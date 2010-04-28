@@ -1,7 +1,17 @@
-targets="${input_base}/check_compile"
+targets=''
+vex_tests="check_compile dump_irsb"
 
+defvars() {
+    echo "VEX_TESTS=\$(patsubst %,${input_base}/%,${vex_tests})"
+    echo 'TARGETS+=$(VEX_TESTS)'
+}
 rules() {
-    echo "${input_base}/check_compile: CPPFLAGS+=-IVEX/pub"
-    echo "${input_base}/check_compile: LDFLAGS+=libVEX.a"
-    echo "${input_base}/check_compile: libVEX.a"
+    echo "\$(VEX_TESTS): CPPFLAGS+=-I\$(libvex)/pub"
+    echo "\$(VEX_TESTS): LDFLAGS+=libVEX.a"
+    for t in $vex_tests
+    do
+	echo "${input_base}/$t: ${input_base}/${t}.c libVEX.a"
+	echo -e '\tgcc $(CFLAGS) $(CPPFLAGS) $^ -o $@'
+    done
+    echo "${input_base}/dump_irsb: CPPFLAGS+=-I\$(libvex)/priv"
 }

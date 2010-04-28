@@ -1,6 +1,7 @@
 all: real_all
 
 TARGETS=
+CFLAGS=-Wall -g
 
 include Makefile.mk
 
@@ -12,3 +13,4 @@ clean:
 	rm -f $(TARGETS)
 
 real_all: $(TARGETS)
+	echo $(VEX_TESTS)
