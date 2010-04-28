@@ -1,0 +1,7 @@
+targets="${input_base}/check_compile"
+
+rules() {
+    echo "${input_base}/check_compile: CPPFLAGS+=-IVEX/pub"
+    echo "${input_base}/check_compile: LDFLAGS+=libVEX.a"
+    echo "${input_base}/check_compile: libVEX.a"
+}

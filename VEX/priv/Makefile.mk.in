@@ -1,0 +1,3 @@
+defvars() {
+    echo libvex_sources+= ${input_base}/*.c
+}

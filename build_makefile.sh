@@ -1,0 +1,32 @@
+#! /bin/bash
+
+set -e
+
+input="$1"
+
+input_base=$(dirname "$input")
+defvars() {
+    true
+}
+rules() {
+    true
+}
+. "./$input"
+
+for subdir in $subdirs
+do
+    echo "include ${input_base}/${subdir}/Makefile.mk"
+done
+
+for extra_mk in $extra_mks
+do
+    echo "include ${input_base}/${extra_mk}"
+done
+
+for target in $targets
+do
+    echo "TARGETS+=$target"
+done
+
+defvars
+rules
