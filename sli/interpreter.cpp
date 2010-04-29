@@ -545,6 +545,9 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = arg1.lo.v + arg2.lo.v;
 			dest->hi.v = arg1.hi.v + arg2.hi.v;
 			break;
+		case Iop_Add8:
+			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xff;
+			break;
 		case Iop_Add32:
 			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xffffffff;
 			ORIGIN(expr_and(expr_add(arg1.lo.origin, arg2.lo.origin),
