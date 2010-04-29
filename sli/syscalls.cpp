@@ -86,6 +86,10 @@ replay_syscall(const LogReader *lr,
 	case __NR_brk: /* 12 */
 		res = addrSpace->setBrk(args[0]);
 		break;
+	case __NR_access: /* 21 */
+		break;
+	case __NR_uname: /* 63 */
+		break;
 	default:
 		throw UnknownSyscallException(thr->regs.regs.guest_RAX);
 	}
