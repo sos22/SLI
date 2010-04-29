@@ -25,7 +25,7 @@ LogReader *LogReader::open(const char *path, LogReader::ptr *initial_ptr)
 
 	LogReader *work = new LogReader();
 	work->fd = fd;
-	*initial_ptr = ptr(0);
+	*initial_ptr = ptr(0, 0);
 	return work;
 }
 
@@ -42,7 +42,7 @@ skip:
 	if (pread(fd, &rh, sizeof(rh), startPtr.offset()) <= 0)
 		return NULL;
 	ThreadId tid(rh.tid);
-	*nextPtr = ptr(startPtr.offset() + rh.size);
+	*nextPtr = ptr(startPtr.offset() + rh.size, startPtr.record_nr+1);
 	switch (rh.cls) {
 	case RECORD_footstep: {
 		footstep_record fr;

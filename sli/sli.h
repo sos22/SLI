@@ -169,7 +169,10 @@ public:
 		friend class LogReader;
 		uint64_t off;
 		bool valid;
-		ptr(uint64_t o) : off(o), valid(true) {};
+		unsigned record_nr;
+		ptr(uint64_t o, unsigned rn) :
+			off(o), valid(true),
+			record_nr(rn) {};
 		uint64_t &offset() {
 			assert(valid);
 			return off;
