@@ -14,6 +14,7 @@ rules() {
 \$(SLIR_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/interpreter.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/logreader.o: sli/ppres.h
+${input_base}/interpreter.o: sli/ppres.h
 
 slir.a: \$(SLIR_OBJECTS)
 	ar rcs \$@ \$^
