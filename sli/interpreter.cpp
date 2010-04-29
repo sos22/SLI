@@ -437,7 +437,7 @@ eval_expression(struct expression_result *temporaries,
 			tl_assert(!sub_word_offset);
 			dest->lo.v = v1;
 			read_reg(thr,
-				 expr->Iex.Get.offset - sub_word_offset,
+				 expr->Iex.Get.offset - sub_word_offset + 8,
 				 &dest->hi.v);
 			break;
 		case Ity_I32:
