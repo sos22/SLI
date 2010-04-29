@@ -75,6 +75,17 @@ public:
 	virtual ~LogRecordMemory() { free((void *)contents); }
 };
 
+class LogRecordRdtsc : public LogRecord {
+public:
+	unsigned long tsc;
+	LogRecordRdtsc(ThreadId _tid,
+		       unsigned long _tsc)
+		: LogRecord(_tid),
+		  tsc(_tsc)
+	{
+	}
+};
+
 class LogRecordAllocateMemory : public LogRecord {
 	friend class AddressSpace;
 	unsigned long start;
@@ -175,7 +186,10 @@ public:
 };
 
 class Interpreter {
-	void replayFootstep(const LogRecordFootstep &lrf);
+	void replayFootstep(const LogRecordFootstep &lrf,
+			    const LogReader *lr,
+			    LogReader::ptr startOffset,
+			    LogReader::ptr *endOffset);
 
 	MachineState *currentState;
 public:

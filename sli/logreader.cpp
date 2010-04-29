@@ -65,6 +65,11 @@ LogRecord *LogReader::read(LogReader::ptr startPtr, LogReader::ptr *nextPtr) con
 					   (unsigned long)mr.ptr,
 					   buf);
 	}
+	case RECORD_rdtsc: {
+		rdtsc_record rr;
+		pread(fd, &rr, sizeof(rr), startPtr.offset() + sizeof(rh));
+		return new LogRecordRdtsc(tid, rr.stashed_tsc);
+	}
 	case RECORD_allocate_memory: {
 		allocate_memory_record amr;
 		pread(fd, &amr, sizeof(amr), startPtr.offset() + sizeof(rh));

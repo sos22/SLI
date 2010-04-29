@@ -11,6 +11,11 @@ extern "C" {
 
 #include "sli.h"
 
+static void eval_expression(struct expression_result *temporaries,
+			    Thread *thr,
+			    struct expression_result *dest,
+			    IRExpr *expr);
+
 template <typename underlying> class PointerKeeper {
 	underlying *x;
 public:
@@ -61,10 +66,71 @@ read_reg(Thread *state, unsigned offset, unsigned long *v)
 	return NULL;
 }
 
-static void
-write_reg(Thread *state, unsigned offset, unsigned long v)
+static unsigned long
+do_dirtyhelper_rdtsc(const LogReader *lf, LogReader::ptr startOffset, LogReader::ptr *endOffset)
 {
-	*get_reg(state, offset) = v;
+	LogRecord *lr = lf->read(startOffset, endOffset);
+	LogRecordRdtsc *lrr = dynamic_cast<LogRecordRdtsc *>(lr);
+	assert(lrr);
+	return lrr->tsc;
+}
+
+static void
+do_dirty_call(struct expression_result *temporaries,
+	      Thread *thr,
+	      IRSB *irsb,
+	      IRDirty *details,
+	      const LogReader *logfile,
+	      LogReader::ptr logfilePtr,
+	      LogReader::ptr *logfilePtrOut)
+{
+	struct expression_result guard;
+	struct expression_result args[6];
+	unsigned x;
+	unsigned long res;
+
+	if (details->guard) {
+		eval_expression(temporaries, thr, &guard, details->guard);
+		if (!guard.lo.v)
+			return;
+	}
+	for (x = 0; details->args[x]; x++) {
+		tl_assert(x < 6);
+		eval_expression(temporaries, thr, &args[x], details->args[x]);
+	}
+	tl_assert(!details->cee->regparms);
+
+	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
+		temporaries[details->tmp].lo.v =
+			do_dirtyhelper_rdtsc(logfile, logfilePtr, logfilePtrOut);
+	} else {
+		printf("Unknown dirty call %s\n", details->cee->name);
+		if (details->needsBBP) {
+			res = ((unsigned long (*)(VexGuestAMD64State *,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long))(details->cee->addr))
+				(&thr->regs.regs, args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
+				 args[4].lo.v, args[5].lo.v);
+		} else {
+			res = ((unsigned long (*)(unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long))(details->cee->addr))
+				(args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
+				 args[4].lo.v, args[5].lo.v);
+		}
+
+		if (details->tmp != IRTemp_INVALID) {
+			temporaries[details->tmp].lo.v = res;
+			temporaries[details->tmp].hi.v = 0;
+		}
+	}
 }
 
 static void
@@ -495,7 +561,10 @@ eval_expression(struct expression_result *temporaries,
 #undef ORIGIN
 }
 
-void Interpreter::replayFootstep(const LogRecordFootstep &lrf)
+void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
+				 const LogReader *lr,
+				 LogReader::ptr startOffset,
+				 LogReader::ptr *endOffset)
 {
 	Thread *thr = currentState->findThread(lrf.thread());
 
@@ -619,6 +688,12 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf)
 			break;
 		}
 
+		case Ist_Dirty: {
+			do_dirty_call(temporaries, thr, irsb, stmt->Ist.Dirty.details,
+				      lr, startOffset, endOffset);
+			break;
+		}
+
 		case Ist_Exit: {
 			struct expression_result guard;
 			if (stmt->Ist.Exit.guard) {
@@ -665,7 +740,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 			break;
 		PointerKeeper<LogRecord> k(lr);
 		if (LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr))
-			replayFootstep(*lrf);
+			replayFootstep(*lrf, lf, ptr, &ptr);
 		else
 			abort();
 	}
