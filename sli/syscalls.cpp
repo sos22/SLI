@@ -118,8 +118,14 @@ replay_syscall(const LogReader *lr,
 		assert(args[0] == ARCH_SET_FS);
 		thr->regs.regs.guest_FS_ZERO = args[1];
 		break;
+	case __NR_set_tid_address: /* 218 */
+		thr->clear_child_tid = args[0];
+		break;
 	case __NR_exit_group: /* 231 */
 		mach->exitGroup(args[0]);
+		break;
+	case __NR_set_robust_list: /* 273 */
+		thr->robust_list = args[0];
 		break;
 	default:
 		throw UnknownSyscallException(thr->regs.regs.guest_RAX);

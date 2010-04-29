@@ -1094,6 +1094,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 }
 
 Thread::Thread(LogRecordInitialRegisters const&lrir)
-	: regs(lrir.regs)
+	: regs(lrir.regs),
+	  clear_child_tid(0)
 {
 }

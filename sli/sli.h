@@ -199,6 +199,8 @@ class Thread {
 public:
 	Thread(const LogRecordInitialRegisters &initRegs);
 	RegisterSet regs;
+	unsigned long clear_child_tid;
+	unsigned long robust_list;
 };
 
 class AddressSpace {
