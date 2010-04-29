@@ -9,6 +9,9 @@ extern "C" {
 #include "guest_amd64_defs.h"
 };
 
+#define FOOTSTEP_REGS_ONLY
+#include "ppres.h"
+
 #include "sli.h"
 
 static void eval_expression(struct expression_result *temporaries,
@@ -592,6 +595,28 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 
 	if (thr->regs.rip() != lrf.rip)
 		throw ReplayFailedBadRip(thr->regs.rip(), lrf.rip);
+
+#define ID(x) x
+#define PASTE(x, y) x ## y
+#define PASTE2(x, y) PASTE(x, y)
+#define STRING(x) #x
+#define STRING2(x) STRING(x)
+#define FR_REG_NAME(x)				\
+	PASTE2(PASTE2(FOOTSTEP_REG_, x), _NAME)
+#define GUEST_REG(x) PASTE2(guest_, FR_REG_NAME(x))
+#define CHECK_REGISTER(x)						\
+	do {								\
+		if (thr->regs.regs. GUEST_REG(x) != lrf. reg ## x)	\
+			throw ReplayFailedBadRegister(			\
+				STRING2( FR_REG_NAME(x)),		\
+				thr->regs.regs.GUEST_REG(x),		\
+				lrf. reg ## x);				\
+	} while (0)
+	CHECK_REGISTER(0);
+	CHECK_REGISTER(1);
+	CHECK_REGISTER(2);
+	CHECK_REGISTER(3);
+	CHECK_REGISTER(4);
 
 	const void *code = addrSpace->getRawPointerUnsafe(thr->regs.rip());
 

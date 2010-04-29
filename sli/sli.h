@@ -261,6 +261,26 @@ public:
 	}
 };
 
+class ReplayFailedBadRegister : public ReplayFailedException {
+public:
+	const char *reg_name;
+	unsigned long observed;
+	unsigned long expected;
+	ReplayFailedBadRegister(const char *_name,
+				unsigned long _observed,
+				unsigned long _expected) :
+		ReplayFailedException(
+			"replay failed due to bad register %s: wanted %lx, got %lx\n",
+			_name,
+			_expected,
+			_observed),
+		reg_name(_name),
+		observed(_observed),
+		expected(_expected)
+	{
+	}
+};
+
 class InstructionDecodeFailedException : public SliException {
 };
 
