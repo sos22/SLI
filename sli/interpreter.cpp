@@ -903,6 +903,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 	LibVEX_default_VexArchInfo(&archinfo_guest);
 	LibVEX_default_VexAbiInfo(&abiinfo_both);
 	abiinfo_both.guest_stack_redzone_size = 128;
+	abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
 	IRSB *irsb = bb_to_IR(&vge,
 			      NULL, /* Context for chase_into_ok */
 			      disInstr_AMD64,
