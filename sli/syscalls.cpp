@@ -132,6 +132,8 @@ replay_syscall(const LogReader *lr,
 	case __NR_set_tid_address: /* 218 */
 		thr->clear_child_tid = args[0];
 		break;
+	case __NR_clock_gettime: /* 228 */
+		break;
 	case __NR_exit_group: /* 231 */
 		mach->exitGroup(args[0]);
 		break;
