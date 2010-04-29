@@ -89,8 +89,10 @@ replay_syscall(const LogReader *lr,
 		//unsigned long fd = args[4];
 		//unsigned long offset = args[5];
 		
-		if (!isErrnoSysres(lrs->res))
+		if (!isErrnoSysres(lrs->res)) {
+			length = (length + 4095) & ~4095;
 			addrSpace->allocateMemory(addr, length, prot);
+		}
 		break;
 	}
 	case __NR_mprotect: { /* 10 */
@@ -102,7 +104,7 @@ replay_syscall(const LogReader *lr,
 		break;
 	}
 	case __NR_munmap: { /* 11 */
-		addrSpace->releaseMemory(args[0], args[1]);
+		addrSpace->releaseMemory(args[0], (args[1] + 4095) & ~4095);
 		break;
 	}
 	case __NR_brk: /* 12 */
