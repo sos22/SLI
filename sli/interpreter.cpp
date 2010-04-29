@@ -139,6 +139,287 @@ do_dirty_call(struct expression_result *temporaries,
 }
 
 static void
+do_ccall_calculate_condition(struct expression_result *temporaries,
+			     AddressSpace *addrSpace,
+			     Thread *thr,
+			     struct expression_result *dest,
+			     IRCallee *cee,
+			     IRType retty,
+			     IRExpr **args)
+{
+	struct expression_result condcode = {};
+	struct expression_result op = {};
+	struct expression_result dep1 = {};
+	struct expression_result dep2 = {};
+	struct expression_result ndep = {};
+	int inv;
+
+	tl_assert(retty == Ity_I64);
+	tl_assert(cee->regparms == 0);
+
+	eval_expression(temporaries, addrSpace, thr, &condcode, args[0]);
+	eval_expression(temporaries, addrSpace, thr, &op, args[1]);
+
+	eval_expression(temporaries, addrSpace, thr, &dep1, args[2]);
+	eval_expression(temporaries, addrSpace, thr, &dep2, args[3]);
+	eval_expression(temporaries, addrSpace, thr, &ndep, args[4]);
+	inv = condcode.lo.v & 1;
+	switch (condcode.lo.v & ~1) {
+	case AMD64CondZ:
+		switch (op.lo.v) {
+		case AMD64G_CC_OP_LOGICB:
+		case AMD64G_CC_OP_LOGICW:
+		case AMD64G_CC_OP_LOGICL:
+		case AMD64G_CC_OP_LOGICQ:
+			dest->lo.v = dep1.lo.v == 0;
+			break;
+		case AMD64G_CC_OP_SUBB:
+		case AMD64G_CC_OP_SUBW:
+		case AMD64G_CC_OP_SUBL:
+		case AMD64G_CC_OP_SUBQ:
+			dest->lo.v = dep1.lo.v == dep2.lo.v;
+			break;
+
+		case AMD64G_CC_OP_ADDL:
+			dest->lo.v = (unsigned)(dep1.lo.v + dep2.lo.v) == 0;
+			break;
+
+		case AMD64G_CC_OP_ADDQ:
+			dest->lo.v = dep1.lo.v + dep2.lo.v == 0;
+			break;
+
+		case AMD64G_CC_OP_INCB:
+		case AMD64G_CC_OP_INCW:
+		case AMD64G_CC_OP_INCL:
+		case AMD64G_CC_OP_INCQ:
+		case AMD64G_CC_OP_DECB:
+		case AMD64G_CC_OP_DECW:
+		case AMD64G_CC_OP_DECL:
+		case AMD64G_CC_OP_DECQ:
+		case AMD64G_CC_OP_SHRL:
+		case AMD64G_CC_OP_SHRQ:
+			dest->lo.v = dep1.lo.v == 0;
+			break;
+		default:
+			printf("Strange operation code %ld\n", op.lo.v);
+			abort();
+		}
+		break;
+
+	case AMD64CondL:
+		switch (op.lo.v) {
+		case AMD64G_CC_OP_SUBL:
+			dest->lo.v = (int)dep1.lo.v < (int)dep2.lo.v;
+			break;
+		default:
+			printf("Strange operation code %ld for lt\n", op.lo.v);
+			abort();
+		}
+		break;
+
+	case AMD64CondLE:
+		switch (op.lo.v) {
+		case AMD64G_CC_OP_SUBB:
+			dest->lo.v = (signed char)dep1.lo.v <= (signed char)dep2.lo.v;
+			break;
+		case AMD64G_CC_OP_SUBL:
+			dest->lo.v = (int)dep1.lo.v <= (int)dep2.lo.v;
+			break;
+		case AMD64G_CC_OP_SUBQ:
+			dest->lo.v = (long)dep1.lo.v <= (long)dep2.lo.v;
+			break;
+		case AMD64G_CC_OP_LOGICL:
+			dest->lo.v = (unsigned)(dep1.lo.v + 0x80000000) <= 0x80000000 ;
+			break;
+		case AMD64G_CC_OP_LOGICQ:
+			dest->lo.v = (long)dep1.lo.v <= 0;
+			break;
+		default:
+			printf("Strange operation code %ld for le\n", op.lo.v);
+			abort();
+		}
+		break;
+	case AMD64CondB:
+		switch (op.lo.v) {
+		case AMD64G_CC_OP_SUBB:
+		case AMD64G_CC_OP_SUBL:
+		case AMD64G_CC_OP_SUBQ:
+			dest->lo.v = dep1.lo.v < dep2.lo.v;
+			break;
+		case AMD64G_CC_OP_ADDQ:
+			dest->lo.v = dep1.lo.v + dep2.lo.v < dep1.lo.v;
+			break;
+		default:
+			printf("Strange operation code %ld for b\n", op.lo.v);
+			abort();
+		}
+		break;
+	case AMD64CondBE:
+		switch (op.lo.v) {
+		case AMD64G_CC_OP_SUBB:
+		case AMD64G_CC_OP_SUBL:
+		case AMD64G_CC_OP_SUBQ:
+			dest->lo.v = dep1.lo.v <= dep2.lo.v;
+			break;
+		default:
+			printf("Strange operation code %ld for be\n", op.lo.v);
+			abort();
+		}
+		break;
+
+	case AMD64CondS:
+		switch (op.lo.v) {
+		case AMD64G_CC_OP_LOGICB:
+			dest->lo.v = dep1.lo.v >> 7;
+			break;
+		case AMD64G_CC_OP_LOGICW:
+			dest->lo.v = dep1.lo.v >> 15;
+			break;
+		case AMD64G_CC_OP_LOGICL:
+			dest->lo.v = dep1.lo.v >> 31;
+			break;
+		case AMD64G_CC_OP_LOGICQ:
+			dest->lo.v = dep1.lo.v >> 63;
+			break;
+		case AMD64G_CC_OP_SUBB:
+			dest->lo.v = (char)dep1.lo.v < (char)dep2.lo.v;
+			break;
+		case AMD64G_CC_OP_SUBW:
+			dest->lo.v = (short)dep1.lo.v < (short)dep2.lo.v;
+			break;
+		case AMD64G_CC_OP_SUBL:
+			dest->lo.v = (long)dep1.lo.v < (long)dep2.lo.v;
+			break;
+		default:
+			printf("Strange operation code %ld for s\n", op.lo.v);
+			abort();
+		}
+		break;
+
+	default:
+		printf("Strange cond code %ld (op %ld)\n", condcode.lo.v, op.lo.v);
+		abort();
+	}
+
+	if (inv) {
+		dest->lo.v ^= 1;
+	}
+}
+
+static void
+do_ccall_calculate_rflags_c(struct expression_result *temporaries,
+			    AddressSpace *addrSpace,
+			    Thread *thr,
+			    struct expression_result *dest,
+			    IRCallee *cee,
+			    IRType retty,
+			    IRExpr **args)
+{
+	struct expression_result op = {};
+	struct expression_result dep1 = {};
+	struct expression_result dep2 = {};
+	struct expression_result ndep = {};
+
+	tl_assert(retty == Ity_I64);
+	tl_assert(cee->regparms == 0);
+
+	eval_expression(temporaries, addrSpace, thr, &op, args[0]);
+
+	eval_expression(temporaries, addrSpace, thr, &dep1, args[1]);
+	eval_expression(temporaries, addrSpace, thr, &dep2, args[2]);
+	eval_expression(temporaries, addrSpace, thr, &ndep, args[3]);
+
+	switch (op.lo.v) {
+	case AMD64G_CC_OP_INCB:
+	case AMD64G_CC_OP_INCW:
+	case AMD64G_CC_OP_INCL:
+	case AMD64G_CC_OP_INCQ:
+	case AMD64G_CC_OP_DECB:
+	case AMD64G_CC_OP_DECW:
+	case AMD64G_CC_OP_DECL:
+	case AMD64G_CC_OP_DECQ:
+		dest->lo.v = ndep.lo.v & 1;
+		break;
+
+	case AMD64G_CC_OP_SUBB:
+		dest->lo.v = (unsigned char)dep1.lo.v < (unsigned char)dep2.lo.v;
+		break;
+
+	case AMD64G_CC_OP_SUBL:
+		dest->lo.v = (unsigned)dep1.lo.v < (unsigned)dep2.lo.v;
+		break;
+
+	case AMD64G_CC_OP_SUBQ:
+		dest->lo.v = dep1.lo.v  < dep2.lo.v;
+		break;
+
+	case AMD64G_CC_OP_LOGICB:
+	case AMD64G_CC_OP_LOGICW:
+	case AMD64G_CC_OP_LOGICL:
+	case AMD64G_CC_OP_LOGICQ:
+		/* XXX Why doesn't the Valgrind optimiser remove
+		 * these? */
+		dest->lo.v = 0;
+		break;
+
+	case AMD64G_CC_OP_SHRB:
+	case AMD64G_CC_OP_SHRW:
+	case AMD64G_CC_OP_SHRL:
+	case AMD64G_CC_OP_SHRQ:
+		dest->lo.v = dep2.lo.v & 1;
+		break;
+
+	default:
+		printf("Can't calculate C flags for op %ld\n",
+		       op.lo.v);
+		abort();
+	}
+}
+
+static void
+do_ccall_generic(struct expression_result *temporaries,
+		 AddressSpace *addrSpace,
+		 Thread *thr,
+		 struct expression_result *dest,
+		 IRCallee *cee,
+		 IRType retty,
+		 IRExpr **args)
+{
+	struct expression_result rargs[6];
+	unsigned x;
+
+	tl_assert(cee->regparms == 0);
+	for (x = 0; args[x]; x++) {
+		tl_assert(x < 6);
+		eval_expression(temporaries, addrSpace, thr, &rargs[x], args[x]);
+	}
+	dest->lo.v = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
+				       unsigned long, unsigned long, unsigned long))cee->addr)
+		(rargs[0].lo.v, rargs[1].lo.v, rargs[2].lo.v, rargs[3].lo.v, rargs[4].lo.v,
+		 rargs[5].lo.v);
+	dest->hi.v = 0;
+}
+
+static void
+do_ccall(struct expression_result *temporaries,
+	 AddressSpace *addrSpace,
+	 Thread *thr,
+	 struct expression_result *dest,
+	 IRCallee *cee,
+	 IRType retty,
+	 IRExpr **args)
+{
+	if (!strcmp(cee->name, "amd64g_calculate_condition")) {
+		do_ccall_calculate_condition(temporaries, addrSpace, thr, dest, cee, retty, args);
+	} else if (!strcmp(cee->name, "amd64g_calculate_rflags_c")) {
+		do_ccall_calculate_rflags_c(temporaries, addrSpace, thr, dest, cee, retty, args);
+	} else {
+		printf("Unknown clean call %s\n", cee->name);
+		do_ccall_generic(temporaries, addrSpace, thr, dest, cee, retty, args);
+	}
+}
+
+static void
 eval_expression(struct expression_result *temporaries,
 		AddressSpace *addrSpace,
 		Thread *thr,
@@ -572,8 +853,8 @@ eval_expression(struct expression_result *temporaries,
 	}
 
 	case Iex_CCall: {
-//		do_ccall(state, dest, expr->Iex.CCall.cee,
-//			 expr->Iex.CCall.retty, expr->Iex.CCall.args);
+		do_ccall(temporaries, addrSpace, thr, dest, expr->Iex.CCall.cee,
+			 expr->Iex.CCall.retty, expr->Iex.CCall.args);
 		break;
 	}
 
