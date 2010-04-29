@@ -580,6 +580,7 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = (long)arg1.lo.v >> arg2.lo.v;
 			ORIGIN(expr_shra(arg1.lo.origin, arg2.lo.origin));
 			break;
+		case Iop_Shr32:
 		case Iop_Shr64:
 			dest->lo.v = arg1.lo.v >> arg2.lo.v;
 			ORIGIN(expr_shrl(arg1.lo.origin, arg2.lo.origin));
