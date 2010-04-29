@@ -38,6 +38,7 @@ LogRecord *LogReader::read(LogReader::ptr startPtr, LogReader::ptr *nextPtr) con
 {
 	struct record_header rh;
 
+skip:
 	if (pread(fd, &rh, sizeof(rh), startPtr.offset()) <= 0)
 		return NULL;
 	ThreadId tid(rh.tid);
@@ -69,6 +70,12 @@ LogRecord *LogReader::read(LogReader::ptr startPtr, LogReader::ptr *nextPtr) con
 		rdtsc_record rr;
 		pread(fd, &rr, sizeof(rr), startPtr.offset() + sizeof(rh));
 		return new LogRecordRdtsc(tid, rr.stashed_tsc);
+	}
+	case RECORD_mem_read:
+	case RECORD_mem_write: {
+		/* Don't need these in the current world order */
+		startPtr = *nextPtr;
+		goto skip;
 	}
 	case RECORD_allocate_memory: {
 		allocate_memory_record amr;

@@ -90,6 +90,29 @@ void AddressSpace::writeMemory(unsigned long start, unsigned size, const void *c
 	}
 }
 
+void AddressSpace::readMemory(unsigned long start, unsigned size, void *contents)
+{
+	unsigned long end = start + size;
+
+	assert(end >= start);
+	while (start < end) {
+		AddressSpace::AddressSpaceEntry *const ase = findAseForPointer(start);
+		if (!ase)
+			throw BadMemoryException(false, start, size);
+		unsigned long to_copy;
+		if (end > ase->end)
+			to_copy = ase->end - start;
+		else
+			to_copy = end - start;
+		memcpy(contents,
+		       (void *)((unsigned long)ase->content + start - ase->start),
+		       to_copy);
+		contents = (void *)((unsigned long)contents + to_copy);
+		start += to_copy;
+		size -= to_copy;
+	}
+}
+
 void AddressSpace::populateMemory(const LogRecordMemory &rec)
 {
 	writeMemory(rec.client_address, rec.size, rec.contents);

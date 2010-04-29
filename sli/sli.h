@@ -169,6 +169,7 @@ public:
 	void allocateMemory(const LogRecordAllocateMemory &rec);
 	void populateMemory(const LogRecordMemory &rec);
 	void writeMemory(unsigned long start, unsigned size, const void *contents);
+	void readMemory(unsigned long start, unsigned size, void *contents);
 
 	const void *getRawPointerUnsafe(unsigned long ptr);
 };

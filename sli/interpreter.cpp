@@ -12,6 +12,7 @@ extern "C" {
 #include "sli.h"
 
 static void eval_expression(struct expression_result *temporaries,
+			    AddressSpace *addrSpace,
 			    Thread *thr,
 			    struct expression_result *dest,
 			    IRExpr *expr);
@@ -77,6 +78,7 @@ do_dirtyhelper_rdtsc(const LogReader *lf, LogReader::ptr startOffset, LogReader:
 
 static void
 do_dirty_call(struct expression_result *temporaries,
+	      AddressSpace *addressSpace,
 	      Thread *thr,
 	      IRSB *irsb,
 	      IRDirty *details,
@@ -90,13 +92,13 @@ do_dirty_call(struct expression_result *temporaries,
 	unsigned long res;
 
 	if (details->guard) {
-		eval_expression(temporaries, thr, &guard, details->guard);
+		eval_expression(temporaries, addressSpace, thr, &guard, details->guard);
 		if (!guard.lo.v)
 			return;
 	}
 	for (x = 0; details->args[x]; x++) {
 		tl_assert(x < 6);
-		eval_expression(temporaries, thr, &args[x], details->args[x]);
+		eval_expression(temporaries, addressSpace, thr, &args[x], details->args[x]);
 	}
 	tl_assert(!details->cee->regparms);
 
@@ -135,6 +137,7 @@ do_dirty_call(struct expression_result *temporaries,
 
 static void
 eval_expression(struct expression_result *temporaries,
+		AddressSpace *addrSpace,
 		Thread *thr,
 		struct expression_result *dest,
 		IRExpr *expr)
@@ -185,6 +188,23 @@ eval_expression(struct expression_result *temporaries,
 		*dest = temporaries[expr->Iex.RdTmp.tmp];
 		break;
 
+	case Iex_Load: {
+		assert(!expr->Iex.Load.isLL);
+		assert(expr->Iex.Load.end == Iend_LE);
+		struct expression_result addr;
+		eval_expression(temporaries, addrSpace, thr, &addr, expr->Iex.Load.addr);
+		unsigned size = sizeofIRType(expr->Iex.Load.ty);
+		if (size <= 8) {
+			addrSpace->readMemory(addr.lo.v, size, &dest->lo.v);
+		} else if (size == 16) {
+			addrSpace->readMemory(addr.lo.v, 8, &dest->lo.v);
+			addrSpace->readMemory(addr.lo.v + 8, 8, &dest->hi.v);
+		} else {
+			abort();
+		}
+		break;
+	}
+
 	case Iex_Const: {
 		IRConst *cnst = expr->Iex.Const.con;
 		dest->lo.origin = NULL;
@@ -223,8 +243,8 @@ eval_expression(struct expression_result *temporaries,
 	case Iex_Binop: {
 		struct expression_result arg1;
 		struct expression_result arg2;
-		eval_expression(temporaries, thr, &arg1, expr->Iex.Binop.arg1);
-		eval_expression(temporaries, thr, &arg2, expr->Iex.Binop.arg2);
+		eval_expression(temporaries, addrSpace, thr, &arg1, expr->Iex.Binop.arg1);
+		eval_expression(temporaries, addrSpace, thr, &arg2, expr->Iex.Binop.arg2);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub64:
 			dest->lo.v = arg1.lo.v - arg2.lo.v;
@@ -439,7 +459,7 @@ eval_expression(struct expression_result *temporaries,
 
 	case Iex_Unop: {
 		struct expression_result arg;
-		eval_expression(temporaries, thr, &arg, expr->Iex.Unop.arg);
+		eval_expression(temporaries, addrSpace, thr, &arg, expr->Iex.Unop.arg);
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
 			dest->lo.v = arg.lo.v >> 32;
@@ -535,10 +555,10 @@ eval_expression(struct expression_result *temporaries,
 		struct expression_result res0;
 		struct expression_result resX;
 		struct expression_result *choice;
-		eval_expression(temporaries, thr, &cond, expr->Iex.Mux0X.cond);
+		eval_expression(temporaries, addrSpace, thr, &cond, expr->Iex.Mux0X.cond);
 		tl_assert(!cond.hi.origin);
-		eval_expression(temporaries, thr, &res0, expr->Iex.Mux0X.expr0);
-		eval_expression(temporaries, thr, &resX, expr->Iex.Mux0X.exprX);
+		eval_expression(temporaries, addrSpace, thr, &res0, expr->Iex.Mux0X.expr0);
+		eval_expression(temporaries, addrSpace, thr, &resX, expr->Iex.Mux0X.exprX);
 		if (cond.lo.v == 0) {
 			choice = &res0;
 		} else {
@@ -556,6 +576,7 @@ eval_expression(struct expression_result *temporaries,
 
 	default:
 		printf("Bad expression tag %x\n", expr->tag);
+		ppIRExpr(expr);
 		abort();
 	}
 #undef ORIGIN
@@ -567,11 +588,12 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				 LogReader::ptr *endOffset)
 {
 	Thread *thr = currentState->findThread(lrf.thread());
+	AddressSpace *addrSpace = currentState->addressSpace;
 
 	if (thr->regs.rip() != lrf.rip)
 		throw ReplayFailedBadRip(thr->regs.rip(), lrf.rip);
 
-	const void *code = currentState->addressSpace->getRawPointerUnsafe(thr->regs.rip());
+	const void *code = addrSpace->getRawPointerUnsafe(thr->regs.rip());
 
 	VexArchInfo archinfo_guest;
 	VexAbiInfo abiinfo_both;
@@ -618,6 +640,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			break;
 		case Ist_WrTmp:
 			eval_expression(temporaries,
+					addrSpace,
 					thr,
 					&temporaries[stmt->Ist.WrTmp.tmp],
 					stmt->Ist.WrTmp.data);
@@ -628,21 +651,21 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
 			struct expression_result data;
 			struct expression_result addr;
-			eval_expression(temporaries, thr, &data, stmt->Ist.Store.data);
-			eval_expression(temporaries, thr, &addr, stmt->Ist.Store.addr);
+			eval_expression(temporaries, addrSpace, thr, &data, stmt->Ist.Store.data);
+			eval_expression(temporaries, addrSpace, thr, &addr, stmt->Ist.Store.addr);
 			unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
 								  stmt->Ist.Store.data));
 			if (size <= 8) {
-				currentState->addressSpace->writeMemory(addr.lo.v,
-									size,
-									&data.lo.v);
+				addrSpace->writeMemory(addr.lo.v,
+						       size,
+						       &data.lo.v);
 			} else if (size == 16) {
-				currentState->addressSpace->writeMemory(addr.lo.v,
-									8,
-									&data.lo.v);
-				currentState->addressSpace->writeMemory(addr.lo.v + 8,
-									8,
-									&data.hi.v);
+				addrSpace->writeMemory(addr.lo.v,
+						       8,
+						       &data.lo.v);
+				addrSpace->writeMemory(addr.lo.v + 8,
+						       8,
+						       &data.hi.v);
 			} else {
 				abort();
 			}
@@ -656,7 +679,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 					stmt->Ist.Put.offset - byte_offset);
 			struct expression_result data;
 
-			eval_expression(temporaries, thr, &data, stmt->Ist.Put.data);
+			eval_expression(temporaries, addrSpace, thr, &data, stmt->Ist.Put.data);
 			switch (typeOfIRExpr(irsb->tyenv, stmt->Ist.Put.data)) {
 			case Ity_I8:
 				*dest &= ~(0xFF << (byte_offset * 8));
@@ -689,7 +712,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 		}
 
 		case Ist_Dirty: {
-			do_dirty_call(temporaries, thr, irsb, stmt->Ist.Dirty.details,
+			do_dirty_call(temporaries, addrSpace, thr, irsb, stmt->Ist.Dirty.details,
 				      lr, startOffset, endOffset);
 			break;
 		}
@@ -697,7 +720,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 		case Ist_Exit: {
 			struct expression_result guard;
 			if (stmt->Ist.Exit.guard) {
-				eval_expression(temporaries, thr, &guard, stmt->Ist.Exit.guard);
+				eval_expression(temporaries, addrSpace, thr, &guard, stmt->Ist.Exit.guard);
 				if (!guard.lo.v)
 					break;
 			}
@@ -721,7 +744,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 
 	{
 		struct expression_result next_addr;
-		eval_expression(temporaries, thr, &next_addr, irsb->next);
+		eval_expression(temporaries, addrSpace, thr, &next_addr, irsb->next);
 		tl_assert(next_addr.hi.origin == NULL);
 		thr->regs.regs.guest_RIP = next_addr.lo.v;
 	}
