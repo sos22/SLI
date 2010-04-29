@@ -1,0 +1,24 @@
+targets="slir"
+
+defvars() {
+	echo SLIR_SOURCES= ${input_base}/{interpret,logreader,addressspace,machinestate,interpreter}.cpp
+
+	cat <<EOF
+SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
+EOF
+}
+
+rules() {
+    cat <<EOF
+\$(SLIR_OBJECTS): sli/sli.h
+\$(SLIR_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/interpreter.o: CPPFLAGS+=-I\$(libvex)/priv
+${input_base}/logreader.o: sli/ppres.h
+
+slir.a: \$(SLIR_OBJECTS)
+	ar rcs \$@ \$^
+
+slir: slir.a libVEX.a
+	gcc -lstdc++ \$^ -o \$@
+EOF
+}

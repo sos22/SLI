@@ -1,5 +1,9 @@
 *.o
 *.a
 *~
+.#*
+\#*#
 Makefile.mk
 core
+slir
+vgcore.*
