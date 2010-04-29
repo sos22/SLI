@@ -1,3 +1,4 @@
+#include <asm/prctl.h>
 #include <asm/unistd.h>
 
 #include "sli.h"
@@ -70,6 +71,12 @@ replay_syscall(const LogReader *lr,
 	res = lrs->res;
 
 	switch (thr->regs.regs.guest_RAX) {
+	case __NR_read: /* 0 */
+		break;
+	case __NR_open: /* 2 */
+		break;
+	case __NR_close: /* 3 */
+		break;
 	case __NR_mmap: { /* 9 */
 		unsigned long addr = lrs->res;
 		unsigned long length = args[1];
@@ -89,6 +96,10 @@ replay_syscall(const LogReader *lr,
 	case __NR_access: /* 21 */
 		break;
 	case __NR_uname: /* 63 */
+		break;
+	case __NR_arch_prctl: /* 158 */
+		assert(args[0] == ARCH_SET_FS);
+		thr->regs.regs.guest_FS_ZERO = args[1];
 		break;
 	default:
 		throw UnknownSyscallException(thr->regs.regs.guest_RAX);
