@@ -552,6 +552,7 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		case Iop_And64:
 		case Iop_And32:
+		case Iop_And16:
 		case Iop_And8:
 			dest->lo.v = arg1.lo.v & arg2.lo.v;
 			ORIGIN(expr_and(arg1.lo.origin, arg2.lo.origin));
