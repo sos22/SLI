@@ -51,7 +51,12 @@ main(int argc, char *argv[])
 		err(1, "first record should have been register state");
 	Thread *rootThread = new Thread(*lrir);
 
-	AddressSpace *as = new AddressSpace();
+	lr = lf->read(ptr, &ptr);
+	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr);
+	if (!lrib)
+		err(1, "second record should have been initial brk");
+	AddressSpace *as = new AddressSpace(lrib->brk);
+
 	while (1) {
 		delete lr;
 		lr = lf->read(ptr, &nextPtr);

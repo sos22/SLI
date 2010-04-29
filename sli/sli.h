@@ -57,6 +57,25 @@ public:
 	}
 };
 
+class LogRecordSyscall : public LogRecord {
+public:
+	unsigned long sysnr, res, arg1, arg2, arg3;
+	LogRecordSyscall(ThreadId _tid,
+			 unsigned long _sysnr,
+			 unsigned long _res,
+			 unsigned long _arg1,
+			 unsigned long _arg2,
+			 unsigned long _arg3) :
+		LogRecord(_tid),
+		sysnr(_sysnr),
+		res(_res),
+		arg1(_arg1),
+		arg2(_arg2),
+		arg3(_arg3)
+	{
+	}
+};
+
 class LogRecordMemory : public LogRecord {
 	friend class AddressSpace;
 	unsigned size;
@@ -119,6 +138,17 @@ public:
 	}
 };
 
+class LogRecordInitialBrk : public LogRecord {
+public:
+	unsigned long brk;
+	LogRecordInitialBrk(ThreadId tid,
+			    unsigned long _brk) :
+		LogRecord(tid),
+		brk(_brk)
+	{
+	}
+};
+
 class LogReader {
 	int fd;
 public:
@@ -163,6 +193,8 @@ class AddressSpace {
 		AddressSpaceEntry *next;
 	};
 
+	unsigned long brkptr;
+
 	AddressSpaceEntry *head;
 	AddressSpaceEntry *findAseForPointer(unsigned long ptr);
 public:
@@ -171,7 +203,15 @@ public:
 	void writeMemory(unsigned long start, unsigned size, const void *contents);
 	void readMemory(unsigned long start, unsigned size, void *contents);
 
+	unsigned long setBrk(unsigned long newBrk);
+
 	const void *getRawPointerUnsafe(unsigned long ptr);
+
+	AddressSpace(unsigned long initialBrk) :
+		brkptr(initialBrk),
+		head(NULL)
+	{
+	}
 };
 
 class MachineState {
@@ -306,5 +346,24 @@ public:
 	{
 	}
 };
+
+class UnknownSyscallException : public SliException {
+public:
+	unsigned nr;
+	UnknownSyscallException(unsigned _nr) :
+		SliException("unknown syscall %d\n", _nr),
+		nr(_nr)
+	{
+	}
+};
+
+
+
+
+void replay_syscall(const LogReader *lr,
+		    LogReader::ptr startOffset,
+		    LogReader::ptr *endOffset,
+		    AddressSpace *addrSpace,
+		    Thread *thr);
 
 #endif /* !SLI_H__ */

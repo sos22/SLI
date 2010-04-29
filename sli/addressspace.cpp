@@ -128,3 +128,9 @@ const void *AddressSpace::getRawPointerUnsafe(unsigned long ptr)
 	return (const void *)((unsigned long)ase->content + ptr - ase->start);
 }
 
+unsigned long AddressSpace::setBrk(unsigned long newBrk)
+{
+	if (newBrk == 0)
+		return brkptr;
+	abort();
+}

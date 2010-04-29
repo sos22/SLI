@@ -55,6 +55,16 @@ skip:
 					     fr.FOOTSTEP_REG_3_NAME,
 					     fr.FOOTSTEP_REG_4_NAME);
 	}
+	case RECORD_syscall: {
+		syscall_record sr;
+		pread(fd, &sr, sizeof(sr), startPtr.offset() + sizeof(rh));
+		return new LogRecordSyscall(tid,
+					    sr.syscall_nr,
+					    sr.syscall_res._isError ? -(long)sr.syscall_res._val : sr.syscall_res._val,
+					    sr.arg1,
+					    sr.arg2,
+					    sr.arg3);
+	}
 	case RECORD_memory: {
 		memory_record mr;
 		pread(fd, &mr, sizeof(mr), startPtr.offset() + sizeof(rh));
@@ -90,6 +100,11 @@ skip:
 		VexGuestAMD64State regs;
 		pread(fd, &regs, sizeof(regs), startPtr.offset() + sizeof(rh));
 		return new LogRecordInitialRegisters(tid, regs);
+	}
+	case RECORD_initial_brk: {
+		initial_brk_record ibr;
+		pread(fd, &ibr, sizeof(ibr), startPtr.offset() + sizeof(rh));
+		return new LogRecordInitialBrk(tid, ibr.initial_brk);
 	}
 	default:
 		abort();

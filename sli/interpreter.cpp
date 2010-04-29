@@ -1045,7 +1045,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 
 	assert(irsb->jumpkind == Ijk_Boring ||
 	       irsb->jumpkind == Ijk_Call ||
-	       irsb->jumpkind == Ijk_Ret);
+	       irsb->jumpkind == Ijk_Ret ||
+	       irsb->jumpkind == Ijk_Sys_syscall);
 
 	{
 		struct expression_result next_addr;
@@ -1053,6 +1054,9 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 		tl_assert(next_addr.hi.origin == NULL);
 		thr->regs.regs.guest_RIP = next_addr.lo.v;
 	}
+
+	if (irsb->jumpkind == Ijk_Sys_syscall)
+		replay_syscall(lr, startOffset, endOffset, addrSpace, thr);
 
 finished_block:
 	return;

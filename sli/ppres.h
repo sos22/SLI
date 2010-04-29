@@ -95,7 +95,13 @@ struct allocate_memory_record {
 /* Uses VexGuestAMD64State as payload */
 #define RECORD_initial_registers 13
 
-#define RECORD_MAX_CLASS RECORD_initial_registers
+#define RECORD_initial_brk 14
+struct initial_brk_record {
+#define RECORD_initial_brk 14
+	UWord initial_brk;
+};
+
+#define RECORD_MAX_CLASS RECORD_initial_brk
 
 
 struct index_record {
@@ -106,8 +112,8 @@ struct index_record {
 static inline int
 IS_STACK(const void *ptr, unsigned long rsp)
 {
-	if (ptr < (const void *)(rsp - 128) ||
-	    ptr > (const void *)(rsp + 16384) )
+	if ((unsigned long)ptr < (unsigned long)rsp - 128 ||
+	    (unsigned long)ptr > (unsigned long)rsp + 16384)
 		return False;
 	else
 		return True;
