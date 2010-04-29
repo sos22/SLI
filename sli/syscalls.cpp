@@ -108,15 +108,26 @@ replay_syscall(const LogReader *lr,
 	case __NR_brk: /* 12 */
 		res = addrSpace->setBrk(args[0]);
 		break;
+	case __NR_rt_sigaction: /* 13 */
+		printf("WARNING: sys_rt_sigaction not correctly handled\n");
+		break;
+	case __NR_rt_sigprocmask: /* 14 */
+		printf("WARNING: sys_rt_sigprocmask not correctly handled\n");
+		break;
 	case __NR_access: /* 21 */
 		break;
 	case __NR_uname: /* 63 */
 		break;
 	case __NR_getcwd: /* 79 */
 		break;
+	case __NR_getrlimit: /* 97 */
+		break;
 	case __NR_arch_prctl: /* 158 */
 		assert(args[0] == ARCH_SET_FS);
 		thr->regs.regs.guest_FS_ZERO = args[1];
+		break;
+	case __NR_futex: /* 202 */
+		printf("WARNING: sys_futex not correctly handled\n");
 		break;
 	case __NR_set_tid_address: /* 218 */
 		thr->clear_child_tid = args[0];
