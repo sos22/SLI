@@ -77,6 +77,8 @@ replay_syscall(const LogReader *lr,
 		break;
 	case __NR_close: /* 3 */
 		break;
+	case __NR_fstat: /* 5 */
+		break;
 	case __NR_mmap: { /* 9 */
 		unsigned long addr = lrs->res;
 		unsigned long length = args[1];
@@ -96,6 +98,8 @@ replay_syscall(const LogReader *lr,
 	case __NR_access: /* 21 */
 		break;
 	case __NR_uname: /* 63 */
+		break;
+	case __NR_getcwd: /* 79 */
 		break;
 	case __NR_arch_prctl: /* 158 */
 		assert(args[0] == ARCH_SET_FS);
