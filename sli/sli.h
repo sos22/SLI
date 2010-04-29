@@ -199,12 +199,39 @@ public:
 };
 
 class AddressSpace {
+public:
+	class Protection {
+	public:
+		bool readable;
+		bool writable;
+		bool executable;
+		Protection(bool r, bool w, bool x) :
+			readable(r),
+			writable(w),
+			executable(x)
+		{
+		}
+		Protection(unsigned prot); /* PROT_* flags */
+	};
+private:
 	struct AddressSpaceEntry {
 		unsigned long start; /* inclusive */
 		unsigned long end; /* not inclusive */
-		bool writable;
+		class Protection prot;
 		void *content;
 		AddressSpaceEntry *next;
+		AddressSpaceEntry(unsigned long _start,
+				  unsigned long _end,
+				  Protection _prot,
+				  void *_content) :
+			start(_start),
+			end(_end),
+			prot(_prot),
+			content(_content),
+			next(NULL)
+		{
+		}
+		void splitAt(unsigned long addr);
 	};
 
 	unsigned long brkptr;
@@ -212,15 +239,17 @@ class AddressSpace {
 	AddressSpaceEntry *head;
 	AddressSpaceEntry *findAseForPointer(unsigned long ptr);
 public:
-	void allocateMemory(unsigned long start, unsigned long size, unsigned prot);
+	void allocateMemory(unsigned long start, unsigned long size, Protection prot);
 	void allocateMemory(const LogRecordAllocateMemory &rec)
 	{
 		allocateMemory(rec.start, rec.size, rec.prot);
 	}
+	void protectMemory(unsigned long start, unsigned long size, Protection prot);
 	void populateMemory(const LogRecordMemory &rec);
 	void writeMemory(unsigned long start, unsigned size, const void *contents,
 			 bool ignore_protection = false);
-	void readMemory(unsigned long start, unsigned size, void *contents);
+	void readMemory(unsigned long start, unsigned size, void *contents,
+			bool ignore_protection = false);
 
 	unsigned long setBrk(unsigned long newBrk);
 

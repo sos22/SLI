@@ -87,9 +87,16 @@ replay_syscall(const LogReader *lr,
 		//unsigned long fd = args[4];
 		//unsigned long offset = args[5];
 		
-		if (isErrnoSysres(lrs->res))
-			break;
-		addrSpace->allocateMemory(addr, length, prot);
+		if (!isErrnoSysres(lrs->res))
+			addrSpace->allocateMemory(addr, length, prot);
+		break;
+	}
+	case __NR_mprotect: { /* 10 */
+		unsigned long addr = args[0];
+		unsigned long size = args[1];
+		unsigned long prot = args[2];
+		if (!isErrnoSysres(lrs->res))
+			addrSpace->protectMemory(addr, size, prot);
 		break;
 	}
 	case __NR_brk: /* 12 */
