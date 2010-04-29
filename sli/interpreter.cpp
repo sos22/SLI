@@ -20,20 +20,6 @@ static void eval_expression(struct expression_result *temporaries,
 			    struct expression_result *dest,
 			    IRExpr *expr);
 
-template <typename underlying> class PointerKeeper {
-	underlying *x;
-public:
-	~PointerKeeper() { delete x; }
-	PointerKeeper(underlying *y) : x(y) {}
-};
-
-template <typename underlying> class PointerKeeperArr {
-	underlying *x;
-public:
-	~PointerKeeperArr() { delete [] x; }
-	PointerKeeperArr(underlying *y) : x(y) {}
-};
-
 static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 {
 	return False;

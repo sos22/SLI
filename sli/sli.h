@@ -14,6 +14,20 @@ extern "C" {
 #include "libvex_guest_amd64.h"
 };
 
+template <typename underlying> class PointerKeeper {
+	underlying *x;
+public:
+	~PointerKeeper() { delete x; }
+	PointerKeeper(underlying *y) : x(y) {}
+};
+
+template <typename underlying> class PointerKeeperArr {
+	underlying *x;
+public:
+	~PointerKeeperArr() { delete [] x; }
+	PointerKeeperArr(underlying *y) : x(y) {}
+};
+
 class ThreadId {
 	unsigned tid;
 public:
@@ -77,18 +91,17 @@ public:
 };
 
 class LogRecordMemory : public LogRecord {
-	friend class AddressSpace;
-	unsigned size;
-	unsigned long client_address;
-	const void *contents;
 public:
+	unsigned size;
+	unsigned long start;
+	const void *contents;
 	LogRecordMemory(ThreadId _tid,
 			unsigned _size,
-			unsigned long _client_address,
+			unsigned long _start,
 			const void *_contents) :
 		LogRecord(_tid),
 		size(_size),
-		client_address(_client_address),
+		start(_start),
 		contents(_contents)
 	{}
 	virtual ~LogRecordMemory() { free((void *)contents); }
@@ -189,6 +202,7 @@ class AddressSpace {
 	struct AddressSpaceEntry {
 		unsigned long start; /* inclusive */
 		unsigned long end; /* not inclusive */
+		bool writable;
 		void *content;
 		AddressSpaceEntry *next;
 	};
@@ -198,9 +212,14 @@ class AddressSpace {
 	AddressSpaceEntry *head;
 	AddressSpaceEntry *findAseForPointer(unsigned long ptr);
 public:
-	void allocateMemory(const LogRecordAllocateMemory &rec);
+	void allocateMemory(unsigned long start, unsigned long size, unsigned prot);
+	void allocateMemory(const LogRecordAllocateMemory &rec)
+	{
+		allocateMemory(rec.start, rec.size, rec.prot);
+	}
 	void populateMemory(const LogRecordMemory &rec);
-	void writeMemory(unsigned long start, unsigned size, const void *contents);
+	void writeMemory(unsigned long start, unsigned size, const void *contents,
+			 bool ignore_protection = false);
 	void readMemory(unsigned long start, unsigned size, void *contents);
 
 	unsigned long setBrk(unsigned long newBrk);

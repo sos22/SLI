@@ -1,14 +1,14 @@
+#include <sys/mman.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "sli.h"
 
-void AddressSpace::allocateMemory(const LogRecordAllocateMemory &rec)
+void AddressSpace::allocateMemory(unsigned long start, unsigned long size,
+				  unsigned prot)
 {
 	AddressSpace::AddressSpaceEntry *ase, **pprev, *newAse;
-
-	unsigned long start = rec.start;
-	unsigned long end = rec.start + rec.size;
+	unsigned long end = start + size;
 
 	/* Trim any existing overlapping ases */
 	pprev = &head;
@@ -32,6 +32,7 @@ void AddressSpace::allocateMemory(const LogRecordAllocateMemory &rec)
 				newAse = new AddressSpace::AddressSpaceEntry;
 				newAse->start = end;
 				newAse->end = ase->end;
+				newAse->writable = ase->writable;
 				newAse->content = malloc(newAse->end - newAse->start);
 				memcpy(newAse->content,
 				       (const void *)((unsigned long)ase->content + newAse->start - ase->start),
@@ -50,8 +51,12 @@ void AddressSpace::allocateMemory(const LogRecordAllocateMemory &rec)
 	newAse = new AddressSpace::AddressSpaceEntry;
 	newAse->start = start;
 	newAse->end = end;
-	newAse->content = malloc(rec.size);
-	memset(newAse->content, 0x52, rec.size);
+	newAse->content = malloc(size);
+	if (prot & PROT_WRITE)
+		newAse->writable = true;
+	else
+		newAse->writable = false;
+	memset(newAse->content, 0, size);
 
 	newAse->next = head;
 	head = newAse;
@@ -67,14 +72,16 @@ AddressSpace::AddressSpaceEntry *AddressSpace::findAseForPointer(unsigned long p
 	return ase;
 }
 
-void AddressSpace::writeMemory(unsigned long start, unsigned size, const void *contents)
+void AddressSpace::writeMemory(unsigned long start, unsigned size, const void *contents,
+			       bool ignore_protection)
 {
 	unsigned long end = start + size;
 
 	assert(end >= start);
 	while (start < end) {
 		AddressSpace::AddressSpaceEntry *const ase = findAseForPointer(start);
-		if (!ase)
+		if (!ase ||
+		    (!ignore_protection && !ase->writable))
 			throw BadMemoryException(true, start, size);
 		unsigned long to_copy;
 		if (end > ase->end)
@@ -115,7 +122,7 @@ void AddressSpace::readMemory(unsigned long start, unsigned size, void *contents
 
 void AddressSpace::populateMemory(const LogRecordMemory &rec)
 {
-	writeMemory(rec.client_address, rec.size, rec.contents);
+	writeMemory(rec.start, rec.size, rec.contents, true);
 }
 
 const void *AddressSpace::getRawPointerUnsafe(unsigned long ptr)
