@@ -534,6 +534,9 @@ eval_expression(struct expression_result *temporaries,
 			ORIGIN(expr_and(expr_sub(arg1.lo.origin, arg2.lo.origin),
 					expr_const(0xff)));
 			break;
+		case Iop_Sub16:
+			dest->lo.v = (arg1.lo.v - arg2.lo.v) & 0xffff;
+			break;
 		case Iop_Add64:
 			dest->lo.v = arg1.lo.v + arg2.lo.v;
 			ORIGIN(expr_add(arg1.lo.origin, arg2.lo.origin));
