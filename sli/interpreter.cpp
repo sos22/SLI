@@ -415,6 +415,80 @@ do_ccall(struct expression_result *temporaries,
 	}
 }
 
+/* Borrowed from gnucash */
+static void
+mulls64(struct expression_result *dest, const struct expression_result &src1,
+	const struct expression_result &src2)
+{
+	bool isneg = false;
+	long a = src1.lo.v;
+	long b = src2.lo.v;
+	unsigned long a0, a1;
+	unsigned long b0, b1;
+	unsigned long d, d0, d1;
+	unsigned long e, e0, e1;
+	unsigned long f, f0, f1;
+	unsigned long g, g0, g1;
+	unsigned long sum, carry, roll, pmax;
+ 
+	if (0 > a)
+	{
+		isneg = !isneg;
+		a = -a;
+	}
+ 
+	if (0 > b)
+	{
+		isneg = !isneg;
+		b = -b;
+	}
+ 
+	a1 = a >> 32;
+	a0 = a - (a1 << 32);
+ 
+	b1 = b >> 32;
+	b0 = b - (b1 << 32);
+ 
+	d = a0 * b0;
+	d1 = d >> 32;
+	d0 = d - (d1 << 32);
+ 
+	e = a0 * b1;
+	e1 = e >> 32;
+	e0 = e - (e1 << 32);
+ 
+	f = a1 * b0;
+	f1 = f >> 32;
+	f0 = f - (f1 << 32);
+ 
+	g = a1 * b1;
+	g1 = g >> 32;
+	g0 = g - (g1 << 32);
+ 
+	sum = d1 + e0 + f0;
+	carry = 0;
+	/* Can't say 1<<32 cause cpp will goof it up; 1ULL<<32 might work */
+	roll = 1 << 30;
+	roll <<= 2;
+ 
+	pmax = roll - 1;
+	while (pmax < sum)
+	{
+		sum -= roll;
+		carry ++;
+	}
+ 
+	dest->lo.v = d0 + (sum << 32);
+	dest->hi.v = carry + e1 + f1 + g0 + (g1 << 32);
+	if (isneg) {
+		dest->lo.v = ~dest->lo.v;
+		dest->hi.v = ~dest->hi.v;
+		dest->lo.v++;
+		if (dest->lo.v == 0)
+			dest->hi.v++;
+	}
+}
+
 static void
 eval_expression(struct expression_result *temporaries,
 		AddressSpace *addrSpace,
@@ -644,6 +718,10 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = (long)(int)arg1.lo.v * (long)(int)arg2.lo.v;
 			break;
 		}
+
+		case Iop_MullS64:
+			mulls64(dest, arg1, arg2);
+			break;
 
 		case Iop_MullU64: {
 			unsigned long a1, a2, b1, b2;
