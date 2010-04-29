@@ -77,6 +77,8 @@ replay_syscall(const LogReader *lr,
 		break;
 	case __NR_close: /* 3 */
 		break;
+	case __NR_stat: /* 4 */
+		break;
 	case __NR_fstat: /* 5 */
 		break;
 	case __NR_mmap: { /* 9 */
