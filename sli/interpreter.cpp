@@ -915,6 +915,9 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 	VexAbiInfo abiinfo_both;
 	VexGuestExtents vge;
 	LibVEX_default_VexArchInfo(&archinfo_guest);
+	archinfo_guest.hwcaps =
+		VEX_HWCAPS_AMD64_SSE3|
+		VEX_HWCAPS_AMD64_CX16;
 	LibVEX_default_VexAbiInfo(&abiinfo_both);
 	abiinfo_both.guest_stack_redzone_size = 128;
 	abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
