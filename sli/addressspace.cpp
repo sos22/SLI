@@ -4,48 +4,53 @@
 
 #include "sli.h"
 
+void AddressSpace::releaseMemory(unsigned long start, unsigned long size)
+{
+	unsigned long end = start + size;
+	AddressSpaceEntry *ase, **pprev;
+
+	pprev = &head;
+	for (ase = *pprev; ase; ase = *pprev) {
+		/* Skip ASEs which don't intersect the target
+		 * region. */
+		if (ase->end <= start || end <= ase->start) {
+			pprev = &ase->next;
+			continue;
+		}
+
+		/* If the start of the target is in the middle of the
+		   ASE, split the ASE so that next time around the ASE
+		   start will be exactly the target start. */
+		if (start > ase->start) {
+			ase->splitAt(start);
+			pprev = &ase->next;
+			continue;
+		}
+
+		/* Likewise for the end */
+		if (end < ase->end) {
+			ase->splitAt(end);
+			continue;
+		}
+
+		/* ASE is now entirely contained in target.  Cull
+		 * it */
+		assert(ase->start >= start);
+		assert(ase->end <= end);
+		*pprev = ase->next;
+		delete ase;
+	}
+}
+
 void AddressSpace::allocateMemory(unsigned long start, unsigned long size,
 				  AddressSpace::Protection prot)
 {
-	AddressSpace::AddressSpaceEntry *ase, **pprev, *newAse;
-	unsigned long end = start + size;
-
 	/* Trim any existing overlapping ases */
-	pprev = &head;
-	ase = *pprev;
-	while (ase) {
-		if (end >= ase->end) {
-			if (start >= ase->end) {
-				pprev = &ase->next;
-			} else if (start > ase->start) {
-				ase->end = start;
-				pprev = &ase->next;
-			} else {
-				*pprev = ase->next;
-				delete ase;
-			}
-		} else if (end > ase->start) {
-			if (start <= ase->start) {
-				pprev = &ase->next;
-				ase->start = end;
-			} else {
-				newAse = new AddressSpace::AddressSpaceEntry(end, ase->end, ase->prot,
-									     malloc(newAse->end - newAse->start));
-				memcpy(newAse->content,
-				       (const void *)((unsigned long)ase->content + newAse->start - ase->start),
-				       newAse->end - newAse->start);
-				ase->end = start;
-				newAse->next = ase->next;
-				ase->next = newAse;
-				pprev = &newAse->next;
-			}
-		} else {
-			pprev = &ase->next;
-		}
-		ase = *pprev;
-	}
+	releaseMemory(start, size);
 
-	newAse = new AddressSpace::AddressSpaceEntry(start, end, prot, malloc(size));
+	AddressSpace::AddressSpaceEntry *newAse =
+		new AddressSpace::AddressSpaceEntry(start, start + size,
+						    prot, malloc(size));
 	memset(newAse->content, 0, size);
 
 	newAse->next = head;
@@ -179,9 +184,15 @@ const void *AddressSpace::getRawPointerUnsafe(unsigned long ptr)
 
 unsigned long AddressSpace::setBrk(unsigned long newBrk)
 {
-	if (newBrk == 0)
-		return brkptr;
-	abort();
+	if (newBrk != 0) {
+		if (newBrk > brkptr)
+			allocateMemory(brkptr, newBrk - brkptr, Protection(true, true, false));
+		else
+			releaseMemory(newBrk, brkptr - newBrk);
+		brkptr = newBrk;
+	}
+	
+	return brkptr;
 }
 
 AddressSpace::Protection::Protection(unsigned prot)

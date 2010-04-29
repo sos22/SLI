@@ -244,6 +244,7 @@ public:
 	{
 		allocateMemory(rec.start, rec.size, rec.prot);
 	}
+	void releaseMemory(unsigned long start, unsigned long size);
 	void protectMemory(unsigned long start, unsigned long size, Protection prot);
 	void populateMemory(const LogRecordMemory &rec);
 	void writeMemory(unsigned long start, unsigned size, const void *contents,
