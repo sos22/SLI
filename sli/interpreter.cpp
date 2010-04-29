@@ -7,6 +7,9 @@ extern "C" {
 #include "libvex_guest_amd64.h"
 #include "guest_generic_bb_to_IR.h"
 #include "guest_amd64_defs.h"
+
+#undef NULL /* main_util redefines NULL, for some reason */
+#include "main_util.h"
 };
 
 #define FOOTSTEP_REGS_ONLY
@@ -891,6 +894,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 	CHECK_REGISTER(4);
 
 	const void *code = addrSpace->getRawPointerUnsafe(thr->regs.rip());
+
+	vexSetAllocModeTEMP_and_clear();
 
 	VexArchInfo archinfo_guest;
 	VexAbiInfo abiinfo_both;
