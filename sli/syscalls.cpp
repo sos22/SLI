@@ -36,7 +36,8 @@ replay_syscall(const LogReader *lr,
 	       LogReader::ptr startOffset,
 	       LogReader::ptr *endOffset,
 	       AddressSpace *addrSpace,
-	       Thread *thr)
+	       Thread *thr,
+	       MachineState *mach)
 {
 	LogRecordSyscall *lrs = dynamic_cast<LogRecordSyscall *>(lr->read(startOffset, endOffset));
 	PointerKeeper<LogRecordSyscall> pk(lrs);
@@ -85,9 +86,6 @@ replay_syscall(const LogReader *lr,
 		unsigned long addr = lrs->res;
 		unsigned long length = args[1];
 		unsigned long prot = args[2];
-		//unsigned long flags = args[3];
-		//unsigned long fd = args[4];
-		//unsigned long offset = args[5];
 		
 		if (!isErrnoSysres(lrs->res)) {
 			length = (length + 4095) & ~4095;
@@ -119,6 +117,9 @@ replay_syscall(const LogReader *lr,
 	case __NR_arch_prctl: /* 158 */
 		assert(args[0] == ARCH_SET_FS);
 		thr->regs.regs.guest_FS_ZERO = args[1];
+		break;
+	case __NR_exit_group: /* 231 */
+		mach->exitGroup(args[0]);
 		break;
 	default:
 		throw UnknownSyscallException(thr->regs.regs.guest_RAX);

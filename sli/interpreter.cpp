@@ -1070,7 +1070,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 	}
 
 	if (irsb->jumpkind == Ijk_Sys_syscall)
-		replay_syscall(lr, startOffset, endOffset, addrSpace, thr);
+		replay_syscall(lr, startOffset, endOffset, addrSpace, thr,
+			       currentState);
 
 finished_block:
 	return;

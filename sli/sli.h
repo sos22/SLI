@@ -268,6 +268,8 @@ public:
 
 class MachineState {
 	Thread *thread;
+	bool exitted;
+	unsigned exit_status;
 public:
 	AddressSpace *addressSpace;
 	MachineState(AddressSpace *as, Thread *rootThread) :
@@ -276,6 +278,10 @@ public:
 	{
 	}
 	Thread *findThread(ThreadId id) { return thread; }
+	void exitGroup(unsigned result) {
+		exitted = true;
+		exit_status = result;
+	}
 };
 
 class Interpreter {
@@ -416,6 +422,7 @@ void replay_syscall(const LogReader *lr,
 		    LogReader::ptr startOffset,
 		    LogReader::ptr *endOffset,
 		    AddressSpace *addrSpace,
-		    Thread *thr);
+		    Thread *thr,
+		    MachineState *ms);
 
 #endif /* !SLI_H__ */
