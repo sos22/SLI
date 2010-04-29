@@ -885,15 +885,22 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 #define GUEST_REG(x) PASTE2(guest_, FR_REG_NAME(x))
 #define CHECK_REGISTER(x)						\
 	do {								\
-		if (thr->regs.regs. GUEST_REG(x) != lrf. reg ## x)	\
+		if (*(unsigned long *)&thr->regs.regs. GUEST_REG(x) != lrf. reg ## x) \
 			throw ReplayFailedBadRegister(			\
 				STRING2( FR_REG_NAME(x)),		\
-				thr->regs.regs.GUEST_REG(x),		\
+				*(unsigned long *)&thr->regs.regs.GUEST_REG(x), \
 				lrf. reg ## x);				\
 	} while (0)
 	CHECK_REGISTER(0);
 	CHECK_REGISTER(1);
-	CHECK_REGISTER(2);
+//	CHECK_REGISTER(2);
+	do {								
+		if ( ((unsigned long *)&thr->regs.regs.guest_XMM0)[1] != lrf.reg2) 
+			throw ReplayFailedBadRegister(			
+				"xmm0b",		
+				((unsigned long *)&thr->regs.regs.guest_XMM0)[1], 
+				lrf. reg2);				
+	} while (0);
 	CHECK_REGISTER(3);
 	CHECK_REGISTER(4);
 
