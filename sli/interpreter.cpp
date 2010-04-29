@@ -31,6 +31,7 @@ static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 struct abstract_interpret_value {
 	unsigned long v;
 	void *origin;
+	abstract_interpret_value() : v(0), origin(NULL) {}
 };
 
 struct expression_result {
@@ -988,6 +989,47 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			} else {
 				abort();
 			}
+			break;
+		}
+
+		case Ist_CAS: {
+			assert(stmt->Ist.CAS.details->oldHi == IRTemp_INVALID);
+			assert(stmt->Ist.CAS.details->expdHi == NULL);
+			assert(stmt->Ist.CAS.details->dataHi == NULL);
+			assert(stmt->Ist.CAS.details->end == Iend_LE);
+			struct expression_result data;
+			struct expression_result addr;
+			struct expression_result expected;
+			eval_expression(temporaries, addrSpace, thr, &data, stmt->Ist.CAS.details->dataLo);
+			eval_expression(temporaries, addrSpace, thr, &addr, stmt->Ist.CAS.details->addr);
+			eval_expression(temporaries, addrSpace, thr, &expected, stmt->Ist.CAS.details->expdLo);
+			unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
+								  stmt->Ist.CAS.details->dataLo));
+			struct expression_result seen;
+			if (size <= 8) {
+				addrSpace->readMemory(addr.lo.v, size, &seen.lo.v);
+			} else if (size == 16) {
+				addrSpace->readMemory(addr.lo.v, 8, &seen.lo.v);
+				addrSpace->readMemory(addr.lo.v + 8, 8, &seen.hi.v);
+			} else {
+				abort();
+			}
+			if (expected.lo.v == seen.lo.v &&
+			    (size <= 8 || expected.hi.v == seen.hi.v)) {
+				if (size <= 8) {
+					addrSpace->writeMemory(addr.lo.v,
+							       size,
+							       &data.lo.v);
+				} else {
+					addrSpace->writeMemory(addr.lo.v,
+							       8,
+							       &data.lo.v);
+					addrSpace->writeMemory(addr.lo.v + 8,
+							       8,
+							       &data.hi.v);
+				}
+			}
+			temporaries[stmt->Ist.CAS.details->oldLo] = seen;
 			break;
 		}
 

@@ -179,6 +179,7 @@ public:
 		}
 	public:
 		ptr() : valid(false) {};
+		unsigned rn() { return record_nr; }
 	};
 
 	LogRecord *read(ptr startPtr, ptr *outPtr) const;
