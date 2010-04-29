@@ -585,6 +585,7 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		case Iop_Xor64:
 		case Iop_Xor32:
+		case Iop_Xor8:
 			dest->lo.v = arg1.lo.v ^ arg2.lo.v;
 			ORIGIN(expr_xor(arg1.lo.origin, arg2.lo.origin));
 			break;
