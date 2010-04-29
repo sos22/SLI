@@ -201,6 +201,9 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 		case AMD64G_CC_OP_SUBL:
 			dest->lo.v = (int)dep1.lo.v < (int)dep2.lo.v;
 			break;
+		case AMD64G_CC_OP_SUBQ:
+			dest->lo.v = (long)dep1.lo.v < (long)dep2.lo.v;
+			break;
 		default:
 			printf("Strange operation code %ld for lt\n", op.lo.v);
 			abort();
@@ -259,6 +262,9 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 
 	case AMD64CondS:
 		switch (op.lo.v) {
+		case AMD64G_CC_OP_ADDQ:
+			dest->lo.v = (dep1.lo.v + dep2.lo.v) >> 63;
+			break;
 		case AMD64G_CC_OP_LOGICB:
 			dest->lo.v = dep1.lo.v >> 7;
 			break;
