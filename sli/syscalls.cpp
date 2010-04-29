@@ -101,6 +101,10 @@ replay_syscall(const LogReader *lr,
 			addrSpace->protectMemory(addr, size, prot);
 		break;
 	}
+	case __NR_munmap: { /* 11 */
+		addrSpace->releaseMemory(args[0], args[1]);
+		break;
+	}
 	case __NR_brk: /* 12 */
 		res = addrSpace->setBrk(args[0]);
 		break;
