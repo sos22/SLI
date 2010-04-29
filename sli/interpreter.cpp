@@ -479,6 +479,7 @@ eval_expression(struct expression_result *temporaries,
 		eval_expression(temporaries, addrSpace, thr, &addr, expr->Iex.Load.addr);
 		unsigned size = sizeofIRType(expr->Iex.Load.ty);
 		if (size <= 8) {
+			dest->lo.v = 0;
 			addrSpace->readMemory(addr.lo.v, size, &dest->lo.v);
 		} else if (size == 16) {
 			addrSpace->readMemory(addr.lo.v, 8, &dest->lo.v);
@@ -807,7 +808,6 @@ eval_expression(struct expression_result *temporaries,
 		case Iop_128HIto64:
 		case Iop_V128HIto64:
 			dest->lo.v = arg.hi.v;
-			tl_assert(arg.hi.origin != NULL);
 			ORIGIN(arg.hi.origin);
 			break;
 
@@ -840,7 +840,6 @@ eval_expression(struct expression_result *temporaries,
 		struct expression_result resX;
 		struct expression_result *choice;
 		eval_expression(temporaries, addrSpace, thr, &cond, expr->Iex.Mux0X.cond);
-		tl_assert(!cond.hi.origin);
 		eval_expression(temporaries, addrSpace, thr, &res0, expr->Iex.Mux0X.expr0);
 		eval_expression(temporaries, addrSpace, thr, &resX, expr->Iex.Mux0X.exprX);
 		if (cond.lo.v == 0) {
