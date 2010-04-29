@@ -721,8 +721,14 @@ eval_expression(struct expression_result *temporaries,
 			if ( (int)(arg1.hi.v >> 32) > (int)(arg2.hi.v >> 32) )
 				dest->hi.v |= 0xffffffff00000000;
 			break;
+			
+		case Iop_XorV128:
+			dest->lo.v = arg1.lo.v ^ arg2.lo.v;
+			dest->hi.v = arg1.hi.v ^ arg2.hi.v;
+			break;
 
 		default:
+			ppIRExpr(expr);
 			abort();
 		}
 		break;
