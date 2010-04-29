@@ -198,6 +198,9 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 
 	case AMD64CondL:
 		switch (op.lo.v) {
+		case AMD64G_CC_OP_SUBB:
+			dest->lo.v = (char)dep1.lo.v < (char)dep2.lo.v;
+			break;
 		case AMD64G_CC_OP_SUBL:
 			dest->lo.v = (int)dep1.lo.v < (int)dep2.lo.v;
 			break;
@@ -284,6 +287,9 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 			dest->lo.v = (short)dep1.lo.v < (short)dep2.lo.v;
 			break;
 		case AMD64G_CC_OP_SUBL:
+			dest->lo.v = (int)dep1.lo.v < (int)dep2.lo.v;
+			break;
+		case AMD64G_CC_OP_SUBQ:
 			dest->lo.v = (long)dep1.lo.v < (long)dep2.lo.v;
 			break;
 		default:
