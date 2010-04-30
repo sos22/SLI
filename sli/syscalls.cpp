@@ -126,6 +126,8 @@ replay_syscall(const LogReader *lr,
 		break;
 	case __NR_access: /* 21 */
 		break;
+	case __NR_getpid: /* 39 */
+		break;
 	case __NR_uname: /* 63 */
 		break;
 	case __NR_fcntl: /* 72 */
@@ -138,7 +140,15 @@ replay_syscall(const LogReader *lr,
 		break;
 	case __NR_getrlimit: /* 97 */
 		break;
+	case __NR_getgid: /* 104 */
+		break;
 	case __NR_geteuid: /* 107 */
+		break;
+	case __NR_getegid: /* 108 */
+		break;
+	case __NR_getppid: /* 110 */
+		break;
+	case __NR_getgroups: /* 115 */
 		break;
 	case __NR_statfs: /* 137 */
 		break;
