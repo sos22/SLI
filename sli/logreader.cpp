@@ -84,7 +84,8 @@ skip:
 		return new LogRecordRdtsc(tid, rr.stashed_tsc);
 	}
 	case RECORD_mem_read:
-	case RECORD_mem_write: {
+	case RECORD_mem_write:
+	case RECORD_new_thread:	{
 		/* Don't need these in the current world order */
 		startPtr = *nextPtr;
 		goto skip;
