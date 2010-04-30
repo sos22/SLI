@@ -219,20 +219,33 @@ public:
 		}
 		Protection(unsigned prot); /* PROT_* flags */
 	};
+	class AllocFlags {
+	public:
+		bool expandsDown;
+		AllocFlags(bool _e) :
+			expandsDown(_e)
+		{
+		}
+		AllocFlags(unsigned flags); /* MAP_* flags */
+	};
+	static const AllocFlags defaultFlags;
 private:
 	struct AddressSpaceEntry {
 		unsigned long start; /* inclusive */
 		unsigned long end; /* not inclusive */
-		class Protection prot;
+		Protection prot;
+		AllocFlags flags;
 		void *content;
 		AddressSpaceEntry *next;
 		AddressSpaceEntry(unsigned long _start,
 				  unsigned long _end,
 				  Protection _prot,
-				  void *_content) :
+				  void *_content,
+				  AllocFlags _flags) :
 			start(_start),
 			end(_end),
 			prot(_prot),
+			flags(_flags),
 			content(_content),
 			next(NULL)
 		{
@@ -244,19 +257,23 @@ private:
 
 	AddressSpaceEntry *head;
 	AddressSpaceEntry *findAseForPointer(unsigned long ptr);
+	bool expandStack(const Thread &thr, unsigned long ptr);
 public:
-	void allocateMemory(unsigned long start, unsigned long size, Protection prot);
+	void allocateMemory(unsigned long start, unsigned long size, Protection prot,
+			    AllocFlags flags = defaultFlags);
 	void allocateMemory(const LogRecordAllocateMemory &rec)
 	{
-		allocateMemory(rec.start, rec.size, rec.prot);
+		allocateMemory(rec.start, rec.size, rec.prot, rec.flags);
 	}
 	void releaseMemory(unsigned long start, unsigned long size);
 	void protectMemory(unsigned long start, unsigned long size, Protection prot);
 	void populateMemory(const LogRecordMemory &rec);
-	void writeMemory(unsigned long start, unsigned size, const void *contents,
-			 bool ignore_protection = false);
-	void readMemory(unsigned long start, unsigned size, void *contents,
-			bool ignore_protection = false);
+	void writeMemory(unsigned long start, unsigned size,
+			 const void *contents, bool ignore_protection = false,
+			 const Thread *thr = NULL);
+	void readMemory(unsigned long start, unsigned size,
+			void *contents, bool ignore_protection = false,
+			const Thread *thr = NULL);
 
 	unsigned long setBrk(unsigned long newBrk);
 

@@ -43,14 +43,16 @@ void AddressSpace::releaseMemory(unsigned long start, unsigned long size)
 }
 
 void AddressSpace::allocateMemory(unsigned long start, unsigned long size,
-				  AddressSpace::Protection prot)
+				  AddressSpace::Protection prot,
+				  AllocFlags flags)
 {
 	/* Trim any existing overlapping ases */
 	releaseMemory(start, size);
 
 	AddressSpace::AddressSpaceEntry *newAse =
 		new AddressSpace::AddressSpaceEntry(start, start + size,
-						    prot, malloc(size));
+						    prot, malloc(size),
+						    flags);
 	memset(newAse->content, 0, size);
 
 	newAse->next = head;
@@ -80,7 +82,8 @@ void AddressSpace::AddressSpaceEntry::splitAt(unsigned long addr)
 		new AddressSpaceEntry(addr,
 				      end,
 				      prot,
-				      malloc(end - addr));
+				      malloc(end - addr),
+				      flags);
 	memcpy(newAse->content,
 	       (const void *)((unsigned long)content + addr - start),
 	       end - addr);
@@ -117,14 +120,55 @@ void AddressSpace::protectMemory(unsigned long start, unsigned long size, Protec
 
 }
 
-void AddressSpace::writeMemory(unsigned long start, unsigned size, const void *contents,
-			       bool ignore_protection)
+bool AddressSpace::expandStack(const Thread &thr, unsigned long ptr)
+{
+	/* Matches kernel stack expansion logic. */
+	if (ptr + 65536 + 32 * sizeof(unsigned long) < thr.regs.regs.guest_RSP)
+		return false;
+
+	AddressSpaceEntry *currentAse, *bestAse;
+	/* Find the lowest ASE above the faulting address */
+	currentAse = head;
+	bestAse = NULL;
+	for (currentAse = head; currentAse; currentAse = currentAse->next) {
+		if (currentAse->end <= ptr)
+			continue;
+		if (!bestAse ||
+		    currentAse->start < bestAse->start)
+			bestAse = currentAse;
+	}
+	if (!bestAse)
+		return false;
+	assert(bestAse->end > ptr);
+	/* Shouldn't try to expand stack if we already have a mapping
+	   for the relevant region. */
+	assert(bestAse->start > ptr);
+
+	if (!bestAse->flags.expandsDown)
+		return false;
+
+	ptr &= ~4095;
+	bestAse->content = realloc(bestAse->content,
+				   bestAse->end - ptr);
+	memmove((void *)((unsigned long)bestAse->content + bestAse->start - ptr),
+		bestAse->content,
+		bestAse->end - bestAse->start);
+	memset(bestAse->content, 0, bestAse->start - ptr);
+	bestAse->start = ptr;
+	return true;
+}
+
+void AddressSpace::writeMemory(unsigned long start, unsigned size,
+			       const void *contents, bool ignore_protection,
+			       const Thread *thr)
 {
 	unsigned long end = start + size;
 
 	assert(end >= start);
 	while (start < end) {
 		AddressSpace::AddressSpaceEntry *const ase = findAseForPointer(start);
+		if (!ase && thr && expandStack(*thr, start))
+			continue;
 		if (!ase ||
 		    (!ignore_protection && !ase->prot.writable))
 			throw BadMemoryException(true, start, size);
@@ -142,14 +186,17 @@ void AddressSpace::writeMemory(unsigned long start, unsigned size, const void *c
 	}
 }
 
-void AddressSpace::readMemory(unsigned long start, unsigned size, void *contents,
-			      bool ignore_protection)
+void AddressSpace::readMemory(unsigned long start, unsigned size,
+			      void *contents, bool ignore_protection,
+			      const Thread *thr)
 {
 	unsigned long end = start + size;
 
 	assert(end >= start);
 	while (start < end) {
 		AddressSpace::AddressSpaceEntry *const ase = findAseForPointer(start);
+		if (!ase && thr && expandStack(*thr, start))
+			continue;
 		if (!ase ||
 		    (!ignore_protection && !ase->prot.readable))
 			throw BadMemoryException(false, start, size);
@@ -205,3 +252,14 @@ AddressSpace::Protection::Protection(unsigned prot)
 	if (prot & PROT_EXEC)
 		executable = true;
 }
+
+AddressSpace::AllocFlags::AllocFlags(unsigned flags)
+{
+	expandsDown = false;
+	if (flags & MAP_GROWSDOWN) {
+		printf("Create a stack segment.\n");
+		expandsDown = true;
+	}
+}
+
+const AddressSpace::AllocFlags AddressSpace::defaultFlags(false);

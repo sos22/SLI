@@ -1073,14 +1073,20 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			if (size <= 8) {
 				addrSpace->writeMemory(addr.lo.v,
 						       size,
-						       &data.lo.v);
+						       &data.lo.v,
+						       false,
+						       thr);
 			} else if (size == 16) {
 				addrSpace->writeMemory(addr.lo.v,
 						       8,
-						       &data.lo.v);
+						       &data.lo.v,
+						       false,
+						       thr);
 				addrSpace->writeMemory(addr.lo.v + 8,
 						       8,
-						       &data.hi.v);
+						       &data.hi.v,
+						       false,
+						       thr);
 			} else {
 				abort();
 			}
@@ -1114,14 +1120,20 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				if (size <= 8) {
 					addrSpace->writeMemory(addr.lo.v,
 							       size,
-							       &data.lo.v);
+							       &data.lo.v,
+							       false,
+							       thr);
 				} else {
 					addrSpace->writeMemory(addr.lo.v,
 							       8,
-							       &data.lo.v);
+							       &data.lo.v,
+							       false,
+							       thr);
 					addrSpace->writeMemory(addr.lo.v + 8,
 							       8,
-							       &data.hi.v);
+							       &data.hi.v,
+							       false,
+							       thr);
 				}
 			}
 			temporaries[stmt->Ist.CAS.details->oldLo] = seen;
