@@ -222,6 +222,7 @@ public:
 	unsigned long clear_child_tid;
 	unsigned long robust_list;
 	unsigned long set_child_tid;
+	bool exitted;
 	Thread(const LogRecordInitialRegisters &initRegs);
 	Thread(unsigned _pid, const Thread &parent) :
 		tid(0),
@@ -229,7 +230,8 @@ public:
 		regs(parent.regs),
 		clear_child_tid(0),
 		robust_list(0),
-		set_child_tid(0)
+		set_child_tid(0),
+		exitted(false)
 	{
 	}
 };

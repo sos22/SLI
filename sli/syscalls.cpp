@@ -191,6 +191,9 @@ replay_syscall(const LogReader *lr,
 				     args[4],
 				     lrs->res);
 		break;
+	case __NR_exit:
+		thr->exitted = true;
+		break;
 	case __NR_uname: /* 63 */
 		break;
 	case __NR_fcntl: /* 72 */
