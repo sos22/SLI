@@ -144,6 +144,7 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 	struct expression_result dep2 = {};
 	struct expression_result ndep = {};
 	int inv;
+	unsigned cf, zf, sf, of;
 
 	tl_assert(retty == Ity_I64);
 	tl_assert(cee->regparms == 0);
@@ -155,160 +156,116 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 	eval_expression(temporaries, addrSpace, thr, &dep2, args[3]);
 	eval_expression(temporaries, addrSpace, thr, &ndep, args[4]);
 	inv = condcode.lo.v & 1;
+
+	switch (op.lo.v) {
+	case AMD64G_CC_OP_COPY:
+		cf = dep1.lo.v;
+		zf = dep1.lo.v >> 6;
+		sf = dep1.lo.v >> 7;
+		of = dep1.lo.v >> 11;
+		break;
+
+#define DO_ACT(name, type_tag, type, bits)				\
+		case AMD64G_CC_OP_ ## name ## type_tag:			\
+			ACTIONS_ ## name (type, bits);		        \
+		        break
+#define ACTION(name)							\
+		DO_ACT(name, B, unsigned char, 7);			\
+		DO_ACT(name, W, unsigned short, 15);			\
+		DO_ACT(name, L, unsigned, 31);		                \
+		DO_ACT(name, Q, unsigned long, 63)
+#define ACTIONS_ADD(type, bits)                                         \
+		do {							\
+			type res;					\
+			res = dep1.lo.v + dep2.lo.v;			\
+			cf = res < (type)dep1.lo.v;		\
+			zf = (res == 0);				\
+			sf = (res >> bits);				\
+			of = (~(dep1.lo.v ^ dep2.lo.v) &		\
+			      (dep1.lo.v ^ res)) >> bits;		\
+		} while (0)
+#define ACTIONS_SUB(type, bits)						\
+		do {							\
+			type res;					\
+			res = dep1.lo.v - dep2.lo.v;			\
+			cf = (type)dep1.lo.v < (type)dep2.lo.v;		\
+			zf = (res == 0);				\
+			sf = res >> bits;				\
+			of = ( (dep1.lo.v ^ dep2.lo.v) &		\
+			       (dep1.lo.v ^ res) ) >> bits;		\
+		} while (0)
+#define ACTIONS_LOGIC(type, bits)		                        \
+		do {							\
+			cf = 0;						\
+			zf = (type)dep1.lo.v == 0;			\
+			sf = (type)dep1.lo.v >> bits;			\
+			of = 0;						\
+		} while (0)
+#define ACTIONS_INC(type, bits)			                        \
+		do {				                        \
+			type res = dep1.lo.v;				\
+			cf = ndep.lo.v & 1;				\
+			zf = (res == 0);				\
+			sf = res >> bits;				\
+			of = res == (1ull << bits);			\
+		} while (0)
+#define ACTIONS_DEC(type, bits)			                        \
+		do {				                        \
+			type res = dep1.lo.v;				\
+			cf = ndep.lo.v & 1;				\
+			zf = (res == 0);				\
+			sf = res >> bits;				\
+			of = (type)(res + 1) == (1ull << bits);		\
+		} while (0)
+#define ACTIONS_SHR(type, bits)			                        \
+		do {				                        \
+			cf = dep2.lo.v & 1;				\
+			zf = (dep1.lo.v == 0);				\
+			sf = dep1.lo.v >> bits;				\
+			of = (dep1.lo.v ^ dep2.lo.v) >> bits;		\
+		} while (0)
+	ACTION(ADD);
+	ACTION(SUB);
+	ACTION(LOGIC);
+	ACTION(INC);
+	ACTION(DEC);
+	ACTION(SHR);
+#undef DO_ACT
+#undef ACTION
+#undef ACTIONS_ADD
+#undef ACTIONS_SUB
+#undef ACTIONS_LOGIC
+#undef ACTIONS_INC
+#undef ACTIONS_DEC
+#undef ACTIONS_SHR
+	default:
+		printf("Strange operation code %ld\n", op.lo.v);
+		abort();
+	}
+
+	of &= 1;
+	sf &= 1;
+	zf &= 1;
+	cf &= 1;
+
 	switch (condcode.lo.v & ~1) {
 	case AMD64CondZ:
-		switch (op.lo.v) {
-		case AMD64G_CC_OP_LOGICB:
-		case AMD64G_CC_OP_LOGICW:
-		case AMD64G_CC_OP_LOGICL:
-		case AMD64G_CC_OP_LOGICQ:
-			dest->lo.v = dep1.lo.v == 0;
-			break;
-		case AMD64G_CC_OP_SUBB:
-		case AMD64G_CC_OP_SUBW:
-		case AMD64G_CC_OP_SUBL:
-		case AMD64G_CC_OP_SUBQ:
-			dest->lo.v = dep1.lo.v == dep2.lo.v;
-			break;
-
-		case AMD64G_CC_OP_ADDB:
-			dest->lo.v = (unsigned char)(dep1.lo.v + dep2.lo.v) == 0;
-			break;
-		case AMD64G_CC_OP_ADDW:
-			dest->lo.v = (unsigned short)(dep1.lo.v + dep2.lo.v) == 0;
-			break;
-		case AMD64G_CC_OP_ADDL:
-			dest->lo.v = (unsigned int)(dep1.lo.v + dep2.lo.v) == 0;
-			break;
-		case AMD64G_CC_OP_ADDQ:
-			dest->lo.v = dep1.lo.v + dep2.lo.v == 0;
-			break;
-
-		case AMD64G_CC_OP_INCB:
-		case AMD64G_CC_OP_INCW:
-		case AMD64G_CC_OP_INCL:
-		case AMD64G_CC_OP_INCQ:
-		case AMD64G_CC_OP_DECB:
-		case AMD64G_CC_OP_DECW:
-		case AMD64G_CC_OP_DECL:
-		case AMD64G_CC_OP_DECQ:
-		case AMD64G_CC_OP_SHRL:
-		case AMD64G_CC_OP_SHRQ:
-			dest->lo.v = dep1.lo.v == 0;
-			break;
-		default:
-			printf("Strange operation code %ld\n", op.lo.v);
-			abort();
-		}
+		dest->lo.v = zf;
 		break;
-
 	case AMD64CondL:
-		switch (op.lo.v) {
-		case AMD64G_CC_OP_SUBB:
-			dest->lo.v = (char)dep1.lo.v < (char)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_SUBL:
-			dest->lo.v = (int)dep1.lo.v < (int)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_SUBQ:
-			dest->lo.v = (long)dep1.lo.v < (long)dep2.lo.v;
-			break;
-		default:
-			printf("Strange operation code %ld for lt\n", op.lo.v);
-			abort();
-		}
+		dest->lo.v = sf ^ of;
 		break;
-
 	case AMD64CondLE:
-		switch (op.lo.v) {
-		case AMD64G_CC_OP_SUBB:
-			dest->lo.v = (signed char)dep1.lo.v <= (signed char)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_SUBL:
-			dest->lo.v = (int)dep1.lo.v <= (int)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_SUBQ:
-			dest->lo.v = (long)dep1.lo.v <= (long)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_LOGICL:
-			dest->lo.v = (unsigned)(dep1.lo.v + 0x80000000) <= 0x80000000 ;
-			break;
-		case AMD64G_CC_OP_LOGICQ:
-			dest->lo.v = (long)dep1.lo.v <= 0;
-			break;
-		default:
-			printf("Strange operation code %ld for le\n", op.lo.v);
-			abort();
-		}
+		dest->lo.v = (sf ^ of) | zf;
 		break;
 	case AMD64CondB:
-		switch (op.lo.v) {
-		case AMD64G_CC_OP_COPY:
-			dest->lo.v = dep1.lo.v;
-			break;
-
-		case AMD64G_CC_OP_SUBB:
-		case AMD64G_CC_OP_SUBW:
-		case AMD64G_CC_OP_SUBL:
-		case AMD64G_CC_OP_SUBQ:
-			dest->lo.v = dep1.lo.v < dep2.lo.v;
-			break;
-
-		case AMD64G_CC_OP_ADDQ:
-			dest->lo.v = dep1.lo.v + dep2.lo.v < dep1.lo.v;
-			break;
-		default:
-			printf("Strange operation code %ld for b\n", op.lo.v);
-			abort();
-		}
+		dest->lo.v = cf;
 		break;
 	case AMD64CondBE:
-		switch (op.lo.v) {
-		case AMD64G_CC_OP_SUBB:
-		case AMD64G_CC_OP_SUBW:
-		case AMD64G_CC_OP_SUBL:
-		case AMD64G_CC_OP_SUBQ:
-			dest->lo.v = dep1.lo.v <= dep2.lo.v;
-			break;
-		default:
-			printf("Strange operation code %ld for be\n", op.lo.v);
-			abort();
-		}
+		dest->lo.v = cf | zf;
 		break;
-
 	case AMD64CondS:
-		switch (op.lo.v) {
-		case AMD64G_CC_OP_ADDQ:
-			dest->lo.v = (dep1.lo.v + dep2.lo.v) >> 63;
-			break;
-		case AMD64G_CC_OP_LOGICB:
-			dest->lo.v = dep1.lo.v >> 7;
-			break;
-		case AMD64G_CC_OP_LOGICW:
-			dest->lo.v = dep1.lo.v >> 15;
-			break;
-		case AMD64G_CC_OP_LOGICL:
-			dest->lo.v = dep1.lo.v >> 31;
-			break;
-		case AMD64G_CC_OP_LOGICQ:
-			dest->lo.v = dep1.lo.v >> 63;
-			break;
-		case AMD64G_CC_OP_SUBB:
-			dest->lo.v = (char)dep1.lo.v < (char)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_SUBW:
-			dest->lo.v = (short)dep1.lo.v < (short)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_SUBL:
-			dest->lo.v = (int)dep1.lo.v < (int)dep2.lo.v;
-			break;
-		case AMD64G_CC_OP_SUBQ:
-			dest->lo.v = (long)dep1.lo.v < (long)dep2.lo.v;
-			break;
-		default:
-			printf("Strange operation code %ld for s\n", op.lo.v);
-			abort();
-		}
+		dest->lo.v = sf;
 		break;
 
 	default:
@@ -316,9 +273,8 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 		abort();
 	}
 
-	if (inv) {
+	if (inv)
 		dest->lo.v ^= 1;
-	}
 }
 
 static void
