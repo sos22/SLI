@@ -170,10 +170,15 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 			dest->lo.v = dep1.lo.v == dep2.lo.v;
 			break;
 
-		case AMD64G_CC_OP_ADDL:
-			dest->lo.v = (unsigned)(dep1.lo.v + dep2.lo.v) == 0;
+		case AMD64G_CC_OP_ADDB:
+			dest->lo.v = (unsigned char)(dep1.lo.v + dep2.lo.v) == 0;
 			break;
-
+		case AMD64G_CC_OP_ADDW:
+			dest->lo.v = (unsigned short)(dep1.lo.v + dep2.lo.v) == 0;
+			break;
+		case AMD64G_CC_OP_ADDL:
+			dest->lo.v = (unsigned int)(dep1.lo.v + dep2.lo.v) == 0;
+			break;
 		case AMD64G_CC_OP_ADDQ:
 			dest->lo.v = dep1.lo.v + dep2.lo.v == 0;
 			break;
