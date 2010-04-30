@@ -1,3 +1,4 @@
+#include <math.h>
 #include <string.h>
 
 extern "C" {
@@ -526,6 +527,7 @@ eval_expression(struct expression_result *temporaries,
 				&v1);
 		switch (expr->Iex.Get.ty) {
 		case Ity_I64:
+		case Ity_F64:
 			tl_assert(!sub_word_offset);
 			dest->lo.v = v1;
 			break;
@@ -537,6 +539,7 @@ eval_expression(struct expression_result *temporaries,
 				 &dest->hi.v);
 			break;
 		case Ity_I32:
+		case Ity_F32:
 			tl_assert(!(sub_word_offset % 4));
 			dest->lo.v = (v1 >> (sub_word_offset * 8)) & 0xffffffff;
 			break;
@@ -839,6 +842,35 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = arg1.lo.v ^ arg2.lo.v;
 			dest->hi.v = arg1.hi.v ^ arg2.hi.v;
 			break;
+
+		case Iop_I64toF64: {
+			switch (arg1.lo.v) {
+			case 0:
+				/* Round to nearest even mode. */
+				*(double *)&dest->lo.v = arg2.lo.v;
+				break;
+			default:
+				printf("unknown rounding mode %ld\n",
+				       arg1.lo.v);
+				abort();
+				break;
+			}
+			break;
+		}
+
+		case Iop_CmpF64: {
+			double a1 = *(double *)&arg1.lo.v;
+			double a2 = *(double *)&arg2.lo.v;
+			if (a1 < a2)
+				dest->lo.v = 1;
+			else if (a1 == a2)
+				dest->lo.v = 0x40;
+			else if (a1 > a2)
+				dest->lo.v = 0;
+			else
+				dest->lo.v = 0x45;
+			break;
+		}
 
 		default:
 			ppIRExpr(expr);
@@ -1166,11 +1198,19 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 
 			case Ity_I16:
 				tl_assert(!(byte_offset % 2));
-				*dest &= ~(0xFFFF << (byte_offset * 8));
+				*dest &= ~(0xFFFFul << (byte_offset * 8));
+				*dest |= data.lo.v << (byte_offset * 8);
+				break;
+
+			case Ity_I32:
+			case Ity_F32:
+				tl_assert(!(byte_offset % 4));
+				*dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
 				*dest |= data.lo.v << (byte_offset * 8);
 				break;
 
 			case Ity_I64:
+			case Ity_F64:
 				tl_assert(byte_offset == 0);
 				*dest = data.lo.v;
 				break;
