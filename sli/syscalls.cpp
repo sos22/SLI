@@ -203,6 +203,8 @@ replay_syscall(const LogReader *lr,
 		break;
 	case __NR_getrlimit: /* 97 */
 		break;
+	case __NR_getuid: /* 102 */
+		break;
 	case __NR_getgid: /* 104 */
 		break;
 	case __NR_geteuid: /* 107 */
