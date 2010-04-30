@@ -146,6 +146,8 @@ replay_syscall(const LogReader *lr,
 		assert(args[0] == ARCH_SET_FS);
 		thr->regs.regs.guest_FS_ZERO = args[1];
 		break;
+	case __NR_sync: /* 162 */
+		break;
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
