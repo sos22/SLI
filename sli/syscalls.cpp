@@ -31,6 +31,45 @@ process_memory_records(AddressSpace *addrSpace,
 	*endOffset = startOffset;
 }
 
+static void
+handle_clone(AddressSpace *addrSpace,
+	     Thread *thr,
+	     MachineState *mach,
+	     unsigned long flags,
+	     unsigned long childRsp,
+	     unsigned long parent_tidptr,
+	     unsigned long child_tidptr,
+	     unsigned long set_tls,
+	     unsigned pid)
+{
+	if (flags != (CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+		      CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
+		      CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)) {
+		printf("can't handle clone flags %lx\n", flags);
+		abort();
+	}
+
+	/* Create a new thread.  This is, as you might expect, closely
+	   modelled on the kernel's version of the same process. */
+	Thread *newThread = new Thread(pid, *thr);
+	if (flags & CLONE_CHILD_SETTID)
+		newThread->set_child_tid = child_tidptr;
+	if (flags & CLONE_CHILD_CLEARTID)
+		newThread->clear_child_tid = child_tidptr;
+	newThread->robust_list = 0;
+#if 0
+	if (flags & CLONE_VM)
+		newThread->sas_ss_sp = newThread->sas_ss_size = 0;
+	newThread->exit_signal = (flags & CLONE_THREAD) ? -1 : (clone_flags & CSIGNAL);
+#endif
+	newThread->regs.regs.guest_RAX = 0;
+	newThread->regs.regs.guest_RSP = childRsp;
+	if (flags & CLONE_SETTLS)
+		newThread->regs.regs.guest_FS_ZERO = set_tls;
+
+	mach->registerThread(newThread);
+}
+
 void
 replay_syscall(const LogReader *lr,
 	       LogReader::ptr startOffset,
@@ -139,6 +178,18 @@ replay_syscall(const LogReader *lr,
 	case __NR_access: /* 21 */
 		break;
 	case __NR_getpid: /* 39 */
+		break;
+	case __NR_clone: /* 56 */
+		if (!isErrnoSysres(lrs->res))
+			handle_clone(addrSpace,
+				     thr,
+				     mach,
+				     args[0],
+				     args[1],
+				     args[2],
+				     args[3],
+				     args[4],
+				     lrs->res);
 		break;
 	case __NR_uname: /* 63 */
 		break;

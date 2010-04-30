@@ -10,6 +10,7 @@
 #include <string.h>
 #include <exception>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include "libvex_guest_amd64.h"
@@ -32,8 +33,13 @@ public:
 class ThreadId {
 	unsigned tid;
 public:
-	ThreadId(unsigned _tid) : tid(_tid) {};
-
+	ThreadId(unsigned _tid) : tid(_tid) {}
+	bool operator==(const ThreadId &b) { return b.tid == tid; }
+	ThreadId operator++() {
+		tid++;
+		return *this;
+	}
+	const unsigned _tid() { return tid; }
 };
 
 class LogRecord {
@@ -202,7 +208,6 @@ public:
 
 
 class RegisterSet {
-	friend class Thread;
 public:
 	VexGuestAMD64State regs;
 	RegisterSet(const VexGuestAMD64State &r) : regs(r) {}
@@ -211,10 +216,22 @@ public:
 
 class Thread {
 public:
-	Thread(const LogRecordInitialRegisters &initRegs);
+	ThreadId tid;
+	unsigned pid;
 	RegisterSet regs;
 	unsigned long clear_child_tid;
 	unsigned long robust_list;
+	unsigned long set_child_tid;
+	Thread(const LogRecordInitialRegisters &initRegs);
+	Thread(unsigned _pid, const Thread &parent) :
+		tid(0),
+		pid(_pid),
+		regs(parent.regs),
+		clear_child_tid(0),
+		robust_list(0),
+		set_child_tid(0)
+	{
+	}
 };
 
 class AddressSpace {
@@ -308,20 +325,37 @@ public:
 };
 
 class MachineState {
-	Thread *thread;
+	std::vector<Thread *>threads;
 	bool exitted;
 	unsigned exit_status;
+	ThreadId nextTid;
 public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
 	MachineState(AddressSpace *as, Thread *rootThread,
 		     const LogRecordInitialSighandlers &handlers) :
-		thread(rootThread),
+		threads(),
+		nextTid(1),
 		addressSpace(as),
 		signalHandlers(handlers)
 	{
+		registerThread(rootThread);
 	}
-	Thread *findThread(ThreadId id) { return thread; }
+	void registerThread(Thread *t) {
+		printf("Register thread %d\n", t->tid._tid());
+		t->tid = nextTid;
+		++nextTid;
+		threads.push_back(t);
+	}
+	Thread *findThread(ThreadId id) {
+		for (std::vector<Thread *>::iterator it = threads.begin();
+		     it != threads.end();
+		     it++) {
+			if ((*it)->tid == id)
+				return *it;
+		}
+		abort();
+	}
 	void exitGroup(unsigned result) {
 		exitted = true;
 		exit_status = result;

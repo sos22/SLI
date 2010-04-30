@@ -1362,7 +1362,10 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 }
 
 Thread::Thread(LogRecordInitialRegisters const&lrir)
-	: regs(lrir.regs),
-	  clear_child_tid(0)
+	: tid(ThreadId(1)),
+	  regs(lrir.regs),
+	  clear_child_tid(0),
+	  robust_list(0),
+	  set_child_tid(0)
 {
 }
