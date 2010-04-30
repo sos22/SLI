@@ -85,7 +85,10 @@ skip:
 	}
 	case RECORD_mem_read:
 	case RECORD_mem_write:
-	case RECORD_new_thread:	{
+	case RECORD_new_thread:
+	case RECORD_thread_blocking:
+	case RECORD_thread_unblocked:
+	{
 		/* Don't need these in the current world order */
 		startPtr = *nextPtr;
 		goto skip;
