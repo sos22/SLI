@@ -130,39 +130,23 @@ do_dirty_call(struct expression_result *temporaries,
 }
 
 static void
-do_ccall_calculate_condition(struct expression_result *temporaries,
-			     AddressSpace *addrSpace,
-			     Thread *thr,
-			     struct expression_result *dest,
-			     IRCallee *cee,
-			     IRType retty,
-			     IRExpr **args)
+calculate_condition_flags_XXX(unsigned long op,
+			      unsigned long dep1,
+			      unsigned long dep2,
+			      unsigned long ndep,
+			      unsigned &cf,
+			      unsigned &zf,
+			      unsigned &sf,
+			      unsigned &of)
 {
-	struct expression_result condcode = {};
-	struct expression_result op = {};
-	struct expression_result dep1 = {};
-	struct expression_result dep2 = {};
-	struct expression_result ndep = {};
-	int inv;
-	unsigned cf, zf, sf, of;
+	cf = zf = sf = of = 0;
 
-	tl_assert(retty == Ity_I64);
-	tl_assert(cee->regparms == 0);
-
-	eval_expression(temporaries, addrSpace, thr, &condcode, args[0]);
-	eval_expression(temporaries, addrSpace, thr, &op, args[1]);
-
-	eval_expression(temporaries, addrSpace, thr, &dep1, args[2]);
-	eval_expression(temporaries, addrSpace, thr, &dep2, args[3]);
-	eval_expression(temporaries, addrSpace, thr, &ndep, args[4]);
-	inv = condcode.lo.v & 1;
-
-	switch (op.lo.v) {
+	switch (op) {
 	case AMD64G_CC_OP_COPY:
-		cf = dep1.lo.v;
-		zf = dep1.lo.v >> 6;
-		sf = dep1.lo.v >> 7;
-		of = dep1.lo.v >> 11;
+		cf = dep1;
+		zf = dep1 >> 6;
+		sf = dep1 >> 7;
+		of = dep1 >> 11;
 		break;
 
 #define DO_ACT(name, type_tag, type, bits)				\
@@ -177,52 +161,52 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 #define ACTIONS_ADD(type, bits)                                         \
 		do {							\
 			type res;					\
-			res = dep1.lo.v + dep2.lo.v;			\
-			cf = res < (type)dep1.lo.v;		\
+			res = dep1 + dep2;				\
+			cf = res < (type)dep1;				\
 			zf = (res == 0);				\
 			sf = (res >> bits);				\
-			of = (~(dep1.lo.v ^ dep2.lo.v) &		\
-			      (dep1.lo.v ^ res)) >> bits;		\
+			of = (~(dep1 ^ dep2) &				\
+			      (dep1 ^ res)) >> bits;			\
 		} while (0)
 #define ACTIONS_SUB(type, bits)						\
 		do {							\
 			type res;					\
-			res = dep1.lo.v - dep2.lo.v;			\
-			cf = (type)dep1.lo.v < (type)dep2.lo.v;		\
+			res = dep1 - dep2;				\
+			cf = (type)dep1 < (type)dep2;			\
 			zf = (res == 0);				\
 			sf = res >> bits;				\
-			of = ( (dep1.lo.v ^ dep2.lo.v) &		\
-			       (dep1.lo.v ^ res) ) >> bits;		\
+			of = ( (dep1 ^ dep2) &				\
+			       (dep1 ^ res) ) >> bits;			\
 		} while (0)
 #define ACTIONS_LOGIC(type, bits)		                        \
 		do {							\
 			cf = 0;						\
-			zf = (type)dep1.lo.v == 0;			\
-			sf = (type)dep1.lo.v >> bits;			\
+			zf = (type)dep1 == 0;				\
+			sf = (type)dep1 >> bits;			\
 			of = 0;						\
 		} while (0)
 #define ACTIONS_INC(type, bits)			                        \
 		do {				                        \
-			type res = dep1.lo.v;				\
-			cf = ndep.lo.v & 1;				\
+			type res = dep1;				\
+			cf = ndep & 1;					\
 			zf = (res == 0);				\
 			sf = res >> bits;				\
 			of = res == (1ull << bits);			\
 		} while (0)
 #define ACTIONS_DEC(type, bits)			                        \
 		do {				                        \
-			type res = dep1.lo.v;				\
-			cf = ndep.lo.v & 1;				\
+			type res = dep1;				\
+			cf = ndep & 1;					\
 			zf = (res == 0);				\
 			sf = res >> bits;				\
 			of = (type)(res + 1) == (1ull << bits);		\
 		} while (0)
 #define ACTIONS_SHR(type, bits)			                        \
 		do {				                        \
-			cf = dep2.lo.v & 1;				\
-			zf = (dep1.lo.v == 0);				\
-			sf = dep1.lo.v >> bits;				\
-			of = (dep1.lo.v ^ dep2.lo.v) >> bits;		\
+			cf = dep2 & 1;					\
+			zf = (dep1 == 0);				\
+			sf = dep1 >> bits;				\
+			of = (dep1 ^ dep2) >> bits;			\
 		} while (0)
 	ACTION(ADD);
 	ACTION(SUB);
@@ -239,7 +223,7 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 #undef ACTIONS_DEC
 #undef ACTIONS_SHR
 	default:
-		printf("Strange operation code %ld\n", op.lo.v);
+		printf("Strange operation code %ld\n", op);
 		abort();
 	}
 
@@ -247,7 +231,40 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 	sf &= 1;
 	zf &= 1;
 	cf &= 1;
+}
 
+static void
+do_ccall_calculate_condition(struct expression_result *temporaries,
+			     AddressSpace *addrSpace,
+			     Thread *thr,
+			     struct expression_result *dest,
+			     IRType retty,
+			     IRExpr **args)
+{
+	struct expression_result condcode = {};
+	struct expression_result op = {};
+	struct expression_result dep1 = {};
+	struct expression_result dep2 = {};
+	struct expression_result ndep = {};
+	int inv;
+	unsigned cf, zf, sf, of;
+
+	eval_expression(temporaries, addrSpace, thr, &condcode, args[0]);
+	eval_expression(temporaries, addrSpace, thr, &op, args[1]);
+	eval_expression(temporaries, addrSpace, thr, &dep1, args[2]);
+	eval_expression(temporaries, addrSpace, thr, &dep2, args[3]);
+	eval_expression(temporaries, addrSpace, thr, &ndep, args[4]);
+
+	calculate_condition_flags_XXX(op.lo.v,
+				      dep1.lo.v,
+				      dep2.lo.v,
+				      ndep.lo.v,
+				      cf,
+				      zf,
+				      sf,
+				      of);
+
+	inv = condcode.lo.v & 1;
 	switch (condcode.lo.v & ~1) {
 	case AMD64CondZ:
 		dest->lo.v = zf;
@@ -282,7 +299,6 @@ do_ccall_calculate_rflags_c(struct expression_result *temporaries,
 			    AddressSpace *addrSpace,
 			    Thread *thr,
 			    struct expression_result *dest,
-			    IRCallee *cee,
 			    IRType retty,
 			    IRExpr **args)
 {
@@ -290,65 +306,23 @@ do_ccall_calculate_rflags_c(struct expression_result *temporaries,
 	struct expression_result dep1 = {};
 	struct expression_result dep2 = {};
 	struct expression_result ndep = {};
-
-	tl_assert(retty == Ity_I64);
-	tl_assert(cee->regparms == 0);
+	unsigned cf, zf, sf, of;
 
 	eval_expression(temporaries, addrSpace, thr, &op, args[0]);
-
 	eval_expression(temporaries, addrSpace, thr, &dep1, args[1]);
 	eval_expression(temporaries, addrSpace, thr, &dep2, args[2]);
 	eval_expression(temporaries, addrSpace, thr, &ndep, args[3]);
 
-	switch (op.lo.v) {
-	case AMD64G_CC_OP_INCB:
-	case AMD64G_CC_OP_INCW:
-	case AMD64G_CC_OP_INCL:
-	case AMD64G_CC_OP_INCQ:
-	case AMD64G_CC_OP_DECB:
-	case AMD64G_CC_OP_DECW:
-	case AMD64G_CC_OP_DECL:
-	case AMD64G_CC_OP_DECQ:
-		dest->lo.v = ndep.lo.v & 1;
-		break;
+	calculate_condition_flags_XXX(op.lo.v,
+				      dep1.lo.v,
+				      dep2.lo.v,
+				      ndep.lo.v,
+				      cf,
+				      zf,
+				      sf,
+				      of);
 
-	case AMD64G_CC_OP_SUBB:
-		dest->lo.v = (unsigned char)dep1.lo.v < (unsigned char)dep2.lo.v;
-		break;
-
-	case AMD64G_CC_OP_SUBW:
-		dest->lo.v = (unsigned short)dep1.lo.v < (unsigned short)dep2.lo.v;
-		break;
-
-	case AMD64G_CC_OP_SUBL:
-		dest->lo.v = (unsigned)dep1.lo.v < (unsigned)dep2.lo.v;
-		break;
-
-	case AMD64G_CC_OP_SUBQ:
-		dest->lo.v = dep1.lo.v  < dep2.lo.v;
-		break;
-
-	case AMD64G_CC_OP_LOGICB:
-	case AMD64G_CC_OP_LOGICW:
-	case AMD64G_CC_OP_LOGICL:
-	case AMD64G_CC_OP_LOGICQ:
-		/* XXX Why doesn't the Valgrind optimiser remove
-		 * these? */
-		dest->lo.v = 0;
-		break;
-
-	case AMD64G_CC_OP_SHRB:
-	case AMD64G_CC_OP_SHRW:
-	case AMD64G_CC_OP_SHRL:
-	case AMD64G_CC_OP_SHRQ:
-		dest->lo.v = dep2.lo.v & 1;
-		break;
-
-	default:
-		printf("Can't calculate C flags for op %ld\n",
-		       op.lo.v);
-		abort();
-	}
+	dest->lo.v = cf;
 }
 
 static void
@@ -385,9 +359,9 @@ do_ccall(struct expression_result *temporaries,
 	 IRExpr **args)
 {
 	if (!strcmp(cee->name, "amd64g_calculate_condition")) {
-		do_ccall_calculate_condition(temporaries, addrSpace, thr, dest, cee, retty, args);
+		do_ccall_calculate_condition(temporaries, addrSpace, thr, dest, retty, args);
 	} else if (!strcmp(cee->name, "amd64g_calculate_rflags_c")) {
-		do_ccall_calculate_rflags_c(temporaries, addrSpace, thr, dest, cee, retty, args);
+		do_ccall_calculate_rflags_c(temporaries, addrSpace, thr, dest, retty, args);
 	} else {
 		printf("Unknown clean call %s\n", cee->name);
 		do_ccall_generic(temporaries, addrSpace, thr, dest, cee, retty, args);
