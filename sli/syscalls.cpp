@@ -126,6 +126,8 @@ replay_syscall(const LogReader *lr,
 		break;
 	case __NR_getrlimit: /* 97 */
 		break;
+	case __NR_statfs: /* 137 */
+		break;
 	case __NR_arch_prctl: /* 158 */
 		assert(args[0] == ARCH_SET_FS);
 		thr->regs.regs.guest_FS_ZERO = args[1];
