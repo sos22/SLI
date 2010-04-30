@@ -971,6 +971,20 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = ~arg.lo.v;
 			ORIGIN(expr_not(arg.lo.origin));
 			break;
+			
+		case Iop_Clz64:
+			dest->lo.v = 0;
+			while (!(arg.lo.v & (1ul << (63 - dest->lo.v))) &&
+			       dest->lo.v < 63)
+				dest->lo.v++;
+			break;
+
+		case Iop_Ctz64:
+			dest->lo.v = 0;
+			while (!(arg.lo.v & (1ul << dest->lo.v)) &&
+			       dest->lo.v < 63)
+				dest->lo.v++;
+			break;
 
 		default:
 			ppIRExpr(expr);
