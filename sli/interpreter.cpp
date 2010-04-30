@@ -347,6 +347,10 @@ do_ccall_calculate_rflags_c(struct expression_result *temporaries,
 		dest->lo.v = (unsigned char)dep1.lo.v < (unsigned char)dep2.lo.v;
 		break;
 
+	case AMD64G_CC_OP_SUBW:
+		dest->lo.v = (unsigned short)dep1.lo.v < (unsigned short)dep2.lo.v;
+		break;
+
 	case AMD64G_CC_OP_SUBL:
 		dest->lo.v = (unsigned)dep1.lo.v < (unsigned)dep2.lo.v;
 		break;
