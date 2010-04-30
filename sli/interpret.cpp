@@ -57,6 +57,11 @@ main(int argc, char *argv[])
 		err(1, "second record should have been initial brk");
 	AddressSpace *as = new AddressSpace(lrib->brk);
 
+	lr = lf->read(ptr, &ptr);
+	LogRecordInitialSighandlers *lris = dynamic_cast<LogRecordInitialSighandlers*>(lr);
+	if (!lris)
+		err(1, "third record should have been initial signal handlers");
+	
 	while (1) {
 		delete lr;
 		lr = lf->read(ptr, &nextPtr);
@@ -73,7 +78,7 @@ main(int argc, char *argv[])
 	}
 
 	delete lr;
-	MachineState *ms = new MachineState(as, rootThread);
+	MachineState *ms = new MachineState(as, rootThread, *lris);
 	Interpreter *i = new Interpreter(ms);
 
 	i->replayLogfile(lf, ptr);

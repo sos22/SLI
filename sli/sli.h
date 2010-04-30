@@ -2,6 +2,7 @@
 #define SLI_H__
 
 #include <assert.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -162,6 +163,18 @@ public:
 	}
 };
 
+class LogRecordInitialSighandlers : public LogRecord {
+	friend class SignalHandlers;
+	struct sigaction handlers[64];
+public:
+	LogRecordInitialSighandlers(ThreadId tid,
+				    const struct sigaction *sa)
+		: LogRecord(tid)
+	{
+		memcpy(handlers, sa, sizeof(*sa));
+	}
+};
+
 class LogReader {
 	int fd;
 public:
@@ -286,15 +299,26 @@ public:
 	}
 };
 
+class SignalHandlers {
+public:
+	struct sigaction handlers[64];
+	SignalHandlers(const LogRecordInitialSighandlers &init) {
+		memcpy(handlers, init.handlers, sizeof(init.handlers));
+	}
+};
+
 class MachineState {
 	Thread *thread;
 	bool exitted;
 	unsigned exit_status;
 public:
 	AddressSpace *addressSpace;
-	MachineState(AddressSpace *as, Thread *rootThread) :
+	SignalHandlers signalHandlers;
+	MachineState(AddressSpace *as, Thread *rootThread,
+		     const LogRecordInitialSighandlers &handlers) :
 		thread(rootThread),
-		addressSpace(as)
+		addressSpace(as),
+		signalHandlers(handlers)
 	{
 	}
 	Thread *findThread(ThreadId id) { return thread; }

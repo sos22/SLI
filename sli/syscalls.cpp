@@ -113,8 +113,20 @@ replay_syscall(const LogReader *lr,
 		res = addrSpace->setBrk(args[0]);
 		break;
 	case __NR_rt_sigaction: /* 13 */
-		printf("WARNING: sys_rt_sigaction not correctly handled\n");
+		if (!isErrnoSysres(lrs->res) &&
+		    args[1] != 0) {
+
+			/* Or else the call should have returned an error */
+			assert(args[0] < 64);
+
+			addrSpace->readMemory(args[1],
+					      sizeof(struct sigaction),
+					      &mach->signalHandlers.handlers[args[0]]);
+		}
+		/* A memory record will follow and handle the old
+		   handler if appropriate. */
 		break;
+
 	case __NR_rt_sigprocmask: /* 14 */
 		printf("WARNING: sys_rt_sigprocmask not correctly handled\n");
 		break;

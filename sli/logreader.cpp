@@ -14,6 +14,8 @@ typedef struct {
 	Bool  _isError;
 } SysRes;
 
+typedef struct sigaction sigaction_t;
+
 #include "ppres.h"
 
 LogReader *LogReader::open(const char *path, LogReader::ptr *initial_ptr)
@@ -106,6 +108,12 @@ skip:
 		pread(fd, &ibr, sizeof(ibr), startPtr.offset() + sizeof(rh));
 		return new LogRecordInitialBrk(tid, ibr.initial_brk);
 	}
+	case RECORD_initial_sighandlers: {
+		initial_sighandlers_record isr;
+		pread(fd, &isr, sizeof(isr), startPtr.offset() + sizeof(rh));
+		return new LogRecordInitialSighandlers(tid, isr.handlers);
+	}
+
 	default:
 		abort();
 	}
