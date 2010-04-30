@@ -1,20 +1,17 @@
 #ifndef SLI_H__
 #define SLI_H__
 
-#include <assert.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
-#include <exception>
-#include <string>
+#include <stdlib.h>
 #include <vector>
 
 extern "C" {
 #include "libvex_guest_amd64.h"
 };
+
+#include "exceptions.h"
 
 template <typename underlying> class PointerKeeper {
 	underlying *x;
@@ -378,125 +375,6 @@ public:
 	}
 	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint);
 };
-
-class SliException : public std::exception {
-	char *msg;
-protected:
-	void setMessage(const char *fmt, va_list args)
-	{
-		free(msg);
-		vasprintf(&msg, fmt, args);
-	}
-public:
-	SliException(const SliException &b)
-	{
-		msg = strdup(b.msg);
-	}
-	SliException(const char *fmt, ...)
-	{
-		va_list args;
-		va_start(args, fmt);
-		vasprintf(&msg, fmt, args);
-		va_end(args);
-	}
-	SliException()
-		: msg(strdup(""))
-	{
-	}
-	~SliException() throw()
-	{
-		free(msg);
-	}
-	virtual const char *what() const throw() {
-		return msg;
-	}
-};
-
-class ReplayFailedException : public SliException {
-public:
-	ReplayFailedException(const char *fmt, ...)
-	{
-		va_list args;
-		va_start(args, fmt);
-		setMessage(fmt, args);
-		va_end(args);
-	}
-};
-
-class ReplayFailedBadRip : public ReplayFailedException {
-public:
-	unsigned long observed;
-	unsigned long expected;
-	ReplayFailedBadRip(unsigned long _observed,
-			   unsigned long _expected) :
-		ReplayFailedException(
-			"replay failed due to bad RIP: wanted %lx, got %lx\n",
-			_expected,
-			_observed),
-		observed(_observed),
-		expected(_expected)
-	{
-	}
-};
-
-class ReplayFailedBadRegister : public ReplayFailedException {
-public:
-	const char *reg_name;
-	unsigned long observed;
-	unsigned long expected;
-	ReplayFailedBadRegister(const char *_name,
-				unsigned long _observed,
-				unsigned long _expected) :
-		ReplayFailedException(
-			"replay failed due to bad register %s: wanted %lx, got %lx\n",
-			_name,
-			_expected,
-			_observed),
-		reg_name(_name),
-		observed(_observed),
-		expected(_expected)
-	{
-	}
-};
-
-class InstructionDecodeFailedException : public SliException {
-};
-
-class NotImplementedException : public SliException {
-};
-
-class BadMemoryException : public SliException {
-public:
-	bool isWrite;
-	unsigned long ptr;
-	unsigned size;
-	BadMemoryException(bool _isWrite,
-			   unsigned long _ptr,
-			   unsigned _size) :
-		SliException(
-			"guest dereferenced a bad pointer: address %lx, size %x, isWrite %d\n",
-			_ptr,
-			_size,
-			_isWrite),
-		isWrite(_isWrite),
-		ptr(_ptr),
-		size(_size)
-	{
-	}
-};
-
-class UnknownSyscallException : public SliException {
-public:
-	unsigned nr;
-	UnknownSyscallException(unsigned _nr) :
-		SliException("unknown syscall %d\n", _nr),
-		nr(_nr)
-	{
-	}
-};
-
-
-
 
 void replay_syscall(const LogReader *lr,
 		    LogReader::ptr startOffset,

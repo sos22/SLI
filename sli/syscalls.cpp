@@ -1,5 +1,6 @@
 #include <asm/prctl.h>
 #include <asm/unistd.h>
+#include <sched.h>
 
 #include "sli.h"
 
