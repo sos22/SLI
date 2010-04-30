@@ -248,10 +248,12 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 			break;
 
 		case AMD64G_CC_OP_SUBB:
+		case AMD64G_CC_OP_SUBW:
 		case AMD64G_CC_OP_SUBL:
 		case AMD64G_CC_OP_SUBQ:
 			dest->lo.v = dep1.lo.v < dep2.lo.v;
 			break;
+
 		case AMD64G_CC_OP_ADDQ:
 			dest->lo.v = dep1.lo.v + dep2.lo.v < dep1.lo.v;
 			break;
@@ -263,6 +265,7 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 	case AMD64CondBE:
 		switch (op.lo.v) {
 		case AMD64G_CC_OP_SUBB:
+		case AMD64G_CC_OP_SUBW:
 		case AMD64G_CC_OP_SUBL:
 		case AMD64G_CC_OP_SUBQ:
 			dest->lo.v = dep1.lo.v <= dep2.lo.v;
