@@ -118,9 +118,19 @@ replay_syscall(const LogReader *lr,
 	case __NR_rt_sigprocmask: /* 14 */
 		printf("WARNING: sys_rt_sigprocmask not correctly handled\n");
 		break;
+	case __NR_ioctl: /* 16 */
+		/* ioctls generally either do IO or fill out in-memory
+		   structures.  IO we want to discard, and in-memory
+		   things will be handled by memory records, so we can
+		   pretty much ignore these. */		   
+		break;
 	case __NR_access: /* 21 */
 		break;
 	case __NR_uname: /* 63 */
+		break;
+	case __NR_fcntl: /* 72 */
+		break;
+	case __NR_getdents: /* 78 */
 		break;
 	case __NR_getcwd: /* 79 */
 		break;
