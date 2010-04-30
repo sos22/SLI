@@ -99,6 +99,26 @@ class InstructionDecodeFailedException : public SliException {
 };
 
 class NotImplementedException : public SliException {
+public:
+	char *reason;
+	NotImplementedException(const char *fmt, ...)
+	{
+		va_list args;
+		
+		va_start(args, fmt);
+		vasprintf(&reason, fmt, args);
+		va_end(args);
+		setMessage("not implemented: %s", reason);
+	}
+	NotImplementedException() :
+		SliException("not implemented"),
+		reason(NULL)
+	{
+	}
+
+	~NotImplementedException() throw () {
+		free(reason);
+	}
 };
 
 class BadMemoryException : public SliException {
@@ -130,8 +150,6 @@ public:
 	{
 	}
 };
-
-
 
 class AssertFailedException : public SliException {
 public:

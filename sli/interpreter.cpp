@@ -41,14 +41,11 @@ struct expression_result {
 
 #define REG_LAST 128
 
-#define tl_assert(x) assert(x)
-#define ASSUME assert
-
 static unsigned long *
 get_reg(Thread *state, unsigned offset)
 {
-	tl_assert(!(offset % 8));
-	tl_assert(offset < sizeof(state->regs.regs));
+	assert(!(offset % 8));
+	assert(offset < sizeof(state->regs.regs));
 	return &((unsigned long *)&state->regs.regs)[offset/8];
 }
 
@@ -89,10 +86,10 @@ do_dirty_call(struct expression_result *temporaries,
 			return;
 	}
 	for (x = 0; details->args[x]; x++) {
-		tl_assert(x < 6);
+		assert(x < 6);
 		eval_expression(temporaries, addressSpace, thr, &args[x], details->args[x]);
 	}
-	tl_assert(!details->cee->regparms);
+	assert(!details->cee->regparms);
 
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 		temporaries[details->tmp].lo.v =
@@ -221,8 +218,7 @@ calculate_condition_flags_XXX(unsigned long op,
 #undef ACTIONS_DEC
 #undef ACTIONS_SHR
 	default:
-		printf("Strange operation code %ld\n", op);
-		abort();
+		throw NotImplementedException("Strange operation code %ld\n", op);
 	}
 
 	of &= 1;
@@ -284,8 +280,7 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 		break;
 
 	default:
-		printf("Strange cond code %ld (op %ld)\n", condcode.lo.v, op.lo.v);
-		abort();
+		throw NotImplementedException("Strange cond code %ld (op %ld)\n", condcode.lo.v, op.lo.v);
 	}
 
 	if (inv)
@@ -335,9 +330,9 @@ do_ccall_generic(struct expression_result *temporaries,
 	struct expression_result rargs[6];
 	unsigned x;
 
-	tl_assert(cee->regparms == 0);
+	assert(cee->regparms == 0);
 	for (x = 0; args[x]; x++) {
-		tl_assert(x < 6);
+		assert(x < 6);
 		eval_expression(temporaries, addrSpace, thr, &rargs[x], args[x]);
 	}
 	dest->lo.v = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
@@ -461,11 +456,11 @@ eval_expression(struct expression_result *temporaries,
 		switch (expr->Iex.Get.ty) {
 		case Ity_I64:
 		case Ity_F64:
-			tl_assert(!sub_word_offset);
+			assert(!sub_word_offset);
 			dest->lo.v = v1;
 			break;
 		case Ity_V128:
-			tl_assert(!sub_word_offset);
+			assert(!sub_word_offset);
 			dest->lo.v = v1;
 			read_reg(thr,
 				 expr->Iex.Get.offset - sub_word_offset + 8,
@@ -473,11 +468,11 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		case Ity_I32:
 		case Ity_F32:
-			tl_assert(!(sub_word_offset % 4));
+			assert(!(sub_word_offset % 4));
 			dest->lo.v = (v1 >> (sub_word_offset * 8)) & 0xffffffff;
 			break;
 		case Ity_I16:
-			tl_assert(!(sub_word_offset % 2));
+			assert(!(sub_word_offset % 2));
 			dest->lo.v = (v1 >> (sub_word_offset * 8)) & 0xffff;
 			break;
 		case Ity_I8:
@@ -485,7 +480,7 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		default:
 			ppIRExpr(expr);
-			abort();
+			throw NotImplementedException();
 		}
 		break;
 	}
@@ -507,7 +502,8 @@ eval_expression(struct expression_result *temporaries,
 			addrSpace->readMemory(addr.lo.v, 8, &dest->lo.v);
 			addrSpace->readMemory(addr.lo.v + 8, 8, &dest->hi.v);
 		} else {
-			abort();
+			ppIRExpr(expr);
+			throw NotImplementedException();
 		}
 		break;
 	}
@@ -538,7 +534,8 @@ eval_expression(struct expression_result *temporaries,
 			dest->hi.v = dest->lo.v;
 			break;
 		default:
-			ASSUME(0);
+			ppIRExpr(expr);
+			throw NotImplementedException();
 		}
 		break;
 	}
@@ -766,10 +763,8 @@ eval_expression(struct expression_result *temporaries,
 				*(double *)&dest->lo.v = arg2.lo.v;
 				break;
 			default:
-				printf("unknown rounding mode %ld\n",
-				       arg1.lo.v);
-				abort();
-				break;
+				throw NotImplementedException("unknown rounding mode %ld\n",
+							      arg1.lo.v);
 			}
 			break;
 		}
@@ -780,7 +775,8 @@ eval_expression(struct expression_result *temporaries,
 				dest->lo.v = (unsigned)*(double *)&arg2.lo.v;
 				break;
 			default:
-				abort();
+				throw NotImplementedException("unknown rounding mode %ld\n",
+							      arg1.lo.v);
 			}
 			break;
 		}
@@ -801,7 +797,7 @@ eval_expression(struct expression_result *temporaries,
 
 		default:
 			ppIRExpr(expr);
-			abort();
+			throw NotImplementedException();
 		}
 		break;
 	}
@@ -890,7 +886,7 @@ eval_expression(struct expression_result *temporaries,
 
 		default:
 			ppIRExpr(expr);
-			abort();
+			throw NotImplementedException();
 		}
 		break;
 	}
@@ -919,9 +915,8 @@ eval_expression(struct expression_result *temporaries,
 	}
 
 	default:
-		printf("Bad expression tag %x\n", expr->tag);
 		ppIRExpr(expr);
-		abort();
+		throw NotImplementedException("Bad expression tag %x\n", expr->tag);
 	}
 }
 
@@ -932,7 +927,7 @@ redirectGuest(unsigned long rip)
 	if (rip == 0xFFFFFFFFFF600400ul)
 		return 0x38017e0d;
 	else if (rip == 0xFFFFFFFFFF600000)
-		abort();
+		throw NotImplementedException();
 	else
 		return rip;
 }
@@ -1063,7 +1058,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 						       false,
 						       thr);
 			} else {
-				abort();
+				ppIRStmt(stmt);
+				throw NotImplementedException();
 			}
 			break;
 		}
@@ -1088,7 +1084,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				addrSpace->readMemory(addr.lo.v, 8, &seen.lo.v);
 				addrSpace->readMemory(addr.lo.v + 8, 8, &seen.hi.v);
 			} else {
-				abort();
+				ppIRStmt(stmt);
+				throw NotImplementedException();
 			}
 			if (expected.lo.v == seen.lo.v &&
 			    (size <= 8 || expected.hi.v == seen.hi.v)) {
@@ -1130,34 +1127,35 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				break;
 
 			case Ity_I16:
-				tl_assert(!(byte_offset % 2));
+				assert(!(byte_offset % 2));
 				*dest &= ~(0xFFFFul << (byte_offset * 8));
 				*dest |= data.lo.v << (byte_offset * 8);
 				break;
 
 			case Ity_I32:
 			case Ity_F32:
-				tl_assert(!(byte_offset % 4));
+				assert(!(byte_offset % 4));
 				*dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
 				*dest |= data.lo.v << (byte_offset * 8);
 				break;
 
 			case Ity_I64:
 			case Ity_F64:
-				tl_assert(byte_offset == 0);
+				assert(byte_offset == 0);
 				*dest = data.lo.v;
 				break;
 
 			case Ity_I128:
 			case Ity_V128:
-				tl_assert(byte_offset == 0);
+				assert(byte_offset == 0);
 				*dest = data.lo.v;
 				*get_reg(thr,
 					 stmt->Ist.Put.offset + 8) =
 					data.hi.v;
 				break;
 			default:
-				abort();
+				ppIRStmt(stmt);
+				throw NotImplementedException();
 			}
 			break;
 		}
@@ -1180,7 +1178,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				printf("EMULATION WARNING %x\n",
 				       thr->regs.regs.guest_EMWARN);
 			}
-			tl_assert(stmt->Ist.Exit.dst->tag == Ico_U64);
+			assert(stmt->Ist.Exit.dst->tag == Ico_U64);
 			thr->regs.regs.guest_RIP = stmt->Ist.Exit.dst->Ico.U64;
 			goto finished_block;
 		}
@@ -1188,8 +1186,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 		default:
 			printf("Don't know how to interpret statement ");
 			ppIRStmt(stmt);
-			abort();
-			break;
+			throw NotImplementedException();
 		}
 	}
 
@@ -1224,7 +1221,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 		if (LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr))
 			replayFootstep(*lrf, lf, ptr, &ptr);
 		else
-			abort();
+			throw SliException();
 	}
 }
 
