@@ -652,6 +652,9 @@ eval_expression(struct expression_result *temporaries,
 		case Iop_Add8:
 			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xff;
 			break;
+		case Iop_Add16:
+			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xffff;
+			break;
 		case Iop_Add32:
 			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xffffffff;
 			ORIGIN(expr_and(expr_add(arg1.lo.origin, arg2.lo.origin),
@@ -733,6 +736,10 @@ eval_expression(struct expression_result *temporaries,
 			ORIGIN(expr_mul(arg1.lo.origin, arg2.lo.origin));
 			break;
 
+		case Iop_Mul32:
+			dest->lo.v = (arg1.lo.v * arg2.lo.v) & 0xffffffff;
+			break;
+
 		case Iop_MullU32: {
 			dest->lo.v = arg1.lo.v * arg2.lo.v;
 			break;
@@ -775,6 +782,14 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = (arg1.lo.v / arg2.lo.v) |
 				((arg1.lo.v % arg2.lo.v) << 32);
 			break;
+
+		case Iop_DivModS64to32: {
+			long a1 = arg1.lo.v;
+			long a2 = arg2.lo.v;
+			dest->lo.v = ((a1 / a2) & 0xffffffff) |
+				((a1 % a2) << 32);
+			break;
+		}
 
 		case Iop_DivModU128to64:
 			/* arg1 is a I128, arg2 is an I64, result is
@@ -862,6 +877,17 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		}
 
+		case Iop_F64toI32: {
+			switch (arg1.lo.v) {
+			case 3:
+				dest->lo.v = (unsigned)*(double *)&arg2.lo.v;
+				break;
+			default:
+				abort();
+			}
+			break;
+		}
+
 		case Iop_CmpF64: {
 			double a1 = *(double *)&arg1.lo.v;
 			double a2 = *(double *)&arg2.lo.v;
@@ -907,6 +933,10 @@ eval_expression(struct expression_result *temporaries,
 		case Iop_V128to64:
 			dest->lo.v = arg.lo.v;
 			ORIGIN(arg.lo.origin);
+			break;
+		case Iop_64UtoV128:
+			dest->lo.v = arg.lo.v;
+			dest->hi.v = 0;
 			break;
 		case Iop_64to1:
 			dest->lo.v = arg.lo.v & 1;
@@ -1024,6 +1054,18 @@ eval_expression(struct expression_result *temporaries,
 #undef ORIGIN
 }
 
+static unsigned long
+redirectGuest(unsigned long rip)
+{
+	/* XXX hideous hack of hideousness */
+	if (rip == 0xFFFFFFFFFF600400ul)
+		return 0x38017e0d;
+	else if (rip == 0xFFFFFFFFFF600000)
+		abort();
+	else
+		return rip;
+}
+
 void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				 const LogReader *lr,
 				 LogReader::ptr startOffset,
@@ -1031,6 +1073,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 {
 	Thread *thr = currentState->findThread(lrf.thread());
 	AddressSpace *addrSpace = currentState->addressSpace;
+
+	thr->regs.regs.guest_RIP = redirectGuest(thr->regs.rip());
 
 	if (thr->regs.rip() != lrf.rip)
 		throw ReplayFailedBadRip(thr->regs.rip(), lrf.rip);
@@ -1260,7 +1304,11 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				if (!guard.lo.v)
 					break;
 			}
-			tl_assert(stmt->Ist.Exit.jk == Ijk_Boring);
+			if (stmt->Ist.Exit.jk != Ijk_Boring) {
+				assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
+				printf("EMULATION WARNING %x\n",
+				       thr->regs.regs.guest_EMWARN);
+			}
 			tl_assert(stmt->Ist.Exit.dst->tag == Ico_U64);
 			thr->regs.regs.guest_RIP = stmt->Ist.Exit.dst->Ico.U64;
 			goto finished_block;
