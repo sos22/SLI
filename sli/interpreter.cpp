@@ -543,6 +543,7 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = (v1 >> (sub_word_offset * 8)) & 0xff;
 			break;
 		default:
+			ppIRExpr(expr);
 			abort();
 		}
 		break;
@@ -891,8 +892,11 @@ eval_expression(struct expression_result *temporaries,
 						  expr_const(56)),
 					 expr_const(56)));
 			break;
+		case Iop_16Sto32:
+			dest->lo.v = (unsigned)(signed short)arg.lo.v;
+			break;
 		case Iop_8Sto32:
-			dest->lo.v = (int)(signed char)arg.lo.v;
+			dest->lo.v = (unsigned)(signed char)arg.lo.v;
 			ORIGIN(expr_and(expr_shra(expr_shl(arg.lo.origin,
 							   expr_const(56)),
 						  expr_const(56)),
@@ -928,6 +932,7 @@ eval_expression(struct expression_result *temporaries,
 			break;
 
 		default:
+			ppIRExpr(expr);
 			abort();
 		}
 		break;
