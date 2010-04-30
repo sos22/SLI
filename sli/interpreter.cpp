@@ -31,8 +31,7 @@ static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 
 struct abstract_interpret_value {
 	unsigned long v;
-	void *origin;
-	abstract_interpret_value() : v(0), origin(NULL) {}
+	abstract_interpret_value() : v(0) {}
 };
 
 struct expression_result {
@@ -43,7 +42,6 @@ struct expression_result {
 #define REG_LAST 128
 
 #define tl_assert(x) assert(x)
-#define expr_const(x) NULL
 #define ASSUME assert
 
 static unsigned long *
@@ -449,8 +447,6 @@ eval_expression(struct expression_result *temporaries,
 		struct expression_result *dest,
 		IRExpr *expr)
 {
-#define ORIGIN(x)
-
 	dest->lo.v = 0xdeadbeeff001f001;
 	dest->hi.v = 0xaaaaaaaaaaaaaaaa;
 
@@ -518,8 +514,6 @@ eval_expression(struct expression_result *temporaries,
 
 	case Iex_Const: {
 		IRConst *cnst = expr->Iex.Const.con;
-		dest->lo.origin = NULL;
-		dest->hi.origin = NULL;
 		switch (cnst->tag) {
 		case Ico_U1:
 			dest->lo.v = cnst->Ico.U1;
@@ -542,12 +536,10 @@ eval_expression(struct expression_result *temporaries,
 			dest->lo.v = cnst->Ico.V128;
 			dest->lo.v = dest->lo.v | (dest->lo.v << 16) | (dest->lo.v << 32) | (dest->lo.v << 48);
 			dest->hi.v = dest->lo.v;
-			dest->hi.origin = expr_const(dest->hi.v);
 			break;
 		default:
 			ASSUME(0);
 		}
-		dest->lo.origin = expr_const(dest->lo.v);
 		break;
 	}
 
@@ -559,24 +551,18 @@ eval_expression(struct expression_result *temporaries,
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub64:
 			dest->lo.v = arg1.lo.v - arg2.lo.v;
-			ORIGIN(expr_sub(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Sub32:
 			dest->lo.v = (arg1.lo.v - arg2.lo.v) & 0xffffffff;
-			ORIGIN(expr_and(expr_sub(arg1.lo.origin, arg2.lo.origin),
-					expr_const(0xffffffff)));
 			break;
 		case Iop_Sub8:
 			dest->lo.v = (arg1.lo.v - arg2.lo.v) & 0xff;
-			ORIGIN(expr_and(expr_sub(arg1.lo.origin, arg2.lo.origin),
-					expr_const(0xff)));
 			break;
 		case Iop_Sub16:
 			dest->lo.v = (arg1.lo.v - arg2.lo.v) & 0xffff;
 			break;
 		case Iop_Add64:
 			dest->lo.v = arg1.lo.v + arg2.lo.v;
-			ORIGIN(expr_add(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Add64x2:
 			dest->lo.v = arg1.lo.v + arg2.lo.v;
@@ -590,83 +576,64 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		case Iop_Add32:
 			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xffffffff;
-			ORIGIN(expr_and(expr_add(arg1.lo.origin, arg2.lo.origin),
-					expr_const(0xffffffff)));
 			break;
 		case Iop_And64:
 		case Iop_And32:
 		case Iop_And16:
 		case Iop_And8:
 			dest->lo.v = arg1.lo.v & arg2.lo.v;
-			ORIGIN(expr_and(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Or8:
 		case Iop_Or32:
 		case Iop_Or64:
 			dest->lo.v = arg1.lo.v | arg2.lo.v;
-			ORIGIN(expr_or(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Shl32:
 			dest->lo.v = (arg1.lo.v << arg2.lo.v) & 0xffffffff;
-			ORIGIN(expr_and(expr_shl(arg1.lo.origin, arg2.lo.origin),
-					expr_const(0xffffffff)));
 			break;
 		case Iop_Shl64:
 			dest->lo.v = arg1.lo.v << arg2.lo.v;
-			ORIGIN(expr_shl(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Sar64:
 			dest->lo.v = (long)arg1.lo.v >> arg2.lo.v;
-			ORIGIN(expr_shra(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Shr32:
 		case Iop_Shr64:
 			dest->lo.v = arg1.lo.v >> arg2.lo.v;
-			ORIGIN(expr_shrl(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Xor64:
 		case Iop_Xor32:
 		case Iop_Xor8:
 			dest->lo.v = arg1.lo.v ^ arg2.lo.v;
-			ORIGIN(expr_xor(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_CmpNE8:
 			dest->lo.v = arg1.lo.v != arg2.lo.v;
-			ORIGIN(expr_not(expr_eq(arg1.lo.origin, arg2.lo.origin)));
 			break;
 		case Iop_CmpEQ8:
 		case Iop_CmpEQ16:
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
 			dest->lo.v = arg1.lo.v == arg2.lo.v;
-			ORIGIN(expr_eq(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_CmpNE32:
 		case Iop_CasCmpNE32:
 		case Iop_CmpNE64:
 			dest->lo.v = arg1.lo.v != arg2.lo.v;
-			ORIGIN(expr_not(expr_eq(arg1.lo.origin, arg2.lo.origin)));
 			break;
 		case Iop_CmpLE64U:
 			dest->lo.v = arg1.lo.v <= arg2.lo.v;
-			ORIGIN(expr_be(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_CmpLE64S:
 			dest->lo.v = (long)arg1.lo.v <= (long)arg2.lo.v;
-			ORIGIN(expr_le(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_CmpLT64S:
 			dest->lo.v = (long)arg1.lo.v < (long)arg2.lo.v;
-			ORIGIN(expr_and(expr_le(arg1.lo.origin, arg2.lo.origin),
-					expr_not(expr_eq(arg1.lo.origin, arg2.lo.origin))));
 			break;
 		case Iop_CmpLT64U:
 			dest->lo.v = arg1.lo.v < arg2.lo.v;
-			ORIGIN(expr_b(arg1.lo.origin, arg2.lo.origin));
 			break;
 		case Iop_Mul64:
 			dest->lo.v = arg1.lo.v * arg2.lo.v;
-			ORIGIN(expr_mul(arg1.lo.origin, arg2.lo.origin));
 			break;
 
 		case Iop_Mul32:
@@ -700,9 +667,6 @@ eval_expression(struct expression_result *temporaries,
 		}
 		case Iop_32HLto64:
 			dest->lo.v = (arg1.lo.v << 32) | arg2.lo.v;
-			ORIGIN(expr_or(expr_shl(arg1.lo.origin,
-						expr_const(32)),
-				       arg2.lo.origin));
 			break;
 
 		case Iop_64HLtoV128:
@@ -848,24 +812,19 @@ eval_expression(struct expression_result *temporaries,
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
 			dest->lo.v = arg.lo.v >> 32;
-			ORIGIN(expr_shrl(arg.lo.origin, expr_const(32)));
 			break;
 		case Iop_64to32:
 			dest->lo.v = arg.lo.v & 0xffffffff;
-			ORIGIN(expr_and(arg.lo.origin, expr_const(0xfffffffful)));
 			break;
 		case Iop_64to16:
 			dest->lo.v = arg.lo.v & 0xffff;
-			ORIGIN(expr_and(arg.lo.origin, expr_const(0xffff)));
 			break;
 		case Iop_64to8:
 			dest->lo.v = arg.lo.v & 0xff;
-			ORIGIN(expr_and(arg.lo.origin, expr_const(0xff)));
 			break;
 		case Iop_128to64:
 		case Iop_V128to64:
 			dest->lo.v = arg.lo.v;
-			ORIGIN(arg.lo.origin);
 			break;
 		case Iop_64UtoV128:
 			dest->lo.v = arg.lo.v;
@@ -873,7 +832,6 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		case Iop_64to1:
 			dest->lo.v = arg.lo.v & 1;
-			ORIGIN(expr_and(arg.lo.origin, expr_const(1)));
 			break;
 		case Iop_32Uto64:
 		case Iop_16Uto64:
@@ -886,53 +844,34 @@ eval_expression(struct expression_result *temporaries,
 			break;
 		case Iop_32Sto64:
 			dest->lo.v = (long)(int)arg.lo.v;
-			ORIGIN(expr_shra(expr_shl(arg.lo.origin,
-						  expr_const(32)),
-					 expr_const(32)));
 			break;
 		case Iop_8Sto64:
 			dest->lo.v = (long)(signed char)arg.lo.v;
-			ORIGIN(expr_shra(expr_shl(arg.lo.origin,
-						  expr_const(56)),
-					 expr_const(56)));
 			break;
 		case Iop_16Sto32:
 			dest->lo.v = (unsigned)(signed short)arg.lo.v;
 			break;
 		case Iop_8Sto32:
 			dest->lo.v = (unsigned)(signed char)arg.lo.v;
-			ORIGIN(expr_and(expr_shra(expr_shl(arg.lo.origin,
-							   expr_const(56)),
-						  expr_const(56)),
-					expr_const(0xffffffff)));
 			break;
 		case Iop_16Sto64:
 			dest->lo.v = (long)(short)arg.lo.v;
-			ORIGIN(expr_shra(expr_shl(arg.lo.origin,
-						  expr_const(48)),
-					 expr_const(48)));
 			break;
 		case Iop_128HIto64:
 		case Iop_V128HIto64:
 			dest->lo.v = arg.hi.v;
-			ORIGIN(arg.hi.origin);
 			break;
 
 		case Iop_Not1:
 			dest->lo.v = !arg.lo.v;
-			ORIGIN(expr_and(expr_not(arg.lo.origin),
-					expr_const(1)));
 			break;
 
 		case Iop_Not32:
 			dest->lo.v = ~arg.lo.v & 0xffffffff;
-			ORIGIN(expr_and(expr_not(arg.lo.origin),
-					expr_const(0xffffffff)));
 			break;
 
 		case Iop_Not64:
 			dest->lo.v = ~arg.lo.v;
-			ORIGIN(expr_not(arg.lo.origin));
 			break;
 			
 		case Iop_Clz64:
@@ -984,7 +923,6 @@ eval_expression(struct expression_result *temporaries,
 		ppIRExpr(expr);
 		abort();
 	}
-#undef ORIGIN
 }
 
 static unsigned long
@@ -1263,7 +1201,6 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 	{
 		struct expression_result next_addr;
 		eval_expression(temporaries, addrSpace, thr, &next_addr, irsb->next);
-		tl_assert(next_addr.hi.origin == NULL);
 		thr->regs.regs.guest_RIP = next_addr.lo.v;
 	}
 
