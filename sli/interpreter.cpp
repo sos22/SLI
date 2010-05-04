@@ -90,6 +90,18 @@ do_dirty_call(struct expression_result *temporaries,
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 		temporaries[details->tmp].lo.v =
 			do_dirtyhelper_rdtsc(logfile, logfilePtr, logfilePtrOut);
+	} else if (!strcmp(details->cee->name, "helper_load_8")) {
+		addressSpace->readMemory(args[0].lo.v, 1,
+					 &temporaries[details->tmp].lo.v);
+	} else if (!strcmp(details->cee->name, "helper_load_16")) {
+		addressSpace->readMemory(args[0].lo.v, 2,
+					 &temporaries[details->tmp].lo.v);
+	} else if (!strcmp(details->cee->name, "helper_load_32")) {
+		addressSpace->readMemory(args[0].lo.v, 4,
+					 &temporaries[details->tmp].lo.v);
+	} else if (!strcmp(details->cee->name, "helper_load_64")) {
+		addressSpace->readMemory(args[0].lo.v, 8,
+					 &temporaries[details->tmp].lo.v);
 	} else {
 		printf("Unknown dirty call %s\n", details->cee->name);
 		if (details->needsBBP) {
@@ -928,6 +940,13 @@ redirectGuest(unsigned long rip)
 		return rip;
 }
 
+IRSB *instrument_func(void *closure,
+		      IRSB *sb_in,
+		      VexGuestLayout *layout,
+		      VexGuestExtents *vge,
+		      IRType gWordTy,
+		      IRType hWordTy);
+
 void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 				 const LogReader *lr,
 				 LogReader::ptr startOffset,
@@ -1003,6 +1022,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 		throw InstructionDecodeFailedException();
 
 	VexGcRoot irsb_gc_root((void **)&irsb);
+
+	irsb = instrument_func(NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
 
 	struct expression_result *temporaries = new expression_result[irsb->tyenv->types_used];
 	memset(temporaries,
