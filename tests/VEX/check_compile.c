@@ -13,7 +13,5 @@ main()
 
 	LibVEX_Init(NULL, NULL, 0, 0, NULL);
 
-	LibVEX_Translate(NULL);
-
 	return 0;
 }
