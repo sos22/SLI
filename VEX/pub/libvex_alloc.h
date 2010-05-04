@@ -9,7 +9,7 @@ public:
 
 class Visitable {
 public:
-   virtual void visit(HeapVisitor &) const = 0;
+   void visit(HeapVisitor &) const {};
 };
 
 /* Allocate in Vex's temporary allocation area.  Be careful with this.
