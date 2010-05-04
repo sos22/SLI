@@ -55,7 +55,7 @@
    under the control of the global "vex_control" struct. */
 extern 
 IRSB* do_iropt_BB ( IRSB* bb,
-                    IRExpr* (*specHelper) (HChar*, IRExpr**),
+                    IRExpr* (*specHelper) (const char*, IRExpr**),
                     Bool (*preciseMemExnsFn)(Int,Int),
                     Addr64 guest_addr );
 

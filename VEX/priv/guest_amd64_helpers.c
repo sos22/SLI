@@ -877,7 +877,7 @@ static Bool isU64 ( IRExpr* e, ULong n )
                   && e->Iex.Const.con->Ico.U64 == n );
 }
 
-IRExpr* guest_amd64_spechelper ( HChar* function_name,
+IRExpr* guest_amd64_spechelper ( const char* function_name,
                                  IRExpr** args )
 {
 #  define unop(_op,_a1) IRExpr_Unop((_op),(_a1))

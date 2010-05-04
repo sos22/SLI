@@ -15,7 +15,7 @@ failure_exit(void)
 	abort();
 }
 
-static void log_bytes(HChar*buf, Int nbytes)
+static void log_bytes(const char *buf, Int nbytes)
 {
 	fwrite(buf, nbytes, 1, stdout);
 }

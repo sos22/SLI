@@ -339,14 +339,14 @@ extern Bool eqIRConst ( IRConst*, IRConst* );
 typedef
    struct {
       Int    regparms;
-      HChar* name;
+      const char* name;
       void*  addr;
       UInt   mcx_mask;
    }
    IRCallee;
 
 /* Create an IRCallee. */
-extern IRCallee* mkIRCallee ( Int regparms, HChar* name, void* addr );
+extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr );
 
 /* Deep-copy an IRCallee. */
 extern IRCallee* deepCopyIRCallee ( IRCallee* );
@@ -1181,7 +1181,7 @@ extern IRExpr* mkIRExpr_HWord ( HWord );
 /* Convenience function for constructing clean helper calls. */
 extern 
 IRExpr* mkIRExprCCall ( IRType retty,
-                        Int regparms, HChar* name, void* addr, 
+                        Int regparms, const char* name, void* addr, 
                         IRExpr** args );
 
 
@@ -1352,14 +1352,14 @@ extern IRDirty* deepCopyIRDirty ( IRDirty* );
    designation) -- you can change this marking later if need be.  A
    suitable IRCallee is constructed from the supplied bits. */
 extern 
-IRDirty* unsafeIRDirty_0_N ( Int regparms, HChar* name, void* addr, 
+IRDirty* unsafeIRDirty_0_N ( Int regparms, const char* name, void* addr, 
                              IRExpr** args );
 
 /* Similarly, make a zero-annotation dirty call which returns a value,
    and assign that to the given temp. */
 extern 
 IRDirty* unsafeIRDirty_1_N ( IRTemp dst, 
-                             Int regparms, HChar* name, void* addr, 
+                             Int regparms, const char* name, void* addr, 
                              IRExpr** args );
 
 
@@ -1763,7 +1763,7 @@ extern IRType typeOfIRExpr  ( IRTypeEnv*, IRExpr* );
 
 /* Sanity check a BB of IR */
 extern void sanityCheckIRSB ( IRSB*  bb, 
-                              HChar* caller,
+                              const char* caller,
                               Bool   require_flatness, 
                               IRType guest_word_size );
 extern Bool isFlatIRStmt ( IRStmt* );

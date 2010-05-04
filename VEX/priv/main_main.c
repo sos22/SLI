@@ -64,7 +64,7 @@
 /* --------- fwds ... --------- */
 
 static Bool   are_valid_hwcaps ( VexArch arch, UInt hwcaps );
-static HChar* show_hwcaps ( VexArch arch, UInt hwcaps );
+static const char* show_hwcaps ( VexArch arch, UInt hwcaps );
 
 
 /* --------- Initialise the library. --------- */
@@ -89,7 +89,7 @@ void LibVEX_Init (
    __attribute__ ((noreturn))
    void (*failure_exit) ( void ),
    /* logging output function */
-   void (*log_bytes) ( HChar*, Int nbytes ),
+   void (*log_bytes) ( const char*, Int nbytes ),
    /* debug paranoia level */
    Int debuglevel,
    /* Are we supporting valgrind checking? */
@@ -178,7 +178,7 @@ VexTranslateResult LibVEX_Translate ( VexTranslateArgs* vta )
    HInstrArray* (*iselSB)       ( IRSB*, VexArch, VexArchInfo*, 
                                                   VexAbiInfo* );
    Int          (*emit)         ( UChar*, Int, HInstr*, Bool, void* );
-   IRExpr*      (*specHelper)   ( HChar*, IRExpr** );
+   IRExpr*      (*specHelper)   ( const char*, IRExpr** );
    Bool         (*preciseMemExnsFn) ( Int, Int );
 
    DisOneInstrFn disInstrFn;
@@ -518,7 +518,7 @@ VexTranslateResult LibVEX_Translate ( VexTranslateArgs* vta )
 
 /* --------- Emulation warnings. --------- */
 
-HChar* LibVEX_EmWarn_string ( VexEmWarn ew )
+const char* LibVEX_EmWarn_string ( VexEmWarn ew )
 {
    switch (ew) {
      case EmWarn_NONE: 
@@ -548,7 +548,7 @@ HChar* LibVEX_EmWarn_string ( VexEmWarn ew )
 
 /* ------------------ Arch/HwCaps stuff. ------------------ */
 
-const HChar* LibVEX_ppVexArch ( VexArch arch )
+const const char* LibVEX_ppVexArch ( VexArch arch )
 {
    switch (arch) {
       case VexArch_INVALID: return "INVALID";
@@ -561,9 +561,9 @@ const HChar* LibVEX_ppVexArch ( VexArch arch )
    }
 }
 
-const HChar* LibVEX_ppVexHwCaps ( VexArch arch, UInt hwcaps )
+const const char* LibVEX_ppVexHwCaps ( VexArch arch, UInt hwcaps )
 {
-   HChar* str = show_hwcaps(arch,hwcaps);
+   const char* str = show_hwcaps(arch,hwcaps);
    return str ? str : "INVALID";
 }
 
@@ -593,7 +593,7 @@ void LibVEX_default_VexAbiInfo ( /*OUT*/VexAbiInfo* vbi )
    be NULL for invalid combinations of flags, so these functions also
    serve as a way to validate hwcaps values. */
 
-static HChar* show_hwcaps_x86 ( UInt hwcaps ) 
+static const char* show_hwcaps_x86 ( UInt hwcaps ) 
 {
    /* Monotonic, SSE3 > SSE2 > SSE1 > baseline. */
    if (hwcaps == 0)
@@ -609,7 +609,7 @@ static HChar* show_hwcaps_x86 ( UInt hwcaps )
    return NULL;
 }
 
-static HChar* show_hwcaps_amd64 ( UInt hwcaps )
+static const char* show_hwcaps_amd64 ( UInt hwcaps )
 {
    /* SSE3 and CX16 are orthogonal and > baseline, although we really
       don't expect to come across anything which can do SSE3 but can't
@@ -624,7 +624,7 @@ static HChar* show_hwcaps_amd64 ( UInt hwcaps )
    return NULL;
 }
 
-static HChar* show_hwcaps_ppc32 ( UInt hwcaps )
+static const char* show_hwcaps_ppc32 ( UInt hwcaps )
 {
    /* Monotonic with complications.  Basically V > F > baseline,
       but once you have F then you can have FX or GX too. */
@@ -645,7 +645,7 @@ static HChar* show_hwcaps_ppc32 ( UInt hwcaps )
    return NULL;
 }
 
-static HChar* show_hwcaps_ppc64 ( UInt hwcaps )
+static const char* show_hwcaps_ppc64 ( UInt hwcaps )
 {
    /* Monotonic with complications.  Basically V > baseline(==F),
       but once you have F then you can have FX or GX too. */
@@ -664,14 +664,14 @@ static HChar* show_hwcaps_ppc64 ( UInt hwcaps )
    return NULL;
 }
 
-static HChar* show_hwcaps_arm ( UInt hwcaps )
+static const char* show_hwcaps_arm ( UInt hwcaps )
 {
    if (hwcaps == 0) return "arm-baseline";
    return NULL;
 }
 
 /* ---- */
-static HChar* show_hwcaps ( VexArch arch, UInt hwcaps )
+static const char* show_hwcaps ( VexArch arch, UInt hwcaps )
 {
    switch (arch) {
       case VexArchX86:   return show_hwcaps_x86(hwcaps);

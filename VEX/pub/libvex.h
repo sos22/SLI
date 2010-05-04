@@ -108,8 +108,8 @@ typedef
 
 /* These return statically allocated strings. */
 
-extern const HChar* LibVEX_ppVexArch    ( VexArch );
-extern const HChar* LibVEX_ppVexHwCaps  ( VexArch, UInt );
+extern const char* LibVEX_ppVexArch    ( VexArch );
+extern const char* LibVEX_ppVexHwCaps  ( VexArch, UInt );
 
 
 /* This struct is a bit of a hack, but is needed to carry misc
@@ -285,9 +285,9 @@ void LibVEX_default_VexControl ( /*OUT*/ VexControl* vcon );
    LibVEX_Translate.  The storage allocated will only stay alive until
    translation of the current basic block is complete.
  */
-extern HChar* private_LibVEX_alloc_first;
-extern HChar* private_LibVEX_alloc_curr;
-extern HChar* private_LibVEX_alloc_last;
+extern char* private_LibVEX_alloc_first;
+extern char* private_LibVEX_alloc_curr;
+extern char* private_LibVEX_alloc_last;
 extern void   private_LibVEX_alloc_OOM(void) __attribute__((noreturn));
 
 static inline void* LibVEX_Alloc ( Int nbytes )
@@ -296,8 +296,8 @@ static inline void* LibVEX_Alloc ( Int nbytes )
   /* Nasty debugging hack, do not use. */
   return malloc(nbytes);
 #else
-   HChar* curr;
-   HChar* next;
+   char*  curr;
+   char*  next;
    Int    ALIGN;
    ALIGN  = sizeof(void*)-1;
    nbytes = (nbytes + ALIGN) & ~ALIGN;
@@ -380,7 +380,7 @@ extern void LibVEX_Init (
    __attribute__ ((noreturn))
    void (*failure_exit) ( void ),
    /* logging output function */
-   void (*log_bytes) ( HChar*, Int nbytes ),
+   void (*log_bytes) ( const char*, Int nbytes ),
    /* debug paranoia level */
    Int debuglevel,
    /* Are we supporting valgrind checking? */

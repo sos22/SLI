@@ -54,9 +54,6 @@
 /* Always 8 bits. */
 typedef  unsigned char   UChar;
 typedef    signed char   Char;
-typedef           char   HChar; /* signfulness depends on host */
-                                /* Only to be used for printf etc 
-                                   format strings */
 
 /* Always 16 bits. */
 typedef  unsigned short  UShort;
@@ -92,10 +89,6 @@ static inline Bool toBool ( Int x ) {
 static inline UChar toUChar ( Int x ) {
    x &= 0xFF;
    return (UChar)x;
-}
-static inline HChar toHChar ( Int x ) {
-   x &= 0xFF;
-   return (HChar)x;
 }
 static inline UShort toUShort ( Int x ) {
    x &= 0xFFFF;

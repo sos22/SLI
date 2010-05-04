@@ -64,19 +64,19 @@
 */
 #define N_TEMPORARY_BYTES 4000000
 
-static HChar  temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
-static HChar* temporary_first = &temporary[0];
-static HChar* temporary_curr  = &temporary[0];
-static HChar* temporary_last  = &temporary[N_TEMPORARY_BYTES-1];
+static char  temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
+static char* temporary_first = &temporary[0];
+static char* temporary_curr  = &temporary[0];
+static char* temporary_last  = &temporary[N_TEMPORARY_BYTES-1];
 
 static ULong  temporary_bytes_allocd_TOT = 0;
 
 #define N_PERMANENT_BYTES 10000
 
-static HChar  permanent[N_PERMANENT_BYTES] __attribute__((aligned(8)));
-static HChar* permanent_first = &permanent[0];
-static HChar* permanent_curr  = &permanent[0];
-static HChar* permanent_last  = &permanent[N_PERMANENT_BYTES-1];
+static char  permanent[N_PERMANENT_BYTES] __attribute__((aligned(8)));
+static char* permanent_first = &permanent[0];
+static char* permanent_curr  = &permanent[0];
+static char* permanent_last  = &permanent[N_PERMANENT_BYTES-1];
 
 static VexAllocMode mode = VexAllocModeTEMP;
 
@@ -162,14 +162,14 @@ VexAllocMode vexGetAllocMode ( void )
 
 /* Visible to library client, unfortunately. */
 
-HChar* private_LibVEX_alloc_first = &temporary[0];
-HChar* private_LibVEX_alloc_curr  = &temporary[0];
-HChar* private_LibVEX_alloc_last  = &temporary[N_TEMPORARY_BYTES-1];
+char* private_LibVEX_alloc_first = &temporary[0];
+char* private_LibVEX_alloc_curr  = &temporary[0];
+char* private_LibVEX_alloc_last  = &temporary[N_TEMPORARY_BYTES-1];
 
 __attribute__((noreturn))
 void private_LibVEX_alloc_OOM(void)
 {
-   HChar* pool = "???";
+   const char* pool = "???";
    if (private_LibVEX_alloc_first == &temporary[0]) pool = "TEMP";
    if (private_LibVEX_alloc_first == &permanent[0]) pool = "PERM";
    vex_printf("VEX temporary storage exhausted.\n");
@@ -212,8 +212,8 @@ void LibVEX_ShowAllocStats ( void )
 /*---------------------------------------------------------*/
 
 __attribute__ ((noreturn))
-void vex_assert_fail ( const HChar* expr,
-                       const HChar* file, Int line, const HChar* fn )
+void vex_assert_fail ( const const char* expr,
+                       const const char* file, Int line, const const char* fn )
 {
    vex_printf( "\nvex: %s:%d (%s): Assertion `%s' failed.\n",
                file, line, fn, expr );
@@ -221,7 +221,7 @@ void vex_assert_fail ( const HChar* expr,
 }
 
 __attribute__ ((noreturn))
-void vpanic ( HChar* str )
+void vpanic ( const char* str )
 {
    vex_printf("\nvex: the `impossible' happened:\n   %s\n", str);
    (*vex_failure_exit)();
@@ -236,14 +236,14 @@ void vpanic ( HChar* str )
    New code for vex_util.c should go above this point. */
 #include <stdarg.h>
 
-static Int vex_strlen ( const HChar* str )
+static Int vex_strlen ( const char* str )
 {
    Int i = 0;
    while (str[i] != 0) i++;
    return i;
 }
 
-Bool vex_streq ( const HChar* s1, const HChar* s2 )
+Bool vex_streq ( const char* s1, const char* s2 )
 {
    while (True) {
       if (*s1 == 0 && *s2 == 0)
@@ -259,11 +259,11 @@ Bool vex_streq ( const HChar* s1, const HChar* s2 )
 /* Convert N0 into ascii in BUF, which is assumed to be big enough (at
    least 67 bytes long).  Observe BASE, SYNED and HEXCAPS. */
 static
-void convert_int ( /*OUT*/HChar* buf, Long n0, 
+void convert_int ( /*OUT*/char* buf, Long n0, 
                    Int base, Bool syned, Bool hexcaps )
 {
    ULong u0;
-   HChar c;
+   char c;
    Bool minus = False;
    Int i, j, bufi = 0;
    buf[bufi] = 0;
@@ -280,7 +280,7 @@ void convert_int ( /*OUT*/HChar* buf, Long n0,
    }
 
    while (1) {
-     buf[bufi++] = toHChar('0' + toUInt(u0 % base));
+     buf[bufi++] = '0' + toUInt(u0 % base);
      u0 /= base;
      if (u0 == 0) break;
    }
@@ -290,7 +290,7 @@ void convert_int ( /*OUT*/HChar* buf, Long n0,
    buf[bufi] = 0;
    for (i = 0; i < bufi; i++)
       if (buf[i] > '9') 
-         buf[i] = toHChar(buf[i] + (hexcaps ? 'A' : 'a') - '9' - 1);
+         buf[i] = buf[i] + (hexcaps ? 'A' : 'a') - '9' - 1;
 
    i = 0;
    j = bufi-1;
@@ -307,8 +307,8 @@ void convert_int ( /*OUT*/HChar* buf, Long n0,
 /* A half-arsed and buggy, but good-enough, implementation of
    printf. */
 static
-UInt vprintf_wrk ( void(*sink)(HChar),
-                   HChar* format,
+UInt vprintf_wrk ( void(*sink)(char),
+                   const char* format,
                    va_list ap )
 {
 #  define PUT(_ch)  \
@@ -320,14 +320,14 @@ UInt vprintf_wrk ( void(*sink)(HChar),
       while (0)
 
 #  define PUTSTR(_str) \
-      do { HChar* _qq = _str; for (; *_qq; _qq++) PUT(*_qq); } \
+      do { const char* _qq = _str; for (; *_qq; _qq++) PUT(*_qq); } \
       while (0)
 
-   HChar* saved_format;
+   const char* saved_format;
    Bool   longlong, ljustify;
-   HChar  padchar;
+   char  padchar;
    Int    fwidth, nout, len1, len2, len3;
-   HChar  intbuf[100];  /* big enough for a 64-bit # in base 2 */
+   char  intbuf[100];  /* big enough for a 64-bit # in base 2 */
 
    nout = 0;
    while (1) {
@@ -372,7 +372,7 @@ UInt vprintf_wrk ( void(*sink)(HChar),
 
       switch (*format) {
          case 's': {
-            HChar* str = va_arg(ap, HChar*);
+            const char* str = va_arg(ap, const char*);
             if (str == NULL)
                str = "(null)";
             len1 = len3 = 0;
@@ -383,8 +383,8 @@ UInt vprintf_wrk ( void(*sink)(HChar),
             break;
          }
          case 'c': {
-            HChar c = (HChar)va_arg(ap, int);
-            HChar str[2];
+            char c = (char)va_arg(ap, int);
+            char str[2];
             str[0] = c;
             str[1] = 0;
             len1 = len3 = 0;
@@ -471,10 +471,10 @@ UInt vprintf_wrk ( void(*sink)(HChar),
    debugging info should be sent via here.  The official route is to
    to use vg_message().  This interface is deprecated.
 */
-static HChar myprintf_buf[1000];
+static char myprintf_buf[1000];
 static Int   n_myprintf_buf;
 
-static void add_to_myprintf_buf ( HChar c )
+static void add_to_myprintf_buf ( char c )
 {
    Bool emit = toBool(c == '\n' || n_myprintf_buf >= 1000-10 /*paranoia*/);
    myprintf_buf[n_myprintf_buf++] = c;
@@ -486,7 +486,7 @@ static void add_to_myprintf_buf ( HChar c )
    }
 }
 
-UInt vex_printf ( HChar* format, ... )
+UInt vex_printf ( const char* format, ... )
 {
    UInt ret;
    va_list vargs;
@@ -508,14 +508,14 @@ UInt vex_printf ( HChar* format, ... )
 
 /* A general replacement for sprintf(). */
 
-static HChar *vg_sprintf_ptr;
+static char *vg_sprintf_ptr;
 
-static void add_to_vg_sprintf_buf ( HChar c )
+static void add_to_vg_sprintf_buf ( char c )
 {
    *vg_sprintf_ptr++ = c;
 }
 
-UInt vex_sprintf ( HChar* buf, HChar *format, ... )
+UInt vex_sprintf ( char* buf, const char *format, ... )
 {
    Int ret;
    va_list vargs;

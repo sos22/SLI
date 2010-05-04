@@ -100,7 +100,7 @@ typedef
 
 
 /* Produces a short string describing the warning. */
-extern HChar* LibVEX_EmWarn_string ( VexEmWarn );
+extern const char* LibVEX_EmWarn_string ( VexEmWarn );
 
 
 #endif /* ndef __LIBVEX_EMWARN_H */

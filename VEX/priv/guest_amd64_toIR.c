@@ -373,7 +373,7 @@ IRExpr* doScalarWidening ( Int szSmall, Int szBig, Bool signd, IRExpr* src )
 
 /* Bomb out if we can't handle something. */
 __attribute__ ((noreturn))
-static void unimplemented ( HChar* str )
+static void unimplemented ( const char* str )
 {
    vex_printf("amd64toIR: unimplemented feature\n");
    vpanic(str);
@@ -865,21 +865,21 @@ static Int integerGuestReg64Offset ( UInt reg )
    the case where sz==1 and no REX byte is present. */
 
 static 
-HChar* nameIReg ( Int sz, UInt reg, Bool irregular )
+const char* nameIReg ( Int sz, UInt reg, Bool irregular )
 {
-   static HChar* ireg64_names[16]
+   static const char* ireg64_names[16]
      = { "%rax", "%rcx", "%rdx", "%rbx", "%rsp", "%rbp", "%rsi", "%rdi",
          "%r8",  "%r9",  "%r10", "%r11", "%r12", "%r13", "%r14", "%r15" };
-   static HChar* ireg32_names[16]
+   static const char* ireg32_names[16]
      = { "%eax", "%ecx", "%edx", "%ebx", "%esp", "%ebp", "%esi", "%edi",
          "%r8d", "%r9d", "%r10d","%r11d","%r12d","%r13d","%r14d","%r15d" };
-   static HChar* ireg16_names[16]
+   static const char* ireg16_names[16]
      = { "%ax",  "%cx",  "%dx",  "%bx",  "%sp",  "%bp",  "%si",  "%di",
          "%r8w", "%r9w", "%r10w","%r11w","%r12w","%r13w","%r14w","%r15w" };
-   static HChar* ireg8_names[16]
+   static const char* ireg8_names[16]
      = { "%al",  "%cl",  "%dl",  "%bl",  "%spl", "%bpl", "%sil", "%dil",
          "%r8b", "%r9b", "%r10b","%r11b","%r12b","%r13b","%r14b","%r15b" };
-   static HChar* ireg8_irregular[8] 
+   static const char* ireg8_irregular[8] 
      = { "%al", "%cl", "%dl", "%bl", "%ah", "%ch", "%dh", "%bh" };
 
    vassert(reg < 16);
@@ -955,7 +955,7 @@ static void putIRegAH ( IRExpr* e )
 /* Read/write various widths of %RAX, as it has various
    special-purpose uses. */
 
-static HChar* nameIRegRAX ( Int sz )
+static const char* nameIRegRAX ( Int sz )
 {
    switch (sz) {
       case 1: return "%al";
@@ -1003,7 +1003,7 @@ static void putIRegRAX ( Int sz, IRExpr* e )
 /* Read/write various widths of %RDX, as it has various
    special-purpose uses. */
 
-static HChar* nameIRegRDX ( Int sz )
+static const char* nameIRegRDX ( Int sz )
 {
    switch (sz) {
       case 1: return "%dl";
@@ -1059,7 +1059,7 @@ static void putIReg64 ( UInt regno, IRExpr* e )
    stmt( IRStmt_Put( integerGuestReg64Offset(regno), e ) );
 }
 
-static HChar* nameIReg64 ( UInt regno )
+static const char* nameIReg64 ( UInt regno )
 {
    return nameIReg( 8, regno, False );
 }
@@ -1082,7 +1082,7 @@ static void putIReg32 ( UInt regno, IRExpr* e )
                      unop(Iop_32Uto64,e) ) );
 }
 
-static HChar* nameIReg32 ( UInt regno )
+static const char* nameIReg32 ( UInt regno )
 {
    return nameIReg( 4, regno, False );
 }
@@ -1098,7 +1098,7 @@ static IRExpr* getIReg16 ( UInt regno )
                       Ity_I16 );
 }
 
-static HChar* nameIReg16 ( UInt regno )
+static const char* nameIReg16 ( UInt regno )
 {
    return nameIReg( 2, regno, False );
 }
@@ -1115,14 +1115,14 @@ static IRExpr* getIReg64rexX ( Prefix pfx, UInt lo3bits )
    return getIReg64( lo3bits | (getRexX(pfx) << 3) );
 }
 
-static HChar* nameIReg64rexX ( Prefix pfx, UInt lo3bits )
+static const char* nameIReg64rexX ( Prefix pfx, UInt lo3bits )
 {
    vassert(lo3bits < 8);
    vassert(IS_VALID_PFX(pfx));
    return nameIReg( 8, lo3bits | (getRexX(pfx) << 3), False );
 }
 
-static HChar* nameIRegRexB ( Int sz, Prefix pfx, UInt lo3bits )
+static const char* nameIRegRexB ( Int sz, Prefix pfx, UInt lo3bits )
 {
    vassert(lo3bits < 8);
    vassert(IS_VALID_PFX(pfx));
@@ -1221,7 +1221,7 @@ void putIRegG ( Int sz, Prefix pfx, UChar mod_reg_rm, IRExpr* e )
 }
 
 static
-HChar* nameIRegG ( Int sz, Prefix pfx, UChar mod_reg_rm )
+const char* nameIRegG ( Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    return nameIReg( sz, gregOfRexRM(pfx,mod_reg_rm),
                         toBool(sz==1 && !haveREX(pfx)) );
@@ -1261,7 +1261,7 @@ void putIRegE ( Int sz, Prefix pfx, UChar mod_reg_rm, IRExpr* e )
 }
 
 static
-HChar* nameIRegE ( Int sz, Prefix pfx, UChar mod_reg_rm )
+const char* nameIRegE ( Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    return nameIReg( sz, eregOfRexRM(pfx,mod_reg_rm),
                         toBool(sz==1 && !haveREX(pfx)) );
@@ -1750,7 +1750,7 @@ void setFlags_MUL ( IRType ty, IRTemp arg1, IRTemp arg2, ULong base_op )
 
 /* Condition codes, using the AMD encoding.  */
 
-static HChar* name_AMD64Condcode ( AMD64Condcode cond )
+static const char* name_AMD64Condcode ( AMD64Condcode cond )
 {
    switch (cond) {
       case AMD64CondO:      return "o";
@@ -1928,47 +1928,47 @@ static void helper_SBB ( Int sz,
 
 /* -------------- Helpers for disassembly printing. -------------- */
 
-static HChar* nameGrp1 ( Int opc_aux )
+static const char* nameGrp1 ( Int opc_aux )
 {
-   static HChar* grp1_names[8] 
+   static const char* grp1_names[8] 
      = { "add", "or", "adc", "sbb", "and", "sub", "xor", "cmp" };
    if (opc_aux < 0 || opc_aux > 7) vpanic("nameGrp1(amd64)");
    return grp1_names[opc_aux];
 }
 
-static HChar* nameGrp2 ( Int opc_aux )
+static const char* nameGrp2 ( Int opc_aux )
 {
-   static HChar* grp2_names[8] 
+   static const char* grp2_names[8] 
      = { "rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar" };
    if (opc_aux < 0 || opc_aux > 7) vpanic("nameGrp2(amd64)");
    return grp2_names[opc_aux];
 }
 
-static HChar* nameGrp4 ( Int opc_aux )
+static const char* nameGrp4 ( Int opc_aux )
 {
-   static HChar* grp4_names[8] 
+   static const char* grp4_names[8] 
      = { "inc", "dec", "???", "???", "???", "???", "???", "???" };
    if (opc_aux < 0 || opc_aux > 1) vpanic("nameGrp4(amd64)");
    return grp4_names[opc_aux];
 }
 
-static HChar* nameGrp5 ( Int opc_aux )
+static const char* nameGrp5 ( Int opc_aux )
 {
-   static HChar* grp5_names[8] 
+   static const char* grp5_names[8] 
      = { "inc", "dec", "call*", "call*", "jmp*", "jmp*", "push", "???" };
    if (opc_aux < 0 || opc_aux > 6) vpanic("nameGrp5(amd64)");
    return grp5_names[opc_aux];
 }
 
-static HChar* nameGrp8 ( Int opc_aux )
+static const char* nameGrp8 ( Int opc_aux )
 {
-   static HChar* grp8_names[8] 
+   static const char* grp8_names[8] 
       = { "???", "???", "???", "???", "bt", "bts", "btr", "btc" };
    if (opc_aux < 4 || opc_aux > 7) vpanic("nameGrp8(amd64)");
    return grp8_names[opc_aux];
 }
 
-//.. static HChar* nameSReg ( UInt sreg )
+//.. static const char* nameSReg ( UInt sreg )
 //.. {
 //..    switch (sreg) {
 //..       case R_ES: return "%es";
@@ -1981,17 +1981,17 @@ static HChar* nameGrp8 ( Int opc_aux )
 //..    }
 //.. }
 
-static HChar* nameMMXReg ( Int mmxreg )
+static const char* nameMMXReg ( Int mmxreg )
 {
-   static HChar* mmx_names[8] 
+   static const char* mmx_names[8] 
      = { "%mm0", "%mm1", "%mm2", "%mm3", "%mm4", "%mm5", "%mm6", "%mm7" };
    if (mmxreg < 0 || mmxreg > 7) vpanic("nameMMXReg(amd64,guest)");
    return mmx_names[mmxreg];
 }
 
-static HChar* nameXMMReg ( Int xmmreg )
+static const char* nameXMMReg ( Int xmmreg )
 {
-   static HChar* xmm_names[16] 
+   static const char* xmm_names[16] 
      = { "%xmm0",  "%xmm1",  "%xmm2",  "%xmm3", 
          "%xmm4",  "%xmm5",  "%xmm6",  "%xmm7", 
          "%xmm8",  "%xmm9",  "%xmm10", "%xmm11", 
@@ -2000,7 +2000,7 @@ static HChar* nameXMMReg ( Int xmmreg )
    return xmm_names[xmmreg];
 }
  
-static HChar* nameMMXGran ( Int gran )
+static const char* nameMMXGran ( Int gran )
 {
    switch (gran) {
       case 0: return "b";
@@ -2011,7 +2011,7 @@ static HChar* nameMMXGran ( Int gran )
    }
 }
 
-static HChar nameISize ( Int size )
+static const char nameISize ( Int size )
 {
    switch (size) {
       case 8: return 'q';
@@ -2068,7 +2068,7 @@ void jcc_01 ( AMD64Condcode cond, Addr64 d64_false, Addr64 d64_true )
 */
 static 
 void make_redzone_AbiHint ( VexAbiInfo* vbi,
-                            IRTemp new_rsp, IRTemp nia, HChar* who )
+                            IRTemp new_rsp, IRTemp nia, const char* who )
 {
    Int szB = vbi->guest_stack_redzone_size;
    vassert(szB >= 0);
@@ -2095,7 +2095,7 @@ void make_redzone_AbiHint ( VexAbiInfo* vbi,
 /*------------------------------------------------------------*/
 
 static 
-HChar* segRegTxt ( Prefix pfx )
+const char* segRegTxt ( Prefix pfx )
 {
    if (pfx & PFX_CS) return "%cs:";
    if (pfx & PFX_DS) return "%ds:";
@@ -2238,7 +2238,7 @@ static IRTemp disAMode_copy2tmp ( IRExpr* addr64 )
 static 
 IRTemp disAMode ( /*OUT*/Int* len,
                   VexAbiInfo* vbi, Prefix pfx, Long delta, 
-                  /*OUT*/HChar* buf, Int extra_bytes )
+                  /*OUT*/char* buf, Int extra_bytes )
 {
    UChar mod_reg_rm = getUChar(delta);
    delta++;
@@ -2622,9 +2622,9 @@ ULong dis_op2_E_G ( VexAbiInfo* vbi,
                     Bool        keep,
                     Int         size, 
                     Long        delta0,
-                    HChar*      t_amd64opc )
+                    const char*      t_amd64opc )
 {
-   HChar   dis_buf[50];
+   char    dis_buf[50];
    Int     len;
    IRType  ty   = szToITy(size);
    IRTemp  dst1 = newTemp(ty);
@@ -2738,9 +2738,9 @@ ULong dis_op2_G_E ( VexAbiInfo* vbi,
                     Bool        keep,
                     Int         size, 
                     Long        delta0,
-                    HChar*      t_amd64opc )
+                    const char*      t_amd64opc )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     len;
    IRType  ty   = szToITy(size);
    IRTemp  dst1 = newTemp(ty);
@@ -2871,7 +2871,7 @@ ULong dis_mov_E_G ( VexAbiInfo* vbi,
 {
    Int len;
    UChar rm = getUChar(delta0);
-   HChar dis_buf[50];
+   char dis_buf[50];
 
    if (epartIsReg(rm)) {
       putIRegG(size, pfx, rm, getIRegE(size, pfx, rm));
@@ -2917,7 +2917,7 @@ ULong dis_mov_G_E ( VexAbiInfo* vbi,
 {
    Int len;
    UChar rm = getUChar(delta0);
-   HChar dis_buf[50];
+   char dis_buf[50];
 
    if (epartIsReg(rm)) {
       putIRegE(size, pfx, rm, getIRegG(size, pfx, rm));
@@ -2946,7 +2946,7 @@ ULong dis_op_imm_A ( Int    size,
                      IROp   op8,
                      Bool   keep,
                      Long   delta,
-                     HChar* t_amd64opc )
+                     const char* t_amd64opc )
 {
    Int    size4 = imin(size,4);
    IRType ty    = szToITy(size);
@@ -3012,7 +3012,7 @@ ULong dis_movx_E_G ( VexAbiInfo* vbi,
    /* E refers to memory */    
    {
       Int    len;
-      HChar  dis_buf[50];
+      char  dis_buf[50];
       IRTemp addr = disAMode ( &len, vbi, pfx, delta, dis_buf, 0 );
       putIRegG(szd, pfx, rm,
                     doScalarWidening(
@@ -3101,7 +3101,7 @@ ULong dis_Grp1 ( VexAbiInfo* vbi,
                  Int am_sz, Int d_sz, Int sz, Long d64 )
 {
    Int     len;
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    IRType  ty   = szToITy(sz);
    IRTemp  dst1 = newTemp(ty);
    IRTemp  src  = newTemp(ty);
@@ -3209,10 +3209,10 @@ ULong dis_Grp2 ( VexAbiInfo* vbi,
                  Prefix pfx,
                  Long delta, UChar modrm,
                  Int am_sz, Int d_sz, Int sz, IRExpr* shift_expr,
-                 HChar* shift_expr_txt, Bool* decode_OK )
+                 const char* shift_expr_txt, Bool* decode_OK )
 {
    /* delta on entry points at the modrm byte. */
-   HChar  dis_buf[50];
+   char  dis_buf[50];
    Int    len;
    Bool   isShift, isRotate, isRotateC;
    IRType ty    = szToITy(sz);
@@ -3492,7 +3492,7 @@ ULong dis_Grp8_Imm ( VexAbiInfo* vbi,
    IRTemp t2     = newTemp(Ity_I64);
    IRTemp t2m    = newTemp(Ity_I64);
    IRTemp t_addr = IRTemp_INVALID;
-   HChar  dis_buf[50];
+   char  dis_buf[50];
    ULong  mask;
 
    /* we're optimists :-) */
@@ -3597,7 +3597,7 @@ ULong dis_Grp8_Imm ( VexAbiInfo* vbi,
    RDX:RAX/EDX:EAX/DX:AX/AX.
 */
 static void codegen_mulL_A_D ( Int sz, Bool syned, 
-                               IRTemp tmp, HChar* tmp_txt )
+                               IRTemp tmp, const char* tmp_txt )
 {
    IRType ty = szToITy(sz);
    IRTemp t1 = newTemp(ty);
@@ -3675,7 +3675,7 @@ ULong dis_Grp3 ( VexAbiInfo* vbi,
 {
    Long    d64;
    UChar   modrm;
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     len;
    IRTemp  addr;
    IRType  ty = szToITy(sz);
@@ -3839,7 +3839,7 @@ ULong dis_Grp4 ( VexAbiInfo* vbi,
 {
    Int   alen;
    UChar modrm;
-   HChar dis_buf[50];
+   char dis_buf[50];
    IRType ty = Ity_I8;
    IRTemp t1 = newTemp(ty);
    IRTemp t2 = newTemp(ty);
@@ -3910,7 +3910,7 @@ ULong dis_Grp5 ( VexAbiInfo* vbi,
 {
    Int     len;
    UChar   modrm;
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    IRTemp  addr = IRTemp_INVALID;
    IRType  ty = szToITy(sz);
    IRTemp  t1 = newTemp(ty);
@@ -4080,7 +4080,7 @@ void dis_string_op_increment ( Int sz, IRTemp t_inc )
 
 static
 void dis_string_op( void (*dis_OP)( Int, IRTemp ), 
-                    Int sz, HChar* name, Prefix pfx )
+                    Int sz, const char* name, Prefix pfx )
 {
    IRTemp t_inc = newTemp(Ity_I64);
    /* Really we ought to inspect the override prefixes, but we don't.
@@ -4186,7 +4186,7 @@ void dis_SCAS ( Int sz, IRTemp t_inc )
 static 
 void dis_REP_op ( AMD64Condcode cond,
                   void (*dis_OP)(Int, IRTemp),
-                  Int sz, Addr64 rip, Addr64 rip_next, HChar* name,
+                  Int sz, Addr64 rip, Addr64 rip_next, const char* name,
                   Prefix pfx )
 {
    IRTemp t_inc = newTemp(Ity_I64);
@@ -4231,7 +4231,7 @@ ULong dis_mul_E_G ( VexAbiInfo* vbi,
                     Long        delta0 )
 {
    Int    alen;
-   HChar  dis_buf[50];
+   char  dis_buf[50];
    UChar  rm = getUChar(delta0);
    IRType ty = szToITy(size);
    IRTemp te = newTemp(ty);
@@ -4276,7 +4276,7 @@ ULong dis_imul_I_E_G ( VexAbiInfo* vbi,
 {
    Long   d64;
    Int    alen;
-   HChar  dis_buf[50];
+   char  dis_buf[50];
    UChar  rm = getUChar(delta);
    IRType ty = szToITy(size);
    IRTemp te = newTemp(ty);
@@ -4527,7 +4527,7 @@ static IRExpr* get_FPU_sw ( void )
    Need to check ST(0)'s tag on read, but not on write.
 */
 static
-void fp_do_op_mem_ST_0 ( IRTemp addr, HChar* op_txt, HChar* dis_buf, 
+void fp_do_op_mem_ST_0 ( IRTemp addr, const char* op_txt, const char* dis_buf, 
                          IROp op, Bool dbl )
 {
    DIP("f%s%c %s\n", op_txt, dbl?'l':'s', dis_buf);
@@ -4553,7 +4553,7 @@ void fp_do_op_mem_ST_0 ( IRTemp addr, HChar* op_txt, HChar* dis_buf,
    Need to check ST(0)'s tag on read, but not on write.
 */
 static
-void fp_do_oprev_mem_ST_0 ( IRTemp addr, HChar* op_txt, HChar* dis_buf, 
+void fp_do_oprev_mem_ST_0 ( IRTemp addr, const char* op_txt, const char* dis_buf, 
                             IROp op, Bool dbl )
 {
    DIP("f%s%c %s\n", op_txt, dbl?'l':'s', dis_buf);
@@ -4579,7 +4579,7 @@ void fp_do_oprev_mem_ST_0 ( IRTemp addr, HChar* op_txt, HChar* dis_buf,
    Check dst and src tags when reading but not on write.
 */
 static
-void fp_do_op_ST_ST ( HChar* op_txt, IROp op, UInt st_src, UInt st_dst,
+void fp_do_op_ST_ST ( const char* op_txt, IROp op, UInt st_src, UInt st_dst,
                       Bool pop_after )
 {
    DIP("f%s%s st(%u), st(%u)\n", op_txt, pop_after?"p":"", st_src, st_dst );
@@ -4598,7 +4598,7 @@ void fp_do_op_ST_ST ( HChar* op_txt, IROp op, UInt st_src, UInt st_dst,
    Check dst and src tags when reading but not on write.
 */
 static
-void fp_do_oprev_ST_ST ( HChar* op_txt, IROp op, UInt st_src, UInt st_dst,
+void fp_do_oprev_ST_ST ( const char* op_txt, IROp op, UInt st_src, UInt st_dst,
                          Bool pop_after )
 {
    DIP("f%s%s st(%u), st(%u)\n", op_txt, pop_after?"p":"", st_src, st_dst );
@@ -4662,7 +4662,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 {
    Int    len;
    UInt   r_src, r_dst;
-   HChar  dis_buf[50];
+   char  dis_buf[50];
    IRTemp t1, t2;
 
    /* On entry, delta points at the second byte of the insn (the modrm
@@ -6284,10 +6284,10 @@ ULong dis_MMXop_regmem_to_reg ( VexAbiInfo* vbi,
                                 Prefix      pfx,
                                 Long        delta,
                                 UChar       opc,
-                                HChar*      name,
+                                const char*      name,
                                 Bool        show_granularity )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    UChar   modrm = getUChar(delta);
    Bool    isReg = epartIsReg(modrm);
    IRExpr* argL  = NULL;
@@ -6299,7 +6299,7 @@ ULong dis_MMXop_regmem_to_reg ( VexAbiInfo* vbi,
    Bool    invG  = False;
    IROp    op    = Iop_INVALID;
    void*   hAddr = NULL;
-   HChar*  hName = NULL;
+   const char*  hName = NULL;
    Bool    eLeft = False;
 
 #  define XXX(_name) do { hAddr = &_name; hName = #_name; } while (0)
@@ -6432,9 +6432,9 @@ ULong dis_MMXop_regmem_to_reg ( VexAbiInfo* vbi,
 
 static ULong dis_MMX_shiftG_byE ( VexAbiInfo* vbi,
                                   Prefix pfx, Long delta, 
-                                  HChar* opname, IROp op )
+                                  const char* opname, IROp op )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen, size;
    IRTemp  addr;
    Bool    shl, shr, sar;
@@ -6507,7 +6507,7 @@ static ULong dis_MMX_shiftG_byE ( VexAbiInfo* vbi,
    straight copy of dis_SSE_shiftE_imm. */
 
 static 
-ULong dis_MMX_shiftE_imm ( Long delta, HChar* opname, IROp op )
+ULong dis_MMX_shiftE_imm ( Long delta, const char* opname, IROp op )
 {
    Bool    shl, shr, sar;
    UChar   rm   = getUChar(delta);
@@ -6567,7 +6567,7 @@ ULong dis_MMX ( Bool* decode_ok,
 {
    Int   len;
    UChar modrm;
-   HChar dis_buf[50];
+   char dis_buf[50];
    UChar opc = getUChar(delta);
    delta++;
 
@@ -7004,13 +7004,13 @@ ULong dis_SHLRD_Gv_Ev ( VexAbiInfo* vbi,
                         Int sz,
                         IRExpr* shift_amt,
                         Bool amt_is_literal,
-                        HChar* shift_amt_txt,
+                        const char* shift_amt_txt,
                         Bool left_shift )
 {
    /* shift_amt :: Ity_I8 is the amount to shift.  shift_amt_txt is used
       for printing it.   And eip on entry points at the modrm byte. */
    Int len;
-   HChar dis_buf[50];
+   char dis_buf[50];
 
    IRType ty     = szToITy(sz);
    IRTemp gsrc   = newTemp(ty);
@@ -7170,7 +7170,7 @@ ULong dis_SHLRD_Gv_Ev ( VexAbiInfo* vbi,
 
 typedef enum { BtOpNone, BtOpSet, BtOpReset, BtOpComp } BtOp;
 
-static HChar* nameBtOp ( BtOp op )
+static const char* nameBtOp ( BtOp op )
 {
    switch (op) {
       case BtOpNone:  return "";
@@ -7186,7 +7186,7 @@ static
 ULong dis_bt_G_E ( VexAbiInfo* vbi,
                    Prefix pfx, Int sz, Long delta, BtOp op )
 {
-   HChar  dis_buf[50];
+   char  dis_buf[50];
    UChar  modrm;
    Int    len;
    IRTemp t_fetched, t_bitno0, t_bitno1, t_bitno2, t_addr0, 
@@ -7332,7 +7332,7 @@ ULong dis_bs_E_G ( VexAbiInfo* vbi,
 {
    Bool   isReg;
    UChar  modrm;
-   HChar  dis_buf[50];
+   char  dis_buf[50];
 
    IRType ty    = szToITy(sz);
    IRTemp src   = newTemp(ty);
@@ -7527,7 +7527,7 @@ ULong dis_cmpxchg_G_E ( /*OUT*/Bool* ok,
                         Int          size, 
                         Long         delta0 )
 {
-   HChar dis_buf[50];
+   char dis_buf[50];
    Int   len;
 
    IRType ty    = szToITy(size);
@@ -7639,7 +7639,7 @@ ULong dis_cmov_E_G ( VexAbiInfo* vbi,
                      Long          delta0 )
 {
    UChar rm  = getUChar(delta0);
-   HChar dis_buf[50];
+   char dis_buf[50];
    Int   len;
 
    IRType ty   = szToITy(sz);
@@ -7690,7 +7690,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
 {
    Int   len;
    UChar rm = getUChar(delta0);
-   HChar dis_buf[50];
+   char dis_buf[50];
 
    IRType ty    = szToITy(sz);
    IRTemp tmpd  = newTemp(ty);
@@ -7756,7 +7756,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
 //..    Int    len;
 //..    IRTemp addr;
 //..    UChar  rm  = getUChar(delta0);
-//..    HChar  dis_buf[50];
+//..    char  dis_buf[50];
 //.. 
 //..    if (epartIsReg(rm)) {
 //..       putSReg( gregOfRM(rm), getIReg(2, eregOfRM(rm)) );
@@ -7781,7 +7781,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
 //..    Int    len;
 //..    IRTemp addr;
 //..    UChar  rm  = getUChar(delta0);
-//..    HChar  dis_buf[50];
+//..    char  dis_buf[50];
 //.. 
 //..    vassert(sz == 2 || sz == 4);
 //.. 
@@ -7858,11 +7858,11 @@ void dis_ret ( VexAbiInfo* vbi, ULong d64 )
 static ULong dis_SSE_E_to_G_all_wrk ( 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
-                HChar* opname, IROp op,
+                const char* opname, IROp op,
                 Bool   invertG
              )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
    UChar   rm = getUChar(delta);
@@ -7895,7 +7895,7 @@ static ULong dis_SSE_E_to_G_all_wrk (
 static
 ULong dis_SSE_E_to_G_all ( VexAbiInfo* vbi,
                            Prefix pfx, Long delta, 
-                           HChar* opname, IROp op )
+                           const char* opname, IROp op )
 {
    return dis_SSE_E_to_G_all_wrk( vbi, pfx, delta, opname, op, False );
 }
@@ -7905,7 +7905,7 @@ ULong dis_SSE_E_to_G_all ( VexAbiInfo* vbi,
 static
 ULong dis_SSE_E_to_G_all_invG ( VexAbiInfo* vbi,
                                 Prefix pfx, Long delta, 
-                                HChar* opname, IROp op )
+                                const char* opname, IROp op )
 {
    return dis_SSE_E_to_G_all_wrk( vbi, pfx, delta, opname, op, True );
 }
@@ -7915,9 +7915,9 @@ ULong dis_SSE_E_to_G_all_invG ( VexAbiInfo* vbi,
 
 static ULong dis_SSE_E_to_G_lo32 ( VexAbiInfo* vbi,
                                    Prefix pfx, Long delta, 
-                                   HChar* opname, IROp op )
+                                   const char* opname, IROp op )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
    UChar   rm = getUChar(delta);
@@ -7951,9 +7951,9 @@ static ULong dis_SSE_E_to_G_lo32 ( VexAbiInfo* vbi,
 
 static ULong dis_SSE_E_to_G_lo64 ( VexAbiInfo* vbi,
                                    Prefix pfx, Long delta, 
-                                   HChar* opname, IROp op )
+                                   const char* opname, IROp op )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
    UChar   rm = getUChar(delta);
@@ -7988,10 +7988,10 @@ static ULong dis_SSE_E_to_G_lo64 ( VexAbiInfo* vbi,
 static ULong dis_SSE_E_to_G_unary_all ( 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
-                HChar* opname, IROp op
+                const char* opname, IROp op
              )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
    UChar   rm = getUChar(delta);
@@ -8019,12 +8019,12 @@ static ULong dis_SSE_E_to_G_unary_all (
 static ULong dis_SSE_E_to_G_unary_lo32 ( 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
-                HChar* opname, IROp op
+                const char* opname, IROp op
              )
 {
    /* First we need to get the old G value and patch the low 32 bits
       of the E operand into it.  Then apply op and write back to G. */
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
    UChar   rm = getUChar(delta);
@@ -8063,12 +8063,12 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
 static ULong dis_SSE_E_to_G_unary_lo64 ( 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
-                HChar* opname, IROp op
+                const char* opname, IROp op
              )
 {
    /* First we need to get the old G value and patch the low 64 bits
       of the E operand into it.  Then apply op and write back to G. */
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
    UChar   rm = getUChar(delta);
@@ -8109,11 +8109,11 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
 static ULong dis_SSEint_E_to_G( 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
-                HChar* opname, IROp op,
+                const char* opname, IROp op,
                 Bool   eLeft
              )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
    UChar   rm = getUChar(delta);
@@ -8196,9 +8196,9 @@ static void findSSECmpOp ( Bool* needNot, IROp* op,
 
 static ULong dis_SSEcmp_E_to_G ( VexAbiInfo* vbi,
                                  Prefix pfx, Long delta, 
-                                 HChar* opname, Bool all_lanes, Int sz )
+                                 const char* opname, Bool all_lanes, Int sz )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen, imm8;
    IRTemp  addr;
    Bool    needNot = False;
@@ -8260,9 +8260,9 @@ static ULong dis_SSEcmp_E_to_G ( VexAbiInfo* vbi,
 
 static ULong dis_SSE_shiftG_byE ( VexAbiInfo* vbi,
                                   Prefix pfx, Long delta, 
-                                  HChar* opname, IROp op )
+                                  const char* opname, IROp op )
 {
-   HChar   dis_buf[50];
+   char   dis_buf[50];
    Int     alen, size;
    IRTemp  addr;
    Bool    shl, shr, sar;
@@ -8336,7 +8336,7 @@ static ULong dis_SSE_shiftG_byE ( VexAbiInfo* vbi,
 
 static 
 ULong dis_SSE_shiftE_imm ( Prefix pfx, 
-                           Long delta, HChar* opname, IROp op )
+                           Long delta, const char* opname, IROp op )
 {
    Bool    shl, shr, sar;
    UChar   rm   = getUChar(delta);
@@ -8813,7 +8813,7 @@ DisResult disInstr_AMD64_WRK (
    Int       alen;
    UChar     opc, modrm, abyte, pre;
    Long      d64;
-   HChar     dis_buf[50];
+   char     dis_buf[50];
    Int       am_sz, d_sz, n, n_prefixes;
    DisResult dres;
    UChar*    insn; /* used in SSE decoders */
@@ -9944,7 +9944,7 @@ DisResult disInstr_AMD64_WRK (
        && haveNo66noF2noF3(pfx)
        && !epartIsReg(insn[2]) 
        && gregLO3ofRM(insn[2]) >= 0 && gregLO3ofRM(insn[2]) <= 3) {
-      HChar* hintstr = "??";
+      const char* hintstr = "??";
 
       modrm = getUChar(delta+2);
       vassert(!epartIsReg(modrm));
@@ -10873,7 +10873,7 @@ DisResult disInstr_AMD64_WRK (
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
        && insn[0] == 0x0F 
        && (insn[1] == 0x28 || insn[1] == 0x10 || insn[1] == 0x6F)) {
-      HChar* wot = insn[1]==0x28 ? "apd" :
+      const char* wot = insn[1]==0x28 ? "apd" :
                    insn[1]==0x10 ? "upd" : "dqa";
       modrm = getUChar(delta+2);
       if (epartIsReg(modrm)) {
@@ -12736,7 +12736,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp leftV  = newTemp(Ity_V128);
       IRTemp rightV = newTemp(Ity_V128);
       Bool   isAdd  = insn[1] == 0x7C;
-      HChar* str    = isAdd ? "add" : "sub";
+      const char* str    = isAdd ? "add" : "sub";
       e3 = e2 = e1 = e0 = g3 = g2 = g1 = g0 = IRTemp_INVALID;
 
       modrm = insn[2];
@@ -12780,7 +12780,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp leftV  = newTemp(Ity_V128);
       IRTemp rightV = newTemp(Ity_V128);
       Bool   isAdd  = insn[1] == 0x7C;
-      HChar* str    = isAdd ? "add" : "sub";
+      const char* str    = isAdd ? "add" : "sub";
 
       modrm = insn[2];
       if (epartIsReg(modrm)) {
@@ -12962,7 +12962,7 @@ DisResult disInstr_AMD64_WRK (
        && insn[0] == 0x0F && insn[1] == 0x38 
        && (insn[2] == 0x03 || insn[2] == 0x07 || insn[2] == 0x01
            || insn[2] == 0x05 || insn[2] == 0x02 || insn[2] == 0x06)) {
-      HChar* str    = "???";
+      const char* str    = "???";
       IROp   opV64  = Iop_INVALID;
       IROp   opCatO = Iop_CatOddLanes16x4;
       IROp   opCatE = Iop_CatEvenLanes16x4;
@@ -13029,7 +13029,7 @@ DisResult disInstr_AMD64_WRK (
        && insn[0] == 0x0F && insn[1] == 0x38 
        && (insn[2] == 0x03 || insn[2] == 0x07 || insn[2] == 0x01
            || insn[2] == 0x05 || insn[2] == 0x02 || insn[2] == 0x06)) {
-      HChar* str    = "???";
+      const char* str    = "???";
       IROp   opV64  = Iop_INVALID;
       IROp   opCatO = Iop_CatOddLanes16x4;
       IROp   opCatE = Iop_CatEvenLanes16x4;
@@ -13181,7 +13181,7 @@ DisResult disInstr_AMD64_WRK (
        && (insn[2] == 0x08 || insn[2] == 0x09 || insn[2] == 0x0A)) {
       IRTemp sV      = newTemp(Ity_I64);
       IRTemp dV      = newTemp(Ity_I64);
-      HChar* str     = "???";
+      const char* str     = "???";
       Int    laneszB = 0;
 
       switch (insn[2]) {
@@ -13228,7 +13228,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp sLo     = newTemp(Ity_I64);
       IRTemp dHi     = newTemp(Ity_I64);
       IRTemp dLo     = newTemp(Ity_I64);
-      HChar* str     = "???";
+      const char* str     = "???";
       Int    laneszB = 0;
 
       switch (insn[2]) {
@@ -13278,7 +13278,7 @@ DisResult disInstr_AMD64_WRK (
        && insn[0] == 0x0F && insn[1] == 0x38 
        && (insn[2] == 0x1C || insn[2] == 0x1D || insn[2] == 0x1E)) {
       IRTemp sV      = newTemp(Ity_I64);
-      HChar* str     = "???";
+      const char* str     = "???";
       Int    laneszB = 0;
 
       switch (insn[2]) {
@@ -13321,7 +13321,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp sV      = newTemp(Ity_V128);
       IRTemp sHi     = newTemp(Ity_I64);
       IRTemp sLo     = newTemp(Ity_I64);
-      HChar* str     = "???";
+      const char* str     = "???";
       Int    laneszB = 0;
 
       switch (insn[2]) {
@@ -14016,7 +14016,7 @@ DisResult disInstr_AMD64_WRK (
       IRExpr* zbit  = NULL;
       IRExpr* count = NULL;
       IRExpr* cond  = NULL;
-      HChar*  xtra  = NULL;
+      const char*  xtra  = NULL;
 
       if (have66orF2orF3(pfx) || haveASO(pfx)) goto decode_failure;
       d64 = guest_RIP_bbstart+delta+1 + getSDisp8(delta);
@@ -15644,7 +15644,7 @@ DisResult disInstr_AMD64_WRK (
             declared to mod rax, wr rbx, rcx, rdx
          */
          IRDirty* d     = NULL;
-         HChar*   fName = NULL;
+         const char*   fName = NULL;
          void*    fAddr = NULL;
          if (haveF2orF3(pfx)) goto decode_failure;
          if (archinfo->hwcaps == (VEX_HWCAPS_AMD64_SSE3

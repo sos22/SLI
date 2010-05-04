@@ -130,7 +130,7 @@ typedef
    }
    AMD64CondCode;
 
-extern HChar* showAMD64CondCode ( AMD64CondCode );
+extern const char* showAMD64CondCode ( AMD64CondCode );
 
 
 /* --------- Memory address expressions (amodes). --------- */
@@ -273,7 +273,7 @@ typedef
    }
    AMD64UnaryOp;
 
-extern HChar* showAMD64UnaryOp ( AMD64UnaryOp );
+extern const char* showAMD64UnaryOp ( AMD64UnaryOp );
 
 
 /* --------- */
@@ -288,7 +288,7 @@ typedef
    }
    AMD64AluOp;
 
-extern HChar* showAMD64AluOp ( AMD64AluOp );
+extern const char* showAMD64AluOp ( AMD64AluOp );
 
 
 /* --------- */
@@ -299,7 +299,7 @@ typedef
    }
    AMD64ShiftOp;
 
-extern HChar* showAMD64ShiftOp ( AMD64ShiftOp );
+extern const char* showAMD64ShiftOp ( AMD64ShiftOp );
 
 
 /* --------- */
@@ -315,7 +315,7 @@ typedef
    }
    A87FpOp;
 
-extern HChar* showA87FpOp ( A87FpOp );
+extern const char* showA87FpOp ( A87FpOp );
 
 
 /* --------- */
@@ -357,7 +357,7 @@ typedef
    }
    AMD64SseOp;
 
-extern HChar* showAMD64SseOp ( AMD64SseOp );
+extern const char* showAMD64SseOp ( AMD64SseOp );
 
 
 /* --------- */
