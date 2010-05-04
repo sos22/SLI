@@ -497,24 +497,8 @@ eval_expression(struct expression_result *temporaries,
 		*dest = temporaries[expr->Iex.RdTmp.tmp];
 		break;
 
-	case Iex_Load: {
-		assert(!expr->Iex.Load.isLL);
-		assert(expr->Iex.Load.end == Iend_LE);
-		struct expression_result addr;
-		eval_expression(temporaries, addrSpace, thr, &addr, expr->Iex.Load.addr);
-		unsigned size = sizeofIRType(expr->Iex.Load.ty);
-		if (size <= 8) {
-			dest->lo.v = 0;
-			addrSpace->readMemory(addr.lo.v, size, &dest->lo.v);
-		} else if (size == 16) {
-			addrSpace->readMemory(addr.lo.v, 8, &dest->lo.v);
-			addrSpace->readMemory(addr.lo.v + 8, 8, &dest->hi.v);
-		} else {
-			ppIRExpr(expr);
-			throw NotImplementedException();
-		}
-		break;
-	}
+	case Iex_Load:
+		throw SliException("transform_expr failed to remove all load expressions\n");
 
 	case Iex_Const: {
 		IRConst *cnst = expr->Iex.Const.con;
