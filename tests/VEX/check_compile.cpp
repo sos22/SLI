@@ -9,7 +9,6 @@ main()
 	LibVEX_default_VexArchInfo(NULL);
 	LibVEX_default_VexAbiInfo(NULL);
 	LibVEX_default_VexControl(NULL);
-	LibVEX_ShowAllocStats();
 
 	LibVEX_Init(NULL, NULL, 0, 0, NULL);
 

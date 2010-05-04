@@ -51,6 +51,8 @@
 #include "main_util.h"
 
 
+#ifndef SLI
+
 /*---------------------------------------------------------*/
 /*--- Storage                                           ---*/
 /*---------------------------------------------------------*/
@@ -205,7 +207,7 @@ void LibVEX_ShowAllocStats ( void )
    vex_printf("vex storage: P total %lld bytes allocated\n",
               (Long)(permanent_curr - permanent_first) );
 }
-
+#endif /* !SLI */
 
 /*---------------------------------------------------------*/
 /*--- Bombing out                                       ---*/

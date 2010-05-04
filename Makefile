@@ -1,8 +1,9 @@
 all: real_all
 
 TARGETS=
-CFLAGS=-Wall -g
-CXXFLAGS=-Wall -g
+CPPFLAGS=-DSLI
+CFLAGS=-Wall -g $(CPPFLAGS)
+CXXFLAGS=-Wall -g $(CPPFLAGS)
 
 include Makefile.mk
 

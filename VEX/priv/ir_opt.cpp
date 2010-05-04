@@ -178,14 +178,17 @@ typedef
    }
    HashHW;
 
+DECLARE_VEX_TYPE(HashHW);
+DEFINE_VEX_TYPE_NO_DESTRUCT(HashHW, { visit(ths->inuse); visit(ths->key); visit(ths->val); });
+
 static HashHW* newHHW ( void )
 {
-   HashHW* h = (HashHW *)LibVEX_Alloc(sizeof(HashHW));
+   HashHW* h = LibVEX_Alloc_HashHW();
    h->size   = 8;
    h->used   = 0;
-   h->inuse  = (Bool *)LibVEX_Alloc(h->size * sizeof(Bool));
-   h->key    = (HWord *)LibVEX_Alloc(h->size * sizeof(HWord));
-   h->val    = (HWord *)LibVEX_Alloc(h->size * sizeof(HWord));
+   h->inuse  = (Bool *)LibVEX_Alloc_Bytes(h->size * sizeof(Bool));
+   h->key    = (HWord *)LibVEX_Alloc_Bytes(h->size * sizeof(HWord));
+   h->val    = (HWord *)LibVEX_Alloc_Bytes(h->size * sizeof(HWord));
    return h;
 }
 
@@ -225,9 +228,9 @@ static void addToHHW ( HashHW* h, HWord key, HWord val )
    /* Ensure a space is available. */
    if (h->used == h->size) {
       /* Copy into arrays twice the size. */
-      Bool*  inuse2 = (Bool *)LibVEX_Alloc(2 * h->size * sizeof(Bool));
-      HWord* key2   = (HWord *)LibVEX_Alloc(2 * h->size * sizeof(HWord));
-      HWord* val2   = (HWord *)LibVEX_Alloc(2 * h->size * sizeof(HWord));
+      Bool*  inuse2 = (Bool *)LibVEX_Alloc_Bytes(2 * h->size * sizeof(Bool));
+      HWord* key2   = (HWord *)LibVEX_Alloc_Bytes(2 * h->size * sizeof(HWord));
+      HWord* val2   = (HWord *)LibVEX_Alloc_Bytes(2 * h->size * sizeof(HWord));
       for (i = j = 0; i < h->size; i++) {
          if (!h->inuse[i]) continue;
          inuse2[j] = True;
@@ -1857,7 +1860,7 @@ IRSB* cprop_BB ( IRSB* in )
    IRSB*    out;
    IRStmt*  st2;
    Int      n_tmps = in->tyenv->types_used;
-   IRExpr** env = (IRExpr **)LibVEX_Alloc(n_tmps * sizeof(IRExpr*));
+   IRExpr** env = LibVEX_Alloc_Array_IRExpr(n_tmps);
 
    out = emptyIRSB();
    out->tyenv = deepCopyIRTypeEnv( in->tyenv );
@@ -2080,7 +2083,7 @@ static Bool isOneU1 ( IRExpr* e )
 {
    Int     i, i_unconditional_exit;
    Int     n_tmps = bb->tyenv->types_used;
-   Bool*   set = (Bool *)LibVEX_Alloc(n_tmps * sizeof(Bool));
+   Bool*   set = (Bool *)LibVEX_Alloc_Bytes(n_tmps * sizeof(Bool));
    IRStmt* st;
 
    for (i = 0; i < n_tmps; i++)
@@ -2361,6 +2364,9 @@ typedef
    }
    AvailExpr;
 
+DECLARE_VEX_TYPE(AvailExpr)
+DEFINE_VEX_TYPE_NO_DESTRUCT(AvailExpr, { if (ths->tag == AvailExpr::GetIt) visit(ths->u.GetIt.descr); });
+
 static Bool eq_AvailExpr ( AvailExpr* a1, AvailExpr* a2 )
 {
    if (a1->tag != a2->tag)
@@ -2410,13 +2416,13 @@ static IRExpr* availExpr_to_IRExpr ( AvailExpr* ae )
                               IRExpr_RdTmp(ae->u.Btt.arg1),
                               IRExpr_RdTmp(ae->u.Btt.arg2) );
       case AvailExpr::Btc:
-         con = (IRConst *)LibVEX_Alloc(sizeof(IRConst));
+         con = LibVEX_Alloc_IRConst();
          *con = ae->u.Btc.con2;
          return IRExpr_Binop( ae->u.Btc.op,
                               IRExpr_RdTmp(ae->u.Btc.arg1), 
                               IRExpr_Const(con) );
       case AvailExpr::Bct:
-         con = (IRConst *)LibVEX_Alloc(sizeof(IRConst));
+         con = LibVEX_Alloc_IRConst();
          *con = ae->u.Bct.con1;
          return IRExpr_Binop( ae->u.Bct.op,
                               IRExpr_Const(con), 
@@ -2485,7 +2491,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_Unop
        && e->Iex.Unop.arg->tag == Iex_RdTmp) {
-      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae = LibVEX_Alloc_AvailExpr();
       ae->tag      = AvailExpr::Ut;
       ae->u.Ut.op  = e->Iex.Unop.op;
       ae->u.Ut.arg = e->Iex.Unop.arg->Iex.RdTmp.tmp;
@@ -2495,7 +2501,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
        && e->Iex.Binop.arg1->tag == Iex_RdTmp
        && e->Iex.Binop.arg2->tag == Iex_RdTmp) {
-      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae = LibVEX_Alloc_AvailExpr();
       ae->tag        = AvailExpr::Btt;
       ae->u.Btt.op   = e->Iex.Binop.op;
       ae->u.Btt.arg1 = e->Iex.Binop.arg1->Iex.RdTmp.tmp;
@@ -2506,7 +2512,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
       && e->Iex.Binop.arg1->tag == Iex_RdTmp
       && e->Iex.Binop.arg2->tag == Iex_Const) {
-      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae = LibVEX_Alloc_AvailExpr();
       ae->tag        = AvailExpr::Btc;
       ae->u.Btc.op   = e->Iex.Binop.op;
       ae->u.Btc.arg1 = e->Iex.Binop.arg1->Iex.RdTmp.tmp;
@@ -2517,7 +2523,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
       && e->Iex.Binop.arg1->tag == Iex_Const
       && e->Iex.Binop.arg2->tag == Iex_RdTmp) {
-      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae = LibVEX_Alloc_AvailExpr();
       ae->tag        = AvailExpr::Bct;
       ae->u.Bct.op   = e->Iex.Binop.op;
       ae->u.Bct.arg2 = e->Iex.Binop.arg2->Iex.RdTmp.tmp;
@@ -2527,7 +2533,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_Const
        && e->Iex.Const.con->tag == Ico_F64i) {
-      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae = LibVEX_Alloc_AvailExpr();
       ae->tag          = AvailExpr::Cf64i;
       ae->u.Cf64i.f64i = e->Iex.Const.con->Ico.F64i;
       return ae;
@@ -2537,7 +2543,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
        && e->Iex.Mux0X.cond->tag == Iex_RdTmp
        && e->Iex.Mux0X.expr0->tag == Iex_RdTmp
        && e->Iex.Mux0X.exprX->tag == Iex_RdTmp) {
-      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae = LibVEX_Alloc_AvailExpr();
       ae->tag       = AvailExpr::Mttt;
       ae->u.Mttt.co = e->Iex.Mux0X.cond->Iex.RdTmp.tmp;
       ae->u.Mttt.e0 = e->Iex.Mux0X.expr0->Iex.RdTmp.tmp;
@@ -2547,7 +2553,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_GetI
        && e->Iex.GetI.ix->tag == Iex_RdTmp) {
-      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae = LibVEX_Alloc_AvailExpr();
       ae->tag           = AvailExpr::GetIt;
       ae->u.GetIt.descr = e->Iex.GetI.descr;
       ae->u.GetIt.ix    = e->Iex.GetI.ix->Iex.RdTmp.tmp;
@@ -4073,7 +4079,7 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
    ATmpInfo env[A_NENV];
 
    Int       n_tmps = bb->tyenv->types_used;
-   UShort*   uses   = (UShort *)LibVEX_Alloc(n_tmps * sizeof(UShort));
+   UShort*   uses   = (UShort *)LibVEX_Alloc_Bytes(n_tmps * sizeof(UShort));
 
    /* Phase 1.  Scan forwards in bb, counting use occurrences of each
       temp.  Also count occurrences in the bb->next field. */

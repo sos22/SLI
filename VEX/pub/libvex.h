@@ -274,46 +274,6 @@ typedef
 extern 
 void LibVEX_default_VexControl ( /*OUT*/ VexControl* vcon );
 
-
-/*-------------------------------------------------------*/
-/*--- Storage management control                      ---*/
-/*-------------------------------------------------------*/
-
-/* Allocate in Vex's temporary allocation area.  Be careful with this.
-   You can only call it inside an instrumentation or optimisation
-   callback that you have previously specified in a call to
-   LibVEX_Translate.  The storage allocated will only stay alive until
-   translation of the current basic block is complete.
- */
-extern char* private_LibVEX_alloc_first;
-extern char* private_LibVEX_alloc_curr;
-extern char* private_LibVEX_alloc_last;
-extern void   private_LibVEX_alloc_OOM(void) __attribute__((noreturn));
-
-static inline void* LibVEX_Alloc ( Int nbytes )
-{
-#if 0
-  /* Nasty debugging hack, do not use. */
-  return malloc(nbytes);
-#else
-   char*  curr;
-   char*  next;
-   Int    ALIGN;
-   ALIGN  = sizeof(void*)-1;
-   nbytes = (nbytes + ALIGN) & ~ALIGN;
-   curr   = private_LibVEX_alloc_curr;
-   next   = curr + nbytes;
-   if (next >= private_LibVEX_alloc_last)
-      private_LibVEX_alloc_OOM();
-   private_LibVEX_alloc_curr = next;
-   return curr;
-#endif
-}
-
-/* Show Vex allocation statistics. */
-extern void LibVEX_ShowAllocStats ( void );
-
-
 /*-------------------------------------------------------*/
 /*--- Describing guest state layout                   ---*/
 /*-------------------------------------------------------*/

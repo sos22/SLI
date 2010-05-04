@@ -50,6 +50,122 @@
 
 #include "main_util.h"
 
+DEFINE_VEX_TYPE(IRConst);
+DEFINE_VEX_TYPE(IRCallee);
+DEFINE_VEX_TYPE(IRRegArray);
+
+void
+_IRExpr::visit(HeapVisitor &visit) const
+{
+   switch (tag) {
+   case Iex_Binder:
+   case Iex_Get:
+   case Iex_RdTmp:
+     break;
+   case Iex_GetI:
+     visit(Iex.GetI.descr);
+     visit(Iex.GetI.ix);
+     break;
+   case Iex_Qop:
+     visit(Iex.Qop.arg1);
+     visit(Iex.Qop.arg2);
+     visit(Iex.Qop.arg3);
+     visit(Iex.Qop.arg4);
+     break;
+   case Iex_Triop:
+     visit(Iex.Triop.arg1);
+     visit(Iex.Triop.arg2);
+     visit(Iex.Triop.arg3);
+     break;
+   case Iex_Binop:
+     visit(Iex.Binop.arg1);
+     visit(Iex.Binop.arg2);
+     break;
+   case Iex_Unop:
+     visit(Iex.Unop.arg);
+     break;
+   case Iex_Load:
+     visit(Iex.Load.addr);
+     break;
+   case Iex_Const:
+     visit(Iex.Const.con);
+     break;
+   case Iex_CCall:
+     visit(Iex.CCall.cee);
+     visit(Iex.CCall.args);
+     break;
+   case Iex_Mux0X:
+     visit(Iex.Mux0X.cond);
+     visit(Iex.Mux0X.expr0);
+     visit(Iex.Mux0X.exprX);
+     break;
+   }
+}
+DEFINE_VEX_TYPE_VISITABLE(IRExpr);
+
+DEFINE_VEX_TYPE_NO_DESTRUCT(IRDirty, {
+    visit(ths->cee);
+    visit(ths->guard);
+    visit(ths->args);
+    visit(ths->mAddr);
+  });
+
+DEFINE_VEX_TYPE_NO_DESTRUCT(IRCAS, {
+    visit(ths->addr);
+    visit(ths->expdHi);
+    visit(ths->expdLo);
+    visit(ths->dataHi);
+    visit(ths->dataLo);
+  });
+
+void
+IRStmt::visit(HeapVisitor &visit) const
+{
+   switch (tag) {
+   case Ist_NoOp:
+   case Ist_IMark:
+     break;
+   case Ist_AbiHint:
+     visit(Ist.AbiHint.base);
+     visit(Ist.AbiHint.nia);
+     break;
+   case Ist_Put:
+     visit(Ist.Put.data);
+     break;
+   case Ist_PutI:
+     visit(Ist.PutI.descr);
+     visit(Ist.PutI.ix);
+     visit(Ist.PutI.data);
+     break;
+   case Ist_WrTmp:
+     visit(Ist.WrTmp.data);
+     break;
+   case Ist_Store:
+     visit(Ist.Store.addr);
+     visit(Ist.Store.data);
+     break;
+   case Ist_CAS:
+     visit(Ist.CAS.details);
+     break;
+   case Ist_Dirty:
+     visit(Ist.Dirty.details);
+     break;
+   case Ist_MBE:
+     break;
+   case Ist_Exit:
+     visit(Ist.Exit.guard);
+     visit(Ist.Exit.dst);
+     break;
+   }
+}
+DEFINE_VEX_TYPE_VISITABLE(IRStmt);
+
+DEFINE_VEX_TYPE_NO_DESTRUCT(IRTypeEnv, { visit(ths->types); });
+DEFINE_VEX_TYPE_NO_DESTRUCT(IRSB, {
+    visit(ths->tyenv);
+    visit(ths->stmts);
+    visit(ths->next);
+  });
 
 /*---------------------------------------------------------------*/
 /*--- Printing the IR                                         ---*/
@@ -904,17 +1020,11 @@ void ppIRSB ( IRSB* bb )
 /*---------------------------------------------------------------*/
 
 
-template <typename t>
-static t *libvex_alloc()
-{
-   return (t *)LibVEX_Alloc(sizeof(t));
-}
-
 /* Constructors -- IRConst */
 
 IRConst* IRConst_U1 ( Bool bit )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag     = Ico_U1;
    c->Ico.U1  = bit;
    /* call me paranoid; I don't care :-) */
@@ -923,49 +1033,49 @@ IRConst* IRConst_U1 ( Bool bit )
 }
 IRConst* IRConst_U8 ( UChar u8 )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag     = Ico_U8;
    c->Ico.U8  = u8;
    return c;
 }
 IRConst* IRConst_U16 ( UShort u16 )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag     = Ico_U16;
    c->Ico.U16 = u16;
    return c;
 }
 IRConst* IRConst_U32 ( UInt u32 )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag     = Ico_U32;
    c->Ico.U32 = u32;
    return c;
 }
 IRConst* IRConst_U64 ( ULong u64 )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag     = Ico_U64;
    c->Ico.U64 = u64;
    return c;
 }
 IRConst* IRConst_F64 ( Double f64 )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag     = Ico_F64;
    c->Ico.F64 = f64;
    return c;
 }
 IRConst* IRConst_F64i ( ULong f64i )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag      = Ico_F64i;
    c->Ico.F64i = f64i;
    return c;
 }
 IRConst* IRConst_V128 ( UShort con )
 {
-   IRConst* c = libvex_alloc<IRConst>();
+   IRConst* c = LibVEX_Alloc_IRConst();
    c->tag      = Ico_V128;
    c->Ico.V128 = con;
    return c;
@@ -975,7 +1085,7 @@ IRConst* IRConst_V128 ( UShort con )
 
 IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr )
 {
-   IRCallee* ce = libvex_alloc<IRCallee>();
+   IRCallee* ce = LibVEX_Alloc_IRCallee();
    ce->regparms = regparms;
    ce->name     = name;
    ce->addr     = addr;
@@ -991,7 +1101,7 @@ IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr )
 
 IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 {
-   IRRegArray* arr = libvex_alloc<IRRegArray>();
+   IRRegArray* arr = LibVEX_Alloc_IRRegArray();
    arr->base       = base;
    arr->elemTy     = elemTy;
    arr->nElems     = nElems;
@@ -1005,20 +1115,20 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 /* Constructors -- IRExpr */
 
 IRExpr* IRExpr_Binder ( Int binder ) {
-   IRExpr* e            = libvex_alloc<IRExpr>();
+   IRExpr* e            = LibVEX_Alloc_IRExpr();
    e->tag               = Iex_Binder;
    e->Iex.Binder.binder = binder;
    return e;
 }
 IRExpr* IRExpr_Get ( Int off, IRType ty ) {
-   IRExpr* e         = libvex_alloc<IRExpr>();
+   IRExpr* e         = LibVEX_Alloc_IRExpr();
    e->tag            = Iex_Get;
    e->Iex.Get.offset = off;
    e->Iex.Get.ty     = ty;
    return e;
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias ) {
-   IRExpr* e         = libvex_alloc<IRExpr>();
+   IRExpr* e         = LibVEX_Alloc_IRExpr();
    e->tag            = Iex_GetI;
    e->Iex.GetI.descr = descr;
    e->Iex.GetI.ix    = ix;
@@ -1026,14 +1136,14 @@ IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias ) {
    return e;
 }
 IRExpr* IRExpr_RdTmp ( IRTemp tmp ) {
-   IRExpr* e        = libvex_alloc<IRExpr>();
+   IRExpr* e        = LibVEX_Alloc_IRExpr();
    e->tag           = Iex_RdTmp;
    e->Iex.RdTmp.tmp = tmp;
    return e;
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {
-   IRExpr* e       = libvex_alloc<IRExpr>();
+   IRExpr* e       = LibVEX_Alloc_IRExpr();
    e->tag          = Iex_Qop;
    e->Iex.Qop.op   = op;
    e->Iex.Qop.arg1 = arg1;
@@ -1044,7 +1154,7 @@ IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2,
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                  IRExpr* arg2, IRExpr* arg3 ) {
-   IRExpr* e         = libvex_alloc<IRExpr>();
+   IRExpr* e         = LibVEX_Alloc_IRExpr();
    e->tag            = Iex_Triop;
    e->Iex.Triop.op   = op;
    e->Iex.Triop.arg1 = arg1;
@@ -1053,7 +1163,7 @@ IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
    return e;
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
-   IRExpr* e         = libvex_alloc<IRExpr>();
+   IRExpr* e         = LibVEX_Alloc_IRExpr();
    e->tag            = Iex_Binop;
    e->Iex.Binop.op   = op;
    e->Iex.Binop.arg1 = arg1;
@@ -1061,14 +1171,14 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    return e;
 }
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
-   IRExpr* e       = libvex_alloc<IRExpr>();
+   IRExpr* e       = LibVEX_Alloc_IRExpr();
    e->tag          = Iex_Unop;
    e->Iex.Unop.op  = op;
    e->Iex.Unop.arg = arg;
    return e;
 }
 IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
-   IRExpr* e        = libvex_alloc<IRExpr>();
+   IRExpr* e        = LibVEX_Alloc_IRExpr();
    e->tag           = Iex_Load;
    e->Iex.Load.isLL = isLL;
    e->Iex.Load.end  = end;
@@ -1078,13 +1188,13 @@ IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {
-   IRExpr* e        = libvex_alloc<IRExpr>();
+   IRExpr* e        = LibVEX_Alloc_IRExpr();
    e->tag           = Iex_Const;
    e->Iex.Const.con = con;
    return e;
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
-   IRExpr* e          = libvex_alloc<IRExpr>();
+   IRExpr* e          = LibVEX_Alloc_IRExpr();
    e->tag             = Iex_CCall;
    e->Iex.CCall.cee   = cee;
    e->Iex.CCall.retty = retty;
@@ -1092,7 +1202,7 @@ IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
    return e;
 }
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
-   IRExpr* e          = libvex_alloc<IRExpr>();
+   IRExpr* e          = LibVEX_Alloc_IRExpr();
    e->tag             = Iex_Mux0X;
    e->Iex.Mux0X.cond  = cond;
    e->Iex.Mux0X.expr0 = expr0;
@@ -1105,25 +1215,25 @@ IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
    suitable for use as arg lists in clean/dirty helper calls. */
 
 IRExpr** mkIRExprVec_0 ( void ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(1 * sizeof(IRExpr*));
+   IRExpr** vec = LibVEX_Alloc_Array_IRExpr(1);
    vec[0] = NULL;
    return vec;
 }
 IRExpr** mkIRExprVec_1 ( IRExpr* arg1 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(2 * sizeof(IRExpr*));
+   IRExpr** vec = LibVEX_Alloc_Array_IRExpr(2);
    vec[0] = arg1;
    vec[1] = NULL;
    return vec;
 }
 IRExpr** mkIRExprVec_2 ( IRExpr* arg1, IRExpr* arg2 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(3 * sizeof(IRExpr*));
+   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(3);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = NULL;
    return vec;
 }
 IRExpr** mkIRExprVec_3 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(4 * sizeof(IRExpr*));
+   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(4);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1132,7 +1242,7 @@ IRExpr** mkIRExprVec_3 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3 ) {
 }
 IRExpr** mkIRExprVec_4 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(5 * sizeof(IRExpr*));
+   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(5);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1142,7 +1252,7 @@ IRExpr** mkIRExprVec_4 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 }
 IRExpr** mkIRExprVec_5 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4, IRExpr* arg5 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(6 * sizeof(IRExpr*));
+   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(6);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1153,7 +1263,7 @@ IRExpr** mkIRExprVec_5 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 }
 IRExpr** mkIRExprVec_6 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4, IRExpr* arg5, IRExpr* arg6 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(7 * sizeof(IRExpr*));
+   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(7);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1166,7 +1276,7 @@ IRExpr** mkIRExprVec_6 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 IRExpr** mkIRExprVec_7 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4, IRExpr* arg5, IRExpr* arg6,
                          IRExpr* arg7 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc(8 * sizeof(IRExpr*));
+   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(8);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1182,7 +1292,7 @@ IRExpr** mkIRExprVec_7 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 /* Constructors -- IRDirty */
 
 IRDirty* emptyIRDirty ( void ) {
-   IRDirty* d = libvex_alloc<IRDirty>();
+   IRDirty* d = LibVEX_Alloc_IRDirty();
    d->cee      = NULL;
    d->guard    = NULL;
    d->args     = NULL;
@@ -1202,7 +1312,7 @@ IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
                  IREndness end, IRExpr* addr, 
                  IRExpr* expdHi, IRExpr* expdLo,
                  IRExpr* dataHi, IRExpr* dataLo ) {
-   IRCAS* cas = libvex_alloc<IRCAS>();
+   IRCAS* cas = LibVEX_Alloc_IRCAS();
    cas->oldHi  = oldHi;
    cas->oldLo  = oldLo;
    cas->end    = end;
@@ -1225,14 +1335,14 @@ IRStmt* IRStmt_NoOp ( void )
    return &static_closure;
 }
 IRStmt* IRStmt_IMark ( Addr64 addr, Int len ) {
-   IRStmt* s         = libvex_alloc<IRStmt>();
+   IRStmt* s         = LibVEX_Alloc_IRStmt();
    s->tag            = Ist_IMark;
    s->Ist.IMark.addr = addr;
    s->Ist.IMark.len  = len;
    return s;
 }
 IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia ) {
-   IRStmt* s           = libvex_alloc<IRStmt>();
+   IRStmt* s           = LibVEX_Alloc_IRStmt();
    s->tag              = Ist_AbiHint;
    s->Ist.AbiHint.base = base;
    s->Ist.AbiHint.len  = len;
@@ -1240,7 +1350,7 @@ IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia ) {
    return s;
 }
 IRStmt* IRStmt_Put ( Int off, IRExpr* data ) {
-   IRStmt* s         = libvex_alloc<IRStmt>();
+   IRStmt* s         = LibVEX_Alloc_IRStmt();
    s->tag            = Ist_Put;
    s->Ist.Put.offset = off;
    s->Ist.Put.data   = data;
@@ -1248,7 +1358,7 @@ IRStmt* IRStmt_Put ( Int off, IRExpr* data ) {
 }
 IRStmt* IRStmt_PutI ( IRRegArray* descr, IRExpr* ix,
                       Int bias, IRExpr* data ) {
-   IRStmt* s         = libvex_alloc<IRStmt>();
+   IRStmt* s         = LibVEX_Alloc_IRStmt();
    s->tag            = Ist_PutI;
    s->Ist.PutI.descr = descr;
    s->Ist.PutI.ix    = ix;
@@ -1257,7 +1367,7 @@ IRStmt* IRStmt_PutI ( IRRegArray* descr, IRExpr* ix,
    return s;
 }
 IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data ) {
-   IRStmt* s         = libvex_alloc<IRStmt>();
+   IRStmt* s         = LibVEX_Alloc_IRStmt();
    s->tag            = Ist_WrTmp;
    s->Ist.WrTmp.tmp  = tmp;
    s->Ist.WrTmp.data = data;
@@ -1265,7 +1375,7 @@ IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data ) {
 }
 IRStmt* IRStmt_Store ( IREndness end,
                        IRTemp resSC, IRExpr* addr, IRExpr* data ) {
-   IRStmt* s          = libvex_alloc<IRStmt>();
+   IRStmt* s          = LibVEX_Alloc_IRStmt();
    s->tag             = Ist_Store;
    s->Ist.Store.end   = end;
    s->Ist.Store.resSC = resSC;
@@ -1275,27 +1385,27 @@ IRStmt* IRStmt_Store ( IREndness end,
    return s;
 }
 IRStmt* IRStmt_CAS ( IRCAS* cas ) {
-   IRStmt* s          = libvex_alloc<IRStmt>();
+   IRStmt* s          = LibVEX_Alloc_IRStmt();
    s->tag             = Ist_CAS;
    s->Ist.CAS.details = cas;
    return s;
 }
 IRStmt* IRStmt_Dirty ( IRDirty* d )
 {
-   IRStmt* s            = libvex_alloc<IRStmt>();
+   IRStmt* s            = LibVEX_Alloc_IRStmt();
    s->tag               = Ist_Dirty;
    s->Ist.Dirty.details = d;
    return s;
 }
 IRStmt* IRStmt_MBE ( IRMBusEvent event )
 {
-   IRStmt* s        = libvex_alloc<IRStmt>();
+   IRStmt* s        = LibVEX_Alloc_IRStmt();
    s->tag           = Ist_MBE;
    s->Ist.MBE.event = event;
    return s;
 }
 IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst ) {
-   IRStmt* s         = libvex_alloc<IRStmt>();
+   IRStmt* s         = LibVEX_Alloc_IRStmt();
    s->tag            = Ist_Exit;
    s->Ist.Exit.guard = guard;
    s->Ist.Exit.jk    = jk;
@@ -1308,8 +1418,8 @@ IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst ) {
 
 IRTypeEnv* emptyIRTypeEnv ( void )
 {
-   IRTypeEnv* env   = libvex_alloc<IRTypeEnv>();
-   env->types       = (IRType *)LibVEX_Alloc(8 * sizeof(IRType));
+   IRTypeEnv* env   = LibVEX_Alloc_IRTypeEnv();
+   env->types       = (IRType *)LibVEX_Alloc_Bytes(8 * sizeof(IRType));
    env->types_size  = 8;
    env->types_used  = 0;
    return env;
@@ -1320,11 +1430,11 @@ IRTypeEnv* emptyIRTypeEnv ( void )
 
 IRSB* emptyIRSB ( void )
 {
-   IRSB* bb       = libvex_alloc<IRSB>();
+   IRSB* bb       = LibVEX_Alloc_IRSB();
    bb->tyenv      = emptyIRTypeEnv();
    bb->stmts_used = 0;
    bb->stmts_size = 8;
-   bb->stmts      = (IRStmt **)LibVEX_Alloc(bb->stmts_size * sizeof(IRStmt*));
+   bb->stmts      = LibVEX_Alloc_Array_IRStmt(bb->stmts_size);
    bb->next       = NULL;
    bb->jumpkind   = Ijk_Boring;
    return bb;
@@ -1347,7 +1457,7 @@ IRExpr** shallowCopyIRExprVec ( IRExpr** vec )
    IRExpr** newvec;
    for (i = 0; vec[i]; i++)
       ;
-   newvec = (IRExpr **)LibVEX_Alloc((i+1)*sizeof(IRExpr*));
+   newvec = LibVEX_Alloc_Array_IRExpr(i+1);
    for (i = 0; vec[i]; i++)
       newvec[i] = vec[i];
    newvec[i] = NULL;
@@ -1517,10 +1627,10 @@ IRStmt* deepCopyIRStmt ( IRStmt* s )
 IRTypeEnv* deepCopyIRTypeEnv ( IRTypeEnv* src )
 {
    Int        i;
-   IRTypeEnv* dst = libvex_alloc<IRTypeEnv>();
+   IRTypeEnv* dst = LibVEX_Alloc_IRTypeEnv();
    dst->types_size = src->types_size;
    dst->types_used = src->types_used;
-   dst->types = (IRType *)LibVEX_Alloc(dst->types_size * sizeof(IRType));
+   dst->types = (IRType *)LibVEX_Alloc_Bytes(dst->types_size * sizeof(IRType));
    for (i = 0; i < src->types_used; i++)
       dst->types[i] = src->types[i];
    return dst;
@@ -1532,7 +1642,7 @@ IRSB* deepCopyIRSB ( IRSB* bb )
    IRStmt** sts2;
    IRSB* bb2 = deepCopyIRSBExceptStmts(bb);
    bb2->stmts_used = bb2->stmts_size = bb->stmts_used;
-   sts2 = (IRStmt **)LibVEX_Alloc(bb2->stmts_used * sizeof(IRStmt*));
+   sts2 = LibVEX_Alloc_Array_IRStmt(bb2->stmts_used);
    for (i = 0; i < bb2->stmts_used; i++)
       sts2[i] = deepCopyIRStmt(bb->stmts[i]);
    bb2->stmts    = sts2;
@@ -1937,7 +2047,7 @@ void addStmtToIRSB ( IRSB* bb, IRStmt* st )
 {
    Int i;
    if (bb->stmts_used == bb->stmts_size) {
-     IRStmt** stmts2 = (IRStmt **)LibVEX_Alloc(2 * bb->stmts_size * sizeof(IRStmt*));
+     IRStmt** stmts2 = (IRStmt **)LibVEX_Alloc_Array_IRStmt(2 * bb->stmts_size);
       for (i = 0; i < bb->stmts_size; i++)
          stmts2[i] = bb->stmts[i];
       bb->stmts = stmts2;
@@ -1968,7 +2078,7 @@ IRTemp newIRTemp ( IRTypeEnv* env, IRType ty )
       Int i;
       Int new_size = env->types_size==0 ? 8 : 2*env->types_size;
       IRType* new_types 
-	= (IRType *)LibVEX_Alloc(new_size * sizeof(IRType));
+	= (IRType *)LibVEX_Alloc_Bytes(new_size * sizeof(IRType));
       for (i = 0; i < env->types_used; i++)
          new_types[i] = env->types[i];
       env->types      = new_types;
@@ -2733,7 +2843,7 @@ void sanityCheckIRSB ( IRSB* bb,          const char* caller,
    Int     i;
    IRStmt* stmt;
    Int     n_temps    = bb->tyenv->types_used;
-   Int*    def_counts = (Int *)LibVEX_Alloc(n_temps * sizeof(Int));
+   Int*    def_counts = (Int *)LibVEX_Alloc_Bytes(n_temps * sizeof(Int));
 
    if (0)
       vex_printf("sanityCheck: %s\n", caller);
