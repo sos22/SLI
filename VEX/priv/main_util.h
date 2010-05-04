@@ -47,12 +47,9 @@
 #ifndef __VEX_MAIN_UTIL_H
 #define __VEX_MAIN_UTIL_H
 
+#include <stddef.h>
+
 #include "libvex_basictypes.h"
-
-
-/* Misc. */
-
-#define NULL ((void*)0)
 
 
 /* Stuff for panicking and assertion. */
