@@ -15,7 +15,6 @@
 #include "sli.h"
 
 static void eval_expression(struct expression_result *temporaries,
-			    AddressSpace *addrSpace,
 			    Thread *thr,
 			    struct expression_result *dest,
 			    IRExpr *expr);
@@ -77,13 +76,13 @@ do_dirty_call(struct expression_result *temporaries,
 	unsigned long res;
 
 	if (details->guard) {
-		eval_expression(temporaries, addressSpace, thr, &guard, details->guard);
+		eval_expression(temporaries, thr, &guard, details->guard);
 		if (!guard.lo.v)
 			return;
 	}
 	for (x = 0; details->args[x]; x++) {
 		assert(x < 6);
-		eval_expression(temporaries, addressSpace, thr, &args[x], details->args[x]);
+		eval_expression(temporaries, thr, &args[x], details->args[x]);
 	}
 	assert(!details->cee->regparms);
 
@@ -237,7 +236,6 @@ calculate_condition_flags_XXX(unsigned long op,
 
 static void
 do_ccall_calculate_condition(struct expression_result *temporaries,
-			     AddressSpace *addrSpace,
 			     Thread *thr,
 			     struct expression_result *dest,
 			     IRType retty,
@@ -251,11 +249,11 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 	int inv;
 	unsigned cf, zf, sf, of;
 
-	eval_expression(temporaries, addrSpace, thr, &condcode, args[0]);
-	eval_expression(temporaries, addrSpace, thr, &op, args[1]);
-	eval_expression(temporaries, addrSpace, thr, &dep1, args[2]);
-	eval_expression(temporaries, addrSpace, thr, &dep2, args[3]);
-	eval_expression(temporaries, addrSpace, thr, &ndep, args[4]);
+	eval_expression(temporaries, thr, &condcode, args[0]);
+	eval_expression(temporaries, thr, &op, args[1]);
+	eval_expression(temporaries, thr, &dep1, args[2]);
+	eval_expression(temporaries, thr, &dep2, args[3]);
+	eval_expression(temporaries, thr, &ndep, args[4]);
 
 	calculate_condition_flags_XXX(op.lo.v,
 				      dep1.lo.v,
@@ -297,7 +295,6 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 
 static void
 do_ccall_calculate_rflags_c(struct expression_result *temporaries,
-			    AddressSpace *addrSpace,
 			    Thread *thr,
 			    struct expression_result *dest,
 			    IRType retty,
@@ -309,10 +306,10 @@ do_ccall_calculate_rflags_c(struct expression_result *temporaries,
 	struct expression_result ndep = {};
 	unsigned cf, zf, sf, of;
 
-	eval_expression(temporaries, addrSpace, thr, &op, args[0]);
-	eval_expression(temporaries, addrSpace, thr, &dep1, args[1]);
-	eval_expression(temporaries, addrSpace, thr, &dep2, args[2]);
-	eval_expression(temporaries, addrSpace, thr, &ndep, args[3]);
+	eval_expression(temporaries, thr, &op, args[0]);
+	eval_expression(temporaries, thr, &dep1, args[1]);
+	eval_expression(temporaries, thr, &dep2, args[2]);
+	eval_expression(temporaries, thr, &ndep, args[3]);
 
 	calculate_condition_flags_XXX(op.lo.v,
 				      dep1.lo.v,
@@ -328,7 +325,6 @@ do_ccall_calculate_rflags_c(struct expression_result *temporaries,
 
 static void
 do_ccall_generic(struct expression_result *temporaries,
-		 AddressSpace *addrSpace,
 		 Thread *thr,
 		 struct expression_result *dest,
 		 IRCallee *cee,
@@ -341,7 +337,7 @@ do_ccall_generic(struct expression_result *temporaries,
 	assert(cee->regparms == 0);
 	for (x = 0; args[x]; x++) {
 		assert(x < 6);
-		eval_expression(temporaries, addrSpace, thr, &rargs[x], args[x]);
+		eval_expression(temporaries, thr, &rargs[x], args[x]);
 	}
 	dest->lo.v = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
 				       unsigned long, unsigned long, unsigned long))cee->addr)
@@ -352,7 +348,6 @@ do_ccall_generic(struct expression_result *temporaries,
 
 static void
 do_ccall(struct expression_result *temporaries,
-	 AddressSpace *addrSpace,
 	 Thread *thr,
 	 struct expression_result *dest,
 	 IRCallee *cee,
@@ -360,12 +355,12 @@ do_ccall(struct expression_result *temporaries,
 	 IRExpr **args)
 {
 	if (!strcmp(cee->name, "amd64g_calculate_condition")) {
-		do_ccall_calculate_condition(temporaries, addrSpace, thr, dest, retty, args);
+		do_ccall_calculate_condition(temporaries, thr, dest, retty, args);
 	} else if (!strcmp(cee->name, "amd64g_calculate_rflags_c")) {
-		do_ccall_calculate_rflags_c(temporaries, addrSpace, thr, dest, retty, args);
+		do_ccall_calculate_rflags_c(temporaries, thr, dest, retty, args);
 	} else {
 		printf("Unknown clean call %s\n", cee->name);
-		do_ccall_generic(temporaries, addrSpace, thr, dest, cee, retty, args);
+		do_ccall_generic(temporaries, thr, dest, cee, retty, args);
 	}
 }
 
@@ -445,7 +440,6 @@ mulls64(struct expression_result *dest, const struct expression_result &src1,
 
 static void
 eval_expression(struct expression_result *temporaries,
-		AddressSpace *addrSpace,
 		Thread *thr,
 		struct expression_result *dest,
 		IRExpr *expr)
@@ -535,8 +529,8 @@ eval_expression(struct expression_result *temporaries,
 	case Iex_Binop: {
 		struct expression_result arg1;
 		struct expression_result arg2;
-		eval_expression(temporaries, addrSpace, thr, &arg1, expr->Iex.Binop.arg1);
-		eval_expression(temporaries, addrSpace, thr, &arg2, expr->Iex.Binop.arg2);
+		eval_expression(temporaries, thr, &arg1, expr->Iex.Binop.arg1);
+		eval_expression(temporaries, thr, &arg2, expr->Iex.Binop.arg2);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub64:
 			dest->lo.v = arg1.lo.v - arg2.lo.v;
@@ -796,7 +790,7 @@ eval_expression(struct expression_result *temporaries,
 
 	case Iex_Unop: {
 		struct expression_result arg;
-		eval_expression(temporaries, addrSpace, thr, &arg, expr->Iex.Unop.arg);
+		eval_expression(temporaries, thr, &arg, expr->Iex.Unop.arg);
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
 			dest->lo.v = arg.lo.v >> 32;
@@ -888,9 +882,9 @@ eval_expression(struct expression_result *temporaries,
 		struct expression_result res0;
 		struct expression_result resX;
 		struct expression_result *choice;
-		eval_expression(temporaries, addrSpace, thr, &cond, expr->Iex.Mux0X.cond);
-		eval_expression(temporaries, addrSpace, thr, &res0, expr->Iex.Mux0X.expr0);
-		eval_expression(temporaries, addrSpace, thr, &resX, expr->Iex.Mux0X.exprX);
+		eval_expression(temporaries, thr, &cond, expr->Iex.Mux0X.cond);
+		eval_expression(temporaries, thr, &res0, expr->Iex.Mux0X.expr0);
+		eval_expression(temporaries, thr, &resX, expr->Iex.Mux0X.exprX);
 		if (cond.lo.v == 0) {
 			choice = &res0;
 		} else {
@@ -901,7 +895,7 @@ eval_expression(struct expression_result *temporaries,
 	}
 
 	case Iex_CCall: {
-		do_ccall(temporaries, addrSpace, thr, dest, expr->Iex.CCall.cee,
+		do_ccall(temporaries, thr, dest, expr->Iex.CCall.cee,
 			 expr->Iex.CCall.retty, expr->Iex.CCall.args);
 		break;
 	}
@@ -1028,7 +1022,6 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			break;
 		case Ist_WrTmp:
 			eval_expression(temporaries,
-					addrSpace,
 					thr,
 					&temporaries[stmt->Ist.WrTmp.tmp],
 					stmt->Ist.WrTmp.data);
@@ -1039,8 +1032,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
 			struct expression_result data;
 			struct expression_result addr;
-			eval_expression(temporaries, addrSpace, thr, &data, stmt->Ist.Store.data);
-			eval_expression(temporaries, addrSpace, thr, &addr, stmt->Ist.Store.addr);
+			eval_expression(temporaries, thr, &data, stmt->Ist.Store.data);
+			eval_expression(temporaries, thr, &addr, stmt->Ist.Store.addr);
 			unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
 								  stmt->Ist.Store.data));
 			if (size <= 8) {
@@ -1075,9 +1068,9 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			struct expression_result data;
 			struct expression_result addr;
 			struct expression_result expected;
-			eval_expression(temporaries, addrSpace, thr, &data, stmt->Ist.CAS.details->dataLo);
-			eval_expression(temporaries, addrSpace, thr, &addr, stmt->Ist.CAS.details->addr);
-			eval_expression(temporaries, addrSpace, thr, &expected, stmt->Ist.CAS.details->expdLo);
+			eval_expression(temporaries, thr, &data, stmt->Ist.CAS.details->dataLo);
+			eval_expression(temporaries, thr, &addr, stmt->Ist.CAS.details->addr);
+			eval_expression(temporaries, thr, &expected, stmt->Ist.CAS.details->expdLo);
 			unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
 								  stmt->Ist.CAS.details->dataLo));
 			struct expression_result seen;
@@ -1122,7 +1115,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 					stmt->Ist.Put.offset - byte_offset);
 			struct expression_result data;
 
-			eval_expression(temporaries, addrSpace, thr, &data, stmt->Ist.Put.data);
+			eval_expression(temporaries, thr, &data, stmt->Ist.Put.data);
 			switch (typeOfIRExpr(irsb->tyenv, stmt->Ist.Put.data)) {
 			case Ity_I8:
 				*dest &= ~(0xFF << (byte_offset * 8));
@@ -1172,7 +1165,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 		case Ist_Exit: {
 			struct expression_result guard;
 			if (stmt->Ist.Exit.guard) {
-				eval_expression(temporaries, addrSpace, thr, &guard, stmt->Ist.Exit.guard);
+				eval_expression(temporaries, thr, &guard, stmt->Ist.Exit.guard);
 				if (!guard.lo.v)
 					break;
 			}
@@ -1200,7 +1193,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 
 	{
 		struct expression_result next_addr;
-		eval_expression(temporaries, addrSpace, thr, &next_addr, irsb->next);
+		eval_expression(temporaries, thr, &next_addr, irsb->next);
 		thr->regs.regs.guest_RIP = next_addr.lo.v;
 	}
 
