@@ -1,4 +1,14 @@
 /* Simple memory allocator and garbage collector. */
+
+/* Why not use malloc() for this?  Historically, it was supposed to
+   run in Valgrind, which means you have an extremely limited CRT,
+   which doesn't include a full malloc() implementation, so we had to
+   build our own.  So why not switch over now?  Because this is,
+   despite being extremely simple, also extremely fast (multiple
+   orders of magnitude better than glibc malloc/free()).  The trick is
+   that there usually aren't very many GC roots, and they won't
+   usually cover very many things in the heap, so the GC pass is very
+   cheap, and we can cover it out of the much simpler allocator. */
 #include <stdio.h>
 
 #include "libvex_basictypes.h"
