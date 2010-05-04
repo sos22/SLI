@@ -70,5 +70,20 @@ extern void *__LibVEX_Alloc_Bytes(Int nbytes, const char *file, unsigned line);
 #define LibVEX_Alloc_Bytes(_n) __LibVEX_Alloc_Bytes((_n), __FILE__, __LINE__)
 
 void vexRegisterGCRoot(void **);
+void vexUnregisterGCRoot(void **);
+
+class VexGcRoot {
+	void **root;
+public:
+	VexGcRoot(void **x) :
+		root(x)
+	{
+		vexRegisterGCRoot(x);
+	}
+	~VexGcRoot()
+	{
+		vexUnregisterGCRoot(root);
+	}
+};
 
 #endif /* !__LIBVEX_ALLOC_H */

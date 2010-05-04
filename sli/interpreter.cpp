@@ -1002,6 +1002,8 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 	if (!irsb)
 		throw InstructionDecodeFailedException();
 
+	VexGcRoot irsb_gc_root((void **)&irsb);
+
 	struct expression_result *temporaries = new expression_result[irsb->tyenv->types_used];
 	memset(temporaries,
 	       0,
