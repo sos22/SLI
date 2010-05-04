@@ -212,8 +212,8 @@ void LibVEX_ShowAllocStats ( void )
 /*---------------------------------------------------------*/
 
 __attribute__ ((noreturn))
-void vex_assert_fail ( const const char* expr,
-                       const const char* file, Int line, const const char* fn )
+void vex_assert_fail ( const char* expr,
+                       const char* file, Int line, const char* fn )
 {
    vex_printf( "\nvex: %s:%d (%s): Assertion `%s' failed.\n",
                file, line, fn, expr );

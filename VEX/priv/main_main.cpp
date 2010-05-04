@@ -184,7 +184,7 @@ const char* LibVEX_EmWarn_string ( VexEmWarn ew )
 
 /* ------------------ Arch/HwCaps stuff. ------------------ */
 
-const const char* LibVEX_ppVexArch ( VexArch arch )
+const char* LibVEX_ppVexArch ( VexArch arch )
 {
    switch (arch) {
       case VexArch_INVALID: return "INVALID";
@@ -197,7 +197,7 @@ const const char* LibVEX_ppVexArch ( VexArch arch )
    }
 }
 
-const const char* LibVEX_ppVexHwCaps ( VexArch arch, UInt hwcaps )
+const char* LibVEX_ppVexHwCaps ( VexArch arch, UInt hwcaps )
 {
    const char* str = show_hwcaps(arch,hwcaps);
    return str ? str : "INVALID";

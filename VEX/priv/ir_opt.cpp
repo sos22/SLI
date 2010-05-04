@@ -180,12 +180,12 @@ typedef
 
 static HashHW* newHHW ( void )
 {
-   HashHW* h = LibVEX_Alloc(sizeof(HashHW));
+   HashHW* h = (HashHW *)LibVEX_Alloc(sizeof(HashHW));
    h->size   = 8;
    h->used   = 0;
-   h->inuse  = LibVEX_Alloc(h->size * sizeof(Bool));
-   h->key    = LibVEX_Alloc(h->size * sizeof(HWord));
-   h->val    = LibVEX_Alloc(h->size * sizeof(HWord));
+   h->inuse  = (Bool *)LibVEX_Alloc(h->size * sizeof(Bool));
+   h->key    = (HWord *)LibVEX_Alloc(h->size * sizeof(HWord));
+   h->val    = (HWord *)LibVEX_Alloc(h->size * sizeof(HWord));
    return h;
 }
 
@@ -225,9 +225,9 @@ static void addToHHW ( HashHW* h, HWord key, HWord val )
    /* Ensure a space is available. */
    if (h->used == h->size) {
       /* Copy into arrays twice the size. */
-      Bool*  inuse2 = LibVEX_Alloc(2 * h->size * sizeof(Bool));
-      HWord* key2   = LibVEX_Alloc(2 * h->size * sizeof(HWord));
-      HWord* val2   = LibVEX_Alloc(2 * h->size * sizeof(HWord));
+      Bool*  inuse2 = (Bool *)LibVEX_Alloc(2 * h->size * sizeof(Bool));
+      HWord* key2   = (HWord *)LibVEX_Alloc(2 * h->size * sizeof(HWord));
+      HWord* val2   = (HWord *)LibVEX_Alloc(2 * h->size * sizeof(HWord));
       for (i = j = 0; i < h->size; i++) {
          if (!h->inuse[i]) continue;
          inuse2[j] = True;
@@ -1857,7 +1857,7 @@ IRSB* cprop_BB ( IRSB* in )
    IRSB*    out;
    IRStmt*  st2;
    Int      n_tmps = in->tyenv->types_used;
-   IRExpr** env = LibVEX_Alloc(n_tmps * sizeof(IRExpr*));
+   IRExpr** env = (IRExpr **)LibVEX_Alloc(n_tmps * sizeof(IRExpr*));
 
    out = emptyIRSB();
    out->tyenv = deepCopyIRTypeEnv( in->tyenv );
@@ -2080,7 +2080,7 @@ static Bool isOneU1 ( IRExpr* e )
 {
    Int     i, i_unconditional_exit;
    Int     n_tmps = bb->tyenv->types_used;
-   Bool*   set = LibVEX_Alloc(n_tmps * sizeof(Bool));
+   Bool*   set = (Bool *)LibVEX_Alloc(n_tmps * sizeof(Bool));
    IRStmt* st;
 
    for (i = 0; i < n_tmps; i++)
@@ -2366,32 +2366,32 @@ static Bool eq_AvailExpr ( AvailExpr* a1, AvailExpr* a2 )
    if (a1->tag != a2->tag)
       return False;
    switch (a1->tag) {
-      case Ut: 
+      case AvailExpr::Ut: 
          return toBool(
                 a1->u.Ut.op == a2->u.Ut.op 
                 && a1->u.Ut.arg == a2->u.Ut.arg);
-      case Btt: 
+      case AvailExpr::Btt: 
          return toBool(
                 a1->u.Btt.op == a2->u.Btt.op
                 && a1->u.Btt.arg1 == a2->u.Btt.arg1
                 && a1->u.Btt.arg2 == a2->u.Btt.arg2);
-      case Btc: 
+      case AvailExpr::Btc: 
          return toBool(
                 a1->u.Btc.op == a2->u.Btc.op
                 && a1->u.Btc.arg1 == a2->u.Btc.arg1
                 && eqIRConst(&a1->u.Btc.con2, &a2->u.Btc.con2));
-      case Bct: 
+      case AvailExpr::Bct: 
          return toBool(
                 a1->u.Bct.op == a2->u.Bct.op
                 && a1->u.Bct.arg2 == a2->u.Bct.arg2
                 && eqIRConst(&a1->u.Bct.con1, &a2->u.Bct.con1));
-      case Cf64i: 
+      case AvailExpr::Cf64i: 
          return toBool(a1->u.Cf64i.f64i == a2->u.Cf64i.f64i);
-      case Mttt:
+      case AvailExpr::Mttt:
          return toBool(a1->u.Mttt.co == a2->u.Mttt.co
                        && a1->u.Mttt.e0 == a2->u.Mttt.e0
                        && a1->u.Mttt.eX == a2->u.Mttt.eX);
-      case GetIt:
+      case AvailExpr::GetIt:
          return toBool(eqIRRegArray(a1->u.GetIt.descr, a2->u.GetIt.descr) 
                        && a1->u.GetIt.ix == a2->u.GetIt.ix
                        && a1->u.GetIt.bias == a2->u.GetIt.bias);
@@ -2403,31 +2403,31 @@ static IRExpr* availExpr_to_IRExpr ( AvailExpr* ae )
 {
    IRConst* con;
    switch (ae->tag) {
-      case Ut:
+      case AvailExpr::Ut:
          return IRExpr_Unop( ae->u.Ut.op, IRExpr_RdTmp(ae->u.Ut.arg) );
-      case Btt:
+      case AvailExpr::Btt:
          return IRExpr_Binop( ae->u.Btt.op,
                               IRExpr_RdTmp(ae->u.Btt.arg1),
                               IRExpr_RdTmp(ae->u.Btt.arg2) );
-      case Btc:
-         con = LibVEX_Alloc(sizeof(IRConst));
+      case AvailExpr::Btc:
+         con = (IRConst *)LibVEX_Alloc(sizeof(IRConst));
          *con = ae->u.Btc.con2;
          return IRExpr_Binop( ae->u.Btc.op,
                               IRExpr_RdTmp(ae->u.Btc.arg1), 
                               IRExpr_Const(con) );
-      case Bct:
-         con = LibVEX_Alloc(sizeof(IRConst));
+      case AvailExpr::Bct:
+         con = (IRConst *)LibVEX_Alloc(sizeof(IRConst));
          *con = ae->u.Bct.con1;
          return IRExpr_Binop( ae->u.Bct.op,
                               IRExpr_Const(con), 
                               IRExpr_RdTmp(ae->u.Bct.arg2) );
-      case Cf64i:
+      case AvailExpr::Cf64i:
          return IRExpr_Const(IRConst_F64i(ae->u.Cf64i.f64i));
-      case Mttt:
+      case AvailExpr::Mttt:
          return IRExpr_Mux0X(IRExpr_RdTmp(ae->u.Mttt.co), 
                              IRExpr_RdTmp(ae->u.Mttt.e0), 
                              IRExpr_RdTmp(ae->u.Mttt.eX));
-      case GetIt:
+      case AvailExpr::GetIt:
          return IRExpr_GetI(ae->u.GetIt.descr,
                             IRExpr_RdTmp(ae->u.GetIt.ix),
                             ae->u.GetIt.bias);
@@ -2451,27 +2451,27 @@ static void subst_AvailExpr ( HashHW* env, AvailExpr* ae )
 {
    /* env :: IRTemp -> IRTemp */
    switch (ae->tag) {
-      case Ut:
+      case AvailExpr::Ut:
          ae->u.Ut.arg = subst_AvailExpr_Temp( env, ae->u.Ut.arg );
          break;
-      case Btt:
+      case AvailExpr::Btt:
          ae->u.Btt.arg1 = subst_AvailExpr_Temp( env, ae->u.Btt.arg1 );
          ae->u.Btt.arg2 = subst_AvailExpr_Temp( env, ae->u.Btt.arg2 );
          break;
-      case Btc:
+      case AvailExpr::Btc:
          ae->u.Btc.arg1 = subst_AvailExpr_Temp( env, ae->u.Btc.arg1 );
          break;
-      case Bct:
+      case AvailExpr::Bct:
          ae->u.Bct.arg2 = subst_AvailExpr_Temp( env, ae->u.Bct.arg2 );
          break;
-      case Cf64i:
+      case AvailExpr::Cf64i:
          break;
-      case Mttt:
+      case AvailExpr::Mttt:
          ae->u.Mttt.co = subst_AvailExpr_Temp( env, ae->u.Mttt.co );
          ae->u.Mttt.e0 = subst_AvailExpr_Temp( env, ae->u.Mttt.e0 );
          ae->u.Mttt.eX = subst_AvailExpr_Temp( env, ae->u.Mttt.eX );
          break;
-      case GetIt:
+      case AvailExpr::GetIt:
          ae->u.GetIt.ix = subst_AvailExpr_Temp( env, ae->u.GetIt.ix );
          break;
       default: 
@@ -2485,8 +2485,8 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_Unop
        && e->Iex.Unop.arg->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc(sizeof(AvailExpr));
-      ae->tag      = Ut;
+      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae->tag      = AvailExpr::Ut;
       ae->u.Ut.op  = e->Iex.Unop.op;
       ae->u.Ut.arg = e->Iex.Unop.arg->Iex.RdTmp.tmp;
       return ae;
@@ -2495,8 +2495,8 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
        && e->Iex.Binop.arg1->tag == Iex_RdTmp
        && e->Iex.Binop.arg2->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc(sizeof(AvailExpr));
-      ae->tag        = Btt;
+      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae->tag        = AvailExpr::Btt;
       ae->u.Btt.op   = e->Iex.Binop.op;
       ae->u.Btt.arg1 = e->Iex.Binop.arg1->Iex.RdTmp.tmp;
       ae->u.Btt.arg2 = e->Iex.Binop.arg2->Iex.RdTmp.tmp;
@@ -2506,8 +2506,8 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
       && e->Iex.Binop.arg1->tag == Iex_RdTmp
       && e->Iex.Binop.arg2->tag == Iex_Const) {
-      ae = LibVEX_Alloc(sizeof(AvailExpr));
-      ae->tag        = Btc;
+      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae->tag        = AvailExpr::Btc;
       ae->u.Btc.op   = e->Iex.Binop.op;
       ae->u.Btc.arg1 = e->Iex.Binop.arg1->Iex.RdTmp.tmp;
       ae->u.Btc.con2 = *(e->Iex.Binop.arg2->Iex.Const.con);
@@ -2517,8 +2517,8 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
       && e->Iex.Binop.arg1->tag == Iex_Const
       && e->Iex.Binop.arg2->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc(sizeof(AvailExpr));
-      ae->tag        = Bct;
+      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae->tag        = AvailExpr::Bct;
       ae->u.Bct.op   = e->Iex.Binop.op;
       ae->u.Bct.arg2 = e->Iex.Binop.arg2->Iex.RdTmp.tmp;
       ae->u.Bct.con1 = *(e->Iex.Binop.arg1->Iex.Const.con);
@@ -2527,8 +2527,8 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_Const
        && e->Iex.Const.con->tag == Ico_F64i) {
-      ae = LibVEX_Alloc(sizeof(AvailExpr));
-      ae->tag          = Cf64i;
+      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae->tag          = AvailExpr::Cf64i;
       ae->u.Cf64i.f64i = e->Iex.Const.con->Ico.F64i;
       return ae;
    }
@@ -2537,8 +2537,8 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
        && e->Iex.Mux0X.cond->tag == Iex_RdTmp
        && e->Iex.Mux0X.expr0->tag == Iex_RdTmp
        && e->Iex.Mux0X.exprX->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc(sizeof(AvailExpr));
-      ae->tag       = Mttt;
+      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae->tag       = AvailExpr::Mttt;
       ae->u.Mttt.co = e->Iex.Mux0X.cond->Iex.RdTmp.tmp;
       ae->u.Mttt.e0 = e->Iex.Mux0X.expr0->Iex.RdTmp.tmp;
       ae->u.Mttt.eX = e->Iex.Mux0X.exprX->Iex.RdTmp.tmp;
@@ -2547,8 +2547,8 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_GetI
        && e->Iex.GetI.ix->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc(sizeof(AvailExpr));
-      ae->tag           = GetIt;
+      ae = (AvailExpr *)LibVEX_Alloc(sizeof(AvailExpr));
+      ae->tag           = AvailExpr::GetIt;
       ae->u.GetIt.descr = e->Iex.GetI.descr;
       ae->u.GetIt.ix    = e->Iex.GetI.ix->Iex.RdTmp.tmp;
       ae->u.GetIt.bias  = e->Iex.GetI.bias;
@@ -2624,7 +2624,7 @@ static Bool do_cse_BB ( IRSB* bb )
             if (!aenv->inuse[j])
                continue;
             ae = (AvailExpr*)aenv->key[j];
-            if (ae->tag != GetIt) 
+            if (ae->tag != AvailExpr::GetIt) 
                continue;
             invalidate = False;
             if (paranoia >= 2) {
@@ -3158,7 +3158,7 @@ static
 void do_redundant_PutI_elimination ( IRSB* bb )
 {
    Int    i, j;
-   Bool   delete;
+   Bool   do_delete;
    IRStmt *st, *stj;
 
    for (i = 0; i < bb->stmts_used; i++) {
@@ -3178,14 +3178,14 @@ void do_redundant_PutI_elimination ( IRSB* bb )
          * If a Put which definitely doesn't overlap, or any other 
            kind of stmt, continue.
       */
-      delete = False;
+      do_delete = False;
       for (j = i+1; j < bb->stmts_used; j++) {
          stj = bb->stmts[j];
          if (stj->tag == Ist_NoOp) 
             continue;
          if (identicalPutIs(st, stj)) {
             /* success! */
-            delete = True;
+            do_delete = True;
             break;
          }
          if (stj->tag == Ist_Exit)
@@ -3199,7 +3199,7 @@ void do_redundant_PutI_elimination ( IRSB* bb )
            break;
       }
 
-      if (delete) {
+      if (do_delete) {
          if (DEBUG_IROPT) {
             vex_printf("rPI:  "); 
             ppIRStmt(st); 
@@ -4073,7 +4073,7 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
    ATmpInfo env[A_NENV];
 
    Int       n_tmps = bb->tyenv->types_used;
-   UShort*   uses   = LibVEX_Alloc(n_tmps * sizeof(UShort));
+   UShort*   uses   = (UShort *)LibVEX_Alloc(n_tmps * sizeof(UShort));
 
    /* Phase 1.  Scan forwards in bb, counting use occurrences of each
       temp.  Also count occurrences in the bb->next field. */

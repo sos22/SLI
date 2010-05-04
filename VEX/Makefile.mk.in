@@ -2,7 +2,7 @@ subdirs="auxprogs priv pub"
 targets="libVEX.a"
 
 defvars() {
-	  echo 'libvex_objects=$(patsubst %.c,%.o,$(libvex_sources))'
+	  echo 'libvex_objects=$(patsubst %.cpp,%.o,$(libvex_sources))'
 	  echo "libvex=$input_base"
 }
 

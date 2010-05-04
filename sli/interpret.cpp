@@ -4,9 +4,7 @@
 
 #include <exception>
 
-extern "C" {
 #include "libvex.h"
-}
 #include "sli.h"
 
 static __attribute__ ((noreturn)) void

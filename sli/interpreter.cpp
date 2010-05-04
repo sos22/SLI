@@ -1,17 +1,13 @@
 #include <math.h>
 #include <string.h>
 
-extern "C" {
 #include "libvex.h"
 #include "libvex_ir.h"
 #include "libvex_emwarn.h"
 #include "libvex_guest_amd64.h"
 #include "guest_generic_bb_to_IR.h"
 #include "guest_amd64_defs.h"
-
-#undef NULL /* main_util redefines NULL, for some reason */
 #include "main_util.h"
-};
 
 #define FOOTSTEP_REGS_ONLY
 #include "ppres.h"

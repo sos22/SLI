@@ -239,11 +239,11 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
                             host_bigendian );
 
       /* stay sane ... */
-      vassert(dres.whatNext == Dis_StopHere
-              || dres.whatNext == Dis_Continue
-              || dres.whatNext == Dis_Resteer);
+      vassert(dres.whatNext == DisResult::Dis_StopHere
+              || dres.whatNext == DisResult::Dis_Continue
+              || dres.whatNext == DisResult::Dis_Resteer);
       vassert(dres.len >= 0 && dres.len <= 20);
-      if (dres.whatNext != Dis_Resteer)
+      if (dres.whatNext != DisResult::Dis_Resteer)
          vassert(dres.continueAt == 0);
 
       /* Fill in the insn-mark length field. */
@@ -265,7 +265,7 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
 
       /* If dis_instr_fn terminated the BB at this point, check it
 	 also filled in the irsb->next field. */
-      if (dres.whatNext == Dis_StopHere) {
+      if (dres.whatNext == DisResult::Dis_StopHere) {
          vassert(irsb->next != NULL);
          if (debug_print) {
             vex_printf("              ");
@@ -293,7 +293,7 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
       delta += (Long)dres.len;
 
       switch (dres.whatNext) {
-         case Dis_Continue:
+         case DisResult::Dis_Continue:
             vassert(irsb->next == NULL);
             if (n_instrs < vex_control.guest_max_insns) {
                /* keep going */
@@ -308,10 +308,10 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
                goto done;
             }
             break;
-         case Dis_StopHere:
+         case DisResult::Dis_StopHere:
             vassert(irsb->next != NULL);
             goto done;
-         case Dis_Resteer:
+         case DisResult::Dis_Resteer:
             /* Check that we actually allowed a resteer .. */
             vassert(resteerOK);
             vassert(irsb->next == NULL);

@@ -2446,53 +2446,53 @@ VexGuestLayout
    amd64guest_layout
       = {
           /* Total size of the guest state, in bytes. */
-          .total_sizeB = sizeof(VexGuestAMD64State),
+          total_sizeB: sizeof(VexGuestAMD64State),
 
           /* Describe the stack pointer. */
-          .offset_SP = offsetof(VexGuestAMD64State,guest_RSP),
-          .sizeof_SP = 8,
+          offset_SP: offsetof(VexGuestAMD64State,guest_RSP),
+          sizeof_SP: 8,
 
           /* Describe the frame pointer. */
-          .offset_FP = offsetof(VexGuestAMD64State,guest_RBP),
-          .sizeof_FP = 8,
+          offset_FP: offsetof(VexGuestAMD64State,guest_RBP),
+          sizeof_FP: 8,
 
           /* Describe the instruction pointer. */
-          .offset_IP = offsetof(VexGuestAMD64State,guest_RIP),
-          .sizeof_IP = 8,
+          offset_IP: offsetof(VexGuestAMD64State,guest_RIP),
+          sizeof_IP: 8,
 
           /* Describe any sections to be regarded by Memcheck as
              'always-defined'. */
-          .n_alwaysDefd = 16,
+          n_alwaysDefd: 16,
 
           /* flags thunk: OP and NDEP are always defd, whereas DEP1
              and DEP2 have to be tracked.  See detailed comment in
              gdefs.h on meaning of thunk fields. */
-          .alwaysDefd
-             = { /*  0 */ ALWAYSDEFD(guest_CC_OP),
-                 /*  1 */ ALWAYSDEFD(guest_CC_NDEP),
-		 /*  2 */ ALWAYSDEFD(guest_DFLAG),
-                 /*  3 */ ALWAYSDEFD(guest_IDFLAG),
-                 /*  4 */ ALWAYSDEFD(guest_RIP),
-                 /*  5 */ ALWAYSDEFD(guest_FS_ZERO),
-                 /*  6 */ ALWAYSDEFD(guest_FTOP),
-                 /*  7 */ ALWAYSDEFD(guest_FPTAG),
-                 /*  8 */ ALWAYSDEFD(guest_FPROUND),
-                 /*  9 */ ALWAYSDEFD(guest_FC3210),
-                 // /* */ ALWAYSDEFD(guest_CS),
-                 // /* */ ALWAYSDEFD(guest_DS),
-                 // /* */ ALWAYSDEFD(guest_ES),
-                 // /* */ ALWAYSDEFD(guest_FS),
-                 // /* */ ALWAYSDEFD(guest_GS),
-                 // /* */ ALWAYSDEFD(guest_SS),
-                 // /* */ ALWAYSDEFD(guest_LDT),
-                 // /* */ ALWAYSDEFD(guest_GDT),
-                 /* 10 */ ALWAYSDEFD(guest_EMWARN),
-                 /* 11 */ ALWAYSDEFD(guest_SSEROUND),
-                 /* 12 */ ALWAYSDEFD(guest_TISTART),
-                 /* 13 */ ALWAYSDEFD(guest_TILEN),
-                 /* 14 */ ALWAYSDEFD(guest_SC_CLASS),
-                 /* 15 */ ALWAYSDEFD(guest_IP_AT_SYSCALL)
-               }
+          alwaysDefd:
+             { /*  0 */ ALWAYSDEFD(guest_CC_OP),
+	       /*  1 */ ALWAYSDEFD(guest_CC_NDEP),
+	       /*  2 */ ALWAYSDEFD(guest_DFLAG),
+	       /*  3 */ ALWAYSDEFD(guest_IDFLAG),
+	       /*  4 */ ALWAYSDEFD(guest_RIP),
+	       /*  5 */ ALWAYSDEFD(guest_FS_ZERO),
+	       /*  6 */ ALWAYSDEFD(guest_FTOP),
+	       /*  7 */ ALWAYSDEFD(guest_FPTAG),
+	       /*  8 */ ALWAYSDEFD(guest_FPROUND),
+	       /*  9 */ ALWAYSDEFD(guest_FC3210),
+	       // /* */ ALWAYSDEFD(guest_CS),
+	       // /* */ ALWAYSDEFD(guest_DS),
+	       // /* */ ALWAYSDEFD(guest_ES),
+	       // /* */ ALWAYSDEFD(guest_FS),
+	       // /* */ ALWAYSDEFD(guest_GS),
+	       // /* */ ALWAYSDEFD(guest_SS),
+	       // /* */ ALWAYSDEFD(guest_LDT),
+	       // /* */ ALWAYSDEFD(guest_GDT),
+	       /* 10 */ ALWAYSDEFD(guest_EMWARN),
+	       /* 11 */ ALWAYSDEFD(guest_SSEROUND),
+	       /* 12 */ ALWAYSDEFD(guest_TISTART),
+	       /* 13 */ ALWAYSDEFD(guest_TILEN),
+	       /* 14 */ ALWAYSDEFD(guest_SC_CLASS),
+	       /* 15 */ ALWAYSDEFD(guest_IP_AT_SYSCALL)
+	     }
         };
 
 

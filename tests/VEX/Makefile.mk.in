@@ -10,8 +10,8 @@ rules() {
     echo "\$(VEX_TESTS): LDFLAGS+=libVEX.a"
     for t in $vex_tests
     do
-	echo "${input_base}/$t: ${input_base}/${t}.c libVEX.a"
-	echo -e '\tgcc $(CFLAGS) $(CPPFLAGS) $^ -o $@'
+	echo "${input_base}/$t: ${input_base}/${t}.cpp libVEX.a"
+	echo -e '\tgcc -lstdc++ $(CFLAGS) $(CPPFLAGS) $^ -o $@'
     done
     echo "${input_base}/dump_irsb: CPPFLAGS+=-I\$(libvex)/priv"
 }
