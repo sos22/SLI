@@ -21,6 +21,7 @@
 /* The main arena. */
 #define N_TEMPORARY_BYTES 4000000
 static char temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
+static unsigned heap_used;
 
 /* Each allocation in the arena is prefixed by an allocation header. */
 struct alloc_header {
@@ -111,30 +112,35 @@ do_gc(void)
   for (x = 0; x < nr_gc_roots; x++)
     gc.visit(*gc_roots[x]);
 
+  heap_used = 0;
   h = first_alloc_header();
   p = NULL;
   while (h) {
     n = next_alloc_header(h);
-    if (h->type && !(h->flags & ALLOC_FLAG_GC_MARK)) {
-      /* We're going to free off this block. */
-      if (h->type->destruct)
-	h->type->destruct(header_to_alloc(h));
-      h->type = NULL;
-      poison(h + 1, h->size - sizeof(*h), 0xa1b2c3d4);
-      if (p && !p->type) {
-	if (h == allocation_cursor)
-	  allocation_cursor = p;
-	p->size += h->size;
-	if (n && !n->type) {
-	  p->size += n->size;
+    if (h->type) {
+      if (h->flags & ALLOC_FLAG_GC_MARK) {
+	heap_used += h->size;
+      } else {
+	/* We're going to free off this block. */
+	if (h->type->destruct)
+	  h->type->destruct(header_to_alloc(h));
+	h->type = NULL;
+	poison(h + 1, h->size - sizeof(*h), 0xa1b2c3d4);
+	if (p && !p->type) {
+	  if (h == allocation_cursor)
+	    allocation_cursor = p;
+	  p->size += h->size;
+	  if (n && !n->type) {
+	    p->size += n->size;
+	  }
+	  n = next_alloc_header(p);
+	  h = p;
+	} else if (n && !n->type) {
+	  if (n == allocation_cursor)
+	    allocation_cursor = h;
+	  h->size += n->size;
+	  n = next_alloc_header(h);
 	}
-	n = next_alloc_header(p);
-	h = p;
-      } else if (n && !n->type) {
-	if (n == allocation_cursor)
-	  allocation_cursor = h;
-	h->size += n->size;
-	n = next_alloc_header(h);
       }
     }
 
@@ -156,7 +162,8 @@ void vexSetAllocModeTEMP_and_clear ( void )
     done_init = True;
   }
 
-  do_gc();
+  if (heap_used > N_TEMPORARY_BYTES / 2)
+    do_gc();
 }
 
 
@@ -226,7 +233,10 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
   res = header_to_alloc(cursor);
   poison(res, size - sizeof(struct alloc_header), 0xaabbccdd);
 
+  heap_used += cursor->size;
+
   allocation_cursor = next_alloc_header(cursor);
+
   return res;
 }
 
@@ -312,7 +322,7 @@ DumpHeapVisitor::visit(const void *what)
     if (!what)
       return;
     struct alloc_header *ah = alloc_to_header(what);
-    if (!ah->type || ah->flags & ALLOC_FLAG_GC_MARK)
+    if (!ah->type || (ah->flags & ALLOC_FLAG_GC_MARK))
       return;
     ah->flags |= ALLOC_FLAG_GC_MARK;
     vex_printf("%d %p %s %s:%d\n", depth, what, ah->type->name, ah->file, ah->line);
