@@ -1,7 +1,7 @@
 targets="slir"
 
 defvars() {
-	echo SLIR_SOURCES= ${input_base}/{interpret,logreader,addressspace,machinestate,interpreter,syscalls,transform_expr}.cpp
+	echo SLIR_SOURCES= ${input_base}/{interpret,logreader,addressspace,machinestate,interpreter,syscalls,transform_expr,replay}.cpp
 
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))

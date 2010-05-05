@@ -7,9 +7,9 @@
 #include <stdlib.h>
 #include <vector>
 
-extern "C" {
 #include "libvex_guest_amd64.h"
-};
+#include "libvex_ir.h"
+#include "libvex.h"
 
 #include "exceptions.h"
 
@@ -112,14 +112,53 @@ public:
 };
 
 class LogRecordRdtsc : public LogRecord {
-public:
+	friend class RdtscEvent;
 	unsigned long tsc;
+public:
 	LogRecordRdtsc(ThreadId _tid,
 		       unsigned long _tsc)
 		: LogRecord(_tid),
 		  tsc(_tsc)
 	{
 	}
+};
+
+class LogRecordLoad : public LogRecord {
+	friend class LoadEvent;
+	unsigned size;
+	unsigned long ptr;
+	const void *buf;
+public:
+	LogRecordLoad(ThreadId _tid,
+		      unsigned _size,
+		      unsigned long _ptr,
+		      const void *_buf) :
+		LogRecord(_tid),
+		size(_size),
+		ptr(_ptr),
+		buf(_buf)
+	{
+	}
+	virtual ~LogRecordLoad() { free((void *)buf); }
+};
+
+class LogRecordStore : public LogRecord {
+	friend class StoreEvent;
+	unsigned size;
+	unsigned long ptr;
+	const void *buf;
+public:
+	LogRecordStore(ThreadId _tid,
+		       unsigned _size,
+		       unsigned long _ptr,
+		       const void *_buf) :
+		LogRecord(_tid),
+		size(_size),
+		ptr(_ptr),
+		buf(_buf)
+	{
+	}
+	virtual ~LogRecordStore() { free((void *)buf); }
 };
 
 class LogRecordAllocateMemory : public LogRecord {
@@ -203,6 +242,16 @@ public:
 	static LogReader *open(const char *path, ptr *initial_ptr);
 };
 
+struct abstract_interpret_value {
+	unsigned long v;
+	abstract_interpret_value() : v(0) {}
+};
+
+struct expression_result {
+	struct abstract_interpret_value lo;
+	struct abstract_interpret_value hi;
+};
+
 
 class RegisterSet {
 public:
@@ -211,7 +260,104 @@ public:
 	unsigned long rip() { return regs.guest_RIP; }
 };
 
+class Thread;
+class MachineState;
+
+class ThreadEvent {
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms) = 0;
+	virtual ~ThreadEvent() {};
+};
+
+class RdtscEvent : public ThreadEvent {
+	IRTemp tmp;
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
+};
+
+class LoadEvent : public ThreadEvent {
+	IRTemp tmp;
+	unsigned long addr;
+	unsigned size;
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	LoadEvent(IRTemp _tmp, unsigned long _addr, unsigned _size) :
+		tmp(_tmp),
+		addr(_addr),
+		size(_size)
+	{
+	}
+};
+
+class StoreEvent : public ThreadEvent {
+	unsigned long addr;
+	unsigned size;
+	void *data;
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	StoreEvent(unsigned long addr, unsigned size, const void *data);
+	virtual ~StoreEvent();
+};
+
+class InstructionEvent : public ThreadEvent {
+	unsigned long rip;
+	unsigned long reg0;
+	unsigned long reg1;
+	unsigned long reg2;
+	unsigned long reg3;
+	unsigned long reg4;
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	InstructionEvent(unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
+			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4) :
+		rip(_rip),
+		reg0(_reg0),
+		reg1(_reg1),
+		reg2(_reg2),
+		reg3(_reg3),
+		reg4(_reg4)
+	{
+	}
+};
+
+class CasEvent : public ThreadEvent {
+	IRTemp dest;
+	expression_result addr;
+	expression_result data;
+	expression_result expected;
+	unsigned size;
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	CasEvent(IRTemp _dest,
+		 expression_result _addr,
+		 expression_result _data,
+		 expression_result _expected,
+		 unsigned _size) :
+		dest(_dest),
+		addr(_addr),
+		data(_data),
+		expected(_expected),
+		size(_size)
+	{
+	}
+};
+
+class SyscallEvent : public ThreadEvent {
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+};
+
+class AddressSpace;
+
 class Thread {
+	void translateNextBlock(AddressSpace *addrSpace);
+	struct expression_result eval_expression(IRExpr *expr);
+	ThreadEvent *do_dirty_call(IRDirty *details);
+	expression_result do_ccall_calculate_condition(struct expression_result *args);
+	expression_result do_ccall_calculate_rflags_c(expression_result *args);
+	expression_result do_ccall_generic(IRCallee *cee, struct expression_result *rargs);
+	expression_result do_ccall(IRCallee *cee, IRExpr **args);
 public:
 	ThreadId tid;
 	unsigned pid;
@@ -220,6 +366,17 @@ public:
 	unsigned long robust_list;
 	unsigned long set_child_tid;
 	bool exitted;
+
+private:
+	IRSB *currentIRSB;
+	VexGcRoot irsbRoot;
+public:
+	struct expression_result *temporaries;
+private:
+	int currentIRSBOffset;
+
+public:
+	ThreadEvent *runToEvent(AddressSpace *addrSpace);
 	Thread(const LogRecordInitialRegisters &initRegs);
 	Thread(unsigned _pid, const Thread &parent) :
 		tid(0),
@@ -228,9 +385,14 @@ public:
 		clear_child_tid(0),
 		robust_list(0),
 		set_child_tid(0),
-		exitted(false)
+		exitted(false),
+		currentIRSB(NULL),
+		irsbRoot((void **)&currentIRSB),
+		temporaries(NULL),
+		currentIRSBOffset(0)
 	{
 	}
+	~Thread() { if (temporaries) delete temporaries; }
 };
 
 class AddressSpace {
@@ -376,11 +538,13 @@ public:
 	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint);
 };
 
-void replay_syscall(const LogReader *lr,
-		    LogReader::ptr startOffset,
-		    LogReader::ptr *endOffset,
-		    AddressSpace *addrSpace,
+void replay_syscall(const LogRecordSyscall *lrs,
 		    Thread *thr,
 		    MachineState *ms);
+void
+process_memory_records(AddressSpace *addrSpace,
+		       const LogReader *lf,
+		       LogReader::ptr startOffset,
+		       LogReader::ptr *endOffset);
 
 #endif /* !SLI_H__ */

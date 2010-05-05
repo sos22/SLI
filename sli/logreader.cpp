@@ -83,8 +83,29 @@ skip:
 		pread(fd, &rr, sizeof(rr), startPtr.offset() + sizeof(rh));
 		return new LogRecordRdtsc(tid, rr.stashed_tsc);
 	}
-	case RECORD_mem_read:
-	case RECORD_mem_write:
+	case RECORD_mem_read: {
+		mem_read_record mrr;
+		pread(fd, &mrr, sizeof(mrr), startPtr.offset() + sizeof(rh));
+		void *buf = malloc(rh.size - sizeof(mrr) - sizeof(rh));
+		pread(fd, buf, rh.size - sizeof(mrr) - sizeof(rh),
+		      startPtr.offset() + sizeof(rh) + sizeof(mrr));
+		return new LogRecordLoad(tid,
+					 rh.size - sizeof(mrr) - sizeof(rh),
+					 mrr.ptr,
+					 buf);
+	}
+	case RECORD_mem_write: {
+		mem_write_record mwr;
+		pread(fd, &mwr, sizeof(mwr), startPtr.offset() + sizeof(rh));
+		void *buf = malloc(rh.size - sizeof(mwr) - sizeof(rh));
+		pread(fd, buf, rh.size - sizeof(mwr) - sizeof(rh),
+		      startPtr.offset() + sizeof(rh) + sizeof(mwr));
+		return new LogRecordStore(tid,
+					  rh.size - sizeof(mwr) - sizeof(rh),
+					  mwr.ptr,
+					  buf);
+	}
+
 	case RECORD_new_thread:
 	case RECORD_thread_blocking:
 	case RECORD_thread_unblocked:

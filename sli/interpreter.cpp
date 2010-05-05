@@ -14,25 +14,10 @@
 
 #include "sli.h"
 
-static void eval_expression(struct expression_result *temporaries,
-			    Thread *thr,
-			    struct expression_result *dest,
-			    IRExpr *expr);
-
 static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 {
 	return False;
 }
-
-struct abstract_interpret_value {
-	unsigned long v;
-	abstract_interpret_value() : v(0) {}
-};
-
-struct expression_result {
-	struct abstract_interpret_value lo;
-	struct abstract_interpret_value hi;
-};
 
 #define REG_LAST 128
 
@@ -51,83 +36,35 @@ read_reg(Thread *state, unsigned offset, unsigned long *v)
 	return NULL;
 }
 
-static unsigned long
-do_dirtyhelper_rdtsc(const LogReader *lf, LogReader::ptr startOffset, LogReader::ptr *endOffset)
+ThreadEvent *
+Thread::do_dirty_call(IRDirty *details)
 {
-	LogRecord *lr = lf->read(startOffset, endOffset);
-	LogRecordRdtsc *lrr = dynamic_cast<LogRecordRdtsc *>(lr);
-	assert(lrr);
-	return lrr->tsc;
-}
-
-static void
-do_dirty_call(struct expression_result *temporaries,
-	      AddressSpace *addressSpace,
-	      Thread *thr,
-	      IRSB *irsb,
-	      IRDirty *details,
-	      const LogReader *logfile,
-	      LogReader::ptr logfilePtr,
-	      LogReader::ptr *logfilePtrOut)
-{
-	struct expression_result guard;
 	struct expression_result args[6];
 	unsigned x;
-	unsigned long res;
 
 	if (details->guard) {
-		eval_expression(temporaries, thr, &guard, details->guard);
+		expression_result guard = eval_expression(details->guard);
 		if (!guard.lo.v)
-			return;
+			return NULL;
 	}
 	for (x = 0; details->args[x]; x++) {
 		assert(x < 6);
-		eval_expression(temporaries, thr, &args[x], details->args[x]);
+		args[x] = eval_expression(details->args[x]);
 	}
 	assert(!details->cee->regparms);
 
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
-		temporaries[details->tmp].lo.v =
-			do_dirtyhelper_rdtsc(logfile, logfilePtr, logfilePtrOut);
+		return new RdtscEvent(details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		addressSpace->readMemory(args[0].lo.v, 1,
-					 &temporaries[details->tmp].lo.v);
+		return new LoadEvent(details->tmp, args[0].lo.v, 1);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		addressSpace->readMemory(args[0].lo.v, 2,
-					 &temporaries[details->tmp].lo.v);
+		return new LoadEvent(details->tmp, args[0].lo.v, 2);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		addressSpace->readMemory(args[0].lo.v, 4,
-					 &temporaries[details->tmp].lo.v);
+		return new LoadEvent(details->tmp, args[0].lo.v, 4);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		addressSpace->readMemory(args[0].lo.v, 8,
-					 &temporaries[details->tmp].lo.v);
+		return new LoadEvent(details->tmp, args[0].lo.v, 8);
 	} else {
-		printf("Unknown dirty call %s\n", details->cee->name);
-		if (details->needsBBP) {
-			res = ((unsigned long (*)(VexGuestAMD64State *,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long))(details->cee->addr))
-				(&thr->regs.regs, args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
-				 args[4].lo.v, args[5].lo.v);
-		} else {
-			res = ((unsigned long (*)(unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long))(details->cee->addr))
-				(args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
-				 args[4].lo.v, args[5].lo.v);
-		}
-
-		if (details->tmp != IRTemp_INVALID) {
-			temporaries[details->tmp].lo.v = res;
-			temporaries[details->tmp].hi.v = 0;
-		}
+		throw NotImplementedException("Unknown dirty call %s\n", details->cee->name);
 	}
 }
 
@@ -234,26 +171,17 @@ calculate_condition_flags_XXX(unsigned long op,
 	cf &= 1;
 }
 
-static void
-do_ccall_calculate_condition(struct expression_result *temporaries,
-			     Thread *thr,
-			     struct expression_result *dest,
-			     IRType retty,
-			     IRExpr **args)
+expression_result
+Thread::do_ccall_calculate_condition(struct expression_result *args)
 {
-	struct expression_result condcode = {};
-	struct expression_result op = {};
-	struct expression_result dep1 = {};
-	struct expression_result dep2 = {};
-	struct expression_result ndep = {};
+	struct expression_result condcode = args[0];
+	struct expression_result op = args[1];
+	struct expression_result dep1 =	args[2];
+	struct expression_result dep2 =	args[3];
+	struct expression_result ndep =	args[4];
+	struct expression_result res;
 	int inv;
 	unsigned cf, zf, sf, of;
-
-	eval_expression(temporaries, thr, &condcode, args[0]);
-	eval_expression(temporaries, thr, &op, args[1]);
-	eval_expression(temporaries, thr, &dep1, args[2]);
-	eval_expression(temporaries, thr, &dep2, args[3]);
-	eval_expression(temporaries, thr, &ndep, args[4]);
 
 	calculate_condition_flags_XXX(op.lo.v,
 				      dep1.lo.v,
@@ -267,22 +195,22 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 	inv = condcode.lo.v & 1;
 	switch (condcode.lo.v & ~1) {
 	case AMD64CondZ:
-		dest->lo.v = zf;
+		res.lo.v = zf;
 		break;
 	case AMD64CondL:
-		dest->lo.v = sf ^ of;
+		res.lo.v = sf ^ of;
 		break;
 	case AMD64CondLE:
-		dest->lo.v = (sf ^ of) | zf;
+		res.lo.v = (sf ^ of) | zf;
 		break;
 	case AMD64CondB:
-		dest->lo.v = cf;
+		res.lo.v = cf;
 		break;
 	case AMD64CondBE:
-		dest->lo.v = cf | zf;
+		res.lo.v = cf | zf;
 		break;
 	case AMD64CondS:
-		dest->lo.v = sf;
+		res.lo.v = sf;
 		break;
 
 	default:
@@ -290,26 +218,20 @@ do_ccall_calculate_condition(struct expression_result *temporaries,
 	}
 
 	if (inv)
-		dest->lo.v ^= 1;
+		res.lo.v ^= 1;
+
+	return res;
 }
 
-static void
-do_ccall_calculate_rflags_c(struct expression_result *temporaries,
-			    Thread *thr,
-			    struct expression_result *dest,
-			    IRType retty,
-			    IRExpr **args)
+expression_result
+Thread::do_ccall_calculate_rflags_c(expression_result *args)
 {
-	struct expression_result op = {};
-	struct expression_result dep1 = {};
-	struct expression_result dep2 = {};
-	struct expression_result ndep = {};
+	struct expression_result op = args[0];
+	struct expression_result dep1 =	args[1];
+	struct expression_result dep2 =	args[2];
+	struct expression_result ndep =	args[3];
+	struct expression_result res;
 	unsigned cf, zf, sf, of;
-
-	eval_expression(temporaries, thr, &op, args[0]);
-	eval_expression(temporaries, thr, &dep1, args[1]);
-	eval_expression(temporaries, thr, &dep2, args[2]);
-	eval_expression(temporaries, thr, &ndep, args[3]);
 
 	calculate_condition_flags_XXX(op.lo.v,
 				      dep1.lo.v,
@@ -320,15 +242,26 @@ do_ccall_calculate_rflags_c(struct expression_result *temporaries,
 				      sf,
 				      of);
 
-	dest->lo.v = cf;
+	res.lo.v = cf;
+	return res;
 }
 
-static void
-do_ccall_generic(struct expression_result *temporaries,
-		 Thread *thr,
-		 struct expression_result *dest,
-		 IRCallee *cee,
-		 IRType retty,
+expression_result
+Thread::do_ccall_generic(IRCallee *cee,
+			 struct expression_result *rargs)
+{
+	struct expression_result res;
+
+	res.lo.v = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
+				       unsigned long, unsigned long, unsigned long))cee->addr)
+		(rargs[0].lo.v, rargs[1].lo.v, rargs[2].lo.v, rargs[3].lo.v, rargs[4].lo.v,
+		 rargs[5].lo.v);
+	res.hi.v = 0;
+	return res;
+}
+
+expression_result
+Thread::do_ccall(IRCallee *cee,
 		 IRExpr **args)
 {
 	struct expression_result rargs[6];
@@ -337,30 +270,15 @@ do_ccall_generic(struct expression_result *temporaries,
 	assert(cee->regparms == 0);
 	for (x = 0; args[x]; x++) {
 		assert(x < 6);
-		eval_expression(temporaries, thr, &rargs[x], args[x]);
+		rargs[x] = eval_expression(args[x]);
 	}
-	dest->lo.v = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
-				       unsigned long, unsigned long, unsigned long))cee->addr)
-		(rargs[0].lo.v, rargs[1].lo.v, rargs[2].lo.v, rargs[3].lo.v, rargs[4].lo.v,
-		 rargs[5].lo.v);
-	dest->hi.v = 0;
-}
-
-static void
-do_ccall(struct expression_result *temporaries,
-	 Thread *thr,
-	 struct expression_result *dest,
-	 IRCallee *cee,
-	 IRType retty,
-	 IRExpr **args)
-{
 	if (!strcmp(cee->name, "amd64g_calculate_condition")) {
-		do_ccall_calculate_condition(temporaries, thr, dest, retty, args);
+		return do_ccall_calculate_condition(rargs);
 	} else if (!strcmp(cee->name, "amd64g_calculate_rflags_c")) {
-		do_ccall_calculate_rflags_c(temporaries, thr, dest, retty, args);
+		return do_ccall_calculate_rflags_c(rargs);
 	} else {
 		printf("Unknown clean call %s\n", cee->name);
-		do_ccall_generic(temporaries, thr, dest, cee, retty, args);
+		return do_ccall_generic(cee, rargs);
 	}
 }
 
@@ -438,12 +356,11 @@ mulls64(struct expression_result *dest, const struct expression_result &src1,
 	}
 }
 
-static void
-eval_expression(struct expression_result *temporaries,
-		Thread *thr,
-		struct expression_result *dest,
-		IRExpr *expr)
+expression_result
+Thread::eval_expression(IRExpr *expr)
 {
+	struct expression_result res;
+	struct expression_result *dest = &res;
 	dest->lo.v = 0xdeadbeeff001f001;
 	dest->hi.v = 0xaaaaaaaaaaaaaaaa;
 
@@ -452,7 +369,7 @@ eval_expression(struct expression_result *temporaries,
 		unsigned long v1;
 		const struct expression *src1;
 		unsigned sub_word_offset = expr->Iex.Get.offset & 7;
-		src1 = read_reg(thr,
+		src1 = read_reg(this,
 				expr->Iex.Get.offset - sub_word_offset,
 				&v1);
 		switch (expr->Iex.Get.ty) {
@@ -464,7 +381,7 @@ eval_expression(struct expression_result *temporaries,
 		case Ity_V128:
 			assert(!sub_word_offset);
 			dest->lo.v = v1;
-			read_reg(thr,
+			read_reg(this,
 				 expr->Iex.Get.offset - sub_word_offset + 8,
 				 &dest->hi.v);
 			break;
@@ -527,10 +444,8 @@ eval_expression(struct expression_result *temporaries,
 	}
 
 	case Iex_Binop: {
-		struct expression_result arg1;
-		struct expression_result arg2;
-		eval_expression(temporaries, thr, &arg1, expr->Iex.Binop.arg1);
-		eval_expression(temporaries, thr, &arg2, expr->Iex.Binop.arg2);
+		struct expression_result arg1 = eval_expression(expr->Iex.Binop.arg1);
+		struct expression_result arg2 = eval_expression(expr->Iex.Binop.arg2);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub64:
 			dest->lo.v = arg1.lo.v - arg2.lo.v;
@@ -789,8 +704,7 @@ eval_expression(struct expression_result *temporaries,
 	}
 
 	case Iex_Unop: {
-		struct expression_result arg;
-		eval_expression(temporaries, thr, &arg, expr->Iex.Unop.arg);
+		struct expression_result arg = eval_expression(expr->Iex.Unop.arg);
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
 			dest->lo.v = arg.lo.v >> 32;
@@ -878,13 +792,10 @@ eval_expression(struct expression_result *temporaries,
 	}
 
 	case Iex_Mux0X: {
-		struct expression_result cond;
-		struct expression_result res0;
-		struct expression_result resX;
+		struct expression_result cond = eval_expression(expr->Iex.Mux0X.cond);
+		struct expression_result res0 = eval_expression(expr->Iex.Mux0X.expr0);
+		struct expression_result resX = eval_expression(expr->Iex.Mux0X.exprX);
 		struct expression_result *choice;
-		eval_expression(temporaries, thr, &cond, expr->Iex.Mux0X.cond);
-		eval_expression(temporaries, thr, &res0, expr->Iex.Mux0X.expr0);
-		eval_expression(temporaries, thr, &resX, expr->Iex.Mux0X.exprX);
 		if (cond.lo.v == 0) {
 			choice = &res0;
 		} else {
@@ -895,8 +806,7 @@ eval_expression(struct expression_result *temporaries,
 	}
 
 	case Iex_CCall: {
-		do_ccall(temporaries, thr, dest, expr->Iex.CCall.cee,
-			 expr->Iex.CCall.retty, expr->Iex.CCall.args);
+		res = do_ccall(expr->Iex.CCall.cee, expr->Iex.CCall.args);
 		break;
 	}
 
@@ -904,6 +814,8 @@ eval_expression(struct expression_result *temporaries,
 		ppIRExpr(expr);
 		throw NotImplementedException("Bad expression tag %x\n", expr->tag);
 	}
+
+	return res;
 }
 
 static unsigned long
@@ -925,49 +837,11 @@ IRSB *instrument_func(void *closure,
 		      IRType gWordTy,
 		      IRType hWordTy);
 
-void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
-				 const LogReader *lr,
-				 LogReader::ptr startOffset,
-				 LogReader::ptr *endOffset)
+void Thread::translateNextBlock(AddressSpace *addrSpace)
 {
-	Thread *thr = currentState->findThread(lrf.thread());
-	AddressSpace *addrSpace = currentState->addressSpace;
+	regs.regs.guest_RIP = redirectGuest(regs.regs.guest_RIP);
 
-	thr->regs.regs.guest_RIP = redirectGuest(thr->regs.rip());
-
-	if (thr->regs.rip() != lrf.rip)
-		throw ReplayFailedBadRip(thr->regs.rip(), lrf.rip);
-
-#define ID(x) x
-#define PASTE(x, y) x ## y
-#define PASTE2(x, y) PASTE(x, y)
-#define STRING(x) #x
-#define STRING2(x) STRING(x)
-#define FR_REG_NAME(x)				\
-	PASTE2(PASTE2(FOOTSTEP_REG_, x), _NAME)
-#define GUEST_REG(x) PASTE2(guest_, FR_REG_NAME(x))
-#define CHECK_REGISTER(x)						\
-	do {								\
-		if (*(unsigned long *)&thr->regs.regs. GUEST_REG(x) != lrf. reg ## x) \
-			throw ReplayFailedBadRegister(			\
-				STRING2( FR_REG_NAME(x)),		\
-				*(unsigned long *)&thr->regs.regs.GUEST_REG(x), \
-				lrf. reg ## x);				\
-	} while (0)
-	CHECK_REGISTER(0);
-	CHECK_REGISTER(1);
-//	CHECK_REGISTER(2);
-	do {								
-		if ( ((unsigned long *)&thr->regs.regs.guest_XMM0)[1] != lrf.reg2) 
-			throw ReplayFailedBadRegister(			
-				"xmm0b",		
-				((unsigned long *)&thr->regs.regs.guest_XMM0)[1], 
-				lrf. reg2);				
-	} while (0);
-	CHECK_REGISTER(3);
-	CHECK_REGISTER(4);
-
-	const void *code = addrSpace->getRawPointerUnsafe(thr->regs.rip());
+	const void *code = addrSpace->getRawPointerUnsafe(regs.rip());
 
 	vexSetAllocModeTEMP_and_clear();
 
@@ -985,7 +859,7 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 			      NULL, /* Context for chase_into_ok */
 			      disInstr_AMD64,
 			      (UChar *)code,
-			      (Addr64)thr->regs.rip(),
+			      (Addr64)regs.rip(),
 			      chase_into_ok,
 			      False, /* host bigendian */
 			      VexArchAMD64,
@@ -999,225 +873,209 @@ void Interpreter::replayFootstep(const LogRecordFootstep &lrf,
 	if (!irsb)
 		throw InstructionDecodeFailedException();
 
-	VexGcRoot irsb_gc_root((void **)&irsb);
-
 	irsb = instrument_func(NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
 
-	struct expression_result *temporaries = new expression_result[irsb->tyenv->types_used];
+	if (temporaries)
+		delete temporaries;
+	temporaries = new expression_result[irsb->tyenv->types_used];
 	memset(temporaries,
 	       0,
 	       sizeof(temporaries[0]) * irsb->tyenv->types_used);
-	PointerKeeperArr<expression_result> pkt(temporaries);
 
-	for (int stmt_nr = 0; stmt_nr < irsb->stmts_used; stmt_nr++) {
-		IRStmt *stmt = irsb->stmts[stmt_nr];
-		switch (stmt->tag) {
-		case Ist_NoOp:
-			break;
-		case Ist_IMark:
-			break;
-		case Ist_AbiHint:
-			break;
-		case Ist_MBE:
-			break;
-		case Ist_WrTmp:
-			eval_expression(temporaries,
-					thr,
-					&temporaries[stmt->Ist.WrTmp.tmp],
-					stmt->Ist.WrTmp.data);
-			break;
+	currentIRSB = irsb;
+	currentIRSBOffset = 0;
+}
 
-		case Ist_Store: {
-			assert(stmt->Ist.Store.end == Iend_LE);
-			assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
-			struct expression_result data;
-			struct expression_result addr;
-			eval_expression(temporaries, thr, &data, stmt->Ist.Store.data);
-			eval_expression(temporaries, thr, &addr, stmt->Ist.Store.addr);
-			unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
-								  stmt->Ist.Store.data));
-			if (size <= 8) {
-				addrSpace->writeMemory(addr.lo.v,
-						       size,
-						       &data.lo.v,
-						       false,
-						       thr);
-			} else if (size == 16) {
-				addrSpace->writeMemory(addr.lo.v,
-						       8,
-						       &data.lo.v,
-						       false,
-						       thr);
-				addrSpace->writeMemory(addr.lo.v + 8,
-						       8,
-						       &data.hi.v,
-						       false,
-						       thr);
-			} else {
-				ppIRStmt(stmt);
-				throw NotImplementedException();
-			}
-			break;
-		}
+ThreadEvent *
+Thread::runToEvent(struct AddressSpace *addrSpace)
+{
+	while (1) {
+		if (!currentIRSB)
+			translateNextBlock(addrSpace);
+		while (currentIRSBOffset < currentIRSB->stmts_used) {
+			IRStmt *stmt = currentIRSB->stmts[currentIRSBOffset];
+			currentIRSBOffset++;
 
-		case Ist_CAS: {
-			assert(stmt->Ist.CAS.details->oldHi == IRTemp_INVALID);
-			assert(stmt->Ist.CAS.details->expdHi == NULL);
-			assert(stmt->Ist.CAS.details->dataHi == NULL);
-			assert(stmt->Ist.CAS.details->end == Iend_LE);
-			struct expression_result data;
-			struct expression_result addr;
-			struct expression_result expected;
-			eval_expression(temporaries, thr, &data, stmt->Ist.CAS.details->dataLo);
-			eval_expression(temporaries, thr, &addr, stmt->Ist.CAS.details->addr);
-			eval_expression(temporaries, thr, &expected, stmt->Ist.CAS.details->expdLo);
-			unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
-								  stmt->Ist.CAS.details->dataLo));
-			struct expression_result seen;
-			if (size <= 8) {
-				addrSpace->readMemory(addr.lo.v, size, &seen.lo.v);
-			} else if (size == 16) {
-				addrSpace->readMemory(addr.lo.v, 8, &seen.lo.v);
-				addrSpace->readMemory(addr.lo.v + 8, 8, &seen.hi.v);
-			} else {
-				ppIRStmt(stmt);
-				throw NotImplementedException();
-			}
-			if (expected.lo.v == seen.lo.v &&
-			    (size <= 8 || expected.hi.v == seen.hi.v)) {
+			switch (stmt->tag) {
+			case Ist_NoOp:
+				break;
+			case Ist_IMark:
+#define PASTE(x, y) x ## y
+#define GR(x) *(unsigned long *)(&regs.regs. PASTE(guest_, x))
+				return new InstructionEvent(regs.regs.guest_RIP,
+							    GR(FOOTSTEP_REG_0_NAME),
+							    GR(FOOTSTEP_REG_1_NAME),
+							    ((unsigned long *)regs.regs.guest_XMM0)[1],
+							    GR(FOOTSTEP_REG_3_NAME),
+							    GR(FOOTSTEP_REG_4_NAME));
+#undef GR
+#undef PASTE
+			case Ist_AbiHint:
+				break;
+			case Ist_MBE:
+				break;
+			case Ist_WrTmp:
+				temporaries[stmt->Ist.WrTmp.tmp] =
+					eval_expression(stmt->Ist.WrTmp.data);
+				break;
+
+			case Ist_Store: {
+				assert(stmt->Ist.Store.end == Iend_LE);
+				assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
+				struct expression_result data =
+					eval_expression(stmt->Ist.Store.data);
+				struct expression_result addr =
+					eval_expression(stmt->Ist.Store.addr);
+				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
+									  stmt->Ist.Store.data));
+				unsigned char dbuf[16];
+				memset(dbuf, 0, 16);
 				if (size <= 8) {
-					addrSpace->writeMemory(addr.lo.v,
-							       size,
-							       &data.lo.v,
-							       false,
-							       thr);
+					memcpy(dbuf, &data.lo.v, size);
+				} else if (size <= 16) {
+					memcpy(dbuf, &data.lo.v, 8);
+					memcpy(dbuf + 8, &data.hi.v, size - 8);
 				} else {
-					addrSpace->writeMemory(addr.lo.v,
-							       8,
-							       &data.lo.v,
-							       false,
-							       thr);
-					addrSpace->writeMemory(addr.lo.v + 8,
-							       8,
-							       &data.hi.v,
-							       false,
-							       thr);
+					ppIRStmt(stmt);
+					throw NotImplementedException();
 				}
+				return new StoreEvent(addr.lo.v, size, dbuf);
 			}
-			temporaries[stmt->Ist.CAS.details->oldLo] = seen;
-			break;
-		}
 
-		case Ist_Put: {
-			unsigned byte_offset = stmt->Ist.Put.offset & 7;
-			unsigned long *dest =
-				get_reg(thr,
-					stmt->Ist.Put.offset - byte_offset);
-			struct expression_result data;
+			case Ist_CAS: {
+				assert(stmt->Ist.CAS.details->oldHi == IRTemp_INVALID);
+				assert(stmt->Ist.CAS.details->expdHi == NULL);
+				assert(stmt->Ist.CAS.details->dataHi == NULL);
+				assert(stmt->Ist.CAS.details->end == Iend_LE);
+				struct expression_result data =
+					eval_expression(stmt->Ist.CAS.details->dataLo);
+				struct expression_result addr =
+					eval_expression(stmt->Ist.CAS.details->addr);
+				struct expression_result expected =
+					eval_expression(stmt->Ist.CAS.details->expdLo);
+				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
+									  stmt->Ist.CAS.details->dataLo));
+				return new CasEvent(stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+			}
 
-			eval_expression(temporaries, thr, &data, stmt->Ist.Put.data);
-			switch (typeOfIRExpr(irsb->tyenv, stmt->Ist.Put.data)) {
-			case Ity_I8:
-				*dest &= ~(0xFF << (byte_offset * 8));
-				*dest |= data.lo.v << (byte_offset * 8);
+			case Ist_Put: {
+				unsigned byte_offset = stmt->Ist.Put.offset & 7;
+				unsigned long *dest =
+					get_reg(this,
+						stmt->Ist.Put.offset - byte_offset);
+				struct expression_result data =
+					eval_expression(stmt->Ist.Put.data);
+				switch (typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data)) {
+				case Ity_I8:
+					*dest &= ~(0xFF << (byte_offset * 8));
+					*dest |= data.lo.v << (byte_offset * 8);
+					break;
+
+				case Ity_I16:
+					assert(!(byte_offset % 2));
+					*dest &= ~(0xFFFFul << (byte_offset * 8));
+					*dest |= data.lo.v << (byte_offset * 8);
+					break;
+
+				case Ity_I32:
+				case Ity_F32:
+					assert(!(byte_offset % 4));
+					*dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
+					*dest |= data.lo.v << (byte_offset * 8);
+					break;
+
+				case Ity_I64:
+				case Ity_F64:
+					assert(byte_offset == 0);
+					*dest = data.lo.v;
+					break;
+
+				case Ity_I128:
+				case Ity_V128:
+					assert(byte_offset == 0);
+					*dest = data.lo.v;
+					*get_reg(this,
+						 stmt->Ist.Put.offset + 8) =
+						data.hi.v;
+					break;
+				default:
+					ppIRStmt(stmt);
+					throw NotImplementedException();
+				}
 				break;
+			}
 
-			case Ity_I16:
-				assert(!(byte_offset % 2));
-				*dest &= ~(0xFFFFul << (byte_offset * 8));
-				*dest |= data.lo.v << (byte_offset * 8);
+			case Ist_Dirty: {
+				ThreadEvent *evt;
+				evt = do_dirty_call(stmt->Ist.Dirty.details);
+				if (evt)
+					return evt;
 				break;
+			}
 
-			case Ity_I32:
-			case Ity_F32:
-				assert(!(byte_offset % 4));
-				*dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
-				*dest |= data.lo.v << (byte_offset * 8);
-				break;
+			case Ist_Exit: {
+				if (stmt->Ist.Exit.guard) {
+					struct expression_result guard =
+						eval_expression(stmt->Ist.Exit.guard);
+					if (!guard.lo.v)
+						break;
+				}
+				if (stmt->Ist.Exit.jk != Ijk_Boring) {
+					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
+					printf("EMULATION WARNING %x\n",
+					       regs.regs.guest_EMWARN);
+				}
+				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
+				regs.regs.guest_RIP = stmt->Ist.Exit.dst->Ico.U64;
+				goto finished_block;
+			}
 
-			case Ity_I64:
-			case Ity_F64:
-				assert(byte_offset == 0);
-				*dest = data.lo.v;
-				break;
-
-			case Ity_I128:
-			case Ity_V128:
-				assert(byte_offset == 0);
-				*dest = data.lo.v;
-				*get_reg(thr,
-					 stmt->Ist.Put.offset + 8) =
-					data.hi.v;
-				break;
 			default:
+				printf("Don't know how to interpret statement ");
 				ppIRStmt(stmt);
 				throw NotImplementedException();
 			}
-			break;
 		}
-
-		case Ist_Dirty: {
-			do_dirty_call(temporaries, addrSpace, thr, irsb, stmt->Ist.Dirty.details,
-				      lr, startOffset, endOffset);
-			break;
+		
+		assert(currentIRSB->jumpkind == Ijk_Boring ||
+		       currentIRSB->jumpkind == Ijk_Call ||
+		       currentIRSB->jumpkind == Ijk_Ret ||
+		       currentIRSB->jumpkind == Ijk_Sys_syscall);
+		
+		{
+			struct expression_result next_addr =
+				eval_expression(currentIRSB->next);
+			regs.regs.guest_RIP = next_addr.lo.v;
 		}
-
-		case Ist_Exit: {
-			struct expression_result guard;
-			if (stmt->Ist.Exit.guard) {
-				eval_expression(temporaries, thr, &guard, stmt->Ist.Exit.guard);
-				if (!guard.lo.v)
-					break;
-			}
-			if (stmt->Ist.Exit.jk != Ijk_Boring) {
-				assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
-				printf("EMULATION WARNING %x\n",
-				       thr->regs.regs.guest_EMWARN);
-			}
-			assert(stmt->Ist.Exit.dst->tag == Ico_U64);
-			thr->regs.regs.guest_RIP = stmt->Ist.Exit.dst->Ico.U64;
-			goto finished_block;
+		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
+			translateNextBlock(addrSpace);
+			return new SyscallEvent();
 		}
-
-		default:
-			printf("Don't know how to interpret statement ");
-			ppIRStmt(stmt);
-			throw NotImplementedException();
-		}
-	}
-
-	assert(irsb->jumpkind == Ijk_Boring ||
-	       irsb->jumpkind == Ijk_Call ||
-	       irsb->jumpkind == Ijk_Ret ||
-	       irsb->jumpkind == Ijk_Sys_syscall);
-
-	{
-		struct expression_result next_addr;
-		eval_expression(temporaries, thr, &next_addr, irsb->next);
-		thr->regs.regs.guest_RIP = next_addr.lo.v;
-	}
-
-	if (irsb->jumpkind == Ijk_Sys_syscall)
-		replay_syscall(lr, startOffset, endOffset, addrSpace, thr,
-			       currentState);
 
 finished_block:
-	return;
+		translateNextBlock(addrSpace);
+	}
 }
 
 void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 {
-	LogRecord *lr;
-
 	while (1) {
-		lr = lf->read(ptr, &ptr);
+		LogRecord *lr = lf->read(ptr, &ptr);
 		if (!lr)
 			break;
-		PointerKeeper<LogRecord> k(lr);
-		if (LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr))
-			replayFootstep(*lrf, lf, ptr, &ptr);
-		else
-			throw SliException();
+
+		PointerKeeper<LogRecord> k_lr(lr);
+		Thread *thr = currentState->findThread(lr->thread());
+		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
+		PointerKeeper<ThreadEvent> k_evt(evt);
+
+		evt->replay(thr, lr, currentState);
+
+		/* Memory records are special and should always be
+		   processed eagerly. */
+		process_memory_records(currentState->addressSpace, lf, ptr,
+				       &ptr);
+
 	}
 }
 
@@ -1227,6 +1085,10 @@ Thread::Thread(LogRecordInitialRegisters const&lrir)
 	  clear_child_tid(0),
 	  robust_list(0),
 	  set_child_tid(0),
-	  exitted(false)
+	  exitted(false),
+	  currentIRSB(NULL),
+	  irsbRoot((void **)&currentIRSB),
+	  temporaries(NULL),
+	  currentIRSBOffset(0)
 {
 }

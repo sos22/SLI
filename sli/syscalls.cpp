@@ -10,7 +10,7 @@ isErrnoSysres(long x)
 	return x >= -4096 && x < 0;
 }
 
-static void
+void
 process_memory_records(AddressSpace *addrSpace,
 		       const LogReader *lf,
 		       LogReader::ptr startOffset,
@@ -72,15 +72,11 @@ handle_clone(AddressSpace *addrSpace,
 }
 
 void
-replay_syscall(const LogReader *lr,
-	       LogReader::ptr startOffset,
-	       LogReader::ptr *endOffset,
-	       AddressSpace *addrSpace,
+replay_syscall(const LogRecordSyscall *lrs,
 	       Thread *thr,
 	       MachineState *mach)
 {
-	LogRecordSyscall *lrs = dynamic_cast<LogRecordSyscall *>(lr->read(startOffset, endOffset));
-	PointerKeeper<LogRecordSyscall> pk(lrs);
+	AddressSpace *addrSpace = mach->addressSpace;
 	unsigned long sysnr = thr->regs.regs.guest_RAX;
 	unsigned long res = lrs->res;
 	unsigned long args[6];
@@ -249,6 +245,4 @@ replay_syscall(const LogReader *lr,
 
 	assert(res == lrs->res);	
 	thr->regs.regs.guest_RAX = res;
-
-	process_memory_records(addrSpace, lr, *endOffset, endOffset);
 }
