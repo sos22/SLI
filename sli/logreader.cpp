@@ -48,7 +48,8 @@ skip:
 	switch (rh.cls) {
 	case RECORD_footstep: {
 		footstep_record fr;
-		pread(fd, &fr, sizeof(fr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &fr, sizeof(fr), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordFootstep(tid,
 					     fr.rip,
 					     fr.FOOTSTEP_REG_0_NAME,
@@ -59,7 +60,8 @@ skip:
 	}
 	case RECORD_syscall: {
 		syscall_record sr;
-		pread(fd, &sr, sizeof(sr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &sr, sizeof(sr), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordSyscall(tid,
 					    sr.syscall_nr,
 					    sr.syscall_res._isError ? -(long)sr.syscall_res._val : sr.syscall_res._val,
@@ -69,10 +71,11 @@ skip:
 	}
 	case RECORD_memory: {
 		memory_record mr;
-		pread(fd, &mr, sizeof(mr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &mr, sizeof(mr), startPtr.offset() + sizeof(rh));
 		void *buf = malloc(rh.size - sizeof(mr) - sizeof(rh));
-		pread(fd, buf, rh.size - sizeof(mr) - sizeof(rh),
-		      startPtr.offset() + sizeof(rh) + sizeof(mr));
+		r = pread(fd, buf, rh.size - sizeof(mr) - sizeof(rh),
+			  startPtr.offset() + sizeof(rh) + sizeof(mr));
+		(void)r;
 		return new LogRecordMemory(tid,
 					   rh.size - sizeof(mr) - sizeof(rh),
 					   (unsigned long)mr.ptr,
@@ -80,15 +83,17 @@ skip:
 	}
 	case RECORD_rdtsc: {
 		rdtsc_record rr;
-		pread(fd, &rr, sizeof(rr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &rr, sizeof(rr), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordRdtsc(tid, rr.stashed_tsc);
 	}
 	case RECORD_mem_read: {
 		mem_read_record mrr;
-		pread(fd, &mrr, sizeof(mrr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &mrr, sizeof(mrr), startPtr.offset() + sizeof(rh));
 		void *buf = malloc(rh.size - sizeof(mrr) - sizeof(rh));
-		pread(fd, buf, rh.size - sizeof(mrr) - sizeof(rh),
-		      startPtr.offset() + sizeof(rh) + sizeof(mrr));
+		r = pread(fd, buf, rh.size - sizeof(mrr) - sizeof(rh),
+			  startPtr.offset() + sizeof(rh) + sizeof(mrr));
+		(void)r;
 		return new LogRecordLoad(tid,
 					 rh.size - sizeof(mrr) - sizeof(rh),
 					 mrr.ptr,
@@ -96,10 +101,11 @@ skip:
 	}
 	case RECORD_mem_write: {
 		mem_write_record mwr;
-		pread(fd, &mwr, sizeof(mwr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &mwr, sizeof(mwr), startPtr.offset() + sizeof(rh));
 		void *buf = malloc(rh.size - sizeof(mwr) - sizeof(rh));
-		pread(fd, buf, rh.size - sizeof(mwr) - sizeof(rh),
-		      startPtr.offset() + sizeof(rh) + sizeof(mwr));
+		r = pread(fd, buf, rh.size - sizeof(mwr) - sizeof(rh),
+			  startPtr.offset() + sizeof(rh) + sizeof(mwr));
+		(void)r;
 		return new LogRecordStore(tid,
 					  rh.size - sizeof(mwr) - sizeof(rh),
 					  mwr.ptr,
@@ -117,14 +123,16 @@ skip:
 
 	case RECORD_signal: {
 		signal_record sr;
-		pread(fd, &sr, sizeof(sr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &sr, sizeof(sr), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordSignal(tid, sr.rip, sr.signo, sr.err,
 					   sr.virtaddr);
 	}
 		
 	case RECORD_allocate_memory: {
 		allocate_memory_record amr;
-		pread(fd, &amr, sizeof(amr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &amr, sizeof(amr), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordAllocateMemory(tid,
 						   amr.start,
 						   amr.size,
@@ -133,17 +141,20 @@ skip:
 	}
 	case RECORD_initial_registers: {
 		VexGuestAMD64State regs;
-		pread(fd, &regs, sizeof(regs), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &regs, sizeof(regs), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordInitialRegisters(tid, regs);
 	}
 	case RECORD_initial_brk: {
 		initial_brk_record ibr;
-		pread(fd, &ibr, sizeof(ibr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &ibr, sizeof(ibr), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordInitialBrk(tid, ibr.initial_brk);
 	}
 	case RECORD_initial_sighandlers: {
 		initial_sighandlers_record isr;
-		pread(fd, &isr, sizeof(isr), startPtr.offset() + sizeof(rh));
+		int r = pread(fd, &isr, sizeof(isr), startPtr.offset() + sizeof(rh));
+		(void)r;
 		return new LogRecordInitialSighandlers(tid, isr.handlers);
 	}
 

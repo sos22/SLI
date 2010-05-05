@@ -2092,7 +2092,6 @@ IRTemp newIRTemp ( IRTypeEnv* env, IRType ty )
 /*--- Helper functions for the IR -- finding types of exprs   ---*/
 /*---------------------------------------------------------------*/
 
-inline 
 IRType typeOfIRTemp ( IRTypeEnv* env, IRTemp tmp )
 {
    vassert(tmp >= 0);

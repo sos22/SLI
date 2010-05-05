@@ -18,7 +18,8 @@ static inline char *my_asprintf(const char *fmt, ...)
 	va_list args;
 	char *r;
 	va_start(args, fmt);
-	vasprintf(&r, fmt, args);
+	int x = vasprintf(&r, fmt, args);
+	(void)x;
 	va_end(args);
 	return r;
 }
@@ -84,10 +85,8 @@ public:
 class LogRecordFootstep : public LogRecord {
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "footstep(rip = %lx, regs = %lx, %lx, %lx, %lx, %lx)",
-			 rip, reg0, reg1, reg2, reg3, reg4);
-		return r;
+		return my_asprintf("footstep(rip = %lx, regs = %lx, %lx, %lx, %lx, %lx)",
+				   rip, reg0, reg1, reg2, reg3, reg4);
 	}
 public:
 	unsigned long rip;
@@ -117,10 +116,8 @@ public:
 class LogRecordSyscall : public LogRecord {
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "syscall(nr = %lx, res = %lx, args = %lx, %lx, %lx)",
-			 sysnr, res, arg1, arg2, arg3);
-		return r;
+		return my_asprintf("syscall(nr = %lx, res = %lx, args = %lx, %lx, %lx)",
+				   sysnr, res, arg1, arg2, arg3);
 	}
 public:
 	unsigned long sysnr, res, arg1, arg2, arg3;
@@ -143,9 +140,7 @@ public:
 class LogRecordMemory : public LogRecord {
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "memory(%lx,%x)", start, size);
-		return r;
+		return my_asprintf("memory(%lx,%x)", start, size);
 	}
 public:
 	unsigned size;
@@ -168,9 +163,7 @@ class LogRecordRdtsc : public LogRecord {
 	unsigned long tsc;
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "rdtsc(%lx)", tsc);
-		return r;
+		return my_asprintf("rdtsc(%lx)", tsc);
 	}
 public:
 	LogRecordRdtsc(ThreadId _tid,
@@ -189,9 +182,7 @@ class LogRecordLoad : public LogRecord {
 	const void *buf;
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "load(%lx,%x)", ptr, size);
-		return r;
+		return my_asprintf("load(%lx,%x)", ptr, size);
 	}
 public:
 	LogRecordLoad(ThreadId _tid,
@@ -215,9 +206,7 @@ class LogRecordStore : public LogRecord {
 	const void *buf;
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "store(%lx,%x)", ptr, size);
-		return r;
+		return my_asprintf("store(%lx,%x)", ptr, size);
 	}
 public:
 	LogRecordStore(ThreadId _tid,
@@ -266,10 +255,8 @@ class LogRecordAllocateMemory : public LogRecord {
 	unsigned flags;
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "allocate(start = %lx, size = %lx, prot = %x, flags = %x)",
-			 start, size, prot, flags);
-		return r;
+		return my_asprintf("allocate(start = %lx, size = %lx, prot = %x, flags = %x)",
+				   start, size, prot, flags);
 	}
 public:
 	LogRecordAllocateMemory(ThreadId _tid,
@@ -305,9 +292,7 @@ public:
 class LogRecordInitialBrk : public LogRecord {
 protected:
 	virtual char *mkName() {
-		char *r;
-		asprintf(&r, "initbrk(%lx)", brk);
-		return r;
+		return my_asprintf("initbrk(%lx)", brk);
 	}
 public:
 	unsigned long brk;

@@ -2,8 +2,8 @@ all: real_all
 
 TARGETS=
 CPPFLAGS=-DSLI
-CFLAGS=-Wall -g $(CPPFLAGS)
-CXXFLAGS=-Wall -g $(CPPFLAGS)
+CFLAGS=-Wall -g $(CPPFLAGS) -O3 -fno-strict-aliasing
+CXXFLAGS=-Wall -g $(CPPFLAGS) -O3 -fno-strict-aliasing
 
 include Makefile.mk
 

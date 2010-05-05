@@ -13,7 +13,8 @@ protected:
 	void setMessage(va_list args, const char *fmt)
 	{
 		free(msg);
-		vasprintf(&msg, fmt, args);
+		int r = vasprintf(&msg, fmt, args);
+		(void)r;
 	}
 	void setMessage(const char *fmt, ...)
 	{
@@ -31,7 +32,8 @@ public:
 	{
 		va_list args;
 		va_start(args, fmt);
-		vasprintf(&msg, fmt, args);
+		int r = vasprintf(&msg, fmt, args);
+		(void)r;
 		va_end(args);
 	}
 	SliException()
@@ -106,7 +108,8 @@ public:
 		va_list args;
 		
 		va_start(args, fmt);
-		vasprintf(&reason, fmt, args);
+		int r = vasprintf(&reason, fmt, args);
+		(void)r;
 		va_end(args);
 		setMessage("not implemented: %s", reason);
 	}
@@ -166,7 +169,8 @@ public:
 	{
 		va_list args;
 		va_start(args, _condition);
-		vasprintf(&condition, _condition, args);
+		int r = vasprintf(&condition, _condition, args);
+		(void)r;
 		va_end(args);
 		setMessage("assertion failed at %s:%d: %s",
 			   file, line, condition);
