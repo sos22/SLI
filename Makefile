@@ -1,9 +1,14 @@
 all: real_all
 
+OPTIMIZE=y
 TARGETS=
 CPPFLAGS=-DSLI
-CFLAGS=-Wall -g $(CPPFLAGS) -O3 -fno-strict-aliasing
-CXXFLAGS=-Wall -g $(CPPFLAGS) -O3 -fno-strict-aliasing
+CFLAGS=-Wall -g $(CPPFLAGS) -fno-strict-aliasing
+CXXFLAGS=$(CFLAGS)
+
+ifeq ($(OPTIMIZE),y)
+CFLAGS+=-O3 -DNDEBUG
+endif
 
 include Makefile.mk
 

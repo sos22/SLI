@@ -2176,6 +2176,7 @@ Bool isPlausibleIRType ( IRType ty )
 }
 
 
+#ifndef NDEBUG
 /*---------------------------------------------------------------*/
 /*--- Sanity checking -- FLATNESS                             ---*/
 /*---------------------------------------------------------------*/
@@ -2945,6 +2946,7 @@ void sanityCheckIRSB ( IRSB* bb,          const char* caller,
    if (typeOfIRExpr(bb->tyenv,bb->next) != guest_word_size)
       sanityCheckFail(bb, NULL, "bb->next field has wrong type");
 }
+#endif
 
 /*---------------------------------------------------------------*/
 /*--- Misc helper functions                                   ---*/

@@ -47,6 +47,7 @@
 #ifndef __VEX_MAIN_UTIL_H
 #define __VEX_MAIN_UTIL_H
 
+#include <assert.h>
 #include <stddef.h>
 
 #include "libvex_basictypes.h"
@@ -56,11 +57,7 @@
 
 #define VG__STRING(__str)  #__str
 
-#define vassert(expr)                                           \
-  ((void) ((expr) ? 0 :                                         \
-           (vex_assert_fail (VG__STRING(expr),                  \
-                             __FILE__, __LINE__,                \
-                             __PRETTY_FUNCTION__), 0)))
+#define vassert assert
 
 __attribute__ ((__noreturn__))
 extern void vex_assert_fail ( const char* expr, const char* file,
