@@ -4,7 +4,8 @@ void RdtscEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	LogRecordRdtsc *lrr = dynamic_cast<LogRecordRdtsc *>(lr);
 	if (!lrr)
-		throw ReplayFailedException("wanted a rdtsc, got something else");
+		throw ReplayFailedException("wanted a rdtsc, got %s",
+					    lr->name());
 	thr->temporaries[tmp].lo.v = lrr->tsc;
 }
 
@@ -25,7 +26,8 @@ void StoreEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr);
 	if (!lrs)
-		throw ReplayFailedException("wanted a store, got something else");
+		throw ReplayFailedException("wanted a store, got %s",
+					    lr->name());
 	if (size != lrs->size || addr != lrs->ptr)
 		throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
 					    lrs->size, lrs->ptr,
@@ -40,7 +42,8 @@ void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 	if (!lrl)
-		throw ReplayFailedException("wanted a load, got something else");
+		throw ReplayFailedException("wanted a load, got %s",
+					    lr->name());
 	if (size != lrl->size || addr != lrl->ptr)
 		throw ReplayFailedException("wanted %d byte load from %lx, got %d from %lx",
 					    lrl->size, lrl->ptr,
@@ -65,7 +68,8 @@ void InstructionEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr);
 	if (!lrf)
-		throw ReplayFailedException("wanted a footstep, got something else");
+		throw ReplayFailedException("wanted a footstep, got %s",
+					    lr->name());
 	if (rip != lrf->rip)
 		throw ReplayFailedBadRip(rip, lrf->rip);
 #define PASTE(x, y) x ## y
@@ -92,7 +96,8 @@ void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	LogRecordSyscall *lrs = dynamic_cast<LogRecordSyscall *>(lr);
 	if (!lrs)
-		throw ReplayFailedException("wanted a syscall, got something else");
+		throw ReplayFailedException("wanted a syscall, got %s",
+					    lr->name());
 		
 	replay_syscall(lrs, thr, ms);
 }
@@ -112,7 +117,8 @@ void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
 
 	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 	if (!lrl)
-		throw ReplayFailedException("wanted a load for CAS, got something else");
+		throw ReplayFailedException("wanted a load for CAS, got %s",
+					    lr->name());
 	if (size != lrl->size || addr.lo.v != lrl->ptr)
 		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
 					    lrl->size, lrl->ptr,

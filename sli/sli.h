@@ -13,6 +13,18 @@
 
 #include "exceptions.h"
 
+static inline char *my_asprintf(const char *fmt, ...)
+{
+	va_list args;
+	char *r;
+	va_start(args, fmt);
+	vasprintf(&r, fmt, args);
+	va_end(args);
+	return r;
+}
+
+static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
+	
 template <typename underlying> class PointerKeeper {
 	underlying *x;
 public:
@@ -27,6 +39,26 @@ public:
 	PointerKeeperArr(underlying *y) : x(y) {}
 };
 
+class Named {
+	char *_name;
+protected:
+	virtual char *mkName(void) = 0;
+public:
+	Named() : _name(NULL) {}
+	Named(const Named &b) {
+		if (b._name)
+			_name = strdup(b._name);
+		else
+			_name = NULL;
+	}
+	const char *name() {
+		if (!_name)
+			_name = mkName();
+		return _name;
+	}
+	~Named() { free(_name); }
+};
+
 class ThreadId {
 	unsigned tid;
 public:
@@ -39,7 +71,7 @@ public:
 	const unsigned _tid() { return tid; }
 };
 
-class LogRecord {
+class LogRecord : public Named {
 	/* DNI */
 	LogRecord(const LogRecord &);
 	ThreadId tid;
@@ -50,6 +82,13 @@ public:
 };
 
 class LogRecordFootstep : public LogRecord {
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "footstep(rip = %lx, regs = %lx, %lx, %lx, %lx, %lx)",
+			 rip, reg0, reg1, reg2, reg3, reg4);
+		return r;
+	}
 public:
 	unsigned long rip;
 	unsigned long reg0;
@@ -76,6 +115,13 @@ public:
 };
 
 class LogRecordSyscall : public LogRecord {
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "syscall(nr = %lx, res = %lx, args = %lx, %lx, %lx)",
+			 sysnr, res, arg1, arg2, arg3);
+		return r;
+	}
 public:
 	unsigned long sysnr, res, arg1, arg2, arg3;
 	LogRecordSyscall(ThreadId _tid,
@@ -95,6 +141,12 @@ public:
 };
 
 class LogRecordMemory : public LogRecord {
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "memory(%lx,%x)", start, size);
+		return r;
+	}
 public:
 	unsigned size;
 	unsigned long start;
@@ -114,6 +166,12 @@ public:
 class LogRecordRdtsc : public LogRecord {
 	friend class RdtscEvent;
 	unsigned long tsc;
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "rdtsc(%lx)", tsc);
+		return r;
+	}
 public:
 	LogRecordRdtsc(ThreadId _tid,
 		       unsigned long _tsc)
@@ -129,6 +187,12 @@ class LogRecordLoad : public LogRecord {
 	unsigned size;
 	unsigned long ptr;
 	const void *buf;
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "load(%lx,%x)", ptr, size);
+		return r;
+	}
 public:
 	LogRecordLoad(ThreadId _tid,
 		      unsigned _size,
@@ -149,6 +213,12 @@ class LogRecordStore : public LogRecord {
 	unsigned size;
 	unsigned long ptr;
 	const void *buf;
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "store(%lx,%x)", ptr, size);
+		return r;
+	}
 public:
 	LogRecordStore(ThreadId _tid,
 		       unsigned _size,
@@ -169,6 +239,13 @@ class LogRecordAllocateMemory : public LogRecord {
 	unsigned long size;
 	unsigned prot;
 	unsigned flags;
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "allocate(start = %lx, size = %lx, prot = %x, flags = %x)",
+			 start, size, prot, flags);
+		return r;
+	}
 public:
 	LogRecordAllocateMemory(ThreadId _tid,
 				unsigned long _start,
@@ -187,6 +264,10 @@ public:
 class LogRecordInitialRegisters : public LogRecord {
 	friend class Thread;
 	VexGuestAMD64State regs;
+protected:
+	virtual char *mkName() {
+		return strdup("initial_regs");
+	}
 public:
 	LogRecordInitialRegisters(ThreadId tid,
 				  const VexGuestAMD64State &r) :
@@ -197,6 +278,12 @@ public:
 };
 
 class LogRecordInitialBrk : public LogRecord {
+protected:
+	virtual char *mkName() {
+		char *r;
+		asprintf(&r, "initbrk(%lx)", brk);
+		return r;
+	}
 public:
 	unsigned long brk;
 	LogRecordInitialBrk(ThreadId tid,
@@ -210,6 +297,10 @@ public:
 class LogRecordInitialSighandlers : public LogRecord {
 	friend class SignalHandlers;
 	struct sigaction handlers[64];
+protected:
+	virtual char *mkName() {
+		return strdup("initial_sighandlers");
+	}
 public:
 	LogRecordInitialSighandlers(ThreadId tid,
 				    const struct sigaction *sa)
@@ -265,7 +356,7 @@ public:
 class Thread;
 class MachineState;
 
-class ThreadEvent {
+class ThreadEvent : public Named {
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms) = 0;
 	virtual ~ThreadEvent() {};
@@ -273,6 +364,8 @@ public:
 
 class RdtscEvent : public ThreadEvent {
 	IRTemp tmp;
+protected:
+	virtual char *mkName() { return my_asprintf("rdtsc(%d)", tmp); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
@@ -282,6 +375,8 @@ class LoadEvent : public ThreadEvent {
 	IRTemp tmp;
 	unsigned long addr;
 	unsigned size;
+protected:
+	virtual char *mkName() { return my_asprintf("load(%d, 0x%lx, %d)", tmp, addr, size); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	LoadEvent(IRTemp _tmp, unsigned long _addr, unsigned _size) :
@@ -296,6 +391,8 @@ class StoreEvent : public ThreadEvent {
 	unsigned long addr;
 	unsigned size;
 	void *data;
+protected:
+	virtual char *mkName() { return my_asprintf("store(0x%lx, %d)", addr, size); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	StoreEvent(unsigned long addr, unsigned size, const void *data);
@@ -309,6 +406,11 @@ class InstructionEvent : public ThreadEvent {
 	unsigned long reg2;
 	unsigned long reg3;
 	unsigned long reg4;
+protected:
+	virtual char *mkName() {
+		return my_asprintf("footstep(rip =%lx, regs = %lx, %lx, %lx, %lx, %lx",
+				   rip, reg0, reg1, reg2, reg3, reg4);
+	}
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	InstructionEvent(unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
@@ -329,6 +431,12 @@ class CasEvent : public ThreadEvent {
 	expression_result data;
 	expression_result expected;
 	unsigned size;
+protected:
+	virtual char *mkName() {
+		return my_asprintf("cas(dest %d, size %d, addr %lx:%lx, data %lx:%lx, expected %lx:%lx)",
+				   dest, size, addr.lo.v, addr.hi.v, data.lo.v, data.hi.v,
+				   expected.lo.v, expected.hi.v);
+	}
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	void replay(Thread *thr, LogRecord *lr, MachineState *ms,
@@ -349,6 +457,10 @@ public:
 };
 
 class SyscallEvent : public ThreadEvent {
+protected:
+	virtual char *mkName() {
+		return my_asprintf("syscall");
+	}
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 };

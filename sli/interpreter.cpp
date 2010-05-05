@@ -1098,6 +1098,11 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 
+#if 0
+		printf("Event %s in thread %d\n",
+		       evt->name(), lr->thread()._tid());
+#endif
+
 		/* CAS events are annoyingly special, because they can
 		   generate multiple records in the logfile (one for
 		   the load and one for the store). */
