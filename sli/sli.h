@@ -233,6 +233,31 @@ public:
 	virtual ~LogRecordStore() { free((void *)buf); }
 };
 
+class LogRecordSignal : public LogRecord {
+public:
+	virtual char *mkName() {
+		return my_asprintf("signal(nr = %d, rip = %lx, err = %lx, va = %lx)",
+				   signr, rip, err, virtaddr);
+	}
+public:
+	unsigned long rip;
+	unsigned signr;
+	unsigned long err;
+	unsigned long virtaddr;
+	LogRecordSignal(ThreadId _tid,
+			unsigned long _rip,
+			unsigned _signr,
+			unsigned long _err,
+			unsigned long _va) :
+		LogRecord(_tid),
+		rip(_rip),
+		signr(_signr),
+		err(_err),
+		virtaddr(_va)
+	{
+	}
+};
+
 class LogRecordAllocateMemory : public LogRecord {
 	friend class AddressSpace;
 	unsigned long start;
@@ -582,7 +607,16 @@ public:
 	void readMemory(unsigned long start, unsigned size,
 			void *contents, bool ignore_protection = false,
 			const Thread *thr = NULL);
-
+	bool isAccessible(unsigned long start, unsigned size,
+			  bool isWrite, const Thread *thr = NULL);
+	bool isWritable(unsigned long start, unsigned size,
+			const Thread *thr = NULL) {
+		return isAccessible(start, size, true, thr);
+	}
+	bool isReadable(unsigned long start, unsigned size,
+			const Thread *thr = NULL) {
+		return isAccessible(start, size, false, thr);
+	}
 	unsigned long setBrk(unsigned long newBrk);
 
 	const void *getRawPointerUnsafe(unsigned long ptr);

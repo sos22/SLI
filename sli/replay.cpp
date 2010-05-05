@@ -22,45 +22,67 @@ StoreEvent::~StoreEvent()
 	free(data);
 }
 
+static void checkSegv(LogRecord *lr, unsigned long addr)
+{
+	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
+	if (!lrs)
+		throw ReplayFailedException("wanted a segv for store to %lx, got %s",
+					    addr, lr->name());
+	if (lrs->signr != 11)
+		throw ReplayFailedException("wanted a segv, got signal %d",
+					    lrs->signr);
+	if (lrs->virtaddr != addr)
+		throw ReplayFailedException("wanted a segv at %lx, got one at %lx\n",
+					    lrs->virtaddr, addr);
+}
+
 void StoreEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
-	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr);
-	if (!lrs)
-		throw ReplayFailedException("wanted a store, got %s",
-					    lr->name());
-	if (size != lrs->size || addr != lrs->ptr)
-		throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
-					    lrs->size, lrs->ptr,
-					    size, addr);
-	if (memcmp(data, lrs->buf, size))
-		throw ReplayFailedException("memory mismatch on store to %lx",
-					    addr);
-	ms->addressSpace->writeMemory(addr, size, data, false, thr);
+	if (ms->addressSpace->isWritable(addr, size, thr)) {
+		LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr);
+		if (!lrs)
+			throw ReplayFailedException("wanted a store, got %s",
+						    lr->name());
+		if (size != lrs->size || addr != lrs->ptr)
+			throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
+						    lrs->size, lrs->ptr,
+						    size, addr);
+		if (memcmp(data, lrs->buf, size))
+			throw ReplayFailedException("memory mismatch on store to %lx",
+						    addr);
+		ms->addressSpace->writeMemory(addr, size, data, false, thr);
+	} else {
+		checkSegv(lr, addr);
+	}
 }
 
 void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
-	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
-	if (!lrl)
-		throw ReplayFailedException("wanted a load, got %s",
-					    lr->name());
-	if (size != lrl->size || addr != lrl->ptr)
-		throw ReplayFailedException("wanted %d byte load from %lx, got %d from %lx",
-					    lrl->size, lrl->ptr,
-					    size, addr);
-	unsigned char buf[16];
-	ms->addressSpace->readMemory(addr, size, buf, false, thr);
-	if (memcmp(buf, lrl->buf, size))
-		throw ReplayFailedException("memory mismatch on load from %lx",
-					    addr);
-
-	if (size <= 8) {
-		memcpy(&thr->temporaries[tmp].lo.v, buf, size);
-	} else if (size <= 16) {
-		memcpy(&thr->temporaries[tmp].lo.v, buf, 8);
-		memcpy(&thr->temporaries[tmp].hi.v, buf + 8, size - 8);
+	if (ms->addressSpace->isReadable(addr, size, thr)) {
+		LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
+		if (!lrl)
+			throw ReplayFailedException("wanted a load, got %s",
+						    lr->name());
+		if (size != lrl->size || addr != lrl->ptr)
+			throw ReplayFailedException("wanted %d byte load from %lx, got %d from %lx",
+						    lrl->size, lrl->ptr,
+						    size, addr);
+		unsigned char buf[16];
+		ms->addressSpace->readMemory(addr, size, buf, false, thr);
+		if (memcmp(buf, lrl->buf, size))
+			throw ReplayFailedException("memory mismatch on load from %lx",
+						    addr);
+		
+		if (size <= 8) {
+			memcpy(&thr->temporaries[tmp].lo.v, buf, size);
+		} else if (size <= 16) {
+			memcpy(&thr->temporaries[tmp].lo.v, buf, 8);
+			memcpy(&thr->temporaries[tmp].hi.v, buf + 8, size - 8);
+		} else {
+			throw NotImplementedException();
+		}
 	} else {
-		throw NotImplementedException();
+		checkSegv(lr, addr);
 	}
 }
 

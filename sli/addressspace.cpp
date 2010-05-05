@@ -214,6 +214,31 @@ void AddressSpace::readMemory(unsigned long start, unsigned size,
 	}
 }
 
+bool AddressSpace::isAccessible(unsigned long start, unsigned size,
+				bool isWrite, const Thread *thr)
+{
+	unsigned long end = start + size;
+
+	assert(end >= start);
+	while (start < end) {
+		AddressSpace::AddressSpaceEntry *const ase = findAseForPointer(start);
+		if (!ase && thr && expandStack(*thr, start))
+			continue;
+		if (!ase ||
+		    (isWrite && !ase->prot.writable) ||
+		    (!isWrite && !ase->prot.readable))
+			return false;
+		unsigned long to_copy;
+		if (end > ase->end)
+			to_copy = ase->end - start;
+		else
+			to_copy = end - start;
+		start += to_copy;
+		size -= to_copy;
+	}
+	return true;
+}
+
 void AddressSpace::populateMemory(const LogRecordMemory &rec)
 {
 	writeMemory(rec.start, rec.size, rec.contents, true);

@@ -114,6 +114,14 @@ skip:
 		startPtr = *nextPtr;
 		goto skip;
 	}
+
+	case RECORD_signal: {
+		signal_record sr;
+		pread(fd, &sr, sizeof(sr), startPtr.offset() + sizeof(rh));
+		return new LogRecordSignal(tid, sr.rip, sr.signo, sr.err,
+					   sr.virtaddr);
+	}
+		
 	case RECORD_allocate_memory: {
 		allocate_memory_record amr;
 		pread(fd, &amr, sizeof(amr), startPtr.offset() + sizeof(rh));
