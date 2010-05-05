@@ -63,6 +63,33 @@ Thread::do_dirty_call(IRDirty *details)
 		return new LoadEvent(details->tmp, args[0].lo.v, 4);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
 		return new LoadEvent(details->tmp, args[0].lo.v, 8);
+	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
+		unsigned long res;
+		if (details->needsBBP) {
+			res = ((unsigned long (*)(VexGuestAMD64State *,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long))(details->cee->addr))
+				(&regs.regs, args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
+				 args[4].lo.v, args[5].lo.v);
+		} else {
+			res = ((unsigned long (*)(unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long,
+						  unsigned long))(details->cee->addr))
+				(args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
+				 args[4].lo.v, args[5].lo.v);
+		}
+		if (details->tmp != IRTemp_INVALID) {
+			temporaries[details->tmp].lo.v = res;
+			temporaries[details->tmp].hi.v = 0;
+		}
+		return NULL;
 	} else {
 		throw NotImplementedException("Unknown dirty call %s\n", details->cee->name);
 	}
@@ -1069,7 +1096,16 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 
-		evt->replay(thr, lr, currentState);
+		/* CAS events are annoyingly special, because they can
+		   generate multiple records in the logfile (one for
+		   the load and one for the store). */
+		CasEvent *ce = dynamic_cast<CasEvent *>(evt);
+		if (ce) {
+			ce->replay(thr, lr, currentState,
+				   lf, ptr, &ptr);
+		} else {
+			evt->replay(thr, lr, currentState);
+		}
 
 		/* Memory records are special and should always be
 		   processed eagerly. */

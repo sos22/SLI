@@ -48,6 +48,9 @@ mk_helpers(ultralong_t, 128)
 static IRExpr *
 log_reads_expr(IRSB *sb, IRExpr *exp)
 {
+	if (!exp)
+		return NULL;
+
 	switch (exp->tag) {
 	case Iex_Get:
 	case Iex_Binder:

@@ -125,6 +125,7 @@ public:
 
 class LogRecordLoad : public LogRecord {
 	friend class LoadEvent;
+	friend class CasEvent;
 	unsigned size;
 	unsigned long ptr;
 	const void *buf;
@@ -144,6 +145,7 @@ public:
 
 class LogRecordStore : public LogRecord {
 	friend class StoreEvent;
+	friend class CasEvent;
 	unsigned size;
 	unsigned long ptr;
 	const void *buf;
@@ -329,6 +331,9 @@ class CasEvent : public ThreadEvent {
 	unsigned size;
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	void replay(Thread *thr, LogRecord *lr, MachineState *ms,
+		    const LogReader *lf, LogReader::ptr ptr,
+		    LogReader::ptr *outPtr);
 	CasEvent(IRTemp _dest,
 		 expression_result _addr,
 		 expression_result _data,

@@ -99,16 +99,47 @@ void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 
 void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
-	unsigned long seen_buf[2];
+	throw SliException("CAS events need a special replay method");
+}
+
+void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
+		      const LogReader *lf, LogReader::ptr ptr,
+		      LogReader::ptr *outPtr)
+{
 	unsigned long expected_buf[2] = {expected.lo.v, expected.hi.v};
 	unsigned long data_buf[2] = {data.lo.v, data.hi.v};
 
-	memset(seen_buf, 0, sizeof(seen_buf));
 
+	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
+	if (!lrl)
+		throw ReplayFailedException("wanted a load for CAS, got something else");
+	if (size != lrl->size || addr.lo.v != lrl->ptr)
+		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
+					    lrl->size, lrl->ptr,
+					    size, addr.lo.v);
+
+	unsigned long seen_buf[2];
+	memset(seen_buf, 0, sizeof(seen_buf));
 	ms->addressSpace->readMemory(addr.lo.v, size, seen_buf, false, thr);
+	if (memcmp(seen_buf, lrl->buf, size))
+		throw ReplayFailedException("memory mismatch on CAS load from %lx",
+					    addr.lo.v);
 	thr->temporaries[dest].lo.v = seen_buf[0];
 	thr->temporaries[dest].hi.v = seen_buf[1];
 	if (memcmp(seen_buf, expected_buf, size))
 		return;
+
+	LogRecord *lr2 = lf->read(ptr, outPtr);
+	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
+	if (!lrs)
+		throw ReplayFailedException("wanted a store for CAS, got something else");
+	if (size != lrs->size || addr.lo.v != lrs->ptr)
+		throw ReplayFailedException("wanted %d byte CAS to %lx, got %d to %lx",
+					    lrs->size, lrs->ptr,
+					    size, addr.lo.v);
+	if (memcmp(data_buf, lrs->buf, size))
+		throw ReplayFailedException("memory mismatch on CAS to %lx",
+					    addr.lo.v);
+
 	ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
 }
