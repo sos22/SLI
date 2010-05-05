@@ -36,6 +36,11 @@ struct alloc_header {
 static unsigned nr_gc_roots;
 static void **gc_roots[NR_GC_ROOTS];
 
+/* A pointer to an allocation somewhere in the heap which is likely to
+   be a reasonable place to start looking when performing
+   allocations. */
+static struct alloc_header *allocation_cursor;
+
 static void *
 header_to_alloc(struct alloc_header *ah)
 {
@@ -117,6 +122,8 @@ do_gc(void)
       h->type = NULL;
       poison(h + 1, h->size - sizeof(*h), 0xa1b2c3d4);
       if (p && !p->type) {
+	if (h == allocation_cursor)
+	  allocation_cursor = p;
 	p->size += h->size;
 	if (n && !n->type) {
 	  p->size += n->size;
@@ -124,6 +131,8 @@ do_gc(void)
 	n = next_alloc_header(p);
 	h = p;
       } else if (n && !n->type) {
+	if (n == allocation_cursor)
+	  allocation_cursor = h;
 	h->size += n->size;
 	n = next_alloc_header(h);
       }
@@ -177,8 +186,9 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
   size += sizeof(struct alloc_header);
   size = (size + 15) & ~15;
 
-  /* First-fit policy */
-  for (cursor = first_alloc_header();
+  /* First-fit policy.  Search starts from the allocation cursor, and
+     then if that fails we try again from the beginning. */
+  for (cursor = allocation_cursor;
        cursor != NULL;
        cursor = next_alloc_header(cursor)) {
     vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
@@ -186,9 +196,16 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
       break;
   }
   if (!cursor) {
-    /* Whoops, out of memory */
-    vpanic("VEX temporary storage exhausted.\n"
-	   "Increase N_TEMPORARY_BYTES and recompile.");
+    for (cursor = first_alloc_header();
+	 cursor != allocation_cursor;
+	 cursor = next_alloc_header(cursor)) {
+      vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
+      if (!cursor->type && cursor->size >= size)
+	break;
+    }
+    if (!cursor)
+      vpanic("VEX temporary storage exhausted.\n"
+	     "Increase N_TEMPORARY_BYTES and recompile.");
   }
 
   /* Consider splitting the block */
@@ -208,6 +225,8 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
   cursor->line = line;
   res = header_to_alloc(cursor);
   poison(res, size - sizeof(struct alloc_header), 0xaabbccdd);
+
+  allocation_cursor = next_alloc_header(cursor);
   return res;
 }
 
