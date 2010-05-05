@@ -20,6 +20,6 @@ slir.a: \$(SLIR_OBJECTS)
 	ar rcs \$@ \$^
 
 slir: slir.a libVEX.a
-	gcc -lstdc++ \$^ -o \$@
+	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 }

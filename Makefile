@@ -1,9 +1,10 @@
 all: real_all
 
 OPTIMIZE=y
+PROFILE_FLAGS=
 TARGETS=
 CPPFLAGS=-DSLI
-CFLAGS=-Wall -g $(CPPFLAGS) -fno-strict-aliasing
+CFLAGS=-Wall -g $(CPPFLAGS) $(PROFILE_FLAGS) -fno-strict-aliasing
 CXXFLAGS=$(CFLAGS)
 
 ifeq ($(OPTIMIZE),y)
