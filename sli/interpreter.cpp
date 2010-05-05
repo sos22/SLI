@@ -872,6 +872,11 @@ void Thread::translateNextBlock(AddressSpace *addrSpace)
 
 	const void *code = addrSpace->getRawPointerUnsafe(regs.rip());
 
+	if (!code) {
+		currentIRSB = NULL;
+		return;
+	}
+
 	vexSetAllocModeTEMP_and_clear();
 
 	VexArchInfo archinfo_guest;
@@ -921,6 +926,8 @@ Thread::runToEvent(struct AddressSpace *addrSpace)
 	while (1) {
 		if (!currentIRSB)
 			translateNextBlock(addrSpace);
+		if (!currentIRSB)
+			return new SignalEvent(11, regs.regs.guest_RIP);
 		while (currentIRSBOffset < currentIRSB->stmts_used) {
 			IRStmt *stmt = currentIRSB->stmts[currentIRSBOffset];
 			currentIRSBOffset++;

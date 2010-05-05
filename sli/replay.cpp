@@ -171,3 +171,23 @@ void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
 
 	ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
 }
+
+void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+{
+	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
+	if (!lrs)
+		throw ReplayFailedException("wanted a signal record, got %s",
+					    lr->name());
+	if (lrs->signr != 11)
+		throw NotImplementedException("Only handle SIGSEGV, got %d",
+					      lrs->signr);
+	if (ms->addressSpace->isReadable(lrs->virtaddr, 1, thr))
+		throw ReplayFailedException("got a segv at %lx, but that location is readable?",
+					    lrs->virtaddr);
+	/* Can't actually do much with this, because we pick up the
+	   Valgrind sighandlers when we start.  Oh well. */
+#if 0
+	if (ms->signalHandlers.handlers[11].sa_handler != SIG_DFL)
+		throw NotImplementedException("don't handle custom signal handlers");
+#endif
+}

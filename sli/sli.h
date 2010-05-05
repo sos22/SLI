@@ -490,6 +490,23 @@ public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 };
 
+class SignalEvent : public ThreadEvent {
+	unsigned signr;
+	unsigned long virtaddr;
+protected:
+	virtual char *mkName() {
+		return my_asprintf("signal(nr = %d, va = %lx)", signr,
+				   virtaddr);
+	}
+public:
+	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	SignalEvent(unsigned _signr, unsigned long _va) :
+		signr(_signr),
+		virtaddr(_va)
+	{
+	}
+};
+
 class AddressSpace;
 
 class Thread {
