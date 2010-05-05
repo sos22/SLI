@@ -7,11 +7,6 @@ public:
    void operator()(const void *p) { visit(p); }
 };
 
-class Visitable {
-public:
-   void visit(HeapVisitor &) const {};
-};
-
 /* Allocate in Vex's temporary allocation area.  Be careful with this.
    You can only call it inside an instrumentation or optimisation
    callback that you have previously specified in a call to
@@ -39,13 +34,6 @@ typedef
   static void __visit_ ## __t(const __t *ths, HeapVisitor &visit)	\
        __visit								\
   __DEFINE_VEX_TYPE_NO_DESTRUCT(__t, __visit_ ## __t)
-
-#define DEFINE_VEX_TYPE_VISITABLE(__t)					\
-	static void __visit_ ## __t(const __t *ths, HeapVisitor &visit)	\
-	{								\
-		ths->visit(visit);					\
-	}								\
-	__DEFINE_VEX_TYPE_NO_DESTRUCT(__t, __visit_ ## __t)
 
 #define DECLARE_VEX_TYPE(t)						\
   extern VexAllocType __vex_type_ ## t;					\

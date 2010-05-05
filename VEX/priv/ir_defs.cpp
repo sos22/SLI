@@ -54,54 +54,54 @@ DEFINE_VEX_TYPE(IRConst);
 DEFINE_VEX_TYPE(IRCallee);
 DEFINE_VEX_TYPE(IRRegArray);
 
-void
-_IRExpr::visit(HeapVisitor &visit) const
+static void
+visit_IRExpr(IRExpr *iex, HeapVisitor &visit)
 {
-   switch (tag) {
+   switch (iex->tag) {
    case Iex_Binder:
    case Iex_Get:
    case Iex_RdTmp:
      break;
    case Iex_GetI:
-     visit(Iex.GetI.descr);
-     visit(Iex.GetI.ix);
+     visit(iex->Iex.GetI.descr);
+     visit(iex->Iex.GetI.ix);
      break;
    case Iex_Qop:
-     visit(Iex.Qop.arg1);
-     visit(Iex.Qop.arg2);
-     visit(Iex.Qop.arg3);
-     visit(Iex.Qop.arg4);
+     visit(iex->Iex.Qop.arg1);
+     visit(iex->Iex.Qop.arg2);
+     visit(iex->Iex.Qop.arg3);
+     visit(iex->Iex.Qop.arg4);
      break;
    case Iex_Triop:
-     visit(Iex.Triop.arg1);
-     visit(Iex.Triop.arg2);
-     visit(Iex.Triop.arg3);
+     visit(iex->Iex.Triop.arg1);
+     visit(iex->Iex.Triop.arg2);
+     visit(iex->Iex.Triop.arg3);
      break;
    case Iex_Binop:
-     visit(Iex.Binop.arg1);
-     visit(Iex.Binop.arg2);
+     visit(iex->Iex.Binop.arg1);
+     visit(iex->Iex.Binop.arg2);
      break;
    case Iex_Unop:
-     visit(Iex.Unop.arg);
+     visit(iex->Iex.Unop.arg);
      break;
    case Iex_Load:
-     visit(Iex.Load.addr);
+     visit(iex->Iex.Load.addr);
      break;
    case Iex_Const:
-     visit(Iex.Const.con);
+     visit(iex->Iex.Const.con);
      break;
    case Iex_CCall:
-     visit(Iex.CCall.cee);
-     visit(Iex.CCall.args);
+     visit(iex->Iex.CCall.cee);
+     visit(iex->Iex.CCall.args);
      break;
    case Iex_Mux0X:
-     visit(Iex.Mux0X.cond);
-     visit(Iex.Mux0X.expr0);
-     visit(Iex.Mux0X.exprX);
+     visit(iex->Iex.Mux0X.cond);
+     visit(iex->Iex.Mux0X.expr0);
+     visit(iex->Iex.Mux0X.exprX);
      break;
    }
 }
-DEFINE_VEX_TYPE_VISITABLE(IRExpr);
+__DEFINE_VEX_TYPE_NO_DESTRUCT(IRExpr, visit_IRExpr);
 
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRDirty, {
     visit(ths->cee);
@@ -118,47 +118,47 @@ DEFINE_VEX_TYPE_NO_DESTRUCT(IRCAS, {
     visit(ths->dataLo);
   });
 
-void
-IRStmt::visit(HeapVisitor &visit) const
+static void
+visit_IRStmt(IRStmt *ist, HeapVisitor &visit)
 {
-   switch (tag) {
+   switch (ist->tag) {
    case Ist_NoOp:
    case Ist_IMark:
      break;
    case Ist_AbiHint:
-     visit(Ist.AbiHint.base);
-     visit(Ist.AbiHint.nia);
+     visit(ist->Ist.AbiHint.base);
+     visit(ist->Ist.AbiHint.nia);
      break;
    case Ist_Put:
-     visit(Ist.Put.data);
+     visit(ist->Ist.Put.data);
      break;
    case Ist_PutI:
-     visit(Ist.PutI.descr);
-     visit(Ist.PutI.ix);
-     visit(Ist.PutI.data);
+     visit(ist->Ist.PutI.descr);
+     visit(ist->Ist.PutI.ix);
+     visit(ist->Ist.PutI.data);
      break;
    case Ist_WrTmp:
-     visit(Ist.WrTmp.data);
+     visit(ist->Ist.WrTmp.data);
      break;
    case Ist_Store:
-     visit(Ist.Store.addr);
-     visit(Ist.Store.data);
+     visit(ist->Ist.Store.addr);
+     visit(ist->Ist.Store.data);
      break;
    case Ist_CAS:
-     visit(Ist.CAS.details);
+     visit(ist->Ist.CAS.details);
      break;
    case Ist_Dirty:
-     visit(Ist.Dirty.details);
+     visit(ist->Ist.Dirty.details);
      break;
    case Ist_MBE:
      break;
    case Ist_Exit:
-     visit(Ist.Exit.guard);
-     visit(Ist.Exit.dst);
+     visit(ist->Ist.Exit.guard);
+     visit(ist->Ist.Exit.dst);
      break;
    }
 }
-DEFINE_VEX_TYPE_VISITABLE(IRStmt);
+__DEFINE_VEX_TYPE_NO_DESTRUCT(IRStmt, visit_IRStmt);
 
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRTypeEnv, { visit(ths->types); });
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRSB, {

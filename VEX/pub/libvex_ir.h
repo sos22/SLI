@@ -945,9 +945,8 @@ typedef
    struct _IRExpr
    IRExpr;
 
-struct _IRExpr : public Visitable {
+struct _IRExpr {
    IRExprTag tag;
-   virtual void visit(HeapVisitor &visit) const;
    union {
       /* Used only in pattern matching within Vex.  Should not be seen
          outside of Vex. */
@@ -1513,9 +1512,8 @@ typedef
    pretty-printed with ppIRStmt().
 */
 typedef
-   struct _IRStmt : public Visitable {
+   struct _IRStmt {
       IRStmtTag tag;
-      virtual void visit(HeapVisitor &visit) const;
       union {
          /* A no-op (usually resulting from IR optimisation).  Can be
             omitted without any effect.
