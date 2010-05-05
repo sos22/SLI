@@ -63,6 +63,8 @@ Thread::do_dirty_call(IRDirty *details)
 		return new LoadEvent(details->tmp, args[0].lo.v, 4);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
 		return new LoadEvent(details->tmp, args[0].lo.v, 8);
+	} else if (!strcmp(details->cee->name, "helper_load_128")) {
+		return new LoadEvent(details->tmp, args[0].lo.v, 16);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		unsigned long res;
 		if (details->needsBBP) {
