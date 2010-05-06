@@ -353,6 +353,7 @@ struct abstract_interpret_value {
 struct expression_result {
 	struct abstract_interpret_value lo;
 	struct abstract_interpret_value hi;
+	void visit(HeapVisitor &hv) const {}
 };
 
 
@@ -494,6 +495,29 @@ public:
 
 class AddressSpace;
 
+class expression_result_array {
+public:
+	struct expression_result *arr;
+	unsigned nr_entries;
+	void setSize(unsigned new_size) {
+		arr = (struct expression_result *)LibVEX_Alloc_Bytes(sizeof(arr[0]) * new_size);
+		memset(arr, 0, sizeof(arr[0]) * new_size);
+		nr_entries = new_size;
+	}
+	expression_result &operator[](unsigned idx) { return arr[idx]; }
+	void visit(HeapVisitor &hv) const {
+		unsigned x;
+		for (x = 0; x < nr_entries; x++)
+			arr[x].visit(hv);
+		hv(arr);
+	}
+	expression_result_array() :
+		arr(NULL),
+		nr_entries(0)
+	{
+	}
+};
+
 class Thread {
 	void translateNextBlock(AddressSpace *addrSpace);
 	struct expression_result eval_expression(IRExpr *expr);
@@ -513,7 +537,7 @@ public:
 
 	IRSB *currentIRSB;
 public:
-	struct expression_result *temporaries;
+	expression_result_array temporaries;
 private:
 	int currentIRSBOffset;
 

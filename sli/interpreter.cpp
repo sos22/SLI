@@ -909,12 +909,7 @@ void Thread::translateNextBlock(AddressSpace *addrSpace)
 
 	irsb = instrument_func(NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
 
-	if (temporaries)
-		delete temporaries;
-	temporaries = new expression_result[irsb->tyenv->types_used];
-	memset(temporaries,
-	       0,
-	       sizeof(temporaries[0]) * irsb->tyenv->types_used);
+	temporaries.setSize(irsb->tyenv->types_used);
 
 	currentIRSB = irsb;
 	currentIRSBOffset = 0;

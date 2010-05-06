@@ -3,7 +3,7 @@
 template class LibvexVector<Thread>;
 
 DECLARE_VEX_TYPE(Thread);
-DEFINE_VEX_TYPE_NO_DESTRUCT(Thread, {visit(ths->currentIRSB);});
+DEFINE_VEX_TYPE_NO_DESTRUCT(Thread, {visit(ths->currentIRSB);ths->temporaries.visit(visit);});
 
 Thread *Thread::initialThread(const LogRecordInitialRegisters &initRegs)
 {
