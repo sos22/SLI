@@ -59,6 +59,8 @@ extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned len,
 extern void *__LibVEX_Alloc_Bytes(Int nbytes, const char *file, unsigned line);
 #define LibVEX_Alloc_Bytes(_n) __LibVEX_Alloc_Bytes((_n), __FILE__, __LINE__)
 
+extern void *LibVEX_realloc(void *base, unsigned new_size);
+
 void vexRegisterGCRoot(void **);
 void vexUnregisterGCRoot(void **);
 void vexInitHeap(void);

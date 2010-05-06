@@ -53,7 +53,7 @@ main(int argc, char *argv[])
 	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr);
 	if (!lrib)
 		err(1, "second record should have been initial brk");
-	AddressSpace *as = new AddressSpace(lrib->brk);
+	AddressSpace *as = AddressSpace::initialAddressSpace(lrib->brk);
 
 	lr = lf->read(ptr, &ptr);
 	LogRecordInitialSighandlers *lris = dynamic_cast<LogRecordInitialSighandlers*>(lr);

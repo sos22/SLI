@@ -576,7 +576,7 @@ public:
 		AllocFlags(unsigned flags); /* MAP_* flags */
 	};
 	static const AllocFlags defaultFlags;
-private:
+
 	struct AddressSpaceEntry {
 		unsigned long start; /* inclusive */
 		unsigned long end; /* not inclusive */
@@ -584,27 +584,28 @@ private:
 		AllocFlags flags;
 		void *content;
 		AddressSpaceEntry *next;
-		AddressSpaceEntry(unsigned long _start,
-				  unsigned long _end,
-				  Protection _prot,
-				  void *_content,
-				  AllocFlags _flags) :
-			start(_start),
-			end(_end),
-			prot(_prot),
-			flags(_flags),
-			content(_content),
-			next(NULL)
-		{
-		}
+
 		void splitAt(unsigned long addr);
+		static AddressSpaceEntry *alloc(unsigned long start,
+						unsigned long end,
+						Protection prot,
+						AllocFlags flags);
+	private:
+		/* DNI */
+		AddressSpaceEntry();
+		~AddressSpaceEntry();
 	};
 
+private:
 	unsigned long brkptr;
 
 	AddressSpaceEntry *head;
 	AddressSpaceEntry *findAseForPointer(unsigned long ptr);
 	bool expandStack(const Thread &thr, unsigned long ptr);
+
+	/* DNI */
+	AddressSpace();
+	~AddressSpace();
 public:
 	void allocateMemory(unsigned long start, unsigned long size, Protection prot,
 			    AllocFlags flags = defaultFlags);
@@ -635,11 +636,8 @@ public:
 
 	const void *getRawPointerUnsafe(unsigned long ptr);
 
-	AddressSpace(unsigned long initialBrk) :
-		brkptr(initialBrk),
-		head(NULL)
-	{
-	}
+	static AddressSpace *initialAddressSpace(unsigned long initialBrk);
+	void visit(HeapVisitor &hv) const;
 };
 
 class SignalHandlers {

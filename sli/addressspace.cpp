@@ -4,6 +4,10 @@
 
 #include "sli.h"
 
+DECLARE_VEX_TYPE(AddressSpace)
+
+DEFINE_VEX_TYPE_NO_DESTRUCT(AddressSpace, {ths->visit(visit);});
+
 void AddressSpace::releaseMemory(unsigned long start, unsigned long size)
 {
 	unsigned long end = start + size;
@@ -38,7 +42,6 @@ void AddressSpace::releaseMemory(unsigned long start, unsigned long size)
 		assert(ase->start >= start);
 		assert(ase->end <= end);
 		*pprev = ase->next;
-		delete ase;
 	}
 }
 
@@ -50,9 +53,10 @@ void AddressSpace::allocateMemory(unsigned long start, unsigned long size,
 	releaseMemory(start, size);
 
 	AddressSpace::AddressSpaceEntry *newAse =
-		new AddressSpace::AddressSpaceEntry(start, start + size,
-						    prot, malloc(size),
-						    flags);
+		AddressSpace::AddressSpaceEntry::alloc(start,
+						       start + size,
+						       prot,
+						       flags);
 	memset(newAse->content, 0, size);
 
 	newAse->next = head;
@@ -79,18 +83,18 @@ void AddressSpace::AddressSpaceEntry::splitAt(unsigned long addr)
 		return;
 
 	AddressSpaceEntry *newAse =
-		new AddressSpaceEntry(addr,
-				      end,
-				      prot,
-				      malloc(end - addr),
-				      flags);
+		AddressSpaceEntry::alloc(addr,
+					 end,
+					 prot,
+					 flags);
 	memcpy(newAse->content,
 	       (const void *)((unsigned long)content + addr - start),
 	       end - addr);
 	newAse->next = next;
 	end = addr;
 	next = newAse;
-	content = realloc(content, end - start);
+
+	content = LibVEX_realloc(content, end - start);
 }
 
 void AddressSpace::protectMemory(unsigned long start, unsigned long size, Protection prot)
@@ -148,8 +152,8 @@ bool AddressSpace::expandStack(const Thread &thr, unsigned long ptr)
 		return false;
 
 	ptr &= ~4095;
-	bestAse->content = realloc(bestAse->content,
-				   bestAse->end - ptr);
+	bestAse->content = LibVEX_realloc(bestAse->content,
+					  bestAse->end - ptr);
 	memmove((void *)((unsigned long)bestAse->content + bestAse->start - ptr),
 		bestAse->content,
 		bestAse->end - bestAse->start);
@@ -288,3 +292,52 @@ AddressSpace::AllocFlags::AllocFlags(unsigned flags)
 }
 
 const AddressSpace::AllocFlags AddressSpace::defaultFlags(false);
+
+AddressSpace *AddressSpace::initialAddressSpace(unsigned long initialBrk)
+{
+	AddressSpace *work;
+
+	work = LibVEX_Alloc_AddressSpace();
+	memset(work, 0, sizeof(*work));
+	work->brkptr = initialBrk;
+	return work;
+}
+
+void AddressSpace::visit(HeapVisitor &hv) const
+{
+	hv(head);
+}
+
+static void visit_ase(const void *_ctxt, HeapVisitor &hv)
+{
+	const AddressSpace::AddressSpaceEntry *ctxt =
+		(const AddressSpace::AddressSpaceEntry *)ctxt;
+	hv(ctxt->content);
+	hv(ctxt->next);
+}
+
+AddressSpace::AddressSpaceEntry *AddressSpace::AddressSpaceEntry::alloc(unsigned long start,
+									unsigned long end,
+									Protection prot,
+									AllocFlags flags)
+{
+	/* The macros don't cope well with :s in type names, so do it
+	 * by hand. */
+	static VexAllocType ase_type = {
+	nbytes: sizeof(AddressSpace::AddressSpaceEntry),
+	gc_visit: visit_ase,
+	destruct: NULL,
+	name: "AddressSpace::AddressSpaceEntry"
+	};
+
+	AddressSpaceEntry *work = (AddressSpaceEntry *)__LibVEX_Alloc(&ase_type,
+								      __FILE__,
+								      __LINE__);
+	work->start = start;
+	work->end = end;
+	work->prot = prot;
+	work->flags = flags;
+	work->next = NULL;
+	work->content = LibVEX_Alloc_Bytes(end - start);
+	return work;
+}

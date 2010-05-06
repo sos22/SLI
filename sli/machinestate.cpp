@@ -6,6 +6,7 @@ DEFINE_VEX_TYPE_NO_DESTRUCT(MachineState, {ths->visit(visit);});
 void MachineState::visit(HeapVisitor &hv) const
 {
 	hv(threads);
+	hv(addressSpace);
 }
 
 MachineState *MachineState::initialMachineState(AddressSpace *as,

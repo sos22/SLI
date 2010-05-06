@@ -10,6 +10,7 @@
    usually cover very many things in the heap, so the GC pass is very
    cheap, and we can cover it out of the much simpler allocator. */
 #include <stdio.h>
+#include <string.h>
 
 #include "libvex_basictypes.h"
 #include "libvex.h"
@@ -19,7 +20,7 @@
 #include "main_util.h"
 
 /* The main arena. */
-#define N_TEMPORARY_BYTES 4000000
+#define N_TEMPORARY_BYTES 1000000000
 static char temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
 static unsigned heap_used;
 
@@ -201,7 +202,7 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
       if (!cursor->type && cursor->size >= size)
 	break;
     }
-    if (!cursor)
+    if (cursor == allocation_cursor)
       vpanic("VEX temporary storage exhausted.\n"
 	     "Increase N_TEMPORARY_BYTES and recompile.");
   }
@@ -244,6 +245,57 @@ struct libvex_alloc_type *
 __LibVEX_Alloc(const VexAllocType *t, const char *file, unsigned line)
 {
   return (struct libvex_alloc_type *)alloc_bytes(t, t->nbytes, file, line);
+}
+
+void *
+LibVEX_realloc(void *ptr, unsigned new_size)
+{
+  struct alloc_header *ah = alloc_to_header(ptr);
+  struct alloc_header *next;
+  unsigned old_size;
+  void *newptr;
+
+  new_size += sizeof(struct alloc_header);
+  new_size = (new_size + 15) & ~15;
+
+  /* Can only resize byte allocations */
+  vassert(ah->type == &byte_alloc_type);
+
+  /* Enlarge if possible */
+  while (new_size > ah->size) {
+    next = next_alloc_header(ah);
+    if (!next || next->type)
+      break;
+    ah->size += next->size;
+    heap_used += next->size;
+  }
+
+  /* Trim it down again */
+  if (new_size < ah->size - 32) {
+    old_size = ah->size;
+    ah->size = new_size;
+    next = next_alloc_header(ah);
+    next->type = NULL;
+    next->size = old_size - new_size;
+    next->flags = 0;
+    heap_used -= old_size - new_size;
+  }
+
+  /* Good enough? */
+  if (new_size <= ah->size)
+    return ptr;
+
+  /* Failed to resize: allocate a new block */
+  newptr = __LibVEX_Alloc_Bytes(new_size, ah->file, ah->line);
+  if (new_size < ah->size)
+    memcpy(newptr, ptr, new_size);
+  else
+    memcpy(newptr, ptr, ah->size);
+
+  ah->type = NULL;
+  heap_used -= ah->size;
+
+  return newptr;
 }
 
 struct libvex_alloc_type *
