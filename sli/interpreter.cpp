@@ -1102,6 +1102,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 
 		PointerKeeper<LogRecord> k_lr(lr);
 		Thread *thr = currentState->findThread(lr->thread());
+		VexGcRoot thread_keeper((void **)&thr);
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 
@@ -1127,18 +1128,4 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 				       &ptr);
 
 	}
-}
-
-Thread::Thread(LogRecordInitialRegisters const&lrir)
-	: tid(ThreadId(1)),
-	  regs(lrir.regs),
-	  clear_child_tid(0),
-	  robust_list(0),
-	  set_child_tid(0),
-	  exitted(false),
-	  currentIRSB(NULL),
-	  irsbRoot((void **)&currentIRSB),
-	  temporaries(NULL),
-	  currentIRSBOffset(0)
-{
 }

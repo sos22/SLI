@@ -153,17 +153,6 @@ do_gc(void)
 
 void vexSetAllocModeTEMP_and_clear ( void )
 {
-  static Bool done_init;
-  struct alloc_header *entire_arena_hdr;
-
-  if (!done_init) {
-    entire_arena_hdr = first_alloc_header();
-    entire_arena_hdr->type = NULL;
-    entire_arena_hdr->size = N_TEMPORARY_BYTES;
-    entire_arena_hdr->flags = 0;
-    done_init = True;
-  }
-
   if (heap_used > N_TEMPORARY_BYTES / 2)
     do_gc();
 }
@@ -222,10 +211,12 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
     /* Do split. */
     old_size = cursor->size;
     cursor->size = size;
+    vassert(cursor->size != 0);
     next = next_alloc_header(cursor);
     vassert(next != NULL);
     next->type = NULL;
     next->size = old_size - size;
+    vassert(next->size != 0);
     next->flags = 0;
   }
 
@@ -366,3 +357,35 @@ void
 vexSetAllocMode(VexAllocMode)
 {
 }
+
+
+void
+vexInitHeap(void)
+{
+  static bool done_init;
+  struct alloc_header *entire_arena_hdr;
+
+  vassert(!done_init);
+  entire_arena_hdr = first_alloc_header();
+  entire_arena_hdr->type = NULL;
+  entire_arena_hdr->size = N_TEMPORARY_BYTES;
+  entire_arena_hdr->flags = 0;
+  done_init = true;
+}
+
+
+void __visit_vector(const void *_ctxt, HeapVisitor &hv)
+{
+  LibvexVector<void *> *ctxt = (LibvexVector<void *>*)_ctxt;
+  unsigned x;
+  for (x = 0; x < ctxt->sz; x++)
+    hv(ctxt->items[x]);
+}
+
+VexAllocType LibvexVectorType = {
+ nbytes: sizeof(LibvexVector<void *>),
+ gc_visit: __visit_vector,
+ destruct: NULL,
+ name: "LibvexVector"
+};
+

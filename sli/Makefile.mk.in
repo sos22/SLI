@@ -2,6 +2,7 @@ targets="slir"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{interpret,logreader,addressspace,machinestate,interpreter,syscalls,transform_expr,replay}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{thread,machinestate}.cpp
 
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
@@ -17,7 +18,7 @@ ${input_base}/logreader.o: sli/ppres.h
 ${input_base}/interpreter.o: sli/ppres.h
 
 slir.a: \$(SLIR_OBJECTS)
-	ar rcs \$@ \$^
+	rm -f \$@ ; ar rcs \$@ \$^
 
 slir: slir.a libVEX.a
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@

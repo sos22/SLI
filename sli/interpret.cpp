@@ -26,6 +26,7 @@ main(int argc, char *argv[])
 
 	std::set_terminate(__gnu_cxx::__verbose_terminate_handler);
 
+	vexInitHeap();
 	LibVEX_default_VexControl(&vcon);
 	vcon.iropt_level = 0;
 	vcon.iropt_unroll_thresh = 0;
@@ -47,7 +48,6 @@ main(int argc, char *argv[])
 	LogRecordInitialRegisters *lrir = dynamic_cast<LogRecordInitialRegisters*>(lr);
 	if (!lrir)
 		err(1, "first record should have been register state");
-	Thread *rootThread = new Thread(*lrir);
 
 	lr = lf->read(ptr, &ptr);
 	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr);
@@ -76,7 +76,7 @@ main(int argc, char *argv[])
 	}
 
 	delete lr;
-	MachineState *ms = new MachineState(as, rootThread, *lris);
+	MachineState *ms = MachineState::initialMachineState(as, Thread::initialThread(*lrir), *lris);
 	Interpreter *i = new Interpreter(ms);
 
 	i->replayLogfile(lf, ptr);

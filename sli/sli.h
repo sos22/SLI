@@ -511,32 +511,20 @@ public:
 	unsigned long set_child_tid;
 	bool exitted;
 
-private:
 	IRSB *currentIRSB;
-	VexGcRoot irsbRoot;
 public:
 	struct expression_result *temporaries;
 private:
 	int currentIRSBOffset;
 
+	/* DNI */
+	Thread();
+	~Thread();
 public:
 	ThreadEvent *runToEvent(AddressSpace *addrSpace);
-	Thread(const LogRecordInitialRegisters &initRegs);
-	Thread(unsigned _pid, const Thread &parent) :
-		tid(0),
-		pid(_pid),
-		regs(parent.regs),
-		clear_child_tid(0),
-		robust_list(0),
-		set_child_tid(0),
-		exitted(false),
-		currentIRSB(NULL),
-		irsbRoot((void **)&currentIRSB),
-		temporaries(NULL),
-		currentIRSBOffset(0)
-	{
-	}
-	~Thread() { if (temporaries) delete temporaries; }
+
+	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
+	static Thread *forkThread(unsigned newPid, const Thread &parent);
 };
 
 class AddressSpace {
@@ -639,41 +627,38 @@ public:
 };
 
 class MachineState {
-	std::vector<Thread *>threads;
+	LibvexVector<Thread> *threads;
 	bool exitted;
 	unsigned exit_status;
 	ThreadId nextTid;
+
+	/* DNI */
+	MachineState();
+	~MachineState();
 public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
-	MachineState(AddressSpace *as, Thread *rootThread,
-		     const LogRecordInitialSighandlers &handlers) :
-		threads(),
-		nextTid(1),
-		addressSpace(as),
-		signalHandlers(handlers)
-	{
-		registerThread(rootThread);
-	}
+	static MachineState *initialMachineState(AddressSpace *as,
+						 Thread *rootThread,
+						 const LogRecordInitialSighandlers &handlers);
 	void registerThread(Thread *t) {
-		printf("Register thread %d\n", t->tid._tid());
 		t->tid = nextTid;
 		++nextTid;
-		threads.push_back(t);
+		threads->push(t);
 	}
 	Thread *findThread(ThreadId id) {
-		for (std::vector<Thread *>::iterator it = threads.begin();
-		     it != threads.end();
-		     it++) {
-			if ((*it)->tid == id)
-				return *it;
-		}
+		unsigned x;
+		for (x = 0; x < threads->size(); x++)
+			if (threads->index(x)->tid == id)
+				return threads->index(x);
 		abort();
 	}
 	void exitGroup(unsigned result) {
 		exitted = true;
 		exit_status = result;
 	}
+
+	void visit(HeapVisitor &hv) const;
 };
 
 class Interpreter {
@@ -683,9 +668,11 @@ class Interpreter {
 			    LogReader::ptr *endOffset);
 
 	MachineState *currentState;
+	VexGcRoot currentStateRoot;
 public:
 	Interpreter(MachineState *rootMachine) :
-		currentState(rootMachine)
+		currentState(rootMachine),
+		currentStateRoot((void **)&currentState)
 	{
 	}
 	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint);

@@ -52,7 +52,7 @@ handle_clone(AddressSpace *addrSpace,
 
 	/* Create a new thread.  This is, as you might expect, closely
 	   modelled on the kernel's version of the same process. */
-	Thread *newThread = new Thread(pid, *thr);
+	Thread *newThread = Thread::forkThread(pid, *thr);
 	if (flags & CLONE_CHILD_SETTID)
 		newThread->set_child_tid = child_tidptr;
 	if (flags & CLONE_CHILD_CLEARTID)

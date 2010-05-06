@@ -1,6 +1,8 @@
 #ifndef __LIBVEX_ALLOC_H
 #define __LIBVEX_ALLOC_H
 
+#include <stdlib.h>
+
 class HeapVisitor {
 public:
    virtual void visit(const void *ptr) = 0;
@@ -59,6 +61,7 @@ extern void *__LibVEX_Alloc_Bytes(Int nbytes, const char *file, unsigned line);
 
 void vexRegisterGCRoot(void **);
 void vexUnregisterGCRoot(void **);
+void vexInitHeap(void);
 
 class VexGcRoot {
 	void **root;
@@ -71,6 +74,40 @@ public:
 	~VexGcRoot()
 	{
 		vexUnregisterGCRoot(root);
+	}
+};
+
+extern VexAllocType LibvexVectorType;
+
+template <typename content>
+class LibvexVector {
+	friend void __visit_vector(const void *_ctxt, HeapVisitor &hv);
+	unsigned sz;
+	content **items;
+
+	/* DNI */
+	LibvexVector();
+	~LibvexVector();
+public:
+	unsigned size() const { return sz; }
+	content *index(unsigned idx) {
+		if (idx >= sz)
+			abort();
+		return items[idx];
+	}
+	void push(content *v) {
+		sz++;
+		items = (content **)realloc(items, sizeof(content *) * sz);
+		items[sz-1] = v;
+	}
+
+	static LibvexVector<content> *empty() {
+		struct libvex_alloc_type *t = __LibVEX_Alloc(&LibvexVectorType,
+							     __FILE__,
+							     __LINE__);
+		LibvexVector<content> *t2 = (LibvexVector<content> *)t;
+		memset(t2, 0, sizeof(*t2));
+		return t2;							     
 	}
 };
 
