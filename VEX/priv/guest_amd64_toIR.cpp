@@ -203,10 +203,6 @@
 /* We need to know this to do sub-register accesses correctly. */
 static Bool host_is_bigendian;
 
-/* Pointer to the guest code area (points to start of BB, not to the
-   insn being processed). */
-static UChar* guest_code;
-
 /* The guest address corresponding to guest_code[0]. */
 static Addr64 guest_RIP_bbstart;
 
@@ -540,13 +536,13 @@ static Int eregLO3ofRM ( UChar mod_reg_rm )
 
 /* Get a 8/16/32-bit unsigned value out of the insn stream. */
 
-static UChar getUChar ( Long delta )
+static UChar getUChar ( GuestMemoryFetcher &guest_code, Long delta )
 {
    UChar v = guest_code[delta+0];
    return v;
 }
 
-static UInt getUDisp16 ( Long delta )
+static UInt getUDisp16 ( GuestMemoryFetcher &guest_code, Long delta )
 {
    UInt v = guest_code[delta+1]; v <<= 8;
    v |= guest_code[delta+0];
@@ -567,14 +563,14 @@ static UInt getUDisp16 ( Long delta )
 
 /* Get a byte value out of the insn stream and sign-extend to 64
    bits. */
-static Long getSDisp8 ( Long delta )
+static Long getSDisp8 ( GuestMemoryFetcher &guest_code, Long delta )
 {
    return extend_s_8to64( guest_code[delta] );
 }
 
 /* Get a 16-bit value out of the insn stream and sign-extend to 64
    bits. */
-static Long getSDisp16 ( Long delta )
+static Long getSDisp16 ( GuestMemoryFetcher &guest_code, Long delta )
 {
    UInt v = guest_code[delta+1]; v <<= 8;
    v |= guest_code[delta+0];
@@ -583,7 +579,7 @@ static Long getSDisp16 ( Long delta )
 
 /* Get a 32-bit value out of the insn stream and sign-extend to 64
    bits. */
-static Long getSDisp32 ( Long delta )
+static Long getSDisp32 ( GuestMemoryFetcher &guest_code, Long delta )
 {
    UInt v = guest_code[delta+3]; v <<= 8;
    v |= guest_code[delta+2]; v <<= 8;
@@ -593,7 +589,7 @@ static Long getSDisp32 ( Long delta )
 }
 
 /* Get a 64-bit value out of the insn stream. */
-static Long getDisp64 ( Long delta )
+static Long getDisp64 ( GuestMemoryFetcher &guest_code, Long delta )
 {
    ULong v = 0;
    v |= guest_code[delta+7]; v <<= 8;
@@ -609,12 +605,12 @@ static Long getDisp64 ( Long delta )
 
 /* Note: because AMD64 doesn't allow 64-bit literals, it is an error
    if this is called with size==8.  Should not happen. */
-static Long getSDisp ( Int size, Long delta )
+static Long getSDisp ( GuestMemoryFetcher &guest_code, Int size, Long delta )
 {
    switch (size) {
-      case 4: return getSDisp32(delta);
-      case 2: return getSDisp16(delta);
-      case 1: return getSDisp8(delta);
+      case 4: return getSDisp32(guest_code, delta);
+      case 2: return getSDisp16(guest_code, delta);
+      case 1: return getSDisp8(guest_code, delta);
       default: vpanic("getSDisp(amd64)");
   }
 }
@@ -2237,11 +2233,11 @@ static IRTemp disAMode_copy2tmp ( IRExpr* addr64 )
 }
 
 static 
-IRTemp disAMode ( /*OUT*/Int* len,
+IRTemp disAMode ( GuestMemoryFetcher &guest_code, /*OUT*/Int* len,
                   VexAbiInfo* vbi, Prefix pfx, Long delta, 
                   /*OUT*/char* buf, Int extra_bytes )
 {
-   UChar mod_reg_rm = getUChar(delta);
+   UChar mod_reg_rm = getUChar(guest_code, delta);
    delta++;
 
    buf[0] = (UChar)0;
@@ -2274,7 +2270,7 @@ IRTemp disAMode ( /*OUT*/Int* len,
       case 0x08: case 0x09: case 0x0A: case 0x0B: 
       /* ! 0C */ case 0x0D: case 0x0E: case 0x0F:
          { UChar rm = toUChar(mod_reg_rm & 7);
-           Long d   = getSDisp8(delta);
+           Long d   = getSDisp8(guest_code, delta);
            if (d == 0) {
               DIS(buf, "%s(%s)", segRegTxt(pfx), nameIRegRexB(8,pfx,rm));
            } else {
@@ -2292,7 +2288,7 @@ IRTemp disAMode ( /*OUT*/Int* len,
       case 0x10: case 0x11: case 0x12: case 0x13: 
       /* ! 14 */ case 0x15: case 0x16: case 0x17:
          { UChar rm = toUChar(mod_reg_rm & 7);
-           Long  d  = getSDisp32(delta);
+           Long  d  = getSDisp32(guest_code, delta);
            DIS(buf, "%s%lld(%s)", segRegTxt(pfx), d, nameIRegRexB(8,pfx,rm));
            *len = 5;
            return disAMode_copy2tmp(
@@ -2309,7 +2305,7 @@ IRTemp disAMode ( /*OUT*/Int* len,
       /* RIP + disp32.  This assumes that guest_RIP_curr_instr is set
          correctly at the start of handling each instruction. */
       case 0x05: 
-         { Long d = getSDisp32(delta);
+         { Long d = getSDisp32(guest_code, delta);
            *len = 5;
            DIS(buf, "%s%lld(%%rip)", segRegTxt(pfx), d);
            /* We need to know the next instruction's start address.
@@ -2343,7 +2339,7 @@ IRTemp disAMode ( /*OUT*/Int* len,
                | %index != %RSP && !(%base == %RBP || %base == %R13)
                = %base + (%index << scale)
          */
-         UChar sib     = getUChar(delta);
+         UChar sib     = getUChar(guest_code, delta);
          UChar scale   = toUChar((sib >> 6) & 3);
          UChar index_r = toUChar((sib >> 3) & 7);
          UChar base_r  = toUChar(sib & 7);
@@ -2373,7 +2369,7 @@ IRTemp disAMode ( /*OUT*/Int* len,
          }
 
          if ((!index_is_SP) && base_is_BPor13) {
-            Long d = getSDisp32(delta);
+            Long d = getSDisp32(guest_code, delta);
             DIS(buf, "%s%lld(,%s,%d)", segRegTxt(pfx), d, 
                       nameIReg64rexX(pfx,index_r), 1<<scale);
             *len = 6;
@@ -2394,7 +2390,7 @@ IRTemp disAMode ( /*OUT*/Int* len,
          }
 
          if (index_is_SP && base_is_BPor13) {
-            Long d = getSDisp32(delta);
+            Long d = getSDisp32(guest_code, delta);
             DIS(buf, "%s%lld", segRegTxt(pfx), d);
             *len = 6;
             return disAMode_copy2tmp(
@@ -2414,11 +2410,11 @@ IRTemp disAMode ( /*OUT*/Int* len,
             = d8 + %base + (%index << scale)
       */
       case 0x0C: {
-         UChar sib     = getUChar(delta);
+         UChar sib     = getUChar(guest_code, delta);
          UChar scale   = toUChar((sib >> 6) & 3);
          UChar index_r = toUChar((sib >> 3) & 7);
          UChar base_r  = toUChar(sib & 7);
-         Long d        = getSDisp8(delta+1);
+         Long d        = getSDisp8(guest_code, delta+1);
 
          if (index_r == R_RSP && 0==getRexX(pfx)) {
             DIS(buf, "%s%lld(%s)", segRegTxt(pfx), 
@@ -2461,11 +2457,11 @@ IRTemp disAMode ( /*OUT*/Int* len,
             = d32 + %base + (%index << scale)
       */
       case 0x14: {
-         UChar sib     = getUChar(delta);
+         UChar sib     = getUChar(guest_code, delta);
          UChar scale   = toUChar((sib >> 6) & 3);
          UChar index_r = toUChar((sib >> 3) & 7);
          UChar base_r  = toUChar(sib & 7);
-         Long d        = getSDisp32(delta+1);
+         Long d        = getSDisp32(guest_code, delta+1);
 
          if (index_r == R_RSP && 0==getRexX(pfx)) {
             DIS(buf, "%s%lld(%s)", segRegTxt(pfx), 
@@ -2509,9 +2505,9 @@ IRTemp disAMode ( /*OUT*/Int* len,
    beginning at delta.  Is useful for getting hold of literals beyond
    the end of the amode before it has been disassembled.  */
 
-static UInt lengthAMode ( Prefix pfx, Long delta )
+static UInt lengthAMode ( GuestMemoryFetcher &guest_code, Prefix pfx, Long delta )
 {
-   UChar mod_reg_rm = getUChar(delta);
+   UChar mod_reg_rm = getUChar(guest_code, delta);
    delta++;
 
    /* squeeze out the reg field from mod_reg_rm, since a 256-entry
@@ -2557,7 +2553,7 @@ static UInt lengthAMode ( Prefix pfx, Long delta )
 
       case 0x04: {
          /* SIB, with no displacement. */
-         UChar sib     = getUChar(delta);
+         UChar sib     = getUChar(guest_code, delta);
          UChar base_r  = toUChar(sib & 7);
          /* correct since #(R13) == 8 + #(RBP) */
          Bool  base_is_BPor13 = toBool(base_r == R_RBP);
@@ -2616,7 +2612,8 @@ static UInt lengthAMode ( Prefix pfx, Long delta )
                        PUT tmpa, %G
 */
 static
-ULong dis_op2_E_G ( VexAbiInfo* vbi,
+ULong dis_op2_E_G ( GuestMemoryFetcher &guest_code,
+		    VexAbiInfo* vbi,
                     Prefix      pfx,
                     Bool        addSubCarry,
                     IROp        op8, 
@@ -2631,7 +2628,7 @@ ULong dis_op2_E_G ( VexAbiInfo* vbi,
    IRTemp  dst1 = newTemp(ty);
    IRTemp  src  = newTemp(ty);
    IRTemp  dst0 = newTemp(ty);
-   UChar   rm   = getUChar(delta0);
+   UChar   rm   = getUChar(guest_code, delta0);
    IRTemp  addr = IRTemp_INVALID;
 
    /* addSubCarry == True indicates the intended operation is
@@ -2681,7 +2678,7 @@ ULong dis_op2_E_G ( VexAbiInfo* vbi,
       return 1+delta0;
    } else {
       /* E refers to memory */
-      addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( dst0, getIRegG(size,pfx,rm) );
       assign( src,  loadLE(szToITy(size), mkexpr(addr)) );
 
@@ -2732,7 +2729,8 @@ ULong dis_op2_E_G ( VexAbiInfo* vbi,
                        ST tmpv, (tmpa)
 */
 static
-ULong dis_op2_G_E ( VexAbiInfo* vbi,
+ULong dis_op2_G_E ( GuestMemoryFetcher &guest_code,
+		    VexAbiInfo* vbi,
                     Prefix      pfx,
                     Bool        addSubCarry,
                     IROp        op8, 
@@ -2747,7 +2745,7 @@ ULong dis_op2_G_E ( VexAbiInfo* vbi,
    IRTemp  dst1 = newTemp(ty);
    IRTemp  src  = newTemp(ty);
    IRTemp  dst0 = newTemp(ty);
-   UChar   rm   = getUChar(delta0);
+   UChar   rm   = getUChar(guest_code, delta0);
    IRTemp  addr = IRTemp_INVALID;
 
    /* addSubCarry == True indicates the intended operation is
@@ -2797,7 +2795,7 @@ ULong dis_op2_G_E ( VexAbiInfo* vbi,
 
    /* E refers to memory */    
    {
-      addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign(dst0, loadLE(ty,mkexpr(addr)));
       assign(src,  getIRegG(size,pfx,rm));
 
@@ -2865,13 +2863,14 @@ ULong dis_op2_G_E ( VexAbiInfo* vbi,
                        PUT tmpb, %G
 */
 static
-ULong dis_mov_E_G ( VexAbiInfo* vbi,
+ULong dis_mov_E_G ( GuestMemoryFetcher &guest_code,
+		    VexAbiInfo* vbi,
                     Prefix      pfx,
                     Int         size, 
                     Long        delta0 )
 {
    Int len;
-   UChar rm = getUChar(delta0);
+   UChar rm = getUChar(guest_code, delta0);
    char dis_buf[50];
 
    if (epartIsReg(rm)) {
@@ -2884,7 +2883,7 @@ ULong dis_mov_E_G ( VexAbiInfo* vbi,
 
    /* E refers to memory */    
    {
-      IRTemp addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      IRTemp addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       putIRegG(size, pfx, rm, loadLE(szToITy(size), mkexpr(addr)));
       DIP("mov%c %s,%s\n", nameISize(size), 
                            dis_buf,
@@ -2911,13 +2910,14 @@ ULong dis_mov_E_G ( VexAbiInfo* vbi,
                        ST tmpv, (tmpa) 
 */
 static
-ULong dis_mov_G_E ( VexAbiInfo* vbi,
+ULong dis_mov_G_E ( GuestMemoryFetcher &guest_code, 
+		    VexAbiInfo* vbi,
                     Prefix      pfx,
                     Int         size, 
                     Long        delta0 )
 {
    Int len;
-   UChar rm = getUChar(delta0);
+   UChar rm = getUChar(guest_code, delta0);
    char dis_buf[50];
 
    if (epartIsReg(rm)) {
@@ -2930,7 +2930,7 @@ ULong dis_mov_G_E ( VexAbiInfo* vbi,
 
    /* E refers to memory */    
    {
-      IRTemp addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      IRTemp addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       storeLE( mkexpr(addr), getIRegG(size, pfx, rm) );
       DIP("mov%c %s,%s\n", nameISize(size), 
                            nameIRegG(size,pfx,rm), 
@@ -2942,7 +2942,8 @@ ULong dis_mov_G_E ( VexAbiInfo* vbi,
 
 /* op $immediate, AL/AX/EAX/RAX. */
 static
-ULong dis_op_imm_A ( Int    size,
+ULong dis_op_imm_A ( GuestMemoryFetcher &guest_code,
+		     Int    size,
                      Bool   carrying,
                      IROp   op8,
                      Bool   keep,
@@ -2954,7 +2955,7 @@ ULong dis_op_imm_A ( Int    size,
    IRTemp dst0  = newTemp(ty);
    IRTemp src   = newTemp(ty);
    IRTemp dst1  = newTemp(ty);
-   Long  lit    = getSDisp(size4,delta);
+   Long  lit    = getSDisp(guest_code, size4,delta);
    assign(dst0, getIRegRAX(size));
    assign(src,  mkU(ty,lit & mkSizeMask(size)));
 
@@ -2992,11 +2993,12 @@ ULong dis_op_imm_A ( Int    size,
 
 /* Sign- and Zero-extending moves. */
 static
-ULong dis_movx_E_G ( VexAbiInfo* vbi,
+ULong dis_movx_E_G ( GuestMemoryFetcher &guest_code,
+		     VexAbiInfo* vbi,
                      Prefix pfx,
                      Long delta, Int szs, Int szd, Bool sign_extend )
 {
-   UChar rm = getUChar(delta);
+   UChar rm = getUChar(guest_code, delta);
    if (epartIsReg(rm)) {
       putIRegG(szd, pfx, rm,
                     doScalarWidening(
@@ -3014,7 +3016,7 @@ ULong dis_movx_E_G ( VexAbiInfo* vbi,
    {
       Int    len;
       char  dis_buf[50];
-      IRTemp addr = disAMode ( &len, vbi, pfx, delta, dis_buf, 0 );
+      IRTemp addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, 0 );
       putIRegG(szd, pfx, rm,
                     doScalarWidening(
                        szs,szd,sign_extend, 
@@ -3096,7 +3098,8 @@ void codegen_div ( Int sz, IRTemp t, Bool signed_divide )
 }
 
 static 
-ULong dis_Grp1 ( VexAbiInfo* vbi,
+ULong dis_Grp1 ( GuestMemoryFetcher &guest_code,
+		 VexAbiInfo* vbi,
                  Prefix pfx,
                  Long delta, UChar modrm, 
                  Int am_sz, Int d_sz, Int sz, Long d64 )
@@ -3150,7 +3153,7 @@ ULong dis_Grp1 ( VexAbiInfo* vbi,
           nameGrp1(gregLO3ofRM(modrm)), nameISize(sz), d64, 
           nameIRegE(sz,pfx,modrm));
    } else {
-      addr = disAMode ( &len, vbi, pfx, delta, dis_buf, /*xtra*/d_sz );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, /*xtra*/d_sz );
 
       assign(dst0, loadLE(ty,mkexpr(addr)));
       assign(src, mkU(ty,d64 & mask));
@@ -3206,7 +3209,8 @@ ULong dis_Grp1 ( VexAbiInfo* vbi,
    expression. */
 
 static
-ULong dis_Grp2 ( VexAbiInfo* vbi,
+ULong dis_Grp2 ( GuestMemoryFetcher &guest_code,
+		 VexAbiInfo* vbi,
                  Prefix pfx,
                  Long delta, UChar modrm,
                  Int am_sz, Int d_sz, Int sz, IRExpr* shift_expr,
@@ -3230,7 +3234,7 @@ ULong dis_Grp2 ( VexAbiInfo* vbi,
       assign(dst0, getIRegE(sz, pfx, modrm));
       delta += (am_sz + d_sz);
    } else {
-      addr = disAMode ( &len, vbi, pfx, delta, dis_buf, /*xtra*/d_sz );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, /*xtra*/d_sz );
       assign(dst0, loadLE(ty,mkexpr(addr)));
       delta += len + d_sz;
    }
@@ -3480,7 +3484,8 @@ ULong dis_Grp2 ( VexAbiInfo* vbi,
 
 /* Group 8 extended opcodes (but BT/BTS/BTC/BTR only). */
 static
-ULong dis_Grp8_Imm ( VexAbiInfo* vbi,
+ULong dis_Grp8_Imm ( GuestMemoryFetcher &guest_code,
+		     VexAbiInfo* vbi,
                      Prefix pfx,
                      Long delta, UChar modrm,
                      Int am_sz, Int sz, ULong src_val,
@@ -3533,7 +3538,7 @@ ULong dis_Grp8_Imm ( VexAbiInfo* vbi,
                                 src_val, nameIRegE(sz,pfx,modrm));
    } else {
       Int len;
-      t_addr = disAMode ( &len, vbi, pfx, delta, dis_buf, 1 );
+      t_addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, 1 );
       delta  += (len+1);
       assign( t2, widenUto64(loadLE(ty, mkexpr(t_addr))) );
       DIP("%s%c $0x%llx, %s\n", nameGrp8(gregLO3ofRM(modrm)), 
@@ -3671,7 +3676,7 @@ static void codegen_mulL_A_D ( Int sz, Bool syned,
 
 /* Group 3 extended opcodes. */
 static 
-ULong dis_Grp3 ( VexAbiInfo* vbi, 
+ULong dis_Grp3 ( GuestMemoryFetcher &guest_code, VexAbiInfo* vbi, 
                  Prefix pfx, Int sz, Long delta, Bool* decode_OK )
 {
    Long    d64;
@@ -3683,12 +3688,12 @@ ULong dis_Grp3 ( VexAbiInfo* vbi,
    IRTemp  t1 = newTemp(ty);
    IRTemp dst1, src, dst0;
    *decode_OK = True;
-   modrm = getUChar(delta);
+   modrm = getUChar(guest_code, delta);
    if (epartIsReg(modrm)) {
       switch (gregLO3ofRM(modrm)) {
          case 0: { /* TEST */
             delta++; 
-            d64 = getSDisp(imin(4,sz), delta); 
+            d64 = getSDisp(guest_code, imin(4,sz), delta); 
             delta += imin(4,sz);
             dst1 = newTemp(ty);
             assign(dst1, binop(mkSizedOp(ty,Iop_And8),
@@ -3757,7 +3762,7 @@ ULong dis_Grp3 ( VexAbiInfo* vbi,
             vpanic("Grp3(amd64,R)");
       }
    } else {
-      addr = disAMode ( &len, vbi, pfx, delta, dis_buf,
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf,
                         /* we have to inform disAMode of any immediate
 			   bytes used */
                         gregLO3ofRM(modrm)==0/*TEST*/
@@ -3769,7 +3774,7 @@ ULong dis_Grp3 ( VexAbiInfo* vbi,
       assign(t1, loadLE(ty,mkexpr(addr)));
       switch (gregLO3ofRM(modrm)) {
          case 0: { /* TEST */
-            d64 = getSDisp(imin(4,sz), delta); 
+            d64 = getSDisp(guest_code, imin(4,sz), delta); 
             delta += imin(4,sz);
             dst1 = newTemp(ty);
             assign(dst1, binop(mkSizedOp(ty,Iop_And8),
@@ -3835,7 +3840,7 @@ ULong dis_Grp3 ( VexAbiInfo* vbi,
 
 /* Group 4 extended opcodes. */
 static
-ULong dis_Grp4 ( VexAbiInfo* vbi,
+ULong dis_Grp4 ( GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
                  Prefix pfx, Long delta, Bool* decode_OK )
 {
    Int   alen;
@@ -3847,7 +3852,7 @@ ULong dis_Grp4 ( VexAbiInfo* vbi,
 
    *decode_OK = True;
 
-   modrm = getUChar(delta);
+   modrm = getUChar(guest_code, delta);
    if (epartIsReg(modrm)) {
       assign(t1, getIRegE(1, pfx, modrm));
       switch (gregLO3ofRM(modrm)) {
@@ -3869,7 +3874,7 @@ ULong dis_Grp4 ( VexAbiInfo* vbi,
       DIP("%sb %s\n", nameGrp4(gregLO3ofRM(modrm)),
                       nameIRegE(1, pfx, modrm));
    } else {
-      IRTemp addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      IRTemp addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( t1, loadLE(ty, mkexpr(addr)) );
       switch (gregLO3ofRM(modrm)) {
          case 0: /* INC */
@@ -3905,7 +3910,7 @@ ULong dis_Grp4 ( VexAbiInfo* vbi,
 
 /* Group 5 extended opcodes. */
 static
-ULong dis_Grp5 ( VexAbiInfo* vbi,
+ULong dis_Grp5 ( GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
                  Prefix pfx, Int sz, Long delta,
                  DisResult* dres, Bool* decode_OK )
 {
@@ -3921,7 +3926,7 @@ ULong dis_Grp5 ( VexAbiInfo* vbi,
 
    *decode_OK = True;
 
-   modrm = getUChar(delta);
+   modrm = getUChar(guest_code, delta);
    if (epartIsReg(modrm)) {
       assign(t1, getIRegE(sz,pfx,modrm));
       switch (gregLO3ofRM(modrm)) {
@@ -3973,7 +3978,7 @@ ULong dis_Grp5 ( VexAbiInfo* vbi,
                        showSz ? nameISize(sz) : ' ', 
                        nameIRegE(sz, pfx, modrm));
    } else {
-      addr = disAMode ( &len, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, 0 );
       if (gregLO3ofRM(modrm) != 2 && gregLO3ofRM(modrm) != 4
                                   && gregLO3ofRM(modrm) != 6) {
          assign(t1, loadLE(ty,mkexpr(addr)));
@@ -4226,14 +4231,15 @@ void dis_REP_op ( AMD64Condcode cond,
 
 /* IMUL E, G.  Supplied eip points to the modR/M byte. */
 static
-ULong dis_mul_E_G ( VexAbiInfo* vbi,
+ULong dis_mul_E_G ( GuestMemoryFetcher &guest_code,
+		    VexAbiInfo* vbi,
                     Prefix      pfx,
                     Int         size, 
                     Long        delta0 )
 {
    Int    alen;
    char  dis_buf[50];
-   UChar  rm = getUChar(delta0);
+   UChar  rm = getUChar(guest_code, delta0);
    IRType ty = szToITy(size);
    IRTemp te = newTemp(ty);
    IRTemp tg = newTemp(ty);
@@ -4243,7 +4249,7 @@ ULong dis_mul_E_G ( VexAbiInfo* vbi,
    if (epartIsReg(rm)) {
       assign( te, getIRegE(size, pfx, rm) );
    } else {
-      IRTemp addr = disAMode( &alen, vbi, pfx, delta0, dis_buf, 0 );
+      IRTemp addr = disAMode( guest_code, &alen, vbi, pfx, delta0, dis_buf, 0 );
       assign( te, loadLE(ty,mkexpr(addr)) );
    }
 
@@ -4269,7 +4275,8 @@ ULong dis_mul_E_G ( VexAbiInfo* vbi,
 
 /* IMUL I * E -> G.  Supplied rip points to the modR/M byte. */
 static
-ULong dis_imul_I_E_G ( VexAbiInfo* vbi,
+ULong dis_imul_I_E_G ( GuestMemoryFetcher &guest_code,
+		       VexAbiInfo* vbi,
                        Prefix      pfx,
                        Int         size, 
                        Long        delta,
@@ -4278,7 +4285,7 @@ ULong dis_imul_I_E_G ( VexAbiInfo* vbi,
    Long   d64;
    Int    alen;
    char  dis_buf[50];
-   UChar  rm = getUChar(delta);
+   UChar  rm = getUChar(guest_code, delta);
    IRType ty = szToITy(size);
    IRTemp te = newTemp(ty);
    IRTemp tl = newTemp(ty);
@@ -4290,12 +4297,12 @@ ULong dis_imul_I_E_G ( VexAbiInfo* vbi,
       assign(te, getIRegE(size, pfx, rm));
       delta++;
    } else {
-      IRTemp addr = disAMode( &alen, vbi, pfx, delta, dis_buf, 
+      IRTemp addr = disAMode( guest_code, &alen, vbi, pfx, delta, dis_buf, 
                                      imin(4,litsize) );
       assign(te, loadLE(ty, mkexpr(addr)));
       delta += alen;
    }
-   d64 = getSDisp(imin(4,litsize),delta);
+   d64 = getSDisp(guest_code, imin(4,litsize),delta);
    delta += imin(4,litsize);
 
    d64 &= mkSizeMask(size);
@@ -4658,7 +4665,7 @@ static IRExpr* x87ishly_qnarrow_32_to_16 ( IRExpr* e32 )
 
 
 static
-ULong dis_FPU ( /*OUT*/Bool* decode_ok, 
+ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok, 
                 VexAbiInfo* vbi, Prefix pfx, Long delta )
 {
    Int    len;
@@ -4668,8 +4675,8 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 
    /* On entry, delta points at the second byte of the insn (the modrm
       byte).*/
-   UChar first_opcode = getUChar(delta-1);
-   UChar modrm        = getUChar(delta+0);
+   UChar first_opcode = getUChar(guest_code, delta-1);
+   UChar modrm        = getUChar(guest_code, delta+0);
 
    /* -+-+-+-+-+-+-+-+-+-+-+-+ 0xD8 opcodes +-+-+-+-+-+-+-+ */
 
@@ -4678,7 +4685,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 
          /* bits 5,4,3 are an opcode extension, and the modRM also
            specifies an address. */
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
 
          switch (gregLO3ofRM(modrm)) {
@@ -4815,7 +4822,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 
          /* bits 5,4,3 are an opcode extension, and the modRM also
             specifies an address. */
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
 
          switch (gregLO3ofRM(modrm)) {
@@ -5311,7 +5318,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
          /* bits 5,4,3 are an opcode extension, and the modRM also
             specifies an address. */
          IROp   fop;
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
          switch (gregLO3ofRM(modrm)) {
 
@@ -5443,7 +5450,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 
          /* bits 5,4,3 are an opcode extension, and the modRM also
             specifies an address. */
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
 
          switch (gregLO3ofRM(modrm)) {
@@ -5659,7 +5666,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 
          /* bits 5,4,3 are an opcode extension, and the modRM also
             specifies an address. */
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
 
          switch (gregLO3ofRM(modrm)) {
@@ -5768,7 +5775,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 
          /* bits 5,4,3 are an opcode extension, and the modRM also
             specifies an address. */
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
 
          switch (gregLO3ofRM(modrm)) {
@@ -5986,7 +5993,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
          /* bits 5,4,3 are an opcode extension, and the modRM also
             specifies an address. */
          IROp   fop;
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
 
          switch (gregLO3ofRM(modrm)) {
@@ -6106,7 +6113,7 @@ ULong dis_FPU ( /*OUT*/Bool* decode_ok,
 
          /* bits 5,4,3 are an opcode extension, and the modRM also
             specifies an address. */
-         IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+         IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
          delta += len;
 
          switch (gregLO3ofRM(modrm)) {
@@ -6281,7 +6288,8 @@ static void putMMXReg ( UInt archreg, IRExpr* e )
    responsibility of its caller. */
 
 static 
-ULong dis_MMXop_regmem_to_reg ( VexAbiInfo* vbi,
+ULong dis_MMXop_regmem_to_reg ( GuestMemoryFetcher &guest_code, 
+				VexAbiInfo* vbi,
                                 Prefix      pfx,
                                 Long        delta,
                                 UChar       opc,
@@ -6289,7 +6297,7 @@ ULong dis_MMXop_regmem_to_reg ( VexAbiInfo* vbi,
                                 Bool        show_granularity )
 {
    char   dis_buf[50];
-   UChar   modrm = getUChar(delta);
+   UChar   modrm = getUChar(guest_code, delta);
    Bool    isReg = epartIsReg(modrm);
    IRExpr* argL  = NULL;
    IRExpr* argR  = NULL;
@@ -6388,7 +6396,7 @@ ULong dis_MMXop_regmem_to_reg ( VexAbiInfo* vbi,
       argE = getMMXReg(eregLO3ofRM(modrm));
    } else {
       Int    len;
-      IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+      IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
       delta += len;
       argE = loadLE(Ity_I64, mkexpr(addr));
    }
@@ -6431,7 +6439,8 @@ ULong dis_MMXop_regmem_to_reg ( VexAbiInfo* vbi,
 /* Vector by scalar shift of G by the amount specified at the bottom
    of E.  This is a straight copy of dis_SSE_shiftG_byE. */
 
-static ULong dis_MMX_shiftG_byE ( VexAbiInfo* vbi,
+static ULong dis_MMX_shiftG_byE ( GuestMemoryFetcher &guest_code, 
+				  VexAbiInfo* vbi,
                                   Prefix pfx, Long delta, 
                                   const char* opname, IROp op )
 {
@@ -6439,7 +6448,7 @@ static ULong dis_MMX_shiftG_byE ( VexAbiInfo* vbi,
    Int     alen, size;
    IRTemp  addr;
    Bool    shl, shr, sar;
-   UChar   rm   = getUChar(delta);
+   UChar   rm   = getUChar(guest_code, delta);
    IRTemp  g0   = newTemp(Ity_I64);
    IRTemp  g1   = newTemp(Ity_I64);
    IRTemp  amt  = newTemp(Ity_I64);
@@ -6452,7 +6461,7 @@ static ULong dis_MMX_shiftG_byE ( VexAbiInfo* vbi,
                         nameMMXReg(gregLO3ofRM(rm)) );
       delta++;
    } else {
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( amt, loadLE(Ity_I64, mkexpr(addr)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
@@ -6508,17 +6517,17 @@ static ULong dis_MMX_shiftG_byE ( VexAbiInfo* vbi,
    straight copy of dis_SSE_shiftE_imm. */
 
 static 
-ULong dis_MMX_shiftE_imm ( Long delta, const char* opname, IROp op )
+ULong dis_MMX_shiftE_imm ( GuestMemoryFetcher &guest_code, Long delta, const char* opname, IROp op )
 {
    Bool    shl, shr, sar;
-   UChar   rm   = getUChar(delta);
+   UChar   rm   = getUChar(guest_code, delta);
    IRTemp  e0   = newTemp(Ity_I64);
    IRTemp  e1   = newTemp(Ity_I64);
    UChar   amt, size;
    vassert(epartIsReg(rm));
    vassert(gregLO3ofRM(rm) == 2 
            || gregLO3ofRM(rm) == 4 || gregLO3ofRM(rm) == 6);
-   amt = getUChar(delta+1);
+   amt = getUChar(guest_code, delta+1);
    delta += 2;
    DIP("%s $%d,%s\n", opname,
                       (Int)amt,
@@ -6563,13 +6572,13 @@ ULong dis_MMX_shiftE_imm ( Long delta, const char* opname, IROp op )
 /* Completely handle all MMX instructions except emms. */
 
 static
-ULong dis_MMX ( Bool* decode_ok,
+ULong dis_MMX ( GuestMemoryFetcher &guest_code, Bool* decode_ok,
                 VexAbiInfo* vbi, Prefix pfx, Int sz, Long delta )
 {
    Int   len;
    UChar modrm;
    char dis_buf[50];
-   UChar opc = getUChar(delta);
+   UChar opc = getUChar(guest_code, delta);
    delta++;
 
    /* dis_MMX handles all insns except emms. */
@@ -6580,7 +6589,7 @@ ULong dis_MMX ( Bool* decode_ok,
       case 0x6E: 
          if (sz == 4) {
             /* MOVD (src)ireg32-or-mem32 (E), (dst)mmxreg (G)*/
-            modrm = getUChar(delta);
+            modrm = getUChar(guest_code, delta);
             if (epartIsReg(modrm)) {
                delta++;
                putMMXReg(
@@ -6592,7 +6601,7 @@ ULong dis_MMX ( Bool* decode_ok,
                    nameIReg32(eregOfRexRM(pfx,modrm)), 
                    nameMMXReg(gregLO3ofRM(modrm)));
             } else {
-               IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+               IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
                delta += len;
                putMMXReg(
                   gregLO3ofRM(modrm),
@@ -6605,7 +6614,7 @@ ULong dis_MMX ( Bool* decode_ok,
          else
          if (sz == 8) {
             /* MOVD (src)ireg64-or-mem64 (E), (dst)mmxreg (G)*/
-            modrm = getUChar(delta);
+            modrm = getUChar(guest_code, delta);
             if (epartIsReg(modrm)) {
                delta++;
                putMMXReg( gregLO3ofRM(modrm),
@@ -6614,7 +6623,7 @@ ULong dis_MMX ( Bool* decode_ok,
                    nameIReg64(eregOfRexRM(pfx,modrm)), 
                    nameMMXReg(gregLO3ofRM(modrm)));
             } else {
-               IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+               IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
                delta += len;
                putMMXReg( gregLO3ofRM(modrm),
                           loadLE(Ity_I64, mkexpr(addr)) );
@@ -6629,7 +6638,7 @@ ULong dis_MMX ( Bool* decode_ok,
       case 0x7E:
          if (sz == 4) {
             /* MOVD (src)mmxreg (G), (dst)ireg32-or-mem32 (E) */
-            modrm = getUChar(delta);
+            modrm = getUChar(guest_code, delta);
             if (epartIsReg(modrm)) {
                delta++;
                putIReg32( eregOfRexRM(pfx,modrm),
@@ -6638,7 +6647,7 @@ ULong dis_MMX ( Bool* decode_ok,
                    nameMMXReg(gregLO3ofRM(modrm)), 
                    nameIReg32(eregOfRexRM(pfx,modrm)));
             } else {
-               IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+               IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
                delta += len;
                storeLE( mkexpr(addr),
                         unop(Iop_64to32, getMMXReg(gregLO3ofRM(modrm)) ) );
@@ -6648,7 +6657,7 @@ ULong dis_MMX ( Bool* decode_ok,
          else
          if (sz == 8) {
             /* MOVD (src)mmxreg (G), (dst)ireg64-or-mem64 (E) */
-            modrm = getUChar(delta);
+            modrm = getUChar(guest_code, delta);
             if (epartIsReg(modrm)) {
                delta++;
                putIReg64( eregOfRexRM(pfx,modrm),
@@ -6657,7 +6666,7 @@ ULong dis_MMX ( Bool* decode_ok,
                    nameMMXReg(gregLO3ofRM(modrm)), 
                    nameIReg64(eregOfRexRM(pfx,modrm)));
             } else {
-               IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+               IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
                delta += len;
                storeLE( mkexpr(addr),
                        getMMXReg(gregLO3ofRM(modrm)) );
@@ -6673,7 +6682,7 @@ ULong dis_MMX ( Bool* decode_ok,
          if (sz != 4
              && /*ignore redundant REX.W*/!(sz==8 && haveNo66noF2noF3(pfx))) 
             goto mmx_decode_failure;
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) {
             delta++;
             putMMXReg( gregLO3ofRM(modrm), getMMXReg(eregLO3ofRM(modrm)) );
@@ -6681,7 +6690,7 @@ ULong dis_MMX ( Bool* decode_ok,
                 nameMMXReg(eregLO3ofRM(modrm)), 
                 nameMMXReg(gregLO3ofRM(modrm)));
          } else {
-            IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+            IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
             delta += len;
             putMMXReg( gregLO3ofRM(modrm), loadLE(Ity_I64, mkexpr(addr)) );
             DIP("movq %s, %s\n", 
@@ -6694,13 +6703,13 @@ ULong dis_MMX ( Bool* decode_ok,
          if (sz != 4
              && /*ignore redundant REX.W*/!(sz==8 && haveNo66noF2noF3(pfx)))
             goto mmx_decode_failure;
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) {
             /* Fall through.  The assembler doesn't appear to generate
                these. */
             goto mmx_decode_failure;
          } else {
-            IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+            IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
             delta += len;
             storeLE( mkexpr(addr), getMMXReg(gregLO3ofRM(modrm)) );
             DIP("mov(nt)q %s, %s\n", 
@@ -6713,7 +6722,7 @@ ULong dis_MMX ( Bool* decode_ok,
       case 0xFE: /* PADDgg (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "padd", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "padd", True );
          break;
 
       case 0xEC: 
@@ -6721,14 +6730,14 @@ ULong dis_MMX ( Bool* decode_ok,
          if (sz != 4
              && /*ignore redundant REX.W*/!(sz==8 && haveNo66noF2noF3(pfx)))
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "padds", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "padds", True );
          break;
 
       case 0xDC: 
       case 0xDD: /* PADDUSgg (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "paddus", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "paddus", True );
          break;
 
       case 0xF8: 
@@ -6736,38 +6745,38 @@ ULong dis_MMX ( Bool* decode_ok,
       case 0xFA: /* PSUBgg (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "psub", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "psub", True );
          break;
 
       case 0xE8: 
       case 0xE9: /* PSUBSgg (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "psubs", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "psubs", True );
          break;
 
       case 0xD8: 
       case 0xD9: /* PSUBUSgg (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "psubus", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "psubus", True );
          break;
 
       case 0xE5: /* PMULHW (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pmulhw", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pmulhw", False );
          break;
 
       case 0xD5: /* PMULLW (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pmullw", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pmullw", False );
          break;
 
       case 0xF5: /* PMADDWD (src)mmxreg-or-mem, (dst)mmxreg */
          vassert(sz == 4);
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pmaddwd", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pmaddwd", False );
          break;
 
       case 0x74: 
@@ -6775,7 +6784,7 @@ ULong dis_MMX ( Bool* decode_ok,
       case 0x76: /* PCMPEQgg (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pcmpeq", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pcmpeq", True );
          break;
 
       case 0x64: 
@@ -6783,25 +6792,25 @@ ULong dis_MMX ( Bool* decode_ok,
       case 0x66: /* PCMPGTgg (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pcmpgt", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pcmpgt", True );
          break;
 
       case 0x6B: /* PACKSSDW (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "packssdw", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "packssdw", False );
          break;
 
       case 0x63: /* PACKSSWB (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "packsswb", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "packsswb", False );
          break;
 
       case 0x67: /* PACKUSWB (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "packuswb", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "packuswb", False );
          break;
 
       case 0x68: 
@@ -6810,7 +6819,7 @@ ULong dis_MMX ( Bool* decode_ok,
          if (sz != 4
              && /*ignore redundant REX.W*/!(sz==8 && haveNo66noF2noF3(pfx))) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "punpckh", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "punpckh", True );
          break;
 
       case 0x60: 
@@ -6819,36 +6828,36 @@ ULong dis_MMX ( Bool* decode_ok,
          if (sz != 4
              && /*ignore redundant REX.W*/!(sz==8 && haveNo66noF2noF3(pfx))) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "punpckl", True );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "punpckl", True );
          break;
 
       case 0xDB: /* PAND (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pand", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pand", False );
          break;
 
       case 0xDF: /* PANDN (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pandn", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pandn", False );
          break;
 
       case 0xEB: /* POR (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "por", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "por", False );
          break;
 
       case 0xEF: /* PXOR (src)mmxreg-or-mem, (dst)mmxreg */
          if (sz != 4) 
             goto mmx_decode_failure;
-         delta = dis_MMXop_regmem_to_reg ( vbi, pfx, delta, opc, "pxor", False );
+         delta = dis_MMXop_regmem_to_reg ( guest_code, vbi, pfx, delta, opc, "pxor", False );
          break; 
 
-#     define SHIFT_BY_REG(_name,_op)                                     \
-                delta = dis_MMX_shiftG_byE(vbi, pfx, delta, _name, _op); \
-                break;
+#     define SHIFT_BY_REG(_name,_op)					\
+	 delta = dis_MMX_shiftG_byE(guest_code, vbi, pfx, delta, _name, _op); \
+	 break;
 
       /* PSLLgg (src)mmxreg-or-mem, (dst)mmxreg */
       case 0xF1: SHIFT_BY_REG("psllw", Iop_ShlN16x4);
@@ -6873,12 +6882,12 @@ ULong dis_MMX ( Bool* decode_ok,
          UChar byte2, subopc;
          if (sz != 4) 
             goto mmx_decode_failure;
-         byte2  = getUChar(delta);      /* amode / sub-opcode */
+         byte2  = getUChar(guest_code, delta);      /* amode / sub-opcode */
          subopc = toUChar( (byte2 >> 3) & 7 );
 
 #        define SHIFT_BY_IMM(_name,_op)                        \
-            do { delta = dis_MMX_shiftE_imm(delta,_name,_op);  \
-            } while (0)
+	 do { delta = dis_MMX_shiftE_imm(guest_code,delta,_name,_op);	\
+	 } while (0)
 
               if (subopc == 2 /*SRL*/ && opc == 0x71) 
                   SHIFT_BY_IMM("psrlw", Iop_ShrN16x4);
@@ -6913,7 +6922,7 @@ ULong dis_MMX ( Bool* decode_ok,
          IRTemp olddata = newTemp(Ity_I64);
          IRTemp newdata = newTemp(Ity_I64);
 
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (sz != 4 || (!epartIsReg(modrm)))
             goto mmx_decode_failure;
          delta++;
@@ -6999,7 +7008,8 @@ IRExpr* shiftR64_with_extras ( IRTemp xtra, IRTemp base, IRTemp amt )
 /* Double length left and right shifts.  Apparently only required in
    v-size (no b- variant). */
 static
-ULong dis_SHLRD_Gv_Ev ( VexAbiInfo* vbi,
+ULong dis_SHLRD_Gv_Ev ( GuestMemoryFetcher &guest_code, 
+			VexAbiInfo* vbi,
                         Prefix pfx,
                         Long delta, UChar modrm,
                         Int sz,
@@ -7052,7 +7062,7 @@ ULong dis_SHLRD_Gv_Ev ( VexAbiInfo* vbi,
           shift_amt_txt,
           nameIRegG(sz, pfx, modrm), nameIRegE(sz, pfx, modrm));
    } else {
-      addr = disAMode ( &len, vbi, pfx, delta, dis_buf, 
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, 
                         /* # bytes following amode */
                         amt_is_literal ? 1 : 0 );
       delta += len;
@@ -7184,7 +7194,7 @@ static const char* nameBtOp ( BtOp op )
 
 
 static
-ULong dis_bt_G_E ( VexAbiInfo* vbi,
+ULong dis_bt_G_E ( GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
                    Prefix pfx, Int sz, Long delta, BtOp op )
 {
    char  dis_buf[50];
@@ -7205,7 +7215,7 @@ ULong dis_bt_G_E ( VexAbiInfo* vbi,
    t_bitno1  = newTemp(Ity_I64);
    t_bitno2  = newTemp(Ity_I8);
    t_addr1   = newTemp(Ity_I64);
-   modrm     = getUChar(delta);
+   modrm     = getUChar(guest_code, delta);
 
    assign( t_bitno0, widenSto64(getIRegG(sz, pfx, modrm)) );
    
@@ -7230,7 +7240,7 @@ ULong dis_bt_G_E ( VexAbiInfo* vbi,
                               mkU64(sz == 8 ? 63 : sz == 4 ? 31 : 15)) );
 
    } else {
-      t_addr0 = disAMode ( &len, vbi, pfx, delta, dis_buf, 0 );
+      t_addr0 = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, 0 );
       delta += len;
       assign( t_bitno1, mkexpr(t_bitno0) );
    }
@@ -7328,7 +7338,7 @@ ULong dis_bt_G_E ( VexAbiInfo* vbi,
 
 /* Handle BSF/BSR.  Only v-size seems necessary. */
 static
-ULong dis_bs_E_G ( VexAbiInfo* vbi,
+ULong dis_bs_E_G ( GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
                    Prefix pfx, Int sz, Long delta, Bool fwds )
 {
    Bool   isReg;
@@ -7344,14 +7354,14 @@ ULong dis_bs_E_G ( VexAbiInfo* vbi,
 
    vassert(sz == 8 || sz == 4 || sz == 2);
 
-   modrm = getUChar(delta);
+   modrm = getUChar(guest_code, delta);
    isReg = epartIsReg(modrm);
    if (isReg) {
       delta++;
       assign( src, getIRegE(sz, pfx, modrm) );
    } else {
       Int    len;
-      IRTemp addr = disAMode( &len, vbi, pfx, delta, dis_buf, 0 );
+      IRTemp addr = disAMode(guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
       delta += len;
       assign( src, loadLE(ty, mkexpr(addr)) );
    }
@@ -7522,7 +7532,8 @@ void codegen_LAHF ( void  )
 
 
 static
-ULong dis_cmpxchg_G_E ( /*OUT*/Bool* ok,
+ULong dis_cmpxchg_G_E ( GuestMemoryFetcher &guest_code, 
+			/*OUT*/Bool* ok,
                         VexAbiInfo*  vbi,
                         Prefix       pfx,
                         Int          size, 
@@ -7539,7 +7550,7 @@ ULong dis_cmpxchg_G_E ( /*OUT*/Bool* ok,
    IRTemp acc2  = newTemp(ty);
    IRTemp cond8 = newTemp(Ity_I8);
    IRTemp addr  = IRTemp_INVALID;
-   UChar  rm    = getUChar(delta0);
+   UChar  rm    = getUChar(guest_code, delta0);
 
    /* There are 3 cases to consider:
 
@@ -7573,7 +7584,7 @@ ULong dis_cmpxchg_G_E ( /*OUT*/Bool* ok,
    } 
    else if (!epartIsReg(rm) && !(pfx & PFX_LOCK)) {
       /* case 2 */
-      addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( dest, loadLE(ty, mkexpr(addr)) );
       delta0 += len;
       assign( src, getIRegG(size, pfx, rm) );
@@ -7593,7 +7604,7 @@ ULong dis_cmpxchg_G_E ( /*OUT*/Bool* ok,
          Compute success from the output of the IRCAS, and steer the
          new value for RAX accordingly: in case of success, RAX is
          unchanged. */
-      addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       delta0 += len;
       assign( src, getIRegG(size, pfx, rm) );
       assign( acc, getIRegRAX(size) );
@@ -7633,13 +7644,14 @@ ULong dis_cmpxchg_G_E ( /*OUT*/Bool* ok,
                        PUT tmpd, %G
 */
 static
-ULong dis_cmov_E_G ( VexAbiInfo* vbi,
+ULong dis_cmov_E_G ( GuestMemoryFetcher &guest_code, 
+		     VexAbiInfo* vbi,
                      Prefix        pfx,
                      Int           sz, 
                      AMD64Condcode cond,
                      Long          delta0 )
 {
-   UChar rm  = getUChar(delta0);
+   UChar rm  = getUChar(guest_code, delta0);
    char dis_buf[50];
    Int   len;
 
@@ -7665,7 +7677,7 @@ ULong dis_cmov_E_G ( VexAbiInfo* vbi,
 
    /* E refers to memory */    
    {
-      IRTemp addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      IRTemp addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( tmps, loadLE(ty, mkexpr(addr)) );
       assign( tmpd, getIRegG(sz, pfx, rm) );
 
@@ -7685,12 +7697,13 @@ ULong dis_cmov_E_G ( VexAbiInfo* vbi,
 
 
 static
-ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
+ULong dis_xadd_G_E ( GuestMemoryFetcher &guest_code, 
+		     /*OUT*/Bool* decode_ok,
                      VexAbiInfo* vbi,
                      Prefix pfx, Int sz, Long delta0 )
 {
    Int   len;
-   UChar rm = getUChar(delta0);
+   UChar rm = getUChar(guest_code, delta0);
    char dis_buf[50];
 
    IRType ty    = szToITy(sz);
@@ -7716,7 +7729,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
    }
    else if (!epartIsReg(rm) && !(pfx & PFX_LOCK)) {
       /* case 2 */
-      IRTemp addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      IRTemp addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( tmpd,  loadLE(ty, mkexpr(addr)) );
       assign( tmpt0, getIRegG(sz, pfx, rm) );
       assign( tmpt1, binop(mkSizedOp(ty,Iop_Add8),
@@ -7731,7 +7744,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
    }
    else if (!epartIsReg(rm) && (pfx & PFX_LOCK)) {
       /* case 3 */
-      IRTemp addr = disAMode ( &len, vbi, pfx, delta0, dis_buf, 0 );
+      IRTemp addr = disAMode ( guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( tmpd,  loadLE(ty, mkexpr(addr)) );
       assign( tmpt0, getIRegG(sz, pfx, rm) );
       assign( tmpt1, binop(mkSizedOp(ty,Iop_Add8), 
@@ -7756,7 +7769,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
 //.. {
 //..    Int    len;
 //..    IRTemp addr;
-//..    UChar  rm  = getUChar(delta0);
+//..    UChar  rm  = getUChar(guest_code, delta0);
 //..    char  dis_buf[50];
 //.. 
 //..    if (epartIsReg(rm)) {
@@ -7764,7 +7777,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
 //..       DIP("movw %s,%s\n", nameIReg(2,eregOfRM(rm)), nameSReg(gregOfRM(rm)));
 //..       return 1+delta0;
 //..    } else {
-//..       addr = disAMode ( &len, sorb, delta0, dis_buf );
+//..       addr = disAMode ( guest_code, &len, sorb, delta0, dis_buf );
 //..       putSReg( gregOfRM(rm), loadLE(Ity_I16, mkexpr(addr)) );
 //..       DIP("movw %s,%s\n", dis_buf, nameSReg(gregOfRM(rm)));
 //..       return len+delta0;
@@ -7781,7 +7794,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
 //.. {
 //..    Int    len;
 //..    IRTemp addr;
-//..    UChar  rm  = getUChar(delta0);
+//..    UChar  rm  = getUChar(guest_code, delta0);
 //..    char  dis_buf[50];
 //.. 
 //..    vassert(sz == 2 || sz == 4);
@@ -7795,7 +7808,7 @@ ULong dis_xadd_G_E ( /*OUT*/Bool* decode_ok,
 //..       DIP("mov %s,%s\n", nameSReg(gregOfRM(rm)), nameIReg(sz,eregOfRM(rm)));
 //..       return 1+delta0;
 //..    } else {
-//..       addr = disAMode ( &len, sorb, delta0, dis_buf );
+//..       addr = disAMode ( guest_code, &len, sorb, delta0, dis_buf );
 //..       storeLE( mkexpr(addr), getSReg(gregOfRM(rm)) );
 //..       DIP("mov %s,%s\n", nameSReg(gregOfRM(rm)), dis_buf);
 //..       return len+delta0;
@@ -7857,6 +7870,7 @@ void dis_ret ( VexAbiInfo* vbi, ULong d64 )
 */
 
 static ULong dis_SSE_E_to_G_all_wrk ( 
+    GuestMemoryFetcher &guest_code, 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
                 const char* opname, IROp op,
@@ -7866,7 +7880,7 @@ static ULong dis_SSE_E_to_G_all_wrk (
    char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
-   UChar   rm = getUChar(delta);
+   UChar   rm = getUChar(guest_code, delta);
    IRExpr* gpart
       = invertG ? unop(Iop_NotV128, getXMMReg(gregOfRexRM(pfx,rm)))
                 : getXMMReg(gregOfRexRM(pfx,rm));
@@ -7879,7 +7893,7 @@ static ULong dis_SSE_E_to_G_all_wrk (
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
       return delta+1;
    } else {
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       putXMMReg( gregOfRexRM(pfx,rm), 
                  binop(op, gpart,
                            loadLE(Ity_V128, mkexpr(addr))) );
@@ -7894,34 +7908,35 @@ static ULong dis_SSE_E_to_G_all_wrk (
 /* All lanes SSE binary operation, G = G `op` E. */
 
 static
-ULong dis_SSE_E_to_G_all ( VexAbiInfo* vbi,
+ULong dis_SSE_E_to_G_all ( GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
                            Prefix pfx, Long delta, 
                            const char* opname, IROp op )
 {
-   return dis_SSE_E_to_G_all_wrk( vbi, pfx, delta, opname, op, False );
+   return dis_SSE_E_to_G_all_wrk( guest_code, vbi, pfx, delta, opname, op, False );
 }
 
 /* All lanes SSE binary operation, G = (not G) `op` E. */
 
 static
-ULong dis_SSE_E_to_G_all_invG ( VexAbiInfo* vbi,
+ULong dis_SSE_E_to_G_all_invG ( GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
                                 Prefix pfx, Long delta, 
                                 const char* opname, IROp op )
 {
-   return dis_SSE_E_to_G_all_wrk( vbi, pfx, delta, opname, op, True );
+   return dis_SSE_E_to_G_all_wrk( guest_code, vbi, pfx, delta, opname, op, True );
 }
 
 
 /* Lowest 32-bit lane only SSE binary operation, G = G `op` E. */
 
-static ULong dis_SSE_E_to_G_lo32 ( VexAbiInfo* vbi,
+static ULong dis_SSE_E_to_G_lo32 ( GuestMemoryFetcher &guest_code, 
+				   VexAbiInfo* vbi,
                                    Prefix pfx, Long delta, 
                                    const char* opname, IROp op )
 {
    char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
-   UChar   rm = getUChar(delta);
+   UChar   rm = getUChar(guest_code, delta);
    IRExpr* gpart = getXMMReg(gregOfRexRM(pfx,rm));
    if (epartIsReg(rm)) {
       putXMMReg( gregOfRexRM(pfx,rm), 
@@ -7935,7 +7950,7 @@ static ULong dis_SSE_E_to_G_lo32 ( VexAbiInfo* vbi,
       /* We can only do a 32-bit memory read, so the upper 3/4 of the
          E operand needs to be made simply of zeroes. */
       IRTemp epart = newTemp(Ity_V128);
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( epart, unop( Iop_32UtoV128,
                            loadLE(Ity_I32, mkexpr(addr))) );
       putXMMReg( gregOfRexRM(pfx,rm), 
@@ -7950,14 +7965,15 @@ static ULong dis_SSE_E_to_G_lo32 ( VexAbiInfo* vbi,
 
 /* Lower 64-bit lane only SSE binary operation, G = G `op` E. */
 
-static ULong dis_SSE_E_to_G_lo64 ( VexAbiInfo* vbi,
+static ULong dis_SSE_E_to_G_lo64 ( GuestMemoryFetcher &guest_code, 
+				   VexAbiInfo* vbi,
                                    Prefix pfx, Long delta, 
                                    const char* opname, IROp op )
 {
    char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
-   UChar   rm = getUChar(delta);
+   UChar   rm = getUChar(guest_code, delta);
    IRExpr* gpart = getXMMReg(gregOfRexRM(pfx,rm));
    if (epartIsReg(rm)) {
       putXMMReg( gregOfRexRM(pfx,rm), 
@@ -7971,7 +7987,7 @@ static ULong dis_SSE_E_to_G_lo64 ( VexAbiInfo* vbi,
       /* We can only do a 64-bit memory read, so the upper half of the
          E operand needs to be made simply of zeroes. */
       IRTemp epart = newTemp(Ity_V128);
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( epart, unop( Iop_64UtoV128,
                            loadLE(Ity_I64, mkexpr(addr))) );
       putXMMReg( gregOfRexRM(pfx,rm), 
@@ -7987,6 +8003,7 @@ static ULong dis_SSE_E_to_G_lo64 ( VexAbiInfo* vbi,
 /* All lanes unary SSE operation, G = op(E). */
 
 static ULong dis_SSE_E_to_G_unary_all ( 
+    GuestMemoryFetcher &guest_code, 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
                 const char* opname, IROp op
@@ -7995,7 +8012,7 @@ static ULong dis_SSE_E_to_G_unary_all (
    char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
-   UChar   rm = getUChar(delta);
+   UChar   rm = getUChar(guest_code, delta);
    if (epartIsReg(rm)) {
       putXMMReg( gregOfRexRM(pfx,rm), 
                  unop(op, getXMMReg(eregOfRexRM(pfx,rm))) );
@@ -8004,7 +8021,7 @@ static ULong dis_SSE_E_to_G_unary_all (
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
       return delta+1;
    } else {
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       putXMMReg( gregOfRexRM(pfx,rm), 
                  unop(op, loadLE(Ity_V128, mkexpr(addr))) );
       DIP("%s %s,%s\n", opname,
@@ -8018,6 +8035,7 @@ static ULong dis_SSE_E_to_G_unary_all (
 /* Lowest 32-bit lane only unary SSE operation, G = op(E). */
 
 static ULong dis_SSE_E_to_G_unary_lo32 ( 
+    GuestMemoryFetcher &guest_code,
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
                 const char* opname, IROp op
@@ -8028,7 +8046,7 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
    char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
-   UChar   rm = getUChar(delta);
+   UChar   rm = getUChar(guest_code, delta);
    IRTemp  oldG0 = newTemp(Ity_V128);
    IRTemp  oldG1 = newTemp(Ity_V128);
 
@@ -8045,7 +8063,7 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
       return delta+1;
    } else {
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( oldG1, 
               binop( Iop_SetV128lo32,
                      mkexpr(oldG0),
@@ -8062,6 +8080,7 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
 /* Lowest 64-bit lane only unary SSE operation, G = op(E). */
 
 static ULong dis_SSE_E_to_G_unary_lo64 ( 
+    GuestMemoryFetcher &guest_code, 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
                 const char* opname, IROp op
@@ -8072,7 +8091,7 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
    char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
-   UChar   rm = getUChar(delta);
+   UChar   rm = getUChar(guest_code, delta);
    IRTemp  oldG0 = newTemp(Ity_V128);
    IRTemp  oldG1 = newTemp(Ity_V128);
 
@@ -8089,7 +8108,7 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
       return delta+1;
    } else {
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( oldG1, 
               binop( Iop_SetV128lo64,
                      mkexpr(oldG0),
@@ -8108,6 +8127,7 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
       G = E `op` G   (eLeft == True)
 */
 static ULong dis_SSEint_E_to_G( 
+    GuestMemoryFetcher &guest_code, 
                 VexAbiInfo* vbi,
                 Prefix pfx, Long delta, 
                 const char* opname, IROp op,
@@ -8117,7 +8137,7 @@ static ULong dis_SSEint_E_to_G(
    char   dis_buf[50];
    Int     alen;
    IRTemp  addr;
-   UChar   rm = getUChar(delta);
+   UChar   rm = getUChar(guest_code, delta);
    IRExpr* gpart = getXMMReg(gregOfRexRM(pfx,rm));
    IRExpr* epart = NULL;
    if (epartIsReg(rm)) {
@@ -8127,7 +8147,7 @@ static ULong dis_SSEint_E_to_G(
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
       delta += 1;
    } else {
-      addr  = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr  = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       epart = loadLE(Ity_V128, mkexpr(addr));
       DIP("%s %s,%s\n", opname,
                         dis_buf,
@@ -8195,7 +8215,8 @@ static void findSSECmpOp ( Bool* needNot, IROp* op,
 
 /* Handles SSE 32F/64F comparisons. */
 
-static ULong dis_SSEcmp_E_to_G ( VexAbiInfo* vbi,
+static ULong dis_SSEcmp_E_to_G ( GuestMemoryFetcher &guest_code, 
+				 VexAbiInfo* vbi,
                                  Prefix pfx, Long delta, 
                                  const char* opname, Bool all_lanes, Int sz )
 {
@@ -8205,11 +8226,11 @@ static ULong dis_SSEcmp_E_to_G ( VexAbiInfo* vbi,
    Bool    needNot = False;
    IROp    op      = Iop_INVALID;
    IRTemp  plain   = newTemp(Ity_V128);
-   UChar   rm      = getUChar(delta);
+   UChar   rm      = getUChar(guest_code, delta);
    UShort  mask    = 0;
    vassert(sz == 4 || sz == 8);
    if (epartIsReg(rm)) {
-      imm8 = getUChar(delta+1);
+      imm8 = getUChar(guest_code, delta+1);
       findSSECmpOp(&needNot, &op, imm8, all_lanes, sz);
       assign( plain, binop(op, getXMMReg(gregOfRexRM(pfx,rm)), 
                                getXMMReg(eregOfRexRM(pfx,rm))) );
@@ -8219,8 +8240,8 @@ static ULong dis_SSEcmp_E_to_G ( VexAbiInfo* vbi,
                             nameXMMReg(eregOfRexRM(pfx,rm)),
                             nameXMMReg(gregOfRexRM(pfx,rm)) );
    } else {
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 1 );
-      imm8 = getUChar(delta+alen);
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 1 );
+      imm8 = getUChar(guest_code, delta+alen);
       findSSECmpOp(&needNot, &op, imm8, all_lanes, sz);
       assign( plain, 
               binop(
@@ -8259,7 +8280,8 @@ static ULong dis_SSEcmp_E_to_G ( VexAbiInfo* vbi,
 /* Vector by scalar shift of G by the amount specified at the bottom
    of E. */
 
-static ULong dis_SSE_shiftG_byE ( VexAbiInfo* vbi,
+static ULong dis_SSE_shiftG_byE ( GuestMemoryFetcher &guest_code,
+				  VexAbiInfo* vbi,
                                   Prefix pfx, Long delta, 
                                   const char* opname, IROp op )
 {
@@ -8267,7 +8289,7 @@ static ULong dis_SSE_shiftG_byE ( VexAbiInfo* vbi,
    Int     alen, size;
    IRTemp  addr;
    Bool    shl, shr, sar;
-   UChar   rm   = getUChar(delta);
+   UChar   rm   = getUChar(guest_code, delta);
    IRTemp  g0   = newTemp(Ity_V128);
    IRTemp  g1   = newTemp(Ity_V128);
    IRTemp  amt  = newTemp(Ity_I32);
@@ -8279,7 +8301,7 @@ static ULong dis_SSE_shiftG_byE ( VexAbiInfo* vbi,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
       delta++;
    } else {
-      addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( amt, loadLE(Ity_I32, mkexpr(addr)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
@@ -8336,18 +8358,18 @@ static ULong dis_SSE_shiftG_byE ( VexAbiInfo* vbi,
 /* Vector by scalar shift of E by an immediate byte. */
 
 static 
-ULong dis_SSE_shiftE_imm ( Prefix pfx, 
+ULong dis_SSE_shiftE_imm ( GuestMemoryFetcher &guest_code, Prefix pfx, 
                            Long delta, const char* opname, IROp op )
 {
    Bool    shl, shr, sar;
-   UChar   rm   = getUChar(delta);
+   UChar   rm   = getUChar(guest_code, delta);
    IRTemp  e0   = newTemp(Ity_V128);
    IRTemp  e1   = newTemp(Ity_V128);
    UChar   amt, size;
    vassert(epartIsReg(rm));
    vassert(gregLO3ofRM(rm) == 2 
            || gregLO3ofRM(rm) == 4 || gregLO3ofRM(rm) == 6);
-   amt = getUChar(delta+1);
+   amt = getUChar(guest_code, delta+1);
    delta += 2;
    DIP("%s $%d,%s\n", opname,
                       (Int)amt,
@@ -8720,72 +8742,72 @@ static void gen_SEGV_if_not_16_aligned ( IRTemp effective_addr )
 
    Same for BTS, BTR
 */
-static Bool can_be_used_with_LOCK_prefix ( UChar* opc )
+static Bool can_be_used_with_LOCK_prefix ( GuestMemoryFetcher &opc, unsigned delta )
 {
-   switch (opc[0]) {
+   switch (opc[delta]) {
       case 0x00: case 0x01: case 0x08: case 0x09:
       case 0x10: case 0x11: case 0x18: case 0x19:
       case 0x20: case 0x21: case 0x28: case 0x29:
       case 0x30: case 0x31:
-         if (!epartIsReg(opc[1]))
+         if (!epartIsReg(opc[delta+1]))
             return True;
          break;
 
       case 0x80: case 0x81: case 0x82: case 0x83:
-         if (gregLO3ofRM(opc[1]) >= 0 && gregLO3ofRM(opc[1]) <= 6
-             && !epartIsReg(opc[1]))
+         if (gregLO3ofRM(opc[delta+1]) >= 0 && gregLO3ofRM(opc[delta+1]) <= 6
+             && !epartIsReg(opc[delta+1]))
             return True;
          break;
 
       case 0xFE: case 0xFF:
-         if (gregLO3ofRM(opc[1]) >= 0 && gregLO3ofRM(opc[1]) <= 1
-             && !epartIsReg(opc[1]))
+         if (gregLO3ofRM(opc[delta+1]) >= 0 && gregLO3ofRM(opc[delta+1]) <= 1
+             && !epartIsReg(opc[delta+1]))
             return True;
          break;
 
       case 0xF6: case 0xF7:
-         if (gregLO3ofRM(opc[1]) >= 2 && gregLO3ofRM(opc[1]) <= 3
-             && !epartIsReg(opc[1]))
+         if (gregLO3ofRM(opc[delta+1]) >= 2 && gregLO3ofRM(opc[delta+1]) <= 3
+             && !epartIsReg(opc[delta+1]))
             return True;
          break;
 
       case 0x86: case 0x87:
-         if (!epartIsReg(opc[1]))
+         if (!epartIsReg(opc[delta+1]))
             return True;
          break;
 
       case 0x0F: {
-         switch (opc[1]) {
+         switch (opc[delta+1]) {
             case 0xBB: case 0xB3: case 0xAB:
-               if (!epartIsReg(opc[2]))
+               if (!epartIsReg(opc[delta+2]))
                   return True;
                break;
             case 0xBA: 
-               if (gregLO3ofRM(opc[2]) >= 5 && gregLO3ofRM(opc[2]) <= 7
-                   && !epartIsReg(opc[2]))
+               if (gregLO3ofRM(opc[delta+2]) >= 5 && gregLO3ofRM(opc[delta+2]) <= 7
+                   && !epartIsReg(opc[delta+2]))
                   return True;
                break;
             case 0xB0: case 0xB1:
-               if (!epartIsReg(opc[2]))
+               if (!epartIsReg(opc[delta+2]))
                   return True;
                break;
             case 0xC7: 
-               if (gregLO3ofRM(opc[2]) == 1 && !epartIsReg(opc[2]) )
+               if (gregLO3ofRM(opc[delta+2]) == 1 && !epartIsReg(opc[delta+2]) )
                   return True;
                break;
             case 0xC0: case 0xC1:
-               if (!epartIsReg(opc[2]))
+               if (!epartIsReg(opc[delta+2]))
                   return True;
                break;
             default:
                break;
-         } /* switch (opc[1]) */
+         } /* switch (opc[delta+1]) */
          break;
       }
 
       default:
          break;
-   } /* switch (opc[0]) */
+   } /* switch (opc[delta+0]) */
 
    return False;
 }
@@ -8796,10 +8818,11 @@ static Bool can_be_used_with_LOCK_prefix ( UChar* opc )
 /*------------------------------------------------------------*/
 
 /* Disassemble a single instruction into IR.  The instruction is
-   located in host memory at &guest_code[delta]. */
+   located in host memory at &(*guest_code)[delta]. */
    
 static
 DisResult disInstr_AMD64_WRK ( 
+    GuestMemoryFetcher &guest_code, 
              /*OUT*/Bool* expect_CAS,
              Bool         put_IP,
              Bool         (*resteerOkFn) ( /*opaque*/void*, Addr64 ),
@@ -8817,7 +8840,6 @@ DisResult disInstr_AMD64_WRK (
    char     dis_buf[50];
    Int       am_sz, d_sz, n, n_prefixes;
    DisResult dres;
-   UChar*    insn; /* used in SSE decoders */
 
    /* The running delta */
    Long delta = delta64;
@@ -8854,24 +8876,21 @@ DisResult disInstr_AMD64_WRK (
 
    /* Spot "Special" instructions (see comment at top of file). */
    {
-      UChar* code = (UChar*)(guest_code + delta);
       /* Spot the 16-byte preamble:
          48C1C703   rolq $3,  %rdi
          48C1C70D   rolq $13, %rdi
          48C1C73D   rolq $61, %rdi
          48C1C733   rolq $51, %rdi
       */
-      if (code[ 0] == 0x48 && code[ 1] == 0xC1 && code[ 2] == 0xC7 
-                                               && code[ 3] == 0x03 &&
-          code[ 4] == 0x48 && code[ 5] == 0xC1 && code[ 6] == 0xC7 
-                                               && code[ 7] == 0x0D &&
-          code[ 8] == 0x48 && code[ 9] == 0xC1 && code[10] == 0xC7 
-                                               && code[11] == 0x3D &&
-          code[12] == 0x48 && code[13] == 0xC1 && code[14] == 0xC7 
-                                               && code[15] == 0x33) {
+      if (guest_code[delta +  0] == 0x48 && guest_code[delta +  1] == 0xC1 && guest_code[delta +  2] == 0xC7 
+	  && guest_code[delta +  3] == 0x03 && guest_code[delta +  4] == 0x48 && guest_code[delta +  5] == 0xC1
+	  && guest_code[delta +  6] == 0xC7 && guest_code[delta +  7] == 0x0D && guest_code[delta +  8] == 0x48
+	  && guest_code[delta +  9] == 0xC1 && guest_code[delta + 10] == 0xC7 && guest_code[delta + 11] == 0x3D
+	  && guest_code[delta + 12] == 0x48 && guest_code[delta + 13] == 0xC1 && guest_code[delta + 14] == 0xC7 
+	  && guest_code[delta + 15] == 0x33) {
          /* Got a "Special" instruction preamble.  Which one is it? */
-         if (code[16] == 0x48 && code[17] == 0x87 
-                              && code[18] == 0xDB /* xchgq %rbx,%rbx */) {
+         if (guest_code[delta + 16] == 0x48 && guest_code[delta + 17] == 0x87 
+	     && guest_code[delta + 18] == 0xDB /* xchgq %rbx,%rbx */) {
             /* %RDX = client_request ( %RAX ) */
             DIP("%%rdx = client_request ( %%rax )\n");
             delta += 19;
@@ -8880,8 +8899,8 @@ DisResult disInstr_AMD64_WRK (
             goto decode_success;
          }
          else
-         if (code[16] == 0x48 && code[17] == 0x87 
-                              && code[18] == 0xC9 /* xchgq %rcx,%rcx */) {
+         if (guest_code[delta + 16] == 0x48 && guest_code[delta + 17] == 0x87 
+	     && guest_code[delta + 18] == 0xC9 /* xchgq %rcx,%rcx */) {
             /* %RAX = guest_NRADDR */
             DIP("%%rax = guest_NRADDR\n");
             delta += 19;
@@ -8889,8 +8908,8 @@ DisResult disInstr_AMD64_WRK (
             goto decode_success;
          }
          else
-         if (code[16] == 0x48 && code[17] == 0x87 
-                              && code[18] == 0xD2 /* xchgq %rdx,%rdx */) {
+         if (guest_code[delta + 16] == 0x48 && guest_code[delta + 17] == 0x87 
+	     && guest_code[delta + 18] == 0xD2 /* xchgq %rdx,%rdx */) {
             /* call-noredir *%RAX */
             DIP("call-noredir *%%rax\n");
             delta += 19;
@@ -8915,7 +8934,7 @@ DisResult disInstr_AMD64_WRK (
    n_prefixes = 0;
    while (True) {
       if (n_prefixes > 7) goto decode_failure;
-      pre = getUChar(delta);
+      pre = getUChar(guest_code, delta);
       switch (pre) {
          case 0x66: pfx |= PFX_66; break;
          case 0x67: pfx |= PFX_ASO; break;
@@ -8980,7 +8999,7 @@ DisResult disInstr_AMD64_WRK (
       allowed. */
 
    if (pfx & PFX_LOCK) {
-      if (can_be_used_with_LOCK_prefix( (UChar*)&guest_code[delta] )) {
+      if (can_be_used_with_LOCK_prefix( guest_code, delta)) {
          DIP("lock ");
       } else {
          *expect_CAS = False;
@@ -9000,8 +9019,6 @@ DisResult disInstr_AMD64_WRK (
       SSE2 as a minimum so there is no point distinguishing SSE1 vs
       SSE2. */
 
-   insn = (UChar*)&guest_code[delta];
-
    /* FXSAVE is spuriously at the start here only because it is
       thusly placed in guest-x86/toIR.c. */
 
@@ -9009,17 +9026,17 @@ DisResult disInstr_AMD64_WRK (
       Note that REX.W 0F AE /0 writes a slightly different format and
       we don't handle that here. */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xAE
-       && !epartIsReg(insn[2]) && gregOfRexRM(pfx,insn[2]) == 0) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xAE
+       && !epartIsReg(guest_code[delta+2]) && gregOfRexRM(pfx,guest_code[delta+2]) == 0) {
        IRDirty* d;
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       vassert(sz == 4);
       vassert(!epartIsReg(modrm));
       /* REX.W must not be set.  That should be assured us by sz == 4
          above. */
       vassert(!(pfx & PFX_REXW));
 
-      addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
       delta += 2+alen;
 
       DIP("fxsave %s\n", dis_buf);
@@ -9085,65 +9102,65 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 58 = ADDPS -- add 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x58) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "addps", Iop_Add32Fx4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x58) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "addps", Iop_Add32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 58 = ADDSS -- add 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x58) {
-      delta = dis_SSE_E_to_G_lo32( vbi, pfx, delta+2, "addss", Iop_Add32F0x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x58) {
+      delta = dis_SSE_E_to_G_lo32( guest_code, vbi, pfx, delta+2, "addss", Iop_Add32F0x4 );
       goto decode_success;
    }
 
    /* 0F 55 = ANDNPS -- G = (not G) and E */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x55) {
-      delta = dis_SSE_E_to_G_all_invG( vbi, pfx, delta+2, "andnps", Iop_AndV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x55) {
+      delta = dis_SSE_E_to_G_all_invG( guest_code, vbi, pfx, delta+2, "andnps", Iop_AndV128 );
       goto decode_success;
    }
 
    /* 0F 54 = ANDPS -- G = G and E */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x54) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "andps", Iop_AndV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x54) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "andps", Iop_AndV128 );
       goto decode_success;
    }
 
    /* 0F C2 = CMPPS -- 32Fx4 comparison from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xC2) {
-      delta = dis_SSEcmp_E_to_G( vbi, pfx, delta+2, "cmpps", True, 4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC2) {
+      delta = dis_SSEcmp_E_to_G( guest_code, vbi, pfx, delta+2, "cmpps", True, 4 );
       goto decode_success;
    }
 
    /* F3 0F C2 = CMPSS -- 32F0x4 comparison from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0xC2) {
-      delta = dis_SSEcmp_E_to_G( vbi, pfx, delta+2, "cmpss", False, 4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC2) {
+      delta = dis_SSEcmp_E_to_G( guest_code, vbi, pfx, delta+2, "cmpss", False, 4 );
       goto decode_success;
    }
 
    /* 0F 2F = COMISS  -- 32F0x4 comparison G,E, and set ZCP */
    /* 0F 2E = UCOMISS -- 32F0x4 comparison G,E, and set ZCP */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && (insn[1] == 0x2F || insn[1] == 0x2E)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x2F || guest_code[delta+1] == 0x2E)) {
       IRTemp argL = newTemp(Ity_F32);
       IRTemp argR = newTemp(Ity_F32);
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( argR, getXMMRegLane32F( eregOfRexRM(pfx,modrm), 
                                          0/*lowest lane*/ ) );
          delta += 2+1;
-         DIP("%scomiss %s,%s\n", insn[1]==0x2E ? "u" : "",
+         DIP("%scomiss %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
 	 assign( argR, loadLE(Ity_F32, mkexpr(addr)) );
          delta += 2+alen;
-         DIP("%scomiss %s,%s\n", insn[1]==0x2E ? "u" : "",
+         DIP("%scomiss %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       }
@@ -9168,11 +9185,11 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 2A = CVTPI2PS -- convert 2 x I32 in mem/mmx to 2 x F32 in low
       half xmm */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x2A) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x2A) {
       IRTemp arg64 = newTemp(Ity_I64);
       IRTemp rmode = newTemp(Ity_I32);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       do_MMX_preamble();
       if (epartIsReg(modrm)) {
          assign( arg64, getMMXReg(eregLO3ofRM(modrm)) );
@@ -9180,7 +9197,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("cvtpi2ps %s,%s\n", nameMMXReg(eregLO3ofRM(modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( arg64, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 2+alen;
          DIP("cvtpi2ps %s,%s\n", dis_buf,
@@ -9210,11 +9227,11 @@ DisResult disInstr_AMD64_WRK (
       -- sz==4: convert I32 in mem/ireg to F32 in low quarter xmm
       -- sz==8: convert I64 in mem/ireg to F32 in low quarter xmm */
    if (haveF3no66noF2(pfx) && (sz == 4 || sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x2A) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x2A) {
 
       IRTemp rmode = newTemp(Ity_I32);
       assign( rmode, get_sse_roundingmode() );
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
 
       if (sz == 4) {
          IRTemp arg32 = newTemp(Ity_I32);
@@ -9224,7 +9241,7 @@ DisResult disInstr_AMD64_WRK (
             DIP("cvtsi2ss %s,%s\n", nameIReg32(eregOfRexRM(pfx,modrm)),
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
-            addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+            addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
             assign( arg32, loadLE(Ity_I32, mkexpr(addr)) );
             delta += 2+alen;
             DIP("cvtsi2ss %s,%s\n", dis_buf,
@@ -9244,7 +9261,7 @@ DisResult disInstr_AMD64_WRK (
             DIP("cvtsi2ssq %s,%s\n", nameIReg64(eregOfRexRM(pfx,modrm)),
                                      nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
-            addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+            addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
             assign( arg64, loadLE(Ity_I64, mkexpr(addr)) );
             delta += 2+alen;
             DIP("cvtsi2ssq %s,%s\n", dis_buf,
@@ -9265,15 +9282,15 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 2C = CVTTPS2PI -- convert 2 x F32 in mem/low half xmm to 2 x
       I32 in mmx, rounding towards zero */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && (insn[1] == 0x2D || insn[1] == 0x2C)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x2D || guest_code[delta+1] == 0x2C)) {
       IRTemp dst64  = newTemp(Ity_I64);
       IRTemp rmode  = newTemp(Ity_I32);
       IRTemp f32lo  = newTemp(Ity_F32);
       IRTemp f32hi  = newTemp(Ity_F32);
-      Bool   r2zero = toBool(insn[1] == 0x2C);
+      Bool   r2zero = toBool(guest_code[delta+1] == 0x2C);
 
       do_MMX_preamble();
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
 
       if (epartIsReg(modrm)) {
          delta += 2+1;
@@ -9283,7 +9300,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign(f32lo, loadLE(Ity_F32, mkexpr(addr)));
          assign(f32hi, loadLE(Ity_F32, binop( Iop_Add64, 
                                               mkexpr(addr), 
@@ -9329,14 +9346,14 @@ DisResult disInstr_AMD64_WRK (
                     truncating towards zero 
    */
    if (haveF3no66noF2(pfx) 
-       && insn[0] == 0x0F 
-       && (insn[1] == 0x2D || insn[1] == 0x2C)) {
+       && guest_code[delta+0] == 0x0F 
+       && (guest_code[delta+1] == 0x2D || guest_code[delta+1] == 0x2C)) {
       IRTemp rmode  = newTemp(Ity_I32);
       IRTemp f32lo  = newTemp(Ity_F32);
-      Bool   r2zero = toBool(insn[1] == 0x2C);
+      Bool   r2zero = toBool(guest_code[delta+1] == 0x2C);
       vassert(sz == 4 || sz == 8);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          assign(f32lo, getXMMRegLane32F(eregOfRexRM(pfx,modrm), 0));
@@ -9344,7 +9361,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameIReg(sz, gregOfRexRM(pfx,modrm), False));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign(f32lo, loadLE(Ity_F32, mkexpr(addr)));
          delta += 2+alen;
          DIP("cvt%sss2si %s,%s\n", r2zero ? "t" : "",
@@ -9375,28 +9392,28 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 5E = DIVPS -- div 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x5E) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "divps", Iop_Div32Fx4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5E) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "divps", Iop_Div32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 5E = DIVSS -- div 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5E) {
-      delta = dis_SSE_E_to_G_lo32( vbi, pfx, delta+2, "divss", Iop_Div32F0x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5E) {
+      delta = dis_SSE_E_to_G_lo32( guest_code, vbi, pfx, delta+2, "divss", Iop_Div32F0x4 );
       goto decode_success;
    }
 
    /* 0F AE /2 = LDMXCSR m32 -- load %mxcsr */
-   if (insn[0] == 0x0F && insn[1] == 0xAE
+   if (guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xAE
        && haveNo66noF2noF3(pfx)
-       && !epartIsReg(insn[2]) && gregLO3ofRM(insn[2]) == 2) {
+       && !epartIsReg(guest_code[delta+2]) && gregLO3ofRM(guest_code[delta+2]) == 2) {
 
       IRTemp t64 = newTemp(Ity_I64);
       IRTemp ew = newTemp(Ity_I32);
 
       vassert(sz == 4);
-      addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
       delta += 2+alen;
       DIP("ldmxcsr %s\n", dis_buf);
 
@@ -9439,9 +9456,9 @@ DisResult disInstr_AMD64_WRK (
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F F7 = MASKMOVQ -- 8x8 masked store */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xF7) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF7) {
       Bool ok = False;
-      delta = dis_MMX( &ok, vbi, pfx, sz, delta+1 );
+      delta = dis_MMX( guest_code, &ok, vbi, pfx, sz, delta+1 );
       if (!ok)
          goto decode_failure;
       goto decode_success;
@@ -9449,29 +9466,29 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 5F = MAXPS -- max 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x5F) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "maxps", Iop_Max32Fx4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5F) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "maxps", Iop_Max32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 5F = MAXSS -- max 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5F) {
-      delta = dis_SSE_E_to_G_lo32( vbi, pfx, delta+2, "maxss", Iop_Max32F0x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5F) {
+      delta = dis_SSE_E_to_G_lo32( guest_code, vbi, pfx, delta+2, "maxss", Iop_Max32F0x4 );
       goto decode_success;
    }
 
    /* 0F 5D = MINPS -- min 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x5D) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "minps", Iop_Min32Fx4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5D) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "minps", Iop_Min32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 5D = MINSS -- min 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5D) {
-      delta = dis_SSE_E_to_G_lo32( vbi, pfx, delta+2, "minss", Iop_Min32F0x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5D) {
+      delta = dis_SSE_E_to_G_lo32( guest_code, vbi, pfx, delta+2, "minss", Iop_Min32F0x4 );
       goto decode_success;
    }
 
@@ -9479,8 +9496,8 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 10 = MOVUPS -- move from E (mem or xmm) to G (xmm). */
    if (haveNo66noF2noF3(pfx) 
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && (insn[1] == 0x28 || insn[1] == 0x10)) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x28 || guest_code[delta+1] == 0x10)) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          putXMMReg( gregOfRexRM(pfx,modrm), 
                     getXMMReg( eregOfRexRM(pfx,modrm) ));
@@ -9488,7 +9505,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
                     loadLE(Ity_V128, mkexpr(addr)) );
          DIP("mov[ua]ps %s,%s\n", dis_buf,
@@ -9502,12 +9519,12 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 11 = MOVUPS -- move from G (xmm) to E (mem or xmm). */
    if (haveNo66noF2noF3(pfx)
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && (insn[1] == 0x29 || insn[1] == 0x11)) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x29 || guest_code[delta+1] == 0x11)) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          /* fall through; awaiting test case */
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr), getXMMReg(gregOfRexRM(pfx,modrm)) );
          DIP("mov[ua]ps %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
                                   dis_buf );
@@ -9520,8 +9537,8 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 16 = MOVLHPS -- move from lo half to hi half of XMM. */
    if (haveNo66noF2noF3(pfx)
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x16) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x16) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 1/*upper lane*/,
@@ -9529,7 +9546,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("movhps %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)), 
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 1/*upper lane*/,
                           loadLE(Ity_I64, mkexpr(addr)) );
@@ -9542,15 +9559,15 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 17 = MOVHPS -- move from high half of XMM to mem. */
    if (haveNo66noF2noF3(pfx)
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x17) {
-      if (!epartIsReg(insn[2])) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x17) {
+      if (!epartIsReg(guest_code[delta+2])) {
          delta += 2;
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
          storeLE( mkexpr(addr), 
-                  getXMMRegLane64( gregOfRexRM(pfx,insn[2]),
+                  getXMMRegLane64( gregOfRexRM(pfx,guest_code[delta+2]),
                                    1/*upper lane*/ ) );
-         DIP("movhps %s,%s\n", nameXMMReg( gregOfRexRM(pfx,insn[2]) ),
+         DIP("movhps %s,%s\n", nameXMMReg( gregOfRexRM(pfx,guest_code[delta+2]) ),
                                dis_buf);
          goto decode_success;
       }
@@ -9561,8 +9578,8 @@ DisResult disInstr_AMD64_WRK (
    /* OF 12 = MOVHLPS -- from from hi half to lo half of XMM. */
    if (haveNo66noF2noF3(pfx)
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x12) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x12) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          putXMMRegLane64( gregOfRexRM(pfx,modrm),  
@@ -9571,7 +9588,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("movhlps %s, %s\n", nameXMMReg(eregOfRexRM(pfx,modrm)), 
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm),  0/*lower lane*/,
                           loadLE(Ity_I64, mkexpr(addr)) );
@@ -9584,15 +9601,15 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 13 = MOVLPS -- move from low half of XMM to mem. */
    if (haveNo66noF2noF3(pfx)
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x13) {
-      if (!epartIsReg(insn[2])) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x13) {
+      if (!epartIsReg(guest_code[delta+2])) {
          delta += 2;
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
          storeLE( mkexpr(addr), 
-                  getXMMRegLane64( gregOfRexRM(pfx,insn[2]), 
+                  getXMMRegLane64( gregOfRexRM(pfx,guest_code[delta+2]), 
                                    0/*lower lane*/ ) );
-         DIP("movlps %s, %s\n", nameXMMReg( gregOfRexRM(pfx,insn[2]) ),
+         DIP("movlps %s, %s\n", nameXMMReg( gregOfRexRM(pfx,guest_code[delta+2]) ),
                                 dis_buf);
          goto decode_success;
       }
@@ -9602,7 +9619,7 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 50 = MOVMSKPS - move 4 sign bits from 4 x F32 in xmm(E)
       to 4 lowest bits of ireg(G) */
    if (haveNo66noF2noF3(pfx) && (sz == 4 || sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x50) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x50) {
       /* sz == 8 is a kludge to handle insns with REX.W redundantly
          set to 1, which has been known to happen:
 
@@ -9621,7 +9638,7 @@ DisResult disInstr_AMD64_WRK (
 
          AMD docs give no indication that REX.W is even valid for this
          insn. */
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          Int src;
          t0 = newTemp(Ity_I32);
@@ -9660,10 +9677,10 @@ DisResult disInstr_AMD64_WRK (
    if ( ( (haveNo66noF2noF3(pfx) && sz == 4)
           || (have66noF2noF3(pfx) && sz == 2) 
         )
-        && insn[0] == 0x0F && insn[1] == 0x2B) {
-      modrm = getUChar(delta+2);
+        && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x2B) {
+      modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr), getXMMReg(gregOfRexRM(pfx,modrm)) );
          DIP("movntp%s %s,%s\n", sz==2 ? "d" : "s",
                                  dis_buf,
@@ -9681,11 +9698,11 @@ DisResult disInstr_AMD64_WRK (
       So we just leave them alone. 
    */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xE7) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE7) {
+      modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
          /* do_MMX_preamble(); Intel docs don't specify this */
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr), getMMXReg(gregLO3ofRM(modrm)) );
          DIP("movntq %s,%s\n", dis_buf,
                                nameMMXReg(gregLO3ofRM(modrm)));
@@ -9699,8 +9716,8 @@ DisResult disInstr_AMD64_WRK (
       (lo 1/4 xmm).  If E is mem, upper 3/4 of G is zeroed out. */
    if (haveF3no66noF2(pfx) 
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x10) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x10) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          putXMMRegLane32( gregOfRexRM(pfx,modrm), 0,
                           getXMMRegLane32( eregOfRexRM(pfx,modrm), 0 ));
@@ -9708,7 +9725,7 @@ DisResult disInstr_AMD64_WRK (
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), mkV128(0) );
          putXMMRegLane32( gregOfRexRM(pfx,modrm), 0,
                           loadLE(Ity_I32, mkexpr(addr)) );
@@ -9722,12 +9739,12 @@ DisResult disInstr_AMD64_WRK (
    /* F3 0F 11 = MOVSS -- move 32 bits from G (lo 1/4 xmm) to E (mem
       or lo 1/4 xmm). */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x11) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x11) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          /* fall through, we don't yet have a test case */
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr),
                   getXMMRegLane32(gregOfRexRM(pfx,modrm), 0) );
          DIP("movss %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
@@ -9739,42 +9756,42 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 59 = MULPS -- mul 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x59) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "mulps", Iop_Mul32Fx4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x59) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "mulps", Iop_Mul32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 59 = MULSS -- mul 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x59) {
-      delta = dis_SSE_E_to_G_lo32( vbi, pfx, delta+2, "mulss", Iop_Mul32F0x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x59) {
+      delta = dis_SSE_E_to_G_lo32( guest_code, vbi, pfx, delta+2, "mulss", Iop_Mul32F0x4 );
       goto decode_success;
    }
 
    /* 0F 56 = ORPS -- G = G and E */
    if (haveNo66noF2noF3(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x56) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "orps", Iop_OrV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x56) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "orps", Iop_OrV128 );
       goto decode_success;
    }
 
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F E0 = PAVGB -- 8x8 unsigned Packed Average, with rounding */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xE0) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE0) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "pavgb", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "pavgb", False );
       goto decode_success;
    }
 
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F E3 = PAVGW -- 16x4 unsigned Packed Average, with rounding */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xE3) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE3) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "pavgw", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "pavgw", False );
       goto decode_success;
    }
 
@@ -9782,15 +9799,15 @@ DisResult disInstr_AMD64_WRK (
    /* 0F C5 = PEXTRW -- extract 16-bit field from mmx(E) and put 
       zero-extend of it in ireg(G). */
    if (haveNo66noF2noF3(pfx) && (sz == 4 || sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0xC5) {
-      modrm = insn[2];
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC5) {
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          IRTemp sV = newTemp(Ity_I64);
          t5 = newTemp(Ity_I16);
          do_MMX_preamble();
          assign(sV, getMMXReg(eregLO3ofRM(modrm)));
          breakup64to16s( sV, &t3, &t2, &t1, &t0 );
-         switch (insn[3] & 3) {
+         switch (guest_code[delta+3] & 3) {
             case 0:  assign(t5, mkexpr(t0)); break;
             case 1:  assign(t5, mkexpr(t1)); break;
             case 2:  assign(t5, mkexpr(t2)); break;
@@ -9802,7 +9819,7 @@ DisResult disInstr_AMD64_WRK (
          else
             putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_16Uto32, mkexpr(t5)));
          DIP("pextrw $%d,%s,%s\n",
-             (Int)insn[3], nameMMXReg(eregLO3ofRM(modrm)),
+             (Int)guest_code[delta+3], nameMMXReg(eregLO3ofRM(modrm)),
                            sz==8 ? nameIReg64(gregOfRexRM(pfx,modrm))
                                  : nameIReg32(gregOfRexRM(pfx,modrm))
          );
@@ -9819,7 +9836,7 @@ DisResult disInstr_AMD64_WRK (
    /* 0F C4 = PINSRW -- get 16 bits from E(mem or low half ireg) and
       put it into the specified lane of mmx(G). */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xC4) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC4) {
       /* Use t0 .. t3 to hold the 4 original 16-bit lanes of the
          mmx reg.  t4 is the new lane value.  t5 is the original
          mmx value. t6 is the new mmx value. */
@@ -9827,7 +9844,7 @@ DisResult disInstr_AMD64_WRK (
       t4 = newTemp(Ity_I16);
       t5 = newTemp(Ity_I64);
       t6 = newTemp(Ity_I64);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       do_MMX_preamble();
 
       assign(t5, getMMXReg(gregLO3ofRM(modrm)));
@@ -9836,14 +9853,14 @@ DisResult disInstr_AMD64_WRK (
       if (epartIsReg(modrm)) {
          assign(t4, getIReg16(eregOfRexRM(pfx,modrm)));
          delta += 3+1;
-         lane = insn[3+1-1];
+         lane = guest_code[delta+3+1-1];
          DIP("pinsrw $%d,%s,%s\n", (Int)lane, 
                                    nameIReg16(eregOfRexRM(pfx,modrm)),
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 1 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 1 );
          delta += 3+alen;
-         lane = insn[3+alen-1];
+         lane = guest_code[delta+3+alen-1];
          assign(t4, loadLE(Ity_I16, mkexpr(addr)));
          DIP("pinsrw $%d,%s,%s\n", (Int)lane,
                                    dis_buf,
@@ -9864,40 +9881,40 @@ DisResult disInstr_AMD64_WRK (
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F EE = PMAXSW -- 16x4 signed max */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xEE) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xEE) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "pmaxsw", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "pmaxsw", False );
       goto decode_success;
    }
 
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F DE = PMAXUB -- 8x8 unsigned max */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xDE) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDE) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "pmaxub", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "pmaxub", False );
       goto decode_success;
    }
 
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F EA = PMINSW -- 16x4 signed min */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xEA) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xEA) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "pminsw", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "pminsw", False );
       goto decode_success;
    }
 
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F DA = PMINUB -- 8x8 unsigned min */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xDA) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDA) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "pminub", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "pminub", False );
       goto decode_success;
    }
 
@@ -9906,8 +9923,8 @@ DisResult disInstr_AMD64_WRK (
       mmx(G), turn them into a byte, and put zero-extend of it in
       ireg(G). */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xD7) {
-      modrm = insn[2];
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD7) {
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          do_MMX_preamble();
          t0 = newTemp(Ity_I64);
@@ -9930,10 +9947,10 @@ DisResult disInstr_AMD64_WRK (
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F E4 = PMULUH -- 16x4 hi-half of unsigned widening multiply */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xE4) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE4) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "pmuluh", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "pmuluh", False );
       goto decode_success;
    }
 
@@ -9941,16 +9958,16 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 18 /1 = PREFETCH0   -- with various different hints */
    /* 0F 18 /2 = PREFETCH1 */
    /* 0F 18 /3 = PREFETCH2 */
-   if (insn[0] == 0x0F && insn[1] == 0x18
+   if (guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x18
        && haveNo66noF2noF3(pfx)
-       && !epartIsReg(insn[2]) 
-       && gregLO3ofRM(insn[2]) >= 0 && gregLO3ofRM(insn[2]) <= 3) {
+       && !epartIsReg(guest_code[delta+2]) 
+       && gregLO3ofRM(guest_code[delta+2]) >= 0 && gregLO3ofRM(guest_code[delta+2]) <= 3) {
       const char* hintstr = "??";
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       vassert(!epartIsReg(modrm));
 
-      addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
       delta += 2+alen;
 
       switch (gregLO3ofRM(modrm)) {
@@ -9968,36 +9985,36 @@ DisResult disInstr_AMD64_WRK (
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F F6 = PSADBW -- sum of 8Ux8 absolute differences */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xF6) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF6) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                 vbi, pfx, delta+2, insn[1], "psadbw", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                 vbi, pfx, delta+2, guest_code[delta+1], "psadbw", False );
       goto decode_success;
    }
 
    /* ***--- this is an MMX class insn introduced in SSE1 ---*** */
    /* 0F 70 = PSHUFW -- rearrange 4x16 from E(mmx or mem) to G(mmx) */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x70) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x70) {
       Int order;
       IRTemp sV, dV, s3, s2, s1, s0;
       s3 = s2 = s1 = s0 = IRTemp_INVALID;
       sV = newTemp(Ity_I64);
       dV = newTemp(Ity_I64);
       do_MMX_preamble();
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( sV, getMMXReg(eregLO3ofRM(modrm)) );
-         order = (Int)insn[3];
+         order = (Int)guest_code[delta+3];
          delta += 2+2;
          DIP("pshufw $%d,%s,%s\n", order, 
                                    nameMMXReg(eregLO3ofRM(modrm)),
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf,
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf,
                            1/*extra byte after amode*/ );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
-         order = (Int)insn[2+alen];
+         order = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("pshufw $%d,%s,%s\n", order, 
                                    dis_buf,
@@ -10017,40 +10034,40 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 53 = RCPPS -- approx reciprocal 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x53) {
-      delta = dis_SSE_E_to_G_unary_all( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x53) {
+      delta = dis_SSE_E_to_G_unary_all( guest_code, vbi, pfx, delta+2, 
                                         "rcpps", Iop_Recip32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 53 = RCPSS -- approx reciprocal 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x53) {
-      delta = dis_SSE_E_to_G_unary_lo32( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x53) {
+      delta = dis_SSE_E_to_G_unary_lo32( guest_code, vbi, pfx, delta+2, 
                                          "rcpss", Iop_Recip32F0x4 );
       goto decode_success;
    }
 
    /* 0F 52 = RSQRTPS -- approx reciprocal sqrt 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x52) {
-      delta = dis_SSE_E_to_G_unary_all( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x52) {
+      delta = dis_SSE_E_to_G_unary_all( guest_code, vbi, pfx, delta+2, 
                                         "rsqrtps", Iop_RSqrt32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 52 = RSQRTSS -- approx reciprocal sqrt 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x52) {
-      delta = dis_SSE_E_to_G_unary_lo32( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x52) {
+      delta = dis_SSE_E_to_G_unary_lo32( guest_code, vbi, pfx, delta+2, 
                                          "rsqrtss", Iop_RSqrt32F0x4 );
       goto decode_success;
    }
 
    /* 0F AE /7 = SFENCE -- flush pending operations to memory */
    if (haveNo66noF2noF3(pfx) 
-       && insn[0] == 0x0F && insn[1] == 0xAE
-       && epartIsReg(insn[2]) && gregLO3ofRM(insn[2]) == 7
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xAE
+       && epartIsReg(guest_code[delta+2]) && gregLO3ofRM(guest_code[delta+2]) == 7
        && sz == 4) {
       delta += 3;
       /* Insert a memory fence.  It's sometimes important that these
@@ -10062,28 +10079,28 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F C6 /r ib = SHUFPS -- shuffle packed F32s */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xC6) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC6) {
       Int    select;
       IRTemp sV, dV;
       IRTemp s3, s2, s1, s0, d3, d2, d1, d0;
       sV = newTemp(Ity_V128);
       dV = newTemp(Ity_V128);
       s3 = s2 = s1 = s0 = d3 = d2 = d1 = d0 = IRTemp_INVALID;
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg(eregOfRexRM(pfx,modrm)) );
-         select = (Int)insn[3];
+         select = (Int)guest_code[delta+3];
          delta += 2+2;
          DIP("shufps $%d,%s,%s\n", select, 
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte at end of insn*/ );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
-         select = (Int)insn[2+alen];
+         select = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("shufps $%d,%s,%s\n", select, 
                                    dis_buf,
@@ -10110,27 +10127,27 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 51 = SQRTPS -- approx sqrt 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x51) {
-      delta = dis_SSE_E_to_G_unary_all( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x51) {
+      delta = dis_SSE_E_to_G_unary_all( guest_code, vbi, pfx, delta+2, 
                                         "sqrtps", Iop_Sqrt32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 51 = SQRTSS -- approx sqrt 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x51) {
-      delta = dis_SSE_E_to_G_unary_lo32( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x51) {
+      delta = dis_SSE_E_to_G_unary_lo32( guest_code, vbi, pfx, delta+2, 
                                          "sqrtss", Iop_Sqrt32F0x4 );
       goto decode_success;
    }
 
    /* 0F AE /3 = STMXCSR m32 -- store %mxcsr */
-   if (insn[0] == 0x0F && insn[1] == 0xAE
+   if (guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xAE
        && haveNo66noF2noF3(pfx)
-       && !epartIsReg(insn[2]) && gregLO3ofRM(insn[2]) == 3) {
+       && !epartIsReg(guest_code[delta+2]) && gregLO3ofRM(guest_code[delta+2]) == 3) {
 
       vassert(sz == 4);
-      addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
       delta += 2+alen;
 
       /* Fake up a native SSE mxcsr word.  The only thing it depends
@@ -10153,15 +10170,15 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 5C = SUBPS -- sub 32Fx4 from R/M to R */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x5C) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "subps", Iop_Sub32Fx4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5C) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "subps", Iop_Sub32Fx4 );
       goto decode_success;
    }
 
    /* F3 0F 5C = SUBSS -- sub 32F0x4 from R/M to R */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5C) {
-      delta = dis_SSE_E_to_G_lo32( vbi, pfx, delta+2, "subss", Iop_Sub32F0x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5C) {
+      delta = dis_SSE_E_to_G_lo32( guest_code, vbi, pfx, delta+2, "subss", Iop_Sub32F0x4 );
       goto decode_success;
    }
 
@@ -10169,14 +10186,14 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 14 = UNPCKLPS -- unpack and interleave low part F32s */
    /* These just appear to be special cases of SHUFPS */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && (insn[1] == 0x15 || insn[1] == 0x14)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x15 || guest_code[delta+1] == 0x14)) {
       IRTemp sV, dV;
       IRTemp s3, s2, s1, s0, d3, d2, d1, d0;
-      Bool hi = toBool(insn[1] == 0x15);
+      Bool hi = toBool(guest_code[delta+1] == 0x15);
       sV = newTemp(Ity_V128);
       dV = newTemp(Ity_V128);
       s3 = s2 = s1 = s0 = d3 = d2 = d1 = d0 = IRTemp_INVALID;
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
@@ -10186,7 +10203,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(eregOfRexRM(pfx,modrm)),
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("unpck%sps %s,%s\n", hi ? "h" : "l",
@@ -10208,8 +10225,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 57 = XORPS -- G = G and E */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x57) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "xorps", Iop_XorV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x57) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "xorps", Iop_XorV128 );
       goto decode_success;
    }
 
@@ -10224,66 +10241,66 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 58 = ADDPD -- add 32Fx4 from R/M to R */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x58) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "addpd", Iop_Add64Fx2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x58) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "addpd", Iop_Add64Fx2 );
       goto decode_success;
    }
  
    /* F2 0F 58 = ADDSD -- add 64F0x2 from R/M to R */
    if (haveF2no66noF3(pfx) 
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x58) {
-      delta = dis_SSE_E_to_G_lo64( vbi, pfx, delta+2, "addsd", Iop_Add64F0x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x58) {
+      delta = dis_SSE_E_to_G_lo64( guest_code, vbi, pfx, delta+2, "addsd", Iop_Add64F0x2 );
       goto decode_success;
    }
 
    /* 66 0F 55 = ANDNPD -- G = (not G) and E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x55) {
-      delta = dis_SSE_E_to_G_all_invG( vbi, pfx, delta+2, "andnpd", Iop_AndV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x55) {
+      delta = dis_SSE_E_to_G_all_invG( guest_code, vbi, pfx, delta+2, "andnpd", Iop_AndV128 );
       goto decode_success;
    }
 
    /* 66 0F 54 = ANDPD -- G = G and E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x54) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "andpd", Iop_AndV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x54) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "andpd", Iop_AndV128 );
       goto decode_success;
    }
 
    /* 66 0F C2 = CMPPD -- 64Fx2 comparison from R/M to R */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xC2) {
-      delta = dis_SSEcmp_E_to_G( vbi, pfx, delta+2, "cmppd", True, 8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC2) {
+      delta = dis_SSEcmp_E_to_G( guest_code, vbi, pfx, delta+2, "cmppd", True, 8 );
       goto decode_success;
    }
 
    /* F2 0F C2 = CMPSD -- 64F0x2 comparison from R/M to R */
    if (haveF2no66noF3(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0xC2) {
-      delta = dis_SSEcmp_E_to_G( vbi, pfx, delta+2, "cmpsd", False, 8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC2) {
+      delta = dis_SSEcmp_E_to_G( guest_code, vbi, pfx, delta+2, "cmpsd", False, 8 );
       goto decode_success;
    }
 
    /* 66 0F 2F = COMISD  -- 64F0x2 comparison G,E, and set ZCP */
    /* 66 0F 2E = UCOMISD -- 64F0x2 comparison G,E, and set ZCP */
    if (have66noF2noF3(pfx) && sz == 2
-       && insn[0] == 0x0F && (insn[1] == 0x2F || insn[1] == 0x2E)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x2F || guest_code[delta+1] == 0x2E)) {
       IRTemp argL = newTemp(Ity_F64);
       IRTemp argR = newTemp(Ity_F64);
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( argR, getXMMRegLane64F( eregOfRexRM(pfx,modrm), 
                                          0/*lowest lane*/ ) );
          delta += 2+1;
-         DIP("%scomisd %s,%s\n", insn[1]==0x2E ? "u" : "",
+         DIP("%scomisd %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( argR, loadLE(Ity_F64, mkexpr(addr)) );
          delta += 2+alen;
-         DIP("%scomisd %s,%s\n", insn[1]==0x2E ? "u" : "",
+         DIP("%scomisd %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       }
@@ -10305,18 +10322,18 @@ DisResult disInstr_AMD64_WRK (
 
    /* F3 0F E6 = CVTDQ2PD -- convert 2 x I32 in mem/lo half xmm to 2 x
       F64 in xmm(G) */
-   if (haveF3no66noF2(pfx) && insn[0] == 0x0F && insn[1] == 0xE6) {
+   if (haveF3no66noF2(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE6) {
       IRTemp arg64 = newTemp(Ity_I64);
       if (sz != 4) goto decode_failure;
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( arg64, getXMMRegLane64(eregOfRexRM(pfx,modrm), 0) );
          delta += 2+1;
          DIP("cvtdq2pd %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( arg64, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 2+alen;
          DIP("cvtdq2pd %s,%s\n", dis_buf,
@@ -10339,18 +10356,18 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 5B = CVTDQ2PS -- convert 4 x I32 in mem/xmm to 4 x F32 in
       xmm(G) */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x5B) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5B) {
       IRTemp argV  = newTemp(Ity_V128);
       IRTemp rmode = newTemp(Ity_I32);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( argV, getXMMReg(eregOfRexRM(pfx,modrm)) );
          delta += 2+1;
          DIP("cvtdq2ps %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( argV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("cvtdq2ps %s,%s\n", dis_buf,
@@ -10382,12 +10399,12 @@ DisResult disInstr_AMD64_WRK (
    if ( ( (haveF2no66noF3(pfx) && sz == 4)
           || (have66noF2noF3(pfx) && sz == 2)
         )
-        && insn[0] == 0x0F && insn[1] == 0xE6) {
+        && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE6) {
       IRTemp argV   = newTemp(Ity_V128);
       IRTemp rmode  = newTemp(Ity_I32);
       Bool   r2zero = toBool(sz == 2);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( argV, getXMMReg(eregOfRexRM(pfx,modrm)) );
          delta += 2+1;
@@ -10395,7 +10412,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( argV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("cvt%spd2dq %s,%s\n", r2zero ? "t" : "",
@@ -10435,15 +10452,15 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 2C = CVTTPD2PI -- convert 2 x F64 in mem/xmm to 2 x
       I32 in mmx, rounding towards zero */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && (insn[1] == 0x2D || insn[1] == 0x2C)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x2D || guest_code[delta+1] == 0x2C)) {
       IRTemp dst64  = newTemp(Ity_I64);
       IRTemp rmode  = newTemp(Ity_I32);
       IRTemp f64lo  = newTemp(Ity_F64);
       IRTemp f64hi  = newTemp(Ity_F64);
-      Bool   r2zero = toBool(insn[1] == 0x2C);
+      Bool   r2zero = toBool(guest_code[delta+1] == 0x2C);
 
       do_MMX_preamble();
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
 
       if (epartIsReg(modrm)) {
          delta += 2+1;
@@ -10453,7 +10470,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign(f64lo, loadLE(Ity_F64, mkexpr(addr)));
          assign(f64hi, loadLE(Ity_F64, binop( Iop_Add64, 
                                               mkexpr(addr), 
@@ -10486,21 +10503,21 @@ DisResult disInstr_AMD64_WRK (
       lo half xmm(G), rounding according to prevailing SSE rounding
       mode, and zero upper half */
    /* Note, this is practically identical to CVTPD2DQ.  It would have
-      been nicer to merge them together, but the insn[] offsets differ
+      been nicer to merge them together, but the guest_code[delta+] offsets differ
       by one. */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x5A) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5A) {
       IRTemp argV  = newTemp(Ity_V128);
       IRTemp rmode = newTemp(Ity_I32);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( argV, getXMMReg(eregOfRexRM(pfx,modrm)) );
          delta += 2+1;
          DIP("cvtpd2ps %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( argV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("cvtpd2ps %s,%s\n", dis_buf,
@@ -10532,10 +10549,10 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 2A = CVTPI2PD -- convert 2 x I32 in mem/mmx to 2 x F64 in
       xmm(G) */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x2A) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x2A) {
       IRTemp arg64 = newTemp(Ity_I64);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       do_MMX_preamble();
       if (epartIsReg(modrm)) {
          assign( arg64, getMMXReg(eregLO3ofRM(modrm)) );
@@ -10543,7 +10560,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("cvtpi2pd %s,%s\n", nameMMXReg(eregLO3ofRM(modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( arg64, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 2+alen;
          DIP("cvtpi2pd %s,%s\n", dis_buf,
@@ -10570,19 +10587,19 @@ DisResult disInstr_AMD64_WRK (
    if ( ( (have66noF2noF3(pfx) && sz == 2)
           || (haveF3no66noF2(pfx) && sz == 4)
         )
-        && insn[0] == 0x0F && insn[1] == 0x5B) {
+        && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5B) {
       IRTemp argV   = newTemp(Ity_V128);
       IRTemp rmode  = newTemp(Ity_I32);
       Bool   r2zero = toBool(sz == 4);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( argV, getXMMReg(eregOfRexRM(pfx,modrm)) );
          delta += 2+1;
          DIP("cvtps2dq %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( argV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("cvtps2dq %s,%s\n", dis_buf,
@@ -10618,11 +10635,11 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 5A = CVTPS2PD -- convert 2 x F32 in low half mem/xmm to 2 x
       F64 in xmm(G). */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x5A) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5A) {
       IRTemp f32lo = newTemp(Ity_F32);
       IRTemp f32hi = newTemp(Ity_F32);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          assign( f32lo, getXMMRegLane32F(eregOfRexRM(pfx,modrm), 0) );
          assign( f32hi, getXMMRegLane32F(eregOfRexRM(pfx,modrm), 1) );
@@ -10630,7 +10647,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("cvtps2pd %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
 	 assign( f32lo, loadLE(Ity_F32, mkexpr(addr)) );
 	 assign( f32hi, loadLE(Ity_F32, 
                                binop(Iop_Add64,mkexpr(addr),mkU64(4))) );
@@ -10660,14 +10677,14 @@ DisResult disInstr_AMD64_WRK (
                     truncating towards zero 
    */
    if (haveF2no66noF3(pfx) 
-       && insn[0] == 0x0F 
-       && (insn[1] == 0x2D || insn[1] == 0x2C)) {
+       && guest_code[delta+0] == 0x0F 
+       && (guest_code[delta+1] == 0x2D || guest_code[delta+1] == 0x2C)) {
       IRTemp rmode  = newTemp(Ity_I32);
       IRTemp f64lo  = newTemp(Ity_F64);
-      Bool   r2zero = toBool(insn[1] == 0x2C);
+      Bool   r2zero = toBool(guest_code[delta+1] == 0x2C);
       vassert(sz == 4 || sz == 8);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          assign(f64lo, getXMMRegLane64F(eregOfRexRM(pfx,modrm), 0));
@@ -10675,7 +10692,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameIReg(sz, gregOfRexRM(pfx,modrm), False));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign(f64lo, loadLE(Ity_F64, mkexpr(addr)));
          delta += 2+alen;
          DIP("cvt%ssd2si %s,%s\n", r2zero ? "t" : "",
@@ -10703,19 +10720,19 @@ DisResult disInstr_AMD64_WRK (
    /* F2 0F 5A = CVTSD2SS -- convert F64 in mem/low half xmm to F32 in
       low 1/4 xmm(G), according to prevailing SSE rounding mode */
    if (haveF2no66noF3(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5A) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5A) {
       IRTemp rmode = newTemp(Ity_I32);
       IRTemp f64lo = newTemp(Ity_F64);
       vassert(sz == 4);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          assign(f64lo, getXMMRegLane64F(eregOfRexRM(pfx,modrm), 0));
          DIP("cvtsd2ss %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign(f64lo, loadLE(Ity_F64, mkexpr(addr)));
          delta += 2+alen;
          DIP("cvtsd2ss %s,%s\n", dis_buf,
@@ -10736,8 +10753,8 @@ DisResult disInstr_AMD64_WRK (
       when sz==8 -- convert I64 in mem/ireg to F64 in low half xmm
    */
    if (haveF2no66noF3(pfx) && (sz == 4 || sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x2A) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x2A) {
+      modrm = getUChar(guest_code, delta+2);
 
       if (sz == 4) {
          IRTemp arg32 = newTemp(Ity_I32);
@@ -10747,7 +10764,7 @@ DisResult disInstr_AMD64_WRK (
             DIP("cvtsi2sd %s,%s\n", nameIReg32(eregOfRexRM(pfx,modrm)),
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
-            addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+            addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
             assign( arg32, loadLE(Ity_I32, mkexpr(addr)) );
             delta += 2+alen;
             DIP("cvtsi2sd %s,%s\n", dis_buf,
@@ -10765,7 +10782,7 @@ DisResult disInstr_AMD64_WRK (
             DIP("cvtsi2sdq %s,%s\n", nameIReg64(eregOfRexRM(pfx,modrm)),
                                      nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
-            addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+            addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
             assign( arg64, loadLE(Ity_I64, mkexpr(addr)) );
             delta += 2+alen;
             DIP("cvtsi2sdq %s,%s\n", dis_buf,
@@ -10788,17 +10805,17 @@ DisResult disInstr_AMD64_WRK (
    /* F3 0F 5A = CVTSS2SD -- convert F32 in mem/low 1/4 xmm to F64 in
       low half xmm(G) */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5A) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5A) {
       IRTemp f32lo = newTemp(Ity_F32);
 
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          assign(f32lo, getXMMRegLane32F(eregOfRexRM(pfx,modrm), 0));
          DIP("cvtss2sd %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign(f32lo, loadLE(Ity_F32, mkexpr(addr)));
          delta += 2+alen;
          DIP("cvtss2sd %s,%s\n", dis_buf,
@@ -10813,57 +10830,57 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 5E = DIVPD -- div 64Fx2 from R/M to R */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x5E) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "divpd", Iop_Div64Fx2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5E) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "divpd", Iop_Div64Fx2 );
       goto decode_success;
    }
 
    /* F2 0F 5E = DIVSD -- div 64F0x2 from R/M to R */
-   if (haveF2no66noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x5E) {
+   if (haveF2no66noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5E) {
       vassert(sz == 4);
-      delta = dis_SSE_E_to_G_lo64( vbi, pfx, delta+2, "divsd", Iop_Div64F0x2 );
+      delta = dis_SSE_E_to_G_lo64( guest_code, vbi, pfx, delta+2, "divsd", Iop_Div64F0x2 );
       goto decode_success;
    }
 
    /* 0F AE /5 = LFENCE -- flush pending operations to memory */
    /* 0F AE /6 = MFENCE -- flush pending operations to memory */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xAE
-       && epartIsReg(insn[2]) 
-       && (gregLO3ofRM(insn[2]) == 5 || gregLO3ofRM(insn[2]) == 6)) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xAE
+       && epartIsReg(guest_code[delta+2]) 
+       && (gregLO3ofRM(guest_code[delta+2]) == 5 || gregLO3ofRM(guest_code[delta+2]) == 6)) {
       delta += 3;
       /* Insert a memory fence.  It's sometimes important that these
          are carried through to the generated code. */
       stmt( IRStmt_MBE(Imbe_Fence) );
-      DIP("%sfence\n", gregLO3ofRM(insn[2])==5 ? "l" : "m");
+      DIP("%sfence\n", gregLO3ofRM(guest_code[delta+2])==5 ? "l" : "m");
       goto decode_success;
    }
 
    /* 66 0F 5F = MAXPD -- max 64Fx2 from R/M to R */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x5F) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "maxpd", Iop_Max64Fx2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5F) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "maxpd", Iop_Max64Fx2 );
       goto decode_success;
    }
 
    /* F2 0F 5F = MAXSD -- max 64F0x2 from R/M to R */
    if (haveF2no66noF3(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5F) {
-      delta = dis_SSE_E_to_G_lo64( vbi, pfx, delta+2, "maxsd", Iop_Max64F0x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5F) {
+      delta = dis_SSE_E_to_G_lo64( guest_code, vbi, pfx, delta+2, "maxsd", Iop_Max64F0x2 );
       goto decode_success;
    }
 
    /* 66 0F 5D = MINPD -- min 64Fx2 from R/M to R */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x5D) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "minpd", Iop_Min64Fx2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5D) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "minpd", Iop_Min64Fx2 );
       goto decode_success;
    }
 
    /* F2 0F 5D = MINSD -- min 64F0x2 from R/M to R */
    if (haveF2no66noF3(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x5D) {
-      delta = dis_SSE_E_to_G_lo64( vbi, pfx, delta+2, "minsd", Iop_Min64F0x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5D) {
+      delta = dis_SSE_E_to_G_lo64( guest_code, vbi, pfx, delta+2, "minsd", Iop_Min64F0x2 );
       goto decode_success;
    }
 
@@ -10872,11 +10889,11 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 6F = MOVDQA -- move from E (mem or xmm) to G (xmm). */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F 
-       && (insn[1] == 0x28 || insn[1] == 0x10 || insn[1] == 0x6F)) {
-      const char* wot = insn[1]==0x28 ? "apd" :
-                   insn[1]==0x10 ? "upd" : "dqa";
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F 
+       && (guest_code[delta+1] == 0x28 || guest_code[delta+1] == 0x10 || guest_code[delta+1] == 0x6F)) {
+      const char* wot = guest_code[delta+1]==0x28 ? "apd" :
+                   guest_code[delta+1]==0x10 ? "upd" : "dqa";
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          putXMMReg( gregOfRexRM(pfx,modrm), 
                     getXMMReg( eregOfRexRM(pfx,modrm) ));
@@ -10884,7 +10901,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
                     loadLE(Ity_V128, mkexpr(addr)) );
          DIP("mov%s %s,%s\n", wot, dis_buf,
@@ -10896,13 +10913,13 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 29 = MOVAPD -- move from G (xmm) to E (mem or xmm). */
    /* 66 0F 11 = MOVUPD -- move from G (xmm) to E (mem or xmm). */
-   if (have66noF2noF3(pfx) && insn[0] == 0x0F 
-       && (insn[1] == 0x29 || insn[1] == 0x11)) {
-      modrm = getUChar(delta+2);
+   if (have66noF2noF3(pfx) && guest_code[delta+0] == 0x0F 
+       && (guest_code[delta+1] == 0x29 || guest_code[delta+1] == 0x11)) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          /* fall through; awaiting test case */
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr), getXMMReg(gregOfRexRM(pfx,modrm)) );
          DIP("mov[ua]pd %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
                                   dis_buf );
@@ -10913,10 +10930,10 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 6E = MOVD from ireg32/m32 to xmm lo 1/4, zeroing high 3/4 of xmm. */
    /*              or from ireg64/m64 to xmm lo 1/2, zeroing high 1/2 of xmm. */
-   if (have66noF2noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x6E) {
+   if (have66noF2noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x6E) {
       vassert(sz == 2 || sz == 8);
       if (sz == 2) sz = 4;
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          if (sz == 4) {
@@ -10935,7 +10952,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
 	 }
       } else {
-         addr = disAMode( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode(guest_code,  &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMReg(
             gregOfRexRM(pfx,modrm),
@@ -10951,10 +10968,10 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 7E = MOVD from xmm low 1/4 to ireg32 or m32. */
    /*              or from xmm low 1/2 to ireg64 or m64. */
-   if (have66noF2noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x7E) {
+   if (have66noF2noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x7E) {
       if (sz == 2) sz = 4;
       vassert(sz == 4 || sz == 8);
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          if (sz == 4) {
@@ -10969,7 +10986,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameIReg64(eregOfRexRM(pfx,modrm)));
 	 }
       } else {
-         addr = disAMode( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode(guest_code,  &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          storeLE( mkexpr(addr),
                   sz == 4
@@ -10983,8 +11000,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 7F = MOVDQA -- move from G (xmm) to E (mem or xmm). */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x7F) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x7F) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          delta += 2+1;
          putXMMReg( eregOfRexRM(pfx,modrm),
@@ -10992,7 +11009,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("movdqa %s, %s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), 
                                 nameXMMReg(eregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode(guest_code,  &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          storeLE( mkexpr(addr), getXMMReg(gregOfRexRM(pfx,modrm)) );
          DIP("movdqa %s, %s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), dis_buf);
@@ -11002,8 +11019,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* F3 0F 6F = MOVDQU -- move from E (mem or xmm) to G (xmm). */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x6F) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x6F) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          putXMMReg( gregOfRexRM(pfx,modrm), 
                     getXMMReg( eregOfRexRM(pfx,modrm) ));
@@ -11011,7 +11028,7 @@ DisResult disInstr_AMD64_WRK (
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
                     loadLE(Ity_V128, mkexpr(addr)) );
          DIP("movdqu %s,%s\n", dis_buf,
@@ -11023,8 +11040,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* F3 0F 7F = MOVDQU -- move from G (xmm) to E (mem or xmm). */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0x7F) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x7F) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          goto decode_failure; /* awaiting test case */
          delta += 2+1;
@@ -11033,7 +11050,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("movdqu %s, %s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), 
                                 nameXMMReg(eregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode(guest_code,  &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          storeLE( mkexpr(addr), getXMMReg(gregOfRexRM(pfx,modrm)) );
          DIP("movdqu %s, %s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), dis_buf);
@@ -11043,8 +11060,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* F2 0F D6 = MOVDQ2Q -- move from E (lo half xmm, not mem) to G (mmx). */
    if (haveF2no66noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xD6) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD6) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          do_MMX_preamble();
          putMMXReg( gregLO3ofRM(modrm), 
@@ -11062,12 +11079,12 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 16 = MOVHPD -- move from mem to high half of XMM. */
    /* These seems identical to MOVHPS.  This instruction encoding is
       completely crazy. */
-   if (have66noF2noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x16) {
-      modrm = getUChar(delta+2);
+   if (have66noF2noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x16) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          /* fall through; apparently reg-reg is not possible */
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 1/*upper lane*/,
                           loadLE(Ity_I64, mkexpr(addr)) );
@@ -11079,15 +11096,15 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 17 = MOVHPD -- move from high half of XMM to mem. */
    /* Again, this seems identical to MOVHPS. */
-   if (have66noF2noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x17) {
-      if (!epartIsReg(insn[2])) {
+   if (have66noF2noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x17) {
+      if (!epartIsReg(guest_code[delta+2])) {
          delta += 2;
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
          storeLE( mkexpr(addr), 
-                  getXMMRegLane64( gregOfRexRM(pfx,insn[2]),
+                  getXMMRegLane64( gregOfRexRM(pfx,guest_code[delta+2]),
                                    1/*upper lane*/ ) );
-         DIP("movhpd %s,%s\n", nameXMMReg( gregOfRexRM(pfx,insn[2]) ),
+         DIP("movhpd %s,%s\n", nameXMMReg( gregOfRexRM(pfx,guest_code[delta+2]) ),
                                dis_buf);
          goto decode_success;
       }
@@ -11096,12 +11113,12 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 12 = MOVLPD -- move from mem to low half of XMM. */
    /* Identical to MOVLPS ? */
-   if (have66noF2noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x12) {
-      modrm = getUChar(delta+2);
+   if (have66noF2noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x12) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          /* fall through; apparently reg-reg is not possible */
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm),
                           0/*lower lane*/,
@@ -11114,10 +11131,10 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 13 = MOVLPD -- move from low half of XMM to mem. */
    /* Identical to MOVLPS ? */
-   if (have66noF2noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x13) {
-      modrm = getUChar(delta+2);
+   if (have66noF2noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x13) {
+      modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          storeLE( mkexpr(addr), 
                   getXMMRegLane64( gregOfRexRM(pfx,modrm), 
@@ -11132,13 +11149,13 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 50 = MOVMSKPD - move 2 sign bits from 2 x F64 in xmm(E) to
       2 lowest bits of ireg(G) */
    if (have66noF2noF3(pfx) && (sz == 2 || sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x50) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x50) {
       /* sz == 8 is a kludge to handle insns with REX.W redundantly
          set to 1, which has been known to happen:
          66 4c 0f 50 d9          rex64X movmskpd %xmm1,%r11d
          20071106: see further comments on MOVMSKPS implementation above.
       */
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          Int src;
          t0 = newTemp(Ity_I32);
@@ -11164,8 +11181,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F F7 = MASKMOVDQU -- store selected bytes of double quadword */
    if (have66noF2noF3(pfx) && sz == 2
-       && insn[0] == 0x0F && insn[1] == 0xF7) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF7) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          IRTemp regD    = newTemp(Ity_V128);
          IRTemp mask    = newTemp(Ity_V128);
@@ -11209,10 +11226,10 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F E7 = MOVNTDQ -- for us, just a plain SSE store. */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE7) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE7) {
+      modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr), getXMMReg(gregOfRexRM(pfx,modrm)) );
          DIP("movntdq %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -11225,11 +11242,11 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F C3 = MOVNTI -- for us, just a plain ireg store. */
    if (haveNo66noF2noF3(pfx) &&
-       insn[0] == 0x0F && insn[1] == 0xC3) {
+       guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC3) {
       vassert(sz == 4 || sz == 8);
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr), getIRegG(sz, pfx, modrm) );
          DIP("movnti %s,%s\n", dis_buf,
                                nameIRegG(sz, pfx, modrm));
@@ -11243,13 +11260,13 @@ DisResult disInstr_AMD64_WRK (
       or lo half xmm).  */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0xD6) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD6) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          /* fall through, awaiting test case */
          /* dst: lo half copied, hi half zeroed */
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr), 
                   getXMMRegLane64( gregOfRexRM(pfx,modrm), 0 ));
          DIP("movq %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), dis_buf );
@@ -11261,8 +11278,8 @@ DisResult disInstr_AMD64_WRK (
    /* F3 0F D6 = MOVQ2DQ -- move from E (mmx) to G (lo half xmm, zero
       hi half). */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && insn[1] == 0xD6) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD6) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          do_MMX_preamble();
          putXMMReg( gregOfRexRM(pfx,modrm), 
@@ -11284,17 +11301,17 @@ DisResult disInstr_AMD64_WRK (
       If E is reg, upper half of G is unchanged. */
    if ( (haveF2no66noF3(pfx) 
          && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-         && insn[0] == 0x0F && insn[1] == 0x10)
+         && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x10)
         || 
         (haveF3no66noF2(pfx) 
          && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-         && insn[0] == 0x0F && insn[1] == 0x7E)
+         && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x7E)
       ) {
-      modrm = getUChar(delta+2);
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 0,
                           getXMMRegLane64( eregOfRexRM(pfx,modrm), 0 ));
-         if (insn[1] == 0x7E/*MOVQ*/) {
+         if (guest_code[delta+1] == 0x7E/*MOVQ*/) {
             /* zero bits 127:64 */
             putXMMRegLane64( gregOfRexRM(pfx,modrm), 1, mkU64(0) );
          }
@@ -11302,7 +11319,7 @@ DisResult disInstr_AMD64_WRK (
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), mkV128(0) );
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 0,
                           loadLE(Ity_I64, mkexpr(addr)) );
@@ -11317,8 +11334,8 @@ DisResult disInstr_AMD64_WRK (
       or lo half xmm). */
    if (haveF2no66noF3(pfx) 
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x11) {
-      modrm = getUChar(delta+2);
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x11) {
+      modrm = getUChar(guest_code, delta+2);
       if (epartIsReg(modrm)) {
          putXMMRegLane64( eregOfRexRM(pfx,modrm), 0,
                           getXMMRegLane64( gregOfRexRM(pfx,modrm), 0 ));
@@ -11326,7 +11343,7 @@ DisResult disInstr_AMD64_WRK (
                               nameXMMReg(eregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          storeLE( mkexpr(addr),
                   getXMMRegLane64(gregOfRexRM(pfx,modrm), 0) );
          DIP("movsd %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
@@ -11339,29 +11356,29 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 59 = MULPD -- mul 64Fx2 from R/M to R */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x59) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "mulpd", Iop_Mul64Fx2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x59) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "mulpd", Iop_Mul64Fx2 );
       goto decode_success;
    }
 
    /* F2 0F 59 = MULSD -- mul 64F0x2 from R/M to R */
    if (haveF2no66noF3(pfx) 
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x59) {
-      delta = dis_SSE_E_to_G_lo64( vbi, pfx, delta+2, "mulsd", Iop_Mul64F0x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x59) {
+      delta = dis_SSE_E_to_G_lo64( guest_code, vbi, pfx, delta+2, "mulsd", Iop_Mul64F0x2 );
       goto decode_success;
    }
 
    /* 66 0F 56 = ORPD -- G = G and E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x56) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "orpd", Iop_OrV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x56) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "orpd", Iop_OrV128 );
       goto decode_success;
    }
 
    /* 66 0F C6 /r ib = SHUFPD -- shuffle packed F64s */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xC6) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC6) {
       Int    select;
       IRTemp sV = newTemp(Ity_V128);
       IRTemp dV = newTemp(Ity_V128);
@@ -11370,20 +11387,20 @@ DisResult disInstr_AMD64_WRK (
       IRTemp d1 = newTemp(Ity_I64);
       IRTemp d0 = newTemp(Ity_I64);
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg(eregOfRexRM(pfx,modrm)) );
-         select = (Int)insn[3];
+         select = (Int)guest_code[delta+3];
          delta += 2+2;
          DIP("shufpd $%d,%s,%s\n", select, 
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 1 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 1 );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
-         select = (Int)insn[2+alen];
+         select = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("shufpd $%d,%s,%s\n", select, 
                                    dis_buf,
@@ -11411,32 +11428,32 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 51 = SQRTPD -- approx sqrt 64Fx2 from R/M to R */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x51) {
-      delta = dis_SSE_E_to_G_unary_all( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x51) {
+      delta = dis_SSE_E_to_G_unary_all( guest_code, vbi, pfx, delta+2, 
                                         "sqrtpd", Iop_Sqrt64Fx2 );
       goto decode_success;
    }
 
    /* F2 0F 51 = SQRTSD -- approx sqrt 64F0x2 from R/M to R */
-   if (haveF2no66noF3(pfx) && insn[0] == 0x0F && insn[1] == 0x51) {
+   if (haveF2no66noF3(pfx) && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x51) {
       vassert(sz == 4);
-      delta = dis_SSE_E_to_G_unary_lo64( vbi, pfx, delta+2, 
+      delta = dis_SSE_E_to_G_unary_lo64( guest_code, vbi, pfx, delta+2, 
                                          "sqrtsd", Iop_Sqrt64F0x2 );
       goto decode_success;
    }
 
    /* 66 0F 5C = SUBPD -- sub 64Fx2 from R/M to R */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x5C) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "subpd", Iop_Sub64Fx2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5C) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "subpd", Iop_Sub64Fx2 );
       goto decode_success;
    }
 
    /* F2 0F 5C = SUBSD -- sub 64F0x2 from R/M to R */
    if (haveF2no66noF3(pfx) 
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x5C) {
-      delta = dis_SSE_E_to_G_lo64( vbi, pfx, delta+2, "subsd", Iop_Sub64F0x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x5C) {
+      delta = dis_SSE_E_to_G_lo64( guest_code, vbi, pfx, delta+2, "subsd", Iop_Sub64F0x2 );
       goto decode_success;
    }
 
@@ -11445,16 +11462,16 @@ DisResult disInstr_AMD64_WRK (
    /* These just appear to be special cases of SHUFPS */
    if (have66noF2noF3(pfx) 
        && sz == 2 /* could be 8 if rex also present */
-       && insn[0] == 0x0F && (insn[1] == 0x15 || insn[1] == 0x14)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x15 || guest_code[delta+1] == 0x14)) {
       IRTemp s1 = newTemp(Ity_I64);
       IRTemp s0 = newTemp(Ity_I64);
       IRTemp d1 = newTemp(Ity_I64);
       IRTemp d0 = newTemp(Ity_I64);
       IRTemp sV = newTemp(Ity_V128);
       IRTemp dV = newTemp(Ity_V128);
-      Bool   hi = toBool(insn[1] == 0x15);
+      Bool   hi = toBool(guest_code[delta+1] == 0x15);
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
@@ -11464,7 +11481,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(eregOfRexRM(pfx,modrm)),
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("unpck%sps %s,%s\n", hi ? "h" : "l",
@@ -11490,47 +11507,47 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 57 = XORPD -- G = G xor E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x57) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "xorpd", Iop_XorV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x57) {
+      delta = dis_SSE_E_to_G_all( guest_code, vbi, pfx, delta+2, "xorpd", Iop_XorV128 );
       goto decode_success;
    }
 
    /* 66 0F 6B = PACKSSDW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x6B) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x6B) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "packssdw", Iop_QNarrow32Sx4, True );
       goto decode_success;
    }
 
    /* 66 0F 63 = PACKSSWB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x63) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x63) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "packsswb", Iop_QNarrow16Sx8, True );
       goto decode_success;
    }
 
    /* 66 0F 67 = PACKUSWB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x67) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x67) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "packuswb", Iop_QNarrow16Ux8, True );
       goto decode_success;
    }
 
    /* 66 0F FC = PADDB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xFC) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xFC) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddb", Iop_Add8x16, False );
       goto decode_success;
    }
 
    /* 66 0F FE = PADDD */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xFE) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xFE) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddd", Iop_Add32x4, False );
       goto decode_success;
    }
@@ -11538,135 +11555,135 @@ DisResult disInstr_AMD64_WRK (
    /* ***--- this is an MMX class insn introduced in SSE2 ---*** */
    /* 0F D4 = PADDQ -- add 64x1 */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xD4) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD4) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                vbi, pfx, delta+2, insn[1], "paddq", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                vbi, pfx, delta+2, guest_code[delta+1], "paddq", False );
       goto decode_success;
    }
 
    /* 66 0F D4 = PADDQ */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xD4) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD4) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddq", Iop_Add64x2, False );
       goto decode_success;
    }
 
    /* 66 0F FD = PADDW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xFD) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xFD) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddw", Iop_Add16x8, False );
       goto decode_success;
    }
 
    /* 66 0F EC = PADDSB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xEC) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xEC) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddsb", Iop_QAdd8Sx16, False );
       goto decode_success;
    }
 
    /* 66 0F ED = PADDSW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xED) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xED) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddsw", Iop_QAdd16Sx8, False );
       goto decode_success;
    }
 
    /* 66 0F DC = PADDUSB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xDC) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDC) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddusb", Iop_QAdd8Ux16, False );
       goto decode_success;
    }
 
    /* 66 0F DD = PADDUSW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xDD) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDD) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "paddusw", Iop_QAdd16Ux8, False );
       goto decode_success;
    }
 
    /* 66 0F DB = PAND */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xDB) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "pand", Iop_AndV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDB) {
+      delta = dis_SSE_E_to_G_all(  guest_code, vbi, pfx, delta+2, "pand", Iop_AndV128 );
       goto decode_success;
    }
 
    /* 66 0F DF = PANDN */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xDF) {
-      delta = dis_SSE_E_to_G_all_invG( vbi, pfx, delta+2, "pandn", Iop_AndV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDF) {
+      delta = dis_SSE_E_to_G_all_invG( guest_code, vbi, pfx, delta+2, "pandn", Iop_AndV128 );
       goto decode_success;
    }
 
    /* 66 0F E0 = PAVGB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE0) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE0) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pavgb", Iop_Avg8Ux16, False );
       goto decode_success;
    }
 
    /* 66 0F E3 = PAVGW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE3) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE3) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pavgw", Iop_Avg16Ux8, False );
       goto decode_success;
    }
 
    /* 66 0F 74 = PCMPEQB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x74) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x74) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pcmpeqb", Iop_CmpEQ8x16, False );
       goto decode_success;
    }
 
    /* 66 0F 76 = PCMPEQD */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x76) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x76) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pcmpeqd", Iop_CmpEQ32x4, False );
       goto decode_success;
    }
 
    /* 66 0F 75 = PCMPEQW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x75) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x75) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pcmpeqw", Iop_CmpEQ16x8, False );
       goto decode_success;
    }
 
    /* 66 0F 64 = PCMPGTB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x64) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x64) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pcmpgtb", Iop_CmpGT8Sx16, False );
       goto decode_success;
    }
 
    /* 66 0F 66 = PCMPGTD */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x66) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x66) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pcmpgtd", Iop_CmpGT32Sx4, False );
       goto decode_success;
    }
 
    /* 66 0F 65 = PCMPGTW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x65) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x65) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pcmpgtw", Iop_CmpGT16Sx8, False );
       goto decode_success;
    }
@@ -11675,14 +11692,14 @@ DisResult disInstr_AMD64_WRK (
       zero-extend of it in ireg(G). */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0xC5) {
-      modrm = insn[2];
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC5) {
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          t5 = newTemp(Ity_V128);
          t4 = newTemp(Ity_I16);
          assign(t5, getXMMReg(eregOfRexRM(pfx,modrm)));
          breakup128to32s( t5, &t3, &t2, &t1, &t0 );
-         switch (insn[3] & 7) {
+         switch (guest_code[delta+3] & 7) {
             case 0:  assign(t4, unop(Iop_32to16,   mkexpr(t0))); break;
             case 1:  assign(t4, unop(Iop_32HIto16, mkexpr(t0))); break;
             case 2:  assign(t4, unop(Iop_32to16,   mkexpr(t1))); break;
@@ -11695,7 +11712,7 @@ DisResult disInstr_AMD64_WRK (
          }
          putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_16Uto32, mkexpr(t4)));
          DIP("pextrw $%d,%s,%s\n",
-             (Int)insn[3], nameXMMReg(eregOfRexRM(pfx,modrm)),
+             (Int)guest_code[delta+3], nameXMMReg(eregOfRexRM(pfx,modrm)),
                            nameIReg32(gregOfRexRM(pfx,modrm)));
          delta += 4;
          goto decode_success;
@@ -11709,23 +11726,23 @@ DisResult disInstr_AMD64_WRK (
       put it into the specified lane of xmm(G). */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0xC4) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xC4) {
       Int lane;
       t4 = newTemp(Ity_I16);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
 
       if (epartIsReg(modrm)) {
          assign(t4, getIReg16(eregOfRexRM(pfx,modrm)));
          delta += 3+1;
-         lane = insn[3+1-1];
+         lane = guest_code[delta+3+1-1];
          DIP("pinsrw $%d,%s,%s\n", (Int)lane, 
                                    nameIReg16(eregOfRexRM(pfx,modrm)),
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
          delta += 3+alen;
-         lane = insn[3+alen-1];
+         lane = guest_code[delta+3+alen-1];
          assign(t4, loadLE(Ity_I16, mkexpr(addr)));
          DIP("pinsrw $%d,%s,%s\n", (Int)lane,
                                    dis_buf,
@@ -11739,7 +11756,7 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F F5 = PMADDWD -- Multiply and add packed integers from
       E(xmm or mem) to G(xmm) */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF5) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF5) {
       IRTemp s1V  = newTemp(Ity_V128);
       IRTemp s2V  = newTemp(Ity_V128);
       IRTemp dV   = newTemp(Ity_V128);
@@ -11749,14 +11766,14 @@ DisResult disInstr_AMD64_WRK (
       IRTemp s2Lo = newTemp(Ity_I64);
       IRTemp dHi  = newTemp(Ity_I64);
       IRTemp dLo  = newTemp(Ity_I64);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( s1V, getXMMReg(eregOfRexRM(pfx,modrm)) );
          delta += 2+1;
          DIP("pmaddwd %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( s1V, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("pmaddwd %s,%s\n", dis_buf,
@@ -11786,32 +11803,32 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F EE = PMAXSW -- 16x8 signed max */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xEE) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xEE) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pmaxsw", Iop_Max16Sx8, False );
       goto decode_success;
    }
 
    /* 66 0F DE = PMAXUB -- 8x16 unsigned max */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xDE) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDE) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pmaxub", Iop_Max8Ux16, False );
       goto decode_success;
    }
 
    /* 66 0F EA = PMINSW -- 16x8 signed min */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xEA) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xEA) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pminsw", Iop_Min16Sx8, False );
       goto decode_success;
    }
 
    /* 66 0F DA = PMINUB -- 8x16 unsigned min */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xDA) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xDA) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pminub", Iop_Min8Ux16, False );
       goto decode_success;
    }
@@ -11823,8 +11840,8 @@ DisResult disInstr_AMD64_WRK (
    /* UInt x86g_calculate_sse_pmovmskb ( ULong w64hi, ULong w64lo ); */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0xD7) {
-      modrm = insn[2];
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD7) {
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          t0 = newTemp(Ity_I64);
          t1 = newTemp(Ity_I64);
@@ -11847,24 +11864,24 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F E4 = PMULHUW -- 16x8 hi-half of unsigned widening multiply */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE4) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE4) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pmulhuw", Iop_MulHi16Ux8, False );
       goto decode_success;
    }
 
    /* 66 0F E5 = PMULHW -- 16x8 hi-half of signed widening multiply */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE5) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE5) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pmulhw", Iop_MulHi16Sx8, False );
       goto decode_success;
    }
 
    /* 66 0F D5 = PMULHL -- 16x8 multiply */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xD5) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD5) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "pmullw", Iop_Mul16x8, False );
       goto decode_success;
    }
@@ -11873,12 +11890,12 @@ DisResult disInstr_AMD64_WRK (
    /* 0F F4 = PMULUDQ -- unsigned widening multiply of 32-lanes 0 x
       0 to form 64-bit result */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xF4) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF4) {
       IRTemp sV = newTemp(Ity_I64);
       IRTemp dV = newTemp(Ity_I64);
       t1 = newTemp(Ity_I32);
       t0 = newTemp(Ity_I32);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
 
       do_MMX_preamble();
       assign( dV, getMMXReg(gregLO3ofRM(modrm)) );
@@ -11889,7 +11906,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pmuludq %s,%s\n", nameMMXReg(eregLO3ofRM(modrm)),
                                 nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 2+alen;
          DIP("pmuludq %s,%s\n", dis_buf,
@@ -11909,7 +11926,7 @@ DisResult disInstr_AMD64_WRK (
    /* This is a really poor translation -- could be improved if
       performance critical */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF4) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF4) {
       IRTemp sV, dV;
       IRTemp s3, s2, s1, s0, d3, d2, d1, d0;
       sV = newTemp(Ity_V128);
@@ -11917,7 +11934,7 @@ DisResult disInstr_AMD64_WRK (
       s3 = s2 = s1 = s0 = d3 = d2 = d1 = d0 = IRTemp_INVALID;
       t1 = newTemp(Ity_I64);
       t0 = newTemp(Ity_I64);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
@@ -11926,7 +11943,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pmuludq %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("pmuludq %s,%s\n", dis_buf,
@@ -11945,15 +11962,15 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F EB = POR */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xEB) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "por", Iop_OrV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xEB) {
+      delta = dis_SSE_E_to_G_all(  guest_code, vbi, pfx, delta+2, "por", Iop_OrV128 );
       goto decode_success;
    }
 
    /* 66 0F F6 = PSADBW -- 2 x (8x8 -> 48 zeroes ++ u16) Sum Abs Diffs
       from E(xmm or mem) to G(xmm) */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF6) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF6) {
       IRTemp s1V  = newTemp(Ity_V128);
       IRTemp s2V  = newTemp(Ity_V128);
       IRTemp dV   = newTemp(Ity_V128);
@@ -11963,14 +11980,14 @@ DisResult disInstr_AMD64_WRK (
       IRTemp s2Lo = newTemp(Ity_I64);
       IRTemp dHi  = newTemp(Ity_I64);
       IRTemp dLo  = newTemp(Ity_I64);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( s1V, getXMMReg(eregOfRexRM(pfx,modrm)) );
          delta += 2+1;
          DIP("psadbw %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( s1V, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 2+alen;
          DIP("psadbw %s,%s\n", dis_buf,
@@ -12000,25 +12017,25 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 70 = PSHUFD -- rearrange 4x32 from E(xmm or mem) to G(xmm) */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x70) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x70) {
       Int order;
       IRTemp sV, dV, s3, s2, s1, s0;
       s3 = s2 = s1 = s0 = IRTemp_INVALID;
       sV = newTemp(Ity_V128);
       dV = newTemp(Ity_V128);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg(eregOfRexRM(pfx,modrm)) );
-         order = (Int)insn[3];
+         order = (Int)guest_code[delta+3];
          delta += 3+1;
          DIP("pshufd $%d,%s,%s\n", order, 
                                    nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
-	 order = (Int)insn[2+alen];
+	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshufd $%d,%s,%s\n", order, 
                                    dis_buf,
@@ -12040,7 +12057,7 @@ DisResult disInstr_AMD64_WRK (
    /* F3 0F 70 = PSHUFHW -- rearrange upper half 4x16 from E(xmm or
       mem) to G(xmm), and copy lower half */
    if (haveF3no66noF2(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x70) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x70) {
       Int order;
       IRTemp sVhi, dVhi, sV, dV, s3, s2, s1, s0;
       s3 = s2 = s1 = s0 = IRTemp_INVALID;
@@ -12048,19 +12065,19 @@ DisResult disInstr_AMD64_WRK (
       dV   = newTemp(Ity_V128);
       sVhi = newTemp(Ity_I64);
       dVhi = newTemp(Ity_I64);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg(eregOfRexRM(pfx,modrm)) );
-         order = (Int)insn[3];
+         order = (Int)guest_code[delta+3];
          delta += 3+1;
          DIP("pshufhw $%d,%s,%s\n", order, 
                                     nameXMMReg(eregOfRexRM(pfx,modrm)),
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
-	 order = (Int)insn[2+alen];
+	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshufhw $%d,%s,%s\n", order, 
                                     dis_buf,
@@ -12086,7 +12103,7 @@ DisResult disInstr_AMD64_WRK (
    /* F2 0F 70 = PSHUFLW -- rearrange lower half 4x16 from E(xmm or
       mem) to G(xmm), and copy upper half */
    if (haveF2no66noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x70) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x70) {
       Int order;
       IRTemp sVlo, dVlo, sV, dV, s3, s2, s1, s0;
       s3 = s2 = s1 = s0 = IRTemp_INVALID;
@@ -12094,19 +12111,19 @@ DisResult disInstr_AMD64_WRK (
       dV   = newTemp(Ity_V128);
       sVlo = newTemp(Ity_I64);
       dVlo = newTemp(Ity_I64);
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg(eregOfRexRM(pfx,modrm)) );
-         order = (Int)insn[3];
+         order = (Int)guest_code[delta+3];
          delta += 3+1;
          DIP("pshuflw $%d,%s,%s\n", order, 
                                     nameXMMReg(eregOfRexRM(pfx,modrm)),
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
-	 order = (Int)insn[2+alen];
+	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshuflw $%d,%s,%s\n", order, 
                                     dis_buf,
@@ -12131,29 +12148,29 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 72 /6 ib = PSLLD by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x72
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 6) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "pslld", Iop_ShlN32x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x72
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 6) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "pslld", Iop_ShlN32x4 );
       goto decode_success;
    }
 
    /* 66 0F F2 = PSLLD by E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF2) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "pslld", Iop_ShlN32x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF2) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "pslld", Iop_ShlN32x4 );
       goto decode_success;
    }
 
    /* 66 0F 73 /7 ib = PSLLDQ by immediate */
    /* note, if mem case ever filled in, 1 byte after amode */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x73
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 7) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x73
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 7) {
       IRTemp sV, dV, hi64, lo64, hi64r, lo64r;
-      Int    imm = (Int)insn[3];
-      Int    reg = eregOfRexRM(pfx,insn[2]);
+      Int    imm = (Int)guest_code[delta+3];
+      Int    reg = eregOfRexRM(pfx,guest_code[delta+2]);
       DIP("pslldq $%d,%s\n", imm, nameXMMReg(reg));
       vassert(imm >= 0 && imm <= 255);
       delta += 4;
@@ -12209,93 +12226,93 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 73 /6 ib = PSLLQ by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x73
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 6) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "psllq", Iop_ShlN64x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x73
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 6) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "psllq", Iop_ShlN64x2 );
       goto decode_success;
    }
 
    /* 66 0F F3 = PSLLQ by E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF3) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "psllq", Iop_ShlN64x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF3) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "psllq", Iop_ShlN64x2 );
       goto decode_success;
    }
 
    /* 66 0F 71 /6 ib = PSLLW by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x71
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 6) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "psllw", Iop_ShlN16x8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x71
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 6) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "psllw", Iop_ShlN16x8 );
       goto decode_success;
    }
 
    /* 66 0F F1 = PSLLW by E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF1) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "psllw", Iop_ShlN16x8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF1) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "psllw", Iop_ShlN16x8 );
       goto decode_success;
    }
 
    /* 66 0F 72 /4 ib = PSRAD by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x72
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 4) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "psrad", Iop_SarN32x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x72
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 4) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "psrad", Iop_SarN32x4 );
       goto decode_success;
    }
 
    /* 66 0F E2 = PSRAD by E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE2) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "psrad", Iop_SarN32x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE2) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "psrad", Iop_SarN32x4 );
       goto decode_success;
    }
 
    /* 66 0F 71 /4 ib = PSRAW by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x71
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 4) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "psraw", Iop_SarN16x8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x71
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 4) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "psraw", Iop_SarN16x8 );
       goto decode_success;
    }
 
    /* 66 0F E1 = PSRAW by E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE1) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "psraw", Iop_SarN16x8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE1) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "psraw", Iop_SarN16x8 );
       goto decode_success;
    }
 
    /* 66 0F 72 /2 ib = PSRLD by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x72
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 2) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "psrld", Iop_ShrN32x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x72
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 2) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "psrld", Iop_ShrN32x4 );
       goto decode_success;
    }
 
    /* 66 0F D2 = PSRLD by E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xD2) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "psrld", Iop_ShrN32x4 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD2) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "psrld", Iop_ShrN32x4 );
       goto decode_success;
    }
 
    /* 66 0F 73 /3 ib = PSRLDQ by immediate */
    /* note, if mem case ever filled in, 1 byte after amode */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x73
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 3) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x73
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 3) {
       IRTemp sV, dV, hi64, lo64, hi64r, lo64r;
-      Int    imm = (Int)insn[3];
-      Int    reg = eregOfRexRM(pfx,insn[2]);
+      Int    imm = (Int)guest_code[delta+3];
+      Int    reg = eregOfRexRM(pfx,guest_code[delta+2]);
       DIP("psrldq $%d,%s\n", imm, nameXMMReg(reg));
       vassert(imm >= 0 && imm <= 255);
       delta += 4;
@@ -12352,48 +12369,48 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 73 /2 ib = PSRLQ by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x73
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 2) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "psrlq", Iop_ShrN64x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x73
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 2) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "psrlq", Iop_ShrN64x2 );
       goto decode_success;
    }
 
    /* 66 0F D3 = PSRLQ by E */
    if (have66noF2noF3(pfx) && sz == 2
-       && insn[0] == 0x0F && insn[1] == 0xD3) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "psrlq", Iop_ShrN64x2 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD3) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "psrlq", Iop_ShrN64x2 );
       goto decode_success;
    }
 
    /* 66 0F 71 /2 ib = PSRLW by immediate */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x71
-       && epartIsReg(insn[2])
-       && gregLO3ofRM(insn[2]) == 2) {
-      delta = dis_SSE_shiftE_imm( pfx, delta+2, "psrlw", Iop_ShrN16x8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x71
+       && epartIsReg(guest_code[delta+2])
+       && gregLO3ofRM(guest_code[delta+2]) == 2) {
+      delta = dis_SSE_shiftE_imm( guest_code, pfx, delta+2, "psrlw", Iop_ShrN16x8 );
       goto decode_success;
    }
 
    /* 66 0F D1 = PSRLW by E */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xD1) {
-      delta = dis_SSE_shiftG_byE( vbi, pfx, delta+2, "psrlw", Iop_ShrN16x8 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD1) {
+      delta = dis_SSE_shiftG_byE( guest_code, vbi, pfx, delta+2, "psrlw", Iop_ShrN16x8 );
       goto decode_success;
    }
 
    /* 66 0F F8 = PSUBB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF8) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF8) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubb", Iop_Sub8x16, False );
       goto decode_success;
    }
 
    /* 66 0F FA = PSUBD */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xFA) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xFA) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubd", Iop_Sub32x4, False );
       goto decode_success;
    }
@@ -12401,65 +12418,65 @@ DisResult disInstr_AMD64_WRK (
    /* ***--- this is an MMX class insn introduced in SSE2 ---*** */
    /* 0F FB = PSUBQ -- sub 64x1 */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xFB) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xFB) {
       do_MMX_preamble();
-      delta = dis_MMXop_regmem_to_reg ( 
-                vbi, pfx, delta+2, insn[1], "psubq", False );
+      delta = dis_MMXop_regmem_to_reg ( guest_code, 
+                vbi, pfx, delta+2, guest_code[delta+1], "psubq", False );
       goto decode_success;
    }
 
    /* 66 0F FB = PSUBQ */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xFB) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xFB) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubq", Iop_Sub64x2, False );
       goto decode_success;
    }
 
    /* 66 0F F9 = PSUBW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xF9) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF9) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubw", Iop_Sub16x8, False );
       goto decode_success;
    }
 
    /* 66 0F E8 = PSUBSB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE8) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE8) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubsb", Iop_QSub8Sx16, False );
       goto decode_success;
    }
 
    /* 66 0F E9 = PSUBSW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xE9) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xE9) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubsw", Iop_QSub16Sx8, False );
       goto decode_success;
    }
 
    /* 66 0F D8 = PSUBSB */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xD8) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD8) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubusb", Iop_QSub8Ux16, False );
       goto decode_success;
    }
 
    /* 66 0F D9 = PSUBSW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xD9) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD9) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "psubusw", Iop_QSub16Ux8, False );
       goto decode_success;
    }
 
    /* 66 0F 68 = PUNPCKHBW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x68) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x68) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpckhbw",
                                  Iop_InterleaveHI8x16, True );
       goto decode_success;
@@ -12467,8 +12484,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 6A = PUNPCKHDQ */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x6A) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x6A) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpckhdq",
                                  Iop_InterleaveHI32x4, True );
       goto decode_success;
@@ -12476,8 +12493,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 6D = PUNPCKHQDQ */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x6D) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x6D) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpckhqdq",
                                  Iop_InterleaveHI64x2, True );
       goto decode_success;
@@ -12485,8 +12502,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 69 = PUNPCKHWD */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x69) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x69) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpckhwd",
                                  Iop_InterleaveHI16x8, True );
       goto decode_success;
@@ -12494,8 +12511,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 60 = PUNPCKLBW */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x60) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x60) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpcklbw",
                                  Iop_InterleaveLO8x16, True );
       goto decode_success;
@@ -12503,8 +12520,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 62 = PUNPCKLDQ */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x62) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x62) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpckldq",
                                  Iop_InterleaveLO32x4, True );
       goto decode_success;
@@ -12512,8 +12529,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 6C = PUNPCKLQDQ */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x6C) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x6C) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpcklqdq",
                                  Iop_InterleaveLO64x2, True );
       goto decode_success;
@@ -12521,8 +12538,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F 61 = PUNPCKLWD */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0x61) {
-      delta = dis_SSEint_E_to_G( vbi, pfx, delta+2, 
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x61) {
+      delta = dis_SSEint_E_to_G( guest_code, vbi, pfx, delta+2, 
                                  "punpcklwd",
                                  Iop_InterleaveLO16x8, True );
       goto decode_success;
@@ -12530,23 +12547,23 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F EF = PXOR */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xEF) {
-      delta = dis_SSE_E_to_G_all( vbi, pfx, delta+2, "pxor", Iop_XorV128 );
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xEF) {
+      delta = dis_SSE_E_to_G_all(  guest_code, vbi, pfx, delta+2, "pxor", Iop_XorV128 );
       goto decode_success;
    }
 
 //.. //--    /* FXSAVE/FXRSTOR m32 -- load/store the FPU/MMX/SSE state. */
-//.. //--    if (insn[0] == 0x0F && insn[1] == 0xAE 
-//.. //--        && (!epartIsReg(insn[2]))
-//.. //--        && (gregOfRM(insn[2]) == 1 || gregOfRM(insn[2]) == 0) ) {
-//.. //--       Bool store = gregOfRM(insn[2]) == 0;
+//.. //--    if (guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xAE 
+//.. //--        && (!epartIsReg(guest_code[delta+2]))
+//.. //--        && (gregOfRM(guest_code[delta+2]) == 1 || gregOfRM(guest_code[delta+2]) == 0) ) {
+//.. //--       Bool store = gregOfRM(guest_code[delta+2]) == 0;
 //.. //--       vg_assert(sz == 4);
-//.. //--       pair = disAMode ( cb, sorb, eip+2, dis_buf );
+//.. //--       pair = disAMode ( guest_code, cb, sorb, eip+2, dis_buf );
 //.. //--       t1   = LOW24(pair);
 //.. //--       eip += 2+HI8(pair);
 //.. //--       uInstr3(cb, store ? SSE2a_MemWr : SSE2a_MemRd, 512,
-//.. //--                   Lit16, (((UShort)insn[0]) << 8) | (UShort)insn[1],
-//.. //--                   Lit16, (UShort)insn[2],
+//.. //--                   Lit16, (((UShort)guest_code[delta+0]) << 8) | (UShort)guest_code[delta+1],
+//.. //--                   Lit16, (UShort)guest_code[delta+2],
 //.. //--                   TempReg, t1 );
 //.. //--       DIP("fx%s %s\n", store ? "save" : "rstor", dis_buf );
 //.. //--       goto decode_success;
@@ -12554,8 +12571,8 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F AE /7 = CLFLUSH -- flush cache line */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xAE
-       && !epartIsReg(insn[2]) && gregLO3ofRM(insn[2]) == 7) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xAE
+       && !epartIsReg(guest_code[delta+2]) && gregLO3ofRM(guest_code[delta+2]) == 7) {
 
       /* This is something of a hack.  We need to know the size of the
          cache line containing addr.  Since we don't (easily), assume
@@ -12564,7 +12581,7 @@ DisResult disInstr_AMD64_WRK (
          inefficient. */
       ULong lineszB = 256ULL;
 
-      addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
       delta += 2+alen;
 
       /* Round addr down to the start of the containing block. */
@@ -12597,13 +12614,13 @@ DisResult disInstr_AMD64_WRK (
    /* F3 0F 16 = MOVSHDUP -- move from E (mem or xmm) to G (xmm),
       duplicating some lanes (3:3:1:1). */
    if (haveF3no66noF2(pfx) && sz == 4
-       && insn[0] == 0x0F && (insn[1] == 0x12 || insn[1] == 0x16)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x12 || guest_code[delta+1] == 0x16)) {
       IRTemp s3, s2, s1, s0;
       IRTemp sV  = newTemp(Ity_V128);
-      Bool   isH = insn[1] == 0x16;
+      Bool   isH = guest_code[delta+1] == 0x16;
       s3 = s2 = s1 = s0 = IRTemp_INVALID;
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg( eregOfRexRM(pfx,modrm)) );
          DIP("movs%cdup %s,%s\n", isH ? 'h' : 'l',
@@ -12611,7 +12628,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          DIP("movs%cdup %s,%s\n", isH ? 'h' : 'l',
 	     dis_buf,
@@ -12630,11 +12647,11 @@ DisResult disInstr_AMD64_WRK (
       duplicating some lanes (0:1:0:1). */
    if (haveF2no66noF3(pfx) 
        && (sz == 4 || /* ignore redundant REX.W */ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x12) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x12) {
       IRTemp sV = newTemp(Ity_V128);
       IRTemp d0 = newTemp(Ity_I64);
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg( eregOfRexRM(pfx,modrm)) );
          DIP("movddup %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
@@ -12642,7 +12659,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
          assign ( d0, unop(Iop_V128to64, mkexpr(sV)) );
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( d0, loadLE(Ity_I64, mkexpr(addr)) );
          DIP("movddup %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12656,7 +12673,7 @@ DisResult disInstr_AMD64_WRK (
 
    /* F2 0F D0 = ADDSUBPS -- 32x4 +/-/+/- from E (mem or xmm) to G (xmm). */
    if (haveF2no66noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xD0) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD0) {
       IRTemp a3, a2, a1, a0, s3, s2, s1, s0;
       IRTemp eV   = newTemp(Ity_V128);
       IRTemp gV   = newTemp(Ity_V128);
@@ -12664,14 +12681,14 @@ DisResult disInstr_AMD64_WRK (
       IRTemp subV = newTemp(Ity_V128);
       a3 = a2 = a1 = a0 = s3 = s2 = s1 = s0 = IRTemp_INVALID;
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( eV, getXMMReg( eregOfRexRM(pfx,modrm)) );
          DIP("addsubps %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( eV, loadLE(Ity_V128, mkexpr(addr)) );
          DIP("addsubps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12692,7 +12709,7 @@ DisResult disInstr_AMD64_WRK (
 
    /* 66 0F D0 = ADDSUBPD -- 64x4 +/- from E (mem or xmm) to G (xmm). */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && insn[1] == 0xD0) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xD0) {
       IRTemp eV   = newTemp(Ity_V128);
       IRTemp gV   = newTemp(Ity_V128);
       IRTemp addV = newTemp(Ity_V128);
@@ -12700,14 +12717,14 @@ DisResult disInstr_AMD64_WRK (
       IRTemp a1     = newTemp(Ity_I64);
       IRTemp s0     = newTemp(Ity_I64);
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( eV, getXMMReg( eregOfRexRM(pfx,modrm)) );
          DIP("addsubpd %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( eV, loadLE(Ity_V128, mkexpr(addr)) );
          DIP("addsubpd %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12730,24 +12747,24 @@ DisResult disInstr_AMD64_WRK (
    /* F2 0F 7D = HSUBPS -- 32x4 sub across from E (mem or xmm) to G (xmm). */
    /* F2 0F 7C = HADDPS -- 32x4 add across from E (mem or xmm) to G (xmm). */
    if (haveF2no66noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && (insn[1] == 0x7C || insn[1] == 0x7D)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x7C || guest_code[delta+1] == 0x7D)) {
       IRTemp e3, e2, e1, e0, g3, g2, g1, g0;
       IRTemp eV     = newTemp(Ity_V128);
       IRTemp gV     = newTemp(Ity_V128);
       IRTemp leftV  = newTemp(Ity_V128);
       IRTemp rightV = newTemp(Ity_V128);
-      Bool   isAdd  = insn[1] == 0x7C;
+      Bool   isAdd  = guest_code[delta+1] == 0x7C;
       const char* str    = isAdd ? "add" : "sub";
       e3 = e2 = e1 = e0 = g3 = g2 = g1 = g0 = IRTemp_INVALID;
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( eV, getXMMReg( eregOfRexRM(pfx,modrm)) );
          DIP("h%sps %s,%s\n", str, nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( eV, loadLE(Ity_V128, mkexpr(addr)) );
          DIP("h%sps %s,%s\n", str, dis_buf,
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12771,7 +12788,7 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 7D = HSUBPD -- 64x2 sub across from E (mem or xmm) to G (xmm). */
    /* 66 0F 7C = HADDPD -- 64x2 add across from E (mem or xmm) to G (xmm). */
    if (have66noF2noF3(pfx) && sz == 2 
-       && insn[0] == 0x0F && (insn[1] == 0x7C || insn[1] == 0x7D)) {
+       && guest_code[delta+0] == 0x0F && (guest_code[delta+1] == 0x7C || guest_code[delta+1] == 0x7D)) {
       IRTemp e1     = newTemp(Ity_I64);
       IRTemp e0     = newTemp(Ity_I64);
       IRTemp g1     = newTemp(Ity_I64);
@@ -12780,17 +12797,17 @@ DisResult disInstr_AMD64_WRK (
       IRTemp gV     = newTemp(Ity_V128);
       IRTemp leftV  = newTemp(Ity_V128);
       IRTemp rightV = newTemp(Ity_V128);
-      Bool   isAdd  = insn[1] == 0x7C;
+      Bool   isAdd  = guest_code[delta+1] == 0x7C;
       const char* str    = isAdd ? "add" : "sub";
 
-      modrm = insn[2];
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          assign( eV, getXMMReg( eregOfRexRM(pfx,modrm)) );
          DIP("h%spd %s,%s\n", str, nameXMMReg(eregOfRexRM(pfx,modrm)),
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( eV, loadLE(Ity_V128, mkexpr(addr)) );
          DIP("h%spd %s,%s\n", str, dis_buf,
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12815,12 +12832,12 @@ DisResult disInstr_AMD64_WRK (
 
    /* F2 0F F0 = LDDQU -- move from E (mem or xmm) to G (xmm). */
    if (haveF2no66noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0xF0) {
-      modrm = insn[2];
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0xF0) {
+      modrm = guest_code[delta+2];
       if (epartIsReg(modrm)) {
          goto decode_failure;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+2, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
                     loadLE(Ity_V128, mkexpr(addr)) );
          DIP("lddqu %s,%s\n", dis_buf,
@@ -12842,7 +12859,7 @@ DisResult disInstr_AMD64_WRK (
       Unsigned Bytes (MMX) */
    if (haveNo66noF2noF3(pfx) 
        && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x38 && insn[2] == 0x04) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 && guest_code[delta+2] == 0x04) {
       IRTemp sV        = newTemp(Ity_I64);
       IRTemp dV        = newTemp(Ity_I64);
       IRTemp sVoddsSX  = newTemp(Ity_I64);
@@ -12850,7 +12867,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp dVoddsZX  = newTemp(Ity_I64);
       IRTemp dVevensZX = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       do_MMX_preamble();
       assign( dV, getMMXReg(gregLO3ofRM(modrm)) );
 
@@ -12860,7 +12877,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pmaddubsw %s,%s\n", nameMMXReg(eregLO3ofRM(modrm)),
                                   nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 3+alen;
          DIP("pmaddubsw %s,%s\n", dis_buf,
@@ -12895,7 +12912,7 @@ DisResult disInstr_AMD64_WRK (
       Unsigned Bytes (XMM) */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /*redundant REX.W*/ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x38 && insn[2] == 0x04) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 && guest_code[delta+2] == 0x04) {
       IRTemp sV        = newTemp(Ity_V128);
       IRTemp dV        = newTemp(Ity_V128);
       IRTemp sVoddsSX  = newTemp(Ity_V128);
@@ -12903,7 +12920,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp dVoddsZX  = newTemp(Ity_V128);
       IRTemp dVevensZX = newTemp(Ity_V128);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
@@ -12912,7 +12929,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pmaddubsw %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( addr );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 3+alen;
@@ -12960,9 +12977,9 @@ DisResult disInstr_AMD64_WRK (
 
    if (haveNo66noF2noF3(pfx) 
        && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x38 
-       && (insn[2] == 0x03 || insn[2] == 0x07 || insn[2] == 0x01
-           || insn[2] == 0x05 || insn[2] == 0x02 || insn[2] == 0x06)) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 
+       && (guest_code[delta+2] == 0x03 || guest_code[delta+2] == 0x07 || guest_code[delta+2] == 0x01
+           || guest_code[delta+2] == 0x05 || guest_code[delta+2] == 0x02 || guest_code[delta+2] == 0x06)) {
       const char* str    = "???";
       IROp   opV64  = Iop_INVALID;
       IROp   opCatO = Iop_CatOddLanes16x4;
@@ -12970,9 +12987,9 @@ DisResult disInstr_AMD64_WRK (
       IRTemp sV     = newTemp(Ity_I64);
       IRTemp dV     = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
 
-      switch (insn[2]) {
+      switch (guest_code[delta+2]) {
          case 0x03: opV64 = Iop_QAdd16Sx4; str = "addsw"; break;
          case 0x07: opV64 = Iop_QSub16Sx4; str = "subsw"; break;
          case 0x01: opV64 = Iop_Add16x4;   str = "addw";  break;
@@ -12981,7 +12998,7 @@ DisResult disInstr_AMD64_WRK (
          case 0x06: opV64 = Iop_Sub32x2;   str = "subd";  break;
          default: vassert(0);
       }
-      if (insn[2] == 0x02 || insn[2] == 0x06) {
+      if (guest_code[delta+2] == 0x02 || guest_code[delta+2] == 0x06) {
          opCatO = Iop_InterleaveHI32x2;
          opCatE = Iop_InterleaveLO32x2;
       }
@@ -12995,7 +13012,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("ph%s %s,%s\n", str, nameMMXReg(eregLO3ofRM(modrm)),
                                   nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 3+alen;
          DIP("ph%s %s,%s\n", str, dis_buf,
@@ -13027,9 +13044,9 @@ DisResult disInstr_AMD64_WRK (
 
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /*redundant REX.W*/ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x38 
-       && (insn[2] == 0x03 || insn[2] == 0x07 || insn[2] == 0x01
-           || insn[2] == 0x05 || insn[2] == 0x02 || insn[2] == 0x06)) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 
+       && (guest_code[delta+2] == 0x03 || guest_code[delta+2] == 0x07 || guest_code[delta+2] == 0x01
+           || guest_code[delta+2] == 0x05 || guest_code[delta+2] == 0x02 || guest_code[delta+2] == 0x06)) {
       const char* str    = "???";
       IROp   opV64  = Iop_INVALID;
       IROp   opCatO = Iop_CatOddLanes16x4;
@@ -13041,9 +13058,9 @@ DisResult disInstr_AMD64_WRK (
       IRTemp dHi    = newTemp(Ity_I64);
       IRTemp dLo    = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
 
-      switch (insn[2]) {
+      switch (guest_code[delta+2]) {
          case 0x03: opV64 = Iop_QAdd16Sx4; str = "addsw"; break;
          case 0x07: opV64 = Iop_QSub16Sx4; str = "subsw"; break;
          case 0x01: opV64 = Iop_Add16x4;   str = "addw";  break;
@@ -13052,7 +13069,7 @@ DisResult disInstr_AMD64_WRK (
          case 0x06: opV64 = Iop_Sub32x2;   str = "subd";  break;
          default: vassert(0);
       }
-      if (insn[2] == 0x02 || insn[2] == 0x06) {
+      if (guest_code[delta+2] == 0x02 || guest_code[delta+2] == 0x06) {
          opCatO = Iop_InterleaveHI32x2;
          opCatE = Iop_InterleaveLO32x2;
       }
@@ -13065,7 +13082,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 3+1;
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( addr );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          DIP("ph%s %s,%s\n", str, dis_buf,
@@ -13101,11 +13118,11 @@ DisResult disInstr_AMD64_WRK (
       (MMX) */
    if (haveNo66noF2noF3(pfx) 
        && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x38 && insn[2] == 0x0B) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 && guest_code[delta+2] == 0x0B) {
       IRTemp sV = newTemp(Ity_I64);
       IRTemp dV = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       do_MMX_preamble();
       assign( dV, getMMXReg(gregLO3ofRM(modrm)) );
 
@@ -13115,7 +13132,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pmulhrsw %s,%s\n", nameMMXReg(eregLO3ofRM(modrm)),
                                  nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 3+alen;
          DIP("pmulhrsw %s,%s\n", dis_buf,
@@ -13133,7 +13150,7 @@ DisResult disInstr_AMD64_WRK (
       Scale (XMM) */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /*redundant REX.W*/ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x38 && insn[2] == 0x0B) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 && guest_code[delta+2] == 0x0B) {
       IRTemp sV  = newTemp(Ity_V128);
       IRTemp dV  = newTemp(Ity_V128);
       IRTemp sHi = newTemp(Ity_I64);
@@ -13141,7 +13158,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp dHi = newTemp(Ity_I64);
       IRTemp dLo = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
@@ -13150,7 +13167,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pmulhrsw %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( addr );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 3+alen;
@@ -13178,21 +13195,21 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 38 09 = PSIGND -- Packed Sign 32x2 (MMX) */
    if (haveNo66noF2noF3(pfx) 
        && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x38 
-       && (insn[2] == 0x08 || insn[2] == 0x09 || insn[2] == 0x0A)) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 
+       && (guest_code[delta+2] == 0x08 || guest_code[delta+2] == 0x09 || guest_code[delta+2] == 0x0A)) {
       IRTemp sV      = newTemp(Ity_I64);
       IRTemp dV      = newTemp(Ity_I64);
       const char* str     = "???";
       Int    laneszB = 0;
 
-      switch (insn[2]) {
+      switch (guest_code[delta+2]) {
          case 0x08: laneszB = 1; str = "b"; break;
          case 0x09: laneszB = 2; str = "w"; break;
          case 0x0A: laneszB = 4; str = "d"; break;
          default: vassert(0);
       }
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       do_MMX_preamble();
       assign( dV, getMMXReg(gregLO3ofRM(modrm)) );
 
@@ -13202,7 +13219,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("psign%s %s,%s\n", str, nameMMXReg(eregLO3ofRM(modrm)),
                                      nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 3+alen;
          DIP("psign%s %s,%s\n", str, dis_buf,
@@ -13221,8 +13238,8 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 38 09 = PSIGND -- Packed Sign 32x4 (XMM) */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /*redundant REX.W*/ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x38 
-       && (insn[2] == 0x08 || insn[2] == 0x09 || insn[2] == 0x0A)) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 
+       && (guest_code[delta+2] == 0x08 || guest_code[delta+2] == 0x09 || guest_code[delta+2] == 0x0A)) {
       IRTemp sV      = newTemp(Ity_V128);
       IRTemp dV      = newTemp(Ity_V128);
       IRTemp sHi     = newTemp(Ity_I64);
@@ -13232,14 +13249,14 @@ DisResult disInstr_AMD64_WRK (
       const char* str     = "???";
       Int    laneszB = 0;
 
-      switch (insn[2]) {
+      switch (guest_code[delta+2]) {
          case 0x08: laneszB = 1; str = "b"; break;
          case 0x09: laneszB = 2; str = "w"; break;
          case 0x0A: laneszB = 4; str = "d"; break;
          default: vassert(0);
       }
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
@@ -13248,7 +13265,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("psign%s %s,%s\n", str, nameXMMReg(eregOfRexRM(pfx,modrm)),
                                      nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( addr );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 3+alen;
@@ -13276,20 +13293,20 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 38 1E = PABSD -- Packed Absolute Value 32x2 (MMX) */
    if (haveNo66noF2noF3(pfx) 
        && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x38 
-       && (insn[2] == 0x1C || insn[2] == 0x1D || insn[2] == 0x1E)) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 
+       && (guest_code[delta+2] == 0x1C || guest_code[delta+2] == 0x1D || guest_code[delta+2] == 0x1E)) {
       IRTemp sV      = newTemp(Ity_I64);
       const char* str     = "???";
       Int    laneszB = 0;
 
-      switch (insn[2]) {
+      switch (guest_code[delta+2]) {
          case 0x1C: laneszB = 1; str = "b"; break;
          case 0x1D: laneszB = 2; str = "w"; break;
          case 0x1E: laneszB = 4; str = "d"; break;
          default: vassert(0);
       }
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       do_MMX_preamble();
 
       if (epartIsReg(modrm)) {
@@ -13298,7 +13315,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pabs%s %s,%s\n", str, nameMMXReg(eregLO3ofRM(modrm)),
                                     nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 3+alen;
          DIP("pabs%s %s,%s\n", str, dis_buf,
@@ -13317,22 +13334,22 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 38 1E = PABSD -- Packed Absolute Value 32x4 (XMM) */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /*redundant REX.W*/ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x38 
-       && (insn[2] == 0x1C || insn[2] == 0x1D || insn[2] == 0x1E)) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 
+       && (guest_code[delta+2] == 0x1C || guest_code[delta+2] == 0x1D || guest_code[delta+2] == 0x1E)) {
       IRTemp sV      = newTemp(Ity_V128);
       IRTemp sHi     = newTemp(Ity_I64);
       IRTemp sLo     = newTemp(Ity_I64);
       const char* str     = "???";
       Int    laneszB = 0;
 
-      switch (insn[2]) {
+      switch (guest_code[delta+2]) {
          case 0x1C: laneszB = 1; str = "b"; break;
          case 0x1D: laneszB = 2; str = "w"; break;
          case 0x1E: laneszB = 4; str = "d"; break;
          default: vassert(0);
       }
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
 
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg(eregOfRexRM(pfx,modrm)) );
@@ -13340,7 +13357,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pabs%s %s,%s\n", str, nameXMMReg(eregOfRexRM(pfx,modrm)),
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( addr );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 3+alen;
@@ -13363,26 +13380,26 @@ DisResult disInstr_AMD64_WRK (
 
    /* 0F 3A 0F = PALIGNR -- Packed Align Right (MMX) */
    if (haveNo66noF2noF3(pfx) && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x3A && insn[2] == 0x0F) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x3A && guest_code[delta+2] == 0x0F) {
       IRTemp sV  = newTemp(Ity_I64);
       IRTemp dV  = newTemp(Ity_I64);
       IRTemp res = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       do_MMX_preamble();
       assign( dV, getMMXReg(gregLO3ofRM(modrm)) );
 
       if (epartIsReg(modrm)) {
          assign( sV, getMMXReg(eregLO3ofRM(modrm)) );
-         d64 = (Long)insn[3+1];
+         d64 = (Long)guest_code[delta+3+1];
          delta += 3+1+1;
          DIP("palignr $%d,%s,%s\n",  (Int)d64, 
                                      nameMMXReg(eregLO3ofRM(modrm)),
                                      nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 1 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 1 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
-         d64 = (Long)insn[3+alen];
+         d64 = (Long)guest_code[delta+3+alen];
          delta += 3+alen+1;
          DIP("palignr $%d%s,%s\n", (Int)d64,
                                    dis_buf,
@@ -13418,7 +13435,7 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 3A 0F = PALIGNR -- Packed Align Right (XMM) */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /*redundant REX.W*/ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x3A && insn[2] == 0x0F) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x3A && guest_code[delta+2] == 0x0F) {
       IRTemp sV  = newTemp(Ity_V128);
       IRTemp dV  = newTemp(Ity_V128);
       IRTemp sHi = newTemp(Ity_I64);
@@ -13428,21 +13445,21 @@ DisResult disInstr_AMD64_WRK (
       IRTemp rHi = newTemp(Ity_I64);
       IRTemp rLo = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
          assign( sV, getXMMReg(eregOfRexRM(pfx,modrm)) );
-         d64 = (Long)insn[3+1];
+         d64 = (Long)guest_code[delta+3+1];
          delta += 3+1+1;
          DIP("palignr $%d,%s,%s\n", (Int)d64,
                                     nameXMMReg(eregOfRexRM(pfx,modrm)),
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 1 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 1 );
          gen_SEGV_if_not_16_aligned( addr );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
-         d64 = (Long)insn[3+alen];
+         d64 = (Long)guest_code[delta+3+alen];
          delta += 3+alen+1;
          DIP("palignr $%d,%s,%s\n", (Int)d64,
                                     dis_buf,
@@ -13503,11 +13520,11 @@ DisResult disInstr_AMD64_WRK (
    /* 0F 38 00 = PSHUFB -- Packed Shuffle Bytes 8x8 (MMX) */
    if (haveNo66noF2noF3(pfx) 
        && sz == 4 
-       && insn[0] == 0x0F && insn[1] == 0x38 && insn[2] == 0x00) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 && guest_code[delta+2] == 0x00) {
       IRTemp sV      = newTemp(Ity_I64);
       IRTemp dV      = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       do_MMX_preamble();
       assign( dV, getMMXReg(gregLO3ofRM(modrm)) );
 
@@ -13517,7 +13534,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pshufb %s,%s\n", nameMMXReg(eregLO3ofRM(modrm)),
                                nameMMXReg(gregLO3ofRM(modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          assign( sV, loadLE(Ity_I64, mkexpr(addr)) );
          delta += 3+alen;
          DIP("pshufb %s,%s\n", dis_buf,
@@ -13544,7 +13561,7 @@ DisResult disInstr_AMD64_WRK (
    /* 66 0F 38 00 = PSHUFB -- Packed Shuffle Bytes 8x16 (XMM) */
    if (have66noF2noF3(pfx) 
        && (sz == 2 || /*redundant REX.W*/ sz == 8)
-       && insn[0] == 0x0F && insn[1] == 0x38 && insn[2] == 0x00) {
+       && guest_code[delta+0] == 0x0F && guest_code[delta+1] == 0x38 && guest_code[delta+2] == 0x00) {
       IRTemp sV         = newTemp(Ity_V128);
       IRTemp dV         = newTemp(Ity_V128);
       IRTemp sHi        = newTemp(Ity_I64);
@@ -13563,7 +13580,7 @@ DisResult disInstr_AMD64_WRK (
       IRTemp permdHi    = newTemp(Ity_I64);
       IRTemp permdLo    = newTemp(Ity_I64);
 
-      modrm = insn[3];
+      modrm = guest_code[delta+3];
       assign( dV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
       if (epartIsReg(modrm)) {
@@ -13572,7 +13589,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("pshufb %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta+3, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( addr );
          assign( sV, loadLE(Ity_V128, mkexpr(addr)) );
          delta += 3+alen;
@@ -13661,7 +13678,7 @@ DisResult disInstr_AMD64_WRK (
    /*after_sse_decoders:*/
 
    /* Get the primary opcode. */
-   opc = getUChar(delta); delta++;
+   opc = getUChar(guest_code, delta); delta++;
 
    /* We get here if the current insn isn't SSE, or this CPU doesn't
       support SSE. */
@@ -13672,7 +13689,7 @@ DisResult disInstr_AMD64_WRK (
 
    case 0xC2: /* RET imm16 */
       if (have66orF2orF3(pfx)) goto decode_failure;
-      d64 = getUDisp16(delta); 
+      d64 = getUDisp16(guest_code, delta); 
       delta += 2;
       dis_ret(vbi, d64);
       dres.whatNext = DisResult::Dis_StopHere;
@@ -13689,7 +13706,7 @@ DisResult disInstr_AMD64_WRK (
       
    case 0xE8: /* CALL J4 */
       if (haveF2orF3(pfx)) goto decode_failure;
-      d64 = getSDisp32(delta); delta += 4;
+      d64 = getSDisp32(guest_code, delta); delta += 4;
       d64 += (guest_RIP_bbstart+delta); 
       /* (guest_RIP_bbstart+delta) == return-to addr, d64 == call-to addr */
       t1 = newTemp(Ity_I64); 
@@ -13711,8 +13728,8 @@ DisResult disInstr_AMD64_WRK (
       break;
 
 //.. //--    case 0xC8: /* ENTER */ 
-//.. //--       d32 = getUDisp16(eip); eip += 2;
-//.. //--       abyte = getUChar(delta); delta++;
+//.. //--       d32 = getUDisp16(guest_code, eip); eip += 2;
+//.. //--       abyte = getUChar(guest_code, delta); delta++;
 //.. //-- 
 //.. //--       vg_assert(sz == 4);           
 //.. //--       vg_assert(abyte == 0);
@@ -13791,7 +13808,7 @@ DisResult disInstr_AMD64_WRK (
 //.. //-- 
 //.. //--    case 0xD4: /* AAM */
 //.. //--    case 0xD5: /* AAD */
-//.. //--       d32 = getUChar(delta); delta++;
+//.. //--       d32 = getUChar(guest_code, delta); delta++;
 //.. //--       if (d32 != 10) VG_(core_panic)("disInstr: AAM/AAD but base not 10 !");
 //.. //--       t1 = newTemp(cb);
 //.. //--       uInstr2(cb, GET, 2, ArchReg, R_EAX, TempReg, t1);
@@ -13876,7 +13893,7 @@ DisResult disInstr_AMD64_WRK (
       /* kludge to tolerate redundant rex.w prefixes (should do this
          properly one day) */
       /* mono 1.1.18.1 produces 48 D9 FA, which is rex.w fsqrt */
-      if ( (opc == 0xD9 && getUChar(delta+0) == 0xFA)/*fsqrt*/ )
+      if ( (opc == 0xD9 && getUChar(guest_code, delta+0) == 0xFA)/*fsqrt*/ )
          redundantREXWok = True;
 
       if ( (sz == 4
@@ -13884,7 +13901,7 @@ DisResult disInstr_AMD64_WRK (
            && haveNo66noF2noF3(pfx)) {
          Long delta0    = delta;
          Bool decode_OK = False;
-         delta = dis_FPU ( &decode_OK, vbi, pfx, delta );
+         delta = dis_FPU ( guest_code, &decode_OK, vbi, pfx, delta );
          if (!decode_OK) {
             delta = delta0;
             goto decode_failure;
@@ -13906,7 +13923,7 @@ DisResult disInstr_AMD64_WRK (
    case 0xCD: { /* INT imm8 */
       IRJumpKind jk = Ijk_Boring;
       if (have66orF2orF3(pfx)) goto decode_failure;
-      d64 = getUChar(delta); delta++;
+      d64 = getUChar(guest_code, delta); delta++;
       switch (d64) {
          case 32: jk = Ijk_Sys_int32; break;
          default: goto decode_failure;
@@ -13928,7 +13945,7 @@ DisResult disInstr_AMD64_WRK (
       if (haveF2orF3(pfx)) goto decode_failure;
       if (sz != 4) 
          goto decode_failure; /* JRS added 2004 July 11 */
-      d64 = (guest_RIP_bbstart+delta+1) + getSDisp8(delta); 
+      d64 = (guest_RIP_bbstart+delta+1) + getSDisp8(guest_code, delta); 
       delta++;
       if (resteerOkFn(callback_opaque,d64)) {
          dres.whatNext   = DisResult::Dis_Resteer;
@@ -13944,7 +13961,7 @@ DisResult disInstr_AMD64_WRK (
       if (haveF2orF3(pfx)) goto decode_failure;
       if (sz != 4) 
          goto decode_failure; /* JRS added 2004 July 11 */
-      d64 = (guest_RIP_bbstart+delta+sz) + getSDisp(sz,delta); 
+      d64 = (guest_RIP_bbstart+delta+sz) + getSDisp(guest_code, sz,delta); 
       delta += sz;
       if (resteerOkFn(callback_opaque,d64)) {
          dres.whatNext   = DisResult::Dis_Resteer;
@@ -13973,7 +13990,7 @@ DisResult disInstr_AMD64_WRK (
    case 0x7E: /* JLEb/JNGb (jump less or equal) */
    case 0x7F: /* JGb/JNLEb (jump greater) */
       if (haveF2orF3(pfx)) goto decode_failure;
-      d64 = (guest_RIP_bbstart+delta+1) + getSDisp8(delta); 
+      d64 = (guest_RIP_bbstart+delta+1) + getSDisp8(guest_code, delta); 
       delta++;
       jcc_01( (AMD64Condcode)(opc - 0x70), 
               guest_RIP_bbstart+delta,
@@ -13985,7 +14002,7 @@ DisResult disInstr_AMD64_WRK (
    case 0xE3: 
       /* JRCXZ or JECXZ, depending address size override. */
       if (have66orF2orF3(pfx)) goto decode_failure;
-      d64 = (guest_RIP_bbstart+delta+1) + getSDisp8(delta); 
+      d64 = (guest_RIP_bbstart+delta+1) + getSDisp8(guest_code, delta); 
       delta++;
       if (haveASO(pfx)) {
          /* 32-bit */
@@ -14020,7 +14037,7 @@ DisResult disInstr_AMD64_WRK (
       const char*  xtra  = NULL;
 
       if (have66orF2orF3(pfx) || haveASO(pfx)) goto decode_failure;
-      d64 = guest_RIP_bbstart+delta+1 + getSDisp8(delta);
+      d64 = guest_RIP_bbstart+delta+1 + getSDisp8(guest_code, delta);
       delta++;
       putIReg64(R_RCX, binop(Iop_Sub64, getIReg64(R_RCX), mkU64(1)));
 
@@ -14053,45 +14070,45 @@ DisResult disInstr_AMD64_WRK (
 
    case 0x69: /* IMUL Iv, Ev, Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_imul_I_E_G ( vbi, pfx, sz, delta, sz );
+      delta = dis_imul_I_E_G ( guest_code, vbi, pfx, sz, delta, sz );
       break;
    case 0x6B: /* IMUL Ib, Ev, Gv */
-      delta = dis_imul_I_E_G ( vbi, pfx, sz, delta, 1 );
+      delta = dis_imul_I_E_G ( guest_code, vbi, pfx, sz, delta, 1 );
       break;
 
    /* ------------------------ MOV ------------------------ */
 
    case 0x88: /* MOV Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_mov_G_E(vbi, pfx, 1, delta);
+      delta = dis_mov_G_E(guest_code, vbi, pfx, 1, delta);
       break;
 
    case 0x89: /* MOV Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_mov_G_E(vbi, pfx, sz, delta);
+      delta = dis_mov_G_E(guest_code, vbi, pfx, sz, delta);
       break;
 
    case 0x8A: /* MOV Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_mov_E_G(vbi, pfx, 1, delta);
+      delta = dis_mov_E_G(guest_code, vbi, pfx, 1, delta);
       break;
  
    case 0x8B: /* MOV Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_mov_E_G(vbi, pfx, sz, delta);
+      delta = dis_mov_E_G(guest_code, vbi, pfx, sz, delta);
       break;
  
    case 0x8D: /* LEA M,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
       if (sz != 4 && sz != 8)
          goto decode_failure;
-      modrm = getUChar(delta);
+      modrm = getUChar(guest_code, delta);
       if (epartIsReg(modrm)) 
          goto decode_failure;
       /* NOTE!  this is the one place where a segment override prefix
          has no effect on the address calculation.  Therefore we clear
          any segment override bits in pfx. */
-      addr = disAMode ( &alen, vbi, clearSegBits(pfx), delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &alen, vbi, clearSegBits(pfx), delta, dis_buf, 0 );
       delta += alen;
       /* This is a hack.  But it isn't clear that really doing the
          calculation at 32 bits is really worth it.  Hence for leal,
@@ -14120,7 +14137,7 @@ DisResult disInstr_AMD64_WRK (
    case 0xA1: /* MOV Ov,eAX */
       if (sz != 8 && sz != 4 && sz != 2 && sz != 1) 
          goto decode_failure;
-      d64 = getDisp64(delta); 
+      d64 = getDisp64(guest_code, delta); 
       delta += 8;
       ty = szToITy(sz);
       addr = newTemp(Ity_I64);
@@ -14138,7 +14155,7 @@ DisResult disInstr_AMD64_WRK (
    case 0xA3: /* MOV eAX,Ov */
       if (sz != 8 && sz != 4 && sz != 2 && sz != 1) 
          goto decode_failure;
-      d64 = getDisp64(delta); 
+      d64 = getDisp64(guest_code, delta); 
       delta += 8;
       ty = szToITy(sz);
       addr = newTemp(Ity_I64);
@@ -14158,7 +14175,7 @@ DisResult disInstr_AMD64_WRK (
    case 0xB6: /* MOV imm,DH */
    case 0xB7: /* MOV imm,BH */
       if (haveF2orF3(pfx)) goto decode_failure;
-      d64 = getUChar(delta); 
+      d64 = getUChar(guest_code, delta); 
       delta += 1;
       putIRegRexB(1, pfx, opc-0xB0, mkU8(d64));
       DIP("movb $%lld,%s\n", d64, nameIRegRexB(1,pfx,opc-0xB0));
@@ -14176,13 +14193,13 @@ DisResult disInstr_AMD64_WRK (
          allowed in the instruction stream. */
       if (haveF2orF3(pfx)) goto decode_failure;
       if (sz == 8) {
-         d64 = getDisp64(delta);
+         d64 = getDisp64(guest_code, delta);
          delta += 8;
          putIRegRexB(8, pfx, opc-0xB8, mkU64(d64));
          DIP("movabsq $%lld,%s\n", (Long)d64, 
                                    nameIRegRexB(8,pfx,opc-0xB8));
       } else {
-         d64 = getSDisp(imin(4,sz),delta);
+         d64 = getSDisp(guest_code, imin(4,sz),delta);
          delta += imin(4,sz);
          putIRegRexB(sz, pfx, opc-0xB8, 
                          mkU(szToITy(sz), d64 & mkSizeMask(sz)));
@@ -14200,10 +14217,10 @@ DisResult disInstr_AMD64_WRK (
 
    do_Mov_I_E:
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
+      modrm = getUChar(guest_code, delta);
       if (epartIsReg(modrm)) {
          delta++; /* mod/rm byte */
-         d64 = getSDisp(imin(4,sz),delta); 
+         d64 = getSDisp(guest_code, imin(4,sz),delta); 
          delta += imin(4,sz);
          putIRegE(sz, pfx, modrm, 
                       mkU(szToITy(sz), d64 & mkSizeMask(sz)));
@@ -14211,10 +14228,10 @@ DisResult disInstr_AMD64_WRK (
                                   (Long)d64, 
                                   nameIRegE(sz,pfx,modrm));
       } else {
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 
                            /*xtra*/imin(4,sz) );
          delta += alen;
-         d64 = getSDisp(imin(4,sz),delta);
+         d64 = getSDisp(guest_code, imin(4,sz),delta);
          delta += imin(4,sz);
          storeLE(mkexpr(addr), 
                  mkU(szToITy(sz), d64 & mkSizeMask(sz)));
@@ -14229,7 +14246,7 @@ DisResult disInstr_AMD64_WRK (
       if (haveREX(pfx) && 1==getRexW(pfx)) {
          vassert(sz == 8);
          /* movsx r/m32 to r64 */
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) {
             delta++;
             putIRegG(8, pfx, modrm, 
@@ -14240,7 +14257,7 @@ DisResult disInstr_AMD64_WRK (
                 nameIRegG(8, pfx, modrm));
             break;
          } else {
-            addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+            addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
             delta += alen;
             putIRegG(8, pfx, modrm, 
                              unop(Iop_32Sto64, 
@@ -14257,237 +14274,237 @@ DisResult disInstr_AMD64_WRK (
 
    case 0x04: /* ADD Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, False, Iop_Add8, True, delta, "add" );
+      delta = dis_op_imm_A(guest_code,  1, False, Iop_Add8, True, delta, "add" );
       break;
    case 0x05: /* ADD Iv, eAX */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A(sz, False, Iop_Add8, True, delta, "add" );
+      delta = dis_op_imm_A(guest_code, sz, False, Iop_Add8, True, delta, "add" );
       break;
 
    case 0x0C: /* OR Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, False, Iop_Or8, True, delta, "or" );
+      delta = dis_op_imm_A(guest_code,  1, False, Iop_Or8, True, delta, "or" );
       break;
    case 0x0D: /* OR Iv, eAX */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( sz, False, Iop_Or8, True, delta, "or" );
+      delta = dis_op_imm_A(guest_code,  sz, False, Iop_Or8, True, delta, "or" );
       break;
 
    case 0x14: /* ADC Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, True, Iop_Add8, True, delta, "adc" );
+      delta = dis_op_imm_A(guest_code,  1, True, Iop_Add8, True, delta, "adc" );
       break;
 //.. //--    case 0x15: /* ADC Iv, eAX */
-//.. //--       delta = dis_op_imm_A( sz, ADC, True, delta, "adc" );
+//.. //--       delta = dis_op_imm_A(guest_code,  sz, ADC, True, delta, "adc" );
 //.. //--       break;
 
    case 0x1C: /* SBB Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, True, Iop_Sub8, True, delta, "sbb" );
+      delta = dis_op_imm_A(guest_code,  1, True, Iop_Sub8, True, delta, "sbb" );
       break;
 //.. //--    case 0x1D: /* SBB Iv, eAX */
-//.. //--       delta = dis_op_imm_A( sz, SBB, True, delta, "sbb" );
+//.. //--       delta = dis_op_imm_A(guest_code,  sz, SBB, True, delta, "sbb" );
 //.. //--       break;
 //.. //-- 
    case 0x24: /* AND Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, False, Iop_And8, True, delta, "and" );
+      delta = dis_op_imm_A(guest_code,  1, False, Iop_And8, True, delta, "and" );
       break;
    case 0x25: /* AND Iv, eAX */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( sz, False, Iop_And8, True, delta, "and" );
+      delta = dis_op_imm_A(guest_code,  sz, False, Iop_And8, True, delta, "and" );
       break;
 
    case 0x2C: /* SUB Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A(1, False, Iop_Sub8, True, delta, "sub" );
+      delta = dis_op_imm_A(guest_code, 1, False, Iop_Sub8, True, delta, "sub" );
       break;
    case 0x2D: /* SUB Iv, eAX */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( sz, False, Iop_Sub8, True, delta, "sub" );
+      delta = dis_op_imm_A(guest_code,  sz, False, Iop_Sub8, True, delta, "sub" );
       break;
 
    case 0x34: /* XOR Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, False, Iop_Xor8, True, delta, "xor" );
+      delta = dis_op_imm_A(guest_code,  1, False, Iop_Xor8, True, delta, "xor" );
       break;
    case 0x35: /* XOR Iv, eAX */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( sz, False, Iop_Xor8, True, delta, "xor" );
+      delta = dis_op_imm_A(guest_code,  sz, False, Iop_Xor8, True, delta, "xor" );
       break;
 
    case 0x3C: /* CMP Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, False, Iop_Sub8, False, delta, "cmp" );
+      delta = dis_op_imm_A(guest_code,  1, False, Iop_Sub8, False, delta, "cmp" );
       break;
    case 0x3D: /* CMP Iv, eAX */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( sz, False, Iop_Sub8, False, delta, "cmp" );
+      delta = dis_op_imm_A(guest_code,  sz, False, Iop_Sub8, False, delta, "cmp" );
       break;
 
    case 0xA8: /* TEST Ib, AL */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( 1, False, Iop_And8, False, delta, "test" );
+      delta = dis_op_imm_A(guest_code,  1, False, Iop_And8, False, delta, "test" );
       break;
    case 0xA9: /* TEST Iv, eAX */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op_imm_A( sz, False, Iop_And8, False, delta, "test" );
+      delta = dis_op_imm_A(guest_code,  sz, False, Iop_And8, False, delta, "test" );
       break;
 
    /* ------------------------ opl Ev, Gv ----------------- */
  
    case 0x02: /* ADD Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Add8, True, 1, delta, "add" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Add8, True, 1, delta, "add" );
       break;
    case 0x03: /* ADD Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Add8, True, sz, delta, "add" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Add8, True, sz, delta, "add" );
       break;
 
    case 0x0A: /* OR Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Or8, True, 1, delta, "or" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Or8, True, 1, delta, "or" );
       break;
    case 0x0B: /* OR Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Or8, True, sz, delta, "or" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Or8, True, sz, delta, "or" );
       break;
 
    case 0x12: /* ADC Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, True, Iop_Add8, True, 1, delta, "adc" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, True, Iop_Add8, True, 1, delta, "adc" );
       break;
    case 0x13: /* ADC Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, True, Iop_Add8, True, sz, delta, "adc" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, True, Iop_Add8, True, sz, delta, "adc" );
       break;
 
 //.. //--    case 0x1A: /* SBB Eb,Gb */
-//.. //--       delta = dis_op2_E_G ( sorb, True, SBB, True, 1, delta, "sbb" );
+//.. //--       delta = dis_op2_E_G ( guest_code, sorb, True, SBB, True, 1, delta, "sbb" );
 //.. //--       break;
    case 0x1B: /* SBB Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, True, Iop_Sub8, True, sz, delta, "sbb" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, True, Iop_Sub8, True, sz, delta, "sbb" );
       break;
 
    case 0x22: /* AND Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_And8, True, 1, delta, "and" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_And8, True, 1, delta, "and" );
       break;
    case 0x23: /* AND Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_And8, True, sz, delta, "and" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_And8, True, sz, delta, "and" );
       break;
 
    case 0x2A: /* SUB Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Sub8, True, 1, delta, "sub" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Sub8, True, 1, delta, "sub" );
       break;
    case 0x2B: /* SUB Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Sub8, True, sz, delta, "sub" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Sub8, True, sz, delta, "sub" );
       break;
 
    case 0x32: /* XOR Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Xor8, True, 1, delta, "xor" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Xor8, True, 1, delta, "xor" );
       break;
    case 0x33: /* XOR Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Xor8, True, sz, delta, "xor" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Xor8, True, sz, delta, "xor" );
       break;
 
    case 0x3A: /* CMP Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Sub8, False, 1, delta, "cmp" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Sub8, False, 1, delta, "cmp" );
       break;
    case 0x3B: /* CMP Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_Sub8, False, sz, delta, "cmp" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_Sub8, False, sz, delta, "cmp" );
       break;
 
    case 0x84: /* TEST Eb,Gb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_And8, False, 1, delta, "test" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_And8, False, 1, delta, "test" );
       break;
    case 0x85: /* TEST Ev,Gv */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_E_G ( vbi, pfx, False, Iop_And8, False, sz, delta, "test" );
+      delta = dis_op2_E_G ( guest_code, vbi, pfx, False, Iop_And8, False, sz, delta, "test" );
       break;
 
    /* ------------------------ opl Gv, Ev ----------------- */
 
    case 0x00: /* ADD Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Add8, True, 1, delta, "add" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Add8, True, 1, delta, "add" );
       break;
    case 0x01: /* ADD Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Add8, True, sz, delta, "add" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Add8, True, sz, delta, "add" );
       break;
 
    case 0x08: /* OR Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Or8, True, 1, delta, "or" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Or8, True, 1, delta, "or" );
       break;
    case 0x09: /* OR Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Or8, True, sz, delta, "or" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Or8, True, sz, delta, "or" );
       break;
 
    case 0x10: /* ADC Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, True, Iop_Add8, True, 1, delta, "adc" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, True, Iop_Add8, True, 1, delta, "adc" );
       break;
    case 0x11: /* ADC Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, True, Iop_Add8, True, sz, delta, "adc" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, True, Iop_Add8, True, sz, delta, "adc" );
       break;
 
    case 0x18: /* SBB Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, True, Iop_Sub8, True, 1, delta, "sbb" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, True, Iop_Sub8, True, 1, delta, "sbb" );
       break;
    case 0x19: /* SBB Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, True, Iop_Sub8, True, sz, delta, "sbb" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, True, Iop_Sub8, True, sz, delta, "sbb" );
       break;
 
    case 0x20: /* AND Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_And8, True, 1, delta, "and" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_And8, True, 1, delta, "and" );
       break;
    case 0x21: /* AND Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_And8, True, sz, delta, "and" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_And8, True, sz, delta, "and" );
       break;
 
    case 0x28: /* SUB Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Sub8, True, 1, delta, "sub" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Sub8, True, 1, delta, "sub" );
       break;
    case 0x29: /* SUB Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Sub8, True, sz, delta, "sub" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Sub8, True, sz, delta, "sub" );
       break;
 
    case 0x30: /* XOR Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Xor8, True, 1, delta, "xor" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Xor8, True, 1, delta, "xor" );
       break;
    case 0x31: /* XOR Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Xor8, True, sz, delta, "xor" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Xor8, True, sz, delta, "xor" );
       break;
 
    case 0x38: /* CMP Gb,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Sub8, False, 1, delta, "cmp" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Sub8, False, 1, delta, "cmp" );
       break;
    case 0x39: /* CMP Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_op2_G_E ( vbi, pfx, False, Iop_Sub8, False, sz, delta, "cmp" );
+      delta = dis_op2_G_E ( guest_code, vbi, pfx, False, Iop_Sub8, False, sz, delta, "cmp" );
       break;
 
    /* ------------------------ POP ------------------------ */
@@ -14602,7 +14619,7 @@ DisResult disInstr_AMD64_WRK (
       if (sz == 4) sz = 8;
       if (sz != 8) goto decode_failure; // until we know a sz==2 test case exists
 
-      rm = getUChar(delta);
+      rm = getUChar(guest_code, delta);
 
       /* make sure this instruction is correct POP */
       if (epartIsReg(rm) || gregLO3ofRM(rm) != 0)
@@ -14622,7 +14639,7 @@ DisResult disInstr_AMD64_WRK (
          after it increments the RSP register.  */
       putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t1), mkU64(sz)) );
 
-      addr = disAMode ( &len, vbi, pfx, delta, dis_buf, 0 );
+      addr = disAMode ( guest_code, &len, vbi, pfx, delta, dis_buf, 0 );
       storeLE( mkexpr(addr), mkexpr(t3) );
 
       DIP("popl %s\n", dis_buf);
@@ -14669,14 +14686,14 @@ DisResult disInstr_AMD64_WRK (
       if (haveF2orF3(pfx)) goto decode_failure;
       /* Note, sz==4 is not possible in 64-bit mode.  Hence ... */
       if (sz == 4) sz = 8;
-      d64 = getSDisp(imin(4,sz),delta); 
+      d64 = getSDisp(guest_code, imin(4,sz),delta); 
       delta += imin(4,sz);
       goto do_push_I;
    case 0x6A: /* PUSH Ib, sign-extended to sz */
       if (haveF2orF3(pfx)) goto decode_failure;
       /* Note, sz==4 is not possible in 64-bit mode.  Hence ... */
       if (sz == 4) sz = 8;
-      d64 = getSDisp8(delta); delta += 1;
+      d64 = getSDisp8(guest_code, delta); delta += 1;
       goto do_push_I;
    do_push_I:
       ty = szToITy(sz);
@@ -14855,9 +14872,9 @@ DisResult disInstr_AMD64_WRK (
 //..    case 0xF2: { 
 //..       Addr32 eip_orig = guest_eip_bbstart + delta - 1;
 //..       vassert(sorb == 0);
-//..       abyte = getUChar(delta); delta++;
+//..       abyte = getUChar(guest_code, delta); delta++;
 //.. 
-//..       if (abyte == 0x66) { sz = 2; abyte = getUChar(delta); delta++; }
+//..       if (abyte == 0x66) { sz = 2; abyte = getUChar(guest_code, delta); delta++; }
 //..       whatNext = DisResult::Dis_StopHere;         
 //.. 
 //..       switch (abyte) {
@@ -15002,7 +15019,7 @@ DisResult disInstr_AMD64_WRK (
       /* Fall through ... */
    case 0x87: /* XCHG Gv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
+      modrm = getUChar(guest_code, delta);
       ty = szToITy(sz);
       t1 = newTemp(ty); t2 = newTemp(ty);
       if (epartIsReg(modrm)) {
@@ -15016,7 +15033,7 @@ DisResult disInstr_AMD64_WRK (
                             nameIRegE(sz, pfx, modrm));
       } else {
          *expect_CAS = True;
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          assign( t1, loadLE(ty, mkexpr(addr)) );
          assign( t2, getIRegG(sz, pfx, modrm) );
          casLE( mkexpr(addr),
@@ -15086,14 +15103,14 @@ DisResult disInstr_AMD64_WRK (
    case 0xE4: /* IN imm8, AL */
       sz = 1; 
       t1 = newTemp(Ity_I64);
-      abyte = getUChar(delta); delta++;
+      abyte = getUChar(guest_code, delta); delta++;
       assign(t1, mkU64( abyte & 0xFF ));
       DIP("in%c $%d,%s\n", nameISize(sz), (Int)abyte, nameIRegRAX(sz));
       goto do_IN;
    case 0xE5: /* IN imm8, eAX */
       if (!(sz == 2 || sz == 4)) goto decode_failure;
       t1 = newTemp(Ity_I64);
-      abyte = getUChar(delta); delta++;
+      abyte = getUChar(guest_code, delta); delta++;
       assign(t1, mkU64( abyte & 0xFF ));
       DIP("in%c $%d,%s\n", nameISize(sz), (Int)abyte, nameIRegRAX(sz));
       goto do_IN;
@@ -15135,14 +15152,14 @@ DisResult disInstr_AMD64_WRK (
    case 0xE6: /* OUT AL, imm8 */
       sz = 1;
       t1 = newTemp(Ity_I64);
-      abyte = getUChar(delta); delta++;
+      abyte = getUChar(guest_code, delta); delta++;
       assign( t1, mkU64( abyte & 0xFF ) );
       DIP("out%c %s,$%d\n", nameISize(sz), nameIRegRAX(sz), (Int)abyte);
       goto do_OUT;
    case 0xE7: /* OUT eAX, imm8 */
       if (!(sz == 2 || sz == 4)) goto decode_failure;
       t1 = newTemp(Ity_I64);
-      abyte = getUChar(delta); delta++;
+      abyte = getUChar(guest_code, delta); delta++;
       assign( t1, mkU64( abyte & 0xFF ) );
       DIP("out%c %s,$%d\n", nameISize(sz), nameIRegRAX(sz), (Int)abyte);
       goto do_OUT;
@@ -15183,30 +15200,30 @@ DisResult disInstr_AMD64_WRK (
 
    case 0x80: /* Grp1 Ib,Eb */
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       sz    = 1;
       d_sz  = 1;
-      d64   = getSDisp8(delta + am_sz);
-      delta = dis_Grp1 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, d64 );
+      d64   = getSDisp8(guest_code, delta + am_sz);
+      delta = dis_Grp1 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, d64 );
       break;
 
    case 0x81: /* Grp1 Iv,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = imin(sz,4);
-      d64   = getSDisp(d_sz, delta + am_sz);
-      delta = dis_Grp1 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, d64 );
+      d64   = getSDisp(guest_code, d_sz, delta + am_sz);
+      delta = dis_Grp1 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, d64 );
       break;
 
    case 0x83: /* Grp1 Ib,Ev */
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = 1;
-      d64   = getSDisp8(delta + am_sz);
-      delta = dis_Grp1 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, d64 );
+      d64   = getSDisp8(guest_code, delta + am_sz);
+      delta = dis_Grp1 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, d64 );
       break;
 
    /* ------------------------ (Grp2 extensions) ---------- */
@@ -15214,12 +15231,12 @@ DisResult disInstr_AMD64_WRK (
    case 0xC0: { /* Grp2 Ib,Eb */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = 1;
-      d64   = getUChar(delta + am_sz);
+      d64   = getUChar(guest_code, delta + am_sz);
       sz    = 1;
-      delta = dis_Grp2 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
+      delta = dis_Grp2 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
                          mkU8(d64 & 0xFF), NULL, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
@@ -15227,11 +15244,11 @@ DisResult disInstr_AMD64_WRK (
    case 0xC1: { /* Grp2 Ib,Ev */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = 1;
-      d64   = getUChar(delta + am_sz);
-      delta = dis_Grp2 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
+      d64   = getUChar(guest_code, delta + am_sz);
+      delta = dis_Grp2 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
                          mkU8(d64 & 0xFF), NULL, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
@@ -15239,12 +15256,12 @@ DisResult disInstr_AMD64_WRK (
    case 0xD0: { /* Grp2 1,Eb */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = 0;
       d64   = 1;
       sz    = 1;
-      delta = dis_Grp2 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
+      delta = dis_Grp2 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
                          mkU8(d64), NULL, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
@@ -15252,11 +15269,11 @@ DisResult disInstr_AMD64_WRK (
    case 0xD1: { /* Grp2 1,Ev */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = 0;
       d64   = 1;
-      delta = dis_Grp2 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
+      delta = dis_Grp2 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
                          mkU8(d64), NULL, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
@@ -15264,11 +15281,11 @@ DisResult disInstr_AMD64_WRK (
    case 0xD2: { /* Grp2 CL,Eb */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = 0;
       sz    = 1;
-      delta = dis_Grp2 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
+      delta = dis_Grp2 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
                          getIRegCL(), "%cl", &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
@@ -15276,10 +15293,10 @@ DisResult disInstr_AMD64_WRK (
    case 0xD3: { /* Grp2 CL,Ev */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      modrm = getUChar(delta);
-      am_sz = lengthAMode(pfx,delta);
+      modrm = getUChar(guest_code, delta);
+      am_sz = lengthAMode(guest_code, pfx,delta);
       d_sz  = 0;
-      delta = dis_Grp2 ( vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
+      delta = dis_Grp2 ( guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
                          getIRegCL(), "%cl", &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
@@ -15290,14 +15307,14 @@ DisResult disInstr_AMD64_WRK (
    case 0xF6: { /* Grp3 Eb */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_Grp3 ( vbi, pfx, 1, delta, &decode_OK );
+      delta = dis_Grp3 ( guest_code, vbi, pfx, 1, delta, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
    case 0xF7: { /* Grp3 Ev */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_Grp3 ( vbi, pfx, sz, delta, &decode_OK );
+      delta = dis_Grp3 ( guest_code, vbi, pfx, sz, delta, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15307,7 +15324,7 @@ DisResult disInstr_AMD64_WRK (
    case 0xFE: { /* Grp4 Eb */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_Grp4 ( vbi, pfx, delta, &decode_OK );
+      delta = dis_Grp4 ( guest_code, vbi, pfx, delta, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15317,7 +15334,7 @@ DisResult disInstr_AMD64_WRK (
    case 0xFF: { /* Grp5 Ev */
       Bool decode_OK = True;
       if (haveF2orF3(pfx)) goto decode_failure;
-      delta = dis_Grp5 ( vbi, pfx, sz, delta, &dres, &decode_OK );
+      delta = dis_Grp5 ( guest_code, vbi, pfx, sz, delta, &dres, &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15325,7 +15342,7 @@ DisResult disInstr_AMD64_WRK (
    /* ------------------------ Escapes to 2-byte opcodes -- */
 
    case 0x0F: {
-      opc = getUChar(delta); delta++;
+      opc = getUChar(guest_code, delta); delta++;
       switch (opc) {
 
       /* =-=-=-=-=-=-=-=-=- Grp8 =-=-=-=-=-=-=-=-=-=-=-= */
@@ -15333,10 +15350,10 @@ DisResult disInstr_AMD64_WRK (
       case 0xBA: { /* Grp8 Ib,Ev */
          Bool decode_OK = False;
          if (haveF2orF3(pfx)) goto decode_failure;
-         modrm = getUChar(delta);
-         am_sz = lengthAMode(pfx,delta);
-         d64   = getSDisp8(delta + am_sz);
-         delta = dis_Grp8_Imm ( vbi, pfx, delta, modrm, am_sz, sz, d64,
+         modrm = getUChar(guest_code, delta);
+         am_sz = lengthAMode(guest_code, pfx,delta);
+         d64   = getSDisp8(guest_code, delta + am_sz);
+         delta = dis_Grp8_Imm ( guest_code, vbi, pfx, delta, modrm, am_sz, sz, d64,
                                 &decode_OK );
          if (!decode_OK)
             goto decode_failure;
@@ -15347,11 +15364,11 @@ DisResult disInstr_AMD64_WRK (
 
       case 0xBC: /* BSF Gv,Ev */
          if (haveF2orF3(pfx)) goto decode_failure;
-         delta = dis_bs_E_G ( vbi, pfx, sz, delta, True );
+         delta = dis_bs_E_G ( guest_code, vbi, pfx, sz, delta, True );
          break;
       case 0xBD: /* BSR Gv,Ev */
          if (haveF2orF3(pfx)) goto decode_failure;
-         delta = dis_bs_E_G ( vbi, pfx, sz, delta, False );
+         delta = dis_bs_E_G ( guest_code, vbi, pfx, sz, delta, False );
          break;
 
       /* =-=-=-=-=-=-=-=-=- BSWAP -=-=-=-=-=-=-=-=-=-=-= */
@@ -15449,22 +15466,22 @@ DisResult disInstr_AMD64_WRK (
       case 0xA3: /* BT Gv,Ev */
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 8 && sz != 4 && sz != 2) goto decode_failure;
-         delta = dis_bt_G_E ( vbi, pfx, sz, delta, BtOpNone );
+         delta = dis_bt_G_E ( guest_code, vbi, pfx, sz, delta, BtOpNone );
          break;
       case 0xB3: /* BTR Gv,Ev */
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 8 && sz != 4 && sz != 2) goto decode_failure;
-         delta = dis_bt_G_E ( vbi, pfx, sz, delta, BtOpReset );
+         delta = dis_bt_G_E ( guest_code, vbi, pfx, sz, delta, BtOpReset );
          break;
       case 0xAB: /* BTS Gv,Ev */
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 8 && sz != 4 && sz != 2) goto decode_failure;
-         delta = dis_bt_G_E ( vbi, pfx, sz, delta, BtOpSet );
+         delta = dis_bt_G_E ( guest_code, vbi, pfx, sz, delta, BtOpSet );
          break;
       case 0xBB: /* BTC Gv,Ev */
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 8 && sz != 4 && sz != 2) goto decode_failure;
-         delta = dis_bt_G_E ( vbi, pfx, sz, delta, BtOpComp );
+         delta = dis_bt_G_E ( guest_code, vbi, pfx, sz, delta, BtOpComp );
          break;
 
       /* =-=-=-=-=-=-=-=-=- CMOV =-=-=-=-=-=-=-=-=-=-=-= */
@@ -15486,7 +15503,7 @@ DisResult disInstr_AMD64_WRK (
       case 0x4E: /* CMOVLEb/CMOVNGb (cmov less or equal) */
       case 0x4F: /* CMOVGb/CMOVNLEb (cmov greater) */
          if (haveF2orF3(pfx)) goto decode_failure;
-         delta = dis_cmov_E_G(vbi, pfx, sz, (AMD64Condcode)(opc - 0x40), delta);
+         delta = dis_cmov_E_G(guest_code, vbi, pfx, sz, (AMD64Condcode)(opc - 0x40), delta);
          break;
 
       /* =-=-=-=-=-=-=-=-=- CMPXCHG -=-=-=-=-=-=-=-=-=-= */
@@ -15494,7 +15511,7 @@ DisResult disInstr_AMD64_WRK (
       case 0xB0: { /* CMPXCHG Gb,Eb */
          Bool ok = True;
          if (haveF2orF3(pfx)) goto decode_failure;
-         delta = dis_cmpxchg_G_E ( &ok, vbi, pfx, 1, delta );
+         delta = dis_cmpxchg_G_E ( guest_code, &ok, vbi, pfx, 1, delta );
          if (!ok) goto decode_failure;
          break;
       }
@@ -15502,7 +15519,7 @@ DisResult disInstr_AMD64_WRK (
          Bool ok = True;
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 2 && sz != 4 && sz != 8) goto decode_failure;
-         delta = dis_cmpxchg_G_E ( &ok, vbi, pfx, sz, delta );
+         delta = dis_cmpxchg_G_E ( guest_code, &ok, vbi, pfx, sz, delta );
          if (!ok) goto decode_failure;
          break;
       }
@@ -15536,10 +15553,10 @@ DisResult disInstr_AMD64_WRK (
          if (sz != 4 && sz != 8) goto decode_failure;
          if (sz == 8 && !(archinfo->hwcaps & VEX_HWCAPS_AMD64_CX16))
             goto decode_failure;
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) goto decode_failure;
          if (gregLO3ofRM(modrm) != 1) goto decode_failure;
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
 
          /* cmpxchg16b requires an alignment check. */
@@ -15694,37 +15711,37 @@ DisResult disInstr_AMD64_WRK (
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 2 && sz != 4 && sz != 8)
             goto decode_failure;
-         delta = dis_movx_E_G ( vbi, pfx, delta, 1, sz, False );
+         delta = dis_movx_E_G ( guest_code, vbi, pfx, delta, 1, sz, False );
          break;
       case 0xB7: /* MOVZXw Ew,Gv */
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 4 && sz != 8)
             goto decode_failure;
-         delta = dis_movx_E_G ( vbi, pfx, delta, 2, sz, False );
+         delta = dis_movx_E_G ( guest_code, vbi, pfx, delta, 2, sz, False );
          break;
 
       case 0xBE: /* MOVSXb Eb,Gv */
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 2 && sz != 4 && sz != 8)
             goto decode_failure;
-         delta = dis_movx_E_G ( vbi, pfx, delta, 1, sz, True );
+         delta = dis_movx_E_G ( guest_code, vbi, pfx, delta, 1, sz, True );
          break;
       case 0xBF: /* MOVSXw Ew,Gv */
          if (haveF2orF3(pfx)) goto decode_failure;
          if (sz != 4 && sz != 8)
             goto decode_failure;
-         delta = dis_movx_E_G ( vbi, pfx, delta, 2, sz, True );
+         delta = dis_movx_E_G ( guest_code, vbi, pfx, delta, 2, sz, True );
          break;
 
 //.. //--       /* =-=-=-=-=-=-=-=-=-=-= MOVNTI -=-=-=-=-=-=-=-=-= */
 //.. //-- 
 //.. //--       case 0xC3: /* MOVNTI Gv,Ev */
 //.. //--          vg_assert(sz == 4);
-//.. //--          modrm = getUChar(eip);
+//.. //--          modrm = getUChar(guest_code, eip);
 //.. //--          vg_assert(!epartIsReg(modrm));
 //.. //--          t1 = newTemp(cb);
 //.. //--          uInstr2(cb, GET, 4, ArchReg, gregOfRM(modrm), TempReg, t1);
-//.. //--          pair = disAMode ( cb, sorb, eip, dis_buf );
+//.. //--          pair = disAMode ( guest_code, cb, sorb, eip, dis_buf );
 //.. //--          t2 = LOW24(pair);
 //.. //--          eip += HI8(pair);
 //.. //--          uInstr2(cb, STORE, 4, TempReg, t1, TempReg, t2);
@@ -15735,16 +15752,16 @@ DisResult disInstr_AMD64_WRK (
 
       case 0xAF: /* IMUL Ev, Gv */
          if (haveF2orF3(pfx)) goto decode_failure;
-         delta = dis_mul_E_G ( vbi, pfx, sz, delta );
+         delta = dis_mul_E_G ( guest_code, vbi, pfx, sz, delta );
          break;
 
       /* =-=-=-=-=-=-=-=-=- NOPs =-=-=-=-=-=-=-=-=-=-=-= */
 
       case 0x1F:
          if (haveF2orF3(pfx)) goto decode_failure;
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) goto decode_failure;
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
          DIP("nop%c %s\n", nameISize(sz), dis_buf);
          break;
@@ -15767,7 +15784,7 @@ DisResult disInstr_AMD64_WRK (
       case 0x8E: /* JLEb/JNGb (jump less or equal) */
       case 0x8F: /* JGb/JNLEb (jump greater) */
          if (haveF2orF3(pfx)) goto decode_failure;
-         d64 = (guest_RIP_bbstart+delta+4) + getSDisp32(delta); 
+         d64 = (guest_RIP_bbstart+delta+4) + getSDisp32(guest_code, delta); 
          delta += 4;
          jcc_01( (AMD64Condcode)(opc - 0x80), 
                  guest_RIP_bbstart+delta, 
@@ -15780,12 +15797,12 @@ DisResult disInstr_AMD64_WRK (
       case 0x0D: /* 0F 0D /0 -- prefetch mem8 */
                  /* 0F 0D /1 -- prefetchw mem8 */
          if (have66orF2orF3(pfx)) goto decode_failure;
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) goto decode_failure;
          if (gregLO3ofRM(modrm) != 0 && gregLO3ofRM(modrm) != 1)
             goto decode_failure;
 
-         addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+         addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
 
          switch (gregLO3ofRM(modrm)) {
@@ -15847,14 +15864,14 @@ DisResult disInstr_AMD64_WRK (
          if (haveF2orF3(pfx)) goto decode_failure;
          t1 = newTemp(Ity_I8);
          assign( t1, unop(Iop_1Uto8,mk_amd64g_calculate_condition(AMD64Condcode(opc-0x90))) );
-         modrm = getUChar(delta);
+         modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) {
             delta++;
             putIRegE(1, pfx, modrm, mkexpr(t1));
             DIP("set%s %s\n", name_AMD64Condcode(AMD64Condcode(opc-0x90)), 
                               nameIRegE(1,pfx,modrm));
          } else {
-            addr = disAMode ( &alen, vbi, pfx, delta, dis_buf, 0 );
+            addr = disAMode ( guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
             delta += alen;
             storeLE( mkexpr(addr), mkexpr(t1) );
             DIP("set%s %s\n", name_AMD64Condcode(AMD64Condcode(opc-0x90)), dis_buf);
@@ -15864,34 +15881,34 @@ DisResult disInstr_AMD64_WRK (
       /* =-=-=-=-=-=-=-=-=- SHLD/SHRD -=-=-=-=-=-=-=-=-= */
 
       case 0xA4: /* SHLDv imm8,Gv,Ev */
-         modrm = getUChar(delta);
-         d64   = delta + lengthAMode(pfx, delta);
-         vex_sprintf(dis_buf, "$%d", (Int)getUChar(d64));
-         delta = dis_SHLRD_Gv_Ev ( 
+         modrm = getUChar(guest_code, delta);
+         d64   = delta + lengthAMode(guest_code, pfx, delta);
+         vex_sprintf(dis_buf, "$%d", (Int)getUChar(guest_code, d64));
+         delta = dis_SHLRD_Gv_Ev ( guest_code, 
                     vbi, pfx, delta, modrm, sz, 
-                    mkU8(getUChar(d64)), True, /* literal */
+                    mkU8(getUChar(guest_code, d64)), True, /* literal */
                     dis_buf, True /* left */ );
          break;
       case 0xA5: /* SHLDv %cl,Gv,Ev */
-         modrm = getUChar(delta);
-         delta = dis_SHLRD_Gv_Ev ( 
+         modrm = getUChar(guest_code, delta);
+         delta = dis_SHLRD_Gv_Ev ( guest_code, 
                     vbi, pfx, delta, modrm, sz,
                     getIRegCL(), False, /* not literal */
                     "%cl", True /* left */ );
          break;
 
       case 0xAC: /* SHRDv imm8,Gv,Ev */
-         modrm = getUChar(delta);
-         d64   = delta + lengthAMode(pfx, delta);
-         vex_sprintf(dis_buf, "$%d", (Int)getUChar(d64));
-         delta = dis_SHLRD_Gv_Ev ( 
+         modrm = getUChar(guest_code, delta);
+         d64   = delta + lengthAMode(guest_code, pfx, delta);
+         vex_sprintf(dis_buf, "$%d", (Int)getUChar(guest_code, d64));
+         delta = dis_SHLRD_Gv_Ev ( guest_code, 
                     vbi, pfx, delta, modrm, sz, 
-                    mkU8(getUChar(d64)), True, /* literal */
+                    mkU8(getUChar(guest_code, d64)), True, /* literal */
                     dis_buf, False /* right */ );
          break;
       case 0xAD: /* SHRDv %cl,Gv,Ev */
-         modrm = getUChar(delta);
-         delta = dis_SHLRD_Gv_Ev ( 
+         modrm = getUChar(guest_code, delta);
+         delta = dis_SHLRD_Gv_Ev ( guest_code, 
                     vbi, pfx, delta, modrm, sz, 
                     getIRegCL(), False, /* not literal */
                     "%cl", False /* right */);
@@ -15914,14 +15931,14 @@ DisResult disInstr_AMD64_WRK (
 
       case 0xC0: { /* XADD Gb,Eb */ 
          Bool decode_OK = False;
-         delta = dis_xadd_G_E ( &decode_OK, vbi, pfx, 1, delta );
+         delta = dis_xadd_G_E ( guest_code, &decode_OK, vbi, pfx, 1, delta );
          if (!decode_OK)
             goto decode_failure;
          break;
       }
       case 0xC1: { /* XADD Gv,Ev */ 
          Bool decode_OK = False;
-         delta = dis_xadd_G_E ( &decode_OK, vbi, pfx, sz, delta );
+         delta = dis_xadd_G_E ( guest_code, &decode_OK, vbi, pfx, sz, delta );
          if (!decode_OK)
             goto decode_failure;
          break;
@@ -16009,7 +16026,7 @@ DisResult disInstr_AMD64_WRK (
          if (have66orF2orF3(pfx))
             goto decode_failure;
 
-         delta = dis_MMX ( &decode_OK, vbi, pfx, sz, delta-1 );
+         delta = dis_MMX ( guest_code, &decode_OK, vbi, pfx, sz, delta-1 );
          if (!decode_OK) {
             delta = delta0;
             goto decode_failure;
@@ -16040,12 +16057,12 @@ DisResult disInstr_AMD64_WRK (
    /* All decode failures end up here. */
    vex_printf("vex amd64->IR: unhandled instruction bytes: "
               "0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",
-              (Int)getUChar(delta_start+0),
-              (Int)getUChar(delta_start+1),
-              (Int)getUChar(delta_start+2),
-              (Int)getUChar(delta_start+3),
-              (Int)getUChar(delta_start+4),
-              (Int)getUChar(delta_start+5) );
+              (Int)getUChar(guest_code, delta_start+0),
+              (Int)getUChar(guest_code, delta_start+1),
+              (Int)getUChar(guest_code, delta_start+2),
+              (Int)getUChar(guest_code, delta_start+3),
+              (Int)getUChar(guest_code, delta_start+4),
+              (Int)getUChar(guest_code, delta_start+5) );
 
    /* Tell the dispatcher that this insn cannot be decoded, and so has
       not been executed, and (is currently) the next to be executed.
@@ -16088,7 +16105,7 @@ DisResult disInstr_AMD64 ( IRSB*        irsb_IN,
                            Bool         put_IP,
                            Bool         (*resteerOkFn) ( void*, Addr64 ),
                            void*        callback_opaque,
-                           UChar*       guest_code_IN,
+                           GuestMemoryFetcher &guest_code_IN,
                            Long         delta,
                            Addr64       guest_IP,
                            VexArch      guest_arch,
@@ -16102,7 +16119,6 @@ DisResult disInstr_AMD64 ( IRSB*        irsb_IN,
 
    /* Set globals (see top of this file) */
    vassert(guest_arch == VexArchAMD64);
-   guest_code           = guest_code_IN;
    irsb                 = irsb_IN;
    host_is_bigendian    = host_bigendian_IN;
    guest_RIP_curr_instr = guest_IP;
@@ -16114,7 +16130,7 @@ DisResult disInstr_AMD64 ( IRSB*        irsb_IN,
 
    x1 = irsb_IN->stmts_used;
    expect_CAS = False;
-   dres = disInstr_AMD64_WRK ( &expect_CAS, put_IP, resteerOkFn,
+   dres = disInstr_AMD64_WRK ( guest_code_IN, &expect_CAS, put_IP, resteerOkFn,
                                callback_opaque,
                                delta, archinfo, abiinfo );
    x2 = irsb_IN->stmts_used;
@@ -16146,7 +16162,7 @@ DisResult disInstr_AMD64 ( IRSB*        irsb_IN,
       /* inconsistency detected.  re-disassemble the instruction so as
          to generate a useful error message; then assert. */
       vex_traceflags |= VEX_TRACE_FE;
-      dres = disInstr_AMD64_WRK ( &expect_CAS, put_IP, resteerOkFn,
+      dres = disInstr_AMD64_WRK ( guest_code_IN, &expect_CAS, put_IP, resteerOkFn,
                                   callback_opaque,
                                   delta, archinfo, abiinfo );
       for (i = x1; i < x2; i++) {

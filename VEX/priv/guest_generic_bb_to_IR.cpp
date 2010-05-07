@@ -52,10 +52,6 @@
 #include "guest_generic_bb_to_IR.h"
 
 
-/* Forwards .. */
-__attribute((regparm(2)))
-static UInt genericg_compute_adler32 ( HWord addr, HWord len );
-
 /* Small helpers */
 static Bool const_False ( void* callback_opaque, Addr64 a ) { 
    return False; 
@@ -95,7 +91,7 @@ static Bool const_False ( void* callback_opaque, Addr64 a ) {
 IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
                  /*IN*/ void*            callback_opaque,
                  /*IN*/ DisOneInstrFn    dis_instr_fn,
-                 /*IN*/ UChar*           guest_code,
+                 /*IN*/ GuestMemoryFetcher &guest_code,
                  /*IN*/ Addr64           guest_IP_bbstart,
                  /*IN*/ Bool             (*chase_into_ok)(void*,Addr64),
                  /*IN*/ Bool             host_bigendian,
@@ -338,115 +334,7 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
    vassert(0);
 
   done:
-   /* We're done.  The only thing that might need attending to is that
-      a self-checking preamble may need to be created. */
-   if (do_self_check) {
-
-      UInt     len2check, adler32;
-      IRTemp   tistart_tmp, tilen_tmp;
-      HWord    p_adler_helper;
-
-      vassert(vge->n_used == 1);
-      len2check = vge->len[0];
-      if (len2check == 0) 
-         len2check = 1;
-
-     adler32 = genericg_compute_adler32( (HWord)guest_code, len2check );
-
-     /* Set TISTART and TILEN.  These will describe to the despatcher
-        the area of guest code to invalidate should we exit with a
-        self-check failure. */
-
-     tistart_tmp = newIRTemp(irsb->tyenv, guest_word_type);
-     tilen_tmp   = newIRTemp(irsb->tyenv, guest_word_type);
-
-     irsb->stmts[selfcheck_idx+0]
-        = IRStmt_WrTmp(tistart_tmp, IRExpr_Const(guest_IP_bbstart_IRConst) );
-
-     irsb->stmts[selfcheck_idx+1]
-        = IRStmt_WrTmp(tilen_tmp,
-                       guest_word_type==Ity_I32 
-                          ? IRExpr_Const(IRConst_U32(len2check)) 
-                          : IRExpr_Const(IRConst_U64(len2check))
-          );
-
-     irsb->stmts[selfcheck_idx+2]
-        = IRStmt_Put( offB_TISTART, IRExpr_RdTmp(tistart_tmp) );
-
-     irsb->stmts[selfcheck_idx+3]
-        = IRStmt_Put( offB_TILEN, IRExpr_RdTmp(tilen_tmp) );
-
-     if (abiinfo_both->host_ppc_calls_use_fndescrs) {
-        HWord* fndescr = (HWord*)&genericg_compute_adler32;
-        p_adler_helper = fndescr[0];
-     } else {
-        p_adler_helper = (HWord)&genericg_compute_adler32;
-     }
-
-     irsb->stmts[selfcheck_idx+4]
-        = IRStmt_Exit( 
-             IRExpr_Binop( 
-                Iop_CmpNE32, 
-                mkIRExprCCall( 
-                   Ity_I32, 
-                   2/*regparms*/, 
-                   "genericg_compute_adler32",
-                   (void*)p_adler_helper,
-                   mkIRExprVec_2( 
-                      mkIRExpr_HWord( (HWord)guest_code ), 
-                      mkIRExpr_HWord( (HWord)len2check )
-                   )
-                ),
-                IRExpr_Const(IRConst_U32(adler32))
-             ),
-             Ijk_TInval,
-             guest_IP_bbstart_IRConst
-          );
-   }
-
    return irsb;
-}
-
-
-/*-------------------------------------------------------------
-  A support routine for doing self-checking translations. 
-  -------------------------------------------------------------*/
-
-/* CLEAN HELPER */
-/* CALLED FROM GENERATED CODE */
-
-/* Compute the Adler32 checksum of host memory at [addr
-   .. addr+len-1].  This presumably holds guest code.  Note this is
-   not a proper implementation of Adler32 in that it fails to mod the
-   counts with 65521 every 5552 bytes, but we really never expect to
-   get anywhere near that many bytes to deal with.  This fn is called
-   once for every use of a self-checking translation, so it needs to
-   be as fast as possible. */
-__attribute((regparm(2)))
-static UInt genericg_compute_adler32 ( HWord addr, HWord len )
-{
-   UInt   s1 = 1;
-   UInt   s2 = 0;
-   UChar* buf = (UChar*)addr;
-   while (len >= 4) {
-      s1 += buf[0];
-      s2 += s1;
-      s1 += buf[1];
-      s2 += s1;
-      s1 += buf[2];
-      s2 += s1;
-      s1 += buf[3];
-      s2 += s1;
-      buf += 4;
-      len -= 4;
-   }
-   while (len > 0) {
-      s1 += buf[0];
-      s2 += s1;
-      len--;
-      buf++;
-   }
-   return (s2 << 16) + s1;
 }
 
 

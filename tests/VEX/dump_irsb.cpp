@@ -44,10 +44,12 @@ main()
 	LibVEX_default_VexAbiInfo(&abiinfo_both);
 	abiinfo_both.guest_stack_redzone_size = 128;
 
+	TrivMemoryFetcher tmf((const UChar *)main,
+			      128);
 	irsb = bb_to_IR(&vge,
 			NULL, /* Context for chase_into_ok */
 			disInstr_AMD64,
-			(UChar *)main, /* guest code buffer */
+			tmf,
 			(Addr64)main, /* guest code original rip */
 			chase_into_ok,
 			False, /* host bigendian */

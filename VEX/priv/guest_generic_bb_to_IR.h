@@ -47,6 +47,7 @@
 #ifndef __VEX_GUEST_GENERIC_BB_TO_IR_H
 #define __VEX_GUEST_GENERIC_BB_TO_IR_H
 
+#include <assert.h>
 
 /* This defines stuff needed by the guest insn disassemblers.
    It's a bit circular; is imported by
@@ -55,6 +56,28 @@
    - vex_main.c
 */
 
+
+class GuestMemoryFetcher {
+public:
+	virtual UChar operator[](unsigned long ptr) const = 0;
+};
+
+class TrivMemoryFetcher : public GuestMemoryFetcher {
+	const UChar *content;
+	unsigned size;
+public:
+	TrivMemoryFetcher(const UChar *_content,
+			  unsigned _size) :
+		GuestMemoryFetcher(),
+		content(_content),
+		size(_size)
+	{
+	}
+	virtual UChar operator[](unsigned long ptr) const {
+		assert(ptr < size);
+		return content[ptr];
+	}
+};
 
 /* ---------------------------------------------------------------
    Result of disassembling an instruction
@@ -131,7 +154,7 @@ typedef
       /*IN*/  void*        callback_opaque,
 
       /* Where is the guest code? */
-      /*IN*/  UChar*       guest_code,
+      /*IN*/  GuestMemoryFetcher &guest_code,
 
       /* Where is the actual insn?  Note: it's at &guest_code[delta] */
       /*IN*/  Long         delta,
@@ -161,7 +184,7 @@ extern
 IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
                  /*IN*/ void*            closure_opaque,
                  /*IN*/ DisOneInstrFn    dis_instr_fn,
-                 /*IN*/ UChar*           guest_code,
+                 /*IN*/ GuestMemoryFetcher &guest_code,
                  /*IN*/ Addr64           guest_IP_bbstart,
                  /*IN*/ Bool             (*chase_into_ok)(void*,Addr64),
                  /*IN*/ Bool             host_bigendian,
