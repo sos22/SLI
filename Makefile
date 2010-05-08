@@ -6,6 +6,7 @@ TARGETS=
 CPPFLAGS=-DSLI
 CFLAGS=-Wall -g $(CPPFLAGS) $(PROFILE_FLAGS) -fno-strict-aliasing
 CXXFLAGS=$(CFLAGS)
+clean_files=$(TARGETS) .depends
 
 ifeq ($(OPTIMIZE),y)
 CFLAGS+=-O3 -DNDEBUG
@@ -29,7 +30,6 @@ include .depends
 
 clean:
 	find . -name '*.mk' -o -name '*.[od]' | xargs rm ; \
-	rm -f $(TARGETS) ; \
-	rm -f .depends
+	rm -f $(clean_files)
 
 real_all: $(TARGETS)
