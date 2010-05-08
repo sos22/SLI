@@ -155,7 +155,7 @@ AddressSpace *AddressSpace::initialAddressSpace(unsigned long initialBrk)
        work = LibVEX_Alloc_AddressSpace();
        memset(work, 0, sizeof(*work));
        work->brkptr = initialBrk;
-       work->brkMapPtr = initialBrk;
+       work->brkMapPtr = initialBrk + 4096;
        work->vamap = VAMap::empty();
        work->pmap = PMap::empty();
        return work;	
