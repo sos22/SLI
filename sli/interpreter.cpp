@@ -476,33 +476,21 @@ Thread::eval_expression(IRExpr *expr)
 		struct expression_result arg1 = eval_expression(expr->Iex.Binop.arg1);
 		struct expression_result arg2 = eval_expression(expr->Iex.Binop.arg2);
 		switch (expr->Iex.Binop.op) {
+		case Iop_Sub8:
+		case Iop_Sub16:
+		case Iop_Sub32:
 		case Iop_Sub64:
 			dest->lo.v = arg1.lo.v - arg2.lo.v;
 			break;
-		case Iop_Sub32:
-			dest->lo.v = (arg1.lo.v - arg2.lo.v) & 0xffffffff;
-			break;
-		case Iop_Sub8:
-			dest->lo.v = (arg1.lo.v - arg2.lo.v) & 0xff;
-			break;
-		case Iop_Sub16:
-			dest->lo.v = (arg1.lo.v - arg2.lo.v) & 0xffff;
-			break;
+		case Iop_Add8:
+		case Iop_Add16:
+		case Iop_Add32:
 		case Iop_Add64:
 			dest->lo.v = arg1.lo.v + arg2.lo.v;
 			break;
 		case Iop_Add64x2:
 			dest->lo.v = arg1.lo.v + arg2.lo.v;
 			dest->hi.v = arg1.hi.v + arg2.hi.v;
-			break;
-		case Iop_Add8:
-			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xff;
-			break;
-		case Iop_Add16:
-			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xffff;
-			break;
-		case Iop_Add32:
-			dest->lo.v = (arg1.lo.v + arg2.lo.v) & 0xffffffff;
 			break;
 		case Iop_And64:
 		case Iop_And32:
@@ -511,13 +499,12 @@ Thread::eval_expression(IRExpr *expr)
 			dest->lo.v = arg1.lo.v & arg2.lo.v;
 			break;
 		case Iop_Or8:
+		case Iop_Or16:
 		case Iop_Or32:
 		case Iop_Or64:
 			dest->lo.v = arg1.lo.v | arg2.lo.v;
 			break;
 		case Iop_Shl32:
-			dest->lo.v = (arg1.lo.v << arg2.lo.v) & 0xffffffff;
-			break;
 		case Iop_Shl64:
 			dest->lo.v = arg1.lo.v << arg2.lo.v;
 			break;
@@ -528,10 +515,13 @@ Thread::eval_expression(IRExpr *expr)
 		case Iop_Shr64:
 			dest->lo.v = arg1.lo.v >> arg2.lo.v;
 			break;
+		case Iop_XorV128:
 		case Iop_Xor64:
 		case Iop_Xor32:
+		case Iop_Xor16:
 		case Iop_Xor8:
 			dest->lo.v = arg1.lo.v ^ arg2.lo.v;
+			dest->hi.v = arg1.hi.v ^ arg2.hi.v;
 			break;
 		case Iop_CmpNE8:
 			dest->lo.v = arg1.lo.v != arg2.lo.v;
@@ -560,11 +550,8 @@ Thread::eval_expression(IRExpr *expr)
 			dest->lo.v = arg1.lo.v < arg2.lo.v;
 			break;
 		case Iop_Mul64:
-			dest->lo.v = arg1.lo.v * arg2.lo.v;
-			break;
-
 		case Iop_Mul32:
-			dest->lo.v = (arg1.lo.v * arg2.lo.v) & 0xffffffff;
+			dest->lo.v = arg1.lo.v * arg2.lo.v;
 			break;
 
 		case Iop_MullU32: {
@@ -681,11 +668,6 @@ Thread::eval_expression(IRExpr *expr)
 				dest->hi.v |= 0xffffffff00000000;
 			break;
 			
-		case Iop_XorV128:
-			dest->lo.v = arg1.lo.v ^ arg2.lo.v;
-			dest->hi.v = arg1.hi.v ^ arg2.hi.v;
-			break;
-
 		case Iop_I64toF64: {
 			switch (arg1.lo.v) {
 			case 0:
@@ -727,6 +709,48 @@ Thread::eval_expression(IRExpr *expr)
 
 		default:
 			ppIRExpr(expr);
+			throw NotImplementedException();
+		}
+
+		IRType t, ign1, ign2, ign3, ign4;
+		typeOfPrimop(expr->Iex.Binop.op, &t, &ign1, &ign2, &ign3, &ign4);
+		switch (t) {
+		case Ity_I1:
+			dest->lo.v &= 1;
+			dest->hi.v = 0;
+			break;
+		case Ity_I8:
+			dest->lo.v &= 0xff;
+			dest->hi.v = 0;
+			break;
+		case Ity_I16:
+			dest->lo.v &= 0xffff;
+			dest->hi.v = 0;
+			break;
+		case Ity_I32:
+			dest->lo.v &= 0xffffffff;
+			dest->hi.v = 0;
+			break;
+		case Ity_I64:
+			dest->hi.v = 0;
+			break;
+
+			/* Floating types follow the same rule as the
+			   integer ones (unused bits must be zero),
+			   but it's not safe to enforce it with a
+			   simple mask, so assert that it's already
+			   true. */
+		case Ity_F32:
+			assert(!(dest->lo.v & ~0xfffffffful));
+		case Ity_F64:
+			assert(dest->hi.v == 0);
+			break;
+
+		case Ity_I128:
+		case Ity_V128:
+			break;
+		default:
+			ppIRType(t);
 			throw NotImplementedException();
 		}
 		break;

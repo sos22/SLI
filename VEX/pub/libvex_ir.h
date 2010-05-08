@@ -1779,6 +1779,11 @@ extern IRTypeEnv* emptyIRTypeEnv  ( void );
 extern IRType typeOfIRConst ( IRConst* );
 extern IRType typeOfIRTemp  ( IRTypeEnv*, IRTemp );
 extern IRType typeOfIRExpr  ( IRTypeEnv*, IRExpr* );
+extern void typeOfPrimop ( IROp op,
+			   /*OUTs*/
+			   IRType* t_dst,
+			   IRType* t_arg1, IRType* t_arg2,
+			   IRType* t_arg3, IRType* t_arg4 );
 
 /* Sanity check a BB of IR */
 extern void sanityCheckIRSB ( IRSB*  bb, 
