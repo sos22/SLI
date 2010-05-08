@@ -6,6 +6,7 @@ defvars() {
 
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
+all_sources+=\$(SLIR_SOURCES)
 EOF
 }
 

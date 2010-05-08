@@ -2,14 +2,15 @@ subdirs="auxprogs priv pub"
 targets="libVEX.a"
 
 defvars() {
-	  echo 'libvex_objects=$(patsubst %.cpp,%.o,$(libvex_sources))'
-	  echo "libvex=$input_base"
+    echo 'libvex_objects=$(patsubst %.cpp,%.o,$(libvex_sources))'
+    echo "libvex=$input_base"
+    echo 'all_sources+=$(libvex_sources)'
 }
 
 rules() {
 	cat <<EOF
 \$(libvex_objects): CPPFLAGS+=-I${input_base}/pub
 libVEX.a: \$(libvex_objects)
-	  echo \$(libvex_objects) ; ar rcs \$@ \$^
+	  rm -f \$@ ; ar rcs \$@ \$^
 EOF
 }
