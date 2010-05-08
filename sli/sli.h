@@ -551,7 +551,21 @@ public:
 	static Thread *forkThread(unsigned newPid, const Thread &parent);
 };
 
-class AddressSpace {
+class PhysicalAddress {
+public:
+	unsigned long _pa;
+	bool operator<(PhysicalAddress b) const { return _pa < b._pa; }
+	bool operator>=(PhysicalAddress b) const { return _pa >= b._pa; }
+	PhysicalAddress operator+(unsigned long x) const
+	{
+		PhysicalAddress r;
+		r._pa = _pa + x;
+		return r;
+	}
+	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
+};
+
+class VAMap {
 public:
 	class Protection {
 	public:
@@ -577,45 +591,96 @@ public:
 	};
 	static const AllocFlags defaultFlags;
 
-	struct AddressSpaceEntry {
-		unsigned long start; /* inclusive */
-		unsigned long end; /* not inclusive */
+	class VAMapEntry {
+	public:
+		VAMapEntry *next;
+		unsigned long addr;
+		PhysicalAddress pa;
 		Protection prot;
-		AllocFlags flags;
-		void *content;
-		AddressSpaceEntry *next;
-
-		void splitAt(unsigned long addr);
-		static AddressSpaceEntry *alloc(unsigned long start,
-						unsigned long end,
-						Protection prot,
-						AllocFlags flags);
-	private:
-		/* DNI */
-		AddressSpaceEntry();
-		~AddressSpaceEntry();
+		AllocFlags alf;
+		static VAMapEntry *alloc(unsigned long va,
+					 PhysicalAddress pa,
+					 Protection prot,
+					 AllocFlags alf);
 	};
 
 private:
-	unsigned long brkptr;
-
-	AddressSpaceEntry *head;
-	AddressSpaceEntry *findAseForPointer(unsigned long ptr);
-	bool expandStack(const Thread &thr, unsigned long ptr);
-
-	/* DNI */
-	AddressSpace();
-	~AddressSpace();
+	VAMapEntry *head;
 public:
-	void allocateMemory(unsigned long start, unsigned long size, Protection prot,
-			    AllocFlags flags = defaultFlags);
+	bool translate(unsigned long va,
+		       PhysicalAddress *pa = NULL,
+		       Protection *prot = NULL,
+		       AllocFlags *alf = NULL);
+	bool findNextMapping(unsigned long from,
+			     unsigned long *va = NULL,
+			     PhysicalAddress *pa = NULL,
+			     Protection *prot = NULL,
+			     AllocFlags *alf = NULL);
+	void addTranslation(unsigned long va,
+			    PhysicalAddress pa,
+			    Protection prot,
+			    AllocFlags alf);
+	bool protect(unsigned long start,
+		     unsigned long size,
+		     Protection prot);
+	void unmap(unsigned long start, unsigned long size);
+
+	static VAMap *empty();
+	void visit(HeapVisitor &hv) const;
+};
+
+class MemoryChunk {
+public:
+	static const unsigned long size = 4096;
+	static MemoryChunk *allocate();
+
+	void write(unsigned offset, const void *source, unsigned nr_bytes);
+	void read(unsigned offset, void *dest, unsigned nr_bytes) const;
+private:
+	unsigned char content[size];
+};
+
+class PMap {
+public:
+	class PMapEntry {
+	public:
+		PhysicalAddress pa;
+		MemoryChunk *mc;
+		PMapEntry *next;
+		static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc);
+	};
+private:
+	PhysicalAddress nextPa;
+	PMapEntry *head;
+public:
+	MemoryChunk *lookup(PhysicalAddress pa, unsigned long *mc_start);
+	PhysicalAddress introduce(MemoryChunk *mc);
+
+	static PMap *empty();
+	void visit(HeapVisitor &hv) const;
+};
+
+class AddressSpace {
+	unsigned long brkptr;
+	unsigned long brkMapPtr;
+	VAMap *vamap;
+	PMap *pmap;
+
+	bool extendStack(unsigned long ptr, unsigned long rsp);
+
+public:
+	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
+			    VAMap::AllocFlags flags = VAMap::defaultFlags);
 	void allocateMemory(const LogRecordAllocateMemory &rec)
 	{
 		allocateMemory(rec.start, rec.size, rec.prot, rec.flags);
 	}
 	void releaseMemory(unsigned long start, unsigned long size);
-	void protectMemory(unsigned long start, unsigned long size, Protection prot);
-	void populateMemory(const LogRecordMemory &rec);
+	void protectMemory(unsigned long start, unsigned long size, VAMap::Protection prot);
+	void populateMemory(const LogRecordMemory &rec)
+	{
+		writeMemory(rec.start, rec.size, rec.contents, true);
+	}
 	void writeMemory(unsigned long start, unsigned size,
 			 const void *contents, bool ignore_protection = false,
 			 const Thread *thr = NULL);
@@ -633,8 +698,6 @@ public:
 		return isAccessible(start, size, false, thr);
 	}
 	unsigned long setBrk(unsigned long newBrk);
-
-	const void *getRawPointerUnsafe(unsigned long ptr);
 
 	static AddressSpace *initialAddressSpace(unsigned long initialBrk);
 	void visit(HeapVisitor &hv) const;
