@@ -650,8 +650,10 @@ public:
 		static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc);
 	};
 private:
+	static const unsigned nrHashBuckets = 1024;
+	static unsigned paHash(PhysicalAddress pa);
 	PhysicalAddress nextPa;
-	PMapEntry *head;
+	PMapEntry *heads[nrHashBuckets];
 public:
 	MemoryChunk *lookup(PhysicalAddress pa, unsigned long *mc_start);
 	PhysicalAddress introduce(MemoryChunk *mc);

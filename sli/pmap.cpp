@@ -33,8 +33,9 @@ PMap::PMapEntry *PMap::PMapEntry::alloc(PhysicalAddress pa,
 
 MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 {
+	unsigned h = paHash(pa);
 	PMapEntry *pme;
-	for (pme = head;
+	for (pme = heads[h];
 	     pme != NULL && (pa < pme->pa ||
 			     pa >= pme->pa + MemoryChunk::size);
 	     pme = pme->next)
@@ -50,8 +51,9 @@ PhysicalAddress PMap::introduce(MemoryChunk *mc)
 	PhysicalAddress pa = nextPa;
 	nextPa = nextPa + MemoryChunk::size;
 	PMapEntry *pme = PMapEntry::alloc(pa, mc);
-	pme->next = head;
-	head = pme;
+	unsigned h = paHash(pa);
+	pme->next = heads[h];
+	heads[h] = pme;
 	return pa;
 }
 
@@ -66,6 +68,12 @@ PMap *PMap::empty()
 
 void PMap::visit(HeapVisitor &hv) const
 {
-	hv(head);
+	unsigned x;
+	for (x = 0; x < nrHashBuckets; x++)
+		hv(heads[x]);
 }
 
+unsigned PMap::paHash(PhysicalAddress pa)
+{
+	return (pa._pa / MemoryChunk::size) % nrHashBuckets;
+}
