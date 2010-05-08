@@ -579,6 +579,11 @@ public:
 		{
 		}
 		Protection(unsigned prot); /* PROT_* flags */
+		bool operator==(const Protection &p) const {
+			return readable == p.readable &&
+				writable == p.writable &&
+				executable == p.executable;
+		}
 	};
 	class AllocFlags {
 	public:
@@ -588,24 +593,31 @@ public:
 		{
 		}
 		AllocFlags(unsigned flags); /* MAP_* flags */
+		bool operator==(const AllocFlags alf) const {
+			return expandsDown == alf.expandsDown;
+		}
 	};
 	static const AllocFlags defaultFlags;
 
 	class VAMapEntry {
 	public:
-		VAMapEntry *next;
-		unsigned long addr;
-		PhysicalAddress pa;
+		VAMapEntry *prev;
+		VAMapEntry *succ;
+		unsigned long start; /* Inclusive */
+		unsigned long end; /* Exclusive */
+		PhysicalAddress *pa;
 		Protection prot;
 		AllocFlags alf;
-		static VAMapEntry *alloc(unsigned long va,
-					 PhysicalAddress pa,
+		static VAMapEntry *alloc(unsigned long start,
+					 unsigned long end,
+					 PhysicalAddress *pa,
 					 Protection prot,
 					 AllocFlags alf);
+		void split(unsigned long where);
 	};
 
 private:
-	VAMapEntry *head;
+	VAMapEntry *root;
 public:
 	bool translate(unsigned long va,
 		       PhysicalAddress *pa = NULL,
