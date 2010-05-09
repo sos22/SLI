@@ -207,7 +207,6 @@ void LibVEX_ShowAllocStats ( void )
    vex_printf("vex storage: P total %lld bytes allocated\n",
               (Long)(permanent_curr - permanent_first) );
 }
-#endif /* !SLI */
 
 /*---------------------------------------------------------*/
 /*--- Bombing out                                       ---*/
@@ -222,6 +221,8 @@ void vex_assert_fail ( const char* expr,
    (*vex_failure_exit)();
 }
 
+#endif /* !SLI */
+
 __attribute__ ((noreturn))
 void vpanic ( const char* str )
 {
@@ -230,6 +231,7 @@ void vpanic ( const char* str )
 }
 
 
+#ifndef SLI
 /*---------------------------------------------------------*/
 /*--- vex_printf                                        ---*/
 /*---------------------------------------------------------*/
@@ -244,6 +246,7 @@ static Int vex_strlen ( const char* str )
    while (str[i] != 0) i++;
    return i;
 }
+#endif
 
 Bool vex_streq ( const char* s1, const char* s2 )
 {
@@ -257,7 +260,7 @@ Bool vex_streq ( const char* s1, const char* s2 )
    }
 }
 
-
+#ifndef SLI
 /* Convert N0 into ascii in BUF, which is assumed to be big enough (at
    least 67 bytes long).  Observe BASE, SYNED and HEXCAPS. */
 static
@@ -535,7 +538,7 @@ UInt vex_sprintf ( char* buf, const char *format, ... )
    return ret;
 }
 
-
+#endif /* !SLI */
 /*---------------------------------------------------------------*/
 /*--- end                                         main_util.c ---*/
 /*---------------------------------------------------------------*/

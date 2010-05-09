@@ -68,12 +68,17 @@ extern void vpanic ( const char* str );
 
 /* Printing */
 
+#ifdef SLI
+#include <stdio.h>
+#define vex_printf printf
+#define vex_sprintf sprintf
+#else
 __attribute__ ((format (printf, 1, 2)))
 extern UInt vex_printf ( const char *format, ... );
 
 __attribute__ ((format (printf, 2, 3)))
 extern UInt vex_sprintf ( char* buf, const char *format, ... );
-
+#endif
 
 /* String ops */
 
