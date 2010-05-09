@@ -652,6 +652,12 @@ private:
 	unsigned char content[size];
 };
 
+/* A PMap is a mapping from physical addresses to memory chunks.  It's
+   pretty much just a simple hash table; nothing clever here.  The
+   only slight oddity is that physical addresses are divided into two
+   parts, a chunk number and a chunk offset, and when you do a PA ->
+   chunk translation you get back the chunk offset as well as the
+   chunk itself. */
 class PMap {
 public:
 	class PMapEntry {
@@ -667,7 +673,12 @@ private:
 	PhysicalAddress nextPa;
 	PMapEntry *heads[nrHashBuckets];
 public:
+	/* Look up the memory chunk for a physical address.  On
+	   success, *mc_start is set to the offset of the address in
+	   the chunk. */
 	MemoryChunk *lookup(PhysicalAddress pa, unsigned long *mc_start);
+	/* Add a new chunk to the map, and return a newly-assigned
+	   physical address for it. */
 	PhysicalAddress introduce(MemoryChunk *mc);
 
 	static PMap *empty();
