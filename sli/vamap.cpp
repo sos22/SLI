@@ -30,12 +30,14 @@ VAMap::AllocFlags::AllocFlags(unsigned flags)
 
 const VAMap::AllocFlags VAMap::defaultFlags(false);
 
-static void visit_vme(const void *_ctxt, HeapVisitor &hv)
+void VAMap::VAMapEntry::visit(PMap *pmap, HeapVisitor &hv)
 {
-	const VAMap::VAMapEntry *ctxt = (const VAMap::VAMapEntry *)_ctxt;
-	hv(ctxt->prev);
-	hv(ctxt->succ);
-	hv(ctxt->pa);
+	unsigned x;
+	prev->visit(pmap, hv);
+	succ->visit(pmap, hv);
+	hv(pa);
+	for (x = 0; x < dchunk(start, end); x++)
+	    pmap->visitPA(pa[x], hv);
 }
 
 VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
@@ -48,7 +50,7 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 	* by hand. */
        static VexAllocType vme_type = {
        nbytes: sizeof(VAMapEntry),
-       gc_visit: visit_vme,
+       gc_visit: NULL,
        destruct: NULL,
        name: "VAMap::VAMapEntry"
        };
@@ -281,18 +283,19 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 
 }
 
-VAMap *VAMap::empty()
+VAMap *VAMap::empty(PMap *pmap)
 {
 	VAMap *work = LibVEX_Alloc_VAMap();
 
 	memset(work, 0, sizeof(*work));
-
+	work->pmap = pmap;
 	return work;
 }
 
 void VAMap::visit(HeapVisitor &hv) const
 {
-	hv(root);
+	hv(pmap);
+	root->visit(pmap, hv);
 }
 
 void VAMap::VAMapEntry::split(unsigned long at)

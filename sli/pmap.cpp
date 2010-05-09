@@ -1,13 +1,16 @@
 #include "sli.h"
 
 DECLARE_VEX_TYPE(PMap)
-DEFINE_VEX_TYPE_NO_DESTRUCT(PMap, {ths->visit(visit);});
+DEFINE_VEX_TYPE(PMap);
 
-static void visit_pme(const void *_ctxt, HeapVisitor &hv)
+/* The PME is dead, and so is the matchinh memory chunk.  Unhook
+   ourselves from the list. */
+static void destruct_pme(void *_ctxt)
 {
-	const PMap::PMapEntry *ctxt = (const PMap::PMapEntry *)_ctxt;
-	hv(ctxt->next);
-	hv(ctxt->mc);
+	PMap::PMapEntry *ctxt = (PMap::PMapEntry *)_ctxt;
+	*ctxt->pprev = ctxt->next;
+	if (ctxt->next)
+		ctxt->next->pprev = ctxt->pprev;
 }
 
 PMap::PMapEntry *PMap::PMapEntry::alloc(PhysicalAddress pa,
@@ -17,8 +20,8 @@ PMap::PMapEntry *PMap::PMapEntry::alloc(PhysicalAddress pa,
 	* by hand. */
        static VexAllocType pme_type = {
        nbytes: sizeof(PMapEntry),
-       gc_visit: visit_pme,
-       destruct: NULL,
+       gc_visit: NULL,
+       destruct: destruct_pme,
        name: "PMap::PMapEntry"
        };
 
@@ -28,6 +31,7 @@ PMap::PMapEntry *PMap::PMapEntry::alloc(PhysicalAddress pa,
        work->pa = pa;
        work->mc = mc;
        work->next = NULL;
+       work->pprev = NULL;
        return work;
 }
 
@@ -53,6 +57,9 @@ PhysicalAddress PMap::introduce(MemoryChunk *mc)
 	PMapEntry *pme = PMapEntry::alloc(pa, mc);
 	unsigned h = paHash(pa);
 	pme->next = heads[h];
+	pme->pprev = &heads[h];
+	if (pme->next)
+		pme->next->pprev = &pme->next;
 	heads[h] = pme;
 	return pa;
 }
@@ -66,14 +73,21 @@ PMap *PMap::empty()
 	return work;	
 }
 
-void PMap::visit(HeapVisitor &hv) const
-{
-	unsigned x;
-	for (x = 0; x < nrHashBuckets; x++)
-		hv(heads[x]);
-}
-
 unsigned PMap::paHash(PhysicalAddress pa)
 {
 	return (pa._pa / MemoryChunk::size) % nrHashBuckets;
+}
+
+void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
+{
+	unsigned h = paHash(pa);
+	PMapEntry *pme;
+	for (pme = heads[h];
+	     pme != NULL && (pa < pme->pa ||
+			     pa >= pme->pa + MemoryChunk::size);
+	     pme = pme->next)
+		;
+	assert(pme);
+	hv(pme);
+	hv(pme->mc);
 }

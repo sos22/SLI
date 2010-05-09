@@ -156,8 +156,8 @@ AddressSpace *AddressSpace::initialAddressSpace(unsigned long initialBrk)
        memset(work, 0, sizeof(*work));
        work->brkptr = initialBrk;
        work->brkMapPtr = initialBrk + 4096;
-       work->vamap = VAMap::empty();
        work->pmap = PMap::empty();
+       work->vamap = VAMap::empty(work->pmap);
        return work;	
 }
 

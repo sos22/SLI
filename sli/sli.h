@@ -599,6 +599,7 @@ public:
 	};
 	static const AllocFlags defaultFlags;
 
+private:
 	class VAMapEntry {
 	public:
 		VAMapEntry *prev;
@@ -614,10 +615,15 @@ public:
 					 Protection prot,
 					 AllocFlags alf);
 		void split(unsigned long where);
+		void visit(class PMap *pmap, HeapVisitor &hv);
 	};
 
-private:
 	VAMapEntry *root;
+
+	/* Bit of a hack, but needed if we're going to keep the
+	   various bits of physical address space live. */
+
+	class PMap *pmap;
 public:
 	bool translate(unsigned long va,
 		       PhysicalAddress *pa = NULL,
@@ -637,7 +643,7 @@ public:
 		     Protection prot);
 	void unmap(unsigned long start, unsigned long size);
 
-	static VAMap *empty();
+	static VAMap *empty(class PMap *pmap);
 	void visit(HeapVisitor &hv) const;
 };
 
@@ -653,11 +659,18 @@ private:
 };
 
 /* A PMap is a mapping from physical addresses to memory chunks.  It's
-   pretty much just a simple hash table; nothing clever here.  The
-   only slight oddity is that physical addresses are divided into two
-   parts, a chunk number and a chunk offset, and when you do a PA ->
-   chunk translation you get back the chunk offset as well as the
-   chunk itself. */
+   pretty much just a simple hash table; nothing clever here.  There are
+   two main oddities:
+
+   -- Physical addresses are divided into two parts, a chunk number
+      and a chunk offset, and when you do a PA -> chunk translation
+      you get back the chunk offset as well as the chunk itself.
+
+   -- The references from the PMap to the memory chunks are weak.  If
+      you want to stop them from disappearing, something else needs to
+      reference them.  The helper function visitPA is provided to help
+      with this: it keeps both the mapping and the memory chunk live.
+*/
 class PMap {
 public:
 	class PMapEntry {
@@ -665,6 +678,7 @@ public:
 		PhysicalAddress pa;
 		MemoryChunk *mc;
 		PMapEntry *next;
+		PMapEntry **pprev;
 		static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc);
 	};
 private:
@@ -682,7 +696,7 @@ public:
 	PhysicalAddress introduce(MemoryChunk *mc);
 
 	static PMap *empty();
-	void visit(HeapVisitor &hv) const;
+	void visitPA(PhysicalAddress pa, HeapVisitor &hv);
 };
 
 class AddressSpace {
