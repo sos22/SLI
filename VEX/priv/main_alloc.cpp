@@ -135,6 +135,8 @@ do_gc(void)
 	  p->size += h->size;
 	  if (n && !n->type) {
 	    p->size += n->size;
+	    if (n == allocation_cursor)
+	      allocation_cursor = p;
 	  }
 	  n = next_alloc_header(p);
 	  h = p;
