@@ -101,8 +101,8 @@ poison(void *start, unsigned nr_bytes, unsigned pattern)
 #endif
 }
 
-static void
-do_gc(void)
+void
+LibVEX_gc(void)
 {
   unsigned x;
   struct alloc_header *h;
@@ -157,7 +157,7 @@ do_gc(void)
 void vexSetAllocModeTEMP_and_clear ( void )
 {
   if (heap_used > N_TEMPORARY_BYTES / 2)
-    do_gc();
+    LibVEX_gc();
 }
 
 

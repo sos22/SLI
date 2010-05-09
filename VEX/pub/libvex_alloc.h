@@ -64,6 +64,7 @@ extern void *LibVEX_realloc(void *base, unsigned new_size);
 void vexRegisterGCRoot(void **);
 void vexUnregisterGCRoot(void **);
 void vexInitHeap(void);
+void LibVEX_gc(void);
 
 class VexGcRoot {
 	void **root;

@@ -1,0 +1,17 @@
+targets=''
+sli_tests="pmap"
+
+defvars() {
+    echo "SLI_TESTS=\$(patsubst %,${input_base}/%,${sli_tests})"
+    echo 'TARGETS+=$(SLI_TESTS)'
+}
+rules() {
+    echo "\$(SLI_TESTS): CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
+    echo "\$(SLI_TESTS): LDFLAGS+=libVEX.a"
+    echo "${input_base}/pmap: sli/pmap.o sli/memorychunk.o"
+    for t in $sli_tests
+    do
+	echo "${input_base}/$t: ${input_base}/${t}.cpp libVEX.a"
+	echo -e '\tgcc -lstdc++ $(CFLAGS) $(CPPFLAGS) $^ -o $@'
+    done
+}
