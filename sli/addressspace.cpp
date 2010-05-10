@@ -15,6 +15,7 @@ void AddressSpace::allocateMemory(unsigned long start, unsigned long size,
 	assert(!(start & ~PAGE_MASK));
 	assert(!(size & ~PAGE_MASK));
 
+	vamap->unmap(start, size);
 	while (size != 0) {
 		MemoryChunk *chunk = MemoryChunk::allocate();
 		PhysicalAddress pa = pmap->introduce(chunk);
