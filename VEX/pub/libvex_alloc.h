@@ -42,23 +42,19 @@ typedef
   extern VexAllocType __vex_type_ ## t;					\
   static inline t *LibVEX_Alloc_ ## t(void)				\
   {									\
-    return (t *)__LibVEX_Alloc(&__vex_type_ ## t, __FILE__, __LINE__);	\
+    return (t *)__LibVEX_Alloc(&__vex_type_ ## t);			\
   }									\
   static inline t **LibVEX_Alloc_Array_ ## t(unsigned nr)		\
   {									\
-    return (t **)__LibVEX_Alloc_Ptr_Array(nr, __FILE__, __LINE__);	\
+    return (t **)__LibVEX_Alloc_Ptr_Array(nr);				\
   }
 
 struct libvex_alloc_type;
 
-extern struct libvex_alloc_type *__LibVEX_Alloc(const VexAllocType *t,
-						const char *file,
-						unsigned line);
-extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned len,
-							  const char *file,
-							  unsigned line);
-extern void *__LibVEX_Alloc_Bytes(Int nbytes, const char *file, unsigned line);
-#define LibVEX_Alloc_Bytes(_n) __LibVEX_Alloc_Bytes((_n), __FILE__, __LINE__)
+extern struct libvex_alloc_type *__LibVEX_Alloc(const VexAllocType *t);
+extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned len);
+extern void *__LibVEX_Alloc_Bytes(Int nbytes);
+#define LibVEX_Alloc_Bytes(_n) __LibVEX_Alloc_Bytes(_n)
 
 extern void *LibVEX_realloc(void *base, unsigned new_size);
 
@@ -119,9 +115,7 @@ public:
 	}
 
 	static LibvexVector<content> *empty() {
-		struct libvex_alloc_type *t = __LibVEX_Alloc(&LibvexVectorType,
-							     __FILE__,
-							     __LINE__);
+		struct libvex_alloc_type *t = __LibVEX_Alloc(&LibvexVectorType);
 		LibvexVector<content> *t2 = (LibvexVector<content> *)t;
 		memset(t2, 0, sizeof(*t2));
 		return t2;

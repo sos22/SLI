@@ -60,32 +60,28 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 					    Protection prot,
 					    AllocFlags alf)
 {
-       VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type,
-						       __FILE__,
-						       __LINE__);
-       memset(work, 0, sizeof(*work));
-       work->start = start;
-       work->end = end;
-       work->pa = pa;
-       work->prot = prot;
-       work->alf = alf;
-       return work;
+	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type);
+	memset(work, 0, sizeof(*work));
+	work->start = start;
+	work->end = end;
+	work->pa = pa;
+	work->prot = prot;
+	work->alf = alf;
+	return work;
 }
 
 VAMap::VAMapEntry *VAMap::VAMapEntry::dupeSelf() const
 {
-       VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type,
-						       __FILE__,
-						       __LINE__);
-       *work = *this;
-       if (prev)
-	       work->prev = prev->dupeSelf();
-       if (succ)
-	       work->succ = succ->dupeSelf();
-       work->pa =
-	       (PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress) * dchunk(start, end));
-       memcpy(work->pa, pa, sizeof(PhysicalAddress) * dchunk(start, end));
-       return work;
+	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type);
+	*work = *this;
+	if (prev)
+		work->prev = prev->dupeSelf();
+	if (succ)
+		work->succ = succ->dupeSelf();
+	work->pa =
+		(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress) * dchunk(start, end));
+	memcpy(work->pa, pa, sizeof(PhysicalAddress) * dchunk(start, end));
+	return work;
 }
 
 bool VAMap::translate(unsigned long va,

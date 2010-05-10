@@ -30,8 +30,6 @@ struct alloc_header {
   unsigned size; /* Includes header */
   unsigned flags;
 #define ALLOC_FLAG_GC_MARK 1
-  const char *file;
-  unsigned line;
 };
 
 #define NR_GC_ROOTS 128
@@ -177,7 +175,7 @@ static VexAllocType ptr_array_type = { -1, visit_ptr_array, NULL, "<array>" };
 
 
 static void *
-alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned line)
+alloc_bytes(const VexAllocType *type, unsigned size)
 {
   struct alloc_header *cursor;
   struct alloc_header *next;
@@ -224,8 +222,6 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
   }
 
   cursor->type = type;
-  cursor->file = file;
-  cursor->line = line;
   res = header_to_alloc(cursor);
   poison(res, size - sizeof(struct alloc_header), 0xaabbccdd);
 
@@ -238,15 +234,15 @@ alloc_bytes(const VexAllocType *type, unsigned size, const char *file, unsigned 
 
 /* Exported to library client. */
 void *
-__LibVEX_Alloc_Bytes(Int nbytes, const char *file, unsigned line)
+__LibVEX_Alloc_Bytes(Int nbytes)
 {
-  return alloc_bytes(&byte_alloc_type, nbytes, file, line);
+  return alloc_bytes(&byte_alloc_type, nbytes);
 }
 
 struct libvex_alloc_type *
-__LibVEX_Alloc(const VexAllocType *t, const char *file, unsigned line)
+__LibVEX_Alloc(const VexAllocType *t)
 {
-  return (struct libvex_alloc_type *)alloc_bytes(t, t->nbytes, file, line);
+  return (struct libvex_alloc_type *)alloc_bytes(t, t->nbytes);
 }
 
 void *
@@ -288,7 +284,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     return ptr;
 
   /* Failed to resize: allocate a new block */
-  newptr = __LibVEX_Alloc_Bytes(new_size, ah->file, ah->line);
+  newptr = __LibVEX_Alloc_Bytes(new_size);
   if (new_size < ah->size)
     memcpy(newptr, ptr, new_size);
   else
@@ -301,13 +297,13 @@ LibVEX_realloc(void *ptr, unsigned new_size)
 }
 
 struct libvex_alloc_type *
-__LibVEX_Alloc_Ptr_Array(unsigned len, const char *file, unsigned line)
+__LibVEX_Alloc_Ptr_Array(unsigned len)
 {
   struct alloc_header *ah;
   void **res;
   unsigned x;
 
-  res = (void **)alloc_bytes(&ptr_array_type, sizeof(void *) * len, file, line);
+  res = (void **)alloc_bytes(&ptr_array_type, sizeof(void *) * len);
   ah = alloc_to_header(res);
   for (x = 0; x < (ah->size - sizeof(*ah)) / sizeof(void *); x++)
     res[x] = NULL;
@@ -372,7 +368,7 @@ DumpHeapVisitor::visit(const void *what)
     if (!ah->type || (ah->flags & ALLOC_FLAG_GC_MARK))
       return;
     ah->flags |= ALLOC_FLAG_GC_MARK;
-    vex_printf("%d %p %s %s:%d\n", depth, what, ah->type->name, ah->file, ah->line);
+    vex_printf("%d %p %s\n", depth, what, ah->type->name);
     depth++;
     if (ah->type && ah->type->gc_visit)
       ah->type->gc_visit(what, *this);

@@ -25,9 +25,7 @@ PMap::PMapEntry *PMap::PMapEntry::alloc(PhysicalAddress pa,
        name: "PMap::PMapEntry"
        };
 
-       PMapEntry *work = (PMapEntry *)__LibVEX_Alloc(&pme_type,
-						     __FILE__,
-						     __LINE__);
+       PMapEntry *work = (PMapEntry *)__LibVEX_Alloc(&pme_type);
        work->pa = pa;
        work->mc = mc;
        work->next = NULL;
