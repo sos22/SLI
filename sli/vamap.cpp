@@ -127,17 +127,17 @@ bool VAMap::findNextMapping(unsigned long from,
 	if (!bestVme)
 		return false;
 	if (va)
-		*va = vme->start;
+		*va = bestVme->start;
 	if (pa) {
-		if (from >= vme->start)
-			*pa = vme->pa[(from - vme->start)/MemoryChunk::size];
+		if (from >= bestVme->start)
+			*pa = bestVme->pa[(from - bestVme->start)/MemoryChunk::size];
 		else
-			*pa = vme->pa[0];
+			*pa = bestVme->pa[0];
 	}
 	if (prot)
-		*prot = vme->prot;
+		*prot = bestVme->prot;
 	if (alf)
-		*alf = vme->alf;
+		*alf = bestVme->alf;
 	return true;
 }
 
