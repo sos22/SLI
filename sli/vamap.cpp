@@ -80,6 +80,9 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::dupeSelf() const
 	       work->prev = prev->dupeSelf();
        if (succ)
 	       work->succ = succ->dupeSelf();
+       work->pa =
+	       (PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress) * dchunk(start, end));
+       memcpy(work->pa, pa, sizeof(PhysicalAddress) * dchunk(start, end));
        return work;
 }
 
