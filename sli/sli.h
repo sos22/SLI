@@ -548,7 +548,7 @@ public:
 	ThreadEvent *runToEvent(AddressSpace *addrSpace);
 
 	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
-	static Thread *forkThread(unsigned newPid, const Thread &parent);
+	Thread *fork(unsigned newPid);
 };
 
 class PhysicalAddress {

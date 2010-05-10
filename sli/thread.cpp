@@ -16,14 +16,14 @@ Thread *Thread::initialThread(const LogRecordInitialRegisters &initRegs)
 	return work;
 }
 
-Thread *Thread::forkThread(unsigned newPid, const Thread &parent)
+Thread *Thread::fork(unsigned newPid)
 {
 	Thread *work;
 
 	work = LibVEX_Alloc_Thread();
 	memset(work, 0, sizeof(*work));
 	work->pid = newPid;
-	work->regs = parent.regs;
+	work->regs = regs;
 	return work;
 }
 
