@@ -31,6 +31,14 @@ LogReader *LogReader::open(const char *path, LogReader::ptr *initial_ptr)
 	return work;
 }
 
+LogReader *LogReader::truncate(LogReader::ptr eof)
+{
+	LogReader *work;
+	work = new LogReader(*this);
+	work->forcedEof = eof;
+	return work;
+}
+
 LogReader::~LogReader()
 {
 	close(fd);
@@ -41,6 +49,8 @@ LogRecord *LogReader::read(LogReader::ptr startPtr, LogReader::ptr *nextPtr) con
 	struct record_header rh;
 
 skip:
+	if (forcedEof.valid && startPtr >= forcedEof)
+		return NULL;
 	if (pread(fd, &rh, sizeof(rh), startPtr.offset()) <= 0)
 		return NULL;
 	ThreadId tid(rh.tid);

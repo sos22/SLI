@@ -1128,7 +1128,8 @@ finished_block:
 	}
 }
 
-void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
+void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
+				LogReader::ptr *eof)
 {
 	while (1) {
 		LogRecord *lr = lf->read(ptr, &ptr);
@@ -1163,4 +1164,6 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr)
 				       &ptr);
 
 	}
+	if (eof)
+		*eof = ptr;
 }

@@ -76,10 +76,30 @@ main(int argc, char *argv[])
 	}
 
 	delete lr;
-	MachineState *ms = MachineState::initialMachineState(as, Thread::initialThread(*lrir), *lris);
-	Interpreter *i = new Interpreter(ms);
+	MachineState *ms_base = MachineState::initialMachineState(as, Thread::initialThread(*lrir), *lris);
+	VexGcRoot base_root((void **)&ms_base);
+	MachineState *ms_adv = ms_base->dupeSelf();
 
+	printf("Doing initial replay...\n");
+	Interpreter *i = new Interpreter(ms_adv);
+	LogReader::ptr eof;
+	i->replayLogfile(lf, ptr, &eof);
+	delete i;
+
+	printf("Replay from %lx to %d - 10000.. (%lx)\n",
+	       ptr._off(),
+	       eof.rn(),
+	       (eof - 10000)._off());
+	LogReader *partialLog = lf->truncate(eof - 10000);
+	i = new Interpreter(ms_base);
+	i->replayLogfile(partialLog, ptr, &ptr);
+	delete i;
+
+	MachineState *ms3 = ms_base->dupeSelf();
+	printf("Replay the rest of the way\n");
+	i = new Interpreter(ms3);
 	i->replayLogfile(lf, ptr);
+	printf("All done.\n");
 
 	return 0;
 }

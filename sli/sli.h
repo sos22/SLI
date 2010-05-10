@@ -337,12 +337,32 @@ public:
 		}
 	public:
 		ptr() : valid(false) {};
+		/* This doesn't really mean much at a semantic level,
+		   but at a concrete one it's useful information for
+		   debugging. */
+		unsigned long _off() { return off; }
 		unsigned rn() { return record_nr; }
+		ptr operator-(unsigned long offset) const {
+			ptr p;
+			p.off = off - offset;
+			p.record_nr = 0;
+			p.valid = valid;
+			return p;
+		}
+		bool operator>=(ptr b) const {
+			assert(valid);
+			assert(b.valid);
+			return off >= b.off;
+		}
 	};
+private:
+	ptr forcedEof;
+public:
 
 	LogRecord *read(ptr startPtr, ptr *outPtr) const;
 	~LogReader();
 	static LogReader *open(const char *path, ptr *initial_ptr);
+	LogReader *truncate(ptr eof);
 };
 
 struct abstract_interpret_value {
@@ -828,7 +848,8 @@ public:
 		currentStateRoot((void **)&currentState)
 	{
 	}
-	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint);
+	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint,
+			   LogReader::ptr *endingPoint = NULL);
 };
 
 void replay_syscall(const LogRecordSyscall *lrs,
