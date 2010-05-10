@@ -27,3 +27,10 @@ Thread *Thread::fork(unsigned newPid)
 	return work;
 }
 
+Thread *Thread::dupeSelf() const
+{
+	Thread *work;
+	work = LibVEX_Alloc_Thread();
+	*work = *this;
+	return work;
+}

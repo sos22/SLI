@@ -549,6 +549,7 @@ public:
 
 	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
 	Thread *fork(unsigned newPid);
+	Thread *dupeSelf() const;
 };
 
 class PhysicalAddress {
