@@ -32,6 +32,8 @@ struct alloc_header {
 #define ALLOC_FLAG_GC_MARK 1
 };
 
+static alloc_header *const alloc_header_terminator = (alloc_header *)(temporary + N_TEMPORARY_BYTES);
+
 #define NR_GC_ROOTS 128
 static unsigned nr_gc_roots;
 static void **gc_roots[NR_GC_ROOTS];
@@ -62,10 +64,7 @@ first_alloc_header(void)
 static struct alloc_header *
 next_alloc_header(struct alloc_header *h)
 {
-  struct alloc_header *maybe = (struct alloc_header *)((unsigned long)h + h->size);
-  if ( (unsigned long)maybe >= (unsigned long)temporary + N_TEMPORARY_BYTES )
-    return NULL;
-  return maybe;
+  return (struct alloc_header *)((unsigned long)h + h->size);
 }
 
 class GcVisitor : public HeapVisitor {
@@ -108,7 +107,7 @@ LibVEX_gc(void)
   struct alloc_header *n;
   GcVisitor gc;
 
-  for (h = first_alloc_header(); h; h = next_alloc_header(h))
+  for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
     h->flags &= ~ ALLOC_FLAG_GC_MARK;
   for (x = 0; x < nr_gc_roots; x++)
     gc.visit(*gc_roots[x]);
@@ -116,7 +115,7 @@ LibVEX_gc(void)
   heap_used = 0;
   h = first_alloc_header();
   p = NULL;
-  while (h) {
+  while (h != alloc_header_terminator) {
     n = next_alloc_header(h);
     if (h->type) {
       if (h->flags & ALLOC_FLAG_GC_MARK) {
@@ -131,14 +130,14 @@ LibVEX_gc(void)
 	  if (h == allocation_cursor)
 	    allocation_cursor = p;
 	  p->size += h->size;
-	  if (n && !n->type) {
+	  if (n != alloc_header_terminator && !n->type) {
 	    p->size += n->size;
 	    if (n == allocation_cursor)
 	      allocation_cursor = p;
 	  }
 	  n = next_alloc_header(p);
 	  h = p;
-	} else if (n && !n->type) {
+	} else if (n != alloc_header_terminator && !n->type) {
 	  if (n == allocation_cursor)
 	    allocation_cursor = h;
 	  h->size += n->size;
@@ -188,13 +187,13 @@ alloc_bytes(const VexAllocType *type, unsigned size)
   /* First-fit policy.  Search starts from the allocation cursor, and
      then if that fails we try again from the beginning. */
   for (cursor = allocation_cursor;
-       cursor != NULL;
+       cursor != alloc_header_terminator;
        cursor = next_alloc_header(cursor)) {
     vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
     if (!cursor->type && cursor->size >= size)
       break;
   }
-  if (!cursor) {
+  if (cursor == alloc_header_terminator) {
     for (cursor = first_alloc_header();
 	 cursor != allocation_cursor;
 	 cursor = next_alloc_header(cursor)) {
@@ -262,7 +261,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
   /* Enlarge if possible */
   while (new_size > ah->size) {
     next = next_alloc_header(ah);
-    if (!next || next->type)
+    if (next == alloc_header_terminator || next->type)
       break;
     ah->size += next->size;
     heap_used += next->size;
@@ -382,14 +381,14 @@ dump_heap(void)
   struct alloc_header *h;
   DumpHeapVisitor visitor;
 
-  for (h = first_alloc_header(); h; h = next_alloc_header(h))
+  for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
     h->flags &= ~ ALLOC_FLAG_GC_MARK;
   for (x = 0; x < nr_gc_roots; x++) {
     vex_printf("Root %d:\n", x);
     visitor.visit(*gc_roots[x]);
   }
 
-  for (h = first_alloc_header(); h; h = next_alloc_header(h)) {
+  for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
     if (!h->type || (h->flags & ALLOC_FLAG_GC_MARK))
       continue;
     vex_printf("Unattached but allocated:\n");
@@ -420,6 +419,7 @@ vexInitHeap(void)
   entire_arena_hdr->type = NULL;
   entire_arena_hdr->size = N_TEMPORARY_BYTES;
   entire_arena_hdr->flags = 0;
+  allocation_cursor = entire_arena_hdr;
   done_init = true;
 }
 
