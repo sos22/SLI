@@ -50,6 +50,21 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	return pme->mc;
 }
 
+const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start) const
+{
+	unsigned h = paHash(pa);
+	const PMapEntry *pme;
+	for (pme = heads[h];
+	     pme != NULL && (pa < pme->pa ||
+			     pa >= pme->pa + MemoryChunk::size);
+	     pme = pme->next)
+		;
+	if (!pme)
+		return NULL;
+	*mc_start = pa - pme->pa;
+	return pme->mc;
+}
+
 PhysicalAddress PMap::introduce(MemoryChunk *mc)
 {
 	PhysicalAddress pa = nextPa;

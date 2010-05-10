@@ -78,7 +78,7 @@ void AddressSpace::readMemory(unsigned long start, unsigned size,
 				throw BadMemoryException(false, start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
+			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
