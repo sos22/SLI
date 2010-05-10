@@ -624,7 +624,7 @@ private:
 					 Protection prot,
 					 AllocFlags alf);
 		void split(unsigned long where);
-		void visit(class PMap *pmap, HeapVisitor &hv);
+		void visit(class PMap *pmap, HeapVisitor &hv) const;
 		VAMapEntry *promoteSmallest();
 	};
 
@@ -638,12 +638,12 @@ public:
 	bool translate(unsigned long va,
 		       PhysicalAddress *pa = NULL,
 		       Protection *prot = NULL,
-		       AllocFlags *alf = NULL);
+		       AllocFlags *alf = NULL) const;
 	bool findNextMapping(unsigned long from,
 			     unsigned long *va = NULL,
 			     PhysicalAddress *pa = NULL,
 			     Protection *prot = NULL,
-			     AllocFlags *alf = NULL);
+			     AllocFlags *alf = NULL) const;
 	void addTranslation(unsigned long va,
 			    PhysicalAddress pa,
 			    Protection prot,

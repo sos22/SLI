@@ -30,7 +30,7 @@ VAMap::AllocFlags::AllocFlags(unsigned flags)
 
 const VAMap::AllocFlags VAMap::defaultFlags(false);
 
-void VAMap::VAMapEntry::visit(PMap *pmap, HeapVisitor &hv)
+void VAMap::VAMapEntry::visit(PMap *pmap, HeapVisitor &hv) const
 {
 	unsigned x;
 	hv(this);
@@ -73,7 +73,7 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 bool VAMap::translate(unsigned long va,
 		      PhysicalAddress *pa,
 		      Protection *prot,
-		      AllocFlags *alf)
+		      AllocFlags *alf) const
 {
 	VAMapEntry *vme;
 	vme = root;
@@ -103,7 +103,7 @@ bool VAMap::findNextMapping(unsigned long from,
 			    unsigned long *va,
 			    PhysicalAddress *pa,
 			    Protection *prot,
-			    AllocFlags *alf)
+			    AllocFlags *alf) const
 {
 	VAMapEntry *vme, *bestVme;
 
