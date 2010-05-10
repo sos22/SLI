@@ -954,10 +954,14 @@ ThreadEvent *
 Thread::runToEvent(struct AddressSpace *addrSpace)
 {
 	while (1) {
-		if (!currentIRSB)
-			translateNextBlock(addrSpace);
-		if (!currentIRSB)
-			return new SignalEvent(11, regs.regs.guest_RIP);
+		if (!currentIRSB) {
+			try {
+				translateNextBlock(addrSpace);
+			} catch (BadMemoryException excn) {
+				return new SignalEvent(11, excn.ptr);
+			}
+			assert(currentIRSB);
+		}
 		while (currentIRSBOffset < currentIRSB->stmts_used) {
 			IRStmt *stmt = currentIRSB->stmts[currentIRSBOffset];
 			currentIRSBOffset++;
@@ -1114,12 +1118,12 @@ Thread::runToEvent(struct AddressSpace *addrSpace)
 			regs.regs.guest_RIP = next_addr.lo.v;
 		}
 		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
-			translateNextBlock(addrSpace);
+			currentIRSB = NULL;
 			return new SyscallEvent();
 		}
 
 finished_block:
-		translateNextBlock(addrSpace);
+		currentIRSB = NULL;
 	}
 }
 
