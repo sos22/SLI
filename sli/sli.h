@@ -764,6 +764,7 @@ public:
 	unsigned long setBrk(unsigned long newBrk);
 
 	static AddressSpace *initialAddressSpace(unsigned long initialBrk);
+	AddressSpace *dupeSelf() const;
 	void visit(HeapVisitor &hv) const;
 };
 

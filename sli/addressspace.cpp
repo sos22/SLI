@@ -162,6 +162,15 @@ AddressSpace *AddressSpace::initialAddressSpace(unsigned long initialBrk)
        return work;	
 }
 
+AddressSpace *AddressSpace::dupeSelf() const
+{
+       AddressSpace *work = LibVEX_Alloc_AddressSpace();
+       *work = *this;
+       work->pmap = pmap->dupeSelf();
+       work->vamap = vamap->dupeSelf(work->pmap);
+       return work;
+}
+
 void AddressSpace::visit(HeapVisitor &hv) const
 {
 	hv(vamap);
