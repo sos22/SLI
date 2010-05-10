@@ -31,9 +31,11 @@ MachineState *MachineState::dupeSelf() const
 	MachineState *work = LibVEX_Alloc_MachineState();
 	*work = *this;
 
-	work->addressSpace = work->addressSpace->dupeSelf();
-	for (unsigned x = 0; x < work->threads->size(); x++)
-		work->threads->set(x, work->threads->index(x)->dupeSelf());
+	work->addressSpace = addressSpace->dupeSelf();
+	work->threads = LibvexVector<Thread>::empty();
+	work->threads->_set_size(threads->size());
+	for (unsigned x = 0; x < threads->size(); x++)
+		work->threads->set(x, threads->index(x)->dupeSelf());
 	return work;
 }
 

@@ -109,13 +109,22 @@ public:
 		items[sz-1] = v;
 	}
 
+	/* This gets a leading underscore because it throws away the
+	   existing content of the array. */
+	void _set_size(unsigned new_size) {
+		free(items);
+		items = (content **)malloc(sizeof(content *) * new_size);
+		memset(items, 0, sizeof(content *) * new_size);
+		sz = new_size;
+	}
+
 	static LibvexVector<content> *empty() {
 		struct libvex_alloc_type *t = __LibVEX_Alloc(&LibvexVectorType,
 							     __FILE__,
 							     __LINE__);
 		LibvexVector<content> *t2 = (LibvexVector<content> *)t;
 		memset(t2, 0, sizeof(*t2));
-		return t2;							     
+		return t2;
 	}
 };
 
