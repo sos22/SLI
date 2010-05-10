@@ -76,8 +76,10 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::dupeSelf() const
 						       __FILE__,
 						       __LINE__);
        *work = *this;
-       work->prev = prev->dupeSelf();
-       work->succ = succ->dupeSelf();
+       if (prev)
+	       work->prev = prev->dupeSelf();
+       if (succ)
+	       work->succ = succ->dupeSelf();
        return work;
 }
 
