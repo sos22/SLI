@@ -1,5 +1,5 @@
 targets=''
-sli_tests="pmap"
+sli_tests="pmap vamap"
 
 defvars() {
     echo "SLI_TESTS=\$(patsubst %,${input_base}/%,${sli_tests})"
@@ -9,6 +9,7 @@ rules() {
     echo "\$(SLI_TESTS): CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
     echo "\$(SLI_TESTS): LDFLAGS+=libVEX.a"
     echo "${input_base}/pmap: sli/pmap.o sli/memorychunk.o"
+    echo "${input_base}/vamap: sli/pmap.o sli/memorychunk.o sli/vamap.o"
     for t in $sli_tests
     do
 	echo "${input_base}/$t: ${input_base}/${t}.cpp libVEX.a"

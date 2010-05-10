@@ -558,6 +558,7 @@ public:
 	bool operator<(PhysicalAddress b) const { return _pa < b._pa; }
 	bool operator>=(PhysicalAddress b) const { return _pa >= b._pa; }
 	bool operator!=(PhysicalAddress b) const { return _pa != b._pa; }
+	bool operator==(PhysicalAddress b) const { return _pa == b._pa; }
 	PhysicalAddress operator+(unsigned long x) const
 	{
 		PhysicalAddress r;
