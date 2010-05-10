@@ -250,6 +250,24 @@ bool VAMap::protect(unsigned long start, unsigned long size, Protection prot)
 	}
 }
 
+/* Restructure the tree such that the smallest item is at the root,
+   and then return a pointer to that item. */
+VAMap::VAMapEntry *VAMap::VAMapEntry::promoteSmallest()
+{
+	/* If we have no predecessor then we don't need to do
+	 * anything. */
+	if (!prev)
+		return this;
+
+	/* Otherwise, recurse */
+	VAMapEntry *tmp;
+	tmp = prev->promoteSmallest();
+	assert(!tmp->prev);
+	prev = tmp->succ;
+	tmp->succ = this;
+	return tmp;
+}
+
 void VAMap::unmap(unsigned long start, unsigned long size)
 {
 	VAMapEntry *vme;
@@ -268,18 +286,42 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 			pprev = &vme->succ;
 			vme = vme->succ;
 		} else if (start < vme->start) {
-			unmap(start, vme->start - start);
-			unmap(vme->start, end - vme->start);
+			unsigned long s = vme->start;
+			unmap(start, s - start);
+			unmap(s, end - s);
 			return;
 		} else if (end > vme->end) {
-			unmap(start, vme->end - start);
-			unmap(vme->end, end - vme->end);
+			unsigned long e = vme->end;
+			unmap(start, e - start);
+			unmap(e, end - e);
+			return;
 		} else if (start != vme->start) {
 			vme->split(start);
 		} else if (end != vme->end) {
 			vme->split(end);
 		} else {
-			*pprev = NULL;
+			/* This node of the tree must be killed.
+			   Promote one of our children to the right
+			   place. */
+
+			/* Easy cases: no children or only one child,
+			   so just promote the other one. */
+			if (!vme->prev) {
+				*pprev = vme->succ;
+				return;
+			}
+			if (!vme->succ) {
+				*pprev = vme->prev;
+				return;
+			}
+
+			/* Otherwise, need to go and find a descendent
+			   to promote. */
+			VAMapEntry *newSucc;
+			newSucc = vme->succ->promoteSmallest();
+			assert(!newSucc->prev);
+			newSucc->prev = vme->prev;
+			*vme = *newSucc;
 			return;
 		}
 	}

@@ -619,6 +619,7 @@ private:
 					 AllocFlags alf);
 		void split(unsigned long where);
 		void visit(class PMap *pmap, HeapVisitor &hv);
+		VAMapEntry *promoteSmallest();
 	};
 
 	VAMapEntry *root;
