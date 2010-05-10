@@ -608,7 +608,6 @@ public:
 	};
 	static const AllocFlags defaultFlags;
 
-private:
 	class VAMapEntry {
 	public:
 		VAMapEntry *prev;
@@ -626,9 +625,15 @@ private:
 		void split(unsigned long where);
 		void visit(class PMap *pmap, HeapVisitor &hv) const;
 		VAMapEntry *promoteSmallest();
+		VAMapEntry *dupeSelf() const;
 	};
 
+private:
 	VAMapEntry *root;
+
+	const VAMap *parent;
+
+	void forceCOW();
 
 	/* Bit of a hack, but needed if we're going to keep the
 	   various bits of physical address space live. */
@@ -654,6 +659,7 @@ public:
 	void unmap(unsigned long start, unsigned long size);
 
 	static VAMap *empty(class PMap *pmap);
+	VAMap *dupeSelf(class PMap *pmap) const;
 	void visit(HeapVisitor &hv) const;
 };
 

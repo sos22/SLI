@@ -43,21 +43,21 @@ void VAMap::VAMapEntry::visit(PMap *pmap, HeapVisitor &hv) const
 	    pmap->visitPA(pa[x], hv);
 }
 
+/* The macros don't cope well with :s in type names, so do it by
+ * hand. */
+static VexAllocType vme_type = {
+nbytes: sizeof(VAMap::VAMapEntry),
+gc_visit: NULL,
+destruct: NULL,
+name: "VAMap::VAMapEntry"
+};
+
 VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 					    unsigned long end,
 					    PhysicalAddress *pa,
 					    Protection prot,
 					    AllocFlags alf)
 {
-       /* The macros don't cope well with :s in type names, so do it
-	* by hand. */
-       static VexAllocType vme_type = {
-       nbytes: sizeof(VAMapEntry),
-       gc_visit: NULL,
-       destruct: NULL,
-       name: "VAMap::VAMapEntry"
-       };
-
        VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type,
 						       __FILE__,
 						       __LINE__);
@@ -70,11 +70,24 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
        return work;
 }
 
+VAMap::VAMapEntry *VAMap::VAMapEntry::dupeSelf() const
+{
+       VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type,
+						       __FILE__,
+						       __LINE__);
+       *work = *this;
+       work->prev = prev->dupeSelf();
+       work->succ = succ->dupeSelf();
+       return work;
+}
+
 bool VAMap::translate(unsigned long va,
 		      PhysicalAddress *pa,
 		      Protection *prot,
 		      AllocFlags *alf) const
 {
+	if (parent)
+		return parent->translate(va, pa, prot, alf);
 	VAMapEntry *vme;
 	vme = root;
 	while (vme) {
@@ -105,6 +118,9 @@ bool VAMap::findNextMapping(unsigned long from,
 			    Protection *prot,
 			    AllocFlags *alf) const
 {
+	if (parent)
+		return parent->findNextMapping(from, va, pa, prot, alf);
+
 	VAMapEntry *vme, *bestVme;
 
 	bestVme = NULL;
@@ -144,11 +160,21 @@ bool VAMap::findNextMapping(unsigned long from,
 	return true;
 }
 
+void VAMap::forceCOW()
+{
+	if (parent) {
+		root = parent->root->dupeSelf();
+		parent = NULL;
+	}
+}
+
 void VAMap::addTranslation(unsigned long start,
 			   PhysicalAddress pa,
 			   Protection prot,
 			   AllocFlags alf)
 {
+	forceCOW();
+
 	VAMapEntry *vme;
 	VAMapEntry *newVme;
 	unsigned long end = start + MemoryChunk::size;
@@ -220,6 +246,8 @@ void VAMap::addTranslation(unsigned long start,
 
 bool VAMap::protect(unsigned long start, unsigned long size, Protection prot)
 {
+	forceCOW();
+
 	VAMapEntry *vme;
 	unsigned long end = start + size;
 
@@ -270,6 +298,8 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::promoteSmallest()
 
 void VAMap::unmap(unsigned long start, unsigned long size)
 {
+	forceCOW();
+
 	VAMapEntry *vme;
 	unsigned long end = start + size;
 	VAMapEntry **pprev;
@@ -337,10 +367,22 @@ VAMap *VAMap::empty(PMap *pmap)
 	return work;
 }
 
+VAMap *VAMap::dupeSelf(PMap *pmap) const
+{
+	VAMap *work = empty(pmap);
+	if (parent)
+		work->parent = parent;
+	else
+		work->parent = this;
+	return work;
+}
+
 void VAMap::visit(HeapVisitor &hv) const
 {
 	hv(pmap);
-	root->visit(pmap, hv);
+	hv(parent);
+	if (root)
+		root->visit(pmap, hv);
 }
 
 void VAMap::VAMapEntry::split(unsigned long at)
