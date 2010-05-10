@@ -569,7 +569,7 @@ public:
 	PhysicalAddress operator-(unsigned long x) const
 	{
 		PhysicalAddress r;
-		r._pa = _pa + x;
+		r._pa = _pa - x;
 		return r;
 	}
 	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
