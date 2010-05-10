@@ -226,7 +226,6 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
-		printf("WARNING: sys_futex not correctly handled\n");
 		break;
 	case __NR_set_tid_address: /* 218 */
 		thr->clear_child_tid = args[0];

@@ -306,7 +306,8 @@ Thread::do_ccall(IRCallee *cee,
 	} else if (!strcmp(cee->name, "amd64g_calculate_rflags_c")) {
 		return do_ccall_calculate_rflags_c(rargs);
 	} else {
-		printf("Unknown clean call %s\n", cee->name);
+		if (strcmp(cee->name, "amd64g_calculate_rflags_all"))
+			printf("Unknown clean call %s\n", cee->name);
 		return do_ccall_generic(cee, rargs);
 	}
 }
