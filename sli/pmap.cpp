@@ -105,6 +105,7 @@ PMap *PMap::empty()
 
 	memset(work, 0, sizeof(*work));
 
+	work->nextPa._pa = 0xbeef0000;
 	return work;	
 }
 
