@@ -840,4 +840,6 @@ process_memory_records(AddressSpace *addrSpace,
 		       LogReader::ptr startOffset,
 		       LogReader::ptr *endOffset);
 
+void debugger_attach(void);
+
 #endif /* !SLI_H__ */
