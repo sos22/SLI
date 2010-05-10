@@ -108,7 +108,7 @@ PMap *PMap::empty()
 	return work;	
 }
 
-PMap *PMap::dupeSelf(void)
+PMap *PMap::dupeSelf(void) const
 {
 	PMap *work = empty();
 

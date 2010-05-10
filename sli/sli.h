@@ -719,7 +719,7 @@ public:
 	PhysicalAddress introduce(MemoryChunk *mc);
 
 	static PMap *empty();
-	PMap *dupeSelf();
+	PMap *dupeSelf() const;
 
 	void visitPA(PhysicalAddress pa, HeapVisitor &hv) const;
 	void visit(HeapVisitor &hv);
