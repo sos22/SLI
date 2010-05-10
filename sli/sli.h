@@ -654,7 +654,8 @@ public:
 	};
 
 private:
-	VAMapEntry *root;
+	/* Mutable because we splay the tree on lookup */
+	mutable VAMapEntry *root;
 
 	const VAMap *parent;
 

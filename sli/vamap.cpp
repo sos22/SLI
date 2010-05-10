@@ -91,29 +91,101 @@ bool VAMap::translate(unsigned long va,
 {
 	if (parent)
 		return parent->translate(va, pa, prot, alf);
-	VAMapEntry *vme;
-	vme = root;
-	while (vme) {
-		if (va >= vme->start && va < vme->end)
-			break;
-		else if (va < vme->start)
-			vme = vme->prev;
-		else if (va >= vme->end)
-			vme = vme->succ;
-		else
-			abort();
-	}
-	if (!vme)
+	if (!root)
 		return false;
+	/* Splay the target node to the root of the tree */
+	while (1) {
+		if (va >= root->start && va < root->end)
+			break;
+
+		if (va < root->start) {
+			if (!root->prev)
+				return false;
+			if (va < root->prev->start) {
+				if (!root->prev->prev)
+					return false;
+				VAMapEntry *r = root;
+				VAMapEntry *rp = r->prev;
+				VAMapEntry *rpp = rp->prev;
+				VAMapEntry *rpps = rpp->succ;
+				VAMapEntry *rps = rp->succ;
+				VAMapEntry *rs = r->succ;
+				root = rpp;
+				rpp->succ = rp;
+				rp->prev = rpps;
+				rp->succ = r;
+				r->prev = rps;
+				r->succ = rs;
+			} else if (va < root->prev->end) {
+				VAMapEntry *r = root;
+				VAMapEntry *rp = r->prev;
+				VAMapEntry *rps = rp->succ;
+				root = rp;
+				rp->succ = r;
+				r->prev = rps;
+			} else {
+				if (!root->prev->succ)
+					return false;
+				VAMapEntry *r = root;
+				VAMapEntry *rp = r->prev;
+				VAMapEntry *rps = rp->succ;
+				VAMapEntry *rpsp = rps->prev;
+				VAMapEntry *rpss = rps->succ;
+				root = rps;
+				rps->prev = rp;
+				rps->succ = r;
+				rp->succ = rpsp;
+				r->prev = rpss;
+			}
+		} else {
+			assert(va >= root->end);
+			if (!root->succ)
+				return false;
+			if (va < root->succ->start) {
+				if (!root->succ->prev)
+					return false;
+				VAMapEntry *r = root;
+				VAMapEntry *rs = r->succ;
+				VAMapEntry *rsp = rs->prev;
+				VAMapEntry *rspp = rsp->prev;
+				VAMapEntry *rsps = rsp->succ;
+				root = rsp;
+				rsp->prev = r;
+				rsp->succ = rs;
+				r->succ = rspp;
+				rs->prev = rsps;
+			} else if (va < root->succ->end) {
+				VAMapEntry *r = root;
+				VAMapEntry *rs = r->succ;
+				VAMapEntry *rsp = rs->prev;
+				root = rs;
+				rs->prev = r;
+				r->succ = rsp;
+			} else {
+				if (!root->succ->succ)
+					return false;
+				VAMapEntry *r = root;
+				VAMapEntry *rs = r->succ;
+				VAMapEntry *rsp = rs->prev;
+				VAMapEntry *rss = rs->succ;
+				VAMapEntry *rssp = rss->prev;
+				root = rss;
+				rss->prev = rs;
+				rs->prev = r;
+				rs->succ = rssp;
+				r->succ = rsp;
+			}
+		}
+	}
 	if (pa) {
-		*pa = vme->pa[(va - vme->start) / MemoryChunk::size] +
-			((va - vme->start) % MemoryChunk::size);
+		*pa = root->pa[(va - root->start) / MemoryChunk::size] +
+			((va - root->start) % MemoryChunk::size);
 		assert(pa->_pa != 0);
 	}
 	if (prot)
-		*prot = vme->prot;
+		*prot = root->prot;
 	if (alf)
-		*alf = vme->alf;
+		*alf = root->alf;
 	return true;
 }
 
