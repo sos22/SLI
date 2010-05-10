@@ -730,9 +730,13 @@ private:
 	static const unsigned nrHashBuckets = 1024;
 	static unsigned paHash(PhysicalAddress pa);
 	PhysicalAddress nextPa;
-	PMapEntry *heads[nrHashBuckets];
+	/* mutable because we do pull-to-front in the lookup methods.
+	 * The denotation of the mapping is unchanged, but its
+	 * physical structure is. */
+	mutable PMapEntry *heads[nrHashBuckets];
 	const PMap *parent;
 
+	PMapEntry *findPme(PhysicalAddress pa, unsigned h) const;
 public:
 	/* Look up the memory chunk for a physical address.  On
 	   success, *mc_start is set to the offset of the address in
@@ -748,7 +752,7 @@ public:
 	PMap *dupeSelf() const;
 
 	void visitPA(PhysicalAddress pa, HeapVisitor &hv) const;
-	void visit(HeapVisitor &hv);
+	void visit(HeapVisitor &hv) const;
 };
 
 class AddressSpace {
