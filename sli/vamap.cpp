@@ -39,8 +39,10 @@ void VAMap::VAMapEntry::visit(PMap *pmap, HeapVisitor &hv) const
 	if (succ)
 		succ->visit(pmap, hv);
 	hv(pa);
-	for (x = 0; x < dchunk(start, end); x++)
-	    pmap->visitPA(pa[x], hv);
+	for (x = 0; x < dchunk(start, end); x++) {
+		assert(pa[x]._pa != 0);
+		pmap->visitPA(pa[x], hv);
+	}
 }
 
 /* The macros don't cope well with :s in type names, so do it by
@@ -107,9 +109,11 @@ bool VAMap::translate(unsigned long va,
 	}
 	if (!vme)
 		return false;
-	if (pa)
+	if (pa) {
 		*pa = vme->pa[(va - vme->start) / MemoryChunk::size] +
 			((va - vme->start) % MemoryChunk::size);
+		assert(pa->_pa != 0);
+	}
 	if (prot)
 		*prot = vme->prot;
 	if (alf)
@@ -419,4 +423,32 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		succ = newVme;
 		pa = (PhysicalAddress *)LibVEX_realloc(pa, sizeof(pa[0]) * dchunk(start, end));
 	}
+}
+
+void VAMap::sanityCheck() const
+{
+	if (parent) {
+		assert(!root);
+		parent->sanityCheck();
+	}
+	if (root)
+		root->sanityCheck();
+}
+
+void VAMap::VAMapEntry::sanityCheck(unsigned long max,
+				    bool have_max,
+				    unsigned long min,
+				    bool have_min) const
+{
+	assert(end > start);
+	if (have_max)
+		assert(end <= max);
+	if (have_min)
+		assert(start >= min);
+	if (prev)
+		prev->sanityCheck(start, true, min, have_min);
+	if (succ)
+		succ->sanityCheck(max, have_max, end, true);
+	for (unsigned x = 0; x < dchunk(start, end); x++)
+		assert(pa[x]._pa != 0);
 }

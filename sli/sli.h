@@ -647,6 +647,10 @@ public:
 		void visit(class PMap *pmap, HeapVisitor &hv) const;
 		VAMapEntry *promoteSmallest();
 		VAMapEntry *dupeSelf() const;
+		void sanityCheck(unsigned long max = 0,
+				 bool have_max = false,
+				 unsigned long min = 0,
+				 bool have_min = false) const;
 	};
 
 private:
@@ -682,6 +686,8 @@ public:
 	static VAMap *empty(class PMap *pmap);
 	VAMap *dupeSelf(class PMap *pmap) const;
 	void visit(HeapVisitor &hv) const;
+
+	void sanityCheck() const;
 };
 
 class MemoryChunk {
@@ -787,6 +793,7 @@ public:
 	static AddressSpace *initialAddressSpace(unsigned long initialBrk);
 	AddressSpace *dupeSelf() const;
 	void visit(HeapVisitor &hv) const;
+	void sanityCheck() const;
 };
 
 class SignalHandlers {
@@ -832,6 +839,7 @@ public:
 	MachineState *dupeSelf() const;
 
 	void visit(HeapVisitor &hv) const;
+	void sanityCheck() const;
 };
 
 class Interpreter {

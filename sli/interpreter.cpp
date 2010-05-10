@@ -1163,6 +1163,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 		process_memory_records(currentState->addressSpace, lf, ptr,
 				       &ptr);
 
+		currentState->sanityCheck();
 	}
 	if (eof)
 		*eof = ptr;

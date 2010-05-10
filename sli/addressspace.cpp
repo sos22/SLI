@@ -194,3 +194,7 @@ bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 	return true;
 }
 
+void AddressSpace::sanityCheck() const
+{
+	vamap->sanityCheck();
+}

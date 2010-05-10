@@ -39,3 +39,7 @@ MachineState *MachineState::dupeSelf() const
 	return work;
 }
 
+void MachineState::sanityCheck() const
+{
+	addressSpace->sanityCheck();
+}
