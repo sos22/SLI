@@ -26,4 +26,14 @@ MachineState *MachineState::initialMachineState(AddressSpace *as,
 	return work;
 }
 
+MachineState *MachineState::dupeSelf() const
+{
+	MachineState *work = LibVEX_Alloc_MachineState();
+	*work = *this;
+
+	work->addressSpace = work->addressSpace->dupeSelf();
+	for (unsigned x = 0; x < work->threads->size(); x++)
+		work->threads->set(x, work->threads->index(x)->dupeSelf());
+	return work;
+}
 

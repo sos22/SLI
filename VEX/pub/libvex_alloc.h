@@ -1,6 +1,7 @@
 #ifndef __LIBVEX_ALLOC_H
 #define __LIBVEX_ALLOC_H
 
+#include <assert.h>
 #include <stdlib.h>
 
 class HeapVisitor {
@@ -97,6 +98,10 @@ public:
 		if (idx >= sz)
 			abort();
 		return items[idx];
+	}
+	void set(unsigned idx, content *x) {
+		assert(idx < sz);
+		items[idx] = x;
 	}
 	void push(content *v) {
 		sz++;

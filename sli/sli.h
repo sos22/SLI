@@ -809,6 +809,8 @@ public:
 		exit_status = result;
 	}
 
+	MachineState *dupeSelf() const;
+
 	void visit(HeapVisitor &hv) const;
 };
 
