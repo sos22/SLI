@@ -33,8 +33,11 @@ const VAMap::AllocFlags VAMap::defaultFlags(false);
 void VAMap::VAMapEntry::visit(PMap *pmap, HeapVisitor &hv)
 {
 	unsigned x;
-	prev->visit(pmap, hv);
-	succ->visit(pmap, hv);
+	hv(this);
+	if (prev)
+		prev->visit(pmap, hv);
+	if (succ)
+		succ->visit(pmap, hv);
 	hv(pa);
 	for (x = 0; x < dchunk(start, end); x++)
 	    pmap->visitPA(pa[x], hv);
