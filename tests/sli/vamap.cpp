@@ -124,4 +124,63 @@ main()
 	assert(pmap->lookup(pa1, &o));
 	printf("Let PA2 die...\n");
 	assert(!pmap->lookup(pa2, &o));
+
+	printf("Introduce 0x70000->0x75000...\n");
+	unsigned x;
+	PhysicalAddress block1Pa[5];
+	MemoryChunk *block1Mc[5];
+	for (x = 0; x < 5; x++) {
+		block1Mc[x] = MemoryChunk::allocate();
+		block1Pa[x] = pmap->introduce(block1Mc[x]);
+		vamap->addTranslation(0x70000 + x * 0x1000,
+				      block1Pa[x],
+				      VAMap::Protection(true, false, true),
+				      VAMap::AllocFlags(false));
+	}
+	for (x = 0; x < 5; x++) {
+		r = vamap->translate(0x70000 + x * 0x1000, &pa3);
+		assert(r);
+		assert(pa3 == block1Pa[x]);
+	}
+	printf("...protect last few pages away...\n");
+	vamap->protect(0x72000, 0x1000, VAMap::Protection(false, false, false));
+	vamap->protect(0x73000, 0x1000, VAMap::Protection(false, false, false));
+	vamap->protect(0x74000, 0x1000, VAMap::Protection(false, false, false));
+	for (x = 0; x < 5; x++) {
+		r = vamap->translate(0x70000 + x * 0x1000, &pa3);
+		assert(pa3 == block1Pa[x]);
+	}
+	printf("...unmap tail...\n");
+	vamap->unmap(0x72000, 0x3000);
+	for (x = 0; x < 2; x++) {
+		r = vamap->translate(0x70000 + x * 0x1000, &pa3);
+		assert(r);
+		assert(pa3 == block1Pa[x]);
+	}
+	for (; x < 5; x++) {
+		r = vamap->translate(0x70000 + x * 0x1000);
+		assert(!r);
+	}
+	printf("...reallocate last few pages...\n");
+	for (x = 3; x < 5; x++) {
+		block1Mc[x] = MemoryChunk::allocate();
+		block1Pa[x] = pmap->introduce(block1Mc[x]);
+		vamap->addTranslation(0x70000 + x * 0x1000,
+				      block1Pa[x],
+				      VAMap::Protection(true, true, false),
+				      VAMap::AllocFlags(false));
+	}
+	printf("...check results\n");
+	r = vamap->translate(0x70000, &pa3);
+	assert(r && pa3 == block1Pa[0]);
+	r = vamap->translate(0x71000, &pa3);
+	assert(r && pa3 == block1Pa[1]);
+	r = vamap->translate(0x72000);
+	assert(!r);
+	r = vamap->translate(0x73000, &pa3);
+	assert(r && pa3 == block1Pa[3]);
+	r = vamap->translate(0x74000, &pa3);
+	assert(r && pa3 == block1Pa[4]);
+
+	return 0;
 }
