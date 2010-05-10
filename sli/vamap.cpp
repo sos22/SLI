@@ -316,7 +316,7 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		       newVme->pa + dchunk(newVme->start, newVme->end),
 		       sizeof(pa[0]) * dchunk(start, end));
 		newVme->pa =
-			(PhysicalAddress *)LibVEX_realloc(pa,
+			(PhysicalAddress *)LibVEX_realloc(newVme->pa,
 							  sizeof(pa[0]) * dchunk(newVme->start, newVme->end));
 		prev = newVme;
 	} else {
