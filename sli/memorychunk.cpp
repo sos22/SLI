@@ -7,6 +7,12 @@ MemoryChunk *MemoryChunk::allocate()
 	return r;
 }
 
+MemoryChunk *MemoryChunk::dupeSelf() const
+{
+	MemoryChunk *r = (MemoryChunk *)LibVEX_Alloc_Bytes(sizeof(MemoryChunk));
+	memcpy(r, this, sizeof(*r));
+	return r;
+}
 
 void MemoryChunk::write(unsigned offset, const void *source, unsigned nr_bytes)
 {

@@ -44,10 +44,26 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 			     pa >= pme->pa + MemoryChunk::size);
 	     pme = pme->next)
 		;
-	if (!pme)
+	if (pme) {
+		*mc_start = pa - pme->pa;
+		return pme->mc;
+	}
+	if (!parent)
 		return NULL;
-	*mc_start = pa - pme->pa;
-	return pme->mc;
+
+	const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start);
+	if (!parent_mc)
+		return NULL;
+
+	PMapEntry *newPme;
+	newPme = PMapEntry::alloc(pa - *mc_start, parent_mc->dupeSelf());
+	newPme->next = heads[h];
+	newPme->pprev = &heads[h];
+	if (newPme->next)
+		newPme->next->pprev = &newPme->next;
+	heads[h] = newPme;
+
+	return newPme->mc;
 }
 
 const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start) const
@@ -59,8 +75,12 @@ const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start
 			     pa >= pme->pa + MemoryChunk::size);
 	     pme = pme->next)
 		;
-	if (!pme)
-		return NULL;
+	if (!pme) {
+		if (parent)
+			return parent->lookupConst(pa, mc_start);
+		else
+			return NULL;
+	}
 	*mc_start = pa - pme->pa;
 	return pme->mc;
 }
@@ -88,12 +108,21 @@ PMap *PMap::empty()
 	return work;	
 }
 
+PMap *PMap::dupeSelf(void)
+{
+	PMap *work = empty();
+
+	work->nextPa = nextPa;
+	work->parent = this;
+	return work;
+}
+
 unsigned PMap::paHash(PhysicalAddress pa)
 {
 	return (pa._pa / MemoryChunk::size) % nrHashBuckets;
 }
 
-void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
+void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv) const
 {
 	unsigned h = paHash(pa);
 	PMapEntry *pme;
@@ -102,7 +131,16 @@ void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 			     pa >= pme->pa + MemoryChunk::size);
 	     pme = pme->next)
 		;
-	assert(pme);
-	hv(pme);
-	hv(pme->mc);
+	if (!pme) {
+		assert(parent);
+		parent->visitPA(pa, hv);
+	} else {
+		hv(pme);
+		hv(pme->mc);
+	}
+}
+
+void PMap::visit(HeapVisitor &hv)
+{
+	hv(parent);
 }

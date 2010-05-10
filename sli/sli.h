@@ -565,6 +565,12 @@ public:
 		r._pa = _pa + x;
 		return r;
 	}
+	PhysicalAddress operator-(unsigned long x) const
+	{
+		PhysicalAddress r;
+		r._pa = _pa + x;
+		return r;
+	}
 	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
 };
 
@@ -658,6 +664,8 @@ public:
 
 	void write(unsigned offset, const void *source, unsigned nr_bytes);
 	void read(unsigned offset, void *dest, unsigned nr_bytes) const;
+
+	MemoryChunk *dupeSelf() const;
 private:
 	unsigned char content[size];
 };
@@ -690,6 +698,8 @@ private:
 	static unsigned paHash(PhysicalAddress pa);
 	PhysicalAddress nextPa;
 	PMapEntry *heads[nrHashBuckets];
+	const PMap *parent;
+
 public:
 	/* Look up the memory chunk for a physical address.  On
 	   success, *mc_start is set to the offset of the address in
@@ -702,7 +712,10 @@ public:
 	PhysicalAddress introduce(MemoryChunk *mc);
 
 	static PMap *empty();
-	void visitPA(PhysicalAddress pa, HeapVisitor &hv);
+	PMap *dupeSelf();
+
+	void visitPA(PhysicalAddress pa, HeapVisitor &hv) const;
+	void visit(HeapVisitor &hv);
 };
 
 class AddressSpace {

@@ -95,7 +95,34 @@ main()
 	mc3 = pmap1->lookup(pa2, &off1);
 	assert(mc3 == NULL);
 
-	/* All done */
+	printf("State forking...\n");
+	mc1 = MemoryChunk::allocate();
+	mc1->write(0, "Hello world", 11);
+	pa1 = pmap1->introduce(mc1);
+	PMap *pmap2 = pmap1->dupeSelf();
+	PMap *pmap3 = pmap1->dupeSelf();
 
+	printf("Check forked state can see parent's MCs\n");
+	const MemoryChunk *cmc = pmap2->lookupConst(pa1, &off1);
+	assert(cmc == mc1);
+	cmc = pmap3->lookupConst(pa1, &off1);
+	assert(cmc == mc1);
+
+	printf("Check forked state can update own MCs.\n");
+	mc2 = pmap2->lookup(pa1, &off1);
+	mc2->write(0, "goodbye", 7);
+	unsigned char buf[30];
+	mc2->read(0, buf, 7);
+	assert(!memcmp(buf, "goodbye", 7));
+
+	printf("Check forked state can't update parent or sibling MCs\n");
+	mc3 = pmap1->lookup(pa1, &off1);
+
+	mc3->read(0, buf, 11);
+	assert(!memcmp(buf, "Hello world", 11));
+
+	cmc = pmap3->lookup(pa1, &off1);
+	cmc->read(0, buf, 11);
+	assert(!memcmp(buf, "Hello world", 11));
 	return 0;
 }
