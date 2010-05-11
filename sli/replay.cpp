@@ -1,3 +1,5 @@
+/* This file is somewhat misnamed: it includes both replay and record
+ * methods on events. */
 #include "sli.h"
 
 void RdtscEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
@@ -9,7 +11,7 @@ void RdtscEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	thr->temporaries[tmp].lo.v = lrr->tsc;
 }
 
-InterpretResult RdtscEvent::fake(Thread *thr, MachineState *ms)
+InterpretResult RdtscEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
 	printf("fake rdtsc\n");
 	return InterpretResultIncomplete;
@@ -62,10 +64,16 @@ void StoreEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	}
 }
 
-InterpretResult StoreEvent::fake(Thread *thr, MachineState *ms)
+InterpretResult StoreEvent::fake(Thread *thr, MachineState *ms,
+				 LogRecord **lr)
 {
 	if (ms->addressSpace->isWritable(addr, size, thr)) {
 		ms->addressSpace->writeMemory(addr, size, data, false, thr);
+		if (lr) {
+			void *sb = malloc(size);
+			memcpy(sb, data, size);
+			*lr = new LogRecordStore(thr->tid, size, addr, sb);
+		}
 		return InterpretResultContinue;
 	} else {
 		return InterpretResultCrash;
@@ -102,7 +110,7 @@ void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	}
 }
 
-InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms)
+InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		unsigned char buf[16];
@@ -114,6 +122,11 @@ InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms)
 			memcpy(&thr->temporaries[tmp].hi.v, buf + 8, size - 8);
 		} else {
 			throw NotImplementedException();
+		}
+		if (lr) {
+			void *rb = malloc(size);
+			memcpy(rb, buf, size);
+			*lr = new LogRecordLoad(thr->tid, size, addr, rb);
 		}
 		return InterpretResultContinue;
 	} else {
@@ -149,8 +162,11 @@ void InstructionEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
        CHECK_REGISTER(4);
 }
 
-InterpretResult InstructionEvent::fake(Thread *thr, MachineState *ms)
+InterpretResult InstructionEvent::fake(Thread *thr, MachineState *ms,
+				       LogRecord **lr)
 {
+	if (lr)
+		*lr = new LogRecordFootstep(thr->tid, rip, reg0, reg1, reg2, reg3, reg4);
 	return InterpretResultContinue;
 }
 
@@ -164,7 +180,7 @@ void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	replay_syscall(lrs, thr, ms);
 }
 
-InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms)
+InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
 	printf("can't fake syscall events yet\n");
 	return InterpretResultIncomplete;
@@ -218,18 +234,35 @@ void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
 	ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
 }
 
-InterpretResult CasEvent::fake(Thread *thr, MachineState *ms)
+InterpretResult CasEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr1,
+			       LogRecord **lr2)
 {
 	unsigned long expected_buf[2] = {expected.lo.v, expected.hi.v};
 	unsigned long data_buf[2] = {data.lo.v, data.hi.v};
 	unsigned long seen_buf[2];
 	memset(seen_buf, 0, sizeof(seen_buf));
 	ms->addressSpace->readMemory(addr.lo.v, size, seen_buf, false, thr);
+	if (lr1) {
+		void *sb = malloc(size);
+		memcpy(sb, seen_buf, size);
+		*lr1 = new LogRecordLoad(thr->tid, size, addr.lo.v, sb);
+	}
 	thr->temporaries[dest].lo.v = seen_buf[0];
 	thr->temporaries[dest].hi.v = seen_buf[1];
-	if (!memcmp(seen_buf, expected_buf, size))
+	if (!memcmp(seen_buf, expected_buf, size)) {
 		ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
+		if (lr2) {
+			void *sb = malloc(size);
+			memcpy(sb, data_buf, size);
+			*lr2 = new LogRecordStore(thr->tid, size, addr.lo.v, sb);
+		}
+	}
 	return InterpretResultContinue;
+}
+
+InterpretResult CasEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr1)
+{
+	return fake(thr, ms, lr1, NULL);
 }
 
 void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
@@ -252,7 +285,9 @@ void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 #endif
 }
 
-InterpretResult SignalEvent::fake(Thread *thr, MachineState *ms)
+InterpretResult SignalEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
+	if (lr)
+		*lr = new LogRecordSignal(thr->tid, thr->regs.regs.guest_RIP, signr, 0, virtaddr);
 	return InterpretResultCrash;
 }
