@@ -40,6 +40,21 @@ public:
 	PointerKeeperArr(underlying *y) : x(y) {}
 };
 
+template <typename underlying>
+class Maybe {
+public:
+	underlying value;
+	bool full;
+	Maybe(const underlying &x)
+		: value(x),
+		  full(true)
+	{
+	}
+	Maybe() : full(false)
+	{
+	}		
+};
+
 class Named {
 	char *_name;
 protected:
@@ -64,7 +79,8 @@ class ThreadId {
 	unsigned tid;
 public:
 	ThreadId(unsigned _tid) : tid(_tid) {}
-	bool operator==(const ThreadId &b) { return b.tid == tid; }
+	bool operator==(const ThreadId &b) const { return b.tid == tid; }
+	bool operator<(const ThreadId &b) const { return tid < b.tid; }
 	ThreadId operator++() {
 		tid++;
 		return *this;
@@ -534,15 +550,15 @@ public:
 };
 
 class MemoryAccess : public Named {
-protected:
+public:
 	unsigned long addr;
 	unsigned size;
-public:
 	MemoryAccess(unsigned long _addr, unsigned _size)
 		: addr(_addr),
 		  size(_size)
 	{
 	}
+	virtual bool isLoad() = 0;
 };
 
 class MemoryAccessLoad: public MemoryAccess {
@@ -555,6 +571,7 @@ public:
 		: MemoryAccess(evt.addr, evt.size)
 	{
 	}
+	virtual bool isLoad() { return true; }
 };
 
 class MemoryAccessStore : public MemoryAccess {
@@ -567,7 +584,7 @@ public:
 		: MemoryAccess(evt.addr, evt.size)
 	{
 	}
-
+	virtual bool isLoad() { return false; }
 };
 
 class AddressSpace;

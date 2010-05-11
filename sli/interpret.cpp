@@ -4,6 +4,7 @@
 
 #include <exception>
 #include <iostream>
+#include <map>
 
 #include "libvex.h"
 #include "sli.h"
@@ -102,21 +103,61 @@ main(int argc, char *argv[])
 	i->replayLogfile(partialLog, ptr, &ptr);
 	delete i;
 
-	for (unsigned x = 0; x < ms_base->threads->size(); x++) {
+	std::map<ThreadId,std::vector<MemoryAccess *> *> thread_traces;
+	unsigned x;
+	for (x = 0; x < ms_base->threads->size(); x++) {
+		ThreadId tid = ms_base->threads->index(x)->tid;
 		MachineState *ms3 = ms_base->dupeSelf();
-		printf("Collect trace of thread %d\n",
-		       ms_base->threads->index(x)->tid._tid());
-		i = new Interpreter(ms3);
-		std::vector<MemoryAccess *> v;
-		InterpretResult ir;
-		ir = i->getThreadMemoryTrace(ms3->threads->index(x)->tid, &v);
-		printf("Trace thread %d -> result %x, %zd items.\n",
-		       x, ir, v.size());
-		for (unsigned y = 0; y < v.size(); y++) {
-			printf("%d: %s\n", y, v[y]->name());
-			delete v[y];
+		printf("Collect trace of thread %d\n", tid._tid());
+		Interpreter i(ms3);
+		std::vector<MemoryAccess *> *v = new std::vector<MemoryAccess *>();
+		i.getThreadMemoryTrace(tid, v);
+		thread_traces[tid] = v;
+	}
+	std::map<ThreadId, Maybe<unsigned> > first_racing_access;
+	for (x = 0; x < ms_base->threads->size(); x++) {
+		ThreadId tid = ms_base->threads->index(x)->tid;
+
+		std::vector<MemoryAccess *> *v = thread_traces[tid];
+		assert(v);
+		unsigned mem_index;
+		for (mem_index = 0; mem_index < v->size(); mem_index++) {
+			MemoryAccess *ma = (*v)[mem_index];
+			unsigned other_thread;
+			for (other_thread = 0; other_thread < ms_base->threads->size(); other_thread++) {
+				if (other_thread == x)
+					continue;
+				ThreadId other_tid = ms_base->threads->index(other_thread)->tid;
+				std::vector<MemoryAccess *> *other_v = thread_traces[other_tid];
+				unsigned other_access;
+				for (other_access = 0;
+				     other_access < other_v->size();
+				     other_access++) {
+					MemoryAccess *other_ma = (*other_v)[other_access];
+					if (other_ma->addr + other_ma->size <= ma->addr ||
+					    other_ma->addr >= ma->addr + ma->size)
+						continue;
+					if (other_ma->isLoad() && ma->isLoad())
+						continue;
+					/* This is the one */
+					goto found_race;
+				}
+			}
 		}
-		delete i;
+		first_racing_access[tid] = Maybe<unsigned>();
+		continue;
+
+	found_race:
+		first_racing_access[tid] = Maybe<unsigned>(mem_index);
+	}
+
+	for (x = 0; x < ms_base->threads->size(); x++) {
+		ThreadId tid = ms_base->threads->index(x)->tid;
+		Maybe<unsigned> r = first_racing_access[tid];
+		if (r.full)
+			printf("Thread %d races at %d\n", tid._tid(), r.value);
+		else
+			printf("Thread %d doesn't race\n", tid._tid());
 	}
 
 	return 0;
