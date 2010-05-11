@@ -114,14 +114,14 @@ main(int argc, char *argv[])
 		Maybe<unsigned> r = it->second;
 		if (r.full) {
 			printf("Thread %d races at %d\n", tid._tid(), r.value);
-			MemLog *ml = new MemLog();
+			MemLog *ml = MemLog::emptyMemlog();
+			VexGcRoot ml_keeper((void **)&ml);
 			MachineState *ms = ms_base->dupeSelf();
 			Interpreter i(ms);
 			printf("Collecting log...\n");
 			i.runToAccessLoggingEvents(tid, r.value + 1, ml);
 			printf("Log:\n");
 			ml->dump();
-			delete ml;
 		} else
 			printf("Thread %d doesn't race\n", tid._tid());
 	}

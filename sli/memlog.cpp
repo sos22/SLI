@@ -21,29 +21,51 @@ InterpretResult MemLog::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *
 
 void MemLog::appendRecord(LogRecord *lr)
 {
-	content.push_back(lr);
+	content->push_back(lr);
 }
 
-MemLog::~MemLog()
+void MemLog::destruct()
 {
 	unsigned x;
-	for (x = 0; x < content.size(); x++)
-		delete content[x];
+	for (x = 0; x < content->size(); x++)
+		delete (*content)[x];
+	delete content;
 }
 
 LogRecord *MemLog::read(ptr startPtr, ptr *outPtr) const
 {
 	unsigned o = unwrapPtr(startPtr);
-	if (o >= content.size())
+	if (o >= content->size())
 		return NULL;
 	*outPtr = mkPtr(o + 1);
-	return content[o];
+	return (*content)[o];
 }
 
 void MemLog::dump() const
 {
 	unsigned x;
-	for (x = 0; x < content.size(); x++) {
-		printf("%d: %s\n", x, content[x]->name());
+	for (x = 0; x < content->size(); x++) {
+		printf("%d: %s\n", x, (*content)[x]->name());
 	}
+}
+
+static void destroy_memlog(void *_ctxt)
+{
+	MemLog *ctxt = (MemLog *)_ctxt;
+	ctxt->destruct();
+}
+
+MemLog *MemLog::emptyMemlog()
+{
+	static const VexAllocType vat = {
+	nbytes: sizeof(MemLog),
+	gc_visit: NULL,
+	destruct: destroy_memlog,
+	name: "MemLog"
+	};
+
+	MemLog *work = (MemLog *)__LibVEX_Alloc(&vat);
+	memset(work, 0, sizeof(work));
+	work->content = new std::vector<LogRecord *>();
+	return work;
 }
