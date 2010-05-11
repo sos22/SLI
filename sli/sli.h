@@ -387,8 +387,11 @@ enum InterpretResult {
 };
 
 class MemLog : public LogReader {
-	void appendRecord(LogRecord *lr);
 	std::vector<LogRecord *> *content;
+	unsigned offset;
+	const MemLog *parent;
+
+	void appendRecord(LogRecord *lr);
 	unsigned unwrapPtr(ptr p) const {
 		return *(unsigned *)p.cls_data;
 	}
@@ -403,12 +406,15 @@ class MemLog : public LogReader {
 	~MemLog();
 public:
 	static MemLog *emptyMemlog();
+	MemLog *dupeSelf() const;
 	virtual LogRecord *read(ptr startPtr, ptr *outPtr) const;
 	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt);
 	void dump() const;
 
 	/* Should only be called by GC destruct routine */
 	void destruct();
+
+	void visit(HeapVisitor *hv) const;
 };
 
 struct abstract_interpret_value {
