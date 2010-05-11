@@ -1128,20 +1128,23 @@ finished_block:
 	}
 }
 
-InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, std::vector<MemoryAccess *> *output)
+InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output)
 {
+	MemoryTrace *work = new MemoryTrace();
 	Thread *thr = currentState->findThread(tid);
 	while (1) {
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 
 		InterpretResult res = evt->fake(thr, currentState);
-		if (res != InterpretResultContinue)
+		if (res != InterpretResultContinue) {
+			*output = work;
 			return res;
+		}
 		if (LoadEvent *lr = dynamic_cast<LoadEvent *>(evt)) {
-			output->push_back(new MemoryAccessLoad(*lr));
+			work->push_back(new MemoryAccessLoad(*lr));
 		} else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
-			output->push_back(new MemoryAccessStore(*sr));
+			work->push_back(new MemoryAccessStore(*sr));
 		}
 	}
 }

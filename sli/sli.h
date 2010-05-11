@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include <map>
 
 #include "libvex_guest_amd64.h"
 #include "libvex_ir.h"
@@ -587,6 +588,35 @@ public:
 	virtual bool isLoad() { return false; }
 };
 
+/* Essentially a thin wrapper around std::vector */
+class MemoryTrace {
+public:
+	std::vector<MemoryAccess *> content;
+	~MemoryTrace() {
+		for (unsigned x; x < content.size(); x++)
+			delete content[x];
+	}
+	size_t size() const { return content.size(); }
+	MemoryAccess *&operator[](unsigned idx) { return content[idx]; }
+	void push_back(MemoryAccess *x) { content.push_back(x); }
+};
+
+class MemTracePool {
+	typedef std::map<ThreadId, MemoryTrace *> contentT;
+	contentT content;
+public:
+	~MemTracePool() {
+		while (!content.empty()) {
+			contentT::iterator it = content.begin();
+			delete it->second;
+			content.erase(it);
+		}
+	}
+	MemTracePool(MachineState *base_state);
+
+	std::map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
+};
+
 class AddressSpace;
 
 class expression_result_array {
@@ -940,7 +970,7 @@ public:
 	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint,
 			   LogReader::ptr *endingPoint = NULL);
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
-					     std::vector<MemoryAccess *> *output);
+					     MemoryTrace **output);
 };
 
 void replay_syscall(const LogRecordSyscall *lrs,
