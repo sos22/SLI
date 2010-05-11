@@ -36,11 +36,11 @@ main(int argc, char *argv[])
 	vcon.guest_max_insns = 1;
 	LibVEX_Init(failure_exit, log_bytes, 0, 0, &vcon);
 
-	LogReader *lf;
+	LogFile *lf;
 	LogReader::ptr ptr;
 	LogReader::ptr nextPtr;
 
-	lf = LogReader::open(argv[1], &ptr);
+	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 
@@ -94,7 +94,7 @@ main(int argc, char *argv[])
 	       (eof - 10000)._off());
 	LogReader *partialLog = lf->truncate(eof - 10000);
 #else
-	LogReader *partialLog = lf->truncate(LogReader::ptr(0xde74e31, 4123917));
+	LogReader *partialLog = lf->truncate(lf->mkPtr(0xde74e31, 4123917));
 	Interpreter *i;
 #endif
 

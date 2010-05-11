@@ -338,50 +338,41 @@ public:
 };
 
 class LogReader {
-	int fd;
 public:
 	class ptr {
-		friend class LogReader;
-		uint64_t off;
-		bool valid;
-		unsigned record_nr;
 	public:
-		ptr(uint64_t o, unsigned rn) :
-			off(o), valid(true),
-			record_nr(rn) {};
-	private:
-		uint64_t &offset() {
-			assert(valid);
-			return off;
-		}
-	public:
-		ptr() : valid(false) {};
-		/* This doesn't really mean much at a semantic level,
-		   but at a concrete one it's useful information for
-		   debugging. */
-		unsigned long _off() { return off; }
-		unsigned rn() { return record_nr; }
-		ptr operator-(unsigned long offset) const {
-			ptr p;
-			p.off = off - offset;
-			p.record_nr = 0;
-			p.valid = valid;
-			return p;
-		}
-		bool operator>=(ptr b) const {
-			assert(valid);
-			assert(b.valid);
-			return off >= b.off;
-		}
+		unsigned char cls_data[32];
 	};
-private:
-	ptr forcedEof;
-public:
+	virtual LogRecord *read(ptr startPtr, ptr *outPtr) const = 0;
+	virtual ~LogReader() {}
+};
 
-	LogRecord *read(ptr startPtr, ptr *outPtr) const;
-	~LogReader();
-	static LogReader *open(const char *path, ptr *initial_ptr);
-	LogReader *truncate(ptr eof);
+class LogFile : public LogReader {
+	int fd;
+	struct _ptr {
+		uint64_t off;
+		unsigned record_nr;
+		bool valid;
+		_ptr() : off(0xcafebabe00000000ul), record_nr(0xbeeffeed), valid(false) {}
+		bool operator>=(const _ptr &b) const { return off >= b.off; }
+	};
+	_ptr unwrapPtr(ptr p) const {
+		return *(_ptr *)p.cls_data;
+	}
+	_ptr forcedEof;
+public:
+	LogReader::ptr mkPtr(uint64_t off, unsigned record_nr) const {
+		ptr w;
+		_ptr *p = (_ptr *)w.cls_data;
+		p->off = off;
+		p->record_nr = record_nr;
+		p->valid = true;
+		return w;
+	}
+	virtual LogRecord *read(ptr startPtr, ptr *outPtr) const;
+	~LogFile();
+	static LogFile *open(const char *path, ptr *initial_ptr);
+	LogFile *truncate(ptr eof);
 };
 
 struct abstract_interpret_value {
