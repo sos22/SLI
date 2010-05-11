@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include <exception>
+#include <iostream>
 
 #include "libvex.h"
 #include "sli.h"
@@ -78,8 +79,8 @@ main(int argc, char *argv[])
 	delete lr;
 	MachineState *ms_base = MachineState::initialMachineState(as, Thread::initialThread(*lrir), *lris);
 	VexGcRoot base_root((void **)&ms_base);
-	MachineState *ms_adv = ms_base->dupeSelf();
 
+#if 0
 	printf("Doing initial replay...\n");
 	Interpreter *i = new Interpreter(ms_adv);
 	LogReader::ptr eof;
@@ -91,15 +92,32 @@ main(int argc, char *argv[])
 	       eof.rn(),
 	       (eof - 10000)._off());
 	LogReader *partialLog = lf->truncate(eof - 10000);
+#else
+	LogReader *partialLog = lf->truncate(LogReader::ptr(0xde74e31, 4123917));
+	Interpreter *i;
+#endif
+
+	printf("Replay to %d\n", 4123917);
 	i = new Interpreter(ms_base);
 	i->replayLogfile(partialLog, ptr, &ptr);
 	delete i;
 
-	MachineState *ms3 = ms_base->dupeSelf();
-	printf("Replay the rest of the way\n");
-	i = new Interpreter(ms3);
-	i->replayLogfile(lf, ptr);
-	printf("All done.\n");
+	for (unsigned x = 0; x < ms_base->threads->size(); x++) {
+		MachineState *ms3 = ms_base->dupeSelf();
+		printf("Collect trace of thread %d\n",
+		       ms_base->threads->index(x)->tid._tid());
+		i = new Interpreter(ms3);
+		std::vector<MemoryAccess *> v;
+		InterpretResult ir;
+		ir = i->getThreadMemoryTrace(ms3->threads->index(x)->tid, &v);
+		printf("Trace thread %d -> result %x, %zd items.\n",
+		       x, ir, v.size());
+		for (unsigned y = 0; y < v.size(); y++) {
+			printf("%d: %s\n", y, v[y]->name());
+			delete v[y];
+		}
+		delete i;
+	}
 
 	return 0;
 }

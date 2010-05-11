@@ -9,6 +9,12 @@ void RdtscEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	thr->temporaries[tmp].lo.v = lrr->tsc;
 }
 
+InterpretResult RdtscEvent::fake(Thread *thr, MachineState *ms)
+{
+	printf("fake rdtsc\n");
+	return InterpretResultIncomplete;
+}
+
 StoreEvent::StoreEvent(unsigned long _addr, unsigned _size, const void *_data)
 	: addr(_addr),
 	  size(_size)
@@ -56,6 +62,16 @@ void StoreEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	}
 }
 
+InterpretResult StoreEvent::fake(Thread *thr, MachineState *ms)
+{
+	if (ms->addressSpace->isWritable(addr, size, thr)) {
+		ms->addressSpace->writeMemory(addr, size, data, false, thr);
+		return InterpretResultContinue;
+	} else {
+		return InterpretResultCrash;
+	}
+}
+
 void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
@@ -83,6 +99,25 @@ void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 		}
 	} else {
 		checkSegv(lr, addr);
+	}
+}
+
+InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms)
+{
+	if (ms->addressSpace->isReadable(addr, size, thr)) {
+		unsigned char buf[16];
+		ms->addressSpace->readMemory(addr, size, buf, false, thr);
+		if (size <= 8) {
+			memcpy(&thr->temporaries[tmp].lo.v, buf, size);
+		} else if (size <= 16) {
+			memcpy(&thr->temporaries[tmp].lo.v, buf, 8);
+			memcpy(&thr->temporaries[tmp].hi.v, buf + 8, size - 8);
+		} else {
+			throw NotImplementedException();
+		}
+		return InterpretResultContinue;
+	} else {
+		return InterpretResultCrash;
 	}
 }
 
@@ -114,6 +149,11 @@ void InstructionEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
        CHECK_REGISTER(4);
 }
 
+InterpretResult InstructionEvent::fake(Thread *thr, MachineState *ms)
+{
+	return InterpretResultContinue;
+}
+
 void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	LogRecordSyscall *lrs = dynamic_cast<LogRecordSyscall *>(lr);
@@ -122,6 +162,12 @@ void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 					    lr->name());
 		
 	replay_syscall(lrs, thr, ms);
+}
+
+InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms)
+{
+	printf("can't fake syscall events yet\n");
+	return InterpretResultIncomplete;
 }
 
 void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
@@ -172,6 +218,20 @@ void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
 	ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
 }
 
+InterpretResult CasEvent::fake(Thread *thr, MachineState *ms)
+{
+	unsigned long expected_buf[2] = {expected.lo.v, expected.hi.v};
+	unsigned long data_buf[2] = {data.lo.v, data.hi.v};
+	unsigned long seen_buf[2];
+	memset(seen_buf, 0, sizeof(seen_buf));
+	ms->addressSpace->readMemory(addr.lo.v, size, seen_buf, false, thr);
+	thr->temporaries[dest].lo.v = seen_buf[0];
+	thr->temporaries[dest].hi.v = seen_buf[1];
+	if (!memcmp(seen_buf, expected_buf, size))
+		ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
+	return InterpretResultContinue;
+}
+
 void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
@@ -190,4 +250,9 @@ void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	if (ms->signalHandlers.handlers[11].sa_handler != SIG_DFL)
 		throw NotImplementedException("don't handle custom signal handlers");
 #endif
+}
+
+InterpretResult SignalEvent::fake(Thread *thr, MachineState *ms)
+{
+	return InterpretResultCrash;
 }

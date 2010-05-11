@@ -1128,6 +1128,24 @@ finished_block:
 	}
 }
 
+InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, std::vector<MemoryAccess *> *output)
+{
+	Thread *thr = currentState->findThread(tid);
+	while (1) {
+		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
+		PointerKeeper<ThreadEvent> k_evt(evt);
+
+		InterpretResult res = evt->fake(thr, currentState);
+		if (res != InterpretResultContinue)
+			return res;
+		if (LoadEvent *lr = dynamic_cast<LoadEvent *>(evt)) {
+			output->push_back(new MemoryAccessLoad(*lr));
+		} else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
+			output->push_back(new MemoryAccessStore(*sr));
+		}
+	}
+}
+
 void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 				LogReader::ptr *eof)
 {
@@ -1138,7 +1156,6 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 
 		PointerKeeper<LogRecord> k_lr(lr);
 		Thread *thr = currentState->findThread(lr->thread());
-		VexGcRoot thread_keeper((void **)&thr);
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 

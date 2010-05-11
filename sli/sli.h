@@ -328,9 +328,11 @@ public:
 		uint64_t off;
 		bool valid;
 		unsigned record_nr;
+	public:
 		ptr(uint64_t o, unsigned rn) :
 			off(o), valid(true),
 			record_nr(rn) {};
+	private:
 		uint64_t &offset() {
 			assert(valid);
 			return off;
@@ -387,9 +389,18 @@ public:
 class Thread;
 class MachineState;
 
+enum InterpretResult {
+	InterpretResultContinue = 0xf001,
+	InterpretResultExit,
+	InterpretResultCrash,
+	InterpretResultIncomplete
+};
+
 class ThreadEvent : public Named {
 public:
+	/* Replay the event using information in the log record */
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms) = 0;
+	virtual InterpretResult fake(Thread *thr, MachineState *ms) = 0;
 	virtual ~ThreadEvent() {};
 };
 
@@ -399,10 +410,12 @@ protected:
 	virtual char *mkName() { return my_asprintf("rdtsc(%d)", tmp); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	virtual InterpretResult fake(Thread *thr, MachineState *ms);
 	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
 };
 
 class LoadEvent : public ThreadEvent {
+	friend class MemoryAccessLoad;
 	IRTemp tmp;
 	unsigned long addr;
 	unsigned size;
@@ -410,6 +423,7 @@ protected:
 	virtual char *mkName() { return my_asprintf("load(%d, 0x%lx, %d)", tmp, addr, size); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	virtual InterpretResult fake(Thread *thr, MachineState *ms);
 	LoadEvent(IRTemp _tmp, unsigned long _addr, unsigned _size) :
 		tmp(_tmp),
 		addr(_addr),
@@ -419,6 +433,7 @@ public:
 };
 
 class StoreEvent : public ThreadEvent {
+	friend class MemoryAccessStore;
 	unsigned long addr;
 	unsigned size;
 	void *data;
@@ -426,6 +441,7 @@ protected:
 	virtual char *mkName() { return my_asprintf("store(0x%lx, %d)", addr, size); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	virtual InterpretResult fake(Thread *thr, MachineState *ms);
 	StoreEvent(unsigned long addr, unsigned size, const void *data);
 	virtual ~StoreEvent();
 };
@@ -444,6 +460,7 @@ protected:
 	}
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	virtual InterpretResult fake(Thread *thr, MachineState *ms);
 	InstructionEvent(unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
 			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4) :
 		rip(_rip),
@@ -470,6 +487,7 @@ protected:
 	}
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	virtual InterpretResult fake(Thread *thr, MachineState *ms);
 	void replay(Thread *thr, LogRecord *lr, MachineState *ms,
 		    const LogReader *lf, LogReader::ptr ptr,
 		    LogReader::ptr *outPtr);
@@ -494,6 +512,7 @@ protected:
 	}
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	virtual InterpretResult fake(Thread *thr, MachineState *ms);
 };
 
 class SignalEvent : public ThreadEvent {
@@ -506,11 +525,49 @@ protected:
 	}
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
+	virtual InterpretResult fake(Thread *thr, MachineState *ms);
 	SignalEvent(unsigned _signr, unsigned long _va) :
 		signr(_signr),
 		virtaddr(_va)
 	{
 	}
+};
+
+class MemoryAccess : public Named {
+protected:
+	unsigned long addr;
+	unsigned size;
+public:
+	MemoryAccess(unsigned long _addr, unsigned _size)
+		: addr(_addr),
+		  size(_size)
+	{
+	}
+};
+
+class MemoryAccessLoad: public MemoryAccess {
+protected:
+	virtual char *mkName() {
+		return my_asprintf("Load(%lx:%lx)", addr, addr + size);
+	}
+public:
+	MemoryAccessLoad(const class LoadEvent &evt)
+		: MemoryAccess(evt.addr, evt.size)
+	{
+	}
+};
+
+class MemoryAccessStore : public MemoryAccess {
+protected:
+	virtual char *mkName() {
+		return my_asprintf("Store(%lx:%lx)", addr, addr + size);
+	}
+public:
+	MemoryAccessStore(const class StoreEvent &evt)
+		: MemoryAccess(evt.addr, evt.size)
+	{
+	}
+
 };
 
 class AddressSpace;
@@ -810,7 +867,9 @@ public:
 };
 
 class MachineState {
+public:
 	LibvexVector<Thread> *threads;
+private:
 	bool exitted;
 	unsigned exit_status;
 	ThreadId nextTid;
@@ -863,6 +922,8 @@ public:
 	}
 	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint,
 			   LogReader::ptr *endingPoint = NULL);
+	InterpretResult getThreadMemoryTrace(ThreadId tid,
+					     std::vector<MemoryAccess *> *output);
 };
 
 void replay_syscall(const LogRecordSyscall *lrs,
