@@ -83,6 +83,7 @@ template <typename content>
 class LibvexVector {
 	friend void __visit_vector(const void *_ctxt, HeapVisitor &hv);
 	unsigned sz;
+	unsigned maxSz;
 	content **items;
 
 	/* DNI */
@@ -101,8 +102,16 @@ public:
 	}
 	void push(content *v) {
 		sz++;
-		items = (content **)realloc(items, sizeof(content *) * sz);
+		if (sz > maxSz) {
+			items = (content **)realloc(items, sizeof(content *) * sz);
+			maxSz = sz;
+		}
 		items[sz-1] = v;
+	}
+	content *pop() {
+		assert(sz != 0);
+		sz--;
+		return items[sz];
 	}
 
 	/* This gets a leading underscore because it throws away the
@@ -111,7 +120,7 @@ public:
 		free(items);
 		items = (content **)malloc(sizeof(content *) * new_size);
 		memset(items, 0, sizeof(content *) * new_size);
-		sz = new_size;
+		maxSz = sz = new_size;
 	}
 
 	static LibvexVector<content> *empty() {

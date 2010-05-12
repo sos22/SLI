@@ -14,7 +14,8 @@ InterpretResult LogWriter::recordEvent(Thread *thr, MachineState *ms, ThreadEven
 	} else {
 		LogRecord *lr;
 		res = evt->fake(thr, ms, &lr);
-		append(*lr);
+		if (lr)
+			append(*lr);
 	}
 	return res;
 }

@@ -182,6 +182,8 @@ void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 
 InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
+	if (lr)
+		*lr = NULL;
 	printf("can't fake syscall events yet\n");
 	return InterpretResultIncomplete;
 }
@@ -258,7 +260,8 @@ InterpretResult CasEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr1,
 			memcpy(sb, data_buf, size);
 			*lr2 = new LogRecordStore(thr->tid, size, addr.lo.v, sb);
 		}
-	}
+	} else if (lr2)
+		*lr2 = NULL;
 	return InterpretResultContinue;
 }
 

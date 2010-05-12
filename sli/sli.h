@@ -1131,6 +1131,7 @@ public:
 					     MemoryTrace **output);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      LogWriter *output = NULL);
+	void runToFailure(ThreadId tid, LogWriter *output);
 };
 
 void replay_syscall(const LogRecordSyscall *lrs,

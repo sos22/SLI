@@ -1152,14 +1152,11 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **ou
 void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 					   LogWriter *output)
 {
-	if (!nr_accesses)
-		return;
-	Thread *thr = currentState->findThread(tid);
-	while (1) {
-		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent> k_evt(evt);
-
-		InterpretResult res = output->recordEvent(thr, currentState, evt);
+        Thread *thr = currentState->findThread(tid);
+        while (1) {
+                ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
+                PointerKeeper<ThreadEvent> k_evt(evt);
+                InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (dynamic_cast<LoadEvent *>(evt) ||
 		    dynamic_cast<StoreEvent *>(evt)) {
 			nr_accesses--;
@@ -1170,6 +1167,18 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 		/* Caller should have made sure that we can actually
 		   make progress. */
 		assert(res == InterpretResultContinue);
+	}
+}
+
+void Interpreter::runToFailure(ThreadId tid, LogWriter *output)
+{
+	Thread *thr = currentState->findThread(tid);
+	while (1) {
+		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
+		PointerKeeper<ThreadEvent> k_evt(evt);
+		InterpretResult res = output->recordEvent(thr, currentState, evt);
+		if (res != InterpretResultContinue)
+			return;
 	}
 }
 
