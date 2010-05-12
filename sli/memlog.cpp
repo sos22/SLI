@@ -82,7 +82,7 @@ MemLog *MemLog::emptyMemlog()
 	};
 
 	MemLog *work = (MemLog *)__LibVEX_Alloc(&vat);
-	memset(work, 0, sizeof(work));
+	memset(work, 0, sizeof(*work));
 	work->content = new std::vector<LogRecord *>();
 	return work;
 }
