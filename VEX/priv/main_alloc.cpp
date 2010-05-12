@@ -213,7 +213,7 @@ alloc_bytes(const VexAllocType *type, unsigned size)
     cursor->size = size;
     vassert(cursor->size != 0);
     next = next_alloc_header(cursor);
-    vassert(next != NULL);
+    vassert(next != alloc_header_terminator);
     next->type = NULL;
     next->size = old_size - size;
     vassert(next->size != 0);
