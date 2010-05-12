@@ -8,7 +8,7 @@ defvars() {
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
 SLIR_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(SLIR_SOURCES))
-all_sources+=\$(SLIR_SOURCES)
+all_sources+=\$(SLIR_SOURCES) ${input_base}/interpret.cpp ${input_base}/crop.cpp
 clean_files+=slir.a
 EOF
 }
