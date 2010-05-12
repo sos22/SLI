@@ -170,6 +170,21 @@ skip:
 		(void)r;
 		return new LogRecordInitialSighandlers(tid, isr.handlers);
 	}
+	case RECORD_vex_thread_state: {
+		vex_thread_state_record *vtsr;
+		vtsr = (vex_thread_state_record *)malloc(rh.size - sizeof(rh));
+		int r = pread(fd, vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
+		(void)r;
+		expression_result_array era;
+		era.setSize((rh.size - sizeof(rh)) / sizeof(unsigned long));
+		for (unsigned x = 0; x < era.nr_entries; x++) {
+			era[x].lo.v = vtsr->temporaries[x * 2];
+			era[x].hi.v = vtsr->temporaries[x * 2 + 1];
+		}
+		unsigned sn = vtsr->statement_nr;
+		free(vtsr);
+		return new LogRecordVexThreadState(tid, sn, era);
+	}
 
 	default:
 		abort();

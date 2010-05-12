@@ -93,9 +93,12 @@ class LogRecord : public Named {
 	/* DNI */
 	LogRecord(const LogRecord &);
 	ThreadId tid;
+protected:
+	void *marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const;
 public:
 	ThreadId thread() const { return tid; }
 	LogRecord(ThreadId _tid) : tid(_tid) {}
+	virtual void *marshal(unsigned *size) const = 0;
 	virtual ~LogRecord();
 };
 
@@ -128,6 +131,7 @@ public:
 		reg4(_reg4)
 	{
 	}
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordSyscall : public LogRecord {
@@ -152,6 +156,7 @@ public:
 		arg3(_arg3)
 	{
 	}
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordMemory : public LogRecord {
@@ -173,6 +178,7 @@ public:
 		contents(_contents)
 	{}
 	virtual ~LogRecordMemory() { free((void *)contents); }
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordRdtsc : public LogRecord {
@@ -189,6 +195,7 @@ public:
 		  tsc(_tsc)
 	{
 	}
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordLoad : public LogRecord {
@@ -213,6 +220,7 @@ public:
 	{
 	}
 	virtual ~LogRecordLoad() { free((void *)buf); }
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordStore : public LogRecord {
@@ -237,6 +245,7 @@ public:
 	{
 	}
 	virtual ~LogRecordStore() { free((void *)buf); }
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordSignal : public LogRecord {
@@ -262,6 +271,7 @@ public:
 		virtaddr(_va)
 	{
 	}
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordAllocateMemory : public LogRecord {
@@ -288,6 +298,7 @@ public:
 		flags(_flags)
 	{
 	}      
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordInitialRegisters : public LogRecord {
@@ -304,6 +315,7 @@ public:
 		regs(r)
 	{
 	}
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordInitialBrk : public LogRecord {
@@ -319,6 +331,7 @@ public:
 		brk(_brk)
 	{
 	}
+	void *marshal(unsigned *size) const;
 };
 
 class LogRecordInitialSighandlers : public LogRecord {
@@ -333,8 +346,9 @@ public:
 				    const struct sigaction *sa)
 		: LogRecord(tid)
 	{
-		memcpy(handlers, sa, sizeof(*sa));
+		memcpy(handlers, sa, sizeof(*sa) * 64);
 	}
+	void *marshal(unsigned *size) const;
 };
 
 class LogReader {
@@ -345,6 +359,12 @@ public:
 	};
 	virtual LogRecord *read(ptr startPtr, ptr *outPtr) const = 0;
 	virtual ~LogReader() {}
+};
+
+class LogWriter {
+public:
+	virtual void append(const LogRecord &lr) = 0;
+	virtual ~LogWriter() {}
 };
 
 class LogFile : public LogReader {
@@ -373,6 +393,14 @@ public:
 	~LogFile();
 	static LogFile *open(const char *path, ptr *initial_ptr);
 	LogFile *truncate(ptr eof);
+};
+
+class LogFileWriter : public LogWriter {
+	int fd;
+public:
+	void append(const LogRecord &lr);
+	static LogFileWriter *open(const char *fname);
+	~LogFileWriter();
 };
 
 class ThreadEvent;
@@ -535,7 +563,7 @@ public:
 				     LogRecord **lr2 = NULL);
 	void replay(Thread *thr, LogRecord *lr, MachineState *ms,
 		    const LogReader *lf, LogReader::ptr ptr,
-		    LogReader::ptr *outPtr);
+		    LogReader::ptr *outPtr, LogWriter *lw);
 	void record(Thread *thr, LogRecord **lr1, LogRecord **lr2);
 	CasEvent(IRTemp _dest,
 		 expression_result _addr,
@@ -671,6 +699,23 @@ public:
 	}
 };
 
+class LogRecordVexThreadState : public LogRecord {
+protected:
+	virtual char *mkName() {
+		return strdup("vex state");
+	}
+	VexGcRoot root;
+	LogRecordVexThreadState **root_data;
+public:
+	expression_result_array tmp;
+	unsigned statement_nr;
+	LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
+				expression_result_array _tmp);
+	void *marshal(unsigned *sz) const;
+	void visit(HeapVisitor &hv) const;
+};
+
+
 class Thread {
 	void translateNextBlock(AddressSpace *addrSpace);
 	struct expression_result eval_expression(IRExpr *expr);
@@ -703,6 +748,10 @@ public:
 	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
 	Thread *fork(unsigned newPid);
 	Thread *dupeSelf() const;
+	void dumpSnapshot(LogWriter *lw) const;
+
+	void imposeState(const LogRecordVexThreadState &rec,
+			 AddressSpace *as);
 };
 
 class PhysicalAddress {
@@ -747,6 +796,7 @@ public:
 				writable == p.writable &&
 				executable == p.executable;
 		}
+		operator unsigned long() const;
 	};
 	class AllocFlags {
 	public:
@@ -759,6 +809,7 @@ public:
 		bool operator==(const AllocFlags alf) const {
 			return expandsDown == alf.expandsDown;
 		}
+		operator unsigned long() const;
 	};
 	static const AllocFlags defaultFlags;
 
@@ -932,6 +983,9 @@ public:
 	AddressSpace *dupeSelf() const;
 	void visit(HeapVisitor &hv) const;
 	void sanityCheck() const;
+
+	void dumpBrkPtr(LogWriter *lw) const;
+	void dumpSnapshot(LogWriter *lw) const;
 };
 
 class SignalHandlers {
@@ -939,6 +993,10 @@ public:
 	struct sigaction handlers[64];
 	SignalHandlers(const LogRecordInitialSighandlers &init) {
 		memcpy(handlers, init.handlers, sizeof(init.handlers));
+	}
+	void dumpSnapshot(LogWriter *lw) const
+	{
+		lw->append(LogRecordInitialSighandlers(ThreadId(0), handlers));
 	}
 };
 
@@ -953,12 +1011,15 @@ private:
 	/* DNI */
 	MachineState();
 	~MachineState();
+	static MachineState *initialMachineState(AddressSpace *as,
+						 const LogRecordInitialSighandlers &handlers);
 public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
-	static MachineState *initialMachineState(AddressSpace *as,
-						 Thread *rootThread,
-						 const LogRecordInitialSighandlers &handlers);
+	static MachineState *initialMachineState(LogReader *lf,
+						 LogFile::ptr startPtr,
+						 LogFile::ptr *endPtr);
+
 	void registerThread(Thread *t) {
 		t->tid = nextTid;
 		++nextTid;
@@ -977,6 +1038,8 @@ public:
 	}
 
 	MachineState *dupeSelf() const;
+
+	void dumpSnapshot(LogWriter *lw) const;
 
 	void visit(HeapVisitor &hv) const;
 	void sanityCheck() const;
@@ -997,7 +1060,7 @@ public:
 	{
 	}
 	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint,
-			   LogReader::ptr *endingPoint = NULL);
+			   LogReader::ptr *endingPoint = NULL, LogWriter *log = NULL);
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
 					     MemoryTrace **output);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
@@ -1011,8 +1074,11 @@ void
 process_memory_records(AddressSpace *addrSpace,
 		       const LogReader *lf,
 		       LogReader::ptr startOffset,
-		       LogReader::ptr *endOffset);
+		       LogReader::ptr *endOffset,
+		       LogWriter *lw);
 
 void debugger_attach(void);
+
+void init_sli(void);
 
 #endif /* !SLI_H__ */

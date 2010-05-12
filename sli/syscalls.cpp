@@ -14,7 +14,8 @@ void
 process_memory_records(AddressSpace *addrSpace,
 		       const LogReader *lf,
 		       LogReader::ptr startOffset,
-		       LogReader::ptr *endOffset)
+		       LogReader::ptr *endOffset,
+		       LogWriter *lw)
 {
 	while (1) {
 		LogReader::ptr nextOffset;
@@ -25,6 +26,8 @@ process_memory_records(AddressSpace *addrSpace,
 		LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr);
 		if (!lrm)
 			break;
+		if (lw)
+			lw->append(*lr);
 		addrSpace->writeMemory(lrm->start, lrm->size, lrm->contents,
 				       true);
 		startOffset = nextOffset;

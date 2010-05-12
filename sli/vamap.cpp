@@ -19,6 +19,13 @@ VAMap::Protection::Protection(unsigned prot)
 		executable = true;
 }
 
+VAMap::Protection::operator unsigned long() const
+{
+	return (readable ? PROT_READ : 0) |
+		(writable ? PROT_WRITE : 0) |
+		(executable ? PROT_EXEC : 0);
+}
+
 VAMap::AllocFlags::AllocFlags(unsigned flags)
 {
        expandsDown = false;
@@ -26,7 +33,12 @@ VAMap::AllocFlags::AllocFlags(unsigned flags)
                printf("Create a stack segment.\n");
                expandsDown = true;
        }
- }
+}
+
+VAMap::AllocFlags::operator unsigned long() const
+{
+	return expandsDown ? (MAP_GROWSDOWN|MAP_STACK) : 0;
+}
 
 const VAMap::AllocFlags VAMap::defaultFlags(false);
 
@@ -198,7 +210,7 @@ bool VAMap::findNextMapping(unsigned long from,
 	if (parent)
 		return parent->findNextMapping(from, va, pa, prot, alf);
 
-	VAMapEntry *vme, *bestVme;
+	const VAMapEntry *vme, *bestVme;
 
 	bestVme = NULL;
 	vme = root;
@@ -222,8 +234,12 @@ bool VAMap::findNextMapping(unsigned long from,
 	}
 	if (!bestVme)
 		return false;
-	if (va)
-		*va = bestVme->start;
+	if (va) {
+		if (from >= bestVme->start)
+			*va = from;
+		else
+			*va = bestVme->start;
+	}
 	if (pa) {
 		if (from >= bestVme->start)
 			*pa = bestVme->pa[(from - bestVme->start)/MemoryChunk::size];

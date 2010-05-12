@@ -11,7 +11,7 @@ Thread *Thread::initialThread(const LogRecordInitialRegisters &initRegs)
 
 	work = LibVEX_Alloc_Thread();
 	memset(work, 0, sizeof(*work));
-	work->tid = ThreadId(1);
+	work->tid = initRegs.thread();
 	work->regs = initRegs.regs;
 	return work;
 }
@@ -34,3 +34,22 @@ Thread *Thread::dupeSelf() const
 	*work = *this;
 	return work;
 }
+
+void Thread::dumpSnapshot(LogWriter *lw) const
+{
+	lw->append(LogRecordInitialRegisters(tid, regs.regs));
+	if (currentIRSB && currentIRSBOffset != 0)
+		lw->append(LogRecordVexThreadState(tid, currentIRSBOffset, temporaries));
+}
+
+void Thread::imposeState(const LogRecordVexThreadState &rec,
+			 AddressSpace *as)
+{
+	translateNextBlock(as);
+	assert(currentIRSB);
+	assert(rec.statement_nr < (unsigned)currentIRSB->stmts_used);
+	currentIRSBOffset = rec.statement_nr;
+
+	temporaries = rec.tmp;
+}
+

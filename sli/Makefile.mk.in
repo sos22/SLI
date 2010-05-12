@@ -1,8 +1,9 @@
-targets="slir"
+targets="slir crop"
 
 defvars() {
-	echo SLIR_SOURCES= ${input_base}/{interpret,logreader,addressspace,machinestate,interpreter,syscalls,transform_expr,replay}.cpp
+	echo SLIR_SOURCES= ${input_base}/{logreader,addressspace,machinestate,interpreter,syscalls,transform_expr,replay}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{thread,machinestate,vamap,pmap,memorychunk,util,memtracepool,memlog}.cpp
+	echo SLIR_SOURCES+= ${input_base}/logwriter.cpp
 
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
@@ -17,14 +18,19 @@ rules() {
 \$(SLIR_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
 \$(SLIR_DEPS): CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/interpret.o: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/crop.o: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/interpreter.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/interpret.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/crop.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/interpreter.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 
 slir.a: \$(SLIR_OBJECTS)
 	rm -f \$@ ; ar rcs \$@ \$^
 
-slir: slir.a libVEX.a
+slir: ${input_base}/interpret.o slir.a libVEX.a
+	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
+
+crop: ${input_base}/crop.o slir.a libVEX.a
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 }

@@ -105,7 +105,13 @@ struct initial_sighandlers_record {
 	sigaction_t handlers[64];
 };
 
-#define RECORD_MAX_CLASS RECORD_initial_sighandlers
+struct vex_thread_state_record {
+#define RECORD_vex_thread_state 16
+	unsigned statement_nr;
+	unsigned long temporaries[0];
+};
+
+#define RECORD_MAX_CLASS RECORD_vex_thread_state
 
 
 struct index_record {

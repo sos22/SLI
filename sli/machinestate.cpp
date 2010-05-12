@@ -1,3 +1,5 @@
+#include <err.h>
+
 #include "sli.h"
 
 DECLARE_VEX_TYPE(MachineState);
@@ -10,7 +12,6 @@ void MachineState::visit(HeapVisitor &hv) const
 }
 
 MachineState *MachineState::initialMachineState(AddressSpace *as,
-						Thread *rootThread,
 						const LogRecordInitialSighandlers &handlers)
 {
 	MachineState *work = LibVEX_Alloc_MachineState();
@@ -21,9 +22,62 @@ MachineState *MachineState::initialMachineState(AddressSpace *as,
 	work->nextTid = ThreadId(1);
 	work->addressSpace = as;
 	work->signalHandlers = SignalHandlers(handlers);
-	work->registerThread(rootThread);
 
 	return work;
+}
+
+MachineState *MachineState::initialMachineState(LogReader *lf, LogFile::ptr ptr, LogFile::ptr *end)
+{
+	MachineState *work;
+	LogRecord *lr;
+
+	lr = lf->read(ptr, &ptr);
+	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr);
+	if (!lrib)
+		errx(1, "first record should have been initial brk");
+	AddressSpace *as = AddressSpace::initialAddressSpace(lrib->brk);
+	delete lr;
+
+	lr = lf->read(ptr, &ptr);
+	LogRecordInitialSighandlers *lris = dynamic_cast<LogRecordInitialSighandlers*>(lr);
+	if (!lris)
+		errx(1, "second record should have been initial signal handlers");
+	work = initialMachineState(as, *lris);
+
+	while (1) {
+		delete lr;
+		LogFile::ptr nextPtr;
+		lr = lf->read(ptr, &nextPtr);
+		if (!lr)
+			err(1, "reading initial memory population");
+		if (LogRecordAllocateMemory *lram = dynamic_cast<LogRecordAllocateMemory*>(lr)) {
+			as->allocateMemory(*lram);
+		} else if (LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr)) {
+			as->populateMemory(*lrm);
+		} else if (LogRecordInitialRegisters *lrir = dynamic_cast<LogRecordInitialRegisters*>(lr)) {
+			work->registerThread(Thread::initialThread(*lrir));
+		} else if (LogRecordVexThreadState *lrvts = dynamic_cast<LogRecordVexThreadState*>(lr)) {
+			Thread *t = work->findThread(lrvts->thread());
+			t->imposeState(*lrvts, as);
+		} else {
+			break;
+		}
+		ptr = nextPtr;
+	}
+
+	delete lr;
+	
+	*end = ptr;
+	return work;
+}
+
+void MachineState::dumpSnapshot(LogWriter *lw) const
+{
+	addressSpace->dumpBrkPtr(lw);
+	signalHandlers.dumpSnapshot(lw);
+	addressSpace->dumpSnapshot(lw);
+	for (unsigned x = 0; x < threads->size(); x++)
+		threads->index(x)->dumpSnapshot(lw);
 }
 
 MachineState *MachineState::dupeSelf() const

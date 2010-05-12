@@ -198,3 +198,35 @@ void AddressSpace::sanityCheck() const
 {
 	vamap->sanityCheck();
 }
+
+void AddressSpace::dumpBrkPtr(LogWriter *lw) const
+{
+	lw->append(LogRecordInitialBrk(ThreadId(0), brkptr));
+}
+
+void AddressSpace::dumpSnapshot(LogWriter *lw) const
+{
+	unsigned long last_va;
+	unsigned long next_va;
+	PhysicalAddress pa;
+	VAMap::Protection prot(0);
+	VAMap::AllocFlags alf(false);
+	last_va = 0;
+	while (vamap->findNextMapping(last_va, &next_va, &pa, &prot, &alf)) {
+		lw->append(LogRecordAllocateMemory(ThreadId(0),
+						   next_va,
+						   MemoryChunk::size,
+						   (unsigned long)prot,
+						   (unsigned long)alf));
+		unsigned long off;
+		MemoryChunk *mc = pmap->lookup(pa, &off);
+		assert(off == 0);
+		void *buf = malloc(MemoryChunk::size);
+		mc->read(0, buf, MemoryChunk::size);
+		lw->append(LogRecordMemory(ThreadId(0),
+					   MemoryChunk::size,
+					   next_va,
+					   buf));
+		last_va = next_va + MemoryChunk::size;
+	}
+}

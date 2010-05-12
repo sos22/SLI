@@ -1174,13 +1174,15 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 }
 
 void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
-				LogReader::ptr *eof)
+				LogReader::ptr *eof, LogWriter *lw)
 {
 	while (1) {
 		LogRecord *lr = lf->read(ptr, &ptr);
 		if (!lr)
 			break;
 
+		if (lw)
+			lw->append(*lr);
 		PointerKeeper<LogRecord> k_lr(lr);
 		Thread *thr = currentState->findThread(lr->thread());
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
@@ -1197,7 +1199,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 		CasEvent *ce = dynamic_cast<CasEvent *>(evt);
 		if (ce) {
 			ce->replay(thr, lr, currentState,
-				   lf, ptr, &ptr);
+				   lf, ptr, &ptr, lw);
 		} else {
 			evt->replay(thr, lr, currentState);
 		}
@@ -1205,7 +1207,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 		/* Memory records are special and should always be
 		   processed eagerly. */
 		process_memory_records(currentState->addressSpace, lf, ptr,
-				       &ptr);
+				       &ptr, lw);
 	}
 	if (eof)
 		*eof = ptr;

@@ -193,7 +193,7 @@ void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 
 void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
 		      const LogReader *lf, LogReader::ptr ptr,
-		      LogReader::ptr *outPtr)
+		      LogReader::ptr *outPtr, LogWriter *lw)
 {
 	unsigned long expected_buf[2] = {expected.lo.v, expected.hi.v};
 	unsigned long data_buf[2] = {data.lo.v, data.hi.v};
@@ -220,6 +220,8 @@ void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
 		return;
 
 	LogRecord *lr2 = lf->read(ptr, outPtr);
+	if (lw)
+		lw->append(*lr2);
 	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");
