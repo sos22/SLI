@@ -414,7 +414,7 @@ public:
 	/* Should only be called by GC destruct routine */
 	void destruct();
 
-	void visit(HeapVisitor *hv) const;
+	void visit(HeapVisitor &hv) const;
 };
 
 struct abstract_interpret_value {
