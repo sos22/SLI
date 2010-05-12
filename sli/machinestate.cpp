@@ -97,3 +97,12 @@ void MachineState::sanityCheck() const
 {
 	addressSpace->sanityCheck();
 }
+
+bool MachineState::crashed() const
+{
+	unsigned x;
+	for (x = 0; x < threads->size(); x++)
+		if (threads->index(x)->crashed)
+			return true;
+	return false;
+}

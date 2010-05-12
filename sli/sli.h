@@ -798,6 +798,7 @@ public:
 	unsigned long robust_list;
 	unsigned long set_child_tid;
 	bool exitted;
+	bool crashed;
 
 	IRSB *currentIRSB;
 public:
@@ -1102,7 +1103,8 @@ public:
 		exitted = true;
 		exit_status = result;
 	}
-
+	bool crashed() const;
+	
 	MachineState *dupeSelf() const;
 
 	void dumpSnapshot(LogWriter *lw) const;

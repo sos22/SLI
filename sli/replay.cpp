@@ -288,11 +288,14 @@ void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	if (ms->signalHandlers.handlers[11].sa_handler != SIG_DFL)
 		throw NotImplementedException("don't handle custom signal handlers");
 #endif
+	printf("Crash in thread %d\n", thr->tid._tid());
+	thr->crashed = true;
 }
 
 InterpretResult SignalEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
 	if (lr)
 		*lr = new LogRecordSignal(thr->tid, thr->regs.regs.guest_RIP, signr, 0, virtaddr);
+	thr->crashed = true;
 	return InterpretResultCrash;
 }

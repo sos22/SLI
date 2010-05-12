@@ -115,5 +115,8 @@ main(int argc, char *argv[])
 	while (e->advance())
 		printf("Advancing...\n");
 
+	for (unsigned x = 0; x < e->whiteStates->size(); x++) {
+		printf("State %d, crashed %d\n", x, e->whiteStates->index(x)->ms->crashed());
+	}
 	return 0;
 }
