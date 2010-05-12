@@ -1,6 +1,6 @@
 #include "sli.h"
 
-InterpretResult MemLog::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt)
+InterpretResult LogWriter::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt)
 {
 	CasEvent *ce = dynamic_cast<CasEvent *>(evt);
 	InterpretResult res;
@@ -8,20 +8,20 @@ InterpretResult MemLog::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *
 	if (ce) {
 		LogRecord *lr1, *lr2;
 		res = ce->fake(thr, ms, &lr1, &lr2);
-		appendRecord(lr1);
+		append(*lr1);
 		if (lr2)
-			appendRecord(lr2);
+			append(*lr2);
 	} else {
 		LogRecord *lr;
 		res = evt->fake(thr, ms, &lr);
-		appendRecord(lr);
+		append(*lr);
 	}
 	return res;
 }
 
-void MemLog::appendRecord(LogRecord *lr)
+void MemLog::append(const LogRecord &lr)
 {
-	content->push_back(lr);
+	content->push_back(lr.dupe());
 }
 
 LogRecord *MemLog::read(ptr startPtr, ptr *outPtr) const
@@ -81,8 +81,8 @@ MemLog *MemLog::emptyMemlog()
 	name: "MemLog"
 	};
 
-	MemLog *work = (MemLog *)__LibVEX_Alloc(&vat);
-	memset(work, 0, sizeof(*work));
+	void *buf = (void *)__LibVEX_Alloc(&vat);
+	MemLog *work = new (buf) MemLog();
 	work->content = new std::vector<LogRecord *>();
 	return work;
 }
@@ -93,4 +93,16 @@ MemLog *MemLog::dupeSelf() const
 	w->parent = this;
 	w->offset = offset + content->size();
 	return w;
+}
+
+MemLog::MemLog()
+{
+	parent = NULL;
+	offset = 0;
+}
+
+
+void MemLog::forceVtable()
+{
+	abort();
 }

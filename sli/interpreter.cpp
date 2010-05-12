@@ -1150,7 +1150,7 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **ou
 }
 
 void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
-					   MemLog *output)
+					   LogWriter *output)
 {
 	if (!nr_accesses)
 		return;

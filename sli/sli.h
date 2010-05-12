@@ -100,6 +100,7 @@ public:
 	LogRecord(ThreadId _tid) : tid(_tid) {}
 	virtual void *marshal(unsigned *size) const = 0;
 	virtual ~LogRecord();
+	virtual LogRecord *dupe() const = 0;
 };
 
 class LogRecordFootstep : public LogRecord {
@@ -132,6 +133,10 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordFootstep(thread(), rip, reg0, reg1, reg2, reg3, reg4);
+	}
 };
 
 class LogRecordSyscall : public LogRecord {
@@ -157,6 +162,10 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordSyscall(thread(), sysnr, res, arg1, arg2, arg3);
+	}
 };
 
 class LogRecordMemory : public LogRecord {
@@ -179,6 +188,12 @@ public:
 	{}
 	virtual ~LogRecordMemory() { free((void *)contents); }
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		void *b = malloc(size);
+		memcpy(b, contents, size);
+		return new LogRecordMemory(thread(), size, start, b);
+	}
 };
 
 class LogRecordRdtsc : public LogRecord {
@@ -196,6 +211,10 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordRdtsc(thread(), tsc);
+	}
 };
 
 class LogRecordLoad : public LogRecord {
@@ -221,6 +240,12 @@ public:
 	}
 	virtual ~LogRecordLoad() { free((void *)buf); }
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		void *b = malloc(size);
+		memcpy(b, buf, size);
+		return new LogRecordLoad(thread(), size, ptr, b);
+	}
 };
 
 class LogRecordStore : public LogRecord {
@@ -246,6 +271,12 @@ public:
 	}
 	virtual ~LogRecordStore() { free((void *)buf); }
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		void *b = malloc(size);
+		memcpy(b, buf, size);
+		return new LogRecordStore(thread(), size, ptr, b);
+	}
 };
 
 class LogRecordSignal : public LogRecord {
@@ -272,6 +303,10 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordSignal(thread(), rip, signr, err, virtaddr);
+	}
 };
 
 class LogRecordAllocateMemory : public LogRecord {
@@ -299,6 +334,10 @@ public:
 	{
 	}      
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordAllocateMemory(thread(), start, size, prot, flags);
+	}
 };
 
 class LogRecordInitialRegisters : public LogRecord {
@@ -316,6 +355,10 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordInitialRegisters(thread(), regs);
+	}
 };
 
 class LogRecordInitialBrk : public LogRecord {
@@ -332,6 +375,10 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordInitialBrk(thread(), brk);
+	}
 };
 
 class LogRecordInitialSighandlers : public LogRecord {
@@ -349,6 +396,10 @@ public:
 		memcpy(handlers, sa, sizeof(*sa) * 64);
 	}
 	void *marshal(unsigned *size) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordInitialSighandlers(thread(), handlers);
+	}
 };
 
 class LogReader {
@@ -361,10 +412,22 @@ public:
 	virtual ~LogReader() {}
 };
 
+enum InterpretResult {
+	InterpretResultContinue = 0xf001,
+	InterpretResultExit,
+	InterpretResultCrash,
+	InterpretResultIncomplete
+};
+
+class Thread;
+class MachineState;
+class ThreadEvent;
+
 class LogWriter {
 public:
 	virtual void append(const LogRecord &lr) = 0;
 	virtual ~LogWriter() {}
+	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt);
 };
 
 class LogFile : public LogReader {
@@ -407,19 +470,11 @@ class ThreadEvent;
 class Thread;
 class MachineState;
 
-enum InterpretResult {
-	InterpretResultContinue = 0xf001,
-	InterpretResultExit,
-	InterpretResultCrash,
-	InterpretResultIncomplete
-};
-
-class MemLog : public LogReader {
+class MemLog : public LogReader, public LogWriter {
 	std::vector<LogRecord *> *content;
 	unsigned offset;
 	const MemLog *parent;
 
-	void appendRecord(LogRecord *lr);
 	unsigned unwrapPtr(ptr p) const {
 		return *(unsigned *)p.cls_data;
 	}
@@ -429,15 +484,22 @@ class MemLog : public LogReader {
 		return p;
 	}
 
-	/* DNI */
+	/* Special, need to use placement new.  Should only really be
+	   invoked from emptyMemlog(). */
 	MemLog();
-	~MemLog();
+
+	/* Should never be called, used to force construction of
+	 * vtable. */
+	virtual void forceVtable();
+
 public:
 	static MemLog *emptyMemlog();
 	MemLog *dupeSelf() const;
-	virtual LogRecord *read(ptr startPtr, ptr *outPtr) const;
+	LogRecord *read(ptr startPtr, ptr *outPtr) const;
 	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt);
 	void dump() const;
+
+	void append(const LogRecord &lr);
 
 	/* Should only be called by GC destruct routine */
 	void destruct();
@@ -713,6 +775,10 @@ public:
 				expression_result_array _tmp);
 	void *marshal(unsigned *sz) const;
 	void visit(HeapVisitor &hv) const;
+	LogRecord *dupe() const
+	{
+		return new LogRecordVexThreadState(thread(), statement_nr, tmp);
+	}
 };
 
 
@@ -1064,7 +1130,7 @@ public:
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
 					     MemoryTrace **output);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
-				      MemLog *output);
+				      LogWriter *output = NULL);
 };
 
 void replay_syscall(const LogRecordSyscall *lrs,
