@@ -19,7 +19,7 @@ Makefile.mk: Makefile.mk.in build_makefile.sh
 	./build_makefile.sh $< $@ > $@.tmp && mv -f $@.tmp $@
 
 %.cpp.d: %.cpp
-	g++ $(CPPFLAGS) -MG -M -MD -o $@ $<
+	g++ $(CPPFLAGS) -MG -M -MD -MT $(patsubst %.cpp,%.o,$<) -o $@ $<
 
 clean:
 	find . -name '*.mk' -o -name '*.[od]' | xargs rm ; \

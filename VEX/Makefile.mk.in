@@ -3,6 +3,7 @@ targets="libVEX.a"
 
 defvars() {
     echo 'libvex_objects=$(patsubst %.cpp,%.o,$(libvex_sources))'
+    echo 'libvex_deps=$(patsubst %.cpp,%.cpp.d,$(libvex_sources))'
     echo "libvex=$input_base"
     echo 'all_sources+=$(libvex_sources)'
 }
@@ -10,6 +11,7 @@ defvars() {
 rules() {
 	cat <<EOF
 \$(libvex_objects): CPPFLAGS+=-I${input_base}/pub
+\$(libvex_deps): CPPFLAGS+=-I${input_base}/pub
 libVEX.a: \$(libvex_objects)
 	  rm -f \$@ ; ar rcs \$@ \$^
 EOF

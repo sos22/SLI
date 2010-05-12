@@ -6,6 +6,7 @@ defvars() {
 
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
+SLIR_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(SLIR_SOURCES))
 all_sources+=\$(SLIR_SOURCES)
 clean_files+=slir.a
 EOF
@@ -13,11 +14,12 @@ EOF
 
 rules() {
     cat <<EOF
-\$(SLIR_OBJECTS): sli/sli.h
 \$(SLIR_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
+\$(SLIR_DEPS): CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/interpret.o: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/interpreter.o: CPPFLAGS+=-I\$(libvex)/priv
-${input_base}/logreader.o: sli/ppres.h
-${input_base}/interpreter.o: sli/ppres.h
+${input_base}/interpret.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/interpreter.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 
 slir.a: \$(SLIR_OBJECTS)
 	rm -f \$@ ; ar rcs \$@ \$^
