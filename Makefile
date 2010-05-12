@@ -7,23 +7,16 @@ CPPFLAGS=-DSLI
 CFLAGS=-Wall -g $(CPPFLAGS) $(PROFILE_FLAGS) -fno-strict-aliasing
 CXXFLAGS=$(CFLAGS)
 clean_files=$(TARGETS) .depends
+all_makefiles=Makefile Makefile.mk
 
 ifeq ($(OPTIMIZE),y)
 CFLAGS+=-O3 -DNDEBUG
 endif
 
 include Makefile.mk
-include .depends
 
-.depends:
-	for x in $(all_sources);\
-	do\
-		echo "include $${x}.d" ;\
-	done > $@.t &&\
-	mv -f $@.t $@
-
-%.mk: %.mk.in build_makefile.sh
-	./build_makefile.sh $< > $@.tmp && mv -f $@.tmp $@
+Makefile.mk: Makefile.mk.in build_makefile.sh
+	./build_makefile.sh $< $@ > $@.tmp && mv -f $@.tmp $@
 
 %.cpp.d: %.cpp
 	g++ $(CPPFLAGS) -MG -M -MD -o $@ $<
@@ -33,3 +26,8 @@ clean:
 	rm -f $(clean_files)
 
 real_all: $(TARGETS)
+
+.depends: $(all_makefiles)
+	make -f Makefile.mk mk_depends
+
+include .depends

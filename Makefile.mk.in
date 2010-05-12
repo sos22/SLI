@@ -1,1 +1,16 @@
 subdirs="VEX tests sli"
+
+rules() {
+	cat <<EOF
+mk_depends: \$(all_makefiles)
+	for x in \$(all_sources);\
+	do\
+		echo "include \$\${x}.d" ;\
+	done > .depends.t &&\
+	mv -f .depends.t .depends
+
+%.mk: %.mk.in build_makefile.sh
+	./build_makefile.sh \$< \$@ > \$@.tmp && mv -f \$@.tmp \$@
+
+EOF
+}
