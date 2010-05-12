@@ -16,7 +16,6 @@ main(int argc, char *argv[])
 
 	LogFile *lf;
 	LogReader::ptr ptr;
-	LogReader::ptr nextPtr;
 
 	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
@@ -24,28 +23,6 @@ main(int argc, char *argv[])
 
 	MachineState *ms_base = MachineState::initialMachineState(lf, ptr, &ptr);
 	VexGcRoot base_root((void **)&ms_base);
-
-#if 0
-	printf("Doing initial replay...\n");
-	Interpreter *i = new Interpreter(ms_adv);
-	LogReader::ptr eof;
-	i->replayLogfile(lf, ptr, &eof);
-	delete i;
-
-	printf("Replay from %lx to %d - 10000.. (%lx)\n",
-	       ptr._off(),
-	       eof.rn(),
-	       (eof - 10000)._off());
-	LogReader *partialLog = lf->truncate(eof - 10000);
-#else
-	LogReader *partialLog = lf->truncate(lf->mkPtr(0xde74e31, 4123917));
-	Interpreter *i;
-#endif
-
-	printf("Replay to %d\n", 4123917);
-	i = new Interpreter(ms_base);
-	i->replayLogfile(partialLog, ptr, &ptr);
-	delete i;
 
 	MemTracePool thread_traces(ms_base);
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
