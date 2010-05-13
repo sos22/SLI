@@ -176,7 +176,7 @@ skip:
 		int r = pread(fd, vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
 		expression_result_array era;
-		era.setSize((rh.size - sizeof(rh)) / sizeof(unsigned long));
+		era.setSize((rh.size - sizeof(rh) - sizeof(*vtsr)) / 16);
 		for (unsigned x = 0; x < era.nr_entries; x++) {
 			era[x].lo.v = vtsr->temporaries[x * 2];
 			era[x].hi.v = vtsr->temporaries[x * 2 + 1];
