@@ -43,6 +43,7 @@ MachineState *MachineState::initialMachineState(LogReader *lf, LogFile::ptr ptr,
 	if (!lris)
 		errx(1, "second record should have been initial signal handlers");
 	work = initialMachineState(as, *lris);
+	VexGcRoot keeper((void **)&work);
 
 	while (1) {
 		delete lr;
