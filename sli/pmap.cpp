@@ -1,7 +1,7 @@
 #include "sli.h"
 
 DECLARE_VEX_TYPE(PMap)
-DEFINE_VEX_TYPE(PMap);
+DEFINE_VEX_TYPE_NO_DESTRUCT(PMap, {ths->visit(visit);});
 
 /* The PME is dead, and so is the matchinh memory chunk.  Unhook
    ourselves from the list. */

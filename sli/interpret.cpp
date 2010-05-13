@@ -65,6 +65,7 @@ bool Explorer::advance()
 		return false;
 
 	ExplorationState *basis = grayStates->pop_first();
+	VexGcRoot basis_keeper((void **)&basis);
 
 	MemTracePool thread_traces(basis->ms);
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
@@ -81,6 +82,7 @@ bool Explorer::advance()
 			continue;
 		noProgress = false;
 		ExplorationState *newGray = basis->dupeSelf();
+		VexGcRoot grayKeeper((void **)&newGray);
 		Interpreter i(newGray->ms);
 		if (r.full) {
 			printf("Thread %d races at %d\n", tid._tid(), r.value);
