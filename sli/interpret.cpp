@@ -147,6 +147,15 @@ void CommunicationGraph::dump() const
 		printf("%s -> %s\n", content[x].store->name(), content[x].load->name());
 }
 
+/* force some functions to be included even when they're not needed,
+   so that they're available for calling from the debugger. */
+static void force_linkage() __attribute__((unused, used));
+static void
+force_linkage()
+{
+	gdb_machine_state(NULL);
+}
+
 int
 main(int argc, char *argv[])
 {

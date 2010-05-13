@@ -1119,6 +1119,13 @@ public:
 				return threads->index(x);
 		abort();
 	}
+	const Thread *findThread(ThreadId id) const {
+		unsigned x;
+		for (x = 0; x < threads->size(); x++)
+			if (threads->index(x)->tid == id)
+				return threads->index(x);
+		abort();
+	}
 	void exitGroup(unsigned result) {
 		exitted = true;
 		exit_status = result;
@@ -1170,5 +1177,7 @@ process_memory_records(AddressSpace *addrSpace,
 void debugger_attach(void);
 
 void init_sli(void);
+
+void gdb_machine_state(const MachineState *ms);
 
 #endif /* !SLI_H__ */
