@@ -113,6 +113,13 @@ public:
 		sz--;
 		return items[sz];
 	}
+	content *pop_first() {
+		assert(sz != 0);
+		content *r = items[0];
+		sz--;
+		memmove(items, items + 1, sizeof(items[0]) & sz);
+		return r;
+	}
 
 	/* This gets a leading underscore because it throws away the
 	   existing content of the array. */

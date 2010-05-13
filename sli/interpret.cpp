@@ -64,7 +64,7 @@ bool Explorer::advance()
 	if (grayStates->size() == 0)
 		return false;
 
-	ExplorationState *basis = grayStates->pop();
+	ExplorationState *basis = grayStates->pop_first();
 
 	MemTracePool thread_traces(basis->ms);
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
