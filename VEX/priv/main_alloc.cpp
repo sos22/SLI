@@ -153,9 +153,7 @@ LibVEX_gc(void)
 
 void vexSetAllocModeTEMP_and_clear ( void )
 {
-#ifdef NDEBUG
   if (heap_used > N_TEMPORARY_BYTES / 2)
-#endif
     LibVEX_gc();
 }
 
