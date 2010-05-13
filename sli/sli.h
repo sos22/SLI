@@ -671,10 +671,12 @@ public:
 
 class MemoryAccess : public Named {
 public:
+	ThreadId tid;
 	unsigned long addr;
 	unsigned size;
-	MemoryAccess(unsigned long _addr, unsigned _size)
-		: addr(_addr),
+	MemoryAccess(ThreadId _tid, unsigned long _addr, unsigned _size)
+		: tid(_tid),
+		  addr(_addr),
 		  size(_size)
 	{
 	}
@@ -687,8 +689,8 @@ protected:
 		return my_asprintf("Load(%lx:%lx)", addr, addr + size);
 	}
 public:
-	MemoryAccessLoad(const class LoadEvent &evt)
-		: MemoryAccess(evt.addr, evt.size)
+	MemoryAccessLoad(ThreadId tid, const class LoadEvent &evt)
+		: MemoryAccess(tid, evt.addr, evt.size)
 	{
 	}
 	virtual bool isLoad() { return true; }
@@ -700,8 +702,8 @@ protected:
 		return my_asprintf("Store(%lx:%lx)", addr, addr + size);
 	}
 public:
-	MemoryAccessStore(const class StoreEvent &evt)
-		: MemoryAccess(evt.addr, evt.size)
+	MemoryAccessStore(ThreadId tid, const class StoreEvent &evt)
+		: MemoryAccess(tid, evt.addr, evt.size)
 	{
 	}
 	virtual bool isLoad() { return false; }

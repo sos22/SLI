@@ -1142,9 +1142,9 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **ou
 			return res;
 		}
 		if (LoadEvent *lr = dynamic_cast<LoadEvent *>(evt)) {
-			work->push_back(new MemoryAccessLoad(*lr));
+			work->push_back(new MemoryAccessLoad(tid, *lr));
 		} else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
-			work->push_back(new MemoryAccessStore(*sr));
+			work->push_back(new MemoryAccessStore(tid, *sr));
 		}
 	}
 }
