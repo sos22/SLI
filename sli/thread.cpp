@@ -47,7 +47,11 @@ void Thread::imposeState(const LogRecordVexThreadState &rec,
 {
 	translateNextBlock(as);
 	assert(currentIRSB);
-	assert(rec.statement_nr < (unsigned)currentIRSB->stmts_used);
+
+	/* == is valid here, and just means we're right at the end of
+	   the block and will re-translate as soon as we try to
+	   resume. */
+	assert(rec.statement_nr <= (unsigned)currentIRSB->stmts_used);
 	currentIRSBOffset = rec.statement_nr;
 
 	temporaries = rec.tmp;
