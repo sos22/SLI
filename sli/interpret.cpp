@@ -96,6 +96,48 @@ bool Explorer::advance()
 	return true;
 }
 
+class CommunicationGraph {
+public:
+	class Edge {
+	public:
+		MemoryAccess *load;
+		MemoryAccess *store;
+		Edge(MemoryAccess *_load, MemoryAccess *_store)
+			: load(_load),
+			  store(_store)
+		{
+		}
+	};
+	std::vector<Edge> content;
+	void addEdge(MemoryAccess *load, MemoryAccess *store)
+	{
+		content.push_back(Edge(load, store));
+	}
+	CommunicationGraph(MemoryTrace *mt);
+	void dump() const;
+};
+
+CommunicationGraph::CommunicationGraph(MemoryTrace *mt)
+{
+	for (unsigned loadInd = 0; loadInd < mt->size(); loadInd++) {
+		MemoryAccessLoad *load = dynamic_cast<MemoryAccessLoad *>((*mt)[loadInd]);
+		if (!load)
+			continue;
+		for (unsigned storeInd = 0; storeInd < loadInd; storeInd++) {
+			MemoryAccessStore *store = dynamic_cast<MemoryAccessStore *>((*mt)[storeInd]);
+			if (!store || store->tid == load->tid || store->addr != load->addr)
+				continue;
+			addEdge(load, store);
+		}
+	}
+}
+
+void CommunicationGraph::dump() const
+{
+	for (unsigned x = 0; x < content.size(); x++)
+		printf("%s -> %s\n", content[x].store->name(), content[x].load->name());
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -119,7 +161,8 @@ main(int argc, char *argv[])
 		printf("State %d, crashed %d\n", x, e->whiteStates->index(x)->ms->crashed());
 		MemoryTrace mt(*e->whiteStates->index(x)->history,
 			       MemLog::startPtr());
-		mt.dump();
+		CommunicationGraph ct(&mt);
+		ct.dump();
 	}
 	return 0;
 }
