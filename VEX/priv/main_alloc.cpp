@@ -20,7 +20,7 @@
 #include "main_util.h"
 
 /* The main arena. */
-#define N_TEMPORARY_BYTES 1000000000
+#define N_TEMPORARY_BYTES 900000000
 static char temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
 static unsigned heap_used;
 
