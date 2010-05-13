@@ -70,26 +70,33 @@ bool Explorer::advance()
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 		thread_traces.firstRacingAccessMap();
 
+	bool noProgress = true;
 	for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
 	     it != first_racing_access->end();
 	     it++) {
 		ThreadId tid = it->first;
 		Maybe<unsigned> r = it->second;
+		Thread *thr = basis->ms->findThread(tid);
+		if (thr->cannot_make_progress)
+			continue;
+		noProgress = false;
 		ExplorationState *newGray = basis->dupeSelf();
 		Interpreter i(newGray->ms);
 		if (r.full) {
 			printf("Thread %d races at %d\n", tid._tid(), r.value);
-			grayStates->push(newGray);
 			i.runToAccessLoggingEvents(tid, r.value + 1, newGray->history);
 		} else {
 			printf("Thread %d doesn't race\n", tid._tid());
-			/* This is as far as we can push this state,
-			 * so it's white and needs no further
-			 * exploration. */
-			whiteStates->push(newGray);
 			i.runToFailure(tid, newGray->history);
 		}
+		if (newGray->ms->crashed())
+			whiteStates->push(newGray);
+		else
+			grayStates->push(newGray);
 	}
+
+	if (noProgress)
+		whiteStates->push(basis);
 
 	delete first_racing_access;
 

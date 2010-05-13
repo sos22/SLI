@@ -817,6 +817,8 @@ public:
 	bool exitted;
 	bool crashed;
 
+	bool cannot_make_progress;
+
 	IRSB *currentIRSB;
 public:
 	expression_result_array temporaries;

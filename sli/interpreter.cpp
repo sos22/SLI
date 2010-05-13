@@ -1177,8 +1177,10 @@ void Interpreter::runToFailure(ThreadId tid, LogWriter *output)
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
-		if (res != InterpretResultContinue)
+		if (res != InterpretResultContinue) {
+			thr->cannot_make_progress = true;
 			return;
+		}
 	}
 }
 
