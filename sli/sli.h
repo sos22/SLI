@@ -57,9 +57,9 @@ public:
 };
 
 class Named {
-	char *_name;
+	mutable char *_name;
 protected:
-	virtual char *mkName(void) = 0;
+	virtual char *mkName(void) const = 0;
 public:
 	Named() : _name(NULL) {}
 	Named(const Named &b) {
@@ -68,7 +68,7 @@ public:
 		else
 			_name = NULL;
 	}
-	const char *name() {
+	const char *name() const {
 		if (!_name)
 			_name = mkName();
 		return _name;
@@ -86,7 +86,7 @@ public:
 		tid++;
 		return *this;
 	}
-	const unsigned _tid() { return tid; }
+	const unsigned _tid() const { return tid; }
 };
 
 class LogRecord : public Named {
@@ -105,7 +105,7 @@ public:
 
 class LogRecordFootstep : public LogRecord {
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("footstep(rip = %lx, regs = %lx, %lx, %lx, %lx, %lx)",
 				   rip, reg0, reg1, reg2, reg3, reg4);
 	}
@@ -141,7 +141,7 @@ public:
 
 class LogRecordSyscall : public LogRecord {
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("syscall(nr = %lx, res = %lx, args = %lx, %lx, %lx)",
 				   sysnr, res, arg1, arg2, arg3);
 	}
@@ -170,7 +170,7 @@ public:
 
 class LogRecordMemory : public LogRecord {
 protected:
-	virtual char *mkName() {
+	char *mkName() const {
 		return my_asprintf("memory(%lx,%x)", start, size);
 	}
 public:
@@ -200,7 +200,7 @@ class LogRecordRdtsc : public LogRecord {
 	friend class RdtscEvent;
 	unsigned long tsc;
 protected:
-	virtual char *mkName() {
+	char *mkName() const {
 		return my_asprintf("rdtsc(%lx)", tsc);
 	}
 public:
@@ -220,11 +220,12 @@ public:
 class LogRecordLoad : public LogRecord {
 	friend class LoadEvent;
 	friend class CasEvent;
+	friend class MemoryAccessLoad;
 	unsigned size;
 	unsigned long ptr;
 	const void *buf;
 protected:
-	virtual char *mkName() {
+	char *mkName() const {
 		return my_asprintf("load(%lx,%x)", ptr, size);
 	}
 public:
@@ -251,11 +252,12 @@ public:
 class LogRecordStore : public LogRecord {
 	friend class StoreEvent;
 	friend class CasEvent;
+	friend class MemoryAccessStore;
 	unsigned size;
 	unsigned long ptr;
 	const void *buf;
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("store(%lx,%x)", ptr, size);
 	}
 public:
@@ -281,7 +283,7 @@ public:
 
 class LogRecordSignal : public LogRecord {
 public:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d, rip = %lx, err = %lx, va = %lx)",
 				   signr, rip, err, virtaddr);
 	}
@@ -316,7 +318,7 @@ class LogRecordAllocateMemory : public LogRecord {
 	unsigned prot;
 	unsigned flags;
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("allocate(start = %lx, size = %lx, prot = %x, flags = %x)",
 				   start, size, prot, flags);
 	}
@@ -344,7 +346,7 @@ class LogRecordInitialRegisters : public LogRecord {
 	friend class Thread;
 	VexGuestAMD64State regs;
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return strdup("initial_regs");
 	}
 public:
@@ -363,7 +365,7 @@ public:
 
 class LogRecordInitialBrk : public LogRecord {
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("initbrk(%lx)", brk);
 	}
 public:
@@ -385,7 +387,7 @@ class LogRecordInitialSighandlers : public LogRecord {
 	friend class SignalHandlers;
 	struct sigaction handlers[64];
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return strdup("initial_sighandlers");
 	}
 public:
@@ -475,10 +477,10 @@ class MemLog : public LogReader, public LogWriter {
 	unsigned offset;
 	const MemLog *parent;
 
-	unsigned unwrapPtr(ptr p) const {
+	static unsigned unwrapPtr(ptr p) {
 		return *(unsigned *)p.cls_data;
 	}
-	ptr mkPtr(unsigned o) const {
+	static ptr mkPtr(unsigned o) {
 		ptr p;
 		*(unsigned *)p.cls_data = o;
 		return p;
@@ -494,6 +496,7 @@ class MemLog : public LogReader, public LogWriter {
 
 public:
 	static MemLog *emptyMemlog();
+	static LogReader::ptr startPtr() { return mkPtr(0); }
 	MemLog *dupeSelf() const;
 	LogRecord *read(ptr startPtr, ptr *outPtr) const;
 	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt);
@@ -540,7 +543,7 @@ public:
 class RdtscEvent : public ThreadEvent {
 	IRTemp tmp;
 protected:
-	virtual char *mkName() { return my_asprintf("rdtsc(%d)", tmp); }
+	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	virtual InterpretResult fake(Thread *thr, MachineState *ms, LogRecord **lr = NULL);
@@ -553,7 +556,7 @@ class LoadEvent : public ThreadEvent {
 	unsigned long addr;
 	unsigned size;
 protected:
-	virtual char *mkName() { return my_asprintf("load(%d, 0x%lx, %d)", tmp, addr, size); }
+	virtual char *mkName() const { return my_asprintf("load(%d, 0x%lx, %d)", tmp, addr, size); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	virtual InterpretResult fake(Thread *thr, MachineState *ms, LogRecord **lr = NULL);
@@ -571,7 +574,7 @@ class StoreEvent : public ThreadEvent {
 	unsigned size;
 	void *data;
 protected:
-	virtual char *mkName() { return my_asprintf("store(0x%lx, %d)", addr, size); }
+	virtual char *mkName() const { return my_asprintf("store(0x%lx, %d)", addr, size); }
 public:
 	virtual void replay(Thread *thr, LogRecord *lr, MachineState *ms);
 	virtual InterpretResult fake(Thread *thr, MachineState *ms, LogRecord **lr = NULL);
@@ -587,7 +590,7 @@ class InstructionEvent : public ThreadEvent {
 	unsigned long reg3;
 	unsigned long reg4;
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("footstep(rip =%lx, regs = %lx, %lx, %lx, %lx, %lx",
 				   rip, reg0, reg1, reg2, reg3, reg4);
 	}
@@ -613,7 +616,7 @@ class CasEvent : public ThreadEvent {
 	expression_result expected;
 	unsigned size;
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("cas(dest %d, size %d, addr %lx:%lx, data %lx:%lx, expected %lx:%lx)",
 				   dest, size, addr.lo.v, addr.hi.v, data.lo.v, data.hi.v,
 				   expected.lo.v, expected.hi.v);
@@ -643,7 +646,7 @@ public:
 
 class SyscallEvent : public ThreadEvent {
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("syscall");
 	}
 public:
@@ -655,7 +658,7 @@ class SignalEvent : public ThreadEvent {
 	unsigned signr;
 	unsigned long virtaddr;
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d, va = %lx)", signr,
 				   virtaddr);
 	}
@@ -681,16 +684,21 @@ public:
 	{
 	}
 	virtual bool isLoad() = 0;
+	void dump() const { printf("%s\n", name()); }
 };
 
-class MemoryAccessLoad: public MemoryAccess {
+class MemoryAccessLoad : public MemoryAccess {
 protected:
-	virtual char *mkName() {
-		return my_asprintf("Load(%lx:%lx)", addr, addr + size);
+	virtual char *mkName() const {
+		return my_asprintf("%d: Load(%lx:%lx)", tid._tid(), addr, addr + size);
 	}
 public:
 	MemoryAccessLoad(ThreadId tid, const class LoadEvent &evt)
 		: MemoryAccess(tid, evt.addr, evt.size)
+	{
+	}
+	MemoryAccessLoad(const LogRecordLoad &lrl)
+		: MemoryAccess(lrl.thread(), lrl.ptr, lrl.size)
 	{
 	}
 	virtual bool isLoad() { return true; }
@@ -698,12 +706,16 @@ public:
 
 class MemoryAccessStore : public MemoryAccess {
 protected:
-	virtual char *mkName() {
-		return my_asprintf("Store(%lx:%lx)", addr, addr + size);
+	virtual char *mkName() const {
+		return my_asprintf("%d: Store(%lx:%lx)", tid._tid(), addr, addr + size);
 	}
 public:
 	MemoryAccessStore(ThreadId tid, const class StoreEvent &evt)
 		: MemoryAccess(tid, evt.addr, evt.size)
+	{
+	}
+	MemoryAccessStore(const LogRecordStore &lrs)
+		: MemoryAccess(lrs.thread(), lrs.ptr, lrs.size)
 	{
 	}
 	virtual bool isLoad() { return false; }
@@ -720,6 +732,9 @@ public:
 	size_t size() const { return content.size(); }
 	MemoryAccess *&operator[](unsigned idx) { return content[idx]; }
 	void push_back(MemoryAccess *x) { content.push_back(x); }
+	MemoryTrace();
+	MemoryTrace(const LogReader &lr, LogReader::ptr start);
+	void dump() const;
 };
 
 class MemTracePool {
@@ -765,7 +780,7 @@ public:
 
 class LogRecordVexThreadState : public LogRecord {
 protected:
-	virtual char *mkName() {
+	virtual char *mkName() const {
 		return strdup("vex state");
 	}
 	VexGcRoot root;

@@ -117,6 +117,9 @@ main(int argc, char *argv[])
 
 	for (unsigned x = 0; x < e->whiteStates->size(); x++) {
 		printf("State %d, crashed %d\n", x, e->whiteStates->index(x)->ms->crashed());
+		MemoryTrace mt(*e->whiteStates->index(x)->history,
+			       MemLog::startPtr());
+		mt.dump();
 	}
 	return 0;
 }

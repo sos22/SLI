@@ -35,7 +35,7 @@ LogRecord *MemLog::read(ptr startPtr, ptr *outPtr) const
 	*outPtr = mkPtr(o + 1);
 	if (o - offset >= content->size())
 		return NULL;
-	return (*content)[o - offset];
+	return (*content)[o - offset]->dupe();
 }
 
 void MemLog::dump() const
