@@ -1128,11 +1128,11 @@ finished_block:
 	}
 }
 
-InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output)
+InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output, unsigned max_events)
 {
 	MemoryTrace *work = new MemoryTrace();
 	Thread *thr = currentState->findThread(tid);
-	while (1) {
+	while (max_events) {
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 
@@ -1146,7 +1146,10 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **ou
 		} else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
 			work->push_back(new MemoryAccessStore(tid, *sr));
 		}
+		max_events--;
 	}
+	*output = work;
+	return InterpretResultTimedOut;
 }
 
 void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,

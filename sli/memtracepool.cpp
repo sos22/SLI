@@ -9,7 +9,7 @@ MemTracePool::MemTracePool(MachineState *base_state)
 		MachineState *ms = base_state->dupeSelf();
 		Interpreter i(ms);
 		MemoryTrace *v;
-		i.getThreadMemoryTrace(tid, &v);
+		i.getThreadMemoryTrace(tid, &v, 100000);
 		content[tid] = v;
 	}
 }

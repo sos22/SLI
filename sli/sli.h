@@ -418,7 +418,8 @@ enum InterpretResult {
 	InterpretResultContinue = 0xf001,
 	InterpretResultExit,
 	InterpretResultCrash,
-	InterpretResultIncomplete
+	InterpretResultIncomplete,
+	InterpretResultTimedOut
 };
 
 class Thread;
@@ -1149,7 +1150,8 @@ public:
 	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint,
 			   LogReader::ptr *endingPoint = NULL, LogWriter *log = NULL);
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
-					     MemoryTrace **output);
+					     MemoryTrace **output,
+					     unsigned max_events);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      LogWriter *output = NULL);
 	void runToFailure(ThreadId tid, LogWriter *output);
