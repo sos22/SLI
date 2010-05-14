@@ -176,13 +176,15 @@ main(int argc, char *argv[])
 	MachineState *ms_base = MachineState::initialMachineState(lf, ptr, &ptr);
 	VexGcRoot((void **)&ms_base);
 
-	unsigned long threshold;
+	unsigned long threshold = 50;
+#if 0
 	{
 		MachineState *a = ms_base->dupeSelf();
 		Interpreter i(a);
 		i.replayLogfile(lf, ptr);
 		threshold = a->nrAccesses * 2;
 	}
+#endif
 
 	Explorer *e = Explorer::init(threshold, ExplorationState::init(ms_base));
 	VexGcRoot e_base((void **)&e);
