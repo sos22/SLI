@@ -248,3 +248,33 @@ replay_syscall(const LogRecordSyscall *lrs,
 	assert(res == lrs->res);	
 	thr->regs.regs.guest_RAX = res;
 }
+
+InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
+{
+	unsigned long res;
+
+	switch (thr->regs.regs.guest_RAX) {
+	case __NR_futex:
+		res = 0;
+		break;
+	default:
+		printf("can't fake syscall %ld yet\n", thr->regs.regs.guest_RAX);
+		if (lr)
+			*lr = NULL;
+		return InterpretResultIncomplete;
+	}
+	LogRecordSyscall *llr = new LogRecordSyscall(thr->tid,
+						     thr->regs.regs.guest_RAX,
+						     res,
+						     thr->regs.regs.guest_RDI,
+						     thr->regs.regs.guest_RSI,
+						     thr->regs.regs.guest_RDX);
+
+	if (lr)
+		*lr = llr;
+	replay_syscall(llr, thr, ms);
+	if (!lr)
+		delete llr;
+	return InterpretResultContinue;
+}
+

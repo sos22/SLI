@@ -188,14 +188,6 @@ void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	replay_syscall(lrs, thr, ms);
 }
 
-InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
-{
-	if (lr)
-		*lr = NULL;
-	printf("can't fake syscall events yet\n");
-	return InterpretResultIncomplete;
-}
-
 void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 {
 	throw SliException("CAS events need a special replay method");
