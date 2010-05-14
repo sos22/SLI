@@ -15,6 +15,9 @@ public:
 	MemLog *history;
 	static ExplorationState *init(MachineState *ms);
 	ExplorationState *dupeSelf() const;
+
+	bool good;
+	bool bad;
 };
 
 DECLARE_VEX_TYPE(ExplorationState)
@@ -25,6 +28,8 @@ ExplorationState *ExplorationState::init(MachineState *ms)
 	ExplorationState *es = LibVEX_Alloc_ExplorationState();
 	es->ms = ms;
 	es->history = MemLog::emptyMemlog();
+	es->good = false;
+	es->bad = false;
 	return es;
 }
 
@@ -33,6 +38,8 @@ ExplorationState *ExplorationState::dupeSelf() const
 	ExplorationState *es = LibVEX_Alloc_ExplorationState();
 	es->ms = ms->dupeSelf();
 	es->history = history->dupeSelf();
+	es->good = good;
+	es->bad = bad;
 	return es;
 }
 
@@ -69,12 +76,61 @@ bool Explorer::advance()
 	ExplorationState *basis = grayStates->pop_first();
 	VexGcRoot basis_keeper((void **)&basis);
 
-	printf("Exploring %p\n", basis);
+	assert(!basis->good);
+	assert(!basis->bad);
+
+	/* Has the state already crashed? */
+	if (basis->ms->crashed()) {
+		printf("%p: bad\n", basis);
+		basis->bad = true;
+		whiteStates->push(basis);
+		return true;
+	}
+
+	/* Check for threads hitting their thresholds. */
+	bool good = true;
+	for (unsigned x = 0;
+	     good && x < basis->ms->threads->size();
+	     x++) {
+		Thread *thr = basis->ms->threads->index(x);
+		if (thr->nrAccesses < (*successThresholds)[thr->tid]) {
+			good = false;
+		} else {
+			thr->cannot_make_progress = true;
+		}
+	}
+
+	if (good) {
+		printf("%p: good\n", basis);
+		basis->good = true;
+		whiteStates->push(basis);
+		return true;
+	}
+
+	/* Check for no-progress-possible condition */
+	bool stopped = true;
+	for (unsigned x = 0; stopped && x < basis->ms->threads->size(); x++) {
+		Thread *thr = basis->ms->threads->index(x);
+		if (!thr->cannot_make_progress)
+			stopped = false;
+	}
+	if (stopped) {
+		printf("%p: indifferent\n", basis);
+		whiteStates->push(basis);
+		return true;
+	}
+
+	/* Okay, have to actually do something. */
 
 	MemTracePool thread_traces(basis->ms);
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 		thread_traces.firstRacingAccessMap();
 
+	/* If there are no races then we can just run one thread after
+	   another, and we don't need to do anything else.  We can
+	   even get away with reusing the old MachineState. */
+	/* This includes the case where only one thread can make
+	   progress at all. */
 	bool noRaces = true;
 	for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
 	     it != first_racing_access->end();
@@ -82,12 +138,7 @@ bool Explorer::advance()
 		if (it->second.full)
 			noRaces = false;
 	}
-
 	if (noRaces) {
-		/* If there are no races then we can just run one
-		   thread after another, and we don't need to do
-		   anything else.  We can even get away with reusing
-		   the old MachineState. */
 		for (unsigned x = 0; x < basis->ms->threads->size(); x++) {
 			Thread *thr = basis->ms->threads->index(x);
 			if (thr->cannot_make_progress)
@@ -95,23 +146,19 @@ bool Explorer::advance()
 			Interpreter i(basis->ms);
 			i.runToFailure(thr->tid, basis->history, 10000);
 		}
-		whiteStates->push(basis);
+		grayStates->push(basis);
 		delete first_racing_access;
 		return true;
 	}
 
-	bool noProgress = true;
 	for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
 	     it != first_racing_access->end();
 	     it++) {
 		ThreadId tid = it->first;
 		Maybe<unsigned> r = it->second;
 		Thread *thr = basis->ms->findThread(tid);
-		if (thr->cannot_make_progress) {
-			printf("Thread %d cannot make progress\n", tid._tid());
+		if (thr->cannot_make_progress)
 			continue;
-		}
-		noProgress = false;
 		ExplorationState *newGray = basis->dupeSelf();
 		VexGcRoot grayKeeper((void **)&newGray);
 		Interpreter i(newGray->ms);
@@ -123,45 +170,8 @@ bool Explorer::advance()
 			i.runToFailure(tid, newGray->history, 10000);
 		}
 
-		/* A white node is one which has been fully explored.  We consider
-		   a node to have been fully explored if either:
-
-		   a) Any thread has crashed, or
-		   b) For each thread thr, either that thread has reached its
-		      successThreshold, or it can no longer make progress.
-		*/
-
-		bool white;
-		white = true;
-		if (!newGray->ms->crashed()) {
-			for (unsigned x = 0;
-			     x < newGray->ms->threads->size();
-			     x++) {
-				thr = newGray->ms->threads->index(x);
-				if (!thr->cannot_make_progress &&
-				    thr->nrAccesses < (*successThresholds)[thr->tid]) {
-					printf("%p: Thread %d can advance (%ld < %ld)\n",
-					       newGray,
-					       thr->tid._tid(),
-					       thr->nrAccesses, (*successThresholds)[thr->tid]);
-					white = false;
-				} else {
-					thr->cannot_make_progress = true;
-				}
-			}
-			if (white)
-				printf("%p: All threads finished.\n", newGray);
-		} else {
-			printf("%p: Crashed\n", newGray);
-		}
-		if (white)
-			whiteStates->push(newGray);
-		else
-			grayStates->push(newGray);
+		grayStates->push(newGray);
 	}
-
-	if (noProgress)
-		whiteStates->push(basis);
 
 	delete first_racing_access;
 
