@@ -78,6 +78,7 @@ InterpretResult StoreEvent::fake(Thread *thr, MachineState *ms,
 		ms->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
+		thr->crashed = true;
 		return InterpretResultCrash;
 	}
 }
@@ -136,6 +137,7 @@ InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 	} else {
 		if (lr)
 			*lr = NULL;
+		thr->crashed = true;
 		return InterpretResultCrash;
 	}
 }
