@@ -70,6 +70,7 @@ Explorer *Explorer::init(std::map<ThreadId, unsigned long> *thresholds, Explorat
 
 bool Explorer::advance()
 {
+	printf("%d gray, %d white.\n", grayStates->size(), whiteStates->size());
 	if (grayStates->size() == 0)
 		return false;
 
@@ -163,10 +164,10 @@ bool Explorer::advance()
 		VexGcRoot grayKeeper((void **)&newGray);
 		Interpreter i(newGray->ms);
 		if (r.full) {
-			printf("%p: run %d to %d\n", newGray, tid._tid(), r.value);
+			printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
 			i.runToAccessLoggingEvents(tid, r.value + 1, newGray->history);
 		} else {
-			printf("%p: run %d to failure\n", newGray, tid._tid());
+			printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
 			i.runToFailure(tid, newGray->history, 10000);
 		}
 
@@ -253,6 +254,7 @@ main(int argc, char *argv[])
 		for (unsigned x = 0; x < a->threads->size(); x++) {
 			Thread *thr = a->threads->index(x);
 			thresholds[thr->tid] = thr->nrAccesses * 2;
+			//thresholds[thr->tid] = 10;
 			printf("Thread %d threshold %ld\n", thr->tid._tid(),
 			       thr->nrAccesses * 2);
 		}
