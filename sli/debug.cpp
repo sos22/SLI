@@ -17,7 +17,7 @@ protected:
 	void sendResponse(const char *fmt, ...);
 public:
 	static GdbCommand *read(int fd);
-	virtual void doIt(const MachineState *) = 0;
+	virtual void doIt(MachineState *) = 0;
 	GdbCommand(GdbChannel *_chan)
 		: chan(_chan)
 	{
@@ -35,11 +35,13 @@ class GdbChannel {
 		  buf(NULL),
 		  buf_avail(0),
 		  buf_size(0),
-		  currentTid(ThreadId(1))
+		  currentTidQuery(ThreadId(1)),
+		  currentTidRun(ThreadId(1))
 	{
 	}
 public:
-	ThreadId currentTid;
+	ThreadId currentTidQuery;
+	ThreadId currentTidRun;
 	unsigned threadInfoIndex;
 	static GdbChannel *accept();
 	~GdbChannel()
@@ -55,20 +57,20 @@ public:
 
 class UnknownCommand : public GdbCommand {
 public:
-	void doIt(const MachineState *) { sendResponse(""); }
+	void doIt(MachineState *) { sendResponse(""); }
 	UnknownCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
 class GetSigCommand : public GdbCommand {
 public:
-	void doIt(const MachineState *) { sendResponse("S11"); }
+	void doIt(MachineState *) { sendResponse("S00"); }
 	GetSigCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
 class QueryCommand : public GdbCommand {
 	char *q;
 public:
-	void doIt(const MachineState *);
+	void doIt(MachineState *);
 	QueryCommand(GdbChannel *c, const char *n)
 		: GdbCommand(c),
 		  q(strdup(n))
@@ -79,14 +81,14 @@ public:
 
 class GetRegistersCommand : public GdbCommand {
 public:
-	void doIt(const MachineState *);
+	void doIt(MachineState *);
 	GetRegistersCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
 class GetRegisterCommand : public GdbCommand {
 	unsigned regNr;
 public:
-	void doIt(const MachineState *);
+	void doIt(MachineState *);
 	GetRegisterCommand(GdbChannel *c, const char *b) : GdbCommand(c) { regNr = strtol(b, NULL, 16); }
 };
 
@@ -94,19 +96,26 @@ class GetMemoryCommand : public GdbCommand {
 	unsigned long addr;
 	unsigned size;
 public:
-	void doIt(const MachineState *);
+	void doIt(MachineState *);
 	GetMemoryCommand(GdbChannel *c, const char *b) : GdbCommand(c) { sscanf(b, "%lx,%x", &addr, &size); }
 };
 
 class SetThreadCommand : public GdbCommand {
 	ThreadId tid;
-	bool actual;
+	bool query;
 public:
-	void doIt(const MachineState *) { if (actual) chan->currentTid = tid; sendResponse(""); }
+	void doIt(MachineState *)
+	{
+		if (query)
+			chan->currentTidQuery = tid;
+		else if (tid._tid() != 0 && tid._tid() != -1)
+			chan->currentTidRun = tid;
+		sendResponse("");
+	}
 	SetThreadCommand(GdbChannel *c, const char *b)
 		: GdbCommand(c),
 		  tid(ThreadId(strtol(b+1, NULL, 16))),
-		  actual(b[0] != 'c')
+		  query(b[0] != 'c')
 	{
 	}
 };
@@ -114,7 +123,7 @@ public:
 class ThreadAliveCommand : public GdbCommand {
 	ThreadId tid;
 public:
-	void doIt(const MachineState *);
+	void doIt(MachineState *);
 	ThreadAliveCommand(GdbChannel *c, const char *b)
 		: GdbCommand(c),
 		  tid(ThreadId(strtol(b, NULL, 16)))
@@ -124,8 +133,25 @@ public:
 
 class DetachCommand : public GdbCommand {
 public:
-	void doIt(const MachineState *) {abort(); }
+	void doIt(MachineState *) {abort(); }
 	DetachCommand(GdbChannel *c) : GdbCommand(c) {}
+};
+
+class ContinueCommand : public GdbCommand {
+	unsigned long newRip;
+	bool haveNewRip;
+public:
+	void doIt(MachineState *ms);
+	ContinueCommand(GdbChannel *c, const char *buf)
+		: GdbCommand(c)
+	{
+		if (buf[0] == '0') {
+			haveNewRip = false;
+		} else {
+			haveNewRip = true;
+			newRip = strtol(buf, NULL, 16);
+		}
+	}
 };
 
 static unsigned long htonlong(unsigned long x)
@@ -133,14 +159,11 @@ static unsigned long htonlong(unsigned long x)
 	return ((unsigned long)htonl(x) << 32) | htonl(x >> 32);
 }
 
-void GetMemoryCommand::doIt(const MachineState *ms)
+void GetMemoryCommand::doIt(MachineState *ms)
 {
 	char *membuf = (char *)malloc(size);
 	try {
-		/* We rely on the fact that readMemory really is const
-		   when it's not given a thread, because in that case
-		   it can't extend the stack. */
-		const_cast<AddressSpace *>(ms->addressSpace)->readMemory(addr, size, membuf, true);
+		ms->addressSpace->readMemory(addr, size, membuf, true);
 	} catch (BadMemoryException exc) {
 		sendResponse("E12");
 		free(membuf);
@@ -157,9 +180,9 @@ void GetMemoryCommand::doIt(const MachineState *ms)
 	free(chrbuf);
 }
 
-void GetRegistersCommand::doIt(const MachineState *ms)
+void GetRegistersCommand::doIt(MachineState *ms)
 {
-	const Thread *thr = ms->findThread(chan->currentTid);
+	const Thread *thr = ms->findThread(chan->currentTidQuery);
 
 	char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
 				htonlong(thr->regs.regs.guest_RAX),
@@ -174,9 +197,9 @@ void GetRegistersCommand::doIt(const MachineState *ms)
 	free(buf);
 }
 
-void GetRegisterCommand::doIt(const MachineState *ms)
+void GetRegisterCommand::doIt(MachineState *ms)
 {
-	const Thread *thr = ms->findThread(chan->currentTid);
+	const Thread *thr = ms->findThread(chan->currentTidQuery);
 	unsigned long r;
 	bool haveIt;
 
@@ -215,14 +238,14 @@ void GetRegisterCommand::doIt(const MachineState *ms)
 	}
 }
 
-void QueryCommand::doIt(const MachineState *ms)
+void QueryCommand::doIt(MachineState *ms)
 {
 	if (!strcmp(q, "C")) {
-		sendResponse("QC%x", chan->currentTid._tid());
+		sendResponse("QC%x", chan->currentTidQuery._tid());
 	} else if (!strcmp(q, "Supported")) {
 		sendResponse("");
 	} else if (!strcmp(q, "fThreadInfo")) {
-		chan->threadInfoIndex = 0;
+		chan->threadInfoIndex = 1;
 		sendResponse("m%d", ms->threads->index(0)->tid._tid());
 	} else if (!strcmp(q, "sThreadInfo")) {
 		if (chan->threadInfoIndex >= ms->threads->size()) {
@@ -237,13 +260,32 @@ void QueryCommand::doIt(const MachineState *ms)
 	}
 }
 
-void ThreadAliveCommand::doIt(const MachineState *ms)
+void ThreadAliveCommand::doIt(MachineState *ms)
 {
 	const Thread *thr = ms->findThread(tid);
 	if (thr->exitted || thr->crashed)
 		sendResponse("E01");
 	else
 		sendResponse("OK");
+}
+
+void ContinueCommand::doIt(MachineState *ms)
+{
+	Thread *thr = ms->findThread(chan->currentTidRun);
+	if (haveNewRip)
+		thr->regs.regs.guest_RIP = newRip;
+
+        while (1) {
+                ThreadEvent *evt = thr->runToEvent(ms->addressSpace);
+                PointerKeeper<ThreadEvent> k_evt(evt);
+                InterpretResult res = evt->fake(thr, ms);
+
+		if (dynamic_cast<SignalEvent *>(evt) ||
+		    res != InterpretResultContinue)
+			break;
+	}
+
+	sendResponse("S03");
 }
 
 void GdbCommand::sendResponse(const char *fmt, ...)
@@ -367,6 +409,9 @@ GdbCommand *GdbChannel::getCommand()
 	case '?':
 		r = new GetSigCommand(this);
 		break;
+	case 'c':
+		r = new ContinueCommand(this, buf + 1);
+		break;
 	case 'D':
 		r = new DetachCommand(this);
 		break;
@@ -432,8 +477,12 @@ GdbChannel *GdbChannel::accept()
 }
 
 void
-gdb_machine_state(const MachineState *ms)
+gdb_machine_state(const MachineState *base_ms)
 {
+	MachineState *ms = base_ms->dupeSelf();
+
+	VexGcRoot ms_keeper((void **)&ms);
+
 	GdbChannel *chan = GdbChannel::accept();
 
 	while (1) {
