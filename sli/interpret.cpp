@@ -40,8 +40,9 @@ class Explorer {
 public:
 	LibvexVector<ExplorationState> *whiteStates;
 	LibvexVector<ExplorationState> *grayStates;
+	unsigned successThreshold;
 
-	static Explorer *init(ExplorationState *initState);
+	static Explorer *init(unsigned, ExplorationState *initState);
 
 	bool advance();
 };
@@ -49,13 +50,14 @@ public:
 DECLARE_VEX_TYPE(Explorer);
 DEFINE_VEX_TYPE_NO_DESTRUCT(Explorer, {visit(ths->whiteStates);visit(ths->grayStates);});
 
-Explorer *Explorer::init(ExplorationState *initState)
+Explorer *Explorer::init(unsigned threshold, ExplorationState *initState)
 {
 	Explorer *e = LibVEX_Alloc_Explorer();
 	memset(e, 0, sizeof(*e));
 	e->whiteStates = LibvexVector<ExplorationState>::empty();
 	e->grayStates = LibvexVector<ExplorationState>::empty();
 	e->grayStates->push(initState);
+	e->successThreshold = threshold;
 	return e;
 }
 
@@ -78,8 +80,10 @@ bool Explorer::advance()
 		ThreadId tid = it->first;
 		Maybe<unsigned> r = it->second;
 		Thread *thr = basis->ms->findThread(tid);
-		if (thr->cannot_make_progress)
+		if (thr->cannot_make_progress) {
+			printf("Thread %d cannot make progress\n", tid._tid());
 			continue;
+		}
 		noProgress = false;
 		ExplorationState *newGray = basis->dupeSelf();
 		VexGcRoot grayKeeper((void **)&newGray);
@@ -89,9 +93,9 @@ bool Explorer::advance()
 			i.runToAccessLoggingEvents(tid, r.value + 1, newGray->history);
 		} else {
 			printf("Thread %d doesn't race\n", tid._tid());
-			i.runToFailure(tid, newGray->history);
+			i.runToFailure(tid, newGray->history, 10000);
 		}
-		if (newGray->ms->crashed())
+		if (newGray->ms->nrAccesses > successThreshold || newGray->ms->crashed())
 			whiteStates->push(newGray);
 		else
 			grayStates->push(newGray);
@@ -169,7 +173,17 @@ main(int argc, char *argv[])
 		err(1, "opening %s", argv[1]);
 
 	MachineState *ms_base = MachineState::initialMachineState(lf, ptr, &ptr);
-	Explorer *e = Explorer::init(ExplorationState::init(ms_base));
+	VexGcRoot((void **)&ms_base);
+
+	unsigned long threshold;
+	{
+		MachineState *a = ms_base->dupeSelf();
+		Interpreter i(a);
+		i.replayLogfile(lf, ptr);
+		threshold = a->nrAccesses * 2;
+	}
+
+	Explorer *e = Explorer::init(threshold, ExplorationState::init(ms_base));
 	VexGcRoot e_base((void **)&e);
 
 	while (e->advance())

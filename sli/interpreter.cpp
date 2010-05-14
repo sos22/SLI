@@ -1131,14 +1131,16 @@ finished_block:
 InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output, unsigned max_events)
 {
 	MemoryTrace *work = new MemoryTrace();
+	*output = work;
 	Thread *thr = currentState->findThread(tid);
+	if (thr->cannot_make_progress)
+		return InterpretResultIncomplete;
 	while (max_events) {
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 
 		InterpretResult res = evt->fake(thr, currentState);
 		if (res != InterpretResultContinue) {
-			*output = work;
 			return res;
 		}
 		if (LoadEvent *lr = dynamic_cast<LoadEvent *>(evt)) {
@@ -1148,7 +1150,6 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **ou
 		}
 		max_events--;
 	}
-	*output = work;
 	return InterpretResultTimedOut;
 }
 
@@ -1173,10 +1174,11 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 	}
 }
 
-void Interpreter::runToFailure(ThreadId tid, LogWriter *output)
+void Interpreter::runToFailure(ThreadId tid, LogWriter *output, unsigned max_events)
 {
+	bool have_event_limit = max_events != 0;
 	Thread *thr = currentState->findThread(tid);
-	while (1) {
+	while (!have_event_limit || max_events) {
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
@@ -1184,6 +1186,7 @@ void Interpreter::runToFailure(ThreadId tid, LogWriter *output)
 			thr->cannot_make_progress = true;
 			return;
 		}
+		max_events--;
 	}
 }
 

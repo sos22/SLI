@@ -1103,6 +1103,7 @@ private:
 public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
+	unsigned long nrAccesses;
 	static MachineState *initialMachineState(LogReader *lf,
 						 LogFile::ptr startPtr,
 						 LogFile::ptr *endPtr);
@@ -1161,7 +1162,8 @@ public:
 					     unsigned max_events);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      LogWriter *output = NULL);
-	void runToFailure(ThreadId tid, LogWriter *output);
+	void runToFailure(ThreadId tid, LogWriter *output,
+			  unsigned max_events = 0);
 };
 
 void replay_syscall(const LogRecordSyscall *lrs,
