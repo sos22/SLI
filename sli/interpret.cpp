@@ -136,11 +136,12 @@ CommunicationGraph::CommunicationGraph(MemoryTrace *mt)
 		MemoryAccessLoad *load = dynamic_cast<MemoryAccessLoad *>((*mt)[loadInd]);
 		if (!load)
 			continue;
-		for (unsigned storeInd = 0; storeInd < loadInd; storeInd++) {
+		for (int storeInd = loadInd - 1; storeInd >= 0; storeInd--) {
 			MemoryAccessStore *store = dynamic_cast<MemoryAccessStore *>((*mt)[storeInd]);
 			if (!store || store->tid == load->tid || store->addr != load->addr)
 				continue;
 			addEdge(load, store);
+			break;
 		}
 	}
 }
