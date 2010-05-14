@@ -75,6 +75,31 @@ bool Explorer::advance()
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 		thread_traces.firstRacingAccessMap();
 
+	bool noRaces = true;
+	for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
+	     it != first_racing_access->end();
+	     it++) {
+		if (it->second.full)
+			noRaces = false;
+	}
+
+	if (noRaces) {
+		/* If there are no races then we can just run one
+		   thread after another, and we don't need to do
+		   anything else.  We can even get away with reusing
+		   the old MachineState. */
+		for (unsigned x = 0; x < basis->ms->threads->size(); x++) {
+			Thread *thr = basis->ms->threads->index(x);
+			if (thr->cannot_make_progress)
+				continue;
+			Interpreter i(basis->ms);
+			i.runToFailure(thr->tid, basis->history, 10000);
+		}
+		whiteStates->push(basis);
+		delete first_racing_access;
+		return true;
+	}
+
 	bool noProgress = true;
 	for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
 	     it != first_racing_access->end();
