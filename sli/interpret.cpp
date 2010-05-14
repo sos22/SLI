@@ -15,9 +15,6 @@ public:
 	MemLog *history;
 	static ExplorationState *init(MachineState *ms);
 	ExplorationState *dupeSelf() const;
-
-	bool good;
-	bool bad;
 };
 
 DECLARE_VEX_TYPE(ExplorationState)
@@ -28,8 +25,6 @@ ExplorationState *ExplorationState::init(MachineState *ms)
 	ExplorationState *es = LibVEX_Alloc_ExplorationState();
 	es->ms = ms;
 	es->history = MemLog::emptyMemlog();
-	es->good = false;
-	es->bad = false;
 	return es;
 }
 
@@ -38,14 +33,13 @@ ExplorationState *ExplorationState::dupeSelf() const
 	ExplorationState *es = LibVEX_Alloc_ExplorationState();
 	es->ms = ms->dupeSelf();
 	es->history = history->dupeSelf();
-	es->good = good;
-	es->bad = bad;
 	return es;
 }
 
 class Explorer {
 public:
-	LibvexVector<ExplorationState> *whiteStates;
+	LibvexVector<ExplorationState> *goodStates;
+	LibvexVector<ExplorationState> *badStates;
 	LibvexVector<ExplorationState> *grayStates;
 	std::map<ThreadId, unsigned long> *successThresholds;
 
@@ -55,13 +49,14 @@ public:
 };
 
 DECLARE_VEX_TYPE(Explorer);
-DEFINE_VEX_TYPE_NO_DESTRUCT(Explorer, {visit(ths->whiteStates);visit(ths->grayStates);});
+DEFINE_VEX_TYPE_NO_DESTRUCT(Explorer, {visit(ths->goodStates);visit(ths->badStates);visit(ths->grayStates);});
 
 Explorer *Explorer::init(std::map<ThreadId, unsigned long> *thresholds, ExplorationState *initState)
 {
 	Explorer *e = LibVEX_Alloc_Explorer();
 	memset(e, 0, sizeof(*e));
-	e->whiteStates = LibvexVector<ExplorationState>::empty();
+	e->goodStates = LibvexVector<ExplorationState>::empty();
+	e->badStates = LibvexVector<ExplorationState>::empty();
 	e->grayStates = LibvexVector<ExplorationState>::empty();
 	e->grayStates->push(initState);
 	e->successThresholds = thresholds;
@@ -70,21 +65,19 @@ Explorer *Explorer::init(std::map<ThreadId, unsigned long> *thresholds, Explorat
 
 bool Explorer::advance()
 {
-	printf("%d gray, %d white.\n", grayStates->size(), whiteStates->size());
-	if (grayStates->size() == 0)
+	printf("%d gray, %d good, %d bad.\n", grayStates->size(), goodStates->size(), badStates->size());
+	if (grayStates->size() == 0 ||
+	    (goodStates->size() >= 30 &&
+	     badStates->size() >= 10))
 		return false;
 
 	ExplorationState *basis = grayStates->pop_first();
 	VexGcRoot basis_keeper((void **)&basis);
 
-	assert(!basis->good);
-	assert(!basis->bad);
-
 	/* Has the state already crashed? */
 	if (basis->ms->crashed()) {
 		printf("%p: bad\n", basis);
-		basis->bad = true;
-		whiteStates->push(basis);
+		badStates->push(basis);
 		return true;
 	}
 
@@ -103,8 +96,7 @@ bool Explorer::advance()
 
 	if (good) {
 		printf("%p: good\n", basis);
-		basis->good = true;
-		whiteStates->push(basis);
+		goodStates->push(basis);
 		return true;
 	}
 
@@ -117,7 +109,6 @@ bool Explorer::advance()
 	}
 	if (stopped) {
 		printf("%p: indifferent\n", basis);
-		whiteStates->push(basis);
 		return true;
 	}
 
@@ -266,12 +257,23 @@ main(int argc, char *argv[])
 	while (e->advance())
 		;
 
-	for (unsigned x = 0; x < e->whiteStates->size(); x++) {
-		printf("State %d, crashed %d\n", x, e->whiteStates->index(x)->ms->crashed());
-		MemoryTrace mt(*e->whiteStates->index(x)->history,
+	printf("Good states:\n");
+	for (unsigned x = 0; x < e->goodStates->size(); x++) {
+		printf("State %d\n", x);
+		MemoryTrace mt(*e->goodStates->index(x)->history,
 			       MemLog::startPtr());
 		CommunicationGraph ct(&mt);
 		ct.dump();
 	}
+
+	printf("Bad states:\n");
+	for (unsigned x = 0; x < e->badStates->size(); x++) {
+		printf("State %d\n", x);
+		MemoryTrace mt(*e->badStates->index(x)->history,
+			       MemLog::startPtr());
+		CommunicationGraph ct(&mt);
+		ct.dump();
+	}
+
 	return 0;
 }
