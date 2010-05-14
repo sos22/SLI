@@ -145,6 +145,8 @@ bool Explorer::advance()
 					       thr->tid._tid(),
 					       thr->nrAccesses, (*successThresholds)[thr->tid]);
 					white = false;
+				} else {
+					thr->cannot_make_progress = true;
 				}
 			}
 			if (white)
