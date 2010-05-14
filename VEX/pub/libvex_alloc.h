@@ -117,7 +117,7 @@ public:
 		assert(sz != 0);
 		content *r = items[0];
 		sz--;
-		memmove(items, items + 1, sizeof(items[0]) & sz);
+		memmove(items, items + 1, sizeof(items[0]) * sz);
 		return r;
 	}
 
