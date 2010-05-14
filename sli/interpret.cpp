@@ -138,7 +138,7 @@ CommunicationGraph::CommunicationGraph(MemoryTrace *mt)
 			continue;
 		for (int storeInd = loadInd - 1; storeInd >= 0; storeInd--) {
 			MemoryAccessStore *store = dynamic_cast<MemoryAccessStore *>((*mt)[storeInd]);
-			if (!store || store->tid == load->tid || store->addr != load->addr)
+			if (!store || store->addr != load->addr)
 				continue;
 			addEdge(load, store);
 			break;
