@@ -820,6 +820,8 @@ public:
 
 	bool cannot_make_progress;
 
+	unsigned long nrAccesses;
+
 	IRSB *currentIRSB;
 public:
 	expression_result_array temporaries;
@@ -1105,7 +1107,6 @@ private:
 public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
-	unsigned long nrAccesses;
 	static MachineState *initialMachineState(LogReader *lf,
 						 LogFile::ptr startPtr,
 						 LogFile::ptr *endPtr);

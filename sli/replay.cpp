@@ -59,7 +59,7 @@ void StoreEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 			throw ReplayFailedException("memory mismatch on store to %lx",
 						    addr);
 		ms->addressSpace->writeMemory(addr, size, data, false, thr);
-		ms->nrAccesses++;
+		thr->nrAccesses++;
 	} else {
 		checkSegv(lr, addr);
 	}
@@ -75,7 +75,7 @@ InterpretResult StoreEvent::fake(Thread *thr, MachineState *ms,
 	}
 	if (ms->addressSpace->isWritable(addr, size, thr)) {
 		ms->addressSpace->writeMemory(addr, size, data, false, thr);
-		ms->nrAccesses++;
+		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
 		thr->crashed = true;
@@ -108,7 +108,7 @@ void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 		} else {
 			throw NotImplementedException();
 		}
-		ms->nrAccesses++;
+		thr->nrAccesses++;
 	} else {
 		checkSegv(lr, addr);
 	}
@@ -132,7 +132,7 @@ InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 			memcpy(rb, buf, size);
 			*lr = new LogRecordLoad(thr->tid, size, addr, rb);
 		}
-		ms->nrAccesses++;
+		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
 		if (lr)
