@@ -258,7 +258,7 @@ InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr
 		res = 0;
 		break;
 	default:
-		printf("can't fake syscall %ld yet\n", thr->regs.regs.guest_RAX);
+		printf("can't fake syscall %lld yet\n", thr->regs.regs.guest_RAX);
 		if (lr)
 			*lr = NULL;
 		return InterpretResultIncomplete;
