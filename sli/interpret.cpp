@@ -175,17 +175,22 @@ public:
 	class Edge {
 	public:
 		MemoryAccess *load;
+		unsigned load_idx;
 		MemoryAccess *store;
-		Edge(MemoryAccess *_load, MemoryAccess *_store)
+		unsigned store_idx;
+		Edge(MemoryAccess *_load, unsigned _load_idx, MemoryAccess *_store,
+		     unsigned _store_idx)
 			: load(_load),
-			  store(_store)
+			  load_idx(_load_idx),
+			  store(_store),
+			  store_idx(_store_idx)
 		{
 		}
 	};
 	std::vector<Edge> content;
-	void addEdge(MemoryAccess *load, MemoryAccess *store)
+	void addEdge(MemoryAccess *load, unsigned load_idx, MemoryAccess *store, unsigned store_idx)
 	{
-		content.push_back(Edge(load, store));
+		content.push_back(Edge(load, load_idx, store, store_idx));
 	}
 	CommunicationGraph(MemoryTrace *mt);
 	void dump() const;
@@ -201,7 +206,7 @@ CommunicationGraph::CommunicationGraph(MemoryTrace *mt)
 			MemoryAccessStore *store = dynamic_cast<MemoryAccessStore *>((*mt)[storeInd]);
 			if (!store || store->addr != load->addr)
 				continue;
-			addEdge(load, store);
+			addEdge(load, loadInd, store, storeInd);
 			break;
 		}
 	}
@@ -210,7 +215,8 @@ CommunicationGraph::CommunicationGraph(MemoryTrace *mt)
 void CommunicationGraph::dump() const
 {
 	for (unsigned x = 0; x < content.size(); x++)
-		printf("%s -> %s\n", content[x].store->name(), content[x].load->name());
+		printf("%s:%d -> %s:%d\n", content[x].store->name(), content[x].store_idx,
+		       content[x].load->name(), content[x].load_idx);
 }
 
 /* force some functions to be included even when they're not needed,
