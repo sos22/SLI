@@ -58,7 +58,7 @@ void AddressSpace::writeMemory(unsigned long start, unsigned size,
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
 			contents = (const void *)((unsigned long)contents + to_copy_this_time);
-		} else if (thr && extendStack(start, thr->regs.regs.guest_RSP)) {
+		} else if (thr && extendStack(start, thr->regs.rsp())) {
 			continue;
 		} else {
 			throw BadMemoryException(true, start, size);
@@ -88,7 +88,7 @@ void AddressSpace::readMemory(unsigned long start, unsigned size,
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
 			contents = (void *)((unsigned long)contents + to_copy_this_time);
-		} else if (thr && extendStack(start, thr->regs.regs.guest_RSP)) {
+		} else if (thr && extendStack(start, thr->regs.rsp())) {
 			/* This is what Linux does, but it doesn't
 			   make a great deal of sense: any time you
 			   hit this the program will definitely have
@@ -123,7 +123,7 @@ bool AddressSpace::isAccessible(unsigned long start, unsigned size,
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
-		} else if (extendStack(start, thr->regs.regs.guest_RSP)) {
+		} else if (extendStack(start, thr->regs.rsp())) {
 			continue;
 		} else {
 			return false;

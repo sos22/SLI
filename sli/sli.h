@@ -525,9 +525,14 @@ struct expression_result {
 
 class RegisterSet {
 public:
-	VexGuestAMD64State regs;
-	RegisterSet(const VexGuestAMD64State &r) : regs(r) {}
-	unsigned long rip() { return regs.guest_RIP; }
+	static const unsigned NR_REGS = sizeof(VexGuestAMD64State) / 8;
+#define REGISTER_IDX(x) (offsetof(VexGuestAMD64State, guest_ ## x) / 8)
+	unsigned long registers[NR_REGS];
+	RegisterSet(const VexGuestAMD64State &r);
+	unsigned long get_reg(unsigned idx) const { assert(idx < NR_REGS); return registers[idx]; }
+	void set_reg(unsigned idx, unsigned long val) { assert(idx < NR_REGS); registers[idx] = val; }
+	unsigned long rip() const { return get_reg(REGISTER_IDX(RIP)); }
+	unsigned long rsp() const { return get_reg(REGISTER_IDX(RSP)); }
 };
 
 class Thread;

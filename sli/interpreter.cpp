@@ -25,16 +25,103 @@ static void
 write_reg(Thread *state, unsigned offset, unsigned long val)
 {
 	assert(!(offset % 8));
-	assert(offset < sizeof(state->regs.regs));
-	((unsigned long *)&state->regs.regs)[offset/8] = val;
+	state->regs.set_reg(offset / 8, val);
 }
 
 static unsigned long
 read_reg(Thread *state, unsigned offset)
 {
 	assert(!(offset % 8));
-	assert(offset < sizeof(state->regs.regs));
-	return ((unsigned long *)&state->regs.regs)[offset/8];
+	return state->regs.get_reg(offset / 8);
+}
+
+static void
+amd64g_dirtyhelper_CPUID_sse3_and_cx16 ( RegisterSet *regs )
+{
+#define SET_ABCD(_a,_b,_c,_d)				\
+	do {						\
+		regs->set_reg(REGISTER_IDX(RAX), _a);	\
+		regs->set_reg(REGISTER_IDX(RBX), _b);	\
+		regs->set_reg(REGISTER_IDX(RCX), _c);	\
+		regs->set_reg(REGISTER_IDX(RDX), _d);	\
+	} while (0)
+
+	switch (0xFFFFFFFF & regs->get_reg(REGISTER_IDX(RAX))) {
+	case 0x00000000:
+		SET_ABCD(0x0000000a, 0x756e6547, 0x6c65746e, 0x49656e69);
+		break;
+	case 0x00000001:
+		SET_ABCD(0x000006f6, 0x00020800, 0x0000e3bd, 0xbfebfbff);
+		break;
+	case 0x00000002:
+		SET_ABCD(0x05b0b101, 0x005657f0, 0x00000000, 0x2cb43049);
+		break;
+	case 0x00000003:
+		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x00000004: {
+		switch (0xFFFFFFFF & regs->get_reg(REGISTER_IDX(RCX))) {
+		case 0x00000000: SET_ABCD(0x04000121, 0x01c0003f,
+					  0x0000003f, 0x00000001); break;
+		case 0x00000001: SET_ABCD(0x04000122, 0x01c0003f,
+					  0x0000003f, 0x00000001); break;
+		case 0x00000002: SET_ABCD(0x04004143, 0x03c0003f,
+					  0x00000fff, 0x00000001); break;
+		default:         SET_ABCD(0x00000000, 0x00000000,
+					  0x00000000, 0x00000000); break;
+		}
+		break;
+	}
+	case 0x00000005:
+		SET_ABCD(0x00000040, 0x00000040, 0x00000003, 0x00000020);
+		break;
+	case 0x00000006:
+		SET_ABCD(0x00000001, 0x00000002, 0x00000001, 0x00000000);
+		break;
+	case 0x00000007:
+		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x00000008:
+		SET_ABCD(0x00000400, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x00000009:
+		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x0000000a:
+	unhandled_eax_value:
+		SET_ABCD(0x07280202, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x80000000:
+		SET_ABCD(0x80000008, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x80000001:
+		SET_ABCD(0x00000000, 0x00000000, 0x00000001, 0x20100800);
+		break;
+	case 0x80000002:
+		SET_ABCD(0x65746e49, 0x2952286c, 0x726f4320, 0x4d542865);
+		break;
+	case 0x80000003:
+		SET_ABCD(0x43203229, 0x20205550, 0x20202020, 0x20202020);
+		break;
+	case 0x80000004:
+		SET_ABCD(0x30303636, 0x20402020, 0x30342e32, 0x007a4847);
+		break;
+	case 0x80000005:
+		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x80000006:
+		SET_ABCD(0x00000000, 0x00000000, 0x10008040, 0x00000000);
+		break;
+	case 0x80000007:
+		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	case 0x80000008:
+		SET_ABCD(0x00003024, 0x00000000, 0x00000000, 0x00000000);
+		break;
+	default:         
+		goto unhandled_eax_value;
+	}
+#undef SET_ABCD
 }
 
 ThreadEvent *
@@ -67,31 +154,7 @@ Thread::do_dirty_call(IRDirty *details)
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
 		return new LoadEvent(details->tmp, args[0].lo.v, 16);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
-		unsigned long res;
-		if (details->needsBBP) {
-			res = ((unsigned long (*)(VexGuestAMD64State *,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long))(details->cee->addr))
-				(&regs.regs, args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
-				 args[4].lo.v, args[5].lo.v);
-		} else {
-			res = ((unsigned long (*)(unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long,
-						  unsigned long))(details->cee->addr))
-				(args[0].lo.v, args[1].lo.v, args[2].lo.v, args[3].lo.v,
-				 args[4].lo.v, args[5].lo.v);
-		}
-		if (details->tmp != IRTemp_INVALID) {
-			temporaries[details->tmp].lo.v = res;
-			temporaries[details->tmp].hi.v = 0;
-		}
+		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;
 	} else {
 		throw NotImplementedException("Unknown dirty call %s\n", details->cee->name);
@@ -908,7 +971,7 @@ public:
 
 void Thread::translateNextBlock(AddressSpace *addrSpace)
 {
-	regs.regs.guest_RIP = redirectGuest(regs.regs.guest_RIP);
+	regs.set_reg(REGISTER_IDX(RIP), redirectGuest(regs.rip()));
 
 	vexSetAllocModeTEMP_and_clear();
 
@@ -969,16 +1032,14 @@ Thread::runToEvent(struct AddressSpace *addrSpace)
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
-#define PASTE(x, y) x ## y
-#define GR(x) *(unsigned long *)(&regs.regs. PASTE(guest_, x))
-				return new InstructionEvent(regs.regs.guest_RIP,
+#define GR(x) regs.get_reg(REGISTER_IDX(x))
+				return new InstructionEvent(regs.rip(),
 							    GR(FOOTSTEP_REG_0_NAME),
 							    GR(FOOTSTEP_REG_1_NAME),
-							    ((unsigned long *)regs.regs.guest_XMM0)[1],
+							    regs.get_reg(REGISTER_IDX(XMM0) + 1),
 							    GR(FOOTSTEP_REG_3_NAME),
 							    GR(FOOTSTEP_REG_4_NAME));
 #undef GR
-#undef PASTE
 			case Ist_AbiHint:
 				break;
 			case Ist_MBE:
@@ -1093,11 +1154,11 @@ Thread::runToEvent(struct AddressSpace *addrSpace)
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
-					printf("EMULATION WARNING %x\n",
-					       regs.regs.guest_EMWARN);
+					printf("EMULATION WARNING %lx\n",
+					       regs.get_reg(REGISTER_IDX(EMWARN)));
 				}
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
-				regs.regs.guest_RIP = stmt->Ist.Exit.dst->Ico.U64;
+				regs.set_reg(REGISTER_IDX(RIP), stmt->Ist.Exit.dst->Ico.U64);
 				goto finished_block;
 			}
 
@@ -1116,7 +1177,7 @@ Thread::runToEvent(struct AddressSpace *addrSpace)
 		{
 			struct expression_result next_addr =
 				eval_expression(currentIRSB->next);
-			regs.regs.guest_RIP = next_addr.lo.v;
+			regs.set_reg(REGISTER_IDX(RIP), next_addr.lo.v);
 		}
 		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
 			currentIRSB = NULL;

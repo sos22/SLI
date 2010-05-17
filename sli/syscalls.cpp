@@ -66,10 +66,10 @@ handle_clone(AddressSpace *addrSpace,
 		newThread->sas_ss_sp = newThread->sas_ss_size = 0;
 	newThread->exit_signal = (flags & CLONE_THREAD) ? -1 : (clone_flags & CSIGNAL);
 #endif
-	newThread->regs.regs.guest_RAX = 0;
-	newThread->regs.regs.guest_RSP = childRsp;
+	newThread->regs.set_reg(REGISTER_IDX(RAX), 0);
+	newThread->regs.set_reg(REGISTER_IDX(RSP), childRsp);
 	if (flags & CLONE_SETTLS)
-		newThread->regs.regs.guest_FS_ZERO = set_tls;
+		newThread->regs.set_reg(REGISTER_IDX(FS_ZERO), set_tls);
 
 	mach->registerThread(newThread);
 }
@@ -80,16 +80,16 @@ replay_syscall(const LogRecordSyscall *lrs,
 	       MachineState *mach)
 {
 	AddressSpace *addrSpace = mach->addressSpace;
-	unsigned long sysnr = thr->regs.regs.guest_RAX;
+	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 	unsigned long res = lrs->res;
 	unsigned long args[6];
 
-	args[0] = thr->regs.regs.guest_RDI;
-	args[1] = thr->regs.regs.guest_RSI;
-	args[2] = thr->regs.regs.guest_RDX;
-	args[3] = thr->regs.regs.guest_R10;
-	args[4] = thr->regs.regs.guest_R8;
-	args[5] = thr->regs.regs.guest_R9;
+	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));
+	args[1] = thr->regs.get_reg(REGISTER_IDX(RSI));
+	args[2] = thr->regs.get_reg(REGISTER_IDX(RDX));
+	args[3] = thr->regs.get_reg(REGISTER_IDX(R10));
+	args[4] = thr->regs.get_reg(REGISTER_IDX(R8));
+	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
 	if (sysnr != lrs->sysnr)
 		throw ReplayFailedBadRegister("<sysnr>",
@@ -110,7 +110,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 
 	res = lrs->res;
 
-	switch (thr->regs.regs.guest_RAX) {
+	switch (sysnr) {
 	case __NR_read: /* 0 */
 		break;
 	case __NR_write: /* 1 */
@@ -222,7 +222,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	case __NR_arch_prctl: /* 158 */
 		assert(args[0] == ARCH_SET_FS);
-		thr->regs.regs.guest_FS_ZERO = args[1];
+		thr->regs.set_reg(REGISTER_IDX(FS_ZERO), args[1]);
 		break;
 	case __NR_sync: /* 162 */
 		break;
@@ -242,33 +242,34 @@ replay_syscall(const LogRecordSyscall *lrs,
 		thr->robust_list = args[0];
 		break;
 	default:
-		throw UnknownSyscallException(thr->regs.regs.guest_RAX);
+		throw UnknownSyscallException(sysnr);
 	}
 
 	assert(res == lrs->res);	
-	thr->regs.regs.guest_RAX = res;
+	thr->regs.set_reg(REGISTER_IDX(RAX), res);
 }
 
 InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
 	unsigned long res;
+	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 
-	switch (thr->regs.regs.guest_RAX) {
+	switch (sysnr) {
 	case __NR_futex:
 		res = 0;
 		break;
 	default:
-		printf("can't fake syscall %lld yet\n", thr->regs.regs.guest_RAX);
+		printf("can't fake syscall %ld yet\n", sysnr);
 		if (lr)
 			*lr = NULL;
 		return InterpretResultIncomplete;
 	}
 	LogRecordSyscall *llr = new LogRecordSyscall(thr->tid,
-						     thr->regs.regs.guest_RAX,
+						     sysnr,
 						     res,
-						     thr->regs.regs.guest_RDI,
-						     thr->regs.regs.guest_RSI,
-						     thr->regs.regs.guest_RDX);
+						     thr->regs.get_reg(REGISTER_IDX(RDI)),
+						     thr->regs.get_reg(REGISTER_IDX(RSI)),
+						     thr->regs.get_reg(REGISTER_IDX(RDX)));
 
 	if (lr)
 		*lr = llr;

@@ -295,7 +295,7 @@ void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 InterpretResult SignalEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 {
 	if (lr)
-		*lr = new LogRecordSignal(thr->tid, thr->regs.regs.guest_RIP, signr, 0, virtaddr);
+		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, 0, virtaddr);
 	thr->crashed = true;
 	return InterpretResultCrash;
 }

@@ -108,7 +108,7 @@ public:
 	{
 		if (query)
 			chan->currentTidQuery = tid;
-		else if (tid._tid() != 0 && tid._tid() != -1)
+		else if (tid._tid() != 0 && (int)tid._tid() != -1)
 			chan->currentTidRun = tid;
 		sendResponse("");
 	}
@@ -185,14 +185,14 @@ void GetRegistersCommand::doIt(MachineState *ms)
 	const Thread *thr = ms->findThread(chan->currentTidQuery);
 
 	char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
-				htonlong(thr->regs.regs.guest_RAX),
-				htonlong(thr->regs.regs.guest_RBX),
-				htonlong(thr->regs.regs.guest_RCX),
-				htonlong(thr->regs.regs.guest_RDX),
-				htonlong(thr->regs.regs.guest_RSI),
-				htonlong(thr->regs.regs.guest_RDI),
-				htonlong(thr->regs.regs.guest_RBP),
-				htonlong(thr->regs.regs.guest_RSP));
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RAX))),
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RBX))),
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RCX))),
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RDX))),
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RSI))),
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RDI))),
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RBP))),
+				htonlong(thr->regs.get_reg(REGISTER_IDX(RSP))));
 	sendResponse(buf);
 	free(buf);
 }
@@ -204,7 +204,7 @@ void GetRegisterCommand::doIt(MachineState *ms)
 	bool haveIt;
 
 	switch (regNr) {
-#define REG(nr, name) case nr: haveIt = true; r = thr->regs.regs. guest_ ## name ; break
+#define REG(nr, name) case nr: haveIt = true; r = thr->regs.get_reg(REGISTER_IDX(name)); break
 		REG(0, RAX);
 		REG(1, RBX);
 		REG(2, RCX);
@@ -273,7 +273,7 @@ void ContinueCommand::doIt(MachineState *ms)
 {
 	Thread *thr = ms->findThread(chan->currentTidRun);
 	if (haveNewRip)
-		thr->regs.regs.guest_RIP = newRip;
+		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
         while (1) {
                 ThreadEvent *evt = thr->runToEvent(ms->addressSpace);

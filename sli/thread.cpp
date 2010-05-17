@@ -5,6 +5,12 @@ template class LibvexVector<Thread>;
 DECLARE_VEX_TYPE(Thread);
 DEFINE_VEX_TYPE_NO_DESTRUCT(Thread, {visit(ths->currentIRSB);ths->temporaries.visit(visit);});
 
+RegisterSet::RegisterSet(VexGuestAMD64State const&r)
+{
+	for (unsigned x = 0; x < NR_REGS; x++)
+		registers[x] = ((unsigned long *)&r)[x];
+}
+
 Thread *Thread::initialThread(const LogRecordInitialRegisters &initRegs)
 {
 	Thread *work;
@@ -37,7 +43,11 @@ Thread *Thread::dupeSelf() const
 
 void Thread::dumpSnapshot(LogWriter *lw) const
 {
-	lw->append(LogRecordInitialRegisters(tid, regs.regs));
+	VexGuestAMD64State r;
+
+	for (unsigned x = 0; x < RegisterSet::NR_REGS; x++)
+		((unsigned long *)&r)[x] = regs.get_reg(x);
+	lw->append(LogRecordInitialRegisters(tid, r));
 	if (currentIRSB && currentIRSBOffset != 0)
 		lw->append(LogRecordVexThreadState(tid, currentIRSBOffset, temporaries));
 }
