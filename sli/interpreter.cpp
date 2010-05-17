@@ -21,19 +21,20 @@ static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 
 #define REG_LAST 128
 
-static unsigned long *
-get_reg(Thread *state, unsigned offset)
+static void
+write_reg(Thread *state, unsigned offset, unsigned long val)
 {
 	assert(!(offset % 8));
 	assert(offset < sizeof(state->regs.regs));
-	return &((unsigned long *)&state->regs.regs)[offset/8];
+	((unsigned long *)&state->regs.regs)[offset/8] = val;
 }
 
-static const struct expression *
-read_reg(Thread *state, unsigned offset, unsigned long *v)
+static unsigned long
+read_reg(Thread *state, unsigned offset)
 {
-	*v = *get_reg(state, offset);
-	return NULL;
+	assert(!(offset % 8));
+	assert(offset < sizeof(state->regs.regs));
+	return ((unsigned long *)&state->regs.regs)[offset/8];
 }
 
 ThreadEvent *
@@ -397,11 +398,9 @@ Thread::eval_expression(IRExpr *expr)
 	switch (expr->tag) {
 	case Iex_Get: {
 		unsigned long v1;
-		const struct expression *src1;
 		unsigned sub_word_offset = expr->Iex.Get.offset & 7;
-		src1 = read_reg(this,
-				expr->Iex.Get.offset - sub_word_offset,
-				&v1);
+		v1 = read_reg(this,
+			      expr->Iex.Get.offset - sub_word_offset);
 		switch (expr->Iex.Get.ty) {
 		case Ity_I64:
 		case Ity_F64:
@@ -411,9 +410,8 @@ Thread::eval_expression(IRExpr *expr)
 		case Ity_V128:
 			assert(!sub_word_offset);
 			dest->lo.v = v1;
-			read_reg(this,
-				 expr->Iex.Get.offset - sub_word_offset + 8,
-				 &dest->hi.v);
+			dest->hi.v = read_reg(this,
+					      expr->Iex.Get.offset - sub_word_offset + 8);
 			break;
 		case Ity_I32:
 		case Ity_F32:
@@ -1031,48 +1029,50 @@ Thread::runToEvent(struct AddressSpace *addrSpace)
 
 			case Ist_Put: {
 				unsigned byte_offset = stmt->Ist.Put.offset & 7;
-				unsigned long *dest =
-					get_reg(this,
-						stmt->Ist.Put.offset - byte_offset);
+				unsigned long dest =
+					read_reg(this,
+						 stmt->Ist.Put.offset - byte_offset);
 				struct expression_result data =
 					eval_expression(stmt->Ist.Put.data);
 				switch (typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data)) {
 				case Ity_I8:
-					*dest &= ~(0xFF << (byte_offset * 8));
-					*dest |= data.lo.v << (byte_offset * 8);
+					dest &= ~(0xFF << (byte_offset * 8));
+					dest |= data.lo.v << (byte_offset * 8);
 					break;
 
 				case Ity_I16:
 					assert(!(byte_offset % 2));
-					*dest &= ~(0xFFFFul << (byte_offset * 8));
-					*dest |= data.lo.v << (byte_offset * 8);
+					dest &= ~(0xFFFFul << (byte_offset * 8));
+					dest |= data.lo.v << (byte_offset * 8);
 					break;
 
 				case Ity_I32:
 				case Ity_F32:
 					assert(!(byte_offset % 4));
-					*dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
-					*dest |= data.lo.v << (byte_offset * 8);
+					dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
+					dest |= data.lo.v << (byte_offset * 8);
 					break;
 
 				case Ity_I64:
 				case Ity_F64:
 					assert(byte_offset == 0);
-					*dest = data.lo.v;
+					dest = data.lo.v;
 					break;
 
 				case Ity_I128:
 				case Ity_V128:
 					assert(byte_offset == 0);
-					*dest = data.lo.v;
-					*get_reg(this,
-						 stmt->Ist.Put.offset + 8) =
-						data.hi.v;
+					dest = data.lo.v;
+					write_reg(this,
+						  stmt->Ist.Put.offset + 8,
+						  data.hi.v);
 					break;
 				default:
 					ppIRStmt(stmt);
 					throw NotImplementedException();
 				}
+
+				write_reg(this, stmt->Ist.Put.offset - byte_offset, dest);
 				break;
 			}
 
