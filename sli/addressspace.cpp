@@ -45,7 +45,7 @@ void AddressSpace::writeMemory(unsigned long start, unsigned size,
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
 			if (!ignore_protection && !prot.writable)
-				throw BadMemoryException(true, start, size);
+				throw BadMemoryException<unsigned long>(true, start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
@@ -61,7 +61,7 @@ void AddressSpace::writeMemory(unsigned long start, unsigned size,
 		} else if (thr && extendStack(start, thr->regs.rsp())) {
 			continue;
 		} else {
-			throw BadMemoryException(true, start, size);
+			throw BadMemoryException<unsigned long>(true, start, size);
 		}
 	}
 }
@@ -75,7 +75,7 @@ void AddressSpace::readMemory(unsigned long start, unsigned size,
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
 			if (!ignore_protection && !prot.readable)
-				throw BadMemoryException(false, start, size);
+				throw BadMemoryException<unsigned long>(false, start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
@@ -97,7 +97,7 @@ void AddressSpace::readMemory(unsigned long start, unsigned size,
 			printf("Huh? Extended stack for a read?\n");
 			continue;
 		} else {
-			throw BadMemoryException(false, start, size);
+			throw BadMemoryException<unsigned long>(false, start, size);
 		}
 	}
 }

@@ -164,7 +164,7 @@ void GetMemoryCommand::doIt(MachineState<unsigned long> *ms)
 	char *membuf = (char *)malloc(size);
 	try {
 		ms->addressSpace->readMemory(addr, size, membuf, true);
-	} catch (BadMemoryException exc) {
+	} catch (BadMemoryException<unsigned long> exc) {
 		sendResponse("E12");
 		free(membuf);
 		return;

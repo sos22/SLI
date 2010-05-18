@@ -1030,7 +1030,7 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 		if (!currentIRSB) {
 			try {
 				translateNextBlock(addrSpace);
-			} catch (BadMemoryException excn) {
+			} catch (BadMemoryException<ait> excn) {
 				return new SignalEvent<ait>(11, excn.ptr);
 			}
 			assert(currentIRSB);

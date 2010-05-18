@@ -124,13 +124,14 @@ public:
 	}
 };
 
+template <typename ait>
 class BadMemoryException : public SliException {
 public:
 	bool isWrite;
-	unsigned long ptr;
+	ait ptr;
 	unsigned size;
 	BadMemoryException(bool _isWrite,
-			   unsigned long _ptr,
+			   ait _ptr,
 			   unsigned _size) :
 		SliException(
 			"guest dereferenced a bad pointer: address %lx, size %x, isWrite %d\n",
