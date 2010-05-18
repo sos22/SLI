@@ -1,13 +1,13 @@
 #include "sli.h"
 
-MemTracePool::MemTracePool(MachineState *base_state)
+MemTracePool::MemTracePool(MachineState<unsigned long> *base_state)
   : content()
 {
 	unsigned x;
 	for (x = 0; x < base_state->threads->size(); x++) {
 		ThreadId tid = base_state->threads->index(x)->tid;
-		MachineState *ms = base_state->dupeSelf();
-		Interpreter i(ms);
+		MachineState<unsigned long> *ms = base_state->dupeSelf();
+		Interpreter<unsigned long> i(ms);
 		MemoryTrace *v;
 		i.getThreadMemoryTrace(tid, &v, 10000);
 		content[tid] = v;

@@ -1,6 +1,6 @@
 #include "sli.h"
 
-InterpretResult LogWriter::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt)
+InterpretResult LogWriter::recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent *evt)
 {
 	CasEvent *ce = dynamic_cast<CasEvent *>(evt);
 	InterpretResult res;

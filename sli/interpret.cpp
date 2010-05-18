@@ -11,16 +11,16 @@
 
 class ExplorationState {
 public:
-	MachineState *ms;
+	MachineState<unsigned long> *ms;
 	MemLog *history;
-	static ExplorationState *init(MachineState *ms);
+	static ExplorationState *init(MachineState<unsigned long> *ms);
 	ExplorationState *dupeSelf() const;
 };
 
 DECLARE_VEX_TYPE(ExplorationState)
 DEFINE_VEX_TYPE_NO_DESTRUCT(ExplorationState, {visit(ths->ms);visit(ths->history);});
 
-ExplorationState *ExplorationState::init(MachineState *ms)
+ExplorationState *ExplorationState::init(MachineState<unsigned long> *ms)
 {
 	ExplorationState *es = LibVEX_Alloc_ExplorationState();
 	es->ms = ms;
@@ -86,7 +86,7 @@ bool Explorer::advance()
 	for (unsigned x = 0;
 	     good && x < basis->ms->threads->size();
 	     x++) {
-		Thread *thr = basis->ms->threads->index(x);
+		Thread<unsigned long> *thr = basis->ms->threads->index(x);
 		if (thr->nrAccesses < (*successThresholds)[thr->tid]) {
 			good = false;
 		} else {
@@ -103,7 +103,7 @@ bool Explorer::advance()
 	/* Check for no-progress-possible condition */
 	bool stopped = true;
 	for (unsigned x = 0; stopped && x < basis->ms->threads->size(); x++) {
-		Thread *thr = basis->ms->threads->index(x);
+		Thread<unsigned long> *thr = basis->ms->threads->index(x);
 		if (!thr->cannot_make_progress)
 			stopped = false;
 	}
@@ -132,10 +132,10 @@ bool Explorer::advance()
 	}
 	if (noRaces) {
 		for (unsigned x = 0; x < basis->ms->threads->size(); x++) {
-			Thread *thr = basis->ms->threads->index(x);
+			Thread<unsigned long> *thr = basis->ms->threads->index(x);
 			if (thr->cannot_make_progress)
 				continue;
-			Interpreter i(basis->ms);
+			Interpreter<unsigned long> i(basis->ms);
 			i.runToFailure(thr->tid, basis->history, 10000);
 		}
 		grayStates->push(basis);
@@ -148,12 +148,12 @@ bool Explorer::advance()
 	     it++) {
 		ThreadId tid = it->first;
 		Maybe<unsigned> r = it->second;
-		Thread *thr = basis->ms->findThread(tid);
+		Thread<unsigned long> *thr = basis->ms->findThread(tid);
 		if (thr->cannot_make_progress)
 			continue;
 		ExplorationState *newGray = basis->dupeSelf();
 		VexGcRoot grayKeeper((void **)&newGray);
-		Interpreter i(newGray->ms);
+		Interpreter<unsigned long> i(newGray->ms);
 		if (r.full) {
 			printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
 			i.runToAccessLoggingEvents(tid, r.value + 1, newGray->history);
@@ -240,16 +240,16 @@ main(int argc, char *argv[])
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 
-	MachineState *ms_base = MachineState::initialMachineState(lf, ptr, &ptr);
+	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
 	VexGcRoot((void **)&ms_base);
 
 	std::map<ThreadId, unsigned long> thresholds;
 	{
-		MachineState *a = ms_base->dupeSelf();
-		Interpreter i(a);
+		MachineState<unsigned long> *a = ms_base->dupeSelf();
+		Interpreter<unsigned long> i(a);
 		i.replayLogfile(lf, ptr);
 		for (unsigned x = 0; x < a->threads->size(); x++) {
-			Thread *thr = a->threads->index(x);
+			Thread<unsigned long> *thr = a->threads->index(x);
 			thresholds[thr->tid] = thr->nrAccesses * 2;
 			//thresholds[thr->tid] = 10;
 			printf("Thread %d threshold %ld\n", thr->tid._tid(),

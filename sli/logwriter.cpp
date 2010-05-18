@@ -245,3 +245,7 @@ LogRecordVexThreadState::LogRecordVexThreadState(ThreadId tid, unsigned _stateme
 	*root_data = this;	
 }
 
+void SignalHandlers::dumpSnapshot(LogWriter *lw) const
+{
+	lw->append(LogRecordInitialSighandlers(ThreadId(0), handlers));
+}

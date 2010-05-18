@@ -1,59 +1,61 @@
 #include "sli.h"
 
-template class LibvexVector<Thread>;
+template class LibvexVector<Thread<unsigned long> >;
 
-DECLARE_VEX_TYPE(Thread);
-DEFINE_VEX_TYPE_NO_DESTRUCT(Thread, {visit(ths->currentIRSB);ths->temporaries.visit(visit);});
-
-RegisterSet::RegisterSet(VexGuestAMD64State const&r)
+template<>
+RegisterSet<unsigned long>::RegisterSet(VexGuestAMD64State const&r)
 {
 	for (unsigned x = 0; x < NR_REGS; x++)
 		registers[x] = ((unsigned long *)&r)[x];
 }
 
-Thread *Thread::initialThread(const LogRecordInitialRegisters &initRegs)
+template<>
+Thread<unsigned long> *Thread<unsigned long>::initialThread(const LogRecordInitialRegisters &initRegs)
 {
-	Thread *work;
+	Thread<unsigned long> *work;
 
-	work = LibVEX_Alloc_Thread();
+	work = allocator.alloc();
 	memset(work, 0, sizeof(*work));
 	work->tid = initRegs.thread();
 	work->regs = initRegs.regs;
 	return work;
 }
 
-Thread *Thread::fork(unsigned newPid)
+template <typename ait>
+Thread<ait> *Thread<ait>::fork(unsigned newPid)
 {
-	Thread *work;
+	Thread<ait> *work;
 
-	work = LibVEX_Alloc_Thread();
+	work = allocator.alloc();
 	memset(work, 0, sizeof(*work));
 	work->pid = newPid;
 	work->regs = regs;
 	return work;
 }
 
-Thread *Thread::dupeSelf() const
+template <typename ait>
+Thread<ait> *Thread<ait>::dupeSelf() const
 {
-	Thread *work;
-	work = LibVEX_Alloc_Thread();
+	Thread<ait> *work = allocator.alloc();
 	*work = *this;
 	return work;
 }
 
-void Thread::dumpSnapshot(LogWriter *lw) const
+template<>
+void Thread<unsigned long>::dumpSnapshot(LogWriter *lw) const
 {
 	VexGuestAMD64State r;
 
-	for (unsigned x = 0; x < RegisterSet::NR_REGS; x++)
+	for (unsigned x = 0; x < RegisterSet<unsigned long>::NR_REGS; x++)
 		((unsigned long *)&r)[x] = regs.get_reg(x);
 	lw->append(LogRecordInitialRegisters(tid, r));
 	if (currentIRSB && currentIRSBOffset != 0)
 		lw->append(LogRecordVexThreadState(tid, currentIRSBOffset, temporaries));
 }
 
-void Thread::imposeState(const LogRecordVexThreadState &rec,
-			 AddressSpace *as)
+template<>
+void Thread<unsigned long>::imposeState(const LogRecordVexThreadState &rec,
+					AddressSpace *as)
 {
 	translateNextBlock(as);
 	assert(currentIRSB);
@@ -67,3 +69,14 @@ void Thread::imposeState(const LogRecordVexThreadState &rec,
 	temporaries = rec.tmp;
 }
 
+template <typename ait>
+void Thread<ait>::visit(HeapVisitor &hv) const
+{
+	hv(currentIRSB);
+	temporaries.visit(hv);
+}
+
+template <typename ait> VexAllocTypeWrapper<Thread<ait> > Thread<ait>::allocator;
+
+#define MK_THREAD(t)					\
+	template VexAllocTypeWrapper<Thread<t> > Thread<t>::allocator

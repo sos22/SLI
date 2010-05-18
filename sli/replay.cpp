@@ -2,7 +2,7 @@
  * methods on events. */
 #include "sli.h"
 
-void RdtscEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+void RdtscEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	LogRecordRdtsc *lrr = dynamic_cast<LogRecordRdtsc *>(lr);
 	if (!lrr)
@@ -11,7 +11,7 @@ void RdtscEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	thr->temporaries[tmp].lo.v = lrr->tsc;
 }
 
-InterpretResult RdtscEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
+InterpretResult RdtscEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
 {
 	printf("fake rdtsc\n");
 	return InterpretResultIncomplete;
@@ -44,7 +44,7 @@ static void checkSegv(LogRecord *lr, unsigned long addr)
 					    lrs->virtaddr, addr);
 }
 
-void StoreEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+void StoreEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	if (ms->addressSpace->isWritable(addr, size, thr)) {
 		LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr);
@@ -65,7 +65,7 @@ void StoreEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	}
 }
 
-InterpretResult StoreEvent::fake(Thread *thr, MachineState *ms,
+InterpretResult StoreEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
 				 LogRecord **lr)
 {
 	if (lr) {
@@ -83,7 +83,7 @@ InterpretResult StoreEvent::fake(Thread *thr, MachineState *ms,
 	}
 }
 
-void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+void LoadEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
@@ -114,7 +114,7 @@ void LoadEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	}
 }
 
-InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
+InterpretResult LoadEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
 {
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		unsigned char buf[16];
@@ -142,7 +142,7 @@ InterpretResult LoadEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
 	}
 }
 
-void InstructionEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+void InstructionEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr);
 	if (!lrf)
@@ -170,7 +170,7 @@ void InstructionEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
        CHECK_REGISTER(4);
 }
 
-InterpretResult InstructionEvent::fake(Thread *thr, MachineState *ms,
+InterpretResult InstructionEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
 				       LogRecord **lr)
 {
 	if (lr)
@@ -178,7 +178,7 @@ InterpretResult InstructionEvent::fake(Thread *thr, MachineState *ms,
 	return InterpretResultContinue;
 }
 
-void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+void SyscallEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	LogRecordSyscall *lrs = dynamic_cast<LogRecordSyscall *>(lr);
 	if (!lrs)
@@ -188,12 +188,12 @@ void SyscallEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	replay_syscall(lrs, thr, ms);
 }
 
-void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+void CasEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	throw SliException("CAS events need a special replay method");
 }
 
-void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
+void CasEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms,
 		      const LogReader *lf, LogReader::ptr ptr,
 		      LogReader::ptr *outPtr, LogWriter *lw)
 {
@@ -238,7 +238,7 @@ void CasEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms,
 	ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
 }
 
-InterpretResult CasEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr1,
+InterpretResult CasEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1,
 			       LogRecord **lr2)
 {
 	unsigned long expected_buf[2] = {expected.lo.v, expected.hi.v};
@@ -265,12 +265,12 @@ InterpretResult CasEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr1,
 	return InterpretResultContinue;
 }
 
-InterpretResult CasEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr1)
+InterpretResult CasEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1)
 {
 	return fake(thr, ms, lr1, NULL);
 }
 
-void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
+void SignalEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
 	if (!lrs)
@@ -292,7 +292,7 @@ void SignalEvent::replay(Thread *thr, LogRecord *lr, MachineState *ms)
 	thr->crashed = true;
 }
 
-InterpretResult SignalEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
+InterpretResult SignalEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
 {
 	if (lr)
 		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, 0, virtaddr);

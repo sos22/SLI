@@ -35,10 +35,11 @@ process_memory_records(AddressSpace *addrSpace,
 	*endOffset = startOffset;
 }
 
+template<typename ait>
 static void
 handle_clone(AddressSpace *addrSpace,
-	     Thread *thr,
-	     MachineState *mach,
+	     Thread<ait> *thr,
+	     MachineState<ait> *mach,
 	     unsigned long flags,
 	     unsigned long childRsp,
 	     unsigned long parent_tidptr,
@@ -55,7 +56,7 @@ handle_clone(AddressSpace *addrSpace,
 
 	/* Create a new thread.  This is, as you might expect, closely
 	   modelled on the kernel's version of the same process. */
-	Thread *newThread = thr->fork(pid);
+	Thread<ait> *newThread = thr->fork(pid);
 	if (flags & CLONE_CHILD_SETTID)
 		newThread->set_child_tid = child_tidptr;
 	if (flags & CLONE_CHILD_CLEARTID)
@@ -74,10 +75,11 @@ handle_clone(AddressSpace *addrSpace,
 	mach->registerThread(newThread);
 }
 
+template<typename ait>
 void
 replay_syscall(const LogRecordSyscall *lrs,
-	       Thread *thr,
-	       MachineState *mach)
+	       Thread<ait> *thr,
+	       MachineState<ait> *mach)
 {
 	AddressSpace *addrSpace = mach->addressSpace;
 	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
@@ -249,7 +251,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 	thr->regs.set_reg(REGISTER_IDX(RAX), res);
 }
 
-InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr)
+InterpretResult SyscallEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
 {
 	unsigned long res;
 	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
@@ -273,9 +275,8 @@ InterpretResult SyscallEvent::fake(Thread *thr, MachineState *ms, LogRecord **lr
 
 	if (lr)
 		*lr = llr;
-	replay_syscall(llr, thr, ms);
+	replay_syscall<unsigned long>(llr, thr, ms);
 	if (!lr)
 		delete llr;
 	return InterpretResultContinue;
 }
-

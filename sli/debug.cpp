@@ -17,7 +17,7 @@ protected:
 	void sendResponse(const char *fmt, ...);
 public:
 	static GdbCommand *read(int fd);
-	virtual void doIt(MachineState *) = 0;
+	virtual void doIt(MachineState<unsigned long> *) = 0;
 	GdbCommand(GdbChannel *_chan)
 		: chan(_chan)
 	{
@@ -57,20 +57,20 @@ public:
 
 class UnknownCommand : public GdbCommand {
 public:
-	void doIt(MachineState *) { sendResponse(""); }
+	void doIt(MachineState<unsigned long> *) { sendResponse(""); }
 	UnknownCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
 class GetSigCommand : public GdbCommand {
 public:
-	void doIt(MachineState *) { sendResponse("S00"); }
+	void doIt(MachineState<unsigned long> *) { sendResponse("S00"); }
 	GetSigCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
 class QueryCommand : public GdbCommand {
 	char *q;
 public:
-	void doIt(MachineState *);
+	void doIt(MachineState<unsigned long> *);
 	QueryCommand(GdbChannel *c, const char *n)
 		: GdbCommand(c),
 		  q(strdup(n))
@@ -81,14 +81,14 @@ public:
 
 class GetRegistersCommand : public GdbCommand {
 public:
-	void doIt(MachineState *);
+	void doIt(MachineState<unsigned long> *);
 	GetRegistersCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
 class GetRegisterCommand : public GdbCommand {
 	unsigned regNr;
 public:
-	void doIt(MachineState *);
+	void doIt(MachineState<unsigned long> *);
 	GetRegisterCommand(GdbChannel *c, const char *b) : GdbCommand(c) { regNr = strtol(b, NULL, 16); }
 };
 
@@ -96,7 +96,7 @@ class GetMemoryCommand : public GdbCommand {
 	unsigned long addr;
 	unsigned size;
 public:
-	void doIt(MachineState *);
+	void doIt(MachineState<unsigned long> *);
 	GetMemoryCommand(GdbChannel *c, const char *b) : GdbCommand(c) { sscanf(b, "%lx,%x", &addr, &size); }
 };
 
@@ -104,7 +104,7 @@ class SetThreadCommand : public GdbCommand {
 	ThreadId tid;
 	bool query;
 public:
-	void doIt(MachineState *)
+	void doIt(MachineState<unsigned long> *)
 	{
 		if (query)
 			chan->currentTidQuery = tid;
@@ -123,7 +123,7 @@ public:
 class ThreadAliveCommand : public GdbCommand {
 	ThreadId tid;
 public:
-	void doIt(MachineState *);
+	void doIt(MachineState<unsigned long> *);
 	ThreadAliveCommand(GdbChannel *c, const char *b)
 		: GdbCommand(c),
 		  tid(ThreadId(strtol(b, NULL, 16)))
@@ -133,7 +133,7 @@ public:
 
 class DetachCommand : public GdbCommand {
 public:
-	void doIt(MachineState *) {abort(); }
+	void doIt(MachineState<unsigned long> *) {abort(); }
 	DetachCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
@@ -141,7 +141,7 @@ class ContinueCommand : public GdbCommand {
 	unsigned long newRip;
 	bool haveNewRip;
 public:
-	void doIt(MachineState *ms);
+	void doIt(MachineState<unsigned long> *ms);
 	ContinueCommand(GdbChannel *c, const char *buf)
 		: GdbCommand(c)
 	{
@@ -159,7 +159,7 @@ static unsigned long htonlong(unsigned long x)
 	return ((unsigned long)htonl(x) << 32) | htonl(x >> 32);
 }
 
-void GetMemoryCommand::doIt(MachineState *ms)
+void GetMemoryCommand::doIt(MachineState<unsigned long> *ms)
 {
 	char *membuf = (char *)malloc(size);
 	try {
@@ -180,9 +180,9 @@ void GetMemoryCommand::doIt(MachineState *ms)
 	free(chrbuf);
 }
 
-void GetRegistersCommand::doIt(MachineState *ms)
+void GetRegistersCommand::doIt(MachineState<unsigned long> *ms)
 {
-	const Thread *thr = ms->findThread(chan->currentTidQuery);
+	const Thread<unsigned long> *thr = ms->findThread(chan->currentTidQuery);
 
 	char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
 				htonlong(thr->regs.get_reg(REGISTER_IDX(RAX))),
@@ -197,9 +197,9 @@ void GetRegistersCommand::doIt(MachineState *ms)
 	free(buf);
 }
 
-void GetRegisterCommand::doIt(MachineState *ms)
+void GetRegisterCommand::doIt(MachineState<unsigned long> *ms)
 {
-	const Thread *thr = ms->findThread(chan->currentTidQuery);
+	const Thread<unsigned long> *thr = ms->findThread(chan->currentTidQuery);
 	unsigned long r;
 	bool haveIt;
 
@@ -238,7 +238,7 @@ void GetRegisterCommand::doIt(MachineState *ms)
 	}
 }
 
-void QueryCommand::doIt(MachineState *ms)
+void QueryCommand::doIt(MachineState<unsigned long> *ms)
 {
 	if (!strcmp(q, "C")) {
 		sendResponse("QC%x", chan->currentTidQuery._tid());
@@ -260,19 +260,20 @@ void QueryCommand::doIt(MachineState *ms)
 	}
 }
 
-void ThreadAliveCommand::doIt(MachineState *ms)
+void ThreadAliveCommand::doIt(MachineState<unsigned long> *ms)
 {
-	const Thread *thr = ms->findThread(tid);
+	const Thread<unsigned long> *thr = ms->findThread(tid);
 	if (thr->exitted || thr->crashed)
 		sendResponse("E01");
 	else
 		sendResponse("OK");
 }
 
-void ContinueCommand::doIt(MachineState *ms)
+void ContinueCommand::doIt(MachineState<unsigned long> *ms)
 {
-	Thread *thr = ms->findThread(chan->currentTidRun);
+	Thread<unsigned long> *thr = ms->findThread(chan->currentTidRun);
 	if (haveNewRip)
+
 		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
         while (1) {
@@ -477,9 +478,9 @@ GdbChannel *GdbChannel::accept()
 }
 
 void
-gdb_machine_state(const MachineState *base_ms)
+gdb_machine_state(const MachineState<unsigned long> *base_ms)
 {
-	MachineState *ms = base_ms->dupeSelf();
+	MachineState<unsigned long> *ms = base_ms->dupeSelf();
 
 	VexGcRoot ms_keeper((void **)&ms);
 

@@ -38,7 +38,7 @@ void AddressSpace::protectMemory(unsigned long start, unsigned long size,
 
 void AddressSpace::writeMemory(unsigned long start, unsigned size,
 			       const void *contents, bool ignore_protection,
-			       const Thread *thr)
+			       const Thread<unsigned long> *thr)
 {
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -68,7 +68,7 @@ void AddressSpace::writeMemory(unsigned long start, unsigned size,
 
 void AddressSpace::readMemory(unsigned long start, unsigned size,
 			      void *contents, bool ignore_protection,
-			      const Thread *thr)
+			      const Thread<unsigned long> *thr)
 {
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -103,7 +103,7 @@ void AddressSpace::readMemory(unsigned long start, unsigned size,
 }
 
 bool AddressSpace::isAccessible(unsigned long start, unsigned size,
-				bool isWrite, const Thread *thr)
+				bool isWrite, const Thread<unsigned long> *thr)
 {
 	while (size != 0) {
 		PhysicalAddress pa;

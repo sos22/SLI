@@ -27,10 +27,10 @@ main(int argc, char *argv[])
 	LogFile *reduced_lf;
 
 	reduced_lf = lf->truncate(lf->mkPtr(size, 0));
-	MachineState *ms = MachineState::initialMachineState(reduced_lf, ptr, &ptr);
+	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr);
 	VexGcRoot ms_root((void **)&ms);
 
-	Interpreter i(ms);
+	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(reduced_lf, ptr, &ptr);
 
 	LogFileWriter *lw;
@@ -41,7 +41,7 @@ main(int argc, char *argv[])
 
 	ms->dumpSnapshot(lw);
 	
-	Interpreter i2(ms);
+	Interpreter<unsigned long> i2(ms);
 	i2.replayLogfile(lf, ptr, NULL, lw);
 
 	delete lw;

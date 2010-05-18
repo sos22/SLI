@@ -39,3 +39,7 @@ init_sli(void)
 	vcon.guest_max_insns = 1;
 	LibVEX_Init(failure_exit, log_bytes, 0, 0, &vcon);
 }
+
+void noop_destructor(void *_ctxt)
+{
+}

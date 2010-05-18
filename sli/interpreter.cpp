@@ -21,22 +21,25 @@ static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 
 #define REG_LAST 128
 
+template<typename ait>
 static void
-write_reg(Thread *state, unsigned offset, unsigned long val)
+write_reg(Thread<ait> *state, unsigned offset, ait val)
 {
 	assert(!(offset % 8));
 	state->regs.set_reg(offset / 8, val);
 }
 
-static unsigned long
-read_reg(Thread *state, unsigned offset)
+template<typename ait>
+static ait
+read_reg(Thread<ait> *state, unsigned offset)
 {
 	assert(!(offset % 8));
 	return state->regs.get_reg(offset / 8);
 }
 
+template<typename ait>
 static void
-amd64g_dirtyhelper_CPUID_sse3_and_cx16 ( RegisterSet *regs )
+amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 {
 #define SET_ABCD(_a,_b,_c,_d)				\
 	do {						\
@@ -124,8 +127,9 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16 ( RegisterSet *regs )
 #undef SET_ABCD
 }
 
+template<typename ait>
 ThreadEvent *
-Thread::do_dirty_call(IRDirty *details)
+Thread<ait>::do_dirty_call(IRDirty *details)
 {
 	struct expression_result args[6];
 	unsigned x;
@@ -161,11 +165,12 @@ Thread::do_dirty_call(IRDirty *details)
 	}
 }
 
+template<typename ait>
 static void
-calculate_condition_flags_XXX(unsigned long op,
-			      unsigned long dep1,
-			      unsigned long dep2,
-			      unsigned long ndep,
+calculate_condition_flags_XXX(ait op,
+			      ait dep1,
+			      ait dep2,
+			      ait ndep,
 			      unsigned &cf,
 			      unsigned &zf,
 			      unsigned &sf,
@@ -264,8 +269,9 @@ calculate_condition_flags_XXX(unsigned long op,
 	cf &= 1;
 }
 
+template<typename ait>
 expression_result
-Thread::do_ccall_calculate_condition(struct expression_result *args)
+Thread<ait>::do_ccall_calculate_condition(struct expression_result *args)
 {
 	struct expression_result condcode = args[0];
 	struct expression_result op = args[1];
@@ -276,14 +282,14 @@ Thread::do_ccall_calculate_condition(struct expression_result *args)
 	int inv;
 	unsigned cf, zf, sf, of;
 
-	calculate_condition_flags_XXX(op.lo.v,
-				      dep1.lo.v,
-				      dep2.lo.v,
-				      ndep.lo.v,
-				      cf,
-				      zf,
-				      sf,
-				      of);
+	calculate_condition_flags_XXX<ait>(op.lo.v,
+					   dep1.lo.v,
+					   dep2.lo.v,
+					   ndep.lo.v,
+					   cf,
+					   zf,
+					   sf,
+					   of);
 
 	inv = condcode.lo.v & 1;
 	switch (condcode.lo.v & ~1) {
@@ -316,8 +322,9 @@ Thread::do_ccall_calculate_condition(struct expression_result *args)
 	return res;
 }
 
+template<typename ait>
 expression_result
-Thread::do_ccall_calculate_rflags_c(expression_result *args)
+Thread<ait>::do_ccall_calculate_rflags_c(expression_result *args)
 {
 	struct expression_result op = args[0];
 	struct expression_result dep1 =	args[1];
@@ -339,9 +346,10 @@ Thread::do_ccall_calculate_rflags_c(expression_result *args)
 	return res;
 }
 
+template<typename ait>
 expression_result
-Thread::do_ccall_generic(IRCallee *cee,
-			 struct expression_result *rargs)
+Thread<ait>::do_ccall_generic(IRCallee *cee,
+			      struct expression_result *rargs)
 {
 	struct expression_result res;
 
@@ -353,9 +361,10 @@ Thread::do_ccall_generic(IRCallee *cee,
 	return res;
 }
 
+template<typename ait>
 expression_result
-Thread::do_ccall(IRCallee *cee,
-		 IRExpr **args)
+Thread<ait>::do_ccall(IRCallee *cee,
+		      IRExpr **args)
 {
 	struct expression_result rargs[6];
 	unsigned x;
@@ -450,8 +459,9 @@ mulls64(struct expression_result *dest, const struct expression_result &src1,
 	}
 }
 
+template<typename ait>
 expression_result
-Thread::eval_expression(IRExpr *expr)
+Thread<ait>::eval_expression(IRExpr *expr)
 {
 	struct expression_result res;
 	struct expression_result *dest = &res;
@@ -969,7 +979,8 @@ public:
 	}
 };
 
-void Thread::translateNextBlock(AddressSpace *addrSpace)
+template<typename ait>
+void Thread<ait>::translateNextBlock(AddressSpace *addrSpace)
 {
 	regs.set_reg(REGISTER_IDX(RIP), redirectGuest(regs.rip()));
 
@@ -1012,8 +1023,9 @@ void Thread::translateNextBlock(AddressSpace *addrSpace)
 	currentIRSBOffset = 0;
 }
 
+template<typename ait>
 ThreadEvent *
-Thread::runToEvent(struct AddressSpace *addrSpace)
+Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 {
 	while (1) {
 		if (!currentIRSB) {
@@ -1189,11 +1201,12 @@ finished_block:
 	}
 }
 
-InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output, unsigned max_events)
+template<typename ait>
+InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output, unsigned max_events)
 {
 	MemoryTrace *work = new MemoryTrace();
 	*output = work;
-	Thread *thr = currentState->findThread(tid);
+	Thread<ait> *thr = currentState->findThread(tid);
 	if (thr->cannot_make_progress)
 		return InterpretResultIncomplete;
 	while (max_events) {
@@ -1214,10 +1227,11 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **ou
 	return InterpretResultTimedOut;
 }
 
-void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
-					   LogWriter *output)
+template<typename ait>
+void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
+						LogWriter *output)
 {
-        Thread *thr = currentState->findThread(tid);
+        Thread<ait> *thr = currentState->findThread(tid);
         while (1) {
                 ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
                 PointerKeeper<ThreadEvent> k_evt(evt);
@@ -1235,10 +1249,11 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 	}
 }
 
-void Interpreter::runToFailure(ThreadId tid, LogWriter *output, unsigned max_events)
+template<typename ait>
+void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter *output, unsigned max_events)
 {
 	bool have_event_limit = max_events != 0;
-	Thread *thr = currentState->findThread(tid);
+	Thread<ait> *thr = currentState->findThread(tid);
 	while (!have_event_limit || max_events) {
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
@@ -1251,8 +1266,9 @@ void Interpreter::runToFailure(ThreadId tid, LogWriter *output, unsigned max_eve
 	}
 }
 
-void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
-				LogReader::ptr *eof, LogWriter *lw)
+template<typename ait>
+void Interpreter<ait>::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
+				     LogReader::ptr *eof, LogWriter *lw)
 {
 	while (1) {
 		LogRecord *lr = lf->read(ptr, &ptr);
@@ -1262,7 +1278,7 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 		if (lw)
 			lw->append(*lr);
 		PointerKeeper<LogRecord> k_lr(lr);
-		Thread *thr = currentState->findThread(lr->thread());
+		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent> k_evt(evt);
 
@@ -1290,3 +1306,21 @@ void Interpreter::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 	if (eof)
 		*eof = ptr;
 }
+
+#define MK_INTERPRETER(t)						\
+	template ThreadEvent *Thread<t>::runToEvent(AddressSpace *addrSpace); \
+	template void Interpreter<t>::runToFailure(ThreadId tid,	\
+						   LogWriter *output,	\
+						   unsigned max_events); \
+	template void Interpreter<t>::runToAccessLoggingEvents(ThreadId tid, \
+							       unsigned nr_accesses, \
+							       LogWriter *output); \
+	template void Interpreter<t>::replayLogfile(LogReader const *lf, \
+						    LogReader::ptr ptr,	\
+						    LogReader::ptr *eof, \
+						    LogWriter *lw);	\
+	template InterpretResult Interpreter<t>::getThreadMemoryTrace(ThreadId tid, \
+								      MemoryTrace **output, \
+								      unsigned max_events)
+
+
