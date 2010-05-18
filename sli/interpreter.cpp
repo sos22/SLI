@@ -961,8 +961,9 @@ IRSB *instrument_func(void *closure,
 		      IRType gWordTy,
 		      IRType hWordTy);
 
+template <typename ait>
 class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
-	AddressSpace *aspace;
+	AddressSpace<ait> *aspace;
 	unsigned long offset;
 public:
 	virtual UChar operator[](unsigned long idx) const {
@@ -970,7 +971,7 @@ public:
 		aspace->readMemory(idx + offset, 1, &res);
 		return res;
 	}
-	AddressSpaceGuestFetcher(AddressSpace *_aspace,
+	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
 				 unsigned long _offset) :
 		aspace(_aspace),
 		offset(_offset)
@@ -979,7 +980,7 @@ public:
 };
 
 template<typename ait>
-void Thread<ait>::translateNextBlock(AddressSpace *addrSpace)
+void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 {
 	regs.set_reg(REGISTER_IDX(RIP), redirectGuest(regs.rip()));
 
@@ -995,7 +996,7 @@ void Thread<ait>::translateNextBlock(AddressSpace *addrSpace)
 	LibVEX_default_VexAbiInfo(&abiinfo_both);
 	abiinfo_both.guest_stack_redzone_size = 128;
 	abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-	class AddressSpaceGuestFetcher fetcher(addrSpace, regs.rip());
+	class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, regs.rip());
 	IRSB *irsb = bb_to_IR(&vge,
 			      NULL, /* Context for chase_into_ok */
 			      disInstr_AMD64,
@@ -1024,7 +1025,7 @@ void Thread<ait>::translateNextBlock(AddressSpace *addrSpace)
 
 template<typename ait>
 ThreadEvent<ait> *
-Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
+Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 {
 	while (1) {
 		if (!currentIRSB) {
@@ -1306,7 +1307,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 }
 
 #define MK_INTERPRETER(t)						\
-	template ThreadEvent<t> *Thread<t>::runToEvent(AddressSpace *addrSpace); \
+	template ThreadEvent<t> *Thread<t>::runToEvent(AddressSpace<t> *addrSpace); \
 	template void Interpreter<t>::runToFailure(ThreadId tid,	\
 						   LogWriter<t> *output, \
 						   unsigned max_events); \

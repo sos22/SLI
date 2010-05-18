@@ -137,7 +137,7 @@ public:
 	underlying rsp() const { return get_reg(REGISTER_IDX(RSP)); }
 };
 
-class AddressSpace;
+template <typename ait> class AddressSpace;
 
 template <typename ait>
 class expression_result_array {
@@ -170,7 +170,7 @@ template <typename ait> class LogRecordVexThreadState;
 
 template <typename abst_int_type>
 class Thread {
-	void translateNextBlock(AddressSpace *addrSpace);
+	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
 	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details);
 	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
@@ -203,7 +203,7 @@ private:
 	Thread();
 	~Thread();
 public:
-	ThreadEvent<abst_int_type> *runToEvent(AddressSpace *addrSpace);
+	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace);
 
 	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
 	Thread<abst_int_type> *fork(unsigned newPid);
@@ -211,7 +211,7 @@ public:
 	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;
 
 	void imposeState(const LogRecordVexThreadState<abst_int_type> &rec,
-			 AddressSpace *as);
+			 AddressSpace<abst_int_type> *as);
 
 	void visit(HeapVisitor &hv) const;
 };
@@ -509,10 +509,10 @@ private:
 	/* DNI */
 	MachineState();
 	~MachineState();
-	static MachineState *initialMachineState(AddressSpace *as,
+	static MachineState *initialMachineState(AddressSpace<abst_int_type> *as,
 						 const LogRecordInitialSighandlers<abst_int_type> &handlers);
 public:
-	AddressSpace *addressSpace;
+	AddressSpace<abst_int_type> *addressSpace;
 	SignalHandlers<abst_int_type> signalHandlers;
 	static MachineState<abst_int_type> *initialMachineState(LogReader<abst_int_type> *lf,
 								LogReaderPtr startPtr,
@@ -1099,7 +1099,7 @@ public:
 
 template <typename ait>
 class LogRecordAllocateMemory : public LogRecord<ait> {
-	friend class AddressSpace;
+	friend class AddressSpace<ait>;
 	ait start;
 	ait size;
 	unsigned prot;
@@ -1193,11 +1193,14 @@ public:
 	}
 };
 
+template <typename ait>
 class AddressSpace {
 	unsigned long brkptr;
 	unsigned long brkMapPtr;
 	VAMap *vamap;
 	PMap *pmap;
+
+	static VexAllocTypeWrapper<AddressSpace<ait> > allocator;
 
 	bool extendStack(unsigned long ptr, unsigned long rsp);
 
@@ -1210,24 +1213,24 @@ public:
 	}
 	void releaseMemory(unsigned long start, unsigned long size);
 	void protectMemory(unsigned long start, unsigned long size, VAMap::Protection prot);
-	void populateMemory(const LogRecordMemory<unsigned long> &rec)
+	void populateMemory(const LogRecordMemory<ait> &rec)
 	{
 		writeMemory(rec.start, rec.size, rec.contents, true);
 	}
 	void writeMemory(unsigned long start, unsigned size,
 			 const void *contents, bool ignore_protection = false,
-			 const Thread<unsigned long> *thr = NULL);
+			 const Thread<ait> *thr = NULL);
 	void readMemory(unsigned long start, unsigned size,
 			void *contents, bool ignore_protection = false,
-			const Thread<unsigned long> *thr = NULL);
+			const Thread<ait> *thr = NULL);
 	bool isAccessible(unsigned long start, unsigned size,
-			  bool isWrite, const Thread<unsigned long> *thr = NULL);
+			  bool isWrite, const Thread<ait> *thr = NULL);
 	bool isWritable(unsigned long start, unsigned size,
-			const Thread<unsigned long> *thr = NULL) {
+			const Thread<ait> *thr = NULL) {
 		return isAccessible(start, size, true, thr);
 	}
 	bool isReadable(unsigned long start, unsigned size,
-			const Thread<unsigned long> *thr = NULL) {
+			const Thread<ait> *thr = NULL) {
 		return isAccessible(start, size, false, thr);
 	}
 	unsigned long setBrk(unsigned long newBrk);
@@ -1237,15 +1240,15 @@ public:
 	void visit(HeapVisitor &hv) const;
 	void sanityCheck() const;
 
-	void dumpBrkPtr(LogWriter<unsigned long> *lw) const;
-	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
+	void dumpBrkPtr(LogWriter<ait> *lw) const;
+	void dumpSnapshot(LogWriter<ait> *lw) const;
 };
 
 template<typename ait> void replay_syscall(const LogRecordSyscall<ait> *lrs,
 					   Thread<ait> *thr,
 					   MachineState<ait> *mach);
 
-template<typename ait> void process_memory_records(AddressSpace *addrSpace,
+template<typename ait> void process_memory_records(AddressSpace<ait> *addrSpace,
 						   const LogReader<ait> *lf,
 						   LogReaderPtr startOffset,
 						   LogReaderPtr *endOffset,

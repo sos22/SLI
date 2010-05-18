@@ -10,9 +10,8 @@ isErrnoSysres(long x)
 	return x >= -4096 && x < 0;
 }
 
-template<typename ait>
-void
-process_memory_records(AddressSpace *addrSpace,
+template<typename ait> void
+process_memory_records(AddressSpace<ait> *addrSpace,
 		       const LogReader<ait> *lf,
 		       LogReaderPtr startOffset,
 		       LogReaderPtr *endOffset,
@@ -38,14 +37,14 @@ process_memory_records(AddressSpace *addrSpace,
 
 template<typename ait>
 static void
-handle_clone(AddressSpace *addrSpace,
+handle_clone(AddressSpace<ait> *addrSpace,
 	     Thread<ait> *thr,
 	     MachineState<ait> *mach,
-	     unsigned long flags,
-	     unsigned long childRsp,
-	     unsigned long parent_tidptr,
-	     unsigned long child_tidptr,
-	     unsigned long set_tls,
+	     ait flags,
+	     ait childRsp,
+	     ait parent_tidptr,
+	     ait child_tidptr,
+	     ait set_tls,
 	     unsigned pid)
 {
 	if (flags != (CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
@@ -76,13 +75,12 @@ handle_clone(AddressSpace *addrSpace,
 	mach->registerThread(newThread);
 }
 
-template<typename ait>
-void
+template<typename ait> void
 replay_syscall(const LogRecordSyscall<ait> *lrs,
 	       Thread<ait> *thr,
 	       MachineState<ait> *mach)
 {
-	AddressSpace *addrSpace = mach->addressSpace;
+	AddressSpace<ait> *addrSpace = mach->addressSpace;
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 	ait res = lrs->res;
 	ait args[6];

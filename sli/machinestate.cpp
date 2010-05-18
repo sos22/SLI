@@ -31,7 +31,7 @@ public:
 };
 
 template<typename abs_int_type>
-MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(AddressSpace *as,
+MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(AddressSpace<abs_int_type> *as,
 									    const LogRecordInitialSighandlers<abs_int_type> &handlers)
 {
 	MachineState<abs_int_type> *work = allocator.alloc();
@@ -56,7 +56,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 	LogRecordInitialBrk<ait> *lrib = dynamic_cast<LogRecordInitialBrk<ait>*>(lr);
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
-	AddressSpace *as = AddressSpace::initialAddressSpace(lrib->brk);
+        AddressSpace<ait> *as = AddressSpace<ait>::initialAddressSpace(lrib->brk);
 	delete lr;
 
 	lr = lf->read(ptr, &ptr);
@@ -138,7 +138,7 @@ template <typename ait> VexAllocTypeWrapper<MachineState<ait> > MachineState<ait
 #define MK_MACHINE_STATE(t)						\
 	template MachineState<t> *MachineState<t>::dupeSelf() const;	\
 	template bool MachineState<t>::crashed() const;			\
-	template MachineState<t> *MachineState<t>::initialMachineState(AddressSpace *as, \
+	template MachineState<t> *MachineState<t>::initialMachineState(AddressSpace<t> *as, \
 								       const LogRecordInitialSighandlers<t> &handlers); \
 	template void MachineState<t>::dumpSnapshot(LogWriter<t> *lw) const; \
 	template VexAllocTypeWrapper<MachineState<t> > MachineState<t>::allocator; \

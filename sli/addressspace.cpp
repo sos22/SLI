@@ -6,11 +6,9 @@
 
 #define PAGE_MASK (~4095)
 
-DECLARE_VEX_TYPE(AddressSpace)
-DEFINE_VEX_TYPE_NO_DESTRUCT(AddressSpace, {ths->visit(visit);});
-
-void AddressSpace::allocateMemory(unsigned long start, unsigned long size,
-				  VAMap::Protection prot, VAMap::AllocFlags flags)
+template <typename ait>
+void AddressSpace<ait>::allocateMemory(unsigned long start, unsigned long size,
+				       VAMap::Protection prot, VAMap::AllocFlags flags)
 {
 	assert(!(start & ~PAGE_MASK));
 	assert(!(size & ~PAGE_MASK));
@@ -25,20 +23,23 @@ void AddressSpace::allocateMemory(unsigned long start, unsigned long size,
 	}
 }
 
-void AddressSpace::releaseMemory(unsigned long start, unsigned long size)
+template <typename ait>
+void AddressSpace<ait>::releaseMemory(unsigned long start, unsigned long size)
 {
 	vamap->unmap(start, size);
 }
 
-void AddressSpace::protectMemory(unsigned long start, unsigned long size,
+template <typename ait>
+void AddressSpace<ait>::protectMemory(unsigned long start, unsigned long size,
 				 VAMap::Protection prot)
 {
 	vamap->protect(start, size, prot);
 }
 
-void AddressSpace::writeMemory(unsigned long start, unsigned size,
-			       const void *contents, bool ignore_protection,
-			       const Thread<unsigned long> *thr)
+template <typename ait>
+void AddressSpace<ait>::writeMemory(unsigned long start, unsigned size,
+				    const void *contents, bool ignore_protection,
+				    const Thread<ait> *thr)
 {
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -66,9 +67,10 @@ void AddressSpace::writeMemory(unsigned long start, unsigned size,
 	}
 }
 
-void AddressSpace::readMemory(unsigned long start, unsigned size,
-			      void *contents, bool ignore_protection,
-			      const Thread<unsigned long> *thr)
+template <typename ait>
+void AddressSpace<ait>::readMemory(unsigned long start, unsigned size,
+				   void *contents, bool ignore_protection,
+				   const Thread<ait> *thr)
 {
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -102,8 +104,9 @@ void AddressSpace::readMemory(unsigned long start, unsigned size,
 	}
 }
 
-bool AddressSpace::isAccessible(unsigned long start, unsigned size,
-				bool isWrite, const Thread<unsigned long> *thr)
+template <typename ait>
+bool AddressSpace<ait>::isAccessible(unsigned long start, unsigned size,
+				     bool isWrite, const Thread<ait> *thr)
 {
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -132,7 +135,8 @@ bool AddressSpace::isAccessible(unsigned long start, unsigned size,
 	return true;
 }
 
-unsigned long AddressSpace::setBrk(unsigned long newBrk)
+template <typename ait>
+unsigned long AddressSpace<ait>::setBrk(unsigned long newBrk)
 {
 	unsigned long newBrkMap = (newBrk + 4095) & PAGE_MASK;
 
@@ -148,36 +152,37 @@ unsigned long AddressSpace::setBrk(unsigned long newBrk)
 	return brkptr;
 }
 
-AddressSpace *AddressSpace::initialAddressSpace(unsigned long initialBrk)
+template <typename ait>
+AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(unsigned long initialBrk)
 {
-       AddressSpace *work;
-
-       assert(!(initialBrk & ~PAGE_MASK));
-       work = LibVEX_Alloc_AddressSpace();
-       memset(work, 0, sizeof(*work));
-       work->brkptr = initialBrk;
-       work->brkMapPtr = initialBrk + 4096;
-       work->pmap = PMap::empty();
-       work->vamap = VAMap::empty(work->pmap);
-       return work;	
+	AddressSpace<ait> *work = allocator.alloc();
+	memset(work, 0, sizeof(*work));
+	work->brkptr = initialBrk;
+	work->brkMapPtr = initialBrk + 4096;
+	work->pmap = PMap::empty();
+	work->vamap = VAMap::empty(work->pmap);
+	return work;	
 }
 
-AddressSpace *AddressSpace::dupeSelf() const
+template <typename ait>
+AddressSpace<ait> *AddressSpace<ait>::dupeSelf() const
 {
-       AddressSpace *work = LibVEX_Alloc_AddressSpace();
-       *work = *this;
-       work->pmap = pmap->dupeSelf();
-       work->vamap = vamap->dupeSelf(work->pmap);
-       return work;
+	AddressSpace<ait> *work = allocator.alloc();
+	*work = *this;
+	work->pmap = pmap->dupeSelf();
+	work->vamap = vamap->dupeSelf(work->pmap);
+	return work;
 }
 
-void AddressSpace::visit(HeapVisitor &hv) const
+template <typename ait>
+void AddressSpace<ait>::visit(HeapVisitor &hv) const
 {
 	hv(vamap);
 	hv(pmap);
 }
 
-bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
+template <typename ait>
+bool AddressSpace<ait>::extendStack(unsigned long ptr, unsigned long rsp)
 {
 	if (ptr + 65536 + 32 * sizeof(unsigned long) < rsp)
 		return false;
@@ -194,17 +199,20 @@ bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 	return true;
 }
 
-void AddressSpace::sanityCheck() const
+template <typename ait>
+void AddressSpace<ait>::sanityCheck() const
 {
 	vamap->sanityCheck();
 }
 
-void AddressSpace::dumpBrkPtr(LogWriter<unsigned long> *lw) const
+template <typename ait>
+void AddressSpace<ait>::dumpBrkPtr(LogWriter<ait> *lw) const
 {
-	lw->append(LogRecordInitialBrk<unsigned long>(ThreadId(0), brkptr));
+	lw->append(LogRecordInitialBrk<ait>(ThreadId(0), brkptr));
 }
 
-void AddressSpace::dumpSnapshot(LogWriter<unsigned long> *lw) const
+template <typename ait>
+void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 {
 	unsigned long last_va;
 	unsigned long next_va;
@@ -230,3 +238,8 @@ void AddressSpace::dumpSnapshot(LogWriter<unsigned long> *lw) const
 		last_va = next_va + MemoryChunk::size;
 	}
 }
+
+template <typename ait> VexAllocTypeWrapper<AddressSpace<ait> > AddressSpace<ait>::allocator;
+
+#define MK_ADDRESS_SPACE(t)						\
+	template VexAllocTypeWrapper<AddressSpace<t> > AddressSpace<t>::allocator;

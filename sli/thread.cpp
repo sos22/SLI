@@ -55,7 +55,7 @@ void Thread<unsigned long>::dumpSnapshot(LogWriter<unsigned long> *lw) const
 
 template<typename ait>
 void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> &rec,
-			      AddressSpace *as)
+			      AddressSpace<ait> *as)
 {
 	translateNextBlock(as);
 	assert(currentIRSB);
