@@ -8,7 +8,7 @@ void RdtscEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<
 	if (!lrr)
 		throw ReplayFailedException("wanted a rdtsc, got %s",
 					    lr->name());
-	thr->temporaries[tmp].lo.v = lrr->tsc;
+	thr->temporaries[tmp].lo = lrr->tsc;
 }
 
 InterpretResult RdtscEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
@@ -101,10 +101,10 @@ void LoadEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<u
 						    addr);
 		
 		if (size <= 8) {
-			memcpy(&thr->temporaries[tmp].lo.v, buf, size);
+			memcpy(&thr->temporaries[tmp].lo, buf, size);
 		} else if (size <= 16) {
-			memcpy(&thr->temporaries[tmp].lo.v, buf, 8);
-			memcpy(&thr->temporaries[tmp].hi.v, buf + 8, size - 8);
+			memcpy(&thr->temporaries[tmp].lo, buf, 8);
+			memcpy(&thr->temporaries[tmp].hi, buf + 8, size - 8);
 		} else {
 			throw NotImplementedException();
 		}
@@ -120,10 +120,10 @@ InterpretResult LoadEvent::fake(Thread<unsigned long> *thr, MachineState<unsigne
 		unsigned char buf[16];
 		ms->addressSpace->readMemory(addr, size, buf, false, thr);
 		if (size <= 8) {
-			memcpy(&thr->temporaries[tmp].lo.v, buf, size);
+			memcpy(&thr->temporaries[tmp].lo, buf, size);
 		} else if (size <= 16) {
-			memcpy(&thr->temporaries[tmp].lo.v, buf, 8);
-			memcpy(&thr->temporaries[tmp].hi.v, buf + 8, size - 8);
+			memcpy(&thr->temporaries[tmp].lo, buf, 8);
+			memcpy(&thr->temporaries[tmp].hi, buf + 8, size - 8);
 		} else {
 			throw NotImplementedException();
 		}
@@ -188,36 +188,38 @@ void SyscallEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineStat
 	replay_syscall(lrs, thr, ms);
 }
 
-void CasEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <>
+void CasEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
 {
 	throw SliException("CAS events need a special replay method");
 }
 
-void CasEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms,
-		      const LogReader *lf, LogReader::ptr ptr,
-		      LogReader::ptr *outPtr, LogWriter *lw)
+template <>
+void CasEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms,
+				     const LogReader *lf, LogReader::ptr ptr,
+				     LogReader::ptr *outPtr, LogWriter *lw)
 {
-	unsigned long expected_buf[2] = {expected.lo.v, expected.hi.v};
-	unsigned long data_buf[2] = {data.lo.v, data.hi.v};
+	unsigned long expected_buf[2] = {expected.lo, expected.hi};
+	unsigned long data_buf[2] = {data.lo, data.hi};
 
 
 	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
 					    lr->name());
-	if (size != lrl->size || addr.lo.v != lrl->ptr)
+	if (size != lrl->size || addr.lo != lrl->ptr)
 		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
 					    lrl->size, lrl->ptr,
-					    size, addr.lo.v);
+					    size, addr.lo);
 
 	unsigned long seen_buf[2];
 	memset(seen_buf, 0, sizeof(seen_buf));
-	ms->addressSpace->readMemory(addr.lo.v, size, seen_buf, false, thr);
+	ms->addressSpace->readMemory(addr.lo, size, seen_buf, false, thr);
 	if (memcmp(seen_buf, lrl->buf, size))
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
-					    addr.lo.v);
-	thr->temporaries[dest].lo.v = seen_buf[0];
-	thr->temporaries[dest].hi.v = seen_buf[1];
+					    addr.lo);
+	thr->temporaries[dest].lo = seen_buf[0];
+	thr->temporaries[dest].hi = seen_buf[1];
 	if (memcmp(seen_buf, expected_buf, size))
 		return;
 
@@ -227,45 +229,47 @@ void CasEvent::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<un
 	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");
-	if (size != lrs->size || addr.lo.v != lrs->ptr)
+	if (size != lrs->size || addr.lo != lrs->ptr)
 		throw ReplayFailedException("wanted %d byte CAS to %lx, got %d to %lx",
 					    lrs->size, lrs->ptr,
-					    size, addr.lo.v);
+					    size, addr.lo);
 	if (memcmp(data_buf, lrs->buf, size))
 		throw ReplayFailedException("memory mismatch on CAS to %lx",
-					    addr.lo.v);
+					    addr.lo);
 
-	ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
+	ms->addressSpace->writeMemory(addr.lo, size, data_buf, false, thr);
 }
 
-InterpretResult CasEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1,
-			       LogRecord **lr2)
+template <>
+InterpretResult CasEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1,
+					      LogRecord **lr2)
 {
-	unsigned long expected_buf[2] = {expected.lo.v, expected.hi.v};
-	unsigned long data_buf[2] = {data.lo.v, data.hi.v};
+	unsigned long expected_buf[2] = {expected.lo, expected.hi};
+	unsigned long data_buf[2] = {data.lo, data.hi};
 	unsigned long seen_buf[2];
 	memset(seen_buf, 0, sizeof(seen_buf));
-	ms->addressSpace->readMemory(addr.lo.v, size, seen_buf, false, thr);
+	ms->addressSpace->readMemory(addr.lo, size, seen_buf, false, thr);
 	if (lr1) {
 		void *sb = malloc(size);
 		memcpy(sb, seen_buf, size);
-		*lr1 = new LogRecordLoad(thr->tid, size, addr.lo.v, sb);
+		*lr1 = new LogRecordLoad(thr->tid, size, addr.lo, sb);
 	}
-	thr->temporaries[dest].lo.v = seen_buf[0];
-	thr->temporaries[dest].hi.v = seen_buf[1];
+	thr->temporaries[dest].lo = seen_buf[0];
+	thr->temporaries[dest].hi = seen_buf[1];
 	if (!memcmp(seen_buf, expected_buf, size)) {
-		ms->addressSpace->writeMemory(addr.lo.v, size, data_buf, false, thr);
+		ms->addressSpace->writeMemory(addr.lo, size, data_buf, false, thr);
 		if (lr2) {
 			void *sb = malloc(size);
 			memcpy(sb, data_buf, size);
-			*lr2 = new LogRecordStore(thr->tid, size, addr.lo.v, sb);
+			*lr2 = new LogRecordStore(thr->tid, size, addr.lo, sb);
 		}
 	} else if (lr2)
 		*lr2 = NULL;
 	return InterpretResultContinue;
 }
 
-InterpretResult CasEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1)
+template <>
+InterpretResult CasEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1)
 {
 	return fake(thr, ms, lr1, NULL);
 }

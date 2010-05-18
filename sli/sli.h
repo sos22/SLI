@@ -120,12 +120,14 @@ public:
 struct abstract_interpret_value {
 	unsigned long v;
 	abstract_interpret_value() : v(0) {}
+	void visit(HeapVisitor &hv) const {}
 };
 
+template<typename abst_int_value>
 struct expression_result {
-	struct abstract_interpret_value lo;
-	struct abstract_interpret_value hi;
-	void visit(HeapVisitor &hv) const {}
+	abst_int_value lo;
+	abst_int_value hi;
+	void visit(HeapVisitor &hv) const { }
 };
 
 template <typename underlying>
@@ -143,16 +145,17 @@ public:
 
 class AddressSpace;
 
+template <typename ait>
 class expression_result_array {
 public:
-	struct expression_result *arr;
+	struct expression_result<ait> *arr;
 	unsigned nr_entries;
 	void setSize(unsigned new_size) {
-		arr = (struct expression_result *)LibVEX_Alloc_Bytes(sizeof(arr[0]) * new_size);
+		arr = (struct expression_result<ait> *)LibVEX_Alloc_Bytes(sizeof(arr[0]) * new_size);
 		memset(arr, 0, sizeof(arr[0]) * new_size);
 		nr_entries = new_size;
 	}
-	expression_result &operator[](unsigned idx) { return arr[idx]; }
+	expression_result<ait> &operator[](unsigned idx) { return arr[idx]; }
 	void visit(HeapVisitor &hv) const {
 		unsigned x;
 		for (x = 0; x < nr_entries; x++)
@@ -176,12 +179,12 @@ class LogRecordMemory;
 template <typename abst_int_type>
 class Thread {
 	void translateNextBlock(AddressSpace *addrSpace);
-	struct expression_result eval_expression(IRExpr *expr);
+	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
 	ThreadEvent *do_dirty_call(IRDirty *details);
-	expression_result do_ccall_calculate_condition(struct expression_result *args);
-	expression_result do_ccall_calculate_rflags_c(expression_result *args);
-	expression_result do_ccall_generic(IRCallee *cee, struct expression_result *rargs);
-	expression_result do_ccall(IRCallee *cee, IRExpr **args);
+	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
+	expression_result<abst_int_type> do_ccall_calculate_rflags_c(expression_result<abst_int_type> *args);
+	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
+	expression_result<abst_int_type> do_ccall(IRCallee *cee, IRExpr **args);
 public:
 	ThreadId tid;
 	unsigned pid;
@@ -198,7 +201,7 @@ public:
 
 	IRSB *currentIRSB;
 public:
-	expression_result_array temporaries;
+	expression_result_array<abst_int_type> temporaries;
 private:
 	int currentIRSBOffset;
 
@@ -717,31 +720,32 @@ public:
 
 class LogWriter;
 
+template <typename ait>
 class CasEvent : public ThreadEvent {
 	IRTemp dest;
-	expression_result addr;
-	expression_result data;
-	expression_result expected;
+	expression_result<ait> addr;
+	expression_result<ait> data;
+	expression_result<ait> expected;
 	unsigned size;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("cas(dest %d, size %d, addr %lx:%lx, data %lx:%lx, expected %lx:%lx)",
-				   dest, size, addr.lo.v, addr.hi.v, data.lo.v, data.hi.v,
-				   expected.lo.v, expected.hi.v);
+				   dest, size, addr.lo, addr.hi, data.lo, data.hi,
+				   expected.lo, expected.hi);
 	}
 public:
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL,
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL,
 				     LogRecord **lr2 = NULL);
-	void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms,
+	void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms,
 		    const LogReader *lf, LogReader::ptr ptr,
 		    LogReader::ptr *outPtr, LogWriter *lw);
-	void record(Thread<unsigned long> *thr, LogRecord **lr1, LogRecord **lr2);
+	void record(Thread<ait> *thr, LogRecord **lr1, LogRecord **lr2);
 	CasEvent(IRTemp _dest,
-		 expression_result _addr,
-		 expression_result _data,
-		 expression_result _expected,
+		 expression_result<ait> _addr,
+		 expression_result<ait> _data,
+		 expression_result<ait> _expected,
 		 unsigned _size) :
 		dest(_dest),
 		addr(_addr),
@@ -797,7 +801,7 @@ public:
 
 class LogRecordLoad : public LogRecord {
 	friend class LoadEvent;
-	friend class CasEvent;
+	friend class CasEvent<unsigned long>;
 	friend class MemoryAccessLoad;
 	unsigned size;
 	unsigned long ptr;
@@ -846,7 +850,7 @@ public:
 
 class LogRecordStore : public LogRecord {
 	friend class StoreEvent;
-	friend class CasEvent;
+	friend class CasEvent<unsigned long>;
 	friend class MemoryAccessStore;
 	unsigned size;
 	unsigned long ptr;
@@ -1149,10 +1153,10 @@ protected:
 	VexGcRoot root;
 	LogRecordVexThreadState **root_data;
 public:
-	expression_result_array tmp;
+	expression_result_array<unsigned long> tmp;
 	unsigned statement_nr;
 	LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
-				expression_result_array _tmp);
+				expression_result_array<unsigned long> _tmp);
 	void *marshal(unsigned *sz) const;
 	void visit(HeapVisitor &hv) const;
 	LogRecord *dupe() const

@@ -178,8 +178,8 @@ void *LogRecordVexThreadState::marshal(unsigned *sz) const
 							      &r);
 	vtsr->statement_nr = statement_nr;
 	for (unsigned x = 0; x < tmp.nr_entries; x++) {
-		vtsr->temporaries[x*2] = tmp.arr[x].lo.v;
-		vtsr->temporaries[x*2+1] = tmp.arr[x].hi.v;
+		vtsr->temporaries[x*2] = tmp.arr[x].lo;
+		vtsr->temporaries[x*2+1] = tmp.arr[x].hi;
 	}
 	return r;
 }
@@ -229,7 +229,7 @@ static void visit_special_keeper(const void *_ctxt, HeapVisitor &hv)
 }
 
 LogRecordVexThreadState::LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
-						 expression_result_array _tmp)
+						 expression_result_array<unsigned long> _tmp)
 		: LogRecord(tid),
 		  root((void **)&root_data),
 		  tmp(_tmp),

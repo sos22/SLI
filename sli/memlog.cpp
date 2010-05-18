@@ -2,7 +2,7 @@
 
 InterpretResult LogWriter::recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent *evt)
 {
-	CasEvent *ce = dynamic_cast<CasEvent *>(evt);
+	CasEvent<unsigned long> *ce = dynamic_cast<CasEvent<unsigned long> *>(evt);
 	InterpretResult res;
 
 	if (ce) {

@@ -131,12 +131,12 @@ template<typename ait>
 ThreadEvent *
 Thread<ait>::do_dirty_call(IRDirty *details)
 {
-	struct expression_result args[6];
+	struct expression_result<ait> args[6];
 	unsigned x;
 
 	if (details->guard) {
-		expression_result guard = eval_expression(details->guard);
-		if (!guard.lo.v)
+		expression_result<ait> guard = eval_expression(details->guard);
+		if (!guard.lo)
 			return NULL;
 	}
 	for (x = 0; details->args[x]; x++) {
@@ -148,15 +148,15 @@ Thread<ait>::do_dirty_call(IRDirty *details)
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 		return new RdtscEvent(details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		return new LoadEvent(details->tmp, args[0].lo.v, 1);
+		return new LoadEvent(details->tmp, args[0].lo, 1);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		return new LoadEvent(details->tmp, args[0].lo.v, 2);
+		return new LoadEvent(details->tmp, args[0].lo, 2);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		return new LoadEvent(details->tmp, args[0].lo.v, 4);
+		return new LoadEvent(details->tmp, args[0].lo, 4);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		return new LoadEvent(details->tmp, args[0].lo.v, 8);
+		return new LoadEvent(details->tmp, args[0].lo, 8);
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
-		return new LoadEvent(details->tmp, args[0].lo.v, 16);
+		return new LoadEvent(details->tmp, args[0].lo, 16);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;
@@ -270,103 +270,103 @@ calculate_condition_flags_XXX(ait op,
 }
 
 template<typename ait>
-expression_result
-Thread<ait>::do_ccall_calculate_condition(struct expression_result *args)
+expression_result<ait>
+Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 {
-	struct expression_result condcode = args[0];
-	struct expression_result op = args[1];
-	struct expression_result dep1 =	args[2];
-	struct expression_result dep2 =	args[3];
-	struct expression_result ndep =	args[4];
-	struct expression_result res;
+	struct expression_result<ait> condcode = args[0];
+	struct expression_result<ait> op       = args[1];
+	struct expression_result<ait> dep1     = args[2];
+	struct expression_result<ait> dep2     = args[3];
+	struct expression_result<ait> ndep     = args[4];
+	struct expression_result<ait> res;
 	int inv;
 	unsigned cf, zf, sf, of;
 
-	calculate_condition_flags_XXX<ait>(op.lo.v,
-					   dep1.lo.v,
-					   dep2.lo.v,
-					   ndep.lo.v,
+	calculate_condition_flags_XXX<ait>(op.lo,
+					   dep1.lo,
+					   dep2.lo,
+					   ndep.lo,
 					   cf,
 					   zf,
 					   sf,
 					   of);
 
-	inv = condcode.lo.v & 1;
-	switch (condcode.lo.v & ~1) {
+	inv = condcode.lo & 1;
+	switch (condcode.lo & ~1) {
 	case AMD64CondZ:
-		res.lo.v = zf;
+		res.lo = zf;
 		break;
 	case AMD64CondL:
-		res.lo.v = sf ^ of;
+		res.lo = sf ^ of;
 		break;
 	case AMD64CondLE:
-		res.lo.v = (sf ^ of) | zf;
+		res.lo = (sf ^ of) | zf;
 		break;
 	case AMD64CondB:
-		res.lo.v = cf;
+		res.lo = cf;
 		break;
 	case AMD64CondBE:
-		res.lo.v = cf | zf;
+		res.lo = cf | zf;
 		break;
 	case AMD64CondS:
-		res.lo.v = sf;
+		res.lo = sf;
 		break;
 
 	default:
-		throw NotImplementedException("Strange cond code %ld (op %ld)\n", condcode.lo.v, op.lo.v);
+		throw NotImplementedException("Strange cond code %ld (op %ld)\n", condcode.lo, op.lo);
 	}
 
 	if (inv)
-		res.lo.v ^= 1;
+		res.lo ^= 1;
 
 	return res;
 }
 
 template<typename ait>
-expression_result
-Thread<ait>::do_ccall_calculate_rflags_c(expression_result *args)
+expression_result<ait>
+Thread<ait>::do_ccall_calculate_rflags_c(expression_result<ait> *args)
 {
-	struct expression_result op = args[0];
-	struct expression_result dep1 =	args[1];
-	struct expression_result dep2 =	args[2];
-	struct expression_result ndep =	args[3];
-	struct expression_result res;
+	struct expression_result<ait> op   = args[0];
+	struct expression_result<ait> dep1 = args[1];
+	struct expression_result<ait> dep2 = args[2];
+	struct expression_result<ait> ndep = args[3];
+	struct expression_result<ait> res;
 	unsigned cf, zf, sf, of;
 
-	calculate_condition_flags_XXX(op.lo.v,
-				      dep1.lo.v,
-				      dep2.lo.v,
-				      ndep.lo.v,
+	calculate_condition_flags_XXX(op.lo,
+				      dep1.lo,
+				      dep2.lo,
+				      ndep.lo,
 				      cf,
 				      zf,
 				      sf,
 				      of);
 
-	res.lo.v = cf;
+	res.lo = cf;
 	return res;
 }
 
 template<typename ait>
-expression_result
+expression_result<ait>
 Thread<ait>::do_ccall_generic(IRCallee *cee,
-			      struct expression_result *rargs)
+			      struct expression_result<ait> *rargs)
 {
-	struct expression_result res;
+	struct expression_result<ait> res;
 
-	res.lo.v = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
+	res.lo = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
 				       unsigned long, unsigned long, unsigned long))cee->addr)
-		(rargs[0].lo.v, rargs[1].lo.v, rargs[2].lo.v, rargs[3].lo.v, rargs[4].lo.v,
-		 rargs[5].lo.v);
-	res.hi.v = 0;
+		(rargs[0].lo, rargs[1].lo, rargs[2].lo, rargs[3].lo, rargs[4].lo,
+		 rargs[5].lo);
+	res.hi = 0;
 	return res;
 }
 
 template<typename ait>
-expression_result
+expression_result<ait>
 Thread<ait>::do_ccall(IRCallee *cee,
 		      IRExpr **args)
 {
-	struct expression_result rargs[6];
+	struct expression_result<ait> rargs[6];
 	unsigned x;
 
 	assert(cee->regparms == 0);
@@ -386,13 +386,14 @@ Thread<ait>::do_ccall(IRCallee *cee,
 }
 
 /* Borrowed from gnucash */
+template <typename ait>
 static void
-mulls64(struct expression_result *dest, const struct expression_result &src1,
-	const struct expression_result &src2)
+mulls64(struct expression_result<ait> *dest, const struct expression_result<ait> &src1,
+	const struct expression_result<ait> &src2)
 {
 	bool isneg = false;
-	long a = src1.lo.v;
-	long b = src2.lo.v;
+	ait a = src1.lo;
+	ait b = src2.lo;
 	unsigned long a0, a1;
 	unsigned long b0, b1;
 	unsigned long d, d0, d1;
@@ -448,25 +449,25 @@ mulls64(struct expression_result *dest, const struct expression_result &src1,
 		carry ++;
 	}
  
-	dest->lo.v = d0 + (sum << 32);
-	dest->hi.v = carry + e1 + f1 + g0 + (g1 << 32);
+	dest->lo = d0 + (sum << 32);
+	dest->hi = carry + e1 + f1 + g0 + (g1 << 32);
 	if (isneg) {
-		dest->lo.v = ~dest->lo.v;
-		dest->hi.v = ~dest->hi.v;
-		dest->lo.v++;
-		if (dest->lo.v == 0)
-			dest->hi.v++;
+		dest->lo = ~dest->lo;
+		dest->hi = ~dest->hi;
+		dest->lo++;
+		if (dest->lo == 0)
+			dest->hi++;
 	}
 }
 
 template<typename ait>
-expression_result
+expression_result<ait>
 Thread<ait>::eval_expression(IRExpr *expr)
 {
-	struct expression_result res;
-	struct expression_result *dest = &res;
-	dest->lo.v = 0xdeadbeeff001f001;
-	dest->hi.v = 0xaaaaaaaaaaaaaaaa;
+	struct expression_result<ait> res;
+	struct expression_result<ait> *dest = &res;
+	dest->lo = 0xdeadbeeff001f001;
+	dest->hi = 0xaaaaaaaaaaaaaaaa;
 
 	switch (expr->tag) {
 	case Iex_Get: {
@@ -478,25 +479,25 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Ity_I64:
 		case Ity_F64:
 			assert(!sub_word_offset);
-			dest->lo.v = v1;
+			dest->lo = v1;
 			break;
 		case Ity_V128:
 			assert(!sub_word_offset);
-			dest->lo.v = v1;
-			dest->hi.v = read_reg(this,
+			dest->lo = v1;
+			dest->hi = read_reg(this,
 					      expr->Iex.Get.offset - sub_word_offset + 8);
 			break;
 		case Ity_I32:
 		case Ity_F32:
 			assert(!(sub_word_offset % 4));
-			dest->lo.v = (v1 >> (sub_word_offset * 8)) & 0xffffffff;
+			dest->lo = (v1 >> (sub_word_offset * 8)) & 0xffffffff;
 			break;
 		case Ity_I16:
 			assert(!(sub_word_offset % 2));
-			dest->lo.v = (v1 >> (sub_word_offset * 8)) & 0xffff;
+			dest->lo = (v1 >> (sub_word_offset * 8)) & 0xffff;
 			break;
 		case Ity_I8:
-			dest->lo.v = (v1 >> (sub_word_offset * 8)) & 0xff;
+			dest->lo = (v1 >> (sub_word_offset * 8)) & 0xff;
 			break;
 		default:
 			ppIRExpr(expr);
@@ -516,26 +517,26 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		IRConst *cnst = expr->Iex.Const.con;
 		switch (cnst->tag) {
 		case Ico_U1:
-			dest->lo.v = cnst->Ico.U1;
+			dest->lo = cnst->Ico.U1;
 			break;
 		case Ico_U8:
-			dest->lo.v = cnst->Ico.U8;
+			dest->lo = cnst->Ico.U8;
 			break;
 		case Ico_U16:
-			dest->lo.v = cnst->Ico.U16;
+			dest->lo = cnst->Ico.U16;
 			break;
 		case Ico_U32:
-			dest->lo.v = cnst->Ico.U32;
+			dest->lo = cnst->Ico.U32;
 			break;
 		case Ico_U64:
 		case Ico_F64:
 		case Ico_F64i:
-			dest->lo.v = cnst->Ico.U64;
+			dest->lo = cnst->Ico.U64;
 			break;
 		case Ico_V128:
-			dest->lo.v = cnst->Ico.V128;
-			dest->lo.v = dest->lo.v | (dest->lo.v << 16) | (dest->lo.v << 32) | (dest->lo.v << 48);
-			dest->hi.v = dest->lo.v;
+			dest->lo = cnst->Ico.V128;
+			dest->lo = dest->lo | (dest->lo << 16) | (dest->lo << 32) | (dest->lo << 48);
+			dest->hi = dest->lo;
 			break;
 		default:
 			ppIRExpr(expr);
@@ -545,93 +546,93 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Binop: {
-		struct expression_result arg1 = eval_expression(expr->Iex.Binop.arg1);
-		struct expression_result arg2 = eval_expression(expr->Iex.Binop.arg2);
+		struct expression_result<ait> arg1 = eval_expression(expr->Iex.Binop.arg1);
+		struct expression_result<ait> arg2 = eval_expression(expr->Iex.Binop.arg2);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub8:
 		case Iop_Sub16:
 		case Iop_Sub32:
 		case Iop_Sub64:
-			dest->lo.v = arg1.lo.v - arg2.lo.v;
+			dest->lo = arg1.lo - arg2.lo;
 			break;
 		case Iop_Add8:
 		case Iop_Add16:
 		case Iop_Add32:
 		case Iop_Add64:
-			dest->lo.v = arg1.lo.v + arg2.lo.v;
+			dest->lo = arg1.lo + arg2.lo;
 			break;
 		case Iop_Add64x2:
-			dest->lo.v = arg1.lo.v + arg2.lo.v;
-			dest->hi.v = arg1.hi.v + arg2.hi.v;
+			dest->lo = arg1.lo + arg2.lo;
+			dest->hi = arg1.hi + arg2.hi;
 			break;
 		case Iop_And64:
 		case Iop_And32:
 		case Iop_And16:
 		case Iop_And8:
-			dest->lo.v = arg1.lo.v & arg2.lo.v;
+			dest->lo = arg1.lo & arg2.lo;
 			break;
 		case Iop_Or8:
 		case Iop_Or16:
 		case Iop_Or32:
 		case Iop_Or64:
-			dest->lo.v = arg1.lo.v | arg2.lo.v;
+			dest->lo = arg1.lo | arg2.lo;
 			break;
 		case Iop_Shl32:
 		case Iop_Shl64:
-			dest->lo.v = arg1.lo.v << arg2.lo.v;
+			dest->lo = arg1.lo << arg2.lo;
 			break;
 		case Iop_Sar64:
-			dest->lo.v = (long)arg1.lo.v >> arg2.lo.v;
+			dest->lo = (long)arg1.lo >> arg2.lo;
 			break;
 		case Iop_Shr32:
 		case Iop_Shr64:
-			dest->lo.v = arg1.lo.v >> arg2.lo.v;
+			dest->lo = arg1.lo >> arg2.lo;
 			break;
 		case Iop_XorV128:
 		case Iop_Xor64:
 		case Iop_Xor32:
 		case Iop_Xor16:
 		case Iop_Xor8:
-			dest->lo.v = arg1.lo.v ^ arg2.lo.v;
-			dest->hi.v = arg1.hi.v ^ arg2.hi.v;
+			dest->lo = arg1.lo ^ arg2.lo;
+			dest->hi = arg1.hi ^ arg2.hi;
 			break;
 		case Iop_CmpNE8:
-			dest->lo.v = arg1.lo.v != arg2.lo.v;
+			dest->lo = arg1.lo != arg2.lo;
 			break;
 		case Iop_CmpEQ8:
 		case Iop_CmpEQ16:
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
-			dest->lo.v = arg1.lo.v == arg2.lo.v;
+			dest->lo = arg1.lo == arg2.lo;
 			break;
 		case Iop_CmpNE32:
 		case Iop_CasCmpNE32:
 		case Iop_CmpNE64:
-			dest->lo.v = arg1.lo.v != arg2.lo.v;
+			dest->lo = arg1.lo != arg2.lo;
 			break;
 		case Iop_CmpLE64U:
-			dest->lo.v = arg1.lo.v <= arg2.lo.v;
+			dest->lo = arg1.lo <= arg2.lo;
 			break;
 		case Iop_CmpLE64S:
-			dest->lo.v = (long)arg1.lo.v <= (long)arg2.lo.v;
+			dest->lo = (long)arg1.lo <= (long)arg2.lo;
 			break;
 		case Iop_CmpLT64S:
-			dest->lo.v = (long)arg1.lo.v < (long)arg2.lo.v;
+			dest->lo = (long)arg1.lo < (long)arg2.lo;
 			break;
 		case Iop_CmpLT64U:
-			dest->lo.v = arg1.lo.v < arg2.lo.v;
+			dest->lo = arg1.lo < arg2.lo;
 			break;
 		case Iop_Mul64:
 		case Iop_Mul32:
-			dest->lo.v = arg1.lo.v * arg2.lo.v;
+			dest->lo = arg1.lo * arg2.lo;
 			break;
 
 		case Iop_MullU32: {
-			dest->lo.v = arg1.lo.v * arg2.lo.v;
+			dest->lo = arg1.lo * arg2.lo;
 			break;
 		}
 		case Iop_MullS32: {
-			dest->lo.v = (long)(int)arg1.lo.v * (long)(int)arg2.lo.v;
+			dest->lo = (long)(int)arg1.lo * (long)(int)arg2.lo;
 			break;
 		}
 
@@ -641,35 +642,35 @@ Thread<ait>::eval_expression(IRExpr *expr)
 
 		case Iop_MullU64: {
 			unsigned long a1, a2, b1, b2;
-			dest->lo.v = arg1.lo.v * arg2.lo.v;
-			a1 = arg1.lo.v & 0xffffffff;
-			a2 = arg1.lo.v >> 32;
-			b1 = arg2.lo.v & 0xffffffff;
-			b2 = arg2.lo.v >> 32;
-			dest->hi.v = a2 * b2 +
+			dest->lo = arg1.lo * arg2.lo;
+			a1 = arg1.lo & 0xffffffff;
+			a2 = arg1.lo >> 32;
+			b1 = arg2.lo & 0xffffffff;
+			b2 = arg2.lo >> 32;
+			dest->hi = a2 * b2 +
 				( (a1 * b2 + a2 * b1 +
 				   ((a1 * b1) >> 32)) >> 32);
 			break;
 		}
 		case Iop_32HLto64:
-			dest->lo.v = (arg1.lo.v << 32) | arg2.lo.v;
+			dest->lo = (arg1.lo << 32) | arg2.lo;
 			break;
 
 		case Iop_64HLtoV128:
 		case Iop_64HLto128:
-			dest->lo.v = arg2.lo.v;
-			dest->hi.v = arg1.lo.v;
+			dest->lo = arg2.lo;
+			dest->hi = arg1.lo;
 			break;
 
 		case Iop_DivModU64to32:
-			dest->lo.v = (arg1.lo.v / arg2.lo.v) |
-				((arg1.lo.v % arg2.lo.v) << 32);
+			dest->lo = (arg1.lo / arg2.lo) |
+				((arg1.lo % arg2.lo) << 32);
 			break;
 
 		case Iop_DivModS64to32: {
-			long a1 = arg1.lo.v;
-			long a2 = arg2.lo.v;
-			dest->lo.v = ((a1 / a2) & 0xffffffff) |
+			long a1 = arg1.lo;
+			long a2 = arg2.lo;
+			dest->lo = ((a1 / a2) & 0xffffffff) |
 				((a1 % a2) << 32);
 			break;
 		}
@@ -680,102 +681,102 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			   bits and the modulus in its high 64
 			   bits. */
 			asm ("div %4\n"
-			     : "=a" (dest->lo.v), "=d" (dest->hi.v)
-			     : "0" (arg1.lo.v), "1" (arg1.hi.v), "r" (arg2.lo.v));
+			     : "=a" (dest->lo), "=d" (dest->hi)
+			     : "0" (arg1.lo), "1" (arg1.hi), "r" (arg2.lo));
 			break;
 
 		case Iop_DivModS128to64:
 			asm ("idiv %4\n"
-			     : "=a" (dest->lo.v), "=d" (dest->hi.v)
-			     : "0" (arg1.lo.v), "1" (arg1.hi.v), "r" (arg2.lo.v));
+			     : "=a" (dest->lo), "=d" (dest->hi)
+			     : "0" (arg1.lo), "1" (arg1.hi), "r" (arg2.lo));
 			break;
 
 		case Iop_Add32x4:
-			dest->lo.v = ((arg1.lo.v + arg2.lo.v) & 0xffffffff) +
-				((arg1.lo.v & ~0xfffffffful) + (arg2.lo.v & ~0xfffffffful));
-			dest->hi.v = ((arg1.hi.v + arg2.hi.v) & 0xffffffff) +
-				((arg1.hi.v & ~0xfffffffful) + (arg2.hi.v & ~0xfffffffful));
+			dest->lo = ((arg1.lo + arg2.lo) & 0xffffffff) +
+				((arg1.lo & ~0xfffffffful) + (arg2.lo & ~0xfffffffful));
+			dest->hi = ((arg1.hi + arg2.hi) & 0xffffffff) +
+				((arg1.hi & ~0xfffffffful) + (arg2.hi & ~0xfffffffful));
 			break;
 
 		case Iop_InterleaveLO64x2:
-			dest->lo.v = arg2.lo.v;
-			dest->hi.v = arg1.lo.v;
+			dest->lo = arg2.lo;
+			dest->hi = arg1.lo;
 			break;
 
 		case Iop_InterleaveHI64x2:
-			dest->lo.v = arg2.hi.v;
-			dest->hi.v = arg1.hi.v;
+			dest->lo = arg2.hi;
+			dest->hi = arg1.hi;
 			break;
 
 		case Iop_InterleaveLO32x4:
-			dest->lo.v = (arg2.lo.v & 0xffffffff) | (arg1.lo.v << 32);
-			dest->hi.v = (arg2.lo.v >> 32) | (arg1.lo.v & 0xffffffff00000000ul);
+			dest->lo = (arg2.lo & 0xffffffff) | (arg1.lo << 32);
+			dest->hi = (arg2.lo >> 32) | (arg1.lo & 0xffffffff00000000ul);
 			break;
 
 		case Iop_InterleaveHI32x4:
-			dest->lo.v = (arg2.hi.v & 0xffffffff) | (arg1.hi.v << 32);
-			dest->hi.v = (arg2.hi.v >> 32) | (arg1.hi.v & 0xffffffff00000000ul);
+			dest->lo = (arg2.hi & 0xffffffff) | (arg1.hi << 32);
+			dest->hi = (arg2.hi >> 32) | (arg1.hi & 0xffffffff00000000ul);
 			break;
 
 		case Iop_ShrN64x2:
-			dest->lo.v = arg1.lo.v >> arg2.lo.v;
-			dest->hi.v = arg1.hi.v >> arg2.lo.v;
+			dest->lo = arg1.lo >> arg2.lo;
+			dest->hi = arg1.hi >> arg2.lo;
 			break;
 
 		case Iop_ShlN64x2:
-			dest->lo.v = arg1.lo.v << arg2.lo.v;
-			dest->hi.v = arg1.hi.v << arg2.lo.v;
+			dest->lo = arg1.lo << arg2.lo;
+			dest->hi = arg1.hi << arg2.lo;
 			break;
 
 		case Iop_CmpGT32Sx4:
-			dest->lo.v = 0;
-			dest->hi.v = 0;
-			if ( (int)arg1.lo.v > (int)arg2.lo.v )
-				dest->lo.v |= 0xffffffff;
-			if ( (int)(arg1.lo.v >> 32) > (int)(arg2.lo.v >> 32) )
-				dest->lo.v |= 0xffffffff00000000;
-			if ( (int)arg1.hi.v > (int)arg2.hi.v )
-				dest->hi.v |= 0xffffffff;
-			if ( (int)(arg1.hi.v >> 32) > (int)(arg2.hi.v >> 32) )
-				dest->hi.v |= 0xffffffff00000000;
+			dest->lo = 0;
+			dest->hi = 0;
+			if ( (int)arg1.lo > (int)arg2.lo )
+				dest->lo |= 0xffffffff;
+			if ( (int)(arg1.lo >> 32) > (int)(arg2.lo >> 32) )
+				dest->lo |= 0xffffffff00000000;
+			if ( (int)arg1.hi > (int)arg2.hi )
+				dest->hi |= 0xffffffff;
+			if ( (int)(arg1.hi >> 32) > (int)(arg2.hi >> 32) )
+				dest->hi |= 0xffffffff00000000;
 			break;
 			
 		case Iop_I64toF64: {
-			switch (arg1.lo.v) {
+			switch (arg1.lo) {
 			case 0:
 				/* Round to nearest even mode. */
-				*(double *)&dest->lo.v = arg2.lo.v;
+				*(double *)&dest->lo = arg2.lo;
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
-							      arg1.lo.v);
+							      arg1.lo);
 			}
 			break;
 		}
 
 		case Iop_F64toI32: {
-			switch (arg1.lo.v) {
+			switch (arg1.lo) {
 			case 3:
-				dest->lo.v = (unsigned)*(double *)&arg2.lo.v;
+				dest->lo = (unsigned)*(double *)&arg2.lo;
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
-							      arg1.lo.v);
+							      arg1.lo);
 			}
 			break;
 		}
 
 		case Iop_CmpF64: {
-			double a1 = *(double *)&arg1.lo.v;
-			double a2 = *(double *)&arg2.lo.v;
+			double a1 = *(double *)&arg1.lo;
+			double a2 = *(double *)&arg2.lo;
 			if (a1 < a2)
-				dest->lo.v = 1;
+				dest->lo = 1;
 			else if (a1 == a2)
-				dest->lo.v = 0x40;
+				dest->lo = 0x40;
 			else if (a1 > a2)
-				dest->lo.v = 0;
+				dest->lo = 0;
 			else
-				dest->lo.v = 0x45;
+				dest->lo = 0x45;
 			break;
 		}
 
@@ -788,23 +789,23 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		typeOfPrimop(expr->Iex.Binop.op, &t, &ign1, &ign2, &ign3, &ign4);
 		switch (t) {
 		case Ity_I1:
-			dest->lo.v &= 1;
-			dest->hi.v = 0;
+			dest->lo &= 1;
+			dest->hi = 0;
 			break;
 		case Ity_I8:
-			dest->lo.v &= 0xff;
-			dest->hi.v = 0;
+			dest->lo &= 0xff;
+			dest->hi = 0;
 			break;
 		case Ity_I16:
-			dest->lo.v &= 0xffff;
-			dest->hi.v = 0;
+			dest->lo &= 0xffff;
+			dest->hi = 0;
 			break;
 		case Ity_I32:
-			dest->lo.v &= 0xffffffff;
-			dest->hi.v = 0;
+			dest->lo &= 0xffffffff;
+			dest->hi = 0;
 			break;
 		case Ity_I64:
-			dest->hi.v = 0;
+			dest->hi = 0;
 			break;
 
 			/* Floating types follow the same rule as the
@@ -813,9 +814,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			   simple mask, so assert that it's already
 			   true. */
 		case Ity_F32:
-			assert(!(dest->lo.v & ~0xfffffffful));
+			assert(!(dest->lo & ~0xfffffffful));
 		case Ity_F64:
-			assert(dest->hi.v == 0);
+			assert(dest->hi == 0);
 			break;
 
 		case Ity_I128:
@@ -829,30 +830,30 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Unop: {
-		struct expression_result arg = eval_expression(expr->Iex.Unop.arg);
+		struct expression_result<ait> arg = eval_expression(expr->Iex.Unop.arg);
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
-			dest->lo.v = arg.lo.v >> 32;
+			dest->lo = arg.lo >> 32;
 			break;
 		case Iop_64to32:
-			dest->lo.v = arg.lo.v & 0xffffffff;
+			dest->lo = arg.lo & 0xffffffff;
 			break;
 		case Iop_64to16:
-			dest->lo.v = arg.lo.v & 0xffff;
+			dest->lo = arg.lo & 0xffff;
 			break;
 		case Iop_64to8:
-			dest->lo.v = arg.lo.v & 0xff;
+			dest->lo = arg.lo & 0xff;
 			break;
 		case Iop_128to64:
 		case Iop_V128to64:
-			dest->lo.v = arg.lo.v;
+			dest->lo = arg.lo;
 			break;
 		case Iop_64UtoV128:
-			dest->lo.v = arg.lo.v;
-			dest->hi.v = 0;
+			dest->lo = arg.lo;
+			dest->hi = 0;
 			break;
 		case Iop_64to1:
-			dest->lo.v = arg.lo.v & 1;
+			dest->lo = arg.lo & 1;
 			break;
 		case Iop_32Uto64:
 		case Iop_16Uto64:
@@ -864,49 +865,49 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			*dest = arg;
 			break;
 		case Iop_32Sto64:
-			dest->lo.v = (long)(int)arg.lo.v;
+			dest->lo = (long)(int)arg.lo;
 			break;
 		case Iop_8Sto64:
-			dest->lo.v = (long)(signed char)arg.lo.v;
+			dest->lo = (long)(signed char)arg.lo;
 			break;
 		case Iop_16Sto32:
-			dest->lo.v = (unsigned)(signed short)arg.lo.v;
+			dest->lo = (unsigned)(signed short)arg.lo;
 			break;
 		case Iop_8Sto32:
-			dest->lo.v = (unsigned)(signed char)arg.lo.v;
+			dest->lo = (unsigned)(signed char)arg.lo;
 			break;
 		case Iop_16Sto64:
-			dest->lo.v = (long)(short)arg.lo.v;
+			dest->lo = (long)(short)arg.lo;
 			break;
 		case Iop_128HIto64:
 		case Iop_V128HIto64:
-			dest->lo.v = arg.hi.v;
+			dest->lo = arg.hi;
 			break;
 
 		case Iop_Not1:
-			dest->lo.v = !arg.lo.v;
+			dest->lo = !arg.lo;
 			break;
 
 		case Iop_Not32:
-			dest->lo.v = ~arg.lo.v & 0xffffffff;
+			dest->lo = ~arg.lo & 0xffffffff;
 			break;
 
 		case Iop_Not64:
-			dest->lo.v = ~arg.lo.v;
+			dest->lo = ~arg.lo;
 			break;
 			
 		case Iop_Clz64:
-			dest->lo.v = 0;
-			while (!(arg.lo.v & (1ul << (63 - dest->lo.v))) &&
-			       dest->lo.v < 63)
-				dest->lo.v++;
+			dest->lo = 0;
+			while (!(arg.lo & (1ul << (63 - dest->lo))) &&
+			       dest->lo < 63)
+				dest->lo++;
 			break;
 
 		case Iop_Ctz64:
-			dest->lo.v = 0;
-			while (!(arg.lo.v & (1ul << dest->lo.v)) &&
-			       dest->lo.v < 63)
-				dest->lo.v++;
+			dest->lo = 0;
+			while (!(arg.lo & (1ul << dest->lo)) &&
+			       dest->lo < 63)
+				dest->lo++;
 			break;
 
 		default:
@@ -917,16 +918,14 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Mux0X: {
-		struct expression_result cond = eval_expression(expr->Iex.Mux0X.cond);
-		struct expression_result res0 = eval_expression(expr->Iex.Mux0X.expr0);
-		struct expression_result resX = eval_expression(expr->Iex.Mux0X.exprX);
-		struct expression_result *choice;
-		if (cond.lo.v == 0) {
-			choice = &res0;
+		struct expression_result<ait> cond = eval_expression(expr->Iex.Mux0X.cond);
+		struct expression_result<ait> res0 = eval_expression(expr->Iex.Mux0X.expr0);
+		struct expression_result<ait> resX = eval_expression(expr->Iex.Mux0X.exprX);
+		if (cond.lo == 0) {
+			*dest = res0;
 		} else {
-			choice = &resX;
+			*dest = resX;
 		}
-		*dest = *choice;
 		break;
 	}
 
@@ -1064,24 +1063,24 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 			case Ist_Store: {
 				assert(stmt->Ist.Store.end == Iend_LE);
 				assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
-				struct expression_result data =
+				struct expression_result<ait> data =
 					eval_expression(stmt->Ist.Store.data);
-				struct expression_result addr =
+				struct expression_result<ait> addr =
 					eval_expression(stmt->Ist.Store.addr);
 				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
 				unsigned char dbuf[16];
 				memset(dbuf, 0, 16);
 				if (size <= 8) {
-					memcpy(dbuf, &data.lo.v, size);
+					memcpy(dbuf, &data.lo, size);
 				} else if (size <= 16) {
-					memcpy(dbuf, &data.lo.v, 8);
-					memcpy(dbuf + 8, &data.hi.v, size - 8);
+					memcpy(dbuf, &data.lo, 8);
+					memcpy(dbuf + 8, &data.hi, size - 8);
 				} else {
 					ppIRStmt(stmt);
 					throw NotImplementedException();
 				}
-				return new StoreEvent(addr.lo.v, size, dbuf);
+				return new StoreEvent(addr.lo, size, dbuf);
 			}
 
 			case Ist_CAS: {
@@ -1089,15 +1088,15 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 				assert(stmt->Ist.CAS.details->expdHi == NULL);
 				assert(stmt->Ist.CAS.details->dataHi == NULL);
 				assert(stmt->Ist.CAS.details->end == Iend_LE);
-				struct expression_result data =
+				struct expression_result<ait> data =
 					eval_expression(stmt->Ist.CAS.details->dataLo);
-				struct expression_result addr =
+				struct expression_result<ait> addr =
 					eval_expression(stmt->Ist.CAS.details->addr);
-				struct expression_result expected =
+				struct expression_result<ait> expected =
 					eval_expression(stmt->Ist.CAS.details->expdLo);
 				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
-				return new CasEvent(stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+				return new CasEvent<ait>(stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 			}
 
 			case Ist_Put: {
@@ -1105,40 +1104,40 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 				unsigned long dest =
 					read_reg(this,
 						 stmt->Ist.Put.offset - byte_offset);
-				struct expression_result data =
+				struct expression_result<ait> data =
 					eval_expression(stmt->Ist.Put.data);
 				switch (typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data)) {
 				case Ity_I8:
 					dest &= ~(0xFF << (byte_offset * 8));
-					dest |= data.lo.v << (byte_offset * 8);
+					dest |= data.lo << (byte_offset * 8);
 					break;
 
 				case Ity_I16:
 					assert(!(byte_offset % 2));
 					dest &= ~(0xFFFFul << (byte_offset * 8));
-					dest |= data.lo.v << (byte_offset * 8);
+					dest |= data.lo << (byte_offset * 8);
 					break;
 
 				case Ity_I32:
 				case Ity_F32:
 					assert(!(byte_offset % 4));
 					dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
-					dest |= data.lo.v << (byte_offset * 8);
+					dest |= data.lo << (byte_offset * 8);
 					break;
 
 				case Ity_I64:
 				case Ity_F64:
 					assert(byte_offset == 0);
-					dest = data.lo.v;
+					dest = data.lo;
 					break;
 
 				case Ity_I128:
 				case Ity_V128:
 					assert(byte_offset == 0);
-					dest = data.lo.v;
+					dest = data.lo;
 					write_reg(this,
 						  stmt->Ist.Put.offset + 8,
-						  data.hi.v);
+						  data.hi);
 					break;
 				default:
 					ppIRStmt(stmt);
@@ -1159,9 +1158,9 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 
 			case Ist_Exit: {
 				if (stmt->Ist.Exit.guard) {
-					struct expression_result guard =
+					struct expression_result<ait> guard =
 						eval_expression(stmt->Ist.Exit.guard);
-					if (!guard.lo.v)
+					if (!guard.lo)
 						break;
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
@@ -1187,9 +1186,9 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 		       currentIRSB->jumpkind == Ijk_Sys_syscall);
 		
 		{
-			struct expression_result next_addr =
+			struct expression_result<ait> next_addr =
 				eval_expression(currentIRSB->next);
-			regs.set_reg(REGISTER_IDX(RIP), next_addr.lo.v);
+			regs.set_reg(REGISTER_IDX(RIP), next_addr.lo);
 		}
 		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
 			currentIRSB = NULL;
@@ -1290,7 +1289,7 @@ void Interpreter<ait>::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 		/* CAS events are annoyingly special, because they can
 		   generate multiple records in the logfile (one for
 		   the load and one for the store). */
-		CasEvent *ce = dynamic_cast<CasEvent *>(evt);
+		CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
 		if (ce) {
 			ce->replay(thr, lr, currentState,
 				   lf, ptr, &ptr, lw);
