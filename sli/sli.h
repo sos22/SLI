@@ -117,12 +117,6 @@ public:
 	const unsigned _tid() const { return tid; }
 };
 
-struct abstract_interpret_value {
-	unsigned long v;
-	abstract_interpret_value() : v(0) {}
-	void visit(HeapVisitor &hv) const {}
-};
-
 template<typename abst_int_value>
 struct expression_result {
 	abst_int_value lo;

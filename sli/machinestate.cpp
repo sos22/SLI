@@ -46,10 +46,10 @@ MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(Addr
 	return work;
 }
 
-template <typename ait>
-MachineState<ait> *MachineState<ait>::initialMachineState(LogReader *lf, LogFile::ptr ptr, LogFile::ptr *end)
+template <>
+MachineState<unsigned long> *MachineState<unsigned long>::initialMachineState(LogReader *lf, LogFile::ptr ptr, LogFile::ptr *end)
 {
-	MachineState<ait> *work;
+	MachineState<unsigned long> *work;
 	LogRecord *lr;
 
 	lr = lf->read(ptr, &ptr);
@@ -140,9 +140,6 @@ template <typename ait> VexAllocTypeWrapper<MachineState<ait> > MachineState<ait
 	template bool MachineState<t>::crashed() const;			\
 	template MachineState<t> *MachineState<t>::initialMachineState(AddressSpace *as, \
 								       const LogRecordInitialSighandlers &handlers); \
-	template MachineState<t> *MachineState<t>::initialMachineState(LogReader *lf, \
-								       LogFile::ptr ptr, \
-								       LogFile::ptr *end); \
 	template void MachineState<t>::dumpSnapshot(LogWriter *lw) const; \
 	template VexAllocTypeWrapper<MachineState<t> > MachineState<t>::allocator 
 

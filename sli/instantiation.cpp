@@ -3,6 +3,9 @@
 #include "interpreter.cpp"
 #include "syscalls.cpp"
 
-MK_MACHINE_STATE(unsigned long);
-MK_INTERPRETER(unsigned long);
-MK_THREAD(unsigned long);
+#define MK_INTERP(t)				\
+	MK_MACHINE_STATE(t);			\
+	MK_INTERPRETER(t);			\
+	MK_THREAD(t)
+
+MK_INTERP(unsigned long);

@@ -2,7 +2,7 @@ targets="slir crop"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{logreader,addressspace,syscalls,transform_expr,replay}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{machinestate,vamap,pmap,memorychunk,util,memtracepool,memlog}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{vamap,pmap,memorychunk,util,memtracepool,memlog}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{logwriter,memorytrace,debug,instantiation}.cpp
 
 	cat <<EOF
