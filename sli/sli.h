@@ -163,7 +163,7 @@ public:
 	}
 };
 
-class ThreadEvent;
+template <typename ait> class ThreadEvent;
 class LogRecordInitialRegisters;
 class LogWriter;
 class LogRecordVexThreadState;
@@ -174,7 +174,7 @@ template <typename abst_int_type>
 class Thread {
 	void translateNextBlock(AddressSpace *addrSpace);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
-	ThreadEvent *do_dirty_call(IRDirty *details);
+	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details);
 	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_calculate_rflags_c(expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
@@ -205,7 +205,7 @@ private:
 	Thread();
 	~Thread();
 public:
-	ThreadEvent *runToEvent(AddressSpace *addrSpace);
+	ThreadEvent<abst_int_type> *runToEvent(AddressSpace *addrSpace);
 
 	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters &initRegs);
 	Thread<abst_int_type> *fork(unsigned newPid);
@@ -586,7 +586,7 @@ class LogWriter {
 public:
 	virtual void append(const LogRecord &lr) = 0;
 	virtual ~LogWriter() {}
-	InterpretResult recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent *evt);
+	InterpretResult recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent<unsigned long> *evt);
 };
 
 class LogFileWriter : public LogWriter {
@@ -624,7 +624,7 @@ public:
 	static LogReader::ptr startPtr() { return mkPtr(0); }
 	MemLog *dupeSelf() const;
 	LogRecord *read(ptr startPtr, ptr *outPtr) const;
-	InterpretResult recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent *evt);
+	InterpretResult recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent<unsigned long> *evt);
 	void dump() const;
 
 	void append(const LogRecord &lr);
@@ -635,35 +635,38 @@ public:
 	void visit(HeapVisitor &hv) const;
 };
 
+template <typename ait>
 class ThreadEvent : public Named {
 public:
 	/* Replay the event using information in the log record */
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms) = 0;
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL) = 0;
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms) = 0;
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL) = 0;
 	virtual ~ThreadEvent() {};
 };
 
-class RdtscEvent : public ThreadEvent {
+template <typename ait>
+class RdtscEvent : public ThreadEvent<ait> {
 	IRTemp tmp;
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL);
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
 	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
 };
 
-class LoadEvent : public ThreadEvent {
+template <typename ait>
+class LoadEvent : public ThreadEvent<ait> {
 	friend class MemoryAccessLoad;
 	IRTemp tmp;
-	unsigned long addr;
+	ait addr;
 	unsigned size;
 protected:
 	virtual char *mkName() const { return my_asprintf("load(%d, 0x%lx, %d)", tmp, addr, size); }
 public:
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL);
-	LoadEvent(IRTemp _tmp, unsigned long _addr, unsigned _size) :
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	LoadEvent(IRTemp _tmp, ait _addr, unsigned _size) :
 		tmp(_tmp),
 		addr(_addr),
 		size(_size)
@@ -671,37 +674,39 @@ public:
 	}
 };
 
-class StoreEvent : public ThreadEvent {
+template <typename ait>
+class StoreEvent : public ThreadEvent<ait> {
 	friend class MemoryAccessStore;
-	unsigned long addr;
+	ait addr;
 	unsigned size;
 	void *data;
 protected:
 	virtual char *mkName() const { return my_asprintf("store(0x%lx, %d)", addr, size); }
 public:
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL);
-	StoreEvent(unsigned long addr, unsigned size, const void *data);
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	StoreEvent(ait addr, unsigned size, const void *data);
 	virtual ~StoreEvent();
 };
 
-class InstructionEvent : public ThreadEvent {
+template <typename ait>
+class InstructionEvent : public ThreadEvent<ait> {
 	unsigned long rip;
-	unsigned long reg0;
-	unsigned long reg1;
-	unsigned long reg2;
-	unsigned long reg3;
-	unsigned long reg4;
+	ait reg0;
+	ait reg1;
+	ait reg2;
+	ait reg3;
+	ait reg4;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("footstep(rip =%lx, regs = %lx, %lx, %lx, %lx, %lx",
 				   rip, reg0, reg1, reg2, reg3, reg4);
 	}
 public:
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL);
-	InstructionEvent(unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
-			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4) :
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	InstructionEvent(unsigned long _rip, ait _reg0, ait _reg1,
+			 ait _reg2, ait _reg3, ait _reg4) :
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -715,7 +720,7 @@ public:
 class LogWriter;
 
 template <typename ait>
-class CasEvent : public ThreadEvent {
+class CasEvent : public ThreadEvent<ait> {
 	IRTemp dest;
 	expression_result<ait> addr;
 	expression_result<ait> data;
@@ -750,28 +755,30 @@ public:
 	}
 };
 
-class SyscallEvent : public ThreadEvent {
+template <typename ait>
+class SyscallEvent : public ThreadEvent<ait> {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall");
 	}
 public:
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL);
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
 };
 
-class SignalEvent : public ThreadEvent {
+template <typename ait>
+class SignalEvent : public ThreadEvent<ait> {
 	unsigned signr;
-	unsigned long virtaddr;
+	ait virtaddr;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d, va = %lx)", signr,
 				   virtaddr);
 	}
 public:
-	virtual void replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms);
-	virtual InterpretResult fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr = NULL);
-	SignalEvent(unsigned _signr, unsigned long _va) :
+	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	SignalEvent(unsigned _signr, ait _va) :
 		signr(_signr),
 		virtaddr(_va)
 	{
@@ -794,7 +801,7 @@ public:
 };
 
 class LogRecordLoad : public LogRecord {
-	friend class LoadEvent;
+	friend class LoadEvent<unsigned long>;
 	friend class CasEvent<unsigned long>;
 	friend class MemoryAccessLoad;
 	unsigned size;
@@ -831,7 +838,7 @@ protected:
 		return my_asprintf("%d: Load(%lx:%lx)", tid._tid(), addr, addr + size);
 	}
 public:
-	MemoryAccessLoad(ThreadId tid, const class LoadEvent &evt)
+	MemoryAccessLoad(ThreadId tid, const class LoadEvent<unsigned long> &evt)
 		: MemoryAccess(tid, evt.addr, evt.size)
 	{
 	}
@@ -843,7 +850,7 @@ public:
 };
 
 class LogRecordStore : public LogRecord {
-	friend class StoreEvent;
+	friend class StoreEvent<unsigned long>;
 	friend class CasEvent<unsigned long>;
 	friend class MemoryAccessStore;
 	unsigned size;
@@ -880,7 +887,7 @@ protected:
 		return my_asprintf("%d: Store(%lx:%lx)", tid._tid(), addr, addr + size);
 	}
 public:
-	MemoryAccessStore(ThreadId tid, const class StoreEvent &evt)
+	MemoryAccessStore(ThreadId tid, const class StoreEvent<unsigned long> &evt)
 		: MemoryAccess(tid, evt.addr, evt.size)
 	{
 	}
@@ -1017,7 +1024,7 @@ public:
 };
 
 class LogRecordRdtsc : public LogRecord {
-	friend class RdtscEvent;
+	friend class RdtscEvent<unsigned long>;
 	unsigned long tsc;
 protected:
 	char *mkName() const {
@@ -1158,8 +1165,6 @@ public:
 		return new LogRecordVexThreadState(thread(), statement_nr, tmp);
 	}
 };
-
-class ThreadEvent;
 
 class AddressSpace {
 	unsigned long brkptr;

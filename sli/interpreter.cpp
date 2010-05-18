@@ -128,7 +128,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 }
 
 template<typename ait>
-ThreadEvent *
+ThreadEvent<ait> *
 Thread<ait>::do_dirty_call(IRDirty *details)
 {
 	struct expression_result<ait> args[6];
@@ -146,17 +146,17 @@ Thread<ait>::do_dirty_call(IRDirty *details)
 	assert(!details->cee->regparms);
 
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
-		return new RdtscEvent(details->tmp);
+		return new RdtscEvent<ait>(details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		return new LoadEvent(details->tmp, args[0].lo, 1);
+		return new LoadEvent<ait>(details->tmp, args[0].lo, 1);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		return new LoadEvent(details->tmp, args[0].lo, 2);
+		return new LoadEvent<ait>(details->tmp, args[0].lo, 2);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		return new LoadEvent(details->tmp, args[0].lo, 4);
+		return new LoadEvent<ait>(details->tmp, args[0].lo, 4);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		return new LoadEvent(details->tmp, args[0].lo, 8);
+		return new LoadEvent<ait>(details->tmp, args[0].lo, 8);
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
-		return new LoadEvent(details->tmp, args[0].lo, 16);
+		return new LoadEvent<ait>(details->tmp, args[0].lo, 16);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;
@@ -1023,7 +1023,7 @@ void Thread<ait>::translateNextBlock(AddressSpace *addrSpace)
 }
 
 template<typename ait>
-ThreadEvent *
+ThreadEvent<ait> *
 Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 {
 	while (1) {
@@ -1031,7 +1031,7 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 			try {
 				translateNextBlock(addrSpace);
 			} catch (BadMemoryException excn) {
-				return new SignalEvent(11, excn.ptr);
+				return new SignalEvent<ait>(11, excn.ptr);
 			}
 			assert(currentIRSB);
 		}
@@ -1044,12 +1044,12 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 				break;
 			case Ist_IMark:
 #define GR(x) regs.get_reg(REGISTER_IDX(x))
-				return new InstructionEvent(regs.rip(),
-							    GR(FOOTSTEP_REG_0_NAME),
-							    GR(FOOTSTEP_REG_1_NAME),
-							    regs.get_reg(REGISTER_IDX(XMM0) + 1),
-							    GR(FOOTSTEP_REG_3_NAME),
-							    GR(FOOTSTEP_REG_4_NAME));
+				return new InstructionEvent<ait>(regs.rip(),
+								 GR(FOOTSTEP_REG_0_NAME),
+								 GR(FOOTSTEP_REG_1_NAME),
+								 regs.get_reg(REGISTER_IDX(XMM0) + 1),
+								 GR(FOOTSTEP_REG_3_NAME),
+								 GR(FOOTSTEP_REG_4_NAME));
 #undef GR
 			case Ist_AbiHint:
 				break;
@@ -1080,7 +1080,7 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 					ppIRStmt(stmt);
 					throw NotImplementedException();
 				}
-				return new StoreEvent(addr.lo, size, dbuf);
+				return new StoreEvent<ait>(addr.lo, size, dbuf);
 			}
 
 			case Ist_CAS: {
@@ -1149,8 +1149,7 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 			}
 
 			case Ist_Dirty: {
-				ThreadEvent *evt;
-				evt = do_dirty_call(stmt->Ist.Dirty.details);
+				ThreadEvent<ait> *evt = do_dirty_call(stmt->Ist.Dirty.details);
 				if (evt)
 					return evt;
 				break;
@@ -1192,7 +1191,7 @@ Thread<ait>::runToEvent(struct AddressSpace *addrSpace)
 		}
 		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
 			currentIRSB = NULL;
-			return new SyscallEvent();
+			return new SyscallEvent<ait>();
 		}
 
 finished_block:
@@ -1209,16 +1208,16 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 	if (thr->cannot_make_progress)
 		return InterpretResultIncomplete;
 	while (max_events) {
-		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent> k_evt(evt);
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
+		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
 
 		InterpretResult res = evt->fake(thr, currentState);
 		if (res != InterpretResultContinue) {
 			return res;
 		}
-		if (LoadEvent *lr = dynamic_cast<LoadEvent *>(evt)) {
-			work->push_back(new MemoryAccessLoad(tid, *lr));
-		} else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
+		if (LoadEvent<ait> *lr = dynamic_cast<LoadEvent <ait> * > (evt)) {
+		        work->push_back(new MemoryAccessLoad(tid, *lr));
+	        } else if (StoreEvent<ait> *sr = dynamic_cast<StoreEvent<ait> *>(evt)) {
 			work->push_back(new MemoryAccessStore(tid, *sr));
 		}
 		max_events--;
@@ -1232,11 +1231,11 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_access
 {
         Thread<ait> *thr = currentState->findThread(tid);
         while (1) {
-                ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
-                PointerKeeper<ThreadEvent> k_evt(evt);
+                ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
+                PointerKeeper<ThreadEvent<ait> > k_evt(evt);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
-		if (dynamic_cast<LoadEvent *>(evt) ||
-		    dynamic_cast<StoreEvent *>(evt)) {
+		if (dynamic_cast<LoadEvent<ait> *>(evt) ||
+		    dynamic_cast<StoreEvent<ait> *>(evt)) {
 			nr_accesses--;
 			if (nr_accesses == 0)
 				return;
@@ -1254,8 +1253,8 @@ void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter *output, unsigned ma
 	bool have_event_limit = max_events != 0;
 	Thread<ait> *thr = currentState->findThread(tid);
 	while (!have_event_limit || max_events) {
-		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent> k_evt(evt);
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
+		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {
 			thr->cannot_make_progress = true;
@@ -1278,8 +1277,8 @@ void Interpreter<ait>::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 			lw->append(*lr);
 		PointerKeeper<LogRecord> k_lr(lr);
 		Thread<ait> *thr = currentState->findThread(lr->thread());
-		ThreadEvent *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent> k_evt(evt);
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
+		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
 
 #if 0
 		printf("Event %s in thread %d\n",
@@ -1307,7 +1306,7 @@ void Interpreter<ait>::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 }
 
 #define MK_INTERPRETER(t)						\
-	template ThreadEvent *Thread<t>::runToEvent(AddressSpace *addrSpace); \
+	template ThreadEvent<t> *Thread<t>::runToEvent(AddressSpace *addrSpace); \
 	template void Interpreter<t>::runToFailure(ThreadId tid,	\
 						   LogWriter *output,	\
 						   unsigned max_events); \

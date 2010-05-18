@@ -277,11 +277,11 @@ void ContinueCommand::doIt(MachineState<unsigned long> *ms)
 		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
         while (1) {
-                ThreadEvent *evt = thr->runToEvent(ms->addressSpace);
-                PointerKeeper<ThreadEvent> k_evt(evt);
+                ThreadEvent<unsigned long> *evt = thr->runToEvent(ms->addressSpace);
+                PointerKeeper<ThreadEvent<unsigned long> > k_evt(evt);
                 InterpretResult res = evt->fake(thr, ms);
 
-		if (dynamic_cast<SignalEvent *>(evt) ||
+		if (dynamic_cast<SignalEvent<unsigned long> *>(evt) ||
 		    res != InterpretResultContinue)
 			break;
 	}

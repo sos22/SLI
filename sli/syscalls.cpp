@@ -251,7 +251,8 @@ replay_syscall(const LogRecordSyscall *lrs,
 	thr->regs.set_reg(REGISTER_IDX(RAX), res);
 }
 
-InterpretResult SyscallEvent::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
+template <>
+InterpretResult SyscallEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
 {
 	unsigned long res;
 	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
