@@ -7,9 +7,11 @@
 #define PAGE_MASK (~4095)
 
 template <typename ait>
-void AddressSpace<ait>::allocateMemory(unsigned long start, unsigned long size,
+void AddressSpace<ait>::allocateMemory(ait _start, ait _size,
 				       VAMap::Protection prot, VAMap::AllocFlags flags)
 {
+	unsigned long start = force(_start);
+	unsigned long size = force(_size);
 	assert(!(start & ~PAGE_MASK));
 	assert(!(size & ~PAGE_MASK));
 
@@ -24,29 +26,30 @@ void AddressSpace<ait>::allocateMemory(unsigned long start, unsigned long size,
 }
 
 template <typename ait>
-void AddressSpace<ait>::releaseMemory(unsigned long start, unsigned long size)
+void AddressSpace<ait>::releaseMemory(ait start, ait size)
 {
-	vamap->unmap(start, size);
+	vamap->unmap(force(start), force(size));
 }
 
 template <typename ait>
-void AddressSpace<ait>::protectMemory(unsigned long start, unsigned long size,
-				 VAMap::Protection prot)
+void AddressSpace<ait>::protectMemory(ait start, ait size,
+				      VAMap::Protection prot)
 {
-	vamap->protect(start, size, prot);
+	vamap->protect(force(start), force(size), prot);
 }
 
 template <typename ait>
-void AddressSpace<ait>::writeMemory(unsigned long start, unsigned size,
+void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
 				    const void *contents, bool ignore_protection,
 				    const Thread<ait> *thr)
 {
+	unsigned long start = force(_start);
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
 			if (!ignore_protection && !prot.writable)
-				throw BadMemoryException<unsigned long>(true, start, size);
+				throw BadMemoryException<ait>(true, start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
@@ -59,7 +62,7 @@ void AddressSpace<ait>::writeMemory(unsigned long start, unsigned size,
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
 			contents = (const void *)((unsigned long)contents + to_copy_this_time);
-		} else if (thr && extendStack(start, thr->regs.rsp())) {
+		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
 			continue;
 		} else {
 			throw BadMemoryException<unsigned long>(true, start, size);
@@ -68,10 +71,11 @@ void AddressSpace<ait>::writeMemory(unsigned long start, unsigned size,
 }
 
 template <typename ait>
-void AddressSpace<ait>::readMemory(unsigned long start, unsigned size,
+void AddressSpace<ait>::readMemory(ait _start, unsigned size,
 				   void *contents, bool ignore_protection,
 				   const Thread<ait> *thr)
 {
+	unsigned long start = force(_start);
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -90,7 +94,7 @@ void AddressSpace<ait>::readMemory(unsigned long start, unsigned size,
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
 			contents = (void *)((unsigned long)contents + to_copy_this_time);
-		} else if (thr && extendStack(start, thr->regs.rsp())) {
+		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
 			/* This is what Linux does, but it doesn't
 			   make a great deal of sense: any time you
 			   hit this the program will definitely have
@@ -105,9 +109,10 @@ void AddressSpace<ait>::readMemory(unsigned long start, unsigned size,
 }
 
 template <typename ait>
-bool AddressSpace<ait>::isAccessible(unsigned long start, unsigned size,
+bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 				     bool isWrite, const Thread<ait> *thr)
 {
+	unsigned long start = force(_start);
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -126,7 +131,7 @@ bool AddressSpace<ait>::isAccessible(unsigned long start, unsigned size,
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
-		} else if (extendStack(start, thr->regs.rsp())) {
+		} else if (extendStack(start, force(thr->regs.rsp()))) {
 			continue;
 		} else {
 			return false;
@@ -136,8 +141,9 @@ bool AddressSpace<ait>::isAccessible(unsigned long start, unsigned size,
 }
 
 template <typename ait>
-unsigned long AddressSpace<ait>::setBrk(unsigned long newBrk)
+unsigned long AddressSpace<ait>::setBrk(ait _newBrk)
 {
+	unsigned long newBrk = force(_newBrk);
 	unsigned long newBrkMap = (newBrk + 4095) & PAGE_MASK;
 
 	if (newBrk != 0) {
@@ -153,8 +159,9 @@ unsigned long AddressSpace<ait>::setBrk(unsigned long newBrk)
 }
 
 template <typename ait>
-AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(unsigned long initialBrk)
+AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(ait _initialBrk)
 {
+	unsigned long initialBrk = force(_initialBrk);
 	AddressSpace<ait> *work = allocator.alloc();
 	memset(work, 0, sizeof(*work));
 	work->brkptr = initialBrk;
@@ -221,20 +228,20 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 	VAMap::AllocFlags alf(false);
 	last_va = 0;
 	while (vamap->findNextMapping(last_va, &next_va, &pa, &prot, &alf)) {
-		lw->append(LogRecordAllocateMemory<unsigned long>(ThreadId(0),
-								  next_va,
-								  MemoryChunk::size,
-								  (unsigned long)prot,
-								  (unsigned long)alf));
+		lw->append(LogRecordAllocateMemory<ait>(ThreadId(0),
+							next_va,
+							MemoryChunk::size,
+							(unsigned long)prot,
+							(unsigned long)alf));
 		unsigned long off;
 		MemoryChunk *mc = pmap->lookup(pa, &off);
 		assert(off == 0);
 		void *buf = malloc(MemoryChunk::size);
 		mc->read(0, buf, MemoryChunk::size);
-		lw->append(LogRecordMemory<unsigned long>(ThreadId(0),
-							  MemoryChunk::size,
-							  next_va,
-							  buf));
+		lw->append(LogRecordMemory<ait>(ThreadId(0),
+						MemoryChunk::size,
+						next_va,
+						buf));
 		last_va = next_va + MemoryChunk::size;
 	}
 }

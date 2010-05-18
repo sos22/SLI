@@ -8,6 +8,7 @@
 #include "memtracepool.cpp"
 #include "memorytrace.cpp"
 #include "addressspace.cpp"
+#include "logreader.cpp"
 
 #define MK_INTERP(t)				\
 	MK_MACHINE_STATE(t);			\
@@ -17,6 +18,149 @@
 	MK_MEMTRACE_POOL(t);			\
 	MK_MEMTRACE(t);				\
 	MK_LOGWRITER(t);			\
-	MK_ADDRESS_SPACE(t)
+	MK_ADDRESS_SPACE(t);			\
+	MK_LOGREADER(t)
 
+static unsigned long force(unsigned long x)
+{
+	return x;
+}
+
+static unsigned long signed_shift_right(unsigned long x, unsigned long y)
+{
+	return (long)x >> y;
+}
+
+static unsigned long signed_le(unsigned long x, unsigned long y)
+{
+	return (long)x <= (long)y;
+}
+	
+static unsigned long signed_l(unsigned long x, unsigned long y)
+{
+	return (long)x < (long)y;
+}
+	
 MK_INTERP(unsigned long);
+
+struct abstract_interpret_value {
+	unsigned long v;
+	abstract_interpret_value(unsigned long _v) : v(_v) {}
+	abstract_interpret_value() : v(0) {}
+};
+
+static unsigned long force(abstract_interpret_value aiv)
+{
+	return aiv.v;
+}
+
+#define OP(x)								\
+	abstract_interpret_value operator x(const abstract_interpret_value &aiv, \
+					    const abstract_interpret_value & cnt) \
+	{								\
+		abstract_interpret_value res;				\
+		res.v = aiv.v x cnt.v;					\
+		return res;						\
+	}
+
+OP(<<)
+OP(>>)
+OP(&)
+OP(|)
+OP(^)
+OP(+)
+OP(*)
+OP(/)
+OP(%)
+OP(-)
+OP(>=)
+OP(>)
+OP(<)
+OP(<=)
+OP(==)
+OP(!=)
+OP(&&)
+OP(||)
+
+abstract_interpret_value operator !(const abstract_interpret_value &aiv)
+{
+	abstract_interpret_value res;
+	res.v = !aiv.v;
+	return res;
+}
+
+abstract_interpret_value operator ~(const abstract_interpret_value &aiv)
+{
+	abstract_interpret_value res;
+	res.v = ~aiv.v;
+	return res;
+}
+
+static abstract_interpret_value signed_shift_right(abstract_interpret_value x, abstract_interpret_value y)
+{
+	abstract_interpret_value v;
+	v.v = (long)x.v >> y.v;
+	return v;
+}
+
+static abstract_interpret_value signed_le(abstract_interpret_value x, abstract_interpret_value y)
+{
+	abstract_interpret_value v;
+	v.v = (long)x.v <= (long)y.v;
+	return v;
+}
+	
+static abstract_interpret_value signed_l(abstract_interpret_value x, abstract_interpret_value y)
+{
+	abstract_interpret_value v;
+	v.v = (long)x.v < (long)y.v;
+	return v;
+}
+	
+abstract_interpret_value operator &=(abstract_interpret_value &lhs,
+				     const abstract_interpret_value &rhs)
+{
+	lhs.v &= rhs.v;
+	return lhs;
+}
+
+abstract_interpret_value operator |=(abstract_interpret_value &lhs,
+				     const abstract_interpret_value &rhs)
+{
+	lhs.v &= rhs.v;
+	return lhs;
+}
+
+abstract_interpret_value operator ^=(abstract_interpret_value &lhs,
+				     const abstract_interpret_value &rhs)
+{
+	lhs.v &= rhs.v;
+	return lhs;
+}
+
+template <>
+void mulls64(struct expression_result<abstract_interpret_value> *dest,
+	     const struct expression_result<abstract_interpret_value> &src1,
+	     const struct expression_result<abstract_interpret_value> &src2)
+{
+	expression_result<unsigned long> d, s1, s2;
+	s1.lo = src1.lo.v;
+	s1.hi = src1.hi.v;
+	s2.lo = src2.lo.v;
+	s2.hi = src2.hi.v;
+
+	mulls64(&d, s1, s2);
+	dest->lo.v = d.lo;
+	dest->hi.v = d.hi;
+}
+
+template<>
+RegisterSet<abstract_interpret_value>::RegisterSet(const VexGuestAMD64State &r)
+{
+	for (unsigned x = 0;
+	     x < NR_REGS;
+	     x++)
+		registers[x] = abstract_interpret_value( ((unsigned long *)&r)[x] );
+}
+
+MK_INTERP(abstract_interpret_value);

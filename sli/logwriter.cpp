@@ -18,8 +18,8 @@ typedef struct sigaction sigaction_t;
 
 #include "ppres.h"
 
-template <>
-void *LogRecord<unsigned long>::marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const
+template <typename ait>
+void *LogRecord<ait>::marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const
 {
 	*sz = sizeof(record_header) + psize;
 	*r = malloc(*sz);
@@ -29,11 +29,11 @@ void *LogRecord<unsigned long>::marshal(unsigned cls, unsigned psize, unsigned *
 	return (void *)((unsigned long)*r + sizeof(record_header));
 }
 
-template <>
-void *LogRecordFootstep<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordFootstep<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	footstep_record *fr = (footstep_record *)LogRecord<unsigned long>::marshal(RECORD_footstep, sizeof(footstep_record), sz, &r);
+	footstep_record<ait> *fr = (footstep_record<ait> *)LogRecord<ait>::marshal(RECORD_footstep, sizeof(footstep_record<ait>), sz, &r);
 	fr->rip = rip;
 	fr->FOOTSTEP_REG_0_NAME = reg0;
 	fr->FOOTSTEP_REG_1_NAME = reg1;
@@ -43,18 +43,18 @@ void *LogRecordFootstep<unsigned long>::marshal(unsigned *sz) const
 	return r;
 }
 
-template<>
-void *LogRecordSyscall<unsigned long>::marshal(unsigned *sz) const
+template<typename ait>
+void *LogRecordSyscall<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	syscall_record *sr = (syscall_record *)LogRecord<unsigned long>::marshal(RECORD_syscall, sizeof(syscall_record), sz, &r);
+	syscall_record<ait> *sr = (syscall_record<ait> *)LogRecord<ait>::marshal(RECORD_syscall, sizeof(syscall_record<ait>), sz, &r);
 	sr->syscall_nr = sysnr;
-	if ((long)res >= 0 || (long)res < -4096) {
+	if ((long)force(res) >= 0 || (long)force(res) < -4096) {
 		sr->syscall_res._isError = false;
-		sr->syscall_res._val = res;
+		sr->syscall_res._val = force(res);
 	} else {
 		sr->syscall_res._isError = true;
-		sr->syscall_res._val = -res;
+		sr->syscall_res._val = -force(res);
 	}
 	sr->arg1 = arg1;
 	sr->arg2 = arg2;
@@ -62,36 +62,36 @@ void *LogRecordSyscall<unsigned long>::marshal(unsigned *sz) const
 	return r;
 }
 
-template <>
-void *LogRecordMemory<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordMemory<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	memory_record *mr = (memory_record *)LogRecord<unsigned long>::marshal(RECORD_memory,
-									       sizeof(memory_record) + size,
+	memory_record<ait> *mr = (memory_record<ait> *)LogRecord<ait>::marshal(RECORD_memory,
+									       sizeof(memory_record<ait>) + size,
 									       sz,
 									       &r);
-	mr->ptr = (void *)start;
+	mr->ptr = start;
 	memcpy(mr + 1, contents, size);
 	return r;
 }
 
-template <>
-void *LogRecordRdtsc<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordRdtsc<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	rdtsc_record *rr = (rdtsc_record *)LogRecord<unsigned long>::marshal(RECORD_rdtsc,
-									     sizeof(rdtsc_record),
+	rdtsc_record<ait> *rr = (rdtsc_record<ait> *)LogRecord<ait>::marshal(RECORD_rdtsc,
+									     sizeof(rdtsc_record<ait>),
 									     sz,
 									     &r);
 	rr->stashed_tsc = tsc;
 	return r;
 }
 
-template <>
-void *LogRecordLoad<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordLoad<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	mem_read_record *lr = (mem_read_record *)LogRecord<unsigned long>::marshal(RECORD_mem_read,
+	mem_read_record<ait> *lr = (mem_read_record<ait> *)LogRecord<ait>::marshal(RECORD_mem_read,
 										   sizeof(*lr) + size,
 										   sz,
 										   &r);
@@ -100,11 +100,11 @@ void *LogRecordLoad<unsigned long>::marshal(unsigned *sz) const
 	return r;
 }
 
-template <>
-void *LogRecordStore<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordStore<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	mem_write_record *sr = (mem_write_record *)LogRecord<unsigned long>::marshal(RECORD_mem_write,
+	mem_write_record<ait> *sr = (mem_write_record<ait> *)LogRecord<ait>::marshal(RECORD_mem_write,
 										     sizeof(*sr) + size,
 										     sz,
 										     &r);
@@ -113,11 +113,11 @@ void *LogRecordStore<unsigned long>::marshal(unsigned *sz) const
 	return r;
 }
 
-template <>
-void *LogRecordSignal<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordSignal<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	signal_record *sr = (signal_record *)LogRecord<unsigned long>::marshal(RECORD_signal,
+	signal_record<ait> *sr = (signal_record<ait> *)LogRecord<ait>::marshal(RECORD_signal,
 									       sizeof(*sr),
 									       sz,
 									       &r);
@@ -128,11 +128,11 @@ void *LogRecordSignal<unsigned long>::marshal(unsigned *sz) const
 	return r;
 }
 
-template <>
-void *LogRecordAllocateMemory<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordAllocateMemory<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	allocate_memory_record *amr = (allocate_memory_record *)LogRecord<unsigned long>::marshal(RECORD_allocate_memory,
+	allocate_memory_record<ait> *amr = (allocate_memory_record<ait> *)LogRecord<ait>::marshal(RECORD_allocate_memory,
 												  sizeof(*amr),
 												  sz,
 												  &r);
@@ -143,23 +143,23 @@ void *LogRecordAllocateMemory<unsigned long>::marshal(unsigned *sz) const
 	return r;
 }
 
-template <>
-void *LogRecordInitialRegisters<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordInitialRegisters<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	VexGuestAMD64State *s = (VexGuestAMD64State *)LogRecord<unsigned long>::marshal(RECORD_initial_registers,
-											sizeof(*s),
-											sz,
-											&r);
+	VexGuestAMD64State *s = (VexGuestAMD64State *)LogRecord<ait>::marshal(RECORD_initial_registers,
+									      sizeof(*s),
+									      sz,
+									      &r);
 	*s = regs;
 	return r;
 }
 
-template <>
-void *LogRecordInitialBrk<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordInitialBrk<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	initial_brk_record *ibr = (initial_brk_record *)LogRecord<unsigned long>::marshal(RECORD_initial_brk,
+	initial_brk_record<ait> *ibr = (initial_brk_record<ait> *)LogRecord<ait>::marshal(RECORD_initial_brk,
 											  sizeof(*ibr),
 											  sz,
 											  &r);
@@ -167,28 +167,28 @@ void *LogRecordInitialBrk<unsigned long>::marshal(unsigned *sz) const
 	return r;
 }
 
-template <>
-void *LogRecordInitialSighandlers<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordInitialSighandlers<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	initial_sighandlers_record *isr =
-		(initial_sighandlers_record *)LogRecord<unsigned long>::marshal(RECORD_initial_sighandlers,
-										sizeof(*isr),
-										sz,
-										&r);
+	initial_sighandlers_record<ait> *isr =
+		(initial_sighandlers_record<ait> *)LogRecord<ait>::marshal(RECORD_initial_sighandlers,
+									   sizeof(*isr),
+									   sz,
+									   &r);
 	memcpy(isr->handlers, handlers, sizeof(isr->handlers));
 	return r;
 }
 
-template <>
-void *LogRecordVexThreadState<unsigned long>::marshal(unsigned *sz) const
+template <typename ait>
+void *LogRecordVexThreadState<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	vex_thread_state_record *vtsr =
-		(vex_thread_state_record *)LogRecord<unsigned long>::marshal(RECORD_vex_thread_state,
-									     sizeof(*vtsr) + 16 * tmp.nr_entries,
-									     sz,
-									     &r);
+	vex_thread_state_record<ait> *vtsr =
+		(vex_thread_state_record<ait> *)LogRecord<ait>::marshal(RECORD_vex_thread_state,
+									sizeof(*vtsr) + 16 * tmp.nr_entries,
+									sz,
+									&r);
 	vtsr->statement_nr = statement_nr;
 	for (unsigned x = 0; x < tmp.nr_entries; x++) {
 		vtsr->temporaries[x*2] = tmp.arr[x].lo;
@@ -262,10 +262,10 @@ LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, unsigned _st
 	*root_data = this;	
 }
 
-template <>
-void SignalHandlers<unsigned long>::dumpSnapshot(LogWriter<unsigned long> *lw) const
+template <typename ait>
+void SignalHandlers<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 {
-	lw->append(LogRecordInitialSighandlers<unsigned long>(ThreadId(0), handlers));
+	lw->append(LogRecordInitialSighandlers<ait>(ThreadId(0), handlers));
 }
 
 #define MK_LOGWRITER(t)							\

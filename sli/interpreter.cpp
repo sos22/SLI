@@ -49,7 +49,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 		regs->set_reg(REGISTER_IDX(RDX), _d);	\
 	} while (0)
 
-	switch (0xFFFFFFFF & regs->get_reg(REGISTER_IDX(RAX))) {
+	switch (force(ait(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RAX)))) {
 	case 0x00000000:
 		SET_ABCD(0x0000000a, 0x756e6547, 0x6c65746e, 0x49656e69);
 		break;
@@ -63,7 +63,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
 		break;
 	case 0x00000004: {
-		switch (0xFFFFFFFF & regs->get_reg(REGISTER_IDX(RCX))) {
+		switch (force(ait(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RCX)))) {
 		case 0x00000000: SET_ABCD(0x04000121, 0x01c0003f,
 					  0x0000003f, 0x00000001); break;
 		case 0x00000001: SET_ABCD(0x04000122, 0x01c0003f,
@@ -136,7 +136,7 @@ Thread<ait>::do_dirty_call(IRDirty *details)
 
 	if (details->guard) {
 		expression_result<ait> guard = eval_expression(details->guard);
-		if (!guard.lo)
+		if (force(!guard.lo))
 			return NULL;
 	}
 	for (x = 0; details->args[x]; x++) {
@@ -171,14 +171,14 @@ calculate_condition_flags_XXX(ait op,
 			      ait dep1,
 			      ait dep2,
 			      ait ndep,
-			      unsigned &cf,
-			      unsigned &zf,
-			      unsigned &sf,
-			      unsigned &of)
+			      ait &cf,
+			      ait &zf,
+			      ait &sf,
+			      ait &of)
 {
 	cf = zf = sf = of = 0;
 
-	switch (op) {
+	switch (force(op)) {
 	case AMD64G_CC_OP_COPY:
 		cf = dep1;
 		zf = dep1 >> 6;
@@ -186,59 +186,62 @@ calculate_condition_flags_XXX(ait op,
 		of = dep1 >> 11;
 		break;
 
-#define DO_ACT(name, type_tag, type, bits)				\
+#define DO_ACT(name, type_tag, bits)					\
 		case AMD64G_CC_OP_ ## name ## type_tag:			\
-			ACTIONS_ ## name (type, bits);		        \
+			ACTIONS_ ## name (bits);		        \
 		        break
 #define ACTION(name)							\
-		DO_ACT(name, B, unsigned char, 7);			\
-		DO_ACT(name, W, unsigned short, 15);			\
-		DO_ACT(name, L, unsigned, 31);		                \
-		DO_ACT(name, Q, unsigned long, 63)
-#define ACTIONS_ADD(type, bits)                                         \
+		DO_ACT(name, B, 7);					\
+		DO_ACT(name, W, 15);					\
+		DO_ACT(name, L, 31);					\
+		DO_ACT(name, Q, 63)
+/* A shift of 64 bits in a 64 bit type is undefined, so we can't just
+   go (1ul << 64).  However, (1ul << 63) * 2 does the right thing. */
+#define MASK(bits) ((1ul << bits) * 2 - 1)
+#define ACTIONS_ADD(bits)						\
 		do {							\
-			type res;					\
-			res = dep1 + dep2;				\
-			cf = res < (type)dep1;				\
+			ait res;					\
+			res = (dep1 + dep2) & MASK(bits);		\
+			cf = res < (dep1 & MASK(bits));			\
 			zf = (res == 0);				\
 			sf = (res >> bits);				\
 			of = (~(dep1 ^ dep2) &				\
 			      (dep1 ^ res)) >> bits;			\
 		} while (0)
-#define ACTIONS_SUB(type, bits)						\
+#define ACTIONS_SUB(bits)						\
 		do {							\
-			type res;					\
-			res = dep1 - dep2;				\
-			cf = (type)dep1 < (type)dep2;			\
+			ait res;					\
+			res = (dep1 - dep2) & MASK(bits);		\
+			cf = (dep1 & MASK(bits)) < (dep2 & MASK(bits));	\
 			zf = (res == 0);				\
 			sf = res >> bits;				\
 			of = ( (dep1 ^ dep2) &				\
 			       (dep1 ^ res) ) >> bits;			\
 		} while (0)
-#define ACTIONS_LOGIC(type, bits)		                        \
+#define ACTIONS_LOGIC(bits)						\
 		do {							\
 			cf = 0;						\
-			zf = (type)dep1 == 0;				\
-			sf = (type)dep1 >> bits;			\
+			zf = (dep1 & MASK(bits)) == 0;			\
+			sf = (dep1 & MASK(bits)) >> bits;		\
 			of = 0;						\
 		} while (0)
-#define ACTIONS_INC(type, bits)			                        \
+#define ACTIONS_INC(bits)			                        \
 		do {				                        \
-			type res = dep1;				\
+			ait res = dep1 & MASK(bits);			\
 			cf = ndep & 1;					\
 			zf = (res == 0);				\
 			sf = res >> bits;				\
 			of = res == (1ull << bits);			\
 		} while (0)
-#define ACTIONS_DEC(type, bits)			                        \
+#define ACTIONS_DEC(bits)			                        \
 		do {				                        \
-			type res = dep1;				\
+			ait res = dep1 & MASK(bits);			\
 			cf = ndep & 1;					\
 			zf = (res == 0);				\
 			sf = res >> bits;				\
-			of = (type)(res + 1) == (1ull << bits);		\
+			of = ((res + 1) & MASK(bits)) == (1ull << bits); \
 		} while (0)
-#define ACTIONS_SHR(type, bits)			                        \
+#define ACTIONS_SHR(bits)			                        \
 		do {				                        \
 			cf = dep2 & 1;					\
 			zf = (dep1 == 0);				\
@@ -260,7 +263,7 @@ calculate_condition_flags_XXX(ait op,
 #undef ACTIONS_DEC
 #undef ACTIONS_SHR
 	default:
-		throw NotImplementedException("Strange operation code %ld\n", op);
+		throw NotImplementedException("Strange operation code %ld\n", force(op));
 	}
 
 	of &= 1;
@@ -279,8 +282,8 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 	struct expression_result<ait> dep2     = args[3];
 	struct expression_result<ait> ndep     = args[4];
 	struct expression_result<ait> res;
-	int inv;
-	unsigned cf, zf, sf, of;
+	ait inv;
+	ait cf, zf, sf, of;
 
 	calculate_condition_flags_XXX<ait>(op.lo,
 					   dep1.lo,
@@ -292,7 +295,7 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 					   of);
 
 	inv = condcode.lo & 1;
-	switch (condcode.lo & ~1) {
+	switch (force(condcode.lo & ~1)) {
 	case AMD64CondZ:
 		res.lo = zf;
 		break;
@@ -313,11 +316,10 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 		break;
 
 	default:
-		throw NotImplementedException("Strange cond code %ld (op %ld)\n", condcode.lo, op.lo);
+		throw NotImplementedException("Strange cond code %ld (op %ld)\n", force(condcode.lo), force(op.lo));
 	}
 
-	if (inv)
-		res.lo ^= 1;
+	res.lo ^= inv;
 
 	return res;
 }
@@ -331,7 +333,7 @@ Thread<ait>::do_ccall_calculate_rflags_c(expression_result<ait> *args)
 	struct expression_result<ait> dep2 = args[2];
 	struct expression_result<ait> ndep = args[3];
 	struct expression_result<ait> res;
-	unsigned cf, zf, sf, of;
+	ait cf, zf, sf, of;
 
 	calculate_condition_flags_XXX(op.lo,
 				      dep1.lo,
@@ -353,11 +355,15 @@ Thread<ait>::do_ccall_generic(IRCallee *cee,
 {
 	struct expression_result<ait> res;
 
-	res.lo = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
-				       unsigned long, unsigned long, unsigned long))cee->addr)
-		(rargs[0].lo, rargs[1].lo, rargs[2].lo, rargs[3].lo, rargs[4].lo,
-		 rargs[5].lo);
-	res.hi = 0;
+	res.lo = ait(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
+					 unsigned long, unsigned long, unsigned long))cee->addr)
+		     (force(rargs[0].lo),
+		      force(rargs[1].lo),
+		      force(rargs[2].lo),
+		      force(rargs[3].lo),
+		      force(rargs[4].lo),
+		      force(rargs[5].lo)));
+	res.hi = ait(0);
 	return res;
 }
 
@@ -387,13 +393,16 @@ Thread<ait>::do_ccall(IRCallee *cee,
 
 /* Borrowed from gnucash */
 template <typename ait>
-static void
-mulls64(struct expression_result<ait> *dest, const struct expression_result<ait> &src1,
-	const struct expression_result<ait> &src2)
+static void mulls64(struct expression_result<ait> *dest, const struct expression_result<ait> &src1,
+		    const struct expression_result<ait> &src2);
+
+template <>
+void mulls64(struct expression_result<unsigned long> *dest, const struct expression_result<unsigned long> &src1,
+	     const struct expression_result<unsigned long> &src2)
 {
 	bool isneg = false;
-	ait a = src1.lo;
-	ait b = src2.lo;
+	unsigned long a = src1.lo;
+	unsigned long b = src2.lo;
 	unsigned long a0, a1;
 	unsigned long b0, b1;
 	unsigned long d, d0, d1;
@@ -471,7 +480,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 
 	switch (expr->tag) {
 	case Iex_Get: {
-		unsigned long v1;
+		ait v1;
 		unsigned sub_word_offset = expr->Iex.Get.offset & 7;
 		v1 = read_reg(this,
 			      expr->Iex.Get.offset - sub_word_offset);
@@ -582,7 +591,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = arg1.lo << arg2.lo;
 			break;
 		case Iop_Sar64:
-			dest->lo = (long)arg1.lo >> arg2.lo;
+			dest->lo = signed_shift_right(arg1.lo, arg2.lo);
 			break;
 		case Iop_Shr32:
 		case Iop_Shr64:
@@ -614,10 +623,10 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = arg1.lo <= arg2.lo;
 			break;
 		case Iop_CmpLE64S:
-			dest->lo = (long)arg1.lo <= (long)arg2.lo;
+			dest->lo = signed_le(arg1.lo, arg2.lo);
 			break;
 		case Iop_CmpLT64S:
-			dest->lo = (long)arg1.lo < (long)arg2.lo;
+			dest->lo = signed_l(arg1.lo, arg2.lo);
 			break;
 		case Iop_CmpLT64U:
 			dest->lo = arg1.lo < arg2.lo;
@@ -632,7 +641,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 		}
 		case Iop_MullS32: {
-			dest->lo = (long)(int)arg1.lo * (long)(int)arg2.lo;
+			dest->lo = ait((long)(int)force(arg1.lo) * (long)(int)force(arg2.lo));
 			break;
 		}
 
@@ -641,19 +650,19 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_MullU64: {
-			unsigned long a1, a2, b1, b2;
+			ait a1, a2, b1, b2;
 			dest->lo = arg1.lo * arg2.lo;
-			a1 = arg1.lo & 0xffffffff;
-			a2 = arg1.lo >> 32;
-			b1 = arg2.lo & 0xffffffff;
-			b2 = arg2.lo >> 32;
+			a1 = arg1.lo & ait(0xffffffff);
+			a2 = arg1.lo >> ait(32);
+			b1 = arg2.lo & ait(0xffffffff);
+			b2 = arg2.lo >> ait(32);
 			dest->hi = a2 * b2 +
 				( (a1 * b2 + a2 * b1 +
 				   ((a1 * b1) >> 32)) >> 32);
 			break;
 		}
 		case Iop_32HLto64:
-			dest->lo = (arg1.lo << 32) | arg2.lo;
+			dest->lo = (arg1.lo << ait(32)) | arg2.lo;
 			break;
 
 		case Iop_64HLtoV128:
@@ -664,38 +673,47 @@ Thread<ait>::eval_expression(IRExpr *expr)
 
 		case Iop_DivModU64to32:
 			dest->lo = (arg1.lo / arg2.lo) |
-				((arg1.lo % arg2.lo) << 32);
+				((arg1.lo % arg2.lo) << ait(32));
 			break;
 
 		case Iop_DivModS64to32: {
-			long a1 = arg1.lo;
-			long a2 = arg2.lo;
-			dest->lo = ((a1 / a2) & 0xffffffff) |
-				((a1 % a2) << 32);
+			long a1 = force(arg1.lo);
+			long a2 = force(arg2.lo);
+			dest->lo = ait(((a1 / a2) & 0xffffffff) |
+				       ((a1 % a2) << 32));
 			break;
 		}
 
-		case Iop_DivModU128to64:
+		case Iop_DivModU128to64: {
 			/* arg1 is a I128, arg2 is an I64, result is
 			   128 bits and has the dividend in its low 64
 			   bits and the modulus in its high 64
 			   bits. */
+			unsigned long dlo, dhi;
 			asm ("div %4\n"
-			     : "=a" (dest->lo), "=d" (dest->hi)
-			     : "0" (arg1.lo), "1" (arg1.hi), "r" (arg2.lo));
+			     : "=a" (dlo), "=d" (dhi)
+			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
+			dest->lo = ait(dlo);
+			dest->hi = ait(dhi);
 			break;
+		}
 
-		case Iop_DivModS128to64:
+		case Iop_DivModS128to64: {
+			unsigned long dlo;
+			unsigned long dhi;
 			asm ("idiv %4\n"
-			     : "=a" (dest->lo), "=d" (dest->hi)
-			     : "0" (arg1.lo), "1" (arg1.hi), "r" (arg2.lo));
+			     : "=a" (dlo), "=d" (dhi)
+			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
+			dest->lo = ait(dlo);
+			dest->hi = ait(dhi);
 			break;
+		}
 
 		case Iop_Add32x4:
-			dest->lo = ((arg1.lo + arg2.lo) & 0xffffffff) +
-				((arg1.lo & ~0xfffffffful) + (arg2.lo & ~0xfffffffful));
-			dest->hi = ((arg1.hi + arg2.hi) & 0xffffffff) +
-				((arg1.hi & ~0xfffffffful) + (arg2.hi & ~0xfffffffful));
+			dest->lo = ((arg1.lo + arg2.lo) & ait(0xffffffff)) +
+				((arg1.lo & ait(~0xfffffffful)) + (arg2.lo & ait(~0xfffffffful)));
+			dest->hi = ((arg1.hi + arg2.hi) & ait(0xffffffff)) +
+				((arg1.hi & ait(~0xfffffffful)) + (arg2.hi & ait(~0xfffffffful)));
 			break;
 
 		case Iop_InterleaveLO64x2:
@@ -709,13 +727,13 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_InterleaveLO32x4:
-			dest->lo = (arg2.lo & 0xffffffff) | (arg1.lo << 32);
-			dest->hi = (arg2.lo >> 32) | (arg1.lo & 0xffffffff00000000ul);
+			dest->lo = (arg2.lo & ait(0xffffffff)) | (arg1.lo << ait(32));
+			dest->hi = (arg2.lo >> ait(32)) | (arg1.lo & ait(0xffffffff00000000ul));
 			break;
 
 		case Iop_InterleaveHI32x4:
-			dest->lo = (arg2.hi & 0xffffffff) | (arg1.hi << 32);
-			dest->hi = (arg2.hi >> 32) | (arg1.hi & 0xffffffff00000000ul);
+			dest->lo = (arg2.hi & ait(0xffffffff)) | (arg1.hi << ait(32));
+			dest->hi = (arg2.hi >> ait(32)) | (arg1.hi & ait(0xffffffff00000000ul));
 			break;
 
 		case Iop_ShrN64x2:
@@ -728,55 +746,78 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->hi = arg1.hi << arg2.lo;
 			break;
 
-		case Iop_CmpGT32Sx4:
+		case Iop_CmpGT32Sx4: {
 			dest->lo = 0;
 			dest->hi = 0;
-			if ( (int)arg1.lo > (int)arg2.lo )
-				dest->lo |= 0xffffffff;
-			if ( (int)(arg1.lo >> 32) > (int)(arg2.lo >> 32) )
-				dest->lo |= 0xffffffff00000000;
-			if ( (int)arg1.hi > (int)arg2.hi )
-				dest->hi |= 0xffffffff;
-			if ( (int)(arg1.hi >> 32) > (int)(arg2.hi >> 32) )
-				dest->hi |= 0xffffffff00000000;
+			unsigned long a1l = force(arg1.lo);
+			unsigned long a2l = force(arg2.lo);
+			unsigned long a1h = force(arg1.hi);
+			unsigned long a2h = force(arg2.hi);
+			if ( (int)a1l > (int)a2l )
+				dest->lo |= ait(0xffffffff);
+			if ( (int)(a1l >> 32) > (int)(a2l >> 32) )
+				dest->lo |= ait(0xffffffff00000000);
+			if ( (int)a1h > (int)a2h )
+				dest->hi |= (ait)0xffffffff;
+			if ( (int)(a1h >> 32) > (int)(a2h >> 32) )
+				dest->hi |= ait(0xffffffff00000000);
 			break;
-			
+		}
+
 		case Iop_I64toF64: {
-			switch (arg1.lo) {
+			switch (force(arg1.lo)) {
 			case 0:
 				/* Round to nearest even mode. */
-				*(double *)&dest->lo = arg2.lo;
+				union {
+					double d;
+					unsigned long l;
+				} r;
+				r.d = force(arg2.lo);
+				dest->lo = ait(r.l);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
-							      arg1.lo);
+							      force(arg1.lo));
 			}
 			break;
 		}
 
 		case Iop_F64toI32: {
-			switch (arg1.lo) {
+			switch (force(arg1.lo)) {
 			case 3:
-				dest->lo = (unsigned)*(double *)&arg2.lo;
+				union {
+					double d;
+					unsigned long l;
+				} r;
+				r.l = force(arg2.lo);
+				dest->lo = ait((unsigned)r.d);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
-							      arg1.lo);
+							      force(arg1.lo));
 			}
 			break;
 		}
 
 		case Iop_CmpF64: {
-			double a1 = *(double *)&arg1.lo;
-			double a2 = *(double *)&arg2.lo;
+			union {
+				double d;
+				unsigned long l;
+			} r1, r2;
+			r1.l = force(arg1.lo);
+			r2.l = force(arg2.lo);
+			double a1 = r1.d;
+			double a2 = r2.d;
+			unsigned long r;
 			if (a1 < a2)
-				dest->lo = 1;
+				r = 1;
 			else if (a1 == a2)
-				dest->lo = 0x40;
+				r = 0x40;
 			else if (a1 > a2)
-				dest->lo = 0;
+				r = 0;
 			else
-				dest->lo = 0x45;
+				r = 0x45;
+			dest->lo = ait(r);
 			break;
 		}
 
@@ -808,15 +849,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->hi = 0;
 			break;
 
-			/* Floating types follow the same rule as the
-			   integer ones (unused bits must be zero),
-			   but it's not safe to enforce it with a
-			   simple mask, so assert that it's already
-			   true. */
 		case Ity_F32:
-			assert(!(dest->lo & ~0xfffffffful));
 		case Ity_F64:
-			assert(dest->hi == 0);
 			break;
 
 		case Ity_I128:
@@ -865,19 +899,19 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			*dest = arg;
 			break;
 		case Iop_32Sto64:
-			dest->lo = (long)(int)arg.lo;
+			dest->lo = signed_shift_right(arg.lo << ait(32), ait(32));
 			break;
 		case Iop_8Sto64:
-			dest->lo = (long)(signed char)arg.lo;
+			dest->lo = signed_shift_right(arg.lo << ait(56), ait(56));
 			break;
 		case Iop_16Sto32:
-			dest->lo = (unsigned)(signed short)arg.lo;
+			dest->lo = signed_shift_right(arg.lo << ait(48), ait(48)) & ait(0xffff);
 			break;
 		case Iop_8Sto32:
-			dest->lo = (unsigned)(signed char)arg.lo;
+			dest->lo = signed_shift_right(arg.lo << ait(56), ait(56)) & ait(0xffff);
 			break;
 		case Iop_16Sto64:
-			dest->lo = (long)(short)arg.lo;
+			dest->lo = signed_shift_right(arg.lo << ait(48), ait(48));
 			break;
 		case Iop_128HIto64:
 		case Iop_V128HIto64:
@@ -896,19 +930,25 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = ~arg.lo;
 			break;
 			
-		case Iop_Clz64:
-			dest->lo = 0;
-			while (!(arg.lo & (1ul << (63 - dest->lo))) &&
-			       dest->lo < 63)
-				dest->lo++;
+		case Iop_Clz64: {
+			unsigned long v = force(arg.lo);
+			unsigned res = 0;
+			while (!(v & (1ul << (63 - res))) &&
+			       res < 63)
+				res++;
+			dest->lo = ait(res);
 			break;
+		}
 
-		case Iop_Ctz64:
-			dest->lo = 0;
-			while (!(arg.lo & (1ul << dest->lo)) &&
-			       dest->lo < 63)
-				dest->lo++;
+		case Iop_Ctz64: {
+			unsigned long v = force(arg.lo);
+			unsigned res = 0;
+			while (!(v & (1ul << res)) &&
+			       res < 63)
+				res++;
+			dest->lo = ait(v);
 			break;
+		}
 
 		default:
 			ppIRExpr(expr);
@@ -921,7 +961,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		struct expression_result<ait> cond = eval_expression(expr->Iex.Mux0X.cond);
 		struct expression_result<ait> res0 = eval_expression(expr->Iex.Mux0X.expr0);
 		struct expression_result<ait> resX = eval_expression(expr->Iex.Mux0X.exprX);
-		if (cond.lo == 0) {
+		if (force(cond.lo == 0)) {
 			*dest = res0;
 		} else {
 			*dest = resX;
@@ -942,13 +982,14 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	return res;
 }
 
-static unsigned long
-redirectGuest(unsigned long rip)
+template <typename ait>
+static ait
+redirectGuest(ait rip)
 {
 	/* XXX hideous hack of hideousness */
-	if (rip == 0xFFFFFFFFFF600400ul)
-		return 0x38017e0d;
-	else if (rip == 0xFFFFFFFFFF600000)
+	if (force(rip == ait(0xFFFFFFFFFF600400ul)))
+		return ait(0x38017e0d);
+	else if (force(rip == ait(0xFFFFFFFFFF600000)))
 		throw NotImplementedException();
 	else
 		return rip;
@@ -996,12 +1037,12 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 	LibVEX_default_VexAbiInfo(&abiinfo_both);
 	abiinfo_both.guest_stack_redzone_size = 128;
 	abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-	class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, regs.rip());
+	class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, force(regs.rip()));
 	IRSB *irsb = bb_to_IR(&vge,
 			      NULL, /* Context for chase_into_ok */
 			      disInstr_AMD64,
 			      fetcher,
-			      (Addr64)regs.rip(),
+			      (Addr64)force(regs.rip()),
 			      chase_into_ok,
 			      False, /* host bigendian */
 			      VexArchAMD64,
@@ -1102,27 +1143,26 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 
 			case Ist_Put: {
 				unsigned byte_offset = stmt->Ist.Put.offset & 7;
-				unsigned long dest =
-					read_reg(this,
-						 stmt->Ist.Put.offset - byte_offset);
+				ait dest = read_reg(this,
+						    stmt->Ist.Put.offset - byte_offset);
 				struct expression_result<ait> data =
 					eval_expression(stmt->Ist.Put.data);
 				switch (typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data)) {
 				case Ity_I8:
-					dest &= ~(0xFF << (byte_offset * 8));
+					dest &= ait(~(0xFF << (byte_offset * 8)));
 					dest |= data.lo << (byte_offset * 8);
 					break;
 
 				case Ity_I16:
 					assert(!(byte_offset % 2));
-					dest &= ~(0xFFFFul << (byte_offset * 8));
+					dest &= ait(~(0xFFFFul << (byte_offset * 8)));
 					dest |= data.lo << (byte_offset * 8);
 					break;
 
 				case Ity_I32:
 				case Ity_F32:
 					assert(!(byte_offset % 4));
-					dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
+					dest &= ait(~(0xFFFFFFFFul << (byte_offset * 8)));
 					dest |= data.lo << (byte_offset * 8);
 					break;
 
@@ -1160,13 +1200,13 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result<ait> guard =
 						eval_expression(stmt->Ist.Exit.guard);
-					if (!guard.lo)
+					if (!force(guard.lo))
 						break;
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
 					printf("EMULATION WARNING %lx\n",
-					       regs.get_reg(REGISTER_IDX(EMWARN)));
+					       force(regs.get_reg(REGISTER_IDX(EMWARN))));
 				}
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
 				regs.set_reg(REGISTER_IDX(RIP), stmt->Ist.Exit.dst->Ico.U64);

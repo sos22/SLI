@@ -20,45 +20,51 @@ struct record_header {
 	unsigned tid;
 };
 
+template<typename ait>
 struct footstep_record {
 #define RECORD_footstep 1
-	Word rip;
-	Word FOOTSTEP_REG_0_NAME;
-	Word FOOTSTEP_REG_1_NAME;
-	Word FOOTSTEP_REG_2_NAME;
-	Word FOOTSTEP_REG_3_NAME;
-	Word FOOTSTEP_REG_4_NAME;
+	ait rip;
+	ait FOOTSTEP_REG_0_NAME;
+	ait FOOTSTEP_REG_1_NAME;
+	ait FOOTSTEP_REG_2_NAME;
+	ait FOOTSTEP_REG_3_NAME;
+	ait FOOTSTEP_REG_4_NAME;
 };
 
+template<typename ait>
 struct syscall_record {
 #define RECORD_syscall 2
-	UInt syscall_nr;
+	ait syscall_nr;
 	SysRes syscall_res;
-	UWord arg1;
-	UWord arg2;
-	UWord arg3;
+	ait arg1;
+	ait arg2;
+	ait arg3;
 };
 
+template<typename ait>
 struct memory_record {
 #define RECORD_memory 3
-	void *ptr;
+	ait ptr;
 	/* Followed by lots more data */
 };
 
+template<typename ait>
 struct rdtsc_record {
 #define RECORD_rdtsc 4
-	ULong stashed_tsc;
+	ait stashed_tsc;
 };
 
+template<typename ait>
 struct mem_read_record {
 #define RECORD_mem_read 5
-	Word ptr;
+	ait ptr;
 	/* Followed by the data */
 };
 
+template<typename ait>
 struct mem_write_record {
 #define RECORD_mem_write 6
-	Word ptr;
+	ait ptr;
 	/* Followed by the data */
 };
 
@@ -71,44 +77,50 @@ struct mem_write_record {
 /* No payload */
 #define RECORD_thread_unblocked 9
 
+template<typename ait>
 struct client_req_record {
 #define RECORD_client 10
-	UWord flavour;
+	ait flavour;
 };
 
+template<typename ait>
 struct signal_record {
 #define RECORD_signal 11
-	UWord rip;
+	ait rip;
 	Int signo;
-	UWord err;
-	UWord virtaddr;
+	ait err;
+	ait virtaddr;
 };
 
+template<typename ait>
 struct allocate_memory_record {
 #define RECORD_allocate_memory 12
-	UWord start;
-	UWord size;
-	UWord prot;
+	ait start;
+	ait size;
+	ait prot;
 	UWord flags;
 };
 
 /* Uses VexGuestAMD64State as payload */
 #define RECORD_initial_registers 13
 
+template<typename ait>
 struct initial_brk_record {
 #define RECORD_initial_brk 14
-	UWord initial_brk;
+	ait initial_brk;
 };
 
+template<typename ait>
 struct initial_sighandlers_record {
 #define RECORD_initial_sighandlers 15
 	sigaction_t handlers[64];
 };
 
+template<typename ait>
 struct vex_thread_state_record {
 #define RECORD_vex_thread_state 16
 	unsigned statement_nr;
-	unsigned long temporaries[0];
+	ait temporaries[0];
 };
 
 #define RECORD_MAX_CLASS RECORD_vex_thread_state

@@ -1,4 +1,3 @@
-#define _XOPEN_SOURCE 500
 #include <sys/types.h>
 #include <sys/fcntl.h>
 #include <stdlib.h>
@@ -9,10 +8,6 @@
 typedef unsigned long Word;
 typedef unsigned long UWord;
 typedef unsigned char Bool;
-typedef struct {
-	UWord _val;
-	Bool  _isError;
-} SysRes;
 
 typedef struct sigaction sigaction_t;
 
@@ -60,7 +55,7 @@ skip:
 	*_nextPtr = mkPtr(startPtr.off + rh.size, startPtr.record_nr+1);
 	switch (rh.cls) {
 	case RECORD_footstep: {
-		footstep_record fr;
+		footstep_record<unsigned long> fr;
 		int r = pread(fd, &fr, sizeof(fr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordFootstep<unsigned long>(tid,
@@ -72,18 +67,18 @@ skip:
 							    fr.FOOTSTEP_REG_4_NAME);
 	}
 	case RECORD_syscall: {
-		syscall_record sr;
+		syscall_record<unsigned long> sr;
 		int r = pread(fd, &sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordSyscall<unsigned long>(tid,
-							   sr.syscall_nr,
+							   sr.syscall_nr & 0xffffffff,
 							   sr.syscall_res._isError ? -(long)sr.syscall_res._val : sr.syscall_res._val,
 							   sr.arg1,
 							   sr.arg2,
 							   sr.arg3);
 	}
 	case RECORD_memory: {
-		memory_record mr;
+		memory_record<unsigned long> mr;
 		int r = pread(fd, &mr, sizeof(mr), startPtr.off + sizeof(rh));
 		void *buf = malloc(rh.size - sizeof(mr) - sizeof(rh));
 		r = pread(fd, buf, rh.size - sizeof(mr) - sizeof(rh),
@@ -95,13 +90,13 @@ skip:
 							  buf);
 	}
 	case RECORD_rdtsc: {
-		rdtsc_record rr;
+		rdtsc_record<unsigned long> rr;
 		int r = pread(fd, &rr, sizeof(rr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordRdtsc<unsigned long>(tid, rr.stashed_tsc);
 	}
 	case RECORD_mem_read: {
-		mem_read_record mrr;
+		mem_read_record<unsigned long> mrr;
 		int r = pread(fd, &mrr, sizeof(mrr), startPtr.off + sizeof(rh));
 		void *buf = malloc(rh.size - sizeof(mrr) - sizeof(rh));
 		r = pread(fd, buf, rh.size - sizeof(mrr) - sizeof(rh),
@@ -113,7 +108,7 @@ skip:
 							buf);
 	}
 	case RECORD_mem_write: {
-		mem_write_record mwr;
+		mem_write_record<unsigned long> mwr;
 		int r = pread(fd, &mwr, sizeof(mwr), startPtr.off + sizeof(rh));
 		void *buf = malloc(rh.size - sizeof(mwr) - sizeof(rh));
 		r = pread(fd, buf, rh.size - sizeof(mwr) - sizeof(rh),
@@ -135,7 +130,7 @@ skip:
 	}
 
 	case RECORD_signal: {
-		signal_record sr;
+		signal_record<unsigned long> sr;
 		int r = pread(fd, &sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordSignal<unsigned long>(tid, sr.rip, sr.signo, sr.err,
@@ -143,7 +138,7 @@ skip:
 	}
 		
 	case RECORD_allocate_memory: {
-		allocate_memory_record amr;
+		allocate_memory_record<unsigned long> amr;
 		int r = pread(fd, &amr, sizeof(amr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordAllocateMemory<unsigned long>(tid,
@@ -159,20 +154,20 @@ skip:
 		return new LogRecordInitialRegisters<unsigned long>(tid, regs);
 	}
 	case RECORD_initial_brk: {
-		initial_brk_record ibr;
+		initial_brk_record<unsigned long> ibr;
 		int r = pread(fd, &ibr, sizeof(ibr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordInitialBrk<unsigned long>(tid, ibr.initial_brk);
 	}
 	case RECORD_initial_sighandlers: {
-		initial_sighandlers_record isr;
+		initial_sighandlers_record<unsigned long> isr;
 		int r = pread(fd, &isr, sizeof(isr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordInitialSighandlers<unsigned long>(tid, isr.handlers);
 	}
 	case RECORD_vex_thread_state: {
-		vex_thread_state_record *vtsr;
-		vtsr = (vex_thread_state_record *)malloc(rh.size - sizeof(rh));
+		vex_thread_state_record<unsigned long> *vtsr;
+		vtsr = (vex_thread_state_record<unsigned long> *)malloc(rh.size - sizeof(rh));
 		int r = pread(fd, vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
 		expression_result_array<unsigned long> era;
@@ -197,3 +192,5 @@ LogRecord<ait>::~LogRecord()
 {
 }
 
+#define MK_LOGREADER(t)				\
+	template LogRecord<t>::~LogRecord()

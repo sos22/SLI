@@ -41,13 +41,13 @@ static void checkSegv(LogRecord<ait> *lr, ait addr)
 	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a segv for store to %lx, got %s",
-					    addr, lr->name());
+					    force(addr), lr->name());
 	if (lrs->signr != 11)
 		throw ReplayFailedException("wanted a segv, got signal %d",
 					    lrs->signr);
-	if (lrs->virtaddr != addr)
+        if (force(lrs->virtaddr != addr))
 		throw ReplayFailedException("wanted a segv at %lx, got one at %lx\n",
-					    lrs->virtaddr, addr);
+					    force(lrs->virtaddr), force(addr));
 }
 
 template <typename ait>
@@ -58,13 +58,13 @@ void StoreEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<
 		if (!lrs)
 			throw ReplayFailedException("wanted a store, got %s",
 						    lr->name());
-		if (size != lrs->size || addr != lrs->ptr)
+		if (size != lrs->size || force(addr != lrs->ptr))
 			throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
-						    lrs->size, lrs->ptr,
-						    size, addr);
+						    lrs->size, force(lrs->ptr),
+						    size, force(addr));
 		if (memcmp(data, lrs->buf, size))
 			throw ReplayFailedException("memory mismatch on store to %lx",
-						    addr);
+						    force(addr));
 		ms->addressSpace->writeMemory(addr, size, data, false, thr);
 		thr->nrAccesses++;
 	} else {
@@ -99,15 +99,15 @@ void LoadEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<a
 		if (!lrl)
 			throw ReplayFailedException("wanted a load, got %s",
 						    lr->name());
-		if (size != lrl->size || addr != lrl->ptr)
+		if (size != lrl->size || force(addr != lrl->ptr))
 			throw ReplayFailedException("wanted %d byte load from %lx, got %d from %lx",
-						    lrl->size, lrl->ptr,
-						    size, addr);
+						    lrl->size, force(lrl->ptr),
+						    size, force(addr));
 		unsigned char buf[16];
 		ms->addressSpace->readMemory(addr, size, buf, false, thr);
 		if (memcmp(buf, lrl->buf, size))
 			throw ReplayFailedException("memory mismatch on load from %lx",
-						    addr);
+						    force(addr));
 		
 		if (size <= 8) {
 			memcpy(&thr->temporaries[tmp].lo, buf, size);
@@ -159,8 +159,8 @@ void InstructionEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, Machine
 	if (!lrf)
 		throw ReplayFailedException("wanted a footstep, got %s",
 					    lr->name());
-	if (rip != lrf->rip)
-		throw ReplayFailedBadRip(rip, lrf->rip);
+        if (force(rip != lrf->rip))
+		throw ReplayFailedBadRip(force(rip), force(lrf->rip));
 #define PASTE(x, y) x ## y
 #define PASTE2(x, y) PASTE(x, y)
 #define STRING(x) #x
@@ -168,12 +168,12 @@ void InstructionEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, Machine
 #define FR_REG_NAME(x) PASTE2(PASTE2(FOOTSTEP_REG_, x), _NAME)
 #define CHECK_REGISTER(x)						\
 	do {                                                            \
-               if (reg ## x != lrf-> reg ## x)				\
-                       throw ReplayFailedBadRegister(			\
-                               STRING2( FR_REG_NAME(x)),		\
-			       reg ## x,				\
-                               lrf-> reg ## x);                         \
-       } while (0)
+		if (force(reg ## x != lrf-> reg ## x))			\
+			throw ReplayFailedBadRegister(			\
+				STRING2( FR_REG_NAME(x)),		\
+				force(reg ## x),			\
+				force(lrf-> reg ## x));			\
+	} while (0)
        CHECK_REGISTER(0);
        CHECK_REGISTER(1);
        CHECK_REGISTER(2);
@@ -219,17 +219,17 @@ void CasEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ai
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
 					    lr->name());
-	if (size != lrl->size || addr.lo != lrl->ptr)
+        if (size != lrl->size || force(addr.lo != lrl->ptr))
 		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
-					    lrl->size, lrl->ptr,
-					    size, addr.lo);
+					    lrl->size, force(lrl->ptr),
+					    size, force(addr.lo));
 
 	ait seen_buf[2];
 	memset(seen_buf, 0, sizeof(seen_buf));
 	ms->addressSpace->readMemory(addr.lo, size, seen_buf, false, thr);
 	if (memcmp(seen_buf, lrl->buf, size))
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
-					    addr.lo);
+					    force(addr.lo));
 	thr->temporaries[dest].lo = seen_buf[0];
 	thr->temporaries[dest].hi = seen_buf[1];
 	if (memcmp(seen_buf, expected_buf, size))
@@ -241,13 +241,13 @@ void CasEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ai
         LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");
-	if (size != lrs->size || addr.lo != lrs->ptr)
+        if (size != lrs->size || force(addr.lo != lrs->ptr))
 		throw ReplayFailedException("wanted %d byte CAS to %lx, got %d to %lx",
-					    lrs->size, lrs->ptr,
-					    size, addr.lo);
+					    lrs->size, force(lrs->ptr),
+					    size, force(addr.lo));
 	if (memcmp(data_buf, lrs->buf, size))
 		throw ReplayFailedException("memory mismatch on CAS to %lx",
-					    addr.lo);
+					    force(addr.lo));
 
 	ms->addressSpace->writeMemory(addr.lo, size, data_buf, false, thr);
 }
@@ -298,7 +298,7 @@ void SignalEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState
 					      lrs->signr);
 	if (ms->addressSpace->isReadable(lrs->virtaddr, 1, thr))
 		throw ReplayFailedException("got a segv at %lx, but that location is readable?",
-					    lrs->virtaddr);
+					    force(lrs->virtaddr));
 	/* Can't actually do much with this, because we pick up the
 	   Valgrind sighandlers when we start.  Oh well. */
 #if 0

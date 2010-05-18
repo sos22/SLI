@@ -47,29 +47,29 @@ handle_clone(AddressSpace<ait> *addrSpace,
 	     ait set_tls,
 	     unsigned pid)
 {
-	if (flags != (CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-		      CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
-		      CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)) {
-		printf("can't handle clone flags %lx\n", flags);
+	if (force(flags != ait((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+				CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
+				CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)))) {
+		printf("can't handle clone flags %lx\n", force(flags));
 		abort();
 	}
 
 	/* Create a new thread.  This is, as you might expect, closely
 	   modelled on the kernel's version of the same process. */
 	Thread<ait> *newThread = thr->fork(pid);
-	if (flags & CLONE_CHILD_SETTID)
+	if (force(flags & CLONE_CHILD_SETTID))
 		newThread->set_child_tid = child_tidptr;
-	if (flags & CLONE_CHILD_CLEARTID)
+	if (force(flags & CLONE_CHILD_CLEARTID))
 		newThread->clear_child_tid = child_tidptr;
-	newThread->robust_list = 0;
+	newThread->robust_list = ait(0);
 #if 0
 	if (flags & CLONE_VM)
 		newThread->sas_ss_sp = newThread->sas_ss_size = 0;
 	newThread->exit_signal = (flags & CLONE_THREAD) ? -1 : (clone_flags & CSIGNAL);
 #endif
-	newThread->regs.set_reg(REGISTER_IDX(RAX), 0);
+	newThread->regs.set_reg(REGISTER_IDX(RAX), ait(0));
 	newThread->regs.set_reg(REGISTER_IDX(RSP), childRsp);
-	if (flags & CLONE_SETTLS)
+	if (force(flags & CLONE_SETTLS))
 		newThread->regs.set_reg(REGISTER_IDX(FS_ZERO), set_tls);
 
 	mach->registerThread(newThread);
@@ -92,26 +92,26 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	args[4] = thr->regs.get_reg(REGISTER_IDX(R8));
 	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
-	if (sysnr != lrs->sysnr)
+	if (force(sysnr != lrs->sysnr))
 		throw ReplayFailedBadRegister("<sysnr>",
-					      sysnr,
-					      lrs->sysnr);
-	if (args[0] != lrs->arg1)
+					      force(sysnr),
+					      force(lrs->sysnr));
+	if (force(args[0] != lrs->arg1))
 		throw ReplayFailedBadRegister("<sys_arg1>",
-					      args[0],
-					      lrs->arg1);
-	if (args[1] != lrs->arg2)
+					      force(args[0]),
+					      force(lrs->arg1));
+	if (force(args[1] != lrs->arg2))
 		throw ReplayFailedBadRegister("<sys_arg2>",
-					      args[1],
-					      lrs->arg2);
-	if (args[2] != lrs->arg3)
+					      force(args[1]),
+					      force(lrs->arg2));
+	if (force(args[2] != lrs->arg3))
 		throw ReplayFailedBadRegister("<sys_arg3>",
-					      args[2],
-					      lrs->arg3);
+					      force(args[2]),
+					      force(lrs->arg3));
 
 	res = lrs->res;
 
-	switch (sysnr) {
+	switch (force(sysnr)) {
 	case __NR_read: /* 0 */
 		break;
 	case __NR_write: /* 1 */
@@ -131,9 +131,9 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		ait length = args[1];
 		ait prot = args[2];
 		
-		if (!isErrnoSysres(lrs->res)) {
+		if (!isErrnoSysres(force(lrs->res))) {
 			length = (length + 4095) & ~4095;
-			addrSpace->allocateMemory(addr, length, prot);
+			addrSpace->allocateMemory(addr, length, force(prot));
 		}
 		break;
 	}
@@ -141,8 +141,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		ait addr = args[0];
 		ait size = args[1];
 		ait prot = args[2];
-		if (!isErrnoSysres(lrs->res))
-			addrSpace->protectMemory(addr, size, prot);
+		if (!isErrnoSysres(force(lrs->res)))
+			addrSpace->protectMemory(addr, size, force(prot));
 		break;
 	}
 	case __NR_munmap: { /* 11 */
@@ -153,15 +153,11 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		res = addrSpace->setBrk(args[0]);
 		break;
 	case __NR_rt_sigaction: /* 13 */
-		if (!isErrnoSysres(lrs->res) &&
-		    args[1] != 0) {
-
-			/* Or else the call should have returned an error */
-			assert(args[0] < 64);
-
+		if (!isErrnoSysres(force(lrs->res)) &&
+		    force(args[1] != 0)) {
 			addrSpace->readMemory(args[1],
 					      sizeof(struct sigaction),
-					      &mach->signalHandlers.handlers[args[0]]);
+					      &mach->signalHandlers.handlers[force(args[0])]);
 		}
 		/* A memory record will follow and handle the old
 		   handler if appropriate. */
@@ -181,7 +177,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_getpid: /* 39 */
 		break;
 	case __NR_clone: /* 56 */
-		if (!isErrnoSysres(lrs->res))
+		if (!isErrnoSysres(force(lrs->res)))
 			handle_clone(addrSpace,
 				     thr,
 				     mach,
@@ -190,7 +186,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 				     args[2],
 				     args[3],
 				     args[4],
-				     lrs->res);
+				     force(lrs->res));
 		break;
 	case __NR_exit:
 		thr->exitted = true;
@@ -222,7 +218,6 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_statfs: /* 137 */
 		break;
 	case __NR_arch_prctl: /* 158 */
-		assert(args[0] == ARCH_SET_FS);
 		thr->regs.set_reg(REGISTER_IDX(FS_ZERO), args[1]);
 		break;
 	case __NR_sync: /* 162 */
@@ -243,10 +238,10 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		thr->robust_list = args[0];
 		break;
 	default:
-		throw UnknownSyscallException(sysnr);
+		throw UnknownSyscallException(force(sysnr));
 	}
 
-	assert(res == lrs->res);	
+	assert(force(res == lrs->res));
 	thr->regs.set_reg(REGISTER_IDX(RAX), res);
 }
 
@@ -256,12 +251,12 @@ InterpretResult SyscallEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms,
 	ait res;
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 
-	switch (sysnr) {
+	switch (force(sysnr)) {
 	case __NR_futex:
 		res = 0;
 		break;
 	default:
-		printf("can't fake syscall %ld yet\n", sysnr);
+		printf("can't fake syscall %ld yet\n", force(sysnr));
 		if (lr)
 			*lr = NULL;
 		return InterpretResultIncomplete;

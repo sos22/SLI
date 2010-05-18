@@ -41,16 +41,16 @@ Thread<ait> *Thread<ait>::dupeSelf() const
 	return work;
 }
 
-template<>
-void Thread<unsigned long>::dumpSnapshot(LogWriter<unsigned long> *lw) const
+template<typename ait>
+void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 {
 	VexGuestAMD64State r;
 
-	for (unsigned x = 0; x < RegisterSet<unsigned long>::NR_REGS; x++)
-		((unsigned long *)&r)[x] = regs.get_reg(x);
-	lw->append(LogRecordInitialRegisters<unsigned long>(tid, r));
+	for (unsigned x = 0; x < RegisterSet<ait>::NR_REGS; x++)
+		((unsigned long *)&r)[x] = force(regs.get_reg(x));
+	lw->append(LogRecordInitialRegisters<ait>(tid, r));
 	if (currentIRSB && currentIRSBOffset != 0)
-		lw->append(LogRecordVexThreadState<unsigned long>(tid, currentIRSBOffset, temporaries));
+		lw->append(LogRecordVexThreadState<ait>(tid, currentIRSBOffset, temporaries));
 }
 
 template<typename ait>

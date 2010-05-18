@@ -134,8 +134,7 @@ public:
 			   ait _ptr,
 			   unsigned _size) :
 		SliException(
-			"guest dereferenced a bad pointer: address %lx, size %x, isWrite %d\n",
-			_ptr,
+			"guest dereferenced a bad pointer: size %x, isWrite %d\n",
 			_size,
 			_isWrite),
 		isWrite(_isWrite),
