@@ -12,7 +12,7 @@
 class ExplorationState {
 public:
 	MachineState<unsigned long> *ms;
-	MemLog *history;
+	MemLog<unsigned long> *history;
 	static ExplorationState *init(MachineState<unsigned long> *ms);
 	ExplorationState *dupeSelf() const;
 };
@@ -24,7 +24,7 @@ ExplorationState *ExplorationState::init(MachineState<unsigned long> *ms)
 {
 	ExplorationState *es = LibVEX_Alloc_ExplorationState();
 	es->ms = ms;
-	es->history = MemLog::emptyMemlog();
+	es->history = MemLog<unsigned long>::emptyMemlog();
 	return es;
 }
 
@@ -114,7 +114,7 @@ bool Explorer::advance()
 
 	/* Okay, have to actually do something. */
 
-	MemTracePool thread_traces(basis->ms);
+	MemTracePool<unsigned long> thread_traces(basis->ms);
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 		thread_traces.firstRacingAccessMap();
 
@@ -174,11 +174,11 @@ class CommunicationGraph {
 public:
 	class Edge {
 	public:
-		MemoryAccess *load;
+		MemoryAccess<unsigned long> *load;
 		unsigned load_idx;
-		MemoryAccess *store;
+		MemoryAccess<unsigned long> *store;
 		unsigned store_idx;
-		Edge(MemoryAccess *_load, unsigned _load_idx, MemoryAccess *_store,
+		Edge(MemoryAccess<unsigned long> *_load, unsigned _load_idx, MemoryAccess<unsigned long >*_store,
 		     unsigned _store_idx)
 			: load(_load),
 			  load_idx(_load_idx),
@@ -188,22 +188,22 @@ public:
 		}
 	};
 	std::vector<Edge> content;
-	void addEdge(MemoryAccess *load, unsigned load_idx, MemoryAccess *store, unsigned store_idx)
+	void addEdge(MemoryAccess<unsigned long> *load, unsigned load_idx, MemoryAccess<unsigned long> *store, unsigned store_idx)
 	{
 		content.push_back(Edge(load, load_idx, store, store_idx));
 	}
-	CommunicationGraph(MemoryTrace *mt);
+	CommunicationGraph(MemoryTrace<unsigned long> *mt);
 	void dump() const;
 };
 
-CommunicationGraph::CommunicationGraph(MemoryTrace *mt)
+CommunicationGraph::CommunicationGraph(MemoryTrace<unsigned long> *mt)
 {
 	for (unsigned loadInd = 0; loadInd < mt->size(); loadInd++) {
-		MemoryAccessLoad *load = dynamic_cast<MemoryAccessLoad *>((*mt)[loadInd]);
+		MemoryAccessLoad<unsigned long> *load = dynamic_cast<MemoryAccessLoad<unsigned long> *>((*mt)[loadInd]);
 		if (!load)
 			continue;
 		for (int storeInd = loadInd - 1; storeInd >= 0; storeInd--) {
-			MemoryAccessStore *store = dynamic_cast<MemoryAccessStore *>((*mt)[storeInd]);
+			MemoryAccessStore<unsigned long> *store = dynamic_cast<MemoryAccessStore<unsigned long> *>((*mt)[storeInd]);
 			if (!store || store->addr != load->addr)
 				continue;
 			addEdge(load, loadInd, store, storeInd);
@@ -234,7 +234,7 @@ main(int argc, char *argv[])
 	init_sli();
 
 	LogFile *lf;
-	LogReader::ptr ptr;
+	LogReaderPtr ptr;
 
 	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
@@ -266,8 +266,8 @@ main(int argc, char *argv[])
 	printf("Good states:\n");
 	for (unsigned x = 0; x < e->goodStates->size(); x++) {
 		printf("State %d\n", x);
-		MemoryTrace mt(*e->goodStates->index(x)->history,
-			       MemLog::startPtr());
+		MemoryTrace<unsigned long> mt(*e->goodStates->index(x)->history,
+					      MemLog<unsigned long>::startPtr());
 		CommunicationGraph ct(&mt);
 		ct.dump();
 	}
@@ -275,8 +275,8 @@ main(int argc, char *argv[])
 	printf("Bad states:\n");
 	for (unsigned x = 0; x < e->badStates->size(); x++) {
 		printf("State %d\n", x);
-		MemoryTrace mt(*e->badStates->index(x)->history,
-			       MemLog::startPtr());
+		MemoryTrace<unsigned long> mt(*e->badStates->index(x)->history,
+					      MemLog<unsigned long>::startPtr());
 		CommunicationGraph ct(&mt);
 		ct.dump();
 	}

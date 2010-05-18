@@ -9,10 +9,10 @@ RegisterSet<unsigned long>::RegisterSet(VexGuestAMD64State const&r)
 		registers[x] = ((unsigned long *)&r)[x];
 }
 
-template<>
-Thread<unsigned long> *Thread<unsigned long>::initialThread(const LogRecordInitialRegisters &initRegs)
+template<typename ait>
+Thread<ait> *Thread<ait>::initialThread(const LogRecordInitialRegisters<ait> &initRegs)
 {
-	Thread<unsigned long> *work;
+	Thread<ait> *work;
 
 	work = allocator.alloc();
 	memset(work, 0, sizeof(*work));
@@ -42,20 +42,20 @@ Thread<ait> *Thread<ait>::dupeSelf() const
 }
 
 template<>
-void Thread<unsigned long>::dumpSnapshot(LogWriter *lw) const
+void Thread<unsigned long>::dumpSnapshot(LogWriter<unsigned long> *lw) const
 {
 	VexGuestAMD64State r;
 
 	for (unsigned x = 0; x < RegisterSet<unsigned long>::NR_REGS; x++)
 		((unsigned long *)&r)[x] = regs.get_reg(x);
-	lw->append(LogRecordInitialRegisters(tid, r));
+	lw->append(LogRecordInitialRegisters<unsigned long>(tid, r));
 	if (currentIRSB && currentIRSBOffset != 0)
-		lw->append(LogRecordVexThreadState(tid, currentIRSBOffset, temporaries));
+		lw->append(LogRecordVexThreadState<unsigned long>(tid, currentIRSBOffset, temporaries));
 }
 
-template<>
-void Thread<unsigned long>::imposeState(const LogRecordVexThreadState &rec,
-					AddressSpace *as)
+template<typename ait>
+void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> &rec,
+			      AddressSpace *as)
 {
 	translateNextBlock(as);
 	assert(currentIRSB);

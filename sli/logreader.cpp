@@ -18,7 +18,7 @@ typedef struct sigaction sigaction_t;
 
 #include "ppres.h"
 
-LogFile *LogFile::open(const char *path, LogReader::ptr *initial_ptr)
+LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
 {
 	int fd;
 	fd = ::open(path, O_RDONLY);
@@ -31,7 +31,7 @@ LogFile *LogFile::open(const char *path, LogReader::ptr *initial_ptr)
 	return work;
 }
 
-LogFile *LogFile::truncate(LogReader::ptr eof)
+LogFile *LogFile::truncate(LogReaderPtr eof)
 {
 	LogFile *work;
 	work = new LogFile();
@@ -45,7 +45,7 @@ LogFile::~LogFile()
 	close(fd);
 }
 
-LogRecord *LogFile::read(LogReader::ptr _startPtr, LogReader::ptr *_nextPtr) const
+LogRecord<unsigned long> *LogFile::read(LogReaderPtr _startPtr, LogReaderPtr *_nextPtr) const
 {
 	struct record_header rh;
 	_ptr startPtr = unwrapPtr(_startPtr);
@@ -63,24 +63,24 @@ skip:
 		footstep_record fr;
 		int r = pread(fd, &fr, sizeof(fr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordFootstep(tid,
-					     fr.rip,
-					     fr.FOOTSTEP_REG_0_NAME,
-					     fr.FOOTSTEP_REG_1_NAME,
-					     fr.FOOTSTEP_REG_2_NAME,
-					     fr.FOOTSTEP_REG_3_NAME,
-					     fr.FOOTSTEP_REG_4_NAME);
+		return new LogRecordFootstep<unsigned long>(tid,
+							    fr.rip,
+							    fr.FOOTSTEP_REG_0_NAME,
+							    fr.FOOTSTEP_REG_1_NAME,
+							    fr.FOOTSTEP_REG_2_NAME,
+							    fr.FOOTSTEP_REG_3_NAME,
+							    fr.FOOTSTEP_REG_4_NAME);
 	}
 	case RECORD_syscall: {
 		syscall_record sr;
 		int r = pread(fd, &sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordSyscall(tid,
-					    sr.syscall_nr,
-					    sr.syscall_res._isError ? -(long)sr.syscall_res._val : sr.syscall_res._val,
-					    sr.arg1,
-					    sr.arg2,
-					    sr.arg3);
+		return new LogRecordSyscall<unsigned long>(tid,
+							   sr.syscall_nr,
+							   sr.syscall_res._isError ? -(long)sr.syscall_res._val : sr.syscall_res._val,
+							   sr.arg1,
+							   sr.arg2,
+							   sr.arg3);
 	}
 	case RECORD_memory: {
 		memory_record mr;
@@ -89,16 +89,16 @@ skip:
 		r = pread(fd, buf, rh.size - sizeof(mr) - sizeof(rh),
 			  startPtr.off + sizeof(rh) + sizeof(mr));
 		(void)r;
-		return new LogRecordMemory(tid,
-					   rh.size - sizeof(mr) - sizeof(rh),
-					   (unsigned long)mr.ptr,
-					   buf);
+		return new LogRecordMemory<unsigned long>(tid,
+							  rh.size - sizeof(mr) - sizeof(rh),
+							  (unsigned long)mr.ptr,
+							  buf);
 	}
 	case RECORD_rdtsc: {
 		rdtsc_record rr;
 		int r = pread(fd, &rr, sizeof(rr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordRdtsc(tid, rr.stashed_tsc);
+		return new LogRecordRdtsc<unsigned long>(tid, rr.stashed_tsc);
 	}
 	case RECORD_mem_read: {
 		mem_read_record mrr;
@@ -107,10 +107,10 @@ skip:
 		r = pread(fd, buf, rh.size - sizeof(mrr) - sizeof(rh),
 			  startPtr.off + sizeof(rh) + sizeof(mrr));
 		(void)r;
-		return new LogRecordLoad(tid,
-					 rh.size - sizeof(mrr) - sizeof(rh),
-					 mrr.ptr,
-					 buf);
+		return new LogRecordLoad<unsigned long>(tid,
+							rh.size - sizeof(mrr) - sizeof(rh),
+							mrr.ptr,
+							buf);
 	}
 	case RECORD_mem_write: {
 		mem_write_record mwr;
@@ -119,10 +119,10 @@ skip:
 		r = pread(fd, buf, rh.size - sizeof(mwr) - sizeof(rh),
 			  startPtr.off + sizeof(rh) + sizeof(mwr));
 		(void)r;
-		return new LogRecordStore(tid,
-					  rh.size - sizeof(mwr) - sizeof(rh),
-					  mwr.ptr,
-					  buf);
+		return new LogRecordStore<unsigned long>(tid,
+							 rh.size - sizeof(mwr) - sizeof(rh),
+							 mwr.ptr,
+							 buf);
 	}
 
 	case RECORD_new_thread:
@@ -138,37 +138,37 @@ skip:
 		signal_record sr;
 		int r = pread(fd, &sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordSignal(tid, sr.rip, sr.signo, sr.err,
-					   sr.virtaddr);
+		return new LogRecordSignal<unsigned long>(tid, sr.rip, sr.signo, sr.err,
+							  sr.virtaddr);
 	}
 		
 	case RECORD_allocate_memory: {
 		allocate_memory_record amr;
 		int r = pread(fd, &amr, sizeof(amr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordAllocateMemory(tid,
-						   amr.start,
-						   amr.size,
-						   amr.prot,
-						   amr.flags);
+		return new LogRecordAllocateMemory<unsigned long>(tid,
+								  amr.start,
+								  amr.size,
+								  amr.prot,
+								  amr.flags);
 	}
 	case RECORD_initial_registers: {
 		VexGuestAMD64State regs;
 		int r = pread(fd, &regs, sizeof(regs), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordInitialRegisters(tid, regs);
+		return new LogRecordInitialRegisters<unsigned long>(tid, regs);
 	}
 	case RECORD_initial_brk: {
 		initial_brk_record ibr;
 		int r = pread(fd, &ibr, sizeof(ibr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordInitialBrk(tid, ibr.initial_brk);
+		return new LogRecordInitialBrk<unsigned long>(tid, ibr.initial_brk);
 	}
 	case RECORD_initial_sighandlers: {
 		initial_sighandlers_record isr;
 		int r = pread(fd, &isr, sizeof(isr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordInitialSighandlers(tid, isr.handlers);
+		return new LogRecordInitialSighandlers<unsigned long>(tid, isr.handlers);
 	}
 	case RECORD_vex_thread_state: {
 		vex_thread_state_record *vtsr;
@@ -183,7 +183,7 @@ skip:
 		}
 		unsigned sn = vtsr->statement_nr;
 		free(vtsr);
-		return new LogRecordVexThreadState(tid, sn, era);
+		return new LogRecordVexThreadState<unsigned long>(tid, sn, era);
 	}
 
 	default:
@@ -192,7 +192,8 @@ skip:
 }
 
 
-LogRecord::~LogRecord()
+template <typename ait>
+LogRecord<ait>::~LogRecord()
 {
 }
 

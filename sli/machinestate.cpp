@@ -32,7 +32,7 @@ public:
 
 template<typename abs_int_type>
 MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(AddressSpace *as,
-									    const LogRecordInitialSighandlers &handlers)
+									    const LogRecordInitialSighandlers<abs_int_type> &handlers)
 {
 	MachineState<abs_int_type> *work = allocator.alloc();
 
@@ -41,26 +41,26 @@ MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(Addr
 	work->threads = LibvexVector<Thread<abs_int_type> >::empty();
 	work->nextTid = ThreadId(1);
 	work->addressSpace = as;
-	work->signalHandlers = SignalHandlers(handlers);
+	work->signalHandlers = SignalHandlers<abs_int_type>(handlers);
 
 	return work;
 }
 
-template <>
-MachineState<unsigned long> *MachineState<unsigned long>::initialMachineState(LogReader *lf, LogFile::ptr ptr, LogFile::ptr *end)
+template <typename ait>
+MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, LogReaderPtr ptr, LogReaderPtr *end)
 {
-	MachineState<unsigned long> *work;
-	LogRecord *lr;
+	MachineState<ait> *work;
+	LogRecord<ait> *lr;
 
 	lr = lf->read(ptr, &ptr);
-	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr);
+	LogRecordInitialBrk<ait> *lrib = dynamic_cast<LogRecordInitialBrk<ait>*>(lr);
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
 	AddressSpace *as = AddressSpace::initialAddressSpace(lrib->brk);
 	delete lr;
 
 	lr = lf->read(ptr, &ptr);
-	LogRecordInitialSighandlers *lris = dynamic_cast<LogRecordInitialSighandlers*>(lr);
+        LogRecordInitialSighandlers<ait> *lris = dynamic_cast<LogRecordInitialSighandlers<ait>*>(lr);
 	if (!lris)
 		errx(1, "second record should have been initial signal handlers");
 	work = initialMachineState(as, *lris);
@@ -68,18 +68,18 @@ MachineState<unsigned long> *MachineState<unsigned long>::initialMachineState(Lo
 
 	while (1) {
 		delete lr;
-		LogFile::ptr nextPtr;
+		LogReaderPtr nextPtr;
 		lr = lf->read(ptr, &nextPtr);
 		if (!lr)
 			err(1, "reading initial memory population");
-		if (LogRecordAllocateMemory *lram = dynamic_cast<LogRecordAllocateMemory*>(lr)) {
+		if (LogRecordAllocateMemory<ait> *lram = dynamic_cast<LogRecordAllocateMemory<ait>*>(lr)) {
 			as->allocateMemory(*lram);
-		} else if (LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr)) {
+	        } else if (LogRecordMemory<ait> *lrm = dynamic_cast<LogRecordMemory<ait>*>(lr)) {
 			as->populateMemory(*lrm);
-		} else if (LogRecordInitialRegisters *lrir = dynamic_cast<LogRecordInitialRegisters*>(lr)) {
-			work->registerThread(Thread<unsigned long>::initialThread(*lrir));
-		} else if (LogRecordVexThreadState *lrvts = dynamic_cast<LogRecordVexThreadState*>(lr)) {
-			Thread<unsigned long> *t = work->findThread(lrvts->thread());
+		} else if (LogRecordInitialRegisters<ait> *lrir = dynamic_cast<LogRecordInitialRegisters<ait>*>(lr)) {
+			work->registerThread(Thread<ait>::initialThread(*lrir));
+	        } else if (LogRecordVexThreadState<ait> *lrvts = dynamic_cast<LogRecordVexThreadState<ait>*>(lr)) {
+			Thread<ait> *t = work->findThread(lrvts->thread());
 			t->imposeState(*lrvts, as);
 		} else {
 			break;
@@ -94,7 +94,7 @@ MachineState<unsigned long> *MachineState<unsigned long>::initialMachineState(Lo
 }
 
 template<typename ait>
-void MachineState<ait>::dumpSnapshot(LogWriter *lw) const
+void MachineState<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 {
 	addressSpace->dumpBrkPtr(lw);
 	signalHandlers.dumpSnapshot(lw);
@@ -139,7 +139,10 @@ template <typename ait> VexAllocTypeWrapper<MachineState<ait> > MachineState<ait
 	template MachineState<t> *MachineState<t>::dupeSelf() const;	\
 	template bool MachineState<t>::crashed() const;			\
 	template MachineState<t> *MachineState<t>::initialMachineState(AddressSpace *as, \
-								       const LogRecordInitialSighandlers &handlers); \
-	template void MachineState<t>::dumpSnapshot(LogWriter *lw) const; \
-	template VexAllocTypeWrapper<MachineState<t> > MachineState<t>::allocator 
+								       const LogRecordInitialSighandlers<t> &handlers); \
+	template void MachineState<t>::dumpSnapshot(LogWriter<t> *lw) const; \
+	template VexAllocTypeWrapper<MachineState<t> > MachineState<t>::allocator; \
+	template MachineState<t> *MachineState<t>::initialMachineState(LogReader<t> *lf, \
+								       LogReaderPtr ptr, \
+								       LogReaderPtr *end)
 

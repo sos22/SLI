@@ -2,25 +2,26 @@
  * methods on events. */
 #include "sli.h"
 
-template <>
-void RdtscEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <typename ait>
+void RdtscEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	LogRecordRdtsc *lrr = dynamic_cast<LogRecordRdtsc *>(lr);
+	LogRecordRdtsc<ait> *lrr = dynamic_cast<LogRecordRdtsc<ait> *>(lr);
 	if (!lrr)
 		throw ReplayFailedException("wanted a rdtsc, got %s",
 					    lr->name());
 	thr->temporaries[tmp].lo = lrr->tsc;
 }
 
-template <>
-InterpretResult RdtscEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
+template <typename ait>
+InterpretResult RdtscEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	printf("fake rdtsc\n");
+	*lr = NULL;
 	return InterpretResultIncomplete;
 }
 
-template <>
-StoreEvent<unsigned long>::StoreEvent(unsigned long _addr, unsigned _size, const void *_data)
+template <typename ait>
+StoreEvent<ait>::StoreEvent(ait _addr, unsigned _size, const void *_data)
 	: addr(_addr),
 	  size(_size)
 {
@@ -28,15 +29,16 @@ StoreEvent<unsigned long>::StoreEvent(unsigned long _addr, unsigned _size, const
 	memcpy(data, _data, size);
 }
 
-template <>
-StoreEvent<unsigned long>::~StoreEvent()
+template <typename ait>
+StoreEvent<ait>::~StoreEvent()
 {
 	free(data);
 }
 
-static void checkSegv(LogRecord *lr, unsigned long addr)
+template <typename ait>
+static void checkSegv(LogRecord<ait> *lr, ait addr)
 {
-	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
+	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a segv for store to %lx, got %s",
 					    addr, lr->name());
@@ -48,11 +50,11 @@ static void checkSegv(LogRecord *lr, unsigned long addr)
 					    lrs->virtaddr, addr);
 }
 
-template <>
-void StoreEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <typename ait>
+void StoreEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	if (ms->addressSpace->isWritable(addr, size, thr)) {
-		LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr);
+		LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
 		if (!lrs)
 			throw ReplayFailedException("wanted a store, got %s",
 						    lr->name());
@@ -66,18 +68,18 @@ void StoreEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr
 		ms->addressSpace->writeMemory(addr, size, data, false, thr);
 		thr->nrAccesses++;
 	} else {
-		checkSegv(lr, addr);
+	        checkSegv<ait>(lr, addr);
 	}
 }
 
-template <>
-InterpretResult StoreEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
-						LogRecord **lr)
+template <typename ait>
+InterpretResult StoreEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms,
+				      LogRecord<ait> **lr)
 {
 	if (lr) {
 		void *sb = malloc(size);
 		memcpy(sb, data, size);
-		*lr = new LogRecordStore(thr->tid, size, addr, sb);
+		*lr = new LogRecordStore<ait>(thr->tid, size, addr, sb);
 	}
 	if (ms->addressSpace->isWritable(addr, size, thr)) {
 		ms->addressSpace->writeMemory(addr, size, data, false, thr);
@@ -89,11 +91,11 @@ InterpretResult StoreEvent<unsigned long>::fake(Thread<unsigned long> *thr, Mach
 	}
 }
 
-template <>
-void LoadEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <typename ait>
+void LoadEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
-		LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
+		LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
 		if (!lrl)
 			throw ReplayFailedException("wanted a load, got %s",
 						    lr->name());
@@ -121,8 +123,8 @@ void LoadEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr,
 	}
 }
 
-template <>
-InterpretResult LoadEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
+template <typename ait>
+InterpretResult LoadEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		unsigned char buf[16];
@@ -138,7 +140,7 @@ InterpretResult LoadEvent<unsigned long>::fake(Thread<unsigned long> *thr, Machi
 		if (lr) {
 			void *rb = malloc(size);
 			memcpy(rb, buf, size);
-			*lr = new LogRecordLoad(thr->tid, size, addr, rb);
+			*lr = new LogRecordLoad<ait>(thr->tid, size, addr, rb);
 		}
 		thr->nrAccesses++;
 		return InterpretResultContinue;
@@ -150,10 +152,10 @@ InterpretResult LoadEvent<unsigned long>::fake(Thread<unsigned long> *thr, Machi
 	}
 }
 
-template <>
-void InstructionEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <typename ait>
+void InstructionEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr);
+	LogRecordFootstep<ait> *lrf = dynamic_cast<LogRecordFootstep<ait> *>(lr);
 	if (!lrf)
 		throw ReplayFailedException("wanted a footstep, got %s",
 					    lr->name());
@@ -179,19 +181,19 @@ void InstructionEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogReco
        CHECK_REGISTER(4);
 }
 
-template <>
-InterpretResult InstructionEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
-						      LogRecord **lr)
+template <typename ait>
+InterpretResult InstructionEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms,
+					    LogRecord<ait> **lr)
 {
 	if (lr)
-		*lr = new LogRecordFootstep(thr->tid, rip, reg0, reg1, reg2, reg3, reg4);
+		*lr = new LogRecordFootstep<ait>(thr->tid, rip, reg0, reg1, reg2, reg3, reg4);
 	return InterpretResultContinue;
 }
 
-template <>
-void SyscallEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <typename ait>
+void SyscallEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	LogRecordSyscall *lrs = dynamic_cast<LogRecordSyscall *>(lr);
+	LogRecordSyscall<ait> *lrs = dynamic_cast<LogRecordSyscall<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a syscall, got %s",
 					    lr->name());
@@ -199,22 +201,21 @@ void SyscallEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *
 	replay_syscall(lrs, thr, ms);
 }
 
-template <>
-void CasEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <typename ait>
+void CasEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	throw SliException("CAS events need a special replay method");
 }
 
-template <>
-void CasEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms,
-				     const LogReader *lf, LogReader::ptr ptr,
-				     LogReader::ptr *outPtr, LogWriter *lw)
+template <typename ait>
+void CasEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms,
+			   const LogReader<ait> *lf, LogReaderPtr ptr,
+			   LogReaderPtr *outPtr, LogWriter<ait> *lw)
 {
-	unsigned long expected_buf[2] = {expected.lo, expected.hi};
-	unsigned long data_buf[2] = {data.lo, data.hi};
+	ait expected_buf[2] = {expected.lo, expected.hi};
+	ait data_buf[2] = {data.lo, data.hi};
 
-
-	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
+	LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
 					    lr->name());
@@ -223,7 +224,7 @@ void CasEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, 
 					    lrl->size, lrl->ptr,
 					    size, addr.lo);
 
-	unsigned long seen_buf[2];
+	ait seen_buf[2];
 	memset(seen_buf, 0, sizeof(seen_buf));
 	ms->addressSpace->readMemory(addr.lo, size, seen_buf, false, thr);
 	if (memcmp(seen_buf, lrl->buf, size))
@@ -234,10 +235,10 @@ void CasEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, 
 	if (memcmp(seen_buf, expected_buf, size))
 		return;
 
-	LogRecord *lr2 = lf->read(ptr, outPtr);
+        LogRecord<ait> *lr2 = lf->read(ptr, outPtr);
 	if (lw)
 		lw->append(*lr2);
-	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
+        LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");
 	if (size != lrs->size || addr.lo != lrs->ptr)
@@ -251,19 +252,19 @@ void CasEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, 
 	ms->addressSpace->writeMemory(addr.lo, size, data_buf, false, thr);
 }
 
-template <>
-InterpretResult CasEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1,
-					      LogRecord **lr2)
+template <typename ait>
+InterpretResult CasEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr1,
+				    LogRecord<ait> **lr2)
 {
-	unsigned long expected_buf[2] = {expected.lo, expected.hi};
-	unsigned long data_buf[2] = {data.lo, data.hi};
-	unsigned long seen_buf[2];
+	ait expected_buf[2] = {expected.lo, expected.hi};
+	ait data_buf[2] = {data.lo, data.hi};
+	ait seen_buf[2];
 	memset(seen_buf, 0, sizeof(seen_buf));
 	ms->addressSpace->readMemory(addr.lo, size, seen_buf, false, thr);
 	if (lr1) {
 		void *sb = malloc(size);
 		memcpy(sb, seen_buf, size);
-		*lr1 = new LogRecordLoad(thr->tid, size, addr.lo, sb);
+		*lr1 = new LogRecordLoad<ait>(thr->tid, size, addr.lo, sb);
 	}
 	thr->temporaries[dest].lo = seen_buf[0];
 	thr->temporaries[dest].hi = seen_buf[1];
@@ -272,23 +273,23 @@ InterpretResult CasEvent<unsigned long>::fake(Thread<unsigned long> *thr, Machin
 		if (lr2) {
 			void *sb = malloc(size);
 			memcpy(sb, data_buf, size);
-			*lr2 = new LogRecordStore(thr->tid, size, addr.lo, sb);
+			*lr2 = new LogRecordStore<ait>(thr->tid, size, addr.lo, sb);
 		}
 	} else if (lr2)
 		*lr2 = NULL;
 	return InterpretResultContinue;
 }
 
-template <>
-InterpretResult CasEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr1)
+template <typename ait>
+InterpretResult CasEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr1)
 {
 	return fake(thr, ms, lr1, NULL);
 }
 
-template <>
-void SignalEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *lr, MachineState<unsigned long> *ms)
+template <typename ait>
+void SignalEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
+	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a signal record, got %s",
 					    lr->name());
@@ -308,11 +309,11 @@ void SignalEvent<unsigned long>::replay(Thread<unsigned long> *thr, LogRecord *l
 	thr->crashed = true;
 }
 
-template <>
-InterpretResult SignalEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
+template <typename ait>
+InterpretResult SignalEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	if (lr)
-		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, 0, virtaddr);
+		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, 0, virtaddr);
 	thr->crashed = true;
 	return InterpretResultCrash;
 }

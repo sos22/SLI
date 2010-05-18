@@ -164,11 +164,9 @@ public:
 };
 
 template <typename ait> class ThreadEvent;
-class LogRecordInitialRegisters;
-class LogWriter;
-class LogRecordVexThreadState;
-class LogRecordAllocateMemory;
-class LogRecordMemory;
+template <typename ait> class LogRecordInitialRegisters;
+template <typename ait> class LogWriter;
+template <typename ait> class LogRecordVexThreadState;
 
 template <typename abst_int_type>
 class Thread {
@@ -207,12 +205,12 @@ private:
 public:
 	ThreadEvent<abst_int_type> *runToEvent(AddressSpace *addrSpace);
 
-	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters &initRegs);
+	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
 	Thread<abst_int_type> *fork(unsigned newPid);
 	Thread<abst_int_type> *dupeSelf() const;
-	void dumpSnapshot(LogWriter *lw) const;
+	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;
 
-	void imposeState(const LogRecordVexThreadState &rec,
+	void imposeState(const LogRecordVexThreadState<abst_int_type> &rec,
 			 AddressSpace *as);
 
 	void visit(HeapVisitor &hv) const;
@@ -406,9 +404,10 @@ public:
 	void visit(HeapVisitor &hv) const;
 };
 
+template <typename ait>
 class LogRecord : public Named {
 	/* DNI */
-	LogRecord(const LogRecord &);
+	LogRecord(const LogRecord<ait> &);
 	ThreadId tid;
 protected:
 	void *marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const;
@@ -420,8 +419,11 @@ public:
 	virtual LogRecord *dupe() const = 0;
 };
 
-class LogRecordInitialSighandlers : public LogRecord {
-	friend class SignalHandlers;
+template <typename ait> class SignalHandlers;
+
+template <typename ait>
+class LogRecordInitialSighandlers : public LogRecord<ait> {
+	friend class SignalHandlers<ait>;
 	struct sigaction handlers[64];
 protected:
 	virtual char *mkName() const {
@@ -430,37 +432,42 @@ protected:
 public:
 	LogRecordInitialSighandlers(ThreadId tid,
 				    const struct sigaction *sa)
-		: LogRecord(tid)
+		: LogRecord<ait>(tid)
 	{
 		memcpy(handlers, sa, sizeof(*sa) * 64);
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordInitialSighandlers(thread(), handlers);
+		return new LogRecordInitialSighandlers<ait>(this->thread(), handlers);
 	}
 };
 
+template <typename ait>
 class SignalHandlers {
 public:
 	struct sigaction handlers[64];
-	SignalHandlers(const LogRecordInitialSighandlers &init) {
+	SignalHandlers(const LogRecordInitialSighandlers<ait> &init) {
 		memcpy(handlers, init.handlers, sizeof(init.handlers));
 	}
-	void dumpSnapshot(LogWriter *lw) const;
+	void dumpSnapshot(LogWriter<ait> *lw) const;
 };
 
+/* gcc struggles with member classes of template classes, so this has
+   to be non-member. */
+class LogReaderPtr {
+public:
+	unsigned char cls_data[32];
+};
+
+template <typename ait>
 class LogReader {
 public:
-	class ptr {
-	public:
-		unsigned char cls_data[32];
-	};
-	virtual LogRecord *read(ptr startPtr, ptr *outPtr) const = 0;
+	virtual LogRecord<ait> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const = 0;
 	virtual ~LogReader() {}
 };
 
-class LogFile : public LogReader {
+class LogFile : public LogReader<unsigned long> {
 	int fd;
 	struct _ptr {
 		uint64_t off;
@@ -469,23 +476,23 @@ class LogFile : public LogReader {
 		_ptr() : off(0xcafebabe00000000ul), record_nr(0xbeeffeed), valid(false) {}
 		bool operator>=(const _ptr &b) const { return off >= b.off; }
 	};
-	_ptr unwrapPtr(ptr p) const {
+	_ptr unwrapPtr(LogReaderPtr p) const {
 		return *(_ptr *)p.cls_data;
 	}
 	_ptr forcedEof;
 public:
-	LogReader::ptr mkPtr(uint64_t off, unsigned record_nr) const {
-		ptr w;
+	LogReaderPtr mkPtr(uint64_t off, unsigned record_nr) const {
+		LogReaderPtr w;
 		_ptr *p = (_ptr *)w.cls_data;
 		p->off = off;
 		p->record_nr = record_nr;
 		p->valid = true;
 		return w;
 	}
-	virtual LogRecord *read(ptr startPtr, ptr *outPtr) const;
+	virtual LogRecord<unsigned long> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
 	~LogFile();
-	static LogFile *open(const char *path, ptr *initial_ptr);
-	LogFile *truncate(ptr eof);
+	static LogFile *open(const char *path, LogReaderPtr *initial_ptr);
+	LogFile *truncate(LogReaderPtr eof);
 };
 
 template <typename abst_int_type>
@@ -503,13 +510,13 @@ private:
 	MachineState();
 	~MachineState();
 	static MachineState *initialMachineState(AddressSpace *as,
-						 const LogRecordInitialSighandlers &handlers);
+						 const LogRecordInitialSighandlers<abst_int_type> &handlers);
 public:
 	AddressSpace *addressSpace;
-	SignalHandlers signalHandlers;
-	static MachineState<abst_int_type> *initialMachineState(LogReader *lf,
-								LogFile::ptr startPtr,
-								LogFile::ptr *endPtr);
+	SignalHandlers<abst_int_type> signalHandlers;
+	static MachineState<abst_int_type> *initialMachineState(LogReader<abst_int_type> *lf,
+								LogReaderPtr startPtr,
+								LogReaderPtr *endPtr);
 	
 	void registerThread(Thread<abst_int_type> *t) {
 		t->tid = nextTid;
@@ -538,13 +545,13 @@ public:
 	
 	MachineState<abst_int_type> *dupeSelf() const;
 
-	void dumpSnapshot(LogWriter *lw) const;
+	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;
 
 	void visit(HeapVisitor &hv) const;
 	void sanityCheck() const;
 };
 
-class LogRecordFootstep;
+template <typename ait> class LogRecordFootstep;
 
 enum InterpretResult {
 	InterpretResultContinue = 0xf001,
@@ -554,14 +561,14 @@ enum InterpretResult {
 	InterpretResultTimedOut
 };
 
-class MemoryTrace;
+template <typename ait> class MemoryTrace;
 
 template<typename abst_int_type>
 class Interpreter {
-	void replayFootstep(const LogRecordFootstep &lrf,
-			    const LogReader *lr,
-			    LogReader::ptr startOffset,
-			    LogReader::ptr *endOffset);
+	void replayFootstep(const LogRecordFootstep<abst_int_type> &lrf,
+			    const LogReader<abst_int_type> *lr,
+			    LogReaderPtr startOffset,
+			    LogReaderPtr *endOffset);
 
 	MachineState<abst_int_type> *currentState;
 	VexGcRoot currentStateRoot;
@@ -571,42 +578,47 @@ public:
 		currentStateRoot((void **)&currentState)
 	{
 	}
-	void replayLogfile(const LogReader *lf, LogReader::ptr startingPoint,
-			   LogReader::ptr *endingPoint = NULL, LogWriter *log = NULL);
+	void replayLogfile(const LogReader<abst_int_type> *lf, LogReaderPtr startingPoint,
+			   LogReaderPtr *endingPoint = NULL, LogWriter<abst_int_type> *log = NULL);
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
-					     MemoryTrace **output,
+					     MemoryTrace<abst_int_type> **output,
 					     unsigned max_events);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
-				      LogWriter *output = NULL);
-	void runToFailure(ThreadId tid, LogWriter *output,
+				      LogWriter<abst_int_type> *output = NULL);
+	void runToFailure(ThreadId tid, LogWriter<abst_int_type> *output,
 			  unsigned max_events = 0);
 };
 
+template <typename ait>
 class LogWriter {
 public:
-	virtual void append(const LogRecord &lr) = 0;
+	virtual void append(const LogRecord<ait> &lr) = 0;
 	virtual ~LogWriter() {}
-	InterpretResult recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent<unsigned long> *evt);
+	InterpretResult recordEvent(Thread<ait> *thr, MachineState<ait> *ms, ThreadEvent<ait> *evt);
 };
 
-class LogFileWriter : public LogWriter {
+class LogFileWriter : public LogWriter<unsigned long> {
 	int fd;
 public:
-	void append(const LogRecord &lr);
+	void append(const LogRecord<unsigned long> &lr);
 	static LogFileWriter *open(const char *fname);
 	~LogFileWriter();
 };
 
-class MemLog : public LogReader, public LogWriter {
-	std::vector<LogRecord *> *content;
-	unsigned offset;
-	const MemLog *parent;
+template <typename ait> void destroy_memlog(void *_ctxt);
 
-	static unsigned unwrapPtr(ptr p) {
+template <typename ait>
+class MemLog : public LogReader<ait>, public LogWriter<ait> {
+	static VexAllocTypeWrapper<MemLog<ait>, visit_object<MemLog<ait> >, destroy_memlog<ait> > allocator;
+	std::vector<LogRecord<ait> *> *content;
+	unsigned offset;
+	const MemLog<ait> *parent;
+
+	static unsigned unwrapPtr(LogReaderPtr p) {
 		return *(unsigned *)p.cls_data;
 	}
-	static ptr mkPtr(unsigned o) {
-		ptr p;
+	static LogReaderPtr mkPtr(unsigned o) {
+		LogReaderPtr p;
 		*(unsigned *)p.cls_data = o;
 		return p;
 	}
@@ -621,13 +633,13 @@ class MemLog : public LogReader, public LogWriter {
 
 public:
 	static MemLog *emptyMemlog();
-	static LogReader::ptr startPtr() { return mkPtr(0); }
-	MemLog *dupeSelf() const;
-	LogRecord *read(ptr startPtr, ptr *outPtr) const;
-	InterpretResult recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent<unsigned long> *evt);
+	static LogReaderPtr startPtr() { return mkPtr(0); }
+	MemLog<ait> *dupeSelf() const;
+	LogRecord<ait> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
+	InterpretResult recordEvent(Thread<ait> *thr, MachineState<ait> *ms, ThreadEvent<ait> *evt);
 	void dump() const;
 
-	void append(const LogRecord &lr);
+	void append(const LogRecord<ait> &lr);
 
 	/* Should only be called by GC destruct routine */
 	void destruct();
@@ -639,8 +651,8 @@ template <typename ait>
 class ThreadEvent : public Named {
 public:
 	/* Replay the event using information in the log record */
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms) = 0;
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL) = 0;
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL) = 0;
 	virtual ~ThreadEvent() {};
 };
 
@@ -650,22 +662,25 @@ class RdtscEvent : public ThreadEvent<ait> {
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
 };
 
+template <typename ait> class MemoryAccessLoad;
+template <typename ait> class MemoryAccessStore;
+
 template <typename ait>
 class LoadEvent : public ThreadEvent<ait> {
-	friend class MemoryAccessLoad;
+	friend class MemoryAccessLoad<ait>;
 	IRTemp tmp;
 	ait addr;
 	unsigned size;
 protected:
 	virtual char *mkName() const { return my_asprintf("load(%d, 0x%lx, %d)", tmp, addr, size); }
 public:
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	LoadEvent(IRTemp _tmp, ait _addr, unsigned _size) :
 		tmp(_tmp),
 		addr(_addr),
@@ -676,22 +691,22 @@ public:
 
 template <typename ait>
 class StoreEvent : public ThreadEvent<ait> {
-	friend class MemoryAccessStore;
+	friend class MemoryAccessStore<ait>;
 	ait addr;
 	unsigned size;
 	void *data;
 protected:
 	virtual char *mkName() const { return my_asprintf("store(0x%lx, %d)", addr, size); }
 public:
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	StoreEvent(ait addr, unsigned size, const void *data);
 	virtual ~StoreEvent();
 };
 
 template <typename ait>
 class InstructionEvent : public ThreadEvent<ait> {
-	unsigned long rip;
+	ait rip;
 	ait reg0;
 	ait reg1;
 	ait reg2;
@@ -703,9 +718,9 @@ protected:
 				   rip, reg0, reg1, reg2, reg3, reg4);
 	}
 public:
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
-	InstructionEvent(unsigned long _rip, ait _reg0, ait _reg1,
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	InstructionEvent(ait _rip, ait _reg0, ait _reg1,
 			 ait _reg2, ait _reg3, ait _reg4) :
 		rip(_rip),
 		reg0(_reg0),
@@ -716,8 +731,6 @@ public:
 	{
 	}
 };
-
-class LogWriter;
 
 template <typename ait>
 class CasEvent : public ThreadEvent<ait> {
@@ -733,14 +746,14 @@ protected:
 				   expected.lo, expected.hi);
 	}
 public:
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL,
-				     LogRecord **lr2 = NULL);
-	void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms,
-		    const LogReader *lf, LogReader::ptr ptr,
-		    LogReader::ptr *outPtr, LogWriter *lw);
-	void record(Thread<ait> *thr, LogRecord **lr1, LogRecord **lr2);
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL,
+				     LogRecord<ait> **lr2 = NULL);
+	void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms,
+		    const LogReader<ait> *lf, LogReaderPtr ptr,
+		    LogReaderPtr *outPtr, LogWriter<ait> *lw);
+	void record(Thread<ait> *thr, LogRecord<ait> **lr1, LogRecord<ait> **lr2);
 	CasEvent(IRTemp _dest,
 		 expression_result<ait> _addr,
 		 expression_result<ait> _data,
@@ -762,8 +775,8 @@ protected:
 		return my_asprintf("syscall");
 	}
 public:
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 };
 
 template <typename ait>
@@ -776,8 +789,8 @@ protected:
 				   virtaddr);
 	}
 public:
-	virtual void replay(Thread<ait> *thr, LogRecord *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord **lr = NULL);
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	SignalEvent(unsigned _signr, ait _va) :
 		signr(_signr),
 		virtaddr(_va)
@@ -785,12 +798,13 @@ public:
 	}
 };
 
+template <typename ait>
 class MemoryAccess : public Named {
 public:
 	ThreadId tid;
-	unsigned long addr;
+	ait addr;
 	unsigned size;
-	MemoryAccess(ThreadId _tid, unsigned long _addr, unsigned _size)
+	MemoryAccess(ThreadId _tid, ait _addr, unsigned _size)
 		: tid(_tid),
 		  addr(_addr),
 		  size(_size)
@@ -800,12 +814,13 @@ public:
 	void dump() const { printf("%s\n", name()); }
 };
 
-class LogRecordLoad : public LogRecord {
-	friend class LoadEvent<unsigned long>;
-	friend class CasEvent<unsigned long>;
-	friend class MemoryAccessLoad;
+template <typename ait>
+class LogRecordLoad : public LogRecord<ait> {
+	friend class LoadEvent<ait>;
+	friend class CasEvent<ait>;
+	friend class MemoryAccessLoad<ait>;
 	unsigned size;
-	unsigned long ptr;
+	ait ptr;
 	const void *buf;
 protected:
 	char *mkName() const {
@@ -814,9 +829,9 @@ protected:
 public:
 	LogRecordLoad(ThreadId _tid,
 		      unsigned _size,
-		      unsigned long _ptr,
+		      ait _ptr,
 		      const void *_buf) :
-		LogRecord(_tid),
+		LogRecord<ait>(_tid),
 		size(_size),
 		ptr(_ptr),
 		buf(_buf)
@@ -824,37 +839,40 @@ public:
 	}
 	virtual ~LogRecordLoad() { free((void *)buf); }
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
 		void *b = malloc(size);
 		memcpy(b, buf, size);
-		return new LogRecordLoad(thread(), size, ptr, b);
+		return new LogRecordLoad<ait>(this->thread(), size, ptr, b);
 	}
 };
 
-class MemoryAccessLoad : public MemoryAccess {
+template <typename ait>
+class MemoryAccessLoad : public MemoryAccess<ait> {
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("%d: Load(%lx:%lx)", tid._tid(), addr, addr + size);
+		return my_asprintf("%d: Load(%lx:%lx)", this->tid._tid(), this->addr,
+				   this->addr + this->size);
 	}
 public:
-	MemoryAccessLoad(ThreadId tid, const class LoadEvent<unsigned long> &evt)
-		: MemoryAccess(tid, evt.addr, evt.size)
+	MemoryAccessLoad(ThreadId tid, const class LoadEvent<ait> &evt)
+		: MemoryAccess<ait>(tid, evt.addr, evt.size)
 	{
 	}
-	MemoryAccessLoad(const LogRecordLoad &lrl)
-		: MemoryAccess(lrl.thread(), lrl.ptr, lrl.size)
+	MemoryAccessLoad(const LogRecordLoad<ait> &lrl)
+		: MemoryAccess<ait>(lrl.thread(), lrl.ptr, lrl.size)
 	{
 	}
 	virtual bool isLoad() { return true; }
 };
 
-class LogRecordStore : public LogRecord {
-	friend class StoreEvent<unsigned long>;
-	friend class CasEvent<unsigned long>;
-	friend class MemoryAccessStore;
+template <typename ait>
+class LogRecordStore : public LogRecord<ait> {
+	friend class StoreEvent<ait>;
+	friend class CasEvent<ait>;
+	friend class MemoryAccessStore<ait>;
 	unsigned size;
-	unsigned long ptr;
+	ait ptr;
 	const void *buf;
 protected:
 	virtual char *mkName() const {
@@ -863,9 +881,9 @@ protected:
 public:
 	LogRecordStore(ThreadId _tid,
 		       unsigned _size,
-		       unsigned long _ptr,
+		       ait _ptr,
 		       const void *_buf) :
-		LogRecord(_tid),
+		LogRecord<ait>(_tid),
 		size(_size),
 		ptr(_ptr),
 		buf(_buf)
@@ -873,84 +891,85 @@ public:
 	}
 	virtual ~LogRecordStore() { free((void *)buf); }
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
 		void *b = malloc(size);
 		memcpy(b, buf, size);
-		return new LogRecordStore(thread(), size, ptr, b);
+		return new LogRecordStore<ait>(this->thread(), size, ptr, b);
 	}
 };
 
-class MemoryAccessStore : public MemoryAccess {
+template <typename ait>
+class MemoryAccessStore : public MemoryAccess<ait> {
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("%d: Store(%lx:%lx)", tid._tid(), addr, addr + size);
+		return my_asprintf("%d: Store(%lx:%lx)",
+				   this->tid._tid(),
+				   this->addr,
+				   this->addr + this->size);
 	}
 public:
-	MemoryAccessStore(ThreadId tid, const class StoreEvent<unsigned long> &evt)
-		: MemoryAccess(tid, evt.addr, evt.size)
+	MemoryAccessStore(ThreadId tid, const class StoreEvent<ait> &evt)
+		: MemoryAccess<ait>(tid, evt.addr, evt.size)
 	{
 	}
-	MemoryAccessStore(const LogRecordStore &lrs)
-		: MemoryAccess(lrs.thread(), lrs.ptr, lrs.size)
+	MemoryAccessStore(const LogRecordStore<ait> &lrs)
+		: MemoryAccess<ait>(lrs.thread(), lrs.ptr, lrs.size)
 	{
 	}
 	virtual bool isLoad() { return false; }
 };
 
 /* Essentially a thin wrapper around std::vector */
+template <typename ait>
 class MemoryTrace {
 public:
-	std::vector<MemoryAccess *> content;
+	std::vector<MemoryAccess<ait> *> content;
 	~MemoryTrace() {
 		for (unsigned x; x < content.size(); x++)
 			delete content[x];
 	}
 	size_t size() const { return content.size(); }
-	MemoryAccess *&operator[](unsigned idx) { return content[idx]; }
-	void push_back(MemoryAccess *x) { content.push_back(x); }
+	MemoryAccess<ait> *&operator[](unsigned idx) { return content[idx]; }
+	void push_back(MemoryAccess<ait> *x) { content.push_back(x); }
 	MemoryTrace();
-	MemoryTrace(const LogReader &lr, LogReader::ptr start);
+	MemoryTrace(const LogReader<ait> &lr, LogReaderPtr start);
 	void dump() const;
 };
 
+template <typename ait>
 class MemTracePool {
-	typedef std::map<ThreadId, MemoryTrace *> contentT;
+	typedef std::map<ThreadId, MemoryTrace<ait> *> contentT;
 	contentT content;
 public:
-	~MemTracePool() {
-		while (!content.empty()) {
-			contentT::iterator it = content.begin();
-			delete it->second;
-			content.erase(it);
-		}
-	}
-	MemTracePool(MachineState<unsigned long> *base_state);
+	~MemTracePool();
+	MemTracePool(MachineState<ait> *base_state);
 
 	std::map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
 };
 
-class LogRecordFootstep : public LogRecord {
+template <typename ait>
+class LogRecordFootstep : public LogRecord<ait> {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("footstep(rip = %lx, regs = %lx, %lx, %lx, %lx, %lx)",
 				   rip, reg0, reg1, reg2, reg3, reg4);
 	}
 public:
-	unsigned long rip;
-	unsigned long reg0;
-	unsigned long reg1;
-	unsigned long reg2;
-	unsigned long reg3;
-	unsigned long reg4;
+	ait rip;
+	ait reg0;
+	ait reg1;
+	ait reg2;
+	ait reg3;
+	ait reg4;
 	LogRecordFootstep(ThreadId _tid,
-			  unsigned long _rip,
-			  unsigned long _reg0,
-			  unsigned long _reg1,
-			  unsigned long _reg2,
-			  unsigned long _reg3,
-			  unsigned long _reg4) :
-		LogRecord(_tid),
+			  ait _rip,
+			  ait _reg0,
+			  ait _reg1,
+			  ait _reg2,
+			  ait _reg3,
+			  ait _reg4) :
+		LogRecord<ait>(_tid),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -960,27 +979,28 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordFootstep(thread(), rip, reg0, reg1, reg2, reg3, reg4);
+		return new LogRecordFootstep<ait>(this->thread(), rip, reg0, reg1, reg2, reg3, reg4);
 	}
 };
 
-class LogRecordSyscall : public LogRecord {
+template <typename ait>
+class LogRecordSyscall : public LogRecord<ait> {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall(nr = %lx, res = %lx, args = %lx, %lx, %lx)",
 				   sysnr, res, arg1, arg2, arg3);
 	}
 public:
-	unsigned long sysnr, res, arg1, arg2, arg3;
+	ait sysnr, res, arg1, arg2, arg3;
 	LogRecordSyscall(ThreadId _tid,
-			 unsigned long _sysnr,
-			 unsigned long _res,
-			 unsigned long _arg1,
-			 unsigned long _arg2,
-			 unsigned long _arg3) :
-		LogRecord(_tid),
+			 ait _sysnr,
+			 ait _res,
+			 ait _arg1,
+			 ait _arg2,
+			 ait _arg3) :
+		LogRecord<ait>(_tid),
 		sysnr(_sysnr),
 		res(_res),
 		arg1(_arg1),
@@ -989,78 +1009,81 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordSyscall(thread(), sysnr, res, arg1, arg2, arg3);
+		return new LogRecordSyscall<ait>(this->thread(), sysnr, res, arg1, arg2, arg3);
 	}
 };
 
-class LogRecordMemory : public LogRecord {
+template <typename ait>
+class LogRecordMemory : public LogRecord<ait> {
 protected:
 	char *mkName() const {
 		return my_asprintf("memory(%lx,%x)", start, size);
 	}
 public:
 	unsigned size;
-	unsigned long start;
+	ait start;
 	const void *contents;
 	LogRecordMemory(ThreadId _tid,
 			unsigned _size,
-			unsigned long _start,
+			ait _start,
 			const void *_contents) :
-		LogRecord(_tid),
+		LogRecord<ait>(_tid),
 		size(_size),
 		start(_start),
 		contents(_contents)
 	{}
 	virtual ~LogRecordMemory() { free((void *)contents); }
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
 		void *b = malloc(size);
 		memcpy(b, contents, size);
-		return new LogRecordMemory(thread(), size, start, b);
+		return new LogRecordMemory<ait>(this->thread(), size, start, b);
 	}
 };
 
-class LogRecordRdtsc : public LogRecord {
-	friend class RdtscEvent<unsigned long>;
-	unsigned long tsc;
+template <typename ait>
+class LogRecordRdtsc : public LogRecord<ait> {
+	friend class RdtscEvent<ait>;
+	ait tsc;
 protected:
 	char *mkName() const {
 		return my_asprintf("rdtsc(%lx)", tsc);
 	}
 public:
 	LogRecordRdtsc(ThreadId _tid,
-		       unsigned long _tsc)
-		: LogRecord(_tid),
+		       ait _tsc)
+		: LogRecord<ait>(_tid),
 		  tsc(_tsc)
 	{
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordRdtsc(thread(), tsc);
+		return new LogRecordRdtsc<ait>(this->thread(), tsc);
 	}
 };
 
-class LogRecordSignal : public LogRecord {
+template <typename ait>
+class LogRecordSignal : public LogRecord<ait> {
 public:
 	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d, rip = %lx, err = %lx, va = %lx)",
 				   signr, rip, err, virtaddr);
 	}
 public:
-	unsigned long rip;
+	ait rip;
 	unsigned signr;
-	unsigned long err;
-	unsigned long virtaddr;
+	ait err;
+	ait virtaddr;
 	LogRecordSignal(ThreadId _tid,
-			unsigned long _rip,
+			ait _rip,
 			unsigned _signr,
-			unsigned long _err,
-			unsigned long _va) :
-		LogRecord(_tid),
+			ait _err,
+			ait _va) :
+		LogRecord<ait>(_tid),
 		rip(_rip),
 		signr(_signr),
 		err(_err),
@@ -1068,16 +1091,17 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordSignal(thread(), rip, signr, err, virtaddr);
+		return new LogRecordSignal<ait>(this->thread(), rip, signr, err, virtaddr);
 	}
 };
 
-class LogRecordAllocateMemory : public LogRecord {
+template <typename ait>
+class LogRecordAllocateMemory : public LogRecord<ait> {
 	friend class AddressSpace;
-	unsigned long start;
-	unsigned long size;
+	ait start;
+	ait size;
 	unsigned prot;
 	unsigned flags;
 protected:
@@ -1087,11 +1111,11 @@ protected:
 	}
 public:
 	LogRecordAllocateMemory(ThreadId _tid,
-				unsigned long _start,
-				unsigned long _size,
+				ait _start,
+				ait _size,
 				unsigned _prot,
 				unsigned _flags) :
-		LogRecord(_tid),
+		LogRecord<ait>(_tid),
 		start(_start),
 		size(_size),
 		prot(_prot),
@@ -1099,14 +1123,15 @@ public:
 	{
 	}      
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordAllocateMemory(thread(), start, size, prot, flags);
+		return new LogRecordAllocateMemory<ait>(this->thread(), start, size, prot, flags);
 	}
 };
 
-class LogRecordInitialRegisters : public LogRecord {
-	friend class Thread<unsigned long>;
+template <typename ait>
+class LogRecordInitialRegisters : public LogRecord<ait> {
+	friend class Thread<ait>;
 	VexGuestAMD64State regs;
 protected:
 	virtual char *mkName() const {
@@ -1115,38 +1140,40 @@ protected:
 public:
 	LogRecordInitialRegisters(ThreadId tid,
 				  const VexGuestAMD64State &r) :
-		LogRecord(tid),
+		LogRecord<ait>(tid),
 		regs(r)
 	{
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordInitialRegisters(thread(), regs);
+		return new LogRecordInitialRegisters(this->thread(), regs);
 	}
 };
 
-class LogRecordInitialBrk : public LogRecord {
+template <typename ait>
+class LogRecordInitialBrk : public LogRecord<ait> {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("initbrk(%lx)", brk);
 	}
 public:
-	unsigned long brk;
+	ait brk;
 	LogRecordInitialBrk(ThreadId tid,
-			    unsigned long _brk) :
-		LogRecord(tid),
+			    ait _brk) :
+		LogRecord<ait>(tid),
 		brk(_brk)
 	{
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordInitialBrk(thread(), brk);
+		return new LogRecordInitialBrk(this->thread(), brk);
 	}
 };
 
-class LogRecordVexThreadState : public LogRecord {
+template <typename ait>
+class LogRecordVexThreadState : public LogRecord<ait> {
 protected:
 	virtual char *mkName() const {
 		return strdup("vex state");
@@ -1154,15 +1181,15 @@ protected:
 	VexGcRoot root;
 	LogRecordVexThreadState **root_data;
 public:
-	expression_result_array<unsigned long> tmp;
+	expression_result_array<ait> tmp;
 	unsigned statement_nr;
 	LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
-				expression_result_array<unsigned long> _tmp);
+				expression_result_array<ait> _tmp);
 	void *marshal(unsigned *sz) const;
 	void visit(HeapVisitor &hv) const;
-	LogRecord *dupe() const
+	LogRecord<ait> *dupe() const
 	{
-		return new LogRecordVexThreadState(thread(), statement_nr, tmp);
+		return new LogRecordVexThreadState(this->thread(), statement_nr, tmp);
 	}
 };
 
@@ -1177,13 +1204,13 @@ class AddressSpace {
 public:
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
-	void allocateMemory(const LogRecordAllocateMemory &rec)
+	void allocateMemory(const LogRecordAllocateMemory<unsigned long> &rec)
 	{
 		allocateMemory(rec.start, rec.size, rec.prot, rec.flags);
 	}
 	void releaseMemory(unsigned long start, unsigned long size);
 	void protectMemory(unsigned long start, unsigned long size, VAMap::Protection prot);
-	void populateMemory(const LogRecordMemory &rec)
+	void populateMemory(const LogRecordMemory<unsigned long> &rec)
 	{
 		writeMemory(rec.start, rec.size, rec.contents, true);
 	}
@@ -1210,19 +1237,19 @@ public:
 	void visit(HeapVisitor &hv) const;
 	void sanityCheck() const;
 
-	void dumpBrkPtr(LogWriter *lw) const;
-	void dumpSnapshot(LogWriter *lw) const;
+	void dumpBrkPtr(LogWriter<unsigned long> *lw) const;
+	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
 };
 
-template<typename ait> void replay_syscall(const LogRecordSyscall *lrs,
+template<typename ait> void replay_syscall(const LogRecordSyscall<ait> *lrs,
 					   Thread<ait> *thr,
 					   MachineState<ait> *mach);
-void
-process_memory_records(AddressSpace *addrSpace,
-		       const LogReader *lf,
-		       LogReader::ptr startOffset,
-		       LogReader::ptr *endOffset,
-		       LogWriter *lw);
+
+template<typename ait> void process_memory_records(AddressSpace *addrSpace,
+						   const LogReader<ait> *lf,
+						   LogReaderPtr startOffset,
+						   LogReaderPtr *endOffset,
+						   LogWriter<ait> *lw);
 
 void debugger_attach(void);
 

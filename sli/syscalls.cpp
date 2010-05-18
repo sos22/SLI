@@ -10,20 +10,21 @@ isErrnoSysres(long x)
 	return x >= -4096 && x < 0;
 }
 
+template<typename ait>
 void
 process_memory_records(AddressSpace *addrSpace,
-		       const LogReader *lf,
-		       LogReader::ptr startOffset,
-		       LogReader::ptr *endOffset,
-		       LogWriter *lw)
+		       const LogReader<ait> *lf,
+		       LogReaderPtr startOffset,
+		       LogReaderPtr *endOffset,
+		       LogWriter<ait> *lw)
 {
 	while (1) {
-		LogReader::ptr nextOffset;
-		LogRecord *lr = lf->read(startOffset, &nextOffset);
+		LogReaderPtr nextOffset;
+		LogRecord<ait> *lr = lf->read(startOffset, &nextOffset);
 		if (!lr)
 			break;
-		PointerKeeper<LogRecord> pk(lr);
-		LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr);
+		PointerKeeper<LogRecord<ait> > pk(lr);
+		LogRecordMemory<ait> *lrm = dynamic_cast<LogRecordMemory<ait>*>(lr);
 		if (!lrm)
 			break;
 		if (lw)
@@ -77,14 +78,14 @@ handle_clone(AddressSpace *addrSpace,
 
 template<typename ait>
 void
-replay_syscall(const LogRecordSyscall *lrs,
+replay_syscall(const LogRecordSyscall<ait> *lrs,
 	       Thread<ait> *thr,
 	       MachineState<ait> *mach)
 {
 	AddressSpace *addrSpace = mach->addressSpace;
-	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
-	unsigned long res = lrs->res;
-	unsigned long args[6];
+	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
+	ait res = lrs->res;
+	ait args[6];
 
 	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));
 	args[1] = thr->regs.get_reg(REGISTER_IDX(RSI));
@@ -128,9 +129,9 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_lseek: /* 8 */
 		break;
 	case __NR_mmap: { /* 9 */
-		unsigned long addr = lrs->res;
-		unsigned long length = args[1];
-		unsigned long prot = args[2];
+		ait addr = lrs->res;
+		ait length = args[1];
+		ait prot = args[2];
 		
 		if (!isErrnoSysres(lrs->res)) {
 			length = (length + 4095) & ~4095;
@@ -139,9 +140,9 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	}
 	case __NR_mprotect: { /* 10 */
-		unsigned long addr = args[0];
-		unsigned long size = args[1];
-		unsigned long prot = args[2];
+		ait addr = args[0];
+		ait size = args[1];
+		ait prot = args[2];
 		if (!isErrnoSysres(lrs->res))
 			addrSpace->protectMemory(addr, size, prot);
 		break;
@@ -251,11 +252,11 @@ replay_syscall(const LogRecordSyscall *lrs,
 	thr->regs.set_reg(REGISTER_IDX(RAX), res);
 }
 
-template <>
-InterpretResult SyscallEvent<unsigned long>::fake(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, LogRecord **lr)
+template <typename ait>
+InterpretResult SyscallEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr)
 {
-	unsigned long res;
-	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
+	ait res;
+	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 
 	switch (sysnr) {
 	case __NR_futex:
@@ -267,16 +268,16 @@ InterpretResult SyscallEvent<unsigned long>::fake(Thread<unsigned long> *thr, Ma
 			*lr = NULL;
 		return InterpretResultIncomplete;
 	}
-	LogRecordSyscall *llr = new LogRecordSyscall(thr->tid,
-						     sysnr,
-						     res,
-						     thr->regs.get_reg(REGISTER_IDX(RDI)),
-						     thr->regs.get_reg(REGISTER_IDX(RSI)),
-						     thr->regs.get_reg(REGISTER_IDX(RDX)));
+	LogRecordSyscall<ait> *llr = new LogRecordSyscall<ait>(thr->tid,
+							       sysnr,
+							       res,
+							       thr->regs.get_reg(REGISTER_IDX(RDI)),
+							       thr->regs.get_reg(REGISTER_IDX(RSI)),
+							       thr->regs.get_reg(REGISTER_IDX(RDX)));
 
 	if (lr)
 		*lr = llr;
-	replay_syscall<unsigned long>(llr, thr, ms);
+	replay_syscall<ait>(llr, thr, ms);
 	if (!lr)
 		delete llr;
 	return InterpretResultContinue;

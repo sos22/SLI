@@ -18,7 +18,7 @@ main(int argc, char *argv[])
 	init_sli();
 
 	LogFile *lf;
-	LogReader::ptr ptr;
+	LogReaderPtr ptr;
 
 	lf = LogFile::open(inp, &ptr);
 	if (!lf)

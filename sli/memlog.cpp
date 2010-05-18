@@ -1,18 +1,19 @@
 #include "sli.h"
 
-InterpretResult LogWriter::recordEvent(Thread<unsigned long> *thr, MachineState<unsigned long> *ms, ThreadEvent<unsigned long> *evt)
+template <typename ait>
+InterpretResult LogWriter<ait>::recordEvent(Thread<ait> *thr, MachineState<ait> *ms, ThreadEvent<ait> *evt)
 {
-	CasEvent<unsigned long> *ce = dynamic_cast<CasEvent<unsigned long> *>(evt);
+	CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
 	InterpretResult res;
 
 	if (ce) {
-		LogRecord *lr1, *lr2;
+		LogRecord<ait> *lr1, *lr2;
 		res = ce->fake(thr, ms, &lr1, &lr2);
 		append(*lr1);
 		if (lr2)
 			append(*lr2);
 	} else {
-		LogRecord *lr;
+		LogRecord<ait> *lr;
 		res = evt->fake(thr, ms, &lr);
 		if (lr)
 			append(*lr);
@@ -20,12 +21,14 @@ InterpretResult LogWriter::recordEvent(Thread<unsigned long> *thr, MachineState<
 	return res;
 }
 
-void MemLog::append(const LogRecord &lr)
+template <typename ait>
+void MemLog<ait>::append(const LogRecord<ait> &lr)
 {
 	content->push_back(lr.dupe());
 }
 
-LogRecord *MemLog::read(ptr startPtr, ptr *outPtr) const
+template <typename ait>
+LogRecord<ait> *MemLog<ait>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
 {
 	unsigned o = unwrapPtr(startPtr);
 	if (o < offset) {
@@ -38,7 +41,8 @@ LogRecord *MemLog::read(ptr startPtr, ptr *outPtr) const
 	return (*content)[o - offset]->dupe();
 }
 
-void MemLog::dump() const
+template <typename ait>
+void MemLog<ait>::dump() const
 {
 	unsigned x;
 	if (parent)
@@ -48,7 +52,8 @@ void MemLog::dump() const
 	}
 }
 
-void MemLog::destruct()
+template <typename ait>
+void MemLog<ait>::destruct()
 {
 	unsigned x;
 	for (x = 0; x < content->size(); x++)
@@ -56,54 +61,60 @@ void MemLog::destruct()
 	delete content;
 }
 
-static void destroy_memlog(void *_ctxt)
+template <typename ait>
+void destroy_memlog(void *_ctxt)
 {
-	MemLog *ctxt = (MemLog *)_ctxt;
+	MemLog<ait> *ctxt = (MemLog<ait> *)_ctxt;
 	ctxt->destruct();
 }
 
-void MemLog::visit(HeapVisitor &hv) const
+template <typename ait>
+void MemLog<ait>::visit(HeapVisitor &hv) const
 {
 	hv(parent);
 }
 
+template <typename ait>
 static void visit_memlog(const void *_ctxt, HeapVisitor &hv)
 {
-	const MemLog *ctxt = (const MemLog *)_ctxt;
+	const MemLog<ait> *ctxt = (const MemLog<ait> *)_ctxt;
 	ctxt->visit(hv);
 }
 
-MemLog *MemLog::emptyMemlog()
+template <typename ait>
+MemLog<ait> *MemLog<ait>::emptyMemlog()
 {
-	static const VexAllocType vat = {
-	nbytes: sizeof(MemLog),
-	gc_visit: visit_memlog,
-	destruct: destroy_memlog,
-	name: "MemLog"
-	};
-
-	void *buf = (void *)__LibVEX_Alloc(&vat);
-	MemLog *work = new (buf) MemLog();
-	work->content = new std::vector<LogRecord *>();
+	void *buf = (void *)allocator.alloc();
+	MemLog<ait> *work = new (buf) MemLog<ait>();
+	work->content = new std::vector<LogRecord<ait> *>();
 	return work;
 }
 
-MemLog *MemLog::dupeSelf() const
+template <typename ait>
+MemLog<ait> *MemLog<ait>::dupeSelf() const
 {
-	MemLog *w = emptyMemlog();
+	MemLog<ait> *w = emptyMemlog();
 	w->parent = this;
 	w->offset = offset + content->size();
 	return w;
 }
 
-MemLog::MemLog()
+template <typename ait>
+MemLog<ait>::MemLog()
 {
 	parent = NULL;
 	offset = 0;
 }
 
 
-void MemLog::forceVtable()
+template <typename ait>
+void MemLog<ait>::forceVtable()
 {
 	abort();
 }
+
+template <typename ait> VexAllocTypeWrapper<MemLog<ait>, visit_object<MemLog<ait> >, destroy_memlog<ait> > MemLog<ait>::allocator;
+
+#define MK_MEM_LOG(t)						\
+	template MemLog<t> *MemLog<t>::dupeSelf() const;	\
+	template VexAllocTypeWrapper<MemLog<t>, visit_object<MemLog<t> >, destroy_memlog<t> > MemLog<t>::allocator

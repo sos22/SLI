@@ -1,26 +1,35 @@
 #include "sli.h"
 
-MemoryTrace::MemoryTrace()
+template <typename ait>
+MemoryTrace<ait>::MemoryTrace()
 	: content()
 {  
 }
 
-MemoryTrace::MemoryTrace(const LogReader &lf, LogReader::ptr s)
+template <typename ait>
+MemoryTrace<ait>::MemoryTrace(const LogReader<ait> &lf, LogReaderPtr s)
 	: content()
 {
-	while (LogRecord *lr = lf.read(s, &s)) {
-		if (LogRecordLoad *lrm = dynamic_cast<LogRecordLoad *>(lr))
-			push_back(new MemoryAccessLoad(*lrm));
-		else if (LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr))
-			push_back(new MemoryAccessStore(*lrs));
+	while (LogRecord<ait> *lr = lf.read(s, &s)) {
+		if (LogRecordLoad<ait> *lrm = dynamic_cast<LogRecordLoad<ait> *>(lr))
+		        push_back(new MemoryAccessLoad<ait>(*lrm));
+		else if (LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr))
+		        push_back(new MemoryAccessStore<ait>(*lrs));
 		delete lr;
 	}
 }
 
-void MemoryTrace::dump() const
+template <typename ait>
+void MemoryTrace<ait>::dump() const
 {
-	for (std::vector<MemoryAccess *>::const_iterator it = content.begin();
+	for (class std::vector<MemoryAccess<ait> *>::const_iterator it = content.begin();
 	     it != content.end();
 	     it++)
 		(*it)->dump();
 }
+
+#define MK_MEMTRACE(t)							\
+	template MemoryTrace<t>::MemoryTrace();				\
+	template MemoryTrace<t>::MemoryTrace(const LogReader<t> &lf,	\
+					     LogReaderPtr s);		\
+	template void MemoryTrace<t>::dump() const

@@ -1200,9 +1200,9 @@ finished_block:
 }
 
 template<typename ait>
-InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output, unsigned max_events)
+InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace<ait> **output, unsigned max_events)
 {
-	MemoryTrace *work = new MemoryTrace();
+	MemoryTrace<ait> *work = new MemoryTrace<ait>();
 	*output = work;
 	Thread<ait> *thr = currentState->findThread(tid);
 	if (thr->cannot_make_progress)
@@ -1216,9 +1216,9 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 			return res;
 		}
 		if (LoadEvent<ait> *lr = dynamic_cast<LoadEvent <ait> * > (evt)) {
-		        work->push_back(new MemoryAccessLoad(tid, *lr));
+		        work->push_back(new MemoryAccessLoad<ait>(tid, *lr));
 	        } else if (StoreEvent<ait> *sr = dynamic_cast<StoreEvent<ait> *>(evt)) {
-			work->push_back(new MemoryAccessStore(tid, *sr));
+	                work->push_back(new MemoryAccessStore<ait>(tid, *sr));
 		}
 		max_events--;
 	}
@@ -1227,7 +1227,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 
 template<typename ait>
 void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
-						LogWriter *output)
+						LogWriter<ait> *output)
 {
         Thread<ait> *thr = currentState->findThread(tid);
         while (1) {
@@ -1248,7 +1248,7 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_access
 }
 
 template<typename ait>
-void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter *output, unsigned max_events)
+void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, unsigned max_events)
 {
 	bool have_event_limit = max_events != 0;
 	Thread<ait> *thr = currentState->findThread(tid);
@@ -1265,17 +1265,17 @@ void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter *output, unsigned ma
 }
 
 template<typename ait>
-void Interpreter<ait>::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
-				     LogReader::ptr *eof, LogWriter *lw)
+void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
+				     LogReaderPtr *eof, LogWriter<ait> *lw)
 {
 	while (1) {
-		LogRecord *lr = lf->read(ptr, &ptr);
+		LogRecord<ait> *lr = lf->read(ptr, &ptr);
 		if (!lr)
 			break;
 
 		if (lw)
 			lw->append(*lr);
-		PointerKeeper<LogRecord> k_lr(lr);
+		PointerKeeper<LogRecord<ait> > k_lr(lr);
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
 		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
@@ -1308,17 +1308,17 @@ void Interpreter<ait>::replayLogfile(LogReader const *lf, LogReader::ptr ptr,
 #define MK_INTERPRETER(t)						\
 	template ThreadEvent<t> *Thread<t>::runToEvent(AddressSpace *addrSpace); \
 	template void Interpreter<t>::runToFailure(ThreadId tid,	\
-						   LogWriter *output,	\
+						   LogWriter<t> *output, \
 						   unsigned max_events); \
 	template void Interpreter<t>::runToAccessLoggingEvents(ThreadId tid, \
 							       unsigned nr_accesses, \
-							       LogWriter *output); \
-	template void Interpreter<t>::replayLogfile(LogReader const *lf, \
-						    LogReader::ptr ptr,	\
-						    LogReader::ptr *eof, \
-						    LogWriter *lw);	\
+							       LogWriter<t> *output); \
+	template void Interpreter<t>::replayLogfile(LogReader<t> const *lf, \
+						    LogReaderPtr ptr,	\
+						    LogReaderPtr *eof, \
+						    LogWriter<t> *lw);	\
 	template InterpretResult Interpreter<t>::getThreadMemoryTrace(ThreadId tid, \
-								      MemoryTrace **output, \
+								      MemoryTrace<t> **output, \
 								      unsigned max_events)
 
 
