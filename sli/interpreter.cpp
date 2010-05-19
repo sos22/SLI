@@ -1062,6 +1062,7 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 
 	currentIRSB = irsb;
 	currentIRSBOffset = 0;
+	currentControlCondition = 1;
 }
 
 template<typename ait>
@@ -1077,6 +1078,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 			}
 			assert(currentIRSB);
 		}
+		assert(force(currentControlCondition == 1));
 		while (currentIRSBOffset < currentIRSB->stmts_used) {
 			IRStmt *stmt = currentIRSB->stmts[currentIRSBOffset];
 			currentIRSBOffset++;
@@ -1189,8 +1191,15 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result<ait> guard =
 						eval_expression(stmt->Ist.Exit.guard);
-					if (!force(guard.lo))
+					if (force(!guard.lo)) {
+						currentControlCondition =
+							currentControlCondition && !guard.lo;
+						assert(force(currentControlCondition == 1));
 						break;
+					}
+					currentControlCondition =
+						currentControlCondition && !!guard.lo;
+					assert(force(currentControlCondition == 1));
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
@@ -1198,7 +1207,11 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 					       force(regs.get_reg(REGISTER_IDX(EMWARN))));
 				}
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
-				regs.set_reg(REGISTER_IDX(RIP), stmt->Ist.Exit.dst->Ico.U64);
+				assert(force(currentControlCondition == 1));
+				regs.set_reg(REGISTER_IDX(RIP),
+					     ternary(currentControlCondition,
+						     ait(stmt->Ist.Exit.dst->Ico.U64),
+						     ait(0xdeadbeef)));
 				goto finished_block;
 			}
 
@@ -1217,7 +1230,11 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 		{
 			struct expression_result<ait> next_addr =
 				eval_expression(currentIRSB->next);
-			regs.set_reg(REGISTER_IDX(RIP), next_addr.lo);
+			assert(force(currentControlCondition == 1));
+			regs.set_reg(REGISTER_IDX(RIP),
+				     ternary(currentControlCondition,
+					     next_addr.lo,
+					     ait(0xdeadbeef)));
 		}
 		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
 			currentIRSB = NULL;

@@ -209,6 +209,8 @@ public:
 
 	static VexAllocTypeWrapper<Thread<abst_int_type> > allocator;
 
+	abst_int_type currentControlCondition;
+
 private:
 	/* DNI */
 	Thread();
@@ -1010,7 +1012,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
-	LogRecord<ait> *dupe() const
+	LogRecordFootstep<ait> *dupe() const
 	{
 		return new LogRecordFootstep<ait>(this->thread(), rip, reg0, reg1, reg2, reg3, reg4);
 	}
@@ -1432,6 +1434,21 @@ static inline abstract_interpret_value operator ^=(abstract_interpret_value &lhs
 {
 	lhs.v ^= rhs.v;
 	return lhs;
+}
+
+/* For some obscure reason C++ doesn't let you overload the ?:
+   operator, so do something almost but not equivalent here (not quite
+   because the laziness is wrong.  Then again, the laziness is wrong
+   on || and && as well, so what the hell.). */
+template<typename ait>
+static inline ait ternary(ait cond,
+			  ait t,
+			  ait f)
+{
+	if (force(cond))
+		return t;
+	else
+		return f;
 }
 
 #endif /* !SLI_H__ */

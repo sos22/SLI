@@ -3,6 +3,11 @@
 #include "sli.h"
 
 class CrashReason : public Named {
+public:
+	virtual CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr)
+	{
+		return this;
+	}
 };
 
 class CrashReasonAnd : public CrashReason {
@@ -33,6 +38,7 @@ public:
 		  tid(_tid)
 	{
 	}
+	CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr);
 };
 
 class CrashReasonBadPointer : public CrashReason {
@@ -71,6 +77,33 @@ void CrashReasonExtractor::append(const LogRecord<abstract_interpret_value> &lr)
 		tid = lr.thread();
 		crash_va = lrs->virtaddr;
 	}
+}
+
+class FootstepRecorder : public LogWriter<abstract_interpret_value> {
+public:
+	typedef std::vector<LogRecordFootstep<abstract_interpret_value> *> vect_type;
+	vect_type content;
+
+	void append(const LogRecord<abstract_interpret_value> &lr) {
+		if (const LogRecordFootstep<abstract_interpret_value> *lrf =
+		    dynamic_cast<const LogRecordFootstep<abstract_interpret_value> *>(&lr))
+			content.push_back(lrf->dupe());
+	}
+};
+
+CrashReason *CrashReasonControl::refine(MachineState<abstract_interpret_value> *ms, LogReader<abstract_interpret_value> *lf,
+					LogReaderPtr ptr)
+{
+	Interpreter<abstract_interpret_value> i(ms);
+	FootstepRecorder fr;
+	i.replayLogfile(lf, ptr, NULL, &fr);
+	for (FootstepRecorder::vect_type::reverse_iterator it = fr.content.rbegin();
+	     it != fr.content.rend();
+	     it++) {
+		printf("footstep %s\n", (*it)->name());
+		delete *it;
+	}
+	return this;
 }
 
 static CrashReason *getCrashReason(MachineState<abstract_interpret_value> *ms,
@@ -119,12 +152,14 @@ main(int argc, char *argv[])
 
 	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
 	MachineState<abstract_interpret_value> *abstract = concrete->abstract<abstract_interpret_value>();
-	
+	VexGcRoot keeper((void **)&abstract);
+
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
 
-	CrashReason *cr = getCrashReason(abstract, al, ptr);
-
+	CrashReason *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	printf("Replayed symbolically, crash reason %s\n", cr->name());
+	CrashReason *cr2 = cr->refine(abstract->dupeSelf(), al, ptr);
+	printf("Refines to %s\n", cr2->name());
 
 	return 0;
 }

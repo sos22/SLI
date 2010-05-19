@@ -93,6 +93,7 @@ Thread<new_type> *Thread<ait>::abstract() const
 	work->currentIRSB = currentIRSB;
 	temporaries.abstract<new_type>(&work->temporaries);
 	work->currentIRSBOffset = currentIRSBOffset;
+	work->currentControlCondition = new_type::import(currentControlCondition);
 	return work;
 }
 
