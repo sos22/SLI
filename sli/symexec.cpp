@@ -19,7 +19,6 @@ main(int argc, char *argv[])
 	
 	Interpreter<abstract_interpret_value> i(abstract);
 
-	LogReaderPtr abstract_ptr;
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
 
 	i.replayLogfile(al, ptr);

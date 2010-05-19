@@ -1,4 +1,4 @@
-targets="slir crop symexec"
+targets="slir crop symexec crashreason"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog}.cpp
@@ -8,7 +8,7 @@ defvars() {
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
 SLIR_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(SLIR_SOURCES))
-all_sources+=\$(SLIR_SOURCES) ${input_base}/interpret.cpp ${input_base}/crop.cpp
+all_sources+=\$(SLIR_SOURCES) ${input_base}/interpret.cpp ${input_base}/crop.cpp ${input_base}/symexec.cpp ${input_base}/crashreason.cpp
 clean_files+=slir.a
 EOF
 }
@@ -26,6 +26,8 @@ ${input_base}/crop.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/crop.o: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/symexec.o: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/symexec.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/crashreason.o: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/crashreason.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
 
 slir.a: \$(SLIR_OBJECTS)
 	rm -f \$@ ; ar rcs \$@ \$^
@@ -37,6 +39,9 @@ crop: ${input_base}/crop.o slir.a libVEX.a
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 
 symexec: ${input_base}/symexec.o slir.a libVEX.a
+	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
+
+crashreason: ${input_base}/crashreason.o slir.a libVEX.a
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 }

@@ -21,11 +21,6 @@
 	MK_ADDRESS_SPACE(t);			\
 	MK_LOGREADER(t)
 
-static unsigned long force(unsigned long x)
-{
-	return x;
-}
-
 static unsigned long signed_shift_right(unsigned long x, unsigned long y)
 {
 	return (long)x >> y;
@@ -60,94 +55,6 @@ unsigned long import_ait(unsigned long x)
 }
 
 MK_INTERP(unsigned long);
-
-static unsigned long force(abstract_interpret_value aiv)
-{
-	return aiv.v;
-}
-
-#define OP(x)								\
-	static abstract_interpret_value operator x(const abstract_interpret_value &aiv, \
-						   const abstract_interpret_value & cnt) \
-	{								\
-		abstract_interpret_value res;				\
-		res.v = aiv.v x cnt.v;					\
-		return res;						\
-	}
-
-OP(<<)
-OP(>>)
-OP(&)
-OP(|)
-OP(^)
-OP(+)
-OP(*)
-OP(/)
-OP(%)
-OP(-)
-OP(>=)
-OP(<)
-OP(<=)
-OP(==)
-OP(!=)
-OP(||)
-OP(&&)
-
-static abstract_interpret_value operator !(const abstract_interpret_value &aiv)
-{
-	abstract_interpret_value res;
-	res.v = !aiv.v;
-	return res;
-}
-
-static abstract_interpret_value operator ~(const abstract_interpret_value &aiv)
-{
-	abstract_interpret_value res;
-	res.v = ~aiv.v;
-	return res;
-}
-
-static abstract_interpret_value signed_shift_right(abstract_interpret_value x, abstract_interpret_value y)
-{
-	abstract_interpret_value v;
-	v.v = (long)x.v >> y.v;
-	return v;
-}
-
-static abstract_interpret_value signed_le(abstract_interpret_value x, abstract_interpret_value y)
-{
-	abstract_interpret_value v;
-	v.v = (long)x.v <= (long)y.v;
-	return v;
-}
-	
-static abstract_interpret_value signed_l(abstract_interpret_value x, abstract_interpret_value y)
-{
-	abstract_interpret_value v;
-	v.v = (long)x.v < (long)y.v;
-	return v;
-}
-	
-static abstract_interpret_value operator &=(abstract_interpret_value &lhs,
-					    const abstract_interpret_value &rhs)
-{
-	lhs.v &= rhs.v;
-	return lhs;
-}
-
-static abstract_interpret_value operator |=(abstract_interpret_value &lhs,
-					    const abstract_interpret_value &rhs)
-{
-	lhs.v |= rhs.v;
-	return lhs;
-}
-
-static abstract_interpret_value operator ^=(abstract_interpret_value &lhs,
-					    const abstract_interpret_value &rhs)
-{
-	lhs.v ^= rhs.v;
-	return lhs;
-}
 
 template <>
 void mulls64(struct expression_result<abstract_interpret_value> *dest,
@@ -194,6 +101,27 @@ unsigned long import_ait(abstract_interpret_value v)
 	return v.v;
 }
 
+static inline abstract_interpret_value signed_shift_right(abstract_interpret_value x, abstract_interpret_value y)
+{
+	abstract_interpret_value v;
+	v.v = (long)x.v >> y.v;
+	return v;
+}
+
+static inline abstract_interpret_value signed_le(abstract_interpret_value x, abstract_interpret_value y)
+{
+	abstract_interpret_value v;
+	v.v = (long)x.v <= (long)y.v;
+	return v;
+}
+	
+static inline abstract_interpret_value signed_l(abstract_interpret_value x, abstract_interpret_value y)
+{
+	abstract_interpret_value v;
+	v.v = (long)x.v < (long)y.v;
+	return v;
+}
+	
 MK_INTERP(abstract_interpret_value);
 
 

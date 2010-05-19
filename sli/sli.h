@@ -1366,4 +1366,72 @@ struct abstract_interpret_value {
 };
 
 
+static inline unsigned long force(abstract_interpret_value aiv)
+{
+	return aiv.v;
+}
+
+#define OP(x)								\
+	static inline abstract_interpret_value operator x(const abstract_interpret_value &aiv, \
+							  const abstract_interpret_value & cnt) \
+	{								\
+		abstract_interpret_value res;				\
+		res.v = aiv.v x cnt.v;					\
+		return res;						\
+	}
+
+OP(<<)
+OP(>>)
+OP(&)
+OP(|)
+OP(^)
+OP(+)
+OP(*)
+OP(/)
+OP(%)
+OP(-)
+OP(>=)
+OP(<)
+OP(<=)
+OP(==)
+OP(!=)
+OP(||)
+OP(&&)
+#undef OP
+
+static inline abstract_interpret_value operator !(const abstract_interpret_value &aiv)
+{
+	abstract_interpret_value res;
+	res.v = !aiv.v;
+	return res;
+}
+
+static inline abstract_interpret_value operator ~(const abstract_interpret_value &aiv)
+{
+	abstract_interpret_value res;
+	res.v = ~aiv.v;
+	return res;
+}
+
+static inline abstract_interpret_value operator &=(abstract_interpret_value &lhs,
+						   const abstract_interpret_value &rhs)
+{
+	lhs.v &= rhs.v;
+	return lhs;
+}
+
+static inline abstract_interpret_value operator |=(abstract_interpret_value &lhs,
+						   const abstract_interpret_value &rhs)
+{
+	lhs.v |= rhs.v;
+	return lhs;
+}
+
+static inline abstract_interpret_value operator ^=(abstract_interpret_value &lhs,
+						   const abstract_interpret_value &rhs)
+{
+	lhs.v ^= rhs.v;
+	return lhs;
+}
+
 #endif /* !SLI_H__ */
