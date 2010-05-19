@@ -65,7 +65,7 @@ void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
 		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
 			continue;
 		} else {
-			throw BadMemoryException<unsigned long>(true, start, size);
+			throw BadMemoryException<ait>(true, _start, size);
 		}
 	}
 }
@@ -104,7 +104,7 @@ void AddressSpace<ait>::readMemory(ait _start, unsigned size,
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
 			if (!ignore_protection && !prot.readable)
-				throw BadMemoryException<unsigned long>(false, start, size);
+				throw BadMemoryException<ait>(false, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
@@ -126,7 +126,7 @@ void AddressSpace<ait>::readMemory(ait _start, unsigned size,
 			printf("Huh? Extended stack for a read?\n");
 			continue;
 		} else {
-			throw BadMemoryException<unsigned long>(false, start, size);
+			throw BadMemoryException<ait>(false, _start, size);
 		}
 	}
 }
