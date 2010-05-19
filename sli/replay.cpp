@@ -21,18 +21,11 @@ InterpretResult RdtscEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, L
 }
 
 template <typename ait>
-StoreEvent<ait>::StoreEvent(ait _addr, unsigned _size, const void *_data)
+StoreEvent<ait>::StoreEvent(ait _addr, unsigned _size, expression_result<ait> _data)
 	: addr(_addr),
-	  size(_size)
+	  size(_size),
+	  data(_data)
 {
-	data = malloc(size);
-	memcpy(data, _data, size);
-}
-
-template <typename ait>
-StoreEvent<ait>::~StoreEvent()
-{
-	free(data);
 }
 
 template <typename ait>
@@ -62,10 +55,10 @@ void StoreEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<
 			throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
 						    lrs->size, force(lrs->ptr),
 						    size, force(addr));
-		if (memcmp(data, lrs->buf, size))
+		if (force(data != lrs->value))
 			throw ReplayFailedException("memory mismatch on store to %lx",
 						    force(addr));
-		ms->addressSpace->writeMemory(addr, size, data, false, thr);
+		ms->addressSpace->store(addr, size, data, false, thr);
 		thr->nrAccesses++;
 	} else {
 	        checkSegv<ait>(lr, addr);
@@ -76,13 +69,10 @@ template <typename ait>
 InterpretResult StoreEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms,
 				      LogRecord<ait> **lr)
 {
-	if (lr) {
-		void *sb = malloc(size);
-		memcpy(sb, data, size);
-		*lr = new LogRecordStore<ait>(thr->tid, size, addr, sb);
-	}
+	if (lr)
+		*lr = new LogRecordStore<ait>(thr->tid, size, addr, data);
 	if (ms->addressSpace->isWritable(addr, size, thr)) {
-		ms->addressSpace->writeMemory(addr, size, data, false, thr);
+		ms->addressSpace->store(addr, size, data, false, thr);
 		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
@@ -103,20 +93,12 @@ void LoadEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<a
 			throw ReplayFailedException("wanted %d byte load from %lx, got %d from %lx",
 						    lrl->size, force(lrl->ptr),
 						    size, force(addr));
-		unsigned char buf[16];
-		ms->addressSpace->readMemory(addr, size, buf, false, thr);
-		if (memcmp(buf, lrl->buf, size))
+		expression_result<ait> buf =
+			ms->addressSpace->load(addr, size, false, thr);
+		if (force(buf != lrl->value))
 			throw ReplayFailedException("memory mismatch on load from %lx",
 						    force(addr));
-		
-		if (size <= 8) {
-			memcpy(&thr->temporaries[tmp].lo, buf, size);
-		} else if (size <= 16) {
-			memcpy(&thr->temporaries[tmp].lo, buf, 8);
-			memcpy(&thr->temporaries[tmp].hi, buf + 8, size - 8);
-		} else {
-			throw NotImplementedException();
-		}
+		thr->temporaries[tmp] = buf;
 		thr->nrAccesses++;
 	} else {
 		checkSegv(lr, addr);
@@ -127,21 +109,11 @@ template <typename ait>
 InterpretResult LoadEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
-		unsigned char buf[16];
-		ms->addressSpace->readMemory(addr, size, buf, false, thr);
-		if (size <= 8) {
-			memcpy(&thr->temporaries[tmp].lo, buf, size);
-		} else if (size <= 16) {
-			memcpy(&thr->temporaries[tmp].lo, buf, 8);
-			memcpy(&thr->temporaries[tmp].hi, buf + 8, size - 8);
-		} else {
-			throw NotImplementedException();
-		}
-		if (lr) {
-			void *rb = malloc(size);
-			memcpy(rb, buf, size);
-			*lr = new LogRecordLoad<ait>(thr->tid, size, addr, rb);
-		}
+		expression_result<ait> buf =
+			ms->addressSpace->load(addr, size, false, thr);
+		thr->temporaries[tmp] = buf;
+		if (lr)
+			*lr = new LogRecordLoad<ait>(thr->tid, size, addr, buf);
 		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
@@ -212,9 +184,6 @@ void CasEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ai
 			   const LogReader<ait> *lf, LogReaderPtr ptr,
 			   LogReaderPtr *outPtr, LogWriter<ait> *lw)
 {
-	ait expected_buf[2] = {expected.lo, expected.hi};
-	ait data_buf[2] = {data.lo, data.hi};
-
 	LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
@@ -224,15 +193,13 @@ void CasEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ai
 					    lrl->size, force(lrl->ptr),
 					    size, force(addr.lo));
 
-	ait seen_buf[2];
-	memset(seen_buf, 0, sizeof(seen_buf));
-	ms->addressSpace->readMemory(addr.lo, size, seen_buf, false, thr);
-	if (memcmp(seen_buf, lrl->buf, size))
+        expression_result<ait> seen;
+        seen = ms->addressSpace->load(addr.lo, size, false, thr);
+        if (force(seen != lrl->value))
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
 					    force(addr.lo));
-	thr->temporaries[dest].lo = seen_buf[0];
-	thr->temporaries[dest].hi = seen_buf[1];
-	if (memcmp(seen_buf, expected_buf, size))
+	thr->temporaries[dest] = seen;
+        if (force(seen != expected))
 		return;
 
         LogRecord<ait> *lr2 = lf->read(ptr, outPtr);
@@ -245,36 +212,25 @@ void CasEvent<ait>::replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ai
 		throw ReplayFailedException("wanted %d byte CAS to %lx, got %d to %lx",
 					    lrs->size, force(lrs->ptr),
 					    size, force(addr.lo));
-	if (memcmp(data_buf, lrs->buf, size))
+        if (force(data != lrs->value))
 		throw ReplayFailedException("memory mismatch on CAS to %lx",
 					    force(addr.lo));
 
-	ms->addressSpace->writeMemory(addr.lo, size, data_buf, false, thr);
+	ms->addressSpace->store(addr.lo, size, data, false, thr);
 }
 
 template <typename ait>
 InterpretResult CasEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr1,
 				    LogRecord<ait> **lr2)
 {
-	ait expected_buf[2] = {expected.lo, expected.hi};
-	ait data_buf[2] = {data.lo, data.hi};
-	ait seen_buf[2];
-	memset(seen_buf, 0, sizeof(seen_buf));
-	ms->addressSpace->readMemory(addr.lo, size, seen_buf, false, thr);
-	if (lr1) {
-		void *sb = malloc(size);
-		memcpy(sb, seen_buf, size);
-		*lr1 = new LogRecordLoad<ait>(thr->tid, size, addr.lo, sb);
-	}
-	thr->temporaries[dest].lo = seen_buf[0];
-	thr->temporaries[dest].hi = seen_buf[1];
-	if (!memcmp(seen_buf, expected_buf, size)) {
-		ms->addressSpace->writeMemory(addr.lo, size, data_buf, false, thr);
-		if (lr2) {
-			void *sb = malloc(size);
-			memcpy(sb, data_buf, size);
-			*lr2 = new LogRecordStore<ait>(thr->tid, size, addr.lo, sb);
-		}
+	expression_result<ait> seen = ms->addressSpace->load(addr.lo, size, false, thr);
+	if (lr1)
+		*lr1 = new LogRecordLoad<ait>(thr->tid, size, addr.lo, seen);
+	thr->temporaries[dest] = seen;
+	if (force(seen == expected)) {
+		ms->addressSpace->store(addr.lo, size, data, false, thr);
+		if (lr2)
+			*lr2 = new LogRecordStore<ait>(thr->tid, size, addr.lo, data);
 	} else if (lr2)
 		*lr2 = NULL;
 	return InterpretResultContinue;

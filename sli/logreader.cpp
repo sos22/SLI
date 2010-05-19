@@ -98,26 +98,28 @@ skip:
 	case RECORD_mem_read: {
 		mem_read_record<unsigned long> mrr;
 		int r = pread(fd, &mrr, sizeof(mrr), startPtr.off + sizeof(rh));
-		void *buf = malloc(rh.size - sizeof(mrr) - sizeof(rh));
-		r = pread(fd, buf, rh.size - sizeof(mrr) - sizeof(rh),
+		expression_result<unsigned long> val;
+		memset(&val, 0, sizeof(val));
+		r = pread(fd, &val, rh.size - sizeof(mrr) - sizeof(rh),
 			  startPtr.off + sizeof(rh) + sizeof(mrr));
 		(void)r;
 		return new LogRecordLoad<unsigned long>(tid,
 							rh.size - sizeof(mrr) - sizeof(rh),
 							mrr.ptr,
-							buf);
+							val);
 	}
 	case RECORD_mem_write: {
 		mem_write_record<unsigned long> mwr;
 		int r = pread(fd, &mwr, sizeof(mwr), startPtr.off + sizeof(rh));
-		void *buf = malloc(rh.size - sizeof(mwr) - sizeof(rh));
-		r = pread(fd, buf, rh.size - sizeof(mwr) - sizeof(rh),
+		expression_result<unsigned long> val;
+		memset(&val, 0, sizeof(val));
+		r = pread(fd, &val, rh.size - sizeof(mwr) - sizeof(rh),
 			  startPtr.off + sizeof(rh) + sizeof(mwr));
 		(void)r;
 		return new LogRecordStore<unsigned long>(tid,
 							 rh.size - sizeof(mwr) - sizeof(rh),
 							 mwr.ptr,
-							 buf);
+							 val);
 	}
 
 	case RECORD_new_thread:

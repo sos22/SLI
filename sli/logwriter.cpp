@@ -96,7 +96,7 @@ void *LogRecordLoad<ait>::marshal(unsigned *sz) const
 										   sz,
 										   &r);
 	lr->ptr = ptr;
-	memcpy(lr + 1, buf, size);
+	memcpy(lr + 1, &value, size);
 	return r;
 }
 
@@ -109,7 +109,7 @@ void *LogRecordStore<ait>::marshal(unsigned *sz) const
 										     sz,
 										     &r);
 	sr->ptr = ptr;
-	memcpy(sr + 1, buf, size);
+	memcpy(sr + 1, &value, size);
 	return r;
 }
 

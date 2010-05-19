@@ -71,6 +71,29 @@ void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
 }
 
 template <typename ait>
+expression_result<ait> AddressSpace<ait>::load(ait start, unsigned size,
+					       bool ignore_protection,
+					       const Thread<ait> *thr)
+{
+	expression_result<unsigned long> concrete_res;
+	memset(&concrete_res, 0, sizeof(concrete_res));
+	readMemory(start, size, &concrete_res, ignore_protection, thr);
+	expression_result<ait> res;
+	concrete_res.abstract(&res);
+	return res;
+}
+
+template <typename ait>
+void AddressSpace<ait>::store(ait start, unsigned size, expression_result<ait> val,
+			      bool ignore_protection,
+			      const Thread<ait> *thr)
+{
+	expression_result<unsigned long> concrete;
+	val.abstract(&concrete);
+	writeMemory(start, size, &concrete, ignore_protection, thr);
+}
+
+template <typename ait>
 void AddressSpace<ait>::readMemory(ait _start, unsigned size,
 				   void *contents, bool ignore_protection,
 				   const Thread<ait> *thr)

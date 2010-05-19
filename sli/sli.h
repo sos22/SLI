@@ -117,6 +117,8 @@ public:
 	const unsigned _tid() const { return tid; }
 };
 
+template<typename src, typename dest> dest import_ait(src x);
+
 template<typename abst_int_value>
 struct expression_result {
 	abst_int_value lo;
@@ -125,8 +127,8 @@ struct expression_result {
 
 	template <typename new_type> void abstract(expression_result<new_type> *out) const
 	{
-		out->lo = new_type::import(lo);
-		out->hi = new_type::import(hi);
+		out->lo = import_ait<abst_int_value, new_type>(lo);
+		out->hi = import_ait<abst_int_value, new_type>(hi);
 	}
 };
 
@@ -717,14 +719,13 @@ class StoreEvent : public ThreadEvent<ait> {
 	friend class MemoryAccessStore<ait>;
 	ait addr;
 	unsigned size;
-	void *data;
+	expression_result<ait> data;
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d)", size); }
 public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	StoreEvent(ait addr, unsigned size, const void *data);
-	virtual ~StoreEvent();
+	StoreEvent(ait addr, unsigned size, expression_result<ait> data);
 };
 
 template <typename ait>
@@ -841,7 +842,7 @@ class LogRecordLoad : public LogRecord<ait> {
 	friend class MemoryAccessLoad<ait>;
 	unsigned size;
 	ait ptr;
-	const void *buf;
+	expression_result<ait> value;
 protected:
 	char *mkName() const {
 		return my_asprintf("load(%x)", size);
@@ -850,29 +851,26 @@ public:
 	LogRecordLoad(ThreadId _tid,
 		      unsigned _size,
 		      ait _ptr,
-		      const void *_buf) :
+		      expression_result<ait> _value) :
 		LogRecord<ait>(_tid),
 		size(_size),
 		ptr(_ptr),
-		buf(_buf)
+		value(_value)
 	{
 	}
-	virtual ~LogRecordLoad() { free((void *)buf); }
 	void *marshal(unsigned *size) const;
 	LogRecord<ait> *dupe() const
 	{
-		void *b = malloc(size);
-		memcpy(b, buf, size);
-		return new LogRecordLoad<ait>(this->thread(), size, ptr, b);
+		return new LogRecordLoad<ait>(this->thread(), size, ptr, value);
 	}
 	template <typename outtype> LogRecordLoad<outtype> *abstract() const
 	{
-		void *b = malloc(size);
-		memcpy(b, buf, size);
+		expression_result<outtype> nvalue;
+		value.abstract(&nvalue);
 		return new LogRecordLoad<outtype>(this->thread(),
 						  size,
 						  outtype::import(ptr),
-						  b);
+						  nvalue);
 	}
 };
 
@@ -902,7 +900,7 @@ class LogRecordStore : public LogRecord<ait> {
 	friend class MemoryAccessStore<ait>;
 	unsigned size;
 	ait ptr;
-	const void *buf;
+	expression_result<ait> value;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("store(%x)", size);
@@ -911,29 +909,26 @@ public:
 	LogRecordStore(ThreadId _tid,
 		       unsigned _size,
 		       ait _ptr,
-		       const void *_buf) :
+		       expression_result<ait> _value) :
 		LogRecord<ait>(_tid),
 		size(_size),
 		ptr(_ptr),
-		buf(_buf)
+		value(_value)
 	{
 	}
-	virtual ~LogRecordStore() { free((void *)buf); }
 	void *marshal(unsigned *size) const;
 	LogRecord<ait> *dupe() const
 	{
-		void *b = malloc(size);
-		memcpy(b, buf, size);
-		return new LogRecordStore<ait>(this->thread(), size, ptr, b);
+		return new LogRecordStore<ait>(this->thread(), size, ptr, value);
 	}
 	template <typename outtype> LogRecordStore<outtype> *abstract() const
 	{
-		void *b = malloc(size);
-		memcpy(b, buf, size);
+		expression_result<outtype> res;
+		value.abstract(&res);
 		return new LogRecordStore<outtype>(this->thread(),
 						   size,
 						   outtype::import(ptr),
-						   b);
+						   res);
 	}
 };
 
@@ -1312,9 +1307,15 @@ public:
 	{
 		writeMemory(rec.start, rec.size, rec.contents, true);
 	}
+	void store(ait start, unsigned size, expression_result<ait> val,
+		   bool ignore_protection = false,
+		   const Thread<ait> *thr = NULL);
 	void writeMemory(ait start, unsigned size,
 			 const void *contents, bool ignore_protection = false,
 			 const Thread<ait> *thr = NULL);
+	expression_result<ait> load(ait start, unsigned size,
+				    bool ignore_protection = false,
+				    const Thread<ait> *thr = NULL);
 	void readMemory(ait start, unsigned size,
 			void *contents, bool ignore_protection = false,
 			const Thread<ait> *thr = NULL);

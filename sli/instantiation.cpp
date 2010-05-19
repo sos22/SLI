@@ -40,7 +40,25 @@ static unsigned long signed_l(unsigned long x, unsigned long y)
 {
 	return (long)x < (long)y;
 }
-	
+
+template <typename ait>
+ait operator !=(expression_result<ait> a, expression_result<ait> b)
+{
+	return !(a == b);
+}
+
+template<typename ait>
+ait operator ==(expression_result<ait> a, expression_result<ait> b)
+{
+	return a.lo == b.lo && a.hi == b.hi;
+}
+
+template<>
+unsigned long import_ait(unsigned long x)
+{
+	return x;
+}
+
 MK_INTERP(unsigned long);
 
 static unsigned long force(abstract_interpret_value aiv)
@@ -73,6 +91,7 @@ OP(<=)
 OP(==)
 OP(!=)
 OP(||)
+OP(&&)
 
 static abstract_interpret_value operator !(const abstract_interpret_value &aiv)
 {
@@ -161,6 +180,18 @@ abstract_interpret_value abstract_interpret_value::import(unsigned long x)
 	abstract_interpret_value v;
 	v.v = x;
 	return v;
+}
+
+template<>
+abstract_interpret_value import_ait(unsigned long x)
+{
+	return abstract_interpret_value::import(x);
+}
+
+template<>
+unsigned long import_ait(abstract_interpret_value v)
+{
+	return v.v;
 }
 
 MK_INTERP(abstract_interpret_value);

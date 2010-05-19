@@ -475,8 +475,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 {
 	struct expression_result<ait> res;
 	struct expression_result<ait> *dest = &res;
-	dest->lo = 0xdeadbeeff001f001;
-	dest->hi = 0xaaaaaaaaaaaaaaaa;
+	memset(&res, 0, sizeof(res));
 
 	switch (expr->tag) {
 	case Iex_Get: {
@@ -524,6 +523,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 
 	case Iex_Const: {
 		IRConst *cnst = expr->Iex.Const.con;
+		dest->hi = 0;
 		switch (cnst->tag) {
 		case Ico_U1:
 			dest->lo = cnst->Ico.U1;
@@ -1111,18 +1111,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 					eval_expression(stmt->Ist.Store.addr);
 				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
-				unsigned char dbuf[16];
-				memset(dbuf, 0, 16);
-				if (size <= 8) {
-					memcpy(dbuf, &data.lo, size);
-				} else if (size <= 16) {
-					memcpy(dbuf, &data.lo, 8);
-					memcpy(dbuf + 8, &data.hi, size - 8);
-				} else {
-					ppIRStmt(stmt);
-					throw NotImplementedException();
-				}
-				return new StoreEvent<ait>(addr.lo, size, dbuf);
+				return new StoreEvent<ait>(addr.lo, size, data);
 			}
 
 			case Ist_CAS: {
