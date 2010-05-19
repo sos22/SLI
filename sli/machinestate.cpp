@@ -56,7 +56,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 	LogRecordInitialBrk<ait> *lrib = dynamic_cast<LogRecordInitialBrk<ait>*>(lr);
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
-        AddressSpace<ait> *as = AddressSpace<ait>::initialAddressSpace(force(lrib->brk));
+        AddressSpace<ait> *as = AddressSpace<ait>::initialAddressSpace(lrib->brk);
 	delete lr;
 
 	lr = lf->read(ptr, &ptr);

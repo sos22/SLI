@@ -1362,15 +1362,25 @@ void gdb_machine_state(const MachineState<unsigned long> *ms);
 
 struct abstract_interpret_value {
 	unsigned long v;
-	abstract_interpret_value(unsigned long _v) : v(_v) {}
+	explicit abstract_interpret_value(unsigned long _v) : v(_v) {}
 	abstract_interpret_value() : v(0) {}
 	template <typename ait> static abstract_interpret_value import(ait x);
 };
 
+template <typename ait>
+static inline ait mkConst(unsigned long x)
+{
+	return ait(x);
+}
 
 static inline unsigned long force(abstract_interpret_value aiv)
 {
 	return aiv.v;
+}
+
+static inline unsigned long force(unsigned long x)
+{
+	return x;
 }
 
 #define OP(x)								\

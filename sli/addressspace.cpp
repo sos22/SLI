@@ -49,7 +49,7 @@ void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
 			if (!ignore_protection && !prot.writable)
-				throw BadMemoryException<ait>(true, start, size);
+				throw BadMemoryException<ait>(true, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
@@ -171,9 +171,9 @@ unsigned long AddressSpace<ait>::setBrk(ait _newBrk)
 
 	if (newBrk != 0) {
 		if (newBrkMap > brkMapPtr)
-			allocateMemory(brkMapPtr, newBrkMap - brkMapPtr, VAMap::Protection(true, true, false));
+			allocateMemory(mkConst<ait>(brkMapPtr), mkConst<ait>(newBrkMap - brkMapPtr), VAMap::Protection(true, true, false));
 		else
-			releaseMemory(newBrkMap, brkMapPtr - newBrkMap);
+			releaseMemory(mkConst<ait>(newBrkMap), mkConst<ait>(brkMapPtr - newBrkMap));
 		brkptr = newBrk;
 		brkMapPtr = newBrkMap;
 	}
@@ -225,7 +225,7 @@ bool AddressSpace<ait>::extendStack(unsigned long ptr, unsigned long rsp)
 	if (!flags.expandsDown)
 		return false;
 
-	allocateMemory(ptr & PAGE_MASK, va, prot, flags);
+	allocateMemory(mkConst<ait>(ptr & PAGE_MASK), mkConst<ait>(va), prot, flags);
 	return true;
 }
 
@@ -238,7 +238,7 @@ void AddressSpace<ait>::sanityCheck() const
 template <typename ait>
 void AddressSpace<ait>::dumpBrkPtr(LogWriter<ait> *lw) const
 {
-	lw->append(LogRecordInitialBrk<ait>(ThreadId(0), brkptr));
+	lw->append(LogRecordInitialBrk<ait>(ThreadId(0), mkConst<ait>(brkptr)));
 }
 
 template <typename ait>
@@ -252,8 +252,8 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 	last_va = 0;
 	while (vamap->findNextMapping(last_va, &next_va, &pa, &prot, &alf)) {
 		lw->append(LogRecordAllocateMemory<ait>(ThreadId(0),
-							next_va,
-							MemoryChunk::size,
+							mkConst<ait>(next_va),
+							mkConst<ait>(MemoryChunk::size),
 							(unsigned long)prot,
 							(unsigned long)alf));
 		unsigned long off;
@@ -263,7 +263,7 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 		mc->read(0, buf, MemoryChunk::size);
 		lw->append(LogRecordMemory<ait>(ThreadId(0),
 						MemoryChunk::size,
-						next_va,
+						mkConst<ait>(next_va),
 						buf));
 		last_va = next_va + MemoryChunk::size;
 	}

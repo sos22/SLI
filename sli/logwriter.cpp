@@ -138,7 +138,7 @@ void *LogRecordAllocateMemory<ait>::marshal(unsigned *sz) const
 												  &r);
 	amr->start = start;
 	amr->size = size;
-	amr->prot = prot;
+	amr->prot = mkConst<ait>(prot);
 	amr->flags = flags;
 	return r;
 }

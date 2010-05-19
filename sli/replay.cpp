@@ -269,7 +269,7 @@ template <typename ait>
 InterpretResult SignalEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	if (lr)
-		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, 0, virtaddr);
+		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
 	thr->crashed = true;
 	return InterpretResultCrash;
 }

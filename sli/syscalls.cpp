@@ -57,9 +57,9 @@ handle_clone(AddressSpace<ait> *addrSpace,
 	/* Create a new thread.  This is, as you might expect, closely
 	   modelled on the kernel's version of the same process. */
 	Thread<ait> *newThread = thr->fork(pid);
-	if (force(flags & CLONE_CHILD_SETTID))
+	if (force(flags & mkConst<ait>(CLONE_CHILD_SETTID)))
 		newThread->set_child_tid = child_tidptr;
-	if (force(flags & CLONE_CHILD_CLEARTID))
+	if (force(flags & mkConst<ait>(CLONE_CHILD_CLEARTID)))
 		newThread->clear_child_tid = child_tidptr;
 	newThread->robust_list = ait(0);
 #if 0
@@ -69,7 +69,7 @@ handle_clone(AddressSpace<ait> *addrSpace,
 #endif
 	newThread->regs.set_reg(REGISTER_IDX(RAX), ait(0));
 	newThread->regs.set_reg(REGISTER_IDX(RSP), childRsp);
-	if (force(flags & CLONE_SETTLS))
+	if (force(flags & mkConst<ait>(CLONE_SETTLS)))
 		newThread->regs.set_reg(REGISTER_IDX(FS_ZERO), set_tls);
 
 	mach->registerThread(newThread);
@@ -132,7 +132,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		ait prot = args[2];
 		
 		if (!isErrnoSysres(force(lrs->res))) {
-			length = (length + 4095) & ~4095;
+			length = (length + mkConst<ait>(4095)) & ~mkConst<ait>(4095);
 			addrSpace->allocateMemory(addr, length, force(prot));
 		}
 		break;
@@ -146,15 +146,15 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	}
 	case __NR_munmap: { /* 11 */
-		addrSpace->releaseMemory(args[0], (args[1] + 4095) & ~4095);
+		addrSpace->releaseMemory(args[0], (args[1] + mkConst<ait>(4095)) & mkConst<ait>(~4095));
 		break;
 	}
 	case __NR_brk: /* 12 */
-		res = addrSpace->setBrk(args[0]);
+		res = mkConst<ait>(addrSpace->setBrk(args[0]));
 		break;
 	case __NR_rt_sigaction: /* 13 */
 		if (!isErrnoSysres(force(lrs->res)) &&
-		    force(args[1] != 0)) {
+		    force(args[1] != mkConst<ait>(0))) {
 			addrSpace->readMemory(args[1],
 					      sizeof(struct sigaction),
 					      &mach->signalHandlers.handlers[force(args[0])]);
@@ -253,7 +253,7 @@ InterpretResult SyscallEvent<ait>::fake(Thread<ait> *thr, MachineState<ait> *ms,
 
 	switch (force(sysnr)) {
 	case __NR_futex:
-		res = 0;
+		res = mkConst<ait>(0);
 		break;
 	default:
 		printf("can't fake syscall %ld yet\n", force(sysnr));
