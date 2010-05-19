@@ -133,6 +133,25 @@ bool MachineState<ait>::crashed() const
 	return false;
 }
 
+template <typename ait> template <typename new_type>
+MachineState<new_type> *MachineState<ait>::abstract() const
+{
+	MachineState<new_type> *work = MachineState<new_type>::allocator.alloc();
+
+	memset(work, 0, sizeof(*work));
+	work->exitted = exitted;
+	work->exit_status = new_type::import(exit_status);
+	work->nextTid = nextTid;
+	signalHandlers.abstract<new_type>(&work->signalHandlers);
+	work->addressSpace = addressSpace->abstract<new_type>();
+	work->threads = LibvexVector<Thread<new_type> >::empty();
+	work->threads->_set_size(threads->size());
+	for (unsigned x = 0; x < threads->size(); x++)
+		work->threads->set(x, threads->index(x)->abstract<new_type>());
+	return work;
+}
+
+
 template <typename ait> VexAllocTypeWrapper<MachineState<ait> > MachineState<ait>::allocator;
 
 #define MK_MACHINE_STATE(t)						\
@@ -146,3 +165,6 @@ template <typename ait> VexAllocTypeWrapper<MachineState<ait> > MachineState<ait
 								       LogReaderPtr ptr, \
 								       LogReaderPtr *end)
 
+#define MK_MACH_CONVERTOR(from, to)		\
+	template MachineState<to> *MachineState<from>::abstract() const
+ 

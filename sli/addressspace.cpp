@@ -246,6 +246,12 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 	}
 }
 
+template <typename ait> template <typename new_type>
+AddressSpace<new_type> *AddressSpace<ait>::abstract() const
+{
+	return (AddressSpace<new_type> *)dupeSelf();
+}
+
 template <typename ait> VexAllocTypeWrapper<AddressSpace<ait> > AddressSpace<ait>::allocator;
 
 #define MK_ADDRESS_SPACE(t)						\

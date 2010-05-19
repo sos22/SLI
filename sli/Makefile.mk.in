@@ -1,7 +1,7 @@
-targets="slir crop"
+targets="slir crop symexec"
 
 defvars() {
-	echo SLIR_SOURCES= ${input_base}/transform_expr.cpp
+	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{vamap,pmap,memorychunk,util}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{debug,instantiation}.cpp
 
@@ -23,6 +23,9 @@ ${input_base}/interpret.o: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/crop.o: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/interpret.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
 ${input_base}/crop.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/crop.o: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/symexec.o: CPPFLAGS+=-I\$(libvex)/pub
+${input_base}/symexec.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
 
 slir.a: \$(SLIR_OBJECTS)
 	rm -f \$@ ; ar rcs \$@ \$^
@@ -31,6 +34,9 @@ slir: ${input_base}/interpret.o slir.a libVEX.a
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 
 crop: ${input_base}/crop.o slir.a libVEX.a
+	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
+
+symexec: ${input_base}/symexec.o slir.a libVEX.a
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 }

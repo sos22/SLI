@@ -122,6 +122,12 @@ struct expression_result {
 	abst_int_value lo;
 	abst_int_value hi;
 	void visit(HeapVisitor &hv) const { }
+
+	template <typename new_type> void abstract(expression_result<new_type> *out) const
+	{
+		out->lo = new_type::import(lo);
+		out->hi = new_type::import(hi);
+	}
 };
 
 template <typename underlying>
@@ -135,6 +141,8 @@ public:
 	void set_reg(unsigned idx, underlying val) { assert(idx < NR_REGS); registers[idx] = val; }
 	underlying rip() const { return get_reg(REGISTER_IDX(RIP)); }
 	underlying rsp() const { return get_reg(REGISTER_IDX(RSP)); }
+
+	template <typename new_type> void abstract(RegisterSet<new_type> *out) const;
 };
 
 template <typename ait> class AddressSpace;
@@ -161,6 +169,8 @@ public:
 		nr_entries(0)
 	{
 	}
+
+	template <typename new_type> void abstract(expression_result_array<new_type> *out) const;
 };
 
 template <typename ait> class ThreadEvent;
@@ -192,13 +202,12 @@ public:
 	unsigned long nrAccesses;
 
 	IRSB *currentIRSB;
-public:
 	expression_result_array<abst_int_type> temporaries;
-private:
 	int currentIRSBOffset;
 
 	static VexAllocTypeWrapper<Thread<abst_int_type> > allocator;
 
+private:
 	/* DNI */
 	Thread();
 	~Thread();
@@ -214,6 +223,8 @@ public:
 			 AddressSpace<abst_int_type> *as);
 
 	void visit(HeapVisitor &hv) const;
+
+	template <typename new_type> Thread<new_type> *abstract() const;
 };
 
 class PhysicalAddress {
@@ -441,6 +452,10 @@ public:
 	{
 		return new LogRecordInitialSighandlers<ait>(this->thread(), handlers);
 	}
+	template <typename outtype> LogRecordInitialSighandlers<outtype> *abstract() const
+	{
+		return new LogRecordInitialSighandlers<outtype>(this->thread(), handlers);
+	}
 };
 
 template <typename ait>
@@ -451,6 +466,10 @@ public:
 		memcpy(handlers, init.handlers, sizeof(init.handlers));
 	}
 	void dumpSnapshot(LogWriter<ait> *lw) const;
+	template <typename new_type> void abstract(SignalHandlers<new_type> *out) const
+	{
+		memcpy(out->handlers, handlers, sizeof(handlers));
+	}
 };
 
 /* gcc struggles with member classes of template classes, so this has
@@ -465,6 +484,7 @@ class LogReader {
 public:
 	virtual LogRecord<ait> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const = 0;
 	virtual ~LogReader() {}
+	template <typename new_type> LogReader<new_type> *abstract() const;
 };
 
 class LogFile : public LogReader<unsigned long> {
@@ -501,11 +521,12 @@ public:
 	LibvexVector<Thread<abst_int_type> > *threads;
 
 	static VexAllocTypeWrapper<MachineState<abst_int_type> > allocator;
-private:
+
 	bool exitted;
 	abst_int_type exit_status;
 	ThreadId nextTid;
 
+private:
 	/* DNI */
 	MachineState();
 	~MachineState();
@@ -517,7 +538,9 @@ public:
 	static MachineState<abst_int_type> *initialMachineState(LogReader<abst_int_type> *lf,
 								LogReaderPtr startPtr,
 								LogReaderPtr *endPtr);
-	
+
+	template <typename new_type> MachineState<new_type> *abstract() const;
+
 	void registerThread(Thread<abst_int_type> *t) {
 		t->tid = nextTid;
 		++nextTid;
@@ -842,6 +865,15 @@ public:
 		memcpy(b, buf, size);
 		return new LogRecordLoad<ait>(this->thread(), size, ptr, b);
 	}
+	template <typename outtype> LogRecordLoad<outtype> *abstract() const
+	{
+		void *b = malloc(size);
+		memcpy(b, buf, size);
+		return new LogRecordLoad<outtype>(this->thread(),
+						  size,
+						  outtype::import(ptr),
+						  b);
+	}
 };
 
 template <typename ait>
@@ -893,6 +925,15 @@ public:
 		void *b = malloc(size);
 		memcpy(b, buf, size);
 		return new LogRecordStore<ait>(this->thread(), size, ptr, b);
+	}
+	template <typename outtype> LogRecordStore<outtype> *abstract() const
+	{
+		void *b = malloc(size);
+		memcpy(b, buf, size);
+		return new LogRecordStore<outtype>(this->thread(),
+						   size,
+						   outtype::import(ptr),
+						   b);
 	}
 };
 
@@ -978,6 +1019,16 @@ public:
 	{
 		return new LogRecordFootstep<ait>(this->thread(), rip, reg0, reg1, reg2, reg3, reg4);
 	}
+	template <typename outtype> LogRecordFootstep<outtype> *abstract() const
+	{
+		return new LogRecordFootstep<outtype>(this->thread(),
+						      outtype::import(rip),
+						      outtype::import(reg0),
+						      outtype::import(reg1),
+						      outtype::import(reg2),
+						      outtype::import(reg3),
+						      outtype::import(reg4));
+	}
 };
 
 template <typename ait>
@@ -1006,6 +1057,15 @@ public:
 	LogRecord<ait> *dupe() const
 	{
 		return new LogRecordSyscall<ait>(this->thread(), sysnr, res, arg1, arg2, arg3);
+	}
+	template <typename outtype> LogRecordSyscall<outtype> *abstract() const
+	{
+		return new LogRecordSyscall<outtype>(this->thread(),
+						     outtype::import(sysnr),
+						     outtype::import(res),
+						     outtype::import(arg1),
+						     outtype::import(arg2),
+						     outtype::import(arg3));
 	}
 };
 
@@ -1036,6 +1096,12 @@ public:
 		memcpy(b, contents, size);
 		return new LogRecordMemory<ait>(this->thread(), size, start, b);
 	}
+	template <typename outtype> LogRecordMemory<outtype> *abstract() const
+	{
+		void *b = malloc(size);
+		memcpy(b, contents, size);
+		return new LogRecordMemory<outtype>(this->thread(), size, outtype::import(start), b);
+	}
 };
 
 template <typename ait>
@@ -1044,7 +1110,7 @@ class LogRecordRdtsc : public LogRecord<ait> {
 	ait tsc;
 protected:
 	char *mkName() const {
-		return my_asprintf("rdtsc(%lx)", tsc);
+		return my_asprintf("rdtsc()");
 	}
 public:
 	LogRecordRdtsc(ThreadId _tid,
@@ -1057,6 +1123,11 @@ public:
 	LogRecord<ait> *dupe() const
 	{
 		return new LogRecordRdtsc<ait>(this->thread(), tsc);
+	}
+	template <typename outtype> LogRecordRdtsc<outtype> *abstract() const
+	{
+		return new LogRecordRdtsc<outtype>(this->thread(),
+						   outtype::import(tsc));
 	}
 };
 
@@ -1087,6 +1158,14 @@ public:
 	LogRecord<ait> *dupe() const
 	{
 		return new LogRecordSignal<ait>(this->thread(), rip, signr, err, virtaddr);
+	}
+	template <typename outtype> LogRecordSignal<outtype> *abstract() const
+	{
+		return new LogRecordSignal<outtype>(this->thread(),
+						    outtype::import(rip),
+						    signr,
+						    outtype::import(err),
+						    outtype::import(virtaddr));
 	}
 };
 
@@ -1120,6 +1199,14 @@ public:
 	{
 		return new LogRecordAllocateMemory<ait>(this->thread(), start, size, prot, flags);
 	}
+	template <typename outtype> LogRecordAllocateMemory<outtype> *abstract() const
+	{
+		return new LogRecordAllocateMemory<outtype>(this->thread(),
+							    outtype::import(start),
+							    outtype::import(size),
+							    prot,
+							    flags);
+	}
 };
 
 template <typename ait>
@@ -1142,6 +1229,10 @@ public:
 	{
 		return new LogRecordInitialRegisters(this->thread(), regs);
 	}
+	template <typename outtype> LogRecordInitialRegisters<outtype> *abstract() const
+	{
+		return new LogRecordInitialRegisters<outtype>(this->thread(), regs);
+	}
 };
 
 template <typename ait>
@@ -1163,6 +1254,11 @@ public:
 	{
 		return new LogRecordInitialBrk(this->thread(), brk);
 	}
+	template <typename outtype> LogRecordInitialBrk<outtype> *abstract() const
+	{
+		return new LogRecordInitialBrk<outtype>(this->thread(),
+							outtype::import(brk));
+	}
 };
 
 template <typename ait>
@@ -1183,6 +1279,12 @@ public:
 	LogRecord<ait> *dupe() const
 	{
 		return new LogRecordVexThreadState(this->thread(), statement_nr, tmp);
+	}
+	template <typename outtype> LogRecordVexThreadState<outtype> *abstract() const
+	{
+		expression_result_array<outtype> ntmp;
+		tmp.abstract(&ntmp);
+		return new LogRecordVexThreadState<outtype>(this->thread(), statement_nr, ntmp);
 	}
 };
 
@@ -1235,6 +1337,8 @@ public:
 
 	void dumpBrkPtr(LogWriter<ait> *lw) const;
 	void dumpSnapshot(LogWriter<ait> *lw) const;
+
+	template <typename new_type> AddressSpace<new_type> *abstract() const;
 };
 
 template<typename ait> void replay_syscall(const LogRecordSyscall<ait> *lrs,
@@ -1252,5 +1356,13 @@ void debugger_attach(void);
 void init_sli(void);
 
 void gdb_machine_state(const MachineState<unsigned long> *ms);
+
+struct abstract_interpret_value {
+	unsigned long v;
+	abstract_interpret_value(unsigned long _v) : v(_v) {}
+	abstract_interpret_value() : v(0) {}
+	template <typename ait> static abstract_interpret_value import(ait x);
+};
+
 
 #endif /* !SLI_H__ */

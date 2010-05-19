@@ -10,3 +10,4 @@ slir
 vgcore.*
 .depends
 crop
+symexec

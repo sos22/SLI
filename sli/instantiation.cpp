@@ -43,20 +43,14 @@ static unsigned long signed_l(unsigned long x, unsigned long y)
 	
 MK_INTERP(unsigned long);
 
-struct abstract_interpret_value {
-	unsigned long v;
-	abstract_interpret_value(unsigned long _v) : v(_v) {}
-	abstract_interpret_value() : v(0) {}
-};
-
 static unsigned long force(abstract_interpret_value aiv)
 {
 	return aiv.v;
 }
 
 #define OP(x)								\
-	abstract_interpret_value operator x(const abstract_interpret_value &aiv, \
-					    const abstract_interpret_value & cnt) \
+	static abstract_interpret_value operator x(const abstract_interpret_value &aiv, \
+						   const abstract_interpret_value & cnt) \
 	{								\
 		abstract_interpret_value res;				\
 		res.v = aiv.v x cnt.v;					\
@@ -74,22 +68,20 @@ OP(/)
 OP(%)
 OP(-)
 OP(>=)
-OP(>)
 OP(<)
 OP(<=)
 OP(==)
 OP(!=)
-OP(&&)
 OP(||)
 
-abstract_interpret_value operator !(const abstract_interpret_value &aiv)
+static abstract_interpret_value operator !(const abstract_interpret_value &aiv)
 {
 	abstract_interpret_value res;
 	res.v = !aiv.v;
 	return res;
 }
 
-abstract_interpret_value operator ~(const abstract_interpret_value &aiv)
+static abstract_interpret_value operator ~(const abstract_interpret_value &aiv)
 {
 	abstract_interpret_value res;
 	res.v = ~aiv.v;
@@ -117,24 +109,24 @@ static abstract_interpret_value signed_l(abstract_interpret_value x, abstract_in
 	return v;
 }
 	
-abstract_interpret_value operator &=(abstract_interpret_value &lhs,
-				     const abstract_interpret_value &rhs)
+static abstract_interpret_value operator &=(abstract_interpret_value &lhs,
+					    const abstract_interpret_value &rhs)
 {
 	lhs.v &= rhs.v;
 	return lhs;
 }
 
-abstract_interpret_value operator |=(abstract_interpret_value &lhs,
-				     const abstract_interpret_value &rhs)
+static abstract_interpret_value operator |=(abstract_interpret_value &lhs,
+					    const abstract_interpret_value &rhs)
 {
-	lhs.v &= rhs.v;
+	lhs.v |= rhs.v;
 	return lhs;
 }
 
-abstract_interpret_value operator ^=(abstract_interpret_value &lhs,
-				     const abstract_interpret_value &rhs)
+static abstract_interpret_value operator ^=(abstract_interpret_value &lhs,
+					    const abstract_interpret_value &rhs)
 {
-	lhs.v &= rhs.v;
+	lhs.v ^= rhs.v;
 	return lhs;
 }
 
@@ -163,4 +155,15 @@ RegisterSet<abstract_interpret_value>::RegisterSet(const VexGuestAMD64State &r)
 		registers[x] = abstract_interpret_value( ((unsigned long *)&r)[x] );
 }
 
+template <>
+abstract_interpret_value abstract_interpret_value::import(unsigned long x)
+{
+	abstract_interpret_value v;
+	v.v = x;
+	return v;
+}
+
 MK_INTERP(abstract_interpret_value);
+
+
+MK_MACH_CONVERTOR(unsigned long, abstract_interpret_value);
