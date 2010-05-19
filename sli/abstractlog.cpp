@@ -41,6 +41,8 @@ LogRecord<abstract_interpret_value> *
 AbstractLogReader<abstract_interpret_value,unsigned long>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
 {
 	LogRecord<unsigned long> *inr = inp->read(startPtr, outPtr);
+	if (!inr)
+		return NULL;
 	LogRecord<abstract_interpret_value> *out = abstractLogRecord(inr);
 	delete inr;
 	return out;
