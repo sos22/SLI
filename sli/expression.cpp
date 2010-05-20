@@ -1,7 +1,23 @@
 #include "sli.h"
 
+template<> abstract_interpret_value
+load_ait(unsigned long x, abstract_interpret_value addr)
+{
+	abstract_interpret_value res;
+	res.v = x;
+	res.origin = LoadExpression::get(x, addr.origin);
+	return res;
+}
+
+template<> unsigned long
+load_ait(unsigned long x, unsigned long addr)
+{
+	return x;
+}
+
 VexAllocTypeWrapper<ConstExpression, visit_object<ConstExpression>, destruct_object<ConstExpression> > ConstExpression::allocator;
 VexAllocTypeWrapper<ImportExpression, visit_object<ImportExpression>, destruct_object<ImportExpression> > ImportExpression::allocator;
+VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 
 Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f)
 {

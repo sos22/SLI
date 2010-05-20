@@ -119,6 +119,7 @@ public:
 };
 
 template<typename src, typename dest> dest import_ait(src x);
+template<typename src, typename dest> dest load_ait(src x, dest addr);
 
 template<typename abst_int_value>
 struct expression_result {
@@ -1498,6 +1499,23 @@ public:
 		return work;
 	}
 	void visit(HeapVisitor &hv) const {}
+};
+
+class LoadExpression : public Expression {
+	static VexAllocTypeWrapper<LoadExpression> allocator;
+	unsigned long val;
+	Expression *addr;
+protected:
+	char *mkName() const { return my_asprintf("(load %s -> %lx)", addr->name(), val); }
+public:
+	static LoadExpression *get(unsigned long val, Expression *addr)
+	{
+		LoadExpression *work = new (allocator.alloc()) LoadExpression();
+		work->val = val;
+		work->addr = addr;
+		return work;
+	}
+	void visit(HeapVisitor &hv) const {hv(addr);}
 };
 
 #define mk_binop_class(nme)						\

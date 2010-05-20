@@ -79,7 +79,8 @@ expression_result<ait> AddressSpace<ait>::load(ait start, unsigned size,
 	memset(&concrete_res, 0, sizeof(concrete_res));
 	readMemory(start, size, &concrete_res, ignore_protection, thr);
 	expression_result<ait> res;
-	concrete_res.abstract(&res);
+	res.lo = load_ait<unsigned long, ait>(concrete_res.lo, start);
+	res.hi = load_ait<unsigned long, ait>(concrete_res.hi, start + mkConst<ait>(8));
 	return res;
 }
 
