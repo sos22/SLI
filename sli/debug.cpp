@@ -278,7 +278,6 @@ void ContinueCommand::doIt(MachineState<unsigned long> *ms)
 
         while (1) {
                 ThreadEvent<unsigned long> *evt = thr->runToEvent(ms->addressSpace);
-                PointerKeeper<ThreadEvent<unsigned long> > k_evt(evt);
                 InterpretResult res = evt->fake(thr, ms);
 
 		if (dynamic_cast<SignalEvent<unsigned long> *>(evt) ||

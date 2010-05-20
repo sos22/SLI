@@ -146,17 +146,17 @@ Thread<ait>::do_dirty_call(IRDirty *details)
 	assert(!details->cee->regparms);
 
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
-		return new RdtscEvent<ait>(details->tmp);
+		return RdtscEvent<ait>::get(details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		return new LoadEvent<ait>(details->tmp, args[0].lo, 1);
+		return LoadEvent<ait>::get(details->tmp, args[0].lo, 1);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		return new LoadEvent<ait>(details->tmp, args[0].lo, 2);
+		return LoadEvent<ait>::get(details->tmp, args[0].lo, 2);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		return new LoadEvent<ait>(details->tmp, args[0].lo, 4);
+		return LoadEvent<ait>::get(details->tmp, args[0].lo, 4);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		return new LoadEvent<ait>(details->tmp, args[0].lo, 8);
+		return LoadEvent<ait>::get(details->tmp, args[0].lo, 8);
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
-		return new LoadEvent<ait>(details->tmp, args[0].lo, 16);
+		return LoadEvent<ait>::get(details->tmp, args[0].lo, 16);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;
@@ -1069,7 +1069,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 			try {
 				translateNextBlock(addrSpace);
 			} catch (BadMemoryException<ait> excn) {
-				return new SignalEvent<ait>(11, excn.ptr);
+				return SignalEvent<ait>::get(11, excn.ptr);
 			}
 			assert(currentIRSB);
 		}
@@ -1082,12 +1082,12 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 				break;
 			case Ist_IMark:
 #define GR(x) regs.get_reg(REGISTER_IDX(x))
-				return new InstructionEvent<ait>(regs.rip(),
-								 GR(FOOTSTEP_REG_0_NAME),
-								 GR(FOOTSTEP_REG_1_NAME),
-								 regs.get_reg(REGISTER_IDX(XMM0) + 1),
-								 GR(FOOTSTEP_REG_3_NAME),
-								 GR(FOOTSTEP_REG_4_NAME));
+				return InstructionEvent<ait>::get(regs.rip(),
+								  GR(FOOTSTEP_REG_0_NAME),
+								  GR(FOOTSTEP_REG_1_NAME),
+								  regs.get_reg(REGISTER_IDX(XMM0) + 1),
+								  GR(FOOTSTEP_REG_3_NAME),
+								  GR(FOOTSTEP_REG_4_NAME));
 #undef GR
 			case Ist_AbiHint:
 				break;
@@ -1107,7 +1107,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 					eval_expression(stmt->Ist.Store.addr);
 				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
-				return new StoreEvent<ait>(addr.lo, size, data);
+				return StoreEvent<ait>::get(addr.lo, size, data);
 			}
 
 			case Ist_CAS: {
@@ -1123,7 +1123,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 					eval_expression(stmt->Ist.CAS.details->expdLo);
 				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
-				return new CasEvent<ait>(stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+				return CasEvent<ait>::get(stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 			}
 
 			case Ist_Put: {
@@ -1228,7 +1228,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 		}
 		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
 			currentIRSB = NULL;
-			return new SyscallEvent<ait>();
+			return SyscallEvent<ait>::get();
 		}
 
 finished_block:
@@ -1246,7 +1246,6 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 		return InterpretResultIncomplete;
 	while (max_events) {
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
 
 		InterpretResult res = evt->fake(thr, currentState);
 		if (res != InterpretResultContinue) {
@@ -1269,7 +1268,6 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_access
         Thread<ait> *thr = currentState->findThread(tid);
         while (1) {
                 ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
-                PointerKeeper<ThreadEvent<ait> > k_evt(evt);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (dynamic_cast<LoadEvent<ait> *>(evt) ||
 		    dynamic_cast<StoreEvent<ait> *>(evt)) {
@@ -1291,7 +1289,6 @@ void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, unsign
 	Thread<ait> *thr = currentState->findThread(tid);
 	while (!have_event_limit || max_events) {
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {
 			thr->cannot_make_progress = true;
@@ -1316,7 +1313,6 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		PointerKeeper<LogRecord<ait> > k_lr(lr);
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
 
 		if (er)
 			er->record(thr, evt);

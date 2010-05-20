@@ -272,4 +272,5 @@ void SignalHandlers<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 	template LogRecordVexThreadState<t>::LogRecordVexThreadState(ThreadId, \
 								     unsigned, \
 								     expression_result_array<t>); \
-	template void *LogRecordRdtsc<t>::marshal(unsigned *sz) const
+	template void *LogRecordRdtsc<t>::marshal(unsigned *sz) const;	\
+	template void *LogRecordSyscall<t>::marshal(unsigned *sz) const

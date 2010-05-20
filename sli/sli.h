@@ -36,13 +36,6 @@ public:
 	void keep(underlying *y) { if (x) delete x; x = y; }
 };
 
-template <typename underlying> class PointerKeeperArr {
-	underlying *x;
-public:
-	~PointerKeeperArr() { delete [] x; }
-	PointerKeeperArr(underlying *y) : x(y) {}
-};
-
 template <typename underlying>
 class Maybe {
 public:
@@ -93,12 +86,7 @@ void destruct_object(void *_ctxt)
 	ctxt->destruct();
 }
 
-/* Does absolutely nothing, could have been NULL, except that C++'s
-   template machinery can't cope with NULL function pointers as
-   template arguments, damn them. */
-void noop_destructor(void *_ctxt);
-
-template <typename t, void (*visit)(const void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = noop_destructor>
+template <typename t, void (*visit)(const void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
 class VexAllocTypeWrapper {
 public:
 	VexAllocType type;
@@ -242,6 +230,8 @@ public:
 	void visit(HeapVisitor &hv) const;
 
 	template <typename new_type> Thread<new_type> *abstract() const;
+
+	void destruct() {}
 };
 
 class PhysicalAddress {
@@ -589,6 +579,8 @@ public:
 
 	void visit(HeapVisitor &hv) const;
 	void sanityCheck() const;
+
+	void destruct() {}
 };
 
 template <typename ait> class LogRecordFootstep;
@@ -696,24 +688,34 @@ public:
 
 template <typename ait>
 class ThreadEvent : public Named {
+protected:
+	ThreadEvent() {}
 public:
 	/* Replay the event using information in the log record */
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL) = 0;
-	virtual ~ThreadEvent() {};
 	virtual ThreadEvent<ait> *dupe() const = 0;
+
+	/* This should really be DNI, but g++ doesn't let you inherit
+	 * from a class which has a private destructor. */
+	~ThreadEvent() { abort(); }
+
+	virtual void visit(HeapVisitor &hv) const {};
 };
 
 template <typename ait>
 class RdtscEvent : public ThreadEvent<ait> {
 	IRTemp tmp;
+	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
+	static VexAllocTypeWrapper<RdtscEvent<ait> > allocator;
+	~RdtscEvent();
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
-	ThreadEvent<ait> *dupe() const { return new RdtscEvent(tmp); }
+	static ThreadEvent<ait> *get(IRTemp temp) { void *b = allocator.alloc(); return new (b) RdtscEvent<ait>(temp); }
+	ThreadEvent<ait> *dupe() const { return get(tmp); }
 };
 
 template <typename ait> class MemoryAccessLoad;
@@ -725,18 +727,25 @@ class LoadEvent : public ThreadEvent<ait> {
 	IRTemp tmp;
 	ait addr;
 	unsigned size;
-protected:
-	virtual char *mkName() const { return my_asprintf("load(%d, %d)", tmp, size); }
-public:
-	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	LoadEvent(IRTemp _tmp, ait _addr, unsigned _size) :
 		tmp(_tmp),
 		addr(_addr),
 		size(_size)
 	{
 	}
-	ThreadEvent<ait> *dupe() const { return new LoadEvent(tmp, addr, size); }
+	static VexAllocTypeWrapper<LoadEvent<ait> > allocator;
+protected:
+	virtual char *mkName() const { return my_asprintf("load(%d, %d)", tmp, size); }
+public:
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	static ThreadEvent<ait> *get(IRTemp _tmp, ait _addr, unsigned _size)
+	{
+		void *b = allocator.alloc();
+		return new (b) LoadEvent<ait>(_tmp, _addr, _size);
+	}
+	ThreadEvent<ait> *dupe() const { return get(tmp, addr, size); }
+	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); }
 };
 
 template <typename ait>
@@ -745,13 +754,21 @@ class StoreEvent : public ThreadEvent<ait> {
 	ait addr;
 	unsigned size;
 	expression_result<ait> data;
+	StoreEvent(ait addr, unsigned size, expression_result<ait> data);
+	static VexAllocTypeWrapper<StoreEvent<ait> > allocator;
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d)", size); }
 public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	StoreEvent(ait addr, unsigned size, expression_result<ait> data);
-	ThreadEvent<ait> *dupe() const { return new StoreEvent(addr, size, data); }
+	static ThreadEvent<ait> *get(ait _addr, unsigned _size, expression_result<ait> data)
+	{
+		void *b = allocator.alloc();
+		return new (b) StoreEvent<ait>(_addr, _size, data);
+	}
+	ThreadEvent<ait> *dupe() const { return get(addr, size, data); }
+
+	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); data.visit(hv); }
 };
 
 template <typename ait>
@@ -763,13 +780,7 @@ public:
 	ait reg2;
 	ait reg3;
 	ait reg4;
-protected:
-	virtual char *mkName() const {
-		return my_asprintf("footstep()");
-	}
-public:
-	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	static VexAllocTypeWrapper<InstructionEvent<ait> > allocator;
 	InstructionEvent(ait _rip, ait _reg0, ait _reg1,
 			 ait _reg2, ait _reg3, ait _reg4) :
 		rip(_rip),
@@ -780,7 +791,30 @@ public:
 		reg4(_reg4)
 	{
 	}
-	ThreadEvent<ait> *dupe() const { return new InstructionEvent(rip, reg0, reg1, reg2, reg3, reg4); }
+protected:
+	virtual char *mkName() const {
+		return my_asprintf("footstep()");
+	}
+public:
+	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	static ThreadEvent<ait> *get(ait _rip, ait _reg0, ait _reg1,
+				     ait _reg2, ait _reg3, ait _reg4)
+	{
+		void *b = allocator.alloc();
+		return new (b) InstructionEvent<ait>(_rip, _reg0, _reg1, _reg2, _reg3, _reg4);
+	}
+	ThreadEvent<ait> *dupe() const { return get(rip, reg0, reg1, reg2, reg3, reg4); }
+
+	void visit(HeapVisitor &hv) const
+	{
+		visit_aiv(rip, hv);
+		visit_aiv(reg0, hv);
+		visit_aiv(reg1, hv);
+		visit_aiv(reg2, hv);
+		visit_aiv(reg3, hv);
+		visit_aiv(reg4, hv);
+	}
 };
 
 template <typename ait>
@@ -790,6 +824,19 @@ class CasEvent : public ThreadEvent<ait> {
 	expression_result<ait> data;
 	expression_result<ait> expected;
 	unsigned size;
+	static VexAllocTypeWrapper<CasEvent<ait> > allocator;
+	CasEvent(IRTemp _dest,
+		 expression_result<ait> _addr,
+		 expression_result<ait> _data,
+		 expression_result<ait> _expected,
+		 unsigned _size) :
+		dest(_dest),
+		addr(_addr),
+		data(_data),
+		expected(_expected),
+		size(_size)
+	{
+	}
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("cas(dest %d, size %d)",
@@ -804,19 +851,24 @@ public:
 		    const LogReader<ait> *lf, LogReaderPtr ptr,
 		    LogReaderPtr *outPtr, LogWriter<ait> *lw);
 	void record(Thread<ait> *thr, LogRecord<ait> **lr1, LogRecord<ait> **lr2);
-	CasEvent(IRTemp _dest,
-		 expression_result<ait> _addr,
-		 expression_result<ait> _data,
-		 expression_result<ait> _expected,
-		 unsigned _size) :
-		dest(_dest),
-		addr(_addr),
-		data(_data),
-		expected(_expected),
-		size(_size)
+
+	static ThreadEvent<ait> *get(IRTemp _dest,
+				     expression_result<ait> _addr,
+				     expression_result<ait> _data,
+				     expression_result<ait> _expected,
+				     unsigned _size)
 	{
+		void *b = allocator.alloc();
+		return new (b) CasEvent<ait>(_dest, _addr, _data, _expected, _size);
 	}
-	ThreadEvent<ait> *dupe() const { return new CasEvent(dest, addr, data, expected, size); }
+	ThreadEvent<ait> *dupe() const { return get(dest, addr, data, expected, size); }
+
+	void visit(HeapVisitor &hv) const
+	{
+		addr.visit(hv);
+		data.visit(hv);
+		expected.visit(hv);
+	}
 };
 
 template <typename ait>
@@ -825,10 +877,13 @@ protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall");
 	}
+	SyscallEvent() {}
+	static VexAllocTypeWrapper<SyscallEvent<ait> > allocator;
 public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	ThreadEvent<ait> *dupe() const { return new SyscallEvent(); }
+	ThreadEvent<ait> *dupe() const { return get(); }
+	static ThreadEvent<ait> *get() { return new (allocator.alloc()) SyscallEvent(); }
 };
 
 template <typename ait>
@@ -836,6 +891,12 @@ class SignalEvent : public ThreadEvent<ait> {
 public:
 	unsigned signr;
 	ait virtaddr;
+	SignalEvent(unsigned _signr, ait _va) :
+		signr(_signr),
+		virtaddr(_va)
+	{
+	}
+	static VexAllocTypeWrapper<SignalEvent<ait> > allocator;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d)", signr);
@@ -843,12 +904,19 @@ protected:
 public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	SignalEvent(unsigned _signr, ait _va) :
-		signr(_signr),
-		virtaddr(_va)
+
+	static ThreadEvent<ait> *get(unsigned _signr, ait _virtaddr)
 	{
+		void *b = allocator.alloc();
+		return new (b) SignalEvent<ait>(_signr, _virtaddr);
 	}
-	ThreadEvent<ait> *dupe() const { return new SignalEvent(signr, virtaddr); }
+	ThreadEvent<ait> *dupe() const { return get(signr, virtaddr); }
+
+	void visit(HeapVisitor &hv) const
+	{
+		visit_aiv(virtaddr, hv);
+	}
+
 };
 
 template <typename ait>
@@ -1372,6 +1440,8 @@ public:
 	void dumpSnapshot(LogWriter<ait> *lw) const;
 
 	template <typename new_type> AddressSpace<new_type> *abstract() const;
+
+	void destruct() {}
 };
 
 template<typename ait> void replay_syscall(const LogRecordSyscall<ait> *lrs,

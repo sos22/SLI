@@ -54,7 +54,17 @@ unsigned long import_ait(unsigned long x)
 	return x;
 }
 
-MK_INTERP(unsigned long);
+	MK_MACHINE_STATE(unsigned long);			
+	MK_INTERPRETER(unsigned long);			
+	MK_THREAD(unsigned long);				
+	MK_MEM_LOG(unsigned long);			       
+	MK_MEMTRACE_POOL(unsigned long);			
+	MK_MEMTRACE(unsigned long);				
+	MK_LOGWRITER(unsigned long);			
+	MK_ADDRESS_SPACE(unsigned long);			
+MK_LOGREADER(unsigned long);
+
+	//MK_INTERP(unsigned long);
 
 template <>
 void mulls64(struct expression_result<abstract_interpret_value> *dest,
