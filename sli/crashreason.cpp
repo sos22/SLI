@@ -116,6 +116,12 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 				       ExpressionBadPointer::get(extr.signal->when, extr.signal->virtaddr.origin));
 }
 
+static Expression *refine(Expression *expr,
+			  const MachineState<abstract_interpret_value> *ms,
+			  LogReader<abstract_interpret_value> *lf,
+			  LogReaderPtr ptr,
+			  bool *progress);
+
 /* A CrashReasonControl indicates that we executed some RIP which we
  * shouldn't have done.  There are two possible explanations:
  *
@@ -125,7 +131,12 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
  *
  * We refine by finding the previous control flow branch for this
  * thread and generating new crash reasons for each possible
- * subcase. */
+ * subcase.
+ *
+ * (It's also possible that the contents of the relevant bit of memory
+ * changed, whether due to mmap() manipulations or direct writes, but
+ * we ignore that possibility, because it's hard and unlikely.)
+ */
 class GetFootstepsOneThread : public EventRecorder<abstract_interpret_value> {
 public:
         typedef std::vector<const InstructionEvent<abstract_interpret_value> *> contentT;
@@ -166,20 +177,17 @@ public:
                         hv(*it);
 	}
 };
-Expression *refine(Expression *expr,
-		   MachineState<abstract_interpret_value> *ms,
-		   LogReader<abstract_interpret_value> *lf,
-		   LogReaderPtr ptr,
-		   bool *progress)
+static Expression *refine(ExpressionRip *er,
+			  const MachineState<abstract_interpret_value> *ms,
+			  LogReader<abstract_interpret_value> *lf,
+			  LogReaderPtr ptr,
+			  bool *progress)
 {
-	ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr);
-	if (!er)
-		return expr;
-
-	Interpreter<abstract_interpret_value> i(ms);
+	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
 	GetFootstepsOneThread fltr(er->tid);
 	i.replayLogfile(lf, ptr, NULL, NULL, &fltr);
 
+	printf("Refine %s\n", er->name());
 	const InstructionEvent<abstract_interpret_value> *cond;
 	GetFootstepsOneThread::contentT::reverse_iterator it;
 	for (it = fltr.content.rbegin();
@@ -207,6 +215,8 @@ Expression *refine(Expression *expr,
 	}
 	const InstructionEvent<abstract_interpret_value> *branch = *it;
 
+	*progress = true;
+
 	/* We get here if... */
 	return logicaland::get(
 		/* We make it to the previous conditional branch, and ... */
@@ -214,6 +224,39 @@ Expression *refine(Expression *expr,
 		/* ... the branch goes the right way */
 		equals::get(cond->rip.origin,
 			    ConstExpression::get(cond->rip.v)));
+}
+
+static Expression *refine(logicaland *er,
+			  const MachineState<abstract_interpret_value> *ms,
+			  LogReader<abstract_interpret_value> *lf,
+			  LogReaderPtr ptr,
+			  bool *progress)
+{
+	bool lprogress, rprogress;
+	lprogress = false;
+	rprogress = false;
+	Expression *l2 = refine(er->l, ms, lf, ptr, &lprogress);
+	Expression *r2 = refine(er->r, ms, lf, ptr, &rprogress);
+	if (!lprogress && !rprogress)
+		return er;
+	*progress = true;
+	return logicaland::get(l2, r2);
+}
+
+Expression *refine(Expression *expr,
+		   const MachineState<abstract_interpret_value> *ms,
+		   LogReader<abstract_interpret_value> *lf,
+		   LogReaderPtr ptr,
+		   bool *progress)
+{
+	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr))
+		return refine(er, ms, lf, ptr, progress);
+	else if (logicaland *la = dynamic_cast<logicaland *>(expr))
+		return refine(la, ms, lf, ptr, progress);
+	else {
+		printf("Cannot refine %s\n", expr->name());
+		return expr;
+	}
 }
 
 int
@@ -242,7 +285,7 @@ main(int argc, char *argv[])
 	do {
 		progress = false;
 		printf("Crash reason %s\n", cr->name());
-		cr = refine(cr, abstract->dupeSelf(), al, ptr, &progress);
+		cr = refine(cr, abstract, al, ptr, &progress);
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
 
