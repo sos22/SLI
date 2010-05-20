@@ -1114,6 +1114,7 @@ public:
 
 template <typename ait>
 class LogRecordFootstep : public LogRecord<ait> {
+	VexGcVisitor<LogRecordFootstep<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("footstep()");
@@ -1133,6 +1134,7 @@ public:
 			  ait _reg3,
 			  ait _reg4) :
 		LogRecord<ait>(_tid),
+		visitor(this),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -1156,10 +1158,20 @@ public:
 						      outtype::import(reg3),
 						      outtype::import(reg4));
 	}
+	void visit(HeapVisitor &hv) const
+	{
+		visit_aiv(rip, hv);
+		visit_aiv(reg0, hv);
+		visit_aiv(reg1, hv);
+		visit_aiv(reg2, hv);
+		visit_aiv(reg3, hv);
+		visit_aiv(reg4, hv);
+	}
 };
 
 template <typename ait>
 class LogRecordSyscall : public LogRecord<ait> {
+	VexGcVisitor<LogRecordSyscall<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall()");
@@ -1173,6 +1185,7 @@ public:
 			 ait _arg2,
 			 ait _arg3) :
 		LogRecord<ait>(_tid),
+		visitor(this),
 		sysnr(_sysnr),
 		res(_res),
 		arg1(_arg1),
@@ -1194,10 +1207,19 @@ public:
 						     outtype::import(arg2),
 						     outtype::import(arg3));
 	}
+	void visit(HeapVisitor &hv) const
+	{
+		visit_aiv(sysnr, hv);
+		visit_aiv(res, hv);
+		visit_aiv(arg1, hv);
+		visit_aiv(arg2, hv);
+		visit_aiv(arg3, hv);
+	}
 };
 
 template <typename ait>
 class LogRecordMemory : public LogRecord<ait> {
+	VexGcVisitor<LogRecordMemory<ait> > visitor;
 protected:
 	char *mkName() const {
 		return my_asprintf("memory(%x)", size);
@@ -1211,6 +1233,7 @@ public:
 			ait _start,
 			const void *_contents) :
 		LogRecord<ait>(_tid),
+		visitor(this),
 		size(_size),
 		start(_start),
 		contents(_contents)
@@ -1229,11 +1252,16 @@ public:
 		memcpy(b, contents, size);
 		return new LogRecordMemory<outtype>(this->thread(), size, outtype::import(start), b);
 	}
+	void visit(HeapVisitor &hv) const
+	{
+		visit_aiv(start, hv);
+	}
 };
 
 template <typename ait>
 class LogRecordRdtsc : public LogRecord<ait> {
 	friend class RdtscEvent<ait>;
+	VexGcVisitor<LogRecordRdtsc<ait> > visitor;
 	ait tsc;
 protected:
 	char *mkName() const {
@@ -1243,6 +1271,7 @@ public:
 	LogRecordRdtsc(ThreadId _tid,
 		       ait _tsc)
 		: LogRecord<ait>(_tid),
+		  visitor(this),
 		  tsc(_tsc)
 	{
 	}
@@ -1256,10 +1285,12 @@ public:
 		return new LogRecordRdtsc<outtype>(this->thread(),
 						   outtype::import(tsc));
 	}
+	void visit(HeapVisitor &hv) const { visit_aiv(tsc, hv); }
 };
 
 template <typename ait>
 class LogRecordSignal : public LogRecord<ait> {
+	VexGcVisitor<LogRecordSignal<ait> > visitor;
 public:
 	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d)", signr);
@@ -1275,6 +1306,7 @@ public:
 			ait _err,
 			ait _va) :
 		LogRecord<ait>(_tid),
+		visitor(this),
 		rip(_rip),
 		signr(_signr),
 		err(_err),
@@ -1294,11 +1326,18 @@ public:
 						    outtype::import(err),
 						    outtype::import(virtaddr));
 	}
+	void visit(HeapVisitor &hv) const
+	{
+		visit_aiv(rip, hv);
+		visit_aiv(err, hv);
+		visit_aiv(virtaddr, hv);
+	}
 };
 
 template <typename ait>
 class LogRecordAllocateMemory : public LogRecord<ait> {
 	friend class AddressSpace<ait>;
+	VexGcVisitor<LogRecordAllocateMemory<ait> > visitor;
 	ait start;
 	ait size;
 	unsigned prot;
@@ -1315,6 +1354,7 @@ public:
 				unsigned _prot,
 				unsigned _flags) :
 		LogRecord<ait>(_tid),
+		visitor(this),
 		start(_start),
 		size(_size),
 		prot(_prot),
@@ -1334,6 +1374,7 @@ public:
 							    prot,
 							    flags);
 	}
+	void visit(HeapVisitor &hv) const { visit_aiv(start, hv); visit_aiv(size, hv); }
 };
 
 template <typename ait>
@@ -1364,6 +1405,7 @@ public:
 
 template <typename ait>
 class LogRecordInitialBrk : public LogRecord<ait> {
+	VexGcVisitor<LogRecordInitialBrk<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("initbrk()");
@@ -1373,6 +1415,7 @@ public:
 	LogRecordInitialBrk(ThreadId tid,
 			    ait _brk) :
 		LogRecord<ait>(tid),
+		visitor(this),
 		brk(_brk)
 	{
 	}
@@ -1386,23 +1429,22 @@ public:
 		return new LogRecordInitialBrk<outtype>(this->thread(),
 							outtype::import(brk));
 	}
+	void visit(HeapVisitor &hv) const { visit_aiv(brk, hv); }
 };
 
 template <typename ait>
 class LogRecordVexThreadState : public LogRecord<ait> {
+	VexGcVisitor<LogRecordVexThreadState<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return strdup("vex state");
 	}
-	VexGcRoot root;
-	LogRecordVexThreadState **root_data;
 public:
 	expression_result_array<ait> tmp;
 	unsigned statement_nr;
 	LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
 				expression_result_array<ait> _tmp);
 	void *marshal(unsigned *sz) const;
-	void visit(HeapVisitor &hv) const;
 	LogRecord<ait> *dupe() const
 	{
 		return new LogRecordVexThreadState(this->thread(), statement_nr, tmp);
@@ -1413,6 +1455,7 @@ public:
 		tmp.abstract(&ntmp);
 		return new LogRecordVexThreadState<outtype>(this->thread(), statement_nr, ntmp);
 	}
+	void visit(HeapVisitor &hv) const { tmp.visit(hv); }
 };
 
 template <typename ait>

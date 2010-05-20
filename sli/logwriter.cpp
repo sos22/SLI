@@ -231,35 +231,13 @@ void LogFileWriter::append(const LogRecord<unsigned long> &lr)
 }
 
 template <typename ait>
-void LogRecordVexThreadState<ait>::visit(HeapVisitor &hv) const
-{
-	tmp.visit(hv);
-}
-
-template <typename ait>
-static void visit_special_keeper(const void *_ctxt, HeapVisitor &hv)
-{
-	const LogRecordVexThreadState<ait> *ctxt = *(const LogRecordVexThreadState<ait> **)_ctxt;
-	ctxt->visit(hv);
-}
-
-template <typename ait>
 LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
 						      expression_result_array<ait> _tmp)
 	: LogRecord<ait>(tid),
-	  root((void **)&root_data),
+	  visitor(this),
 	  tmp(_tmp),
 	  statement_nr(_statement_nr)
 {
-	static VexAllocType vat;
-
-	vat.nbytes = sizeof(LogRecordVexThreadState<ait> *);
-	vat.gc_visit = visit_special_keeper<ait>;
-	vat.destruct = NULL;
-	vat.name = "LogRecordVexThreadState keeper";
-
-	root_data = (LogRecordVexThreadState<ait> **)__LibVEX_Alloc(&vat);
-	*root_data = this;	
 }
 
 template <typename ait>
