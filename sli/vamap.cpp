@@ -30,7 +30,6 @@ VAMap::AllocFlags::AllocFlags(unsigned flags)
 {
        expandsDown = false;
        if (flags & MAP_GROWSDOWN) {
-               printf("Create a stack segment.\n");
                expandsDown = true;
        }
 }
