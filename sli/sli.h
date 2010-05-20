@@ -701,6 +701,7 @@ public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL) = 0;
 	virtual ~ThreadEvent() {};
+	virtual ThreadEvent<ait> *dupe() const = 0;
 };
 
 template <typename ait>
@@ -712,6 +713,7 @@ public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	RdtscEvent(IRTemp _tmp) : tmp(_tmp) {};
+	ThreadEvent<ait> *dupe() const { return new RdtscEvent(tmp); }
 };
 
 template <typename ait> class MemoryAccessLoad;
@@ -734,6 +736,7 @@ public:
 		size(_size)
 	{
 	}
+	ThreadEvent<ait> *dupe() const { return new LoadEvent(tmp, addr, size); }
 };
 
 template <typename ait>
@@ -748,6 +751,7 @@ public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	StoreEvent(ait addr, unsigned size, expression_result<ait> data);
+	ThreadEvent<ait> *dupe() const { return new StoreEvent(addr, size, data); }
 };
 
 template <typename ait>
@@ -776,6 +780,7 @@ public:
 		reg4(_reg4)
 	{
 	}
+	ThreadEvent<ait> *dupe() const { return new InstructionEvent(rip, reg0, reg1, reg2, reg3, reg4); }
 };
 
 template <typename ait>
@@ -811,6 +816,7 @@ public:
 		size(_size)
 	{
 	}
+	ThreadEvent<ait> *dupe() const { return new CasEvent(dest, addr, data, expected, size); }
 };
 
 template <typename ait>
@@ -822,10 +828,12 @@ protected:
 public:
 	virtual void replay(Thread<ait> *thr, LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(Thread<ait> *thr, MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	ThreadEvent<ait> *dupe() const { return new SyscallEvent(); }
 };
 
 template <typename ait>
 class SignalEvent : public ThreadEvent<ait> {
+public:
 	unsigned signr;
 	ait virtaddr;
 protected:
@@ -840,6 +848,7 @@ public:
 		virtaddr(_va)
 	{
 	}
+	ThreadEvent<ait> *dupe() const { return new SignalEvent(signr, virtaddr); }
 };
 
 template <typename ait>
@@ -1382,6 +1391,8 @@ void init_sli(void);
 void gdb_machine_state(const MachineState<unsigned long> *ms);
 
 class Expression : public Named {
+public:
+	virtual bool isConstant(unsigned long *cv) { return false; }
 };
 
 class ConstExpression : public Expression {
@@ -1399,6 +1410,7 @@ public:
 		return work;
 	}
 	void visit(HeapVisitor &hv) const {}
+	bool isConstant(unsigned long *cv) { *cv = v; return true; }
 };
 
 class ImportExpression : public Expression {
@@ -1430,13 +1442,7 @@ public:
 					   l->name(), r->name());	\
 		}							\
 	public:								\
-	        static nme *get(Expression *_l, Expression *_r)		\
-		{							\
-			nme *work = new (allocator.alloc()) nme();	\
-			work->l = _l;					\
-			work->r = _r;					\
-			return work;					\
-		}							\
+	        static Expression *get(Expression *_l, Expression *_r);	\
 		void visit(HeapVisitor &hv) const			\
 		{							\
 			hv(l);						\
@@ -1474,12 +1480,7 @@ mk_binop_class(logicaland);
 			return my_asprintf("(" #nme " %s)", l->name());	\
 		}							\
 	public:								\
-	        static nme* get(Expression *_l)				\
-		{							\
-			nme *work = new (allocator.alloc()) nme();	\
-			work->l = _l;					\
-			return work;					\
-		}							\
+	        static Expression* get(Expression *_l);			\
 		void visit(HeapVisitor &hv) const			\
 		{							\
 			hv(l);						\
@@ -1501,14 +1502,7 @@ protected:
 				   cond->name(), t->name(), f->name());
 	}
 public:
-	static ternarycondition *get(Expression *_cond, Expression *_t, Expression *_f)
-	{
-		ternarycondition *work = new (allocator.alloc()) ternarycondition();
-		work->cond = _cond;
-		work->t = _t;
-		work->f = _f;
-		return work;
-	}
+	static Expression *get(Expression *_cond, Expression *_t, Expression *_f);
 	void visit(HeapVisitor &hv) const
 	{
 		hv(cond);

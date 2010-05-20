@@ -30,7 +30,7 @@ class CrashReasonControl : public CrashReason {
 	ThreadId tid;
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(rip %d:%lx)", tid._tid(), badRip.v);
+		return my_asprintf("(rip %d:%s)", tid._tid(), badRip.origin->name());
 	}
 public:
 	CrashReasonControl(ThreadId _tid, abstract_interpret_value _badRip)
@@ -38,7 +38,6 @@ public:
 		  tid(_tid)
 	{
 	}
-	CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr);
 };
 
 class CrashReasonBadPointer : public CrashReason {
@@ -56,57 +55,23 @@ public:
 	}
 };
 
-class CrashReasonExtractor : public LogWriter<abstract_interpret_value> {
+class CrashReasonExtractor : public EventRecorder<abstract_interpret_value> {
 public:
-	bool full;
-	abstract_interpret_value crash_va;
-	ThreadId tid;
+	SignalEvent<abstract_interpret_value> *signal;
+	Thread<abstract_interpret_value> *thr;
 
-	void append(const LogRecord<abstract_interpret_value> &lr);
+	void record(Thread<abstract_interpret_value> *thr, const ThreadEvent<abstract_interpret_value> *evt);
 
-	CrashReasonExtractor() : full(false), tid(0) {}
+	CrashReasonExtractor() : signal(NULL) {}
 };
 
-void CrashReasonExtractor::append(const LogRecord<abstract_interpret_value> &lr)
+void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const ThreadEvent<abstract_interpret_value> *evt)
 {
-	const LogRecord<abstract_interpret_value> *lrp = &lr;
-
-	if (const LogRecordSignal<abstract_interpret_value> *lrs =
-	    dynamic_cast<const LogRecordSignal<abstract_interpret_value> *>(lrp)) {
-		full = true;
-		tid = lr.thread();
-		crash_va = lrs->virtaddr;
+	if (const SignalEvent<abstract_interpret_value> *es =
+	    dynamic_cast<const SignalEvent<abstract_interpret_value> *>(evt)) {
+		thr = _thr;
+		signal = (SignalEvent<abstract_interpret_value> *)es->dupe();
 	}
-}
-
-class ControlRecorder : public EventRecorder<abstract_interpret_value> {
-public:
-	typedef std::vector<const InstructionEvent<abstract_interpret_value> *> vect_type;
-	vect_type content;
-
-	void record(Thread<abstract_interpret_value> *thr,
-		    const ThreadEvent<abstract_interpret_value> *evt) {
-		if (const InstructionEvent<abstract_interpret_value> *ievt =
-		    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt))
-			content.push_back(ievt);
-		else
-			delete evt;
-	}
-};
-
-CrashReason *CrashReasonControl::refine(MachineState<abstract_interpret_value> *ms, LogReader<abstract_interpret_value> *lf,
-					LogReaderPtr ptr)
-{
-	Interpreter<abstract_interpret_value> i(ms);
-	ControlRecorder cr;
-	i.replayLogfile(lf, ptr, NULL, NULL, &cr);
-	for (ControlRecorder::vect_type::reverse_iterator it = cr.content.rbegin();
-	     it != cr.content.rend();
-	     it++) {
-		printf("instruction %s %s\n", (*it)->name(), (*it)->rip.origin->name());
-		delete *it;
-	}
-	return this;
 }
 
 static CrashReason *getCrashReason(MachineState<abstract_interpret_value> *ms,
@@ -116,7 +81,7 @@ static CrashReason *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	Interpreter<abstract_interpret_value> i(ms);
 	CrashReasonExtractor extr;
 
-	i.replayLogfile(script, ptr, NULL, &extr);
+	i.replayLogfile(script, ptr, NULL, NULL, &extr);
 
 	if (!ms->crashed())
 		return NULL;
@@ -130,15 +95,13 @@ static CrashReason *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	   We further assume that a crash is due to a bad instruction
 	   if the faulting address matches the RIP, and bad data
 	   otherwise. */
-	assert(extr.full);
-	ThreadId crashingTid = extr.tid;
-	Thread<abstract_interpret_value> *thr = ms->findThread(crashingTid);
-	assert(thr->crashed);
-	if (force(thr->regs.rip() == extr.crash_va))
-		return new CrashReasonControl(crashingTid, extr.crash_va);
+	assert(extr.signal);
+	assert(extr.thr->crashed);
+	if (force(extr.thr->regs.rip() == extr.signal->virtaddr))
+		return new CrashReasonControl(extr.thr->tid, extr.signal->virtaddr);
 	else
-		return new CrashReasonAnd(new CrashReasonControl(crashingTid, thr->regs.rip()),
-					  new CrashReasonBadPointer(crashingTid, extr.crash_va));
+		return new CrashReasonAnd(new CrashReasonControl(extr.thr->tid, extr.thr->regs.rip()),
+					  new CrashReasonBadPointer(extr.thr->tid, extr.signal->virtaddr));
 }
 
 int
@@ -161,8 +124,6 @@ main(int argc, char *argv[])
 
 	CrashReason *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	printf("Replayed symbolically, crash reason %s\n", cr->name());
-	CrashReason *cr2 = cr->refine(abstract->dupeSelf(), al, ptr);
-	printf("Refines to %s\n", cr2->name());
 
 	return 0;
 }

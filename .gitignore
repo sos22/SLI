@@ -11,3 +11,4 @@ vgcore.*
 .depends
 crop
 symexec
+crashreason

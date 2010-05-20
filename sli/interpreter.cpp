@@ -475,8 +475,10 @@ Thread<ait>::eval_expression(IRExpr *expr)
 {
 	struct expression_result<ait> res;
 	struct expression_result<ait> *dest = &res;
-	memset(&res, 0, sizeof(res));
 
+	res.lo = import_ait<unsigned long, ait>(0);
+	res.hi = import_ait<unsigned long, ait>(0);
+	
 	switch (expr->tag) {
 	case Iex_Get: {
 		ait v1;
@@ -998,15 +1000,15 @@ IRSB *instrument_func(void *closure,
 template <typename ait>
 class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	AddressSpace<ait> *aspace;
-	unsigned long offset;
+	ait offset;
 public:
 	virtual UChar operator[](unsigned long idx) const {
 		UChar res;
-		aspace->readMemory(mkConst<ait>(idx + offset), 1, &res);
+		aspace->readMemory(mkConst<ait>(idx) + offset, 1, &res);
 		return res;
 	}
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
-				 unsigned long _offset) :
+				 ait _offset) :
 		aspace(_aspace),
 		offset(_offset)
 	{
@@ -1030,7 +1032,7 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 	LibVEX_default_VexAbiInfo(&abiinfo_both);
 	abiinfo_both.guest_stack_redzone_size = 128;
 	abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-	class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, force(regs.rip()));
+	class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, regs.rip());
 	IRSB *irsb = bb_to_IR(&vge,
 			      NULL, /* Context for chase_into_ok */
 			      disInstr_AMD64,
@@ -1314,14 +1316,16 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		PointerKeeper<LogRecord<ait> > k_lr(lr);
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent<ait> > k_evt;
-		if (!er)
-			k_evt.keep(evt);
+		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
+
+		if (er)
+			er->record(thr, evt);
 
 #if 0
 		printf("Event %s in thread %d\n",
 		       evt->name(), lr->thread()._tid());
 #endif
+
 
 		/* CAS events are annoyingly special, because they can
 		   generate multiple records in the logfile (one for
@@ -1333,9 +1337,6 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		} else {
 			evt->replay(thr, lr, currentState);
 		}
-
-		if (er)
-			er->record(thr, evt);
 
 		/* Memory records are special and should always be
 		   processed eagerly. */
