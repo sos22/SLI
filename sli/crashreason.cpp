@@ -3,66 +3,94 @@
 #include "sli.h"
 
 class CrashReason : public Named {
+protected:
+	CrashReason() {}
 public:
 	virtual CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr)
 	{
 		return this;
 	}
+	virtual void visit(HeapVisitor &hv) const {}
 };
 
 class CrashReasonAnd : public CrashReason {
 	CrashReason *left;
 	CrashReason *right;
-protected:
-	char *mkName(void) const {
-		return my_asprintf("(%s && %s)", left->name(), right->name());
-	}
-public:
 	CrashReasonAnd(CrashReason *_left, CrashReason *_right)
 		: left(_left),
 		  right(_right)
 	{
 	}
+	static VexAllocTypeWrapper<CrashReasonAnd> allocator;
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(%s && %s)", left->name(), right->name());
+	}
+public:
+	static CrashReason *get(CrashReason *l, CrashReason *r)
+	{
+		return new (allocator.alloc()) CrashReasonAnd(l, r);
+	}
+	void visit(HeapVisitor &hv) const { hv(left); hv(right); }
 };
+
+VexAllocTypeWrapper<CrashReasonAnd> CrashReasonAnd::allocator;
 
 class CrashReasonControl : public CrashReason {
 	abstract_interpret_value badRip;
 	ThreadId tid;
-protected:
-	char *mkName(void) const {
-		return my_asprintf("(rip %d:%s)", tid._tid(), badRip.origin->name());
-	}
-public:
+	static VexAllocTypeWrapper<CrashReasonControl> allocator;
 	CrashReasonControl(ThreadId _tid, abstract_interpret_value _badRip)
 		: badRip(_badRip),
 		  tid(_tid)
 	{
 	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(rip %d:%s)", tid._tid(), badRip.origin->name());
+	}
+public:
+	static CrashReason *get(ThreadId _tid, abstract_interpret_value _rip)
+	{
+		return new (allocator.alloc()) CrashReasonControl(_tid, _rip);
+	}
+	void visit(HeapVisitor &hv) const { visit_aiv(badRip, hv); }
 };
+
+VexAllocTypeWrapper<CrashReasonControl> CrashReasonControl::allocator;
 
 class CrashReasonBadPointer : public CrashReason {
 	abstract_interpret_value bad;
 	ThreadId tid;
-protected:
-	char *mkName(void) const {
-		return my_asprintf("(ptr %d:%lx)", tid._tid(), bad.v);
-	}
-public:
+	static VexAllocTypeWrapper<CrashReasonBadPointer> allocator;
 	CrashReasonBadPointer(ThreadId _tid, abstract_interpret_value _bad)
 		: bad(_bad),
 		  tid(_tid)
 	{
 	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(ptr %d:%lx)", tid._tid(), bad.v);
+	}
+public:
+	static CrashReason *get(ThreadId _tid, abstract_interpret_value _rip)
+	{
+		return new (allocator.alloc()) CrashReasonBadPointer(_tid, _rip);
+	}
+	void visit(HeapVisitor &hv) const { visit_aiv(bad, hv); }
 };
+
+VexAllocTypeWrapper<CrashReasonBadPointer> CrashReasonBadPointer::allocator;
 
 class CrashReasonExtractor : public EventRecorder<abstract_interpret_value> {
 public:
 	SignalEvent<abstract_interpret_value> *signal;
 	Thread<abstract_interpret_value> *thr;
 
+	VexGcRoot sroot;
 	void record(Thread<abstract_interpret_value> *thr, const ThreadEvent<abstract_interpret_value> *evt);
 
-	CrashReasonExtractor() : signal(NULL) {}
+	CrashReasonExtractor() : signal(NULL),sroot((void **)&signal) {}
 };
 
 void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const ThreadEvent<abstract_interpret_value> *evt)
@@ -98,10 +126,10 @@ static CrashReason *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	assert(extr.signal);
 	assert(extr.thr->crashed);
 	if (force(extr.thr->regs.rip() == extr.signal->virtaddr))
-		return new CrashReasonControl(extr.thr->tid, extr.signal->virtaddr);
+		return CrashReasonControl::get(extr.thr->tid, extr.signal->virtaddr);
 	else
-		return new CrashReasonAnd(new CrashReasonControl(extr.thr->tid, extr.thr->regs.rip()),
-					  new CrashReasonBadPointer(extr.thr->tid, extr.signal->virtaddr));
+		return CrashReasonAnd::get(CrashReasonControl::get(extr.thr->tid, extr.thr->regs.rip()),
+					   CrashReasonBadPointer::get(extr.thr->tid, extr.signal->virtaddr));
 }
 
 int
