@@ -49,7 +49,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 		regs->set_reg(REGISTER_IDX(RDX), mkConst<ait>(_d));	\
 	} while (0)
 
-	switch (force(ait(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RAX)))) {
+	switch (force(mkConst<ait>(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RAX)))) {
 	case 0x00000000:
 		SET_ABCD(0x0000000a, 0x756e6547, 0x6c65746e, 0x49656e69);
 		break;
@@ -63,7 +63,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
 		break;
 	case 0x00000004: {
-		switch (force(ait(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RCX)))) {
+		switch (force(mkConst<ait>(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RCX)))) {
 		case 0x00000000: SET_ABCD(0x04000121, 0x01c0003f,
 					  0x0000003f, 0x00000001); break;
 		case 0x00000001: SET_ABCD(0x04000122, 0x01c0003f,
@@ -355,15 +355,15 @@ Thread<ait>::do_ccall_generic(IRCallee *cee,
 {
 	struct expression_result<ait> res;
 
-	res.lo = ait(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
-					 unsigned long, unsigned long, unsigned long))cee->addr)
-		     (force(rargs[0].lo),
-		      force(rargs[1].lo),
-		      force(rargs[2].lo),
-		      force(rargs[3].lo),
-		      force(rargs[4].lo),
-		      force(rargs[5].lo)));
-	res.hi = ait(0);
+	res.lo = import_ait<unsigned long, ait>(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
+								    unsigned long, unsigned long, unsigned long))cee->addr)
+						(force(rargs[0].lo),
+						 force(rargs[1].lo),
+						 force(rargs[2].lo),
+						 force(rargs[3].lo),
+						 force(rargs[4].lo),
+						 force(rargs[5].lo)));
+	res.hi = mkConst<ait>(0);
 	return res;
 }
 
@@ -642,7 +642,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 		}
 		case Iop_MullS32: {
-			dest->lo = ait((long)(int)force(arg1.lo) * (long)(int)force(arg2.lo));
+			dest->lo = import_ait<unsigned long, ait>((long)(int)force(arg1.lo) * (long)(int)force(arg2.lo));
 			break;
 		}
 
@@ -680,7 +680,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_DivModS64to32: {
 			long a1 = force(arg1.lo);
 			long a2 = force(arg2.lo);
-			dest->lo = ait(((a1 / a2) & 0xffffffff) |
+			dest->lo = import_ait<unsigned long, ait>(((a1 / a2) & 0xffffffff) |
 				       ((a1 % a2) << 32));
 			break;
 		}
@@ -694,8 +694,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("div %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = ait(dlo);
-			dest->hi = ait(dhi);
+			dest->lo = import_ait<unsigned long, ait>(dlo);
+			dest->hi = import_ait<unsigned long, ait>(dhi);
 			break;
 		}
 
@@ -705,16 +705,16 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("idiv %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = ait(dlo);
-			dest->hi = ait(dhi);
+			dest->lo = import_ait<unsigned long, ait>(dlo);
+			dest->hi = import_ait<unsigned long, ait>(dhi);
 			break;
 		}
 
 		case Iop_Add32x4:
-			dest->lo = ((arg1.lo + arg2.lo) & ait(0xffffffff)) +
-				((arg1.lo & ait(~0xfffffffful)) + (arg2.lo & ait(~0xfffffffful)));
-			dest->hi = ((arg1.hi + arg2.hi) & ait(0xffffffff)) +
-				((arg1.hi & ait(~0xfffffffful)) + (arg2.hi & ait(~0xfffffffful)));
+			dest->lo = ((arg1.lo + arg2.lo) & mkConst<ait>(0xffffffff)) +
+				((arg1.lo & mkConst<ait>(~0xfffffffful)) + (arg2.lo & mkConst<ait>(~0xfffffffful)));
+			dest->hi = ((arg1.hi + arg2.hi) & mkConst<ait>(0xffffffff)) +
+				((arg1.hi & mkConst<ait>(~0xfffffffful)) + (arg2.hi & mkConst<ait>(~0xfffffffful)));
 			break;
 
 		case Iop_InterleaveLO64x2:
@@ -728,13 +728,13 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_InterleaveLO32x4:
-			dest->lo = (arg2.lo & ait(0xffffffff)) | (arg1.lo << ait(32));
-			dest->hi = (arg2.lo >> ait(32)) | (arg1.lo & ait(0xffffffff00000000ul));
+			dest->lo = (arg2.lo & mkConst<ait>(0xffffffff)) | (arg1.lo << mkConst<ait>(32));
+			dest->hi = (arg2.lo >> mkConst<ait>(32)) | (arg1.lo & mkConst<ait>(0xffffffff00000000ul));
 			break;
 
 		case Iop_InterleaveHI32x4:
-			dest->lo = (arg2.hi & ait(0xffffffff)) | (arg1.hi << ait(32));
-			dest->hi = (arg2.hi >> ait(32)) | (arg1.hi & ait(0xffffffff00000000ul));
+			dest->lo = (arg2.hi & mkConst<ait>(0xffffffff)) | (arg1.hi << mkConst<ait>(32));
+			dest->hi = (arg2.hi >> mkConst<ait>(32)) | (arg1.hi & mkConst<ait>(0xffffffff00000000ul));
 			break;
 
 		case Iop_ShrN64x2:
@@ -772,7 +772,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.d = force(arg2.lo);
-				dest->lo = ait(r.l);
+				dest->lo = import_ait<unsigned long, ait>(r.l);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -789,7 +789,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.l = force(arg2.lo);
-				dest->lo = ait((unsigned)r.d);
+				dest->lo = import_ait<unsigned long, ait>((unsigned)r.d);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -816,7 +816,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				r = 0;
 			else
 				r = 0x45;
-			dest->lo = ait(r);
+			dest->lo = import_ait<unsigned long, ait>(r);
 			break;
 		}
 
@@ -892,19 +892,19 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			*dest = arg;
 			break;
 		case Iop_32Sto64:
-			dest->lo = signed_shift_right(arg.lo << ait(32), ait(32));
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(32), mkConst<ait>(32));
 			break;
 		case Iop_8Sto64:
-			dest->lo = signed_shift_right(arg.lo << ait(56), ait(56));
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56));
 			break;
 		case Iop_16Sto32:
-			dest->lo = signed_shift_right(arg.lo << ait(48), ait(48)) & ait(0xffff);
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48)) & mkConst<ait>(0xffff);
 			break;
 		case Iop_8Sto32:
-			dest->lo = signed_shift_right(arg.lo << ait(56), ait(56)) & ait(0xffff);
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffff);
 			break;
 		case Iop_16Sto64:
-			dest->lo = signed_shift_right(arg.lo << ait(48), ait(48));
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48));
 			break;
 		case Iop_128HIto64:
 		case Iop_V128HIto64:
@@ -929,7 +929,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << (63 - res))) &&
 			       res < 63)
 				res++;
-			dest->lo = ait(res);
+			dest->lo = import_ait<unsigned long, ait>(res);
 			break;
 		}
 
@@ -939,7 +939,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << res)) &&
 			       res < 63)
 				res++;
-			dest->lo = ait(v);
+			dest->lo = import_ait<unsigned long, ait>(v);
 			break;
 		}
 
@@ -980,9 +980,9 @@ static ait
 redirectGuest(ait rip)
 {
 	/* XXX hideous hack of hideousness */
-	if (force(rip == ait(0xFFFFFFFFFF600400ul)))
-		return ait(0x38017e0d);
-	else if (force(rip == ait(0xFFFFFFFFFF600000)))
+	if (force(rip == mkConst<ait>(0xFFFFFFFFFF600400ul)))
+		return mkConst<ait>(0x38017e0d);
+	else if (force(rip == mkConst<ait>(0xFFFFFFFFFF600000)))
 		throw NotImplementedException();
 	else
 		return rip;
@@ -1199,8 +1199,8 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
 				regs.set_reg(REGISTER_IDX(RIP),
 					     ternary(currentControlCondition,
-						     ait(stmt->Ist.Exit.dst->Ico.U64),
-						     ait(0xdeadbeef)));
+						     mkConst<ait>(stmt->Ist.Exit.dst->Ico.U64),
+						     mkConst<ait>(0xdeadbeef)));
 				goto finished_block;
 			}
 
@@ -1222,7 +1222,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 			regs.set_reg(REGISTER_IDX(RIP),
 				     ternary(currentControlCondition,
 					     next_addr.lo,
-					     ait(0xdeadbeef)));
+					     mkConst<ait>(0xdeadbeef)));
 		}
 		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
 			currentIRSB = NULL;
@@ -1301,7 +1301,8 @@ void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, unsign
 
 template<typename ait>
 void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
-				     LogReaderPtr *eof, LogWriter<ait> *lw)
+				     LogReaderPtr *eof, LogWriter<ait> *lw,
+				     EventRecorder<ait> *er)
 {
 	while (1) {
 		LogRecord<ait> *lr = lf->read(ptr, &ptr);
@@ -1313,7 +1314,9 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		PointerKeeper<LogRecord<ait> > k_lr(lr);
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
-		PointerKeeper<ThreadEvent<ait> > k_evt(evt);
+		PointerKeeper<ThreadEvent<ait> > k_evt;
+		if (!er)
+			k_evt.keep(evt);
 
 #if 0
 		printf("Event %s in thread %d\n",
@@ -1330,6 +1333,9 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		} else {
 			evt->replay(thr, lr, currentState);
 		}
+
+		if (er)
+			er->record(thr, evt);
 
 		/* Memory records are special and should always be
 		   processed eagerly. */
@@ -1350,8 +1356,9 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 							       LogWriter<t> *output); \
 	template void Interpreter<t>::replayLogfile(LogReader<t> const *lf, \
 						    LogReaderPtr ptr,	\
-						    LogReaderPtr *eof, \
-						    LogWriter<t> *lw);	\
+						    LogReaderPtr *eof,	\
+						    LogWriter<t> *lw,	\
+						    EventRecorder<t> *er); \
 	template InterpretResult Interpreter<t>::getThreadMemoryTrace(ThreadId tid, \
 								      MemoryTrace<t> **output, \
 								      unsigned max_events)

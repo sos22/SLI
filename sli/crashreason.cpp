@@ -79,15 +79,18 @@ void CrashReasonExtractor::append(const LogRecord<abstract_interpret_value> &lr)
 	}
 }
 
-class FootstepRecorder : public LogWriter<abstract_interpret_value> {
+class ControlRecorder : public EventRecorder<abstract_interpret_value> {
 public:
-	typedef std::vector<LogRecordFootstep<abstract_interpret_value> *> vect_type;
+	typedef std::vector<const InstructionEvent<abstract_interpret_value> *> vect_type;
 	vect_type content;
 
-	void append(const LogRecord<abstract_interpret_value> &lr) {
-		if (const LogRecordFootstep<abstract_interpret_value> *lrf =
-		    dynamic_cast<const LogRecordFootstep<abstract_interpret_value> *>(&lr))
-			content.push_back(lrf->dupe());
+	void record(Thread<abstract_interpret_value> *thr,
+		    const ThreadEvent<abstract_interpret_value> *evt) {
+		if (const InstructionEvent<abstract_interpret_value> *ievt =
+		    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt))
+			content.push_back(ievt);
+		else
+			delete evt;
 	}
 };
 
@@ -95,12 +98,12 @@ CrashReason *CrashReasonControl::refine(MachineState<abstract_interpret_value> *
 					LogReaderPtr ptr)
 {
 	Interpreter<abstract_interpret_value> i(ms);
-	FootstepRecorder fr;
-	i.replayLogfile(lf, ptr, NULL, &fr);
-	for (FootstepRecorder::vect_type::reverse_iterator it = fr.content.rbegin();
-	     it != fr.content.rend();
+	ControlRecorder cr;
+	i.replayLogfile(lf, ptr, NULL, NULL, &cr);
+	for (ControlRecorder::vect_type::reverse_iterator it = cr.content.rbegin();
+	     it != cr.content.rend();
 	     it++) {
-		printf("footstep %s\n", (*it)->name());
+		printf("instruction %s %s\n", (*it)->name(), (*it)->rip.origin->name());
 		delete *it;
 	}
 	return this;

@@ -1,7 +1,7 @@
 targets="slir crop symexec crashreason"
 
 defvars() {
-	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog}.cpp
+	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog,expression}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{vamap,pmap,memorychunk,util}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{debug,instantiation}.cpp
 

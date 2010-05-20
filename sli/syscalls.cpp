@@ -47,9 +47,9 @@ handle_clone(AddressSpace<ait> *addrSpace,
 	     ait set_tls,
 	     unsigned pid)
 {
-	if (force(flags != ait((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-				CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
-				CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)))) {
+	if (force(flags != mkConst<ait>((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+					 CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
+					 CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)))) {
 		printf("can't handle clone flags %lx\n", force(flags));
 		abort();
 	}
@@ -61,13 +61,13 @@ handle_clone(AddressSpace<ait> *addrSpace,
 		newThread->set_child_tid = child_tidptr;
 	if (force(flags & mkConst<ait>(CLONE_CHILD_CLEARTID)))
 		newThread->clear_child_tid = child_tidptr;
-	newThread->robust_list = ait(0);
+	newThread->robust_list = mkConst<ait>(0);
 #if 0
 	if (flags & CLONE_VM)
 		newThread->sas_ss_sp = newThread->sas_ss_size = 0;
 	newThread->exit_signal = (flags & CLONE_THREAD) ? -1 : (clone_flags & CSIGNAL);
 #endif
-	newThread->regs.set_reg(REGISTER_IDX(RAX), ait(0));
+	newThread->regs.set_reg(REGISTER_IDX(RAX), mkConst<ait>(0));
 	newThread->regs.set_reg(REGISTER_IDX(RSP), childRsp);
 	if (force(flags & mkConst<ait>(CLONE_SETTLS)))
 		newThread->regs.set_reg(REGISTER_IDX(FS_ZERO), set_tls);

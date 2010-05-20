@@ -78,7 +78,7 @@ RegisterSet<abstract_interpret_value>::RegisterSet(const VexGuestAMD64State &r)
 	for (unsigned x = 0;
 	     x < NR_REGS;
 	     x++)
-		registers[x] = abstract_interpret_value( ((unsigned long *)&r)[x] );
+		registers[x] = mkConst<abstract_interpret_value>( ((unsigned long *)&r)[x] );
 }
 
 template <>
@@ -86,6 +86,7 @@ abstract_interpret_value abstract_interpret_value::import(unsigned long x)
 {
 	abstract_interpret_value v;
 	v.v = x;
+	v.origin = ImportExpression::get(x);
 	return v;
 }
 

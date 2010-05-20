@@ -39,8 +39,8 @@ std::map<ThreadId, Maybe<unsigned> > *MemTracePool<ait>::firstRacingAccessMap()
 				     other_access < other_v->size();
 				     other_access++) {
 					MemoryAccess<ait> *other_ma = (*other_v)[other_access];
-					if (force(other_ma->addr + ait(other_ma->size) <= ma->addr ||
-						  other_ma->addr >= ma->addr + ait(ma->size)) )
+					if (force(other_ma->addr + mkConst<ait>(other_ma->size) <= ma->addr ||
+						  other_ma->addr >= ma->addr + mkConst<ait>(ma->size)) )
 						continue;
 					if (other_ma->isLoad() && ma->isLoad())
 						continue;

@@ -30,8 +30,10 @@ static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__prin
 template <typename underlying> class PointerKeeper {
 	underlying *x;
 public:
-	~PointerKeeper() { delete x; }
+	~PointerKeeper() { if (x) delete x; }
 	PointerKeeper(underlying *y) : x(y) {}
+	PointerKeeper() : x(NULL) {}
+	void keep(underlying *y) { if (x) delete x; x = y; }
 };
 
 template <typename underlying> class PointerKeeperArr {
@@ -73,7 +75,8 @@ public:
 			_name = mkName();
 		return _name;
 	}
-	~Named() { free(_name); }
+	void destruct() { free(_name); _name = NULL; }
+	~Named() { destruct(); }
 };
 
 template <typename underlying>
@@ -81,6 +84,13 @@ void visit_object(const void *_ctxt, HeapVisitor &hv)
 {
 	const underlying *ctxt = (const underlying *)_ctxt;
 	ctxt->visit(hv);
+}
+
+template <typename underlying>
+void destruct_object(void *_ctxt)
+{
+	underlying *ctxt = (underlying *)_ctxt;
+	ctxt->destruct();
 }
 
 /* Does absolutely nothing, could have been NULL, except that C++'s
@@ -103,6 +113,9 @@ public:
 	}
 };
 
+static inline void visit_aiv(unsigned long, HeapVisitor &)
+{
+}
 
 class ThreadId {
 	unsigned tid;
@@ -123,7 +136,7 @@ template<typename abst_int_value>
 struct expression_result {
 	abst_int_value lo;
 	abst_int_value hi;
-	void visit(HeapVisitor &hv) const { }
+	void visit(HeapVisitor &hv) const { visit_aiv(lo, hv); visit_aiv(hi, hv); }
 
 	template <typename new_type> void abstract(expression_result<new_type> *out) const
 	{
@@ -590,6 +603,12 @@ enum InterpretResult {
 
 template <typename ait> class MemoryTrace;
 
+template <typename ait>
+class EventRecorder {
+public:
+	virtual void record(Thread<ait> *thr, const ThreadEvent<ait> *evt) = 0;
+};
+
 template<typename abst_int_type>
 class Interpreter {
 	void replayFootstep(const LogRecordFootstep<abst_int_type> &lrf,
@@ -606,7 +625,8 @@ public:
 	{
 	}
 	void replayLogfile(const LogReader<abst_int_type> *lf, LogReaderPtr startingPoint,
-			   LogReaderPtr *endingPoint = NULL, LogWriter<abst_int_type> *log = NULL);
+			   LogReaderPtr *endingPoint = NULL, LogWriter<abst_int_type> *log = NULL,
+			   EventRecorder<abst_int_type> *er = NULL);
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
 					     MemoryTrace<abst_int_type> **output,
 					     unsigned max_events);
@@ -732,6 +752,7 @@ public:
 
 template <typename ait>
 class InstructionEvent : public ThreadEvent<ait> {
+public:
 	ait rip;
 	ait reg0;
 	ait reg1;
@@ -1360,17 +1381,167 @@ void init_sli(void);
 
 void gdb_machine_state(const MachineState<unsigned long> *ms);
 
+class Expression : public Named {
+};
+
+class ConstExpression : public Expression {
+	static VexAllocTypeWrapper<ConstExpression,
+				   visit_object<ConstExpression>,
+				   destruct_object<ConstExpression> > allocator;
+        unsigned long v;
+protected:
+	char *mkName() const { return my_asprintf("%lx", v); }
+public:
+	static ConstExpression *get(unsigned long v)
+	{
+		ConstExpression *work = new (allocator.alloc()) ConstExpression();
+		work->v = v;
+		return work;
+	}
+	void visit(HeapVisitor &hv) const {}
+};
+
+class ImportExpression : public Expression {
+	static VexAllocTypeWrapper<ImportExpression,
+				   visit_object<ImportExpression>,
+				   destruct_object<ImportExpression> > allocator;
+        unsigned long v;
+protected:
+	char *mkName() const { return my_asprintf("import %lx", v); }
+public:
+	static ImportExpression *get(unsigned long v)
+	{
+		ImportExpression *work = new (allocator.alloc()) ImportExpression();
+		work->v = v;
+		return work;
+	}
+	void visit(HeapVisitor &hv) const {}
+};
+
+#define mk_binop_class(nme)						\
+	class nme : public Expression {					\
+		Expression *l, *r;					\
+		static VexAllocTypeWrapper<nme, visit_object<nme>,	\
+					   destruct_object<nme> > allocator; \
+	protected:							\
+	        char *mkName() const                                    \
+		{							\
+			return my_asprintf("(%s " #nme "  %s)",		\
+					   l->name(), r->name());	\
+		}							\
+	public:								\
+	        static nme *get(Expression *_l, Expression *_r)		\
+		{							\
+			nme *work = new (allocator.alloc()) nme();	\
+			work->l = _l;					\
+			work->r = _r;					\
+			return work;					\
+		}							\
+		void visit(HeapVisitor &hv) const			\
+		{							\
+			hv(l);						\
+			hv(r);						\
+		}							\
+	}
+
+mk_binop_class(lshift);
+mk_binop_class(rshift);
+mk_binop_class(bitwiseand);
+mk_binop_class(bitwiseor);
+mk_binop_class(bitwisexor);
+mk_binop_class(plus);
+mk_binop_class(subtract);
+mk_binop_class(times);
+mk_binop_class(divide);
+mk_binop_class(modulo);
+mk_binop_class(greaterthanequals);
+mk_binop_class(greaterthan);
+mk_binop_class(lessthanequals);
+mk_binop_class(lessthan);
+mk_binop_class(equals);
+mk_binop_class(notequals);
+mk_binop_class(logicalor);
+mk_binop_class(logicaland);
+
+#define mk_unop_class(nme)						\
+	class nme : public Expression {					\
+		Expression *l;						\
+		static VexAllocTypeWrapper<nme, visit_object<nme>,	\
+					   destruct_object<nme> > allocator; \
+	protected:							\
+	        char *mkName() const					\
+		{							\
+			return my_asprintf("(" #nme " %s)", l->name());	\
+		}							\
+	public:								\
+	        static nme* get(Expression *_l)				\
+		{							\
+			nme *work = new (allocator.alloc()) nme();	\
+			work->l = _l;					\
+			return work;					\
+		}							\
+		void visit(HeapVisitor &hv) const			\
+		{							\
+			hv(l);						\
+		}							\
+	}
+
+mk_unop_class(logicalnot);
+mk_unop_class(bitwisenot);
+
+class ternarycondition : public Expression {
+	Expression *cond, *t, *f;
+	static VexAllocTypeWrapper<ternarycondition,
+				   visit_object<ternarycondition>,
+				   destruct_object<ternarycondition> > allocator;
+protected:
+	char *mkName() const
+	{
+		return my_asprintf("(%s ? %s : %s)",
+				   cond->name(), t->name(), f->name());
+	}
+public:
+	static ternarycondition *get(Expression *_cond, Expression *_t, Expression *_f)
+	{
+		ternarycondition *work = new (allocator.alloc()) ternarycondition();
+		work->cond = _cond;
+		work->t = _t;
+		work->f = _f;
+		return work;
+	}
+	void visit(HeapVisitor &hv) const
+	{
+		hv(cond);
+		hv(t);
+		hv(f);
+	}
+};
+
 struct abstract_interpret_value {
 	unsigned long v;
-	explicit abstract_interpret_value(unsigned long _v) : v(_v) {}
-	abstract_interpret_value() : v(0) {}
+	Expression *origin;
+	abstract_interpret_value(unsigned long _v, Expression *_origin) : v(_v), origin(_origin) {assert(origin);}
+	abstract_interpret_value() : v(0), origin(NULL) {}
 	template <typename ait> static abstract_interpret_value import(ait x);
 };
 
-template <typename ait>
-static inline ait mkConst(unsigned long x)
+static inline void visit_aiv(const abstract_interpret_value &aiv, HeapVisitor &hv)
 {
-	return ait(x);
+	hv(aiv.origin);
+}
+
+template <typename ait> static inline ait mkConst(unsigned long x);
+
+template <>
+unsigned long mkConst(unsigned long x)
+{
+	return x;
+}
+
+template <>
+abstract_interpret_value mkConst(unsigned long x)
+{
+	return abstract_interpret_value(x, ConstExpression::get(x));
 }
 
 static inline unsigned long force(abstract_interpret_value aiv)
@@ -1383,38 +1554,40 @@ static inline unsigned long force(unsigned long x)
 	return x;
 }
 
-#define OP(x)								\
+#define OP(x, name)								\
 	static inline abstract_interpret_value operator x(const abstract_interpret_value &aiv, \
-							  const abstract_interpret_value & cnt) \
+							  const abstract_interpret_value &cnt) \
 	{								\
 		abstract_interpret_value res;				\
 		res.v = aiv.v x cnt.v;					\
+		res.origin = name::get(aiv.origin, cnt.origin);		\
 		return res;						\
 	}
 
-OP(<<)
-OP(>>)
-OP(&)
-OP(|)
-OP(^)
-OP(+)
-OP(*)
-OP(/)
-OP(%)
-OP(-)
-OP(>=)
-OP(<)
-OP(<=)
-OP(==)
-OP(!=)
-OP(||)
-OP(&&)
+OP(<<, lshift)
+OP(>>, rshift)
+OP(&, bitwiseand)
+OP(|, bitwiseor)
+OP(^, bitwisexor)
+OP(+, plus)
+OP(*, times)
+OP(/, divide)
+OP(%, modulo)
+OP(-, subtract)
+OP(>=, greaterthanequals)
+OP(<, lessthan)
+OP(<=, lessthanequals)
+OP(==, equals)
+OP(!=, notequals)
+OP(||, logicalor)
+OP(&&, logicaland)
 #undef OP
 
 static inline abstract_interpret_value operator !(const abstract_interpret_value &aiv)
 {
 	abstract_interpret_value res;
 	res.v = !aiv.v;
+	res.origin = logicalnot::get(aiv.origin);
 	return res;
 }
 
@@ -1422,6 +1595,7 @@ static inline abstract_interpret_value operator ~(const abstract_interpret_value
 {
 	abstract_interpret_value res;
 	res.v = ~aiv.v;
+	res.origin = bitwisenot::get(aiv.origin);
 	return res;
 }
 
@@ -1429,6 +1603,7 @@ static inline abstract_interpret_value operator &=(abstract_interpret_value &lhs
 						   const abstract_interpret_value &rhs)
 {
 	lhs.v &= rhs.v;
+	lhs.origin = bitwiseand::get(lhs.origin, rhs.origin);
 	return lhs;
 }
 
@@ -1436,6 +1611,7 @@ static inline abstract_interpret_value operator |=(abstract_interpret_value &lhs
 						   const abstract_interpret_value &rhs)
 {
 	lhs.v |= rhs.v;
+	lhs.origin = bitwiseor::get(lhs.origin, rhs.origin);
 	return lhs;
 }
 
@@ -1443,6 +1619,7 @@ static inline abstract_interpret_value operator ^=(abstract_interpret_value &lhs
 						   const abstract_interpret_value &rhs)
 {
 	lhs.v ^= rhs.v;
+	lhs.origin = bitwisexor::get(lhs.origin, rhs.origin);
 	return lhs;
 }
 
@@ -1450,15 +1627,24 @@ static inline abstract_interpret_value operator ^=(abstract_interpret_value &lhs
    operator, so do something almost but not equivalent here (not quite
    because the laziness is wrong.  Then again, the laziness is wrong
    on || and && as well, so what the hell.). */
-template<typename ait>
-static inline ait ternary(ait cond,
-			  ait t,
-			  ait f)
+template<typename ait> static inline ait ternary(ait cond,
+						 ait t,
+						 ait f);
+
+template<> abstract_interpret_value ternary(abstract_interpret_value cond,
+					    abstract_interpret_value t,
+					    abstract_interpret_value f)
 {
-	if (force(cond))
-		return t;
-	else
-		return f;
+	unsigned long v = cond.v ? t.v : f.v;
+	Expression *origin = ternarycondition::get(cond.origin, t.origin, f.origin);
+	return abstract_interpret_value(v, origin);
+}
+
+template<> unsigned long ternary(unsigned long cond,
+				 unsigned long t,
+				 unsigned long f)
+{
+	return cond ? t : f;
 }
 
 #endif /* !SLI_H__ */
