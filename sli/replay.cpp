@@ -95,7 +95,7 @@ void LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 						    lrl->size, force(lrl->ptr),
 						    size, force(addr));
 		expression_result<ait> buf =
-			ms->addressSpace->load(addr, size, false, this->thr);
+			ms->addressSpace->load(this->when, addr, size, false, this->thr);
 		if (force(buf != lrl->value))
 			throw ReplayFailedException("memory mismatch on load from %lx",
 						    force(addr));
@@ -111,7 +111,7 @@ InterpretResult LoadEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	if (ms->addressSpace->isReadable(addr, size, this->thr)) {
 		expression_result<ait> buf =
-			ms->addressSpace->load(addr, size, false, this->thr);
+			ms->addressSpace->load(this->when, addr, size, false, this->thr);
 		this->thr->temporaries[tmp] = buf;
 		if (lr)
 			*lr = new LogRecordLoad<ait>(this->thr->tid, size, addr, buf);
@@ -195,7 +195,7 @@ void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 					    size, force(addr.lo));
 
         expression_result<ait> seen;
-        seen = ms->addressSpace->load(addr.lo, size, false, this->thr);
+        seen = ms->addressSpace->load(this->when, addr.lo, size, false, this->thr);
         if (force(seen != lrl->value))
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
 					    force(addr.lo));
@@ -224,7 +224,7 @@ template <typename ait>
 InterpretResult CasEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr1,
 				    LogRecord<ait> **lr2)
 {
-	expression_result<ait> seen = ms->addressSpace->load(addr.lo, size, false, this->thr);
+	expression_result<ait> seen = ms->addressSpace->load(this->when, addr.lo, size, false, this->thr);
 	if (lr1)
 		*lr1 = new LogRecordLoad<ait>(this->thr->tid, size, addr.lo, seen);
 	this->thr->temporaries[dest] = seen;

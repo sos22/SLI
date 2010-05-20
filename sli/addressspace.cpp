@@ -71,7 +71,8 @@ void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
 }
 
 template <typename ait>
-expression_result<ait> AddressSpace<ait>::load(ait start, unsigned size,
+expression_result<ait> AddressSpace<ait>::load(ReplayTimestamp when,
+					       ait start, unsigned size,
 					       bool ignore_protection,
 					       const Thread<ait> *thr)
 {
@@ -79,8 +80,8 @@ expression_result<ait> AddressSpace<ait>::load(ait start, unsigned size,
 	memset(&concrete_res, 0, sizeof(concrete_res));
 	readMemory(start, size, &concrete_res, ignore_protection, thr);
 	expression_result<ait> res;
-	res.lo = load_ait<unsigned long, ait>(concrete_res.lo, start);
-	res.hi = load_ait<unsigned long, ait>(concrete_res.hi, start + mkConst<ait>(8));
+	res.lo = load_ait<unsigned long, ait>(concrete_res.lo, start, when);
+	res.hi = load_ait<unsigned long, ait>(concrete_res.hi, start + mkConst<ait>(8), when);
 	return res;
 }
 

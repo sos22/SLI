@@ -1,16 +1,16 @@
 #include "sli.h"
 
 template<> abstract_interpret_value
-load_ait(unsigned long x, abstract_interpret_value addr)
+load_ait(unsigned long x, abstract_interpret_value addr, ReplayTimestamp when)
 {
 	abstract_interpret_value res;
 	res.v = x;
-	res.origin = LoadExpression::get(x, addr.origin);
+	res.origin = LoadExpression::get(when, x, addr.origin);
 	return res;
 }
 
 template<> unsigned long
-load_ait(unsigned long x, unsigned long addr)
+load_ait(unsigned long x, unsigned long addr, ReplayTimestamp when)
 {
 	return x;
 }

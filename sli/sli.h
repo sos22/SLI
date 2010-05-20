@@ -118,8 +118,16 @@ public:
 	const unsigned _tid() const { return tid; }
 };
 
+class ReplayTimestamp {
+public:
+	unsigned long val;
+	explicit ReplayTimestamp(unsigned long v) : val(v) {}
+	ReplayTimestamp() { val = 0; }
+	void operator++(int _ignore) { val++; }
+};
+
 template<typename src, typename dest> dest import_ait(src x);
-template<typename src, typename dest> dest load_ait(src x, dest addr);
+template<typename src, typename dest> dest load_ait(src x, dest addr, ReplayTimestamp when);
 
 template<typename abst_int_value>
 struct expression_result {
@@ -181,13 +189,6 @@ template <typename ait> class ThreadEvent;
 template <typename ait> class LogRecordInitialRegisters;
 template <typename ait> class LogWriter;
 template <typename ait> class LogRecordVexThreadState;
-
-class ReplayTimestamp {
-public:
-	unsigned long val;
-	explicit ReplayTimestamp(unsigned long v) : val(v) {}
-	void operator++(int _ignore) { val++; }
-};
 
 template <typename abst_int_type>
 class Thread {
@@ -1437,7 +1438,7 @@ public:
 	void writeMemory(ait start, unsigned size,
 			 const void *contents, bool ignore_protection = false,
 			 const Thread<ait> *thr = NULL);
-	expression_result<ait> load(ait start, unsigned size,
+	expression_result<ait> load(ReplayTimestamp when, ait start, unsigned size,
 				    bool ignore_protection = false,
 				    const Thread<ait> *thr = NULL);
 	void readMemory(ait start, unsigned size,
@@ -1528,14 +1529,16 @@ class LoadExpression : public Expression {
 	static VexAllocTypeWrapper<LoadExpression> allocator;
 	unsigned long val;
 	Expression *addr;
+	ReplayTimestamp when;
 protected:
-	char *mkName() const { return my_asprintf("(load %s -> %lx)", addr->name(), val); }
+	char *mkName() const { return my_asprintf("(load@%lx %s -> %lx)", when.val, addr->name(), val); }
 public:
-	static LoadExpression *get(unsigned long val, Expression *addr)
+	static LoadExpression *get(ReplayTimestamp when, unsigned long val, Expression *addr)
 	{
 		LoadExpression *work = new (allocator.alloc()) LoadExpression();
 		work->val = val;
 		work->addr = addr;
+		work->when = when;
 		return work;
 	}
 	void visit(HeapVisitor &hv) const {hv(addr);}
