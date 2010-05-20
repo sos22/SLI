@@ -278,7 +278,7 @@ void ContinueCommand::doIt(MachineState<unsigned long> *ms)
 
         while (1) {
                 ThreadEvent<unsigned long> *evt = thr->runToEvent(ms->addressSpace);
-                InterpretResult res = evt->fake(thr, ms);
+                InterpretResult res = evt->fake(ms);
 
 		if (dynamic_cast<SignalEvent<unsigned long> *>(evt) ||
 		    res != InterpretResultContinue)

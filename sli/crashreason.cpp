@@ -6,8 +6,10 @@ class CrashReason : public Named {
 protected:
 	CrashReason() {}
 public:
-	virtual CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr)
+	virtual CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr,
+				    bool *progress)
 	{
+		*progress = false;
 		return this;
 	}
 	virtual void visit(HeapVisitor &hv) const {}
@@ -55,6 +57,8 @@ public:
 		return new (allocator.alloc()) CrashReasonControl(_tid, _rip);
 	}
 	void visit(HeapVisitor &hv) const { visit_aiv(badRip, hv); }
+	CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr,
+			    bool &progress);
 };
 
 VexAllocTypeWrapper<CrashReasonControl> CrashReasonControl::allocator;
@@ -151,7 +155,13 @@ main(int argc, char *argv[])
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
 
 	CrashReason *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
-	printf("Replayed symbolically, crash reason %s\n", cr->name());
+	VexGcRoot crkeeper((void **)&cr);
+
+	bool progress;
+	do {
+		printf("Crash reason %s\n", cr->name());
+		cr = cr->refine(abstract->dupeSelf(), al, ptr, &progress);
+	} while (progress);
 
 	return 0;
 }

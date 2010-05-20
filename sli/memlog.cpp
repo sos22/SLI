@@ -8,13 +8,13 @@ InterpretResult LogWriter<ait>::recordEvent(Thread<ait> *thr, MachineState<ait> 
 
 	if (ce) {
 		LogRecord<ait> *lr1, *lr2;
-		res = ce->fake(thr, ms, &lr1, &lr2);
+		res = ce->fake(ms, &lr1, &lr2);
 		append(*lr1);
 		if (lr2)
 			append(*lr2);
 	} else {
 		LogRecord<ait> *lr;
-		res = evt->fake(thr, ms, &lr);
+		res = evt->fake(ms, &lr);
 		if (lr)
 			append(*lr);
 	}
