@@ -702,9 +702,9 @@ template <typename ait>
 class ThreadEvent : public Named {
 protected:
 	Thread<ait> *thr;
-	ReplayTimestamp when;
 	ThreadEvent(Thread<ait> *_thr, ReplayTimestamp _when) : thr(_thr), when(_when) {}
 public:
+	ReplayTimestamp when;
 	/* Replay the event using information in the log record */
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL) = 0;

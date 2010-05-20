@@ -2,90 +2,67 @@
 
 #include "sli.h"
 
-class CrashReason : public Named {
-protected:
-	CrashReason() {}
-public:
-	virtual CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr,
-				    bool *progress)
-	{
-		*progress = false;
-		return this;
-	}
-	virtual void visit(HeapVisitor &hv) const {}
-};
-
-class CrashReasonAnd : public CrashReason {
-	CrashReason *left;
-	CrashReason *right;
-	CrashReasonAnd(CrashReason *_left, CrashReason *_right)
-		: left(_left),
-		  right(_right)
-	{
-	}
-	static VexAllocTypeWrapper<CrashReasonAnd> allocator;
-protected:
-	char *mkName(void) const {
-		return my_asprintf("(%s && %s)", left->name(), right->name());
-	}
-public:
-	static CrashReason *get(CrashReason *l, CrashReason *r)
-	{
-		return new (allocator.alloc()) CrashReasonAnd(l, r);
-	}
-	void visit(HeapVisitor &hv) const { hv(left); hv(right); }
-};
-
-VexAllocTypeWrapper<CrashReasonAnd> CrashReasonAnd::allocator;
-
-class CrashReasonControl : public CrashReason {
-	abstract_interpret_value badRip;
+/* A RIP expression is an assertion that a particular thread is
+   executing a particular instruction at a particular time. */
+class ExpressionRip : public Expression {
+	Expression *rip;
 	ThreadId tid;
-	static VexAllocTypeWrapper<CrashReasonControl> allocator;
-	CrashReasonControl(ThreadId _tid, abstract_interpret_value _badRip)
-		: badRip(_badRip),
-		  tid(_tid)
+	ReplayTimestamp when;
+	static VexAllocTypeWrapper<ExpressionRip> allocator;
+	ExpressionRip(Expression *_rip, ThreadId _tid, ReplayTimestamp _when) :
+		rip(_rip),
+		tid(_tid),
+		when(_when)
 	{
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(rip %d:%s)", tid._tid(), badRip.origin->name());
+		return my_asprintf("(bad rip %d:%lx:%s)",
+				   tid._tid(),
+				   when.val,
+				   rip->name());
 	}
 public:
-	static CrashReason *get(ThreadId _tid, abstract_interpret_value _rip)
+	static Expression *get(ThreadId tid, ReplayTimestamp when,
+			       Expression *rip)
 	{
-		return new (allocator.alloc()) CrashReasonControl(_tid, _rip);
+		return new (allocator.alloc()) ExpressionRip(rip, tid, when);
 	}
-	void visit(HeapVisitor &hv) const { visit_aiv(badRip, hv); }
-	CrashReason *refine(MachineState<abstract_interpret_value> *, LogReader<abstract_interpret_value> *, LogReaderPtr,
-			    bool &progress);
+	void visit(HeapVisitor &hv) const
+	{
+		hv(rip);
+	}
 };
 
-VexAllocTypeWrapper<CrashReasonControl> CrashReasonControl::allocator;
+VexAllocTypeWrapper<ExpressionRip> ExpressionRip::allocator;
 
-class CrashReasonBadPointer : public CrashReason {
-	abstract_interpret_value bad;
-	ThreadId tid;
-	static VexAllocTypeWrapper<CrashReasonBadPointer> allocator;
-	CrashReasonBadPointer(ThreadId _tid, abstract_interpret_value _bad)
-		: bad(_bad),
-		  tid(_tid)
+/* A bad pointer expression asserts that a particular memory location
+ * is inaccessible at a particular time. */
+class ExpressionBadPointer : public Expression {
+	Expression *addr;
+	ReplayTimestamp when;
+	static VexAllocTypeWrapper<ExpressionBadPointer> allocator;
+	ExpressionBadPointer(ReplayTimestamp _when, Expression *_addr)
+		: addr(_addr), when(_when)
 	{
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(ptr %d:%lx)", tid._tid(), bad.v);
+		return my_asprintf("(bad ptr %lx:%s)", when.val, addr->name());
 	}
 public:
-	static CrashReason *get(ThreadId _tid, abstract_interpret_value _rip)
+	static Expression *get(ReplayTimestamp _when, Expression *_addr)
 	{
-		return new (allocator.alloc()) CrashReasonBadPointer(_tid, _rip);
+		return new (allocator.alloc()) ExpressionBadPointer(_when, _addr);
 	}
-	void visit(HeapVisitor &hv) const { visit_aiv(bad, hv); }
+	void visit(HeapVisitor &hv) const { hv(addr); }
 };
 
-VexAllocTypeWrapper<CrashReasonBadPointer> CrashReasonBadPointer::allocator;
+VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
 
+
+/* Given a trace, extract a precondition which is necessary for it to
+   crash in the observed way. */
 class CrashReasonExtractor : public EventRecorder<abstract_interpret_value> {
 public:
 	SignalEvent<abstract_interpret_value> *signal;
@@ -96,7 +73,6 @@ public:
 
 	CrashReasonExtractor() : signal(NULL),sroot((void **)&signal) {}
 };
-
 void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const ThreadEvent<abstract_interpret_value> *evt)
 {
 	if (const SignalEvent<abstract_interpret_value> *es =
@@ -105,10 +81,9 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const 
 		signal = (SignalEvent<abstract_interpret_value> *)es->dupe();
 	}
 }
-
-static CrashReason *getCrashReason(MachineState<abstract_interpret_value> *ms,
-				   LogReader<abstract_interpret_value> *script,
-				   LogReaderPtr ptr)
+static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
+				  LogReader<abstract_interpret_value> *script,
+				  LogReaderPtr ptr)
 {
 	Interpreter<abstract_interpret_value> i(ms);
 	CrashReasonExtractor extr;
@@ -130,10 +105,10 @@ static CrashReason *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	assert(extr.signal);
 	assert(extr.thr->crashed);
 	if (force(extr.thr->regs.rip() == extr.signal->virtaddr))
-		return CrashReasonControl::get(extr.thr->tid, extr.signal->virtaddr);
+		return ExpressionRip::get(extr.thr->tid, extr.signal->when, extr.thr->regs.rip().origin);
 	else
-		return CrashReasonAnd::get(CrashReasonControl::get(extr.thr->tid, extr.thr->regs.rip()),
-					   CrashReasonBadPointer::get(extr.thr->tid, extr.signal->virtaddr));
+		return logicaland::get(ExpressionRip::get(extr.thr->tid, extr.signal->when, extr.thr->regs.rip().origin),
+				       ExpressionBadPointer::get(extr.signal->when, extr.signal->virtaddr.origin));
 }
 
 int
@@ -154,14 +129,10 @@ main(int argc, char *argv[])
 
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
 
-	CrashReason *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
+	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	VexGcRoot crkeeper((void **)&cr);
 
-	bool progress;
-	do {
-		printf("Crash reason %s\n", cr->name());
-		cr = cr->refine(abstract->dupeSelf(), al, ptr, &progress);
-	} while (progress);
+	printf("Crash reason %s\n", cr->name());
 
 	return 0;
 }
