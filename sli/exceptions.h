@@ -42,7 +42,6 @@ public:
 	}
 	~SliException() throw()
 	{
-		printf("Destroy sli exception\n");
 		free(msg);
 	}
 	virtual const char *what() const throw() {
