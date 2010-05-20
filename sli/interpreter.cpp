@@ -1001,6 +1001,7 @@ template <typename ait>
 class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	AddressSpace<ait> *aspace;
 	ait offset;
+	VexGcVisitor<AddressSpaceGuestFetcher<ait> > visitor;
 public:
 	virtual UChar operator[](unsigned long idx) const {
 		UChar res;
@@ -1010,9 +1011,11 @@ public:
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
 				 ait _offset) :
 		aspace(_aspace),
-		offset(_offset)
+		offset(_offset),
+		visitor(this)
 	{
 	}
+	void visit(HeapVisitor &hv) const { visit_aiv(offset, hv); hv(aspace); }
 };
 
 template<typename ait>

@@ -157,6 +157,11 @@ public:
 	underlying rsp() const { return get_reg(REGISTER_IDX(RSP)); }
 
 	template <typename new_type> void abstract(RegisterSet<new_type> *out) const;
+
+	void visit(HeapVisitor &hv) const {
+		for (unsigned x = 0; x < NR_REGS; x++)
+			visit_aiv(registers[x], hv);
+	}
 };
 
 template <typename ait> class AddressSpace;
@@ -1548,7 +1553,9 @@ public:
 
 #define mk_binop_class(nme)						\
 	class nme : public Expression {					\
+	public:								\
 		Expression *l, *r;					\
+	protected:							\
 		static VexAllocTypeWrapper<nme, visit_object<nme>,	\
 					   destruct_object<nme> > allocator; \
 	protected:							\

@@ -74,6 +74,7 @@ void Thread<ait>::visit(HeapVisitor &hv) const
 {
 	hv(currentIRSB);
 	temporaries.visit(hv);
+	regs.visit(hv);
 }
 
 template <typename ait> template <typename new_type>
