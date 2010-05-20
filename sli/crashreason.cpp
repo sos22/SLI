@@ -2,12 +2,17 @@
 
 #include "sli.h"
 
+#define FOOTSTEP_REGS_ONLY
+#include "ppres.h"
+
 /* A RIP expression is an assertion that a particular thread is
    executing a particular instruction at a particular time. */
 class ExpressionRip : public Expression {
+public:
 	Expression *rip;
 	ThreadId tid;
 	ReplayTimestamp when;
+private:
 	static VexAllocTypeWrapper<ExpressionRip> allocator;
 	ExpressionRip(Expression *_rip, ThreadId _tid, ReplayTimestamp _when) :
 		rip(_rip),
@@ -17,7 +22,7 @@ class ExpressionRip : public Expression {
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(bad rip %d:%lx:%s)",
+		return my_asprintf("(rip %d:%lx:%s)",
 				   tid._tid(),
 				   when.val,
 				   rip->name());
@@ -111,6 +116,106 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 				       ExpressionBadPointer::get(extr.signal->when, extr.signal->virtaddr.origin));
 }
 
+/* A CrashReasonControl indicates that we executed some RIP which we
+ * shouldn't have done.  There are two possible explanations:
+ *
+ * 1) The previous control flow instruction branched the wrong way.
+ * 2) The previous control flow instruction should never have been
+ * executed.
+ *
+ * We refine by finding the previous control flow branch for this
+ * thread and generating new crash reasons for each possible
+ * subcase. */
+class GetFootstepsOneThread : public EventRecorder<abstract_interpret_value> {
+public:
+        typedef std::vector<const InstructionEvent<abstract_interpret_value> *> contentT;
+	contentT content;
+	ThreadId tid;
+        VexGcVisitor<GetFootstepsOneThread> visitor;
+
+	GetFootstepsOneThread(ThreadId _tid) :
+		EventRecorder<abstract_interpret_value>(),
+		tid(_tid),
+		visitor(this)
+	{
+	}
+	void record(Thread<abstract_interpret_value> *thr, const ThreadEvent<abstract_interpret_value> *evt)
+	{
+		if (thr->tid != tid)
+			return;
+		if (const InstructionEvent<abstract_interpret_value> *ie =
+		    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt))
+			content.push_back(ie);
+		if (dynamic_cast<const SignalEvent<abstract_interpret_value> *>(evt))
+			content.push_back(
+				InstructionEvent<abstract_interpret_value>::get(
+					evt->thr, evt->when, thr->regs.rip(),
+#define GR(x) thr->regs.get_reg(REGISTER_IDX(x))
+					GR(FOOTSTEP_REG_0_NAME),
+					GR(FOOTSTEP_REG_1_NAME),
+					thr->regs.get_reg(REGISTER_IDX(XMM0) + 1),
+					GR(FOOTSTEP_REG_3_NAME),
+					GR(FOOTSTEP_REG_4_NAME)));
+#undef GR
+	}
+	void visit(HeapVisitor &hv) const
+	{
+                for (contentT::const_iterator it = content.begin();
+                     it != content.end();
+                     it++)
+                        hv(*it);
+	}
+};
+Expression *refine(Expression *expr,
+		   MachineState<abstract_interpret_value> *ms,
+		   LogReader<abstract_interpret_value> *lf,
+		   LogReaderPtr ptr,
+		   bool *progress)
+{
+	ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr);
+	if (!er)
+		return expr;
+
+	Interpreter<abstract_interpret_value> i(ms);
+	GetFootstepsOneThread fltr(er->tid);
+	i.replayLogfile(lf, ptr, NULL, NULL, &fltr);
+
+	const InstructionEvent<abstract_interpret_value> *cond;
+	GetFootstepsOneThread::contentT::reverse_iterator it;
+	for (it = fltr.content.rbegin();
+	     it != fltr.content.rend();
+	     it++) {
+		cond = *it;
+		if (cond->when > er->when)
+			continue;
+		unsigned long ign;
+		if (!cond->rip.origin->isConstant(&ign))
+			break;
+	}
+
+	if (it == fltr.content.rend()) {
+		/* Okay, there were no previous conditional branches.
+		   We're doomed. */
+		*progress = true;
+		return ConstExpression::get(1);
+	}
+
+	it++;
+	if (it == fltr.content.rend()) {
+		*progress = true;
+		return ConstExpression::get(1);
+	}
+	const InstructionEvent<abstract_interpret_value> *branch = *it;
+
+	/* We get here if... */
+	return logicaland::get(
+		/* We make it to the previous conditional branch, and ... */
+		ExpressionRip::get(er->tid, branch->when, branch->rip.origin),
+		/* ... the branch goes the right way */
+		equals::get(cond->rip.origin,
+			    ConstExpression::get(cond->rip.v)));
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -132,6 +237,13 @@ main(int argc, char *argv[])
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	VexGcRoot crkeeper((void **)&cr);
 
+	bool progress;
+
+	do {
+		progress = false;
+		printf("Crash reason %s\n", cr->name());
+		cr = refine(cr, abstract->dupeSelf(), al, ptr, &progress);
+	} while (progress);
 	printf("Crash reason %s\n", cr->name());
 
 	return 0;

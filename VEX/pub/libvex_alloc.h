@@ -77,6 +77,34 @@ public:
 	}
 };
 
+template <typename t>
+class VexGcVisitor {
+	t **owner;
+	VexGcRoot root;
+	static VexAllocType type;
+public:
+	VexGcVisitor(t *x) : root((void **)&owner)
+	{
+		owner = (t **)__LibVEX_Alloc(&type);
+		*owner = x;
+	}
+};
+
+template <typename t>
+void visit_vex_gc_visitor(const void *_ctxt, HeapVisitor &hv)
+{
+	const t **ctxt = (const t **)_ctxt;
+	if (*ctxt)
+		(*ctxt)->visit(hv);
+}
+
+template <typename t> VexAllocType VexGcVisitor<t>::type = {
+	sizeof(t *),
+	visit_vex_gc_visitor<t>,
+	NULL,
+	"vex_gc_visitor"
+};
+
 extern VexAllocType LibvexVectorType;
 
 template <typename content>

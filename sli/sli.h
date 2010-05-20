@@ -110,6 +110,7 @@ class ThreadId {
 public:
 	ThreadId(unsigned _tid) : tid(_tid) {}
 	bool operator==(const ThreadId &b) const { return b.tid == tid; }
+	bool operator!=(const ThreadId &b) const { return b.tid != tid; }
 	bool operator<(const ThreadId &b) const { return tid < b.tid; }
 	ThreadId operator++() {
 		tid++;
@@ -124,6 +125,7 @@ public:
 	explicit ReplayTimestamp(unsigned long v) : val(v) {}
 	ReplayTimestamp() { val = 0; }
 	void operator++(int _ignore) { val++; }
+	bool operator>(const ReplayTimestamp o) const { return val > o.val; }
 };
 
 template<typename src, typename dest> dest import_ait(src x);
@@ -701,9 +703,9 @@ public:
 template <typename ait>
 class ThreadEvent : public Named {
 protected:
-	Thread<ait> *thr;
 	ThreadEvent(Thread<ait> *_thr, ReplayTimestamp _when) : thr(_thr), when(_when) {}
 public:
+	Thread<ait> *thr;
 	ReplayTimestamp when;
 	/* Replay the event using information in the log record */
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
@@ -815,8 +817,8 @@ protected:
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	static ThreadEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when, ait _rip, ait _reg0, ait _reg1,
-				     ait _reg2, ait _reg3, ait _reg4)
+	static InstructionEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when, ait _rip, ait _reg0, ait _reg1,
+					  ait _reg2, ait _reg3, ait _reg4)
 	{
 		void *b = allocator.alloc();
 		return new (b) InstructionEvent<ait>(thr, when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
