@@ -182,11 +182,18 @@ template <typename ait> class LogRecordInitialRegisters;
 template <typename ait> class LogWriter;
 template <typename ait> class LogRecordVexThreadState;
 
+class ReplayTimestamp {
+public:
+	unsigned long val;
+	explicit ReplayTimestamp(unsigned long v) : val(v) {}
+	void operator++(int _ignore) { val++; }
+};
+
 template <typename abst_int_type>
 class Thread {
 	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
-	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details);
+	ThreadEvent<abst_int_type> *do_dirty_call(ReplayTimestamp when, IRDirty *details);
 	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_calculate_rflags_c(expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
@@ -218,7 +225,7 @@ private:
 	Thread();
 	~Thread();
 public:
-	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace);
+	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace, ReplayTimestamp when);
 
 	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
 	Thread<abst_int_type> *fork(unsigned newPid);
@@ -619,14 +626,17 @@ public:
 	}
 	void replayLogfile(const LogReader<abst_int_type> *lf, LogReaderPtr startingPoint,
 			   LogReaderPtr *endingPoint = NULL, LogWriter<abst_int_type> *log = NULL,
-			   EventRecorder<abst_int_type> *er = NULL);
+			   EventRecorder<abst_int_type> *er = NULL, ReplayTimestamp when = ReplayTimestamp(0));
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
 					     MemoryTrace<abst_int_type> **output,
-					     unsigned max_events);
+					     unsigned max_events,
+					     ReplayTimestamp when = ReplayTimestamp(0));
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
-				      LogWriter<abst_int_type> *output = NULL);
+				      LogWriter<abst_int_type> *output = NULL,
+				      ReplayTimestamp when = ReplayTimestamp(0));
 	void runToFailure(ThreadId tid, LogWriter<abst_int_type> *output,
-			  unsigned max_events = 0);
+			  unsigned max_events = 0, ReplayTimestamp when = ReplayTimestamp(0));
+
 };
 
 template <typename ait>
@@ -691,7 +701,8 @@ template <typename ait>
 class ThreadEvent : public Named {
 protected:
 	Thread<ait> *thr;
-	ThreadEvent(Thread<ait> *_thr) : thr(_thr) {}
+	ReplayTimestamp when;
+	ThreadEvent(Thread<ait> *_thr, ReplayTimestamp _when) : thr(_thr), when(_when) {}
 public:
 	/* Replay the event using information in the log record */
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
@@ -708,7 +719,7 @@ public:
 template <typename ait>
 class RdtscEvent : public ThreadEvent<ait> {
 	IRTemp tmp;
-	RdtscEvent(Thread<ait> *thr, IRTemp _tmp) : ThreadEvent<ait>(thr), tmp(_tmp) {};
+	RdtscEvent(Thread<ait> *thr, ReplayTimestamp when, IRTemp _tmp) : ThreadEvent<ait>(thr, when), tmp(_tmp) {};
 	static VexAllocTypeWrapper<RdtscEvent<ait> > allocator;
 	~RdtscEvent();
 protected:
@@ -716,9 +727,9 @@ protected:
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	static ThreadEvent<ait> *get(Thread<ait> *thr, IRTemp temp)
-	{ return new (allocator.alloc()) RdtscEvent<ait>(thr, temp); }
-	ThreadEvent<ait> *dupe() const { return get(this->thr, tmp); }
+	static ThreadEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when, IRTemp temp)
+	{ return new (allocator.alloc()) RdtscEvent<ait>(thr, when, temp); }
+	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when, tmp); }
 };
 
 template <typename ait> class MemoryAccessLoad;
@@ -730,8 +741,8 @@ class LoadEvent : public ThreadEvent<ait> {
 	IRTemp tmp;
 	ait addr;
 	unsigned size;
-	LoadEvent(Thread<ait> *thr, IRTemp _tmp, ait _addr, unsigned _size) :
-		ThreadEvent<ait>(thr),
+	LoadEvent(Thread<ait> *thr, ReplayTimestamp when, IRTemp _tmp, ait _addr, unsigned _size) :
+		ThreadEvent<ait>(thr, when),
 		tmp(_tmp),
 		addr(_addr),
 		size(_size)
@@ -743,12 +754,12 @@ protected:
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	static ThreadEvent<ait> *get(Thread<ait> *thr, IRTemp _tmp, ait _addr, unsigned _size)
+	static ThreadEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
 	{
 		void *b = allocator.alloc();
-		return new (b) LoadEvent<ait>(thr, _tmp, _addr, _size);
+		return new (b) LoadEvent<ait>(thr, when, _tmp, _addr, _size);
 	}
-	ThreadEvent<ait> *dupe() const { return get(this->thr, tmp, addr, size); }
+	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when, tmp, addr, size); }
 	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); ThreadEvent<ait>::visit(hv); }
 };
 
@@ -758,19 +769,19 @@ class StoreEvent : public ThreadEvent<ait> {
 	ait addr;
 	unsigned size;
 	expression_result<ait> data;
-	StoreEvent(Thread<ait> *thr, ait addr, unsigned size, expression_result<ait> data);
+	StoreEvent(Thread<ait> *thr, ReplayTimestamp when, ait addr, unsigned size, expression_result<ait> data);
 	static VexAllocTypeWrapper<StoreEvent<ait> > allocator;
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d)", size); }
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	static ThreadEvent<ait> *get(Thread<ait> *thr, ait _addr, unsigned _size, expression_result<ait> data)
+	static ThreadEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
 	{
 		void *b = allocator.alloc();
-		return new (b) StoreEvent<ait>(thr, _addr, _size, data);
+		return new (b) StoreEvent<ait>(thr, when, _addr, _size, data);
 	}
-	ThreadEvent<ait> *dupe() const { return get(this->thr, addr, size, data); }
+	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when, addr, size, data); }
 
 	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); data.visit(hv); ThreadEvent<ait>::visit(hv); }
 };
@@ -785,9 +796,9 @@ public:
 	ait reg3;
 	ait reg4;
 	static VexAllocTypeWrapper<InstructionEvent<ait> > allocator;
-	InstructionEvent(Thread<ait> *thr, ait _rip, ait _reg0, ait _reg1,
+	InstructionEvent(Thread<ait> *thr, ReplayTimestamp when, ait _rip, ait _reg0, ait _reg1,
 			 ait _reg2, ait _reg3, ait _reg4) :
-		ThreadEvent<ait>(thr),
+		ThreadEvent<ait>(thr, when),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -803,13 +814,13 @@ protected:
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	static ThreadEvent<ait> *get(Thread<ait> *thr, ait _rip, ait _reg0, ait _reg1,
+	static ThreadEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when, ait _rip, ait _reg0, ait _reg1,
 				     ait _reg2, ait _reg3, ait _reg4)
 	{
 		void *b = allocator.alloc();
-		return new (b) InstructionEvent<ait>(thr, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
+		return new (b) InstructionEvent<ait>(thr, when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
 	}
-	ThreadEvent<ait> *dupe() const { return get(this->thr, rip, reg0, reg1, reg2, reg3, reg4); }
+	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when, rip, reg0, reg1, reg2, reg3, reg4); }
 
 	void visit(HeapVisitor &hv) const
 	{
@@ -832,12 +843,13 @@ class CasEvent : public ThreadEvent<ait> {
 	unsigned size;
 	static VexAllocTypeWrapper<CasEvent<ait> > allocator;
 	CasEvent(Thread<ait> *thr,
+		 ReplayTimestamp when,
 		 IRTemp _dest,
 		 expression_result<ait> _addr,
 		 expression_result<ait> _data,
 		 expression_result<ait> _expected,
 		 unsigned _size) :
-		ThreadEvent<ait>(thr),
+		ThreadEvent<ait>(thr, when),
 		dest(_dest),
 		addr(_addr),
 		data(_data),
@@ -860,6 +872,7 @@ public:
 		    LogReaderPtr *outPtr, LogWriter<ait> *lw);
 
 	static ThreadEvent<ait> *get(Thread<ait> *thr,
+				     ReplayTimestamp when,
 				     IRTemp _dest,
 				     expression_result<ait> _addr,
 				     expression_result<ait> _data,
@@ -867,9 +880,9 @@ public:
 				     unsigned _size)
 	{
 		void *b = allocator.alloc();
-		return new (b) CasEvent<ait>(thr, _dest, _addr, _data, _expected, _size);
+		return new (b) CasEvent<ait>(thr, when, _dest, _addr, _data, _expected, _size);
 	}
-	ThreadEvent<ait> *dupe() const { return get(this->thr, dest, addr, data, expected, size); }
+	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when, dest, addr, data, expected, size); }
 
 	void visit(HeapVisitor &hv) const
 	{
@@ -886,13 +899,14 @@ protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall");
 	}
-	SyscallEvent(Thread<ait> *thr) : ThreadEvent<ait>(thr) {}
+	SyscallEvent(Thread<ait> *thr, ReplayTimestamp when) : ThreadEvent<ait>(thr, when) {}
 	static VexAllocTypeWrapper<SyscallEvent<ait> > allocator;
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	ThreadEvent<ait> *dupe() const { return get(this->thr); }
-	static ThreadEvent<ait> *get(Thread<ait> *thr) { return new (allocator.alloc()) SyscallEvent(thr); }
+	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when); }
+	static ThreadEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when)
+	{ return new (allocator.alloc()) SyscallEvent(thr, when); }
 };
 
 template <typename ait>
@@ -900,8 +914,8 @@ class SignalEvent : public ThreadEvent<ait> {
 public:
 	unsigned signr;
 	ait virtaddr;
-	SignalEvent(Thread<ait> *thr, unsigned _signr, ait _va) :
-		ThreadEvent<ait>(thr),
+	SignalEvent(Thread<ait> *thr, ReplayTimestamp when, unsigned _signr, ait _va) :
+		ThreadEvent<ait>(thr, when),
 		signr(_signr),
 		virtaddr(_va)
 	{
@@ -915,12 +929,12 @@ public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 
-	static ThreadEvent<ait> *get(Thread<ait> *thr, unsigned _signr, ait _virtaddr)
+	static ThreadEvent<ait> *get(Thread<ait> *thr, ReplayTimestamp when, unsigned _signr, ait _virtaddr)
 	{
 		void *b = allocator.alloc();
-		return new (b) SignalEvent<ait>(thr, _signr, _virtaddr);
+		return new (b) SignalEvent<ait>(thr, when, _signr, _virtaddr);
 	}
-	ThreadEvent<ait> *dupe() const { return get(this->thr, signr, virtaddr); }
+	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when, signr, virtaddr); }
 
 	void visit(HeapVisitor &hv) const
 	{

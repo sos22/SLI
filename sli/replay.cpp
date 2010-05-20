@@ -21,8 +21,8 @@ InterpretResult RdtscEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr
 }
 
 template <typename ait>
-StoreEvent<ait>::StoreEvent(Thread<ait> *thr, ait _addr, unsigned _size, expression_result<ait> _data)
-	: ThreadEvent<ait>(thr),
+StoreEvent<ait>::StoreEvent(Thread<ait> *thr, ReplayTimestamp when, ait _addr, unsigned _size, expression_result<ait> _data)
+	: ThreadEvent<ait>(thr, when),
 	  addr(_addr),
 	  size(_size),
 	  data(_data)
