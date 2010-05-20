@@ -38,13 +38,15 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 #define mk_op_allocator(op)						\
 	VexAllocTypeWrapper<op, visit_object<op>, destruct_object<op> > op::allocator
 
-#define mk_binop(nme, op)						\
+#define mk_binop(nme, op, associates)					\
 	mk_op_allocator(nme);						\
 	Expression *nme::get(Expression *l, Expression *r)		\
 	{								\
 	        unsigned long lc, rc;				        \
 		if (l->isConstant(&lc) && r->isConstant(&rc))		\
 			return ConstExpression::get(lc op rc);		\
+		if (nme *ll = dynamic_cast<nme *>(l))			\
+			return nme::get(ll->l, nme::get(ll->r, r));	\
 		nme *work = new (allocator.alloc()) nme();		\
 		work->l = l;						\
 		work->r = r;						\
@@ -63,26 +65,31 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 		return work;						\
 	}
 
-mk_binop(lshift, <<);
-mk_binop(rshift, >>);
-mk_binop(bitwiseand, &);
-mk_binop(bitwiseor, |);
-mk_binop(bitwisexor, ^);
-mk_binop(plus, +);
-mk_binop(subtract, -);
-mk_binop(times, *);
-mk_binop(divide, /);
-mk_binop(modulo, %);
-mk_binop(greaterthanequals, >=);
-mk_binop(greaterthan, >);
-mk_binop(lessthanequals, <=);
-mk_binop(lessthan, <);
-mk_binop(equals, ==);
-mk_binop(notequals, !=);
-mk_binop(logicalor, ||);
-mk_binop(logicaland, &&);
+Expression *subtract::get(Expression *l, Expression *r)
+{
+	return plus::get(l, unaryminus::get(r));
+}
+
+mk_binop(lshift, <<, false);
+mk_binop(rshift, >>, false);
+mk_binop(bitwiseand, &, true);
+mk_binop(bitwiseor, |, true);
+mk_binop(bitwisexor, ^, true);
+mk_binop(plus, +, true);
+mk_binop(times, *, false);
+mk_binop(divide, /, false);
+mk_binop(modulo, %, false);
+mk_binop(greaterthanequals, >=, false);
+mk_binop(greaterthan, >, false);
+mk_binop(lessthanequals, <=, false);
+mk_binop(lessthan, <, false);
+mk_binop(equals, ==, false);
+mk_binop(notequals, !=, false);
+mk_binop(logicalor, ||, true);
+mk_binop(logicaland, &&, true);
 
 mk_unop(logicalnot, !);
 mk_unop(bitwisenot, ~);
+mk_unop(unaryminus, -);
 
 mk_op_allocator(ternarycondition);

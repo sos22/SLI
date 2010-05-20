@@ -1577,6 +1577,7 @@ mk_binop_class(logicaland);
 
 mk_unop_class(logicalnot);
 mk_unop_class(bitwisenot);
+mk_unop_class(unaryminus);
 
 class ternarycondition : public Expression {
 	Expression *cond, *t, *f;
