@@ -24,8 +24,9 @@ static inline char *my_asprintf(const char *fmt, ...)
 	va_end(args);
 	return r;
 }
-
 static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
+
+char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 	
 template <typename underlying> class PointerKeeper {
 	underlying *x;
@@ -105,6 +106,11 @@ static inline void visit_aiv(unsigned long, HeapVisitor &)
 {
 }
 
+static inline char *name_aiv(unsigned long x)
+{
+	return vex_asprintf("%lx", x);
+}
+
 class ThreadId {
 	unsigned tid;
 public:
@@ -132,9 +138,16 @@ template<typename src, typename dest> dest import_ait(src x);
 template<typename src, typename dest> dest load_ait(src x, dest addr, ReplayTimestamp when);
 
 template<typename abst_int_value>
-struct expression_result {
+struct expression_result : public Named {
+protected:
+	char *mkName() const {
+		return my_asprintf("{%s, %s}",
+				   name_aiv(lo), name_aiv(hi));
+	}
+public:
 	abst_int_value lo;
 	abst_int_value hi;
+	expression_result() : Named() {}
 	void visit(HeapVisitor &hv) const { visit_aiv(lo, hv); visit_aiv(hi, hv); }
 
 	template <typename new_type> void abstract(expression_result<new_type> *out) const
@@ -175,6 +188,8 @@ public:
 		arr = (struct expression_result<ait> *)LibVEX_Alloc_Bytes(sizeof(arr[0]) * new_size);
 		memset(arr, 0, sizeof(arr[0]) * new_size);
 		nr_entries = new_size;
+		for (unsigned x = 0; x < nr_entries; x++)
+			new (&arr[x]) expression_result<ait>();
 	}
 	expression_result<ait> &operator[](unsigned idx) { return arr[idx]; }
 	void visit(HeapVisitor &hv) const {
@@ -190,6 +205,11 @@ public:
 	}
 
 	template <typename new_type> void abstract(expression_result_array<new_type> *out) const;
+	~expression_result_array()
+	{
+		for (unsigned x = 0; x < nr_entries; x++)
+			arr[x].~expression_result();
+	}
 };
 
 template <typename ait> class ThreadEvent;
@@ -229,8 +249,6 @@ public:
 	abst_int_type currentControlCondition;
 
 private:
-	/* DNI */
-	Thread();
 	~Thread();
 public:
 	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace, ReplayTimestamp when);
@@ -247,7 +265,7 @@ public:
 
 	template <typename new_type> Thread<new_type> *abstract() const;
 
-	void destruct() {}
+	void destruct() { temporaries.~expression_result_array<abst_int_type>(); }
 };
 
 class PhysicalAddress {
@@ -758,7 +776,7 @@ class LoadEvent : public ThreadEvent<ait> {
 	}
 	static VexAllocTypeWrapper<LoadEvent<ait> > allocator;
 protected:
-	virtual char *mkName() const { return my_asprintf("load(%d, %d)", tmp, size); }
+	virtual char *mkName() const { return my_asprintf("load(%s, %d, %d)", name_aiv(addr), tmp, size); }
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
@@ -780,7 +798,7 @@ class StoreEvent : public ThreadEvent<ait> {
 	StoreEvent(Thread<ait> *thr, ReplayTimestamp when, ait addr, unsigned size, expression_result<ait> data);
 	static VexAllocTypeWrapper<StoreEvent<ait> > allocator;
 protected:
-	virtual char *mkName() const { return my_asprintf("store(%d)", size); }
+	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
@@ -792,6 +810,7 @@ public:
 	ThreadEvent<ait> *dupe() const { return get(this->thr, this->when, addr, size, data); }
 
 	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); data.visit(hv); ThreadEvent<ait>::visit(hv); }
+	void destruct() { data.~expression_result<ait>(); ThreadEvent<ait>::destruct(); }
 };
 
 template <typename ait>
@@ -898,6 +917,13 @@ public:
 		data.visit(hv);
 		expected.visit(hv);
 		ThreadEvent<ait>::visit(hv);
+	}
+	void destruct()
+	{
+		addr.~expression_result<ait>();
+		data.~expression_result<ait>();
+		expected.~expression_result<ait>();
+		ThreadEvent<ait>::destruct();
 	}
 };
 
@@ -1679,16 +1705,28 @@ public:
 };
 
 struct abstract_interpret_value {
+	mutable char *_name;
 	unsigned long v;
 	Expression *origin;
-	abstract_interpret_value(unsigned long _v, Expression *_origin) : v(_v), origin(_origin) {assert(origin);}
-	abstract_interpret_value() : v(0), origin(NULL) {}
+	abstract_interpret_value(unsigned long _v, Expression *_origin) : _name(NULL), v(_v), origin(_origin) {assert(origin);}
+	abstract_interpret_value() : _name(NULL), v(0), origin(NULL) {}
 	template <typename ait> static abstract_interpret_value import(ait x);
+	const char *name() const {
+		if (!_name)
+			_name = vex_asprintf("{%lx:%s}", v, origin->name());
+		return _name;		
+	}
 };
 
 static inline void visit_aiv(const abstract_interpret_value &aiv, HeapVisitor &hv)
 {
 	hv(aiv.origin);
+	hv(aiv._name);
+}
+
+static inline const char *name_aiv(const abstract_interpret_value &aiv)
+{
+	return aiv.name();
 }
 
 template <typename ait> static inline ait mkConst(unsigned long x);

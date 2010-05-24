@@ -16,6 +16,7 @@ Thread<ait> *Thread<ait>::initialThread(const LogRecordInitialRegisters<ait> &in
 
 	work = allocator.alloc();
 	memset(work, 0, sizeof(*work));
+	new (work) Thread<ait>();
 	work->tid = initRegs.thread();
 	work->regs = initRegs.regs;
 	return work;
@@ -28,6 +29,7 @@ Thread<ait> *Thread<ait>::fork(unsigned newPid)
 
 	work = allocator.alloc();
 	memset(work, 0, sizeof(*work));
+	new (work) Thread<ait>();
 	work->pid = newPid;
 	work->regs = regs;
 	return work;
@@ -37,6 +39,7 @@ template <typename ait>
 Thread<ait> *Thread<ait>::dupeSelf() const
 {
 	Thread<ait> *work = allocator.alloc();
+	new (work) Thread<ait>();
 	*work = *this;
 	return work;
 }
