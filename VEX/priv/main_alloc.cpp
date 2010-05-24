@@ -244,6 +244,12 @@ __LibVEX_Alloc_Bytes(Int nbytes)
   return alloc_bytes(&byte_alloc_type, nbytes);
 }
 
+void *
+LibVEX_Alloc_Sized(const VexAllocType *t, unsigned nbytes)
+{
+  return alloc_bytes(t, nbytes);
+}
+
 struct libvex_alloc_type *
 __LibVEX_Alloc(const VexAllocType *t)
 {

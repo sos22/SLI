@@ -1,13 +1,27 @@
 #include <stdio.h>
 #include "sli.h"
 
+class VAPMap {
+public:
+	static VexAllocTypeWrapper<VAPMap> allocator;
+	VAMap *vamap;
+	PMap *pmap;
+	void visit(HeapVisitor &hv) const {
+		hv(vamap);
+		hv(pmap);
+		vamap->visit(hv, pmap);
+	}
+	void destruct() {}
+};
+VexAllocTypeWrapper<VAPMap> VAPMap::allocator;
+
 int
 main()
 {
 	vexInitHeap();
 
 	PMap *pmap = PMap::empty();
-	VAMap *vamap = VAMap::empty(pmap);
+	VAMap *vamap = VAMap::empty();
 
 	printf("Check that translating bad addresses gives back false\n");
 	assert(!vamap->translate(0));
@@ -114,8 +128,11 @@ main()
 	assert(alf == VAMap::AllocFlags(false));
 
 	printf("Check GC behaviour: VAMap keeps physical addresses live\n");
-	VexGcRoot vgc((void **)&vamap);
-
+	VAPMap *vap = VAPMap::allocator.alloc();
+	vap->vamap = vamap;
+	vap->pmap = pmap;
+	VexGcRoot vgc((void **)&vap);
+	
 	LibVEX_gc();
 
 	unsigned long o;

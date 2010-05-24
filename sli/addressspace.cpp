@@ -195,7 +195,7 @@ AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(ait _initialBrk)
 	work->brkptr = initialBrk;
 	work->brkMapPtr = initialBrk + 4096;
 	work->pmap = PMap::empty();
-	work->vamap = VAMap::empty(work->pmap);
+	work->vamap = VAMap::empty();
 	return work;	
 }
 
@@ -205,7 +205,7 @@ AddressSpace<ait> *AddressSpace<ait>::dupeSelf() const
 	AddressSpace<ait> *work = allocator.alloc();
 	*work = *this;
 	work->pmap = pmap->dupeSelf();
-	work->vamap = vamap->dupeSelf(work->pmap);
+	work->vamap = vamap->dupeSelf();
 	return work;
 }
 
@@ -214,6 +214,7 @@ void AddressSpace<ait>::visit(HeapVisitor &hv) const
 {
 	hv(vamap);
 	hv(pmap);
+	vamap->visit(hv, pmap);
 }
 
 template <typename ait>

@@ -1355,6 +1355,27 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		*eof = ptr;
 }
 
+template <typename ait> void visit_expression_result_array(const void *_ctxt,
+							   HeapVisitor &hv)
+{
+	unsigned nr_entries = *(const unsigned *)_ctxt;
+	const expression_result<ait> *arr = (const expression_result<ait> *)((unsigned *)_ctxt + 1);
+	for (unsigned x = 0; x < nr_entries; x++)
+		arr[x].visit(hv);
+}
+
+template <typename ait> void destruct_expression_result_array(void *_ctxt)
+{
+	unsigned nr_entries = *(unsigned *)_ctxt;
+	expression_result<ait> *arr = (expression_result<ait> *)((unsigned *)_ctxt + 1);
+	for (unsigned x = 0; x < nr_entries; x++)
+		arr[x].~expression_result<ait>();
+}
+
+template <typename ait> const VexAllocType expression_result_array<ait>::arrayAllocType = {
+	-1, visit_expression_result_array<ait>, destruct_expression_result_array<ait>,
+	"expression result array"};
+
 #define MK_INTERPRETER(t)						\
 	template ThreadEvent<t> *Thread<t>::runToEvent(AddressSpace<t> *addrSpace, \
 						       ReplayTimestamp when); \

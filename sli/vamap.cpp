@@ -472,18 +472,17 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 
 }
 
-VAMap *VAMap::empty(PMap *pmap)
+VAMap *VAMap::empty()
 {
 	VAMap *work = LibVEX_Alloc_VAMap();
 
 	memset(work, 0, sizeof(*work));
-	work->pmap = pmap;
 	return work;
 }
 
-VAMap *VAMap::dupeSelf(PMap *pmap) const
+VAMap *VAMap::dupeSelf() const
 {
-	VAMap *work = empty(pmap);
+	VAMap *work = empty();
 	if (parent)
 		work->parent = parent;
 	else
@@ -493,10 +492,19 @@ VAMap *VAMap::dupeSelf(PMap *pmap) const
 
 void VAMap::visit(HeapVisitor &hv) const
 {
-	hv(pmap);
 	hv(parent);
-	if (root)
+}
+
+void VAMap::visit(HeapVisitor &hv, PMap *pmap) const
+{
+	if (root) {
+		assert(!parent);
 		root->visit(pmap, hv);
+	}
+	if (parent) {
+		assert(!root);
+		parent->visit(hv, pmap);
+	}
 }
 
 void VAMap::VAMapEntry::split(unsigned long at)

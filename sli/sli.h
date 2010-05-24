@@ -183,11 +183,15 @@ template <typename ait> class AddressSpace;
 
 template <typename ait>
 class expression_result_array {
+	static const VexAllocType arrayAllocType;
 public:
 	struct expression_result<ait> *arr;
 	unsigned nr_entries;
 	void setSize(unsigned new_size) {
-		arr = (struct expression_result<ait> *)LibVEX_Alloc_Bytes(sizeof(arr[0]) * new_size);
+		void *b = LibVEX_Alloc_Sized(&arrayAllocType,
+					     sizeof(arr[0]) * new_size + sizeof(unsigned));
+		*(unsigned *)b = new_size;
+		arr = (expression_result<ait> *)((unsigned *)b + 1);
 		memset(arr, 0, sizeof(arr[0]) * new_size);
 		nr_entries = new_size;
 		for (unsigned x = 0; x < nr_entries; x++)
@@ -195,10 +199,8 @@ public:
 	}
 	expression_result<ait> &operator[](unsigned idx) { return arr[idx]; }
 	void visit(HeapVisitor &hv) const {
-		unsigned x;
-		for (x = 0; x < nr_entries; x++)
-			arr[x].visit(hv);
-		hv(arr);
+		if (arr)
+			hv( (unsigned *)arr - 1);
 	}
 	expression_result_array() :
 		arr(NULL),
@@ -207,11 +209,6 @@ public:
 	}
 
 	template <typename new_type> void abstract(expression_result_array<new_type> *out) const;
-	~expression_result_array()
-	{
-		for (unsigned x = 0; x < nr_entries; x++)
-			arr[x].~expression_result();
-	}
 };
 
 template <typename ait> class ThreadEvent;
@@ -360,11 +357,6 @@ private:
 	const VAMap *parent;
 
 	void forceCOW();
-
-	/* Bit of a hack, but needed if we're going to keep the
-	   various bits of physical address space live. */
-
-	class PMap *pmap;
 public:
 	bool translate(unsigned long va,
 		       PhysicalAddress *pa = NULL,
@@ -384,8 +376,9 @@ public:
 		     Protection prot);
 	void unmap(unsigned long start, unsigned long size);
 
-	static VAMap *empty(class PMap *pmap);
-	VAMap *dupeSelf(class PMap *pmap) const;
+	static VAMap *empty();
+	VAMap *dupeSelf() const;
+	void visit(HeapVisitor &hv, class PMap *pmap) const;
 	void visit(HeapVisitor &hv) const;
 
 	void sanityCheck() const;
