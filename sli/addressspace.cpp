@@ -147,7 +147,7 @@ bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 				return false;
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
+			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time >
@@ -259,7 +259,7 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 							(unsigned long)prot,
 							(unsigned long)alf));
 		unsigned long off;
-		MemoryChunk *mc = pmap->lookup(pa, &off);
+		const MemoryChunk *mc = pmap->lookupConst(pa, &off);
 		assert(off == 0);
 		void *buf = malloc(MemoryChunk::size);
 		mc->read(0, buf, MemoryChunk::size);
