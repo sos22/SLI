@@ -37,6 +37,7 @@ public:
 	{
 		hv(rip);
 	}
+	ReplayTimestamp timestamp() const { return when; }
 };
 
 VexAllocTypeWrapper<ExpressionRip> ExpressionRip::allocator;
@@ -61,6 +62,7 @@ public:
 		return new (allocator.alloc()) ExpressionBadPointer(_when, _addr);
 	}
 	void visit(HeapVisitor &hv) const { hv(addr); }
+	ReplayTimestamp timestamp() const { return when; }
 };
 
 VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
@@ -232,15 +234,29 @@ static Expression *refine(logicaland *er,
 			  LogReaderPtr ptr,
 			  bool *progress)
 {
-	bool lprogress, rprogress;
-	lprogress = false;
-	rprogress = false;
-	Expression *l2 = refine(er->l, ms, lf, ptr, &lprogress);
-	Expression *r2 = refine(er->r, ms, lf, ptr, &rprogress);
-	if (!lprogress && !rprogress)
+	/* Prefer to refine the later argument first, if possible. */
+	if (er->l->timestamp() > er->r->timestamp()) {
+		bool lprogress = false;
+		Expression *refined_l = refine(er->l, ms, lf, ptr,
+					       &lprogress);
+		if (lprogress) {
+			*progress = true;
+			return logicaland::get(refined_l, er->r);
+		}
+	}
+
+	/* Either r is after l or l can't make progress.  Either way,
+	   we're going to be refining r now. */
+	bool rprogress = false;
+	Expression *refined_r = refine(er->r, ms, lf, ptr, &rprogress);
+	if (rprogress) {
+		*progress = true;
+		return logicaland::get(er->l, refined_r);
+	} else {
+		/* Completely failed to perform and kind of
+		   refinement.  Oh well. */
 		return er;
-	*progress = true;
-	return logicaland::get(l2, r2);
+	}
 }
 
 Expression *refine(Expression *expr,

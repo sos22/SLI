@@ -133,7 +133,16 @@ public:
 	ReplayTimestamp() { val = 0; }
 	void operator++(int _ignore) { val++; }
 	bool operator>(const ReplayTimestamp o) const { return val > o.val; }
+	bool operator<(const ReplayTimestamp o) const { return val < o.val; }
 };
+
+template <typename t> t min(const t &a, const t &b)
+{
+	if (a < b)
+		return a;
+	else
+		return b;
+}
 
 template<typename src, typename dest> dest import_ait(src x);
 template<typename src, typename dest> dest load_ait(src x, dest addr, ReplayTimestamp when);
@@ -1559,6 +1568,7 @@ void gdb_machine_state(const MachineState<unsigned long> *ms);
 class Expression : public Named {
 public:
 	virtual bool isConstant(unsigned long *cv) { return false; }
+	virtual ReplayTimestamp timestamp() const { return ReplayTimestamp(0); }
 };
 
 class ConstExpression : public Expression {
@@ -1612,6 +1622,7 @@ public:
 		work->when = when;
 		return work;
 	}
+	ReplayTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr);}
 };
 
@@ -1634,6 +1645,11 @@ public:
 		{							\
 			hv(l);						\
 			hv(r);						\
+		}							\
+                ReplayTimestamp timestamp() const			\
+		{							\
+		        return min<ReplayTimestamp>(l->timestamp(),	\
+						    r->timestamp());	\
 		}							\
 	}
 
@@ -1672,6 +1688,10 @@ mk_binop_class(logicaland);
 		{							\
 			hv(l);						\
 		}							\
+                ReplayTimestamp timestamp() const			\
+		{							\
+		        return l->timestamp();				\
+		}							\
 	}
 
 mk_unop_class(logicalnot);
@@ -1697,6 +1717,12 @@ public:
 		hv(t);
 		hv(f);
 	}
+	ReplayTimestamp timestamp() const					
+	{								
+		return min<ReplayTimestamp>(cond->timestamp(),
+					    min<ReplayTimestamp>(t->timestamp(),
+								 f->timestamp()));
+	}								
 };
 
 struct abstract_interpret_value {
