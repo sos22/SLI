@@ -1510,7 +1510,7 @@ public:
 	{
 		writeMemory(rec.start, rec.size, rec.contents, true);
 	}
-	void store(ait start, unsigned size, expression_result<ait> val,
+	void store(ait start, unsigned size, const expression_result<ait> &val,
 		   bool ignore_protection = false,
 		   const Thread<ait> *thr = NULL);
 	void writeMemory(ait start, unsigned size,

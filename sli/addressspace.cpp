@@ -86,7 +86,7 @@ expression_result<ait> AddressSpace<ait>::load(ReplayTimestamp when,
 }
 
 template <typename ait>
-void AddressSpace<ait>::store(ait start, unsigned size, expression_result<ait> val,
+void AddressSpace<ait>::store(ait start, unsigned size, const expression_result<ait> &val,
 			      bool ignore_protection,
 			      const Thread<ait> *thr)
 {
