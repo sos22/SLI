@@ -75,6 +75,10 @@ void Thread<ait>::visit(HeapVisitor &hv) const
 	hv(currentIRSB);
 	temporaries.visit(hv);
 	regs.visit(hv);
+	visit_aiv(currentControlCondition, hv);
+	visit_aiv(clear_child_tid, hv);
+	visit_aiv(robust_list, hv);
+	visit_aiv(set_child_tid, hv);
 }
 
 template <typename ait> template <typename new_type>
