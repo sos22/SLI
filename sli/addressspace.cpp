@@ -76,12 +76,12 @@ expression_result<ait> AddressSpace<ait>::load(ReplayTimestamp when,
 					       bool ignore_protection,
 					       const Thread<ait> *thr)
 {
-	expression_result<unsigned long> concrete_res;
-	memset(&concrete_res, 0, sizeof(concrete_res));
-	readMemory(start, size, &concrete_res, ignore_protection, thr);
+	unsigned long b[2];
+	memset(b, 0, sizeof(b));
+	readMemory(start, size, b, ignore_protection, thr);
 	expression_result<ait> res;
-	res.lo = load_ait<unsigned long, ait>(concrete_res.lo, start, when);
-	res.hi = load_ait<unsigned long, ait>(concrete_res.hi, start + mkConst<ait>(8), when);
+	res.lo = load_ait<unsigned long, ait>(b[0], start, when);
+	res.hi = load_ait<unsigned long, ait>(b[1], start + mkConst<ait>(8), when);
 	return res;
 }
 
@@ -92,7 +92,10 @@ void AddressSpace<ait>::store(ait start, unsigned size, expression_result<ait> v
 {
 	expression_result<unsigned long> concrete;
 	val.abstract(&concrete);
-	writeMemory(start, size, &concrete, ignore_protection, thr);
+	unsigned long b[2];
+	b[0] = concrete.lo;
+	b[1] = concrete.hi;
+	writeMemory(start, size, b, ignore_protection, thr);
 }
 
 template <typename ait>

@@ -99,10 +99,12 @@ skip:
 		mem_read_record<unsigned long> mrr;
 		int r = pread(fd, &mrr, sizeof(mrr), startPtr.off + sizeof(rh));
 		expression_result<unsigned long> val;
-		memset(&val, 0, sizeof(val));
-		r = pread(fd, &val, rh.size - sizeof(mrr) - sizeof(rh),
+		unsigned long b[2];
+		memset(b, 0, sizeof(b));
+		r = pread(fd, b, rh.size - sizeof(mrr) - sizeof(rh),
 			  startPtr.off + sizeof(rh) + sizeof(mrr));
-		(void)r;
+		val.lo = b[0];
+		val.hi = b[1];
 		return new LogRecordLoad<unsigned long>(tid,
 							rh.size - sizeof(mrr) - sizeof(rh),
 							mrr.ptr,
@@ -112,9 +114,12 @@ skip:
 		mem_write_record<unsigned long> mwr;
 		int r = pread(fd, &mwr, sizeof(mwr), startPtr.off + sizeof(rh));
 		expression_result<unsigned long> val;
-		memset(&val, 0, sizeof(val));
-		r = pread(fd, &val, rh.size - sizeof(mwr) - sizeof(rh),
+		unsigned long b[2];
+		memset(b, 0, sizeof(b));
+		r = pread(fd, b, rh.size - sizeof(mwr) - sizeof(rh),
 			  startPtr.off + sizeof(rh) + sizeof(mwr));
+		val.lo = b[0];
+		val.hi = b[1];
 		(void)r;
 		return new LogRecordStore<unsigned long>(tid,
 							 rh.size - sizeof(mwr) - sizeof(rh),
