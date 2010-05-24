@@ -9,6 +9,8 @@
    that there usually aren't very many GC roots, and they won't
    usually cover very many things in the heap, so the GC pass is very
    cheap, and we can cover it out of the much simpler allocator. */
+#include <valgrind/memcheck.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -126,6 +128,7 @@ LibVEX_gc(void)
 	  h->type->destruct(header_to_alloc(h));
 	h->type = NULL;
 	poison(h + 1, h->size - sizeof(*h), 0xa1b2c3d4);
+	VALGRIND_MAKE_MEM_NOACCESS(h + 1, h->size - sizeof(*h));
 	if (p && !p->type) {
 	  if (h == allocation_cursor)
 	    allocation_cursor = p;
@@ -213,6 +216,7 @@ alloc_bytes(const VexAllocType *type, unsigned size)
     cursor->size = size;
     vassert(cursor->size != 0);
     next = next_alloc_header(cursor);
+    VALGRIND_MAKE_MEM_UNDEFINED(next, sizeof(*next));
     vassert(next != alloc_header_terminator);
     next->type = NULL;
     next->size = old_size - size;
@@ -222,7 +226,9 @@ alloc_bytes(const VexAllocType *type, unsigned size)
 
   cursor->type = type;
   res = header_to_alloc(cursor);
+  VALGRIND_MAKE_MEM_UNDEFINED(res, size - sizeof(*cursor));
   poison(res, size - sizeof(struct alloc_header), 0xaabbccdd);
+  VALGRIND_MAKE_MEM_UNDEFINED(res, size - sizeof(*cursor));
 
   heap_used += cursor->size;
 
@@ -263,6 +269,8 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     next = next_alloc_header(ah);
     if (next == alloc_header_terminator || next->type)
       break;
+    VALGRIND_MAKE_MEM_UNDEFINED((void *)((unsigned long)ah + ah->size),
+				next->size);
     ah->size += next->size;
     heap_used += next->size;
   }
@@ -276,6 +284,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     next->size = old_size - new_size;
     next->flags = 0;
     heap_used -= old_size - new_size;
+    VALGRIND_MAKE_MEM_NOACCESS(next + 1, next->size - sizeof(*next));
   }
 
   /* Good enough? */
@@ -290,6 +299,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     memcpy(newptr, ptr, ah->size);
 
   ah->type = NULL;
+  VALGRIND_MAKE_MEM_NOACCESS(ah + 1, ah->size - sizeof(*ah));
   heap_used -= ah->size;
 
   return newptr;
