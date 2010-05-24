@@ -115,6 +115,7 @@ class ThreadId {
 	unsigned tid;
 public:
 	ThreadId(unsigned _tid) : tid(_tid) {}
+	ThreadId() : tid(0) {}
 	bool operator==(const ThreadId &b) const { return b.tid == tid; }
 	bool operator!=(const ThreadId &b) const { return b.tid != tid; }
 	bool operator<(const ThreadId &b) const { return tid < b.tid; }
@@ -164,6 +165,7 @@ public:
 #define REGISTER_IDX(x) (offsetof(VexGuestAMD64State, guest_ ## x) / 8)
 	underlying registers[NR_REGS];
 	RegisterSet(const VexGuestAMD64State &r);
+	RegisterSet() {};
 	underlying get_reg(unsigned idx) const { assert(idx < NR_REGS); return registers[idx]; }
 	void set_reg(unsigned idx, underlying val) { assert(idx < NR_REGS); registers[idx] = val; }
 	underlying rip() const { return get_reg(REGISTER_IDX(RIP)); }
