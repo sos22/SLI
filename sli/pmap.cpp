@@ -1,5 +1,9 @@
 #include "sli.h"
 
+#ifndef TRACE_PMAP
+#define TRACE_PMAP 0
+#endif
+
 DECLARE_VEX_TYPE(PMap)
 DEFINE_VEX_TYPE_NO_DESTRUCT(PMap, {ths->visit(visit);});
 
@@ -65,10 +69,17 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	PMapEntry *pme = findPme(pa, h);
 	if (pme) {
 		if (pme->readonly) {
+#if TRACE_PMAP
+			printf("%p: COW %p for %lx\n", this, pme->mc,
+			       pa._pa);
+#endif
 			pme->mc = pme->mc->dupeSelf();
 			pme->readonly = false;
 		}
 		*mc_start = pa - pme->pa;
+#if TRACE_PMAP
+		printf("%p: %lx -> %p\n", this, pa._pa, pme->mc);
+#endif
 		return pme->mc;
 	} else if (!parent) {
 		return NULL;
@@ -85,6 +96,10 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 			newPme->next->pprev = &newPme->next;
 		heads[h] = newPme;
 
+#if TRACE_PMAP
+		printf("%p: pull up non-const %lx -> %p from %p\n", this,
+		       pa._pa, newPme->mc, parent_mc);
+#endif
 		return newPme->mc;
 	}
 }
@@ -96,6 +111,9 @@ const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start
 	PMapEntry *pme = findPme(pa, h);
 	if (pme) {
 		*mc_start = pa - pme->pa;
+#if TRACE_PMAP
+		printf("%p: %lx const -> %p\n", this, pa._pa, pme->mc);
+#endif
 		return pme->mc;
 	} else if (parent) {
 		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start, false);
@@ -107,6 +125,10 @@ const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start
 			if (newPme->next)
 				newPme->next->pprev = &newPme->next;
 			heads[h] = newPme;
+#if TRACE_PMAP
+			printf("%p: pull up const %lx -> %p\n", this,
+			       pa._pa, parent_mc);
+#endif
 		}
 		return parent_mc;
 	} else {
@@ -125,6 +147,9 @@ PhysicalAddress PMap::introduce(MemoryChunk *mc)
 	if (pme->next)
 		pme->next->pprev = &pme->next;
 	heads[h] = pme;
+#if TRACE_PMAP
+	printf("%p: alloc %lx for %p\n", this, pa._pa, mc);
+#endif
 	return pa;
 }
 

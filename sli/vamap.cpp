@@ -2,6 +2,10 @@
 
 #include "sli.h"
 
+#ifndef TRACE_VAMAP
+#define TRACE_VAMAP 0
+#endif
+
 /* Distance in chunks */
 #define dchunk(start, end) (((end) - (start))/MemoryChunk::size)
 
@@ -100,6 +104,9 @@ bool VAMap::translate(unsigned long va,
 		      Protection *prot,
 		      AllocFlags *alf) const
 {
+#if TRACE_VAMAP
+	printf("%p: Translate %lx\n", this, va);
+#endif
 	if (parent)
 		return parent->translate(va, pa, prot, alf);
 	if (!root)
@@ -188,6 +195,10 @@ bool VAMap::translate(unsigned long va,
 			}
 		}
 	}
+#if TRACE_VAMAP
+	printf("%p, Translates to %lx\n", this,
+	       root->pa[(va - root->start) / MemoryChunk::size]._pa);
+#endif
 	if (pa) {
 		*pa = root->pa[(va - root->start) / MemoryChunk::size] +
 			((va - root->start) % MemoryChunk::size);
@@ -265,6 +276,9 @@ void VAMap::addTranslation(unsigned long start,
 			   Protection prot,
 			   AllocFlags alf)
 {
+#if TRACE_VAMAP
+	printf("%p: Add translation %lx -> %lx\n", this, start, pa._pa);
+#endif
 	forceCOW();
 
 	VAMapEntry *vme;
@@ -343,6 +357,11 @@ bool VAMap::protect(unsigned long start, unsigned long size, Protection prot)
 	VAMapEntry *vme;
 	unsigned long end = start + size;
 
+#if TRACE_VAMAP
+	printf("%p: Protect %lx:%lx -> %d.%d.%d\n", this, start, end,
+	       prot.readable, prot.writable, prot.executable);
+#endif
+
 	vme = root;
 	while (1) {
 		if (!vme)
@@ -396,6 +415,9 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 	unsigned long end = start + size;
 	VAMapEntry **pprev;
 
+#if TRACE_VAMAP
+	printf("%p: Unmap %lx:%lx\n", this, start, end);
+#endif
 	pprev = &root;
 	vme = root;
 	while (1) {
