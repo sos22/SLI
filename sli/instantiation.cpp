@@ -10,7 +10,6 @@
 #include "addressspace.cpp"
 #include "logreader.cpp"
 #include "pmap.cpp"
-#include "memorychunk.cpp"
 #include "vamap.cpp"
 
 #define MK_INTERP(t)				\
@@ -23,8 +22,7 @@
 	MK_LOGWRITER(t);			\
 	MK_ADDRESS_SPACE(t);			\
 	MK_LOGREADER(t);                        \
-        MK_PMAP(t);				\
-	MK_MEMORYCHUNK(t)
+        MK_PMAP(t)
 
 static unsigned long signed_shift_right(unsigned long x, unsigned long y)
 {

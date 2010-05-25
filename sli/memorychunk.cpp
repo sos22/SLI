@@ -1,48 +1,106 @@
 #include "sli.h"
 
-template <typename ait>
-MemoryChunk<ait> *MemoryChunk<ait>::allocate()
+MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::allocate()
 {
-	void *r = LibVEX_Alloc_Bytes(sizeof(MemoryChunk<ait>));
-	memset(r, 0, sizeof(MemoryChunk<ait>));
-	return new (r) MemoryChunk<ait>();
+	void *r = LibVEX_Alloc_Bytes(sizeof(MemoryChunk<unsigned long>));
+	memset(r, 0, sizeof(MemoryChunk<unsigned long>));
+	return new (r) MemoryChunk<unsigned long>();
 }
 
-template <typename ait>
-MemoryChunk<ait> *MemoryChunk<ait>::dupeSelf() const
+MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::dupeSelf() const
 {
-	MemoryChunk<ait> *r = (MemoryChunk<ait> *)LibVEX_Alloc_Bytes(sizeof(MemoryChunk<ait>));
+	MemoryChunk<unsigned long> *r = (MemoryChunk<unsigned long> *)LibVEX_Alloc_Bytes(sizeof(MemoryChunk<unsigned long>));
 	memcpy(r, this, sizeof(*r));
 	return r;
 }
 
-template <typename ait>
-void MemoryChunk<ait>::write(unsigned offset, const ait *source, unsigned nr_bytes)
+void MemoryChunk<unsigned long>::write(unsigned offset, const unsigned long *source, unsigned nr_bytes)
 {
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
 	for (unsigned x = 0; x < nr_bytes; x++)
-		content[offset + x] = force(source[x]);
+		content[offset + x] = source[x];
 }
 
-template <typename ait>
-void MemoryChunk<ait>::read(unsigned offset, ait *dest, unsigned nr_bytes) const
+void MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const
 {
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
 	for (unsigned x = 0; x < nr_bytes; x++)
-		dest[x] = import_ait<unsigned long, ait>(content[offset + x]);
+		dest[x] = content[offset + x];
 }
 
-template <typename ait> template <typename new_type>
-MemoryChunk<new_type> *MemoryChunk<ait>::abstract() const
+template <>
+MemoryChunk<abstract_interpret_value> *MemoryChunk<unsigned long>::abstract() const
 {
-	MemoryChunk<new_type> *work =
-		new (LibVEX_Alloc_Bytes(sizeof(MemoryChunk<new_type>)))
-		MemoryChunk<new_type>();
-	for (unsigned x = 0; x < size; x++)
-		work->content[x] = content[x];
+	MemoryChunk<abstract_interpret_value> *work =
+		MemoryChunk<abstract_interpret_value>::allocator.alloc();
+	work->headLookaside = NULL;
+	work->underlying = this;
 	return work;
 }
 
-#define MK_MEMORYCHUNK(t)
+MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::allocate()
+{
+	void *r = allocator.alloc();
+	memset(r, 0, sizeof(MemoryChunk<abstract_interpret_value>));
+	return new (r) MemoryChunk<abstract_interpret_value>();
+}
+
+MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::dupeSelf() const
+{
+	MemoryChunk<abstract_interpret_value> *r = allocator.alloc();
+	memcpy(r, this, sizeof(*r));
+	return r;
+}
+
+void MemoryChunk<abstract_interpret_value>::read(unsigned offset,
+						 abstract_interpret_value *dest,
+						 unsigned nr_bytes) const
+{
+	for (unsigned x = 0; x < nr_bytes; x++) {
+		bool done = false;
+		for (const MCLookasideEntry *mce = headLookaside;
+		     !done && mce;
+		     mce = mce->next) {
+			if (mce->offset <= offset + x &&
+			    mce->offset + mce->size > offset + x) {
+				dest[x] = mce->content[offset + x - mce->offset];
+				done = true;
+			}
+		}
+		if (!done) {
+			unsigned long b;
+			underlying->read(offset + x, &b, 1);
+			dest[x] = import_ait<unsigned long, abstract_interpret_value>(b);
+		}
+	}
+}
+
+void MemoryChunk<abstract_interpret_value>::write(unsigned offset,
+						  const abstract_interpret_value *source,
+						  unsigned nr_bytes)
+{
+	MCLookasideEntry *newmcl =
+		(MCLookasideEntry *)LibVEX_Alloc_Sized(&mcl_allocator,
+						       sizeof(MCLookasideEntry) + sizeof(abstract_interpret_value) * nr_bytes);
+	newmcl->next = headLookaside;
+	newmcl->offset = offset;
+	newmcl->size = nr_bytes;
+	memcpy(newmcl->content, source, nr_bytes * sizeof(abstract_interpret_value));
+	headLookaside = newmcl;
+}
+
+const VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > MemoryChunk<abstract_interpret_value>::allocator;
+
+static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
+{
+	const class MemoryChunk<abstract_interpret_value>::MCLookasideEntry *mcl =
+		(const class MemoryChunk<abstract_interpret_value>::MCLookasideEntry *)_ctxt;
+	for (unsigned x = 0; x < mcl->size; x++)
+		visit_aiv(mcl->content[x], hv);
+	hv(mcl->next);
+}
+
+const VexAllocType MemoryChunk<abstract_interpret_value>::mcl_allocator =
+{ -1, visit_mcl_lookaside, NULL, "mcl_lookaside" };

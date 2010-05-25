@@ -397,18 +397,21 @@ public:
 
 #define MEMORY_CHUNK_SIZE 4096
 
-template <typename ait>
-class MemoryChunk {
+template <typename ait> class MemoryChunk;
+
+template <>
+class MemoryChunk<unsigned long> {
 public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
-	static MemoryChunk<ait> *allocate();
+	static MemoryChunk<unsigned long> *allocate();
 
-	void write(unsigned offset, const ait *source, unsigned nr_bytes);
-	void read(unsigned offset, ait *dest, unsigned nr_bytes) const;
+	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes);
+	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const;
 
-	MemoryChunk<ait> *dupeSelf() const;
+	MemoryChunk<unsigned long> *dupeSelf() const;
 	template <typename nt> MemoryChunk<nt> *abstract() const;
 
+private:
 	unsigned char content[size];
 };
 
@@ -1890,5 +1893,37 @@ template<> unsigned long ternary(unsigned long cond,
 {
 	return cond ? t : f;
 }
+
+template <>
+class MemoryChunk<struct abstract_interpret_value> {
+public:
+	static const unsigned long size = MEMORY_CHUNK_SIZE;
+	static MemoryChunk<abstract_interpret_value> *allocate();
+
+	void write(unsigned offset, const abstract_interpret_value *source, unsigned nr_bytes);
+	void read(unsigned offset, abstract_interpret_value *dest, unsigned nr_bytes) const;
+
+	MemoryChunk<abstract_interpret_value> *dupeSelf() const;
+
+	const MemoryChunk<unsigned long> *underlying;
+	struct MCLookasideEntry {
+		MCLookasideEntry *next;
+		unsigned offset;
+		unsigned size;
+		abstract_interpret_value content[0];
+	};
+	MCLookasideEntry *headLookaside;
+
+	static const VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > allocator;
+	static const VexAllocType mcl_allocator;
+
+	void visit(HeapVisitor &hv) const
+	{
+		hv(underlying);
+		hv(headLookaside);
+	}
+	void destruct() {}
+};
+
 
 #endif /* !SLI_H__ */
