@@ -127,7 +127,6 @@ Expression *subtract::get(Expression *l, Expression *r)
 	return plus::get(l, unaryminus::get(r));
 }
 
-mk_binop(bitwiseand, &, true);
 mk_binop(bitwisexor, ^, true);
 mk_binop(times, *, false);
 mk_binop(divide, /, false);
@@ -298,5 +297,33 @@ Expression *bitwiseor::get(Expression *l, Expression *r)
 	bitwiseor *work = new (allocator.alloc()) bitwiseor();
 	work->l = l;							
 	work->r = r;							
+	return intern(work);						
+}
+
+mk_op_allocator(bitwiseand);
+Expression *bitwiseand::get(Expression *l, Expression *r)			
+{									
+	unsigned long lc, rc;						
+	bool lIsConstant = l->isConstant(&lc);
+	bool rIsConstant = r->isConstant(&rc);
+	if (lIsConstant) {
+		if (lc == 0)
+			return l;
+		if (lc == 0xfffffffffffffffful)
+			return r;
+		if (rIsConstant)
+			return ConstExpression::get(lc & rc);
+	} else if (rIsConstant) {
+		if (rc == 0)
+			return r;
+		if (rc == 0xfffffffffffffffful)
+			return l;
+	}
+
+	if (bitwiseand *ll = dynamic_cast<bitwiseand *>(l))
+		return bitwiseand::get(ll->l, bitwiseand::get(ll->r, r));		
+	bitwiseand *work = new (allocator.alloc()) bitwiseand();
+	work->l = l;
+	work->r = r;
 	return intern(work);						
 }
