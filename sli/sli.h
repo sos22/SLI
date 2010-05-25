@@ -1658,7 +1658,7 @@ public:
 		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {}
-	bool isConstant(unsigned long *cv) { *cv = v; return true; }
+	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
 };
 
 class ImportExpression : public Expression {
