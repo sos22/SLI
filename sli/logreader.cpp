@@ -79,15 +79,20 @@ skip:
 	}
 	case RECORD_memory: {
 		memory_record<unsigned long> mr;
+		unsigned s;
 		int r = pread(fd, &mr, sizeof(mr), startPtr.off + sizeof(rh));
-		void *buf = malloc(rh.size - sizeof(mr) - sizeof(rh));
-		r = pread(fd, buf, rh.size - sizeof(mr) - sizeof(rh),
-			  startPtr.off + sizeof(rh) + sizeof(mr));
+		s = rh.size - sizeof(mr) - sizeof(rh);
+		void *buf = malloc(s);
+		r = pread(fd, buf, s, startPtr.off + sizeof(rh) + sizeof(mr));
 		(void)r;
+		unsigned long *b = (unsigned long *)malloc(sizeof(unsigned long) * s);
+		for (unsigned x = 0; x < s; x++)
+			b[x] = ((unsigned char *)buf)[x];
+		free(buf);
 		return new LogRecordMemory<unsigned long>(tid,
 							  rh.size - sizeof(mr) - sizeof(rh),
 							  (unsigned long)mr.ptr,
-							  buf);
+							  b);
 	}
 	case RECORD_rdtsc: {
 		rdtsc_record<unsigned long> rr;

@@ -5,7 +5,7 @@ class VAPMap {
 public:
 	static VexAllocTypeWrapper<VAPMap> allocator;
 	VAMap *vamap;
-	PMap *pmap;
+	PMap<unsigned long> *pmap;
 	void visit(HeapVisitor &hv) const {
 		hv(vamap);
 		hv(pmap);
@@ -20,7 +20,7 @@ main()
 {
 	vexInitHeap();
 
-	PMap *pmap = PMap::empty();
+	PMap<unsigned long> *pmap = PMap<unsigned long>::empty();
 	VAMap *vamap = VAMap::empty();
 
 	printf("Check that translating bad addresses gives back false\n");
@@ -29,7 +29,7 @@ main()
 	assert(!vamap->translate(~0));
 	assert(!vamap->translate(~0ul));
 
-	MemoryChunk *mc1 = MemoryChunk::allocate();
+	MemoryChunk<unsigned long> *mc1 = MemoryChunk<unsigned long>::allocate();
 	PhysicalAddress pa1 = pmap->introduce(mc1);
 	printf("Introduce a mapping and check that it comes back\n");
 	vamap->addTranslation(0x10000, pa1,
@@ -65,7 +65,7 @@ main()
 	assert(!r);
 
 	printf("Introduce another mapping and check that they stay separate.\n");
-	MemoryChunk *mc2 = MemoryChunk::allocate();
+	MemoryChunk<unsigned long> *mc2 = MemoryChunk<unsigned long>::allocate();
 	pa2 = pmap->introduce(mc2);
 	vamap->addTranslation(0x11000, pa2,
 			      VAMap::Protection(true, false, true),
@@ -145,9 +145,9 @@ main()
 	printf("Introduce 0x70000->0x75000...\n");
 	unsigned x;
 	PhysicalAddress block1Pa[5];
-	MemoryChunk *block1Mc[5];
+	MemoryChunk<unsigned long> *block1Mc[5];
 	for (x = 0; x < 5; x++) {
-		block1Mc[x] = MemoryChunk::allocate();
+		block1Mc[x] = MemoryChunk<unsigned long>::allocate();
 		block1Pa[x] = pmap->introduce(block1Mc[x]);
 		vamap->addTranslation(0x70000 + x * 0x1000,
 				      block1Pa[x],
@@ -180,7 +180,7 @@ main()
 	}
 	printf("...reallocate last few pages...\n");
 	for (x = 3; x < 5; x++) {
-		block1Mc[x] = MemoryChunk::allocate();
+		block1Mc[x] = MemoryChunk<unsigned long>::allocate();
 		block1Pa[x] = pmap->introduce(block1Mc[x]);
 		vamap->addTranslation(0x70000 + x * 0x1000,
 				      block1Pa[x],

@@ -161,7 +161,7 @@ static unsigned long htonlong(unsigned long x)
 
 void GetMemoryCommand::doIt(MachineState<unsigned long> *ms)
 {
-	char *membuf = (char *)malloc(size);
+	unsigned long *membuf = (unsigned long *)malloc(size);
 	try {
 		ms->addressSpace->readMemory(addr, size, membuf, true);
 	} catch (BadMemoryException<unsigned long> exc) {

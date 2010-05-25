@@ -7,7 +7,7 @@
 #endif
 
 /* Distance in chunks */
-#define dchunk(start, end) (((end) - (start))/MemoryChunk::size)
+#define dchunk(start, end) (((end) - (start))/MEMORY_CHUNK_SIZE)
 
 DECLARE_VEX_TYPE(VAMap)
 DEFINE_VEX_TYPE_NO_DESTRUCT(VAMap, {ths->visit(visit);});
@@ -45,7 +45,8 @@ VAMap::AllocFlags::operator unsigned long() const
 
 const VAMap::AllocFlags VAMap::defaultFlags(false);
 
-void VAMap::VAMapEntry::visit(PMap *pmap, HeapVisitor &hv) const
+template <typename ait>
+void VAMap::VAMapEntry::visit(PMap<ait> *pmap, HeapVisitor &hv) const
 {
 	unsigned x;
 	hv(this);
@@ -197,11 +198,11 @@ bool VAMap::translate(unsigned long va,
 	}
 #if TRACE_VAMAP
 	printf("%p, Translates to %lx\n", this,
-	       root->pa[(va - root->start) / MemoryChunk::size]._pa);
+	       root->pa[(va - root->start) / MEMORY_CHUNK_SIZE]._pa);
 #endif
 	if (pa) {
-		*pa = root->pa[(va - root->start) / MemoryChunk::size] +
-			((va - root->start) % MemoryChunk::size);
+		*pa = root->pa[(va - root->start) / MEMORY_CHUNK_SIZE] +
+			((va - root->start) % MEMORY_CHUNK_SIZE);
 		assert(pa->_pa != 0);
 	}
 	if (prot)
@@ -252,7 +253,7 @@ bool VAMap::findNextMapping(unsigned long from,
 	}
 	if (pa) {
 		if (from >= bestVme->start)
-			*pa = bestVme->pa[(from - bestVme->start)/MemoryChunk::size];
+			*pa = bestVme->pa[(from - bestVme->start)/MEMORY_CHUNK_SIZE];
 		else
 			*pa = bestVme->pa[0];
 	}
@@ -283,7 +284,7 @@ void VAMap::addTranslation(unsigned long start,
 
 	VAMapEntry *vme;
 	VAMapEntry *newVme;
-	unsigned long end = start + MemoryChunk::size;
+	unsigned long end = start + MEMORY_CHUNK_SIZE;
 
 	if (!root) {
 		PhysicalAddress *newPas =
@@ -495,7 +496,8 @@ void VAMap::visit(HeapVisitor &hv) const
 	hv(parent);
 }
 
-void VAMap::visit(HeapVisitor &hv, PMap *pmap) const
+template <typename ait>
+void VAMap::visit(HeapVisitor &hv, PMap<ait> *pmap) const
 {
 	if (root) {
 		assert(!parent);

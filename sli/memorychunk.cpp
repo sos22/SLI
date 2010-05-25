@@ -1,30 +1,48 @@
 #include "sli.h"
 
-MemoryChunk *MemoryChunk::allocate()
+template <typename ait>
+MemoryChunk<ait> *MemoryChunk<ait>::allocate()
 {
-	MemoryChunk *r = (MemoryChunk *)LibVEX_Alloc_Bytes(sizeof(MemoryChunk));
-	memset(r, 0, sizeof(*r));
-	return r;
+	void *r = LibVEX_Alloc_Bytes(sizeof(MemoryChunk<ait>));
+	memset(r, 0, sizeof(MemoryChunk<ait>));
+	return new (r) MemoryChunk<ait>();
 }
 
-MemoryChunk *MemoryChunk::dupeSelf() const
+template <typename ait>
+MemoryChunk<ait> *MemoryChunk<ait>::dupeSelf() const
 {
-	MemoryChunk *r = (MemoryChunk *)LibVEX_Alloc_Bytes(sizeof(MemoryChunk));
+	MemoryChunk<ait> *r = (MemoryChunk<ait> *)LibVEX_Alloc_Bytes(sizeof(MemoryChunk<ait>));
 	memcpy(r, this, sizeof(*r));
 	return r;
 }
 
-void MemoryChunk::write(unsigned offset, const void *source, unsigned nr_bytes)
+template <typename ait>
+void MemoryChunk<ait>::write(unsigned offset, const ait *source, unsigned nr_bytes)
 {
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
-	memcpy(content + offset, source, nr_bytes);
+	for (unsigned x = 0; x < nr_bytes; x++)
+		content[offset + x] = force(source[x]);
 }
 
-void MemoryChunk::read(unsigned offset, void *dest, unsigned nr_bytes) const
+template <typename ait>
+void MemoryChunk<ait>::read(unsigned offset, ait *dest, unsigned nr_bytes) const
 {
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
-	memcpy(dest, content + offset, nr_bytes);
+	for (unsigned x = 0; x < nr_bytes; x++)
+		dest[x] = import_ait<unsigned long, ait>(content[offset + x]);
 }
 
+template <typename ait> template <typename new_type>
+MemoryChunk<new_type> *MemoryChunk<ait>::abstract() const
+{
+	MemoryChunk<new_type> *work =
+		new (LibVEX_Alloc_Bytes(sizeof(MemoryChunk<new_type>)))
+		MemoryChunk<new_type>();
+	for (unsigned x = 0; x < size; x++)
+		work->content[x] = content[x];
+	return work;
+}
+
+#define MK_MEMORYCHUNK(t)

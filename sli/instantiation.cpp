@@ -9,6 +9,9 @@
 #include "memorytrace.cpp"
 #include "addressspace.cpp"
 #include "logreader.cpp"
+#include "pmap.cpp"
+#include "memorychunk.cpp"
+#include "vamap.cpp"
 
 #define MK_INTERP(t)				\
 	MK_MACHINE_STATE(t);			\
@@ -19,7 +22,9 @@
 	MK_MEMTRACE(t);				\
 	MK_LOGWRITER(t);			\
 	MK_ADDRESS_SPACE(t);			\
-	MK_LOGREADER(t)
+	MK_LOGREADER(t);                        \
+        MK_PMAP(t);				\
+	MK_MEMORYCHUNK(t)
 
 static unsigned long signed_shift_right(unsigned long x, unsigned long y)
 {
@@ -54,17 +59,7 @@ unsigned long import_ait(unsigned long x)
 	return x;
 }
 
-	MK_MACHINE_STATE(unsigned long);			
-	MK_INTERPRETER(unsigned long);			
-	MK_THREAD(unsigned long);				
-	MK_MEM_LOG(unsigned long);			       
-	MK_MEMTRACE_POOL(unsigned long);			
-	MK_MEMTRACE(unsigned long);				
-	MK_LOGWRITER(unsigned long);			
-	MK_ADDRESS_SPACE(unsigned long);			
-MK_LOGREADER(unsigned long);
-
-	//MK_INTERP(unsigned long);
+MK_INTERP(unsigned long);
 
 template <>
 void mulls64(struct expression_result<abstract_interpret_value> *dest,

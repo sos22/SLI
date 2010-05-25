@@ -97,7 +97,7 @@ public:
 		type.destruct = destruct;
 		type.name = "<wrapper type>";
 	}
-	t *alloc() {
+	t *alloc() const {
 		return (t *)__LibVEX_Alloc(&type);
 	}
 };
@@ -145,7 +145,7 @@ template <typename t> t min(const t &a, const t &b)
 }
 
 template<typename src, typename dest> dest import_ait(src x);
-template<typename src, typename dest> dest load_ait(src x, dest addr, ReplayTimestamp when);
+template<typename ait> ait load_ait(ait x, ait addr, ReplayTimestamp when);
 
 template<typename abst_int_value>
 struct expression_result : public Named {
@@ -299,6 +299,8 @@ public:
 	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
 };
 
+template <typename ait> class PMap;
+
 class VAMap {
 public:
 	class Protection {
@@ -350,7 +352,7 @@ public:
 					 Protection prot,
 					 AllocFlags alf);
 		void split(unsigned long where);
-		void visit(class PMap *pmap, HeapVisitor &hv) const;
+		template <typename ait> void visit(PMap<ait> *pmap, HeapVisitor &hv) const;
 		VAMapEntry *promoteSmallest();
 		VAMapEntry *dupeSelf() const;
 		void sanityCheck(unsigned long max = 0,
@@ -387,22 +389,26 @@ public:
 
 	static VAMap *empty();
 	VAMap *dupeSelf() const;
-	void visit(HeapVisitor &hv, class PMap *pmap) const;
+	template <typename ait> void visit(HeapVisitor &hv, PMap<ait> *pmap) const;
 	void visit(HeapVisitor &hv) const;
 
 	void sanityCheck() const;
 };
 
+#define MEMORY_CHUNK_SIZE 4096
+
+template <typename ait>
 class MemoryChunk {
 public:
-	static const unsigned long size = 4096;
-	static MemoryChunk *allocate();
+	static const unsigned long size = MEMORY_CHUNK_SIZE;
+	static MemoryChunk<ait> *allocate();
 
-	void write(unsigned offset, const void *source, unsigned nr_bytes);
-	void read(unsigned offset, void *dest, unsigned nr_bytes) const;
+	void write(unsigned offset, const ait *source, unsigned nr_bytes);
+	void read(unsigned offset, ait *dest, unsigned nr_bytes) const;
 
-	MemoryChunk *dupeSelf() const;
-private:
+	MemoryChunk<ait> *dupeSelf() const;
+	template <typename nt> MemoryChunk<nt> *abstract() const;
+
 	unsigned char content[size];
 };
 
@@ -419,45 +425,59 @@ private:
       reference them.  The helper function visitPA is provided to help
       with this: it keeps both the mapping and the memory chunk live.
 */
+template <typename ait>
+class PMapEntry {
+	static const VexAllocTypeWrapper<class PMapEntry > allocator;
+public:
+	PhysicalAddress pa;
+	MemoryChunk<ait> *mc;
+	PMapEntry<ait> *next;
+	PMapEntry<ait> **pprev;
+	bool readonly;
+	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk<ait> *mc, bool readonly);
+	void visit(HeapVisitor &hv) const {}
+	void destruct() {
+		*pprev = next;
+		if (next)
+			next->pprev = pprev;
+	}
+};
+
+template <typename ait>
 class PMap {
 public:
-	class PMapEntry {
-	public:
-		PhysicalAddress pa;
-		MemoryChunk *mc;
-		PMapEntry *next;
-		PMapEntry **pprev;
-		bool readonly;
-		static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc, bool readonly);
-	};
-private:
+	static const VexAllocTypeWrapper<PMap<ait> > allocator;
 	static const unsigned nrHashBuckets = 1024;
 	static unsigned paHash(PhysicalAddress pa);
 	PhysicalAddress nextPa;
 	/* mutable because we do pull-to-front in the lookup methods.
 	 * The denotation of the mapping is unchanged, but its
 	 * physical structure is. */
-	mutable PMapEntry *heads[nrHashBuckets];
-	const PMap *parent;
+	mutable PMapEntry<ait> *heads[nrHashBuckets];
+	const PMap<ait> *parent;
 
-	PMapEntry *findPme(PhysicalAddress pa, unsigned h) const;
+private:
+	PMapEntry<ait> *findPme(PhysicalAddress pa, unsigned h) const;
 public:
 	/* Look up the memory chunk for a physical address.  On
 	   success, *mc_start is set to the offset of the address in
 	   the chunk. */
-	MemoryChunk *lookup(PhysicalAddress pa, unsigned long *mc_start);
-	const MemoryChunk *lookupConst(PhysicalAddress pa, unsigned long *mc_start,
-				       bool pull_up = true) const;
+	MemoryChunk<ait> *lookup(PhysicalAddress pa, unsigned long *mc_start);
+	const MemoryChunk<ait> *lookupConst(PhysicalAddress pa, unsigned long *mc_start,
+					    bool pull_up = true) const;
 
 	/* Add a new chunk to the map, and return a newly-assigned
 	   physical address for it. */
-	PhysicalAddress introduce(MemoryChunk *mc);
+	PhysicalAddress introduce(MemoryChunk<ait> *mc);
 
-	static PMap *empty();
-	PMap *dupeSelf() const;
+	static PMap<ait> *empty();
+	PMap<ait> *dupeSelf() const;
 
 	void visitPA(PhysicalAddress pa, HeapVisitor &hv) const;
 	void visit(HeapVisitor &hv) const;
+	void destruct() {}
+
+	template <typename newtype> PMap<newtype> *abstract() const;
 };
 
 template <typename ait>
@@ -1257,11 +1277,11 @@ protected:
 public:
 	unsigned size;
 	ait start;
-	const void *contents;
+	const ait *contents;
 	LogRecordMemory(ThreadId _tid,
 			unsigned _size,
 			ait _start,
-			const void *_contents) :
+			const ait *_contents) :
 		LogRecord<ait>(_tid),
 		visitor(this),
 		size(_size),
@@ -1272,14 +1292,16 @@ public:
 	void *marshal(unsigned *size) const;
 	LogRecord<ait> *dupe() const
 	{
-		void *b = malloc(size);
-		memcpy(b, contents, size);
+		ait *b = (ait *)malloc(size);
+		for (unsigned x = 0; x < size; x++)
+			b[x] = contents[x];
 		return new LogRecordMemory<ait>(this->thread(), size, start, b);
 	}
 	template <typename outtype> LogRecordMemory<outtype> *abstract() const
 	{
-		void *b = malloc(size);
-		memcpy(b, contents, size);
+		outtype *b = (outtype *)malloc(size * sizeof(outtype));
+		for (unsigned x = 0; x < size; x++)
+			b[x] = outtype::import(contents[x]);
 		return new LogRecordMemory<outtype>(this->thread(), size, outtype::import(start), b);
 	}
 	void visit(HeapVisitor &hv) const
@@ -1490,13 +1512,15 @@ public:
 
 template <typename ait>
 class AddressSpace {
+public:
 	unsigned long brkptr;
 	unsigned long brkMapPtr;
 	VAMap *vamap;
-	PMap *pmap;
+	PMap<ait> *pmap;
 
 	static VexAllocTypeWrapper<AddressSpace<ait> > allocator;
 
+private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
 
 public:
@@ -1516,13 +1540,13 @@ public:
 		   bool ignore_protection = false,
 		   const Thread<ait> *thr = NULL);
 	void writeMemory(ait start, unsigned size,
-			 const void *contents, bool ignore_protection = false,
+			 const ait *contents, bool ignore_protection = false,
 			 const Thread<ait> *thr = NULL);
 	expression_result<ait> load(ReplayTimestamp when, ait start, unsigned size,
 				    bool ignore_protection = false,
 				    const Thread<ait> *thr = NULL);
 	void readMemory(ait start, unsigned size,
-			void *contents, bool ignore_protection = false,
+			ait *contents, bool ignore_protection = false,
 			const Thread<ait> *thr = NULL);
 	bool isAccessible(ait start, unsigned size,
 			  bool isWrite, const Thread<ait> *thr = NULL);
@@ -1608,13 +1632,13 @@ public:
 
 class LoadExpression : public Expression {
 	static VexAllocTypeWrapper<LoadExpression> allocator;
-	unsigned long val;
+	Expression *val;
 	Expression *addr;
 	ReplayTimestamp when;
 protected:
-	char *mkName() const { return my_asprintf("(load@%lx %s -> %lx)", when.val, addr->name(), val); }
+	char *mkName() const { return my_asprintf("(load@%lx %s -> %s)", when.val, addr->name(), val->name()); }
 public:
-	static LoadExpression *get(ReplayTimestamp when, unsigned long val, Expression *addr)
+	static LoadExpression *get(ReplayTimestamp when, Expression *val, Expression *addr)
 	{
 		LoadExpression *work = new (allocator.alloc()) LoadExpression();
 		work->val = val;
@@ -1623,7 +1647,7 @@ public:
 		return work;
 	}
 	ReplayTimestamp timestamp() const { return when; }
-	void visit(HeapVisitor &hv) const {hv(addr);}
+	void visit(HeapVisitor &hv) const {hv(addr); hv(val);}
 };
 
 #define mk_binop_class(nme)						\

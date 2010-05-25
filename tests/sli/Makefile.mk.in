@@ -7,12 +7,9 @@ defvars() {
 }
 rules() {
     echo "\$(SLI_TESTS): CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
-    echo "\$(SLI_TESTS): LDFLAGS+=libVEX.a"
-    echo "${input_base}/pmap: sli/pmap.o sli/memorychunk.o sli/expression.o"
-    echo "${input_base}/vamap: sli/pmap.o sli/memorychunk.o sli/vamap.o sli/expression.o"
     for t in $sli_tests
     do
-	echo "${input_base}/$t: ${input_base}/${t}.cpp libVEX.a"
+	echo "${input_base}/$t: ${input_base}/${t}.cpp slir.a libVEX.a"
 	echo -e '\tgcc -lstdc++ $(CFLAGS) $(CPPFLAGS) $^ -o $@'
     done
 }

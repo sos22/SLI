@@ -155,9 +155,14 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_rt_sigaction: /* 13 */
 		if (!isErrnoSysres(force(lrs->res)) &&
 		    force(args[1] != mkConst<ait>(0))) {
+			ait buf[sizeof(struct sigaction)];
 			addrSpace->readMemory(args[1],
 					      sizeof(struct sigaction),
-					      &mach->signalHandlers.handlers[force(args[0])]);
+					      buf);
+			unsigned long arg0 = force(args[0]);
+			for (unsigned x = 0; x < sizeof(struct sigaction); x++)
+				((unsigned char *)&mach->signalHandlers.handlers[arg0])[x] =
+					force(buf[x]);
 		}
 		/* A memory record will follow and handle the old
 		   handler if appropriate. */

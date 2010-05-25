@@ -1004,9 +1004,9 @@ class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	VexGcVisitor<AddressSpaceGuestFetcher<ait> > visitor;
 public:
 	virtual UChar operator[](unsigned long idx) const {
-		UChar res;
-		aspace->readMemory(mkConst<ait>(idx) + offset, 1, &res);
-		return res;
+		ait v;
+		aspace->readMemory(mkConst<ait>(idx) + offset, 1, &v);
+		return force(v);
 	}
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
 				 ait _offset) :
