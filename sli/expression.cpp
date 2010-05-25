@@ -100,8 +100,10 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 	        unsigned long lc, rc;				        \
 		if (l->isConstant(&lc) && r->isConstant(&rc))		\
 			return ConstExpression::get(lc op rc);		\
-		if (nme *ll = dynamic_cast<nme *>(l))			\
-			return nme::get(ll->l, nme::get(ll->r, r));	\
+                if (associates) {					\
+			if (nme *ll = dynamic_cast<nme *>(l))		\
+				return nme::get(ll->l, nme::get(ll->r, r)); \
+		}							\
 		nme *work = new (allocator.alloc()) nme();		\
 		work->l = l;						\
 		work->r = r;						\
@@ -125,12 +127,9 @@ Expression *subtract::get(Expression *l, Expression *r)
 	return plus::get(l, unaryminus::get(r));
 }
 
-mk_binop(lshift, <<, false);
-mk_binop(rshift, >>, false);
 mk_binop(bitwiseand, &, true);
 mk_binop(bitwiseor, |, true);
 mk_binop(bitwisexor, ^, true);
-mk_binop(plus, +, true);
 mk_binop(times, *, false);
 mk_binop(divide, /, false);
 mk_binop(modulo, %, false);
@@ -148,3 +147,110 @@ mk_unop(bitwisenot, ~);
 mk_unop(unaryminus, -);
 
 mk_op_allocator(ternarycondition);
+
+mk_op_allocator(plus);							
+Expression *plus::get(Expression *l, Expression *r)			
+{									
+	unsigned long lc, rc;						
+	if (l->isConstant(&lc)) {
+		if (lc == 0)
+			return r;
+		if (r->isConstant(&rc))
+			return ConstExpression::get(lc + rc);			
+	} else if (r->isConstant(&rc) && rc == 0)
+		return l;
+
+	if (plus *ll = dynamic_cast<plus *>(l))				
+		return plus::get(ll->l, plus::get(ll->r, r));		
+	plus *work = new (allocator.alloc()) plus();			
+	work->l = l;							
+	work->r = r;							
+	return intern(work);						
+}
+
+/* C's normal semantics for shifts by negative amounts and by amounts
+   greater than the width of the type are broken.  Use sane
+   alternatives. */
+static unsigned long sane_lshift(unsigned long r, long cntr);
+static unsigned long
+sane_rshift(unsigned long r, long cntr)
+{
+	if (cntr < 0)
+		return sane_lshift(r, -cntr);
+	else if (cntr >= 64)
+		return 0;
+	else
+		return r >> cntr;
+}
+static unsigned long
+sane_lshift(unsigned long r, long cntr)
+{
+	if (cntr < 0)
+		return sane_rshift(r, -cntr);
+	else if (cntr >= 64)
+		return 0;
+	else
+		return r << cntr;
+}
+
+mk_op_allocator(lshift);
+Expression *lshift::get(Expression *l, Expression *r)			
+{									
+	unsigned long lc, rc;	
+	bool rIsConstant;
+
+	rIsConstant = r->isConstant(&rc);
+	if (l->isConstant(&lc)) {
+		if (lc == 0)
+			return l;
+		if (rIsConstant)
+			return ConstExpression::get(sane_lshift(lc, rc));
+	} else if (rIsConstant && rc == 0)
+		return l;
+
+	/* We rewrite ((x >> A) & B) << C into
+	   (x >> (A - C)) & (B << C) if A, B, and C
+	   are all constants. */
+	if (rIsConstant) {
+		bitwiseand *land = dynamic_cast<bitwiseand *>(l);
+		rshift *lrshift;
+		Expression *x;
+		unsigned long A, B, C = rc;
+		if (land) {
+			lrshift = dynamic_cast<rshift *>(land->l);
+			x = lrshift->l;
+			if (lrshift &&
+			    lrshift->r->isConstant(&A) &&
+			    land->r->isConstant(&B)) {
+				return bitwiseand::get(
+					rshift::get(x, ConstExpression::get(A - C)),
+					ConstExpression::get(sane_lshift(B, C)));
+			}
+		}
+	}
+	lshift *work = new (allocator.alloc()) lshift();			
+	work->l = l;							
+	work->r = r;							
+	return intern(work);						
+}
+
+mk_op_allocator(rshift);
+Expression *rshift::get(Expression *l, Expression *r)			
+{									
+	unsigned long lc, rc;	
+	bool rIsConstant;
+
+	rIsConstant = r->isConstant(&rc);
+	if (l->isConstant(&lc)) {
+		if (lc == 0)
+			return l;
+		if (rIsConstant)
+			return ConstExpression::get(sane_rshift(lc, rc));
+	} else if (rIsConstant && rc == 0)
+		return l;
+	rshift *work = new (allocator.alloc()) rshift();			
+	work->l = l;							
+	work->r = r;							
+	return intern(work);						
+}
+
