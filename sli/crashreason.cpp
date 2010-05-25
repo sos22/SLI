@@ -27,6 +27,17 @@ protected:
 				   when.val,
 				   rip->name());
 	}
+	unsigned _hash() const {
+		return rip->hash() ^ tid._tid() ^ when.val;
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionRip *oth = dynamic_cast<const ExpressionRip *>(other);
+		if (oth && oth->rip->isEqual(rip) &&
+		    oth->tid == tid && oth->when == when)
+			return true;
+		else
+			return false;
+	}
 public:
 	static Expression *get(ThreadId tid, ReplayTimestamp when,
 			       Expression *rip)
@@ -55,6 +66,16 @@ class ExpressionBadPointer : public Expression {
 protected:
 	char *mkName(void) const {
 		return my_asprintf("(bad ptr %lx:%s)", when.val, addr->name());
+	}
+	unsigned _hash() const {
+		return addr->hash() ^ when.val;
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionBadPointer *oth = dynamic_cast<const ExpressionBadPointer *>(other);
+		if (oth && oth->addr->isEqual(addr) && oth->when == when)
+			return true;
+		else
+			return false;
 	}
 public:
 	static Expression *get(ReplayTimestamp _when, Expression *_addr)
@@ -294,6 +315,8 @@ main(int argc, char *argv[])
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
 
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
+	printf("%s\n", cr->name());
+#if 0
 	VexGcRoot crkeeper((void **)&cr);
 
 	bool progress;
@@ -304,6 +327,6 @@ main(int argc, char *argv[])
 		cr = refine(cr, abstract, al, ptr, &progress);
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
-
+#endif
 	return 0;
 }

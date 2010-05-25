@@ -134,6 +134,7 @@ public:
 	void operator++(int _ignore) { val++; }
 	bool operator>(const ReplayTimestamp o) const { return val > o.val; }
 	bool operator<(const ReplayTimestamp o) const { return val < o.val; }
+	bool operator==(const ReplayTimestamp o) const { return val == o.val; }
 };
 
 template <typename t> t min(const t &a, const t &b)
@@ -1593,9 +1594,42 @@ void init_sli(void);
 void gdb_machine_state(const MachineState<unsigned long> *ms);
 
 class Expression : public Named {
+	static const unsigned nr_heads = 262144;
+	static Expression *heads[nr_heads];
+	static unsigned chain_lengths[nr_heads];
+	static unsigned tot_outstanding;
+	static unsigned nr_interned;
+	Expression *next;
+	Expression **pprev;
+	unsigned hashval;
+protected:
+	static Expression *intern(Expression *e);
+	virtual unsigned _hash() const = 0;
+	virtual bool _isEqual(const Expression *other) const = 0;
 public:
-	virtual bool isConstant(unsigned long *cv) { return false; }
+	unsigned hash() const { return hashval; }
+	virtual bool isConstant(unsigned long *cv) const { return false; }
 	virtual ReplayTimestamp timestamp() const { return ReplayTimestamp(0); }
+	Expression() : Named(), next(NULL) {}
+	bool isEqual(const Expression *other) const {
+		if (other == this)
+			return true;
+		else if (hashval == other->hashval)
+			return _isEqual(other);
+		else
+			return false;
+	}
+	void destruct() {
+		if (pprev) {
+			*pprev = next;
+			if (next)
+				next->pprev = pprev;
+			chain_lengths[hashval % nr_heads]--;
+			nr_interned--;
+		}
+		tot_outstanding--;
+		Named::destruct();
+	}
 };
 
 class ConstExpression : public Expression {
@@ -1604,13 +1638,22 @@ class ConstExpression : public Expression {
 				   destruct_object<ConstExpression> > allocator;
         unsigned long v;
 protected:
+	unsigned _hash() const { return v; }
 	char *mkName() const { return my_asprintf("%lx", v); }
+	bool _isEqual(const Expression *other) const
+	{
+		const ConstExpression *ce = dynamic_cast<const ConstExpression *>(other);
+		if (ce && ce->v == v)
+			return true;
+		else
+			return false;
+	}
 public:
-	static ConstExpression *get(unsigned long v)
+	static Expression *get(unsigned long v)
 	{
 		ConstExpression *work = new (allocator.alloc()) ConstExpression();
 		work->v = v;
-		return work;
+		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {}
 	bool isConstant(unsigned long *cv) { *cv = v; return true; }
@@ -1622,13 +1665,17 @@ class ImportExpression : public Expression {
 				   destruct_object<ImportExpression> > allocator;
         unsigned long v;
 protected:
+	unsigned _hash() const { return v; }
 	char *mkName() const { return my_asprintf("import %lx", v); }
+	bool _isEqual(const Expression *other) const {
+		return other == this;
+	}
 public:
-	static ImportExpression *get(unsigned long v)
+	static Expression *get(unsigned long v)
 	{
 		ImportExpression *work = new (allocator.alloc()) ImportExpression();
 		work->v = v;
-		return work;
+		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {}
 };
@@ -1640,14 +1687,25 @@ class LoadExpression : public Expression {
 	ReplayTimestamp when;
 protected:
 	char *mkName() const { return my_asprintf("(load@%lx %s -> %s)", when.val, addr->name(), val->name()); }
+	unsigned _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.val * 5); }
+	bool _isEqual(const Expression *other) const {
+		const LoadExpression *le = dynamic_cast<const LoadExpression *>(other);
+		if (le &&
+		    le->when == when &&
+		    le->val->isEqual(val) &&
+		    le->addr->isEqual(addr))
+			return true;
+		else
+			return false;
+	}
 public:
-	static LoadExpression *get(ReplayTimestamp when, Expression *val, Expression *addr)
+	static Expression *get(ReplayTimestamp when, Expression *val, Expression *addr)
 	{
 		LoadExpression *work = new (allocator.alloc()) LoadExpression();
 		work->val = val;
 		work->addr = addr;
 		work->when = when;
-		return work;
+		return intern(work);
 	}
 	ReplayTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val);}
@@ -1665,6 +1723,18 @@ public:
 		{							\
 			return my_asprintf("(%s " #nme "  %s)",		\
 					   l->name(), r->name());	\
+		}							\
+		unsigned _hash() const { return l->hash() ^ (r->hash() * 3) ^ sizeof(nme); } \
+                bool _isEqual(const Expression *other) const		\
+		{							\
+			const nme *oth =				\
+				dynamic_cast<const nme *>(other);	\
+			if (oth &&					\
+			    oth->l->isEqual(l) &&			\
+			    oth->r->isEqual(r))				\
+				return true;				\
+			else						\
+				return false;				\
 		}							\
 	public:								\
 	        static Expression *get(Expression *_l, Expression *_r);	\
@@ -1709,6 +1779,17 @@ mk_binop_class(logicaland);
 		{							\
 			return my_asprintf("(" #nme " %s)", l->name());	\
 		}							\
+		unsigned _hash() const { return l->hash() ^ sizeof(nme); } \
+                bool _isEqual(const Expression *other) const		\
+		{							\
+			const nme *oth =				\
+				dynamic_cast<const nme *>(other);	\
+			if (oth &&					\
+			    oth->l->isEqual(l))				\
+				return true;				\
+			else						\
+				return false;				\
+		}							\
 	public:								\
 	        static Expression* get(Expression *_l);			\
 		void visit(HeapVisitor &hv) const			\
@@ -1736,6 +1817,19 @@ protected:
 		return my_asprintf("(%s ? %s : %s)",
 				   cond->name(), t->name(), f->name());
 	}
+	unsigned _hash() const { return cond->hash() ^ (t->hash() * 3) ^ (f->hash() * 5) ^ 97; }
+	bool _isEqual(const Expression *other) const			
+	{							
+		const ternarycondition *oth =				
+			dynamic_cast<const ternarycondition *>(other);	
+		if (oth &&					
+		    oth->cond->isEqual(cond) &&
+		    oth->t->isEqual(t) &&
+		    oth->f->isEqual(f))
+			return true;				
+		else						
+			return false;				
+	}							
 public:
 	static Expression *get(Expression *_cond, Expression *_t, Expression *_f);
 	void visit(HeapVisitor &hv) const

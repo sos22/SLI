@@ -1,5 +1,48 @@
 #include "sli.h"
 
+Expression *Expression::heads[Expression::nr_heads];
+unsigned Expression::tot_outstanding;
+unsigned Expression::chain_lengths[Expression::nr_heads];
+unsigned Expression::nr_interned;
+
+static unsigned calls_to_intern;
+static unsigned intern_hits;
+static unsigned long nr_intern_steps;
+
+Expression *Expression::intern(Expression *e)
+{
+	calls_to_intern++;
+	e->hashval = e->_hash();
+	unsigned h = e->hashval % nr_heads;
+	Expression *cursor;
+	tot_outstanding++;
+	for (cursor = heads[h]; cursor && !cursor->isEqual(e); cursor = cursor->next)
+		nr_intern_steps++;
+	if (cursor) {
+		intern_hits++;
+		if (cursor != heads[h]) {
+			*cursor->pprev = cursor->next;
+			if (cursor->next)
+				cursor->next->pprev = cursor->pprev;
+			if (heads[h])
+				heads[h]->pprev = &cursor->next;
+			cursor->pprev = &heads[h];
+			cursor->next = heads[h];
+		}
+		e->pprev = NULL;
+		e->next = NULL;
+		return cursor;
+	}
+	e->next = heads[h];
+	e->pprev = &heads[h];
+	if (heads[h])
+		heads[h]->pprev = &e->next;
+	heads[h] = e;
+	chain_lengths[h]++;
+	nr_interned++;
+	return e;
+}
+
 template<> abstract_interpret_value
 load_ait(abstract_interpret_value val, abstract_interpret_value addr, ReplayTimestamp when)
 {
@@ -32,7 +75,7 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 	work->cond = cond;
 	work->t = t;
 	work->f = f;
-	return work;
+	return intern(work);
 }
 
 #define mk_op_allocator(op)						\
@@ -50,7 +93,7 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 		nme *work = new (allocator.alloc()) nme();		\
 		work->l = l;						\
 		work->r = r;						\
-		return work;						\
+		return intern(work);					\
 	}
 
 #define mk_unop(nme, op)						\
@@ -62,7 +105,7 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 			return ConstExpression::get(op lc);		\
 		nme *work = new (allocator.alloc()) nme();		\
 		work->l = l;						\
-		return work;						\
+		return intern(work);					\
 	}
 
 Expression *subtract::get(Expression *l, Expression *r)
