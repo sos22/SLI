@@ -128,7 +128,6 @@ Expression *subtract::get(Expression *l, Expression *r)
 }
 
 mk_binop(bitwiseand, &, true);
-mk_binop(bitwiseor, |, true);
 mk_binop(bitwisexor, ^, true);
 mk_binop(times, *, false);
 mk_binop(divide, /, false);
@@ -152,14 +151,30 @@ mk_op_allocator(plus);
 Expression *plus::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;						
-	if (l->isConstant(&lc)) {
+	bool lIsConstant = l->isConstant(&lc);
+	bool rIsConstant = r->isConstant(&rc);
+	if (lIsConstant) {
 		if (lc == 0)
 			return r;
-		if (r->isConstant(&rc))
+		if (rIsConstant)
 			return ConstExpression::get(lc + rc);			
-	} else if (r->isConstant(&rc) && rc == 0)
+	} else if (rIsConstant && rc == 0)
 		return l;
 
+	/* We rewrite (a & Y) + (b & Z) to (a & Y) | (b & Z) whenever
+	   possible, which is pretty much when Y and Z don't
+	   intersect. */
+	{
+		bitwiseand *land = dynamic_cast<bitwiseand *>(l);
+		bitwiseand *rand = dynamic_cast<bitwiseand *>(r);
+		if (land && rand) {
+			Expression *c = bitwiseand::get(land->r, rand->r);
+			unsigned long cc;
+			if (c->isConstant(&cc) && cc == 0)
+				return bitwiseor::get(land, rand);
+		}
+	}
+	
 	if (plus *ll = dynamic_cast<plus *>(l))				
 		return plus::get(ll->l, plus::get(ll->r, r));		
 	plus *work = new (allocator.alloc()) plus();			
@@ -254,3 +269,34 @@ Expression *rshift::get(Expression *l, Expression *r)
 	return intern(work);						
 }
 
+mk_op_allocator(bitwiseor);
+Expression *bitwiseor::get(Expression *l, Expression *r)			
+{									
+	unsigned long lc, rc;						
+	bool lIsConstant = l->isConstant(&lc);
+	bool rIsConstant = r->isConstant(&rc);
+	if (lIsConstant) {
+		if (lc == 0)
+			return r;
+		if (rIsConstant)
+			return ConstExpression::get(lc | rc);
+	} else if (rIsConstant && rc == 0)
+		return l;
+
+	/* Rewrite (x & Y) | (x & Z) to x & (Y | Z) */
+	{
+		bitwiseand *land = dynamic_cast<bitwiseand *>(l);
+		bitwiseand *rand = dynamic_cast<bitwiseand *>(r);
+		if (land && rand && land->l == rand->l)
+			return bitwiseand::get(land->l,
+					       bitwiseor::get(land->r,
+							      rand->r));
+	}
+	
+	if (bitwiseor *ll = dynamic_cast<bitwiseor *>(l))
+		return bitwiseor::get(ll->l, bitwiseor::get(ll->r, r));		
+	bitwiseor *work = new (allocator.alloc()) bitwiseor();
+	work->l = l;							
+	work->r = r;							
+	return intern(work);						
+}
