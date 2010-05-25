@@ -3,11 +3,21 @@
 Expression *Expression::heads[Expression::nr_heads];
 unsigned Expression::tot_outstanding;
 unsigned Expression::chain_lengths[Expression::nr_heads];
+unsigned long Expression::eq_calls[Expression::nr_heads];
 unsigned Expression::nr_interned;
 
 static unsigned calls_to_intern;
 static unsigned intern_hits;
 static unsigned long nr_intern_steps;
+
+void Expression::dump_eq_calls_table()
+{
+	FILE *f;
+	f = fopen("eqcalls.inf", "w");
+	for (unsigned x = 0; x < nr_heads; x++)
+		fprintf(f, "%d\t%ld\n", x, eq_calls[x]);
+	fclose(f);
+}
 
 Expression *Expression::intern(Expression *e)
 {
@@ -16,8 +26,10 @@ Expression *Expression::intern(Expression *e)
 	unsigned h = e->hashval % nr_heads;
 	Expression *cursor;
 	tot_outstanding++;
-	for (cursor = heads[h]; cursor && !cursor->isEqual(e); cursor = cursor->next)
+	for (cursor = heads[h]; cursor && !cursor->isEqual(e); cursor = cursor->next) {
 		nr_intern_steps++;
+		eq_calls[h]++;
+	}
 	if (cursor) {
 		intern_hits++;
 		if (cursor != heads[h]) {
