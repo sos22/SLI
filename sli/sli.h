@@ -1665,7 +1665,7 @@ class ImportExpression : public Expression {
 				   destruct_object<ImportExpression> > allocator;
         unsigned long v;
 protected:
-	unsigned _hash() const { return v; }
+	unsigned _hash() const { return (unsigned long)this / 64; }
 	char *mkName() const { return my_asprintf("import %lx", v); }
 	bool _isEqual(const Expression *other) const {
 		return other == this;
