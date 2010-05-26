@@ -140,7 +140,7 @@ MachineState<new_type> *MachineState<ait>::abstract() const
 
 	memset(work, 0, sizeof(*work));
 	work->exitted = exitted;
-	work->exit_status = new_type::import(exit_status);
+	work->exit_status = new_type::import(exit_status, ImportOriginInitialValue::get());
 	work->nextTid = nextTid;
 	signalHandlers.abstract<new_type>(&work->signalHandlers);
 	work->addressSpace = addressSpace->abstract<new_type>();

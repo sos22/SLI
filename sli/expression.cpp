@@ -327,3 +327,34 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 	work->r = r;
 	return intern(work);						
 }
+
+
+ImportOrigin *ImportOriginSymbolicFailure::get()
+{
+	return NULL;
+}
+
+ImportOrigin *ImportOriginInitialRegister::get(unsigned x)
+{
+	return NULL;
+}
+
+ImportOrigin *ImportOriginInitialTemporary::get(unsigned x)
+{
+	return NULL;
+}
+
+ImportOrigin *ImportOriginInitialMemory::get()
+{
+	return NULL;
+}
+
+ImportOrigin *ImportOriginInitialValue::get()
+{
+	return NULL;
+}
+
+ImportOrigin *ImportOriginLogfile::get()
+{
+	return NULL;
+}

@@ -145,7 +145,40 @@ template <typename t> t min(const t &a, const t &b)
 		return b;
 }
 
-template<typename src, typename dest> dest import_ait(src x);
+class ImportOrigin {
+};
+
+class ImportOriginLogfile : public ImportOrigin {
+public:
+	static ImportOrigin *get();
+};
+
+class ImportOriginInitialValue : public ImportOrigin {
+public:
+	static ImportOrigin *get();
+};
+
+class ImportOriginInitialMemory : public ImportOriginInitialValue {
+public:
+	static ImportOrigin *get();
+};
+
+class ImportOriginInitialRegister : public ImportOriginInitialValue {
+public:
+	static ImportOrigin *get(unsigned x);
+};
+
+class ImportOriginInitialTemporary : public ImportOriginInitialValue {
+public:
+	static ImportOrigin *get(unsigned x);
+};
+
+class ImportOriginSymbolicFailure : public ImportOrigin {
+public:
+	static ImportOrigin *get();
+};
+
+template<typename src, typename dest> dest import_ait(src x, ImportOrigin *origin);
 template<typename ait> ait load_ait(ait x, ait addr, ReplayTimestamp when);
 
 template<typename abst_int_value>
@@ -160,11 +193,12 @@ public:
 	abst_int_value hi;
 	expression_result() : Named() {}
 	void visit(HeapVisitor &hv) const { visit_aiv(lo, hv); visit_aiv(hi, hv); }
-
-	template <typename new_type> void abstract(expression_result<new_type> *out) const
+	
+	template <typename new_type> void abstract(expression_result<new_type> *out,
+						   ImportOrigin *origin) const
 	{
-		out->lo = import_ait<abst_int_value, new_type>(lo);
-		out->hi = import_ait<abst_int_value, new_type>(hi);
+		out->lo = import_ait<abst_int_value, new_type>(lo, origin);
+		out->hi = import_ait<abst_int_value, new_type>(hi, origin);
 	}
 };
 
@@ -1052,10 +1086,10 @@ public:
 	template <typename outtype> LogRecordLoad<outtype> *abstract() const
 	{
 		expression_result<outtype> nvalue;
-		value.abstract(&nvalue);
+		value.abstract(&nvalue, ImportOriginLogfile::get());
 		return new LogRecordLoad<outtype>(this->thread(),
 						  size,
-						  outtype::import(ptr),
+						  outtype::import(ptr, ImportOriginLogfile::get()),
 						  nvalue);
 	}
 };
@@ -1110,10 +1144,10 @@ public:
 	template <typename outtype> LogRecordStore<outtype> *abstract() const
 	{
 		expression_result<outtype> res;
-		value.abstract(&res);
+		value.abstract(&res, ImportOriginLogfile::get());
 		return new LogRecordStore<outtype>(this->thread(),
 						   size,
-						   outtype::import(ptr),
+						   outtype::import(ptr, ImportOriginLogfile::get()),
 						   res);
 	}
 };
@@ -1205,12 +1239,12 @@ public:
 	template <typename outtype> LogRecordFootstep<outtype> *abstract() const
 	{
 		return new LogRecordFootstep<outtype>(this->thread(),
-						      outtype::import(rip),
-						      outtype::import(reg0),
-						      outtype::import(reg1),
-						      outtype::import(reg2),
-						      outtype::import(reg3),
-						      outtype::import(reg4));
+						      outtype::import(rip, ImportOriginLogfile::get()),
+						      outtype::import(reg0, ImportOriginLogfile::get()),
+						      outtype::import(reg1, ImportOriginLogfile::get()),
+						      outtype::import(reg2, ImportOriginLogfile::get()),
+						      outtype::import(reg3, ImportOriginLogfile::get()),
+						      outtype::import(reg4, ImportOriginLogfile::get()));
 	}
 	void visit(HeapVisitor &hv) const
 	{
@@ -1255,11 +1289,11 @@ public:
 	template <typename outtype> LogRecordSyscall<outtype> *abstract() const
 	{
 		return new LogRecordSyscall<outtype>(this->thread(),
-						     outtype::import(sysnr),
-						     outtype::import(res),
-						     outtype::import(arg1),
-						     outtype::import(arg2),
-						     outtype::import(arg3));
+						     outtype::import(sysnr, ImportOriginLogfile::get()),
+						     outtype::import(res, ImportOriginLogfile::get()),
+						     outtype::import(arg1, ImportOriginLogfile::get()),
+						     outtype::import(arg2, ImportOriginLogfile::get()),
+						     outtype::import(arg3, ImportOriginLogfile::get()));
 	}
 	void visit(HeapVisitor &hv) const
 	{
@@ -1305,8 +1339,8 @@ public:
 	{
 		outtype *b = (outtype *)malloc(size * sizeof(outtype));
 		for (unsigned x = 0; x < size; x++)
-			b[x] = outtype::import(contents[x]);
-		return new LogRecordMemory<outtype>(this->thread(), size, outtype::import(start), b);
+			b[x] = outtype::import(contents[x], ImportOriginLogfile::get());
+		return new LogRecordMemory<outtype>(this->thread(), size, outtype::import(start, ImportOriginLogfile::get()), b);
 	}
 	void visit(HeapVisitor &hv) const
 	{
@@ -1339,7 +1373,7 @@ public:
 	template <typename outtype> LogRecordRdtsc<outtype> *abstract() const
 	{
 		return new LogRecordRdtsc<outtype>(this->thread(),
-						   outtype::import(tsc));
+						   outtype::import(tsc, ImportOriginLogfile::get()));
 	}
 	void visit(HeapVisitor &hv) const { visit_aiv(tsc, hv); }
 };
@@ -1377,10 +1411,10 @@ public:
 	template <typename outtype> LogRecordSignal<outtype> *abstract() const
 	{
 		return new LogRecordSignal<outtype>(this->thread(),
-						    outtype::import(rip),
+						    outtype::import(rip, ImportOriginLogfile::get()),
 						    signr,
-						    outtype::import(err),
-						    outtype::import(virtaddr));
+						    outtype::import(err, ImportOriginLogfile::get()),
+						    outtype::import(virtaddr, ImportOriginLogfile::get()));
 	}
 	void visit(HeapVisitor &hv) const
 	{
@@ -1425,8 +1459,8 @@ public:
 	template <typename outtype> LogRecordAllocateMemory<outtype> *abstract() const
 	{
 		return new LogRecordAllocateMemory<outtype>(this->thread(),
-							    outtype::import(start),
-							    outtype::import(size),
+							    outtype::import(start, ImportOriginLogfile::get()),
+							    outtype::import(size, ImportOriginLogfile::get()),
 							    prot,
 							    flags);
 	}
@@ -1483,7 +1517,7 @@ public:
 	template <typename outtype> LogRecordInitialBrk<outtype> *abstract() const
 	{
 		return new LogRecordInitialBrk<outtype>(this->thread(),
-							outtype::import(brk));
+							outtype::import(brk, ImportOriginLogfile::get()));
 	}
 	void visit(HeapVisitor &hv) const { visit_aiv(brk, hv); }
 };
@@ -1666,6 +1700,7 @@ class ImportExpression : public Expression {
 				   visit_object<ImportExpression>,
 				   destruct_object<ImportExpression> > allocator;
         unsigned long v;
+	ImportOrigin *origin;
 protected:
 	unsigned _hash() const { return (unsigned long)this / 64; }
 	char *mkName() const { return my_asprintf("import %lx", v); }
@@ -1673,13 +1708,14 @@ protected:
 		return other == this;
 	}
 public:
-	static Expression *get(unsigned long v)
+	static Expression *get(unsigned long v, ImportOrigin *origin)
 	{
 		ImportExpression *work = new (allocator.alloc()) ImportExpression();
 		work->v = v;
+		work->origin = origin;
 		return intern(work);
 	}
-	void visit(HeapVisitor &hv) const {}
+	void visit(HeapVisitor &hv) const {hv(origin);}
 };
 
 class LoadExpression : public Expression {
@@ -1854,7 +1890,8 @@ struct abstract_interpret_value {
 	Expression *origin;
 	abstract_interpret_value(unsigned long _v, Expression *_origin) : _name(NULL), v(_v), origin(_origin) {assert(origin);}
 	abstract_interpret_value() : _name(NULL), v(0), origin(NULL) {}
-	template <typename ait> static abstract_interpret_value import(ait x);
+	template <typename ait> static abstract_interpret_value import(ait x,
+								       ImportOrigin *origin);
 	const char *name() const {
 		if (!_name)
 			_name = vex_asprintf("{%lx:%s}", v, origin->name());

@@ -92,16 +92,24 @@ Thread<new_type> *Thread<ait>::abstract() const
 	work->tid = tid;
 	work->pid = pid;
 	regs.abstract<new_type>(&work->regs);
-	work->clear_child_tid = new_type::import(clear_child_tid);
-	work->robust_list = new_type::import(robust_list);
-	work->set_child_tid = new_type::import(set_child_tid);
+	work->clear_child_tid = new_type::import(
+		clear_child_tid,
+		ImportOriginInitialValue::get());
+	work->robust_list = new_type::import(
+		robust_list,
+		ImportOriginInitialValue::get());
+	work->set_child_tid = new_type::import(
+		set_child_tid,
+		ImportOriginInitialValue::get());
 	work->exitted = exitted;
 	work->crashed = crashed;
 	work->cannot_make_progress = cannot_make_progress;
 	work->currentIRSB = currentIRSB;
 	temporaries.abstract<new_type>(&work->temporaries);
 	work->currentIRSBOffset = currentIRSBOffset;
-	work->currentControlCondition = new_type::import(currentControlCondition);
+	work->currentControlCondition = new_type::import(
+		currentControlCondition,
+		ImportOriginInitialValue::get());
 	return work;
 }
 
@@ -110,7 +118,9 @@ void RegisterSet<ait>::abstract(RegisterSet<new_type> *out) const
 {
 	memset(out, 0, sizeof(*out));
 	for (unsigned x = 0; x < NR_REGS; x++)
-		out->registers[x] = new_type::import(registers[x]);
+		out->registers[x] = new_type::import(
+			registers[x],
+			ImportOriginInitialRegister::get(x));
 }
 
 template <typename ait> template <typename new_type>
@@ -119,7 +129,9 @@ void expression_result_array<ait>::abstract(expression_result_array<new_type> *o
 	memset(out, 0, sizeof(*out));
 	out->setSize(nr_entries);
 	for (unsigned x = 0; x < nr_entries; x++)
-		arr[x].abstract<new_type>(&out->arr[x]);
+		arr[x].abstract<new_type>(
+			&out->arr[x],
+			ImportOriginInitialTemporary::get(x));
 }
 
 template <typename ait> VexAllocTypeWrapper<Thread<ait> > Thread<ait>::allocator;

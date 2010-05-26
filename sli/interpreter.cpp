@@ -362,7 +362,8 @@ Thread<ait>::do_ccall_generic(IRCallee *cee,
 						 force(rargs[2].lo),
 						 force(rargs[3].lo),
 						 force(rargs[4].lo),
-						 force(rargs[5].lo)));
+						 force(rargs[5].lo)),
+						ImportOriginSymbolicFailure::get());
 	res.hi = mkConst<ait>(0);
 	return res;
 }
@@ -476,8 +477,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	struct expression_result<ait> res;
 	struct expression_result<ait> *dest = &res;
 
-	res.lo = import_ait<unsigned long, ait>(0);
-	res.hi = import_ait<unsigned long, ait>(0);
+	res.lo = mkConst<ait>(0);
+	res.hi = mkConst<ait>(0);
 	
 	switch (expr->tag) {
 	case Iex_Get: {
@@ -639,14 +640,15 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = arg1.lo * arg2.lo;
 			break;
 
-		case Iop_MullU32: {
+		case Iop_MullU32:
 			dest->lo = arg1.lo * arg2.lo;
 			break;
-		}
-		case Iop_MullS32: {
-			dest->lo = import_ait<unsigned long, ait>((long)(int)force(arg1.lo) * (long)(int)force(arg2.lo));
+		case Iop_MullS32:
+			dest->lo =
+				import_ait<unsigned long, ait>(
+					(long)(int)force(arg1.lo) * (long)(int)force(arg2.lo),
+					ImportOriginSymbolicFailure::get());
 			break;
-		}
 
 		case Iop_MullS64:
 			mulls64(dest, arg1, arg2);
@@ -682,8 +684,10 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_DivModS64to32: {
 			long a1 = force(arg1.lo);
 			long a2 = force(arg2.lo);
-			dest->lo = import_ait<unsigned long, ait>(((a1 / a2) & 0xffffffff) |
-				       ((a1 % a2) << 32));
+			dest->lo = import_ait<unsigned long, ait>(
+				((a1 / a2) & 0xffffffff) | ((a1 % a2) << 32),
+				ImportOriginSymbolicFailure::get()
+				);
 			break;
 		}
 
@@ -696,8 +700,12 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("div %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = import_ait<unsigned long, ait>(dlo);
-			dest->hi = import_ait<unsigned long, ait>(dhi);
+			dest->lo = import_ait<unsigned long, ait>(
+				dlo,
+				ImportOriginSymbolicFailure::get());
+			dest->hi = import_ait<unsigned long, ait>(
+				dhi,
+				ImportOriginSymbolicFailure::get());
 			break;
 		}
 
@@ -707,8 +715,12 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("idiv %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = import_ait<unsigned long, ait>(dlo);
-			dest->hi = import_ait<unsigned long, ait>(dhi);
+			dest->lo = import_ait<unsigned long, ait>(
+				dlo,
+				ImportOriginSymbolicFailure::get());
+			dest->hi = import_ait<unsigned long, ait>(
+				dhi,
+				ImportOriginSymbolicFailure::get());
 			break;
 		}
 
@@ -774,7 +786,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.d = force(arg2.lo);
-				dest->lo = import_ait<unsigned long, ait>(r.l);
+				dest->lo = import_ait<unsigned long, ait>(
+					r.l,
+					ImportOriginSymbolicFailure::get());
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -791,7 +805,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.l = force(arg2.lo);
-				dest->lo = import_ait<unsigned long, ait>((unsigned)r.d);
+				dest->lo = import_ait<unsigned long, ait>(
+					(unsigned)r.d,
+					ImportOriginSymbolicFailure::get());
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -818,7 +834,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				r = 0;
 			else
 				r = 0x45;
-			dest->lo = import_ait<unsigned long, ait>(r);
+			dest->lo = import_ait<unsigned long, ait>(
+				r,
+				ImportOriginSymbolicFailure::get());
 			break;
 		}
 
@@ -931,7 +949,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << (63 - res))) &&
 			       res < 63)
 				res++;
-			dest->lo = import_ait<unsigned long, ait>(res);
+			dest->lo = import_ait<unsigned long, ait>(
+				res,
+				ImportOriginSymbolicFailure::get());
 			break;
 		}
 
@@ -941,7 +961,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << res)) &&
 			       res < 63)
 				res++;
-			dest->lo = import_ait<unsigned long, ait>(v);
+			dest->lo = import_ait<unsigned long, ait>(
+				v,
+				ImportOriginSymbolicFailure::get());
 			break;
 		}
 

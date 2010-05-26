@@ -52,7 +52,7 @@ ait operator ==(expression_result<ait> a, expression_result<ait> b)
 }
 
 template<>
-unsigned long import_ait(unsigned long x)
+unsigned long import_ait(unsigned long x, ImportOrigin *ignore)
 {
 	return x;
 }
@@ -85,22 +85,23 @@ RegisterSet<abstract_interpret_value>::RegisterSet(const VexGuestAMD64State &r)
 }
 
 template <>
-abstract_interpret_value abstract_interpret_value::import(unsigned long x)
+abstract_interpret_value abstract_interpret_value::import(unsigned long x,
+							  ImportOrigin *origin)
 {
 	abstract_interpret_value v;
 	v.v = x;
-	v.origin = ImportExpression::get(x);
+	v.origin = ImportExpression::get(x, origin);
 	return v;
 }
 
 template<>
-abstract_interpret_value import_ait(unsigned long x)
+abstract_interpret_value import_ait(unsigned long x, ImportOrigin *origin)
 {
-	return abstract_interpret_value::import(x);
+	return abstract_interpret_value::import(x, origin);
 }
 
 template<>
-unsigned long import_ait(abstract_interpret_value v)
+unsigned long import_ait(abstract_interpret_value v, ImportOrigin *ignore)
 {
 	return v.v;
 }
