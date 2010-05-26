@@ -12,3 +12,4 @@ vgcore.*
 crop
 symexec
 crashreason
+cftrace
