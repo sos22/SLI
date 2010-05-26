@@ -329,32 +329,53 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 }
 
 
+VexAllocType ImportOrigin::allocator = { -1, ImportOrigin::visit,
+					 ImportOrigin::destruct,
+					 "ImportOrigin" };
+
+void *ImportOrigin::operator new(size_t s)
+{
+	return LibVEX_Alloc_Sized(&allocator, s);
+}
+
+ImportOriginSymbolicFailure *ImportOriginSymbolicFailure::w;
 ImportOrigin *ImportOriginSymbolicFailure::get()
 {
-	return NULL;
+	if (!w)
+		w = new ImportOriginSymbolicFailure();
+	return w;
 }
 
 ImportOrigin *ImportOriginInitialRegister::get(unsigned x)
 {
-	return NULL;
+	return new ImportOriginInitialRegister(x);
 }
 
 ImportOrigin *ImportOriginInitialTemporary::get(unsigned x)
 {
-	return NULL;
+	return new ImportOriginInitialTemporary(x);
 }
 
+ImportOriginInitialMemory *ImportOriginInitialMemory::w;
 ImportOrigin *ImportOriginInitialMemory::get()
 {
-	return NULL;
+	if (!w)
+		w = new ImportOriginInitialMemory();
+	return w;
 }
 
+ImportOriginInitialValue *ImportOriginInitialValue::w;
 ImportOrigin *ImportOriginInitialValue::get()
 {
-	return NULL;
+	if (!w)
+		w = new ImportOriginInitialValue();
+	return w;
 }
 
+ImportOriginLogfile *ImportOriginLogfile::w;
 ImportOrigin *ImportOriginLogfile::get()
 {
-	return NULL;
+	if (!w)
+		w = new ImportOriginLogfile();
+	return w;
 }

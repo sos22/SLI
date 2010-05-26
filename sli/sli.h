@@ -146,34 +146,92 @@ template <typename t> t min(const t &a, const t &b)
 }
 
 class ImportOrigin {
+	static VexAllocType allocator;
+	mutable char *_name;
+
+protected:
+	void *operator new(size_t s);
+	/* DNI */
+	static void operator delete(void *ptr);
+
+	ImportOrigin() : _name(NULL) {}
+	~ImportOrigin() {}
+
+	virtual void visit(HeapVisitor &hv) const {hv(_name);}
+	virtual void destruct() { this->~ImportOrigin(); }
+	virtual char *mkName() const = 0;
+public:
+	static void visit(const void *ctxt, HeapVisitor &hv)
+	{
+		((const ImportOrigin *)ctxt)->visit(hv);
+	}
+	static void destruct(void *ctxt)
+	{
+		((ImportOrigin *)ctxt)->destruct();
+	}
+	char *name() const {
+		if (!_name)
+			_name = mkName();
+		return _name;
+	}
 };
 
 class ImportOriginLogfile : public ImportOrigin {
+	static ImportOriginLogfile *w;
+protected:
+	char *mkName() const { return vex_asprintf("logfile"); }
 public:
 	static ImportOrigin *get();
 };
 
 class ImportOriginInitialValue : public ImportOrigin {
+	static ImportOriginInitialValue *w;
+protected:
+	virtual char *mkName() const { return vex_asprintf("initial_value"); }
 public:
 	static ImportOrigin *get();
 };
 
 class ImportOriginInitialMemory : public ImportOriginInitialValue {
+	static ImportOriginInitialMemory *w;
+protected:
+	char *mkName() const { return vex_asprintf("initial_memory"); }
 public:
 	static ImportOrigin *get();
 };
 
 class ImportOriginInitialRegister : public ImportOriginInitialValue {
+	unsigned idx;
+	ImportOriginInitialRegister(unsigned _idx) :
+		ImportOriginInitialValue(),
+		idx(_idx)
+	{}
+	/* DNI */
+	~ImportOriginInitialRegister();
+protected:
+	char *mkName() const { return vex_asprintf("initial_register(%d)", idx); }
 public:
 	static ImportOrigin *get(unsigned x);
 };
 
 class ImportOriginInitialTemporary : public ImportOriginInitialValue {
+	unsigned idx;
+	ImportOriginInitialTemporary(unsigned _idx) :
+		ImportOriginInitialValue(),
+		idx(_idx)
+	{}
+	/* DNI */
+	~ImportOriginInitialTemporary();
+protected:
+	char *mkName() const { return vex_asprintf("initial_temporary(%d)", idx); }
 public:
 	static ImportOrigin *get(unsigned x);
 };
 
 class ImportOriginSymbolicFailure : public ImportOrigin {
+	static ImportOriginSymbolicFailure *w;
+protected:
+	char *mkName() const { return vex_asprintf("symbolic_failure"); }
 public:
 	static ImportOrigin *get();
 };
@@ -1703,7 +1761,7 @@ class ImportExpression : public Expression {
 	ImportOrigin *origin;
 protected:
 	unsigned _hash() const { return (unsigned long)this / 64; }
-	char *mkName() const { return my_asprintf("import %lx", v); }
+	char *mkName() const { return my_asprintf("import:%s %lx", origin->name(), v); }
 	bool _isEqual(const Expression *other) const {
 		return other == this;
 	}
