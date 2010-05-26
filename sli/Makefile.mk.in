@@ -4,49 +4,42 @@ defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog,expression,events}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{debug,instantiation}.cpp
-
+	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
 SLIR_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(SLIR_SOURCES))
-all_sources+=\$(SLIR_SOURCES) ${input_base}/interpret.cpp ${input_base}/crop.cpp ${input_base}/symexec.cpp ${input_base}/crashreason.cpp ${input_base}/cftrace.cpp
+SLIR_TARGET_SOURCES=\$(patsubst %,${input_base}/%.cpp,\$(SLIR_TARGETS))
+SLIR_TARGET_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_TARGET_SOURCES))
+SLIR_TARGET_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(SLIR_TARGET_SOURCES))
+all_sources+=\$(SLIR_SOURCES) \$(SLIR_TARGET_SOURCES)
 clean_files+=slir.a
 EOF
 }
 
 rules() {
     cat <<EOF
-\$(SLIR_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
-\$(SLIR_DEPS): CPPFLAGS+=-I\$(libvex)/pub
+\$(SLIR_OBJECTS) \$(SLIR_TARGET_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
+\$(SLIR_DEPS) \$(SLIR_TARGET_DEPS): CPPFLAGS+=-I\$(libvex)/pub
+$targets: slir.a libVEX.a
 ${input_base}/instantiation.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/instantiation.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
-${input_base}/interpret.o: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/crop.o: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/interpret.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/crop.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/crop.o: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/symexec.o: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/symexec.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/crashreason.o: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/crashreason.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/cftrace.o: CPPFLAGS+=-I\$(libvex)/pub
-${input_base}/cftrace.cpp.d: CPPFLAGS+=-I\$(libvex)/pub
 
 slir.a: \$(SLIR_OBJECTS)
 	rm -f \$@ ; ar rcs \$@ \$^
 
-slir: ${input_base}/interpret.o slir.a libVEX.a
+slir: ${input_base}/slir.o
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 
-crop: ${input_base}/crop.o slir.a libVEX.a
+crop: ${input_base}/crop.o
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 
-symexec: ${input_base}/symexec.o slir.a libVEX.a
+symexec: ${input_base}/symexec.o
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 
-crashreason: ${input_base}/crashreason.o slir.a libVEX.a
+crashreason: ${input_base}/crashreason.o
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 
-cftrace: ${input_base}/cftrace.o slir.a libVEX.a
+cftrace: ${input_base}/cftrace.o
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 }
