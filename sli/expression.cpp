@@ -120,7 +120,6 @@ mk_binop(greaterthanequals, >=, false, true);
 mk_binop(greaterthan, >, false, true);
 mk_binop(lessthanequals, <=, false, true);
 mk_binop(lessthan, <, false, true);
-mk_binop(equals, ==, false, true);
 mk_binop(notequals, !=, false, true);
 
 mk_unop(bitwisenot, ~);
@@ -138,7 +137,7 @@ Expression *logicaland::get(Expression *l, Expression *r)
 
 Expression *logicalnot::get(Expression *l)
 {
-	return bitsaturate::get(bitwisenot::get(l));
+	return bitsaturate::get(bitwisenot::get(bitsaturate::get(l)));
 }
 
 mk_op_allocator(bitsaturate);
@@ -449,3 +448,34 @@ ImportOrigin *ImportOriginLogfile::get()
 		w = new ImportOriginLogfile();
 	return w;
 }
+
+mk_op_allocator(equals);							
+bool equals::isLogical() const { return true; }			
+Expression *equals::get(Expression *l, Expression *r)		
+{									
+	unsigned long lc, rc;
+	if (r->isConstant(&rc)) {
+		if (l->isConstant(&lc))
+			return ConstExpression::get(lc == rc);
+
+		/* Rewrite X ? a : b == a to just X if a and b are
+		   non-equal constants. */
+		ternarycondition *tc = dynamic_cast<ternarycondition *>(l);
+		if (tc) {
+			unsigned long tc_true_const, tc_false_const;
+			if (tc->t->isConstant(&tc_true_const) &&
+			    tc->f->isConstant(&tc_false_const)) {
+				if (tc_true_const == rc)
+					return bitsaturate::get(tc->cond);
+				else
+					return logicalnot::get(tc->cond);
+			}
+		}
+	}
+
+	equals *work = new (allocator.alloc()) equals();
+	work->l = l;							
+	work->r = r;							
+	return intern(work);						
+}
+

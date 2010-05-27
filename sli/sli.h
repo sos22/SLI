@@ -1912,7 +1912,9 @@ mk_unop_class(unaryminus);
 mk_unop_class(bitsaturate);
 
 class ternarycondition : public Expression {
+public:
 	Expression *cond, *t, *f;
+private:
 	static VexAllocTypeWrapper<ternarycondition,
 				   visit_object<ternarycondition>,
 				   destruct_object<ternarycondition> > allocator;
