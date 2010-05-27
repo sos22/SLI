@@ -135,6 +135,7 @@ public:
 	bool operator>(const ReplayTimestamp o) const { return val > o.val; }
 	bool operator<(const ReplayTimestamp o) const { return val < o.val; }
 	bool operator==(const ReplayTimestamp o) const { return val == o.val; }
+	bool operator!=(const ReplayTimestamp o) const { return val != o.val; }
 };
 
 template <typename t> t min(const t &a, const t &b)
