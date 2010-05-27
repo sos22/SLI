@@ -74,22 +74,6 @@ VexAllocTypeWrapper<ConstExpression, visit_object<ConstExpression>, destruct_obj
 VexAllocTypeWrapper<ImportExpression, visit_object<ImportExpression>, destruct_object<ImportExpression> > ImportExpression::allocator;
 VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 
-Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f)
-{
-	unsigned long cv;
-	if (cond->isConstant(&cv)) {
-		if (cv)
-			return t;
-		else
-			return f;
-	}
-	ternarycondition *work = new (allocator.alloc()) ternarycondition();
-	work->cond = cond;
-	work->t = t;
-	work->f = f;
-	return intern(work);
-}
-
 #define mk_op_allocator(op)						\
 	VexAllocTypeWrapper<op, visit_object<op>, destruct_object<op> > op::allocator
 
@@ -127,7 +111,6 @@ Expression *subtract::get(Expression *l, Expression *r)
 	return plus::get(l, unaryminus::get(r));
 }
 
-mk_binop(bitwisexor, ^, true);
 mk_binop(times, *, false);
 mk_binop(divide, /, false);
 mk_binop(modulo, %, false);
@@ -145,6 +128,21 @@ mk_unop(bitwisenot, ~);
 mk_unop(unaryminus, -);
 
 mk_op_allocator(ternarycondition);
+Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f)
+{
+	unsigned long cv;
+	if (cond->isConstant(&cv)) {
+		if (cv)
+			return t;
+		else
+			return f;
+	}
+	ternarycondition *work = new (allocator.alloc()) ternarycondition();
+	work->cond = cond;
+	work->t = t;
+	work->f = f;
+	return intern(work);
+}
 
 mk_op_allocator(plus);							
 Expression *plus::get(Expression *l, Expression *r)			
@@ -300,6 +298,28 @@ Expression *bitwiseor::get(Expression *l, Expression *r)
 	return intern(work);						
 }
 
+mk_op_allocator(bitwisexor);
+Expression *bitwisexor::get(Expression *l, Expression *r)			
+{									
+	unsigned long lc, rc;						
+	bool lIsConstant = l->isConstant(&lc);
+	bool rIsConstant = r->isConstant(&rc);
+	if (lIsConstant) {
+		if (lc == 0)
+			return r;
+		if (rIsConstant)
+			return ConstExpression::get(lc ^ rc);
+	} else if (rIsConstant && rc == 0)
+		return l;
+
+	if (bitwiseor *ll = dynamic_cast<bitwiseor *>(l))
+		return bitwisexor::get(ll->l, bitwisexor::get(ll->r, r));		
+	bitwisexor *work = new (allocator.alloc()) bitwisexor();
+	work->l = l;							
+	work->r = r;							
+	return intern(work);						
+}
+
 mk_op_allocator(bitwiseand);
 Expression *bitwiseand::get(Expression *l, Expression *r)			
 {									
@@ -320,8 +340,14 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 			return l;
 	}
 
-	if (bitwiseand *ll = dynamic_cast<bitwiseand *>(l))
+	if (bitwiseand *ll = dynamic_cast<bitwiseand *>(l)) {
+		/* Rewrite (x & A) & A to just x & A */
+		if (ll->r == r)
+			return l;
+
+		/* Otherwise, rewrite (x & y) & z to x & (y & z) */
 		return bitwiseand::get(ll->l, bitwiseand::get(ll->r, r));		
+	}
 	bitwiseand *work = new (allocator.alloc()) bitwiseand();
 	work->l = l;
 	work->r = r;
