@@ -32,11 +32,20 @@ private:
 	HistorySegment(Expression *_condition,
 		       ReplayTimestamp _when)
 		: condition(_condition),
-		  when(_when)
+		  when(_when),
+		  rips()
 	{
 	}
 	HistorySegment()
-		: condition(ConstExpression::get(1))
+		: condition(ConstExpression::get(1)),
+		  when(),
+		  rips()
+	{
+	}
+	HistorySegment(std::vector<unsigned long> &_rips)
+		: condition(ConstExpression::get(1)),
+		  when(),
+		  rips(_rips)
 	{
 	}
 protected:
@@ -61,6 +70,10 @@ public:
 	static HistorySegment *get()
 	{
 		return new (allocator.alloc()) HistorySegment();
+	}
+	static HistorySegment *get(std::vector<unsigned long> &rips)
+	{
+		return new (allocator.alloc()) HistorySegment(rips);
 	}
 	void destruct()
 	{
@@ -103,6 +116,10 @@ private:
 		: history(start, end)
 	{
 	}
+	History(std::vector<unsigned long> rips)
+	{
+		history.push_back(HistorySegment::get(rips));
+	}
 	History()
 	{
 		history.push_back(HistorySegment::get());
@@ -132,6 +149,10 @@ public:
 			    std::vector<HistorySegment *>::const_iterator end)
 	{
 		return new (allocator.alloc()) History(start, end);
+	}
+	static History *get(std::vector<unsigned long> &rips)
+	{
+		return new (allocator.alloc()) History(rips);
 	}
 	static History *get()
 	{
@@ -175,6 +196,15 @@ public:
 	{
 		return history.back()->when;
 	}
+	void extractSubModel(
+		ThreadId tid,
+		const MachineState<abstract_interpret_value> *ms,
+		LogReader<abstract_interpret_value> *lf,
+		LogReaderPtr ptr,
+		LogReader<abstract_interpret_value> **newModel,
+		LogReaderPtr *newPtr,
+		LogReader<abstract_interpret_value> **newModel2,
+		LogReaderPtr *newPtr2);
 };
 const VexAllocTypeWrapper<History> History::allocator;
 
@@ -187,12 +217,18 @@ public:
 	ThreadId tid;
 	History *history;
 	Expression *cond;
+	LogReader<abstract_interpret_value> *model_execution;
+	LogReaderPtr model_exec_start;
 private:
 	static VexAllocTypeWrapper<ExpressionRip> allocator;
-	ExpressionRip(ThreadId _tid, History *_history, Expression *_cond)
+	ExpressionRip(ThreadId _tid, History *_history, Expression *_cond,
+		      LogReader<abstract_interpret_value> *model,
+		      LogReaderPtr start)
 		: tid(_tid),
 		  history(_history),
-		  cond(_cond)
+		  cond(_cond),
+		  model_execution(model),
+		  model_exec_start(start)
 	{
 	}
 protected:
@@ -211,14 +247,18 @@ protected:
 			return false;
 	}
 public:
-	static Expression *get(ThreadId tid, History *history, Expression *cond)
+	static Expression *get(ThreadId tid, History *history, Expression *cond,
+			       LogReader<abstract_interpret_value> *model,
+			       LogReaderPtr start)
 	{
-		return new (allocator.alloc()) ExpressionRip(tid, history, cond);
+		return new (allocator.alloc()) ExpressionRip(tid, history, cond,
+							     model, start);
 	}
 	void visit(HeapVisitor &hv) const
 	{
 		hv(history);
 		hv(cond);
+		hv(model_execution);
 	}
 	ReplayTimestamp timestamp() const {
 		return max<ReplayTimestamp>(history->timestamp(),
@@ -356,10 +396,14 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
 		return ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
 					  equals::get(extr->thr->regs.rip().origin,
-						      ConstExpression::get(extr->thr->regs.rip().v)));
+						      ConstExpression::get(extr->thr->regs.rip().v)),
+					  script,
+					  ptr);
 	else
 		return ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
-					  ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin));
+					  ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin),
+					  script,
+					  ptr);
 }
 
 static Expression *refine(Expression *expr,
@@ -389,7 +433,9 @@ static Expression *refine(ExpressionRip *er,
 		return ExpressionRip::get(
 			er->tid,
 			er->history,
-			newSubCond);
+			newSubCond,
+			er->model_execution,
+			er->model_exec_start);
 	}
 
 	/* Okay, done as much as we can here.  Go back to previous
@@ -407,44 +453,27 @@ static Expression *refine(ExpressionRip *er,
 		er->history->history.end();
 	end--;
 
+	History *newHist = History::get(start, end);
+	LogReaderPtr newPtr;
+	LogReaderPtr newPtr2;
+	LogReader<abstract_interpret_value> *newModel;
+	LogReader<abstract_interpret_value> *newModel2;
+
+	newHist->extractSubModel(er->tid, ms, lf, ptr, &newModel, &newPtr,
+				 &newModel2, &newPtr2);
 	*progress = true;
 
 	return ExpressionRip::get(
 		er->tid,
-		History::get(start, end),
+		newHist,
 		logicaland::get((*end)->condition,
-				er->cond));
-}
-
-static Expression *refine(logicaland *er,
-			  const MachineState<abstract_interpret_value> *ms,
-			  LogReader<abstract_interpret_value> *lf,
-			  LogReaderPtr ptr,
-			  bool *progress)
-{
-	/* Prefer to refine the later argument first, if possible. */
-	if (er->l->timestamp() > er->r->timestamp()) {
-		bool lprogress = false;
-		Expression *refined_l = refine(er->l, ms, lf, ptr,
-					       &lprogress);
-		if (lprogress) {
-			*progress = true;
-			return logicaland::get(refined_l, er->r);
-		}
-	}
-
-	/* Either r is after l or l can't make progress.  Either way,
-	   we're going to be refining r now. */
-	bool rprogress = false;
-	Expression *refined_r = refine(er->r, ms, lf, ptr, &rprogress);
-	if (rprogress) {
-		*progress = true;
-		return logicaland::get(er->l, refined_r);
-	} else {
-		/* Completely failed to perform and kind of
-		   refinement.  Oh well. */
-		return er;
-	}
+				ExpressionRip::get(er->tid,
+						   History::get((*end)->rips),
+						   er->cond,
+						   newModel2,
+						   newPtr2)),
+		newModel,
+		newPtr);
 }
 
 Expression *refine(Expression *expr,
@@ -459,6 +488,86 @@ Expression *refine(Expression *expr,
 		printf("Cannot refine %s\n", expr->name());
 		return expr;
 	}
+}
+
+class HistoryLogTruncater : public LogWriter<abstract_interpret_value> {
+	History *hist;
+	std::vector<HistorySegment *>::iterator current_history_segment;
+	unsigned current_segment_index;
+	ThreadId desired_thread;
+	static const VexAllocTypeWrapper<HistoryLogTruncater> allocator;
+public:
+	static void *operator new(size_t s)
+	{
+		return (void *)LibVEX_Alloc_Sized(&allocator.type, s);
+	}
+	MemLog<abstract_interpret_value> *model1;
+	MemLog<abstract_interpret_value> *model2;
+	bool finishedFirstPhase;
+	void append(const LogRecord<abstract_interpret_value> &lr);
+	HistoryLogTruncater(ThreadId tid, History *_hist)
+		: hist(_hist),
+		  current_history_segment(hist->history.begin()),
+		  current_segment_index(0),
+		  desired_thread(tid),
+		  model1(MemLog<abstract_interpret_value>::emptyMemlog()),
+		  model2(MemLog<abstract_interpret_value>::emptyMemlog()),
+		  finishedFirstPhase(false)
+	{
+	}
+	void destruct() { this->~HistoryLogTruncater(); }
+	void visit(HeapVisitor &hv) const { hv(hist); hv(model1); hv(model2); }
+};
+const VexAllocTypeWrapper<HistoryLogTruncater> HistoryLogTruncater::allocator;
+
+void HistoryLogTruncater::append(const LogRecord<abstract_interpret_value> &lr)
+{
+	while (!finishedFirstPhase &&
+	       current_segment_index ==
+	       (*current_history_segment)->rips.size()) {
+		current_segment_index = 0;
+		current_history_segment++;
+		if (current_history_segment == hist->history.end())
+			finishedFirstPhase = true;
+	}
+
+	if (finishedFirstPhase) {
+		model2->append(lr);
+		return;
+	}
+
+	if (lr.thread() == desired_thread) {
+		const LogRecordFootstep<abstract_interpret_value> *lrf =
+			dynamic_cast<const LogRecordFootstep<abstract_interpret_value> *>(&lr);
+		if (lrf) {
+			assert(lrf->rip.v ==
+			       (*current_history_segment)->rips[current_segment_index]);
+			current_segment_index++;
+		}
+	}
+
+	return model1->append(lr);
+}
+void History::extractSubModel(
+	ThreadId tid,
+	const MachineState<abstract_interpret_value> *ms,
+	LogReader<abstract_interpret_value> *lf,
+	LogReaderPtr ptr,
+	LogReader<abstract_interpret_value> **newModel,
+	LogReaderPtr *newPtr,
+	LogReader<abstract_interpret_value> **newModel2,
+	LogReaderPtr *newPtr2)
+{
+	HistoryLogTruncater *work = new HistoryLogTruncater(tid, this);
+	VexGcRoot root((void **)&work, "extractSubModel");
+
+	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
+	i.replayLogfile(lf, ptr, NULL, work);
+
+	*newModel = work->model1;
+	*newPtr = work->model1->startPtr();
+	*newModel2 = work->model2;
+	*newPtr2 = work->model2->startPtr();
 }
 
 int

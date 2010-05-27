@@ -81,12 +81,15 @@ static void visit_memlog(const void *_ctxt, HeapVisitor &hv)
 }
 
 template <typename ait>
+void *MemLog<ait>::operator new(size_t s)
+{
+	return LibVEX_Alloc_Sized(&allocator.type, s);
+}
+
+template <typename ait>
 MemLog<ait> *MemLog<ait>::emptyMemlog()
 {
-	void *buf = (void *)allocator.alloc();
-	MemLog<ait> *work = new (buf) MemLog<ait>();
-	work->content = new std::vector<LogRecord<ait> *>();
-	return work;
+	return new MemLog<ait>();
 }
 
 template <typename ait>
@@ -103,6 +106,7 @@ MemLog<ait>::MemLog()
 {
 	parent = NULL;
 	offset = 0;
+	content = new std::vector<LogRecord<ait> *>();
 }
 
 
@@ -110,4 +114,5 @@ template <typename ait> VexAllocTypeWrapper<MemLog<ait>, visit_object<MemLog<ait
 
 #define MK_MEM_LOG(t)						\
 	template MemLog<t> *MemLog<t>::dupeSelf() const;	\
-	template VexAllocTypeWrapper<MemLog<t>, visit_object<MemLog<t> >, destroy_memlog<t> > MemLog<t>::allocator
+	template VexAllocTypeWrapper<MemLog<t>, visit_object<MemLog<t> >, destroy_memlog<t> > MemLog<t>::allocator; \
+	template MemLog<t>::MemLog()

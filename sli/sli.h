@@ -873,22 +873,23 @@ class MemLog : public LogReader<ait>, public LogWriter<ait> {
 
 	/* Special, need to use placement new.  Should only really be
 	   invoked from emptyMemlog(). */
+protected:
 	MemLog();
 
 public:
+	static void *operator new(size_t s);
 	static MemLog *emptyMemlog();
 	static LogReaderPtr startPtr() { return mkPtr(0); }
 	MemLog<ait> *dupeSelf() const;
 	LogRecord<ait> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
-	InterpretResult recordEvent(Thread<ait> *thr, MachineState<ait> *ms, ThreadEvent<ait> *evt);
 	void dump() const;
 
-	void append(const LogRecord<ait> &lr);
+	virtual void append(const LogRecord<ait> &lr);
 
 	/* Should only be called by GC destruct routine */
-	void destruct();
+	virtual void destruct();
 
-	void visit(HeapVisitor &hv) const;
+	virtual void visit(HeapVisitor &hv) const;
 };
 
 template <typename ait>
@@ -1740,7 +1741,7 @@ public:
 	virtual bool isConstant(unsigned long *cv) const { return false; }
 	virtual bool isLogical() const { return false; }
 	virtual ReplayTimestamp timestamp() const { return ReplayTimestamp(0); }
-	Expression() : Named(), next(NULL) {}
+	Expression() : Named(), next(NULL), pprev(&next) {}
 	bool isEqual(const Expression *other) const {
 		if (other == this)
 			return true;
