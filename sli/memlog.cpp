@@ -55,9 +55,6 @@ void MemLog<ait>::dump() const
 template <typename ait>
 void MemLog<ait>::destruct()
 {
-	unsigned x;
-	for (x = 0; x < content->size(); x++)
-		delete (*content)[x];
 	delete content;
 }
 
@@ -72,6 +69,8 @@ template <typename ait>
 void MemLog<ait>::visit(HeapVisitor &hv) const
 {
 	hv(parent);
+	for (unsigned x = 0; x < content->size(); x++)
+		hv((*content)[x]);
 }
 
 template <typename ait>
@@ -106,12 +105,6 @@ MemLog<ait>::MemLog()
 	offset = 0;
 }
 
-
-template <typename ait>
-void MemLog<ait>::forceVtable()
-{
-	abort();
-}
 
 template <typename ait> VexAllocTypeWrapper<MemLog<ait>, visit_object<MemLog<ait> >, destroy_memlog<ait> > MemLog<ait>::allocator;
 

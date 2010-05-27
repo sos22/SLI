@@ -43,9 +43,7 @@ AbstractLogReader<abstract_interpret_value,unsigned long>::read(LogReaderPtr sta
 	LogRecord<unsigned long> *inr = inp->read(startPtr, outPtr);
 	if (!inr)
 		return NULL;
-	LogRecord<abstract_interpret_value> *out = abstractLogRecord(inr);
-	delete inr;
-	return out;
+	return abstractLogRecord(inr);
 }
 
 template <typename ait> template <typename new_type>

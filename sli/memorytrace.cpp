@@ -15,7 +15,6 @@ MemoryTrace<ait>::MemoryTrace(const LogReader<ait> &lf, LogReaderPtr s)
 		        push_back(new MemoryAccessLoad<ait>(*lrm));
 		else if (LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr))
 		        push_back(new MemoryAccessStore<ait>(*lrs));
-		delete lr;
 	}
 }
 

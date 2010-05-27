@@ -22,7 +22,6 @@ process_memory_records(AddressSpace<ait> *addrSpace,
 		LogRecord<ait> *lr = lf->read(startOffset, &nextOffset);
 		if (!lr)
 			break;
-		PointerKeeper<LogRecord<ait> > pk(lr);
 		LogRecordMemory<ait> *lrm = dynamic_cast<LogRecordMemory<ait>*>(lr);
 		if (!lrm)
 			break;
@@ -276,7 +275,5 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 	if (lr)
 		*lr = llr;
 	replay_syscall<ait>(llr, this->thr, ms);
-	if (!lr)
-		delete llr;
 	return InterpretResultContinue;
 }

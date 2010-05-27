@@ -1343,7 +1343,6 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 
 		if (lw)
 			lw->append(*lr);
-		PointerKeeper<LogRecord<ait> > k_lr(lr);
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, when);
 

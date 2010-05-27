@@ -14,6 +14,7 @@ typedef struct sigaction sigaction_t;
 #include "ppres.h"
 
 const VexAllocTypeWrapper<LogFile> LogFile::allocator;
+template <typename ait> const VexAllocTypeWrapper<LogRecord<ait> > LogRecord<ait>::allocator;
 
 LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
 {
@@ -200,11 +201,6 @@ skip:
 	}
 }
 
-
-template <typename ait>
-LogRecord<ait>::~LogRecord()
-{
-}
 
 #define MK_LOGREADER(t)				\
 	template LogRecord<t>::~LogRecord()

@@ -615,17 +615,27 @@ public:
 
 template <typename ait>
 class LogRecord : public Named {
-	/* DNI */
-	LogRecord(const LogRecord<ait> &);
 	ThreadId tid;
+	static const VexAllocTypeWrapper<LogRecord> allocator;
 protected:
 	void *marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const;
 public:
+	static void *operator new(size_t s)
+	{
+		return (void *)LibVEX_Alloc_Sized(&allocator.type,
+						  s);
+	}
+	static void operator delete(void *ptr)
+	{
+		abort();
+	}
 	ThreadId thread() const { return tid; }
 	LogRecord(ThreadId _tid) : tid(_tid) {}
 	virtual void *marshal(unsigned *size) const = 0;
-	virtual ~LogRecord();
+	virtual ~LogRecord() {};
 	virtual LogRecord *dupe() const = 0;
+	virtual void destruct() {}
+	virtual void visit(HeapVisitor &hv) const {}
 };
 
 template <typename ait> class SignalHandlers;
@@ -864,10 +874,6 @@ class MemLog : public LogReader<ait>, public LogWriter<ait> {
 	/* Special, need to use placement new.  Should only really be
 	   invoked from emptyMemlog(). */
 	MemLog();
-
-	/* Should never be called, used to force construction of
-	 * vtable. */
-	virtual void forceVtable();
 
 public:
 	static MemLog *emptyMemlog();
@@ -1192,6 +1198,7 @@ public:
 						  outtype::import(ptr, ImportOriginLogfile::get()),
 						  nvalue);
 	}
+	void visit(HeapVisitor &hv) const { value.visit(hv); visit_aiv(ptr, hv); }
 };
 
 template <typename ait>
@@ -1250,6 +1257,7 @@ public:
 						   outtype::import(ptr, ImportOriginLogfile::get()),
 						   res);
 	}
+	void visit(HeapVisitor &hv) const { value.visit(hv); visit_aiv(ptr, hv); }
 };
 
 template <typename ait>
@@ -1302,7 +1310,6 @@ public:
 
 template <typename ait>
 class LogRecordFootstep : public LogRecord<ait> {
-	VexGcVisitor<LogRecordFootstep<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("footstep()");
@@ -1322,7 +1329,6 @@ public:
 			  ait _reg3,
 			  ait _reg4) :
 		LogRecord<ait>(_tid),
-		visitor(this, "LogRecordFootstep"),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -1359,7 +1365,6 @@ public:
 
 template <typename ait>
 class LogRecordSyscall : public LogRecord<ait> {
-	VexGcVisitor<LogRecordSyscall<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall()");
@@ -1373,7 +1378,6 @@ public:
 			 ait _arg2,
 			 ait _arg3) :
 		LogRecord<ait>(_tid),
-		visitor(this, "LogRecordSyscall"),
 		sysnr(_sysnr),
 		res(_res),
 		arg1(_arg1),
@@ -1407,7 +1411,6 @@ public:
 
 template <typename ait>
 class LogRecordMemory : public LogRecord<ait> {
-	VexGcVisitor<LogRecordMemory<ait> > visitor;
 protected:
 	char *mkName() const {
 		return my_asprintf("memory(%x)", size);
@@ -1421,7 +1424,6 @@ public:
 			ait _start,
 			const ait *_contents) :
 		LogRecord<ait>(_tid),
-		visitor(this, "LogRecordMemory"),
 		size(_size),
 		start(_start),
 		contents(_contents)
@@ -1451,7 +1453,6 @@ public:
 template <typename ait>
 class LogRecordRdtsc : public LogRecord<ait> {
 	friend class RdtscEvent<ait>;
-	VexGcVisitor<LogRecordRdtsc<ait> > visitor;
 	ait tsc;
 protected:
 	char *mkName() const {
@@ -1461,7 +1462,6 @@ public:
 	LogRecordRdtsc(ThreadId _tid,
 		       ait _tsc)
 		: LogRecord<ait>(_tid),
-		  visitor(this, "LogRecordRdtsc"),
 		  tsc(_tsc)
 	{
 	}
@@ -1480,7 +1480,6 @@ public:
 
 template <typename ait>
 class LogRecordSignal : public LogRecord<ait> {
-	VexGcVisitor<LogRecordSignal<ait> > visitor;
 public:
 	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d)", signr);
@@ -1496,7 +1495,6 @@ public:
 			ait _err,
 			ait _va) :
 		LogRecord<ait>(_tid),
-		visitor(this, "LogRecordSignal"),
 		rip(_rip),
 		signr(_signr),
 		err(_err),
@@ -1527,7 +1525,6 @@ public:
 template <typename ait>
 class LogRecordAllocateMemory : public LogRecord<ait> {
 	friend class AddressSpace<ait>;
-	VexGcVisitor<LogRecordAllocateMemory<ait> > visitor;
 	ait start;
 	ait size;
 	unsigned prot;
@@ -1544,7 +1541,6 @@ public:
 				unsigned _prot,
 				unsigned _flags) :
 		LogRecord<ait>(_tid),
-		visitor(this, "LogRecordAllocateMemory"),
 		start(_start),
 		size(_size),
 		prot(_prot),
@@ -1595,7 +1591,6 @@ public:
 
 template <typename ait>
 class LogRecordInitialBrk : public LogRecord<ait> {
-	VexGcVisitor<LogRecordInitialBrk<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("initbrk()");
@@ -1605,7 +1600,6 @@ public:
 	LogRecordInitialBrk(ThreadId tid,
 			    ait _brk) :
 		LogRecord<ait>(tid),
-		visitor(this, "LogRecordInitialBrk"),
 		brk(_brk)
 	{
 	}
@@ -1624,7 +1618,6 @@ public:
 
 template <typename ait>
 class LogRecordVexThreadState : public LogRecord<ait> {
-	VexGcVisitor<LogRecordVexThreadState<ait> > visitor;
 protected:
 	virtual char *mkName() const {
 		return strdup("vex state");

@@ -57,7 +57,6 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
         AddressSpace<ait> *as = AddressSpace<ait>::initialAddressSpace(lrib->brk);
-	delete lr;
 
 	lr = lf->read(ptr, &ptr);
         LogRecordInitialSighandlers<ait> *lris = dynamic_cast<LogRecordInitialSighandlers<ait>*>(lr);
@@ -67,7 +66,6 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 	VexGcRoot keeper((void **)&work, "initialMachineState");
 
 	while (1) {
-		delete lr;
 		LogReaderPtr nextPtr;
 		lr = lf->read(ptr, &nextPtr);
 		if (!lr)
@@ -87,8 +85,6 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 		ptr = nextPtr;
 	}
 
-	delete lr;
-	
 	*end = ptr;
 	return work;
 }
