@@ -13,7 +13,7 @@ main(int argc, char *argv[])
 	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	VexGcRoot((void **)&lf);
+	VexGcRoot k((void **)&lf, "lf");
 
 	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
 	MachineState<abstract_interpret_value> *abstract = concrete->abstract<abstract_interpret_value>();

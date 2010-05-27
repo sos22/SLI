@@ -335,7 +335,7 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 {
 	Interpreter<abstract_interpret_value> i(ms);
 	CrashReasonExtractor *extr = CrashReasonExtractor::get();
-	VexGcRoot((void **)&extr);
+	VexGcRoot root1((void **)&extr, "root1");
 
 	i.replayLogfile(script, ptr, NULL, NULL, extr);
 
@@ -472,17 +472,17 @@ main(int argc, char *argv[])
 	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	VexGcRoot((void **)&lf);
+	VexGcRoot logroot((void **)&lf, "logroot");
 
 	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
 	MachineState<abstract_interpret_value> *abstract = concrete->abstract<abstract_interpret_value>();
-	VexGcRoot keeper((void **)&abstract);
+	VexGcRoot keeper((void **)&abstract, "keeper");
 
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
 
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	printf("%s\n", cr->name());
-	VexGcRoot crkeeper((void **)&cr);
+	VexGcRoot crkeeper((void **)&cr, "crkeeper");
 
 	bool progress;
 

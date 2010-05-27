@@ -39,6 +39,7 @@ static alloc_header *const alloc_header_terminator = (alloc_header *)(temporary 
 #define NR_GC_ROOTS 128
 static unsigned nr_gc_roots;
 static void **gc_roots[NR_GC_ROOTS];
+static const char *gc_root_names[NR_GC_ROOTS];
 
 /* A pointer to an allocation somewhere in the heap which is likely to
    be a reasonable place to start looking when performing
@@ -330,10 +331,11 @@ void vexAllocSanityCheck ( void )
 }
 
 void
-vexRegisterGCRoot(void **w)
+vexRegisterGCRoot(void **w, const char *name)
 {
   vassert(nr_gc_roots < NR_GC_ROOTS);
   gc_roots[nr_gc_roots] = w;
+  gc_root_names[nr_gc_roots] = name;
   nr_gc_roots++;
 }
 
@@ -359,6 +361,7 @@ vexUnregisterGCRoot(void **w)
   for (x = 0; x < nr_gc_roots; x++) {
     if (gc_roots[x] == w) {
       my_memmove(gc_roots + x, gc_roots + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_roots[0]));
+      my_memmove(gc_root_names, gc_root_names + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_root_names[0]));
       nr_gc_roots--;
       return;
     }

@@ -49,7 +49,7 @@ main(int argc, char *argv[])
 	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	VexGcRoot((void **)&lf);
+	VexGcRoot k((void **)&lf, "lf");
 
 	MachineState<unsigned long> *m = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
 

@@ -1034,7 +1034,7 @@ public:
 				 ait _offset) :
 		aspace(_aspace),
 		offset(_offset),
-		visitor(this)
+		visitor(this, "AddressSpaceGuestFetcher")
 	{
 	}
 	void visit(HeapVisitor &hv) const { visit_aiv(offset, hv); hv(aspace); }

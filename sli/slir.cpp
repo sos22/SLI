@@ -72,7 +72,7 @@ bool Explorer::advance()
 		return false;
 
 	ExplorationState *basis = grayStates->pop_first();
-	VexGcRoot basis_keeper((void **)&basis);
+	VexGcRoot basis_keeper((void **)&basis, "basis_keeper");
 
 	/* Has the state already crashed? */
 	if (basis->ms->crashed()) {
@@ -152,7 +152,7 @@ bool Explorer::advance()
 		if (thr->cannot_make_progress)
 			continue;
 		ExplorationState *newGray = basis->dupeSelf();
-		VexGcRoot grayKeeper((void **)&newGray);
+		VexGcRoot grayKeeper((void **)&newGray, "newGray");
 		Interpreter<unsigned long> i(newGray->ms);
 		if (r.full) {
 			printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
@@ -239,10 +239,10 @@ main(int argc, char *argv[])
 	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	VexGcRoot((void **)&lf);
+	VexGcRoot((void **)&lf, "lf");
 
 	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
-	VexGcRoot((void **)&ms_base);
+	VexGcRoot((void **)&ms_base, "ms_base");
 
 	std::map<ThreadId, unsigned long> thresholds;
 	{
@@ -259,7 +259,7 @@ main(int argc, char *argv[])
 	}
 
 	Explorer *e = Explorer::init(&thresholds, ExplorationState::init(ms_base));
-	VexGcRoot e_base((void **)&e);
+	VexGcRoot e_base((void **)&e, "e_base");
 
 	while (e->advance())
 		;

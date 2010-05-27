@@ -481,7 +481,7 @@ gdb_machine_state(const MachineState<unsigned long> *base_ms)
 {
 	MachineState<unsigned long> *ms = base_ms->dupeSelf();
 
-	VexGcRoot ms_keeper((void **)&ms);
+	VexGcRoot ms_keeper((void **)&ms, "gdb_machine_state");
 
 	GdbChannel *chan = GdbChannel::accept();
 

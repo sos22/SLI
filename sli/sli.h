@@ -809,7 +809,7 @@ class Interpreter {
 public:
 	Interpreter(MachineState<abst_int_type> *rootMachine) :
 		currentState(rootMachine),
-		currentStateRoot((void **)&currentState)
+		currentStateRoot((void **)&currentState, "currentStateRoot")
 	{
 	}
 	void replayLogfile(const LogReader<abst_int_type> *lf, LogReaderPtr startingPoint,
@@ -1322,7 +1322,7 @@ public:
 			  ait _reg3,
 			  ait _reg4) :
 		LogRecord<ait>(_tid),
-		visitor(this),
+		visitor(this, "LogRecordFootstep"),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -1373,7 +1373,7 @@ public:
 			 ait _arg2,
 			 ait _arg3) :
 		LogRecord<ait>(_tid),
-		visitor(this),
+		visitor(this, "LogRecordSyscall"),
 		sysnr(_sysnr),
 		res(_res),
 		arg1(_arg1),
@@ -1421,7 +1421,7 @@ public:
 			ait _start,
 			const ait *_contents) :
 		LogRecord<ait>(_tid),
-		visitor(this),
+		visitor(this, "LogRecordMemory"),
 		size(_size),
 		start(_start),
 		contents(_contents)
@@ -1461,7 +1461,7 @@ public:
 	LogRecordRdtsc(ThreadId _tid,
 		       ait _tsc)
 		: LogRecord<ait>(_tid),
-		  visitor(this),
+		  visitor(this, "LogRecordRdtsc"),
 		  tsc(_tsc)
 	{
 	}
@@ -1496,7 +1496,7 @@ public:
 			ait _err,
 			ait _va) :
 		LogRecord<ait>(_tid),
-		visitor(this),
+		visitor(this, "LogRecordSignal"),
 		rip(_rip),
 		signr(_signr),
 		err(_err),
@@ -1544,7 +1544,7 @@ public:
 				unsigned _prot,
 				unsigned _flags) :
 		LogRecord<ait>(_tid),
-		visitor(this),
+		visitor(this, "LogRecordAllocateMemory"),
 		start(_start),
 		size(_size),
 		prot(_prot),
@@ -1605,7 +1605,7 @@ public:
 	LogRecordInitialBrk(ThreadId tid,
 			    ait _brk) :
 		LogRecord<ait>(tid),
-		visitor(this),
+		visitor(this, "LogRecordInitialBrk"),
 		brk(_brk)
 	{
 	}

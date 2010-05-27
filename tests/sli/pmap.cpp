@@ -60,7 +60,7 @@ main()
 	assert(mc3 == mc2);
 	
 	printf("GC behaviour.  There are no external references, so a GC cycle should cause the pmap to empty itself.\n");
-	vexRegisterGCRoot((void **)&pmap1);
+	vexRegisterGCRoot((void **)&pmap1, "testpmap");
 	LibVEX_gc();
 
 	mc1 = pmap1->lookup(pa1, &off1);
@@ -79,7 +79,7 @@ main()
 	k->pa2 = pa2;
 	k->pmap = pmap1;
 
-	vexRegisterGCRoot((void **)&k);
+	vexRegisterGCRoot((void **)&k, "testpmap2");
 	LibVEX_gc();
 
 	mc3 = pmap1->lookup(pa1, &off1);

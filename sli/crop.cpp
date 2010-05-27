@@ -21,7 +21,7 @@ main(int argc, char *argv[])
 	LogReaderPtr ptr;
 
 	lf = LogFile::open(inp, &ptr);
-	VexGcRoot((void **)&lf);
+	VexGcRoot lf_root((void **)&lf, "lf");
 	if (!lf)
 		err(1, "opening %s", inp);
 
@@ -29,7 +29,7 @@ main(int argc, char *argv[])
 
 	reduced_lf = lf->truncate(lf->mkPtr(size, 0));
 	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr);
-	VexGcRoot ms_root((void **)&ms);
+	VexGcRoot ms_root((void **)&ms, "ms_root");
 
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(reduced_lf, ptr, &ptr);

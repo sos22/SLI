@@ -58,7 +58,7 @@ extern void *__LibVEX_Alloc_Bytes(Int nbytes);
 extern void *LibVEX_Alloc_Sized(const VexAllocType *t, unsigned size);
 extern void *LibVEX_realloc(void *base, unsigned new_size);
 
-void vexRegisterGCRoot(void **);
+void vexRegisterGCRoot(void **, const char *name);
 void vexUnregisterGCRoot(void **);
 void vexInitHeap(void);
 void LibVEX_gc(void);
@@ -66,10 +66,10 @@ void LibVEX_gc(void);
 class VexGcRoot {
 	void **root;
 public:
-	VexGcRoot(void **x) :
+	VexGcRoot(void **x, const char *name) :
 		root(x)
 	{
-		vexRegisterGCRoot(x);
+		vexRegisterGCRoot(x, name);
 	}
 	~VexGcRoot()
 	{
@@ -83,7 +83,7 @@ class VexGcVisitor {
 	VexGcRoot root;
 	static VexAllocType type;
 public:
-	VexGcVisitor(t *x) : root((void **)&owner)
+	VexGcVisitor(t *x, const char *name) : root((void **)&owner, name)
 	{
 		owner = (t **)__LibVEX_Alloc(&type);
 		*owner = x;

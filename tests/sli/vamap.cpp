@@ -131,7 +131,7 @@ main()
 	VAPMap *vap = VAPMap::allocator.alloc();
 	vap->vamap = vamap;
 	vap->pmap = pmap;
-	VexGcRoot vgc((void **)&vap);
+	VexGcRoot vgc((void **)&vap, "test vamap");
 	
 	LibVEX_gc();
 

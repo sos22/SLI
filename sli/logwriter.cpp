@@ -234,7 +234,7 @@ template <typename ait>
 LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
 						      expression_result_array<ait> _tmp)
 	: LogRecord<ait>(tid),
-	  visitor(this),
+	  visitor(this, "LogRecordVexThreadState"),
 	  tmp(_tmp),
 	  statement_nr(_statement_nr)
 {
