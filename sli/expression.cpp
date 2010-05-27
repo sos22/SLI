@@ -77,8 +77,9 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 #define mk_op_allocator(op)						\
 	VexAllocTypeWrapper<op, visit_object<op>, destruct_object<op> > op::allocator
 
-#define mk_binop(nme, op, associates)					\
+#define mk_binop(nme, op, associates, logical)				\
 	mk_op_allocator(nme);						\
+	bool nme::isLogical() const { return logical; }			\
 	Expression *nme::get(Expression *l, Expression *r)		\
 	{								\
 	        unsigned long lc, rc;				        \
@@ -96,6 +97,7 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 
 #define mk_unop(nme, op)						\
 	mk_op_allocator(nme);						\
+        bool nme::isLogical() const { return false; }			\
 	Expression *nme::get(Expression *l)				\
 	{								\
 	        unsigned long lc;				        \
@@ -111,26 +113,62 @@ Expression *subtract::get(Expression *l, Expression *r)
 	return plus::get(l, unaryminus::get(r));
 }
 
-mk_binop(times, *, false);
-mk_binop(divide, /, false);
-mk_binop(modulo, %, false);
-mk_binop(greaterthanequals, >=, false);
-mk_binop(greaterthan, >, false);
-mk_binop(lessthanequals, <=, false);
-mk_binop(lessthan, <, false);
-mk_binop(equals, ==, false);
-mk_binop(notequals, !=, false);
-mk_binop(logicalor, ||, true);
-mk_binop(logicaland, &&, true);
+mk_binop(times, *, false, false);
+mk_binop(divide, /, false, false);
+mk_binop(modulo, %, false, false);
+mk_binop(greaterthanequals, >=, false, true);
+mk_binop(greaterthan, >, false, true);
+mk_binop(lessthanequals, <=, false, true);
+mk_binop(lessthan, <, false, true);
+mk_binop(equals, ==, false, true);
+mk_binop(notequals, !=, false, true);
 
-mk_unop(logicalnot, !);
 mk_unop(bitwisenot, ~);
 mk_unop(unaryminus, -);
 
+Expression *logicalor::get(Expression *l, Expression *r)
+{
+	return bitsaturate::get(bitwiseor::get(l, r));
+}
+
+Expression *logicaland::get(Expression *l, Expression *r)
+{
+	return bitsaturate::get(bitwiseand::get(l, r));
+}
+
+Expression *logicalnot::get(Expression *l)
+{
+	return bitsaturate::get(bitwisenot::get(l));
+}
+
+mk_op_allocator(bitsaturate);
+bool bitsaturate::isLogical() const { return true; }
+Expression *bitsaturate::get(Expression *arg)
+{
+	unsigned long c;
+	if (arg->isConstant(&c)) {
+		if (c == 0 || c == 1)
+			return arg;
+		else
+			return ConstExpression::get(1);
+	}
+	if (arg->isLogical())
+		return arg;
+	bitsaturate *work = new (allocator.alloc()) bitsaturate;
+	work->l = arg;
+	return work;
+}
+
 mk_op_allocator(ternarycondition);
+bool ternarycondition::isLogical() const
+{
+	return t->isLogical() && f->isLogical();
+}
 Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f)
 {
 	unsigned long cv;
+	if (t == f)
+		return t;
 	if (cond->isConstant(&cv)) {
 		if (cv)
 			return t;
@@ -145,6 +183,7 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 }
 
 mk_op_allocator(plus);							
+bool plus::isLogical() const { return false; }
 Expression *plus::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;						
@@ -206,6 +245,7 @@ sane_lshift(unsigned long r, long cntr)
 }
 
 mk_op_allocator(lshift);
+bool lshift::isLogical() const { return false; }
 Expression *lshift::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;	
@@ -247,6 +287,7 @@ Expression *lshift::get(Expression *l, Expression *r)
 }
 
 mk_op_allocator(rshift);
+bool rshift::isLogical() const { return false; }
 Expression *rshift::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;	
@@ -267,6 +308,7 @@ Expression *rshift::get(Expression *l, Expression *r)
 }
 
 mk_op_allocator(bitwiseor);
+bool bitwiseor::isLogical() const { return l->isLogical() && r->isLogical(); }
 Expression *bitwiseor::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;						
@@ -299,6 +341,7 @@ Expression *bitwiseor::get(Expression *l, Expression *r)
 }
 
 mk_op_allocator(bitwisexor);
+bool bitwisexor::isLogical() const { return l->isLogical() && r->isLogical(); }
 Expression *bitwisexor::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;						
@@ -321,6 +364,7 @@ Expression *bitwisexor::get(Expression *l, Expression *r)
 }
 
 mk_op_allocator(bitwiseand);
+bool bitwiseand::isLogical() const { return l->isLogical() && r->isLogical(); }
 Expression *bitwiseand::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;						

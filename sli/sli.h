@@ -1704,6 +1704,7 @@ protected:
 public:
 	unsigned hash() const { return hashval; }
 	virtual bool isConstant(unsigned long *cv) const { return false; }
+	virtual bool isLogical() const { return false; }
 	virtual ReplayTimestamp timestamp() const { return ReplayTimestamp(0); }
 	Expression() : Named(), next(NULL) {}
 	bool isEqual(const Expression *other) const {
@@ -1744,6 +1745,7 @@ protected:
 			return false;
 	}
 public:
+	bool isLogical() const { return v == 0 || v == 1; }
 	static Expression *get(unsigned long v)
 	{
 		ConstExpression *work = new (allocator.alloc()) ConstExpression();
@@ -1834,6 +1836,7 @@ public:
 				return false;				\
 		}							\
 	public:								\
+	        bool isLogical() const;					\
 	        static Expression *get(Expression *_l, Expression *_r);	\
 		void visit(HeapVisitor &hv) const			\
 		{							\
@@ -1888,6 +1891,7 @@ mk_binop_class(logicaland);
 				return false;				\
 		}							\
 	public:								\
+	        bool isLogical() const;					\
 	        static Expression* get(Expression *_l);			\
 		void visit(HeapVisitor &hv) const			\
 		{							\
@@ -1902,6 +1906,10 @@ mk_binop_class(logicaland);
 mk_unop_class(logicalnot);
 mk_unop_class(bitwisenot);
 mk_unop_class(unaryminus);
+
+/* bitsaturate is 0 whenever its argument is zero and one
+   otherwise. */
+mk_unop_class(bitsaturate);
 
 class ternarycondition : public Expression {
 	Expression *cond, *t, *f;
@@ -1928,6 +1936,7 @@ protected:
 			return false;				
 	}							
 public:
+	bool isLogical() const;						\
 	static Expression *get(Expression *_cond, Expression *_t, Expression *_f);
 	void visit(HeapVisitor &hv) const
 	{

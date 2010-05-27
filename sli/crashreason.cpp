@@ -433,8 +433,6 @@ Expression *refine(Expression *expr,
 {
 	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr))
 		return refine(er, ms, lf, ptr, progress);
-	else if (logicaland *la = dynamic_cast<logicaland *>(expr))
-		return refine(la, ms, lf, ptr, progress);
 	else {
 		printf("Cannot refine %s\n", expr->name());
 		return expr;
