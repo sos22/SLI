@@ -193,12 +193,62 @@ public:
 	static ImportOrigin *get();
 };
 
-class ImportOriginInitialMemory : public ImportOriginInitialValue {
-	static ImportOriginInitialMemory *w;
-protected:
-	char *mkName() const { return vex_asprintf("initial_memory"); }
+class PhysicalAddress {
 public:
-	static ImportOrigin *get();
+	unsigned long _pa;
+	PhysicalAddress() : _pa(0) {}
+	bool operator<(PhysicalAddress b) const { return _pa < b._pa; }
+	bool operator>=(PhysicalAddress b) const { return _pa >= b._pa; }
+	bool operator!=(PhysicalAddress b) const { return _pa != b._pa; }
+	bool operator==(PhysicalAddress b) const { return _pa == b._pa; }
+	PhysicalAddress operator+(unsigned long x) const
+	{
+		PhysicalAddress r;
+		r._pa = _pa + x;
+		return r;
+	}
+	PhysicalAddress operator-(unsigned long x) const
+	{
+		PhysicalAddress r;
+		r._pa = _pa - x;
+		return r;
+	}
+	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
+};
+
+class ImportOriginInitialMemory : public ImportOriginInitialValue {
+	static const unsigned nr_heads = 1024;
+	static ImportOriginInitialMemory *heads[nr_heads];
+	ImportOriginInitialMemory *next, **pprev;
+	unsigned size;
+	PhysicalAddress pa;
+	void remove_from_chain()
+	{
+		if (next) next->pprev = pprev;
+		*pprev = next;
+		next = NULL;
+		pprev = &next;
+	}
+	void insert_in_chain()
+	{
+		unsigned h = (size ^ pa._pa / 16) % nr_heads;
+		next = heads[h];
+		pprev = &heads[h];
+		if (next)
+			next->pprev = &next;
+		*pprev = this;
+	}
+	ImportOriginInitialMemory(unsigned _size, PhysicalAddress _pa)
+		: size(_size), pa(_pa)
+	{
+		insert_in_chain();
+	}
+protected:
+	char *mkName() const { return vex_asprintf("initial_memory%d@%lx", size, pa._pa); }
+public:
+	static ImportOrigin *get(unsigned size, PhysicalAddress pa);
+	~ImportOriginInitialMemory() { remove_from_chain(); }
+	void destruct() { this->~ImportOriginInitialMemory(); }	
 };
 
 class ImportOriginInitialRegister : public ImportOriginInitialValue {
@@ -370,29 +420,6 @@ public:
 	void destruct() { temporaries.~expression_result_array<abst_int_type>(); }
 };
 
-class PhysicalAddress {
-public:
-	unsigned long _pa;
-	PhysicalAddress() : _pa(0) {}
-	bool operator<(PhysicalAddress b) const { return _pa < b._pa; }
-	bool operator>=(PhysicalAddress b) const { return _pa >= b._pa; }
-	bool operator!=(PhysicalAddress b) const { return _pa != b._pa; }
-	bool operator==(PhysicalAddress b) const { return _pa == b._pa; }
-	PhysicalAddress operator+(unsigned long x) const
-	{
-		PhysicalAddress r;
-		r._pa = _pa + x;
-		return r;
-	}
-	PhysicalAddress operator-(unsigned long x) const
-	{
-		PhysicalAddress r;
-		r._pa = _pa - x;
-		return r;
-	}
-	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
-};
-
 template <typename ait> class PMap;
 
 class VAMap {
@@ -505,6 +532,7 @@ public:
 	MemoryChunk<unsigned long> *dupeSelf() const;
 	template <typename nt> MemoryChunk<nt> *abstract() const;
 
+	PhysicalAddress base;
 private:
 	unsigned char content[size];
 };
@@ -2116,6 +2144,7 @@ public:
 		abstract_interpret_value content[0];
 	};
 	MCLookasideEntry *headLookaside;
+	PhysicalAddress base;
 
 	static const VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > allocator;
 	static const VexAllocType mcl_allocator;

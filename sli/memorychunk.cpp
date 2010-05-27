@@ -37,6 +37,7 @@ MemoryChunk<abstract_interpret_value> *MemoryChunk<unsigned long>::abstract() co
 		MemoryChunk<abstract_interpret_value>::allocator.alloc();
 	work->headLookaside = NULL;
 	work->underlying = this;
+	work->base = base;
 	return work;
 }
 
@@ -73,7 +74,7 @@ void MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 			unsigned long b;
 			underlying->read(offset + x, &b, 1);
 			dest[x] = import_ait<unsigned long, abstract_interpret_value>(b,
-										      ImportOriginInitialMemory::get());
+										      ImportOriginInitialMemory::get(1, base + offset + x));
 		}
 	}
 }

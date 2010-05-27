@@ -122,6 +122,7 @@ template <typename ait>
 PhysicalAddress PMap<ait>::introduce(MemoryChunk<ait> *mc)
 {
 	PhysicalAddress pa = nextPa;
+	mc->base = pa;
 	nextPa = nextPa + MemoryChunk<ait>::size;
 	PMapEntry<ait> *pme = PMapEntry<ait>::alloc(pa, mc, false);
 	unsigned h = paHash(pa);

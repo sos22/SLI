@@ -429,12 +429,21 @@ ImportOrigin *ImportOriginInitialTemporary::get(unsigned x)
 	return new ImportOriginInitialTemporary(x);
 }
 
-ImportOriginInitialMemory *ImportOriginInitialMemory::w;
-ImportOrigin *ImportOriginInitialMemory::get()
+ImportOriginInitialMemory *ImportOriginInitialMemory::heads[ImportOriginInitialMemory::nr_heads];
+ImportOrigin *ImportOriginInitialMemory::get(unsigned size, PhysicalAddress pa)
 {
-	if (!w)
-		w = new ImportOriginInitialMemory();
-	return w;
+	unsigned h = (size ^ pa._pa / 16) % nr_heads;
+	ImportOriginInitialMemory *mh;
+	for (mh = heads[h]; mh; mh = mh->next)
+		if (mh->size == size && mh->pa == pa)
+			break;
+	if (mh) {
+		/* Pull-to-front */
+		mh->remove_from_chain();
+		mh->insert_in_chain();
+		return mh;
+	}
+	return new ImportOriginInitialMemory(size, pa);
 }
 
 ImportOriginInitialValue *ImportOriginInitialValue::w;
