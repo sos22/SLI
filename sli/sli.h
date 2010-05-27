@@ -146,6 +146,14 @@ template <typename t> t min(const t &a, const t &b)
 		return b;
 }
 
+template <typename t> t max(const t &a, const t &b)
+{
+	if (a > b)
+		return a;
+	else
+		return b;
+}
+
 class ImportOrigin {
 	static VexAllocType allocator;
 	mutable char *_name;
@@ -1873,7 +1881,7 @@ public:
 		}							\
                 ReplayTimestamp timestamp() const			\
 		{							\
-		        return min<ReplayTimestamp>(l->timestamp(),	\
+		        return max<ReplayTimestamp>(l->timestamp(),	\
 						    r->timestamp());	\
 		}							\
 	}

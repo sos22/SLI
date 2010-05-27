@@ -186,38 +186,44 @@ class ExpressionRip : public Expression {
 public:
 	ThreadId tid;
 	History *history;
+	Expression *cond;
 private:
 	static VexAllocTypeWrapper<ExpressionRip> allocator;
-	ExpressionRip(ThreadId _tid, History *_history)
+	ExpressionRip(ThreadId _tid, History *_history, Expression *_cond)
 		: tid(_tid),
-		  history(_history)
+		  history(_history),
+		  cond(_cond)
 	{
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(rip %d:%s)", tid._tid(), history->name());
+		return my_asprintf("(rip %d:{...}:%s)", tid._tid(), cond->name());
 	}
 	unsigned _hash() const {
-		return history->history.size() ^ tid._tid();
+		return history->history.size() ^ tid._tid() ^ cond->hash();
 	}
 	bool _isEqual(const Expression *other) const {
 		const ExpressionRip *oth = dynamic_cast<const ExpressionRip *>(other);
-		if (oth && oth->history->isEqual(history) &&
-		    oth->tid == tid)
+		if (oth && oth->tid == tid && cond->isEqual(oth->cond) &&
+		    oth->history->isEqual(history))
 			return true;
 		else
 			return false;
 	}
 public:
-	static Expression *get(ThreadId tid, History *history)
+	static Expression *get(ThreadId tid, History *history, Expression *cond)
 	{
-		return new (allocator.alloc()) ExpressionRip(tid, history);
+		return new (allocator.alloc()) ExpressionRip(tid, history, cond);
 	}
 	void visit(HeapVisitor &hv) const
 	{
 		hv(history);
+		hv(cond);
 	}
-	ReplayTimestamp timestamp() const { return history->timestamp(); }
+	ReplayTimestamp timestamp() const {
+		return max<ReplayTimestamp>(history->timestamp(),
+					    cond->timestamp());
+	}
 };
 
 VexAllocTypeWrapper<ExpressionRip> ExpressionRip::allocator;
@@ -348,10 +354,12 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	assert(extr->signal);
 	assert(extr->thr->crashed);
 	if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
-		return ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid]);
+		return ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
+					  equals::get(extr->thr->regs.rip().origin,
+						      ConstExpression::get(extr->thr->regs.rip().v)));
 	else
-		return logicaland::get(ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid]),
-				       ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin));
+		return ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
+					  ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin));
 }
 
 static Expression *refine(Expression *expr,
@@ -370,6 +378,23 @@ static Expression *refine(ExpressionRip *er,
 {
 	printf("Refine %s\n", er->name());
 
+	/* Try to refine the subcondition first, since that's usually
+	 * cheaper. */
+	Expression *newSubCond;
+	bool subCondProgress = false;
+	newSubCond = refine(er->cond, ms, lf, ptr, &subCondProgress);
+	if (subCondProgress) {
+		/* Yay. */
+		*progress = true;
+		return ExpressionRip::get(
+			er->tid,
+			er->history,
+			newSubCond);
+	}
+
+	/* Okay, done as much as we can here.  Go back to previous
+	   conditional branch. */
+
 	if (er->history->history.size() == 1) {
 		/* Okay, there were no previous conditional branches.
 		   We're doomed. */
@@ -382,16 +407,13 @@ static Expression *refine(ExpressionRip *er,
 		er->history->history.end();
 	end--;
 
-	/* Extract the desired condition. */
-	Expression *condition = (*end)->condition;
-
-	/* Build the new RIP expression */
-	History *newHistory = History::get(start, end);
-	Expression *newRip = ExpressionRip::get(er->tid, newHistory);
-
 	*progress = true;
 
-	return logicaland::get(newRip, condition);
+	return ExpressionRip::get(
+		er->tid,
+		History::get(start, end),
+		logicaland::get((*end)->condition,
+				er->cond));
 }
 
 static Expression *refine(logicaland *er,
@@ -459,7 +481,6 @@ main(int argc, char *argv[])
 
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	printf("%s\n", cr->name());
-#if 0
 	VexGcRoot crkeeper((void **)&cr);
 
 	bool progress;
@@ -470,6 +491,6 @@ main(int argc, char *argv[])
 		cr = refine(cr, abstract, al, ptr, &progress);
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
-#endif
+
 	return 0;
 }
