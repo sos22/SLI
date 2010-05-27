@@ -13,6 +13,8 @@ typedef struct sigaction sigaction_t;
 
 #include "ppres.h"
 
+const VexAllocTypeWrapper<LogFile> LogFile::allocator;
+
 LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
 {
 	int fd;
@@ -20,7 +22,7 @@ LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
 	if (fd < 0)
 		return NULL;
 
-	LogFile *work = new LogFile();
+	LogFile *work = new (allocator.alloc()) LogFile();
 	work->fd = fd;
 	*initial_ptr = work->mkPtr(0, 0);
 	return work;
@@ -29,7 +31,7 @@ LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
 LogFile *LogFile::truncate(LogReaderPtr eof)
 {
 	LogFile *work;
-	work = new LogFile();
+	work = new (allocator.alloc()) LogFile();
 	work->forcedEof = unwrapPtr(eof);
 	work->fd = fd;
 	return work;

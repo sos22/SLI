@@ -698,6 +698,9 @@ class LogFile : public LogReader<unsigned long> {
 		return *(_ptr *)p.cls_data;
 	}
 	_ptr forcedEof;
+	static const VexAllocTypeWrapper<LogFile> allocator;
+
+	LogFile() {}
 public:
 	LogReaderPtr mkPtr(uint64_t off, unsigned record_nr) const {
 		LogReaderPtr w;
@@ -711,6 +714,8 @@ public:
 	~LogFile();
 	static LogFile *open(const char *path, LogReaderPtr *initial_ptr);
 	LogFile *truncate(LogReaderPtr eof);
+	void visit(HeapVisitor &hv) const {}
+	void destruct() { this->~LogFile(); }
 };
 
 template <typename abst_int_type>

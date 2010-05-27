@@ -239,6 +239,7 @@ main(int argc, char *argv[])
 	lf = LogFile::open(argv[1], &ptr);
 	if (!lf)
 		err(1, "opening %s", argv[1]);
+	VexGcRoot((void **)&lf);
 
 	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
 	VexGcRoot((void **)&ms_base);

@@ -21,6 +21,7 @@ main(int argc, char *argv[])
 	LogReaderPtr ptr;
 
 	lf = LogFile::open(inp, &ptr);
+	VexGcRoot((void **)&lf);
 	if (!lf)
 		err(1, "opening %s", inp);
 
