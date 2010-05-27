@@ -372,6 +372,8 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 	if (lIsConstant) {
 		if (lc == 0)
 			return l;
+		if (lc == 1 && r->isLogical())
+			return r;
 		if (lc == 0xfffffffffffffffful)
 			return r;
 		if (rIsConstant)
@@ -379,6 +381,8 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 	} else if (rIsConstant) {
 		if (rc == 0)
 			return r;
+		if (rc == 1 && l->isLogical())
+			return l;
 		if (rc == 0xfffffffffffffffful)
 			return l;
 	}
