@@ -418,7 +418,7 @@ public:
 	Thread<abst_int_type> *dupeSelf() const;
 	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;
 
-	void imposeState(const LogRecordVexThreadState<abst_int_type> &rec,
+	void imposeState(const LogRecordVexThreadState<abst_int_type> *rec,
 			 AddressSpace<abst_int_type> *as);
 
 	void visit(HeapVisitor &hv) const;

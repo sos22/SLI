@@ -57,7 +57,7 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 }
 
 template<typename ait>
-void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> &rec,
+void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> *rec,
 			      AddressSpace<ait> *as)
 {
 	translateNextBlock(as);
@@ -66,10 +66,10 @@ void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> &rec,
 	/* == is valid here, and just means we're right at the end of
 	   the block and will re-translate as soon as we try to
 	   resume. */
-	assert(rec.statement_nr <= (unsigned)currentIRSB->stmts_used);
-	currentIRSBOffset = rec.statement_nr;
+	assert(rec->statement_nr <= (unsigned)currentIRSB->stmts_used);
+	currentIRSBOffset = rec->statement_nr;
 
-	temporaries = rec.tmp;
+	temporaries = rec->tmp;
 }
 
 template <typename ait>

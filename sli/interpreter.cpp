@@ -1338,6 +1338,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 {
 	while (1) {
 		LogRecord<ait> *lr = lf->read(ptr, &ptr);
+		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
 		if (!lr)
 			break;
 

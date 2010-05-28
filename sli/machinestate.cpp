@@ -51,8 +51,9 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 {
 	MachineState<ait> *work;
 	LogRecord<ait> *lr;
-
+	
 	lr = lf->read(ptr, &ptr);
+	VexGcRoot lrkeeper((void **)&lr, "lrkeeper");
 	LogRecordInitialBrk<ait> *lrib = dynamic_cast<LogRecordInitialBrk<ait>*>(lr);
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
@@ -78,7 +79,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 			work->registerThread(Thread<ait>::initialThread(*lrir));
 	        } else if (LogRecordVexThreadState<ait> *lrvts = dynamic_cast<LogRecordVexThreadState<ait>*>(lr)) {
 			Thread<ait> *t = work->findThread(lrvts->thread());
-			t->imposeState(*lrvts, as);
+			t->imposeState(lrvts, as);
 		} else {
 			break;
 		}
