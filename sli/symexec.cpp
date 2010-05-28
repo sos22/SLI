@@ -21,7 +21,7 @@ main(int argc, char *argv[])
 	Interpreter<abstract_interpret_value> i(abstract);
 
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
-
+	VexGcRoot al_keeper((void **)&al, "al");
 	i.replayLogfile(al, ptr);
 
 	printf("Replayed symbolically.\n");

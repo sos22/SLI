@@ -588,6 +588,7 @@ main(int argc, char *argv[])
 	VexGcRoot keeper((void **)&abstract, "keeper");
 
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
+	VexGcRoot al_keeper((void **)&al, "al_keeper");
 
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	printf("%s\n", cr->name());

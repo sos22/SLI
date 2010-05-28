@@ -3,10 +3,18 @@
 template <typename outtype, typename intype>
 class AbstractLogReader : public LogReader<outtype> {
 	const LogReader<intype> *inp;
+	static const VexAllocTypeWrapper<AbstractLogReader> allocator;
 public:
+	static void *operator new(size_t s) { return LibVEX_Alloc_Sized(&allocator.type, s); }
 	LogRecord<outtype> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
-	AbstractLogReader(const LogReader<intype> *_inp) : inp(_inp) {}
+	AbstractLogReader(const LogReader<intype> *_inp) :
+		LogReader<outtype>(),
+		inp(_inp) {}
+	void visit(HeapVisitor &hv) const {}
+	void destruct() {}
 };
+
+template <typename outtype, typename intype> const VexAllocTypeWrapper<AbstractLogReader<outtype, intype> > AbstractLogReader<outtype,intype>::allocator;
 
 /* Templates turn out to be much more limited than you would expect,
    so have to unroll this by hand (in particular, you can't call a
