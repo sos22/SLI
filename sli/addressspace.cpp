@@ -71,7 +71,7 @@ void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
 }
 
 template <typename ait>
-expression_result<ait> AddressSpace<ait>::load(ReplayTimestamp when,
+expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 					       ait start, unsigned size,
 					       bool ignore_protection,
 					       const Thread<ait> *thr)

@@ -253,7 +253,8 @@ template <typename ait>
 InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	ait res;
-	ait sysnr = this->thr->regs.get_reg(REGISTER_IDX(RAX));
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 
 	switch (force(sysnr)) {
 	case __NR_futex:
@@ -265,15 +266,15 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 			*lr = NULL;
 		return InterpretResultIncomplete;
 	}
-	LogRecordSyscall<ait> *llr = new LogRecordSyscall<ait>(this->thr->tid,
+	LogRecordSyscall<ait> *llr = new LogRecordSyscall<ait>(thr->tid,
 							       sysnr,
 							       res,
-							       this->thr->regs.get_reg(REGISTER_IDX(RDI)),
-							       this->thr->regs.get_reg(REGISTER_IDX(RSI)),
-							       this->thr->regs.get_reg(REGISTER_IDX(RDX)));
+							       thr->regs.get_reg(REGISTER_IDX(RDI)),
+							       thr->regs.get_reg(REGISTER_IDX(RSI)),
+							       thr->regs.get_reg(REGISTER_IDX(RDX)));
 
 	if (lr)
 		*lr = llr;
-	replay_syscall<ait>(llr, this->thr, ms);
+	replay_syscall<ait>(llr, thr, ms);
 	return InterpretResultContinue;
 }

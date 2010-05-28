@@ -9,7 +9,7 @@ void RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 	if (!lrr)
 		throw ReplayFailedException("wanted a rdtsc, got %s",
 					    lr->name());
-        this->thr->temporaries[tmp].lo = lrr->tsc;
+        ms->findThread(this->when.tid)->temporaries[tmp].lo = lrr->tsc;
 }
 
 template <typename ait>
@@ -21,8 +21,8 @@ InterpretResult RdtscEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr
 }
 
 template <typename ait>
-StoreEvent<ait>::StoreEvent(Thread<ait> *thr, ReplayTimestamp when, ait _addr, unsigned _size, expression_result<ait> _data)
-	: ThreadEvent<ait>(thr, when),
+StoreEvent<ait>::StoreEvent(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> _data)
+	: ThreadEvent<ait>(when),
 	  addr(_addr),
 	  size(_size),
 	  data(_data)
@@ -47,7 +47,8 @@ static void checkSegv(LogRecord<ait> *lr, ait addr)
 template <typename ait>
 void StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	if (ms->addressSpace->isWritable(addr, size, this->thr)) {
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+	if (ms->addressSpace->isWritable(addr, size, thr)) {
 		LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
 		if (!lrs)
 			throw ReplayFailedException("wanted a store, got %s",
@@ -59,8 +60,8 @@ void StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 		if (force(data != lrs->value))
 			throw ReplayFailedException("memory mismatch on store to %lx",
 						    force(addr));
-		ms->addressSpace->store(addr, size, data, false, this->thr);
-		this->thr->nrAccesses++;
+		ms->addressSpace->store(addr, size, data, false, thr);
+		thr->nrAccesses++;
 	} else {
 	        checkSegv<ait>(lr, addr);
 	}
@@ -70,14 +71,15 @@ template <typename ait>
 InterpretResult StoreEvent<ait>::fake(MachineState<ait> *ms,
 				      LogRecord<ait> **lr)
 {
+	Thread<ait> *thr = ms->findThread(this->when.tid);
 	if (lr)
-		*lr = new LogRecordStore<ait>(this->thr->tid, size, addr, data);
-	if (ms->addressSpace->isWritable(addr, size, this->thr)) {
-		ms->addressSpace->store(addr, size, data, false, this->thr);
-		this->thr->nrAccesses++;
+		*lr = new LogRecordStore<ait>(thr->tid, size, addr, data);
+	if (ms->addressSpace->isWritable(addr, size, thr)) {
+		ms->addressSpace->store(addr, size, data, false, thr);
+		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
-		this->thr->crashed = true;
+		thr->crashed = true;
 		return InterpretResultCrash;
 	}
 }
@@ -85,7 +87,8 @@ InterpretResult StoreEvent<ait>::fake(MachineState<ait> *ms,
 template <typename ait>
 void LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	if (ms->addressSpace->isReadable(addr, size, this->thr)) {
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
 		if (!lrl)
 			throw ReplayFailedException("wanted a load, got %s",
@@ -95,12 +98,12 @@ void LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 						    lrl->size, force(lrl->ptr),
 						    size, force(addr));
 		expression_result<ait> buf =
-			ms->addressSpace->load(this->when, addr, size, false, this->thr);
+			ms->addressSpace->load(this->when, addr, size, false, thr);
 		if (force(buf != lrl->value))
 			throw ReplayFailedException("memory mismatch on load from %lx",
 						    force(addr));
-		this->thr->temporaries[tmp] = buf;
-		this->thr->nrAccesses++;
+		thr->temporaries[tmp] = buf;
+		thr->nrAccesses++;
 	} else {
 		checkSegv(lr, addr);
 	}
@@ -109,18 +112,19 @@ void LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 template <typename ait>
 InterpretResult LoadEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {
-	if (ms->addressSpace->isReadable(addr, size, this->thr)) {
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		expression_result<ait> buf =
-			ms->addressSpace->load(this->when, addr, size, false, this->thr);
-		this->thr->temporaries[tmp] = buf;
+			ms->addressSpace->load(this->when, addr, size, false, thr);
+		thr->temporaries[tmp] = buf;
 		if (lr)
-			*lr = new LogRecordLoad<ait>(this->thr->tid, size, addr, buf);
-		this->thr->nrAccesses++;
+			*lr = new LogRecordLoad<ait>(thr->tid, size, addr, buf);
+		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
 		if (lr)
 			*lr = NULL;
-		this->thr->crashed = true;
+		thr->crashed = true;
 		return InterpretResultCrash;
 	}
 }
@@ -159,7 +163,7 @@ InterpretResult InstructionEvent<ait>::fake(MachineState<ait> *ms,
 					    LogRecord<ait> **lr)
 {
 	if (lr)
-		*lr = new LogRecordFootstep<ait>(this->thr->tid, rip, reg0, reg1, reg2, reg3, reg4);
+		*lr = new LogRecordFootstep<ait>(this->when.tid, rip, reg0, reg1, reg2, reg3, reg4);
 	return InterpretResultContinue;
 }
 
@@ -171,7 +175,7 @@ void SyscallEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 		throw ReplayFailedException("wanted a syscall, got %s",
 					    lr->name());
 		
-	replay_syscall(lrs, this->thr, ms);
+	replay_syscall(lrs, ms->findThread(this->when.tid), ms);
 }
 
 template <typename ait>
@@ -195,11 +199,12 @@ void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 					    size, force(addr.lo));
 
         expression_result<ait> seen;
-        seen = ms->addressSpace->load(this->when, addr.lo, size, false, this->thr);
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+        seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
         if (force(seen != lrl->value))
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
 					    force(addr.lo));
-	this->thr->temporaries[dest] = seen;
+	thr->temporaries[dest] = seen;
         if (force(seen != expected))
 		return;
 
@@ -217,21 +222,22 @@ void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 		throw ReplayFailedException("memory mismatch on CAS to %lx",
 					    force(addr.lo));
 
-	ms->addressSpace->store(addr.lo, size, data, false, this->thr);
+	ms->addressSpace->store(addr.lo, size, data, false, thr);
 }
 
 template <typename ait>
 InterpretResult CasEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr1,
 				    LogRecord<ait> **lr2)
 {
-	expression_result<ait> seen = ms->addressSpace->load(this->when, addr.lo, size, false, this->thr);
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+	expression_result<ait> seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
 	if (lr1)
-		*lr1 = new LogRecordLoad<ait>(this->thr->tid, size, addr.lo, seen);
-	this->thr->temporaries[dest] = seen;
+		*lr1 = new LogRecordLoad<ait>(this->when.tid, size, addr.lo, seen);
+	thr->temporaries[dest] = seen;
 	if (force(seen == expected)) {
-		ms->addressSpace->store(addr.lo, size, data, false, this->thr);
+		ms->addressSpace->store(addr.lo, size, data, false, thr);
 		if (lr2)
-			*lr2 = new LogRecordStore<ait>(this->thr->tid, size, addr.lo, data);
+			*lr2 = new LogRecordStore<ait>(this->when.tid, size, addr.lo, data);
 	} else if (lr2)
 		*lr2 = NULL;
 	return InterpretResultContinue;
@@ -246,6 +252,7 @@ InterpretResult CasEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr1)
 template <typename ait>
 void SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
+	Thread<ait> *thr = ms->findThread(this->when.tid);
 	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a signal record, got %s",
@@ -253,7 +260,7 @@ void SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 	if (lrs->signr != 11)
 		throw NotImplementedException("Only handle SIGSEGV, got %d",
 					      lrs->signr);
-	if (ms->addressSpace->isReadable(lrs->virtaddr, 1, this->thr))
+	if (ms->addressSpace->isReadable(lrs->virtaddr, 1, thr))
 		throw ReplayFailedException("got a segv at %lx, but that location is readable?",
 					    force(lrs->virtaddr));
 	/* Can't actually do much with this, because we pick up the
@@ -262,15 +269,16 @@ void SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 	if (ms->signalHandlers.handlers[11].sa_handler != SIG_DFL)
 		throw NotImplementedException("don't handle custom signal handlers");
 #endif
-	printf("Crash in thread %d\n", this->thr->tid._tid());
-	this->thr->crashed = true;
+	printf("Crash in thread %d\n", thr->tid._tid());
+	thr->crashed = true;
 }
 
 template <typename ait>
 InterpretResult SignalEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {
+	Thread<ait> *thr = ms->findThread(this->when.tid);
 	if (lr)
-		*lr = new LogRecordSignal<ait>(this->thr->tid, this->thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
-	this->thr->crashed = true;
+		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
+	thr->crashed = true;
 	return InterpretResultCrash;
 }

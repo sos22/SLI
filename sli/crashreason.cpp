@@ -25,12 +25,12 @@
 class HistorySegment : public Named {
 public:
 	Expression *condition;
-	ReplayTimestamp when;
+	EventTimestamp when;
 	std::vector<unsigned long> rips;
 private:
 	static const VexAllocTypeWrapper<HistorySegment> allocator;
 	HistorySegment(Expression *_condition,
-		       ReplayTimestamp _when)
+		       EventTimestamp _when)
 		: condition(_condition),
 		  when(_when),
 		  rips()
@@ -50,7 +50,7 @@ private:
 	}
 protected:
 	char *mkName() const {
-		char *buf = my_asprintf("%s@%lx", condition->name(), when.val);
+		char *buf = my_asprintf("%s@%d:%lx", condition->name(), when.tid._tid(), when.idx);
 		for (std::vector<unsigned long>::const_iterator it = rips.begin();
 		     it != rips.end();
 		     it++) {
@@ -62,7 +62,7 @@ protected:
 	}
 public:
 	static HistorySegment *get(Expression *condition,
-				   ReplayTimestamp when)
+				   EventTimestamp when)
 	{
 		return new (allocator.alloc()) HistorySegment(condition,
 							      when);
@@ -184,7 +184,7 @@ public:
 		}
 		return false;
 	}
-	void control_expression(ReplayTimestamp when, Expression *e)
+	void control_expression(EventTimestamp when, Expression *e)
 	{
 		history.push_back(HistorySegment::get(e, when));
 	}
@@ -192,7 +192,7 @@ public:
 	{
 		history.back()->rips.push_back(rip);
 	}
-	ReplayTimestamp timestamp() const
+	EventTimestamp timestamp() const
 	{
 		return history.back()->when;
 	}
@@ -260,8 +260,8 @@ public:
 		hv(cond);
 		hv(model_execution);
 	}
-	ReplayTimestamp timestamp() const {
-		return max<ReplayTimestamp>(history->timestamp(),
+	EventTimestamp timestamp() const {
+		return max<EventTimestamp>(history->timestamp(),
 					    cond->timestamp());
 	}
 };
@@ -272,18 +272,18 @@ VexAllocTypeWrapper<ExpressionRip> ExpressionRip::allocator;
  * is inaccessible at a particular time. */
 class ExpressionBadPointer : public Expression {
 	Expression *addr;
-	ReplayTimestamp when;
+	EventTimestamp when;
 	static VexAllocTypeWrapper<ExpressionBadPointer> allocator;
-	ExpressionBadPointer(ReplayTimestamp _when, Expression *_addr)
+	ExpressionBadPointer(EventTimestamp _when, Expression *_addr)
 		: addr(_addr), when(_when)
 	{
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(bad ptr %lx:%s)", when.val, addr->name());
+		return my_asprintf("(bad ptr %d:%lx:%s)", when.tid._tid(), when.idx, addr->name());
 	}
 	unsigned _hash() const {
-		return addr->hash() ^ when.val;
+		return addr->hash() ^ when.hash();
 	}
 	bool _isEqual(const Expression *other) const {
 		const ExpressionBadPointer *oth = dynamic_cast<const ExpressionBadPointer *>(other);
@@ -293,12 +293,12 @@ protected:
 			return false;
 	}
 public:
-	static Expression *get(ReplayTimestamp _when, Expression *_addr)
+	static Expression *get(EventTimestamp _when, Expression *_addr)
 	{
 		return new (allocator.alloc()) ExpressionBadPointer(_when, _addr);
 	}
 	void visit(HeapVisitor &hv) const { hv(addr); }
-	ReplayTimestamp timestamp() const { return when; }
+	EventTimestamp timestamp() const { return when; }
 };
 
 VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;

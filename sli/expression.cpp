@@ -42,7 +42,7 @@ Expression *Expression::intern(Expression *e)
 }
 
 template<> abstract_interpret_value
-load_ait(abstract_interpret_value val, abstract_interpret_value addr, ReplayTimestamp when)
+load_ait(abstract_interpret_value val, abstract_interpret_value addr, EventTimestamp when)
 {
 	abstract_interpret_value res;
 	res.v = val.v;
@@ -51,7 +51,7 @@ load_ait(abstract_interpret_value val, abstract_interpret_value addr, ReplayTime
 }
 
 template<> unsigned long
-load_ait(unsigned long x, unsigned long addr, ReplayTimestamp when)
+load_ait(unsigned long x, unsigned long addr, EventTimestamp when)
 {
 	return x;
 }

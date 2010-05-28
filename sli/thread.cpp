@@ -2,6 +2,9 @@
 
 template class LibvexVector<Thread<unsigned long> >;
 
+const ThreadId ThreadId::invalidTid;
+const EventTimestamp EventTimestamp::invalid;
+
 template<>
 RegisterSet<unsigned long>::RegisterSet(VexGuestAMD64State const&r)
 {
@@ -19,6 +22,7 @@ Thread<ait> *Thread<ait>::initialThread(const LogRecordInitialRegisters<ait> &in
 	new (work) Thread<ait>();
 	work->tid = initRegs.thread();
 	work->regs = initRegs.regs;
+	work->lastEvent.tid = work->tid;
 	return work;
 }
 
@@ -32,6 +36,7 @@ Thread<ait> *Thread<ait>::fork(unsigned newPid)
 	new (work) Thread<ait>();
 	work->pid = newPid;
 	work->regs = regs;
+	work->lastEvent.tid = work->tid;
 	return work;
 }
 
@@ -90,6 +95,7 @@ Thread<new_type> *Thread<ait>::abstract() const
 	Thread<new_type> *work = Thread<new_type>::allocator.alloc();
 	memset(work, 0, sizeof(*work));
 	work->tid = tid;
+	work->lastEvent = lastEvent;
 	work->pid = pid;
 	regs.abstract<new_type>(&work->regs);
 	work->clear_child_tid = new_type::import(
