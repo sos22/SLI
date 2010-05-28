@@ -1732,6 +1732,24 @@ class Expression : public Named {
 	Expression **pprev;
 	unsigned hashval;
 	static void dump_eq_calls_table();
+	void remove_from_hash() {
+		*pprev = next;
+		if (next)
+			next->pprev = pprev;
+		pprev = &next;
+		next = NULL;
+	}
+	void add_to_hash() {
+		pprev = &heads[hashval % nr_heads];
+		next = *pprev;
+		if (next)
+			next->pprev = &next;
+		*pprev = this;
+	}
+	void pull_to_front() {
+		remove_from_hash();
+		add_to_hash();
+	}
 protected:
 	static Expression *intern(Expression *e);
 	virtual unsigned _hash() const = 0;
@@ -1751,13 +1769,7 @@ public:
 			return false;
 	}
 	void destruct() {
-		if (pprev) {
-			*pprev = next;
-			if (next)
-				next->pprev = pprev;
-			chain_lengths[hashval % nr_heads]--;
-			nr_interned--;
-		}
+		remove_from_hash();
 		tot_outstanding--;
 		Named::destruct();
 	}

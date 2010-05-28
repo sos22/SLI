@@ -32,24 +32,10 @@ Expression *Expression::intern(Expression *e)
 	}
 	if (cursor) {
 		intern_hits++;
-		if (cursor != heads[h]) {
-			*cursor->pprev = cursor->next;
-			if (cursor->next)
-				cursor->next->pprev = cursor->pprev;
-			if (heads[h])
-				heads[h]->pprev = &cursor->next;
-			cursor->pprev = &heads[h];
-			cursor->next = heads[h];
-		}
-		e->pprev = NULL;
-		e->next = NULL;
+		cursor->pull_to_front();
 		return cursor;
 	}
-	e->next = heads[h];
-	e->pprev = &heads[h];
-	if (heads[h])
-		heads[h]->pprev = &e->next;
-	heads[h] = e;
+	e->add_to_hash();
 	chain_lengths[h]++;
 	nr_interned++;
 	return e;
