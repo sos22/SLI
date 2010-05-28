@@ -127,8 +127,8 @@ LibVEX_gc(void)
 	/* We're going to free off this block. */
 	if (h->type->destruct)
 	  h->type->destruct(header_to_alloc(h));
-	h->type = NULL;
 	poison(h + 1, h->size - sizeof(*h), 0xa1b2c3d4);
+	h->type = NULL;
 	VALGRIND_MAKE_MEM_NOACCESS(h + 1, h->size - sizeof(*h));
 	if (p && !p->type) {
 	  if (h == allocation_cursor)
