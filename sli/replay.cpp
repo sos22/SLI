@@ -60,7 +60,7 @@ void StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 		if (force(data != lrs->value))
 			throw ReplayFailedException("memory mismatch on store to %lx",
 						    force(addr));
-		ms->addressSpace->store(addr, size, data, false, thr);
+		ms->addressSpace->store(this->when, addr, size, data, false, thr);
 		thr->nrAccesses++;
 	} else {
 	        checkSegv<ait>(lr, addr);
@@ -75,7 +75,7 @@ InterpretResult StoreEvent<ait>::fake(MachineState<ait> *ms,
 	if (lr)
 		*lr = new LogRecordStore<ait>(thr->tid, size, addr, data);
 	if (ms->addressSpace->isWritable(addr, size, thr)) {
-		ms->addressSpace->store(addr, size, data, false, thr);
+		ms->addressSpace->store(this->when, addr, size, data, false, thr);
 		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
@@ -222,7 +222,7 @@ void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 		throw ReplayFailedException("memory mismatch on CAS to %lx",
 					    force(addr.lo));
 
-	ms->addressSpace->store(addr.lo, size, data, false, thr);
+	ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
 }
 
 template <typename ait>
@@ -235,7 +235,7 @@ InterpretResult CasEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr1,
 		*lr1 = new LogRecordLoad<ait>(this->when.tid, size, addr.lo, seen);
 	thr->temporaries[dest] = seen;
 	if (force(seen == expected)) {
-		ms->addressSpace->store(addr.lo, size, data, false, thr);
+		ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
 		if (lr2)
 			*lr2 = new LogRecordStore<ait>(this->when.tid, size, addr.lo, data);
 	} else if (lr2)

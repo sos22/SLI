@@ -39,7 +39,7 @@ void AddressSpace<ait>::protectMemory(ait start, ait size,
 }
 
 template <typename ait>
-void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
+void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned size,
 				    const ait *contents, bool ignore_protection,
 				    const Thread<ait> *thr)
 {
@@ -57,7 +57,7 @@ void AddressSpace<ait>::writeMemory(ait _start, unsigned size,
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			mc->write(mc_start, contents, to_copy_this_time);
+			mc->write(when, mc_start, contents, to_copy_this_time);
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
@@ -129,8 +129,8 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 }
 
 template <typename ait>
-void AddressSpace<ait>::store(ait start, unsigned size, const expression_result<ait> &val,
-			      bool ignore_protection,
+void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
+			      const expression_result<ait> &val, bool ignore_protection,
 			      const Thread<ait> *thr)
 {
 	ait b[16];
@@ -160,7 +160,7 @@ void AddressSpace<ait>::store(ait start, unsigned size, const expression_result<
 	default:
 		abort();
 	}
-	writeMemory(start, size, b, ignore_protection, thr);
+	writeMemory(when, start, size, b, ignore_protection, thr);
 }
 
 template <typename ait>

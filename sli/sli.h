@@ -545,7 +545,7 @@ public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk<unsigned long> *allocate();
 
-	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes);
+	void write(EventTimestamp, unsigned offset, const unsigned long *source, unsigned nr_bytes);
 	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const;
 
 	MemoryChunk<unsigned long> *dupeSelf() const;
@@ -1673,12 +1673,12 @@ public:
 	void protectMemory(ait start, ait size, VAMap::Protection prot);
 	void populateMemory(const LogRecordMemory<ait> &rec)
 	{
-		writeMemory(rec.start, rec.size, rec.contents, true);
+		writeMemory(EventTimestamp::invalid, rec.start, rec.size, rec.contents, true);
 	}
-	void store(ait start, unsigned size, const expression_result<ait> &val,
+	void store(EventTimestamp when, ait start, unsigned size, const expression_result<ait> &val,
 		   bool ignore_protection = false,
 		   const Thread<ait> *thr = NULL);
-	void writeMemory(ait start, unsigned size,
+	void writeMemory(EventTimestamp when, ait start, unsigned size,
 			 const ait *contents, bool ignore_protection = false,
 			 const Thread<ait> *thr = NULL);
 	expression_result<ait> load(EventTimestamp when, ait start, unsigned size,
@@ -1831,6 +1831,34 @@ public:
 		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {hv(origin);}
+};
+
+class StoreExpression : public Expression {
+	static VexAllocTypeWrapper<StoreExpression> allocator;
+	EventTimestamp when;
+	Expression *val;
+protected:
+	char *mkName() const { return my_asprintf("(store@%d:%lx:%s)", when.tid._tid(), when.idx, val->name()); }
+	unsigned _hash() const { return val->hash() ^ (when.hash() * 5); }
+	bool _isEqual(const Expression *other) const {
+		const StoreExpression *le = dynamic_cast<const StoreExpression *>(other);
+		if (le &&
+		    le->when == when &&
+		    le->val->isEqual(val))
+			return true;
+		else
+			return false;
+	}
+public:
+	static Expression *get(EventTimestamp when, Expression *val)
+	{
+		StoreExpression *work = new (allocator.alloc()) StoreExpression();
+		work->val = val;
+		work->when = when;
+		return intern(work);
+	}
+	EventTimestamp timestamp() const { return when; }
+	void visit(HeapVisitor &hv) const { hv(val); }
 };
 
 class LoadExpression : public Expression {
@@ -2157,7 +2185,7 @@ public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk<abstract_interpret_value> *allocate();
 
-	void write(unsigned offset, const abstract_interpret_value *source, unsigned nr_bytes);
+	void write(EventTimestamp when, unsigned offset, const abstract_interpret_value *source, unsigned nr_bytes);
 	void read(unsigned offset, abstract_interpret_value *dest, unsigned nr_bytes) const;
 
 	MemoryChunk<abstract_interpret_value> *dupeSelf() const;

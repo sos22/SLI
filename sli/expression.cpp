@@ -59,6 +59,7 @@ load_ait(unsigned long x, unsigned long addr, EventTimestamp when)
 VexAllocTypeWrapper<ConstExpression, visit_object<ConstExpression>, destruct_object<ConstExpression> > ConstExpression::allocator;
 VexAllocTypeWrapper<ImportExpression, visit_object<ImportExpression>, destruct_object<ImportExpression> > ImportExpression::allocator;
 VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
+VexAllocTypeWrapper<StoreExpression> StoreExpression::allocator;
 
 #define mk_op_allocator(op)						\
 	VexAllocTypeWrapper<op, visit_object<op>, destruct_object<op> > op::allocator

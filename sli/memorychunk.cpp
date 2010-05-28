@@ -14,7 +14,7 @@ MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::dupeSelf() const
 	return r;
 }
 
-void MemoryChunk<unsigned long>::write(unsigned offset, const unsigned long *source, unsigned nr_bytes)
+void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, const unsigned long *source, unsigned nr_bytes)
 {
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
@@ -79,7 +79,8 @@ void MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 	}
 }
 
-void MemoryChunk<abstract_interpret_value>::write(unsigned offset,
+void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
+						  unsigned offset,
 						  const abstract_interpret_value *source,
 						  unsigned nr_bytes)
 {
@@ -89,7 +90,10 @@ void MemoryChunk<abstract_interpret_value>::write(unsigned offset,
 	newmcl->next = headLookaside;
 	newmcl->offset = offset;
 	newmcl->size = nr_bytes;
-	memcpy(newmcl->content, source, nr_bytes * sizeof(abstract_interpret_value));
+	for (unsigned x = 0; x < nr_bytes; x++) {
+		newmcl->content[x].v = source[x].v;
+		newmcl->content[x].origin = StoreExpression::get(when, source[x].origin);
+	}
 	headLookaside = newmcl;
 }
 

@@ -27,7 +27,7 @@ process_memory_records(AddressSpace<ait> *addrSpace,
 			break;
 		if (lw)
 			lw->append(*lr);
-		addrSpace->writeMemory(lrm->start, lrm->size, lrm->contents,
+		addrSpace->writeMemory(EventTimestamp::invalid, lrm->start, lrm->size, lrm->contents,
 				       true);
 		startOffset = nextOffset;
 	}
