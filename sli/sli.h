@@ -1835,6 +1835,7 @@ public:
 
 class LoadExpression : public Expression {
 	static VexAllocTypeWrapper<LoadExpression> allocator;
+public:
 	Expression *val;
 	Expression *addr;
 	EventTimestamp when;
@@ -1871,14 +1872,15 @@ public:
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val);}
 };
 
+class BinaryExpression : public Expression {
+public:
+	Expression *l, *r;
+};
+
 #define mk_binop_class(nme)						\
-	class nme : public Expression {					\
-	public:								\
-		Expression *l, *r;					\
+	class nme : public BinaryExpression {				\
 	protected:							\
-		static VexAllocTypeWrapper<nme, visit_object<nme>,	\
-					   destruct_object<nme> > allocator; \
-	protected:							\
+	        static VexAllocTypeWrapper<nme> allocator;		\
 	        char *mkName() const                                    \
 		{							\
 			return my_asprintf("(%s " #nme "  %s)",		\
@@ -1930,11 +1932,14 @@ mk_binop_class(notequals);
 mk_binop_class(logicalor);
 mk_binop_class(logicaland);
 
+class UnaryExpression : public Expression {
+public:
+	Expression *l;
+};
+
 #define mk_unop_class(nme)						\
-	class nme : public Expression {					\
-		Expression *l;						\
-		static VexAllocTypeWrapper<nme, visit_object<nme>,	\
-					   destruct_object<nme> > allocator; \
+	class nme : public UnaryExpression {				\
+		static VexAllocTypeWrapper<nme> allocator;		\
 	protected:							\
 	        char *mkName() const					\
 		{							\

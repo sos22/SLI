@@ -21,10 +21,18 @@
    condition is evaluated).  This is in theory redundant with the
    condition, because if you pass the condition then you ought to
    always follow the same RIP path, but it makes it a *lot* easier to
-   see if something's gone wrong. */
+   see if something's gone wrong.
+
+   Finally, we store the number of memory operations which the thread
+   will perform after it passes this condition before it reaches the
+   next one.  This is extremely useful when checking whether a given
+   expression is syntactically valid, in the sense that all memory
+   indexes are defined by enclosing RIP expressions.
+*/
 class HistorySegment : public Named {
 public:
 	Expression *condition;
+	unsigned long nr_memory_operations;
 	EventTimestamp when;
 	std::vector<unsigned long> rips;
 private:
@@ -32,18 +40,22 @@ private:
 	HistorySegment(Expression *_condition,
 		       EventTimestamp _when)
 		: condition(_condition),
+		  nr_memory_operations(0),
 		  when(_when),
 		  rips()
 	{
 	}
 	HistorySegment()
 		: condition(ConstExpression::get(1)),
+		  nr_memory_operations(0),
 		  when(),
 		  rips()
 	{
 	}
-	HistorySegment(std::vector<unsigned long> &_rips)
+	HistorySegment(std::vector<unsigned long> &_rips,
+		       unsigned long nr_memory_ops)
 		: condition(ConstExpression::get(1)),
+		  nr_memory_operations(nr_memory_ops),
 		  when(),
 		  rips(_rips)
 	{
@@ -71,9 +83,10 @@ public:
 	{
 		return new (allocator.alloc()) HistorySegment();
 	}
-	static HistorySegment *get(std::vector<unsigned long> &rips)
+	static HistorySegment *get(std::vector<unsigned long> &rips,
+				   unsigned long nr_memory_ops)
 	{
-		return new (allocator.alloc()) HistorySegment(rips);
+		return new (allocator.alloc()) HistorySegment(rips, nr_memory_ops);
 	}
 	void destruct()
 	{
@@ -103,26 +116,41 @@ public:
 		}
 		return false;
 	}
+	void finish(EventTimestamp fin)
+	{
+		nr_memory_operations = fin.idx - when.idx;
+	}
 };
 const VexAllocTypeWrapper<HistorySegment> HistorySegment::allocator;
 
 class History : public Named {
 public:
 	std::vector<HistorySegment *>history;
+	unsigned long last_valid_idx;
 private:
 	static const VexAllocTypeWrapper<History> allocator;
+	void calc_last_valid_idx() {
+		last_valid_idx = 0;
+		for (std::vector<HistorySegment *>::iterator it = history.begin();
+		     it != history.end();
+		     it++)
+			last_valid_idx += (*it)->nr_memory_operations;
+	}
 	History(std::vector<HistorySegment *>::const_iterator start,
 		std::vector<HistorySegment *>::const_iterator end)
 		: history(start, end)
 	{
+		calc_last_valid_idx();
 	}
-	History(std::vector<unsigned long> rips)
+	History(std::vector<unsigned long> rips, unsigned long nr_memory_ops)
 	{
-		history.push_back(HistorySegment::get(rips));
+		history.push_back(HistorySegment::get(rips, nr_memory_ops));
+		calc_last_valid_idx();
 	}
 	History()
 	{
 		history.push_back(HistorySegment::get());
+		calc_last_valid_idx();
 	}
 protected:
 	char *mkName() const {
@@ -150,9 +178,10 @@ public:
 	{
 		return new (allocator.alloc()) History(start, end);
 	}
-	static History *get(std::vector<unsigned long> &rips)
+	static History *get(std::vector<unsigned long> &rips,
+			    unsigned long nr_memory_ops)
 	{
-		return new (allocator.alloc()) History(rips);
+		return new (allocator.alloc()) History(rips, nr_memory_ops);
 	}
 	static History *get()
 	{
@@ -186,6 +215,7 @@ public:
 	}
 	void control_expression(EventTimestamp when, Expression *e)
 	{
+		history.back()->finish(when);
 		history.push_back(HistorySegment::get(e, when));
 	}
 	void footstep(unsigned long rip)
@@ -271,8 +301,10 @@ VexAllocTypeWrapper<ExpressionRip> ExpressionRip::allocator;
 /* A bad pointer expression asserts that a particular memory location
  * is inaccessible at a particular time. */
 class ExpressionBadPointer : public Expression {
+public:
 	Expression *addr;
 	EventTimestamp when;
+private:
 	static VexAllocTypeWrapper<ExpressionBadPointer> allocator;
 	ExpressionBadPointer(EventTimestamp _when, Expression *_addr)
 		: addr(_addr), when(_when)
@@ -303,6 +335,64 @@ public:
 
 VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
 
+
+static bool
+syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_valid_idx)
+{
+	if (dynamic_cast<ConstExpression *>(e) ||
+	    dynamic_cast<ImportExpression *>(e))
+		return true;
+
+	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(e))
+		return syntax_check_expression(ue->l, last_valid_idx);
+
+	if (BinaryExpression *be = dynamic_cast<BinaryExpression *>(e))
+		return syntax_check_expression(be->l, last_valid_idx) &&
+			syntax_check_expression(be->r, last_valid_idx);
+
+	if (ternarycondition *tc = dynamic_cast<ternarycondition *>(e))
+		return syntax_check_expression(tc->cond, last_valid_idx) &&
+			syntax_check_expression(tc->t, last_valid_idx) &&
+			syntax_check_expression(tc->f, last_valid_idx);
+
+	if (ExpressionBadPointer *ebp = dynamic_cast<ExpressionBadPointer *>(e))
+		return syntax_check_expression(ebp->addr, last_valid_idx);
+
+	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(e)) {
+		std::vector<HistorySegment *>::iterator it;
+		std::map<ThreadId, unsigned long> new_last_valid_idx(last_valid_idx);
+		unsigned long &idx_entry = new_last_valid_idx[er->tid];
+		for (it = er->history->history.begin();
+		     it != er->history->history.end();
+		     it++) {
+			HistorySegment *hs = *it;
+			if (!syntax_check_expression(hs->condition,
+						     new_last_valid_idx))
+				return false;
+			idx_entry += hs->nr_memory_operations;
+		}
+		return syntax_check_expression(er->cond, new_last_valid_idx);
+	}
+
+	if (LoadExpression *le = dynamic_cast<LoadExpression *>(e)) {
+		if (le->when.idx > last_valid_idx[le->when.tid]) {
+			printf("Syntax check failed: %d:%ld is after %ld\n",
+			       le->when.tid._tid(), le->when.idx,
+			       last_valid_idx[le->when.tid]);
+			return false;
+		}
+		if (le->store.idx > last_valid_idx[le->store.tid]) {
+			printf("Syntax check failed: store %d:%ld is after %ld\n",
+			       le->store.tid._tid(), le->store.idx,
+			       last_valid_idx[le->store.tid]);
+			return false;
+		}
+		return syntax_check_expression(le->val, last_valid_idx) &&
+			syntax_check_expression(le->addr, last_valid_idx);
+	}
+
+	abort();
+}
 
 /* Given a trace, extract a precondition which is necessary for it to
    crash in the observed way. */
@@ -378,7 +468,6 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	VexGcRoot root1((void **)&extr, "root1");
 
 	i.replayLogfile(script, ptr, NULL, NULL, extr);
-
 	if (!ms->crashed())
 		return NULL;
 
@@ -468,7 +557,8 @@ static Expression *refine(ExpressionRip *er,
 		newHist,
 		logicaland::get((*end)->condition,
 				ExpressionRip::get(er->tid,
-						   History::get((*end)->rips),
+						   History::get((*end)->rips,
+								(*end)->nr_memory_operations),
 						   er->cond,
 						   newModel2,
 						   newPtr2)),
@@ -592,6 +682,8 @@ main(int argc, char *argv[])
 
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	printf("%s\n", cr->name());
+	std::map<ThreadId, unsigned long> m1;
+	assert(syntax_check_expression(cr, m1));
 	VexGcRoot crkeeper((void **)&cr, "crkeeper");
 
 	bool progress;
@@ -599,6 +691,7 @@ main(int argc, char *argv[])
 	do {
 		progress = false;
 		printf("Crash reason %s\n", cr->name());
+		assert(syntax_check_expression(cr, m1));
 		cr = refine(cr, abstract, al, ptr, &progress);
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
