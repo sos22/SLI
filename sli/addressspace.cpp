@@ -80,15 +80,15 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	memset(b, 0, sizeof(ait) * size);
 	for (unsigned x = 0; x < size; x++)
 		new (&b[x]) ait();
-	readMemory(start, size, b, ignore_protection, thr);
+	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr);
 	expression_result<ait> res;
 	res.hi = mkConst<ait>(0);
 	switch(size) {
 	case 1:
-		res.lo = load_ait<ait>(b[0], start, when);
+		res.lo = load_ait<ait>(b[0], start, when, sto);
 		break;
 	case 2:
-		res.lo = load_ait<ait>(b[0] + (b[1] << mkConst<ait>(8)), start, when);
+		res.lo = load_ait<ait>(b[0] + (b[1] << mkConst<ait>(8)), start, when, sto);
 		break;
 	case 4:
 		res.lo = load_ait<ait>(b[0] +
@@ -96,7 +96,7 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 				       (b[2] << mkConst<ait>(16)) +
 				       (b[3] << mkConst<ait>(24)),
 				       start,
-				       when);
+				       when, sto);
 		break;
 	case 16:
 		res.hi = load_ait<ait>(b[8] +
@@ -108,7 +108,8 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 				       (b[14] << mkConst<ait>(48)) +
 				       (b[15] << mkConst<ait>(56)),
 				       start,
-				       when);
+				       when,
+				       sto);
 		/* fall through */
 	case 8:
 		res.lo = load_ait<ait>(b[0] +
@@ -120,7 +121,8 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 				       (b[6] << mkConst<ait>(48)) +
 				       (b[7] << mkConst<ait>(56)),
 				       start,
-				       when);
+				       when,
+				       sto);
 		break;
 	default:
 		abort();
@@ -164,10 +166,11 @@ void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 }
 
 template <typename ait>
-void AddressSpace<ait>::readMemory(ait _start, unsigned size,
-				   ait *contents, bool ignore_protection,
-				   const Thread<ait> *thr)
+EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
+					     ait *contents, bool ignore_protection,
+					     const Thread<ait> *thr)
 {
+	EventTimestamp when;
 	unsigned long start = force(_start);
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -182,7 +185,7 @@ void AddressSpace<ait>::readMemory(ait _start, unsigned size,
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			mc->read(mc_start, contents, to_copy_this_time);
+			when = mc->read(mc_start, contents, to_copy_this_time);
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
@@ -199,6 +202,7 @@ void AddressSpace<ait>::readMemory(ait _start, unsigned size,
 			throw BadMemoryException<ait>(false, _start, size);
 		}
 	}
+	return when;
 }
 
 template <typename ait>

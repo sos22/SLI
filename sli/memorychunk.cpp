@@ -22,12 +22,13 @@ void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, con
 		content[offset + x] = source[x];
 }
 
-void MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const
+EventTimestamp MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const
 {
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
 	for (unsigned x = 0; x < nr_bytes; x++)
 		dest[x] = content[offset + x];
+	return EventTimestamp();
 }
 
 template <>
@@ -55,10 +56,11 @@ MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::du
 	return r;
 }
 
-void MemoryChunk<abstract_interpret_value>::read(unsigned offset,
-						 abstract_interpret_value *dest,
-						 unsigned nr_bytes) const
+EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
+							   abstract_interpret_value *dest,
+							   unsigned nr_bytes) const
 {
+	EventTimestamp when;
 	for (unsigned x = 0; x < nr_bytes; x++) {
 		bool done = false;
 		for (const MCLookasideEntry *mce = headLookaside;
@@ -67,6 +69,7 @@ void MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 			if (mce->offset <= offset + x &&
 			    mce->offset + mce->size > offset + x) {
 				dest[x] = mce->content[offset + x - mce->offset];
+				when = mce->when;
 				done = true;
 			}
 		}
@@ -77,6 +80,7 @@ void MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 										      ImportOriginInitialMemory::get(1, base + offset + x));
 		}
 	}
+	return when;
 }
 
 void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
@@ -90,10 +94,9 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 	newmcl->next = headLookaside;
 	newmcl->offset = offset;
 	newmcl->size = nr_bytes;
-	for (unsigned x = 0; x < nr_bytes; x++) {
-		newmcl->content[x].v = source[x].v;
-		newmcl->content[x].origin = StoreExpression::get(when, source[x].origin);
-	}
+	newmcl->when = when;
+	for (unsigned x = 0; x < nr_bytes; x++)
+		newmcl->content[x] = source[x];
 	headLookaside = newmcl;
 }
 

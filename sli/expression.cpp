@@ -42,16 +42,17 @@ Expression *Expression::intern(Expression *e)
 }
 
 template<> abstract_interpret_value
-load_ait(abstract_interpret_value val, abstract_interpret_value addr, EventTimestamp when)
+load_ait(abstract_interpret_value val, abstract_interpret_value addr, EventTimestamp when,
+	 EventTimestamp store)
 {
 	abstract_interpret_value res;
 	res.v = val.v;
-	res.origin = LoadExpression::get(when, val.origin, addr.origin);
+	res.origin = LoadExpression::get(when, val.origin, addr.origin, store);
 	return res;
 }
 
 template<> unsigned long
-load_ait(unsigned long x, unsigned long addr, EventTimestamp when)
+load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestamp store)
 {
 	return x;
 }
@@ -59,7 +60,6 @@ load_ait(unsigned long x, unsigned long addr, EventTimestamp when)
 VexAllocTypeWrapper<ConstExpression, visit_object<ConstExpression>, destruct_object<ConstExpression> > ConstExpression::allocator;
 VexAllocTypeWrapper<ImportExpression, visit_object<ImportExpression>, destruct_object<ImportExpression> > ImportExpression::allocator;
 VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
-VexAllocTypeWrapper<StoreExpression> StoreExpression::allocator;
 
 #define mk_op_allocator(op)						\
 	VexAllocTypeWrapper<op, visit_object<op>, destruct_object<op> > op::allocator
