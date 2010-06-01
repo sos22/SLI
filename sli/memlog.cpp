@@ -9,20 +9,20 @@ InterpretResult LogWriter<ait>::recordEvent(Thread<ait> *thr, MachineState<ait> 
 	if (ce) {
 		LogRecord<ait> *lr1, *lr2;
 		res = ce->fake(ms, &lr1, &lr2);
-		append(*lr1);
+		append(*lr1, evt->when.idx);
 		if (lr2)
-			append(*lr2);
+			append(*lr2, evt->when.idx);
 	} else {
 		LogRecord<ait> *lr;
 		res = evt->fake(ms, &lr);
 		if (lr)
-			append(*lr);
+			append(*lr, evt->when.idx);
 	}
 	return res;
 }
 
 template <typename ait>
-void MemLog<ait>::append(const LogRecord<ait> &lr)
+void MemLog<ait>::append(const LogRecord<ait> &lr, unsigned long ignore)
 {
 	content->push_back(lr.dupe());
 }

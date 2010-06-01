@@ -313,7 +313,8 @@ void AddressSpace<ait>::sanityCheck() const
 template <typename ait>
 void AddressSpace<ait>::dumpBrkPtr(LogWriter<ait> *lw) const
 {
-	lw->append(LogRecordInitialBrk<ait>(ThreadId(0), mkConst<ait>(brkptr)));
+	lw->append(LogRecordInitialBrk<ait>(ThreadId(0), mkConst<ait>(brkptr)),
+		   0);
 }
 
 template <typename ait>
@@ -330,7 +331,8 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 							mkConst<ait>(next_va),
 							mkConst<ait>(MemoryChunk<ait>::size),
 							(unsigned long)prot,
-							(unsigned long)alf));
+							(unsigned long)alf),
+			   0);
 		unsigned long off;
 		const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &off);
 		assert(off == 0);
@@ -339,7 +341,8 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 		lw->append(LogRecordMemory<ait>(ThreadId(0),
 						MemoryChunk<ait>::size,
 						mkConst<ait>(next_va),
-						buf));
+						buf),
+			   0);
 		last_va = next_va + MemoryChunk<ait>::size;
 	}
 }

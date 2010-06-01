@@ -1336,11 +1336,11 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		if (!lr)
 			break;
 
-		if (lw)
-			lw->append(*lr);
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace);
 
+		if (lw)
+			lw->append(*lr, evt->when.idx);
 		if (er)
 			er->record(thr, evt);
 

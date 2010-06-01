@@ -115,6 +115,7 @@ class ThreadId {
 	unsigned tid;
 public:
 	static const ThreadId invalidTid;
+	bool valid() const { return tid != 0xf001beef && tid != 0xa1b2c3d4 && tid != 0xaabbccdd; }
 	ThreadId(unsigned _tid) : tid(_tid) {}
 	ThreadId() : tid(0xf001beef) {}
 	bool operator==(const ThreadId &b) const { return b.tid == tid; }
@@ -850,7 +851,7 @@ public:
 template <typename ait>
 class LogWriter {
 public:
-	virtual void append(const LogRecord<ait> &lr) = 0;
+	virtual void append(const LogRecord<ait> &lr, unsigned long idx) = 0;
 	virtual ~LogWriter() {}
 	InterpretResult recordEvent(Thread<ait> *thr, MachineState<ait> *ms, ThreadEvent<ait> *evt);
 };
@@ -858,7 +859,7 @@ public:
 class LogFileWriter : public LogWriter<unsigned long> {
 	int fd;
 public:
-	void append(const LogRecord<unsigned long> &lr);
+	void append(const LogRecord<unsigned long> &lr, unsigned long idx);
 	static LogFileWriter *open(const char *fname);
 	~LogFileWriter();
 };
@@ -894,7 +895,7 @@ public:
 	LogRecord<ait> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
 	void dump() const;
 
-	virtual void append(const LogRecord<ait> &lr);
+	virtual void append(const LogRecord<ait> &lr, unsigned long idx);
 
 	/* Should only be called by GC destruct routine */
 	virtual void destruct();

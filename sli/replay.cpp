@@ -210,7 +210,7 @@ void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 
         LogRecord<ait> *lr2 = lf->read(ptr, outPtr);
 	if (lw)
-		lw->append(*lr2);
+		lw->append(*lr2, this->when.idx);
         LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");

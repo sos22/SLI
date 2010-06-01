@@ -213,7 +213,7 @@ LogFileWriter::~LogFileWriter()
 	close(fd);
 }
 
-void LogFileWriter::append(const LogRecord<unsigned long> &lr)
+void LogFileWriter::append(const LogRecord<unsigned long> &lr, unsigned long ignore)
 {
 	void *b;
 	unsigned s;
@@ -242,7 +242,7 @@ LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, unsigned _st
 template <typename ait>
 void SignalHandlers<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 {
-	lw->append(LogRecordInitialSighandlers<ait>(ThreadId(0), handlers));
+  lw->append(LogRecordInitialSighandlers<ait>(ThreadId(0), handlers), 0);
 }
 
 #define MK_LOGWRITER(t)							\
