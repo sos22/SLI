@@ -307,7 +307,8 @@ public:
 };
 
 template<typename src, typename dest> dest import_ait(src x, ImportOrigin *origin);
-template<typename ait> ait load_ait(ait x, ait addr, EventTimestamp when, EventTimestamp store);
+template<typename ait> ait load_ait(ait x, ait addr, EventTimestamp when, EventTimestamp store,
+				    ait storeAddr);
 
 template<typename abst_int_value>
 struct expression_result : public Named {
@@ -552,8 +553,10 @@ public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk<unsigned long> *allocate();
 
-	void write(EventTimestamp, unsigned offset, const unsigned long *source, unsigned nr_bytes);
-	EventTimestamp read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const;
+	void write(EventTimestamp, unsigned offset, const unsigned long *source, unsigned nr_bytes,
+		   unsigned long sa);
+	EventTimestamp read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
+			    unsigned long *sa = NULL) const;
 
 	MemoryChunk<unsigned long> *dupeSelf() const;
 	template <typename nt> MemoryChunk<nt> *abstract() const;
@@ -1693,7 +1696,8 @@ public:
 				    const Thread<ait> *thr = NULL);
 	EventTimestamp readMemory(ait start, unsigned size,
 				  ait *contents, bool ignore_protection = false,
-				  const Thread<ait> *thr = NULL);
+				  const Thread<ait> *thr = NULL,
+				  ait *storeAddr = NULL);
 	bool isAccessible(ait start, unsigned size,
 			  bool isWrite, const Thread<ait> *thr = NULL);
 	bool isWritable(ait start, unsigned size,
@@ -1845,38 +1849,42 @@ class LoadExpression : public Expression {
 public:
 	Expression *val;
 	Expression *addr;
+	Expression *storeAddr;
 	EventTimestamp when;
 	EventTimestamp store;
 protected:
-	char *mkName() const { return my_asprintf("(load@%d:%lx;%d:%lx %s -> %s)",
+	char *mkName() const { return my_asprintf("(load@%d:%lx;%d:%lx %s:%s -> %s)",
 						  when.tid._tid(), when.idx,
 						  store.tid._tid(), store.idx,
-						  addr->name(), val->name()); }
-	unsigned _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.hash() * 5) ^ (store.hash() * 7); }
+						  addr->name(), storeAddr->name(),
+						  val->name()); }
+	unsigned _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.hash() * 5) ^ (store.hash() * 7) ^ (storeAddr->hash() * 11); }
 	bool _isEqual(const Expression *other) const {
 		const LoadExpression *le = dynamic_cast<const LoadExpression *>(other);
 		if (le &&
 		    le->when == when &&
 		    le->store == store &&
 		    le->val->isEqual(val) &&
-		    le->addr->isEqual(addr))
+		    le->addr->isEqual(addr) &&
+		    le->storeAddr->isEqual(storeAddr))
 			return true;
 		else
 			return false;
 	}
 public:
 	static Expression *get(EventTimestamp when, Expression *val, Expression *addr,
-			       EventTimestamp store)
+			       Expression *storeAddr, EventTimestamp store)
 	{
 		LoadExpression *work = new (allocator.alloc()) LoadExpression();
 		work->val = val;
 		work->addr = addr;
+		work->storeAddr = storeAddr;
 		work->when = when;
 		work->store = store;
 		return intern(work);
 	}
 	EventTimestamp timestamp() const { return when; }
-	void visit(HeapVisitor &hv) const {hv(addr); hv(val);}
+	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
 };
 
 class BinaryExpression : public Expression {
@@ -2206,13 +2214,15 @@ template<> unsigned long ternary(unsigned long cond,
 }
 
 template <>
-class MemoryChunk<struct abstract_interpret_value> {
+class MemoryChunk<abstract_interpret_value> {
 public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk<abstract_interpret_value> *allocate();
 
-	void write(EventTimestamp when, unsigned offset, const abstract_interpret_value *source, unsigned nr_bytes);
-	EventTimestamp read(unsigned offset, abstract_interpret_value *dest, unsigned nr_bytes) const;
+	void write(EventTimestamp when, unsigned offset, const abstract_interpret_value *source, unsigned nr_bytes,
+		   abstract_interpret_value storeAddr);
+	EventTimestamp read(unsigned offset, abstract_interpret_value *dest, unsigned nr_bytes,
+			    abstract_interpret_value *storeAddr = NULL) const;
 
 	MemoryChunk<abstract_interpret_value> *dupeSelf() const;
 
@@ -2222,6 +2232,7 @@ public:
 		unsigned offset;
 		unsigned size;
 		EventTimestamp when;
+		abstract_interpret_value storeAddr;
 		abstract_interpret_value content[0];
 	};
 	MCLookasideEntry *headLookaside;

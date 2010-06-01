@@ -100,7 +100,7 @@ main()
 	unsigned long b[12];
 	for (unsigned x = 0; x < 12; x++)
 		b[x] = "Hello world"[x];
-	mc1->write(EventTimestamp::invalid, 0, b, 11);
+	mc1->write(EventTimestamp::invalid, 0, b, 11, 0);
 	pa1 = pmap1->introduce(mc1);
 	PMap<unsigned long> *pmap2 = pmap1->dupeSelf();
 	PMap<unsigned long> *pmap3 = pmap1->dupeSelf();
@@ -116,7 +116,7 @@ main()
 	unsigned long b2[7];
 	for (unsigned x = 0; x < 7; x++)
 		b2[x] = "goodbye"[x];
-	mc2->write(EventTimestamp::invalid, 0, b2, 7);
+	mc2->write(EventTimestamp::invalid, 0, b2, 7, 0);
 	unsigned long buf[11];
 	mc2->read(0, buf, 7);
 	unsigned char b3[11];

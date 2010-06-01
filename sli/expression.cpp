@@ -43,16 +43,17 @@ Expression *Expression::intern(Expression *e)
 
 template<> abstract_interpret_value
 load_ait(abstract_interpret_value val, abstract_interpret_value addr, EventTimestamp when,
-	 EventTimestamp store)
+	 EventTimestamp store, abstract_interpret_value storeAddr)
 {
 	abstract_interpret_value res;
 	res.v = val.v;
-	res.origin = LoadExpression::get(when, val.origin, addr.origin, store);
+	res.origin = LoadExpression::get(when, val.origin, addr.origin, storeAddr.origin, store);
 	return res;
 }
 
 template<> unsigned long
-load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestamp store)
+load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestamp store,
+	 unsigned long storeAddr)
 {
 	return x;
 }

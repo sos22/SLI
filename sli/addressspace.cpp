@@ -44,6 +44,7 @@ void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned si
 				    const Thread<ait> *thr)
 {
 	unsigned long start = force(_start);
+	unsigned off = 0;
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -57,10 +58,12 @@ void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned si
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			mc->write(when, mc_start, contents, to_copy_this_time);
+			mc->write(when, mc_start, contents, to_copy_this_time,
+				  _start + mkConst<ait>(off));
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
+			off += to_copy_this_time;
 			contents = contents + to_copy_this_time;
 		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
 			continue;
@@ -77,10 +80,11 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 					       const Thread<ait> *thr)
 {
 	ait b[16];
+	ait storeAddr;
 	memset(b, 0, sizeof(ait) * size);
 	for (unsigned x = 0; x < size; x++)
 		new (&b[x]) ait();
-	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr);
+	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr, &storeAddr);
 	expression_result<ait> res;
 	res.hi = mkConst<ait>(0);
 	res.lo = mkConst<ait>(0);
@@ -121,9 +125,9 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	   accesses.  This isn't *entirely* valid, but it makes things
 	   so much easier that it's worth it. */
 	if (!is_stack(start)) {
-		res.lo = load_ait<ait>(res.lo, start, when, sto);
+		res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr);
 		if (size > 8)
-			res.hi = load_ait<ait>(res.hi, start, when, sto);
+			res.hi = load_ait<ait>(res.hi, start, when, sto, storeAddr);
 	}
 	return res;
 }
@@ -166,7 +170,8 @@ void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 template <typename ait>
 EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 					     ait *contents, bool ignore_protection,
-					     const Thread<ait> *thr)
+					     const Thread<ait> *thr,
+					     ait *storeAddr)
 {
 	EventTimestamp when;
 	unsigned long start = force(_start);
@@ -183,7 +188,8 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			when = mc->read(mc_start, contents, to_copy_this_time);
+			when = mc->read(mc_start, contents, to_copy_this_time,
+					storeAddr);
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;

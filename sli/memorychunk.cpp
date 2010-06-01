@@ -14,7 +14,8 @@ MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::dupeSelf() const
 	return r;
 }
 
-void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, const unsigned long *source, unsigned nr_bytes)
+void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, const unsigned long *source, unsigned nr_bytes,
+				       unsigned long sa)
 {
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
@@ -22,8 +23,11 @@ void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, con
 		content[offset + x] = source[x];
 }
 
-EventTimestamp MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const
+EventTimestamp MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
+						unsigned long *storeAddr) const
 {
+	if (storeAddr)
+		*storeAddr = 0xbeeffeed;
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
 	for (unsigned x = 0; x < nr_bytes; x++)
@@ -58,9 +62,12 @@ MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::du
 
 EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 							   abstract_interpret_value *dest,
-							   unsigned nr_bytes) const
+							   unsigned nr_bytes,
+							   abstract_interpret_value *storeAddr) const
 {
 	EventTimestamp when;
+	if (storeAddr)
+		*storeAddr = mkConst<abstract_interpret_value>(0);
 	for (unsigned x = 0; x < nr_bytes; x++) {
 		bool done = false;
 		for (const MCLookasideEntry *mce = headLookaside;
@@ -69,6 +76,11 @@ EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 			if (mce->offset <= offset + x &&
 			    mce->offset + mce->size > offset + x) {
 				dest[x] = mce->content[offset + x - mce->offset];
+				if (storeAddr) {
+					*storeAddr = mce->storeAddr +
+						mkConst<abstract_interpret_value>(offset + x - mce->offset);
+					storeAddr = NULL;
+				}
 				when = mce->when;
 				done = true;
 			}
@@ -86,7 +98,8 @@ EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 						  unsigned offset,
 						  const abstract_interpret_value *source,
-						  unsigned nr_bytes)
+						  unsigned nr_bytes,
+						  abstract_interpret_value sa)
 {
 	MCLookasideEntry *newmcl =
 		(MCLookasideEntry *)LibVEX_Alloc_Sized(&mcl_allocator,
@@ -95,6 +108,7 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 	newmcl->offset = offset;
 	newmcl->size = nr_bytes;
 	newmcl->when = when;
+	newmcl->storeAddr = sa;
 	for (unsigned x = 0; x < nr_bytes; x++)
 		newmcl->content[x] = source[x];
 	headLookaside = newmcl;
@@ -108,6 +122,7 @@ static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
 		(const class MemoryChunk<abstract_interpret_value>::MCLookasideEntry *)_ctxt;
 	for (unsigned x = 0; x < mcl->size; x++)
 		visit_aiv(mcl->content[x], hv);
+	visit_aiv(mcl->storeAddr, hv);
 	hv(mcl->next);
 }
 

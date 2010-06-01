@@ -330,6 +330,7 @@ public:
 		return max<EventTimestamp>(history->timestamp(),
 					    cond->timestamp());
 	}
+	bool isLogical() const { return cond->isLogical(); }
 };
 
 VexAllocTypeWrapper<ExpressionRip> ExpressionRip::allocator;
@@ -368,8 +369,53 @@ public:
 	void visit(HeapVisitor &hv) const { hv(addr); }
 	EventTimestamp timestamp() const { return when; }
 };
-
 VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
+
+class ExpressionLastStore : public Expression {
+public:
+	EventTimestamp load;
+	EventTimestamp store;
+	Expression *vaddr;
+private:
+	static VexAllocTypeWrapper<ExpressionLastStore> allocator;
+	ExpressionLastStore(EventTimestamp _load, EventTimestamp _store,
+			    Expression *_vaddr)
+		: load(_load), store(_store), vaddr(_vaddr)
+	{
+	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(lastStore@%d:%lx:%s -> %d:%lx)",
+				   load.tid._tid(),
+				   load.idx,
+				   vaddr->name(),
+				   store.tid._tid(),
+				   store.idx);
+	}
+	unsigned _hash() const {
+		return load.hash() ^ store.hash() ^ vaddr->hash();
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionLastStore *oth = dynamic_cast<const ExpressionLastStore *>(other);
+		if (oth &&
+		    load == oth->load &&
+		    store == oth->store &&
+		    vaddr->isEqual(oth->vaddr))
+			return true;
+		else
+			return false;
+	}
+public:
+	static Expression *get(EventTimestamp load, EventTimestamp store,
+			       Expression *vaddr)
+	{
+		return new (allocator.alloc()) ExpressionLastStore(load, store, vaddr);
+	}
+	void visit(HeapVisitor &hv) const { hv(vaddr); }
+	EventTimestamp timestamp() const { return load; }
+	bool isLogical() const { return true; }
+};
+VexAllocTypeWrapper<ExpressionLastStore> ExpressionLastStore::allocator;
 
 void History::splitAt(unsigned idx, History **firstBit, History **secondBit) const
 {
@@ -464,6 +510,10 @@ syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_v
 		return syntax_check_expression(le->val, last_valid_idx, why) &&
 			syntax_check_expression(le->addr, last_valid_idx, why);
 	}
+
+	if (ExpressionLastStore *els =
+	    dynamic_cast<ExpressionLastStore *>(e))
+		return syntax_check_expression(els->vaddr, last_valid_idx, why);
 
 	abort();
 }
@@ -810,6 +860,12 @@ fixup_expression(Expression **e,
 		return;
 	}
 
+	if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(*e)) {
+		fixup_expression(&els->vaddr, last_valid_idx, spare_histories, ms,
+				 global_lf, global_lf_start);
+		return;
+	}
+
 	abort();
 }
 
@@ -1015,15 +1071,49 @@ static Expression *refine(ExpressionRip *er,
 		er->prefix_rips);
 }
 
+/* We handle precisely one interesting case when refining ==:
+   
+   (load@L:S la:sa -> val) == R
+
+   becomes
+
+   laststore(L,S,la) && (la == sa) && (val == R)
+
+   i.e. in order for the load to be satisfied by the store, the store
+   has to be the last write to the load address, and the load and
+   store virtual addresses have to match up.  This allows us to
+   ``unwrap'' the load expression, so the meat of the expression is
+   just val == R.
+*/
+static Expression *
+refine(equals *eq, 
+       const MachineState<abstract_interpret_value> *ms,
+       LogReader<abstract_interpret_value> *lf,
+       LogReaderPtr ptr,
+       bool *progress)
+{
+	if (LoadExpression *le = dynamic_cast<LoadExpression *>(eq->l)) {
+		*progress = true;
+		return logicaland::get(
+			ExpressionLastStore::get(le->when, le->store, le->addr),
+			logicaland::get(
+				equals::get(le->addr, le->storeAddr),
+				equals::get(le->val, eq->r)));
+	}
+	return eq;
+}
+
 Expression *refine(Expression *expr,
 		   const MachineState<abstract_interpret_value> *ms,
 		   LogReader<abstract_interpret_value> *lf,
 		   LogReaderPtr ptr,
 		   bool *progress)
 {
-	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr))
+	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr)) {
 		return refine(er, ms, lf, ptr, progress);
-	else {
+	} else if (equals *eq = dynamic_cast<equals *>(expr)) {
+		return refine(eq, ms, lf, ptr, progress);
+	} else {
 		printf("Cannot refine %s\n", expr->name());
 		return expr;
 	}
