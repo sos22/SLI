@@ -512,9 +512,25 @@ syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_v
 	}
 
 	if (ExpressionLastStore *els =
-	    dynamic_cast<ExpressionLastStore *>(e))
+	    dynamic_cast<ExpressionLastStore *>(e)) {
+		if (els->load.idx > last_valid_idx[els->load.tid]) {
+			printf("Syntax check failed at %s: load %d:%ld is after %ld\n",
+			       els->name(), els->load.tid._tid(),
+			       els->load.idx, last_valid_idx[els->load.tid]);
+			if (why)
+				*why = els->load;
+			return false;
+		}
+		if (els->store.idx > last_valid_idx[els->store.tid]) {
+			printf("Syntax check failed at %s: store %d:%ld is after %ld\n",
+			       els->name(), els->store.tid._tid(),
+			       els->store.idx, last_valid_idx[els->store.tid]);
+			if (why)
+				*why = els->store;
+			return false;
+		}
 		return syntax_check_expression(els->vaddr, last_valid_idx, why);
-
+	}
 	abort();
 }
 
