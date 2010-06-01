@@ -417,6 +417,47 @@ public:
 };
 VexAllocTypeWrapper<ExpressionLastStore> ExpressionLastStore::allocator;
 
+class ExpressionHappensBefore : public Expression {
+public:
+	EventTimestamp before;
+	EventTimestamp after;
+private:
+	static const VexAllocTypeWrapper<ExpressionHappensBefore> allocator;
+	ExpressionHappensBefore(EventTimestamp _before, EventTimestamp _after)
+		: before(_before), after(_after)
+	{
+	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(before %d:%lx %d:%lx)",
+				   before.tid._tid(),
+				   before.idx,
+				   after.tid._tid(),
+				   after.idx);
+	}
+	unsigned _hash() const {
+		return before.hash() ^ after.hash();
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionHappensBefore *oth = dynamic_cast<const ExpressionHappensBefore *>(other);
+		if (oth &&
+		    oth->before == before &&
+		    oth->after == after)
+			return true;
+		else
+			return false;
+	}
+public:
+	static Expression *get(EventTimestamp before, EventTimestamp after)
+	{
+		return new (allocator.alloc()) ExpressionHappensBefore(before, after);
+	}
+	EventTimestamp timestamp() const { return after; }
+	bool isLogical() const { return true; }
+	void visit(HeapVisitor &hv) const {}
+};
+const VexAllocTypeWrapper<ExpressionHappensBefore> ExpressionHappensBefore::allocator;
+
 void History::splitAt(unsigned idx, History **firstBit, History **secondBit) const
 {
 	History *first;
@@ -530,6 +571,27 @@ syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_v
 			return false;
 		}
 		return syntax_check_expression(els->vaddr, last_valid_idx, why);
+	}
+
+	if (ExpressionHappensBefore *ehb =
+	    dynamic_cast<ExpressionHappensBefore *>(e)) {
+		if (ehb->before.idx > last_valid_idx[ehb->before.tid]) {
+			printf("Syntax check failed at %s: %d:%ld is after %ld\n",
+			       ehb->name(), ehb->before.tid._tid(),
+			       ehb->before.idx, last_valid_idx[ehb->before.tid]);
+			if (why)
+				*why = ehb->before;
+			return false;
+		}
+		if (ehb->after.idx > last_valid_idx[ehb->after.tid]) {
+			printf("Syntax check failed at %s: %d:%ld is after %ld\n",
+			       ehb->name(), ehb->after.tid._tid(),
+			       ehb->after.idx, last_valid_idx[ehb->after.tid]);
+			if (why)
+				*why = ehb->after;
+			return false;
+		}
+		return true;
 	}
 	abort();
 }
@@ -1119,6 +1181,17 @@ refine(equals *eq,
 	return eq;
 }
 
+Expression *refine(ExpressionLastStore *expr,
+		   const MachineState<abstract_interpret_value> *ms,
+		   LogReader<abstract_interpret_value> *lf,
+		   LogReaderPtr ptr,
+		   bool *progress)
+{
+#warning XXX This isn't anywhere near complete.'
+	*progress = true;
+	return ExpressionHappensBefore::get(expr->store, expr->load);
+}
+
 Expression *refine(Expression *expr,
 		   const MachineState<abstract_interpret_value> *ms,
 		   LogReader<abstract_interpret_value> *lf,
@@ -1129,6 +1202,8 @@ Expression *refine(Expression *expr,
 		return refine(er, ms, lf, ptr, progress);
 	} else if (equals *eq = dynamic_cast<equals *>(expr)) {
 		return refine(eq, ms, lf, ptr, progress);
+	} else if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(expr)) {
+		return refine(els, ms, lf, ptr, progress);
 	} else {
 		printf("Cannot refine %s\n", expr->name());
 		return expr;
