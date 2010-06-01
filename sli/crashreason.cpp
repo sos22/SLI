@@ -450,7 +450,14 @@ protected:
 public:
 	static Expression *get(EventTimestamp before, EventTimestamp after)
 	{
-		return new (allocator.alloc()) ExpressionHappensBefore(before, after);
+		if (before.tid == after.tid) {
+			if (before.idx < after.idx)
+				return ConstExpression::get(1);
+			else
+				return ConstExpression::get(0);
+		} else {
+			return new (allocator.alloc()) ExpressionHappensBefore(before, after);
+		}
 	}
 	EventTimestamp timestamp() const { return after; }
 	bool isLogical() const { return true; }
