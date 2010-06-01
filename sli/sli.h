@@ -339,7 +339,13 @@ public:
 	RegisterSet(const VexGuestAMD64State &r);
 	RegisterSet() {};
 	underlying get_reg(unsigned idx) const { assert(idx < NR_REGS); return registers[idx]; }
-	void set_reg(unsigned idx, underlying val) { assert(idx < NR_REGS); registers[idx] = val; }
+	void set_reg(unsigned idx, underlying val)
+	{
+		assert(idx < NR_REGS);
+		registers[idx] = val;
+		if (idx == REGISTER_IDX(RSP))
+			mark_as_stack(registers[idx]);
+	}
 	underlying rip() const { return get_reg(REGISTER_IDX(RIP)); }
 	underlying rsp() const { return get_reg(REGISTER_IDX(RSP)); }
 
@@ -2025,10 +2031,15 @@ struct abstract_interpret_value {
 	mutable char *_name;
 	unsigned long v;
 	Expression *origin;
-	abstract_interpret_value(unsigned long _v, Expression *_origin) : _name(NULL), v(_v), origin(_origin) {assert(origin);}
-	abstract_interpret_value() : _name(NULL), v(0), origin(NULL) {}
+	bool isStack;
+	abstract_interpret_value(unsigned long _v, Expression *_origin,
+				 bool _isStack = false)
+		: _name(NULL), v(_v), origin(_origin), isStack(_isStack)
+	{assert(origin);}
+	abstract_interpret_value() : _name(NULL), v(0), origin(NULL), isStack(false) {}
 	template <typename ait> static abstract_interpret_value import(ait x,
-								       ImportOrigin *origin);
+								       ImportOrigin *origin,
+								       bool isStack = false);
 	const char *name() const {
 		if (!_name)
 			_name = vex_asprintf("{%lx:%s}", v, origin->name());
@@ -2071,33 +2082,63 @@ static inline unsigned long force(unsigned long x)
 	return x;
 }
 
-#define OP(x, name)								\
+static inline bool is_stack(unsigned long x)
+{
+	return false;
+}
+
+static inline bool is_stack(abstract_interpret_value &x)
+{
+	return x.isStack;
+}
+
+static inline void mark_as_stack(unsigned long x)
+{
+}
+
+static inline void mark_as_stack(abstract_interpret_value &aiv)
+{
+	aiv.isStack = true;
+}
+
+/* We track whether an AIV is likely to point at the stack.  The rule
+   is basically that if the operator is ``stack-like'', and one of the
+   operands is probably-stack, and the other operand is a constant,
+   then the result is also probably-stack.  The RSP register is also
+   permanently marked as probably-stack. */
+#define OP(x, name, stackLike)						\
 	static inline abstract_interpret_value operator x(const abstract_interpret_value &aiv, \
 							  const abstract_interpret_value &cnt) \
 	{								\
 		abstract_interpret_value res;				\
 		res.v = aiv.v x cnt.v;					\
 		res.origin = name::get(aiv.origin, cnt.origin);		\
+		res.isStack = false;					\
+		unsigned long c;					\
+		if (stackLike &&					\
+			((aiv.isStack && cnt.origin->isConstant(&c)) ||	\
+			 (aiv.origin->isConstant(&c) && cnt.isStack)))	\
+			res.isStack = true;				\
 		return res;						\
 	}
 
-OP(<<, lshift)
-OP(>>, rshift)
-OP(&, bitwiseand)
-OP(|, bitwiseor)
-OP(^, bitwisexor)
-OP(+, plus)
-OP(*, times)
-OP(/, divide)
-OP(%, modulo)
-OP(-, subtract)
-OP(>=, greaterthanequals)
-OP(<, lessthan)
-OP(<=, lessthanequals)
-OP(==, equals)
-OP(!=, notequals)
-OP(||, logicalor)
-OP(&&, logicaland)
+OP(<<, lshift, false)
+OP(>>, rshift, false)
+OP(&, bitwiseand, true)
+OP(|, bitwiseor, false)
+OP(^, bitwisexor, false)
+OP(+, plus, true)
+OP(*, times, false)
+OP(/, divide, false)
+OP(%, modulo, false)
+OP(-, subtract, true)
+OP(>=, greaterthanequals, false)
+OP(<, lessthan, false)
+OP(<=, lessthanequals, false)
+OP(==, equals, false)
+OP(!=, notequals, false)
+OP(||, logicalor, false)
+OP(&&, logicaland, false)
 #undef OP
 
 static inline abstract_interpret_value operator !(const abstract_interpret_value &aiv)

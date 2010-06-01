@@ -83,49 +83,47 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr);
 	expression_result<ait> res;
 	res.hi = mkConst<ait>(0);
+	res.lo = mkConst<ait>(0);
 	switch(size) {
-	case 1:
-		res.lo = load_ait<ait>(b[0], start, when, sto);
-		break;
-	case 2:
-		res.lo = load_ait<ait>(b[0] + (b[1] << mkConst<ait>(8)), start, when, sto);
-		break;
-	case 4:
-		res.lo = load_ait<ait>(b[0] +
-				       (b[1] << mkConst<ait>(8)) +
-				       (b[2] << mkConst<ait>(16)) +
-				       (b[3] << mkConst<ait>(24)),
-				       start,
-				       when, sto);
-		break;
 	case 16:
-		res.hi = load_ait<ait>(b[8] +
-				       (b[9] << mkConst<ait>(8)) +
-				       (b[10] << mkConst<ait>(16)) +
-				       (b[11] << mkConst<ait>(24)) +
-				       (b[12] << mkConst<ait>(32)) +
-				       (b[13] << mkConst<ait>(40)) +
-				       (b[14] << mkConst<ait>(48)) +
-				       (b[15] << mkConst<ait>(56)),
-				       start,
-				       when,
-				       sto);
-		/* fall through */
+		res.hi = b[8] +
+			(b[9] << mkConst<ait>(8)) +
+			(b[10] << mkConst<ait>(16)) +
+			(b[11] << mkConst<ait>(24)) +
+			(b[12] << mkConst<ait>(32)) +
+			(b[13] << mkConst<ait>(40)) +
+			(b[14] << mkConst<ait>(48)) +
+			(b[15] << mkConst<ait>(56));
+		/* Fall through */
 	case 8:
-		res.lo = load_ait<ait>(b[0] +
-				       (b[1] << mkConst<ait>(8)) +
-				       (b[2] << mkConst<ait>(16)) +
-				       (b[3] << mkConst<ait>(24)) +
-				       (b[4] << mkConst<ait>(32)) +
-				       (b[5] << mkConst<ait>(40)) +
-				       (b[6] << mkConst<ait>(48)) +
-				       (b[7] << mkConst<ait>(56)),
-				       start,
-				       when,
-				       sto);
+		res.lo = res.lo +
+			(b[7] << mkConst<ait>(56)) +
+			(b[6] << mkConst<ait>(48)) +
+			(b[5] << mkConst<ait>(40)) +
+			(b[4] << mkConst<ait>(32));
+		/* Fall through */
+	case 4:
+		res.lo = res.lo +
+			(b[3] << mkConst<ait>(24)) +
+			(b[2] << mkConst<ait>(16));
+		/* Fall through */
+	case 2:
+		res.lo = res.lo + (b[1] << mkConst<ait>(8));
+		/* Fall through */
+	case 1:
+		res.lo = res.lo + b[0];
 		break;
 	default:
 		abort();
+	}
+
+	/* We cheat slightly and assume that you don't race on stack
+	   accesses.  This isn't *entirely* valid, but it makes things
+	   so much easier that it's worth it. */
+	if (!is_stack(start)) {
+		res.lo = load_ait<ait>(res.lo, start, when, sto);
+		if (size > 8)
+			res.hi = load_ait<ait>(res.hi, start, when, sto);
 	}
 	return res;
 }

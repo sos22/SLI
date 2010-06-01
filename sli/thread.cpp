@@ -126,7 +126,8 @@ void RegisterSet<ait>::abstract(RegisterSet<new_type> *out) const
 	for (unsigned x = 0; x < NR_REGS; x++)
 		out->registers[x] = new_type::import(
 			registers[x],
-			ImportOriginInitialRegister::get(x));
+			ImportOriginInitialRegister::get(x),
+			x == REGISTER_IDX(RSP));
 }
 
 template <typename ait> template <typename new_type>

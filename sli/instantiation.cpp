@@ -86,11 +86,13 @@ RegisterSet<abstract_interpret_value>::RegisterSet(const VexGuestAMD64State &r)
 
 template <>
 abstract_interpret_value abstract_interpret_value::import(unsigned long x,
-							  ImportOrigin *origin)
+							  ImportOrigin *origin,
+							  bool isStack)
 {
 	abstract_interpret_value v;
 	v.v = x;
 	v.origin = ImportExpression::get(x, origin);
+	v.isStack = isStack;
 	return v;
 }
 
