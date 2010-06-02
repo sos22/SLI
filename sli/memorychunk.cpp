@@ -88,8 +88,7 @@ EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 		if (!done) {
 			unsigned long b;
 			underlying->read(offset + x, &b, 1);
-			dest[x] = import_ait<unsigned long, abstract_interpret_value>(b,
-										      ImportOriginInitialMemory::get(1, base + offset + x));
+			dest[x] = mkConst<abstract_interpret_value>(b);
 		}
 	}
 	return when;

@@ -124,10 +124,7 @@ void RegisterSet<ait>::abstract(RegisterSet<new_type> *out) const
 {
 	memset(out, 0, sizeof(*out));
 	for (unsigned x = 0; x < NR_REGS; x++)
-		out->registers[x] = new_type::import(
-			registers[x],
-			ImportOriginInitialRegister::get(x),
-			x == REGISTER_IDX(RSP));
+		out->registers[x] = mkConst<new_type>(registers[x]);
 }
 
 template <typename ait> template <typename new_type>
@@ -135,10 +132,10 @@ void expression_result_array<ait>::abstract(expression_result_array<new_type> *o
 {
 	memset(out, 0, sizeof(*out));
 	out->setSize(nr_entries);
-	for (unsigned x = 0; x < nr_entries; x++)
-		arr[x].abstract<new_type>(
-			&out->arr[x],
-			ImportOriginInitialTemporary::get(x));
+	for (unsigned x = 0; x < nr_entries; x++) {
+		out->arr[x].lo = mkConst<new_type>(arr[x].lo);
+		out->arr[x].hi = mkConst<new_type>(arr[x].hi);
+	}
 }
 
 template <typename ait> VexAllocTypeWrapper<Thread<ait> > Thread<ait>::allocator;

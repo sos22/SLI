@@ -198,35 +198,6 @@ Expression *plus::get(Expression *l, Expression *r)
 		}
 	}
 
-	/* We rewrite (import_memory:A << x) + import_memory:B
-	   to import_memory:B if A == B + sizeof(B) and
-	   x == 8 * sizeof(B). */
-	{
-		lshift *llsh = dynamic_cast<lshift *>(l);
-		ImportExpression *rimport = dynamic_cast<ImportExpression *>(r);
-		if (llsh && rimport) {
-			ImportExpression *limport = dynamic_cast<ImportExpression *>(llsh->l);
-			ImportOriginInitialMemory *rorig =
-				dynamic_cast<ImportOriginInitialMemory *>(rimport->origin);
-			unsigned long x;
-			if (rorig &&
-			    limport &&
-			    llsh->r->isConstant(&x)) {
-				ImportOriginInitialMemory *lorig =
-					dynamic_cast<ImportOriginInitialMemory *>(limport->origin);
-				if (lorig &&
-				    lorig->pa == rorig->pa + rorig->size &&
-				    rorig->size + lorig->size <= 8 &&
-				    x == 8 * rorig->size)
-					return ImportExpression::get(
-						rimport->v | (limport->v << x),
-						ImportOriginInitialMemory::get(
-							lorig->size + rorig->size,
-							rorig->pa));
-			}
-		}
-	}
-
 	if (plus *ll = dynamic_cast<plus *>(l))				
 		return plus::get(ll->l, plus::get(ll->r, r));		
 	plus *work = new (allocator.alloc()) plus();			
@@ -444,33 +415,6 @@ ImportOrigin *ImportOriginSymbolicFailure::get()
 	if (!w)
 		w = new ImportOriginSymbolicFailure();
 	return w;
-}
-
-ImportOrigin *ImportOriginInitialRegister::get(unsigned x)
-{
-	return new ImportOriginInitialRegister(x);
-}
-
-ImportOrigin *ImportOriginInitialTemporary::get(unsigned x)
-{
-	return new ImportOriginInitialTemporary(x);
-}
-
-ImportOriginInitialMemory *ImportOriginInitialMemory::heads[ImportOriginInitialMemory::nr_heads];
-ImportOrigin *ImportOriginInitialMemory::get(unsigned size, PhysicalAddress pa)
-{
-	unsigned h = (size ^ pa._pa / 16) % nr_heads;
-	ImportOriginInitialMemory *mh;
-	for (mh = heads[h]; mh; mh = mh->next)
-		if (mh->size == size && mh->pa == pa)
-			break;
-	if (mh) {
-		/* Pull-to-front */
-		mh->remove_from_chain();
-		mh->insert_in_chain();
-		return mh;
-	}
-	return new ImportOriginInitialMemory(size, pa);
 }
 
 ImportOriginInitialValue *ImportOriginInitialValue::w;
