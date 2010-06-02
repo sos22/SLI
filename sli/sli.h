@@ -239,8 +239,10 @@ class ImportOriginInitialMemory : public ImportOriginInitialValue {
 	static const unsigned nr_heads = 1024;
 	static ImportOriginInitialMemory *heads[nr_heads];
 	ImportOriginInitialMemory *next, **pprev;
+public:
 	unsigned size;
 	PhysicalAddress pa;
+private:
 	void remove_from_chain()
 	{
 		if (next) next->pprev = pprev;
@@ -1819,6 +1821,7 @@ class ImportExpression : public Expression {
 	static VexAllocTypeWrapper<ImportExpression,
 				   visit_object<ImportExpression>,
 				   destruct_object<ImportExpression> > allocator;
+public:
         unsigned long v;
 	ImportOrigin *origin;
 protected:

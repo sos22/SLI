@@ -197,7 +197,36 @@ Expression *plus::get(Expression *l, Expression *r)
 				return bitwiseor::get(land, rand);
 		}
 	}
-	
+
+	/* We rewrite (import_memory:A << x) + import_memory:B
+	   to import_memory:B if A == B + sizeof(B) and
+	   x == 8 * sizeof(B). */
+	{
+		lshift *llsh = dynamic_cast<lshift *>(l);
+		ImportExpression *rimport = dynamic_cast<ImportExpression *>(r);
+		if (llsh && rimport) {
+			ImportExpression *limport = dynamic_cast<ImportExpression *>(llsh->l);
+			ImportOriginInitialMemory *rorig =
+				dynamic_cast<ImportOriginInitialMemory *>(rimport->origin);
+			unsigned long x;
+			if (rorig &&
+			    limport &&
+			    llsh->r->isConstant(&x)) {
+				ImportOriginInitialMemory *lorig =
+					dynamic_cast<ImportOriginInitialMemory *>(limport->origin);
+				if (lorig &&
+				    lorig->pa == rorig->pa + rorig->size &&
+				    rorig->size + lorig->size <= 8 &&
+				    x == 8 * rorig->size)
+					return ImportExpression::get(
+						rimport->v | (limport->v << x),
+						ImportOriginInitialMemory::get(
+							lorig->size + rorig->size,
+							rorig->pa));
+			}
+		}
+	}
+
 	if (plus *ll = dynamic_cast<plus *>(l))				
 		return plus::get(ll->l, plus::get(ll->r, r));		
 	plus *work = new (allocator.alloc()) plus();			
