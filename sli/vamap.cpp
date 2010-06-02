@@ -278,7 +278,9 @@ void VAMap::addTranslation(unsigned long start,
 			   AllocFlags alf)
 {
 #if TRACE_VAMAP
-	printf("%p: Add translation %lx -> %lx\n", this, start, pa._pa);
+	printf("%p: Add translation %lx -> %lx (%d,%d,%d,%d)\n", this, start, pa._pa,
+	       prot.readable, prot.writable, prot.executable,
+	       alf.expandsDown);
 #endif
 	forceCOW();
 
