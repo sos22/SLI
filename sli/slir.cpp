@@ -267,7 +267,8 @@ main(int argc, char *argv[])
 	printf("Good states:\n");
 	for (unsigned x = 0; x < e->goodStates->size(); x++) {
 		printf("State %d\n", x);
-		MemoryTrace<unsigned long> mt(*e->goodStates->index(x)->history,
+		MemoryTrace<unsigned long> mt(ms_base,
+					      e->goodStates->index(x)->history,
 					      MemLog<unsigned long>::startPtr());
 		CommunicationGraph ct(&mt);
 		ct.dump();
@@ -276,7 +277,8 @@ main(int argc, char *argv[])
 	printf("Bad states:\n");
 	for (unsigned x = 0; x < e->badStates->size(); x++) {
 		printf("State %d\n", x);
-		MemoryTrace<unsigned long> mt(*e->badStates->index(x)->history,
+		MemoryTrace<unsigned long> mt(ms_base,
+					      e->badStates->index(x)->history,
 					      MemLog<unsigned long>::startPtr());
 		CommunicationGraph ct(&mt);
 		ct.dump();

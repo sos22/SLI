@@ -1166,11 +1166,11 @@ public:
 template <typename ait>
 class MemoryAccess : public Named {
 public:
-	ThreadId tid;
+	EventTimestamp when;
 	ait addr;
 	unsigned size;
-	MemoryAccess(ThreadId _tid, ait _addr, unsigned _size)
-		: tid(_tid),
+	MemoryAccess(EventTimestamp _when, ait _addr, unsigned _size)
+		: when(_when),
 		  addr(_addr),
 		  size(_size)
 	{
@@ -1223,16 +1223,12 @@ template <typename ait>
 class MemoryAccessLoad : public MemoryAccess<ait> {
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("%d: Load(%x)", this->tid._tid(),
+		return my_asprintf("%d: Load(%x)", this->when.tid._tid(),
 				   this->size);
 	}
 public:
-	MemoryAccessLoad(ThreadId tid, const class LoadEvent<ait> &evt)
-		: MemoryAccess<ait>(tid, evt.addr, evt.size)
-	{
-	}
-	MemoryAccessLoad(const LogRecordLoad<ait> &lrl)
-		: MemoryAccess<ait>(lrl.thread(), lrl.ptr, lrl.size)
+	MemoryAccessLoad(const class LoadEvent<ait> &evt)
+		: MemoryAccess<ait>(evt.when, evt.addr, evt.size)
 	{
 	}
 	virtual bool isLoad() { return true; }
@@ -1283,16 +1279,12 @@ class MemoryAccessStore : public MemoryAccess<ait> {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("%d: Store(%x)",
-				   this->tid._tid(),
+				   this->when.tid._tid(),
 				   this->size);
 	}
 public:
-	MemoryAccessStore(ThreadId tid, const class StoreEvent<ait> &evt)
-		: MemoryAccess<ait>(tid, evt.addr, evt.size)
-	{
-	}
-	MemoryAccessStore(const LogRecordStore<ait> &lrs)
-		: MemoryAccess<ait>(lrs.thread(), lrs.ptr, lrs.size)
+	MemoryAccessStore(const class StoreEvent<ait> &evt)
+		: MemoryAccess<ait>(evt.when, evt.addr, evt.size)
 	{
 	}
 	virtual bool isLoad() { return false; }
@@ -1307,11 +1299,11 @@ public:
 		for (unsigned x; x < content.size(); x++)
 			delete content[x];
 	}
+	MemoryTrace(const MachineState<ait> *, LogReader<ait> *, LogReaderPtr);
 	size_t size() const { return content.size(); }
 	MemoryAccess<ait> *&operator[](unsigned idx) { return content[idx]; }
 	void push_back(MemoryAccess<ait> *x) { content.push_back(x); }
 	MemoryTrace();
-	MemoryTrace(const LogReader<ait> &lr, LogReaderPtr start);
 	void dump() const;
 };
 

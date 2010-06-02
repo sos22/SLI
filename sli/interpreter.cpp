@@ -1279,9 +1279,9 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 			return res;
 		}
 		if (LoadEvent<ait> *lr = dynamic_cast<LoadEvent <ait> * > (evt)) {
-		        work->push_back(new MemoryAccessLoad<ait>(tid, *lr));
+		        work->push_back(new MemoryAccessLoad<ait>(*lr));
 	        } else if (StoreEvent<ait> *sr = dynamic_cast<StoreEvent<ait> *>(evt)) {
-	                work->push_back(new MemoryAccessStore<ait>(tid, *sr));
+	                work->push_back(new MemoryAccessStore<ait>(*sr));
 		}
 		max_events--;
 	}
