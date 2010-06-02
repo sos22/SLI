@@ -1086,8 +1086,6 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
 	EventTimestamp store;
 	EventTimestamp load;
 	Expression *addr;
-	bool seenStore;
-	bool seenLoad;
 	static const VexAllocTypeWrapper<LastStoreRefiner> allocator;
 public:
 	Expression *result;
@@ -1100,8 +1098,6 @@ public:
 		: store(_store),
 		  load(_load),
 		  addr(_addr),
-		  seenStore(false),
-		  seenLoad(false),
 		  result(_result)
 	{
 	}
@@ -1121,21 +1117,9 @@ void
 LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 			 const ThreadEvent<abstract_interpret_value> *evt)
 {
-	if (seenLoad)
-		return;
 	if (const StoreEvent<abstract_interpret_value> *se =
 	    dynamic_cast<const StoreEvent<abstract_interpret_value> *>(evt)) {
-		if (seenStore) {
-			result =
-				logicaland::get(
-					result,
-					logicalnot::get(
-						equals::get(
-							se->addr.origin,
-							addr)));
-		} else if (evt->when == store) {
-			seenStore = true;
-		} else {
+		if (evt->when != store) {
 			result =
 				logicaland::get(
 					result,
@@ -1144,14 +1128,13 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 							equals::get(
 								se->addr.origin,
 								addr)),
-						ExpressionHappensBefore::get(
-							evt->when,
-							store)));
-		}
-	} else if (dynamic_cast<const LoadEvent<abstract_interpret_value> *>(evt)) {
-		if (evt->when == load) {
-			assert(seenStore);
-			seenLoad = true;
+						logicalor::get(
+							ExpressionHappensBefore::get(
+								evt->when,
+								store),
+							ExpressionHappensBefore::get(
+								load,
+								evt->when))));
 		}
 	}
 }
