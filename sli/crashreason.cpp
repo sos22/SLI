@@ -1135,12 +1135,6 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 							addr)));
 		} else if (evt->when == store) {
 			seenStore = true;
-			result =
-				logicaland::get(
-					result,
-					equals::get(
-						se->addr.origin,
-						addr));
 		} else {
 			result =
 				logicaland::get(
