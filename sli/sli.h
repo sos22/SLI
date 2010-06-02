@@ -980,9 +980,11 @@ public:
 template <typename ait>
 class StoreEvent : public ThreadEvent<ait> {
 	friend class MemoryAccessStore<ait>;
+public:
 	ait addr;
 	unsigned size;
 	expression_result<ait> data;
+private:
 	StoreEvent(EventTimestamp when, ait addr, unsigned size, expression_result<ait> data);
 	static VexAllocTypeWrapper<StoreEvent<ait> > allocator;
 protected:

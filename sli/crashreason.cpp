@@ -1077,6 +1077,91 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	return res;
 }
 
+
+/* Takes the content of a last-store expression and compares it with a
+   sample execution, building an expression which captures what's
+   necessary for the last store to happen in that execution.  We do
+   not look at anything past the end of the execution, though. */
+class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
+	EventTimestamp store;
+	EventTimestamp load;
+	Expression *addr;
+	bool seenStore;
+	bool seenLoad;
+	static const VexAllocTypeWrapper<LastStoreRefiner> allocator;
+public:
+	Expression *result;
+	void record(Thread<abstract_interpret_value> *thr,
+		    const ThreadEvent<abstract_interpret_value> *evt);
+	LastStoreRefiner(EventTimestamp _store,
+			 EventTimestamp _load,
+			 Expression *_addr,
+			 Expression *_result = ConstExpression::get(1))
+		: store(_store),
+		  load(_load),
+		  addr(_addr),
+		  seenStore(false),
+		  seenLoad(false),
+		  result(_result)
+	{
+	}
+	static void *operator new(size_t s)
+	{
+		return (void *)LibVEX_Alloc_Sized(&allocator.type, s);
+	}
+	static void operator delete(void *x)
+	{
+		abort();
+	}
+	void visit(HeapVisitor &hv) const { hv(addr); hv(result); }
+	void destruct() {}
+};
+const VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
+void
+LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
+			 const ThreadEvent<abstract_interpret_value> *evt)
+{
+	if (seenLoad)
+		return;
+	if (const StoreEvent<abstract_interpret_value> *se =
+	    dynamic_cast<const StoreEvent<abstract_interpret_value> *>(evt)) {
+		if (seenStore) {
+			result =
+				logicaland::get(
+					result,
+					logicalnot::get(
+						equals::get(
+							se->addr.origin,
+							addr)));
+		} else if (evt->when == store) {
+			seenStore = true;
+			result =
+				logicaland::get(
+					result,
+					equals::get(
+						se->addr.origin,
+						addr));
+		} else {
+			result =
+				logicaland::get(
+					result,
+					logicalor::get(
+						logicalnot::get(
+							equals::get(
+								se->addr.origin,
+								addr)),
+						ExpressionHappensBefore::get(
+							evt->when,
+							store)));
+		}
+	} else if (dynamic_cast<const LoadEvent<abstract_interpret_value> *>(evt)) {
+		if (evt->when == load) {
+			assert(seenStore);
+			seenLoad = true;
+		}
+	}
+}
+
 static Expression *refine(Expression *expr,
 			  const MachineState<abstract_interpret_value> *ms,
 			  LogReader<abstract_interpret_value> *lf,
@@ -1091,8 +1176,6 @@ static Expression *refine(ExpressionRip *er,
 			  LogReaderPtr ptr,
 			  bool *progress)
 {
-	printf("Refine %s\n", er->name());
-
 	/* Try to refine the subcondition first, since that's usually
 	 * cheaper. */
 	Expression *newSubCond;
@@ -1195,8 +1278,17 @@ Expression *refine(ExpressionLastStore *expr,
 		   bool *progress)
 {
 #warning XXX This isn't anywhere near complete.'
+	LastStoreRefiner *lsr =
+		new LastStoreRefiner(
+			expr->store,
+			expr->load,
+			expr->vaddr,
+			ExpressionHappensBefore::get(expr->store, expr->load));
+	VexGcRoot r((void **)&lsr, "r");
+	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
+	i.replayLogfile(lf, ptr, NULL, NULL, lsr);
 	*progress = true;
-	return ExpressionHappensBefore::get(expr->store, expr->load);
+	return lsr->result;
 }
 
 Expression *refine(Expression *expr,
