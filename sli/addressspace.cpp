@@ -124,7 +124,10 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	/* We cheat slightly and assume that you don't race on stack
 	   accesses.  This isn't *entirely* valid, but it makes things
 	   so much easier that it's worth it. */
-	if (!is_stack(start)) {
+	if (!is_stack(start) &&
+	    (!thr ||
+	     force(start) < force(thr->regs.rsp()) - 1000000 ||
+	     force(start) > force(thr->regs.rsp()) + 1000000)) {
 		res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr);
 		if (size > 8)
 			res.hi = load_ait<ait>(res.hi, start, when, sto, storeAddr);
