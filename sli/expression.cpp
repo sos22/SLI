@@ -333,10 +333,20 @@ Expression *bitwiseor::get(Expression *l, Expression *r)
 	if (lIsConstant) {
 		if (lc == 0)
 			return r;
+		if (lc == 0xfffffffffffffffful)
+			return l;
+		if (r->isLogical() && (lc & 1))
+			return l;
 		if (rIsConstant)
 			return ConstExpression::get(lc | rc);
-	} else if (rIsConstant && rc == 0)
-		return l;
+	} else if (rIsConstant) {
+		if (rc == 0)
+			return l;
+		if (rc == 0xfffffffffffffffful)
+			return r;
+		if (l->isLogical() && (rc & 1))
+			return r;
+	}
 
 	/* Rewrite (x & Y) | (x & Z) to x & (Y | Z) */
 	{
