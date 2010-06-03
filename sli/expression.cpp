@@ -400,10 +400,22 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 		/* Rewrite (x & A) & A to just x & A */
 		if (ll->r == r)
 			return l;
-
+		/* Rewrite (A & x) & A to just A & x */
+		if (ll->l == r)
+			return l;
 		/* Otherwise, rewrite (x & y) & z to x & (y & z) */
 		return bitwiseand::get(ll->l, bitwiseand::get(ll->r, r));		
 	}
+
+	if (bitwiseand *rr = dynamic_cast<bitwiseand *>(r)) {
+		/* Rewrite A & (x & A) to just x & A */
+		if (rr->r == l)
+			return r;
+		/* Rewrite A & (A & x) to just A & x */
+		if (rr->l == l)
+			return r;
+	}
+
 	bitwiseand *work = new (allocator.alloc()) bitwiseand();
 	work->l = l;
 	work->r = r;
