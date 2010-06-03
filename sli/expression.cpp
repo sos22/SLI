@@ -53,17 +53,18 @@ Expression *Expression::intern(Expression *e)
 
 template<> abstract_interpret_value
 load_ait(abstract_interpret_value val, abstract_interpret_value addr, EventTimestamp when,
-	 EventTimestamp store, abstract_interpret_value storeAddr)
+	 EventTimestamp store, abstract_interpret_value storeAddr, unsigned size)
 {
 	abstract_interpret_value res;
 	res.v = val.v;
-	res.origin = LoadExpression::get(when, val.origin, addr.origin, storeAddr.origin, store);
+	res.origin = LoadExpression::get(when, val.origin, addr.origin, storeAddr.origin, store,
+					 size);
 	return res;
 }
 
 template<> unsigned long
 load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestamp store,
-	 unsigned long storeAddr)
+	 unsigned long storeAddr, unsigned size)
 {
 	return x;
 }
@@ -374,25 +375,54 @@ Expression *bitwisexor::get(Expression *l, Expression *r)
 mk_op_allocator(bitwiseand);
 bool bitwiseand::isLogical() const { return l->isLogical() || r->isLogical(); }
 Expression *bitwiseand::get(Expression *l, Expression *r)			
-{									
+{
+	if (l == r)
+		return l;
 	unsigned long lc, rc;						
 	bool lIsConstant = l->isConstant(&lc);
 	bool rIsConstant = r->isConstant(&rc);
+	unsigned long mask = 0xfffffffffffffffful;
 	if (lIsConstant) {
-		if (lc == 0)
-			return l;
+		if (LoadExpression *le =
+		    dynamic_cast<LoadExpression *>(r)) {
+			switch (le->size) {
+			case 1:
+				mask = 0xff;
+				break;
+			case 2:
+				mask = 0xffff;
+				break;
+			case 4:
+				mask = 0xffffffff;
+			}
+		}
+		if ((lc & mask) == 0)
+			return ConstExpression::get(0);
 		if (lc == 1 && r->isLogical())
 			return r;
-		if (lc == 0xfffffffffffffffful)
+		if ((lc & mask) == (0xfffffffffffffffful & mask))
 			return r;
 		if (rIsConstant)
 			return ConstExpression::get(lc & rc);
 	} else if (rIsConstant) {
-		if (rc == 0)
-			return r;
+		if (LoadExpression *le =
+		    dynamic_cast<LoadExpression *>(l)) {
+			switch (le->size) {
+			case 1:
+				mask = 0xff;
+				break;
+			case 2:
+				mask = 0xffff;
+				break;
+			case 4:
+				mask = 0xffffffff;
+			}
+		}
+		if ((rc & mask) == 0)
+			return ConstExpression::get(0);
 		if (rc == 1 && l->isLogical())
 			return l;
-		if (rc == 0xfffffffffffffffful)
+		if ((rc & mask) == (0xfffffffffffffffful & mask))
 			return l;
 	}
 

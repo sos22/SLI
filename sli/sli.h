@@ -254,7 +254,7 @@ public:
 
 template<typename src, typename dest> dest import_ait(src x, ImportOrigin *origin);
 template<typename ait> ait load_ait(ait x, ait addr, EventTimestamp when, EventTimestamp store,
-				    ait storeAddr);
+				    ait storeAddr, unsigned size);
 
 template<typename abst_int_value>
 struct expression_result : public Named {
@@ -1853,18 +1853,20 @@ public:
 	Expression *storeAddr;
 	EventTimestamp when;
 	EventTimestamp store;
+	unsigned size;
 protected:
-	char *mkName() const { return my_asprintf("(load@%d:%lx;%d:%lx %s:%s -> %s)",
-						  when.tid._tid(), when.idx,
+	char *mkName() const { return my_asprintf("(load%d@%d:%lx;%d:%lx %s:%s -> %s)",
+						  size, when.tid._tid(), when.idx,
 						  store.tid._tid(), store.idx,
 						  addr->name(), storeAddr->name(),
 						  val->name()); }
-	unsigned _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.hash() * 5) ^ (store.hash() * 7) ^ (storeAddr->hash() * 11); }
+	unsigned _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.hash() * 5) ^ (store.hash() * 7) ^ (storeAddr->hash() * 11) ^ (size * 13); }
 	bool _isEqual(const Expression *other) const {
 		const LoadExpression *le = dynamic_cast<const LoadExpression *>(other);
 		if (le &&
 		    le->when == when &&
 		    le->store == store &&
+		    le->size == size &&
 		    le->val->isEqual(val) &&
 		    le->addr->isEqual(addr) &&
 		    le->storeAddr->isEqual(storeAddr))
@@ -1874,7 +1876,7 @@ protected:
 	}
 public:
 	static Expression *get(EventTimestamp when, Expression *val, Expression *addr,
-			       Expression *storeAddr, EventTimestamp store)
+			       Expression *storeAddr, EventTimestamp store, unsigned size)
 	{
 		LoadExpression *work = new (allocator.alloc()) LoadExpression();
 		work->val = val;
@@ -1882,6 +1884,7 @@ public:
 		work->storeAddr = storeAddr;
 		work->when = when;
 		work->store = store;
+		work->size = size;
 		return intern(work);
 	}
 	EventTimestamp timestamp() const { return when; }

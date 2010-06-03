@@ -86,8 +86,8 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 		new (&b[x]) ait();
 	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr, &storeAddr);
 	expression_result<ait> res;
-	res.hi = mkConst<ait>(0);
 	res.lo = mkConst<ait>(0);
+	res.hi = mkConst<ait>(0);
 	switch(size) {
 	case 16:
 		res.hi = b[8] +
@@ -128,9 +128,12 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	    (!thr ||
 	     force(start) < force(thr->regs.rsp()) - 1000000 ||
 	     force(start) > force(thr->regs.rsp()) + 1000000)) {
-		res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr);
-		if (size > 8)
-			res.hi = load_ait<ait>(res.hi, start, when, sto, storeAddr);
+		if (size <= 8) {
+			res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr, size);
+		} else {
+			res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr, 8);
+			res.hi = load_ait<ait>(res.hi, start, when, sto, storeAddr, 8);
+		}
 	}
 	return res;
 }
