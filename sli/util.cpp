@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <unistd.h>
 
 #include "sli.h"
@@ -24,6 +25,13 @@ log_bytes(const char *buf, Int nbytes)
 	fwrite(buf, nbytes, 1, stdout);
 }
 
+static void
+handle_sigusr1(int ignore)
+{
+	/* So that we can get profiling results etc. */
+	exit(1);
+}
+
 void
 init_sli(void)
 {
@@ -38,6 +46,8 @@ init_sli(void)
 	vcon.guest_chase_thresh = 0;
 	vcon.guest_max_insns = 1;
 	LibVEX_Init(failure_exit, log_bytes, 0, 0, &vcon);
+
+	signal(SIGUSR1, handle_sigusr1);
 }
 
 void noop_destructor(void *_ctxt)
