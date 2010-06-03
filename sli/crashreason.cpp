@@ -1440,6 +1440,37 @@ refine(equals *eq,
 	return eq;
 }
 
+static Expression *
+refine(bitwiseand *an, 
+       const MachineState<abstract_interpret_value> *ms,
+       LogReader<abstract_interpret_value> *lf,
+       LogReaderPtr ptr,
+       bool *progress)
+{
+	bool subprogress;
+	Expression *l = an->l;
+	Expression *r = an->r;
+
+	/* We try to refine the later of the two arguments first, and
+	   only bother with the earlier if that doesn't make any
+	   progress. */
+	subprogress = false;
+	if (l->timestamp() > r->timestamp()) {
+		l = refine(l, ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			r = refine(r, ms, lf, ptr, &subprogress);
+	} else {
+		r = refine(r, ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			l = refine(l, ms, lf, ptr, &subprogress);
+	}
+	if (subprogress) {
+		*progress = true;
+		return bitwiseand::get(l, r);
+	}
+	return an;
+}
+
 Expression *refine(ExpressionLastStore *expr,
 		   const MachineState<abstract_interpret_value> *ms,
 		   LogReader<abstract_interpret_value> *lf,
@@ -1495,6 +1526,8 @@ Expression *refine(Expression *expr,
 		return refine(er, ms, lf, ptr, progress);
 	} else if (equals *eq = dynamic_cast<equals *>(expr)) {
 		return refine(eq, ms, lf, ptr, progress);
+	} else if (bitwiseand *an = dynamic_cast<bitwiseand *>(expr)) {
+		return refine(an, ms, lf, ptr, progress);
 	} else if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(expr)) {
 		return refine(els, ms, lf, ptr, progress);
 	} else {
