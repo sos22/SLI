@@ -452,11 +452,26 @@ dump_heap_usage(void)
   headType = NULL;
 
   HeapUsageVisitor visitor;
-  for (alloc_header *h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
+  alloc_header *h;
+  for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
     h->flags &= ~ ALLOC_FLAG_GC_MARK;
   for (unsigned x = 0; x < nr_gc_roots; x++)
     visitor.visit(*gc_roots[x]);
 
+  printf("Live:\n");
+  for (cursor = headType; cursor; cursor = cursor->next)
+    printf("%8d\t%s\n", cursor->total_allocated, cursor->name);
+
+  for (cursor = headType; cursor; cursor = cursor->next)
+    cursor->total_allocated = 0;
+  headType = NULL;
+  for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
+    if (!h->type || (h->flags & ALLOC_FLAG_GC_MARK))
+      continue;
+    visitor.visit(h + 1);
+  }
+
+  printf("\nDragging:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
     printf("%8d\t%s\n", cursor->total_allocated, cursor->name);
 }
