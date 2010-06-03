@@ -104,6 +104,32 @@ poison(void *start, unsigned nr_bytes, unsigned pattern)
 }
 
 void
+LibVEX_free(const void *_ptr)
+{
+  void *ptr = (void *)_ptr;
+  struct alloc_header *h = alloc_to_header(ptr);
+  struct alloc_header *n;
+
+  heap_used -= h->size;
+
+  if (h->type->destruct)
+    h->type->destruct(ptr);
+
+  poison(h + 1, h->size - sizeof(*h), 0xa9b8c7d6);
+  h->type = NULL;
+  VALGRIND_MAKE_MEM_NOACCESS(h + 1, h->size - sizeof(*h));
+
+  n = next_alloc_header(h);
+  while (n != alloc_header_terminator &&
+	 !n->type) {
+    if (allocation_cursor == n)
+      allocation_cursor = h;
+    h->size += n->size;
+    n = next_alloc_header(h);
+  }
+}
+
+void
 LibVEX_gc(void)
 {
   unsigned x;
@@ -150,6 +176,11 @@ LibVEX_gc(void)
 	  n = next_alloc_header(h);
 	}
       }
+    } else {
+      while (n != alloc_header_terminator && !n->type) {
+	h->size += n->size;
+	n = next_alloc_header(h);
+      }
     }
 
     p = h;
@@ -194,18 +225,34 @@ alloc_bytes(VexAllocType *type, unsigned size)
      then if that fails we try again from the beginning. */
   for (cursor = allocation_cursor;
        cursor != alloc_header_terminator;
-       cursor = next_alloc_header(cursor)) {
+       cursor = next) {
     vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
-    if (!cursor->type && cursor->size >= size)
-      break;
+    next = next_alloc_header(cursor);
+    if (!cursor->type) {
+      while (next != alloc_header_terminator && !next->type) {
+	cursor->size += next->size;
+	next = next_alloc_header(cursor);
+      }
+      if (cursor->size >= size)
+	break;
+    }
   }
   if (cursor == alloc_header_terminator) {
     for (cursor = first_alloc_header();
 	 cursor != allocation_cursor;
 	 cursor = next_alloc_header(cursor)) {
       vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
-      if (!cursor->type && cursor->size >= size)
-	break;
+      next = next_alloc_header(cursor);
+      if (!cursor->type) {
+	while (next != alloc_header_terminator && !next->type) {
+	  cursor->size += next->size;
+	  if (next == allocation_cursor)
+	    allocation_cursor = next_alloc_header(cursor);
+	  next = next_alloc_header(cursor);
+	}
+	if (cursor->size >= size)
+	  break;
+      }
     }
     if (cursor == allocation_cursor)
       vpanic("VEX temporary storage exhausted.\n"
@@ -422,6 +469,19 @@ public:
   void visit(const void *ptr);
 };
 
+static void
+account_one_allocation(alloc_header *hdr)
+{
+  VexAllocType *t = hdr->type;
+  if (!t->total_allocated) {
+    t->next = headType;
+    if (!t->name)
+      t->name = t->get_name(hdr + 1);
+    headType = t;
+  }
+  t->total_allocated += hdr->size;
+}
+
 void HeapUsageVisitor::visit(const void *ptr)
 {
   if (!ptr)
@@ -431,13 +491,7 @@ void HeapUsageVisitor::visit(const void *ptr)
   
   if (!hdr->type || (hdr->flags & ALLOC_FLAG_GC_MARK))
     return;
-  if (!t->total_allocated) {
-    t->next = headType;
-    if (!t->name)
-      t->name = t->get_name(ptr);
-    headType = t;
-  }
-  t->total_allocated += hdr->size;
+  account_one_allocation(hdr);
   hdr->flags |= ALLOC_FLAG_GC_MARK;
   if (t->gc_visit)
     t->gc_visit(ptr, *this);
@@ -468,7 +522,7 @@ dump_heap_usage(void)
   for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
     if (!h->type || (h->flags & ALLOC_FLAG_GC_MARK))
       continue;
-    visitor.visit(h + 1);
+    account_one_allocation(h);
   }
 
   printf("\nDragging:\n");

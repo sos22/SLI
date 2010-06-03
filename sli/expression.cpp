@@ -33,6 +33,7 @@ Expression *Expression::intern(Expression *e)
 	if (cursor) {
 		intern_hits++;
 		cursor->pull_to_front();
+		LibVEX_free(e);
 		return cursor;
 	}
 	e->add_to_hash();

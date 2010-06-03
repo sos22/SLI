@@ -56,6 +56,7 @@ struct libvex_alloc_type;
 
 extern struct libvex_alloc_type *__LibVEX_Alloc(VexAllocType *t);
 extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned len);
+extern void LibVEX_free(const void *_ptr);
 extern void *__LibVEX_Alloc_Bytes(Int nbytes);
 #define LibVEX_Alloc_Bytes(_n) __LibVEX_Alloc_Bytes(_n)
 extern void *LibVEX_Alloc_Sized(VexAllocType *t, unsigned size);
