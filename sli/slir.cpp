@@ -115,7 +115,7 @@ bool Explorer::advance()
 	/* Okay, have to actually do something. */
 
 	MemTracePool<unsigned long> *thread_traces =
-		new MemTracePool<unsigned long>(basis->ms);
+		new MemTracePool<unsigned long>(basis->ms, ThreadId());
 	VexGcRoot ttraces((void **)&thread_traces, "ttraces");
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 		thread_traces->firstRacingAccessMap();

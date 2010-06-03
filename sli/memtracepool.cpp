@@ -1,7 +1,7 @@
 #include "sli.h"
 
 template <typename ait>
-MemTracePool<ait>::MemTracePool(MachineState<ait> *base_state)
+MemTracePool<ait>::MemTracePool(MachineState<ait> *base_state, ThreadId ignoredThread)
   : content()
 {
 	MemTracePool<ait> *t = this;
@@ -9,6 +9,8 @@ MemTracePool<ait>::MemTracePool(MachineState<ait> *base_state)
 	unsigned x;
 	for (x = 0; x < base_state->threads->size(); x++) {
 		ThreadId tid = base_state->threads->index(x)->tid;
+		if (tid == ignoredThread)
+			continue;
 		MachineState<ait> *ms = base_state->dupeSelf();
 		Interpreter<ait> i(ms);
 		MemoryTrace<ait> *v;
@@ -72,6 +74,6 @@ void MemTracePool<t>::visit(HeapVisitor &hv) const
 }
 
 #define MK_MEMTRACE_POOL(t)						\
-	template MemTracePool<t>::MemTracePool(MachineState<t> *);	\
+	template MemTracePool<t>::MemTracePool(MachineState<t> *, ThreadId); \
 	template std::map<ThreadId, Maybe<unsigned> > *MemTracePool<t>::firstRacingAccessMap();	\
 	template void MemTracePool<t>::visit(HeapVisitor &hv) const

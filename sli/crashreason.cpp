@@ -495,7 +495,8 @@ class Explorer : public GarbageCollected<Explorer> {
 public:
 	std::vector<ExplorationState *> futures;
 
-	Explorer(const MachineState<abstract_interpret_value> *ms);
+	Explorer(const MachineState<abstract_interpret_value> *ms,
+		 ThreadId ignoredTid);
 	void visit(HeapVisitor &hv) const
 	{
 		visit_container(futures, hv);
@@ -504,7 +505,8 @@ public:
 	void destruct() {}
 };
 
-Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
+Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
+		   ThreadId ignoredThread)
 	: grayStates(), futures()
 {
 	Explorer *thisK = this;
@@ -514,33 +516,32 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
 						  MemLog<abstract_interpret_value>::emptyMemlog()));
 
 	while (grayStates.size() != 0 &&
-	       (futures.size() == 0 ||
-		grayStates.size() < 10)) {
+	       (grayStates.size() + futures.size()) < 80) {
 		printf("%zd futures, %zd grays\n", futures.size(),
 		       grayStates.size());
 		ExplorationState *s = grayStates.front();
 		VexGcRoot sroot((void **)&s, "sroot");
 		grayStates.pop_front();
 
-		if (s->ms->crashed()) {
-			/* Already crashed, nothing to do. */
-			futures.push_back(s);
-			continue;
-		}
+		printf("Consider %p\n", s);
+
 		bool stopped = true;
 		for (unsigned x = 0; stopped && x < s->ms->threads->size(); x++) {
 			Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
+			if (thr->tid == ignoredThread)
+				continue;
 			if (!thr->cannot_make_progress)
 				stopped = false;
 		}
 		if (stopped) {
 			/* No thread can make progress. */
 			futures.push_back(s);
+			printf("No progress possible.\n");
 			continue;
 		}
 
 		MemTracePool<abstract_interpret_value> *thread_traces =
-			new MemTracePool<abstract_interpret_value>(s->ms);
+			new MemTracePool<abstract_interpret_value>(s->ms, ignoredThread);
 		VexGcRoot ttraces((void **)&thread_traces, "ttraces");
 		std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 			thread_traces->firstRacingAccessMap();
@@ -556,12 +557,16 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
 		for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
 		     it != first_racing_access->end();
 		     it++) {
+			if (it->first == ignoredThread)
+				continue;
 			if (it->second.full)
 				noRaces = false;
 		}
 		if (noRaces) {
 			for (unsigned x = 0; x < s->ms->threads->size(); x++) {
 				Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
+				if (thr->tid == ignoredThread)
+					continue;
 				if (thr->cannot_make_progress)
 					continue;
 				Interpreter<abstract_interpret_value> i(s->ms);
@@ -579,6 +584,8 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
 			ThreadId tid = it->first;
 			Maybe<unsigned> r = it->second;
 			Thread<abstract_interpret_value> *thr = s->ms->findThread(tid);
+			if (thr->tid == ignoredThread)
+				continue;
 			if (thr->cannot_make_progress)
 				continue;
 			ExplorationState *newGray = s->dupeSelf();
@@ -594,6 +601,11 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
 
 			grayStates.push_back(newGray);
 		}
+	}
+
+	while (!grayStates.empty()) {
+		futures.push_back(grayStates.front());
+		grayStates.pop_front();
 	}
 }
 
@@ -1313,6 +1325,7 @@ truncate_logfile(const MachineState<abstract_interpret_value> *ms,
 {
 	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
 	TruncateToEvent *tte = new TruncateToEvent(lastEvent);
+	VexGcRoot tteroot((void **)&tte, "tte");
 	i.replayLogfile(lf, ptr, NULL, tte);
 	return tte->work;
 }
@@ -1433,7 +1446,6 @@ Expression *refine(ExpressionLastStore *expr,
 		   LogReaderPtr ptr,
 		   bool *progress)
 {
-#warning XXX This isn't anywhere near complete.'
 	LastStoreRefiner *lsr =
 		new LastStoreRefiner(
 			expr->store,
@@ -1449,10 +1461,28 @@ Expression *refine(ExpressionLastStore *expr,
 	VexGcRoot rr((void **)&truncatedLog, "rr");
 	i.replayLogfile(truncatedLog, ptr, NULL, NULL, lsr);
 
-	new Explorer(localMs);
+	Explorer *e = new Explorer(localMs, expr->load.tid);
+	VexGcRoot eroot((void **)&e, "eroot");
 
+	Expression *work = lsr->result;
+	VexGcRoot workroot((void **)&work, "workroot");
+
+	for (std::vector<ExplorationState *>::iterator it = e->futures.begin();
+	     it != e->futures.end();
+	     it++) {
+		Interpreter<abstract_interpret_value> i2(localMs->dupeSelf());
+		LastStoreRefiner *lsr2 =
+			new LastStoreRefiner(
+				expr->store,
+				expr->load,
+				expr->vaddr,
+				work);
+		VexGcRoot r3((void **)&lsr2, "r3");
+		i2.replayLogfile((*it)->lf, (*it)->lf->startPtr(), NULL, NULL, lsr2);
+		work = lsr2->result;
+	}
 	*progress = true;
-	return lsr->result;
+	return work;
 }
 
 Expression *refine(Expression *expr,

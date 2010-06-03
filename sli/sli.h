@@ -1315,7 +1315,7 @@ class MemTracePool : public GarbageCollected<MemTracePool<ait> > {
 	typedef std::map<ThreadId, MemoryTrace<ait> *> contentT;
 	contentT content;
 public:
-	MemTracePool(MachineState<ait> *base_state);
+	MemTracePool(MachineState<ait> *base_state, ThreadId ignoredThread);
 	~MemTracePool() {}
 	std::map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
 	void visit(HeapVisitor &hv) const;
