@@ -1,4 +1,5 @@
 #include <err.h>
+#include <deque>
 
 #include "sli.h"
 
@@ -464,6 +465,164 @@ public:
 	void visit(HeapVisitor &hv) const {}
 };
 const VexAllocTypeWrapper<ExpressionHappensBefore> ExpressionHappensBefore::allocator;
+
+template <typename t>
+class GarbageCollected {
+	static VexAllocType type;
+public:
+	static void *operator new(size_t s)
+	{
+		return LibVEX_Alloc_Sized(&type, s);
+	}
+	static void operator delete(void *)
+	{
+		abort();
+	}
+	virtual void visit(HeapVisitor &hv) const = 0;
+	virtual void destruct() = 0;
+};
+template <typename t> void visit_gced(const void *_ctxt, HeapVisitor &hv)
+{
+	const t *ctxt = (const t *)_ctxt;
+	ctxt->visit(hv);
+}
+template <typename t> void destruct_gced(void *_ctxt)
+{
+	t *ctxt = (t *)_ctxt;
+	ctxt->destruct();
+}
+template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_gced<t>, destruct_gced<t>, "GarbageCollected" };
+
+template<typename t> void
+visit_container(const t &vector, HeapVisitor &hv)
+{
+	for (class t::const_iterator it = vector.begin();
+	     it != vector.end();
+	     it++)
+		hv(*it);
+}
+
+class ExplorationState : public GarbageCollected<ExplorationState> {
+public:
+	MachineState<abstract_interpret_value> *ms;
+	MemLog<abstract_interpret_value> *lf;
+
+	void visit(HeapVisitor &hv) const { hv(lf); hv(ms); }
+	void destruct() {}
+	ExplorationState(MachineState<abstract_interpret_value> *_ms,
+			 MemLog<abstract_interpret_value> *_lf)
+		: ms(_ms), lf(_lf)
+	{
+	}
+	ExplorationState *dupeSelf()
+	{
+		return new ExplorationState(ms->dupeSelf(), lf->dupeSelf());
+	}
+};
+
+class Explorer : public GarbageCollected<Explorer> {
+	std::deque<ExplorationState *> grayStates;
+public:
+	std::vector<ExplorationState *> futures;
+
+	Explorer(const MachineState<abstract_interpret_value> *ms);
+	void visit(HeapVisitor &hv) const
+	{
+		visit_container(futures, hv);
+		visit_container(grayStates, hv);
+	}
+	void destruct() {}
+};
+
+Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
+	: grayStates(), futures()
+{
+	Explorer *thisK = this;
+	VexGcRoot thisKeeper((void **)&thisK, "this");
+
+	grayStates.push_back(new ExplorationState(ms->dupeSelf(),
+						  MemLog<abstract_interpret_value>::emptyMemlog()));
+
+	while (futures.size() < 50 &&
+	       grayStates.size() != 0) {
+		printf("%zd futures, %zd grays\n", futures.size(),
+		       grayStates.size());
+		ExplorationState *s = grayStates.front();
+		VexGcRoot sroot((void **)&s, "sroot");
+		grayStates.pop_front();
+
+		if (s->ms->crashed()) {
+			/* Already crashed, nothing to do. */
+			futures.push_back(s);
+			continue;
+		}
+		bool stopped = true;
+		for (unsigned x = 0; stopped && x < s->ms->threads->size(); x++) {
+			Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
+			if (!thr->cannot_make_progress)
+				stopped = false;
+		}
+		if (stopped) {
+			/* No thread can make progress. */
+			futures.push_back(s);
+			continue;
+		}
+
+		MemTracePool<abstract_interpret_value> thread_traces(s->ms);
+		std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
+			thread_traces.firstRacingAccessMap();
+		PointerKeeper<std::map<ThreadId, Maybe<unsigned> > > keeper(first_racing_access);
+
+		/* If there are no races then we can just run one
+		   thread after another, and we don't need to do
+		   anything else.  We can even get away with reusing
+		   the old MachineState. */
+		/* This includes the case where only one thread can
+		   make progress at all. */
+		bool noRaces = true;
+		for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
+		     it != first_racing_access->end();
+		     it++) {
+			if (it->second.full)
+				noRaces = false;
+		}
+		if (noRaces) {
+			for (unsigned x = 0; x < s->ms->threads->size(); x++) {
+				Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
+				if (thr->cannot_make_progress)
+					continue;
+				Interpreter<abstract_interpret_value> i(s->ms);
+				i.runToFailure(thr->tid, s->lf, 10000);
+			}
+			futures.push_back(s);
+			continue;
+		}
+
+		/* Have some actual races -> have to do full
+		 * repertoire. */
+		for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
+		     it != first_racing_access->end();
+		     it++) {
+			ThreadId tid = it->first;
+			Maybe<unsigned> r = it->second;
+			Thread<abstract_interpret_value> *thr = s->ms->findThread(tid);
+			if (thr->cannot_make_progress)
+				continue;
+			ExplorationState *newGray = s->dupeSelf();
+			VexGcRoot grayKeeper((void **)&newGray, "newGray");
+			Interpreter<abstract_interpret_value> i(newGray->ms);
+			if (r.full) {
+				printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
+				i.runToAccessLoggingEvents(tid, r.value + 1, newGray->lf);
+			} else {
+				printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
+				i.runToFailure(tid, newGray->lf, 10000);
+			}
+
+			grayStates.push_back(newGray);
+		}
+	}
+}
 
 void History::splitAt(unsigned idx, History **firstBit, History **secondBit) const
 {
@@ -1139,6 +1298,49 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 	}
 }
 
+class TruncateToEvent : public LogWriter<abstract_interpret_value>,
+			public GarbageCollected<TruncateToEvent> {
+	EventTimestamp lastEvent;
+	bool finished;
+public:
+	MemLog<abstract_interpret_value> *work;
+
+	TruncateToEvent(EventTimestamp _lastEvent)
+		: lastEvent(_lastEvent),
+		  finished(false),
+		  work(MemLog<abstract_interpret_value>::emptyMemlog())
+	{
+	}
+
+	void append(const LogRecord<abstract_interpret_value> &lr,
+		    unsigned long idx);
+
+	void visit(HeapVisitor &hv) const { hv(work); }
+	void destruct() { this->~TruncateToEvent(); }
+};
+void
+TruncateToEvent::append(const LogRecord<abstract_interpret_value> &lr,
+			unsigned long idx)
+{
+	if (finished)
+		return;
+	work->append(lr, idx);
+	if (lr.thread() == lastEvent.tid &&
+	    idx == lastEvent.idx)
+		finished = true;
+}
+static LogReader<abstract_interpret_value> *
+truncate_logfile(const MachineState<abstract_interpret_value> *ms,
+		 LogReader<abstract_interpret_value> *lf,
+		 LogReaderPtr ptr,
+		 EventTimestamp lastEvent)
+{
+	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
+	TruncateToEvent *tte = new TruncateToEvent(lastEvent);
+	i.replayLogfile(lf, ptr, NULL, tte);
+	return tte->work;
+}
+
 static Expression *refine(Expression *expr,
 			  const MachineState<abstract_interpret_value> *ms,
 			  LogReader<abstract_interpret_value> *lf,
@@ -1157,7 +1359,8 @@ static Expression *refine(ExpressionRip *er,
 	 * cheaper. */
 	Expression *newSubCond;
 	bool subCondProgress = false;
-	newSubCond = refine(er->cond, ms, lf, ptr, &subCondProgress);
+	newSubCond = refine(er->cond, ms, er->model_execution, er->model_exec_start,
+			    &subCondProgress);
 	if (subCondProgress) {
 		/* Yay. */
 		*progress = true;
@@ -1262,8 +1465,16 @@ Expression *refine(ExpressionLastStore *expr,
 			expr->vaddr,
 			ExpressionHappensBefore::get(expr->store, expr->load));
 	VexGcRoot r((void **)&lsr, "r");
-	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
-	i.replayLogfile(lf, ptr, NULL, NULL, lsr);
+	MachineState<abstract_interpret_value> *localMs = ms->dupeSelf();
+	VexGcRoot r2((void **)&localMs, "r2");
+	Interpreter<abstract_interpret_value> i(localMs);
+	LogReader<abstract_interpret_value> *truncatedLog =
+		truncate_logfile(ms, lf, ptr, expr->load);
+	VexGcRoot rr((void **)&truncatedLog, "rr");
+	i.replayLogfile(truncatedLog, ptr, NULL, NULL, lsr);
+
+	new Explorer(localMs);
+
 	*progress = true;
 	return lsr->result;
 }
