@@ -472,42 +472,6 @@ public:
 };
 VexAllocTypeWrapper<ExpressionHappensBefore> ExpressionHappensBefore::allocator;
 
-template <typename t>
-class GarbageCollected {
-	static VexAllocType type;
-public:
-	static void *operator new(size_t s)
-	{
-		return LibVEX_Alloc_Sized(&type, s);
-	}
-	static void operator delete(void *)
-	{
-		abort();
-	}
-	virtual void visit(HeapVisitor &hv) const = 0;
-	virtual void destruct() = 0;
-};
-template <typename t> void visit_gced(const void *_ctxt, HeapVisitor &hv)
-{
-	const t *ctxt = (const t *)_ctxt;
-	ctxt->visit(hv);
-}
-template <typename t> void destruct_gced(void *_ctxt)
-{
-	t *ctxt = (t *)_ctxt;
-	ctxt->destruct();
-}
-template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_gced<t>, destruct_gced<t>, "GarbageCollected" };
-
-template<typename t> void
-visit_container(const t &vector, HeapVisitor &hv)
-{
-	for (class t::const_iterator it = vector.begin();
-	     it != vector.end();
-	     it++)
-		hv(*it);
-}
-
 class ExplorationState : public GarbageCollected<ExplorationState> {
 public:
 	MachineState<abstract_interpret_value> *ms;
@@ -549,8 +513,9 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
 	grayStates.push_back(new ExplorationState(ms->dupeSelf(),
 						  MemLog<abstract_interpret_value>::emptyMemlog()));
 
-	while (futures.size() < 50 &&
-	       grayStates.size() != 0) {
+	while (grayStates.size != 0 &&
+	       (futures.size() == 0 ||
+		grayStates.size() < 10)) {
 		printf("%zd futures, %zd grays\n", futures.size(),
 		       grayStates.size());
 		ExplorationState *s = grayStates.front();
@@ -574,9 +539,11 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
 			continue;
 		}
 
-		MemTracePool<abstract_interpret_value> thread_traces(s->ms);
+		MemTracePool<abstract_interpret_value> *thread_traces =
+			new MemTracePool<abstract_interpret_value>(s->ms);
+		VexGcRoot ttraces((void **)&thread_traces, "ttraces");
 		std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
-			thread_traces.firstRacingAccessMap();
+			thread_traces->firstRacingAccessMap();
 		PointerKeeper<std::map<ThreadId, Maybe<unsigned> > > keeper(first_racing_access);
 
 		/* If there are no races then we can just run one

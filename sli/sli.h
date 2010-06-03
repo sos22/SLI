@@ -1128,8 +1128,44 @@ public:
 	NAMED_CLASS
 };
 
+template <typename t>
+class GarbageCollected {
+	static VexAllocType type;
+public:
+	static void *operator new(size_t s)
+	{
+		return LibVEX_Alloc_Sized(&type, s);
+	}
+	static void operator delete(void *)
+	{
+		abort();
+	}
+	virtual void visit(HeapVisitor &hv) const = 0;
+	virtual void destruct() = 0;
+};
+template <typename t> void visit_gced(const void *_ctxt, HeapVisitor &hv)
+{
+	const t *ctxt = (const t *)_ctxt;
+	ctxt->visit(hv);
+}
+template <typename t> void destruct_gced(void *_ctxt)
+{
+	t *ctxt = (t *)_ctxt;
+	ctxt->destruct();
+}
+template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_gced<t>, destruct_gced<t>, "GarbageCollected" };
+
+template<typename t> void
+visit_container(const t &vector, HeapVisitor &hv)
+{
+	for (class t::const_iterator it = vector.begin();
+	     it != vector.end();
+	     it++)
+		hv(*it);
+}
+
 template <typename ait>
-class MemoryAccess : public Named {
+class MemoryAccess : public Named, public GarbageCollected<MemoryAccess<ait> > {
 public:
 	EventTimestamp when;
 	ait addr;
@@ -1142,6 +1178,9 @@ public:
 	}
 	virtual bool isLoad() = 0;
 	void dump() const { printf("%s\n", name()); }
+	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); }
+	void destruct() {}
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -1257,30 +1296,31 @@ public:
 
 /* Essentially a thin wrapper around std::vector */
 template <typename ait>
-class MemoryTrace {
+class MemoryTrace : public GarbageCollected<MemoryTrace<ait> > {
 public:
 	std::vector<MemoryAccess<ait> *> content;
-	~MemoryTrace() {
-		for (unsigned x; x < content.size(); x++)
-			delete content[x];
-	}
 	MemoryTrace(const MachineState<ait> *, LogReader<ait> *, LogReaderPtr);
 	size_t size() const { return content.size(); }
 	MemoryAccess<ait> *&operator[](unsigned idx) { return content[idx]; }
 	void push_back(MemoryAccess<ait> *x) { content.push_back(x); }
-	MemoryTrace();
+	MemoryTrace() : content() {}
 	void dump() const;
+	void visit(HeapVisitor &hv) const { visit_container(content, hv); }
+	void destruct() { this->~MemoryTrace<ait>(); }
+	NAMED_CLASS
 };
 
 template <typename ait>
-class MemTracePool {
+class MemTracePool : public GarbageCollected<MemTracePool<ait> > {
 	typedef std::map<ThreadId, MemoryTrace<ait> *> contentT;
 	contentT content;
 public:
-	~MemTracePool();
 	MemTracePool(MachineState<ait> *base_state);
-
+	~MemTracePool() {}
 	std::map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
+	void visit(HeapVisitor &hv) const;
+	void destruct() { this->~MemTracePool<ait>(); }
+	NAMED_CLASS
 };
 
 template <typename ait>

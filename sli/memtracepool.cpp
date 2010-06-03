@@ -4,6 +4,8 @@ template <typename ait>
 MemTracePool<ait>::MemTracePool(MachineState<ait> *base_state)
   : content()
 {
+	MemTracePool<ait> *t = this;
+	VexGcRoot thisroot((void **)&t, "thisroot");
 	unsigned x;
 	for (x = 0; x < base_state->threads->size(); x++) {
 		ThreadId tid = base_state->threads->index(x)->tid;
@@ -60,18 +62,16 @@ std::map<ThreadId, Maybe<unsigned> > *MemTracePool<ait>::firstRacingAccessMap()
 	return work;
 }
 
-template <typename ait>
-MemTracePool<ait>::~MemTracePool()
+template <typename t>
+void MemTracePool<t>::visit(HeapVisitor &hv) const
 {
-	while (!content.empty()) {
-		class contentT::iterator it = content.begin();
-		delete it->second;
-		content.erase(it);
-	}
+	for (class contentT::const_iterator outerIt = content.begin();
+	     outerIt != content.end();
+	     outerIt++)
+		hv(outerIt->second);
 }
-
 
 #define MK_MEMTRACE_POOL(t)						\
 	template MemTracePool<t>::MemTracePool(MachineState<t> *);	\
-	template std::map<ThreadId, Maybe<unsigned> > *MemTracePool<t>::firstRacingAccessMap(); \
-	template MemTracePool<t>::~MemTracePool()
+	template std::map<ThreadId, Maybe<unsigned> > *MemTracePool<t>::firstRacingAccessMap();	\
+	template void MemTracePool<t>::visit(HeapVisitor &hv) const

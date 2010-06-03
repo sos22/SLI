@@ -114,9 +114,11 @@ bool Explorer::advance()
 
 	/* Okay, have to actually do something. */
 
-	MemTracePool<unsigned long> thread_traces(basis->ms);
+	MemTracePool<unsigned long> *thread_traces =
+		new MemTracePool<unsigned long>(basis->ms);
+	VexGcRoot ttraces((void **)&thread_traces, "ttraces");
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
-		thread_traces.firstRacingAccessMap();
+		thread_traces->firstRacingAccessMap();
 
 	/* If there are no races then we can just run one thread after
 	   another, and we don't need to do anything else.  We can

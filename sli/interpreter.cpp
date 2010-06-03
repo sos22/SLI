@@ -1267,6 +1267,7 @@ template<typename ait>
 InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace<ait> **output, unsigned max_events)
 {
 	MemoryTrace<ait> *work = new MemoryTrace<ait>();
+	VexGcRoot root((void **)&work, "getThreadMemoryTrace work");
 	*output = work;
 	Thread<ait> *thr = currentState->findThread(tid);
 	if (thr->cannot_make_progress)

@@ -1,13 +1,8 @@
 #include "sli.h"
 
 template <typename ait>
-MemoryTrace<ait>::MemoryTrace()
-	: content()
-{  
-}
-
-template <typename ait>
-class MemTraceMaker : public EventRecorder<ait> {
+class MemTraceMaker : public EventRecorder<ait>,
+		      public GarbageCollected<MemTraceMaker<ait> > {
 	MemoryTrace<ait> *mt;
 public:
 	MemTraceMaker(MemoryTrace<ait> *_mt)
@@ -15,6 +10,9 @@ public:
 	{
 	}
 	void record(Thread<ait> *thr, const ThreadEvent<ait> *evt);
+	void visit(HeapVisitor &hv) const { hv(mt); }
+	void destruct() {}
+	NAMED_CLASS
 };
 template <typename ait> void
 MemTraceMaker<ait>::record(Thread<ait> *thr, const ThreadEvent<ait> *evt)
@@ -30,9 +28,10 @@ MemoryTrace<ait>::MemoryTrace(const MachineState<ait> *ms,
 			      LogReader<ait> *lf,
 			      LogReaderPtr ptr)
 {
-	MemTraceMaker<ait> mtm(this);
+	MemTraceMaker<ait> *mtm = new MemTraceMaker<ait>(this);
+	VexGcRoot mtmroot((void **)&mtm, "mtmroot");
 	Interpreter<ait> i(ms->dupeSelf());
-	i.replayLogfile(lf, ptr, NULL, NULL, &mtm);
+	i.replayLogfile(lf, ptr, NULL, NULL, mtm);
 }
 
 template <typename ait>
