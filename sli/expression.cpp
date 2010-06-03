@@ -19,6 +19,15 @@ void Expression::dump_eq_calls_table()
 	fclose(f);
 }
 
+void Expression::dump_chain_length_table()
+{
+	FILE *f;
+	f = fopen("chains.inf", "w");
+	for (unsigned x = 0; x < nr_heads; x++)
+		fprintf(f, "%d\t%d\n", x, chain_lengths[x]);
+	fclose(f);
+}
+
 Expression *Expression::intern(Expression *e)
 {
 	calls_to_intern++;

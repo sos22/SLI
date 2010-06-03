@@ -1739,7 +1739,7 @@ void init_sli(void);
 void gdb_machine_state(const MachineState<unsigned long> *ms);
 
 class Expression : public Named {
-	static const unsigned nr_heads = 262144;
+	static const unsigned nr_heads = 262147;
 	static Expression *heads[nr_heads];
 	static unsigned chain_lengths[nr_heads];
 	static unsigned long eq_calls[nr_heads];
@@ -1749,6 +1749,7 @@ class Expression : public Named {
 	Expression **pprev;
 	unsigned hashval;
 	static void dump_eq_calls_table();
+	static void dump_chain_length_table();
 	void remove_from_hash() {
 		*pprev = next;
 		if (next)
