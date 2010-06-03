@@ -135,7 +135,7 @@ Expression *logicaland::get(Expression *l, Expression *r)
 
 Expression *logicalnot::get(Expression *l)
 {
-	return bitwiseand::get(bitwisenot::get(l),
+	return bitwiseand::get(bitwisenot::get(bitsaturate::get(l)),
 			       ConstExpression::get(1));
 }
 
