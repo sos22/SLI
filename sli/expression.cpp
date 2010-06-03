@@ -153,7 +153,7 @@ Expression *bitsaturate::get(Expression *arg)
 		return arg;
 	bitsaturate *work = new (allocator.alloc()) bitsaturate;
 	work->l = arg;
-	return work;
+	return intern(work);
 }
 
 mk_op_allocator(ternarycondition);
