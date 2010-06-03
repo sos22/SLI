@@ -17,11 +17,13 @@ public:
    translation of the current basic block is complete.
  */
 typedef
-   struct {
+   struct _VexAllocType {
       Int nbytes;
       void (*gc_visit)(const void *, HeapVisitor &);
       void (*destruct)(void *);
       const char *name;
+      unsigned total_allocated;
+      struct _VexAllocType *next;
    }
    VexAllocType;
 
@@ -51,11 +53,11 @@ typedef
 
 struct libvex_alloc_type;
 
-extern struct libvex_alloc_type *__LibVEX_Alloc(const VexAllocType *t);
+extern struct libvex_alloc_type *__LibVEX_Alloc(VexAllocType *t);
 extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned len);
 extern void *__LibVEX_Alloc_Bytes(Int nbytes);
 #define LibVEX_Alloc_Bytes(_n) __LibVEX_Alloc_Bytes(_n)
-extern void *LibVEX_Alloc_Sized(const VexAllocType *t, unsigned size);
+extern void *LibVEX_Alloc_Sized(VexAllocType *t, unsigned size);
 extern void *LibVEX_realloc(void *base, unsigned new_size);
 
 void vexRegisterGCRoot(void **, const char *name);

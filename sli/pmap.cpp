@@ -217,8 +217,8 @@ PMap<new_type> *PMap<ait>::abstract() const
 	return work;
 }
 
-template <typename ait> const VexAllocTypeWrapper<PMap<ait> > PMap<ait>::allocator;
-template <typename ait> const VexAllocTypeWrapper<PMapEntry<ait> > PMapEntry<ait>::allocator;
+template <typename ait> VexAllocTypeWrapper<PMap<ait> > PMap<ait>::allocator;
+template <typename ait> VexAllocTypeWrapper<PMapEntry<ait> > PMapEntry<ait>::allocator;
 
 #define MK_PMAP(t)							\
 	template MemoryChunk<t> *PMap<t>::lookup(PhysicalAddress pa,	\

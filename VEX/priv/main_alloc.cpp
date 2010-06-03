@@ -26,9 +26,11 @@
 static char temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
 static unsigned heap_used;
 
+static VexAllocType *headType;
+
 /* Each allocation in the arena is prefixed by an allocation header. */
 struct alloc_header {
-  const VexAllocType *type; /* Or NULL for free blocks */
+  VexAllocType *type; /* Or NULL for free blocks */
   unsigned size; /* Includes header */
   unsigned flags;
 #define ALLOC_FLAG_GC_MARK 1
@@ -178,7 +180,7 @@ static VexAllocType ptr_array_type = { -1, visit_ptr_array, NULL, "<array>" };
 
 
 static void *
-alloc_bytes(const VexAllocType *type, unsigned size)
+alloc_bytes(VexAllocType *type, unsigned size)
 {
   struct alloc_header *cursor;
   struct alloc_header *next;
@@ -246,13 +248,13 @@ __LibVEX_Alloc_Bytes(Int nbytes)
 }
 
 void *
-LibVEX_Alloc_Sized(const VexAllocType *t, unsigned nbytes)
+LibVEX_Alloc_Sized(VexAllocType *t, unsigned nbytes)
 {
   return alloc_bytes(t, nbytes);
 }
 
 struct libvex_alloc_type *
-__LibVEX_Alloc(const VexAllocType *t)
+__LibVEX_Alloc(VexAllocType *t)
 {
   return (struct libvex_alloc_type *)alloc_bytes(t, t->nbytes);
 }
@@ -413,6 +415,48 @@ dump_heap(void)
     vex_printf("Unattached but allocated:\n");
     visitor.visit(h + 1);
   }
+}
+
+class HeapUsageVisitor : public HeapVisitor {
+public:
+  void visit(const void *ptr);
+};
+
+void HeapUsageVisitor::visit(const void *ptr)
+{
+  if (!ptr)
+    return;
+  alloc_header *hdr = alloc_to_header(ptr);
+  VexAllocType *t = hdr->type;
+  
+  if (!hdr->type || (hdr->flags & ALLOC_FLAG_GC_MARK))
+    return;
+  if (!t->total_allocated) {
+    t->next = headType;
+    headType = t;
+  }
+  t->total_allocated += hdr->size;
+  hdr->flags |= ALLOC_FLAG_GC_MARK;
+  if (t->gc_visit)
+    t->gc_visit(ptr, *this);
+}
+
+void
+dump_heap_usage(void)
+{
+  VexAllocType *cursor;
+  for (cursor = headType; cursor; cursor = cursor->next)
+    cursor->total_allocated = 0;
+  headType = NULL;
+
+  HeapUsageVisitor visitor;
+  for (alloc_header *h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
+    h->flags &= ~ ALLOC_FLAG_GC_MARK;
+  for (unsigned x = 0; x < nr_gc_roots; x++)
+    visitor.visit(*gc_roots[x]);
+
+  for (cursor = headType; cursor; cursor = cursor->next)
+    printf("%8d\t%s\n", cursor->total_allocated, cursor->name);
 }
 
 void

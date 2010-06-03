@@ -37,7 +37,7 @@ public:
 	EventTimestamp when;
 	std::vector<unsigned long> rips;
 private:
-	static const VexAllocTypeWrapper<HistorySegment> allocator;
+	static VexAllocTypeWrapper<HistorySegment> allocator;
 	HistorySegment(Expression *_condition,
 		       EventTimestamp _when)
 		: condition(_condition),
@@ -127,7 +127,7 @@ public:
 		nr_memory_operations = fin.idx - when.idx;
 	}
 };
-const VexAllocTypeWrapper<HistorySegment> HistorySegment::allocator;
+VexAllocTypeWrapper<HistorySegment> HistorySegment::allocator;
 
 class History : public Named {
 public:
@@ -143,7 +143,7 @@ public:
 			last_valid_idx += (*it)->nr_memory_operations;
 	}
 private:
-	static const VexAllocTypeWrapper<History> allocator;
+	static VexAllocTypeWrapper<History> allocator;
 	History(std::vector<HistorySegment *>::const_iterator start,
 		std::vector<HistorySegment *>::const_iterator end,
 		unsigned long _first,
@@ -265,7 +265,7 @@ public:
 		LogReaderPtr *newPtr2,
 		std::vector<unsigned long> *newPrefix);
 };
-const VexAllocTypeWrapper<History> History::allocator;
+VexAllocTypeWrapper<History> History::allocator;
 
 /* A RIP expression asserts that a particular thread will follow a
  * particular control flow path, and hence that memory operations can
@@ -423,7 +423,7 @@ public:
 	EventTimestamp before;
 	EventTimestamp after;
 private:
-	static const VexAllocTypeWrapper<ExpressionHappensBefore> allocator;
+	static VexAllocTypeWrapper<ExpressionHappensBefore> allocator;
 	ExpressionHappensBefore(EventTimestamp _before, EventTimestamp _after)
 		: before(_before), after(_after)
 	{
@@ -464,7 +464,7 @@ public:
 	bool isLogical() const { return true; }
 	void visit(HeapVisitor &hv) const {}
 };
-const VexAllocTypeWrapper<ExpressionHappensBefore> ExpressionHappensBefore::allocator;
+VexAllocTypeWrapper<ExpressionHappensBefore> ExpressionHappensBefore::allocator;
 
 template <typename t>
 class GarbageCollected {
@@ -773,7 +773,7 @@ private:
 	std::vector<unsigned long> *collected_rips;
 	unsigned long stop_collecting_rips_idx;
 
-	static const VexAllocTypeWrapper<ModelExtractor> allocator;
+	static VexAllocTypeWrapper<ModelExtractor> allocator;
 public:
 	static void *operator new(size_t s)
 	{
@@ -798,7 +798,7 @@ public:
 	void destruct() { this->~ModelExtractor(); }
 	void visit(HeapVisitor &hv) const { hv(model); }
 };
-const VexAllocTypeWrapper<ModelExtractor> ModelExtractor::allocator;
+VexAllocTypeWrapper<ModelExtractor> ModelExtractor::allocator;
 
 template <typename k, typename v>
 const v &hashget(const std::map<k,v> &m, const k &key)
@@ -1245,7 +1245,7 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
 	EventTimestamp store;
 	EventTimestamp load;
 	Expression *addr;
-	static const VexAllocTypeWrapper<LastStoreRefiner> allocator;
+	static VexAllocTypeWrapper<LastStoreRefiner> allocator;
 public:
 	Expression *result;
 	void record(Thread<abstract_interpret_value> *thr,
@@ -1271,7 +1271,7 @@ public:
 	void visit(HeapVisitor &hv) const { hv(addr); hv(result); }
 	void destruct() {}
 };
-const VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
+VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
 void
 LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 			 const ThreadEvent<abstract_interpret_value> *evt)
@@ -1502,7 +1502,7 @@ class HistoryLogTruncater : public LogWriter<abstract_interpret_value> {
 	std::vector<HistorySegment *>::iterator current_history_segment;
 	unsigned current_segment_index;
 	ThreadId desired_thread;
-	static const VexAllocTypeWrapper<HistoryLogTruncater> allocator;
+	static VexAllocTypeWrapper<HistoryLogTruncater> allocator;
 	const std::vector<unsigned long> &prefix_rips;
 	unsigned prefix_rips_idx;
 	std::vector<unsigned long> *prefix_rips_out;
@@ -1534,7 +1534,7 @@ public:
 	void destruct() { this->~HistoryLogTruncater(); }
 	void visit(HeapVisitor &hv) const { hv(hist); hv(model1); hv(model2); }
 };
-const VexAllocTypeWrapper<HistoryLogTruncater> HistoryLogTruncater::allocator;
+VexAllocTypeWrapper<HistoryLogTruncater> HistoryLogTruncater::allocator;
 
 void HistoryLogTruncater::append(const LogRecord<abstract_interpret_value> &lr,
 				 unsigned long idx)

@@ -97,7 +97,7 @@ public:
 		type.destruct = destruct;
 		type.name = "<wrapper type>";
 	}
-	t *alloc() const {
+	t *alloc() {
 		return (t *)__LibVEX_Alloc(&type);
 	}
 };
@@ -299,7 +299,7 @@ template <typename ait> class AddressSpace;
 
 template <typename ait>
 class expression_result_array {
-	static const VexAllocType arrayAllocType;
+	static VexAllocType arrayAllocType;
 public:
 	struct expression_result<ait> *arr;
 	unsigned nr_entries;
@@ -518,7 +518,7 @@ private:
 */
 template <typename ait>
 class PMapEntry {
-	static const VexAllocTypeWrapper<class PMapEntry > allocator;
+	static VexAllocTypeWrapper<class PMapEntry > allocator;
 public:
 	PhysicalAddress pa;
 	MemoryChunk<ait> *mc;
@@ -537,7 +537,7 @@ public:
 template <typename ait>
 class PMap {
 public:
-	static const VexAllocTypeWrapper<PMap<ait> > allocator;
+	static VexAllocTypeWrapper<PMap<ait> > allocator;
 	static const unsigned nrHashBuckets = 1024;
 	static unsigned paHash(PhysicalAddress pa);
 	PhysicalAddress nextPa;
@@ -574,7 +574,7 @@ public:
 template <typename ait>
 class LogRecord : public Named {
 	ThreadId tid;
-	static const VexAllocTypeWrapper<LogRecord> allocator;
+	static VexAllocTypeWrapper<LogRecord> allocator;
 protected:
 	void *marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const;
 public:
@@ -666,7 +666,7 @@ class LogFile : public LogReader<unsigned long> {
 		return *(_ptr *)p.cls_data;
 	}
 	_ptr forcedEof;
-	static const VexAllocTypeWrapper<LogFile> allocator;
+	static VexAllocTypeWrapper<LogFile> allocator;
 
 	LogFile() {}
 public:
@@ -2170,8 +2170,8 @@ public:
 	MCLookasideEntry *headLookaside;
 	PhysicalAddress base;
 
-	static const VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > allocator;
-	static const VexAllocType mcl_allocator;
+	static VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > allocator;
+	static VexAllocType mcl_allocator;
 
 	void visit(HeapVisitor &hv) const
 	{

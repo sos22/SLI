@@ -113,7 +113,7 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 	headLookaside = newmcl;
 }
 
-const VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > MemoryChunk<abstract_interpret_value>::allocator;
+VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > MemoryChunk<abstract_interpret_value>::allocator;
 
 static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
 {
@@ -125,5 +125,5 @@ static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
 	hv(mcl->next);
 }
 
-const VexAllocType MemoryChunk<abstract_interpret_value>::mcl_allocator =
+VexAllocType MemoryChunk<abstract_interpret_value>::mcl_allocator =
 { -1, visit_mcl_lookaside, NULL, "mcl_lookaside" };

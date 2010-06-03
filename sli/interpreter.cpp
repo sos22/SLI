@@ -1387,7 +1387,7 @@ template <typename ait> void destruct_expression_result_array(void *_ctxt)
 		arr[x].~expression_result<ait>();
 }
 
-template <typename ait> const VexAllocType expression_result_array<ait>::arrayAllocType = {
+template <typename ait> VexAllocType expression_result_array<ait>::arrayAllocType = {
 	-1, visit_expression_result_array<ait>, destruct_expression_result_array<ait>,
 	"expression result array"};
 

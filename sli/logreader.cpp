@@ -13,8 +13,8 @@ typedef struct sigaction sigaction_t;
 
 #include "ppres.h"
 
-const VexAllocTypeWrapper<LogFile> LogFile::allocator;
-template <typename ait> const VexAllocTypeWrapper<LogRecord<ait> > LogRecord<ait>::allocator;
+VexAllocTypeWrapper<LogFile> LogFile::allocator;
+template <typename ait> VexAllocTypeWrapper<LogRecord<ait> > LogRecord<ait>::allocator;
 
 LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
 {
