@@ -12,6 +12,7 @@ public:
 		inp(_inp) {}
 	void visit(HeapVisitor &hv) const {}
 	void destruct() {}
+	NAMED_CLASS
 };
 
 template <typename outtype, typename intype> VexAllocTypeWrapper<AbstractLogReader<outtype, intype> > AbstractLogReader<outtype,intype>::allocator;

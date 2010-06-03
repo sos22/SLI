@@ -22,6 +22,7 @@ typedef
       void (*gc_visit)(const void *, HeapVisitor &);
       void (*destruct)(void *);
       const char *name;
+      const char *(*get_name)(const void *);
       unsigned total_allocated;
       struct _VexAllocType *next;
    }

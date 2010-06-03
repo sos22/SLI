@@ -87,7 +87,16 @@ void destruct_object(void *_ctxt)
 	ctxt->destruct();
 }
 
-template <typename t, void (*visit)(const void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
+template <typename underlying>
+const char *get_name(const void *_ctxt)
+{
+	const underlying *ctxt = (const underlying *)_ctxt;
+	return ctxt->cls_name();
+}
+
+#define NAMED_CLASS static const char *cls_name() { return __PRETTY_FUNCTION__; }
+
+template <typename t, const char *(*get_name)(const void *) = get_name<t>, void (*visit)(const void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
 class VexAllocTypeWrapper {
 public:
 	VexAllocType type;
@@ -95,7 +104,7 @@ public:
 		type.nbytes = sizeof(t);
 		type.gc_visit = visit;
 		type.destruct = destruct;
-		type.name = "<wrapper type>";
+		type.get_name = get_name;
 	}
 	t *alloc() {
 		return (t *)__LibVEX_Alloc(&type);
@@ -382,6 +391,8 @@ public:
 	template <typename new_type> Thread<new_type> *abstract() const;
 
 	void destruct() { temporaries.~expression_result_array<abst_int_type>(); }
+
+	NAMED_CLASS
 };
 
 template <typename ait> class PMap;
@@ -532,6 +543,7 @@ public:
 		if (next)
 			next->pprev = pprev;
 	}
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -569,6 +581,7 @@ public:
 	void destruct() {}
 
 	template <typename newtype> PMap<newtype> *abstract() const;
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -594,6 +607,7 @@ public:
 	virtual LogRecord *dupe() const = 0;
 	virtual void destruct() {}
 	virtual void visit(HeapVisitor &hv) const {}
+	NAMED_CLASS
 };
 
 template <typename ait> class SignalHandlers;
@@ -684,6 +698,7 @@ public:
 	LogFile *truncate(LogReaderPtr eof);
 	void visit(HeapVisitor &hv) const {}
 	void destruct() { this->~LogFile(); }
+	NAMED_CLASS
 };
 
 template <typename abst_int_type>
@@ -746,6 +761,8 @@ public:
 	void sanityCheck() const;
 
 	void destruct() {}
+
+	NAMED_CLASS
 };
 
 template <typename ait> class LogRecordFootstep;
@@ -814,7 +831,7 @@ template <typename ait> void destroy_memlog(void *_ctxt);
 
 template <typename ait>
 class MemLog : public LogReader<ait>, public LogWriter<ait> {
-	static VexAllocTypeWrapper<MemLog<ait>, visit_object<MemLog<ait> >, destroy_memlog<ait> > allocator;
+	static VexAllocTypeWrapper<MemLog<ait> > allocator;
 	std::vector<LogRecord<ait> *> *content;
 	unsigned offset;
 	const MemLog<ait> *parent;
@@ -847,6 +864,8 @@ public:
 	virtual void destruct();
 
 	virtual void visit(HeapVisitor &hv) const;
+
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -881,6 +900,7 @@ public:
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp temp)
 	{ return new (allocator.alloc()) RdtscEvent<ait>(when, temp); }
 	ThreadEvent<ait> *dupe() const { return get(this->when, tmp); }
+	NAMED_CLASS
 };
 
 template <typename ait> class MemoryAccessLoad;
@@ -912,6 +932,7 @@ public:
 	}
 	ThreadEvent<ait> *dupe() const { return get(this->when, tmp, addr, size); }
 	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); ThreadEvent<ait>::visit(hv); }
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -938,6 +959,7 @@ public:
 
 	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); data.visit(hv); ThreadEvent<ait>::visit(hv); }
 	void destruct() { data.~expression_result<ait>(); ThreadEvent<ait>::destruct(); }
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -986,6 +1008,7 @@ public:
 		visit_aiv(reg4, hv);
 		ThreadEvent<ait>::visit(hv);
 	}
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -1050,6 +1073,7 @@ public:
 		expected.~expression_result<ait>();
 		ThreadEvent<ait>::destruct();
 	}
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -1066,6 +1090,7 @@ public:
 	ThreadEvent<ait> *dupe() const { return get(this->when); }
 	static ThreadEvent<ait> *get(EventTimestamp when)
 	{ return new (allocator.alloc()) SyscallEvent(when); }
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -1100,6 +1125,7 @@ public:
 		visit_aiv(virtaddr, hv);
 		ThreadEvent<ait>::visit(hv);
 	}
+	NAMED_CLASS
 };
 
 template <typename ait>
@@ -1652,6 +1678,8 @@ public:
 	template <typename new_type> AddressSpace<new_type> *abstract() const;
 
 	void destruct() {}
+
+	NAMED_CLASS
 };
 
 template<typename ait> void replay_syscall(const LogRecordSyscall<ait> *lrs,
@@ -1725,9 +1753,7 @@ public:
 };
 
 class ConstExpression : public Expression {
-	static VexAllocTypeWrapper<ConstExpression,
-				   visit_object<ConstExpression>,
-				   destruct_object<ConstExpression> > allocator;
+	static VexAllocTypeWrapper<ConstExpression> allocator;
         unsigned long v;
 protected:
 	unsigned _hash() const { return v; }
@@ -1750,12 +1776,12 @@ public:
 	}
 	void visit(HeapVisitor &hv) const {}
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
+
+	NAMED_CLASS
 };
 
 class ImportExpression : public Expression {
-	static VexAllocTypeWrapper<ImportExpression,
-				   visit_object<ImportExpression>,
-				   destruct_object<ImportExpression> > allocator;
+	static VexAllocTypeWrapper<ImportExpression> allocator;
 public:
         unsigned long v;
 	ImportOrigin *origin;
@@ -1774,6 +1800,8 @@ public:
 		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {hv(origin);}
+
+	NAMED_CLASS
 };
 
 class LoadExpression : public Expression {
@@ -1817,6 +1845,8 @@ public:
 	}
 	EventTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
+
+	NAMED_CLASS
 };
 
 class BinaryExpression : public Expression {
@@ -1858,6 +1888,7 @@ public:
 		        return max<EventTimestamp>(l->timestamp(),	\
 						   r->timestamp());	\
 		}							\
+		NAMED_CLASS						\
 	}
 
 mk_binop_class(lshift);
@@ -1914,6 +1945,7 @@ public:
 		{							\
 		        return l->timestamp();				\
 		}							\
+		NAMED_CLASS						\
 	}
 
 mk_unop_class(logicalnot);
@@ -1928,9 +1960,7 @@ class ternarycondition : public Expression {
 public:
 	Expression *cond, *t, *f;
 private:
-	static VexAllocTypeWrapper<ternarycondition,
-				   visit_object<ternarycondition>,
-				   destruct_object<ternarycondition> > allocator;
+	static VexAllocTypeWrapper<ternarycondition> allocator;
 protected:
 	char *mkName() const
 	{
@@ -1965,6 +1995,7 @@ public:
 					   max<EventTimestamp>(t->timestamp(),
 							       f->timestamp()));
 	}								
+	NAMED_CLASS
 };
 
 struct abstract_interpret_value {
@@ -2179,6 +2210,8 @@ public:
 		hv(headLookaside);
 	}
 	void destruct() {}
+
+	NAMED_CLASS
 };
 
 

@@ -110,9 +110,9 @@ MemLog<ait>::MemLog()
 }
 
 
-template <typename ait> VexAllocTypeWrapper<MemLog<ait>, visit_object<MemLog<ait> >, destroy_memlog<ait> > MemLog<ait>::allocator;
+template <typename ait> VexAllocTypeWrapper<MemLog<ait> > MemLog<ait>::allocator;
 
 #define MK_MEM_LOG(t)						\
 	template MemLog<t> *MemLog<t>::dupeSelf() const;	\
-	template VexAllocTypeWrapper<MemLog<t>, visit_object<MemLog<t> >, destroy_memlog<t> > MemLog<t>::allocator; \
+	template VexAllocTypeWrapper<MemLog<t> > MemLog<t>::allocator; \
 	template MemLog<t>::MemLog()

@@ -12,6 +12,7 @@ public:
 		vamap->visit(hv, pmap);
 	}
 	void destruct() {}
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<VAPMap> VAPMap::allocator;
 

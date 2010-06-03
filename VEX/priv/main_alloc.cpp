@@ -388,7 +388,7 @@ DumpHeapVisitor::visit(const void *what)
     if (!ah->type || (ah->flags & ALLOC_FLAG_GC_MARK))
       return;
     ah->flags |= ALLOC_FLAG_GC_MARK;
-    vex_printf("%d %p %s\n", depth, what, ah->type->name);
+    vex_printf("%d %p %s\n", depth, what, ah->type->name ?: ah->type->get_name(what));
     depth++;
     if (ah->type && ah->type->gc_visit)
       ah->type->gc_visit(what, *this);
@@ -433,6 +433,8 @@ void HeapUsageVisitor::visit(const void *ptr)
     return;
   if (!t->total_allocated) {
     t->next = headType;
+    if (!t->name)
+      t->name = t->get_name(ptr);
     headType = t;
   }
   t->total_allocated += hdr->size;

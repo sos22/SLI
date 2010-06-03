@@ -126,6 +126,7 @@ public:
 	{
 		nr_memory_operations = fin.idx - when.idx;
 	}
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<HistorySegment> HistorySegment::allocator;
 
@@ -264,6 +265,7 @@ public:
 		LogReader<abstract_interpret_value> **newModel2,
 		LogReaderPtr *newPtr2,
 		std::vector<unsigned long> *newPrefix);
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<History> History::allocator;
 
@@ -332,6 +334,7 @@ public:
 					    cond->timestamp());
 	}
 	bool isLogical() const { return cond->isLogical(); }
+	NAMED_CLASS
 };
 
 VexAllocTypeWrapper<ExpressionRip> ExpressionRip::allocator;
@@ -369,6 +372,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) const { hv(addr); }
 	EventTimestamp timestamp() const { return when; }
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
 
@@ -415,6 +419,7 @@ public:
 	void visit(HeapVisitor &hv) const { hv(vaddr); }
 	EventTimestamp timestamp() const { return load; }
 	bool isLogical() const { return true; }
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<ExpressionLastStore> ExpressionLastStore::allocator;
 
@@ -463,6 +468,7 @@ public:
 	EventTimestamp timestamp() const { return after; }
 	bool isLogical() const { return true; }
 	void visit(HeapVisitor &hv) const {}
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<ExpressionHappensBefore> ExpressionHappensBefore::allocator;
 
@@ -797,6 +803,7 @@ public:
 	}
 	void destruct() { this->~ModelExtractor(); }
 	void visit(HeapVisitor &hv) const { hv(model); }
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<ModelExtractor> ModelExtractor::allocator;
 
@@ -1158,6 +1165,7 @@ public:
 		     it++)
 			hv(it->second);
 	}
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<CrashReasonExtractor> CrashReasonExtractor::allocator;
 void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const ThreadEvent<abstract_interpret_value> *evt)
@@ -1270,6 +1278,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) const { hv(addr); hv(result); }
 	void destruct() {}
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
 void
@@ -1533,6 +1542,7 @@ public:
 	}
 	void destruct() { this->~HistoryLogTruncater(); }
 	void visit(HeapVisitor &hv) const { hv(hist); hv(model1); hv(model2); }
+	NAMED_CLASS
 };
 VexAllocTypeWrapper<HistoryLogTruncater> HistoryLogTruncater::allocator;
 
