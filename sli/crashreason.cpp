@@ -513,7 +513,7 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms)
 	grayStates.push_back(new ExplorationState(ms->dupeSelf(),
 						  MemLog<abstract_interpret_value>::emptyMemlog()));
 
-	while (grayStates.size != 0 &&
+	while (grayStates.size() != 0 &&
 	       (futures.size() == 0 ||
 		grayStates.size() < 10)) {
 		printf("%zd futures, %zd grays\n", futures.size(),

@@ -1307,6 +1307,7 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_access
 		/* Caller should have made sure that we can actually
 		   make progress. */
 		assert(res == InterpretResultContinue);
+		(void)res;
 	}
 }
 

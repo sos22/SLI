@@ -569,3 +569,6 @@ void VAMap::VAMapEntry::sanityCheck(unsigned long max,
 	for (unsigned x = 0; x < dchunk(start, end); x++)
 		assert(pa[x]._pa != 0);
 }
+
+#define MK_VAMAP(t)							\
+	template void VAMap::visit<t>(HeapVisitor &hv, PMap<t> *pmap) const

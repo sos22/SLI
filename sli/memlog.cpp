@@ -115,4 +115,5 @@ template <typename ait> VexAllocTypeWrapper<MemLog<ait> > MemLog<ait>::allocator
 #define MK_MEM_LOG(t)						\
 	template MemLog<t> *MemLog<t>::dupeSelf() const;	\
 	template VexAllocTypeWrapper<MemLog<t> > MemLog<t>::allocator; \
-	template MemLog<t>::MemLog()
+	template MemLog<t>::MemLog();				       \
+	template MemLog<t> *MemLog<t>::emptyMemlog()

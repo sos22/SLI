@@ -22,7 +22,8 @@
 	MK_LOGWRITER(t);			\
 	MK_ADDRESS_SPACE(t);			\
 	MK_LOGREADER(t);                        \
-        MK_PMAP(t)
+        MK_PMAP(t);				\
+	MK_VAMAP(t)
 
 static unsigned long signed_shift_right(unsigned long x, unsigned long y)
 {
