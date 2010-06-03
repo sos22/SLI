@@ -135,7 +135,8 @@ Expression *logicaland::get(Expression *l, Expression *r)
 
 Expression *logicalnot::get(Expression *l)
 {
-	return bitsaturate::get(bitwisenot::get(bitsaturate::get(l)));
+	return bitwiseand::get(bitwisenot::get(l),
+			       ConstExpression::get(1));
 }
 
 mk_op_allocator(bitsaturate);
@@ -371,7 +372,7 @@ Expression *bitwisexor::get(Expression *l, Expression *r)
 }
 
 mk_op_allocator(bitwiseand);
-bool bitwiseand::isLogical() const { return l->isLogical() && r->isLogical(); }
+bool bitwiseand::isLogical() const { return l->isLogical() || r->isLogical(); }
 Expression *bitwiseand::get(Expression *l, Expression *r)			
 {									
 	unsigned long lc, rc;						
