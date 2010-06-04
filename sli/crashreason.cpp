@@ -435,7 +435,7 @@ private:
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(before %d:%lx %d:%lx)",
+		return my_asprintf("(%d:%lx <-< %d:%lx)",
 				   before.tid._tid(),
 				   before.idx,
 				   after.tid._tid(),

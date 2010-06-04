@@ -1898,13 +1898,13 @@ public:
 	Expression *l, *r;
 };
 
-#define mk_binop_class(nme)						\
+#define mk_binop_class(nme, pp)						\
 	class nme : public BinaryExpression {				\
 	protected:							\
 	        static VexAllocTypeWrapper<nme> allocator;		\
 	        char *mkName() const                                    \
 		{							\
-			return my_asprintf("(%s " #nme "  %s)",		\
+			return my_asprintf("(%s " #pp " %s)",		\
 					   l->name(), r->name());	\
 		}							\
 		unsigned _hash() const { return l->hash() ^ (r->hash() * 3) ^ sizeof(nme); } \
@@ -1935,24 +1935,24 @@ public:
 		NAMED_CLASS						\
 	}
 
-mk_binop_class(lshift);
-mk_binop_class(rshift);
-mk_binop_class(bitwiseand);
-mk_binop_class(bitwiseor);
-mk_binop_class(bitwisexor);
-mk_binop_class(plus);
-mk_binop_class(subtract);
-mk_binop_class(times);
-mk_binop_class(divide);
-mk_binop_class(modulo);
-mk_binop_class(greaterthanequals);
-mk_binop_class(greaterthan);
-mk_binop_class(lessthanequals);
-mk_binop_class(lessthan);
-mk_binop_class(equals);
-mk_binop_class(notequals);
-mk_binop_class(logicalor);
-mk_binop_class(logicaland);
+mk_binop_class(lshift, <<);
+mk_binop_class(rshift, >>);
+mk_binop_class(bitwiseand, &);
+mk_binop_class(bitwiseor, |);
+mk_binop_class(bitwisexor, ^);
+mk_binop_class(plus, +);
+mk_binop_class(subtract, -);
+mk_binop_class(times, *);
+mk_binop_class(divide, /);
+mk_binop_class(modulo, %%);
+mk_binop_class(greaterthanequals, >=);
+mk_binop_class(greaterthan, >);
+mk_binop_class(lessthanequals, <=);
+mk_binop_class(lessthan, <);
+mk_binop_class(equals, ==);
+mk_binop_class(notequals, !=);
+mk_binop_class(logicalor, ||);
+mk_binop_class(logicaland, &&);
 
 class UnaryExpression : public Expression {
 public:
