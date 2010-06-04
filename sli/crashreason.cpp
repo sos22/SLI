@@ -1440,6 +1440,29 @@ refine(equals *eq,
 	return eq;
 }
 
+/* As with equals, so with notequals: we only handle one interesting case. */
+static Expression *
+refine(bitwisenot *bn,
+       const MachineState<abstract_interpret_value> *ms,
+       LogReader<abstract_interpret_value> *lf,
+       LogReaderPtr ptr,
+       bool *progress)
+{
+	equals *eq = dynamic_cast<equals *>(bn->l);
+	if (!eq)
+		return bn;
+
+	if (LoadExpression *le = dynamic_cast<LoadExpression *>(eq->l)) {
+		*progress = true;
+		return logicaland::get(
+			ExpressionLastStore::get(le->when, le->store, le->addr),
+			logicaland::get(
+				equals::get(le->addr, le->storeAddr),
+				bitwisenot::get(equals::get(le->val, eq->r))));
+	}
+	return bn;
+}
+
 static Expression *
 refine(bitwiseand *an, 
        const MachineState<abstract_interpret_value> *ms,
@@ -1528,6 +1551,8 @@ Expression *refine(Expression *expr,
 		return refine(eq, ms, lf, ptr, progress);
 	} else if (bitwiseand *an = dynamic_cast<bitwiseand *>(expr)) {
 		return refine(an, ms, lf, ptr, progress);
+	} else if (bitwisenot *bn = dynamic_cast<bitwisenot *>(expr)) {
+		return refine(bn, ms, lf, ptr, progress);
 	} else if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(expr)) {
 		return refine(els, ms, lf, ptr, progress);
 	} else {
