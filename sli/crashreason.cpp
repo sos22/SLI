@@ -55,6 +55,17 @@ private:
 	{
 		assert(when.tid.valid());
 	}
+	HistorySegment(Expression *cond,
+		       std::vector<unsigned long> &_rips,
+		       unsigned long nr_memory_ops,
+		       EventTimestamp _when)
+		: condition(cond),
+		  nr_memory_operations(nr_memory_ops),
+		  when(_when),
+		  rips(_rips)
+	{
+		assert(when.tid.valid());
+	}
 	HistorySegment(std::vector<unsigned long> &_rips,
 		       unsigned long nr_memory_ops,
 		       ThreadId tid)
@@ -93,6 +104,13 @@ public:
 				   ThreadId when)
 	{
 		return new (allocator.alloc()) HistorySegment(rips, nr_memory_ops, when);
+	}
+	static HistorySegment *get(Expression *cond,
+				   std::vector<unsigned long> &rips,
+				   unsigned long nr_memory_ops,
+				   EventTimestamp when)
+	{
+		return new (allocator.alloc()) HistorySegment(cond, rips, nr_memory_ops, when);
 	}
 	void destruct()
 	{
@@ -155,6 +173,15 @@ private:
 	{
 		calc_last_valid_idx();
 	}
+	History(std::vector<HistorySegment *> &_history,
+		unsigned long _first,
+		ThreadId _tid)
+		: history(_history),
+		  first_valid_idx(_first),
+		  tid(_tid)
+	{
+		calc_last_valid_idx();
+	}
 	History(std::vector<unsigned long> rips, unsigned long nr_memory_ops,
 		unsigned long _first, ThreadId _tid)
 		: first_valid_idx(_first),
@@ -197,6 +224,12 @@ public:
 			    ThreadId tid)
 	{
 		return new (allocator.alloc()) History(start, end, first_valid_idx, tid);
+	}
+	static History *get(std::vector<HistorySegment *> &content,
+			    unsigned long first_valid_idx,
+			    ThreadId tid)
+	{
+		return new (allocator.alloc()) History(content, first_valid_idx, tid);
 	}
 	static History *get(std::vector<unsigned long> &rips,
 			    unsigned long nr_memory_ops,
@@ -301,7 +334,7 @@ private:
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(rip %d:{...}:%s)", tid._tid(), cond->name());
+		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history->name(), cond->name());
 	}
 	unsigned _hash() const {
 		return history->history.size() ^ tid._tid() ^ cond->hash();
@@ -1321,39 +1354,28 @@ static Expression *refine(ExpressionRip *er,
 			er->prefix_rips);
 	}
 
-	/* Okay, done as much as we can here.  Go back to previous
-	   conditional branch. */
+	/* That didn't work, so try some of the predecessor
+	   conditional branches out of the history. */
 
-	if (er->history->history.size() == 1) {
-		/* Okay, there were no previous conditional branches.
-		   We're doomed. */
-		return er;
+	std::vector<HistorySegment *> new_history(er->history->history);
+	for (std::vector<HistorySegment *>::reverse_iterator it = new_history.rbegin();
+	     !subCondProgress && it != new_history.rend();
+	     it++) {
+		Expression *newCond = refine((*it)->condition, ms, lf, ptr, &subCondProgress);
+		if (subCondProgress)
+			*it = HistorySegment::get(newCond, (*it)->rips,
+						  (*it)->nr_memory_operations,
+						  (*it)->when);
 	}
 
-	std::vector<HistorySegment *>::const_iterator start =
-		er->history->history.begin();
-	std::vector<HistorySegment *>::const_iterator end =
-		er->history->history.end();
-	end--;
+	if (!subCondProgress)
+		return er;
 
-	History *newHist = History::get(start, end, er->history->first_valid_idx,
-					er->history->tid);
 	*progress = true;
-
 	return ExpressionRip::get(
 		er->tid,
-		newHist,
-		logicaland::get((*end)->condition,
-				ExpressionRip::get(er->tid,
-						   History::get((*end)->rips,
-								(*end)->nr_memory_operations,
-								er->history->last_valid_idx -
-								(*end)->nr_memory_operations,
-								er->history->tid),
-						   er->cond,
-						   er->model_execution,
-						   er->model_exec_start,
-						   er->prefix_rips)),
+		History::get(new_history, er->history->first_valid_idx, er->tid),
+		er->cond,
 		er->model_execution,
 		er->model_exec_start,
 		er->prefix_rips);
