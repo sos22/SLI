@@ -264,7 +264,7 @@ public:
 		LogReaderPtr *newPtr,
 		LogReader<abstract_interpret_value> **newModel2,
 		LogReaderPtr *newPtr2,
-		std::vector<unsigned long> *newPrefix);
+		std::vector<unsigned long> *newRips);
 	NAMED_CLASS
 };
 VexAllocTypeWrapper<History> History::allocator;
@@ -331,7 +331,7 @@ public:
 	}
 	EventTimestamp timestamp() const {
 		return max<EventTimestamp>(history->timestamp(),
-					    cond->timestamp());
+					   cond->timestamp());
 	}
 	bool isLogical() const { return cond->isLogical(); }
 	NAMED_CLASS
@@ -633,8 +633,8 @@ void History::splitAt(unsigned idx, History **firstBit, History **secondBit) con
 	if (secondBit) {
 		second = History::get(cntr, tid);
 		for ( ;
-		     it != history.end();
-		     it++) {
+		      it != history.end();
+		      it++) {
 			second->history.push_back(*it);
 		}
 		second->calc_last_valid_idx();
@@ -938,27 +938,16 @@ fixup_expression(Expression **e,
 				   This has a couple of phases:
 
 				   -- First, we split the existing
-                                      history into {abc} and {X,def}
+				      history into {abc} and {X,def}
 				   -- Next, we grab a history for
-				      tidB, denoted ... above.  We
-				      pull this out of the
-				      pre-existing spare history map.
-				   -- We then synthesise three
-                                      suitable model executions.
-				*/
-
-				History *newOuterHist;
-				History *newMiddleHist;
-				History *newInnerHist;
-				LogReader<abstract_interpret_value> *outerModel;
-				LogReaderPtr outerStart;
-				LogReader<abstract_interpret_value> *middleModel;
-				LogReaderPtr middleStart;
-				LogReader<abstract_interpret_value> *innerModel;
-				LogReaderPtr innerStart;
-				std::vector<unsigned long> outerRips;
-				std::vector<unsigned long> middleRips;
-				std::vector<unsigned long> innerRips;
+  				      tidB, denoted ... above.  We
+  				      pull this out of the
+  				      pre-existing spare history map.
+				*/                                                                                                              
+                                                                                                                                               
+				History *newOuterHist;                                                                                          
+				History *newMiddleHist;                                                                                         
+				History *newInnerHist;                                                                                          
 				er->history->splitAt(idx_entry,
 						     &newOuterHist,
 						     &newInnerHist);
@@ -969,49 +958,14 @@ fixup_expression(Expression **e,
 				{
 					VexGcRoot r1((void **)&newOuterHist, "r1");
 					VexGcRoot r2((void **)&newInnerHist, "r2");
-					new_histories[needed.tid]->splitAt(needed.idx,
-									   &newMiddleHist,
-									   NULL);
-					VexGcRoot r3((void **)&newMiddleHist, "r3");
-
-					new_last_valid_idx[er->tid] = newOuterHist->last_valid_idx;
-					outerModel = extract_model_exec(er->model_execution,
-									er->model_exec_start,
-									ms,
-									new_last_valid_idx,
-									&outerStart,
-									er->tid,
-									&outerRips,
-									newOuterHist->first_valid_idx);
-					VexGcRoot r4((void **)&outerModel, "r4");
-					new_last_valid_idx[needed.tid] = newMiddleHist->last_valid_idx;
-					middleModel = extract_model_exec(er->model_execution,
-									 er->model_exec_start,
-									 ms,
-									 new_last_valid_idx,
-									 &middleStart,
-									 needed.tid,
-									 &middleRips,
-									 newMiddleHist->first_valid_idx);
-					VexGcRoot r6((void **)&middleModel, "r6");
-					new_last_valid_idx[er->tid] = newInnerHist->last_valid_idx;
-					innerModel = extract_model_exec(er->model_execution,
-									er->model_exec_start,
-									ms,
-									new_last_valid_idx,
-									&innerStart,
-									er->tid,
-									&innerRips,
-									newInnerHist->first_valid_idx);
-				}
-
-				/* Turn e into the outer history */
-				er->history = newOuterHist;
-				er->model_execution = outerModel;
-				er->model_exec_start = outerStart;
-				er->prefix_rips = outerRips;
-
-				er->cond =
+					new_histories[needed.tid]->splitAt(needed.idx,                                                          
+									   &newMiddleHist,                                                      
+									   NULL);                                                               
+				}                                                                                                               
+                                                                                                                                               
+				*e = ExpressionRip::get(                                                                                        
+					er->tid,                                                                                                
+					newOuterHist,                                                                                           
 					ExpressionRip::get(
 						needed.tid,
 						newMiddleHist,
@@ -1019,12 +973,15 @@ fixup_expression(Expression **e,
 							er->tid,
 							newInnerHist,
 							er->cond,
-							innerModel,
-							innerStart,
-							innerRips),
-						middleModel,
-						middleStart,
-						middleRips);
+							er->model_execution,
+							er->model_exec_start,
+							er->prefix_rips),
+						er->model_execution,
+						er->model_exec_start,
+						er->prefix_rips),
+					er->model_execution,
+					er->model_exec_start,
+					er->prefix_rips);
 
 				/* Run the check again on that. */
 				fixup_expression(e, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
@@ -1321,12 +1278,14 @@ static LogReader<abstract_interpret_value> *
 truncate_logfile(const MachineState<abstract_interpret_value> *ms,
 		 LogReader<abstract_interpret_value> *lf,
 		 LogReaderPtr ptr,
-		 EventTimestamp lastEvent)
+		 EventTimestamp lastEvent,
+		 LogReaderPtr *outPtr)
 {
 	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
 	TruncateToEvent *tte = new TruncateToEvent(lastEvent);
 	VexGcRoot tteroot((void **)&tte, "tte");
 	i.replayLogfile(lf, ptr, NULL, tte);
+	*outPtr = tte->work->startPtr();
 	return tte->work;
 }
 
@@ -1379,14 +1338,6 @@ static Expression *refine(ExpressionRip *er,
 
 	History *newHist = History::get(start, end, er->history->first_valid_idx,
 					er->history->tid);
-	LogReaderPtr newPtr;
-	LogReaderPtr newPtr2;
-	LogReader<abstract_interpret_value> *newModel;
-	LogReader<abstract_interpret_value> *newModel2;
-
-	std::vector<unsigned long> newPrefix;
-	newHist->extractSubModel(er->tid, ms, er->prefix_rips, lf, ptr, &newModel, &newPtr,
-				 &newModel2, &newPtr2, &newPrefix);
 	*progress = true;
 
 	return ExpressionRip::get(
@@ -1400,11 +1351,11 @@ static Expression *refine(ExpressionRip *er,
 								(*end)->nr_memory_operations,
 								er->history->tid),
 						   er->cond,
-						   newModel2,
-						   newPtr2,
-						   newPrefix)),
-		newModel,
-		newPtr,
+						   er->model_execution,
+						   er->model_exec_start,
+						   er->prefix_rips)),
+		er->model_execution,
+		er->model_exec_start,
 		er->prefix_rips);
 }
 
@@ -1510,14 +1461,14 @@ Expression *refine(ExpressionLastStore *expr,
 	MachineState<abstract_interpret_value> *localMs = ms->dupeSelf();
 	VexGcRoot r2((void **)&localMs, "r2");
 	Interpreter<abstract_interpret_value> i(localMs);
+	LogReaderPtr truncatedPtr;
 	LogReader<abstract_interpret_value> *truncatedLog =
-		truncate_logfile(ms, lf, ptr, expr->load);
+		truncate_logfile(ms, lf, ptr, expr->load, &truncatedPtr);
 	VexGcRoot rr((void **)&truncatedLog, "rr");
-	i.replayLogfile(truncatedLog, ptr, NULL, NULL, lsr);
-
+	i.replayLogfile(truncatedLog, truncatedPtr, NULL, NULL, lsr);
+	
 	Explorer *e = new Explorer(localMs, expr->load.tid);
 	VexGcRoot eroot((void **)&e, "eroot");
-
 	Expression *work = lsr->result;
 	VexGcRoot workroot((void **)&work, "workroot");
 
