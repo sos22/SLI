@@ -97,8 +97,11 @@ void *LogRecordLoad<ait>::marshal(unsigned *sz) const
 										   sizeof(*lr) + size,
 										   sz,
 										   &r);
+	unsigned long v[2];
 	lr->ptr = ptr;
-	memcpy(lr + 1, &value, size);
+	v[0] = force(value.lo);
+	v[1] = force(value.hi);
+	memcpy(lr + 1, v, size);
 	return r;
 }
 
@@ -110,8 +113,11 @@ void *LogRecordStore<ait>::marshal(unsigned *sz) const
 										     sizeof(*sr) + size,
 										     sz,
 										     &r);
+	unsigned long v[2];
 	sr->ptr = ptr;
-	memcpy(sr + 1, &value, size);
+	v[0] = force(value.lo);
+	v[1] = force(value.hi);
+	memcpy(sr + 1, v, size);
 	return r;
 }
 
