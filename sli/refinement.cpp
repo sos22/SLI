@@ -143,7 +143,8 @@ Expression *
 LoadExpression::refine(const MachineState<abstract_interpret_value> *ms,
 		       LogReader<abstract_interpret_value> *lf,
 		       LogReaderPtr ptr,
-		       bool *progress)
+		       bool *progress,
+		       const std::map<ThreadId, unsigned long> &validity)
 {
 	*progress = true;
 	return onlyif::get(
@@ -157,7 +158,8 @@ Expression *
 BinaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 			 LogReader<abstract_interpret_value> *lf,
 			 LogReaderPtr ptr,
-			 bool *progress)
+			 bool *progress,
+			 const std::map<ThreadId, unsigned long> &validity)
 {
 	bool subprogress;
 	Expression *_l = l;
@@ -165,13 +167,13 @@ BinaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 
 	subprogress = false;
 	if (l->timestamp() > r->timestamp()) {
-		_l = l->refine(ms, lf, ptr, &subprogress);
+	  _l = l->refine(ms, lf, ptr, &subprogress, validity);
 		if (!subprogress)
-			_r = r->refine(ms, lf, ptr, &subprogress);
+		  _r = r->refine(ms, lf, ptr, &subprogress, validity);
 	} else {
-		_r = r->refine(ms, lf, ptr, &subprogress);
+	  _r = r->refine(ms, lf, ptr, &subprogress, validity);
 		if (!subprogress)
-			_l = l->refine(ms, lf, ptr, &subprogress);
+		  _l = l->refine(ms, lf, ptr, &subprogress, validity);
 	}
 	if (subprogress) {
 		*progress = true;
@@ -184,10 +186,11 @@ Expression *
 UnaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 			LogReader<abstract_interpret_value> *lf,
 			LogReaderPtr ptr,
-			bool *progress)
+			bool *progress,
+			const std::map<ThreadId, unsigned long> &validity)
 {
 	bool subprogress = false;
-	Expression *l2 = l->refine(ms, lf, ptr, &subprogress);
+	Expression *l2 = l->refine(ms, lf, ptr, &subprogress, validity);
 	if (subprogress) {
 		*progress = true;
 		return semiDupe(l2);
@@ -308,7 +311,8 @@ Expression *
 ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 			    LogReader<abstract_interpret_value> *lf,
 			    LogReaderPtr ptr,
-			    bool *progress)
+			    bool *progress,
+			    const std::map<ThreadId, unsigned long> &validity)
 {
 	LastStoreRefiner *lsr =
 		new LastStoreRefiner(

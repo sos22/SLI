@@ -1782,7 +1782,8 @@ public:
 	virtual Expression *refine(const MachineState<abstract_interpret_value> *ms,
 				   LogReader<abstract_interpret_value> *lf,
 				   LogReaderPtr ptr,
-				   bool *progress) { return this; }
+				   bool *progress,
+				   const std::map<ThreadId, unsigned long> &validity) = 0;
 	Expression() : Named(), next(NULL), pprev(&next) {}
 	bool isEqual(const Expression *other) const {
 		if (other == this)
@@ -1815,6 +1816,11 @@ public:
 	}
 	void visit(HeapVisitor &hv) const {}
 
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 	NAMED_CLASS
 };
 
@@ -1843,6 +1849,11 @@ public:
 	void visit(HeapVisitor &hv) const {}
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
 
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 	NAMED_CLASS
 };
 
@@ -1866,6 +1877,12 @@ public:
 		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {hv(origin);}
+
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 
 	NAMED_CLASS
 };
@@ -1913,7 +1930,8 @@ public:
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
-			   bool *progress);
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity);
 	void visit(HeapVisitor &hv) const { hv(vaddr); }
 	EventTimestamp timestamp() const { return load; }
 	bool isLogical() const { return true; }
@@ -1965,6 +1983,12 @@ public:
 	EventTimestamp timestamp() const { return after; }
 	bool isLogical() const { return true; }
 	void visit(HeapVisitor &hv) const {}
+
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 	NAMED_CLASS
 };
 
@@ -2013,7 +2037,8 @@ public:
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
-			   bool *progress);
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity);
 
 	EventTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
@@ -2028,7 +2053,8 @@ public:
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
-			   bool *progress);
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity);
 	Expression *l, *r;
 };
 
@@ -2102,7 +2128,8 @@ public:
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
-			   bool *progress);
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity);
 	Expression *l;
 };
 
@@ -2190,6 +2217,11 @@ public:
 					   max<EventTimestamp>(t->timestamp(),
 							       f->timestamp()));
 	}								
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 	NAMED_CLASS
 };
 
