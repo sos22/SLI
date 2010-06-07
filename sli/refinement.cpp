@@ -265,6 +265,12 @@ public:
 		hv(modelExec);
 	}
 	void destruct() {}
+	void finish(const MachineState<abstract_interpret_value> *ms) {
+		for (std::map<ThreadId, History *>::const_iterator it = thread_histories.begin();
+		     it != thread_histories.end();
+		     it++)
+			it->second->finish(ms->findThread(it->first)->lastEvent);
+	}
 	NAMED_CLASS
 };
 VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
@@ -389,7 +395,8 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 		truncate_logfile(ms, lf, ptr, load, &truncatedPtr);
 	VexGcRoot rr((void **)&truncatedLog, "rr");
 	i.replayLogfile(truncatedLog, truncatedPtr, NULL, NULL, lsr);
-	
+	lsr->finish(localMs);
+
 	Explorer *e = new Explorer(localMs, load.tid);
 	VexGcRoot eroot((void **)&e, "eroot");
 	Expression *work = lsr->result;
@@ -398,7 +405,8 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 	for (std::vector<ExplorationState *>::iterator it = e->futures.begin();
 	     it != e->futures.end();
 	     it++) {
-		Interpreter<abstract_interpret_value> i2(localMs->dupeSelf());
+		MachineState<abstract_interpret_value> *ms2 = localMs->dupeSelf();
+		Interpreter<abstract_interpret_value> i2(ms2);
 		LastStoreRefiner *lsr2 =
 			new LastStoreRefiner(
 				store,
@@ -410,6 +418,7 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 				validity);
 		VexGcRoot r3((void **)&lsr2, "r3");
 		i2.replayLogfile((*it)->lf, (*it)->lf->startPtr(), NULL, NULL, lsr2);
+		lsr2->finish(ms2);
 		work = lsr2->result;
 	}
 	*progress = true;
