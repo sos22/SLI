@@ -985,7 +985,7 @@ public:
 	}
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("footstep()");
+		return my_asprintf("footstep(%s)", name_aiv(rip));
 	}
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
@@ -1248,7 +1248,7 @@ class LogRecordStore : public LogRecord<ait> {
 	expression_result<ait> value;
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("store(%x)", size);
+		return my_asprintf("store(%x,%s)", size, name_aiv(ptr));
 	}
 public:
 	LogRecordStore(ThreadId _tid,
