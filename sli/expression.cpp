@@ -269,10 +269,10 @@ Expression *lshift::get(Expression *l, Expression *r)
 		unsigned long A, B, C = rc;
 		if (land) {
 			lrshift = dynamic_cast<rshift *>(land->l);
-			x = lrshift->l;
 			if (lrshift &&
 			    lrshift->r->isConstant(&A) &&
 			    land->r->isConstant(&B)) {
+				x = lrshift->l;
 				return bitwiseand::get(
 					rshift::get(x, ConstExpression::get(A - C)),
 					ConstExpression::get(sane_lshift(B, C)));
