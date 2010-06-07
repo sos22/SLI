@@ -1793,6 +1793,25 @@ public:
 	}
 };
 
+class BottomExpression : public Expression {
+	static VexAllocTypeWrapper<BottomExpression> allocator;
+	static BottomExpression *bottom;
+protected:
+	unsigned _hash() const { return 0x1234567; }
+	char *mkName() const { return my_asprintf("_|_"); }
+	bool _isEqual(const Expression *other) const { return false; }
+public:
+	static Expression *get()
+	{
+		if (!bottom)
+			bottom = new (allocator.alloc()) BottomExpression();
+		return bottom;
+	}
+	void visit(HeapVisitor &hv) const {}
+
+	NAMED_CLASS
+};
+
 class ConstExpression : public Expression {
 	static VexAllocTypeWrapper<ConstExpression> allocator;
         unsigned long v;
@@ -1954,6 +1973,7 @@ mk_binop_class(equals, ==);
 mk_binop_class(notequals, !=);
 mk_binop_class(logicalor, ||);
 mk_binop_class(logicaland, &&);
+mk_binop_class(onlyif, onlyif);
 
 class UnaryExpression : public Expression {
 public:

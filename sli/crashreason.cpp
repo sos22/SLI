@@ -680,7 +680,8 @@ syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_v
 			EventTimestamp *why = NULL)
 {
 	if (dynamic_cast<ConstExpression *>(e) ||
-	    dynamic_cast<ImportExpression *>(e))
+	    dynamic_cast<ImportExpression *>(e) ||
+	    dynamic_cast<BottomExpression *>(e))
 		return true;
 
 	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(e))
@@ -1381,20 +1382,21 @@ static Expression *refine(ExpressionRip *er,
 		er->prefix_rips);
 }
 
-/* We handle precisely one interesting case when refining ==:
-   
-   (load@L:S la:sa -> val) == R
+static Expression *
+refine(LoadExpression *le,
+       const MachineState<abstract_interpret_value> *ms,
+       LogReader<abstract_interpret_value> *lf,
+       LogReaderPtr ptr,
+       bool *progress)
+{
+	*progress = true;
+	return onlyif::get(
+		logicaland::get(
+			ExpressionLastStore::get(le->when, le->store, le->addr),
+			equals::get(le->addr, le->storeAddr)),
+		le->val);
+}
 
-   becomes
-
-   laststore(L,S,la) && (la == sa) && (val == R)
-
-   i.e. in order for the load to be satisfied by the store, the store
-   has to be the last write to the load address, and the load and
-   store virtual addresses have to match up.  This allows us to
-   ``unwrap'' the load expression, so the meat of the expression is
-   just val == R.
-*/
 static Expression *
 refine(equals *eq, 
        const MachineState<abstract_interpret_value> *ms,
@@ -1402,18 +1404,55 @@ refine(equals *eq,
        LogReaderPtr ptr,
        bool *progress)
 {
-	if (LoadExpression *le = dynamic_cast<LoadExpression *>(eq->l)) {
+	bool subprogress;
+	Expression *l = eq->l;
+	Expression *r = eq->r;
+
+	subprogress = false;
+	if (l->timestamp() > r->timestamp()) {
+		l = refine(l, ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			r = refine(r, ms, lf, ptr, &subprogress);
+	} else {
+		r = refine(r, ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			l = refine(l, ms, lf, ptr, &subprogress);
+	}
+	if (subprogress) {
 		*progress = true;
-		return logicaland::get(
-			ExpressionLastStore::get(le->when, le->store, le->addr),
-			logicaland::get(
-				equals::get(le->addr, le->storeAddr),
-				equals::get(le->val, eq->r)));
+		return equals::get(l, r);
 	}
 	return eq;
 }
 
-/* As with equals, so with notequals: we only handle one interesting case. */
+static Expression *
+refine(onlyif *eq, 
+       const MachineState<abstract_interpret_value> *ms,
+       LogReader<abstract_interpret_value> *lf,
+       LogReaderPtr ptr,
+       bool *progress)
+{
+	bool subprogress;
+	Expression *l = eq->l;
+	Expression *r = eq->r;
+
+	subprogress = false;
+	if (l->timestamp() > r->timestamp()) {
+		l = refine(l, ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			r = refine(r, ms, lf, ptr, &subprogress);
+	} else {
+		r = refine(r, ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			l = refine(l, ms, lf, ptr, &subprogress);
+	}
+	if (subprogress) {
+		*progress = true;
+		return onlyif::get(l, r);
+	}
+	return eq;
+}
+
 static Expression *
 refine(bitwisenot *bn,
        const MachineState<abstract_interpret_value> *ms,
@@ -1421,19 +1460,14 @@ refine(bitwisenot *bn,
        LogReaderPtr ptr,
        bool *progress)
 {
-	equals *eq = dynamic_cast<equals *>(bn->l);
-	if (!eq)
-		return bn;
-
-	if (LoadExpression *le = dynamic_cast<LoadExpression *>(eq->l)) {
+	bool subprogress = false;
+	Expression *l2 = refine(bn->l, ms, lf, ptr, &subprogress);
+	if (subprogress) {
 		*progress = true;
-		return logicaland::get(
-			ExpressionLastStore::get(le->when, le->store, le->addr),
-			logicaland::get(
-				equals::get(le->addr, le->storeAddr),
-				bitwisenot::get(equals::get(le->val, eq->r))));
+		return bitwisenot::get(l2);
+	} else {
+		return bn;
 	}
-	return bn;
 }
 
 static Expression *
@@ -1520,10 +1554,14 @@ Expression *refine(Expression *expr,
 {
 	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr)) {
 		return refine(er, ms, lf, ptr, progress);
+	} else if (LoadExpression *le = dynamic_cast<LoadExpression *>(expr)) {
+		return refine(le, ms, lf, ptr, progress);
 	} else if (equals *eq = dynamic_cast<equals *>(expr)) {
 		return refine(eq, ms, lf, ptr, progress);
 	} else if (bitwiseand *an = dynamic_cast<bitwiseand *>(expr)) {
 		return refine(an, ms, lf, ptr, progress);
+	} else if (onlyif *oi = dynamic_cast<onlyif *>(expr)) {
+		return refine(oi, ms, lf, ptr, progress);
 	} else if (bitwisenot *bn = dynamic_cast<bitwisenot *>(expr)) {
 		return refine(bn, ms, lf, ptr, progress);
 	} else if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(expr)) {

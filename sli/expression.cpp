@@ -550,3 +550,22 @@ Expression *equals::get(Expression *l, Expression *r)
 	return intern(work);						
 }
 
+mk_op_allocator(onlyif);
+bool onlyif::isLogical() const { return r->isLogical(); }
+Expression *onlyif::get(Expression *l, Expression *r)
+{
+	unsigned long lc;
+	if (l->isConstant(&lc)) {
+		if (lc)
+			return r;
+		else
+			return BottomExpression::get();
+	}
+	onlyif *work= new (allocator.alloc()) onlyif();
+	work->l = l;
+	work->r = r;
+	return intern(work);
+}
+
+mk_op_allocator(BottomExpression);
+BottomExpression *BottomExpression::bottom;
