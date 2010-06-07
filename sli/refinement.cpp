@@ -1,0 +1,351 @@
+#include <deque>
+
+#include "sli.h"
+
+class ExplorationState : public GarbageCollected<ExplorationState> {
+public:
+	MachineState<abstract_interpret_value> *ms;
+	MemLog<abstract_interpret_value> *lf;
+
+	void visit(HeapVisitor &hv) const { hv(lf); hv(ms); }
+	void destruct() {}
+	ExplorationState(MachineState<abstract_interpret_value> *_ms,
+			 MemLog<abstract_interpret_value> *_lf)
+		: ms(_ms), lf(_lf)
+	{
+	}
+	ExplorationState *dupeSelf()
+	{
+		return new ExplorationState(ms->dupeSelf(), lf->dupeSelf());
+	}
+};
+
+class Explorer : public GarbageCollected<Explorer> {
+	std::deque<ExplorationState *> grayStates;
+public:
+	std::vector<ExplorationState *> futures;
+
+	Explorer(const MachineState<abstract_interpret_value> *ms,
+		 ThreadId ignoredTid);
+	void visit(HeapVisitor &hv) const
+	{
+		visit_container(futures, hv);
+		visit_container(grayStates, hv);
+	}
+	void destruct() {}
+};
+
+Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
+		   ThreadId ignoredThread)
+	: grayStates(), futures()
+{
+	Explorer *thisK = this;
+	VexGcRoot thisKeeper((void **)&thisK, "this");
+
+	grayStates.push_back(new ExplorationState(ms->dupeSelf(),
+						  MemLog<abstract_interpret_value>::emptyMemlog()));
+
+	while (grayStates.size() != 0 &&
+	       (grayStates.size() + futures.size()) < 80) {
+		printf("%zd futures, %zd grays\n", futures.size(),
+		       grayStates.size());
+		ExplorationState *s = grayStates.front();
+		VexGcRoot sroot((void **)&s, "sroot");
+		grayStates.pop_front();
+
+		printf("Consider %p\n", s);
+
+		bool stopped = true;
+		for (unsigned x = 0; stopped && x < s->ms->threads->size(); x++) {
+			Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
+			if (thr->tid == ignoredThread)
+				continue;
+			if (!thr->cannot_make_progress)
+				stopped = false;
+		}
+		if (stopped) {
+			/* No thread can make progress. */
+			futures.push_back(s);
+			printf("No progress possible.\n");
+			continue;
+		}
+
+		MemTracePool<abstract_interpret_value> *thread_traces =
+			new MemTracePool<abstract_interpret_value>(s->ms, ignoredThread);
+		VexGcRoot ttraces((void **)&thread_traces, "ttraces");
+		std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
+			thread_traces->firstRacingAccessMap();
+		PointerKeeper<std::map<ThreadId, Maybe<unsigned> > > keeper(first_racing_access);
+
+		/* If there are no races then we can just run one
+		   thread after another, and we don't need to do
+		   anything else.  We can even get away with reusing
+		   the old MachineState. */
+		/* This includes the case where only one thread can
+		   make progress at all. */
+		bool noRaces = true;
+		for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
+		     it != first_racing_access->end();
+		     it++) {
+			if (it->first == ignoredThread)
+				continue;
+			if (it->second.full)
+				noRaces = false;
+		}
+		if (noRaces) {
+			for (unsigned x = 0; x < s->ms->threads->size(); x++) {
+				Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
+				if (thr->tid == ignoredThread)
+					continue;
+				if (thr->cannot_make_progress)
+					continue;
+				Interpreter<abstract_interpret_value> i(s->ms);
+				i.runToFailure(thr->tid, s->lf, 10000);
+			}
+			futures.push_back(s);
+			continue;
+		}
+
+		/* Have some actual races -> have to do full
+		 * repertoire. */
+		for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
+		     it != first_racing_access->end();
+		     it++) {
+			ThreadId tid = it->first;
+			Maybe<unsigned> r = it->second;
+			Thread<abstract_interpret_value> *thr = s->ms->findThread(tid);
+			if (thr->tid == ignoredThread)
+				continue;
+			if (thr->cannot_make_progress)
+				continue;
+			ExplorationState *newGray = s->dupeSelf();
+			VexGcRoot grayKeeper((void **)&newGray, "newGray");
+			Interpreter<abstract_interpret_value> i(newGray->ms);
+			if (r.full) {
+				printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
+				i.runToAccessLoggingEvents(tid, r.value + 1, newGray->lf);
+			} else {
+				printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
+				i.runToFailure(tid, newGray->lf, 10000);
+			}
+
+			grayStates.push_back(newGray);
+		}
+	}
+
+	while (!grayStates.empty()) {
+		futures.push_back(grayStates.front());
+		grayStates.pop_front();
+	}
+}
+
+Expression *
+LoadExpression::refine(const MachineState<abstract_interpret_value> *ms,
+		       LogReader<abstract_interpret_value> *lf,
+		       LogReaderPtr ptr,
+		       bool *progress)
+{
+	*progress = true;
+	return onlyif::get(
+		logicaland::get(
+			ExpressionLastStore::get(when, store, addr),
+			equals::get(addr, storeAddr)),
+		val);
+}
+
+Expression *
+BinaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
+			 LogReader<abstract_interpret_value> *lf,
+			 LogReaderPtr ptr,
+			 bool *progress)
+{
+	bool subprogress;
+	Expression *_l = l;
+	Expression *_r = r;
+
+	subprogress = false;
+	if (l->timestamp() > r->timestamp()) {
+		_l = l->refine(ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			_r = r->refine(ms, lf, ptr, &subprogress);
+	} else {
+		_r = r->refine(ms, lf, ptr, &subprogress);
+		if (!subprogress)
+			_l = l->refine(ms, lf, ptr, &subprogress);
+	}
+	if (subprogress) {
+		*progress = true;
+		return semiDupe(_l, _r);
+	}
+	return this;
+}
+
+Expression *
+UnaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
+			LogReader<abstract_interpret_value> *lf,
+			LogReaderPtr ptr,
+			bool *progress)
+{
+	bool subprogress = false;
+	Expression *l2 = l->refine(ms, lf, ptr, &subprogress);
+	if (subprogress) {
+		*progress = true;
+		return semiDupe(l2);
+	} else {
+		return this;
+	}
+}
+
+/* Takes the content of a last-store expression and compares it with a
+   sample execution, building an expression which captures what's
+   necessary for the last store to happen in that execution.  We do
+   not look at anything past the end of the execution, though. */
+class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
+	EventTimestamp store;
+	EventTimestamp load;
+	Expression *addr;
+	static VexAllocTypeWrapper<LastStoreRefiner> allocator;
+public:
+	Expression *result;
+	void record(Thread<abstract_interpret_value> *thr,
+		    const ThreadEvent<abstract_interpret_value> *evt);
+	LastStoreRefiner(EventTimestamp _store,
+			 EventTimestamp _load,
+			 Expression *_addr,
+			 Expression *_result = ConstExpression::get(1))
+		: store(_store),
+		  load(_load),
+		  addr(_addr),
+		  result(_result)
+	{
+	}
+	static void *operator new(size_t s)
+	{
+		return (void *)LibVEX_Alloc_Sized(&allocator.type, s);
+	}
+	static void operator delete(void *x)
+	{
+		abort();
+	}
+	void visit(HeapVisitor &hv) const { hv(addr); hv(result); }
+	void destruct() {}
+	NAMED_CLASS
+};
+VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
+void
+LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
+			 const ThreadEvent<abstract_interpret_value> *evt)
+{
+	if (const StoreEvent<abstract_interpret_value> *se =
+	    dynamic_cast<const StoreEvent<abstract_interpret_value> *>(evt)) {
+		if (evt->when != store) {
+			result =
+				logicaland::get(
+					result,
+					logicalor::get(
+						logicalnot::get(
+							equals::get(
+								se->addr.origin,
+								addr)),
+						logicalor::get(
+							ExpressionHappensBefore::get(
+								evt->when,
+								store),
+							ExpressionHappensBefore::get(
+								load,
+								evt->when))));
+		}
+	}
+}
+
+class TruncateToEvent : public LogWriter<abstract_interpret_value>,
+			public GarbageCollected<TruncateToEvent> {
+	EventTimestamp lastEvent;
+	bool finished;
+public:
+	MemLog<abstract_interpret_value> *work;
+
+	TruncateToEvent(EventTimestamp _lastEvent)
+		: lastEvent(_lastEvent),
+		  finished(false),
+		  work(MemLog<abstract_interpret_value>::emptyMemlog())
+	{
+	}
+
+	void append(const LogRecord<abstract_interpret_value> &lr,
+		    unsigned long idx);
+
+	void visit(HeapVisitor &hv) const { hv(work); }
+	void destruct() { this->~TruncateToEvent(); }
+};
+void
+TruncateToEvent::append(const LogRecord<abstract_interpret_value> &lr,
+			unsigned long idx)
+{
+	if (finished)
+		return;
+	work->append(lr, idx);
+	if (lr.thread() == lastEvent.tid &&
+	    idx == lastEvent.idx)
+		finished = true;
+}
+static LogReader<abstract_interpret_value> *
+truncate_logfile(const MachineState<abstract_interpret_value> *ms,
+		 LogReader<abstract_interpret_value> *lf,
+		 LogReaderPtr ptr,
+		 EventTimestamp lastEvent,
+		 LogReaderPtr *outPtr)
+{
+	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
+	TruncateToEvent *tte = new TruncateToEvent(lastEvent);
+	VexGcRoot tteroot((void **)&tte, "tte");
+	i.replayLogfile(lf, ptr, NULL, tte);
+	*outPtr = tte->work->startPtr();
+	return tte->work;
+}
+
+Expression *
+ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
+			    LogReader<abstract_interpret_value> *lf,
+			    LogReaderPtr ptr,
+			    bool *progress)
+{
+	LastStoreRefiner *lsr =
+		new LastStoreRefiner(
+			store,
+			load,
+			vaddr,
+			ExpressionHappensBefore::get(store, load));
+	VexGcRoot r((void **)&lsr, "r");
+	MachineState<abstract_interpret_value> *localMs = ms->dupeSelf();
+	VexGcRoot r2((void **)&localMs, "r2");
+	Interpreter<abstract_interpret_value> i(localMs);
+	LogReaderPtr truncatedPtr;
+	LogReader<abstract_interpret_value> *truncatedLog =
+		truncate_logfile(ms, lf, ptr, load, &truncatedPtr);
+	VexGcRoot rr((void **)&truncatedLog, "rr");
+	i.replayLogfile(truncatedLog, truncatedPtr, NULL, NULL, lsr);
+	
+	Explorer *e = new Explorer(localMs, load.tid);
+	VexGcRoot eroot((void **)&e, "eroot");
+	Expression *work = lsr->result;
+	VexGcRoot workroot((void **)&work, "workroot");
+
+	for (std::vector<ExplorationState *>::iterator it = e->futures.begin();
+	     it != e->futures.end();
+	     it++) {
+		Interpreter<abstract_interpret_value> i2(localMs->dupeSelf());
+		LastStoreRefiner *lsr2 =
+			new LastStoreRefiner(
+				store,
+				load,
+				vaddr,
+				work);
+		VexGcRoot r3((void **)&lsr2, "r3");
+		i2.replayLogfile((*it)->lf, (*it)->lf->startPtr(), NULL, NULL, lsr2);
+		work = lsr2->result;
+	}
+	*progress = true;
+	return work;
+}
+

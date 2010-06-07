@@ -569,3 +569,7 @@ Expression *onlyif::get(Expression *l, Expression *r)
 
 mk_op_allocator(BottomExpression);
 BottomExpression *BottomExpression::bottom;
+
+mk_op_allocator(ExpressionLastStore);
+mk_op_allocator(ExpressionHappensBefore);
+

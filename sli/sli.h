@@ -1738,6 +1738,8 @@ void init_sli(void);
 
 void gdb_machine_state(const MachineState<unsigned long> *ms);
 
+struct abstract_interpret_value;
+
 class Expression : public Named {
 	static const unsigned nr_heads = 262147;
 	static Expression *heads[nr_heads];
@@ -1777,6 +1779,10 @@ public:
 	virtual bool isConstant(unsigned long *cv) const { return false; }
 	virtual bool isLogical() const { return false; }
 	virtual EventTimestamp timestamp() const { return EventTimestamp::invalid; }
+	virtual Expression *refine(const MachineState<abstract_interpret_value> *ms,
+				   LogReader<abstract_interpret_value> *lf,
+				   LogReaderPtr ptr,
+				   bool *progress) { return this; }
 	Expression() : Named(), next(NULL), pprev(&next) {}
 	bool isEqual(const Expression *other) const {
 		if (other == this)
@@ -1864,6 +1870,104 @@ public:
 	NAMED_CLASS
 };
 
+class ExpressionLastStore : public Expression {
+public:
+	EventTimestamp load;
+	EventTimestamp store;
+	Expression *vaddr;
+private:
+	static VexAllocTypeWrapper<ExpressionLastStore> allocator;
+	ExpressionLastStore(EventTimestamp _load, EventTimestamp _store,
+			    Expression *_vaddr)
+		: load(_load), store(_store), vaddr(_vaddr)
+	{
+	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(lastStore@%d:%lx:%s -> %d:%lx)",
+				   load.tid._tid(),
+				   load.idx,
+				   vaddr->name(),
+				   store.tid._tid(),
+				   store.idx);
+	}
+	unsigned _hash() const {
+		return load.hash() ^ store.hash() ^ vaddr->hash();
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionLastStore *oth = dynamic_cast<const ExpressionLastStore *>(other);
+		if (oth &&
+		    load == oth->load &&
+		    store == oth->store &&
+		    vaddr->isEqual(oth->vaddr))
+			return true;
+		else
+			return false;
+	}
+public:
+	static Expression *get(EventTimestamp load, EventTimestamp store,
+			       Expression *vaddr)
+	{
+		return new (allocator.alloc()) ExpressionLastStore(load, store, vaddr);
+	}
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress);
+	void visit(HeapVisitor &hv) const { hv(vaddr); }
+	EventTimestamp timestamp() const { return load; }
+	bool isLogical() const { return true; }
+	NAMED_CLASS
+};
+
+class ExpressionHappensBefore : public Expression {
+public:
+	EventTimestamp before;
+	EventTimestamp after;
+private:
+	static VexAllocTypeWrapper<ExpressionHappensBefore> allocator;
+	ExpressionHappensBefore(EventTimestamp _before, EventTimestamp _after)
+		: before(_before), after(_after)
+	{
+	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(%d:%lx <-< %d:%lx)",
+				   before.tid._tid(),
+				   before.idx,
+				   after.tid._tid(),
+				   after.idx);
+	}
+	unsigned _hash() const {
+		return before.hash() ^ after.hash();
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionHappensBefore *oth = dynamic_cast<const ExpressionHappensBefore *>(other);
+		if (oth &&
+		    oth->before == before &&
+		    oth->after == after)
+			return true;
+		else
+			return false;
+	}
+public:
+	static Expression *get(EventTimestamp before, EventTimestamp after)
+	{
+		if (before.tid == after.tid) {
+			if (before.idx < after.idx)
+				return ConstExpression::get(1);
+			else
+				return ConstExpression::get(0);
+		} else {
+			return new (allocator.alloc()) ExpressionHappensBefore(before, after);
+		}
+	}
+	EventTimestamp timestamp() const { return after; }
+	bool isLogical() const { return true; }
+	void visit(HeapVisitor &hv) const {}
+	NAMED_CLASS
+};
+
 class LoadExpression : public Expression {
 	static VexAllocTypeWrapper<LoadExpression> allocator;
 public:
@@ -1906,6 +2010,11 @@ public:
 		work->size = size;
 		return intern(work);
 	}
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress);
+
 	EventTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
 
@@ -1913,7 +2022,13 @@ public:
 };
 
 class BinaryExpression : public Expression {
+protected:
+	virtual Expression *semiDupe(Expression *l, Expression *r) const = 0;
 public:
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress);
 	Expression *l, *r;
 };
 
@@ -1921,6 +2036,11 @@ public:
 	class nme : public BinaryExpression {				\
 	protected:							\
 	        static VexAllocTypeWrapper<nme> allocator;		\
+		Expression *semiDupe(Expression *l,			\
+				     Expression *r) const		\
+		{							\
+			return nme::get(l,r);				\
+		}							\
 	        char *mkName() const                                    \
 		{							\
 			return my_asprintf("(%s " #pp " %s)",		\
@@ -1976,7 +2096,13 @@ mk_binop_class(logicaland, &&);
 mk_binop_class(onlyif, onlyif);
 
 class UnaryExpression : public Expression {
+protected:
+	virtual Expression *semiDupe(Expression *l) const = 0;
 public:
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress);
 	Expression *l;
 };
 
@@ -1984,6 +2110,10 @@ public:
 	class nme : public UnaryExpression {				\
 		static VexAllocTypeWrapper<nme> allocator;		\
 	protected:							\
+	        Expression *semiDupe(Expression *l) const		\
+		{							\
+		        return nme::get(l);				\
+		}							\
 	        char *mkName() const					\
 		{							\
 			return my_asprintf("(" #nme " %s)", l->name());	\

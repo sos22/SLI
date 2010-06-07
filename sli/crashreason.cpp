@@ -367,6 +367,11 @@ public:
 					   cond->timestamp());
 	}
 	bool isLogical() const { return cond->isLogical(); }
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress);
+
 	NAMED_CLASS
 };
 
@@ -408,239 +413,6 @@ public:
 	NAMED_CLASS
 };
 VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
-
-class ExpressionLastStore : public Expression {
-public:
-	EventTimestamp load;
-	EventTimestamp store;
-	Expression *vaddr;
-private:
-	static VexAllocTypeWrapper<ExpressionLastStore> allocator;
-	ExpressionLastStore(EventTimestamp _load, EventTimestamp _store,
-			    Expression *_vaddr)
-		: load(_load), store(_store), vaddr(_vaddr)
-	{
-	}
-protected:
-	char *mkName(void) const {
-		return my_asprintf("(lastStore@%d:%lx:%s -> %d:%lx)",
-				   load.tid._tid(),
-				   load.idx,
-				   vaddr->name(),
-				   store.tid._tid(),
-				   store.idx);
-	}
-	unsigned _hash() const {
-		return load.hash() ^ store.hash() ^ vaddr->hash();
-	}
-	bool _isEqual(const Expression *other) const {
-		const ExpressionLastStore *oth = dynamic_cast<const ExpressionLastStore *>(other);
-		if (oth &&
-		    load == oth->load &&
-		    store == oth->store &&
-		    vaddr->isEqual(oth->vaddr))
-			return true;
-		else
-			return false;
-	}
-public:
-	static Expression *get(EventTimestamp load, EventTimestamp store,
-			       Expression *vaddr)
-	{
-		return new (allocator.alloc()) ExpressionLastStore(load, store, vaddr);
-	}
-	void visit(HeapVisitor &hv) const { hv(vaddr); }
-	EventTimestamp timestamp() const { return load; }
-	bool isLogical() const { return true; }
-	NAMED_CLASS
-};
-VexAllocTypeWrapper<ExpressionLastStore> ExpressionLastStore::allocator;
-
-class ExpressionHappensBefore : public Expression {
-public:
-	EventTimestamp before;
-	EventTimestamp after;
-private:
-	static VexAllocTypeWrapper<ExpressionHappensBefore> allocator;
-	ExpressionHappensBefore(EventTimestamp _before, EventTimestamp _after)
-		: before(_before), after(_after)
-	{
-	}
-protected:
-	char *mkName(void) const {
-		return my_asprintf("(%d:%lx <-< %d:%lx)",
-				   before.tid._tid(),
-				   before.idx,
-				   after.tid._tid(),
-				   after.idx);
-	}
-	unsigned _hash() const {
-		return before.hash() ^ after.hash();
-	}
-	bool _isEqual(const Expression *other) const {
-		const ExpressionHappensBefore *oth = dynamic_cast<const ExpressionHappensBefore *>(other);
-		if (oth &&
-		    oth->before == before &&
-		    oth->after == after)
-			return true;
-		else
-			return false;
-	}
-public:
-	static Expression *get(EventTimestamp before, EventTimestamp after)
-	{
-		if (before.tid == after.tid) {
-			if (before.idx < after.idx)
-				return ConstExpression::get(1);
-			else
-				return ConstExpression::get(0);
-		} else {
-			return new (allocator.alloc()) ExpressionHappensBefore(before, after);
-		}
-	}
-	EventTimestamp timestamp() const { return after; }
-	bool isLogical() const { return true; }
-	void visit(HeapVisitor &hv) const {}
-	NAMED_CLASS
-};
-VexAllocTypeWrapper<ExpressionHappensBefore> ExpressionHappensBefore::allocator;
-
-class ExplorationState : public GarbageCollected<ExplorationState> {
-public:
-	MachineState<abstract_interpret_value> *ms;
-	MemLog<abstract_interpret_value> *lf;
-
-	void visit(HeapVisitor &hv) const { hv(lf); hv(ms); }
-	void destruct() {}
-	ExplorationState(MachineState<abstract_interpret_value> *_ms,
-			 MemLog<abstract_interpret_value> *_lf)
-		: ms(_ms), lf(_lf)
-	{
-	}
-	ExplorationState *dupeSelf()
-	{
-		return new ExplorationState(ms->dupeSelf(), lf->dupeSelf());
-	}
-};
-
-class Explorer : public GarbageCollected<Explorer> {
-	std::deque<ExplorationState *> grayStates;
-public:
-	std::vector<ExplorationState *> futures;
-
-	Explorer(const MachineState<abstract_interpret_value> *ms,
-		 ThreadId ignoredTid);
-	void visit(HeapVisitor &hv) const
-	{
-		visit_container(futures, hv);
-		visit_container(grayStates, hv);
-	}
-	void destruct() {}
-};
-
-Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
-		   ThreadId ignoredThread)
-	: grayStates(), futures()
-{
-	Explorer *thisK = this;
-	VexGcRoot thisKeeper((void **)&thisK, "this");
-
-	grayStates.push_back(new ExplorationState(ms->dupeSelf(),
-						  MemLog<abstract_interpret_value>::emptyMemlog()));
-
-	while (grayStates.size() != 0 &&
-	       (grayStates.size() + futures.size()) < 80) {
-		printf("%zd futures, %zd grays\n", futures.size(),
-		       grayStates.size());
-		ExplorationState *s = grayStates.front();
-		VexGcRoot sroot((void **)&s, "sroot");
-		grayStates.pop_front();
-
-		printf("Consider %p\n", s);
-
-		bool stopped = true;
-		for (unsigned x = 0; stopped && x < s->ms->threads->size(); x++) {
-			Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
-			if (thr->tid == ignoredThread)
-				continue;
-			if (!thr->cannot_make_progress)
-				stopped = false;
-		}
-		if (stopped) {
-			/* No thread can make progress. */
-			futures.push_back(s);
-			printf("No progress possible.\n");
-			continue;
-		}
-
-		MemTracePool<abstract_interpret_value> *thread_traces =
-			new MemTracePool<abstract_interpret_value>(s->ms, ignoredThread);
-		VexGcRoot ttraces((void **)&thread_traces, "ttraces");
-		std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
-			thread_traces->firstRacingAccessMap();
-		PointerKeeper<std::map<ThreadId, Maybe<unsigned> > > keeper(first_racing_access);
-
-		/* If there are no races then we can just run one
-		   thread after another, and we don't need to do
-		   anything else.  We can even get away with reusing
-		   the old MachineState. */
-		/* This includes the case where only one thread can
-		   make progress at all. */
-		bool noRaces = true;
-		for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
-		     it != first_racing_access->end();
-		     it++) {
-			if (it->first == ignoredThread)
-				continue;
-			if (it->second.full)
-				noRaces = false;
-		}
-		if (noRaces) {
-			for (unsigned x = 0; x < s->ms->threads->size(); x++) {
-				Thread<abstract_interpret_value> *thr = s->ms->threads->index(x);
-				if (thr->tid == ignoredThread)
-					continue;
-				if (thr->cannot_make_progress)
-					continue;
-				Interpreter<abstract_interpret_value> i(s->ms);
-				i.runToFailure(thr->tid, s->lf, 10000);
-			}
-			futures.push_back(s);
-			continue;
-		}
-
-		/* Have some actual races -> have to do full
-		 * repertoire. */
-		for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
-		     it != first_racing_access->end();
-		     it++) {
-			ThreadId tid = it->first;
-			Maybe<unsigned> r = it->second;
-			Thread<abstract_interpret_value> *thr = s->ms->findThread(tid);
-			if (thr->tid == ignoredThread)
-				continue;
-			if (thr->cannot_make_progress)
-				continue;
-			ExplorationState *newGray = s->dupeSelf();
-			VexGcRoot grayKeeper((void **)&newGray, "newGray");
-			Interpreter<abstract_interpret_value> i(newGray->ms);
-			if (r.full) {
-				printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
-				i.runToAccessLoggingEvents(tid, r.value + 1, newGray->lf);
-			} else {
-				printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
-				i.runToFailure(tid, newGray->lf, 10000);
-			}
-
-			grayStates.push_back(newGray);
-		}
-	}
-
-	while (!grayStates.empty()) {
-		futures.push_back(grayStates.front());
-		grayStates.pop_front();
-	}
-}
 
 void History::splitAt(unsigned idx, History **firstBit, History **secondBit) const
 {
@@ -1215,154 +987,40 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 }
 
 
-/* Takes the content of a last-store expression and compares it with a
-   sample execution, building an expression which captures what's
-   necessary for the last store to happen in that execution.  We do
-   not look at anything past the end of the execution, though. */
-class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
-	EventTimestamp store;
-	EventTimestamp load;
-	Expression *addr;
-	static VexAllocTypeWrapper<LastStoreRefiner> allocator;
-public:
-	Expression *result;
-	void record(Thread<abstract_interpret_value> *thr,
-		    const ThreadEvent<abstract_interpret_value> *evt);
-	LastStoreRefiner(EventTimestamp _store,
-			 EventTimestamp _load,
-			 Expression *_addr,
-			 Expression *_result = ConstExpression::get(1))
-		: store(_store),
-		  load(_load),
-		  addr(_addr),
-		  result(_result)
-	{
-	}
-	static void *operator new(size_t s)
-	{
-		return (void *)LibVEX_Alloc_Sized(&allocator.type, s);
-	}
-	static void operator delete(void *x)
-	{
-		abort();
-	}
-	void visit(HeapVisitor &hv) const { hv(addr); hv(result); }
-	void destruct() {}
-	NAMED_CLASS
-};
-VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
-void
-LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
-			 const ThreadEvent<abstract_interpret_value> *evt)
-{
-	if (const StoreEvent<abstract_interpret_value> *se =
-	    dynamic_cast<const StoreEvent<abstract_interpret_value> *>(evt)) {
-		if (evt->when != store) {
-			result =
-				logicaland::get(
-					result,
-					logicalor::get(
-						logicalnot::get(
-							equals::get(
-								se->addr.origin,
-								addr)),
-						logicalor::get(
-							ExpressionHappensBefore::get(
-								evt->when,
-								store),
-							ExpressionHappensBefore::get(
-								load,
-								evt->when))));
-		}
-	}
-}
-
-class TruncateToEvent : public LogWriter<abstract_interpret_value>,
-			public GarbageCollected<TruncateToEvent> {
-	EventTimestamp lastEvent;
-	bool finished;
-public:
-	MemLog<abstract_interpret_value> *work;
-
-	TruncateToEvent(EventTimestamp _lastEvent)
-		: lastEvent(_lastEvent),
-		  finished(false),
-		  work(MemLog<abstract_interpret_value>::emptyMemlog())
-	{
-	}
-
-	void append(const LogRecord<abstract_interpret_value> &lr,
-		    unsigned long idx);
-
-	void visit(HeapVisitor &hv) const { hv(work); }
-	void destruct() { this->~TruncateToEvent(); }
-};
-void
-TruncateToEvent::append(const LogRecord<abstract_interpret_value> &lr,
-			unsigned long idx)
-{
-	if (finished)
-		return;
-	work->append(lr, idx);
-	if (lr.thread() == lastEvent.tid &&
-	    idx == lastEvent.idx)
-		finished = true;
-}
-static LogReader<abstract_interpret_value> *
-truncate_logfile(const MachineState<abstract_interpret_value> *ms,
-		 LogReader<abstract_interpret_value> *lf,
-		 LogReaderPtr ptr,
-		 EventTimestamp lastEvent,
-		 LogReaderPtr *outPtr)
-{
-	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
-	TruncateToEvent *tte = new TruncateToEvent(lastEvent);
-	VexGcRoot tteroot((void **)&tte, "tte");
-	i.replayLogfile(lf, ptr, NULL, tte);
-	*outPtr = tte->work->startPtr();
-	return tte->work;
-}
-
-static Expression *refine(Expression *expr,
-			  const MachineState<abstract_interpret_value> *ms,
-			  LogReader<abstract_interpret_value> *lf,
-			  LogReaderPtr ptr,
-			  bool *progress);
-
 /* We refine a RIP expression by just splitting the very last segment
    off of the history and turning it into a direct expression. */
-static Expression *refine(ExpressionRip *er,
-			  const MachineState<abstract_interpret_value> *ms,
-			  LogReader<abstract_interpret_value> *lf,
-			  LogReaderPtr ptr,
-			  bool *progress)
+Expression *
+ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
+		      LogReader<abstract_interpret_value> *lf,
+		      LogReaderPtr ptr,
+		      bool *progress)
 {
 	/* Try to refine the subcondition first, since that's usually
 	 * cheaper. */
 	Expression *newSubCond;
 	bool subCondProgress = false;
-	newSubCond = refine(er->cond, ms, er->model_execution, er->model_exec_start,
-			    &subCondProgress);
+	newSubCond = cond->refine(ms, model_execution, model_exec_start,
+				  &subCondProgress);
 	if (subCondProgress) {
 		/* Yay. */
 		*progress = true;
 		return ExpressionRip::get(
-			er->tid,
-			er->history,
+			tid,
+			history,
 			newSubCond,
-			er->model_execution,
-			er->model_exec_start,
-			er->prefix_rips);
+			model_execution,
+			model_exec_start,
+			prefix_rips);
 	}
 
 	/* That didn't work, so try some of the predecessor
 	   conditional branches out of the history. */
 
-	std::vector<HistorySegment *> new_history(er->history->history);
+	std::vector<HistorySegment *> new_history(history->history);
 	for (std::vector<HistorySegment *>::reverse_iterator it = new_history.rbegin();
 	     !subCondProgress && it != new_history.rend();
 	     it++) {
-		Expression *newCond = refine((*it)->condition, ms, lf, ptr, &subCondProgress);
+		Expression *newCond = (*it)->condition->refine(ms, lf, ptr, &subCondProgress);
 		if (subCondProgress)
 			*it = HistorySegment::get(newCond, (*it)->rips,
 						  (*it)->nr_memory_operations,
@@ -1370,206 +1028,16 @@ static Expression *refine(ExpressionRip *er,
 	}
 
 	if (!subCondProgress)
-		return er;
+		return this;
 
 	*progress = true;
 	return ExpressionRip::get(
-		er->tid,
-		History::get(new_history, er->history->first_valid_idx, er->tid),
-		er->cond,
-		er->model_execution,
-		er->model_exec_start,
-		er->prefix_rips);
-}
-
-static Expression *
-refine(LoadExpression *le,
-       const MachineState<abstract_interpret_value> *ms,
-       LogReader<abstract_interpret_value> *lf,
-       LogReaderPtr ptr,
-       bool *progress)
-{
-	*progress = true;
-	return onlyif::get(
-		logicaland::get(
-			ExpressionLastStore::get(le->when, le->store, le->addr),
-			equals::get(le->addr, le->storeAddr)),
-		le->val);
-}
-
-static Expression *
-refine(equals *eq, 
-       const MachineState<abstract_interpret_value> *ms,
-       LogReader<abstract_interpret_value> *lf,
-       LogReaderPtr ptr,
-       bool *progress)
-{
-	bool subprogress;
-	Expression *l = eq->l;
-	Expression *r = eq->r;
-
-	subprogress = false;
-	if (l->timestamp() > r->timestamp()) {
-		l = refine(l, ms, lf, ptr, &subprogress);
-		if (!subprogress)
-			r = refine(r, ms, lf, ptr, &subprogress);
-	} else {
-		r = refine(r, ms, lf, ptr, &subprogress);
-		if (!subprogress)
-			l = refine(l, ms, lf, ptr, &subprogress);
-	}
-	if (subprogress) {
-		*progress = true;
-		return equals::get(l, r);
-	}
-	return eq;
-}
-
-static Expression *
-refine(onlyif *eq, 
-       const MachineState<abstract_interpret_value> *ms,
-       LogReader<abstract_interpret_value> *lf,
-       LogReaderPtr ptr,
-       bool *progress)
-{
-	bool subprogress;
-	Expression *l = eq->l;
-	Expression *r = eq->r;
-
-	subprogress = false;
-	if (l->timestamp() > r->timestamp()) {
-		l = refine(l, ms, lf, ptr, &subprogress);
-		if (!subprogress)
-			r = refine(r, ms, lf, ptr, &subprogress);
-	} else {
-		r = refine(r, ms, lf, ptr, &subprogress);
-		if (!subprogress)
-			l = refine(l, ms, lf, ptr, &subprogress);
-	}
-	if (subprogress) {
-		*progress = true;
-		return onlyif::get(l, r);
-	}
-	return eq;
-}
-
-static Expression *
-refine(bitwisenot *bn,
-       const MachineState<abstract_interpret_value> *ms,
-       LogReader<abstract_interpret_value> *lf,
-       LogReaderPtr ptr,
-       bool *progress)
-{
-	bool subprogress = false;
-	Expression *l2 = refine(bn->l, ms, lf, ptr, &subprogress);
-	if (subprogress) {
-		*progress = true;
-		return bitwisenot::get(l2);
-	} else {
-		return bn;
-	}
-}
-
-static Expression *
-refine(bitwiseand *an, 
-       const MachineState<abstract_interpret_value> *ms,
-       LogReader<abstract_interpret_value> *lf,
-       LogReaderPtr ptr,
-       bool *progress)
-{
-	bool subprogress;
-	Expression *l = an->l;
-	Expression *r = an->r;
-
-	/* We try to refine the later of the two arguments first, and
-	   only bother with the earlier if that doesn't make any
-	   progress. */
-	subprogress = false;
-	if (l->timestamp() > r->timestamp()) {
-		l = refine(l, ms, lf, ptr, &subprogress);
-		if (!subprogress)
-			r = refine(r, ms, lf, ptr, &subprogress);
-	} else {
-		r = refine(r, ms, lf, ptr, &subprogress);
-		if (!subprogress)
-			l = refine(l, ms, lf, ptr, &subprogress);
-	}
-	if (subprogress) {
-		*progress = true;
-		return bitwiseand::get(l, r);
-	}
-	return an;
-}
-
-Expression *refine(ExpressionLastStore *expr,
-		   const MachineState<abstract_interpret_value> *ms,
-		   LogReader<abstract_interpret_value> *lf,
-		   LogReaderPtr ptr,
-		   bool *progress)
-{
-	LastStoreRefiner *lsr =
-		new LastStoreRefiner(
-			expr->store,
-			expr->load,
-			expr->vaddr,
-			ExpressionHappensBefore::get(expr->store, expr->load));
-	VexGcRoot r((void **)&lsr, "r");
-	MachineState<abstract_interpret_value> *localMs = ms->dupeSelf();
-	VexGcRoot r2((void **)&localMs, "r2");
-	Interpreter<abstract_interpret_value> i(localMs);
-	LogReaderPtr truncatedPtr;
-	LogReader<abstract_interpret_value> *truncatedLog =
-		truncate_logfile(ms, lf, ptr, expr->load, &truncatedPtr);
-	VexGcRoot rr((void **)&truncatedLog, "rr");
-	i.replayLogfile(truncatedLog, truncatedPtr, NULL, NULL, lsr);
-	
-	Explorer *e = new Explorer(localMs, expr->load.tid);
-	VexGcRoot eroot((void **)&e, "eroot");
-	Expression *work = lsr->result;
-	VexGcRoot workroot((void **)&work, "workroot");
-
-	for (std::vector<ExplorationState *>::iterator it = e->futures.begin();
-	     it != e->futures.end();
-	     it++) {
-		Interpreter<abstract_interpret_value> i2(localMs->dupeSelf());
-		LastStoreRefiner *lsr2 =
-			new LastStoreRefiner(
-				expr->store,
-				expr->load,
-				expr->vaddr,
-				work);
-		VexGcRoot r3((void **)&lsr2, "r3");
-		i2.replayLogfile((*it)->lf, (*it)->lf->startPtr(), NULL, NULL, lsr2);
-		work = lsr2->result;
-	}
-	*progress = true;
-	return work;
-}
-
-Expression *refine(Expression *expr,
-		   const MachineState<abstract_interpret_value> *ms,
-		   LogReader<abstract_interpret_value> *lf,
-		   LogReaderPtr ptr,
-		   bool *progress)
-{
-	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(expr)) {
-		return refine(er, ms, lf, ptr, progress);
-	} else if (LoadExpression *le = dynamic_cast<LoadExpression *>(expr)) {
-		return refine(le, ms, lf, ptr, progress);
-	} else if (equals *eq = dynamic_cast<equals *>(expr)) {
-		return refine(eq, ms, lf, ptr, progress);
-	} else if (bitwiseand *an = dynamic_cast<bitwiseand *>(expr)) {
-		return refine(an, ms, lf, ptr, progress);
-	} else if (onlyif *oi = dynamic_cast<onlyif *>(expr)) {
-		return refine(oi, ms, lf, ptr, progress);
-	} else if (bitwisenot *bn = dynamic_cast<bitwisenot *>(expr)) {
-		return refine(bn, ms, lf, ptr, progress);
-	} else if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(expr)) {
-		return refine(els, ms, lf, ptr, progress);
-	} else {
-		printf("Cannot refine %s\n", expr->name());
-		return expr;
-	}
+		tid,
+		History::get(new_history, history->first_valid_idx, tid),
+		cond,
+		model_execution,
+		model_exec_start,
+		prefix_rips);
 }
 
 class HistoryLogTruncater : public LogWriter<abstract_interpret_value> {
@@ -1711,7 +1179,7 @@ main(int argc, char *argv[])
 			printf("Post fixup %s\n", cr->name());
 			assert(syntax_check_expression(cr, m1));
 		}
-		cr = refine(cr, abstract, al, ptr, &progress);
+		cr = cr->refine(abstract, al, ptr, &progress);
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
 
