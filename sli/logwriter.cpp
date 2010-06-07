@@ -66,12 +66,14 @@ template <typename ait>
 void *LogRecordMemory<ait>::marshal(unsigned *sz) const
 {
 	void *r;
+	unsigned x;
 	memory_record<ait> *mr = (memory_record<ait> *)LogRecord<ait>::marshal(RECORD_memory,
 									       sizeof(memory_record<ait>) + size,
 									       sz,
 									       &r);
 	mr->ptr = start;
-	memcpy(mr + 1, contents, size);
+	for (x = 0; x < size; x++)
+		((unsigned char *)(mr + 1))[x] = force(contents[x]);
 	return r;
 }
 
