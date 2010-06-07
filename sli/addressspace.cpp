@@ -181,6 +181,8 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 {
 	EventTimestamp when;
 	unsigned long start = force(_start);
+	if (storeAddr)
+		*storeAddr = _start;
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);

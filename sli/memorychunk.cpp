@@ -66,8 +66,6 @@ EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 							   abstract_interpret_value *storeAddr) const
 {
 	EventTimestamp when;
-	if (storeAddr)
-		*storeAddr = mkConst<abstract_interpret_value>(0);
 	for (unsigned x = 0; x < nr_bytes; x++) {
 		bool done = false;
 		for (const MCLookasideEntry *mce = headLookaside;
