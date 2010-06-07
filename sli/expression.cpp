@@ -232,6 +232,19 @@ sane_rshift(unsigned long r, long cntr)
 	else
 		return r >> cntr;
 }
+static long
+sane_rshift_arith(long r, long cntr)
+{
+	if (cntr < 0)
+		return sane_lshift(r, -cntr);
+	else if (cntr >= 64) {
+		if (r < 0)
+			return -1;
+		else
+			return 0;
+	} else
+		return r >> cntr;
+}
 static unsigned long
 sane_lshift(unsigned long r, long cntr)
 {
@@ -302,6 +315,27 @@ Expression *rshift::get(Expression *l, Expression *r)
 		return l;
 	rshift *work = new (allocator.alloc()) rshift();			
 	work->l = l;							
+	work->r = r;							
+	return intern(work);						
+}
+
+mk_op_allocator(rshiftarith);
+bool rshiftarith::isLogical() const { return false; }
+Expression *rshiftarith::get(Expression *l, Expression *r)			
+{									
+	unsigned long lc, rc;	
+	bool rIsConstant;
+
+	rIsConstant = r->isConstant(&rc);
+	if (l->isConstant(&lc)) {
+		if (lc == 0)
+			return l;
+		if (rIsConstant)
+			return ConstExpression::get(sane_rshift_arith(lc, rc));
+	} else if (rIsConstant && rc == 0)
+		return l;
+	rshiftarith *work = new (allocator.alloc()) rshiftarith();
+	work->l = l;
 	work->r = r;							
 	return intern(work);						
 }

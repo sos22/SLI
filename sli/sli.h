@@ -1937,6 +1937,7 @@ public:
 
 mk_binop_class(lshift, <<);
 mk_binop_class(rshift, >>);
+mk_binop_class(rshiftarith, >a>);
 mk_binop_class(bitwiseand, &);
 mk_binop_class(bitwiseor, |);
 mk_binop_class(bitwisexor, ^);

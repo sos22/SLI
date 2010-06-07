@@ -112,21 +112,31 @@ unsigned long import_ait(abstract_interpret_value v, ImportOrigin *ignore)
 static inline abstract_interpret_value signed_shift_right(abstract_interpret_value x, abstract_interpret_value y)
 {
 	abstract_interpret_value v;
+	memset(&v, 0, sizeof(v));
 	v.v = (long)x.v >> y.v;
+	v.origin = rshiftarith::get(x.origin, y.origin);
 	return v;
 }
 
 static inline abstract_interpret_value signed_le(abstract_interpret_value x, abstract_interpret_value y)
 {
 	abstract_interpret_value v;
+	Expression *c = ConstExpression::get(0x8000000000000000ul);
+	memset(&v, 0, sizeof(v));
 	v.v = (long)x.v <= (long)y.v;
+	v.origin = lessthanequals::get(plus::get(x.origin, c),
+				       plus::get(y.origin, c));
 	return v;
 }
 	
 static inline abstract_interpret_value signed_l(abstract_interpret_value x, abstract_interpret_value y)
 {
 	abstract_interpret_value v;
+	Expression *c = ConstExpression::get(0x8000000000000000ul);
+	memset(&v, 0, sizeof(v));
 	v.v = (long)x.v < (long)y.v;
+	v.origin = lessthan::get(plus::get(x.origin, c),
+				 plus::get(y.origin, c));
 	return v;
 }
 	
