@@ -2500,15 +2500,8 @@ public:
 	}
 protected:
 	char *mkName() const {
-		char *buf = my_asprintf("%s@%d:%lx", condition->name(), when.tid._tid(), when.idx);
-		for (std::vector<unsigned long>::const_iterator it = rips.begin();
-		     it != rips.end();
-		     it++) {
-			char *b2 = my_asprintf("%s:%lx", buf, *it);
-			free(buf);
-			buf = b2;
-		}
-		return buf;
+		return my_asprintf("%s@%d:%lx->%lx", condition->name(), when.tid._tid(), when.idx,
+				   last_valid_idx);
 	}
 public:
 	unsigned long hash() const
