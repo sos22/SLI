@@ -48,23 +48,19 @@ template <typename ait>
 void StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	Thread<ait> *thr = ms->findThread(this->when.tid);
-	if (ms->addressSpace->isWritable(addr, size, thr)) {
-		LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
-		if (!lrs)
-			throw ReplayFailedException("wanted a store, got %s",
-						    lr->name());
-		if (size != lrs->size || force(addr != lrs->ptr))
-			throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
-						    lrs->size, force(lrs->ptr),
-						    size, force(addr));
-		if (force(data != lrs->value))
-			throw ReplayFailedException("memory mismatch on store to %lx",
-						    force(addr));
-		ms->addressSpace->store(this->when, addr, size, data, false, thr);
-		thr->nrAccesses++;
-	} else {
-	        checkSegv<ait>(lr, addr);
-	}
+	LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
+	if (!lrs)
+		throw ReplayFailedException("wanted a store, got %s",
+					    lr->name());
+	if (size != lrs->size || force(addr != lrs->ptr))
+		throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
+					    lrs->size, force(lrs->ptr),
+					    size, force(addr));
+	if (force(data != lrs->value))
+		throw ReplayFailedException("memory mismatch on store to %lx",
+					    force(addr));
+	ms->addressSpace->store(this->when, addr, size, data, false, thr);
+	thr->nrAccesses++;
 }
 
 template <typename ait>
@@ -74,14 +70,9 @@ InterpretResult StoreEvent<ait>::fake(MachineState<ait> *ms,
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	if (lr)
 		*lr = new LogRecordStore<ait>(thr->tid, size, addr, data);
-	if (ms->addressSpace->isWritable(addr, size, thr)) {
-		ms->addressSpace->store(this->when, addr, size, data, false, thr);
-		thr->nrAccesses++;
-		return InterpretResultContinue;
-	} else {
-		thr->crashed = true;
-		return InterpretResultCrash;
-	}
+	ms->addressSpace->store(this->when, addr, size, data, false, thr);
+	thr->nrAccesses++;
+	return InterpretResultContinue;
 }
 
 template <typename ait>

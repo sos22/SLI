@@ -1134,7 +1134,10 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace)
 					eval_expression(stmt->Ist.Store.addr);
 				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
-				return StoreEvent<ait>::get(++lastEvent, addr.lo, size, data);
+				if (addrSpace->isWritable(addr.lo, size, this))
+					return StoreEvent<ait>::get(++lastEvent, addr.lo, size, data);
+				else
+					return SignalEvent<ait>::get(++lastEvent, 11, addr.lo);
 			}
 
 			case Ist_CAS: {
