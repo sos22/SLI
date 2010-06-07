@@ -28,6 +28,7 @@ main(int argc, char *argv[])
 	LogFile *reduced_lf;
 
 	reduced_lf = lf->truncate(lf->mkPtr(size, 0));
+	VexGcRoot rlf_root((void **)&reduced_lf, "reduced lf");
 	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr);
 	VexGcRoot ms_root((void **)&ms, "ms_root");
 
