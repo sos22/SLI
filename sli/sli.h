@@ -2442,4 +2442,219 @@ public:
 };
 
 
+/* A History segment represents a chunk of per-thread history.  In
+   theory, the only part which is really necessary, and the only part
+   which is semantically important, is the condition, which is just a
+   condition which is evaluated at the start of the segment and has to
+   be true.
+
+   We also store a timestamp, which is the point in the model
+   execution at which the condition was evaluated.  This is used in
+   the heuristic which decides which branch of an expression to refine
+   first.
+
+   We also store a log of the RIPs touched between each conditional
+   expression (the ones in the vector are touched *after* the current
+   condition is evaluated).  This is in theory redundant with the
+   condition, because if you pass the condition then you ought to
+   always follow the same RIP path, but it makes it a *lot* easier to
+   see if something's gone wrong.
+
+   Finally, we store the last memory index which is valid with this
+   history, which is the index of the last memory operation after
+   passing this condition and before reaching the next one.  This is
+   extremely useful when checking whether a given expression is
+   syntactically valid, in the sense that all memory indexes are
+   defined by enclosing RIP expressions.
+*/
+class History : public Named, public GarbageCollected<History> {
+public:
+	Expression *condition;
+	unsigned long last_valid_idx;
+	EventTimestamp when;
+	std::vector<unsigned long> rips;
+	History *parent;
+	History(Expression *_condition,
+		EventTimestamp _when,
+		History *_parent)
+		: condition(_condition),
+		  last_valid_idx(_parent ? _parent->last_valid_idx : 0),
+		  when(_when),
+		  rips(),
+		  parent(_parent)
+	{
+		assert(when.tid.valid());
+	}
+	History(Expression *cond,
+		unsigned long _last_valid_idx,
+		EventTimestamp _when,
+		std::vector<unsigned long> &_rips,
+		History *_parent)
+		: condition(cond),
+		  last_valid_idx(_last_valid_idx),
+		  when(_when),
+		  rips(_rips),
+		  parent(_parent)
+	{
+		assert(when.tid.valid());
+	}
+protected:
+	char *mkName() const {
+		char *buf = my_asprintf("%s@%d:%lx", condition->name(), when.tid._tid(), when.idx);
+		for (std::vector<unsigned long>::const_iterator it = rips.begin();
+		     it != rips.end();
+		     it++) {
+			char *b2 = my_asprintf("%s:%lx", buf, *it);
+			free(buf);
+			buf = b2;
+		}
+		return buf;
+	}
+public:
+	unsigned long hash() const
+	{
+		return (unsigned long)this;
+	}
+	void destruct()
+	{
+		this->~History();
+	}
+	void visit(HeapVisitor &hv) const
+	{
+		hv(condition);
+		hv(parent);
+	}
+
+	bool isEqual(const History *h) const
+	{
+		if (h == this)
+			return true;
+		if (when != h->when)
+			return false;
+		if (rips.size() != h->rips.size())
+			return false;
+		if (!condition->isEqual(h->condition))
+			return false;
+		if ((parent && !h->parent) ||
+		    (!parent && h->parent))
+			return false;
+		std::vector<unsigned long>::const_iterator it1;
+		std::vector<unsigned long>::const_iterator it2;
+		it1 = rips.begin();
+		it2 = h->rips.begin();
+		while (it1 != rips.end()) {
+			assert(it2 != h->rips.end());
+			if (*it1 != *it2)
+				return false;
+		}
+		if (!parent)
+			return true;
+		return parent->isEqual(h->parent);
+	}
+	void finish(EventTimestamp fin)
+	{
+		last_valid_idx = fin.idx;
+	}
+
+	History *control_expression(EventTimestamp when, Expression *e)
+	{
+		finish(when);
+		return new History(e, when, this);
+	}
+
+	void footstep(unsigned long rip)
+	{
+		rips.push_back(rip);
+	}
+
+	EventTimestamp timestamp() const
+	{
+		return when;
+	}
+
+	History *dupeWithParentReplace(History *from, History *to)
+	{
+		if (this == from)
+			return to;
+		assert(parent != NULL);
+		return new History(condition,
+				   last_valid_idx,
+				   when,
+				   rips,
+				   parent->dupeWithParentReplace(from, to));
+	}
+
+	History *truncate(unsigned long, bool);
+	History *truncateInclusive(unsigned long x) { return truncate(x, true); }
+	History *truncateExclusive(unsigned long x) { return truncate(x, false); }
+
+	NAMED_CLASS
+};
+
+/* A RIP expression asserts that a particular thread will follow a
+ * particular control flow path, and hence that memory operations can
+ * be identified by their position in the memory operation stream.
+ */
+class ExpressionRip : public Expression {
+public:
+	ThreadId tid;
+	History *history;
+	Expression *cond;
+	LogReader<abstract_interpret_value> *model_execution;
+	LogReaderPtr model_exec_start;
+private:
+	static VexAllocTypeWrapper<ExpressionRip> allocator;
+	ExpressionRip(ThreadId _tid, History *_history, Expression *_cond,
+		      LogReader<abstract_interpret_value> *model,
+		      LogReaderPtr start)
+		: tid(_tid),
+		  history(_history),
+		  cond(_cond),
+		  model_execution(model),
+		  model_exec_start(start)
+	{
+	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history->name(), cond->name());
+	}
+	unsigned _hash() const {
+		return history->hash() ^ tid._tid() ^ cond->hash();
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionRip *oth = dynamic_cast<const ExpressionRip *>(other);
+		if (oth && oth->tid == tid && cond->isEqual(oth->cond) &&
+		    oth->history->isEqual(history))
+			return true;
+		else
+			return false;
+	}
+public:
+	static Expression *get(ThreadId tid, History *history, Expression *cond,
+			       LogReader<abstract_interpret_value> *model,
+			       LogReaderPtr start)
+	{
+		return new (allocator.alloc()) ExpressionRip(tid, history, cond,
+							     model, start);
+	}
+	void visit(HeapVisitor &hv) const
+	{
+		hv(history);
+		hv(cond);
+		hv(model_execution);
+	}
+	EventTimestamp timestamp() const {
+		return max<EventTimestamp>(history->timestamp(),
+					   cond->timestamp());
+	}
+	bool isLogical() const { return cond->isLogical(); }
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity);
+
+	NAMED_CLASS
+};
+
 #endif /* !SLI_H__ */

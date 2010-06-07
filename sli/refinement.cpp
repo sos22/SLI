@@ -208,6 +208,24 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
 	EventTimestamp load;
 	Expression *addr;
 	static VexAllocTypeWrapper<LastStoreRefiner> allocator;
+
+	std::map<ThreadId, History *> thread_histories;
+	LogReader<abstract_interpret_value> *modelExec;
+	LogReaderPtr modelExecStart;
+	const std::map<ThreadId, unsigned long> &validity;
+	History *getHistory(ThreadId tid)
+	{
+		History *&ptr = thread_histories[tid];
+		if (!ptr)
+			ptr = new History(ConstExpression::get(1),
+					  EventTimestamp(tid, 0),
+					  NULL);
+		return ptr;
+	}
+	void setHistory(ThreadId tid, History *hs)
+	{
+		thread_histories[tid] = hs;
+	}
 public:
 	Expression *result;
 	void record(Thread<abstract_interpret_value> *thr,
@@ -215,10 +233,16 @@ public:
 	LastStoreRefiner(EventTimestamp _store,
 			 EventTimestamp _load,
 			 Expression *_addr,
-			 Expression *_result = ConstExpression::get(1))
+			 Expression *_result,
+			 LogReader<abstract_interpret_value> *_modelExec,
+			 LogReaderPtr _modelExecStart,
+			 const std::map<ThreadId, unsigned long> &_validity)
 		: store(_store),
 		  load(_load),
 		  addr(_addr),
+		  modelExec(_modelExec),
+		  modelExecStart(_modelExecStart),
+		  validity(_validity),
 		  result(_result)
 	{
 	}
@@ -230,7 +254,16 @@ public:
 	{
 		abort();
 	}
-	void visit(HeapVisitor &hv) const { hv(addr); hv(result); }
+	void visit(HeapVisitor &hv) const
+	{
+		hv(addr);
+		hv(result);
+		for (std::map<ThreadId, History *>::const_iterator it = thread_histories.begin();
+		     it != thread_histories.end();
+		     it++)
+			hv(it->second);
+		hv(modelExec);
+	}
 	void destruct() {}
 	NAMED_CLASS
 };
@@ -239,9 +272,39 @@ void
 LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 			 const ThreadEvent<abstract_interpret_value> *evt)
 {
+	if (const InstructionEvent<abstract_interpret_value> *fe =
+	    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt)) {
+		unsigned long c;
+		if (!fe->rip.origin->isConstant(&c))
+			this->setHistory(thr->tid,
+					 this->getHistory(thr->tid)->control_expression(
+						 evt->when,
+						 equals::get(fe->rip.origin, ConstExpression::get(fe->rip.v))));
+		this->getHistory(thr->tid)->footstep(fe->rip.v);
+	}
+
 	if (const StoreEvent<abstract_interpret_value> *se =
 	    dynamic_cast<const StoreEvent<abstract_interpret_value> *>(evt)) {
 		if (evt->when != store) {
+			Expression *happensInRange =
+				logicaland::get(
+					ExpressionHappensBefore::get(
+						store,
+						evt->when),
+					ExpressionHappensBefore::get(
+						evt->when,
+						load));
+			/* If necessary, introduce a rip expression
+			   which brings the relevant memory access
+			   into scope. */
+			if (evt->when.idx > validity.find(evt->when.tid)->second)
+				happensInRange =
+					ExpressionRip::get(
+						evt->when.tid,
+						thread_histories[evt->when.tid],
+						happensInRange,
+						modelExec,
+						modelExecStart);
 			result =
 				logicaland::get(
 					result,
@@ -250,13 +313,7 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 							equals::get(
 								se->addr.origin,
 								addr)),
-						logicalor::get(
-							ExpressionHappensBefore::get(
-								evt->when,
-								store),
-							ExpressionHappensBefore::get(
-								load,
-								evt->when))));
+						logicalnot::get(happensInRange)));
 		}
 	}
 }
@@ -319,7 +376,10 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 			store,
 			load,
 			vaddr,
-			ExpressionHappensBefore::get(store, load));
+			ExpressionHappensBefore::get(store, load),
+			lf,
+			ptr,
+			validity);
 	VexGcRoot r((void **)&lsr, "r");
 	MachineState<abstract_interpret_value> *localMs = ms->dupeSelf();
 	VexGcRoot r2((void **)&localMs, "r2");
@@ -344,7 +404,10 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 				store,
 				load,
 				vaddr,
-				work);
+				work,
+				lf,
+				ptr,
+				validity);
 		VexGcRoot r3((void **)&lsr2, "r3");
 		i2.replayLogfile((*it)->lf, (*it)->lf->startPtr(), NULL, NULL, lsr2);
 		work = lsr2->result;
@@ -353,3 +416,61 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 	return work;
 }
 
+/* We refine a RIP expression by just splitting the very last segment
+   off of the history and turning it into a direct expression. */
+Expression *
+ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
+		      LogReader<abstract_interpret_value> *lf,
+		      LogReaderPtr ptr,
+		      bool *progress,
+		      const std::map<ThreadId, unsigned long> &validity)
+{
+	/* Try to refine the subcondition first, since that's usually
+	 * cheaper. */
+	Expression *newSubCond;
+	bool subCondProgress = false;
+	std::map<ThreadId, unsigned long> newValidity(validity);
+	newValidity[tid] = history->last_valid_idx;
+	newSubCond = cond->refine(ms, model_execution, model_exec_start,
+				  &subCondProgress, newValidity);
+	if (subCondProgress) {
+		/* Yay. */
+		*progress = true;
+		return ExpressionRip::get(
+			tid,
+			history,
+			newSubCond,
+			model_execution,
+			model_exec_start);
+	}
+
+	/* That didn't work, so try some of the predecessor
+	   conditional branches out of the history. */
+
+	for (History *hs = history;
+	     hs != NULL;
+	     hs = hs->parent) {
+		if (hs->last_valid_idx <= validity.find(tid)->second)
+			break;
+		newValidity[tid] = hs->last_valid_idx;
+		Expression *newCond = hs->condition->refine(ms, lf, ptr, &subCondProgress,
+							    newValidity);
+		if (subCondProgress) {
+			*progress = true;
+			return ExpressionRip::get(
+				tid,
+				history->dupeWithParentReplace(
+					hs,
+					new History(newCond,
+						    hs->last_valid_idx,
+						    hs->when,
+						    hs->rips,
+						    hs->parent)),
+				cond,
+				model_execution,
+				model_exec_start);
+		}
+	}
+
+	return this;
+}

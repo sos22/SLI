@@ -572,4 +572,5 @@ BottomExpression *BottomExpression::bottom;
 
 mk_op_allocator(ExpressionLastStore);
 mk_op_allocator(ExpressionHappensBefore);
+mk_op_allocator(ExpressionRip);
 
