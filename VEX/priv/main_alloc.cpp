@@ -229,7 +229,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
     vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
     next = next_alloc_header(cursor);
     if (!cursor->type) {
-      while (next != alloc_header_terminator && !next->type) {
+      while (next != alloc_header_terminator && !next->type && cursor->size < size) {
 	cursor->size += next->size;
 	next = next_alloc_header(cursor);
       }
@@ -244,7 +244,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
       vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
       next = next_alloc_header(cursor);
       if (!cursor->type) {
-	while (next != alloc_header_terminator && !next->type) {
+	while (next != alloc_header_terminator && !next->type && cursor->size < size) {
 	  cursor->size += next->size;
 	  if (next == allocation_cursor)
 	    allocation_cursor = next_alloc_header(cursor);
@@ -466,11 +466,13 @@ dump_heap(void)
 
 class HeapUsageVisitor : public HeapVisitor {
 public:
+  unsigned long heap_used;
   void visit(const void *ptr);
+  void account_one_allocation(alloc_header *hdr);
 };
 
-static void
-account_one_allocation(alloc_header *hdr)
+void
+HeapUsageVisitor::account_one_allocation(alloc_header *hdr)
 {
   VexAllocType *t = hdr->type;
   if (!t->total_allocated) {
@@ -480,6 +482,7 @@ account_one_allocation(alloc_header *hdr)
     headType = t;
   }
   t->total_allocated += hdr->size;
+  this->heap_used += hdr->size;
 }
 
 void HeapUsageVisitor::visit(const void *ptr)
@@ -506,6 +509,7 @@ dump_heap_usage(void)
   headType = NULL;
 
   HeapUsageVisitor visitor;
+  visitor.heap_used = 0;
   alloc_header *h;
   for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
     h->flags &= ~ ALLOC_FLAG_GC_MARK;
@@ -515,6 +519,8 @@ dump_heap_usage(void)
   printf("Live:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
     printf("%8d\t%s\n", cursor->total_allocated, cursor->name);
+  printf("%8ld\ttotal\n", visitor.heap_used);
+  visitor.heap_used = 0;
 
   for (cursor = headType; cursor; cursor = cursor->next)
     cursor->total_allocated = 0;
@@ -522,12 +528,25 @@ dump_heap_usage(void)
   for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
     if (!h->type || (h->flags & ALLOC_FLAG_GC_MARK))
       continue;
-    account_one_allocation(h);
+    visitor.account_one_allocation(h);
   }
 
   printf("\nDragging:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
     printf("%8d\t%s\n", cursor->total_allocated, cursor->name);
+  printf("%8ld\ttotal\n", visitor.heap_used);
+}
+
+void
+dump_heap_pattern(void)
+{
+  FILE *f = fopen("heap_pattern.dat", "w");
+  for (alloc_header *h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
+    if (h->type && !h->type->name)
+      h->type->name = h->type->get_name(h + 1);
+    fprintf(f, "%p %80s %d\n", h, h->type ? h->type->name : "<free>", h->size);
+  }
+  fclose(f);
 }
 
 void
