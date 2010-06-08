@@ -347,8 +347,11 @@ LibVEX_realloc(void *ptr, unsigned new_size)
   if (new_size <= ah->size)
     return ptr;
 
-  /* Failed to resize: allocate a new block */
-  newptr = __LibVEX_Alloc_Bytes(new_size);
+  /* Failed to resize: allocate a new block.  This is expensive, and
+     tends to cause heap fragmentation, so if we have to do it then we
+     double the requested allocation so as to make future realloc()s
+     cheaper. */
+  newptr = __LibVEX_Alloc_Bytes(new_size * 2);
   if (new_size < ah->size)
     memcpy(newptr, ptr, new_size);
   else
