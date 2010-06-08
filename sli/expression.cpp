@@ -76,23 +76,64 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 #define mk_op_allocator(op)						\
 	VexAllocTypeWrapper<op> op::allocator
 
+#define binop_float_rip(nme)						\
+	do {								\
+		ExpressionRip *lrip = dynamic_cast<ExpressionRip *>(l);	\
+		ExpressionRip *rrip = dynamic_cast<ExpressionRip *>(r);	\
+		if (lrip && rrip && lrip->history->isEqual(rrip->history)) \
+			return ExpressionRip::get(lrip->tid,		\
+						  lrip->history,	\
+						  nme::get(lrip->cond,	\
+							   rrip->cond), \
+						  lrip->model_execution, \
+						  lrip->model_exec_start); \
+		if (rrip && lIsConstant)				\
+			return ExpressionRip::get(rrip->tid,		\
+						  rrip->history,	\
+						  nme::get(l,		\
+							   rrip->cond), \
+						  rrip->model_execution, \
+						  rrip->model_exec_start); \
+		if (lrip && rIsConstant)				\
+			return ExpressionRip::get(lrip->tid,		\
+						  lrip->history,	\
+						  nme::get(r,		\
+							   lrip->cond), \
+						  lrip->model_execution, \
+						  lrip->model_exec_start); \
+	} while (0)
+
 #define mk_binop(nme, op, associates, logical)				\
 	mk_op_allocator(nme);						\
 	bool nme::isLogical() const { return logical; }			\
 	Expression *nme::get(Expression *l, Expression *r)		\
 	{								\
 	        unsigned long lc, rc;				        \
-		if (l->isConstant(&lc) && r->isConstant(&rc))		\
+		bool lIsConstant = l->isConstant(&lc);			\
+		bool rIsConstant = r->isConstant(&rc);			\
+		if (lIsConstant && rIsConstant)				\
 			return ConstExpression::get(lc op rc);		\
                 if (associates) {					\
 			if (nme *ll = dynamic_cast<nme *>(l))		\
 				return nme::get(ll->l, nme::get(ll->r, r)); \
 		}							\
+		binop_float_rip(nme);					\
 		nme *work = new (allocator.alloc()) nme();		\
 		work->l = l;						\
 		work->r = r;						\
 		return intern(work);					\
 	}
+
+#define unop_float_rip(nme)						\
+	do {								\
+		if (ExpressionRip *re =					\
+		    dynamic_cast<ExpressionRip *>(l)) {			\
+			return ExpressionRip::get(re->tid, re->history,	\
+						  nme::get(re->cond),	\
+						  re->model_execution,	\
+						  re->model_exec_start); \
+		}							\
+	} while (0)
 
 #define mk_unop(nme, op)						\
 	mk_op_allocator(nme);						\
@@ -102,6 +143,7 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 	        unsigned long lc;				        \
 		if (l->isConstant(&lc))					\
 			return ConstExpression::get(op lc);		\
+		unop_float_rip(nme);					\
 		nme *work = new (allocator.alloc()) nme();		\
 		work->l = l;						\
 		return intern(work);					\
@@ -142,19 +184,20 @@ Expression *logicalnot::get(Expression *l)
 
 mk_op_allocator(bitsaturate);
 bool bitsaturate::isLogical() const { return true; }
-Expression *bitsaturate::get(Expression *arg)
+Expression *bitsaturate::get(Expression *l)
 {
 	unsigned long c;
-	if (arg->isConstant(&c)) {
+	if (l->isConstant(&c)) {
 		if (c == 0 || c == 1)
-			return arg;
+			return l;
 		else
 			return ConstExpression::get(1);
 	}
-	if (arg->isLogical())
-		return arg;
+	if (l->isLogical())
+		return l;
+	unop_float_rip(bitsaturate);
 	bitsaturate *work = new (allocator.alloc()) bitsaturate;
-	work->l = arg;
+	work->l = l;
 	return intern(work);
 }
 
@@ -195,6 +238,8 @@ Expression *plus::get(Expression *l, Expression *r)
 			return ConstExpression::get(lc + rc);			
 	} else if (rIsConstant && rc == 0)
 		return l;
+
+	binop_float_rip(plus);
 
 	/* We rewrite (a & Y) + (b & Z) to (a & Y) | (b & Z) whenever
 	   possible, which is pretty much when Y and Z don't
@@ -262,15 +307,19 @@ Expression *lshift::get(Expression *l, Expression *r)
 {									
 	unsigned long lc, rc;	
 	bool rIsConstant;
-
+	bool lIsConstant;
 	rIsConstant = r->isConstant(&rc);
-	if (l->isConstant(&lc)) {
+	lIsConstant = l->isConstant(&lc);
+
+	if (lIsConstant) {
 		if (lc == 0)
 			return l;
 		if (rIsConstant)
 			return ConstExpression::get(sane_lshift(lc, rc));
 	} else if (rIsConstant && rc == 0)
 		return l;
+
+	binop_float_rip(lshift);
 
 	/* We rewrite ((x >> A) & B) << C into
 	   (x >> (A - C)) & (B << C) if A, B, and C
@@ -304,15 +353,18 @@ Expression *rshift::get(Expression *l, Expression *r)
 {									
 	unsigned long lc, rc;	
 	bool rIsConstant;
+	bool lIsConstant;
 
 	rIsConstant = r->isConstant(&rc);
-	if (l->isConstant(&lc)) {
+	lIsConstant = l->isConstant(&rc);
+	if (lIsConstant) {
 		if (lc == 0)
 			return l;
 		if (rIsConstant)
 			return ConstExpression::get(sane_rshift(lc, rc));
 	} else if (rIsConstant && rc == 0)
 		return l;
+	binop_float_rip(rshift);
 	rshift *work = new (allocator.alloc()) rshift();			
 	work->l = l;							
 	work->r = r;							
@@ -325,15 +377,18 @@ Expression *rshiftarith::get(Expression *l, Expression *r)
 {									
 	unsigned long lc, rc;	
 	bool rIsConstant;
+	bool lIsConstant;
 
 	rIsConstant = r->isConstant(&rc);
-	if (l->isConstant(&lc)) {
+	lIsConstant = l->isConstant(&rc);
+	if (lIsConstant) {
 		if (lc == 0)
 			return l;
 		if (rIsConstant)
 			return ConstExpression::get(sane_rshift_arith(lc, rc));
 	} else if (rIsConstant && rc == 0)
 		return l;
+	binop_float_rip(rshiftarith);
 	rshiftarith *work = new (allocator.alloc()) rshiftarith();
 	work->l = l;
 	work->r = r;							
@@ -364,6 +419,8 @@ Expression *bitwiseor::get(Expression *l, Expression *r)
 		if (l->isLogical() && (rc & 1))
 			return r;
 	}
+
+	binop_float_rip(bitwiseor);
 
 	/* Rewrite (x & Y) | (x & Z) to x & (Y | Z) */
 	{
@@ -397,6 +454,8 @@ Expression *bitwisexor::get(Expression *l, Expression *r)
 			return ConstExpression::get(lc ^ rc);
 	} else if (rIsConstant && rc == 0)
 		return l;
+
+	binop_float_rip(bitwisexor);
 
 	if (bitwiseor *ll = dynamic_cast<bitwiseor *>(l))
 		return bitwisexor::get(ll->l, bitwisexor::get(ll->r, r));		
@@ -459,6 +518,8 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 		if ((rc & mask) == (0xfffffffffffffffful & mask))
 			return l;
 	}
+
+	binop_float_rip(bitwiseand);
 
 	if (bitwiseand *ll = dynamic_cast<bitwiseand *>(l)) {
 		/* Rewrite (x & A) & A to just x & A */
@@ -525,8 +586,10 @@ bool equals::isLogical() const { return true; }
 Expression *equals::get(Expression *l, Expression *r)		
 {									
 	unsigned long lc, rc;
-	if (r->isConstant(&rc)) {
-		if (l->isConstant(&lc))
+	bool lIsConstant = l->isConstant(&lc);
+	bool rIsConstant = r->isConstant(&rc);
+	if (rIsConstant) {
+		if (lIsConstant)
 			return ConstExpression::get(lc == rc);
 
 		/* Rewrite X ? a : b == a to just X if a and b are
@@ -543,6 +606,8 @@ Expression *equals::get(Expression *l, Expression *r)
 			}
 		}
 	}
+
+	binop_float_rip(onlyif);
 
 	equals *work = new (allocator.alloc()) equals();
 	work->l = l;							
