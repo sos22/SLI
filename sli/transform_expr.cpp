@@ -165,7 +165,7 @@ instrument_func(void *closure,
 	sb_out = deepCopyIRSBExceptStmts(sb_in);
 	for (i = 0; i < sb_in->stmts_used; i++) {
 		current_in_stmt = sb_in->stmts[i];
-		out_stmt = deepCopyIRStmt(current_in_stmt);
+		out_stmt = current_in_stmt;
 		switch (current_in_stmt->tag) {
 		case Ist_NoOp:
 			break;
