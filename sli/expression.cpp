@@ -101,6 +101,12 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 							   lrip->cond), \
 						  lrip->model_execution, \
 						  lrip->model_exec_start); \
+		if (onlyif *loif = dynamic_cast<onlyif*>(l))		\
+			return onlyif::get(loif->l,			\
+					   nme::get(loif->r, r));	\
+		if (onlyif *roif = dynamic_cast<onlyif*>(r))		\
+			return onlyif::get(roif->l,			\
+					   nme::get(l, roif->r));	\
 	} while (0)
 
 #define mk_binop(nme, op, associates, logical)				\
@@ -133,6 +139,9 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 						  re->model_execution,	\
 						  re->model_exec_start); \
 		}							\
+		if (onlyif *oif = dynamic_cast<onlyif*>(l))		\
+			return onlyif::get(oif->l,			\
+					   nme::get(oif->r));		\
 	} while (0)
 
 #define mk_unop(nme, op)						\
@@ -607,7 +616,7 @@ Expression *equals::get(Expression *l, Expression *r)
 		}
 	}
 
-	binop_float_rip(onlyif);
+	binop_float_rip(equals);
 
 	equals *work = new (allocator.alloc()) equals();
 	work->l = l;							
