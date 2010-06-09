@@ -42,7 +42,7 @@ class RemoveEventsMapper : public ExpressionMapper {
 	{
 		if (!hs)
 			return NULL;
-		if (!hs->condition)
+		if (!hs->condition || dynamic_cast<ConstExpression *>(hs->condition))
 			return removeNullConditionsHist(hs->parent);
 		return new History(hs->condition,
 				   hs->last_valid_idx,
@@ -196,4 +196,5 @@ considerPotentialFixes(Expression *expr)
 	RemoveEventsMapper mapper(avail_timestamps);
 	Expression *simplified = expr->map(mapper);
 	printf("Simplified expression %s\n", simplified->name());
+
 }
