@@ -359,13 +359,9 @@ generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::se
 	}
 }
 
-/* Refinement believes that if we could make @expr false then we'd
-   avoid the crash.  Investigate ways of doing so. */
-void
-considerPotentialFixes(Expression *expr)
+static void
+generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 {
-	printf("Consider fixing from %s\n", expr->name());
-
 	/* First phase is to produce a simplified version of the
 	   expression, most importantly by reducing the number of
 	   memory accesses which we have to think about.  We start by
@@ -386,12 +382,6 @@ considerPotentialFixes(Expression *expr)
 		if (it->second.size() > 1)
 			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 1));
 	}
-
-	printf("Consider timestamps:\n");
-	for (std::set<EventTimestamp>::iterator it = avail_timestamps.begin();
-	     it != avail_timestamps.end();
-	     it++)
-		printf("\t%d:%lx\n", it->tid._tid(), it->idx);
 
 	/* Now remove all bits of the expression which mention a
 	   timestamp other than the one which we're interested in. */
@@ -418,8 +408,18 @@ considerPotentialFixes(Expression *expr)
 	/* We now suspect that if all the assumptions are satisfied
 	   and @simplified is true then we'll crash in the observed
 	   way. */
+	generateCSCandidates(simplified, output, assumptions);
+}
+
+/* Refinement believes that if we could make @expr false then we'd
+   avoid the crash.  Investigate ways of doing so. */
+void
+considerPotentialFixes(Expression *expr)
+{
+	printf("Consider fixing from %s\n", expr->name());
+
 	std::set<CSCandidate> candidates;
-	generateCSCandidates(simplified, &candidates, assumptions);
+	generateCSCandidates(expr, &candidates);
 	for (std::set<CSCandidate>::iterator it = candidates.begin();
 	     it != candidates.end();
 	     it++) {
