@@ -419,7 +419,6 @@ public:
 void
 AssumptionSet::assertTrue(Expression *e)
 {
-	e = simplifyLogic(convertToCNF(e));
 	unsigned long c;
 	if (e->isConstant(&c)) {
 		if (c) {
@@ -466,7 +465,7 @@ AssumptionSet::assertTrue(Expression *e)
 	for (std::set<Expression *>::iterator it = content.begin();
 	     it != content.end();
 	     it++) {
-		newE = simplifyAssuming(e, *it);
+		newE = simplifyAssuming(newE, *it);
 	}
 
 	if (e == newE)
@@ -580,7 +579,7 @@ validateCSCandidate(Expression *expr, const CSCandidate &cs)
 					cs.tid2start))));
 
 	RemoveOnlyIfRip r;
-	assumptions.assertTrue(expr->map(r));
+	assumptions.assertTrue(simplifyLogic(convertToCNF(expr->map(r))));
 	return assumptions.contradiction();
 }
 
