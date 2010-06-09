@@ -173,7 +173,6 @@ mk_binop(lessthanequals, <=, false, true);
 mk_binop(lessthan, <, false, true);
 mk_binop(notequals, !=, false, true);
 
-mk_unop(bitwisenot, ~);
 mk_unop(unaryminus, -);
 
 Expression *logicalor::get(Expression *l, Expression *r)
@@ -207,6 +206,22 @@ Expression *bitsaturate::get(Expression *l)
 		return l;
 	unop_float_rip(bitsaturate);
 	bitsaturate *work = new (allocator.alloc()) bitsaturate;
+	work->l = l;
+	return intern(work);
+}
+
+mk_op_allocator(bitwisenot);
+bool bitwisenot::isLogical() const { return false; }
+Expression *bitwisenot::get(Expression *l)
+{
+	unsigned long c;
+	if (l->isConstant(&c)) {
+		return ConstExpression::get(~c);
+	}
+	if (bitwisenot *bn = dynamic_cast<bitwisenot *>(l))
+		return bn->l;
+	unop_float_rip(bitwisenot);
+	bitwisenot *work = new (allocator.alloc()) bitwisenot;
 	work->l = l;
 	return intern(work);
 }
