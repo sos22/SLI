@@ -1740,6 +1740,12 @@ void gdb_machine_state(const MachineState<unsigned long> *ms);
 
 struct abstract_interpret_value;
 
+class Expression;
+class ExpressionVisitor {
+public:
+	virtual void visit(Expression *e) = 0;
+};
+
 class Expression : public Named {
 	static const unsigned nr_heads = 262147;
 	static Expression *heads[nr_heads];
@@ -1784,6 +1790,7 @@ public:
 				   LogReaderPtr ptr,
 				   bool *progress,
 				   const std::map<ThreadId, unsigned long> &validity) = 0;
+	virtual void visit(ExpressionVisitor &ev) = 0;
 	Expression() : Named(), next(NULL), pprev(&next) {}
 	bool isEqual(const Expression *other) const {
 		if (other == this)
@@ -1815,7 +1822,7 @@ public:
 		return bottom;
 	}
 	void visit(HeapVisitor &hv) const {}
-
+	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
@@ -1848,6 +1855,7 @@ public:
 		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {}
+	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
 
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
@@ -1878,6 +1886,7 @@ public:
 		return intern(work);
 	}
 	void visit(HeapVisitor &hv) const {hv(origin);}
+	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
@@ -1934,6 +1943,7 @@ public:
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity);
 	void visit(HeapVisitor &hv) const { hv(vaddr); }
+	void visit(ExpressionVisitor &ev) { ev.visit(this); vaddr->visit(ev); }
 	EventTimestamp timestamp() const { return load; }
 	bool isLogical() const { return true; }
 	NAMED_CLASS
@@ -1988,6 +1998,7 @@ public:
 	EventTimestamp timestamp() const { return after; }
 	bool isLogical() const { return true; }
 	void visit(HeapVisitor &hv) const {}
+	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
@@ -2047,6 +2058,7 @@ public:
 
 	EventTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
+	void visit(ExpressionVisitor &ev) { ev.visit(this); val->visit(ev); addr->visit(ev); storeAddr->visit(ev); }
 
 	NAMED_CLASS
 };
@@ -2061,6 +2073,24 @@ public:
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity);
 	Expression *l, *r;
+
+	
+	void visit(HeapVisitor &hv) const
+	{								
+		hv(l);							
+		hv(r);							
+	}								
+	void visit(ExpressionVisitor &ev)
+	{
+		ev.visit(this);
+		l->visit(ev);
+		r->visit(ev);
+	}
+	EventTimestamp timestamp() const				
+	{								
+		return max<EventTimestamp>(l->timestamp(),		
+					   r->timestamp());		
+	}								
 };
 
 #define mk_binop_class(nme, pp)						\
@@ -2092,16 +2122,6 @@ public:
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression *get(Expression *_l, Expression *_r);	\
-		void visit(HeapVisitor &hv) const			\
-		{							\
-			hv(l);						\
-			hv(r);						\
-		}							\
-                EventTimestamp timestamp() const			\
-		{							\
-		        return max<EventTimestamp>(l->timestamp(),	\
-						   r->timestamp());	\
-		}							\
 		NAMED_CLASS						\
 	}
 
@@ -2136,6 +2156,20 @@ public:
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity);
 	Expression *l;
+
+	void visit(HeapVisitor &hv) const				
+	{								
+		hv(l);							
+	}								
+	void visit(ExpressionVisitor &ev)
+	{
+		ev.visit(this);
+		l->visit(ev);
+	}
+	EventTimestamp timestamp() const				
+	{								
+		return l->timestamp();					
+	}								
 };
 
 #define mk_unop_class(nme)						\
@@ -2164,14 +2198,6 @@ public:
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression* get(Expression *_l);			\
-		void visit(HeapVisitor &hv) const			\
-		{							\
-			hv(l);						\
-		}							\
-                EventTimestamp timestamp() const			\
-		{							\
-		        return l->timestamp();				\
-		}							\
 		NAMED_CLASS						\
 	}
 
@@ -2215,6 +2241,13 @@ public:
 		hv(cond);
 		hv(t);
 		hv(f);
+	}
+	void visit(ExpressionVisitor &ev)
+	{
+		ev.visit(this);
+		cond->visit(ev);
+		t->visit(ev);
+		f->visit(ev);
 	}
 	EventTimestamp timestamp() const					
 	{								
@@ -2522,6 +2555,12 @@ public:
 		hv(condition);
 		hv(parent);
 	}
+	void visit(ExpressionVisitor &ev)
+	{
+		condition->visit(ev);
+		if (parent)
+			parent->visit(ev);
+	}
 
 	bool isEqual(const History *h) const
 	{
@@ -2641,6 +2680,12 @@ public:
 		hv(cond);
 		hv(model_execution);
 	}
+	void visit(ExpressionVisitor &ev)
+	{
+		ev.visit(this);
+		history->visit(ev);
+		cond->visit(ev);
+	}
 	EventTimestamp timestamp() const {
 		return max<EventTimestamp>(history->timestamp(),
 					   cond->timestamp());
@@ -2661,5 +2706,7 @@ static inline void sanity_check_ait(abstract_interpret_value v)
 	if (ConstExpression *ce = dynamic_cast<ConstExpression *>(v.origin))
 		assert(ce->v == v.v);
 }
+
+void considerPotentialFixes(Expression *expr);
 
 #endif /* !SLI_H__ */

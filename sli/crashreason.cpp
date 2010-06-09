@@ -38,6 +38,7 @@ public:
 		return new (allocator.alloc()) ExpressionBadPointer(_when, _addr);
 	}
 	void visit(HeapVisitor &hv) const { hv(addr); }
+	void visit(ExpressionVisitor &ev) { ev.visit(this); addr->visit(ev); }
 	EventTimestamp timestamp() const { return when; }
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,

@@ -2,12 +2,6 @@
 
 #include "sli.h"
 
-static void
-considerPotentialFixes(Expression *expr)
-{
-	printf("Consider fixing from %s\n", expr->name());
-}
-
 class ExplorationState : public GarbageCollected<ExplorationState> {
 public:
 	MachineState<abstract_interpret_value> *ms;
