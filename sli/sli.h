@@ -1826,6 +1826,7 @@ public:
 
 class ConstExpression : public Expression {
 	static VexAllocTypeWrapper<ConstExpression> allocator;
+public:
         unsigned long v;
 protected:
 	unsigned _hash() const { return v; }
@@ -2653,5 +2654,12 @@ public:
 
 	NAMED_CLASS
 };
+
+static inline void sanity_check_ait(unsigned long x) {}
+static inline void sanity_check_ait(abstract_interpret_value v)
+{
+	if (ConstExpression *ce = dynamic_cast<ConstExpression *>(v.origin))
+		assert(ce->v == v.v);
+}
 
 #endif /* !SLI_H__ */

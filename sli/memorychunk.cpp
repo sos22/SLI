@@ -106,8 +106,10 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 	newmcl->size = nr_bytes;
 	newmcl->when = when;
 	newmcl->storeAddr = sa;
-	for (unsigned x = 0; x < nr_bytes; x++)
+	for (unsigned x = 0; x < nr_bytes; x++) {
+		sanity_check_ait(source[x]);
 		newmcl->content[x] = source[x];
+	}
 	headLookaside = newmcl;
 }
 

@@ -85,6 +85,8 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	for (unsigned x = 0; x < size; x++)
 		new (&b[x]) ait();
 	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr, &storeAddr);
+	for (unsigned x = 0; x < size; x++)
+		sanity_check_ait(b[x]);
 	expression_result<ait> res;
 	res.lo = mkConst<ait>(0);
 	res.hi = mkConst<ait>(0);
@@ -144,6 +146,8 @@ void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 			      const Thread<ait> *thr)
 {
 	ait b[16];
+	sanity_check_ait(val.hi);
+	sanity_check_ait(val.lo);
 	switch (size) {
 	case 16:
 		b[15] = (val.hi >> mkConst<ait>(56)) & mkConst<ait>(0xff);
@@ -170,6 +174,8 @@ void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 	default:
 		abort();
 	}
+	for (unsigned x = 0; x < size; x++)
+		sanity_check_ait(b[x]);
 	writeMemory(when, start, size, b, ignore_protection, thr);
 }
 
