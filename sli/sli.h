@@ -1741,6 +1741,31 @@ void gdb_machine_state(const MachineState<unsigned long> *ms);
 struct abstract_interpret_value;
 
 class Expression;
+
+#define FOREACH_EXPR_CLASS			\
+	DO_EXPR_CLASS(BottomExpression)		\
+	DO_EXPR_CLASS(ConstExpression)		\
+	DO_EXPR_CLASS(ImportExpression)		\
+	DO_EXPR_CLASS(ExpressionLastStore)	\
+	DO_EXPR_CLASS(ExpressionHappensBefore)	\
+	DO_EXPR_CLASS(LoadExpression)		\
+	DO_EXPR_CLASS(BinaryExpression)		\
+	DO_EXPR_CLASS(UnaryExpression)		\
+	DO_EXPR_CLASS(ternarycondition)		\
+	DO_EXPR_CLASS(ExpressionRip)		\
+	DO_EXPR_CLASS(ExpressionBadPointer)
+
+#define DO_EXPR_CLASS(x) class x;
+FOREACH_EXPR_CLASS
+#undef DO_EXPR_CLASS
+
+class ExpressionMapper {
+public:
+#define DO_EXPR_CLASS(x) virtual Expression *map(x *e);
+	FOREACH_EXPR_CLASS
+#undef DO_EXPR_CLASS
+};
+
 class ExpressionVisitor {
 public:
 	virtual void visit(Expression *e) = 0;
@@ -1791,6 +1816,7 @@ public:
 				   bool *progress,
 				   const std::map<ThreadId, unsigned long> &validity) = 0;
 	virtual void visit(ExpressionVisitor &ev) = 0;
+	virtual Expression *map(ExpressionMapper &f) = 0;
 	Expression() : Named(), next(NULL), pprev(&next) {}
 	bool isEqual(const Expression *other) const {
 		if (other == this)
@@ -1823,6 +1849,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
+	Expression *map(ExpressionMapper &f) { return f.map(this); }
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
@@ -1856,6 +1883,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
 
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
@@ -1887,7 +1915,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) const {hv(origin);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
-
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
@@ -1944,6 +1972,7 @@ public:
 			   const std::map<ThreadId, unsigned long> &validity);
 	void visit(HeapVisitor &hv) const { hv(vaddr); }
 	void visit(ExpressionVisitor &ev) { ev.visit(this); vaddr->visit(ev); }
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const { return load; }
 	bool isLogical() const { return true; }
 	NAMED_CLASS
@@ -1999,6 +2028,7 @@ public:
 	bool isLogical() const { return true; }
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
@@ -2059,14 +2089,14 @@ public:
 	EventTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); val->visit(ev); addr->visit(ev); storeAddr->visit(ev); }
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 
 	NAMED_CLASS
 };
 
 class BinaryExpression : public Expression {
-protected:
-	virtual Expression *semiDupe(Expression *l, Expression *r) const = 0;
 public:
+	virtual Expression *semiDupe(Expression *l, Expression *r) const = 0;
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
@@ -2086,6 +2116,7 @@ public:
 		l->visit(ev);
 		r->visit(ev);
 	}
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const				
 	{								
 		return max<EventTimestamp>(l->timestamp(),		
@@ -2147,9 +2178,8 @@ mk_binop_class(logicaland, &&);
 mk_binop_class(onlyif, onlyif);
 
 class UnaryExpression : public Expression {
-protected:
-	virtual Expression *semiDupe(Expression *l) const = 0;
 public:
+	virtual Expression *semiDupe(Expression *l) const = 0;
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
@@ -2166,6 +2196,7 @@ public:
 		ev.visit(this);
 		l->visit(ev);
 	}
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const				
 	{								
 		return l->timestamp();					
@@ -2249,6 +2280,7 @@ public:
 		t->visit(ev);
 		f->visit(ev);
 	}
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const					
 	{								
 		return max<EventTimestamp>(cond->timestamp(),
@@ -2561,7 +2593,12 @@ public:
 		if (parent)
 			parent->visit(ev);
 	}
-
+	History *map(ExpressionMapper &m)
+	{
+		return new History(condition->map(m),
+				   when,
+				   parent ? parent->map(m) : NULL);
+	}
 	bool isEqual(const History *h) const
 	{
 		if (h == this)
@@ -2686,6 +2723,7 @@ public:
 		history->visit(ev);
 		cond->visit(ev);
 	}
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const {
 		return max<EventTimestamp>(history->timestamp(),
 					   cond->timestamp());
@@ -2697,6 +2735,49 @@ public:
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity);
 
+	NAMED_CLASS
+};
+
+/* A bad pointer expression asserts that a particular memory location
+ * is inaccessible at a particular time. */
+class ExpressionBadPointer : public Expression {
+public:
+	Expression *addr;
+	EventTimestamp when;
+private:
+	static VexAllocTypeWrapper<ExpressionBadPointer> allocator;
+	ExpressionBadPointer(EventTimestamp _when, Expression *_addr)
+		: addr(_addr), when(_when)
+	{
+	}
+protected:
+	char *mkName(void) const {
+		return my_asprintf("(bad ptr %d:%lx:%s)", when.tid._tid(), when.idx, addr->name());
+	}
+	unsigned _hash() const {
+		return addr->hash() ^ when.hash();
+	}
+	bool _isEqual(const Expression *other) const {
+		const ExpressionBadPointer *oth = dynamic_cast<const ExpressionBadPointer *>(other);
+		if (oth && oth->addr->isEqual(addr) && oth->when == when)
+			return true;
+		else
+			return false;
+	}
+public:
+	static Expression *get(EventTimestamp _when, Expression *_addr)
+	{
+		return new (allocator.alloc()) ExpressionBadPointer(_when, _addr);
+	}
+	void visit(HeapVisitor &hv) const { hv(addr); }
+	void visit(ExpressionVisitor &ev) { ev.visit(this); addr->visit(ev); }
+	Expression *map(ExpressionMapper &m) { return m.map(this); }
+	EventTimestamp timestamp() const { return when; }
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 	NAMED_CLASS
 };
 

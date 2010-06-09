@@ -1,4 +1,5 @@
 #include <list>
+#include <set>
 
 #include "sli.h"
 
@@ -36,6 +37,119 @@ rindex(t &vect, unsigned idx)
 	return *it;
 }
 
+class RemoveEventsMapper : public ExpressionMapper {
+	History *removeNullConditionsHist(History *hs)
+	{
+		if (!hs)
+			return NULL;
+		if (!hs->condition)
+			return removeNullConditionsHist(hs->parent);
+		return new History(hs->condition,
+				   hs->last_valid_idx,
+				   hs->when,
+				   hs->rips,
+				   removeNullConditionsHist(hs->parent));
+	}
+public:
+	const std::set<EventTimestamp> &allowed;
+	RemoveEventsMapper(const std::set<EventTimestamp> &_allowed)
+		: allowed(_allowed)
+	{
+	}
+	bool allow(EventTimestamp ts)
+	{
+		return allowed.count(ts) != 0;
+	}
+	Expression *map(ExpressionLastStore *els)
+	{
+		if (!allow(els->load) || !allow(els->store))
+			return NULL;
+		Expression *va;
+		va = els->vaddr->map(*this);
+		if (!va)
+			return NULL;
+		else
+			return ExpressionLastStore::get(els->load, els->store, va);
+	}
+	Expression *map(ExpressionHappensBefore *ehb)
+	{
+		if (allow(ehb->before) && allow(ehb->after))
+			return ehb;
+		else
+			return NULL;
+	}
+	Expression *map(LoadExpression *le)
+	{
+		if (!allow(le->when) || !allow(le->store))
+			return NULL;
+		Expression *val = le->val->map(*this);
+		Expression *addr = le->addr->map(*this);
+		Expression *sa = le->storeAddr->map(*this);
+		if (!val || !addr || !sa)
+			return NULL;
+		return LoadExpression::get(le->when, val, addr, sa,
+					   le->store, le->size);
+	}
+	Expression *map(BinaryExpression *be)
+	{
+		Expression *l = be->l->map(*this);
+		Expression *r = be->r->map(*this);
+		if (l && r)
+			return be->semiDupe(l, r);
+		else if (l)
+			return l;
+		else if (r)
+			return r;
+		else
+			return NULL;
+	}
+	Expression *map(UnaryExpression *ue)
+	{
+		Expression *l = ue->l->map(*this);
+		if (l)
+			return ue->semiDupe(l);
+		else
+			return NULL;
+	}
+	Expression *map(ternarycondition *tc)
+	{
+		Expression *c = tc->cond->map(*this),
+			*t = tc->t->map(*this),
+			*f = tc->f->map(*this);
+		if (!t)
+			return f;
+		if (!f)
+			return t;
+		if (!c)
+			return NULL;
+		return ternarycondition::get(c, t, f);
+	}
+	Expression *map(ExpressionRip *er)
+	{
+		Expression *a = ExpressionMapper::map(er);
+		ExpressionRip *a2 = dynamic_cast<ExpressionRip *>(a);
+		assert(a2);
+		if (!a2->cond)
+			return NULL;
+		else
+			return ExpressionRip::get(a2->tid,
+						  removeNullConditionsHist(a2->history),
+						  a2->cond,
+						  a2->model_execution,
+						  a2->model_exec_start);
+	}
+	Expression *map(ExpressionBadPointer *ebp)
+	{
+		if (!allow(ebp->when))
+			return NULL;
+		Expression *e = ebp->addr->map(*this);
+		if (e)
+			return ExpressionBadPointer::get(ebp->when, e);
+		else
+			return NULL;
+	}
+};
+
 /* Refinement believes that if we could make @expr false then we'd
    avoid the crash.  Investigate ways of doing so. */
 void
@@ -52,21 +166,27 @@ considerPotentialFixes(Expression *expr)
 	CollectTimestampsVisitor v;
 	expr->visit(v);
 
-	std::list<EventTimestamp> avail_timestamps;
+	std::set<EventTimestamp> avail_timestamps;
 	for (std::map<ThreadId, std::list<EventTimestamp> >::iterator it = v.timestamps.begin();
 	     it != v.timestamps.end();
 	     it++) {
 		it->second.sort();
 		it->second.unique();
 		if (it->second.size() > 0)
-			avail_timestamps.push_back(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 0));
+			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 0));
 		if (it->second.size() > 1)
-			avail_timestamps.push_back(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 1));
+			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 1));
 	}
 
 	printf("Consider timestamps:\n");
-	for (std::list<EventTimestamp>::iterator it = avail_timestamps.begin();
+	for (std::set<EventTimestamp>::iterator it = avail_timestamps.begin();
 	     it != avail_timestamps.end();
 	     it++)
 		printf("\t%d:%lx\n", it->tid._tid(), it->idx);
+
+	/* Now remove all bits of the expression which mention a
+	   timestamp other than the one which we're interested in. */
+	RemoveEventsMapper mapper(avail_timestamps);
+	Expression *simplified = expr->map(mapper);
+	printf("Simplified expression %s\n", simplified->name());
 }

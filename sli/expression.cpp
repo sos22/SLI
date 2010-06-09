@@ -647,4 +647,72 @@ BottomExpression *BottomExpression::bottom;
 mk_op_allocator(ExpressionLastStore);
 mk_op_allocator(ExpressionHappensBefore);
 mk_op_allocator(ExpressionRip);
+mk_op_allocator(ExpressionBadPointer);
 
+#define TRIV_EXPR_MAPPER(c)			\
+	Expression *				\
+	ExpressionMapper::map(c *e)		\
+	{					\
+		return e;			\
+	}					\
+
+TRIV_EXPR_MAPPER(BottomExpression)
+TRIV_EXPR_MAPPER(ConstExpression)
+TRIV_EXPR_MAPPER(ImportExpression)
+TRIV_EXPR_MAPPER(ExpressionHappensBefore)
+
+Expression *
+ExpressionMapper::map(ExpressionLastStore *els)
+{
+	return ExpressionLastStore::get(els->load, els->store,
+					els->vaddr->map(*this));
+}
+
+Expression *
+ExpressionMapper::map(LoadExpression *le)
+{
+	return LoadExpression::get(le->when,
+				   le->val->map(*this),
+				   le->addr->map(*this),
+				   le->storeAddr->map(*this),
+				   le->store,
+				   le->size);
+}
+
+Expression *
+ExpressionMapper::map(BinaryExpression *be)
+{
+	return be->semiDupe(be->l->map(*this),
+			    be->r->map(*this));
+}
+
+Expression *
+ExpressionMapper::map(UnaryExpression *ue)
+{
+	return ue->semiDupe(ue->l->map(*this));
+}
+
+Expression *
+ExpressionMapper::map(ternarycondition *tc)
+{
+	return ternarycondition::get(tc->cond->map(*this),
+				     tc->t->map(*this),
+				     tc->f->map(*this));
+}
+
+Expression *
+ExpressionMapper::map(ExpressionRip *er)
+{
+	return ExpressionRip::get(er->tid,
+				  er->history->map(*this),
+				  er->cond->map(*this),
+				  er->model_execution,
+				  er->model_exec_start);
+}
+
+Expression *
+ExpressionMapper::map(ExpressionBadPointer *ebp)
+{
+	return ExpressionBadPointer::get(ebp->when,
+					 ebp->addr->map(*this));
+}

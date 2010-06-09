@@ -6,49 +6,6 @@
 #define FOOTSTEP_REGS_ONLY
 #include "ppres.h"
 
-/* A bad pointer expression asserts that a particular memory location
- * is inaccessible at a particular time. */
-class ExpressionBadPointer : public Expression {
-public:
-	Expression *addr;
-	EventTimestamp when;
-private:
-	static VexAllocTypeWrapper<ExpressionBadPointer> allocator;
-	ExpressionBadPointer(EventTimestamp _when, Expression *_addr)
-		: addr(_addr), when(_when)
-	{
-	}
-protected:
-	char *mkName(void) const {
-		return my_asprintf("(bad ptr %d:%lx:%s)", when.tid._tid(), when.idx, addr->name());
-	}
-	unsigned _hash() const {
-		return addr->hash() ^ when.hash();
-	}
-	bool _isEqual(const Expression *other) const {
-		const ExpressionBadPointer *oth = dynamic_cast<const ExpressionBadPointer *>(other);
-		if (oth && oth->addr->isEqual(addr) && oth->when == when)
-			return true;
-		else
-			return false;
-	}
-public:
-	static Expression *get(EventTimestamp _when, Expression *_addr)
-	{
-		return new (allocator.alloc()) ExpressionBadPointer(_when, _addr);
-	}
-	void visit(HeapVisitor &hv) const { hv(addr); }
-	void visit(ExpressionVisitor &ev) { ev.visit(this); addr->visit(ev); }
-	EventTimestamp timestamp() const { return when; }
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
-			   LogReaderPtr ptr,
-			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity) { return this; }
-	NAMED_CLASS
-};
-VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
-
 History *History::truncate(unsigned long idx, bool inclusive)
 {
 	assert(idx <= last_valid_idx);
