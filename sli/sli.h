@@ -1818,7 +1818,7 @@ public:
 				   const std::map<ThreadId, unsigned long> &validity) = 0;
 	virtual void visit(ExpressionVisitor &ev) = 0;
 	virtual Expression *map(ExpressionMapper &f) = 0;
-	Expression() : Named(), next(NULL), pprev(&next) {}
+	Expression() : Named(), next(NULL), pprev(&next), hashval(0) {}
 	bool isEqual(const Expression *other) const {
 		if (other == this)
 			return true;
