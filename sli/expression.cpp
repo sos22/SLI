@@ -226,6 +226,11 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 		else
 			return f;
 	}
+	unsigned long tv;
+	unsigned long fv;
+	if (t->isConstant(&tv) && f->isConstant(&fv) &&
+	    tv == 1 && fv == 0)
+		return bitsaturate::get(cond);
 	ternarycondition *work = new (allocator.alloc()) ternarycondition();
 	work->cond = cond;
 	work->t = t;
