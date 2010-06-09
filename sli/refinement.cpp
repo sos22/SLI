@@ -2,6 +2,12 @@
 
 #include "sli.h"
 
+static void
+considerPotentialFixes(Expression *expr)
+{
+	printf("Consider fixing from %s\n", expr->name());
+}
+
 class ExplorationState : public GarbageCollected<ExplorationState> {
 public:
 	MachineState<abstract_interpret_value> *ms;
@@ -421,6 +427,7 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 		lsr2->finish(ms2);
 		work = lsr2->result;
 	}
+
 	*progress = true;
 	return work;
 }
@@ -466,7 +473,7 @@ ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
 							    newValidity);
 		if (subCondProgress) {
 			*progress = true;
-			return ExpressionRip::get(
+			Expression *res = ExpressionRip::get(
 				tid,
 				history->dupeWithParentReplace(
 					hs,
@@ -478,6 +485,8 @@ ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
 				cond,
 				model_execution,
 				model_exec_start);
+			considerPotentialFixes(res);
+			return res;
 		}
 	}
 
