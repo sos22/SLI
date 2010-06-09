@@ -125,6 +125,7 @@ LibVEX_free(const void *_ptr)
     if (allocation_cursor == n)
       allocation_cursor = h;
     h->size += n->size;
+    VALGRIND_MAKE_MEM_NOACCESS(n, sizeof(*n));
     n = next_alloc_header(h);
   }
 }
@@ -162,8 +163,10 @@ LibVEX_gc(void)
 	  if (h == allocation_cursor)
 	    allocation_cursor = p;
 	  p->size += h->size;
+	  VALGRIND_MAKE_MEM_NOACCESS(h, sizeof(*h));
 	  if (n != alloc_header_terminator && !n->type) {
 	    p->size += n->size;
+	    VALGRIND_MAKE_MEM_NOACCESS(n, sizeof(*n));
 	    if (n == allocation_cursor)
 	      allocation_cursor = p;
 	  }
@@ -173,12 +176,14 @@ LibVEX_gc(void)
 	  if (n == allocation_cursor)
 	    allocation_cursor = h;
 	  h->size += n->size;
+	  VALGRIND_MAKE_MEM_NOACCESS(n, sizeof(*n));
 	  n = next_alloc_header(h);
 	}
       }
     } else {
       while (n != alloc_header_terminator && !n->type) {
 	h->size += n->size;
+	VALGRIND_MAKE_MEM_NOACCESS(n, sizeof(*n));
 	n = next_alloc_header(h);
       }
     }
@@ -231,6 +236,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
     if (!cursor->type) {
       while (next != alloc_header_terminator && !next->type && cursor->size < size) {
 	cursor->size += next->size;
+	VALGRIND_MAKE_MEM_NOACCESS(next, sizeof(*next));
 	next = next_alloc_header(cursor);
       }
       if (cursor->size >= size)
@@ -246,6 +252,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
       if (!cursor->type) {
 	while (next != alloc_header_terminator && !next->type && cursor->size < size) {
 	  cursor->size += next->size;
+	  VALGRIND_MAKE_MEM_NOACCESS(next, sizeof(*next));
 	  if (next == allocation_cursor)
 	    allocation_cursor = next_alloc_header(cursor);
 	  next = next_alloc_header(cursor);
@@ -276,9 +283,9 @@ alloc_bytes(VexAllocType *type, unsigned size)
 
   cursor->type = type;
   res = header_to_alloc(cursor);
-  VALGRIND_MAKE_MEM_UNDEFINED(res, size - sizeof(*cursor));
+  VALGRIND_MAKE_MEM_UNDEFINED(res, cursor->size - sizeof(*cursor));
   poison(res, size - sizeof(struct alloc_header), 0xaabbccdd);
-  VALGRIND_MAKE_MEM_UNDEFINED(res, size - sizeof(*cursor));
+  VALGRIND_MAKE_MEM_UNDEFINED(res, cursor->size - sizeof(*cursor));
 
   heap_used += cursor->size;
 
@@ -317,6 +324,8 @@ LibVEX_realloc(void *ptr, unsigned new_size)
   new_size += sizeof(struct alloc_header);
   new_size = (new_size + 15) & ~15;
 
+  VALGRIND_CHECK_MEM_IS_DEFINED(ah, sizeof(*ah));
+
   /* Can only resize byte allocations */
   vassert(ah->type == &byte_alloc_type);
 
@@ -325,10 +334,11 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     next = next_alloc_header(ah);
     if (next == alloc_header_terminator || next->type)
       break;
-    VALGRIND_MAKE_MEM_UNDEFINED((void *)((unsigned long)ah + ah->size),
-				next->size);
     ah->size += next->size;
     heap_used += next->size;
+    VALGRIND_MAKE_MEM_UNDEFINED((void *)((unsigned long)(ah + 1) + ah->size - sizeof(*ah) - next->size),
+				next->size);
+    next = next_alloc_header(ah);
   }
 
   /* Trim it down again */
@@ -336,6 +346,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     old_size = ah->size;
     ah->size = new_size;
     next = next_alloc_header(ah);
+    VALGRIND_MAKE_MEM_UNDEFINED(next, sizeof(*next));
     next->type = NULL;
     next->size = old_size - new_size;
     next->flags = 0;
