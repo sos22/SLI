@@ -157,6 +157,208 @@ public:
 	}
 };
 
+static Expression *
+convertToCNF(Expression *e)
+{
+	if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
+		return bitwiseand::get(convertToCNF(ba->l),
+				       convertToCNF(ba->r));
+	} else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(e)) {
+		if (bitwiseand *bal = dynamic_cast<bitwiseand *>(bo->l)) {
+			return convertToCNF(
+				bitwiseand::get(
+					bitwiseor::get(bal->l, bo->r),
+					bitwiseor::get(bal->r, bo->r)));
+		} else if (bitwiseand *bar = dynamic_cast<bitwiseand *>(bo->r)) {
+			return convertToCNF(
+				bitwiseand::get(
+					bitwiseor::get(bo->l, bar->l),
+					bitwiseor::get(bo->l, bar->r)));
+		} else {
+			Expression *lc = convertToCNF(bo->l);
+			Expression *rc = convertToCNF(bo->l);
+			if (lc == rc)
+				return e;
+			else
+				return convertToCNF(bitwiseor::get(lc, rc));
+		}
+	} else if (bitwisenot *bn = dynamic_cast<bitwisenot *>(e)) {
+		if (bitwiseand *ba = dynamic_cast<bitwiseand *>(bn->l))
+			return convertToCNF(bitwiseor::get(bitwisenot::get(ba->l),
+							   bitwisenot::get(ba->r)));
+		else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(bn->l))
+			return convertToCNF(bitwiseand::get(bitwisenot::get(bo->l),
+							    bitwisenot::get(bo->r)));
+		else
+			return e;
+	} else {
+		return e;
+	}
+}
+
+static Expression *
+simplifyLogic(Expression *e)
+{
+	if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
+		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->l)) {
+			if (e->v)
+				return simplifyLogic(ba->r);
+			else
+				return ba->l;
+		}
+		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->r)) {
+			if (e->v)
+				return simplifyLogic(ba->l);
+			else
+				return ba->r;
+		}
+		return bitwiseand::get(simplifyLogic(ba->l),
+				       simplifyLogic(ba->r));
+	}
+	if (bitwiseor *ba = dynamic_cast<bitwiseor *>(e)) {
+		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->l)) {
+			if (e->v)
+				return ba->l;
+			else
+				return simplifyLogic(ba->r);
+		}
+		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->r)) {
+			if (e->v)
+				return ba->r;
+			else
+				return simplifyLogic(ba->l);
+		}
+		return bitwiseor::get(simplifyLogic(ba->l),
+				      simplifyLogic(ba->r));
+	}
+	if (bitwisenot *bn = dynamic_cast<bitwisenot *>(e)) {
+		if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(bn->l))
+			return ExpressionHappensBefore::get(ehb->after, ehb->before);
+	}
+	return e;
+}
+
+class CSCandidate {
+public:
+	ThreadId tid1;
+	unsigned long tid1start;
+	unsigned long tid1end;
+	ThreadId tid2;
+	unsigned long tid2start;
+	unsigned long tid2end;
+
+	CSCandidate(ThreadId _tid1,
+		    unsigned long _t1start,
+		    unsigned long _t1end,
+		    ThreadId _tid2,
+		    unsigned long _t2start,
+		    unsigned long _t2end)
+		: tid1(_tid1),
+		  tid1start(_t1start),
+		  tid1end(_t1end),
+		  tid2(_tid2),
+		  tid2start(_t2start),
+		  tid2end(_t2end)
+	{
+	}
+};
+
+static bool operator<(const CSCandidate &a,
+		      const CSCandidate &b)
+{
+#define F(x)					\
+	if (a. x < b. x)			\
+		return true;			\
+	else if (a. x > b. x)			\
+		return false
+	F(tid1);
+	F(tid1start);
+	F(tid1end);
+	F(tid2);
+	F(tid2start);
+	F(tid2end);
+#undef F
+	return false;
+}
+
+static void
+generateCSCandidates(ExpressionHappensBefore *ehb,
+		     std::set<CSCandidate> *output,
+		     const std::set<Expression *> &assumptions)
+{
+	/* We have that in order for the crash to happen a<-<b, and so
+	   we want to enforce b<-<a.  The only primitive we have
+	   available is to introduce a new critical section.
+
+	   A critical section covering W->X;Y->Z will impose the rule
+	   that
+
+	   X <-< Z => W <-< Y && Y <-< X => Z <-< W.
+
+	   We can therefore either match b==W,a==Y and find some X and
+	   Z in the assumptions, or b==Z,a==W and find Y and X in the
+	   assumptions.  Try to do so. */
+	EventTimestamp a = ehb->before;
+	EventTimestamp b = ehb->after;
+
+	EventTimestamp W, X, Y, Z;
+	/* b==W, a==Y first */
+	W = b;
+	Y = a;
+	for (std::set<Expression *>::iterator it = assumptions.begin();
+	     it != assumptions.end();
+	     it++) {
+		ExpressionHappensBefore *assumption = dynamic_cast<ExpressionHappensBefore *>(*it);
+		if (!assumption)
+			continue;
+		X = assumption->before;
+		Z = assumption->after;
+		if (W.tid == X.tid && W.idx <= X.idx &&
+		    Y.tid == Z.tid && Y.idx <= Z.idx) {
+			output->insert(CSCandidate(W.tid, W.idx, X.idx,
+						   Y.tid, Y.idx, Z.idx));
+		}
+	}
+	
+	/* Now try b==Z, a==W */
+	Z = b;
+	W = a;
+	for (std::set<Expression *>::iterator it = assumptions.begin();
+	     it != assumptions.end();
+	     it++) {
+		ExpressionHappensBefore *assumption = dynamic_cast<ExpressionHappensBefore *>(*it);
+		if (!assumption)
+			continue;
+		Y = assumption->before;
+		X = assumption->after;
+		if (W.tid == X.tid && W.idx <= X.idx &&
+		    Y.tid == Z.tid && Y.idx <= Z.idx) {
+			output->insert(CSCandidate(W.tid, W.idx, X.idx,
+						   Y.tid, Y.idx, Z.idx));
+		}
+	}
+}
+
+static void
+generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::set<Expression *> &assumptions)
+{
+	if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(e)) {
+		generateCSCandidates(ehb, output, assumptions);
+	} else if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
+		generateCSCandidates(ba->l, output, assumptions);
+		generateCSCandidates(ba->r, output, assumptions);
+	} else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(e)) {
+		std::set<CSCandidate> l, r;
+		generateCSCandidates(bo->l, &l, assumptions);
+		generateCSCandidates(bo->r, &r, assumptions);
+		for (std::set<CSCandidate>::iterator it = l.begin();
+		     it != l.end();
+		     it++) 
+			if (r.count(*it))
+				output->insert(*it);
+	}
+}
+
 /* Refinement believes that if we could make @expr false then we'd
    avoid the crash.  Investigate ways of doing so. */
 void
@@ -197,4 +399,32 @@ considerPotentialFixes(Expression *expr)
 	Expression *simplified = expr->map(mapper);
 	printf("Simplified expression %s\n", simplified->name());
 
+	/* We now strip the outer layers of rip expression, turning
+	   them into assumptions which will be available during
+	   critical section derivation. */
+	std::set<Expression *> assumptions;
+	while (ExpressionRip *er = dynamic_cast<ExpressionRip *>(simplified)) {
+		for (History *h = er->history; h; h = h->parent) {
+			Expression *e = simplifyLogic(convertToCNF(h->condition));
+			printf("Assumption %s\n", e->name());
+			assumptions.insert(e);
+		}
+		simplified = er->cond;
+	}
+
+	simplified = simplifyLogic(convertToCNF(simplified));
+	printf("Stripped simplified: %s\n", simplified->name());
+
+	/* We now suspect that if all the assumptions are satisfied
+	   and @simplified is true then we'll crash in the observed
+	   way. */
+	std::set<CSCandidate> candidates;
+	generateCSCandidates(simplified, &candidates, assumptions);
+	for (std::set<CSCandidate>::iterator it = candidates.begin();
+	     it != candidates.end();
+	     it++) {
+		printf("Candidate: %d:%lx->%lx;%d:%lx->%lx\n",
+		       it->tid1._tid(), it->tid1start, it->tid1end,
+		       it->tid2._tid(), it->tid2start, it->tid2end);
+	}
 }

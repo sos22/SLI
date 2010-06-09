@@ -130,6 +130,7 @@ public:
 	bool operator==(const ThreadId &b) const { return b.tid == tid; }
 	bool operator!=(const ThreadId &b) const { return b.tid != tid; }
 	bool operator<(const ThreadId &b) const { return tid < b.tid; }
+	bool operator>(const ThreadId &b) const { return tid > b.tid; }
 	ThreadId operator++() {
 		tid++;
 		return *this;
