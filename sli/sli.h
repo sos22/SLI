@@ -1765,6 +1765,7 @@ public:
 #define DO_EXPR_CLASS(x) virtual Expression *map(x *e);
 	FOREACH_EXPR_CLASS
 #undef DO_EXPR_CLASS
+	virtual Expression *idmap(Expression *e);
 };
 
 class ExpressionVisitor {

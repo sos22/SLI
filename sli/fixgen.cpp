@@ -176,8 +176,8 @@ convertToCNF(Expression *e)
 					bitwiseor::get(bo->l, bar->r)));
 		} else {
 			Expression *lc = convertToCNF(bo->l);
-			Expression *rc = convertToCNF(bo->l);
-			if (lc == rc)
+			Expression *rc = convertToCNF(bo->r);
+			if (lc == bo->l && rc == bo->r)
 				return e;
 			else
 				return convertToCNF(bitwiseor::get(lc, rc));
@@ -407,6 +407,183 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	generateCSCandidates(simplified, output, assumptions);
 }
 
+class AssumptionSet {
+	std::set<Expression *> content;
+	Expression *simplifyAssuming(Expression *toSimpl, Expression *assumption);
+public:
+	AssumptionSet() : content() {}
+	void assertTrue(Expression *e);
+	bool contradiction() const;
+	void dump() const;
+};
+void
+AssumptionSet::assertTrue(Expression *e)
+{
+	e = simplifyLogic(convertToCNF(e));
+	unsigned long c;
+	if (e->isConstant(&c)) {
+		if (c) {
+			/* Introducing a constant true assumption ->
+			 * nothing to do */
+			return;
+		} else {
+			/* Contradiction! */
+			content.clear();
+			content.insert(ConstExpression::get(0));
+			return;
+		}
+	}
+
+	if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
+		assertTrue(ba->l);
+		assertTrue(ba->r);
+		return;
+	}
+
+	/* At this point, content has been ``logically'' rewritten to
+	   include the new assumption.  Go and see if there are any
+	   nice simplifications available as a result before doing the
+	   actual concrete rewrite. */
+
+	/* Use the new assumption to reduce our existing
+	 * assumptions. */
+	for (std::set<Expression *>::iterator it = content.begin();
+	     it != content.end();
+	     it++) {
+		if (*it == e)
+			return;
+		Expression *newIt = simplifyAssuming(*it, e);
+		if (newIt != *it) {
+			content.erase(it);
+			assertTrue(newIt);
+			assertTrue(e);
+			return;
+		}
+	}
+
+	/* Now use the existing assumptions to reduce the new one. */
+	Expression *newE = e;
+	for (std::set<Expression *>::iterator it = content.begin();
+	     it != content.end();
+	     it++) {
+		newE = simplifyAssuming(e, *it);
+	}
+
+	if (e == newE)
+		content.insert(e);
+	else
+		assertTrue(newE);
+}
+bool
+AssumptionSet::contradiction() const
+{
+	return content.count(ConstExpression::get(0)) != 0;
+}
+void
+AssumptionSet::dump() const
+{
+	for (std::set<Expression *>::const_iterator it = content.begin();
+	     it != content.end();
+	     it++) {
+		printf("%s\n", (*it)->name());
+	}
+}
+
+class SimpleRewrite : public ExpressionMapper {
+public:
+	Expression *from;
+	Expression *to;
+	SimpleRewrite(Expression *_from,
+		      Expression *_to)
+		: from(_from), to(_to)
+	{
+	}
+	Expression *idmap(Expression *x)
+	{
+		if (x == from)
+			return to;
+		else
+			return x;
+	}
+};
+
+Expression *
+AssumptionSet::simplifyAssuming(Expression *what, Expression *assumption)
+{
+	SimpleRewrite rw(assumption, ConstExpression::get(1));
+	return what->map(rw);
+}
+
+class RemoveOnlyIfRip : public ExpressionMapper {
+public:
+	Expression *map(ExpressionRip *);
+	Expression *map(BinaryExpression *);
+	Expression *map(ternarycondition *tc);
+};
+
+Expression *RemoveOnlyIfRip::map(ExpressionRip *er)
+{
+	/* Turn (rip {hist} (cond)) into hist ? cond : !cond*/
+	Expression *precond;
+	precond = ConstExpression::get(1);
+	for (History *h = er->history; h != NULL; h = h->parent)
+		precond = logicaland::get(precond, h->condition);
+	Expression *c = er->cond->map(*this);
+	return ternarycondition::get(precond->map(*this),
+				     c,
+				     logicalnot::get(c))->map(*this);
+}
+
+Expression *RemoveOnlyIfRip::map(BinaryExpression *be)
+{
+	if (onlyif *oif = dynamic_cast<onlyif *>(be)) {
+		Expression *r = oif->r->map(*this);
+		return ternarycondition::get(oif->l->map(*this),
+					     r,
+					     logicalnot::get(r))->map(*this);
+	} else {
+		return ExpressionMapper::map(be);
+	}
+}
+
+Expression *RemoveOnlyIfRip::map(ternarycondition *tc)
+{
+	Expression *c = tc->cond->map(*this);
+	Expression *t = tc->t->map(*this);
+	Expression *f = tc->f->map(*this);
+	return logicalor::get(logicaland::get(c, t),
+			      logicaland::get(logicalnot::get(c), f));
+}
+
+/* We believe that cs will make expr false.  Check this.  Returns true
+   if it definitely will, and false otherwise. */
+static bool
+validateCSCandidate(Expression *expr, const CSCandidate &cs)
+{
+	AssumptionSet assumptions;
+
+	assumptions.assertTrue(
+		logicalor::get(
+			ExpressionHappensBefore::get(
+				EventTimestamp(
+					cs.tid2,
+					cs.tid2end),
+				EventTimestamp(
+					cs.tid1,
+					cs.tid1start)),
+			ExpressionHappensBefore::get(
+				EventTimestamp(
+					cs.tid1,
+					cs.tid1end),
+				EventTimestamp(
+					cs.tid2,
+					cs.tid2start))));
+
+	RemoveOnlyIfRip r;
+	assumptions.assertTrue(expr->map(r));
+	return assumptions.contradiction();
+}
+
 /* Refinement believes that if we could make @expr false then we'd
    avoid the crash.  Investigate ways of doing so. */
 void
@@ -422,5 +599,7 @@ considerPotentialFixes(Expression *expr)
 		printf("Candidate: %d:%lx->%lx;%d:%lx->%lx\n",
 		       it->tid1._tid(), it->tid1start, it->tid1end,
 		       it->tid2._tid(), it->tid2start, it->tid2end);
+		if (validateCSCandidate(expr, *it))
+			printf("Valid -> we're done.\n");
 	}
 }

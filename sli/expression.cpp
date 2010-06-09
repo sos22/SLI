@@ -32,6 +32,7 @@ Expression *Expression::intern(Expression *e)
 {
 	calls_to_intern++;
 	e->hashval = e->_hash();
+	
 	unsigned h = e->hashval % nr_heads;
 	Expression *cursor;
 	tot_outstanding++;
@@ -658,7 +659,7 @@ mk_op_allocator(ExpressionBadPointer);
 	Expression *				\
 	ExpressionMapper::map(c *e)		\
 	{					\
-		return e;			\
+		return idmap(e);		\
 	}					\
 
 TRIV_EXPR_MAPPER(BottomExpression)
@@ -669,55 +670,61 @@ TRIV_EXPR_MAPPER(ExpressionHappensBefore)
 Expression *
 ExpressionMapper::map(ExpressionLastStore *els)
 {
-	return ExpressionLastStore::get(els->load, els->store,
-					els->vaddr->map(*this));
+	return idmap(ExpressionLastStore::get(els->load, els->store,
+					      els->vaddr->map(*this)));
 }
 
 Expression *
 ExpressionMapper::map(LoadExpression *le)
 {
-	return LoadExpression::get(le->when,
-				   le->val->map(*this),
-				   le->addr->map(*this),
-				   le->storeAddr->map(*this),
-				   le->store,
-				   le->size);
+	return idmap(LoadExpression::get(le->when,
+					 le->val->map(*this),
+					 le->addr->map(*this),
+					 le->storeAddr->map(*this),
+					 le->store,
+					 le->size));
 }
 
 Expression *
 ExpressionMapper::map(BinaryExpression *be)
 {
-	return be->semiDupe(be->l->map(*this),
-			    be->r->map(*this));
+	return idmap(be->semiDupe(be->l->map(*this),
+				  be->r->map(*this)));
 }
 
 Expression *
 ExpressionMapper::map(UnaryExpression *ue)
 {
-	return ue->semiDupe(ue->l->map(*this));
+	return idmap(ue->semiDupe(ue->l->map(*this)));
 }
 
 Expression *
 ExpressionMapper::map(ternarycondition *tc)
 {
-	return ternarycondition::get(tc->cond->map(*this),
-				     tc->t->map(*this),
-				     tc->f->map(*this));
+	return idmap(ternarycondition::get(tc->cond->map(*this),
+					   tc->t->map(*this),
+					   tc->f->map(*this)));
 }
 
 Expression *
 ExpressionMapper::map(ExpressionRip *er)
 {
-	return ExpressionRip::get(er->tid,
-				  er->history->map(*this),
-				  er->cond->map(*this),
-				  er->model_execution,
-				  er->model_exec_start);
+	return idmap(ExpressionRip::get(er->tid,
+					er->history->map(*this),
+					er->cond->map(*this),
+					er->model_execution,
+					er->model_exec_start));
 }
 
 Expression *
 ExpressionMapper::map(ExpressionBadPointer *ebp)
 {
-	return ExpressionBadPointer::get(ebp->when,
-					 ebp->addr->map(*this));
+	return idmap(ExpressionBadPointer::get(ebp->when,
+					       ebp->addr->map(*this)));
+}
+
+Expression *
+ExpressionMapper::idmap(Expression *e)
+{
+	return e;
 }
