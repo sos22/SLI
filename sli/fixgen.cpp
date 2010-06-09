@@ -247,6 +247,7 @@ public:
 	unsigned long tid2start;
 	unsigned long tid2end;
 
+	CSCandidate() {}
 	CSCandidate(ThreadId _tid1,
 		    unsigned long _t1start,
 		    unsigned long _t1end,
@@ -286,56 +287,51 @@ generateCSCandidates(ExpressionHappensBefore *ehb,
 		     std::set<CSCandidate> *output,
 		     const std::set<Expression *> &assumptions)
 {
-	/* We have that in order for the crash to happen a<-<b, and so
-	   we want to enforce b<-<a.  The only primitive we have
-	   available is to introduce a new critical section.
+	CSCandidate work;
 
-	   A critical section covering W->X;Y->Z will impose the rule
-	   that
-
-	   X <-< Z => W <-< Y && Y <-< X => Z <-< W.
-
-	   We can therefore either match b==W,a==Y and find some X and
-	   Z in the assumptions, or b==Z,a==W and find Y and X in the
-	   assumptions.  Try to do so. */
-	EventTimestamp a = ehb->before;
-	EventTimestamp b = ehb->after;
-
-	EventTimestamp W, X, Y, Z;
-	/* b==W, a==Y first */
-	W = b;
-	Y = a;
 	for (std::set<Expression *>::iterator it = assumptions.begin();
 	     it != assumptions.end();
 	     it++) {
 		ExpressionHappensBefore *assumption = dynamic_cast<ExpressionHappensBefore *>(*it);
 		if (!assumption)
 			continue;
-		X = assumption->before;
-		Z = assumption->after;
-		if (W.tid == X.tid && W.idx <= X.idx &&
-		    Y.tid == Z.tid && Y.idx <= Z.idx) {
-			output->insert(CSCandidate(W.tid, W.idx, X.idx,
-						   Y.tid, Y.idx, Z.idx));
-		}
-	}
-	
-	/* Now try b==Z, a==W */
-	Z = b;
-	W = a;
-	for (std::set<Expression *>::iterator it = assumptions.begin();
-	     it != assumptions.end();
-	     it++) {
-		ExpressionHappensBefore *assumption = dynamic_cast<ExpressionHappensBefore *>(*it);
-		if (!assumption)
-			continue;
+
+		/* We have four memory accesses, and we want to know
+		   if we can build any critical sections out of them.
+		   Try every possible combination. */
+		EventTimestamp W, X, Y, Z;
+		W = ehb->before;
+		X = ehb->after;
 		Y = assumption->before;
-		X = assumption->after;
-		if (W.tid == X.tid && W.idx <= X.idx &&
-		    Y.tid == Z.tid && Y.idx <= Z.idx) {
-			output->insert(CSCandidate(W.tid, W.idx, X.idx,
-						   Y.tid, Y.idx, Z.idx));
-		}
+		Z = assumption->after;
+		if (W.tid == X.tid && Y.tid == Z.tid) {
+			work.tid1 = W.tid;
+			work.tid1start = min<unsigned long>(W.idx,X.idx);
+			work.tid1end = max<unsigned long>(W.idx,X.idx);
+			work.tid2 = Y.tid;
+			work.tid2start = min<unsigned long>(Y.idx, Z.idx);
+			work.tid2end = max<unsigned long>(Y.idx, Z.idx);
+		} else if (W.tid == Y.tid && X.tid == Z.tid) {
+			work.tid1 = W.tid;
+			work.tid1start = min<unsigned long>(W.idx,Y.idx);
+			work.tid1end = max<unsigned long>(W.idx,Y.idx);
+			work.tid2 = Y.tid;
+			work.tid2start = min<unsigned long>(X.idx, Z.idx);
+			work.tid2end = max<unsigned long>(X.idx, Z.idx);
+		} else if (W.tid == Z.tid && X.tid == Y.tid) {
+			work.tid1 = W.tid;
+			work.tid1start = min<unsigned long>(W.idx,Z.idx);
+			work.tid1end = max<unsigned long>(W.idx,Z.idx);
+			work.tid2 = Y.tid;
+			work.tid2start = min<unsigned long>(X.idx, Y.idx);
+			work.tid2end = max<unsigned long>(X.idx, Y.idx);
+		} else
+			continue;
+
+		if (work.tid1 == work.tid2)
+			continue;
+
+		output->insert(work);
 	}
 }
 
