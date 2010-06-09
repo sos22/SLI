@@ -92,6 +92,13 @@ public:
 	}
 	Expression *map(BinaryExpression *be)
 	{
+		if (onlyif *oif = dynamic_cast<onlyif *>(be)) {
+			Expression *e = ternarycondition::get(oif->l,
+							      oif->r,
+							      logicalnot::get(oif->r));
+			return e->map(*this);
+		}
+
 		Expression *l = be->l->map(*this);
 		Expression *r = be->r->map(*this);
 		if (l && r)
