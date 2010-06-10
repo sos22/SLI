@@ -567,6 +567,10 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	   timestamp other than the one which we're interested in. */
 	RemoveEventsMapper mapper(avail_timestamps);
 	Expression *simplified = expr->map(mapper);
+	if (!simplified) {
+		printf("Simplification -> nothing at all?\n");
+		return;
+	}
 	printf("Simplified expression %s\n", simplified->name());
 
 	/* We now strip the outer layers of rip expression, turning
