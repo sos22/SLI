@@ -448,6 +448,8 @@ static bool operator<(const CSCandidate &a,
 	return false;
 }
 
+static void generateCSCandidates(Expression *e, std::set<CSCandidate> *output,
+				 const std::set<Expression *> &assumptions);
 static void
 generateCSCandidates(ExpressionHappensBefore *ehb,
 		     std::set<CSCandidate> *output,
@@ -529,6 +531,20 @@ generateCSCandidates(ExpressionHappensBefore *ehb,
 	}
 }
 
+/* Walk back down the history, simultaneously generating critical
+   sections which could prevent the history from happening and
+   building up an assumption set which will hold if it does happen. */
+static void
+generateCSCandidates(History *h, std::set<CSCandidate> *output, std::set<Expression *> *assumptions)
+{
+	if (!h)
+		return;
+	generateCSCandidates(h->parent, output, assumptions);
+	Expression *c = simplifyLogic(h->condition->CNF());
+	generateCSCandidates(c, output, *assumptions);
+	assumptions->insert(c);
+}
+
 static void
 generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::set<Expression *> &assumptions)
 {
@@ -546,6 +562,10 @@ generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::se
 		     it++) 
 			if (r.count(*it))
 				output->insert(*it);
+	} else if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(e)) {
+		std::set<Expression *> newAssumptions(assumptions);
+		generateCSCandidates(er->history, output, &newAssumptions);
+		generateCSCandidates(er->cond, output, newAssumptions);
 	}
 }
 
@@ -583,25 +603,13 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	}
 	printf("Simplified expression %s\n", simplified->name());
 
-	/* We now strip the outer layers of rip expression, turning
-	   them into assumptions which will be available during
-	   critical section derivation. */
-	std::set<Expression *> assumptions;
-	while (ExpressionRip *er = dynamic_cast<ExpressionRip *>(simplified)) {
-		for (History *h = er->history; h; h = h->parent) {
-			Expression *e = simplifyLogic(h->condition->CNF());
-			printf("Assumption %s\n", e->name());
-			assumptions.insert(e);
-		}
-		simplified = er->cond;
-	}
-
 	simplified = simplifyLogic(simplified->CNF());
 	printf("Stripped simplified: %s\n", simplified->name());
 
-	/* We now suspect that if all the assumptions are satisfied
-	   and @simplified is true then we'll crash in the observed
-	   way. */
+	/* We now suspect that if @simplified is true then we'll crash
+	   in the observed way.  Find ways of making it not be
+	   true. */
+	std::set<Expression *> assumptions;
 	generateCSCandidates(simplified, output, assumptions);
 }
 
