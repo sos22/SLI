@@ -170,4 +170,21 @@ public:
 	}
 };
 
+void registerWeakRef(const void *object, void **ref);
+void unregisterWeakRef(const void *object, void **ref);
+
+template <typename t>
+class WeakRef {
+	t *target;
+public:
+	WeakRef() : target(NULL) {}
+	~WeakRef() { if (target) unregisterWeakRef(target, (void **)&target); }
+	void set(t *newTarg) {
+		if (target) unregisterWeakRef(target, (void **)&target);
+		target = newTarg;
+		if (newTarg) registerWeakRef(newTarg, (void **)&target);
+	}
+	t *get() { return target; }
+};
+
 #endif /* !__LIBVEX_ALLOC_H */

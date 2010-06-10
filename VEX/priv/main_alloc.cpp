@@ -34,6 +34,17 @@ struct alloc_header {
   unsigned size; /* Includes header */
   unsigned flags;
 #define ALLOC_FLAG_GC_MARK 1
+#define ALLOC_FLAG_HAS_WEAK_TABLE 2
+#define ALLOC_FLAG_WEAK_TABLE_MASK (~3)
+};
+
+struct weak_table {
+  unsigned nr_refs;
+  void **inlineRef;
+  void ***outlineRefs;
+  void registerRef(void **);
+  void unregisterRef(void **);
+  void ownerDied();
 };
 
 static alloc_header *const alloc_header_terminator = (alloc_header *)(temporary + N_TEMPORARY_BYTES);
@@ -103,6 +114,33 @@ poison(void *start, unsigned nr_bytes, unsigned pattern)
 #endif
 }
 
+static weak_table *
+header_to_weak_table(alloc_header *h)
+{
+  weak_table *w;
+  if (!(h->flags & ALLOC_FLAG_HAS_WEAK_TABLE)) {
+    w = (weak_table *)__LibVEX_Alloc_Bytes(sizeof(weak_table));
+    w->nr_refs = 0;
+    w->outlineRefs = NULL;
+    unsigned long off = (unsigned long)w - (unsigned long)temporary;
+    assert(off == (unsigned)off);
+    assert(!(off & ~ALLOC_FLAG_WEAK_TABLE_MASK));
+    h->flags &= ~ALLOC_FLAG_WEAK_TABLE_MASK;
+    h->flags |= off | ALLOC_FLAG_HAS_WEAK_TABLE;
+  }
+  return (weak_table *)((unsigned long)temporary +
+			(h->flags & ALLOC_FLAG_WEAK_TABLE_MASK));
+}
+
+static void
+release_weak_table(alloc_header *h)
+{
+  weak_table *w = header_to_weak_table(h);
+  w->ownerDied();
+  LibVEX_free(w);
+  h->flags &= ~ALLOC_FLAG_HAS_WEAK_TABLE;
+}
+
 void
 LibVEX_free(const void *_ptr)
 {
@@ -112,6 +150,8 @@ LibVEX_free(const void *_ptr)
 
   heap_used -= h->size;
 
+  if (h->flags & ALLOC_FLAG_HAS_WEAK_TABLE)
+    release_weak_table(h);
   if (h->type->destruct)
     h->type->destruct(ptr);
 
@@ -154,6 +194,8 @@ LibVEX_gc(void)
 	heap_used += h->size;
       } else {
 	/* We're going to free off this block. */
+	if (h->flags & ALLOC_FLAG_HAS_WEAK_TABLE)
+	  release_weak_table(h);
 	if (h->type->destruct)
 	  h->type->destruct(header_to_alloc(h));
 	poison(h + 1, h->size - sizeof(*h), 0xa1b2c3d4);
@@ -606,3 +648,66 @@ VexAllocType LibvexVectorType = {
  name: "LibvexVector"
 };
 
+
+void registerWeakRef(const void *object, void **ref)
+{
+  alloc_header *ah = alloc_to_header(object);
+  weak_table *w = header_to_weak_table(ah);
+  w->registerRef(ref);
+}
+
+void unregisterWeakRef(const void *object, void **ref)
+{
+  alloc_header *ah = alloc_to_header(object);
+  weak_table *w = header_to_weak_table(ah);
+  w->unregisterRef(ref);
+}
+
+void
+weak_table::registerRef(void **ref)
+{
+  if (nr_refs == 0) {
+    inlineRef = ref;
+  } else {
+    if (outlineRefs)
+      outlineRefs = (void ***)LibVEX_realloc(outlineRefs, sizeof(void **) * nr_refs);
+    else
+      outlineRefs = (void ***)LibVEX_Alloc_Bytes(sizeof(void **) * nr_refs);
+    outlineRefs[nr_refs - 1] = ref;
+  }
+  nr_refs++;
+}
+
+void
+weak_table::unregisterRef(void **ref)
+{
+  nr_refs--;
+  if (!nr_refs)
+    return;
+  if (inlineRef == ref) {
+    inlineRef = outlineRefs[0];
+    memmove(outlineRefs, outlineRefs + 1, (nr_refs - 1) * sizeof(void **));
+  } else {
+    unsigned x;
+    for (x = 0; x < nr_refs; x++) {
+      if (outlineRefs[x] == ref) {
+	memmove(outlineRefs + x, outlineRefs + x + 1, (nr_refs - x - 1) * sizeof(void **));
+	break;
+      }
+    }
+    assert(x != nr_refs);
+  }
+}
+
+void
+weak_table::ownerDied()
+{
+  if (nr_refs == 0)
+    return;
+  *inlineRef = NULL;
+  if (outlineRefs) {
+    for (unsigned x = 1; x < nr_refs; x++)
+      *(outlineRefs[x-1]) = NULL;
+    LibVEX_free(outlineRefs);
+  }
+}

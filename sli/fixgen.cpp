@@ -157,43 +157,50 @@ public:
 	}
 };
 
-static Expression *
-convertToCNF(Expression *e)
+Expression *
+bitwiseand::_CNF()
 {
-	if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
-		return bitwiseand::get(convertToCNF(ba->l),
-				       convertToCNF(ba->r));
-	} else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(e)) {
-		if (bitwiseand *bal = dynamic_cast<bitwiseand *>(bo->l)) {
-			return convertToCNF(
-				bitwiseand::get(
-					bitwiseor::get(bal->l, bo->r),
-					bitwiseor::get(bal->r, bo->r)));
-		} else if (bitwiseand *bar = dynamic_cast<bitwiseand *>(bo->r)) {
-			return convertToCNF(
-				bitwiseand::get(
-					bitwiseor::get(bo->l, bar->l),
-					bitwiseor::get(bo->l, bar->r)));
-		} else {
-			Expression *lc = convertToCNF(bo->l);
-			Expression *rc = convertToCNF(bo->r);
-			if (lc == bo->l && rc == bo->r)
-				return e;
-			else
-				return convertToCNF(bitwiseor::get(lc, rc));
-		}
-	} else if (bitwisenot *bn = dynamic_cast<bitwisenot *>(e)) {
-		if (bitwiseand *ba = dynamic_cast<bitwiseand *>(bn->l))
-			return convertToCNF(bitwiseor::get(bitwisenot::get(ba->l),
-							   bitwisenot::get(ba->r)));
-		else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(bn->l))
-			return convertToCNF(bitwiseand::get(bitwisenot::get(bo->l),
-							    bitwisenot::get(bo->r)));
-		else
-			return e;
+	return bitwiseand::get(l->CNF(), r->CNF());
+}
+
+Expression *
+bitwiseor::_CNF()
+{
+	if (bitwiseand *bal = dynamic_cast<bitwiseand *>(l)) {
+		return bitwiseand::get(
+			bitwiseor::get(bal->l, r)->CNF(),
+			bitwiseor::get(bal->r, r)->CNF());
+	} else if (bitwiseand *bar = dynamic_cast<bitwiseand *>(r)) {
+		return bitwiseand::get(
+			bitwiseor::get(l, bar->l)->CNF(),
+			bitwiseor::get(l, bar->r)->CNF());
 	} else {
-		return e;
+		Expression *lc = l->CNF();
+		Expression *rc = r->CNF();
+		if (lc == l && rc == r)
+			return this;
+		else
+			return bitwiseor::get(lc, rc)->CNF();
 	}
+}
+
+Expression *
+bitsaturate::_CNF()
+{
+	return bitsaturate::get(l->CNF());
+}
+
+Expression *
+bitwisenot::_CNF()
+{
+	if (bitwiseand *ba = dynamic_cast<bitwiseand *>(l))
+		return bitwiseor::get(bitwisenot::get(ba->l),
+				      bitwisenot::get(ba->r))->CNF();
+	else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(l))
+		return bitwiseand::get(bitwisenot::get(bo->l)->CNF(),
+				       bitwisenot::get(bo->r)->CNF());
+	else
+		return this;
 }
 
 static Expression *
@@ -391,14 +398,14 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	std::set<Expression *> assumptions;
 	while (ExpressionRip *er = dynamic_cast<ExpressionRip *>(simplified)) {
 		for (History *h = er->history; h; h = h->parent) {
-			Expression *e = simplifyLogic(convertToCNF(h->condition));
+			Expression *e = simplifyLogic(h->condition->CNF());
 			printf("Assumption %s\n", e->name());
 			assumptions.insert(e);
 		}
 		simplified = er->cond;
 	}
 
-	simplified = simplifyLogic(convertToCNF(simplified));
+	simplified = simplifyLogic(simplified->CNF());
 	printf("Stripped simplified: %s\n", simplified->name());
 
 	/* We now suspect that if all the assumptions are satisfied
@@ -579,7 +586,7 @@ validateCSCandidate(Expression *expr, const CSCandidate &cs)
 					cs.tid2start))));
 
 	RemoveOnlyIfRip r;
-	assumptions.assertTrue(simplifyLogic(convertToCNF(expr->map(r))));
+	assumptions.assertTrue(simplifyLogic(expr->map(r)->CNF()));
 	return assumptions.contradiction();
 }
 

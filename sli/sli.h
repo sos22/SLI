@@ -1803,10 +1803,12 @@ class Expression : public Named {
 		remove_from_hash();
 		add_to_hash();
 	}
+	mutable WeakRef<Expression> cnf;
 protected:
 	static Expression *intern(Expression *e);
 	virtual unsigned _hash() const = 0;
 	virtual bool _isEqual(const Expression *other) const = 0;
+	virtual Expression *_CNF() { return this; }
 public:
 	unsigned hash() const { return hashval; }
 	virtual bool isConstant(unsigned long *cv) const { return false; }
@@ -1819,6 +1821,11 @@ public:
 				   const std::map<ThreadId, unsigned long> &validity) = 0;
 	virtual void visit(ExpressionVisitor &ev) = 0;
 	virtual Expression *map(ExpressionMapper &f) = 0;
+	Expression *CNF() {
+		if (!cnf.get())
+			cnf.set(_CNF());
+		return cnf.get();
+	}
 	Expression() : Named(), next(NULL), pprev(&next), hashval(0) {}
 	bool isEqual(const Expression *other) const {
 		if (other == this)
@@ -2126,7 +2133,7 @@ public:
 	}								
 };
 
-#define mk_binop_class(nme, pp)						\
+#define mk_binop_class(nme, pp, m)					\
 	class nme : public BinaryExpression {				\
 	protected:							\
 	        static VexAllocTypeWrapper<nme> allocator;		\
@@ -2152,32 +2159,33 @@ public:
 			else						\
 				return false;				\
 		}							\
+		m							\
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression *get(Expression *_l, Expression *_r);	\
 		NAMED_CLASS						\
 	}
 
-mk_binop_class(lshift, <<);
-mk_binop_class(rshift, >>);
-mk_binop_class(rshiftarith, >a>);
-mk_binop_class(bitwiseand, &);
-mk_binop_class(bitwiseor, |);
-mk_binop_class(bitwisexor, ^);
-mk_binop_class(plus, +);
-mk_binop_class(subtract, -);
-mk_binop_class(times, *);
-mk_binop_class(divide, /);
-mk_binop_class(modulo, %%);
-mk_binop_class(greaterthanequals, >=);
-mk_binop_class(greaterthan, >);
-mk_binop_class(lessthanequals, <=);
-mk_binop_class(lessthan, <);
-mk_binop_class(equals, ==);
-mk_binop_class(notequals, !=);
-mk_binop_class(logicalor, ||);
-mk_binop_class(logicaland, &&);
-mk_binop_class(onlyif, onlyif);
+mk_binop_class(lshift, <<, );
+mk_binop_class(rshift, >>, );
+mk_binop_class(rshiftarith, >a>, );
+mk_binop_class(bitwiseand, &, Expression *_CNF(););
+mk_binop_class(bitwiseor, |, Expression *_CNF(); );
+mk_binop_class(bitwisexor, ^, );
+mk_binop_class(plus, +, );
+mk_binop_class(subtract, -, );
+mk_binop_class(times, *, );
+mk_binop_class(divide, /, );
+mk_binop_class(modulo, %%, );
+mk_binop_class(greaterthanequals, >=, );
+mk_binop_class(greaterthan, >, );
+mk_binop_class(lessthanequals, <=, );
+mk_binop_class(lessthan, <, );
+mk_binop_class(equals, ==, );
+mk_binop_class(notequals, !=, );
+mk_binop_class(logicalor, ||, );
+mk_binop_class(logicaland, &&, );
+mk_binop_class(onlyif, onlyif, );
 
 class UnaryExpression : public Expression {
 public:
@@ -2205,7 +2213,7 @@ public:
 	}								
 };
 
-#define mk_unop_class(nme)						\
+#define mk_unop_class(nme, m)						\
 	class nme : public UnaryExpression {				\
 		static VexAllocTypeWrapper<nme> allocator;		\
 	protected:							\
@@ -2228,19 +2236,20 @@ public:
 			else						\
 				return false;				\
 		}							\
+		m							\
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression* get(Expression *_l);			\
 		NAMED_CLASS						\
 	}
 
-mk_unop_class(logicalnot);
-mk_unop_class(bitwisenot);
-mk_unop_class(unaryminus);
+mk_unop_class(logicalnot, );
+mk_unop_class(bitwisenot, Expression *_CNF(););
+mk_unop_class(unaryminus, );
 
 /* bitsaturate is 0 whenever its argument is zero and one
    otherwise. */
-mk_unop_class(bitsaturate);
+mk_unop_class(bitsaturate, Expression *_CNF(););
 
 class ternarycondition : public Expression {
 public:
