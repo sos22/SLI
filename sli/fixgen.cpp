@@ -245,175 +245,6 @@ simplifyLogic(Expression *e)
 	return e;
 }
 
-class CSCandidate {
-public:
-	ThreadId tid1;
-	unsigned long tid1start;
-	unsigned long tid1end;
-	ThreadId tid2;
-	unsigned long tid2start;
-	unsigned long tid2end;
-
-	CSCandidate() {}
-	CSCandidate(ThreadId _tid1,
-		    unsigned long _t1start,
-		    unsigned long _t1end,
-		    ThreadId _tid2,
-		    unsigned long _t2start,
-		    unsigned long _t2end)
-		: tid1(_tid1),
-		  tid1start(_t1start),
-		  tid1end(_t1end),
-		  tid2(_tid2),
-		  tid2start(_t2start),
-		  tid2end(_t2end)
-	{
-	}
-};
-
-static bool operator<(const CSCandidate &a,
-		      const CSCandidate &b)
-{
-#define F(x)					\
-	if (a. x < b. x)			\
-		return true;			\
-	else if (a. x > b. x)			\
-		return false
-	F(tid1);
-	F(tid1start);
-	F(tid1end);
-	F(tid2);
-	F(tid2start);
-	F(tid2end);
-#undef F
-	return false;
-}
-
-static void
-generateCSCandidates(ExpressionHappensBefore *ehb,
-		     std::set<CSCandidate> *output,
-		     const std::set<Expression *> &assumptions)
-{
-	CSCandidate work;
-
-	for (std::set<Expression *>::iterator it = assumptions.begin();
-	     it != assumptions.end();
-	     it++) {
-		ExpressionHappensBefore *assumption = dynamic_cast<ExpressionHappensBefore *>(*it);
-		if (!assumption)
-			continue;
-
-		/* We have four memory accesses, and we want to know
-		   if we can build any critical sections out of them.
-		   Try every possible combination. */
-		EventTimestamp W, X, Y, Z;
-		W = ehb->before;
-		X = ehb->after;
-		Y = assumption->before;
-		Z = assumption->after;
-		if (W.tid == X.tid && Y.tid == Z.tid) {
-			work.tid1 = W.tid;
-			work.tid1start = min<unsigned long>(W.idx,X.idx);
-			work.tid1end = max<unsigned long>(W.idx,X.idx);
-			work.tid2 = Y.tid;
-			work.tid2start = min<unsigned long>(Y.idx, Z.idx);
-			work.tid2end = max<unsigned long>(Y.idx, Z.idx);
-		} else if (W.tid == Y.tid && X.tid == Z.tid) {
-			work.tid1 = W.tid;
-			work.tid1start = min<unsigned long>(W.idx,Y.idx);
-			work.tid1end = max<unsigned long>(W.idx,Y.idx);
-			work.tid2 = Y.tid;
-			work.tid2start = min<unsigned long>(X.idx, Z.idx);
-			work.tid2end = max<unsigned long>(X.idx, Z.idx);
-		} else if (W.tid == Z.tid && X.tid == Y.tid) {
-			work.tid1 = W.tid;
-			work.tid1start = min<unsigned long>(W.idx,Z.idx);
-			work.tid1end = max<unsigned long>(W.idx,Z.idx);
-			work.tid2 = Y.tid;
-			work.tid2start = min<unsigned long>(X.idx, Y.idx);
-			work.tid2end = max<unsigned long>(X.idx, Y.idx);
-		} else
-			continue;
-
-		if (work.tid1 == work.tid2)
-			continue;
-
-		output->insert(work);
-	}
-}
-
-static void
-generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::set<Expression *> &assumptions)
-{
-	if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(e)) {
-		generateCSCandidates(ehb, output, assumptions);
-	} else if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
-		generateCSCandidates(ba->l, output, assumptions);
-		generateCSCandidates(ba->r, output, assumptions);
-	} else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(e)) {
-		std::set<CSCandidate> l, r;
-		generateCSCandidates(bo->l, &l, assumptions);
-		generateCSCandidates(bo->r, &r, assumptions);
-		for (std::set<CSCandidate>::iterator it = l.begin();
-		     it != l.end();
-		     it++) 
-			if (r.count(*it))
-				output->insert(*it);
-	}
-}
-
-static void
-generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
-{
-	/* First phase is to produce a simplified version of the
-	   expression, most importantly by reducing the number of
-	   memory accesses which we have to think about.  We start by
-	   just using the last two accesses in every thread, and then
-	   work back from there if that doesn't work. */
-
-	CollectTimestampsVisitor v;
-	expr->visit(v);
-
-	std::set<EventTimestamp> avail_timestamps;
-	for (std::map<ThreadId, std::list<EventTimestamp> >::iterator it = v.timestamps.begin();
-	     it != v.timestamps.end();
-	     it++) {
-		it->second.sort();
-		it->second.unique();
-		if (it->second.size() > 0)
-			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 0));
-		if (it->second.size() > 1)
-			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 1));
-	}
-
-	/* Now remove all bits of the expression which mention a
-	   timestamp other than the one which we're interested in. */
-	RemoveEventsMapper mapper(avail_timestamps);
-	Expression *simplified = expr->map(mapper);
-	printf("Simplified expression %s\n", simplified->name());
-
-	/* We now strip the outer layers of rip expression, turning
-	   them into assumptions which will be available during
-	   critical section derivation. */
-	std::set<Expression *> assumptions;
-	while (ExpressionRip *er = dynamic_cast<ExpressionRip *>(simplified)) {
-		for (History *h = er->history; h; h = h->parent) {
-			Expression *e = simplifyLogic(h->condition->CNF());
-			printf("Assumption %s\n", e->name());
-			assumptions.insert(e);
-		}
-		simplified = er->cond;
-	}
-
-	simplified = simplifyLogic(simplified->CNF());
-	printf("Stripped simplified: %s\n", simplified->name());
-
-	/* We now suspect that if all the assumptions are satisfied
-	   and @simplified is true then we'll crash in the observed
-	   way. */
-	generateCSCandidates(simplified, output, assumptions);
-}
-
 class AssumptionSet {
 	std::set<Expression *> content;
 	Expression *simplifyAssuming(Expression *toSimpl, Expression *assumption);
@@ -511,83 +342,253 @@ public:
 		else
 			return x;
 	}
+	Expression *map(ExpressionHappensBefore *ehb)
+	{
+		if (ExpressionHappensBefore *assume =
+		    dynamic_cast<ExpressionHappensBefore *>(from)) {
+			/* We're trying to simplify t1:idx1 < t2:idx2
+			   given t3:idx3 < t4:idx4.  We want to move
+			   idx1 as early as possible and idx2 as
+			   late as possible, so we consider two
+			   cases:
+
+			   t4 == t1 && idx4 < idx1 -> t3:idx3 < t2:idx2
+			   t2 == t3 && idx2 < idx3 -> t1:idx1 < t4:idx4
+
+			   We can't, unfortunately, just introduce the
+			   transitive edges, but we can handle the
+			   special case that it's a backwards self
+			   edge.
+			*/
+			if (assume->after.tid == ehb->before.tid &&
+			    assume->before.tid == ehb->after.tid &&
+			    assume->after.idx <= ehb->before.idx &&
+			    ehb->after.idx <= assume->before.idx)
+				return ConstExpression::get(0);
+
+			/* We can rewrite ehb into just true if it's
+			   implied by the assumption.  That's the case
+			   if t1 == t3, t2 == t4, idx1 <= idx3, and
+			   idx2 >= idx4. */
+			if (ehb->before.tid == assume->before.tid &&
+			    ehb->before.idx <= assume->before.idx &&
+			    ehb->after.tid == assume->after.tid &&
+			    ehb->after.idx >= assume->after.idx)
+				return ConstExpression::get(1);
+		}
+		return ExpressionMapper::map(ehb);
+	}
 };
 
 Expression *
 AssumptionSet::simplifyAssuming(Expression *what, Expression *assumption)
 {
+	unsigned long cass;
+	if (assumption->isConstant(&cass)) {
+		if (cass == 0)
+			return assumption;
+		else
+			return what;
+	}
 	SimpleRewrite rw(assumption, ConstExpression::get(1));
 	return what->map(rw);
 }
 
-class RemoveOnlyIfRip : public ExpressionMapper {
+class CSCandidate {
 public:
-	Expression *map(ExpressionRip *);
-	Expression *map(BinaryExpression *);
-	Expression *map(ternarycondition *tc);
+	ThreadId tid1;
+	unsigned long tid1start;
+	unsigned long tid1end;
+	ThreadId tid2;
+	unsigned long tid2start;
+	unsigned long tid2end;
+
+	CSCandidate() {}
+	CSCandidate(ThreadId _tid1,
+		    unsigned long _t1start,
+		    unsigned long _t1end,
+		    ThreadId _tid2,
+		    unsigned long _t2start,
+		    unsigned long _t2end)
+		: tid1(_tid1),
+		  tid1start(_t1start),
+		  tid1end(_t1end),
+		  tid2(_tid2),
+		  tid2start(_t2start),
+		  tid2end(_t2end)
+	{
+	}
 };
 
-Expression *RemoveOnlyIfRip::map(ExpressionRip *er)
+static bool operator<(const CSCandidate &a,
+		      const CSCandidate &b)
 {
-	/* Turn (rip {hist} (cond)) into hist ? cond : !cond*/
-	Expression *precond;
-	precond = ConstExpression::get(1);
-	for (History *h = er->history; h != NULL; h = h->parent)
-		precond = logicaland::get(precond, h->condition);
-	Expression *c = er->cond->map(*this);
-	return ternarycondition::get(precond->map(*this),
-				     c,
-				     logicalnot::get(c))->map(*this);
+#define F(x)					\
+	if (a. x < b. x)			\
+		return true;			\
+	else if (a. x > b. x)			\
+		return false
+	F(tid1);
+	F(tid1start);
+	F(tid1end);
+	F(tid2);
+	F(tid2start);
+	F(tid2end);
+#undef F
+	return false;
 }
 
-Expression *RemoveOnlyIfRip::map(BinaryExpression *be)
+static void
+generateCSCandidates(ExpressionHappensBefore *ehb,
+		     std::set<CSCandidate> *output,
+		     const std::set<Expression *> &assumptions)
 {
-	if (onlyif *oif = dynamic_cast<onlyif *>(be)) {
-		Expression *r = oif->r->map(*this);
-		return ternarycondition::get(oif->l->map(*this),
-					     r,
-					     logicalnot::get(r))->map(*this);
-	} else {
-		return ExpressionMapper::map(be);
+	CSCandidate work;
+
+	for (std::set<Expression *>::iterator it = assumptions.begin();
+	     it != assumptions.end();
+	     it++) {
+		ExpressionHappensBefore *assumption = dynamic_cast<ExpressionHappensBefore *>(*it);
+		if (!assumption)
+			continue;
+
+		/* We have four memory accesses, and we want to know
+		   if we can build any critical sections out of them.
+		   Try every possible combination. */
+		EventTimestamp W, X, Y, Z;
+		W = ehb->before;
+		X = ehb->after;
+		Y = assumption->before;
+		Z = assumption->after;
+		if (W.tid == X.tid && Y.tid == Z.tid) {
+			work.tid1 = W.tid;
+			work.tid1start = min<unsigned long>(W.idx,X.idx);
+			work.tid1end = max<unsigned long>(W.idx,X.idx);
+			work.tid2 = Y.tid;
+			work.tid2start = min<unsigned long>(Y.idx, Z.idx);
+			work.tid2end = max<unsigned long>(Y.idx, Z.idx);
+		} else if (W.tid == Y.tid && X.tid == Z.tid) {
+			work.tid1 = W.tid;
+			work.tid1start = min<unsigned long>(W.idx,Y.idx);
+			work.tid1end = max<unsigned long>(W.idx,Y.idx);
+			work.tid2 = Y.tid;
+			work.tid2start = min<unsigned long>(X.idx, Z.idx);
+			work.tid2end = max<unsigned long>(X.idx, Z.idx);
+		} else if (W.tid == Z.tid && X.tid == Y.tid) {
+			work.tid1 = W.tid;
+			work.tid1start = min<unsigned long>(W.idx,Z.idx);
+			work.tid1end = max<unsigned long>(W.idx,Z.idx);
+			work.tid2 = Y.tid;
+			work.tid2start = min<unsigned long>(X.idx, Y.idx);
+			work.tid2end = max<unsigned long>(X.idx, Y.idx);
+		} else
+			continue;
+
+		if (work.tid1 == work.tid2)
+			continue;
+
+		/* Critical section is syntactically valid.  Check
+		 * that it actually works. */
+
+		AssumptionSet aset;
+		/* This is the thing which is imposed by the critical
+		 * section. */
+		aset.assertTrue(
+			logicalor::get(
+				ExpressionHappensBefore::get(
+					EventTimestamp(
+						work.tid2,
+						work.tid2end),
+					EventTimestamp(
+						work.tid1,
+						work.tid1start)),
+				ExpressionHappensBefore::get(
+					EventTimestamp(
+						work.tid1,
+						work.tid1end),
+					EventTimestamp(
+						work.tid2,
+						work.tid2start))));
+		/* The combination of the mutex constraint, the
+		   assumption, and the crash predictor should lead to
+		   a contradiction. */
+		aset.assertTrue(assumption);
+		aset.assertTrue(ehb);
+		if (aset.contradiction())
+			output->insert(work);
 	}
 }
 
-Expression *RemoveOnlyIfRip::map(ternarycondition *tc)
+static void
+generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::set<Expression *> &assumptions)
 {
-	Expression *c = tc->cond->map(*this);
-	Expression *t = tc->t->map(*this);
-	Expression *f = tc->f->map(*this);
-	return logicalor::get(logicaland::get(c, t),
-			      logicaland::get(logicalnot::get(c), f));
+	if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(e)) {
+		generateCSCandidates(ehb, output, assumptions);
+	} else if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
+		generateCSCandidates(ba->l, output, assumptions);
+		generateCSCandidates(ba->r, output, assumptions);
+	} else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(e)) {
+		std::set<CSCandidate> l, r;
+		generateCSCandidates(bo->l, &l, assumptions);
+		generateCSCandidates(bo->r, &r, assumptions);
+		for (std::set<CSCandidate>::iterator it = l.begin();
+		     it != l.end();
+		     it++) 
+			if (r.count(*it))
+				output->insert(*it);
+	}
 }
 
-/* We believe that cs will make expr false.  Check this.  Returns true
-   if it definitely will, and false otherwise. */
-static bool
-validateCSCandidate(Expression *expr, const CSCandidate &cs)
+static void
+generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 {
-	AssumptionSet assumptions;
+	/* First phase is to produce a simplified version of the
+	   expression, most importantly by reducing the number of
+	   memory accesses which we have to think about.  We start by
+	   just using the last two accesses in every thread, and then
+	   work back from there if that doesn't work. */
 
-	assumptions.assertTrue(
-		logicalor::get(
-			ExpressionHappensBefore::get(
-				EventTimestamp(
-					cs.tid2,
-					cs.tid2end),
-				EventTimestamp(
-					cs.tid1,
-					cs.tid1start)),
-			ExpressionHappensBefore::get(
-				EventTimestamp(
-					cs.tid1,
-					cs.tid1end),
-				EventTimestamp(
-					cs.tid2,
-					cs.tid2start))));
+	CollectTimestampsVisitor v;
+	expr->visit(v);
 
-	RemoveOnlyIfRip r;
-	assumptions.assertTrue(simplifyLogic(expr->map(r)->CNF()));
-	return assumptions.contradiction();
+	std::set<EventTimestamp> avail_timestamps;
+	for (std::map<ThreadId, std::list<EventTimestamp> >::iterator it = v.timestamps.begin();
+	     it != v.timestamps.end();
+	     it++) {
+		it->second.sort();
+		it->second.unique();
+		if (it->second.size() > 0)
+			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 0));
+		if (it->second.size() > 1)
+			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 1));
+	}
+
+	/* Now remove all bits of the expression which mention a
+	   timestamp other than the one which we're interested in. */
+	RemoveEventsMapper mapper(avail_timestamps);
+	Expression *simplified = expr->map(mapper);
+	printf("Simplified expression %s\n", simplified->name());
+
+	/* We now strip the outer layers of rip expression, turning
+	   them into assumptions which will be available during
+	   critical section derivation. */
+	std::set<Expression *> assumptions;
+	while (ExpressionRip *er = dynamic_cast<ExpressionRip *>(simplified)) {
+		for (History *h = er->history; h; h = h->parent) {
+			Expression *e = simplifyLogic(h->condition->CNF());
+			printf("Assumption %s\n", e->name());
+			assumptions.insert(e);
+		}
+		simplified = er->cond;
+	}
+
+	simplified = simplifyLogic(simplified->CNF());
+	printf("Stripped simplified: %s\n", simplified->name());
+
+	/* We now suspect that if all the assumptions are satisfied
+	   and @simplified is true then we'll crash in the observed
+	   way. */
+	generateCSCandidates(simplified, output, assumptions);
 }
 
 /* Refinement believes that if we could make @expr false then we'd
@@ -605,7 +606,5 @@ considerPotentialFixes(Expression *expr)
 		printf("Candidate: %d:%lx->%lx;%d:%lx->%lx\n",
 		       it->tid1._tid(), it->tid1start, it->tid1end,
 		       it->tid2._tid(), it->tid2start, it->tid2end);
-		if (validateCSCandidate(expr, *it))
-			printf("Valid -> we're done.\n");
 	}
 }

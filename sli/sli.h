@@ -2701,7 +2701,7 @@ private:
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history->name(), cond->name());
+		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history ? history->name() : "<nohistory>", cond->name());
 	}
 	unsigned _hash() const {
 		return history->hash() ^ tid._tid() ^ cond->hash();
