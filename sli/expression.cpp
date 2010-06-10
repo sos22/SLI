@@ -725,7 +725,7 @@ Expression *
 ExpressionMapper::map(ExpressionRip *er)
 {
 	return idmap(ExpressionRip::get(er->tid,
-					er->history->map(*this),
+					er->history ? er->history->map(*this) : NULL,
 					er->cond->map(*this),
 					er->model_execution,
 					er->model_exec_start));

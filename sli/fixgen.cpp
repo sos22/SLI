@@ -84,11 +84,11 @@ public:
 		if (!val)
 			return NULL;
 		if (!allow(le->when) || !allow(le->store))
-			return le->val;
+			return val;
 		Expression *addr = le->addr->map(*this);
 		Expression *sa = le->storeAddr->map(*this);
 		if (!addr || !sa)
-			return le->val;
+			return val;
 		return LoadExpression::get(le->when, val, addr, sa,
 					   le->store, le->size);
 	}
@@ -139,7 +139,8 @@ public:
 			return t;
 		if (!c)
 			return NULL;
-		return ternarycondition::get(c, t, f);
+		return logicalor::get(logicaland::get(c, t),
+				      logicaland::get(logicalnot::get(c), f))->map(*this);
 	}
 	Expression *map(ExpressionRip *er)
 	{
@@ -149,11 +150,15 @@ public:
 		Expression *cond = a2->cond;
 		if (!cond)
 			cond = ConstExpression::get(1);
-		return ExpressionRip::get(a2->tid,
-					  removeNullConditionsHist(a2->history),
-					  cond,
-					  a2->model_execution,
-					  a2->model_exec_start);
+		History *h = removeNullConditionsHist(a2->history);
+		if (h)
+			return ExpressionRip::get(a2->tid,
+						  removeNullConditionsHist(a2->history),
+						  cond,
+						  a2->model_execution,
+						  a2->model_exec_start);
+		else
+			return cond;
 	}
 	Expression *map(ExpressionBadPointer *ebp)
 	{
@@ -218,13 +223,13 @@ simplifyLogic(Expression *e)
 {
 	if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
 		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->l)) {
-			if (e->v)
+			if (e->v & 1)
 				return simplifyLogic(ba->r);
 			else
 				return ba->l;
 		}
 		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->r)) {
-			if (e->v)
+			if (e->v & 1)
 				return simplifyLogic(ba->l);
 			else
 				return ba->r;
@@ -234,13 +239,13 @@ simplifyLogic(Expression *e)
 	}
 	if (bitwiseor *ba = dynamic_cast<bitwiseor *>(e)) {
 		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->l)) {
-			if (e->v)
+			if (e->v & 1)
 				return ba->l;
 			else
 				return simplifyLogic(ba->r);
 		}
 		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->r)) {
-			if (e->v)
+			if (e->v & 1)
 				return ba->r;
 			else
 				return simplifyLogic(ba->l);
@@ -252,13 +257,15 @@ simplifyLogic(Expression *e)
 		if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(bn->l))
 			return ExpressionHappensBefore::get(ehb->after, ehb->before);
 	}
+	if (ConstExpression *ce = dynamic_cast<ConstExpression *>(e))
+		return ConstExpression::get(ce->v & 1);
 	return e;
 }
 
 class AssumptionSet {
-	std::set<Expression *> content;
 	Expression *simplifyAssuming(Expression *toSimpl, Expression *assumption);
 public:
+	std::set<Expression *> content;
 	AssumptionSet() : content() {}
 	void assertTrue(Expression *e);
 	bool contradiction() const;
@@ -449,16 +456,16 @@ static bool operator<(const CSCandidate &a,
 }
 
 static void generateCSCandidates(Expression *e, std::set<CSCandidate> *output,
-				 const std::set<Expression *> &assumptions);
+				 const AssumptionSet &assumptions);
 static void
 generateCSCandidates(ExpressionHappensBefore *ehb,
 		     std::set<CSCandidate> *output,
-		     const std::set<Expression *> &assumptions)
+		     const AssumptionSet &assumptions)
 {
 	CSCandidate work;
 
-	for (std::set<Expression *>::iterator it = assumptions.begin();
-	     it != assumptions.end();
+	for (std::set<Expression *>::iterator it = assumptions.content.begin();
+	     it != assumptions.content.end();
 	     it++) {
 		ExpressionHappensBefore *assumption = dynamic_cast<ExpressionHappensBefore *>(*it);
 		if (!assumption)
@@ -535,18 +542,18 @@ generateCSCandidates(ExpressionHappensBefore *ehb,
    sections which could prevent the history from happening and
    building up an assumption set which will hold if it does happen. */
 static void
-generateCSCandidates(History *h, std::set<CSCandidate> *output, std::set<Expression *> *assumptions)
+generateCSCandidates(History *h, std::set<CSCandidate> *output, AssumptionSet *assumptions)
 {
 	if (!h)
 		return;
 	generateCSCandidates(h->parent, output, assumptions);
 	Expression *c = simplifyLogic(h->condition->CNF());
 	generateCSCandidates(c, output, *assumptions);
-	assumptions->insert(c);
+	assumptions->assertTrue(c);
 }
 
 static void
-generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::set<Expression *> &assumptions)
+generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const AssumptionSet &assumptions)
 {
 	if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(e)) {
 		generateCSCandidates(ehb, output, assumptions);
@@ -563,9 +570,9 @@ generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const std::se
 			if (r.count(*it))
 				output->insert(*it);
 	} else if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(e)) {
-		std::set<Expression *> newAssumptions(assumptions);
+		AssumptionSet newAssumptions(assumptions);
 		generateCSCandidates(er->history, output, &newAssumptions);
-		generateCSCandidates(er->cond, output, newAssumptions);
+		generateCSCandidates(simplifyLogic(er->cond->CNF()), output, newAssumptions);
 	}
 }
 
@@ -609,7 +616,7 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	/* We now suspect that if @simplified is true then we'll crash
 	   in the observed way.  Find ways of making it not be
 	   true. */
-	std::set<Expression *> assumptions;
+	AssumptionSet assumptions;
 	generateCSCandidates(simplified, output, assumptions);
 }
 

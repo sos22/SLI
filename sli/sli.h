@@ -2701,10 +2701,10 @@ private:
 	}
 protected:
 	char *mkName(void) const {
-		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history ? history->name() : "<nohistory>", cond->name());
+		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history ? history->name() : "<nohistory>", cond ? cond->name() : "<nocond>");
 	}
 	unsigned _hash() const {
-		return history->hash() ^ tid._tid() ^ cond->hash();
+		return (history ? history->hash() : 0) ^ tid._tid() ^ (cond ? cond->hash() : 0);
 	}
 	bool _isEqual(const Expression *other) const {
 		const ExpressionRip *oth = dynamic_cast<const ExpressionRip *>(other);
@@ -2719,8 +2719,8 @@ public:
 			       LogReader<abstract_interpret_value> *model,
 			       LogReaderPtr start)
 	{
-		return new (allocator.alloc()) ExpressionRip(tid, history, cond,
-							     model, start);
+		return intern(new (allocator.alloc()) ExpressionRip(tid, history, cond,
+								    model, start));
 	}
 	void visit(HeapVisitor &hv) const
 	{
