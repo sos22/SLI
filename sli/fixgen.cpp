@@ -80,13 +80,15 @@ public:
 	}
 	Expression *map(LoadExpression *le)
 	{
-		if (!allow(le->when) || !allow(le->store))
-			return NULL;
 		Expression *val = le->val->map(*this);
+		if (!val)
+			return NULL;
+		if (!allow(le->when) || !allow(le->store))
+			return le->val;
 		Expression *addr = le->addr->map(*this);
 		Expression *sa = le->storeAddr->map(*this);
-		if (!val || !addr || !sa)
-			return NULL;
+		if (!addr || !sa)
+			return le->val;
 		return LoadExpression::get(le->when, val, addr, sa,
 					   le->store, le->size);
 	}
@@ -103,10 +105,18 @@ public:
 		Expression *r = be->r->map(*this);
 		if (l && r)
 			return be->semiDupe(l, r);
-		else if (l)
-			return l;
-		else if (r)
-			return r;
+		else if (!l && !r)
+			return NULL;
+
+		Expression *a = NULL;
+		if (l)
+			a = l;
+		if (r)
+			a = r;
+		assert(a != NULL);
+		if (dynamic_cast<bitwiseand *>(be) ||
+		    dynamic_cast<bitwiseand *>(be))
+			return a;
 		else
 			return NULL;
 	}
@@ -136,14 +146,14 @@ public:
 		Expression *a = ExpressionMapper::map(er);
 		ExpressionRip *a2 = dynamic_cast<ExpressionRip *>(a);
 		assert(a2);
-		if (!a2->cond)
-			return NULL;
-		else
-			return ExpressionRip::get(a2->tid,
-						  removeNullConditionsHist(a2->history),
-						  a2->cond,
-						  a2->model_execution,
-						  a2->model_exec_start);
+		Expression *cond = a2->cond;
+		if (!cond)
+			cond = ConstExpression::get(1);
+		return ExpressionRip::get(a2->tid,
+					  removeNullConditionsHist(a2->history),
+					  cond,
+					  a2->model_execution,
+					  a2->model_exec_start);
 	}
 	Expression *map(ExpressionBadPointer *ebp)
 	{
