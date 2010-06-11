@@ -510,7 +510,7 @@ generateCSCandidates(ExpressionHappensBefore *ehb,
 		/* Critical section is syntactically valid.  Check
 		 * that it actually works. */
 
-		AssumptionSet aset;
+		AssumptionSet aset(assumptions);
 		/* This is the thing which is imposed by the critical
 		 * section. */
 		aset.assertTrue(
@@ -532,7 +532,6 @@ generateCSCandidates(ExpressionHappensBefore *ehb,
 		/* The combination of the mutex constraint, the
 		   assumption, and the crash predictor should lead to
 		   a contradiction. */
-		aset.assertTrue(assumption);
 		aset.assertTrue(ehb);
 		if (aset.contradiction())
 			output->insert(work);
@@ -560,11 +559,15 @@ generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const Assumpt
 		generateCSCandidates(ehb, output, assumptions);
 	} else if (bitwiseand *ba = dynamic_cast<bitwiseand *>(e)) {
 		generateCSCandidates(ba->l, output, assumptions);
-		generateCSCandidates(ba->r, output, assumptions);
+		AssumptionSet newAssumes(assumptions);
+		newAssumes.assertTrue(ba->l);
+		generateCSCandidates(ba->r, output, newAssumes);
 	} else if (bitwiseor *bo = dynamic_cast<bitwiseor *>(e)) {
 		std::set<CSCandidate> l, r;
 		generateCSCandidates(bo->l, &l, assumptions);
-		generateCSCandidates(bo->r, &r, assumptions);
+		AssumptionSet newAssumes(assumptions);
+		newAssumes.assertTrue(logicalnot::get(bo->l));
+		generateCSCandidates(bo->r, &r, newAssumes);
 		for (std::set<CSCandidate>::iterator it = l.begin();
 		     it != l.end();
 		     it++) 
@@ -589,7 +592,6 @@ considerReducedExpression(Expression *expr,
 		return;
 	}
 	simplified = simplifyLogic(simplified->CNF());
-	printf("Simplified expression %s\n", simplified->name());
 
 	/* We now suspect that if @simplified is true then we'll crash
 	   in the observed way.  Find ways of making it not be
@@ -624,15 +626,6 @@ enumReducedExpressions(Expression *expr,
 				     t2startidx >= 0;
 				     t2startidx--) {
 					std::set<EventTimestamp> s;
-					printf("Avail timestamps: %d:%lx, %d:%lx, %d:%lx, %d:%lx\n",
-					       (*t1)[t1startidx].tid._tid(),
-					       (*t1)[t1startidx].idx,
-					       (*t1)[t1endidx].tid._tid(),
-					       (*t1)[t1endidx].idx,
-					       (*t2)[t2startidx].tid._tid(),
-					       (*t2)[t2startidx].idx,
-					       (*t2)[t2endidx].tid._tid(),
-					       (*t2)[t2endidx].idx);
 					s.insert((*t1)[t1startidx]);
 					s.insert((*t1)[t1endidx]);
 					s.insert((*t2)[t2startidx]);
