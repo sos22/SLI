@@ -273,7 +273,6 @@ alloc_bytes(VexAllocType *type, unsigned size)
   for (cursor = allocation_cursor;
        cursor != alloc_header_terminator;
        cursor = next) {
-    vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
     next = next_alloc_header(cursor);
     if (!cursor->type) {
       while (next != alloc_header_terminator && !next->type && cursor->size < size) {
@@ -289,7 +288,6 @@ alloc_bytes(VexAllocType *type, unsigned size)
     for (cursor = first_alloc_header();
 	 cursor != allocation_cursor;
 	 cursor = next_alloc_header(cursor)) {
-      vassert(!(cursor->flags & ~ALLOC_FLAG_GC_MARK));
       next = next_alloc_header(cursor);
       if (!cursor->type) {
 	while (next != alloc_header_terminator && !next->type && cursor->size < size) {
