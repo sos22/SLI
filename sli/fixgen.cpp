@@ -1,11 +1,12 @@
 #include <list>
 #include <set>
+#include <algorithm>
 
 #include "sli.h"
 
 class CollectTimestampsVisitor : public ExpressionVisitor {
 public:
-	std::map<ThreadId, std::list<EventTimestamp> > timestamps;
+	std::map<ThreadId, std::vector<EventTimestamp> > timestamps;
 	void addTimestamp(EventTimestamp ts);
 	void visit(Expression *e);
 };
@@ -577,6 +578,96 @@ generateCSCandidates(Expression *e, std::set<CSCandidate> *output, const Assumpt
 }
 
 static void
+considerReducedExpression(Expression *expr,
+			  std::set<EventTimestamp> &avail_timestamps,
+			  std::set<CSCandidate> *output)
+{
+	RemoveEventsMapper mapper(avail_timestamps);
+	Expression *simplified = expr->map(mapper);
+	if (!simplified) {
+		printf("Simplification -> nothing at all?\n");
+		return;
+	}
+	simplified = simplifyLogic(simplified->CNF());
+	printf("Simplified expression %s\n", simplified->name());
+
+	/* We now suspect that if @simplified is true then we'll crash
+	   in the observed way.  Find ways of making it not be
+	   true. */
+	AssumptionSet assumptions;
+	generateCSCandidates(simplified, output, assumptions);
+}
+
+/* Phase 2: For two selected threads, enumerate every set of accesses
+   such that there are at more two accesses from each thread. */
+static void
+enumReducedExpressions(Expression *expr,
+		       const std::vector<EventTimestamp> *t1,
+		       const std::vector<EventTimestamp> *t2,
+		       std::set<CSCandidate> *output)
+{
+	if (t2->size() < t1->size()) {
+		const std::vector<EventTimestamp> *temp = t2;
+		t2 = t1;
+		t1 = temp;
+	}
+	for (int t1endidx = t1->size() - 1;
+	     t1endidx >= 0;
+	     t1endidx--) {
+		for (int t2endidx = t2->size() - 1;
+		     t2endidx >= 0;
+		     t2endidx--) {
+			for (int t1startidx = t1endidx;
+			     t1startidx >= 0;
+			     t1startidx--) {
+				for (int t2startidx = t2endidx;
+				     t2startidx >= 0;
+				     t2startidx--) {
+					std::set<EventTimestamp> s;
+					printf("Avail timestamps: %d:%lx, %d:%lx, %d:%lx, %d:%lx\n",
+					       (*t1)[t1startidx].tid._tid(),
+					       (*t1)[t1startidx].idx,
+					       (*t1)[t1endidx].tid._tid(),
+					       (*t1)[t1endidx].idx,
+					       (*t2)[t2startidx].tid._tid(),
+					       (*t2)[t2startidx].idx,
+					       (*t2)[t2endidx].tid._tid(),
+					       (*t2)[t2endidx].idx);
+					s.insert((*t1)[t1startidx]);
+					s.insert((*t1)[t1endidx]);
+					s.insert((*t2)[t2startidx]);
+					s.insert((*t2)[t2endidx]);
+					considerReducedExpression(expr, s, output);
+				}
+			}
+		}
+	}
+}
+
+/* Phase 1: Enumerate every possible combination of pairs of
+ * threads. */
+static void
+enumReducedExpressions(Expression *expr,
+		       const std::set<ThreadId> &avail_threads,
+		       const std::map<ThreadId, std::vector<EventTimestamp> > &timestamps,
+		       std::set<CSCandidate> *output)
+{
+	for (std::set<ThreadId>::const_iterator outer = avail_threads.begin();
+	     outer != avail_threads.end();
+	     outer++) {
+		std::set<ThreadId>::const_iterator inner(outer);
+		inner++;
+		while (inner != avail_threads.end()) {
+			enumReducedExpressions(expr,
+					       &timestamps.find(*outer)->second,
+					       &timestamps.find(*inner)->second,
+					       output);
+			inner++;
+		}
+	}
+}
+
+static void
 generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 {
 	/* First phase is to produce a simplified version of the
@@ -588,36 +679,16 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	CollectTimestampsVisitor v;
 	expr->visit(v);
 
-	std::set<EventTimestamp> avail_timestamps;
-	for (std::map<ThreadId, std::list<EventTimestamp> >::iterator it = v.timestamps.begin();
+	std::set<ThreadId> avail_threads;
+	for (std::map<ThreadId, std::vector<EventTimestamp> >::iterator it = v.timestamps.begin();
 	     it != v.timestamps.end();
 	     it++) {
-		it->second.sort();
-		it->second.unique();
-		if (it->second.size() > 0)
-			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 0));
-		if (it->second.size() > 1)
-			avail_timestamps.insert(rindex<std::list<EventTimestamp>, EventTimestamp>(it->second, 1));
+		std::sort(it->second.begin(), it->second.end());
+		std::vector<EventTimestamp>::iterator vit = std::unique(it->second.begin(), it->second.end());
+		it->second.resize(vit - it->second.begin());
+		avail_threads.insert(it->first);
 	}
-
-	/* Now remove all bits of the expression which mention a
-	   timestamp other than the one which we're interested in. */
-	RemoveEventsMapper mapper(avail_timestamps);
-	Expression *simplified = expr->map(mapper);
-	if (!simplified) {
-		printf("Simplification -> nothing at all?\n");
-		return;
-	}
-	printf("Simplified expression %s\n", simplified->name());
-
-	simplified = simplifyLogic(simplified->CNF());
-	printf("Stripped simplified: %s\n", simplified->name());
-
-	/* We now suspect that if @simplified is true then we'll crash
-	   in the observed way.  Find ways of making it not be
-	   true. */
-	AssumptionSet assumptions;
-	generateCSCandidates(simplified, output, assumptions);
+	enumReducedExpressions(expr, avail_threads, v.timestamps, output);
 }
 
 /* Refinement believes that if we could make @expr false then we'd
