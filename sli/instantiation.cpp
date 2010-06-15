@@ -115,6 +115,7 @@ static inline abstract_interpret_value signed_shift_right(abstract_interpret_val
 	memset(&v, 0, sizeof(v));
 	v.v = (long)x.v >> y.v;
 	v.origin = rshiftarith::get(x.origin, y.origin);
+	sanity_check_ait(v);
 	return v;
 }
 

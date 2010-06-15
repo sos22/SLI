@@ -289,6 +289,7 @@ public:
 	underlying get_reg(unsigned idx) const { assert(idx < NR_REGS); return registers[idx]; }
 	void set_reg(unsigned idx, underlying val)
 	{
+		sanity_check_ait(val);
 		assert(idx < NR_REGS);
 		registers[idx] = val;
 		if (idx == REGISTER_IDX(RSP))

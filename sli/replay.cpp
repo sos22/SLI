@@ -27,6 +27,8 @@ StoreEvent<ait>::StoreEvent(EventTimestamp when, ait _addr, unsigned _size, expr
 	  size(_size),
 	  data(_data)
 {
+	sanity_check_ait(data.lo);
+	sanity_check_ait(data.hi);
 }
 
 template <typename ait>
