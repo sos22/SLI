@@ -410,7 +410,7 @@ Expression *rshiftarith::get(Expression *l, Expression *r)
 	bool lIsConstant;
 
 	rIsConstant = r->isConstant(&rc);
-	lIsConstant = l->isConstant(&rc);
+	lIsConstant = l->isConstant(&lc);
 	if (lIsConstant) {
 		if (lc == 0)
 			return l;
