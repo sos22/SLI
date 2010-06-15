@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <vector>
 #include <map>
+#include <algorithm>
 
 #include "libvex_guest_amd64.h"
 #include "libvex_ir.h"
@@ -140,23 +141,67 @@ public:
 
 class EventTimestamp {
 public:
-	EventTimestamp(ThreadId _tid, unsigned long _idx) : tid(_tid), idx(_idx) {}
-	EventTimestamp() : tid(ThreadId::invalidTid), idx(0) {}
+	EventTimestamp(ThreadId _tid, unsigned long _idx, unsigned long _total_timestamp)
+		: tid(_tid), idx(_idx), total_timestamp(_total_timestamp)
+	{}
+	EventTimestamp() : tid(ThreadId::invalidTid), idx(0), total_timestamp(0) {}
 	static const EventTimestamp invalid;
 	ThreadId tid;
 	unsigned long idx;
 
+	/* Count of all events over every thread.  This could, in
+	   principle, be derived from tid and idx, but doing so is
+	   often difficult. */
+	unsigned long total_timestamp;
+
 	bool operator ==(const EventTimestamp &b) const { return tid == b.tid && idx == b.idx; }
 	bool operator !=(const EventTimestamp &b) const { return tid != b.tid || idx != b.idx; }
 
-	EventTimestamp &operator++() { idx++; return *this; }
-	/* XXX This really shouldn't be here, and doesn't make any
-	   real sense from a semantic point of view, but makes a few
-	   things easier elsewhere.  Remove as soon as possible. */
-	bool operator >(const EventTimestamp &b) const { return idx > b.idx; }
-	bool operator <(const EventTimestamp &b) const { return idx < b.idx; }
+	bool operator >(const EventTimestamp &b) const { return total_timestamp > b.total_timestamp; }
+	bool operator <(const EventTimestamp &b) const { return total_timestamp < b.total_timestamp; }
 
-	unsigned hash() const { return (tid._tid() * 7) ^ idx; }
+	unsigned hash() const { return total_timestamp; }
+};
+
+/* This is intended to be a measure of how ``relevant'' a given event
+   is to some other event, and is used when deciding which branch of
+   an expression to perform refinement on. */
+class Relevance {
+	/* Careful: This is a measure of the irrelevance of the
+	   target, so has a backwards sense to the enclosing
+	   structure.  0 is perfectly relevant, +ve numbers are
+	   increasingly irrelevance, and -ve numbers aren't used. */
+	long irrelevance;
+	Relevance(long _irr) : irrelevance(_irr) {}
+public:
+	Relevance(Relevance a, Relevance b) {
+		irrelevance = std::min<long>(a.irrelevance, b.irrelevance) + 1;
+	}
+	/* How relevant is @ev likely to be to an event at time
+	 * @to? */
+	Relevance(EventTimestamp ev, EventTimestamp to) {
+		long delta = ev.total_timestamp - to.total_timestamp;
+		if (delta > 0) {
+			irrelevance = (delta * delta) / 10;
+			if (irrelevance < 0)
+				irrelevance = 0;
+		} else {
+			irrelevance = -delta;
+		}
+	}
+
+	/* These look backwards, because irrelevance is the opposite
+	   of relevance. */
+	bool operator>(const Relevance &r) const { return irrelevance < r.irrelevance; }
+	bool operator>=(const Relevance &r) const { return irrelevance <= r.irrelevance; }
+	bool operator<(const Relevance &r) const { return irrelevance > r.irrelevance; }
+	bool operator<=(const Relevance &r) const { return irrelevance >= r.irrelevance; }
+
+	Relevance operator-(long d) const { return Relevance(irrelevance + d); }
+	Relevance operator+(long d) const { return Relevance(irrelevance - d); }
+
+	static const Relevance irrelevant;
+	static const Relevance perfect;
 };
 
 template <typename t> t min(const t &a, const t &b)
@@ -339,6 +384,7 @@ public:
 };
 
 template <typename ait> class ThreadEvent;
+template <typename ait> class MachineState;
 template <typename ait> class LogRecordInitialRegisters;
 template <typename ait> class LogWriter;
 template <typename ait> class LogRecordVexThreadState;
@@ -347,11 +393,12 @@ template <typename abst_int_type>
 class Thread {
 	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
-	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details);
+	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details, MachineState<abst_int_type> *ms);
 	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_calculate_rflags_c(expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
 	expression_result<abst_int_type> do_ccall(IRCallee *cee, IRExpr **args);
+	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
 public:
 	ThreadId tid;
 	unsigned pid;
@@ -361,11 +408,11 @@ public:
 	abst_int_type set_child_tid;
 	bool exitted;
 	bool crashed;
-	EventTimestamp lastEvent;
 
 	bool cannot_make_progress;
 
 	unsigned long nrAccesses;
+	unsigned long nrEvents;
 
 	IRSB *currentIRSB;
 	expression_result_array<abst_int_type> temporaries;
@@ -375,10 +422,12 @@ public:
 
 	abst_int_type currentControlCondition;
 
+	EventTimestamp lastEvent;
+
 private:
 	~Thread();
 public:
-	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace);
+	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace, MachineState<abst_int_type> *ms);
 
 	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
 	Thread<abst_int_type> *fork(unsigned newPid);
@@ -723,6 +772,7 @@ private:
 public:
 	AddressSpace<abst_int_type> *addressSpace;
 	SignalHandlers<abst_int_type> signalHandlers;
+	unsigned long nrEvents;
 	static MachineState<abst_int_type> *initialMachineState(LogReader<abst_int_type> *lf,
 								LogReaderPtr startPtr,
 								LogReaderPtr *endPtr);
@@ -731,7 +781,6 @@ public:
 
 	void registerThread(Thread<abst_int_type> *t) {
 		t->tid = nextTid;
-		t->lastEvent.tid = t->tid;
 		++nextTid;
 		threads->push(t);
 	}
@@ -1819,9 +1868,12 @@ public:
 				   LogReader<abstract_interpret_value> *lf,
 				   LogReaderPtr ptr,
 				   bool *progress,
-				   const std::map<ThreadId, unsigned long> &validity) = 0;
+				   const std::map<ThreadId, unsigned long> &validity,
+				   EventTimestamp ev) = 0;
 	virtual void visit(ExpressionVisitor &ev) = 0;
 	virtual Expression *map(ExpressionMapper &f) = 0;
+	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_threshold,
+				    Relevance high_threshold) = 0;
 	Expression *CNF() {
 		if (!cnf.get())
 			cnf.set(_CNF());
@@ -1843,7 +1895,18 @@ public:
 	}
 };
 
-class BottomExpression : public Expression {
+class UnrefinableExpression : public Expression {
+public:
+	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+			   LogReader<abstract_interpret_value> *lf,
+			   LogReaderPtr ptr,
+			   bool *progress,
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev) { return this; }
+	Relevance relevance(const EventTimestamp &ev, Relevance, Relevance) { return Relevance::irrelevant; }
+};
+
+class BottomExpression : public UnrefinableExpression {
 	static VexAllocTypeWrapper<BottomExpression> allocator;
 	static BottomExpression *bottom;
 protected:
@@ -1860,15 +1923,10 @@ public:
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &f) { return f.map(this); }
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
-			   LogReaderPtr ptr,
-			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 	NAMED_CLASS
 };
 
-class ConstExpression : public Expression {
+class ConstExpression : public UnrefinableExpression {
 	static VexAllocTypeWrapper<ConstExpression> allocator;
 public:
         unsigned long v;
@@ -1896,15 +1954,10 @@ public:
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
 
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
-			   LogReaderPtr ptr,
-			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity) { return this; }
 	NAMED_CLASS
 };
 
-class ImportExpression : public Expression {
+class ImportExpression : public UnrefinableExpression {
 	static VexAllocTypeWrapper<ImportExpression> allocator;
 public:
         unsigned long v;
@@ -1926,12 +1979,6 @@ public:
 	void visit(HeapVisitor &hv) const {hv(origin);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
-			   LogReaderPtr ptr,
-			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity) { return this; }
-
 	NAMED_CLASS
 };
 
@@ -1979,12 +2026,23 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity);
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev);
 	void visit(HeapVisitor &hv) const { hv(vaddr); }
 	void visit(ExpressionVisitor &ev) { ev.visit(this); vaddr->visit(ev); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const { return load; }
 	bool isLogical() const { return true; }
+	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
+		if (low_thresh >= high_thresh)
+			return low_thresh;
+		Relevance r = Relevance(Relevance(load, ev),
+					Relevance(store, ev));
+		if (r >= high_thresh)
+			return r;
+		else
+			return Relevance(r, vaddr->relevance(ev, r + 1, high_thresh));
+	}
 	NAMED_CLASS
 };
 
@@ -2044,7 +2102,13 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity) { return this; }
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev) { return this; }
+
+	Relevance relevance(const EventTimestamp &ev, Relevance, Relevance) {
+		return Relevance(Relevance(before, ev),
+				 Relevance(after, ev));
+	}
 	NAMED_CLASS
 };
 
@@ -2094,12 +2158,25 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity);
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev);
 
 	EventTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); val->visit(ev); addr->visit(ev); storeAddr->visit(ev); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
+	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
+		if (low_thresh >= high_thresh)
+			return low_thresh;
+		Relevance r = Relevance(Relevance(when, ev),
+					Relevance(store, ev));
+		if (r >= high_thresh)
+			return r;
+		return Relevance(
+			Relevance(val->relevance(ev, r + 1, high_thresh),
+				  addr->relevance(ev, r + 1, high_thresh)),
+			storeAddr->relevance(ev, r + 1, high_thresh));
+	}
 
 	NAMED_CLASS
 };
@@ -2111,7 +2188,8 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity);
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev);
 	Expression *l, *r;
 
 	
@@ -2131,7 +2209,17 @@ public:
 	{								
 		return max<EventTimestamp>(l->timestamp(),		
 					   r->timestamp());		
-	}								
+	}
+	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_thresh,
+				    Relevance high_thresh)
+	{
+		if (low_thresh >= high_thresh)
+			return low_thresh;
+		Relevance lr = l->relevance(ev, low_thresh, high_thresh);
+		if (lr >= high_thresh)
+			return lr;
+		return Relevance(lr, r->relevance(ev, lr + 1, high_thresh));
+	}
 };
 
 #define mk_binop_class(nme, pp, m)					\
@@ -2195,7 +2283,8 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity);
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev);
 	Expression *l;
 
 	void visit(HeapVisitor &hv) const				
@@ -2211,7 +2300,11 @@ public:
 	EventTimestamp timestamp() const				
 	{								
 		return l->timestamp();					
-	}								
+	}
+	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh)
+	{
+		return l->relevance(ev, low_thresh + 1, high_thresh + 1);
+	}
 };
 
 #define mk_unop_class(nme, m)						\
@@ -2303,7 +2396,24 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity) { return this; }
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev) { return this; }
+	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh,
+			    Relevance high_thresh)
+	{
+		Relevance c = cond->relevance(ev, low_thresh, high_thresh - 1);
+		if (c >= high_thresh)
+			return c;
+		Relevance tr = t->relevance(ev, c + 1, high_thresh);
+		if (tr >= high_thresh)
+			return tr;
+		if (tr >= c)
+			low_thresh = c;
+		else
+			low_thresh = tr;
+		Relevance fr = f->relevance(ev, low_thresh + 1, high_thresh);
+		return Relevance(c, Relevance(tr, fr));
+	}
 	NAMED_CLASS
 };
 
@@ -2580,6 +2690,16 @@ public:
 	{
 		assert(when.tid.valid());
 	}
+	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
+		if (low_thresh >= high_thresh)
+			return low_thresh;
+		Relevance r = Relevance(condition->relevance(ev, low_thresh, high_thresh),
+					Relevance(when, ev));
+		if (parent)
+			r = Relevance(parent->relevance(ev, r + 100, high_thresh) - 100,
+				      r);
+		return r;
+	}
 protected:
 	char *mkName() const {
 		return my_asprintf("%s@%d:%lx->%lx", condition->name(), when.tid._tid(), when.idx,
@@ -2637,14 +2757,14 @@ public:
 			return true;
 		return parent->isEqual(h->parent);
 	}
-	void finish(EventTimestamp fin)
+	void finish(unsigned long final_event)
 	{
-		last_valid_idx = fin.idx;
+		last_valid_idx = final_event;
 	}
 
 	History *control_expression(EventTimestamp when, Expression *e)
 	{
-		finish(when);
+		finish(when.idx);
 		return new History(e, when, this);
 	}
 
@@ -2700,6 +2820,17 @@ private:
 		  model_exec_start(start)
 	{
 	}
+	Expression *refineHistory(const MachineState<abstract_interpret_value> *ms,
+				  LogReader<abstract_interpret_value> *lf,
+				  LogReaderPtr ptr,
+				  const std::map<ThreadId, unsigned long> &validity,
+				  EventTimestamp ev);
+	Expression *refineSubCond(const MachineState<abstract_interpret_value> *ms,
+				  LogReader<abstract_interpret_value> *lf,
+				  LogReaderPtr ptr,
+				  const std::map<ThreadId, unsigned long> &validity,
+				  EventTimestamp ev);
+
 protected:
 	char *mkName(void) const {
 		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history ? history->name() : "<nohistory>", cond ? cond->name() : "<nocond>");
@@ -2745,7 +2876,13 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity);
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev);
+
+	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
+		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
+		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
+	}
 
 	NAMED_CLASS
 };
@@ -2789,7 +2926,14 @@ public:
 			   LogReader<abstract_interpret_value> *lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity) { return this; }
+			   const std::map<ThreadId, unsigned long> &validity,
+			   EventTimestamp ev) { return this; }
+
+	Relevance relevance(const EventTimestamp &ev, Relevance low, Relevance high)
+	{
+		Relevance r = Relevance(when, ev);
+		return Relevance(r, addr->relevance(ev, r + 1, high));
+	}
 	NAMED_CLASS
 };
 

@@ -277,7 +277,7 @@ void ContinueCommand::doIt(MachineState<unsigned long> *ms)
 		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
         while (1) {
-                ThreadEvent<unsigned long> *evt = thr->runToEvent(ms->addressSpace);
+		ThreadEvent<unsigned long> *evt = thr->runToEvent(ms->addressSpace, ms);
                 InterpretResult res = evt->fake(ms);
 
 		if (dynamic_cast<SignalEvent<unsigned long> *>(evt) ||

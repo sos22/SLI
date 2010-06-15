@@ -144,7 +144,8 @@ LoadExpression::refine(const MachineState<abstract_interpret_value> *ms,
 		       LogReader<abstract_interpret_value> *lf,
 		       LogReaderPtr ptr,
 		       bool *progress,
-		       const std::map<ThreadId, unsigned long> &validity)
+		       const std::map<ThreadId, unsigned long> &validity,
+		       EventTimestamp ev)
 {
 	*progress = true;
 	return onlyif::get(
@@ -159,21 +160,23 @@ BinaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 			 LogReader<abstract_interpret_value> *lf,
 			 LogReaderPtr ptr,
 			 bool *progress,
-			 const std::map<ThreadId, unsigned long> &validity)
+			 const std::map<ThreadId, unsigned long> &validity,
+			 EventTimestamp ev)
 {
 	bool subprogress;
 	Expression *_l = l;
 	Expression *_r = r;
+	Relevance lr = l->relevance(ev, Relevance::irrelevant, Relevance::perfect);
 
 	subprogress = false;
-	if (l->timestamp() > r->timestamp()) {
-	  _l = l->refine(ms, lf, ptr, &subprogress, validity);
+	if (lr > r->relevance(ev, Relevance::irrelevant, lr)) {
+		_l = l->refine(ms, lf, ptr, &subprogress, validity, ev);
 		if (!subprogress)
-		  _r = r->refine(ms, lf, ptr, &subprogress, validity);
+			_r = r->refine(ms, lf, ptr, &subprogress, validity, ev);
 	} else {
-	  _r = r->refine(ms, lf, ptr, &subprogress, validity);
+		_r = r->refine(ms, lf, ptr, &subprogress, validity, ev);
 		if (!subprogress)
-		  _l = l->refine(ms, lf, ptr, &subprogress, validity);
+			_l = l->refine(ms, lf, ptr, &subprogress, validity, ev);
 	}
 	if (subprogress) {
 		*progress = true;
@@ -187,10 +190,11 @@ UnaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 			LogReader<abstract_interpret_value> *lf,
 			LogReaderPtr ptr,
 			bool *progress,
-			const std::map<ThreadId, unsigned long> &validity)
+			const std::map<ThreadId, unsigned long> &validity,
+			EventTimestamp ev)
 {
 	bool subprogress = false;
-	Expression *l2 = l->refine(ms, lf, ptr, &subprogress, validity);
+	Expression *l2 = l->refine(ms, lf, ptr, &subprogress, validity, ev);
 	if (subprogress) {
 		*progress = true;
 		return semiDupe(l2);
@@ -213,12 +217,12 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
 	LogReader<abstract_interpret_value> *modelExec;
 	LogReaderPtr modelExecStart;
 	const std::map<ThreadId, unsigned long> &validity;
-	History *getHistory(ThreadId tid)
+	History *getHistory(EventTimestamp evt)
 	{
-		History *&ptr = thread_histories[tid];
+		History *&ptr = thread_histories[evt.tid];
 		if (!ptr)
 			ptr = new History(ConstExpression::get(1),
-					  EventTimestamp(tid, 0),
+					  evt,
 					  NULL);
 		return ptr;
 	}
@@ -269,7 +273,7 @@ public:
 		for (std::map<ThreadId, History *>::const_iterator it = thread_histories.begin();
 		     it != thread_histories.end();
 		     it++)
-			it->second->finish(ms->findThread(it->first)->lastEvent);
+			it->second->finish(ms->findThread(it->first)->nrEvents);
 	}
 	NAMED_CLASS
 };
@@ -283,10 +287,10 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 		unsigned long c;
 		if (!fe->rip.origin->isConstant(&c))
 			this->setHistory(thr->tid,
-					 this->getHistory(thr->tid)->control_expression(
+					 this->getHistory(evt->when)->control_expression(
 						 evt->when,
 						 equals::get(fe->rip.origin, ConstExpression::get(fe->rip.v))));
-		this->getHistory(thr->tid)->footstep(fe->rip.v);
+		this->getHistory(evt->when)->footstep(fe->rip.v);
 	}
 
 	if (const StoreEvent<abstract_interpret_value> *se =
@@ -375,7 +379,8 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 			    LogReader<abstract_interpret_value> *lf,
 			    LogReaderPtr ptr,
 			    bool *progress,
-			    const std::map<ThreadId, unsigned long> &validity)
+			    const std::map<ThreadId, unsigned long> &validity,
+			    EventTimestamp ev)
 {
 	LastStoreRefiner *lsr =
 		new LastStoreRefiner(
@@ -426,37 +431,40 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 	return work;
 }
 
-/* We refine a RIP expression by just splitting the very last segment
-   off of the history and turning it into a direct expression. */
 Expression *
-ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
-		      LogReader<abstract_interpret_value> *lf,
-		      LogReaderPtr ptr,
-		      bool *progress,
-		      const std::map<ThreadId, unsigned long> &validity)
+ExpressionRip::refineSubCond(const MachineState<abstract_interpret_value> *ms,
+			     LogReader<abstract_interpret_value> *lf,
+			     LogReaderPtr ptr,
+			     const std::map<ThreadId, unsigned long> &validity,
+			     EventTimestamp ev)
 {
-	/* Try to refine the subcondition first, since that's usually
-	 * cheaper. */
-	Expression *newSubCond;
 	bool subCondProgress = false;
 	std::map<ThreadId, unsigned long> newValidity(validity);
 	newValidity[tid] = history->last_valid_idx;
-	newSubCond = cond->refine(ms, model_execution, model_exec_start,
-				  &subCondProgress, newValidity);
+	Expression *newSubCond = cond->refine(ms, model_execution, model_exec_start,
+					      &subCondProgress, newValidity, ev);
 	if (subCondProgress) {
-		/* Yay. */
-		*progress = true;
 		return ExpressionRip::get(
 			tid,
 			history,
 			newSubCond,
 			model_execution,
 			model_exec_start);
+	} else {
+		return NULL;
 	}
+}
 
-	/* That didn't work, so try some of the predecessor
-	   conditional branches out of the history. */
-
+Expression *
+ExpressionRip::refineHistory(const MachineState<abstract_interpret_value> *ms,
+			     LogReader<abstract_interpret_value> *lf,
+			     LogReaderPtr ptr,
+			     const std::map<ThreadId, unsigned long> &validity,
+			     EventTimestamp ev)
+{
+	std::map<ThreadId, unsigned long> newValidity(validity);
+	newValidity[tid] = history->last_valid_idx;
+	bool subCondProgress = false;
 	for (History *hs = history;
 	     hs != NULL;
 	     hs = hs->parent) {
@@ -464,9 +472,8 @@ ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
 			break;
 		newValidity[tid] = hs->last_valid_idx;
 		Expression *newCond = hs->condition->refine(ms, lf, ptr, &subCondProgress,
-							    newValidity);
+							    newValidity, ev);
 		if (subCondProgress) {
-			*progress = true;
 			Expression *res = ExpressionRip::get(
 				tid,
 				history->dupeWithParentReplace(
@@ -484,5 +491,39 @@ ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
 		}
 	}
 
+	return NULL;
+}
+
+/* We refine a RIP expression by just splitting the very last segment
+   off of the history and turning it into a direct expression. */
+Expression *
+ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
+		      LogReader<abstract_interpret_value> *lf,
+		      LogReaderPtr ptr,
+		      bool *progress,
+		      const std::map<ThreadId, unsigned long> &validity,
+		      EventTimestamp ev)
+{
+	Expression *n;
+	Relevance cr = cond->relevance(ev, Relevance::irrelevant, Relevance::perfect);
+	if (cr > history->relevance(ev, Relevance::irrelevant, cr)) {
+		if ((n = refineSubCond(ms, lf, ptr, validity, ev))) {
+			*progress = true;
+			return n;
+		}
+		if ((n = refineHistory(ms, lf, ptr, validity, ev))) {
+			*progress = true;
+			return n;
+		}
+	} else {
+		if ((n = refineHistory(ms, lf, ptr, validity, ev))) {
+			*progress = true;
+			return n;
+		}
+		if ((n = refineSubCond(ms, lf, ptr, validity, ev))) {
+			*progress = true;
+			return n;
+		}
+	}
 	return this;
 }

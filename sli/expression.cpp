@@ -743,3 +743,6 @@ ExpressionMapper::idmap(Expression *e)
 {
 	return e;
 }
+
+const Relevance Relevance::irrelevant(10000);
+const Relevance Relevance::perfect(0);

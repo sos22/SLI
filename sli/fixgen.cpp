@@ -414,26 +414,20 @@ AssumptionSet::simplifyAssuming(Expression *what, Expression *assumption)
 
 class CSCandidate {
 public:
-	ThreadId tid1;
-	unsigned long tid1start;
-	unsigned long tid1end;
-	ThreadId tid2;
-	unsigned long tid2start;
-	unsigned long tid2end;
+	EventTimestamp tid1start;
+	EventTimestamp tid1end;
+	EventTimestamp tid2start;
+	EventTimestamp tid2end;
 
 	CSCandidate() {}
-	CSCandidate(ThreadId _tid1,
-		    unsigned long _t1start,
-		    unsigned long _t1end,
-		    ThreadId _tid2,
-		    unsigned long _t2start,
-		    unsigned long _t2end)
-		: tid1(_tid1),
-		  tid1start(_t1start),
-		  tid1end(_t1end),
-		  tid2(_tid2),
-		  tid2start(_t2start),
-		  tid2end(_t2end)
+	CSCandidate(EventTimestamp _tid1start,
+		    EventTimestamp _tid1end,
+		    EventTimestamp _tid2start,
+		    EventTimestamp _tid2end)
+		: tid1start(_tid1start),
+		  tid1end(_tid1end),
+		  tid2start(_tid2start),
+		  tid2end(_tid2end)
 	{
 	}
 };
@@ -446,10 +440,8 @@ static bool operator<(const CSCandidate &a,
 		return true;			\
 	else if (a. x > b. x)			\
 		return false
-	F(tid1);
 	F(tid1start);
 	F(tid1end);
-	F(tid2);
 	F(tid2start);
 	F(tid2end);
 #undef F
@@ -481,30 +473,27 @@ generateCSCandidates(ExpressionHappensBefore *ehb,
 		Y = assumption->before;
 		Z = assumption->after;
 		if (W.tid == X.tid && Y.tid == Z.tid) {
-			work.tid1 = W.tid;
-			work.tid1start = min<unsigned long>(W.idx,X.idx);
-			work.tid1end = max<unsigned long>(W.idx,X.idx);
-			work.tid2 = Y.tid;
-			work.tid2start = min<unsigned long>(Y.idx, Z.idx);
-			work.tid2end = max<unsigned long>(Y.idx, Z.idx);
+			work.tid1start = min<EventTimestamp>(W, X);
+			work.tid1end = max<EventTimestamp>(W, X);
+			work.tid2start = min<EventTimestamp>(Y, Z);
+			work.tid2end = max<EventTimestamp>(Y, Z);
 		} else if (W.tid == Y.tid && X.tid == Z.tid) {
-			work.tid1 = W.tid;
-			work.tid1start = min<unsigned long>(W.idx,Y.idx);
-			work.tid1end = max<unsigned long>(W.idx,Y.idx);
-			work.tid2 = Y.tid;
-			work.tid2start = min<unsigned long>(X.idx, Z.idx);
-			work.tid2end = max<unsigned long>(X.idx, Z.idx);
+			work.tid1start = min<EventTimestamp>(W, Y);
+			work.tid1end = max<EventTimestamp>(W, Y);
+			work.tid2start = min<EventTimestamp>(X, Z);
+			work.tid2end = max<EventTimestamp>(X, Z);
 		} else if (W.tid == Z.tid && X.tid == Y.tid) {
-			work.tid1 = W.tid;
-			work.tid1start = min<unsigned long>(W.idx,Z.idx);
-			work.tid1end = max<unsigned long>(W.idx,Z.idx);
-			work.tid2 = Y.tid;
-			work.tid2start = min<unsigned long>(X.idx, Y.idx);
-			work.tid2end = max<unsigned long>(X.idx, Y.idx);
+			work.tid1start = min<EventTimestamp>(W, Z);
+			work.tid1end = max<EventTimestamp>(W, Z);
+			work.tid2start = min<EventTimestamp>(X, Y);
+			work.tid2end = max<EventTimestamp>(X, Y);
 		} else
 			continue;
 
-		if (work.tid1 == work.tid2)
+		assert(work.tid1start.tid == work.tid1end.tid);
+		assert(work.tid2start.tid == work.tid2end.tid);
+
+		if (work.tid1start.tid == work.tid2start.tid)
 			continue;
 
 		/* Critical section is syntactically valid.  Check
@@ -516,19 +505,11 @@ generateCSCandidates(ExpressionHappensBefore *ehb,
 		aset.assertTrue(
 			logicalor::get(
 				ExpressionHappensBefore::get(
-					EventTimestamp(
-						work.tid2,
-						work.tid2end),
-					EventTimestamp(
-						work.tid1,
-						work.tid1start)),
+					work.tid2end,
+					work.tid1start),
 				ExpressionHappensBefore::get(
-					EventTimestamp(
-						work.tid1,
-						work.tid1end),
-					EventTimestamp(
-						work.tid2,
-						work.tid2start))));
+					work.tid1end,
+					work.tid2start)));
 		/* The combination of the mutex constraint, the
 		   assumption, and the crash predictor should lead to
 		   a contradiction. */
@@ -697,7 +678,7 @@ considerPotentialFixes(Expression *expr)
 	     it != candidates.end();
 	     it++) {
 		printf("Candidate: %d:%lx->%lx;%d:%lx->%lx\n",
-		       it->tid1._tid(), it->tid1start, it->tid1end,
-		       it->tid2._tid(), it->tid2start, it->tid2end);
+		       it->tid1start.tid._tid(), it->tid1start.idx, it->tid1end.idx,
+		       it->tid2start.tid._tid(), it->tid2start.idx, it->tid2end.idx);
 	}
 }

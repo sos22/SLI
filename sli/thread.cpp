@@ -22,7 +22,6 @@ Thread<ait> *Thread<ait>::initialThread(const LogRecordInitialRegisters<ait> &in
 	new (work) Thread<ait>();
 	work->tid = initRegs.thread();
 	work->regs = initRegs.regs;
-	work->lastEvent.tid = work->tid;
 	return work;
 }
 
@@ -36,7 +35,6 @@ Thread<ait> *Thread<ait>::fork(unsigned newPid)
 	new (work) Thread<ait>();
 	work->pid = newPid;
 	work->regs = regs;
-	work->lastEvent.tid = work->tid;
 	return work;
 }
 
@@ -89,13 +87,20 @@ void Thread<ait>::visit(HeapVisitor &hv) const
 	visit_aiv(set_child_tid, hv);
 }
 
+template <typename ait>
+EventTimestamp Thread<ait>::bumpEvent(MachineState<ait> *ms)
+{
+	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++);
+	return lastEvent;
+}
+
 template <typename ait> template <typename new_type>
 Thread<new_type> *Thread<ait>::abstract() const
 {
 	Thread<new_type> *work = Thread<new_type>::allocator.alloc();
 	memset(work, 0, sizeof(*work));
 	work->tid = tid;
-	work->lastEvent = lastEvent;
+	work->nrEvents = nrEvents;
 	work->pid = pid;
 	regs.abstract<new_type>(&work->regs);
 	work->clear_child_tid = new_type::import(

@@ -360,11 +360,11 @@ public:
 			hv(it->second);
 	}
 
-	History *getHistory(ThreadId tid) {
-		History *&ptr = thread_histories[tid];
+	History *getHistory(const EventTimestamp &evt) {
+		History *&ptr = thread_histories[evt.tid];
 		if (!ptr)
 			ptr = new History(ConstExpression::get(1),
-					  EventTimestamp(tid, 0),
+					  evt,
 					  NULL);
 		return ptr;
 	}
@@ -382,10 +382,10 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const 
 		unsigned long c;
 		if (!fe->rip.origin->isConstant(&c))
 			this->setHistory(_thr->tid,
-					 this->getHistory(_thr->tid)->control_expression(
+					 this->getHistory(evt->when)->control_expression(
 						 evt->when,
 						 equals::get(fe->rip.origin, ConstExpression::get(fe->rip.v))));
-		this->getHistory(_thr->tid)->footstep(fe->rip.v);
+		this->getHistory(evt->when)->footstep(fe->rip.v);
 	}
 
 	if (const SignalEvent<abstract_interpret_value> *es =
@@ -411,7 +411,7 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	for (std::map<ThreadId, History *>::const_iterator it = extr->thread_histories.begin();
 	     it != extr->thread_histories.end();
 	     it++) {
-		it->second->finish(ms2->findThread(it->first)->lastEvent);
+		it->second->finish(ms2->findThread(it->first)->nrEvents);
 	}
 
 	/* For now, we assume that the only reason to crash is
@@ -427,14 +427,14 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	assert(extr->thr->crashed);
 	Expression *res;
 	if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
-		res = ExpressionRip::get(extr->thr->tid, extr->getHistory(extr->thr->tid),
+		res = ExpressionRip::get(extr->thr->tid, extr->getHistory(extr->thr->lastEvent),
 					 equals::get(extr->thr->regs.rip().origin,
 						     ConstExpression::get(extr->thr->regs.rip().v)),
 					 script,
 					 ptr);
 	else
 		res = ExpressionRip::get(extr->thr->tid,
-					 extr->getHistory(extr->thr->tid),
+					 extr->getHistory(extr->thr->lastEvent),
 					 ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin),
 					 script,
 					 ptr);
@@ -483,7 +483,7 @@ main(int argc, char *argv[])
 		printf("Crash reason %s\n", cr->name());
 		assert(syntax_check_expression(cr, m1));
 		std::map<ThreadId, unsigned long> v;
-		cr = cr->refine(abstract, al, ptr, &progress, v);
+		cr = cr->refine(abstract, al, ptr, &progress, v, cr->timestamp());
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
 
