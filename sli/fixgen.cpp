@@ -123,11 +123,15 @@ public:
 	}
 	Expression *map(UnaryExpression *ue)
 	{
-		Expression *l = ue->l->map(*this);
-		if (l)
-			return ue->semiDupe(l);
-		else
-			return NULL;
+		if (dynamic_cast<alias *>(ue)) {
+			return ue->concretise();
+		} else {
+			Expression *l = ue->l->map(*this);
+			if (l)
+				return ue->semiDupe(l);
+			else
+				return NULL;
+		}
 	}
 	Expression *map(ternarycondition *tc)
 	{
@@ -594,6 +598,7 @@ enumReducedExpressions(Expression *expr,
 		t2 = t1;
 		t1 = temp;
 	}
+
 	for (int t1endidx = t1->size() - 1;
 	     t1endidx >= 0;
 	     t1endidx--) {
