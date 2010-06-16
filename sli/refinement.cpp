@@ -445,12 +445,14 @@ ExpressionRip::refineSubCond(const MachineState<abstract_interpret_value> *ms,
 	Expression *newSubCond = cond->refine(ms, model_execution, model_exec_start,
 					      &subCondProgress, newValidity, ev);
 	if (subCondProgress) {
-		return ExpressionRip::get(
+		Expression *res = ExpressionRip::get(
 			tid,
 			history,
 			newSubCond,
 			model_execution,
 			model_exec_start);
+		considerPotentialFixes(res);
+		return res;
 	} else {
 		return NULL;
 	}

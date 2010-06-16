@@ -1857,11 +1857,13 @@ class Expression : public Named {
 		add_to_hash();
 	}
 	mutable WeakRef<Expression> cnf;
+	mutable WeakRef<Expression> concrete;
 protected:
 	static Expression *intern(Expression *e);
 	virtual unsigned _hash() const = 0;
 	virtual bool _isEqual(const Expression *other) const = 0;
 	virtual Expression *_CNF() { return this; }
+	virtual Expression *_concretise() = 0;
 public:
 	unsigned hash() const { return hashval; }
 	virtual bool isConstant(unsigned long *cv) const { return false; }
@@ -1877,7 +1879,11 @@ public:
 	virtual Expression *map(ExpressionMapper &f) = 0;
 	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_threshold,
 				    Relevance high_threshold) = 0;
-	virtual Expression *concretise() = 0;
+	Expression *concretise() {
+		if (!concrete.get())
+			concrete.set(_concretise());
+		return concrete.get();
+	}
 	Expression *CNF() {
 		if (!cnf.get())
 			cnf.set(_CNF());
@@ -1917,6 +1923,7 @@ protected:
 	unsigned _hash() const { return 0x1234567; }
 	char *mkName() const { return my_asprintf("_|_"); }
 	bool _isEqual(const Expression *other) const { return false; }
+	Expression *_concretise() { return this; }
 public:
 	static Expression *get()
 	{
@@ -1927,7 +1934,6 @@ public:
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &f) { return f.map(this); }
-	Expression *concretise() { return this; }
 	NAMED_CLASS
 };
 
@@ -1946,6 +1952,7 @@ protected:
 		else
 			return false;
 	}
+	Expression *_concretise() { return this; }
 public:
 	bool isLogical() const { return v == 0 || v == 1; }
 	static Expression *get(unsigned long v)
@@ -1958,7 +1965,6 @@ public:
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
-	Expression *concretise() { return this; }
 
 	NAMED_CLASS
 };
@@ -1974,6 +1980,7 @@ protected:
 	bool _isEqual(const Expression *other) const {
 		return other == this;
 	}
+	Expression *_concretise() { return ConstExpression::get(v); }
 public:
 	static Expression *get(unsigned long v, ImportOrigin *origin)
 	{
@@ -1985,7 +1992,6 @@ public:
 	void visit(HeapVisitor &hv) const {hv(origin);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
-	Expression *concretise() { return ConstExpression::get(v); }
 	NAMED_CLASS
 };
 
@@ -2023,6 +2029,12 @@ protected:
 		else
 			return false;
 	}
+	Expression *_concretise() {
+		Expression *va = vaddr->concretise();
+		if (va == vaddr)
+			return this;
+		return get(load, store, va);
+	}
 public:
 	static Expression *get(EventTimestamp load, EventTimestamp store,
 			       Expression *vaddr)
@@ -2050,7 +2062,6 @@ public:
 		else
 			return Relevance(r, vaddr->relevance(ev, r + 1, high_thresh));
 	}
-	Expression *concretise() { return get(load, store, vaddr->concretise()); }
 	NAMED_CLASS
 };
 
@@ -2084,6 +2095,7 @@ protected:
 		else
 			return false;
 	}
+	Expression *_concretise() { return this; }
 public:
 	static Expression *get(EventTimestamp before, EventTimestamp after)
 	{
@@ -2117,7 +2129,6 @@ public:
 		return Relevance(Relevance(before, ev),
 				 Relevance(after, ev));
 	}
-	Expression *concretise() { return this; }
 	NAMED_CLASS
 };
 
@@ -2150,6 +2161,7 @@ protected:
 		else
 			return false;
 	}
+	Expression *_concretise() { return val->concretise(); }
 public:
 	static Expression *get(EventTimestamp when, Expression *val, Expression *addr,
 			       Expression *storeAddr, EventTimestamp store, unsigned size)
@@ -2186,12 +2198,20 @@ public:
 				  addr->relevance(ev, r + 1, high_thresh)),
 			storeAddr->relevance(ev, r + 1, high_thresh));
 	}
-	Expression *concretise() { return val->concretise(); }
 
 	NAMED_CLASS
 };
 
 class BinaryExpression : public Expression {
+protected:
+	Expression *_concretise() {
+		Expression *lc = l->concretise();
+		Expression *rc = r->concretise();
+		if (lc != l || rc != r)
+			return semiDupe(lc, rc);
+		else
+			return this;
+	}
 public:
 	virtual Expression *semiDupe(Expression *l, Expression *r) const = 0;
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
@@ -2230,7 +2250,6 @@ public:
 			return lr;
 		return Relevance(lr, r->relevance(ev, lr + 1, high_thresh));
 	}
-	Expression *concretise() { return semiDupe(l->concretise(), r->concretise()); }
 };
 
 #define mk_binop_class(nme, pp, m)					\
@@ -2288,6 +2307,14 @@ mk_binop_class(logicaland, &&, );
 mk_binop_class(onlyif, onlyif, );
 
 class UnaryExpression : public Expression {
+protected:
+	Expression *_concretise() {
+		Expression *lc = l->concretise();
+		if (lc != l)
+			return semiDupe(l->concretise());
+		else
+			return this;
+	}
 public:
 	virtual Expression *semiDupe(Expression *l) const = 0;
 	virtual Expression *refine(const MachineState<abstract_interpret_value> *ms,
@@ -2316,7 +2343,6 @@ public:
 	{
 		return l->relevance(ev, low_thresh + 1, high_thresh + 1);
 	}
-	Expression *concretise() { return semiDupe(l->concretise()); }
 };
 
 #define mk_unop_class(nme, m)						\
@@ -2398,6 +2424,12 @@ protected:
 		else						
 			return false;				
 	}							
+	Expression *_concretise() {
+		Expression *cc = cond->concretise(),
+			*tc = t->concretise(),
+			*fc = f->concretise();
+		return get(cc, tc, fc);
+	}
 public:
 	bool isLogical() const;
 	static Expression *get(Expression *_cond, Expression *_t, Expression *_f);
@@ -2443,7 +2475,6 @@ public:
 		Relevance fr = f->relevance(ev, low_thresh + 1, high_thresh);
 		return Relevance(c, Relevance(tr, fr));
 	}
-	Expression *concretise() { return get(cond->concretise(), t->concretise(), f->concretise()); }
 	NAMED_CLASS
 };
 
@@ -2730,6 +2761,8 @@ public:
 				      r);
 		return r;
 	}
+private:
+	WeakRef<History> concrete;
 protected:
 	char *mkName() const {
 		return my_asprintf("%s@%d:%lx->%lx", condition->name(), when.tid._tid(), when.idx,
@@ -2824,6 +2857,15 @@ public:
 	History *truncateInclusive(unsigned long x) { return truncate(x, true); }
 	History *truncateExclusive(unsigned long x) { return truncate(x, false); }
 
+	History *concretise() {
+		if (!concrete.get())
+			concrete.set(new History(condition->concretise(),
+						 last_valid_idx,
+						 when,
+						 rips,
+						 NULL));
+		return concrete.get();
+	}
 	NAMED_CLASS
 };
 
@@ -2876,6 +2918,8 @@ protected:
 		else
 			return false;
 	}
+	Expression *_concretise() { return get(tid, history->concretise(), cond->concretise(), model_execution,
+					       model_exec_start); }
 public:
 	static Expression *get(ThreadId tid, History *history, Expression *cond,
 			       LogReader<abstract_interpret_value> *model,
@@ -2908,7 +2952,6 @@ public:
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
 			   EventTimestamp ev);
-	Expression *concretise() { return cond->concretise(); }
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
 		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
 		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
@@ -2943,6 +2986,7 @@ protected:
 		else
 			return false;
 	}
+	Expression *_concretise() { return get(when, addr->concretise()); }
 public:
 	static Expression *get(EventTimestamp _when, Expression *_addr)
 	{
@@ -2964,7 +3008,6 @@ public:
 		Relevance r = Relevance(when, ev);
 		return Relevance(r, addr->relevance(ev, r + 1, high));
 	}
-	Expression *concretise() { return get(when, addr->concretise()); }
 	NAMED_CLASS
 };
 

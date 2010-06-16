@@ -655,8 +655,10 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	   just using the last two accesses in every thread, and then
 	   work back from there if that doesn't work. */
 
+	Expression *noAliasExpr = expr->concretise();
+
 	CollectTimestampsVisitor v;
-	expr->visit(v);
+	noAliasExpr->visit(v);
 
 	std::set<ThreadId> avail_threads;
 	for (std::map<ThreadId, std::vector<EventTimestamp> >::iterator it = v.timestamps.begin();
@@ -667,7 +669,7 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 		it->second.resize(vit - it->second.begin());
 		avail_threads.insert(it->first);
 	}
-	enumReducedExpressions(expr, avail_threads, v.timestamps, output);
+	enumReducedExpressions(noAliasExpr, avail_threads, v.timestamps, output);
 }
 
 /* Refinement believes that if we could make @expr false then we'd

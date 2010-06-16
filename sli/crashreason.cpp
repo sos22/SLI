@@ -447,7 +447,7 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 			 script,
 			 ptr);
 	std::map<ThreadId, unsigned long> v;
-	assert(syntax_check_expression(res, v));
+	//assert(syntax_check_expression(res, v));
 	return res;
 }
 
