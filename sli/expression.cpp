@@ -764,3 +764,13 @@ Relevance alias::relevance(const EventTimestamp &ev,
 {
 	return l->relevance(ev, lowThresh + 100, highThresh) - 100;
 }
+Expression *alias::refine(const MachineState<abstract_interpret_value> *ms,
+			  LogReader<abstract_interpret_value> *lf,
+			  LogReaderPtr ptr,
+			  bool *progress,
+			  const std::map<ThreadId, unsigned long> &validity,
+			  EventTimestamp ev)
+{
+	*progress = true;
+	return l;
+}

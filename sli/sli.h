@@ -2279,12 +2279,12 @@ mk_binop_class(onlyif, onlyif, );
 class UnaryExpression : public Expression {
 public:
 	virtual Expression *semiDupe(Expression *l) const = 0;
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
-			   LogReaderPtr ptr,
-			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev);
+	virtual Expression *refine(const MachineState<abstract_interpret_value> *ms,
+				   LogReader<abstract_interpret_value> *lf,
+				   LogReaderPtr ptr,
+				   bool *progress,
+				   const std::map<ThreadId, unsigned long> &validity,
+				   EventTimestamp ev);
 	Expression *l;
 
 	void visit(HeapVisitor &hv) const				
@@ -2352,7 +2352,15 @@ mk_unop_class(bitsaturate, Expression *_CNF(););
  * concrete alias graph is a very good approximation of the abstract
  * one, and building the full abstract one is very time consuming.
  */
-mk_unop_class(alias, Relevance relevance(const EventTimestamp &, Relevance, Relevance););
+mk_unop_class(alias,
+	      Relevance relevance(const EventTimestamp &, Relevance, Relevance);
+	      Expression *refine(const MachineState<abstract_interpret_value> *ms,
+					 LogReader<abstract_interpret_value> *lf,
+					 LogReaderPtr ptr,
+					 bool *progress,
+					 const std::map<ThreadId, unsigned long> &validity,
+					 EventTimestamp ev);
+	);
 
 class ternarycondition : public Expression {
 public:
