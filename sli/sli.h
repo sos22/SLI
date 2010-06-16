@@ -2301,7 +2301,7 @@ public:
 	{								
 		return l->timestamp();					
 	}
-	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh)
+	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh)
 	{
 		return l->relevance(ev, low_thresh + 1, high_thresh + 1);
 	}
@@ -2344,6 +2344,15 @@ mk_unop_class(unaryminus, );
 /* bitsaturate is 0 whenever its argument is zero and one
    otherwise. */
 mk_unop_class(bitsaturate, Expression *_CNF(););
+
+/* alias x is just x, but with a hint that x is in some sense
+ * ``unlikely'' to be a useful candidate for refinement and can be
+ * turned into a constant without too much loss of information.  It's
+ * mostly used for alias analysis, because most of the time the
+ * concrete alias graph is a very good approximation of the abstract
+ * one, and building the full abstract one is very time consuming.
+ */
+mk_unop_class(alias, Relevance relevance(const EventTimestamp &, Relevance, Relevance););
 
 class ternarycondition : public Expression {
 public:

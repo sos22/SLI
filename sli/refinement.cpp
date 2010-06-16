@@ -320,9 +320,10 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 					result,
 					logicalor::get(
 						logicalnot::get(
-							equals::get(
-								se->addr.origin,
-								addr)),
+							alias::get(
+								equals::get(
+									se->addr.origin,
+									addr))),
 						logicalnot::get(happensInRange)));
 		}
 	}

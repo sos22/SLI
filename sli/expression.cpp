@@ -746,3 +746,21 @@ ExpressionMapper::idmap(Expression *e)
 
 const Relevance Relevance::irrelevant(10000);
 const Relevance Relevance::perfect(0);
+
+mk_op_allocator(alias);
+bool alias::isLogical() const { return l->isLogical(); }
+Expression *alias::get(Expression *l)
+{
+	unsigned long lc;
+	if (l->isConstant(&lc))
+		return ConstExpression::get(lc);
+	alias *work = new (allocator.alloc()) alias();
+	work->l = l;
+	return intern(work);
+}
+Relevance alias::relevance(const EventTimestamp &ev,
+			   Relevance lowThresh,
+			   Relevance highThresh)
+{
+	return l->relevance(ev, lowThresh + 100, highThresh) - 100;
+}
