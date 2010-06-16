@@ -1375,6 +1375,39 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		*eof = ptr;
 }
 
+template<typename ait>
+void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, LogReaderPtr ptr,
+				  LogReaderPtr *eof)
+{
+	while (1) {
+		LogRecord<ait> *lr = lf->read(ptr, &ptr);
+		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
+		if (!lr)
+			break;
+
+		Thread<ait> *thr = currentState->findThread(lr->thread());
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
+
+		CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
+		if (ce) {
+			ce->replay(lr, currentState,
+				   lf, ptr, &ptr, NULL);
+		} else {
+			evt->replay(lr, currentState);
+		}
+
+		/* Memory records are special and should always be
+		   processed eagerly. */
+		process_memory_records(currentState->addressSpace, lf, ptr,
+				       &ptr, (LogWriter<ait> *)NULL);
+
+		if (evt->when == end)
+			break;
+	}
+	if (eof)
+		*eof = ptr;
+}
+
 template <typename ait> void visit_expression_result_array(const void *_ctxt,
 							   HeapVisitor &hv)
 {
@@ -1412,6 +1445,10 @@ template <typename ait> VexAllocType expression_result_array<ait>::arrayAllocTyp
 						    EventRecorder<t> *er); \
 	template InterpretResult Interpreter<t>::getThreadMemoryTrace(ThreadId tid, \
 								      MemoryTrace<t> **output, \
-								      unsigned max_events) \
+								      unsigned max_events); \
+	template void Interpreter<t>::runToEvent(EventTimestamp end,	\
+						 LogReader<t> const *lf, \
+						 LogReaderPtr ptr,	\
+						 LogReaderPtr *eof)
 
 

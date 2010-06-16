@@ -451,6 +451,51 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	return res;
 }
 
+/* Most of the time, things more than half a dozen control flow                                      
+   operations back are pretty damn useless, and they're also very                                    
+   expensive to analyse.  Strip them off. */                                                         
+static Expression *                                                                                  
+strip_outer_rips(Expression *e, MachineState<abstract_interpret_value> *ms,
+		 LogReader<abstract_interpret_value> **lf,
+		 LogReaderPtr *lfstart)
+{
+	/* Phase 1: count how many RIP wrappers there are. */                                         
+	unsigned cntr;                                                                                
+	Expression *cursor;                                                                           
+	ExpressionRip *crip;                                                                          
+	cursor = e;                                                                                   
+	cntr = 0;                                                                                     
+	while (1) {                                                                                   
+		crip = dynamic_cast<ExpressionRip *>(cursor);                                         
+		if (!crip)                                                                            
+			break;                                                                        
+		cursor = crip->cond;                                                                  
+		cntr++;                                                                               
+	}                                                                                             
+	
+	/* Phase 2: Strip them. */
+	if (cntr <= 6)
+		return e;
+	cntr -= 6;
+	cursor = e;
+	while (cntr) {
+		crip = dynamic_cast<ExpressionRip *>(cursor);
+		assert(crip);
+		cursor = crip->cond;
+		cntr--;
+	}
+
+	crip = dynamic_cast<ExpressionRip *>(cursor);
+	assert(crip);
+
+	/* Phase 3: generate a new machine state representing the very
+	   start of the current history. */
+	Interpreter<abstract_interpret_value> i(ms);
+	i.runToEvent(crip->history->when, crip->model_execution, crip->model_exec_start, lfstart);
+	*lf = crip->model_execution;
+	return getCrashReason(ms->dupeSelf(), crip->model_execution, *lfstart);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -472,18 +517,21 @@ main(int argc, char *argv[])
 	VexGcRoot al_keeper((void **)&al, "al_keeper");
 
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
-	printf("%s\n", cr->name());
-	std::map<ThreadId, unsigned long> m1;
 	VexGcRoot crkeeper((void **)&cr, "crkeeper");
+	printf("%s\n", cr->name());
+	LogReader<abstract_interpret_value> *lf2 = NULL;
+	VexGcRoot lf2keeper((void **)&lf2, "lf2keeper");
+	LogReaderPtr lf2start;
+	cr = strip_outer_rips(cr, abstract, &lf2, &lf2start);
 
+	std::map<ThreadId, unsigned long> m1;
 	bool progress;
-
 	do {
 		progress = false;
 		printf("Crash reason %s\n", cr->name());
 		assert(syntax_check_expression(cr, m1));
 		std::map<ThreadId, unsigned long> v;
-		cr = cr->refine(abstract, al, ptr, &progress, v, cr->timestamp());
+		cr = cr->refine(abstract, lf2, lf2start, &progress, v, cr->timestamp());
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
 

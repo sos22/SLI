@@ -859,7 +859,10 @@ public:
 				      LogWriter<abst_int_type> *output = NULL);
 	void runToFailure(ThreadId tid, LogWriter<abst_int_type> *output,
 			  unsigned max_events = 0);
-
+	void runToEvent(EventTimestamp evt,
+			const LogReader<abst_int_type> *lf,
+			LogReaderPtr startingPoint,
+			LogReaderPtr *endPoint = NULL);
 };
 
 template <typename ait>
