@@ -529,7 +529,7 @@ main(int argc, char *argv[])
 	do {
 		progress = false;
 		printf("Crash reason %s\n", cr->name());
-		assert(syntax_check_expression(cr, m1));
+		//assert(syntax_check_expression(cr, m1));
 		std::map<ThreadId, unsigned long> v;
 		cr = cr->refine(abstract, lf2, lf2start, &progress, v, cr->timestamp());
 	} while (progress);
