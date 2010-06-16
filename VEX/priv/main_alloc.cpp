@@ -80,38 +80,8 @@ first_alloc_header(void)
 static struct alloc_header *
 next_alloc_header(struct alloc_header *h)
 {
+  assert(h->size != 0);
   return (struct alloc_header *)((unsigned long)h + h->size);
-}
-
-class GcVisitor : public HeapVisitor {
-public:
-   virtual void visit(const void *ptr);
-};
-
-void
-GcVisitor::visit(const void *what)
-{
-  struct alloc_header *what_header;
-
-  if (!what)
-    return;
-  what_header = alloc_to_header(what);
-  vassert(what_header->type != NULL); /* Shouldn't be visiting free memory... */
-  if (what_header->flags & ALLOC_FLAG_GC_MARK)
-    return;
-  what_header->flags |= ALLOC_FLAG_GC_MARK;
-  if (what_header->type->gc_visit)
-    what_header->type->gc_visit(what, *this);
-}
-
-static void
-poison(void *start, unsigned nr_bytes, unsigned pattern)
-{
-#ifndef NDEBUG
-  unsigned x;
-  for (x = 0; x < nr_bytes / 4; x++)
-    ((unsigned *)start)[x] = pattern;
-#endif
 }
 
 static weak_table *
@@ -130,6 +100,51 @@ header_to_weak_table(alloc_header *h)
   }
   return (weak_table *)((unsigned long)temporary +
 			(h->flags & ALLOC_FLAG_WEAK_TABLE_MASK));
+}
+
+class GcVisitor : public HeapVisitor {
+public:
+  void visitWeakTable(weak_table *w);
+  void visit(const void *ptr);
+};
+
+void
+GcVisitor::visit(const void *what)
+{
+  struct alloc_header *what_header;
+
+  if (!what)
+    return;
+  what_header = alloc_to_header(what);
+  vassert(what_header->type != NULL); /* Shouldn't be visiting free memory... */
+  if (what_header->flags & ALLOC_FLAG_GC_MARK)
+    return;
+  if (what_header->flags & ALLOC_FLAG_HAS_WEAK_TABLE)
+    visitWeakTable(header_to_weak_table(what_header));
+  what_header->flags |= ALLOC_FLAG_GC_MARK;
+  if (what_header->type->gc_visit)
+    what_header->type->gc_visit(what, *this);
+}
+
+void
+GcVisitor::visitWeakTable(weak_table *w)
+{
+  visit(w);
+  if (w->outlineRefs) {
+    /* Visit the table itself, but not the things referenced from
+       it. */
+    visit(w->outlineRefs);
+  }
+}
+
+static void
+poison(void *start, unsigned nr_bytes, unsigned pattern)
+{
+#ifndef NDEBUG
+  unsigned x;
+  for (x = 0; x < nr_bytes / 4; x++)
+    ((unsigned *)start)[x] = pattern;
+#endif
 }
 
 static void
@@ -273,9 +288,15 @@ alloc_bytes(VexAllocType *type, unsigned size)
   for (cursor = allocation_cursor;
        cursor != alloc_header_terminator;
        cursor = next) {
+    assert(cursor >= first_alloc_header());
+    assert(cursor < alloc_header_terminator);
     next = next_alloc_header(cursor);
+    assert(next <= alloc_header_terminator);
     if (!cursor->type) {
       while (next != alloc_header_terminator && !next->type && cursor->size < size) {
+	assert(next < alloc_header_terminator);
+	assert(next >= first_alloc_header());
+	assert(next->size != 0);
 	cursor->size += next->size;
 	VALGRIND_MAKE_MEM_NOACCESS(next, sizeof(*next));
 	next = next_alloc_header(cursor);
@@ -288,9 +309,15 @@ alloc_bytes(VexAllocType *type, unsigned size)
     for (cursor = first_alloc_header();
 	 cursor != allocation_cursor;
 	 cursor = next_alloc_header(cursor)) {
+      assert(cursor >= first_alloc_header());
+      assert(cursor < alloc_header_terminator);
       next = next_alloc_header(cursor);
+      assert(next <= alloc_header_terminator);
       if (!cursor->type) {
 	while (next != alloc_header_terminator && !next->type && cursor->size < size) {
+	  assert(next < alloc_header_terminator);
+	  assert(next >= first_alloc_header());
+	  assert(next->size != 0);
 	  cursor->size += next->size;
 	  VALGRIND_MAKE_MEM_NOACCESS(next, sizeof(*next));
 	  if (next == allocation_cursor)
