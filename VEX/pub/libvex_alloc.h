@@ -187,4 +187,6 @@ public:
 	t *get() { return target; }
 };
 
+void LibVEX_alloc_sanity_check();
+
 #endif /* !__LIBVEX_ALLOC_H */

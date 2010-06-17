@@ -152,6 +152,8 @@ release_weak_table(alloc_header *h)
 {
   weak_table *w = header_to_weak_table(h);
   w->ownerDied();
+  if (w->outlineRefs)
+    LibVEX_free(w->outlineRefs);
   LibVEX_free(w);
   h->flags &= ~ALLOC_FLAG_HAS_WEAK_TABLE;
 }
@@ -163,6 +165,7 @@ LibVEX_free(const void *_ptr)
   struct alloc_header *h = alloc_to_header(ptr);
   struct alloc_header *n;
 
+  LibVEX_alloc_sanity_check();
   heap_used -= h->size;
 
   if (h->flags & ALLOC_FLAG_HAS_WEAK_TABLE)
@@ -180,9 +183,11 @@ LibVEX_free(const void *_ptr)
     if (allocation_cursor == n)
       allocation_cursor = h;
     h->size += n->size;
+    poison(n, sizeof(*n), 0xa9b8c7d6);
     VALGRIND_MAKE_MEM_NOACCESS(n, sizeof(*n));
     n = next_alloc_header(h);
   }
+  LibVEX_alloc_sanity_check();
 }
 
 void
@@ -193,6 +198,8 @@ LibVEX_gc(void)
   struct alloc_header *p;
   struct alloc_header *n;
   GcVisitor gc;
+
+  LibVEX_alloc_sanity_check();
 
   for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
     h->flags &= ~ ALLOC_FLAG_GC_MARK;
@@ -248,6 +255,8 @@ LibVEX_gc(void)
     p = h;
     h = n;
   }
+
+  LibVEX_alloc_sanity_check();
 }
 
 void vexSetAllocModeTEMP_and_clear ( void )
@@ -270,7 +279,6 @@ visit_ptr_array(const void *ths, HeapVisitor &visitor)
 }
 
 static VexAllocType ptr_array_type = { -1, visit_ptr_array, NULL, "<array>" };
-
 
 static void *
 alloc_bytes(VexAllocType *type, unsigned size)
@@ -298,6 +306,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
 	assert(next >= first_alloc_header());
 	assert(next->size != 0);
 	cursor->size += next->size;
+	poison(next, sizeof(*next), 0xa1b2c3d4);
 	VALGRIND_MAKE_MEM_NOACCESS(next, sizeof(*next));
 	next = next_alloc_header(cursor);
       }
@@ -319,6 +328,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
 	  assert(next >= first_alloc_header());
 	  assert(next->size != 0);
 	  cursor->size += next->size;
+	  poison(next, sizeof(*next), 0xa1b2c3d4);
 	  VALGRIND_MAKE_MEM_NOACCESS(next, sizeof(*next));
 	  if (next == allocation_cursor)
 	    allocation_cursor = next_alloc_header(cursor);
@@ -388,6 +398,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
   unsigned old_size;
   void *newptr;
 
+  LibVEX_alloc_sanity_check();
   new_size += sizeof(struct alloc_header);
   new_size = (new_size + 15) & ~15;
 
@@ -421,12 +432,15 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     next->size = old_size - new_size;
     next->flags = 0;
     heap_used -= old_size - new_size;
+    poison(next + 1, next->size - sizeof(*next), 0xa1b2c3d4);
     VALGRIND_MAKE_MEM_NOACCESS(next + 1, next->size - sizeof(*next));
   }
 
   /* Good enough? */
-  if (new_size <= ah->size)
+  if (new_size <= ah->size) {
+    LibVEX_alloc_sanity_check();
     return ptr;
+  }
 
   /* Failed to resize: allocate a new block.  This is expensive, and
      tends to cause heap fragmentation, so if we have to do it then we
@@ -437,11 +451,9 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     memcpy(newptr, ptr, new_size);
   else
     memcpy(newptr, ptr, ah->size);
+  LibVEX_free(ptr);
 
-  ah->type = NULL;
-  VALGRIND_MAKE_MEM_NOACCESS(ah + 1, ah->size - sizeof(*ah));
-  heap_used -= ah->size;
-
+  LibVEX_alloc_sanity_check();
   return newptr;
 }
 
@@ -652,6 +664,7 @@ vexInitHeap(void)
   struct alloc_header *entire_arena_hdr;
 
   vassert(!done_init);
+  poison(temporary, N_TEMPORARY_BYTES, 0xa1b2c3d4);
   entire_arena_hdr = first_alloc_header();
   entire_arena_hdr->type = NULL;
   entire_arena_hdr->size = N_TEMPORARY_BYTES;
@@ -739,3 +752,51 @@ weak_table::ownerDied()
     LibVEX_free(outlineRefs);
   }
 }
+
+/* Occasionally useful for dealing with heap corruption bugs, but too
+   expensive to be on by default, even in debug builds. */
+#if 0
+static void
+sanity_check_alloc_header(const alloc_header *h)
+{
+  assert(h >= first_alloc_header());
+  assert(h < alloc_header_terminator);
+  assert(h->size >= sizeof(*h));
+  if (!(h->flags & ALLOC_FLAG_HAS_WEAK_TABLE))
+    assert(!(h->flags & ALLOC_FLAG_WEAK_TABLE_MASK));
+  if (h->type) {
+    assert(h->type->name || h->type->get_name);
+  } else {
+    const unsigned *p = (const unsigned *)header_to_alloc((alloc_header *)h);
+    for (unsigned x = 0; x < (h->size - sizeof(*h)) / sizeof(unsigned); x++)
+      assert(p[x] == 0xa1b2c3d4 || p[x] == 0xa9b8c7d6);
+  }
+}
+
+static unsigned nr_sanity_checks;
+static unsigned sanity_threshold = 2383010;
+void
+LibVEX_alloc_sanity_check(void)
+{
+  bool found_cursor = false;
+  nr_sanity_checks++;
+  /* Magic number is 2383357 */
+  if (nr_sanity_checks < sanity_threshold)
+    return;
+
+  for (alloc_header *h = first_alloc_header();
+       h != alloc_header_terminator;
+       h = next_alloc_header(h)) {
+    if (h == allocation_cursor)
+      found_cursor = true;
+    sanity_check_alloc_header(h);
+  }
+  assert(found_cursor);
+  printf("Sanity passed.\n");
+}
+#else
+void
+LibVEX_alloc_sanity_check(void)
+{
+}
+#endif
