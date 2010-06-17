@@ -563,6 +563,7 @@ dump_heap(void)
 class HeapUsageVisitor : public HeapVisitor {
 public:
   unsigned long heap_used;
+  unsigned nr_allocations;
   void visit(const void *ptr);
   void account_one_allocation(alloc_header *hdr);
 };
@@ -578,7 +579,9 @@ HeapUsageVisitor::account_one_allocation(alloc_header *hdr)
     headType = t;
   }
   t->total_allocated += hdr->size;
+  t->nr_allocated++;
   this->heap_used += hdr->size;
+  this->nr_allocations++;
 }
 
 void HeapUsageVisitor::visit(const void *ptr)
@@ -600,12 +603,15 @@ void
 dump_heap_usage(void)
 {
   VexAllocType *cursor;
-  for (cursor = headType; cursor; cursor = cursor->next)
+  for (cursor = headType; cursor; cursor = cursor->next) {
     cursor->total_allocated = 0;
+    cursor->nr_allocated = 0;
+  }
   headType = NULL;
 
   HeapUsageVisitor visitor;
   visitor.heap_used = 0;
+  visitor.nr_allocations = 0;
   alloc_header *h;
   for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h))
     h->flags &= ~ ALLOC_FLAG_GC_MARK;
@@ -614,12 +620,15 @@ dump_heap_usage(void)
 
   printf("Live:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
-    printf("%8d\t%s\n", cursor->total_allocated, cursor->name);
-  printf("%8ld\ttotal\n", visitor.heap_used);
+    printf("%8d\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
+  printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
   visitor.heap_used = 0;
+  visitor.nr_allocations = 0;
 
-  for (cursor = headType; cursor; cursor = cursor->next)
+  for (cursor = headType; cursor; cursor = cursor->next) {
     cursor->total_allocated = 0;
+    cursor->nr_allocated = 0;
+  }
   headType = NULL;
   for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
     if (!h->type || (h->flags & ALLOC_FLAG_GC_MARK))
@@ -629,8 +638,8 @@ dump_heap_usage(void)
 
   printf("\nDragging:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
-    printf("%8d\t%s\n", cursor->total_allocated, cursor->name);
-  printf("%8ld\ttotal\n", visitor.heap_used);
+    printf("%8d\t%4d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
+  printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
 }
 
 void

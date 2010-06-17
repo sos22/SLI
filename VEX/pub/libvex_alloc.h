@@ -24,6 +24,7 @@ typedef
       const char *name;
       const char *(*get_name)(const void *);
       unsigned total_allocated;
+      unsigned nr_allocated;
       struct _VexAllocType *next;
    }
    VexAllocType;
