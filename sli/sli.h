@@ -596,7 +596,7 @@ private:
       with this: it keeps both the mapping and the memory chunk live.
 */
 template <typename ait>
-class PMapEntry : private GarbageCollected<PMapEntry<ait> > {
+class PMapEntry : public GarbageCollected<PMapEntry<ait> > {
 public:
 	PhysicalAddress pa;
 	MemoryChunk<ait> *mc;
@@ -614,9 +614,8 @@ public:
 };
 
 template <typename ait>
-class PMap {
+class PMap : public GarbageCollected<PMap<ait> > {
 public:
-	static VexAllocTypeWrapper<PMap<ait> > allocator;
 	static const unsigned nrHashBuckets = 1024;
 	static unsigned paHash(PhysicalAddress pa);
 	PhysicalAddress nextPa;

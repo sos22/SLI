@@ -140,11 +140,7 @@ PhysicalAddress PMap<ait>::introduce(MemoryChunk<ait> *mc)
 template <typename ait>
 PMap<ait> *PMap<ait>::empty()
 {
-	PMap<ait> *work = allocator.alloc();
-
-	memset(work, 0, sizeof(*work));
-	new (work) PMap<ait> ();
-
+	PMap<ait> *work = new PMap<ait>();
 	work->nextPa._pa = 0xbeef0000;
 	return work;	
 }
@@ -193,8 +189,7 @@ void PMap<ait>::visit(HeapVisitor &hv) const
 template <typename ait> template <typename new_type>
 PMap<new_type> *PMap<ait>::abstract() const
 {
-	PMap<new_type> *work =
-		new (PMap<new_type>::allocator.alloc()) PMap<new_type>();
+	PMap<new_type> *work = new PMap<new_type>();
 	work->nextPa = nextPa;
 	if (parent)
 		work->parent = parent->abstract<new_type>();
@@ -216,8 +211,6 @@ PMap<new_type> *PMap<ait>::abstract() const
 	}
 	return work;
 }
-
-template <typename ait> VexAllocTypeWrapper<PMap<ait> > PMap<ait>::allocator;
 
 #define MK_PMAP(t)							\
 	template MemoryChunk<t> *PMap<t>::lookup(PhysicalAddress pa,	\
