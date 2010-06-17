@@ -95,6 +95,25 @@ const char *get_name(const void *_ctxt)
 	return ctxt->cls_name();
 }
 
+template <typename t>
+class GarbageCollected {
+	static VexAllocType type;
+public:
+	static void *operator new(size_t s)
+	{
+		void *x = LibVEX_Alloc_Sized(&type, s);
+		memset(x, 0, s);
+		return x;
+	}
+	static void operator delete(void *)
+	{
+		abort();
+	}
+	virtual void visit(HeapVisitor &hv) const = 0;
+	virtual void destruct() = 0;
+};
+template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
+
 #define NAMED_CLASS static const char *cls_name() { return __PRETTY_FUNCTION__ + 19; }
 
 template <typename t, const char *(*get_name)(const void *) = get_name<t>, void (*visit)(const void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
@@ -390,7 +409,7 @@ template <typename ait> class LogWriter;
 template <typename ait> class LogRecordVexThreadState;
 
 template <typename abst_int_type>
-class Thread {
+class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
 	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details, MachineState<abst_int_type> *ms);
@@ -417,8 +436,6 @@ public:
 	IRSB *currentIRSB;
 	expression_result_array<abst_int_type> temporaries;
 	int currentIRSBOffset;
-
-	static VexAllocTypeWrapper<Thread<abst_int_type> > allocator;
 
 	abst_int_type currentControlCondition;
 
@@ -1181,38 +1198,6 @@ public:
 	}
 	NAMED_CLASS
 };
-
-template <typename t>
-class GarbageCollected {
-	static VexAllocType type;
-public:
-	static void *operator new(size_t s)
-	{
-		return LibVEX_Alloc_Sized(&type, s);
-	}
-	static void operator delete(void *)
-	{
-		abort();
-	}
-	virtual void visit(HeapVisitor &hv) const = 0;
-	virtual void destruct() = 0;
-};
-template <typename t> void visit_gced(const void *_ctxt, HeapVisitor &hv)
-{
-	const t *ctxt = (const t *)_ctxt;
-	ctxt->visit(hv);
-}
-template <typename t> void destruct_gced(void *_ctxt)
-{
-	t *ctxt = (t *)_ctxt;
-	ctxt->destruct();
-}
-template <typename t> void name_gced(void *_ctxt)
-{
-	t *ctxt = (t *)_ctxt;
-	return ctxt->cls_name();
-}
-template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_gced<t>, destruct_gced<t>, NULL, get_name<t> };
 
 template<typename t> void
 visit_container(const t &vector, HeapVisitor &hv)

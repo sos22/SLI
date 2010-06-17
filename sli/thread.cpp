@@ -17,9 +17,7 @@ Thread<ait> *Thread<ait>::initialThread(const LogRecordInitialRegisters<ait> &in
 {
 	Thread<ait> *work;
 
-	work = allocator.alloc();
-	memset(work, 0, sizeof(*work));
-	new (work) Thread<ait>();
+	work = new Thread<ait>();
 	work->tid = initRegs.thread();
 	work->regs = initRegs.regs;
 	return work;
@@ -30,9 +28,7 @@ Thread<ait> *Thread<ait>::fork(unsigned newPid)
 {
 	Thread<ait> *work;
 
-	work = allocator.alloc();
-	memset(work, 0, sizeof(*work));
-	new (work) Thread<ait>();
+	work = new Thread<ait>();
 	work->pid = newPid;
 	work->regs = regs;
 	return work;
@@ -41,8 +37,7 @@ Thread<ait> *Thread<ait>::fork(unsigned newPid)
 template <typename ait>
 Thread<ait> *Thread<ait>::dupeSelf() const
 {
-	Thread<ait> *work = allocator.alloc();
-	new (work) Thread<ait>();
+	Thread<ait> *work = new Thread<ait>();
 	*work = *this;
 	return work;
 }
@@ -97,8 +92,7 @@ EventTimestamp Thread<ait>::bumpEvent(MachineState<ait> *ms)
 template <typename ait> template <typename new_type>
 Thread<new_type> *Thread<ait>::abstract() const
 {
-	Thread<new_type> *work = Thread<new_type>::allocator.alloc();
-	memset(work, 0, sizeof(*work));
+	Thread<new_type> *work = new Thread<new_type>();
 	work->tid = tid;
 	work->nrEvents = nrEvents;
 	work->pid = pid;
@@ -142,8 +136,5 @@ void expression_result_array<ait>::abstract(expression_result_array<new_type> *o
 	}
 }
 
-template <typename ait> VexAllocTypeWrapper<Thread<ait> > Thread<ait>::allocator;
-
-#define MK_THREAD(t)					\
-	template VexAllocTypeWrapper<Thread<t> > Thread<t>::allocator
+#define MK_THREAD(t)
 
