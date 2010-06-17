@@ -651,21 +651,11 @@ public:
 };
 
 template <typename ait>
-class LogRecord : public Named {
+class LogRecord : public Named, public GarbageCollected<LogRecord<ait> > {
 	ThreadId tid;
-	static VexAllocTypeWrapper<LogRecord> allocator;
 protected:
 	void *marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const;
 public:
-	static void *operator new(size_t s)
-	{
-		return (void *)LibVEX_Alloc_Sized(&allocator.type,
-						  s);
-	}
-	static void operator delete(void *ptr)
-	{
-		abort();
-	}
 	ThreadId thread() const { return tid; }
 	LogRecord(ThreadId _tid) : tid(_tid) {}
 	virtual void *marshal(unsigned *size) const = 0;
