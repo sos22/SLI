@@ -401,8 +401,11 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     next = next_alloc_header(ah);
     if (next == alloc_header_terminator || next->type)
       break;
+    if (next == allocation_cursor)
+      allocation_cursor = ah;
     ah->size += next->size;
     heap_used += next->size;
+    poison(next, next->size, 0xaabbccdd);
     VALGRIND_MAKE_MEM_UNDEFINED((void *)((unsigned long)(ah + 1) + ah->size - sizeof(*ah) - next->size),
 				next->size);
     next = next_alloc_header(ah);
