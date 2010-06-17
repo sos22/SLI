@@ -1207,7 +1207,12 @@ template <typename t> void destruct_gced(void *_ctxt)
 	t *ctxt = (t *)_ctxt;
 	ctxt->destruct();
 }
-template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_gced<t>, destruct_gced<t>, "GarbageCollected" };
+template <typename t> void name_gced(void *_ctxt)
+{
+	t *ctxt = (t *)_ctxt;
+	return ctxt->cls_name();
+}
+template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_gced<t>, destruct_gced<t>, NULL, get_name<t> };
 
 template<typename t> void
 visit_container(const t &vector, HeapVisitor &hv)

@@ -18,6 +18,7 @@ public:
 	{
 		return new ExplorationState(ms->dupeSelf(), lf->dupeSelf());
 	}
+	NAMED_CLASS
 };
 
 class Explorer : public GarbageCollected<Explorer> {
@@ -33,6 +34,7 @@ public:
 		visit_container(grayStates, hv);
 	}
 	void destruct() {}
+	NAMED_CLASS
 };
 
 Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
@@ -348,6 +350,7 @@ public:
 
 	void visit(HeapVisitor &hv) const { hv(work); }
 	void destruct() { this->~TruncateToEvent(); }
+	NAMED_CLASS
 };
 void
 TruncateToEvent::append(const LogRecord<abstract_interpret_value> &lr,
