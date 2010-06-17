@@ -95,7 +95,7 @@ const char *get_name(const void *_ctxt)
 	return ctxt->cls_name();
 }
 
-#define NAMED_CLASS static const char *cls_name() { return __PRETTY_FUNCTION__; }
+#define NAMED_CLASS static const char *cls_name() { return __PRETTY_FUNCTION__ + 19; }
 
 template <typename t, const char *(*get_name)(const void *) = get_name<t>, void (*visit)(const void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
 class VexAllocTypeWrapper {
