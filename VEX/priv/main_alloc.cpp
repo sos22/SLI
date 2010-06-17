@@ -638,7 +638,7 @@ dump_heap_usage(void)
 
   printf("\nDragging:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
-    printf("%8d\t%4d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
+    printf("%8d\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
   printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
 }
 
