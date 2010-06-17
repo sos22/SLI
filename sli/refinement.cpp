@@ -100,7 +100,7 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
 				if (thr->cannot_make_progress)
 					continue;
 				Interpreter<abstract_interpret_value> i(s->ms);
-				i.runToFailure(thr->tid, s->lf, 1000);
+				i.runToFailure(thr->tid, s->lf, 100000);
 			}
 			futures.push_back(s);
 			continue;
@@ -126,7 +126,7 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
 				i.runToAccessLoggingEvents(tid, r.value + 1, newGray->lf);
 			} else {
 				printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
-				i.runToFailure(tid, newGray->lf, 1000);
+				i.runToFailure(tid, newGray->lf, 100000);
 			}
 
 			grayStates.push_back(newGray);
