@@ -723,7 +723,7 @@ public:
 	template <typename new_type> LogReader<new_type> *abstract() const;
 };
 
-class LogFile : public LogReader<unsigned long> {
+class LogFile : public LogReader<unsigned long>, public GarbageCollected<LogFile> {
 	int fd;
 	struct _ptr {
 		uint64_t off;
@@ -736,7 +736,6 @@ class LogFile : public LogReader<unsigned long> {
 		return *(_ptr *)p.cls_data;
 	}
 	_ptr forcedEof;
-	static VexAllocTypeWrapper<LogFile> allocator;
 
 	LogFile() {}
 public:
