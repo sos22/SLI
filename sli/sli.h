@@ -596,8 +596,7 @@ private:
       with this: it keeps both the mapping and the memory chunk live.
 */
 template <typename ait>
-class PMapEntry {
-	static VexAllocTypeWrapper<class PMapEntry > allocator;
+class PMapEntry : private GarbageCollected<PMapEntry<ait> > {
 public:
 	PhysicalAddress pa;
 	MemoryChunk<ait> *mc;

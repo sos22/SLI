@@ -9,7 +9,7 @@ PMapEntry<ait> *PMapEntry<ait>::alloc(PhysicalAddress pa,
 				      MemoryChunk<ait> *mc,
 				      bool readonly)
 {
-	PMapEntry<ait> *work = allocator.alloc();
+	PMapEntry<ait> *work = new PMapEntry<ait>();
 	work->pa = pa;
 	work->mc = mc;
 	work->readonly = readonly;
@@ -218,7 +218,6 @@ PMap<new_type> *PMap<ait>::abstract() const
 }
 
 template <typename ait> VexAllocTypeWrapper<PMap<ait> > PMap<ait>::allocator;
-template <typename ait> VexAllocTypeWrapper<PMapEntry<ait> > PMapEntry<ait>::allocator;
 
 #define MK_PMAP(t)							\
 	template MemoryChunk<t> *PMap<t>::lookup(PhysicalAddress pa,	\
