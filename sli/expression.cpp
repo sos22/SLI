@@ -70,13 +70,6 @@ load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestam
 	return x;
 }
 
-VexAllocTypeWrapper<ConstExpression> ConstExpression::allocator;
-VexAllocTypeWrapper<ImportExpression> ImportExpression::allocator;
-VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
-
-#define mk_op_allocator(op)						\
-	VexAllocTypeWrapper<op> op::allocator
-
 #define binop_float_rip(nme)						\
 	do {								\
 		ExpressionRip *lrip = dynamic_cast<ExpressionRip *>(l);	\
@@ -111,7 +104,6 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 	} while (0)
 
 #define mk_binop(nme, op, associates, logical)				\
-	mk_op_allocator(nme);						\
 	bool nme::isLogical() const { return logical; }			\
 	Expression *nme::get(Expression *l, Expression *r)		\
 	{								\
@@ -125,7 +117,7 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 				return nme::get(ll->l, nme::get(ll->r, r)); \
 		}							\
 		binop_float_rip(nme);					\
-		nme *work = new (allocator.alloc()) nme();		\
+		nme *work = new nme();					\
 		work->l = l;						\
 		work->r = r;						\
 		return intern(work);					\
@@ -146,7 +138,6 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 	} while (0)
 
 #define mk_unop(nme, op)						\
-	mk_op_allocator(nme);						\
         bool nme::isLogical() const { return false; }			\
 	Expression *nme::get(Expression *l)				\
 	{								\
@@ -154,7 +145,7 @@ VexAllocTypeWrapper<LoadExpression> LoadExpression::allocator;
 		if (l->isConstant(&lc))					\
 			return ConstExpression::get(op lc);		\
 		unop_float_rip(nme);					\
-		nme *work = new (allocator.alloc()) nme();		\
+		nme *work = new nme();					\
 		work->l = l;						\
 		return intern(work);					\
 	}
@@ -191,7 +182,6 @@ Expression *logicalnot::get(Expression *l)
 			       ConstExpression::get(1));
 }
 
-mk_op_allocator(bitsaturate);
 bool bitsaturate::isLogical() const { return true; }
 Expression *bitsaturate::get(Expression *l)
 {
@@ -205,12 +195,11 @@ Expression *bitsaturate::get(Expression *l)
 	if (l->isLogical())
 		return l;
 	unop_float_rip(bitsaturate);
-	bitsaturate *work = new (allocator.alloc()) bitsaturate;
+	bitsaturate *work = new bitsaturate();
 	work->l = l;
 	return intern(work);
 }
 
-mk_op_allocator(bitwisenot);
 bool bitwisenot::isLogical() const { return false; }
 Expression *bitwisenot::get(Expression *l)
 {
@@ -221,12 +210,11 @@ Expression *bitwisenot::get(Expression *l)
 	if (bitwisenot *bn = dynamic_cast<bitwisenot *>(l))
 		return bn->l;
 	unop_float_rip(bitwisenot);
-	bitwisenot *work = new (allocator.alloc()) bitwisenot;
+	bitwisenot *work = new bitwisenot();
 	work->l = l;
 	return intern(work);
 }
 
-mk_op_allocator(ternarycondition);
 bool ternarycondition::isLogical() const
 {
 	return t->isLogical() && f->isLogical();
@@ -247,14 +235,13 @@ Expression *ternarycondition::get(Expression *cond, Expression *t, Expression *f
 	if (t->isConstant(&tv) && f->isConstant(&fv) &&
 	    tv == 1 && fv == 0)
 		return bitsaturate::get(cond);
-	ternarycondition *work = new (allocator.alloc()) ternarycondition();
+	ternarycondition *work = new ternarycondition();
 	work->cond = cond;
 	work->t = t;
 	work->f = f;
 	return intern(work);
 }
 
-mk_op_allocator(plus);							
 bool plus::isLogical() const { return false; }
 Expression *plus::get(Expression *l, Expression *r)			
 {									
@@ -287,7 +274,7 @@ Expression *plus::get(Expression *l, Expression *r)
 
 	if (plus *ll = dynamic_cast<plus *>(l))				
 		return plus::get(ll->l, plus::get(ll->r, r));		
-	plus *work = new (allocator.alloc()) plus();			
+	plus *work = new plus();			
 	work->l = l;							
 	work->r = r;							
 	return intern(work);						
@@ -331,7 +318,6 @@ sane_lshift(unsigned long r, long cntr)
 		return r << cntr;
 }
 
-mk_op_allocator(lshift);
 bool lshift::isLogical() const { return false; }
 Expression *lshift::get(Expression *l, Expression *r)			
 {									
@@ -371,13 +357,12 @@ Expression *lshift::get(Expression *l, Expression *r)
 			}
 		}
 	}
-	lshift *work = new (allocator.alloc()) lshift();			
+	lshift *work = new lshift();			
 	work->l = l;							
 	work->r = r;							
 	return intern(work);						
 }
 
-mk_op_allocator(rshift);
 bool rshift::isLogical() const { return false; }
 Expression *rshift::get(Expression *l, Expression *r)			
 {									
@@ -395,13 +380,12 @@ Expression *rshift::get(Expression *l, Expression *r)
 	} else if (rIsConstant && rc == 0)
 		return l;
 	binop_float_rip(rshift);
-	rshift *work = new (allocator.alloc()) rshift();			
+	rshift *work = new rshift();			
 	work->l = l;							
 	work->r = r;							
 	return intern(work);						
 }
 
-mk_op_allocator(rshiftarith);
 bool rshiftarith::isLogical() const { return false; }
 Expression *rshiftarith::get(Expression *l, Expression *r)			
 {									
@@ -419,13 +403,12 @@ Expression *rshiftarith::get(Expression *l, Expression *r)
 	} else if (rIsConstant && rc == 0)
 		return l;
 	binop_float_rip(rshiftarith);
-	rshiftarith *work = new (allocator.alloc()) rshiftarith();
+	rshiftarith *work = new rshiftarith();
 	work->l = l;
 	work->r = r;							
 	return intern(work);						
 }
 
-mk_op_allocator(bitwiseor);
 bool bitwiseor::isLogical() const { return l->isLogical() && r->isLogical(); }
 Expression *bitwiseor::get(Expression *l, Expression *r)			
 {									
@@ -464,13 +447,12 @@ Expression *bitwiseor::get(Expression *l, Expression *r)
 	
 	if (bitwiseor *ll = dynamic_cast<bitwiseor *>(l))
 		return bitwiseor::get(ll->l, bitwiseor::get(ll->r, r));		
-	bitwiseor *work = new (allocator.alloc()) bitwiseor();
+	bitwiseor *work = new bitwiseor();
 	work->l = l;							
 	work->r = r;							
 	return intern(work);						
 }
 
-mk_op_allocator(bitwisexor);
 bool bitwisexor::isLogical() const { return l->isLogical() && r->isLogical(); }
 Expression *bitwisexor::get(Expression *l, Expression *r)			
 {									
@@ -489,13 +471,12 @@ Expression *bitwisexor::get(Expression *l, Expression *r)
 
 	if (bitwiseor *ll = dynamic_cast<bitwiseor *>(l))
 		return bitwisexor::get(ll->l, bitwisexor::get(ll->r, r));		
-	bitwisexor *work = new (allocator.alloc()) bitwisexor();
+	bitwisexor *work = new bitwisexor();
 	work->l = l;							
 	work->r = r;							
 	return intern(work);						
 }
 
-mk_op_allocator(bitwiseand);
 bool bitwiseand::isLogical() const { return l->isLogical() || r->isLogical(); }
 Expression *bitwiseand::get(Expression *l, Expression *r)			
 {
@@ -571,7 +552,7 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 			return r;
 	}
 
-	bitwiseand *work = new (allocator.alloc()) bitwiseand();
+	bitwiseand *work = new bitwiseand();
 	work->l = l;
 	work->r = r;
 	return intern(work);						
@@ -611,7 +592,6 @@ ImportOrigin *ImportOriginLogfile::get()
 	return w;
 }
 
-mk_op_allocator(equals);							
 bool equals::isLogical() const { return true; }			
 Expression *equals::get(Expression *l, Expression *r)		
 {									
@@ -639,13 +619,12 @@ Expression *equals::get(Expression *l, Expression *r)
 
 	binop_float_rip(equals);
 
-	equals *work = new (allocator.alloc()) equals();
+	equals *work = new equals();
 	work->l = l;							
 	work->r = r;							
 	return intern(work);						
 }
 
-mk_op_allocator(onlyif);
 bool onlyif::isLogical() const { return r->isLogical(); }
 Expression *onlyif::get(Expression *l, Expression *r)
 {
@@ -656,19 +635,13 @@ Expression *onlyif::get(Expression *l, Expression *r)
 		else
 			return BottomExpression::get();
 	}
-	onlyif *work= new (allocator.alloc()) onlyif();
+	onlyif *work= new onlyif();
 	work->l = l;
 	work->r = r;
 	return intern(work);
 }
 
-mk_op_allocator(BottomExpression);
 BottomExpression *BottomExpression::bottom;
-
-mk_op_allocator(ExpressionLastStore);
-mk_op_allocator(ExpressionHappensBefore);
-mk_op_allocator(ExpressionRip);
-mk_op_allocator(ExpressionBadPointer);
 
 #define TRIV_EXPR_MAPPER(c)			\
 	Expression *				\
@@ -747,14 +720,13 @@ ExpressionMapper::idmap(Expression *e)
 const Relevance Relevance::irrelevant(10000);
 const Relevance Relevance::perfect(0);
 
-mk_op_allocator(alias);
 bool alias::isLogical() const { return l->isLogical(); }
 Expression *alias::get(Expression *l)
 {
 	unsigned long lc;
 	if (l->isConstant(&lc))
 		return ConstExpression::get(lc);
-	alias *work = new (allocator.alloc()) alias();
+	alias *work = new alias();
 	work->l = l;
 	return intern(work);
 }

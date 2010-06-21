@@ -1789,7 +1789,7 @@ public:
 	virtual void visit(Expression *e) = 0;
 };
 
-class Expression : public Named {
+class Expression : public Named, public GarbageCollected<Expression> {
 	static const unsigned nr_heads = 262147;
 	static Expression *heads[nr_heads];
 	static unsigned chain_lengths[nr_heads];
@@ -1866,6 +1866,9 @@ public:
 		tot_outstanding--;
 		Named::destruct();
 	}
+
+	virtual void visit(HeapVisitor &hv) const = 0;
+	NAMED_CLASS
 };
 
 class UnrefinableExpression : public Expression {
@@ -1880,7 +1883,6 @@ public:
 };
 
 class BottomExpression : public UnrefinableExpression {
-	static VexAllocTypeWrapper<BottomExpression> allocator;
 	static BottomExpression *bottom;
 protected:
 	unsigned _hash() const { return 0x1234567; }
@@ -1891,17 +1893,15 @@ public:
 	static Expression *get()
 	{
 		if (!bottom)
-			bottom = new (allocator.alloc()) BottomExpression();
+			bottom = new BottomExpression();
 		return bottom;
 	}
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &f) { return f.map(this); }
-	NAMED_CLASS
 };
 
 class ConstExpression : public UnrefinableExpression {
-	static VexAllocTypeWrapper<ConstExpression> allocator;
 public:
         unsigned long v;
 protected:
@@ -1920,7 +1920,7 @@ public:
 	bool isLogical() const { return v == 0 || v == 1; }
 	static Expression *get(unsigned long v)
 	{
-		ConstExpression *work = new (allocator.alloc()) ConstExpression();
+		ConstExpression *work = new ConstExpression();
 		work->v = v;
 		return intern(work);
 	}
@@ -1928,12 +1928,9 @@ public:
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
-
-	NAMED_CLASS
 };
 
 class ImportExpression : public UnrefinableExpression {
-	static VexAllocTypeWrapper<ImportExpression> allocator;
 public:
         unsigned long v;
 	ImportOrigin *origin;
@@ -1947,7 +1944,7 @@ protected:
 public:
 	static Expression *get(unsigned long v, ImportOrigin *origin)
 	{
-		ImportExpression *work = new (allocator.alloc()) ImportExpression();
+		ImportExpression *work = new ImportExpression();
 		work->v = v;
 		work->origin = origin;
 		return intern(work);
@@ -1955,7 +1952,6 @@ public:
 	void visit(HeapVisitor &hv) const {hv(origin);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
-	NAMED_CLASS
 };
 
 class ExpressionLastStore : public Expression {
@@ -1964,7 +1960,6 @@ public:
 	EventTimestamp store;
 	Expression *vaddr;
 private:
-	static VexAllocTypeWrapper<ExpressionLastStore> allocator;
 	ExpressionLastStore(EventTimestamp _load, EventTimestamp _store,
 			    Expression *_vaddr)
 		: load(_load), store(_store), vaddr(_vaddr)
@@ -2002,7 +1997,7 @@ public:
 	static Expression *get(EventTimestamp load, EventTimestamp store,
 			       Expression *vaddr)
 	{
-		return new (allocator.alloc()) ExpressionLastStore(load, store, vaddr);
+		return new ExpressionLastStore(load, store, vaddr);
 	}
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
@@ -2025,7 +2020,6 @@ public:
 		else
 			return Relevance(r, vaddr->relevance(ev, r + 1, high_thresh));
 	}
-	NAMED_CLASS
 };
 
 class ExpressionHappensBefore : public Expression {
@@ -2033,7 +2027,6 @@ public:
 	EventTimestamp before;
 	EventTimestamp after;
 private:
-	static VexAllocTypeWrapper<ExpressionHappensBefore> allocator;
 	ExpressionHappensBefore(EventTimestamp _before, EventTimestamp _after)
 		: before(_before), after(_after)
 	{
@@ -2072,7 +2065,7 @@ public:
 			else
 				return ConstExpression::get(0);
 		} else {
-			return new (allocator.alloc()) ExpressionHappensBefore(before, after);
+			return new ExpressionHappensBefore(before, after);
 		}
 	}
 	EventTimestamp timestamp() const { return after; }
@@ -2092,11 +2085,9 @@ public:
 		return Relevance(Relevance(before, ev),
 				 Relevance(after, ev));
 	}
-	NAMED_CLASS
 };
 
 class LoadExpression : public Expression {
-	static VexAllocTypeWrapper<LoadExpression> allocator;
 public:
 	Expression *val;
 	Expression *addr;
@@ -2129,7 +2120,7 @@ public:
 	static Expression *get(EventTimestamp when, Expression *val, Expression *addr,
 			       Expression *storeAddr, EventTimestamp store, unsigned size)
 	{
-		LoadExpression *work = new (allocator.alloc()) LoadExpression();
+		LoadExpression *work = new LoadExpression();
 		work->val = val;
 		work->addr = addr;
 		work->storeAddr = storeAddr;
@@ -2161,8 +2152,6 @@ public:
 				  addr->relevance(ev, r + 1, high_thresh)),
 			storeAddr->relevance(ev, r + 1, high_thresh));
 	}
-
-	NAMED_CLASS
 };
 
 class BinaryExpression : public Expression {
@@ -2218,7 +2207,6 @@ public:
 #define mk_binop_class(nme, pp, m)					\
 	class nme : public BinaryExpression {				\
 	protected:							\
-	        static VexAllocTypeWrapper<nme> allocator;		\
 		Expression *semiDupe(Expression *l,			\
 				     Expression *r) const		\
 		{							\
@@ -2245,7 +2233,6 @@ public:
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression *get(Expression *_l, Expression *_r);	\
-		NAMED_CLASS						\
 	}
 
 mk_binop_class(lshift, <<, );
@@ -2310,7 +2297,6 @@ public:
 
 #define mk_unop_class(nme, m)						\
 	class nme : public UnaryExpression {				\
-		static VexAllocTypeWrapper<nme> allocator;		\
 	protected:							\
 	        Expression *semiDupe(Expression *l) const		\
 		{							\
@@ -2335,7 +2321,6 @@ public:
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression* get(Expression *_l);			\
-		NAMED_CLASS						\
 	}
 
 mk_unop_class(logicalnot, );
@@ -2366,8 +2351,6 @@ mk_unop_class(alias,
 class ternarycondition : public Expression {
 public:
 	Expression *cond, *t, *f;
-private:
-	static VexAllocTypeWrapper<ternarycondition> allocator;
 protected:
 	char *mkName() const
 	{
@@ -2438,7 +2421,6 @@ public:
 		Relevance fr = f->relevance(ev, low_thresh + 1, high_thresh);
 		return Relevance(c, Relevance(tr, fr));
 	}
-	NAMED_CLASS
 };
 
 struct abstract_interpret_value {
@@ -2844,7 +2826,6 @@ public:
 	LogReader<abstract_interpret_value> *model_execution;
 	LogReaderPtr model_exec_start;
 private:
-	static VexAllocTypeWrapper<ExpressionRip> allocator;
 	ExpressionRip(ThreadId _tid, History *_history, Expression *_cond,
 		      LogReader<abstract_interpret_value> *model,
 		      LogReaderPtr start)
@@ -2888,8 +2869,8 @@ public:
 			       LogReader<abstract_interpret_value> *model,
 			       LogReaderPtr start)
 	{
-		return intern(new (allocator.alloc()) ExpressionRip(tid, history, cond,
-								    model, start));
+		return intern(new ExpressionRip(tid, history, cond,
+						model, start));
 	}
 	void visit(HeapVisitor &hv) const
 	{
@@ -2919,8 +2900,6 @@ public:
 		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
 		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
 	}
-
-	NAMED_CLASS
 };
 
 /* A bad pointer expression asserts that a particular memory location
@@ -2930,7 +2909,6 @@ public:
 	Expression *addr;
 	EventTimestamp when;
 private:
-	static VexAllocTypeWrapper<ExpressionBadPointer> allocator;
 	ExpressionBadPointer(EventTimestamp _when, Expression *_addr)
 		: addr(_addr), when(_when)
 	{
@@ -2953,7 +2931,7 @@ protected:
 public:
 	static Expression *get(EventTimestamp _when, Expression *_addr)
 	{
-		return new (allocator.alloc()) ExpressionBadPointer(_when, _addr);
+		return new ExpressionBadPointer(_when, _addr);
 	}
 	void visit(HeapVisitor &hv) const { hv(addr); }
 	void visit(ExpressionVisitor &ev) { ev.visit(this); addr->visit(ev); }
@@ -2971,7 +2949,6 @@ public:
 		Relevance r = Relevance(when, ev);
 		return Relevance(r, addr->relevance(ev, r + 1, high));
 	}
-	NAMED_CLASS
 };
 
 static inline void sanity_check_ait(unsigned long x) {}
