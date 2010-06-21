@@ -885,8 +885,7 @@ public:
 template <typename ait> void destroy_memlog(void *_ctxt);
 
 template <typename ait>
-class MemLog : public LogReader<ait>, public LogWriter<ait> {
-	static VexAllocTypeWrapper<MemLog<ait> > allocator;
+class MemLog : public LogReader<ait>, public LogWriter<ait>, public GarbageCollected<MemLog<ait> > {
 	std::vector<LogRecord<ait> *> *content;
 	unsigned offset;
 	const MemLog<ait> *parent;
@@ -906,7 +905,6 @@ protected:
 	MemLog();
 
 public:
-	static void *operator new(size_t s);
 	static MemLog *emptyMemlog();
 	static LogReaderPtr startPtr() { return mkPtr(0); }
 	MemLog<ait> *dupeSelf() const;
