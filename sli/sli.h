@@ -701,6 +701,7 @@ public:
 	SignalHandlers(const LogRecordInitialSighandlers<ait> &init) {
 		memcpy(handlers, init.handlers, sizeof(init.handlers));
 	}
+	SignalHandlers() { memset(handlers, 0, sizeof(handlers)); }
 	void dumpSnapshot(LogWriter<ait> *lw) const;
 	template <typename new_type> void abstract(SignalHandlers<new_type> *out) const
 	{
@@ -757,19 +758,15 @@ public:
 };
 
 template <typename abst_int_type>
-class MachineState {
+class MachineState : public GarbageCollected<MachineState<abst_int_type> > {
 public:
 	LibvexVector<Thread<abst_int_type> > *threads;
-
-	static VexAllocTypeWrapper<MachineState<abst_int_type> > allocator;
 
 	bool exitted;
 	abst_int_type exit_status;
 	ThreadId nextTid;
 
 private:
-	/* DNI */
-	MachineState();
 	~MachineState();
 	static MachineState *initialMachineState(AddressSpace<abst_int_type> *as,
 						 const LogRecordInitialSighandlers<abst_int_type> &handlers);

@@ -34,9 +34,7 @@ template<typename abs_int_type>
 MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(AddressSpace<abs_int_type> *as,
 									    const LogRecordInitialSighandlers<abs_int_type> &handlers)
 {
-	MachineState<abs_int_type> *work = allocator.alloc();
-
-	memset(work, 0, sizeof(*work));
+	MachineState<abs_int_type> *work = new MachineState<abs_int_type>();
 
 	work->threads = LibvexVector<Thread<abs_int_type> >::empty();
 	work->nextTid = ThreadId(1);
@@ -103,7 +101,7 @@ void MachineState<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 template<typename ait>
 MachineState<ait> *MachineState<ait>::dupeSelf() const
 {
-	MachineState<ait> *work = allocator.alloc();
+	MachineState<ait> *work = new MachineState<ait>();
 	*work = *this;
 
 	work->addressSpace = addressSpace->dupeSelf();
@@ -133,9 +131,8 @@ bool MachineState<ait>::crashed() const
 template <typename ait> template <typename new_type>
 MachineState<new_type> *MachineState<ait>::abstract() const
 {
-	MachineState<new_type> *work = MachineState<new_type>::allocator.alloc();
+	MachineState<new_type> *work = new MachineState<new_type>();
 
-	memset(work, 0, sizeof(*work));
 	work->exitted = exitted;
 	work->exit_status = new_type::import(exit_status, ImportOriginInitialValue::get());
 	work->nextTid = nextTid;
@@ -149,15 +146,12 @@ MachineState<new_type> *MachineState<ait>::abstract() const
 }
 
 
-template <typename ait> VexAllocTypeWrapper<MachineState<ait> > MachineState<ait>::allocator;
-
 #define MK_MACHINE_STATE(t)						\
 	template MachineState<t> *MachineState<t>::dupeSelf() const;	\
 	template bool MachineState<t>::crashed() const;			\
 	template MachineState<t> *MachineState<t>::initialMachineState(AddressSpace<t> *as, \
 								       const LogRecordInitialSighandlers<t> &handlers); \
 	template void MachineState<t>::dumpSnapshot(LogWriter<t> *lw) const; \
-	template VexAllocTypeWrapper<MachineState<t> > MachineState<t>::allocator; \
 	template MachineState<t> *MachineState<t>::initialMachineState(LogReader<t> *lf, \
 								       LogReaderPtr ptr, \
 								       LogReaderPtr *end)
