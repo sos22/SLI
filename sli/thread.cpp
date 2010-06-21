@@ -85,7 +85,8 @@ void Thread<ait>::visit(HeapVisitor &hv) const
 template <typename ait>
 EventTimestamp Thread<ait>::bumpEvent(MachineState<ait> *ms)
 {
-	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++);
+	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++,
+				   force(regs.rip()));
 	return lastEvent;
 }
 
