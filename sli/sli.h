@@ -2600,7 +2600,7 @@ template<> unsigned long ternary(unsigned long cond,
 }
 
 template <>
-class MemoryChunk<abstract_interpret_value> {
+class MemoryChunk<abstract_interpret_value> : public GarbageCollected<MemoryChunk<abstract_interpret_value> > {
 public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk<abstract_interpret_value> *allocate();
@@ -2624,7 +2624,6 @@ public:
 	MCLookasideEntry *headLookaside;
 	PhysicalAddress base;
 
-	static VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > allocator;
 	static VexAllocType mcl_allocator;
 
 	void visit(HeapVisitor &hv) const

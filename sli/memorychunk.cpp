@@ -38,8 +38,7 @@ EventTimestamp MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *
 template <>
 MemoryChunk<abstract_interpret_value> *MemoryChunk<unsigned long>::abstract() const
 {
-	MemoryChunk<abstract_interpret_value> *work =
-		MemoryChunk<abstract_interpret_value>::allocator.alloc();
+	MemoryChunk<abstract_interpret_value> *work = new MemoryChunk<abstract_interpret_value>();
 	work->headLookaside = NULL;
 	work->underlying = this;
 	work->base = base;
@@ -48,14 +47,12 @@ MemoryChunk<abstract_interpret_value> *MemoryChunk<unsigned long>::abstract() co
 
 MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::allocate()
 {
-	void *r = allocator.alloc();
-	memset(r, 0, sizeof(MemoryChunk<abstract_interpret_value>));
-	return new (r) MemoryChunk<abstract_interpret_value>();
+	return new MemoryChunk<abstract_interpret_value>();
 }
 
 MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::dupeSelf() const
 {
-	MemoryChunk<abstract_interpret_value> *r = allocator.alloc();
+	MemoryChunk<abstract_interpret_value> *r = new MemoryChunk<abstract_interpret_value>();
 	memcpy(r, this, sizeof(*r));
 	return r;
 }
@@ -112,8 +109,6 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 	}
 	headLookaside = newmcl;
 }
-
-VexAllocTypeWrapper<MemoryChunk<abstract_interpret_value> > MemoryChunk<abstract_interpret_value>::allocator;
 
 static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
 {
