@@ -277,8 +277,7 @@ template <typename ait>
 AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(ait _initialBrk)
 {
 	unsigned long initialBrk = force(_initialBrk);
-	AddressSpace<ait> *work = allocator.alloc();
-	memset(work, 0, sizeof(*work));
+	AddressSpace<ait> *work = new AddressSpace<ait>();
 	work->brkptr = initialBrk;
 	work->brkMapPtr = initialBrk + 4096;
 	work->pmap = PMap<ait>::empty();
@@ -289,7 +288,7 @@ AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(ait _initialBrk)
 template <typename ait>
 AddressSpace<ait> *AddressSpace<ait>::dupeSelf() const
 {
-	AddressSpace<ait> *work = allocator.alloc();
+	AddressSpace<ait> *work = new AddressSpace<ait>();
 	*work = *this;
 	work->pmap = pmap->dupeSelf();
 	work->vamap = vamap->dupeSelf();
@@ -368,7 +367,7 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 template <typename ait> template <typename new_type>
 AddressSpace<new_type> *AddressSpace<ait>::abstract() const
 {
-	AddressSpace<new_type> *work = new (AddressSpace<new_type>::allocator.alloc()) AddressSpace<new_type>();
+	AddressSpace<new_type> *work = new AddressSpace<new_type>();
 
 	work->brkptr = brkptr;
 	work->brkMapPtr = brkMapPtr;
@@ -377,7 +376,4 @@ AddressSpace<new_type> *AddressSpace<ait>::abstract() const
 	return work;
 }
 
-template <typename ait> VexAllocTypeWrapper<AddressSpace<ait> > AddressSpace<ait>::allocator;
-
-#define MK_ADDRESS_SPACE(t)						\
-	template VexAllocTypeWrapper<AddressSpace<t> > AddressSpace<t>::allocator;
+#define MK_ADDRESS_SPACE(t)

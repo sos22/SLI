@@ -1688,14 +1688,12 @@ public:
 };
 
 template <typename ait>
-class AddressSpace {
+class AddressSpace : public GarbageCollected<AddressSpace<ait> > {
 public:
 	unsigned long brkptr;
 	unsigned long brkMapPtr;
 	VAMap *vamap;
 	PMap<ait> *pmap;
-
-	static VexAllocTypeWrapper<AddressSpace<ait> > allocator;
 
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
