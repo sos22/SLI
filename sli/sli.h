@@ -924,7 +924,7 @@ public:
 };
 
 template <typename ait>
-class ThreadEvent : public Named {
+class ThreadEvent : public Named, public GarbageCollected<ThreadEvent<ait> > {
 protected:
 	ThreadEvent(EventTimestamp _when) : when(_when) {}
 public:
@@ -939,13 +939,15 @@ public:
 	~ThreadEvent() { abort(); }
 
 	virtual void visit(HeapVisitor &hv) const {};
+	virtual void destruct() {}
+
+	NAMED_CLASS
 };
 
 template <typename ait>
 class RdtscEvent : public ThreadEvent<ait> {
 	IRTemp tmp;
 	RdtscEvent(EventTimestamp when, IRTemp _tmp) : ThreadEvent<ait>(when), tmp(_tmp) {};
-	static VexAllocTypeWrapper<RdtscEvent<ait> > allocator;
 	~RdtscEvent();
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
@@ -953,7 +955,7 @@ public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp temp)
-	{ return new (allocator.alloc()) RdtscEvent<ait>(when, temp); }
+	{ return new RdtscEvent<ait>(when, temp); }
 	ThreadEvent<ait> *dupe() const { return get(this->when, tmp); }
 	NAMED_CLASS
 };
@@ -974,7 +976,6 @@ class LoadEvent : public ThreadEvent<ait> {
 		size(_size)
 	{
 	}
-	static VexAllocTypeWrapper<LoadEvent<ait> > allocator;
 protected:
 	virtual char *mkName() const { return my_asprintf("load(%s, %d, %d)", name_aiv(addr), tmp, size); }
 public:
@@ -982,8 +983,7 @@ public:
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
 	{
-		void *b = allocator.alloc();
-		return new (b) LoadEvent<ait>(when, _tmp, _addr, _size);
+		return new LoadEvent<ait>(when, _tmp, _addr, _size);
 	}
 	ThreadEvent<ait> *dupe() const { return get(this->when, tmp, addr, size); }
 	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); ThreadEvent<ait>::visit(hv); }
@@ -999,7 +999,6 @@ public:
 	expression_result<ait> data;
 private:
 	StoreEvent(EventTimestamp when, ait addr, unsigned size, expression_result<ait> data);
-	static VexAllocTypeWrapper<StoreEvent<ait> > allocator;
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
@@ -1007,8 +1006,7 @@ public:
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
 	{
-		void *b = allocator.alloc();
-		return new (b) StoreEvent<ait>(when, _addr, _size, data);
+		return new StoreEvent<ait>(when, _addr, _size, data);
 	}
 	ThreadEvent<ait> *dupe() const { return get(this->when, addr, size, data); }
 
@@ -1026,7 +1024,6 @@ public:
 	ait reg2;
 	ait reg3;
 	ait reg4;
-	static VexAllocTypeWrapper<InstructionEvent<ait> > allocator;
 	InstructionEvent(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
 			 ait _reg2, ait _reg3, ait _reg4) :
 		ThreadEvent<ait>(when),
@@ -1048,8 +1045,7 @@ public:
 	static InstructionEvent<ait> *get(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
 					  ait _reg2, ait _reg3, ait _reg4)
 	{
-		void *b = allocator.alloc();
-		return new (b) InstructionEvent<ait>(when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
+		return new InstructionEvent<ait>(when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
 	}
 	ThreadEvent<ait> *dupe() const { return get(this->when, rip, reg0, reg1, reg2, reg3, reg4); }
 
@@ -1073,7 +1069,6 @@ class CasEvent : public ThreadEvent<ait> {
 	expression_result<ait> data;
 	expression_result<ait> expected;
 	unsigned size;
-	static VexAllocTypeWrapper<CasEvent<ait> > allocator;
 	CasEvent(EventTimestamp when,
 		 IRTemp _dest,
 		 expression_result<ait> _addr,
@@ -1109,8 +1104,7 @@ public:
 				     expression_result<ait> _expected,
 				     unsigned _size)
 	{
-		void *b = allocator.alloc();
-		return new (b) CasEvent<ait>(when, _dest, _addr, _data, _expected, _size);
+		return new CasEvent<ait>(when, _dest, _addr, _data, _expected, _size);
 	}
 	ThreadEvent<ait> *dupe() const { return get(this->when, dest, addr, data, expected, size); }
 
@@ -1138,13 +1132,12 @@ protected:
 		return my_asprintf("syscall");
 	}
 	SyscallEvent(EventTimestamp when) : ThreadEvent<ait>(when) {}
-	static VexAllocTypeWrapper<SyscallEvent<ait> > allocator;
 public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	ThreadEvent<ait> *dupe() const { return get(this->when); }
 	static ThreadEvent<ait> *get(EventTimestamp when)
-	{ return new (allocator.alloc()) SyscallEvent(when); }
+	{ return new SyscallEvent(when); }
 	NAMED_CLASS
 };
 
@@ -1159,7 +1152,6 @@ public:
 		virtaddr(_va)
 	{
 	}
-	static VexAllocTypeWrapper<SignalEvent<ait> > allocator;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d)", signr);
@@ -1170,8 +1162,7 @@ public:
 
 	static ThreadEvent<ait> *get(EventTimestamp when, unsigned _signr, ait _virtaddr)
 	{
-		void *b = allocator.alloc();
-		return new (b) SignalEvent<ait>(when, _signr, _virtaddr);
+		return new SignalEvent<ait>(when, _signr, _virtaddr);
 	}
 	ThreadEvent<ait> *dupe() const { return get(this->when, signr, virtaddr); }
 
