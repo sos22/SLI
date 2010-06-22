@@ -684,8 +684,10 @@ considerPotentialFixes(Expression *expr)
 	for (std::set<CSCandidate>::iterator it = candidates.begin();
 	     it != candidates.end();
 	     it++) {
-		printf("Candidate: %d:%lx->%lx;%d:%lx->%lx\n",
-		       it->tid1start.tid._tid(), it->tid1start.idx, it->tid1end.idx,
-		       it->tid2start.tid._tid(), it->tid2start.idx, it->tid2end.idx);
+		printf("Candidate: %d:%lx@%lx->%lx@%lx;%d:%lx@%lx->%lx@%lx\n",
+		       it->tid1start.tid._tid(), it->tid1start.idx, it->tid1start.rip,
+		       it->tid1end.idx, it->tid1end.rip,
+		       it->tid2start.tid._tid(), it->tid2start.idx, it->tid2start.rip,
+		       it->tid2end.idx, it->tid2end.rip);
 	}
 }

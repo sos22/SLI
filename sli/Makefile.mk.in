@@ -1,4 +1,4 @@
-targets="slir crop symexec crashreason cftrace"
+targets="slir crop symexec crashreason cftrace binpatch"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog,expression,events}.cpp
@@ -26,20 +26,13 @@ ${input_base}/instantiation.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 
 slir.a: \$(SLIR_OBJECTS)
 	rm -f \$@ ; ar rcs \$@ \$^
+EOF
 
-slir: ${input_base}/slir.o
-	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
-
-crop: ${input_base}/crop.o
-	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
-
-symexec: ${input_base}/symexec.o
-	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
-
-crashreason: ${input_base}/crashreason.o
-	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
-
-cftrace: ${input_base}/cftrace.o
+	for t in $targets
+	do
+	    cat <<EOF
+$t: ${input_base}/${t}.o
 	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
+	done
 }

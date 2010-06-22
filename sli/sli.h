@@ -1178,13 +1178,16 @@ public:
 	NAMED_CLASS
 };
 
+static inline void maybeVisit(unsigned long x, HeapVisitor &hv) {}
+static inline void maybeVisit(const void *x, HeapVisitor &hv) { hv(x); }
+
 template<typename t> void
 visit_container(const t &vector, HeapVisitor &hv)
 {
 	for (class t::const_iterator it = vector.begin();
 	     it != vector.end();
 	     it++)
-		hv(*it);
+		maybeVisit(*it, hv);
 }
 
 template <typename ait>
