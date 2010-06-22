@@ -19,6 +19,30 @@ public:
 
 typedef unsigned char Byte;
 
+/* A relocation represents any kind of reference inside the patch
+   which can't be resolved immediately.  The targets can include:
+
+   -- Client code
+   -- Another bit in the patch
+   -- Host code
+   -- Client data
+   -- A host symbol
+
+   We determine the actual target like this:
+
+   -- If a host symbol is set, use that as the target.
+
+   -- If allowRedirection is clear, the target is just @target.
+
+   -- Otherwise, guess that the target is client code.  If there
+      is a patch instruction for it, use that.
+
+   -- Otherwise, if needsEpilogue is set, generate a new
+      pseudo-instruction for the target, set up a redirection from
+      the target to the pseudo, and then use the pseudo.
+
+   -- Otherwise, treat the target as data as use it directly.
+*/
 class Relocation : public GarbageCollected<Relocation> {
 public:
 	unsigned int offset;
@@ -26,15 +50,23 @@ public:
 	long addend;
 	bool needsEpilogue;
 	bool allowRedirection;
+	char *symbol;
 	Relocation(unsigned _offset, unsigned long _target, long _addend, bool _needsEpilogue,
 		   bool _allowRedirection)
 		: offset(_offset),
 		  target(_target),
 		  addend(_addend),
 		  needsEpilogue(_needsEpilogue),
-		  allowRedirection(_allowRedirection)
+		  allowRedirection(_allowRedirection),
+		  symbol(NULL)
 	{}
-	void visit(HeapVisitor &hv) const {};
+	Relocation(unsigned _offset, long _addend, char *_symbol)
+		: offset(_offset),
+		  addend(_addend),
+		  symbol(_symbol)
+	{
+	}
+	void visit(HeapVisitor &hv) const { hv(symbol); }
 	void destruct() { this->~Relocation(); }
 	NAMED_CLASS
 };
@@ -429,6 +461,7 @@ CFG::doit()
 class PatchFragment : public GarbageCollected<PatchFragment> {
 	std::map<Instruction *, unsigned> instrToOffset;
 	std::vector<Relocation *> relocs;
+	std::vector<Relocation *> symbolRelocs;
 protected:
 	std::vector<Byte> content;
 
@@ -440,7 +473,7 @@ protected:
 	/* Emit a jump to an offset in the current fragment. */
 	void emitJmpToOffset(unsigned offset);
 	void emitJmpToRip(unsigned long rip, bool needsEpilogue, bool allowRedirection);
-	void emitCallSequence(unsigned long target, bool allowRedirection);
+	void emitCallSequence(const char *target, bool allowRedirection);
 	void skipRedZone();
 	void restoreRedZone();
 	void emitPushQ(unsigned);
@@ -449,6 +482,7 @@ protected:
 	void emitCallReg(unsigned);
 public:
 	void fromCFG(CFG *cfg);
+	char *asC() const;
 
 	void visit(HeapVisitor &hv) const {
 		for (std::map<Instruction*, unsigned>::const_iterator it = instrToOffset.begin();
@@ -532,6 +566,12 @@ PatchFragment::fromCFG(CFG *cfg)
 		assert(r);
 		assert(r->offset < content.size());
 
+		if (r->symbol) {
+			/* These need to be deferred until we're in C
+			 * again. */
+			symbolRelocs.push_back(r);
+/**/			continue;
+		}
 		union {
 			unsigned delta;
 			Byte deltaBytes[4];
@@ -702,8 +742,14 @@ PatchFragment::emitCallReg(unsigned reg)
 	content.push_back(0xd0 + reg);
 }
 
+static char *
+vg_strdup(const char *s)
+{
+	return vex_asprintf("%s", s);
+}
+
 void
-PatchFragment::emitCallSequence(unsigned long target, bool allowRedirection)
+PatchFragment::emitCallSequence(const char *target, bool allowRedirection)
 {
 	skipRedZone();
 
@@ -714,10 +760,8 @@ PatchFragment::emitCallSequence(unsigned long target, bool allowRedirection)
 	content.push_back(0);
 	content.push_back(0);
 	relocs.push_back(new Relocation(content.size() - 4,
-					target,
 					-4,
-					false,
-					allowRedirection));
+					vg_strdup(target)));
 	
 	restoreRedZone();
 }
@@ -763,6 +807,26 @@ PatchFragment::emitStraightLine(Instruction *i)
 	}
 }
 
+char *
+PatchFragment::asC() const
+{
+	char *content_buf = (char *)LibVEX_Alloc_Bytes(content.size() * 4 + 1);
+	for (unsigned x = 0; x < content.size(); x++)
+		sprintf(content_buf + x * 4, "\\x%02x", content[x]);
+	char *content = vex_asprintf("const unsigned char patch_content[] = \"%s\";\n\n"
+				     "struct relocation reloc[] = {\n",
+				     content_buf);
+	for (std::vector<Relocation *>::const_iterator it = symbolRelocs.begin();
+	     it != symbolRelocs.end();
+	     it++)
+		content = vex_asprintf("%s{%d, %ld, %s},\n",
+				       content,
+				       (*it)->offset,
+				       (*it)->addend,
+				       (*it)->symbol);
+	return vex_asprintf("%s};\n", content);
+}
+
 class SourceSinkCFG : public CFG {
 	std::map<unsigned long, bool> sinkInstructions;
 public:
@@ -794,7 +858,7 @@ AddExitCallPatch::generateEpilogue(unsigned long exitRip,
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
 
-	emitCallSequence(0x11223344, true);
+	emitCallSequence("release_lock", true);
 	emitJmpToRip(exitRip, false, false);
 
 	return true;
@@ -833,6 +897,8 @@ main(int argc, char *argv[])
 	PatchFragment *pf = new AddExitCallPatch();
 
 	pf->fromCFG(cfg);
+
+	printf("%s\n", pf->asC());
 
 	return 0;
 }
