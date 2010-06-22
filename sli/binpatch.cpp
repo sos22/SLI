@@ -24,10 +24,15 @@ public:
 	unsigned int offset;
 	unsigned long target;
 	long addend;
-	Relocation(unsigned _offset, unsigned long _target, long _addend)
+	bool needsEpilogue;
+	bool allowRedirection;
+	Relocation(unsigned _offset, unsigned long _target, long _addend, bool _needsEpilogue,
+		   bool _allowRedirection)
 		: offset(_offset),
 		  target(_target),
-		  addend(_addend)
+		  addend(_addend),
+		  needsEpilogue(_needsEpilogue),
+		  allowRedirection(_allowRedirection)
 	{}
 	void visit(HeapVisitor &hv) const {};
 	void destruct() { this->~Relocation(); }
@@ -60,8 +65,8 @@ class Instruction : public GarbageCollected<Instruction > {
 	void emit(Byte);
 	void modrm(unsigned nrImmediates);
 	void immediate(unsigned size);
-	void justEmittedRipRel32(unsigned long target, long addend);
-	void justEmittedRipRel32(unsigned immediates = 0);
+	void justEmittedRipRel32(unsigned long target, long addend, bool needsEpilogue);
+	void justEmittedRipRel32(unsigned immediates, bool needsEpilogue);
 public:
 	unsigned long rip;
 
@@ -83,6 +88,7 @@ public:
 	static Instruction *decode(AddressSpace<unsigned long> *as,
 				   unsigned long rip,
 				   CFG *cfg);
+	static Instruction *pseudo(unsigned long rip);
 
 	void visit(HeapVisitor &hv) const {
 		visit_container(relocs, hv);
@@ -116,6 +122,7 @@ public:
 			hv(it->second);
 		hv(as);
 	}
+	void registerInstruction(Instruction *i) { ripToInstr[i->rip] = i; }
 	virtual void destruct() { this->~CFG(); }
 	NAMED_CLASS
 
@@ -169,16 +176,16 @@ Instruction::immediate(unsigned size)
 }
 
 void
-Instruction::justEmittedRipRel32(unsigned long target, long addend)
+Instruction::justEmittedRipRel32(unsigned long target, long addend, bool needsEpilogue)
 {
-	relocs.push_back(new Relocation(len - 4, target, addend));
+	relocs.push_back(new Relocation(len - 4, target, addend, needsEpilogue, true));
 }
 
 void
-Instruction::justEmittedRipRel32(unsigned immediates)
+Instruction::justEmittedRipRel32(unsigned immediates, bool needsEpilogue)
 {
 	int delta = *(int *)(content + len - 4);
-	justEmittedRipRel32(delta + rip + len + immediates, -4 - immediates);
+	justEmittedRipRel32(delta + rip + len + immediates, -4 - immediates, needsEpilogue);
 }
 
 void
@@ -197,7 +204,7 @@ Instruction::modrm(unsigned nrImmediates)
 		   by four bytes of signed displacement, plus
 		   immediates if appropriate. */
 		immediate(4);
-		justEmittedRipRel32(nrImmediates);
+		justEmittedRipRel32(nrImmediates, false);
 		return;
 	}
 	if (rm == 4) {
@@ -212,6 +219,15 @@ Instruction::modrm(unsigned nrImmediates)
 	else
 		dispBytes = 4;
 	immediate(dispBytes);
+}
+
+Instruction *
+Instruction::pseudo(unsigned long rip)
+{
+	printf("Pseudo(%lx)\n", rip);
+	Instruction *i = new Instruction();
+	i->rip = rip;
+	return i;
 }
 
 Instruction *
@@ -250,7 +266,7 @@ Instruction::decode(AddressSpace<unsigned long> *as,
 		i->emit(0x0f);
 		i->emit(b + 0x10);
 		i->len += 4;
-		i->justEmittedRipRel32(i->branchNext, -4);
+		i->justEmittedRipRel32(i->branchNext, -4, true);
 		/* Don't let the tail update defaultNext */
 /**/		return i;
 	case 0x83:
@@ -283,7 +299,13 @@ Instruction::decode(AddressSpace<unsigned long> *as,
 		break;
 	case 0xe8: { /* Call instruction. */
 		i->immediate(4);
-		i->justEmittedRipRel32();
+		/* We don't emit epilogues for the target of a call
+		   instruction, because we assume that we'll come back
+		   here as soon as the call is done. */
+		/* XXX this is unsafe: we have no idea what the call
+		   does, so can't just assume that it'll cope without
+		   an epilogue. XXX */
+		i->justEmittedRipRel32(0, false);
 		int delta = *(int *)(i->content + i->len - 4);
 		unsigned long target = i->rip + i->len + delta;
 		if (cfg->exploreFunction(target))
@@ -312,7 +334,8 @@ CFG::decodeInstruction(unsigned long rip, unsigned max_depth)
 	Instruction *i = Instruction::decode(as, rip, this);
 	if (!i)
 		return;
-	ripToInstr[rip] = i;
+	assert(i->rip == rip);
+	registerInstruction(i);
 	if (exploreInstruction(i)) {
 		if (i->branchNext)
 			pendingRips.push_back(std::pair<unsigned long, unsigned>(
@@ -406,12 +429,26 @@ CFG::doit()
 class PatchFragment : public GarbageCollected<PatchFragment> {
 	std::map<Instruction *, unsigned> instrToOffset;
 	std::vector<Relocation *> relocs;
+protected:
 	std::vector<Byte> content;
 
+private:
 	Instruction *nextInstr(CFG *cfg);
 	void emitStraightLine(Instruction *i);
+
+protected:
+	/* Emit a jump to an offset in the current fragment. */
+	void emitJmpToOffset(unsigned offset);
+	void emitJmpToRip(unsigned long rip, bool needsEpilogue, bool allowRedirection);
+	void emitCallSequence(unsigned long target, bool allowRedirection);
+	void skipRedZone();
+	void restoreRedZone();
+	void emitPushQ(unsigned);
+	void emitPopQ(unsigned);
+	void emitMovQ(unsigned, unsigned long);
+	void emitCallReg(unsigned);
 public:
-	static PatchFragment *fromCFG(CFG *cfg);
+	void fromCFG(CFG *cfg);
 
 	void visit(HeapVisitor &hv) const {
 		for (std::map<Instruction*, unsigned>::const_iterator it = instrToOffset.begin();
@@ -422,6 +459,26 @@ public:
 	}
 	void destruct() { this->~PatchFragment(); }
 	NAMED_CLASS
+
+protected:
+
+	/* Can be overridden by derived classes which need to do
+	 * something special when we return to untranslated code.
+	 * This is only invoked for statically constant branches; if
+	 * you want to do anything with non-constant branches then
+	 * you'll need to override emitInstruction() as well.
+	 */
+	virtual bool generateEpilogue(unsigned long exitRip, CFG *cfg) { return false; }
+
+	/* Emit a single instruction.  The instruction passed in is as
+	 * it was in the original program.  The derived class is at
+	 * liberty to generate as many or as few output instructions
+	 * as it desires. */
+	virtual void emitInstruction(Instruction *i);
+
+	void registerInstruction(Instruction *i, unsigned offset) {
+		instrToOffset[i] = offset;
+	}
 };
 
 Instruction *
@@ -458,40 +515,211 @@ PatchFragment::nextInstr(CFG *cfg)
 	abort();
 }
 
-PatchFragment *
+void
 PatchFragment::fromCFG(CFG *cfg)
 {
-	PatchFragment *work = new PatchFragment();
-
 	while (1) {
-		Instruction *i = work->nextInstr(cfg);
+		Instruction *i = nextInstr(cfg);
 		if (!i)
 			break;
-		work->emitStraightLine(i);
+		emitStraightLine(i);
 	}
 
-	while (!work->relocs.empty()) {
-		Relocation *r = work->relocs.back();
-		work->relocs.pop_back();
+	bool expectTargetPresent = false;
+	while (!relocs.empty()) {
+		Relocation *r = relocs.back();
+		relocs.pop_back();
 		assert(r);
-		assert(r->offset < work->content.size());
+		assert(r->offset < content.size());
 
-		std::map<unsigned long, Instruction *>::iterator probe =
-			cfg->ripToInstr.find(r->target);
 		union {
 			unsigned delta;
 			Byte deltaBytes[4];
 		};
-		if (probe == cfg->ripToInstr.end()) {
-			delta = r->target - (unsigned long)&work->content[r->offset] + r->addend;
+		if (r->allowRedirection) {
+			std::map<unsigned long, Instruction *>::iterator probe =
+				cfg->ripToInstr.find(r->target);
+			if (probe == cfg->ripToInstr.end()) {
+				assert(!expectTargetPresent);
+				if (r->needsEpilogue) {
+					/* This relocation represents
+					 * a branch out of translated
+					 * code.  That may require
+					 * epilogue generation.
+					 */
+					if (generateEpilogue(r->target, cfg)) {
+						/* Yes.  There should
+						   now be an epilogue
+						   instruction for the
+						   target, so try it
+						   again. */
+						relocs.push_back(r);
+						
+						/* Next time around,
+						   the target of the
+						   relocation should
+						   definitely be
+						   present, or we'll
+						   get an infinite
+						   loop. */
+						expectTargetPresent = true;
+
+/**/						continue;
+					}
+				}
+				delta = r->target - (unsigned long)&content[r->offset] + r->addend;
+			} else {
+				unsigned targetOffset = instrToOffset[probe->second];
+				delta = targetOffset - r->offset + r->addend;
+			}
 		} else {
-			unsigned targetOffset = work->instrToOffset[probe->second];
-			delta = targetOffset - r->offset + r->addend;
+			delta = r->target - (unsigned long)&content[r->offset] + r->addend;
 		}
 		for (unsigned x = 0; x < 4; x++)
-			work->content[x + r->offset] = deltaBytes[x];
+			content[x + r->offset] = deltaBytes[x];
+		expectTargetPresent = false;
 	}
-	return work;
+}
+
+void
+PatchFragment::emitInstruction(Instruction *i)
+{
+	unsigned offset = content.size();
+	for (unsigned x = 0; x < i->len; x++)
+		content.push_back(i->content[x]);
+	for (std::vector<Relocation *>::iterator it = i->relocs.begin();
+	     it != i->relocs.end();
+	     it++) {
+		(*it)->offset += offset;
+		relocs.push_back(*it);
+	}
+}
+
+void
+PatchFragment::emitJmpToOffset(unsigned target_offset)
+{
+	unsigned starting_offset = content.size();
+	content.push_back(0xe9);
+	union {
+		int delta_word;
+		Byte delta_bytes[4];
+	};
+	delta_word = target_offset - starting_offset - 5;
+	for (unsigned x = 0; x < 4; x++)
+		content.push_back(delta_bytes[x]);
+}
+
+void
+PatchFragment::emitJmpToRip(unsigned long rip, bool needsEpilogue, bool allowRedirection)
+{
+	/* Emit a jmp32. */
+	content.push_back(0xe9);
+
+	/* Fill in offset later. */
+	content.push_back(0);
+	content.push_back(0);
+	content.push_back(0);
+	content.push_back(0);
+
+	relocs.push_back(new Relocation(content.size() - 4, rip, -4, needsEpilogue, allowRedirection));
+}
+
+void
+PatchFragment::skipRedZone()
+{
+	/* lea -128(%rsp), %rsp */
+	content.push_back(0x48);
+	content.push_back(0x8d);
+	content.push_back(0x64);
+	content.push_back(0x24);
+	content.push_back(0x80);
+}
+
+void
+PatchFragment::restoreRedZone()
+{
+	/* lea 128(%rsp), %rsp */
+	content.push_back(0x48);
+	content.push_back(0x8d);
+	content.push_back(0xa4);
+	content.push_back(0x24);
+	content.push_back(0x80);
+	content.push_back(0x00);
+	content.push_back(0x00);
+	content.push_back(0x00);
+}
+
+void
+PatchFragment::emitPushQ(unsigned reg)
+{
+	if (reg >= 8) {
+		content.push_back(0x41);
+		reg -= 8;
+	}
+	assert(reg < 8);
+	content.push_back(0x50 + reg);
+}
+
+void
+PatchFragment::emitPopQ(unsigned reg)
+{
+	if (reg >= 8) {
+		content.push_back(0x41);
+		reg -= 8;
+	}
+	assert(reg < 8);
+	content.push_back(0x58 + reg);
+}
+
+void
+PatchFragment::emitMovQ(unsigned reg, unsigned long val)
+{
+	if (reg < 8) {
+		content.push_back(0x48);
+	} else {
+		content.push_back(0x49);
+		reg -= 8;
+	}
+	assert(reg < 8);
+	content.push_back(0xb8 + reg);
+	union {
+		unsigned long asLong;
+		Byte asBytes[8];
+	};
+	asLong = val;
+	for (unsigned x = 0; x < 8; x++)
+		content.push_back(asBytes[x]);
+}
+
+void
+PatchFragment::emitCallReg(unsigned reg)
+{
+	if (reg >= 8) {
+		content.push_back(0x41);
+		reg -= 8;
+	}
+	content.push_back(0xff);
+	content.push_back(0xd0 + reg);
+}
+
+void
+PatchFragment::emitCallSequence(unsigned long target, bool allowRedirection)
+{
+	skipRedZone();
+
+	/* Emit a call instruction */
+	content.push_back(0xe8);
+	content.push_back(0);
+	content.push_back(0);
+	content.push_back(0);
+	content.push_back(0);
+	relocs.push_back(new Relocation(content.size() - 4,
+					target,
+					-4,
+					false,
+					allowRedirection));
+	
+	restoreRedZone();
 }
 
 void
@@ -507,53 +735,27 @@ PatchFragment::emitStraightLine(Instruction *i)
 			   Rather than duplicating it, emit an
 			   unconditional branch to the existing
 			   location. */
-			content.push_back(0xe9);
-			union {
-				int delta_word;
-				Byte delta_bytes[4];
-			};
-			delta_word = existing_offset - offset - 5;
-			for (unsigned x = 0; x < 4; x++)
-				content.push_back(delta_bytes[x]);
+			emitJmpToOffset(existing_offset);
 
 			/* Don't try to reassemble any further. */
 /**/			return;
 		}
 
 		instrToOffset[i] = offset;
-		for (unsigned x = 0; x < i->len; x++)
-			content.push_back(i->content[x]);
 
-		for (std::vector<Relocation *>::iterator it = i->relocs.begin();
-		     it != i->relocs.end();
-		     it++) {
-			(*it)->offset += offset;
-			relocs.push_back(*it);
-		}
+		emitInstruction(i);
 			
 		if (!i->defaultNextI) {
 			/* Hit end of block, and don't want to go any
 			 * further.  Return to the original code. */
-			if (!i->defaultNext) {
+			if (i->defaultNext) {
+				emitJmpToRip(i->defaultNext, true, true);
+			} else {
 				/* Last instruction in the block was
 				   an unpredictable branch, which
 				   we'll just have emitted verbatim,
 				   so we don't need to do any more. */
-				return;
 			}
-
-			/* Emit a jmp32. */
-			content.push_back(0xe9);
-
-			/* Fill in offset later. */
-			content.push_back(0);
-			content.push_back(0);
-			content.push_back(0);
-			content.push_back(0);
-
-			relocs.push_back(new Relocation(content.size() - 4,
-							i->defaultNext,
-							-4));
 			return;
 		}
 
@@ -575,6 +777,28 @@ public:
 	{
 	}
 };
+
+class AddExitCallPatch : public PatchFragment {
+protected:
+	bool generateEpilogue(unsigned long exitRip, CFG *cfg);
+	/* XXX should really override emitInstruction here to catch
+	   indirect jmp and ret instructions; oh well. */
+};
+
+bool
+AddExitCallPatch::generateEpilogue(unsigned long exitRip,
+				   CFG *cfg)
+{
+	Instruction *i = Instruction::pseudo(exitRip);
+
+	cfg->registerInstruction(i);
+	registerInstruction(i, content.size());
+
+	emitCallSequence(0x11223344, true);
+	emitJmpToRip(exitRip, false, false);
+
+	return true;
+}
 
 int
 main(int argc, char *argv[])
@@ -606,7 +830,9 @@ main(int argc, char *argv[])
 	}
 	cfg->doit();
 
-	PatchFragment *pf = PatchFragment::fromCFG(cfg);
+	PatchFragment *pf = new AddExitCallPatch();
+
+	pf->fromCFG(cfg);
 
 	return 0;
 }
