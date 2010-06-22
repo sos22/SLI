@@ -21,8 +21,14 @@ typedef unsigned char Byte;
 
 class Relocation : public GarbageCollected<Relocation> {
 public:
-	Relocation(unsigned _offset) : offset(_offset) {}
-	unsigned offset;
+	unsigned int offset;
+	unsigned long target;
+	long addend;
+	Relocation(unsigned _offset, unsigned long _target, long _addend)
+		: offset(_offset),
+		  target(_target),
+		  addend(_addend)
+	{}
 	void visit(HeapVisitor &hv) const {};
 	void destruct() { this->~Relocation(); }
 	NAMED_CLASS
@@ -44,22 +50,6 @@ public:
 		rex_x = !!(b & 2);
 		rex_r = !!(b & 4);
 		rex_w = !!(b & 8);
-	}
-};
-
-/* A relocation which says that there's a 32 bit value at @offset
- * which is RIP relative and should be tweaked so that it points at
- * the same absolute address after relocation. */
-class RelocationRipRel32 : public Relocation {
-public:
-	unsigned long target;
-	long addend;
-	RelocationRipRel32(unsigned _offset, unsigned long _target,
-			   long _addend)
-		: Relocation(_offset),
-		  target(_target),
-		  addend(_addend)
-	{
 	}
 };
 
@@ -181,7 +171,7 @@ Instruction::immediate(unsigned size)
 void
 Instruction::justEmittedRipRel32(unsigned long target, long addend)
 {
-	relocs.push_back(new RelocationRipRel32(len - 4, target, addend));
+	relocs.push_back(new Relocation(len - 4, target, addend));
 }
 
 void
@@ -480,28 +470,26 @@ PatchFragment::fromCFG(CFG *cfg)
 		work->emitStraightLine(i);
 	}
 
-	for (std::vector<Relocation *>::iterator it = work->relocs.begin();
-	     it != work->relocs.end();
-	     it++) {
-		RelocationRipRel32 *rrr32 =
-			dynamic_cast<RelocationRipRel32 *>(*it);
-		assert(rrr32);
-		assert(rrr32->offset < work->content.size());
+	while (!work->relocs.empty()) {
+		Relocation *r = work->relocs.back();
+		work->relocs.pop_back();
+		assert(r);
+		assert(r->offset < work->content.size());
 
 		std::map<unsigned long, Instruction *>::iterator probe =
-			cfg->ripToInstr.find(rrr32->target);
+			cfg->ripToInstr.find(r->target);
 		union {
 			unsigned delta;
 			Byte deltaBytes[4];
 		};
 		if (probe == cfg->ripToInstr.end()) {
-			delta = rrr32->target - (unsigned long)&work->content[rrr32->offset] + rrr32->addend;
+			delta = r->target - (unsigned long)&work->content[r->offset] + r->addend;
 		} else {
 			unsigned targetOffset = work->instrToOffset[probe->second];
-			delta = targetOffset - rrr32->offset + rrr32->addend;
+			delta = targetOffset - r->offset + r->addend;
 		}
 		for (unsigned x = 0; x < 4; x++)
-			work->content[x + rrr32->offset] = deltaBytes[x];
+			work->content[x + r->offset] = deltaBytes[x];
 	}
 	return work;
 }
@@ -563,9 +551,9 @@ PatchFragment::emitStraightLine(Instruction *i)
 			content.push_back(0);
 			content.push_back(0);
 
-			relocs.push_back(new RelocationRipRel32(content.size() - 4,
-								i->defaultNext,
-								-4));
+			relocs.push_back(new Relocation(content.size() - 4,
+							i->defaultNext,
+							-4));
 			return;
 		}
 
