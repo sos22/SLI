@@ -1,4 +1,9 @@
+#include <sys/types.h>
+#include <sys/fcntl.h>
 #include <err.h>
+#include <errno.h>
+#include <unistd.h>
+#include <wait.h>
 
 #include "sli.h"
 
@@ -19,57 +24,35 @@ public:
 
 typedef unsigned char Byte;
 
-/* A relocation represents any kind of reference inside the patch
-   which can't be resolved immediately.  The targets can include:
+class PatchFragment;
 
-   -- Client code
-   -- Another bit in the patch
-   -- Host code
-   -- Client data
-   -- A host symbol
-
-   We determine the actual target like this:
-
-   -- If a host symbol is set, use that as the target.
-
-   -- If allowRedirection is clear, the target is just @target.
-
-   -- Otherwise, guess that the target is client code.  If there
-      is a patch instruction for it, use that.
-
-   -- Otherwise, if needsEpilogue is set, generate a new
-      pseudo-instruction for the target, set up a redirection from
-      the target to the pseudo, and then use the pseudo.
-
-   -- Otherwise, treat the target as data as use it directly.
-*/
-class Relocation : public GarbageCollected<Relocation> {
+/* There are two types of relocation, early and late.  Early
+   relocations are done statically while building the patch.  Late
+   relocations are done afterwards, when the patch is loaded. */
+class EarlyRelocation : public GarbageCollected<EarlyRelocation> {
 public:
-	unsigned int offset;
-	unsigned long target;
-	long addend;
-	bool needsEpilogue;
-	bool allowRedirection;
-	char *symbol;
-	Relocation(unsigned _offset, unsigned long _target, long _addend, bool _needsEpilogue,
-		   bool _allowRedirection)
-		: offset(_offset),
-		  target(_target),
-		  addend(_addend),
-		  needsEpilogue(_needsEpilogue),
-		  allowRedirection(_allowRedirection),
-		  symbol(NULL)
-	{}
-	Relocation(unsigned _offset, long _addend, char *_symbol)
-		: offset(_offset),
-		  addend(_addend),
-		  symbol(_symbol)
-	{
-	}
-	void visit(HeapVisitor &hv) const { hv(symbol); }
-	void destruct() { this->~Relocation(); }
+	unsigned offset;
+	unsigned size;
+	EarlyRelocation(unsigned _offset, unsigned _size)
+		: offset(_offset), size(_size) {}
+	virtual void doit(PatchFragment *pf) = 0;
+	void visit(HeapVisitor &hv) const {}
+	void destruct() {}
 	NAMED_CLASS
 };
+
+typedef char *LateRelocation;
+
+static LateRelocation
+late_relocation(unsigned offset, unsigned size,
+		const char *target, unsigned nrImmediateBytes,
+		bool relative)
+{
+	return vex_asprintf("{%d, %d, %d, %d, %s}",
+			    offset, size,
+			    relative ? -nrImmediateBytes - size : 0,
+			    relative, target);
+}
 
 class Prefixes {
 public:
@@ -97,8 +80,6 @@ class Instruction : public GarbageCollected<Instruction > {
 	void emit(Byte);
 	void modrm(unsigned nrImmediates);
 	void immediate(unsigned size);
-	void justEmittedRipRel32(unsigned long target, long addend, bool needsEpilogue);
-	void justEmittedRipRel32(unsigned immediates, bool needsEpilogue);
 public:
 	unsigned long rip;
 
@@ -111,7 +92,7 @@ public:
 	unsigned len;
 	Prefixes pfx;
 	unsigned nr_prefixes;
-	std::vector<Relocation *> relocs;
+	std::vector<EarlyRelocation *> relocs;
 
 	AddressSpace<unsigned long> *as;
 
@@ -207,18 +188,35 @@ Instruction::immediate(unsigned size)
 		byte();
 }
 
-void
-Instruction::justEmittedRipRel32(unsigned long target, long addend, bool needsEpilogue)
-{
-	relocs.push_back(new Relocation(len - 4, target, addend, needsEpilogue, true));
-}
+class RipRelativeRelocation : public EarlyRelocation {
+	unsigned long target;
+	unsigned nrImmediateBytes;
+public:
+	void doit(PatchFragment *pf);
 
-void
-Instruction::justEmittedRipRel32(unsigned immediates, bool needsEpilogue)
-{
-	int delta = *(int *)(content + len - 4);
-	justEmittedRipRel32(delta + rip + len + immediates, -4 - immediates, needsEpilogue);
-}
+	RipRelativeRelocation(unsigned _offset,
+			      unsigned _size,
+			      unsigned long _target,
+			      unsigned _nrImmediateBytes)
+		: EarlyRelocation(_offset, _size),
+		  target(_target),
+		  nrImmediateBytes(_nrImmediateBytes)
+	{
+	}
+};
+
+class RipRelativeBranchRelocation : public EarlyRelocation {
+	unsigned long target;
+public:
+	void doit(PatchFragment *pf);
+	RipRelativeBranchRelocation(unsigned _offset,
+				    unsigned _size,
+				    unsigned long _target)
+		: EarlyRelocation(_offset, _size),
+		  target(_target)
+	{
+	}
+};
 
 void
 Instruction::modrm(unsigned nrImmediates)
@@ -236,7 +234,11 @@ Instruction::modrm(unsigned nrImmediates)
 		   by four bytes of signed displacement, plus
 		   immediates if appropriate. */
 		immediate(4);
-		justEmittedRipRel32(nrImmediates, false);
+		int delta = *(int *)(content + len - 4);
+		relocs.push_back(new RipRelativeRelocation(len - 4,
+							   4,
+							   delta + rip + len + nrImmediates,
+							   nrImmediates));
 		return;
 	}
 	if (rm == 4) {
@@ -256,7 +258,6 @@ Instruction::modrm(unsigned nrImmediates)
 Instruction *
 Instruction::pseudo(unsigned long rip)
 {
-	printf("Pseudo(%lx)\n", rip);
 	Instruction *i = new Instruction();
 	i->rip = rip;
 	return i;
@@ -267,7 +268,6 @@ Instruction::decode(AddressSpace<unsigned long> *as,
 		    unsigned long start,
 		    CFG *cfg)
 {
-	printf("Decode %lx\n", start);
 	Instruction *i = new Instruction();
 	i->rip = start;
 	i->as = as;
@@ -297,8 +297,8 @@ Instruction::decode(AddressSpace<unsigned long> *as,
 		i->len = 0;
 		i->emit(0x0f);
 		i->emit(b + 0x10);
+		i->relocs.push_back(new RipRelativeBranchRelocation(i->len, 4, i->branchNext));
 		i->len += 4;
-		i->justEmittedRipRel32(i->branchNext, -4, true);
 		/* Don't let the tail update defaultNext */
 /**/		return i;
 	case 0x83:
@@ -337,9 +337,12 @@ Instruction::decode(AddressSpace<unsigned long> *as,
 		/* XXX this is unsafe: we have no idea what the call
 		   does, so can't just assume that it'll cope without
 		   an epilogue. XXX */
-		i->justEmittedRipRel32(0, false);
 		int delta = *(int *)(i->content + i->len - 4);
 		unsigned long target = i->rip + i->len + delta;
+		i->relocs.push_back(new RipRelativeRelocation(i->len - 4,
+							      4,
+							      target,
+							      0));
 		if (cfg->exploreFunction(target))
 			i->branchNext = target;
 		break;
@@ -460,9 +463,11 @@ CFG::doit()
 
 class PatchFragment : public GarbageCollected<PatchFragment> {
 	std::map<Instruction *, unsigned> instrToOffset;
-	std::vector<Relocation *> relocs;
-	std::vector<Relocation *> symbolRelocs;
+	std::vector<EarlyRelocation *> relocs;
+	std::vector<LateRelocation> lateRelocs;
+
 protected:
+	CFG *cfg;
 	std::vector<Byte> content;
 
 private:
@@ -472,7 +477,8 @@ private:
 protected:
 	/* Emit a jump to an offset in the current fragment. */
 	void emitJmpToOffset(unsigned offset);
-	void emitJmpToRip(unsigned long rip, bool needsEpilogue, bool allowRedirection);
+	void emitJmpToRipClient(unsigned long rip);
+	void emitJmpToRipHost(unsigned long rip);
 	void emitCallSequence(const char *target, bool allowRedirection);
 	void skipRedZone();
 	void restoreRedZone();
@@ -484,6 +490,10 @@ public:
 	void fromCFG(CFG *cfg);
 	char *asC() const;
 
+	bool ripToOffset(unsigned long rip, unsigned *res);
+	void writeBytes(const void *bytes, unsigned size, unsigned offset);
+	void addLateReloc(LateRelocation m) { lateRelocs.push_back(m); }
+
 	void visit(HeapVisitor &hv) const {
 		for (std::map<Instruction*, unsigned>::const_iterator it = instrToOffset.begin();
 		     it != instrToOffset.end();
@@ -494,15 +504,15 @@ public:
 	void destruct() { this->~PatchFragment(); }
 	NAMED_CLASS
 
-protected:
-
 	/* Can be overridden by derived classes which need to do
 	 * something special when we return to untranslated code.
 	 * This is only invoked for statically constant branches; if
 	 * you want to do anything with non-constant branches then
 	 * you'll need to override emitInstruction() as well.
 	 */
-	virtual bool generateEpilogue(unsigned long exitRip, CFG *cfg) { return false; }
+	virtual bool generateEpilogue(unsigned long exitRip) { return false; }
+
+protected:
 
 	/* Emit a single instruction.  The instruction passed in is as
 	 * it was in the original program.  The derived class is at
@@ -514,6 +524,32 @@ protected:
 		instrToOffset[i] = offset;
 	}
 };
+
+void
+RipRelativeRelocation::doit(PatchFragment *pf)
+{
+	unsigned targetOffset;
+	if (pf->ripToOffset(target, &targetOffset)) {
+		long delta = targetOffset - offset - nrImmediateBytes - size;
+		pf->writeBytes(&delta, size, offset);
+	} else {
+		pf->addLateReloc(late_relocation(offset, size,
+						 vex_asprintf("0x%lx",target),
+						 nrImmediateBytes, true));
+	}
+}
+
+void
+RipRelativeBranchRelocation::doit(PatchFragment *pf)
+{
+	unsigned targetOffset;
+	if (!pf->ripToOffset(target, &targetOffset))
+		pf->generateEpilogue(target);
+	if (!pf->ripToOffset(target, &targetOffset))
+		abort();
+	int delta = targetOffset - offset - size;
+	pf->writeBytes(&delta, size, offset);
+}
 
 Instruction *
 PatchFragment::nextInstr(CFG *cfg)
@@ -549,9 +585,29 @@ PatchFragment::nextInstr(CFG *cfg)
 	abort();
 }
 
-void
-PatchFragment::fromCFG(CFG *cfg)
+bool
+PatchFragment::ripToOffset(unsigned long rip, unsigned *res)
 {
+	*res = 0;
+	std::map<unsigned long, Instruction *>::iterator probe = cfg->ripToInstr.find(rip);
+	if (probe == cfg->ripToInstr.end())
+		return false;
+	*res = instrToOffset[probe->second];
+	return true;
+}
+
+void
+PatchFragment::writeBytes(const void *_bytes, unsigned size, unsigned offset)
+{
+	const Byte *bytes = (const Byte *)_bytes;
+	for (unsigned x = 0; x < size; x++)
+		content[offset + x] = bytes[x];
+}
+
+void
+PatchFragment::fromCFG(CFG *_cfg)
+{
+	cfg = _cfg;
 	while (1) {
 		Instruction *i = nextInstr(cfg);
 		if (!i)
@@ -559,65 +615,13 @@ PatchFragment::fromCFG(CFG *cfg)
 		emitStraightLine(i);
 	}
 
-	bool expectTargetPresent = false;
 	while (!relocs.empty()) {
-		Relocation *r = relocs.back();
+		EarlyRelocation *r = relocs.back();
 		relocs.pop_back();
 		assert(r);
-		assert(r->offset < content.size());
+		assert(r->offset + r->size <= content.size());
 
-		if (r->symbol) {
-			/* These need to be deferred until we're in C
-			 * again. */
-			symbolRelocs.push_back(r);
-/**/			continue;
-		}
-		union {
-			unsigned delta;
-			Byte deltaBytes[4];
-		};
-		if (r->allowRedirection) {
-			std::map<unsigned long, Instruction *>::iterator probe =
-				cfg->ripToInstr.find(r->target);
-			if (probe == cfg->ripToInstr.end()) {
-				assert(!expectTargetPresent);
-				if (r->needsEpilogue) {
-					/* This relocation represents
-					 * a branch out of translated
-					 * code.  That may require
-					 * epilogue generation.
-					 */
-					if (generateEpilogue(r->target, cfg)) {
-						/* Yes.  There should
-						   now be an epilogue
-						   instruction for the
-						   target, so try it
-						   again. */
-						relocs.push_back(r);
-						
-						/* Next time around,
-						   the target of the
-						   relocation should
-						   definitely be
-						   present, or we'll
-						   get an infinite
-						   loop. */
-						expectTargetPresent = true;
-
-/**/						continue;
-					}
-				}
-				delta = r->target - (unsigned long)&content[r->offset] + r->addend;
-			} else {
-				unsigned targetOffset = instrToOffset[probe->second];
-				delta = targetOffset - r->offset + r->addend;
-			}
-		} else {
-			delta = r->target - (unsigned long)&content[r->offset] + r->addend;
-		}
-		for (unsigned x = 0; x < 4; x++)
-			content[x + r->offset] = deltaBytes[x];
-		expectTargetPresent = false;
+		r->doit(this);
 	}
 }
 
@@ -627,7 +631,7 @@ PatchFragment::emitInstruction(Instruction *i)
 	unsigned offset = content.size();
 	for (unsigned x = 0; x < i->len; x++)
 		content.push_back(i->content[x]);
-	for (std::vector<Relocation *>::iterator it = i->relocs.begin();
+	for (std::vector<EarlyRelocation *>::iterator it = i->relocs.begin();
 	     it != i->relocs.end();
 	     it++) {
 		(*it)->offset += offset;
@@ -650,18 +654,20 @@ PatchFragment::emitJmpToOffset(unsigned target_offset)
 }
 
 void
-PatchFragment::emitJmpToRip(unsigned long rip, bool needsEpilogue, bool allowRedirection)
+PatchFragment::emitJmpToRipClient(unsigned long rip)
 {
-	/* Emit a jmp32. */
-	content.push_back(0xe9);
+	emitJmpToOffset(0);
+	relocs.push_back(new RipRelativeBranchRelocation(content.size() - 4, 4, rip));
+}
 
-	/* Fill in offset later. */
-	content.push_back(0);
-	content.push_back(0);
-	content.push_back(0);
-	content.push_back(0);
-
-	relocs.push_back(new Relocation(content.size() - 4, rip, -4, needsEpilogue, allowRedirection));
+void
+PatchFragment::emitJmpToRipHost(unsigned long rip)
+{
+	emitJmpToOffset(0);
+	lateRelocs.push_back(late_relocation(content.size() - 4, 4,
+					     vex_asprintf("0x%lx", rip),
+					     0,
+					     true));
 }
 
 void
@@ -753,15 +759,15 @@ PatchFragment::emitCallSequence(const char *target, bool allowRedirection)
 {
 	skipRedZone();
 
-	/* Emit a call instruction */
-	content.push_back(0xe8);
-	content.push_back(0);
-	content.push_back(0);
-	content.push_back(0);
-	content.push_back(0);
-	relocs.push_back(new Relocation(content.size() - 4,
-					-4,
-					vg_strdup(target)));
+	emitPushQ(6);
+	emitMovQ(6, 0);
+	lateRelocs.push_back(late_relocation(content.size() - 8,
+					     8,
+					     vg_strdup(target),
+					     0,
+					     false));
+	emitCallReg(6);
+	emitPopQ(6);
 	
 	restoreRedZone();
 }
@@ -793,7 +799,7 @@ PatchFragment::emitStraightLine(Instruction *i)
 			/* Hit end of block, and don't want to go any
 			 * further.  Return to the original code. */
 			if (i->defaultNext) {
-				emitJmpToRip(i->defaultNext, true, true);
+				emitJmpToRipClient(i->defaultNext);
 			} else {
 				/* Last instruction in the block was
 				   an unpredictable branch, which
@@ -813,19 +819,16 @@ PatchFragment::asC() const
 	char *content_buf = (char *)LibVEX_Alloc_Bytes(content.size() * 4 + 1);
 	for (unsigned x = 0; x < content.size(); x++)
 		sprintf(content_buf + x * 4, "\\x%02x", content[x]);
-	char *content = vex_asprintf("const unsigned char patch_content[] = \"%s\";\n\n"
-				     "struct relocation reloc[] = {\n",
+	char *content = vex_asprintf("static const unsigned char patch_content[] = \"%s\";\n\n"
+				     "static const struct relocation reloc[] = {\n",
 				     content_buf);
-	for (std::vector<Relocation *>::const_iterator it = symbolRelocs.begin();
-	     it != symbolRelocs.end();
+	for (std::vector<LateRelocation>::const_iterator it = lateRelocs.begin();
+	     it != lateRelocs.end();
 	     it++)
-		content = vex_asprintf("%s\t{%d, %ld, (unsigned long)%s},\n",
-				       content,
-				       (*it)->offset,
-				       (*it)->addend,
-				       (*it)->symbol);
+		content = vex_asprintf("%s\t%s,\n",
+				       content, *it);
 
-	content = vex_asprintf("%s};\n\nstruct trans_table_entry trans_table[] = {\n",
+	content = vex_asprintf("%s};\n\nstatic const struct trans_table_entry trans_table[] = {\n",
 			       content);
 	for (std::map<Instruction *, unsigned>::const_iterator it = instrToOffset.begin();
 	     it != instrToOffset.end();
@@ -854,22 +857,21 @@ public:
 
 class AddExitCallPatch : public PatchFragment {
 protected:
-	bool generateEpilogue(unsigned long exitRip, CFG *cfg);
+	bool generateEpilogue(unsigned long exitRip);
 	/* XXX should really override emitInstruction here to catch
 	   indirect jmp and ret instructions; oh well. */
 };
 
 bool
-AddExitCallPatch::generateEpilogue(unsigned long exitRip,
-				   CFG *cfg)
+AddExitCallPatch::generateEpilogue(unsigned long exitRip)
 {
 	Instruction *i = Instruction::pseudo(exitRip);
 
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
 
-	emitCallSequence("release_lock", true);
-	emitJmpToRip(exitRip, false, false);
+	emitCallSequence("(unsigned long)release_lock", true);
+	emitJmpToRipHost(exitRip);
 
 	return true;
 }
@@ -892,7 +894,84 @@ mkPatch(AddressSpace<unsigned long> *as, struct CriticalSection *csects, unsigne
 	PatchFragment *pf = new AddExitCallPatch();
 	pf->fromCFG(cfg);
 
-	return pf->asC();
+	char *res = pf->asC();
+	res = vex_asprintf("#include \"patch_head.h\"\n\n%s\nstatic unsigned long entry_points[] = {\n",
+			   res);
+	for (unsigned x = 0; x < nr_csects; x++)
+		res = vex_asprintf("%s\t0x%lx,\n", res, csects[x].entry);
+	return vex_asprintf("%s};\n\n#include \"patch_skeleton.c\"\n", res);
+}
+
+static void
+safeWrite(int fd, const void *buf, size_t buf_size)
+{
+	unsigned written;
+	int this_time;
+
+	for (written = 0; written < buf_size; written += this_time) {
+		this_time = write(fd, (const char*)buf + written, buf_size - written);
+		if (this_time < 0)
+			err(1, "writing to output file");
+		if (this_time == 0)
+			errx(1, "cannot write to output file");
+	}
+}
+
+class DeleteOnDeath {
+	char *path;
+public:
+	DeleteOnDeath(char *_path) : path(strdup(_path)) {}
+	~DeleteOnDeath() { unlink(path); free(path); }
+};
+
+static int
+spawn(const char *path, ...)
+{
+	va_list args;
+	unsigned nr_args;
+	const char *arg;
+	const char **argv;
+
+	va_start(args, path);
+	nr_args = 2; /* Include argv[0] and the NULL terminator */
+	while (1) {
+		arg = va_arg(args, const char *);
+		if (!arg)
+			break;
+		nr_args++;
+	}
+	va_end(args);
+
+	argv = (const char **)malloc(sizeof(argv[0]) * nr_args);
+	argv[0] = path;
+	va_start(args, path);
+	unsigned argc = 1;
+	while (1) {
+		argv[argc] = va_arg(args, const char *);
+		if (argv[argc] == NULL)
+			break;
+		argc++;		
+	}
+	va_end(args);
+
+	pid_t child = fork();
+	if (child == 0) {
+		execv(path, (char *const*)argv);
+		err(1, "cannot exec %s", path);
+	}
+	if (child == -1)
+		err(1, "cannot fork");
+
+	int status;
+	pid_t r = waitpid(child, &status, 0);
+	if (r < 0)
+		err(1, "waiting for child");
+	assert(r == child);
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status);
+	if (WIFSIGNALED(status))
+		return -WTERMSIG(status);
+	abort();
 }
 
 int
@@ -924,7 +1003,36 @@ main(int argc, char *argv[])
 		csects[x].exit = strtol(argv[x * 2 + 3], NULL, 16);
 	}
 
-	printf("%s\n", mkPatch(as, csects, (argc - 2) / 2));
+	char *patchFragment = mkPatch(as, csects, (argc - 2) / 2);
+
+	char *tmpPath;
+	int tmpFd;
+	while (1) {
+		tmpPath = tempnam(NULL, NULL);
+		tmpFd = open(tmpPath, O_WRONLY|O_CREAT|O_EXCL|O_APPEND, 0600);
+		if (tmpFd >= 0)
+			break;
+		if (errno != EEXIST)
+			err(1, "creating temporary file");
+		free(tmpPath);
+	}
+	DeleteOnDeath dod(tmpPath);
+	safeWrite(tmpFd, patchFragment, strlen(patchFragment));
+
+	int r = spawn("/usr/bin/gcc",
+		      "-Wall",
+		      "-shared",
+		      "-fPIC",
+		      "-I",
+		      "sli",
+		      "-x"
+		      "c",
+		      tmpPath,
+		      "-o",
+		      "patch1.so",
+		      NULL);
+
+	printf("gcc said %d\n", r);
 
 	return 0;
 }
