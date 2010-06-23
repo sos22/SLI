@@ -864,6 +864,27 @@ AddExitCallPatch::generateEpilogue(unsigned long exitRip,
 	return true;
 }
 
+struct CriticalSection {
+	unsigned long entry;
+	unsigned long exit;
+};
+
+static char *
+mkPatch(AddressSpace<unsigned long> *as, struct CriticalSection *csects, unsigned nr_csects)
+{
+	SourceSinkCFG *cfg = new SourceSinkCFG(as);
+	for (unsigned x = 0; x < nr_csects; x++) {
+		cfg->add_root(csects[x].entry, 50);
+		cfg->add_sink(csects[x].exit);
+	}
+	cfg->doit();
+
+	PatchFragment *pf = new AddExitCallPatch();
+	pf->fromCFG(cfg);
+
+	return pf->asC();
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -887,18 +908,13 @@ main(int argc, char *argv[])
 	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
 	VexPtr<AddressSpace<unsigned long> > as(ms->addressSpace);
 
-	SourceSinkCFG *cfg = new SourceSinkCFG(as);
-	for (int x = 2; x < argc; x += 2) {
-		cfg->add_root(strtol(argv[x], NULL, 16), 50);
-		cfg->add_sink(strtol(argv[x+1], NULL, 16));
+	CriticalSection *csects = (CriticalSection *)malloc(sizeof(CriticalSection) * (argc - 2) / 2);
+	for (int x = 0; x < (argc - 2) / 2; x++) {
+		csects[x].entry = strtol(argv[x * 2 + 2], NULL, 16);
+		csects[x].exit = strtol(argv[x * 2 + 3], NULL, 16);
 	}
-	cfg->doit();
 
-	PatchFragment *pf = new AddExitCallPatch();
-
-	pf->fromCFG(cfg);
-
-	printf("%s\n", pf->asC());
+	printf("%s\n", mkPatch(as, csects, (argc - 2) / 2));
 
 	return 0;
 }
