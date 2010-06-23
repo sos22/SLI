@@ -819,11 +819,21 @@ PatchFragment::asC() const
 	for (std::vector<Relocation *>::const_iterator it = symbolRelocs.begin();
 	     it != symbolRelocs.end();
 	     it++)
-		content = vex_asprintf("%s{%d, %ld, %s},\n",
+		content = vex_asprintf("%s\t{%d, %ld, (unsigned long)%s},\n",
 				       content,
 				       (*it)->offset,
 				       (*it)->addend,
 				       (*it)->symbol);
+
+	content = vex_asprintf("%s};\n\nstruct trans_table_entry trans_table[] = {\n",
+			       content);
+	for (std::map<Instruction *, unsigned>::const_iterator it = instrToOffset.begin();
+	     it != instrToOffset.end();
+	     it++)
+		content = vex_asprintf("%s\t{0x%lx, %d},\n",
+				       content,
+				       it->first->rip,
+				       it->second);
 	return vex_asprintf("%s};\n", content);
 }
 
