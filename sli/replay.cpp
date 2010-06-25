@@ -18,7 +18,8 @@ template <typename ait>
 InterpretResult RdtscEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {
 	printf("fake rdtsc\n");
-	*lr = NULL;
+	if (lr)
+		*lr = NULL;
 	return InterpretResultIncomplete;
 }
 
