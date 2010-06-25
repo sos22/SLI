@@ -376,4 +376,51 @@ AddressSpace<new_type> *AddressSpace<ait>::abstract() const
 	return work;
 }
 
+/* Valgrind handles vsyscalls in a slightly weird way, and we have to
+   emulate that here. */
+#define STRING(x) #x
+#define STRING2(x) STRING(x)
+asm (
+"redirect_vtime:\n"
+"        movq $" STRING2(__NR_time) ", %rax\n"
+"        syscall\n"
+"        ret\n"
+"redirect_vgettimeofday:\n"
+"        movq $" STRING2(__NR_gettimeofday) ", %rax\n"
+"        syscall\n"
+"        ret\n"
+"redirect_end:\n"
+	);
+extern unsigned char redirect_vtime[];
+extern unsigned char redirect_vgettimeofday[];
+extern unsigned char redirect_end[];
+
+template <typename ait> void
+AddressSpace<ait>::writeLiteralMemory(unsigned long start,
+				      unsigned size,
+				      const unsigned char *content)
+{
+	ait *c = (ait *)malloc(sizeof(ait) * size);
+	for (unsigned x = 0; x < size; x++)
+		c[x] = mkConst<ait>(content[x]);
+	writeMemory(EventTimestamp::invalid, mkConst<ait>(start),
+		    size, c, true);
+	free(c);
+}
+
+template <typename ait> void
+AddressSpace<ait>::addVsyscalls()
+{
+	allocateMemory(mkConst<ait>(0xFFFFFFFFFF600000),
+		       mkConst<ait>(0x1000),
+		       VAMap::Protection(true, false, true),
+		       VAMap::AllocFlags(false));
+	writeLiteralMemory(0xFFFFFFFFFF600000,
+			   redirect_end - redirect_vgettimeofday,
+			   redirect_vgettimeofday);
+	writeLiteralMemory(0xFFFFFFFFFF600400,
+			   redirect_vgettimeofday - redirect_vtime,
+			   redirect_vtime);
+}
+
 #define MK_ADDRESS_SPACE(t)

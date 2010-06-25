@@ -84,6 +84,8 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 		ptr = nextPtr;
 	}
 
+	as->addVsyscalls();
+
 	*end = ptr;
 	return work;
 }

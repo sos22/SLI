@@ -1,5 +1,6 @@
 #include <math.h>
 #include <string.h>
+#include <asm/unistd.h>
 
 #include "libvex.h"
 #include "libvex_ir.h"
@@ -918,10 +919,10 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56));
 			break;
 		case Iop_16Sto32:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48)) & mkConst<ait>(0xffff);
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48)) & mkConst<ait>(0xffffffff);
 			break;
 		case Iop_8Sto32:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffff);
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffffffff);
 			break;
 		case Iop_16Sto64:
 			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48));
@@ -999,17 +1000,14 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	return res;
 }
 
-template <typename ait>
-static ait
-redirectGuest(ait rip)
+/* vsyscalls are weird (the redirection target effectively moves), and
+ * cause a number of RIP mismatches during replay.  Skank it up. */
+template <typename ait> void
+Thread<ait>::redirectGuest(ait rip)
 {
-	/* XXX hideous hack of hideousness */
-	if (force(rip == mkConst<ait>(0xFFFFFFFFFF600400ul)))
-		return mkConst<ait>(0x38017e0d);
-	else if (force(rip == mkConst<ait>(0xFFFFFFFFFF600000)))
-		throw NotImplementedException();
-	else
-		return rip;
+	if (force(rip == mkConst<ait>(0xFFFFFFFFFF600400ul) ||
+		  rip == mkConst<ait>(0xffffffffff600000ul)))
+		allowRipMismatch = true;
 }
 
 IRSB *instrument_func(void *closure,
@@ -1043,7 +1041,7 @@ public:
 template<typename ait>
 void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 {
-	regs.set_reg(REGISTER_IDX(RIP), redirectGuest(regs.rip()));
+	redirectGuest(regs.rip());
 
 	vexSetAllocModeTEMP_and_clear();
 
@@ -1114,7 +1112,8 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 								  GR(FOOTSTEP_REG_1_NAME),
 								  regs.get_reg(REGISTER_IDX(XMM0) + 1),
 								  GR(FOOTSTEP_REG_3_NAME),
-								  GR(FOOTSTEP_REG_4_NAME));
+								  GR(FOOTSTEP_REG_4_NAME),
+								  allowRipMismatch);
 #undef GR
 			case Ist_AbiHint:
 				break;
@@ -1247,7 +1246,9 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 		       currentIRSB->jumpkind == Ijk_Call ||
 		       currentIRSB->jumpkind == Ijk_Ret ||
 		       currentIRSB->jumpkind == Ijk_Sys_syscall);
-		
+		if (currentIRSB->jumpkind == Ijk_Ret)
+			allowRipMismatch = false;
+
 		{
 			struct expression_result<ait> next_addr =
 				eval_expression(currentIRSB->next);

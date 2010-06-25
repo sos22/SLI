@@ -129,7 +129,7 @@ void InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 	if (!lrf)
 		throw ReplayFailedException("wanted a footstep, got %s",
 					    lr->name());
-        if (force(rip != lrf->rip))
+        if (!allowRipMismatch && force(rip != lrf->rip))
 		throw ReplayFailedBadRip(force(rip), force(lrf->rip));
 #define PASTE(x, y) x ## y
 #define PASTE2(x, y) PASTE(x, y)

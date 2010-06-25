@@ -205,6 +205,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_readlink: /* 89 */
 		break;
+	case __NR_gettimeofday: /* 96 */
+		break;
 	case __NR_getrlimit: /* 97 */
 		break;
 	case __NR_getuid: /* 102 */
@@ -221,6 +223,14 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_statfs: /* 137 */
 		break;
+	case __NR_sched_getparam: /* 143 */
+		break;
+	case __NR_sched_getscheduler: /* 145 */
+		break;
+	case __NR_sched_get_priority_max: /* 146 */
+		break;
+	case __NR_sched_get_priority_min: /* 147 */
+		break;
 	case __NR_arch_prctl: /* 158 */
 		thr->regs.set_reg(REGISTER_IDX(FS_ZERO), args[1]);
 		break;
@@ -234,6 +244,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		thr->clear_child_tid = args[0];
 		break;
 	case __NR_clock_gettime: /* 228 */
+		break;
+	case __NR_clock_getres: /* 229 */
 		break;
 	case __NR_exit_group: /* 231 */
 		mach->exitGroup(args[0]);

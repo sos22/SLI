@@ -424,6 +424,7 @@ class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
 	expression_result<abst_int_type> do_ccall(IRCallee *cee, IRExpr **args);
 	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
+	void redirectGuest(abst_int_type rip);
 public:
 	ThreadId tid;
 	unsigned pid;
@@ -448,6 +449,7 @@ public:
 	EventTimestamp lastEvent;
 
 private:
+	bool allowRipMismatch;
 	~Thread();
 public:
 	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace, MachineState<abst_int_type> *ms);
@@ -1028,15 +1030,17 @@ public:
 	ait reg2;
 	ait reg3;
 	ait reg4;
+	bool allowRipMismatch;
 	InstructionEvent(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
-			 ait _reg2, ait _reg3, ait _reg4) :
+			 ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch) :
 		ThreadEvent<ait>(when),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
 		reg2(_reg2),
 		reg3(_reg3),
-		reg4(_reg4)
+		reg4(_reg4),
+		allowRipMismatch(_allowRipMismatch)
 	{
 	}
 protected:
@@ -1047,11 +1051,13 @@ public:
 	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static InstructionEvent<ait> *get(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
-					  ait _reg2, ait _reg3, ait _reg4)
+					  ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch)
 	{
-		return new InstructionEvent<ait>(when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
+		return new InstructionEvent<ait>(when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4,
+						 _allowRipMismatch);
 	}
-	ThreadEvent<ait> *dupe() const { return get(this->when, rip, reg0, reg1, reg2, reg3, reg4); }
+	ThreadEvent<ait> *dupe() const { return get(this->when, rip, reg0, reg1, reg2, reg3, reg4,
+						    allowRipMismatch); }
 
 	void visit(HeapVisitor &hv) const
 	{
@@ -1712,6 +1718,7 @@ public:
 	void writeMemory(EventTimestamp when, ait start, unsigned size,
 			 const ait *contents, bool ignore_protection = false,
 			 const Thread<ait> *thr = NULL);
+	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result<ait> load(EventTimestamp when, ait start, unsigned size,
 				    bool ignore_protection = false,
 				    const Thread<ait> *thr = NULL);
@@ -1735,6 +1742,8 @@ public:
 	AddressSpace *dupeSelf() const;
 	void visit(HeapVisitor &hv) const;
 	void sanityCheck() const;
+
+	void addVsyscalls();
 
 	void dumpBrkPtr(LogWriter<ait> *lw) const;
 	void dumpSnapshot(LogWriter<ait> *lw) const;
