@@ -1,5 +1,6 @@
 #include <asm/prctl.h>
 #include <asm/unistd.h>
+#include <errno.h>
 #include <sched.h>
 
 #include "sli.h"
@@ -283,9 +284,8 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 		printf("Can't fake open syscall (file %s)\n",
 		       path);
 		free(path);
-		if (lr)
-			*lr = NULL;
-		return InterpretResultIncomplete;
+		res = mkConst<ait>(-ENOENT);
+		break;
 	}
 	case __NR_futex:
 		res = mkConst<ait>(0);
