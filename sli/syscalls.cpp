@@ -276,6 +276,17 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 
 	switch (force(sysnr)) {
+	case __NR_open: {
+		char *path =
+			ms->addressSpace->readString(
+				thr->regs.get_reg(REGISTER_IDX(RDI)));
+		printf("Can't fake open syscall (file %s)\n",
+		       path);
+		free(path);
+		if (lr)
+			*lr = NULL;
+		return InterpretResultIncomplete;
+	}
 	case __NR_futex:
 		res = mkConst<ait>(0);
 		break;

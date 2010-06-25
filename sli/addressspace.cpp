@@ -423,4 +423,29 @@ AddressSpace<ait>::addVsyscalls()
 			   redirect_vtime);
 }
 
+template <typename ait> char *
+AddressSpace<ait>::readString(ait start)
+{
+	char *buf;
+	unsigned offset;
+	unsigned buf_size;
+
+	buf_size = 64;
+	buf = (char *)malloc(buf_size);
+	offset = 0;
+	while (1) {
+		ait b;
+		readMemory(start + mkConst<ait>(offset), 1, &b);
+		buf[offset] = force(b);
+		if (!buf[offset])
+			break;
+		offset++;
+		if (offset >= buf_size) {
+			buf_size *= 2;
+			buf = (char *)realloc(buf, buf_size);
+		}
+	}
+	return buf;
+}
+
 #define MK_ADDRESS_SPACE(t)

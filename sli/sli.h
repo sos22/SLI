@@ -1748,6 +1748,8 @@ public:
 	void dumpBrkPtr(LogWriter<ait> *lw) const;
 	void dumpSnapshot(LogWriter<ait> *lw) const;
 
+	char *readString(ait start);
+
 	template <typename new_type> AddressSpace<new_type> *abstract() const;
 
 	void destruct() {}
