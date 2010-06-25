@@ -23,6 +23,13 @@
 
 void dump_heap_usage(void);
 
+#undef VALGRIND_MAKE_MEM_NOACCESS
+#undef VALGRIND_MAKE_MEM_UNDEFINED
+#undef VALGRIND_CHECK_MEM_IS_DEFINED
+#define VALGRIND_MAKE_MEM_NOACCESS(x, y)
+#define VALGRIND_MAKE_MEM_UNDEFINED(x, y)
+#define VALGRIND_CHECK_MEM_IS_DEFINED(x, y)
+
 /* The main arena. */
 #define N_TEMPORARY_BYTES 900000000
 static char temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
