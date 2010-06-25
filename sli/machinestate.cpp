@@ -136,7 +136,7 @@ MachineState<new_type> *MachineState<ait>::abstract() const
 	MachineState<new_type> *work = new MachineState<new_type>();
 
 	work->exitted = exitted;
-	work->exit_status = new_type::import(exit_status, ImportOriginInitialValue::get());
+	work->exit_status = mkConst<new_type>(exit_status);
 	work->nextTid = nextTid;
 	signalHandlers.abstract<new_type>(&work->signalHandlers);
 	work->addressSpace = addressSpace->abstract<new_type>();

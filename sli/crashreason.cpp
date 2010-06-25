@@ -82,15 +82,17 @@ dump_spare_list_idx(const std::map<ThreadId, History *> &spare_histories)
 
 static void
 fixup_expression(Expression **e,
-		 const std::map<ThreadId, unsigned long> &last_valid_idx,
+		 std::map<ThreadId, unsigned long> &last_valid_idx,
 		 std::map<ThreadId, History *> &spare_histories,
 		 const MachineState<abstract_interpret_value> *ms,
 		 LogReader<abstract_interpret_value> *global_lf,
 		 LogReaderPtr global_lf_start)
 {
 top:
-	if (dynamic_cast<ConstExpression *>(*e) ||
-	    dynamic_cast<ImportExpression *>(*e))
+	if (syntax_check_expression(*e, last_valid_idx, NULL))
+		return;
+
+	if (dynamic_cast<ConstExpression *>(*e))
 		return;
 
 	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(*e)) {
@@ -364,8 +366,9 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	}
 
 	VexGcRoot root2((void **)&res, "root2");
+	std::map<ThreadId, unsigned long> m;
 	fixup_expression(&res,
-			 std::map<ThreadId, unsigned long>(),
+			 m,
 			 extr->thread_histories,
 			 ms,
 			 script,

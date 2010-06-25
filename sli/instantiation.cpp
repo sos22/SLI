@@ -52,12 +52,6 @@ ait operator ==(expression_result<ait> a, expression_result<ait> b)
 	return a.lo == b.lo && a.hi == b.hi;
 }
 
-template<>
-unsigned long import_ait(unsigned long x, ImportOrigin *ignore)
-{
-	return x;
-}
-
 MK_INTERP(unsigned long);
 
 template <>
@@ -83,30 +77,6 @@ RegisterSet<abstract_interpret_value>::RegisterSet(const VexGuestAMD64State &r)
 	     x < NR_REGS;
 	     x++)
 		registers[x] = mkConst<abstract_interpret_value>( ((unsigned long *)&r)[x] );
-}
-
-template <>
-abstract_interpret_value abstract_interpret_value::import(unsigned long x,
-							  ImportOrigin *origin,
-							  bool isStack)
-{
-	abstract_interpret_value v;
-	v.v = x;
-	v.origin = ImportExpression::get(x, origin);
-	v.isStack = isStack;
-	return v;
-}
-
-template<>
-abstract_interpret_value import_ait(unsigned long x, ImportOrigin *origin)
-{
-	return abstract_interpret_value::import(x, origin);
-}
-
-template<>
-unsigned long import_ait(abstract_interpret_value v, ImportOrigin *ignore)
-{
-	return v.v;
 }
 
 static inline abstract_interpret_value signed_shift_right(abstract_interpret_value x, abstract_interpret_value y)

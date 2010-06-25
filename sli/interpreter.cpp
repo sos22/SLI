@@ -356,15 +356,14 @@ Thread<ait>::do_ccall_generic(IRCallee *cee,
 {
 	struct expression_result<ait> res;
 
-	res.lo = import_ait<unsigned long, ait>(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
-								    unsigned long, unsigned long, unsigned long))cee->addr)
-						(force(rargs[0].lo),
-						 force(rargs[1].lo),
-						 force(rargs[2].lo),
-						 force(rargs[3].lo),
-						 force(rargs[4].lo),
-						 force(rargs[5].lo)),
-						ImportOriginSymbolicFailure::get());
+	res.lo = mkConst<ait>(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
+						  unsigned long, unsigned long, unsigned long))cee->addr)
+			      (force(rargs[0].lo),
+			       force(rargs[1].lo),
+			       force(rargs[2].lo),
+			       force(rargs[3].lo),
+			       force(rargs[4].lo),
+			       force(rargs[5].lo)));
 	res.hi = mkConst<ait>(0);
 	return res;
 }
@@ -646,9 +645,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 		case Iop_MullS32:
 			dest->lo =
-				import_ait<unsigned long, ait>(
-					(long)(int)force(arg1.lo) * (long)(int)force(arg2.lo),
-					ImportOriginSymbolicFailure::get());
+				mkConst<ait>((long)(int)force(arg1.lo) * (long)(int)force(arg2.lo));
 			break;
 
 		case Iop_MullS64:
@@ -685,10 +682,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_DivModS64to32: {
 			long a1 = force(arg1.lo);
 			long a2 = force(arg2.lo);
-			dest->lo = import_ait<unsigned long, ait>(
-				((a1 / a2) & 0xffffffff) | ((a1 % a2) << 32),
-				ImportOriginSymbolicFailure::get()
-				);
+			dest->lo = mkConst<ait>(
+				((a1 / a2) & 0xffffffff) | ((a1 % a2) << 32));
 			break;
 		}
 
@@ -701,12 +696,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("div %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = import_ait<unsigned long, ait>(
-				dlo,
-				ImportOriginSymbolicFailure::get());
-			dest->hi = import_ait<unsigned long, ait>(
-				dhi,
-				ImportOriginSymbolicFailure::get());
+			dest->lo = mkConst<ait>(dlo);
+			dest->hi = mkConst<ait>(dhi);
 			break;
 		}
 
@@ -716,12 +707,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("idiv %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = import_ait<unsigned long, ait>(
-				dlo,
-				ImportOriginSymbolicFailure::get());
-			dest->hi = import_ait<unsigned long, ait>(
-				dhi,
-				ImportOriginSymbolicFailure::get());
+			dest->lo = mkConst<ait>(dlo);
+			dest->hi = mkConst<ait>(dhi);
 			break;
 		}
 
@@ -787,9 +774,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.d = force(arg2.lo);
-				dest->lo = import_ait<unsigned long, ait>(
-					r.l,
-					ImportOriginSymbolicFailure::get());
+				dest->lo = mkConst<ait>(r.l);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -806,9 +791,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.l = force(arg2.lo);
-				dest->lo = import_ait<unsigned long, ait>(
-					(unsigned)r.d,
-					ImportOriginSymbolicFailure::get());
+				dest->lo = mkConst<ait>((unsigned)r.d);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -835,9 +818,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				r = 0;
 			else
 				r = 0x45;
-			dest->lo = import_ait<unsigned long, ait>(
-				r,
-				ImportOriginSymbolicFailure::get());
+			dest->lo = mkConst<ait>(r);
 			break;
 		}
 
@@ -950,9 +931,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << (63 - res))) &&
 			       res < 63)
 				res++;
-			dest->lo = import_ait<unsigned long, ait>(
-				res,
-				ImportOriginSymbolicFailure::get());
+			dest->lo = mkConst<ait>(res);
 			break;
 		}
 
@@ -962,9 +941,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << res)) &&
 			       res < 63)
 				res++;
-			dest->lo = import_ait<unsigned long, ait>(
-				v,
-				ImportOriginSymbolicFailure::get());
+			dest->lo = mkConst<ait>(res);
 			break;
 		}
 

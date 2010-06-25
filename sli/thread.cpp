@@ -98,15 +98,9 @@ Thread<new_type> *Thread<ait>::abstract() const
 	work->nrEvents = nrEvents;
 	work->pid = pid;
 	regs.abstract<new_type>(&work->regs);
-	work->clear_child_tid = new_type::import(
-		clear_child_tid,
-		ImportOriginInitialValue::get());
-	work->robust_list = new_type::import(
-		robust_list,
-		ImportOriginInitialValue::get());
-	work->set_child_tid = new_type::import(
-		set_child_tid,
-		ImportOriginInitialValue::get());
+	work->clear_child_tid = mkConst<new_type>(clear_child_tid);
+	work->robust_list = mkConst<new_type>(robust_list);
+	work->set_child_tid = mkConst<new_type>(set_child_tid);
 	work->exitted = exitted;
 	work->crashed = crashed;
 	work->cannot_make_progress = cannot_make_progress;

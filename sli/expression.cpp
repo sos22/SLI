@@ -559,39 +559,6 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 }
 
 
-VexAllocType ImportOrigin::allocator = { -1, ImportOrigin::visit,
-					 ImportOrigin::destruct,
-					 "ImportOrigin" };
-
-void *ImportOrigin::operator new(size_t s)
-{
-	return LibVEX_Alloc_Sized(&allocator, s);
-}
-
-ImportOriginSymbolicFailure *ImportOriginSymbolicFailure::w;
-ImportOrigin *ImportOriginSymbolicFailure::get()
-{
-	if (!w)
-		w = new ImportOriginSymbolicFailure();
-	return w;
-}
-
-ImportOriginInitialValue *ImportOriginInitialValue::w;
-ImportOrigin *ImportOriginInitialValue::get()
-{
-	if (!w)
-		w = new ImportOriginInitialValue();
-	return w;
-}
-
-ImportOriginLogfile *ImportOriginLogfile::w;
-ImportOrigin *ImportOriginLogfile::get()
-{
-	if (!w)
-		w = new ImportOriginLogfile();
-	return w;
-}
-
 bool equals::isLogical() const { return true; }			
 Expression *equals::get(Expression *l, Expression *r)		
 {									
@@ -652,7 +619,6 @@ BottomExpression *BottomExpression::bottom;
 
 TRIV_EXPR_MAPPER(BottomExpression)
 TRIV_EXPR_MAPPER(ConstExpression)
-TRIV_EXPR_MAPPER(ImportExpression)
 TRIV_EXPR_MAPPER(ExpressionHappensBefore)
 
 Expression *
