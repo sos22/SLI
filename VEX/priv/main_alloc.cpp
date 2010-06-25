@@ -21,6 +21,8 @@
 #include "main_globals.h"
 #include "main_util.h"
 
+void dump_heap_usage(void);
+
 /* The main arena. */
 #define N_TEMPORARY_BYTES 900000000
 static char temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
@@ -338,9 +340,11 @@ alloc_bytes(VexAllocType *type, unsigned size)
 	  break;
       }
     }
-    if (cursor == allocation_cursor)
+    if (cursor == allocation_cursor) {
+      dump_heap_usage();
       vpanic("VEX temporary storage exhausted.\n"
 	     "Increase N_TEMPORARY_BYTES and recompile.");
+    }
   }
 
   /* Consider splitting the block */
