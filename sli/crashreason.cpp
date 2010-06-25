@@ -88,8 +88,7 @@ fixup_expression(Expression **e,
 		 LogReader<abstract_interpret_value> *global_lf,
 		 LogReaderPtr global_lf_start)
 {
-	dump_spare_list_idx(spare_histories);
-
+top:
 	if (dynamic_cast<ConstExpression *>(*e) ||
 	    dynamic_cast<ImportExpression *>(*e))
 		return;
@@ -175,8 +174,7 @@ fixup_expression(Expression **e,
 					er->model_exec_start);
 
 				/* Run the check again on that. */
-				fixup_expression(e, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-				return;
+				goto top;
 			}
 		}
 		idx_entry = er->history->last_valid_idx;
@@ -202,8 +200,7 @@ fixup_expression(Expression **e,
 						ehb,
 						global_lf,
 						global_lf_start);
-			fixup_expression(e, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-			return;
+			goto top;
 		}
 		return;
 	}
