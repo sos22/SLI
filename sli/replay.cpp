@@ -3,13 +3,15 @@
 #include "sli.h"
 
 template <typename ait>
-void RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	LogRecordRdtsc<ait> *lrr = dynamic_cast<LogRecordRdtsc<ait> *>(lr);
 	if (!lrr)
 		throw ReplayFailedException("wanted a rdtsc, got %s",
 					    lr->name());
         ms->findThread(this->when.tid)->temporaries[tmp].lo = lrr->tsc;
+
+	return NULL;
 }
 
 template <typename ait>
@@ -47,7 +49,7 @@ static void checkSegv(LogRecord<ait> *lr, ait addr)
 }
 
 template <typename ait>
-void StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
@@ -63,6 +65,8 @@ void StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 					    force(addr));
 	ms->addressSpace->store(this->when, addr, size, data, false, thr);
 	thr->nrAccesses++;
+
+	return NULL;
 }
 
 template <typename ait>
@@ -78,7 +82,7 @@ InterpretResult StoreEvent<ait>::fake(MachineState<ait> *ms,
 }
 
 template <typename ait>
-void LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
@@ -100,6 +104,8 @@ void LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 	} else {
 		checkSegv(lr, addr);
 	}
+
+	return NULL;
 }
 
 template <typename ait>
@@ -123,7 +129,7 @@ InterpretResult LoadEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 }
 
 template <typename ait>
-void InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	LogRecordFootstep<ait> *lrf = dynamic_cast<LogRecordFootstep<ait> *>(lr);
 	if (!lrf)
@@ -149,6 +155,8 @@ void InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
        CHECK_REGISTER(2);
        CHECK_REGISTER(3);
        CHECK_REGISTER(4);
+
+	return NULL;
 }
 
 template <typename ait>
@@ -161,24 +169,24 @@ InterpretResult InstructionEvent<ait>::fake(MachineState<ait> *ms,
 }
 
 template <typename ait>
-void SyscallEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *SyscallEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	LogRecordSyscall<ait> *lrs = dynamic_cast<LogRecordSyscall<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a syscall, got %s",
 					    lr->name());
 		
-	replay_syscall(lrs, ms->findThread(this->when.tid), ms);
+	return replay_syscall(lrs, ms->findThread(this->when.tid), ms);
 }
 
 template <typename ait>
-void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	throw SliException("CAS events need a special replay method");
 }
 
 template <typename ait>
-void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 			   const LogReader<ait> *lf, LogReaderPtr ptr,
 			   LogReaderPtr *outPtr, LogWriter<ait> *lw)
 {
@@ -199,7 +207,7 @@ void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 					    force(addr.lo));
 	thr->temporaries[dest] = seen;
         if (force(seen != expected))
-		return;
+		return NULL;
 
         LogRecord<ait> *lr2 = lf->read(ptr, outPtr);
 	if (lw)
@@ -216,6 +224,8 @@ void CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 					    force(addr.lo));
 
 	ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
+
+	return NULL;
 }
 
 template <typename ait>
@@ -243,27 +253,40 @@ InterpretResult CasEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr1)
 }
 
 template <typename ait>
-void SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a signal record, got %s",
 					    lr->name());
-	if (lrs->signr != 11)
-		throw NotImplementedException("Only handle SIGSEGV, got %d",
-					      lrs->signr);
-	if (ms->addressSpace->isReadable(lrs->virtaddr, 1, thr))
-		throw ReplayFailedException("got a segv at %lx, but that location is readable?",
-					    force(lrs->virtaddr));
-	/* Can't actually do much with this, because we pick up the
-	   Valgrind sighandlers when we start.  Oh well. */
+	if (lrs->signr != signr)
+		throw ReplayFailedException("wanted signal %d, got signal %d",
+					    lrs->signr, signr);
+	switch (lrs->signr) {
+	case 6:
+		break;
+	case 11:
+		if (ms->addressSpace->isReadable(lrs->virtaddr, 1, thr))
+			throw ReplayFailedException("got a segv at %lx, but that location is readable?",
+						    force(lrs->virtaddr));
+		/* Can't actually do much with this, because we pick
+		   up the Valgrind sighandlers when we start.  Oh
+		   well. */
 #if 0
-	if (ms->signalHandlers.handlers[11].sa_handler != SIG_DFL)
-		throw NotImplementedException("don't handle custom signal handlers");
+		if (ms->signalHandlers.handlers[11].sa_handler != SIG_DFL)
+			throw NotImplementedException("don't handle custom signal handlers");
 #endif
+		break;
+	default:
+		throw NotImplementedException("Only handle SIGSEGV and SIGABRT, got %d",
+					      lrs->signr);
+	}
+
 	printf("Crash in thread %d\n", thr->tid._tid());
 	thr->crashed = true;
+
+	return NULL;
 }
 
 template <typename ait>

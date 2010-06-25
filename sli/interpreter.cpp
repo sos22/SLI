@@ -1345,26 +1345,31 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
-		if (lw)
-			lw->append(*lr, evt->when.idx);
-		if (er)
-			er->record(thr, evt);
+		while (evt) {
+			if (lw)
+				lw->append(*lr, evt->when.idx);
+			if (er)
+				er->record(thr, evt);
 
 #if 0
-		printf("Event %s in thread %d\n",
-		       evt->name(), lr->thread()._tid());
+			printf("Event %s in thread %d\n",
+			       evt->name(), lr->thread()._tid());
 #endif
 
 
-		/* CAS events are annoyingly special, because they can
-		   generate multiple records in the logfile (one for
-		   the load and one for the store). */
-		CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
-		if (ce) {
-			ce->replay(lr, currentState,
-				   lf, ptr, &ptr, lw);
-		} else {
-			evt->replay(lr, currentState);
+			/* CAS events are annoyingly special, because
+			   they can generate multiple records in the
+			   logfile (one for the load and one for the
+			   store). */
+			CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
+			if (ce) {
+				evt = ce->replay(lr, currentState,
+						 lf, ptr, &ptr, lw);
+			} else {
+				evt = evt->replay(lr, currentState);
+			}
+			if (evt)
+				lr = lf->read(ptr, &ptr);
 		}
 
 		/* Memory records are special and should always be
@@ -1389,12 +1394,16 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
-		CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
-		if (ce) {
-			ce->replay(lr, currentState,
-				   lf, ptr, &ptr, NULL);
-		} else {
-			evt->replay(lr, currentState);
+		while (evt) {
+			CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
+			if (ce) {
+				evt = ce->replay(lr, currentState,
+						 lf, ptr, &ptr, NULL);
+			} else {
+				evt = evt->replay(lr, currentState);
+			}
+			if (evt)
+				lr = lf->read(ptr, &ptr);
 		}
 
 		/* Memory records are special and should always be

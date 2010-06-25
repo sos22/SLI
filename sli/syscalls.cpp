@@ -74,7 +74,7 @@ handle_clone(AddressSpace<ait> *addrSpace,
 	mach->registerThread(newThread);
 }
 
-template<typename ait> void
+template<typename ait> ThreadEvent<ait> *
 replay_syscall(const LogRecordSyscall<ait> *lrs,
 	       Thread<ait> *thr,
 	       MachineState<ait> *mach)
@@ -83,7 +83,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 	ait res = lrs->res;
 	ait args[6];
-
+	ThreadEvent<ait> *evt = NULL;
 	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));
 	args[1] = thr->regs.get_reg(REGISTER_IDX(RSI));
 	args[2] = thr->regs.get_reg(REGISTER_IDX(RDX));
@@ -250,6 +250,11 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_exit_group: /* 231 */
 		mach->exitGroup(args[0]);
 		break;
+	case __NR_tgkill: /* 234 */
+		/* Hack: assume that this came from raise() */
+		evt = SignalEvent<ait>::get(thr->bumpEvent(mach), force(args[2]), mkConst<ait>(0));
+		break;
+
 	case __NR_set_robust_list: /* 273 */
 		thr->robust_list = args[0];
 		break;
@@ -259,6 +264,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 
 	assert(force(res == lrs->res));
 	thr->regs.set_reg(REGISTER_IDX(RAX), res);
+
+	return evt;
 }
 
 template <typename ait>

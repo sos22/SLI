@@ -423,9 +423,9 @@ class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	expression_result<abst_int_type> do_ccall_calculate_rflags_c(expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
 	expression_result<abst_int_type> do_ccall(IRCallee *cee, IRExpr **args);
-	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
 	void redirectGuest(abst_int_type rip);
 public:
+	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
 	ThreadId tid;
 	unsigned pid;
 	RegisterSet<abst_int_type> regs;
@@ -936,7 +936,7 @@ protected:
 public:
 	EventTimestamp when;
 	/* Replay the event using information in the log record */
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
+	virtual ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL) = 0;
 	virtual ThreadEvent<ait> *dupe() const = 0;
 
@@ -958,7 +958,7 @@ class RdtscEvent : public ThreadEvent<ait> {
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	virtual ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp temp)
 	{ return new RdtscEvent<ait>(when, temp); }
@@ -985,7 +985,7 @@ class LoadEvent : public ThreadEvent<ait> {
 protected:
 	virtual char *mkName() const { return my_asprintf("load(%s, %d, %d)", name_aiv(addr), tmp, size); }
 public:
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
 	{
@@ -1008,7 +1008,7 @@ private:
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
 	{
@@ -1048,7 +1048,7 @@ protected:
 		return my_asprintf("footstep(%s)", name_aiv(rip));
 	}
 public:
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static InstructionEvent<ait> *get(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
 					  ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch)
@@ -1099,13 +1099,13 @@ protected:
 				   dest, size);
 	}
 public:
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL,
 				     LogRecord<ait> **lr2 = NULL);
-	void replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-		    const LogReader<ait> *lf, LogReaderPtr ptr,
-		    LogReaderPtr *outPtr, LogWriter<ait> *lw);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+				 const LogReader<ait> *lf, LogReaderPtr ptr,
+				 LogReaderPtr *outPtr, LogWriter<ait> *lw);
 
 	static ThreadEvent<ait> *get(EventTimestamp when,
 				     IRTemp _dest,
@@ -1143,7 +1143,7 @@ protected:
 	}
 	SyscallEvent(EventTimestamp when) : ThreadEvent<ait>(when) {}
 public:
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	ThreadEvent<ait> *dupe() const { return get(this->when); }
 	static ThreadEvent<ait> *get(EventTimestamp when)
@@ -1167,7 +1167,7 @@ protected:
 		return my_asprintf("signal(nr = %d)", signr);
 	}
 public:
-	virtual void replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 
 	static ThreadEvent<ait> *get(EventTimestamp when, unsigned _signr, ait _virtaddr)
@@ -1755,9 +1755,9 @@ public:
 	NAMED_CLASS
 };
 
-template<typename ait> void replay_syscall(const LogRecordSyscall<ait> *lrs,
-					   Thread<ait> *thr,
-					   MachineState<ait> *mach);
+template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall<ait> *lrs,
+							 Thread<ait> *thr,
+							 MachineState<ait> *mach);
 
 template<typename ait> void process_memory_records(AddressSpace<ait> *addrSpace,
 						   const LogReader<ait> *lf,
