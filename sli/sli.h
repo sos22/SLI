@@ -1843,6 +1843,15 @@ protected:
 	virtual bool _isEqual(const Expression *other) const = 0;
 	virtual Expression *_CNF() { return this; }
 	virtual Expression *_concretise() = 0;
+	static void lastAccessTS(EventTimestamp ts, std::map<ThreadId, unsigned long> &output)
+	{
+		if (output[ts.tid] < ts.idx)
+			output[ts.tid] = ts.idx;
+	}
+	virtual void _lastAccessMap(std::map<ThreadId, unsigned long> &output) = 0;
+private:
+	std::map<ThreadId, unsigned long> lastAccessedMap;
+	bool haveLastAccessMap;
 public:
 	unsigned hash() const { return hashval; }
 	virtual bool isConstant(unsigned long *cv) const { return false; }
@@ -1858,6 +1867,18 @@ public:
 	virtual Expression *map(ExpressionMapper &f) = 0;
 	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_threshold,
 				    Relevance high_threshold) = 0;
+	void lastAccessMap(std::map<ThreadId, unsigned long> &output) {
+		if (!haveLastAccessMap) {
+			_lastAccessMap(lastAccessedMap);
+			haveLastAccessMap = true;
+		}
+		for (std::map<ThreadId, unsigned long>::iterator it = lastAccessedMap.begin();
+		     it != lastAccessedMap.end();
+		     it++) {
+			if (output[it->first] < it->second)
+				output[it->first] = it->second;
+		}
+	}
 	Expression *concretise() {
 		if (!concrete.get())
 			concrete.set(_concretise());
@@ -1915,6 +1936,7 @@ public:
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &f) { return f.map(this); }
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output) {}
 };
 
 class ConstExpression : public UnrefinableExpression {
@@ -1944,6 +1966,7 @@ public:
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output) {}
 };
 
 class ImportExpression : public UnrefinableExpression {
@@ -1968,6 +1991,7 @@ public:
 	void visit(HeapVisitor &hv) const {hv(origin);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output) { }
 };
 
 class ExpressionLastStore : public Expression {
@@ -2036,6 +2060,12 @@ public:
 		else
 			return Relevance(r, vaddr->relevance(ev, r + 1, high_thresh));
 	}
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		vaddr->lastAccessMap(output);
+		lastAccessTS(load, output);		
+		lastAccessTS(store, output);		
+	}
 };
 
 class ExpressionHappensBefore : public Expression {
@@ -2100,6 +2130,11 @@ public:
 	Relevance relevance(const EventTimestamp &ev, Relevance, Relevance) {
 		return Relevance(Relevance(before, ev),
 				 Relevance(after, ev));
+	}
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		lastAccessTS(before, output);
+		lastAccessTS(after, output);
 	}
 };
 
@@ -2168,6 +2203,14 @@ public:
 				  addr->relevance(ev, r + 1, high_thresh)),
 			storeAddr->relevance(ev, r + 1, high_thresh));
 	}
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		val->lastAccessMap(output);
+		addr->lastAccessMap(output);
+		storeAddr->lastAccessMap(output);
+		lastAccessTS(when, output);
+		lastAccessTS(store, output);
+	}
 };
 
 class BinaryExpression : public Expression {
@@ -2217,6 +2260,11 @@ public:
 		if (lr >= high_thresh)
 			return lr;
 		return Relevance(lr, r->relevance(ev, lr + 1, high_thresh));
+	}
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		l->lastAccessMap(output);
+		r->lastAccessMap(output);
 	}
 };
 
@@ -2308,6 +2356,10 @@ public:
 	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh)
 	{
 		return l->relevance(ev, low_thresh + 1, high_thresh + 1);
+	}
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		l->lastAccessMap(output);
 	}
 };
 
@@ -2436,6 +2488,12 @@ public:
 			low_thresh = tr;
 		Relevance fr = f->relevance(ev, low_thresh + 1, high_thresh);
 		return Relevance(c, Relevance(tr, fr));
+	}
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		cond->lastAccessMap(output);
+		t->lastAccessMap(output);
+		f->lastAccessMap(output);
 	}
 };
 
@@ -2697,6 +2755,7 @@ public:
 		  parent(_parent)
 	{
 		assert(when.tid.valid());
+		calcLastAccessed();
 	}
 	History(Expression *cond,
 		unsigned long _last_valid_idx,
@@ -2710,6 +2769,7 @@ public:
 		  parent(_parent)
 	{
 		assert(when.tid.valid());
+		calcLastAccessed();
 	}
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
 		if (low_thresh >= high_thresh)
@@ -2721,8 +2781,19 @@ public:
 				      r);
 		return r;
 	}
+	void lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		for (std::map<ThreadId, unsigned long>::iterator it = lastAccessed.begin();
+		     it != lastAccessed.end();
+		     it++) {
+			if (it->second > output[it->first])
+				output[it->first] = it->second;
+		}
+	}
 private:
 	WeakRef<History> concrete;
+	std::map<ThreadId, unsigned long> lastAccessed;
+	void calcLastAccessed();
 protected:
 	char *mkName() const {
 		return my_asprintf("%s@%d:%lx->%lx", condition->name(), when.tid._tid(), when.idx,
@@ -2915,6 +2986,12 @@ public:
 		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
 		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
 	}
+
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		cond->lastAccessMap(output);
+		history->lastAccessMap(output);
+	}
 };
 
 /* A bad pointer expression asserts that a particular memory location
@@ -2963,6 +3040,12 @@ public:
 	{
 		Relevance r = Relevance(when, ev);
 		return Relevance(r, addr->relevance(ev, r + 1, high));
+	}
+
+	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	{
+		addr->lastAccessMap(output);
+		lastAccessTS(when, output);
 	}
 };
 

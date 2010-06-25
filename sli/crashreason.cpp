@@ -18,110 +18,29 @@ History *History::truncate(unsigned long idx, bool inclusive)
 		return work->parent;
 }
 
+struct PartialTimestamp {
+	ThreadId tid;
+	unsigned long idx;
+};
+
 static bool
 syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_valid_idx,
-			EventTimestamp *why = NULL)
+			PartialTimestamp *why = NULL)
 {
-	if (dynamic_cast<ConstExpression *>(e) ||
-	    dynamic_cast<ImportExpression *>(e) ||
-	    dynamic_cast<BottomExpression *>(e))
-		return true;
-
-	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(e))
-		return syntax_check_expression(ue->l, last_valid_idx, why);
-
-	if (BinaryExpression *be = dynamic_cast<BinaryExpression *>(e))
-		return syntax_check_expression(be->l, last_valid_idx, why) &&
-			syntax_check_expression(be->r, last_valid_idx, why);
-
-	if (ternarycondition *tc = dynamic_cast<ternarycondition *>(e))
-		return syntax_check_expression(tc->cond, last_valid_idx, why) &&
-			syntax_check_expression(tc->t, last_valid_idx, why) &&
-			syntax_check_expression(tc->f, last_valid_idx, why);
-
-	if (ExpressionBadPointer *ebp = dynamic_cast<ExpressionBadPointer *>(e))
-		return syntax_check_expression(ebp->addr, last_valid_idx, why);
-
-	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(e)) {
-		History *it;
-		std::map<ThreadId, unsigned long> new_last_valid_idx(last_valid_idx);
-		unsigned long &idx_entry = new_last_valid_idx[er->tid];
-		for (it = er->history;
-		     it != NULL;
-		     it = it->parent) {
-			idx_entry = it->last_valid_idx;
-			if (!syntax_check_expression(it->condition,
-						     new_last_valid_idx,
-						     why))
-				return false;
+	std::map<ThreadId, unsigned long> neededIdxes;
+	e->lastAccessMap(neededIdxes);
+	for (std::map<ThreadId, unsigned long>::iterator it = neededIdxes.begin();
+	     it != neededIdxes.end();
+	     it++) {
+		if (it->second > last_valid_idx[it->first]) {
+			if (why) {
+				why->tid = it->first;
+				why->idx = it->second;
+			}
+			return false;
 		}
-		idx_entry = er->history->last_valid_idx;
-		return syntax_check_expression(er->cond, new_last_valid_idx, why);
 	}
-
-	if (LoadExpression *le = dynamic_cast<LoadExpression *>(e)) {
-		if (le->when.idx > last_valid_idx[le->when.tid]) {
-			printf("Syntax check failed: %d:%ld is after %ld\n",
-			       le->when.tid._tid(), le->when.idx,
-			       last_valid_idx[le->when.tid]);
-			if (why)
-				*why = le->when;
-			return false;
-		}
-		if (le->store.idx > last_valid_idx[le->store.tid]) {
-			printf("Syntax check failed: store %d:%ld is after %ld\n",
-			       le->store.tid._tid(), le->store.idx,
-			       last_valid_idx[le->store.tid]);
-			if (why)
-				*why = le->store;
-			return false;
-		}
-		return syntax_check_expression(le->val, last_valid_idx, why) &&
-			syntax_check_expression(le->addr, last_valid_idx, why);
-	}
-
-	if (ExpressionLastStore *els =
-	    dynamic_cast<ExpressionLastStore *>(e)) {
-		if (els->load.idx > last_valid_idx[els->load.tid]) {
-			printf("Syntax check failed at %s: load %d:%ld is after %ld\n",
-			       els->name(), els->load.tid._tid(),
-			       els->load.idx, last_valid_idx[els->load.tid]);
-			if (why)
-				*why = els->load;
-			return false;
-		}
-		if (els->store.idx > last_valid_idx[els->store.tid]) {
-			printf("Syntax check failed at %s: store %d:%ld is after %ld\n",
-			       els->name(), els->store.tid._tid(),
-			       els->store.idx, last_valid_idx[els->store.tid]);
-			if (why)
-				*why = els->store;
-			return false;
-		}
-		return syntax_check_expression(els->vaddr, last_valid_idx, why);
-	}
-
-	if (ExpressionHappensBefore *ehb =
-	    dynamic_cast<ExpressionHappensBefore *>(e)) {
-		if (ehb->before.idx > last_valid_idx[ehb->before.tid]) {
-			printf("Syntax check failed at %s: %d:%ld is after %ld\n",
-			       ehb->name(), ehb->before.tid._tid(),
-			       ehb->before.idx, last_valid_idx[ehb->before.tid]);
-			if (why)
-				*why = ehb->before;
-			return false;
-		}
-		if (ehb->after.idx > last_valid_idx[ehb->after.tid]) {
-			printf("Syntax check failed at %s: %d:%ld is after %ld\n",
-			       ehb->name(), ehb->after.tid._tid(),
-			       ehb->after.idx, last_valid_idx[ehb->after.tid]);
-			if (why)
-				*why = ehb->after;
-			return false;
-		}
-		return true;
-	}
-	abort();
+	return true;
 }
 
 template <typename k, typename v>
@@ -205,7 +124,7 @@ fixup_expression(Expression **e,
 		for (it = er->history;
 		     it != NULL;
 		     it = it->parent) {
-			EventTimestamp needed;
+			PartialTimestamp needed;
 			idx_entry = it->last_valid_idx;
 			if (!syntax_check_expression(it->condition,
 						     new_last_valid_idx,
@@ -426,18 +345,26 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	assert(extr->signal);
 	assert(extr->thr->crashed);
 	Expression *res;
-	if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
+	if (extr->signal->signr == 11) {
+		if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
+			res = ExpressionRip::get(extr->thr->tid, extr->getHistory(extr->thr->lastEvent),
+						 equals::get(extr->thr->regs.rip().origin,
+							     ConstExpression::get(extr->thr->regs.rip().v)),
+						 script,
+						 ptr);
+		else
+			res = ExpressionRip::get(extr->thr->tid,
+						 extr->getHistory(extr->thr->lastEvent),
+						 ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin),
+						 script,
+						 ptr);
+	} else {
 		res = ExpressionRip::get(extr->thr->tid, extr->getHistory(extr->thr->lastEvent),
 					 equals::get(extr->thr->regs.rip().origin,
 						     ConstExpression::get(extr->thr->regs.rip().v)),
 					 script,
 					 ptr);
-	else
-		res = ExpressionRip::get(extr->thr->tid,
-					 extr->getHistory(extr->thr->lastEvent),
-					 ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin),
-					 script,
-					 ptr);
+	}
 
 	VexGcRoot root2((void **)&res, "root2");
 	fixup_expression(&res,

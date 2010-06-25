@@ -746,3 +746,12 @@ Expression *alias::refine(const MachineState<abstract_interpret_value> *ms,
 	*progress = true;
 	return l;
 }
+
+void
+History::calcLastAccessed()
+{
+	if (parent)
+		parent->lastAccessMap(lastAccessed);
+	if (condition)
+		condition->lastAccessMap(lastAccessed);
+}
