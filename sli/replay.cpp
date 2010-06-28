@@ -211,6 +211,12 @@ ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *m
 		return NULL;
 
         LogRecord<ait> *lr2 = lf->read(ptr, outPtr);
+	if (!lr2) {
+		/* We've hit the end of the log, which means that we
+		   were supposed to replay the load part of the CAS
+		   but not the store.  Meh. */
+		return NULL;
+	}
 	if (lw)
 		lw->append(*lr2, this->when.idx);
         LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr2);
