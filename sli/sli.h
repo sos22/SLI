@@ -2026,10 +2026,10 @@ protected:
 public:
 	static Expression *get(EventTimestamp before, EventTimestamp after)
 	{
-		if (before.tid._tid() == 0)
-			return ConstExpression::get(1);
-		if (after.tid._tid() == 0)
+		if (after.tid._tid() == 0 || after.tid == ThreadId::invalidTid)
 			return ConstExpression::get(0);
+		if (before.tid._tid() == 0 || before.tid == ThreadId::invalidTid)
+			return ConstExpression::get(1);
 		if (before.tid == after.tid) {
 			if (before.idx < after.idx)
 				return ConstExpression::get(1);
