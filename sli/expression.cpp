@@ -532,6 +532,30 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 
 	binop_float_rip(bitwiseand);
 
+	if (dynamic_cast<bitwisenot *>(r)) {
+		/* Rewrite x & ~y to ~y & x */
+		Expression *t = l;
+		l = r;
+		r = t;
+	}
+
+	if (bitwisenot *ll = dynamic_cast<bitwisenot *>(l)) {
+		/* Rewrite ~(x & y) & z to just ~x & (y & z) */
+		if (bitwiseand *lll = dynamic_cast<bitwiseand *>(ll->l)) {
+			return bitwiseand::get(bitwisenot::get(lll->l),
+					       bitwiseand::get(lll->r, r));
+		}
+		/* Rewrite ~(x == y) & 1 to x != y */
+		if (rIsConstant && rc == 1) {
+			if (equals *eq = dynamic_cast<equals *>(ll->l))
+				return notequals::get(eq->l, eq->r);
+		}
+		/* And ~(x != y) & 1 to x == y */
+		if (rIsConstant && rc == 1) {
+			if (notequals *eq = dynamic_cast<notequals *>(ll->l))
+				return equals::get(eq->l, eq->r);
+		}
+	}
 	if (bitwiseand *ll = dynamic_cast<bitwiseand *>(l)) {
 		/* Rewrite (x & A) & A to just x & A */
 		if (ll->r == r)
