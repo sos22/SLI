@@ -2711,8 +2711,9 @@ private:
 	void calcLastAccessed();
 protected:
 	char *mkName() const {
-		return my_asprintf("%s@%d:%lx->%lx", condition->name(), when.tid._tid(), when.idx,
-				   last_valid_idx);
+	  return my_asprintf("{%s}%s@%d:%lx->%lx", parent ? parent->name() : "",
+			     condition->name(), when.tid._tid(), when.idx,
+			     last_valid_idx);
 	}
 public:
 	unsigned long hash() const
