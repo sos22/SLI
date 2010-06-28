@@ -450,9 +450,9 @@ main(int argc, char *argv[])
 	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
 	VexGcRoot crkeeper((void **)&cr, "crkeeper");
 	printf("%s\n", cr->name());
-	LogReader<abstract_interpret_value> *lf2 = NULL;
+	LogReader<abstract_interpret_value> *lf2 = al;
 	VexGcRoot lf2keeper((void **)&lf2, "lf2keeper");
-	LogReaderPtr lf2start;
+	LogReaderPtr lf2start = ptr;
 	cr = strip_outer_rips(cr, abstract, &lf2, &lf2start);
 
 	LibVEX_alloc_sanity_check();
