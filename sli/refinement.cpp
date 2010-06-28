@@ -102,7 +102,7 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
 				if (thr->cannot_make_progress)
 					continue;
 				Interpreter<abstract_interpret_value> i(s->ms);
-				i.runToFailure(thr->tid, s->lf, 100000);
+				i.runToFailure(thr->tid, s->lf, 10000000);
 			}
 			futures.push_back(s);
 			continue;
@@ -128,7 +128,7 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
 				i.runToAccessLoggingEvents(tid, r.value + 1, newGray->lf);
 			} else {
 				printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
-				i.runToFailure(tid, newGray->lf, 100000);
+				i.runToFailure(tid, newGray->lf, 10000000);
 			}
 
 			grayStates.push_back(newGray);
@@ -235,7 +235,7 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
 public:
 	Expression *result;
 	void record(Thread<abstract_interpret_value> *thr,
-		    const ThreadEvent<abstract_interpret_value> *evt);
+		    ThreadEvent<abstract_interpret_value> *evt);
 	LastStoreRefiner(EventTimestamp _store,
 			 EventTimestamp _load,
 			 Expression *_addr,
@@ -282,7 +282,7 @@ public:
 VexAllocTypeWrapper<LastStoreRefiner> LastStoreRefiner::allocator;
 void
 LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
-			 const ThreadEvent<abstract_interpret_value> *evt)
+			 ThreadEvent<abstract_interpret_value> *evt)
 {
 	if (const InstructionEvent<abstract_interpret_value> *fe =
 	    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt)) {
@@ -345,7 +345,7 @@ public:
 	{
 	}
 
-	void append(const LogRecord<abstract_interpret_value> &lr,
+	void append(LogRecord<abstract_interpret_value> *lr,
 		    unsigned long idx);
 
 	void visit(HeapVisitor &hv) const { hv(work); }
@@ -353,13 +353,13 @@ public:
 	NAMED_CLASS
 };
 void
-TruncateToEvent::append(const LogRecord<abstract_interpret_value> &lr,
+TruncateToEvent::append(LogRecord<abstract_interpret_value> *lr,
 			unsigned long idx)
 {
 	if (finished)
 		return;
 	work->append(lr, idx);
-	if (lr.thread() == lastEvent.tid &&
+	if (lr->thread() == lastEvent.tid &&
 	    idx == lastEvent.idx)
 		finished = true;
 }
@@ -474,8 +474,6 @@ ExpressionRip::refineHistory(const MachineState<abstract_interpret_value> *ms,
 	for (History *hs = history;
 	     hs != NULL;
 	     hs = hs->parent) {
-		if (hs->last_valid_idx <= validity.find(tid)->second)
-			break;
 		newValidity[tid] = hs->last_valid_idx;
 		Expression *newCond = hs->condition->refine(ms, lf, ptr, &subCondProgress,
 							    newValidity, ev);

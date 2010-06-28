@@ -17,11 +17,11 @@ public:
 	iterator end() { return map.end(); }
 
 	void record(Thread<unsigned long> *thr,
-		    const ThreadEvent<unsigned long> *evt);
+		    ThreadEvent<unsigned long> *evt);
 };
 
 void GetControlTraces::record(Thread<unsigned long> *thr,
-			      const ThreadEvent<unsigned long> *evt)
+			      ThreadEvent<unsigned long> *evt)
 {
 	const InstructionEvent<unsigned long> *ie =
 		dynamic_cast<const InstructionEvent<unsigned long> *>(evt);

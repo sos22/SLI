@@ -9,22 +9,22 @@ InterpretResult LogWriter<ait>::recordEvent(Thread<ait> *thr, MachineState<ait> 
 	if (ce) {
 		LogRecord<ait> *lr1, *lr2;
 		res = ce->fake(ms, &lr1, &lr2);
-		append(*lr1, evt->when.idx);
+		append(lr1, evt->when.idx);
 		if (lr2)
-			append(*lr2, evt->when.idx);
+			append(lr2, evt->when.idx);
 	} else {
 		LogRecord<ait> *lr;
 		res = evt->fake(ms, &lr);
 		if (lr)
-			append(*lr, evt->when.idx);
+			append(lr, evt->when.idx);
 	}
 	return res;
 }
 
 template <typename ait>
-void MemLog<ait>::append(const LogRecord<ait> &lr, unsigned long ignore)
+void MemLog<ait>::append(LogRecord<ait> *lr, unsigned long ignore)
 {
-	content->push_back(lr.dupe());
+	content->push_back(lr);
 }
 
 template <typename ait>
@@ -38,7 +38,7 @@ LogRecord<ait> *MemLog<ait>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) c
 	*outPtr = mkPtr(o + 1);
 	if (o - offset >= content->size())
 		return NULL;
-	return (*content)[o - offset]->dupe();
+	return (*content)[o - offset];
 }
 
 template <typename ait>

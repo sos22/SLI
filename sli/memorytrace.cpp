@@ -9,13 +9,13 @@ public:
 		: mt(_mt)
 	{
 	}
-	void record(Thread<ait> *thr, const ThreadEvent<ait> *evt);
+	void record(Thread<ait> *thr, ThreadEvent<ait> *evt);
 	void visit(HeapVisitor &hv) const { hv(mt); }
 	void destruct() {}
 	NAMED_CLASS
 };
 template <typename ait> void
-MemTraceMaker<ait>::record(Thread<ait> *thr, const ThreadEvent<ait> *evt)
+MemTraceMaker<ait>::record(Thread<ait> *thr, ThreadEvent<ait> *evt)
 {
 	if (const LoadEvent<ait> *le = dynamic_cast<const LoadEvent<ait> *>(evt)) {
 		mt->push_back(new MemoryAccessLoad<ait>(*le));

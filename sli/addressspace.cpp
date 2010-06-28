@@ -126,10 +126,12 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	/* We cheat slightly and assume that you don't race on stack
 	   accesses.  This isn't *entirely* valid, but it makes things
 	   so much easier that it's worth it. */
-	if (!is_stack(start) &&
-	    (!thr ||
-	     force(start) < force(thr->regs.rsp()) - 1000000 ||
-	     force(start) > force(thr->regs.rsp()) + 1000000)) {
+	bool irrelevant;
+	irrelevant = (!is_stack(start) &&
+		      (!thr ||
+		       force(start) < force(thr->regs.rsp()) - 1000000 ||
+		       force(start) > force(thr->regs.rsp()) + 1000000));
+	if (!irrelevant) {
 		if (size <= 8) {
 			res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr, size);
 		} else {
@@ -330,7 +332,7 @@ void AddressSpace<ait>::sanityCheck() const
 template <typename ait>
 void AddressSpace<ait>::dumpBrkPtr(LogWriter<ait> *lw) const
 {
-	lw->append(LogRecordInitialBrk<ait>(ThreadId(0), mkConst<ait>(brkptr)),
+	lw->append(new LogRecordInitialBrk<ait>(ThreadId(0), mkConst<ait>(brkptr)),
 		   0);
 }
 
@@ -344,21 +346,21 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 	VAMap::AllocFlags alf(false);
 	last_va = 0;
 	while (vamap->findNextMapping(last_va, &next_va, &pa, &prot, &alf)) {
-		lw->append(LogRecordAllocateMemory<ait>(ThreadId(0),
-							mkConst<ait>(next_va),
-							mkConst<ait>(MemoryChunk<ait>::size),
-							(unsigned long)prot,
-							(unsigned long)alf),
+		lw->append(new LogRecordAllocateMemory<ait>(ThreadId(0),
+							    mkConst<ait>(next_va),
+							    mkConst<ait>(MemoryChunk<ait>::size),
+							    (unsigned long)prot,
+							    (unsigned long)alf),
 			   0);
 		unsigned long off;
 		const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &off);
 		assert(off == 0);
 		ait *buf = (ait *)calloc(MemoryChunk<ait>::size, sizeof(ait));
 		mc->read(0, buf, MemoryChunk<ait>::size);
-		lw->append(LogRecordMemory<ait>(ThreadId(0),
-						MemoryChunk<ait>::size,
-						mkConst<ait>(next_va),
-						buf),
+		lw->append(new LogRecordMemory<ait>(ThreadId(0),
+						    MemoryChunk<ait>::size,
+						    mkConst<ait>(next_va),
+						    buf),
 			   0);
 		last_va = next_va + MemoryChunk<ait>::size;
 	}

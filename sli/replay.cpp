@@ -183,7 +183,26 @@ ThreadEvent<ait> *SyscallEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait
 template <typename ait>
 ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	throw SliException("CAS events need a special replay method");
+	LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
+	if (!lrl)
+		throw ReplayFailedException("wanted a load for CAS, got %s",
+					    lr->name());
+        if (size != lrl->size || force(addr.lo != lrl->ptr))
+		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
+					    lrl->size, force(lrl->ptr),
+					    size, force(addr.lo));
+
+        expression_result<ait> seen;
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+        seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
+        if (force(seen != lrl->value))
+		throw ReplayFailedException("memory mismatch on CAS load from %lx",
+					    force(addr.lo));
+	thr->temporaries[dest] = seen;
+        if (force(seen != expected))
+		return NULL;
+
+	return StoreEvent<ait>::get(this->when, addr.lo, size, data);
 }
 
 template <typename ait>
@@ -218,7 +237,7 @@ ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *m
 		return NULL;
 	}
 	if (lw)
-		lw->append(*lr2, this->when.idx);
+		lw->append(lr2, this->when.idx);
         LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");

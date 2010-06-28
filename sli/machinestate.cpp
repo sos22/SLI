@@ -68,7 +68,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 		LogReaderPtr nextPtr;
 		lr = lf->read(ptr, &nextPtr);
 		if (!lr)
-			err(1, "reading initial memory population");
+			break;
 		if (LogRecordAllocateMemory<ait> *lram = dynamic_cast<LogRecordAllocateMemory<ait>*>(lr)) {
 			as->allocateMemory(*lram);
 	        } else if (LogRecordMemory<ait> *lrm = dynamic_cast<LogRecordMemory<ait>*>(lr)) {

@@ -49,9 +49,9 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 
 	for (unsigned x = 0; x < RegisterSet<ait>::NR_REGS; x++)
 		((unsigned long *)&r)[x] = force(regs.get_reg(x));
-	lw->append(LogRecordInitialRegisters<ait>(tid, r), 0);
+	lw->append(new LogRecordInitialRegisters<ait>(tid, r), 0);
 	if (currentIRSB && currentIRSBOffset != 0)
-		lw->append(LogRecordVexThreadState<ait>(tid, currentIRSBOffset, temporaries), 0);
+		lw->append(new LogRecordVexThreadState<ait>(tid, currentIRSBOffset, temporaries), 0);
 }
 
 template<typename ait>

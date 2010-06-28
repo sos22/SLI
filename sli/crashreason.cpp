@@ -266,7 +266,7 @@ public:
 		return new (allocator.alloc()) CrashReasonExtractor();
 	}
 
-	void record(Thread<abstract_interpret_value> *thr, const ThreadEvent<abstract_interpret_value> *evt);
+	void record(Thread<abstract_interpret_value> *thr, ThreadEvent<abstract_interpret_value> *evt);
 
 	void destruct() { this->~CrashReasonExtractor(); }
 	void visit(HeapVisitor &hv) const {
@@ -293,7 +293,7 @@ public:
 	NAMED_CLASS
 };
 VexAllocTypeWrapper<CrashReasonExtractor> CrashReasonExtractor::allocator;
-void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const ThreadEvent<abstract_interpret_value> *evt)
+void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, ThreadEvent<abstract_interpret_value> *evt)
 {
 	if (const InstructionEvent<abstract_interpret_value> *fe =
 	    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt)) {
@@ -306,10 +306,10 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const 
 		this->getHistory(evt->when)->footstep(fe->rip.v);
 	}
 
-	if (const SignalEvent<abstract_interpret_value> *es =
-	    dynamic_cast<const SignalEvent<abstract_interpret_value> *>(evt)) {
+	if (SignalEvent<abstract_interpret_value> *es =
+	    dynamic_cast<SignalEvent<abstract_interpret_value> *>(evt)) {
 		thr = _thr;
-		signal = (SignalEvent<abstract_interpret_value> *)es->dupe();
+		signal = es;
 	}
 }
 static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,

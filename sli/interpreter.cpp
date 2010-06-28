@@ -1324,7 +1324,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 
 		while (evt) {
 			if (lw)
-				lw->append(*lr, evt->when.idx);
+				lw->append(lr, evt->when.idx);
 			if (er)
 				er->record(thr, evt);
 

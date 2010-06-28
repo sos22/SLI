@@ -9,19 +9,6 @@
 
 #define MAX_INSTRUCTION_SIZE 15
 
-template <typename p>
-class VexPtr {
-	p *content;
-	VexGcRoot root;
-public:
-	VexPtr(p *_content) : content(_content), root((void **)&content, "VexPtr") {}
-	VexPtr(VexPtr<p> &c) : content(c.content), root((void **)&content, "VexPtr") {}
-	const VexPtr<p> &operator=(VexPtr<p> &x) { content = x.content; return *this; }
-	p &operator*() { return *content; }
-	p *operator->() { return content; }
-	operator p*() { return content; }
-};
-
 typedef unsigned char Byte;
 
 class PatchFragment;
