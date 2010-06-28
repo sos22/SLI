@@ -1362,7 +1362,8 @@ template<typename ait>
 void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, LogReaderPtr ptr,
 				  LogReaderPtr *eof)
 {
-	while (1) {
+	bool finished = false;
+	while (!finished) {
 		LogRecord<ait> *lr = lf->read(ptr, &ptr);
 		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
 		if (!lr)
@@ -1371,7 +1372,9 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
-		while (evt) {
+		while (evt && !finished) {
+			if (evt->when == end)
+				finished = true;
 			CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
 			if (ce) {
 				evt = ce->replay(lr, currentState,
@@ -1379,7 +1382,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 			} else {
 				evt = evt->replay(lr, currentState);
 			}
-			if (evt)
+			if (!finished && evt)
 				lr = lf->read(ptr, &ptr);
 		}
 
@@ -1387,9 +1390,6 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 		   processed eagerly. */
 		process_memory_records(currentState->addressSpace, lf, ptr,
 				       &ptr, (LogWriter<ait> *)NULL);
-
-		if (evt->when == end)
-			break;
 	}
 	if (eof)
 		*eof = ptr;
