@@ -1722,8 +1722,6 @@ void debugger_attach(void);
 
 void init_sli(void);
 
-void gdb_machine_state(const MachineState<unsigned long> *ms);
-
 struct abstract_interpret_value;
 
 class Expression;
@@ -2974,5 +2972,20 @@ static inline void sanity_check_ait(abstract_interpret_value v)
 }
 
 void considerPotentialFixes(Expression *expr);
+
+void gdb_concrete(const MachineState<unsigned long> *ms);
+void gdb_abstract(const MachineState<abstract_interpret_value> *ms);
+
+/* force some functions to be included even when they're not needed,
+   so that they're available for calling from the debugger. */
+static void force_linkage() __attribute__((unused, used));
+static void
+force_linkage()
+{
+	gdb_concrete(NULL);
+	gdb_abstract(NULL);
+}
+
+
 
 #endif /* !SLI_H__ */

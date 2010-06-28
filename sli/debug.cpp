@@ -9,22 +9,24 @@
 
 #include "sli.h"
 
-class GdbChannel;
+template <typename ait> class GdbChannel;
 
+template <typename ait>
 class GdbCommand {
 protected:
-	GdbChannel *chan;
+	GdbChannel<ait> *chan;
 	void sendResponse(const char *fmt, ...);
 public:
 	static GdbCommand *read(int fd);
-	virtual void doIt(MachineState<unsigned long> *) = 0;
-	GdbCommand(GdbChannel *_chan)
+	virtual void doIt(MachineState<ait> *) = 0;
+	GdbCommand<ait>(GdbChannel<ait> *_chan)
 		: chan(_chan)
 	{
 	}
 	virtual ~GdbCommand() {}
 };
 
+template <typename ait>
 class GdbChannel {
 	int fd;
 	char *buf;
@@ -49,123 +51,135 @@ public:
 		close(fd);
 		free(buf);
 	}
-	GdbCommand *getCommand();
+	GdbCommand<ait> *getCommand();
 
 	void sendResponse(const char *buf);
 	char *readCommand();
 };
 
-class UnknownCommand : public GdbCommand {
+template <typename ait>
+class UnknownCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<unsigned long> *) { sendResponse(""); }
-	UnknownCommand(GdbChannel *c) : GdbCommand(c) {}
+	void doIt(MachineState<ait> *) { this->sendResponse(""); }
+	UnknownCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
-class GetSigCommand : public GdbCommand {
+template <typename ait>
+class GetSigCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<unsigned long> *) { sendResponse("S00"); }
-	GetSigCommand(GdbChannel *c) : GdbCommand(c) {}
+	void doIt(MachineState<ait> *) { this->sendResponse("S00"); }
+	GetSigCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
-class QueryCommand : public GdbCommand {
+template <typename ait>
+class QueryCommand : public GdbCommand<ait> {
 	char *q;
 public:
-	void doIt(MachineState<unsigned long> *);
-	QueryCommand(GdbChannel *c, const char *n)
-		: GdbCommand(c),
+	void doIt(MachineState<ait> *);
+	QueryCommand(GdbChannel<ait> *c, const char *n)
+		: GdbCommand<ait>(c),
 		  q(strdup(n))
 	{
 	}
 	~QueryCommand() { free(q); }
 };
 
-class GetRegistersCommand : public GdbCommand {
+template <typename ait>
+class GetRegistersCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<unsigned long> *);
-	GetRegistersCommand(GdbChannel *c) : GdbCommand(c) {}
+	void doIt(MachineState<ait> *);
+	GetRegistersCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
-class GetRegisterCommand : public GdbCommand {
+template <typename ait>
+class GetRegisterCommand : public GdbCommand<ait> {
 	unsigned regNr;
 public:
-	void doIt(MachineState<unsigned long> *);
-	GetRegisterCommand(GdbChannel *c, const char *b) : GdbCommand(c) { regNr = strtol(b, NULL, 16); }
+	void doIt(MachineState<ait> *);
+	GetRegisterCommand(GdbChannel<ait> *c, const char *b) : GdbCommand<ait>(c) { regNr = strtol(b, NULL, 16); }
 };
 
-class GetMemoryCommand : public GdbCommand {
+template <typename ait>
+class GetMemoryCommand : public GdbCommand<ait> {
 	unsigned long addr;
 	unsigned size;
 public:
-	void doIt(MachineState<unsigned long> *);
-	GetMemoryCommand(GdbChannel *c, const char *b) : GdbCommand(c) { sscanf(b, "%lx,%x", &addr, &size); }
+	void doIt(MachineState<ait> *);
+	GetMemoryCommand(GdbChannel<ait> *c, const char *b) : GdbCommand<ait>(c) { sscanf(b, "%lx,%x", &addr, &size); }
 };
 
-class SetThreadCommand : public GdbCommand {
+template <typename ait>
+class SetThreadCommand : public GdbCommand<ait> {
 	ThreadId tid;
 	bool query;
 public:
-	void doIt(MachineState<unsigned long> *)
+	void doIt(MachineState<ait> *)
 	{
 		if (query)
-			chan->currentTidQuery = tid;
+			this->chan->currentTidQuery = tid;
 		else if (tid._tid() != 0 && (int)tid._tid() != -1)
-			chan->currentTidRun = tid;
-		sendResponse("");
+			this->chan->currentTidRun = tid;
+		this->sendResponse("");
 	}
-	SetThreadCommand(GdbChannel *c, const char *b)
-		: GdbCommand(c),
+	SetThreadCommand(GdbChannel<ait> *c, const char *b)
+		: GdbCommand<ait>(c),
 		  tid(ThreadId(strtol(b+1, NULL, 16))),
 		  query(b[0] != 'c')
 	{
 	}
 };
 
-class ThreadAliveCommand : public GdbCommand {
+template <typename ait>
+class ThreadAliveCommand : public GdbCommand<ait> {
 	ThreadId tid;
 public:
-	void doIt(MachineState<unsigned long> *);
-	ThreadAliveCommand(GdbChannel *c, const char *b)
-		: GdbCommand(c),
+	void doIt(MachineState<ait> *);
+	ThreadAliveCommand(GdbChannel<ait> *c, const char *b)
+		: GdbCommand<ait>(c),
 		  tid(ThreadId(strtol(b, NULL, 16)))
 	{
 	}
 };
 
-class DetachCommand : public GdbCommand {
+template <typename ait>
+class DetachCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<unsigned long> *) {abort(); }
-	DetachCommand(GdbChannel *c) : GdbCommand(c) {}
+	void doIt(MachineState<ait> *) {abort(); }
+	DetachCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
-class ContinueCommand : public GdbCommand {
-	unsigned long newRip;
+template <typename ait>
+class ContinueCommand : public GdbCommand<ait> {
+	ait newRip;
 	bool haveNewRip;
 public:
-	void doIt(MachineState<unsigned long> *ms);
-	ContinueCommand(GdbChannel *c, const char *buf)
-		: GdbCommand(c)
+	void doIt(MachineState<ait> *ms);
+	ContinueCommand(GdbChannel<ait> *c, const char *buf)
+		: GdbCommand<ait>(c)
 	{
 		if (buf[0] == '0') {
 			haveNewRip = false;
 		} else {
 			haveNewRip = true;
-			newRip = strtol(buf, NULL, 16);
+			newRip = mkConst<ait>(strtol(buf, NULL, 16));
 		}
 	}
 };
 
-static unsigned long htonlong(unsigned long x)
+static unsigned long
+htonlong(unsigned long x)
 {
 	return ((unsigned long)htonl(x) << 32) | htonl(x >> 32);
 }
 
-void GetMemoryCommand::doIt(MachineState<unsigned long> *ms)
+template <typename ait> void
+GetMemoryCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	unsigned long *membuf = (unsigned long *)malloc(size * sizeof(unsigned long));
+	ait *membuf = (ait *)malloc(size * sizeof(ait));
 	try {
-		ms->addressSpace->readMemory(addr, size, membuf, true);
-	} catch (BadMemoryException<unsigned long> exc) {
-		sendResponse("E12");
+		ms->addressSpace->readMemory(mkConst<ait>(addr), size, membuf, true);
+	} catch (BadMemoryException<ait> exc) {
+		this->sendResponse("E12");
 		free(membuf);
 		return;
 	}
@@ -174,33 +188,35 @@ void GetMemoryCommand::doIt(MachineState<unsigned long> *ms)
 	unsigned x;
 
 	for (x = 0; x < size; x++)
-		sprintf(chrbuf + x * 2, "%02x", (unsigned char)membuf[x]);
+		sprintf(chrbuf + x * 2, "%02x", (unsigned char)force(membuf[x]));
 	free(membuf);
-	sendResponse(chrbuf);
+	this->sendResponse(chrbuf);
 	free(chrbuf);
 }
 
-void GetRegistersCommand::doIt(MachineState<unsigned long> *ms)
+template <typename ait> void
+GetRegistersCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	const Thread<unsigned long> *thr = ms->findThread(chan->currentTidQuery);
+	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery);
 
 	char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RAX))),
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RBX))),
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RCX))),
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RDX))),
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RSI))),
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RDI))),
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RBP))),
-				htonlong(thr->regs.get_reg(REGISTER_IDX(RSP))));
-	sendResponse(buf);
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RAX)))),
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBX)))),
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RCX)))),
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDX)))),
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSI)))),
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDI)))),
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBP)))),
+				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSP)))));
+	this->sendResponse(buf);
 	free(buf);
 }
 
-void GetRegisterCommand::doIt(MachineState<unsigned long> *ms)
+template <typename ait> void
+GetRegisterCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	const Thread<unsigned long> *thr = ms->findThread(chan->currentTidQuery);
-	unsigned long r;
+	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery);
+	ait r;
 	bool haveIt;
 
 	switch (regNr) {
@@ -230,65 +246,68 @@ void GetRegisterCommand::doIt(MachineState<unsigned long> *ms)
 	}
 
 	if (haveIt) {
-		char *b = my_asprintf("%016lx", htonlong(r));
-		sendResponse(b);
+		char *b = my_asprintf("%016lx", htonlong(force(r)));
+		this->sendResponse(b);
 		free(b);
 	} else {
-		sendResponse("E01");
+		this->sendResponse("E01");
 	}
 }
 
-void QueryCommand::doIt(MachineState<unsigned long> *ms)
+template <typename ait> void
+QueryCommand<ait>::doIt(MachineState<ait> *ms)
 {
 	if (!strcmp(q, "C")) {
-		sendResponse("QC%x", chan->currentTidQuery._tid());
+		this->sendResponse("QC%x", this->chan->currentTidQuery._tid());
 	} else if (!strcmp(q, "Supported")) {
-		sendResponse("");
+		this->sendResponse("");
 	} else if (!strcmp(q, "fThreadInfo")) {
-		chan->threadInfoIndex = 1;
-		sendResponse("m%d", ms->threads->index(0)->tid._tid());
+		this->chan->threadInfoIndex = 1;
+		this->sendResponse("m%d", ms->threads->index(0)->tid._tid());
 	} else if (!strcmp(q, "sThreadInfo")) {
-		if (chan->threadInfoIndex >= ms->threads->size()) {
-			sendResponse("l");
+		if (this->chan->threadInfoIndex >= ms->threads->size()) {
+			this->sendResponse("l");
 		} else {
-			sendResponse("m%d", ms->threads->index(chan->threadInfoIndex)->tid._tid());
-			chan->threadInfoIndex++;
+			this->sendResponse("m%d", ms->threads->index(this->chan->threadInfoIndex)->tid._tid());
+			this->chan->threadInfoIndex++;
 		}
 	} else {
 		warnx("unknown query %s", q);
-		sendResponse("E00");
+		this->sendResponse("E00");
 	}
 }
 
-void ThreadAliveCommand::doIt(MachineState<unsigned long> *ms)
+template <typename ait> void
+ThreadAliveCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	const Thread<unsigned long> *thr = ms->findThread(tid);
+	const Thread<ait> *thr = ms->findThread(tid);
 	if (thr->exitted || thr->crashed)
-		sendResponse("E01");
+		this->sendResponse("E01");
 	else
-		sendResponse("OK");
+		this->sendResponse("OK");
 }
 
-void ContinueCommand::doIt(MachineState<unsigned long> *ms)
+template <typename ait> void
+ContinueCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	Thread<unsigned long> *thr = ms->findThread(chan->currentTidRun);
+	Thread<ait> *thr = ms->findThread(this->chan->currentTidRun);
 	if (haveNewRip)
-
 		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
         while (1) {
-		ThreadEvent<unsigned long> *evt = thr->runToEvent(ms->addressSpace, ms);
+		ThreadEvent<ait> *evt = thr->runToEvent(ms->addressSpace, ms);
                 InterpretResult res = evt->fake(ms);
 
-		if (dynamic_cast<SignalEvent<unsigned long> *>(evt) ||
+		if (dynamic_cast<SignalEvent<ait> *>(evt) ||
 		    res != InterpretResultContinue)
 			break;
 	}
 
-	sendResponse("S03");
+	this->sendResponse("S03");
 }
 
-void GdbCommand::sendResponse(const char *fmt, ...)
+template <typename ait> void
+GdbCommand<ait>::sendResponse(const char *fmt, ...)
 {
 	va_list args;
 	char *buf;
@@ -296,11 +315,12 @@ void GdbCommand::sendResponse(const char *fmt, ...)
 	int x = vasprintf(&buf, fmt, args);
 	(void)x;
 	va_end(args);
-	chan->sendResponse(buf);
+	this->chan->sendResponse(buf);
 	free(buf);
 }
 
-void GdbChannel::sendResponse(const char *m)
+template <typename ait> void
+GdbChannel<ait>::sendResponse(const char *m)
 {
 	char *obuf;
 	unsigned x;
@@ -339,7 +359,8 @@ top:
 	}
 }
 
-char *GdbChannel::readCommand()
+template <typename ait> char *
+GdbChannel<ait>::readCommand()
 {
 	int r;
 
@@ -393,7 +414,8 @@ char *GdbChannel::readCommand()
 	}
 }
 
-GdbCommand *GdbChannel::getCommand()
+template <typename ait> GdbCommand<ait> *
+GdbChannel<ait>::getCommand()
 {
 	char *buf;
 
@@ -404,45 +426,46 @@ GdbCommand *GdbChannel::getCommand()
 	 * regs), m (read memory), M (write memory), c (continue), s
 	 * (step).  Since we're only really inspecting state, we only
 	 * need g and m. */
-	GdbCommand *r;
+	GdbCommand<ait> *r;
 	switch (buf[0]) {
 	case '?':
-		r = new GetSigCommand(this);
+		r = new GetSigCommand<ait>(this);
 		break;
 	case 'c':
-		r = new ContinueCommand(this, buf + 1);
+		r = new ContinueCommand<ait>(this, buf + 1);
 		break;
 	case 'D':
-		r = new DetachCommand(this);
+		r = new DetachCommand<ait>(this);
 		break;
 	case 'g':
-		r = new GetRegistersCommand(this);
+		r = new GetRegistersCommand<ait>(this);
 		break;
 	case 'H':
-		r = new SetThreadCommand(this, buf + 1);
+		r = new SetThreadCommand<ait>(this, buf + 1);
 		break;
 	case 'm':
-		r = new GetMemoryCommand(this, buf + 1);
+		r = new GetMemoryCommand<ait>(this, buf + 1);
 		break;
 	case 'p':
-		r = new GetRegisterCommand(this, buf + 1);
+		r = new GetRegisterCommand<ait>(this, buf + 1);
 		break;
 	case 'q':
-		r = new QueryCommand(this, buf + 1);
+		r = new QueryCommand<ait>(this, buf + 1);
 		break;
 	case 'T':
-		r = new ThreadAliveCommand(this, buf + 1);
+		r = new ThreadAliveCommand<ait>(this, buf + 1);
 		break;
 	default:
 		printf("Unknown GDB command %s\n", buf);
-		r = new UnknownCommand(this);
+		r = new UnknownCommand<ait>(this);
 		break;
 	}
 	free(buf);
 	return r;
 }
 
-GdbChannel *GdbChannel::accept()
+template <typename ait> GdbChannel<ait> *
+GdbChannel<ait>::accept()
 {
 	int lfd;
 	struct sockaddr_in saddr;
@@ -473,24 +496,24 @@ GdbChannel *GdbChannel::accept()
 		return NULL;
 	}
 
-	return new GdbChannel(fd);
+	return new GdbChannel<ait>(fd);
 }
 
-void
-gdb_machine_state(const MachineState<unsigned long> *base_ms)
+template <typename ait> static void
+gdb_machine_state(const MachineState<ait> *base_ms)
 {
-	MachineState<unsigned long> *ms = base_ms->dupeSelf();
+	MachineState<ait> *ms = base_ms->dupeSelf();
 
 	VexGcRoot ms_keeper((void **)&ms, "gdb_machine_state");
 
-	GdbChannel *chan = GdbChannel::accept();
+	GdbChannel<ait> *chan = GdbChannel<ait>::accept();
 
 	while (1) {
-		GdbCommand *cmd = chan->getCommand();
+		GdbCommand<ait> *cmd = chan->getCommand();
 		if (!cmd)
 			break;
 		/* Bit of a hack.  Oh well. */
-		if (dynamic_cast<DetachCommand *>(cmd)) {
+		if (dynamic_cast<DetachCommand<ait> *>(cmd)) {
 			delete cmd;
 			break;
 		}
@@ -499,4 +522,16 @@ gdb_machine_state(const MachineState<unsigned long> *base_ms)
 	}
 
 	delete chan;
+}
+
+void
+gdb_concrete(const MachineState<unsigned long> *ms)
+{
+	gdb_machine_state(ms);
+}
+
+void
+gdb_abstract(const MachineState<abstract_interpret_value> *ms)
+{
+	gdb_machine_state(ms);
 }
