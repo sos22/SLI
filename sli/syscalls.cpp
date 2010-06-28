@@ -1,3 +1,4 @@
+#include <linux/futex.h>
 #include <asm/prctl.h>
 #include <asm/unistd.h>
 #include <errno.h>
@@ -275,6 +276,13 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 	ait res;
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
+	ait args[6];
+	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));
+	args[1] = thr->regs.get_reg(REGISTER_IDX(RSI));
+	args[2] = thr->regs.get_reg(REGISTER_IDX(RDX));
+	args[3] = thr->regs.get_reg(REGISTER_IDX(R10));
+	args[4] = thr->regs.get_reg(REGISTER_IDX(R8));
+	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
 	switch (force(sysnr)) {
 	case __NR_open: {
@@ -287,9 +295,27 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 		res = mkConst<ait>(-ENOENT);
 		break;
 	}
-	case __NR_futex:
+	case __NR_futex: {
+		if ((force(args[1]) & FUTEX_CMD_MASK) == FUTEX_WAIT) {
+			expression_result<ait> res =
+				ms->addressSpace->load(this->when,
+						       args[0],
+						       4,
+						       false,
+						       thr);
+			if (force(res.lo) == force(args[2])) {
+				printf("Should block for fake futex operation, crashing instead.\n");
+				/* We should block, but don't know
+				   how, so meh. */
+				if (lr)
+					*lr = NULL;
+				return InterpretResultIncomplete;
+			}
+		}
 		res = mkConst<ait>(0);
 		break;
+	}
+
 	default:
 		printf("can't fake syscall %ld yet\n", force(sysnr));
 		if (lr)
