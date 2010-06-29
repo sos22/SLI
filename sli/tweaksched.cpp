@@ -321,12 +321,22 @@ replayToSchedule(ConstraintMaker *cm)
 		if (probe != ripCounters.end()) {
 			for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
 			     it != liveConstraints.end();
-			     it++) {
+				) {
 				if (it->after.tid == tid &&
 				    it->after.nonCanon.rip == thr->regs.rip() &&
 				    it->after.nonCanon.cntr <= probe->second.first &&
 				    it->after.nonCanon.nr_instr <= probe->second.second) {
-					goto select_new_thread;
+					if (availThreads.empty()) {
+						/* Okay, can't satisfy
+						   all constraints.
+						   Remove one and see
+						   what happens. */
+						it = liveConstraints.erase(it);
+					} else {
+						goto select_new_thread;
+					}
+				} else {
+					it++;
 				}
 			}
 		}
