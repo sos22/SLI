@@ -293,7 +293,7 @@ replayToSchedule(ConstraintMaker *cm)
 
 	std::map<ThreadId, VexPtr<ThreadEvent<unsigned long> > > stashedEvents;
 
-	unsigned record_nr;
+	unsigned event_nr = 0;
 
 	while (1) {
 		/* Get list of available threads */
@@ -345,9 +345,11 @@ replayToSchedule(ConstraintMaker *cm)
 		       thr->regs.rip(),
 		       (probe == ripCounters.end()) ? -1 : probe->second.first,
 		       (probe == ripCounters.end()) ? -1 : probe->second.second,
-		       record_nr++,
+		       record_nr,
 		       evt->name());
 #endif
+
+		event_nr++;
 
 		if ( dynamic_cast<InstructionEvent<unsigned long> *> (evt)) {
 			if (probe != ripCounters.end()) {
@@ -393,7 +395,7 @@ replayToSchedule(ConstraintMaker *cm)
 #endif
 	}
 
-	printf("Ran %d records.\n", record_nr);
+	printf("Ran %d events.\n", event_nr);
 }
 
 int
