@@ -84,43 +84,6 @@ public:
 };
 
 class ConstraintMaker : public GarbageCollected<ConstraintMaker> {
-	void emitConstraint(ThreadId beforeTid, unsigned long beforeIdx,
-			    ThreadId afterTid, unsigned long afterIdx, unsigned long addr)
-	{
-		if (threadSeen[afterTid][beforeTid] >= beforeIdx)
-			return;
-		threadSeen[afterTid][beforeTid] = beforeIdx;
-		constraints.push_back(SchedConstraint(MemoryIdent(beforeTid, beforeIdx),
-						      MemoryIdent(afterTid, afterIdx), addr));
-	}
-
-	std::map<unsigned long, std::pair<ThreadId, unsigned long> > lastWriter;
-	std::map<unsigned long, std::pair<ThreadId, unsigned long> > lastReader;
-	std::map<ThreadId, std::map<ThreadId, unsigned long> > threadSeen;
-	std::map<ThreadId, unsigned long> threadCounters;
-
-	void issueRead(ThreadId tid, unsigned long addr)
-	{
-		std::pair<ThreadId, unsigned long> lw = lastWriter[addr];
-		if (lw.first.valid() && lw.first != tid)
-			emitConstraint(lw.first, lw.second, tid, threadCounters[tid], addr);
-		if (lastReader[addr].first != tid)
-			lastReader[addr] = std::pair<ThreadId, unsigned long>(tid, threadCounters[tid]);
-		threadCounters[tid]++;
-	}
-
-	void issueWrite(ThreadId tid, unsigned long addr)
-	{
-		std::pair<ThreadId, unsigned long> lw = lastReader[addr];
-		if (lw.first.valid() && lw.first != tid)
-			emitConstraint(lw.first, lw.second, tid, threadCounters[tid], addr);
-		lw = lastWriter[addr];
-		if (lw.first.valid() && lw.first != tid)
-			emitConstraint(lw.first, lw.second, tid, threadCounters[tid], addr);
-		lastWriter[addr] = std::pair<ThreadId, unsigned long>(tid, threadCounters[tid]);
-		threadCounters[tid]++;
-	}
-
 	void decanonAccessMemory(ThreadId tid, unsigned long addr, unsigned long rip,
 				 std::map<ThreadId, unsigned long> &threadCounters,
 				 std::pair<unsigned, unsigned> *me,
@@ -145,19 +108,130 @@ public:
 void
 ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 {
+	LogReaderPtr idx = ptr;
 	ThreadId effTid;
 
+	/* Phase 1: find all racing addresses */
+	std::map<unsigned long, std::pair<ThreadId, unsigned long> > lastWriter;
+	std::map<unsigned long, std::pair<ThreadId, unsigned long> > lastReader;
+	std::map<ThreadId, std::map<ThreadId, unsigned long> > threadSeen;
+	std::map<ThreadId, unsigned long> threadCounters;
+	std::set<unsigned long> racingAddresses;
+
 	while (1) {
-		LogRecord<unsigned long> *lr = lf->read(ptr, &ptr);
+		LogRecord<unsigned long> *lr = lf->read(idx, &idx);
 		if (!lr)
 			break;
+		ThreadId tid = lr->thread();
+		std::pair<ThreadId, unsigned long> tidCntr(tid, threadCounters[tid]);
+
 		if (LogRecordLoad<unsigned long> *lrl =
 		    dynamic_cast<LogRecordLoad<unsigned long> *>(lr)) {
-			issueRead(lr->thread(), lrl->ptr);
+			unsigned long addr = lrl->ptr;
+			std::pair<ThreadId, unsigned long> lw = lastWriter[addr];
+			if (lw.first.valid() &&
+			    lw.first != tid &&
+			    threadSeen[tid][lw.first] < lw.second) {
+				threadSeen[tid][lw.first] = lw.second;
+				racingAddresses.insert(addr);
+			}
+			if (lastReader[addr].first != tid)
+				lastReader[addr] = tidCntr;
+			threadCounters[tid]++;
 		}
+
 		if (LogRecordStore<unsigned long> *lrs =
 		    dynamic_cast<LogRecordStore<unsigned long> *>(lr)) {
-			issueWrite(lr->thread(), lrs->ptr);
+			unsigned long addr = lrs->ptr;
+			std::pair<ThreadId, unsigned long> lw = lastReader[addr];
+			if (lw.first.valid() &&
+			    lw.first != tid &&
+			    threadSeen[tid][lw.first] < lw.second) {
+				threadSeen[tid][lw.first] = lw.second;
+				racingAddresses.insert(addr);
+			}
+			lw = lastWriter[addr];
+			if (lw.first.valid() &&
+			    lw.first != tid &&
+			    threadSeen[tid][lw.first] < lw.second) {
+				threadSeen[tid][lw.first] = lw.second;
+				racingAddresses.insert(addr);
+			}
+			lastWriter[addr] = tidCntr;
+			threadCounters[tid]++;
+		}
+	}
+
+	/* Phase 2: Find the races.  Split the log into per-thread
+	   components at the same time. */
+	idx = ptr;
+	threadSeen.clear();
+	threadCounters.clear();
+
+	/* <is_read, <tid, cntr> > */
+	typedef std::vector<std::pair<bool, std::pair<ThreadId, unsigned> > > memlog_t;
+	std::map<unsigned long, memlog_t> memLogs;
+
+	while (1) {
+		LogRecord<unsigned long> *lr = lf->read(idx, &idx);
+		if (!lr)
+			break;
+		ThreadId tid = lr->thread();
+		std::pair<ThreadId, unsigned long> tidCntr(tid, threadCounters[tid]);
+
+		if (LogRecordLoad<unsigned long> *lrl =
+		    dynamic_cast<LogRecordLoad<unsigned long> *>(lr)) {
+			if (racingAddresses.count(lrl->ptr)) {
+				memlog_t &mlog = memLogs[lrl->ptr];
+				/* We race with any write which we
+				   can't order based on ``seen''
+				   relations */
+				for (memlog_t::iterator it = mlog.begin();
+				     it != mlog.end();
+				     it++) {
+					if (!it->first &&
+					    it->second.first != tid &&
+					    it->second.second > threadSeen[tid][it->first]) {
+						threadSeen[tid][it->second.first] = it->second.second;
+						constraints.push_back(
+							SchedConstraint(
+								MemoryIdent(it->second.first,
+									    it->second.second),
+								MemoryIdent(tid, threadCounters[tid]),
+								lrl->ptr));
+					}
+				}
+				mlog.push_back(std::pair<bool, std::pair<ThreadId, unsigned> >
+					       (true, tidCntr));
+			}
+			threadCounters[tid]++;
+		}
+
+		if (LogRecordStore<unsigned long> *lrs =
+		    dynamic_cast<LogRecordStore<unsigned long> *>(lr)) {
+			if (racingAddresses.count(lrs->ptr)) {
+				memlog_t &mlog = memLogs[lrs->ptr];
+				/* We race with any access which we
+				   can't order based on ``seen''
+				   relations */
+				for (memlog_t::iterator it = mlog.begin();
+				     it != mlog.end();
+				     it++) {
+					if (it->second.first != tid &&
+					    it->second.second > threadSeen[tid][it->first]) {
+						threadSeen[tid][it->second.first] = it->second.second;
+						constraints.push_back(
+							SchedConstraint(
+								MemoryIdent(it->second.first,
+									    it->second.second),
+								MemoryIdent(tid, threadCounters[tid]),
+								lrs->ptr));
+					}
+				}
+				mlog.push_back(std::pair<bool, std::pair<ThreadId, unsigned> >
+					       (false, tidCntr));
+			}
+			threadCounters[tid]++;
 		}
 
 		/* Hack: push all of the initialisation stuff into
@@ -332,8 +406,6 @@ replayToSchedule(ConstraintMaker *cm)
 						   all constraints.
 						   Remove one and see
 						   what happens. */
-						printf("Discard constraint %s\n",
-						       it->name());
 						it = liveConstraints.erase(it);
 					} else {
 						goto select_new_thread;
@@ -359,7 +431,7 @@ replayToSchedule(ConstraintMaker *cm)
 		       thr->regs.rip(),
 		       (probe == ripCounters.end()) ? -1 : probe->second.first,
 		       (probe == ripCounters.end()) ? -1 : probe->second.second,
-		       record_nr,
+		       event_nr,
 		       evt->name());
 #endif
 
@@ -430,16 +502,9 @@ main(int argc, char *argv[])
 	VexPtr<ConstraintMaker> cm(new ConstraintMaker());
 	cm->playLogfile(lf, ptr);
 
-	printf("Initial race set:\n");
-	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
-	     it != cm->constraints.end();
-	     it++) {
-		printf("%s\n", it->name());
-	}
-
 	cm->decanonise(lf, ptr);
 
-	printf("Decanoned:\n");
+	printf("Base schedule (%zd items):\n", cm->constraints.size());
 	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
 	     it != cm->constraints.end();
 	     it++) {
@@ -448,12 +513,12 @@ main(int argc, char *argv[])
 
 	replayToSchedule(cm);
 
-	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
-	     it != cm->constraints.end();
+	for (std::vector<SchedConstraint>::reverse_iterator it = cm->constraints.rbegin();
+	     it != cm->constraints.rend();
 	     it++) {
 		printf("\n\nFlip %s  -> ", it->name());
 		it->flip();
-		printf("%s\n", it->name());
+		printf("%s: ", it->name());
 		replayToSchedule(cm);
 		it->flip();
 	}
