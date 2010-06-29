@@ -302,8 +302,9 @@ replayToSchedule(ConstraintMaker *cm)
 		     it != cm->threadLogs.end();
 		     it++)
 			if (it->first._tid() != 0 &&
-			    ms->findThread(it->first)->runnable())
+			    ms->findThread(it->first)->runnable()) {
 				availThreads.insert(it->first);
+			}
 
 	select_new_thread:
 		if (availThreads.empty())
@@ -438,6 +439,7 @@ main(int argc, char *argv[])
 		printf("Flip %s\n", it->name());
 		it->flip();
 		replayToSchedule(cm);
+		it->flip();
 	}
 
 	return 0;
