@@ -334,6 +334,10 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 
 		break;
 	}
+	case __NR_exit_group: {
+		res = mkConst<ait>(0);
+		break;
+	}
 	default:
 		printf("can't fake syscall %ld yet\n", force(sysnr));
 		break;

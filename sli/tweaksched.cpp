@@ -295,7 +295,7 @@ replayToSchedule(ConstraintMaker *cm)
 
 	unsigned event_nr = 0;
 
-	while (1) {
+	while (!ms->exitted) {
 		/* Get list of available threads */
 		std::set<ThreadId> availThreads;
 		for (std::map<ThreadId, MemLog<unsigned long> *>::iterator it = cm->threadLogs.begin();
@@ -407,6 +407,8 @@ replayToSchedule(ConstraintMaker *cm)
 	}
 
 	printf("Ran %d events.\n", event_nr);
+	if (ms->exitted)
+		printf("Machine exitted, status %ld\n", ms->exit_status);
 }
 
 int
