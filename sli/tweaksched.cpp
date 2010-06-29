@@ -77,6 +77,7 @@ public:
 		MemoryIdent t = before;
 		before = after;
 		after = t;
+		clearName();
 	}
 
 	void clearName() { Named::clearName(); }
@@ -331,6 +332,8 @@ replayToSchedule(ConstraintMaker *cm)
 						   all constraints.
 						   Remove one and see
 						   what happens. */
+						printf("Discard constraint %s\n",
+						       it->name());
 						it = liveConstraints.erase(it);
 					} else {
 						goto select_new_thread;
@@ -448,8 +451,9 @@ main(int argc, char *argv[])
 	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
 	     it != cm->constraints.end();
 	     it++) {
-		printf("\n\nFlip %s\n", it->name());
+		printf("\n\nFlip %s  -> ", it->name());
 		it->flip();
+		printf("%s\n", it->name());
 		replayToSchedule(cm);
 		it->flip();
 	}
