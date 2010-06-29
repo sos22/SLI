@@ -44,7 +44,6 @@ public:
 	void decanon(unsigned long r, unsigned c, unsigned c2) {
 		assert(isCanon);
 		isCanon = false;
-		idx = -1;
 		nonCanon.rip = r;
 		nonCanon.cntr = c;
 		nonCanon.nr_instr = c2;
@@ -94,6 +93,8 @@ public:
 
 	void playLogfile(LogReader<unsigned long> *lr, LogReaderPtr start);
 	void decanonise(LogReader<unsigned long> *lr, LogReaderPtr start);
+
+	bool contradictory();
 
 	void visit(HeapVisitor &hv) const {
 		for (std::map<ThreadId, MemLog<unsigned long> *>::const_iterator it = threadLogs.begin();
@@ -336,6 +337,74 @@ ConstraintMaker::decanonise(LogReader<unsigned long> *lf, LogReaderPtr start)
 	}
 }
 
+bool
+ConstraintMaker::contradictory()
+{
+	std::map<ThreadId, unsigned long> threadCounters;
+	std::vector<std::pair<bool, SchedConstraint> > liveConstraints;
+	std::map<ThreadId, unsigned long> advanceTo;
+
+	for (std::vector<SchedConstraint>::iterator it = constraints.begin();
+	     it != constraints.end();
+	     it++)
+		liveConstraints.push_back(std::pair<bool, SchedConstraint>(true, *it));
+
+	while (1) {
+		advanceTo.clear();
+
+		/* Eliminate any constraints which we've now
+		 * satisfied, and figure out where we might be able to
+		 * advance to. */
+		bool constraintsLeft = false;
+		for (std::vector<std::pair<bool, SchedConstraint> >::iterator it = liveConstraints.begin();
+		     it != liveConstraints.end();
+		     it++) {
+			if (!it->first)
+				continue;
+			if (it->second.before.idx <= threadCounters[it->second.before.tid]) {
+				it->first = false;
+			} else {
+				if (advanceTo.find(it->second.before.tid) == advanceTo.end() ||
+				    advanceTo[it->second.before.tid] > it->second.before.idx)
+					advanceTo[it->second.before.tid] = it->second.before.idx;
+				constraintsLeft = true;
+			}
+		}
+
+		if (!constraintsLeft)
+			return false;
+
+		/* Now see which thread we want to advance */
+		bool progress = false;
+		for (std::map<ThreadId, unsigned long>::iterator it = advanceTo.begin();
+		     !progress && it != advanceTo.end();
+		     it++) {
+			/* Check whether this is valid. */
+			bool valid = true;
+			for (std::vector<std::pair<bool, SchedConstraint> >::iterator it2 = liveConstraints.begin();
+			     valid && it2 != liveConstraints.end();
+			     it2++) {
+				if (!it2->first)
+					continue;
+				if (it2->second.after.tid == it->first &&
+				    it2->second.after.idx < advanceTo[it->first]) {
+					/* No: this access depends on
+					 * some access which hasn't
+					 * happened yet. */
+					valid = false;
+				}
+			}
+			if (valid) {
+				progress = true;
+				threadCounters[it->first] = it->second;
+			}
+		}
+		if (!progress)
+			return true;
+	}
+
+}
+
 static void
 replayToSchedule(ConstraintMaker *cm)
 {
@@ -499,7 +568,11 @@ main(int argc, char *argv[])
 	VexPtr<ConstraintMaker> cm(new ConstraintMaker());
 	cm->playLogfile(lf, ptr);
 
+	assert(!cm->contradictory());
+
 	cm->decanonise(lf, ptr);
+
+	assert(!cm->contradictory());
 
 	printf("Base schedule (%zd items):\n", cm->constraints.size());
 	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
@@ -516,7 +589,11 @@ main(int argc, char *argv[])
 		printf("\n\nFlip %s  -> ", it->name());
 		it->flip();
 		printf("%s: ", it->name());
-		replayToSchedule(cm);
+		if (cm->contradictory()) {
+			printf("Contradiction\n");
+		} else {
+			replayToSchedule(cm);
+		}
 		it->flip();
 	}
 
