@@ -8,23 +8,78 @@
 
 #include "sli.h"
 
+/* We have two ways of naming a memory access.  One, the canonical
+   form, uses just the thread and the number of instructions executed
+   by that thread.  The other uses the thread, the issuing RIP, the
+   number of times which that thread has issued that RIP, and the
+   number of memory accesses issued by that instruction.  For a given
+   schedule, the two will be equivalent, but if you modify the
+   schedule then non-canonical form is sometimes a better choice. */
+class MemoryIdent : public Named {
+protected:
+	char *mkName() const {
+		if (isCanon)
+			return my_asprintf("%d:%lx", tid._tid(), idx);
+		else
+			return my_asprintf("%d@%lx:%d:%d", tid._tid(),
+					   nonCanon.rip, nonCanon.cntr,
+					   nonCanon.nr_instr);
+	}
+public:
+	ThreadId tid;
+	bool isCanon;
+	unsigned long idx;
+	struct {
+		unsigned long rip;
+		unsigned cntr; /* Number of times the rip has been issued */
+		unsigned nr_instr; /* Number of memory ops in the
+				    * instruction */
+	} nonCanon;
+
+	MemoryIdent(ThreadId _tid, unsigned long _idx)
+		: tid(_tid), isCanon(true), idx(_idx)
+	{
+	}
+
+	void decanon(unsigned long r, unsigned c, unsigned c2) {
+		assert(isCanon);
+		isCanon = false;
+		idx = -1;
+		nonCanon.rip = r;
+		nonCanon.cntr = c;
+		nonCanon.nr_instr = c2;
+		clearName();
+	}
+};
+
 /* A constraint on schedules, requiring that tid1:idx1 happens before
  * tid2:idx2 */
-class SchedConstraint {
+class SchedConstraint : public Named {
+protected:
+	char *mkName() const { return my_asprintf("%s <-< %s (%lx)",
+						  before.name(),
+						  after.name(),
+						  inducingAddress); }
 public:
-	ThreadId tid1;
-	unsigned long idx1;
-	ThreadId tid2;
-	unsigned long idx2;
+	MemoryIdent before;
+	MemoryIdent after;
 
 	unsigned long inducingAddress;
-	SchedConstraint(ThreadId _tid1, unsigned long _idx1,
-			ThreadId _tid2, unsigned long _idx2,
+	SchedConstraint(MemoryIdent _before, MemoryIdent _after,
 			unsigned long addr)
-		: tid1(_tid1), idx1(_idx1), tid2(_tid2), idx2(_idx2),
+		: before(_before), after(_after),
 		  inducingAddress(addr)
 	{
 	}
+
+	void flip()
+	{
+		MemoryIdent t = before;
+		before = after;
+		after = t;
+	}
+
+	void clearName() { Named::clearName(); }
 };
 
 class ConstraintMaker : public GarbageCollected<ConstraintMaker> {
@@ -34,8 +89,8 @@ class ConstraintMaker : public GarbageCollected<ConstraintMaker> {
 		if (threadSeen[afterTid][beforeTid] >= beforeIdx)
 			return;
 		threadSeen[afterTid][beforeTid] = beforeIdx;
-		constraints.push_back(SchedConstraint(beforeTid, beforeIdx,
-						      afterTid, afterIdx, addr));
+		constraints.push_back(SchedConstraint(MemoryIdent(beforeTid, beforeIdx),
+						      MemoryIdent(afterTid, afterIdx), addr));
 	}
 
 	std::map<unsigned long, std::pair<ThreadId, unsigned long> > lastWriter;
@@ -65,11 +120,16 @@ class ConstraintMaker : public GarbageCollected<ConstraintMaker> {
 		threadCounters[tid]++;
 	}
 
+	void decanonAccessMemory(ThreadId tid, unsigned long addr, unsigned long rip,
+				 std::map<ThreadId, unsigned long> &threadCounters,
+				 std::pair<unsigned, unsigned> *me,
+				 std::vector<SchedConstraint> &canonical);
 public:
 	std::vector<SchedConstraint> constraints;
 	std::map<ThreadId, MemLog<unsigned long> *> threadLogs;
 
 	void playLogfile(LogReader<unsigned long> *lr, LogReaderPtr start);
+	void decanonise(LogReader<unsigned long> *lr, LogReaderPtr start);
 
 	void visit(HeapVisitor &hv) const {
 		for (std::map<ThreadId, MemLog<unsigned long> *>::const_iterator it = threadLogs.begin();
@@ -113,6 +173,94 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 	}
 }
 
+void
+ConstraintMaker::decanonAccessMemory(ThreadId tid, unsigned long addr, unsigned long rip,
+				     std::map<ThreadId, unsigned long> &threadCounters,
+				     std::pair<unsigned,unsigned> *me,
+				     std::vector<SchedConstraint> &canonical)
+{
+	bool needed = false;
+	for (std::vector<SchedConstraint>::iterator it = canonical.begin();
+	     !needed && it != canonical.end();
+	     it++) {
+		if (it->inducingAddress == addr)
+			needed = true;
+	}
+	if (!needed)
+		return;
+
+	for (std::vector<SchedConstraint>::iterator it = canonical.begin();
+	     it != canonical.end();
+		) {
+		if (it->before.isCanon &&
+		    it->before.tid == tid &&
+		    it->before.idx == threadCounters[tid]) {
+			it->before.decanon(rip, me->first, me->second);
+		}
+		if (it->after.isCanon &&
+		    it->after.tid == tid &&
+		    it->after.idx == threadCounters[tid]) {
+			it->after.decanon(rip, me->first, me->second);
+		}
+		if (!it->before.isCanon && !it->after.isCanon) {
+			it->clearName();
+			constraints.push_back(*it);
+			it = canonical.erase(it);
+		} else {
+			it++;
+		}
+	}
+	me->second++;
+}
+
+void
+ConstraintMaker::decanonise(LogReader<unsigned long> *lf, LogReaderPtr start)
+{
+	std::map<std::pair<ThreadId, unsigned long>, std::pair<unsigned, unsigned> > ripCounters;
+	std::map<ThreadId, unsigned long> threadRips;
+	std::map<ThreadId, unsigned long> threadCounters;
+
+	std::vector<SchedConstraint> canonical(constraints);
+	constraints.clear();
+
+	while (!canonical.empty()) {
+		LogRecord<unsigned long> *lr = lf->read(start, &start);
+
+		assert(lr);
+
+		if (LogRecordFootstep<unsigned long> *lrf =
+		    dynamic_cast<LogRecordFootstep<unsigned long> *>(lr)) {
+			threadRips[lr->thread()] = lrf->rip;
+			std::map<std::pair<ThreadId, unsigned long>, std::pair<unsigned, unsigned> >::iterator it;
+			it = ripCounters.find(std::pair<ThreadId, unsigned long>(lr->thread(), lrf->rip));
+			if (it != ripCounters.end()) {
+				it->second.first++;
+				it->second.second = 0;
+			}
+		} else if (LogRecordLoad<unsigned long> *lrl =
+			   dynamic_cast<LogRecordLoad<unsigned long> *>(lr)) {
+			decanonAccessMemory(lr->thread(),
+					    lrl->ptr,
+					    threadRips[lr->thread()],
+					    threadCounters,
+					    &ripCounters[std::pair<ThreadId, unsigned long>(lr->thread(),
+											    threadRips[lr->thread()])],
+					    canonical);
+			threadCounters[lr->thread()]++;
+		} else if (LogRecordStore<unsigned long> *lrs =
+			   dynamic_cast<LogRecordStore<unsigned long> *>(lr)) {
+			decanonAccessMemory(lr->thread(),
+					    lrs->ptr,
+					    threadRips[lr->thread()],
+					    threadCounters,
+					    &ripCounters[std::pair<ThreadId, unsigned long>(lr->thread(),
+											    threadRips[lr->thread()])],
+					    canonical);
+			threadCounters[lr->thread()]++;
+		}
+	}
+}
+
 static void
 replayToSchedule(ConstraintMaker *cm)
 {
@@ -128,8 +276,26 @@ replayToSchedule(ConstraintMaker *cm)
 	std::map<ThreadId, unsigned long> threadCounters;
 	std::map<ThreadId, LogReaderPtr> threadPtrs;
 
+	std::map<std::pair<ThreadId, unsigned long>, std::pair<unsigned, unsigned> > ripCounters;
+
+	for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
+	     it != liveConstraints.end();
+	     it++) {
+		assert(!it->before.isCanon);
+		assert(!it->after.isCanon);
+		ripCounters[std::pair<ThreadId, unsigned long>(it->before.tid,
+							       it->before.nonCanon.rip)] =
+			std::pair<unsigned, unsigned>(0, 0);
+		ripCounters[std::pair<ThreadId, unsigned long>(it->after.tid,
+							       it->after.nonCanon.rip)] =
+			std::pair<unsigned, unsigned>(0, 0);
+	}
+
 	std::map<ThreadId, VexPtr<ThreadEvent<unsigned long> > > stashedEvents;
-	unsigned record_nr = 0;
+
+	std::map<ThreadId, unsigned> threadsStoppedForReplay;
+
+	unsigned record_nr;
 
 	while (1) {
 		/* Get list of available threads */
@@ -137,34 +303,38 @@ replayToSchedule(ConstraintMaker *cm)
 		for (std::map<ThreadId, MemLog<unsigned long> *>::iterator it = cm->threadLogs.begin();
 		     it != cm->threadLogs.end();
 		     it++)
-			if (it->first._tid() != 0 && ms->findThread(it->first)->runnable())
+			if (it->first._tid() != 0 &&
+			    ms->findThread(it->first)->runnable() &&
+			    !threadsStoppedForReplay[it->first])
 				availThreads.insert(it->first);
-		for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
-		     it != liveConstraints.end();
-		     ) {
-			if (threadCounters[it->tid1] > it->idx1) {
-				/* The constraint is that tid1:idx1
-				   must happen before tid2:idx2.
-				   tid1:idx1 has now happened, so
-				   we're done. */
-				it = liveConstraints.erase(it);
-			} else {
-				/* tid1:idx1 hasn't happened yet, so
-				   we need to make sure that tid2:idx2
-				   doesn't happen. */
-				assert(threadCounters[it->tid2] <= it->idx2);
-				if (threadCounters[it->tid2] == it->idx2)
-					availThreads.erase(it->tid2);
-				it++;
-			}
-		}
 
 		if (availThreads.empty())
 			break;
 
 		/* Replay an event in that thread. */
+	select_new_thread:
 		ThreadId tid = *availThreads.begin();
+		availThreads.erase(tid);
 		Thread<unsigned long> *thr = ms->findThread(tid);
+
+		std::map<std::pair<ThreadId, unsigned long>, std::pair<unsigned, unsigned> >::iterator probe;
+		probe = ripCounters.find(std::pair<ThreadId, unsigned long>(tid,
+									    thr->regs.rip()));
+		if (probe != ripCounters.end()) {
+			for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
+			     it != liveConstraints.end();
+			     it++) {
+				if (it->after.tid == tid &&
+				    it->after.nonCanon.rip == thr->regs.rip() &&
+				    it->after.nonCanon.cntr <= probe->second.first &&
+				    it->after.nonCanon.nr_instr <= probe->second.second) {
+					assert(!availThreads.empty());
+					goto select_new_thread;
+				}
+			}
+		}
+
+
 		MemLog<unsigned long> *logfile = cm->threadLogs[tid];
 		LogReaderPtr &logptr(threadPtrs[tid]);
 		VexPtr<LogRecord<unsigned long> > lr(logfile->read(logptr, &logptr));
@@ -174,6 +344,13 @@ replayToSchedule(ConstraintMaker *cm)
 		}
 
 		assert(tid == lr->thread());
+		if (dynamic_cast<LogRecordFootstep<unsigned long> *>(lr.get())) {
+			if (probe != ripCounters.end()) {
+				probe->second.first++;
+				probe->second.second = 0;
+			}
+		}
+
 		ThreadEvent<unsigned long> *evt;
 
 		if (stashedEvents[tid])
@@ -181,14 +358,38 @@ replayToSchedule(ConstraintMaker *cm)
 		else
 			evt = thr->runToEvent(ms->addressSpace, ms);
 
-#if 0
-		printf("%d:%lx:%d: %s\t%s\n", tid._tid(), threadCounters[tid], record_nr++, evt->name(),
-		       lr->name());
-#endif
+		
+		{
+			printf("%d:%lx:%lx:%d:%d: (%d) %s\t%s\n",
+			       tid._tid(),
+			       threadCounters[tid],
+			       thr->regs.rip(),
+			       (probe == ripCounters.end()) ? -1 : probe->second.first,
+			       (probe == ripCounters.end()) ? -1 : probe->second.second,
+			       record_nr++,
+			       evt->name(),
+			       lr->name());
+		}
 
 		if (dynamic_cast<LogRecordLoad<unsigned long> *>(lr.get()) ||
-		    dynamic_cast<LogRecordStore<unsigned long> *>(lr.get()))
+		    dynamic_cast<LogRecordStore<unsigned long> *>(lr.get())) {
 			threadCounters[tid]++;
+			probe->second.second++;
+			if (probe != ripCounters.end()) {
+				for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
+				     it != liveConstraints.end();
+					) {
+					if (it->before.tid == tid &&
+					    it->before.nonCanon.rip == thr->regs.rip() &&
+					    it->before.nonCanon.cntr <= probe->second.first &&
+					    it->before.nonCanon.nr_instr < probe->second.second) {
+						it = liveConstraints.erase(it);
+					} else {
+						it++;
+					}
+				}
+			}
+		}
 
 		stashedEvents[tid] = evt->replay(lr, ms);
 
@@ -213,13 +414,20 @@ main(int argc, char *argv[])
 	VexPtr<ConstraintMaker> cm(new ConstraintMaker());
 	cm->playLogfile(lf, ptr);
 
+	printf("Initial race set:\n");
 	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
 	     it != cm->constraints.end();
 	     it++) {
-		printf("%d:%lx <-< %d:%lx\t\t%lx\n",
-		       it->tid1._tid(), it->idx1,
-		       it->tid2._tid(), it->idx2,
-		       it->inducingAddress);
+		printf("%s\n", it->name());
+	}
+
+	cm->decanonise(lf, ptr);
+
+	printf("Decanoned:\n");
+	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
+	     it != cm->constraints.end();
+	     it++) {
+		printf("%s\n", it->name());
 	}
 
 	replayToSchedule(cm);

@@ -57,7 +57,14 @@ class Named {
 	mutable char *_name;
 protected:
 	virtual char *mkName(void) const = 0;
+	void clearName() const { free(_name); _name = NULL; }
 public:
+	Named &operator=(const Named &src) {
+		clearName();
+		if (src._name)
+			_name = strdup(src._name);
+		return *this;
+	}
 	Named() : _name(NULL) {}
 	Named(const Named &b) {
 		if (b._name)
@@ -70,7 +77,7 @@ public:
 			_name = mkName();
 		return _name;
 	}
-	void destruct() { free(_name); _name = NULL; }
+	void destruct() { clearName(); }
 	~Named() { destruct(); }
 };
 
