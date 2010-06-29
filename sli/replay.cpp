@@ -324,3 +324,77 @@ InterpretResult SignalEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **l
 	thr->crashed = true;
 	return InterpretResultCrash;
 }
+
+template <typename ait> ThreadEvent<ait> *
+RdtscEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
+			     LogReader<ait> *lf,
+			     LogReaderPtr startPtr,
+			     LogReaderPtr *endPtr)
+{
+	/* Try to satisfy it with the next rdtsc in the log */
+	while (1) {
+		LogRecord<ait> *lr = lf->read(startPtr, &startPtr);
+		if (!lr)
+			break;
+		if (!dynamic_cast<LogRecordRdtsc<ait> *>(lr))
+			continue;
+		*endPtr = startPtr;
+		return replay(lr, ms);
+	}
+
+	/* Nothing left in the log.  Fake it. */
+	fake(ms, NULL);
+	return NULL;
+}
+
+template <typename ait> ThreadEvent<ait> *
+SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
+			       LogReader<ait> *lf,
+			       LogReaderPtr startPtr,
+			       LogReaderPtr *endPtr)
+{
+	ThreadEvent<ait> *r;
+
+	while (1) {
+		LogRecord<ait> *lr = lf->read(startPtr, &startPtr);
+		if (!lr)
+			break;
+		if (!dynamic_cast<LogRecordSyscall<ait> *>(lr))
+			continue;
+		try {
+			r = replay(lr, ms);
+		} catch (ReplayFailedException &excpt) {
+			/* Replay failed.  Keep trying more calls out
+			 * of the log. */
+			r = NULL;
+		}
+		if (r) {
+			/* We have replayed the syscall.  Woot.  If it
+			   came with some memory records then replay
+			   them as well. */
+			*endPtr = startPtr;
+			process_memory_records(ms->addressSpace, lf, startPtr,
+					       endPtr, (LogWriter<ait> *)NULL);
+			return r;
+		}
+	}
+
+	fake(ms, NULL);
+	return NULL;
+}
+
+template <typename ait> ThreadEvent<ait> *
+CasEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
+			   LogReader<ait> *lf,
+			   LogReaderPtr startPtr,
+			   LogReaderPtr *endPtr)
+{
+        expression_result<ait> seen;
+	Thread<ait> *thr = ms->findThread(this->when.tid);
+        seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
+	thr->temporaries[dest] = seen;
+        if (force(seen != expected))
+		return NULL;
+	return StoreEvent<ait>::get(this->when, addr.lo, size, data);
+}
+

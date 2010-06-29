@@ -909,7 +909,19 @@ public:
 	EventTimestamp when;
 	/* Replay the event using information in the log record */
 	virtual ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms) = 0;
+	/* Try to ``replay'' the event without reference to a pre-existing logfile */
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL) = 0;
+	/* Use the logfile if it matches, and otherwise fake it.  This
+	   can fast-forward through the log e.g. to find a matching
+	   syscall. */
+	virtual ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms,
+					      LogReader<ait> *lf,
+					      LogReaderPtr startPtr,
+					      LogReaderPtr *endPtr)
+	{
+		fake(ms, NULL);
+		return NULL;
+	}
 
 	/* This should really be DNI, but g++ doesn't let you inherit
 	 * from a class which has a private destructor. */
@@ -929,8 +941,10 @@ class RdtscEvent : public ThreadEvent<ait> {
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
-	virtual ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms, LogReader<ait> *lf,
+				      LogReaderPtr startPtr, LogReaderPtr *endPtr);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp temp)
 	{ return new RdtscEvent<ait>(when, temp); }
 	NAMED_CLASS
@@ -956,7 +970,7 @@ protected:
 	virtual char *mkName() const { return my_asprintf("load(%s, %d, %d)", name_aiv(addr), tmp, size); }
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
 	{
 		return new LoadEvent<ait>(when, _tmp, _addr, _size);
@@ -978,7 +992,7 @@ protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
 	{
 		return new StoreEvent<ait>(when, _addr, _size, data);
@@ -1017,7 +1031,7 @@ protected:
 	}
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static InstructionEvent<ait> *get(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
 					  ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch)
 	{
@@ -1073,6 +1087,10 @@ public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 				 const LogReader<ait> *lf, LogReaderPtr ptr,
 				 LogReaderPtr *outPtr, LogWriter<ait> *lw);
+	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms,
+				      LogReader<ait> *lf,
+				      LogReaderPtr startPtr,
+				      LogReaderPtr *endPtr);
 
 	static ThreadEvent<ait> *get(EventTimestamp when,
 				     IRTemp _dest,
@@ -1110,7 +1128,9 @@ protected:
 	SyscallEvent(EventTimestamp when) : ThreadEvent<ait>(when) {}
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms, LogReader<ait> *lf,
+				      LogReaderPtr startPtr, LogReaderPtr *endPtr);
 	static ThreadEvent<ait> *get(EventTimestamp when)
 	{ return new SyscallEvent(when); }
 	NAMED_CLASS
@@ -1133,8 +1153,7 @@ protected:
 	}
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
-	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, unsigned _signr, ait _virtaddr)
 	{
 		return new SignalEvent<ait>(when, _signr, _virtaddr);

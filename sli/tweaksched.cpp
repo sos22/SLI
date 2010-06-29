@@ -308,11 +308,11 @@ replayToSchedule(ConstraintMaker *cm)
 			    !threadsStoppedForReplay[it->first])
 				availThreads.insert(it->first);
 
+	select_new_thread:
 		if (availThreads.empty())
 			break;
 
 		/* Replay an event in that thread. */
-	select_new_thread:
 		ThreadId tid = *availThreads.begin();
 		availThreads.erase(tid);
 		Thread<unsigned long> *thr = ms->findThread(tid);
@@ -328,7 +328,6 @@ replayToSchedule(ConstraintMaker *cm)
 				    it->after.nonCanon.rip == thr->regs.rip() &&
 				    it->after.nonCanon.cntr <= probe->second.first &&
 				    it->after.nonCanon.nr_instr <= probe->second.second) {
-					assert(!availThreads.empty());
 					goto select_new_thread;
 				}
 			}
@@ -359,20 +358,21 @@ replayToSchedule(ConstraintMaker *cm)
 			evt = thr->runToEvent(ms->addressSpace, ms);
 
 		
-		{
-			printf("%d:%lx:%lx:%d:%d: (%d) %s\t%s\n",
-			       tid._tid(),
-			       threadCounters[tid],
-			       thr->regs.rip(),
-			       (probe == ripCounters.end()) ? -1 : probe->second.first,
-			       (probe == ripCounters.end()) ? -1 : probe->second.second,
-			       record_nr++,
-			       evt->name(),
-			       lr->name());
-		}
+#if 0
+		printf("%d:%lx:%lx:%d:%d: (%d) %s\t%s\n",
+		       tid._tid(),
+		       threadCounters[tid],
+		       thr->regs.rip(),
+		       (probe == ripCounters.end()) ? -1 : probe->second.first,
+		       (probe == ripCounters.end()) ? -1 : probe->second.second,
+		       record_nr++,
+		       evt->name(),
+		       lr->name());
+#endif
 
-		if (dynamic_cast<LogRecordLoad<unsigned long> *>(lr.get()) ||
-		    dynamic_cast<LogRecordStore<unsigned long> *>(lr.get())) {
+		if ( dynamic_cast<LoadEvent<unsigned long> *>(evt) ||
+		     dynamic_cast<StoreEvent<unsigned long> *>(evt) ||
+		     dynamic_cast<CasEvent<unsigned long> *>(evt) ) {
 			threadCounters[tid]++;
 			probe->second.second++;
 			if (probe != ripCounters.end()) {
@@ -391,10 +391,7 @@ replayToSchedule(ConstraintMaker *cm)
 			}
 		}
 
-		stashedEvents[tid] = evt->replay(lr, ms);
-
-		process_memory_records(ms->addressSpace, logfile, logptr,
-				       &logptr, (LogWriter<unsigned long> *)NULL);
+		stashedEvents[tid] = evt->fuzzyReplay(ms, logfile, logptr, &logptr);
 	}
 }
 
@@ -431,6 +428,14 @@ main(int argc, char *argv[])
 	}
 
 	replayToSchedule(cm);
+
+	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
+	     it != cm->constraints.end();
+	     it++) {
+		printf("Flip %s\n", it->name());
+		it->flip();
+		replayToSchedule(cm);
+	}
 
 	return 0;
 }
