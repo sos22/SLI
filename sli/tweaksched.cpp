@@ -293,8 +293,6 @@ replayToSchedule(ConstraintMaker *cm)
 
 	std::map<ThreadId, VexPtr<ThreadEvent<unsigned long> > > stashedEvents;
 
-	std::map<ThreadId, unsigned> threadsStoppedForReplay;
-
 	unsigned record_nr;
 
 	while (1) {
@@ -304,8 +302,7 @@ replayToSchedule(ConstraintMaker *cm)
 		     it != cm->threadLogs.end();
 		     it++)
 			if (it->first._tid() != 0 &&
-			    ms->findThread(it->first)->runnable() &&
-			    !threadsStoppedForReplay[it->first])
+			    ms->findThread(it->first)->runnable())
 				availThreads.insert(it->first);
 
 	select_new_thread:
