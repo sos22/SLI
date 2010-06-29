@@ -346,16 +346,15 @@ replayToSchedule(ConstraintMaker *cm)
 			cm->threadLogs[ThreadId(0)]->startPtr(),
 			&p));
 
-	std::vector<SchedConstraint> liveConstraints(cm->constraints);
-
+	std::vector<std::pair<bool, SchedConstraint> > liveConstraints;
 	std::map<ThreadId, unsigned long> threadCounters;
 	std::map<ThreadId, LogReaderPtr> threadPtrs;
-
 	std::map<std::pair<ThreadId, unsigned long>, std::pair<unsigned, unsigned> > ripCounters;
 
-	for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
-	     it != liveConstraints.end();
+	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
+	     it != cm->constraints.end();
 	     it++) {
+		liveConstraints.push_back(std::pair<bool, SchedConstraint>(true, *it));
 		assert(!it->before.isCanon);
 		assert(!it->after.isCanon);
 		ripCounters[std::pair<ThreadId, unsigned long>(it->before.tid,
@@ -394,24 +393,23 @@ replayToSchedule(ConstraintMaker *cm)
 		probe = ripCounters.find(std::pair<ThreadId, unsigned long>(tid,
 									    thr->regs.rip()));
 		if (probe != ripCounters.end()) {
-			for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
+			for (std::vector<std::pair<bool, SchedConstraint> >::iterator it = liveConstraints.begin();
 			     it != liveConstraints.end();
-				) {
-				if (it->after.tid == tid &&
-				    it->after.nonCanon.rip == thr->regs.rip() &&
-				    it->after.nonCanon.cntr <= probe->second.first &&
-				    it->after.nonCanon.nr_instr <= probe->second.second) {
+			     it++) {
+				if (it->first &&
+				    it->second.after.tid == tid &&
+				    it->second.after.nonCanon.rip == thr->regs.rip() &&
+				    it->second.after.nonCanon.cntr <= probe->second.first &&
+				    it->second.after.nonCanon.nr_instr <= probe->second.second) {
 					if (availThreads.empty()) {
 						/* Okay, can't satisfy
 						   all constraints.
 						   Remove one and see
 						   what happens. */
-						it = liveConstraints.erase(it);
+						it->first = false;
 					} else {
 						goto select_new_thread;
 					}
-				} else {
-					it++;
 				}
 			}
 		}
@@ -450,16 +448,15 @@ replayToSchedule(ConstraintMaker *cm)
 			threadCounters[tid]++;
 			probe->second.second++;
 			if (probe != ripCounters.end()) {
-				for (std::vector<SchedConstraint>::iterator it = liveConstraints.begin();
+				for (std::vector<std::pair<bool, SchedConstraint> >::iterator it = liveConstraints.begin();
 				     it != liveConstraints.end();
-					) {
-					if (it->before.tid == tid &&
-					    it->before.nonCanon.rip == thr->regs.rip() &&
-					    it->before.nonCanon.cntr <= probe->second.first &&
-					    it->before.nonCanon.nr_instr < probe->second.second) {
-						it = liveConstraints.erase(it);
-					} else {
-						it++;
+				     it++) {
+					if (it->first &&
+					    it->second.before.tid == tid &&
+					    it->second.before.nonCanon.rip == thr->regs.rip() &&
+					    it->second.before.nonCanon.cntr <= probe->second.first &&
+					    it->second.before.nonCanon.nr_instr < probe->second.second) {
+						it->first = false;
 					}
 				}
 			}
