@@ -309,7 +309,7 @@ ThreadEvent<ait> *SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait>
 					      lrs->signr);
 	}
 
-	printf("Crash in thread %d\n", thr->tid._tid());
+	printf("Crash in thread %d signal %d\n", thr->tid._tid(), signr);
 	thr->crashed = true;
 
 	return NULL;
@@ -321,7 +321,7 @@ InterpretResult SignalEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **l
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	if (lr)
 		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
-	printf("Crash in thread %d\n", thr->tid._tid());
+	printf("Crash in thread %d signal %d\n", thr->tid._tid(),signr);
 	thr->crashed = true;
 	return InterpretResultCrash;
 }

@@ -340,7 +340,7 @@ replayToSchedule(ConstraintMaker *cm)
 		else
 			evt = thr->runToEvent(ms->addressSpace, ms);
 
-		
+
 #if 0
 		printf("%d:%lx:%lx:%d:%d: (%d) %s\n",
 		       tid._tid(),
@@ -352,7 +352,7 @@ replayToSchedule(ConstraintMaker *cm)
 		       evt->name());
 #endif
 
-		if ( dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
+		if ( dynamic_cast<InstructionEvent<unsigned long> *> (evt)) {
 			if (probe != ripCounters.end()) {
 				probe->second.first++;
 				probe->second.second = 0;
@@ -395,6 +395,8 @@ replayToSchedule(ConstraintMaker *cm)
 				       &logptr, (LogWriter<unsigned long> *)NULL);
 #endif
 	}
+
+	printf("Ran %d records.\n", record_nr);
 }
 
 int
