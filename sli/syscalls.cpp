@@ -247,7 +247,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 				thr->futexBlock(args[0]);
 			break;
 		case FUTEX_WAKE:
-			mach->futexWake(args[0]);
+			mach->futexWake(args[0], true);
 			break;
 		default:
 			throw UnknownSyscallException(force(sysnr));			
@@ -317,7 +317,6 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 						       false,
 						       thr);
 			if (force(m.lo) == force(args[2])) {
-				thr->futexBlock(args[0]);
 				res = mkConst<ait>(0);
 			} else {
 				res = mkConst<ait>(-EWOULDBLOCK);
@@ -325,7 +324,7 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 			break;
 		}
 		case FUTEX_WAKE: {
-			res = mkConst<ait>(ms->futexWake(args[0]));
+			res = mkConst<ait>(ms->futexWake(args[0], false));
 			break;
 		}
 		default:

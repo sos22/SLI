@@ -436,7 +436,7 @@ main(int argc, char *argv[])
 	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
 	     it != cm->constraints.end();
 	     it++) {
-		printf("Flip %s\n", it->name());
+		printf("\n\nFlip %s\n", it->name());
 		it->flip();
 		replayToSchedule(cm);
 		it->flip();

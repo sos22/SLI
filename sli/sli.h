@@ -425,8 +425,8 @@ public:
 	EventTimestamp lastEvent;
 
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress && !blocked; }
-	void futexBlock(abst_int_type fba) { blocked = true; futex_block_address = fba; }
-	void futexUnblock() { blocked = false; }
+	void futexBlock(abst_int_type fba) { printf("%d: block\n", tid._tid()); assert(!blocked); blocked = true; futex_block_address = fba; }
+	void futexUnblock() { printf("%d: unblocked\n", tid._tid()); blocked = false; }
 
 private:
 	bool allowRipMismatch;
@@ -789,13 +789,14 @@ public:
 	}
 	bool crashed() const;
 	
-	unsigned futexWake(abst_int_type key) {
+	unsigned futexWake(abst_int_type key, bool do_it) {
 		unsigned cntr = 0;
 		for (unsigned x = 0; x < threads->size(); x++)
 			if (threads->index(x)->blocked &&
 			    force(threads->index(x)->futex_block_address == key)) {
 				cntr++;
-				threads->index(x)->futexUnblock();
+				if (do_it)
+					threads->index(x)->futexUnblock();
 			}
 		return cntr;
 	}
