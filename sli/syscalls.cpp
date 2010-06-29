@@ -241,6 +241,17 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
+		switch (force(args[1] & mkConst<ait>(FUTEX_CMD_MASK))) {
+		case FUTEX_WAIT:
+			if (force(res == mkConst<ait>(0)))
+				thr->futexBlock(args[0]);
+			break;
+		case FUTEX_WAKE:
+			mach->futexWake(args[0]);
+			break;
+		default:
+			throw UnknownSyscallException(force(sysnr));			
+		}
 		break;
 	case __NR_set_tid_address: /* 218 */
 		thr->clear_child_tid = args[0];
@@ -284,6 +295,7 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 	args[4] = thr->regs.get_reg(REGISTER_IDX(R8));
 	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
+	res = mkConst<ait>(-ENOSYS);
 	switch (force(sysnr)) {
 	case __NR_open: {
 		char *path =
@@ -296,31 +308,36 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 		break;
 	}
 	case __NR_futex: {
-		if ((force(args[1]) & FUTEX_CMD_MASK) == FUTEX_WAIT) {
-			expression_result<ait> res =
+		switch (force(args[1]) & FUTEX_CMD_MASK) {
+		case FUTEX_WAIT: {
+			expression_result<ait> m =
 				ms->addressSpace->load(this->when,
 						       args[0],
 						       4,
 						       false,
 						       thr);
-			if (force(res.lo) == force(args[2])) {
-				printf("Should block for fake futex operation, crashing instead.\n");
-				/* We should block, but don't know
-				   how, so meh. */
-				if (lr)
-					*lr = NULL;
-				return InterpretResultIncomplete;
+			if (force(m.lo) == force(args[2])) {
+				thr->futexBlock(args[0]);
+				res = mkConst<ait>(0);
+			} else {
+				res = mkConst<ait>(-EWOULDBLOCK);
 			}
+			break;
 		}
-		res = mkConst<ait>(0);
+		case FUTEX_WAKE: {
+			res = mkConst<ait>(ms->futexWake(args[0]));
+			break;
+		}
+		default:
+			printf("unknown futex op %lx\n", force(args[1]));
+			break;
+		}
+
 		break;
 	}
-
 	default:
 		printf("can't fake syscall %ld yet\n", force(sysnr));
-		if (lr)
-			*lr = NULL;
-		return InterpretResultIncomplete;
+		break;
 	}
 	LogRecordSyscall<ait> *llr = new LogRecordSyscall<ait>(thr->tid,
 							       sysnr,

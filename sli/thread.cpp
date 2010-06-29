@@ -80,6 +80,7 @@ void Thread<ait>::visit(HeapVisitor &hv) const
 	visit_aiv(clear_child_tid, hv);
 	visit_aiv(robust_list, hv);
 	visit_aiv(set_child_tid, hv);
+	visit_aiv(futex_block_address, hv);
 }
 
 template <typename ait>

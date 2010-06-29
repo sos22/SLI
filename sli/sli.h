@@ -406,10 +406,12 @@ public:
 	abst_int_type clear_child_tid;
 	abst_int_type robust_list;
 	abst_int_type set_child_tid;
+	abst_int_type futex_block_address;
 	bool exitted;
 	bool crashed;
 
 	bool cannot_make_progress;
+	bool blocked;
 
 	unsigned long nrAccesses;
 	unsigned long nrEvents;
@@ -422,7 +424,9 @@ public:
 
 	EventTimestamp lastEvent;
 
-	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
+	bool runnable() const { return !exitted && !crashed && !cannot_make_progress && !blocked; }
+	void futexBlock(abst_int_type fba) { blocked = true; futex_block_address = fba; }
+	void futexUnblock() { blocked = false; }
 
 private:
 	bool allowRipMismatch;
@@ -785,6 +789,16 @@ public:
 	}
 	bool crashed() const;
 	
+	unsigned futexWake(abst_int_type key) {
+		unsigned cntr = 0;
+		for (unsigned x = 0; x < threads->size(); x++)
+			if (threads->index(x)->blocked &&
+			    force(threads->index(x)->futex_block_address == key)) {
+				cntr++;
+				threads->index(x)->futexUnblock();
+			}
+		return cntr;
+	}
 	MachineState<abst_int_type> *dupeSelf() const;
 
 	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;

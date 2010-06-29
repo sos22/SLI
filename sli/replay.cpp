@@ -321,6 +321,7 @@ InterpretResult SignalEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **l
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	if (lr)
 		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
+	printf("Crash in thread %d\n", thr->tid._tid());
 	thr->crashed = true;
 	return InterpretResultCrash;
 }
@@ -353,8 +354,6 @@ SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 			       LogReaderPtr startPtr,
 			       LogReaderPtr *endPtr)
 {
-	ThreadEvent<ait> *r;
-
 	while (1) {
 		LogRecord<ait> *lr = lf->read(startPtr, &startPtr);
 		if (!lr)
@@ -362,20 +361,14 @@ SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 		if (!dynamic_cast<LogRecordSyscall<ait> *>(lr))
 			continue;
 		try {
-			r = replay(lr, ms);
-		} catch (ReplayFailedException &excpt) {
-			/* Replay failed.  Keep trying more calls out
-			 * of the log. */
-			r = NULL;
-		}
-		if (r) {
-			/* We have replayed the syscall.  Woot.  If it
-			   came with some memory records then replay
-			   them as well. */
+			ThreadEvent<ait> *r = replay(lr, ms);
 			*endPtr = startPtr;
 			process_memory_records(ms->addressSpace, lf, startPtr,
 					       endPtr, (LogWriter<ait> *)NULL);
 			return r;
+		} catch (ReplayFailedException &excpt) {
+			/* Replay failed.  Keep trying more calls out
+			 * of the log. */
 		}
 	}
 

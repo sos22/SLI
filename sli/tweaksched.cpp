@@ -334,24 +334,7 @@ replayToSchedule(ConstraintMaker *cm)
 		}
 
 
-		MemLog<unsigned long> *logfile = cm->threadLogs[tid];
-		LogReaderPtr &logptr(threadPtrs[tid]);
-		VexPtr<LogRecord<unsigned long> > lr(logfile->read(logptr, &logptr));
-		if (!lr) {
-			thr->cannot_make_progress = true;
-			continue;
-		}
-
-		assert(tid == lr->thread());
-		if (dynamic_cast<LogRecordFootstep<unsigned long> *>(lr.get())) {
-			if (probe != ripCounters.end()) {
-				probe->second.first++;
-				probe->second.second = 0;
-			}
-		}
-
 		ThreadEvent<unsigned long> *evt;
-
 		if (stashedEvents[tid])
 			evt = stashedEvents[tid];
 		else
@@ -359,16 +342,22 @@ replayToSchedule(ConstraintMaker *cm)
 
 		
 #if 0
-		printf("%d:%lx:%lx:%d:%d: (%d) %s\t%s\n",
+		printf("%d:%lx:%lx:%d:%d: (%d) %s\n",
 		       tid._tid(),
 		       threadCounters[tid],
 		       thr->regs.rip(),
 		       (probe == ripCounters.end()) ? -1 : probe->second.first,
 		       (probe == ripCounters.end()) ? -1 : probe->second.second,
 		       record_nr++,
-		       evt->name(),
-		       lr->name());
+		       evt->name());
 #endif
+
+		if ( dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
+			if (probe != ripCounters.end()) {
+				probe->second.first++;
+				probe->second.second = 0;
+			}
+		}
 
 		if ( dynamic_cast<LoadEvent<unsigned long> *>(evt) ||
 		     dynamic_cast<StoreEvent<unsigned long> *>(evt) ||
@@ -391,7 +380,20 @@ replayToSchedule(ConstraintMaker *cm)
 			}
 		}
 
+		MemLog<unsigned long> *logfile = cm->threadLogs[tid];
+		LogReaderPtr &logptr(threadPtrs[tid]);
+#if 1
 		stashedEvents[tid] = evt->fuzzyReplay(ms, logfile, logptr, &logptr);
+#else
+		VexPtr<LogRecord<unsigned long> > lr(logfile->read(logptr, &logptr));
+		if (!lr) {
+			thr->cannot_make_progress = true;
+			continue;
+		}
+		stashedEvents[tid] = evt->replay(lr, ms);
+		process_memory_records(ms->addressSpace, logfile, logptr,
+				       &logptr, (LogWriter<unsigned long> *)NULL);
+#endif
 	}
 }
 
