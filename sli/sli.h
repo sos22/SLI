@@ -2809,12 +2809,19 @@ public:
 	History *truncateExclusive(unsigned long x) { return truncate(x, false); }
 
 	History *concretise() {
-		if (!concrete.get())
-			concrete.set(new History(condition->concretise(),
-						 last_valid_idx,
-						 when,
-						 rips,
-						 NULL));
+		if (!concrete.get()) {
+			Expression *c = condition->concretise();
+			unsigned long cc;
+			if (c->isConstant(&cc) && cc && parent) {
+				concrete.set(parent->concretise());
+			} else {
+				concrete.set(new History(c,
+							 last_valid_idx,
+							 when,
+							 rips,
+							 parent ? parent->concretise() : NULL));
+			}
+		}
 		return concrete.get();
 	}
 	NAMED_CLASS
