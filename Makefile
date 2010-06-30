@@ -4,13 +4,15 @@ OPTIMIZE=n
 PROFILE_FLAGS=
 TARGETS=
 CPPFLAGS=-DSLI
-CFLAGS=-Wall -g $(CPPFLAGS) $(PROFILE_FLAGS) -fno-strict-aliasing
+CFLAGS=-Wall -g $(CPPFLAGS) $(PROFILE_FLAGS) $(OPTIMIZE_FLAGS) -fno-strict-aliasing
 CXXFLAGS=$(CFLAGS)
 clean_files=$(TARGETS) .depends
 all_makefiles=Makefile Makefile.mk
 
 ifeq ($(OPTIMIZE),y)
-CFLAGS+=-O3 -DNDEBUG
+OPTIMIZE_FLAGS=-O3 -DNDEBUG
+else
+OPTIMIZE_FLAGS=
 endif
 
 include Makefile.mk

@@ -2980,6 +2980,8 @@ void considerPotentialFixes(Expression *expr);
 
 void gdb_concrete(const MachineState<unsigned long> *ms);
 void gdb_abstract(const MachineState<abstract_interpret_value> *ms);
+void gdb(void);
+void dbg_break(const char *msg, ...);
 
 /* force some functions to be included even when they're not needed,
    so that they're available for calling from the debugger. */

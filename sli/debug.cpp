@@ -1,11 +1,14 @@
 /* Simple gdb stub for inspecting machine states */
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <err.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <wait.h>
 
 #include "sli.h"
 
@@ -534,4 +537,60 @@ void
 gdb_abstract(const MachineState<abstract_interpret_value> *ms)
 {
 	gdb_machine_state(ms);
+}
+
+/* Support for attaching gdb to ourself. */
+static volatile bool gdb_attached;
+static pid_t gdb_pid;
+
+void
+gdb(void)
+{
+	if (gdb_pid) {
+		/* Should already have a GDB.  See if it's exitted. */
+		int status;
+		pid_t r = waitpid(gdb_pid, &status, WNOHANG);
+		if (r == gdb_pid) {
+			/* Yes */
+			gdb_pid = 0;
+		} else {
+			/* No */
+			dbg_break("Debugger invoked");
+			return;
+		}
+	}
+	pid_t me = getpid();
+	char *path = vex_asprintf("/proc/%d/exe", me);
+	char buf[4097];
+	if (readlink(path, buf, sizeof(buf)) < 0) {
+		warn("cannot read %s", path);
+		return;
+	}
+	pid_t gdb_pid = fork();
+	if (gdb_pid == -1) {
+		warn("fork()");
+		return;
+	}
+	if (gdb_pid == 0) {
+		execlp("gdb", "gdb", buf, vex_asprintf("%d", me), NULL);
+		err(1, "executing gdb");
+	}
+	while (1) {
+		int status;
+		pid_t r = waitpid(gdb_pid, &status, WNOHANG);
+
+		if (r == -1) {
+			warn("waiting for gdb");
+			break;
+		}
+		if (r == gdb_pid) {
+			/* We're done. */
+			gdb_pid = 0;
+			break;
+		}
+		if (gdb_attached)
+			break;
+
+		sleep(1);
+	}
 }

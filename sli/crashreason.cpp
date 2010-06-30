@@ -428,6 +428,8 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
+	gdb();
+
 	LibVEX_alloc_sanity_check();
 
 	LogFile *lf;
@@ -468,6 +470,8 @@ main(int argc, char *argv[])
 		LibVEX_alloc_sanity_check();
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
+
+	dbg_break("Finished.");
 
 	return 0;
 }
