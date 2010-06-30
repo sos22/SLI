@@ -745,3 +745,22 @@ History::calcLastAccessed()
 	if (condition)
 		condition->lastAccessMap(lastAccessed);
 }
+
+/* If the parent condition is a constant then we can merge the current
+   condition into it, simplifying the history chain subtantially. */
+void
+History::mergeParent()
+{
+	unsigned long pc;
+	if (!parent || !parent->condition->isConstant(&pc))
+		return;
+	std::vector<unsigned long> newRips(parent->rips);
+	for (std::vector<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++)
+		newRips.push_back(*it);
+	rips = newRips;
+	when = parent->when;
+	condition = logicaland::get(parent->condition, condition);
+	parent = parent->parent;
+}
