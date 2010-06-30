@@ -1966,7 +1966,7 @@ public:
 	static Expression *get(EventTimestamp load, EventTimestamp store,
 			       Expression *vaddr)
 	{
-		return new ExpressionLastStore(load, store, vaddr);
+		return intern(new ExpressionLastStore(load, store, vaddr));
 	}
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
 			   LogReader<abstract_interpret_value> *lf,
