@@ -2674,7 +2674,6 @@ public:
 		  parent(_parent)
 	{
 		assert(when.tid.valid());
-		mergeParent();
 		calcLastAccessed();
 	}
 	History(Expression *cond,
@@ -2689,7 +2688,6 @@ public:
 		  parent(_parent)
 	{
 		assert(when.tid.valid());
-		mergeParent();
 		calcLastAccessed();
 	}
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
@@ -2715,7 +2713,6 @@ private:
 	WeakRef<History> concrete;
 	std::map<ThreadId, unsigned long> lastAccessed;
 	void calcLastAccessed();
-	void mergeParent();
 protected:
 	char *mkName() const {
 	  return my_asprintf("{%s}%s@%d:%lx->%lx", parent ? parent->name() : "",
@@ -2844,6 +2841,7 @@ private:
 		  model_execution(model),
 		  model_exec_start(start)
 	{
+		assert(history);
 	}
 	Expression *refineHistory(const MachineState<abstract_interpret_value> *ms,
 				  LogReader<abstract_interpret_value> *lf,
@@ -2866,8 +2864,7 @@ protected:
 	bool _isEqual(const Expression *other) const {
 		const ExpressionRip *oth = dynamic_cast<const ExpressionRip *>(other);
 		if (oth && oth->tid == tid && cond->isEqual(oth->cond) &&
-		    ((!oth->history && !history) ||
-		     (history && oth->history && oth->history->isEqual(history))) )
+		    oth->history->isEqual(history))
 			return true;
 		else
 			return false;
@@ -2891,17 +2888,13 @@ public:
 	void visit(ExpressionVisitor &ev)
 	{
 		ev.visit(this);
-		if (history)
-			history->visit(ev);
+		history->visit(ev);
 		cond->visit(ev);
 	}
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const {
-		if (history)
-			return max<EventTimestamp>(history->timestamp(),
-						   cond->timestamp());
-		else
-			return cond->timestamp();
+		return max<EventTimestamp>(history->timestamp(),
+					   cond->timestamp());
 	}
 	bool isLogical() const { return cond->isLogical(); }
 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
@@ -2912,17 +2905,13 @@ public:
 			   EventTimestamp ev);
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
 		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
-		if (history)
-			return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
-		else
-			return cr;
+		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
 	}
 
 	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
 	{
 		cond->lastAccessMap(output);
-		if (history)
-			history->lastAccessMap(output);
+		history->lastAccessMap(output);
 	}
 };
 
