@@ -770,7 +770,9 @@ weak_table::ownerDied()
     for (unsigned x = 1; x < nr_refs; x++)
       *(outlineRefs[x-1]) = NULL;
     LibVEX_free(outlineRefs);
+    outlineRefs = NULL;
   }
+  nr_refs = 0;
 }
 
 /* Occasionally useful for dealing with heap corruption bugs, but too
