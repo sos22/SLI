@@ -58,6 +58,11 @@ struct weak_table {
 
 static alloc_header *const alloc_header_terminator = (alloc_header *)(temporary + N_TEMPORARY_BYTES);
 
+static void visit_ptr_array(const void *ths, HeapVisitor &visitor);
+static VexAllocType byte_alloc_type = { -1, 0, 0, "<bytes>" };
+static VexAllocType ptr_array_type = { -1, visit_ptr_array, NULL, "<array>" };
+static VexAllocType weak_table_type = { -1, 0, 0, "<weaktable>" };
+
 #define NR_GC_ROOTS 128
 static unsigned nr_gc_roots;
 static void **gc_roots[NR_GC_ROOTS];
@@ -67,6 +72,8 @@ static const char *gc_root_names[NR_GC_ROOTS];
    be a reasonable place to start looking when performing
    allocations. */
 static struct alloc_header *allocation_cursor;
+
+static void *alloc_bytes(VexAllocType *type, unsigned size);
 
 static void *
 header_to_alloc(struct alloc_header *ah)
@@ -98,7 +105,7 @@ header_to_weak_table(alloc_header *h)
 {
   weak_table *w;
   if (!(h->flags & ALLOC_FLAG_HAS_WEAK_TABLE)) {
-    w = (weak_table *)__LibVEX_Alloc_Bytes(sizeof(weak_table));
+    w = (weak_table *)alloc_bytes(&weak_table_type, sizeof(weak_table));
     w->nr_refs = 0;
     w->outlineRefs = NULL;
     unsigned long off = (unsigned long)w - (unsigned long)temporary;
@@ -223,8 +230,10 @@ LibVEX_gc(void)
     if (h->type) {
       if (h->flags & ALLOC_FLAG_GC_MARK) {
 	heap_used += h->size;
-      } else {
-	/* We're going to free off this block. */
+      } else if (h->type != &weak_table_type) {
+	/* We're going to free off this block.  Weak table allocations
+	   are released when their owner goes away, and not before. */
+
 	if (h->flags & ALLOC_FLAG_HAS_WEAK_TABLE)
 	  release_weak_table(h);
 	if (h->type->destruct)
@@ -275,8 +284,6 @@ void vexSetAllocModeTEMP_and_clear ( void )
 }
 
 
-static VexAllocType byte_alloc_type = { -1, 0, 0, "<bytes>" };
-
 static void
 visit_ptr_array(const void *ths, HeapVisitor &visitor)
 {
@@ -286,8 +293,6 @@ visit_ptr_array(const void *ths, HeapVisitor &visitor)
   for (x = 0; x < (ah->size - sizeof(*ah)) / sizeof(void *); x++)
     visitor.visit(payload[x]);
 }
-
-static VexAllocType ptr_array_type = { -1, visit_ptr_array, NULL, "<array>" };
 
 static void *
 alloc_bytes(VexAllocType *type, unsigned size)
@@ -416,7 +421,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
   VALGRIND_CHECK_MEM_IS_DEFINED(ah, sizeof(*ah));
 
   /* Can only resize byte allocations */
-  vassert(ah->type == &byte_alloc_type);
+  vassert(ah->type == &byte_alloc_type || ah->type == &weak_table_type);
 
   /* Enlarge if possible */
   while (new_size > ah->size) {
@@ -457,7 +462,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
      tends to cause heap fragmentation, so if we have to do it then we
      double the requested allocation so as to make future realloc()s
      cheaper. */
-  newptr = __LibVEX_Alloc_Bytes(new_size * 2);
+  newptr = alloc_bytes(ah->type, new_size * 2);
   if (new_size < ah->size)
     memcpy(newptr, ptr, new_size);
   else
@@ -733,7 +738,7 @@ weak_table::registerRef(void **ref)
     if (outlineRefs)
       outlineRefs = (void ***)LibVEX_realloc(outlineRefs, sizeof(void **) * nr_refs);
     else
-      outlineRefs = (void ***)LibVEX_Alloc_Bytes(sizeof(void **) * nr_refs);
+      outlineRefs = (void ***)alloc_bytes(&weak_table_type, sizeof(void **) * nr_refs);
     outlineRefs[nr_refs - 1] = ref;
   }
   nr_refs++;
