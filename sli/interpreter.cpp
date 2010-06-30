@@ -1253,7 +1253,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 	Thread<ait> *thr = currentState->findThread(tid);
 	if (thr->cannot_make_progress)
 		return InterpretResultIncomplete;
-	while (max_events) {
+	while (max_events && thr->runnable()) {
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
 		InterpretResult res = evt->fake(currentState);
@@ -1267,6 +1267,8 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 		}
 		max_events--;
 	}
+	if (max_events)
+		return InterpretResultExit;
 	return InterpretResultTimedOut;
 }
 
@@ -1297,7 +1299,7 @@ void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, unsign
 {
 	bool have_event_limit = max_events != 0;
 	Thread<ait> *thr = currentState->findThread(tid);
-	while (!have_event_limit || max_events) {
+	while ((!have_event_limit || max_events) && thr->runnable()) {
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {
@@ -1370,6 +1372,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 			break;
 
 		Thread<ait> *thr = currentState->findThread(lr->thread());
+		assert(thr->runnable());
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
 		while (evt && !finished) {

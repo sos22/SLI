@@ -425,7 +425,7 @@ public:
 	EventTimestamp lastEvent;
 
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress && !blocked; }
-	void futexBlock(abst_int_type fba) { printf("%d: block\n", tid._tid()); assert(!blocked); blocked = true; futex_block_address = fba; }
+	void futexBlock(abst_int_type fba) { printf("%d: block\n", tid._tid()); blocked = true; futex_block_address = fba; }
 	void futexUnblock() { printf("%d: unblocked\n", tid._tid()); blocked = false; }
 
 private:
