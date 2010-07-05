@@ -23,6 +23,8 @@ void AddressSpace<ait>::allocateMemory(ait _start, ait _size,
 		start += MemoryChunk<ait>::size;
 		size -= MemoryChunk<ait>::size;
 	}
+
+	findInterestingFunctions();
 }
 
 template <typename ait>
@@ -181,6 +183,20 @@ void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 	writeMemory(when, start, size, b, ignore_protection, thr);
 }
 
+template <typename ait> template <typename t> const t
+AddressSpace<ait>::fetch(unsigned long start)
+{
+	ait *res;
+
+	res = (ait *)malloc(sizeof(ait) * sizeof(t));
+	readMemory(mkConst<ait>(start), sizeof(t), res);
+	t tt;
+	for (unsigned x = 0; x < sizeof(t); x++)
+		((unsigned char *)&tt)[x] = force(res[x]);
+	free(res);
+	return tt;
+}
+
 template <typename ait>
 EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 					     ait *contents, bool ignore_protection,
@@ -303,6 +319,7 @@ void AddressSpace<ait>::visit(HeapVisitor &hv) const
 	hv(vamap);
 	hv(pmap);
 	vamap->visit(hv, pmap);
+	visit_aiv(client_free, hv);
 }
 
 template <typename ait>
@@ -375,6 +392,7 @@ AddressSpace<new_type> *AddressSpace<ait>::abstract() const
 	work->brkMapPtr = brkMapPtr;
 	work->vamap = vamap->dupeSelf();
 	work->pmap = pmap->abstract<new_type>();
+	work->client_free = mkConst<new_type>(force(work->client_free));
 	return work;
 }
 
@@ -448,6 +466,60 @@ AddressSpace<ait>::readString(ait start)
 		}
 	}
 	return buf;
+}
+
+template <typename ait> int
+compare_ait_buffer_char_buffer(const ait *buffer,
+			       const char *bytes,
+			       size_t s)
+{
+	for (unsigned x = 0; x < s; x++) {
+		unsigned long b = force(buffer[x]);
+		unsigned long b2 = ((unsigned char *)bytes)[x];
+		if (b < b2)
+			return -1;
+		else if (b > b2)
+			return 1;
+	}
+	return 0;
+}
+
+template <typename ait> void
+AddressSpace<ait>::findInterestingFunctions(const VAMap::VAMapEntry *it)
+{
+	ait buf[4096];
+
+	/* Try to spot malloc, free, realloc.  Hideous hack. */
+	if (it->end - it->start != 0x168000) {
+		/* Wrong size -> not libc. */
+		return;
+	}
+	readMemory(mkConst<ait>(it->start + 0x7a230),
+		   293,
+		   buf);
+	if (compare_ait_buffer_char_buffer<ait>(
+		    buf,
+		    "\x48\x8b\x05\x21\x1d\x2f\x00\x53\x49\x89\xf8\x48\x8b\x00\x48\x85\xc0\x74\x0d\x48\x8b\x74\x24\x08\x49\x89\xc3\x5b\x41\xff\xe3\x90\x48\x85\xff\x74\x6d\x48\x8b\x47\xf8\x48\x8d\x4f\xf0\xa8\x02\x75\x67\xa8\x04\x48\x8d\x1d\x96\x37\x2f\x00\x74\x0a\x48\x81\xe1\x00\x00\x00\xfc\x48\x8b\x19\xbe\x01\x00\x00\x00\x31\xc0\x83\x3d\xc4\x6d\x2f\x00\x00\x74\x0c\xf0\x0f\xb1\x33\x0f\x85\xb6\x3d\x00\x00\xeb\x09\x0f\xb1\x33\x0f\x85\xab\x3d\x00\x00\x4c\x89\xc6\x48\x89\xdf\xe8\x5a\xf6\xff\xff\x83\x3d\x9b\x6d\x2f\x00\x00\x74\x0b\xf0\xff\x0b\x0f\x85\xa9\x3d\x00\x00\xeb\x08\xff\x0b\x0f\x85\x9f\x3d\x00\x00\x5b\xc3\x0f\x1f\x40\x00\x8b\x15\xf6\x3f\x2f\x00\x85\xd2\x75\x2e\x48\x3b\x05\xd7\x3f\x2f\x00\x76\x25\x48\x3d\x00\x00\x00\x02\x77\x1d\x48\x89\xc2\x48\x83\xe2\xf8\x48\x8d\x04\x12\x48\x89\x15\xbb\x3f\x2f\x00\x48\x89\x05\xa4\x3f\x2f\x00\xeb\x09\x66\x90\x48\x89\xc2\x48\x83\xe2\xf8\x49\x8b\x40\xf0\x48\x89\xcf\x48\x29\xc7\x48\x8d\x34\x02\x8b\x05\xad\x3f\x2f\x00\x48\x89\xf2\x48\x09\xfa\x83\xe8\x01\x48\x85\xc2\x75\x14\x5b\x83\x2d\x87\x3f\x2f\x00\x01\x48\x29\x35\x98\x3f\x2f\x00\xe9\x23\x86\x06\x00\x5b\x8b\x3d\xa0\x1d\x2f\x00\x48\x8d\x51\x10\x48\x8d\x35\xc9\x21\x0c\x00\xe9\xdc\xd8\xff\xff\x66",
+		    293)) {
+		printf("free() mismatch -> not libc\n");
+		return;
+	}
+	this->client_free = mkConst<ait>(it->start + 0x7a230);
+}
+
+template <typename ait> void
+AddressSpace<ait>::findInterestingFunctions()
+{
+	for (VAMap::iterator it = vamap->begin();
+	     it != vamap->end();
+	     it++) {
+		if (!it->prot.readable || !it->prot.executable)
+			continue;
+
+		findInterestingFunctions(&*it);
+	}
+
+	fflush(NULL);
 }
 
 #define MK_ADDRESS_SPACE(t)

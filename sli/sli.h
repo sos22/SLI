@@ -513,6 +513,22 @@ public:
 				 bool have_min = false) const;
 	};
 
+	class iterator {
+		VAMapEntry *current;
+		VAMap *m;
+	public:
+		iterator(VAMap *_m);
+		iterator(VAMap *_m, void *ign) : current(NULL), m(_m) {}
+		const VAMapEntry &operator*() const { return *current; }
+		const VAMapEntry *operator->() const { return current; }
+		void operator++(int);
+		bool operator==(const iterator &x) const { return current == x.current && m == x.m; }
+		bool operator!=(const iterator &x) const { return !(x == *this); }
+	};
+
+	iterator begin() { return iterator(this); }
+	iterator end() { return iterator(this, NULL); }
+
 private:
 	/* Mutable because we splay the tree on lookup */
 	mutable VAMapEntry *root;
@@ -808,6 +824,8 @@ public:
 	void sanityCheck() const;
 
 	void destruct() {}
+
+	void client_free(EventTimestamp when, abst_int_type ptr);
 
 	NAMED_CLASS
 };
@@ -1650,11 +1668,15 @@ public:
 	unsigned long brkMapPtr;
 	VAMap *vamap;
 	PMap<ait> *pmap;
+	ait client_free;
 
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
 
 public:
+	void findInterestingFunctions(const VAMap::VAMapEntry *vme);
+	void findInterestingFunctions();
+
 	void allocateMemory(ait start, ait size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
 	void allocateMemory(const LogRecordAllocateMemory<ait> &rec)
@@ -1677,6 +1699,7 @@ public:
 	expression_result<ait> load(EventTimestamp when, ait start, unsigned size,
 				    bool ignore_protection = false,
 				    const Thread<ait> *thr = NULL);
+	template <typename t> const t fetch(unsigned long addr);
 	EventTimestamp readMemory(ait start, unsigned size,
 				  ait *contents, bool ignore_protection = false,
 				  const Thread<ait> *thr = NULL,

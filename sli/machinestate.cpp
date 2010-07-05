@@ -85,6 +85,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 	}
 
 	as->addVsyscalls();
+	as->findInterestingFunctions();
 
 	*end = ptr;
 	return work;
@@ -147,6 +148,22 @@ MachineState<new_type> *MachineState<ait>::abstract() const
 	return work;
 }
 
+struct size_t_pair {
+	size_t a;
+	size_t b;
+};
+
+template <typename ait> void
+MachineState<ait>::client_free(EventTimestamp when, ait ptr)
+{
+	if (force(ptr == mkConst<ait>(0)))
+		return;
+
+	expression_result<ait> chk = addressSpace->load(when,
+							ptr - mkConst<ait>(8),
+							8);
+	printf("client_free(%lx, %lx)\n", force(ptr), force(chk.lo));
+}
 
 #define MK_MACHINE_STATE(t)						\
 	template MachineState<t> *MachineState<t>::dupeSelf() const;	\

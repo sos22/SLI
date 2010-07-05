@@ -1082,6 +1082,9 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
+				if (force(regs.rip() == addrSpace->client_free))
+					ms->client_free(bumpEvent(ms),
+							regs.get_reg(REGISTER_IDX(RDI)));
 #define GR(x) regs.get_reg(REGISTER_IDX(x))
 				return InstructionEvent<ait>::get(bumpEvent(ms),
 								  regs.rip(),
