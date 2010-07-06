@@ -1083,8 +1083,8 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 				break;
 			case Ist_IMark:
 				if (force(regs.rip() == addrSpace->client_free))
-					ms->client_free(bumpEvent(ms),
-							regs.get_reg(REGISTER_IDX(RDI)));
+					addrSpace->client_freed(bumpEvent(ms),
+								regs.get_reg(REGISTER_IDX(RDI)));
 #define GR(x) regs.get_reg(REGISTER_IDX(x))
 				return InstructionEvent<ait>::get(bumpEvent(ms),
 								  regs.rip(),
@@ -1115,6 +1115,11 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 									  stmt->Ist.Store.data));
 				if (addrSpace->isWritable(addr.lo, size, this))
 					return StoreEvent<ait>::get(bumpEvent(ms), addr.lo, size, data);
+				EventTimestamp et;
+				if (addrSpace->isOnFreeList(force(addr.lo), force(addr.lo) + size, &et))
+					return UseFreeMemoryEvent<ait>::get(bumpEvent(ms), 
+									    addr.lo,
+									    et);
 				else
 					return SignalEvent<ait>::get(bumpEvent(ms), 11, addr.lo);
 			}

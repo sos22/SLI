@@ -14,6 +14,20 @@ ThreadEvent<ait> *RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> 
 	return NULL;
 }
 
+template <typename ait> ThreadEvent<ait> *
+UseFreeMemoryEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+{
+	throw UseOfFreeMemoryException(this->when, force(addr), whenFreed);
+}
+
+template <typename ait> InterpretResult
+UseFreeMemoryEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
+{
+	if (lr)
+		*lr = NULL;
+	return InterpretResultCrash;
+}
+
 template <typename ait>
 InterpretResult RdtscEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {

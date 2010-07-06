@@ -47,6 +47,7 @@ void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned si
 {
 	unsigned long start = force(_start);
 	unsigned off = 0;
+	checkFreeList(start, start + size, EventTimestamp::invalid);
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -205,6 +206,7 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 {
 	EventTimestamp when;
 	unsigned long start = force(_start);
+	checkFreeList(start, start + size, EventTimestamp::invalid);
 	if (storeAddr)
 		*storeAddr = _start;
 	while (size != 0) {
@@ -241,11 +243,39 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 	return when;
 }
 
+template <typename ait> bool
+AddressSpace<ait>::isOnFreeList(unsigned long start, unsigned long end,
+				EventTimestamp *when) const
+{
+	std::vector<client_freed_entry>::const_iterator it;
+
+	for (it = freed_memory.begin();
+	     it != freed_memory.end();
+	     it++) {
+		if (it->start < end && it->end > start) {
+			if (when)
+				*when = it->when;
+			return true;
+		}
+	}
+	return false;
+}
+
+template <typename ait> void
+AddressSpace<ait>::checkFreeList(unsigned long start, unsigned long end, EventTimestamp now)
+{
+	EventTimestamp when;
+	if (isOnFreeList(start, end, &when))
+		throw UseOfFreeMemoryException(now, start, when);
+}
+
 template <typename ait>
 bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 				     bool isWrite, const Thread<ait> *thr)
 {
 	unsigned long start = force(_start);
+	if (isOnFreeList(start, start + size))
+		return false;
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -520,6 +550,22 @@ AddressSpace<ait>::findInterestingFunctions()
 	}
 
 	fflush(NULL);
+}
+
+template <typename ait> void
+AddressSpace<ait>::client_freed(EventTimestamp when, ait ptr)
+{
+	if (force(ptr == mkConst<ait>(0)))
+		return;
+
+	expression_result<ait> chk = load(when, ptr - mkConst<ait>(8), 8);
+	client_freed_entry cf;
+
+	cf.start = force(ptr);
+	cf.end = force(ptr + chk.lo);
+	cf.when = when;
+	printf("client_free(%lx, %lx)\n", cf.start, cf.end);
+	freed_memory.push_back(cf);
 }
 
 #define MK_ADDRESS_SPACE(t)

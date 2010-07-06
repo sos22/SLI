@@ -825,8 +825,6 @@ public:
 
 	void destruct() {}
 
-	void client_free(EventTimestamp when, abst_int_type ptr);
-
 	NAMED_CLASS
 };
 
@@ -964,6 +962,34 @@ public:
 	virtual void destruct() {}
 
 	NAMED_CLASS
+};
+
+template <typename ait>
+class UseFreeMemoryEvent : public ThreadEvent<ait> {
+	ait addr;
+	EventTimestamp whenFreed;
+	UseFreeMemoryEvent(EventTimestamp _when,
+			   ait _addr,
+			   EventTimestamp _whenFreed)
+		: ThreadEvent<ait>(_when),
+		  addr(_addr),
+		  whenFreed(_whenFreed)
+	{
+	}
+protected:
+	char *mkName() const { return my_asprintf("useFree(%d:%lx, %s, %d:%lx)",
+						  this->when.tid._tid(),
+						  this->when.idx,
+						  name_aiv(addr),
+						  whenFreed.tid._tid(),
+						  whenFreed.idx); }
+public:
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
+	static ThreadEvent<ait> *get(EventTimestamp when,
+				     ait addr,
+				     EventTimestamp whenFreed)
+	{ return new UseFreeMemoryEvent<ait>(when, addr, whenFreed); }
 };
 
 template <typename ait>
@@ -1661,6 +1687,13 @@ public:
 	void visit(HeapVisitor &hv) const { tmp.visit(hv); }
 };
 
+class client_freed_entry {
+public:
+	unsigned long start;
+	unsigned long end;
+	EventTimestamp when;
+};
+
 template <typename ait>
 class AddressSpace : public GarbageCollected<AddressSpace<ait> > {
 public:
@@ -1670,9 +1703,11 @@ public:
 	PMap<ait> *pmap;
 	ait client_free;
 
+	bool isOnFreeList(unsigned long start, unsigned long end,
+			  EventTimestamp *when = NULL) const;
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
-
+	void checkFreeList(unsigned long start, unsigned long end, EventTimestamp now);
 public:
 	void findInterestingFunctions(const VAMap::VAMapEntry *vme);
 	void findInterestingFunctions();
@@ -1731,6 +1766,11 @@ public:
 	template <typename new_type> AddressSpace<new_type> *abstract() const;
 
 	void destruct() {}
+
+	std::vector<client_freed_entry> freed_memory;
+
+	void client_freed(EventTimestamp when, ait ptr);
+
 
 	NAMED_CLASS
 };
@@ -3024,6 +3064,24 @@ force_linkage()
 	gdb_abstract(NULL);
 }
 
+
+class UseOfFreeMemoryException : public SliException {
+public:
+	EventTimestamp when;
+	unsigned long ptr;
+	EventTimestamp whenFreed;
+	UseOfFreeMemoryException(EventTimestamp _when,
+				 unsigned long _ptr,
+				 EventTimestamp _whenFreed)
+		: SliException(
+			"guest used freed memory at %lx at %d:%lx (freed at %d:%lx)\n",
+			_ptr, _when.tid._tid(), _when.idx, _whenFreed.tid._tid(), _whenFreed.idx),
+		  when(_when),
+		  ptr(_ptr),
+		  whenFreed(_whenFreed)
+	{
+	}
+};
 
 
 #endif /* !SLI_H__ */
