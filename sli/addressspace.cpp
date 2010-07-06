@@ -47,7 +47,8 @@ void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned si
 {
 	unsigned long start = force(_start);
 	unsigned off = 0;
-	checkFreeList(start, start + size, EventTimestamp::invalid);
+	if (thr)
+		checkFreeList(_start, _start + mkConst<ait>(size), thr->tid, EventTimestamp::invalid);
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -185,12 +186,12 @@ void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 }
 
 template <typename ait> template <typename t> const t
-AddressSpace<ait>::fetch(unsigned long start)
+AddressSpace<ait>::fetch(unsigned long start, Thread<ait> *thr)
 {
 	ait *res;
 
 	res = (ait *)malloc(sizeof(ait) * sizeof(t));
-	readMemory(mkConst<ait>(start), sizeof(t), res);
+	readMemory(mkConst<ait>(start), sizeof(t), res, thr);
 	t tt;
 	for (unsigned x = 0; x < sizeof(t); x++)
 		((unsigned char *)&tt)[x] = force(res[x]);
@@ -206,7 +207,8 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 {
 	EventTimestamp when;
 	unsigned long start = force(_start);
-	checkFreeList(start, start + size, EventTimestamp::invalid);
+	if (thr)
+		checkFreeList(_start, _start + mkConst<ait>(size), thr->tid, EventTimestamp::invalid);
 	if (storeAddr)
 		*storeAddr = _start;
 	while (size != 0) {
@@ -244,17 +246,22 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 }
 
 template <typename ait> bool
-AddressSpace<ait>::isOnFreeList(unsigned long start, unsigned long end,
-				EventTimestamp *when) const
+AddressSpace<ait>::isOnFreeList(ait start, ait end,
+				ThreadId asking,
+				EventTimestamp *when,
+				ait *free_addr) const
 {
-	std::vector<client_freed_entry>::const_iterator it;
+	class AddressSpace<ait>::freed_memory_t::const_iterator it;
 
 	for (it = freed_memory.begin();
 	     it != freed_memory.end();
 	     it++) {
-		if (it->start < end && it->end > start) {
+		if (it->when.tid != asking && force(it->start < end) &&
+		    force(it->end > start)) {
 			if (when)
 				*when = it->when;
+			if (free_addr)
+				*free_addr = it->start;
 			return true;
 		}
 	}
@@ -262,11 +269,12 @@ AddressSpace<ait>::isOnFreeList(unsigned long start, unsigned long end,
 }
 
 template <typename ait> void
-AddressSpace<ait>::checkFreeList(unsigned long start, unsigned long end, EventTimestamp now)
+AddressSpace<ait>::checkFreeList(ait start, ait end,
+				 ThreadId asking, EventTimestamp now)
 {
 	EventTimestamp when;
-	if (isOnFreeList(start, end, &when))
-		throw UseOfFreeMemoryException(now, start, when);
+	if (isOnFreeList(start, end, asking, &when))
+		throw UseOfFreeMemoryException(now, force(start), when);
 }
 
 template <typename ait>
@@ -274,7 +282,7 @@ bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 				     bool isWrite, const Thread<ait> *thr)
 {
 	unsigned long start = force(_start);
-	if (isOnFreeList(start, start + size))
+	if (isOnFreeList(_start, _start + mkConst<ait>(size), thr->tid))
 		return false;
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -422,7 +430,7 @@ AddressSpace<new_type> *AddressSpace<ait>::abstract() const
 	work->brkMapPtr = brkMapPtr;
 	work->vamap = vamap->dupeSelf();
 	work->pmap = pmap->abstract<new_type>();
-	work->client_free = mkConst<new_type>(force(work->client_free));
+	work->client_free = mkConst<new_type>(force(client_free));
 	return work;
 }
 
@@ -454,7 +462,7 @@ AddressSpace<ait>::writeLiteralMemory(unsigned long start,
 	for (unsigned x = 0; x < size; x++)
 		c[x] = mkConst<ait>(content[x]);
 	writeMemory(EventTimestamp::invalid, mkConst<ait>(start),
-		    size, c, true);
+		    size, c, true, NULL);
 	free(c);
 }
 
@@ -474,7 +482,7 @@ AddressSpace<ait>::addVsyscalls()
 }
 
 template <typename ait> char *
-AddressSpace<ait>::readString(ait start)
+AddressSpace<ait>::readString(ait start, Thread<ait> *thr)
 {
 	char *buf;
 	unsigned offset;
@@ -485,7 +493,7 @@ AddressSpace<ait>::readString(ait start)
 	offset = 0;
 	while (1) {
 		ait b;
-		readMemory(start + mkConst<ait>(offset), 1, &b);
+		readMemory(start + mkConst<ait>(offset), 1, &b, false, thr);
 		buf[offset] = force(b);
 		if (!buf[offset])
 			break;
@@ -526,7 +534,9 @@ AddressSpace<ait>::findInterestingFunctions(const VAMap::VAMapEntry *it)
 	}
 	readMemory(mkConst<ait>(it->start + 0x7a230),
 		   293,
-		   buf);
+		   buf,
+		   false,
+		   NULL);
 	if (compare_ait_buffer_char_buffer<ait>(
 		    buf,
 		    "\x48\x8b\x05\x21\x1d\x2f\x00\x53\x49\x89\xf8\x48\x8b\x00\x48\x85\xc0\x74\x0d\x48\x8b\x74\x24\x08\x49\x89\xc3\x5b\x41\xff\xe3\x90\x48\x85\xff\x74\x6d\x48\x8b\x47\xf8\x48\x8d\x4f\xf0\xa8\x02\x75\x67\xa8\x04\x48\x8d\x1d\x96\x37\x2f\x00\x74\x0a\x48\x81\xe1\x00\x00\x00\xfc\x48\x8b\x19\xbe\x01\x00\x00\x00\x31\xc0\x83\x3d\xc4\x6d\x2f\x00\x00\x74\x0c\xf0\x0f\xb1\x33\x0f\x85\xb6\x3d\x00\x00\xeb\x09\x0f\xb1\x33\x0f\x85\xab\x3d\x00\x00\x4c\x89\xc6\x48\x89\xdf\xe8\x5a\xf6\xff\xff\x83\x3d\x9b\x6d\x2f\x00\x00\x74\x0b\xf0\xff\x0b\x0f\x85\xa9\x3d\x00\x00\xeb\x08\xff\x0b\x0f\x85\x9f\x3d\x00\x00\x5b\xc3\x0f\x1f\x40\x00\x8b\x15\xf6\x3f\x2f\x00\x85\xd2\x75\x2e\x48\x3b\x05\xd7\x3f\x2f\x00\x76\x25\x48\x3d\x00\x00\x00\x02\x77\x1d\x48\x89\xc2\x48\x83\xe2\xf8\x48\x8d\x04\x12\x48\x89\x15\xbb\x3f\x2f\x00\x48\x89\x05\xa4\x3f\x2f\x00\xeb\x09\x66\x90\x48\x89\xc2\x48\x83\xe2\xf8\x49\x8b\x40\xf0\x48\x89\xcf\x48\x29\xc7\x48\x8d\x34\x02\x8b\x05\xad\x3f\x2f\x00\x48\x89\xf2\x48\x09\xfa\x83\xe8\x01\x48\x85\xc2\x75\x14\x5b\x83\x2d\x87\x3f\x2f\x00\x01\x48\x29\x35\x98\x3f\x2f\x00\xe9\x23\x86\x06\x00\x5b\x8b\x3d\xa0\x1d\x2f\x00\x48\x8d\x51\x10\x48\x8d\x35\xc9\x21\x0c\x00\xe9\xdc\xd8\xff\xff\x66",
@@ -559,12 +569,12 @@ AddressSpace<ait>::client_freed(EventTimestamp when, ait ptr)
 		return;
 
 	expression_result<ait> chk = load(when, ptr - mkConst<ait>(8), 8);
-	client_freed_entry cf;
+	client_freed_entry<ait> cf;
 
-	cf.start = force(ptr);
-	cf.end = force(ptr + chk.lo);
+	cf.start = ptr;
+	cf.end = ptr + chk.lo;
 	cf.when = when;
-	printf("client_free(%lx, %lx)\n", cf.start, cf.end);
+	printf("client_free(%lx, %lx)\n", force(cf.start), force(cf.end));
 	freed_memory.push_back(cf);
 }
 

@@ -180,7 +180,8 @@ GetMemoryCommand<ait>::doIt(MachineState<ait> *ms)
 {
 	ait *membuf = (ait *)malloc(size * sizeof(ait));
 	try {
-		ms->addressSpace->readMemory(mkConst<ait>(addr), size, membuf, true);
+		ms->addressSpace->readMemory(mkConst<ait>(addr), size, membuf, true,
+					     ms->findThread(this->chan->currentTidQuery));
 	} catch (BadMemoryException<ait> exc) {
 		this->sendResponse("E12");
 		free(membuf);

@@ -162,7 +162,7 @@ Instruction::byte()
 {
 	unsigned long t;
 	t = 0;
-	as->readMemory(rip + len, 1, &t);
+	as->readMemory(rip + len, 1, &t, false, NULL);
 	Byte b = t;
 	emit(b);
 	return b;

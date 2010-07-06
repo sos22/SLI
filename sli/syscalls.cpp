@@ -30,7 +30,7 @@ process_memory_records(AddressSpace<ait> *addrSpace,
 		if (lw)
 			lw->append(lr, 0);
 		addrSpace->writeMemory(EventTimestamp::invalid, lrm->start, lrm->size, lrm->contents,
-				       true);
+				       true, NULL);
 		startOffset = nextOffset;
 	}
 	*endOffset = startOffset;
@@ -159,7 +159,9 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 			ait buf[sizeof(struct sigaction)];
 			addrSpace->readMemory(args[1],
 					      sizeof(struct sigaction),
-					      buf);
+					      buf,
+					      false,
+					      thr);
 			unsigned long arg0 = force(args[0]);
 			for (unsigned x = 0; x < sizeof(struct sigaction); x++)
 				((unsigned char *)&mach->signalHandlers.handlers[arg0])[x] =
@@ -299,8 +301,8 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 	switch (force(sysnr)) {
 	case __NR_open: {
 		char *path =
-			ms->addressSpace->readString(
-				thr->regs.get_reg(REGISTER_IDX(RDI)));
+			ms->addressSpace->readString(thr->regs.get_reg(REGISTER_IDX(RDI)),
+						     thr);
 		printf("Can't fake open syscall (file %s)\n",
 		       path);
 		free(path);

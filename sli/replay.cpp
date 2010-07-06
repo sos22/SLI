@@ -17,7 +17,8 @@ ThreadEvent<ait> *RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> 
 template <typename ait> ThreadEvent<ait> *
 UseFreeMemoryEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 {
-	throw UseOfFreeMemoryException(this->when, force(addr), whenFreed);
+        ms->findThread(this->when.tid)->crashed = true;
+	return NULL;
 }
 
 template <typename ait> InterpretResult

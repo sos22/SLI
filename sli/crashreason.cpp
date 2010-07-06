@@ -70,17 +70,6 @@ public:
 };
 
 static void
-dump_spare_list_idx(const std::map<ThreadId, History *> &spare_histories)
-{
-	for (std::map<ThreadId, History *>::const_iterator it = spare_histories.begin();
-	     it != spare_histories.end();
-	     it++)
-		printf("%d -> last %ld\n",
-		       it->first._tid(),
-		       it->second->last_valid_idx);
-}
-
-static void
 fixup_expression(Expression **e,
 		 std::map<ThreadId, unsigned long> &last_valid_idx,
 		 std::map<ThreadId, History *> &spare_histories,
@@ -253,11 +242,11 @@ public:
 
 	SignalEvent<abstract_interpret_value> *signal;
 	Thread<abstract_interpret_value> *thr;
-
+	UseFreeMemoryEvent<abstract_interpret_value> *uafe;
 
 private:
 	CrashReasonExtractor()
-		: thread_histories(), signal(NULL), thr(NULL)
+		: thread_histories(), signal(NULL), thr(NULL), uafe(NULL)
 	{
 	}
 public:
@@ -272,6 +261,7 @@ public:
 	void visit(HeapVisitor &hv) const {
 		hv(thr);
 		hv(signal);
+		hv(uafe);
 		for (std::map<ThreadId, History *>::const_iterator it = thread_histories.begin();
 		     it != thread_histories.end();
 		     it++)
@@ -295,6 +285,8 @@ public:
 VexAllocTypeWrapper<CrashReasonExtractor> CrashReasonExtractor::allocator;
 void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, ThreadEvent<abstract_interpret_value> *evt)
 {
+	if (uafe)
+		return;
 	if (const InstructionEvent<abstract_interpret_value> *fe =
 	    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt)) {
 		unsigned long c;
@@ -310,6 +302,12 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, Thread
 	    dynamic_cast<SignalEvent<abstract_interpret_value> *>(evt)) {
 		thr = _thr;
 		signal = es;
+	}
+
+	if (UseFreeMemoryEvent<abstract_interpret_value> *uaf =
+	    dynamic_cast<UseFreeMemoryEvent<abstract_interpret_value> *>(evt)) {
+		uafe = uaf;
+		thr = _thr;
 	}
 }
 static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
@@ -341,29 +339,34 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	   We further assume that a crash is due to a bad instruction
 	   if the faulting address matches the RIP, and bad data
 	   otherwise. */
-	assert(extr->signal);
-	assert(extr->thr->crashed);
 	Expression *res;
-	if (extr->signal->signr == 11) {
-		if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
-			res = ExpressionRip::get(extr->thr->tid, extr->getHistory(extr->thr->lastEvent),
-						 equals::get(extr->thr->regs.rip().origin,
-							     ConstExpression::get(extr->thr->regs.rip().v)),
-						 script,
-						 ptr);
-		else
-			res = ExpressionRip::get(extr->thr->tid,
-						 extr->getHistory(extr->thr->lastEvent),
-						 ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin),
-						 script,
-						 ptr);
+	if (extr->uafe) {
+		res = logicaland::get(
+			ExpressionHappensBefore::get(extr->uafe->whenFreed,
+						     extr->uafe->when),
+			equals::get(
+				extr->uafe->free_addr.origin,
+				extr->uafe->use_addr.origin));
 	} else {
-		res = ExpressionRip::get(extr->thr->tid, extr->getHistory(extr->thr->lastEvent),
-					 equals::get(extr->thr->regs.rip().origin,
-						     ConstExpression::get(extr->thr->regs.rip().v)),
-					 script,
-					 ptr);
+		assert(extr->signal);
+		assert(extr->thr->crashed);
+		if (extr->signal->signr == 11) {
+			if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
+				res = equals::get(extr->thr->regs.rip().origin,
+						  ConstExpression::get(extr->thr->regs.rip().v));
+			else
+				res = ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin);
+		} else {
+			res = equals::get(extr->thr->regs.rip().origin,
+					  ConstExpression::get(extr->thr->regs.rip().v));
+		}
 	}
+
+	res = ExpressionRip::get(extr->thr->tid,
+				 extr->getHistory(extr->thr->lastEvent),
+				 res,
+				 script,
+				 ptr);
 
 	VexGcRoot root2((void **)&res, "root2");
 	std::map<ThreadId, unsigned long> m;
@@ -427,8 +430,6 @@ int
 main(int argc, char *argv[])
 {
 	init_sli();
-
-	gdb();
 
 	LibVEX_alloc_sanity_check();
 

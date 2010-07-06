@@ -1002,7 +1002,7 @@ class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 public:
 	virtual UChar operator[](unsigned long idx) const {
 		ait v;
-		aspace->readMemory(mkConst<ait>(idx) + offset, 1, &v);
+		aspace->readMemory(mkConst<ait>(idx) + offset, 1, &v, false, NULL);
 		return force(v);
 	}
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
@@ -1116,9 +1116,12 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 				if (addrSpace->isWritable(addr.lo, size, this))
 					return StoreEvent<ait>::get(bumpEvent(ms), addr.lo, size, data);
 				EventTimestamp et;
-				if (addrSpace->isOnFreeList(force(addr.lo), force(addr.lo) + size, &et))
+				ait free_addr;
+				if (addrSpace->isOnFreeList(addr.lo, addr.lo + mkConst<ait>(size), tid, &et,
+							    &free_addr))
 					return UseFreeMemoryEvent<ait>::get(bumpEvent(ms), 
 									    addr.lo,
+									    free_addr,
 									    et);
 				else
 					return SignalEvent<ait>::get(bumpEvent(ms), 11, addr.lo);

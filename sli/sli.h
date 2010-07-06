@@ -966,30 +966,37 @@ public:
 
 template <typename ait>
 class UseFreeMemoryEvent : public ThreadEvent<ait> {
-	ait addr;
+public:
+	ait free_addr;
+	ait use_addr;
 	EventTimestamp whenFreed;
+private:
 	UseFreeMemoryEvent(EventTimestamp _when,
-			   ait _addr,
+			   ait _use_addr,
+			   ait _free_addr,
 			   EventTimestamp _whenFreed)
 		: ThreadEvent<ait>(_when),
-		  addr(_addr),
+		  free_addr(_free_addr),
+		  use_addr(_use_addr),
 		  whenFreed(_whenFreed)
 	{
 	}
 protected:
-	char *mkName() const { return my_asprintf("useFree(%d:%lx, %s, %d:%lx)",
+	char *mkName() const { return my_asprintf("useFree(%d:%lx, %s==%s, %d:%lx)",
 						  this->when.tid._tid(),
 						  this->when.idx,
-						  name_aiv(addr),
+						  name_aiv(use_addr),
+						  name_aiv(free_addr),
 						  whenFreed.tid._tid(),
 						  whenFreed.idx); }
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when,
-				     ait addr,
+				     ait use_addr,
+				     ait free_addr,
 				     EventTimestamp whenFreed)
-	{ return new UseFreeMemoryEvent<ait>(when, addr, whenFreed); }
+	{ return new UseFreeMemoryEvent<ait>(when, use_addr, free_addr, whenFreed); }
 };
 
 template <typename ait>
@@ -1687,10 +1694,11 @@ public:
 	void visit(HeapVisitor &hv) const { tmp.visit(hv); }
 };
 
+template <typename ait>
 class client_freed_entry {
 public:
-	unsigned long start;
-	unsigned long end;
+	ait start;
+	ait end;
 	EventTimestamp when;
 };
 
@@ -1703,11 +1711,13 @@ public:
 	PMap<ait> *pmap;
 	ait client_free;
 
-	bool isOnFreeList(unsigned long start, unsigned long end,
-			  EventTimestamp *when = NULL) const;
+	bool isOnFreeList(ait start, ait end,
+			  ThreadId asker,
+			  EventTimestamp *when = NULL,
+			  ait *free_addr = NULL) const;
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
-	void checkFreeList(unsigned long start, unsigned long end, EventTimestamp now);
+	void checkFreeList(ait start, ait end, ThreadId asking, EventTimestamp now);
 public:
 	void findInterestingFunctions(const VAMap::VAMapEntry *vme);
 	void findInterestingFunctions();
@@ -1722,25 +1732,26 @@ public:
 	void protectMemory(ait start, ait size, VAMap::Protection prot);
 	void populateMemory(const LogRecordMemory<ait> &rec)
 	{
-		writeMemory(EventTimestamp::invalid, rec.start, rec.size, rec.contents, true);
+		writeMemory(EventTimestamp::invalid, rec.start, rec.size, rec.contents, true, NULL);
 	}
 	void store(EventTimestamp when, ait start, unsigned size, const expression_result<ait> &val,
 		   bool ignore_protection = false,
 		   const Thread<ait> *thr = NULL);
 	void writeMemory(EventTimestamp when, ait start, unsigned size,
-			 const ait *contents, bool ignore_protection = false,
-			 const Thread<ait> *thr = NULL);
+			 const ait *contents, bool ignore_protection,
+			 const Thread<ait> *thr);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result<ait> load(EventTimestamp when, ait start, unsigned size,
 				    bool ignore_protection = false,
 				    const Thread<ait> *thr = NULL);
-	template <typename t> const t fetch(unsigned long addr);
+	template <typename t> const t fetch(unsigned long addr,
+					    Thread<ait> *thr);
 	EventTimestamp readMemory(ait start, unsigned size,
-				  ait *contents, bool ignore_protection = false,
-				  const Thread<ait> *thr = NULL,
+				  ait *contents, bool ignore_protection,
+				  const Thread<ait> *thr,
 				  ait *storeAddr = NULL);
 	bool isAccessible(ait start, unsigned size,
-			  bool isWrite, const Thread<ait> *thr = NULL);
+			  bool isWrite, const Thread<ait> *thr);
 	bool isWritable(ait start, unsigned size,
 			const Thread<ait> *thr = NULL) {
 		return isAccessible(start, size, true, thr);
@@ -1761,13 +1772,14 @@ public:
 	void dumpBrkPtr(LogWriter<ait> *lw) const;
 	void dumpSnapshot(LogWriter<ait> *lw) const;
 
-	char *readString(ait start);
+	char *readString(ait start, Thread<ait> *thr);
 
 	template <typename new_type> AddressSpace<new_type> *abstract() const;
 
 	void destruct() {}
 
-	std::vector<client_freed_entry> freed_memory;
+	typedef std::vector<client_freed_entry<ait> > freed_memory_t;
+	freed_memory_t freed_memory;
 
 	void client_freed(EventTimestamp when, ait ptr);
 
@@ -2585,6 +2597,7 @@ OP(/, divide, false)
 OP(%, modulo, false)
 OP(-, subtract, true)
 OP(>=, greaterthanequals, false)
+OP(>, greaterthan, false)
 OP(<, lessthan, false)
 OP(<=, lessthanequals, false)
 OP(==, equals, false)
@@ -3063,7 +3076,6 @@ force_linkage()
 	gdb_concrete(NULL);
 	gdb_abstract(NULL);
 }
-
 
 class UseOfFreeMemoryException : public SliException {
 public:
