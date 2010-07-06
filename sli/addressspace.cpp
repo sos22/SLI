@@ -131,10 +131,10 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	   accesses.  This isn't *entirely* valid, but it makes things
 	   so much easier that it's worth it. */
 	bool irrelevant;
-	irrelevant = (!is_stack(start) &&
-		      (!thr ||
-		       force(start) < force(thr->regs.rsp()) - 1000000 ||
-		       force(start) > force(thr->regs.rsp()) + 1000000));
+	irrelevant = (is_stack(start) ||
+		      (thr &&
+		       force(start) > force(thr->regs.rsp()) - 1000000 &&
+		       force(start) < force(thr->regs.rsp()) + 1000000));
 	if (!irrelevant) {
 		if (size <= 8) {
 			res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr, size);
