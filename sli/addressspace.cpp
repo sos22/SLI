@@ -210,7 +210,7 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 	if (thr)
 		checkFreeList(_start, _start + mkConst<ait>(size), thr->tid, EventTimestamp::invalid);
 	if (storeAddr)
-		*storeAddr = _start;
+		*storeAddr = mkConst<ait>(start);
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
