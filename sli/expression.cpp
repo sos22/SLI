@@ -252,9 +252,15 @@ Expression *plus::get(Expression *l, Expression *r)
 		if (lc == 0)
 			return r;
 		if (rIsConstant)
-			return ConstExpression::get(lc + rc);			
-	} else if (rIsConstant && rc == 0)
-		return l;
+			return ConstExpression::get(lc + rc);
+	} else if (rIsConstant) {
+		if (rc == 0)
+			return l;
+		/* Prefer constants on the left where possible. */
+		Expression *t = l;
+		l = r;
+		r = t;
+	}
 
 	binop_float_rip(plus);
 
@@ -270,6 +276,30 @@ Expression *plus::get(Expression *l, Expression *r)
 			if (c->isConstant(&cc) && cc == 0)
 				return bitwiseor::get(land, rand);
 		}
+	}
+
+	/* Rewrite x + (c + y) to c + (x + y) whenever c is a constant */
+	{
+		plus *rplus = dynamic_cast<plus *>(r);
+		unsigned long c;
+		if (rplus && rplus->l->isConstant(&c)) {
+			if (lIsConstant)
+				/* Rewrite c + (c' + y) to (c + c') +
+				 * y whenever c and c' are constant */
+				return plus::get(plus::get(l, rplus->l),
+						 rplus->r);
+			else
+				return plus::get(rplus->l,
+						 plus::get(l, rplus->r));
+		}
+	}
+	/* And (c + y) + x */
+	{
+		plus *lplus = dynamic_cast<plus *>(l);
+		unsigned long c;
+		if (lplus && lplus->l->isConstant(&c))
+			return plus::get(lplus->l,
+					 plus::get(r, lplus->r));
 	}
 
 	if (plus *ll = dynamic_cast<plus *>(l))				
@@ -439,10 +469,16 @@ Expression *bitwiseor::get(Expression *l, Expression *r)
 	{
 		bitwiseand *land = dynamic_cast<bitwiseand *>(l);
 		bitwiseand *rand = dynamic_cast<bitwiseand *>(r);
-		if (land && rand && land->l == rand->l)
-			return bitwiseand::get(land->l,
-					       bitwiseor::get(land->r,
-							      rand->r));
+		if (land && rand) {
+			if (land->l == rand->l)
+				return bitwiseand::get(land->l,
+						       bitwiseor::get(land->r,
+								      rand->r));
+			if (land->r == rand->r)
+				return bitwiseand::get(bitwiseor::get(land->l,
+								      land->l),
+						       land->r);
+		}
 	}
 	
 	if (bitwiseor *ll = dynamic_cast<bitwiseor *>(l))
@@ -589,6 +625,14 @@ Expression *equals::get(Expression *l, Expression *r)
 	unsigned long lc, rc;
 	bool lIsConstant = l->isConstant(&lc);
 	bool rIsConstant = r->isConstant(&rc);
+	if (lIsConstant && !rIsConstant) {
+		/* Prefer X == c to c == X, where c is a constant and
+		 * X isn't. */
+		Expression *t = l;
+		l = r;
+		r = t;
+	}
+
 	if (rIsConstant) {
 		if (lIsConstant)
 			return ConstExpression::get(lc == rc);
@@ -605,6 +649,16 @@ Expression *equals::get(Expression *l, Expression *r)
 				else
 					return logicalnot::get(tc->cond);
 			}
+		}
+
+		/* Rewrite (c + X) == c', where c and c' constants, to
+		 * X == c' - c */
+		plus *lplus = dynamic_cast<plus *>(l);
+		if (lplus) {
+			unsigned long c;
+			if (lplus->l->isConstant(&c))
+				return equals::get(lplus->r,
+						   ConstExpression::get(rc - c));
 		}
 	}
 

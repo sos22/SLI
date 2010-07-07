@@ -177,6 +177,10 @@ calculate_condition_flags_XXX(ait op,
 			      ait &sf,
 			      ait &of)
 {
+	sanity_check_ait(op);
+	sanity_check_ait(dep1);
+	sanity_check_ait(dep2);
+	sanity_check_ait(ndep);
 	cf = zf = sf = of = mkConst<ait>(0);
 
 	switch (force(op)) {
@@ -213,8 +217,10 @@ calculate_condition_flags_XXX(ait op,
 		do {							\
 			ait res;					\
 			res = (dep1 - dep2) & MASK(bits);		\
+			sanity_check_ait(res);				\
 			cf = (dep1 & MASK(bits)) < (dep2 & MASK(bits));	\
 			zf = (res == mkConst<ait>(0));			\
+			sanity_check_ait(zf);				\
 			sf = res >> bits;				\
 			of = ( (dep1 ^ dep2) &				\
 			       (dep1 ^ res) ) >> bits;			\
@@ -271,6 +277,11 @@ calculate_condition_flags_XXX(ait op,
 	sf &= mkConst<ait>(1);
 	zf &= mkConst<ait>(1);
 	cf &= mkConst<ait>(1);
+
+	sanity_check_ait(of);
+	sanity_check_ait(sf);
+	sanity_check_ait(zf);
+	sanity_check_ait(cf);
 }
 
 template<typename ait>
@@ -1202,13 +1213,17 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result<ait> guard =
 						eval_expression(stmt->Ist.Exit.guard);
+					sanity_check_ait(currentControlCondition);
+					sanity_check_ait(guard.lo);
 					if (force(!guard.lo)) {
 						currentControlCondition =
 							currentControlCondition && !guard.lo;
+						sanity_check_ait(currentControlCondition);
 						break;
 					}
 					currentControlCondition =
 						currentControlCondition && !!guard.lo;
+					sanity_check_ait(currentControlCondition);
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
@@ -1216,6 +1231,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 					       force(regs.get_reg(REGISTER_IDX(EMWARN))));
 				}
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
+				sanity_check_ait(currentControlCondition);
 				regs.set_reg(REGISTER_IDX(RIP),
 					     ternary(currentControlCondition,
 						     mkConst<ait>(stmt->Ist.Exit.dst->Ico.U64),
@@ -1240,6 +1256,8 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 		{
 			struct expression_result<ait> next_addr =
 				eval_expression(currentIRSB->next);
+			sanity_check_ait(currentControlCondition);
+			sanity_check_ait(next_addr.lo);
 			regs.set_reg(REGISTER_IDX(RIP),
 				     ternary(currentControlCondition,
 					     next_addr.lo,
