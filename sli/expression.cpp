@@ -441,7 +441,9 @@ Expression *rshiftarith::get(Expression *l, Expression *r)
 
 bool bitwiseor::isLogical() const { return l->isLogical() && r->isLogical(); }
 Expression *bitwiseor::get(Expression *l, Expression *r)			
-{									
+{
+	if (l == r)
+		return l;
 	unsigned long lc, rc;						
 	bool lIsConstant = l->isConstant(&lc);
 	bool rIsConstant = r->isConstant(&rc);
