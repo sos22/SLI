@@ -9,6 +9,7 @@
    that there usually aren't very many GC roots, and they won't
    usually cover very many things in the heap, so the GC pass is very
    cheap, and we can cover it out of the much simpler allocator. */
+#define NDEBUG
 #include <valgrind/memcheck.h>
 
 #include <stdio.h>
