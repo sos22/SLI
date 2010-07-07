@@ -136,14 +136,15 @@ public:
 	Expression *map(ternarycondition *tc)
 	{
 		Expression *c = tc->cond->map(*this),
-			*t = tc->t->map(*this),
-			*f = tc->f->map(*this);
+			*t, *f;
+		if (!c)
+			return NULL;
+		t = tc->t->map(*this);
+		f = tc->f->map(*this);
 		if (!t)
 			return f;
 		if (!f)
 			return t;
-		if (!c)
-			return NULL;
 		return logicalor::get(logicaland::get(c, t),
 				      logicaland::get(logicalnot::get(c), f))->map(*this);
 	}
