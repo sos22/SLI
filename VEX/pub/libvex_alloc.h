@@ -18,16 +18,23 @@ public:
  */
 typedef
    struct _VexAllocType {
-      Int nbytes;
+      unsigned long nbytes;
       void (*gc_visit)(const void *, HeapVisitor &);
       void (*destruct)(void *);
       const char *name;
       const char *(*get_name)(const void *);
-      unsigned total_allocated;
+      unsigned long total_allocated;
       unsigned nr_allocated;
       struct _VexAllocType *next;
    }
    VexAllocType;
+
+struct libvex_allocation_site {
+	unsigned long nr_bytes;
+	const char *file;
+	unsigned line;
+	unsigned flags;
+};
 
 #define DEFINE_VEX_TYPE(t) VexAllocType __vex_type_ ## t = { sizeof(t), NULL, NULL, #t }
 #define __DEFINE_VEX_TYPE_NO_DESTRUCT(__t, __visit)			\
@@ -56,12 +63,19 @@ typedef
 struct libvex_alloc_type;
 
 extern struct libvex_alloc_type *__LibVEX_Alloc(VexAllocType *t);
-extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned len);
+extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned long len);
 extern void LibVEX_free(const void *_ptr);
-extern void *__LibVEX_Alloc_Bytes(Int nbytes);
-#define LibVEX_Alloc_Bytes(_n) __LibVEX_Alloc_Bytes(_n)
-extern void *LibVEX_Alloc_Sized(VexAllocType *t, unsigned size);
-extern void *LibVEX_realloc(void *base, unsigned new_size);
+extern void *__LibVEX_Alloc_Bytes(unsigned long nbytes,
+				  struct libvex_allocation_site *las);
+#define LibVEX_Alloc_Bytes(_n)						\
+	({								\
+		static libvex_allocation_site __las = {0, __FILE__,	\
+						       __LINE__};	\
+		__LibVEX_Alloc_Bytes(_n, &__las);			\
+	})
+
+extern void *LibVEX_Alloc_Sized(VexAllocType *t, unsigned long size);
+extern void *LibVEX_realloc(void *base, unsigned long new_size);
 
 void vexRegisterGCRoot(void **, const char *name);
 void vexUnregisterGCRoot(void **);

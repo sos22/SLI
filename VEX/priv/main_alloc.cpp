@@ -11,7 +11,7 @@
    cheap, and we can cover it out of the much simpler allocator. */
 #define NDEBUG
 #include <valgrind/memcheck.h>
-
+#include <sys/mman.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -32,20 +32,21 @@ void dump_heap_usage(void);
 #define VALGRIND_CHECK_MEM_IS_DEFINED(x, y)
 
 /* The main arena. */
-#define N_TEMPORARY_BYTES 900000000
-static char temporary[N_TEMPORARY_BYTES] __attribute__((aligned(8)));
-static unsigned heap_used;
+#define N_TEMPORARY_BYTES (2ul<<30)
+static char *temporary;
+static unsigned long heap_used;
 
 static VexAllocType *headType;
 
 /* Each allocation in the arena is prefixed by an allocation header. */
 struct alloc_header {
   VexAllocType *type; /* Or NULL for free blocks */
-  unsigned size; /* Includes header */
-  unsigned flags;
+  unsigned long size; /* Includes header */
+  unsigned long flags;
 #define ALLOC_FLAG_GC_MARK 1
 #define ALLOC_FLAG_HAS_WEAK_TABLE 2
-#define ALLOC_FLAG_WEAK_TABLE_MASK (~3)
+#define ALLOC_FLAG_WEAK_TABLE_MASK (~(3ul))
+  struct libvex_allocation_site *site;
 };
 
 struct weak_table {
@@ -57,7 +58,7 @@ struct weak_table {
   void ownerDied();
 };
 
-static alloc_header *const alloc_header_terminator = (alloc_header *)(temporary + N_TEMPORARY_BYTES);
+static alloc_header *alloc_header_terminator;
 
 static void visit_ptr_array(const void *ths, HeapVisitor &visitor);
 static VexAllocType byte_alloc_type = { -1, 0, 0, "<bytes>" };
@@ -74,7 +75,7 @@ static const char *gc_root_names[NR_GC_ROOTS];
    allocations. */
 static struct alloc_header *allocation_cursor;
 
-static void *alloc_bytes(VexAllocType *type, unsigned size);
+static void *alloc_bytes(VexAllocType *type, unsigned long size);
 
 static void *
 header_to_alloc(struct alloc_header *ah)
@@ -110,7 +111,6 @@ header_to_weak_table(alloc_header *h)
     w->nr_refs = 0;
     w->outlineRefs = NULL;
     unsigned long off = (unsigned long)w - (unsigned long)temporary;
-    assert(off == (unsigned)off);
     assert(!(off & ~ALLOC_FLAG_WEAK_TABLE_MASK));
     h->flags &= ~ALLOC_FLAG_WEAK_TABLE_MASK;
     h->flags |= off | ALLOC_FLAG_HAS_WEAK_TABLE;
@@ -155,10 +155,10 @@ GcVisitor::visitWeakTable(weak_table *w)
 }
 
 static void
-poison(void *start, unsigned nr_bytes, unsigned pattern)
+poison(void *start, unsigned long nr_bytes, unsigned pattern)
 {
 #ifndef NDEBUG
-  unsigned x;
+  unsigned long x;
   for (x = 0; x < nr_bytes / 4; x++)
     ((unsigned *)start)[x] = pattern;
 #endif
@@ -189,6 +189,8 @@ LibVEX_free(const void *_ptr)
     release_weak_table(h);
   if (h->type->destruct)
     h->type->destruct(ptr);
+  if (h->site)
+    h->site->nr_bytes -= h->size;
 
   poison(h + 1, h->size - sizeof(*h), 0xa9b8c7d6);
   h->type = NULL;
@@ -239,6 +241,8 @@ LibVEX_gc(void)
 	  release_weak_table(h);
 	if (h->type->destruct)
 	  h->type->destruct(header_to_alloc(h));
+	if (h->site)
+	  h->site->nr_bytes -= h->size;
 	poison(h + 1, h->size - sizeof(*h), 0xa1b2c3d4);
 	h->type = NULL;
 	VALGRIND_MAKE_MEM_NOACCESS(h + 1, h->size - sizeof(*h));
@@ -296,11 +300,11 @@ visit_ptr_array(const void *ths, HeapVisitor &visitor)
 }
 
 static void *
-alloc_bytes(VexAllocType *type, unsigned size)
+alloc_bytes(VexAllocType *type, unsigned long size)
 {
   struct alloc_header *cursor;
   struct alloc_header *next;
-  unsigned old_size;
+  unsigned long old_size;
   void *res;
 
   size += sizeof(struct alloc_header);
@@ -361,7 +365,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
   }
 
   /* Consider splitting the block */
-  if (cursor->size >= size + 32) {
+  if (cursor->size >= size + 32ul) {
     /* Do split. */
     old_size = cursor->size;
     cursor->size = size;
@@ -373,6 +377,7 @@ alloc_bytes(VexAllocType *type, unsigned size)
     next->size = old_size - size;
     vassert(next->size != 0);
     next->flags = 0;
+    next->site = NULL;
   }
 
   cursor->type = type;
@@ -390,13 +395,17 @@ alloc_bytes(VexAllocType *type, unsigned size)
 
 /* Exported to library client. */
 void *
-__LibVEX_Alloc_Bytes(Int nbytes)
+__LibVEX_Alloc_Bytes(unsigned long nbytes, struct libvex_allocation_site *site)
 {
-  return alloc_bytes(&byte_alloc_type, nbytes);
+  void *res = alloc_bytes(&byte_alloc_type, nbytes);
+  struct alloc_header *ah = alloc_to_header(res);
+  ah->site = site;
+  site->nr_bytes += ah->size;
+  return res;
 }
 
 void *
-LibVEX_Alloc_Sized(VexAllocType *t, unsigned nbytes)
+LibVEX_Alloc_Sized(VexAllocType *t, unsigned long nbytes)
 {
   return alloc_bytes(t, nbytes);
 }
@@ -408,11 +417,11 @@ __LibVEX_Alloc(VexAllocType *t)
 }
 
 void *
-LibVEX_realloc(void *ptr, unsigned new_size)
+LibVEX_realloc(void *ptr, unsigned long new_size)
 {
   struct alloc_header *ah = alloc_to_header(ptr);
   struct alloc_header *next;
-  unsigned old_size;
+  unsigned long old_size;
   void *newptr;
 
   LibVEX_alloc_sanity_check();
@@ -423,6 +432,9 @@ LibVEX_realloc(void *ptr, unsigned new_size)
 
   /* Can only resize byte allocations */
   vassert(ah->type == &byte_alloc_type || ah->type == &weak_table_type);
+
+  if (ah->site)
+    ah->site->nr_bytes -= ah->size;
 
   /* Enlarge if possible */
   while (new_size > ah->size) {
@@ -448,6 +460,7 @@ LibVEX_realloc(void *ptr, unsigned new_size)
     next->type = NULL;
     next->size = old_size - new_size;
     next->flags = 0;
+    next->site = NULL;
     heap_used -= old_size - new_size;
     poison(next + 1, next->size - sizeof(*next), 0xa1b2c3d4);
     VALGRIND_MAKE_MEM_NOACCESS(next + 1, next->size - sizeof(*next));
@@ -456,6 +469,8 @@ LibVEX_realloc(void *ptr, unsigned new_size)
   /* Good enough? */
   if (new_size <= ah->size) {
     LibVEX_alloc_sanity_check();
+    if (ah->site)
+      ah->site->nr_bytes += ah->size;
     return ptr;
   }
 
@@ -471,11 +486,16 @@ LibVEX_realloc(void *ptr, unsigned new_size)
   LibVEX_free(ptr);
 
   LibVEX_alloc_sanity_check();
+
+  ah = alloc_to_header(newptr);
+  if (ah->site)
+    ah->site->nr_bytes += ah->size;
+
   return newptr;
 }
 
 struct libvex_alloc_type *
-__LibVEX_Alloc_Ptr_Array(unsigned len)
+__LibVEX_Alloc_Ptr_Array(unsigned long len)
 {
   struct alloc_header *ah;
   void **res;
@@ -501,29 +521,14 @@ vexRegisterGCRoot(void **w, const char *name)
   nr_gc_roots++;
 }
 
-static void
-my_memmove(void *dest, const void *src, unsigned n)
-{
-  int x;
-
-  if (dest < src) {
-    for (x = 0; x < (int)n; x++) {
-      ((char *)dest)[x] = ((const char *)src)[x];
-    }
-  } else {
-    for (x = n - 1; x >= 0; x++)
-      ((char *)dest)[x] = ((const char *)src)[x];
-  }
-}
-
 void
 vexUnregisterGCRoot(void **w)
 {
   unsigned x;
   for (x = 0; x < nr_gc_roots; x++) {
     if (gc_roots[x] == w) {
-      my_memmove(gc_roots + x, gc_roots + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_roots[0]));
-      my_memmove(gc_root_names, gc_root_names + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_root_names[0]));
+      memmove(gc_roots + x, gc_roots + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_roots[0]));
+      memmove(gc_root_names, gc_root_names + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_root_names[0]));
       nr_gc_roots--;
       return;
     }
@@ -637,7 +642,7 @@ dump_heap_usage(void)
 
   printf("Live:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
-    printf("%8d\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
+    printf("%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
   printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
   visitor.heap_used = 0;
   visitor.nr_allocations = 0;
@@ -655,8 +660,21 @@ dump_heap_usage(void)
 
   printf("\nDragging:\n");
   for (cursor = headType; cursor; cursor = cursor->next)
-    printf("%8d\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
+    printf("%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
   printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
+
+  printf("\nByte allocation sites:\n");
+  for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
+    if (!h->site || h->site->flags)
+      continue;
+    printf("%8ld\t\t%s:%d\n", h->site->nr_bytes, h->site->file, h->site->line);
+    h->site->flags = 1;
+  }
+  for (h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
+    if (!h->site)
+      continue;
+    h->site->flags = 0;
+  }
 }
 
 void
@@ -666,7 +684,7 @@ dump_heap_pattern(void)
   for (alloc_header *h = first_alloc_header(); h != alloc_header_terminator; h = next_alloc_header(h)) {
     if (h->type && !h->type->name)
       h->type->name = h->type->get_name(h + 1);
-    fprintf(f, "%p %80s %d\n", h, h->type ? h->type->name : "<free>", h->size);
+    fprintf(f, "%p %80s %ld\n", h, h->type ? h->type->name : "<free>", h->size);
   }
   fclose(f);
 }
@@ -690,11 +708,15 @@ vexInitHeap(void)
   struct alloc_header *entire_arena_hdr;
 
   vassert(!done_init);
+  temporary = (char *)mmap(NULL, N_TEMPORARY_BYTES, PROT_READ|PROT_WRITE,
+			   MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+  alloc_header_terminator = (alloc_header *)(temporary + N_TEMPORARY_BYTES);
   poison(temporary, N_TEMPORARY_BYTES, 0xa1b2c3d4);
   entire_arena_hdr = first_alloc_header();
   entire_arena_hdr->type = NULL;
   entire_arena_hdr->size = N_TEMPORARY_BYTES;
   entire_arena_hdr->flags = 0;
+  entire_arena_hdr->site = NULL;
   allocation_cursor = entire_arena_hdr;
   done_init = true;
 }
