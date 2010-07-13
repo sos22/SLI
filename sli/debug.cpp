@@ -595,3 +595,12 @@ gdb(void)
 		sleep(1);
 	}
 }
+
+void RipHistogram::dump() {
+	for (std::map<void *, unsigned>::iterator it = m.begin();
+	     it != m.end();
+	     it++)
+		printf("%p\t%d\n", it->first, it->second);
+}
+
+RipHistogram __caller_histogram;

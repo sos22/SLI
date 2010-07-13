@@ -3098,5 +3098,16 @@ public:
 	}
 };
 
+class RipHistogram {
+	std::map<void *, unsigned> m;
+public:
+	void dump();
+	~RipHistogram() { dump(); }
+	void click(void *k) { m[k]++; }
+};
+
+#define CALLER_HISTOGRAM(depth)						\
+	extern RipHistogram __caller_histogram;				\
+	__caller_histogram.click(__builtin_return_address(depth + 1))
 
 #endif /* !SLI_H__ */
