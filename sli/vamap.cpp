@@ -307,9 +307,9 @@ void VAMap::addTranslation(unsigned long start,
 				vme->pa = (PhysicalAddress *)LibVEX_realloc(vme->pa,
 									    sizeof(vme->pa[0]) *
 									    dchunk(start, vme->end));
-				memmove(vme->pa + dchunk(start, vme->start) * sizeof(vme->pa[0]),
+				memmove(vme->pa + dchunk(start, vme->start),
 					vme->pa,
-					sizeof(vme->pa[0]) * dchunk(start, vme->end));
+					sizeof(vme->pa[0]) * dchunk(vme->start, vme->end));
 				vme->pa[0] = pa;
 				vme->start = start;
 				return;
