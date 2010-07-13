@@ -14,7 +14,7 @@ MemTracePool<ait>::MemTracePool(MachineState<ait> *base_state, ThreadId ignoredT
 		MachineState<ait> *ms = base_state->dupeSelf();
 		Interpreter<ait> i(ms);
 		MemoryTrace<ait> *v;
-		i.getThreadMemoryTrace(tid, &v, 10000);
+		i.getThreadMemoryTrace(tid, &v, 1000000);
 		content[tid] = v;
 	}
 }

@@ -1287,6 +1287,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 
 		InterpretResult res = evt->fake(currentState);
 		if (res != InterpretResultContinue) {
+			printf("Stop memory trace because can't fake %s\n", evt->name());
 			return res;
 		}
 		if (LoadEvent<ait> *lr = dynamic_cast<LoadEvent <ait> * > (evt)) {

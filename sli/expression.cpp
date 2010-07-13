@@ -780,7 +780,7 @@ Relevance alias::relevance(const EventTimestamp &ev,
 			   Relevance lowThresh,
 			   Relevance highThresh)
 {
-	return l->relevance(ev, lowThresh + 100, highThresh) - 100;
+	return l->relevance(ev, lowThresh + 1000000, highThresh) - 1000000;
 }
 Expression *alias::refine(const MachineState<abstract_interpret_value> *ms,
 			  LogReader<abstract_interpret_value> *lf,

@@ -65,6 +65,8 @@ Explorer *Explorer::init(std::map<ThreadId, unsigned long> *thresholds, Explorat
 
 bool Explorer::advance()
 {
+	LibVEX_gc();
+
 	printf("%d gray, %d good, %d bad.\n", grayStates->size(), goodStates->size(), badStates->size());
 	if (grayStates->size() == 0 ||
 	    (goodStates->size() >= 30 &&
@@ -83,14 +85,16 @@ bool Explorer::advance()
 
 	/* Check for threads hitting their thresholds. */
 	bool good = true;
-	for (unsigned x = 0;
-	     good && x < basis->ms->threads->size();
-	     x++) {
-		Thread<unsigned long> *thr = basis->ms->threads->index(x);
-		if (thr->nrAccesses < (*successThresholds)[thr->tid]) {
-			good = false;
-		} else {
-			thr->cannot_make_progress = true;
+	if (!basis->ms->exitted) {
+		for (unsigned x = 0;
+		     good && x < basis->ms->threads->size();
+		     x++) {
+			Thread<unsigned long> *thr = basis->ms->threads->index(x);
+			if (thr->nrAccesses < (*successThresholds)[thr->tid]) {
+				good = false;
+			} else {
+				thr->cannot_make_progress = true;
+			}
 		}
 	}
 
@@ -104,7 +108,7 @@ bool Explorer::advance()
 	bool stopped = true;
 	for (unsigned x = 0; stopped && x < basis->ms->threads->size(); x++) {
 		Thread<unsigned long> *thr = basis->ms->threads->index(x);
-		if (!thr->cannot_make_progress)
+		if (thr->runnable())
 			stopped = false;
 	}
 	if (stopped) {
@@ -234,8 +238,7 @@ main(int argc, char *argv[])
 		err(1, "opening %s", argv[1]);
 	VexGcRoot((void **)&lf, "lf");
 
-	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
-	VexGcRoot((void **)&ms_base, "ms_base");
+	VexPtr<MachineState<unsigned long> > ms_base(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr));
 
 	std::map<ThreadId, unsigned long> thresholds;
 	{

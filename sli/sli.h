@@ -230,7 +230,7 @@ public:
 	Relevance(EventTimestamp ev, EventTimestamp to) {
 		long delta = ev.total_timestamp - to.total_timestamp;
 		if (delta > 0) {
-			irrelevance = (delta * delta) / 10;
+			irrelevance = (delta * delta) / 10 + delta;
 			if (irrelevance < 0)
 				irrelevance = 0;
 		} else {
@@ -424,7 +424,7 @@ public:
 
 	EventTimestamp lastEvent;
 
-	bool runnable() const { return !exitted && !crashed && !cannot_make_progress && !blocked; }
+	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
 	void futexBlock(abst_int_type fba) { printf("%d: block\n", tid._tid()); blocked = true; futex_block_address = fba; }
 	void futexUnblock() { printf("%d: unblocked\n", tid._tid()); blocked = false; }
 
@@ -2132,8 +2132,9 @@ public:
 			   EventTimestamp ev) { return this; }
 
 	Relevance relevance(const EventTimestamp &ev, Relevance, Relevance) {
-		return Relevance(Relevance(before, ev),
-				 Relevance(after, ev));
+		/* happens-before relations can't be refined, so their
+		   relevance kind of doesn't matter. */
+		return Relevance::irrelevant;
 	}
 	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
 	{
@@ -2203,9 +2204,11 @@ public:
 		if (r >= high_thresh)
 			return r;
 		return Relevance(
-			Relevance(val->relevance(ev, r + 1, high_thresh),
-				  addr->relevance(ev, r + 1, high_thresh)),
-			storeAddr->relevance(ev, r + 1, high_thresh));
+			r,
+			Relevance(
+				Relevance(val->relevance(ev, r + 1, high_thresh),
+					  addr->relevance(ev, r + 1, high_thresh)),
+				storeAddr->relevance(ev, r + 1, high_thresh)));
 	}
 	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
 	{
@@ -2772,7 +2775,7 @@ public:
 		Relevance r = Relevance(condition->relevance(ev, low_thresh, high_thresh),
 					Relevance(when, ev));
 		if (parent)
-			r = Relevance(parent->relevance(ev, r + 100, high_thresh) - 100,
+			r = Relevance(parent->relevance(ev, r + 10, high_thresh) - 10,
 				      r);
 		return r;
 	}

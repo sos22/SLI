@@ -1,4 +1,5 @@
 #include <deque>
+#include <set>
 
 #include "sli.h"
 
@@ -468,31 +469,52 @@ ExpressionRip::refineHistory(const MachineState<abstract_interpret_value> *ms,
 			     const std::map<ThreadId, unsigned long> &validity,
 			     EventTimestamp ev)
 {
-	std::map<ThreadId, unsigned long> newValidity(validity);
-	newValidity[tid] = history->last_valid_idx;
-	bool subCondProgress = false;
-	for (History *hs = history;
-	     hs != NULL;
-	     hs = hs->parent) {
-		newValidity[tid] = hs->last_valid_idx;
-		Expression *newCond = hs->condition->refine(ms, lf, ptr, &subCondProgress,
-							    newValidity, ev);
+	std::set<History *> unrefinable;
+
+	while (1) {
+		History *hs = history;
+
+		while (hs && unrefinable.count(hs))
+			hs = hs->parent;
+		if (!hs) {
+			/* Cannot refine history */
+			return NULL;
+		}
+
+		History *mostRelevantEntry = hs;
+		Relevance mostRelevantRelevance = hs->condition->relevance(ev, Relevance::irrelevant, Relevance::perfect);
+		hs = hs->parent;
+		while (hs) {
+			Relevance thisRelevance = hs->condition->relevance(ev, Relevance::irrelevant, Relevance::perfect);
+			if (thisRelevance > mostRelevantRelevance) {
+				mostRelevantRelevance = thisRelevance;
+				mostRelevantEntry = hs;
+			}
+			hs = hs->parent;
+		}
+
+		std::map<ThreadId, unsigned long> newValidity(validity);
+		newValidity[tid] = mostRelevantEntry->last_valid_idx;
+		bool subCondProgress = false;
+		Expression *newCond = mostRelevantEntry->condition->refine(ms, lf, ptr, &subCondProgress,
+									   newValidity, ev);
 		if (subCondProgress) {
 			Expression *res = ExpressionRip::get(
 				tid,
 				history->dupeWithParentReplace(
-					hs,
+					mostRelevantEntry,
 					new History(newCond,
-						    hs->last_valid_idx,
-						    hs->when,
-						    hs->rips,
-						    hs->parent)),
+						    mostRelevantEntry->last_valid_idx,
+						    mostRelevantEntry->when,
+						    mostRelevantEntry->rips,
+						    mostRelevantEntry->parent)),
 				cond,
 				model_execution,
 				model_exec_start);
 			considerPotentialFixes(res);
 			return res;
 		}
+		unrefinable.insert(mostRelevantEntry);
 	}
 
 	return NULL;

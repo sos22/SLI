@@ -24,6 +24,7 @@ UseFreeMemoryEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
 template <typename ait> InterpretResult
 UseFreeMemoryEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {
+        ms->findThread(this->when.tid)->crashed = true;
 	if (lr)
 		*lr = NULL;
 	return InterpretResultCrash;
