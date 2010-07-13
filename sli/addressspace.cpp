@@ -378,7 +378,9 @@ bool AddressSpace<ait>::extendStack(unsigned long ptr, unsigned long rsp)
 	if (!flags.expandsDown)
 		return false;
 
-	allocateMemory(mkConst<ait>(ptr & PAGE_MASK), mkConst<ait>(va), prot, flags);
+	printf("Extending stack from %lx to %lx\n", ptr, va);
+	ptr &= PAGE_MASK;
+	allocateMemory(mkConst<ait>(ptr), mkConst<ait>(va - ptr), prot, flags);
 	return true;
 }
 
