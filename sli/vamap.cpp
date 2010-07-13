@@ -2,6 +2,10 @@
 
 #include "sli.h"
 
+#define TRACE_VAMAP_LOOKUP 1
+#define TRACE_VAMAP_CHANGE 2
+#define TRACE_VAMAP_CHANGE_DETAILS 4
+
 #ifndef TRACE_VAMAP
 #define TRACE_VAMAP 0
 #endif
@@ -105,7 +109,7 @@ bool VAMap::translate(unsigned long va,
 		      Protection *prot,
 		      AllocFlags *alf) const
 {
-#if TRACE_VAMAP
+#if TRACE_VAMAP & TRACE_VAMAP_LOOKUP
 	printf("%p: Translate %lx\n", this, va);
 #endif
 	if (parent)
@@ -196,7 +200,7 @@ bool VAMap::translate(unsigned long va,
 			}
 		}
 	}
-#if TRACE_VAMAP
+#if TRACE_VAMAP & TRACE_VAMAP_LOOKUP
 	printf("%p, Translates to %lx\n", this,
 	       root->pa[(va - root->start) / MEMORY_CHUNK_SIZE]._pa);
 #endif
@@ -277,7 +281,7 @@ void VAMap::addTranslation(unsigned long start,
 			   Protection prot,
 			   AllocFlags alf)
 {
-#if TRACE_VAMAP
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE
 	printf("%p: Add translation %lx -> %lx (%d,%d,%d,%d)\n", this, start, pa._pa,
 	       prot.readable, prot.writable, prot.executable,
 	       alf.expandsDown);
@@ -289,6 +293,9 @@ void VAMap::addTranslation(unsigned long start,
 	unsigned long end = start + MEMORY_CHUNK_SIZE;
 
 	if (!root) {
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE_DETAILS
+		printf("%p, new root\n", this);
+#endif
 		PhysicalAddress *newPas =
 			(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
 		*newPas = pa;
@@ -304,6 +311,10 @@ void VAMap::addTranslation(unsigned long start,
 		/* Try to merge with an existing node. */
 		if (prot == vme->prot && alf == vme->alf) {
 			if (end == vme->start) {
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE_DETAILS
+				printf("%p, merge before with %lx:%lx\n", this,
+				       vme->start, vme->end);
+#endif
 				vme->pa = (PhysicalAddress *)LibVEX_realloc(vme->pa,
 									    sizeof(vme->pa[0]) *
 									    dchunk(start, vme->end));
@@ -315,6 +326,10 @@ void VAMap::addTranslation(unsigned long start,
 				return;
 			}
 			if (start == vme->end) {
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE_DETAILS
+				printf("%p, merge after with %lx:%lx\n", this,
+				       vme->start, vme->end);
+#endif
 				vme->pa = (PhysicalAddress *)LibVEX_realloc(vme->pa,
 									    sizeof(vme->pa[0]) *
 									    dchunk(vme->start, end));
@@ -330,6 +345,10 @@ void VAMap::addTranslation(unsigned long start,
 			if (vme->prev) {
 				vme = vme->prev;
 			} else {
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE_DETAILS
+				printf("%p, new before %lx:%lx\n", this,
+				       vme->start, vme->end);
+#endif
 				PhysicalAddress *newPas =
 					(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
 				*newPas = pa;
@@ -342,6 +361,10 @@ void VAMap::addTranslation(unsigned long start,
 			if (vme->succ) {
 				vme = vme->succ;
 			} else {
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE_DETAILS
+				printf("%p, new after %lx:%lx\n", this,
+				       vme->start, vme->end);
+#endif
 				PhysicalAddress *newPas =
 					(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
 				*newPas = pa;
@@ -360,7 +383,7 @@ bool VAMap::protect(unsigned long start, unsigned long size, Protection prot)
 	VAMapEntry *vme;
 	unsigned long end = start + size;
 
-#if TRACE_VAMAP
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE
 	printf("%p: Protect %lx:%lx -> %d.%d.%d\n", this, start, end,
 	       prot.readable, prot.writable, prot.executable);
 #endif
@@ -418,7 +441,7 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 	unsigned long end = start + size;
 	VAMapEntry **pprev;
 
-#if TRACE_VAMAP
+#if TRACE_VAMAP & TRACE_VAMAP_CHANGE
 	printf("%p: Unmap %lx:%lx\n", this, start, end);
 #endif
 	pprev = &root;
@@ -443,21 +466,41 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 			unmap(e, end - e);
 			return;
 		} else if (start != vme->start) {
+#if TRACE_VAMAP & TRACE_VAMP_CHANGE_DETAILS
+			printf("%p, split %lx:%lx at %lx\n",
+			       this, vme->start, vme->end, start);
+#endif
 			vme->split(start);
 		} else if (end != vme->end) {
+#if TRACE_VAMAP & TRACE_VAMP_CHANGE_DETAILS
+			printf("%p, split %lx:%lx at %lx\n",
+			       this, vme->start, vme->end, end);
+#endif
 			vme->split(end);
 		} else {
 			/* This node of the tree must be killed.
 			   Promote one of our children to the right
 			   place. */
 
+#if TRACE_VAMAP & TRACE_VAMP_CHANGE_DETAILS
+			printf("%p, kill %lx:%lx\n",
+			       this, vme->start, vme->end);
+#endif
 			/* Easy cases: no children or only one child,
 			   so just promote the other one. */
 			if (!vme->prev) {
+#if TRACE_VAMAP & TRACE_VAMP_CHANGE_DETAILS
+				printf("%p, promote successor\n",
+				       this);
+#endif
 				*pprev = vme->succ;
 				return;
 			}
 			if (!vme->succ) {
+#if TRACE_VAMAP & TRACE_VAMP_CHANGE_DETAILS
+				printf("%p, promote predecessor\n",
+				       this);
+#endif
 				*pprev = vme->prev;
 				return;
 			}
@@ -466,6 +509,10 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 			   to promote. */
 			VAMapEntry *newSucc;
 			newSucc = vme->succ->promoteSmallest();
+#if TRACE_VAMAP & TRACE_VAMP_CHANGE_DETAILS
+			printf("%p, promote %p\n",
+			       this, newSucc);
+#endif
 			assert(!newSucc->prev);
 			newSucc->prev = vme->prev;
 			*vme = *newSucc;
