@@ -48,6 +48,11 @@ handle_clone(AddressSpace<ait> *addrSpace,
 	     ait set_tls,
 	     unsigned pid)
 {
+	if (force(flags == mkConst<ait>(CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD))) {
+		/* Simple fork() -> don't need to do anything */
+		return;
+	}
+
 	if (force(flags != mkConst<ait>((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
 					 CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
 					 CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)))) {
@@ -125,6 +130,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_fstat: /* 5 */
 		break;
+	case __NR_poll: /* 7 */
+		break;
 	case __NR_lseek: /* 8 */
 		break;
 	case __NR_mmap: { /* 9 */
@@ -180,9 +187,31 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		   things will be handled by memory records, so we can
 		   pretty much ignore these. */		   
 		break;
+	case __NR_writev: /* 20 */
+		break;
 	case __NR_access: /* 21 */
 		break;
+	case __NR_pipe: /* 22 */
+		break;
 	case __NR_getpid: /* 39 */
+		break;
+	case __NR_socket: /* 41 */
+		break;
+	case __NR_connect: /* 42 */
+		break;
+	case __NR_accept: /* 43 */
+		break;
+	case __NR_sendto: /* 44 */
+		break;
+	case __NR_recvmsg: /* 47 */
+		break;
+	case __NR_bind: /* 49 */
+		break;
+	case __NR_listen: /* 50 */
+		break;
+	case __NR_getsockname: /* 51 */
+		break;
+	case __NR_setsockopt: /* 54 */
 		break;
 	case __NR_clone: /* 56 */
 		if (!isErrnoSysres(force(lrs->res)))
@@ -196,8 +225,10 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 				     args[4],
 				     force(lrs->res));
 		break;
-	case __NR_exit:
+	case __NR_exit: /* 60 */
 		thr->exitted = true;
+		break;
+	case __NR_wait4: /* 61 */
 		break;
 	case __NR_uname: /* 63 */
 		break;
@@ -206,6 +237,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_getdents: /* 78 */
 		break;
 	case __NR_getcwd: /* 79 */
+		break;
+	case __NR_mkdir: /* 83 */
 		break;
 	case __NR_readlink: /* 89 */
 		break;
@@ -224,6 +257,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_getppid: /* 110 */
 		break;
 	case __NR_getgroups: /* 115 */
+		break;
+	case __NR_utime: /* 132 */
 		break;
 	case __NR_statfs: /* 137 */
 		break;
