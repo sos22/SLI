@@ -485,6 +485,10 @@ ExpressionRip::refineHistory(const MachineState<abstract_interpret_value> *ms,
 		Relevance mostRelevantRelevance = hs->condition->relevance(ev, Relevance::irrelevant, Relevance::perfect);
 		hs = hs->parent;
 		while (hs) {
+			while (hs && unrefinable.count(hs))
+				hs = hs->parent;
+			if (!hs)
+				break;
 			Relevance thisRelevance = hs->condition->relevance(ev, Relevance::irrelevant, Relevance::perfect);
 			if (thisRelevance > mostRelevantRelevance) {
 				mostRelevantRelevance = thisRelevance;
