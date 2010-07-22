@@ -224,6 +224,75 @@ bitwisenot::_CNF()
 		return this;
 }
 
+class SimpleRewrite : public ExpressionMapper {
+public:
+	Expression *from;
+	Expression *to;
+	SimpleRewrite(Expression *_from,
+		      Expression *_to)
+		: from(_from), to(_to)
+	{
+	}
+	Expression *idmap(Expression *x)
+	{
+		if (x == from)
+			return to;
+		else
+			return x;
+	}
+	Expression *map(ExpressionHappensBefore *ehb)
+	{
+		if (ExpressionHappensBefore *assume =
+		    dynamic_cast<ExpressionHappensBefore *>(from)) {
+			/* We're trying to simplify t1:idx1 < t2:idx2
+			   given t3:idx3 < t4:idx4.  We want to move
+			   idx1 as early as possible and idx2 as
+			   late as possible, so we consider two
+			   cases:
+
+			   t4 == t1 && idx4 < idx1 -> t3:idx3 < t2:idx2
+			   t2 == t3 && idx2 < idx3 -> t1:idx1 < t4:idx4
+
+			   We can't, unfortunately, just introduce the
+			   transitive edges, but we can handle the
+			   special case that it's a backwards self
+			   edge.
+			*/
+			if (assume->after.tid == ehb->before.tid &&
+			    assume->before.tid == ehb->after.tid &&
+			    assume->after.idx <= ehb->before.idx &&
+			    ehb->after.idx <= assume->before.idx)
+				return ConstExpression::get(0);
+
+			/* We can rewrite ehb into just true if it's
+			   implied by the assumption.  That's the case
+			   if t1 == t3, t2 == t4, idx1 <= idx3, and
+			   idx2 >= idx4. */
+			if (ehb->before.tid == assume->before.tid &&
+			    ehb->before.idx <= assume->before.idx &&
+			    ehb->after.tid == assume->after.tid &&
+			    ehb->after.idx >= assume->after.idx)
+				return ConstExpression::get(1);
+		}
+		return ExpressionMapper::map(ehb);
+	}
+};
+
+
+static Expression *
+simplifyAssuming(Expression *what, Expression *assumption)
+{
+	unsigned long cass;
+	if (assumption->isConstant(&cass)) {
+		if (cass == 0)
+			return assumption;
+		else
+			return what;
+	}
+	SimpleRewrite rw(assumption, ConstExpression::get(1));
+	return what->map(rw);
+}
+
 static Expression *
 simplifyLogic(Expression *e)
 {
@@ -240,8 +309,9 @@ simplifyLogic(Expression *e)
 			else
 				return ba->r;
 		}
-		return bitwiseand::get(simplifyLogic(ba->l),
-				       simplifyLogic(ba->r));
+		Expression *l = simplifyLogic(ba->l);
+		Expression *r = simplifyLogic(simplifyAssuming(simplifyLogic(ba->r), l));
+		return bitwiseand::get(l, r);
 	}
 	if (bitwiseor *ba = dynamic_cast<bitwiseor *>(e)) {
 		if (ConstExpression *e = dynamic_cast<ConstExpression *>(ba->l)) {
@@ -256,8 +326,10 @@ simplifyLogic(Expression *e)
 			else
 				return simplifyLogic(ba->l);
 		}
-		return bitwiseor::get(simplifyLogic(ba->l),
-				      simplifyLogic(ba->r));
+		Expression *l = simplifyLogic(ba->l);
+		Expression *r = simplifyLogic(simplifyAssuming(simplifyLogic(ba->r),
+							       simplifyLogic(logicalnot::get(l))));
+		return bitwiseor::get(l, r);
 	}
 	if (bitwisenot *bn = dynamic_cast<bitwisenot *>(e)) {
 		if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(bn->l))
@@ -269,7 +341,6 @@ simplifyLogic(Expression *e)
 }
 
 class AssumptionSet {
-	Expression *simplifyAssuming(Expression *toSimpl, Expression *assumption);
 public:
 	std::set<Expression *> content;
 	AssumptionSet() : content() {}
@@ -347,74 +418,6 @@ AssumptionSet::dump() const
 	     it++) {
 		printf("%s\n", (*it)->name());
 	}
-}
-
-class SimpleRewrite : public ExpressionMapper {
-public:
-	Expression *from;
-	Expression *to;
-	SimpleRewrite(Expression *_from,
-		      Expression *_to)
-		: from(_from), to(_to)
-	{
-	}
-	Expression *idmap(Expression *x)
-	{
-		if (x == from)
-			return to;
-		else
-			return x;
-	}
-	Expression *map(ExpressionHappensBefore *ehb)
-	{
-		if (ExpressionHappensBefore *assume =
-		    dynamic_cast<ExpressionHappensBefore *>(from)) {
-			/* We're trying to simplify t1:idx1 < t2:idx2
-			   given t3:idx3 < t4:idx4.  We want to move
-			   idx1 as early as possible and idx2 as
-			   late as possible, so we consider two
-			   cases:
-
-			   t4 == t1 && idx4 < idx1 -> t3:idx3 < t2:idx2
-			   t2 == t3 && idx2 < idx3 -> t1:idx1 < t4:idx4
-
-			   We can't, unfortunately, just introduce the
-			   transitive edges, but we can handle the
-			   special case that it's a backwards self
-			   edge.
-			*/
-			if (assume->after.tid == ehb->before.tid &&
-			    assume->before.tid == ehb->after.tid &&
-			    assume->after.idx <= ehb->before.idx &&
-			    ehb->after.idx <= assume->before.idx)
-				return ConstExpression::get(0);
-
-			/* We can rewrite ehb into just true if it's
-			   implied by the assumption.  That's the case
-			   if t1 == t3, t2 == t4, idx1 <= idx3, and
-			   idx2 >= idx4. */
-			if (ehb->before.tid == assume->before.tid &&
-			    ehb->before.idx <= assume->before.idx &&
-			    ehb->after.tid == assume->after.tid &&
-			    ehb->after.idx >= assume->after.idx)
-				return ConstExpression::get(1);
-		}
-		return ExpressionMapper::map(ehb);
-	}
-};
-
-Expression *
-AssumptionSet::simplifyAssuming(Expression *what, Expression *assumption)
-{
-	unsigned long cass;
-	if (assumption->isConstant(&cass)) {
-		if (cass == 0)
-			return assumption;
-		else
-			return what;
-	}
-	SimpleRewrite rw(assumption, ConstExpression::get(1));
-	return what->map(rw);
 }
 
 class CSCandidate {
