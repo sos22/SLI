@@ -193,6 +193,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_pipe: /* 22 */
 		break;
+	case __NR_nanosleep: /* 35 */
+		break;
 	case __NR_getpid: /* 39 */
 		break;
 	case __NR_socket: /* 41 */
@@ -275,6 +277,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_sync: /* 162 */
 		break;
+	case __NR_gettid: /* 186 */
+		break;
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
@@ -285,6 +289,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 			break;
 		case FUTEX_WAKE:
 			mach->futexWake(args[0], true);
+			break;
+		case FUTEX_CMP_REQUEUE:
 			break;
 		default:
 			throw UnknownSyscallException(force(sysnr));			

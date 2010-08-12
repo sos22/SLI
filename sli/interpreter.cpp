@@ -880,9 +880,12 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = arg.lo & mkConst<ait>(0xffffffff);
 			break;
 		case Iop_64to16:
+		case Iop_32to16:
 			dest->lo = arg.lo & mkConst<ait>(0xffff);
 			break;
 		case Iop_64to8:
+		case Iop_32to8:
+		case Iop_16to8:
 			dest->lo = arg.lo & mkConst<ait>(0xff);
 			break;
 		case Iop_128to64:
