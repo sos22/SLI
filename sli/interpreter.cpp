@@ -166,6 +166,41 @@ Thread<ait>::do_dirty_call(IRDirty *details, MachineState<ait> *ms)
 	}
 }
 
+static const UChar parity_table[256] = {
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    1, 0, 0, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+};
+
 template<typename ait>
 static void
 calculate_condition_flags_XXX(ait op,
@@ -175,13 +210,14 @@ calculate_condition_flags_XXX(ait op,
 			      ait &cf,
 			      ait &zf,
 			      ait &sf,
-			      ait &of)
+			      ait &of,
+			      ait &pf)
 {
 	sanity_check_ait(op);
 	sanity_check_ait(dep1);
 	sanity_check_ait(dep2);
 	sanity_check_ait(ndep);
-	cf = zf = sf = of = mkConst<ait>(0);
+	pf = cf = zf = sf = of = mkConst<ait>(0);
 
 	switch (force(op)) {
 	case AMD64G_CC_OP_COPY:
@@ -189,6 +225,7 @@ calculate_condition_flags_XXX(ait op,
 		zf = dep1 >> mkConst<ait>(6);
 		sf = dep1 >> mkConst<ait>(7);
 		of = dep1 >> mkConst<ait>(11);
+		pf = dep1 >> mkConst<ait>(2);
 		break;
 
 #define DO_ACT(name, type_tag, bits)					\
@@ -212,6 +249,21 @@ calculate_condition_flags_XXX(ait op,
 			sf = (res >> bits);				\
 			of = (~(dep1 ^ dep2) &				\
 			      (dep1 ^ res)) >> bits;			\
+			pf = mkConst<ait>(parity_table[(UChar)force(res)]); \
+		} while (0)
+#define ACTIONS_ADC(bits)	 		                        \
+		do {							\
+			ait oldC = ndep & mkConst<ait>(AMD64G_CC_MASK_C); \
+			ait argR = dep2 ^ oldC;				\
+			ait res = ((dep1 + argR) + oldC) & MASK(bits);	\
+			if (force(oldC))				\
+				cf = res <= (dep1 & MASK(bits));	\
+			else						\
+				cf = res < (dep1 & MASK(bits));		\
+			zf = res == mkConst<ait>(0);			\
+			sf = res >> bits;				\
+			of = (~(dep1 ^ argR) & (dep1 ^ res)) >> bits;	\
+			pf = mkConst<ait>(parity_table[(UChar)force(res)]); \
 		} while (0)
 #define ACTIONS_SUB(bits)						\
 		do {							\
@@ -224,6 +276,7 @@ calculate_condition_flags_XXX(ait op,
 			sf = res >> bits;				\
 			of = ( (dep1 ^ dep2) &				\
 			       (dep1 ^ res) ) >> bits;			\
+			pf = mkConst<ait>(parity_table[(UChar)force(res)]); \
 		} while (0)
 #define ACTIONS_LOGIC(bits)						\
 		do {							\
@@ -231,6 +284,7 @@ calculate_condition_flags_XXX(ait op,
 			zf = (dep1 & MASK(bits)) == mkConst<ait>(0);	\
 			sf = (dep1 & MASK(bits)) >> bits;		\
 			of = mkConst<ait>(0);				\
+			pf = mkConst<ait>(parity_table[(UChar)force(dep1)]); \
 		} while (0)
 #define ACTIONS_INC(bits)			                        \
 		do {				                        \
@@ -239,6 +293,7 @@ calculate_condition_flags_XXX(ait op,
 			zf = (res == mkConst<ait>(0));			\
 			sf = res >> bits;				\
 			of = res == (mkConst<ait>(1) << bits);		\
+			pf = mkConst<ait>(parity_table[(UChar)force(res)]); \
 		} while (0)
 #define ACTIONS_DEC(bits)			                        \
 		do {				                        \
@@ -247,6 +302,7 @@ calculate_condition_flags_XXX(ait op,
 			zf = (res == mkConst<ait>(0));			\
 			sf = res >> bits;				\
 			of = ((res + mkConst<ait>(1)) & MASK(bits)) == (mkConst<ait>(1) << bits); \
+			pf = mkConst<ait>(parity_table[(UChar)force(res)]); \
 		} while (0)
 #define ACTIONS_SHR(bits)			                        \
 		do {				                        \
@@ -254,6 +310,7 @@ calculate_condition_flags_XXX(ait op,
 			zf = (dep1 == mkConst<ait>(0));			\
 			sf = dep1 >> bits;				\
 			of = (dep1 ^ dep2) >> bits;			\
+			pf = mkConst<ait>(parity_table[(UChar)force(dep1)]); \
 		} while (0)
 	ACTION(ADD);
 	ACTION(SUB);
@@ -261,6 +318,7 @@ calculate_condition_flags_XXX(ait op,
 	ACTION(INC);
 	ACTION(DEC);
 	ACTION(SHR);
+	ACTION(ADC);
 #undef DO_ACT
 #undef ACTION
 #undef ACTIONS_ADD
@@ -269,6 +327,7 @@ calculate_condition_flags_XXX(ait op,
 #undef ACTIONS_INC
 #undef ACTIONS_DEC
 #undef ACTIONS_SHR
+#undef ACTIONS_ADC
 	default:
 		throw NotImplementedException("Strange operation code %ld\n", force(op));
 	}
@@ -295,7 +354,7 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 	struct expression_result<ait> ndep     = args[4];
 	struct expression_result<ait> res;
 	ait inv;
-	ait cf, zf, sf, of;
+	ait cf, zf, sf, of, pf;
 
 	calculate_condition_flags_XXX<ait>(op.lo,
 					   dep1.lo,
@@ -304,7 +363,8 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 					   cf,
 					   zf,
 					   sf,
-					   of);
+					   of,
+					   pf);
 
 	inv = condcode.lo & mkConst<ait>(1);
 	switch (force(condcode.lo & ~mkConst<ait>(1))) {
@@ -326,6 +386,9 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 	case AMD64CondS:
 		res.lo = sf;
 		break;
+	case AMD64CondP:
+		res.lo = pf;
+		break;
 
 	default:
 		throw NotImplementedException("Strange cond code %ld (op %ld)\n", force(condcode.lo), force(op.lo));
@@ -345,7 +408,7 @@ Thread<ait>::do_ccall_calculate_rflags_c(expression_result<ait> *args)
 	struct expression_result<ait> dep2 = args[2];
 	struct expression_result<ait> ndep = args[3];
 	struct expression_result<ait> res;
-	ait cf, zf, sf, of;
+	ait cf, zf, sf, of, pf;
 
 	calculate_condition_flags_XXX(op.lo,
 				      dep1.lo,
@@ -354,7 +417,8 @@ Thread<ait>::do_ccall_calculate_rflags_c(expression_result<ait> *args)
 				      cf,
 				      zf,
 				      sf,
-				      of);
+				      of,
+				      pf);
 
 	res.lo = cf;
 	return res;
@@ -803,11 +867,28 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				} r;
 				r.l = force(arg2.lo);
 				dest->lo = mkConst<ait>((unsigned)r.d);
+				printf("f64toi32: %s(%f) -> %s\n",
+				       arg2.name(), r.d, dest->name());
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
 							      force(arg1.lo));
 			}
+			break;
+		}
+
+		case Iop_F64toF32: {
+			union {
+				double d;
+				unsigned long l;
+			} in;
+			union {
+				float f;
+				unsigned l;
+			} out;
+			in.l = force(arg2.lo);
+			out.f = in.d;
+			dest->lo = mkConst<ait>(out.l);
 			break;
 		}
 
@@ -830,6 +911,54 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			else
 				r = 0x45;
 			dest->lo = mkConst<ait>(r);
+			break;
+		}
+
+		case Iop_Div32F0x4: {
+			printf("div32f0x4\n");
+			union {
+				float f;
+				unsigned l;
+			} in1, in2, out;
+			in1.l = force(arg1.lo);
+			in2.l = force(arg2.lo);
+			out.f = in1.f / in2.f;
+			dest->hi = arg1.hi;
+			dest->lo = (arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | mkConst<ait>(out.l);
+			printf("div %s(%f)/%s(%f) -> %s(%f)\n", arg1.name(), in1.f, arg2.name(), in2.f, dest->name(),
+			       out.f);
+			break;
+		}
+
+		case Iop_Add32F0x4: {
+			union {
+				float f;
+				unsigned l;
+			} in1, in2, out;
+			in1.l = force(arg1.lo);
+			in2.l = force(arg2.lo);
+			out.f = in1.f + in2.f;
+			dest->hi = arg1.hi;
+			dest->lo = (arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | mkConst<ait>(out.l);
+			printf("add32f0x4: %s(%f) + %s(%f) -> %s(%f)\n",
+			       arg1.name(), in1.f, arg2.name(), in2.f, dest->name(),
+			       out.f);
+			break;
+		}
+
+		case Iop_Mul32F0x4: {
+			union {
+				float f;
+				unsigned l;
+			} in1, in2, out;
+			in1.l = force(arg1.lo);
+			in2.l = force(arg2.lo);
+			out.f = in1.f * in2.f;
+			dest->hi = arg1.hi;
+			dest->lo = (arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | mkConst<ait>(out.l);
+			printf("add32f0x4: %s(%f) + %s(%f) -> %s(%f)\n",
+			       arg1.name(), in1.f, arg2.name(), in2.f, dest->name(),
+			       out.f);
 			break;
 		}
 
@@ -892,6 +1021,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_V128to64:
 			dest->lo = arg.lo;
 			break;
+		case Iop_32UtoV128:
 		case Iop_64UtoV128:
 			dest->lo = arg.lo;
 			break;
@@ -907,8 +1037,11 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_8Uto64:
 			*dest = arg;
 			break;
-		case Iop_32Sto64:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(32), mkConst<ait>(32));
+		case Iop_8Sto16:
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffff);
+			break;
+		case Iop_8Sto32:
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffffffff);
 			break;
 		case Iop_8Sto64:
 			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56));
@@ -916,16 +1049,44 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_16Sto32:
 			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48)) & mkConst<ait>(0xffffffff);
 			break;
-		case Iop_8Sto32:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffffffff);
-			break;
 		case Iop_16Sto64:
 			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48));
+			break;
+		case Iop_32Sto64:
+			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(32), mkConst<ait>(32));
 			break;
 		case Iop_128HIto64:
 		case Iop_V128HIto64:
 			dest->lo = arg.hi;
 			break;
+
+		case Iop_I32toF64: {
+			union {
+				long l;
+				double d;
+			} out;
+			out.d = (int)force(arg.lo);
+			dest->lo = mkConst<ait>(out.l);
+			printf("I32toF64: %ld -> %f\n", out.l, out.d);
+			break;
+		}
+
+		case Iop_F32toF64: {
+			union {
+				float f;
+				int l;
+			} in;
+			union {
+				double d;
+				unsigned long l;
+			} out;
+			in.l = force(arg.lo);
+			out.d = in.f;
+			dest->lo = mkConst<ait>(out.l);
+			printf("f32tof64: %s(%f) -> %s(%f)\n",
+			       arg.name(), in.f, dest->name(), out.d);
+			break;
+		}
 
 		case Iop_Not1:
 			dest->lo = !arg.lo;
