@@ -1753,8 +1753,12 @@ template<typename ait>
 void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, LogReaderPtr ptr,
 				  LogReaderPtr *eof)
 {
+	/* Mostly a debugging aide */
+	static unsigned long event_counter;
+
 	bool finished = false;
 	while (!finished) {
+		event_counter++;
 		LogRecord<ait> *lr = lf->read(ptr, &ptr);
 		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
 		if (!lr)

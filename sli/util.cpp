@@ -44,7 +44,7 @@ init_sli(void)
 	vcon.iropt_level = 0;
 	vcon.iropt_unroll_thresh = 0;
 	vcon.guest_chase_thresh = 0;
-	vcon.guest_max_insns = 1;
+	//vcon.guest_max_insns = 1;
 	LibVEX_Init(failure_exit, log_bytes, 0, 0, &vcon);
 
 	signal(SIGUSR1, handle_sigusr1);
