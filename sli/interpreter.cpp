@@ -7,6 +7,7 @@
 #include "libvex_emwarn.h"
 #include "libvex_guest_amd64.h"
 #include "guest_generic_bb_to_IR.h"
+#include "guest_generic_x87.h"
 #include "guest_amd64_defs.h"
 #include "main_util.h"
 
@@ -128,6 +129,41 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 #undef SET_ABCD
 }
 
+template<typename ait> void
+Thread<ait>::amd64g_dirtyhelper_loadF80le(MachineState<ait> *ms, IRTemp tmp, ait addr)
+{
+	ait buf[10];
+	ms->addressSpace->readMemory(addr, 10, buf, false, this, NULL);
+	UChar buf2[10];
+	for (unsigned x = 0; x < 10; x++)
+		buf2[x] = force(buf[x]);
+	ULong f64;
+	convert_f80le_to_f64le(buf2, (UChar*)&f64);
+	temporaries[tmp].lo = mkConst<ait>(f64);
+	temporaries[tmp].hi = mkConst<ait>(0);
+}
+
+template <typename ait> void
+Thread<ait>::amd64g_dirtyhelper_storeF80le(MachineState<ait> *ms, ait addr, ait _f64)
+{
+	unsigned long f64 = force(_f64);
+	unsigned char buf[10];
+	ait buf2[10];
+	unsigned x;
+
+	convert_f64le_to_f80le((UChar *)&f64, (UChar *)buf);
+
+	for (x = 0; x < 10; x++)
+		buf2[x] = mkConst<ait>(buf[x]);
+	ms->addressSpace->writeMemory(EventTimestamp(tid, nrEvents, ms->nrEvents,
+						     force(regs.rip())),
+				      addr,
+				      10,
+				      buf2,
+				      false,
+				      this);
+}
+
 template<typename ait>
 ThreadEvent<ait> *
 Thread<ait>::do_dirty_call(IRDirty *details, MachineState<ait> *ms)
@@ -160,6 +196,12 @@ Thread<ait>::do_dirty_call(IRDirty *details, MachineState<ait> *ms)
 		return LoadEvent<ait>::get(bumpEvent(ms), details->tmp, args[0].lo, 16);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
+		return NULL;
+	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_storeF80le")) {
+		amd64g_dirtyhelper_storeF80le(ms, args[0].lo, args[1].lo);
+		return NULL;
+	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_loadF80le")) {
+		amd64g_dirtyhelper_loadF80le(ms, details->tmp, args[0].lo);
 		return NULL;
 	} else {
 		throw NotImplementedException("Unknown dirty call %s\n", details->cee->name);
@@ -551,17 +593,22 @@ Thread<ait>::eval_expression(IRExpr *expr)
 {
 	struct expression_result<ait> res;
 	struct expression_result<ait> *dest = &res;
+	unsigned getOffset;
+	IRType getType;
 
 	res.lo = mkConst<ait>(0);
 	res.hi = mkConst<ait>(0);
 	
 	switch (expr->tag) {
 	case Iex_Get: {
+		getOffset = expr->Iex.Get.offset;
+		getType = expr->Iex.Get.ty;
+
+		do_get:
 		ait v1;
-		unsigned sub_word_offset = expr->Iex.Get.offset & 7;
-		v1 = read_reg(this,
-			      expr->Iex.Get.offset - sub_word_offset);
-		switch (expr->Iex.Get.ty) {
+		unsigned sub_word_offset = getOffset & 7;
+		v1 = read_reg(this, getOffset - sub_word_offset);
+		switch (getType) {
 		case Ity_I64:
 		case Ity_F64:
 			assert(!sub_word_offset);
@@ -570,8 +617,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Ity_V128:
 			assert(!sub_word_offset);
 			dest->lo = v1;
-			dest->hi = read_reg(this,
-					      expr->Iex.Get.offset - sub_word_offset + 8);
+			dest->hi = read_reg(this, getOffset - sub_word_offset + 8);
 			break;
 		case Ity_I32:
 		case Ity_F32:
@@ -590,6 +636,16 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			throw NotImplementedException();
 		}
 		break;
+	}
+
+	case Iex_GetI: {
+		getOffset = force(eval_expression(expr->Iex.GetI.ix).lo);
+		getOffset += expr->Iex.GetI.bias;
+		getOffset %= expr->Iex.GetI.descr->nElems;
+		getOffset *= sizeofIRType(expr->Iex.GetI.descr->elemTy);
+		getOffset += expr->Iex.GetI.descr->base;
+		getType = expr->Iex.GetI.descr->elemTy;
+		goto do_get;
 	}
 
 	case Iex_RdTmp:
@@ -653,18 +709,23 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = arg1.lo + arg2.lo;
 			dest->hi = arg1.hi + arg2.hi;
 			break;
+		case Iop_AndV128:
+			dest->hi = arg1.hi & arg2.hi;
 		case Iop_And64:
 		case Iop_And32:
 		case Iop_And16:
 		case Iop_And8:
 			dest->lo = arg1.lo & arg2.lo;
 			break;
+		case Iop_OrV128:
+			dest->hi = arg1.hi | arg2.hi;
 		case Iop_Or8:
 		case Iop_Or16:
 		case Iop_Or32:
 		case Iop_Or64:
 			dest->lo = arg1.lo | arg2.lo;
 			break;
+		case Iop_Shl16:
 		case Iop_Shl32:
 		case Iop_Shl64:
 			dest->lo = arg1.lo << arg2.lo;
@@ -867,8 +928,23 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				} r;
 				r.l = force(arg2.lo);
 				dest->lo = mkConst<ait>((unsigned)r.d);
-				printf("f64toi32: %s(%f) -> %s\n",
-				       arg2.name(), r.d, dest->name());
+				break;
+			default:
+				throw NotImplementedException("unknown rounding mode %ld\n",
+							      force(arg1.lo));
+			}
+			break;
+		}
+
+		case Iop_F64toI64: {
+			switch (force(arg1.lo)) {
+			case 3:
+				union {
+					double d;
+					unsigned long l;
+				} r;
+				r.l = force(arg2.lo);
+				dest->lo = mkConst<ait>(r.d);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -914,54 +990,82 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 		}
 
-		case Iop_Div32F0x4: {
-			printf("div32f0x4\n");
+		case Iop_SinF64: {
 			union {
-				float f;
-				unsigned l;
-			} in1, in2, out;
-			in1.l = force(arg1.lo);
-			in2.l = force(arg2.lo);
-			out.f = in1.f / in2.f;
-			dest->hi = arg1.hi;
-			dest->lo = (arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | mkConst<ait>(out.l);
-			printf("div %s(%f)/%s(%f) -> %s(%f)\n", arg1.name(), in1.f, arg2.name(), in2.f, dest->name(),
-			       out.f);
+				unsigned long l;
+				double d;
+			} in, out;
+			in.l = force(arg2.lo);
+			out.d = sin(in.d);
+			dest->lo = mkConst<ait>(out.l);
 			break;
 		}
 
-		case Iop_Add32F0x4: {
+		case Iop_CosF64: {
 			union {
-				float f;
-				unsigned l;
-			} in1, in2, out;
-			in1.l = force(arg1.lo);
-			in2.l = force(arg2.lo);
-			out.f = in1.f + in2.f;
-			dest->hi = arg1.hi;
-			dest->lo = (arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | mkConst<ait>(out.l);
-			printf("add32f0x4: %s(%f) + %s(%f) -> %s(%f)\n",
-			       arg1.name(), in1.f, arg2.name(), in2.f, dest->name(),
-			       out.f);
+				unsigned long l;
+				double d;
+			} in, out;
+			in.l = force(arg2.lo);
+			out.d = cos(in.d);
+			dest->lo = mkConst<ait>(out.l);
 			break;
 		}
 
-		case Iop_Mul32F0x4: {
-			union {
-				float f;
-				unsigned l;
-			} in1, in2, out;
-			in1.l = force(arg1.lo);
-			in2.l = force(arg2.lo);
-			out.f = in1.f * in2.f;
+		case Iop_SetV128lo64:
 			dest->hi = arg1.hi;
-			dest->lo = (arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | mkConst<ait>(out.l);
-			printf("add32f0x4: %s(%f) + %s(%f) -> %s(%f)\n",
-			       arg1.name(), in1.f, arg2.name(), in2.f, dest->name(),
-			       out.f);
+			dest->lo = arg2.lo;
 			break;
-		}
 
+#define _F0x2op(name, op)						\
+			case Iop_ ## name ## 64F0x2: {			\
+				union {					\
+					unsigned long l;		\
+					double d;			\
+				} in1, in2, out;			\
+				in1.l = force(arg1.lo);			\
+				in2.l = force(arg2.lo);			\
+				out.d = op;				\
+				dest->lo = mkConst<ait>(out.l);		\
+				break;					\
+			}
+#define F0x2op(name, op) _F0x2op(name, in1.d op in2.d)
+
+#define _F0x4op(name, op)						\
+			case Iop_ ## name ## 32F0x4: {			\
+				union {					\
+					unsigned l;			\
+					float d;			\
+				} in1, in2, out;			\
+				in1.l = force(arg1.lo);			\
+				in2.l = force(arg2.lo);			\
+				out.d = op;				\
+				dest->lo =				\
+					(arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | \
+					mkConst<ait>(out.l);		\
+				break;					\
+			}
+#define F0x4op(name, op) _F0x4op(name, in1.d op in2.d)
+
+#define doit(op, _op)						\
+			op(Add, +)		                \
+			op(Sub, -)	                        \
+			op(Div, /)	                        \
+			op(Mul, *)			        \
+			_op(Max, in1.d > in2.d ? in1.d : in2.d)	\
+			_op(Min, in1.d > in2.d ? in1.d : in2.d)	\
+			_op(CmpEQ, in1.d == in2.d)		\
+			_op(CmpLT, in1.d < in2.d)		\
+			_op(CmpLE, in1.d <= in2.d)
+		doit(F0x2op, _F0x2op)
+		doit(F0x4op, _F0x4op)
+#undef doit
+#undef F0x2op
+#undef _F0x2op
+#undef F0x4op
+#undef _F0x4op
+#undef _F0xYop
+			
 		default:
 			ppIRExpr(expr);
 			throw NotImplementedException();
@@ -992,6 +1096,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Ity_I128:
 		case Ity_V128:
 			break;
+
 		default:
 			ppIRType(t);
 			throw NotImplementedException();
@@ -1033,8 +1138,13 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_16Uto32:
 		case Iop_1Uto64:
 		case Iop_1Uto8:
+		case Iop_8Uto16:
 		case Iop_8Uto32:
 		case Iop_8Uto64:
+		case Iop_ReinterpF64asI64:
+		case Iop_ReinterpI64asF64:
+		case Iop_ReinterpF32asI32:
+		case Iop_ReinterpI32asF32:
 			*dest = arg;
 			break;
 		case Iop_8Sto16:
@@ -1067,7 +1177,6 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			} out;
 			out.d = (int)force(arg.lo);
 			dest->lo = mkConst<ait>(out.l);
-			printf("I32toF64: %ld -> %f\n", out.l, out.d);
 			break;
 		}
 
@@ -1083,8 +1192,6 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			in.l = force(arg.lo);
 			out.d = in.f;
 			dest->lo = mkConst<ait>(out.l);
-			printf("f32tof64: %s(%f) -> %s(%f)\n",
-			       arg.name(), in.f, dest->name(), out.d);
 			break;
 		}
 
@@ -1098,6 +1205,11 @@ Thread<ait>::eval_expression(IRExpr *expr)
 
 		case Iop_Not64:
 			dest->lo = ~arg.lo;
+			break;
+
+		case Iop_NotV128:
+			dest->lo = ~arg.lo;
+			dest->hi = ~arg.hi;
 			break;
 			
 		case Iop_Clz64: {
@@ -1120,6 +1232,57 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 		}
 
+		case Iop_Sqrt64F0x2: {
+			union {
+				unsigned long l;
+				double d;
+			} in, out;
+			in.l = force(arg.lo);
+			out.d = sqrt(in.d);
+			dest->lo = mkConst<ait>(out.l);
+			break;
+		}
+
+		default:
+			ppIRExpr(expr);
+			throw NotImplementedException();
+		}
+		break;
+	}
+
+	case Iex_Triop: {
+		struct expression_result<ait> arg1 = eval_expression(expr->Iex.Triop.arg1);
+		struct expression_result<ait> arg2 = eval_expression(expr->Iex.Triop.arg2);
+		struct expression_result<ait> arg3 = eval_expression(expr->Iex.Triop.arg3);
+		switch (expr->Iex.Triop.op) {
+		case Iop_PRemF64: {
+			union {
+				double d;
+				unsigned long l;
+			} a1, a2, res;
+			a1.l = force(arg2.lo);
+			a2.l = force(arg3.lo);
+			asm ("fprem\n"
+			     : "=t" (res.d)
+			     : "0" (a1.d), "u" (a2.d));
+			dest->lo = mkConst<ait>(res.l);
+			break;
+		}
+		case Iop_PRemC3210F64: {
+			union {
+				double d;
+				unsigned long l;
+			} a1, a2, clobber;
+			unsigned short res;
+			a1.l = force(arg2.lo);
+			a2.l = force(arg3.lo);
+			asm ("fprem\nfstsw %%ax\n"
+			     : "=t" (clobber.d), "=a" (res)
+			     : "0" (a1.d), "u" (a2.d));
+			dest->lo =
+				mkConst<ait>(((res >> 8) & 7) | ((res & 0x400) >> 11));
+			break;
+		}
 		default:
 			ppIRExpr(expr);
 			throw NotImplementedException();
@@ -1233,6 +1396,8 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 	currentIRSB = irsb;
 	currentIRSBOffset = 0;
 	currentControlCondition = mkConst<ait>(1);
+
+	//ppIRSB(irsb);
 }
 
 template<typename ait>
@@ -1240,6 +1405,10 @@ ThreadEvent<ait> *
 Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			MachineState<ait> *ms)
 {
+	unsigned put_offset;
+	struct expression_result<ait> put_data;
+	IRType put_type;
+
 	while (1) {
 		if (!currentIRSB) {
 			try {
@@ -1260,6 +1429,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 				if (force(regs.rip() == addrSpace->client_free))
 					addrSpace->client_freed(bumpEvent(ms),
 								regs.get_reg(REGISTER_IDX(RDI)));
+#if 0
 #define GR(x) regs.get_reg(REGISTER_IDX(x))
 				return InstructionEvent<ait>::get(bumpEvent(ms),
 								  regs.rip(),
@@ -1270,6 +1440,9 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 								  GR(FOOTSTEP_REG_4_NAME),
 								  allowRipMismatch);
 #undef GR
+#else
+				break;
+#endif
 			case Ist_AbiHint:
 				break;
 			case Ist_MBE:
@@ -1319,51 +1492,68 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			}
 
 			case Ist_Put: {
-				unsigned byte_offset = stmt->Ist.Put.offset & 7;
-				ait dest = read_reg(this,
-						    stmt->Ist.Put.offset - byte_offset);
-				struct expression_result<ait> data =
-					eval_expression(stmt->Ist.Put.data);
-				switch (typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data)) {
+				put_offset = stmt->Ist.Put.offset;
+				put_data = eval_expression(stmt->Ist.Put.data);
+				put_type = typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data);
+				do_put:
+				unsigned byte_offset = put_offset & 7;
+				ait dest = read_reg(this, put_offset - byte_offset);
+				switch (put_type) {
 				case Ity_I8:
 					dest &= mkConst<ait>(~(0xFF << (byte_offset * 8)));
-					dest |= data.lo << mkConst<ait>(byte_offset * 8);
+					dest |= put_data.lo << mkConst<ait>(byte_offset * 8);
 					break;
 
 				case Ity_I16:
 					assert(!(byte_offset % 2));
 					dest &= mkConst<ait>(~(0xFFFFul << (byte_offset * 8)));
-					dest |= data.lo << mkConst<ait>(byte_offset * 8);
+					dest |= put_data.lo << mkConst<ait>(byte_offset * 8);
 					break;
 
 				case Ity_I32:
 				case Ity_F32:
 					assert(!(byte_offset % 4));
 					dest &= mkConst<ait>(~(0xFFFFFFFFul << (byte_offset * 8)));
-					dest |= data.lo << mkConst<ait>(byte_offset * 8);
+					dest |= put_data.lo << mkConst<ait>(byte_offset * 8);
 					break;
 
 				case Ity_I64:
 				case Ity_F64:
 					assert(byte_offset == 0);
-					dest = data.lo;
+					dest = put_data.lo;
 					break;
 
 				case Ity_I128:
 				case Ity_V128:
 					assert(byte_offset == 0);
-					dest = data.lo;
+					dest = put_data.lo;
 					write_reg(this,
-						  stmt->Ist.Put.offset + 8,
-						  data.hi);
+						  put_offset + 8,
+						  put_data.hi);
 					break;
 				default:
 					ppIRStmt(stmt);
 					throw NotImplementedException();
 				}
 
-				write_reg(this, stmt->Ist.Put.offset - byte_offset, dest);
+				write_reg(this, put_offset - byte_offset, dest);
 				break;
+			}
+
+			case Ist_PutI: {
+				struct expression_result<ait> idx = eval_expression(stmt->Ist.PutI.ix);
+
+				/* Crazy bloody encoding scheme */
+				idx.lo =
+					mkConst<ait>(((force(idx.lo) + stmt->Ist.PutI.bias) %
+						      stmt->Ist.PutI.descr->nElems) *
+						     sizeofIRType(stmt->Ist.PutI.descr->elemTy) +
+						     stmt->Ist.PutI.descr->base);
+
+				put_offset = force(idx.lo);
+				put_data = eval_expression(stmt->Ist.PutI.data);
+				put_type = stmt->Ist.PutI.descr->elemTy;
+				goto do_put;
 			}
 
 			case Ist_Dirty: {
@@ -1413,7 +1603,12 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 		assert(currentIRSB->jumpkind == Ijk_Boring ||
 		       currentIRSB->jumpkind == Ijk_Call ||
 		       currentIRSB->jumpkind == Ijk_Ret ||
-		       currentIRSB->jumpkind == Ijk_Sys_syscall);
+		       currentIRSB->jumpkind == Ijk_Sys_syscall ||
+		       currentIRSB->jumpkind == Ijk_Yield);
+
+		if (currentIRSB->jumpkind == Ijk_Yield)
+			currentIRSB->jumpkind = Ijk_Boring;
+
 		if (currentIRSB->jumpkind == Ijk_Ret)
 			allowRipMismatch = false;
 

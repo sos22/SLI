@@ -397,6 +397,10 @@ class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	expression_result<abst_int_type> do_ccall_calculate_rflags_c(expression_result<abst_int_type> *args);
 	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
 	expression_result<abst_int_type> do_ccall(IRCallee *cee, IRExpr **args);
+
+	void amd64g_dirtyhelper_loadF80le(MachineState<abst_int_type> *, IRTemp tmp, abst_int_type addr);
+	void amd64g_dirtyhelper_storeF80le(MachineState<abst_int_type> *, abst_int_type addr, abst_int_type _f64);
+
 	void redirectGuest(abst_int_type rip);
 public:
 	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
@@ -424,7 +428,7 @@ public:
 
 	EventTimestamp lastEvent;
 
-	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
+	bool runnable() const { return !exitted && !crashed && !cannot_make_progress && !blocked; }
 	void futexBlock(abst_int_type fba) { printf("%d: block\n", tid._tid()); blocked = true; futex_block_address = fba; }
 	void futexUnblock() { printf("%d: unblocked\n", tid._tid()); blocked = false; }
 

@@ -193,6 +193,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_pipe: /* 22 */
 		break;
+	case __NR_select: /* 23 */
+		break;
 	case __NR_nanosleep: /* 35 */
 		break;
 	case __NR_getpid: /* 39 */
@@ -205,6 +207,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_sendto: /* 44 */
 		break;
+	case __NR_recvfrom: /* 45 */
+		break;
 	case __NR_recvmsg: /* 47 */
 		break;
 	case __NR_bind: /* 49 */
@@ -214,6 +218,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_getsockname: /* 51 */
 		break;
 	case __NR_setsockopt: /* 54 */
+		break;
+	case __NR_getsockopt: /* 55 */
 		break;
 	case __NR_clone: /* 56 */
 		if (!isErrnoSysres(force(lrs->res)))
@@ -266,6 +272,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_sched_getparam: /* 143 */
 		break;
+	case __NR_sched_setscheduler: /* 144 */
+		break;
 	case __NR_sched_getscheduler: /* 145 */
 		break;
 	case __NR_sched_get_priority_max: /* 146 */
@@ -291,6 +299,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 			mach->futexWake(args[0], true);
 			break;
 		case FUTEX_CMP_REQUEUE:
+			break;
+		case FUTEX_WAKE_OP:
 			break;
 		default:
 			throw UnknownSyscallException(force(sysnr));			

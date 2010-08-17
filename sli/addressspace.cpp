@@ -550,7 +550,7 @@ AddressSpace<ait>::findInterestingFunctions(const VAMap::VAMapEntry *it)
 		printf("free() mismatch -> not libc\n");
 		return;
 	}
-	this->client_free = mkConst<ait>(it->start + 0x7a230);
+//	this->client_free = mkConst<ait>(it->start + 0x7a230);
 }
 
 template <typename ait> void
