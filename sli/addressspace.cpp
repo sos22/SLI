@@ -475,6 +475,7 @@ AddressSpace<ait>::writeLiteralMemory(unsigned long start,
 template <typename ait> void
 AddressSpace<ait>::addVsyscalls()
 {
+#if 0
 	allocateMemory(mkConst<ait>(0xFFFFFFFFFF600000),
 		       mkConst<ait>(0x1000),
 		       VAMap::Protection(true, false, true),
@@ -485,6 +486,7 @@ AddressSpace<ait>::addVsyscalls()
 	writeLiteralMemory(0xFFFFFFFFFF600400,
 			   redirect_vgettimeofday - redirect_vtime,
 			   redirect_vtime);
+#endif
 }
 
 template <typename ait> char *
