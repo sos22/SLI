@@ -794,14 +794,14 @@ public:
 		for (x = 0; x < threads->size(); x++)
 			if (threads->index(x)->tid == id)
 				return threads->index(x);
-		abort();
+		return NULL;
 	}
 	const Thread<abst_int_type> *findThread(ThreadId id) const {
 		unsigned x;
 		for (x = 0; x < threads->size(); x++)
 			if (threads->index(x)->tid == id)
 				return threads->index(x);
-		abort();
+		return NULL;
 	}
 	void exitGroup(abst_int_type result) {
 		exitted = true;

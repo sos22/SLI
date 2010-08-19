@@ -203,17 +203,21 @@ GetRegistersCommand<ait>::doIt(MachineState<ait> *ms)
 {
 	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery);
 
-	char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RAX)))),
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBX)))),
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RCX)))),
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDX)))),
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSI)))),
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDI)))),
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBP)))),
-				htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSP)))));
-	this->sendResponse(buf);
-	free(buf);
+	if (thr) {
+		char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RAX)))),
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBX)))),
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RCX)))),
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDX)))),
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSI)))),
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDI)))),
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBP)))),
+					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSP)))));
+		this->sendResponse(buf);
+		free(buf);
+	} else {
+		this->sendResponse("E01");
+	}
 }
 
 template <typename ait> void
@@ -222,6 +226,11 @@ GetRegisterCommand<ait>::doIt(MachineState<ait> *ms)
 	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery);
 	ait r;
 	bool haveIt;
+
+	if (!thr) {
+		this->sendResponse("E01");
+		return;
+	}
 
 	switch (regNr) {
 #define REG(nr, name) case nr: haveIt = true; r = thr->regs.get_reg(REGISTER_IDX(name)); break
@@ -285,7 +294,7 @@ template <typename ait> void
 ThreadAliveCommand<ait>::doIt(MachineState<ait> *ms)
 {
 	const Thread<ait> *thr = ms->findThread(tid);
-	if (thr->exitted || thr->crashed)
+	if (!thr || thr->exitted || thr->crashed)
 		this->sendResponse("E01");
 	else
 		this->sendResponse("OK");
@@ -295,6 +304,10 @@ template <typename ait> void
 ContinueCommand<ait>::doIt(MachineState<ait> *ms)
 {
 	Thread<ait> *thr = ms->findThread(this->chan->currentTidRun);
+	if (!thr) {
+		this->sendResponse("E99");
+		return;
+	}
 	if (haveNewRip)
 		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
