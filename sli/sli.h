@@ -742,6 +742,12 @@ class LogFile : public LogReader<unsigned long>, public GarbageCollected<LogFile
 	}
 	_ptr forcedEof;
 
+	ssize_t buffered_pread(void *output, size_t output_size, off_t start_offset) const;
+
+	mutable unsigned char buffer[8192];
+	mutable off_t buffer_start;
+	mutable off_t buffer_end;
+
 	LogFile() {}
 public:
 	LogReaderPtr mkPtr(uint64_t off, unsigned record_nr) const {

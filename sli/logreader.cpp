@@ -40,6 +40,45 @@ LogFile::~LogFile()
 	close(fd);
 }
 
+ssize_t
+LogFile::buffered_pread(void *output, size_t output_size, off_t start_offset) const
+{
+	off_t end_offset = start_offset + output_size;
+	off_t next_offset = start_offset;
+
+	while (next_offset != end_offset) {
+		if (next_offset >= buffer_start && next_offset < buffer_end) {
+			/* Grab as much as possible from the buffer */
+			unsigned from_buffer;
+			if (end_offset > buffer_end)
+				from_buffer = buffer_end - next_offset;
+			else
+				from_buffer = end_offset - next_offset;
+			memcpy((void *)((unsigned long)output + next_offset - start_offset),
+			       (void *)((unsigned long)buffer + next_offset - buffer_start),
+			       from_buffer);
+			next_offset += from_buffer;
+			if (next_offset == end_offset)
+				break;
+		}
+
+		/* Replenish the buffer */
+		buffer_start = next_offset;
+		ssize_t s = pread(fd, buffer, sizeof(buffer), buffer_start);
+		if (s < 0) {
+			if (next_offset == start_offset)
+				return s;
+			else
+				break;
+		}
+		if (s == 0)
+			break;
+		buffer_end = buffer_start + s;
+	}
+
+	return next_offset - start_offset;
+}
+
 LogRecord<unsigned long> *LogFile::read(LogReaderPtr _startPtr, LogReaderPtr *_nextPtr) const
 {
 	struct record_header rh;
@@ -49,7 +88,7 @@ LogRecord<unsigned long> *LogFile::read(LogReaderPtr _startPtr, LogReaderPtr *_n
 skip:
 	if (forcedEof.valid && startPtr >= forcedEof)
 		return NULL;
-	if (pread(fd, &rh, sizeof(rh), startPtr.off) <= 0)
+	if (buffered_pread(&rh, sizeof(rh), startPtr.off) <= 0)
 		return NULL;
 	ThreadId tid(rh.tid);
 	*_nextPtr = mkPtr(startPtr.off + rh.size, startPtr.record_nr+1);
@@ -59,7 +98,7 @@ skip:
 	switch (rh.cls) {
 	case RECORD_footstep: {
 		footstep_record<unsigned long> fr;
-		int r = pread(fd, &fr, sizeof(fr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&fr, sizeof(fr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordFootstep<unsigned long>(tid,
 							    fr.rip,
@@ -71,7 +110,7 @@ skip:
 	}
 	case RECORD_syscall: {
 		syscall_record<unsigned long> sr;
-		int r = pread(fd, &sr, sizeof(sr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordSyscall<unsigned long>(tid,
 							   sr.syscall_nr & 0xffffffff,
@@ -83,10 +122,10 @@ skip:
 	case RECORD_memory: {
 		memory_record<unsigned long> mr;
 		unsigned s;
-		int r = pread(fd, &mr, sizeof(mr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&mr, sizeof(mr), startPtr.off + sizeof(rh));
 		s = rh.size - sizeof(mr) - sizeof(rh);
 		void *buf = malloc(s);
-		r = pread(fd, buf, s, startPtr.off + sizeof(rh) + sizeof(mr));
+		r = buffered_pread(buf, s, startPtr.off + sizeof(rh) + sizeof(mr));
 		(void)r;
 		unsigned long *b = (unsigned long *)malloc(sizeof(unsigned long) * s);
 		for (unsigned x = 0; x < s; x++)
@@ -99,18 +138,18 @@ skip:
 	}
 	case RECORD_rdtsc: {
 		rdtsc_record<unsigned long> rr;
-		int r = pread(fd, &rr, sizeof(rr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&rr, sizeof(rr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordRdtsc<unsigned long>(tid, rr.stashed_tsc);
 	}
 	case RECORD_mem_read: {
 		mem_read_record<unsigned long> mrr;
-		int r = pread(fd, &mrr, sizeof(mrr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&mrr, sizeof(mrr), startPtr.off + sizeof(rh));
 		expression_result<unsigned long> val;
 		unsigned long b[2];
 		memset(b, 0, sizeof(b));
-		r = pread(fd, b, rh.size - sizeof(mrr) - sizeof(rh),
-			  startPtr.off + sizeof(rh) + sizeof(mrr));
+		r = buffered_pread(b, rh.size - sizeof(mrr) - sizeof(rh),
+				   startPtr.off + sizeof(rh) + sizeof(mrr));
 		val.lo = b[0];
 		val.hi = b[1];
 		return new LogRecordLoad<unsigned long>(tid,
@@ -120,12 +159,12 @@ skip:
 	}
 	case RECORD_mem_write: {
 		mem_write_record<unsigned long> mwr;
-		int r = pread(fd, &mwr, sizeof(mwr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&mwr, sizeof(mwr), startPtr.off + sizeof(rh));
 		expression_result<unsigned long> val;
 		unsigned long b[2];
 		memset(b, 0, sizeof(b));
-		r = pread(fd, b, rh.size - sizeof(mwr) - sizeof(rh),
-			  startPtr.off + sizeof(rh) + sizeof(mwr));
+		r = buffered_pread(b, rh.size - sizeof(mwr) - sizeof(rh),
+				   startPtr.off + sizeof(rh) + sizeof(mwr));
 		val.lo = b[0];
 		val.hi = b[1];
 		(void)r;
@@ -146,7 +185,7 @@ skip:
 
 	case RECORD_signal: {
 		signal_record<unsigned long> sr;
-		int r = pread(fd, &sr, sizeof(sr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordSignal<unsigned long>(tid, sr.rip, sr.signo, sr.err,
 							  sr.virtaddr);
@@ -154,7 +193,7 @@ skip:
 		
 	case RECORD_allocate_memory: {
 		allocate_memory_record<unsigned long> amr;
-		int r = pread(fd, &amr, sizeof(amr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&amr, sizeof(amr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordAllocateMemory<unsigned long>(tid,
 								  amr.start,
@@ -164,26 +203,26 @@ skip:
 	}
 	case RECORD_initial_registers: {
 		VexGuestAMD64State regs;
-		int r = pread(fd, &regs, sizeof(regs), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&regs, sizeof(regs), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordInitialRegisters<unsigned long>(tid, regs);
 	}
 	case RECORD_initial_brk: {
 		initial_brk_record<unsigned long> ibr;
-		int r = pread(fd, &ibr, sizeof(ibr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&ibr, sizeof(ibr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordInitialBrk<unsigned long>(tid, ibr.initial_brk);
 	}
 	case RECORD_initial_sighandlers: {
 		initial_sighandlers_record<unsigned long> isr;
-		int r = pread(fd, &isr, sizeof(isr), startPtr.off + sizeof(rh));
+		int r = buffered_pread(&isr, sizeof(isr), startPtr.off + sizeof(rh));
 		(void)r;
 		return new LogRecordInitialSighandlers<unsigned long>(tid, isr.handlers);
 	}
 	case RECORD_vex_thread_state: {
 		vex_thread_state_record<unsigned long> *vtsr;
 		vtsr = (vex_thread_state_record<unsigned long> *)malloc(rh.size - sizeof(rh));
-		int r = pread(fd, vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
+		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
 		expression_result_array<unsigned long> era;
 		era.setSize((rh.size - sizeof(rh) - sizeof(*vtsr)) / 16);
