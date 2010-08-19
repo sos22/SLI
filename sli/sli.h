@@ -1787,8 +1787,34 @@ public:
 
 	void client_freed(EventTimestamp when, ait ptr);
 
-
 	NAMED_CLASS
+
+	class trans_hash_entry : public GarbageCollected<trans_hash_entry> {
+	public:
+		trans_hash_entry *next;
+		trans_hash_entry **pprev;
+
+		unsigned long rip;
+		WeakRef<IRSB> irsb;
+
+		void visit(HeapVisitor &hv) const { hv(next); }
+		void destruct() {}
+
+		trans_hash_entry(unsigned long _rip)
+			: next(NULL),
+			  pprev(NULL),
+			  rip(_rip),
+			  irsb()
+		{
+		}
+		NAMED_CLASS
+	};
+
+	WeakRef<IRSB> *searchDecodeCache(unsigned long rip);
+
+private:
+	static const unsigned nr_trans_hash_slots = 2048;
+	trans_hash_entry *trans_hash[nr_trans_hash_slots];
 };
 
 template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall<ait> *lrs,

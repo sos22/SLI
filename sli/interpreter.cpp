@@ -1360,36 +1360,43 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 
 	vexSetAllocModeTEMP_and_clear();
 
-	VexArchInfo archinfo_guest;
-	VexAbiInfo abiinfo_both;
-	VexGuestExtents vge;
-	LibVEX_default_VexArchInfo(&archinfo_guest);
-	archinfo_guest.hwcaps =
-		VEX_HWCAPS_AMD64_SSE3|
-		VEX_HWCAPS_AMD64_CX16;
-	LibVEX_default_VexAbiInfo(&abiinfo_both);
-	abiinfo_both.guest_stack_redzone_size = 128;
-	abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-	class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, regs.rip());
-	IRSB *irsb = bb_to_IR(&vge,
-			      NULL, /* Context for chase_into_ok */
-			      disInstr_AMD64,
-			      fetcher,
-			      (Addr64)force(regs.rip()),
-			      chase_into_ok,
-			      False, /* host bigendian */
-			      VexArchAMD64,
-			      &archinfo_guest,
-			      &abiinfo_both,
-			      Ity_I64, /* guest word type */
-			      False, /* do_self_check */
-			      NULL, /* preamble */
-			      0, /* self check start */
-			      0); /* self check len */
-	if (!irsb)
-		throw InstructionDecodeFailedException();
+	WeakRef<IRSB> *cacheSlot = addrSpace->searchDecodeCache(force(regs.rip()));
+	assert(cacheSlot != NULL);
+	IRSB *irsb = cacheSlot->get();
+	if (!irsb) {
+		VexArchInfo archinfo_guest;
+		VexAbiInfo abiinfo_both;
+		VexGuestExtents vge;
+		LibVEX_default_VexArchInfo(&archinfo_guest);
+		archinfo_guest.hwcaps =
+			VEX_HWCAPS_AMD64_SSE3|
+			VEX_HWCAPS_AMD64_CX16;
+		LibVEX_default_VexAbiInfo(&abiinfo_both);
+		abiinfo_both.guest_stack_redzone_size = 128;
+		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
+		class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, regs.rip());
+		irsb = bb_to_IR(&vge,
+				NULL, /* Context for chase_into_ok */
+				disInstr_AMD64,
+				fetcher,
+				(Addr64)force(regs.rip()),
+				chase_into_ok,
+				False, /* host bigendian */
+				VexArchAMD64,
+				&archinfo_guest,
+				&abiinfo_both,
+				Ity_I64, /* guest word type */
+				False, /* do_self_check */
+				NULL, /* preamble */
+				0, /* self check start */
+				0); /* self check len */
+		if (!irsb)
+			throw InstructionDecodeFailedException();
 
-	irsb = instrument_func(NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
+		irsb = instrument_func(NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
+
+		cacheSlot->set(irsb);
+	}
 
 	temporaries.setSize(irsb->tyenv->types_used);
 

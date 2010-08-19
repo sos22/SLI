@@ -362,6 +362,8 @@ void AddressSpace<ait>::visit(HeapVisitor &hv) const
 	hv(pmap);
 	vamap->visit(hv, pmap);
 	visit_aiv(client_free, hv);
+	for (unsigned x = 0; x < nr_trans_hash_slots; x++)
+		hv(trans_hash[x]);
 }
 
 template <typename ait>
@@ -584,6 +586,70 @@ AddressSpace<ait>::client_freed(EventTimestamp when, ait ptr)
 	cf.when = when;
 	printf("client_free(%lx, %lx)\n", force(cf.start), force(cf.end));
 	freed_memory.push_back(cf);
+}
+
+template <typename ait> WeakRef<IRSB> *
+AddressSpace<ait>::searchDecodeCache(unsigned long rip)
+{
+	unsigned long hash;
+	unsigned long rip2;
+	trans_hash_entry **pprev, *n;
+
+	hash = 0;
+	rip2 = rip;
+	while (rip2) {
+		hash ^= rip2 % nr_trans_hash_slots;
+		rip2 /= nr_trans_hash_slots;
+	}
+
+	pprev = &trans_hash[hash];
+	if (trans_hash[hash])
+		assert(trans_hash[hash]->pprev == &trans_hash[hash]);
+	while (1) {
+		n = *pprev;
+		if (!n)
+			break;
+		if (n->next)
+			assert(n->next->pprev == &n->next);
+		assert(*n->pprev == n);
+		if (n->rip == rip) {
+			/* Pull-to-front hash chaining */
+			if (trans_hash[hash] != n) {
+				if (n->next)
+					n->next->pprev = n->pprev;
+				*n->pprev = n->next;
+
+				trans_hash[hash]->pprev = &n->next;
+				n->next = trans_hash[hash];
+				n->pprev = &trans_hash[hash];
+				trans_hash[hash] = n;
+			}
+			if (n->next)
+				assert(n->next->pprev == &n->next);
+			assert(*n->pprev == n);
+			return &n->irsb;
+		}
+
+		if (!n->irsb.get()) {
+			/* Target has been garbage collected.  Unhook
+			   ourselves from the list.  We'll get garbage
+			   collected ourselves on the next cycle. */
+			if (n->next)
+				n->next->pprev = n->pprev;
+			*n->pprev = n->next;
+		}
+
+		pprev = &n->next;
+	}
+
+	n = new trans_hash_entry(rip);
+	n->next = trans_hash[hash];
+	if (trans_hash[hash])
+		trans_hash[hash]->pprev = &n->next;
+	n->pprev = &trans_hash[hash];
+	trans_hash[hash] = n;
+
+	return &n->irsb;
 }
 
 #define MK_ADDRESS_SPACE(t)
