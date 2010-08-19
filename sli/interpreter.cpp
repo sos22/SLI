@@ -733,6 +733,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_Sar64:
 			dest->lo = signed_shift_right(arg1.lo, arg2.lo);
 			break;
+		case Iop_Shr16:
 		case Iop_Shr32:
 		case Iop_Shr64:
 			dest->lo = arg1.lo >> arg2.lo;
@@ -909,7 +910,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					double d;
 					unsigned long l;
 				} r;
-				r.d = force(arg2.lo);
+				r.d = (long)force(arg2.lo);
 				dest->lo = mkConst<ait>(r.l);
 				break;
 			default:
@@ -924,9 +925,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			case 3:
 				union {
 					double d;
-					unsigned long l;
+					long l;
 				} r;
-				r.l = force(arg2.lo);
+				r.l = (long)force(arg2.lo);
 				dest->lo = mkConst<ait>((unsigned)r.d);
 				break;
 			default:
