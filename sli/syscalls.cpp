@@ -235,6 +235,17 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_exit: /* 60 */
 		thr->exitted = true;
+		if (force(thr->clear_child_tid)) {
+			struct expression_result<ait> v;
+			v.lo = mkConst<ait>(0);
+			try {
+				addrSpace->store(EventTimestamp::invalid, thr->clear_child_tid, 4, v);
+			} catch (BadMemoryException<ait> &e) {
+				/* Kernel ignores errors clearing the
+				   child TID pointer, and so we do
+				   to. */
+			}
+		}
 		break;
 	case __NR_wait4: /* 61 */
 		break;
