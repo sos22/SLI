@@ -1,4 +1,3 @@
-#include <math.h>
 #include <string.h>
 #include <asm/unistd.h>
 
@@ -997,7 +996,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				double d;
 			} in, out;
 			in.l = force(arg2.lo);
-			out.d = sin(in.d);
+			asm ("fsin\n"
+			     : "=t" (out.d)
+			     : "0" (in.d));
 			dest->lo = mkConst<ait>(out.l);
 			break;
 		}
@@ -1008,7 +1009,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				double d;
 			} in, out;
 			in.l = force(arg2.lo);
-			out.d = cos(in.d);
+			asm ("fcos\n"
+			     : "=t" (out.d)
+			     : "0" (in.d));
 			dest->lo = mkConst<ait>(out.l);
 			break;
 		}
@@ -1239,7 +1242,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				double d;
 			} in, out;
 			in.l = force(arg.lo);
-			out.d = sqrt(in.d);
+			asm ("fsqrt\n"
+			     : "=t" (out.d)
+			     : "0" (in.d));
 			dest->lo = mkConst<ait>(out.l);
 			break;
 		}
