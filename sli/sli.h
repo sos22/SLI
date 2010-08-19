@@ -791,8 +791,21 @@ public:
 	template <typename new_type> MachineState<new_type> *abstract() const;
 
 	void registerThread(Thread<abst_int_type> *t) {
-		t->tid = nextTid;
-		++nextTid;
+		ThreadId tid;
+		tid = 1;
+	top:
+		for (unsigned x = 0; x < threads->size(); x++) {
+			if (threads->index(x)->exitted) {
+				t->tid = tid;
+				threads->set(x, t);
+				return;
+			}
+			if (threads->index(x)->tid == tid) {
+				++tid;
+				goto top;
+			}
+		}
+		t->tid = tid;
 		threads->push(t);
 	}
 	Thread<abst_int_type> *findThread(ThreadId id) {
