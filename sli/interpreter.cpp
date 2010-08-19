@@ -15,6 +15,10 @@
 
 #include "sli.h"
 
+static bool loud_mode;
+
+#define DBG(x, args...) do { if (loud_mode) printf("%s:%d:%d: " x, __FILE__, __LINE__, tid._tid(), ##args); } while (0)
+
 static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 {
 	return False;
@@ -1318,6 +1322,12 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		throw NotImplementedException("Bad expression tag %x\n", expr->tag);
 	}
 
+	if (loud_mode) {
+		printf("eval ");
+		ppIRExpr(expr);
+		printf(" -> %s\n", dest->name());
+	}
+
 	return res;
 }
 
@@ -1410,7 +1420,8 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 	currentIRSBOffset = 0;
 	currentControlCondition = mkConst<ait>(1);
 
-	//ppIRSB(irsb);
+	if (loud_mode)
+		ppIRSB(irsb);
 }
 
 template<typename ait>
@@ -1463,6 +1474,9 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			case Ist_WrTmp:
 				temporaries[stmt->Ist.WrTmp.tmp] =
 					eval_expression(stmt->Ist.WrTmp.data);
+				DBG("wrtmp %d -> %s",
+				    stmt->Ist.WrTmp.tmp,
+				    temporaries[stmt->Ist.WrTmp.tmp].name());
 				break;
 
 			case Ist_Store: {
@@ -1474,8 +1488,10 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 					eval_expression(stmt->Ist.Store.addr);
 				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
-				if (addrSpace->isWritable(addr.lo, size, this))
+				if (addrSpace->isWritable(addr.lo, size, this)) {
+					DBG("Store %s to %s\n", data.name(), addr.name());
 					return StoreEvent<ait>::get(bumpEvent(ms), addr.lo, size, data);
+				}
 				EventTimestamp et;
 				ait free_addr;
 				if (addrSpace->isOnFreeList(addr.lo, addr.lo + mkConst<ait>(size), tid, &et,
@@ -1509,6 +1525,8 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 				put_data = eval_expression(stmt->Ist.Put.data);
 				put_type = typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data);
 				do_put:
+				DBG("put offset %d type %d -> %s",
+				    put_offset, put_type, put_data.name());
 				unsigned byte_offset = put_offset & 7;
 				ait dest = read_reg(this, put_offset - byte_offset);
 				switch (put_type) {
@@ -1717,13 +1735,23 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 				     LogReaderPtr *eof, LogWriter<ait> *lw,
 				     EventRecorder<ait> *er)
 {
+	unsigned long event_counter = 0;
+
 	while (1) {
+		event_counter++;
+		if (event_counter % 100000 == 0)
+			printf("event %ld\n", event_counter);
+		if (event_counter > 81748000)
+			loud_mode = true;
+
 		LogRecord<ait> *lr = lf->read(ptr, &ptr);
 		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
 		if (!lr)
 			break;
 
 		Thread<ait> *thr = currentState->findThread(lr->thread());
+		assert(thr);
+		assert(!thr->exitted);
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
 		while (evt) {
@@ -1732,11 +1760,9 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 			if (er)
 				er->record(thr, evt);
 
-#if 0
-			printf("Event %s in thread %d\n",
-			       evt->name(), lr->thread()._tid());
-#endif
-
+			if (loud_mode)
+				printf("Event %s in thread %d\n",
+				       evt->name(), lr->thread()._tid());
 
 			/* CAS events are annoyingly special, because
 			   they can generate multiple records in the
@@ -1767,11 +1793,13 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 				  LogReaderPtr *eof)
 {
 	/* Mostly a debugging aide */
-	static unsigned long event_counter;
+	volatile static unsigned long event_counter;
 
 	bool finished = false;
 	while (!finished) {
 		event_counter++;
+		printf("event %ld\n", event_counter);
+
 		LogRecord<ait> *lr = lf->read(ptr, &ptr);
 		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
 		if (!lr)
