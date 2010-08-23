@@ -1370,13 +1370,14 @@ public:
 };
 
 template<typename ait>
-void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
+void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace,
+				     ait rip)
 {
-	redirectGuest(regs.rip());
+	redirectGuest(rip);
 
 	vexSetAllocModeTEMP_and_clear();
 
-	WeakRef<IRSB> *cacheSlot = addrSpace->searchDecodeCache(force(regs.rip()));
+	WeakRef<IRSB> *cacheSlot = addrSpace->searchDecodeCache(force(rip));
 	assert(cacheSlot != NULL);
 	IRSB *irsb = cacheSlot->get();
 	if (!irsb) {
@@ -1390,12 +1391,12 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 		LibVEX_default_VexAbiInfo(&abiinfo_both);
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-		class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, regs.rip());
+		class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, rip);
 		irsb = bb_to_IR(&vge,
 				NULL, /* Context for chase_into_ok */
 				disInstr_AMD64,
 				fetcher,
-				(Addr64)force(regs.rip()),
+				(Addr64)force(rip),
 				chase_into_ok,
 				False, /* host bigendian */
 				VexArchAMD64,
@@ -1418,6 +1419,8 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace)
 
 	currentIRSB = irsb;
 	currentIRSBOffset = 0;
+	currentIRSBRip = regs.rip();
+
 	currentControlCondition = mkConst<ait>(1);
 
 	if (loud_mode)
@@ -1434,9 +1437,10 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 	IRType put_type;
 
 	while (1) {
+		addrSpace->sanityCheckDecodeCache();
 		if (!currentIRSB) {
 			try {
-				translateNextBlock(addrSpace);
+				translateNextBlock(addrSpace, regs.rip());
 			} catch (BadMemoryException<ait> excn) {
 				return SignalEvent<ait>::get(bumpEvent(ms), 11, excn.ptr);
 			}
@@ -1621,6 +1625,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 					     ternary(currentControlCondition,
 						     mkConst<ait>(stmt->Ist.Exit.dst->Ico.U64),
 						     mkConst<ait>(0xdeadbeef)));
+				currentIRSB = NULL;
 				goto finished_block;
 			}
 
@@ -1644,22 +1649,24 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			allowRipMismatch = false;
 
 		{
-			struct expression_result<ait> next_addr =
-				eval_expression(currentIRSB->next);
-			sanity_check_ait(currentControlCondition);
-			sanity_check_ait(next_addr.lo);
-			regs.set_reg(REGISTER_IDX(RIP),
-				     ternary(currentControlCondition,
-					     next_addr.lo,
-					     mkConst<ait>(0xdeadbeef)));
-		}
-		if (currentIRSB->jumpkind == Ijk_Sys_syscall) {
-			currentIRSB = NULL;
-			return SyscallEvent<ait>::get(bumpEvent(ms));
+			bool is_syscall = currentIRSB->jumpkind == Ijk_Sys_syscall;
+			{
+				struct expression_result<ait> next_addr =
+					eval_expression(currentIRSB->next);
+				sanity_check_ait(currentControlCondition);
+				sanity_check_ait(next_addr.lo);
+				regs.set_reg(REGISTER_IDX(RIP),
+					     ternary(currentControlCondition,
+						     next_addr.lo,
+						     mkConst<ait>(0xdeadbeef)));
+				currentIRSB = NULL;
+			}
+			if (is_syscall)
+				return SyscallEvent<ait>::get(bumpEvent(ms));
 		}
 
 finished_block:
-		currentIRSB = NULL;
+		addrSpace->sanityCheckDecodeCache();
 	}
 }
 
@@ -1741,7 +1748,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		event_counter++;
 		if (event_counter % 100000 == 0)
 			printf("event %ld\n", event_counter);
-		if (event_counter > 81748000)
+		if (event_counter > 23206000 && 0)
 			loud_mode = true;
 
 		LogRecord<ait> *lr = lf->read(ptr, &ptr);

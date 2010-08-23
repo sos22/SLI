@@ -239,7 +239,11 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 			struct expression_result<ait> v;
 			v.lo = mkConst<ait>(0);
 			try {
-				addrSpace->store(EventTimestamp::invalid, thr->clear_child_tid, 4, v);
+				addrSpace->store(EventTimestamp(thr->tid,
+								thr->nrEvents,
+								mach->nrEvents,
+								force(thr->regs.rip())),
+						 thr->clear_child_tid, 4, v);
 			} catch (BadMemoryException<ait> &e) {
 				/* Kernel ignores errors clearing the
 				   child TID pointer, and so we do
@@ -258,6 +262,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_getcwd: /* 79 */
 		break;
 	case __NR_mkdir: /* 83 */
+		break;
+	case __NR_unlink: /* 87 */
 		break;
 	case __NR_readlink: /* 89 */
 		break;
@@ -362,9 +368,7 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 	res = mkConst<ait>(-ENOSYS);
 	switch (force(sysnr)) {
 	case __NR_open: {
-		char *path =
-			ms->addressSpace->readString(thr->regs.get_reg(REGISTER_IDX(RDI)),
-						     thr);
+		char *path = ms->addressSpace->readString(args[0], thr);
 		printf("Can't fake open syscall (file %s)\n",
 		       path);
 		free(path);
@@ -401,6 +405,29 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 	case __NR_exit:
 	case __NR_exit_group: {
 		res = mkConst<ait>(0);
+		break;
+	}
+
+	case __NR_write: {
+		printf("write(%ld, 0x%lx, %ld)\n",
+		       force(args[0]), force(args[1]),
+		       force(args[2]));
+		if (force(args[0]) == 1 ||
+		    force(args[0]) == 2) {
+			char *s = ms->addressSpace->readString(args[1], thr);
+			printf("Client message %.*s\n",
+			       (int)force(args[2]), s);
+			free(s);
+		}
+		res = args[2];
+		break;
+	}
+
+	case __NR_select: {
+		/* Leave the masks unchanged, so every fd which was
+		 * polled on is flagged as ready, and return 1, so
+		 * that the client actually goes and looks at them. */
+		res = mkConst<ait>(1);		
 		break;
 	}
 

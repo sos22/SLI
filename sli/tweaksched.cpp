@@ -118,6 +118,7 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 	std::map<ThreadId, std::map<ThreadId, unsigned long> > threadSeen;
 	std::map<ThreadId, unsigned long> threadCounters;
 	std::set<unsigned long> racingAddresses;
+	std::set<ThreadId> threads;
 
 	while (1) {
 		LogRecord<unsigned long> *lr = lf->read(idx, &idx);
@@ -139,6 +140,8 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 			if (lastReader[addr].first != tid)
 				lastReader[addr] = tidCntr;
 			threadCounters[tid]++;
+
+			threads.insert(tid);
 		}
 
 		if (LogRecordStore<unsigned long> *lrs =
@@ -160,8 +163,12 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 			}
 			lastWriter[addr] = tidCntr;
 			threadCounters[tid]++;
+
+			threads.insert(tid);
 		}
 	}
+
+	LibVEX_gc();
 
 	/* Phase 2: Find the races.  Split the log into per-thread
 	   components at the same time. */
@@ -173,6 +180,7 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 	typedef std::vector<std::pair<bool, std::pair<ThreadId, unsigned> > > memlog_t;
 	std::map<unsigned long, memlog_t> memLogs;
 
+	unsigned nrRecords = 0;
 	while (1) {
 		LogRecord<unsigned long> *lr = lf->read(idx, &idx);
 		if (!lr)
@@ -187,12 +195,13 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 				/* We race with any write which we
 				   can't order based on ``seen''
 				   relations */
-				for (memlog_t::iterator it = mlog.begin();
-				     it != mlog.end();
+				for (memlog_t::reverse_iterator it = mlog.rbegin();
+				     it != mlog.rend();
 				     it++) {
 					if (!it->first &&
 					    it->second.first != tid &&
-					    it->second.second > threadSeen[tid][it->first]) {
+					    it->second.second > threadSeen[tid][it->second.first]) {
+						/* XXX transitivity? */
 						threadSeen[tid][it->second.first] = it->second.second;
 						constraints.push_back(
 							SchedConstraint(
@@ -215,11 +224,12 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 				/* We race with any access which we
 				   can't order based on ``seen''
 				   relations */
-				for (memlog_t::iterator it = mlog.begin();
-				     it != mlog.end();
+				for (memlog_t::reverse_iterator it = mlog.rbegin();
+				     it != mlog.rend();
 				     it++) {
 					if (it->second.first != tid &&
-					    it->second.second > threadSeen[tid][it->first]) {
+					    it->second.second > threadSeen[tid][it->second.first]) {
+						/* XXX transitivity? */
 						threadSeen[tid][it->second.first] = it->second.second;
 						constraints.push_back(
 							SchedConstraint(
@@ -246,6 +256,38 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 			threadLogs[effTid] = MemLog<unsigned long>::emptyMemlog();
 		}
 		threadLogs[effTid]->append(lr, 0);
+
+		if (++nrRecords % 1000 == 0) {
+			/* Try to eliminate the useless bits at the
+			 * start of the logs. */
+			for (std::map<unsigned long, memlog_t>::iterator it = memLogs.begin();
+			     it != memLogs.end();
+			     it++) {
+				memlog_t::iterator start = it->second.begin();
+				memlog_t::iterator end = start;
+
+				while (1) {
+					if (end == it->second.end())
+						break;
+					/* Has everyone seen this access? */
+					bool everyone_seen = true;
+					for (std::set<ThreadId>::iterator tid_it = threads.begin();
+					     tid_it != threads.end() && everyone_seen;
+					     tid_it++) {
+						if (threadSeen[*tid_it][end->second.first] <
+						    end->second.second)
+							everyone_seen = false;
+					}
+					if (!everyone_seen)
+						break;
+					++end;
+				}
+				if (start != end) {
+					printf("Remove prefix of log...\n");
+					it->second.erase(start, end);
+				}
+			}
+		}
 	}
 }
 
@@ -341,13 +383,23 @@ bool
 ConstraintMaker::contradictory()
 {
 	std::map<ThreadId, unsigned long> threadCounters;
-	std::vector<std::pair<bool, SchedConstraint> > liveConstraints;
+	/* The bool is an ``is-present'' flag.  You might think we'd
+	   be better off just erasing the things which aren't present,
+	   but this is faster because it avoids lots of copying. */
+	std::vector<std::pair<bool, SchedConstraint> > *liveConstraints;
+
+	/* Use a copying collector with two arenas to keep density of
+	 * constraint map reasonable. */
+	std::vector<std::pair<bool, SchedConstraint> > lc1;
+	std::vector<std::pair<bool, SchedConstraint> > lc2;
+
 	std::map<ThreadId, unsigned long> advanceTo;
 
+	liveConstraints = &lc1;
 	for (std::vector<SchedConstraint>::iterator it = constraints.begin();
 	     it != constraints.end();
 	     it++)
-		liveConstraints.push_back(std::pair<bool, SchedConstraint>(true, *it));
+		liveConstraints->push_back(std::pair<bool, SchedConstraint>(true, *it));
 
 	while (1) {
 		advanceTo.clear();
@@ -355,9 +407,9 @@ ConstraintMaker::contradictory()
 		/* Eliminate any constraints which we've now
 		 * satisfied, and figure out where we might be able to
 		 * advance to. */
-		bool constraintsLeft = false;
-		for (std::vector<std::pair<bool, SchedConstraint> >::iterator it = liveConstraints.begin();
-		     it != liveConstraints.end();
+		unsigned nrLive = 0;
+		for (std::vector<std::pair<bool, SchedConstraint> >::iterator it = liveConstraints->begin();
+		     it != liveConstraints->end();
 		     it++) {
 			if (!it->first)
 				continue;
@@ -367,11 +419,11 @@ ConstraintMaker::contradictory()
 				if (advanceTo.find(it->second.before.tid) == advanceTo.end() ||
 				    advanceTo[it->second.before.tid] > it->second.before.idx)
 					advanceTo[it->second.before.tid] = it->second.before.idx;
-				constraintsLeft = true;
+				nrLive++;
 			}
 		}
 
-		if (!constraintsLeft)
+		if (nrLive == 0)
 			return false;
 
 		/* Now see which thread we want to advance */
@@ -381,8 +433,8 @@ ConstraintMaker::contradictory()
 		     it++) {
 			/* Check whether this is valid. */
 			bool valid = true;
-			for (std::vector<std::pair<bool, SchedConstraint> >::iterator it2 = liveConstraints.begin();
-			     valid && it2 != liveConstraints.end();
+			for (std::vector<std::pair<bool, SchedConstraint> >::iterator it2 = liveConstraints->begin();
+			     valid && it2 != liveConstraints->end();
 			     it2++) {
 				if (!it2->first)
 					continue;
@@ -401,25 +453,41 @@ ConstraintMaker::contradictory()
 		}
 		if (!progress)
 			return true;
+
+		if (nrLive < liveConstraints->size() / 2) {
+			/* Compact */
+			std::vector<std::pair<bool, SchedConstraint> > *other_lc;
+			if (liveConstraints == &lc1)
+				other_lc = &lc2;
+			else
+				other_lc = &lc1;
+
+			other_lc->reserve(nrLive);
+			for (std::vector<std::pair<bool, SchedConstraint> >::iterator it = liveConstraints->begin();
+			     it != liveConstraints->end();
+			     it++) {
+				if (it->first)
+					other_lc->push_back(*it);
+			}
+			liveConstraints->clear();
+
+			liveConstraints = other_lc;
+		}
 	}
 
 }
 
 static void
-replayToSchedule(ConstraintMaker *cm)
+replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms)
 {
-	LogReaderPtr p;
-	VexPtr<MachineState<unsigned long> > ms(
-		MachineState<unsigned long>::initialMachineState(
-			cm->threadLogs[ThreadId(0)],
-			cm->threadLogs[ThreadId(0)]->startPtr(),
-			&p));
+	VexPtr<MachineState<unsigned long> > ms(_ms);
 
 	std::vector<std::pair<bool, SchedConstraint> > liveConstraints;
 	std::map<ThreadId, unsigned long> threadCounters;
 	std::map<ThreadId, LogReaderPtr> threadPtrs;
 	std::map<std::pair<ThreadId, unsigned long>, std::pair<unsigned, unsigned> > ripCounters;
 
+	ms->addressSpace->sanityCheckDecodeCache();
 	for (std::vector<SchedConstraint>::iterator it = cm->constraints.begin();
 	     it != cm->constraints.end();
 	     it++) {
@@ -484,11 +552,13 @@ replayToSchedule(ConstraintMaker *cm)
 		}
 
 
+		ms->addressSpace->sanityCheckDecodeCache();
 		ThreadEvent<unsigned long> *evt;
 		if (stashedEvents[tid])
 			evt = stashedEvents[tid];
 		else
 			evt = thr->runToEvent(ms->addressSpace, ms);
+		ms->addressSpace->sanityCheckDecodeCache();
 
 
 #if 0
@@ -557,14 +627,16 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	LogFile *lf;
 	LogReaderPtr ptr;
-
-	lf = LogFile::open(argv[1], &ptr);
+	VexPtr<LogFile> lf(LogFile::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	VexGcRoot((void **)&lf, "lf");
 
+	VexPtr<MachineState<unsigned long> > ms(
+		MachineState<unsigned long>::initialMachineState(
+			lf, ptr, &ptr));
+
+	ms->addressSpace->sanityCheckDecodeCache();
 	VexPtr<ConstraintMaker> cm(new ConstraintMaker());
 	cm->playLogfile(lf, ptr);
 
@@ -581,7 +653,8 @@ main(int argc, char *argv[])
 		printf("%s\n", it->name());
 	}
 
-	replayToSchedule(cm);
+	ms->addressSpace->sanityCheckDecodeCache();
+	replayToSchedule(cm, ms->dupeSelf());
 
 	for (std::vector<SchedConstraint>::reverse_iterator it = cm->constraints.rbegin();
 	     it != cm->constraints.rend();
@@ -592,7 +665,7 @@ main(int argc, char *argv[])
 		if (cm->contradictory()) {
 			printf("Contradiction\n");
 		} else {
-			replayToSchedule(cm);
+			replayToSchedule(cm, ms->dupeSelf());
 		}
 		it->flip();
 	}

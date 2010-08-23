@@ -51,14 +51,21 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 		((unsigned long *)&r)[x] = force(regs.get_reg(x));
 	lw->append(new LogRecordInitialRegisters<ait>(tid, r), 0);
 	if (currentIRSB && currentIRSBOffset != 0)
-		lw->append(new LogRecordVexThreadState<ait>(tid, currentIRSBOffset, temporaries), 0);
+		lw->append(new LogRecordVexThreadState<ait>(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
+
+	printf("Tid %d is at %d, irsb: \n", tid._tid(),
+	       currentIRSBOffset);
+	if (currentIRSB)
+		ppIRSB(currentIRSB);
+	else
+		printf("<null>\n");
 }
 
 template<typename ait>
 void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> *rec,
 			      AddressSpace<ait> *as)
 {
-	translateNextBlock(as);
+	translateNextBlock(as, rec->currentIRSBRip);
 	assert(currentIRSB);
 
 	/* == is valid here, and just means we're right at the end of

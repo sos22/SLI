@@ -352,6 +352,7 @@ AddressSpace<ait> *AddressSpace<ait>::dupeSelf() const
 	*work = *this;
 	work->pmap = pmap->dupeSelf();
 	work->vamap = vamap->dupeSelf();
+	memset(work->trans_hash, 0, sizeof(work->trans_hash));
 	return work;
 }
 
@@ -402,30 +403,62 @@ void AddressSpace<ait>::dumpBrkPtr(LogWriter<ait> *lw) const
 template <typename ait>
 void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 {
-	unsigned long last_va;
-	unsigned long next_va;
-	PhysicalAddress pa;
-	VAMap::Protection prot(0);
-	VAMap::AllocFlags alf(false);
-	last_va = 0;
-	while (vamap->findNextMapping(last_va, &next_va, &pa, &prot, &alf)) {
+	unsigned long end_of_last_block = 0;
+
+	while (1) {
+		unsigned long start_va;
+		PhysicalAddress pa;
+		VAMap::Protection prot(0);
+		VAMap::AllocFlags alf(false);
+
+		if (!vamap->findNextMapping(end_of_last_block, &start_va, &pa, &prot, &alf))
+			return;
+
+		/* Do this in two steps.  First, dump all the allocate
+		   records, and then go back and do the populate ones.
+		   This makes it easier to merge adjacent
+		   allocations. */
+		unsigned long end_va = start_va;
+		while (1) {
+			unsigned long next_va;
+			VAMap::Protection prot2(0);
+			VAMap::AllocFlags alf2(false);
+			if (!vamap->findNextMapping(end_va + 4096, &next_va, &pa, &prot2, &alf2))
+				break;
+			if (next_va != end_va + 4096 || prot != prot2 || alf != alf2)
+				break;
+			end_va = next_va;
+		}
+
+		end_va += 4096;
+
 		lw->append(new LogRecordAllocateMemory<ait>(ThreadId(0),
-							    mkConst<ait>(next_va),
-							    mkConst<ait>(MemoryChunk<ait>::size),
+							    mkConst<ait>(start_va),
+							    mkConst<ait>(end_va - start_va),
 							    (unsigned long)prot,
 							    (unsigned long)alf),
 			   0);
-		unsigned long off;
-		const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &off);
-		assert(off == 0);
-		ait *buf = (ait *)calloc(MemoryChunk<ait>::size, sizeof(ait));
-		mc->read(0, buf, MemoryChunk<ait>::size);
-		lw->append(new LogRecordMemory<ait>(ThreadId(0),
-						    MemoryChunk<ait>::size,
-						    mkConst<ait>(next_va),
-						    buf),
-			   0);
-		last_va = next_va + MemoryChunk<ait>::size;
+
+		/* Now do the contents of the block */
+		unsigned long cursor_va;
+		for (cursor_va = start_va; cursor_va < end_va; cursor_va += 4096) {
+			bool r;
+			PhysicalAddress pa;
+			r = vamap->translate(cursor_va, &pa);
+			assert(r);
+			unsigned long off;
+			const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &off);
+			assert(off == 0);
+			ait *buf = (ait *)calloc(MemoryChunk<ait>::size, sizeof(ait));
+			mc->read(0, buf, MemoryChunk<ait>::size);
+			lw->append(new LogRecordMemory<ait>(ThreadId(0),
+							    MemoryChunk<ait>::size,
+							    mkConst<ait>(cursor_va),
+							    buf),
+				   0);
+		}
+
+		end_of_last_block = end_va;
 	}
 }
 
@@ -588,19 +621,47 @@ AddressSpace<ait>::client_freed(EventTimestamp when, ait ptr)
 	freed_memory.push_back(cf);
 }
 
+static unsigned long
+rip_hash(unsigned long rip, unsigned nr_trans_hash_slots)
+{
+	unsigned long hash = 0;
+	while (rip) {
+		hash ^= rip % nr_trans_hash_slots;
+		rip /= nr_trans_hash_slots;
+	}
+	return hash;
+}
+
+#if 0
+template <typename ait> void
+AddressSpace<ait>::sanityCheckDecodeCache() const
+{
+	trans_hash_entry *n;
+
+	for (unsigned x = 0;
+	     x < nr_trans_hash_slots;
+	     x++) {
+		if (!trans_hash[x])
+			continue;
+		assert(trans_hash[x]->pprev == &trans_hash[x]);
+		n = trans_hash[x];
+		while (n) {
+			assert(rip_hash(n->rip, nr_trans_hash_slots) == x);
+			if (n->next)
+				assert(n->next->pprev == &n->next);
+			n = n->next;
+		}
+	}
+}
+#endif
+
 template <typename ait> WeakRef<IRSB> *
 AddressSpace<ait>::searchDecodeCache(unsigned long rip)
 {
-	unsigned long hash;
-	unsigned long rip2;
+	unsigned long hash = rip_hash(rip, nr_trans_hash_slots);
 	trans_hash_entry **pprev, *n;
 
-	hash = 0;
-	rip2 = rip;
-	while (rip2) {
-		hash ^= rip2 % nr_trans_hash_slots;
-		rip2 /= nr_trans_hash_slots;
-	}
+	sanityCheckDecodeCache();
 
 	pprev = &trans_hash[hash];
 	if (trans_hash[hash])
@@ -612,6 +673,7 @@ AddressSpace<ait>::searchDecodeCache(unsigned long rip)
 		if (n->next)
 			assert(n->next->pprev == &n->next);
 		assert(*n->pprev == n);
+		assert(rip_hash(n->rip, nr_trans_hash_slots) == hash);
 		if (n->rip == rip) {
 			/* Pull-to-front hash chaining */
 			if (trans_hash[hash] != n) {
@@ -623,10 +685,12 @@ AddressSpace<ait>::searchDecodeCache(unsigned long rip)
 				n->next = trans_hash[hash];
 				n->pprev = &trans_hash[hash];
 				trans_hash[hash] = n;
+				assert(trans_hash[hash]->pprev == &trans_hash[hash]);
 			}
 			if (n->next)
 				assert(n->next->pprev == &n->next);
 			assert(*n->pprev == n);
+			sanityCheckDecodeCache();
 			return &n->irsb;
 		}
 
@@ -649,6 +713,7 @@ AddressSpace<ait>::searchDecodeCache(unsigned long rip)
 	n->pprev = &trans_hash[hash];
 	trans_hash[hash] = n;
 
+	sanityCheckDecodeCache();
 	return &n->irsb;
 }
 

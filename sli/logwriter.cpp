@@ -23,10 +23,17 @@ void *LogRecord<ait>::marshal(unsigned cls, unsigned psize, unsigned *sz, void *
 {
 	*sz = sizeof(record_header) + psize;
 	*r = malloc(*sz);
+	memset(*r, 0, *sz);
 	((record_header *)*r)->cls = cls;
 	((record_header *)*r)->size = *sz;
 	((record_header *)*r)->tid = thread()._tid();
 	return (void *)((unsigned long)*r + sizeof(record_header));
+}
+
+template <typename ait> unsigned
+LogRecordFootstep<ait>::marshal_size() const
+{
+	return sizeof(footstep_record<ait>);
 }
 
 template <typename ait>
@@ -41,6 +48,12 @@ void *LogRecordFootstep<ait>::marshal(unsigned *sz) const
 	fr->FOOTSTEP_REG_3_NAME = reg3;
 	fr->FOOTSTEP_REG_4_NAME = reg4;
 	return r;
+}
+
+template <typename ait> unsigned
+LogRecordSyscall<ait>::marshal_size() const
+{
+	return sizeof(syscall_record<ait>);
 }
 
 template<typename ait>
@@ -62,6 +75,12 @@ void *LogRecordSyscall<ait>::marshal(unsigned *sz) const
 	return r;
 }
 
+template <typename ait> unsigned
+LogRecordMemory<ait>::marshal_size() const
+{
+	return sizeof(memory_record<ait>) + size;
+}
+
 template <typename ait>
 void *LogRecordMemory<ait>::marshal(unsigned *sz) const
 {
@@ -77,6 +96,12 @@ void *LogRecordMemory<ait>::marshal(unsigned *sz) const
 	return r;
 }
 
+template <typename ait> unsigned
+LogRecordRdtsc<ait>::marshal_size() const
+{
+	return sizeof(rdtsc_record<ait>);
+}
+
 template <typename ait>
 void *LogRecordRdtsc<ait>::marshal(unsigned *sz) const
 {
@@ -87,6 +112,12 @@ void *LogRecordRdtsc<ait>::marshal(unsigned *sz) const
 									     &r);
 	rr->stashed_tsc = tsc;
 	return r;
+}
+
+template <typename ait> unsigned
+LogRecordLoad<ait>::marshal_size() const
+{
+	return sizeof(mem_read_record<ait>) + size;
 }
 
 template <typename ait>
@@ -105,6 +136,12 @@ void *LogRecordLoad<ait>::marshal(unsigned *sz) const
 	return r;
 }
 
+template <typename ait> unsigned
+LogRecordStore<ait>::marshal_size() const
+{
+	return sizeof(mem_write_record<ait>) + size;
+}
+
 template <typename ait>
 void *LogRecordStore<ait>::marshal(unsigned *sz) const
 {
@@ -119,6 +156,12 @@ void *LogRecordStore<ait>::marshal(unsigned *sz) const
 	v[1] = force(value.hi);
 	memcpy(sr + 1, v, size);
 	return r;
+}
+
+template <typename ait> unsigned
+LogRecordSignal<ait>::marshal_size() const
+{
+	return sizeof(signal_record<ait>);
 }
 
 template <typename ait>
@@ -136,6 +179,12 @@ void *LogRecordSignal<ait>::marshal(unsigned *sz) const
 	return r;
 }
 
+template <typename ait> unsigned
+LogRecordAllocateMemory<ait>::marshal_size() const
+{
+	return sizeof(allocate_memory_record<ait>);
+}
+
 template <typename ait>
 void *LogRecordAllocateMemory<ait>::marshal(unsigned *sz) const
 {
@@ -151,6 +200,12 @@ void *LogRecordAllocateMemory<ait>::marshal(unsigned *sz) const
 	return r;
 }
 
+template <typename ait> unsigned
+LogRecordInitialRegisters<ait>::marshal_size() const
+{
+	return sizeof(VexGuestAMD64State);
+}
+
 template <typename ait>
 void *LogRecordInitialRegisters<ait>::marshal(unsigned *sz) const
 {
@@ -163,6 +218,12 @@ void *LogRecordInitialRegisters<ait>::marshal(unsigned *sz) const
 	return r;
 }
 
+template <typename ait> unsigned
+LogRecordInitialBrk<ait>::marshal_size() const
+{
+	return sizeof(initial_brk_record<ait>);
+}
+
 template <typename ait>
 void *LogRecordInitialBrk<ait>::marshal(unsigned *sz) const
 {
@@ -173,6 +234,12 @@ void *LogRecordInitialBrk<ait>::marshal(unsigned *sz) const
 											  &r);
 	ibr->initial_brk = brk;
 	return r;
+}
+
+template <typename ait> unsigned
+LogRecordInitialSighandlers<ait>::marshal_size() const
+{
+	return sizeof(initial_sighandlers_record<ait>);
 }
 
 template <typename ait>
@@ -188,16 +255,23 @@ void *LogRecordInitialSighandlers<ait>::marshal(unsigned *sz) const
 	return r;
 }
 
+template <typename ait> unsigned
+LogRecordVexThreadState<ait>::marshal_size() const
+{
+	return sizeof(vex_thread_state_record_2<ait>);
+}
+
 template <typename ait>
 void *LogRecordVexThreadState<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	vex_thread_state_record<ait> *vtsr =
-		(vex_thread_state_record<ait> *)LogRecord<ait>::marshal(RECORD_vex_thread_state,
-									sizeof(*vtsr) + 16 * tmp.nr_entries,
-									sz,
-									&r);
+	vex_thread_state_record_2<ait> *vtsr =
+		(vex_thread_state_record_2<ait> *)LogRecord<ait>::marshal(RECORD_vex_thread_state_2,
+									  sizeof(*vtsr) + 16 * tmp.nr_entries,
+									  sz,
+									  &r);
 	vtsr->statement_nr = statement_nr;
+	vtsr->translation_origin = currentIRSBRip;
 	for (unsigned x = 0; x < tmp.nr_entries; x++) {
 		vtsr->temporaries[x*2] = tmp.arr[x].lo;
 		vtsr->temporaries[x*2+1] = tmp.arr[x].hi;
@@ -208,7 +282,7 @@ void *LogRecordVexThreadState<ait>::marshal(unsigned *sz) const
 LogFileWriter *LogFileWriter::open(const char *path)
 {
 	int fd;
-	fd = ::open(path, O_WRONLY|O_APPEND|O_CREAT|O_EXCL, 0666);
+	fd = ::open(path, O_WRONLY|O_APPEND|O_CREAT|O_TRUNC, 0666);
 	if (fd < 0)
 		return NULL;
 	LogFileWriter *work = new LogFileWriter();
@@ -239,9 +313,11 @@ void LogFileWriter::append(LogRecord<unsigned long> *lr, unsigned long ignore)
 }
 
 template <typename ait>
-LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
+LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, ait _currentIRSBRip,
+						      unsigned _statement_nr,
 						      expression_result_array<ait> _tmp)
 	: LogRecord<ait>(tid),
+	  currentIRSBRip(_currentIRSBRip),
 	  tmp(_tmp),
 	  statement_nr(_statement_nr)
 {
@@ -254,9 +330,8 @@ void SignalHandlers<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 }
 
 #define MK_LOGWRITER(t)							\
-	template LogRecordVexThreadState<t>::LogRecordVexThreadState(ThreadId, \
-								     unsigned, \
-								     expression_result_array<t>); \
 	template void *LogRecordRdtsc<t>::marshal(unsigned *sz) const;	\
+	template unsigned LogRecordRdtsc<t>::marshal_size() const;	\
 	template void *LogRecordSyscall<t>::marshal(unsigned *sz) const; \
-	template void *LogRecordFootstep<t>::marshal(unsigned *sz) const
+	template void *LogRecordFootstep<t>::marshal(unsigned *sz) const; \
+	template unsigned LogRecordFootstep<t>::marshal_size() const

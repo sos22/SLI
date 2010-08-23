@@ -6,8 +6,6 @@
 int
 main(int argc, char *argv[])
 {
-	std::set_terminate(__gnu_cxx::__verbose_terminate_handler);
-
 	if (argc != 4)
 		errx(1, "need precisely three arguments: input, output, and target size");
 
@@ -31,6 +29,8 @@ main(int argc, char *argv[])
 	VexGcRoot rlf_root((void **)&reduced_lf, "reduced lf");
 	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr);
 	VexGcRoot ms_root((void **)&ms, "ms_root");
+
+	ms->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
 
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(reduced_lf, ptr, &ptr);

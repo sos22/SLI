@@ -36,6 +36,7 @@ void
 init_sli(void)
 {
 	VexControl vcon;
+	unsigned short fpu_control;
 
 	std::set_terminate(__gnu_cxx::__verbose_terminate_handler);
 
@@ -48,6 +49,14 @@ init_sli(void)
 	LibVEX_Init(failure_exit, log_bytes, 0, 0, &vcon);
 
 	signal(SIGUSR1, handle_sigusr1);
+
+	/* Horrible hack: do what's needed to make Thunderbird work */
+	asm("fstcw %0\n"
+	    : "=m" (fpu_control));
+	fpu_control &= ~0x300;
+	asm volatile("fldcw %0\n"
+		     :
+		     : "m" (fpu_control));
 }
 
 void noop_destructor(void *_ctxt)

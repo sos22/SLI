@@ -49,7 +49,8 @@ std::map<ThreadId, Maybe<unsigned> > *MemTracePool<ait>::firstRacingAccessMap()
 					if (other_ma->isLoad() && ma->isLoad())
 						continue;
 					/* This is the one */
-					printf("Race on %lx\n", force(other_ma->addr));
+					printf("Race on %lx, tids %d %d\n", force(other_ma->addr),
+					       tid._tid(), other_tid._tid());
 					goto found_race;
 				}
 			}

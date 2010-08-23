@@ -129,6 +129,7 @@ public:
 		  tid(ThreadId(strtol(b+1, NULL, 16))),
 		  query(b[0] != 'c')
 	{
+		printf("Set thread %d (b:%s)\n", tid._tid(), b);
 	}
 };
 

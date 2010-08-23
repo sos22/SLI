@@ -850,3 +850,9 @@ LibVEX_alloc_sanity_check(void)
 {
 }
 #endif
+
+bool
+LibVEX_is_gc_address(const void *what)
+{
+  return what >= temporary && what < temporary + N_TEMPORARY_BYTES;
+}

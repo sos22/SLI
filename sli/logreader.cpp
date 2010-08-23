@@ -92,7 +92,7 @@ skip:
 		return NULL;
 	ThreadId tid(rh.tid);
 	*_nextPtr = mkPtr(startPtr.off + rh.size, startPtr.record_nr+1);
-	if (startPtr.off / 1000000 != (startPtr.off + rh.size) / 1000000)
+	if (startPtr.off / 10000000 != (startPtr.off + rh.size) / 10000000)
 		printf("Read %ldM\n", startPtr.off / 1000000);
 
 	switch (rh.cls) {
@@ -124,13 +124,12 @@ skip:
 		unsigned s;
 		int r = buffered_pread(&mr, sizeof(mr), startPtr.off + sizeof(rh));
 		s = rh.size - sizeof(mr) - sizeof(rh);
-		void *buf = malloc(s);
+		void *buf = alloca(s);
 		r = buffered_pread(buf, s, startPtr.off + sizeof(rh) + sizeof(mr));
 		(void)r;
 		unsigned long *b = (unsigned long *)malloc(sizeof(unsigned long) * s);
 		for (unsigned x = 0; x < s; x++)
 			b[x] = ((unsigned char *)buf)[x];
-		free(buf);
 		return new LogRecordMemory<unsigned long>(tid,
 							  rh.size - sizeof(mr) - sizeof(rh),
 							  (unsigned long)mr.ptr,
@@ -219,9 +218,9 @@ skip:
 		(void)r;
 		return new LogRecordInitialSighandlers<unsigned long>(tid, isr.handlers);
 	}
-	case RECORD_vex_thread_state: {
-		vex_thread_state_record<unsigned long> *vtsr;
-		vtsr = (vex_thread_state_record<unsigned long> *)malloc(rh.size - sizeof(rh));
+	case RECORD_vex_thread_state_1: {
+		vex_thread_state_record_1<unsigned long> *vtsr;
+		vtsr = (vex_thread_state_record_1<unsigned long> *)alloca(rh.size - sizeof(rh));
 		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
 		expression_result_array<unsigned long> era;
@@ -231,8 +230,21 @@ skip:
 			era[x].hi = vtsr->temporaries[x * 2 + 1];
 		}
 		unsigned sn = vtsr->statement_nr;
-		free(vtsr);
-		return new LogRecordVexThreadState<unsigned long>(tid, sn, era);
+		return new LogRecordVexThreadState<unsigned long>(tid, 0, sn, era);
+	}
+	case RECORD_vex_thread_state_2: {
+		vex_thread_state_record_2<unsigned long> *vtsr;
+		vtsr = (vex_thread_state_record_2<unsigned long> *)alloca(rh.size - sizeof(rh));
+		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
+		(void)r;
+		expression_result_array<unsigned long> era;
+		era.setSize((rh.size - sizeof(rh) - sizeof(*vtsr)) / 16);
+		for (unsigned x = 0; x < era.nr_entries; x++) {
+			era[x].lo = vtsr->temporaries[x * 2];
+			era[x].hi = vtsr->temporaries[x * 2 + 1];
+		}
+		unsigned sn = vtsr->statement_nr;
+		return new LogRecordVexThreadState<unsigned long>(tid, vtsr->translation_origin, sn, era);
 	}
 
 	default:

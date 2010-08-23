@@ -117,13 +117,21 @@ struct initial_sighandlers_record {
 };
 
 template<typename ait>
-struct vex_thread_state_record {
-#define RECORD_vex_thread_state 16
+struct vex_thread_state_record_1 {
+#define RECORD_vex_thread_state_1 16
 	unsigned statement_nr;
 	ait temporaries[0];
 };
 
-#define RECORD_MAX_CLASS RECORD_vex_thread_state
+template<typename ait>
+struct vex_thread_state_record_2 {
+#define RECORD_vex_thread_state_2 17
+	unsigned statement_nr;
+	ait translation_origin;
+	ait temporaries[0];
+};
+
+#define RECORD_MAX_CLASS RECORD_vex_thread_state_2
 
 
 struct index_record {

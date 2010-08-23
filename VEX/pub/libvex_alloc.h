@@ -77,6 +77,8 @@ extern void *__LibVEX_Alloc_Bytes(unsigned long nbytes,
 extern void *LibVEX_Alloc_Sized(VexAllocType *t, unsigned long size);
 extern void *LibVEX_realloc(void *base, unsigned long new_size);
 
+bool LibVEX_is_gc_address(const void *what);
+
 void vexRegisterGCRoot(void **, const char *name);
 void vexUnregisterGCRoot(void **);
 void vexInitHeap(void);

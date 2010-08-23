@@ -390,7 +390,7 @@ template <typename ait> class LogRecordVexThreadState;
 
 template <typename abst_int_type>
 class Thread : public GarbageCollected<Thread<abst_int_type> > {
-	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace);
+	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace, abst_int_type rip);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
 	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details, MachineState<abst_int_type> *ms);
 	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
@@ -421,6 +421,7 @@ public:
 	unsigned long nrEvents;
 
 	IRSB *currentIRSB;
+	abst_int_type currentIRSBRip;
 	expression_result_array<abst_int_type> temporaries;
 	int currentIRSBOffset;
 
@@ -666,6 +667,7 @@ protected:
 public:
 	ThreadId thread() const { return tid; }
 	LogRecord(ThreadId _tid) : tid(_tid) {}
+	virtual unsigned marshal_size() const = 0;
 	virtual void *marshal(unsigned *size) const = 0;
 	virtual ~LogRecord() {};
 	virtual void destruct() {}
@@ -691,6 +693,7 @@ public:
 		memcpy(handlers, sa, sizeof(*sa) * 64);
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordInitialSighandlers<outtype> *abstract() const
 	{
 		return new LogRecordInitialSighandlers<outtype>(this->thread(), handlers);
@@ -1313,6 +1316,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordLoad<outtype> *abstract() const
 	{
 		expression_result<outtype> nvalue;
@@ -1366,6 +1370,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordStore<outtype> *abstract() const
 	{
 		expression_result<outtype> res;
@@ -1453,6 +1458,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordFootstep<outtype> *abstract() const
 	{
 		return new LogRecordFootstep<outtype>(this->thread(),
@@ -1497,6 +1503,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordSyscall<outtype> *abstract() const
 	{
 		return new LogRecordSyscall<outtype>(this->thread(),
@@ -1522,6 +1529,8 @@ protected:
 	char *mkName() const {
 		return my_asprintf("memory(%x)", size);
 	}
+	LogRecordMemory(const LogRecordMemory &); /* DNI */
+	void operator=(const LogRecordMemory &); /* DNI */
 public:
 	unsigned size;
 	ait start;
@@ -1534,9 +1543,17 @@ public:
 		size(_size),
 		start(_start),
 		contents(_contents)
-	{}
-	virtual ~LogRecordMemory() { free((void *)contents); }
+	{
+		assert(!LibVEX_is_gc_address(contents));
+	}
+	~LogRecordMemory()
+	{ 
+		assert(!LibVEX_is_gc_address(contents));
+		free((void *)contents);
+	}
+	void destruct() { this->~LogRecordMemory(); }
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordMemory<outtype> *abstract() const
 	{
 		outtype *b = (outtype *)malloc(size * sizeof(outtype));
@@ -1566,6 +1583,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordRdtsc<outtype> *abstract() const
 	{
 		return new LogRecordRdtsc<outtype>(this->thread(),
@@ -1598,6 +1616,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordSignal<outtype> *abstract() const
 	{
 		return new LogRecordSignal<outtype>(this->thread(),
@@ -1640,6 +1659,7 @@ public:
 	{
 	}      
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordAllocateMemory<outtype> *abstract() const
 	{
 		return new LogRecordAllocateMemory<outtype>(this->thread(),
@@ -1667,6 +1687,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordInitialRegisters<outtype> *abstract() const
 	{
 		return new LogRecordInitialRegisters<outtype>(this->thread(), regs);
@@ -1688,6 +1709,7 @@ public:
 	{
 	}
 	void *marshal(unsigned *size) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordInitialBrk<outtype> *abstract() const
 	{
 		return new LogRecordInitialBrk<outtype>(this->thread(),
@@ -1703,16 +1725,20 @@ protected:
 		return strdup("vex state");
 	}
 public:
+	ait currentIRSBRip;
 	expression_result_array<ait> tmp;
 	unsigned statement_nr;
-	LogRecordVexThreadState(ThreadId tid, unsigned _statement_nr,
-				expression_result_array<ait> _tmp);
+	LogRecordVexThreadState(ThreadId tid, ait _currentIRSBRip,
+				unsigned _statement_nr, expression_result_array<ait> _tmp);
 	void *marshal(unsigned *sz) const;
+	unsigned marshal_size() const;
 	template <typename outtype> LogRecordVexThreadState<outtype> *abstract() const
 	{
 		expression_result_array<outtype> ntmp;
 		tmp.abstract(&ntmp);
-		return new LogRecordVexThreadState<outtype>(this->thread(), statement_nr, ntmp);
+		return new LogRecordVexThreadState<outtype>(
+			this->thread(), mkConst<outtype>(currentIRSBRip),
+			statement_nr, ntmp);
 	}
 	void visit(HeapVisitor &hv) const { tmp.visit(hv); }
 };
@@ -1799,7 +1825,7 @@ public:
 
 	template <typename new_type> AddressSpace<new_type> *abstract() const;
 
-	void destruct() {}
+	void destruct() { this->~AddressSpace(); }
 
 	typedef std::vector<client_freed_entry<ait> > freed_memory_t;
 	freed_memory_t freed_memory;
@@ -1817,7 +1843,7 @@ public:
 		WeakRef<IRSB> irsb;
 
 		void visit(HeapVisitor &hv) const { hv(next); }
-		void destruct() {}
+		void destruct() { this->~trans_hash_entry(); }
 
 		trans_hash_entry(unsigned long _rip)
 			: next(NULL),
@@ -1830,6 +1856,13 @@ public:
 	};
 
 	WeakRef<IRSB> *searchDecodeCache(unsigned long rip);
+
+	void sanityCheckDecodeCache(void) const
+#if 1
+	{}
+#else
+	;
+#endif
 
 private:
 	static const unsigned nr_trans_hash_slots = 2048;
