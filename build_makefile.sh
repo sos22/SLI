@@ -14,6 +14,10 @@ rules() {
 }
 . "./$input"
 
+echo "# Generated from ${input} by $0; do not edit"
+echo
+echo
+
 for subdir in $subdirs
 do
     echo "include ${input_base}/${subdir}/Makefile.mk"
