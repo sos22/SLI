@@ -69,12 +69,16 @@ bool Explorer::advance()
 
 	/* Check for no-progress-possible condition */
 	bool stopped = true;
+	bool everyone_idle = true;
 	for (unsigned x = 0; stopped && x < basis->ms->threads->size(); x++) {
 		Thread<unsigned long> *thr = basis->ms->threads->index(x);
-		if (!thr->cannot_make_progress)
+		if (!thr->cannot_make_progress) {
+			if (!thr->idle)
+				everyone_idle = false;
 			stopped = false;
+		}
 	}
-	if (stopped)
+	if (stopped || everyone_idle)
 		return true;
 
 	/* Okay, have to actually do something. */
@@ -104,6 +108,7 @@ bool Explorer::advance()
 				continue;
 			Interpreter<unsigned long> i(basis->ms);
 			i.runToFailure(thr->tid, basis->history, 10000);
+			thr->idle = false;
 		}
 		grayStates->push(basis);
 		delete first_racing_access;
@@ -127,6 +132,7 @@ bool Explorer::advance()
 			i.runToFailure(tid, newGray->history, 10000);
 		}
 
+		thr->idle = false;
 		grayStates->push(newGray);
 	}
 
