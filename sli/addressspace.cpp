@@ -481,22 +481,33 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 			   0);
 
 		/* Now do the contents of the block */
-		unsigned long cursor_va;
-		for (cursor_va = start_va; cursor_va < end_va; cursor_va += 4096) {
-			bool r;
-			PhysicalAddress pa;
-			r = vamap->translate(cursor_va, &pa);
-			assert(r);
-			unsigned long off;
-			const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &off);
-			assert(off == 0);
-			ait *buf = (ait *)calloc(MemoryChunk<ait>::size, sizeof(ait));
-			mc->read(0, buf, MemoryChunk<ait>::size);
-			lw->append(new LogRecordMemory<ait>(ThreadId(0),
-							    MemoryChunk<ait>::size,
-							    mkConst<ait>(cursor_va),
-							    buf),
-				   0);
+
+		/* We cheat just a little bit and only bother dumping
+		   stuff which can be read or executed.  In principle,
+		   other bits of address space could be relevant,
+		   because someone might mprotect() them to be
+		   readable, but that's rather unlikely.  This allows
+		   us to avoid dumping reserved areas of address
+		   space, which can be hundreds of megabytes of data
+		   in some cases. */
+		if (prot.readable || prot.executable) {
+			unsigned long cursor_va;
+			for (cursor_va = start_va; cursor_va < end_va; cursor_va += 4096) {
+				bool r;
+				PhysicalAddress pa;
+				r = vamap->translate(cursor_va, &pa);
+				assert(r);
+				unsigned long off;
+				const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &off);
+				assert(off == 0);
+				ait *buf = (ait *)calloc(MemoryChunk<ait>::size, sizeof(ait));
+				mc->read(0, buf, MemoryChunk<ait>::size);
+				lw->append(new LogRecordMemory<ait>(ThreadId(0),
+								    MemoryChunk<ait>::size,
+								    mkConst<ait>(cursor_va),
+								    buf),
+					   0);
+			}
 		}
 
 		end_of_last_block = end_va;
