@@ -1679,7 +1679,11 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 	Thread<ait> *thr = currentState->findThread(tid);
 	if (thr->cannot_make_progress)
 		return InterpretResultIncomplete;
-	while (max_events && thr->runnable()) {
+	while (max_events && thr->runnable() &&
+
+	       /* Since we're running the thread in isolation, if it
+		  goes idle it's unlikely to ever wake up again. */
+	       !thr->idle) {
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
 		InterpretResult res = evt->fake(currentState);
@@ -1762,8 +1766,6 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
 
 		while (evt) {
-			if (lw)
-				lw->append(lr, evt->when.idx);
 			if (er)
 				er->record(thr, evt);
 
@@ -1775,6 +1777,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 			   they can generate multiple records in the
 			   logfile (one for the load and one for the
 			   store). */
+			ThreadEvent<ait> *oldEvent = evt;
 			CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
 			if (ce) {
 				evt = ce->replay(lr, currentState,
@@ -1782,6 +1785,8 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 			} else {
 				evt = evt->replay(lr, currentState);
 			}
+			if (lw)
+				lw->append(lr, oldEvent->when.idx);
 			if (evt)
 				lr = lf->read(ptr, &ptr);
 		}
