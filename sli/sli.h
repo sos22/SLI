@@ -85,14 +85,20 @@ template <typename underlying>
 void visit_object(const void *_ctxt, HeapVisitor &hv)
 {
 	const underlying *ctxt = (const underlying *)_ctxt;
-	ctxt->visit(hv);
+	/* hackety hackety hack: don't visit if we've not been
+	 * constructed (no vtable pointer) */
+	if (*(unsigned long *)_ctxt)
+		ctxt->visit(hv);
 }
 
 template <typename underlying>
 void destruct_object(void *_ctxt)
 {
 	underlying *ctxt = (underlying *)_ctxt;
-	ctxt->destruct();
+	/* Like visit_object(), don't destruct if we've not been
+	   constructed. */
+	if (*(unsigned long *)_ctxt)
+		ctxt->destruct();
 }
 
 template <typename underlying>
@@ -102,15 +108,55 @@ const char *get_name(const void *_ctxt)
 	return ctxt->cls_name();
 }
 
-template <typename t>
+/* Slight ugliness: if you specify a non-zero magazine, then your
+   items can get visit()ed before they've been constructed.  Clients
+   are expected to handle this.  If you can't, then you can't use a
+   magazine.  We guarantee to zero all your memory if that happens
+   (including vtable pointers!). */
+template <typename t, unsigned magazine_size = 0, size_t magazine_item_size = 0>
 class GarbageCollected {
 	static VexAllocType type;
+	static unsigned magazine_used;
+	/* XXX should maybe use weak references in here, so that the
+	   magazine gets blown away during GC, but that seems like too
+	   much effort. */
+	static LibvexVector<t> *magazine;
 public:
 	static void *operator new(size_t s)
 	{
-		void *x = LibVEX_Alloc_Sized(&type, s);
-		memset(x, 0, s);
-		return x;
+		/* Use the magazine if available.  This can sometimes
+		   help to avoid heap fragmentation: interleaving
+		   allocations of long- and short-lived structures is
+		   a particularly bad case for our allocator, but
+		   allocating a batch of long-lived ones followed by a
+		   batch of short-lived ones is generally pretty
+		   good. */
+		void *res;
+		if (magazine_size != 0 && s <= magazine_item_size) {
+			if (!magazine) {
+				printf("Allocate magazine for %s\n",
+				       t::cls_name());
+				magazine = LibvexVector<t>::empty();
+				magazine->_set_size(magazine_size);
+				vexRegisterGCRoot((void **)&magazine, "<allocation magazine>");
+				magazine_used = magazine_size;
+			}
+			if (magazine_used == magazine_size) {
+				for (unsigned x = 0; x < magazine_size; x++) {
+					void *r = LibVEX_Alloc_Sized(&type,
+								     magazine_item_size);
+					memset(r, 0, s);
+					magazine->set(x, (t *)r);
+				}
+				magazine_used = 0;
+			}
+			res = magazine->index(magazine_used);
+			magazine_used++;
+		} else {
+			res = LibVEX_Alloc_Sized(&type, s);
+			memset(res, 0, s);
+		}
+		return res;
 	}
 	static void operator delete(void *)
 	{
@@ -119,7 +165,9 @@ public:
 	virtual void visit(HeapVisitor &hv) const = 0;
 	virtual void destruct() = 0;
 };
-template <typename t> VexAllocType GarbageCollected<t>::type = {-1, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
+template <typename t, unsigned mag, size_t s> VexAllocType GarbageCollected<t, mag, s>::type = {-1, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
+template <typename t, unsigned mag, size_t s> unsigned GarbageCollected<t, mag, s>::magazine_used;
+template <typename t, unsigned mag, size_t s> LibvexVector<t> *GarbageCollected<t, mag, s>::magazine;
 
 template <typename p>
 class VexPtr {
@@ -961,7 +1009,7 @@ public:
 };
 
 template <typename ait>
-class ThreadEvent : public Named, public GarbageCollected<ThreadEvent<ait> > {
+class ThreadEvent : public Named, public GarbageCollected<ThreadEvent<ait>, 16, 256> {
 protected:
 	ThreadEvent(EventTimestamp _when) : when(_when) {}
 public:
