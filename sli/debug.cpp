@@ -518,10 +518,13 @@ GdbChannel<ait>::accept()
 }
 
 template <typename ait> static void
-gdb_machine_state(const MachineState<ait> *base_ms)
+gdb_machine_state(const MachineState<ait> *_ms)
 {
-	MachineState<ait> *ms = base_ms->dupeSelf();
+	if (fork())
+		return;
 
+	/* Allowed because of the fork() */
+	MachineState<ait> *ms = const_cast<MachineState<ait> *>(_ms);	
 	VexGcRoot ms_keeper((void **)&ms, "gdb_machine_state");
 
 	GdbChannel<ait> *chan = GdbChannel<ait>::accept();
@@ -540,6 +543,8 @@ gdb_machine_state(const MachineState<ait> *base_ms)
 	}
 
 	delete chan;
+
+	_exit(0);
 }
 
 void
