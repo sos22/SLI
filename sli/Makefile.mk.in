@@ -33,7 +33,7 @@ EOF
 	do
 	    cat <<EOF
 $t: ${input_base}/${t}.o
-	gcc \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
+	gcc -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 	done
 }

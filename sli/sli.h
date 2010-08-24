@@ -413,6 +413,7 @@ public:
 	abst_int_type futex_block_address;
 	bool exitted;
 	bool crashed;
+	bool idle;
 
 	bool cannot_make_progress;
 	bool blocked;
@@ -811,11 +812,12 @@ public:
 		t->tid = tid;
 		threads->push(t);
 	}
-	Thread<abst_int_type> *findThread(ThreadId id) {
+	Thread<abst_int_type> *findThread(ThreadId id, bool allow_failure = false) {
 		unsigned x;
 		for (x = 0; x < threads->size(); x++)
 			if (threads->index(x)->tid == id)
 				return threads->index(x);
+		assert(allow_failure);
 		return NULL;
 	}
 	const Thread<abst_int_type> *findThread(ThreadId id) const {
@@ -1789,6 +1791,10 @@ public:
 	void writeMemory(EventTimestamp when, ait start, unsigned size,
 			 const ait *contents, bool ignore_protection,
 			 const Thread<ait> *thr);
+	bool copyToClient(EventTimestamp when, ait start, unsigned size,
+			  const void *source);
+	bool copyFromClient(EventTimestamp when, ait start, unsigned size,
+			    void *dest);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result<ait> load(EventTimestamp when, ait start, unsigned size,
 				    bool ignore_protection = false,

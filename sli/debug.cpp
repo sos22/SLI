@@ -182,7 +182,7 @@ GetMemoryCommand<ait>::doIt(MachineState<ait> *ms)
 	ait *membuf = (ait *)malloc(size * sizeof(ait));
 	try {
 		ms->addressSpace->readMemory(mkConst<ait>(addr), size, membuf, true,
-					     ms->findThread(this->chan->currentTidQuery));
+					     ms->findThread(this->chan->currentTidQuery, true));
 	} catch (BadMemoryException<ait> exc) {
 		this->sendResponse("E12");
 		free(membuf);
@@ -202,7 +202,7 @@ GetMemoryCommand<ait>::doIt(MachineState<ait> *ms)
 template <typename ait> void
 GetRegistersCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery);
+	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
 
 	if (thr) {
 		char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
@@ -224,7 +224,7 @@ GetRegistersCommand<ait>::doIt(MachineState<ait> *ms)
 template <typename ait> void
 GetRegisterCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery);
+	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
 	ait r;
 	bool haveIt;
 
@@ -294,7 +294,7 @@ QueryCommand<ait>::doIt(MachineState<ait> *ms)
 template <typename ait> void
 ThreadAliveCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	const Thread<ait> *thr = ms->findThread(tid);
+	const Thread<ait> *thr = ms->findThread(tid, true);
 	if (!thr || thr->exitted || thr->crashed)
 		this->sendResponse("E01");
 	else
@@ -304,7 +304,7 @@ ThreadAliveCommand<ait>::doIt(MachineState<ait> *ms)
 template <typename ait> void
 ContinueCommand<ait>::doIt(MachineState<ait> *ms)
 {
-	Thread<ait> *thr = ms->findThread(this->chan->currentTidRun);
+	Thread<ait> *thr = ms->findThread(this->chan->currentTidRun, true);
 	if (!thr) {
 		this->sendResponse("E99");
 		return;

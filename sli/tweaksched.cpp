@@ -505,21 +505,41 @@ replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms)
 	std::map<ThreadId, VexPtr<ThreadEvent<unsigned long> > > stashedEvents;
 
 	unsigned event_nr = 0;
+	bool allow_idle_threads;
 
-	while (!ms->exitted) {
+	/* Impose an arbitrary cut-off of 10,000,000 events so that
+	   you don't get one history running forever. */
+	while (!ms->exitted && event_nr < 10000000) {
 		/* Get list of available threads */
 		std::set<ThreadId> availThreads;
 		for (std::map<ThreadId, MemLog<unsigned long> *>::iterator it = cm->threadLogs.begin();
 		     it != cm->threadLogs.end();
 		     it++)
-			if (it->first._tid() != 0 &&
-			    ms->findThread(it->first)->runnable()) {
-				availThreads.insert(it->first);
+			if (it->first._tid() != 0) {
+				Thread<unsigned long> *thr = ms->findThread(it->first, true);
+				if (thr && thr->runnable()) {
+					if (!thr->idle || allow_idle_threads) {
+						availThreads.insert(it->first);
+						thr->idle = false;
+					}
+				}
 			}
 
 	select_new_thread:
-		if (availThreads.empty())
-			break;
+		if (availThreads.empty()) {
+			if (allow_idle_threads) {
+				break;
+			} else {
+				/* If we're going idle every time then
+				   we're probably not making progress,
+				   so bump the event counter a bit
+				   faster so that we give up
+				   sooner. */
+				event_nr += 100000;
+				allow_idle_threads = true;
+				continue;
+			}
+		}
 
 		/* Replay an event in that thread. */
 		ThreadId tid = *availThreads.begin();
@@ -560,7 +580,7 @@ replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms)
 			evt = thr->runToEvent(ms->addressSpace, ms);
 		ms->addressSpace->sanityCheckDecodeCache();
 
-
+		allow_idle_threads = false;
 #if 0
 		printf("%d:%lx:%lx:%d:%d: (%d) %s\n",
 		       tid._tid(),

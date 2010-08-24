@@ -40,6 +40,47 @@ void AddressSpace<ait>::protectMemory(ait start, ait size,
 	vamap->protect(force(start), force(size), prot);
 }
 
+template <typename ait> bool
+AddressSpace<ait>::copyToClient(EventTimestamp when, ait start, unsigned size,
+				const void *contents)
+{
+	ait *buf = (ait *)malloc(sizeof(ait) * size);
+	bool fault;
+
+	for (unsigned x = 0; x < size; x++)
+		buf[x] = mkConst<ait>( ((unsigned char *)contents)[x] );
+	fault = false;
+	try {
+		writeMemory(when, start, size, buf, false, NULL);
+	} catch (BadMemoryException<ait> &e) {
+		fault = true;
+	}
+	free(buf);
+	return fault;
+}
+
+template <typename ait> bool
+AddressSpace<ait>::copyFromClient(EventTimestamp when, ait start, unsigned size,
+				  void *dest)
+{
+	ait *buf = (ait *)calloc(sizeof(ait), size);
+	bool fault;
+
+	fault = false;
+	try {
+		readMemory(start, size, buf, false, NULL, NULL);
+	} catch (BadMemoryException<ait> &e) {
+		fault = true;
+	}
+	if (!fault) {
+		for (unsigned x = 0; x < size; x++) {
+			((unsigned char *)dest)[x] = force(buf[x]);
+		}
+	}
+	free(buf);
+	return fault;
+}
+
 template <typename ait>
 void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned size,
 				    const ait *contents, bool ignore_protection,

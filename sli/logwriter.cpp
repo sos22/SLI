@@ -330,6 +330,11 @@ void SignalHandlers<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 }
 
 #define MK_LOGWRITER(t)							\
+	template LogRecordVexThreadState<t>::LogRecordVexThreadState(	\
+		ThreadId tid,						\
+		t _currentIRSBRip,					\
+		unsigned _statement_nr,					\
+		expression_result_array<t> _tmp);			\
 	template void *LogRecordRdtsc<t>::marshal(unsigned *sz) const;	\
 	template unsigned LogRecordRdtsc<t>::marshal_size() const;	\
 	template void *LogRecordSyscall<t>::marshal(unsigned *sz) const; \

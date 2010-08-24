@@ -284,7 +284,7 @@ LibVEX_gc(void)
 
 void vexSetAllocModeTEMP_and_clear ( void )
 {
-  if (heap_used > N_TEMPORARY_BYTES / 2)
+  if (heap_used > (N_TEMPORARY_BYTES * 3) / 4)
     LibVEX_gc();
 }
 
