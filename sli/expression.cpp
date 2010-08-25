@@ -70,13 +70,6 @@ load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestam
 	return x;
 }
 
-template<> racetrack_value
-load_ait(racetrack_value x, racetrack_value addr, EventTimestamp when, EventTimestamp store,
-	 racetrack_value storeAddr, unsigned size)
-{
-	return x;
-}
-
 #define binop_float_rip(nme)						\
 	do {								\
 		ExpressionRip *lrip = dynamic_cast<ExpressionRip *>(l);	\

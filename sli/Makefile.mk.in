@@ -3,7 +3,7 @@ targets="slir crop symexec crashreason cftrace binpatch fuzzsched tweaksched dbg
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog,expression,events}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk,refinement,fixgen}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{debug,instantiation,dbgbreak,racetrack}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{debug,instantiation,dbgbreak}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))

@@ -70,13 +70,13 @@ void mulls64(struct expression_result<abstract_interpret_value> *dest,
 	dest->hi.v = d.hi;
 }
 
-template<typename ait>
-RegisterSet<ait>::RegisterSet(const VexGuestAMD64State &r)
+template<>
+RegisterSet<abstract_interpret_value>::RegisterSet(const VexGuestAMD64State &r)
 {
 	for (unsigned x = 0;
 	     x < NR_REGS;
 	     x++)
-		registers[x] = mkConst<ait>( ((unsigned long *)&r)[x] );
+		registers[x] = mkConst<abstract_interpret_value>( ((unsigned long *)&r)[x] );
 }
 
 static inline abstract_interpret_value signed_shift_right(abstract_interpret_value x, abstract_interpret_value y)
@@ -114,94 +114,4 @@ static inline abstract_interpret_value signed_l(abstract_interpret_value x, abst
 MK_INTERP(abstract_interpret_value);
 
 
-#define lift_binary_operator(op, type, field)				\
-	static inline type operator op(const type &l, const type &r)	\
-	{								\
-		return type(l. field op r. field);			\
-	}								\
-	static inline void operator op ## = (type &l, const type &r)	\
-	{								\
-		l . field op ## = r . field;				\
-	}
-
-#define lift_binary_operators(type, field)	\
-	lift_binary_operator(+, type, field)	\
-	lift_binary_operator(-, type, field)	\
-	lift_binary_operator(*, type, field)	\
-	lift_binary_operator(/, type, field)	\
-	lift_binary_operator(%, type, field)	\
-	lift_binary_operator(&, type, field)	\
-	lift_binary_operator(|, type, field)	\
-	lift_binary_operator(^, type, field)	\
-	lift_binary_operator(<<, type, field)	\
-	lift_binary_operator(>>, type, field)
-
-#define lift_logical_operator(op, type, field)				\
-	static inline type operator op(const type &l, const type &r)	\
-	{								\
-		return type(l. field op r. field);			\
-	}
-#define lift_logical_operators(type, field)	\
-	lift_logical_operator(||, type, field)	\
-	lift_logical_operator(&&, type, field)	\
-	lift_logical_operator(==, type, field)	\
-	lift_logical_operator(!=, type, field)	\
-	lift_logical_operator(<=, type, field)	\
-	lift_logical_operator(>=, type, field)	\
-	lift_logical_operator(>, type, field)	\
-	lift_logical_operator(<, type, field)
-
-#define lift_unary_operator(op, type, field)				\
-	static inline type operator op(const type &l)			\
-	{								\
-		return type(op l. field);				\
-	}
-
-#define lift_unary_operators(type, field)		\
-	lift_unary_operator(-, type, field)		\
-	lift_unary_operator(!, type, field)		\
-	lift_unary_operator(~, type, field)
-
-#define lift_operators(type, field)			\
-	lift_logical_operators(type, field)		\
-	lift_binary_operators(type, field)		\
-	lift_unary_operators(type, field)
-
-lift_operators(racetrack_value, concrete)
-
-static racetrack_value signed_shift_right(racetrack_value x, racetrack_value y)
-{
-	return (long)x.concrete >> y.concrete;
-}
-
-static racetrack_value signed_le(racetrack_value x, racetrack_value y)
-{
-	return (long)x.concrete <= (long)y.concrete;
-}
-	
-static racetrack_value signed_l(racetrack_value x, racetrack_value y)
-{
-	return (long)x.concrete < (long)y.concrete;
-}
-
-template <>
-void mulls64(struct expression_result<racetrack_value> *dest,
-	     const struct expression_result<racetrack_value> &src1,
-	     const struct expression_result<racetrack_value> &src2)
-{
-	struct expression_result<unsigned long> s1, s2, d;
-
-	s1.lo = src1.lo.concrete;
-	s1.hi = src1.hi.concrete;
-	s2.lo = src2.lo.concrete;
-	s2.hi = src2.hi.concrete;
-	mulls64(&d, s1, s2);
-	dest->lo.concrete = d.lo;
-	dest->hi.concrete = d.hi;
-}
-
-MK_INTERP(racetrack_value);
-
-
 MK_MACH_CONVERTOR(unsigned long, abstract_interpret_value);
-MK_MACH_CONVERTOR(unsigned long, racetrack_value);

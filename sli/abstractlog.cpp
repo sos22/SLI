@@ -17,14 +17,18 @@ public:
 
 template <typename outtype, typename intype> VexAllocTypeWrapper<AbstractLogReader<outtype, intype> > AbstractLogReader<outtype,intype>::allocator;
 
-template <typename rtype>
-LogRecord<rtype> *
+/* Templates turn out to be much more limited than you would expect,
+   so have to unroll this by hand (in particular, you can't call a
+   member template function from another multi-parameter template
+   function, at least not with gcc 4.3.3).  Grr. */
+
+static LogRecord<abstract_interpret_value> *
 abstractLogRecord(const LogRecord<unsigned long> *inp)
 {
 #define DO_TYPE(typ)							\
 	if (const LogRecord ## typ <unsigned long> *ll =		\
 	    dynamic_cast<const LogRecord ## typ <unsigned long> *>(inp)) \
-		return ll->abstract<rtype>()
+		return ll->abstract<abstract_interpret_value>()
 	DO_TYPE(InitialSighandlers);
 	DO_TYPE(Load);
 	DO_TYPE(Store);
@@ -41,14 +45,14 @@ abstractLogRecord(const LogRecord<unsigned long> *inp)
 	abort();
 }
 
-template <typename outtype, typename intype>
-LogRecord<outtype> *
-AbstractLogReader<outtype,intype>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
+template <>
+LogRecord<abstract_interpret_value> *
+AbstractLogReader<abstract_interpret_value,unsigned long>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
 {
-	LogRecord<intype> *inr = inp->read(startPtr, outPtr);
+	LogRecord<unsigned long> *inr = inp->read(startPtr, outPtr);
 	if (!inr)
 		return NULL;
-	return abstractLogRecord<outtype>(inr);
+	return abstractLogRecord(inr);
 }
 
 template <typename ait> template <typename new_type>
@@ -58,5 +62,4 @@ LogReader<new_type> *LogReader<ait>::abstract() const
 }
 
 template LogReader<abstract_interpret_value> *LogReader<unsigned long>::abstract<abstract_interpret_value>() const;
-template LogReader<racetrack_value> *LogReader<unsigned long>::abstract<racetrack_value>() const;
 
