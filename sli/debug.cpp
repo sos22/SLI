@@ -129,7 +129,6 @@ public:
 		  tid(ThreadId(strtol(b+1, NULL, 16))),
 		  query(b[0] != 'c')
 	{
-		printf("Set thread %d (b:%s)\n", tid._tid(), b);
 	}
 };
 
@@ -285,6 +284,9 @@ QueryCommand<ait>::doIt(MachineState<ait> *ms)
 			this->sendResponse("m%d", ms->threads->index(this->chan->threadInfoIndex)->tid._tid());
 			this->chan->threadInfoIndex++;
 		}
+	} else if (!strcmp(q, "Symbol::")) {
+		/* Don't want to look any symbols up, thank you. */
+		this->sendResponse("E00");
 	} else {
 		warnx("unknown query %s", q);
 		this->sendResponse("E00");
@@ -549,6 +551,12 @@ gdb_machine_state(const MachineState<ait> *_ms)
 
 void
 gdb_concrete(const MachineState<unsigned long> *ms)
+{
+	gdb_machine_state(ms);
+}
+
+void
+gdb_racetrack(const MachineState<racetrack_value> *ms)
 {
 	gdb_machine_state(ms);
 }

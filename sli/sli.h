@@ -1937,6 +1937,8 @@ void debugger_attach(void);
 
 void init_sli(void);
 
+struct racetrack_value;
+
 struct abstract_interpret_value;
 
 class Expression;
@@ -3202,6 +3204,7 @@ static inline void sanity_check_ait(abstract_interpret_value v)
 void considerPotentialFixes(Expression *expr);
 
 void gdb_concrete(const MachineState<unsigned long> *ms);
+void gdb_racetrack(const MachineState<racetrack_value> *ms);
 void gdb_abstract(const MachineState<abstract_interpret_value> *ms);
 void gdb(void);
 void dbg_break(const char *msg, ...);
@@ -3214,6 +3217,7 @@ force_linkage()
 {
 	gdb_concrete(NULL);
 	gdb_abstract(NULL);
+	gdb_racetrack(NULL);
 }
 
 class UseOfFreeMemoryException : public SliException {
@@ -3245,5 +3249,66 @@ public:
 #define CALLER_HISTOGRAM(depth)						\
 	extern RipHistogram __caller_histogram;				\
 	__caller_histogram.click(__builtin_return_address(depth + 1))
+
+struct racetrack_value {
+	unsigned long concrete;
+	racetrack_value(unsigned long x) : concrete(x) {}
+	racetrack_value() : concrete(0) {}
+};
+
+static inline unsigned long force(racetrack_value x)
+{
+	return x.concrete;
+}
+
+static inline void sanity_check_ait(racetrack_value ign)
+{
+}
+
+static inline void mark_as_stack(racetrack_value ign)
+{
+}
+
+static inline void visit_aiv(racetrack_value, HeapVisitor &)
+{
+}
+
+static inline char *name_aiv(racetrack_value x)
+{
+	return vex_asprintf("%lx", x.concrete);
+}
+
+template <> racetrack_value mkConst(unsigned long x)
+{
+	return racetrack_value(x);
+}
+
+template<> racetrack_value ternary(racetrack_value cond,
+				   racetrack_value t,
+				   racetrack_value f)
+{
+	return racetrack_value(cond.concrete ? t.concrete : f.concrete);
+}
+
+template <>
+class MemoryChunk<racetrack_value> : public GarbageCollected<MemoryChunk<racetrack_value> > {
+public:
+	static const unsigned long size = MEMORY_CHUNK_SIZE;
+	static MemoryChunk<racetrack_value> *allocate() { return new MemoryChunk<racetrack_value>(); }
+	MemoryChunk<racetrack_value> *dupeSelf() const;
+	PhysicalAddress base;
+
+	EventTimestamp read(unsigned offset, racetrack_value *dest, unsigned nr_bytes,
+			    racetrack_value *sa = NULL) const;
+	void write(EventTimestamp when, unsigned offset, const racetrack_value *source, unsigned nr_bytes,
+		   racetrack_value storeAddr);
+
+	void visit(HeapVisitor &hv) const {}
+	void destruct() {}
+
+	NAMED_CLASS
+private:
+	unsigned char content[size];
+};
 
 #endif /* !SLI_H__ */

@@ -728,6 +728,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_Or64:
 			dest->lo = arg1.lo | arg2.lo;
 			break;
+		case Iop_Shl8:
 		case Iop_Shl16:
 		case Iop_Shl32:
 		case Iop_Shl64:
@@ -736,6 +737,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Iop_Sar64:
 			dest->lo = signed_shift_right(arg1.lo, arg2.lo);
 			break;
+		case Iop_Shr8:
 		case Iop_Shr16:
 		case Iop_Shr32:
 		case Iop_Shr64:
