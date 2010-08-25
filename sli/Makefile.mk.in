@@ -23,6 +23,8 @@ rules() {
 $targets: slir.a libVEX.a
 ${input_base}/instantiation.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/instantiation.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
+${input_base}/races.o: CPPFLAGS+=-I\$(libvex)/priv
+${input_base}/races.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/dbgbreak.o: OPTIMIZE_FLAGS=-O0
 
 slir.a: \$(SLIR_OBJECTS)
