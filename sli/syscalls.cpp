@@ -203,6 +203,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		break;
 	case __NR_select: /* 23 */
 		break;
+	case __NR_sched_yield: /* 24 */
+		break;
 	case __NR_nanosleep: /* 35 */
 		break;
 	case __NR_getpid: /* 39 */
@@ -359,6 +361,11 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	return evt;
 }
 
+/* Try to ``fake'' a system call.  This tries to do something sensible
+   which will encourage the client to continue and allow us to explore
+   more of its behaviour.  This is all very ad-hoc and hacky, but
+   seems to work often enough to be useful (at least for some
+   programs). */
 template <typename ait>
 InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 {
@@ -382,7 +389,8 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 		if (force(args[0]) == 1 ||
 		    force(args[0]) == 2) {
 			char *s = ms->addressSpace->readString(args[1], thr);
-			printf("Client message %.*s\n",
+			printf("Client %s %.*s",
+			       force(args[0]) == 1 ? "message" : "error",
 			       (int)force(args[2]), s);
 			free(s);
 		}
@@ -398,6 +406,10 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 		res = mkConst<ait>(-ENOENT);
 		break;
 	}
+
+	case __NR_close: /* 3 */
+		res = mkConst<ait>(0);
+		break;
 
 	case __NR_poll: { /* 7 */
 		struct pollfd pfd;
@@ -435,11 +447,34 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 		else {
 			printf("thread %d appears to have gone idle...\n",
 			       thr->tid._tid());
-			res = mkConst<ait>(-EFAULT);
+			res = mkConst<ait>(-ENOSYS);
 			thr->idle = true;
 		}
 		break;
 	}
+
+	case __NR_writev: { /* 20 */
+		/* Just say that everything went out fine */
+		struct iovec iov;
+		unsigned nr_iovs = force(args[3]);
+		ssize_t written;
+		written = 0;
+		for (unsigned x = 0; x < nr_iovs; x++) {
+			ms->addressSpace->copyFromClient(this->when,
+							 args[0] + mkConst<ait>(x * sizeof(iov)),
+							 sizeof(iov),
+							 &iov);
+			written += iov.iov_len;
+		}
+		res = mkConst<ait>(written);
+		break;
+	}
+
+	case __NR_stat: /* 4 */
+	case __NR_lstat: /* 6 */
+	case __NR_access: /* 21 */
+		res = mkConst<ait>(-ENOENT);
+		break;
 
 	case __NR_select: { /* 23 */
 		/* Leave the masks unchanged, so every fd which was
@@ -448,6 +483,18 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 		res = mkConst<ait>(1);		
 		break;
 	}
+
+	case __NR_nanosleep: /* 35 */
+		printf("Thread %d sleeping...\n", thr->tid._tid());
+		thr->idle = true;
+		res = mkConst<ait>(0);
+		break;
+
+	case __NR_mkdir: /* 83 */
+	case __NR_rmdir: /* 84 */
+	case __NR_unlink: /* 87 */
+		res = mkConst<ait>(0);
+		break;
 
 	case __NR_gettimeofday: { /* 96 */
 		struct timeval tv;
@@ -525,6 +572,9 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 
 	if (lr)
 		*lr = llr;
-	replay_syscall<ait>(llr, thr, ms);
-	return InterpretResultContinue;
+	ThreadEvent<ait> *evt = replay_syscall<ait>(llr, thr, ms);
+	if (evt)
+		return evt->fake(ms);
+	else
+		return InterpretResultContinue;
 }
