@@ -1971,6 +1971,7 @@ public:
 };
 
 class Expression : public Named, public GarbageCollected<Expression> {
+	friend class ConstExpression;
 	static const unsigned nr_heads = 262147;
 	static Expression *heads[nr_heads];
 	static unsigned chain_lengths[nr_heads];
@@ -2127,9 +2128,26 @@ public:
 	bool isLogical() const { return v == 0 || v == 1; }
 	static Expression *get(unsigned long v)
 	{
+		/* Search the hash table first */
+		unsigned h_index = v % nr_heads;
+		Expression *cursor = Expression::heads[h_index];
+		while (cursor) {
+			if (cursor->hashval == v &&
+			    dynamic_cast<ConstExpression *>(cursor)) {
+				/* We know that, for const expressions, if the
+				   hash matches then so does the value, so don't
+				   need to do a full comparison. */
+				cursor->pull_to_front();
+				return cursor;
+			}
+			cursor = cursor->next;
+		}
 		ConstExpression *work = new ConstExpression();
 		work->v = v;
-		return intern(work);
+		work->hashval = v;
+		work->add_to_hash();
+		Expression::nr_interned++;
+		return work;
 	}
 	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
