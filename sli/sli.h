@@ -1979,10 +1979,12 @@ class Expression : public Named, public GarbageCollected<Expression> {
 	static unsigned nr_interned;
 	Expression *next;
 	Expression **pprev;
-	unsigned hashval;
+	unsigned long hashval;
 	static void dump_eq_calls_table();
 	static void dump_chain_length_table();
 	void remove_from_hash() {
+		if (pprev != &next)
+			chain_lengths[hashval % nr_heads]--;
 		*pprev = next;
 		if (next)
 			next->pprev = pprev;
@@ -1990,11 +1992,13 @@ class Expression : public Named, public GarbageCollected<Expression> {
 		next = NULL;
 	}
 	void add_to_hash() {
+		assert(pprev == &next);
 		pprev = &heads[hashval % nr_heads];
 		next = *pprev;
 		if (next)
 			next->pprev = &next;
 		*pprev = this;
+		chain_lengths[hashval % nr_heads]++;
 	}
 	void pull_to_front() {
 		remove_from_hash();
@@ -2004,7 +2008,7 @@ class Expression : public Named, public GarbageCollected<Expression> {
 	mutable WeakRef<Expression> concrete;
 protected:
 	static Expression *intern(Expression *e);
-	virtual unsigned _hash() const = 0;
+	virtual unsigned long _hash() const = 0;
 	virtual bool _isEqual(const Expression *other) const = 0;
 	virtual Expression *_CNF() { return this; }
 	virtual Expression *_concretise() = 0;
@@ -2087,7 +2091,7 @@ public:
 class BottomExpression : public UnrefinableExpression {
 	static BottomExpression *bottom;
 protected:
-	unsigned _hash() const { return 0x1234567; }
+	unsigned long _hash() const { return 0x1234567; }
 	char *mkName() const { return my_asprintf("_|_"); }
 	bool _isEqual(const Expression *other) const { return false; }
 	Expression *_concretise() { return this; }
@@ -2108,7 +2112,7 @@ class ConstExpression : public UnrefinableExpression {
 public:
         unsigned long v;
 protected:
-	unsigned _hash() const { return v; }
+	unsigned long _hash() const { return v; }
 	char *mkName() const { return my_asprintf("%lx", v); }
 	bool _isEqual(const Expression *other) const
 	{
@@ -2154,7 +2158,7 @@ protected:
 				   store.tid._tid(),
 				   store.idx);
 	}
-	unsigned _hash() const {
+	unsigned long _hash() const {
 		return load.hash() ^ store.hash() ^ vaddr->hash();
 	}
 	bool _isEqual(const Expression *other) const {
@@ -2225,7 +2229,7 @@ protected:
 				   after.tid._tid(),
 				   after.idx);
 	}
-	unsigned _hash() const {
+	unsigned long _hash() const {
 		return before.hash() ^ after.hash();
 	}
 	bool _isEqual(const Expression *other) const {
@@ -2293,7 +2297,7 @@ protected:
 						  store.tid._tid(), store.idx,
 						  addr->name(), storeAddr->name(),
 						  val->name()); }
-	unsigned _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.hash() * 5) ^ (store.hash() * 7) ^ (storeAddr->hash() * 11) ^ (size * 13); }
+	unsigned long _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.hash() * 5) ^ (store.hash() * 7) ^ (storeAddr->hash() * 11) ^ (size * 13); }
 	bool _isEqual(const Expression *other) const {
 		const LoadExpression *le = dynamic_cast<const LoadExpression *>(other);
 		if (le &&
@@ -2424,7 +2428,7 @@ public:
 			return my_asprintf("(%s " #pp " %s)",		\
 					   l->name(), r->name());	\
 		}							\
-		unsigned _hash() const { return l->hash() ^ (r->hash() * 3) ^ sizeof(nme); } \
+		unsigned long _hash() const { return l->hash() ^ (r->hash() * 3) ^ sizeof(nme); } \
                 bool _isEqual(const Expression *other) const		\
 		{							\
 			const nme *oth =				\
@@ -2517,7 +2521,7 @@ public:
 		{							\
 			return my_asprintf("(" #nme " %s)", l->name());	\
 		}							\
-		unsigned _hash() const { return l->hash() ^ sizeof(nme); } \
+		unsigned long _hash() const { return l->hash() ^ sizeof(nme); } \
                 bool _isEqual(const Expression *other) const		\
 		{							\
 			const nme *oth =				\
@@ -2568,7 +2572,7 @@ protected:
 		return my_asprintf("(%s ? %s : %s)",
 				   cond->name(), t->name(), f->name());
 	}
-	unsigned _hash() const { return cond->hash() ^ (t->hash() * 3) ^ (f->hash() * 5) ^ 97; }
+	unsigned long _hash() const { return cond->hash() ^ (t->hash() * 3) ^ (f->hash() * 5) ^ 97; }
 	bool _isEqual(const Expression *other) const			
 	{							
 		const ternarycondition *oth =				
@@ -3085,7 +3089,7 @@ protected:
 	char *mkName(void) const {
 		return my_asprintf("(rip %d:{%s}:%s)", tid._tid(), history ? history->name() : "<nohistory>", cond ? cond->name() : "<nocond>");
 	}
-	unsigned _hash() const {
+	unsigned long _hash() const {
 		return (history ? history->hash() : 0) ^ tid._tid() ^ (cond ? cond->hash() : 0);
 	}
 	bool _isEqual(const Expression *other) const {
@@ -3157,7 +3161,7 @@ protected:
 	char *mkName(void) const {
 		return my_asprintf("(bad ptr %d:%lx:%s)", when.tid._tid(), when.idx, addr->name());
 	}
-	unsigned _hash() const {
+	unsigned long _hash() const {
 		return addr->hash() ^ when.hash();
 	}
 	bool _isEqual(const Expression *other) const {

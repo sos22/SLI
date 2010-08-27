@@ -32,7 +32,7 @@ Expression *Expression::intern(Expression *e)
 {
 	calls_to_intern++;
 	e->hashval = e->_hash();
-	
+
 	unsigned h = e->hashval % nr_heads;
 	Expression *cursor;
 	tot_outstanding++;
@@ -47,7 +47,6 @@ Expression *Expression::intern(Expression *e)
 		return cursor;
 	}
 	e->add_to_hash();
-	chain_lengths[h]++;
 	nr_interned++;
 	return e;
 }
