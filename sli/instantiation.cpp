@@ -66,8 +66,8 @@ void mulls64(struct expression_result<abstract_interpret_value> *dest,
 	s2.hi = src2.hi.v;
 
 	mulls64(&d, s1, s2);
-	dest->lo.v = d.lo;
-	dest->hi.v = d.hi;
+	dest->lo = mkConst<abstract_interpret_value>(d.lo);
+	dest->hi = mkConst<abstract_interpret_value>(d.hi);
 }
 
 template<>
