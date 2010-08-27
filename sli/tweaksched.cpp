@@ -91,7 +91,8 @@ public:
 	std::vector<SchedConstraint> constraints;
 	std::map<ThreadId, MemLog<unsigned long> *> threadLogs;
 
-	void playLogfile(LogReader<unsigned long> *lr, LogReaderPtr start);
+	void playLogfile(LogReader<unsigned long> *lr, LogReaderPtr start,
+			 GarbageCollectionToken tok);
 	void decanonise(LogReader<unsigned long> *lr, LogReaderPtr start);
 
 	bool contradictory();
@@ -107,7 +108,8 @@ public:
 };
 
 void
-ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
+ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr,
+			     GarbageCollectionToken tok)
 {
 	LogReaderPtr idx = ptr;
 	ThreadId effTid;
@@ -168,7 +170,7 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr)
 		}
 	}
 
-	LibVEX_gc();
+	LibVEX_gc(tok);
 
 	/* Phase 2: Find the races.  Split the log into per-thread
 	   components at the same time. */
@@ -478,7 +480,7 @@ ConstraintMaker::contradictory()
 }
 
 static void
-replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms)
+replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms, GarbageCollectionToken tok)
 {
 	VexPtr<MachineState<unsigned long> > ms(_ms);
 
@@ -577,7 +579,7 @@ replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms)
 		if (stashedEvents[tid])
 			evt = stashedEvents[tid];
 		else
-			evt = thr->runToEvent(ms->addressSpace, ms);
+			evt = thr->runToEvent(ms->addressSpace, ms, tok);
 		ms->addressSpace->sanityCheckDecodeCache();
 
 		allow_idle_threads = false;
@@ -624,7 +626,7 @@ replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms)
 		MemLog<unsigned long> *logfile = cm->threadLogs[tid];
 		LogReaderPtr &logptr(threadPtrs[tid]);
 #if 1
-		stashedEvents[tid] = evt->fuzzyReplay(ms, logfile, logptr, &logptr);
+		stashedEvents[tid] = evt->fuzzyReplay(ms, logfile, logptr, &logptr, tok);
 #else
 		VexPtr<LogRecord<unsigned long> > lr(logfile->read(logptr, &logptr));
 		if (!lr) {
@@ -654,11 +656,11 @@ main(int argc, char *argv[])
 
 	VexPtr<MachineState<unsigned long> > ms(
 		MachineState<unsigned long>::initialMachineState(
-			lf, ptr, &ptr));
+			lf, ptr, &ptr, ALLOW_GC));
 
 	ms->addressSpace->sanityCheckDecodeCache();
 	VexPtr<ConstraintMaker> cm(new ConstraintMaker());
-	cm->playLogfile(lf, ptr);
+	cm->playLogfile(lf, ptr, ALLOW_GC);
 
 	assert(!cm->contradictory());
 
@@ -674,7 +676,7 @@ main(int argc, char *argv[])
 	}
 
 	ms->addressSpace->sanityCheckDecodeCache();
-	replayToSchedule(cm, ms->dupeSelf());
+	replayToSchedule(cm, ms->dupeSelf(), ALLOW_GC);
 
 	for (std::vector<SchedConstraint>::reverse_iterator it = cm->constraints.rbegin();
 	     it != cm->constraints.rend();
@@ -685,7 +687,7 @@ main(int argc, char *argv[])
 		if (cm->contradictory()) {
 			printf("Contradiction\n");
 		} else {
-			replayToSchedule(cm, ms->dupeSelf());
+			replayToSchedule(cm, ms->dupeSelf(), ALLOW_GC);
 		}
 		it->flip();
 	}

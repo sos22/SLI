@@ -4,6 +4,16 @@
 #include <assert.h>
 #include <stdlib.h>
 
+/* A GC token doesn't actually do anything, it's just there to make it
+   more obvious which functions can perform GC sweeps. */
+class GarbageCollectionToken {
+  GarbageCollectionToken() {}
+public:
+  static GarbageCollectionToken GarbageCollectionAllowed() { return GarbageCollectionToken(); }
+};
+
+#define ALLOW_GC GarbageCollectionToken::GarbageCollectionAllowed()
+
 class HeapVisitor {
 public:
    virtual void visit(const void *ptr) = 0;
@@ -82,7 +92,7 @@ bool LibVEX_is_gc_address(const void *what);
 void vexRegisterGCRoot(void **, const char *name);
 void vexUnregisterGCRoot(void **);
 void vexInitHeap(void);
-void LibVEX_gc(void);
+void LibVEX_gc(GarbageCollectionToken t);
 
 class VexGcRoot {
 	void **root;

@@ -44,7 +44,7 @@ public:
 
 	static Explorer *init(ExplorationState *initState);
 
-	bool advance();
+	bool advance(GarbageCollectionToken tok);
 };
 
 DECLARE_VEX_TYPE(Explorer);
@@ -59,7 +59,7 @@ Explorer *Explorer::init(ExplorationState *initState)
 	return e;
 }
 
-bool Explorer::advance()
+bool Explorer::advance(GarbageCollectionToken tok)
 {
 	if (grayStates->size() == 0)
 		return false;
@@ -84,7 +84,7 @@ bool Explorer::advance()
 	/* Okay, have to actually do something. */
 
 	MemTracePool<unsigned long> *thread_traces =
-		new MemTracePool<unsigned long>(basis->ms, ThreadId());
+	  new MemTracePool<unsigned long>(basis->ms, ThreadId(), tok);
 	VexGcRoot ttraces((void **)&thread_traces, "ttraces");
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 		thread_traces->firstRacingAccessMap();
@@ -107,7 +107,7 @@ bool Explorer::advance()
 			if (thr->cannot_make_progress)
 				continue;
 			Interpreter<unsigned long> i(basis->ms);
-			i.runToFailure(thr->tid, basis->history, 10000);
+			i.runToFailure(thr->tid, basis->history, tok, 10000);
 			thr->idle = false;
 		}
 		grayStates->push(basis);
@@ -127,9 +127,9 @@ bool Explorer::advance()
 		VexGcRoot grayKeeper((void **)&newGray, "newGray");
 		Interpreter<unsigned long> i(newGray->ms);
 		if (r.full) {
-			i.runToAccessLoggingEvents(tid, r.value + 1, newGray->history);
+			i.runToAccessLoggingEvents(tid, r.value + 1, tok, newGray->history);
 		} else {
-			i.runToFailure(tid, newGray->history, 10000);
+			i.runToFailure(tid, newGray->history, tok, 10000);
 		}
 
 		thr->idle = false;
@@ -154,13 +154,13 @@ main(int argc, char *argv[])
 		err(1, "opening %s", argv[1]);
 	VexGcRoot((void **)&lf, "lf");
 
-	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
+	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
 	VexGcRoot((void **)&ms_base, "ms_base");
 
 	Explorer *e = Explorer::init(ExplorationState::init(ms_base));
 	VexGcRoot e_base((void **)&e, "e_base");
 
-	while (e->advance())
+	while (e->advance(ALLOW_GC))
 		;
 
 	return 0;

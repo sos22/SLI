@@ -134,7 +134,7 @@ main()
 	vap->pmap = pmap;
 	VexGcRoot vgc((void **)&vap, "test vamap");
 	
-	LibVEX_gc();
+	LibVEX_gc(ALLOW_GC);
 
 	unsigned long o;
 

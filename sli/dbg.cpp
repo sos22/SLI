@@ -14,7 +14,7 @@ main(int argc, char *argv[])
 		err(1, "opening %s", argv[1]);
 	VexGcRoot((void **)&lf, "lf");
 
-	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
+	MachineState<unsigned long> *ms_base = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
 	VexGcRoot((void **)&ms_base, "ms_base");
 
 	gdb_concrete(ms_base);

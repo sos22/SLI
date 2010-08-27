@@ -45,7 +45,9 @@ MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(Addr
 }
 
 template <typename ait>
-MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, LogReaderPtr ptr, LogReaderPtr *end)
+MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, LogReaderPtr ptr,
+							  LogReaderPtr *end,
+							  GarbageCollectionToken token)
 {
 	MachineState<ait> *work;
 	LogRecord<ait> *lr;
@@ -77,7 +79,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 			work->registerThread(Thread<ait>::initialThread(*lrir));
 	        } else if (LogRecordVexThreadState<ait> *lrvts = dynamic_cast<LogRecordVexThreadState<ait>*>(lr)) {
 			Thread<ait> *t = work->findThread(lrvts->thread());
-			t->imposeState(lrvts, as);
+			t->imposeState(lrvts, as, token);
 		} else {
 			break;
 		}
@@ -156,7 +158,8 @@ MachineState<new_type> *MachineState<ait>::abstract() const
 	template void MachineState<t>::dumpSnapshot(LogWriter<t> *lw) const; \
 	template MachineState<t> *MachineState<t>::initialMachineState(LogReader<t> *lf, \
 								       LogReaderPtr ptr, \
-								       LogReaderPtr *end)
+								       LogReaderPtr *end, \
+								       GarbageCollectionToken)
 
 #define MK_MACH_CONVERTOR(from, to)		\
 	template MachineState<to> *MachineState<from>::abstract() const

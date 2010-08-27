@@ -1371,11 +1371,12 @@ public:
 
 template<typename ait>
 void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace,
-				     ait rip)
+				     ait rip,
+				     GarbageCollectionToken t)
 {
 	redirectGuest(rip);
 
-	vexSetAllocModeTEMP_and_clear();
+	vexSetAllocModeTEMP_and_clear(t);
 
 	WeakRef<IRSB> *cacheSlot = addrSpace->searchDecodeCache(force(rip));
 	assert(cacheSlot != NULL);
@@ -1430,7 +1431,8 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace,
 template<typename ait>
 ThreadEvent<ait> *
 Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
-			MachineState<ait> *ms)
+			MachineState<ait> *ms,
+			GarbageCollectionToken t)
 {
 	unsigned put_offset;
 	struct expression_result<ait> put_data;
@@ -1440,7 +1442,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 		addrSpace->sanityCheckDecodeCache();
 		if (!currentIRSB) {
 			try {
-				translateNextBlock(addrSpace, regs.rip());
+				translateNextBlock(addrSpace, regs.rip(), t);
 			} catch (BadMemoryException<ait> excn) {
 				return SignalEvent<ait>::get(bumpEvent(ms), 11, excn.ptr);
 			}
@@ -1671,7 +1673,8 @@ finished_block:
 }
 
 template<typename ait>
-InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace<ait> **output, unsigned max_events)
+InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace<ait> **output, unsigned max_events,
+						       GarbageCollectionToken t)
 {
 	MemoryTrace<ait> *work = new MemoryTrace<ait>();
 	VexGcRoot root((void **)&work, "getThreadMemoryTrace work");
@@ -1684,7 +1687,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 	       /* Since we're running the thread in isolation, if it
 		  goes idle it's unlikely to ever wake up again. */
 	       !thr->idle) {
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
 
 		InterpretResult res = evt->fake(currentState);
 		if (res != InterpretResultContinue) {
@@ -1705,11 +1708,12 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 
 template<typename ait>
 void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
+						GarbageCollectionToken t,
 						LogWriter<ait> *output)
 {
         Thread<ait> *thr = currentState->findThread(tid);
         while (1) {
-                ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
+                ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (dynamic_cast<LoadEvent<ait> *>(evt) ||
 		    dynamic_cast<StoreEvent<ait> *>(evt)) {
@@ -1726,12 +1730,13 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_access
 }
 
 template<typename ait>
-void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, unsigned max_events)
+void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, GarbageCollectionToken t,
+				    unsigned max_events)
 {
 	bool have_event_limit = max_events != 0;
 	Thread<ait> *thr = currentState->findThread(tid);
 	while ((!have_event_limit || max_events) && thr->runnable()) {
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {
 			thr->cannot_make_progress = true;
@@ -1743,6 +1748,7 @@ void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, unsign
 
 template<typename ait>
 void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
+				     GarbageCollectionToken t,
 				     LogReaderPtr *eof, LogWriter<ait> *lw,
 				     EventRecorder<ait> *er)
 {
@@ -1763,7 +1769,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		assert(thr);
 		assert(!thr->exitted);
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
 
 		while (evt) {
 			if (er)
@@ -1794,7 +1800,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		/* Memory records are special and should always be
 		   processed eagerly. */
 		process_memory_records(currentState->addressSpace, lf, ptr,
-				       &ptr, lw);
+				       &ptr, lw, t);
 	}
 	if (eof)
 		*eof = ptr;
@@ -1802,7 +1808,7 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 
 template<typename ait>
 void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, LogReaderPtr ptr,
-				  LogReaderPtr *eof)
+				  GarbageCollectionToken t, LogReaderPtr *eof)
 {
 	/* Mostly a debugging aide */
 	volatile static unsigned long event_counter;
@@ -1819,7 +1825,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 
 		Thread<ait> *thr = currentState->findThread(lr->thread());
 		assert(thr->runnable());
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState);
+		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
 
 		while (evt && !finished) {
 			if (evt->when == end)
@@ -1838,7 +1844,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 		/* Memory records are special and should always be
 		   processed eagerly. */
 		process_memory_records(currentState->addressSpace, lf, ptr,
-				       &ptr, (LogWriter<ait> *)NULL);
+				       &ptr, (LogWriter<ait> *)NULL, t);
 	}
 	if (eof)
 		*eof = ptr;
@@ -1867,24 +1873,30 @@ template <typename ait> VexAllocType expression_result_array<ait>::arrayAllocTyp
 
 #define MK_INTERPRETER(t)						\
 	template ThreadEvent<t> *Thread<t>::runToEvent(AddressSpace<t> *addrSpace, \
-						       MachineState<t> *ms); \
+						       MachineState<t> *ms, \
+						       GarbageCollectionToken);	\
 	template void Interpreter<t>::runToFailure(ThreadId tid,	\
 						   LogWriter<t> *output, \
+						   GarbageCollectionToken, \
 						   unsigned max_events); \
 	template void Interpreter<t>::runToAccessLoggingEvents(ThreadId tid, \
 							       unsigned nr_accesses, \
+							       GarbageCollectionToken, \
 							       LogWriter<t> *output); \
 	template void Interpreter<t>::replayLogfile(LogReader<t> const *lf, \
 						    LogReaderPtr ptr,	\
+						    GarbageCollectionToken, \
 						    LogReaderPtr *eof,	\
 						    LogWriter<t> *lw,	\
 						    EventRecorder<t> *er); \
 	template InterpretResult Interpreter<t>::getThreadMemoryTrace(ThreadId tid, \
 								      MemoryTrace<t> **output, \
-								      unsigned max_events); \
+								      unsigned max_events, \
+								      GarbageCollectionToken); \
 	template void Interpreter<t>::runToEvent(EventTimestamp end,	\
 						 LogReader<t> const *lf, \
 						 LogReaderPtr ptr,	\
+						 GarbageCollectionToken, \
 						 LogReaderPtr *eof)
 
 

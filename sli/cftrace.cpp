@@ -51,12 +51,12 @@ main(int argc, char *argv[])
 		err(1, "opening %s", argv[1]);
 	VexGcRoot k((void **)&lf, "lf");
 
-	MachineState<unsigned long> *m = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
+	MachineState<unsigned long> *m = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
 
 	Interpreter<unsigned long> i(m);
 
 	GetControlTraces gct;
-	i.replayLogfile(lf, ptr, NULL, NULL, &gct);
+	i.replayLogfile(lf, ptr, ALLOW_GC, NULL, NULL, &gct);
 
 	for (GetControlTraces::iterator i = gct.begin();
 	     i != gct.end();

@@ -63,9 +63,10 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 
 template<typename ait>
 void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> *rec,
-			      AddressSpace<ait> *as)
+			      AddressSpace<ait> *as,
+			      GarbageCollectionToken t)
 {
-	translateNextBlock(as, rec->currentIRSBRip);
+	translateNextBlock(as, rec->currentIRSBRip, t);
 	assert(currentIRSB);
 
 	/* == is valid here, and just means we're right at the end of

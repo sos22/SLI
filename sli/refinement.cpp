@@ -28,7 +28,7 @@ public:
 	std::vector<ExplorationState *> futures;
 
 	Explorer(const MachineState<abstract_interpret_value> *ms,
-		 ThreadId ignoredTid);
+		 ThreadId ignoredTid, GarbageCollectionToken t);
 	void visit(HeapVisitor &hv) const
 	{
 		visit_container(futures, hv);
@@ -39,7 +39,7 @@ public:
 };
 
 Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
-		   ThreadId ignoredThread)
+		   ThreadId ignoredThread, GarbageCollectionToken t)
 	: grayStates(), futures()
 {
 	Explorer *thisK = this;
@@ -74,7 +74,7 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
 		}
 
 		MemTracePool<abstract_interpret_value> *thread_traces =
-			new MemTracePool<abstract_interpret_value>(s->ms, ignoredThread);
+			new MemTracePool<abstract_interpret_value>(s->ms, ignoredThread, t);
 		VexGcRoot ttraces((void **)&thread_traces, "ttraces");
 		std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 			thread_traces->firstRacingAccessMap();
@@ -103,7 +103,7 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
 				if (thr->cannot_make_progress)
 					continue;
 				Interpreter<abstract_interpret_value> i(s->ms);
-				i.runToFailure(thr->tid, s->lf, 10000000);
+				i.runToFailure(thr->tid, s->lf, t, 10000000);
 			}
 			futures.push_back(s);
 			continue;
@@ -126,10 +126,10 @@ Explorer::Explorer(const MachineState<abstract_interpret_value> *ms,
 			Interpreter<abstract_interpret_value> i(newGray->ms);
 			if (r.full) {
 				printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
-				i.runToAccessLoggingEvents(tid, r.value + 1, newGray->lf);
+				i.runToAccessLoggingEvents(tid, r.value + 1, t, newGray->lf);
 			} else {
 				printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
-				i.runToFailure(tid, newGray->lf, 10000000);
+				i.runToFailure(tid, newGray->lf, t, 10000000);
 			}
 
 			grayStates.push_back(newGray);
@@ -148,7 +148,8 @@ LoadExpression::refine(const MachineState<abstract_interpret_value> *ms,
 		       LogReaderPtr ptr,
 		       bool *progress,
 		       const std::map<ThreadId, unsigned long> &validity,
-		       EventTimestamp ev)
+		       EventTimestamp ev,
+		       GarbageCollectionToken)
 {
 	*progress = true;
 	return onlyif::get(
@@ -164,7 +165,8 @@ BinaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 			 LogReaderPtr ptr,
 			 bool *progress,
 			 const std::map<ThreadId, unsigned long> &validity,
-			 EventTimestamp ev)
+			 EventTimestamp ev,
+			 GarbageCollectionToken t)
 {
 	bool subprogress;
 	Expression *_l = l;
@@ -173,13 +175,13 @@ BinaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 
 	subprogress = false;
 	if (lr > r->relevance(ev, Relevance::irrelevant, lr)) {
-		_l = l->refine(ms, lf, ptr, &subprogress, validity, ev);
+		_l = l->refine(ms, lf, ptr, &subprogress, validity, ev, t);
 		if (!subprogress)
-			_r = r->refine(ms, lf, ptr, &subprogress, validity, ev);
+			_r = r->refine(ms, lf, ptr, &subprogress, validity, ev, t);
 	} else {
-		_r = r->refine(ms, lf, ptr, &subprogress, validity, ev);
+		_r = r->refine(ms, lf, ptr, &subprogress, validity, ev, t);
 		if (!subprogress)
-			_l = l->refine(ms, lf, ptr, &subprogress, validity, ev);
+			_l = l->refine(ms, lf, ptr, &subprogress, validity, ev, t);
 	}
 	if (subprogress) {
 		*progress = true;
@@ -194,10 +196,11 @@ UnaryExpression::refine(const MachineState<abstract_interpret_value> *ms,
 			LogReaderPtr ptr,
 			bool *progress,
 			const std::map<ThreadId, unsigned long> &validity,
-			EventTimestamp ev)
+			EventTimestamp ev,
+			GarbageCollectionToken t)
 {
 	bool subprogress = false;
-	Expression *l2 = l->refine(ms, lf, ptr, &subprogress, validity, ev);
+	Expression *l2 = l->refine(ms, lf, ptr, &subprogress, validity, ev, t);
 	if (subprogress) {
 		*progress = true;
 		return semiDupe(l2);
@@ -369,12 +372,13 @@ truncate_logfile(const MachineState<abstract_interpret_value> *ms,
 		 LogReader<abstract_interpret_value> *lf,
 		 LogReaderPtr ptr,
 		 EventTimestamp lastEvent,
-		 LogReaderPtr *outPtr)
+		 LogReaderPtr *outPtr,
+		 GarbageCollectionToken t)
 {
 	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
 	TruncateToEvent *tte = new TruncateToEvent(lastEvent);
 	VexGcRoot tteroot((void **)&tte, "tte");
-	i.replayLogfile(lf, ptr, NULL, tte);
+	i.replayLogfile(lf, ptr, t, NULL, tte);
 	*outPtr = tte->work->startPtr();
 	return tte->work;
 }
@@ -385,7 +389,8 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 			    LogReaderPtr ptr,
 			    bool *progress,
 			    const std::map<ThreadId, unsigned long> &validity,
-			    EventTimestamp ev)
+			    EventTimestamp ev,
+			    GarbageCollectionToken t)
 {
 	LastStoreRefiner *lsr =
 		new LastStoreRefiner(
@@ -402,12 +407,12 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 	Interpreter<abstract_interpret_value> i(localMs);
 	LogReaderPtr truncatedPtr;
 	LogReader<abstract_interpret_value> *truncatedLog =
-		truncate_logfile(ms, lf, ptr, load, &truncatedPtr);
+		truncate_logfile(ms, lf, ptr, load, &truncatedPtr, t);
 	VexGcRoot rr((void **)&truncatedLog, "rr");
-	i.replayLogfile(truncatedLog, truncatedPtr, NULL, NULL, lsr);
+	i.replayLogfile(truncatedLog, truncatedPtr, t, NULL, NULL, lsr);
 	lsr->finish(localMs);
 
-	Explorer *e = new Explorer(localMs, load.tid);
+	Explorer *e = new Explorer(localMs, load.tid, t);
 	VexGcRoot eroot((void **)&e, "eroot");
 	Expression *work = lsr->result;
 	VexGcRoot workroot((void **)&work, "workroot");
@@ -427,7 +432,7 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
 				ptr,
 				validity);
 		VexGcRoot r3((void **)&lsr2, "r3");
-		i2.replayLogfile((*it)->lf, (*it)->lf->startPtr(), NULL, NULL, lsr2);
+		i2.replayLogfile((*it)->lf, (*it)->lf->startPtr(), t, NULL, NULL, lsr2);
 		lsr2->finish(ms2);
 		work = lsr2->result;
 	}
@@ -441,13 +446,14 @@ ExpressionRip::refineSubCond(const MachineState<abstract_interpret_value> *ms,
 			     LogReader<abstract_interpret_value> *lf,
 			     LogReaderPtr ptr,
 			     const std::map<ThreadId, unsigned long> &validity,
-			     EventTimestamp ev)
+			     EventTimestamp ev,
+			     GarbageCollectionToken t)
 {
 	bool subCondProgress = false;
 	std::map<ThreadId, unsigned long> newValidity(validity);
 	newValidity[tid] = history->last_valid_idx;
 	Expression *newSubCond = cond->refine(ms, model_execution, model_exec_start,
-					      &subCondProgress, newValidity, ev);
+					      &subCondProgress, newValidity, ev, t);
 	if (subCondProgress) {
 		Expression *res = ExpressionRip::get(
 			tid,
@@ -467,7 +473,8 @@ ExpressionRip::refineHistory(const MachineState<abstract_interpret_value> *ms,
 			     LogReader<abstract_interpret_value> *lf,
 			     LogReaderPtr ptr,
 			     const std::map<ThreadId, unsigned long> &validity,
-			     EventTimestamp ev)
+			     EventTimestamp ev,
+			     GarbageCollectionToken t)
 {
 	std::set<History *> unrefinable;
 
@@ -501,7 +508,7 @@ ExpressionRip::refineHistory(const MachineState<abstract_interpret_value> *ms,
 		newValidity[tid] = mostRelevantEntry->last_valid_idx;
 		bool subCondProgress = false;
 		Expression *newCond = mostRelevantEntry->condition->refine(ms, lf, ptr, &subCondProgress,
-									   newValidity, ev);
+									   newValidity, ev, t);
 		if (subCondProgress) {
 			Expression *res = ExpressionRip::get(
 				tid,
@@ -532,25 +539,26 @@ ExpressionRip::refine(const MachineState<abstract_interpret_value> *ms,
 		      LogReaderPtr ptr,
 		      bool *progress,
 		      const std::map<ThreadId, unsigned long> &validity,
-		      EventTimestamp ev)
+		      EventTimestamp ev,
+		      GarbageCollectionToken t)
 {
 	Expression *n;
 	Relevance cr = cond->relevance(ev, Relevance::irrelevant, Relevance::perfect);
 	if (cr > history->relevance(ev, Relevance::irrelevant, cr)) {
-		if ((n = refineSubCond(ms, lf, ptr, validity, ev))) {
+		if ((n = refineSubCond(ms, lf, ptr, validity, ev, t))) {
 			*progress = true;
 			return n;
 		}
-		if ((n = refineHistory(ms, lf, ptr, validity, ev))) {
+		if ((n = refineHistory(ms, lf, ptr, validity, ev, t))) {
 			*progress = true;
 			return n;
 		}
 	} else {
-		if ((n = refineHistory(ms, lf, ptr, validity, ev))) {
+		if ((n = refineHistory(ms, lf, ptr, validity, ev, t))) {
 			*progress = true;
 			return n;
 		}
-		if ((n = refineSubCond(ms, lf, ptr, validity, ev))) {
+		if ((n = refineSubCond(ms, lf, ptr, validity, ev, t))) {
 			*progress = true;
 			return n;
 		}

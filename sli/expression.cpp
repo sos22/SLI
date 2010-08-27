@@ -43,7 +43,7 @@ Expression *Expression::intern(Expression *e)
 	if (cursor) {
 		intern_hits++;
 		cursor->pull_to_front();
-		LibVEX_free(e);
+		e->release(e);
 		return cursor;
 	}
 	e->add_to_hash();
@@ -335,19 +335,6 @@ load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestam
 					   nme::get(oif->r));		\
 	} while (0)
 
-#define mk_unop(nme, op)						\
-        bool nme::isLogical() const { return false; }			\
-	Expression *nme::get(Expression *l)				\
-	{								\
-	        unsigned long lc;				        \
-		if (l->isConstant(&lc))					\
-			return ConstExpression::get(op lc);		\
-		unop_float_rip(nme);					\
-		nme *work = new nme();					\
-		work->l = l;						\
-		return intern(work);					\
-	}
-
 Expression *subtract::get(Expression *l, Expression *r)
 {
 	return plus::get(l, unaryminus::get(r));
@@ -362,7 +349,21 @@ mk_binop(lessthanequals, <=, false, true);
 mk_binop(lessthan, <, false, true);
 mk_binop(notequals, !=, false, true);
 
-mk_unop(unaryminus, -);
+bool unaryminus::isLogical() const { return false; }
+Expression *unaryminus::get(Expression *l)
+{
+	unsigned long lc;
+	if (l->isConstant(&lc))
+		return ConstExpression::get(-lc);
+	if (plus *p = dynamic_cast<plus *>(l)) {
+		return plus::get(unaryminus::get(p->l),
+				 unaryminus::get(p->r));
+	}
+	unop_float_rip(unaryminus);
+	unaryminus *work = new unaryminus();
+	work->l = l;
+	return intern(work);
+}
 
 Expression *logicalor::get(Expression *l, Expression *r)
 {
@@ -498,6 +499,20 @@ Expression *plus::get(Expression *l, Expression *r)
 		if (lplus && lplus->l->isConstant(&c))
 			return plus::get(lplus->l,
 					 plus::get(r, lplus->r));
+	}
+
+	/* Rewrite -x + x to just 0 */
+	{
+		unaryminus *lminus = dynamic_cast<unaryminus *>(l);
+		if (lminus && lminus->l == r)
+			return ConstExpression::get(0);
+	}
+
+	/* Likewise x + -x to just 0 */
+	{
+		unaryminus *rminus = dynamic_cast<unaryminus *>(r);
+		if (rminus && rminus->l == r)
+			return ConstExpression::get(0);
 	}
 
 	if (plus *ll = dynamic_cast<plus *>(l))				
@@ -812,6 +827,16 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 			return r;
 	}
 
+	/* rewrite (~y + (x & y)) & y to just (x & y) */
+	if (plus *lp = dynamic_cast<plus *>(l)) {
+		if (bitwiseand *lr = dynamic_cast<bitwiseand *>(lp->r)) {
+			if (lr->r == r) {
+				Expression *complement_r = bitwisenot::get(r);
+				if (complement_r == lp->l)
+					return lr;
+			}
+		}
+	}
 	bitwiseand *work = new bitwiseand();
 	work->l = l;
 	work->r = r;
@@ -985,7 +1010,8 @@ Expression *alias::refine(const MachineState<abstract_interpret_value> *ms,
 			  LogReaderPtr ptr,
 			  bool *progress,
 			  const std::map<ThreadId, unsigned long> &validity,
-			  EventTimestamp ev)
+			  EventTimestamp ev,
+			  GarbageCollectionToken)
 {
 	*progress = true;
 	return l;

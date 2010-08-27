@@ -27,13 +27,13 @@ main(int argc, char *argv[])
 
 	reduced_lf = lf->truncate(lf->mkPtr(size, 0));
 	VexGcRoot rlf_root((void **)&reduced_lf, "reduced lf");
-	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr);
+	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
 	VexGcRoot ms_root((void **)&ms, "ms_root");
 
 	ms->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
 
 	Interpreter<unsigned long> i(ms);
-	i.replayLogfile(reduced_lf, ptr, &ptr);
+	i.replayLogfile(reduced_lf, ptr, ALLOW_GC, &ptr);
 
 	LogFileWriter *lw;
 
@@ -44,7 +44,7 @@ main(int argc, char *argv[])
 	ms->dumpSnapshot(lw);
 	
 	Interpreter<unsigned long> i2(ms);
-	i2.replayLogfile(lf, ptr, NULL, lw);
+	i2.replayLogfile(lf, ptr, ALLOW_GC, NULL, lw);
 
 	delete lw;
 

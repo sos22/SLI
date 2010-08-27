@@ -150,7 +150,7 @@ main(int argc, char *argv[])
 			 dynamic_cast<LogRecordSyscall<unsigned long> *>(lr))
 			process_syscall_record(lrsys);
 
-		vexSetAllocModeTEMP_and_clear();
+		vexSetAllocModeTEMP_and_clear(ALLOW_GC);
 	}
 
 	return 0;

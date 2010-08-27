@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include "sli.h"
+#include "main_util.h"
 
 static bool
 isErrnoSysres(long x)
@@ -20,7 +21,8 @@ process_memory_records(AddressSpace<ait> *addrSpace,
 		       const LogReader<ait> *lf,
 		       LogReaderPtr startOffset,
 		       LogReaderPtr *endOffset,
-		       LogWriter<ait> *lw)
+		       LogWriter<ait> *lw,
+		       GarbageCollectionToken tok)
 {
 	while (1) {
 		LogReaderPtr nextOffset;
@@ -35,6 +37,11 @@ process_memory_records(AddressSpace<ait> *addrSpace,
 		addrSpace->writeMemory(EventTimestamp::invalid, lrm->start, lrm->size, lrm->contents,
 				       true, NULL);
 		startOffset = nextOffset;
+
+		/* That can sometimes do a lot of work (e.g. mmap()ing
+		   a new shared library).  That makes this loop a good
+		   place to try to do a GC pass. */
+		vexSetAllocModeTEMP_and_clear(tok);
 	}
 	*endOffset = startOffset;
 }

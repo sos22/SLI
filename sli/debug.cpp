@@ -21,7 +21,7 @@ protected:
 	void sendResponse(const char *fmt, ...);
 public:
 	static GdbCommand *read(int fd);
-	virtual void doIt(MachineState<ait> *) = 0;
+	virtual void doIt(MachineState<ait> *, GarbageCollectionToken) = 0;
 	GdbCommand<ait>(GdbChannel<ait> *_chan)
 		: chan(_chan)
 	{
@@ -63,14 +63,14 @@ public:
 template <typename ait>
 class UnknownCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<ait> *) { this->sendResponse(""); }
+	void doIt(MachineState<ait> *, GarbageCollectionToken) { this->sendResponse(""); }
 	UnknownCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
 template <typename ait>
 class GetSigCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<ait> *) { this->sendResponse("S00"); }
+	void doIt(MachineState<ait> *, GarbageCollectionToken) { this->sendResponse("S00"); }
 	GetSigCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
@@ -78,7 +78,7 @@ template <typename ait>
 class QueryCommand : public GdbCommand<ait> {
 	char *q;
 public:
-	void doIt(MachineState<ait> *);
+	void doIt(MachineState<ait> *, GarbageCollectionToken);
 	QueryCommand(GdbChannel<ait> *c, const char *n)
 		: GdbCommand<ait>(c),
 		  q(strdup(n))
@@ -90,7 +90,7 @@ public:
 template <typename ait>
 class GetRegistersCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<ait> *);
+	void doIt(MachineState<ait> *, GarbageCollectionToken);
 	GetRegistersCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
@@ -98,7 +98,7 @@ template <typename ait>
 class GetRegisterCommand : public GdbCommand<ait> {
 	unsigned regNr;
 public:
-	void doIt(MachineState<ait> *);
+	void doIt(MachineState<ait> *, GarbageCollectionToken);
 	GetRegisterCommand(GdbChannel<ait> *c, const char *b) : GdbCommand<ait>(c) { regNr = strtol(b, NULL, 16); }
 };
 
@@ -107,7 +107,7 @@ class GetMemoryCommand : public GdbCommand<ait> {
 	unsigned long addr;
 	unsigned size;
 public:
-	void doIt(MachineState<ait> *);
+	void doIt(MachineState<ait> *, GarbageCollectionToken);
 	GetMemoryCommand(GdbChannel<ait> *c, const char *b) : GdbCommand<ait>(c) { sscanf(b, "%lx,%x", &addr, &size); }
 };
 
@@ -116,7 +116,7 @@ class SetThreadCommand : public GdbCommand<ait> {
 	ThreadId tid;
 	bool query;
 public:
-	void doIt(MachineState<ait> *)
+	void doIt(MachineState<ait> *, GarbageCollectionToken)
 	{
 		if (query)
 			this->chan->currentTidQuery = tid;
@@ -137,7 +137,7 @@ template <typename ait>
 class ThreadAliveCommand : public GdbCommand<ait> {
 	ThreadId tid;
 public:
-	void doIt(MachineState<ait> *);
+	void doIt(MachineState<ait> *, GarbageCollectionToken);
 	ThreadAliveCommand(GdbChannel<ait> *c, const char *b)
 		: GdbCommand<ait>(c),
 		  tid(ThreadId(strtol(b, NULL, 16)))
@@ -148,7 +148,7 @@ public:
 template <typename ait>
 class DetachCommand : public GdbCommand<ait> {
 public:
-	void doIt(MachineState<ait> *) {abort(); }
+	void doIt(MachineState<ait> *, GarbageCollectionToken) {abort(); }
 	DetachCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
@@ -157,7 +157,7 @@ class ContinueCommand : public GdbCommand<ait> {
 	ait newRip;
 	bool haveNewRip;
 public:
-	void doIt(MachineState<ait> *ms);
+	void doIt(MachineState<ait> *ms, GarbageCollectionToken);
 	ContinueCommand(GdbChannel<ait> *c, const char *buf)
 		: GdbCommand<ait>(c)
 	{
@@ -177,7 +177,7 @@ htonlong(unsigned long x)
 }
 
 template <typename ait> void
-GetMemoryCommand<ait>::doIt(MachineState<ait> *ms)
+GetMemoryCommand<ait>::doIt(MachineState<ait> *ms, GarbageCollectionToken)
 {
 	ait *membuf = (ait *)malloc(size * sizeof(ait));
 	try {
@@ -200,7 +200,7 @@ GetMemoryCommand<ait>::doIt(MachineState<ait> *ms)
 }
 
 template <typename ait> void
-GetRegistersCommand<ait>::doIt(MachineState<ait> *ms)
+GetRegistersCommand<ait>::doIt(MachineState<ait> *ms, GarbageCollectionToken)
 {
 	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
 
@@ -222,7 +222,7 @@ GetRegistersCommand<ait>::doIt(MachineState<ait> *ms)
 }
 
 template <typename ait> void
-GetRegisterCommand<ait>::doIt(MachineState<ait> *ms)
+GetRegisterCommand<ait>::doIt(MachineState<ait> *ms, GarbageCollectionToken)
 {
 	const Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
 	ait r;
@@ -269,7 +269,7 @@ GetRegisterCommand<ait>::doIt(MachineState<ait> *ms)
 }
 
 template <typename ait> void
-QueryCommand<ait>::doIt(MachineState<ait> *ms)
+QueryCommand<ait>::doIt(MachineState<ait> *ms, GarbageCollectionToken)
 {
 	if (!strcmp(q, "C")) {
 		this->sendResponse("QC%x", this->chan->currentTidQuery._tid());
@@ -292,7 +292,7 @@ QueryCommand<ait>::doIt(MachineState<ait> *ms)
 }
 
 template <typename ait> void
-ThreadAliveCommand<ait>::doIt(MachineState<ait> *ms)
+ThreadAliveCommand<ait>::doIt(MachineState<ait> *ms, GarbageCollectionToken)
 {
 	const Thread<ait> *thr = ms->findThread(tid, true);
 	if (!thr || thr->exitted || thr->crashed)
@@ -302,7 +302,7 @@ ThreadAliveCommand<ait>::doIt(MachineState<ait> *ms)
 }
 
 template <typename ait> void
-ContinueCommand<ait>::doIt(MachineState<ait> *ms)
+ContinueCommand<ait>::doIt(MachineState<ait> *ms, GarbageCollectionToken t)
 {
 	Thread<ait> *thr = ms->findThread(this->chan->currentTidRun, true);
 	if (!thr) {
@@ -313,7 +313,7 @@ ContinueCommand<ait>::doIt(MachineState<ait> *ms)
 		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
         while (1) {
-		ThreadEvent<ait> *evt = thr->runToEvent(ms->addressSpace, ms);
+		ThreadEvent<ait> *evt = thr->runToEvent(ms->addressSpace, ms, t);
                 InterpretResult res = evt->fake(ms);
 
 		if (dynamic_cast<SignalEvent<ait> *>(evt) ||
@@ -538,7 +538,7 @@ gdb_machine_state(const MachineState<ait> *_ms)
 			delete cmd;
 			break;
 		}
-		cmd->doIt(ms);
+		cmd->doIt(ms, ALLOW_GC);
 		delete cmd;
 	}
 

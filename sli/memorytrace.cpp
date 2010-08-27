@@ -26,12 +26,13 @@ MemTraceMaker<ait>::record(Thread<ait> *thr, ThreadEvent<ait> *evt)
 template <typename ait>
 MemoryTrace<ait>::MemoryTrace(const MachineState<ait> *ms,
 			      LogReader<ait> *lf,
-			      LogReaderPtr ptr)
+			      LogReaderPtr ptr,
+			      GarbageCollectionToken t)
 {
 	MemTraceMaker<ait> *mtm = new MemTraceMaker<ait>(this);
 	VexGcRoot mtmroot((void **)&mtm, "mtmroot");
 	Interpreter<ait> i(ms->dupeSelf());
-	i.replayLogfile(lf, ptr, NULL, NULL, mtm);
+	i.replayLogfile(lf, ptr, t, NULL, NULL, mtm);
 }
 
 template <typename ait>
@@ -47,5 +48,6 @@ void MemoryTrace<ait>::dump() const
 	template MemoryTrace<t>::MemoryTrace();				\
 	template MemoryTrace<t>::MemoryTrace(const MachineState<t> *,	\
 					     LogReader<t> *,		\
-					     LogReaderPtr);		\
+					     LogReaderPtr,		\
+					     GarbageCollectionToken);	\
 	template void MemoryTrace<t>::dump() const

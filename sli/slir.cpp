@@ -45,7 +45,7 @@ public:
 
 	static Explorer *init(std::map<ThreadId, unsigned long> *, ExplorationState *initState);
 
-	bool advance();
+	bool advance(GarbageCollectionToken tok);
 };
 
 DECLARE_VEX_TYPE(Explorer);
@@ -63,9 +63,9 @@ Explorer *Explorer::init(std::map<ThreadId, unsigned long> *thresholds, Explorat
 	return e;
 }
 
-bool Explorer::advance()
+bool Explorer::advance(GarbageCollectionToken tok)
 {
-	LibVEX_gc();
+	LibVEX_gc(tok);
 
 	printf("%d gray, %d good, %d bad.\n", grayStates->size(), goodStates->size(), badStates->size());
 	if (grayStates->size() == 0 ||
@@ -119,7 +119,7 @@ bool Explorer::advance()
 	/* Okay, have to actually do something. */
 
 	MemTracePool<unsigned long> *thread_traces =
-		new MemTracePool<unsigned long>(basis->ms, ThreadId());
+		new MemTracePool<unsigned long>(basis->ms, ThreadId(), tok);
 	VexGcRoot ttraces((void **)&thread_traces, "ttraces");
 	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
 		thread_traces->firstRacingAccessMap();
@@ -142,7 +142,7 @@ bool Explorer::advance()
 			if (thr->cannot_make_progress)
 				continue;
 			Interpreter<unsigned long> i(basis->ms);
-			i.runToFailure(thr->tid, basis->history, 10000);
+			i.runToFailure(thr->tid, basis->history, tok, 10000);
 		}
 		grayStates->push(basis);
 		delete first_racing_access;
@@ -162,10 +162,10 @@ bool Explorer::advance()
 		Interpreter<unsigned long> i(newGray->ms);
 		if (r.full) {
 			printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
-			i.runToAccessLoggingEvents(tid, r.value + 1, newGray->history);
+			i.runToAccessLoggingEvents(tid, r.value + 1, tok, newGray->history);
 		} else {
 			printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
-			i.runToFailure(tid, newGray->history, 10000);
+			i.runToFailure(tid, newGray->history, tok, 10000);
 		}
 
 		grayStates->push(newGray);
@@ -238,13 +238,13 @@ main(int argc, char *argv[])
 		err(1, "opening %s", argv[1]);
 	VexGcRoot((void **)&lf, "lf");
 
-	VexPtr<MachineState<unsigned long> > ms_base(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr));
+	VexPtr<MachineState<unsigned long> > ms_base(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
 	std::map<ThreadId, unsigned long> thresholds;
 	{
 		MachineState<unsigned long> *a = ms_base->dupeSelf();
 		Interpreter<unsigned long> i(a);
-		i.replayLogfile(lf, ptr);
+		i.replayLogfile(lf, ptr, ALLOW_GC);
 		for (unsigned x = 0; x < a->threads->size(); x++) {
 			Thread<unsigned long> *thr = a->threads->index(x);
 			thresholds[thr->tid] = thr->nrAccesses * 2;
@@ -257,7 +257,7 @@ main(int argc, char *argv[])
 	Explorer *e = Explorer::init(&thresholds, ExplorationState::init(ms_base));
 	VexGcRoot e_base((void **)&e, "e_base");
 
-	while (e->advance())
+	while (e->advance(ALLOW_GC))
 		;
 
 	printf("Good states:\n");
@@ -265,7 +265,8 @@ main(int argc, char *argv[])
 		printf("State %d\n", x);
 		MemoryTrace<unsigned long> mt(ms_base,
 					      e->goodStates->index(x)->history,
-					      MemLog<unsigned long>::startPtr());
+					      MemLog<unsigned long>::startPtr(),
+					      ALLOW_GC);
 		CommunicationGraph ct(&mt);
 		ct.dump();
 	}
@@ -275,7 +276,8 @@ main(int argc, char *argv[])
 		printf("State %d\n", x);
 		MemoryTrace<unsigned long> mt(ms_base,
 					      e->badStates->index(x)->history,
-					      MemLog<unsigned long>::startPtr());
+					      MemLog<unsigned long>::startPtr(),
+					      ALLOW_GC);
 		CommunicationGraph ct(&mt);
 		ct.dump();
 	}

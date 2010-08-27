@@ -9,7 +9,7 @@
    that there usually aren't very many GC roots, and they won't
    usually cover very many things in the heap, so the GC pass is very
    cheap, and we can cover it out of the much simpler allocator. */
-#define NDEBUG
+//#define NDEBUG
 #include <valgrind/memcheck.h>
 #include <sys/mman.h>
 #include <stdio.h>
@@ -210,7 +210,7 @@ LibVEX_free(const void *_ptr)
 }
 
 void
-LibVEX_gc(void)
+LibVEX_gc(GarbageCollectionToken t)
 {
   unsigned x;
   struct alloc_header *h;
@@ -282,10 +282,10 @@ LibVEX_gc(void)
   LibVEX_alloc_sanity_check();
 }
 
-void vexSetAllocModeTEMP_and_clear ( void )
+void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t)
 {
   if (heap_used > (N_TEMPORARY_BYTES * 3) / 4)
-    LibVEX_gc();
+    LibVEX_gc(t);
 }
 
 

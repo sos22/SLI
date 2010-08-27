@@ -95,7 +95,7 @@ main(int argc, char *argv[])
 	if (!lf)
 		err(1, "opening %s", inp);
 
-	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
+	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
 	VexGcRoot ms_root((void **)&ms, "ms_root");
 
 	ms->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
@@ -105,7 +105,7 @@ main(int argc, char *argv[])
 	Interpreter<unsigned long> i(ms);
 	LogChunker *chunker = new LogChunker(size, period, prefix, ms);
 	VexGcRoot chunker_root((void **)&chunker, "chunker root");
-	i.replayLogfile(lf, ptr, NULL, chunker);
+	i.replayLogfile(lf, ptr, ALLOW_GC, NULL, chunker);
 
 	return 0;
 }

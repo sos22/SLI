@@ -346,7 +346,8 @@ template <typename ait> ThreadEvent<ait> *
 RdtscEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 			     LogReader<ait> *lf,
 			     LogReaderPtr startPtr,
-			     LogReaderPtr *endPtr)
+			     LogReaderPtr *endPtr,
+			     GarbageCollectionToken)
 {
 	/* Try to satisfy it with the next rdtsc in the log */
 	while (1) {
@@ -368,7 +369,8 @@ template <typename ait> ThreadEvent<ait> *
 SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 			       LogReader<ait> *lf,
 			       LogReaderPtr startPtr,
-			       LogReaderPtr *endPtr)
+			       LogReaderPtr *endPtr,
+			       GarbageCollectionToken t)
 {
 	while (1) {
 		LogRecord<ait> *lr = lf->read(startPtr, &startPtr);
@@ -380,7 +382,8 @@ SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 			ThreadEvent<ait> *r = replay(lr, ms);
 			*endPtr = startPtr;
 			process_memory_records(ms->addressSpace, lf, startPtr,
-					       endPtr, (LogWriter<ait> *)NULL);
+					       endPtr, (LogWriter<ait> *)NULL,
+					       t);
 			return r;
 		} catch (ReplayFailedException &excpt) {
 			/* Replay failed.  Keep trying more calls out
@@ -396,7 +399,8 @@ template <typename ait> ThreadEvent<ait> *
 CasEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 			   LogReader<ait> *lf,
 			   LogReaderPtr startPtr,
-			   LogReaderPtr *endPtr)
+			   LogReaderPtr *endPtr,
+			   GarbageCollectionToken)
 {
         expression_result<ait> seen;
 	Thread<ait> *thr = ms->findThread(this->when.tid);

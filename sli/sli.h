@@ -121,6 +121,15 @@ class GarbageCollected {
 	   magazine gets blown away during GC, but that seems like too
 	   much effort. */
 	static LibvexVector<t> *magazine;
+protected:
+	static void release(const t *x) {
+		if (magazine_size == 0 || !magazine || magazine_used == 0) {
+			LibVEX_free(x);
+			return;
+		}
+		magazine_used--;
+		magazine->set(magazine_used, const_cast<t *>(x));
+	}
 public:
 	static void *operator new(size_t s)
 	{
@@ -438,7 +447,8 @@ template <typename ait> class LogRecordVexThreadState;
 
 template <typename abst_int_type>
 class Thread : public GarbageCollected<Thread<abst_int_type> > {
-	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace, abst_int_type rip);
+	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace, abst_int_type rip,
+				GarbageCollectionToken t);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
 	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details, MachineState<abst_int_type> *ms);
 	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
@@ -486,7 +496,8 @@ private:
 	bool allowRipMismatch;
 	~Thread();
 public:
-	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace, MachineState<abst_int_type> *ms);
+	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace, MachineState<abst_int_type> *ms,
+					       GarbageCollectionToken t);
 
 	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
 	Thread<abst_int_type> *fork(unsigned newPid);
@@ -494,7 +505,7 @@ public:
 	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;
 
 	void imposeState(const LogRecordVexThreadState<abst_int_type> *rec,
-			 AddressSpace<abst_int_type> *as);
+			 AddressSpace<abst_int_type> *as, GarbageCollectionToken t);
 
 	void visit(HeapVisitor &hv) const;
 
@@ -654,7 +665,7 @@ private:
       with this: it keeps both the mapping and the memory chunk live.
 */
 template <typename ait>
-class PMapEntry : public GarbageCollected<PMapEntry<ait> > {
+class PMapEntry : public GarbageCollected<PMapEntry<ait>, 128, 48> {
 public:
 	PhysicalAddress pa;
 	MemoryChunk<ait> *mc;
@@ -838,7 +849,8 @@ public:
 	unsigned long nrEvents;
 	static MachineState<abst_int_type> *initialMachineState(LogReader<abst_int_type> *lf,
 								LogReaderPtr startPtr,
-								LogReaderPtr *endPtr);
+								LogReaderPtr *endPtr,
+								GarbageCollectionToken t);
 
 	template <typename new_type> MachineState<new_type> *abstract() const;
 
@@ -938,18 +950,23 @@ public:
 	{
 	}
 	void replayLogfile(const LogReader<abst_int_type> *lf, LogReaderPtr startingPoint,
-			   LogReaderPtr *endingPoint = NULL, LogWriter<abst_int_type> *log = NULL,
+			   GarbageCollectionToken, LogReaderPtr *endingPoint = NULL,
+			   LogWriter<abst_int_type> *log = NULL,
 			   EventRecorder<abst_int_type> *er = NULL);
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
 					     MemoryTrace<abst_int_type> **output,
-					     unsigned max_events);
+					     unsigned max_events,
+					     GarbageCollectionToken t);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
+				      GarbageCollectionToken t,
 				      LogWriter<abst_int_type> *output = NULL);
 	void runToFailure(ThreadId tid, LogWriter<abst_int_type> *output,
+			  GarbageCollectionToken t,
 			  unsigned max_events = 0);
 	void runToEvent(EventTimestamp evt,
 			const LogReader<abst_int_type> *lf,
 			LogReaderPtr startingPoint,
+			GarbageCollectionToken t,
 			LogReaderPtr *endPoint = NULL);
 };
 
@@ -1024,7 +1041,8 @@ public:
 	virtual ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms,
 					      LogReader<ait> *lf,
 					      LogReaderPtr startPtr,
-					      LogReaderPtr *endPtr)
+					      LogReaderPtr *endPtr,
+					      GarbageCollectionToken t)
 	{
 		fake(ms, NULL);
 		return NULL;
@@ -1086,7 +1104,8 @@ public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms, LogReader<ait> *lf,
-				      LogReaderPtr startPtr, LogReaderPtr *endPtr);
+				      LogReaderPtr startPtr, LogReaderPtr *endPtr,
+				      GarbageCollectionToken);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp temp)
 	{ return new RdtscEvent<ait>(when, temp); }
 	NAMED_CLASS
@@ -1232,7 +1251,8 @@ public:
 	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms,
 				      LogReader<ait> *lf,
 				      LogReaderPtr startPtr,
-				      LogReaderPtr *endPtr);
+				      LogReaderPtr *endPtr,
+				      GarbageCollectionToken);
 
 	static ThreadEvent<ait> *get(EventTimestamp when,
 				     IRTemp _dest,
@@ -1272,7 +1292,8 @@ public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms, LogReader<ait> *lf,
-				      LogReaderPtr startPtr, LogReaderPtr *endPtr);
+				      LogReaderPtr startPtr, LogReaderPtr *endPtr,
+				      GarbageCollectionToken);
 	static ThreadEvent<ait> *get(EventTimestamp when)
 	{ return new SyscallEvent(when); }
 	NAMED_CLASS
@@ -1454,7 +1475,8 @@ template <typename ait>
 class MemoryTrace : public GarbageCollected<MemoryTrace<ait> > {
 public:
 	std::vector<MemoryAccess<ait> *> content;
-	MemoryTrace(const MachineState<ait> *, LogReader<ait> *, LogReaderPtr);
+	MemoryTrace(const MachineState<ait> *, LogReader<ait> *, LogReaderPtr,
+		    GarbageCollectionToken);
 	size_t size() const { return content.size(); }
 	MemoryAccess<ait> *&operator[](unsigned idx) { return content[idx]; }
 	void push_back(MemoryAccess<ait> *x) { content.push_back(x); }
@@ -1470,7 +1492,7 @@ class MemTracePool : public GarbageCollected<MemTracePool<ait> > {
 	typedef std::map<ThreadId, MemoryTrace<ait> *> contentT;
 	contentT content;
 public:
-	MemTracePool(MachineState<ait> *base_state, ThreadId ignoredThread);
+	MemTracePool(MachineState<ait> *base_state, ThreadId ignoredThread, GarbageCollectionToken t);
 	~MemTracePool() {}
 	std::map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
 	void visit(HeapVisitor &hv) const;
@@ -1931,7 +1953,8 @@ template<typename ait> void process_memory_records(AddressSpace<ait> *addrSpace,
 						   const LogReader<ait> *lf,
 						   LogReaderPtr startOffset,
 						   LogReaderPtr *endOffset,
-						   LogWriter<ait> *lw);
+						   LogWriter<ait> *lw,
+						   GarbageCollectionToken tok);
 
 void debugger_attach(void);
 
@@ -1970,7 +1993,7 @@ public:
 	virtual void visit(Expression *e) = 0;
 };
 
-class Expression : public Named, public GarbageCollected<Expression> {
+class Expression : public Named, public GarbageCollected<Expression, 128, 256> {
 	friend class ConstExpression;
 	static const unsigned nr_heads = 262147;
 	static Expression *heads[nr_heads];
@@ -2032,7 +2055,8 @@ public:
 				   LogReaderPtr ptr,
 				   bool *progress,
 				   const std::map<ThreadId, unsigned long> &validity,
-				   EventTimestamp ev) = 0;
+				   EventTimestamp ev,
+				   GarbageCollectionToken t) = 0;
 	virtual void visit(ExpressionVisitor &ev) = 0;
 	virtual Expression *map(ExpressionMapper &f) = 0;
 	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_threshold,
@@ -2085,7 +2109,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev) { return this; }
+			   EventTimestamp ev,
+			   GarbageCollectionToken t) { return this; }
 	Relevance relevance(const EventTimestamp &ev, Relevance, Relevance) { return Relevance::irrelevant; }
 };
 
@@ -2206,7 +2231,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev);
+			   EventTimestamp ev,
+			   GarbageCollectionToken);
 	void visit(HeapVisitor &hv) const { hv(vaddr); }
 	void visit(ExpressionVisitor &ev) { ev.visit(this); vaddr->visit(ev); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
@@ -2287,7 +2313,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev) { return this; }
+			   EventTimestamp ev,
+			   GarbageCollectionToken) { return this; }
 
 	Relevance relevance(const EventTimestamp &ev, Relevance, Relevance) {
 		/* happens-before relations can't be refined, so their
@@ -2348,7 +2375,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev);
+			   EventTimestamp ev,
+			   GarbageCollectionToken);
 
 	EventTimestamp timestamp() const { return when; }
 	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
@@ -2395,7 +2423,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev);
+			   EventTimestamp ev,
+			   GarbageCollectionToken);
 	Expression *l, *r;
 
 	
@@ -2501,7 +2530,8 @@ public:
 				   LogReaderPtr ptr,
 				   bool *progress,
 				   const std::map<ThreadId, unsigned long> &validity,
-				   EventTimestamp ev);
+				   EventTimestamp ev,
+				   GarbageCollectionToken);
 	Expression *l;
 
 	void visit(HeapVisitor &hv) const				
@@ -2574,11 +2604,12 @@ mk_unop_class(bitsaturate, Expression *_CNF(););
 mk_unop_class(alias,
 	      Relevance relevance(const EventTimestamp &, Relevance, Relevance);
 	      Expression *refine(const MachineState<abstract_interpret_value> *ms,
-					 LogReader<abstract_interpret_value> *lf,
-					 LogReaderPtr ptr,
-					 bool *progress,
-					 const std::map<ThreadId, unsigned long> &validity,
-					 EventTimestamp ev);
+				 LogReader<abstract_interpret_value> *lf,
+				 LogReaderPtr ptr,
+				 bool *progress,
+				 const std::map<ThreadId, unsigned long> &validity,
+				 EventTimestamp ev,
+				 GarbageCollectionToken);
 	);
 
 class ternarycondition : public Expression {
@@ -2637,7 +2668,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev) { return this; }
+			   EventTimestamp ev,
+			   GarbageCollectionToken) { return this; }
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh,
 			    Relevance high_thresh)
 	{
@@ -3096,12 +3128,14 @@ private:
 				  LogReader<abstract_interpret_value> *lf,
 				  LogReaderPtr ptr,
 				  const std::map<ThreadId, unsigned long> &validity,
-				  EventTimestamp ev);
+				  EventTimestamp ev,
+				  GarbageCollectionToken);
 	Expression *refineSubCond(const MachineState<abstract_interpret_value> *ms,
 				  LogReader<abstract_interpret_value> *lf,
 				  LogReaderPtr ptr,
 				  const std::map<ThreadId, unsigned long> &validity,
-				  EventTimestamp ev);
+				  EventTimestamp ev,
+				  GarbageCollectionToken);
 
 protected:
 	char *mkName(void) const {
@@ -3151,7 +3185,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev);
+			   EventTimestamp ev,
+			   GarbageCollectionToken);
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
 		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
 		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
@@ -3204,7 +3239,8 @@ public:
 			   LogReaderPtr ptr,
 			   bool *progress,
 			   const std::map<ThreadId, unsigned long> &validity,
-			   EventTimestamp ev) { return this; }
+			   EventTimestamp ev,
+			   GarbageCollectionToken) { return this; }
 
 	Relevance relevance(const EventTimestamp &ev, Relevance low, Relevance high)
 	{

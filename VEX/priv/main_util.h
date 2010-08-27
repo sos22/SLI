@@ -102,7 +102,8 @@ extern void         vexSetAllocMode ( VexAllocMode );
 extern VexAllocMode vexGetAllocMode ( void );
 extern void         vexAllocSanityCheck ( void );
 
-extern void vexSetAllocModeTEMP_and_clear ( void );
+class GarbageCollectionToken;
+extern void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t);
 
 #endif /* ndef __VEX_MAIN_UTIL_H */
 

@@ -312,7 +312,8 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, Thread
 }
 static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 				  LogReader<abstract_interpret_value> *script,
-				  LogReaderPtr ptr)
+				  LogReaderPtr ptr,
+				  GarbageCollectionToken tok)
 {
 	VexGcRoot root0((void **)&ms, "root0");
 	MachineState<abstract_interpret_value> *ms2 = ms->dupeSelf();
@@ -320,7 +321,7 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 	CrashReasonExtractor *extr = CrashReasonExtractor::get();
 	VexGcRoot root1((void **)&extr, "root1");
 
-	i.replayLogfile(script, ptr, NULL, NULL, extr);
+	i.replayLogfile(script, ptr, tok, NULL, NULL, extr);
 	if (!ms2->crashed())
 		return NULL;
 
@@ -387,7 +388,7 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 static Expression *                                                                                  
 strip_outer_rips(Expression *e, MachineState<abstract_interpret_value> *ms,
 		 LogReader<abstract_interpret_value> **lf,
-		 LogReaderPtr *lfstart)
+		 LogReaderPtr *lfstart, GarbageCollectionToken tok)
 {
 	/* Phase 1: count how many RIP wrappers there are. */                                         
 	unsigned cntr;                                                                                
@@ -421,9 +422,9 @@ strip_outer_rips(Expression *e, MachineState<abstract_interpret_value> *ms,
 	/* Phase 3: generate a new machine state representing the very
 	   start of the current history. */
 	Interpreter<abstract_interpret_value> i(ms);
-	i.runToEvent(crip->history->when, crip->model_execution, crip->model_exec_start, lfstart);
+	i.runToEvent(crip->history->when, crip->model_execution, crip->model_exec_start, tok, lfstart);
 	*lf = crip->model_execution;
-	return getCrashReason(ms->dupeSelf(), crip->model_execution, *lfstart);
+	return getCrashReason(ms->dupeSelf(), crip->model_execution, *lfstart, tok);
 }
 
 int
@@ -442,7 +443,7 @@ main(int argc, char *argv[])
 	VexGcRoot logroot((void **)&lf, "logroot");
 	LibVEX_alloc_sanity_check();
 
-	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr);
+	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
 	MachineState<abstract_interpret_value> *abstract = concrete->abstract<abstract_interpret_value>();
 	VexGcRoot keeper((void **)&abstract, "keeper");
 
@@ -450,13 +451,13 @@ main(int argc, char *argv[])
 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
 	VexGcRoot al_keeper((void **)&al, "al_keeper");
 
-	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
+	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr, ALLOW_GC);
 	VexGcRoot crkeeper((void **)&cr, "crkeeper");
 	printf("%s\n", cr->name());
 	LogReader<abstract_interpret_value> *lf2 = al;
 	VexGcRoot lf2keeper((void **)&lf2, "lf2keeper");
 	LogReaderPtr lf2start = ptr;
-	cr = strip_outer_rips(cr, abstract, &lf2, &lf2start);
+	cr = strip_outer_rips(cr, abstract, &lf2, &lf2start, ALLOW_GC);
 
 	LibVEX_alloc_sanity_check();
 	std::map<ThreadId, unsigned long> m1;
@@ -467,7 +468,7 @@ main(int argc, char *argv[])
 		//assert(syntax_check_expression(cr, m1));
 		std::map<ThreadId, unsigned long> v;
 		LibVEX_alloc_sanity_check();
-		cr = cr->refine(abstract, lf2, lf2start, &progress, v, cr->timestamp());
+		cr = cr->refine(abstract, lf2, lf2start, &progress, v, cr->timestamp(), ALLOW_GC);
 		LibVEX_alloc_sanity_check();
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
