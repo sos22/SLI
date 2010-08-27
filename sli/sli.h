@@ -2829,12 +2829,17 @@ public:
 		unsigned size;
 		EventTimestamp when;
 		abstract_interpret_value storeAddr;
+		MCLookasideEntry *dupeSelf() const;
 		abstract_interpret_value content[0];
 	};
+	mutable bool lookasideChainFrozen;
 	MCLookasideEntry *headLookaside;
 	PhysicalAddress base;
+	unsigned write_counter;
 
 	static VexAllocType mcl_allocator;
+
+	void compact_lookaside_chain(void);
 
 	void visit(HeapVisitor &hv) const
 	{

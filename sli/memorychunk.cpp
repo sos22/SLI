@@ -1,3 +1,4 @@
+#include <bitset>
 #include "sli.h"
 
 MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::allocate()
@@ -53,6 +54,7 @@ MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::al
 MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::dupeSelf() const
 {
 	MemoryChunk<abstract_interpret_value> *r = new MemoryChunk<abstract_interpret_value>();
+	lookasideChainFrozen = true;
 	memcpy(r, this, sizeof(*r));
 	return r;
 }
@@ -89,6 +91,53 @@ EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 	return when;
 }
 
+void
+MemoryChunk<abstract_interpret_value>::compact_lookaside_chain(void)
+{
+	MCLookasideEntry *oldHead;
+	MCLookasideEntry *newHead;
+	MCLookasideEntry **newTailp;
+	std::bitset<size> seen;
+
+	newHead = NULL;
+	newTailp = &newHead;
+	oldHead = headLookaside;
+
+	while (oldHead) {
+		bool useful = false;
+		for (unsigned x = 0; x < oldHead->size; x++) {
+			if (!seen.test(x + oldHead->offset))
+				useful = true;
+			seen.set(x + oldHead->offset);
+		}
+		if (useful) {
+			if (lookasideChainFrozen) {
+				*newTailp = oldHead->dupeSelf();
+			} else {
+				*newTailp = oldHead;
+			}
+			newTailp = &(*newTailp)->next;
+		}
+		oldHead = oldHead->next;
+	}
+
+	*newTailp = NULL;
+	headLookaside = newHead;
+	lookasideChainFrozen = false;
+}
+
+
+MemoryChunk<abstract_interpret_value>::MCLookasideEntry *
+MemoryChunk<abstract_interpret_value>::MCLookasideEntry::dupeSelf() const
+{
+	MCLookasideEntry *newmcl =
+		(MCLookasideEntry *)LibVEX_Alloc_Sized(&mcl_allocator,
+						       sizeof(MCLookasideEntry) + sizeof(abstract_interpret_value) * size);
+	*newmcl = *this;
+	memcpy(newmcl->content, content, size * sizeof(content[0]));
+	return newmcl;
+}
+
 void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 						  unsigned offset,
 						  const abstract_interpret_value *source,
@@ -108,6 +157,9 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 		newmcl->content[x] = source[x];
 	}
 	headLookaside = newmcl;
+
+	if (++write_counter % 256 == 0)
+		compact_lookaside_chain();
 }
 
 static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
