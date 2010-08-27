@@ -172,7 +172,7 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 	   accesses.  This isn't *entirely* valid, but it makes things
 	   so much easier that it's worth it. */
 	bool irrelevant;
-#if 0
+#if 1
 	irrelevant = (is_stack(start) ||
 		      (thr &&
 		       force(start) > force(thr->regs.rsp()) - 1000000 &&
