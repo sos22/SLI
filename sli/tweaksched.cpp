@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include <set>
+#include <map>
 
 #include "sli.h"
 
@@ -89,7 +90,10 @@ class ConstraintMaker : public GarbageCollected<ConstraintMaker> {
 				 std::vector<SchedConstraint> &canonical);
 public:
 	std::vector<SchedConstraint> constraints;
-	std::map<ThreadId, MemLog<unsigned long> *> threadLogs;
+	typedef gc_map<ThreadId, MemLog<unsigned long> *,
+		       __default_hash_function, __default_eq_function,
+		       __visit_function_heap> threadLogsT;
+	threadLogsT *threadLogs;
 
 	void playLogfile(LogReader<unsigned long> *lr, LogReaderPtr start,
 			 GarbageCollectionToken tok);
@@ -97,11 +101,9 @@ public:
 
 	bool contradictory();
 
-	void visit(HeapVisitor &hv) const {
-		for (std::map<ThreadId, MemLog<unsigned long> *>::const_iterator it = threadLogs.begin();
-		     it != threadLogs.end();
-		     it++)
-			hv(it->second);
+	ConstraintMaker() : threadLogs(new threadLogsT()) {}
+	void visit(HeapVisitor &hv) {
+		hv(threadLogs);
 	}
 	void destruct() { this->~ConstraintMaker(); }
 	NAMED_CLASS
@@ -254,10 +256,10 @@ ConstraintMaker::playLogfile(LogReader<unsigned long> *lf, LogReaderPtr ptr,
 		    dynamic_cast<LogRecordVexThreadState<unsigned long> *>(lr))
 			effTid = ThreadId(0);
 
-		if (!threadLogs[effTid]) {
-			threadLogs[effTid] = MemLog<unsigned long>::emptyMemlog();
+		if (!(*threadLogs)[effTid]) {
+			(*threadLogs)[effTid] = MemLog<unsigned long>::emptyMemlog();
 		}
-		threadLogs[effTid]->append(lr, 0);
+		(*threadLogs)[effTid]->append(lr, 0);
 
 		if (++nrRecords % 1000 == 0) {
 			/* Try to eliminate the useless bits at the
@@ -514,14 +516,14 @@ replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms, GarbageC
 	while (!ms->exitted && event_nr < 10000000) {
 		/* Get list of available threads */
 		std::set<ThreadId> availThreads;
-		for (std::map<ThreadId, MemLog<unsigned long> *>::iterator it = cm->threadLogs.begin();
-		     it != cm->threadLogs.end();
+		for (ConstraintMaker::threadLogsT::iterator it = cm->threadLogs->begin();
+		     it != cm->threadLogs->end();
 		     it++)
-			if (it->first._tid() != 0) {
-				Thread<unsigned long> *thr = ms->findThread(it->first, true);
+			if (it.key()._tid() != 0) {
+				Thread<unsigned long> *thr = ms->findThread(it.key(), true);
 				if (thr && thr->runnable()) {
 					if (!thr->idle || allow_idle_threads) {
-						availThreads.insert(it->first);
+						availThreads.insert(it.key());
 						thr->idle = false;
 					}
 				}
@@ -623,7 +625,7 @@ replayToSchedule(ConstraintMaker *cm, MachineState<unsigned long> *_ms, GarbageC
 			}
 		}
 
-		MemLog<unsigned long> *logfile = cm->threadLogs[tid];
+		MemLog<unsigned long> *logfile = (*cm->threadLogs)[tid];
 		LogReaderPtr &logptr(threadPtrs[tid]);
 #if 1
 		stashedEvents[tid] = evt->fuzzyReplay(ms, logfile, logptr, &logptr, tok);

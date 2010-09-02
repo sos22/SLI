@@ -10,7 +10,7 @@ public:
 	AbstractLogReader(const LogReader<intype> *_inp) :
 		LogReader<outtype>(),
 		inp(_inp) {}
-	void visit(HeapVisitor &hv) const {}
+	void visit(HeapVisitor &hv) { hv(inp); }
 	void destruct() {}
 	NAMED_CLASS
 };

@@ -50,18 +50,18 @@ VAMap::AllocFlags::operator unsigned long() const
 const VAMap::AllocFlags VAMap::defaultFlags(false);
 
 template <typename ait>
-void VAMap::VAMapEntry::visit(PMap<ait> *pmap, HeapVisitor &hv) const
+void VAMap::VAMapEntry::visit(VAMapEntry *&ref, PMap<ait> *pmap, HeapVisitor &hv)
 {
 	unsigned x;
-	hv(this);
-	if (prev)
-		prev->visit(pmap, hv);
-	if (succ)
-		succ->visit(pmap, hv);
-	hv(pa);
-	for (x = 0; x < dchunk(start, end); x++) {
-		assert(pa[x]._pa != 0);
-		pmap->visitPA(pa[x], hv);
+	hv(ref);
+	if (ref->prev)
+		ref->prev->visit(ref->prev, pmap, hv);
+	if (ref->succ)
+		ref->succ->visit(ref->succ, pmap, hv);
+	hv(ref->pa);
+	for (x = 0; x < dchunk(ref->start, ref->end); x++) {
+		assert(ref->pa[x]._pa != 0);
+		pmap->visitPA(ref->pa[x], hv);
 	}
 }
 
@@ -69,6 +69,7 @@ void VAMap::VAMapEntry::visit(PMap<ait> *pmap, HeapVisitor &hv) const
  * hand. */
 static VexAllocType vme_type = {
 nbytes: sizeof(VAMap::VAMapEntry),
+relocate: NULL,
 gc_visit: NULL,
 destruct: NULL,
 name: "VAMap::VAMapEntry"
@@ -530,7 +531,7 @@ VAMap *VAMap::empty()
 	return work;
 }
 
-VAMap *VAMap::dupeSelf() const
+VAMap *VAMap::dupeSelf()
 {
 	VAMap *work = empty();
 	if (parent)
@@ -540,21 +541,22 @@ VAMap *VAMap::dupeSelf() const
 	return work;
 }
 
-void VAMap::visit(HeapVisitor &hv) const
+void VAMap::visit(HeapVisitor &hv)
 {
 	hv(parent);
 }
 
 template <typename ait>
-void VAMap::visit(HeapVisitor &hv, PMap<ait> *pmap) const
+void VAMap::visit(VAMap *&ref, HeapVisitor &hv, PMap<ait> *pmap)
 {
-	if (root) {
-		assert(!parent);
-		root->visit(pmap, hv);
+	hv(ref);
+	if (ref->root) {
+		assert(!ref->parent);
+		ref->root->visit(ref->root, pmap, hv);
 	}
-	if (parent) {
-		assert(!root);
-		parent->visit(hv, pmap);
+	if (ref->parent) {
+		assert(!ref->root);
+		ref->parent->visit(ref->parent, hv, pmap);
 	}
 }
 
@@ -656,4 +658,4 @@ VAMap::iterator::operator++(int ignore)
 }
 
 #define MK_VAMAP(t)							\
-	template void VAMap::visit<t>(HeapVisitor &hv, PMap<t> *pmap) const
+	template void VAMap::visit<t>(VAMap *&, HeapVisitor &hv, PMap<t> *pmap)

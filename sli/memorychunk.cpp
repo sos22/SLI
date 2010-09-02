@@ -1,11 +1,16 @@
 #include <bitset>
 #include "sli.h"
 
+unsigned MemoryChunk<unsigned long>::serial_start = 0xbeeffeed;
+
 MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::allocate()
 {
 	void *r = LibVEX_Alloc_Bytes(sizeof(MemoryChunk<unsigned long>));
+	MemoryChunk<unsigned long> *mc;
 	memset(r, 0, sizeof(MemoryChunk<unsigned long>));
-	return new (r) MemoryChunk<unsigned long>();
+	mc = new (r) MemoryChunk<unsigned long>();
+	mc->serial = serial_start++;
+	return mc;
 }
 
 MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::dupeSelf() const
@@ -84,7 +89,10 @@ EventTimestamp MemoryChunk<abstract_interpret_value>::read(unsigned offset,
 		}
 		if (!done) {
 			unsigned long b;
-			underlying->read(offset + x, &b, 1);
+			if (underlying)
+				underlying->read(offset + x, &b, 1);
+			else
+				b = 0;
 			dest[x] = mkConst<abstract_interpret_value>(b);
 		}
 	}
@@ -162,10 +170,10 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 		compact_lookaside_chain();
 }
 
-static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
+static void visit_mcl_lookaside(void *_ctxt, HeapVisitor &hv)
 {
-	const class MemoryChunk<abstract_interpret_value>::MCLookasideEntry *mcl =
-		(const class MemoryChunk<abstract_interpret_value>::MCLookasideEntry *)_ctxt;
+	class MemoryChunk<abstract_interpret_value>::MCLookasideEntry *mcl =
+		(class MemoryChunk<abstract_interpret_value>::MCLookasideEntry *)_ctxt;
 	for (unsigned x = 0; x < mcl->size; x++)
 		visit_aiv(mcl->content[x], hv);
 	visit_aiv(mcl->storeAddr, hv);
@@ -173,4 +181,4 @@ static void visit_mcl_lookaside(const void *_ctxt, HeapVisitor &hv)
 }
 
 VexAllocType MemoryChunk<abstract_interpret_value>::mcl_allocator =
-{ -1, visit_mcl_lookaside, NULL, "mcl_lookaside" };
+{ -1, NULL, visit_mcl_lookaside, NULL, "mcl_lookaside" };

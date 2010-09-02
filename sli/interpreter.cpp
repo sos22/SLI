@@ -17,7 +17,7 @@
 
 static bool loud_mode;
 
-#define DBG(x, args...) do { if (loud_mode) printf("%s:%d:%d: " x, __FILE__, __LINE__, tid._tid(), ##args); } while (0)
+#define DBG(x, args...) do { if (loud_mode) printf("%s:%d:%d: " x, __FILE__, __LINE__, ths->tid._tid(), ##args); } while (0)
 
 static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 {
@@ -1351,34 +1351,36 @@ IRSB *instrument_func(void *closure,
 template <typename ait>
 class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	AddressSpace<ait> *aspace;
-	ait offset;
+	unsigned long offset;
 	VexGcVisitor<AddressSpaceGuestFetcher<ait> > visitor;
 public:
 	virtual UChar operator[](unsigned long idx) const {
 		ait v;
-		aspace->readMemory(mkConst<ait>(idx) + offset, 1, &v, false, NULL);
+		aspace->readMemory(mkConst<ait>(idx + offset), 1, &v, false, NULL);
 		return force(v);
 	}
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
-				 ait _offset) :
+				 unsigned long _offset) :
 		aspace(_aspace),
 		offset(_offset),
 		visitor(this, "AddressSpaceGuestFetcher")
 	{
 	}
-	void visit(HeapVisitor &hv) const { visit_aiv(offset, hv); hv(aspace); }
+	void visit(HeapVisitor &hv) { visit_aiv(offset, hv); hv(aspace); }
 };
 
-template<typename ait>
-void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace,
-				     ait rip,
-				     GarbageCollectionToken t)
+template<typename ait> void
+Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
+				VexPtr<AddressSpace<ait> > &addrSpace,
+				ait rip,
+				GarbageCollectionToken t)
 {
-	redirectGuest(rip);
+	ths->redirectGuest(rip);
 
+	unsigned long _rip = force(rip);
 	vexSetAllocModeTEMP_and_clear(t);
 
-	WeakRef<IRSB> *cacheSlot = addrSpace->searchDecodeCache(force(rip));
+	WeakRef<IRSB> *cacheSlot = addrSpace->searchDecodeCache(_rip);
 	assert(cacheSlot != NULL);
 	IRSB *irsb = cacheSlot->get();
 	if (!irsb) {
@@ -1392,12 +1394,12 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace,
 		LibVEX_default_VexAbiInfo(&abiinfo_both);
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-		class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, rip);
+		class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, _rip);
 		irsb = bb_to_IR(&vge,
 				NULL, /* Context for chase_into_ok */
 				disInstr_AMD64,
 				fetcher,
-				(Addr64)force(rip),
+				(Addr64)_rip,
 				chase_into_ok,
 				False, /* host bigendian */
 				VexArchAMD64,
@@ -1416,13 +1418,13 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace,
 		cacheSlot->set(irsb);
 	}
 
-	temporaries.setSize(irsb->tyenv->types_used);
+	ths->temporaries.setSize(irsb->tyenv->types_used);
 
-	currentIRSB = irsb;
-	currentIRSBOffset = 0;
-	currentIRSBRip = regs.rip();
+	ths->currentIRSB = irsb;
+	ths->currentIRSBOffset = 0;
+	ths->currentIRSBRip = ths->regs.rip();
 
-	currentControlCondition = mkConst<ait>(1);
+	ths->currentControlCondition = mkConst<ait>(1);
 
 	if (loud_mode)
 		ppIRSB(irsb);
@@ -1430,8 +1432,8 @@ void Thread<ait>::translateNextBlock(AddressSpace<ait> *addrSpace,
 
 template<typename ait>
 ThreadEvent<ait> *
-Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
-			MachineState<ait> *ms,
+Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
+			VexPtr<MachineState<ait> > &ms,
 			GarbageCollectionToken t)
 {
 	unsigned put_offset;
@@ -1439,26 +1441,26 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 	IRType put_type;
 
 	while (1) {
-		addrSpace->sanityCheckDecodeCache();
-		if (!currentIRSB) {
+		if (!ths->currentIRSB) {
 			try {
-				translateNextBlock(addrSpace, regs.rip(), t);
+				VexPtr<AddressSpace<ait> > as(ms->addressSpace);
+			        ths->translateNextBlock(ths, as, ths->regs.rip(), t);
 			} catch (BadMemoryException<ait> excn) {
-				return SignalEvent<ait>::get(bumpEvent(ms), 11, excn.ptr);
+				return SignalEvent<ait>::get(ths->bumpEvent(ms), 11, excn.ptr);
 			}
-			assert(currentIRSB);
+			assert(ths->currentIRSB);
 		}
-		while (currentIRSBOffset < currentIRSB->stmts_used) {
-			IRStmt *stmt = currentIRSB->stmts[currentIRSBOffset];
-			currentIRSBOffset++;
+		while (ths->currentIRSBOffset < ths->currentIRSB->stmts_used) {
+			IRStmt *stmt = ths->currentIRSB->stmts[ths->currentIRSBOffset];
+			ths->currentIRSBOffset++;
 
 			switch (stmt->tag) {
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
-				if (force(regs.rip() == addrSpace->client_free))
-					addrSpace->client_freed(bumpEvent(ms),
-								regs.get_reg(REGISTER_IDX(RDI)));
+				if (force(ths->regs.rip() == ms->addressSpace->client_free))
+					ms->addressSpace->client_freed(ths->bumpEvent(ms),
+								       ths->regs.get_reg(REGISTER_IDX(RDI)));
 #if 0
 #define GR(x) regs.get_reg(REGISTER_IDX(x))
 				return InstructionEvent<ait>::get(bumpEvent(ms),
@@ -1478,36 +1480,36 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			case Ist_MBE:
 				break;
 			case Ist_WrTmp:
-				temporaries[stmt->Ist.WrTmp.tmp] =
-					eval_expression(stmt->Ist.WrTmp.data);
+				ths->temporaries[stmt->Ist.WrTmp.tmp] =
+					ths->eval_expression(stmt->Ist.WrTmp.data);
 				DBG("wrtmp %d -> %s",
 				    stmt->Ist.WrTmp.tmp,
-				    temporaries[stmt->Ist.WrTmp.tmp].name());
+				    ths->temporaries[stmt->Ist.WrTmp.tmp].name());
 				break;
 
 			case Ist_Store: {
 				assert(stmt->Ist.Store.end == Iend_LE);
 				assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
 				struct expression_result<ait> data =
-					eval_expression(stmt->Ist.Store.data);
+					ths->eval_expression(stmt->Ist.Store.data);
 				struct expression_result<ait> addr =
-					eval_expression(stmt->Ist.Store.addr);
-				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
+					ths->eval_expression(stmt->Ist.Store.addr);
+				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
-				if (addrSpace->isWritable(addr.lo, size, this)) {
+				if (ms->addressSpace->isWritable(addr.lo, size, ths)) {
 					DBG("Store %s to %s\n", data.name(), addr.name());
-					return StoreEvent<ait>::get(bumpEvent(ms), addr.lo, size, data);
+					return StoreEvent<ait>::get(ths->bumpEvent(ms), addr.lo, size, data);
 				}
 				EventTimestamp et;
 				ait free_addr;
-				if (addrSpace->isOnFreeList(addr.lo, addr.lo + mkConst<ait>(size), tid, &et,
-							    &free_addr))
-					return UseFreeMemoryEvent<ait>::get(bumpEvent(ms), 
+				if (ms->addressSpace->isOnFreeList(addr.lo, addr.lo + mkConst<ait>(size), ths->tid, &et,
+								   &free_addr))
+					return UseFreeMemoryEvent<ait>::get(ths->bumpEvent(ms), 
 									    addr.lo,
 									    free_addr,
 									    et);
 				else
-					return SignalEvent<ait>::get(bumpEvent(ms), 11, addr.lo);
+					return SignalEvent<ait>::get(ths->bumpEvent(ms), 11, addr.lo);
 			}
 
 			case Ist_CAS: {
@@ -1516,25 +1518,25 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 				assert(stmt->Ist.CAS.details->dataHi == NULL);
 				assert(stmt->Ist.CAS.details->end == Iend_LE);
 				struct expression_result<ait> data =
-					eval_expression(stmt->Ist.CAS.details->dataLo);
+					ths->eval_expression(stmt->Ist.CAS.details->dataLo);
 				struct expression_result<ait> addr =
-					eval_expression(stmt->Ist.CAS.details->addr);
+					ths->eval_expression(stmt->Ist.CAS.details->addr);
 				struct expression_result<ait> expected =
-					eval_expression(stmt->Ist.CAS.details->expdLo);
-				unsigned size = sizeofIRType(typeOfIRExpr(currentIRSB->tyenv,
+					ths->eval_expression(stmt->Ist.CAS.details->expdLo);
+				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
-				return CasEvent<ait>::get(bumpEvent(ms), stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+				return CasEvent<ait>::get(ths->bumpEvent(ms), stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 			}
 
 			case Ist_Put: {
 				put_offset = stmt->Ist.Put.offset;
-				put_data = eval_expression(stmt->Ist.Put.data);
-				put_type = typeOfIRExpr(currentIRSB->tyenv, stmt->Ist.Put.data);
+				put_data = ths->eval_expression(stmt->Ist.Put.data);
+				put_type = typeOfIRExpr(ths->currentIRSB->tyenv, stmt->Ist.Put.data);
 				do_put:
 				DBG("put offset %d type %d -> %s",
 				    put_offset, put_type, put_data.name());
 				unsigned byte_offset = put_offset & 7;
-				ait dest = read_reg(this, put_offset - byte_offset);
+				ait dest = read_reg(&*ths, put_offset - byte_offset);
 				switch (put_type) {
 				case Ity_I8:
 					dest &= mkConst<ait>(~(0xFF << (byte_offset * 8)));
@@ -1564,7 +1566,7 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 				case Ity_V128:
 					assert(byte_offset == 0);
 					dest = put_data.lo;
-					write_reg(this,
+					write_reg(&*ths,
 						  put_offset + 8,
 						  put_data.hi);
 					break;
@@ -1573,12 +1575,12 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 					throw NotImplementedException();
 				}
 
-				write_reg(this, put_offset - byte_offset, dest);
+				write_reg(&*ths, put_offset - byte_offset, dest);
 				break;
 			}
 
 			case Ist_PutI: {
-				struct expression_result<ait> idx = eval_expression(stmt->Ist.PutI.ix);
+				struct expression_result<ait> idx = ths->eval_expression(stmt->Ist.PutI.ix);
 
 				/* Crazy bloody encoding scheme */
 				idx.lo =
@@ -1588,13 +1590,13 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 						     stmt->Ist.PutI.descr->base);
 
 				put_offset = force(idx.lo);
-				put_data = eval_expression(stmt->Ist.PutI.data);
+				put_data = ths->eval_expression(stmt->Ist.PutI.data);
 				put_type = stmt->Ist.PutI.descr->elemTy;
 				goto do_put;
 			}
 
 			case Ist_Dirty: {
-				ThreadEvent<ait> *evt = do_dirty_call(stmt->Ist.Dirty.details, ms);
+				ThreadEvent<ait> *evt = ths->do_dirty_call(stmt->Ist.Dirty.details, ms);
 				if (evt)
 					return evt;
 				break;
@@ -1603,31 +1605,31 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			case Ist_Exit: {
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result<ait> guard =
-						eval_expression(stmt->Ist.Exit.guard);
-					sanity_check_ait(currentControlCondition);
+						ths->eval_expression(stmt->Ist.Exit.guard);
+					sanity_check_ait(ths->currentControlCondition);
 					sanity_check_ait(guard.lo);
 					if (force(!guard.lo)) {
-						currentControlCondition =
-							currentControlCondition && !guard.lo;
-						sanity_check_ait(currentControlCondition);
+						ths->currentControlCondition =
+							ths->currentControlCondition && !guard.lo;
+						sanity_check_ait(ths->currentControlCondition);
 						break;
 					}
-					currentControlCondition =
-						currentControlCondition && !!guard.lo;
-					sanity_check_ait(currentControlCondition);
+					ths->currentControlCondition =
+						ths->currentControlCondition && !!guard.lo;
+					sanity_check_ait(ths->currentControlCondition);
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
 					printf("EMULATION WARNING %lx\n",
-					       force(regs.get_reg(REGISTER_IDX(EMWARN))));
+					       force(ths->regs.get_reg(REGISTER_IDX(EMWARN))));
 				}
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
-				sanity_check_ait(currentControlCondition);
-				regs.set_reg(REGISTER_IDX(RIP),
-					     ternary(currentControlCondition,
-						     mkConst<ait>(stmt->Ist.Exit.dst->Ico.U64),
-						     mkConst<ait>(0xdeadbeef)));
-				currentIRSB = NULL;
+				sanity_check_ait(ths->currentControlCondition);
+				ths->regs.set_reg(REGISTER_IDX(RIP),
+						  ternary(ths->currentControlCondition,
+							  mkConst<ait>(stmt->Ist.Exit.dst->Ico.U64),
+							  mkConst<ait>(0xdeadbeef)));
+				ths->currentIRSB = NULL;
 				goto finished_block;
 			}
 
@@ -1638,37 +1640,37 @@ Thread<ait>::runToEvent(struct AddressSpace<ait> *addrSpace,
 			}
 		}
 		
-		assert(currentIRSB->jumpkind == Ijk_Boring ||
-		       currentIRSB->jumpkind == Ijk_Call ||
-		       currentIRSB->jumpkind == Ijk_Ret ||
-		       currentIRSB->jumpkind == Ijk_Sys_syscall ||
-		       currentIRSB->jumpkind == Ijk_Yield);
+		assert(ths->currentIRSB->jumpkind == Ijk_Boring ||
+		       ths->currentIRSB->jumpkind == Ijk_Call ||
+		       ths->currentIRSB->jumpkind == Ijk_Ret ||
+		       ths->currentIRSB->jumpkind == Ijk_Sys_syscall ||
+		       ths->currentIRSB->jumpkind == Ijk_Yield);
 
-		if (currentIRSB->jumpkind == Ijk_Yield)
-			currentIRSB->jumpkind = Ijk_Boring;
+		if (ths->currentIRSB->jumpkind == Ijk_Yield)
+			ths->currentIRSB->jumpkind = Ijk_Boring;
 
-		if (currentIRSB->jumpkind == Ijk_Ret)
-			allowRipMismatch = false;
+		if (ths->currentIRSB->jumpkind == Ijk_Ret)
+			ths->allowRipMismatch = false;
 
 		{
-			bool is_syscall = currentIRSB->jumpkind == Ijk_Sys_syscall;
+			bool is_syscall = ths->currentIRSB->jumpkind == Ijk_Sys_syscall;
 			{
 				struct expression_result<ait> next_addr =
-					eval_expression(currentIRSB->next);
-				sanity_check_ait(currentControlCondition);
+					ths->eval_expression(ths->currentIRSB->next);
+				sanity_check_ait(ths->currentControlCondition);
 				sanity_check_ait(next_addr.lo);
-				regs.set_reg(REGISTER_IDX(RIP),
-					     ternary(currentControlCondition,
-						     next_addr.lo,
-						     mkConst<ait>(0xdeadbeef)));
-				currentIRSB = NULL;
+				ths->regs.set_reg(REGISTER_IDX(RIP),
+						  ternary(ths->currentControlCondition,
+							  next_addr.lo,
+							  mkConst<ait>(0xdeadbeef)));
+				ths->currentIRSB = NULL;
 			}
 			if (is_syscall)
-				return SyscallEvent<ait>::get(bumpEvent(ms));
+				return SyscallEvent<ait>::get(ths->bumpEvent(ms));
 		}
 
 finished_block:
-		addrSpace->sanityCheckDecodeCache();
+		;
 	}
 }
 
@@ -1676,10 +1678,9 @@ template<typename ait>
 InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace<ait> **output, unsigned max_events,
 						       GarbageCollectionToken t)
 {
-	MemoryTrace<ait> *work = new MemoryTrace<ait>();
-	VexGcRoot root((void **)&work, "getThreadMemoryTrace work");
+	VexPtr<MemoryTrace<ait> > work(new MemoryTrace<ait>());
 	*output = work;
-	Thread<ait> *thr = currentState->findThread(tid);
+	VexPtr<Thread<ait> > thr(currentState->findThread(tid));
 	if (thr->cannot_make_progress)
 		return InterpretResultIncomplete;
 	while (max_events && thr->runnable() &&
@@ -1687,7 +1688,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 	       /* Since we're running the thread in isolation, if it
 		  goes idle it's unlikely to ever wake up again. */
 	       !thr->idle) {
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
 
 		InterpretResult res = evt->fake(currentState);
 		if (res != InterpretResultContinue) {
@@ -1707,13 +1708,14 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 }
 
 template<typename ait>
-void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
+void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid,
+						unsigned nr_accesses,
 						GarbageCollectionToken t,
-						LogWriter<ait> *output)
+						VexPtr<LogWriter<ait> > &output)
 {
-        Thread<ait> *thr = currentState->findThread(tid);
+        VexPtr<Thread<ait> > thr(currentState->findThread(tid));
         while (1) {
-                ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
+                ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (dynamic_cast<LoadEvent<ait> *>(evt) ||
 		    dynamic_cast<StoreEvent<ait> *>(evt)) {
@@ -1730,13 +1732,16 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid, unsigned nr_access
 }
 
 template<typename ait>
-void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, GarbageCollectionToken t,
+void Interpreter<ait>::runToFailure(ThreadId tid,
+				    VexPtr<LogWriter<ait> > &output,
+				    GarbageCollectionToken t,
 				    unsigned max_events)
 {
 	bool have_event_limit = max_events != 0;
-	Thread<ait> *thr = currentState->findThread(tid);
+	VexPtr<Thread<ait> > thr(currentState->findThread(tid));
 	while ((!have_event_limit || max_events) && thr->runnable()) {
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
+		VexPtr<MachineState<ait> > cs(currentState);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, cs, t);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {
 			thr->cannot_make_progress = true;
@@ -1747,10 +1752,12 @@ void Interpreter<ait>::runToFailure(ThreadId tid, LogWriter<ait> *output, Garbag
 }
 
 template<typename ait>
-void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
+void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
+				     LogReaderPtr ptr,
 				     GarbageCollectionToken t,
-				     LogReaderPtr *eof, LogWriter<ait> *lw,
-				     EventRecorder<ait> *er)
+				     LogReaderPtr *eof,
+				     VexPtr<LogWriter<ait> > &lw,
+				     VexPtr<EventRecorder<ait> > &er)
 {
 	unsigned long event_counter = 0;
 
@@ -1766,10 +1773,10 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 		if (!lr)
 			break;
 
-		Thread<ait> *thr = currentState->findThread(lr->thread());
+		VexPtr<Thread<ait> > thr(currentState->findThread(lr->thread()));
 		assert(thr);
 		assert(!thr->exitted);
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
 
 		while (evt) {
 			if (er)
@@ -1799,15 +1806,17 @@ void Interpreter<ait>::replayLogfile(LogReader<ait> const *lf, LogReaderPtr ptr,
 
 		/* Memory records are special and should always be
 		   processed eagerly. */
-		process_memory_records(currentState->addressSpace, lf, ptr,
-				       &ptr, lw, t);
+		VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
+	        process_memory_records(as, lf, ptr, &ptr, lw, t);
 	}
 	if (eof)
 		*eof = ptr;
 }
 
 template<typename ait>
-void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, LogReaderPtr ptr,
+void Interpreter<ait>::runToEvent(EventTimestamp end,
+				  VexPtr<LogReader<ait> > &lf,
+				  LogReaderPtr ptr,
 				  GarbageCollectionToken t, LogReaderPtr *eof)
 {
 	/* Mostly a debugging aide */
@@ -1823,9 +1832,9 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 		if (!lr)
 			break;
 
-		Thread<ait> *thr = currentState->findThread(lr->thread());
+		VexPtr<Thread<ait> > thr(currentState->findThread(lr->thread()));
 		assert(thr->runnable());
-		ThreadEvent<ait> *evt = thr->runToEvent(currentState->addressSpace, currentState, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
 
 		while (evt && !finished) {
 			if (evt->when == end)
@@ -1843,18 +1852,19 @@ void Interpreter<ait>::runToEvent(EventTimestamp end, const LogReader<ait> *lf, 
 
 		/* Memory records are special and should always be
 		   processed eagerly. */
-		process_memory_records(currentState->addressSpace, lf, ptr,
-				       &ptr, (LogWriter<ait> *)NULL, t);
+		VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
+	        VexPtr<LogWriter<ait> > dummy(NULL);
+		process_memory_records(as, lf, ptr, &ptr, dummy, t);
 	}
 	if (eof)
 		*eof = ptr;
 }
 
-template <typename ait> void visit_expression_result_array(const void *_ctxt,
+template <typename ait> void visit_expression_result_array(void *_ctxt,
 							   HeapVisitor &hv)
 {
-	unsigned nr_entries = *(const unsigned *)_ctxt;
-	const expression_result<ait> *arr = (const expression_result<ait> *)((unsigned *)_ctxt + 1);
+	unsigned nr_entries = *(unsigned *)_ctxt;
+	expression_result<ait> *arr = (expression_result<ait> *)((unsigned *)_ctxt + 1);
 	for (unsigned x = 0; x < nr_entries; x++)
 		arr[x].visit(hv);
 }
@@ -1867,34 +1877,30 @@ template <typename ait> void destruct_expression_result_array(void *_ctxt)
 		arr[x].~expression_result<ait>();
 }
 
-template <typename ait> VexAllocType expression_result_array<ait>::arrayAllocType = {
-	-1, visit_expression_result_array<ait>, destruct_expression_result_array<ait>,
-	"expression result array"};
-
 #define MK_INTERPRETER(t)						\
-	template ThreadEvent<t> *Thread<t>::runToEvent(AddressSpace<t> *addrSpace, \
-						       MachineState<t> *ms, \
+	template ThreadEvent<t> *Thread<t>::runToEvent(VexPtr<Thread<t> > &ths, \
+						       VexPtr<MachineState<t> > &ms, \
 						       GarbageCollectionToken);	\
 	template void Interpreter<t>::runToFailure(ThreadId tid,	\
-						   LogWriter<t> *output, \
+						   VexPtr<LogWriter<t> > &output, \
 						   GarbageCollectionToken, \
 						   unsigned max_events); \
 	template void Interpreter<t>::runToAccessLoggingEvents(ThreadId tid, \
 							       unsigned nr_accesses, \
 							       GarbageCollectionToken, \
-							       LogWriter<t> *output); \
-	template void Interpreter<t>::replayLogfile(LogReader<t> const *lf, \
+							       VexPtr<LogWriter<t> > &output); \
+	template void Interpreter<t>::replayLogfile(VexPtr<LogReader<t> > &lf, \
 						    LogReaderPtr ptr,	\
 						    GarbageCollectionToken, \
 						    LogReaderPtr *eof,	\
-						    LogWriter<t> *lw,	\
-						    EventRecorder<t> *er); \
+						    VexPtr<LogWriter<t> > &lw, \
+						    VexPtr<EventRecorder<t> > &er); \
 	template InterpretResult Interpreter<t>::getThreadMemoryTrace(ThreadId tid, \
 								      MemoryTrace<t> **output, \
 								      unsigned max_events, \
 								      GarbageCollectionToken); \
 	template void Interpreter<t>::runToEvent(EventTimestamp end,	\
-						 LogReader<t> const *lf, \
+						 VexPtr<LogReader<t> > &lf, \
 						 LogReaderPtr ptr,	\
 						 GarbageCollectionToken, \
 						 LogReaderPtr *eof)

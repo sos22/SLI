@@ -6,7 +6,8 @@
 
 class CollectTimestampsVisitor : public ExpressionVisitor {
 public:
-	std::map<ThreadId, std::vector<EventTimestamp> > timestamps;
+	gc_map<ThreadId, std::vector<EventTimestamp> > *timestamps;
+	CollectTimestampsVisitor() : timestamps(new gc_map<ThreadId, std::vector<EventTimestamp> >()) {}
 	void addTimestamp(EventTimestamp ts);
 	void visit(Expression *e);
 };
@@ -14,7 +15,7 @@ public:
 void
 CollectTimestampsVisitor::addTimestamp(EventTimestamp ts)
 {
-	timestamps[ts.tid].push_back(ts);
+	(*timestamps)[ts.tid].push_back(ts);
 }
 
 void
@@ -632,7 +633,7 @@ enumReducedExpressions(Expression *expr,
 static void
 enumReducedExpressions(Expression *expr,
 		       const std::set<ThreadId> &avail_threads,
-		       const std::map<ThreadId, std::vector<EventTimestamp> > &timestamps,
+		       const gc_map<ThreadId, std::vector<EventTimestamp> > &timestamps,
 		       std::set<CSCandidate> *output)
 {
 	for (std::set<ThreadId>::const_iterator outer = avail_threads.begin();
@@ -642,8 +643,8 @@ enumReducedExpressions(Expression *expr,
 		inner++;
 		while (inner != avail_threads.end()) {
 			enumReducedExpressions(expr,
-					       &timestamps.find(*outer)->second,
-					       &timestamps.find(*inner)->second,
+					       &timestamps[*outer],
+					       &timestamps[*inner],
 					       output);
 			inner++;
 		}
@@ -665,15 +666,15 @@ generateCSCandidates(Expression *expr, std::set<CSCandidate> *output)
 	noAliasExpr->visit(v);
 
 	std::set<ThreadId> avail_threads;
-	for (std::map<ThreadId, std::vector<EventTimestamp> >::iterator it = v.timestamps.begin();
-	     it != v.timestamps.end();
+	for (gc_map<ThreadId, std::vector<EventTimestamp> >::iterator it = v.timestamps->begin();
+	     it != v.timestamps->end();
 	     it++) {
-		std::sort(it->second.begin(), it->second.end());
-		std::vector<EventTimestamp>::iterator vit = std::unique(it->second.begin(), it->second.end());
-		it->second.resize(vit - it->second.begin());
-		avail_threads.insert(it->first);
+		std::sort(it.value().begin(), it.value().end());
+		std::vector<EventTimestamp>::iterator vit = std::unique(it.value().begin(), it.value().end());
+		it.value().resize(vit - it.value().begin());
+		avail_threads.insert(it.key());
 	}
-	enumReducedExpressions(noAliasExpr, avail_threads, v.timestamps, output);
+	enumReducedExpressions(noAliasExpr, avail_threads, *v.timestamps, output);
 }
 
 /* Refinement believes that if we could make @expr false then we'd

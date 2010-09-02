@@ -224,8 +224,9 @@ skip:
 		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
 		expression_result_array<unsigned long> era;
-		era.setSize((rh.size - sizeof(rh) - sizeof(*vtsr)) / 16);
-		for (unsigned x = 0; x < era.nr_entries; x++) {
+		unsigned sz = (rh.size - sizeof(rh) - sizeof(*vtsr)) / 16;
+		era.setSize(sz);
+		for (unsigned x = 0; x < sz; x++) {
 			era[x].lo = vtsr->temporaries[x * 2];
 			era[x].hi = vtsr->temporaries[x * 2 + 1];
 		}
@@ -238,8 +239,9 @@ skip:
 		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
 		expression_result_array<unsigned long> era;
-		era.setSize((rh.size - sizeof(rh) - sizeof(*vtsr)) / 16);
-		for (unsigned x = 0; x < era.nr_entries; x++) {
+		unsigned sz = (rh.size - sizeof(rh) - sizeof(*vtsr)) / 16;
+		era.setSize(sz);
+		for (unsigned x = 0; x < sz; x++) {
 			era[x].lo = vtsr->temporaries[x * 2];
 			era[x].hi = vtsr->temporaries[x * 2 + 1];
 		}

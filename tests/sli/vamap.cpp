@@ -6,10 +6,9 @@ public:
 	static VexAllocTypeWrapper<VAPMap> allocator;
 	VAMap *vamap;
 	PMap<unsigned long> *pmap;
-	void visit(HeapVisitor &hv) const {
-		hv(vamap);
+	void visit(HeapVisitor &hv) {
 		hv(pmap);
-		vamap->visit(hv, pmap);
+		vamap->visit(vamap, hv, pmap);
 	}
 	void destruct() {}
 	NAMED_CLASS
@@ -135,6 +134,9 @@ main()
 	VexGcRoot vgc((void **)&vap, "test vamap");
 	
 	LibVEX_gc(ALLOW_GC);
+
+	pmap = vap->pmap;
+	vamap = vap->vamap;
 
 	unsigned long o;
 

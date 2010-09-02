@@ -1005,11 +1005,11 @@ Relevance alias::relevance(const EventTimestamp &ev,
 {
 	return l->relevance(ev, lowThresh + 1000000, highThresh) - 1000000;
 }
-Expression *alias::refine(const MachineState<abstract_interpret_value> *ms,
-			  LogReader<abstract_interpret_value> *lf,
+Expression *alias::refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			  VexPtr<LogReader<abstract_interpret_value> > &lf,
 			  LogReaderPtr ptr,
 			  bool *progress,
-			  const std::map<ThreadId, unsigned long> &validity,
+			  VexPtr<gc_map<ThreadId, unsigned long> >&validity,
 			  EventTimestamp ev,
 			  GarbageCollectionToken)
 {
@@ -1020,8 +1020,46 @@ Expression *alias::refine(const MachineState<abstract_interpret_value> *ms,
 void
 History::calcLastAccessed()
 {
+	const gc_map<ThreadId, unsigned long> *p;
+	gc_map<ThreadId, unsigned long> *c;
 	if (parent)
-		parent->lastAccessMap(lastAccessed);
+		p = parent->lastAccessMap();
+	else
+		p = NULL;
 	if (condition)
-		condition->lastAccessMap(lastAccessed);
+		c = condition->lastAccessMap();
+	else
+		c = NULL;
+	if (!p && !c) {
+		lastAccessed = new gc_map<ThreadId, unsigned long>();
+	} else if (!p) {
+		lastAccessed = c;
+	} else if (!c) {
+		lastAccessed = new gc_map<ThreadId, unsigned long>(*p);
+	} else {
+		Expression::mergeAccessMaps(c, p);
+		lastAccessed = c;
+	}
+}
+
+void
+Expression::mergeAccessMaps(gc_map<ThreadId, unsigned long> *out,
+			    const gc_map<ThreadId, unsigned long> *_in)
+{
+	gc_map<ThreadId, unsigned long> *in =
+		const_cast<gc_map<ThreadId, unsigned long> *>(_in);
+	for (gc_map<ThreadId, unsigned long>::iterator it = in->begin();
+	     it != in->end();
+	     it++) {
+		if ( (*out)[it.key()] < it.value() )
+			(*out)[it.key()] = it.value();
+	}
+}
+
+void
+fixup_expression_table(void)
+{
+	for (unsigned x = 0; x < Expression::nr_heads; x++)
+		if (Expression::heads[x])
+			Expression::heads[x]->pprev = &Expression::heads[x];
 }

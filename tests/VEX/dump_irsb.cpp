@@ -25,6 +25,11 @@ static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 	return False;
 }
 
+void fixup_expression_table(void)
+{
+}
+
+
 int
 main()
 {

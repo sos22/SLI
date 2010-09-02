@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
-#include <map>
 #include <algorithm>
 
 #include "libvex_guest_amd64.h"
@@ -14,6 +13,8 @@
 #include "libvex.h"
 
 #include "exceptions.h"
+
+#include "map.h"
 
 static inline char *my_asprintf(const char *fmt, ...)
 {
@@ -81,122 +82,7 @@ public:
 	~Named() { destruct(); }
 };
 
-template <typename underlying>
-void visit_object(const void *_ctxt, HeapVisitor &hv)
-{
-	const underlying *ctxt = (const underlying *)_ctxt;
-	/* hackety hackety hack: don't visit if we've not been
-	 * constructed (no vtable pointer) */
-	if (*(unsigned long *)_ctxt)
-		ctxt->visit(hv);
-}
-
-template <typename underlying>
-void destruct_object(void *_ctxt)
-{
-	underlying *ctxt = (underlying *)_ctxt;
-	/* Like visit_object(), don't destruct if we've not been
-	   constructed. */
-	if (*(unsigned long *)_ctxt)
-		ctxt->destruct();
-}
-
-template <typename underlying>
-const char *get_name(const void *_ctxt)
-{
-	const underlying *ctxt = (const underlying *)_ctxt;
-	return ctxt->cls_name();
-}
-
-/* Slight ugliness: if you specify a non-zero magazine, then your
-   items can get visit()ed before they've been constructed.  Clients
-   are expected to handle this.  If you can't, then you can't use a
-   magazine.  We guarantee to zero all your memory if that happens
-   (including vtable pointers!). */
-template <typename t, unsigned magazine_size = 0, size_t magazine_item_size = 0>
-class GarbageCollected {
-	static VexAllocType type;
-	static unsigned magazine_used;
-	/* XXX should maybe use weak references in here, so that the
-	   magazine gets blown away during GC, but that seems like too
-	   much effort. */
-	static LibvexVector<t> *magazine;
-protected:
-	static void release(const t *x) {
-		if (magazine_size == 0 || !magazine || magazine_used == 0) {
-			LibVEX_free(x);
-			return;
-		}
-		magazine_used--;
-		magazine->set(magazine_used, const_cast<t *>(x));
-	}
-public:
-	static void *operator new(size_t s)
-	{
-		/* Use the magazine if available.  This can sometimes
-		   help to avoid heap fragmentation: interleaving
-		   allocations of long- and short-lived structures is
-		   a particularly bad case for our allocator, but
-		   allocating a batch of long-lived ones followed by a
-		   batch of short-lived ones is generally pretty
-		   good. */
-		void *res;
-		if (magazine_size != 0 && s <= magazine_item_size) {
-			if (!magazine) {
-				printf("Allocate magazine for %s\n",
-				       t::cls_name());
-				magazine = LibvexVector<t>::empty();
-				magazine->_set_size(magazine_size);
-				vexRegisterGCRoot((void **)&magazine, "<allocation magazine>");
-				magazine_used = magazine_size;
-			}
-			if (magazine_used == magazine_size) {
-				for (unsigned x = 0; x < magazine_size; x++) {
-					void *r = LibVEX_Alloc_Sized(&type,
-								     magazine_item_size);
-					memset(r, 0, s);
-					magazine->set(x, (t *)r);
-				}
-				magazine_used = 0;
-			}
-			res = magazine->index(magazine_used);
-			magazine_used++;
-		} else {
-			res = LibVEX_Alloc_Sized(&type, s);
-			memset(res, 0, s);
-		}
-		return res;
-	}
-	static void operator delete(void *)
-	{
-		abort();
-	}
-	virtual void visit(HeapVisitor &hv) const = 0;
-	virtual void destruct() = 0;
-};
-template <typename t, unsigned mag, size_t s> VexAllocType GarbageCollected<t, mag, s>::type = {-1, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
-template <typename t, unsigned mag, size_t s> unsigned GarbageCollected<t, mag, s>::magazine_used;
-template <typename t, unsigned mag, size_t s> LibvexVector<t> *GarbageCollected<t, mag, s>::magazine;
-
-template <typename p>
-class VexPtr {
-	p *content;
-	VexGcRoot root;
-public:
-	VexPtr() : content(NULL), root((void **)&content, "VexPtr") {}
-	VexPtr(p *_content) : content(_content), root((void **)&content, "VexPtr") {}
-	VexPtr(VexPtr<p> &c) : content(c.content), root((void **)&content, "VexPtr") {}
-	const VexPtr<p> &operator=(VexPtr<p> &x) { content = x.content; return *this; }
-	const VexPtr<p> &operator=(p *x) { content = x; return *this; }
-	p &operator*() const { return *content; }
-	p *operator->() const { return content; }
-	operator p*() const { return content; }
-	p *get() const { return content; }
-};
-
-#define NAMED_CLASS static const char *cls_name() { return __PRETTY_FUNCTION__ + 19; }
-
-template <typename t, const char *(*get_name)(const void *) = get_name<t>, void (*visit)(const void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
+template <typename t, const char *(*get_name)(const void *) = get_name<t>, void (*visit)(void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
 class VexAllocTypeWrapper {
 public:
 	VexAllocType type;
@@ -236,6 +122,7 @@ public:
 		return *this;
 	}
 	const unsigned _tid() const { return tid; }
+	unsigned long hash() const { return tid; }
 };
 
 class EventTimestamp {
@@ -370,7 +257,7 @@ public:
 	abst_int_value lo;
 	abst_int_value hi;
 	expression_result() : Named() {}
-	void visit(HeapVisitor &hv) const { visit_aiv(lo, hv); visit_aiv(hi, hv); }
+	void visit(HeapVisitor &hv) { visit_aiv(lo, hv); visit_aiv(hi, hv); }
 	
 	template <typename new_type> void abstract(expression_result<new_type> *out) const
 	{
@@ -387,7 +274,7 @@ public:
 	underlying registers[NR_REGS];
 	RegisterSet(const VexGuestAMD64State &r);
 	RegisterSet() {};
-	underlying get_reg(unsigned idx) const { assert(idx < NR_REGS); return registers[idx]; }
+	underlying &get_reg(unsigned idx) { assert(idx < NR_REGS); return registers[idx]; }
 	void set_reg(unsigned idx, underlying val)
 	{
 		sanity_check_ait(val);
@@ -396,12 +283,12 @@ public:
 		if (idx == REGISTER_IDX(RSP))
 			mark_as_stack(registers[idx]);
 	}
-	underlying rip() const { return get_reg(REGISTER_IDX(RIP)); }
-	underlying rsp() const { return get_reg(REGISTER_IDX(RSP)); }
+	underlying &rip() { return get_reg(REGISTER_IDX(RIP)); }
+	underlying &rsp() { return get_reg(REGISTER_IDX(RSP)); }
 
 	template <typename new_type> void abstract(RegisterSet<new_type> *out) const;
 
-	void visit(HeapVisitor &hv) const {
+	void visit(HeapVisitor &hv) {
 		for (unsigned x = 0; x < NR_REGS; x++)
 			visit_aiv(registers[x], hv);
 	}
@@ -411,28 +298,22 @@ template <typename ait> class AddressSpace;
 
 template <typename ait>
 class expression_result_array {
-	static VexAllocType arrayAllocType;
 public:
-	struct expression_result<ait> *arr;
-	unsigned nr_entries;
+	std::vector<expression_result<ait> > content;
 	void setSize(unsigned new_size) {
-		void *b = LibVEX_Alloc_Sized(&arrayAllocType,
-					     sizeof(arr[0]) * new_size + sizeof(unsigned));
-		*(unsigned *)b = new_size;
-		arr = (expression_result<ait> *)((unsigned *)b + 1);
-		memset(arr, 0, sizeof(arr[0]) * new_size);
-		nr_entries = new_size;
-		for (unsigned x = 0; x < nr_entries; x++)
-			new (&arr[x]) expression_result<ait>();
+		content.clear();
+		content.resize(new_size);
 	}
-	expression_result<ait> &operator[](unsigned idx) { return arr[idx]; }
-	void visit(HeapVisitor &hv) const {
-		if (arr)
-			hv( (unsigned *)arr - 1);
+	expression_result<ait> &operator[](unsigned idx) { return content[idx]; }
+	void visit(HeapVisitor &hv) {
+		for (class std::vector<expression_result<ait> >::iterator it = content.begin();
+		     it != content.end();
+		     it++)
+			it->visit(hv);
+
 	}
 	expression_result_array() :
-		arr(NULL),
-		nr_entries(0)
+		content()
 	{
 	}
 
@@ -447,8 +328,10 @@ template <typename ait> class LogRecordVexThreadState;
 
 template <typename abst_int_type>
 class Thread : public GarbageCollected<Thread<abst_int_type> > {
-	void translateNextBlock(AddressSpace<abst_int_type> *addrSpace, abst_int_type rip,
-				GarbageCollectionToken t);
+	static void translateNextBlock(VexPtr<Thread<abst_int_type> > &ths,
+				       VexPtr<AddressSpace<abst_int_type> > &addrSpace,
+				       abst_int_type rip,
+				       GarbageCollectionToken t);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
 	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details, MachineState<abst_int_type> *ms);
 	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
@@ -496,18 +379,21 @@ private:
 	bool allowRipMismatch;
 	~Thread();
 public:
-	ThreadEvent<abst_int_type> *runToEvent(AddressSpace<abst_int_type> *addrSpace, MachineState<abst_int_type> *ms,
-					       GarbageCollectionToken t);
+	static ThreadEvent<abst_int_type> *runToEvent(VexPtr<Thread<abst_int_type> > &ths,
+						      VexPtr<MachineState<abst_int_type> > &ms,
+						      GarbageCollectionToken t);
 
 	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
 	Thread<abst_int_type> *fork(unsigned newPid);
 	Thread<abst_int_type> *dupeSelf() const;
-	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;
+	void dumpSnapshot(LogWriter<abst_int_type> *lw);
 
-	void imposeState(const LogRecordVexThreadState<abst_int_type> *rec,
-			 AddressSpace<abst_int_type> *as, GarbageCollectionToken t);
+	static void imposeState(VexPtr<Thread<abst_int_type> > &thr,
+				VexPtr<LogRecordVexThreadState<abst_int_type> > &rec,
+				VexPtr<AddressSpace<abst_int_type> > &as,
+				GarbageCollectionToken t);
 
-	void visit(HeapVisitor &hv) const;
+	void visit(HeapVisitor &hv);
 
 	template <typename new_type> Thread<new_type> *abstract() const;
 
@@ -569,7 +455,7 @@ public:
 					 Protection prot,
 					 AllocFlags alf);
 		void split(unsigned long where);
-		template <typename ait> void visit(PMap<ait> *pmap, HeapVisitor &hv) const;
+		template <typename ait> static void visit(VAMapEntry *&ref, PMap<ait> *pmap, HeapVisitor &hv);
 		VAMapEntry *promoteSmallest();
 		VAMapEntry *dupeSelf() const;
 		void sanityCheck(unsigned long max = 0,
@@ -598,7 +484,7 @@ private:
 	/* Mutable because we splay the tree on lookup */
 	mutable VAMapEntry *root;
 
-	const VAMap *parent;
+	VAMap *parent;
 
 	void forceCOW();
 public:
@@ -621,9 +507,9 @@ public:
 	void unmap(unsigned long start, unsigned long size);
 
 	static VAMap *empty();
-	VAMap *dupeSelf() const;
-	template <typename ait> void visit(HeapVisitor &hv, PMap<ait> *pmap) const;
-	void visit(HeapVisitor &hv) const;
+	VAMap *dupeSelf();
+	template <typename ait> static void visit(VAMap *&ref, HeapVisitor &hv, PMap<ait> *pmap);
+	void visit(HeapVisitor &hv);
 
 	void sanityCheck() const;
 };
@@ -647,7 +533,9 @@ public:
 	template <typename nt> MemoryChunk<nt> *abstract() const;
 
 	PhysicalAddress base;
+	unsigned serial;
 private:
+	static unsigned serial_start;
 	unsigned char content[size];
 };
 
@@ -665,7 +553,7 @@ private:
       with this: it keeps both the mapping and the memory chunk live.
 */
 template <typename ait>
-class PMapEntry : public GarbageCollected<PMapEntry<ait>, 128, 48> {
+class PMapEntry : public GarbageCollected<PMapEntry<ait> > {
 public:
 	PhysicalAddress pa;
 	MemoryChunk<ait> *mc;
@@ -673,12 +561,13 @@ public:
 	PMapEntry<ait> **pprev;
 	bool readonly;
 	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk<ait> *mc, bool readonly);
-	void visit(HeapVisitor &hv) const {}
+	void visit(HeapVisitor &hv) { hv(mc); }
 	void destruct() {
 		*pprev = next;
 		if (next)
 			next->pprev = pprev;
 	}
+	void relocate(PMapEntry<ait> *target, size_t sz);
 	NAMED_CLASS
 };
 
@@ -692,7 +581,7 @@ public:
 	 * The denotation of the mapping is unchanged, but its
 	 * physical structure is. */
 	mutable PMapEntry<ait> *heads[nrHashBuckets];
-	const PMap<ait> *parent;
+	PMap<ait> *parent;
 
 private:
 	PMapEntry<ait> *findPme(PhysicalAddress pa, unsigned h) const;
@@ -711,8 +600,10 @@ public:
 	static PMap<ait> *empty();
 	PMap<ait> *dupeSelf() const;
 
-	void visitPA(PhysicalAddress pa, HeapVisitor &hv) const;
-	void visit(HeapVisitor &hv) const;
+	void visitPA(PhysicalAddress pa, HeapVisitor &hv);
+	void visit(HeapVisitor &hv);
+	void relocate(PMap<ait> *target, size_t sz);
+
 	void destruct() {}
 
 	template <typename newtype> PMap<newtype> *abstract() const;
@@ -731,7 +622,7 @@ public:
 	virtual void *marshal(unsigned *size) const = 0;
 	virtual ~LogRecord() {};
 	virtual void destruct() {}
-	virtual void visit(HeapVisitor &hv) const {}
+	virtual void visit(HeapVisitor &hv) {}
 	NAMED_CLASS
 };
 
@@ -784,14 +675,15 @@ public:
 };
 
 template <typename ait>
-class LogReader {
+class LogReader : public GarbageCollected<LogReader<ait> > {
 public:
 	virtual LogRecord<ait> *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const = 0;
 	virtual ~LogReader() {}
 	template <typename new_type> LogReader<new_type> *abstract() const;
+	NAMED_CLASS
 };
 
-class LogFile : public LogReader<unsigned long>, public GarbageCollected<LogFile> {
+class LogFile : public LogReader<unsigned long> {
 	int fd;
 	struct _ptr {
 		uint64_t off;
@@ -825,7 +717,7 @@ public:
 	~LogFile();
 	static LogFile *open(const char *path, LogReaderPtr *initial_ptr);
 	LogFile *truncate(LogReaderPtr eof);
-	void visit(HeapVisitor &hv) const {}
+	void visit(HeapVisitor &hv){}
 	void destruct() { this->~LogFile(); }
 	NAMED_CLASS
 };
@@ -847,7 +739,7 @@ public:
 	AddressSpace<abst_int_type> *addressSpace;
 	SignalHandlers<abst_int_type> signalHandlers;
 	unsigned long nrEvents;
-	static MachineState<abst_int_type> *initialMachineState(LogReader<abst_int_type> *lf,
+	static MachineState<abst_int_type> *initialMachineState(VexPtr<LogReader<abst_int_type> > &lf,
 								LogReaderPtr startPtr,
 								LogReaderPtr *endPtr,
 								GarbageCollectionToken t);
@@ -908,7 +800,7 @@ public:
 
 	void dumpSnapshot(LogWriter<abst_int_type> *lw) const;
 
-	void visit(HeapVisitor &hv) const;
+	void visit(HeapVisitor &hv);
 	void sanityCheck() const;
 
 	void destruct() {}
@@ -929,9 +821,10 @@ enum InterpretResult {
 template <typename ait> class MemoryTrace;
 
 template <typename ait>
-class EventRecorder {
+class EventRecorder : public GarbageCollected<EventRecorder<ait> > {
 public:
 	virtual void record(Thread<ait> *thr, ThreadEvent<ait> *evt) = 0;
+	NAMED_CLASS
 };
 
 template<typename abst_int_type>
@@ -941,30 +834,53 @@ class Interpreter {
 			    LogReaderPtr startOffset,
 			    LogReaderPtr *endOffset);
 
-	MachineState<abst_int_type> *currentState;
-	VexGcRoot currentStateRoot;
+	VexPtr<MachineState<abst_int_type> > currentState;
 public:
-	Interpreter(MachineState<abst_int_type> *rootMachine) :
-		currentState(rootMachine),
-		currentStateRoot((void **)&currentState, "currentStateRoot")
+	Interpreter(MachineState<abst_int_type> *rootMachine) : currentState(rootMachine)
 	{
 	}
-	void replayLogfile(const LogReader<abst_int_type> *lf, LogReaderPtr startingPoint,
-			   GarbageCollectionToken, LogReaderPtr *endingPoint = NULL,
-			   LogWriter<abst_int_type> *log = NULL,
-			   EventRecorder<abst_int_type> *er = NULL);
+	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+			   LogReaderPtr startingPoint,
+			   GarbageCollectionToken,
+			   LogReaderPtr *endingPoint,
+			   VexPtr<LogWriter<abst_int_type> > &log,
+			   VexPtr<EventRecorder<abst_int_type> > &er);
+	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+			   LogReaderPtr startingPoint,
+			   GarbageCollectionToken tok)
+	{
+		replayLogfile(lf, startingPoint, tok, NULL);
+	}
+	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+			   LogReaderPtr startingPoint,
+			   GarbageCollectionToken tok,
+			   LogReaderPtr *endingPoint)
+	{
+		VexPtr<LogWriter<abst_int_type> > l(NULL);
+		replayLogfile(lf, startingPoint, tok, endingPoint, l);
+	}
+	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+			   LogReaderPtr startingPoint,
+			   GarbageCollectionToken tok,
+			   LogReaderPtr *endingPoint,
+			   VexPtr<LogWriter<abst_int_type> > &log)
+	{
+		VexPtr<EventRecorder<abst_int_type> > er(NULL);
+		replayLogfile(lf, startingPoint, tok, endingPoint, log, er);
+	}
+
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
 					     MemoryTrace<abst_int_type> **output,
 					     unsigned max_events,
 					     GarbageCollectionToken t);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      GarbageCollectionToken t,
-				      LogWriter<abst_int_type> *output = NULL);
-	void runToFailure(ThreadId tid, LogWriter<abst_int_type> *output,
+				      VexPtr<LogWriter<abst_int_type> > &output);
+	void runToFailure(ThreadId tid, VexPtr<LogWriter<abst_int_type> > &output,
 			  GarbageCollectionToken t,
 			  unsigned max_events = 0);
 	void runToEvent(EventTimestamp evt,
-			const LogReader<abst_int_type> *lf,
+			VexPtr<LogReader<abst_int_type> > &lf,
 			LogReaderPtr startingPoint,
 			GarbageCollectionToken t,
 			LogReaderPtr *endPoint = NULL);
@@ -989,7 +905,7 @@ public:
 template <typename ait> void destroy_memlog(void *_ctxt);
 
 template <typename ait>
-class MemLog : public LogReader<ait>, public LogWriter<ait>, public GarbageCollected<MemLog<ait> > {
+class MemLog : public LogReader<ait>, public LogWriter<ait> {
 	std::vector<LogRecord<ait> *> *content;
 	unsigned offset;
 	const MemLog<ait> *parent;
@@ -1020,13 +936,13 @@ public:
 	/* Should only be called by GC destruct routine */
 	virtual void destruct();
 
-	virtual void visit(HeapVisitor &hv) const;
+	virtual void visit(HeapVisitor &hv);
 
 	NAMED_CLASS
 };
 
 template <typename ait>
-class ThreadEvent : public Named, public GarbageCollected<ThreadEvent<ait>, 16, 256> {
+class ThreadEvent : public Named, public GarbageCollected<ThreadEvent<ait> > {
 protected:
 	ThreadEvent(EventTimestamp _when) : when(_when) {}
 public:
@@ -1038,8 +954,8 @@ public:
 	/* Use the logfile if it matches, and otherwise fake it.  This
 	   can fast-forward through the log e.g. to find a matching
 	   syscall. */
-	virtual ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms,
-					      LogReader<ait> *lf,
+	virtual ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState<ait> > &ms,
+					      VexPtr<LogReader<ait> > &lf,
 					      LogReaderPtr startPtr,
 					      LogReaderPtr *endPtr,
 					      GarbageCollectionToken t)
@@ -1052,7 +968,7 @@ public:
 	 * from a class which has a private destructor. */
 	~ThreadEvent() { abort(); }
 
-	virtual void visit(HeapVisitor &hv) const {};
+	virtual void visit(HeapVisitor &hv){};
 	virtual void destruct() {}
 
 	NAMED_CLASS
@@ -1103,8 +1019,10 @@ protected:
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms, LogReader<ait> *lf,
-				      LogReaderPtr startPtr, LogReaderPtr *endPtr,
+	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState<ait> > &ms,
+				      VexPtr<LogReader<ait> > &lf,
+				      LogReaderPtr startPtr,
+				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp temp)
 	{ return new RdtscEvent<ait>(when, temp); }
@@ -1136,7 +1054,7 @@ public:
 	{
 		return new LoadEvent<ait>(when, _tmp, _addr, _size);
 	}
-	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); ThreadEvent<ait>::visit(hv); }
+	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); ThreadEvent<ait>::visit(hv); }
 	NAMED_CLASS
 };
 
@@ -1159,7 +1077,7 @@ public:
 		return new StoreEvent<ait>(when, _addr, _size, data);
 	}
 
-	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); data.visit(hv); ThreadEvent<ait>::visit(hv); }
+	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); data.visit(hv); ThreadEvent<ait>::visit(hv); }
 	void destruct() { data.~expression_result<ait>(); ThreadEvent<ait>::destruct(); }
 	NAMED_CLASS
 };
@@ -1248,8 +1166,8 @@ public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
 				 const LogReader<ait> *lf, LogReaderPtr ptr,
 				 LogReaderPtr *outPtr, LogWriter<ait> *lw);
-	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms,
-				      LogReader<ait> *lf,
+	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState<ait> > &ms,
+				      VexPtr<LogReader<ait> > &lf,
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
@@ -1291,8 +1209,10 @@ protected:
 public:
 	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
-	ThreadEvent<ait> *fuzzyReplay(MachineState<ait> *ms, LogReader<ait> *lf,
-				      LogReaderPtr startPtr, LogReaderPtr *endPtr,
+	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState<ait> > &ms,
+				      VexPtr<LogReader<ait> > &lf,
+				      LogReaderPtr startPtr,
+				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
 	static ThreadEvent<ait> *get(EventTimestamp when)
 	{ return new SyscallEvent(when); }
@@ -1331,12 +1251,12 @@ public:
 };
 
 static inline void maybeVisit(unsigned long x, HeapVisitor &hv) {}
-static inline void maybeVisit(const void *x, HeapVisitor &hv) { hv(x); }
+static inline void maybeVisit(void *x, HeapVisitor &hv) { hv(x); }
 
 template<typename t> void
-visit_container(const t &vector, HeapVisitor &hv)
+visit_container(t &vector, HeapVisitor &hv)
 {
-	for (class t::const_iterator it = vector.begin();
+	for (class t::iterator it = vector.begin();
 	     it != vector.end();
 	     it++)
 		maybeVisit(*it, hv);
@@ -1356,7 +1276,7 @@ public:
 	}
 	virtual bool isLoad() = 0;
 	void dump() const { printf("%s\n", name()); }
-	void visit(HeapVisitor &hv) const { visit_aiv(addr, hv); }
+	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); }
 	void destruct() {}
 	NAMED_CLASS
 };
@@ -1397,7 +1317,7 @@ public:
 						  mkConst<outtype>(ptr),
 						  nvalue);
 	}
-	void visit(HeapVisitor &hv) const { value.visit(hv); visit_aiv(ptr, hv); }
+	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
 template <typename ait>
@@ -1451,7 +1371,7 @@ public:
 						   mkConst<outtype>(ptr),
 						   res);
 	}
-	void visit(HeapVisitor &hv) const { value.visit(hv); visit_aiv(ptr, hv); }
+	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
 template <typename ait>
@@ -1475,28 +1395,36 @@ template <typename ait>
 class MemoryTrace : public GarbageCollected<MemoryTrace<ait> > {
 public:
 	std::vector<MemoryAccess<ait> *> content;
-	MemoryTrace(const MachineState<ait> *, LogReader<ait> *, LogReaderPtr,
-		    GarbageCollectionToken);
+	static MemoryTrace<ait> *get(VexPtr<MachineState<ait> > &,
+				     VexPtr<LogReader<ait> > &,
+				     LogReaderPtr,
+				     GarbageCollectionToken);
 	size_t size() const { return content.size(); }
 	MemoryAccess<ait> *&operator[](unsigned idx) { return content[idx]; }
 	void push_back(MemoryAccess<ait> *x) { content.push_back(x); }
 	MemoryTrace() : content() {}
 	void dump() const;
-	void visit(HeapVisitor &hv) const { visit_container(content, hv); }
+	void visit(HeapVisitor &hv){ visit_container(content, hv); }
 	void destruct() { this->~MemoryTrace<ait>(); }
 	NAMED_CLASS
 };
 
+template <typename ait> void
+visit_memory_trace_fn(MemoryTrace<ait> *&h, HeapVisitor &hv)
+{
+	hv(h);
+}
+
 template <typename ait>
 class MemTracePool : public GarbageCollected<MemTracePool<ait> > {
-	typedef std::map<ThreadId, MemoryTrace<ait> *> contentT;
-	contentT content;
+	typedef gc_map<ThreadId, MemoryTrace<ait> *, __default_hash_function, __default_eq_function,
+		       visit_memory_trace_fn<ait> > contentT;
+	contentT *content;
 public:
-	MemTracePool(MachineState<ait> *base_state, ThreadId ignoredThread, GarbageCollectionToken t);
-	~MemTracePool() {}
-	std::map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
-	void visit(HeapVisitor &hv) const;
-	void destruct() { this->~MemTracePool<ait>(); }
+	static MemTracePool<ait> *get(VexPtr<MachineState<ait> > &base_state, ThreadId ignoredThread, GarbageCollectionToken t);
+	gc_map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
+	void visit(HeapVisitor &hv);
+	void destruct() { }
 	NAMED_CLASS
 };
 
@@ -1616,11 +1544,9 @@ public:
 		start(_start),
 		contents(_contents)
 	{
-		assert(!LibVEX_is_gc_address(contents));
 	}
 	~LogRecordMemory()
 	{ 
-		assert(!LibVEX_is_gc_address(contents));
 		free((void *)contents);
 	}
 	void destruct() { this->~LogRecordMemory(); }
@@ -1661,7 +1587,7 @@ public:
 		return new LogRecordRdtsc<outtype>(this->thread(),
 						   mkConst<outtype>(tsc));
 	}
-	void visit(HeapVisitor &hv) const { visit_aiv(tsc, hv); }
+	void visit(HeapVisitor &hv) { visit_aiv(tsc, hv); }
 };
 
 template <typename ait>
@@ -1740,7 +1666,7 @@ public:
 							    prot,
 							    flags);
 	}
-	void visit(HeapVisitor &hv) const { visit_aiv(start, hv); visit_aiv(size, hv); }
+	void visit(HeapVisitor &hv){ visit_aiv(start, hv); visit_aiv(size, hv); }
 };
 
 template <typename ait>
@@ -1787,7 +1713,7 @@ public:
 		return new LogRecordInitialBrk<outtype>(this->thread(),
 							mkConst<outtype>(brk));
 	}
-	void visit(HeapVisitor &hv) const { visit_aiv(brk, hv); }
+	void visit(HeapVisitor &hv){ visit_aiv(brk, hv); }
 };
 
 template <typename ait>
@@ -1812,7 +1738,7 @@ public:
 			this->thread(), mkConst<outtype>(currentIRSBRip),
 			statement_nr, ntmp);
 	}
-	void visit(HeapVisitor &hv) const { tmp.visit(hv); }
+	void visit(HeapVisitor &hv){ tmp.visit(hv); }
 };
 
 template <typename ait>
@@ -1857,10 +1783,10 @@ public:
 	}
 	void store(EventTimestamp when, ait start, unsigned size, const expression_result<ait> &val,
 		   bool ignore_protection = false,
-		   const Thread<ait> *thr = NULL);
+		   Thread<ait> *thr = NULL);
 	void writeMemory(EventTimestamp when, ait start, unsigned size,
 			 const ait *contents, bool ignore_protection,
-			 const Thread<ait> *thr);
+			 Thread<ait> *thr);
 	bool copyToClient(EventTimestamp when, ait start, unsigned size,
 			  const void *source);
 	bool copyFromClient(EventTimestamp when, ait start, unsigned size,
@@ -1868,28 +1794,28 @@ public:
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result<ait> load(EventTimestamp when, ait start, unsigned size,
 				    bool ignore_protection = false,
-				    const Thread<ait> *thr = NULL);
+				    Thread<ait> *thr = NULL);
 	template <typename t> const t fetch(unsigned long addr,
 					    Thread<ait> *thr);
 	EventTimestamp readMemory(ait start, unsigned size,
 				  ait *contents, bool ignore_protection,
-				  const Thread<ait> *thr,
+				  Thread<ait> *thr,
 				  ait *storeAddr = NULL);
 	bool isAccessible(ait start, unsigned size,
-			  bool isWrite, const Thread<ait> *thr);
+			  bool isWrite, Thread<ait> *thr);
 	bool isWritable(ait start, unsigned size,
-			const Thread<ait> *thr = NULL) {
+			Thread<ait> *thr = NULL) {
 		return isAccessible(start, size, true, thr);
 	}
 	bool isReadable(ait start, unsigned size,
-			const Thread<ait> *thr = NULL) {
+			Thread<ait> *thr = NULL) {
 		return isAccessible(start, size, false, thr);
 	}
 	unsigned long setBrk(ait newBrk);
 
 	static AddressSpace *initialAddressSpace(ait initialBrk);
 	AddressSpace *dupeSelf() const;
-	void visit(HeapVisitor &hv) const;
+	void visit(HeapVisitor &hv);
 	void sanityCheck() const;
 
 	void addVsyscalls();
@@ -1916,22 +1842,30 @@ public:
 		trans_hash_entry **pprev;
 
 		unsigned long rip;
-		WeakRef<IRSB> irsb;
+		WeakRef<IRSB> *irsb;
 
-		void visit(HeapVisitor &hv) const { hv(next); }
+		void visit(HeapVisitor &hv) { hv(next); hv(irsb); }
 		void destruct() { this->~trans_hash_entry(); }
 
+		void relocate(trans_hash_entry *target, size_t sz) {
+			if (target->next)
+				target->next->pprev = &target->next;
+			*target->pprev = target;
+			memset(this, 0x73, sizeof(*this));
+		}
 		trans_hash_entry(unsigned long _rip)
 			: next(NULL),
 			  pprev(NULL),
-			  rip(_rip),
-			  irsb()
+			  rip(_rip)
 		{
+			irsb = new WeakRef<IRSB>();
 		}
 		NAMED_CLASS
 	};
 
 	WeakRef<IRSB> *searchDecodeCache(unsigned long rip);
+
+	void relocate(AddressSpace<ait> *target, size_t sz);
 
 	void sanityCheckDecodeCache(void) const
 #if 1
@@ -1949,11 +1883,11 @@ template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall<
 							 Thread<ait> *thr,
 							 MachineState<ait> *mach);
 
-template<typename ait> void process_memory_records(AddressSpace<ait> *addrSpace,
-						   const LogReader<ait> *lf,
+template<typename ait> void process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
+						   VexPtr<LogReader<ait> > &lf,
 						   LogReaderPtr startOffset,
 						   LogReaderPtr *endOffset,
-						   LogWriter<ait> *lw,
+						   VexPtr<LogWriter<ait> > &lw,
 						   GarbageCollectionToken tok);
 
 void debugger_attach(void);
@@ -1993,8 +1927,10 @@ public:
 	virtual void visit(Expression *e) = 0;
 };
 
-class Expression : public Named, public GarbageCollected<Expression, 128, 256> {
+class Expression : public Named, public GarbageCollected<Expression> {
 	friend class ConstExpression;
+	friend void fixup_expression_table(void);
+
 	static const unsigned nr_heads = 262147;
 	static Expression *heads[nr_heads];
 	static unsigned chain_lengths[nr_heads];
@@ -2028,60 +1964,62 @@ class Expression : public Named, public GarbageCollected<Expression, 128, 256> {
 		remove_from_hash();
 		add_to_hash();
 	}
-	mutable WeakRef<Expression> cnf;
-	mutable WeakRef<Expression> concrete;
+	mutable WeakRef<Expression> *cnf;
+	mutable WeakRef<Expression> *concrete;
 protected:
 	static Expression *intern(Expression *e);
 	virtual unsigned long _hash() const = 0;
 	virtual bool _isEqual(const Expression *other) const = 0;
 	virtual Expression *_CNF() { return this; }
 	virtual Expression *_concretise() = 0;
-	static void lastAccessTS(EventTimestamp ts, std::map<ThreadId, unsigned long> &output)
+	static void lastAccessTS(EventTimestamp ts, gc_map<ThreadId, unsigned long> *output)
 	{
-		if (output[ts.tid] < ts.idx)
-			output[ts.tid] = ts.idx;
+		if ((*output)[ts.tid] < ts.idx)
+			(*output)[ts.tid] = ts.idx;
 	}
-	virtual void _lastAccessMap(std::map<ThreadId, unsigned long> &output) = 0;
+	virtual gc_map<ThreadId, unsigned long> *_lastAccessMap() = 0;
+	virtual void _visit(HeapVisitor &hv) = 0;
+
 private:
-	std::map<ThreadId, unsigned long> lastAccessedMap;
-	bool haveLastAccessMap;
+	WeakRef<gc_map<ThreadId, unsigned long> > *lastAccessedMap;
 public:
+	static void mergeAccessMaps(gc_map<ThreadId, unsigned long> *out,
+				    const gc_map<ThreadId, unsigned long> *in);
 	unsigned hash() const { return hashval; }
 	virtual bool isConstant(unsigned long *cv) const { return false; }
 	virtual bool isLogical() const { return false; }
 	virtual EventTimestamp timestamp() const { return EventTimestamp::invalid; }
-	virtual Expression *refine(const MachineState<abstract_interpret_value> *ms,
-				   LogReader<abstract_interpret_value> *lf,
+	virtual Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+				   VexPtr<LogReader<abstract_interpret_value> > &lf,
 				   LogReaderPtr ptr,
 				   bool *progress,
-				   const std::map<ThreadId, unsigned long> &validity,
+				   VexPtr<gc_map<ThreadId, unsigned long> > &validity,
 				   EventTimestamp ev,
 				   GarbageCollectionToken t) = 0;
 	virtual void visit(ExpressionVisitor &ev) = 0;
 	virtual Expression *map(ExpressionMapper &f) = 0;
 	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_threshold,
 				    Relevance high_threshold) = 0;
-	void lastAccessMap(std::map<ThreadId, unsigned long> &output) {
-		if (!haveLastAccessMap) {
-			_lastAccessMap(lastAccessedMap);
-			haveLastAccessMap = true;
-		}
-		for (std::map<ThreadId, unsigned long>::iterator it = lastAccessedMap.begin();
-		     it != lastAccessedMap.end();
-		     it++) {
-			if (output[it->first] < it->second)
-				output[it->first] = it->second;
-		}
+	gc_map<ThreadId, unsigned long> *lastAccessMap() {
+		if (!lastAccessedMap)
+			lastAccessedMap = new WeakRef<gc_map<ThreadId, unsigned long> >();
+		if (!lastAccessedMap->get())
+			lastAccessedMap->set(_lastAccessMap());
+		return lastAccessedMap->get();
 	}
 	Expression *concretise() {
-		if (!concrete.get())
-			concrete.set(_concretise());
-		return concrete.get();
+		if (!concrete)
+			concrete = new WeakRef<Expression>();
+		if (!concrete->get())
+			concrete->set(_concretise());
+		return concrete->get();
 	}
 	Expression *CNF() {
-		if (!cnf.get())
-			cnf.set(_CNF());
-		return cnf.get();
+		if (!cnf)
+			cnf = new WeakRef<Expression>();
+		if (!cnf->get())
+			cnf->set(_CNF());
+		return cnf->get();
 	}
 	Expression() : Named(), next(NULL), pprev(&next), hashval(0) {}
 	bool isEqual(const Expression *other) const {
@@ -2098,17 +2036,29 @@ public:
 		Named::destruct();
 	}
 
-	virtual void visit(HeapVisitor &hv) const = 0;
+	void visit(HeapVisitor &hv) {
+		hv(lastAccessedMap);
+		hv(cnf);
+		hv(concrete);
+		_visit(hv);
+	}
+
+	void relocate(Expression *target, size_t) {
+		if (target->next)
+			target->next->pprev = &target->next;
+		*target->pprev = target;
+	}
+
 	NAMED_CLASS
 };
 
 class UnrefinableExpression : public Expression {
 public:
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			   VexPtr<LogReader<abstract_interpret_value> > &lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> >&validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken t) { return this; }
 	Relevance relevance(const EventTimestamp &ev, Relevance, Relevance) { return Relevance::irrelevant; }
@@ -2121,6 +2071,8 @@ protected:
 	char *mkName() const { return my_asprintf("_|_"); }
 	bool _isEqual(const Expression *other) const { return false; }
 	Expression *_concretise() { return this; }
+	void _visit(HeapVisitor &hv) {}
+	gc_map<ThreadId, unsigned long> *_lastAccessMap() { return new gc_map<ThreadId, unsigned long>(); }
 public:
 	static Expression *get()
 	{
@@ -2128,10 +2080,8 @@ public:
 			bottom = new BottomExpression();
 		return bottom;
 	}
-	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &f) { return f.map(this); }
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output) {}
 };
 
 class ConstExpression : public UnrefinableExpression {
@@ -2149,6 +2099,8 @@ protected:
 			return false;
 	}
 	Expression *_concretise() { return this; }
+	void _visit(HeapVisitor &hv) {}
+	gc_map<ThreadId, unsigned long> *_lastAccessMap() { return new gc_map<ThreadId, unsigned long>();}
 public:
 	bool isLogical() const { return v == 0 || v == 1; }
 	static Expression *get(unsigned long v)
@@ -2174,11 +2126,9 @@ public:
 		Expression::nr_interned++;
 		return work;
 	}
-	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output) {}
 };
 
 class ExpressionLastStore : public Expression {
@@ -2220,20 +2170,30 @@ protected:
 			return this;
 		return get(load, store, va);
 	}
+	void _visit(HeapVisitor &hv) { hv(vaddr); }
+
+	gc_map<ThreadId, unsigned long> *_lastAccessMap()
+	{
+		gc_map<ThreadId, unsigned long> *work;
+		work = vaddr->lastAccessMap();
+		lastAccessTS(load, work);
+		lastAccessTS(store, work);
+		return work;
+	}
+
 public:
 	static Expression *get(EventTimestamp load, EventTimestamp store,
 			       Expression *vaddr)
 	{
 		return intern(new ExpressionLastStore(load, store, vaddr));
 	}
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			   VexPtr<LogReader<abstract_interpret_value> > &lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> >&validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken);
-	void visit(HeapVisitor &hv) const { hv(vaddr); }
 	void visit(ExpressionVisitor &ev) { ev.visit(this); vaddr->visit(ev); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const { return load; }
@@ -2247,12 +2207,6 @@ public:
 			return r;
 		else
 			return Relevance(r, vaddr->relevance(ev, r + 1, high_thresh));
-	}
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		vaddr->lastAccessMap(output);
-		lastAccessTS(load, output);		
-		lastAccessTS(store, output);		
 	}
 };
 
@@ -2286,6 +2240,14 @@ protected:
 			return false;
 	}
 	Expression *_concretise() { return this; }
+	void _visit(HeapVisitor &hv) {}
+	gc_map<ThreadId, unsigned long> *_lastAccessMap()
+	{
+		gc_map<ThreadId, unsigned long> *work = new gc_map<ThreadId, unsigned long>();
+		lastAccessTS(before, work);
+		lastAccessTS(after, work);
+		return work;
+	}
 public:
 	static Expression *get(EventTimestamp before, EventTimestamp after)
 	{
@@ -2304,15 +2266,14 @@ public:
 	}
 	EventTimestamp timestamp() const { return after; }
 	bool isLogical() const { return true; }
-	void visit(HeapVisitor &hv) const {}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			   VexPtr<LogReader<abstract_interpret_value> > &lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> > &validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken) { return this; }
 
@@ -2320,11 +2281,6 @@ public:
 		/* happens-before relations can't be refined, so their
 		   relevance kind of doesn't matter. */
 		return Relevance::irrelevant;
-	}
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		lastAccessTS(before, output);
-		lastAccessTS(after, output);
 	}
 };
 
@@ -2357,6 +2313,19 @@ protected:
 			return false;
 	}
 	Expression *_concretise() { return val->concretise(); }
+	void _visit(HeapVisitor &hv) { hv(addr); hv(val); hv(storeAddr); }
+
+	gc_map<ThreadId, unsigned long> *_lastAccessMap()
+	{
+		gc_map<ThreadId, unsigned long> *work;
+		work = val->lastAccessMap();
+		mergeAccessMaps(work, addr->lastAccessMap());
+		mergeAccessMaps(work, storeAddr->lastAccessMap());
+		lastAccessTS(when, work);
+		lastAccessTS(store, work);
+		return work;
+	}
+
 public:
 	static Expression *get(EventTimestamp when, Expression *val, Expression *addr,
 			       Expression *storeAddr, EventTimestamp store, unsigned size)
@@ -2370,16 +2339,15 @@ public:
 		work->size = size;
 		return intern(work);
 	}
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			   VexPtr<LogReader<abstract_interpret_value> > &lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> >&validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken);
 
 	EventTimestamp timestamp() const { return when; }
-	void visit(HeapVisitor &hv) const {hv(addr); hv(val); hv(storeAddr);}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); val->visit(ev); addr->visit(ev); storeAddr->visit(ev); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
@@ -2396,14 +2364,6 @@ public:
 					  addr->relevance(ev, r + 1, high_thresh)),
 				storeAddr->relevance(ev, r + 1, high_thresh)));
 	}
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		val->lastAccessMap(output);
-		addr->lastAccessMap(output);
-		storeAddr->lastAccessMap(output);
-		lastAccessTS(when, output);
-		lastAccessTS(store, output);
-	}
 };
 
 class BinaryExpression : public Expression {
@@ -2416,23 +2376,28 @@ protected:
 		else
 			return this;
 	}
+	gc_map<ThreadId, unsigned long> *_lastAccessMap()
+	{
+		gc_map<ThreadId, unsigned long> *work = l->lastAccessMap();
+		mergeAccessMaps(work, r->lastAccessMap());
+		return work;
+	}
+	void _visit(HeapVisitor &hv)
+	{
+		hv(l);							
+		hv(r);							
+	}								
 public:
 	virtual Expression *semiDupe(Expression *l, Expression *r) const = 0;
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			   VexPtr<LogReader<abstract_interpret_value> > &lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> > &validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken);
 	Expression *l, *r;
 
-	
-	void visit(HeapVisitor &hv) const
-	{								
-		hv(l);							
-		hv(r);							
-	}								
 	void visit(ExpressionVisitor &ev)
 	{
 		ev.visit(this);
@@ -2454,11 +2419,6 @@ public:
 		if (lr >= high_thresh)
 			return lr;
 		return Relevance(lr, r->relevance(ev, lr + 1, high_thresh));
-	}
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		l->lastAccessMap(output);
-		r->lastAccessMap(output);
 	}
 };
 
@@ -2523,21 +2483,25 @@ protected:
 		else
 			return this;
 	}
+	gc_map<ThreadId, unsigned long> * _lastAccessMap()
+	{
+		return l->lastAccessMap();
+	}
+	void _visit(HeapVisitor &hv)
+	{
+		hv(l);							
+	}								
 public:
 	virtual Expression *semiDupe(Expression *l) const = 0;
-	virtual Expression *refine(const MachineState<abstract_interpret_value> *ms,
-				   LogReader<abstract_interpret_value> *lf,
+	virtual Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+				   VexPtr<LogReader<abstract_interpret_value> > &lf,
 				   LogReaderPtr ptr,
 				   bool *progress,
-				   const std::map<ThreadId, unsigned long> &validity,
+				   VexPtr<gc_map<ThreadId, unsigned long> >&validity,
 				   EventTimestamp ev,
 				   GarbageCollectionToken);
 	Expression *l;
 
-	void visit(HeapVisitor &hv) const				
-	{								
-		hv(l);							
-	}								
 	void visit(ExpressionVisitor &ev)
 	{
 		ev.visit(this);
@@ -2551,10 +2515,6 @@ public:
 	virtual Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh)
 	{
 		return l->relevance(ev, low_thresh + 1, high_thresh + 1);
-	}
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		l->lastAccessMap(output);
 	}
 };
 
@@ -2603,11 +2563,11 @@ mk_unop_class(bitsaturate, Expression *_CNF(););
  */
 mk_unop_class(alias,
 	      Relevance relevance(const EventTimestamp &, Relevance, Relevance);
-	      Expression *refine(const MachineState<abstract_interpret_value> *ms,
-				 LogReader<abstract_interpret_value> *lf,
+	      Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+				 VexPtr<LogReader<abstract_interpret_value> > &lf,
 				 LogReaderPtr ptr,
 				 bool *progress,
-				 const std::map<ThreadId, unsigned long> &validity,
+				 VexPtr<gc_map<ThreadId, unsigned long> >&validity,
 				 EventTimestamp ev,
 				 GarbageCollectionToken);
 	);
@@ -2640,15 +2600,23 @@ protected:
 			*fc = f->concretise();
 		return get(cc, tc, fc);
 	}
-public:
-	bool isLogical() const;
-	static Expression *get(Expression *_cond, Expression *_t, Expression *_f);
-	void visit(HeapVisitor &hv) const
+	gc_map<ThreadId, unsigned long> *_lastAccessMap()
+	{
+		gc_map<ThreadId, unsigned long> *work;
+		work = cond->lastAccessMap();
+		mergeAccessMaps(work, t->lastAccessMap());
+		mergeAccessMaps(work, f->lastAccessMap());
+		return work;
+	}
+	void _visit(HeapVisitor &hv)
 	{
 		hv(cond);
 		hv(t);
 		hv(f);
 	}
+public:
+	bool isLogical() const;
+	static Expression *get(Expression *_cond, Expression *_t, Expression *_f);
 	void visit(ExpressionVisitor &ev)
 	{
 		ev.visit(this);
@@ -2663,11 +2631,11 @@ public:
 					   max<EventTimestamp>(t->timestamp(),
 							       f->timestamp()));
 	}								
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> >&ms,
+			   VexPtr<LogReader<abstract_interpret_value> >&lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> >&validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken) { return this; }
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh,
@@ -2685,12 +2653,6 @@ public:
 			low_thresh = tr;
 		Relevance fr = f->relevance(ev, low_thresh + 1, high_thresh);
 		return Relevance(c, Relevance(tr, fr));
-	}
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		cond->lastAccessMap(output);
-		t->lastAccessMap(output);
-		f->lastAccessMap(output);
 	}
 };
 
@@ -2718,7 +2680,7 @@ abstract_interpret_value mkConst(unsigned long x)
 }
 
 
-static inline void visit_aiv(const abstract_interpret_value &aiv, HeapVisitor &hv)
+static inline void visit_aiv(abstract_interpret_value &aiv, HeapVisitor &hv)
 {
 	hv(aiv.origin);
 	hv(aiv._name);
@@ -2895,7 +2857,7 @@ public:
 
 	void compact_lookaside_chain(void);
 
-	void visit(HeapVisitor &hv) const
+	void visit(HeapVisitor &hv)
 	{
 		hv(underlying);
 		hv(headLookaside);
@@ -2974,18 +2936,13 @@ public:
 				      r);
 		return r;
 	}
-	void lastAccessMap(std::map<ThreadId, unsigned long> &output)
+	const gc_map<ThreadId, unsigned long> *lastAccessMap()
 	{
-		for (std::map<ThreadId, unsigned long>::iterator it = lastAccessed.begin();
-		     it != lastAccessed.end();
-		     it++) {
-			if (it->second > output[it->first])
-				output[it->first] = it->second;
-		}
+		return lastAccessed;
 	}
 private:
-	WeakRef<History> concrete;
-	std::map<ThreadId, unsigned long> lastAccessed;
+	WeakRef<History> *concrete;
+	gc_map<ThreadId, unsigned long> *lastAccessed;
 	void calcLastAccessed();
 protected:
 	char *mkName() const {
@@ -3002,10 +2959,11 @@ public:
 	{
 		this->~History();
 	}
-	void visit(HeapVisitor &hv) const
+	void visit(HeapVisitor &hv)
 	{
 		hv(condition);
 		hv(parent);
+		hv(lastAccessed);
 	}
 	void visit(ExpressionVisitor &ev)
 	{
@@ -3083,20 +3041,22 @@ public:
 	History *truncateExclusive(unsigned long x) { return truncate(x, false); }
 
 	History *concretise() {
-		if (!concrete.get()) {
+		if (!concrete)
+			concrete = new WeakRef<History>();
+		if (!concrete->get()) {
 			Expression *c = condition->concretise();
 			unsigned long cc;
 			if (c->isConstant(&cc) && cc && parent) {
-				concrete.set(parent->concretise());
+				concrete->set(parent->concretise());
 			} else {
-				concrete.set(new History(c,
-							 last_valid_idx,
-							 when,
-							 rips,
-							 parent ? parent->concretise() : NULL));
+				concrete->set(new History(c,
+							  last_valid_idx,
+							  when,
+							  rips,
+							  parent ? parent->concretise() : NULL));
 			}
 		}
-		return concrete.get();
+		return concrete->get();
 	}
 	NAMED_CLASS
 };
@@ -3124,18 +3084,20 @@ private:
 	{
 		assert(history);
 	}
-	Expression *refineHistory(const MachineState<abstract_interpret_value> *ms,
-				  LogReader<abstract_interpret_value> *lf,
-				  LogReaderPtr ptr,
-				  const std::map<ThreadId, unsigned long> &validity,
-				  EventTimestamp ev,
-				  GarbageCollectionToken);
-	Expression *refineSubCond(const MachineState<abstract_interpret_value> *ms,
-				  LogReader<abstract_interpret_value> *lf,
-				  LogReaderPtr ptr,
-				  const std::map<ThreadId, unsigned long> &validity,
-				  EventTimestamp ev,
-				  GarbageCollectionToken);
+	static Expression *refineHistory(VexPtr<ExpressionRip> &ths,
+					 VexPtr<MachineState<abstract_interpret_value> > &ms,
+					 VexPtr<LogReader<abstract_interpret_value> > &lf,
+					 LogReaderPtr ptr,
+					 VexPtr<gc_map<ThreadId, unsigned long> >&validity,
+					 EventTimestamp ev,
+					 GarbageCollectionToken);
+	static Expression *refineSubCond(VexPtr<ExpressionRip> &ths,
+					 VexPtr<MachineState<abstract_interpret_value> > &ms,
+					 VexPtr<LogReader<abstract_interpret_value> > &lf,
+					 LogReaderPtr ptr,
+					 VexPtr<gc_map<ThreadId, unsigned long> > &validity,
+					 EventTimestamp ev,
+					 GarbageCollectionToken);
 
 protected:
 	char *mkName(void) const {
@@ -3154,6 +3116,19 @@ protected:
 	}
 	Expression *_concretise() { return get(tid, history->concretise(), cond->concretise(), model_execution,
 					       model_exec_start); }
+	void _visit(HeapVisitor &hv)
+	{
+		hv(history);
+		hv(cond);
+		hv(model_execution);
+	}
+
+	gc_map<ThreadId, unsigned long> *_lastAccessMap()
+	{
+		gc_map<ThreadId, unsigned long> *work = cond->lastAccessMap();
+		mergeAccessMaps(work, history->lastAccessMap());
+		return work;
+	}
 public:
 	static Expression *get(ThreadId tid, History *history, Expression *cond,
 			       LogReader<abstract_interpret_value> *model,
@@ -3161,12 +3136,6 @@ public:
 	{
 		return intern(new ExpressionRip(tid, history, cond,
 						model, start));
-	}
-	void visit(HeapVisitor &hv) const
-	{
-		hv(history);
-		hv(cond);
-		hv(model_execution);
 	}
 	void visit(ExpressionVisitor &ev)
 	{
@@ -3180,22 +3149,16 @@ public:
 					   cond->timestamp());
 	}
 	bool isLogical() const { return cond->isLogical(); }
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			   VexPtr<LogReader<abstract_interpret_value> > &lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> > &validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken);
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
 		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
 		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
-	}
-
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		cond->lastAccessMap(output);
-		history->lastAccessMap(output);
 	}
 };
 
@@ -3225,20 +3188,26 @@ protected:
 			return false;
 	}
 	Expression *_concretise() { return get(when, addr->concretise()); }
+	void _visit(HeapVisitor &hv) { hv(addr); }
+	gc_map<ThreadId, unsigned long> *_lastAccessMap()
+	{
+		gc_map<ThreadId, unsigned long> *work = addr->lastAccessMap();
+		lastAccessTS(when, work);
+		return work;
+	}
 public:
 	static Expression *get(EventTimestamp _when, Expression *_addr)
 	{
 		return new ExpressionBadPointer(_when, _addr);
 	}
-	void visit(HeapVisitor &hv) const { hv(addr); }
 	void visit(ExpressionVisitor &ev) { ev.visit(this); addr->visit(ev); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	EventTimestamp timestamp() const { return when; }
-	Expression *refine(const MachineState<abstract_interpret_value> *ms,
-			   LogReader<abstract_interpret_value> *lf,
+	Expression *refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
+			   VexPtr<LogReader<abstract_interpret_value> > &lf,
 			   LogReaderPtr ptr,
 			   bool *progress,
-			   const std::map<ThreadId, unsigned long> &validity,
+			   VexPtr<gc_map<ThreadId, unsigned long> > &validity,
 			   EventTimestamp ev,
 			   GarbageCollectionToken) { return this; }
 
@@ -3246,12 +3215,6 @@ public:
 	{
 		Relevance r = Relevance(when, ev);
 		return Relevance(r, addr->relevance(ev, r + 1, high));
-	}
-
-	void _lastAccessMap(std::map<ThreadId, unsigned long> &output)
-	{
-		addr->lastAccessMap(output);
-		lastAccessTS(when, output);
 	}
 };
 
@@ -3298,7 +3261,10 @@ public:
 };
 
 class RipHistogram {
-	std::map<void *, unsigned> m;
+	static unsigned long hashfn(void *const &k) {
+		return (unsigned long)k;
+	}
+	gc_map<void *, unsigned, hashfn> m;
 public:
 	void dump();
 	~RipHistogram() { dump(); }

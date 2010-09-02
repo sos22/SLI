@@ -6,6 +6,8 @@
 #define FOOTSTEP_REGS_ONLY
 #include "ppres.h"
 
+typedef gc_map<ThreadId, History *, __default_hash_function, __default_eq_function, __visit_function_heap> history_map;
+
 History *History::truncate(unsigned long idx, bool inclusive)
 {
 	assert(idx <= last_valid_idx);
@@ -24,18 +26,18 @@ struct PartialTimestamp {
 };
 
 static bool
-syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_valid_idx,
+syntax_check_expression(Expression *e, gc_map<ThreadId, unsigned long> &last_valid_idx,
 			PartialTimestamp *why = NULL)
 {
-	std::map<ThreadId, unsigned long> neededIdxes;
-	e->lastAccessMap(neededIdxes);
-	for (std::map<ThreadId, unsigned long>::iterator it = neededIdxes.begin();
-	     it != neededIdxes.end();
+	gc_map<ThreadId, unsigned long> *neededIdxes = 
+		e->lastAccessMap();
+	for (gc_map<ThreadId, unsigned long>::iterator it = neededIdxes->begin();
+	     it != neededIdxes->end();
 	     it++) {
-		if (it->second > last_valid_idx[it->first]) {
+		if (it.value() > last_valid_idx[it.key()]) {
 			if (why) {
-				why->tid = it->first;
-				why->idx = it->second;
+				why->tid = it.key();
+				why->idx = it.value();
 			}
 			return false;
 		}
@@ -43,36 +45,10 @@ syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_v
 	return true;
 }
 
-template <typename k, typename v>
-const v &hashget(const std::map<k,v> &m, const k &key)
-{
-	std::map<k,v> *non_const_m = 
-		const_cast<std::map<k,v> *>(&m);
-	return (*non_const_m)[key];
-}
-
-class HistoryMapHolder {
-	VexGcVisitor<HistoryMapHolder> v;
-	std::map<ThreadId, History *> *p;
-public:
-	HistoryMapHolder(std::map<ThreadId, History *> *_p)
-		: v(this, "HistoryMapHolder"),
-		  p(_p)
-	{
-	}
-	void visit(HeapVisitor &hv) const
-	{
-		for (std::map<ThreadId, History *>::const_iterator it = p->begin();
-		     it != p->end();
-		     it++)
-			hv(it->second);
-	}
-};
-
 static void
 fixup_expression(Expression **e,
-		 std::map<ThreadId, unsigned long> &last_valid_idx,
-		 std::map<ThreadId, History *> &spare_histories,
+		 gc_map<ThreadId, unsigned long> &last_valid_idx,
+		 history_map &spare_histories,
 		 const MachineState<abstract_interpret_value> *ms,
 		 LogReader<abstract_interpret_value> *global_lf,
 		 LogReaderPtr global_lf_start)
@@ -109,15 +85,15 @@ top:
 
 	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(*e)) {
 		History *it;
-		std::map<ThreadId, unsigned long> new_last_valid_idx(last_valid_idx);
-		unsigned long &idx_entry = new_last_valid_idx[er->tid];
+		gc_map<ThreadId, unsigned long> *new_last_valid_idx = new gc_map<ThreadId, unsigned long>(last_valid_idx);
+		unsigned long &idx_entry = (*new_last_valid_idx)[er->tid];
 		for (it = er->history;
 		     it != NULL;
 		     it = it->parent) {
 			PartialTimestamp needed;
 			idx_entry = it->last_valid_idx;
 			if (!syntax_check_expression(it->condition,
-						     new_last_valid_idx,
+						     *new_last_valid_idx,
 						     &needed)) {
 				/* Okay, so we have something like this:
 
@@ -169,7 +145,7 @@ top:
 			}
 		}
 		idx_entry = er->history->last_valid_idx;
-		fixup_expression(&er->cond, new_last_valid_idx,
+		fixup_expression(&er->cond, *new_last_valid_idx,
 				 spare_histories, ms, global_lf, global_lf_start);
 		return;
 	}
@@ -177,11 +153,11 @@ top:
 	if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(*e)) {
 		EventTimestamp when;
 		bool needFixup = false;
-		if (ehb->before.idx > hashget(last_valid_idx, ehb->before.tid)) {
+		if (ehb->before.idx > last_valid_idx[ehb->before.tid]) {
 			when = ehb->before;
 			needFixup = true;
 		}
-		if (ehb->after.idx > hashget(last_valid_idx, ehb->after.tid)) {
+		if (ehb->after.idx > last_valid_idx[ehb->after.tid]) {
 			when = ehb->after;
 			needFixup = true;
 		}
@@ -199,11 +175,11 @@ top:
 	if (LoadExpression *le = dynamic_cast<LoadExpression *>(*e)) {
 		EventTimestamp when;
 		bool needFixup = false;
-		if (le->when.idx > hashget(last_valid_idx, le->when.tid)) {
+		if (le->when.idx > last_valid_idx[le->when.tid]) {
 			when = le->when;
 			needFixup = true;
 		}
-		if (le->store.idx > hashget(last_valid_idx, le->store.tid)) {
+		if (le->store.idx > last_valid_idx[le->store.tid]) {
 			when = le->store;
 			needFixup = true;
 		}
@@ -236,40 +212,33 @@ top:
 /* Given a trace, extract a precondition which is necessary for it to
    crash in the observed way. */
 class CrashReasonExtractor : public EventRecorder<abstract_interpret_value> {
-	static VexAllocTypeWrapper<CrashReasonExtractor> allocator;
 public:
-	std::map<ThreadId, History *> thread_histories;
+	history_map *thread_histories;
 
 	SignalEvent<abstract_interpret_value> *signal;
 	Thread<abstract_interpret_value> *thr;
 	UseFreeMemoryEvent<abstract_interpret_value> *uafe;
 
-private:
-	CrashReasonExtractor()
-		: thread_histories(), signal(NULL), thr(NULL), uafe(NULL)
-	{
+	CrashReasonExtractor() {
+		thread_histories = new history_map();
 	}
-public:
 	static CrashReasonExtractor *get()
 	{
-		return new (allocator.alloc()) CrashReasonExtractor();
+		return new CrashReasonExtractor();
 	}
 
 	void record(Thread<abstract_interpret_value> *thr, ThreadEvent<abstract_interpret_value> *evt);
 
 	void destruct() { this->~CrashReasonExtractor(); }
-	void visit(HeapVisitor &hv) const {
+	void visit(HeapVisitor &hv) {
 		hv(thr);
 		hv(signal);
 		hv(uafe);
-		for (std::map<ThreadId, History *>::const_iterator it = thread_histories.begin();
-		     it != thread_histories.end();
-		     it++)
-			hv(it->second);
+		hv(thread_histories);
 	}
 
 	History *getHistory(const EventTimestamp &evt) {
-		History *&ptr = thread_histories[evt.tid];
+		History *&ptr((*thread_histories)[evt.tid]);
 		if (!ptr)
 			ptr = new History(ConstExpression::get(1),
 					  evt,
@@ -278,11 +247,10 @@ public:
 	}
 	void setHistory(ThreadId tid, History *hs)
 	{
-		thread_histories[tid] = hs;
+		(*thread_histories)[tid] = hs;
 	}
 	NAMED_CLASS
 };
-VexAllocTypeWrapper<CrashReasonExtractor> CrashReasonExtractor::allocator;
 void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, ThreadEvent<abstract_interpret_value> *evt)
 {
 	if (uafe)
@@ -310,25 +278,26 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, Thread
 		thr = _thr;
 	}
 }
-static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
-				  LogReader<abstract_interpret_value> *script,
+static Expression *getCrashReason(VexPtr<MachineState<abstract_interpret_value> > &ms,
+				  VexPtr<LogReader<abstract_interpret_value> > &script,
 				  LogReaderPtr ptr,
 				  GarbageCollectionToken tok)
 {
 	VexGcRoot root0((void **)&ms, "root0");
 	MachineState<abstract_interpret_value> *ms2 = ms->dupeSelf();
 	Interpreter<abstract_interpret_value> i(ms2);
-	CrashReasonExtractor *extr = CrashReasonExtractor::get();
-	VexGcRoot root1((void **)&extr, "root1");
+	VexPtr<CrashReasonExtractor> extr(CrashReasonExtractor::get());
 
-	i.replayLogfile(script, ptr, tok, NULL, NULL, extr);
+	VexPtr<LogWriter<abstract_interpret_value> > dummy(NULL);
+	VexPtr<EventRecorder<abstract_interpret_value> > extr2(extr);
+	i.replayLogfile(script, ptr, tok, NULL, dummy, extr2);
 	if (!ms2->crashed())
 		return NULL;
 
-	for (std::map<ThreadId, History *>::const_iterator it = extr->thread_histories.begin();
-	     it != extr->thread_histories.end();
+	for (history_map::iterator it = extr->thread_histories->begin();
+	     it != extr->thread_histories->end();
 	     it++) {
-		it->second->finish(ms2->findThread(it->first)->nrEvents);
+		it.value()->finish(ms2->findThread(it.key())->nrEvents);
 	}
 
 	/* For now, we assume that the only reason to crash is
@@ -370,14 +339,14 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
 				 ptr);
 
 	VexGcRoot root2((void **)&res, "root2");
-	std::map<ThreadId, unsigned long> m;
+	gc_map<ThreadId, unsigned long> *m = new gc_map<ThreadId, unsigned long>();
 	fixup_expression(&res,
-			 m,
-			 extr->thread_histories,
+			 *m,
+			 *extr->thread_histories,
 			 ms,
 			 script,
 			 ptr);
-	std::map<ThreadId, unsigned long> v;
+	//std::map<ThreadId, unsigned long> v;
 	//assert(syntax_check_expression(res, v));
 	return res;
 }
@@ -386,18 +355,20 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
    operations back are pretty damn useless, and they're also very                                    
    expensive to analyse.  Strip them off. */                                                         
 static Expression *                                                                                  
-strip_outer_rips(Expression *e, MachineState<abstract_interpret_value> *ms,
+strip_outer_rips(VexPtr<Expression> &e,
+		 VexPtr<MachineState<abstract_interpret_value> > &ms,
 		 LogReader<abstract_interpret_value> **lf,
-		 LogReaderPtr *lfstart, GarbageCollectionToken tok)
+		 LogReaderPtr *lfstart,
+		 GarbageCollectionToken tok)
 {
 	/* Phase 1: count how many RIP wrappers there are. */                                         
 	unsigned cntr;                                                                                
-	Expression *cursor;                                                                           
-	ExpressionRip *crip;                                                                          
+	VexPtr<Expression> cursor;
+	ExpressionRip *crip;
 	cursor = e;                                                                                   
 	cntr = 0;                                                                                     
 	while (1) {                                                                                   
-		crip = dynamic_cast<ExpressionRip *>(cursor);                                         
+		crip = dynamic_cast<ExpressionRip *>(cursor.get());
 		if (!crip)                                                                            
 			break;                                                                        
 		cursor = crip->cond;                                                                  
@@ -410,21 +381,26 @@ strip_outer_rips(Expression *e, MachineState<abstract_interpret_value> *ms,
 	cntr -= 6;
 	cursor = e;
 	while (cntr) {
-		crip = dynamic_cast<ExpressionRip *>(cursor);
+		crip = dynamic_cast<ExpressionRip *>(cursor.get());
 		assert(crip);
 		cursor = crip->cond;
 		cntr--;
 	}
 
-	crip = dynamic_cast<ExpressionRip *>(cursor);
+	crip = dynamic_cast<ExpressionRip *>(cursor.get());
 	assert(crip);
 
 	/* Phase 3: generate a new machine state representing the very
 	   start of the current history. */
 	Interpreter<abstract_interpret_value> i(ms);
-	i.runToEvent(crip->history->when, crip->model_execution, crip->model_exec_start, tok, lfstart);
+	VexPtr<LogReader<abstract_interpret_value> > model_exec(crip->model_execution);
+	i.runToEvent(crip->history->when, model_exec, crip->model_exec_start, tok, lfstart);
+        crip = dynamic_cast<ExpressionRip *>(cursor.get());
+	assert(crip);
 	*lf = crip->model_execution;
-	return getCrashReason(ms->dupeSelf(), crip->model_execution, *lfstart, tok);
+        VexPtr<MachineState<abstract_interpret_value> > ms2(ms->dupeSelf());
+        model_exec = crip->model_execution;
+        return getCrashReason(ms2, model_exec, *lfstart, tok);
 }
 
 int
@@ -434,42 +410,36 @@ main(int argc, char *argv[])
 
 	LibVEX_alloc_sanity_check();
 
-	LogFile *lf;
 	LogReaderPtr ptr;
 
-	lf = LogFile::open(argv[1], &ptr);
+	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	VexGcRoot logroot((void **)&lf, "logroot");
+
 	LibVEX_alloc_sanity_check();
 
 	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
-	MachineState<abstract_interpret_value> *abstract = concrete->abstract<abstract_interpret_value>();
-	VexGcRoot keeper((void **)&abstract, "keeper");
+	VexPtr<MachineState<abstract_interpret_value> > abstract(concrete->abstract<abstract_interpret_value>());
 
 	LibVEX_alloc_sanity_check();
-	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
-	VexGcRoot al_keeper((void **)&al, "al_keeper");
+	VexPtr<LogReader<abstract_interpret_value> > al(lf->abstract<abstract_interpret_value>());
 
-	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr, ALLOW_GC);
+	VexPtr<MachineState<abstract_interpret_value> > abstract2(abstract->dupeSelf());
+        VexPtr<Expression> cr(getCrashReason(abstract2, al, ptr, ALLOW_GC));
 	VexGcRoot crkeeper((void **)&cr, "crkeeper");
 	printf("%s\n", cr->name());
-	LogReader<abstract_interpret_value> *lf2 = al;
-	VexGcRoot lf2keeper((void **)&lf2, "lf2keeper");
+        LogReader<abstract_interpret_value> *lf2 = al;
 	LogReaderPtr lf2start = ptr;
-	cr = strip_outer_rips(cr, abstract, &lf2, &lf2start, ALLOW_GC);
+        cr = strip_outer_rips(cr, abstract, &lf2, &lf2start, ALLOW_GC);
+        VexPtr<LogReader<abstract_interpret_value> > lf3(lf2);
 
 	LibVEX_alloc_sanity_check();
-	std::map<ThreadId, unsigned long> m1;
 	bool progress;
 	do {
 		progress = false;
 		printf("Crash reason %s\n", cr->name());
-		//assert(syntax_check_expression(cr, m1));
-		std::map<ThreadId, unsigned long> v;
-		LibVEX_alloc_sanity_check();
-		cr = cr->refine(abstract, lf2, lf2start, &progress, v, cr->timestamp(), ALLOW_GC);
-		LibVEX_alloc_sanity_check();
+		VexPtr<gc_map<ThreadId, unsigned long> > v(new gc_map<ThreadId, unsigned long>());
+		cr = cr->refine(abstract, lf3, lf2start, &progress, v, cr->timestamp(), ALLOW_GC);
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
 

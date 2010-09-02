@@ -15,18 +15,13 @@ main(int argc, char *argv[])
 
 	init_sli();
 
-	LogFile *lf;
 	LogReaderPtr ptr;
 
-	lf = LogFile::open(inp, &ptr);
-	VexGcRoot lf_root((void **)&lf, "lf");
+	VexPtr<LogFile> lf(LogFile::open(inp, &ptr));
 	if (!lf)
 		err(1, "opening %s", inp);
 
-	LogFile *reduced_lf;
-
-	reduced_lf = lf->truncate(lf->mkPtr(size, 0));
-	VexGcRoot rlf_root((void **)&reduced_lf, "reduced lf");
+	VexPtr<LogReader<unsigned long> > reduced_lf(lf->truncate(lf->mkPtr(size, 0)));
 	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
 	VexGcRoot ms_root((void **)&ms, "ms_root");
 
@@ -35,16 +30,15 @@ main(int argc, char *argv[])
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(reduced_lf, ptr, ALLOW_GC, &ptr);
 
-	LogFileWriter *lw;
-
-	lw = LogFileWriter::open(outp);
+	VexPtr<LogWriter<unsigned long> > lw(LogFileWriter::open(outp));
 	if (!lw)
 		err(1, "opening %s", outp);
 
 	ms->dumpSnapshot(lw);
 	
 	Interpreter<unsigned long> i2(ms);
-	i2.replayLogfile(lf, ptr, ALLOW_GC, NULL, lw);
+	VexPtr<LogReader<unsigned long> > lf_downcast(lf);
+	i2.replayLogfile(lf_downcast, ptr, ALLOW_GC, NULL, lw);
 
 	delete lw;
 

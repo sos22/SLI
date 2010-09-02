@@ -43,7 +43,7 @@ Thread<ait> *Thread<ait>::dupeSelf() const
 }
 
 template<typename ait>
-void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw) const
+void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw)
 {
 	VexGuestAMD64State r;
 
@@ -62,24 +62,25 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 }
 
 template<typename ait>
-void Thread<ait>::imposeState(const LogRecordVexThreadState<ait> *rec,
-			      AddressSpace<ait> *as,
+void Thread<ait>::imposeState(VexPtr<Thread<ait> > &ths,
+			      VexPtr<LogRecordVexThreadState<ait> > &rec,
+			      VexPtr<AddressSpace<ait> > &as,
 			      GarbageCollectionToken t)
 {
-	translateNextBlock(as, rec->currentIRSBRip, t);
-	assert(currentIRSB);
+	translateNextBlock(ths, as, rec->currentIRSBRip, t);
+	assert(ths->currentIRSB);
 
 	/* == is valid here, and just means we're right at the end of
 	   the block and will re-translate as soon as we try to
 	   resume. */
-	assert(rec->statement_nr <= (unsigned)currentIRSB->stmts_used);
-	currentIRSBOffset = rec->statement_nr;
+	assert(rec->statement_nr <= (unsigned)ths->currentIRSB->stmts_used);
+	ths->currentIRSBOffset = rec->statement_nr;
 
-	temporaries = rec->tmp;
+	ths->temporaries = rec->tmp;
 }
 
 template <typename ait>
-void Thread<ait>::visit(HeapVisitor &hv) const
+void Thread<ait>::visit(HeapVisitor &hv)
 {
 	hv(currentIRSB);
 	temporaries.visit(hv);
@@ -132,12 +133,9 @@ void RegisterSet<ait>::abstract(RegisterSet<new_type> *out) const
 template <typename ait> template <typename new_type>
 void expression_result_array<ait>::abstract(expression_result_array<new_type> *out) const
 {
-	memset(out, 0, sizeof(*out));
-	out->setSize(nr_entries);
-	for (unsigned x = 0; x < nr_entries; x++) {
-		out->arr[x].lo = mkConst<new_type>(arr[x].lo);
-		out->arr[x].hi = mkConst<new_type>(arr[x].hi);
-	}
+	out->setSize(content.size());
+	for (unsigned x = 0; x < content.size(); x++)
+		content[x].abstract(&out->content[x]);
 }
 
 #define MK_THREAD(t)

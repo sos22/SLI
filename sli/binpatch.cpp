@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <wait.h>
 
+#include <map>
+
 #include "sli.h"
 
 #define MAX_INSTRUCTION_SIZE 15
@@ -23,7 +25,7 @@ public:
 	EarlyRelocation(unsigned _offset, unsigned _size)
 		: offset(_offset), size(_size) {}
 	virtual void doit(PatchFragment *pf) = 0;
-	void visit(HeapVisitor &hv) const {}
+	void visit(HeapVisitor &hv) {}
 	void destruct() {}
 	NAMED_CLASS
 };
@@ -75,6 +77,10 @@ public:
 	unsigned long branchNext;
 	Instruction *branchNextI;
 
+	/* Doesn't really belong here, but it'll do for now. */
+	unsigned offsetInPatch;
+	bool presentInPatch;
+
 	Byte content[MAX_INSTRUCTION_SIZE];
 	unsigned len;
 	Prefixes pfx;
@@ -90,7 +96,7 @@ public:
 				   CFG *cfg);
 	static Instruction *pseudo(unsigned long rip);
 
-	void visit(HeapVisitor &hv) const {
+	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
 		hv(as);
 		hv(defaultNextI);
@@ -103,26 +109,26 @@ public:
 class CFG : public GarbageCollected<CFG> {
 	AddressSpace<unsigned long> *as;
 public:
-	std::map<unsigned long, Instruction *> ripToInstr;
+	static unsigned long __trivial_hash_function(const unsigned long &k) { return k; }
+	typedef gc_map<unsigned long, Instruction *, __trivial_hash_function,
+		       __default_eq_function, __visit_function_heap> ripToInstrT;
+	ripToInstrT *ripToInstr;
 private:
 	std::vector<std::pair<unsigned long, unsigned> > pendingRips;
 	std::vector<unsigned long> neededRips;
 	void decodeInstruction(unsigned long rip, unsigned max_depth);
 public:
-	CFG(AddressSpace<unsigned long> *_as) : as(_as) {}
+	CFG(AddressSpace<unsigned long> *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
 	void add_root(unsigned long root, unsigned max_depth)
 	{
 		pendingRips.push_back(std::pair<unsigned long, unsigned>(root, max_depth));
 	}
 	void doit();
-	void visit(HeapVisitor &hv) const {
-		for (std::map<unsigned long, Instruction *>::const_iterator it = ripToInstr.begin();
-		     it != ripToInstr.end();
-		     it++)
-			hv(it->second);
+	void visit(HeapVisitor &hv) {
+		hv(ripToInstr);
 		hv(as);
 	}
-	void registerInstruction(Instruction *i) { ripToInstr[i->rip] = i; }
+	void registerInstruction(Instruction *i) { (*ripToInstr)[i->rip] = i; }
 	virtual void destruct() { this->~CFG(); }
 	NAMED_CLASS
 
@@ -374,42 +380,38 @@ CFG::doit()
 	while (!pendingRips.empty()) {
 		std::pair<unsigned long, unsigned> p = pendingRips.back();
 		pendingRips.pop_back();
-		if (ripToInstr.find(p.first) == ripToInstr.end())
+		if (!ripToInstr->hasKey(p.first))
 			decodeInstruction(p.first, p.second);
 	}
 
-	for (std::map<unsigned long, Instruction *>::iterator it = ripToInstr.begin();
-	     it != ripToInstr.end();
+	for (ripToInstrT::iterator it = ripToInstr->begin();
+	     it != ripToInstr->end();
 	     it++) {
-		std::map<unsigned long, Instruction *>::iterator probe;
-		it->second->useful = instructionUseful(it->second);
-		if (it->second->defaultNext) {
-			probe = ripToInstr.find(it->second->defaultNext);
-			if (probe != ripToInstr.end()) {
-				it->second->defaultNext = 0;
-				it->second->defaultNextI = probe->second;
-				if (probe->second->useful)
-					it->second->useful = true;
-			}
+		Instruction *ins = it.value();
+		ins->useful = instructionUseful(ins);
+		if (ins->defaultNext && ripToInstr->hasKey(ins->defaultNext)) {
+			Instruction *dn = (*ripToInstr)[ins->defaultNext];
+			ins->defaultNext = 0;
+			ins->defaultNextI = dn;
+			if (dn->useful)
+				ins->useful = true;
 		}
-		if (it->second->branchNext) {
-			probe = ripToInstr.find(it->second->branchNext);
-			if (probe != ripToInstr.end()) {
-				it->second->branchNext = 0;
-				it->second->branchNextI = probe->second;
-				if (probe->second->useful)
-					it->second->useful = true;
-			}
+		if (ins->branchNext && ripToInstr->hasKey(ins->branchNext)) {
+			Instruction *bn = (*ripToInstr)[ins->branchNext];
+			ins->branchNext = 0;
+			ins->branchNextI = bn;
+			if (bn->useful)
+				bn->useful = true;
 		}
 	}
 
 	bool progress;
 	do {
 		progress = false;
-		for (std::map<unsigned long, Instruction *>::iterator it = ripToInstr.begin();
-		     it != ripToInstr.end();
+		for (ripToInstrT::iterator it = ripToInstr->begin();
+		     it != ripToInstr->end();
 		     it++) {
-			Instruction *i = it->second;
+			Instruction *i = it.value();
 			if (i->useful)
 				continue;
 			if (i->defaultNextI && i->defaultNextI->useful) {
@@ -426,10 +428,10 @@ CFG::doit()
 	/* Rewrite every instruction so that non-useful next
 	   instructions get turned back into RIPs, and remove the
 	   non-useful instructions. */
-	for (std::map<unsigned long, Instruction *>::iterator it = ripToInstr.begin();
-	     it != ripToInstr.end();
+	for (ripToInstrT::iterator it = ripToInstr->begin();
+	     it != ripToInstr->end();
 		) {
-		Instruction *i = it->second;
+		Instruction *i = it.value();
 
 		if (i->useful) {
 			if (i->defaultNextI && !i->defaultNextI->useful) {
@@ -442,16 +444,16 @@ CFG::doit()
 			}
 			it++;
 		} else {
-			ripToInstr.erase(it++);
+			it = ripToInstr->erase(it);
 		}
 	}
 }
 
 
 class PatchFragment : public GarbageCollected<PatchFragment> {
-	std::map<Instruction *, unsigned> instrToOffset;
 	std::vector<EarlyRelocation *> relocs;
 	std::vector<LateRelocation> lateRelocs;
+	std::vector<Instruction *> registeredInstrs;
 
 protected:
 	CFG *cfg;
@@ -481,11 +483,7 @@ public:
 	void writeBytes(const void *bytes, unsigned size, unsigned offset);
 	void addLateReloc(LateRelocation m) { lateRelocs.push_back(m); }
 
-	void visit(HeapVisitor &hv) const {
-		for (std::map<Instruction*, unsigned>::const_iterator it = instrToOffset.begin();
-		     it != instrToOffset.end();
-		     it++)
-			hv(it->first);
+	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
 	}
 	void destruct() { this->~PatchFragment(); }
@@ -508,7 +506,10 @@ protected:
 	virtual void emitInstruction(Instruction *i);
 
 	void registerInstruction(Instruction *i, unsigned offset) {
-		instrToOffset[i] = offset;
+		assert(!i->presentInPatch);
+		i->offsetInPatch = offset;
+		i->presentInPatch = true;
+		registeredInstrs.push_back(i);
 	}
 };
 
@@ -543,11 +544,11 @@ PatchFragment::nextInstr(CFG *cfg)
 {
 	/* Decide what to emit next */
 	std::map<Instruction *, bool> pendingInstructions;
-	for (std::map<unsigned long, Instruction *>::iterator it = cfg->ripToInstr.begin();
-	     it != cfg->ripToInstr.end();
+	for (CFG::ripToInstrT::iterator it = cfg->ripToInstr->begin();
+	     it != cfg->ripToInstr->end();
 	     it++) {
-		if (instrToOffset.find(it->second) == instrToOffset.end())
-			pendingInstructions[it->second] = true;
+		if (!it.value()->presentInPatch)
+			pendingInstructions[it.value()] = true;
 	}
 	if (pendingInstructions.empty())
 		return NULL;
@@ -576,10 +577,12 @@ bool
 PatchFragment::ripToOffset(unsigned long rip, unsigned *res)
 {
 	*res = 0;
-	std::map<unsigned long, Instruction *>::iterator probe = cfg->ripToInstr.find(rip);
-	if (probe == cfg->ripToInstr.end())
+	if (!cfg->ripToInstr->hasKey(rip))
 		return false;
-	*res = instrToOffset[probe->second];
+	Instruction *i = (*cfg->ripToInstr)[rip];
+	if (!i->presentInPatch)
+		return false;
+	*res = i->offsetInPatch;
 	return true;
 }
 
@@ -765,20 +768,19 @@ PatchFragment::emitStraightLine(Instruction *i)
 	assert(i);
 	while (1) {
 		unsigned offset = content.size();
-		unsigned existing_offset = instrToOffset[i];
 
-		if (existing_offset) {
+		if (i->presentInPatch) {
 			/* This instruction has already been emitted.
 			   Rather than duplicating it, emit an
 			   unconditional branch to the existing
 			   location. */
-			emitJmpToOffset(existing_offset);
+			emitJmpToOffset(i->offsetInPatch);
 
 			/* Don't try to reassemble any further. */
 /**/			return;
 		}
 
-		instrToOffset[i] = offset;
+		registerInstruction(i, offset);
 
 		emitInstruction(i);
 			
@@ -817,28 +819,34 @@ PatchFragment::asC() const
 
 	content = vex_asprintf("%s};\n\nstatic const struct trans_table_entry trans_table[] = {\n",
 			       content);
-	for (std::map<Instruction *, unsigned>::const_iterator it = instrToOffset.begin();
-	     it != instrToOffset.end();
+	for (std::vector<Instruction *>::const_iterator it = registeredInstrs.begin();
+	     it != registeredInstrs.end();
 	     it++)
 		content = vex_asprintf("%s\t{0x%lx, %d},\n",
 				       content,
-				       it->first->rip,
-				       it->second);
+				       (*it)->rip,
+				       (*it)->offsetInPatch);
 	return vex_asprintf("%s};\n", content);
 }
 
 class SourceSinkCFG : public CFG {
-	std::map<unsigned long, bool> sinkInstructions;
+	static unsigned long __trivial_hash_function(const unsigned long &k) { return k; }	
+	gc_map<unsigned long, bool, __trivial_hash_function> *sinkInstructions;
 public:
-	void add_sink(unsigned long rip) { sinkInstructions[rip] = true; }
+	void add_sink(unsigned long rip) { (*sinkInstructions)[rip] = true; }
 	void destruct() { this->~SourceSinkCFG(); }
 
-	bool exploreInstruction(Instruction *i) { return !sinkInstructions[i->rip]; }
-	bool instructionUseful(Instruction *i) { return sinkInstructions[i->rip]; }
+	bool exploreInstruction(Instruction *i) { return !(*sinkInstructions)[i->rip]; }
+	bool instructionUseful(Instruction *i) { return (*sinkInstructions)[i->rip]; }
 
 	SourceSinkCFG(AddressSpace<unsigned long> *as)
 		: CFG(as)
 	{
+		sinkInstructions = new gc_map<unsigned long, bool, __trivial_hash_function>();
+	}
+	void visit(HeapVisitor &hv) {
+		CFG::visit(hv);
+		hv(sinkInstructions);
 	}
 };
 

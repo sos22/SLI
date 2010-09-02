@@ -343,8 +343,8 @@ InterpretResult SignalEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **l
 }
 
 template <typename ait> ThreadEvent<ait> *
-RdtscEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
-			     LogReader<ait> *lf,
+RdtscEvent<ait>::fuzzyReplay(VexPtr<MachineState<ait> > &ms,
+			     VexPtr<LogReader<ait> > &lf,
 			     LogReaderPtr startPtr,
 			     LogReaderPtr *endPtr,
 			     GarbageCollectionToken)
@@ -366,8 +366,8 @@ RdtscEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 }
 
 template <typename ait> ThreadEvent<ait> *
-SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
-			       LogReader<ait> *lf,
+SyscallEvent<ait>::fuzzyReplay(VexPtr<MachineState<ait> > &ms,
+			       VexPtr<LogReader<ait> > &lf,
 			       LogReaderPtr startPtr,
 			       LogReaderPtr *endPtr,
 			       GarbageCollectionToken t)
@@ -381,9 +381,10 @@ SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 		try {
 			ThreadEvent<ait> *r = replay(lr, ms);
 			*endPtr = startPtr;
-			process_memory_records(ms->addressSpace, lf, startPtr,
-					       endPtr, (LogWriter<ait> *)NULL,
-					       t);
+			VexPtr<AddressSpace<ait> > as(ms->addressSpace);
+		        VexPtr<LogWriter<ait> > dummy(NULL);
+			/* This might invalidate the this pointer... */
+			process_memory_records(as, lf, startPtr, endPtr, dummy, t);
 			return r;
 		} catch (ReplayFailedException &excpt) {
 			/* Replay failed.  Keep trying more calls out
@@ -396,8 +397,8 @@ SyscallEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
 }
 
 template <typename ait> ThreadEvent<ait> *
-CasEvent<ait>::fuzzyReplay(MachineState<ait> *ms,
-			   LogReader<ait> *lf,
+CasEvent<ait>::fuzzyReplay(VexPtr<MachineState<ait> > &ms,
+			   VexPtr<LogReader<ait> > &lf,
 			   LogReaderPtr startPtr,
 			   LogReaderPtr *endPtr,
 			   GarbageCollectionToken)

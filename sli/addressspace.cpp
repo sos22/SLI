@@ -84,7 +84,7 @@ AddressSpace<ait>::copyFromClient(EventTimestamp when, ait start, unsigned size,
 template <typename ait>
 void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned size,
 				    const ait *contents, bool ignore_protection,
-				    const Thread<ait> *thr)
+				    Thread<ait> *thr)
 {
 	unsigned long start = force(_start);
 	unsigned off = 0;
@@ -122,7 +122,7 @@ template <typename ait>
 expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 					       ait start, unsigned size,
 					       bool ignore_protection,
-					       const Thread<ait> *thr)
+					       Thread<ait> *thr)
 {
 	ait b[16];
 	ait storeAddr;
@@ -194,7 +194,7 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 template <typename ait>
 void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 			      const expression_result<ait> &val, bool ignore_protection,
-			      const Thread<ait> *thr)
+			      Thread<ait> *thr)
 {
 	ait b[16];
 	sanity_check_ait(val.hi);
@@ -247,7 +247,7 @@ AddressSpace<ait>::fetch(unsigned long start, Thread<ait> *thr)
 template <typename ait>
 EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 					     ait *contents, bool ignore_protection,
-					     const Thread<ait> *thr,
+					     Thread<ait> *thr,
 					     ait *storeAddr)
 {
 	EventTimestamp when;
@@ -324,7 +324,7 @@ AddressSpace<ait>::checkFreeList(ait start, ait end,
 
 template <typename ait>
 bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
-				     bool isWrite, const Thread<ait> *thr)
+				     bool isWrite, Thread<ait> *thr)
 {
 	unsigned long start = force(_start);
 	if (isOnFreeList(_start, _start + mkConst<ait>(size), thr->tid))
@@ -398,11 +398,10 @@ AddressSpace<ait> *AddressSpace<ait>::dupeSelf() const
 }
 
 template <typename ait>
-void AddressSpace<ait>::visit(HeapVisitor &hv) const
+void AddressSpace<ait>::visit(HeapVisitor &hv)
 {
-	hv(vamap);
 	hv(pmap);
-	vamap->visit(hv, pmap);
+	vamap->visit(vamap, hv, pmap);
 	visit_aiv(client_free, hv);
 	for (unsigned x = 0; x < nr_trans_hash_slots; x++)
 		hv(trans_hash[x]);
@@ -707,6 +706,15 @@ AddressSpace<ait>::sanityCheckDecodeCache() const
 }
 #endif
 
+template <typename ait> void
+AddressSpace<ait>::relocate(AddressSpace<ait> *target, size_t)
+{
+	for (unsigned x = 0; x < nr_trans_hash_slots; x++)
+		if (target->trans_hash[x])
+			target->trans_hash[x]->pprev = &target->trans_hash[x];
+	memset(trans_hash, 0x99, sizeof(trans_hash));
+}
+
 template <typename ait> WeakRef<IRSB> *
 AddressSpace<ait>::searchDecodeCache(unsigned long rip)
 {
@@ -743,10 +751,10 @@ AddressSpace<ait>::searchDecodeCache(unsigned long rip)
 				assert(n->next->pprev == &n->next);
 			assert(*n->pprev == n);
 			sanityCheckDecodeCache();
-			return &n->irsb;
+			return n->irsb;
 		}
 
-		if (!n->irsb.get()) {
+		if (!n->irsb->get()) {
 			/* Target has been garbage collected.  Unhook
 			   ourselves from the list.  We'll get garbage
 			   collected ourselves on the next cycle. */
@@ -766,7 +774,7 @@ AddressSpace<ait>::searchDecodeCache(unsigned long rip)
 	trans_hash[hash] = n;
 
 	sanityCheckDecodeCache();
-	return &n->irsb;
+	return n->irsb;
 }
 
 #define MK_ADDRESS_SPACE(t)

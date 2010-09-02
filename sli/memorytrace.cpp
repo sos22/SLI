@@ -1,8 +1,7 @@
 #include "sli.h"
 
 template <typename ait>
-class MemTraceMaker : public EventRecorder<ait>,
-		      public GarbageCollected<MemTraceMaker<ait> > {
+class MemTraceMaker : public EventRecorder<ait> {
 	MemoryTrace<ait> *mt;
 public:
 	MemTraceMaker(MemoryTrace<ait> *_mt)
@@ -10,7 +9,7 @@ public:
 	{
 	}
 	void record(Thread<ait> *thr, ThreadEvent<ait> *evt);
-	void visit(HeapVisitor &hv) const { hv(mt); }
+	void visit(HeapVisitor &hv) { hv(mt); }
 	void destruct() {}
 	NAMED_CLASS
 };
@@ -23,16 +22,19 @@ MemTraceMaker<ait>::record(Thread<ait> *thr, ThreadEvent<ait> *evt)
 		mt->push_back(new MemoryAccessStore<ait>(*se));
 	}
 }
-template <typename ait>
-MemoryTrace<ait>::MemoryTrace(const MachineState<ait> *ms,
-			      LogReader<ait> *lf,
-			      LogReaderPtr ptr,
-			      GarbageCollectionToken t)
+template <typename ait> MemoryTrace<ait> *
+MemoryTrace<ait>::get(VexPtr<MachineState<ait> > &ms,
+		      VexPtr<LogReader<ait> > &lf,
+		      LogReaderPtr ptr,
+		      GarbageCollectionToken t)
 {
-	MemTraceMaker<ait> *mtm = new MemTraceMaker<ait>(this);
-	VexGcRoot mtmroot((void **)&mtm, "mtmroot");
+	VexPtr<MemoryTrace<ait> > work(new MemoryTrace<ait>);
+	VexPtr<MemTraceMaker<ait> > mtm(new MemTraceMaker<ait>(work));
 	Interpreter<ait> i(ms->dupeSelf());
-	i.replayLogfile(lf, ptr, t, NULL, NULL, mtm);
+	VexPtr<LogWriter<ait> > dummy(NULL);
+	VexPtr<EventRecorder<ait> > mtm2(mtm);
+	i.replayLogfile(lf, ptr, t, NULL, dummy, mtm2);
+	return work;
 }
 
 template <typename ait>
@@ -46,8 +48,8 @@ void MemoryTrace<ait>::dump() const
 
 #define MK_MEMTRACE(t)							\
 	template MemoryTrace<t>::MemoryTrace();				\
-	template MemoryTrace<t>::MemoryTrace(const MachineState<t> *,	\
-					     LogReader<t> *,		\
-					     LogReaderPtr,		\
-					     GarbageCollectionToken);	\
+	template MemoryTrace<t> *MemoryTrace<t>::get(VexPtr<MachineState<t> >&, \
+						     VexPtr<LogReader<t> > &, \
+						     LogReaderPtr,	\
+						     GarbageCollectionToken); \
 	template void MemoryTrace<t>::dump() const

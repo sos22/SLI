@@ -3,16 +3,16 @@
 #include "sli.h"
 
 template<typename abs_int_type>
-void MachineState<abs_int_type>::visit(HeapVisitor &hv) const
+void MachineState<abs_int_type>::visit(HeapVisitor &hv)
 {
 	hv(threads);
 	hv(addressSpace);
 }
 
 template<typename abs_int_type>
-void visit_machine_state(const void *_ctxt, HeapVisitor &hv)
+void visit_machine_state(void *_ctxt, HeapVisitor &hv)
 {
-	const MachineState<abs_int_type> *ctxt = (const MachineState<abs_int_type> *)_ctxt;
+	MachineState<abs_int_type> *ctxt = (MachineState<abs_int_type> *)_ctxt;
 	ctxt->visit(hv);
 }
 
@@ -45,7 +45,8 @@ MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(Addr
 }
 
 template <typename ait>
-MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, LogReaderPtr ptr,
+MachineState<ait> *MachineState<ait>::initialMachineState(VexPtr<LogReader<ait> > &lf,
+							  LogReaderPtr ptr,
 							  LogReaderPtr *end,
 							  GarbageCollectionToken token)
 {
@@ -57,7 +58,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 	LogRecordInitialBrk<ait> *lrib = dynamic_cast<LogRecordInitialBrk<ait>*>(lr);
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
-        AddressSpace<ait> *as = AddressSpace<ait>::initialAddressSpace(lrib->brk);
+        VexPtr<AddressSpace<ait> > as(AddressSpace<ait>::initialAddressSpace(lrib->brk));
 
 	lr = lf->read(ptr, &ptr);
         LogRecordInitialSighandlers<ait> *lris = dynamic_cast<LogRecordInitialSighandlers<ait>*>(lr);
@@ -78,8 +79,9 @@ MachineState<ait> *MachineState<ait>::initialMachineState(LogReader<ait> *lf, Lo
 		} else if (LogRecordInitialRegisters<ait> *lrir = dynamic_cast<LogRecordInitialRegisters<ait>*>(lr)) {
 			work->registerThread(Thread<ait>::initialThread(*lrir));
 	        } else if (LogRecordVexThreadState<ait> *lrvts = dynamic_cast<LogRecordVexThreadState<ait>*>(lr)) {
-			Thread<ait> *t = work->findThread(lrvts->thread());
-			t->imposeState(lrvts, as, token);
+			VexPtr<LogRecordVexThreadState<ait> > l(lrvts);
+			VexPtr<Thread<ait> > t(work->findThread(lrvts->thread()));
+			t->imposeState(t, l, as, token);
 		} else {
 			break;
 		}
@@ -156,7 +158,7 @@ MachineState<new_type> *MachineState<ait>::abstract() const
 	template MachineState<t> *MachineState<t>::initialMachineState(AddressSpace<t> *as, \
 								       const LogRecordInitialSighandlers<t> &handlers); \
 	template void MachineState<t>::dumpSnapshot(LogWriter<t> *lw) const; \
-	template MachineState<t> *MachineState<t>::initialMachineState(LogReader<t> *lf, \
+	template MachineState<t> *MachineState<t>::initialMachineState(VexPtr<LogReader<t> > &lf, \
 								       LogReaderPtr ptr, \
 								       LogReaderPtr *end, \
 								       GarbageCollectionToken)

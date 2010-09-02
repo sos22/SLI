@@ -151,7 +151,7 @@ PMap<ait> *PMap<ait>::dupeSelf(void) const
 	PMap<ait> *work = empty();
 	
 	work->nextPa = nextPa;
-	work->parent = this;
+	work->parent = (PMap<ait> *)this;
 	return work;
 }
 
@@ -162,26 +162,29 @@ unsigned PMap<ait>::paHash(PhysicalAddress pa)
 }
 
 template <typename ait>
-void PMap<ait>::visitPA(PhysicalAddress pa, HeapVisitor &hv) const
+void PMap<ait>::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 {
 	unsigned h = paHash(pa);
-	PMapEntry<ait> *pme;
-	for (pme = heads[h];
-	     pme != NULL && (pa < pme->pa ||
-			     pa >= pme->pa + MemoryChunk<ait>::size);
-	     pme = pme->next)
-		;
-	if (!pme) {
-		assert(parent);
-		parent->visitPA(pa, hv);
-	} else {
-		hv(pme);
-		hv(pme->mc);
+	/* Double indirection because the hv() might want to relocate
+	   it. */
+	PMapEntry<ait> **pme;
+	
+	pme = &heads[h];
+	while (*pme) {
+		if ( pa >= (*pme)->pa &&
+		     pa < (*pme)->pa + MemoryChunk<ait>::size ) {
+			hv(*pme);
+			return;
+		}
+		pme = &(*pme)->next;
 	}
+
+	assert(parent);
+	parent->visitPA(pa, hv);
 }
 
 template <typename ait>
-void PMap<ait>::visit(HeapVisitor &hv) const
+void PMap<ait>::visit(HeapVisitor &hv)
 {
 	hv(parent);
 }
@@ -212,6 +215,34 @@ PMap<new_type> *PMap<ait>::abstract() const
 	return work;
 }
 
+template <typename ait> void
+PMapEntry<ait>::relocate(PMapEntry<ait> *target, size_t sz)
+{
+	if (target->next)
+		target->next->pprev = &target->next;
+	*target->pprev = target;
+	memset(this, 0x67, sizeof(*this));
+}
+
+template <typename ait> void
+PMap<ait>::relocate(PMap<ait> *target, size_t sz)
+{
+	/* The pmap head pointers are slightly weak, in the sense that
+	   just being in the pmap isn't enough to keep them live (for
+	   which you need an external reference from a vamap).  That
+	   means that we need to manually fix them up if the GC
+	   relocates us. */
+
+	/* We've just been duplicated from *this to *target.  Fix up
+	 * target's linked lists to be valid.  This will break this's
+	 * linked lists, but that's okay, because they'll never be
+	 * referenced again. */
+	for (unsigned x = 0; x < nrHashBuckets; x++)
+		if (target->heads[x])
+			target->heads[x]->pprev = &target->heads[x];			
+	memset(heads, 0x66, sizeof(heads));
+}
+
 #define MK_PMAP(t)							\
 	template MemoryChunk<t> *PMap<t>::lookup(PhysicalAddress pa,	\
 						 unsigned long *mc_start); \
@@ -222,6 +253,6 @@ PMap<new_type> *PMap<ait>::abstract() const
 	template PMap<t> *PMap<t>::empty();				\
 	template PMap<t> *PMap<t>::dupeSelf() const;			\
 	template void PMap<t>::visitPA(PhysicalAddress pa,		\
-				       HeapVisitor &hv) const;		\
-	template void PMap<t>::visit(HeapVisitor &hv) const
+				       HeapVisitor &hv);		\
+	template void PMap<t>::visit(HeapVisitor &hv)
 

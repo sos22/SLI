@@ -66,7 +66,7 @@ void destroy_memlog(void *_ctxt)
 }
 
 template <typename ait>
-void MemLog<ait>::visit(HeapVisitor &hv) const
+void MemLog<ait>::visit(HeapVisitor &hv)
 {
 	hv(parent);
 	for (unsigned x = 0; x < content->size(); x++)

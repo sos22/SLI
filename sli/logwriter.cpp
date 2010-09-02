@@ -267,14 +267,14 @@ void *LogRecordVexThreadState<ait>::marshal(unsigned *sz) const
 	void *r;
 	vex_thread_state_record_2<ait> *vtsr =
 		(vex_thread_state_record_2<ait> *)LogRecord<ait>::marshal(RECORD_vex_thread_state_2,
-									  sizeof(*vtsr) + 16 * tmp.nr_entries,
+									  sizeof(*vtsr) + 16 * tmp.content.size(),
 									  sz,
 									  &r);
 	vtsr->statement_nr = statement_nr;
 	vtsr->translation_origin = currentIRSBRip;
-	for (unsigned x = 0; x < tmp.nr_entries; x++) {
-		vtsr->temporaries[x*2] = tmp.arr[x].lo;
-		vtsr->temporaries[x*2+1] = tmp.arr[x].hi;
+	for (unsigned x = 0; x < tmp.content.size(); x++) {
+		vtsr->temporaries[x*2] = tmp.content[x].lo;
+		vtsr->temporaries[x*2+1] = tmp.content[x].hi;
 	}
 	return r;
 }

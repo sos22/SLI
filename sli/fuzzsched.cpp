@@ -86,8 +86,8 @@ bool Explorer::advance(GarbageCollectionToken tok)
 	MemTracePool<unsigned long> *thread_traces =
 	  new MemTracePool<unsigned long>(basis->ms, ThreadId(), tok);
 	VexGcRoot ttraces((void **)&thread_traces, "ttraces");
-	std::map<ThreadId, Maybe<unsigned> > *first_racing_access =
-		thread_traces->firstRacingAccessMap();
+	VexPtr<gc_map<ThreadId, Maybe<unsigned> > > first_racing_access(
+		thread_traces->firstRacingAccessMap());
 
 	/* If there are no races then we can just run one thread after
 	   another, and we don't need to do anything else.  We can
@@ -95,10 +95,10 @@ bool Explorer::advance(GarbageCollectionToken tok)
 	/* This includes the case where only one thread can make
 	   progress at all. */
 	bool noRaces = true;
-	for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
+	for (gc_map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
 	     it != first_racing_access->end();
 	     it++) {
-		if (it->second.full)
+		if (it.value().full)
 			noRaces = false;
 	}
 	if (noRaces) {
@@ -115,11 +115,11 @@ bool Explorer::advance(GarbageCollectionToken tok)
 		return true;
 	}
 
-	for (std::map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
+	for (gc_map<ThreadId, Maybe<unsigned> >::iterator it = first_racing_access->begin();
 	     it != first_racing_access->end();
 	     it++) {
-		ThreadId tid = it->first;
-		Maybe<unsigned> r = it->second;
+		ThreadId tid = it.key();
+		Maybe<unsigned> r = it.value();
 		Thread<unsigned long> *thr = basis->ms->findThread(tid);
 		if (thr->cannot_make_progress)
 			continue;

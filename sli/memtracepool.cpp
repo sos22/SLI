@@ -1,12 +1,12 @@
 #include "sli.h"
 
-template <typename ait>
-MemTracePool<ait>::MemTracePool(MachineState<ait> *base_state, ThreadId ignoredThread,
-				GarbageCollectionToken token)
-  : content()
+template <typename ait> MemTracePool<ait> *
+MemTracePool<ait>::get(VexPtr<MachineState<ait> > &base_state,
+		       ThreadId ignoredThread,
+		       GarbageCollectionToken token)
 {
-	MemTracePool<ait> *t = this;
-	VexGcRoot thisroot((void **)&t, "thisroot");
+	VexPtr<MemTracePool<ait> > t(new MemTracePool<ait>());
+	t->content = new contentT();
 	unsigned x;
 	for (x = 0; x < base_state->threads->size(); x++) {
 		ThreadId tid = base_state->threads->index(x)->tid;
@@ -16,30 +16,31 @@ MemTracePool<ait>::MemTracePool(MachineState<ait> *base_state, ThreadId ignoredT
 		Interpreter<ait> i(ms);
 		MemoryTrace<ait> *v;
 		i.getThreadMemoryTrace(tid, &v, 1000000, token);
-		content[tid] = v;
+		(*t->content)[tid] = v;
 	}
+	return t;
 }
 
 template <typename ait>
-std::map<ThreadId, Maybe<unsigned> > *MemTracePool<ait>::firstRacingAccessMap()
+gc_map<ThreadId, Maybe<unsigned> > *MemTracePool<ait>::firstRacingAccessMap()
 {
-	std::map<ThreadId, Maybe<unsigned> > *work = new std::map<ThreadId, Maybe<unsigned> >();
-	for (class contentT::iterator outerIt = content.begin();
-	     outerIt != content.end();
+	gc_map<ThreadId, Maybe<unsigned> > *work = new gc_map<ThreadId, Maybe<unsigned> >();
+	for (class contentT::iterator outerIt = content->begin();
+	     outerIt != content->end();
 	     outerIt++) {
-		ThreadId tid = outerIt->first;
-		MemoryTrace<ait> *v = outerIt->second;
+		ThreadId tid = outerIt.key();
+		MemoryTrace<ait> *v = outerIt.value();
 		assert(v);
 		unsigned mem_index;
 		for (mem_index = 0; mem_index < v->size(); mem_index++) {
 			MemoryAccess<ait> *ma = (*v)[mem_index];
-			for (class contentT::iterator innerIt = content.begin();
-			     innerIt != content.end();
+			for (class contentT::iterator innerIt = content->begin();
+			     innerIt != content->end();
 			     innerIt++) {
-				ThreadId other_tid = innerIt->first;
+				ThreadId other_tid = innerIt.key();
 				if (other_tid == tid)
 					continue;
-				MemoryTrace<ait> *other_v = innerIt->second;
+				MemoryTrace<ait> *other_v = innerIt.value();
 				for (unsigned other_access = 0;
 				     other_access < other_v->size();
 				     other_access++) {
@@ -68,15 +69,14 @@ std::map<ThreadId, Maybe<unsigned> > *MemTracePool<ait>::firstRacingAccessMap()
 }
 
 template <typename t>
-void MemTracePool<t>::visit(HeapVisitor &hv) const
+void MemTracePool<t>::visit(HeapVisitor &hv)
 {
-	for (class contentT::const_iterator outerIt = content.begin();
-	     outerIt != content.end();
-	     outerIt++)
-		hv(outerIt->second);
+	hv(content);
 }
 
 #define MK_MEMTRACE_POOL(t)						\
-  template MemTracePool<t>::MemTracePool(MachineState<t> *, ThreadId, GarbageCollectionToken); \
-	template std::map<ThreadId, Maybe<unsigned> > *MemTracePool<t>::firstRacingAccessMap();	\
-	template void MemTracePool<t>::visit(HeapVisitor &hv) const
+	template MemTracePool<t> *MemTracePool<t>::get(VexPtr<MachineState<t> > &, \
+						       ThreadId,	\
+						       GarbageCollectionToken); \
+	template gc_map<ThreadId, Maybe<unsigned> > *MemTracePool<t>::firstRacingAccessMap(); \
+	template void MemTracePool<t>::visit(HeapVisitor &hv)

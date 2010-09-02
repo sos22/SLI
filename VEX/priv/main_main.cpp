@@ -148,7 +148,6 @@ void LibVEX_Init (
    vex_valgrind_support   = valgrind_support;
    vex_control            = *vcon;
    vex_initdone           = True;
-   vexSetAllocMode ( VexAllocModeTEMP );
 }
 
 

@@ -17,11 +17,11 @@ isErrnoSysres(long x)
 }
 
 template<typename ait> void
-process_memory_records(AddressSpace<ait> *addrSpace,
-		       const LogReader<ait> *lf,
+process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
+		       VexPtr<LogReader<ait> > &lf,
 		       LogReaderPtr startOffset,
 		       LogReaderPtr *endOffset,
-		       LogWriter<ait> *lw,
+		       VexPtr<LogWriter<ait> > &lw,
 		       GarbageCollectionToken tok)
 {
 	while (1) {

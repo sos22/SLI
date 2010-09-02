@@ -13,6 +13,7 @@ struct keeper {
 
 DECLARE_VEX_TYPE(keeper);
 DEFINE_VEX_TYPE_NO_DESTRUCT(keeper, {
+		visit(ths->pmap);
 		ths->pmap->visitPA(ths->pa1, visit);
 		ths->pmap->visitPA(ths->pa2, visit);
 	});
@@ -71,6 +72,8 @@ main()
 	printf("Now check that it's possible to hold references to the chunks\n");
 	mc1 = MemoryChunk<unsigned long>::allocate();
 	mc2 = MemoryChunk<unsigned long>::allocate();
+	unsigned mc1_serial = mc1->serial;
+	unsigned mc2_serial = mc2->serial;
 	pa1 = pmap1->introduce(mc1);
 	pa2 = pmap1->introduce(mc2);
 
@@ -82,10 +85,12 @@ main()
 	vexRegisterGCRoot((void **)&k, "testpmap2");
 	LibVEX_gc(ALLOW_GC);
 
+	pmap1 = k->pmap;
+
 	mc3 = pmap1->lookup(pa1, &off1);
-	assert(mc3 == mc1);
+	assert(mc3->serial == mc1_serial);
 	mc3 = pmap1->lookup(pa2, &off1);
-	assert(mc3 == mc2);
+	assert(mc3->serial == mc2_serial);
 
 	printf("Unregister the keeper and check that everything drops away\n");
 	vexUnregisterGCRoot((void **)&k);
