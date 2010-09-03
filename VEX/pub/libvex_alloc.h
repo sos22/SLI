@@ -281,6 +281,7 @@ public:
 	p *operator->() const { return content; }
 	operator p*() const { return content; }
 	p *get() const { return content; }
+	void set(p *x) { content = x; }
 };
 
 template <typename t> class WeakRef;

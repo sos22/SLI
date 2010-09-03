@@ -283,8 +283,7 @@ static Expression *getCrashReason(VexPtr<MachineState<abstract_interpret_value> 
 				  LogReaderPtr ptr,
 				  GarbageCollectionToken tok)
 {
-	VexGcRoot root0((void **)&ms, "root0");
-	MachineState<abstract_interpret_value> *ms2 = ms->dupeSelf();
+	VexPtr<MachineState<abstract_interpret_value> > ms2(ms->dupeSelf());
 	Interpreter<abstract_interpret_value> i(ms2);
 	VexPtr<CrashReasonExtractor> extr(CrashReasonExtractor::get());
 
@@ -357,7 +356,7 @@ static Expression *getCrashReason(VexPtr<MachineState<abstract_interpret_value> 
 static Expression *                                                                                  
 strip_outer_rips(VexPtr<Expression> &e,
 		 VexPtr<MachineState<abstract_interpret_value> > &ms,
-		 LogReader<abstract_interpret_value> **lf,
+		 VexPtr<LogReader<abstract_interpret_value> > *lf,
 		 LogReaderPtr *lfstart,
 		 GarbageCollectionToken tok)
 {
@@ -397,7 +396,7 @@ strip_outer_rips(VexPtr<Expression> &e,
 	i.runToEvent(crip->history->when, model_exec, crip->model_exec_start, tok, lfstart);
         crip = dynamic_cast<ExpressionRip *>(cursor.get());
 	assert(crip);
-	*lf = crip->model_execution;
+        lf->set(crip->model_execution);
         VexPtr<MachineState<abstract_interpret_value> > ms2(ms->dupeSelf());
         model_exec = crip->model_execution;
         return getCrashReason(ms2, model_exec, *lfstart, tok);
@@ -419,19 +418,19 @@ main(int argc, char *argv[])
 	LibVEX_alloc_sanity_check();
 
 	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
+	concrete->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
 	VexPtr<MachineState<abstract_interpret_value> > abstract(concrete->abstract<abstract_interpret_value>());
+	concrete = NULL;
 
 	LibVEX_alloc_sanity_check();
 	VexPtr<LogReader<abstract_interpret_value> > al(lf->abstract<abstract_interpret_value>());
 
 	VexPtr<MachineState<abstract_interpret_value> > abstract2(abstract->dupeSelf());
         VexPtr<Expression> cr(getCrashReason(abstract2, al, ptr, ALLOW_GC));
-	VexGcRoot crkeeper((void **)&cr, "crkeeper");
 	printf("%s\n", cr->name());
-        LogReader<abstract_interpret_value> *lf2 = al;
+        VexPtr<LogReader<abstract_interpret_value> > lf2(al);
 	LogReaderPtr lf2start = ptr;
         cr = strip_outer_rips(cr, abstract, &lf2, &lf2start, ALLOW_GC);
-        VexPtr<LogReader<abstract_interpret_value> > lf3(lf2);
 
 	LibVEX_alloc_sanity_check();
 	bool progress;
@@ -439,7 +438,7 @@ main(int argc, char *argv[])
 		progress = false;
 		printf("Crash reason %s\n", cr->name());
 		VexPtr<gc_map<ThreadId, unsigned long> > v(new gc_map<ThreadId, unsigned long>());
-		cr = cr->refine(abstract, lf3, lf2start, &progress, v, cr->timestamp(), ALLOW_GC);
+		cr = cr->refine(abstract, lf2, lf2start, &progress, v, cr->timestamp(), ALLOW_GC);
 	} while (progress);
 	printf("Crash reason %s\n", cr->name());
 

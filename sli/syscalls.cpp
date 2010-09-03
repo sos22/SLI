@@ -251,6 +251,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 				     force(lrs->res));
 		break;
 	case __NR_exit: /* 60 */
+		printf("Thread %d exits\n", thr->tid._tid());
 		thr->exitted = true;
 		if (force(thr->clear_child_tid)) {
 			struct expression_result<ait> v;
