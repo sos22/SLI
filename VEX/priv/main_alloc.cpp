@@ -19,10 +19,16 @@
    client basic blocks. */
 #define GC_PERIOD 1000000
 
+/* How far are we willing to recur during the heap walking phase of a
+ * GC sweep?  If we hit this limit then we start pushing stuff off
+ * to a std::vector<> to deal with later. */
+#define MAX_RECURSION_DEPTH 1000
+
 #include <sys/mman.h>
 #include <err.h>
 #include <stdio.h>
 #include <string.h>
+#include <vector>
 
 #include "libvex_basictypes.h"
 #include "libvex.h"
@@ -106,6 +112,8 @@ new_arena(size_t content_size)
 
 class GcVisitor : public HeapVisitor {
 public:
+	std::vector<struct allocation_header *> deferredVisit;
+	unsigned depth;
 	void visit(void *&ptr);
 };
 
@@ -138,8 +146,15 @@ GcVisitor::visit(void *&what)
 		DBG("Redirect %p:%p to %p\n", what, (void *)((unsigned long)what + what_header->size()), header_to_alloc(redir));
 		what = header_to_alloc(redir);
 		assert(what != NULL);
-		if (redir->type->gc_visit)
-			redir->type->gc_visit(what, *this);
+		if (redir->type->gc_visit) {
+			if (depth >= MAX_RECURSION_DEPTH) {
+				deferredVisit.push_back(redir);
+			} else {
+				depth++;
+				redir->type->gc_visit(what, *this);
+				depth--;
+			}
+		}
 
 		DBG("Done visit of %p\n", what);
 	} else {
@@ -181,6 +196,8 @@ LibVEX_gc(GarbageCollectionToken t)
 
 	printf("Major GC starts\n");
 
+	gc.depth = 0;
+
 	/* Zap the old redirection pointers */
 	for (struct arena *a = head_arena; a; a = a->next) {
 		unsigned offset;
@@ -204,6 +221,14 @@ LibVEX_gc(GarbageCollectionToken t)
 	/* Do the copy phase */
 	for (unsigned x = 0; x < nr_gc_roots; x++)
 		gc.visit(*gc_roots[x]);
+	while (!gc.deferredVisit.empty()) {
+		struct allocation_header *ah;
+		ah = gc.deferredVisit.back();
+		gc.deferredVisit.pop_back();
+		assert(ah->type);
+		assert(ah->type->gc_visit);
+		ah->type->gc_visit(header_to_alloc(ah), gc);
+	}
 
 	/* Hack: the expression internment table still points at the
 	   old generation.  Fix it up. */
