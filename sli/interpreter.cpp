@@ -1818,10 +1818,12 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 			}
 		}
 
-		/* Memory records are special and should always be
-		   processed eagerly. */
-		VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
-	        process_memory_records(as, lf, ptr, &ptr, lw, t);
+		if (!lr) {
+			/* Memory records are special and should always be
+			   processed eagerly. */
+			VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
+	                process_memory_records(as, lf, ptr, &ptr, lw, t);
+	        }
 	}
 	if (eof)
 		*eof = ptr;
