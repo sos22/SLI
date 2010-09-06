@@ -72,10 +72,11 @@ Explorer::get(const MachineState<abstract_interpret_value> *ms,
 		}
 
 		VexPtr<MachineState<abstract_interpret_value> > ms(s->ms);
-		VexPtr<MemTracePool<abstract_interpret_value> > thread_traces(
-			MemTracePool<abstract_interpret_value>::get(ms, ignoredThread, t));
+		MemTracePool<abstract_interpret_value> *thread_traces =
+			MemTracePool<abstract_interpret_value>::get(ms, ignoredThread, t);
 		VexPtr<gc_map<ThreadId, Maybe<unsigned> > > first_racing_access
 			(thread_traces->firstRacingAccessMap());
+		thread_traces = NULL;
 
 		/* If there are no races then we can just run one
 		   thread after another, and we don't need to do
@@ -100,7 +101,7 @@ Explorer::get(const MachineState<abstract_interpret_value> *ms,
 				if (thr->cannot_make_progress)
 					continue;
 				Interpreter<abstract_interpret_value> i(s->ms);
-				VexPtr<LogWriter<abstract_interpret_value> > lf(s->lf);
+				VexPtr<LogWriter<abstract_interpret_value> > lf(s->lf->writer);
 				i.runToFailure(thr->tid, lf, t, 10000000);
 			}
 		        work->futures.push_back(s);
@@ -119,16 +120,15 @@ Explorer::get(const MachineState<abstract_interpret_value> *ms,
 				continue;
 			if (thr->cannot_make_progress)
 				continue;
-			ExplorationState *newGray = s->dupeSelf();
-			VexGcRoot grayKeeper((void **)&newGray, "newGray");
+			VexPtr<ExplorationState> newGray(s->dupeSelf());
 			Interpreter<abstract_interpret_value> i(newGray->ms);
-			VexPtr<LogWriter<abstract_interpret_value> > lf(newGray->lf);
+			VexPtr<LogWriter<abstract_interpret_value> > lf(newGray->lf->writer);
 			if (r.full) {
-				printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
+				printf("%p: run %d to %ld\n", newGray.get(), tid._tid(), r.value + thr->nrAccesses);
 				i.runToAccessLoggingEvents(tid, r.value + 1, t, lf);
 			} else {
-				printf("%p: run %d to failure from %ld\n", newGray, tid._tid(), thr->nrAccesses);
-				i.runToFailure(tid, lf, t, 10000000);
+				printf("%p: run %d to failure from %ld\n", newGray.get(), tid._tid(), thr->nrAccesses);
+				i.runToFailure(tid, lf, t, 10000);
 			}
 
 			work->grayStates.push_back(newGray);
@@ -155,7 +155,7 @@ LoadExpression::refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
 	*progress = true;
 	return onlyif::get(
 		logicaland::get(
-			ExpressionLastStore::get(when, store, addr),
+			ExpressionLastStore::get(when, store, addr, concrete_addr),
 			equals::get(addr, storeAddr)),
 		val);
 }
@@ -220,6 +220,7 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
 	EventTimestamp store;
 	EventTimestamp load;
 	Expression *addr;
+	unsigned long concrete_addr;
 	static VexAllocTypeWrapper<LastStoreRefiner> allocator;
 
 	static void visitHistoryPointer(History *&h, HeapVisitor &hv)
@@ -253,6 +254,7 @@ public:
 	LastStoreRefiner(EventTimestamp _store,
 			 EventTimestamp _load,
 			 Expression *_addr,
+			 unsigned long _concrete_addr,
 			 Expression *_result,
 			 LogReader<abstract_interpret_value> *_modelExec,
 			 LogReaderPtr _modelExecStart,
@@ -260,11 +262,13 @@ public:
 		: store(_store),
 		  load(_load),
 		  addr(_addr),
+		  concrete_addr(_concrete_addr),
 		  modelExec(_modelExec),
 		  modelExecStart(_modelExecStart),
 		  validity(_validity),
 		  result(_result)
 	{
+		thread_histories = new thread_histories_t();
 	}
 	static void *operator new(size_t s)
 	{
@@ -309,7 +313,8 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 
 	if (const StoreEvent<abstract_interpret_value> *se =
 	    dynamic_cast<const StoreEvent<abstract_interpret_value> *>(evt)) {
-		if (evt->when != store) {
+		if (evt->when != store &&
+		    se->addr.v == concrete_addr) {
 			Expression *happensInRange =
 				logicaland::get(
 					ExpressionHappensBefore::get(
@@ -343,54 +348,6 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 	}
 }
 
-class TruncateToEvent : public LogWriter<abstract_interpret_value>,
-			public GarbageCollected<TruncateToEvent> {
-	EventTimestamp lastEvent;
-	bool finished;
-public:
-	MemLog<abstract_interpret_value> *work;
-
-	TruncateToEvent(EventTimestamp _lastEvent)
-		: lastEvent(_lastEvent),
-		  finished(false),
-		  work(MemLog<abstract_interpret_value>::emptyMemlog())
-	{
-	}
-
-	void append(LogRecord<abstract_interpret_value> *lr,
-		    unsigned long idx);
-
-	void visit(HeapVisitor &hv) { hv(work); }
-	void destruct() { this->~TruncateToEvent(); }
-	NAMED_CLASS
-};
-void
-TruncateToEvent::append(LogRecord<abstract_interpret_value> *lr,
-			unsigned long idx)
-{
-	if (finished)
-		return;
-	work->append(lr, idx);
-	if (lr->thread() == lastEvent.tid &&
-	    idx == lastEvent.idx)
-		finished = true;
-}
-static LogReader<abstract_interpret_value> *
-truncate_logfile(VexPtr<MachineState<abstract_interpret_value> > &ms,
-		 VexPtr<LogReader<abstract_interpret_value> > &lf,
-		 LogReaderPtr ptr,
-		 EventTimestamp lastEvent,
-		 LogReaderPtr *outPtr,
-		 GarbageCollectionToken t)
-{
-	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
-	VexPtr<TruncateToEvent> tte(new TruncateToEvent(lastEvent));
-	VexPtr<LogWriter<abstract_interpret_value> > tte2(tte.get());
-	i.replayLogfile(lf, ptr, t, NULL, tte2);
-	*outPtr = tte->work->startPtr();
-	return tte->work;
-}
-
 Expression *
 ExpressionLastStore::refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
 			    VexPtr<LogReader<abstract_interpret_value> > &lf,
@@ -400,45 +357,52 @@ ExpressionLastStore::refine(VexPtr<MachineState<abstract_interpret_value> > &ms,
 			    EventTimestamp ev,
 			    GarbageCollectionToken t)
 {
+	VexPtr<ExpressionLastStore> ths(this);
 	VexPtr<LastStoreRefiner> lsr(
 		new LastStoreRefiner(
-			store,
-			load,
-			vaddr,
-			ExpressionHappensBefore::get(store, load),
+			ths->store,
+			ths->load,
+			ths->vaddr,
+			ths->concrete_vaddr,
+			ExpressionHappensBefore::get(ths->store, ths->load),
 			lf.get(),
 			ptr,
 			validity));
 	VexPtr<MachineState<abstract_interpret_value> > localMs(ms->dupeSelf());
 	Interpreter<abstract_interpret_value> i(localMs);
-	LogReaderPtr truncatedPtr;
-	VexPtr<LogReader<abstract_interpret_value> > truncatedLog(
-		truncate_logfile(ms, lf, ptr, load, &truncatedPtr, t));
 	VexPtr<EventRecorder<abstract_interpret_value> > lsr2(lsr.get());
 	VexPtr<LogWriter<abstract_interpret_value> > dummyWriter(NULL);
-	i.replayLogfile(truncatedLog, truncatedPtr, t, NULL, dummyWriter, lsr2);
+	EventTimestamp loadTime = ths->load;
+	i.replayLogfile(lf, ptr, t, NULL, dummyWriter, lsr2,
+			&loadTime);
 	lsr->finish(localMs);
 
-	VexPtr<Explorer> e(Explorer::get(localMs, load.tid, t));
+	VexPtr<Explorer> e(Explorer::get(localMs, ths->load.tid, t));
 	VexPtr<Expression> work(lsr->result);
 
-	for (std::vector<ExplorationState *>::iterator it = e->futures.begin();
-	     it != e->futures.end();
-	     it++) {
-		MachineState<abstract_interpret_value> *ms2 = localMs->dupeSelf();
+	for (unsigned idx = 0; idx < e->futures.size(); idx++) {
+		ExplorationState *es = e->futures[idx];
+		VexPtr<MachineState<abstract_interpret_value> > ms2(localMs->dupeSelf());
 		Interpreter<abstract_interpret_value> i2(ms2);
 		VexPtr<LastStoreRefiner> lsr2(
 			new LastStoreRefiner(
-				store,
-				load,
-				vaddr,
+				ths->store,
+				ths->load,
+				ths->vaddr,
+				ths->concrete_vaddr,
 				work,
 				lf,
 				ptr,
 				validity));
 		VexPtr<EventRecorder<abstract_interpret_value> > lsr3;
-		VexPtr<LogReader<abstract_interpret_value> > lf2((*it)->lf);
-		i2.replayLogfile(lf2, (*it)->lf->startPtr(), t, NULL, dummyWriter, lsr3);
+		VexPtr<LogReader<abstract_interpret_value> > lf2(es->lf);
+	        try {
+			i2.replayLogfile(lf2, es->lf->startPtr(), t, NULL, dummyWriter, lsr3);
+		} catch (SliException) {
+			/* Don't care that much about things which go
+			   wrong in there; just keep chugging
+			   along. */
+		}
 		lsr2->finish(ms2);
 		work = lsr2->result;
 	}

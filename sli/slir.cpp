@@ -141,7 +141,7 @@ bool Explorer::advance(GarbageCollectionToken tok)
 			if (thr->cannot_make_progress)
 				continue;
 			Interpreter<unsigned long> i(basis->ms);
-			VexPtr<LogWriter<unsigned long> > basis_history(basis->history);
+			VexPtr<LogWriter<unsigned long> > basis_history(basis->history->writer);
 			i.runToFailure(thr->tid, basis_history, tok, 10000);
 		}
 		grayStates->push(basis);
@@ -160,7 +160,7 @@ bool Explorer::advance(GarbageCollectionToken tok)
 		ExplorationState *newGray = basis->dupeSelf();
 		VexGcRoot grayKeeper((void **)&newGray, "newGray");
 		Interpreter<unsigned long> i(newGray->ms);
-		VexPtr<LogWriter<unsigned long> > newGray_history(newGray->history);
+		VexPtr<LogWriter<unsigned long> > newGray_history(newGray->history->writer);
 		if (r.full) {
 			printf("%p: run %d to %ld\n", newGray, tid._tid(), r.value + thr->nrAccesses);
 			i.runToAccessLoggingEvents(tid, r.value + 1, tok, newGray_history);

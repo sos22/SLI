@@ -167,6 +167,16 @@ Thread<ait>::amd64g_dirtyhelper_storeF80le(MachineState<ait> *ms, ait addr, ait 
 				      this);
 }
 
+template <typename ait> ThreadEvent<ait> *
+Thread<ait>::do_load(EventTimestamp when, IRTemp tmp, ait addr, unsigned size,
+		     MachineState<ait> *ms)
+{
+	if (ms->addressSpace->isReadable(addr, size, this))
+		return LoadEvent<ait>::get(when, tmp, addr, size);
+	else
+		return SignalEvent<ait>::get(when, 11, addr);
+}
+
 template<typename ait>
 ThreadEvent<ait> *
 Thread<ait>::do_dirty_call(IRDirty *details, MachineState<ait> *ms)
@@ -188,15 +198,15 @@ Thread<ait>::do_dirty_call(IRDirty *details, MachineState<ait> *ms)
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 		return RdtscEvent<ait>::get(bumpEvent(ms), details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		return LoadEvent<ait>::get(bumpEvent(ms), details->tmp, args[0].lo, 1);
+		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 1, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		return LoadEvent<ait>::get(bumpEvent(ms), details->tmp, args[0].lo, 2);
+		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 2, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		return LoadEvent<ait>::get(bumpEvent(ms), details->tmp, args[0].lo, 4);
+		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 4, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		return LoadEvent<ait>::get(bumpEvent(ms), details->tmp, args[0].lo, 8);
+		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 8, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
-		return LoadEvent<ait>::get(bumpEvent(ms), details->tmp, args[0].lo, 16);
+		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 16, ms);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;
@@ -1461,20 +1471,16 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				if (force(ths->regs.rip() == ms->addressSpace->client_free))
 					ms->addressSpace->client_freed(ths->bumpEvent(ms),
 								       ths->regs.get_reg(REGISTER_IDX(RDI)));
-#if 0
-#define GR(x) regs.get_reg(REGISTER_IDX(x))
-				return InstructionEvent<ait>::get(bumpEvent(ms),
-								  regs.rip(),
+#define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
+				return InstructionEvent<ait>::get(ths->bumpEvent(ms),
+								  ths->regs.rip(),
 								  GR(FOOTSTEP_REG_0_NAME),
 								  GR(FOOTSTEP_REG_1_NAME),
-								  regs.get_reg(REGISTER_IDX(XMM0) + 1),
+								  ths->regs.get_reg(REGISTER_IDX(XMM0) + 1),
 								  GR(FOOTSTEP_REG_3_NAME),
 								  GR(FOOTSTEP_REG_4_NAME),
-								  allowRipMismatch);
+								  ths->allowRipMismatch);
 #undef GR
-#else
-				break;
-#endif
 			case Ist_AbiHint:
 				break;
 			case Ist_MBE:
@@ -1679,10 +1685,11 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 						       GarbageCollectionToken t)
 {
 	VexPtr<MemoryTrace<ait> > work(new MemoryTrace<ait>());
-	*output = work;
 	VexPtr<Thread<ait> > thr(currentState->findThread(tid));
-	if (thr->cannot_make_progress)
+	if (thr->cannot_make_progress) {
+		*output = work;
 		return InterpretResultIncomplete;
+	}
 	while (max_events && thr->runnable() &&
 
 	       /* Since we're running the thread in isolation, if it
@@ -1693,6 +1700,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 		InterpretResult res = evt->fake(currentState);
 		if (res != InterpretResultContinue) {
 			printf("Stop memory trace because can't fake %s\n", evt->name());
+			*output = work;
 			return res;
 		}
 		if (LoadEvent<ait> *lr = dynamic_cast<LoadEvent <ait> * > (evt)) {
@@ -1702,6 +1710,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 		}
 		max_events--;
 	}
+	*output = work;
 	if (max_events)
 		return InterpretResultExit;
 	return InterpretResultTimedOut;
@@ -1757,19 +1766,25 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 				     GarbageCollectionToken t,
 				     LogReaderPtr *eof,
 				     VexPtr<LogWriter<ait> > &lw,
-				     VexPtr<EventRecorder<ait> > &er)
+				     VexPtr<EventRecorder<ait> > &er,
+				     EventTimestamp *lastEvent)
 {
 	unsigned long event_counter = 0;
+	VexPtr<LogRecord<ait> > lr;
+	bool appendedRecord;
+	bool finished = false;
 
-	while (1) {
+	while (!finished) {
 		event_counter++;
 		if (event_counter % 100000 == 0)
 			printf("event %ld\n", event_counter);
-		if (event_counter > 23206000 && 0)
+		if (event_counter > 1700000 && 0)
 			loud_mode = true;
 
-		LogRecord<ait> *lr = lf->read(ptr, &ptr);
-		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
+		if (!lr) {
+			lr = lf->read(ptr, &ptr);
+			appendedRecord = false;
+		}
 		if (!lr)
 			break;
 
@@ -1779,29 +1794,28 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
 
 		while (evt) {
+			if (lastEvent && evt->when == *lastEvent)
+				finished = true;
 			if (er)
 				er->record(thr, evt);
-
 			if (loud_mode)
-				printf("Event %s in thread %d\n",
-				       evt->name(), lr->thread()._tid());
+				printf("Event %s in thread %d, lr %s\n",
+				       evt->name(), lr->thread()._tid(),
+				       lr->name());
 
-			/* CAS events are annoyingly special, because
-			   they can generate multiple records in the
-			   logfile (one for the load and one for the
-			   store). */
 			ThreadEvent<ait> *oldEvent = evt;
-			CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
-			if (ce) {
-				evt = ce->replay(lr, currentState,
-						 lf, ptr, &ptr, lw);
-			} else {
-				evt = evt->replay(lr, currentState);
-			}
-			if (lw)
+			bool consumed = true;
+			evt = evt->replay(lr, currentState, consumed);
+			if (lw && !appendedRecord) {
 				lw->append(lr, oldEvent->when.idx);
-			if (evt)
+				appendedRecord = true;
+			}
+			if (consumed)
+				lr = NULL;
+			if (evt && !lr) {
+				appendedRecord = false;
 				lr = lf->read(ptr, &ptr);
+			}
 		}
 
 		/* Memory records are special and should always be
@@ -1819,6 +1833,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 				  LogReaderPtr ptr,
 				  GarbageCollectionToken t, LogReaderPtr *eof)
 {
+	VexPtr<LogRecord<ait> > lr;
 	/* Mostly a debugging aide */
 	volatile static unsigned long event_counter;
 
@@ -1827,8 +1842,8 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 		event_counter++;
 		printf("event %ld\n", event_counter);
 
-		LogRecord<ait> *lr = lf->read(ptr, &ptr);
-		VexGcRoot lrkeeper((void **)&lr, "interpreter::replayLogfile");
+		if (!lr)
+			lr = lf->read(ptr, &ptr);
 		if (!lr)
 			break;
 
@@ -1839,14 +1854,11 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 		while (evt && !finished) {
 			if (evt->when == end)
 				finished = true;
-			CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
-			if (ce) {
-				evt = ce->replay(lr, currentState,
-						 lf, ptr, &ptr, NULL);
-			} else {
-				evt = evt->replay(lr, currentState);
-			}
-			if (!finished && evt)
+			bool consumed = true;
+			evt = evt->replay(lr, currentState, consumed);
+			if (consumed)
+				lr = NULL;
+			if (!finished && evt && !lr)
 				lr = lf->read(ptr, &ptr);
 		}
 
@@ -1894,7 +1906,8 @@ template <typename ait> void destruct_expression_result_array(void *_ctxt)
 						    GarbageCollectionToken, \
 						    LogReaderPtr *eof,	\
 						    VexPtr<LogWriter<t> > &lw, \
-						    VexPtr<EventRecorder<t> > &er); \
+						    VexPtr<EventRecorder<t> > &er,\
+						    EventTimestamp *);	\
 	template InterpretResult Interpreter<t>::getThreadMemoryTrace(ThreadId tid, \
 								      MemoryTrace<t> **output, \
 								      unsigned max_events, \

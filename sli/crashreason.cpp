@@ -29,7 +29,7 @@ static bool
 syntax_check_expression(Expression *e, gc_map<ThreadId, unsigned long> &last_valid_idx,
 			PartialTimestamp *why = NULL)
 {
-	gc_map<ThreadId, unsigned long> *neededIdxes = 
+	const gc_map<ThreadId, unsigned long> *neededIdxes = 
 		e->lastAccessMap();
 	for (gc_map<ThreadId, unsigned long>::iterator it = neededIdxes->begin();
 	     it != neededIdxes->end();
@@ -144,7 +144,8 @@ top:
 				goto top;
 			}
 		}
-		idx_entry = er->history->last_valid_idx;
+		if (er->history)
+			idx_entry = er->history->last_valid_idx;
 		fixup_expression(&er->cond, *new_last_valid_idx,
 				 spare_histories, ms, global_lf, global_lf_start);
 		return;
@@ -255,6 +256,8 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, Thread
 {
 	if (uafe)
 		return;
+	this->getHistory(evt->when);
+
 	if (const InstructionEvent<abstract_interpret_value> *fe =
 	    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt)) {
 		unsigned long c;
@@ -290,8 +293,10 @@ static Expression *getCrashReason(VexPtr<MachineState<abstract_interpret_value> 
 	VexPtr<LogWriter<abstract_interpret_value> > dummy(NULL);
 	VexPtr<EventRecorder<abstract_interpret_value> > extr2(extr);
 	i.replayLogfile(script, ptr, tok, NULL, dummy, extr2);
-	if (!ms2->crashed())
+	if (!ms2->crashed()) {
+		abort();
 		return NULL;
+	}
 
 	for (history_map::iterator it = extr->thread_histories->begin();
 	     it != extr->thread_histories->end();
@@ -337,7 +342,6 @@ static Expression *getCrashReason(VexPtr<MachineState<abstract_interpret_value> 
 				 script,
 				 ptr);
 
-	VexGcRoot root2((void **)&res, "root2");
 	gc_map<ThreadId, unsigned long> *m = new gc_map<ThreadId, unsigned long>();
 	fixup_expression(&res,
 			 *m,

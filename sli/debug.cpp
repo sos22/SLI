@@ -35,6 +35,7 @@ class GdbChannel {
 	char *buf;
 	unsigned buf_avail;
 	unsigned buf_size;
+	bool synchronised;
 	GdbChannel(int _fd)
 		: fd(_fd),
 		  buf(NULL),
@@ -129,7 +130,6 @@ public:
 		  tid(ThreadId(strtol(b+1, NULL, 16))),
 		  query(b[0] != 'c')
 	{
-		printf("Set thread %d (b:%s)\n", tid._tid(), b);
 	}
 };
 
@@ -181,8 +181,7 @@ GetMemoryCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionTok
 {
 	ait *membuf = (ait *)malloc(size * sizeof(ait));
 	try {
-		ms->addressSpace->readMemory(mkConst<ait>(addr), size, membuf, true,
-					     ms->findThread(this->chan->currentTidQuery, true));
+		ms->addressSpace->readMemory(mkConst<ait>(addr), size, membuf, true, NULL);
 	} catch (BadMemoryException<ait> exc) {
 		this->sendResponse("E12");
 		free(membuf);
@@ -285,6 +284,11 @@ QueryCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken)
 			this->sendResponse("m%d", ms->threads->index(this->chan->threadInfoIndex)->tid._tid());
 			this->chan->threadInfoIndex++;
 		}
+	} else if (!strcmp(q, "Offsets") || !strcmp(q, "Symbol::")) {
+		/* Not supported, but doesn't seem to be necessary,
+		   and the warning gets really annoying after a
+		   while. */
+		this->sendResponse("E00");
 	} else {
 		warnx("unknown query %s", q);
 		this->sendResponse("E00");
@@ -386,7 +390,8 @@ GdbChannel<ait>::readCommand()
 		/* First, try to parse what we have. */
 		if (buf_avail != 0) {
 			if (buf[0] != '$') {
-				warnx("garbage at start of debug packet: %.*s, expected to start with $", buf_avail, (char *)buf);
+				if (!synchronised)
+					warnx("garbage at start of debug packet: %.*s, expected to start with $", buf_avail, (char *)buf);
 				char *s = (char *)memchr(buf, '$', buf_avail);
 				if (s) {
 					unsigned o = s - buf;
@@ -409,6 +414,7 @@ GdbChannel<ait>::readCommand()
 				buf_avail -= msg_size + 4;
 				if (write(fd, "+", 1) != 1)
 					warn("send ack to debugger");
+				synchronised = true;
 				return res;
 			}
 		}
@@ -615,10 +621,10 @@ gdb(void)
 }
 
 void RipHistogram::dump() {
-	for (gc_map<void *, unsigned, hashfn>::iterator it = m.begin();
+	for (std::map<void *, unsigned>::iterator it = m.begin();
 	     it != m.end();
 	     it++)
-		printf("%p\t%d\n", it.key(), it.value());
+		printf("%p\t%d\n", it->first, it->second);
 }
 
 RipHistogram __caller_histogram;

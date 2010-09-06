@@ -9,7 +9,8 @@ InterpretResult LogWriter<ait>::recordEvent(Thread<ait> *thr, MachineState<ait> 
 	if (ce) {
 		LogRecord<ait> *lr1, *lr2;
 		res = ce->fake(ms, &lr1, &lr2);
-		append(lr1, evt->when.idx);
+		if (lr1)
+			append(lr1, evt->when.idx);
 		if (lr2)
 			append(lr2, evt->when.idx);
 	} else {
@@ -71,6 +72,7 @@ void MemLog<ait>::visit(HeapVisitor &hv)
 	hv(parent);
 	for (unsigned x = 0; x < content->size(); x++)
 		hv((*content)[x]);
+	hv(writer);
 }
 
 template <typename ait>
@@ -101,6 +103,7 @@ MemLog<ait>::MemLog()
 	parent = NULL;
 	offset = 0;
 	content = new std::vector<LogRecord<ait> *>();
+	writer = new Writer(this);
 }
 
 #define MK_MEM_LOG(t)						       \

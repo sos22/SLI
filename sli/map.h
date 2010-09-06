@@ -93,9 +93,26 @@ public:
 	class iterator {
 		friend class gc_map<keyt, valuet, hashfn, equalfn, visitvalue>;
 		unsigned bucket_idx;
-		struct hash_entry *cursor;
-		self_t *htable;
+		VexPtr<struct hash_entry> cursor;
+		VexPtr<self_t> htable;
 	public:
+		iterator(const iterator &it)
+			: bucket_idx(it.bucket_idx),
+			  cursor(it.cursor),
+			  htable(it.htable)
+		{
+		}
+		iterator(self_t *ht)
+			: bucket_idx(0),
+			  cursor(NULL),
+			  htable(ht)
+		{
+		}
+		void operator=(const iterator &it) {
+			bucket_idx = it.bucket_idx;
+			cursor = it.cursor;
+			htable = it.htable;
+		}
 		void operator++() {
 			if (!cursor)
 				return;
@@ -110,7 +127,7 @@ public:
 
 		void operator++(int ign) { this->operator++(); }
 		bool operator!=(const iterator &i) const {
-			return cursor != i.cursor;
+			return cursor.get() != i.cursor.get();
 		}
 		const keyt &key() const { assert(cursor); return cursor->key; }
 		valuet &value() const { assert(cursor); return cursor->value; }
@@ -119,20 +136,18 @@ public:
 	iterator begin() const {
 		for (unsigned x = 0; x < nr_heads; x++) {
 			if (heads[x]) {
-				iterator r;
+				iterator r(const_cast<self_t *>(this));
 				r.bucket_idx = x;
 				r.cursor = heads[x];
-				r.htable = const_cast<self_t *>(this);
 				return r;
 			}
 		}
 		return end();
 	}
 	iterator end() const {
-		iterator r;
+		iterator r(const_cast<self_t *>(this));
 		r.cursor = NULL;
 		r.bucket_idx = nr_heads;
-		r.htable = const_cast<self_t *>(this);
 		return r;
 	}
 	iterator erase(const iterator &it) {

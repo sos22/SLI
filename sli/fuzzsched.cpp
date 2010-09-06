@@ -83,9 +83,9 @@ bool Explorer::advance(GarbageCollectionToken tok)
 
 	/* Okay, have to actually do something. */
 
-	MemTracePool<unsigned long> *thread_traces =
-	  new MemTracePool<unsigned long>(basis->ms, ThreadId(), tok);
-	VexGcRoot ttraces((void **)&thread_traces, "ttraces");
+	VexPtr<MachineState<unsigned long> > basis_ms(basis->ms);
+        VexPtr<MemTracePool<unsigned long> > thread_traces
+	        (MemTracePool<unsigned long>::get(basis_ms, ThreadId(), tok));
 	VexPtr<gc_map<ThreadId, Maybe<unsigned> > > first_racing_access(
 		thread_traces->firstRacingAccessMap());
 
@@ -107,7 +107,8 @@ bool Explorer::advance(GarbageCollectionToken tok)
 			if (thr->cannot_make_progress)
 				continue;
 			Interpreter<unsigned long> i(basis->ms);
-			i.runToFailure(thr->tid, basis->history, tok, 10000);
+			VexPtr<LogWriter<unsigned long> > basis_history(basis->history->writer);
+			i.runToFailure(thr->tid, basis_history, tok, 10000);
 			thr->idle = false;
 		}
 		grayStates->push(basis);
@@ -126,10 +127,11 @@ bool Explorer::advance(GarbageCollectionToken tok)
 		ExplorationState *newGray = basis->dupeSelf();
 		VexGcRoot grayKeeper((void **)&newGray, "newGray");
 		Interpreter<unsigned long> i(newGray->ms);
+		VexPtr<LogWriter<unsigned long> > newGrayHist(newGray->history->writer);
 		if (r.full) {
-			i.runToAccessLoggingEvents(tid, r.value + 1, tok, newGray->history);
+			i.runToAccessLoggingEvents(tid, r.value + 1, tok, newGrayHist);
 		} else {
-			i.runToFailure(tid, newGray->history, tok, 10000);
+			i.runToFailure(tid, newGrayHist, tok, 10000);
 		}
 
 		thr->idle = false;
@@ -146,10 +148,8 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	LogFile *lf;
 	LogReaderPtr ptr;
-
-	lf = LogFile::open(argv[1], &ptr);
+	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 	VexGcRoot((void **)&lf, "lf");

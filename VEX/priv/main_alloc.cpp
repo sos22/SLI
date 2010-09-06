@@ -12,12 +12,12 @@
 
 /* The heap sanity checks are expensive enough that we're better off
    leaving them off even during normal debug runs. */
-#define NDEBUG
+//#define NDEBUG
 
 /* How often should we perform a garbage collection, measured in calls
    to vexSetAllocModeTEMP_and_clear, which roughly corresponds to
    client basic blocks. */
-#define GC_PERIOD 1000000
+#define GC_PERIOD 100000
 
 /* How far are we willing to recur during the heap walking phase of a
  * GC sweep?  If we hit this limit then we start pushing stuff off
@@ -44,8 +44,11 @@ void dump_heap_usage(void);
 
 struct arena;
 
+#define ALLOCATION_HEADER_MAGIC 0x11223344aa987654ul
+
 struct allocation_header {
 	VexAllocType *type;
+	unsigned long magic;
 	unsigned long _size;
 	struct allocation_header *redirection;
 
@@ -124,6 +127,8 @@ GcVisitor::visit(void *&what)
 
 	if (!what)
 		return;
+	assert_gc_allocated(what);
+
 	what_header = alloc_to_header(what);
 
 	DBG("Visit %p\n", what);
@@ -170,6 +175,8 @@ GcVisitor::visit(void *&what)
 void
 LibVEX_free(const void *_ptr)
 {
+	assert_gc_allocated(_ptr);
+
 	struct allocation_header *ah = alloc_to_header(_ptr);
 
 	/* We support one special case, which is just rewinding the
@@ -331,6 +338,8 @@ raw_alloc(VexAllocType *t, unsigned long size)
 	   don't handle it are annoyingly subtle, so just do it. */
 	res->redirection = res;
 
+	res->magic = ALLOCATION_HEADER_MAGIC;
+
 	LibVEX_alloc_sanity_check();
 
 	return res;
@@ -365,6 +374,7 @@ __LibVEX_Alloc(VexAllocType *t)
 void *
 LibVEX_realloc(void *ptr, unsigned long new_size)
 {
+	assert_gc_allocated(ptr);
 	struct allocation_header *ah = alloc_to_header(ptr);
 	void *newptr;
 
@@ -392,6 +402,8 @@ void
 vexUnregisterGCRoot(void **w)
 {
 	unsigned x;
+	if (*w)
+		assert_gc_allocated(*w);
 	for (x = 0; x < nr_gc_roots; x++) {
 		if (gc_roots[x] == w) {
 			memmove(gc_roots + x, gc_roots + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_roots[0]));
@@ -565,6 +577,7 @@ sanity_check_arena(struct arena *a)
 	assert(a->bytes_used <= a->size);
 	for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
 		ah = (struct allocation_header *)(&a->content[offset]);
+		assert(ah->magic == ALLOCATION_HEADER_MAGIC);
 		assert(ah->type != NULL);
 		assert(ah->size() <= a->size - offset);
 		assert(!ah->mark());
@@ -605,10 +618,16 @@ LibVEX_alloc_sanity_check()
 #ifndef NDEBUG
 	static int counter;
 
-	if (counter++ % 100000 != 0)
+	if (counter++ % 1000000 != 0)
 		return;
 
 	_LibVEX_alloc_sanity_check();
 #endif
 }
 
+void
+assert_gc_allocated(const void *ptr)
+{
+	struct allocation_header *ah = alloc_to_header(ptr);
+	assert(ah->magic == ALLOCATION_HEADER_MAGIC);
+}

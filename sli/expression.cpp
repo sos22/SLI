@@ -226,7 +226,6 @@ static unsigned long interesting_addresses[] = {
 	0x7faa44fbea60,
 	0x7faa44fbea78,
 	0x7faa44fbea88,
-	0x7faa44fc2048,
 	0x7faa4a029728,
 	0x7faa4a029738,
 	0x7faa4a02c030,
@@ -255,7 +254,7 @@ load_ait(abstract_interpret_value val, abstract_interpret_value addr, EventTimes
 	res.v = val.v;
 	if (address_is_interesting(addr.v))
 		res.origin = LoadExpression::get(when, val.origin, addr.origin, storeAddr.origin, store,
-						 size);
+						 size, addr.v);
 	else
 		res.origin = val.origin;
 	return res;
@@ -928,7 +927,8 @@ Expression *
 ExpressionMapper::map(ExpressionLastStore *els)
 {
 	return idmap(ExpressionLastStore::get(els->load, els->store,
-					      els->vaddr->map(*this)));
+					      els->vaddr->map(*this),
+					      els->concrete_vaddr));
 }
 
 Expression *
@@ -939,7 +939,8 @@ ExpressionMapper::map(LoadExpression *le)
 					 le->addr->map(*this),
 					 le->storeAddr->map(*this),
 					 le->store,
-					 le->size));
+					 le->size,
+					 le->concrete_addr));
 }
 
 Expression *
@@ -1021,7 +1022,7 @@ void
 History::calcLastAccessed()
 {
 	const gc_map<ThreadId, unsigned long> *p;
-	gc_map<ThreadId, unsigned long> *c;
+	const gc_map<ThreadId, unsigned long> *c;
 	if (parent)
 		p = parent->lastAccessMap();
 	else
@@ -1030,16 +1031,19 @@ History::calcLastAccessed()
 		c = condition->lastAccessMap();
 	else
 		c = NULL;
+	gc_map<ThreadId, unsigned long> *t;
 	if (!p && !c) {
-		lastAccessed = new gc_map<ThreadId, unsigned long>();
+		t = new gc_map<ThreadId, unsigned long>();
 	} else if (!p) {
-		lastAccessed = c;
+		t = new gc_map<ThreadId, unsigned long>(*c);
 	} else if (!c) {
-		lastAccessed = new gc_map<ThreadId, unsigned long>(*p);
+		t = new gc_map<ThreadId, unsigned long>(*p);
 	} else {
-		Expression::mergeAccessMaps(c, p);
-		lastAccessed = c;
+		t = new gc_map<ThreadId, unsigned long>(*c);
+		Expression::mergeAccessMaps(t, p);
 	}
+
+	lastAccessed = t;
 }
 
 void

@@ -6,7 +6,7 @@ MemTracePool<ait>::get(VexPtr<MachineState<ait> > &base_state,
 		       GarbageCollectionToken token)
 {
 	VexPtr<MemTracePool<ait> > t(new MemTracePool<ait>());
-	t->content = new contentT();
+	t.get()->content = new contentT();
 	unsigned x;
 	for (x = 0; x < base_state->threads->size(); x++) {
 		ThreadId tid = base_state->threads->index(x)->tid;
@@ -15,7 +15,14 @@ MemTracePool<ait>::get(VexPtr<MachineState<ait> > &base_state,
 		MachineState<ait> *ms = base_state->dupeSelf();
 		Interpreter<ait> i(ms);
 		MemoryTrace<ait> *v;
-		i.getThreadMemoryTrace(tid, &v, 1000000, token);
+		try {
+			i.getThreadMemoryTrace(tid, &v, 1000000, token);
+		} catch (SliException) {
+			/* Hackety hackety hack: if we get an
+			   exception during replay, just stop the
+			   trace. */
+		}
+		assert_gc_allocated(v);
 		(*t->content)[tid] = v;
 	}
 	return t;

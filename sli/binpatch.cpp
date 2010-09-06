@@ -984,13 +984,12 @@ main(int argc, char *argv[])
 	   there are so many other things which go wrong when code
 	   changes while you're trying to fix it that it's not worth
 	   it. */
-	LogFile *lf;
 	LogReaderPtr ptr;
-	lf = LogFile::open(argv[1], &ptr);
+	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
-	VexPtr<AddressSpace<unsigned long> > as(ms->addressSpace);
+	AddressSpace<unsigned long> *as = ms->addressSpace;
 
 	CriticalSection *csects = (CriticalSection *)malloc(sizeof(CriticalSection) * (argc - 2) / 2);
 	for (int x = 0; x < (argc - 2) / 2; x++) {

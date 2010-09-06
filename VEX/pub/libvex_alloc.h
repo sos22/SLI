@@ -82,6 +82,7 @@ struct libvex_allocation_site {
 
 struct libvex_alloc_type;
 
+void assert_gc_allocated(const void *ptr);
 extern struct libvex_alloc_type *__LibVEX_Alloc(VexAllocType *t);
 extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned long len);
 extern void LibVEX_free(const void *_ptr);
@@ -302,7 +303,7 @@ class WeakRef : public GarbageCollected<WeakRef<t> > {
 	wr_core core;
 public:
 	WeakRef() : core() {}
-	void set(t *newTarg) { core.content = newTarg; }
+	void set(t *newTarg) { core.content = (void *)newTarg; }
 	t *get() { return (t *)core.content; }
 
 	void visit(HeapVisitor &hv) {

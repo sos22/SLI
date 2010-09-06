@@ -3,7 +3,8 @@
 #include "sli.h"
 
 template <typename ait>
-ThreadEvent<ait> *RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+					  bool &)
 {
 	LogRecordRdtsc<ait> *lrr = dynamic_cast<LogRecordRdtsc<ait> *>(lr);
 	if (!lrr)
@@ -15,7 +16,8 @@ ThreadEvent<ait> *RdtscEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> 
 }
 
 template <typename ait> ThreadEvent<ait> *
-UseFreeMemoryEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+UseFreeMemoryEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+				bool &)
 {
         ms->findThread(this->when.tid)->crashed = true;
 	return NULL;
@@ -66,7 +68,8 @@ static void checkSegv(LogRecord<ait> *lr, ait addr)
 }
 
 template <typename ait>
-ThreadEvent<ait> *StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+					  bool &)
 {
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
@@ -99,7 +102,8 @@ InterpretResult StoreEvent<ait>::fake(MachineState<ait> *ms,
 }
 
 template <typename ait>
-ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+					 bool &)
 {
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
@@ -146,8 +150,10 @@ InterpretResult LoadEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
 }
 
 template <typename ait>
-ThreadEvent<ait> *InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+						bool &consumedRecord)
 {
+#if 0
 	LogRecordFootstep<ait> *lrf = dynamic_cast<LogRecordFootstep<ait> *>(lr);
 	if (!lrf)
 		throw ReplayFailedException("wanted a footstep, got %s",
@@ -172,21 +178,29 @@ ThreadEvent<ait> *InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState
        CHECK_REGISTER(2);
        CHECK_REGISTER(3);
        CHECK_REGISTER(4);
-
-	return NULL;
+#else
+       consumedRecord = false;
+#endif
+       return NULL;
 }
 
 template <typename ait>
 InterpretResult InstructionEvent<ait>::fake(MachineState<ait> *ms,
 					    LogRecord<ait> **lr)
 {
+#if 0
 	if (lr)
 		*lr = new LogRecordFootstep<ait>(this->when.tid, rip, reg0, reg1, reg2, reg3, reg4);
+#else
+	if (lr)
+		*lr = NULL;
+#endif
 	return InterpretResultContinue;
 }
 
 template <typename ait>
-ThreadEvent<ait> *SyscallEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *SyscallEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+					    bool &)
 {
 	LogRecordSyscall<ait> *lrs = dynamic_cast<LogRecordSyscall<ait> *>(lr);
 	if (!lrs)
@@ -197,7 +211,8 @@ ThreadEvent<ait> *SyscallEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait
 }
 
 template <typename ait>
-ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+					bool &)
 {
 	LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
 	if (!lrl)
@@ -295,7 +310,8 @@ InterpretResult CasEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr1)
 }
 
 template <typename ait>
-ThreadEvent<ait> *SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms)
+ThreadEvent<ait> *SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *ms,
+					   bool &)
 {
 	Thread<ait> *thr = ms->findThread(this->when.tid);
 	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
@@ -357,7 +373,8 @@ RdtscEvent<ait>::fuzzyReplay(VexPtr<MachineState<ait> > &ms,
 		if (!dynamic_cast<LogRecordRdtsc<ait> *>(lr))
 			continue;
 		*endPtr = startPtr;
-		return replay(lr, ms);
+		bool ign;
+		return replay(lr, ms, ign);
 	}
 
 	/* Nothing left in the log.  Fake it. */
@@ -379,7 +396,8 @@ SyscallEvent<ait>::fuzzyReplay(VexPtr<MachineState<ait> > &ms,
 		if (!dynamic_cast<LogRecordSyscall<ait> *>(lr))
 			continue;
 		try {
-			ThreadEvent<ait> *r = replay(lr, ms);
+			bool ign;
+			ThreadEvent<ait> *r = replay(lr, ms, ign);
 			*endPtr = startPtr;
 			VexPtr<AddressSpace<ait> > as(ms->addressSpace);
 		        VexPtr<LogWriter<ait> > dummy(NULL);

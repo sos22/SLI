@@ -1,6 +1,7 @@
 #include <asm/unistd.h>
 #include <err.h>
 
+#include <map>
 #include "sli.h"
 
 #include "main_util.h"

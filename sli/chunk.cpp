@@ -3,7 +3,7 @@
 
 #include "sli.h"
 
-class LogChunker : public LogWriter<unsigned long>, public GarbageCollected<LogChunker> {
+class LogChunker : public LogWriter<unsigned long> {
 	unsigned long next_input_offset;
 	unsigned long chunk_size;
 	unsigned long chunk_period;
@@ -22,23 +22,18 @@ public:
 	}
 	void append(LogRecord<unsigned long> *lr, unsigned long idx);
 	void destruct() { this->~LogChunker(); }
-	~LogChunker();
-	void visit(HeapVisitor &hv) const;
+	void visit(HeapVisitor &hv);
 	NAMED_CLASS
 };
 
-LogChunker::~LogChunker()
-{
-	for (std::vector<std::pair<unsigned long, LogFileWriter *> >::const_iterator it = writers.begin();
-	     it != writers.end();
-	     it++)
-		delete it->second;	
-}
-
 void
-LogChunker::visit(HeapVisitor &hv) const
+LogChunker::visit(HeapVisitor &hv)
 {
 	hv(ms);
+	for (std::vector<std::pair<unsigned long, LogFileWriter *> >::iterator it = writers.begin();
+	     it != writers.end();
+	     it++)
+		hv(it->second);
 }
 
 void
@@ -46,6 +41,18 @@ LogChunker::append(LogRecord<unsigned long> *lr, unsigned long idx)
 {
 	unsigned long start = next_input_offset;
 	unsigned long end = start + lr->marshal_size();
+
+	for (std::vector<std::pair<unsigned long, LogFileWriter *> >::iterator it = writers.begin();
+	     it != writers.end();
+	     ) {
+		if (it->first + chunk_size < end) {
+			printf("Closed %ld\n", it->first);
+			it = writers.erase(it);
+		} else {
+			it->second->append(lr, idx);
+			it++;
+		}
+	}
 
 	if ( (start - 1)/chunk_period != (end - 1)/chunk_period ) {
 		char *p = my_asprintf("%s/%d", prefix, next_index);
@@ -56,19 +63,6 @@ LogChunker::append(LogRecord<unsigned long> *lr, unsigned long idx)
 		ms->dumpSnapshot(f);
 		writers.push_back(std::pair<unsigned long, LogFileWriter *>(start, f));
 		printf("Opened %s for %ld\n", p, start);
-	}
-
-	for (std::vector<std::pair<unsigned long, LogFileWriter *> >::iterator it = writers.begin();
-	     it != writers.end();
-	     ) {
-		if (it->first + chunk_size < end) {
-			printf("Closed %ld\n", it->first);
-			delete it->second;
-			it = writers.erase(it);
-		} else {
-			it->second->append(lr, idx);
-			it++;
-		}
 	}
 
 	next_input_offset = end;
@@ -87,24 +81,21 @@ main(int argc, char *argv[])
 
 	init_sli();
 
-	LogFile *lf;
 	LogReaderPtr ptr;
 
-	lf = LogFile::open(inp, &ptr);
-	VexGcRoot lf_root((void **)&lf, "lf");
+	VexPtr<LogReader<unsigned long> > lf(LogFile::open(inp, &ptr));
 	if (!lf)
 		err(1, "opening %s", inp);
 
-	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
-	VexGcRoot ms_root((void **)&ms, "ms_root");
+	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
 	ms->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
 	
 	printf("Slurped initial state\n");
 
 	Interpreter<unsigned long> i(ms);
-	LogChunker *chunker = new LogChunker(size, period, prefix, ms);
-	VexGcRoot chunker_root((void **)&chunker, "chunker root");
+	VexPtr<LogWriter<unsigned long> > chunker(new LogChunker(size, period, prefix, ms));
+
 	i.replayLogfile(lf, ptr, ALLOW_GC, NULL, chunker);
 
 	return 0;

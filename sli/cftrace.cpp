@@ -18,6 +18,9 @@ public:
 
 	void record(Thread<unsigned long> *thr,
 		    ThreadEvent<unsigned long> *evt);
+
+	void visit(HeapVisitor &hv) { }
+	void destruct() {}
 };
 
 void GetControlTraces::record(Thread<unsigned long> *thr,
@@ -43,10 +46,9 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	LogFile *lf;
 	LogReaderPtr ptr;
 
-	lf = LogFile::open(argv[1], &ptr);
+	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 	VexGcRoot k((void **)&lf, "lf");
@@ -55,11 +57,13 @@ main(int argc, char *argv[])
 
 	Interpreter<unsigned long> i(m);
 
-	GetControlTraces gct;
-	i.replayLogfile(lf, ptr, ALLOW_GC, NULL, NULL, &gct);
+	VexPtr<GetControlTraces> gct(new GetControlTraces());
+	VexPtr<EventRecorder<unsigned long> > downcast(gct.get());
+	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	i.replayLogfile(lf, ptr, ALLOW_GC, NULL, dummy, downcast);
 
-	for (GetControlTraces::iterator i = gct.begin();
-	     i != gct.end();
+	for (GetControlTraces::iterator i = gct->begin();
+	     i != gct->end();
 	     i++) {
 		printf("Thread %d:\n", i->first._tid());
 		for (GetControlTraces::vtype::iterator j = i->second.begin();

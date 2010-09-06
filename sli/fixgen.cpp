@@ -71,7 +71,8 @@ public:
 		if (!va)
 			return NULL;
 		else
-			return ExpressionLastStore::get(els->load, els->store, va);
+			return ExpressionLastStore::get(els->load, els->store, va,
+							els->concrete_vaddr);
 	}
 	Expression *map(ExpressionHappensBefore *ehb)
 	{
@@ -92,7 +93,7 @@ public:
 		if (!addr || !sa)
 			return val;
 		return LoadExpression::get(le->when, val, addr, sa,
-					   le->store, le->size);
+					   le->store, le->size, le->concrete_addr);
 	}
 	Expression *map(BinaryExpression *be)
 	{
