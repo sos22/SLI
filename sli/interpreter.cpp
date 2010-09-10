@@ -1731,9 +1731,11 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 			return res;
 		}
 		if (LoadEvent<ait> *lr = dynamic_cast<LoadEvent <ait> * > (evt)) {
-		        work->push_back(new MemoryAccessLoad<ait>(*lr));
+			if (address_is_interesting(thr->tid, force(lr->addr)))
+				work->push_back(new MemoryAccessLoad<ait>(*lr));
 	        } else if (StoreEvent<ait> *sr = dynamic_cast<StoreEvent<ait> *>(evt)) {
-	                work->push_back(new MemoryAccessStore<ait>(*sr));
+			if (address_is_interesting(thr->tid, force(sr->addr)))
+				work->push_back(new MemoryAccessStore<ait>(*sr));
 		}
 		max_events--;
 	}

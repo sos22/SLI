@@ -243,7 +243,7 @@ static unsigned long interesting_addresses[] = {
 };
 #endif
 
-static bool
+bool
 address_is_interesting(ThreadId tid, unsigned long addr)
 {
 	if (tid._tid() != 9)

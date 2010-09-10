@@ -308,7 +308,6 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
 					 this->getHistory(evt->when)->control_expression(
 						 evt->when,
 						 equals::get(fe->rip.origin, ConstExpression::get(fe->rip.v))));
-		this->getHistory(evt->when)->footstep(fe->rip.v);
 	}
 
 	if (const StoreEvent<abstract_interpret_value> *se =
@@ -491,7 +490,6 @@ ExpressionRip::refineHistory(VexPtr<ExpressionRip> &ths,
 					History::get(newCond,
 						     mostRelevantEntry->last_valid_idx,
 						     mostRelevantEntry->when,
-						     mostRelevantEntry->rips,
 						     mostRelevantEntry->parent)),
 				ths->cond,
 				ths->model_execution,

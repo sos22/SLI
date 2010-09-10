@@ -279,12 +279,14 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, Thread
 	if (const InstructionEvent<abstract_interpret_value> *fe =
 	    dynamic_cast<const InstructionEvent<abstract_interpret_value> *>(evt)) {
 		unsigned long c;
-		if (!fe->rip.origin->isConstant(&c))
+		if (!fe->rip.origin->isConstant(&c)) {
+			printf("Thread %d acquires history expression %s\n",
+			       _thr->tid._tid(), fe->rip.origin->name());
 			this->setHistory(_thr->tid,
 					 this->getHistory(evt->when)->control_expression(
 						 evt->when,
 						 equals::get(fe->rip.origin, ConstExpression::get(fe->rip.v))));
-		this->getHistory(evt->when)->footstep(fe->rip.v);
+		}
 	}
 
 	if (SignalEvent<abstract_interpret_value> *es =
@@ -443,6 +445,7 @@ main(int argc, char *argv[])
 
 	MachineState<unsigned long> *concrete = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
 	concrete->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
+	concrete->findThread(ThreadId(7))->exitted = true;
 	VexPtr<MachineState<abstract_interpret_value> > abstract(concrete->abstract<abstract_interpret_value>());
 	concrete = NULL;
 

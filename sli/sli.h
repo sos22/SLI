@@ -554,11 +554,8 @@ public:
 	unsigned serial;
 	unsigned long checksum;
 	void sanity_check(void) const;
-	void visit(HeapVisitor &hv) {}
+	void visit(HeapVisitor &hv) { sanity_check(); }
 	void destruct() {}
-	void relocate(MemoryChunk<unsigned long> *t, size_t) {
-		t->sanity_check();
-	}
 
 	NAMED_CLASS
 
@@ -1088,7 +1085,9 @@ template <typename ait>
 class LoadEvent : public ThreadEvent<ait> {
 	friend class MemoryAccessLoad<ait>;
 	IRTemp tmp;
+public:
 	ait addr;
+private:
 	unsigned size;
 	LoadEvent(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size) :
 		ThreadEvent<ait>(when),
@@ -2017,8 +2016,10 @@ class Expression : public Named, public GarbageCollected<Expression> {
 		chain_lengths[hashval % nr_heads]++;
 	}
 	void pull_to_front() {
-		remove_from_hash();
-		add_to_hash();
+		if (heads[hashval % nr_heads] != this) {
+			remove_from_hash();
+			add_to_hash();
+		}
 	}
 	mutable WeakRef<Expression> *cnf;
 	mutable WeakRef<Expression> *concrete;
@@ -2963,12 +2964,10 @@ public:
 	{
 		hv(underlying);
 		hv(headLookaside);
+		sanity_check();
 	}
 	void destruct() {}
 	void sanity_check() const;
-	void relocate(MemoryChunk<abstract_interpret_value> *t, size_t)  {
-		t->sanity_check();
-	}
 	NAMED_CLASS
 };
 
@@ -2984,13 +2983,6 @@ public:
    the heuristic which decides which branch of an expression to refine
    first.
 
-   We also store a log of the RIPs touched between each conditional
-   expression (the ones in the vector are touched *after* the current
-   condition is evaluated).  This is in theory redundant with the
-   condition, because if you pass the condition then you ought to
-   always follow the same RIP path, but it makes it a *lot* easier to
-   see if something's gone wrong.
-
    Finally, we store the last memory index which is valid with this
    history, which is the index of the last memory operation after
    passing this condition and before reaching the next one.  This is
@@ -3003,7 +2995,6 @@ public:
 	Expression *condition;
 	unsigned long last_valid_idx;
 	EventTimestamp when;
-	std::vector<unsigned long> rips;
 	History *parent;
 private:
 	History(Expression *_condition,
@@ -3012,7 +3003,6 @@ private:
 		: condition(_condition),
 		  last_valid_idx(_parent ? _parent->last_valid_idx : 0),
 		  when(_when),
-		  rips(),
 		  parent(_parent)
 	{
 		assert(when.tid.valid());
@@ -3021,12 +3011,10 @@ private:
 	History(Expression *cond,
 		unsigned long _last_valid_idx,
 		EventTimestamp _when,
-		std::vector<unsigned long> &_rips,
 		History *_parent)
 		: condition(cond),
 		  last_valid_idx(_last_valid_idx),
 		  when(_when),
-		  rips(_rips),
 		  parent(_parent)
 	{
 		assert(when.tid.valid());
@@ -3054,7 +3042,6 @@ public:
 	static History *get(Expression *cond,
 			    unsigned long last_valid_idx,
 			    EventTimestamp when,
-			    std::vector<unsigned long> &rips,
 			    History *parent)
 	{
 		if (parent && parent->condition == cond) {
@@ -3069,7 +3056,7 @@ public:
 				parent = parent->parent;
 			}
 		}
-		return new History(cond, last_valid_idx, when, rips, parent);
+		return new History(cond, last_valid_idx, when, parent);
 	}
 
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
@@ -3130,22 +3117,11 @@ public:
 			return true;
 		if (when != h->when)
 			return false;
-		if (rips.size() != h->rips.size())
-			return false;
 		if (!condition->isEqual(h->condition))
 			return false;
 		if ((parent && !h->parent) ||
 		    (!parent && h->parent))
 			return false;
-		std::vector<unsigned long>::const_iterator it1;
-		std::vector<unsigned long>::const_iterator it2;
-		it1 = rips.begin();
-		it2 = h->rips.begin();
-		while (it1 != rips.end()) {
-			assert(it2 != h->rips.end());
-			if (*it1 != *it2)
-				return false;
-		}
 		if (!parent)
 			return true;
 		return parent->isEqual(h->parent);
@@ -3161,11 +3137,6 @@ public:
 		return History::get(e, when, this);
 	}
 
-	void footstep(unsigned long rip)
-	{
-		rips.push_back(rip);
-	}
-
 	EventTimestamp timestamp() const
 	{
 		return when;
@@ -3179,7 +3150,6 @@ public:
 		return History::get(condition,
 				    last_valid_idx,
 				    when,
-				    rips,
 				    parent->dupeWithParentReplace(from, to));
 	}
 
@@ -3199,7 +3169,6 @@ public:
 				concrete->set(History::get(c,
 							   last_valid_idx,
 							   when,
-							   rips,
 							   parent ? parent->concretise() : NULL));
 			}
 		}
@@ -3438,5 +3407,7 @@ public:
 #define CALLER_HISTOGRAM(depth)						\
 	extern RipHistogram __caller_histogram;				\
 	__caller_histogram.click(__builtin_return_address(depth + 1))
+
+bool address_is_interesting(ThreadId tid, unsigned long addr);
 
 #endif /* !SLI_H__ */

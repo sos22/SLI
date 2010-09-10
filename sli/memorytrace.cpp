@@ -17,13 +17,17 @@ template <typename ait> void
 MemTraceMaker<ait>::record(Thread<ait> *thr, ThreadEvent<ait> *evt)
 {
 	if (const LoadEvent<ait> *le = dynamic_cast<const LoadEvent<ait> *>(evt)) {
-		MemoryAccess<ait> *ma = new MemoryAccessLoad<ait>(*le);
-		assert_gc_allocated(ma);
-		mt->push_back(ma);
+		if (address_is_interesting(thr->tid, force(le->addr))) {
+			MemoryAccess<ait> *ma = new MemoryAccessLoad<ait>(*le);
+			assert_gc_allocated(ma);
+			mt->push_back(ma);
+		}
 	} else if (const StoreEvent<ait> *se = dynamic_cast<const StoreEvent<ait> *>(evt)) {
-		MemoryAccess<ait> *ma = new MemoryAccessStore<ait>(*se);
-		assert_gc_allocated(ma);
-		mt->push_back(ma);
+		if (address_is_interesting(thr->tid, force(se->addr))) {
+			MemoryAccess<ait> *ma = new MemoryAccessStore<ait>(*se);
+			assert_gc_allocated(ma);
+			mt->push_back(ma);
+		}
 	}
 }
 template <typename ait> MemoryTrace<ait> *

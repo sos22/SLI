@@ -17,7 +17,7 @@
 /* How often should we perform a garbage collection, measured in calls
    to vexSetAllocModeTEMP_and_clear, which roughly corresponds to
    client basic blocks. */
-#define GC_PERIOD 100000
+#define GC_PERIOD 500000
 
 /* How far are we willing to recur during the heap walking phase of a
  * GC sweep?  If we hit this limit then we start pushing stuff off

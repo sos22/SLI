@@ -191,8 +191,10 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 void
 MemoryChunk<abstract_interpret_value>::sanity_check(void) const
 {
-	assert(underlying_checksum == underlying->checksum);
-	assert(underlying_serial == underlying->serial);
+	if (underlying) {
+		assert(underlying_checksum == underlying->checksum);
+		assert(underlying_serial == underlying->serial);
+	}
 }
 
 static void visit_mcl_lookaside(void *_ctxt, HeapVisitor &hv)

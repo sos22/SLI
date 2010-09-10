@@ -49,7 +49,6 @@ class RemoveEventsMapper : public ExpressionMapper {
 		return History::get(hs->condition,
 				    hs->last_valid_idx,
 				    hs->when,
-				    hs->rips,
 				    removeNullConditionsHist(hs->parent));
 	}
 public:
