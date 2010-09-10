@@ -532,6 +532,10 @@ gdb_machine_state(const MachineState<ait> *_ms)
 	/* Allowed because of the fork() */
 	VexPtr<MachineState<ait> > ms(const_cast<MachineState<ait> *>(_ms));
 
+	/* Force a GC, so as to clear up any mess we had left over
+	 * from the parent. */
+	LibVEX_gc(ALLOW_GC);
+
 	GdbChannel<ait> *chan = GdbChannel<ait>::accept();
 
 	while (1) {

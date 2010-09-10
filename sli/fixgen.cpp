@@ -46,11 +46,11 @@ class RemoveEventsMapper : public ExpressionMapper {
 			return NULL;
 		if (!hs->condition || dynamic_cast<ConstExpression *>(hs->condition))
 			return removeNullConditionsHist(hs->parent);
-		return new History(hs->condition,
-				   hs->last_valid_idx,
-				   hs->when,
-				   hs->rips,
-				   removeNullConditionsHist(hs->parent));
+		return History::get(hs->condition,
+				    hs->last_valid_idx,
+				    hs->when,
+				    hs->rips,
+				    removeNullConditionsHist(hs->parent));
 	}
 public:
 	const std::set<EventTimestamp> &allowed;

@@ -51,6 +51,7 @@ Expression *Expression::intern(Expression *e)
 	return e;
 }
 
+#if 0
 static unsigned long interesting_addresses[] = {
 	0x26f4030,                                                                                                       
 	0x26f4160,                                                                                                       
@@ -236,10 +237,18 @@ static unsigned long interesting_addresses[] = {
 	0x7faa4b16a310,
 	0x7faa4b38b508
 };
+#else
+static unsigned long interesting_addresses[] = {
+	0x456e9e0
+};
+#endif
 
 static bool
-address_is_interesting(unsigned long addr)
+address_is_interesting(ThreadId tid, unsigned long addr)
 {
+	if (tid._tid() != 9)
+		return false;
+
 	for (unsigned x = 0; x < sizeof(interesting_addresses) / sizeof(interesting_addresses[0]); x++)
 		if (addr == interesting_addresses[x])
 			return true;
@@ -252,7 +261,7 @@ load_ait(abstract_interpret_value val, abstract_interpret_value addr, EventTimes
 {
 	abstract_interpret_value res;
 	res.v = val.v;
-	if (address_is_interesting(addr.v))
+	if (address_is_interesting(when.tid, addr.v))
 		res.origin = LoadExpression::get(when, val.origin, addr.origin, storeAddr.origin, store,
 						 size, addr.v);
 	else
@@ -719,8 +728,6 @@ Expression *bitwisexor::get(Expression *l, Expression *r)
 
 	binop_float_rip(bitwisexor);
 
-	if (bitwiseor *ll = dynamic_cast<bitwiseor *>(l))
-		return bitwisexor::get(ll->l, bitwisexor::get(ll->r, r));		
 	bitwisexor *work = new bitwisexor();
 	work->l = l;							
 	work->r = r;							
@@ -737,6 +744,7 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 	bool rIsConstant = r->isConstant(&rc);
 	unsigned long mask = 0xfffffffffffffffful;
 	if (lIsConstant) {
+		r = r->restrictToMask(lc);
 		if (LoadExpression *le =
 		    dynamic_cast<LoadExpression *>(r)) {
 			switch (le->size) {
@@ -752,13 +760,18 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 		}
 		if ((lc & mask) == 0)
 			return ConstExpression::get(0);
-		if (lc == 1 && r->isLogical())
-			return r;
+		if (r->isLogical()) {
+			if (lc & 1)
+				return r;
+			else
+				return ConstExpression::get(0);
+		}
 		if ((lc & mask) == (0xfffffffffffffffful & mask))
 			return r;
 		if (rIsConstant)
 			return ConstExpression::get(lc & rc);
 	} else if (rIsConstant) {
+		l = l->restrictToMask(rc);
 		if (LoadExpression *le =
 		    dynamic_cast<LoadExpression *>(l)) {
 			switch (le->size) {
@@ -774,8 +787,12 @@ Expression *bitwiseand::get(Expression *l, Expression *r)
 		}
 		if ((rc & mask) == 0)
 			return ConstExpression::get(0);
-		if (rc == 1 && l->isLogical())
-			return l;
+		if (l->isLogical()) {
+			if (rc & 1)
+				return l;
+			else
+				return ConstExpression::get(0);
+		}
 		if ((rc & mask) == (0xfffffffffffffffful & mask))
 			return l;
 	}
@@ -911,6 +928,61 @@ Expression *onlyif::get(Expression *l, Expression *r)
 }
 
 BottomExpression *BottomExpression::bottom;
+
+Expression *
+alias::restrictToMask(unsigned long x)
+{
+	return get(l->restrictToMask(x));
+}
+
+Expression *
+onlyif::restrictToMask(unsigned long x)
+{
+	return get(l, r->restrictToMask(x));
+}
+
+#define RESTRICT_LOGICAL(name)				\
+	Expression *					\
+	name::restrictToMask(unsigned long x)		\
+	{						\
+		if (!(x & 1))				\
+			return ConstExpression::get(0);	\
+		else					\
+			return this;			\
+	}
+RESTRICT_LOGICAL(equals)
+RESTRICT_LOGICAL(notequals)
+RESTRICT_LOGICAL(lessthan)
+RESTRICT_LOGICAL(lessthanequals)
+RESTRICT_LOGICAL(greaterthan)
+RESTRICT_LOGICAL(greaterthanequals)
+
+#define RESTRICT_BITWISE(name)						\
+	Expression *							\
+	name::restrictToMask(unsigned long x)				\
+	{								\
+		return get(l->restrictToMask(x), r->restrictToMask(x));	\
+	}
+RESTRICT_BITWISE(bitwisexor)
+RESTRICT_BITWISE(bitwiseor)
+RESTRICT_BITWISE(bitwiseand)
+RESTRICT_BITWISE(plus)
+
+#define RESTRICT_TRIVIAL(name)			\
+	Expression *				\
+	name::restrictToMask(unsigned long)	\
+	{					\
+		return this;			\
+	}
+RESTRICT_TRIVIAL(rshiftarith)
+RESTRICT_TRIVIAL(rshift)
+RESTRICT_TRIVIAL(lshift)
+RESTRICT_TRIVIAL(modulo)
+RESTRICT_TRIVIAL(divide)
+RESTRICT_TRIVIAL(times)
+RESTRICT_TRIVIAL(bitwisenot)
+RESTRICT_TRIVIAL(bitsaturate)
+RESTRICT_TRIVIAL(unaryminus)
 
 #define TRIV_EXPR_MAPPER(c)			\
 	Expression *				\
@@ -1067,3 +1139,4 @@ fixup_expression_table(void)
 		if (Expression::heads[x])
 			Expression::heads[x]->pprev = &Expression::heads[x];
 }
+

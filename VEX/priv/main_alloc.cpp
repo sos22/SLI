@@ -167,6 +167,7 @@ GcVisitor::visit(void *&what)
 		assert((unsigned long)header_to_alloc(what_header->redirection) != 0x93939393939393ab);
 		what = header_to_alloc(what_header->redirection);
 		assert(what != NULL);
+		assert_gc_allocated(what);
 		DBG("Already visited; redirect to %p\n", what);
 		assert((unsigned long)what != 0x93939393939393ab);
 	}
@@ -618,7 +619,7 @@ LibVEX_alloc_sanity_check()
 #ifndef NDEBUG
 	static int counter;
 
-	if (counter++ % 1000000 != 0)
+	if (counter++ % 10000000 != 0)
 		return;
 
 	_LibVEX_alloc_sanity_check();
@@ -628,6 +629,8 @@ LibVEX_alloc_sanity_check()
 void
 assert_gc_allocated(const void *ptr)
 {
+#ifndef NDEBUG
 	struct allocation_header *ah = alloc_to_header(ptr);
 	assert(ah->magic == ALLOCATION_HEADER_MAGIC);
+#endif
 }

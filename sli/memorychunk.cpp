@@ -5,28 +5,31 @@ unsigned MemoryChunk<unsigned long>::serial_start = 0xbeeffeed;
 
 MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::allocate()
 {
-	void *r = LibVEX_Alloc_Bytes(sizeof(MemoryChunk<unsigned long>));
-	MemoryChunk<unsigned long> *mc;
-	memset(r, 0, sizeof(MemoryChunk<unsigned long>));
-	mc = new (r) MemoryChunk<unsigned long>();
+	MemoryChunk<unsigned long> *mc = new MemoryChunk<unsigned long>();
 	mc->serial = serial_start++;
 	return mc;
 }
 
 MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::dupeSelf() const
 {
-	MemoryChunk<unsigned long> *r = (MemoryChunk<unsigned long> *)LibVEX_Alloc_Bytes(sizeof(MemoryChunk<unsigned long>));
+	MemoryChunk<unsigned long> *r = new MemoryChunk<unsigned long>();
+	sanity_check();
 	memcpy(r, this, sizeof(*r));
+	r->sanity_check();
 	return r;
 }
 
 void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, const unsigned long *source, unsigned nr_bytes,
 				       unsigned long sa)
 {
+	assert(!frozen);
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
-	for (unsigned x = 0; x < nr_bytes; x++)
+	for (unsigned x = 0; x < nr_bytes; x++) {
+		checksum -= content[offset + x];
+		checksum += source[x];
 		content[offset + x] = source[x];
+	}
 }
 
 EventTimestamp MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
@@ -45,10 +48,25 @@ template <>
 MemoryChunk<abstract_interpret_value> *MemoryChunk<unsigned long>::abstract() const
 {
 	MemoryChunk<abstract_interpret_value> *work = new MemoryChunk<abstract_interpret_value>();
+	sanity_check();
 	work->headLookaside = NULL;
 	work->underlying = this;
 	work->base = base;
+	work->underlying_checksum = checksum;
+	work->underlying_serial = serial;
+	this->frozen = true;
 	return work;
+}
+
+void
+MemoryChunk<unsigned long>::sanity_check(void) const
+{
+	unsigned long desired_csum;
+	unsigned x;
+	desired_csum = 0;
+	for (x = 0; x < size; x++)
+		desired_csum += content[x];
+	assert(desired_csum == checksum);
 }
 
 MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::allocate()
@@ -168,6 +186,13 @@ void MemoryChunk<abstract_interpret_value>::write(EventTimestamp when,
 
 	if (++write_counter % 256 == 0)
 		compact_lookaside_chain();
+}
+
+void
+MemoryChunk<abstract_interpret_value>::sanity_check(void) const
+{
+	assert(underlying_checksum == underlying->checksum);
+	assert(underlying_serial == underlying->serial);
 }
 
 static void visit_mcl_lookaside(void *_ctxt, HeapVisitor &hv)

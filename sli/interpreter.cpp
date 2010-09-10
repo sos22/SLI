@@ -1387,6 +1387,8 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 {
 	ths->redirectGuest(rip);
 
+	ths->currentIRSBRip = rip;
+
 	unsigned long _rip = force(rip);
 	vexSetAllocModeTEMP_and_clear(t);
 
@@ -1432,12 +1434,17 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 
 	ths->currentIRSB = irsb;
 	ths->currentIRSBOffset = 0;
-	ths->currentIRSBRip = ths->regs.rip();
 
 	ths->currentControlCondition = mkConst<ait>(1);
 
 	if (loud_mode)
 		ppIRSB(irsb);
+
+	/* First statement in block should be a mark */
+	assert(ths->currentIRSB->stmts[0]->tag == Ist_IMark);
+	/* Should be a mark for the IRSB rip */
+	assert(ths->currentIRSB->stmts[0]->Ist.IMark.addr ==
+	       force(ths->currentIRSBRip));
 }
 
 template<typename ait>
@@ -1460,9 +1467,12 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			}
 			assert(ths->currentIRSB);
 		}
+	        assert(force(ths->currentControlCondition));
 		while (ths->currentIRSBOffset < ths->currentIRSB->stmts_used) {
 			IRStmt *stmt = ths->currentIRSB->stmts[ths->currentIRSBOffset];
 			ths->currentIRSBOffset++;
+
+			assert(force(ths->currentControlCondition));
 
 			switch (stmt->tag) {
 			case Ist_NoOp:
@@ -1481,6 +1491,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 								  GR(FOOTSTEP_REG_4_NAME),
 								  ths->allowRipMismatch);
 #undef GR
+
 			case Ist_AbiHint:
 				break;
 			case Ist_MBE:
@@ -1612,23 +1623,35 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result<ait> guard =
 						ths->eval_expression(stmt->Ist.Exit.guard);
+					bool controlCondIsConstant = isConstant(ths->currentControlCondition);
 					sanity_check_ait(ths->currentControlCondition);
 					sanity_check_ait(guard.lo);
 					if (force(!guard.lo)) {
+						ait inv_guard = !guard.lo;
+						assert(force(inv_guard) == 1);
 						ths->currentControlCondition =
-							ths->currentControlCondition && !guard.lo;
+							ths->currentControlCondition && inv_guard;
 						sanity_check_ait(ths->currentControlCondition);
+						if (!controlCondIsConstant)
+							assert(!isConstant(ths->currentControlCondition));
+						assert(force(ths->currentControlCondition));
 						break;
 					}
+					ait inv_inv_guard = !!guard.lo;
+					assert(force(inv_inv_guard) == 1);
 					ths->currentControlCondition =
-						ths->currentControlCondition && !!guard.lo;
+						ths->currentControlCondition && inv_inv_guard;
 					sanity_check_ait(ths->currentControlCondition);
+					if (!controlCondIsConstant)
+						assert(!isConstant(ths->currentControlCondition));
+					assert(force(ths->currentControlCondition));
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
 					printf("EMULATION WARNING %lx\n",
 					       force(ths->regs.get_reg(REGISTER_IDX(EMWARN))));
 				}
+				assert(force(ths->currentControlCondition));
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
 				sanity_check_ait(ths->currentControlCondition);
 				ths->regs.set_reg(REGISTER_IDX(RIP),
@@ -1644,6 +1667,8 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				ppIRStmt(stmt);
 				throw NotImplementedException();
 			}
+
+			assert(force(ths->currentControlCondition));
 		}
 		
 		assert(ths->currentIRSB->jumpkind == Ijk_Boring ||
@@ -1665,6 +1690,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 					ths->eval_expression(ths->currentIRSB->next);
 				sanity_check_ait(ths->currentControlCondition);
 				sanity_check_ait(next_addr.lo);
+				assert(force(ths->currentControlCondition));
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  ternary(ths->currentControlCondition,
 							  next_addr.lo,
@@ -1676,6 +1702,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 		}
 
 finished_block:
+		assert(force(ths->currentControlCondition));
 		;
 	}
 }
@@ -1806,15 +1833,18 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 			ThreadEvent<ait> *oldEvent = evt;
 			bool consumed = true;
 			evt = evt->replay(lr, currentState, consumed);
-			if (lw && !appendedRecord) {
-				lw->append(lr, oldEvent->when.idx);
-				appendedRecord = true;
-			}
-			if (consumed)
+			if (consumed) {
+				if (lw && !appendedRecord) {
+					lw->append(lr, oldEvent->when.idx);
+					appendedRecord = true;
+				}
 				lr = NULL;
-			if (evt && !lr) {
-				appendedRecord = false;
-				lr = lf->read(ptr, &ptr);
+				if (eof)
+					*eof = ptr;
+				if (evt) {
+					appendedRecord = false;
+					lr = lf->read(ptr, &ptr);
+				}
 			}
 		}
 
@@ -1823,10 +1853,10 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 			   processed eagerly. */
 			VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
 	                process_memory_records(as, lf, ptr, &ptr, lw, t);
+			if (eof)
+				*eof = ptr;
 	        }
 	}
-	if (eof)
-		*eof = ptr;
 }
 
 template<typename ait>
@@ -1858,8 +1888,11 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 				finished = true;
 			bool consumed = true;
 			evt = evt->replay(lr, currentState, consumed);
-			if (consumed)
+			if (consumed) {
 				lr = NULL;
+				if (eof)
+					*eof = ptr;
+			}
 			if (!finished && evt && !lr)
 				lr = lf->read(ptr, &ptr);
 		}
@@ -1870,8 +1903,6 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 	        VexPtr<LogWriter<ait> > dummy(NULL);
 		process_memory_records(as, lf, ptr, &ptr, dummy, t);
 	}
-	if (eof)
-		*eof = ptr;
 }
 
 template <typename ait> void visit_expression_result_array(void *_ctxt,

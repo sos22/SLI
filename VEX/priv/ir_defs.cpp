@@ -1003,7 +1003,7 @@ void ppIRSB ( IRSB* bb )
    ppIRTypeEnv(bb->tyenv);
    vex_printf("\n");
    for (i = 0; i < bb->stmts_used; i++) {
-      vex_printf( "   ");
+      vex_printf( "%d:   ", i);
       ppIRStmt(bb->stmts[i]);
       vex_printf( "\n");
    }

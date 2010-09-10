@@ -303,11 +303,12 @@ class WeakRef : public GarbageCollected<WeakRef<t> > {
 	wr_core core;
 public:
 	WeakRef() : core() {}
-	void set(t *newTarg) { core.content = (void *)newTarg; }
+	void set(t *newTarg) { assert((unsigned long)newTarg != 0x93939393939393b3); core.content = (void *)newTarg; }
 	t *get() { return (t *)core.content; }
 
 	void visit(HeapVisitor &hv) {
 		if (core.content) {
+			assert(core.content != (void *)0x93939393939393b3);
 			core.next = headVisitedWeakRef;
 			headVisitedWeakRef = &core;
 		}

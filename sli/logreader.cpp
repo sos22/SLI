@@ -92,7 +92,7 @@ skip:
 		return NULL;
 	ThreadId tid(rh.tid);
 	*_nextPtr = mkPtr(startPtr.off + rh.size, startPtr.record_nr+1);
-	if (startPtr.off / 10000000 != (startPtr.off + rh.size) / 10000000)
+	if (startPtr.off / 1000000 != (startPtr.off + rh.size) / 1000000)
 		printf("Read %ldM\n", startPtr.off / 1000000);
 
 	switch (rh.cls) {

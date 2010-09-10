@@ -50,8 +50,14 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw)
 	for (unsigned x = 0; x < RegisterSet<ait>::NR_REGS; x++)
 		((unsigned long *)&r)[x] = force(regs.get_reg(x));
 	lw->append(new LogRecordInitialRegisters<ait>(tid, r), 0);
-	if (currentIRSB && currentIRSBOffset != 0)
+	if (currentIRSB && currentIRSBOffset != 0) {
+		/* First statement in block should be a mark */
+		assert(currentIRSB->stmts[0]->tag == Ist_IMark);
+		/* Should be a mark for the IRSB rip */
+		assert(currentIRSB->stmts[0]->Ist.IMark.addr ==
+		       force(currentIRSBRip));
 		lw->append(new LogRecordVexThreadState<ait>(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
+	}
 
 	printf("Tid %d is at %d, irsb: \n", tid._tid(),
 	       currentIRSBOffset);
@@ -97,6 +103,9 @@ EventTimestamp Thread<ait>::bumpEvent(MachineState<ait> *ms)
 {
 	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++,
 				   force(regs.rip()));
+	if (lastEvent.tid._tid() == 9 && lastEvent.idx == 0x1ab6fe)
+		printf("Producing the magic event %d:%lx\n",
+		       lastEvent.tid._tid(), lastEvent.idx);
 	return lastEvent;
 }
 
@@ -138,5 +147,36 @@ void expression_result_array<ait>::abstract(expression_result_array<new_type> *o
 		content[x].abstract(&out->content[x]);
 }
 
-#define MK_THREAD(t)
+template <typename ait> void
+Thread<ait>::pretty_print(void) const
+{
+	printf("Thread tid %d, pid %d access %ld event %ld, last event %lx:%lx:%lx %s%s%s%s%s\n",
+	       tid._tid(), pid,
+	       nrAccesses,
+	       nrEvents,
+	       lastEvent.idx,
+	       lastEvent.total_timestamp,
+	       lastEvent.rip,
+#define f(n) n ? "(" #n ")" : ""
+	       f(exitted),
+	       f(crashed),
+	       f(idle),
+	       f(cannot_make_progress),
+	       f(blocked));
+#undef f
+	regs.pretty_print();
+	temporaries.pretty_print();
+
+	if (currentIRSB) {
+		printf("Current IRSB:\n");
+		ppIRSB(currentIRSB);
+		printf("Offset %d, origin %s, CCC %s\n",
+		       currentIRSBOffset,
+		       name_aiv(currentIRSBRip),
+		       name_aiv(currentControlCondition));
+	}
+}
+
+#define MK_THREAD(t)						\
+	template <> void Thread<t>::pretty_print(void) const;
 

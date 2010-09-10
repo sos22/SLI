@@ -213,6 +213,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	case __NR_sched_yield: /* 24 */
 		break;
 	case __NR_nanosleep: /* 35 */
+		printf("Thread %d issues nanosleep\n",
+		       thr->tid._tid());
 		break;
 	case __NR_getpid: /* 39 */
 		break;

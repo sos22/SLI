@@ -88,8 +88,13 @@ void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned si
 {
 	unsigned long start = force(_start);
 	unsigned off = 0;
-	if (thr)
+	if (thr) {
 		checkFreeList(_start, _start + mkConst<ait>(size), thr->tid, EventTimestamp::invalid);
+		if (start == 0x456e9e0)
+			printf("Thread %d writes %d to %lx\n", thr->tid._tid(),
+			       size, start);
+	}
+
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -180,7 +185,7 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 #else
 	irrelevant = force(start) != 0x601080 && force(start) != 0x4221010;
 #endif
-	if (!irrelevant) {
+	if (!irrelevant || 1) {
 		if (size <= 8) {
 			res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr, size);
 		} else {
@@ -380,7 +385,7 @@ AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(ait _initialBrk)
 	unsigned long initialBrk = force(_initialBrk);
 	AddressSpace<ait> *work = new AddressSpace<ait>();
 	work->brkptr = initialBrk;
-	work->brkMapPtr = initialBrk + 4096;
+	work->brkMapPtr = initialBrk /*+ 4096*/;
 	work->pmap = PMap<ait>::empty();
 	work->vamap = VAMap::empty();
 	return work;	

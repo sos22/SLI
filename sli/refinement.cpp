@@ -238,9 +238,9 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
 	{
 		History *&ptr = (*thread_histories)[evt.tid];
 		if (!ptr)
-			ptr = new History(ConstExpression::get(1),
-					  evt,
-					  NULL);
+			ptr = History::get(ConstExpression::get(1),
+					   evt,
+					   NULL);
 		return ptr;
 	}
 	void setHistory(ThreadId tid, History *hs)
@@ -488,11 +488,11 @@ ExpressionRip::refineHistory(VexPtr<ExpressionRip> &ths,
 				ths->tid,
 				ths->history->dupeWithParentReplace(
 					mostRelevantEntry,
-					new History(newCond,
-						    mostRelevantEntry->last_valid_idx,
-						    mostRelevantEntry->when,
-						    mostRelevantEntry->rips,
-						    mostRelevantEntry->parent)),
+					History::get(newCond,
+						     mostRelevantEntry->last_valid_idx,
+						     mostRelevantEntry->when,
+						     mostRelevantEntry->rips,
+						     mostRelevantEntry->parent)),
 				ths->cond,
 				ths->model_execution,
 				ths->model_exec_start);

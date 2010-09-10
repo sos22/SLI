@@ -180,6 +180,8 @@ public:
 		} else {
 			irrelevance = -delta;
 		}
+		if (ev.tid != to.tid)
+			irrelevance += 100000;
 	}
 
 	/* These look backwards, because irrelevance is the opposite
@@ -292,6 +294,11 @@ public:
 		for (unsigned x = 0; x < NR_REGS; x++)
 			visit_aiv(registers[x], hv);
 	}
+
+	void pretty_print() const {
+		for (unsigned x = 0; x < NR_REGS; x++)
+			printf("\treg%d: %s\n", x, name_aiv(registers[x]));
+	}
 };
 
 template <typename ait> class AddressSpace;
@@ -318,6 +325,11 @@ public:
 	}
 
 	template <typename new_type> void abstract(expression_result_array<new_type> *out) const;
+
+	void pretty_print() const {
+		for (unsigned x = 0; x < content.size(); x++)
+			printf("\tt%d: %s\n", x, content[x].name());
+	}
 };
 
 template <typename ait> class ThreadEvent;
@@ -376,10 +388,11 @@ public:
 
 	EventTimestamp lastEvent;
 
-	bool runnable() const { return !exitted && !crashed && !cannot_make_progress && !blocked; }
+	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
 	void futexBlock(abst_int_type fba) { printf("%d: block\n", tid._tid()); blocked = true; futex_block_address = fba; }
 	void futexUnblock() { printf("%d: unblocked\n", tid._tid()); blocked = false; }
 
+	void pretty_print() const;
 private:
 	bool allowRipMismatch;
 	~Thread();
@@ -524,7 +537,7 @@ public:
 template <typename ait> class MemoryChunk;
 
 template <>
-class MemoryChunk<unsigned long> {
+class MemoryChunk<unsigned long> : public GarbageCollected<MemoryChunk<unsigned long> > {
 public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk<unsigned long> *allocate();
@@ -539,8 +552,19 @@ public:
 
 	PhysicalAddress base;
 	unsigned serial;
+	unsigned long checksum;
+	void sanity_check(void) const;
+	void visit(HeapVisitor &hv) {}
+	void destruct() {}
+	void relocate(MemoryChunk<unsigned long> *t, size_t) {
+		t->sanity_check();
+	}
+
+	NAMED_CLASS
+
 private:
 	static unsigned serial_start;
+	mutable bool frozen;
 	unsigned char content[size];
 };
 
@@ -2081,6 +2105,8 @@ public:
 		*target->pprev = target;
 	}
 
+	virtual Expression *restrictToMask(unsigned long mask) = 0;
+
 	NAMED_CLASS
 };
 
@@ -2114,6 +2140,7 @@ public:
 	}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &f) { return f.map(this); }
+	virtual Expression *restrictToMask(unsigned long mask) { return this; }
 };
 
 class ConstExpression : public UnrefinableExpression {
@@ -2161,6 +2188,7 @@ public:
 	void visit(ExpressionVisitor &ev) { ev.visit(this); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }
 	bool isConstant(unsigned long *cv) const { *cv = v; return true; }
+	virtual Expression *restrictToMask(unsigned long mask) { return get(v & mask); }
 };
 
 class ExpressionLastStore : public Expression {
@@ -2243,6 +2271,8 @@ public:
 		else
 			return Relevance(r, vaddr->relevance(ev, r + 1, high_thresh));
 	}
+
+	virtual Expression *restrictToMask(unsigned long mask) { return this; }
 };
 
 class ExpressionHappensBefore : public Expression {
@@ -2317,6 +2347,8 @@ public:
 		   relevance kind of doesn't matter. */
 		return Relevance::irrelevant;
 	}
+
+	virtual Expression *restrictToMask(unsigned long mask) { return this; }
 };
 
 class LoadExpression : public Expression {
@@ -2329,9 +2361,9 @@ public:
 	EventTimestamp store;
 	unsigned size;
 protected:
-	char *mkName() const { return my_asprintf("(load%d@%d:%lx;%d:%lx %s:%s -> %s)",
-						  size, when.tid._tid(), when.idx,
-						  store.tid._tid(), store.idx,
+	char *mkName() const { return my_asprintf("(load%d@%d:%lx:%lx;%d:%lx:%lx %s:%s -> %s)",
+						  size, when.tid._tid(), when.idx, when.rip,
+						  store.tid._tid(), store.idx, store.rip,
 						  addr->name(), storeAddr->name(),
 						  val->name()); }
 	unsigned long _hash() const { return val->hash() ^ (addr->hash() * 3) ^ (when.hash() * 5) ^ (store.hash() * 7) ^ (storeAddr->hash() * 11) ^ (size * 13); }
@@ -2402,6 +2434,8 @@ public:
 					  addr->relevance(ev, r + 1, high_thresh)),
 				storeAddr->relevance(ev, r + 1, high_thresh)));
 	}
+
+	virtual Expression *restrictToMask(unsigned long mask) { return this; }
 };
 
 class BinaryExpression : public Expression {
@@ -2489,6 +2523,7 @@ public:
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression *get(Expression *_l, Expression *_r);	\
+		Expression *restrictToMask(unsigned long x);		\
 	}
 
 mk_binop_class(lshift, <<, );
@@ -2582,6 +2617,7 @@ public:
 	public:								\
 	        bool isLogical() const;					\
 	        static Expression* get(Expression *_l);			\
+		Expression *restrictToMask(unsigned long x);		\
 	}
 
 mk_unop_class(logicalnot, );
@@ -2691,6 +2727,10 @@ public:
 			low_thresh = tr;
 		Relevance fr = f->relevance(ev, low_thresh + 1, high_thresh);
 		return Relevance(c, Relevance(tr, fr));
+	}
+
+	Expression *restrictToMask(unsigned long x) {
+		return get(cond, t->restrictToMask(x), f->restrictToMask(x));
 	}
 };
 
@@ -2843,6 +2883,23 @@ static inline abstract_interpret_value operator ^=(abstract_interpret_value &lhs
 	return lhs;
 }
 
+static inline bool isConstant(unsigned long x)
+{
+	return true;
+}
+
+static inline bool isConstant(abstract_interpret_value &x)
+{
+	unsigned long r;
+
+	if (x.origin->isConstant(&r)) {
+		assert(r == x.v);
+		return true;
+	} else {
+		return false;
+	}
+}
+
 /* For some obscure reason C++ doesn't let you overload the ?:
    operator, so do something almost but not equivalent here (not quite
    because the laziness is wrong.  Then again, the laziness is wrong
@@ -2872,6 +2929,9 @@ class MemoryChunk<abstract_interpret_value> : public GarbageCollected<MemoryChun
 public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk<abstract_interpret_value> *allocate();
+
+	unsigned long underlying_checksum;
+	unsigned underlying_serial;
 
 	void write(EventTimestamp when, unsigned offset, const abstract_interpret_value *source, unsigned nr_bytes,
 		   abstract_interpret_value storeAddr);
@@ -2905,7 +2965,10 @@ public:
 		hv(headLookaside);
 	}
 	void destruct() {}
-
+	void sanity_check() const;
+	void relocate(MemoryChunk<abstract_interpret_value> *t, size_t)  {
+		t->sanity_check();
+	}
 	NAMED_CLASS
 };
 
@@ -2942,6 +3005,7 @@ public:
 	EventTimestamp when;
 	std::vector<unsigned long> rips;
 	History *parent;
+private:
 	History(Expression *_condition,
 		EventTimestamp _when,
 		History *_parent)
@@ -2968,6 +3032,46 @@ public:
 		assert(when.tid.valid());
 		calcLastAccessed();
 	}
+public:
+	static History *get(Expression *condition,
+			    EventTimestamp when,
+			    History *parent)
+	{
+		if (parent && parent->condition == condition) {
+			when = parent->when;
+			parent = parent->parent;
+		}
+		if (parent) {
+			unsigned long l;
+			if (parent->condition->isConstant(&l)) {
+				assert(l);
+				when = parent->when;
+				parent = parent->parent;
+			}
+		}
+		return new History(condition, when, parent);
+	}
+	static History *get(Expression *cond,
+			    unsigned long last_valid_idx,
+			    EventTimestamp when,
+			    std::vector<unsigned long> &rips,
+			    History *parent)
+	{
+		if (parent && parent->condition == cond) {
+			when = parent->when;
+			parent = parent->parent;
+		}
+		if (parent) {
+			unsigned long l;
+			if (parent->condition->isConstant(&l)) {
+				assert(l);
+				when = parent->when;
+				parent = parent->parent;
+			}
+		}
+		return new History(cond, last_valid_idx, when, rips, parent);
+	}
+
 	Relevance relevance(const EventTimestamp &ev, Relevance low_thresh, Relevance high_thresh) {
 		if (low_thresh >= high_thresh)
 			return low_thresh;
@@ -3016,9 +3120,9 @@ public:
 	}
 	History *map(ExpressionMapper &m)
 	{
-		return new History(condition->map(m),
-				   when,
-				   parent ? parent->map(m) : NULL);
+		return History::get(condition->map(m),
+				    when,
+				    parent ? parent->map(m) : NULL);
 	}
 	bool isEqual(const History *h) const
 	{
@@ -3054,7 +3158,7 @@ public:
 	History *control_expression(EventTimestamp when, Expression *e)
 	{
 		finish(when.idx);
-		return new History(e, when, this);
+		return History::get(e, when, this);
 	}
 
 	void footstep(unsigned long rip)
@@ -3072,11 +3176,11 @@ public:
 		if (this == from)
 			return to;
 		assert(parent != NULL);
-		return new History(condition,
-				   last_valid_idx,
-				   when,
-				   rips,
-				   parent->dupeWithParentReplace(from, to));
+		return History::get(condition,
+				    last_valid_idx,
+				    when,
+				    rips,
+				    parent->dupeWithParentReplace(from, to));
 	}
 
 	History *truncate(unsigned long, bool);
@@ -3092,11 +3196,11 @@ public:
 			if (c->isConstant(&cc) && cc && parent) {
 				concrete->set(parent->concretise());
 			} else {
-				concrete->set(new History(c,
-							  last_valid_idx,
-							  when,
-							  rips,
-							  parent ? parent->concretise() : NULL));
+				concrete->set(History::get(c,
+							   last_valid_idx,
+							   when,
+							   rips,
+							   parent ? parent->concretise() : NULL));
 			}
 		}
 		return concrete->get();
@@ -3212,6 +3316,10 @@ public:
 		Relevance cr = cond->relevance(ev, low_thresh, high_thresh);
 		return Relevance(cr, history->relevance(ev, cr + 1, high_thresh));
 	}
+
+	Expression *restrictToMask(unsigned long mask) {
+		return get(tid, history, cond->restrictToMask(mask), model_execution, model_exec_start);
+	}
 };
 
 /* A bad pointer expression asserts that a particular memory location
@@ -3272,6 +3380,8 @@ public:
 		Relevance r = Relevance(when, ev);
 		return Relevance(r, addr->relevance(ev, r + 1, high));
 	}
+
+Expression *restrictToMask(unsigned long mask) { return this; }
 };
 
 static inline void sanity_check_ait(unsigned long x) {}

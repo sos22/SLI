@@ -45,8 +45,8 @@ syntax_check_expression(Expression *e, gc_map<ThreadId, unsigned long> &last_val
 	return true;
 }
 
-static void
-fixup_expression(Expression **e,
+static Expression *
+fixup_expression(Expression *e,
 		 gc_map<ThreadId, unsigned long> &last_valid_idx,
 		 history_map &spare_histories,
 		 const MachineState<abstract_interpret_value> *ms,
@@ -54,87 +54,78 @@ fixup_expression(Expression **e,
 		 LogReaderPtr global_lf_start)
 {
 top:
-	if (syntax_check_expression(*e, last_valid_idx, NULL))
-		return;
+	if (syntax_check_expression(e, last_valid_idx, NULL))
+		return e;
 
-	if (dynamic_cast<ConstExpression *>(*e))
-		return;
+	if (dynamic_cast<ConstExpression *>(e))
+		return e;
 
-	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(*e)) {
-		fixup_expression(&ue->l, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		return;
+	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(e)) {
+		return ue->semiDupe(fixup_expression(ue->l, last_valid_idx,
+						     spare_histories, ms,
+						     global_lf,
+						     global_lf_start));
 	}
 
-	if (BinaryExpression *be = dynamic_cast<BinaryExpression *>(*e)) {
-		fixup_expression(&be->l, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		fixup_expression(&be->r, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		return;
+	if (BinaryExpression *be = dynamic_cast<BinaryExpression *>(e)) {
+		return be->semiDupe(fixup_expression(be->l, last_valid_idx,
+						     spare_histories, ms,
+						     global_lf, global_lf_start),
+				    fixup_expression(be->r, last_valid_idx,
+						     spare_histories, ms,
+						     global_lf, global_lf_start));
 	}
 
-	if (ternarycondition *tc = dynamic_cast<ternarycondition *>(*e)) {
-		fixup_expression(&tc->cond, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		fixup_expression(&tc->t, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		fixup_expression(&tc->f, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		return;
+	if (ternarycondition *tc = dynamic_cast<ternarycondition *>(e)) {
+		return ternarycondition::get(
+			fixup_expression(tc->cond, last_valid_idx, spare_histories, ms, global_lf, global_lf_start),
+			fixup_expression(tc->t, last_valid_idx, spare_histories, ms, global_lf, global_lf_start),
+			fixup_expression(tc->f, last_valid_idx, spare_histories, ms, global_lf, global_lf_start));
 	}
 
-	if (ExpressionBadPointer *ebp = dynamic_cast<ExpressionBadPointer *>(*e)) {
-		fixup_expression(&ebp->addr, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		return;
+	if (ExpressionBadPointer *ebp = dynamic_cast<ExpressionBadPointer *>(e)) {
+		if (ebp->when.idx > last_valid_idx[ebp->when.tid]) {
+			e = ExpressionRip::get(ebp->when.tid,
+					       spare_histories[ebp->when.tid]->truncateInclusive(ebp->when.idx),
+					       ebp,
+					       global_lf,
+					       global_lf_start);
+			goto top;
+		}
+		return ExpressionBadPointer::get(
+			ebp->when,
+			fixup_expression(ebp->addr, last_valid_idx, spare_histories, ms, global_lf, global_lf_start));
 	}
 
-	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(*e)) {
+	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(e)) {
 		History *it;
 		gc_map<ThreadId, unsigned long> *new_last_valid_idx = new gc_map<ThreadId, unsigned long>(last_valid_idx);
 		unsigned long &idx_entry = (*new_last_valid_idx)[er->tid];
+		assert(idx_entry == last_valid_idx[er->tid]);
 		for (it = er->history;
 		     it != NULL;
 		     it = it->parent) {
 			PartialTimestamp needed;
-			idx_entry = it->last_valid_idx;
+			if (it->parent)
+				idx_entry = it->parent->last_valid_idx;
+			else
+				idx_entry = 0;
+			if (idx_entry < last_valid_idx[er->tid])
+				idx_entry = last_valid_idx[er->tid];
 			if (!syntax_check_expression(it->condition,
 						     *new_last_valid_idx,
 						     &needed)) {
-				/* Okay, so we have something like this:
+				History *newHist;
 
-				   rip(tidA, {abc,X,def}, cond)
-
-				   where X references index N in tidB
-				   which isn't currently available.  Try to
-				   turn it into
-
-				   rip(tidA, {abc}, rip(tidB, {...}, rip(tidA {X,def}, cond)))
-
-				   This has a couple of phases:
-
-				   -- First, we split the existing
-				      history into {abc} and {X,def}
-				   -- Next, we grab a history for
-  				      tidB, denoted ... above.  We
-  				      pull this out of the
-  				      pre-existing spare history map.
-				*/                                                                                                              
+				newHist = spare_histories[needed.tid]->truncateInclusive(needed.idx);
                                                                                                                                                
-				History *newOuterHist;                                                                                          
-				History *newMiddleHist;                                                                                         
-				History *newInnerHist;
-
-				newOuterHist = er->history->truncateExclusive(idx_entry);
-				newMiddleHist = spare_histories[needed.tid]->truncateInclusive(needed.idx);
-				newInnerHist = er->history;
-                                                                                                                                               
-				*e = ExpressionRip::get(                                                                                        
-					er->tid,                                                                                                
-					newOuterHist,                                                                                           
+				e = ExpressionRip::get(
+					needed.tid,
+					newHist,
 					ExpressionRip::get(
-						needed.tid,
-						newMiddleHist,
-						ExpressionRip::get(
-							er->tid,
-							newInnerHist,
-							er->cond,
-							er->model_execution,
-							er->model_exec_start),
+						er->tid,
+						er->history,
+						er->cond,
 						er->model_execution,
 						er->model_exec_start),
 					er->model_execution,
@@ -146,12 +137,15 @@ top:
 		}
 		if (er->history)
 			idx_entry = er->history->last_valid_idx;
-		fixup_expression(&er->cond, *new_last_valid_idx,
-				 spare_histories, ms, global_lf, global_lf_start);
-		return;
+		return ExpressionRip::get(er->tid,
+					  er->history,
+					  fixup_expression(er->cond, *new_last_valid_idx,
+							   spare_histories, ms, global_lf, global_lf_start),
+					  er->model_execution,
+					  er->model_exec_start);
 	}
 
-	if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(*e)) {
+	if (ExpressionHappensBefore *ehb = dynamic_cast<ExpressionHappensBefore *>(e)) {
 		EventTimestamp when;
 		bool needFixup = false;
 		if (ehb->before.idx > last_valid_idx[ehb->before.tid]) {
@@ -163,17 +157,17 @@ top:
 			needFixup = true;
 		}
 		if (needFixup) {
-			*e = ExpressionRip::get(when.tid,
-						spare_histories[when.tid]->truncateInclusive(when.idx),
-						ehb,
-						global_lf,
-						global_lf_start);
+			e = ExpressionRip::get(when.tid,
+					       spare_histories[when.tid]->truncateInclusive(when.idx),
+					       ehb,
+					       global_lf,
+					       global_lf_start);
 			goto top;
 		}
-		return;
+		return e;
 	}
 
-	if (LoadExpression *le = dynamic_cast<LoadExpression *>(*e)) {
+	if (LoadExpression *le = dynamic_cast<LoadExpression *>(e)) {
 		EventTimestamp when;
 		bool needFixup = false;
 		if (le->when.idx > last_valid_idx[le->when.tid]) {
@@ -188,23 +182,47 @@ top:
 			/* We have a reference to location @when which
 			   isn't currently in scope.  Synthesise a RIP
 			   expression which brings it in. */
-			*e = ExpressionRip::get(when.tid,
-						spare_histories[when.tid]->truncateInclusive(when.idx),
-						le,
-						global_lf,
-						global_lf_start);
-			fixup_expression(e, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-			return;
+			e = ExpressionRip::get(when.tid,
+					       spare_histories[when.tid]->truncateInclusive(when.idx),
+					       le,
+					       global_lf,
+					       global_lf_start);
+			goto top;
 		}
-		fixup_expression(&le->val, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		fixup_expression(&le->addr, last_valid_idx, spare_histories, ms, global_lf, global_lf_start);
-		return;
+		return LoadExpression::get(
+			le->when,
+			fixup_expression(le->val, last_valid_idx, spare_histories, ms, global_lf, global_lf_start),
+			fixup_expression(le->addr, last_valid_idx, spare_histories, ms, global_lf, global_lf_start),
+			fixup_expression(le->storeAddr, last_valid_idx, spare_histories, ms, global_lf, global_lf_start),
+			le->store,
+			le->size,
+			le->concrete_addr);
 	}
 
-	if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(*e)) {
-		fixup_expression(&els->vaddr, last_valid_idx, spare_histories, ms,
-				 global_lf, global_lf_start);
-		return;
+	if (ExpressionLastStore *els = dynamic_cast<ExpressionLastStore *>(e)) {
+		EventTimestamp when;
+		bool needFixup = false;
+		if (els->load.idx > last_valid_idx[els->load.tid]) {
+			when = els->load;
+			needFixup = true;
+		}
+		if (els->store.idx > last_valid_idx[els->store.tid]) {
+			when = els->store;
+			needFixup = true;
+		}
+		if (needFixup) {
+			e = ExpressionRip::get(when.tid,
+					       spare_histories[when.tid]->truncateInclusive(when.idx),
+					       els,
+					       global_lf,
+					       global_lf_start);
+			goto top;
+		}
+		return ExpressionLastStore::get(
+			els->load,
+			els->store,
+			fixup_expression(els->vaddr, last_valid_idx, spare_histories, ms, global_lf, global_lf_start),
+			els->concrete_vaddr);
 	}
 
 	abort();
@@ -241,9 +259,9 @@ public:
 	History *getHistory(const EventTimestamp &evt) {
 		History *&ptr((*thread_histories)[evt.tid]);
 		if (!ptr)
-			ptr = new History(ConstExpression::get(1),
-					  evt,
-					  NULL);
+			ptr = History::get(ConstExpression::get(1),
+					   evt,
+					   NULL);
 		return ptr;
 	}
 	void setHistory(ThreadId tid, History *hs)
@@ -342,13 +360,15 @@ static Expression *getCrashReason(VexPtr<MachineState<abstract_interpret_value> 
 				 script,
 				 ptr);
 
+	printf("Pre-fixup expression %s\n", res->name());
 	gc_map<ThreadId, unsigned long> *m = new gc_map<ThreadId, unsigned long>();
-	fixup_expression(&res,
-			 *m,
-			 *extr->thread_histories,
-			 ms,
-			 script,
-			 ptr);
+	res = fixup_expression(res,
+			       *m,
+			       *extr->thread_histories,
+			       ms,
+			       script,
+			       ptr);
+	printf("Post-fixup expression %s\n", res->name());
 	//std::map<ThreadId, unsigned long> v;
 	//assert(syntax_check_expression(res, v));
 	return res;
