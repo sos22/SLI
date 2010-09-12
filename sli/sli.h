@@ -56,26 +56,30 @@ public:
 
 class Named {
 	mutable char *_name;
+	mutable char *_name2;
 protected:
 	virtual char *mkName(void) const = 0;
-	void clearName() const { free(_name); _name = NULL; }
+	void clearName() const { assert(_name == _name2); free(_name); _name = NULL; _name2 = NULL; }
 public:
 	Named &operator=(const Named &src) {
+		assert(src._name == src._name2);
 		clearName();
 		if (src._name)
-			_name = strdup(src._name);
+			_name2 = _name = strdup(src._name);
 		return *this;
 	}
-	Named() : _name(NULL) {}
+	Named() : _name(NULL), _name2(NULL) {}
 	Named(const Named &b) {
+		assert(b._name == b._name2);
 		if (b._name)
-			_name = strdup(b._name);
+			_name2 = _name = strdup(b._name);
 		else
-			_name = NULL;
+			_name2 = _name = NULL;
 	}
 	const char *name() const {
+		assert(_name == _name2);
 		if (!_name)
-			_name = mkName();
+			_name2 = _name = mkName();
 		return _name;
 	}
 	void destruct() { clearName(); }
@@ -2327,7 +2331,7 @@ public:
 			else
 				return ConstExpression::get(0);
 		} else {
-			return new ExpressionHappensBefore(before, after);
+			return intern(new ExpressionHappensBefore(before, after));
 		}
 	}
 	EventTimestamp timestamp() const { return after; }
@@ -3327,7 +3331,7 @@ protected:
 public:
 	static Expression *get(EventTimestamp _when, Expression *_addr)
 	{
-		return new ExpressionBadPointer(_when, _addr);
+		return intern(new ExpressionBadPointer(_when, _addr));
 	}
 	void visit(ExpressionVisitor &ev) { ev.visit(this); addr->visit(ev); }
 	Expression *map(ExpressionMapper &m) { return m.map(this); }

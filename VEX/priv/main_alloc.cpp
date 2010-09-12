@@ -17,7 +17,11 @@
 /* How often should we perform a garbage collection, measured in calls
    to vexSetAllocModeTEMP_and_clear, which roughly corresponds to
    client basic blocks. */
-#define GC_PERIOD 500000
+#define GC_PERIOD 100000
+
+/* If we're given an opportunity to garbage collect and the heap is
+   bigger than this then we always take it. */
+#define GC_MAX_SIZE 5000000000ul
 
 /* How far are we willing to recur during the heap walking phase of a
  * GC sweep?  If we hit this limit then we start pushing stuff off
@@ -81,6 +85,7 @@ static struct arena *head_arena;
 static struct arena *current_arena;
 static VexAllocType *headType;
 struct wr_core *headVisitedWeakRef;
+static unsigned long heap_used;
 
 static void *
 header_to_alloc(struct allocation_header *ah)
@@ -109,6 +114,8 @@ new_arena(size_t content_size)
 	r->size = content_size;
 	r->next = head_arena;
 	head_arena = r;
+
+	heap_used += content_size;
 
 	return r;
 }
@@ -165,6 +172,7 @@ GcVisitor::visit(void *&what)
 	} else {
 		assert(!((unsigned long)what_header->redirection & 0x8000000000000000ul));
 		assert((unsigned long)header_to_alloc(what_header->redirection) != 0x93939393939393ab);
+		assert(what_header->redirection->type == what_header->type);
 		what = header_to_alloc(what_header->redirection);
 		assert(what != NULL);
 		assert_gc_allocated(what);
@@ -220,6 +228,7 @@ LibVEX_gc(GarbageCollectionToken t)
 	old_arena = head_arena;
 	head_arena = NULL;
 	current_arena = NULL;
+	heap_used = 0;
 
 	/* Any allocations made from this point onwards will
 	   automatically go to the new generation. */
@@ -291,13 +300,23 @@ LibVEX_gc(GarbageCollectionToken t)
 	}
 	LibVEX_alloc_sanity_check();
 
-	printf("Major GC finished\n");
+	printf("Major GC finished; %ld bytes in heap\n", heap_used);
+
+	if (heap_used >= GC_MAX_SIZE) {
+		/* We're pretty much boned at this point: every
+		   vexSetAllocModeTEMP_and_clear will trigger a full
+		   GC, and performance will go through the floor. */
+		extern void dbg_break(const char *msg, ...);
+		dbg_break("Heap is enormous (%ld bytes) after a full garbage collect!\n",
+			  heap_used);
+	}
 }
 
 void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t)
 {
 	static unsigned counter;
-	if (counter++ % GC_PERIOD == 0)
+	if (counter++ % GC_PERIOD == 0 ||
+	    heap_used >= GC_MAX_SIZE)
 		LibVEX_gc(t);
 }
 

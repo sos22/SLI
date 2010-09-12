@@ -29,6 +29,7 @@ void fixup_expression_table(void)
 {
 }
 
+void dbg_break(const char *msg, ...) {}
 
 int
 main()
