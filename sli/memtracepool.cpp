@@ -16,7 +16,7 @@ MemTracePool<ait>::get(VexPtr<MachineState<ait> > &base_state,
 		Interpreter<ait> i(ms);
 		MemoryTrace<ait> *v;
 		try {
-			i.getThreadMemoryTrace(tid, &v, 1000000, token);
+			i.getThreadMemoryTrace(tid, &v, 100000, token);
 		} catch (SliException) {
 			/* Hackety hackety hack: if we get an
 			   exception during replay, just stop the

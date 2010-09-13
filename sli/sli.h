@@ -645,9 +645,9 @@ class LogRecord : public Named, public GarbageCollected<LogRecord<ait> > {
 	ThreadId tid;
 protected:
 	void *marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const;
+	LogRecord(ThreadId _tid) : tid(_tid) {}
 public:
 	ThreadId thread() const { return tid; }
-	LogRecord(ThreadId _tid) : tid(_tid) {}
 	virtual unsigned marshal_size() const = 0;
 	virtual void *marshal(unsigned *size) const = 0;
 	virtual ~LogRecord() {};
@@ -3024,23 +3024,39 @@ private:
 		assert(when.tid.valid());
 		calcLastAccessed();
 	}
+	static History *drop_matching_conditions(History *parent,
+						 Expression *condition,
+						 EventTimestamp *when)
+	{
+		bool doit;
+
+		while (1) {
+			if (!parent)
+				break;
+			doit = false;
+			if (!parent->condition ||
+			    parent->condition == condition) {
+				doit = true;
+			} else {
+				unsigned long l;
+				if (parent->condition->isConstant(&l)) {
+					assert(l != 0);
+					doit = true;
+				}
+			}
+			if (!doit)
+				break;
+			*when = parent->when;
+			parent = parent->parent;
+		}
+		return parent;
+	}
 public:
 	static History *get(Expression *condition,
 			    EventTimestamp when,
 			    History *parent)
 	{
-		if (parent && parent->condition == condition) {
-			when = parent->when;
-			parent = parent->parent;
-		}
-		if (parent) {
-			unsigned long l;
-			if (parent->condition->isConstant(&l)) {
-				assert(l);
-				when = parent->when;
-				parent = parent->parent;
-			}
-		}
+		parent = drop_matching_conditions(parent, condition, &when);
 		return new History(condition, when, parent);
 	}
 	static History *get(Expression *cond,
@@ -3048,18 +3064,7 @@ public:
 			    EventTimestamp when,
 			    History *parent)
 	{
-		if (parent && parent->condition == cond) {
-			when = parent->when;
-			parent = parent->parent;
-		}
-		if (parent) {
-			unsigned long l;
-			if (parent->condition->isConstant(&l)) {
-				assert(l);
-				when = parent->when;
-				parent = parent->parent;
-			}
-		}
+		parent = drop_matching_conditions(parent, cond, &when);
 		return new History(cond, last_valid_idx, when, parent);
 	}
 

@@ -102,7 +102,11 @@ Explorer::get(const MachineState<abstract_interpret_value> *ms,
 					continue;
 				Interpreter<abstract_interpret_value> i(s->ms);
 				VexPtr<LogWriter<abstract_interpret_value> > lf(s->lf->writer);
-				i.runToFailure(thr->tid, lf, t, 10000000);
+				try {
+					i.runToFailure(thr->tid, lf, t, 100000);
+				} catch (SliException &e) {
+					/* Don't care that much if something bad happens here. */
+				}
 			}
 		        work->futures.push_back(s);
 			continue;
@@ -128,7 +132,7 @@ Explorer::get(const MachineState<abstract_interpret_value> *ms,
 				i.runToAccessLoggingEvents(tid, r.value + 1, t, lf);
 			} else {
 				printf("%p: run %d to failure from %ld\n", newGray.get(), tid._tid(), thr->nrAccesses);
-				i.runToFailure(tid, lf, t, 10000);
+				i.runToFailure(tid, lf, t, 100000);
 			}
 
 			work->grayStates.push_back(newGray);

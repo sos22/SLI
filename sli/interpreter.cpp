@@ -1786,6 +1786,12 @@ void Interpreter<ait>::runToFailure(ThreadId tid,
 			return;
 		}
 		max_events--;
+		if (thr->blocked) {
+			if (max_events >= 1000)
+				max_events -= 1000;
+			else
+				max_events = 0;
+		}
 	}
 }
 
