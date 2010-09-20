@@ -15,6 +15,7 @@
 #include "exceptions.h"
 
 #include "map.h"
+#include "ring_buffer.h"
 
 static inline char *my_asprintf(const char *fmt, ...)
 {
@@ -365,6 +366,7 @@ class Thread : public GarbageCollected<Thread<abst_int_type> > {
 
 	void redirectGuest(abst_int_type rip);
 public:
+	unsigned decode_counter;
 	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
 	ThreadId tid;
 	unsigned pid;
@@ -384,6 +386,7 @@ public:
 	unsigned long nrEvents;
 
 	IRSB *currentIRSB;
+	ring_buffer<std::pair<unsigned long, int>, 100> irsbExits;
 	abst_int_type currentIRSBRip;
 	expression_result_array<abst_int_type> temporaries;
 	int currentIRSBOffset;
@@ -1825,6 +1828,8 @@ private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
 	void checkFreeList(ait start, ait end, ThreadId asking, EventTimestamp now);
 public:
+	IRSB *getIRSBForAddress(unsigned long rip);
+
 	void findInterestingFunctions(const VAMap::VAMapEntry *vme);
 	void findInterestingFunctions();
 

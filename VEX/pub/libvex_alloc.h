@@ -102,6 +102,7 @@ void vexRegisterGCRoot(void **, const char *name);
 void vexUnregisterGCRoot(void **);
 void vexInitHeap(void);
 void LibVEX_gc(GarbageCollectionToken t);
+void libvex_redirect(void *what, void *to);
 
 class VexGcRoot {
 	void **root;
@@ -250,6 +251,9 @@ class GarbageCollected {
 protected:
 	static void release(const t *x) {
 		LibVEX_free(x);
+	}
+	void libvex_install_redirect(GarbageCollected<t> *n) {
+		libvex_redirect(this, n);
 	}
 public:
 	static void *operator new(size_t s)

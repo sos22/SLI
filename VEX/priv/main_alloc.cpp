@@ -14,11 +14,6 @@
    leaving them off even during normal debug runs. */
 //#define NDEBUG
 
-/* How often should we perform a garbage collection, measured in calls
-   to vexSetAllocModeTEMP_and_clear, which roughly corresponds to
-   client basic blocks. */
-#define GC_PERIOD 100000
-
 /* If we're given an opportunity to garbage collect and the heap is
    bigger than this then we always take it. */
 #define GC_MAX_SIZE 5000000000ul
@@ -54,6 +49,7 @@ struct allocation_header {
 	VexAllocType *type;
 	unsigned long magic;
 	unsigned long _size;
+	bool manual_redirection;
 	struct allocation_header *redirection;
 
 	unsigned long size() const { return _size & ~1ul; }
@@ -132,6 +128,7 @@ GcVisitor::visit(void *&what)
 {
 	struct allocation_header *what_header;
 
+top:
 	if (!what)
 		return;
 	assert_gc_allocated(what);
@@ -173,6 +170,11 @@ GcVisitor::visit(void *&what)
 		assert(!((unsigned long)what_header->redirection & 0x8000000000000000ul));
 		assert((unsigned long)header_to_alloc(what_header->redirection) != 0x93939393939393ab);
 		assert(what_header->redirection->type == what_header->type);
+		if (what_header->redirection->manual_redirection) {
+			assert(what != header_to_alloc(what_header->redirection));
+			what = header_to_alloc(what_header->redirection);
+			goto top;
+		}
 		what = header_to_alloc(what_header->redirection);
 		assert(what != NULL);
 		assert_gc_allocated(what);
@@ -214,13 +216,14 @@ LibVEX_gc(GarbageCollectionToken t)
 
 	gc.depth = 0;
 
-	/* Zap the old redirection pointers */
+	/* Zap the redirection pointers */
 	for (struct arena *a = head_arena; a; a = a->next) {
 		unsigned offset;
 		struct allocation_header *ah;
 		for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
 			ah = (struct allocation_header *)(a->content + offset);
-			ah->redirection = NULL;
+			if (!ah->manual_redirection)
+				ah->redirection = NULL;
 		}
 	}
 
@@ -266,7 +269,7 @@ LibVEX_gc(GarbageCollectionToken t)
 		   it'll have a redirection.  Otherwise, it's garbage.
 		   Update the content of the reference
 		   appropriately. */
-		if (ah->redirection)
+		if (ah->redirection && !ah->manual_redirection)
 			weak->content = header_to_alloc(ah->redirection);
 		else
 			weak->content = NULL;
@@ -280,7 +283,7 @@ LibVEX_gc(GarbageCollectionToken t)
 
 		for (offset = 0; offset < old_arena->bytes_used; offset += ah->size()) {
 			ah = (struct allocation_header *)(&old_arena->content[offset]);
-			if (ah->redirection) {
+			if (ah->redirection && !ah->manual_redirection) {
 				/* This one is still alive, so don't
 				   run its destructor.  The underlying
 				   memory will be released, though,
@@ -298,6 +301,7 @@ LibVEX_gc(GarbageCollectionToken t)
 		munmap(old_arena, old_arena->size);
 		old_arena = next_old;
 	}
+
 	LibVEX_alloc_sanity_check();
 
 	printf("Major GC finished; %ld bytes in heap\n", heap_used);
@@ -314,9 +318,7 @@ LibVEX_gc(GarbageCollectionToken t)
 
 void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t)
 {
-	static unsigned counter;
-	if (counter++ % GC_PERIOD == 0 ||
-	    heap_used >= GC_MAX_SIZE)
+	if (heap_used >= GC_MAX_SIZE)
 		LibVEX_gc(t);
 }
 
@@ -601,7 +603,7 @@ sanity_check_arena(struct arena *a)
 		assert(ah->type != NULL);
 		assert(ah->size() <= a->size - offset);
 		assert(!ah->mark());
-		assert(ah->redirection == ah || ah->redirection == NULL);
+		assert(ah->redirection == ah || ah->redirection == NULL || ah->manual_redirection);
 	}
 }
 
@@ -652,4 +654,18 @@ assert_gc_allocated(const void *ptr)
 	struct allocation_header *ah = alloc_to_header(ptr);
 	assert(ah->magic == ALLOCATION_HEADER_MAGIC);
 #endif
+}
+
+/* Arrange that on the next GC pass every reference to what gets
+   turned into a reference to to. */
+void
+libvex_redirect(void *what, void *to)
+{
+	assert(what != to);
+	assert_gc_allocated(what);
+	assert_gc_allocated(to);
+
+	struct allocation_header *ah = alloc_to_header(what);
+	ah->redirection = alloc_to_header(to);
+	ah->manual_redirection = true;
 }

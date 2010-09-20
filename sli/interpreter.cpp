@@ -1379,20 +1379,10 @@ public:
 	void visit(HeapVisitor &hv) { visit_aiv(offset, hv); hv(aspace); }
 };
 
-template<typename ait> void
-Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
-				VexPtr<AddressSpace<ait> > &addrSpace,
-				ait rip,
-				GarbageCollectionToken t)
+template<typename ait> IRSB *
+AddressSpace<ait>::getIRSBForAddress(unsigned long rip)
 {
-	ths->redirectGuest(rip);
-
-	ths->currentIRSBRip = rip;
-
-	unsigned long _rip = force(rip);
-	vexSetAllocModeTEMP_and_clear(t);
-
-	WeakRef<IRSB> *cacheSlot = addrSpace->searchDecodeCache(_rip);
+	WeakRef<IRSB> *cacheSlot = searchDecodeCache(rip);
 	assert(cacheSlot != NULL);
 	IRSB *irsb = cacheSlot->get();
 	if (!irsb) {
@@ -1406,12 +1396,12 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 		LibVEX_default_VexAbiInfo(&abiinfo_both);
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-		class AddressSpaceGuestFetcher<ait> fetcher(addrSpace, _rip);
+		class AddressSpaceGuestFetcher<ait> fetcher(this, rip);
 		irsb = bb_to_IR(&vge,
 				NULL, /* Context for chase_into_ok */
 				disInstr_AMD64,
 				fetcher,
-				(Addr64)_rip,
+				(Addr64)rip,
 				chase_into_ok,
 				False, /* host bigendian */
 				VexArchAMD64,
@@ -1429,6 +1419,27 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 
 		cacheSlot->set(irsb);
 	}
+
+	return irsb;
+}
+
+template<typename ait> void
+Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
+				VexPtr<AddressSpace<ait> > &addrSpace,
+				ait rip,
+				GarbageCollectionToken t)
+{
+	ths->decode_counter++;
+	ths->redirectGuest(rip);
+
+	ths->irsbExits.push(std::pair<unsigned long, int>(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+
+	ths->currentIRSBRip = rip;
+
+	unsigned long _rip = force(rip);
+	vexSetAllocModeTEMP_and_clear(t);
+
+	IRSB *irsb = addrSpace->getIRSBForAddress(_rip);
 
 	ths->temporaries.setSize(irsb->tyenv->types_used);
 
