@@ -11,6 +11,8 @@ __default_hash_function(const k &key)
 	return key.hash();
 }
 
+template <> unsigned long __default_hash_function(const unsigned long &key);
+
 template <typename k> bool
 __default_eq_function(const k &k1, const k &k2)
 {
@@ -89,6 +91,9 @@ public:
 
 	valuet &operator [](const keyt &idx) { return lookup(idx, true)->value; }
 	const valuet &operator [](const keyt &idx) const { return lookup(idx, true)->value; }
+	valuet &get(const keyt &idx) { return lookup(idx, true)->value; }
+	void set(const keyt &idx, const valuet &v) { lookup(idx, true)->value = v; }
+
 	bool hasKey(const keyt &k) { return lookup(k, false) != NULL; }
 	class iterator {
 		friend class gc_map<keyt, valuet, hashfn, equalfn, visitvalue>;

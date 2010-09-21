@@ -1,4 +1,5 @@
 #include <typeinfo>
+#include <deque>
 
 #include "sli.h"
 
@@ -55,12 +56,10 @@ public:
 	}
 };
 
-class CrashPredicate;
 class CrashExpression;
 
 class CPMapper {
 public:
-	virtual CrashPredicate *operator()(CrashPredicate *p) { return p; }
 	virtual CrashExpression *operator()(CrashExpression *e) { return e; }
 };
 
@@ -638,6 +637,7 @@ public:
 
 mk_unop(Neg, -)
 mk_unop(Not, 0x7f8ff8ac608cb30d ^)
+mk_unop(BadAddr, 76348956389 *)
 
 static CrashExpression *
 replaceFirstAddExpression(CrashExpression *start,
@@ -762,6 +762,14 @@ CrashExpressionNot::_simplify(unsigned hardness)
 	unsigned long lc;
 	if (l->isConstant(lc))
 		return CrashExpressionConst::get(!lc);
+	return this;
+}
+
+CrashExpression *
+CrashExpressionBadAddr::_simplify(unsigned hardness)
+{
+	l = l->simplify(hardness);
+	rehash();
 	return this;
 }
 
@@ -1063,63 +1071,33 @@ public:
 	}
 };
 
-class CrashPredicate : public GarbageCollected<CrashPredicate>, public Named {
-protected:
-	virtual void _visit(HeapVisitor &hv) = 0;
-	virtual const char *_mkName() const = 0;
-	char *mkName() const {
-		return my_asprintf("%s", _mkName());
-	}
-public:
-	virtual ~CrashPredicate() {}
-	void visit(HeapVisitor &hv) { _visit(hv); }
-	void destruct() { this->~CrashPredicate(); }
-	virtual CrashPredicate *map(CPMapper &m) = 0;
-	virtual unsigned complexity() const = 0;
-	virtual bool isConstant(bool &l) const = 0;
-	bool isConstant() const { bool ign; return isConstant(ign); }
-	NAMED_CLASS
-};
+/* A crash machine is intended to be an abstraction of a program,
+   starting from a particular RIP, which attempts to capture the
+   details of why it's going to crash in a particular way.  It's a
+   very simple, non-Turing complete, programming language.  Programs
+   are essentially DAGs.  Interior nodes indicate control-flow
+   expressions.  Leaf nodes have some condition attached to them, and
+   we crash if we get to that node and the condition turns out to be
+   true.  Edges are annotated with sequences of stores, which tells
+   you what memory stores you'll make while going down that edge.
 
-class CrashPredicateConstant : public CrashPredicate {
-	CrashPredicateConstant(bool _v) : v(_v) {}
-protected:
-	void _visit(HeapVisitor &hv) {}
-	const char *_mkName() const { return v ? "true" : "false"; }
-public:
-	bool v;
-	CrashPredicate *map(CPMapper &m) { return m(this); }
-	unsigned complexity() const { return 0; }
-	bool isConstant(bool &l) const { l = v; return true; }
-	static CrashPredicate *get(bool val) {
-		return new CrashPredicateConstant(val);
-	}
-};
+   Major complication: all of the expressions are evaluates with
+   respect to registers at the *start* of the program.
 
-class CrashPredicateBadAddr : public CrashPredicate {
-	CrashPredicateBadAddr(CrashExpression *_addr)
-		: addr(_addr)
-	{
-	}
-protected:
-	void _visit(HeapVisitor &hv) { hv(addr); }
-	const char *_mkName() const { return my_asprintf("bad address %s", addr->name()); }
-public:
-	CrashExpression *addr;
-	static CrashPredicate *get(CrashExpression *addr) {
-		return new CrashPredicateBadAddr(addr);
-	}
-	static CrashPredicate *get(IRExpr *addr) {
-		return get(CrashExpression::get(addr));
-	}
-	CrashPredicate *map(CPMapper &m) {
-		return m(get(addr->map(m)));
-	}
-	unsigned complexity() const { return addr->complexity() + 1; }
-	bool isConstant(bool &l) const { return false; }
-};
+   Note that the machine is a DAG i.e. it cannot contain cycles.  This
+   limits the expressivity quite a bit, but also makes it much easier
+   to analyse.
 
-class CrashReason : public GarbageCollected<CrashReason>, public Named {
+   We also restrict things in that internal nodes have at most two
+   successors.  If we ever need more than that then we'll have to
+   factor them.
+
+   There are also stub nodes in the graph, which just indicate that we
+   don't really know what happens there yet.  That can be either
+   because we've not run the analysis yet, or because we can't (e.g
+   indirect branch).
+*/
+class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named {
 	class RewriteTmpMapper : public CPMapper {
 		IRTemp tmp;
 		CrashExpression *e;
@@ -1131,11 +1109,11 @@ class CrashReason : public GarbageCollected<CrashReason>, public Named {
 		CrashExpression *operator()(CrashExpression *ce) {
 			if (CrashExpressionTemp *cet =
 			    dynamic_cast<CrashExpressionTemp *>(ce)) {
-				if (cet->tmp == tmp)
-					return e;
+                               if (cet->tmp == tmp)
+                                       return e;
 			}
 			return ce;
-		}				
+		}
 	};
 	class RewriteRegisterMapper : public CPMapper {
 		Int offset;
@@ -1149,202 +1127,191 @@ class CrashReason : public GarbageCollected<CrashReason>, public Named {
 			if (CrashExpressionRegister *cet =
 			    dynamic_cast<CrashExpressionRegister *>(ce)) {
 				if (cet->offset == offset)
-					return e;
+                                       return e;
 			}
 			return ce;
-		}				
+		}
 	};
-	CrashReason(const CrashReason &x);
 protected:
 	char *mkName() const {
-		char *b = my_asprintf("%s: %s", when.name(), data_reason->name());
-		for (std::vector<CrashPredicate *>::const_iterator it = control_reasons.begin();
-		     it != control_reasons.end();
-		     it++) {
-			char *b2;
-			b2 = my_asprintf("%s;\n%s", b, (*it)->name());
-			free(b);
-			b = b2;
+		switch (type) {
+		case CM_NODE_LEAF:
+			return my_asprintf("%lx: leaf{%s}", rip, leafCond->name());
+		case CM_NODE_STUB:
+			return my_asprintf("%lx: stub", rip);
+		case CM_NODE_BRANCH:
+			return my_asprintf("%lx: branch{%s, %p, %p}",
+					   rip,
+					   branchCond->name(),
+					   trueTarget,
+					   falseTarget);
 		}
-		return b;
+		abort();
 	}
 public:
-	struct store_record : public Named {
-	protected:
-		char *mkName() const { return my_asprintf("%s: %s -> %s",
-							  when.name(),
-							  value->name(),
-							  addr->name()); }
-	public:
+	CrashMachineNode(unsigned long _rip, CrashExpression *e) {
+		rip = _rip;
+		type = CM_NODE_LEAF;
+		leafCond = e;
+	}
+	CrashMachineNode(unsigned long _rip) {
+		rip = _rip;
+	}
+
+	struct store_record {
 		CrashTimestamp when;
 		CrashExpression *addr;
-		CrashExpression *value;
+		CrashExpression *data;
+		store_record(CrashTimestamp _when,
+			     CrashExpression *_addr,
+			     CrashExpression *_data)
+			: when(_when), addr(_addr), data(_data)
+		{
+		}
 	};
-	CrashTimestamp when;
-	CrashPredicate *data_reason;
-	std::vector<CrashPredicate *> control_reasons;
-	std::vector<store_record> storesIssued;
 
-	void addControlReason(CrashPredicate *cp)
+	unsigned long rip;
+	std::deque<store_record> stores;
+
+	enum { CM_NODE_LEAF = 52, CM_NODE_BRANCH, CM_NODE_STUB } type;
+
+	union {
+		/* Crash condition for leaf nodes */
+		CrashExpression *leafCond;
+
+		struct {
+			/* Internal binary branches.  branchCond might be constant, in
+			   which case only one of the targets will relevant (and the
+			   other might well be NULL). */
+			CrashExpression *branchCond;
+			CrashMachineNode *trueTarget;
+			CrashMachineNode *falseTarget;
+		};
+	};
+
+	CrashMachineNode *map(CPMapper &m)
 	{
-		bool c;
-		if (cp->isConstant(c)) {
-			assert(c);
-			return;
+		CrashMachineNode *res;
+		switch (type) {
+		case CM_NODE_LEAF: {
+			CrashExpression *l = leafCond->map(m);
+			if (l == leafCond)
+				return this;
+			res = new CrashMachineNode(rip);
+			res->type = CM_NODE_LEAF;
+			res->leafCond = l;
+			break;
 		}
-		control_reasons.push_back(cp);
-		clearName();
+		case CM_NODE_BRANCH: {
+			CrashExpression *c = branchCond->map(m);
+			CrashMachineNode *t = trueTarget ? trueTarget->map(m) : NULL;
+			CrashMachineNode *f = falseTarget ? falseTarget->map(m) : NULL;
+			if (c == branchCond && t == trueTarget &&
+			    f == falseTarget)
+				return this;
+			res = new CrashMachineNode(rip);
+			res->type = CM_NODE_BRANCH;
+			res->branchCond = c;
+			res->trueTarget = t;
+			res->falseTarget = f;
+			break;
+		}
+		case CM_NODE_STUB:
+			return this;
+		}
+		for (std::deque<store_record>::iterator it = stores.begin();
+		     it != stores.end();
+		     it++) {
+			store_record n(it->when,
+				       it->addr->map(m),
+				       it->data->map(m));
+			res->stores.push_back(n);
+		}
+		return res;
+	}
+	CrashMachineNode *rewriteTemporary(IRTemp tmp,
+					   CrashExpression *ce)
+	{
+		RewriteTmpMapper rtm(tmp, ce);
+		return map(rtm);
+	}
+	CrashMachineNode *rewriteRegister(unsigned offset,
+					  CrashExpression *ce)
+	{
+		RewriteRegisterMapper rrm(offset, ce);
+		return map(rrm);
 	}
 
-	CrashReason(CrashTimestamp _when, CrashPredicate *r, const std::vector<store_record> &si,
-		    const std::vector<CrashPredicate *> &cr)
-		: when(_when), data_reason(r), control_reasons(cr), storesIssued(si)
-	{
-	}
-	CrashReason *map(CPMapper &cm) {
-		std::vector<store_record> newSi;
-		for (std::vector<store_record>::iterator it = storesIssued.begin();
-		     it != storesIssued.end();
-		     it++) {
-			store_record sr;
-			sr.when = it->when;
-			sr.addr = it->addr->map(cm);
-			sr.value = it->value->map(cm);
-			newSi.push_back(sr);
-		}
-		std::vector<CrashPredicate *> newCr;
-		for (std::vector<CrashPredicate *>::iterator it = control_reasons.begin();
-		     it != control_reasons.end();
-		     it++) {
-			CrashPredicate *newCp = (*it)->map(cm);
-			bool b;
-			if (newCp->isConstant(b)) {
-				if (!b) {
-					/* This can happen, if we get
-					   the aliasing pattern wrong.
-					   Oh well. */
-					printf("Whoops: %s -> %s\n",
-					       (*it)->name(),
-					       newCp->name());
-				}
-			} else {
-				newCr.push_back(newCp);
-			}
-		}
-		return new CrashReason(when, data_reason->map(cm), newSi, newCr);
-	}
-	CrashReason *reduceTimestampOneStatement() const {
-		return new CrashReason(when.reduceOneStatement(),
-				       data_reason,
-				       storesIssued,
-				       control_reasons);
-	}
-	CrashReason *reduceTimestampOneBlock(int n) const {
-		return new CrashReason(when.reduceOneBlock(n),
-				       data_reason,
-				       storesIssued,
-				       control_reasons);
-	}
-	CrashReason *issueStore(CrashExpression *addr, CrashExpression *data) const {
-		printf("Issue store %s to %s at %s\n", data->name(), addr->name(), when.name());
-		CrashReason *cr = new CrashReason(when,
-						  data_reason,
-						  storesIssued,
-						  control_reasons);
-		store_record sr;
-		sr.when = when;
-		sr.addr = addr;
-		sr.value = data;
-		cr->storesIssued.push_back(sr);
-		return cr;
-	}
-	CrashReason *rewriteTemporary(IRTemp what, CrashExpression *to) {
-		RewriteTmpMapper t(what, to);
-		return map(t);
-	}
-	CrashReason *rewriteRegister(Int offset, CrashExpression *to) {
-		RewriteRegisterMapper t(offset, to);
-		return map(t);
-	}
 	void visit(HeapVisitor &hv) {
-		hv(data_reason);
-		for (std::vector<store_record>::iterator it = storesIssued.begin();
-		     it != storesIssued.end();
+		switch (type) {
+		case CM_NODE_LEAF:
+			hv(leafCond);
+			break;
+		case CM_NODE_BRANCH:
+			hv(branchCond);
+			hv(trueTarget);
+			hv(falseTarget);
+			break;
+		case CM_NODE_STUB:
+			break;
+		}
+		for (std::deque<store_record>::iterator it = stores.begin();
+		     it != stores.end();
 		     it++) {
 			hv(it->addr);
-			hv(it->value);
+			hv(it->data);
 		}
-		for (std::vector<CrashPredicate *>::iterator it = control_reasons.begin();
-		     it != control_reasons.end();
-		     it++)
-			hv(*it);
 	}
-	void destruct() { this->~CrashReason(); }
-
+	void destruct() { this->~CrashMachineNode(); }
 	NAMED_CLASS
 };
 
-class CrashPredicateNot : public CrashPredicate {
-	CrashPredicateNot(CrashPredicate *_l)
-		: l(_l)
-	{
-	}
-	CrashPredicate *l;
+class CrashMachine : public GarbageCollected<CrashMachine>, public Named {
 protected:
-	void _visit(HeapVisitor &hv) { hv(l); }
-	const char *_mkName() const { return vex_asprintf("¬(%s)",
-							  l->name()); }
+	virtual ~CrashMachine() {}
+	char *mkName() const;
 public:
-	static CrashPredicate *get(CrashPredicate *l)
+	typedef gc_map<unsigned long,
+		       CrashMachineNode *,
+		       __default_hash_function<unsigned long>,
+		       __default_eq_function<unsigned long>,
+		       __visit_function_heap<CrashMachineNode *> >
+	nodeMapT;
+	nodeMapT *nodeMap;
+	CrashMachineNode *start;
+	CrashTimestamp when;
+
+	void changed() { clearName(); }
+	CrashMachine(CrashTimestamp _when)
+		: nodeMap(new nodeMapT()),
+		  when(_when)
 	{
-		bool c;
-		if (l->isConstant(c))
-			return CrashPredicateConstant::get(!c);
-		return new CrashPredicateNot(l);
 	}
 
-	CrashPredicate *map(CPMapper &m) {
-		return m(get(l->map(m)));
-	}
-	unsigned complexity() const { return l->complexity() + 1; }
-	bool isConstant(bool &out) const { return l->isConstant(out); }
+	void visit(HeapVisitor &hv) { hv(nodeMap); hv(start); }
+	void destruct() { this->~CrashMachine(); }
+	NAMED_CLASS
 };
 
-class CrashPredicateLift : public CrashPredicate {
-	CrashPredicateLift(CrashExpression *_l)
-		: l(_l)
-	{
+char *
+CrashMachine::mkName() const
+{
+	char *acc = my_asprintf("%s start at %p",
+				when.name(),
+				start);
+	for (nodeMapT::iterator it = nodeMap->begin();
+	     it != nodeMap->end();
+	     it++) {
+		char *t = my_asprintf("%s;\n%lx -> %p(%s)",
+				      acc,
+				      it.key(),
+				      it.value(),
+				      it.value()->name());
+		free(acc);
+		acc = t;
 	}
-protected:
-	void _visit(HeapVisitor &hv) { hv(l); }
-	const char *_mkName() const { return l->name(); }
-public:
-	CrashExpression *l;
-
-	static CrashPredicate *get(CrashExpression *l)
-	{
-		unsigned long v;
-		if (l->isConstant(v))
-			return CrashPredicateConstant::get(!!v);
-		return new CrashPredicateLift(l);
-	}
-
-	CrashPredicate *map(CPMapper &m) {
-		return m(get(l->map(m)));
-	}
-
-	unsigned complexity() const { return l->complexity() + 1; }
-
-	bool isConstant(bool &out) const {
-		unsigned long v;
-		if (l->isConstant(v)) {
-			out = !!v;
-			return true;
-		} else {
-			return false;
-		}
-	}
-};
+	return acc;
+}
 
 CrashExpression *
 CrashExpressionEqual::_simplify(unsigned hardness)
@@ -1575,16 +1542,16 @@ CrashExpression::get(IRExpr *e)
 	}
 }
 
-static CrashReason *
+static CrashMachineNode *
 exprToCrashReason(CrashTimestamp when, IRExpr *expr)
 {
 	return NULL;
 }
 
-static CrashReason *
-statementToCrashReason(CrashTimestamp when, IRStmt *irs)
+static CrashMachineNode *
+statementToCrashReason(CrashTimestamp when, IRStmt *irs, unsigned long rip)
 {
-	CrashReason *r;
+	CrashMachineNode *r;
 
 	switch (irs->tag) {
 	case Ist_NoOp:
@@ -1606,11 +1573,11 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 		r = exprToCrashReason(when, irs->Ist.Store.addr);
 		if (!r)
 			r = exprToCrashReason(when, irs->Ist.Store.data);
-		if (!r) {
-			std::vector<CrashReason::store_record> i;
-			std::vector<CrashPredicate *> i2;
-			r = new CrashReason(when, CrashPredicateBadAddr::get(irs->Ist.Store.addr), i, i2);
-		}
+		if (!r)
+			r = new CrashMachineNode(
+				rip,
+				CrashExpressionBadAddr::get(
+					CrashExpression::get(irs->Ist.Store.addr)));
 		return r;
 	case Ist_Dirty:
 		if (irs->Ist.Dirty.details->guard) {
@@ -1628,129 +1595,181 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 		if (!strncmp(irs->Ist.Dirty.details->cee->name,
 			     "helper_load_",
 			     12)) {
-			std::vector<CrashReason::store_record> i;
-			std::vector<CrashPredicate *> i2;
-			return new CrashReason(when, CrashPredicateBadAddr::get(irs->Ist.Dirty.details->args[0]), i, i2);
+			return new CrashMachineNode(
+				rip,
+				CrashExpressionBadAddr::get(
+					CrashExpression::get(irs->Ist.Dirty.details->args[0])));
 		}
 		return NULL;
 	}
 }
 
-static CrashReason *
-updateCrashReasonForStatement(CrashReason *cr,
-			      IRStmt *stmt)
+/* We know that after some instruction the crash machine will be
+   @successor. What's the crash machine before the instruction?  The
+   instruction is represented as a list of VEX statements. */
+/* This is only correct for internal nodes (i.e. not leaves) where we
+   don't take any branches in the instruction.  There can be branches
+   in the instruction, we just can't take them. */
+static CrashMachineNode *
+crashMachineNodeForInstruction(CrashTimestamp *when,
+			       CrashMachineNode *successor,
+			       IRStmt **statements,
+			       int nr_statements)
 {
-	CrashReason *n = cr->reduceTimestampOneStatement();
-	switch (stmt->tag) {
-	case Ist_NoOp:
-	case Ist_AbiHint:
-	case Ist_MBE:
-	case Ist_IMark:
-		return n;
-	case Ist_Put: {
-		CrashExpression *d = CrashExpression::get(stmt->Ist.Put.data);
-		if (stmt->Ist.Put.offset == OFFSET_amd64_RSP ||
-		    stmt->Ist.Put.offset == OFFSET_amd64_RBP)
-			d = CrashExpressionStackPtr::get(d);
-		return n->rewriteRegister(stmt->Ist.Put.offset,
-					  d);
-	}
-	case Ist_WrTmp:
-		return n->rewriteTemporary(stmt->Ist.WrTmp.tmp,
-					   CrashExpression::get(stmt->Ist.WrTmp.data));
-	case Ist_Dirty:
-		if (strncmp(stmt->Ist.Dirty.details->cee->name,
-			    "helper_load_",
-			    12))
-			abort(); /* don't know how to deal with these */
-		return n->rewriteTemporary(
-			stmt->Ist.Dirty.details->tmp,
-			CrashExpressionLoad::get(
-				n->when,
-				CrashExpression::get(
-					stmt->Ist.Dirty.details->args[0])));
-	case Ist_Store:
-		return n->issueStore(
-		       CrashExpression::get(
-			       stmt->Ist.Store.addr),
-		       CrashExpression::get(
-			       stmt->Ist.Store.data));
-	case Ist_Exit: {
-		CrashReason *cr2 = new CrashReason(
-			cr->when.reduceOneStatement(),
-			cr->data_reason,
-			cr->storesIssued,
-			cr->control_reasons);
-		cr2->addControlReason(
-			CrashPredicateNot::get(
-				CrashPredicateLift::get(
-					CrashExpression::get(stmt->Ist.Exit.guard))));
-		return cr2;
-	}
+	CrashMachineNode *res = new CrashMachineNode(statements[0]->Ist.IMark.addr);
+	int i;
 
-	case Ist_CAS:
-		return n->rewriteTemporary(
-			stmt->Ist.CAS.details->oldLo,
-			CrashExpressionLoad::get(
-				n->when,
-				CrashExpression::get(
-					stmt->Ist.CAS.details->addr)));
-	default:
-		/* Dunno what to do here. */
-		abort();
-	}
-}
+	res->type = CrashMachineNode::CM_NODE_BRANCH;
+	res->branchCond = CrashExpressionConst::get(0);
+	res->falseTarget = successor;
 
-static CrashReason *
-updateCrashReasonForTakenBranch(CrashReason *cr,
-				IRStmt *stmt)
-{
-	assert(stmt->tag == Ist_Exit);
-	cr->addControlReason(CrashPredicateLift::get(
-				     CrashExpression::get(stmt->Ist.Exit.guard)));
-	return cr->reduceTimestampOneStatement();
-}
+	for (i = nr_statements - 1; i >= 0; i--)  {
+		IRStmt *stmt = statements[i];
 
-class ResolveStackMapper : public CPMapper {
-public:
-	CrashReason *cr;
-	bool progress;
+		*when = when->reduceOneStatement();
 
-	CrashExpression *operator()(CrashExpression *ce) {
-		CrashExpressionLoad *cel =
-			dynamic_cast<CrashExpressionLoad *>(ce);
-		if (!cel || !cel->addr->pointsAtStack())
-			return ce;
-		for (std::vector<CrashReason::store_record>::iterator it = cr->storesIssued.begin();
-		     it != cr->storesIssued.end();
-		     it++) {
-			/* We assume that stack references are simple
-			   enough that the simplifier can always tell
-			   whether two expressions are equal.
-			   Otherwise, we'll miss some assignments,
-			   which would be bad. */
-			if (it->when < cel->when &&
-			    ce->complexity() > it->value->complexity()) {
-				CrashExpression *c =
-					CrashExpressionEqual::get(
-						cel->addr,
-						it->addr)->simplify(100);
-				if (c->isTrue()) {
-					progress = true;
-					return it->value;
-				}
-			}
+		switch (stmt->tag) {
+		case Ist_NoOp:
+		case Ist_AbiHint:
+		case Ist_MBE:
+		case Ist_IMark:
+			break;
+
+		case Ist_Put: {
+			CrashExpression *d = CrashExpression::get(stmt->Ist.Put.data);
+			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP ||
+			    stmt->Ist.Put.offset == OFFSET_amd64_RBP)
+				d = CrashExpressionStackPtr::get(d);
+			res = res->rewriteRegister(stmt->Ist.Put.offset, d);
+			break;
 		}
-		return ce;
+
+		case Ist_WrTmp:
+			res = res->rewriteTemporary(
+				stmt->Ist.WrTmp.tmp,
+				CrashExpression::get(stmt->Ist.WrTmp.data));
+			break;
+			
+		case Ist_Dirty:
+			if (strncmp(stmt->Ist.Dirty.details->cee->name,
+				    "helper_load_",
+				    12))
+				abort(); /* don't know how to deal with these */
+			res = res->rewriteTemporary(
+				stmt->Ist.Dirty.details->tmp,
+				CrashExpressionLoad::get(
+					*when,
+					CrashExpression::get(
+						stmt->Ist.Dirty.details->args[0])));
+			break;
+
+		case Ist_Store:
+			res->stores.push_front(
+				CrashMachineNode::store_record(
+					*when,
+					CrashExpression::get(
+						stmt->Ist.Store.addr),
+					CrashExpression::get(
+						stmt->Ist.Store.data)));
+			break;
+
+		case Ist_Exit:
+			/* Only handle two-way branches */
+			assert(!res->trueTarget);
+			res->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64);
+			res->trueTarget->type = CrashMachineNode::CM_NODE_STUB;
+			res->branchCond = CrashExpression::get(stmt->Ist.Exit.guard);
+			break;
+
+		case Ist_CAS:
+			res = res->rewriteTemporary(
+				stmt->Ist.CAS.details->oldLo,
+				CrashExpressionLoad::get(
+					*when,
+					CrashExpression::get(
+						stmt->Ist.CAS.details->addr)));
+			break;
+
+		default:
+			/* Dunno what to do here. */
+			abort();
+		}
 	}
-	CrashPredicate *operator()(CrashPredicate *cp) {
-		CrashPredicateLift *cpl =
-			dynamic_cast<CrashPredicateLift *>(cp);
-		if (!cpl)
-			return cp;
-		return CrashPredicateLift::get(cpl->l->simplify(10000));
+
+	return res;
+}
+
+static void
+updateCrashMachineForBlock(CrashMachine *cm,
+			   unsigned long start,
+			   int exit_idx,
+			   MachineState<unsigned long> *ms,
+			   bool leaf)
+{
+	IRSB *irsb = ms->addressSpace->getIRSBForAddress(start);
+	int stmt_start, stmt_end;
+	CrashMachineNode *node;
+	unsigned long rip;
+
+	assert(exit_idx <= irsb->stmts_used);
+
+	if (!leaf && exit_idx != irsb->stmts_used) {
+		/* Special case when we have a taken branch */
+		int x;
+		assert(irsb->stmts[exit_idx]->tag == Ist_Exit);
+		for (x = exit_idx; irsb->stmts[x]->tag != Ist_IMark; x--)
+			;
+		node = new CrashMachineNode(irsb->stmts[x]->Ist.IMark.addr);
+		node->type = CrashMachineNode::CM_NODE_BRANCH;
+		node->branchCond = CrashExpression::get(irsb->stmts[exit_idx]->Ist.Exit.guard);
+
+		/* Hackety hackety hack: assume that conditional
+		   branches are always the last statement in the
+		   block. */
+		if (exit_idx == irsb->stmts_used - 1) {
+			if (irsb->next->tag == Iex_Const)
+				rip = irsb->next->Iex.Const.con->Ico.U64;
+			else
+				rip = 0;
+		} else {
+			assert(irsb->stmts[exit_idx+1]->tag == Ist_IMark);
+			rip = irsb->stmts[exit_idx+1]->Ist.IMark.addr;
+		}
+
+		node->falseTarget = new CrashMachineNode(rip);
+		node->falseTarget->type = CrashMachineNode::CM_NODE_STUB;
+
+		node->trueTarget = cm->start;
+	} else if (leaf) {
+		node = cm->start;
+		stmt_end = exit_idx;
+	} else {
+		node = cm->start;
+		stmt_end = exit_idx - 1;
 	}
-};
+
+	while (stmt_end > 0) {
+		for (stmt_start = stmt_end;
+		     irsb->stmts[stmt_start]->tag != Ist_IMark;
+		     stmt_start--)
+			;
+		rip = irsb->stmts[stmt_start]->Ist.IMark.addr;
+		node = crashMachineNodeForInstruction(
+			&cm->when, node, irsb->stmts + stmt_start, stmt_end - stmt_start + 1);
+
+		if (!cm->nodeMap->hasKey(rip)) {
+			/* If we find several possible crash reasons
+			   for one location, we pick the first one
+			   which we find, because it tends to be the
+			   easiest to analyse. */
+			cm->nodeMap->set(rip, node);
+		}
+		stmt_end = stmt_start - 1;
+	}
+
+	cm->start = node;
+	cm->changed();
+}
 
 class SimplifyHardMapper : public CPMapper {
 public:
@@ -1798,25 +1817,35 @@ main(int argc, char *argv[])
 
 	/* Step one: examine the current statement to figure out the
 	   proximal cause of the crash. */
-	VexPtr<CrashReason> cr(
-		statementToCrashReason(CrashTimestamp(crashedThread->tid,
-						      crashedThread->currentIRSBOffset - 1,
-						      crashedThread->decode_counter),
-				       crashedThread->currentIRSB->stmts[crashedThread->currentIRSBOffset - 1]));
-
-	printf("Proximal cause is %s\n", cr->name());
-
-	/* Step two: work our way backwards, expanding the crash reason as we go. */
-	for (int i = crashedThread->currentIRSBOffset - 2;
-	     i >= 0;
-	     i--) {
-		cr = updateCrashReasonForStatement(cr,
-						   crashedThread->currentIRSB->stmts[i]);
+	CrashTimestamp when(crashedThread->tid,
+			    crashedThread->currentIRSBOffset - 1,
+			    crashedThread->decode_counter);
+	CrashMachineNode *cmn;
+	{
+		int idx;
+		for (idx = crashedThread->currentIRSBOffset;
+		     crashedThread->currentIRSB->stmts[idx]->tag != Ist_IMark;
+		     idx--)
+			;
+		cmn = statementToCrashReason(
+			when,
+			crashedThread->currentIRSB->stmts[crashedThread->currentIRSBOffset - 1],
+			crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr);
 	}
 
-	printf("Cause after backtracking current IRSB is %s\n", cr->name());
+	printf("Proximal cause is %s\n", cmn->name());
 
-	unsigned long prev_rip = crashedThread->currentIRSBRip;
+	VexPtr<CrashMachine> cm(new CrashMachine(when));
+	cm->start = cmn;
+
+	/* Step two: work our way backwards, expanding the crash reason as we go. */
+	updateCrashMachineForBlock(cm,
+				   crashedThread->currentIRSBRip,
+				   crashedThread->currentIRSBOffset - 2,
+				   ms,
+				   true);
+
+	printf("Cause after backtracking current IRSB is %s\n", cm->name());
 
 	/* And now do the same for the logged IRSBs */
 	{
@@ -1824,28 +1853,19 @@ main(int argc, char *argv[])
 		for (ring_buffer<std::pair<unsigned long, int>, 100>::reverse_iterator it = crashedThread->irsbExits.rbegin();
 		     it != crashedThread->irsbExits.rend();
 		     it++, cntr++) {
-			if (cntr == 43)
-				dbg_break("Here we are.\n");
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(it->first);
-			assert(irsb->stmts_used >= it->second);
-			int i = it->second - 1;
-			cr = cr->reduceTimestampOneBlock(it->second);
-			if (irsb->stmts[i]->tag == Ist_Exit &&
-			    irsb->stmts[i]->Ist.Exit.dst->Ico.U64 == prev_rip) {
-				cr = updateCrashReasonForTakenBranch(cr, irsb->stmts[i]);
-				i--;
-			}
-			for (; i >= 0; i--)
-				cr = updateCrashReasonForStatement(cr, irsb->stmts[i]);
-			printf("Cause after backtracking IRSB at %lx:%d %s\n",
-			       it->first, it->second, cr->name());
-			prev_rip = it->first;
+			cm->when = cm->when.reduceOneBlock(it->second);
+			updateCrashMachineForBlock(cm,
+						   it->first,
+						   it->second,
+						   ms,
+						   false);
 		}
 	}
 
-	printf("Reason before stack resolution %s\n",
-	       cr->name());
+	printf("Reason before stub resolution %s\n",
+	       cm->name());
 
+#if 0
 	/* Step 3: Go through the expression and try to resolve
 	 * stack-local references. */
 	ResolveStackMapper rsm;
@@ -1864,6 +1884,8 @@ main(int argc, char *argv[])
 	CrashReason *cr2 = cr->map(shm);
 
 	printf("Final cause %s\n", cr2->name());
+
+#endif
 
 	dbg_break("finished");
 

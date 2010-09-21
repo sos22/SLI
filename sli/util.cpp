@@ -78,3 +78,10 @@ vex_asprintf(const char *fmt, ...)
 	free(r);
 	return r2;
 }
+
+template <> unsigned long
+__default_hash_function(const unsigned long &key)
+{
+	return key;
+}
+
