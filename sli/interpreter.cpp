@@ -1657,6 +1657,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 						assert(!isConstant(ths->currentControlCondition));
 					assert(force(ths->currentControlCondition));
 				}
+				printf("Branch out of %llx\n", ths->currentIRSB->stmts[0]->Ist.IMark.addr);
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
 					printf("EMULATION WARNING %lx\n",
@@ -1681,6 +1682,9 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 
 			assert(force(ths->currentControlCondition));
 		}
+
+		printf("Fell out of %llx\n", ths->currentIRSB->stmts[0]->Ist.IMark.addr);
+		ths->currentIRSBOffset++;
 		
 		assert(ths->currentIRSB->jumpkind == Ijk_Boring ||
 		       ths->currentIRSB->jumpkind == Ijk_Call ||

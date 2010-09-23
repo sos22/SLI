@@ -255,6 +255,7 @@ protected:
 	void libvex_install_redirect(GarbageCollected<t> *n) {
 		libvex_redirect(this, n);
 	}
+	virtual ~GarbageCollected() {}
 public:
 	static void *operator new(size_t s)
 	{
@@ -267,7 +268,7 @@ public:
 		abort();
 	}
 	virtual void visit(HeapVisitor &hv) = 0;
-	virtual void destruct() = 0;
+	virtual void destruct() { this->~GarbageCollected(); }
 	virtual void relocate(t *target, size_t sz) { }
 };
 template <typename t> VexAllocType GarbageCollected<t>::type = {-1, relocate_object<t>, visit_object<t>, destruct_object<t>, NULL, get_name<t> };

@@ -83,8 +83,7 @@ public:
 			_name2 = _name = mkName();
 		return _name;
 	}
-	void destruct() { clearName(); }
-	~Named() { destruct(); }
+	~Named() { clearName(); }
 };
 
 template <typename t, const char *(*get_name)(const void *) = get_name<t>, void (*visit)(void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
@@ -402,7 +401,6 @@ public:
 	void pretty_print() const;
 private:
 	bool allowRipMismatch;
-	~Thread();
 public:
 	static ThreadEvent<abst_int_type> *runToEvent(VexPtr<Thread<abst_int_type> > &ths,
 						      VexPtr<MachineState<abst_int_type> > &ms,
@@ -765,7 +763,6 @@ public:
 	ThreadId nextTid;
 
 private:
-	~MachineState();
 	static MachineState *initialMachineState(AddressSpace<abst_int_type> *as,
 						 const LogRecordInitialSighandlers<abst_int_type> &handlers);
 public:
@@ -1068,7 +1065,6 @@ template <typename ait>
 class RdtscEvent : public ThreadEvent<ait> {
 	IRTemp tmp;
 	RdtscEvent(EventTimestamp when, IRTemp _tmp) : ThreadEvent<ait>(when), tmp(_tmp) {};
-	~RdtscEvent();
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
@@ -2046,6 +2042,10 @@ protected:
 	virtual const gc_map<ThreadId, unsigned long> *_lastAccessMap() = 0;
 	virtual void _visit(HeapVisitor &hv) = 0;
 
+	~Expression() {
+		remove_from_hash();
+		tot_outstanding--;
+	}
 private:
 	WeakRef<const gc_map<ThreadId, unsigned long> > *lastAccessedMap;
 public:
@@ -2095,11 +2095,6 @@ public:
 			return _isEqual(other);
 		else
 			return false;
-	}
-	void destruct() {
-		remove_from_hash();
-		tot_outstanding--;
-		Named::destruct();
 	}
 
 	void visit(HeapVisitor &hv) {
