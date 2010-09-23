@@ -1145,8 +1145,6 @@ protected:
 					   branchCond->name(),
 					   trueTarget ? trueTarget->name() : "(null)",
 					   falseTarget ? falseTarget->name() : "(null)");
-		case CM_NODE_CYCLE_BREAK:
-			return my_asprintf("%lx: cycle break", rip);
 		}
 		abort();
 	}
@@ -1163,7 +1161,6 @@ public:
 	bool isStubFree() const {
 		switch (type) {
 		case CM_NODE_LEAF:
-		case CM_NODE_CYCLE_BREAK:
 			return true;
 		case CM_NODE_STUB:
 			return false;
@@ -1180,7 +1177,6 @@ public:
 	void sanity_check() {
 		switch (type) {
 		case CM_NODE_LEAF:
-		case CM_NODE_CYCLE_BREAK:
 		case CM_NODE_STUB:
 			return;
 		case CM_NODE_BRANCH:
@@ -1209,7 +1205,7 @@ public:
 	unsigned long rip;
 	std::deque<store_record> stores;
 
-	enum { CM_NODE_LEAF = 52, CM_NODE_BRANCH, CM_NODE_STUB, CM_NODE_CYCLE_BREAK } type;
+	enum { CM_NODE_LEAF = 52, CM_NODE_BRANCH, CM_NODE_STUB } type;
 
 	/* Crash condition for leaf nodes */
 	CrashExpression *leafCond;
@@ -1235,8 +1231,6 @@ public:
 			res->leafCond = l;
 			break;
 		}
-		case CM_NODE_CYCLE_BREAK:
-			return this;
 		case CM_NODE_BRANCH: {
 			CrashExpression *c = branchCond->map(m);
 			CrashMachineNode *t = trueTarget ? trueTarget->map(m) : NULL;
@@ -1282,8 +1276,6 @@ public:
 		switch (type) {
 		case CM_NODE_LEAF:
 			hv(leafCond);
-			break;
-		case CM_NODE_CYCLE_BREAK:
 			break;
 		case CM_NODE_BRANCH:
 			hv(branchCond);
@@ -1784,6 +1776,56 @@ crashMachineNodeForInstruction(CrashTimestamp *when,
 	return res;
 }
 
+/* Returns true if two CMNs are definitely equivalent, and false if
+   we're not sure. */
+static bool
+cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
+{
+	if (cmn1 == cmn2)
+		return true;
+	if (!cmn1 || !cmn2)
+		return false;
+	if (cmn1->type != cmn2->type)
+		return false;
+	assert(cmn1->type != CrashMachineNode::CM_NODE_STUB);
+	if (cmn1->type == CrashMachineNode::CM_NODE_LEAF) {
+		return cmn1->leafCond->eq(cmn2->leafCond);
+	} else {
+		assert(cmn1->type == CrashMachineNode::CM_NODE_BRANCH);
+		return cmn1->branchCond->eq(cmn2->branchCond) &&
+			cmns_bisimilar(cmn1->trueTarget,
+				       cmn2->trueTarget) &&
+			cmns_bisimilar(cmn1->falseTarget,
+				       cmn2->falseTarget);
+	}
+}
+
+static CrashMachineNode *
+easy_simplify_cmn(CrashMachineNode *cmn)
+{
+	/* Do a very basic kind of CMN simplification */
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		while (cmn->type == CrashMachineNode::CM_NODE_BRANCH &&
+		       !cmn->trueTarget) {
+			cmn = cmn->falseTarget;
+			progress = true;
+		}
+		while (cmn->type == CrashMachineNode::CM_NODE_BRANCH &&
+		       !cmn->falseTarget) {
+			cmn = cmn->trueTarget;
+			progress = true;
+		}
+		while (cmn->type == CrashMachineNode::CM_NODE_BRANCH &&
+		       cmns_bisimilar(cmn->trueTarget, cmn->falseTarget)) {
+			cmn = cmn->trueTarget;
+			progress = true;
+		}
+	}
+	return cmn;
+}
+
 static void
 updateCrashMachineForBlock(CrashMachine *cm,
 			   unsigned long start,
@@ -2092,6 +2134,7 @@ void
 CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		    CrashMachine *partial_cm)
 {
+	static unsigned nr_nodes = 0;
 	while (!grey.empty()) {
 		unsigned long rip = grey.back();
 		grey.pop_back();
@@ -2130,7 +2173,9 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		CrashCFGNode *newNode =
 			new CrashCFGNode(rip, nonFallThroughTarget, fallThroughTarget);
 		nodeMap->set(rip, newNode);
+		nr_nodes++;
 	}
+	printf("CFG has %d nodes.\n", nr_nodes);
 }
 
 void
@@ -2356,30 +2401,6 @@ CrashCFG::build(MachineState<unsigned long> *ms,
 	calculate_cmns(partial_cm, ms);
 }
 
-/* Returns true if two CMNs are definitely equivalent, and false if
-   we're not sure. */
-static bool
-cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
-{
-	if (cmn1 == cmn2)
-		return true;
-	if (!cmn1 || !cmn2)
-		return false;
-	if (cmn1->type != cmn2->type)
-		return false;
-	assert(cmn1->type != CrashMachineNode::CM_NODE_STUB);
-	if (cmn1->type == CrashMachineNode::CM_NODE_LEAF) {
-		return cmn1->leafCond->eq(cmn2->leafCond);
-	} else {
-		assert(cmn1->type == CrashMachineNode::CM_NODE_BRANCH);
-		return cmn1->branchCond->eq(cmn2->branchCond) &&
-			cmns_bisimilar(cmn1->trueTarget,
-				       cmn2->trueTarget) &&
-			cmns_bisimilar(cmn1->falseTarget,
-				       cmn2->falseTarget);
-	}
-}
-
 static CrashMachineNode *
 getStaticMachine(CrashMachine *dynamic_cm,
 		 CrashMachine *static_cm,
@@ -2397,13 +2418,6 @@ getStaticMachine(CrashMachine *dynamic_cm,
 		       static_cmn->name());
 		return static_cmn;
 	}
-
-	/* Don't loop forever if we recurse: set a loop breaker
-	 * here. */
-	CrashMachineNode *breaker =
-		new CrashMachineNode(dynamic_cmn->rip);
-	breaker->type = CrashMachineNode::CM_NODE_CYCLE_BREAK;
-	static_cm->set(breaker);
 
 	if (dynamic_cmn->type == CrashMachineNode::CM_NODE_LEAF) {
 		static_cmn = dynamic_cmn;
@@ -2439,32 +2453,9 @@ getStaticMachine(CrashMachine *dynamic_cm,
 
 	assert(static_cmn->isStubFree());
 	assert(static_cmn->rip == dynamic_cmn->rip);
-	while (static_cmn->type == CrashMachineNode::CM_NODE_BRANCH &&
-	       cmns_bisimilar(static_cmn->trueTarget, static_cmn->falseTarget))
-		static_cmn = static_cmn->trueTarget;
 	static_cm->set(static_cmn);
 
-	/* Do a very basic kind of simplification here */
-	bool progress = true;
-	while (progress) {
-		progress = false;
-		while (static_cmn->type == CrashMachineNode::CM_NODE_BRANCH &&
-		       !static_cmn->trueTarget) {
-			static_cmn = static_cmn->falseTarget;
-			progress = true;
-		}
-		while (static_cmn->type == CrashMachineNode::CM_NODE_BRANCH &&
-		       !static_cmn->falseTarget) {
-			static_cmn = static_cmn->trueTarget;
-			progress = true;
-		}
-		while (static_cmn->type == CrashMachineNode::CM_NODE_BRANCH &&
-		       cmns_bisimilar(static_cmn->trueTarget, static_cmn->falseTarget)) {
-			static_cmn = static_cmn->trueTarget;
-			progress = true;
-		}
-	}
-	return static_cmn;
+	return easy_simplify_cmn(static_cmn);
 }
 
 static CrashMachineNode *
@@ -2474,9 +2465,6 @@ simplify_cmn(CrashMachineNode *cmn)
 		return NULL;
 
 	switch (cmn->type) {
-	case CrashMachineNode::CM_NODE_CYCLE_BREAK:
-		return cmn;
-
 	case CrashMachineNode::CM_NODE_STUB:
 		/* These should already have been stripped out by our caller. */
 		abort();
@@ -2490,18 +2478,12 @@ simplify_cmn(CrashMachineNode *cmn)
 		cmn->trueTarget = simplify_cmn(cmn->trueTarget);
 		assert(cmn->trueTarget || cmn->falseTarget);
 		cmn->sanity_check();
-		if (!cmn->falseTarget || cmn->falseTarget->type == CrashMachineNode::CM_NODE_CYCLE_BREAK) {
-			if (cmn->trueTarget)
-				cmn = cmn->trueTarget;
-			else
-				cmn = cmn->falseTarget;
+		if (!cmn->falseTarget) {
+			cmn = cmn->trueTarget;
 			break;
 		}
-		if (!cmn->trueTarget || cmn->trueTarget->type == CrashMachineNode::CM_NODE_CYCLE_BREAK) {
-			if (cmn->falseTarget)
-				cmn = cmn->falseTarget;
-			else
-				cmn = cmn->trueTarget;
+		if (!cmn->trueTarget) {
+			cmn = cmn->falseTarget;
 			break;
 		}
 		unsigned long lc;
