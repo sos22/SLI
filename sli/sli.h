@@ -78,6 +78,8 @@ public:
 			_name2 = _name = NULL;
 	}
 	const char *name() const {
+		if (!this)
+			return NULL;
 		assert(_name == _name2);
 		if (!_name)
 			_name2 = _name = mkName();
