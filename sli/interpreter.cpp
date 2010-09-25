@@ -1432,7 +1432,7 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 	ths->decode_counter++;
 	ths->redirectGuest(rip);
 
-	ths->irsbExits.push(std::pair<unsigned long, int>(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+	ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
 
 	ths->currentIRSBRip = rip;
 

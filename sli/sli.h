@@ -387,10 +387,28 @@ public:
 	unsigned long nrEvents;
 
 	IRSB *currentIRSB;
-	ring_buffer<std::pair<unsigned long, int>, 100> irsbExits;
 	abst_int_type currentIRSBRip;
 	expression_result_array<abst_int_type> temporaries;
 	int currentIRSBOffset;
+
+	/* We maintain a log of the thread's recent control flow
+	   activity.  This means that whenever we translate a new
+	   IRSB, we record the address from which we obtained the old
+	   one. */
+	struct control_log_entry {
+		unsigned long translated_rip;
+		int exit_idx;
+		control_log_entry(unsigned long _rip, int _idx)
+			: translated_rip(_rip), exit_idx(_idx)
+		{
+		}
+		control_log_entry()
+			: translated_rip(0), exit_idx(-99)
+		{
+		}
+	};
+	ring_buffer<control_log_entry, 100> controlLog;
+
 
 	abst_int_type currentControlCondition;
 

@@ -2553,19 +2553,19 @@ main(int argc, char *argv[])
 	/* Now walk back over the earlier IRSBs */
 	{
 		int cntr = 0;
-		for (ring_buffer<std::pair<unsigned long, int>, 100>::reverse_iterator it =
-			     crashedThread->irsbExits.rbegin();
-		     it != crashedThread->irsbExits.rend() && cntr < 20;
+		for (ring_buffer<Thread<unsigned long>::control_log_entry, 100>::reverse_iterator it =
+			     crashedThread->controlLog.rbegin();
+		     it != crashedThread->controlLog.rend() && cntr < 20;
 		     it++) {
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(it->first);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(it->translated_rip);
 			bool exited_by_branch;
 			int exit_idx;
-			if (it->second == irsb->stmts_used + 1) {
+			if (it->exit_idx == irsb->stmts_used + 1) {
 				exited_by_branch = false;
-				exit_idx = it->second - 2;
+				exit_idx = it->exit_idx - 2;
 			} else {
 				exited_by_branch = true;
-				exit_idx = it->second - 1;
+				exit_idx = it->exit_idx - 1;
 			}
 			for (int idx = exit_idx;
 			     idx >= 0;
