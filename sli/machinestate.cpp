@@ -50,7 +50,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(VexPtr<LogReader<ait> 
 							  LogReaderPtr *end,
 							  GarbageCollectionToken token)
 {
-	MachineState<ait> *work;
+	VexPtr<MachineState<ait> > work;
 	LogRecord<ait> *lr;
 	
 	lr = lf->read(ptr, &ptr);
@@ -81,7 +81,7 @@ MachineState<ait> *MachineState<ait>::initialMachineState(VexPtr<LogReader<ait> 
 	        } else if (LogRecordVexThreadState<ait> *lrvts = dynamic_cast<LogRecordVexThreadState<ait>*>(lr)) {
 			VexPtr<LogRecordVexThreadState<ait> > l(lrvts);
 			VexPtr<Thread<ait> > t(work->findThread(lrvts->thread()));
-			t->imposeState(t, l, as, token);
+			t->imposeState(t, l, as, work, ptr, token);
 		} else {
 			break;
 		}

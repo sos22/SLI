@@ -71,9 +71,11 @@ template<typename ait>
 void Thread<ait>::imposeState(VexPtr<Thread<ait> > &ths,
 			      VexPtr<LogRecordVexThreadState<ait> > &rec,
 			      VexPtr<AddressSpace<ait> > &as,
+			      VexPtr<MachineState<ait> > &ms,
+			      const LogReaderPtr &ptr,
 			      GarbageCollectionToken t)
 {
-	translateNextBlock(ths, as, rec->currentIRSBRip, t);
+	translateNextBlock(ths, as, ms, ptr, rec->currentIRSBRip, t);
 	assert(ths->currentIRSB);
 
 	/* == is valid here, and just means we're right at the end of
@@ -96,6 +98,11 @@ void Thread<ait>::visit(HeapVisitor &hv)
 	visit_aiv(robust_list, hv);
 	visit_aiv(set_child_tid, hv);
 	visit_aiv(futex_block_address, hv);
+
+	for (class ring_buffer<control_log_entry, 100>::iterator it = controlLog.begin();
+	     it != controlLog.end();
+	     it++)
+		hv(it->ms);
 }
 
 template <typename ait>

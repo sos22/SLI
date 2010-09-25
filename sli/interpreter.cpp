@@ -1426,13 +1426,16 @@ AddressSpace<ait>::getIRSBForAddress(unsigned long rip)
 template<typename ait> void
 Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 				VexPtr<AddressSpace<ait> > &addrSpace,
+				VexPtr<MachineState<ait> > &ms,
+				const LogReaderPtr &ptr,
 				ait rip,
 				GarbageCollectionToken t)
 {
 	ths->decode_counter++;
 	ths->redirectGuest(rip);
 
-	ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+	ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset,
+							    ms, ptr));
 
 	ths->currentIRSBRip = rip;
 
@@ -1462,6 +1465,7 @@ template<typename ait>
 ThreadEvent<ait> *
 Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			VexPtr<MachineState<ait> > &ms,
+			const LogReaderPtr &ptr,
 			GarbageCollectionToken t)
 {
 	unsigned put_offset;
@@ -1472,7 +1476,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 		if (!ths->currentIRSB) {
 			try {
 				VexPtr<AddressSpace<ait> > as(ms->addressSpace);
-			        ths->translateNextBlock(ths, as, ths->regs.rip(), t);
+			        ths->translateNextBlock(ths, as, ms, ptr, ths->regs.rip(), t);
 			} catch (BadMemoryException<ait> excn) {
 				return SignalEvent<ait>::get(ths->bumpEvent(ms), 11, excn.ptr);
 			}
@@ -1737,7 +1741,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 	       /* Since we're running the thread in isolation, if it
 		  goes idle it's unlikely to ever wake up again. */
 	       !thr->idle) {
-		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
 
 		InterpretResult res = evt->fake(currentState);
 		if (res != InterpretResultContinue) {
@@ -1768,7 +1772,7 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid,
 {
         VexPtr<Thread<ait> > thr(currentState->findThread(tid));
         while (1) {
-                ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
+                ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (dynamic_cast<LoadEvent<ait> *>(evt) ||
 		    dynamic_cast<StoreEvent<ait> *>(evt)) {
@@ -1794,7 +1798,7 @@ void Interpreter<ait>::runToFailure(ThreadId tid,
 	VexPtr<Thread<ait> > thr(currentState->findThread(tid));
 	while ((!have_event_limit || max_events) && thr->runnable()) {
 		VexPtr<MachineState<ait> > cs(currentState);
-		ThreadEvent<ait> *evt = thr->runToEvent(thr, cs, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, cs, LogReaderPtr(), t);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {
 			thr->cannot_make_progress = true;
@@ -1823,6 +1827,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 	VexPtr<LogRecord<ait> > lr;
 	bool appendedRecord;
 	bool finished = false;
+	LogReaderPtr ptr2 = ptr;
 
 	while (!finished) {
 		event_counter++;
@@ -1841,7 +1846,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		VexPtr<Thread<ait> > thr(currentState->findThread(lr->thread()));
 		assert(thr);
 		assert(!thr->exitted);
-		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, ptr2, t);
 
 		while (evt) {
 			if (lastEvent && evt->when == *lastEvent)
@@ -1864,6 +1869,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 				lr = NULL;
 				if (eof)
 					*eof = ptr;
+				ptr2 = ptr;
 				if (evt) {
 					appendedRecord = false;
 					lr = lf->read(ptr, &ptr);
@@ -1878,6 +1884,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 	                process_memory_records(as, lf, ptr, &ptr, lw, t);
 			if (eof)
 				*eof = ptr;
+			ptr2 = ptr;
 	        }
 	}
 }
@@ -1888,6 +1895,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 				  LogReaderPtr ptr,
 				  GarbageCollectionToken t, LogReaderPtr *eof)
 {
+	LogReaderPtr ptr2 = ptr;
 	VexPtr<LogRecord<ait> > lr;
 	/* Mostly a debugging aide */
 	volatile static unsigned long event_counter;
@@ -1904,7 +1912,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 
 		VexPtr<Thread<ait> > thr(currentState->findThread(lr->thread()));
 		assert(thr->runnable());
-		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, ptr2, t);
 
 		while (evt && !finished) {
 			if (evt->when == end)
@@ -1915,6 +1923,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 				lr = NULL;
 				if (eof)
 					*eof = ptr;
+				ptr2 = ptr;
 			}
 			if (!finished && evt && !lr)
 				lr = lf->read(ptr, &ptr);
@@ -1925,6 +1934,9 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 		VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
 	        VexPtr<LogWriter<ait> > dummy(NULL);
 		process_memory_records(as, lf, ptr, &ptr, dummy, t);
+				if (eof)
+					*eof = ptr;
+				ptr2 = ptr;
 	}
 }
 
@@ -1946,9 +1958,6 @@ template <typename ait> void destruct_expression_result_array(void *_ctxt)
 }
 
 #define MK_INTERPRETER(t)						\
-	template ThreadEvent<t> *Thread<t>::runToEvent(VexPtr<Thread<t> > &ths, \
-						       VexPtr<MachineState<t> > &ms, \
-						       GarbageCollectionToken);	\
 	template void Interpreter<t>::runToFailure(ThreadId tid,	\
 						   VexPtr<LogWriter<t> > &output, \
 						   GarbageCollectionToken, \

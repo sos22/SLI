@@ -580,7 +580,7 @@ replayToSchedule(VexPtr<ConstraintMaker> &cm, VexPtr<MachineState<unsigned long>
 		if (stashedEvents[tid])
 			evt = stashedEvents[tid];
 		else
-			evt = thr->runToEvent(thr, ms, tok);
+		  evt = thr->runToEvent(thr, ms, LogReaderPtr(), tok);
 		ms->addressSpace->sanityCheckDecodeCache();
 
 		allow_idle_threads = false;

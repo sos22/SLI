@@ -344,10 +344,18 @@ template <typename ait> class LogRecordInitialRegisters;
 template <typename ait> class LogWriter;
 template <typename ait> class LogRecordVexThreadState;
 
+class LogReaderPtr {
+public:
+	unsigned char cls_data[32];
+	LogReaderPtr() { memset(cls_data, 0, sizeof(cls_data)); }
+};
+
 template <typename abst_int_type>
 class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	static void translateNextBlock(VexPtr<Thread<abst_int_type> > &ths,
 				       VexPtr<AddressSpace<abst_int_type> > &addrSpace,
+				       VexPtr<MachineState<abst_int_type> > &ms,
+				       const LogReaderPtr &ptr,
 				       abst_int_type rip,
 				       GarbageCollectionToken t);
 	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
@@ -398,12 +406,19 @@ public:
 	struct control_log_entry {
 		unsigned long translated_rip;
 		int exit_idx;
-		control_log_entry(unsigned long _rip, int _idx)
-			: translated_rip(_rip), exit_idx(_idx)
+		MachineState<abst_int_type> *ms; /* At the end of the
+						    block. */
+		LogReaderPtr logptr; /* At the end of the block */
+		control_log_entry(unsigned long _rip, int _idx,
+				  MachineState<abst_int_type> *_ms,
+				  const LogReaderPtr &_ptr)
+			: translated_rip(_rip), exit_idx(_idx),
+			  ms(_ms), logptr(_ptr)
 		{
 		}
 		control_log_entry()
-			: translated_rip(0), exit_idx(-99)
+			: translated_rip(0), exit_idx(-99),
+			  ms(NULL), logptr()
 		{
 		}
 	};
@@ -424,6 +439,7 @@ private:
 public:
 	static ThreadEvent<abst_int_type> *runToEvent(VexPtr<Thread<abst_int_type> > &ths,
 						      VexPtr<MachineState<abst_int_type> > &ms,
+						      const LogReaderPtr &ptr,
 						      GarbageCollectionToken t);
 
 	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
@@ -434,6 +450,8 @@ public:
 	static void imposeState(VexPtr<Thread<abst_int_type> > &thr,
 				VexPtr<LogRecordVexThreadState<abst_int_type> > &rec,
 				VexPtr<AddressSpace<abst_int_type> > &as,
+				VexPtr<MachineState<abst_int_type> > &ms,
+				const LogReaderPtr &ptr,
 				GarbageCollectionToken t);
 
 	void visit(HeapVisitor &hv);
@@ -715,14 +733,6 @@ public:
 	{
 		memcpy(out->handlers, handlers, sizeof(handlers));
 	}
-};
-
-/* gcc struggles with member classes of template classes, so this has
-   to be non-member. */
-class LogReaderPtr {
-public:
-	unsigned char cls_data[32];
-	LogReaderPtr() { memset(cls_data, 0, sizeof(cls_data)); }
 };
 
 template <typename ait>

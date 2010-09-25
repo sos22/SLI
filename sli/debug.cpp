@@ -317,7 +317,7 @@ ContinueCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToke
 		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
 
         while (1) {
-		ThreadEvent<ait> *evt = thr->runToEvent(thr, ms, t);
+		ThreadEvent<ait> *evt = thr->runToEvent(thr, ms, LogReaderPtr(), t);
                 InterpretResult res = evt->fake(ms);
 
 		if (dynamic_cast<SignalEvent<ait> *>(evt) ||
