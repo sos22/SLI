@@ -1736,6 +1736,91 @@ extract_call_follower(IRSB *irsb)
 	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
 }
 
+/* The Oracle is used when static analysis fails us (or I just
+   couldn't be bothered to write it properly :)).  It basically allows
+   you to make queries against the captured crash in a relatively
+   structured way. */
+class Oracle {
+	typedef std::vector<std::pair<unsigned long, bool> > traceT;
+	traceT trace;
+public:
+
+	/* Note that the RIP trace is in reverse chronological order
+	   i.e. it produces things which are nearest the crash
+	   first! */
+	class RipTraceIterator {
+		friend class Oracle;
+		traceT::iterator it;
+		RipTraceIterator(traceT::iterator _it)
+			: it(_it)
+		{
+		}
+	public:
+		unsigned long operator*() { return it->first; }
+		bool operator==(const RipTraceIterator &b) {
+			return it == b.it;
+		}
+		bool operator!=(const RipTraceIterator &b) {
+			return !(*this == b);
+		}
+		void operator++(int i) {
+			it++;
+		}
+	};
+	RipTraceIterator begin_rip_trace() { return RipTraceIterator(trace.begin()); }
+	RipTraceIterator end_rip_trace() { return RipTraceIterator(trace.end()); }
+	void addRipTrace(unsigned long rip, bool branchTaken) {
+		trace.push_back(std::pair<unsigned long, bool>(rip, branchTaken));
+	}
+
+	/* Given a RIP, try to make a guess at what the next
+	   instruction is likely to be.  Returns 0 if we don't
+	   know. */
+	unsigned long successorOf(unsigned long rip) const
+	{
+		traceT::const_iterator it = trace.begin();
+		unsigned long succ_rip = it->first;
+		it++;
+		while (it != trace.end() && it->first != rip) {
+			succ_rip = it->first;
+			it++;
+		}
+		if (it == trace.end())
+			return 0;
+		else
+			return succ_rip;
+	}
+
+	/* Did the dynamic execution include a branch from @first to
+	 * @second? */
+	bool containsRipEdge(unsigned long first, unsigned long second) const
+	{
+		/* XXX is this not backwards? */
+		for (traceT::const_iterator oit = trace.begin();
+		     oit + 1 != trace.end();
+		     oit++) {
+			if (oit->first == first &&
+			    (oit+1)->first == second)
+				return true;
+		}
+		return false;
+	}
+
+	/* Is the branch @rip taken?  Returns true if it is, and @dflt
+	 * otherwise.  Also returns @dflt if @rip doesn't contain a
+	 * branch. */
+	bool branchTaken(unsigned long rip, bool dflt) const {
+		for (traceT::const_iterator it = trace.begin();
+		     it != trace.end();
+		     it++) {
+			if (it->first == rip)
+				return it->second;
+		}
+		return dflt;
+	}
+};
+
+
 /* Aim here is to incorporate a bit of static analysis into the crash
  * machine. */
 /* There are two crash machines:
@@ -1809,8 +1894,6 @@ public:
 	NAMED_CLASS
 };
 
-typedef std::vector<std::pair<unsigned long, bool> > Oracle;
-
 class CrashCFG : public GarbageCollected<CrashCFG> {
 	typedef gc_map<unsigned long, CrashCFGNode *,
 		       __default_hash_function<unsigned long>,
@@ -1877,24 +1960,6 @@ get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
 	return true;
 }
 
-/* Try to use the oracle to figure out where we should go after
- * rip. */
-static unsigned long
-oracle_find_successor(const Oracle &oracle, unsigned long rip)
-{
-	Oracle::const_iterator it = oracle.begin();
-	unsigned long succ_rip = it->first;
-	it++;
-	while (it != oracle.end() && it->first != rip) {
-		succ_rip = it->first;
-		it++;
-	}
-	if (it == oracle.end())
-		return 0;
-	else
-		return succ_rip;
-}
-
 /* Hackety hackety hack: we ``know'' that certain RIPs are equivalent,
    because we have some idea of how the standard library is
    implemented.  In particular, we know what the system call template
@@ -1950,7 +2015,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			    irsb->jumpkind == Ijk_Ret) {
 				/* Cheat and grab the return address out of
 				   the dynamic trace, if it's available. */
-				fallThroughTarget = oracle_find_successor(oracle, rip);
+				fallThroughTarget = oracle.successorOf(rip);
 			}
 		}
 
@@ -2084,18 +2149,12 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 						break;
 					if (it->n->trueTarget && it->n->falseTarget) {
 						unsigned long target = (it - 1)->n->rip;
-						if (avoid_edges_in_oracle) {
-							bool in_oracle = false;
-							for (Oracle::const_iterator oit = oracle.begin();
-							     !in_oracle && oit + 1 != oracle.end();
-							     oit++) {
-								if (oit->first == s.n->rip &&
-								    (oit+1)->first == target)
-									in_oracle = true;
-							}
-							if (in_oracle)
-								continue;
-						}
+						if (avoid_edges_in_oracle &&
+						    oracle.containsRipEdge(
+							    s.n->rip,
+							    target))
+							continue;
+
 						printf("Cycle breaker removes edge %lx -> %lx\n",
 						       it->n->rip,
 						       target);
@@ -2161,14 +2220,9 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 				 * encourage the visiter to keep the
 				 * simplest possible execution and
 				 * avoids unnecessary partitioning. */
-				for (Oracle::const_iterator it = oracle.begin();
-				     it != oracle.end();
-				     it++) {
-					if (it->first == n->rip) {
-						visitTrueTargetFirst = it->second;
-						break;
-					}
-				}
+				visitTrueTargetFirst =
+					oracle.branchTaken(n->rip,
+							   visitTrueTargetFirst);
 			} else if (s.n->trueTarget) {
 				assert(!s.n->falseTarget);
 				visitTrueTargetFirst = true;
@@ -2357,13 +2411,13 @@ CrashCFG::calculate_cmns(ThreadId tid,
    machine nodes for every instruction. */
 void
 CrashCFG::build(MachineState<unsigned long> *ms,
-		const std::vector<std::pair<unsigned long, bool> > &footstep_log,
+		const Oracle &oracle,
 		CrashMachine *cm,
 		ThreadId tid)
 {
-	build_cfg(ms, footstep_log, cm, tid);
+	build_cfg(ms, oracle, cm, tid);
 	resolve_stubs();
-	break_cycles(footstep_log);
+	break_cycles(oracle);
 	calculate_cmns(tid, ms, cm);
 }
 
@@ -2425,9 +2479,8 @@ simplify_cmn(CrashMachineNode *cmn)
 static CrashMachineNode *
 buildCrashMachineNode(MachineState<unsigned long> *ms,
 		      unsigned long rip,
-		      bool earlyExit,
 		      CrashMachine *cm,
-		      const std::vector<std::pair<unsigned long, bool> > &footstep_log,
+		      const Oracle &oracle,
 		      ThreadId tid)
 {
 	CrashTimestamp when(tid, rip);
@@ -2435,7 +2488,7 @@ buildCrashMachineNode(MachineState<unsigned long> *ms,
 		return cm->get(when);
 	CrashCFG *cfg = new CrashCFG();
 	cfg->add_root(rip);
-	cfg->build(ms, footstep_log, cm, tid);
+	cfg->build(ms, oracle, cm, tid);
 	return cfg->get_cmn(rip);
 }
 
@@ -2486,17 +2539,16 @@ main(int argc, char *argv[])
 	   analysis fails.
 	*/
 
-	std::vector<std::pair<unsigned long, bool> > footstep_log;
+	Oracle oracle;
 	
 	/* Do the current IRSB first */
 	for (int idx = crashedThread->currentIRSBOffset;
 	     idx >= 0;
 	     idx--) {
 		if (crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark)
-			footstep_log.push_back(
-				std::pair<unsigned long, bool>(
-					crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr,
-					false));
+			oracle.addRipTrace(
+				crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr,
+				false);
 	}
 	/* Now walk back over the earlier IRSBs */
 	{
@@ -2519,10 +2571,9 @@ main(int argc, char *argv[])
 			     idx >= 0;
 			     idx--) {
 				if (irsb->stmts[idx]->tag == Ist_IMark) {
-					footstep_log.push_back(
-						std::pair<unsigned long, bool>(
-							irsb->stmts[idx]->Ist.IMark.addr,
-							exited_by_branch));
+					oracle.addRipTrace(
+						irsb->stmts[idx]->Ist.IMark.addr,
+						exited_by_branch);
 					exited_by_branch = false;
 				}
 			}
@@ -2561,21 +2612,20 @@ main(int argc, char *argv[])
 
 	/* Incorporate stuff from the dynamic trace in reverse
 	 * order. */
-	for (std::vector<std::pair<unsigned long, bool> >::iterator it = footstep_log.begin();
-	     it != footstep_log.end();
+	for (Oracle::RipTraceIterator it = oracle.begin_rip_trace();
+	     it != oracle.end_rip_trace();
 	     it++) {
-		CrashTimestamp when(crashedThread->tid, it->first);
+		CrashTimestamp when(crashedThread->tid, *it);
 		if (!cm->hasKey(when)) {
 			CrashMachineNode *cmn;
 			cmn = buildCrashMachineNode(ms,
-						    it->first,
-						    it->second,
+						    *it,
 						    cm,
-						    footstep_log,
+						    oracle,
 						    crashedThread->tid);
 			cmn = simplify_cmn(cmn);
 			printf("CrashMachineNode for %lx -> %s\n",
-			       it->first, cmn->name());
+			       *it, cmn->name());
 			cm->set(when, cmn);
 		}
 	}
