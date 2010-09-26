@@ -8,6 +8,10 @@
 #include "guest_generic_bb_to_IR.h"
 #include "guest_amd64_defs.h"
 
+#define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
+#define DBG_CYCLE_BREAKER(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
+#define DBG_CALC_CMNS(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
+
 /* Something which is almost like a timestamp: a bundle of TID and
    RIP.  Most of the analysis works on acyclic CFGs, for which this is
    actually sufficient to uniquely identify a dynamic instruction. */
@@ -2228,12 +2232,12 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 
 		assert(s.n);
 
-		printf("Cycle breaker %lx: ", s.n->rip);
+		DBG_CYCLE_BREAKER("Cycle breaker %lx: ", s.n->rip);
 		if (s.n->visitedByCycleBreaker) {
 			/* Nothing to do here: we've already visited
 			   this node, and know that it doesn't
 			   participate in any cycles. */
-			printf("Already visited.\n");
+			DBG_CYCLE_BREAKER("Already visited.\n");
 			stack.pop_back();
 			continue;
 		}
@@ -2241,25 +2245,25 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 		if ( (s.visitedTrueTarget || !s.n->trueTarget) &&
 		     (s.visitedFalseTarget || !s.n->falseTarget) ) {
 			/* Finished this node. */
-			printf("Finished.\n");
+			DBG_CYCLE_BREAKER("Finished.\n");
 			s.n->visitedByCycleBreaker = true;
 			s.n->onCycleBreakerPath = false;
 			stack.pop_back();
 		} else if (s.visitedTrueTarget) {
 			assert(s.n->falseTarget);
-			printf("Visited true; trying false %lx.\n",
+			DBG_CYCLE_BREAKER("Visited true; trying false %lx.\n",
 				s.n->falseTarget->rip);
 			s.visitedFalseTarget = true;
 			stack.push_back(CycleBreakerState(s.n->falseTarget));
 		} else if (s.visitedFalseTarget) {
 			assert(s.n->trueTarget);
-			printf("Visited false; trying true %lx.\n",
+			DBG_CYCLE_BREAKER("Visited false; trying true %lx.\n",
 			       s.n->trueTarget->rip);
 			s.visitedTrueTarget = true;
 			stack.push_back(CycleBreakerState(s.n->trueTarget));
 		} else if (s.n->onCycleBreakerPath) {
 			/* We have a cycle.  Break it. */
-			printf("Found a cycle.\n");
+			DBG_CYCLE_BREAKER("Found a cycle.\n");
 
 			succeeded = false;
 
@@ -2296,7 +2300,7 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 							    target))
 							continue;
 
-						printf("Cycle breaker removes edge %lx -> %lx\n",
+						DBG_CYCLE_BREAKER("Cycle breaker removes edge %lx -> %lx\n",
 						       it->n->rip,
 						       target);
 						if (it->n->trueTarget == (it + 1)->n) {
@@ -2330,7 +2334,7 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 			/* Really failed.  Just break on the last
 			 * possible edge. */
 			CycleBreakerState &parent(stack[stack.size()-2]);
-			printf("Forced cycle breaking at %lx -> %lx\n",
+			DBG_CYCLE_BREAKER("Forced cycle breaking at %lx -> %lx\n",
 			       parent.n->rip,
 			       s.n->rip);
 			if (parent.n->trueTarget == s.n) {
@@ -2342,7 +2346,7 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 			}
 			goto out;
 		} else {
-			printf("First visit, no cycle discovered yet: ");
+			DBG_CYCLE_BREAKER("First visit, no cycle discovered yet: ");
 			s.n->onCycleBreakerPath = true;
 
 			bool visitTrueTargetFirst = false;
@@ -2373,12 +2377,12 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 
 			if (visitTrueTargetFirst) {
 				assert(s.n->trueTarget);
-				printf("Explore true branch %lx first\n", s.n->trueTarget->rip);
+				DBG_CYCLE_BREAKER("Explore true branch %lx first\n", s.n->trueTarget->rip);
 				s.visitedTrueTarget = true;
 				stack.push_back(CycleBreakerState(s.n->trueTarget));
 			} else {
 				assert(s.n->falseTarget);
-				printf("Explore false branch %lx first\n", s.n->falseTarget->rip);
+				DBG_CYCLE_BREAKER("Explore false branch %lx first\n", s.n->falseTarget->rip);
 				s.visitedFalseTarget = true;
 				stack.push_back(CycleBreakerState(s.n->falseTarget));
 			}
@@ -2425,7 +2429,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			if (cm->hasKey(when)) {
 				node->cmn = cm->get(when);
 				progress = true;
-				printf("%lx: %s from crash machine\n", node->rip, node->cmn->name());
+				DBG_CALC_CMNS("%lx: %s from crash machine\n", node->rip, node->cmn->name());
 				continue;
 			}
 
@@ -2435,7 +2439,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			/* Okay, both exits either have a CMN or don't
 			 * exist.  That means we should be able to
 			 * derive a CMN for this node. */
-			printf("Calculate CMN for %lx\n", node->rip);
+			DBG_CALC_CMNS("Calculate CMN for %lx\n", node->rip);
 			progress = true;
 			if (!node->trueTarget && !node->falseTarget) {
 				/* Don't know where we go after this
@@ -2444,7 +2448,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 				   sufficiently different from the
 				   captured one that we avoid the
 				   crash. */
-				printf("%lx: no known successors\n", node->rip);
+				DBG_CALC_CMNS("%lx: no known successors\n", node->rip);
 				node->cmn = new CrashMachineNode(
 					node->rip,
 					when,
@@ -2512,7 +2516,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			if (falseTarget)
 				falseTarget = falseTarget->setDefiningTime(when);
 
-			printf("%lx: have successors %s and %s\n",
+			DBG_CALC_CMNS("%lx: have successors %s and %s\n",
 			       node->rip,
 			       trueTarget ? trueTarget->name() : NULL,
 			       falseTarget ? falseTarget->name() : NULL);
@@ -2544,7 +2548,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 
 			/* All done. */
 			node->cmn = cmn;
-			printf("%lx -> %s\n", node->rip, cmn->name());
+			DBG_CALC_CMNS("%lx -> %s\n", node->rip, cmn->name());
 		}
 	}
 }
