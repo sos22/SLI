@@ -97,6 +97,9 @@ skip:
 
 	switch (rh.cls) {
 	case RECORD_footstep: {
+		startPtr = unwrapPtr(*_nextPtr);
+		goto skip;
+#if 0
 		footstep_record<unsigned long> fr;
 		int r = buffered_pread(&fr, sizeof(fr), startPtr.off + sizeof(rh));
 		(void)r;
@@ -107,6 +110,7 @@ skip:
 							    fr.FOOTSTEP_REG_2_NAME,
 							    fr.FOOTSTEP_REG_3_NAME,
 							    fr.FOOTSTEP_REG_4_NAME);
+#endif
 	}
 	case RECORD_syscall: {
 		syscall_record<unsigned long> sr;
