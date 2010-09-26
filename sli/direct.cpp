@@ -1744,6 +1744,7 @@ class Oracle {
 	typedef std::vector<std::pair<unsigned long, bool> > traceT;
 	traceT trace;
 public:
+	ThreadId crashingTid;
 
 	/* Note that the RIP trace is in reverse chronological order
 	   i.e. it produces things which are nearest the crash
@@ -1907,7 +1908,7 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	std::vector<unsigned long> roots;
 
 	void build_cfg(MachineState<unsigned long> *ms, const Oracle &oracle,
-		       CrashMachine *partial_cm, ThreadId tid);
+		       CrashMachine *partial_cm);
 		       
 	void resolve_stubs();
 	void break_cycles(const Oracle &oracle);
@@ -1924,8 +1925,7 @@ public:
 	void add_root(unsigned long x) { roots.push_back(x); grey.push_back(x); }
 	void build(MachineState<unsigned long> *ms,
 		   const Oracle &footstep_log,
-		   CrashMachine *partial_cm,
-		   ThreadId tid);
+		   CrashMachine *partial_cm);
 	CrashMachineNode *get_cmn(unsigned long rip) {
 		return nodeMap->get(rip)->cmn;
 	}
@@ -1976,9 +1976,9 @@ fixup_rip(unsigned long _rip)
 void
 CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		    const Oracle &oracle,
-		    CrashMachine *partial_cm,
-		    ThreadId tid)
+		    CrashMachine *partial_cm)
 {
+	ThreadId tid = oracle.crashingTid;
 	unsigned nr_nodes = 0;
 	while (!grey.empty()) {
 		unsigned long rip = grey.back();
@@ -2412,13 +2412,12 @@ CrashCFG::calculate_cmns(ThreadId tid,
 void
 CrashCFG::build(MachineState<unsigned long> *ms,
 		const Oracle &oracle,
-		CrashMachine *cm,
-		ThreadId tid)
+		CrashMachine *cm)
 {
-	build_cfg(ms, oracle, cm, tid);
+	build_cfg(ms, oracle, cm);
 	resolve_stubs();
 	break_cycles(oracle);
-	calculate_cmns(tid, ms, cm);
+	calculate_cmns(oracle.crashingTid, ms, cm);
 }
 
 static CrashMachineNode *
@@ -2480,15 +2479,14 @@ static CrashMachineNode *
 buildCrashMachineNode(MachineState<unsigned long> *ms,
 		      unsigned long rip,
 		      CrashMachine *cm,
-		      const Oracle &oracle,
-		      ThreadId tid)
+		      const Oracle &oracle)
 {
-	CrashTimestamp when(tid, rip);
+	CrashTimestamp when(oracle.crashingTid, rip);
 	if (cm->hasKey(when))
 		return cm->get(when);
 	CrashCFG *cfg = new CrashCFG();
 	cfg->add_root(rip);
-	cfg->build(ms, oracle, cm, tid);
+	cfg->build(ms, oracle, cm);
 	return cfg->get_cmn(rip);
 }
 
@@ -2525,6 +2523,10 @@ main(int argc, char *argv[])
 
 	assert(crashedThread->currentIRSBOffset != 0);
 
+	Oracle oracle;
+	
+	oracle.crashingTid = crashedThread->tid;
+
 	/* Step one: build the footstep log.  This has a record for
 	   every instruction in the dynamic trace, which says:
 
@@ -2539,8 +2541,6 @@ main(int argc, char *argv[])
 	   analysis fails.
 	*/
 
-	Oracle oracle;
-	
 	/* Do the current IRSB first */
 	for (int idx = crashedThread->currentIRSBOffset;
 	     idx >= 0;
@@ -2621,8 +2621,7 @@ main(int argc, char *argv[])
 			cmn = buildCrashMachineNode(ms,
 						    *it,
 						    cm,
-						    oracle,
-						    crashedThread->tid);
+						    oracle);
 			cmn = simplify_cmn(cmn);
 			printf("CrashMachineNode for %lx -> %s\n",
 			       *it, cmn->name());
