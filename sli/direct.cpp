@@ -553,12 +553,6 @@ CrashExpressionShl::_simplify(unsigned hardness)
 top:
 	l = l->simplify(hardness);
 	r = r->simplify(hardness);
-	if (l->complexity() > r->complexity()) {
-		CrashExpression *t;
-		t = l;
-		l = r;
-		r = t;
-	}
 
 	rehash();
 	if (l->isConstant(lc)) {
