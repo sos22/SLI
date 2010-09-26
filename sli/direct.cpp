@@ -1595,145 +1595,30 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 	}
 }
 
-static CrashMachineNode *
-backtrack_crash_machine_node_for_statements(
-	CrashTimestamp when,
-	CrashMachineNode *node,
-	IRStmt **statements,
-	int nr_statements,
-	bool ignore_branches)
+class ResolveLoadsMapper : public CPMapper {
+public:
+	CrashExpression *data;
+	const std::vector<unsigned long> &satisfiedLoads;
+	ResolveLoadsMapper(CrashExpression *_data,
+			   const std::vector<unsigned long> &_satisfiedLoads)
+		: data(_data), satisfiedLoads(_satisfiedLoads)
+	{
+	}
+	CrashExpression *operator ()(CrashExpression *ce);
+};
+CrashExpression *
+ResolveLoadsMapper::operator()(CrashExpression *ce)
 {
-	int i;
-
-	for (i = nr_statements - 1; i >= 0; i--)  {
-		IRStmt *stmt = statements[i];
-
-		switch (stmt->tag) {
-		case Ist_NoOp:
-		case Ist_AbiHint:
-		case Ist_MBE:
-		case Ist_IMark:
-			break;
-
-		case Ist_Put: {
-			CrashExpression *d = CrashExpression::get(stmt->Ist.Put.data);
-			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP ||
-			    stmt->Ist.Put.offset == OFFSET_amd64_RBP)
-				d = CrashExpressionStackPtr::get(d);
-			node = node->rewriteRegister(stmt->Ist.Put.offset, d);
-			break;
-		}
-
-		case Ist_WrTmp:
-			node = node->rewriteTemporary(
-				stmt->Ist.WrTmp.tmp,
-				CrashExpression::get(stmt->Ist.WrTmp.data));
-			break;
-			
-		case Ist_Dirty:
-			if (strncmp(stmt->Ist.Dirty.details->cee->name,
-				    "helper_load_",
-				    12))
-				abort(); /* don't know how to deal with these */
-			node = node->rewriteTemporary(
-				stmt->Ist.Dirty.details->tmp,
-				CrashExpressionLoad::get(
-					when,
-					CrashExpression::get(
-						stmt->Ist.Dirty.details->args[0])));
-			break;
-
-		case Ist_Store:
-			break;
-
-		case Ist_Exit:
-			if (!ignore_branches) {
-				/* Only handle two-way branches */
-				assert(!node->trueTarget);
-				node->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64, when);
-				node->branchCond = CrashExpression::get(stmt->Ist.Exit.guard);
-			}
-			break;
-
-		case Ist_CAS:
-			node = node->rewriteTemporary(
-				stmt->Ist.CAS.details->oldLo,
-				CrashExpressionLoad::get(
-					when,
-					CrashExpression::get(
-						stmt->Ist.CAS.details->addr)));
-			break;
-
-		default:
-			/* Dunno what to do here. */
-			abort();
+	if (CrashExpressionLoad *cel =
+	    dynamic_cast<CrashExpressionLoad *>(ce)) {
+		for (std::vector<unsigned long>::const_iterator it = satisfiedLoads.begin();
+		     it != satisfiedLoads.end();
+		     it++) {
+			if (cel->when.rip == *it)
+				return data;
 		}
 	}
-
-	return node;
-}
-
-
-/* Returns true if two CMNs are definitely equivalent, and false if
-   we're not sure. */
-static bool
-cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
-{
-	assert(cmn1->defining_time == cmn2->defining_time);
-	if (cmn1 == cmn2)
-		return true;
-	if (!cmn1 || !cmn2)
-		return false;
-	if (cmn1->type != cmn2->type)
-		return false;
-	switch (cmn1->type) {
-	case CrashMachineNode::CM_NODE_STUB:
-		return cmn1->origin_rip == cmn2->origin_rip;
-	case CrashMachineNode::CM_NODE_LEAF:
-		return cmn1->leafCond->eq(cmn2->leafCond);
-	case CrashMachineNode::CM_NODE_BRANCH:
-		return cmn1->branchCond->eq(cmn2->branchCond) &&
-			cmns_bisimilar(cmn1->trueTarget,
-				       cmn2->trueTarget) &&
-			cmns_bisimilar(cmn1->falseTarget,
-				       cmn2->falseTarget);
-	}
-	abort();
-}
-
-static unsigned long
-extract_call_follower(IRSB *irsb)
-{
-	/* We expect a call to look like this:
-
-	   0:   ------ IMark(0x7fde5bdd85a7, 5) ------
-	   1:   t0 = Sub64(GET:I64(32),0x8:I64)
-	   2:   PUT(32) = t0
-	   3:   STle(t0) = 0x7fde5bdd85ac:I64
-	   4:   t1 = 0x7fde5be62750:I64
-	   5:   ====== AbiHint(Sub64(t0,0x80:I64), 128, t1) ======
-	   goto {Call} 0x7fde5be62750:I64
-   
-	   Or so.  The WrTmp at statement 4 is optional, but the rest
-	   has to be there.  We process statements in reverse order
-	   from the end, checking that things match as we go. */
-	int idx = irsb->stmts_used - 1;
-
-	if (idx < 0 ||
-	    irsb->stmts[idx]->tag != Ist_AbiHint)
-		abort();
-	idx--;
-	if (idx < 0)
-		abort();
-	if (irsb->stmts[idx]->tag == Ist_WrTmp)
-		idx--;
-	if (idx < 0)
-		abort();
-	if (irsb->stmts[idx]->tag != Ist_Store)
-		abort();
-	if (irsb->stmts[idx]->Ist.Store.data->tag != Iex_Const)
-		abort();
-	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
+	return ce;
 }
 
 /* The Oracle is used when static analysis fails us (or I just
@@ -1846,7 +1731,202 @@ public:
 		}
 		return dflt;
 	}
+
+	void findLoadsForStore(unsigned long store, std::vector<unsigned long> *loads) const;
 };
+
+void
+Oracle::findLoadsForStore(unsigned long store_rip,
+			  std::vector<unsigned long> *load_rips) const
+{
+	/* First, find the last instance we have of that store RIP in
+	 * the mem log. */
+	int idx;
+	for (idx = memlog.size() - 1; idx >= 0; idx--)
+		if (memlog[idx].rip == store_rip &&
+		    !memlog[idx].is_load)
+			break;
+	if (idx < 0)
+		return;
+	unsigned long addr = memlog[idx].addr;
+	/* Now go through and find all of the loads which were
+	   satisfied by that store. */
+	for (idx++; idx < (int)memlog.size(); idx++) {
+		if (!memlog[idx].is_load) {
+			assert(memlog[idx].rip != store_rip);
+			continue;
+		}
+		if (memlog[idx].addr != addr)
+			continue;
+		/* Make sure we only resolve each load once */
+		std::vector<unsigned long>::iterator it;
+		for (it = load_rips->begin();
+		     it != load_rips->end() && *it != memlog[idx].rip;
+		     it++)
+			;
+		if (it == load_rips->end())
+			load_rips->push_back(memlog[idx].rip);
+	}
+}
+
+static CrashMachineNode *
+backtrack_crash_machine_node_for_statements(
+	CrashTimestamp when,
+	CrashMachineNode *node,
+	IRStmt **statements,
+	int nr_statements,
+	bool ignore_branches,
+	const Oracle &oracle)
+{
+	int i;
+	unsigned long rip;
+
+	assert(statements[0]->tag == Ist_IMark);
+	rip = statements[0]->Ist.IMark.addr;
+
+	for (i = nr_statements - 1; i >= 0; i--)  {
+		IRStmt *stmt = statements[i];
+
+		switch (stmt->tag) {
+		case Ist_NoOp:
+		case Ist_AbiHint:
+		case Ist_MBE:
+			break;
+
+		case Ist_IMark:
+			assert(i == 0);
+			break;
+
+		case Ist_Put: {
+			CrashExpression *d = CrashExpression::get(stmt->Ist.Put.data);
+			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP ||
+			    stmt->Ist.Put.offset == OFFSET_amd64_RBP)
+				d = CrashExpressionStackPtr::get(d);
+			node = node->rewriteRegister(stmt->Ist.Put.offset, d);
+			break;
+		}
+
+		case Ist_WrTmp:
+			node = node->rewriteTemporary(
+				stmt->Ist.WrTmp.tmp,
+				CrashExpression::get(stmt->Ist.WrTmp.data));
+			break;
+			
+		case Ist_Dirty:
+			if (strncmp(stmt->Ist.Dirty.details->cee->name,
+				    "helper_load_",
+				    12))
+				abort(); /* don't know how to deal with these */
+			node = node->rewriteTemporary(
+				stmt->Ist.Dirty.details->tmp,
+				CrashExpressionLoad::get(
+					when,
+					CrashExpression::get(
+						stmt->Ist.Dirty.details->args[0])));
+			break;
+
+		case Ist_Store: {
+			std::vector<unsigned long> satisfiedLoads;
+			oracle.findLoadsForStore(rip, &satisfiedLoads);
+			if (!satisfiedLoads.empty()) {
+				CrashExpression *data =
+					CrashExpression::get(
+						stmt->Ist.Store.data);
+				ResolveLoadsMapper rlm(data, satisfiedLoads);
+				node = node->map(rlm);
+			}
+			break;
+		}
+
+		case Ist_Exit:
+			if (!ignore_branches) {
+				/* Only handle two-way branches */
+				assert(!node->trueTarget);
+				node->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64, when);
+				node->branchCond = CrashExpression::get(stmt->Ist.Exit.guard);
+			}
+			break;
+
+		case Ist_CAS:
+			node = node->rewriteTemporary(
+				stmt->Ist.CAS.details->oldLo,
+				CrashExpressionLoad::get(
+					when,
+					CrashExpression::get(
+						stmt->Ist.CAS.details->addr)));
+			break;
+
+		default:
+			/* Dunno what to do here. */
+			abort();
+		}
+	}
+
+	return node;
+}
+
+
+/* Returns true if two CMNs are definitely equivalent, and false if
+   we're not sure. */
+static bool
+cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
+{
+	assert(cmn1->defining_time == cmn2->defining_time);
+	if (cmn1 == cmn2)
+		return true;
+	if (!cmn1 || !cmn2)
+		return false;
+	if (cmn1->type != cmn2->type)
+		return false;
+	switch (cmn1->type) {
+	case CrashMachineNode::CM_NODE_STUB:
+		return cmn1->origin_rip == cmn2->origin_rip;
+	case CrashMachineNode::CM_NODE_LEAF:
+		return cmn1->leafCond->eq(cmn2->leafCond);
+	case CrashMachineNode::CM_NODE_BRANCH:
+		return cmn1->branchCond->eq(cmn2->branchCond) &&
+			cmns_bisimilar(cmn1->trueTarget,
+				       cmn2->trueTarget) &&
+			cmns_bisimilar(cmn1->falseTarget,
+				       cmn2->falseTarget);
+	}
+	abort();
+}
+
+static unsigned long
+extract_call_follower(IRSB *irsb)
+{
+	/* We expect a call to look like this:
+
+	   0:   ------ IMark(0x7fde5bdd85a7, 5) ------
+	   1:   t0 = Sub64(GET:I64(32),0x8:I64)
+	   2:   PUT(32) = t0
+	   3:   STle(t0) = 0x7fde5bdd85ac:I64
+	   4:   t1 = 0x7fde5be62750:I64
+	   5:   ====== AbiHint(Sub64(t0,0x80:I64), 128, t1) ======
+	   goto {Call} 0x7fde5be62750:I64
+   
+	   Or so.  The WrTmp at statement 4 is optional, but the rest
+	   has to be there.  We process statements in reverse order
+	   from the end, checking that things match as we go. */
+	int idx = irsb->stmts_used - 1;
+
+	if (idx < 0 ||
+	    irsb->stmts[idx]->tag != Ist_AbiHint)
+		abort();
+	idx--;
+	if (idx < 0)
+		abort();
+	if (irsb->stmts[idx]->tag == Ist_WrTmp)
+		idx--;
+	if (idx < 0)
+		abort();
+	if (irsb->stmts[idx]->tag != Ist_Store)
+		abort();
+	if (irsb->stmts[idx]->Ist.Store.data->tag != Iex_Const)
+		abort();
+	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
+}
 
 
 /* Aim here is to incorporate a bit of static analysis into the crash
@@ -1940,9 +2020,9 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	void resolve_stubs();
 	void break_cycles(const Oracle &oracle);
 	bool break_cycles_from(CrashCFGNode *n, const Oracle &oracle);
-	void calculate_cmns(ThreadId tid,
-			    MachineState<unsigned long> *ms,
-			    CrashMachine *cm);
+	void calculate_cmns(MachineState<unsigned long> *ms,
+			    CrashMachine *cm,
+			    const Oracle &oracle);
 public:
 	CrashCFG()
 		: nodeMap(new nodeMapT())
@@ -2293,9 +2373,9 @@ CrashCFG::break_cycles(const Oracle &oracle)
 }
 
 void
-CrashCFG::calculate_cmns(ThreadId tid,
-			 MachineState<unsigned long> *ms,
-			 CrashMachine *cm)
+CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
+			 CrashMachine *cm,
+			 const Oracle &oracle)
 {
 	bool progress;
 	progress = true;
@@ -2307,7 +2387,7 @@ CrashCFG::calculate_cmns(ThreadId tid,
 			CrashCFGNode *node = it.value();
 			if (node->cmn)
 				continue;
-			CrashTimestamp when(tid, node->rip);
+			CrashTimestamp when(oracle.crashingTid, node->rip);
 			if (cm->hasKey(when)) {
 				node->cmn = cm->get(when);
 				progress = true;
@@ -2424,7 +2504,8 @@ CrashCFG::calculate_cmns(ThreadId tid,
 				cmn,
 				irsb->stmts,
 				instr_end,
-				true);
+				true,
+				oracle);
 			assert(cmn->isStubFree());
 
 			/* All done. */
@@ -2444,7 +2525,7 @@ CrashCFG::build(MachineState<unsigned long> *ms,
 	build_cfg(ms, oracle, cm);
 	resolve_stubs();
 	break_cycles(oracle);
-	calculate_cmns(oracle.crashingTid, ms, cm);
+	calculate_cmns(ms, cm, oracle);
 }
 
 static CrashMachineNode *
@@ -2669,7 +2750,8 @@ main(int argc, char *argv[])
 			cmn,
 			crashedThread->currentIRSB->stmts + instr_start,
 			crashedThread->currentIRSBOffset - instr_start,
-			false);
+			false,
+			oracle);
 	}
 	cmn->sanity_check();
 
