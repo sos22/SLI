@@ -2773,7 +2773,7 @@ main(int argc, char *argv[])
 	CrashMachineNode *cmn;
 	{
 		int instr_start;
-		for (instr_start = crashedThread->currentIRSBOffset;
+		for (instr_start = crashedThread->currentIRSBOffset-1;
 		     crashedThread->currentIRSB->stmts[instr_start]->tag != Ist_IMark;
 		     instr_start--)
 			;
