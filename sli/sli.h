@@ -406,24 +406,29 @@ public:
 	struct control_log_entry {
 		unsigned long translated_rip;
 		int exit_idx;
-		MachineState<abst_int_type> *ms; /* At the end of the
-						    block. */
-		LogReaderPtr logptr; /* At the end of the block */
-		control_log_entry(unsigned long _rip, int _idx,
-				  MachineState<abst_int_type> *_ms,
-				  const LogReaderPtr &_ptr)
-			: translated_rip(_rip), exit_idx(_idx),
-			  ms(_ms), logptr(_ptr)
+		control_log_entry(unsigned long _rip, int _idx)
+			: translated_rip(_rip), exit_idx(_idx)
 		{
 		}
 		control_log_entry()
-			: translated_rip(0), exit_idx(-99),
-			  ms(NULL), logptr()
+			: translated_rip(0), exit_idx(-99)
 		{
 		}
 	};
 	ring_buffer<control_log_entry, 100> controlLog;
-
+	struct snapshot_log_entry {
+		MachineState<abst_int_type> *ms;
+		LogReaderPtr ptr;
+		snapshot_log_entry(MachineState<abst_int_type> *_ms,
+				   const LogReaderPtr &_ptr)
+			: ms(_ms), ptr(_ptr)
+		{
+		}
+		snapshot_log_entry() : ms(NULL), ptr(LogReaderPtr())
+		{
+		}
+	};
+	ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
 	abst_int_type currentControlCondition;
 
@@ -882,8 +887,11 @@ template <typename ait> class MemoryTrace;
 
 template <typename ait>
 class EventRecorder : public GarbageCollected<EventRecorder<ait> > {
+protected:
+	virtual ~EventRecorder() {}
 public:
 	virtual void record(Thread<ait> *thr, ThreadEvent<ait> *evt) = 0;
+	void destruct() { this->~EventRecorder(); }
 	NAMED_CLASS
 };
 
@@ -894,8 +902,8 @@ class Interpreter {
 			    LogReaderPtr startOffset,
 			    LogReaderPtr *endOffset);
 
-	VexPtr<MachineState<abst_int_type> > currentState;
 public:
+	VexPtr<MachineState<abst_int_type> > currentState;
 	Interpreter(MachineState<abst_int_type> *rootMachine) : currentState(rootMachine)
 	{
 	}

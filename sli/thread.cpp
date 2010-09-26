@@ -99,8 +99,8 @@ void Thread<ait>::visit(HeapVisitor &hv)
 	visit_aiv(set_child_tid, hv);
 	visit_aiv(futex_block_address, hv);
 
-	for (class ring_buffer<control_log_entry, 100>::iterator it = controlLog.begin();
-	     it != controlLog.end();
+	for (class ring_buffer<snapshot_log_entry, 2>::iterator it = snapshotLog.begin();
+	     it != snapshotLog.end();
 	     it++)
 		hv(it->ms);
 }

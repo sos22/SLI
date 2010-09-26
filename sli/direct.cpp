@@ -1743,6 +1743,26 @@ extract_call_follower(IRSB *irsb)
 class Oracle {
 	typedef std::vector<std::pair<unsigned long, bool> > traceT;
 	traceT trace;
+	struct memaccess {
+		bool is_load;
+		unsigned long rip;
+		unsigned long addr;
+		static memaccess load(unsigned long rip, unsigned long addr) {
+			memaccess r;
+			r.is_load = true;
+			r.rip = rip;
+			r.addr = addr;
+			return r;
+		}
+		static memaccess store(unsigned long rip, unsigned long addr) {
+			memaccess r;
+			r.is_load = false;
+			r.rip = rip;
+			r.addr = addr;
+			return r;
+		}
+	};
+	std::vector<memaccess> memlog;
 public:
 	ThreadId crashingTid;
 
@@ -1772,6 +1792,13 @@ public:
 	RipTraceIterator end_rip_trace() { return RipTraceIterator(trace.end()); }
 	void addRipTrace(unsigned long rip, bool branchTaken) {
 		trace.push_back(std::pair<unsigned long, bool>(rip, branchTaken));
+	}
+
+	void load_event(unsigned long rip, unsigned long addr) {
+		memlog.push_back(memaccess::load(rip, addr));
+	}
+	void store_event(unsigned long rip, unsigned long addr) {
+		memlog.push_back(memaccess::store(rip, addr));
 	}
 
 	/* Given a RIP, try to make a guess at what the next
@@ -2490,6 +2517,40 @@ buildCrashMachineNode(MachineState<unsigned long> *ms,
 	return cfg->get_cmn(rip);
 }
 
+class MemTraceExtractor : public EventRecorder<unsigned long> {
+public:
+	Oracle *oracle;
+	MemTraceExtractor(Oracle *o) : oracle(o) {}
+	void record(Thread<unsigned long> *thr,
+		    ThreadEvent<unsigned long> *evt);
+	void visit(HeapVisitor &hv) {}
+};
+
+void
+MemTraceExtractor::record(Thread<unsigned long> *thr,
+			  ThreadEvent<unsigned long> *evt)
+{
+	unsigned long rsp;
+	if (thr->tid != oracle->crashingTid)
+		return;
+	rsp = thr->regs.get_reg(REGISTER_IDX(RSP));
+	if (LoadEvent<unsigned long> *le =
+	    dynamic_cast<LoadEvent<unsigned long> *>(evt)) {
+		/* Arbitrarily assume that stacks are never deeper
+		   than 8MB.  Also assume that the red zone is only
+		   128 bytes, and we never access more than 8 bytes
+		   past its nominal end. */
+		if (le->addr >= rsp - 136 &&
+		    le->addr < rsp + (8 << 20))
+			oracle->load_event(thr->regs.rip(), le->addr);
+	} else if (StoreEvent<unsigned long> *se =
+		   dynamic_cast<StoreEvent<unsigned long> *>(evt)) {
+		if (se->addr >= rsp - 136 &&
+		    se->addr < rsp + (8 << 20))
+			oracle->store_event(thr->regs.rip(), se->addr);
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -2501,6 +2562,7 @@ main(int argc, char *argv[])
 
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(lf, ptr, ALLOW_GC);
+	ms = i.currentState;
 
 	Thread<unsigned long> *crashedThread;
 	crashedThread = NULL;
@@ -2554,10 +2616,10 @@ main(int argc, char *argv[])
 	{
 		int cntr = 0;
 		for (ring_buffer<Thread<unsigned long>::control_log_entry, 100>::reverse_iterator it =
-			     crashedThread->controlLog.rbegin();
-		     it != crashedThread->controlLog.rend() && cntr < 20;
-		     it++) {
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(it->translated_rip);
+				crashedThread->controlLog.rbegin();
+		    it != crashedThread->controlLog.rend() && cntr < 20;
+		    it++) {
+		        IRSB *irsb = ms->addressSpace->getIRSBForAddress(it->translated_rip);
 			bool exited_by_branch;
 			int exit_idx;
 			if (it->exit_idx == irsb->stmts_used + 1) {
@@ -2577,11 +2639,18 @@ main(int argc, char *argv[])
 					exited_by_branch = false;
 				}
 			}
-		}
+	         }
 	}
 
-	/* Step two: look at the crashing statement to derive a
-	 * proximal cause of the crash. */
+        /* Now extract a memory trace */
+        VexPtr<EventRecorder<unsigned long> > mte(new MemTraceExtractor(&oracle));
+	Interpreter<unsigned long> i2(crashedThread->snapshotLog.begin()->ms);
+	VexPtr<LogWriter<unsigned long> > dummy_lw(NULL);
+	i2.replayLogfile(lf, crashedThread->snapshotLog.begin()->ptr,
+			 ALLOW_GC, NULL, dummy_lw, mte);
+
+	/* Look at the crashing statement to derive a proximal cause
+	 * of the crash. */
 	CrashTimestamp when(crashedThread->tid,
 			    crashedThread->regs.rip());
 
@@ -2606,7 +2675,7 @@ main(int argc, char *argv[])
 
 	printf("Proximal cause is %s\n", cmn->name());
 
-	/* Step three: Go and build the crash machine */
+	/* Go and build the crash machine */
 	VexPtr<CrashMachine> cm(new CrashMachine());
 	cm->set(cmn->defining_time, cmn);
 
@@ -2629,29 +2698,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	/* Step four: profit */
-
-#if 0
-	/* Step 3: Go through the expression and try to resolve
-	 * stack-local references. */
-	ResolveStackMapper rsm;
-
-	do {
-		rsm.progress = false;
-		rsm.cr = cr;
-		cr = cr->map(rsm);
-	} while (rsm.progress);
-
-	printf("After stack resolution, reason %s\n",
-	       cr->name());
-
-	/* Step 5: run a final simplification pass */
-	SimplifyHardMapper shm;
-	CrashReason *cr2 = cr->map(shm);
-
-	printf("Final cause %s\n", cr2->name());
-
-#endif
+	/* Profit */
 
 	dbg_break("finished");
 

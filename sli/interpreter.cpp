@@ -1434,8 +1434,12 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 	ths->decode_counter++;
 	ths->redirectGuest(rip);
 
-	ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset,
-							    ms, ptr));
+	ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+
+	if (ths->decode_counter % 100 == 0) {
+		ths->snapshotLog.push(Thread<ait>::snapshot_log_entry(ms, ptr));
+		ms = ms->dupeSelf();
+	}
 
 	ths->currentIRSBRip = rip;
 
@@ -1661,7 +1665,6 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 						assert(!isConstant(ths->currentControlCondition));
 					assert(force(ths->currentControlCondition));
 				}
-				printf("Branch out of %llx\n", ths->currentIRSB->stmts[0]->Ist.IMark.addr);
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
 					printf("EMULATION WARNING %lx\n",
@@ -1687,7 +1690,6 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			assert(force(ths->currentControlCondition));
 		}
 
-		printf("Fell out of %llx\n", ths->currentIRSB->stmts[0]->Ist.IMark.addr);
 		ths->currentIRSBOffset++;
 		
 		assert(ths->currentIRSB->jumpkind == Ijk_Boring ||
