@@ -327,6 +327,7 @@ public:
 
 #define most_binops(x)						\
 	x(Add, +)						\
+	x(Mul, *)						\
 	x(Xor, ^)						\
 	x(And, &)						\
 	x(Or, |)						\
@@ -514,6 +515,31 @@ top:
 
 	if (hardness > 1 && l->eq(r))
 		return l;
+
+	return this;
+}
+
+CrashExpression *
+CrashExpressionMul::_simplify(unsigned hardness)
+{
+	unsigned long lc;
+	unsigned long rc;
+	l = l->simplify(hardness);
+	r = r->simplify(hardness);
+	if (l->complexity() > r->complexity()) {
+		CrashExpression *t = l;
+		l = r;
+		r = t;
+	}
+	rehash();
+	if (l->isConstant(lc)) {
+		if (lc == 0)
+			return l;
+		if (lc == 1)
+			return r;
+		if (r->isConstant(rc))
+			return CrashExpressionConst::get(lc * rc);
+	}
 
 	return this;
 }
@@ -1467,6 +1493,15 @@ CrashExpression::get(IRExpr *e)
 				CrashExpression::get(e->Iex.Binop.arg1),
 				CrashExpressionNeg::get(
 					CrashExpression::get(e->Iex.Binop.arg2)));
+
+		case Iop_MullS8:
+		case Iop_MullS16:
+		case Iop_MullS32:
+		case Iop_MullS64:
+			return CrashExpressionMul::get(
+				CrashExpression::get(e->Iex.Binop.arg1),
+				CrashExpression::get(e->Iex.Binop.arg2));
+
 		default:
 			abort();
 		}
@@ -1486,6 +1521,11 @@ CrashExpression::get(IRExpr *e)
 				CrashExpression::get(e->Iex.Unop.arg),
 				32,
 				64);
+		case Iop_64HIto32:
+			return CrashExpressionShl::get(
+				CrashExpression::get(e->Iex.Unop.arg),
+				CrashExpressionConst::get(-32));
+
 		case Iop_Not8:
 		case Iop_Not16:
 		case Iop_Not32:
