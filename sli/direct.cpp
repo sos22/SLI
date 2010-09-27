@@ -33,6 +33,10 @@ public:
 	bool operator==(const CrashTimestamp &c) const {
 		return tid == c.tid && rip == c.rip;
 	}
+
+	bool operator<(const CrashTimestamp &c) const {
+		return rip < c.rip;
+	}
 };
 
 class CrashExpression;
@@ -2123,7 +2127,11 @@ public:
 			: tid(_tid), rip(_rip), addr(_addr),
 			  val(_val)
 		{
-		};
+		}
+		address_log_entry()
+			: tid(), rip(0), addr(0), val(0)
+		{
+		}
 	};
 	std::vector<address_log_entry> address_log;
 };
@@ -3076,6 +3084,178 @@ MemTraceExtractor::record(Thread<unsigned long> *thr,
 	}
 }
 
+typedef std::pair<unsigned long, CrashTimestamp> possibleStoreT;
+typedef std::set<std::pair<unsigned long, CrashTimestamp> > possibleStoresT;
+typedef std::map<unsigned long, possibleStoresT> addressPossiblesT;
+
+class EvalUsingIteratorMap : public CPMapper {
+public:
+	std::map<CrashTimestamp, possibleStoresT::iterator> &iterators;
+
+	MachineState<unsigned long> *ms;
+	EvalUsingIteratorMap(
+		std::map<CrashTimestamp, possibleStoresT::iterator> &_iterators,
+		MachineState<unsigned long> *_ms)
+		: iterators(_iterators),
+		  ms(_ms)
+	{
+	}
+	CrashExpression *operator()(CrashExpression *ce) {
+		unsigned long addr;
+		CrashExpression *ce2;
+		if (CrashExpressionLoad *cel =
+		    dynamic_cast<CrashExpressionLoad *>(ce)) {
+			if (!cel->addr->isConstant(addr)) {
+				ce2 = ce->simplify(1000);
+				if (ce2 != ce)
+					return ce2->map(*this);
+				else
+					return ce;
+			}
+			return CrashExpressionConst::get(iterators[cel->when]->first);
+		} else if (CrashExpressionBadAddr *ceba =
+			   dynamic_cast<CrashExpressionBadAddr *>(ce)) {
+			if (!ceba->l->isConstant(addr)) {
+				ce2 = ce->simplify(1000);
+				if (ce2 != ce)
+					return ce2->map(*this);
+				else
+					return ce;
+			}
+			if (ms->addressSpace->isReadable(addr, 8))
+				return CrashExpressionConst::get(0);
+			else
+				return CrashExpressionConst::get(1);
+		}
+		return ce;
+	}
+};
+
+static CrashMachineNode *
+eval_using_iterator_map(CrashMachineNode *cmn,
+			std::map<CrashTimestamp, possibleStoresT::iterator> &iterators,
+			MachineState<unsigned long> *ms)
+{
+	EvalUsingIteratorMap eium(iterators, ms);
+	return cmn->map(eium);
+}
+
+class MentionsRegistersMap : public CPMapper {
+public:
+	bool res;
+	MentionsRegistersMap() : res(false) {}
+	CrashExpression *operator()(CrashExpression *ce) {
+		if (!res &&
+		    dynamic_cast<CrashExpressionRegister *>(ce))
+			res = true;
+		return ce;
+	}
+};
+
+static bool
+mentionsRegisters(CrashMachineNode *cmn)
+{
+	MentionsRegistersMap mrm;
+	cmn->map(mrm);
+	return mrm.res;
+}
+
+class CollectLoadsMap : public CPMapper {
+public:
+	std::set<std::pair<CrashTimestamp, unsigned long> > &res;
+	CollectLoadsMap(std::set<std::pair<CrashTimestamp, unsigned long> > &_res)
+		: res(_res)
+	{
+	}
+	CrashExpression *operator()(CrashExpression *ce) {
+		if (CrashExpressionLoad *cel =
+		    dynamic_cast<CrashExpressionLoad *>(ce)) {
+			unsigned long addr;
+			if (cel->addr->isConstant(addr))
+				res.insert(std::pair<CrashTimestamp, unsigned long>(cel->when, addr));
+		}
+		return ce;
+	}
+};
+
+static void
+collectLoads(CrashMachineNode *cmn, std::set<std::pair<CrashTimestamp, unsigned long> > &res)
+{
+	CollectLoadsMap clm(res);
+	cmn->map(clm);
+}
+
+static void
+brute_force_explore_schedulings(Oracle &oracle,
+				CrashMachine *cm,
+				MachineState<unsigned long> *ms)
+{
+	/* Go through and find all of the possible values which all of
+	   the interesting addresses can have. */
+	addressPossiblesT addressPossibles;
+	for (std::vector<Oracle::address_log_entry>::const_iterator it =
+		     oracle.address_log.begin();
+	     it != oracle.address_log.end();
+	     it++) {
+		addressPossibles[it->addr].insert(
+			std::pair<unsigned long, CrashTimestamp>
+			(it->val,
+			 CrashTimestamp(it->tid, it->rip)));
+	}
+
+	/* Now drop them into the expression in a rather stupid
+	   brute-force way, and see what we get out the other side. */
+	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
+	     cmn_it != cm->content->end();
+	     cmn_it++) {
+		std::set<std::pair<CrashTimestamp, unsigned long> > allLoads;
+		collectLoads(cmn_it.value().first, allLoads);
+		if (allLoads.empty())
+			continue;
+		std::map<CrashTimestamp, possibleStoresT::iterator> iterators;
+		for (std::set<std::pair<CrashTimestamp, unsigned long> >::iterator it = allLoads.begin();
+		     it != allLoads.end();
+		     it++)
+			iterators[it->first] = addressPossibles[it->second].begin();
+		bool done_outer = false;
+		while ( !done_outer ) {
+			CrashMachineNode *new_cmn =
+				eval_using_iterator_map(cmn_it.value().first,
+							iterators,
+							ms);
+			new_cmn = simplify_cmn(new_cmn);
+			unsigned long willCrash;
+			if (new_cmn->type == CrashMachineNode::CM_NODE_LEAF &&
+			    new_cmn->leafCond->isConstant(willCrash) &&
+			    willCrash) {
+				printf("\n\n");
+				for (std::map<CrashTimestamp, possibleStoresT::iterator>::iterator it =
+					     iterators.begin();
+				     it != iterators.end();
+				     it++) {
+					printf("%s: %lx\n", it->first.name(), it->second->first);
+				}
+				printf("%s -> %s\n", cmn_it.value().first->name(),
+				       new_cmn->name());
+			}
+
+			/* Now advance to the next set of accesses */
+			bool done = false;
+			for (std::set<std::pair<CrashTimestamp, unsigned long> >::iterator it = allLoads.begin();
+			     !done && it != allLoads.end();
+			     it++) {
+				iterators[it->first]++;
+				if (iterators[it->first] == addressPossibles[it->second].end()) {
+					iterators[it->first] = addressPossibles[it->second].begin();
+				} else {
+					done = true;
+				}
+			}
+			done_outer = !done;
+		}
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -3295,6 +3475,10 @@ main(int argc, char *argv[])
 		sle.ptr,
 		ALLOW_GC);
 
+#if 0 /* Turn this off for now, because it doesn't work with the
+	 current test case, and it gets confused by some interactions
+	 with the test harness. */
+
 	/* Now, for each machine, walk over the relevant address logs
 	 * and figure out when the CMN goes green and red. */
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
@@ -3342,6 +3526,14 @@ main(int argc, char *argv[])
 			last = new_cmn;
 		}
 	}
+#endif
+
+	/* Okay, executing the crashing thread's read side atomically
+	 * didn't tell us where the critical sections should have
+	 * been.  Be a little bit more aggressive and just look at
+	 * every possible satisfaction pattern.
+	 */
+	brute_force_explore_schedulings(oracle, cm, ms);
 
 	dbg_break("finished");
 
