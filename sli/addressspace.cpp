@@ -332,7 +332,7 @@ bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 				     bool isWrite, Thread<ait> *thr)
 {
 	unsigned long start = force(_start);
-	if (isOnFreeList(_start, _start + mkConst<ait>(size), thr->tid))
+	if (thr && isOnFreeList(_start, _start + mkConst<ait>(size), thr->tid))
 		return false;
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -352,7 +352,7 @@ bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
-		} else if (extendStack(start, force(thr->regs.rsp()))) {
+		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
 			continue;
 		} else {
 			return false;

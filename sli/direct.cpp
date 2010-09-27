@@ -1,5 +1,6 @@
 #include <typeinfo>
 #include <deque>
+#include <set>
 
 #include "sli.h"
 
@@ -103,7 +104,7 @@ protected:
 		return what;
 	}
 
-	static void discover_relevant_address(std::vector<unsigned long> &addresses,
+	static void discover_relevant_address(std::set<unsigned long> &addresses,
 					      unsigned long addr);
 
 public:
@@ -131,7 +132,7 @@ public:
 
 	virtual void build_relevant_address_list(Thread<unsigned long> *thr,
 						 MachineState<unsigned long> *ms,
-						 std::vector<unsigned long> &addresses) = 0;
+						 std::set<unsigned long> &addresses) = 0;
 	virtual unsigned long eval(Thread<unsigned long> *thr,
 				   MachineState<unsigned long> *ms) = 0;
 
@@ -158,15 +159,10 @@ public:
 CrashExpression *CrashExpression::intern_heads[CrashExpression::nr_intern_heads];
 
 void
-CrashExpression::discover_relevant_address(std::vector<unsigned long> &addresses,
+CrashExpression::discover_relevant_address(std::set<unsigned long> &addresses,
 					   unsigned long addr)
 {
-	for (std::vector<unsigned long>::iterator it = addresses.begin();
-	     it != addresses.end();
-	     it++)
-		if (*it == addr)
-			return;
-	addresses.push_back(addr);
+	addresses.insert(addr);
 }
 
 class CrashExpressionTemp : public CrashExpression {
@@ -193,7 +189,7 @@ public:
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses) {
+					 std::set<unsigned long> &addresses) {
 		/* This can't happen, because we shouldn't be building
 		   the address list until all temporaries have been
 		   resolved. */
@@ -233,7 +229,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
@@ -266,7 +262,7 @@ public:
 	bool isConstant(unsigned long &l) { l = value; return true; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
@@ -323,7 +319,7 @@ public:
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 		addr->build_relevant_address_list(thr, ms, addresses);
 		if (!addr->pointsAtStack())
@@ -331,16 +327,22 @@ public:
 				addresses,
 				addr->eval(thr, ms));
 	}
-	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms)
+	/* This doesn't really belong here, but nevermind. */
+	static unsigned long fetch(unsigned long addr,
+				   MachineState<unsigned long> *ms,
+				   Thread<unsigned long> *thr)
 	{
-		unsigned long a = addr->eval(thr, ms);
 		unsigned long res[8];
-		ms->addressSpace->readMemory(a, 8, res, false, thr);
+		ms->addressSpace->readMemory(addr, 8, res, false, thr);
 		unsigned long folded;
 		for (unsigned x = 0; x < 8; x++)
 			((unsigned char *)&folded)[x] = res[x];
 		return folded;
+	}
+	unsigned long eval(Thread<unsigned long> *thr,
+			   MachineState<unsigned long> *ms)
+	{
+		return fetch(addr->eval(thr, ms), ms, thr);
 	}
 };
 
@@ -374,7 +376,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 		l->build_relevant_address_list(thr, ms, addresses);
 		r->build_relevant_address_list(thr, ms, addresses);
@@ -673,7 +675,7 @@ public:
 	unsigned complexity() const { return l->complexity() + 1; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 		l->build_relevant_address_list(thr, ms, addresses);
 	}
@@ -1049,7 +1051,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 		a->build_relevant_address_list(thr, ms, addresses);
 		b->build_relevant_address_list(thr, ms, addresses);
@@ -1135,7 +1137,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 		a->build_relevant_address_list(thr, ms, addresses);
 		b->build_relevant_address_list(thr, ms, addresses);
@@ -1212,7 +1214,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses)
 	{
 		cond->build_relevant_address_list(thr, ms, addresses);
 		zero->build_relevant_address_list(thr, ms, addresses);
@@ -1292,6 +1294,51 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 			return ce;
 		}
 	};
+	class ResolveLoadsMapper : public CPMapper {
+		std::map<unsigned long, unsigned long> &memory;
+		MachineState<unsigned long> *ms;
+	public:
+		ResolveLoadsMapper(std::map<unsigned long, unsigned long> &_memory,
+				   MachineState<unsigned long> *_ms)
+			: memory(_memory), ms(_ms)
+		{
+		}
+		CrashExpression *operator()(CrashExpression *ce) {
+			CrashExpressionLoad *cel =
+				dynamic_cast<CrashExpressionLoad *>(ce);
+			unsigned long addr;
+			CrashExpression *ce2;
+			if (!cel) {
+				CrashExpressionBadAddr *ceba =
+					dynamic_cast<CrashExpressionBadAddr *>(ce);
+				if (!ceba)
+					return ce;
+				if (!ceba->l->isConstant(addr)) {
+					ce2 = ce->simplify(1000);
+					if (ce2 != ce)
+						return ce2->map(*this);
+					else
+						return ce;
+				}
+				if (ms->addressSpace->isReadable(addr, 8))
+					return CrashExpressionConst::get(0);
+				else
+					return CrashExpressionConst::get(1);
+			}
+			if (!cel->addr->isConstant(addr)) {
+				CrashExpression *ce2 = ce->simplify(1000);
+				if (ce != ce2)
+					return ce2->map(*this);
+				else
+					return ce;
+			}
+			if (memory.count(addr) == 0)
+				return ce;
+			else
+				return CrashExpressionConst::get(memory[addr]);
+		}
+	};
+
 protected:
 	char *mkName() const {
 		switch (type) {
@@ -1454,10 +1501,17 @@ public:
 		RewriteRegisterMapper rrm(offset, ce);
 		return map(rrm);
 	}
+	/* ms is used to resolve badAddr expressions */
+	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
+				       MachineState<unsigned long> *ms)
+	{
+		ResolveLoadsMapper rlm(memory, ms);
+		return map(rlm);
+	}
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::vector<unsigned long> &addresses);
+					 std::set<unsigned long> &addresses);
 
 	void changed() { clearName(); }
 	void visit(HeapVisitor &hv) {
@@ -1481,7 +1535,7 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 	friend class CRAEventRecorder;
 
 	static void visit_content_fn(std::pair<CrashMachineNode *,
-				             std::vector<unsigned long> > &v,
+				             std::set<unsigned long> > &v,
 				     HeapVisitor &hv)
 	{
 		hv(v.first);
@@ -1491,7 +1545,7 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 					      MachineState<unsigned long> *ms);
 public:
 	typedef gc_map<CrashTimestamp,
-		       std::pair<CrashMachineNode *, std::vector<unsigned long> >,
+		       std::pair<CrashMachineNode *, std::set<unsigned long> >,
 		       __default_hash_function<CrashTimestamp>,
 		       __default_eq_function<CrashTimestamp>,
 		       visit_content_fn> contentT;
@@ -1503,9 +1557,9 @@ public:
 	CrashMachineNode *get(CrashTimestamp ts) { return content->get(ts).first; }
 	void set(CrashTimestamp ts, CrashMachineNode *cmn)
 	{
-		std::vector<unsigned long> t;
+		std::set<unsigned long> t;
 		content->set(ts,
-			     std::pair<CrashMachineNode *, std::vector<unsigned long> >
+			     std::pair<CrashMachineNode *, std::set<unsigned long> >
 			     (cmn, t));
 	}
 
@@ -1522,7 +1576,7 @@ public:
 void
 CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 					      MachineState<unsigned long> *ms,
-					      std::vector<unsigned long> &addresses)
+					      std::set<unsigned long> &addresses)
 {
 	switch (type) {
 	case CM_NODE_LEAF:
@@ -1546,7 +1600,7 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
 					       MachineState<unsigned long> *ms)
 {
 	CrashTimestamp ts(thr->tid, thr->regs.rip());
-	std::pair<CrashMachineNode *, std::vector<unsigned long> >
+	std::pair<CrashMachineNode *, std::set<unsigned long> >
 		&slot(content->get(ts));
 #if 0 /* unconfuse emacs */
 (
@@ -1966,6 +2020,7 @@ class Oracle {
 	std::vector<memaccess> memlog;
 public:
 	ThreadId crashingTid;
+	std::set<unsigned long> interesting_addresses;
 
 	/* Note that the RIP trace is in reverse chronological order
 	   i.e. it produces things which are nearest the crash
@@ -2049,6 +2104,28 @@ public:
 	}
 
 	void findLoadsForStore(unsigned long store, std::vector<unsigned long> *loads) const;
+
+	void collect_interesting_access_log(
+		VexPtr<MachineState<unsigned long> > &ms,
+		VexPtr<LogReader<unsigned long> > &lf,
+		LogReaderPtr ptr,
+		GarbageCollectionToken tok);
+
+	struct address_log_entry {
+		ThreadId tid;
+		unsigned long rip;
+		unsigned long addr;
+		unsigned long val;
+		address_log_entry(ThreadId _tid,
+				  unsigned long _rip,
+				  unsigned long _addr,
+				  unsigned long _val)
+			: tid(_tid), rip(_rip), addr(_addr),
+			  val(_val)
+		{
+		};
+	};
+	std::vector<address_log_entry> address_log;
 };
 
 void
@@ -2083,6 +2160,60 @@ Oracle::findLoadsForStore(unsigned long store_rip,
 		if (it == load_rips->end())
 			load_rips->push_back(memlog[idx].rip);
 	}
+}
+
+class CIALEventRecorder : public EventRecorder<unsigned long> {
+	Oracle *oracle; /* Note that the oracle isn't garbage
+			 * collected! */
+protected:
+	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt);
+public:
+	CIALEventRecorder(Oracle *_oracle)
+		: oracle(_oracle)
+	{
+	}
+	void visit(HeapVisitor &hv) {}
+};
+void
+CIALEventRecorder::record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt)
+{
+	StoreEvent<unsigned long> *se =
+		dynamic_cast<StoreEvent<unsigned long> *>(evt);
+	if (!se)
+		return;
+	if (oracle->interesting_addresses.count(se->addr) == 0)
+		return;
+	oracle->address_log.push_back(
+		Oracle::address_log_entry(
+			thr->tid,
+			thr->regs.rip(),
+			se->addr,
+			se->data.lo));
+}
+void
+Oracle::collect_interesting_access_log(
+	VexPtr<MachineState<unsigned long> > &ms,
+	VexPtr<LogReader<unsigned long> > &lf,
+	LogReaderPtr ptr,
+	GarbageCollectionToken tok)
+{
+	/* Make bootstrapping easier by starting the log off with
+	   records for the initial state of every interesting memory
+	   location. */
+	for (std::set<unsigned long>::iterator it = interesting_addresses.begin();
+	    it != interesting_addresses.end();
+	    it++)
+		address_log.push_back(
+			address_log_entry(
+				ThreadId(),
+				-1,
+				*it,
+				CrashExpressionLoad::fetch(*it, ms, NULL)));
+
+	VexPtr<EventRecorder<unsigned long> > er(new CIALEventRecorder(this));
+	Interpreter<unsigned long> i(ms);
+	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	i.replayLogfile(lf, ptr, tok, NULL, dummy, er);
 }
 
 static CrashMachineNode *
@@ -3130,19 +3261,62 @@ main(int argc, char *argv[])
 					 sle.ptr,
 					 ALLOW_GC);
 
-
+	/* Build the overall interesting address list */
+	oracle.interesting_addresses.clear();
 	for (CrashMachine::contentT::iterator it = cm->content->begin();
 	     it != cm->content->end();
 	     it++) {
 		printf("CMN %lx -> %s ",
 		       it.key().rip,
 		       it.value().first->name());
-		for (std::vector<unsigned long>::iterator it2 = it.value().second.begin();
+		for (std::set<unsigned long>::iterator it2 = it.value().second.begin();
 		     it2 != it.value().second.end();
-		     it2++)
+		     it2++) {
+			oracle.interesting_addresses.insert(*it2);
 			printf("%lx ", *it2);
+		}
 		printf("\n");
 	}
+
+#if 0 /* Unconfuse emacs */
+(
+#endif
+	printf("Interesting addresses:\n");
+	for (std::set<unsigned long>::iterator it = oracle.interesting_addresses.begin();
+	     it != oracle.interesting_addresses.end();
+	     it++)
+		printf("%lx\n", *it);
+
+	/* Collect the logs of those addresses */
+	snapshotMs = sle.ms->dupeSelf();
+	oracle.collect_interesting_access_log(
+		snapshotMs,
+		lf,
+		sle.ptr,
+		ALLOW_GC);
+
+	/* Now, for each machine, walk over the relevant address logs
+	 * and figure out when the CMN goes green and red. */
+	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
+	     cmn_it != cm->content->end();
+	     cmn_it++) {
+		std::map<unsigned long, unsigned long> memory;
+		CrashMachineNode *last = NULL;
+		for (std::vector<Oracle::address_log_entry>::iterator m_it =
+			     oracle.address_log.begin();
+		     m_it != oracle.address_log.end();
+		     m_it++) {
+			memory[m_it->addr] = m_it->val;
+			CrashMachineNode *new_cmn =
+				cmn_it.value().first->resolveLoads(memory, ms);
+			new_cmn = simplify_cmn(new_cmn);
+			if (last && last != new_cmn)
+				printf("CMN %s -> %s\n", cmn_it.value().first->name(),
+				       new_cmn->name());
+			last = new_cmn;
+		}
+	}
+
 	dbg_break("finished");
 
 	return 0;
