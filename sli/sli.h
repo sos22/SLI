@@ -890,8 +890,13 @@ template <typename ait>
 class EventRecorder : public GarbageCollected<EventRecorder<ait> > {
 protected:
 	virtual ~EventRecorder() {}
-public:
 	virtual void record(Thread<ait> *thr, ThreadEvent<ait> *evt) = 0;
+public:
+	virtual void record(Thread<ait> *thr, ThreadEvent<ait> *evt,
+			    MachineState<ait> *ms)
+	{
+		record(thr, evt);
+	}
 	void destruct() { this->~EventRecorder(); }
 	NAMED_CLASS
 };

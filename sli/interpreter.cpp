@@ -1500,9 +1500,11 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				if (force(ths->regs.rip() == ms->addressSpace->client_free))
 					ms->addressSpace->client_freed(ths->bumpEvent(ms),
 								       ths->regs.get_reg(REGISTER_IDX(RDI)));
+				ths->regs.set_reg(REGISTER_IDX(RIP),
+						  mkConst<ait>(stmt->Ist.IMark.addr));
 #define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
 				return InstructionEvent<ait>::get(ths->bumpEvent(ms),
-								  ths->regs.rip(),
+								  GR(RIP),
 								  GR(FOOTSTEP_REG_0_NAME),
 								  GR(FOOTSTEP_REG_1_NAME),
 								  ths->regs.get_reg(REGISTER_IDX(XMM0) + 1),
@@ -1854,7 +1856,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 			if (lastEvent && evt->when == *lastEvent)
 				finished = true;
 			if (er)
-				er->record(thr, evt);
+				er->record(thr, evt, currentState);
 			if (loud_mode)
 				printf("Event %s in thread %d, lr %s\n",
 				       evt->name(), lr->thread()._tid(),
