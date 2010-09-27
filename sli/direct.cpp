@@ -2124,7 +2124,6 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		    CrashMachine *partial_cm)
 {
 	ThreadId tid = oracle.crashingTid;
-	unsigned nr_nodes = 0;
 	while (!grey.empty()) {
 		unsigned long rip = grey.back();
 		grey.pop_back();
@@ -2170,14 +2169,12 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		CrashCFGNode *newNode =
 			new CrashCFGNode(rip, nonFallThroughTarget, fallThroughTarget);
 		nodeMap->set(rip, newNode);
-		nr_nodes++;
 
 		if (nonFallThroughTarget)
 			grey.push_back(nonFallThroughTarget);
 		if (fallThroughTarget)
 			grey.push_back(fallThroughTarget);
 	}
-	printf("CFG has %d nodes.\n", nr_nodes);
 }
 
 void
@@ -2699,10 +2696,25 @@ main(int argc, char *argv[])
 
 	printf("Selected thread %d as crasher\n", crashedThread->tid._tid());
 
-	printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
-	ppIRSB(crashedThread->currentIRSB);
+	if (crashedThread->currentIRSB) {
+		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
+		ppIRSB(crashedThread->currentIRSB);
+		assert(crashedThread->currentIRSBOffset != 0);
+	} else {
+		printf("Crashed because we jumped at a bad RIP %lx\n",
+		       crashedThread->currentIRSBRip);
 
-	assert(crashedThread->currentIRSBOffset != 0);
+		/* If we don't have a current IRSB, build one based on
+		 * the last thing in the ring buffer. */
+		crashedThread->currentIRSB =
+			ms->addressSpace->getIRSBForAddress(
+				crashedThread->controlLog.rbegin()->translated_rip);
+		/* We should be at the end of that... */
+		assert(crashedThread->currentIRSBOffset ==
+		       crashedThread->currentIRSB->stmts_used + 1);
+		/* Don't double-process the last thing in the ring. */
+		crashedThread->controlLog.pop_back();
+	}
 
 	Oracle oracle;
 	
@@ -2726,11 +2738,13 @@ main(int argc, char *argv[])
 	for (int idx = crashedThread->currentIRSBOffset;
 	     idx >= 0;
 	     idx--) {
-		if (crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark)
+		if (idx < crashedThread->currentIRSB->stmts_used &&
+		    crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark)
 			oracle.addRipTrace(
 				crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr,
 				false);
 	}
+
 	/* Now walk back over the earlier IRSBs */
 	for (ring_buffer<Thread<unsigned long>::control_log_entry, 100>::reverse_iterator it =
 										 crashedThread->controlLog.rbegin();
@@ -2771,8 +2785,23 @@ main(int argc, char *argv[])
 			    crashedThread->regs.rip());
 
 	CrashMachineNode *cmn;
-	{
-		int instr_start;
+        int instr_start;
+        if (crashedThread->currentIRSBOffset == crashedThread->currentIRSB->stmts_used + 1) {        
+		/* We made it to the end of the block and then crashed
+		   trying to start the next one -> the next address
+		   must be bad. */
+		for (instr_start = crashedThread->currentIRSBOffset-2;
+		     crashedThread->currentIRSB->stmts[instr_start]->tag != Ist_IMark;
+		     instr_start--)
+			;
+		when.rip = crashedThread->currentIRSB->stmts[instr_start]->Ist.IMark.addr;
+		cmn = new CrashMachineNode(
+			when.rip,
+			when,
+			CrashExpressionBadAddr::get(
+				CrashExpression::get(crashedThread->currentIRSB->next)));
+		crashedThread->currentIRSBOffset -= 1;
+	} else {
 		for (instr_start = crashedThread->currentIRSBOffset-1;
 		     crashedThread->currentIRSB->stmts[instr_start]->tag != Ist_IMark;
 		     instr_start--)
@@ -2780,14 +2809,15 @@ main(int argc, char *argv[])
 		cmn = statementToCrashReason(
 			when,
 			crashedThread->currentIRSB->stmts[crashedThread->currentIRSBOffset - 1]);
-		cmn = backtrack_crash_machine_node_for_statements(
-			when,
-			cmn,
-			crashedThread->currentIRSB->stmts + instr_start,
-			crashedThread->currentIRSBOffset - instr_start,
-			false,
-			oracle);
 	}
+        cmn = backtrack_crash_machine_node_for_statements(
+		when,
+		cmn,
+		crashedThread->currentIRSB->stmts + instr_start,
+		crashedThread->currentIRSBOffset - instr_start,
+		false,
+		oracle);
+
 	cmn->sanity_check();
 
 	printf("Proximal cause is %s\n", cmn->name());
