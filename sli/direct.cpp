@@ -1311,11 +1311,22 @@ public:
 	NAMED_CLASS
 };
 
-typedef gc_map<CrashTimestamp,
-	       CrashMachineNode *,
-	       __default_hash_function<CrashTimestamp>,
-	       __default_eq_function<CrashTimestamp>,
-	       __visit_function_heap<CrashMachineNode *> > CrashMachine;
+class CrashMachine : public GarbageCollected<CrashMachine> {
+public:
+	typedef gc_map<CrashTimestamp,
+		       CrashMachineNode *,
+		       __default_hash_function<CrashTimestamp>,
+		       __default_eq_function<CrashTimestamp>,
+		       __visit_function_heap<CrashMachineNode *> > contentT;
+	contentT *content;
+
+	CrashMachine() : content(new contentT()) {}
+
+	void visit(HeapVisitor &hv) { hv(content); }
+	void destruct() { this->~CrashMachine(); }
+	NAMED_CLASS
+};
+
 
 CrashExpression *
 CrashExpressionEqual::_simplify(unsigned hardness)
@@ -2133,7 +2144,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		unsigned long fallThroughTarget = 0;
 		unsigned long nonFallThroughTarget = 0;
 		CrashTimestamp when(tid, rip);
-		if (!partial_cm->hasKey(when)) {
+		if (!partial_cm->content->hasKey(when)) {
 			/* We stop exploration if we get to something
 			   which already has a CMN, because it can't
 			   do us any good to go beyond that point, and
@@ -2423,8 +2434,8 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			if (node->cmn)
 				continue;
 			CrashTimestamp when(oracle.crashingTid, node->rip);
-			if (cm->hasKey(when)) {
-				node->cmn = cm->get(when);
+			if (cm->content->hasKey(when)) {
+				node->cmn = cm->content->get(when);
 				progress = true;
 				DBG_CALC_CMNS("%lx: %s from crash machine\n", node->rip, node->cmn->name());
 				continue;
@@ -2625,8 +2636,8 @@ buildCrashMachineNode(MachineState<unsigned long> *ms,
 		      const Oracle &oracle)
 {
 	CrashTimestamp when(oracle.crashingTid, rip);
-	if (cm->hasKey(when))
-		return cm->get(when);
+	if (cm->content->hasKey(when))
+		return cm->content->get(when);
 	CrashCFG *cfg = new CrashCFG();
 	cfg->add_root(rip);
 	cfg->build(ms, oracle, cm);
@@ -2824,7 +2835,7 @@ main(int argc, char *argv[])
 
 	/* Go and build the crash machine */
 	VexPtr<CrashMachine> cm(new CrashMachine());
-	cm->set(cmn->defining_time, cmn);
+        cm->content->set(cmn->defining_time, cmn);
 
 	/* Incorporate stuff from the dynamic trace in reverse
 	 * order. */
@@ -2832,7 +2843,7 @@ main(int argc, char *argv[])
 	     it != oracle.end_rip_trace();
 	     it++) {
 		CrashTimestamp when(crashedThread->tid, *it);
-		if (!cm->hasKey(when)) {
+		if (!cm->content->hasKey(when)) {
 			CrashMachineNode *cmn;
 			cmn = buildCrashMachineNode(ms,
 						    *it,
@@ -2841,7 +2852,7 @@ main(int argc, char *argv[])
 			cmn = simplify_cmn(cmn);
 			printf("CrashMachineNode for %lx -> %s\n",
 			       *it, cmn->name());
-			cm->set(when, cmn);
+			cm->content->set(when, cmn);
 		}
 	}
 
