@@ -3302,6 +3302,7 @@ main(int argc, char *argv[])
 	     cmn_it++) {
 		std::map<unsigned long, unsigned long> memory;
 		CrashMachineNode *last = NULL;
+		bool in_critical_section = false;
 		for (std::vector<Oracle::address_log_entry>::iterator m_it =
 			     oracle.address_log.begin();
 		     m_it != oracle.address_log.end();
@@ -3310,9 +3311,34 @@ main(int argc, char *argv[])
 			CrashMachineNode *new_cmn =
 				cmn_it.value().first->resolveLoads(memory, ms);
 			new_cmn = simplify_cmn(new_cmn);
-			if (last && last != new_cmn)
-				printf("CMN %s -> %s\n", cmn_it.value().first->name(),
-				       new_cmn->name());
+			if (last &&
+			    !cmns_bisimilar(last, new_cmn) &&
+			    new_cmn->type == CrashMachineNode::CM_NODE_LEAF) {
+				unsigned long willCrash;
+				if (new_cmn->leafCond->simplify(1000)->isConstant(willCrash)) {
+					if (willCrash) {
+						if (!in_critical_section)
+							printf("CMN %s: enter remote critical section at %d:%lx\n",
+							       cmn_it.value().first->name(),
+							       m_it->tid._tid(),
+							       m_it->rip);
+						in_critical_section = true;
+					} else {
+						if (in_critical_section)
+							printf("CMN %s: exit remote critical section at %d:%lx\n",
+							       cmn_it.value().first->name(),
+							       m_it->tid._tid(),
+							       m_it->rip);
+						in_critical_section = false;
+					}
+				} else {
+					if (in_critical_section) {
+						printf("CMN %s: Critical section failed due to %s non-constant\n",
+						       cmn_it.value().first->name(),
+						       new_cmn->name());
+					}
+				}
+			}
 			last = new_cmn;
 		}
 	}
