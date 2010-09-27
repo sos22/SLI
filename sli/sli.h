@@ -428,15 +428,16 @@ public:
 		{
 		}
 	};
-	ring_buffer<snapshot_log_entry, 2> snapshotLog;
+	/* mutable because we have to nuke it from dupeSelf. */
+	mutable ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
 	abst_int_type currentControlCondition;
 
 	EventTimestamp lastEvent;
 
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
-	void futexBlock(abst_int_type fba) { printf("%d: block\n", tid._tid()); blocked = true; futex_block_address = fba; }
-	void futexUnblock() { printf("%d: unblocked\n", tid._tid()); blocked = false; }
+	void futexBlock(abst_int_type fba) { blocked = true; futex_block_address = fba; }
+	void futexUnblock() { blocked = false; }
 
 	void pretty_print() const;
 private:
