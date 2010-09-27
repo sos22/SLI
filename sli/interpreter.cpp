@@ -1436,7 +1436,7 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 
 	ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
 
-	if (ths->decode_counter % 100 == 0) {
+	if (ths->decode_counter % 10000 == 0) {
 		ths->snapshotLog.push(Thread<ait>::snapshot_log_entry(ms, ptr));
 		ms = ms->dupeSelf();
 	}
