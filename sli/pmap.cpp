@@ -165,22 +165,27 @@ template <typename ait>
 void PMap<ait>::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 {
 	unsigned h = paHash(pa);
-	/* Double indirection because the hv() might want to relocate
-	   it. */
-	PMapEntry<ait> **pme;
-	
-	pme = &heads[h];
-	while (*pme) {
-		if ( pa >= (*pme)->pa &&
-		     pa < (*pme)->pa + MemoryChunk<ait>::size ) {
-			hv(*pme);
-			return;
-		}
-		pme = &(*pme)->next;
-	}
+	PMap<ait> *cursor = this;
 
-	assert(parent);
-	parent->visitPA(pa, hv);
+	while (1) {
+		assert(cursor);
+		/* Double indirection because the hv() might want to
+		   relocate it. */
+		PMapEntry<ait> **pme;
+	
+		pme = &cursor->heads[h];
+		while (*pme) {
+			if ( pa >= (*pme)->pa &&
+			     pa < (*pme)->pa + MemoryChunk<ait>::size ) {
+				hv(*pme);
+				return;
+			}
+			pme = &(*pme)->next;
+		}
+		hv(cursor->parent);
+		assert(cursor->parent);
+		cursor = cursor->parent;
+	}
 }
 
 template <typename ait>
