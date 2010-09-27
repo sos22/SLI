@@ -39,6 +39,15 @@ Thread<ait> *Thread<ait>::dupeSelf() const
 {
 	Thread<ait> *work = new Thread<ait>();
 	*work = *this;
+
+	/* Clear out our old machine snapshots.  This is necessary to
+	   prevent a massive memory leak, as otherwise you build up an
+	   enormous chain of the things and nothing ever gets GCed. */
+	for (class ring_buffer<snapshot_log_entry, 2>::iterator it =
+		     this->snapshotLog.begin();
+	     it != this->snapshotLog.end();
+	     it++)
+		it->ms = NULL;
 	return work;
 }
 
