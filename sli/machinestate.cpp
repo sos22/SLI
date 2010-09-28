@@ -91,8 +91,11 @@ MachineState<ait> *MachineState<ait>::initialMachineState(VexPtr<LogReader<ait> 
 	as->addVsyscalls();
 	as->findInterestingFunctions();
 
+	for (unsigned x = 0; x < work->threads->size(); x++)
+		work->threads->index(x)->snapshotLog.push(
+			typename Thread<ait>::snapshot_log_entry(work, ptr));
 	*end = ptr;
-	return work;
+	return work->dupeSelf();;
 }
 
 template<typename ait>
