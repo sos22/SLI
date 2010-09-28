@@ -1439,6 +1439,8 @@ protected:
 					 trueTarget ? trueTarget->name() : "(null)",
 					 falseTarget ? falseTarget->name() : "(null)");
 			break;
+		default:
+			abort();
 		}
 		free(buf);
 		return b2;
@@ -1597,6 +1599,8 @@ public:
 			res = new CrashMachineNode(origin_rip, defining_time, newStores);
 			break;
 		}
+		default:
+			abort();
 		}
 		res->sanity_check();
 		return res;
@@ -1758,9 +1762,12 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 	case CM_NODE_STUB:
 		res = new CrashMachineNode(origin_rip, defining_time, newAbsStores);
 		break;
+	default:
+		abort();
 	}
 
 	assert(concrete_stores.size() == sz2);
+	(void)sz2;
 	concrete_stores.resize(sz);
 	return res;
 }
@@ -1796,6 +1803,7 @@ CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 								 concrete_stores);
 			assert(concrete_stores.size() == sz2);
 		}
+		(void)sz2;
 		concrete_stores.resize(sz);
 		return;
 	}
@@ -3404,7 +3412,7 @@ main(int argc, char *argv[])
 	LogReaderPtr ptr;
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
-
+	ms->findThread(ThreadId(7))->exitted = true;
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(lf, ptr, ALLOW_GC);
 	ms = i.currentState;

@@ -109,4 +109,5 @@ MemLog<ait>::MemLog()
 #define MK_MEM_LOG(t)						       \
 	template MemLog<t> *MemLog<t>::dupeSelf() const;	       \
 	template MemLog<t>::MemLog();				       \
-	template MemLog<t> *MemLog<t>::emptyMemlog()
+	template MemLog<t> *MemLog<t>::emptyMemlog();		       \
+	template void MemLog<t>::append(LogRecord<t> *lr, unsigned long)
