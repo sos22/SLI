@@ -128,18 +128,20 @@ bool VAMap::translate(unsigned long va,
 			if (va < root->prev->start) {
 				if (!root->prev->prev)
 					return false;
+				/* This isn't quite the normal splay
+				   table zig-zig rule, but seems to
+				   work a bit better for these access
+				   patterns. */
 				VAMapEntry *r = root;
 				VAMapEntry *rp = r->prev;
 				VAMapEntry *rpp = rp->prev;
 				VAMapEntry *rpps = rpp->succ;
 				VAMapEntry *rps = rp->succ;
-				VAMapEntry *rs = r->succ;
 				root = rpp;
-				rpp->succ = rp;
+				rpp->succ = r;
+				r->prev = rp;
 				rp->prev = rpps;
-				rp->succ = r;
-				r->prev = rps;
-				r->succ = rs;
+				rp->succ = rps;
 			} else if (va < root->prev->end) {
 				VAMapEntry *r = root;
 				VAMapEntry *rp = r->prev;
@@ -201,6 +203,7 @@ bool VAMap::translate(unsigned long va,
 			}
 		}
 	}
+
 #if TRACE_VAMAP & TRACE_VAMAP_LOOKUP
 	printf("%p, Translates to %lx\n", this,
 	       root->pa[(va - root->start) / MEMORY_CHUNK_SIZE]._pa);
