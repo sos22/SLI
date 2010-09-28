@@ -1874,11 +1874,18 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 
 			ThreadEvent<ait> *oldEvent = evt;
 			bool consumed = true;
-			evt = evt->replay(lr, currentState, consumed);
+			evt = oldEvent->replay(lr, currentState, consumed);
 			if (consumed) {
 				if (lw && !appendedRecord) {
 					lw->append(lr, oldEvent->when.idx);
 					appendedRecord = true;
+				}
+				if (!lw) {
+					if (!er) {
+						LibVEX_free(oldEvent);
+						oldEvent = NULL;
+					}
+					LibVEX_free(lr);
 				}
 				lr = NULL;
 				if (eof)
@@ -1889,6 +1896,9 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 					lr = lf->read(ptr, &ptr);
 				}
 			}
+
+			if (!er && oldEvent)
+				LibVEX_free(oldEvent);
 		}
 
 		if (!lr) {
