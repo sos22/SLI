@@ -61,12 +61,14 @@ MemoryChunk<abstract_interpret_value> *MemoryChunk<unsigned long>::abstract() co
 void
 MemoryChunk<unsigned long>::sanity_check(void) const
 {
+#ifndef NDEBUG
 	unsigned long desired_csum;
 	unsigned x;
 	desired_csum = 0;
 	for (x = 0; x < size; x++)
 		desired_csum += content[x];
 	assert(desired_csum == checksum);
+#endif
 }
 
 MemoryChunk<abstract_interpret_value> *MemoryChunk<abstract_interpret_value>::allocate()
