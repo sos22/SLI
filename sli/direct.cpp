@@ -1624,6 +1624,26 @@ public:
 		return resolveLoads(memory, ms, stores);
 	}
 
+	bool willDefinitelyCrash()
+	{
+		if (type == CM_NODE_LEAF) {
+			unsigned long v;
+			if (leafCond->isConstant(v) && v)
+				return true;
+		}
+		return false;
+	}
+
+	bool willDefinitelyNotCrash()
+	{
+		if (type == CM_NODE_LEAF) {
+			unsigned long v;
+			if (leafCond->isConstant(v) && !v)
+				return true;
+		}
+		return false;
+	}
+
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
 					 std::set<unsigned long> &addresses,
@@ -3331,7 +3351,16 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 {
 	std::map<unsigned long, unsigned long> memory;
 	CrashMachineNode *last = NULL;
-	bool in_critical_section = false;
+	unsigned nr_good, nr_bad, nr_unknown;
+
+	cmn = cmn->resolveLoads(memory, ms);
+	cmn = simplify_cmn(cmn);
+	if (cmn->willDefinitelyCrash() || cmn->willDefinitelyNotCrash())
+		return;
+
+	nr_good = 0;
+	nr_bad = 0;
+	nr_unknown = 0;
 	for (std::vector<Oracle::address_log_entry>::const_iterator m_it =
 		     oracle.address_log.begin();
 	     m_it != oracle.address_log.end();
@@ -3341,35 +3370,23 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 			cmn->resolveLoads(memory, ms);
 		new_cmn = simplify_cmn(new_cmn);
 		if (last &&
-		    !cmns_bisimilar(last, new_cmn) &&
-		    new_cmn->type == CrashMachineNode::CM_NODE_LEAF) {
-			unsigned long willCrash;
-			if (new_cmn->leafCond->simplify(1000)->isConstant(willCrash)) {
-				if (willCrash) {
-					if (!in_critical_section)
-						printf("CMN %s: enter remote critical section at %d:%lx\n",
-						       cmn->name(),
-						       m_it->tid._tid(),
-						       m_it->rip);
-					in_critical_section = true;
-				} else {
-					if (in_critical_section)
-						printf("CMN %s: exit remote critical section at %d:%lx\n",
-						       cmn->name(),
-						       m_it->tid._tid(),
-						       m_it->rip);
-					in_critical_section = false;
-				}
-			} else {
-				if (in_critical_section) {
-					printf("CMN %s: Critical section failed due to %s non-constant\n",
-					       cmn->name(),
-					       new_cmn->name());
-				}
-			}
+		    (1 || !cmns_bisimilar(last, new_cmn))) {
+			if (new_cmn->willDefinitelyCrash())
+				nr_bad++;
+			else if (new_cmn->willDefinitelyNotCrash())
+				nr_good++;
+			else
+				nr_unknown++;
 		}
 		last = new_cmn;
 	}
+	if (nr_good != 0)
+		printf("%lx: %d %d %d (%s)\n",
+		       cmn->defining_time.rip,
+		       nr_good,
+		       nr_bad,
+		       nr_unknown,
+		       cmn->name());
 }
 
 /* Only be called from debugger */
