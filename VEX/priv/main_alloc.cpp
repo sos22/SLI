@@ -12,7 +12,7 @@
 
 /* The heap sanity checks are expensive enough that we're better off
    leaving them off even during normal debug runs. */
-//#define NDEBUG
+#define NDEBUG
 
 /* If we're given an opportunity to garbage collect and the heap is
    bigger than this then we always take it. */
@@ -43,11 +43,15 @@ void dump_heap_usage(void);
 
 struct arena;
 
+#ifndef NDEBUG
 #define ALLOCATION_HEADER_MAGIC 0x11223344aa987654ul
+#endif
 
 struct allocation_header {
 	VexAllocType *type;
+#ifndef NDEBUG
 	unsigned long magic;
+#endif
 	unsigned long _size;
 	bool manual_redirection;
 	struct allocation_header *redirection;
@@ -380,7 +384,9 @@ raw_alloc(VexAllocType *t, unsigned long size)
 	   don't handle it are annoyingly subtle, so just do it. */
 	res->redirection = res;
 
+#ifndef NDEBUG
 	res->magic = ALLOCATION_HEADER_MAGIC;
+#endif
 
 	LibVEX_alloc_sanity_check();
 
