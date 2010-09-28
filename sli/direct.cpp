@@ -37,6 +37,33 @@ public:
 
 class CrashExpression;
 
+struct concrete_store {
+	unsigned long addr;
+	unsigned long value;
+	concrete_store(unsigned long _addr, unsigned long _value)
+		: addr(_addr), value(_value)
+	{
+	}
+	concrete_store()
+		: addr(0xf001), value(0xbeef)
+	{
+	}
+};
+typedef std::vector<concrete_store> concreteStoresT;
+
+struct abstract_store {
+	CrashExpression *addr;
+	CrashExpression *data;
+	abstract_store(CrashExpression *_addr,
+		       CrashExpression *_data)
+		: addr(_addr), data(_data)
+	{
+	}
+};
+typedef std::vector<abstract_store> abstractStoresT;
+
+class CrashExpression;
+
 class CPMapper {
 public:
 	virtual CrashExpression *operator()(CrashExpression *e) = 0;
@@ -132,9 +159,11 @@ public:
 
 	virtual void build_relevant_address_list(Thread<unsigned long> *thr,
 						 MachineState<unsigned long> *ms,
-						 std::set<unsigned long> &addresses) = 0;
+						 std::set<unsigned long> &addresses,
+						 const concreteStoresT &stores) = 0;
 	virtual unsigned long eval(Thread<unsigned long> *thr,
-				   MachineState<unsigned long> *ms) = 0;
+				   MachineState<unsigned long> *ms,
+				   const concreteStoresT &stores) = 0;
 
 	CrashExpression *simplify(unsigned hardness = 1) {
 		if (simplified_hardness < hardness) {
@@ -189,7 +218,8 @@ public:
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses) {
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores) {
 		/* This can't happen, because we shouldn't be building
 		   the address list until all temporaries have been
 		   resolved. */
@@ -197,7 +227,8 @@ public:
 	}
 
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms)
+			   MachineState<unsigned long> *ms,
+			   const std::vector<concrete_store> &)
 	{
 		return thr->temporaries[tmp].lo;
 	}
@@ -229,11 +260,14 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms)
+			   MachineState<unsigned long> *ms,
+			   const std::vector<concrete_store> &)
+
 	{
 		return thr->regs.get_reg(offset / 8);
 	}
@@ -262,11 +296,13 @@ public:
 	bool isConstant(unsigned long &l) { l = value; return true; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms)
+			   MachineState<unsigned long> *ms,
+			   const std::vector<concrete_store> &)
 	{
 		return value;
 	}
@@ -319,13 +355,14 @@ public:
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
-		addr->build_relevant_address_list(thr, ms, addresses);
+		addr->build_relevant_address_list(thr, ms, addresses, stores);
 		if (!addr->pointsAtStack())
 			discover_relevant_address(
 				addresses,
-				addr->eval(thr, ms));
+				addr->eval(thr, ms, stores));
 	}
 	/* This doesn't really belong here, but nevermind. */
 	static unsigned long fetch(unsigned long addr,
@@ -340,9 +377,17 @@ public:
 		return folded;
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms)
+			   MachineState<unsigned long> *ms,
+			   const std::vector<concrete_store> &stores)
 	{
-		return fetch(addr->eval(thr, ms), ms, thr);
+		unsigned long concrete_addr = addr->eval(thr, ms, stores);
+		for (std::vector<concrete_store>::const_reverse_iterator it = stores.rbegin();
+		     it != stores.rend();
+		     it++) {
+			if (it->addr == concrete_addr)
+				return it->value;
+		}
+		return fetch(addr->eval(thr, ms, stores), ms, thr);
 	}
 };
 
@@ -376,10 +421,11 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
-		l->build_relevant_address_list(thr, ms, addresses);
-		r->build_relevant_address_list(thr, ms, addresses);
+		l->build_relevant_address_list(thr, ms, addresses, stores);
+		r->build_relevant_address_list(thr, ms, addresses, stores);
 	}
 };
 
@@ -415,9 +461,11 @@ public:
 		return get(l, r);					\
 	}								\
 	unsigned long eval(Thread<unsigned long> *thr,			\
-			   MachineState<unsigned long> *ms)		\
+			   MachineState<unsigned long> *ms,		\
+			   const concreteStoresT &stores)		\
 	{								\
-		return l->eval(thr, ms) op r->eval(thr, ms);		\
+		return l->eval(thr, ms, stores) op			\
+			r->eval(thr, ms, stores);			\
 	}								\
 	};
 
@@ -523,9 +571,10 @@ protected:
 		return get(l, r);					
 	}								
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms)
+			   MachineState<unsigned long> *ms,
+			   const concreteStoresT &stores)
 	{
-		return (long)l->eval(thr, ms) < (long)r->eval(thr, ms);
+		return (long)l->eval(thr, ms, stores) < (long)r->eval(thr, ms, stores);
 	}
 };
 
@@ -675,9 +724,10 @@ public:
 	unsigned complexity() const { return l->complexity() + 1; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
-		l->build_relevant_address_list(thr, ms, addresses);
+		l->build_relevant_address_list(thr, ms, addresses, stores);
 	}
 };
 
@@ -708,7 +758,8 @@ public:
 			return get(e);					\
 		}							\
 	unsigned long eval(Thread<unsigned long> *thr,			\
-			   MachineState<unsigned long> *ms);		\
+			   MachineState<unsigned long> *ms,		\
+			   const concreteStoresT &stores);		\
 	};
 
 mk_unop(Neg, -)
@@ -725,21 +776,24 @@ mk_unop(Not, 0x7f8ff8ac608cb30d ^)
 mk_unop(BadAddr, 76348956389 *)
 
 unsigned long
-CrashExpressionNeg::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms)
+CrashExpressionNeg::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			 const concreteStoresT &stores)
 {
-	return -l->eval(thr, ms);
+	return -l->eval(thr, ms, stores);
 }
 
 unsigned long
-CrashExpressionNot::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms)
+CrashExpressionNot::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			 const concreteStoresT &stores)
 {
-	return !l->eval(thr, ms);
+	return !l->eval(thr, ms, stores);
 }
 
 unsigned long
-CrashExpressionBadAddr::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms)
+CrashExpressionBadAddr::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			     const concreteStoresT &stores)
 {
-	unsigned long a = l->eval(thr, ms);
+	unsigned long a = l->eval(thr, ms, stores);
 	if (ms->addressSpace->isAccessible(a, 8, false, thr))
 		return 0;
 	else
@@ -929,8 +983,9 @@ public:
 	CrashExpression *semiDupe(CrashExpression *l) {
 		return get(l);
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms) {
-		return l->eval(thr, ms);
+	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			   const concreteStoresT &stores) {
+		return l->eval(thr, ms, stores);
 	}
 };
 
@@ -963,8 +1018,9 @@ public:
 	CrashExpression *semiDupe(CrashExpression *l) {
 		return get(l, start, end);
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms) {
-		long a = l->eval(thr, ms);
+	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			   const concreteStoresT &stores) {
+		long a = l->eval(thr, ms, stores);
 		a <<= 64 - start;
 		a >>= 64 - start;
 		if (end != 64)
@@ -1044,20 +1100,23 @@ public:
 			d->complexity() + 
 			e->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms) {
+	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			   const concreteStoresT &stores)
+	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
 		abort();
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
-		a->build_relevant_address_list(thr, ms, addresses);
-		b->build_relevant_address_list(thr, ms, addresses);
-		c->build_relevant_address_list(thr, ms, addresses);
-		d->build_relevant_address_list(thr, ms, addresses);
-		e->build_relevant_address_list(thr, ms, addresses);
+		a->build_relevant_address_list(thr, ms, addresses, stores);
+		b->build_relevant_address_list(thr, ms, addresses, stores);
+		c->build_relevant_address_list(thr, ms, addresses, stores);
+		d->build_relevant_address_list(thr, ms, addresses, stores);
+		e->build_relevant_address_list(thr, ms, addresses, stores);
 	}
 };
 
@@ -1130,19 +1189,22 @@ public:
 			c->complexity() + 
 			d->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms) {
+	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			   const concreteStoresT &stores)
+	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
 		abort();
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
-		a->build_relevant_address_list(thr, ms, addresses);
-		b->build_relevant_address_list(thr, ms, addresses);
-		c->build_relevant_address_list(thr, ms, addresses);
-		d->build_relevant_address_list(thr, ms, addresses);
+		a->build_relevant_address_list(thr, ms, addresses, stores);
+		b->build_relevant_address_list(thr, ms, addresses, stores);
+		c->build_relevant_address_list(thr, ms, addresses, stores);
+		d->build_relevant_address_list(thr, ms, addresses, stores);
 	}
 };
 
@@ -1206,19 +1268,22 @@ public:
 			zero->complexity() + 
 			nzero->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms) {
-		if (cond->eval(thr, ms) == 0)
-			return zero->eval(thr, ms);
+	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+			   const concreteStoresT &stores)
+	{
+		if (cond->eval(thr, ms, stores) == 0)
+			return zero->eval(thr, ms, stores);
 		else
-			return nzero->eval(thr, ms);
+			return nzero->eval(thr, ms, stores);
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses)
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
 	{
-		cond->build_relevant_address_list(thr, ms, addresses);
-		zero->build_relevant_address_list(thr, ms, addresses);
-		nzero->build_relevant_address_list(thr, ms, addresses);
+		cond->build_relevant_address_list(thr, ms, addresses, stores);
+		zero->build_relevant_address_list(thr, ms, addresses, stores);
+		nzero->build_relevant_address_list(thr, ms, addresses, stores);
 	}
 };
 
@@ -1297,10 +1362,12 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 	class ResolveLoadsMapper : public CPMapper {
 		std::map<unsigned long, unsigned long> &memory;
 		MachineState<unsigned long> *ms;
+		concreteStoresT &stores;
 	public:
 		ResolveLoadsMapper(std::map<unsigned long, unsigned long> &_memory,
-				   MachineState<unsigned long> *_ms)
-			: memory(_memory), ms(_ms)
+				   MachineState<unsigned long> *_ms,
+				   concreteStoresT &_stores)
+			: memory(_memory), ms(_ms), stores(_stores)
 		{
 		}
 		CrashExpression *operator()(CrashExpression *ce) {
@@ -1332,43 +1399,70 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 				else
 					return ce;
 			}
-			if (memory.count(addr) == 0)
-				return ce;
-			else
+			for (concreteStoresT::reverse_iterator it = stores.rbegin();
+			     it != stores.rend();
+			     it++) {
+				if (addr == it->addr)
+					return CrashExpressionConst::get(it->value);
+			}
+			if (memory.count(addr) != 0)
 				return CrashExpressionConst::get(memory[addr]);
+			return ce;
 		}
 	};
 
 protected:
 	char *mkName() const {
+		char *buf = my_asprintf("%s: <%lx> ", defining_time.name(), origin_rip);
+		for (abstractStoresT::const_iterator it = stores.begin();
+		     it != stores.end();
+		     it++) {
+			char *b2 = my_asprintf("%s*(%s) = %s;",
+					       buf,
+					       it->addr->name(),
+					       it->data->name());
+			free(buf);
+			buf = b2;
+		}
+		char *b2;
 		switch (type) {
 		case CM_NODE_LEAF:
-			return my_asprintf("%s: <%lx> leaf{%s}", defining_time.name(), origin_rip, leafCond->name());
+			b2 = my_asprintf("%sleaf{%s}", buf, leafCond->name());
+			break;
 		case CM_NODE_STUB:
-			return my_asprintf("%s: stub %lx", defining_time.name(), origin_rip);
+			b2 = my_asprintf("%sstub", buf);
+			break;
 		case CM_NODE_BRANCH:
-			return my_asprintf("%s: <%lx> branch{%s, %s, %s}",
-					   defining_time.name(),
-					   origin_rip,
-					   branchCond->name(),
-					   trueTarget ? trueTarget->name() : "(null)",
-					   falseTarget ? falseTarget->name() : "(null)");
+			b2 = my_asprintf("%sbranch{%s, %s, %s}",
+					 buf,
+					 branchCond->name(),
+					 trueTarget ? trueTarget->name() : "(null)",
+					 falseTarget ? falseTarget->name() : "(null)");
+			break;
 		}
-		abort();
+		free(buf);
+		return b2;
 	}
+
 public:
+	abstractStoresT stores;
+
 	CrashMachineNode(unsigned long _origin_rip,
 			 CrashTimestamp _defining_time,
-			 CrashExpression *e)
-		: origin_rip(_origin_rip),
+			 CrashExpression *e,
+			 const abstractStoresT &_stores)
+		: stores(_stores),
+		  origin_rip(_origin_rip),
 		  defining_time(_defining_time),
 		  type(CM_NODE_LEAF),
 		  leafCond(e)
 	{
 	}
 	CrashMachineNode(unsigned long _origin_rip,
-			 CrashTimestamp _defining_time)
-		: origin_rip(_origin_rip),
+			 CrashTimestamp _defining_time,
+			 const abstractStoresT &_stores)
+		: stores(_stores),
+		  origin_rip(_origin_rip),
 		  defining_time(_defining_time),
 		  type(CM_NODE_STUB)
 	{
@@ -1377,8 +1471,10 @@ public:
 			 CrashTimestamp _defining_time,
 			 CrashExpression *_branchCond,
 			 CrashMachineNode *_trueTarget,
-			 CrashMachineNode *_falseTarget)
-		: origin_rip(_origin_rip),
+			 CrashMachineNode *_falseTarget,
+			 const abstractStoresT &_stores)
+		: stores(_stores),
+		  origin_rip(_origin_rip),
 		  defining_time(_defining_time),
 		  type(CM_NODE_BRANCH),
 		  branchCond(_branchCond),
@@ -1432,13 +1528,14 @@ public:
 			return this;
 		switch (type) {
 		case CM_NODE_LEAF:
-			return new CrashMachineNode(origin_rip, ts, leafCond);
+			return new CrashMachineNode(origin_rip, ts, leafCond, stores);
 		case CM_NODE_STUB:
-			return new CrashMachineNode(origin_rip, ts);
+			return new CrashMachineNode(origin_rip, ts, stores);
 		case CM_NODE_BRANCH:
 			return new CrashMachineNode(origin_rip, ts, branchCond,
 						    trueTarget->setDefiningTime(ts),
-						    falseTarget->setDefiningTime(ts));
+						    falseTarget->setDefiningTime(ts),
+						    stores);
 		}
 		abort();
 	}
@@ -1465,12 +1562,23 @@ public:
 	CrashMachineNode *map(CPMapper &m)
 	{
 		CrashMachineNode *res;
+		abstractStoresT newStores;
+		bool forceNew = false;
+		for (abstractStoresT::iterator it = stores.begin();
+		     it != stores.end();
+		     it++) {
+			CrashExpression *a = it->addr->map(m);
+			CrashExpression *d = it->data->map(m);
+			if (a != it->addr || d != it->data)
+				forceNew = true;
+			newStores.push_back(abstract_store(a, d));
+		}
 		switch (type) {
 		case CM_NODE_LEAF: {
 			CrashExpression *l = leafCond->map(m);
-			if (l == leafCond)
+			if (l == leafCond && !forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, defining_time, l);
+			res = new CrashMachineNode(origin_rip, defining_time, l, newStores);
 			break;
 		}
 		case CM_NODE_BRANCH: {
@@ -1478,13 +1586,17 @@ public:
 			CrashMachineNode *t = trueTarget ? trueTarget->map(m) : NULL;
 			CrashMachineNode *f = falseTarget ? falseTarget->map(m) : NULL;
 			if (c == branchCond && t == trueTarget &&
-			    f == falseTarget)
+			    f == falseTarget && !forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, defining_time, c, t, f);
+			res = new CrashMachineNode(origin_rip, defining_time, c, t, f, newStores);
 			break;
 		}
-		case CM_NODE_STUB:
-			return this;
+		case CM_NODE_STUB: {
+			if (!forceNew)
+				return this;
+			res = new CrashMachineNode(origin_rip, defining_time, newStores);
+			break;
+		}
 		}
 		res->sanity_check();
 		return res;
@@ -1503,15 +1615,19 @@ public:
 	}
 	/* ms is used to resolve badAddr expressions */
 	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
+				       MachineState<unsigned long> *ms,
+				       concreteStoresT &stores);
+	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
 				       MachineState<unsigned long> *ms)
 	{
-		ResolveLoadsMapper rlm(memory, ms);
-		return map(rlm);
+		concreteStoresT stores;
+		return resolveLoads(memory, ms, stores);
 	}
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses);
+					 std::set<unsigned long> &addresses,
+					 concreteStoresT &stores);
 
 	void changed() { clearName(); }
 	void visit(HeapVisitor &hv) {
@@ -1573,22 +1689,96 @@ public:
 	NAMED_CLASS
 };
 
+CrashMachineNode *
+CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
+			       MachineState<unsigned long> *ms,
+			       concreteStoresT &concrete_stores)
+{
+	ResolveLoadsMapper rlm(memory, ms, concrete_stores);
+	abstractStoresT newAbsStores;
+	CrashMachineNode *res;
+
+	unsigned sz = concrete_stores.size();
+	for (abstractStoresT::iterator it = stores.begin();
+	     it != stores.end();
+	     it++) {
+		CrashExpression *addr = it->addr->map(rlm);
+		CrashExpression *data = it->data->map(rlm);
+		newAbsStores.push_back(abstract_store(addr, data));
+		unsigned long concreteAddr, concreteData;
+		if (addr->isConstant(concreteAddr) &&
+		    data->isConstant(concreteData)) {
+			concrete_stores.push_back(
+				concrete_store(concreteAddr, concreteData));
+		}
+	}
+	unsigned sz2 = concrete_stores.size();
+
+	switch (type) {
+	case CM_NODE_LEAF:
+		res = new CrashMachineNode(origin_rip, defining_time,
+					   leafCond->map(rlm), newAbsStores);
+		break;
+	case CM_NODE_BRANCH: {
+		CrashExpression *b = branchCond->map(rlm);
+		CrashMachineNode *t = NULL;
+		CrashMachineNode *f = NULL;
+		if (trueTarget) {
+			t = trueTarget->resolveLoads(memory, ms, concrete_stores);
+			assert(concrete_stores.size() == sz2);
+		}
+		if (falseTarget) {
+			f = falseTarget->resolveLoads(memory, ms, concrete_stores);
+			assert(concrete_stores.size() == sz2);
+		}
+		res = new CrashMachineNode(origin_rip, defining_time,
+					   b, t, f, newAbsStores);
+		break;
+	}
+	case CM_NODE_STUB:
+		res = new CrashMachineNode(origin_rip, defining_time, newAbsStores);
+		break;
+	}
+
+	assert(concrete_stores.size() == sz2);
+	concrete_stores.resize(sz);
+	return res;
+}
+
 void
 CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 					      MachineState<unsigned long> *ms,
-					      std::set<unsigned long> &addresses)
+					      std::set<unsigned long> &addresses,
+					      concreteStoresT &concrete_stores)
 {
 	switch (type) {
 	case CM_NODE_LEAF:
-		leafCond->build_relevant_address_list(thr, ms, addresses);
+		leafCond->build_relevant_address_list(thr, ms, addresses, concrete_stores);
 		return;
-	case CM_NODE_BRANCH:
-		branchCond->build_relevant_address_list(thr, ms, addresses);
-		if (trueTarget)
-			trueTarget->build_relevant_address_list(thr, ms, addresses);
-		if (falseTarget)
-			falseTarget->build_relevant_address_list(thr, ms, addresses);
+	case CM_NODE_BRANCH: {
+		unsigned sz = concrete_stores.size();
+		for (abstractStoresT::iterator it = stores.begin();
+		     it != stores.end();
+		     it++)
+			concrete_stores.push_back(
+				concrete_store(
+					it->addr->eval(thr, ms, concrete_stores),
+					it->data->eval(thr, ms, concrete_stores)));
+		unsigned sz2 = concrete_stores.size();
+		branchCond->build_relevant_address_list(thr, ms, addresses, concrete_stores);
+		if (trueTarget) {
+			trueTarget->build_relevant_address_list(thr, ms, addresses,
+								concrete_stores);
+			assert(concrete_stores.size() == sz2);
+		}
+		if (falseTarget) {
+			falseTarget->build_relevant_address_list(thr, ms, addresses,
+								 concrete_stores);
+			assert(concrete_stores.size() == sz2);
+		}
+		concrete_stores.resize(sz);
 		return;
+	}
 	case CM_NODE_STUB:
 		return;
 	}
@@ -1602,15 +1792,15 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
 	CrashTimestamp ts(thr->tid, thr->regs.rip());
 	std::pair<CrashMachineNode *, std::set<unsigned long> >
 		&slot(content->get(ts));
-#if 0 /* unconfuse emacs */
-(
-#endif
+
 	/* We're only interested in the results of the *last*
 	   execution of this instruction */
 	slot.second.clear();
 
 	/* Do it. */
-	slot.first->build_relevant_address_list(thr, ms, slot.second);
+	concreteStoresT concreteStores;
+	slot.first->build_relevant_address_list(thr, ms, slot.second, concreteStores);
+	assert(concreteStores.size() == 0);
 }
 
 class CRAEventRecorder : public EventRecorder<unsigned long> {
@@ -1932,12 +2122,15 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 		r = exprToCrashReason(when, irs->Ist.Store.addr);
 		if (!r)
 			r = exprToCrashReason(when, irs->Ist.Store.data);
-		if (!r)
+		if (!r) {
+			abstractStoresT stores;
 			r = new CrashMachineNode(
 				when.rip,
 				when,
 				CrashExpressionBadAddr::get(
-					CrashExpression::get(irs->Ist.Store.addr)));
+					CrashExpression::get(irs->Ist.Store.addr)),
+				stores);
+		}
 		return r;
 	case Ist_Dirty:
 		if (irs->Ist.Dirty.details->guard) {
@@ -1955,11 +2148,13 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 		if (!strncmp(irs->Ist.Dirty.details->cee->name,
 			     "helper_load_",
 			     12)) {
+			abstractStoresT stores;
 			return new CrashMachineNode(
 				when.rip,
 				when,
 				CrashExpressionBadAddr::get(
-					CrashExpression::get(irs->Ist.Dirty.details->args[0])));
+					CrashExpression::get(irs->Ist.Dirty.details->args[0])),
+				stores);
 		}
 		return NULL;
 	}
@@ -2273,14 +2468,17 @@ backtrack_crash_machine_node_for_statements(
 			break;
 
 		case Ist_Store: {
+			CrashExpression *data =	CrashExpression::get(stmt->Ist.Store.data);
+			CrashExpression *addr =	CrashExpression::get(stmt->Ist.Store.addr);
 			std::vector<unsigned long> satisfiedLoads;
 			oracle.findLoadsForStore(rip, &satisfiedLoads);
 			if (!satisfiedLoads.empty()) {
-				CrashExpression *data =
-					CrashExpression::get(
-						stmt->Ist.Store.data);
 				ResolveLoadsMapper rlm(data, satisfiedLoads);
 				node = node->map(rlm);
+			} else {
+				node->stores.insert(
+					node->stores.begin(),
+					abstract_store(addr, data));
 			}
 			break;
 		}
@@ -2289,7 +2487,8 @@ backtrack_crash_machine_node_for_statements(
 			if (!ignore_branches) {
 				/* Only handle two-way branches */
 				assert(!node->trueTarget);
-				node->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64, when);
+				abstractStoresT stores;
+				node->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64, when, stores);
 				node->branchCond = CrashExpression::get(stmt->Ist.Exit.guard);
 			}
 			break;
@@ -2325,6 +2524,15 @@ cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
 		return false;
 	if (cmn1->type != cmn2->type)
 		return false;
+	if (cmn1->stores.size() != cmn2->stores.size())
+		return false;
+	for (unsigned idx = 0;
+	     idx < cmn1->stores.size();
+	     idx++)
+		if (!cmn1->stores[idx].addr->eq(cmn2->stores[idx].addr) ||
+		    !cmn1->stores[idx].data->eq(cmn2->stores[idx].data))
+			return false;
+
 	switch (cmn1->type) {
 	case CrashMachineNode::CM_NODE_STUB:
 		return cmn1->origin_rip == cmn2->origin_rip;
@@ -2855,10 +3063,12 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 				   captured one that we avoid the
 				   crash. */
 				DBG_CALC_CMNS("%lx: no known successors\n", node->rip);
+				abstractStoresT stores;
 				node->cmn = new CrashMachineNode(
 					node->rip,
 					when,
-					CrashExpressionConst::get(0));
+					CrashExpressionConst::get(0),
+					stores);
 				continue;
 			}
 
@@ -2930,11 +3140,13 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			/* cmn is now valid at the exit of this
 			   instruction.  Backtrack it to get the CMN
 			   for the start of the instruction. */
+			abstractStoresT stores;
 			cmn = new CrashMachineNode(node->rip,
 						   when,
 						   branchCond,
 						   trueTarget,
-						   falseTarget);
+						   falseTarget,
+						   stores);
 			if (doCallFixup)
 				cmn = cmn->rewriteRegister(
 					OFFSET_amd64_RSP,
@@ -2972,6 +3184,36 @@ CrashCFG::build(MachineState<unsigned long> *ms,
 	calculate_cmns(ms, cm, oracle);
 }
 
+/* Construct a new CMN which is equivalent to running all of the
+   stores out of base and then running sub. */
+static CrashMachineNode *
+mergeCmns(CrashMachineNode *base, CrashMachineNode *sub)
+{
+	abstractStoresT stores(base->stores);
+	stores.insert(stores.end(),
+		      sub->stores.begin(),
+		      sub->stores.end());
+	switch (sub->type) {
+	case CrashMachineNode::CM_NODE_LEAF:
+		return new CrashMachineNode(sub->origin_rip,
+					    sub->defining_time,
+					    sub->leafCond,
+					    stores);
+	case CrashMachineNode::CM_NODE_STUB:
+		return new CrashMachineNode(sub->origin_rip,
+					    sub->defining_time,
+					    stores);
+	case CrashMachineNode::CM_NODE_BRANCH:
+		return new CrashMachineNode(sub->origin_rip,
+					    sub->defining_time,
+					    sub->branchCond,
+					    sub->trueTarget,
+					    sub->falseTarget,
+					    stores);
+	}
+	abort();
+}
+
 static CrashMachineNode *
 simplify_cmn(CrashMachineNode *cmn)
 {
@@ -2993,20 +3235,20 @@ simplify_cmn(CrashMachineNode *cmn)
 		assert(cmn->trueTarget || cmn->falseTarget);
 		cmn->sanity_check();
 		if (!cmn->falseTarget) {
-			cmn = cmn->trueTarget;
+			cmn = mergeCmns(cmn, cmn->trueTarget);
 			break;
 		}
 		if (!cmn->trueTarget) {
-			cmn = cmn->falseTarget;
+			cmn = mergeCmns(cmn, cmn->falseTarget);
 			break;
 		}
 		unsigned long lc;
 		cmn->branchCond = cmn->branchCond->simplify(1000);
 		if (cmn->branchCond->isConstant(lc)) {
 			if (lc)
-				cmn = cmn->trueTarget;
+				cmn = mergeCmns(cmn, cmn->trueTarget);
 			else
-				cmn = cmn->falseTarget;
+				cmn = mergeCmns(cmn, cmn->falseTarget);
 		} else {
 			if (cmn->falseTarget->origin_rip < cmn->trueTarget->origin_rip) {
 				CrashMachineNode *t;
@@ -3016,7 +3258,7 @@ simplify_cmn(CrashMachineNode *cmn)
 				cmn->falseTarget = t;
 			}
 			if (cmns_bisimilar(cmn->trueTarget, cmn->falseTarget))
-				cmn = cmn->trueTarget;
+				cmn = mergeCmns(cmn, cmn->trueTarget);
 		}
 		cmn->changed();
 		break;
@@ -3074,6 +3316,67 @@ MemTraceExtractor::record(Thread<unsigned long> *thr,
 		    se->addr < rsp + (8 << 20))
 			oracle->store_event(thr->regs.rip(), se->addr);
 	}
+}
+
+unsigned long
+memory_lookup(std::map<unsigned long, unsigned long> *memory, unsigned long addr)
+{
+	return (*memory)[addr];
+}
+
+static void
+findRemoteCriticalSections(CrashMachineNode *cmn,
+			   const Oracle &oracle,
+			   MachineState<unsigned long> *ms)
+{
+	std::map<unsigned long, unsigned long> memory;
+	CrashMachineNode *last = NULL;
+	bool in_critical_section = false;
+	for (std::vector<Oracle::address_log_entry>::const_iterator m_it =
+		     oracle.address_log.begin();
+	     m_it != oracle.address_log.end();
+	     m_it++) {
+		memory[m_it->addr] = m_it->val;
+		CrashMachineNode *new_cmn =
+			cmn->resolveLoads(memory, ms);
+		new_cmn = simplify_cmn(new_cmn);
+		if (last &&
+		    !cmns_bisimilar(last, new_cmn) &&
+		    new_cmn->type == CrashMachineNode::CM_NODE_LEAF) {
+			unsigned long willCrash;
+			if (new_cmn->leafCond->simplify(1000)->isConstant(willCrash)) {
+				if (willCrash) {
+					if (!in_critical_section)
+						printf("CMN %s: enter remote critical section at %d:%lx\n",
+						       cmn->name(),
+						       m_it->tid._tid(),
+						       m_it->rip);
+					in_critical_section = true;
+				} else {
+					if (in_critical_section)
+						printf("CMN %s: exit remote critical section at %d:%lx\n",
+						       cmn->name(),
+						       m_it->tid._tid(),
+						       m_it->rip);
+					in_critical_section = false;
+				}
+			} else {
+				if (in_critical_section) {
+					printf("CMN %s: Critical section failed due to %s non-constant\n",
+					       cmn->name(),
+					       new_cmn->name());
+				}
+			}
+		}
+		last = new_cmn;
+	}
+}
+
+/* Only be called from debugger */
+CrashMachineNode *
+_get_cmn(CrashMachine *cm, int tid, unsigned long rip)
+{
+	return cm->get(CrashTimestamp(ThreadId(tid), rip));
 }
 
 int
@@ -3204,11 +3507,13 @@ main(int argc, char *argv[])
 		     instr_start--)
 			;
 		when.rip = crashedThread->currentIRSB->stmts[instr_start]->Ist.IMark.addr;
+		abstractStoresT stores;
 		cmn = new CrashMachineNode(
 			when.rip,
 			when,
 			CrashExpressionBadAddr::get(
-				CrashExpression::get(crashedThread->currentIRSB->next)));
+				CrashExpression::get(crashedThread->currentIRSB->next)),
+			stores);
 		crashedThread->currentIRSBOffset -= 1;
 	} else {
 		for (instr_start = crashedThread->currentIRSBOffset-1;
@@ -3295,52 +3600,13 @@ main(int argc, char *argv[])
 		sle.ptr,
 		ALLOW_GC);
 
+	printf("Critical sections:\n");
 	/* Now, for each machine, walk over the relevant address logs
 	 * and figure out when the CMN goes green and red. */
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
-		std::map<unsigned long, unsigned long> memory;
-		CrashMachineNode *last = NULL;
-		bool in_critical_section = false;
-		for (std::vector<Oracle::address_log_entry>::iterator m_it =
-			     oracle.address_log.begin();
-		     m_it != oracle.address_log.end();
-		     m_it++) {
-			memory[m_it->addr] = m_it->val;
-			CrashMachineNode *new_cmn =
-				cmn_it.value().first->resolveLoads(memory, ms);
-			new_cmn = simplify_cmn(new_cmn);
-			if (last &&
-			    !cmns_bisimilar(last, new_cmn) &&
-			    new_cmn->type == CrashMachineNode::CM_NODE_LEAF) {
-				unsigned long willCrash;
-				if (new_cmn->leafCond->simplify(1000)->isConstant(willCrash)) {
-					if (willCrash) {
-						if (!in_critical_section)
-							printf("CMN %s: enter remote critical section at %d:%lx\n",
-							       cmn_it.value().first->name(),
-							       m_it->tid._tid(),
-							       m_it->rip);
-						in_critical_section = true;
-					} else {
-						if (in_critical_section)
-							printf("CMN %s: exit remote critical section at %d:%lx\n",
-							       cmn_it.value().first->name(),
-							       m_it->tid._tid(),
-							       m_it->rip);
-						in_critical_section = false;
-					}
-				} else {
-					if (in_critical_section) {
-						printf("CMN %s: Critical section failed due to %s non-constant\n",
-						       cmn_it.value().first->name(),
-						       new_cmn->name());
-					}
-				}
-			}
-			last = new_cmn;
-		}
+		findRemoteCriticalSections(cmn_it.value().first, oracle, ms);
 	}
 
 	dbg_break("finished");
