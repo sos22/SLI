@@ -1839,7 +1839,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 {
 	unsigned long event_counter = 0;
 	VexPtr<LogRecord<ait> > lr;
-	bool appendedRecord;
+	bool appendedRecord = false;
 	bool finished = false;
 	LogReaderPtr ptr2 = ptr;
 
