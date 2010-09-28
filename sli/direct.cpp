@@ -3413,11 +3413,23 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 	ms->findThread(ThreadId(7))->exitted = true;
+	
+	Oracle oracle;
+
+	/* Figure out which thread crashed.  We usei sby replaying the
+	   entire log and then looking at the very last record, but
+	   hat's really stupid, because all we really need to know is
+	   which thread got signalled.  Could trivially do that by
+	   just looking at the last record, but I'm lazy, so hard-code
+	   for now. */
+	oracle.crashingTid = ThreadId(9);
+
+#if 0
+	VexPtr<Thread<unsigned long> > crashedThread;
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(lf, ptr, ALLOW_GC);
 	ms = i.currentState;
-	
-	VexPtr<Thread<unsigned long> > crashedThread;
+
 	crashedThread = NULL;
 	for (unsigned x = 0; x < ms->threads->size(); x++) {
 		if (ms->threads->index(x)->crashed) {
@@ -3431,6 +3443,21 @@ main(int argc, char *argv[])
 		return 0;
 	}
 
+	oracle.crashingTid = crashedThread->tid;
+#endif
+	
+        /* Extract a memory trace */
+	{
+		VexPtr<EventRecorder<unsigned long> > mte(new MemTraceExtractor(&oracle));
+		Interpreter<unsigned long> i2(ms->dupeSelf());
+		VexPtr<LogWriter<unsigned long> > dummy_lw(NULL);
+		i2.replayLogfile(lf, ptr,
+				 ALLOW_GC, NULL, dummy_lw, mte);
+		ms = i2.currentState;
+	}
+
+	VexPtr<Thread<unsigned long> > crashedThread;
+	crashedThread = ms->findThread(oracle.crashingTid);
 	printf("Selected thread %d as crasher\n", crashedThread->tid._tid());
 
 	if (crashedThread->currentIRSB) {
@@ -3453,12 +3480,8 @@ main(int argc, char *argv[])
 		crashedThread->controlLog.pop_back();
 	}
 
-	Oracle oracle;
-	
-	oracle.crashingTid = crashedThread->tid;
-
-	/* Step one: build the footstep log.  This has a record for
-	   every instruction in the dynamic trace, which says:
+	/* Build the footstep log.  This has a record for every
+	   instruction in the dynamic trace, which says:
 
 	   -- What the RIP was
 	   -- Whether we exited due to a branch or a fall-through (true for
@@ -3509,12 +3532,6 @@ main(int argc, char *argv[])
 		}
 	}
 
-        /* Now extract a memory trace */
-        VexPtr<EventRecorder<unsigned long> > mte(new MemTraceExtractor(&oracle));
-        Interpreter<unsigned long> i2(crashedThread->snapshotLog.begin()->ms->dupeSelf());
-	VexPtr<LogWriter<unsigned long> > dummy_lw(NULL);
-	i2.replayLogfile(lf, crashedThread->snapshotLog.begin()->ptr,
-			 ALLOW_GC, NULL, dummy_lw, mte);
 
 	/* Look at the crashing statement to derive a proximal cause
 	 * of the crash. */
