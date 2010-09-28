@@ -1363,20 +1363,30 @@ class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	AddressSpace<ait> *aspace;
 	unsigned long offset;
 	VexGcVisitor<AddressSpaceGuestFetcher<ait> > visitor;
+	mutable UChar cache[16];
+	mutable unsigned long cache_start;
 public:
-	virtual UChar operator[](unsigned long idx) const {
-		ait v;
-		aspace->readMemory(mkConst<ait>(idx + offset), 1, &v, false, NULL);
-		return force(v);
+	virtual UChar operator[](unsigned long idx) const
+	{
+		unsigned long desired = idx + offset;
+		if (desired >= cache_start && desired < cache_start + sizeof(cache))
+			return cache[desired - cache_start];
+		cache_start = desired;
+		ait v[16];
+		aspace->readMemory(mkConst<ait>(desired), 16, v, false, NULL);
+		for (unsigned x = 0; x < sizeof(cache); x++)
+			cache[x] = force(v[x]);
+		return cache[0];
 	}
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
 				 unsigned long _offset) :
 		aspace(_aspace),
 		offset(_offset),
-		visitor(this, "AddressSpaceGuestFetcher")
+		visitor(this, "AddressSpaceGuestFetcher"),
+		cache_start(0)
 	{
 	}
-	void visit(HeapVisitor &hv) { visit_aiv(offset, hv); hv(aspace); }
+	void visit(HeapVisitor &hv) { hv(aspace); }
 };
 
 template<typename ait> IRSB *
