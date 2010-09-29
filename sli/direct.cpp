@@ -1593,99 +1593,6 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 		sanity_check();
 	}
 
-	static const unsigned nr_heads = 1023;
-	static CrashMachineNode *heads[nr_heads];
-	CrashMachineNode *next, *prev;
-
-	unsigned long hash() const {
-		unsigned long h = 0;
-		for (abstractStoresT::const_iterator it = stores.begin();
-		     it != stores.end();
-		     it++)
-			h = h * 97 + it->addr->hash() * 3 + it->data->hash() * 5;
-		h *= 103;
-		switch (type) {
-		case CM_NODE_LEAF:
-			return h + leafCond->hash();
-		case CM_NODE_STUB:
-			return h + origin_rip;
-		case CM_NODE_BRANCH:
-			return h + branchCond->hash() +
-				(trueTarget ? trueTarget->hash() * 17 : 0) +
-				(falseTarget ? falseTarget->hash() * 23 : 0);
-		}
-		abort();
-	}
-	CrashMachineNode *intern() {
-		int head = hash() % nr_heads;
-		CrashMachineNode *cursor;
-		for (cursor = heads[head];
-		     cursor && !cursor->eq(this);
-		     cursor = cursor->next)
-			;
-		if (cursor && cursor != heads[head]) {
-			if (cursor->next)
-				cursor->next->prev = cursor->prev;
-			if (cursor->prev)
-				cursor->prev->next = cursor->next;
-			else
-				abort();
-			cursor->next = heads[head];
-			cursor->prev = NULL;
-			if (heads[head])
-				heads[head]->prev = cursor;
-			heads[head] = cursor;
-			LibVEX_free(this);
-			return cursor;
-		} else {
-			next = heads[head];
-			prev = NULL;
-			if (heads[head])
-				heads[head]->prev = this;
-			heads[head] = this;
-			return this;
-		} 
-	}
-	bool eq(const CrashMachineNode *o) const {
-		if (o == this)
-			return true;
-		if (!o)
-			return false;
-		if (!this)
-			return false;
-		if (o->type != type ||
-		    o->stores.size() != stores.size() ||
-		    o->hash() != hash())
-			return false;
-		for (unsigned x = 0; x < stores.size(); x++) {
-			if (!stores[x].addr->eq(o->stores[x].addr) ||
-			    !stores[x].data->eq(o->stores[x].data))
-				return false;
-		}
-		switch (type) {
-		case CM_NODE_LEAF:
-			return o->leafCond->eq(leafCond);
-		case CM_NODE_STUB:
-			return o->origin_rip == origin_rip;
-		case CM_NODE_BRANCH:
-			return o->branchCond->eq(branchCond) &&
-				o->trueTarget->eq(trueTarget) &&
-				o->falseTarget->eq(falseTarget);
-		}
-		abort();
-	}
-
-	~CrashMachineNode() {
-		if (next)
-			next->prev = prev;
-		if (prev) {
-			prev->next = next;
-		} else {
-			assert(heads[hash() % nr_heads] == this);
-			heads[hash() % nr_heads] = next;
-		}
-	}
-
 protected:
 	char *mkName() const {
 		char *buf = my_asprintf("<%lx> ", origin_rip);
@@ -1729,12 +1636,12 @@ public:
 				      CrashExpression *e,
 				      const abstractStoresT &_stores)
 	{
-		return (new CrashMachineNode(_origin_rip, e, _stores))->intern();
+		return (new CrashMachineNode(_origin_rip, e, _stores));
 	}
 	static CrashMachineNode *stub(unsigned long _origin_rip,
 				      const abstractStoresT &_stores)
 	{
-		return (new CrashMachineNode(_origin_rip, _stores))->intern();
+		return (new CrashMachineNode(_origin_rip, _stores));
 	}
 	static CrashMachineNode *branch(unsigned long _origin_rip,
 					CrashExpression *_branchCond,
@@ -1744,7 +1651,7 @@ public:
 	{
 		return (new CrashMachineNode(_origin_rip, _branchCond,
 					     _trueTarget, _falseTarget,
-					     _stores))->intern();
+					     _stores));
 	}
 
 	abstractStoresT stores;
@@ -1903,7 +1810,69 @@ public:
 					 std::set<unsigned long> &addresses,
 					 concreteStoresT &stores);
 
-	void changed() { clearName(); }
+	mutable bool have_hash;
+	mutable unsigned long _hash;
+
+	unsigned long hash() const {
+		if (have_hash)
+			return _hash;
+
+		unsigned long h = 0;
+		for (abstractStoresT::const_iterator it = stores.begin();
+		     it != stores.end();
+		     it++)
+			h = h * 97 + it->addr->hash() * 3 + it->data->hash() * 5;
+		h *= 103;
+		switch (type) {
+		case CM_NODE_LEAF:
+			h =  h + leafCond->hash();
+			break;
+		case CM_NODE_STUB:
+			h = h + origin_rip;
+			break;
+		case CM_NODE_BRANCH:
+			h = h + branchCond->hash() +
+				(trueTarget ? trueTarget->hash() * 17 : 0) +
+				(falseTarget ? falseTarget->hash() * 23 : 0);
+			break;
+		default:
+			abort();
+		}
+		have_hash = true;
+		_hash = h;
+		return h;
+	}
+	bool eq(const CrashMachineNode *o) const {
+		if (o == this)
+			return true;
+		if (!o)
+			return false;
+		if (!this)
+			return false;
+		if (o->type != type ||
+		    o->stores.size() != stores.size() ||
+		    o->hash() != hash())
+			return false;
+		for (unsigned x = 0; x < stores.size(); x++) {
+			if (!stores[x].addr->eq(o->stores[x].addr) ||
+			    !stores[x].data->eq(o->stores[x].data))
+				return false;
+		}
+		switch (type) {
+		case CM_NODE_LEAF:
+			return o->leafCond->eq(leafCond);
+		case CM_NODE_STUB:
+			return o->origin_rip == origin_rip;
+		case CM_NODE_BRANCH:
+			return o->branchCond->eq(branchCond) &&
+				o->trueTarget->eq(trueTarget) &&
+				o->falseTarget->eq(falseTarget);
+		}
+		abort();
+	}
+
+
+	void changed() { clearName(); have_hash = false; }
 	void visit(HeapVisitor &hv) {
 		for (abstractStoresT::iterator it = stores.begin();
 		     it != stores.end();
@@ -1924,19 +1893,11 @@ public:
 			break;
 		}
 	}
-	void relocate(CrashMachineNode *cmn, size_t sz) {
-		if (cmn->next)
-			cmn->next->prev = cmn;
-		if (cmn->prev)
-			cmn->prev->next = cmn;
-		else
-			heads[cmn->hash() % nr_heads] = cmn;
-	}
+	CrashMachineNode *pool_next; /* For the benefit of
+				      * CrashMachine's deduplicate
+				      * method. */
 	NAMED_CLASS
 };
-
-CrashMachineNode *
-CrashMachineNode::heads[1023];
 
 class CrashMachine : public GarbageCollected<CrashMachine> {
 	friend class CRAEventRecorder;
@@ -1985,10 +1946,51 @@ public:
 					  LogReaderPtr ptr,
 					  GarbageCollectionToken tok);
 
+	void deduplicate();
+
 	void visit(HeapVisitor &hv) { hv(content); }
 	void destruct() { this->~CrashMachine(); }
 	NAMED_CLASS
 };
+
+/* Rebuild the hash table, discarding all of the duplicate CMNs which
+   we've built up. */
+void
+CrashMachine::deduplicate()
+{
+	static const unsigned nr_heads = 1023;
+	CrashMachineNode *heads[nr_heads];
+	contentT *newContent = new contentT();
+	unsigned kept;
+	unsigned dropped;
+	memset(heads, 0, sizeof(heads));
+	kept = dropped = 0;
+	for (contentT::iterator it = content->begin();
+	     it != content->end();
+	     it++) {
+		CrashMachineNode *cmn = it.value().first;
+		std::set<unsigned long> &s(it.value().second);
+		CrashTimestamp origin;
+		origin = it.key();
+		unsigned h = cmn->hash() % nr_heads;
+		CrashMachineNode *cursor;
+		for (cursor = heads[h]; cursor && !cursor->eq(cmn); cursor = cursor->pool_next)
+			;
+		if (!cursor) {
+			cmn->pool_next = heads[h];
+			heads[h] = cmn;
+			newContent->set(origin, std::pair<CrashMachineNode *, std::set<unsigned long> >(cmn, s));
+			kept++;
+		} else {
+			dropped++;
+		}
+	}
+
+	content = newContent;
+
+	printf("CM de-duplication kept %d nodes and dropped %d\n",
+	       kept, dropped);
+}
 
 CrashMachineNode *
 CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
@@ -3795,6 +3797,78 @@ public:
 	}
 };
 
+class MightMentionAddrMapper : public CPMapper {
+public:
+	unsigned long addr;
+	bool result;
+	MightMentionAddrMapper(unsigned long _addr)
+		: addr(_addr), result(false)
+	{
+	}
+
+	CrashExpression *operator()(CrashExpression *ce) {
+		CrashExpressionLoad *cel = dynamic_cast<CrashExpressionLoad *>(ce);
+		unsigned long a;
+		if (cel &&
+		    (!cel->addr->isConstant(a) ||
+		     a == addr))
+			result = true;
+		return ce;
+	}
+};
+
+static bool
+mightMentionAddress(CrashExpression *e, CrashExpression *addr)
+{
+	unsigned long a;
+	if (!addr->simplify(1000)->isConstant(a))
+		return true;
+	MightMentionAddrMapper mmam(a);
+	e->map(mmam);
+	return mmam.result;
+}
+
+static bool
+mightMentionAddress(CrashMachineNode *e, CrashExpression *addr)
+{
+	unsigned long a;
+	if (!addr->simplify(1000)->isConstant(a))
+		return true;
+	MightMentionAddrMapper mmam(a);
+	e->map(mmam);
+	return mmam.result;
+}
+
+static void
+removeRedundantStores(CrashMachineNode *n)
+{
+	if (!n)
+		return;
+	assert(n->type != CrashMachineNode::CM_NODE_STUB);
+	if (n->type == CrashMachineNode::CM_NODE_BRANCH) {
+		removeRedundantStores(n->trueTarget);
+		removeRedundantStores(n->falseTarget);
+	}
+	for (abstractStoresT::iterator it = n->stores.begin();
+	     it != n->stores.end();
+		) {
+		if (n->type == CrashMachineNode::CM_NODE_LEAF) {
+			if (!mightMentionAddress(n->leafCond, it->addr))
+				it = n->stores.erase(it);
+			else
+				it++;
+		} else {
+			if (!mightMentionAddress(n->branchCond, it->addr) &&
+			    !mightMentionAddress(n->trueTarget, it->addr) &&
+			    !mightMentionAddress(n->falseTarget, it->addr))
+				it = n->stores.erase(it);
+			else
+				it++;
+		}
+	}
+	n->changed();
+}
+
 static CrashMachineNode *
 removeProbablyConstantReferences(CrashMachineNode *start,
 				 const Oracle &oracle,
@@ -3804,7 +3878,9 @@ removeProbablyConstantReferences(CrashMachineNode *start,
 	if (oracle.constant_addresses.empty())
 		return start;
 	RemoveProbablyConstantReferencesMapper rpcrm(oracle, ms, thr);
-	return start->map(rpcrm);
+	CrashMachineNode *n = start->map(rpcrm);
+	removeRedundantStores(n);
+	return n;
 }
 
 static void
@@ -4089,6 +4165,9 @@ main(int argc, char *argv[])
 
 	timing("built crash machine");
 
+	cm->deduplicate();
+	timing("Done CMN de-duplicate 1\n");
+
         /* Now try to figure out what the relevant addresses are for
 	   each CMN.*/
         Thread<unsigned long>::snapshot_log_entry &sle(*crashedThread->snapshotLog.begin());
@@ -4136,9 +4215,6 @@ main(int argc, char *argv[])
 
 	timing("collected interesting address logs");
 
-	printf("Critical sections:\n");
-	/* Now, for each machine, walk over the relevant address logs
-	 * and figure out when the CMN goes green and red. */
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
@@ -4146,7 +4222,19 @@ main(int argc, char *argv[])
 		       cmn_it.key().name());
 		cmn_it.value().first = removeProbablyConstantReferences(cmn_it.value().first, oracle, ms,
 									crashedThread);
-		timing("removed constant references from %s",
+	}
+
+	timing("Done remove constant references\n");
+	cm->deduplicate();
+	timing("Done CMN de-duplicate 2\n");
+
+	printf("Critical sections:\n");
+	/* Now, for each machine, walk over the relevant address logs
+	 * and figure out when the CMN goes green and red. */
+	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
+	     cmn_it != cm->content->end();
+	     cmn_it++) {
+		timing("calculating critical sections for %s",
 		       cmn_it.key().name());
 		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms);
 		timing("calculated critical sections for %s",
