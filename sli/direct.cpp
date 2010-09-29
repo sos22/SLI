@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include <typeinfo>
 #include <deque>
 #include <set>
@@ -3679,9 +3680,44 @@ removeProbablyConstantReferences(CrashMachineNode *start,
 	return start->map(rpcrm);
 }
 
+static void
+timing(const char *fmt, ...)
+{
+	static struct timeval start_of_day;
+	static FILE *out;
+	struct timeval now;
+	va_list args;
+
+	if (!fmt) {
+		fclose(out);
+		return;
+	}
+
+	if (!out) {
+		out = fopen("timing.txt", "w");
+		gettimeofday(&start_of_day, NULL);
+	}
+	gettimeofday(&now, NULL);
+	va_start(args, fmt);
+	char *r;
+	(void)vasprintf(&r, fmt, args);
+	va_end(args);
+	now.tv_sec -= start_of_day.tv_sec;
+	now.tv_usec -= start_of_day.tv_usec;
+	if (now.tv_usec < 0) {
+		now.tv_sec--;
+		now.tv_usec += 1000000;
+	}
+	fprintf(out, "%5ld.%06ld %s\n", now.tv_sec,
+		now.tv_usec, r);
+	fflush(out);
+	free(r);
+}
+
 int
 main(int argc, char *argv[])
 {
+	timing("start");
 	init_sli();
 
 	LogReaderPtr ptr;
@@ -3689,6 +3725,8 @@ main(int argc, char *argv[])
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 	//ms->findThread(ThreadId(7))->exitted = true;
 	
+	timing("read initial snapshot");
+
 	Oracle oracle;
 
 	/* Figure out which thread crashed.  We usei sby replaying the
@@ -3730,6 +3768,8 @@ main(int argc, char *argv[])
 				 ALLOW_GC, NULL, dummy_lw, mte);
 		ms = i2.currentState;
 	}
+
+	timing("have memory trace of crashed thread");
 
 	VexPtr<Thread<unsigned long> > crashedThread;
 	crashedThread = ms->findThread(oracle.crashingTid);
@@ -3822,6 +3862,7 @@ main(int argc, char *argv[])
 		}
 	}
 
+	timing("built rip trace");
 
 	/* Look at the crashing statement to derive a proximal cause
 	 * of the crash. */
@@ -3872,6 +3913,8 @@ main(int argc, char *argv[])
 
 	cmn->sanity_check();
 
+	timing("have proximal cause");
+
 	printf("Proximal cause is %s\n", cmn->name());
 
 	/* Go and build the crash machine */
@@ -3910,10 +3953,14 @@ main(int argc, char *argv[])
 						    oracle);
 			cmn = simplify_cmn(cmn);
 			cm->set(*it, cmn);
+			timing("built cmn for %s", (*it).name());
 			printf("CMN for %s is %s\n",
 			       (*it).name(), cmn->name());
+			timing("rendered cmn for %s", (*it).name());
 		}
 	}
+
+	timing("built crash machine");
 
         /* Now try to figure out what the relevant addresses are for
 	   each CMN.*/
@@ -3950,6 +3997,8 @@ main(int argc, char *argv[])
 	     it++)
 		printf("%lx\n", *it);
 
+	timing("built interesting addresses set");
+
 	/* Collect the logs of those addresses */
 	snapshotMs = sle.ms->dupeSelf();
 	oracle.collect_interesting_access_log(
@@ -3958,18 +4007,29 @@ main(int argc, char *argv[])
 		sle.ptr,
 		ALLOW_GC);
 
+	timing("collected interesting address logs");
+
 	printf("Critical sections:\n");
 	/* Now, for each machine, walk over the relevant address logs
 	 * and figure out when the CMN goes green and red. */
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
+		timing("removing constant references from %s",
+		       cmn_it.key().name());
 		cmn_it.value().first = removeProbablyConstantReferences(cmn_it.value().first, oracle, ms,
 									crashedThread);
+		timing("removed constant references from %s",
+		       cmn_it.key().name());
 		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms);
+		timing("calculated critical sections for %s",
+		       cmn_it.key().name());
 		LibVEX_maybe_gc(ALLOW_GC);
 	}
 
+	timing("all done");
+
+	timing(NULL);
 	dbg_break("finished");
 
 	return 0;
