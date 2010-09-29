@@ -134,12 +134,12 @@ class CrashExpression : public GarbageCollected<CrashExpression>, public Named {
 	static const int nr_intern_heads = 4095;
 	static CrashExpression *intern_heads[nr_intern_heads];
 	CrashExpression *next_intern;
-	CrashExpression **pprev_intern;
+	CrashExpression *prev_intern;
 
 	CrashExpression *simplified;
 	unsigned simplified_hardness;
 protected:
-	CrashExpression() { pprev_intern = &next_intern; }
+	CrashExpression() { prev_intern = next_intern = NULL; }
 	virtual void _visit(HeapVisitor &hv) = 0;
 	virtual const char *_mkName() const = 0;
 	char *mkName() const {
@@ -152,19 +152,23 @@ protected:
 		clearName();
 		if (!have_hash)
 			return;
+		int old_head = hashval % nr_intern_heads;
 		unsigned long newhash = _hash();
 		if (newhash == hashval)
 			return;
 		hashval = newhash;
 		if (next_intern)
-			next_intern->pprev_intern = pprev_intern;
-		*pprev_intern = next_intern;
-		int head = hashval % nr_intern_heads;
-		next_intern = intern_heads[head];
-		if (intern_heads[head])
-			intern_heads[head]->pprev_intern = &next_intern;
-		intern_heads[head] = this;
-		pprev_intern = &intern_heads[head];
+			next_intern->prev_intern = prev_intern;
+		if (prev_intern)
+			prev_intern->next_intern = next_intern;
+		else
+			intern_heads[old_head] = next_intern;
+		int new_head = hashval % nr_intern_heads;
+		next_intern = intern_heads[new_head];
+		prev_intern = NULL;
+		if (intern_heads[new_head])
+			intern_heads[new_head]->prev_intern = this;
+		intern_heads[new_head] = this;
 	}
 
 	static CrashExpression *intern(CrashExpression *what) {
@@ -174,19 +178,36 @@ protected:
 		while (cursor) {
 			if (cursor->eq(what)) {
 				if (cursor->next_intern)
-					cursor->next_intern->pprev_intern = cursor->pprev_intern;
-				*cursor->pprev_intern = cursor->next_intern;
+					cursor->next_intern->prev_intern = cursor->prev_intern;
+				if (cursor->prev_intern) {
+					cursor->prev_intern->next_intern = cursor->next_intern;
+				} else {
+					assert(intern_heads[head] == cursor);
+					intern_heads[head] = cursor->next_intern;
+				}
+				cursor->prev_intern = cursor->next_intern = NULL;
 				what = cursor;
 				break;
 			}
 			cursor = cursor->next_intern;
 		}
 		what->next_intern = intern_heads[head];
+		what->prev_intern = NULL;
 		if (intern_heads[head])
-			intern_heads[head]->pprev_intern = &what->next_intern;
+			intern_heads[head]->prev_intern = what;
 		intern_heads[head] = what;
-		what->pprev_intern = &intern_heads[head];
 		return what;
+	}
+
+	~CrashExpression() {
+		if (next_intern)
+			next_intern->prev_intern = prev_intern;
+		if (prev_intern)
+			prev_intern->next_intern = next_intern;
+		else
+			intern_heads[hashval % nr_intern_heads] = next_intern;
+		prev_intern = NULL;
+		next_intern = NULL;
 	}
 
 	static void discover_relevant_address(std::set<unsigned long> &addresses,
@@ -240,6 +261,18 @@ public:
 		return simplified;
 	}
 	virtual bool pointsAtStack() const { return false; }
+
+	void relocate(CrashExpression *target, size_t sz)
+	{
+		if (target->next_intern)
+			target->next_intern->prev_intern = target;
+		if (target->prev_intern)
+			target->prev_intern->next_intern = target;
+		else
+			intern_heads[target->hashval % nr_intern_heads] = target;
+		memset(this, 0x73, sizeof(*this));
+	}
+
 	NAMED_CLASS
 };
 
@@ -1720,6 +1753,12 @@ public:
 
 	void changed() { clearName(); }
 	void visit(HeapVisitor &hv) {
+		for (abstractStoresT::iterator it = stores.begin();
+		     it != stores.end();
+		     it++) {
+			hv(it->addr);
+			hv(it->data);
+		}
 		switch (type) {
 		case CM_NODE_LEAF:
 			hv(leafCond);
