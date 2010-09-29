@@ -3260,15 +3260,13 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			if (!node->trueTarget && !node->falseTarget) {
 				/* Don't know where we go after this
 				   node, and it wasn't executed in the
-				   dynamic execution -> assume it's
-				   sufficiently different from the
-				   captured one that we avoid the
-				   crash. */
+				   dynamic execution. */
 				DBG_CALC_CMNS("%s: no known successors\n", node->when.name());
 				abstractStoresT stores;
 				node->cmn = new CrashMachineNode(
 					node->when.rip,
-					CrashExpressionConst::get(0),
+					CrashExpressionFailed::get("can't find successor for %s",
+								   node->when.name()),
 					stores);
 				continue;
 			}
