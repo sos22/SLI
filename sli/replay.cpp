@@ -117,10 +117,11 @@ ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *
 						    size, force(addr));
 		expression_result<ait> buf =
 			ms->addressSpace->load(this->when, addr, size, false, thr);
-		if (force(buf != lrl->value))
+		if (force(buf != lrl->value) &&
+		    force(addr) < 0xFFFFFFFFFF600000)
 			throw ReplayFailedException("memory mismatch on load from %lx",
 						    force(addr));
-		thr->temporaries[tmp] = buf;
+		thr->temporaries[tmp] = lrl->value;
 		thr->nrAccesses++;
 	} else {
 		checkSegv(lr, addr);

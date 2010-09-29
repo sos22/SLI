@@ -10,7 +10,7 @@ clean_files=$(TARGETS) .depends
 all_makefiles=Makefile Makefile.mk
 
 ifeq ($(OPTIMIZE),y)
-OPTIMIZE_FLAGS=-O3 -DNDEBUG
+OPTIMIZE_FLAGS=-O1 -DNDEBUG
 else
 OPTIMIZE_FLAGS=
 endif

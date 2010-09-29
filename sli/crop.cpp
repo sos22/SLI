@@ -26,7 +26,7 @@ main(int argc, char *argv[])
 	VexGcRoot ms_root((void **)&ms, "ms_root");
 
 	ms->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
-	//	ms->findThread(ThreadId(7))->exitted = true;
+	ms->findThread(ThreadId(7))->exitted = true;
 
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(reduced_lf, ptr, ALLOW_GC, &ptr);

@@ -16056,13 +16056,15 @@ DisResult disInstr_AMD64_WRK (
   decode_failure:
    /* All decode failures end up here. */
    vex_printf("vex amd64->IR: unhandled instruction bytes: "
-              "0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",
+              "0x%x 0x%x 0x%x 0x%x 0x%x 0x%x at %lx:%lx\n",
               (Int)getUChar(guest_code, delta_start+0),
               (Int)getUChar(guest_code, delta_start+1),
               (Int)getUChar(guest_code, delta_start+2),
               (Int)getUChar(guest_code, delta_start+3),
               (Int)getUChar(guest_code, delta_start+4),
-              (Int)getUChar(guest_code, delta_start+5) );
+              (Int)getUChar(guest_code, delta_start+5),
+	      delta_start,
+	      guest_code.rip);
 
    /* Tell the dispatcher that this insn cannot be decoded, and so has
       not been executed, and (is currently) the next to be executed.

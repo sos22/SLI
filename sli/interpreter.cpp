@@ -1380,6 +1380,7 @@ public:
 	}
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
 				 unsigned long _offset) :
+		GuestMemoryFetcher(_offset),
 		aspace(_aspace),
 		offset(_offset),
 		visitor(this, "AddressSpaceGuestFetcher"),
@@ -1441,10 +1442,12 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 				ait rip,
 				GarbageCollectionToken t)
 {
-	ths->decode_counter++;
 	ths->redirectGuest(rip);
 
-	ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+	if (ths->decode_counter != 0)
+		ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+
+	ths->decode_counter++;
 
 	if (ths->decode_counter % 10000 == 0) {
 		ths->snapshotLog.push(Thread<ait>::snapshot_log_entry(ms, ptr));
@@ -1847,7 +1850,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		event_counter++;
 		if (event_counter % 100000 == 0)
 			printf("event %ld\n", event_counter);
-		if (event_counter > 1700000 && 0)
+		if (event_counter > 600000 && 0)
 			loud_mode = true;
 
 		if (!lr) {

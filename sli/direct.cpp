@@ -308,6 +308,38 @@ public:
 	}
 };
 
+class CrashExpressionFailed : public CrashExpression {
+	CrashExpressionFailed() {}
+protected:
+	const char *_mkName() const { return "<decode_failed>"; }
+	void _visit(HeapVisitor &hv) {}
+	bool _eq(const CrashExpression *o) const {
+		if (dynamic_cast<const CrashExpressionFailed *>(o))
+			return true;
+		else
+			return false;
+	}
+	unsigned long _hash() const {
+		return 99999;
+	}
+public:
+	static CrashExpression *get() {return intern(new CrashExpressionFailed())->simplify(); }
+	CrashExpression *map(CPMapper &m) { return m(this); }
+	unsigned complexity() const { return 1; }
+	void build_relevant_address_list(Thread<unsigned long> *thr,
+					 MachineState<unsigned long> *ms,
+					 std::set<unsigned long> &addresses,
+					 const concreteStoresT &stores)
+	{
+	}
+	unsigned long eval(Thread<unsigned long> *thr,
+			   MachineState<unsigned long> *ms,
+			   const std::vector<concrete_store> &)
+	{
+		abort();
+	}
+};
+
 class CrashExpressionLoad : public CrashExpression {
 	CrashExpressionLoad(CrashTimestamp _when, CrashExpression *_addr)
 		: when(_when), addr(_addr)
@@ -1414,6 +1446,7 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 protected:
 	char *mkName() const {
 		char *buf = my_asprintf("%s: <%lx> ", defining_time.name(), origin_rip);
+#if 0
 		for (abstractStoresT::const_iterator it = stores.begin();
 		     it != stores.end();
 		     it++) {
@@ -1424,6 +1457,7 @@ protected:
 			free(buf);
 			buf = b2;
 		}
+#endif
 		char *b2;
 		switch (type) {
 		case CM_NODE_LEAF:
@@ -1503,6 +1537,7 @@ public:
 	}
 
 	void sanity_check() {
+#if 0
 		switch (type) {
 		case CM_NODE_LEAF:
 		case CM_NODE_STUB:
@@ -1520,6 +1555,7 @@ public:
 			return;
 		}
 		abort();
+#endif
 	}
 
 	CrashMachineNode *setDefiningTime(CrashTimestamp ts)
@@ -1694,7 +1730,18 @@ public:
 	CrashMachine() : content(new contentT()) {}
 
 	bool hasKey(CrashTimestamp ts) { return content->hasKey(ts); }
-	CrashMachineNode *get(CrashTimestamp ts) { return content->get(ts).first; }
+	CrashMachineNode *get(CrashTimestamp ts) {
+		/* We know where abort() and raise() live */
+		if ((ts.rip >= 0x50a6a40 && ts.rip <= 0x50a6c7a) ||
+		    (ts.rip >= 0x50a4f80 && ts.rip <= 0x50a4ff7)) {
+			return new CrashMachineNode(
+				ts.rip,
+				ts,
+				CrashExpressionConst::get(1),
+				abstractStoresT());
+		}
+		return content->get(ts).first;
+	}
 	void set(CrashTimestamp ts, CrashMachineNode *cmn)
 	{
 		std::set<unsigned long> t;
@@ -2051,7 +2098,7 @@ CrashExpression::get(IRExpr *e)
 				CrashExpression::get(e->Iex.Binop.arg2));
 
 		default:
-			abort();
+			goto failed;
 		}
 	case Iex_Unop:
 		switch (e->Iex.Unop.op) {
@@ -2081,7 +2128,7 @@ CrashExpression::get(IRExpr *e)
 			return CrashExpressionBitwiseNot::get(
 				CrashExpression::get(e->Iex.Unop.arg));
 		default:
-			abort();
+			goto failed;
 		}
 	case Iex_CCall:
 		if (!strcmp(e->Iex.CCall.cee->name, "amd64g_calculate_condition"))  {
@@ -2107,7 +2154,7 @@ CrashExpression::get(IRExpr *e)
 				CrashExpression::get(e->Iex.CCall.args[2]),
 				CrashExpression::get(e->Iex.CCall.args[3]));
 		} else {
-			abort();
+			goto failed;
 		}
 	case Iex_Mux0X:
 		return CrashExpressionMux::get(
@@ -2115,8 +2162,14 @@ CrashExpression::get(IRExpr *e)
 			CrashExpression::get(e->Iex.Mux0X.expr0),
 			CrashExpression::get(e->Iex.Mux0X.exprX));
 	default:
-		abort();
+		goto failed;
 	}
+
+failed:
+	printf("Failed to translate expression ");
+	ppIRExpr(e);
+	printf("\n");
+	return CrashExpressionFailed::get();
 }
 
 static CrashMachineNode *
@@ -2244,6 +2297,7 @@ class Oracle {
 public:
 	ThreadId crashingTid;
 	std::set<unsigned long> interesting_addresses;
+	std::set<unsigned long> constant_addresses;
 
 	/* Note that the RIP trace is in reverse chronological order
 	   i.e. it produces things which are nearest the crash
@@ -2406,6 +2460,7 @@ CIALEventRecorder::record(Thread<unsigned long> *thr, ThreadEvent<unsigned long>
 		return;
 	if (oracle->interesting_addresses.count(se->addr) == 0)
 		return;
+	oracle->constant_addresses.erase(se->addr);
 	oracle->address_log.push_back(
 		Oracle::address_log_entry(
 			thr->tid,
@@ -2420,12 +2475,14 @@ Oracle::collect_interesting_access_log(
 	LogReaderPtr ptr,
 	GarbageCollectionToken tok)
 {
+	constant_addresses = interesting_addresses;
+
 	/* Make bootstrapping easier by starting the log off with
 	   records for the initial state of every interesting memory
 	   location. */
 	for (std::set<unsigned long>::iterator it = interesting_addresses.begin();
-	    it != interesting_addresses.end();
-	    it++)
+	     it != interesting_addresses.end();
+	     it++)
 		address_log.push_back(
 			address_log_entry(
 				ThreadId(),
@@ -2676,6 +2733,8 @@ public:
 	bool brokeCycleFalseTarget;
 	CrashCFGNode *falseTarget;
 
+	bool dead;
+
 	bool visitedByCycleBreaker;
 	bool onCycleBreakerPath;
 
@@ -2729,7 +2788,13 @@ static bool
 get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
 {
 	if (instr_end == irsb->stmts_used) {
-		if (irsb->jumpkind == Ijk_Call) {
+		/* Disable special handling for calls for now, because
+		   it doesn't really work all that well.  Because we
+		   pick the return address for functions out of the
+		   dynamic trace this is kind of equivalent to just
+		   inlining all functions, provided they're only
+		   called once, which is reasonably safe. */
+		if (0 && irsb->jumpkind == Ijk_Call) {
 			/* We pretend that functions do nothing at
 			   all.  That's not entirely valid, but it's
 			   kind of convenient. */
@@ -2759,6 +2824,8 @@ fixup_rip(unsigned long _rip)
 {
 	if (_rip == 0x00007fde5be4601a)
 		return 0x00007fde5be45fc8;
+	else if (_rip == 0x00007faa4af5d7b8)
+		return 0x00007faa4af5d800;
 	else
 		return _rip;
 }
@@ -2778,6 +2845,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		unsigned long fallThroughTarget = 0;
 		unsigned long nonFallThroughTarget = 0;
 		CrashTimestamp when(tid, rip);
+		bool dead = false;
 		if (!partial_cm->content->hasKey(when)) {
 			/* We stop exploration if we get to something
 			   which already has a CMN, because it can't
@@ -2800,12 +2868,14 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			}
 			get_fallthrough_rip(irsb, instr_end, &fallThroughTarget, NULL);
 			if (!fallThroughTarget &&
-			    instr_end == irsb->stmts_used &&
-			    irsb->jumpkind == Ijk_Ret) {
+			    instr_end == irsb->stmts_used) {
 				/* Cheat and grab the return address out of
 				   the dynamic trace, if it's available. */
 				fallThroughTarget = oracle.successorOf(rip);
 			}
+
+			if (irsb->jumpkind == Ijk_NoDecode)
+				dead = true;
 		}
 
 		fallThroughTarget = fixup_rip(fallThroughTarget);
@@ -2813,6 +2883,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 
 		CrashCFGNode *newNode =
 			new CrashCFGNode(rip, nonFallThroughTarget, fallThroughTarget);
+		newNode->dead = dead;
 		nodeMap->set(rip, newNode);
 
 		if (nonFallThroughTarget)
@@ -3083,6 +3154,15 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			 * derive a CMN for this node. */
 			DBG_CALC_CMNS("Calculate CMN for %lx\n", node->rip);
 			progress = true;
+			if (node->dead) {
+				node->cmn = new CrashMachineNode(
+					node->rip,
+					when,
+					CrashExpressionConst::get(1),
+					abstractStoresT());
+				continue;
+			}
+
 			if (!node->trueTarget && !node->falseTarget) {
 				/* Don't know where we go after this
 				   node, and it wasn't executed in the
@@ -3136,6 +3216,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 				branchCond = CrashExpressionConst::get(0);
 				falseTarget = node->falseTarget->cmn;
 
+#if 0
 				if (instr_end == irsb->stmts_used &&
 				    irsb->jumpkind == Ijk_Call) {
 					/* We pretty much ignore
@@ -3144,13 +3225,17 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 					   return address. */
 					doCallFixup = true;
 				}
+#endif
+
 			} else {
 				/* We have a true target but not a
 				   false one.  The fall-through branch
 				   must have been culled. */
 				assert(node->trueTarget);
-				assert(irsb->stmts[instr_end-1]->tag == Ist_Exit);
-				instr_end--; /* Ignore final branch in IRSB */
+				while (irsb->stmts[instr_end-1]->tag != Ist_Exit &&
+				       instr_end - 1 > 0)
+					instr_end--;
+				assert(instr_end > 0);
 				branchCond = CrashExpressionConst::get(1);
 				trueTarget = node->trueTarget->cmn;
 			}
@@ -3254,7 +3339,13 @@ simplify_cmn(CrashMachineNode *cmn)
 		abort();
 		return cmn;
 	case CrashMachineNode::CM_NODE_LEAF:
-		return cmn;
+		if (cmn->leafCond->isConstant()) {
+			/* The stores are irrelevant in this case */
+			cmn->stores.clear();
+			cmn->changed();
+		}
+		break;
+
 	case CrashMachineNode::CM_NODE_BRANCH:
 		assert(cmn->trueTarget || cmn->falseTarget);
 		cmn->sanity_check();
@@ -3404,6 +3495,46 @@ _get_cmn(CrashMachine *cm, int tid, unsigned long rip)
 	return cm->get(CrashTimestamp(ThreadId(tid), rip));
 }
 
+class RemoveProbablyConstantReferencesMapper : public CPMapper {
+public:
+	const Oracle &oracle;
+	MachineState<unsigned long> *ms;
+	Thread<unsigned long> *thr;
+	RemoveProbablyConstantReferencesMapper(
+		const Oracle &_oracle,
+		MachineState<unsigned long> *_ms,
+		Thread<unsigned long> *_thr)
+		: oracle(_oracle),
+		  ms(_ms),
+		  thr(_thr)
+	{
+	}
+	CrashExpression *operator()(CrashExpression *e) {
+		e = e->simplify(1000);
+		CrashExpressionLoad *cel = dynamic_cast<CrashExpressionLoad *>(e);
+		unsigned long addr;
+		if (cel &&
+		    cel->addr->isConstant(addr) &&
+		    oracle.constant_addresses.count(addr) != 0) {
+			return CrashExpressionConst::get(
+				CrashExpressionLoad::fetch(addr, ms, thr));
+		}
+		return e;
+	}
+};
+
+static CrashMachineNode *
+removeProbablyConstantReferences(CrashMachineNode *start,
+				 const Oracle &oracle,
+				 MachineState<unsigned long> *ms,
+				 Thread<unsigned long> *thr)
+{
+	if (oracle.constant_addresses.empty())
+		return start;
+	RemoveProbablyConstantReferencesMapper rpcrm(oracle, ms, thr);
+	return start->map(rpcrm);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -3412,7 +3543,7 @@ main(int argc, char *argv[])
 	LogReaderPtr ptr;
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
-	ms->findThread(ThreadId(7))->exitted = true;
+	//ms->findThread(ThreadId(7))->exitted = true;
 	
 	Oracle oracle;
 
@@ -3422,7 +3553,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(9);
+	oracle.crashingTid = ThreadId(1);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;
@@ -3464,7 +3595,7 @@ main(int argc, char *argv[])
 		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
 		ppIRSB(crashedThread->currentIRSB);
 		assert(crashedThread->currentIRSBOffset != 0);
-	} else {
+	} else if (0) {
 		printf("Crashed because we jumped at a bad RIP %lx\n",
 		       crashedThread->currentIRSBRip);
 
@@ -3478,6 +3609,11 @@ main(int argc, char *argv[])
 		       crashedThread->currentIRSB->stmts_used + 1);
 		/* Don't double-process the last thing in the ring. */
 		crashedThread->controlLog.pop_back();
+	} else {
+		printf("Crashed by syscall\n");
+		crashedThread->currentIRSB =
+			ms->addressSpace->getIRSBForAddress(
+				crashedThread->currentIRSBRip);
 	}
 
 	/* Build the footstep log.  This has a record for every
@@ -3507,7 +3643,7 @@ main(int argc, char *argv[])
 
 	/* Now walk back over the earlier IRSBs */
 	for (ring_buffer<Thread<unsigned long>::control_log_entry, 100>::reverse_iterator it =
-										 crashedThread->controlLog.rbegin();
+		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
 	     it++) {
 	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(it->translated_rip);
@@ -3540,7 +3676,7 @@ main(int argc, char *argv[])
 
 	CrashMachineNode *cmn;
         int instr_start;
-        if (crashedThread->currentIRSBOffset == crashedThread->currentIRSB->stmts_used + 1) {        
+        if (crashedThread->currentIRSBOffset == crashedThread->currentIRSB->stmts_used + 1) {
 		/* We made it to the end of the block and then crashed
 		   trying to start the next one -> the next address
 		   must be bad. */
@@ -3548,14 +3684,22 @@ main(int argc, char *argv[])
 		     crashedThread->currentIRSB->stmts[instr_start]->tag != Ist_IMark;
 		     instr_start--)
 			;
-		when.rip = crashedThread->currentIRSB->stmts[instr_start]->Ist.IMark.addr;
 		abstractStoresT stores;
-		cmn = new CrashMachineNode(
-			when.rip,
-			when,
-			CrashExpressionBadAddr::get(
-				CrashExpression::get(crashedThread->currentIRSB->next)),
-			stores);
+		when.rip = crashedThread->currentIRSB->stmts[instr_start]->Ist.IMark.addr;
+		if (0) {
+			cmn = new CrashMachineNode(
+				when.rip,
+				when,
+				CrashExpressionBadAddr::get(
+					CrashExpression::get(crashedThread->currentIRSB->next)),
+				stores);
+		} else {
+			cmn = new CrashMachineNode(
+				when.rip,
+				when,
+				CrashExpressionConst::get(1),
+				stores);
+		}
 		crashedThread->currentIRSBOffset -= 1;
 	} else {
 		for (instr_start = crashedThread->currentIRSBOffset-1;
@@ -3596,6 +3740,8 @@ main(int argc, char *argv[])
 						    oracle);
 			cmn = simplify_cmn(cmn);
 			cm->set(when, cmn);
+			printf("CMN for %s is %s\n",
+			       when.name(), cmn->name());
 		}
 	}
 
@@ -3648,6 +3794,8 @@ main(int argc, char *argv[])
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
+		cmn_it.value().first = removeProbablyConstantReferences(cmn_it.value().first, oracle, ms,
+									crashedThread);
 		findRemoteCriticalSections(cmn_it.value().first, oracle, ms);
 	}
 

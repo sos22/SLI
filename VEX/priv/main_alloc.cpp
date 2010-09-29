@@ -16,7 +16,7 @@
 
 /* If we're given an opportunity to garbage collect and the heap is
    bigger than this then we always take it. */
-#define GC_MAX_SIZE 5000000000ul
+#define GC_MAX_SIZE 4000000000ul
 
 /* How far are we willing to recur during the heap walking phase of a
  * GC sweep?  If we hit this limit then we start pushing stuff off

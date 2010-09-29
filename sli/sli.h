@@ -374,6 +374,7 @@ class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	void amd64g_dirtyhelper_storeF80le(MachineState<abst_int_type> *, abst_int_type addr, abst_int_type _f64);
 
 	void redirectGuest(abst_int_type rip);
+
 public:
 	unsigned decode_counter;
 	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
