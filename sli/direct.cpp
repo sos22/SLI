@@ -3887,6 +3887,9 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 	nr_good = 0;
 	nr_bad = 0;
 	nr_unknown = 0;
+	bool in_remote_csect = false;
+	bool have_first_remote_good = false;
+	AtomicBlock currentRemoteBlock;
 	for (std::vector<Oracle::address_log_entry>::const_iterator m_it =
 		     oracle.address_log.begin();
 	     m_it != oracle.address_log.end();
@@ -3895,14 +3898,27 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 		CrashMachineNode *new_cmn = cmn->resolveLoads(memory, ms);
 		new_cmn = simplify_cmn(new_cmn);
 		if (new_cmn->willDefinitelyCrash()) {
-			/* XXX Need to record that there's a potentially-bad remote event here */
+			if (have_first_remote_good) {
+				if (!in_remote_csect)
+					currentRemoteBlock.events.insert(m_it->rip);
+				in_remote_csect = true;
+			}
 			nr_bad++;
 		} else if (new_cmn->willDefinitelyNotCrash()) {
+			if (in_remote_csect) {
+				currentRemoteBlock.events.insert(m_it->rip);
+				sab.remote.insert(currentRemoteBlock);
+				currentRemoteBlock.events.clear();
+			}
+			in_remote_csect = false;
+			have_first_remote_good = true;
 			nr_good++;
 		} else {
 			nr_unknown++;
 		}
 	}
+	if (in_remote_csect)
+		sab.remote.insert(currentRemoteBlock);
 	if (nr_good != 0) {
 		sab.bad = nr_bad;
 		sab.unknown = nr_unknown;
