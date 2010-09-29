@@ -127,6 +127,7 @@ void vexRegisterGCRoot(void **, const char *name);
 void vexUnregisterGCRoot(void **);
 void vexInitHeap(void);
 void LibVEX_gc(GarbageCollectionToken t);
+void LibVEX_maybe_gc(GarbageCollectionToken t);
 void libvex_redirect(void *what, void *to);
 
 class VexGcRoot {

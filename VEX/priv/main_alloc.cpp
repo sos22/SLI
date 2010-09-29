@@ -340,10 +340,15 @@ LibVEX_gc(GarbageCollectionToken t)
 	}
 }
 
-void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t)
+void LibVEX_maybe_gc(GarbageCollectionToken t)
 {
 	if (heap_used >= GC_MAX_SIZE)
 		LibVEX_gc(t);
+}
+
+void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t)
+{
+	LibVEX_maybe_gc(t);
 }
 
 static struct allocation_header *

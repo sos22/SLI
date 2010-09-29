@@ -3805,6 +3805,7 @@ main(int argc, char *argv[])
 		cmn_it.value().first = removeProbablyConstantReferences(cmn_it.value().first, oracle, ms,
 									crashedThread);
 		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms);
+		LibVEX_maybe_gc(ALLOW_GC);
 	}
 
 	dbg_break("finished");
