@@ -423,13 +423,13 @@ protected:
 		return 99999;
 	}
 public:
-	static CrashExpression *get(const char *fmt,
-				    ...)
+	static CrashExpression *get(const char *fmt, ...)
 	{
 		va_list args;
 		char *reason;
 		va_start(args, fmt);
-		reason = vex_asprintf(fmt, args);
+		va_arg(args, void *);
+		reason = vex_vasprintf(fmt, args);
 		va_end(args);
 		return intern(new CrashExpressionFailed(reason))->simplify();
 	}

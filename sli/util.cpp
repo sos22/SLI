@@ -65,18 +65,25 @@ void noop_destructor(void *_ctxt)
 
 /* Like my_asprintf, but allocate from the VEX GC-able heap. */
 char *
-vex_asprintf(const char *fmt, ...)
+vex_vasprintf(const char *fmt, va_list args)
 {
-	va_list args;
 	char *r;
-	va_start(args, fmt);
 	int x = vasprintf(&r, fmt, args);
-	va_end(args);
 
 	char *r2 = (char *)LibVEX_Alloc_Bytes(x + 1);
 	memcpy(r2, r, x + 1);
 	free(r);
 	return r2;
+}
+char *
+vex_asprintf(const char *fmt, ...)
+{
+	va_list args;
+	char *r;
+	va_start(args, fmt);
+	r = vex_vasprintf(fmt, args);
+	va_end(args);
+	return r;
 }
 
 template <> unsigned long
