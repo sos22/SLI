@@ -3772,7 +3772,26 @@ main(int argc, char *argv[])
 
 	/* Go and build the crash machine */
 	VexPtr<CrashMachine> cm(new CrashMachine());
+
+	/* Install the proximal cause, so that we have something to
+	   bootstrap with. */
         cm->set(when, cmn);
+
+	/* Returning from the function which crashed is assumed to
+	   mean that the bug has been averted. */
+	{
+		CrashTimestamp tmpTs;
+		tmpTs = when;
+		while (!tmpTs.callStack.empty()) {
+			tmpTs.rip = tmpTs.callStack.back();
+			tmpTs.callStack.pop_back();
+			cm->set(tmpTs,
+				new CrashMachineNode(
+					tmpTs.rip,
+					CrashExpressionConst::get(0),
+					abstractStoresT()));
+		}
+	}
 
 	/* Incorporate stuff from the dynamic trace in reverse
 	 * order. */
