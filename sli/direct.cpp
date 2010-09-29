@@ -1593,6 +1593,98 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 		sanity_check();
 	}
 
+	static const unsigned nr_heads = 1023;
+	static CrashMachineNode *heads[nr_heads];
+	CrashMachineNode *next, *prev;
+
+	unsigned long hash() const {
+		unsigned long h = 0;
+		for (abstractStoresT::const_iterator it = stores.begin();
+		     it != stores.end();
+		     it++)
+			h = h * 97 + it->addr->hash() * 3 + it->data->hash() * 5;
+		h *= 103;
+		switch (type) {
+		case CM_NODE_LEAF:
+			return h + leafCond->hash();
+		case CM_NODE_STUB:
+			return h + origin_rip;
+		case CM_NODE_BRANCH:
+			return h + branchCond->hash() +
+				(trueTarget ? trueTarget->hash() * 17 : 0) +
+				(falseTarget ? falseTarget->hash() * 23 : 0);
+		}
+		abort();
+	}
+	CrashMachineNode *intern() {
+		int head = hash() % nr_heads;
+		CrashMachineNode *cursor;
+		for (cursor = heads[head];
+		     cursor && !cursor->eq(this);
+		     cursor = cursor->next)
+			;
+		if (cursor && cursor != heads[head]) {
+			if (cursor->next)
+				cursor->next->prev = cursor->prev;
+			if (cursor->prev)
+				cursor->prev->next = cursor->next;
+			else
+				abort();
+			cursor->next = heads[head];
+			cursor->prev = NULL;
+			if (heads[head])
+				heads[head]->prev = cursor;
+			heads[head] = cursor;
+			LibVEX_free(this);
+			return cursor;
+		} else {
+			next = heads[head];
+			prev = NULL;
+			if (heads[head])
+				heads[head]->prev = this;
+			heads[head] = this;
+			return this;
+		} 
+	}
+	bool eq(const CrashMachineNode *o) const {
+		if (o == this)
+			return true;
+		if (!o)
+			return false;
+		if (!this)
+			return false;
+		if (o->type != type ||
+		    o->stores.size() != stores.size() ||
+		    o->hash() != hash())
+			return false;
+		for (unsigned x = 0; x < stores.size(); x++) {
+			if (!stores[x].addr->eq(o->stores[x].addr) ||
+			    !stores[x].data->eq(o->stores[x].data))
+				return false;
+		}
+		switch (type) {
+		case CM_NODE_LEAF:
+			return o->leafCond->eq(leafCond);
+		case CM_NODE_STUB:
+			return o->origin_rip == origin_rip;
+		case CM_NODE_BRANCH:
+			return o->branchCond->eq(branchCond) &&
+				o->trueTarget->eq(trueTarget) &&
+				o->falseTarget->eq(falseTarget);
+		}
+		abort();
+	}
+
+	~CrashMachineNode() {
+		if (next)
+			next->prev = prev;
+		if (prev) {
+			prev->next = next;
+		} else {
+			assert(heads[hash() % nr_heads] == this);
+			heads[hash() % nr_heads] = next;
+		}
+	}
 
 protected:
 	char *mkName() const {
@@ -1637,12 +1729,12 @@ public:
 				      CrashExpression *e,
 				      const abstractStoresT &_stores)
 	{
-		return new CrashMachineNode(_origin_rip, e, _stores);
+		return (new CrashMachineNode(_origin_rip, e, _stores))->intern();
 	}
 	static CrashMachineNode *stub(unsigned long _origin_rip,
 				      const abstractStoresT &_stores)
 	{
-		return new CrashMachineNode(_origin_rip, _stores);
+		return (new CrashMachineNode(_origin_rip, _stores))->intern();
 	}
 	static CrashMachineNode *branch(unsigned long _origin_rip,
 					CrashExpression *_branchCond,
@@ -1650,9 +1742,9 @@ public:
 					CrashMachineNode *_falseTarget,
 					const abstractStoresT &_stores)
 	{
-		return new CrashMachineNode(_origin_rip, _branchCond,
-					    _trueTarget, _falseTarget,
-					    _stores);
+		return (new CrashMachineNode(_origin_rip, _branchCond,
+					     _trueTarget, _falseTarget,
+					     _stores))->intern();
 	}
 
 	abstractStoresT stores;
@@ -1832,8 +1924,19 @@ public:
 			break;
 		}
 	}
+	void relocate(CrashMachineNode *cmn, size_t sz) {
+		if (cmn->next)
+			cmn->next->prev = cmn;
+		if (cmn->prev)
+			cmn->prev->next = cmn;
+		else
+			heads[cmn->hash() % nr_heads] = cmn;
+	}
 	NAMED_CLASS
 };
+
+CrashMachineNode *
+CrashMachineNode::heads[1023];
 
 class CrashMachine : public GarbageCollected<CrashMachine> {
 	friend class CRAEventRecorder;
