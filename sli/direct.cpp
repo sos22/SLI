@@ -1778,22 +1778,38 @@ public:
 
 	bool willDefinitelyCrash()
 	{
-		if (type == CM_NODE_LEAF) {
+		switch (type) {
+		case CM_NODE_LEAF: {
 			unsigned long v;
 			if (leafCond->isConstant(v) && v)
 				return true;
+			return false;
 		}
-		return false;
+		case CM_NODE_BRANCH:
+			return (trueTarget ? trueTarget->willDefinitelyCrash() : true) &&
+				(falseTarget ? falseTarget->willDefinitelyCrash() : true);
+		case CM_NODE_STUB:
+			return false;
+		}
+		abort();
 	}
 
 	bool willDefinitelyNotCrash()
 	{
-		if (type == CM_NODE_LEAF) {
+		switch (type) {
+		case CM_NODE_LEAF: {
 			unsigned long v;
 			if (leafCond->isConstant(v) && !v)
 				return true;
+			return false;
 		}
-		return false;
+		case CM_NODE_BRANCH:
+			return (trueTarget ? trueTarget->willDefinitelyNotCrash() : true) &&
+				(falseTarget ? falseTarget->willDefinitelyNotCrash() : true);
+		case CM_NODE_STUB:
+			return false;
+		}
+		abort();
 	}
 
 	bool isFailure()
@@ -3730,7 +3746,6 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 			   MachineState<unsigned long> *ms)
 {
 	std::map<unsigned long, unsigned long> memory;
-	CrashMachineNode *last = NULL;
 	unsigned nr_good, nr_bad, nr_unknown;
 
 	cmn = cmn->resolveLoads(memory, ms);
@@ -3746,19 +3761,14 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 	     m_it != oracle.address_log.end();
 	     m_it++) {
 		memory[m_it->addr] = m_it->val;
-		CrashMachineNode *new_cmn =
-			cmn->resolveLoads(memory, ms);
+		CrashMachineNode *new_cmn = cmn->resolveLoads(memory, ms);
 		new_cmn = simplify_cmn(new_cmn);
-		if (last &&
-		    (1 || !cmns_bisimilar(last, new_cmn))) {
-			if (new_cmn->willDefinitelyCrash())
-				nr_bad++;
-			else if (new_cmn->willDefinitelyNotCrash())
-				nr_good++;
-			else
-				nr_unknown++;
-		}
-		last = new_cmn;
+		if (new_cmn->willDefinitelyCrash())
+			nr_bad++;
+		else if (new_cmn->willDefinitelyNotCrash())
+			nr_good++;
+		else
+			nr_unknown++;
 	}
 	if (nr_good != 0)
 		printf("%s: %d %d %d (%s)\n",
