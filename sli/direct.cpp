@@ -1771,6 +1771,15 @@ public:
 		return false;
 	}
 
+	bool isFailure()
+	{
+		if (type == CM_NODE_LEAF &&
+		    dynamic_cast<CrashExpressionFailed *>(leafCond))
+			return true;
+		else
+			return false;
+	}
+
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
 					 std::set<unsigned long> &addresses,
@@ -3421,7 +3430,8 @@ simplify_cmn(CrashMachineNode *cmn)
 		abort();
 		return cmn;
 	case CrashMachineNode::CM_NODE_LEAF:
-		if (cmn->leafCond->isConstant()) {
+		if (cmn->leafCond->isConstant() ||
+		    cmn->isFailure()) {
 			/* The stores are irrelevant in this case */
 			cmn->stores.clear();
 			cmn->changed();
@@ -3430,11 +3440,54 @@ simplify_cmn(CrashMachineNode *cmn)
 
 	case CrashMachineNode::CM_NODE_BRANCH:
 		assert(cmn->trueTarget || cmn->falseTarget);
+		if (dynamic_cast<CrashExpressionFailed *>(cmn->branchCond)) {
+			/* We don't know which way the branch will go,
+			   so just make pick one arbitrarily. */
+			if (cmn->falseTarget) {
+				cmn->branchCond = CrashExpressionConst::get(0);
+				cmn->trueTarget = NULL;
+			} else {
+				cmn->branchCond = CrashExpressionConst::get(1);
+			}
+		}
+
 		cmn->sanity_check();
 		cmn->falseTarget = simplify_cmn(cmn->falseTarget);
 		cmn->trueTarget = simplify_cmn(cmn->trueTarget);
 		assert(cmn->trueTarget || cmn->falseTarget);
 		cmn->sanity_check();
+
+		if (cmn->falseTarget && cmn->falseTarget->isFailure()) {
+			if (cmn->trueTarget) {
+				cmn->falseTarget = NULL;
+			} else {
+				cmn->type = CrashMachineNode::CM_NODE_LEAF;
+				cmn->leafCond = cmn->falseTarget->leafCond;
+				cmn->branchCond = NULL;
+				cmn->trueTarget = NULL;
+				cmn->falseTarget = NULL;
+				cmn->stores.clear();
+				return simplify_cmn(cmn);
+			}
+		}
+
+		if (cmn->trueTarget && cmn->trueTarget->isFailure()) {
+			if (cmn->falseTarget) {
+				cmn->trueTarget = NULL;
+			} else {
+				cmn->type = CrashMachineNode::CM_NODE_LEAF;
+				cmn->leafCond = cmn->trueTarget->leafCond;
+				cmn->branchCond = NULL;
+				cmn->trueTarget = NULL;
+				cmn->falseTarget = NULL;
+				cmn->stores.clear();
+				return simplify_cmn(cmn);
+			}
+		}
+
+		if (cmn->trueTarget && cmn->trueTarget->isFailure())
+			cmn->falseTarget = NULL;
+
 		if (!cmn->falseTarget) {
 			cmn = mergeCmns(cmn, cmn->trueTarget);
 			break;
@@ -3443,6 +3496,7 @@ simplify_cmn(CrashMachineNode *cmn)
 			cmn = mergeCmns(cmn, cmn->falseTarget);
 			break;
 		}
+
 		unsigned long lc;
 		cmn->branchCond = cmn->branchCond->simplify(1000);
 		if (cmn->branchCond->isConstant(lc)) {
