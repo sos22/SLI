@@ -2810,7 +2810,16 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	nodeMapT *nodeMap;
 
 	/* Things which we need to visit, but haven't reached yet. */
-	std::queue<CrashTimestamp> grey;
+	struct build_cfg_work {
+		CrashTimestamp time;
+		unsigned max_depth;
+		build_cfg_work(const CrashTimestamp &t,
+			       unsigned _max_depth)
+			: time(t), max_depth(_max_depth)
+		{
+		}
+	};
+	std::queue<build_cfg_work> grey;
 
 	std::vector<CrashTimestamp> roots;
 
@@ -2832,7 +2841,7 @@ public:
 	void add_root(const CrashTimestamp &x)
 	{
 		roots.push_back(x);
-		grey.push(x);
+		grey.push(build_cfg_work(x, 100));
 	}
 	void build(MachineState<unsigned long> *ms,
 		   const Oracle &footstep_log,
@@ -2898,20 +2907,24 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 {
 	ThreadId tid = oracle.crashingTid;
 	while (!grey.empty()) {
-		CrashTimestamp &when = grey.front();
-		if (nodeMap->hasKey(when)) {
+		build_cfg_work &work = grey.front();
+		if (nodeMap->hasKey(work.time)) {
 			grey.pop();
 			continue;
 		}
-
+		if (work.max_depth == 0) {
+			printf("Truncate CFG exploration at %s\n", work.time.name());
+			grey.pop();
+			continue;
+		}
 		bool haveFallThrough = false;
 		bool haveNonFallThrough = false;
 		CrashTimestamp fallThroughTarget;
-		fallThroughTarget = when;
+		fallThroughTarget = work.time;
 		CrashTimestamp nonFallThroughTarget;
-		nonFallThroughTarget = when;
+		nonFallThroughTarget = work.time;
 		bool dead = false;
-		if (!partial_cm->content->hasKey(when)) {
+		if (!partial_cm->content->hasKey(work.time)) {
 			/* We stop exploration if we get to something
 			   which already has a CMN, because it can't
 			   do us any good to go beyond that point, and
@@ -2919,7 +2932,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			   causes the loop breaker to do something
 			   stupid. */
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(when.rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(work.time.rip);
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used &&
@@ -2937,8 +2950,8 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			if (instr_end == irsb->stmts_used &&
 			    !frip) {
 				if (irsb->jumpkind == Ijk_Ret &&
-				    !when.callStack.empty()) {
-					frip = when.callStack.back();
+				    !work.time.callStack.empty()) {
+					frip = work.time.callStack.back();
 					fallThroughTarget.callStack.pop_back();
 				} else {
 					/* Cheat and grab the return
@@ -2946,7 +2959,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 					   trace, if it's
 					   available. */
 					CrashTimestamp n;
-					if (oracle.successorOf(when, n))
+					if (oracle.successorOf(work.time, n))
 						frip = n.rip;
 				}
 			}
@@ -2972,17 +2985,18 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		fixup_rip(nonFallThroughTarget);
 
 		CrashCFGNode *newNode =
-			new CrashCFGNode(when, nonFallThroughTarget, fallThroughTarget);
+			new CrashCFGNode(work.time, nonFallThroughTarget, fallThroughTarget);
 		newNode->dead = dead;
 		assert(newNode != NULL);
-		nodeMap->set(when, newNode);
+		nodeMap->set(work.time, newNode);
 
+		unsigned new_max_depth = work.max_depth - 1;
 		grey.pop();
 
 		if (haveFallThrough)
-			grey.push(fallThroughTarget);
+			grey.push(build_cfg_work(fallThroughTarget, new_max_depth));
 		if (haveNonFallThrough)
-			grey.push(nonFallThroughTarget);
+			grey.push(build_cfg_work(nonFallThroughTarget, new_max_depth));
 	}
 }
 
