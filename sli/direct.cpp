@@ -400,11 +400,20 @@ public:
 };
 
 class CrashExpressionFailed : public CrashExpression {
-	CrashExpressionFailed() {}
+	CrashExpressionFailed(char *_reason)
+		: reason(_reason)
+	{
+	}
 protected:
-	const char *_mkName() const { return "<decode_failed>"; }
-	void _visit(HeapVisitor &hv) {}
+	char *reason;
+	const char *_mkName() const { return my_asprintf("<decode_failed:%s>",
+							 reason); }
+	void _visit(HeapVisitor &hv) {hv(reason);}
 	bool _eq(const CrashExpression *o) const {
+		/* We cheat a little and consider all failed crash
+		   expressions to be identical, even if they have
+		   different reason strings, as this makes the
+		   analysis work a lot better. */
 		if (dynamic_cast<const CrashExpressionFailed *>(o))
 			return true;
 		else
@@ -414,9 +423,20 @@ protected:
 		return 99999;
 	}
 public:
-	static CrashExpression *get() {return intern(new CrashExpressionFailed())->simplify(); }
+	static CrashExpression *get(const char *fmt,
+				    ...)
+	{
+		va_list args;
+		char *reason;
+		va_start(args, fmt);
+		reason = vex_asprintf(fmt, args);
+		va_end(args);
+		return intern(new CrashExpressionFailed(reason))->simplify();
+	}
 	CrashExpression *map(CPMapper &m) { return m(this); }
-	unsigned complexity() const { return 1; }
+	/* Give failed nodes a very high complexity, so that the
+	   simplification eliminates them whenever possible. */
+	unsigned complexity() const { return (unsigned)-1; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
 					 std::set<unsigned long> &addresses,
@@ -427,7 +447,8 @@ public:
 			   MachineState<unsigned long> *ms,
 			   const std::vector<concrete_store> &)
 	{
-		abort();
+		/* Guess wildly. */
+		return 0;
 	}
 };
 
@@ -2237,7 +2258,9 @@ failed:
 	printf("Failed to translate expression ");
 	ppIRExpr(e);
 	printf("\n");
-	return CrashExpressionFailed::get();
+	return CrashExpressionFailed::get("expression tag 0x%x op 0x%x",
+					  e->tag,
+					  e->Iex.Unop.op);
 }
 
 static CrashMachineNode *
