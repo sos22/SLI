@@ -376,6 +376,8 @@ class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	void redirectGuest(abst_int_type rip);
 
 public:
+	std::vector<unsigned long> currentCallStack;
+
 	unsigned decode_counter;
 	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);
 	ThreadId tid;
@@ -3463,5 +3465,6 @@ public:
 	__caller_histogram.click(__builtin_return_address(depth + 1))
 
 bool address_is_interesting(ThreadId tid, unsigned long addr);
+unsigned long extract_call_follower(IRSB *irsb);
 
 #endif /* !SLI_H__ */

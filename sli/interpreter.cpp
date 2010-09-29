@@ -1365,17 +1365,19 @@ class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	VexGcVisitor<AddressSpaceGuestFetcher<ait> > visitor;
 	mutable UChar cache[16];
 	mutable unsigned long cache_start;
+	mutable bool have_cache;
 public:
 	virtual UChar operator[](unsigned long idx) const
 	{
 		unsigned long desired = idx + offset;
-		if (desired >= cache_start && desired < cache_start + sizeof(cache))
+		if (have_cache && desired >= cache_start && desired < cache_start + sizeof(cache))
 			return cache[desired - cache_start];
 		cache_start = desired;
 		ait v[16];
 		aspace->readMemory(mkConst<ait>(desired), 16, v, false, NULL);
 		for (unsigned x = 0; x < sizeof(cache); x++)
 			cache[x] = force(v[x]);
+		have_cache = true;
 		return cache[0];
 	}
 	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
@@ -1384,7 +1386,8 @@ public:
 		aspace(_aspace),
 		offset(_offset),
 		visitor(this, "AddressSpaceGuestFetcher"),
-		cache_start(0)
+		cache_start(0),
+		have_cache(false)
 	{
 	}
 	void visit(HeapVisitor &hv) { hv(aspace); }
@@ -1476,6 +1479,41 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 	/* Should be a mark for the IRSB rip */
 	assert(ths->currentIRSB->stmts[0]->Ist.IMark.addr ==
 	       force(ths->currentIRSBRip));
+}
+
+unsigned long
+extract_call_follower(IRSB *irsb)
+{
+	/* We expect a call to look like this:
+
+	   0:   ------ IMark(0x7fde5bdd85a7, 5) ------
+	   1:   t0 = Sub64(GET:I64(32),0x8:I64)
+	   2:   PUT(32) = t0
+	   3:   STle(t0) = 0x7fde5bdd85ac:I64
+	   4:   t1 = 0x7fde5be62750:I64
+	   5:   ====== AbiHint(Sub64(t0,0x80:I64), 128, t1) ======
+	   goto {Call} 0x7fde5be62750:I64
+   
+	   Or so.  The WrTmp at statement 4 is optional, but the rest
+	   has to be there.  We process statements in reverse order
+	   from the end, checking that things match as we go. */
+	int idx = irsb->stmts_used - 1;
+
+	if (idx < 0 ||
+	    irsb->stmts[idx]->tag != Ist_AbiHint)
+		abort();
+	idx--;
+	if (idx < 0)
+		abort();
+	if (irsb->stmts[idx]->tag == Ist_WrTmp)
+		idx--;
+	if (idx < 0)
+		abort();
+	if (irsb->stmts[idx]->tag != Ist_Store)
+		abort();
+	if (irsb->stmts[idx]->Ist.Store.data->tag != Iex_Const)
+		abort();
+	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
 }
 
 template<typename ait>
@@ -1731,6 +1769,36 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 						  ternary(ths->currentControlCondition,
 							  next_addr.lo,
 							  mkConst<ait>(0xdeadbeef)));
+				if (ths->currentIRSB->jumpkind == Ijk_Ret) {
+					/* Because of longjmp() etc.,
+					   the return address won't
+					   necessarily be the top
+					   thing on the stack.
+					   Account for that. */
+					int x;
+					for (x = ths->currentCallStack.size() - 1;
+					     x >= 0;
+					     x--) {
+						if (ths->currentCallStack[x] ==
+						    force(ths->regs.rip())) {
+							ths->currentCallStack.resize(x);
+							break;
+						}
+					}
+					if (x == -1) {
+						printf("WARNING: couldn't find where to return to (looking for %s, stack [",
+						       name_aiv(ths->regs.rip()));
+						for (int x = 0;
+						     x < (int)ths->currentCallStack.size();
+						     x++)
+							printf("%lx ", ths->currentCallStack[x]);
+						printf("])\n");
+						ths->currentCallStack.clear();
+					}
+				} else if (ths->currentIRSB->jumpkind == Ijk_Call) {
+					ths->currentCallStack.push_back(
+						extract_call_follower(ths->currentIRSB));
+				}
 				ths->currentIRSB = NULL;
 			}
 			if (is_syscall)

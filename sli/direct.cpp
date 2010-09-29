@@ -18,20 +18,78 @@
    actually sufficient to uniquely identify a dynamic instruction. */
 class CrashTimestamp : public Named {
 protected:
-	char *mkName() const { return my_asprintf("%d:%lx", tid._tid(), rip); }
+	char *mkName() const {
+		char *b = my_asprintf("}%d:%lx", tid._tid(), rip);
+		for (std::vector<unsigned long>::const_iterator it =
+			     callStack.begin();
+		     it != callStack.end();
+		     it++) {
+			char *b2 = my_asprintf("%lx;%s", *it, b);
+			free(b);
+			b = b2;
+		}
+		char *b2 = my_asprintf("{%s", b);
+		free(b);
+		return b2;
+	}
 public:
+	void changed() { clearName(); }
 	ThreadId tid; /* Which thread are we talking about */
 	unsigned long rip;
-	CrashTimestamp(ThreadId _tid, unsigned long _rip)
-		: tid(_tid), rip(_rip)
+	std::vector<unsigned long> callStack;
+	CrashTimestamp(ThreadId _tid, unsigned long _rip,
+		       const std::vector<unsigned long> &stack)
+		: tid(_tid), rip(_rip), callStack(stack)
 	{
 	}
-	CrashTimestamp() {}
+	CrashTimestamp() : tid(), rip(-1), callStack() {}
+	CrashTimestamp(Thread<unsigned long> *thr)
+		: tid(thr->tid),
+		  rip(thr->regs.rip()),
+		  callStack(thr->currentCallStack)
+	{
+	}
+	void operator=(const CrashTimestamp &ts)
+	{
+		tid = ts.tid;
+		rip = ts.rip;
+		callStack = ts.callStack;
+	}
+	bool valid() { return tid.valid(); }
 	unsigned long hash() const {
-		return tid.hash() ^ (rip * 7);
+		unsigned long h = tid.hash() ^ (rip * 7);
+		for (std::vector<unsigned long>::const_iterator it = callStack.begin();
+		     it != callStack.end();
+		     it++)
+			h = h * 103 + *it;
+		return h;
 	}
 	bool operator==(const CrashTimestamp &c) const {
-		return tid == c.tid && rip == c.rip;
+		return tid == c.tid && rip == c.rip && callStack == c.callStack;
+	}
+	bool operator!=(const CrashTimestamp &c) const {
+		return !(*this == c);
+	}
+	bool operator<(const CrashTimestamp &c) const {
+		if (tid < c.tid)
+			return true;
+		if (tid > c.tid)
+			return false;
+		if (rip < c.rip)
+			return true;
+		if (rip > c.rip)
+			return false;
+		if (callStack.size() < c.callStack.size())
+			return true;
+		if (callStack.size() > c.callStack.size())
+			return false;
+		for (unsigned x = 0; x < callStack.size(); x++) {
+			if (callStack[x] < c.callStack[x])
+				return true;
+			if (callStack[x] < c.callStack[x])
+				return false;
+		}
+		return false;
 	}
 };
 
@@ -341,9 +399,10 @@ public:
 };
 
 class CrashExpressionLoad : public CrashExpression {
-	CrashExpressionLoad(CrashTimestamp _when, CrashExpression *_addr)
-		: when(_when), addr(_addr)
+	CrashExpressionLoad(const CrashTimestamp &_when, CrashExpression *_addr)
+		: addr(_addr)
 	{
+		when = _when;
 	}
 
 protected:
@@ -368,7 +427,7 @@ protected:
 public:
 	CrashTimestamp when;
 	CrashExpression *addr;
-	static CrashExpression *get(CrashTimestamp when,
+	static CrashExpression *get(const CrashTimestamp &when,
 				    CrashExpression *addr)
 	{
 		unsigned long c;
@@ -1445,7 +1504,7 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 
 protected:
 	char *mkName() const {
-		char *buf = my_asprintf("%s: <%lx> ", defining_time.name(), origin_rip);
+		char *buf = my_asprintf("<%lx> ", origin_rip);
 #if 0
 		for (abstractStoresT::const_iterator it = stores.begin();
 		     it != stores.end();
@@ -1484,34 +1543,28 @@ public:
 	abstractStoresT stores;
 
 	CrashMachineNode(unsigned long _origin_rip,
-			 CrashTimestamp _defining_time,
 			 CrashExpression *e,
 			 const abstractStoresT &_stores)
 		: stores(_stores),
 		  origin_rip(_origin_rip),
-		  defining_time(_defining_time),
 		  type(CM_NODE_LEAF),
 		  leafCond(e)
 	{
 	}
 	CrashMachineNode(unsigned long _origin_rip,
-			 CrashTimestamp _defining_time,
 			 const abstractStoresT &_stores)
 		: stores(_stores),
 		  origin_rip(_origin_rip),
-		  defining_time(_defining_time),
 		  type(CM_NODE_STUB)
 	{
 	}
 	CrashMachineNode(unsigned long _origin_rip,
-			 CrashTimestamp _defining_time,
 			 CrashExpression *_branchCond,
 			 CrashMachineNode *_trueTarget,
 			 CrashMachineNode *_falseTarget,
 			 const abstractStoresT &_stores)
 		: stores(_stores),
 		  origin_rip(_origin_rip),
-		  defining_time(_defining_time),
 		  type(CM_NODE_BRANCH),
 		  branchCond(_branchCond),
 		  trueTarget(_trueTarget),
@@ -1546,11 +1599,9 @@ public:
 			assert(trueTarget || falseTarget);
 			if (trueTarget) {
 				trueTarget->sanity_check();
-				assert(trueTarget->defining_time == defining_time);
 			}
 			if (falseTarget) {
 				falseTarget->sanity_check();
-				assert(falseTarget->defining_time == defining_time);
 			}
 			return;
 		}
@@ -1558,32 +1609,10 @@ public:
 #endif
 	}
 
-	CrashMachineNode *setDefiningTime(CrashTimestamp ts)
-	{
-		if (!this)
-			return NULL;
-		if (ts == defining_time)
-			return this;
-		switch (type) {
-		case CM_NODE_LEAF:
-			return new CrashMachineNode(origin_rip, ts, leafCond, stores);
-		case CM_NODE_STUB:
-			return new CrashMachineNode(origin_rip, ts, stores);
-		case CM_NODE_BRANCH:
-			return new CrashMachineNode(origin_rip, ts, branchCond,
-						    trueTarget->setDefiningTime(ts),
-						    falseTarget->setDefiningTime(ts),
-						    stores);
-		}
-		abort();
-	}
-
 	/* Where was the instruction which caused us to generate this
 	   node?  Mostly a debug aid, except for STUB nodes, where it
 	   tells you what instruction we're a stub for. */
 	unsigned long origin_rip;
-	/* When should this node be evaluated? */
-	CrashTimestamp defining_time;
 
 	enum { CM_NODE_LEAF = 52, CM_NODE_BRANCH, CM_NODE_STUB } type;
 
@@ -1616,7 +1645,7 @@ public:
 			CrashExpression *l = leafCond->map(m);
 			if (l == leafCond && !forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, defining_time, l, newStores);
+			res = new CrashMachineNode(origin_rip, l, newStores);
 			break;
 		}
 		case CM_NODE_BRANCH: {
@@ -1626,13 +1655,13 @@ public:
 			if (c == branchCond && t == trueTarget &&
 			    f == falseTarget && !forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, defining_time, c, t, f, newStores);
+			res = new CrashMachineNode(origin_rip, c, t, f, newStores);
 			break;
 		}
 		case CM_NODE_STUB: {
 			if (!forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, defining_time, newStores);
+			res = new CrashMachineNode(origin_rip, newStores);
 			break;
 		}
 		default:
@@ -1729,20 +1758,19 @@ public:
 
 	CrashMachine() : content(new contentT()) {}
 
-	bool hasKey(CrashTimestamp ts) { return content->hasKey(ts); }
-	CrashMachineNode *get(CrashTimestamp ts) {
+	bool hasKey(const CrashTimestamp &ts) { return content->hasKey(ts); }
+	CrashMachineNode *get(const CrashTimestamp &ts) {
 		/* We know where abort() and raise() live */
 		if ((ts.rip >= 0x50a6a40 && ts.rip <= 0x50a6c7a) ||
 		    (ts.rip >= 0x50a4f80 && ts.rip <= 0x50a4ff7)) {
 			return new CrashMachineNode(
 				ts.rip,
-				ts,
 				CrashExpressionConst::get(1),
 				abstractStoresT());
 		}
 		return content->get(ts).first;
 	}
-	void set(CrashTimestamp ts, CrashMachineNode *cmn)
+	void set(const CrashTimestamp &ts, CrashMachineNode *cmn)
 	{
 		std::set<unsigned long> t;
 		content->set(ts,
@@ -1787,7 +1815,7 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 
 	switch (type) {
 	case CM_NODE_LEAF:
-		res = new CrashMachineNode(origin_rip, defining_time,
+		res = new CrashMachineNode(origin_rip,
 					   leafCond->map(rlm), newAbsStores);
 		break;
 	case CM_NODE_BRANCH: {
@@ -1802,12 +1830,12 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 			f = falseTarget->resolveLoads(memory, ms, concrete_stores);
 			assert(concrete_stores.size() == sz2);
 		}
-		res = new CrashMachineNode(origin_rip, defining_time,
+		res = new CrashMachineNode(origin_rip,
 					   b, t, f, newAbsStores);
 		break;
 	}
 	case CM_NODE_STUB:
-		res = new CrashMachineNode(origin_rip, defining_time, newAbsStores);
+		res = new CrashMachineNode(origin_rip, newAbsStores);
 		break;
 	default:
 		abort();
@@ -1864,7 +1892,7 @@ void
 CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
 					       MachineState<unsigned long> *ms)
 {
-	CrashTimestamp ts(thr->tid, thr->regs.rip());
+	CrashTimestamp ts(thr->tid, thr->regs.rip(), thr->currentCallStack);
 	std::pair<CrashMachineNode *, std::set<unsigned long> >
 		&slot(content->get(ts));
 
@@ -1894,7 +1922,8 @@ public:
 #if 0 /* Stop emacs getting confused by putting in a redundant { */
 		{
 #endif
-			CrashTimestamp ts(thr->tid, ie->rip);
+			CrashTimestamp ts(thr);
+			ts.rip = ie->rip;
 			if (cm->hasKey(ts))
 				cm->calc_relevant_addresses_snapshot(thr, ms);
 		}
@@ -2173,13 +2202,13 @@ failed:
 }
 
 static CrashMachineNode *
-exprToCrashReason(CrashTimestamp when, IRExpr *expr)
+exprToCrashReason(const CrashTimestamp &when, IRExpr *expr)
 {
 	return NULL;
 }
 
 static CrashMachineNode *
-statementToCrashReason(CrashTimestamp when, IRStmt *irs)
+statementToCrashReason(const CrashTimestamp &when, IRStmt *irs)
 {
 	CrashMachineNode *r;
 
@@ -2207,7 +2236,6 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 			abstractStoresT stores;
 			r = new CrashMachineNode(
 				when.rip,
-				when,
 				CrashExpressionBadAddr::get(
 					CrashExpression::get(irs->Ist.Store.addr)),
 				stores);
@@ -2232,7 +2260,6 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 			abstractStoresT stores;
 			return new CrashMachineNode(
 				when.rip,
-				when,
 				CrashExpressionBadAddr::get(
 					CrashExpression::get(irs->Ist.Dirty.details->args[0])),
 				stores);
@@ -2244,9 +2271,9 @@ statementToCrashReason(CrashTimestamp when, IRStmt *irs)
 class ResolveLoadsMapper : public CPMapper {
 public:
 	CrashExpression *data;
-	const std::vector<unsigned long> &satisfiedLoads;
+	const std::set<CrashTimestamp> &satisfiedLoads;
 	ResolveLoadsMapper(CrashExpression *_data,
-			   const std::vector<unsigned long> &_satisfiedLoads)
+			   const std::set<CrashTimestamp> &_satisfiedLoads)
 		: data(_data), satisfiedLoads(_satisfiedLoads)
 	{
 	}
@@ -2257,12 +2284,8 @@ ResolveLoadsMapper::operator()(CrashExpression *ce)
 {
 	if (CrashExpressionLoad *cel =
 	    dynamic_cast<CrashExpressionLoad *>(ce)) {
-		for (std::vector<unsigned long>::const_iterator it = satisfiedLoads.begin();
-		     it != satisfiedLoads.end();
-		     it++) {
-			if (cel->when.rip == *it)
-				return data;
-		}
+		if (satisfiedLoads.count(cel->when))
+			return data;
 	}
 	return ce;
 }
@@ -2272,25 +2295,29 @@ ResolveLoadsMapper::operator()(CrashExpression *ce)
    you to make queries against the captured crash in a relatively
    structured way. */
 class Oracle {
-	typedef std::vector<std::pair<unsigned long, bool> > traceT;
+	typedef std::vector<std::pair<CrashTimestamp, bool> > traceT;
 	traceT trace;
 	struct memaccess {
 		bool is_load;
-		unsigned long rip;
+		CrashTimestamp rip;
 		unsigned long addr;
-		static memaccess load(unsigned long rip, unsigned long addr) {
+		static memaccess load(const CrashTimestamp &rip, unsigned long addr) {
 			memaccess r;
 			r.is_load = true;
 			r.rip = rip;
 			r.addr = addr;
 			return r;
 		}
-		static memaccess store(unsigned long rip, unsigned long addr) {
+		static memaccess store(const CrashTimestamp &rip, unsigned long addr) {
 			memaccess r;
 			r.is_load = false;
 			r.rip = rip;
 			r.addr = addr;
 			return r;
+		}
+		memaccess()
+			: is_load(0), rip(), addr(99)
+		{
 		}
 	};
 	std::vector<memaccess> memlog;
@@ -2310,7 +2337,7 @@ public:
 		{
 		}
 	public:
-		unsigned long operator*() { return it->first; }
+		const CrashTimestamp &operator*() { return it->first; }
 		bool operator==(const RipTraceIterator &b) {
 			return it == b.it;
 		}
@@ -2323,40 +2350,39 @@ public:
 	};
 	RipTraceIterator begin_rip_trace() { return RipTraceIterator(trace.begin()); }
 	RipTraceIterator end_rip_trace() { return RipTraceIterator(trace.end()); }
-	void addRipTrace(unsigned long rip, bool branchTaken) {
-		trace.push_back(std::pair<unsigned long, bool>(rip, branchTaken));
+	void addRipTrace(const CrashTimestamp &rip, bool branchTaken) {
+		trace.push_back(std::pair<CrashTimestamp, bool>(rip, branchTaken));
 	}
 
-	void load_event(unsigned long rip, unsigned long addr) {
+	void load_event(const CrashTimestamp &rip, unsigned long addr) {
 		memlog.push_back(memaccess::load(rip, addr));
 	}
-	void store_event(unsigned long rip, unsigned long addr) {
+	void store_event(const CrashTimestamp &rip, unsigned long addr) {
 		memlog.push_back(memaccess::store(rip, addr));
 	}
 
 	/* Given a RIP, try to make a guess at what the next
 	   instruction is likely to be.  Returns 0 if we don't
 	   know. */
-	unsigned long successorOf(unsigned long rip) const
+	bool successorOf(const CrashTimestamp &rip, CrashTimestamp &out) const
 	{
 		traceT::const_iterator it = trace.begin();
-		unsigned long succ_rip = it->first;
+		const CrashTimestamp *succ_rip = &it->first;
 		it++;
 		while (it != trace.end() && it->first != rip) {
-			succ_rip = it->first;
+			succ_rip = &it->first;
 			it++;
 		}
 		if (it == trace.end())
-			return 0;
-		else
-			return succ_rip;
+			return false;
+		out = *succ_rip;
+		return true;
 	}
 
 	/* Did the dynamic execution include a branch from @first to
 	 * @second? */
-	bool containsRipEdge(unsigned long first, unsigned long second) const
+	bool containsRipEdge(const CrashTimestamp &first, const CrashTimestamp &second) const
 	{
-		/* XXX is this not backwards? */
 		for (traceT::const_iterator oit = trace.begin();
 		     oit + 1 != trace.end();
 		     oit++) {
@@ -2370,7 +2396,7 @@ public:
 	/* Is the branch @rip taken?  Returns true if it is, and @dflt
 	 * otherwise.  Also returns @dflt if @rip doesn't contain a
 	 * branch. */
-	bool branchTaken(unsigned long rip, bool dflt) const {
+	bool branchTaken(const CrashTimestamp &rip, bool dflt) const {
 		for (traceT::const_iterator it = trace.begin();
 		     it != trace.end();
 		     it++) {
@@ -2380,7 +2406,7 @@ public:
 		return dflt;
 	}
 
-	void findLoadsForStore(unsigned long store, std::vector<unsigned long> *loads) const;
+	void findLoadsForStore(const CrashTimestamp &store, std::set<CrashTimestamp> *loads) const;
 
 	void collect_interesting_access_log(
 		VexPtr<MachineState<unsigned long> > &ms,
@@ -2389,25 +2415,23 @@ public:
 		GarbageCollectionToken tok);
 
 	struct address_log_entry {
-		ThreadId tid;
-		unsigned long rip;
+		CrashTimestamp rip;
 		unsigned long addr;
 		unsigned long val;
-		address_log_entry(ThreadId _tid,
-				  unsigned long _rip,
+		address_log_entry(const CrashTimestamp &_rip,
 				  unsigned long _addr,
 				  unsigned long _val)
-			: tid(_tid), rip(_rip), addr(_addr),
-			  val(_val)
+			: addr(_addr), val(_val)
 		{
-		};
+			rip = _rip;
+		}
 	};
 	std::vector<address_log_entry> address_log;
 };
 
 void
-Oracle::findLoadsForStore(unsigned long store_rip,
-			  std::vector<unsigned long> *load_rips) const
+Oracle::findLoadsForStore(const CrashTimestamp &store_rip,
+			  std::set<CrashTimestamp> *load_rips) const
 {
 	/* First, find the last instance we have of that store RIP in
 	 * the mem log. */
@@ -2428,14 +2452,7 @@ Oracle::findLoadsForStore(unsigned long store_rip,
 		}
 		if (memlog[idx].addr != addr)
 			continue;
-		/* Make sure we only resolve each load once */
-		std::vector<unsigned long>::iterator it;
-		for (it = load_rips->begin();
-		     it != load_rips->end() && *it != memlog[idx].rip;
-		     it++)
-			;
-		if (it == load_rips->end())
-			load_rips->push_back(memlog[idx].rip);
+		load_rips->insert(memlog[idx].rip);
 	}
 }
 
@@ -2463,8 +2480,7 @@ CIALEventRecorder::record(Thread<unsigned long> *thr, ThreadEvent<unsigned long>
 	oracle->constant_addresses.erase(se->addr);
 	oracle->address_log.push_back(
 		Oracle::address_log_entry(
-			thr->tid,
-			thr->regs.rip(),
+			CrashTimestamp(thr->tid, thr->regs.rip(), thr->currentCallStack),
 			se->addr,
 			se->data.lo));
 }
@@ -2485,8 +2501,7 @@ Oracle::collect_interesting_access_log(
 	     it++)
 		address_log.push_back(
 			address_log_entry(
-				ThreadId(),
-				-1,
+				CrashTimestamp(),
 				*it,
 				CrashExpressionLoad::fetch(*it, ms, NULL)));
 
@@ -2498,7 +2513,7 @@ Oracle::collect_interesting_access_log(
 
 static CrashMachineNode *
 backtrack_crash_machine_node_for_statements(
-	CrashTimestamp when,
+	const CrashTimestamp &when,
 	CrashMachineNode *node,
 	IRStmt **statements,
 	int nr_statements,
@@ -2506,10 +2521,9 @@ backtrack_crash_machine_node_for_statements(
 	const Oracle &oracle)
 {
 	int i;
-	unsigned long rip;
 
 	assert(statements[0]->tag == Ist_IMark);
-	rip = statements[0]->Ist.IMark.addr;
+	assert(when.rip == statements[0]->Ist.IMark.addr);
 
 	for (i = nr_statements - 1; i >= 0; i--)  {
 		IRStmt *stmt = statements[i];
@@ -2555,8 +2569,8 @@ backtrack_crash_machine_node_for_statements(
 		case Ist_Store: {
 			CrashExpression *data =	CrashExpression::get(stmt->Ist.Store.data);
 			CrashExpression *addr =	CrashExpression::get(stmt->Ist.Store.addr);
-			std::vector<unsigned long> satisfiedLoads;
-			oracle.findLoadsForStore(rip, &satisfiedLoads);
+			std::set<CrashTimestamp> satisfiedLoads;
+			oracle.findLoadsForStore(when, &satisfiedLoads);
 			if (!satisfiedLoads.empty()) {
 				ResolveLoadsMapper rlm(data, satisfiedLoads);
 				node = node->map(rlm);
@@ -2573,7 +2587,7 @@ backtrack_crash_machine_node_for_statements(
 				/* Only handle two-way branches */
 				assert(!node->trueTarget);
 				abstractStoresT stores;
-				node->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64, when, stores);
+				node->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64, stores);
 				node->branchCond = CrashExpression::get(stmt->Ist.Exit.guard);
 			}
 			break;
@@ -2602,7 +2616,6 @@ backtrack_crash_machine_node_for_statements(
 static bool
 cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
 {
-	assert(cmn1->defining_time == cmn2->defining_time);
 	if (cmn1 == cmn2)
 		return true;
 	if (!cmn1 || !cmn2)
@@ -2632,42 +2645,6 @@ cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
 	}
 	abort();
 }
-
-static unsigned long
-extract_call_follower(IRSB *irsb)
-{
-	/* We expect a call to look like this:
-
-	   0:   ------ IMark(0x7fde5bdd85a7, 5) ------
-	   1:   t0 = Sub64(GET:I64(32),0x8:I64)
-	   2:   PUT(32) = t0
-	   3:   STle(t0) = 0x7fde5bdd85ac:I64
-	   4:   t1 = 0x7fde5be62750:I64
-	   5:   ====== AbiHint(Sub64(t0,0x80:I64), 128, t1) ======
-	   goto {Call} 0x7fde5be62750:I64
-   
-	   Or so.  The WrTmp at statement 4 is optional, but the rest
-	   has to be there.  We process statements in reverse order
-	   from the end, checking that things match as we go. */
-	int idx = irsb->stmts_used - 1;
-
-	if (idx < 0 ||
-	    irsb->stmts[idx]->tag != Ist_AbiHint)
-		abort();
-	idx--;
-	if (idx < 0)
-		abort();
-	if (irsb->stmts[idx]->tag == Ist_WrTmp)
-		idx--;
-	if (idx < 0)
-		abort();
-	if (irsb->stmts[idx]->tag != Ist_Store)
-		abort();
-	if (irsb->stmts[idx]->Ist.Store.data->tag != Iex_Const)
-		abort();
-	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
-}
-
 
 /* Aim here is to incorporate a bit of static analysis into the crash
  * machine. */
@@ -2720,16 +2697,21 @@ extract_call_follower(IRSB *irsb)
  */
 
 class CrashCFGNode : public GarbageCollected<CrashCFGNode> {
+	CrashCFGNode(const CrashCFGNode &); /* DNI */
 public:
-	CrashCFGNode(unsigned long r, unsigned long t, unsigned long f)
-		: rip(r), trueTargetRip(t), falseTargetRip(f)
-	{}
-	unsigned long rip;
-	unsigned long trueTargetRip;
+	CrashCFGNode(const CrashTimestamp &_when, const CrashTimestamp &t, const CrashTimestamp &f)
+	{
+		when = _when;
+		trueTargetRip = t;
+		falseTargetRip = f;
+	}
+	CrashTimestamp when;
+
+	CrashTimestamp trueTargetRip;
 	bool brokeCycleTrueTarget;
 	CrashCFGNode *trueTarget;
 
-	unsigned long falseTargetRip;
+	CrashTimestamp falseTargetRip;
 	bool brokeCycleFalseTarget;
 	CrashCFGNode *falseTarget;
 
@@ -2745,16 +2727,16 @@ public:
 };
 
 class CrashCFG : public GarbageCollected<CrashCFG> {
-	typedef gc_map<unsigned long, CrashCFGNode *,
-		       __default_hash_function<unsigned long>,
-		       __default_eq_function<unsigned long>,
+	typedef gc_map<CrashTimestamp, CrashCFGNode *,
+		       __default_hash_function<CrashTimestamp>,
+		       __default_eq_function<CrashTimestamp>,
 		       __visit_function_heap<CrashCFGNode *> > nodeMapT;
 	nodeMapT *nodeMap;
 
 	/* Things which we need to visit, but haven't reached yet. */
-	std::vector<unsigned long> grey;
+	std::vector<CrashTimestamp> grey;
 
-	std::vector<unsigned long> roots;
+	std::vector<CrashTimestamp> roots;
 
 	void build_cfg(MachineState<unsigned long> *ms, const Oracle &oracle,
 		       CrashMachine *partial_cm);
@@ -2771,12 +2753,17 @@ public:
 	{
 	}
 
-	void add_root(unsigned long x) { roots.push_back(x); grey.push_back(x); }
+	void add_root(const CrashTimestamp &x)
+	{
+		roots.push_back(x);
+		grey.push_back(x);
+	}
 	void build(MachineState<unsigned long> *ms,
 		   const Oracle &footstep_log,
 		   CrashMachine *partial_cm);
-	CrashMachineNode *get_cmn(unsigned long rip) {
-		return nodeMap->get(rip)->cmn;
+	CrashMachineNode *get_cmn(const CrashTimestamp &when)
+	{
+		return nodeMap->get(when)->cmn;
 	}
 
 	void visit(HeapVisitor &hv) { hv(nodeMap); }
@@ -2819,15 +2806,13 @@ get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
    because we have some idea of how the standard library is
    implemented.  In particular, we know what the system call template
    looks like. */
-static unsigned long
-fixup_rip(unsigned long _rip)
+static void
+fixup_rip(CrashTimestamp &ts)
 {
-	if (_rip == 0x00007fde5be4601a)
-		return 0x00007fde5be45fc8;
-	else if (_rip == 0x00007faa4af5d7b8)
-		return 0x00007faa4af5d800;
-	else
-		return _rip;
+	if (ts.rip == 0x00007fde5be4601a)
+		ts.rip = 0x00007fde5be45fc8;
+	else if (ts.rip == 0x00007faa4af5d7b8)
+		ts.rip = 0x00007faa4af5d800;
 }
 
 void
@@ -2837,14 +2822,18 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 {
 	ThreadId tid = oracle.crashingTid;
 	while (!grey.empty()) {
-		unsigned long rip = grey.back();
-		grey.pop_back();
-		if (nodeMap->hasKey(rip))
+		CrashTimestamp &when = grey.back();
+		if (nodeMap->hasKey(when)) {
+			grey.pop_back();
 			continue;
+		}
 
-		unsigned long fallThroughTarget = 0;
-		unsigned long nonFallThroughTarget = 0;
-		CrashTimestamp when(tid, rip);
+		bool haveFallThrough = false;
+		bool haveNonFallThrough = false;
+		CrashTimestamp fallThroughTarget;
+		fallThroughTarget = when;
+		CrashTimestamp nonFallThroughTarget;
+		nonFallThroughTarget = when;
 		bool dead = false;
 		if (!partial_cm->content->hasKey(when)) {
 			/* We stop exploration if we get to something
@@ -2854,42 +2843,70 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			   causes the loop breaker to do something
 			   stupid. */
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(when.rip);
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used &&
 				     irsb->stmts[instr_end]->tag != Ist_IMark;
 			     instr_end++) {
 				if (irsb->stmts[instr_end]->tag == Ist_Exit) {
-					assert(nonFallThroughTarget == 0);
-					nonFallThroughTarget =
+					assert(!haveNonFallThrough);
+					nonFallThroughTarget.rip =
 						irsb->stmts[instr_end]->Ist.Exit.dst->Ico.U64;
+					haveNonFallThrough = true;
 				}
 			}
-			get_fallthrough_rip(irsb, instr_end, &fallThroughTarget, NULL);
-			if (!fallThroughTarget &&
-			    instr_end == irsb->stmts_used) {
-				/* Cheat and grab the return address out of
-				   the dynamic trace, if it's available. */
-				fallThroughTarget = oracle.successorOf(rip);
+			unsigned long frip = 0;
+			get_fallthrough_rip(irsb, instr_end, &frip, NULL);
+			if (instr_end == irsb->stmts_used &&
+			    !frip) {
+				if (irsb->jumpkind == Ijk_Ret &&
+				    !when.callStack.empty()) {
+					frip = when.callStack.back();
+					fallThroughTarget.callStack.pop_back();
+				} else {
+					/* Cheat and grab the return
+					   address out of the dynamic
+					   trace, if it's
+					   available. */
+					CrashTimestamp n;
+					if (oracle.successorOf(when, n))
+						frip = n.rip;
+				}
 			}
 
-			if (irsb->jumpkind == Ijk_NoDecode)
+			if (frip) {
+				fallThroughTarget.rip = frip;
+				haveFallThrough = true;
+			}
+
+			if (haveFallThrough &&
+			    instr_end == irsb->stmts_used &&
+			    irsb->jumpkind == Ijk_Call) {
+				fallThroughTarget.callStack.push_back(extract_call_follower(irsb));
+			}
+			if (irsb->jumpkind == Ijk_NoDecode) {
 				dead = true;
+				haveFallThrough = false;
+				haveFallThrough = false;
+			}
 		}
 
-		fallThroughTarget = fixup_rip(fallThroughTarget);
-		nonFallThroughTarget = fixup_rip(nonFallThroughTarget);
+		fixup_rip(fallThroughTarget);
+		fixup_rip(nonFallThroughTarget);
 
 		CrashCFGNode *newNode =
-			new CrashCFGNode(rip, nonFallThroughTarget, fallThroughTarget);
+			new CrashCFGNode(when, nonFallThroughTarget, fallThroughTarget);
 		newNode->dead = dead;
-		nodeMap->set(rip, newNode);
+		assert(newNode != NULL);
+		nodeMap->set(when, newNode);
 
-		if (nonFallThroughTarget)
-			grey.push_back(nonFallThroughTarget);
-		if (fallThroughTarget)
+		grey.pop_back();
+
+		if (haveFallThrough)
 			grey.push_back(fallThroughTarget);
+		if (haveNonFallThrough)
+			grey.push_back(nonFallThroughTarget);
 	}
 }
 
@@ -2900,9 +2917,10 @@ CrashCFG::resolve_stubs()
 	     it != nodeMap->end();
 	     it++) {
 		CrashCFGNode *n = it.value();
-		if (n->trueTargetRip)
+		assert(n);
+		if (n->trueTargetRip.valid())
 			n->trueTarget = nodeMap->get(n->trueTargetRip);
-		if (n->falseTargetRip)
+		if (n->falseTargetRip.valid())
 			n->falseTarget = nodeMap->get(n->falseTargetRip);
 	}
 }
@@ -2945,7 +2963,7 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 
 		assert(s.n);
 
-		DBG_CYCLE_BREAKER("Cycle breaker %lx: ", s.n->rip);
+		DBG_CYCLE_BREAKER("Cycle breaker %s: ", s.n->when.name());
 		if (s.n->visitedByCycleBreaker) {
 			/* Nothing to do here: we've already visited
 			   this node, and know that it doesn't
@@ -2964,14 +2982,14 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 			stack.pop_back();
 		} else if (s.visitedTrueTarget) {
 			assert(s.n->falseTarget);
-			DBG_CYCLE_BREAKER("Visited true; trying false %lx.\n",
-				s.n->falseTarget->rip);
+			DBG_CYCLE_BREAKER("Visited true; trying false %s.\n",
+					  s.n->falseTarget->when.name());
 			s.visitedFalseTarget = true;
 			stack.push_back(CycleBreakerState(s.n->falseTarget));
 		} else if (s.visitedFalseTarget) {
 			assert(s.n->trueTarget);
-			DBG_CYCLE_BREAKER("Visited false; trying true %lx.\n",
-			       s.n->trueTarget->rip);
+			DBG_CYCLE_BREAKER("Visited false; trying true %s.\n",
+					  s.n->trueTarget->when.name());
 			s.visitedTrueTarget = true;
 			stack.push_back(CycleBreakerState(s.n->trueTarget));
 		} else if (s.n->onCycleBreakerPath) {
@@ -3006,16 +3024,17 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 					if (it->n == s.n)
 						break;
 					if (it->n->trueTarget && it->n->falseTarget) {
-						unsigned long target = (it - 1)->n->rip;
+						CrashTimestamp target;
+						target = (it - 1)->n->when;
 						if (avoid_edges_in_oracle &&
 						    oracle.containsRipEdge(
-							    s.n->rip,
+							    s.n->when,
 							    target))
 							continue;
 
-						DBG_CYCLE_BREAKER("Cycle breaker removes edge %lx -> %lx\n",
-						       it->n->rip,
-						       target);
+						DBG_CYCLE_BREAKER("Cycle breaker removes edge %s -> %s\n",
+								  it->n->when.name(),
+								  target.name());
 						if (it->n->trueTarget == (it + 1)->n) {
 							it->n->trueTarget = NULL;
 							it->n->brokeCycleTrueTarget = true;
@@ -3047,9 +3066,9 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 			/* Really failed.  Just break on the last
 			 * possible edge. */
 			CycleBreakerState &parent(stack[stack.size()-2]);
-			DBG_CYCLE_BREAKER("Forced cycle breaking at %lx -> %lx\n",
-			       parent.n->rip,
-			       s.n->rip);
+			DBG_CYCLE_BREAKER("Forced cycle breaking at %s -> %s\n",
+					  parent.n->when.name(),
+					  s.n->when.name());
 			if (parent.n->trueTarget == s.n) {
 				parent.n->trueTarget = NULL;
 				parent.n->brokeCycleTrueTarget = true;
@@ -3079,7 +3098,7 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 				 * simplest possible execution and
 				 * avoids unnecessary partitioning. */
 				visitTrueTargetFirst =
-					oracle.branchTaken(n->rip,
+					oracle.branchTaken(n->when,
 							   visitTrueTargetFirst);
 			} else if (s.n->trueTarget) {
 				assert(!s.n->falseTarget);
@@ -3090,12 +3109,12 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 
 			if (visitTrueTargetFirst) {
 				assert(s.n->trueTarget);
-				DBG_CYCLE_BREAKER("Explore true branch %lx first\n", s.n->trueTarget->rip);
+				DBG_CYCLE_BREAKER("Explore true branch %s first\n", s.n->trueTarget->when.name());
 				s.visitedTrueTarget = true;
 				stack.push_back(CycleBreakerState(s.n->trueTarget));
 			} else {
 				assert(s.n->falseTarget);
-				DBG_CYCLE_BREAKER("Explore false branch %lx first\n", s.n->falseTarget->rip);
+				DBG_CYCLE_BREAKER("Explore false branch %s first\n", s.n->falseTarget->when.name());
 				s.visitedFalseTarget = true;
 				stack.push_back(CycleBreakerState(s.n->falseTarget));
 			}
@@ -3116,11 +3135,12 @@ CrashCFG::break_cycles(const Oracle &oracle)
 {
 	/* We start enumeration from the roots, because that helps to
 	   keep the important bits of the graph structure intact. */
-	for (std::vector<unsigned long>::iterator it = roots.begin();
+	for (std::vector<CrashTimestamp>::iterator it = roots.begin();
 	     it != roots.end();
-	     it++)
+	     it++) {
 		while (!break_cycles_from(nodeMap->get(*it), oracle))
 			;
+	}
 }
 
 void
@@ -3138,11 +3158,10 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			CrashCFGNode *node = it.value();
 			if (node->cmn)
 				continue;
-			CrashTimestamp when(oracle.crashingTid, node->rip);
-			if (cm->hasKey(when)) {
-				node->cmn = cm->get(when);
+			if (cm->hasKey(node->when)) {
+				node->cmn = cm->get(node->when);
 				progress = true;
-				DBG_CALC_CMNS("%lx: %s from crash machine\n", node->rip, node->cmn->name());
+				DBG_CALC_CMNS("%s: %s from crash machine\n", node->when.name(), node->cmn->name());
 				continue;
 			}
 
@@ -3152,12 +3171,11 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			/* Okay, both exits either have a CMN or don't
 			 * exist.  That means we should be able to
 			 * derive a CMN for this node. */
-			DBG_CALC_CMNS("Calculate CMN for %lx\n", node->rip);
+			DBG_CALC_CMNS("Calculate CMN for %s\n", node->when.name());
 			progress = true;
 			if (node->dead) {
 				node->cmn = new CrashMachineNode(
-					node->rip,
-					when,
+					node->when.rip,
 					CrashExpressionConst::get(1),
 					abstractStoresT());
 				continue;
@@ -3170,17 +3188,16 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 				   sufficiently different from the
 				   captured one that we avoid the
 				   crash. */
-				DBG_CALC_CMNS("%lx: no known successors\n", node->rip);
+				DBG_CALC_CMNS("%s: no known successors\n", node->when.name());
 				abstractStoresT stores;
 				node->cmn = new CrashMachineNode(
-					node->rip,
-					when,
+					node->when.rip,
 					CrashExpressionConst::get(0),
 					stores);
 				continue;
 			}
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(node->rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(node->when.rip);
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used && irsb->stmts[instr_end]->tag != Ist_IMark;
@@ -3240,22 +3257,16 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 				trueTarget = node->trueTarget->cmn;
 			}
 
-			if (trueTarget)
-				trueTarget = trueTarget->setDefiningTime(when);
-			if (falseTarget)
-				falseTarget = falseTarget->setDefiningTime(when);
-
-			DBG_CALC_CMNS("%lx: have successors %s and %s\n",
-			       node->rip,
-			       trueTarget ? trueTarget->name() : NULL,
-			       falseTarget ? falseTarget->name() : NULL);
+			DBG_CALC_CMNS("%s: have successors %s and %s\n",
+				      node->when.name(),
+				      trueTarget ? trueTarget->name() : NULL,
+				      falseTarget ? falseTarget->name() : NULL);
 			
 			/* cmn is now valid at the exit of this
 			   instruction.  Backtrack it to get the CMN
 			   for the start of the instruction. */
 			abstractStoresT stores;
-			cmn = new CrashMachineNode(node->rip,
-						   when,
+			cmn = new CrashMachineNode(node->when.rip,
 						   branchCond,
 						   trueTarget,
 						   falseTarget,
@@ -3269,7 +3280,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 
 			assert(cmn->isStubFree());
 			cmn = backtrack_crash_machine_node_for_statements(
-				when,
+				node->when,
 				cmn,
 				irsb->stmts,
 				instr_end,
@@ -3279,7 +3290,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 
 			/* All done. */
 			node->cmn = cmn;
-			DBG_CALC_CMNS("%lx -> %s\n", node->rip, cmn->name());
+			DBG_CALC_CMNS("%s -> %s\n", node->when.name(), cmn->name());
 		}
 	}
 }
@@ -3309,16 +3320,13 @@ mergeCmns(CrashMachineNode *base, CrashMachineNode *sub)
 	switch (sub->type) {
 	case CrashMachineNode::CM_NODE_LEAF:
 		return new CrashMachineNode(sub->origin_rip,
-					    sub->defining_time,
 					    sub->leafCond,
 					    stores);
 	case CrashMachineNode::CM_NODE_STUB:
 		return new CrashMachineNode(sub->origin_rip,
-					    sub->defining_time,
 					    stores);
 	case CrashMachineNode::CM_NODE_BRANCH:
 		return new CrashMachineNode(sub->origin_rip,
-					    sub->defining_time,
 					    sub->branchCond,
 					    sub->trueTarget,
 					    sub->falseTarget,
@@ -3390,17 +3398,16 @@ simplify_cmn(CrashMachineNode *cmn)
 
 static CrashMachineNode *
 buildCrashMachineNode(MachineState<unsigned long> *ms,
-		      unsigned long rip,
+		      const CrashTimestamp &when,
 		      CrashMachine *cm,
 		      const Oracle &oracle)
 {
-	CrashTimestamp when(oracle.crashingTid, rip);
 	if (cm->hasKey(when))
 		return cm->get(when);
 	CrashCFG *cfg = new CrashCFG();
-	cfg->add_root(rip);
+	cfg->add_root(when);
 	cfg->build(ms, oracle, cm);
-	return cfg->get_cmn(rip);
+	return cfg->get_cmn(when);
 }
 
 class MemTraceExtractor : public EventRecorder<unsigned long> {
@@ -3428,12 +3435,12 @@ MemTraceExtractor::record(Thread<unsigned long> *thr,
 		   past its nominal end. */
 		if (le->addr >= rsp - 136 &&
 		    le->addr < rsp + (8 << 20))
-			oracle->load_event(thr->regs.rip(), le->addr);
+			oracle->load_event(CrashTimestamp(thr), le->addr);
 	} else if (StoreEvent<unsigned long> *se =
 		   dynamic_cast<StoreEvent<unsigned long> *>(evt)) {
 		if (se->addr >= rsp - 136 &&
 		    se->addr < rsp + (8 << 20))
-			oracle->store_event(thr->regs.rip(), se->addr);
+			oracle->store_event(CrashTimestamp(thr), se->addr);
 	}
 }
 
@@ -3445,6 +3452,7 @@ memory_lookup(std::map<unsigned long, unsigned long> *memory, unsigned long addr
 
 static void
 findRemoteCriticalSections(CrashMachineNode *cmn,
+			   const CrashTimestamp &when,
 			   const Oracle &oracle,
 			   MachineState<unsigned long> *ms)
 {
@@ -3480,19 +3488,12 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 		last = new_cmn;
 	}
 	if (nr_good != 0)
-		printf("%lx: %d %d %d (%s)\n",
-		       cmn->defining_time.rip,
+		printf("%s: %d %d %d (%s)\n",
+		       when.name(),
 		       nr_good,
 		       nr_bad,
 		       nr_unknown,
 		       cmn->name());
-}
-
-/* Only be called from debugger */
-CrashMachineNode *
-_get_cmn(CrashMachine *cm, int tid, unsigned long rip)
-{
-	return cm->get(CrashTimestamp(ThreadId(tid), rip));
 }
 
 class RemoveProbablyConstantReferencesMapper : public CPMapper {
@@ -3595,7 +3596,7 @@ main(int argc, char *argv[])
 		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
 		ppIRSB(crashedThread->currentIRSB);
 		assert(crashedThread->currentIRSBOffset != 0);
-	} else if (0) {
+	} else if (1) {
 		printf("Crashed because we jumped at a bad RIP %lx\n",
 		       crashedThread->currentIRSBRip);
 
@@ -3609,6 +3610,10 @@ main(int argc, char *argv[])
 		       crashedThread->currentIRSB->stmts_used + 1);
 		/* Don't double-process the last thing in the ring. */
 		crashedThread->controlLog.pop_back();
+
+		/* If this was a call, it failed. */
+		if (crashedThread->currentIRSB->jumpkind == Ijk_Call)
+			crashedThread->currentCallStack.pop_back();
 	} else {
 		printf("Crashed by syscall\n");
 		crashedThread->currentIRSB =
@@ -3631,17 +3636,19 @@ main(int argc, char *argv[])
 	*/
 
 	/* Do the current IRSB first */
+	CrashTimestamp ts(crashedThread);
 	for (int idx = crashedThread->currentIRSBOffset;
 	     idx >= 0;
 	     idx--) {
 		if (idx < crashedThread->currentIRSB->stmts_used &&
-		    crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark)
-			oracle.addRipTrace(
-				crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr,
-				false);
+		    crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark) {
+			ts.rip = crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr;
+			oracle.addRipTrace(ts, false);
+		}
 	}
 
 	/* Now walk back over the earlier IRSBs */
+	unsigned long prev_rip = crashedThread->regs.rip();
 	for (ring_buffer<Thread<unsigned long>::control_log_entry, 100>::reverse_iterator it =
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
@@ -3652,6 +3659,10 @@ main(int argc, char *argv[])
 		if (it->exit_idx == irsb->stmts_used + 1) {
 			exited_by_branch = false;
 			exit_idx = it->exit_idx - 2;
+			if (irsb->jumpkind == Ijk_Ret)
+				ts.callStack.push_back(prev_rip);
+			else if (irsb->jumpkind == Ijk_Call)
+				ts.callStack.pop_back();
 		} else {
 			exited_by_branch = true;
 			exit_idx = it->exit_idx - 1;
@@ -3660,10 +3671,10 @@ main(int argc, char *argv[])
 		     idx >= 0;
 		     idx--) {
 			if (irsb->stmts[idx]->tag == Ist_IMark) {
-				oracle.addRipTrace(
-					irsb->stmts[idx]->Ist.IMark.addr,
-					exited_by_branch);
+				ts.rip = irsb->stmts[idx]->Ist.IMark.addr;
+				oracle.addRipTrace(ts, exited_by_branch);
 				exited_by_branch = false;
+				prev_rip = irsb->stmts[idx]->Ist.IMark.addr;
 			}
 		}
 	}
@@ -3671,8 +3682,7 @@ main(int argc, char *argv[])
 
 	/* Look at the crashing statement to derive a proximal cause
 	 * of the crash. */
-	CrashTimestamp when(crashedThread->tid,
-			    crashedThread->regs.rip());
+	CrashTimestamp when(crashedThread);
 
 	CrashMachineNode *cmn;
         int instr_start;
@@ -3686,17 +3696,16 @@ main(int argc, char *argv[])
 			;
 		abstractStoresT stores;
 		when.rip = crashedThread->currentIRSB->stmts[instr_start]->Ist.IMark.addr;
-		if (0) {
+		when.changed();
+		if (1) {
 			cmn = new CrashMachineNode(
 				when.rip,
-				when,
 				CrashExpressionBadAddr::get(
 					CrashExpression::get(crashedThread->currentIRSB->next)),
 				stores);
 		} else {
 			cmn = new CrashMachineNode(
 				when.rip,
-				when,
 				CrashExpressionConst::get(1),
 				stores);
 		}
@@ -3724,24 +3733,23 @@ main(int argc, char *argv[])
 
 	/* Go and build the crash machine */
 	VexPtr<CrashMachine> cm(new CrashMachine());
-        cm->set(cmn->defining_time, cmn);
+        cm->set(when, cmn);
 
 	/* Incorporate stuff from the dynamic trace in reverse
 	 * order. */
 	for (Oracle::RipTraceIterator it = oracle.begin_rip_trace();
 	     it != oracle.end_rip_trace();
 	     it++) {
-		CrashTimestamp when(crashedThread->tid, *it);
-		if (!cm->hasKey(when)) {
+		if (!cm->hasKey(*it)) {
 			CrashMachineNode *cmn;
 			cmn = buildCrashMachineNode(ms,
 						    *it,
 						    cm,
 						    oracle);
 			cmn = simplify_cmn(cmn);
-			cm->set(when, cmn);
+			cm->set(*it, cmn);
 			printf("CMN for %s is %s\n",
-			       when.name(), cmn->name());
+			       (*it).name(), cmn->name());
 		}
 	}
 
@@ -3796,7 +3804,7 @@ main(int argc, char *argv[])
 	     cmn_it++) {
 		cmn_it.value().first = removeProbablyConstantReferences(cmn_it.value().first, oracle, ms,
 									crashedThread);
-		findRemoteCriticalSections(cmn_it.value().first, oracle, ms);
+		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms);
 	}
 
 	dbg_break("finished");
