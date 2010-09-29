@@ -1,6 +1,7 @@
 #include <typeinfo>
 #include <deque>
 #include <set>
+#include <queue>
 
 #include "sli.h"
 
@@ -2809,7 +2810,7 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	nodeMapT *nodeMap;
 
 	/* Things which we need to visit, but haven't reached yet. */
-	std::vector<CrashTimestamp> grey;
+	std::queue<CrashTimestamp> grey;
 
 	std::vector<CrashTimestamp> roots;
 
@@ -2831,7 +2832,7 @@ public:
 	void add_root(const CrashTimestamp &x)
 	{
 		roots.push_back(x);
-		grey.push_back(x);
+		grey.push(x);
 	}
 	void build(MachineState<unsigned long> *ms,
 		   const Oracle &footstep_log,
@@ -2897,9 +2898,9 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 {
 	ThreadId tid = oracle.crashingTid;
 	while (!grey.empty()) {
-		CrashTimestamp &when = grey.back();
+		CrashTimestamp &when = grey.front();
 		if (nodeMap->hasKey(when)) {
-			grey.pop_back();
+			grey.pop();
 			continue;
 		}
 
@@ -2976,12 +2977,12 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		assert(newNode != NULL);
 		nodeMap->set(when, newNode);
 
-		grey.pop_back();
+		grey.pop();
 
 		if (haveFallThrough)
-			grey.push_back(fallThroughTarget);
+			grey.push(fallThroughTarget);
 		if (haveNonFallThrough)
-			grey.push_back(nonFallThroughTarget);
+			grey.push(nonFallThroughTarget);
 	}
 }
 
