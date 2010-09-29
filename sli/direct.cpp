@@ -3739,11 +3739,140 @@ memory_lookup(std::map<unsigned long, unsigned long> *memory, unsigned long addr
 	return (*memory)[addr];
 }
 
+template <typename t> static char *
+name_set(const std::set<t> &x)
+{
+	char *b = NULL;
+	for (typename std::set<t>::const_iterator it = x.begin();
+	     it != x.end();
+	     it++) {
+		if (b) {
+			char *b2 = my_asprintf("%s, %s", b, it->name());
+			free(b);
+			b = b2;
+		} else {
+			b = my_asprintf("{%s", it->name());
+		}
+	}
+	if (b) {
+		char *b2 = my_asprintf("%s}", b);
+		free(b);
+		return b2;
+	} else {
+		return strdup("{}");
+	}
+}
+
+class AtomicBlock : public Named {
+protected:
+	char *mkName() const
+	{
+		return name_set(events);
+	}
+public:
+	std::set<CrashTimestamp> events;
+
+	/* We assume that cost is proportional to the number of
+	   accesses which need to be protected, which is almost
+	   true. */
+	bool operator<(const AtomicBlock &c) const {
+		if (events.size() == c.events.size())
+			return events < c.events;
+		if (events.size() < c.events.size())
+			return true;
+		else
+			return false;
+	}
+	bool operator>(const AtomicBlock &c) const {
+		if (events.size() == c.events.size())
+			return events > c.events;
+		if (events.size() > c.events.size())
+			return true;
+		else
+			return false;
+	}
+};
+
+class SuggestedFix : public Named {
+protected:
+	char *mkName() const {
+		return my_asprintf("%d unknown, %d bad, %d good, local %s, remote %s",
+				   unknown,
+				   bad,
+				   good,
+				   local.name(),
+				   name_set(remote));
+	}
+public:
+	AtomicBlock local;
+	std::set<AtomicBlock> remote;
+	unsigned good;
+	unsigned bad;
+	unsigned unknown;
+	SuggestedFix()
+		: good(0), bad(0), unknown(0)
+	{
+	}
+
+	static unsigned cost(const std::set<AtomicBlock> &c)
+	{
+		unsigned acc = 0;
+		for (std::set<AtomicBlock>::const_iterator it = c.begin();
+		     it != c.end();
+		     it++)
+			acc += 10 + it->events.size();
+		return acc;
+	}
+
+	bool operator<(const SuggestedFix &c) const {
+		if (unknown < c.unknown)
+			return true;
+		if (unknown > c.unknown)
+			return false;
+		unsigned remote_cost = cost(remote);
+		unsigned c_remote_cost = cost(c.remote);
+		if (remote_cost < c_remote_cost)
+			return true;
+		if (remote_cost > c_remote_cost)
+			return false;
+		if (local < c.local)
+			return true;
+		if (local > c.local)
+			return false;
+		if (bad > c.bad)
+			return true;
+		if (bad < c.bad)
+			return false;
+		if (good < c.good)
+			return true;
+		if (good > c.good)
+			return false;
+		return false;
+	}
+};
+
+class CollectLoadsMapper : public CPMapper {
+public:
+	std::set<CrashTimestamp> &out;
+	CollectLoadsMapper(std::set<CrashTimestamp> &_out)
+		: out(_out)
+	{
+	}
+	CrashExpression *operator()(CrashExpression *e) {
+		CrashExpressionLoad *cel =
+			dynamic_cast<CrashExpressionLoad *>(e);
+		if (cel)
+			out.insert(cel->when);
+		return e;
+	}
+};
+
 static void
 findRemoteCriticalSections(CrashMachineNode *cmn,
 			   const CrashTimestamp &when,
 			   const Oracle &oracle,
-			   MachineState<unsigned long> *ms)
+			   MachineState<unsigned long> *ms,
+			   std::set<SuggestedFix> &out)
 {
 	std::map<unsigned long, unsigned long> memory;
 	unsigned nr_good, nr_bad, nr_unknown;
@@ -3752,6 +3881,8 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 	cmn = simplify_cmn(cmn);
 	if (cmn->willDefinitelyCrash() || cmn->willDefinitelyNotCrash())
 		return;
+
+	SuggestedFix sab;
 
 	nr_good = 0;
 	nr_bad = 0;
@@ -3763,20 +3894,23 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 		memory[m_it->addr] = m_it->val;
 		CrashMachineNode *new_cmn = cmn->resolveLoads(memory, ms);
 		new_cmn = simplify_cmn(new_cmn);
-		if (new_cmn->willDefinitelyCrash())
+		if (new_cmn->willDefinitelyCrash()) {
+			/* XXX Need to record that there's a potentially-bad remote event here */
 			nr_bad++;
-		else if (new_cmn->willDefinitelyNotCrash())
+		} else if (new_cmn->willDefinitelyNotCrash()) {
 			nr_good++;
-		else
+		} else {
 			nr_unknown++;
+		}
 	}
-	if (nr_good != 0)
-		printf("%s: %d %d %d (%s)\n",
-		       when.name(),
-		       nr_good,
-		       nr_bad,
-		       nr_unknown,
-		       cmn->name());
+	if (nr_good != 0) {
+		sab.bad = nr_bad;
+		sab.unknown = nr_unknown;
+		sab.good = nr_good;
+		CollectLoadsMapper clm(sab.local.events);
+		cmn->map(clm);
+		out.insert(sab);
+	}
 }
 
 class RemoveProbablyConstantReferencesMapper : public CPMapper {
@@ -4238,19 +4372,26 @@ main(int argc, char *argv[])
 	cm->deduplicate();
 	timing("Done CMN de-duplicate 2\n");
 
-	printf("Critical sections:\n");
+
 	/* Now, for each machine, walk over the relevant address logs
 	 * and figure out when the CMN goes green and red. */
+	std::set<SuggestedFix> csectPool;
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
 		timing("calculating critical sections for %s",
 		       cmn_it.key().name());
-		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms);
+		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms,
+					   csectPool);
 		timing("calculated critical sections for %s",
 		       cmn_it.key().name());
 		LibVEX_maybe_gc(ALLOW_GC);
 	}
+
+	for (std::set<SuggestedFix>::iterator it = csectPool.begin();
+	     it != csectPool.end();
+	     it++)
+		printf("Suggested atomic block: %s\n", it->name());
 
 	timing("all done");
 
