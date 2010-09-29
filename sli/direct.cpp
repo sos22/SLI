@@ -9,7 +9,11 @@
 #include "guest_generic_bb_to_IR.h"
 #include "guest_amd64_defs.h"
 
+/* Do it this way so that we still get format argument checking even
+   when a particular type of debug is disabled. */
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
+#define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
+
 #define DBG_CYCLE_BREAKER(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 #define DBG_CALC_CMNS(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 
@@ -3025,7 +3029,7 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 
 		assert(s.n);
 
-		DBG_CYCLE_BREAKER("Cycle breaker %s: ", s.n->when.name());
+		DBG_CYCLE_BREAKER("Cycle breaker %p %p %s: ", &s, s.n, s.n->when.name());
 		if (s.n->visitedByCycleBreaker) {
 			/* Nothing to do here: we've already visited
 			   this node, and know that it doesn't
@@ -3094,13 +3098,19 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 							    target))
 							continue;
 
-						DBG_CYCLE_BREAKER("Cycle breaker removes edge %s -> %s\n",
+						DBG_CYCLE_BREAKER("Cycle breaker removes edge %s -> %s ",
 								  it->n->when.name(),
 								  target.name());
-						if (it->n->trueTarget == (it + 1)->n) {
+						if (it->n->trueTarget == (it - 1)->n) {
+							DBG_CYCLE_BREAKER("(true %s, false was %s)\n",
+									  it->n->trueTarget->when.name(),
+									  it->n->falseTarget->when.name());
 							it->n->trueTarget = NULL;
 							it->n->brokeCycleTrueTarget = true;
 						} else {
+							DBG_CYCLE_BREAKER("(false %s, true was %s)\n",
+									  it->n->falseTarget->when.name(),
+									  it->n->trueTarget->when.name());
 							it->n->falseTarget = NULL;
 							it->n->brokeCycleFalseTarget = true;
 						}
@@ -3128,19 +3138,23 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 			/* Really failed.  Just break on the last
 			 * possible edge. */
 			CycleBreakerState &parent(stack[stack.size()-2]);
-			DBG_CYCLE_BREAKER("Forced cycle breaking at %s -> %s\n",
+			DBG_CYCLE_BREAKER("Forced cycle breaking at %s -> %s ",
 					  parent.n->when.name(),
 					  s.n->when.name());
 			if (parent.n->trueTarget == s.n) {
+				DBG_CYCLE_BREAKER("(true)\n");
 				parent.n->trueTarget = NULL;
 				parent.n->brokeCycleTrueTarget = true;
 			} else {
+				DBG_CYCLE_BREAKER("(false %s)\n",
+						  parent.n->falseTarget->when.name());
 				parent.n->falseTarget = NULL;
 				parent.n->brokeCycleFalseTarget = true;
 			}
 			goto out;
 		} else {
 			DBG_CYCLE_BREAKER("First visit, no cycle discovered yet: ");
+			assert(!s.n->onCycleBreakerPath);
 			s.n->onCycleBreakerPath = true;
 
 			bool visitTrueTargetFirst = false;
