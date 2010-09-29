@@ -1562,6 +1562,38 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 		}
 	};
 
+	CrashMachineNode(unsigned long _origin_rip,
+			 CrashExpression *e,
+			 const abstractStoresT &_stores)
+		: stores(_stores),
+		  origin_rip(_origin_rip),
+		  type(CM_NODE_LEAF),
+		  leafCond(e)
+	{
+	}
+	CrashMachineNode(unsigned long _origin_rip,
+			 const abstractStoresT &_stores)
+		: stores(_stores),
+		  origin_rip(_origin_rip),
+		  type(CM_NODE_STUB)
+	{
+	}
+	CrashMachineNode(unsigned long _origin_rip,
+			 CrashExpression *_branchCond,
+			 CrashMachineNode *_trueTarget,
+			 CrashMachineNode *_falseTarget,
+			 const abstractStoresT &_stores)
+		: stores(_stores),
+		  origin_rip(_origin_rip),
+		  type(CM_NODE_BRANCH),
+		  branchCond(_branchCond),
+		  trueTarget(_trueTarget),
+		  falseTarget(_falseTarget)
+	{
+		sanity_check();
+	}
+
+
 protected:
 	char *mkName() const {
 		char *buf = my_asprintf("<%lx> ", origin_rip);
@@ -1600,38 +1632,30 @@ protected:
 	}
 
 public:
-	abstractStoresT stores;
 
-	CrashMachineNode(unsigned long _origin_rip,
-			 CrashExpression *e,
-			 const abstractStoresT &_stores)
-		: stores(_stores),
-		  origin_rip(_origin_rip),
-		  type(CM_NODE_LEAF),
-		  leafCond(e)
+	static CrashMachineNode *leaf(unsigned long _origin_rip,
+				      CrashExpression *e,
+				      const abstractStoresT &_stores)
 	{
+		return new CrashMachineNode(_origin_rip, e, _stores);
 	}
-	CrashMachineNode(unsigned long _origin_rip,
-			 const abstractStoresT &_stores)
-		: stores(_stores),
-		  origin_rip(_origin_rip),
-		  type(CM_NODE_STUB)
+	static CrashMachineNode *stub(unsigned long _origin_rip,
+				      const abstractStoresT &_stores)
 	{
+		return new CrashMachineNode(_origin_rip, _stores);
 	}
-	CrashMachineNode(unsigned long _origin_rip,
-			 CrashExpression *_branchCond,
-			 CrashMachineNode *_trueTarget,
-			 CrashMachineNode *_falseTarget,
-			 const abstractStoresT &_stores)
-		: stores(_stores),
-		  origin_rip(_origin_rip),
-		  type(CM_NODE_BRANCH),
-		  branchCond(_branchCond),
-		  trueTarget(_trueTarget),
-		  falseTarget(_falseTarget)
+	static CrashMachineNode *branch(unsigned long _origin_rip,
+					CrashExpression *_branchCond,
+					CrashMachineNode *_trueTarget,
+					CrashMachineNode *_falseTarget,
+					const abstractStoresT &_stores)
 	{
-		sanity_check();
+		return new CrashMachineNode(_origin_rip, _branchCond,
+					    _trueTarget, _falseTarget,
+					    _stores);
 	}
+
+	abstractStoresT stores;
 
 	bool isStubFree() const {
 		switch (type) {
@@ -1705,7 +1729,7 @@ public:
 			CrashExpression *l = leafCond->map(m);
 			if (l == leafCond && !forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, l, newStores);
+			res = leaf(origin_rip, l, newStores);
 			break;
 		}
 		case CM_NODE_BRANCH: {
@@ -1715,13 +1739,13 @@ public:
 			if (c == branchCond && t == trueTarget &&
 			    f == falseTarget && !forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, c, t, f, newStores);
+			res = branch(origin_rip, c, t, f, newStores);
 			break;
 		}
 		case CM_NODE_STUB: {
 			if (!forceNew)
 				return this;
-			res = new CrashMachineNode(origin_rip, newStores);
+			res = stub(origin_rip, newStores);
 			break;
 		}
 		default:
@@ -1838,7 +1862,7 @@ public:
 		/* We know where abort() and raise() live */
 		if ((ts.rip >= 0x50a6a40 && ts.rip <= 0x50a6c7a) ||
 		    (ts.rip >= 0x50a4f80 && ts.rip <= 0x50a4ff7)) {
-			return new CrashMachineNode(
+			return CrashMachineNode::leaf(
 				ts.rip,
 				CrashExpressionConst::get(1),
 				abstractStoresT());
@@ -1890,8 +1914,8 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 
 	switch (type) {
 	case CM_NODE_LEAF:
-		res = new CrashMachineNode(origin_rip,
-					   leafCond->map(rlm), newAbsStores);
+		res = CrashMachineNode::leaf(origin_rip,
+					     leafCond->map(rlm), newAbsStores);
 		break;
 	case CM_NODE_BRANCH: {
 		CrashExpression *b = branchCond->map(rlm);
@@ -1905,12 +1929,12 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 			f = falseTarget->resolveLoads(memory, ms, concrete_stores);
 			assert(concrete_stores.size() == sz2);
 		}
-		res = new CrashMachineNode(origin_rip,
-					   b, t, f, newAbsStores);
+		res = CrashMachineNode::branch(origin_rip,
+					       b, t, f, newAbsStores);
 		break;
 	}
 	case CM_NODE_STUB:
-		res = new CrashMachineNode(origin_rip, newAbsStores);
+		res = CrashMachineNode::stub(origin_rip, newAbsStores);
 		break;
 	default:
 		abort();
@@ -2311,7 +2335,7 @@ statementToCrashReason(const CrashTimestamp &when, IRStmt *irs)
 			r = exprToCrashReason(when, irs->Ist.Store.data);
 		if (!r) {
 			abstractStoresT stores;
-			r = new CrashMachineNode(
+			r = CrashMachineNode::leaf(
 				when.rip,
 				CrashExpressionBadAddr::get(
 					CrashExpression::get(irs->Ist.Store.addr)),
@@ -2335,7 +2359,7 @@ statementToCrashReason(const CrashTimestamp &when, IRStmt *irs)
 			     "helper_load_",
 			     12)) {
 			abstractStoresT stores;
-			return new CrashMachineNode(
+			return CrashMachineNode::leaf(
 				when.rip,
 				CrashExpressionBadAddr::get(
 					CrashExpression::get(irs->Ist.Dirty.details->args[0])),
@@ -2664,7 +2688,7 @@ backtrack_crash_machine_node_for_statements(
 				/* Only handle two-way branches */
 				assert(!node->trueTarget);
 				abstractStoresT stores;
-				node->trueTarget = new CrashMachineNode(stmt->Ist.Exit.dst->Ico.U64, stores);
+				node->trueTarget = CrashMachineNode::stub(stmt->Ist.Exit.dst->Ico.U64, stores);
 				node->branchCond = CrashExpression::get(stmt->Ist.Exit.guard);
 			}
 			break;
@@ -3275,7 +3299,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			DBG_CALC_CMNS("Calculate CMN for %s\n", node->when.name());
 			progress = true;
 			if (node->dead) {
-				node->cmn = new CrashMachineNode(
+				node->cmn = CrashMachineNode::leaf(
 					node->when.rip,
 					CrashExpressionConst::get(1),
 					abstractStoresT());
@@ -3288,7 +3312,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 				   dynamic execution. */
 				DBG_CALC_CMNS("%s: no known successors\n", node->when.name());
 				abstractStoresT stores;
-				node->cmn = new CrashMachineNode(
+				node->cmn = CrashMachineNode::leaf(
 					node->when.rip,
 					CrashExpressionFailed::get("can't find successor for %s",
 								   node->when.name()),
@@ -3365,11 +3389,11 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			   instruction.  Backtrack it to get the CMN
 			   for the start of the instruction. */
 			abstractStoresT stores;
-			cmn = new CrashMachineNode(node->when.rip,
-						   branchCond,
-						   trueTarget,
-						   falseTarget,
-						   stores);
+			cmn = CrashMachineNode::branch(node->when.rip,
+						       branchCond,
+						       trueTarget,
+						       falseTarget,
+						       stores);
 			if (doCallFixup)
 				cmn = cmn->rewriteRegister(
 					OFFSET_amd64_RSP,
@@ -3418,18 +3442,18 @@ mergeCmns(CrashMachineNode *base, CrashMachineNode *sub)
 		      sub->stores.end());
 	switch (sub->type) {
 	case CrashMachineNode::CM_NODE_LEAF:
-		return new CrashMachineNode(sub->origin_rip,
-					    sub->leafCond,
-					    stores);
+		return CrashMachineNode::leaf(sub->origin_rip,
+					      sub->leafCond,
+					      stores);
 	case CrashMachineNode::CM_NODE_STUB:
-		return new CrashMachineNode(sub->origin_rip,
-					    stores);
+		return CrashMachineNode::stub(sub->origin_rip,
+					      stores);
 	case CrashMachineNode::CM_NODE_BRANCH:
-		return new CrashMachineNode(sub->origin_rip,
-					    sub->branchCond,
-					    sub->trueTarget,
-					    sub->falseTarget,
-					    stores);
+		return CrashMachineNode::branch(sub->origin_rip,
+						sub->branchCond,
+						sub->trueTarget,
+						sub->falseTarget,
+						stores);
 	}
 	abort();
 }
@@ -3882,13 +3906,13 @@ main(int argc, char *argv[])
 		when.rip = crashedThread->currentIRSB->stmts[instr_start]->Ist.IMark.addr;
 		when.changed();
 		if (1) {
-			cmn = new CrashMachineNode(
+			cmn = CrashMachineNode::leaf(
 				when.rip,
 				CrashExpressionBadAddr::get(
 					CrashExpression::get(crashedThread->currentIRSB->next)),
 				stores);
 		} else {
-			cmn = new CrashMachineNode(
+			cmn = CrashMachineNode::leaf(
 				when.rip,
 				CrashExpressionConst::get(1),
 				stores);
@@ -3933,7 +3957,7 @@ main(int argc, char *argv[])
 			tmpTs.rip = tmpTs.callStack.back();
 			tmpTs.callStack.pop_back();
 			cm->set(tmpTs,
-				new CrashMachineNode(
+				CrashMachineNode::leaf(
 					tmpTs.rip,
 					CrashExpressionConst::get(0),
 					abstractStoresT()));
