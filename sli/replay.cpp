@@ -77,13 +77,13 @@ ThreadEvent<ait> *StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> 
 		throw ReplayFailedException("wanted a store, got %s",
 					    lr->name());
 	if (size != lrs->size || force(addr != lrs->ptr))
-		throw ReplayFailedException("wanted %d byte store to %lx, got %d to %lx",
-					    lrs->size, force(lrs->ptr),
-					    size, force(addr));
+		printf("WARNING: wanted %d byte store to %lx, got %d to %lx",
+		       lrs->size, force(lrs->ptr),
+		       size, force(addr));
 	if (force(data != lrs->value))
-		throw ReplayFailedException("memory mismatch on store to %lx",
-					    force(addr));
-	(*ms)->addressSpace->store(this->when, addr, size, data, false, thr);
+		printf("WARNING: memory mismatch on store to %lx: %s != %s",
+		       force(addr), data.name(), lrs->value.name());
+	(*ms)->addressSpace->store(this->when, lrs->ptr, lrs->size, lrs->value, false, thr);
 	thr->nrAccesses++;
 
 	return NULL;
