@@ -33,6 +33,7 @@ main(int argc, char *argv[])
 
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(reduced_lf, ptr, ALLOW_GC, &ptr);
+	ms = i.currentState;
 
 	VexPtr<LogWriter<unsigned long> > lw(LogFileWriter::open(outp));
 	if (!lw)

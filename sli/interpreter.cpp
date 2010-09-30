@@ -1948,7 +1948,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		event_counter++;
 		if (event_counter % 100000 == 0)
 			printf("event %ld\n", event_counter);
-		if (event_counter > 600000 && 0)
+		if (event_counter > 677000 && 0)
 			loud_mode = true;
 
 		if (!lr) {
@@ -1957,6 +1957,9 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		}
 		if (!lr)
 			break;
+
+		if (loud_mode)
+			printf("lr %s\n", lr->name());
 
 		VexPtr<Thread<ait> > thr(currentState->findThread(lr->thread()));
 		assert(thr);
@@ -2012,6 +2015,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 			ptr2 = ptr;
 	        }
 	}
+	printf("Done replay, counter %ld\n", event_counter);
 }
 
 template<typename ait>
