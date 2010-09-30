@@ -1514,11 +1514,14 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 		std::map<unsigned long, unsigned long> &memory;
 		MachineState<unsigned long> *ms;
 		concreteStoresT &stores;
+		std::set<unsigned long> &readAddrs;
 	public:
 		ResolveLoadsMapper(std::map<unsigned long, unsigned long> &_memory,
 				   MachineState<unsigned long> *_ms,
-				   concreteStoresT &_stores)
-			: memory(_memory), ms(_ms), stores(_stores)
+				   concreteStoresT &_stores,
+				   std::set<unsigned long> &_readAddrs)
+			: memory(_memory), ms(_ms), stores(_stores),
+			  readAddrs(_readAddrs)
 		{
 		}
 		CrashExpression *operator()(CrashExpression *ce) {
@@ -1550,6 +1553,7 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 				else
 					return ce;
 			}
+			readAddrs.insert(addr);
 			for (concreteStoresT::reverse_iterator it = stores.rbegin();
 			     it != stores.rend();
 			     it++) {
@@ -1768,7 +1772,15 @@ public:
 	/* ms is used to resolve badAddr expressions */
 	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
 				       MachineState<unsigned long> *ms,
-				       concreteStoresT &stores);
+				       concreteStoresT &stores,
+				       std::set<unsigned long> &readAddrs);
+	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
+				       MachineState<unsigned long> *ms,
+				       concreteStoresT &stores)
+	{
+		std::set<unsigned long> a;
+		return resolveLoads(memory, ms, stores, a);
+	}
 	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
 				       MachineState<unsigned long> *ms)
 	{
@@ -2011,9 +2023,10 @@ CrashMachine::deduplicate()
 CrashMachineNode *
 CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 			       MachineState<unsigned long> *ms,
-			       concreteStoresT &concrete_stores)
+			       concreteStoresT &concrete_stores,
+			       std::set<unsigned long> &readAddrs)
 {
-	ResolveLoadsMapper rlm(memory, ms, concrete_stores);
+	ResolveLoadsMapper rlm(memory, ms, concrete_stores, readAddrs);
 	abstractStoresT newAbsStores;
 	CrashMachineNode *res;
 
@@ -2043,11 +2056,11 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 		CrashMachineNode *t = NULL;
 		CrashMachineNode *f = NULL;
 		if (trueTarget) {
-			t = trueTarget->resolveLoads(memory, ms, concrete_stores);
+			t = trueTarget->resolveLoads(memory, ms, concrete_stores, readAddrs);
 			assert(concrete_stores.size() == sz2);
 		}
 		if (falseTarget) {
-			f = falseTarget->resolveLoads(memory, ms, concrete_stores);
+			f = falseTarget->resolveLoads(memory, ms, concrete_stores, readAddrs);
 			assert(concrete_stores.size() == sz2);
 		}
 		res = CrashMachineNode::branch(origin_rip,
@@ -3890,12 +3903,14 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 	bool in_remote_csect = false;
 	bool have_first_remote_good = false;
 	AtomicBlock currentRemoteBlock;
+	std::set<unsigned long> addrsRead;
 	for (std::vector<Oracle::address_log_entry>::const_iterator m_it =
 		     oracle.address_log.begin();
 	     m_it != oracle.address_log.end();
 	     m_it++) {
 		memory[m_it->addr] = m_it->val;
-		CrashMachineNode *new_cmn = cmn->resolveLoads(memory, ms);
+		concreteStoresT cs;
+		CrashMachineNode *new_cmn = cmn->resolveLoads(memory, ms, cs, addrsRead);
 		new_cmn = simplify_cmn(new_cmn);
 		if (new_cmn->willDefinitelyCrash()) {
 			if (have_first_remote_good) {
@@ -3925,6 +3940,20 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 		sab.good = nr_good;
 		CollectLoadsMapper clm(sab.local.events);
 		cmn->map(clm);
+		for (std::set<unsigned long>::iterator it = addrsRead.begin();
+		     it != addrsRead.end();
+		     it++) {
+			for (std::vector<Oracle::address_log_entry>::const_iterator it2 =
+				     oracle.address_log.begin();
+			     it2 != oracle.address_log.end();
+			     it2++) {
+				if (it2->addr != *it)
+					continue;
+				AtomicBlock singleton;
+				singleton.events.insert(it2->rip);
+				sab.remote.insert(singleton);
+			}
+		}
 		out.insert(sab);
 	}
 }
@@ -4098,7 +4127,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(1);
+	oracle.crashingTid = ThreadId(2);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;
