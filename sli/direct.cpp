@@ -2974,7 +2974,7 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 		       __default_hash_function<CrashTimestamp>,
 		       __default_eq_function<CrashTimestamp>,
 		       __visit_function_heap<CrashCFGNode *> > nodeMapT;
-	nodeMapT *nodeMap;
+	nodeMapT *_nodeMap;
 
 	/* Things which we need to visit, but haven't reached yet. */
 	struct build_cfg_work {
@@ -2999,9 +2999,25 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	void calculate_cmns(MachineState<unsigned long> *ms,
 			    CrashMachine *cm,
 			    const Oracle &oracle);
+	void set_node(const CrashTimestamp &when, CrashCFGNode *cmn)
+	{
+		assert(cmn != NULL);
+		_nodeMap->set(when, cmn);
+	}
+	CrashCFGNode *get_node(const CrashTimestamp &when)
+	{
+		CrashCFGNode *r = _nodeMap->get(when);
+		assert(r);
+		return r;
+	}
+	bool have_node(const CrashTimestamp &when)
+	{
+		return _nodeMap->hasKey(when);
+	}
+
 public:
 	CrashCFG()
-		: nodeMap(new nodeMapT())
+		: _nodeMap(new nodeMapT())
 	{
 	}
 
@@ -3015,10 +3031,10 @@ public:
 		   CrashMachine *partial_cm);
 	CrashMachineNode *get_cmn(const CrashTimestamp &when)
 	{
-		return nodeMap->get(when)->cmn;
+		return get_node(when)->cmn;
 	}
 
-	void visit(HeapVisitor &hv) { hv(nodeMap); }
+	void visit(HeapVisitor &hv) { hv(_nodeMap); }
 	NAMED_CLASS
 };
 
@@ -3075,7 +3091,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 	ThreadId tid = oracle.crashingTid;
 	while (!grey.empty()) {
 		build_cfg_work &work = grey.front();
-		if (nodeMap->hasKey(work.time)) {
+		if (have_node(work.time)) {
 			grey.pop();
 			continue;
 		}
@@ -3155,7 +3171,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			new CrashCFGNode(work.time, nonFallThroughTarget, fallThroughTarget);
 		newNode->dead = dead;
 		assert(newNode != NULL);
-		nodeMap->set(work.time, newNode);
+		set_node(work.time, newNode);
 
 		unsigned new_max_depth = work.max_depth - 1;
 		grey.pop();
@@ -3170,15 +3186,17 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 void
 CrashCFG::resolve_stubs()
 {
-	for (nodeMapT::iterator it = nodeMap->begin();
-	     it != nodeMap->end();
+	for (nodeMapT::iterator it = _nodeMap->begin();
+	     it != _nodeMap->end();
 	     it++) {
 		CrashCFGNode *n = it.value();
 		assert(n);
-		if (n->trueTargetRip.valid())
-			n->trueTarget = nodeMap->get(n->trueTargetRip);
-		if (n->falseTargetRip.valid())
-			n->falseTarget = nodeMap->get(n->falseTargetRip);
+		if (n->trueTargetRip.valid() &&
+		    have_node(n->trueTargetRip))
+			n->trueTarget = get_node(n->trueTargetRip);
+		if (n->falseTargetRip.valid() &&
+		    have_node(n->falseTargetRip))
+			n->falseTarget = get_node(n->falseTargetRip);
 	}
 }
 
@@ -3405,7 +3423,7 @@ CrashCFG::break_cycles(const Oracle &oracle)
 	for (std::vector<CrashTimestamp>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++) {
-		while (!break_cycles_from(nodeMap->get(*it), oracle))
+		while (!break_cycles_from(get_node(*it), oracle))
 			;
 	}
 }
@@ -3419,8 +3437,8 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 	progress = true;
 	while (progress) {
 		progress = false;
-		for (nodeMapT::iterator it = nodeMap->begin();
-		     it != nodeMap->end();
+		for (nodeMapT::iterator it = _nodeMap->begin();
+		     it != _nodeMap->end();
 		     it++) {
 			CrashCFGNode *node = it.value();
 			if (node->cmn)
@@ -4179,7 +4197,7 @@ main(int argc, char *argv[])
 		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
 		ppIRSB(crashedThread->currentIRSB);
 		assert(crashedThread->currentIRSBOffset != 0);
-	} else if (1) {
+	} else if (0) {
 		printf("Crashed because we jumped at a bad RIP %lx\n",
 		       crashedThread->currentIRSBRip);
 
