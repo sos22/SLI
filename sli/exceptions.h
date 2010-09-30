@@ -143,6 +143,17 @@ public:
 	}
 };
 
+class ForceFailureException : public SliException {
+public:
+	unsigned long rip;
+	ForceFailureException(unsigned long _rip)
+		: SliException(
+			"forced failure at %lx\n", _rip),
+		  rip(_rip)
+	{
+	}
+};
+
 class UnknownSyscallException : public SliException {
 public:
 	unsigned nr;

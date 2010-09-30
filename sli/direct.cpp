@@ -1541,7 +1541,8 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 					else
 						return ce;
 				}
-				if (ms->addressSpace->isReadable(addr, 8))
+				if (addr != ASSERT_FAILED_ADDRESS &&
+				    ms->addressSpace->isReadable(addr, 8))
 					return CrashExpressionConst::get(0);
 				else
 					return CrashExpressionConst::get(1);
@@ -4197,7 +4198,7 @@ main(int argc, char *argv[])
 		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
 		ppIRSB(crashedThread->currentIRSB);
 		assert(crashedThread->currentIRSBOffset != 0);
-	} else if (0) {
+	} else if (1) {
 		printf("Crashed because we jumped at a bad RIP %lx\n",
 		       crashedThread->currentIRSBRip);
 

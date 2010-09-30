@@ -1396,6 +1396,9 @@ public:
 template<typename ait> IRSB *
 AddressSpace<ait>::getIRSBForAddress(unsigned long rip)
 {
+	if (rip == ASSERT_FAILED_ADDRESS)
+		throw ForceFailureException(rip);
+
 	WeakRef<IRSB> *cacheSlot = searchDecodeCache(rip);
 	assert(cacheSlot != NULL);
 	IRSB *irsb = cacheSlot->get();
@@ -1534,6 +1537,8 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			        ths->translateNextBlock(ths, as, ms, ptr, ths->regs.rip(), t);
 			} catch (BadMemoryException<ait> excn) {
 				return SignalEvent<ait>::get(ths->bumpEvent(ms), 11, excn.ptr);
+			} catch (ForceFailureException ffe) {
+				return new DetectedErrorEvent<ait>(ths->bumpEvent(ms), ffe.rip);
 			}
 			assert(ths->currentIRSB);
 		}
@@ -1943,7 +1948,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		assert(!thr->exitted);
 		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, ptr2, t);
 
-		while (evt) {
+		while (evt && lr) {
 			if (lastEvent && evt->when == *lastEvent)
 				finished = true;
 			if (er)

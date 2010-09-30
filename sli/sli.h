@@ -1327,6 +1327,36 @@ public:
 };
 
 template <typename ait>
+class DetectedErrorEvent : public ThreadEvent<ait> {
+protected:
+	char *mkName() const { return my_asprintf("Detected error at %lx\n", rip); }
+public:
+	unsigned long rip;
+	DetectedErrorEvent(EventTimestamp when, unsigned long _rip)
+		: ThreadEvent<ait>(when), rip(_rip)
+	{
+	}
+	/* Okay, we've crashed.  Consume to the end of the log and
+	 * then stop. */
+	ThreadEvent<ait> *replay(LogRecord<ait> *,
+				 MachineState<ait> **ms,
+				 bool &consumed,
+				 LogReaderPtr)
+	{
+		Thread<ait> *thr = (*ms)->findThread(this->when.tid);
+		thr->crashed = true;
+		consumed = true;
+		return this;
+	}
+	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL)
+	{
+		Thread<ait> *thr = ms->findThread(this->when.tid);
+		thr->crashed = true;
+		return InterpretResultCrash;
+	}
+};
+
+template <typename ait>
 class SignalEvent : public ThreadEvent<ait> {
 public:
 	unsigned signr;
@@ -3468,5 +3498,8 @@ public:
 
 bool address_is_interesting(ThreadId tid, unsigned long addr);
 unsigned long extract_call_follower(IRSB *irsb);
+
+
+#define ASSERT_FAILED_ADDRESS 0x40a760
 
 #endif /* !SLI_H__ */
