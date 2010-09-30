@@ -1754,9 +1754,14 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 		       ths->currentIRSB->jumpkind == Ijk_Call ||
 		       ths->currentIRSB->jumpkind == Ijk_Ret ||
 		       ths->currentIRSB->jumpkind == Ijk_Sys_syscall ||
-		       ths->currentIRSB->jumpkind == Ijk_Yield);
+		       ths->currentIRSB->jumpkind == Ijk_Yield ||
+		       ths->currentIRSB->jumpkind == Ijk_ClientReq);
 
-		if (ths->currentIRSB->jumpkind == Ijk_Yield)
+		/* Yields are boring, and the only kind of clientreq
+		   which we support is changing thread priority, which
+		   is equally boring. */
+		if (ths->currentIRSB->jumpkind == Ijk_Yield ||
+		    ths->currentIRSB->jumpkind == Ijk_ClientReq)
 			ths->currentIRSB->jumpkind = Ijk_Boring;
 
 		if (ths->currentIRSB->jumpkind == Ijk_Ret)
