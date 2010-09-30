@@ -46,17 +46,17 @@ process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
 	*endOffset = startOffset;
 }
 
-template<typename ait>
-static void
+template<typename ait> static void
 handle_clone(AddressSpace<ait> *addrSpace,
 	     Thread<ait> *thr,
-	     MachineState<ait> *mach,
+	     MachineState<ait> *&mach,
 	     ait flags,
 	     ait childRsp,
 	     ait parent_tidptr,
 	     ait child_tidptr,
 	     ait set_tls,
-	     unsigned pid)
+	     unsigned pid,
+	     LogReaderPtr ptr)
 {
 	if (force(flags == mkConst<ait>(CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD))) {
 		/* Simple fork() -> don't need to do anything */
@@ -90,6 +90,9 @@ handle_clone(AddressSpace<ait> *addrSpace,
 
 	mach->registerThread(newThread);
 
+	newThread->snapshotLog.push(typename Thread<ait>::snapshot_log_entry(mach, ptr));
+	mach = mach->dupeSelf();
+
 	printf("Clone created thread %d from %d\n", newThread->tid._tid(),
 	       thr->tid._tid());
 }
@@ -97,7 +100,8 @@ handle_clone(AddressSpace<ait> *addrSpace,
 template<typename ait> ThreadEvent<ait> *
 replay_syscall(const LogRecordSyscall<ait> *lrs,
 	       Thread<ait> *thr,
-	       MachineState<ait> *mach)
+	       MachineState<ait> *&mach,
+	       LogReaderPtr ptr)
 {
 	AddressSpace<ait> *addrSpace = mach->addressSpace;
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
@@ -250,7 +254,8 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 				     args[2],
 				     args[3],
 				     args[4],
-				     force(lrs->res));
+				     force(lrs->res),
+				     ptr);
 		break;
 	case __NR_exit: /* 60 */
 		printf("Thread %d exits\n", thr->tid._tid());
@@ -582,7 +587,7 @@ InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **
 
 	if (lr)
 		*lr = llr;
-	ThreadEvent<ait> *evt = replay_syscall<ait>(llr, thr, ms);
+	ThreadEvent<ait> *evt = replay_syscall<ait>(llr, thr, ms, LogReaderPtr());
 	if (evt)
 		return evt->fake(ms);
 	else

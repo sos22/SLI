@@ -1914,6 +1914,16 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 	bool finished = false;
 	LogReaderPtr ptr2 = ptr;
 
+	/* Memory records are special and should always be
+	   processed eagerly. */
+	{
+		VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
+		process_memory_records(as, lf, ptr, &ptr, lw, t);
+		if (eof)
+			*eof = ptr;
+		ptr2 = ptr;
+	}
+
 	while (!finished) {
 		event_counter++;
 		if (event_counter % 100000 == 0)
@@ -1945,7 +1955,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 
 			ThreadEvent<ait> *oldEvent = evt;
 			bool consumed = true;
-			evt = oldEvent->replay(lr, currentState, consumed);
+			evt = oldEvent->replay(lr, &currentState.get(), consumed, ptr);
 			if (consumed) {
 				if (lw && !appendedRecord) {
 					lw->append(lr, oldEvent->when.idx);
@@ -2013,7 +2023,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 			if (evt->when == end)
 				finished = true;
 			bool consumed = true;
-			evt = evt->replay(lr, currentState, consumed);
+			evt = evt->replay(lr, &currentState.get(), consumed, ptr);
 			if (consumed) {
 				lr = NULL;
 				if (eof)

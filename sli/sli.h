@@ -1046,8 +1046,8 @@ protected:
 public:
 	EventTimestamp when;
 	/* Replay the event using information in the log record */
-	virtual ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-					 bool &consumedRecord) = 0;
+	virtual ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+					 bool &consumedRecord, LogReaderPtr ptr) = 0;
 	/* Try to ``replay'' the event without reference to a pre-existing logfile */
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL) = 0;
 	/* Use the logfile if it matches, and otherwise fake it.  This
@@ -1099,8 +1099,8 @@ protected:
 						  whenFreed.tid._tid(),
 						  whenFreed.idx); }
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when,
 				     ait use_addr,
@@ -1116,8 +1116,8 @@ class RdtscEvent : public ThreadEvent<ait> {
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState<ait> > &ms,
 				      VexPtr<LogReader<ait> > &lf,
@@ -1150,8 +1150,8 @@ private:
 protected:
 	virtual char *mkName() const { return my_asprintf("load(%s, %d, %d)", name_aiv(addr), tmp, size); }
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
 	{
@@ -1173,8 +1173,8 @@ private:
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
 	{
@@ -1213,8 +1213,8 @@ protected:
 		return my_asprintf("footstep(%s)", name_aiv(rip));
 	}
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static InstructionEvent<ait> *get(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
 					  ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch)
@@ -1264,8 +1264,8 @@ protected:
 				   dest, size);
 	}
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	virtual InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL,
 				     LogRecord<ait> **lr2 = NULL);
@@ -1313,8 +1313,8 @@ protected:
 	}
 	SyscallEvent(EventTimestamp when) : ThreadEvent<ait>(when) {}
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr ptr);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState<ait> > &ms,
 				      VexPtr<LogReader<ait> > &lf,
@@ -1342,8 +1342,8 @@ protected:
 		return my_asprintf("signal(nr = %d)", signr);
 	}
 public:
-	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> *ms,
-				 bool &consumedRecord);
+	ThreadEvent<ait> *replay(LogRecord<ait> *lr, MachineState<ait> **ms,
+				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState<ait> *ms, LogRecord<ait> **lr = NULL);
 	static ThreadEvent<ait> *get(EventTimestamp when, unsigned _signr, ait _virtaddr)
 	{
@@ -1989,7 +1989,8 @@ private:
 
 template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall<ait> *lrs,
 							 Thread<ait> *thr,
-							 MachineState<ait> *mach);
+							 MachineState<ait> *&mach,
+							 LogReaderPtr ptr);
 
 template<typename ait> void process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
 						   VexPtr<LogReader<ait> > &lf,

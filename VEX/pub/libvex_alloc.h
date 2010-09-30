@@ -312,7 +312,8 @@ public:
 	p &operator*() const { return *content; }
 	p *operator->() const { return content; }
 	operator p*() const { return content; }
-	p *get() const { return content; }
+	p *&get() { return content; }
+	p * const &get() const { return content; }
 	void set(p *x) { content = x; }
 };
 
