@@ -3138,6 +3138,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 				if (irsb->jumpkind == Ijk_Ret &&
 				    !work.time.callStack.empty()) {
 					frip = work.time.callStack.back();
+					printf("Ret target is %lx\n", frip);
 					fallThroughTarget.callStack.pop_back();
 				} else {
 					/* Cheat and grab the return
@@ -3145,8 +3146,10 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 					   trace, if it's
 					   available. */
 					CrashTimestamp n;
-					if (oracle.successorOf(work.time, n))
+					if (oracle.successorOf(work.time, n)) {
+						printf("Oracle successor is %lx\n", n.rip);
 						frip = n.rip;
+					}
 				}
 			}
 
@@ -4366,7 +4369,8 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
-	//ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
+	ms->findThread(ThreadId(7))->exitted = true;
+	ms->findThread(ThreadId(10))->exitted = true;
 	
 	timing("read initial snapshot");
 
@@ -4463,6 +4467,7 @@ main(int argc, char *argv[])
 
 	/* Do the current IRSB first */
 	CrashTimestamp ts(crashedThread);
+	unsigned long prev_rip = crashedThread->regs.rip();
 	for (int idx = crashedThread->currentIRSBOffset;
 	     idx >= 0;
 	     idx--) {
@@ -4470,11 +4475,11 @@ main(int argc, char *argv[])
 		    crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark) {
 			ts.rip = crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr;
 			oracle.addRipTrace(ts, false);
+			prev_rip = ts.rip;
 		}
 	}
 
 	/* Now walk back over the earlier IRSBs */
-	unsigned long prev_rip = crashedThread->regs.rip();
 	for (ring_buffer<Thread<unsigned long>::control_log_entry, 100>::reverse_iterator it =
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
