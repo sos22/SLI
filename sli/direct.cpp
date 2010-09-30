@@ -510,10 +510,16 @@ public:
 					 const concreteStoresT &stores)
 	{
 		addr->build_relevant_address_list(thr, ms, addresses, stores);
-		if (!addr->pointsAtStack())
-			discover_relevant_address(
-				addresses,
-				addr->eval(thr, ms, stores));
+		if (!addr->pointsAtStack()) {
+			try {
+				discover_relevant_address(
+					addresses,
+					addr->eval(thr, ms, stores));
+			} catch (SliException se) {
+				/* Guest did something stupid in its address.
+				   Give up. */
+			}
+		}
 	}
 	/* This doesn't really belong here, but nevermind. */
 	static unsigned long fetch(unsigned long addr,
@@ -2103,11 +2109,19 @@ CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 		unsigned sz = concrete_stores.size();
 		for (abstractStoresT::iterator it = stores.begin();
 		     it != stores.end();
-		     it++)
-			concrete_stores.push_back(
-				concrete_store(
-					it->addr->eval(thr, ms, concrete_stores),
-					it->data->eval(thr, ms, concrete_stores)));
+		     it++) {
+			try {
+				concrete_stores.push_back(
+					concrete_store(
+						it->addr->eval(thr, ms, concrete_stores),
+						it->data->eval(thr, ms, concrete_stores)));
+			} catch (SliException se) {
+				/* Ignore faults generated while
+				   evaluating the address and data
+				   expressions, because they don't
+				   really mean anything. */
+			}
+		}
 		unsigned sz2 = concrete_stores.size();
 		branchCond->build_relevant_address_list(thr, ms, addresses, concrete_stores);
 		if (trueTarget) {
@@ -4209,8 +4223,14 @@ public:
 		if (cel &&
 		    cel->addr->isConstant(addr) &&
 		    oracle.constant_addresses.count(addr) != 0) {
-			return CrashExpressionConst::get(
-				CrashExpressionLoad::fetch(addr, ms, thr));
+			try {
+				return CrashExpressionConst::get(
+					CrashExpressionLoad::fetch(addr, ms, thr));
+			} catch (SliException se) {
+				/* If there was a fault reading from the
+				   address then give up. */
+				return e;
+			}
 		}
 		return e;
 	}
@@ -4358,7 +4378,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(1);
+	oracle.crashingTid = ThreadId(9);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;
