@@ -1949,11 +1949,19 @@ public:
 
 	CrashMachine() : content(new contentT()) {}
 
-	bool hasKey(const CrashTimestamp &ts) { return content->hasKey(ts); }
+	bool hasKey(const CrashTimestamp &ts) {
+		if ((ts.rip >= 0x40f250 && ts.rip <= 0x40f48a) ||
+		    (ts.rip >= 0x433270 && ts.rip <= 0x4332ef) ||
+		    (ts.rip >= 0x40a760 && ts.rip <= 0x40a86f))
+			return true;
+		return content->hasKey(ts);
+	}
 	CrashMachineNode *get(const CrashTimestamp &ts) {
-		/* We know where abort() and raise() live */
-		if ((ts.rip >= 0x50a6a40 && ts.rip <= 0x50a6c7a) ||
-		    (ts.rip >= 0x50a4f80 && ts.rip <= 0x50a4ff7)) {
+		/* We know where abort(), raise(), and __assert_fail
+		 * live */
+		if ((ts.rip >= 0x40f250 && ts.rip <= 0x40f48a) ||
+		    (ts.rip >= 0x433270 && ts.rip <= 0x4332ef) ||
+		    (ts.rip >= 0x40a760 && ts.rip <= 0x40a86f)) {
 			return CrashMachineNode::leaf(
 				ts.rip,
 				CrashExpressionConst::get(1),
