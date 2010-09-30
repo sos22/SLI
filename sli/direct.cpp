@@ -2737,18 +2737,6 @@ Oracle::collect_interesting_access_log(
 {
 	constant_addresses = interesting_addresses;
 
-	/* Make bootstrapping easier by starting the log off with
-	   records for the initial state of every interesting memory
-	   location. */
-	for (std::set<unsigned long>::iterator it = interesting_addresses.begin();
-	     it != interesting_addresses.end();
-	     it++)
-		address_log.push_back(
-			address_log_entry(
-				CrashTimestamp(),
-				*it,
-				CrashExpressionLoad::fetch(*it, ms, NULL)));
-
 	VexPtr<EventRecorder<unsigned long> > er(new CIALEventRecorder(this));
 	Interpreter<unsigned long> i(ms);
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
@@ -3923,6 +3911,11 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 		return;
 
 	SuggestedFix sab;
+
+	for (std::set<unsigned long>::iterator it = oracle.interesting_addresses.begin();
+	     it != oracle.interesting_addresses.end();
+	     it++)
+		memory[*it] = CrashExpressionLoad::fetch(*it, ms, NULL);
 
 	nr_good = 0;
 	nr_bad = 0;
