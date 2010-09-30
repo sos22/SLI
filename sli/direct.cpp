@@ -4185,7 +4185,8 @@ main(int argc, char *argv[])
 	LogReaderPtr ptr;
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
-	//ms->findThread(ThreadId(7))->exitted = true;
+
+	ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
 	
 	timing("read initial snapshot");
 
