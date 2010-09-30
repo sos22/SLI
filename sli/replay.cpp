@@ -112,9 +112,11 @@ ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState<ait> *
 			throw ReplayFailedException("wanted a load, got %s",
 						    lr->name());
 		if (size != lrl->size || force(addr != lrl->ptr))
-			throw ReplayFailedException("wanted %d byte load from %lx, got %d from %lx",
-						    lrl->size, force(lrl->ptr),
-						    size, force(addr));
+			printf("ReplayFailedException(\"wanted %d byte load from %lx, got %d from %lx\","
+			       "lrl->size, force(lrl->ptr),"
+			       "size, force(addr));\n",
+			       lrl->size, force(lrl->ptr),
+			       size, force(addr));
 		expression_result<ait> buf =
 			(*ms)->addressSpace->load(this->when, addr, size, false, thr);
 		if (force(buf != lrl->value) &&
@@ -160,7 +162,7 @@ ThreadEvent<ait> *InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState
 		throw ReplayFailedException("wanted a footstep, got %s",
 					    lr->name());
         if (!allowRipMismatch && force(rip != lrf->rip))
-		throw ReplayFailedBadRip(force(rip), force(lrf->rip));
+		printf("ReplayFailedBadRip(%lx, %lx)", force(rip), force(lrf->rip));
 #define PASTE(x, y) x ## y
 #define PASTE2(x, y) PASTE(x, y)
 #define STRING(x) #x
@@ -169,10 +171,10 @@ ThreadEvent<ait> *InstructionEvent<ait>::replay(LogRecord<ait> *lr, MachineState
 #define CHECK_REGISTER(x)						\
 	do {                                                            \
 		if (force(reg ## x != lrf-> reg ## x))			\
-			throw ReplayFailedBadRegister(			\
-				STRING2( FR_REG_NAME(x)),		\
-				force(reg ## x),			\
-				force(lrf-> reg ## x));			\
+			printf("ReplayFailedBadRegister("		\
+			       STRING2( FR_REG_NAME(x))", %lx, %lx)",	\
+			       force(reg ## x),				\
+			       force(lrf-> reg ## x));			\
 	} while (0)
        CHECK_REGISTER(0);
        CHECK_REGISTER(1);

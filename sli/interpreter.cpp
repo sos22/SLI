@@ -1085,8 +1085,14 @@ Thread<ait>::eval_expression(IRExpr *expr)
 #undef _F0xYop
 			
 		default:
+			printf("WARNING: can't handle ");
 			ppIRExpr(expr);
-			throw NotImplementedException();
+			printf("\n");
+			if (force(arg1.lo))
+				*dest = arg1;
+			else
+				*dest = arg2;
+			break;
 		}
 
 		IRType t, ign1, ign2, ign3, ign4;
@@ -1116,7 +1122,6 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 
 		default:
-			ppIRType(t);
 			throw NotImplementedException();
 		}
 		break;
@@ -1264,8 +1269,11 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		}
 
 		default:
+			printf("WARNING: can't handle ");
 			ppIRExpr(expr);
-			throw NotImplementedException();
+			printf("; guessing\n");
+			*dest = arg;
+			break;
 		}
 		break;
 	}
@@ -1529,6 +1537,8 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 	unsigned put_offset;
 	struct expression_result<ait> put_data;
 	IRType put_type;
+
+	check_fpu_control();
 
 	while (1) {
 		if (!ths->currentIRSB) {

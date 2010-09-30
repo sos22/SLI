@@ -3499,7 +3499,8 @@ public:
 bool address_is_interesting(ThreadId tid, unsigned long addr);
 unsigned long extract_call_follower(IRSB *irsb);
 
+void check_fpu_control(void);
 
-#define ASSERT_FAILED_ADDRESS 0x40a770
+#define ASSERT_FAILED_ADDRESS 0x54308d6
 
 #endif /* !SLI_H__ */

@@ -3881,6 +3881,38 @@ public:
 	bool generate_patch(MachineState<unsigned long> *ms) const;
 };
 
+class BinaryInstr {
+public:
+	CrashTimestamp rip;
+	unsigned size;
+	CrashTimestamp succ1;
+	CrashTimestamp succ2;
+	BinaryInstr(CrashTimestamp _rip)
+		: rip(_rip), succ1(), succ2()
+	{
+	}
+};
+
+class BinaryCFG {
+	bool needFunctionContent(const CrashTimestamp &returns_to);
+
+public:
+	std::map<CrashTimestamp, BinaryInstr *> instrMap;
+
+	const std::vector<unsigned long> &commonStack;
+	const AtomicBlock &accesses;
+	std::set<CrashTimestamp> function_heads;
+
+	unsigned long function_to_patch;
+	BinaryCFG(std::vector<unsigned long> &_commonStack,
+		  const AtomicBlock &_accesses)
+		: commonStack(_commonStack),
+		  accesses(_accesses)
+	{
+	}
+	bool build(ThreadId tid, MachineState<unsigned long> *ms);
+};
+
 bool
 SuggestedFix::generate_patch(MachineState<unsigned long> *ms) const
 {
@@ -3919,6 +3951,134 @@ SuggestedFix::generate_patch(MachineState<unsigned long> *ms) const
 		printf(" %lx", *it);
 	printf("\n");
 
+	if (commonStack.size() == 0)
+		return false;
+
+	BinaryCFG cfg(commonStack, local);
+	if (!cfg.build(tid, ms))
+		return false;
+
+	return true;
+}
+
+bool
+BinaryCFG::needFunctionContent(const CrashTimestamp &return_address)
+{
+	std::vector<unsigned long> s = return_address.callStack;
+	s.push_back(return_address.rip);
+	for (std::set<CrashTimestamp>::iterator it = accesses.events.begin();
+	     it != accesses.events.end();
+	     it++) {
+		if (it->callStack.size() < s.size())
+			continue;
+		bool matches = true;
+		for (unsigned x = 0; matches && x < s.size(); x++)
+			if (s[x] != it->callStack[x])
+				matches = false;
+		if (matches)
+			return true;
+	}
+	return false;
+}
+
+bool
+BinaryCFG::build(ThreadId tid, MachineState<unsigned long> *ms)
+{
+	unsigned long call_instr_to_patch;
+	std::vector<CrashTimestamp> functions;
+
+	call_instr_to_patch = commonStack[commonStack.size()-1] - 5;
+	IRSB *irsb = ms->addressSpace->getIRSBForAddress(call_instr_to_patch);
+	ppIRSB(irsb);
+	if (irsb->jumpkind != Ijk_Call || irsb->jumpkind != Ijk_Call)
+		return false;
+	function_to_patch = irsb->next->Iex.Const.con->Ico.U64;
+	CrashTimestamp t(tid, function_to_patch, commonStack);
+	printf("Start of critical function is %s\n", t.name());
+	functions.push_back(t);
+
+	while (!functions.empty()) {
+		CrashTimestamp &fhead = functions.back();
+		if (function_heads.count(fhead) != 0) {
+			functions.pop_back();
+			continue;
+		}
+
+		printf("fhead %s\n", fhead.name());
+
+		/* Instructions yet to be processed in this block. */
+		std::vector<CrashTimestamp> instrs;
+		instrs.push_back(fhead);
+
+		function_heads.insert(fhead);
+
+		while (!instrs.empty()) {
+			CrashTimestamp &next_instr = instrs.back();
+			if (instrMap.count(next_instr) != 0) {
+				instrs.pop_back();
+				continue;
+			}
+
+			printf("Examine instruction %s\n", next_instr.name());
+
+			BinaryInstr *i = new BinaryInstr(next_instr);
+			instrMap[next_instr] = i;
+
+			irsb = ms->addressSpace->getIRSBForAddress(i->rip.rip);
+
+			i->size = irsb->stmts[0]->Ist.IMark.len;
+
+			int instr_end;
+			unsigned long s1_rip = 0, s2_rip = 0;
+			for (instr_end = 1; instr_end < irsb->stmts_used && irsb->stmts[instr_end]->tag != Ist_IMark; instr_end++) {
+				if (irsb->stmts[instr_end]->tag == Ist_Exit) {
+					assert(!s2_rip);
+					s2_rip = irsb->stmts[instr_end]->Ist.Exit.dst->Ico.U64;
+				}
+			}
+
+			if (instr_end == irsb->stmts_used) {
+				if (irsb->next->tag == Iex_Const) {
+					unsigned long next =
+						irsb->next->Iex.Const.con->Ico.U64;
+					if (irsb->jumpkind == Ijk_Call) {
+						CrashTimestamp t(next_instr);
+						t.rip = extract_call_follower(irsb);
+						if (needFunctionContent(t)) {
+							t.callStack.push_back(t.rip);
+							t.rip = next;
+							functions.push_back(t);
+						}
+						next = t.rip;
+					} else {
+						assert(irsb->jumpkind == Ijk_Boring);
+					}
+					s1_rip = next;
+				}
+			} else {
+				assert(irsb->stmts[instr_end]->tag == Ist_IMark);
+				s1_rip = irsb->stmts[instr_end]->Ist.IMark.addr;
+			}
+
+			if (s1_rip) {
+				i->succ1 = next_instr;
+				i->succ1.rip = s1_rip;
+			}
+			if (s2_rip) {
+				i->succ2 = next_instr;
+				i->succ2.rip = s2_rip;
+			}
+
+			instrs.pop_back();
+
+			if (s1_rip)
+				instrs.push_back(i->succ1);
+			if (s2_rip)
+				instrs.push_back(i->succ2);
+		}
+
+		functions.pop_back();
+	}
 	return true;
 }
 
@@ -4186,7 +4346,7 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
-	ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
+	//ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
 	
 	timing("read initial snapshot");
 
@@ -4198,7 +4358,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(2);
+	oracle.crashingTid = ThreadId(1);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;

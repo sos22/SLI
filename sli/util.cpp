@@ -33,10 +33,25 @@ handle_sigusr1(int ignore)
 }
 
 void
+check_fpu_control(void)
+{
+        unsigned short ctrl;
+
+        asm volatile("fnstcw %0" : "=m" (ctrl));
+
+        assert(ctrl == 0x37f);
+}
+
+void
 init_sli(void)
 {
 	VexControl vcon;
 	unsigned short fpu_control;
+
+        unsigned short ctrl = 0x37f;
+        asm volatile("fldcw %0" :: "m" (ctrl));
+
+	check_fpu_control();
 
 	std::set_terminate(__gnu_cxx::__verbose_terminate_handler);
 
@@ -50,6 +65,7 @@ init_sli(void)
 
 	signal(SIGUSR1, handle_sigusr1);
 
+#if 0
 	/* Horrible hack: do what's needed to make Thunderbird work */
 	asm("fstcw %0\n"
 	    : "=m" (fpu_control));
@@ -57,6 +73,7 @@ init_sli(void)
 	asm volatile("fldcw %0\n"
 		     :
 		     : "m" (fpu_control));
+#endif
 }
 
 void noop_destructor(void *_ctxt)

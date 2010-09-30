@@ -97,9 +97,10 @@ skip:
 
 	switch (rh.cls) {
 	case RECORD_footstep: {
+#if 1
 		startPtr = unwrapPtr(*_nextPtr);
 		goto skip;
-#if 0
+#else
 		footstep_record<unsigned long> fr;
 		int r = buffered_pread(&fr, sizeof(fr), startPtr.off + sizeof(rh));
 		(void)r;

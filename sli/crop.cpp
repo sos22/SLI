@@ -14,6 +14,7 @@ main(int argc, char *argv[])
 	unsigned long size = atol(argv[3]);
 
 	init_sli();
+	check_fpu_control();
 
 	LogReaderPtr ptr;
 
@@ -21,11 +22,14 @@ main(int argc, char *argv[])
 	if (!lf)
 		err(1, "opening %s", inp);
 
+	check_fpu_control();
 	VexPtr<LogReader<unsigned long> > reduced_lf(lf->truncate(lf->mkPtr(size, 0)));
+	check_fpu_control();
 	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
+	check_fpu_control();
 	VexGcRoot ms_root((void **)&ms, "ms_root");
 
-	ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
+	//ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
 
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(reduced_lf, ptr, ALLOW_GC, &ptr);

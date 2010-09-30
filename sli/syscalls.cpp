@@ -34,8 +34,11 @@ process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
 			break;
 		if (lw)
 			lw->append(lr, 0);
-		addrSpace->writeMemory(EventTimestamp::invalid, lrm->start, lrm->size, lrm->contents,
-				       true, NULL);
+		try {
+			addrSpace->writeMemory(EventTimestamp::invalid, lrm->start, lrm->size, lrm->contents,
+					       true, NULL);
+		} catch (BadMemoryException<ait> bme) {
+		}
 		startOffset = nextOffset;
 
 		/* That can sometimes do a lot of work (e.g. mmap()ing
