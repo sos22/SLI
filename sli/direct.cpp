@@ -3877,7 +3877,50 @@ public:
 			return false;
 		return false;
 	}
+
+	bool generate_patch(MachineState<unsigned long> *ms) const;
 };
+
+bool
+SuggestedFix::generate_patch(MachineState<unsigned long> *ms) const
+{
+	/* Look at the local one first. */
+
+	/* First step: check that they're all in the same thread and
+	 * extract the longest common stack. */
+	bool haveThread = false;
+	ThreadId tid;
+	std::vector<unsigned long> commonStack;
+	for (std::set<CrashTimestamp>::iterator it = local.events.begin();
+	     it != local.events.end();
+	     it++) {
+		if (haveThread) {
+			if (tid != it->tid)
+				return false;
+			unsigned newStackSize;
+			for (newStackSize = 0;
+			     newStackSize < commonStack.size() &&
+				     newStackSize < it->callStack.size() &&
+				     commonStack[newStackSize] == it->callStack[newStackSize];
+			     newStackSize++)
+				;
+			commonStack.resize(newStackSize);
+		} else {
+			commonStack = it->callStack;
+			tid = it->tid;
+		}
+		haveThread = true;
+	}
+
+	printf("common stack");
+	for (std::vector<unsigned long>::iterator it = commonStack.begin();
+	     it != commonStack.end();
+	     it++)
+		printf(" %lx", *it);
+	printf("\n");
+
+	return true;
+}
 
 class CollectLoadsMapper : public CPMapper {
 public:
@@ -3914,8 +3957,15 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 
 	for (std::set<unsigned long>::iterator it = oracle.interesting_addresses.begin();
 	     it != oracle.interesting_addresses.end();
-	     it++)
-		memory[*it] = CrashExpressionLoad::fetch(*it, ms, NULL);
+	     it++) {
+		try {
+			memory[*it] = CrashExpressionLoad::fetch(*it, ms, NULL);
+		} catch (BadMemoryException<unsigned long> bme) {
+			/* Can sometimes happen if the guest crashed
+			   because it dereferenced NULL or some
+			   such. */
+		}
+	}
 
 	nr_good = 0;
 	nr_bad = 0;
@@ -4455,8 +4505,11 @@ main(int argc, char *argv[])
 
 	for (std::set<SuggestedFix>::iterator it = csectPool.begin();
 	     it != csectPool.end();
-	     it++)
+	     it++) {
 		printf("Suggested atomic block: %s\n", it->name());
+		if (!it->generate_patch(ms))
+			printf("\t<no patch>\n");
+	}
 
 	timing("all done");
 

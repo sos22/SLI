@@ -3500,6 +3500,6 @@ bool address_is_interesting(ThreadId tid, unsigned long addr);
 unsigned long extract_call_follower(IRSB *irsb);
 
 
-#define ASSERT_FAILED_ADDRESS 0x40a760
+#define ASSERT_FAILED_ADDRESS 0x40a770
 
 #endif /* !SLI_H__ */
