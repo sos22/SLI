@@ -420,7 +420,7 @@ public:
 		{
 		}
 	};
-	ring_buffer<control_log_entry, 100> controlLog;
+	ring_buffer<control_log_entry, 10> controlLog;
 	struct snapshot_log_entry {
 		MachineState<abst_int_type> *ms;
 		LogReaderPtr ptr;
@@ -3502,6 +3502,6 @@ unsigned long extract_call_follower(IRSB *irsb);
 
 void check_fpu_control(void);
 
-#define ASSERT_FAILED_ADDRESS 0x54308d6
+#define ASSERT_FAILED_ADDRESS 0x40a770
 
 #endif /* !SLI_H__ */

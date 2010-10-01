@@ -173,6 +173,11 @@ public:
 		return rv;
 	}
 
+	void clear() {
+		heads = NULL;
+		nr_heads = 0;
+		nr_items = 0;
+	}
 	void visit(HeapVisitor &hv) {
 		hv(heads);
 		for (unsigned x = 0; x < nr_heads; x++)

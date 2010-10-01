@@ -216,7 +216,7 @@ protected:
 		next_intern = NULL;
 	}
 
-	static void discover_relevant_address(std::set<unsigned long> &addresses,
+	static void discover_relevant_address(gc_map<unsigned long, bool> *addresses,
 					      unsigned long addr);
 
 public:
@@ -244,7 +244,7 @@ public:
 
 	virtual void build_relevant_address_list(Thread<unsigned long> *thr,
 						 MachineState<unsigned long> *ms,
-						 std::set<unsigned long> &addresses,
+						 gc_map<unsigned long, bool> *addresses,
 						 const concreteStoresT &stores) = 0;
 	virtual unsigned long eval(Thread<unsigned long> *thr,
 				   MachineState<unsigned long> *ms,
@@ -285,10 +285,10 @@ public:
 CrashExpression *CrashExpression::intern_heads[CrashExpression::nr_intern_heads];
 
 void
-CrashExpression::discover_relevant_address(std::set<unsigned long> &addresses,
+CrashExpression::discover_relevant_address(gc_map<unsigned long, bool> *addresses,
 					   unsigned long addr)
 {
-	addresses.insert(addr);
+	addresses->set(addr, true);
 }
 
 class CrashExpressionTemp : public CrashExpression {
@@ -315,7 +315,7 @@ public:
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores) {
 		/* This can't happen, because we shouldn't be building
 		   the address list until all temporaries have been
@@ -352,12 +352,11 @@ public:
 	CrashExpression *map(CPMapper &m) { return m(this); }
 	unsigned complexity() const { return 2; }
 	bool pointsAtStack() const {
-		return offset == OFFSET_amd64_RSP ||
-			offset == OFFSET_amd64_RBP;
+		return offset == OFFSET_amd64_RSP;
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
@@ -393,7 +392,7 @@ public:
 	bool isConstant(unsigned long &l) { l = value; return true; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
@@ -445,7 +444,7 @@ public:
 	unsigned complexity() const { return (unsigned)-1; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
@@ -503,7 +502,7 @@ public:
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 		addr->build_relevant_address_list(thr, ms, addresses, stores);
@@ -575,7 +574,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 		l->build_relevant_address_list(thr, ms, addresses, stores);
@@ -878,7 +877,7 @@ public:
 	unsigned complexity() const { return l->complexity() + 1; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 		l->build_relevant_address_list(thr, ms, addresses, stores);
@@ -1263,7 +1262,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 		a->build_relevant_address_list(thr, ms, addresses, stores);
@@ -1352,7 +1351,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 		a->build_relevant_address_list(thr, ms, addresses, stores);
@@ -1432,7 +1431,7 @@ public:
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 		cond->build_relevant_address_list(thr, ms, addresses, stores);
@@ -1862,7 +1861,7 @@ public:
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
-					 std::set<unsigned long> &addresses,
+					 gc_map<unsigned long, bool> *addresses,
 					 concreteStoresT &stores);
 
 	mutable bool have_hash;
@@ -1958,18 +1957,18 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 	friend class CRAEventRecorder;
 
 	static void visit_content_fn(std::pair<CrashMachineNode *,
-				             std::set<unsigned long> > &v,
+				     gc_map<unsigned long, bool> *> &v,
 				     HeapVisitor &hv)
 	{
 		hv(v.first);
+		hv(v.second);
 	}
 
 	void calc_relevant_addresses_snapshot(Thread<unsigned long> *ts,
-					      MachineState<unsigned long> *ms,
-					      CrashMachine *newCm);
+					      MachineState<unsigned long> *ms);
 public:
 	typedef gc_map<CrashTimestamp,
-		       std::pair<CrashMachineNode *, std::set<unsigned long> >,
+		       std::pair<CrashMachineNode *, gc_map<unsigned long, bool> *>,
 		       __default_hash_function<CrashTimestamp>,
 		       __default_eq_function<CrashTimestamp>,
 		       visit_content_fn> contentT;
@@ -1978,48 +1977,91 @@ public:
 	CrashMachine() : content(new contentT()) {}
 
 	bool hasKey(const CrashTimestamp &ts) {
-#if 0
-		if ((ts.rip >= 0x40f250 && ts.rip <= 0x40f48a) ||
-		    (ts.rip >= 0x433270 && ts.rip <= 0x4332ef) ||
-		    (ts.rip >= 0x40a760 && ts.rip <= 0x40a86f))
+		if (ts.rip == ASSERT_FAILED_ADDRESS)
 			return true;
-#endif
 		return content->hasKey(ts);
 	}
 	CrashMachineNode *get(const CrashTimestamp &ts) {
-		/* We know where abort(), raise(), and __assert_fail
-		 * live */
-#if 0
-		if ((ts.rip >= 0x40f250 && ts.rip <= 0x40f48a) ||
-		    (ts.rip >= 0x433270 && ts.rip <= 0x4332ef) ||
-		    (ts.rip >= 0x40a760 && ts.rip <= 0x40a86f)) {
+		/* We know where __assert_fail lives. */
+		if (ts.rip == ASSERT_FAILED_ADDRESS) {
 			return CrashMachineNode::leaf(
 				ts.rip,
 				CrashExpressionConst::get(1),
 				abstractStoresT());
 		}
-#endif
 		return content->get(ts).first;
 	}
 	void set(const CrashTimestamp &ts, CrashMachineNode *cmn)
 	{
-		std::set<unsigned long> t;
+		gc_map<unsigned long, bool> *t =
+			new gc_map<unsigned long, bool>();
 		content->set(ts,
-			     std::pair<CrashMachineNode *, std::set<unsigned long> >
+			     std::pair<CrashMachineNode *, gc_map<unsigned long, bool> * >
 			     (cmn, t));
 	}
 
-	CrashMachine *calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
-						   VexPtr<LogReader<unsigned long> > &lr,
-						   LogReaderPtr ptr,
-						   GarbageCollectionToken tok);
+	void calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
+					  VexPtr<LogReader<unsigned long> > &lr,
+					  LogReaderPtr ptr,
+					  GarbageCollectionToken tok);
 
 	void deduplicate();
+
+	CrashMachine *foldRegisters(VexPtr<MachineState<unsigned long> > &ms,
+				    VexPtr<LogReader<unsigned long> > &lr,
+				    LogReaderPtr ptr,
+				    GarbageCollectionToken tok);
 
 	void visit(HeapVisitor &hv) { hv(content); }
 	void destruct() { this->~CrashMachine(); }
 	NAMED_CLASS
 };
+
+class FREventRecorder : public EventRecorder<unsigned long> {
+protected:
+	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt) {
+		abort();
+	}
+public:
+	CrashMachine *cm;
+	CrashMachine *new_cm;
+	FREventRecorder(CrashMachine *_cm)
+		: cm(_cm),
+		  new_cm(new CrashMachine())
+	{
+	}
+	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt,
+		    MachineState<unsigned long> *ms)
+	{
+		if (InstructionEvent<unsigned long> *ie =
+		    dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
+			CrashTimestamp ts(thr);
+			ts.rip = ie->rip;
+			if (cm->hasKey(ts)) {
+				CrashMachineNode *cmn = cm->get(ts);
+				assert(cmn != NULL);
+				new_cm->set(ts, cmn->foldInRegisters(thr));
+			}
+		}
+	}
+	void visit(HeapVisitor &hv) { hv(cm); hv(new_cm); }
+};
+
+
+CrashMachine *
+CrashMachine::foldRegisters(VexPtr<MachineState<unsigned long> > &ms,
+			    VexPtr<LogReader<unsigned long> > &lr,
+			    LogReaderPtr ptr,
+			    GarbageCollectionToken tok)
+{
+	VexPtr<CrashMachine> new_cm(new CrashMachine(*this));
+	VexPtr<FREventRecorder> frer(new FREventRecorder(this));
+	VexPtr<EventRecorder<unsigned long> > er(frer);
+	Interpreter<unsigned long> i(ms->dupeSelf());
+	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	i.replayLogfile(lr, ptr, tok, NULL, dummy, er);
+	return frer->new_cm;
+}
 
 /* Rebuild the hash table, discarding all of the duplicate CMNs which
    we've built up. */
@@ -2037,7 +2079,7 @@ CrashMachine::deduplicate()
 	     it != content->end();
 	     it++) {
 		CrashMachineNode *cmn = it.value().first;
-		std::set<unsigned long> &s(it.value().second);
+		gc_map<unsigned long, bool> *s = it.value().second;
 		CrashTimestamp origin;
 		origin = it.key();
 		unsigned h = cmn->hash() % nr_heads;
@@ -2047,9 +2089,17 @@ CrashMachine::deduplicate()
 		if (!cursor) {
 			cmn->pool_next = heads[h];
 			heads[h] = cmn;
-			newContent->set(origin, std::pair<CrashMachineNode *, std::set<unsigned long> >(cmn, s));
+			newContent->set(origin, std::pair<CrashMachineNode *, gc_map<unsigned long, bool> *>(cmn, s));
 			kept++;
+			printf("Keep %s (%s) at %p\n",
+			       it.key().name(),
+			       it.value().first->name(),
+			       it.value().first);
 		} else {
+			printf("Drop %s (%s); duplicates %p\n",
+			       it.key().name(),
+			       it.value().first->name(),
+			       cursor);
 			dropped++;
 		}
 	}
@@ -2123,7 +2173,7 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 void
 CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 					      MachineState<unsigned long> *ms,
-					      std::set<unsigned long> &addresses,
+					      gc_map<unsigned long, bool> *addresses,
 					      concreteStoresT &concrete_stores)
 {
 	switch (type) {
@@ -2171,25 +2221,20 @@ CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 
 void
 CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
-					       MachineState<unsigned long> *ms,
-					       CrashMachine *newRes)
+					       MachineState<unsigned long> *ms)
 {
 	CrashTimestamp ts(thr);
-	std::pair<CrashMachineNode *, std::set<unsigned long> >	&slot(content->get(ts));
+	std::pair<CrashMachineNode *, gc_map<unsigned long, bool> *> &slot(content->get(ts));
 	assert(slot.first != NULL);
 
 	/* We're only interested in the results of the *last*
 	   execution of this instruction */
-	slot.second.clear();
+	slot.second->clear();
 
 	/* Do it. */
 	concreteStoresT concreteStores;
 	slot.first->build_relevant_address_list(thr, ms, slot.second, concreteStores);
 	assert(concreteStores.size() == 0);
-
-	newRes->content->set(ts,
-			     std::pair<CrashMachineNode *, std::set<unsigned long> >
-			     (slot.first->foldInRegisters(thr), slot.second));
 }
 
 class CRAEventRecorder : public EventRecorder<unsigned long> {
@@ -2199,41 +2244,35 @@ protected:
 	}
 public:
 	CrashMachine *cm;
-	CrashMachine *new_cm;
-	CRAEventRecorder(CrashMachine *_cm,
-			 CrashMachine *_new_cm) : cm(_cm), new_cm(_new_cm) {}
+	CRAEventRecorder(CrashMachine *_cm) : cm(_cm) {}
 	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt,
 		    MachineState<unsigned long> *ms)
 	{
 		if (InstructionEvent<unsigned long> *ie =
 		    dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
-#if 0 /* Stop emacs getting confused by putting in a redundant { */
-		{
-#endif
 			CrashTimestamp ts(thr);
 			ts.rip = ie->rip;
+			if (ie->rip == 0x7f860d33acce)
+				dbg_break("Evaluating at the magic address\n");
 			if (cm->hasKey(ts)) {
 				assert(cm->get(ts) != NULL);
-				cm->calc_relevant_addresses_snapshot(thr, ms, new_cm);
+				cm->calc_relevant_addresses_snapshot(thr, ms);
 			}
 		}
 	}
-		void visit(HeapVisitor &hv) { hv(cm); hv(new_cm); }
+	void visit(HeapVisitor &hv) { hv(cm); }
 };
 
-/* Misnamed: also builds a register-folded version of the CM */
-CrashMachine *
+void
 CrashMachine::calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
 					   VexPtr<LogReader<unsigned long> > &lr,
 					   LogReaderPtr ptr,
 					   GarbageCollectionToken tok)
 {
-	VexPtr<CrashMachine> new_cm(new CrashMachine(*this));
-	VexPtr<EventRecorder<unsigned long> > craer(new CRAEventRecorder(this, new_cm));
+	VexPtr<EventRecorder<unsigned long> > craer(new CRAEventRecorder(this));
 	Interpreter<unsigned long> i(ms->dupeSelf());
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, craer);
-	return new_cm;
 }
 
 CrashExpression *
@@ -2823,8 +2862,7 @@ backtrack_crash_machine_node_for_statements(
 
 		case Ist_Put: {
 			CrashExpression *d = CrashExpression::get(stmt->Ist.Put.data);
-			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP ||
-			    stmt->Ist.Put.offset == OFFSET_amd64_RBP)
+			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP)
 				d = CrashExpressionStackPtr::get(d);
 			node = node->rewriteRegister(stmt->Ist.Put.offset, d);
 			break;
@@ -3905,14 +3943,38 @@ name_set(const std::set<t> &x)
 	}
 }
 
+template <typename t> static char *
+name_vector(const std::vector<t> &x)
+{
+	char *b = NULL;
+	for (typename std::vector<t>::const_iterator it = x.begin();
+	     it != x.end();
+	     it++) {
+		if (b) {
+			char *b2 = my_asprintf("%s, %s", b, it->name());
+			free(b);
+			b = b2;
+		} else {
+			b = my_asprintf("[%s", it->name());
+		}
+	}
+	if (b) {
+		char *b2 = my_asprintf("%s]", b);
+		free(b);
+		return b2;
+	} else {
+		return strdup("[]");
+	}
+}
+
 class AtomicBlock : public Named {
 protected:
 	char *mkName() const
 	{
-		return name_set(events);
+		return name_vector(events);
 	}
 public:
-	std::set<CrashTimestamp> events;
+	std::vector<CrashTimestamp> events;
 
 	/* We assume that cost is proportional to the number of
 	   accesses which need to be protected, which is almost
@@ -3995,211 +4057,10 @@ public:
 	bool generate_patch(MachineState<unsigned long> *ms) const;
 };
 
-class BinaryInstr {
-public:
-	CrashTimestamp rip;
-	unsigned size;
-	CrashTimestamp succ1;
-	CrashTimestamp succ2;
-	BinaryInstr(CrashTimestamp _rip)
-		: rip(_rip), succ1(), succ2()
-	{
-	}
-};
-
-class BinaryCFG {
-	bool needFunctionContent(const CrashTimestamp &returns_to);
-
-public:
-	std::map<CrashTimestamp, BinaryInstr *> instrMap;
-
-	const std::vector<unsigned long> &commonStack;
-	const AtomicBlock &accesses;
-	std::set<CrashTimestamp> function_heads;
-
-	unsigned long function_to_patch;
-	BinaryCFG(std::vector<unsigned long> &_commonStack,
-		  const AtomicBlock &_accesses)
-		: commonStack(_commonStack),
-		  accesses(_accesses)
-	{
-	}
-	bool build(ThreadId tid, MachineState<unsigned long> *ms);
-};
-
-bool
-SuggestedFix::generate_patch(MachineState<unsigned long> *ms) const
-{
-	/* Look at the local one first. */
-
-	/* First step: check that they're all in the same thread and
-	 * extract the longest common stack. */
-	bool haveThread = false;
-	ThreadId tid;
-	std::vector<unsigned long> commonStack;
-	for (std::set<CrashTimestamp>::iterator it = local.events.begin();
-	     it != local.events.end();
-	     it++) {
-		if (haveThread) {
-			if (tid != it->tid)
-				return false;
-			unsigned newStackSize;
-			for (newStackSize = 0;
-			     newStackSize < commonStack.size() &&
-				     newStackSize < it->callStack.size() &&
-				     commonStack[newStackSize] == it->callStack[newStackSize];
-			     newStackSize++)
-				;
-			commonStack.resize(newStackSize);
-		} else {
-			commonStack = it->callStack;
-			tid = it->tid;
-		}
-		haveThread = true;
-	}
-
-	printf("common stack");
-	for (std::vector<unsigned long>::iterator it = commonStack.begin();
-	     it != commonStack.end();
-	     it++)
-		printf(" %lx", *it);
-	printf("\n");
-
-	if (commonStack.size() == 0)
-		return false;
-
-	BinaryCFG cfg(commonStack, local);
-	if (!cfg.build(tid, ms))
-		return false;
-
-	return true;
-}
-
-bool
-BinaryCFG::needFunctionContent(const CrashTimestamp &return_address)
-{
-	std::vector<unsigned long> s = return_address.callStack;
-	s.push_back(return_address.rip);
-	for (std::set<CrashTimestamp>::iterator it = accesses.events.begin();
-	     it != accesses.events.end();
-	     it++) {
-		if (it->callStack.size() < s.size())
-			continue;
-		bool matches = true;
-		for (unsigned x = 0; matches && x < s.size(); x++)
-			if (s[x] != it->callStack[x])
-				matches = false;
-		if (matches)
-			return true;
-	}
-	return false;
-}
-
-bool
-BinaryCFG::build(ThreadId tid, MachineState<unsigned long> *ms)
-{
-	unsigned long call_instr_to_patch;
-	std::vector<CrashTimestamp> functions;
-
-	call_instr_to_patch = commonStack[commonStack.size()-1] - 5;
-	IRSB *irsb = ms->addressSpace->getIRSBForAddress(call_instr_to_patch);
-	ppIRSB(irsb);
-	if (irsb->jumpkind != Ijk_Call || irsb->jumpkind != Ijk_Call)
-		return false;
-	function_to_patch = irsb->next->Iex.Const.con->Ico.U64;
-	CrashTimestamp t(tid, function_to_patch, commonStack);
-	printf("Start of critical function is %s\n", t.name());
-	functions.push_back(t);
-
-	while (!functions.empty()) {
-		CrashTimestamp &fhead = functions.back();
-		if (function_heads.count(fhead) != 0) {
-			functions.pop_back();
-			continue;
-		}
-
-		printf("fhead %s\n", fhead.name());
-
-		/* Instructions yet to be processed in this block. */
-		std::vector<CrashTimestamp> instrs;
-		instrs.push_back(fhead);
-
-		function_heads.insert(fhead);
-
-		while (!instrs.empty()) {
-			CrashTimestamp &next_instr = instrs.back();
-			if (instrMap.count(next_instr) != 0) {
-				instrs.pop_back();
-				continue;
-			}
-
-			printf("Examine instruction %s\n", next_instr.name());
-
-			BinaryInstr *i = new BinaryInstr(next_instr);
-			instrMap[next_instr] = i;
-
-			irsb = ms->addressSpace->getIRSBForAddress(i->rip.rip);
-
-			i->size = irsb->stmts[0]->Ist.IMark.len;
-
-			int instr_end;
-			unsigned long s1_rip = 0, s2_rip = 0;
-			for (instr_end = 1; instr_end < irsb->stmts_used && irsb->stmts[instr_end]->tag != Ist_IMark; instr_end++) {
-				if (irsb->stmts[instr_end]->tag == Ist_Exit) {
-					assert(!s2_rip);
-					s2_rip = irsb->stmts[instr_end]->Ist.Exit.dst->Ico.U64;
-				}
-			}
-
-			if (instr_end == irsb->stmts_used) {
-				if (irsb->next->tag == Iex_Const) {
-					unsigned long next =
-						irsb->next->Iex.Const.con->Ico.U64;
-					if (irsb->jumpkind == Ijk_Call) {
-						CrashTimestamp t(next_instr);
-						t.rip = extract_call_follower(irsb);
-						if (needFunctionContent(t)) {
-							t.callStack.push_back(t.rip);
-							t.rip = next;
-							functions.push_back(t);
-						}
-						next = t.rip;
-					} else {
-						assert(irsb->jumpkind == Ijk_Boring);
-					}
-					s1_rip = next;
-				}
-			} else {
-				assert(irsb->stmts[instr_end]->tag == Ist_IMark);
-				s1_rip = irsb->stmts[instr_end]->Ist.IMark.addr;
-			}
-
-			if (s1_rip) {
-				i->succ1 = next_instr;
-				i->succ1.rip = s1_rip;
-			}
-			if (s2_rip) {
-				i->succ2 = next_instr;
-				i->succ2.rip = s2_rip;
-			}
-
-			instrs.pop_back();
-
-			if (s1_rip)
-				instrs.push_back(i->succ1);
-			if (s2_rip)
-				instrs.push_back(i->succ2);
-		}
-
-		functions.pop_back();
-	}
-	return true;
-}
-
 class CollectLoadsMapper : public CPMapper {
 public:
-	std::set<CrashTimestamp> &out;
-	CollectLoadsMapper(std::set<CrashTimestamp> &_out)
+	std::vector<CrashTimestamp> &out;
+	CollectLoadsMapper(std::vector<CrashTimestamp> &_out)
 		: out(_out)
 	{
 	}
@@ -4207,7 +4068,7 @@ public:
 		CrashExpressionLoad *cel =
 			dynamic_cast<CrashExpressionLoad *>(e);
 		if (cel)
-			out.insert(cel->when);
+			out.push_back(cel->when);
 		return e;
 	}
 };
@@ -4259,13 +4120,13 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 		if (new_cmn->willDefinitelyCrash()) {
 			if (have_first_remote_good) {
 				if (!in_remote_csect)
-					currentRemoteBlock.events.insert(m_it->rip);
+					currentRemoteBlock.events.push_back(m_it->rip);
 				in_remote_csect = true;
 			}
 			nr_bad++;
 		} else if (new_cmn->willDefinitelyNotCrash()) {
 			if (in_remote_csect) {
-				currentRemoteBlock.events.insert(m_it->rip);
+				currentRemoteBlock.events.push_back(m_it->rip);
 				sab.remote.insert(currentRemoteBlock);
 				currentRemoteBlock.events.clear();
 			}
@@ -4294,7 +4155,7 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 				if (it2->addr != *it)
 					continue;
 				AtomicBlock singleton;
-				singleton.events.insert(it2->rip);
+				singleton.events.push_back(it2->rip);
 				sab.remote.insert(singleton);
 			}
 		}
@@ -4466,8 +4327,8 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
-	//ms->findThread(ThreadId(7))->exitted = true;
-	//ms->findThread(ThreadId(10))->exitted = true;
+	ms->findThread(ThreadId(7))->exitted = true;
+	ms->findThread(ThreadId(10))->exitted = true;
 	
 	timing("read initial snapshot");
 
@@ -4479,7 +4340,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(2);
+	oracle.crashingTid = ThreadId(9);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;
@@ -4523,7 +4384,7 @@ main(int argc, char *argv[])
 		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
 		ppIRSB(crashedThread->currentIRSB);
 		assert(crashedThread->currentIRSBOffset != 0);
-	} else if (0) {
+	} else if (1) {
 		printf("Crashed because we jumped at a bad RIP %lx\n",
 		       crashedThread->currentIRSBRip);
 
@@ -4577,7 +4438,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Now walk back over the earlier IRSBs */
-	for (ring_buffer<Thread<unsigned long>::control_log_entry, 100>::reverse_iterator it =
+	for (ring_buffer<Thread<unsigned long>::control_log_entry, 10>::reverse_iterator it =
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
 	     it++) {
@@ -4668,7 +4529,22 @@ main(int argc, char *argv[])
 
 	/* Install the proximal cause, so that we have something to
 	   bootstrap with. */
+	for (CrashMachine::contentT::iterator it = cm->content->begin();
+	     it != cm->content->end();
+	     it++)
+		for (gc_map<unsigned long,bool>::iterator it2 = it.value().second->begin();
+		     it2 != it.value().second->end();
+		     it2++)
+			;
+
         cm->set(when, cmn);
+	for (CrashMachine::contentT::iterator it = cm->content->begin();
+	     it != cm->content->end();
+	     it++)
+		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
+		     it2 != it.value().second->end();
+		     it2++)
+			;
 
 	/* Returning from the function which crashed is assumed to
 	   mean that the bug has been averted. */
@@ -4685,6 +4561,14 @@ main(int argc, char *argv[])
 					abstractStoresT()));
 		}
 	}
+
+	for (CrashMachine::contentT::iterator it = cm->content->begin();
+	     it != cm->content->end();
+	     it++)
+		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
+		     it2 != it.value().second->end();
+		     it2++)
+			;
 
 	/* Incorporate stuff from the dynamic trace in reverse
 	 * order. */
@@ -4721,33 +4605,48 @@ main(int argc, char *argv[])
 
 	timing("built crash machine");
 
+	for (CrashMachine::contentT::iterator it = cm->content->begin();
+	     it != cm->content->end();
+	     it++)
+		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
+		     it2 != it.value().second->end();
+		     it2++)
+			;
 	cm->deduplicate();
+	for (CrashMachine::contentT::iterator it = cm->content->begin();
+	     it != cm->content->end();
+	     it++)
+		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
+		     it2 != it.value().second->end();
+		     it2++)
+			;
 	timing("Done CMN de-duplicate 1\n");
 
         /* Now try to figure out what the relevant addresses are for
 	   each CMN.*/
         Thread<unsigned long>::snapshot_log_entry &sle(*crashedThread->snapshotLog.begin());
-	//sle.ms->findThread(ThreadId(7))->exitted = true;
-	//sle.ms->findThread(ThreadId(10))->exitted = true;
+	sle.ms->findThread(ThreadId(7))->exitted = true;
+	sle.ms->findThread(ThreadId(10))->exitted = true;
         VexPtr<MachineState<unsigned long> > snapshotMs(sle.ms->dupeSelf());
-	cm = cm->calculate_relevant_addresses(snapshotMs,
-					      lf,
-					      sle.ptr,
-					      ALLOW_GC);
+	cm->calculate_relevant_addresses(snapshotMs,
+					 lf,
+					 sle.ptr,
+					 ALLOW_GC);
 
 	/* Build the overall interesting address list */
 	oracle.interesting_addresses.clear();
 	for (CrashMachine::contentT::iterator it = cm->content->begin();
 	     it != cm->content->end();
 	     it++) {
-		printf("CMN %lx -> %s ",
+		printf("CMN %s %lx -> %s ",
+		       it.key().name(),
 		       it.key().rip,
 		       it.value().first->name());
-		for (std::set<unsigned long>::iterator it2 = it.value().second.begin();
-		     it2 != it.value().second.end();
+		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
+		     it2 != it.value().second->end();
 		     it2++) {
-			oracle.interesting_addresses.insert(*it2);
-			printf("%lx ", *it2);
+			oracle.interesting_addresses.insert(it2.key());
+			printf("%lx ", it2.key());
 		}
 		printf("\n");
 	}
@@ -4786,6 +4685,26 @@ main(int argc, char *argv[])
 	cm->deduplicate();
 	timing("Done CMN de-duplicate 2\n");
 
+	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
+	     cmn_it != cm->content->end();
+	     cmn_it++) {
+		printf("Pre-fold %s -> %s\n",
+		       cmn_it.key().name(),
+		       cmn_it.value().first->name());
+	}
+	snapshotMs = sle.ms->dupeSelf();
+	cm = cm->foldRegisters(snapshotMs, lf, sle.ptr, ALLOW_GC);
+	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
+	     cmn_it != cm->content->end();
+	     cmn_it++) {
+		printf("Post-fold %s -> %s\n",
+		       cmn_it.key().name(),
+		       cmn_it.value().first->name());
+	}
+
+	timing("Done fold registers.\n");
+	cm->deduplicate();
+	timing("Done CMN de-duplicate 3\n");
 
 	/* Now, for each machine, walk over the relevant address logs
 	 * and figure out when the CMN goes green and red. */
@@ -4806,8 +4725,6 @@ main(int argc, char *argv[])
 	     it != csectPool.end();
 	     it++) {
 		printf("Suggested atomic block: %s\n", it->name());
-		if (!it->generate_patch(ms))
-			printf("\t<no patch>\n");
 	}
 
 	timing("all done");
