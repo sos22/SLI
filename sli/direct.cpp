@@ -490,9 +490,6 @@ public:
 	static CrashExpression *get(const CrashTimestamp &when,
 				    CrashExpression *addr)
 	{
-		unsigned long c;
-		if (addr->isConstant(c))
-			assert(c == 0 || c > 0x1000);
 		return intern(new CrashExpressionLoad(when, addr))->simplify();
 	}
 	CrashExpression *map(CPMapper &m) {
@@ -1262,7 +1259,7 @@ public:
 	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
-		abort();
+		return 0;
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
@@ -1351,7 +1348,7 @@ public:
 	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
-		abort();
+		return 0;
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
 					 MachineState<unsigned long> *ms,
@@ -1573,6 +1570,23 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 		}
 	};
 
+	class FoldInRegistersMapper : public CPMapper {
+	public:
+		Thread<unsigned long> *thr;
+		FoldInRegistersMapper(Thread<unsigned long> *_thr)
+			: thr(_thr)
+		{
+		}
+		CrashExpression *operator()(CrashExpression *ce)
+		{
+			if (CrashExpressionRegister *cer =
+			    dynamic_cast<CrashExpressionRegister *>(ce)) {
+				return CrashExpressionConst::get(thr->regs.get_reg(cer->offset / 8));
+			}
+			return ce;
+		}
+	};
+
 	CrashMachineNode(unsigned long _origin_rip,
 			 CrashExpression *e,
 			 const abstractStoresT &_stores)
@@ -1663,6 +1677,12 @@ public:
 		return (new CrashMachineNode(_origin_rip, _branchCond,
 					     _trueTarget, _falseTarget,
 					     _stores));
+	}
+
+	CrashMachineNode *foldInRegisters(Thread<unsigned long> *thr)
+	{
+		FoldInRegistersMapper firm(thr);
+		return map(firm);
 	}
 
 	abstractStoresT stores;
@@ -1945,7 +1965,8 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 	}
 
 	void calc_relevant_addresses_snapshot(Thread<unsigned long> *ts,
-					      MachineState<unsigned long> *ms);
+					      MachineState<unsigned long> *ms,
+					      CrashMachine *newCm);
 public:
 	typedef gc_map<CrashTimestamp,
 		       std::pair<CrashMachineNode *, std::set<unsigned long> >,
@@ -1957,15 +1978,18 @@ public:
 	CrashMachine() : content(new contentT()) {}
 
 	bool hasKey(const CrashTimestamp &ts) {
+#if 0
 		if ((ts.rip >= 0x40f250 && ts.rip <= 0x40f48a) ||
 		    (ts.rip >= 0x433270 && ts.rip <= 0x4332ef) ||
 		    (ts.rip >= 0x40a760 && ts.rip <= 0x40a86f))
 			return true;
+#endif
 		return content->hasKey(ts);
 	}
 	CrashMachineNode *get(const CrashTimestamp &ts) {
 		/* We know where abort(), raise(), and __assert_fail
 		 * live */
+#if 0
 		if ((ts.rip >= 0x40f250 && ts.rip <= 0x40f48a) ||
 		    (ts.rip >= 0x433270 && ts.rip <= 0x4332ef) ||
 		    (ts.rip >= 0x40a760 && ts.rip <= 0x40a86f)) {
@@ -1974,6 +1998,7 @@ public:
 				CrashExpressionConst::get(1),
 				abstractStoresT());
 		}
+#endif
 		return content->get(ts).first;
 	}
 	void set(const CrashTimestamp &ts, CrashMachineNode *cmn)
@@ -1984,10 +2009,10 @@ public:
 			     (cmn, t));
 	}
 
-	void calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
-					  VexPtr<LogReader<unsigned long> > &lr,
-					  LogReaderPtr ptr,
-					  GarbageCollectionToken tok);
+	CrashMachine *calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
+						   VexPtr<LogReader<unsigned long> > &lr,
+						   LogReaderPtr ptr,
+						   GarbageCollectionToken tok);
 
 	void deduplicate();
 
@@ -2146,11 +2171,12 @@ CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 
 void
 CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
-					       MachineState<unsigned long> *ms)
+					       MachineState<unsigned long> *ms,
+					       CrashMachine *newRes)
 {
-	CrashTimestamp ts(thr->tid, thr->regs.rip(), thr->currentCallStack);
-	std::pair<CrashMachineNode *, std::set<unsigned long> >
-		&slot(content->get(ts));
+	CrashTimestamp ts(thr);
+	std::pair<CrashMachineNode *, std::set<unsigned long> >	&slot(content->get(ts));
+	assert(slot.first != NULL);
 
 	/* We're only interested in the results of the *last*
 	   execution of this instruction */
@@ -2160,6 +2186,10 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
 	concreteStoresT concreteStores;
 	slot.first->build_relevant_address_list(thr, ms, slot.second, concreteStores);
 	assert(concreteStores.size() == 0);
+
+	newRes->content->set(ts,
+			     std::pair<CrashMachineNode *, std::set<unsigned long> >
+			     (slot.first->foldInRegisters(thr), slot.second));
 }
 
 class CRAEventRecorder : public EventRecorder<unsigned long> {
@@ -2169,7 +2199,9 @@ protected:
 	}
 public:
 	CrashMachine *cm;
-	CRAEventRecorder(CrashMachine *_cm) : cm(_cm) {}
+	CrashMachine *new_cm;
+	CRAEventRecorder(CrashMachine *_cm,
+			 CrashMachine *_new_cm) : cm(_cm), new_cm(_new_cm) {}
 	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt,
 		    MachineState<unsigned long> *ms)
 	{
@@ -2180,23 +2212,28 @@ public:
 #endif
 			CrashTimestamp ts(thr);
 			ts.rip = ie->rip;
-			if (cm->hasKey(ts))
-				cm->calc_relevant_addresses_snapshot(thr, ms);
+			if (cm->hasKey(ts)) {
+				assert(cm->get(ts) != NULL);
+				cm->calc_relevant_addresses_snapshot(thr, ms, new_cm);
+			}
 		}
 	}
-	void visit(HeapVisitor &hv) { hv(cm); }
+		void visit(HeapVisitor &hv) { hv(cm); hv(new_cm); }
 };
 
-void
+/* Misnamed: also builds a register-folded version of the CM */
+CrashMachine *
 CrashMachine::calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
 					   VexPtr<LogReader<unsigned long> > &lr,
 					   LogReaderPtr ptr,
 					   GarbageCollectionToken tok)
 {
-	VexPtr<EventRecorder<unsigned long> > craer(new CRAEventRecorder(this));
+	VexPtr<CrashMachine> new_cm(new CrashMachine(*this));
+	VexPtr<EventRecorder<unsigned long> > craer(new CRAEventRecorder(this, new_cm));
 	Interpreter<unsigned long> i(ms->dupeSelf());
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, craer);
+	return new_cm;
 }
 
 CrashExpression *
@@ -3001,7 +3038,8 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	bool break_cycles_from(CrashCFGNode *n, const Oracle &oracle);
 	void calculate_cmns(MachineState<unsigned long> *ms,
 			    CrashMachine *cm,
-			    const Oracle &oracle);
+			    const Oracle &oracle,
+			    bool precious);
 	void set_node(const CrashTimestamp &when, CrashCFGNode *cmn)
 	{
 		assert(cmn != NULL);
@@ -3027,11 +3065,12 @@ public:
 	void add_root(const CrashTimestamp &x)
 	{
 		roots.push_back(x);
-		grey.push(build_cfg_work(x, 100));
+		grey.push(build_cfg_work(x, 20));
 	}
 	void build(MachineState<unsigned long> *ms,
 		   const Oracle &footstep_log,
-		   CrashMachine *partial_cm);
+		   CrashMachine *partial_cm,
+		   bool precious);
 	CrashMachineNode *get_cmn(const CrashTimestamp &when)
 	{
 		return get_node(when)->cmn;
@@ -3160,7 +3199,8 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 
 			if (haveFallThrough &&
 			    instr_end == irsb->stmts_used &&
-			    irsb->jumpkind == Ijk_Call) {
+			    irsb->jumpkind == Ijk_Call &&
+			    work.time.rip != 0x82297) {
 				fallThroughTarget.callStack.push_back(extract_call_follower(irsb));
 			}
 			if (irsb->jumpkind == Ijk_NoDecode) {
@@ -3437,7 +3477,8 @@ CrashCFG::break_cycles(const Oracle &oracle)
 void
 CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			 CrashMachine *cm,
-			 const Oracle &oracle)
+			 const Oracle &oracle,
+			 bool precious)
 {
 	bool progress;
 	progress = true;
@@ -3478,11 +3519,29 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 				   dynamic execution. */
 				DBG_CALC_CMNS("%s: no known successors\n", node->when.name());
 				abstractStoresT stores;
-				node->cmn = CrashMachineNode::leaf(
-					node->when.rip,
-					CrashExpressionFailed::get("can't find successor for %s",
-								   node->when.name()),
-					stores);
+				if (precious) {
+					/* Okay, we're at the top of
+					   the call stack -> if we
+					   lose control then we guess
+					   that we survive (because
+					   the usual function-returns
+					   heuristic won't work). */
+					printf("Assuming that %s survives\n",
+					       node->when.name());
+					node->cmn =
+						CrashMachineNode::leaf(
+							node->when.rip,
+							CrashExpressionConst::get(0),
+							stores);
+				} else {
+					printf("Failing analysis at %s\n",
+					       node->when.name());
+					node->cmn = CrashMachineNode::leaf(
+						node->when.rip,
+						CrashExpressionFailed::get("can't find successor for %s",
+									   node->when.name()),
+						stores);
+				}
 				continue;
 			}
 
@@ -3589,12 +3648,13 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 void
 CrashCFG::build(MachineState<unsigned long> *ms,
 		const Oracle &oracle,
-		CrashMachine *cm)
+		CrashMachine *cm,
+		bool precious)
 {
 	build_cfg(ms, oracle, cm);
 	resolve_stubs();
 	break_cycles(oracle);
-	calculate_cmns(ms, cm, oracle);
+	calculate_cmns(ms, cm, oracle, precious);
 }
 
 /* Construct a new CMN which is equivalent to running all of the
@@ -3620,6 +3680,43 @@ mergeCmns(CrashMachineNode *base, CrashMachineNode *sub)
 						sub->trueTarget,
 						sub->falseTarget,
 						stores);
+	}
+	abort();
+}
+
+#define DROP_STORES_DEPTH 5
+#define DROP_BRANCHES_DEPTH 10
+static CrashMachineNode *
+drop_late_stores(CrashMachineNode *cmn, int depth = 0)
+{
+	if (!cmn)
+		return NULL;
+
+	abstractStoresT stores;
+
+	if (depth < DROP_STORES_DEPTH)
+		stores = cmn->stores;
+
+	switch (cmn->type) {
+	case CrashMachineNode::CM_NODE_STUB:
+		return CrashMachineNode::stub(cmn->origin_rip, stores);
+	case CrashMachineNode::CM_NODE_LEAF:
+		return CrashMachineNode::leaf(cmn->origin_rip, cmn->leafCond, stores);
+	case CrashMachineNode::CM_NODE_BRANCH: {
+		if (depth > DROP_BRANCHES_DEPTH) {
+			if (cmn->falseTarget)
+				return drop_late_stores(cmn->falseTarget, depth);
+			else
+				return drop_late_stores(cmn->trueTarget, depth);
+		}
+		CrashMachineNode *t = drop_late_stores(cmn->trueTarget, depth + 1);
+		CrashMachineNode *f = drop_late_stores(cmn->falseTarget, depth + 1);
+		return CrashMachineNode::branch(cmn->origin_rip,
+						cmn->branchCond,
+						t,
+						f,
+						stores);
+	}
 	}
 	abort();
 }
@@ -3740,7 +3837,7 @@ buildCrashMachineNode(MachineState<unsigned long> *ms,
 		return cm->get(when);
 	CrashCFG *cfg = new CrashCFG();
 	cfg->add_root(when);
-	cfg->build(ms, oracle, cm);
+	cfg->build(ms, oracle, cm, when.callStack.size() == 0);
 	return cfg->get_cmn(when);
 }
 
@@ -4369,8 +4466,8 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
-	ms->findThread(ThreadId(7))->exitted = true;
-	ms->findThread(ThreadId(10))->exitted = true;
+	//ms->findThread(ThreadId(7))->exitted = true;
+	//ms->findThread(ThreadId(10))->exitted = true;
 	
 	timing("read initial snapshot");
 
@@ -4382,7 +4479,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(9);
+	oracle.crashingTid = ThreadId(2);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;
@@ -4426,7 +4523,7 @@ main(int argc, char *argv[])
 		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
 		ppIRSB(crashedThread->currentIRSB);
 		assert(crashedThread->currentIRSBOffset != 0);
-	} else if (1) {
+	} else if (0) {
 		printf("Crashed because we jumped at a bad RIP %lx\n",
 		       crashedThread->currentIRSBRip);
 
@@ -4492,7 +4589,8 @@ main(int argc, char *argv[])
 			exit_idx = it->exit_idx - 2;
 			if (irsb->jumpkind == Ijk_Ret)
 				ts.callStack.push_back(prev_rip);
-			else if (irsb->jumpkind == Ijk_Call)
+			else if (irsb->jumpkind == Ijk_Call &&
+				 it->translated_rip != 0x8229c)
 				ts.callStack.pop_back();
 		} else {
 			exited_by_branch = true;
@@ -4600,11 +4698,24 @@ main(int argc, char *argv[])
 						    cm,
 						    oracle);
 			cmn = simplify_cmn(cmn);
+			printf("Before dropping late stores %s\n",
+			       cmn->name());
+			cmn = drop_late_stores(cmn);
+			cmn = simplify_cmn(cmn);
 			cm->set(*it, cmn);
 			timing("built cmn for %s", (*it).name());
 			printf("CMN for %s is %s\n",
 			       (*it).name(), cmn->name());
 			timing("rendered cmn for %s", (*it).name());
+
+			/* Edit out the effects of some of our
+			 * infrastructure. */
+			if ((*it).rip == 0xc822b0) {
+				CrashTimestamp t;
+				t = *it;
+				t.rip = 0xc822ab;
+				cm->set(t, cmn);
+			}
 		}
 	}
 
@@ -4616,11 +4727,13 @@ main(int argc, char *argv[])
         /* Now try to figure out what the relevant addresses are for
 	   each CMN.*/
         Thread<unsigned long>::snapshot_log_entry &sle(*crashedThread->snapshotLog.begin());
+	//sle.ms->findThread(ThreadId(7))->exitted = true;
+	//sle.ms->findThread(ThreadId(10))->exitted = true;
         VexPtr<MachineState<unsigned long> > snapshotMs(sle.ms->dupeSelf());
-	cm->calculate_relevant_addresses(snapshotMs,
-					 lf,
-					 sle.ptr,
-					 ALLOW_GC);
+	cm = cm->calculate_relevant_addresses(snapshotMs,
+					      lf,
+					      sle.ptr,
+					      ALLOW_GC);
 
 	/* Build the overall interesting address list */
 	oracle.interesting_addresses.clear();

@@ -378,6 +378,7 @@ class Thread : public GarbageCollected<Thread<abst_int_type> > {
 
 public:
 	std::vector<unsigned long> currentCallStack;
+	bool inInfrastructure;
 
 	unsigned decode_counter;
 	EventTimestamp bumpEvent(MachineState<abst_int_type> *ms);

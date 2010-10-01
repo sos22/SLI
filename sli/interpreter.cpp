@@ -1357,6 +1357,8 @@ Thread<ait>::redirectGuest(ait rip)
 	if (force(rip == mkConst<ait>(0xFFFFFFFFFF600400ul) ||
 		  rip == mkConst<ait>(0xffffffffff600000ul)))
 		allowRipMismatch = true;
+	if (force(rip) == 0x4382f8)
+		inInfrastructure = true;
 }
 
 IRSB *instrument_func(void *closure,
@@ -1458,8 +1460,12 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 {
 	ths->redirectGuest(rip);
 
-	if (ths->decode_counter != 0)
+	if (force(ths->currentIRSBRip) == 0xc822b0)
+		ths->inInfrastructure = false;
+
+	if (ths->decode_counter != 0 && !ths->inInfrastructure)
 		ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+
 
 	ths->decode_counter++;
 
