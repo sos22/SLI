@@ -11,13 +11,16 @@
 #include "guest_generic_bb_to_IR.h"
 #include "guest_amd64_defs.h"
 
+#define MAX_LOOP_DUPE 0
+
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
 #define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
 
-#define DBG_CYCLE_BREAKER(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
+#define DBG_CYCLE_BREAKER(fmt, ...) DBG_PRINT(fmt, ## __VA_ARGS__)
 #define DBG_CALC_CMNS(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
+#define DBG_BUILD_CFG(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 
 /* Something which is almost like a timestamp: a bundle of TID and
    RIP.  Most of the analysis works on acyclic CFGs, for which this is
@@ -3018,15 +3021,23 @@ cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2)
  */
 
 class CrashCFGNode : public GarbageCollected<CrashCFGNode> {
-	CrashCFGNode(const CrashCFGNode &); /* DNI */
 public:
+	CrashCFGNode(const CrashCFGNode &x)
+	{
+		*this = x;
+		onCycleBreakerPath = false;
+		visitedByCycleBreaker = false;
+	}
 	CrashCFGNode(const CrashTimestamp &_when, const CrashTimestamp &t, const CrashTimestamp &f)
 	{
 		when = _when;
 		trueTargetRip = t;
 		falseTargetRip = f;
+		loopDepth = 0;
 	}
 	CrashTimestamp when;
+
+	unsigned loopDepth;
 
 	CrashTimestamp trueTargetRip;
 	bool brokeCycleTrueTarget;
@@ -3171,7 +3182,9 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 	ThreadId tid = oracle.crashingTid;
 	while (!grey.empty()) {
 		build_cfg_work &work = grey.front();
+		DBG_BUILD_CFG("Grey work at %s\n", work.time.name());
 		if (have_node(work.time)) {
+			DBG_BUILD_CFG("Already done\n");
 			grey.pop();
 			continue;
 		}
@@ -3195,6 +3208,8 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			   causes the loop breaker to do something
 			   stupid. */
 
+			DBG_BUILD_CFG("Not dynamically available\n");
+
 			IRSB *irsb = ms->addressSpace->getIRSBForAddress(work.time.rip);
 			int instr_end;
 			for (instr_end = 1;
@@ -3206,6 +3221,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 					nonFallThroughTarget.rip =
 						irsb->stmts[instr_end]->Ist.Exit.dst->Ico.U64;
 					haveNonFallThrough = true;
+					DBG_BUILD_CFG("NFT %s\n", nonFallThroughTarget.name());
 				}
 			}
 			unsigned long frip = 0;
@@ -3217,6 +3233,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 					frip = work.time.callStack.back();
 					printf("Ret target is %lx\n", frip);
 					fallThroughTarget.callStack.pop_back();
+					DBG_BUILD_CFG("Return to %s\n", fallThroughTarget.name());
 				} else {
 					/* Cheat and grab the return
 					   address out of the dynamic
@@ -3225,7 +3242,10 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 					CrashTimestamp n;
 					if (oracle.successorOf(work.time, n)) {
 						printf("Oracle successor is %lx\n", n.rip);
+						DBG_BUILD_CFG("Oracle frip %s\n", n.name());
 						frip = n.rip;
+					} else {
+						DBG_BUILD_CFG("No oracle frip\n");
 					}
 				}
 			}
@@ -3233,6 +3253,7 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 			if (frip) {
 				fallThroughTarget.rip = frip;
 				haveFallThrough = true;
+				DBG_BUILD_CFG("Fall-through %s\n", fallThroughTarget.name());
 			}
 
 			if (haveFallThrough &&
@@ -3251,8 +3272,16 @@ CrashCFG::build_cfg(MachineState<unsigned long> *ms,
 		fixup_rip(fallThroughTarget);
 		fixup_rip(nonFallThroughTarget);
 
+		DBG_BUILD_CFG("%s: nFTT %d %s, FTT %d %s\n",
+			      work.time.name(),
+			      haveNonFallThrough,
+			      nonFallThroughTarget.name(),
+			      haveFallThrough,
+			      fallThroughTarget.name());
 		CrashCFGNode *newNode =
-			new CrashCFGNode(work.time, nonFallThroughTarget, fallThroughTarget);
+			new CrashCFGNode(work.time,
+					 haveNonFallThrough ? nonFallThroughTarget : CrashTimestamp(),
+					 haveFallThrough ? fallThroughTarget : CrashTimestamp());
 		newNode->dead = dead;
 		assert(newNode != NULL);
 		set_node(work.time, newNode);
@@ -3398,14 +3427,28 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 							DBG_CYCLE_BREAKER("(true %s, false was %s)\n",
 									  it->n->trueTarget->when.name(),
 									  it->n->falseTarget->when.name());
-							it->n->trueTarget = NULL;
-							it->n->brokeCycleTrueTarget = true;
+							if (it->n->trueTarget->loopDepth < MAX_LOOP_DUPE) {
+								DBG_CYCLE_BREAKER("Duplicate\n");
+								CrashCFGNode *d = new CrashCFGNode(*it->n->trueTarget);
+								d->loopDepth++;
+								it->n->trueTarget = d;
+							} else {
+								it->n->trueTarget = NULL;
+								it->n->brokeCycleTrueTarget = true;
+							}
 						} else {
 							DBG_CYCLE_BREAKER("(false %s, true was %s)\n",
 									  it->n->falseTarget->when.name(),
 									  it->n->trueTarget->when.name());
-							it->n->falseTarget = NULL;
-							it->n->brokeCycleFalseTarget = true;
+							if (it->n->falseTarget->loopDepth < MAX_LOOP_DUPE) {
+								DBG_CYCLE_BREAKER("Duplicate\n");
+								CrashCFGNode *d = new CrashCFGNode(*it->n->falseTarget);
+								d->loopDepth++;
+								it->n->falseTarget = d;
+							} else {
+								it->n->falseTarget = NULL;
+								it->n->brokeCycleFalseTarget = true;
+							}
 						}
 					
 						/* Tell caller to
@@ -3435,14 +3478,30 @@ CrashCFG::break_cycles_from(CrashCFGNode *n, const Oracle &oracle)
 					  parent.n->when.name(),
 					  s.n->when.name());
 			if (parent.n->trueTarget == s.n) {
-				DBG_CYCLE_BREAKER("(true)\n");
-				parent.n->trueTarget = NULL;
-				parent.n->brokeCycleTrueTarget = true;
+				DBG_CYCLE_BREAKER("(true %s)\n",
+						  parent.n->when.name());
+				if (s.n->loopDepth < MAX_LOOP_DUPE) {
+					CrashCFGNode *d = new CrashCFGNode(*s.n);
+					d->loopDepth++;
+					parent.n->trueTarget = d;
+					DBG_CYCLE_BREAKER("Duplicate %p at %p into %p\n", s.n,
+							  d, parent.n);
+				} else {
+					parent.n->trueTarget = NULL;
+					parent.n->brokeCycleTrueTarget = true;
+				}
 			} else {
 				DBG_CYCLE_BREAKER("(false %s)\n",
 						  parent.n->falseTarget->when.name());
-				parent.n->falseTarget = NULL;
-				parent.n->brokeCycleFalseTarget = true;
+				if (s.n->loopDepth < MAX_LOOP_DUPE) {
+					DBG_CYCLE_BREAKER("Duplicate\n");
+					CrashCFGNode *d = new CrashCFGNode(*s.n);
+					d->loopDepth++;
+					parent.n->falseTarget = d;
+				} else {
+					parent.n->falseTarget = NULL;
+					parent.n->brokeCycleFalseTarget = true;
+				}
 			}
 			goto out;
 		} else {
@@ -4327,8 +4386,8 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
-	ms->findThread(ThreadId(7))->exitted = true;
-	ms->findThread(ThreadId(10))->exitted = true;
+	//ms->findThread(ThreadId(7))->exitted = true;
+	//ms->findThread(ThreadId(10))->exitted = true;
 	
 	timing("read initial snapshot");
 
@@ -4340,7 +4399,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(9);
+	oracle.crashingTid = ThreadId(2);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;
@@ -4438,7 +4497,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Now walk back over the earlier IRSBs */
-	for (ring_buffer<Thread<unsigned long>::control_log_entry, 10>::reverse_iterator it =
+	for (ring_buffer<Thread<unsigned long>::control_log_entry, CONTROL_LOG_DEPTH>::reverse_iterator it =
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
 	     it++) {
@@ -4625,8 +4684,8 @@ main(int argc, char *argv[])
         /* Now try to figure out what the relevant addresses are for
 	   each CMN.*/
         Thread<unsigned long>::snapshot_log_entry &sle(*crashedThread->snapshotLog.begin());
-	sle.ms->findThread(ThreadId(7))->exitted = true;
-	sle.ms->findThread(ThreadId(10))->exitted = true;
+	//sle.ms->findThread(ThreadId(7))->exitted = true;
+	//sle.ms->findThread(ThreadId(10))->exitted = true;
         VexPtr<MachineState<unsigned long> > snapshotMs(sle.ms->dupeSelf());
 	cm->calculate_relevant_addresses(snapshotMs,
 					 lf,

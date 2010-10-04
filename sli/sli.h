@@ -420,7 +420,8 @@ public:
 		{
 		}
 	};
-	ring_buffer<control_log_entry, 10> controlLog;
+#define CONTROL_LOG_DEPTH 10
+	ring_buffer<control_log_entry, CONTROL_LOG_DEPTH> controlLog;
 	struct snapshot_log_entry {
 		MachineState<abst_int_type> *ms;
 		LogReaderPtr ptr;
