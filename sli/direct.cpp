@@ -37,7 +37,7 @@ stop_replay()
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
 #define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
 
-#define DBG_CYCLE_BREAKER(fmt, ...) DBG_PRINT(fmt, ## __VA_ARGS__)
+#define DBG_CYCLE_BREAKER(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 #define DBG_CALC_CMNS(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 #define DBG_BUILD_CFG(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 
