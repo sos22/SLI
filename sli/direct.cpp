@@ -13,6 +13,25 @@
 
 #define MAX_LOOP_DUPE 0
 
+static double time_replay;
+
+static struct timeval replay_starts;
+static void
+start_replay()
+{
+	gettimeofday(&replay_starts, NULL);
+}
+static void
+stop_replay()
+{
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	now.tv_sec -= replay_starts.tv_sec;
+	now.tv_usec -= replay_starts.tv_usec;
+	time_replay += now.tv_sec + now.tv_usec * 1e-6;
+	memset(&now, 0, sizeof(now));
+}
+    
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
@@ -2062,7 +2081,9 @@ CrashMachine::foldRegisters(VexPtr<MachineState<unsigned long> > &ms,
 	VexPtr<EventRecorder<unsigned long> > er(frer);
 	Interpreter<unsigned long> i(ms->dupeSelf());
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	start_replay();
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, er);
+	stop_replay();
 	return frer->new_cm;
 }
 
@@ -2275,7 +2296,9 @@ CrashMachine::calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > 
 	VexPtr<EventRecorder<unsigned long> > craer(new CRAEventRecorder(this));
 	Interpreter<unsigned long> i(ms->dupeSelf());
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	start_replay();
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, craer);
+	stop_replay();
 }
 
 CrashExpression *
@@ -2833,7 +2856,9 @@ Oracle::collect_interesting_access_log(
 	VexPtr<EventRecorder<unsigned long> > er(new CIALEventRecorder(this));
 	Interpreter<unsigned long> i(ms);
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	start_replay();
 	i.replayLogfile(lf, ptr, tok, NULL, dummy, er);
+	stop_replay();
 }
 
 static CrashMachineNode *
@@ -4384,7 +4409,11 @@ main(int argc, char *argv[])
 
 	LogReaderPtr ptr;
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
+	struct timeval start_read_initial_snapshot;
+	gettimeofday(&start_read_initial_snapshot, NULL);
 	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
+	struct timeval finish_read_initial_snapshot;
+	gettimeofday(&finish_read_initial_snapshot, NULL);
 
 	//ms->findThread(ThreadId(7))->exitted = true;
 	//ms->findThread(ThreadId(10))->exitted = true;
@@ -4428,8 +4457,10 @@ main(int argc, char *argv[])
 		VexPtr<EventRecorder<unsigned long> > mte(new MemTraceExtractor(&oracle));
 		Interpreter<unsigned long> i2(ms->dupeSelf());
 		VexPtr<LogWriter<unsigned long> > dummy_lw(NULL);
+		start_replay();
 		i2.replayLogfile(lf, ptr,
 				 ALLOW_GC, NULL, dummy_lw, mte);
+		stop_replay();
 		ms = i2.currentState;
 	}
 
@@ -4530,6 +4561,9 @@ main(int argc, char *argv[])
 
 	timing("built rip trace");
 
+	struct timeval start_deriving_crash_machine;
+	gettimeofday(&start_deriving_crash_machine, NULL);
+
 	/* Look at the crashing statement to derive a proximal cause
 	 * of the crash. */
 	CrashTimestamp when(crashedThread);
@@ -4588,22 +4622,7 @@ main(int argc, char *argv[])
 
 	/* Install the proximal cause, so that we have something to
 	   bootstrap with. */
-	for (CrashMachine::contentT::iterator it = cm->content->begin();
-	     it != cm->content->end();
-	     it++)
-		for (gc_map<unsigned long,bool>::iterator it2 = it.value().second->begin();
-		     it2 != it.value().second->end();
-		     it2++)
-			;
-
         cm->set(when, cmn);
-	for (CrashMachine::contentT::iterator it = cm->content->begin();
-	     it != cm->content->end();
-	     it++)
-		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
-		     it2 != it.value().second->end();
-		     it2++)
-			;
 
 	/* Returning from the function which crashed is assumed to
 	   mean that the bug has been averted. */
@@ -4620,14 +4639,6 @@ main(int argc, char *argv[])
 					abstractStoresT()));
 		}
 	}
-
-	for (CrashMachine::contentT::iterator it = cm->content->begin();
-	     it != cm->content->end();
-	     it++)
-		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
-		     it2 != it.value().second->end();
-		     it2++)
-			;
 
 	/* Incorporate stuff from the dynamic trace in reverse
 	 * order. */
@@ -4664,21 +4675,11 @@ main(int argc, char *argv[])
 
 	timing("built crash machine");
 
-	for (CrashMachine::contentT::iterator it = cm->content->begin();
-	     it != cm->content->end();
-	     it++)
-		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
-		     it2 != it.value().second->end();
-		     it2++)
-			;
 	cm->deduplicate();
-	for (CrashMachine::contentT::iterator it = cm->content->begin();
-	     it != cm->content->end();
-	     it++)
-		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
-		     it2 != it.value().second->end();
-		     it2++)
-			;
+
+	struct timeval finish_deriving_crash_machine;
+	gettimeofday(&finish_deriving_crash_machine, NULL);
+
 	timing("Done CMN de-duplicate 1\n");
 
         /* Now try to figure out what the relevant addresses are for
@@ -4765,6 +4766,8 @@ main(int argc, char *argv[])
 	cm->deduplicate();
 	timing("Done CMN de-duplicate 3\n");
 
+	struct timeval start_deriving_fixes;
+	gettimeofday(&start_deriving_fixes, NULL);
 	/* Now, for each machine, walk over the relevant address logs
 	 * and figure out when the CMN goes green and red. */
 	std::set<SuggestedFix> csectPool;
@@ -4779,6 +4782,8 @@ main(int argc, char *argv[])
 		       cmn_it.key().name());
 		LibVEX_maybe_gc(ALLOW_GC);
 	}
+	struct timeval finish_deriving_fixes;
+	gettimeofday(&finish_deriving_fixes, NULL);
 
 	for (std::set<SuggestedFix>::iterator it = csectPool.begin();
 	     it != csectPool.end();
@@ -4787,6 +4792,21 @@ main(int argc, char *argv[])
 	}
 
 	timing("all done");
+
+	timing("By class: initial snapshot %f, replay %f, building CM %f, gen fixes %f\n",
+	       finish_read_initial_snapshot.tv_sec -
+	       start_read_initial_snapshot.tv_sec +
+	       1e-6 * (finish_read_initial_snapshot.tv_usec -
+		       start_read_initial_snapshot.tv_usec),
+	       time_replay,
+	       finish_deriving_crash_machine.tv_sec -
+	       start_deriving_crash_machine.tv_sec +
+	       1e-6 * (finish_deriving_crash_machine.tv_usec -
+		       start_deriving_crash_machine.tv_usec),
+	       finish_deriving_fixes.tv_sec -
+	       start_deriving_fixes.tv_sec +
+	       1e-6 * (finish_deriving_fixes.tv_usec -
+		       start_deriving_fixes.tv_usec));
 
 	timing(NULL);
 	dbg_break("finished");

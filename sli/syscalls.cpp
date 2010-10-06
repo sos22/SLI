@@ -348,7 +348,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 		case FUTEX_WAKE_OP:
 			break;
 		default:
-			throw UnknownSyscallException(force(sysnr));			
+			break;
 		}
 		break;
 	case __NR_set_tid_address: /* 218 */
