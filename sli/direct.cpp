@@ -1594,8 +1594,12 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 	class FoldInRegistersMapper : public CPMapper {
 	public:
 		Thread<unsigned long> *thr;
-		FoldInRegistersMapper(Thread<unsigned long> *_thr)
-			: thr(_thr)
+		MachineState<unsigned long> *ms;
+		const concreteStoresT &concreteStores;
+		FoldInRegistersMapper(Thread<unsigned long> *_thr,
+				      MachineState<unsigned long> *_ms,
+				      const concreteStoresT &_concreteStores)
+			: thr(_thr), ms(_ms), concreteStores(_concreteStores)
 		{
 		}
 		CrashExpression *operator()(CrashExpression *ce)
@@ -1603,6 +1607,14 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 			if (CrashExpressionRegister *cer =
 			    dynamic_cast<CrashExpressionRegister *>(ce)) {
 				return CrashExpressionConst::get(thr->regs.get_reg(cer->offset / 8));
+			}
+			if (CrashExpressionLoad *cel =
+			    dynamic_cast<CrashExpressionLoad *>(ce)) {
+				unsigned long addr = cel->addr->eval(thr, ms, concreteStores);
+				unsigned long rsp = thr->regs.get_reg(REGISTER_IDX(RSP));
+				if (addr >= rsp - 128 && addr < rsp + 4096)
+					return CrashExpressionConst::get(cel->eval(thr, ms, concreteStores));
+
 			}
 			return ce;
 		}
@@ -1700,11 +1712,9 @@ public:
 					     _stores));
 	}
 
-	CrashMachineNode *foldInRegisters(Thread<unsigned long> *thr)
-	{
-		FoldInRegistersMapper firm(thr);
-		return map(firm);
-	}
+	CrashMachineNode *foldInRegisters(Thread<unsigned long> *thr,
+					  MachineState<unsigned long> *ms,
+					  concreteStoresT &stores);
 
 	abstractStoresT stores;
 
@@ -2062,7 +2072,8 @@ public:
 			if (cm->hasKey(ts)) {
 				CrashMachineNode *cmn = cm->get(ts);
 				assert(cmn != NULL);
-				new_cm->set(ts, cmn->foldInRegisters(thr));
+				concreteStoresT stores;
+				new_cm->set(ts, cmn->foldInRegisters(thr, ms, stores));
 			}
 		}
 	}
@@ -2085,6 +2096,65 @@ CrashMachine::foldRegisters(VexPtr<MachineState<unsigned long> > &ms,
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, er);
 	stop_replay();
 	return frer->new_cm;
+}
+
+CrashMachineNode *
+CrashMachineNode::foldInRegisters(Thread<unsigned long> *thr,
+				  MachineState<unsigned long> *ms,
+				  concreteStoresT &concrete_stores)
+{
+	FoldInRegistersMapper firm(thr, ms, concrete_stores);
+	abstractStoresT newAbsStores;
+	unsigned sz = concrete_stores.size();
+	for (abstractStoresT::iterator it = stores.begin();
+	     it != stores.end();
+	     it++) {
+		CrashExpression *addr = it->addr->map(firm);
+		CrashExpression *data = it->data->map(firm);
+		newAbsStores.push_back(abstract_store(addr, data));
+		unsigned long concreteAddr, concreteData;
+		if (addr->isConstant(concreteAddr) &&
+		    data->isConstant(concreteData)) {
+			concrete_stores.push_back(
+				concrete_store(concreteAddr, concreteData));
+		}
+	}
+	unsigned sz2 = concrete_stores.size();
+
+	CrashMachineNode *res;
+
+	switch (type) {
+	case CM_NODE_LEAF:
+		res = CrashMachineNode::leaf(origin_rip,
+					     leafCond->map(firm), newAbsStores);
+		break;
+	case CM_NODE_BRANCH: {
+		CrashExpression *b = branchCond->map(firm);
+		CrashMachineNode *t = NULL;
+		CrashMachineNode *f = NULL;
+		if (trueTarget) {
+			t = trueTarget->foldInRegisters(thr, ms, concrete_stores);
+			assert(concrete_stores.size() == sz2);
+		}
+		if (falseTarget) {
+			f = falseTarget->foldInRegisters(thr, ms, concrete_stores);
+			assert(concrete_stores.size() == sz2);
+		}
+		res = CrashMachineNode::branch(origin_rip,
+					       b, t, f, newAbsStores);
+		break;
+	}
+	case CM_NODE_STUB:
+		res = CrashMachineNode::stub(origin_rip, newAbsStores);
+		break;
+	default:
+		abort();
+	}
+
+	assert(concrete_stores.size() == sz2);
+	(void)sz2;
+	concrete_stores.resize(sz);
+	return res;
 }
 
 /* Rebuild the hash table, discarding all of the duplicate CMNs which
