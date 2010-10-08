@@ -7,3 +7,7 @@
 #ifndef ASSERT_FAILED_ADDRESS
 #define ASSERT_FAILED_ADDRESS 0x40a770
 #endif
+
+#ifndef CRASHED_THREAD
+#define CRASHED_THREAD 2
+#endif

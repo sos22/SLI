@@ -1985,14 +1985,16 @@ public:
 	NAMED_CLASS
 };
 
+static bool cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2);
+
 class CrashMachine : public GarbageCollected<CrashMachine> {
 	friend class CRAEventRecorder;
 
-	static void visit_content_fn(std::pair<CrashMachineNode *,
+	static void visit_content_fn(std::pair<std::vector<CrashMachineNode *>,
 				     gc_map<unsigned long, bool> *> &v,
 				     HeapVisitor &hv)
 	{
-		hv(v.first);
+		visit_container(v.first, hv);
 		hv(v.second);
 	}
 
@@ -2000,7 +2002,7 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 					      MachineState<unsigned long> *ms);
 public:
 	typedef gc_map<CrashTimestamp,
-		       std::pair<CrashMachineNode *, gc_map<unsigned long, bool> *>,
+		       std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> *>,
 		       __default_hash_function<CrashTimestamp>,
 		       __default_eq_function<CrashTimestamp>,
 		       visit_content_fn> contentT;
@@ -2013,7 +2015,7 @@ public:
 			return true;
 		return content->hasKey(ts);
 	}
-	CrashMachineNode *get(const CrashTimestamp &ts) {
+	CrashMachineNode *get(const CrashTimestamp &ts, int idx) {
 		/* We know where __assert_fail lives. */
 		if (ts.rip == ASSERT_FAILED_ADDRESS) {
 			return CrashMachineNode::leaf(
@@ -2021,15 +2023,29 @@ public:
 				CrashExpressionConst::get(1),
 				abstractStoresT());
 		}
-		return content->get(ts).first;
+		return content->get(ts).first[idx];
 	}
-	void set(const CrashTimestamp &ts, CrashMachineNode *cmn)
+	void set(const CrashTimestamp &ts, CrashMachineNode *cmn, bool extend)
 	{
+		if (extend && content->hasKey(ts)) {
+			std::pair<std::vector<CrashMachineNode *>,
+				gc_map<unsigned long, bool> *> &slot(content->get(ts));
+			for (std::vector<CrashMachineNode *>::iterator it=
+				     slot.first.begin();
+			     it != slot.first.end();
+			     it++)
+				if (cmns_bisimilar(cmn, *it))
+					return;
+			slot.first.push_back(cmn);
+			return;
+		}
 		gc_map<unsigned long, bool> *t =
 			new gc_map<unsigned long, bool>();
+		std::vector<CrashMachineNode *> v;
+		v.push_back(cmn);
 		content->set(ts,
-			     std::pair<CrashMachineNode *, gc_map<unsigned long, bool> * >
-			     (cmn, t));
+			     std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> * >
+			     (v, t));
 	}
 
 	void calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
@@ -2070,10 +2086,10 @@ public:
 			CrashTimestamp ts(thr);
 			ts.rip = ie->rip;
 			if (cm->hasKey(ts)) {
-				CrashMachineNode *cmn = cm->get(ts);
+				CrashMachineNode *cmn = cm->get(ts, 0);
 				assert(cmn != NULL);
 				concreteStoresT stores;
-				new_cm->set(ts, cmn->foldInRegisters(thr, ms, stores));
+				new_cm->set(ts, cmn->foldInRegisters(thr, ms, stores), true);
 			}
 		}
 	}
@@ -2172,29 +2188,51 @@ CrashMachine::deduplicate()
 	for (contentT::iterator it = content->begin();
 	     it != content->end();
 	     it++) {
-		CrashMachineNode *cmn = it.value().first;
+		std::vector<CrashMachineNode *> &cmn(it.value().first);
 		gc_map<unsigned long, bool> *s = it.value().second;
 		CrashTimestamp origin;
 		origin = it.key();
-		unsigned h = cmn->hash() % nr_heads;
-		CrashMachineNode *cursor;
-		for (cursor = heads[h]; cursor && !cursor->eq(cmn); cursor = cursor->pool_next)
-			;
-		if (!cursor) {
-			cmn->pool_next = heads[h];
-			heads[h] = cmn;
-			newContent->set(origin, std::pair<CrashMachineNode *, gc_map<unsigned long, bool> *>(cmn, s));
-			kept++;
-			printf("Keep %s (%s) at %p\n",
-			       it.key().name(),
-			       it.value().first->name(),
-			       it.value().first);
-		} else {
-			printf("Drop %s (%s); duplicates %p\n",
-			       it.key().name(),
-			       it.value().first->name(),
-			       cursor);
-			dropped++;
+		for (std::vector<CrashMachineNode *>::iterator it2 = cmn.begin();
+		     it2 != cmn.end();
+		     it2++) {
+			unsigned h = (*it2)->hash() % nr_heads;
+			CrashMachineNode *cursor;
+			for (cursor = heads[h]; cursor && !cursor->eq(*it2); cursor = cursor->pool_next)
+				;
+			if (!cursor) {
+				(*it2)->pool_next = heads[h];
+				heads[h] = *it2;
+				bool insert = true;
+				if (newContent->hasKey(origin)) {
+					std::pair<std::vector<CrashMachineNode *>,
+						gc_map<unsigned long, bool> *> &slot(newContent->get(origin));
+					insert = false;
+					for (std::vector<CrashMachineNode *>::iterator it3 =
+						     slot.first.begin();
+					     !insert && it3 != slot.first.end();
+					     it3++)
+						if (cmns_bisimilar(*it2, *it3))
+							insert = true;
+					if (!insert)
+						slot.first.push_back(*it2);
+				}
+				if (insert) {
+					std::vector<CrashMachineNode *> v;
+					v.push_back(*it2);
+					newContent->set(origin, std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> *>(v, s));
+				}
+				kept++;
+				printf("Keep %s (%s) at %p\n",
+				       it.key().name(),
+				       (*it2)->name(),
+				       *it2);
+			} else {
+				printf("Drop %s (%s); duplicates %p\n",
+				       it.key().name(),
+				       (*it2)->name(),
+				       cursor);
+				dropped++;
+			}
 		}
 	}
 
@@ -2318,8 +2356,8 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
 					       MachineState<unsigned long> *ms)
 {
 	CrashTimestamp ts(thr);
-	std::pair<CrashMachineNode *, gc_map<unsigned long, bool> *> &slot(content->get(ts));
-	assert(slot.first != NULL);
+	std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> *> &slot(content->get(ts));
+	assert(slot.first.size() != 0);
 
 	/* We're only interested in the results of the *last*
 	   execution of this instruction */
@@ -2327,7 +2365,11 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
 
 	/* Do it. */
 	concreteStoresT concreteStores;
-	slot.first->build_relevant_address_list(thr, ms, slot.second, concreteStores);
+	for (std::vector<CrashMachineNode *>::iterator it =
+		     slot.first.begin();
+	     it != slot.first.end();
+	     it++)
+		(*it)->build_relevant_address_list(thr, ms, slot.second, concreteStores);
 	assert(concreteStores.size() == 0);
 }
 
@@ -2349,7 +2391,6 @@ public:
 			if (ie->rip == 0x7f860d33acce)
 				dbg_break("Evaluating at the magic address\n");
 			if (cm->hasKey(ts)) {
-				assert(cm->get(ts) != NULL);
 				cm->calc_relevant_addresses_snapshot(thr, ms);
 			}
 		}
@@ -3683,7 +3724,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 			if (node->cmn)
 				continue;
 			if (cm->hasKey(node->when)) {
-				node->cmn = cm->get(node->when);
+				node->cmn = cm->get(node->when, 0);
 				progress = true;
 				DBG_CALC_CMNS("%s: %s from crash machine\n", node->when.name(), node->cmn->name());
 				continue;
@@ -4026,7 +4067,7 @@ buildCrashMachineNode(MachineState<unsigned long> *ms,
 		      const Oracle &oracle)
 {
 	if (cm->hasKey(when))
-		return cm->get(when);
+		return cm->get(when, 0);
 	CrashCFG *cfg = new CrashCFG();
 	cfg->add_root(when);
 	cfg->build(ms, oracle, cm, when.callStack.size() == 0);
@@ -4228,7 +4269,7 @@ public:
 };
 
 static void
-findRemoteCriticalSections(CrashMachineNode *cmn,
+findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 			   const CrashTimestamp &when,
 			   const Oracle &oracle,
 			   MachineState<unsigned long> *ms,
@@ -4236,10 +4277,20 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 {
 	std::map<unsigned long, unsigned long> memory;
 	unsigned nr_good, nr_bad, nr_unknown;
+	bool definitelyCrash = true;
+	bool definitelyNotCrash = true;
 
-	cmn = cmn->resolveLoads(memory, ms);
-	cmn = simplify_cmn(cmn);
-	if (cmn->willDefinitelyCrash() || cmn->willDefinitelyNotCrash())
+	for (std::vector<CrashMachineNode *>::reverse_iterator it = cmns.rbegin();
+	     it != cmns.rend();
+	     it++) {
+		*it = simplify_cmn((*it)->resolveLoads(memory, ms));
+		if (!(*it)->willDefinitelyCrash())
+			definitelyCrash = false;
+		if (!(*it)->willDefinitelyNotCrash())
+			definitelyNotCrash = false;
+		break;
+	}
+	if (definitelyCrash || definitelyNotCrash)
 		return;
 
 	SuggestedFix sab;
@@ -4269,16 +4320,27 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 	     m_it++) {
 		memory[m_it->addr] = m_it->val;
 		concreteStoresT cs;
-		CrashMachineNode *new_cmn = cmn->resolveLoads(memory, ms, cs, addrsRead);
-		new_cmn = simplify_cmn(new_cmn);
-		if (new_cmn->willDefinitelyCrash()) {
+
+		definitelyCrash = true;
+		definitelyNotCrash = true;
+		for (std::vector<CrashMachineNode *>::reverse_iterator it = cmns.rbegin();
+		     it != cmns.rend();
+		     it++) {
+			CrashMachineNode *new_cmn = simplify_cmn((*it)->resolveLoads(memory, ms, cs, addrsRead));
+			if (!new_cmn->willDefinitelyCrash())
+				definitelyCrash = false;
+			if (!new_cmn->willDefinitelyNotCrash())
+				definitelyNotCrash = false;
+			break;
+		}
+		if (definitelyCrash && !definitelyNotCrash) {
 			if (have_first_remote_good) {
 				if (!in_remote_csect)
 					currentRemoteBlock.events.push_back(m_it->rip);
 				in_remote_csect = true;
 			}
 			nr_bad++;
-		} else if (new_cmn->willDefinitelyNotCrash()) {
+		} else if (definitelyNotCrash && !definitelyCrash) {
 			if (in_remote_csect) {
 				currentRemoteBlock.events.push_back(m_it->rip);
 				sab.remote.insert(currentRemoteBlock);
@@ -4298,7 +4360,10 @@ findRemoteCriticalSections(CrashMachineNode *cmn,
 		sab.unknown = nr_unknown;
 		sab.good = nr_good;
 		CollectLoadsMapper clm(sab.local.events);
-		cmn->map(clm);
+		for (std::vector<CrashMachineNode *>::iterator cmn = cmns.begin();
+		     cmn != cmns.end();
+		     cmn++)
+			(*cmn)->map(clm);
 		for (std::set<unsigned long>::iterator it = addrsRead.begin();
 		     it != addrsRead.end();
 		     it++) {
@@ -4498,7 +4563,7 @@ main(int argc, char *argv[])
 	   which thread got signalled.  Could trivially do that by
 	   just looking at the last record, but I'm lazy, so hard-code
 	   for now. */
-	oracle.crashingTid = ThreadId(2);
+	oracle.crashingTid = ThreadId(CRASHED_THREAD);
 
 #if 0
 	VexPtr<Thread<unsigned long> > crashedThread;
@@ -4692,7 +4757,7 @@ main(int argc, char *argv[])
 
 	/* Install the proximal cause, so that we have something to
 	   bootstrap with. */
-        cm->set(when, cmn);
+        cm->set(when, cmn, false);
 
 	/* Returning from the function which crashed is assumed to
 	   mean that the bug has been averted. */
@@ -4706,7 +4771,8 @@ main(int argc, char *argv[])
 				CrashMachineNode::leaf(
 					tmpTs.rip,
 					CrashExpressionConst::get(0),
-					abstractStoresT()));
+					abstractStoresT()),
+				false);
 		}
 	}
 
@@ -4726,7 +4792,7 @@ main(int argc, char *argv[])
 			       cmn->name());
 			cmn = drop_late_stores(cmn);
 			cmn = simplify_cmn(cmn);
-			cm->set(*it, cmn);
+			cm->set(*it, cmn, false);
 			timing("built cmn for %s", (*it).name());
 			printf("CMN for %s is %s\n",
 			       (*it).name(), cmn->name());
@@ -4738,7 +4804,7 @@ main(int argc, char *argv[])
 				CrashTimestamp t;
 				t = *it;
 				t.rip = 0xc822ab;
-				cm->set(t, cmn);
+				cm->set(t, cmn, false);
 			}
 		}
 	}
@@ -4771,7 +4837,7 @@ main(int argc, char *argv[])
 		printf("CMN %s %lx -> %s ",
 		       it.key().name(),
 		       it.key().rip,
-		       it.value().first->name());
+		       it.value().first[0]->name());
 		for (gc_map<unsigned long, bool>::iterator it2 = it.value().second->begin();
 		     it2 != it.value().second->end();
 		     it2++) {
@@ -4807,8 +4873,10 @@ main(int argc, char *argv[])
 	     cmn_it++) {
 		timing("removing constant references from %s",
 		       cmn_it.key().name());
-		cmn_it.value().first = removeProbablyConstantReferences(cmn_it.value().first, oracle, ms,
-									crashedThread);
+		cmn_it.value().first[0] = removeProbablyConstantReferences(cmn_it.value().first[0],
+									   oracle,
+									   ms,
+									   crashedThread);
 	}
 
 	timing("Done remove constant references\n");
@@ -4820,16 +4888,20 @@ main(int argc, char *argv[])
 	     cmn_it++) {
 		printf("Pre-fold %s -> %s\n",
 		       cmn_it.key().name(),
-		       cmn_it.value().first->name());
+		       cmn_it.value().first[0]->name());
 	}
 	snapshotMs = sle.ms->dupeSelf();
 	cm = cm->foldRegisters(snapshotMs, lf, sle.ptr, ALLOW_GC);
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
-		printf("Post-fold %s -> %s\n",
-		       cmn_it.key().name(),
-		       cmn_it.value().first->name());
+		for (std::vector<CrashMachineNode *>::iterator it2 =
+			     cmn_it.value().first.begin();
+		     it2 != cmn_it.value().first.end();
+		     it2++)
+			printf("Post-fold %s -> %s\n",
+			       cmn_it.key().name(),
+			       (*it2)->name());
 	}
 
 	timing("Done fold registers.\n");
