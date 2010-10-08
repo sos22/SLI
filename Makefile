@@ -3,7 +3,7 @@ all: real_all
 OPTIMIZE=n
 PROFILE_FLAGS=
 TARGETS=
-CPPFLAGS=-DSLI
+CPPFLAGS=-DSLI -include config.h
 CFLAGS=-Wall -g $(CPPFLAGS) $(PROFILE_FLAGS) $(OPTIMIZE_FLAGS) -fno-strict-aliasing
 CXXFLAGS=$(CFLAGS)
 clean_files=$(TARGETS) .depends
@@ -31,5 +31,8 @@ real_all: $(TARGETS)
 
 .depends: $(all_makefiles)
 	make -f Makefile.mk mk_depends
+
+extra_config.h:
+	touch extra_config.h
 
 include .depends
