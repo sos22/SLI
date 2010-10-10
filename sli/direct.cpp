@@ -3917,8 +3917,6 @@ mergeCmns(CrashMachineNode *base, CrashMachineNode *sub)
 	abort();
 }
 
-#define DROP_STORES_DEPTH 5
-#define DROP_BRANCHES_DEPTH 10
 static CrashMachineNode *
 drop_late_stores(CrashMachineNode *cmn, int depth = 0)
 {
@@ -4288,7 +4286,6 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 			definitelyCrash = false;
 		if (!(*it)->willDefinitelyNotCrash())
 			definitelyNotCrash = false;
-		break;
 	}
 	if (definitelyCrash || definitelyNotCrash)
 		return;
@@ -4331,7 +4328,6 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 				definitelyCrash = false;
 			if (!new_cmn->willDefinitelyNotCrash())
 				definitelyNotCrash = false;
-			break;
 		}
 		if (definitelyCrash && !definitelyNotCrash) {
 			if (have_first_remote_good) {
@@ -4550,9 +4546,11 @@ main(int argc, char *argv[])
 	struct timeval finish_read_initial_snapshot;
 	gettimeofday(&finish_read_initial_snapshot, NULL);
 
-	//ms->findThread(ThreadId(7))->exitted = true;
-	//ms->findThread(ThreadId(10))->exitted = true;
-	
+#ifdef MOZ_BUG
+	ms->findThread(ThreadId(7))->exitted = true;
+	ms->findThread(ThreadId(10))->exitted = true;
+#endif
+
 	timing("read initial snapshot");
 
 	Oracle oracle;
@@ -4821,8 +4819,10 @@ main(int argc, char *argv[])
         /* Now try to figure out what the relevant addresses are for
 	   each CMN.*/
         Thread<unsigned long>::snapshot_log_entry &sle(*crashedThread->snapshotLog.begin());
-	//sle.ms->findThread(ThreadId(7))->exitted = true;
-	//sle.ms->findThread(ThreadId(10))->exitted = true;
+#ifdef MOZ_BUG
+	sle.ms->findThread(ThreadId(7))->exitted = true;
+	sle.ms->findThread(ThreadId(10))->exitted = true;
+#endif
         VexPtr<MachineState<unsigned long> > snapshotMs(sle.ms->dupeSelf());
 	cm->calculate_relevant_addresses(snapshotMs,
 					 lf,

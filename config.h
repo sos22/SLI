@@ -11,3 +11,11 @@
 #ifndef CRASHED_THREAD
 #define CRASHED_THREAD 2
 #endif
+
+#ifndef DROP_STORES_DEPTH
+#define DROP_STORES_DEPTH 5
+#endif
+
+#ifndef DROP_BRANCHES_DEPTH
+#define DROP_BRANCHES_DEPTH 10
+#endif
