@@ -25,20 +25,20 @@ main()
 
 	PMap *pmap1 = PMap::empty();
 
-	MemoryChunk<unsigned long> *mc1;
+	MemoryChunk *mc1;
 
 	printf("Lookup in an empty map -> NULL\n");
 	unsigned long off1;
 	mc1 = pmap1->lookup(PhysicalAddress(), &off1);
 	assert(mc1 == NULL);
 
-	mc1 = MemoryChunk<unsigned long>::allocate();
+	mc1 = MemoryChunk::allocate();
 	PhysicalAddress pa1;
 
 	printf("Introduce a memory chunk and make sure we can get it back again.\n");
 	pa1 = pmap1->introduce(mc1);
 	printf("pa1 %lx\n", pa1._pa);
-	MemoryChunk<unsigned long> *mc2 = pmap1->lookup(pa1, &off1);
+	MemoryChunk *mc2 = pmap1->lookup(pa1, &off1);
 	assert(mc1 == mc2);
 	assert(off1 == 0);
 	printf("Check that offsets work.\n");
@@ -46,15 +46,15 @@ main()
 	assert(mc1 == mc2);
 	assert(off1 == 10);
 	printf("Make sure that looking up a bad address returns NULL.\n");
-	mc2 = pmap1->lookup(pa1 + MemoryChunk<unsigned long>::size, &off1);
+	mc2 = pmap1->lookup(pa1 + MemoryChunk::size, &off1);
 	assert(mc2 == NULL);
 
 	printf("Introduce a second chunk and make sure that they stay separate.\n");
-	mc2 = MemoryChunk<unsigned long>::allocate();
+	mc2 = MemoryChunk::allocate();
 	PhysicalAddress pa2 = pmap1->introduce(mc2);
 	printf("pa2 %lx\n", pa2._pa);
 	assert(pa2 != pa1);
-	MemoryChunk<unsigned long> *mc3;
+	MemoryChunk *mc3;
 	mc3 = pmap1->lookup(pa1, &off1);
 	assert(mc3 == mc1);
 	mc3 = pmap1->lookup(pa2, &off1);
@@ -70,8 +70,8 @@ main()
 	assert(mc2 == NULL);
 
 	printf("Now check that it's possible to hold references to the chunks\n");
-	mc1 = MemoryChunk<unsigned long>::allocate();
-	mc2 = MemoryChunk<unsigned long>::allocate();
+	mc1 = MemoryChunk::allocate();
+	mc2 = MemoryChunk::allocate();
 	unsigned mc1_serial = mc1->serial;
 	unsigned mc2_serial = mc2->serial;
 	pa1 = pmap1->introduce(mc1);
@@ -101,7 +101,7 @@ main()
 	assert(mc3 == NULL);
 
 	printf("State forking...\n");
-	mc1 = MemoryChunk<unsigned long>::allocate();
+	mc1 = MemoryChunk::allocate();
 	unsigned long b[12];
 	for (unsigned x = 0; x < 12; x++)
 		b[x] = "Hello world"[x];
@@ -111,7 +111,7 @@ main()
 	PMap *pmap3 = pmap1->dupeSelf();
 
 	printf("Check forked state can see parent's MCs\n");
-	const MemoryChunk<unsigned long> *cmc = pmap2->lookupConst(pa1, &off1);
+	const MemoryChunk *cmc = pmap2->lookupConst(pa1, &off1);
 	assert(cmc == mc1);
 	cmc = pmap3->lookupConst(pa1, &off1);
 	assert(cmc == mc1);

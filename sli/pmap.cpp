@@ -5,7 +5,7 @@
 #endif
 
 PMapEntry *PMapEntry::alloc(PhysicalAddress pa,
-			    MemoryChunk<unsigned long> *mc,
+			    MemoryChunk *mc,
 			    bool readonly)
 {
 	PMapEntry *work = new PMapEntry();
@@ -22,7 +22,7 @@ PMapEntry *PMap::findPme(PhysicalAddress pa, unsigned h) const
 	PMapEntry *pme;
 	for (pme = heads[h];
 	     pme != NULL && (pa < pme->pa ||
-			     pa >= pme->pa + MemoryChunk<unsigned long>::size);
+			     pa >= pme->pa + MemoryChunk::size);
 	     pme = pme->next)
 		;
 	if (!pme)
@@ -41,7 +41,7 @@ PMapEntry *PMap::findPme(PhysicalAddress pa, unsigned h) const
 	return pme;
 }
 
-MemoryChunk<unsigned long> *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
+MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 {
 	unsigned h = paHash(pa);
 	PMapEntry *pme = findPme(pa, h);
@@ -62,7 +62,7 @@ MemoryChunk<unsigned long> *PMap::lookup(PhysicalAddress pa, unsigned long *mc_s
 	} else if (!parent) {
 		return NULL;
 	} else {
-		const MemoryChunk<unsigned long> *parent_mc = parent->lookupConst(pa, mc_start, false);
+		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start, false);
 		if (!parent_mc)
 			return NULL;
 
@@ -82,7 +82,7 @@ MemoryChunk<unsigned long> *PMap::lookup(PhysicalAddress pa, unsigned long *mc_s
 	}
 }
 
-const MemoryChunk<unsigned long> *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start,
+const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start,
 						    bool pull_up) const
 {
 	unsigned h = paHash(pa);
@@ -94,10 +94,10 @@ const MemoryChunk<unsigned long> *PMap::lookupConst(PhysicalAddress pa, unsigned
 #endif
 		return pme->mc;
 	} else if (parent) {
-		const MemoryChunk<unsigned long> *parent_mc = parent->lookupConst(pa, mc_start, false);
+		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start, false);
 		if (pull_up) {
 			PMapEntry *newPme;
-			newPme = PMapEntry::alloc(pa - *mc_start, const_cast<MemoryChunk<unsigned long> *>(parent_mc), true);
+			newPme = PMapEntry::alloc(pa - *mc_start, const_cast<MemoryChunk *>(parent_mc), true);
 			newPme->next = heads[h];
 			newPme->pprev = &heads[h];
 			if (newPme->next)
@@ -114,11 +114,11 @@ const MemoryChunk<unsigned long> *PMap::lookupConst(PhysicalAddress pa, unsigned
 	}
 }
 
-PhysicalAddress PMap::introduce(MemoryChunk<unsigned long> *mc)
+PhysicalAddress PMap::introduce(MemoryChunk *mc)
 {
 	PhysicalAddress pa = nextPa;
 	mc->base = pa;
-	nextPa = nextPa + MemoryChunk<unsigned long>::size;
+	nextPa = nextPa + MemoryChunk::size;
 	PMapEntry *pme = PMapEntry::alloc(pa, mc, false);
 	unsigned h = paHash(pa);
 	pme->next = heads[h];
@@ -150,7 +150,7 @@ PMap *PMap::dupeSelf(void) const
 
 unsigned PMap::paHash(PhysicalAddress pa)
 {
-	return (pa._pa / MemoryChunk<unsigned long>::size) % nrHashBuckets;
+	return (pa._pa / MemoryChunk::size) % nrHashBuckets;
 }
 
 void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
@@ -167,7 +167,7 @@ void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 		pme = &cursor->heads[h];
 		while (*pme) {
 			if ( pa >= (*pme)->pa &&
-			     pa < (*pme)->pa + MemoryChunk<unsigned long>::size ) {
+			     pa < (*pme)->pa + MemoryChunk::size ) {
 				hv(*pme);
 				return;
 			}

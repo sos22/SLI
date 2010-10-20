@@ -1,25 +1,25 @@
 #include <bitset>
 #include "sli.h"
 
-unsigned MemoryChunk<unsigned long>::serial_start = 0xbeeffeed;
+unsigned MemoryChunk::serial_start = 0xbeeffeed;
 
-MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::allocate()
+MemoryChunk *MemoryChunk::allocate()
 {
-	MemoryChunk<unsigned long> *mc = new MemoryChunk<unsigned long>();
+	MemoryChunk *mc = new MemoryChunk();
 	mc->serial = serial_start++;
 	return mc;
 }
 
-MemoryChunk<unsigned long> *MemoryChunk<unsigned long>::dupeSelf() const
+MemoryChunk *MemoryChunk::dupeSelf() const
 {
-	MemoryChunk<unsigned long> *r = new MemoryChunk<unsigned long>();
+	MemoryChunk *r = new MemoryChunk();
 	sanity_check();
 	memcpy(r, this, sizeof(*r));
 	r->sanity_check();
 	return r;
 }
 
-void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, const unsigned long *source, unsigned nr_bytes,
+void MemoryChunk::write(EventTimestamp when, unsigned offset, const unsigned long *source, unsigned nr_bytes,
 				       unsigned long sa)
 {
 	assert(!frozen);
@@ -32,7 +32,7 @@ void MemoryChunk<unsigned long>::write(EventTimestamp when, unsigned offset, con
 	}
 }
 
-EventTimestamp MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
+EventTimestamp MemoryChunk::read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
 						unsigned long *storeAddr) const
 {
 	if (storeAddr)
@@ -45,7 +45,7 @@ EventTimestamp MemoryChunk<unsigned long>::read(unsigned offset, unsigned long *
 }
 
 void
-MemoryChunk<unsigned long>::sanity_check(void) const
+MemoryChunk::sanity_check(void) const
 {
 #ifndef NDEBUG
 	unsigned long desired_csum;

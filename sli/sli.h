@@ -531,21 +531,17 @@ public:
 
 #define MEMORY_CHUNK_SIZE 4096
 
-template <typename ait> class MemoryChunk;
-
-template <>
-class MemoryChunk<unsigned long> : public GarbageCollected<MemoryChunk<unsigned long> > {
+class MemoryChunk : public GarbageCollected<MemoryChunk> {
 public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
-	static MemoryChunk<unsigned long> *allocate();
+	static MemoryChunk *allocate();
 
 	void write(EventTimestamp, unsigned offset, const unsigned long *source, unsigned nr_bytes,
 		   unsigned long sa);
 	EventTimestamp read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
 			    unsigned long *sa = NULL) const;
 
-	MemoryChunk<unsigned long> *dupeSelf() const;
-	template <typename nt> MemoryChunk<nt> *abstract() const;
+	MemoryChunk *dupeSelf() const;
 
 	PhysicalAddress base;
 	unsigned serial;
@@ -578,11 +574,11 @@ private:
 class PMapEntry : public GarbageCollected<PMapEntry> {
 public:
 	PhysicalAddress pa;
-	MemoryChunk<unsigned long> *mc;
+	MemoryChunk *mc;
 	PMapEntry *next;
 	PMapEntry **pprev;
 	bool readonly;
-	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk<unsigned long> *mc, bool readonly);
+	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc, bool readonly);
 	void visit(HeapVisitor &hv) { hv(mc); }
 	void destruct() {
 		*pprev = next;
@@ -610,13 +606,13 @@ public:
 	/* Look up the memory chunk for a physical address.  On
 	   success, *mc_start is set to the offset of the address in
 	   the chunk. */
-	MemoryChunk<unsigned long> *lookup(PhysicalAddress pa, unsigned long *mc_start);
-	const MemoryChunk<unsigned long> *lookupConst(PhysicalAddress pa, unsigned long *mc_start,
-					    bool pull_up = true) const;
+	MemoryChunk *lookup(PhysicalAddress pa, unsigned long *mc_start);
+	const MemoryChunk *lookupConst(PhysicalAddress pa, unsigned long *mc_start,
+				       bool pull_up = true) const;
 
 	/* Add a new chunk to the map, and return a newly-assigned
 	   physical address for it. */
-	PhysicalAddress introduce(MemoryChunk<unsigned long> *mc);
+	PhysicalAddress introduce(MemoryChunk *mc);
 
 	static PMap *empty();
 	PMap *dupeSelf() const;

@@ -17,11 +17,11 @@ AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
 
 	vamap->unmap(start, size);
 	while (size != 0) {
-		MemoryChunk<unsigned long> *chunk = MemoryChunk<unsigned long>::allocate();
+		MemoryChunk *chunk = MemoryChunk::allocate();
 		PhysicalAddress pa = pmap->introduce(chunk);
 		vamap->addTranslation(start, pa, prot, flags);
-		start += MemoryChunk<unsigned long>::size;
-		size -= MemoryChunk<unsigned long>::size;
+		start += MemoryChunk::size;
+		size -= MemoryChunk::size;
 	}
 
 	findInterestingFunctions();
@@ -103,7 +103,7 @@ AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned si
 				throw BadMemoryException<unsigned long>(true, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			MemoryChunk<unsigned long> *mc = pmap->lookup(pa, &mc_start);
+			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
@@ -266,7 +266,7 @@ EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
 				throw BadMemoryException<unsigned long>(false, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			const MemoryChunk<unsigned long> *mc = pmap->lookupConst(pa, &mc_start);
+			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
@@ -339,7 +339,7 @@ bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
 				return false;
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			const MemoryChunk<unsigned long> *mc = pmap->lookupConst(pa, &mc_start);
+			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time >
@@ -490,12 +490,12 @@ void AddressSpace::dumpSnapshot(LogWriter<unsigned long> *lw) const
 				r = vamap->translate(cursor_va, &pa);
 				assert(r);
 				unsigned long off;
-				const MemoryChunk<unsigned long> *mc = pmap->lookupConst(pa, &off);
+				const MemoryChunk *mc = pmap->lookupConst(pa, &off);
 				assert(off == 0);
-				unsigned long *buf = (unsigned long *)calloc(MemoryChunk<unsigned long>::size, sizeof(unsigned long));
-				mc->read(0, buf, MemoryChunk<unsigned long>::size);
+				unsigned long *buf = (unsigned long *)calloc(MemoryChunk::size, sizeof(unsigned long));
+				mc->read(0, buf, MemoryChunk::size);
 				lw->append(new LogRecordMemory<unsigned long>(ThreadId(0),
-								    MemoryChunk<unsigned long>::size,
+								    MemoryChunk::size,
 								    mkConst<unsigned long>(cursor_va),
 								    buf),
 					   0);
