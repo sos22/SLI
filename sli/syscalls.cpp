@@ -18,7 +18,7 @@ isErrnoSysres(long x)
 
 template<typename ait> void
 process_memory_records(VexPtr<AddressSpace> &addrSpace,
-		       VexPtr<LogReader<ait> > &lf,
+		       VexPtr<LogReader > &lf,
 		       LogReaderPtr startOffset,
 		       LogReaderPtr *endOffset,
 		       VexPtr<LogWriter<ait> > &lw,

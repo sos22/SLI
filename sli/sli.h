@@ -663,16 +663,14 @@ public:
 	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
 };
 
-template <typename ait>
-class LogReader : public GarbageCollected<LogReader<ait> > {
+class LogReader : public GarbageCollected<LogReader> {
 public:
 	virtual LogRecord *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const = 0;
 	virtual ~LogReader() {}
-	template <typename new_type> LogReader<new_type> *abstract() const;
 	NAMED_CLASS
 };
 
-class LogFile : public LogReader<unsigned long> {
+class LogFile : public LogReader {
 	int fd;
 	struct _ptr {
 		uint64_t off;
@@ -726,10 +724,10 @@ public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
 	unsigned long nrEvents;
-	static MachineState *initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
-								LogReaderPtr startPtr,
-								LogReaderPtr *endPtr,
-								GarbageCollectionToken t);
+	static MachineState *initialMachineState(VexPtr<LogReader> &lf,
+						 LogReaderPtr startPtr,
+						 LogReaderPtr *endPtr,
+						 GarbageCollectionToken t);
 
 	void registerThread(Thread *t) {
 		ThreadId tid;
@@ -820,7 +818,7 @@ public:
 
 class Interpreter {
 	void replayFootstep(const LogRecordFootstep &lrf,
-			    const LogReader<unsigned long> *lr,
+			    const LogReader *lr,
 			    LogReaderPtr startOffset,
 			    LogReaderPtr *endOffset);
 
@@ -829,20 +827,20 @@ public:
 	Interpreter(MachineState *rootMachine) : currentState(rootMachine)
 	{
 	}
-	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
+	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken,
 			   LogReaderPtr *endingPoint,
 			   VexPtr<LogWriter<unsigned long> > &log,
 			   VexPtr<EventRecorder<unsigned long> > &er,
 			   EventTimestamp *lastEvent = NULL);
-	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
+	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok)
 	{
 		replayLogfile(lf, startingPoint, tok, NULL);
 	}
-	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
+	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok,
 			   LogReaderPtr *endingPoint)
@@ -850,7 +848,7 @@ public:
 		VexPtr<LogWriter<unsigned long> > l(NULL);
 		replayLogfile(lf, startingPoint, tok, endingPoint, l);
 	}
-	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
+	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok,
 			   LogReaderPtr *endingPoint,
@@ -871,7 +869,7 @@ public:
 			  GarbageCollectionToken t,
 			  unsigned max_events = 0);
 	void runToEvent(EventTimestamp evt,
-			VexPtr<LogReader<unsigned long> > &lf,
+			VexPtr<LogReader > &lf,
 			LogReaderPtr startingPoint,
 			GarbageCollectionToken t,
 			LogReaderPtr *endPoint = NULL);
@@ -900,7 +898,7 @@ public:
 template <typename ait> void destroy_memlog(void *_ctxt);
 
 template <typename ait>
-class MemLog : public LogReader<ait> {
+class MemLog : public LogReader {
 	std::vector<LogRecord *> *content;
 	unsigned offset;
 	const MemLog<ait> *parent;
@@ -966,7 +964,7 @@ public:
 	   can fast-forward through the log e.g. to find a matching
 	   syscall. */
 	virtual ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
-					      VexPtr<LogReader<ait> > &lf,
+					      VexPtr<LogReader> &lf,
 					      LogReaderPtr startPtr,
 					      LogReaderPtr *endPtr,
 					      GarbageCollectionToken t)
@@ -1032,7 +1030,7 @@ public:
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
-				      VexPtr<LogReader<ait> > &lf,
+				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
@@ -1182,10 +1180,10 @@ public:
 	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL,
 				     LogRecord **lr2 = NULL);
 	ThreadEvent<ait> *replay(LogRecord *lr, MachineState *ms,
-				 const LogReader<ait> *lf, LogReaderPtr ptr,
+				 const LogReader *lf, LogReaderPtr ptr,
 				 LogReaderPtr *outPtr, LogWriter<ait> *lw);
 	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
-				      VexPtr<LogReader<ait> > &lf,
+				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
@@ -1229,7 +1227,7 @@ public:
 				 bool &consumedRecord, LogReaderPtr ptr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
-				      VexPtr<LogReader<ait> > &lf,
+				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
@@ -1424,7 +1422,7 @@ class MemoryTrace : public GarbageCollected<MemoryTrace<ait> > {
 public:
 	std::vector<MemoryAccess<ait> *> content;
 	static MemoryTrace<ait> *get(VexPtr<MachineState > &,
-				     VexPtr<LogReader<ait> > &,
+				     VexPtr<LogReader > &,
 				     LogReaderPtr,
 				     GarbageCollectionToken);
 	size_t size() const { return content.size(); }
@@ -1839,7 +1837,7 @@ template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall 
 							 LogReaderPtr ptr);
 
 template<typename ait> void process_memory_records(VexPtr<AddressSpace > &addrSpace,
-						   VexPtr<LogReader<ait> > &lf,
+						   VexPtr<LogReader > &lf,
 						   LogReaderPtr startOffset,
 						   LogReaderPtr *endOffset,
 						   VexPtr<LogWriter<ait> > &lw,

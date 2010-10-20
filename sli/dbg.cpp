@@ -7,7 +7,7 @@ main(int argc, char *argv[])
 	init_sli();
 
 	LogReaderPtr ptr;
-	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
+	VexPtr<LogReader> lf(LogFile::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 	VexGcRoot((void **)&lf, "lf");

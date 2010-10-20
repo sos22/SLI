@@ -44,7 +44,7 @@ MachineState::initialMachineState(AddressSpace *as,
 }
 
 MachineState *
-MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
+MachineState::initialMachineState(VexPtr<LogReader > &lf,
 							  LogReaderPtr ptr,
 							  LogReaderPtr *end,
 							  GarbageCollectionToken token)

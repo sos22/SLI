@@ -2050,14 +2050,14 @@ public:
 	}
 
 	void calculate_relevant_addresses(VexPtr<MachineState > &ms,
-					  VexPtr<LogReader<unsigned long> > &lr,
+					  VexPtr<LogReader > &lr,
 					  LogReaderPtr ptr,
 					  GarbageCollectionToken tok);
 
 	void deduplicate();
 
 	CrashMachine *foldRegisters(VexPtr<MachineState > &ms,
-				    VexPtr<LogReader<unsigned long> > &lr,
+				    VexPtr<LogReader > &lr,
 				    LogReaderPtr ptr,
 				    GarbageCollectionToken tok);
 
@@ -2100,7 +2100,7 @@ public:
 
 CrashMachine *
 CrashMachine::foldRegisters(VexPtr<MachineState > &ms,
-			    VexPtr<LogReader<unsigned long> > &lr,
+			    VexPtr<LogReader > &lr,
 			    LogReaderPtr ptr,
 			    GarbageCollectionToken tok)
 {
@@ -2401,7 +2401,7 @@ public:
 
 void
 CrashMachine::calculate_relevant_addresses(VexPtr<MachineState > &ms,
-					   VexPtr<LogReader<unsigned long> > &lr,
+					   VexPtr<LogReader > &lr,
 					   LogReaderPtr ptr,
 					   GarbageCollectionToken tok)
 {
@@ -2882,7 +2882,7 @@ public:
 
 	void collect_interesting_access_log(
 		VexPtr<MachineState > &ms,
-		VexPtr<LogReader<unsigned long> > &lf,
+		VexPtr<LogReader > &lf,
 		LogReaderPtr ptr,
 		GarbageCollectionToken tok);
 
@@ -2959,7 +2959,7 @@ CIALEventRecorder::record(Thread *thr, ThreadEvent<unsigned long> *evt)
 void
 Oracle::collect_interesting_access_log(
 	VexPtr<MachineState > &ms,
-	VexPtr<LogReader<unsigned long> > &lf,
+	VexPtr<LogReader > &lf,
 	LogReaderPtr ptr,
 	GarbageCollectionToken tok)
 {
@@ -4540,7 +4540,7 @@ main(int argc, char *argv[])
 	init_sli();
 
 	LogReaderPtr ptr;
-	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
+	VexPtr<LogReader > lf(LogFile::open(argv[1], &ptr));
 	struct timeval start_read_initial_snapshot;
 	gettimeofday(&start_read_initial_snapshot, NULL);
 	VexPtr<MachineState > ms(MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC));

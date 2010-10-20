@@ -241,7 +241,7 @@ ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord *lr, MachineState **ms,
 
 template <typename ait>
 ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord *lr, MachineState *ms,
-					const LogReader<ait> *lf, LogReaderPtr ptr,
+					const LogReader *lf, LogReaderPtr ptr,
 					LogReaderPtr *outPtr, LogWriter<ait> *lw)
 {
 	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
@@ -363,7 +363,7 @@ InterpretResult SignalEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 
 template <typename ait> ThreadEvent<ait> *
 RdtscEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
-			     VexPtr<LogReader<ait> > &lf,
+			     VexPtr<LogReader > &lf,
 			     LogReaderPtr startPtr,
 			     LogReaderPtr *endPtr,
 			     GarbageCollectionToken)
@@ -387,7 +387,7 @@ RdtscEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
 
 template <typename ait> ThreadEvent<ait> *
 SyscallEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
-			       VexPtr<LogReader<ait> > &lf,
+			       VexPtr<LogReader > &lf,
 			       LogReaderPtr startPtr,
 			       LogReaderPtr *endPtr,
 			       GarbageCollectionToken t)
@@ -419,7 +419,7 @@ SyscallEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
 
 template <typename ait> ThreadEvent<ait> *
 CasEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
-			   VexPtr<LogReader<ait> > &lf,
+			   VexPtr<LogReader > &lf,
 			   LogReaderPtr startPtr,
 			   LogReaderPtr *endPtr,
 			   GarbageCollectionToken)

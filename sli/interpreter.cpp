@@ -1905,13 +1905,13 @@ void Interpreter::runToFailure(ThreadId tid,
 	}
 }
 
-void Interpreter::replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
-				     LogReaderPtr ptr,
-				     GarbageCollectionToken t,
-				     LogReaderPtr *eof,
-				     VexPtr<LogWriter<unsigned long> > &lw,
-				     VexPtr<EventRecorder<unsigned long> > &er,
-				     EventTimestamp *lastEvent)
+void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
+				LogReaderPtr ptr,
+				GarbageCollectionToken t,
+				LogReaderPtr *eof,
+				VexPtr<LogWriter<unsigned long> > &lw,
+				VexPtr<EventRecorder<unsigned long> > &er,
+				EventTimestamp *lastEvent)
 {
 	unsigned long event_counter = 0;
 	VexPtr<LogRecord> lr;
@@ -2004,7 +2004,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
 }
 
 void Interpreter::runToEvent(EventTimestamp end,
-				  VexPtr<LogReader<unsigned long> > &lf,
+				  VexPtr<LogReader> &lf,
 				  LogReaderPtr ptr,
 				  GarbageCollectionToken t, LogReaderPtr *eof)
 {

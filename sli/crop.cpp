@@ -23,7 +23,7 @@ main(int argc, char *argv[])
 		err(1, "opening %s", inp);
 
 	check_fpu_control();
-	VexPtr<LogReader<unsigned long> > reduced_lf(lf->truncate(lf->mkPtr(size, 0)));
+	VexPtr<LogReader> reduced_lf(lf->truncate(lf->mkPtr(size, 0)));
 	check_fpu_control();
 	MachineState *ms = MachineState::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
 	check_fpu_control();
@@ -42,7 +42,7 @@ main(int argc, char *argv[])
 	ms->dumpSnapshot(lw);
 	
 	Interpreter i2(ms);
-	VexPtr<LogReader<unsigned long> > lf_downcast(lf);
+	VexPtr<LogReader> lf_downcast(lf);
 	i2.replayLogfile(lf_downcast, ptr, ALLOW_GC, NULL, lw);
 
 	return 0;
