@@ -49,32 +49,28 @@ public:
 
 class Named {
 	mutable char *_name;
-	mutable char *_name2;
 protected:
 	virtual char *mkName(void) const = 0;
-	void clearName() const { assert(_name == _name2); free(_name); _name = NULL; _name2 = NULL; }
+	void clearName() const { free(_name); _name = NULL; }
 public:
 	Named &operator=(const Named &src) {
-		assert(src._name == src._name2);
 		clearName();
 		if (src._name)
-			_name2 = _name = strdup(src._name);
+			_name = strdup(src._name);
 		return *this;
 	}
-	Named() : _name(NULL), _name2(NULL) {}
+	Named() : _name(NULL) {}
 	Named(const Named &b) {
-		assert(b._name == b._name2);
 		if (b._name)
-			_name2 = _name = strdup(b._name);
+			_name = strdup(b._name);
 		else
-			_name2 = _name = NULL;
+			_name = NULL;
 	}
 	const char *name() const {
 		if (!this)
 			return NULL;
-		assert(_name == _name2);
 		if (!_name)
-			_name2 = _name = mkName();
+			_name = mkName();
 		return _name;
 	}
 	~Named() { clearName(); }
