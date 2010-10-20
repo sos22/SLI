@@ -102,7 +102,7 @@ skip:
 		footstep_record<unsigned long> fr;
 		int r = buffered_pread(&fr, sizeof(fr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordFootstep<unsigned long>(tid,
+		return new LogRecordFootstep(tid,
 							    fr.rip,
 							    fr.FOOTSTEP_REG_0_NAME,
 							    fr.FOOTSTEP_REG_1_NAME,
@@ -115,7 +115,7 @@ skip:
 		syscall_record<unsigned long> sr;
 		int r = buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordSyscall<unsigned long>(tid,
+		return new LogRecordSyscall(tid,
 							   sr.syscall_nr & 0xffffffff,
 							   sr.syscall_res._isError ? -(long)sr.syscall_res._val : sr.syscall_res._val,
 							   sr.arg1,
@@ -133,7 +133,7 @@ skip:
 		unsigned long *b = (unsigned long *)malloc(sizeof(unsigned long) * s);
 		for (unsigned x = 0; x < s; x++)
 			b[x] = ((unsigned char *)buf)[x];
-		return new LogRecordMemory<unsigned long>(tid,
+		return new LogRecordMemory(tid,
 							  rh.size - sizeof(mr) - sizeof(rh),
 							  (unsigned long)mr.ptr,
 							  b);
@@ -142,7 +142,7 @@ skip:
 		rdtsc_record<unsigned long> rr;
 		int r = buffered_pread(&rr, sizeof(rr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordRdtsc<unsigned long>(tid, rr.stashed_tsc);
+		return new LogRecordRdtsc(tid, rr.stashed_tsc);
 	}
 	case RECORD_mem_read: {
 		mem_read_record<unsigned long> mrr;
@@ -189,7 +189,7 @@ skip:
 		signal_record<unsigned long> sr;
 		int r = buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordSignal<unsigned long>(tid, sr.rip, sr.signo, sr.err,
+		return new LogRecordSignal(tid, sr.rip, sr.signo, sr.err,
 							  sr.virtaddr);
 	}
 		
@@ -197,7 +197,7 @@ skip:
 		allocate_memory_record<unsigned long> amr;
 		int r = buffered_pread(&amr, sizeof(amr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordAllocateMemory<unsigned long>(tid,
+		return new LogRecordAllocateMemory(tid,
 								  amr.start,
 								  amr.size,
 								  amr.prot,
@@ -207,13 +207,13 @@ skip:
 		VexGuestAMD64State regs;
 		int r = buffered_pread(&regs, sizeof(regs), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordInitialRegisters<unsigned long>(tid, regs);
+		return new LogRecordInitialRegisters(tid, regs);
 	}
 	case RECORD_initial_brk: {
 		initial_brk_record<unsigned long> ibr;
 		int r = buffered_pread(&ibr, sizeof(ibr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordInitialBrk<unsigned long>(tid, ibr.initial_brk);
+		return new LogRecordInitialBrk(tid, ibr.initial_brk);
 	}
 	case RECORD_initial_sighandlers: {
 		initial_sighandlers_record<unsigned long> isr;
@@ -234,7 +234,7 @@ skip:
 			era[x].hi = vtsr->temporaries[x * 2 + 1];
 		}
 		unsigned sn = vtsr->statement_nr;
-		return new LogRecordVexThreadState<unsigned long>(tid, 0, sn, era);
+		return new LogRecordVexThreadState(tid, 0, sn, era);
 	}
 	case RECORD_vex_thread_state_2: {
 		vex_thread_state_record_2<unsigned long> *vtsr;
@@ -249,7 +249,7 @@ skip:
 			era[x].hi = vtsr->temporaries[x * 2 + 1];
 		}
 		unsigned sn = vtsr->statement_nr;
-		return new LogRecordVexThreadState<unsigned long>(tid, vtsr->translation_origin, sn, era);
+		return new LogRecordVexThreadState(tid, vtsr->translation_origin, sn, era);
 	}
 
 	default:

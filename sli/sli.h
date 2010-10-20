@@ -280,10 +280,12 @@ class AddressSpace;
 class PMap;
 class SignalHandlers;
 
+class LogRecordFootstep;
+class LogRecordInitialRegisters;
+class LogRecordVexThreadState;
+
 template <typename ait> class ThreadEvent;
-template <typename ait> class LogRecordInitialRegisters;
 template <typename ait> class LogWriter;
-template <typename ait> class LogRecordVexThreadState;
 
 class LogReaderPtr {
 public:
@@ -392,13 +394,13 @@ public:
 						      const LogReaderPtr &ptr,
 						      GarbageCollectionToken t);
 
-	static Thread *initialThread(const LogRecordInitialRegisters<unsigned long> &initRegs);
+	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
 	Thread *fork(unsigned newPid);
 	Thread *dupeSelf() const;
 	void dumpSnapshot(LogWriter<unsigned long> *lw);
 
 	static void imposeState(VexPtr<Thread > &thr,
-				VexPtr<LogRecordVexThreadState<unsigned long> > &rec,
+				VexPtr<LogRecordVexThreadState> &rec,
 				VexPtr<AddressSpace > &as,
 				VexPtr<MachineState > &ms,
 				const LogReaderPtr &ptr,
@@ -791,8 +793,6 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait> class LogRecordFootstep;
-
 enum InterpretResult {
 	InterpretResultContinue = 0xf001,
 	InterpretResultExit,
@@ -820,7 +820,7 @@ public:
 
 template<typename abst_int_type>
 class Interpreter {
-	void replayFootstep(const LogRecordFootstep<abst_int_type> &lrf,
+	void replayFootstep(const LogRecordFootstep &lrf,
 			    const LogReader<abst_int_type> *lr,
 			    LogReaderPtr startOffset,
 			    LogReaderPtr *endOffset);
@@ -1457,26 +1457,25 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait>
 class LogRecordFootstep : public LogRecord {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("footstep()");
 	}
 public:
-	ait rip;
-	ait reg0;
-	ait reg1;
-	ait reg2;
-	ait reg3;
-	ait reg4;
+	unsigned long rip;
+	unsigned long reg0;
+	unsigned long reg1;
+	unsigned long reg2;
+	unsigned long reg3;
+	unsigned long reg4;
 	LogRecordFootstep(ThreadId _tid,
-			  ait _rip,
-			  ait _reg0,
-			  ait _reg1,
-			  ait _reg2,
-			  ait _reg3,
-			  ait _reg4) :
+			  unsigned long _rip,
+			  unsigned long _reg0,
+			  unsigned long _reg1,
+			  unsigned long _reg2,
+			  unsigned long _reg3,
+			  unsigned long _reg4) :
 		LogRecord(_tid),
 		rip(_rip),
 		reg0(_reg0),
@@ -1488,16 +1487,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordFootstep<outtype> *abstract() const
-	{
-		return new LogRecordFootstep<outtype>(this->thread(),
-						      mkConst<outtype>(rip),
-						      mkConst<outtype>(reg0),
-						      mkConst<outtype>(reg1),
-						      mkConst<outtype>(reg2),
-						      mkConst<outtype>(reg3),
-						      mkConst<outtype>(reg4));
-	}
 	void visit(HeapVisitor &hv)
 	{
 		visit_aiv(rip, hv);
@@ -1509,20 +1498,19 @@ public:
 	}
 };
 
-template <typename ait>
 class LogRecordSyscall : public LogRecord {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall()");
 	}
 public:
-	ait sysnr, res, arg1, arg2, arg3;
+	unsigned long sysnr, res, arg1, arg2, arg3;
 	LogRecordSyscall(ThreadId _tid,
-			 ait _sysnr,
-			 ait _res,
-			 ait _arg1,
-			 ait _arg2,
-			 ait _arg3) :
+			 unsigned long _sysnr,
+			 unsigned long _res,
+			 unsigned long _arg1,
+			 unsigned long _arg2,
+			 unsigned long _arg3) :
 		LogRecord(_tid),
 		sysnr(_sysnr),
 		res(_res),
@@ -1533,15 +1521,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordSyscall<outtype> *abstract() const
-	{
-		return new LogRecordSyscall<outtype>(this->thread(),
-						     mkConst<outtype>(sysnr),
-						     mkConst<outtype>(res),
-						     mkConst<outtype>(arg1),
-						     mkConst<outtype>(arg2),
-						     mkConst<outtype>(arg3));
-	}
 	void visit(HeapVisitor &hv)
 	{
 		visit_aiv(sysnr, hv);
@@ -1552,7 +1531,6 @@ public:
 	}
 };
 
-template <typename ait>
 class LogRecordMemory : public LogRecord {
 protected:
 	char *mkName() const {
@@ -1562,12 +1540,12 @@ protected:
 	void operator=(const LogRecordMemory &); /* DNI */
 public:
 	unsigned size;
-	ait start;
-	const ait *contents;
+	unsigned long start;
+	const unsigned long *contents;
 	LogRecordMemory(ThreadId _tid,
 			unsigned _size,
-			ait _start,
-			const ait *_contents) :
+			unsigned long _start,
+			const unsigned long *_contents) :
 		LogRecord(_tid),
 		size(_size),
 		start(_start),
@@ -1581,60 +1559,46 @@ public:
 	void destruct() { this->~LogRecordMemory(); }
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordMemory<outtype> *abstract() const
-	{
-		outtype *b = (outtype *)malloc(size * sizeof(outtype));
-		for (unsigned x = 0; x < size; x++)
-			b[x] = mkConst<outtype>(contents[x]);
-		return new LogRecordMemory<outtype>(this->thread(), size, mkConst<outtype>(start), b);
-	}
 	void visit(HeapVisitor &hv)
 	{
 		visit_aiv(start, hv);
 	}
 };
 
-template <typename ait>
 class LogRecordRdtsc : public LogRecord {
-	friend class RdtscEvent<ait>;
-	ait tsc;
+	friend class RdtscEvent<unsigned long>;
+	unsigned long tsc;
 protected:
 	char *mkName() const {
 		return my_asprintf("rdtsc()");
 	}
 public:
 	LogRecordRdtsc(ThreadId _tid,
-		       ait _tsc)
+		       unsigned long _tsc)
 		: LogRecord(_tid),
 		  tsc(_tsc)
 	{
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordRdtsc<outtype> *abstract() const
-	{
-		return new LogRecordRdtsc<outtype>(this->thread(),
-						   mkConst<outtype>(tsc));
-	}
 	void visit(HeapVisitor &hv) { visit_aiv(tsc, hv); }
 };
 
-template <typename ait>
 class LogRecordSignal : public LogRecord {
 public:
 	virtual char *mkName() const {
 		return my_asprintf("signal(nr = %d)", signr);
 	}
 public:
-	ait rip;
+	unsigned long rip;
 	unsigned signr;
-	ait err;
-	ait virtaddr;
+	unsigned long err;
+	unsigned long virtaddr;
 	LogRecordSignal(ThreadId _tid,
-			ait _rip,
+			unsigned long _rip,
 			unsigned _signr,
-			ait _err,
-			ait _va) :
+			unsigned long _err,
+			unsigned long _va) :
 		LogRecord(_tid),
 		rip(_rip),
 		signr(_signr),
@@ -1644,14 +1608,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordSignal<outtype> *abstract() const
-	{
-		return new LogRecordSignal<outtype>(this->thread(),
-						    mkConst<outtype>(rip),
-						    signr,
-						    mkConst<outtype>(err),
-						    mkConst<outtype>(virtaddr));
-	}
 	void visit(HeapVisitor &hv)
 	{
 		visit_aiv(rip, hv);
@@ -1660,11 +1616,10 @@ public:
 	}
 };
 
-template <typename ait>
 class LogRecordAllocateMemory : public LogRecord {
 	friend class AddressSpace;
-	ait start;
-	ait size;
+	unsigned long start;
+	unsigned long size;
 	unsigned prot;
 	unsigned flags;
 protected:
@@ -1674,8 +1629,8 @@ protected:
 	}
 public:
 	LogRecordAllocateMemory(ThreadId _tid,
-				ait _start,
-				ait _size,
+				unsigned long _start,
+				unsigned long _size,
 				unsigned _prot,
 				unsigned _flags) :
 		LogRecord(_tid),
@@ -1687,18 +1642,9 @@ public:
 	}      
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordAllocateMemory<outtype> *abstract() const
-	{
-		return new LogRecordAllocateMemory<outtype>(this->thread(),
-							    mkConst<outtype>(start),
-							    mkConst<outtype>(size),
-							    prot,
-							    flags);
-	}
 	void visit(HeapVisitor &hv){ visit_aiv(start, hv); visit_aiv(size, hv); }
 };
 
-template <typename ait>
 class LogRecordInitialRegisters : public LogRecord {
 	friend class Thread;
 	VexGuestAMD64State regs;
@@ -1715,58 +1661,39 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordInitialRegisters<outtype> *abstract() const
-	{
-		return new LogRecordInitialRegisters<outtype>(this->thread(), regs);
-	}
 };
 
-template <typename ait>
 class LogRecordInitialBrk : public LogRecord {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("initbrk()");
 	}
 public:
-	ait brk;
+	unsigned long brk;
 	LogRecordInitialBrk(ThreadId tid,
-			    ait _brk) :
+			    unsigned long _brk) :
 		LogRecord(tid),
 		brk(_brk)
 	{
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordInitialBrk<outtype> *abstract() const
-	{
-		return new LogRecordInitialBrk<outtype>(this->thread(),
-							mkConst<outtype>(brk));
-	}
 	void visit(HeapVisitor &hv){ visit_aiv(brk, hv); }
 };
 
-template <typename ait>
 class LogRecordVexThreadState : public LogRecord {
 protected:
 	virtual char *mkName() const {
 		return strdup("vex state");
 	}
 public:
-	ait currentIRSBRip;
-	expression_result_array<ait> tmp;
+	unsigned long currentIRSBRip;
+	expression_result_array<unsigned long> tmp;
 	unsigned statement_nr;
-	LogRecordVexThreadState(ThreadId tid, ait _currentIRSBRip,
-				unsigned _statement_nr, expression_result_array<ait> _tmp);
+	LogRecordVexThreadState(ThreadId tid, unsigned long _currentIRSBRip,
+				unsigned _statement_nr, expression_result_array<unsigned long> _tmp);
 	void *marshal(unsigned *sz) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordVexThreadState<outtype> *abstract() const
-	{
-		expression_result_array<outtype> ntmp;
-		tmp.abstract(&ntmp);
-		return new LogRecordVexThreadState<outtype>(
-			this->thread(), mkConst<outtype>(currentIRSBRip),
-			statement_nr, ntmp);
-	}
 	void visit(HeapVisitor &hv){ tmp.visit(hv); }
 };
 
@@ -1801,13 +1728,13 @@ public:
 
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
-	void allocateMemory(const LogRecordAllocateMemory<unsigned long> &rec)
+	void allocateMemory(const LogRecordAllocateMemory &rec)
 	{
 		allocateMemory(rec.start, rec.size, rec.prot, rec.flags);
 	}
 	void releaseMemory(unsigned long start, unsigned long size);
 	void protectMemory(unsigned long start, unsigned long size, VAMap::Protection prot);
-	void populateMemory(const LogRecordMemory<unsigned long> &rec)
+	void populateMemory(const LogRecordMemory &rec)
 	{
 		writeMemory(EventTimestamp::invalid, rec.start, rec.size, rec.contents, true, NULL);
 	}
@@ -1907,7 +1834,7 @@ private:
 	trans_hash_entry *trans_hash[nr_trans_hash_slots];
 };
 
-template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall<ait> *lrs,
+template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall *lrs,
 							 Thread *thr,
 							 MachineState *&mach,
 							 LogReaderPtr ptr);

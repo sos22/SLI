@@ -29,7 +29,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		LogRecord *lr = lf->read(startOffset, &nextOffset);
 		if (!lr)
 			break;
-		LogRecordMemory<ait> *lrm = dynamic_cast<LogRecordMemory<ait>*>(lr);
+		LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr);
 		if (!lrm)
 			break;
 		if (lw)
@@ -101,7 +101,7 @@ handle_clone(AddressSpace *addrSpace,
 }
 
 template<typename ait> ThreadEvent<ait> *
-replay_syscall(const LogRecordSyscall<ait> *lrs,
+replay_syscall(const LogRecordSyscall *lrs,
 	       Thread *thr,
 	       MachineState *&mach,
 	       LogReaderPtr ptr)
@@ -581,12 +581,12 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 		printf("can't fake syscall %ld yet\n", force(sysnr));
 		break;
 	}
-	LogRecordSyscall<ait> *llr = new LogRecordSyscall<ait>(thr->tid,
-							       sysnr,
-							       res,
-							       thr->regs.get_reg(REGISTER_IDX(RDI)),
-							       thr->regs.get_reg(REGISTER_IDX(RSI)),
-							       thr->regs.get_reg(REGISTER_IDX(RDX)));
+	LogRecordSyscall *llr = new LogRecordSyscall(thr->tid,
+						     sysnr,
+						     res,
+						     thr->regs.get_reg(REGISTER_IDX(RDI)),
+						     thr->regs.get_reg(REGISTER_IDX(RSI)),
+						     thr->regs.get_reg(REGISTER_IDX(RDX)));
 
 	if (lr)
 		*lr = llr;

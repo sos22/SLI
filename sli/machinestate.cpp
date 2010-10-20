@@ -54,7 +54,7 @@ MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
 	
 	lr = lf->read(ptr, &ptr);
 	VexGcRoot lrkeeper((void **)&lr, "lrkeeper");
-	LogRecordInitialBrk<unsigned long> *lrib = dynamic_cast<LogRecordInitialBrk<unsigned long>*>(lr);
+	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr);
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
         VexPtr<AddressSpace > as(AddressSpace::initialAddressSpace(lrib->brk));
@@ -71,14 +71,14 @@ MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
 		lr = lf->read(ptr, &nextPtr);
 		if (!lr)
 			break;
-		if (LogRecordAllocateMemory<unsigned long> *lram = dynamic_cast<LogRecordAllocateMemory<unsigned long>*>(lr)) {
+		if (LogRecordAllocateMemory *lram = dynamic_cast<LogRecordAllocateMemory*>(lr)) {
 			as->allocateMemory(*lram);
-	        } else if (LogRecordMemory<unsigned long> *lrm = dynamic_cast<LogRecordMemory<unsigned long>*>(lr)) {
+	        } else if (LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr)) {
 			as->populateMemory(*lrm);
-		} else if (LogRecordInitialRegisters<unsigned long> *lrir = dynamic_cast<LogRecordInitialRegisters<unsigned long>*>(lr)) {
+		} else if (LogRecordInitialRegisters *lrir = dynamic_cast<LogRecordInitialRegisters*>(lr)) {
 			work->registerThread(Thread::initialThread(*lrir));
-	        } else if (LogRecordVexThreadState<unsigned long> *lrvts = dynamic_cast<LogRecordVexThreadState<unsigned long>*>(lr)) {
-			VexPtr<LogRecordVexThreadState<unsigned long> > l(lrvts);
+	        } else if (LogRecordVexThreadState *lrvts = dynamic_cast<LogRecordVexThreadState*>(lr)) {
+			VexPtr<LogRecordVexThreadState > l(lrvts);
 			VexPtr<Thread > t(work->findThread(lrvts->thread()));
 			t->imposeState(t, l, as, work, ptr, token);
 		} else {

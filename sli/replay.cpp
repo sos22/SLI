@@ -6,7 +6,7 @@ template <typename ait>
 ThreadEvent<ait> *RdtscEvent<ait>::replay(LogRecord *lr, MachineState **ms,
 					  bool &, LogReaderPtr)
 {
-	LogRecordRdtsc<ait> *lrr = dynamic_cast<LogRecordRdtsc<ait> *>(lr);
+	LogRecordRdtsc *lrr = dynamic_cast<LogRecordRdtsc *>(lr);
 	if (!lrr)
 		throw ReplayFailedException("wanted a rdtsc, got %s",
 					    lr->name());
@@ -55,7 +55,7 @@ StoreEvent<ait>::StoreEvent(EventTimestamp when, ait _addr, unsigned _size, expr
 template <typename ait>
 static void checkSegv(LogRecord *lr, ait addr)
 {
-	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
+	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a segv for store to %lx, got %s",
 					    force(addr), lr->name());
@@ -157,7 +157,7 @@ ThreadEvent<ait> *InstructionEvent<ait>::replay(LogRecord *lr, MachineState **ms
 						bool &consumedRecord, LogReaderPtr)
 {
 #if 0
-	LogRecordFootstep<ait> *lrf = dynamic_cast<LogRecordFootstep<ait> *>(lr);
+	LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr);
 	if (!lrf)
 		throw ReplayFailedException("wanted a footstep, got %s",
 					    lr->name());
@@ -193,7 +193,7 @@ InterpretResult InstructionEvent<ait>::fake(MachineState *ms,
 {
 #if 0
 	if (lr)
-		*lr = new LogRecordFootstep<ait>(this->when.tid, rip, reg0, reg1, reg2, reg3, reg4);
+		*lr = new LogRecordFootstep(this->when.tid, rip, reg0, reg1, reg2, reg3, reg4);
 #else
 	if (lr)
 		*lr = NULL;
@@ -205,12 +205,12 @@ template <typename ait>
 ThreadEvent<ait> *SyscallEvent<ait>::replay(LogRecord *lr, MachineState **ms,
 					    bool &, LogReaderPtr ptr)
 {
-	LogRecordSyscall<ait> *lrs = dynamic_cast<LogRecordSyscall<ait> *>(lr);
+	LogRecordSyscall *lrs = dynamic_cast<LogRecordSyscall *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a syscall, got %s",
 					    lr->name());
 		
-	return replay_syscall(lrs, (*ms)->findThread(this->when.tid), *ms, ptr);
+	return replay_syscall<ait>(lrs, (*ms)->findThread(this->when.tid), *ms, ptr);
 }
 
 template <typename ait>
@@ -317,7 +317,7 @@ ThreadEvent<ait> *SignalEvent<ait>::replay(LogRecord *lr, MachineState **ms,
 					   bool &, LogReaderPtr)
 {
 	Thread *thr = (*ms)->findThread(this->when.tid);
-	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
+	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a signal record, got %s",
 					    lr->name());
@@ -355,7 +355,7 @@ InterpretResult SignalEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 {
 	Thread *thr = ms->findThread(this->when.tid);
 	if (lr)
-		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
+		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
 	printf("Crash in thread %d signal %d\n", thr->tid._tid(),signr);
 	thr->crashed = true;
 	return InterpretResultCrash;
@@ -373,7 +373,7 @@ RdtscEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
 		LogRecord *lr = lf->read(startPtr, &startPtr);
 		if (!lr)
 			break;
-		if (!dynamic_cast<LogRecordRdtsc<ait> *>(lr))
+		if (!dynamic_cast<LogRecordRdtsc *>(lr))
 			continue;
 		*endPtr = startPtr;
 		bool ign;
@@ -396,7 +396,7 @@ SyscallEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
 		LogRecord *lr = lf->read(startPtr, &startPtr);
 		if (!lr)
 			break;
-		if (!dynamic_cast<LogRecordSyscall<ait> *>(lr))
+		if (!dynamic_cast<LogRecordSyscall *>(lr))
 			continue;
 		try {
 			bool ign;

@@ -430,7 +430,7 @@ void AddressSpace::sanityCheck() const
 
 void AddressSpace::dumpBrkPtr(LogWriter<unsigned long> *lw) const
 {
-	lw->append(new LogRecordInitialBrk<unsigned long>(ThreadId(0), mkConst<unsigned long>(brkptr)),
+	lw->append(new LogRecordInitialBrk(ThreadId(0), mkConst<unsigned long>(brkptr)),
 		   0);
 }
 
@@ -465,11 +465,11 @@ void AddressSpace::dumpSnapshot(LogWriter<unsigned long> *lw) const
 
 		end_va += 4096;
 
-		lw->append(new LogRecordAllocateMemory<unsigned long>(ThreadId(0),
-							    mkConst<unsigned long>(start_va),
-							    mkConst<unsigned long>(end_va - start_va),
-							    (unsigned long)prot,
-							    (unsigned long)alf),
+		lw->append(new LogRecordAllocateMemory(ThreadId(0),
+						       mkConst<unsigned long>(start_va),
+						       mkConst<unsigned long>(end_va - start_va),
+						       (unsigned long)prot,
+						       (unsigned long)alf),
 			   0);
 
 		/* Now do the contents of the block */
@@ -494,10 +494,10 @@ void AddressSpace::dumpSnapshot(LogWriter<unsigned long> *lw) const
 				assert(off == 0);
 				unsigned long *buf = (unsigned long *)calloc(MemoryChunk::size, sizeof(unsigned long));
 				mc->read(0, buf, MemoryChunk::size);
-				lw->append(new LogRecordMemory<unsigned long>(ThreadId(0),
-								    MemoryChunk::size,
-								    mkConst<unsigned long>(cursor_va),
-								    buf),
+				lw->append(new LogRecordMemory(ThreadId(0),
+							       MemoryChunk::size,
+							       mkConst<unsigned long>(cursor_va),
+							       buf),
 					   0);
 			}
 		}

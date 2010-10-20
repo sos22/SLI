@@ -11,7 +11,7 @@ RegisterSet::RegisterSet(VexGuestAMD64State const&r)
 		registers[x] = ((unsigned long *)&r)[x];
 }
 
-Thread *Thread::initialThread(const LogRecordInitialRegisters<unsigned long> &initRegs)
+Thread *Thread::initialThread(const LogRecordInitialRegisters &initRegs)
 {
 	Thread *work;
 
@@ -53,14 +53,14 @@ void Thread::dumpSnapshot(LogWriter<unsigned long> *lw)
 
 	for (unsigned x = 0; x < RegisterSet::NR_REGS; x++)
 		((unsigned long *)&r)[x] = force(regs.get_reg(x));
-	lw->append(new LogRecordInitialRegisters<unsigned long>(tid, r), 0);
+	lw->append(new LogRecordInitialRegisters(tid, r), 0);
 	if (currentIRSB && currentIRSBOffset != 0) {
 		/* First statement in block should be a mark */
 		assert(currentIRSB->stmts[0]->tag == Ist_IMark);
 		/* Should be a mark for the IRSB rip */
 		assert(currentIRSB->stmts[0]->Ist.IMark.addr ==
 		       force(currentIRSBRip));
-		lw->append(new LogRecordVexThreadState<unsigned long>(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
+		lw->append(new LogRecordVexThreadState(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
 	}
 
 	printf("Tid %d is at %d, irsb: \n", tid._tid(),
@@ -72,7 +72,7 @@ void Thread::dumpSnapshot(LogWriter<unsigned long> *lw)
 }
 
 void Thread::imposeState(VexPtr<Thread > &ths,
-			      VexPtr<LogRecordVexThreadState<unsigned long> > &rec,
+			      VexPtr<LogRecordVexThreadState > &rec,
 			      VexPtr<AddressSpace> &as,
 			      VexPtr<MachineState > &ms,
 			      const LogReaderPtr &ptr,
