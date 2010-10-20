@@ -246,17 +246,16 @@ public:
 	}
 };
 
-template <typename ait>
 class expression_result_array {
 public:
-	std::vector<expression_result<ait> > content;
+	std::vector<expression_result<unsigned long> > content;
 	void setSize(unsigned new_size) {
 		content.clear();
 		content.resize(new_size);
 	}
-	expression_result<ait> &operator[](unsigned idx) { return content[idx]; }
+	expression_result<unsigned long> &operator[](unsigned idx) { return content[idx]; }
 	void visit(HeapVisitor &hv) {
-		for (class std::vector<expression_result<ait> >::iterator it = content.begin();
+		for (std::vector<expression_result<unsigned long> >::iterator it = content.begin();
 		     it != content.end();
 		     it++)
 			it->visit(hv);
@@ -266,8 +265,6 @@ public:
 		content()
 	{
 	}
-
-	template <typename new_type> void abstract(expression_result_array<new_type> *out) const;
 
 	void pretty_print() const {
 		for (unsigned x = 0; x < content.size(); x++)
@@ -341,7 +338,7 @@ public:
 
 	IRSB *currentIRSB;
 	unsigned long currentIRSBRip;
-	expression_result_array<unsigned long> temporaries;
+	expression_result_array temporaries;
 	int currentIRSBOffset;
 
 	/* We maintain a log of the thread's recent control flow
@@ -407,7 +404,7 @@ public:
 
 	void visit(HeapVisitor &hv);
 
-	void destruct() { temporaries.~expression_result_array<unsigned long>(); }
+	void destruct() { temporaries.~expression_result_array(); }
 
 	NAMED_CLASS
 };
@@ -891,8 +888,6 @@ public:
 	void visit(HeapVisitor &hv) {}
 	void destruct() { this->~LogFileWriter(); }
 };
-
-template <typename ait> void destroy_memlog(void *_ctxt);
 
 class MemLog : public LogReader {
 	std::vector<LogRecord *> *content;
@@ -1671,10 +1666,10 @@ protected:
 	}
 public:
 	unsigned long currentIRSBRip;
-	expression_result_array<unsigned long> tmp;
+	expression_result_array tmp;
 	unsigned statement_nr;
 	LogRecordVexThreadState(ThreadId tid, unsigned long _currentIRSBRip,
-				unsigned _statement_nr, expression_result_array<unsigned long> _tmp);
+				unsigned _statement_nr, expression_result_array _tmp);
 	void *marshal(unsigned *sz) const;
 	unsigned marshal_size() const;
 	void visit(HeapVisitor &hv){ tmp.visit(hv); }

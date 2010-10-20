@@ -117,14 +117,6 @@ EventTimestamp Thread::bumpEvent(MachineState *ms)
 	return lastEvent;
 }
 
-template <typename ait> template <typename new_type>
-void expression_result_array<ait>::abstract(expression_result_array<new_type> *out) const
-{
-	out->setSize(content.size());
-	for (unsigned x = 0; x < content.size(); x++)
-		content[x].abstract(&out->content[x]);
-}
-
 void
 Thread::pretty_print(void) const
 {

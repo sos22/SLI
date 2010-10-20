@@ -308,7 +308,7 @@ void LogFileWriter::append(LogRecord *lr, unsigned long ignore)
 
 LogRecordVexThreadState::LogRecordVexThreadState(ThreadId tid, unsigned long _currentIRSBRip,
 						 unsigned _statement_nr,
-						 expression_result_array<unsigned long> _tmp)
+						 expression_result_array _tmp)
 	: LogRecord(tid),
 	  currentIRSBRip(_currentIRSBRip),
 	  tmp(_tmp),

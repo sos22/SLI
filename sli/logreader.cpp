@@ -226,7 +226,7 @@ skip:
 		vtsr = (vex_thread_state_record_1<unsigned long> *)alloca(rh.size - sizeof(rh));
 		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
-		expression_result_array<unsigned long> era;
+		expression_result_array era;
 		unsigned sz = (rh.size - sizeof(rh) - sizeof(*vtsr)) / 16;
 		era.setSize(sz);
 		for (unsigned x = 0; x < sz; x++) {
@@ -241,7 +241,7 @@ skip:
 		vtsr = (vex_thread_state_record_2<unsigned long> *)alloca(rh.size - sizeof(rh));
 		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		(void)r;
-		expression_result_array<unsigned long> era;
+		expression_result_array era;
 		unsigned sz = (rh.size - sizeof(rh) - sizeof(*vtsr)) / 16;
 		era.setSize(sz);
 		for (unsigned x = 0; x < sz; x++) {
