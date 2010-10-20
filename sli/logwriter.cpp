@@ -18,8 +18,7 @@ typedef struct sigaction sigaction_t;
 
 #include "ppres.h"
 
-template <typename ait>
-void *LogRecord<ait>::marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const
+void *LogRecord::marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const
 {
 	*sz = sizeof(record_header) + psize;
 	*r = malloc(*sz);
@@ -40,7 +39,7 @@ template <typename ait>
 void *LogRecordFootstep<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	footstep_record<ait> *fr = (footstep_record<ait> *)LogRecord<ait>::marshal(RECORD_footstep, sizeof(footstep_record<ait>), sz, &r);
+	footstep_record<ait> *fr = (footstep_record<ait> *)LogRecord::marshal(RECORD_footstep, sizeof(footstep_record<ait>), sz, &r);
 	fr->rip = rip;
 	fr->FOOTSTEP_REG_0_NAME = reg0;
 	fr->FOOTSTEP_REG_1_NAME = reg1;
@@ -60,7 +59,7 @@ template<typename ait>
 void *LogRecordSyscall<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	syscall_record<ait> *sr = (syscall_record<ait> *)LogRecord<ait>::marshal(RECORD_syscall, sizeof(syscall_record<ait>), sz, &r);
+	syscall_record<ait> *sr = (syscall_record<ait> *)LogRecord::marshal(RECORD_syscall, sizeof(syscall_record<ait>), sz, &r);
 	sr->syscall_nr = sysnr;
 	if ((long)force(res) >= 0 || (long)force(res) < -4096) {
 		sr->syscall_res._isError = false;
@@ -86,7 +85,7 @@ void *LogRecordMemory<ait>::marshal(unsigned *sz) const
 {
 	void *r;
 	unsigned x;
-	memory_record<ait> *mr = (memory_record<ait> *)LogRecord<ait>::marshal(RECORD_memory,
+	memory_record<ait> *mr = (memory_record<ait> *)LogRecord::marshal(RECORD_memory,
 									       sizeof(memory_record<ait>) + size,
 									       sz,
 									       &r);
@@ -106,7 +105,7 @@ template <typename ait>
 void *LogRecordRdtsc<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	rdtsc_record<ait> *rr = (rdtsc_record<ait> *)LogRecord<ait>::marshal(RECORD_rdtsc,
+	rdtsc_record<ait> *rr = (rdtsc_record<ait> *)LogRecord::marshal(RECORD_rdtsc,
 									     sizeof(rdtsc_record<ait>),
 									     sz,
 									     &r);
@@ -124,7 +123,7 @@ template <typename ait>
 void *LogRecordLoad<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	mem_read_record<ait> *lr = (mem_read_record<ait> *)LogRecord<ait>::marshal(RECORD_mem_read,
+	mem_read_record<ait> *lr = (mem_read_record<ait> *)LogRecord::marshal(RECORD_mem_read,
 										   sizeof(*lr) + size,
 										   sz,
 										   &r);
@@ -146,7 +145,7 @@ template <typename ait>
 void *LogRecordStore<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	mem_write_record<ait> *sr = (mem_write_record<ait> *)LogRecord<ait>::marshal(RECORD_mem_write,
+	mem_write_record<ait> *sr = (mem_write_record<ait> *)LogRecord::marshal(RECORD_mem_write,
 										     sizeof(*sr) + size,
 										     sz,
 										     &r);
@@ -168,7 +167,7 @@ template <typename ait>
 void *LogRecordSignal<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	signal_record<ait> *sr = (signal_record<ait> *)LogRecord<ait>::marshal(RECORD_signal,
+	signal_record<ait> *sr = (signal_record<ait> *)LogRecord::marshal(RECORD_signal,
 									       sizeof(*sr),
 									       sz,
 									       &r);
@@ -189,7 +188,7 @@ template <typename ait>
 void *LogRecordAllocateMemory<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	allocate_memory_record<ait> *amr = (allocate_memory_record<ait> *)LogRecord<ait>::marshal(RECORD_allocate_memory,
+	allocate_memory_record<ait> *amr = (allocate_memory_record<ait> *)LogRecord::marshal(RECORD_allocate_memory,
 												  sizeof(*amr),
 												  sz,
 												  &r);
@@ -210,7 +209,7 @@ template <typename ait>
 void *LogRecordInitialRegisters<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	VexGuestAMD64State *s = (VexGuestAMD64State *)LogRecord<ait>::marshal(RECORD_initial_registers,
+	VexGuestAMD64State *s = (VexGuestAMD64State *)LogRecord::marshal(RECORD_initial_registers,
 									      sizeof(*s),
 									      sz,
 									      &r);
@@ -228,7 +227,7 @@ template <typename ait>
 void *LogRecordInitialBrk<ait>::marshal(unsigned *sz) const
 {
 	void *r;
-	initial_brk_record<ait> *ibr = (initial_brk_record<ait> *)LogRecord<ait>::marshal(RECORD_initial_brk,
+	initial_brk_record<ait> *ibr = (initial_brk_record<ait> *)LogRecord::marshal(RECORD_initial_brk,
 											  sizeof(*ibr),
 											  sz,
 											  &r);
@@ -247,7 +246,7 @@ void *LogRecordInitialSighandlers<ait>::marshal(unsigned *sz) const
 {
 	void *r;
 	initial_sighandlers_record<ait> *isr =
-		(initial_sighandlers_record<ait> *)LogRecord<ait>::marshal(RECORD_initial_sighandlers,
+		(initial_sighandlers_record<ait> *)LogRecord::marshal(RECORD_initial_sighandlers,
 									   sizeof(*isr),
 									   sz,
 									   &r);
@@ -266,7 +265,7 @@ void *LogRecordVexThreadState<ait>::marshal(unsigned *sz) const
 {
 	void *r;
 	vex_thread_state_record_2<ait> *vtsr =
-		(vex_thread_state_record_2<ait> *)LogRecord<ait>::marshal(RECORD_vex_thread_state_2,
+		(vex_thread_state_record_2<ait> *)LogRecord::marshal(RECORD_vex_thread_state_2,
 									  sizeof(*vtsr) + 16 * tmp.content.size(),
 									  sz,
 									  &r);
@@ -295,7 +294,7 @@ LogFileWriter::~LogFileWriter()
 	close(fd);
 }
 
-void LogFileWriter::append(LogRecord<unsigned long> *lr, unsigned long ignore)
+void LogFileWriter::append(LogRecord *lr, unsigned long ignore)
 {
 	void *b;
 	unsigned s;
@@ -316,7 +315,7 @@ template <typename ait>
 LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, ait _currentIRSBRip,
 						      unsigned _statement_nr,
 						      expression_result_array<ait> _tmp)
-	: LogRecord<ait>(tid),
+	: LogRecord(tid),
 	  currentIRSBRip(_currentIRSBRip),
 	  tmp(_tmp),
 	  statement_nr(_statement_nr)

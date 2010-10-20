@@ -1918,7 +1918,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 				     EventTimestamp *lastEvent)
 {
 	unsigned long event_counter = 0;
-	VexPtr<LogRecord<ait> > lr;
+	VexPtr<LogRecord> lr;
 	bool appendedRecord = false;
 	bool finished = false;
 	LogReaderPtr ptr2 = ptr;
@@ -2014,7 +2014,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 				  GarbageCollectionToken t, LogReaderPtr *eof)
 {
 	LogReaderPtr ptr2 = ptr;
-	VexPtr<LogRecord<ait> > lr;
+	VexPtr<LogRecord> lr;
 	/* Mostly a debugging aide */
 	volatile static unsigned long event_counter;
 

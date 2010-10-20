@@ -50,7 +50,7 @@ MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
 							  GarbageCollectionToken token)
 {
 	VexPtr<MachineState > work;
-	LogRecord<unsigned long> *lr;
+	LogRecord *lr;
 	
 	lr = lf->read(ptr, &ptr);
 	VexGcRoot lrkeeper((void **)&lr, "lrkeeper");

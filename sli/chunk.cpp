@@ -20,7 +20,7 @@ public:
 		  next_index(0), ms(_ms), writers()
 	{
 	}
-	void append(LogRecord<unsigned long> *lr, unsigned long idx);
+	void append(LogRecord *lr, unsigned long idx);
 	void destruct() { this->~LogChunker(); }
 	void visit(HeapVisitor &hv);
 	NAMED_CLASS
@@ -37,7 +37,7 @@ LogChunker::visit(HeapVisitor &hv)
 }
 
 void
-LogChunker::append(LogRecord<unsigned long> *lr, unsigned long idx)
+LogChunker::append(LogRecord *lr, unsigned long idx)
 {
 	unsigned long start = next_input_offset;
 	unsigned long end = start + lr->marshal_size();

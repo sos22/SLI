@@ -26,7 +26,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 {
 	while (1) {
 		LogReaderPtr nextOffset;
-		LogRecord<ait> *lr = lf->read(startOffset, &nextOffset);
+		LogRecord *lr = lf->read(startOffset, &nextOffset);
 		if (!lr)
 			break;
 		LogRecordMemory<ait> *lrm = dynamic_cast<LogRecordMemory<ait>*>(lr);
@@ -385,7 +385,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
    seems to work often enough to be useful (at least for some
    programs). */
 template <typename ait>
-InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord<ait> **lr)
+InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 {
 	ait res;
 	Thread *thr = ms->findThread(this->when.tid);

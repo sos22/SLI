@@ -77,7 +77,7 @@ LogFile::buffered_pread(void *output, size_t output_size, off_t start_offset) co
 	return next_offset - start_offset;
 }
 
-LogRecord<unsigned long> *LogFile::read(LogReaderPtr _startPtr, LogReaderPtr *_nextPtr) const
+LogRecord *LogFile::read(LogReaderPtr _startPtr, LogReaderPtr *_nextPtr) const
 {
 	struct record_header rh;
 	_ptr startPtr = unwrapPtr(_startPtr);
@@ -258,5 +258,5 @@ skip:
 }
 
 
-#define MK_LOGREADER(t)				\
-	template LogRecord<t>::~LogRecord()
+#define MK_LOGREADER(t)				
+

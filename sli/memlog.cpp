@@ -7,14 +7,14 @@ InterpretResult LogWriter<ait>::recordEvent(Thread *thr, MachineState *ms, Threa
 	InterpretResult res;
 
 	if (ce) {
-		LogRecord<ait> *lr1, *lr2;
+		LogRecord *lr1, *lr2;
 		res = ce->fake(ms, &lr1, &lr2);
 		if (lr1)
 			append(lr1, evt->when.idx);
 		if (lr2)
 			append(lr2, evt->when.idx);
 	} else {
-		LogRecord<ait> *lr;
+		LogRecord *lr;
 		res = evt->fake(ms, &lr);
 		if (lr)
 			append(lr, evt->when.idx);
@@ -23,13 +23,13 @@ InterpretResult LogWriter<ait>::recordEvent(Thread *thr, MachineState *ms, Threa
 }
 
 template <typename ait>
-void MemLog<ait>::append(LogRecord<ait> *lr, unsigned long ignore)
+void MemLog<ait>::append(LogRecord *lr, unsigned long ignore)
 {
 	content->push_back(lr);
 }
 
 template <typename ait>
-LogRecord<ait> *MemLog<ait>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
+LogRecord *MemLog<ait>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
 {
 	unsigned o = unwrapPtr(startPtr);
 	if (o < offset) {
@@ -102,7 +102,7 @@ MemLog<ait>::MemLog()
 {
 	parent = NULL;
 	offset = 0;
-	content = new std::vector<LogRecord<ait> *>();
+	content = new std::vector<LogRecord *>();
 	writer = new Writer(this);
 }
 
@@ -110,4 +110,4 @@ MemLog<ait>::MemLog()
 	template MemLog<t> *MemLog<t>::dupeSelf() const;	       \
 	template MemLog<t>::MemLog();				       \
 	template MemLog<t> *MemLog<t>::emptyMemlog();		       \
-	template void MemLog<t>::append(LogRecord<t> *lr, unsigned long)
+	template void MemLog<t>::append(LogRecord *lr, unsigned long)
