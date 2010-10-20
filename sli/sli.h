@@ -278,6 +278,7 @@ public:
 class MachineState;
 class AddressSpace;
 class PMap;
+class SignalHandlers;
 
 template <typename ait> class ThreadEvent;
 template <typename ait> class LogRecordInitialRegisters;
@@ -633,11 +634,9 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait> class SignalHandlers;
-
 template <typename ait>
 class LogRecordInitialSighandlers : public LogRecord<ait> {
-	friend class SignalHandlers<ait>;
+	friend class SignalHandlers;
 	struct sigaction handlers[64];
 protected:
 	virtual char *mkName() const {
@@ -658,19 +657,14 @@ public:
 	}
 };
 
-template <typename ait>
 class SignalHandlers {
 public:
 	struct sigaction handlers[64];
-	SignalHandlers(const LogRecordInitialSighandlers<ait> &init) {
+	SignalHandlers(const LogRecordInitialSighandlers<unsigned long> &init) {
 		memcpy(handlers, init.handlers, sizeof(init.handlers));
 	}
 	SignalHandlers() { memset(handlers, 0, sizeof(handlers)); }
-	void dumpSnapshot(LogWriter<ait> *lw) const;
-	template <typename new_type> void abstract(SignalHandlers<new_type> *out) const
-	{
-		memcpy(out->handlers, handlers, sizeof(handlers));
-	}
+	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
 };
 
 template <typename ait>
@@ -734,7 +728,7 @@ private:
 						 const LogRecordInitialSighandlers<unsigned long> &handlers);
 public:
 	AddressSpace *addressSpace;
-	SignalHandlers<unsigned long> signalHandlers;
+	SignalHandlers signalHandlers;
 	unsigned long nrEvents;
 	static MachineState *initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
 								LogReaderPtr startPtr,

@@ -323,10 +323,9 @@ LogRecordVexThreadState<ait>::LogRecordVexThreadState(ThreadId tid, ait _current
 {
 }
 
-template <typename ait>
-void SignalHandlers<ait>::dumpSnapshot(LogWriter<ait> *lw) const
+void SignalHandlers::dumpSnapshot(LogWriter<unsigned long> *lw) const
 {
-	lw->append(new LogRecordInitialSighandlers<ait>(ThreadId(0), handlers), 0);
+	lw->append(new LogRecordInitialSighandlers<unsigned long>(ThreadId(0), handlers), 0);
 }
 
 #define MK_LOGWRITER(t)							\

@@ -38,7 +38,7 @@ MachineState::initialMachineState(AddressSpace *as,
 	work->threads = LibvexVector<Thread >::empty();
 	work->nextTid = ThreadId(1);
 	work->addressSpace = as;
-	work->signalHandlers = SignalHandlers<unsigned long>(handlers);
+	work->signalHandlers = SignalHandlers(handlers);
 
 	return work;
 }
