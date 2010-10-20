@@ -1,20 +1,20 @@
 #include "sli.h"
 
 template <typename ait>
-class MemTraceMaker : public EventRecorder<ait> {
+class MemTraceMaker : public EventRecorder {
 	MemoryTrace<ait> *mt;
 public:
 	MemTraceMaker(MemoryTrace<ait> *_mt)
 		: mt(_mt)
 	{
 	}
-	void record(Thread *thr, ThreadEvent<ait> *evt);
+	void record(Thread *thr, ThreadEvent *evt);
 	void visit(HeapVisitor &hv) { hv(mt); }
 	void destruct() {}
 	NAMED_CLASS
 };
 template <typename ait> void
-MemTraceMaker<ait>::record(Thread *thr, ThreadEvent<ait> *evt)
+MemTraceMaker<ait>::record(Thread *thr, ThreadEvent *evt)
 {
 	if (const LoadEvent<ait> *le = dynamic_cast<const LoadEvent<ait> *>(evt)) {
 		if (address_is_interesting(thr->tid, force(le->addr))) {
@@ -40,7 +40,7 @@ MemoryTrace<ait>::get(VexPtr<MachineState> &ms,
 	VexPtr<MemTraceMaker<ait> > mtm(new MemTraceMaker<ait>(work));
 	Interpreter i(ms->dupeSelf());
 	VexPtr<LogWriter<ait> > dummy(NULL);
-	VexPtr<EventRecorder<ait> > mtm2(mtm);
+	VexPtr<EventRecorder> mtm2(mtm);
 	i.replayLogfile(lf, ptr, t, NULL, dummy, mtm2);
 	return work;
 }

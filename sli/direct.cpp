@@ -2066,9 +2066,9 @@ public:
 	NAMED_CLASS
 };
 
-class FREventRecorder : public EventRecorder<unsigned long> {
+class FREventRecorder : public EventRecorder {
 protected:
-	void record(Thread *thr, ThreadEvent<unsigned long> *evt) {
+	void record(Thread *thr, ThreadEvent  *evt) {
 		abort();
 	}
 public:
@@ -2079,7 +2079,7 @@ public:
 		  new_cm(new CrashMachine())
 	{
 	}
-	void record(Thread *thr, ThreadEvent<unsigned long> *evt,
+	void record(Thread *thr, ThreadEvent *evt,
 		    MachineState *ms)
 	{
 		if (InstructionEvent<unsigned long> *ie =
@@ -2106,7 +2106,7 @@ CrashMachine::foldRegisters(VexPtr<MachineState > &ms,
 {
 	VexPtr<CrashMachine> new_cm(new CrashMachine(*this));
 	VexPtr<FREventRecorder> frer(new FREventRecorder(this));
-	VexPtr<EventRecorder<unsigned long> > er(frer);
+	VexPtr<EventRecorder> er(frer);
 	Interpreter i(ms->dupeSelf());
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
 	start_replay();
@@ -2374,15 +2374,15 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread *thr,
 	assert(concreteStores.size() == 0);
 }
 
-class CRAEventRecorder : public EventRecorder<unsigned long> {
+class CRAEventRecorder : public EventRecorder {
 protected:
-	void record(Thread *thr, ThreadEvent<unsigned long> *evt) {
+	void record(Thread *thr, ThreadEvent *evt) {
 		abort();
 	}
 public:
 	CrashMachine *cm;
 	CRAEventRecorder(CrashMachine *_cm) : cm(_cm) {}
-	void record(Thread *thr, ThreadEvent<unsigned long> *evt,
+	void record(Thread *thr, ThreadEvent *evt,
 		    MachineState *ms)
 	{
 		if (InstructionEvent<unsigned long> *ie =
@@ -2405,7 +2405,7 @@ CrashMachine::calculate_relevant_addresses(VexPtr<MachineState > &ms,
 					   LogReaderPtr ptr,
 					   GarbageCollectionToken tok)
 {
-	VexPtr<EventRecorder<unsigned long> > craer(new CRAEventRecorder(this));
+	VexPtr<EventRecorder> craer(new CRAEventRecorder(this));
 	Interpreter i(ms->dupeSelf());
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
 	start_replay();
@@ -2928,11 +2928,11 @@ Oracle::findLoadsForStore(const CrashTimestamp &store_rip,
 	}
 }
 
-class CIALEventRecorder : public EventRecorder<unsigned long> {
+class CIALEventRecorder : public EventRecorder {
 	Oracle *oracle; /* Note that the oracle isn't garbage
 			 * collected! */
 protected:
-	void record(Thread *thr, ThreadEvent<unsigned long> *evt);
+	void record(Thread *thr, ThreadEvent *evt);
 public:
 	CIALEventRecorder(Oracle *_oracle)
 		: oracle(_oracle)
@@ -2941,7 +2941,7 @@ public:
 	void visit(HeapVisitor &hv) {}
 };
 void
-CIALEventRecorder::record(Thread *thr, ThreadEvent<unsigned long> *evt)
+CIALEventRecorder::record(Thread *thr, ThreadEvent *evt)
 {
 	StoreEvent<unsigned long> *se =
 		dynamic_cast<StoreEvent<unsigned long> *>(evt);
@@ -2965,7 +2965,7 @@ Oracle::collect_interesting_access_log(
 {
 	constant_addresses = interesting_addresses;
 
-	VexPtr<EventRecorder<unsigned long> > er(new CIALEventRecorder(this));
+	VexPtr<EventRecorder> er(new CIALEventRecorder(this));
 	Interpreter i(ms);
 	VexPtr<LogWriter<unsigned long> > dummy(NULL);
 	start_replay();
@@ -4073,18 +4073,18 @@ buildCrashMachineNode(MachineState *ms,
 	return cfg->get_cmn(when);
 }
 
-class MemTraceExtractor : public EventRecorder<unsigned long> {
+class MemTraceExtractor : public EventRecorder {
 public:
 	Oracle *oracle;
 	MemTraceExtractor(Oracle *o) : oracle(o) {}
 	void record(Thread *thr,
-		    ThreadEvent<unsigned long> *evt);
+		    ThreadEvent *evt);
 	void visit(HeapVisitor &hv) {}
 };
 
 void
 MemTraceExtractor::record(Thread *thr,
-			  ThreadEvent<unsigned long> *evt)
+			  ThreadEvent *evt)
 {
 	unsigned long rsp;
 	if (thr->tid != oracle->crashingTid)
@@ -4588,7 +4588,7 @@ main(int argc, char *argv[])
 	
         /* Extract a memory trace */
 	{
-		VexPtr<EventRecorder<unsigned long> > mte(new MemTraceExtractor(&oracle));
+		VexPtr<EventRecorder> mte(new MemTraceExtractor(&oracle));
 		Interpreter i2(ms->dupeSelf());
 		VexPtr<LogWriter<unsigned long> > dummy_lw(NULL);
 		start_replay();

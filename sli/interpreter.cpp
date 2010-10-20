@@ -164,7 +164,7 @@ Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsi
 				      this);
 }
 
-ThreadEvent<unsigned long> *
+ThreadEvent *
 Thread::do_load(EventTimestamp when, IRTemp tmp, unsigned long addr, unsigned size,
 		     MachineState *ms)
 {
@@ -174,7 +174,7 @@ Thread::do_load(EventTimestamp when, IRTemp tmp, unsigned long addr, unsigned si
 		return SignalEvent<unsigned long>::get(when, 11, addr);
 }
 
-ThreadEvent<unsigned long> *
+ThreadEvent *
 Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 {
 	struct expression_result<unsigned long> args[6];
@@ -1524,7 +1524,7 @@ extract_call_follower(IRSB *irsb)
 	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
 }
 
-ThreadEvent<unsigned long> *
+ThreadEvent *
 Thread::runToEvent(VexPtr<Thread > &ths,
 			VexPtr<MachineState > &ms,
 			const LogReaderPtr &ptr,
@@ -1696,7 +1696,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			}
 
 			case Ist_Dirty: {
-				ThreadEvent<unsigned long> *evt = ths->do_dirty_call(stmt->Ist.Dirty.details, ms);
+				ThreadEvent *evt = ths->do_dirty_call(stmt->Ist.Dirty.details, ms);
 				if (evt)
 					return evt;
 				break;
@@ -1834,7 +1834,7 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace<unsi
 	       /* Since we're running the thread in isolation, if it
 		  goes idle it's unlikely to ever wake up again. */
 	       !thr->idle) {
-		ThreadEvent<unsigned long> *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
+		ThreadEvent *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
 
 		InterpretResult res = evt->fake(currentState);
 		if (res != InterpretResultContinue) {
@@ -1864,7 +1864,7 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid,
 {
         VexPtr<Thread > thr(currentState->findThread(tid));
         while (1) {
-                ThreadEvent<unsigned long> *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
+                ThreadEvent *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (dynamic_cast<LoadEvent<unsigned long> *>(evt) ||
 		    dynamic_cast<StoreEvent<unsigned long> *>(evt)) {
@@ -1889,7 +1889,7 @@ void Interpreter::runToFailure(ThreadId tid,
 	VexPtr<Thread > thr(currentState->findThread(tid));
 	while ((!have_event_limit || max_events) && thr->runnable()) {
 		VexPtr<MachineState > cs(currentState);
-		ThreadEvent<unsigned long> *evt = thr->runToEvent(thr, cs, LogReaderPtr(), t);
+		ThreadEvent *evt = thr->runToEvent(thr, cs, LogReaderPtr(), t);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {
 			thr->cannot_make_progress = true;
@@ -1910,7 +1910,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				GarbageCollectionToken t,
 				LogReaderPtr *eof,
 				VexPtr<LogWriter<unsigned long> > &lw,
-				VexPtr<EventRecorder<unsigned long> > &er,
+				VexPtr<EventRecorder> &er,
 				EventTimestamp *lastEvent)
 {
 	unsigned long event_counter = 0;
@@ -1949,7 +1949,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 		VexPtr<Thread > thr(currentState->findThread(lr->thread()));
 		assert(thr);
 		assert(!thr->exitted);
-		ThreadEvent<unsigned long> *evt = thr->runToEvent(thr, currentState, ptr2, t);
+		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t);
 
 		while (evt && lr) {
 			if (lastEvent && evt->when == *lastEvent)
@@ -1961,7 +1961,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				       evt->name(), lr->thread()._tid(),
 				       lr->name());
 
-			ThreadEvent<unsigned long> *oldEvent = evt;
+			ThreadEvent *oldEvent = evt;
 			bool consumed = true;
 			evt = oldEvent->replay(lr, &currentState.get(), consumed, ptr);
 			if (consumed) {
@@ -2025,7 +2025,7 @@ void Interpreter::runToEvent(EventTimestamp end,
 
 		VexPtr<Thread > thr(currentState->findThread(lr->thread()));
 		assert(thr->runnable());
-		ThreadEvent<unsigned long> *evt = thr->runToEvent(thr, currentState, ptr2, t);
+		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t);
 
 		while (evt && !finished) {
 			if (evt->when == end)

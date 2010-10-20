@@ -279,12 +279,12 @@ class MachineState;
 class AddressSpace;
 class PMap;
 class SignalHandlers;
+class ThreadEvent;
 
 class LogRecordFootstep;
 class LogRecordInitialRegisters;
 class LogRecordVexThreadState;
 
-template <typename ait> class ThreadEvent;
 template <typename ait> class LogWriter;
 
 class LogReaderPtr {
@@ -301,8 +301,8 @@ class Thread : public GarbageCollected<Thread> {
 				       unsigned long rip,
 				       GarbageCollectionToken t);
 	struct expression_result<unsigned long> eval_expression(IRExpr *expr);
-	ThreadEvent<unsigned long> *do_dirty_call(IRDirty *details, MachineState *ms);
-	ThreadEvent<unsigned long> *do_load(EventTimestamp when,
+	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms);
+	ThreadEvent *do_load(EventTimestamp when,
 					    IRTemp tmp,
 					    unsigned long addr,
 					    unsigned size,
@@ -389,7 +389,7 @@ public:
 private:
 	bool allowRipMismatch;
 public:
-	static ThreadEvent<unsigned long> *runToEvent(VexPtr<Thread > &ths,
+	static ThreadEvent *runToEvent(VexPtr<Thread > &ths,
 						      VexPtr<MachineState > &ms,
 						      const LogReaderPtr &ptr,
 						      GarbageCollectionToken t);
@@ -801,13 +801,12 @@ enum InterpretResult {
 
 template <typename ait> class MemoryTrace;
 
-template <typename ait>
-class EventRecorder : public GarbageCollected<EventRecorder<ait> > {
+class EventRecorder : public GarbageCollected<EventRecorder> {
 protected:
 	virtual ~EventRecorder() {}
-	virtual void record(Thread *thr, ThreadEvent<ait> *evt) = 0;
+	virtual void record(Thread *thr, ThreadEvent *evt) = 0;
 public:
-	virtual void record(Thread *thr, ThreadEvent<ait> *evt,
+	virtual void record(Thread *thr, ThreadEvent *evt,
 			    MachineState *ms)
 	{
 		record(thr, evt);
@@ -832,7 +831,7 @@ public:
 			   GarbageCollectionToken,
 			   LogReaderPtr *endingPoint,
 			   VexPtr<LogWriter<unsigned long> > &log,
-			   VexPtr<EventRecorder<unsigned long> > &er,
+			   VexPtr<EventRecorder> &er,
 			   EventTimestamp *lastEvent = NULL);
 	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
@@ -854,7 +853,7 @@ public:
 			   LogReaderPtr *endingPoint,
 			   VexPtr<LogWriter<unsigned long> > &log)
 	{
-		VexPtr<EventRecorder<unsigned long> > er(NULL);
+		VexPtr<EventRecorder> er(NULL);
 		replayLogfile(lf, startingPoint, tok, endingPoint, log, er);
 	}
 
@@ -880,7 +879,7 @@ class LogWriter : public GarbageCollected<LogWriter<ait> > {
 public:
 	virtual void append(LogRecord *lr, unsigned long idx) = 0;
 	virtual ~LogWriter() {}
-	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent<ait> *evt);
+	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt);
 
 	NAMED_CLASS
 };
@@ -949,21 +948,20 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait>
-class ThreadEvent : public Named, public GarbageCollected<ThreadEvent<ait> > {
+class ThreadEvent : public Named, public GarbageCollected<ThreadEvent > {
 protected:
 	ThreadEvent(EventTimestamp _when) : when(_when) {}
 public:
 	EventTimestamp when;
 	/* Replay the event using information in the log record */
-	virtual ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	virtual ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 					 bool &consumedRecord, LogReaderPtr ptr) = 0;
 	/* Try to ``replay'' the event without reference to a pre-existing logfile */
 	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL) = 0;
 	/* Use the logfile if it matches, and otherwise fake it.  This
 	   can fast-forward through the log e.g. to find a matching
 	   syscall. */
-	virtual ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
+	virtual ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
 					      VexPtr<LogReader> &lf,
 					      LogReaderPtr startPtr,
 					      LogReaderPtr *endPtr,
@@ -984,7 +982,7 @@ public:
 };
 
 template <typename ait>
-class UseFreeMemoryEvent : public ThreadEvent<ait> {
+class UseFreeMemoryEvent : public ThreadEvent {
 public:
 	ait free_addr;
 	ait use_addr;
@@ -994,7 +992,7 @@ private:
 			   ait _use_addr,
 			   ait _free_addr,
 			   EventTimestamp _whenFreed)
-		: ThreadEvent<ait>(_when),
+		: ThreadEvent(_when),
 		  free_addr(_free_addr),
 		  use_addr(_use_addr),
 		  whenFreed(_whenFreed)
@@ -1009,10 +1007,10 @@ protected:
 						  whenFreed.tid._tid(),
 						  whenFreed.idx); }
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent<ait> *get(EventTimestamp when,
+	static ThreadEvent *get(EventTimestamp when,
 				     ait use_addr,
 				     ait free_addr,
 				     EventTimestamp whenFreed)
@@ -1020,21 +1018,21 @@ public:
 };
 
 template <typename ait>
-class RdtscEvent : public ThreadEvent<ait> {
+class RdtscEvent : public ThreadEvent {
 	IRTemp tmp;
-	RdtscEvent(EventTimestamp when, IRTemp _tmp) : ThreadEvent<ait>(when), tmp(_tmp) {};
+	RdtscEvent(EventTimestamp when, IRTemp _tmp) : ThreadEvent(when), tmp(_tmp) {};
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
+	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
 				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
-	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp temp)
+	static ThreadEvent *get(EventTimestamp when, IRTemp temp)
 	{ return new RdtscEvent<ait>(when, temp); }
 	NAMED_CLASS
 };
@@ -1043,7 +1041,7 @@ template <typename ait> class MemoryAccessLoad;
 template <typename ait> class MemoryAccessStore;
 
 template <typename ait>
-class LoadEvent : public ThreadEvent<ait> {
+class LoadEvent : public ThreadEvent {
 	friend class MemoryAccessLoad<ait>;
 	IRTemp tmp;
 public:
@@ -1051,7 +1049,7 @@ public:
 private:
 	unsigned size;
 	LoadEvent(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size) :
-		ThreadEvent<ait>(when),
+		ThreadEvent(when),
 		tmp(_tmp),
 		addr(_addr),
 		size(_size)
@@ -1060,19 +1058,19 @@ private:
 protected:
 	virtual char *mkName() const { return my_asprintf("load(%s, %d, %d)", name_aiv(addr), tmp, size); }
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent<ait> *get(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
+	static ThreadEvent *get(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
 	{
 		return new LoadEvent<ait>(when, _tmp, _addr, _size);
 	}
-	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); ThreadEvent<ait>::visit(hv); }
+	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); ThreadEvent::visit(hv); }
 	NAMED_CLASS
 };
 
 template <typename ait>
-class StoreEvent : public ThreadEvent<ait> {
+class StoreEvent : public ThreadEvent {
 	friend class MemoryAccessStore<ait>;
 public:
 	ait addr;
@@ -1083,21 +1081,21 @@ private:
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent<ait> *get(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
+	static ThreadEvent *get(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
 	{
 		return new StoreEvent<ait>(when, _addr, _size, data);
 	}
 
-	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); data.visit(hv); ThreadEvent<ait>::visit(hv); }
-	void destruct() { data.~expression_result<ait>(); ThreadEvent<ait>::destruct(); }
+	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); data.visit(hv); ThreadEvent::visit(hv); }
+	void destruct() { data.~expression_result<ait>(); ThreadEvent::destruct(); }
 	NAMED_CLASS
 };
 
 template <typename ait>
-class InstructionEvent : public ThreadEvent<ait> {
+class InstructionEvent : public ThreadEvent {
 public:
 	ait rip;
 	ait reg0;
@@ -1108,7 +1106,7 @@ public:
 	bool allowRipMismatch;
 	InstructionEvent(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
 			 ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch) :
-		ThreadEvent<ait>(when),
+		ThreadEvent(when),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -1123,7 +1121,7 @@ protected:
 		return my_asprintf("footstep(%s)", name_aiv(rip));
 	}
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static InstructionEvent<ait> *get(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
@@ -1141,13 +1139,13 @@ public:
 		visit_aiv(reg2, hv);
 		visit_aiv(reg3, hv);
 		visit_aiv(reg4, hv);
-		ThreadEvent<ait>::visit(hv);
+		ThreadEvent::visit(hv);
 	}
 	NAMED_CLASS
 };
 
 template <typename ait>
-class CasEvent : public ThreadEvent<ait> {
+class CasEvent : public ThreadEvent {
 	IRTemp dest;
 	expression_result<ait> addr;
 	expression_result<ait> data;
@@ -1159,7 +1157,7 @@ class CasEvent : public ThreadEvent<ait> {
 		 expression_result<ait> _data,
 		 expression_result<ait> _expected,
 		 unsigned _size) :
-		ThreadEvent<ait>(when),
+		ThreadEvent(when),
 		dest(_dest),
 		addr(_addr),
 		data(_data),
@@ -1174,21 +1172,21 @@ protected:
 				   dest, size);
 	}
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL,
 				     LogRecord **lr2 = NULL);
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState *ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState *ms,
 				 const LogReader *lf, LogReaderPtr ptr,
 				 LogReaderPtr *outPtr, LogWriter<ait> *lw);
-	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
+	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
 				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
 
-	static ThreadEvent<ait> *get(EventTimestamp when,
+	static ThreadEvent *get(EventTimestamp when,
 				     IRTemp _dest,
 				     expression_result<ait> _addr,
 				     expression_result<ait> _data,
@@ -1203,52 +1201,52 @@ public:
 		addr.visit(hv);
 		data.visit(hv);
 		expected.visit(hv);
-		ThreadEvent<ait>::visit(hv);
+		ThreadEvent::visit(hv);
 	}
 	void destruct()
 	{
 		addr.~expression_result<ait>();
 		data.~expression_result<ait>();
 		expected.~expression_result<ait>();
-		ThreadEvent<ait>::destruct();
+		ThreadEvent::destruct();
 	}
 	NAMED_CLASS
 };
 
 template <typename ait>
-class SyscallEvent : public ThreadEvent<ait> {
+class SyscallEvent : public ThreadEvent {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall");
 	}
-	SyscallEvent(EventTimestamp when) : ThreadEvent<ait>(when) {}
+	SyscallEvent(EventTimestamp when) : ThreadEvent(when) {}
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr ptr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	ThreadEvent<ait> *fuzzyReplay(VexPtr<MachineState > &ms,
+	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
 				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
-	static ThreadEvent<ait> *get(EventTimestamp when)
+	static ThreadEvent *get(EventTimestamp when)
 	{ return new SyscallEvent(when); }
 	NAMED_CLASS
 };
 
 template <typename ait>
-class DetectedErrorEvent : public ThreadEvent<ait> {
+class DetectedErrorEvent : public ThreadEvent {
 protected:
 	char *mkName() const { return my_asprintf("Detected error at %lx\n", rip); }
 public:
 	unsigned long rip;
 	DetectedErrorEvent(EventTimestamp when, unsigned long _rip)
-		: ThreadEvent<ait>(when), rip(_rip)
+		: ThreadEvent(when), rip(_rip)
 	{
 	}
 	/* Okay, we've crashed.  Consume to the end of the log and
 	 * then stop. */
-	ThreadEvent<ait> *replay(LogRecord *,
+	ThreadEvent *replay(LogRecord *,
 				 MachineState **ms,
 				 bool &consumed,
 				 LogReaderPtr)
@@ -1267,12 +1265,12 @@ public:
 };
 
 template <typename ait>
-class SignalEvent : public ThreadEvent<ait> {
+class SignalEvent : public ThreadEvent {
 public:
 	unsigned signr;
 	ait virtaddr;
 	SignalEvent(EventTimestamp when, unsigned _signr, ait _va) :
-		ThreadEvent<ait>(when),
+		ThreadEvent(when),
 		signr(_signr),
 		virtaddr(_va)
 	{
@@ -1282,10 +1280,10 @@ protected:
 		return my_asprintf("signal(nr = %d)", signr);
 	}
 public:
-	ThreadEvent<ait> *replay(LogRecord *lr, MachineState **ms,
+	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent<ait> *get(EventTimestamp when, unsigned _signr, ait _virtaddr)
+	static ThreadEvent *get(EventTimestamp when, unsigned _signr, ait _virtaddr)
 	{
 		return new SignalEvent<ait>(when, _signr, _virtaddr);
 	}
@@ -1293,7 +1291,7 @@ public:
 	void visit(HeapVisitor &hv)
 	{
 		visit_aiv(virtaddr, hv);
-		ThreadEvent<ait>::visit(hv);
+		ThreadEvent::visit(hv);
 	}
 	NAMED_CLASS
 };
@@ -1831,10 +1829,10 @@ private:
 	trans_hash_entry *trans_hash[nr_trans_hash_slots];
 };
 
-template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall *lrs,
-							 Thread *thr,
-							 MachineState *&mach,
-							 LogReaderPtr ptr);
+ThreadEvent * replay_syscall(const LogRecordSyscall *lrs,
+			     Thread *thr,
+			     MachineState *&mach,
+			     LogReaderPtr ptr);
 
 template<typename ait> void process_memory_records(VexPtr<AddressSpace > &addrSpace,
 						   VexPtr<LogReader > &lf,

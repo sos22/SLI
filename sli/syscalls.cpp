@@ -100,17 +100,17 @@ handle_clone(AddressSpace *addrSpace,
 	       thr->tid._tid());
 }
 
-template<typename ait> ThreadEvent<ait> *
+ThreadEvent *
 replay_syscall(const LogRecordSyscall *lrs,
 	       Thread *thr,
 	       MachineState *&mach,
 	       LogReaderPtr ptr)
 {
 	AddressSpace *addrSpace = mach->addressSpace;
-	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
-	ait res = lrs->res;
-	ait args[6];
-	ThreadEvent<ait> *evt = NULL;
+	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
+	unsigned long res = lrs->res;
+	unsigned long args[6];
+	ThreadEvent *evt = NULL;
 	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));
 	args[1] = thr->regs.get_reg(REGISTER_IDX(RSI));
 	args[2] = thr->regs.get_reg(REGISTER_IDX(RDX));
@@ -157,35 +157,35 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_lseek: /* 8 */
 		break;
 	case __NR_mmap: { /* 9 */
-		ait addr = lrs->res;
-		ait length = args[1];
-		ait prot = args[2];
+		unsigned long addr = lrs->res;
+		unsigned long length = args[1];
+		unsigned long prot = args[2];
 		
 		if (!isErrnoSysres(force(lrs->res))) {
-			length = (length + mkConst<ait>(4095)) & ~mkConst<ait>(4095);
+			length = (length + mkConst<unsigned long>(4095)) & ~mkConst<unsigned long>(4095);
 			addrSpace->allocateMemory(addr, length, force(prot));
 		}
 		break;
 	}
 	case __NR_mprotect: { /* 10 */
-		ait addr = args[0];
-		ait size = args[1];
-		ait prot = args[2];
+		unsigned long addr = args[0];
+		unsigned long size = args[1];
+		unsigned long prot = args[2];
 		if (!isErrnoSysres(force(lrs->res)))
 			addrSpace->protectMemory(addr, size, force(prot));
 		break;
 	}
 	case __NR_munmap: { /* 11 */
-		addrSpace->releaseMemory(args[0], (args[1] + mkConst<ait>(4095)) & mkConst<ait>(~4095));
+		addrSpace->releaseMemory(args[0], (args[1] + mkConst<unsigned long>(4095)) & mkConst<unsigned long>(~4095));
 		break;
 	}
 	case __NR_brk: /* 12 */
-		res = mkConst<ait>(addrSpace->setBrk(args[0]));
+		res = mkConst<unsigned long>(addrSpace->setBrk(args[0]));
 		break;
 	case __NR_rt_sigaction: /* 13 */
 		if (!isErrnoSysres(force(lrs->res)) &&
-		    force(args[1] != mkConst<ait>(0))) {
-			ait buf[sizeof(struct sigaction)];
+		    force(args[1] != mkConst<unsigned long>(0))) {
+			unsigned long buf[sizeof(struct sigaction)];
 			addrSpace->readMemory(args[1],
 					      sizeof(struct sigaction),
 					      buf,
@@ -264,15 +264,15 @@ replay_syscall(const LogRecordSyscall *lrs,
 		printf("Thread %d exits\n", thr->tid._tid());
 		thr->exitted = true;
 		if (force(thr->clear_child_tid)) {
-			struct expression_result<ait> v;
-			v.lo = mkConst<ait>(0);
+			struct expression_result<unsigned long> v;
+			v.lo = mkConst<unsigned long>(0);
 			try {
 				addrSpace->store(EventTimestamp(thr->tid,
 								thr->nrEvents,
 								mach->nrEvents,
 								force(thr->regs.rip())),
 						 thr->clear_child_tid, 4, v);
-			} catch (BadMemoryException<ait> &e) {
+			} catch (BadMemoryException<unsigned long> &e) {
 				/* Kernel ignores errors clearing the
 				   child TID pointer, and so we do
 				   to. */
@@ -335,9 +335,9 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
-		switch (force(args[1] & mkConst<ait>(FUTEX_CMD_MASK))) {
+		switch (force(args[1] & mkConst<unsigned long>(FUTEX_CMD_MASK))) {
 		case FUTEX_WAIT:
-			if (force(res == mkConst<ait>(0)))
+			if (force(res == mkConst<unsigned long>(0)))
 				thr->futexBlock(args[0]);
 			break;
 		case FUTEX_WAKE:
@@ -363,7 +363,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	case __NR_tgkill: /* 234 */
 		/* Hack: assume that this came from raise() */
-		evt = SignalEvent<ait>::get(thr->bumpEvent(mach), force(args[2]), mkConst<ait>(0));
+		evt = SignalEvent<unsigned long>::get(thr->bumpEvent(mach), force(args[2]), mkConst<unsigned long>(0));
 		break;
 
 	case __NR_set_robust_list: /* 273 */
@@ -590,7 +590,7 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 
 	if (lr)
 		*lr = llr;
-	ThreadEvent<ait> *evt = replay_syscall<ait>(llr, thr, ms, LogReaderPtr());
+	ThreadEvent *evt = replay_syscall(llr, thr, ms, LogReaderPtr());
 	if (evt)
 		return evt->fake(ms);
 	else
