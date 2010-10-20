@@ -51,7 +51,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 
 template<typename ait> static void
 handle_clone(AddressSpace *addrSpace,
-	     Thread<ait> *thr,
+	     Thread *thr,
 	     MachineState *&mach,
 	     ait flags,
 	     ait childRsp,
@@ -75,7 +75,7 @@ handle_clone(AddressSpace *addrSpace,
 
 	/* Create a new thread.  This is, as you might expect, closely
 	   modelled on the kernel's version of the same process. */
-	Thread<ait> *newThread = thr->fork(pid);
+	Thread *newThread = thr->fork(pid);
 	if (force(flags & mkConst<ait>(CLONE_CHILD_SETTID)))
 		newThread->set_child_tid = child_tidptr;
 	if (force(flags & mkConst<ait>(CLONE_CHILD_CLEARTID)))
@@ -93,7 +93,7 @@ handle_clone(AddressSpace *addrSpace,
 
 	mach->registerThread(newThread);
 
-	newThread->snapshotLog.push(typename Thread<ait>::snapshot_log_entry(mach, ptr));
+	newThread->snapshotLog.push(typename Thread::snapshot_log_entry(mach, ptr));
 	mach = mach->dupeSelf();
 
 	printf("Clone created thread %d from %d\n", newThread->tid._tid(),
@@ -102,7 +102,7 @@ handle_clone(AddressSpace *addrSpace,
 
 template<typename ait> ThreadEvent<ait> *
 replay_syscall(const LogRecordSyscall<ait> *lrs,
-	       Thread<ait> *thr,
+	       Thread *thr,
 	       MachineState *&mach,
 	       LogReaderPtr ptr)
 {
@@ -388,7 +388,7 @@ template <typename ait>
 InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord<ait> **lr)
 {
 	ait res;
-	Thread<ait> *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->when.tid);
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 	ait args[6];
 	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));

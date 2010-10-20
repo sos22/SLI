@@ -35,7 +35,7 @@ MachineState::initialMachineState(AddressSpace *as,
 {
 	MachineState *work = new MachineState();
 
-	work->threads = LibvexVector<Thread<unsigned long> >::empty();
+	work->threads = LibvexVector<Thread >::empty();
 	work->nextTid = ThreadId(1);
 	work->addressSpace = as;
 	work->signalHandlers = SignalHandlers<unsigned long>(handlers);
@@ -76,10 +76,10 @@ MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
 	        } else if (LogRecordMemory<unsigned long> *lrm = dynamic_cast<LogRecordMemory<unsigned long>*>(lr)) {
 			as->populateMemory(*lrm);
 		} else if (LogRecordInitialRegisters<unsigned long> *lrir = dynamic_cast<LogRecordInitialRegisters<unsigned long>*>(lr)) {
-			work->registerThread(Thread<unsigned long>::initialThread(*lrir));
+			work->registerThread(Thread::initialThread(*lrir));
 	        } else if (LogRecordVexThreadState<unsigned long> *lrvts = dynamic_cast<LogRecordVexThreadState<unsigned long>*>(lr)) {
 			VexPtr<LogRecordVexThreadState<unsigned long> > l(lrvts);
-			VexPtr<Thread<unsigned long> > t(work->findThread(lrvts->thread()));
+			VexPtr<Thread > t(work->findThread(lrvts->thread()));
 			t->imposeState(t, l, as, work, ptr, token);
 		} else {
 			break;
@@ -92,7 +92,7 @@ MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
 
 	for (unsigned x = 0; x < work->threads->size(); x++)
 		work->threads->index(x)->snapshotLog.push(
-			Thread<unsigned long>::snapshot_log_entry(work, ptr));
+			Thread::snapshot_log_entry(work, ptr));
 	*end = ptr;
 	return work->dupeSelf();;
 }
@@ -112,7 +112,7 @@ MachineState *MachineState::dupeSelf() const
 	*work = *this;
 
 	work->addressSpace = addressSpace->dupeSelf();
-	work->threads = LibvexVector<Thread<unsigned long> >::empty();
+	work->threads = LibvexVector<Thread >::empty();
 	work->threads->_set_size(threads->size());
 	for (unsigned x = 0; x < threads->size(); x++)
 		work->threads->set(x, threads->index(x)->dupeSelf());

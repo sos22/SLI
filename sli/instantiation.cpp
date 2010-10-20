@@ -1,14 +1,23 @@
+#include "sli.h"
+
+template<> unsigned long
+load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestamp store,
+	 unsigned long storeAddr, unsigned size)
+{
+	return x;
+}
+
+
 #include "logwriter.cpp"
 #include "replay.cpp"
 #include "thread.cpp"
 #include "machinestate.cpp"
-#include "interpreter.cpp"
+#include "logreader.cpp"
 #include "syscalls.cpp"
 #include "memlog.cpp"
 #include "memtracepool.cpp"
 #include "memorytrace.cpp"
 #include "addressspace.cpp"
-#include "logreader.cpp"
 #include "pmap.cpp"
 #include "vamap.cpp"
 
@@ -24,6 +33,7 @@
 	MK_LOGREADER(t);                        \
         MK_PMAP(t);				\
 	MK_VAMAP(t)
+
 
 static unsigned long signed_shift_right(unsigned long x, unsigned long y)
 {
@@ -51,6 +61,8 @@ ait operator ==(expression_result<ait> a, expression_result<ait> b)
 {
 	return a.lo == b.lo && a.hi == b.hi;
 }
+
+#include "interpreter.cpp"
 
 MK_INTERP(unsigned long);
 

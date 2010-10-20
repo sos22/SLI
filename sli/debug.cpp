@@ -201,7 +201,7 @@ GetMemoryCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 template <typename ait> void
 GetRegistersCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
-	Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
+	Thread *thr = ms->findThread(this->chan->currentTidQuery, true);
 
 	if (thr) {
 		char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
@@ -223,7 +223,7 @@ GetRegistersCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken
 template <typename ait> void
 GetRegisterCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
-	Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
+	Thread *thr = ms->findThread(this->chan->currentTidQuery, true);
 	ait r;
 	bool haveIt;
 
@@ -298,7 +298,7 @@ QueryCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 template <typename ait> void
 ThreadAliveCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
-	const Thread<ait> *thr = ms->findThread(tid, true);
+	const Thread *thr = ms->findThread(tid, true);
 	if (!thr || thr->exitted || thr->crashed)
 		this->sendResponse("E01");
 	else
@@ -308,7 +308,7 @@ ThreadAliveCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 template <typename ait> void
 ContinueCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken t)
 {
-	VexPtr<Thread<ait> > thr(ms->findThread(this->chan->currentTidRun, true));
+	VexPtr<Thread > thr(ms->findThread(this->chan->currentTidRun, true));
 	if (!thr) {
 		this->sendResponse("E99");
 		return;

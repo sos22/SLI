@@ -71,7 +71,7 @@ template <typename ait>
 ThreadEvent<ait> *StoreEvent<ait>::replay(LogRecord<ait> *lr, MachineState **ms,
 					  bool &, LogReaderPtr)
 {
-	Thread<ait> *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->when.tid);
 	LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store, got %s",
@@ -93,7 +93,7 @@ template <typename ait>
 InterpretResult StoreEvent<ait>::fake(MachineState *ms,
 				      LogRecord<ait> **lr)
 {
-	Thread<ait> *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->when.tid);
 	if (lr)
 		*lr = new LogRecordStore<ait>(thr->tid, size, addr, data);
 	ms->addressSpace->store(this->when, addr, size, data, false, thr);
@@ -105,7 +105,7 @@ template <typename ait>
 ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState **ms,
 					 bool &, LogReaderPtr)
 {
-	Thread<ait> *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->when.tid);
 	if ((*ms)->addressSpace->isReadable(addr, size, thr)) {
 		LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
 		if (!lrl)
@@ -135,7 +135,7 @@ ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord<ait> *lr, MachineState **ms,
 template <typename ait>
 InterpretResult LoadEvent<ait>::fake(MachineState *ms, LogRecord<ait> **lr)
 {
-	Thread<ait> *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->when.tid);
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		expression_result<ait> buf =
 			ms->addressSpace->load(this->when, addr, size, false, thr);
@@ -227,7 +227,7 @@ ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState **ms,
 					    size, force(addr.lo));
 
         expression_result<ait> seen;
-	Thread<ait> *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->when.tid);
         seen = (*ms)->addressSpace->load(this->when, addr.lo, size, false, thr);
         if (force(seen != lrl->value))
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
@@ -254,7 +254,7 @@ ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord<ait> *lr, MachineState *ms,
 					    size, force(addr.lo));
 
         expression_result<ait> seen;
-	Thread<ait> *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->when.tid);
         seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
         if (force(seen != lrl->value))
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
@@ -292,7 +292,7 @@ template <typename ait>
 InterpretResult CasEvent<ait>::fake(MachineState *ms, LogRecord<ait> **lr1,
 				    LogRecord<ait> **lr2)
 {
-	Thread<ait> *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->when.tid);
 	expression_result<ait> seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
 	if (lr1)
 		*lr1 = new LogRecordLoad<ait>(this->when.tid, size, addr.lo, seen);
@@ -316,7 +316,7 @@ template <typename ait>
 ThreadEvent<ait> *SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState **ms,
 					   bool &, LogReaderPtr)
 {
-	Thread<ait> *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->when.tid);
 	LogRecordSignal<ait> *lrs = dynamic_cast<LogRecordSignal<ait> *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a signal record, got %s",
@@ -353,7 +353,7 @@ ThreadEvent<ait> *SignalEvent<ait>::replay(LogRecord<ait> *lr, MachineState **ms
 template <typename ait>
 InterpretResult SignalEvent<ait>::fake(MachineState *ms, LogRecord<ait> **lr)
 {
-	Thread<ait> *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->when.tid);
 	if (lr)
 		*lr = new LogRecordSignal<ait>(thr->tid, thr->regs.rip(), signr, mkConst<ait>(0), virtaddr);
 	printf("Crash in thread %d signal %d\n", thr->tid._tid(),signr);
@@ -425,7 +425,7 @@ CasEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
 			   GarbageCollectionToken)
 {
         expression_result<ait> seen;
-	Thread<ait> *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->when.tid);
         seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
 	thr->temporaries[dest] = seen;
         if (force(seen != expected))

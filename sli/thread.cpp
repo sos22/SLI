@@ -1,6 +1,6 @@
 #include "sli.h"
 
-template class LibvexVector<Thread<unsigned long> >;
+template class LibvexVector<Thread>;
 
 const ThreadId ThreadId::invalidTid;
 const EventTimestamp EventTimestamp::invalid;
@@ -12,32 +12,29 @@ RegisterSet<unsigned long>::RegisterSet(VexGuestAMD64State const&r)
 		registers[x] = ((unsigned long *)&r)[x];
 }
 
-template<typename ait>
-Thread<ait> *Thread<ait>::initialThread(const LogRecordInitialRegisters<ait> &initRegs)
+Thread *Thread::initialThread(const LogRecordInitialRegisters<unsigned long> &initRegs)
 {
-	Thread<ait> *work;
+	Thread *work;
 
-	work = new Thread<ait>();
+	work = new Thread();
 	work->tid = initRegs.thread();
 	work->regs = initRegs.regs;
 	return work;
 }
 
-template <typename ait>
-Thread<ait> *Thread<ait>::fork(unsigned newPid)
+Thread *Thread::fork(unsigned newPid)
 {
-	Thread<ait> *work;
+	Thread *work;
 
-	work = new Thread<ait>();
+	work = new Thread();
 	work->pid = newPid;
 	work->regs = regs;
 	return work;
 }
 
-template <typename ait>
-Thread<ait> *Thread<ait>::dupeSelf() const
+Thread *Thread::dupeSelf() const
 {
-	Thread<ait> *work = new Thread<ait>();
+	Thread *work = new Thread();
 	*work = *this;
 
 	/* Clear out our old machine snapshots.  This is necessary to
@@ -51,21 +48,20 @@ Thread<ait> *Thread<ait>::dupeSelf() const
 	return work;
 }
 
-template<typename ait>
-void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw)
+void Thread::dumpSnapshot(LogWriter<unsigned long> *lw)
 {
 	VexGuestAMD64State r;
 
-	for (unsigned x = 0; x < RegisterSet<ait>::NR_REGS; x++)
+	for (unsigned x = 0; x < RegisterSet<unsigned long>::NR_REGS; x++)
 		((unsigned long *)&r)[x] = force(regs.get_reg(x));
-	lw->append(new LogRecordInitialRegisters<ait>(tid, r), 0);
+	lw->append(new LogRecordInitialRegisters<unsigned long>(tid, r), 0);
 	if (currentIRSB && currentIRSBOffset != 0) {
 		/* First statement in block should be a mark */
 		assert(currentIRSB->stmts[0]->tag == Ist_IMark);
 		/* Should be a mark for the IRSB rip */
 		assert(currentIRSB->stmts[0]->Ist.IMark.addr ==
 		       force(currentIRSBRip));
-		lw->append(new LogRecordVexThreadState<ait>(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
+		lw->append(new LogRecordVexThreadState<unsigned long>(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
 	}
 
 	printf("Tid %d is at %d, irsb: \n", tid._tid(),
@@ -76,9 +72,8 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw)
 		printf("<null>\n");
 }
 
-template<typename ait>
-void Thread<ait>::imposeState(VexPtr<Thread<ait> > &ths,
-			      VexPtr<LogRecordVexThreadState<ait> > &rec,
+void Thread::imposeState(VexPtr<Thread > &ths,
+			      VexPtr<LogRecordVexThreadState<unsigned long> > &rec,
 			      VexPtr<AddressSpace> &as,
 			      VexPtr<MachineState > &ms,
 			      const LogReaderPtr &ptr,
@@ -96,8 +91,7 @@ void Thread<ait>::imposeState(VexPtr<Thread<ait> > &ths,
 	ths->temporaries = rec->tmp;
 }
 
-template <typename ait>
-void Thread<ait>::visit(HeapVisitor &hv)
+void Thread::visit(HeapVisitor &hv)
 {
 	hv(currentIRSB);
 	temporaries.visit(hv);
@@ -114,8 +108,7 @@ void Thread<ait>::visit(HeapVisitor &hv)
 		hv(it->ms);
 }
 
-template <typename ait>
-EventTimestamp Thread<ait>::bumpEvent(MachineState *ms)
+EventTimestamp Thread::bumpEvent(MachineState *ms)
 {
 	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++,
 				   force(regs.rip()));
@@ -123,28 +116,6 @@ EventTimestamp Thread<ait>::bumpEvent(MachineState *ms)
 		printf("Producing the magic event %d:%lx\n",
 		       lastEvent.tid._tid(), lastEvent.idx);
 	return lastEvent;
-}
-
-template <typename ait> template <typename new_type>
-Thread<new_type> *Thread<ait>::abstract() const
-{
-	Thread<new_type> *work = new Thread<new_type>();
-	work->tid = tid;
-	work->nrEvents = nrEvents;
-	work->pid = pid;
-	regs.abstract<new_type>(&work->regs);
-	work->clear_child_tid = mkConst<new_type>(clear_child_tid);
-	work->robust_list = mkConst<new_type>(robust_list);
-	work->set_child_tid = mkConst<new_type>(set_child_tid);
-	work->exitted = exitted;
-	work->crashed = crashed;
-	work->cannot_make_progress = cannot_make_progress;
-	work->currentIRSB = currentIRSB;
-	temporaries.abstract<new_type>(&work->temporaries);
-	work->currentIRSBOffset = currentIRSBOffset;
-	work->currentControlCondition =
-		mkConst<new_type>(currentControlCondition);
-	return work;
 }
 
 template <typename ait> template <typename new_type>
@@ -163,8 +134,8 @@ void expression_result_array<ait>::abstract(expression_result_array<new_type> *o
 		content[x].abstract(&out->content[x]);
 }
 
-template <typename ait> void
-Thread<ait>::pretty_print(void) const
+void
+Thread::pretty_print(void) const
 {
 	printf("Thread tid %d, pid %d access %ld event %ld, last event %lx:%lx:%lx %s%s%s%s%s\n",
 	       tid._tid(), pid,
@@ -193,6 +164,5 @@ Thread<ait>::pretty_print(void) const
 	}
 }
 
-#define MK_THREAD(t)						\
-	template <> void Thread<t>::pretty_print(void) const;
+#define MK_THREAD(t)
 

@@ -72,7 +72,7 @@ public:
 	{
 	}
 	CrashTimestamp() : tid(), rip(-1), callStack() {}
-	CrashTimestamp(Thread<unsigned long> *thr)
+	CrashTimestamp(Thread *thr)
 		: tid(thr->tid),
 		  rip(thr->regs.rip()),
 		  callStack(thr->currentCallStack)
@@ -265,11 +265,11 @@ public:
 	void destruct() { this->~CrashExpression(); }
 	virtual unsigned complexity() const = 0;
 
-	virtual void build_relevant_address_list(Thread<unsigned long> *thr,
+	virtual void build_relevant_address_list(Thread *thr,
 						 MachineState *ms,
 						 gc_map<unsigned long, bool> *addresses,
 						 const concreteStoresT &stores) = 0;
-	virtual unsigned long eval(Thread<unsigned long> *thr,
+	virtual unsigned long eval(Thread *thr,
 				   MachineState *ms,
 				   const concreteStoresT &stores) = 0;
 
@@ -336,7 +336,7 @@ public:
 	CrashExpression *map(CPMapper &m) { return m(this); }
 	unsigned complexity() const { return 2; }
 
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores) {
@@ -346,7 +346,7 @@ public:
 		abort();
 	}
 
-	unsigned long eval(Thread<unsigned long> *thr,
+	unsigned long eval(Thread *thr,
 			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 	{
@@ -377,13 +377,13 @@ public:
 	bool pointsAtStack() const {
 		return offset == OFFSET_amd64_RSP;
 	}
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
-	unsigned long eval(Thread<unsigned long> *thr,
+	unsigned long eval(Thread *thr,
 			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 
@@ -413,13 +413,13 @@ public:
 	CrashExpression *map(CPMapper &m) { return m(this); }
 	unsigned complexity() const { return 1; }
 	bool isConstant(unsigned long &l) { l = value; return true; }
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
-	unsigned long eval(Thread<unsigned long> *thr,
+	unsigned long eval(Thread *thr,
 			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 	{
@@ -465,13 +465,13 @@ public:
 	/* Give failed nodes a very high complexity, so that the
 	   simplification eliminates them whenever possible. */
 	unsigned complexity() const { return (unsigned)-1; }
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
-	unsigned long eval(Thread<unsigned long> *thr,
+	unsigned long eval(Thread *thr,
 			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 	{
@@ -523,7 +523,7 @@ public:
 	}
 	unsigned complexity() const { return addr->complexity() + 3; }
 
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
@@ -543,7 +543,7 @@ public:
 	/* This doesn't really belong here, but nevermind. */
 	static unsigned long fetch(unsigned long addr,
 				   MachineState *ms,
-				   Thread<unsigned long> *thr)
+				   Thread *thr)
 	{
 		unsigned long res[8];
 		ms->addressSpace->readMemory(addr, 8, res, false, thr);
@@ -552,7 +552,7 @@ public:
 			((unsigned char *)&folded)[x] = res[x];
 		return folded;
 	}
-	unsigned long eval(Thread<unsigned long> *thr,
+	unsigned long eval(Thread *thr,
 			   MachineState *ms,
 			   const std::vector<concrete_store> &stores)
 	{
@@ -595,7 +595,7 @@ public:
 	bool pointsAtStack() const {
 		return l->isConstant() && r->pointsAtStack();
 	}
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
@@ -636,7 +636,7 @@ public:
 			return this;					\
 		return get(l, r);					\
 	}								\
-	unsigned long eval(Thread<unsigned long> *thr,			\
+	unsigned long eval(Thread *thr,			\
 			   MachineState *ms,		\
 			   const concreteStoresT &stores)		\
 	{								\
@@ -746,7 +746,7 @@ protected:
 			return this;					
 		return get(l, r);					
 	}								
-	unsigned long eval(Thread<unsigned long> *thr,
+	unsigned long eval(Thread *thr,
 			   MachineState *ms,
 			   const concreteStoresT &stores)
 	{
@@ -898,7 +898,7 @@ public:
 			return m(semiDupe(l2));
 	}
 	unsigned complexity() const { return l->complexity() + 1; }
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
@@ -933,7 +933,7 @@ public:
 		{							\
 			return get(e);					\
 		}							\
-	unsigned long eval(Thread<unsigned long> *thr,			\
+	unsigned long eval(Thread *thr,			\
 			   MachineState *ms,		\
 			   const concreteStoresT &stores);		\
 	};
@@ -952,21 +952,21 @@ mk_unop(Not, 0x7f8ff8ac608cb30d ^)
 mk_unop(BadAddr, 76348956389 *)
 
 unsigned long
-CrashExpressionNeg::eval(Thread<unsigned long> *thr, MachineState *ms,
+CrashExpressionNeg::eval(Thread *thr, MachineState *ms,
 			 const concreteStoresT &stores)
 {
 	return -l->eval(thr, ms, stores);
 }
 
 unsigned long
-CrashExpressionNot::eval(Thread<unsigned long> *thr, MachineState *ms,
+CrashExpressionNot::eval(Thread *thr, MachineState *ms,
 			 const concreteStoresT &stores)
 {
 	return !l->eval(thr, ms, stores);
 }
 
 unsigned long
-CrashExpressionBadAddr::eval(Thread<unsigned long> *thr, MachineState *ms,
+CrashExpressionBadAddr::eval(Thread *thr, MachineState *ms,
 			     const concreteStoresT &stores)
 {
 	unsigned long a = l->eval(thr, ms, stores);
@@ -1159,7 +1159,7 @@ public:
 	CrashExpression *semiDupe(CrashExpression *l) {
 		return get(l);
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
+	unsigned long eval(Thread *thr, MachineState *ms,
 			   const concreteStoresT &stores) {
 		return l->eval(thr, ms, stores);
 	}
@@ -1194,7 +1194,7 @@ public:
 	CrashExpression *semiDupe(CrashExpression *l) {
 		return get(l, start, end);
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
+	unsigned long eval(Thread *thr, MachineState *ms,
 			   const concreteStoresT &stores) {
 		long a = l->eval(thr, ms, stores);
 		a <<= 64 - start;
@@ -1276,14 +1276,14 @@ public:
 			d->complexity() + 
 			e->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
+	unsigned long eval(Thread *thr, MachineState *ms,
 			   const concreteStoresT &stores)
 	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
 		return 0;
 	}
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
@@ -1365,14 +1365,14 @@ public:
 			c->complexity() + 
 			d->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
+	unsigned long eval(Thread *thr, MachineState *ms,
 			   const concreteStoresT &stores)
 	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
 		return 0;
 	}
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
@@ -1444,7 +1444,7 @@ public:
 			zero->complexity() + 
 			nzero->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
+	unsigned long eval(Thread *thr, MachineState *ms,
 			   const concreteStoresT &stores)
 	{
 		if (cond->eval(thr, ms, stores) == 0)
@@ -1452,7 +1452,7 @@ public:
 		else
 			return nzero->eval(thr, ms, stores);
 	}
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
@@ -1594,10 +1594,10 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 
 	class FoldInRegistersMapper : public CPMapper {
 	public:
-		Thread<unsigned long> *thr;
+		Thread *thr;
 		MachineState *ms;
 		const concreteStoresT &concreteStores;
-		FoldInRegistersMapper(Thread<unsigned long> *_thr,
+		FoldInRegistersMapper(Thread *_thr,
 				      MachineState *_ms,
 				      const concreteStoresT &_concreteStores)
 			: thr(_thr), ms(_ms), concreteStores(_concreteStores)
@@ -1713,7 +1713,7 @@ public:
 					     _stores));
 	}
 
-	CrashMachineNode *foldInRegisters(Thread<unsigned long> *thr,
+	CrashMachineNode *foldInRegisters(Thread *thr,
 					  MachineState *ms,
 					  concreteStoresT &stores);
 
@@ -1892,7 +1892,7 @@ public:
 			return false;
 	}
 
-	void build_relevant_address_list(Thread<unsigned long> *thr,
+	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 concreteStoresT &stores);
@@ -1999,7 +1999,7 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 		hv(v.second);
 	}
 
-	void calc_relevant_addresses_snapshot(Thread<unsigned long> *ts,
+	void calc_relevant_addresses_snapshot(Thread *ts,
 					      MachineState *ms);
 public:
 	typedef gc_map<CrashTimestamp,
@@ -2068,7 +2068,7 @@ public:
 
 class FREventRecorder : public EventRecorder<unsigned long> {
 protected:
-	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt) {
+	void record(Thread *thr, ThreadEvent<unsigned long> *evt) {
 		abort();
 	}
 public:
@@ -2079,7 +2079,7 @@ public:
 		  new_cm(new CrashMachine())
 	{
 	}
-	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt,
+	void record(Thread *thr, ThreadEvent<unsigned long> *evt,
 		    MachineState *ms)
 	{
 		if (InstructionEvent<unsigned long> *ie =
@@ -2116,7 +2116,7 @@ CrashMachine::foldRegisters(VexPtr<MachineState > &ms,
 }
 
 CrashMachineNode *
-CrashMachineNode::foldInRegisters(Thread<unsigned long> *thr,
+CrashMachineNode::foldInRegisters(Thread *thr,
 				  MachineState *ms,
 				  concreteStoresT &concrete_stores)
 {
@@ -2304,7 +2304,7 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 }
 
 void
-CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
+CrashMachineNode::build_relevant_address_list(Thread *thr,
 					      MachineState *ms,
 					      gc_map<unsigned long, bool> *addresses,
 					      concreteStoresT &concrete_stores)
@@ -2353,7 +2353,7 @@ CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 }
 
 void
-CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
+CrashMachine::calc_relevant_addresses_snapshot(Thread *thr,
 					       MachineState *ms)
 {
 	CrashTimestamp ts(thr);
@@ -2376,13 +2376,13 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
 
 class CRAEventRecorder : public EventRecorder<unsigned long> {
 protected:
-	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt) {
+	void record(Thread *thr, ThreadEvent<unsigned long> *evt) {
 		abort();
 	}
 public:
 	CrashMachine *cm;
 	CRAEventRecorder(CrashMachine *_cm) : cm(_cm) {}
-	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt,
+	void record(Thread *thr, ThreadEvent<unsigned long> *evt,
 		    MachineState *ms)
 	{
 		if (InstructionEvent<unsigned long> *ie =
@@ -2932,7 +2932,7 @@ class CIALEventRecorder : public EventRecorder<unsigned long> {
 	Oracle *oracle; /* Note that the oracle isn't garbage
 			 * collected! */
 protected:
-	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt);
+	void record(Thread *thr, ThreadEvent<unsigned long> *evt);
 public:
 	CIALEventRecorder(Oracle *_oracle)
 		: oracle(_oracle)
@@ -2941,7 +2941,7 @@ public:
 	void visit(HeapVisitor &hv) {}
 };
 void
-CIALEventRecorder::record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt)
+CIALEventRecorder::record(Thread *thr, ThreadEvent<unsigned long> *evt)
 {
 	StoreEvent<unsigned long> *se =
 		dynamic_cast<StoreEvent<unsigned long> *>(evt);
@@ -4077,13 +4077,13 @@ class MemTraceExtractor : public EventRecorder<unsigned long> {
 public:
 	Oracle *oracle;
 	MemTraceExtractor(Oracle *o) : oracle(o) {}
-	void record(Thread<unsigned long> *thr,
+	void record(Thread *thr,
 		    ThreadEvent<unsigned long> *evt);
 	void visit(HeapVisitor &hv) {}
 };
 
 void
-MemTraceExtractor::record(Thread<unsigned long> *thr,
+MemTraceExtractor::record(Thread *thr,
 			  ThreadEvent<unsigned long> *evt)
 {
 	unsigned long rsp;
@@ -4383,11 +4383,11 @@ class RemoveProbablyConstantReferencesMapper : public CPMapper {
 public:
 	const Oracle &oracle;
 	MachineState *ms;
-	Thread<unsigned long> *thr;
+	Thread *thr;
 	RemoveProbablyConstantReferencesMapper(
 		const Oracle &_oracle,
 		MachineState *_ms,
-		Thread<unsigned long> *_thr)
+		Thread *_thr)
 		: oracle(_oracle),
 		  ms(_ms),
 		  thr(_thr)
@@ -4489,7 +4489,7 @@ static CrashMachineNode *
 removeProbablyConstantReferences(CrashMachineNode *start,
 				 const Oracle &oracle,
 				 MachineState *ms,
-				 Thread<unsigned long> *thr)
+				 Thread *thr)
 {
 	if (oracle.constant_addresses.empty())
 		return start;
@@ -4565,7 +4565,7 @@ main(int argc, char *argv[])
 	oracle.crashingTid = ThreadId(CRASHED_THREAD);
 
 #if 0
-	VexPtr<Thread<unsigned long> > crashedThread;
+	VexPtr<Thread > crashedThread;
 	Interpreter<unsigned long> i(ms);
 	i.replayLogfile(lf, ptr, ALLOW_GC);
 	ms = i.currentState;
@@ -4600,7 +4600,7 @@ main(int argc, char *argv[])
 
 	timing("have memory trace of crashed thread");
 
-	VexPtr<Thread<unsigned long> > crashedThread;
+	VexPtr<Thread > crashedThread;
 	crashedThread = ms->findThread(oracle.crashingTid);
 	printf("Selected thread %d as crasher\n", crashedThread->tid._tid());
 
@@ -4662,7 +4662,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Now walk back over the earlier IRSBs */
-	for (ring_buffer<Thread<unsigned long>::control_log_entry, CONTROL_LOG_DEPTH>::reverse_iterator it =
+	for (ring_buffer<Thread::control_log_entry, CONTROL_LOG_DEPTH>::reverse_iterator it =
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
 	     it++) {
@@ -4819,7 +4819,7 @@ main(int argc, char *argv[])
 
         /* Now try to figure out what the relevant addresses are for
 	   each CMN.*/
-        Thread<unsigned long>::snapshot_log_entry &sle(*crashedThread->snapshotLog.begin());
+        Thread::snapshot_log_entry &sle(*crashedThread->snapshotLog.begin());
 #ifdef MOZ_BUG
 	sle.ms->findThread(ThreadId(7))->exitted = true;
 	sle.ms->findThread(ThreadId(10))->exitted = true;

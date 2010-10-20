@@ -11,8 +11,6 @@ typedef unsigned char Bool;
 
 typedef struct sigaction sigaction_t;
 
-#include "ppres.h"
-
 LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
 {
 	int fd;

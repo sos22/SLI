@@ -1,7 +1,7 @@
 #include "sli.h"
 
 template <typename ait>
-InterpretResult LogWriter<ait>::recordEvent(Thread<ait> *thr, MachineState *ms, ThreadEvent<ait> *evt)
+InterpretResult LogWriter<ait>::recordEvent(Thread *thr, MachineState *ms, ThreadEvent<ait> *evt)
 {
 	CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
 	InterpretResult res;

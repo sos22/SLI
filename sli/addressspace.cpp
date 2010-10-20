@@ -84,7 +84,7 @@ AddressSpace::copyFromClient(EventTimestamp when, unsigned long start, unsigned 
 void
 AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned size,
 			  const unsigned long *contents, bool ignore_protection,
-			  Thread<unsigned long> *thr)
+			  Thread *thr)
 {
 	unsigned long start = force(_start);
 	unsigned off = 0;
@@ -127,7 +127,7 @@ expression_result<unsigned long>
 AddressSpace::load(EventTimestamp when,
 		   unsigned long start, unsigned size,
 		   bool ignore_protection,
-		   Thread<unsigned long> *thr)
+		   Thread *thr)
 {
 	unsigned long b[16];
 	unsigned long storeAddr;
@@ -197,7 +197,7 @@ AddressSpace::load(EventTimestamp when,
 void
 AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
 		    const expression_result<unsigned long> &val, bool ignore_protection,
-		    Thread<unsigned long> *thr)
+		    Thread *thr)
 {
 	unsigned long b[16];
 	sanity_check_ait(val.hi);
@@ -234,7 +234,7 @@ AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
 }
 
 template <typename t> const t
-AddressSpace::fetch(unsigned long start, Thread<unsigned long> *thr)
+AddressSpace::fetch(unsigned long start, Thread *thr)
 {
 	unsigned long *res;
 
@@ -249,7 +249,7 @@ AddressSpace::fetch(unsigned long start, Thread<unsigned long> *thr)
 
 EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
 					unsigned long *contents, bool ignore_protection,
-					Thread<unsigned long> *thr,
+					Thread *thr,
 					unsigned long *storeAddr)
 {
 	EventTimestamp when;
@@ -325,7 +325,7 @@ AddressSpace::checkFreeList(unsigned long start, unsigned long end,
 }
 
 bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
-				     bool isWrite, Thread<unsigned long> *thr)
+				     bool isWrite, Thread *thr)
 {
 	unsigned long start = force(_start);
 	if (thr && isOnFreeList(_start, _start + mkConst<unsigned long>(size), thr->tid))
@@ -556,7 +556,7 @@ AddressSpace::addVsyscalls()
 }
 
 char *
-AddressSpace::readString(unsigned long start, Thread<unsigned long> *thr)
+AddressSpace::readString(unsigned long start, Thread *thr)
 {
 	char *buf;
 	unsigned offset;

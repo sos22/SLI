@@ -8,13 +8,13 @@ public:
 		: mt(_mt)
 	{
 	}
-	void record(Thread<ait> *thr, ThreadEvent<ait> *evt);
+	void record(Thread *thr, ThreadEvent<ait> *evt);
 	void visit(HeapVisitor &hv) { hv(mt); }
 	void destruct() {}
 	NAMED_CLASS
 };
 template <typename ait> void
-MemTraceMaker<ait>::record(Thread<ait> *thr, ThreadEvent<ait> *evt)
+MemTraceMaker<ait>::record(Thread *thr, ThreadEvent<ait> *evt)
 {
 	if (const LoadEvent<ait> *le = dynamic_cast<const LoadEvent<ait> *>(evt)) {
 		if (address_is_interesting(thr->tid, force(le->addr))) {

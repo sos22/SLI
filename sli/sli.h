@@ -296,30 +296,29 @@ public:
 	LogReaderPtr() { memset(cls_data, 0, sizeof(cls_data)); }
 };
 
-template <typename abst_int_type>
-class Thread : public GarbageCollected<Thread<abst_int_type> > {
-	static void translateNextBlock(VexPtr<Thread<abst_int_type> > &ths,
+class Thread : public GarbageCollected<Thread> {
+	static void translateNextBlock(VexPtr<Thread > &ths,
 				       VexPtr<AddressSpace > &addrSpace,
 				       VexPtr<MachineState> &ms,
 				       const LogReaderPtr &ptr,
-				       abst_int_type rip,
+				       unsigned long rip,
 				       GarbageCollectionToken t);
-	struct expression_result<abst_int_type> eval_expression(IRExpr *expr);
-	ThreadEvent<abst_int_type> *do_dirty_call(IRDirty *details, MachineState *ms);
-	ThreadEvent<abst_int_type> *do_load(EventTimestamp when,
+	struct expression_result<unsigned long> eval_expression(IRExpr *expr);
+	ThreadEvent<unsigned long> *do_dirty_call(IRDirty *details, MachineState *ms);
+	ThreadEvent<unsigned long> *do_load(EventTimestamp when,
 					    IRTemp tmp,
-					    abst_int_type addr,
+					    unsigned long addr,
 					    unsigned size,
 					    MachineState *ms);
-	expression_result<abst_int_type> do_ccall_calculate_condition(struct expression_result<abst_int_type> *args);
-	expression_result<abst_int_type> do_ccall_calculate_rflags_c(expression_result<abst_int_type> *args);
-	expression_result<abst_int_type> do_ccall_generic(IRCallee *cee, struct expression_result<abst_int_type> *rargs);
-	expression_result<abst_int_type> do_ccall(IRCallee *cee, IRExpr **args);
+	expression_result<unsigned long> do_ccall_calculate_condition(struct expression_result<unsigned long> *args);
+	expression_result<unsigned long> do_ccall_calculate_rflags_c(expression_result<unsigned long> *args);
+	expression_result<unsigned long> do_ccall_generic(IRCallee *cee, struct expression_result<unsigned long> *rargs);
+	expression_result<unsigned long> do_ccall(IRCallee *cee, IRExpr **args);
 
-	void amd64g_dirtyhelper_loadF80le(MachineState *, IRTemp tmp, abst_int_type addr);
-	void amd64g_dirtyhelper_storeF80le(MachineState *, abst_int_type addr, abst_int_type _f64);
+	void amd64g_dirtyhelper_loadF80le(MachineState *, IRTemp tmp, unsigned long addr);
+	void amd64g_dirtyhelper_storeF80le(MachineState *, unsigned long addr, unsigned long _f64);
 
-	void redirectGuest(abst_int_type rip);
+	void redirectGuest(unsigned long rip);
 
 public:
 	std::vector<unsigned long> currentCallStack;
@@ -329,11 +328,11 @@ public:
 	EventTimestamp bumpEvent(MachineState *ms);
 	ThreadId tid;
 	unsigned pid;
-	RegisterSet<abst_int_type> regs;
-	abst_int_type clear_child_tid;
-	abst_int_type robust_list;
-	abst_int_type set_child_tid;
-	abst_int_type futex_block_address;
+	RegisterSet<unsigned long> regs;
+	unsigned long clear_child_tid;
+	unsigned long robust_list;
+	unsigned long set_child_tid;
+	unsigned long futex_block_address;
 	bool exitted;
 	bool crashed;
 	bool idle;
@@ -345,8 +344,8 @@ public:
 	unsigned long nrEvents;
 
 	IRSB *currentIRSB;
-	abst_int_type currentIRSBRip;
-	expression_result_array<abst_int_type> temporaries;
+	unsigned long currentIRSBRip;
+	expression_result_array<unsigned long> temporaries;
 	int currentIRSBOffset;
 
 	/* We maintain a log of the thread's recent control flow
@@ -381,30 +380,30 @@ public:
 	/* mutable because we have to nuke it from dupeSelf. */
 	mutable ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
-	abst_int_type currentControlCondition;
+	unsigned long currentControlCondition;
 
 	EventTimestamp lastEvent;
 
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
-	void futexBlock(abst_int_type fba) { blocked = true; futex_block_address = fba; }
+	void futexBlock(unsigned long fba) { blocked = true; futex_block_address = fba; }
 	void futexUnblock() { blocked = false; }
 
 	void pretty_print() const;
 private:
 	bool allowRipMismatch;
 public:
-	static ThreadEvent<abst_int_type> *runToEvent(VexPtr<Thread<abst_int_type> > &ths,
+	static ThreadEvent<unsigned long> *runToEvent(VexPtr<Thread > &ths,
 						      VexPtr<MachineState > &ms,
 						      const LogReaderPtr &ptr,
 						      GarbageCollectionToken t);
 
-	static Thread<abst_int_type> *initialThread(const LogRecordInitialRegisters<abst_int_type> &initRegs);
-	Thread<abst_int_type> *fork(unsigned newPid);
-	Thread<abst_int_type> *dupeSelf() const;
-	void dumpSnapshot(LogWriter<abst_int_type> *lw);
+	static Thread *initialThread(const LogRecordInitialRegisters<unsigned long> &initRegs);
+	Thread *fork(unsigned newPid);
+	Thread *dupeSelf() const;
+	void dumpSnapshot(LogWriter<unsigned long> *lw);
 
-	static void imposeState(VexPtr<Thread<abst_int_type> > &thr,
-				VexPtr<LogRecordVexThreadState<abst_int_type> > &rec,
+	static void imposeState(VexPtr<Thread > &thr,
+				VexPtr<LogRecordVexThreadState<unsigned long> > &rec,
 				VexPtr<AddressSpace > &as,
 				VexPtr<MachineState > &ms,
 				const LogReaderPtr &ptr,
@@ -412,9 +411,7 @@ public:
 
 	void visit(HeapVisitor &hv);
 
-	template <typename new_type> Thread<new_type> *abstract() const;
-
-	void destruct() { temporaries.~expression_result_array<abst_int_type>(); }
+	void destruct() { temporaries.~expression_result_array<unsigned long>(); }
 
 	NAMED_CLASS
 };
@@ -732,7 +729,7 @@ public:
 
 class MachineState : public GarbageCollected<MachineState > {
 public:
-	LibvexVector<Thread<unsigned long> > *threads;
+	LibvexVector<Thread > *threads;
 
 	bool exitted;
 	unsigned long exit_status;
@@ -750,7 +747,7 @@ public:
 								LogReaderPtr *endPtr,
 								GarbageCollectionToken t);
 
-	void registerThread(Thread<unsigned long> *t) {
+	void registerThread(Thread *t) {
 		ThreadId tid;
 		tid = 1;
 	top:
@@ -768,7 +765,7 @@ public:
 		t->tid = tid;
 		threads->push(t);
 	}
-	Thread<unsigned long> *findThread(ThreadId id, bool allow_failure = false) {
+	Thread *findThread(ThreadId id, bool allow_failure = false) {
 		unsigned x;
 		for (x = 0; x < threads->size(); x++)
 			if (threads->index(x)->tid == id)
@@ -776,7 +773,7 @@ public:
 		assert(allow_failure);
 		return NULL;
 	}
-	const Thread<unsigned long> *findThread(ThreadId id) const {
+	const Thread *findThread(ThreadId id) const {
 		unsigned x;
 		for (x = 0; x < threads->size(); x++)
 			if (threads->index(x)->tid == id)
@@ -828,9 +825,9 @@ template <typename ait>
 class EventRecorder : public GarbageCollected<EventRecorder<ait> > {
 protected:
 	virtual ~EventRecorder() {}
-	virtual void record(Thread<ait> *thr, ThreadEvent<ait> *evt) = 0;
+	virtual void record(Thread *thr, ThreadEvent<ait> *evt) = 0;
 public:
-	virtual void record(Thread<ait> *thr, ThreadEvent<ait> *evt,
+	virtual void record(Thread *thr, ThreadEvent<ait> *evt,
 			    MachineState *ms)
 	{
 		record(thr, evt);
@@ -904,7 +901,7 @@ class LogWriter : public GarbageCollected<LogWriter<ait> > {
 public:
 	virtual void append(LogRecord<ait> *lr, unsigned long idx) = 0;
 	virtual ~LogWriter() {}
-	InterpretResult recordEvent(Thread<ait> *thr, MachineState *ms, ThreadEvent<ait> *evt);
+	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent<ait> *evt);
 
 	NAMED_CLASS
 };
@@ -1277,14 +1274,14 @@ public:
 				 bool &consumed,
 				 LogReaderPtr)
 	{
-		Thread<ait> *thr = (*ms)->findThread(this->when.tid);
+		Thread *thr = (*ms)->findThread(this->when.tid);
 		thr->crashed = true;
 		consumed = true;
 		return this;
 	}
 	InterpretResult fake(MachineState *ms, LogRecord<ait> **lr = NULL)
 	{
-		Thread<ait> *thr = ms->findThread(this->when.tid);
+		Thread *thr = ms->findThread(this->when.tid);
 		thr->crashed = true;
 		return InterpretResultCrash;
 	}
@@ -1741,7 +1738,7 @@ public:
 
 template <typename ait>
 class LogRecordInitialRegisters : public LogRecord<ait> {
-	friend class Thread<ait>;
+	friend class Thread;
 	VexGuestAMD64State regs;
 protected:
 	virtual char *mkName() const {
@@ -1854,10 +1851,10 @@ public:
 	}
 	void store(EventTimestamp when, unsigned long start, unsigned size, const expression_result<unsigned long> &val,
 		   bool ignore_protection = false,
-		   Thread<unsigned long> *thr = NULL);
+		   Thread *thr = NULL);
 	void writeMemory(EventTimestamp when, unsigned long start, unsigned size,
 			 const unsigned long *contents, bool ignore_protection,
-			 Thread<unsigned long> *thr);
+			 Thread *thr);
 	bool copyToClient(EventTimestamp when, unsigned long start, unsigned size,
 			  const void *source);
 	bool copyFromClient(EventTimestamp when, unsigned long start, unsigned size,
@@ -1865,21 +1862,21 @@ public:
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result<unsigned long> load(EventTimestamp when, unsigned long start, unsigned size,
 				    bool ignore_protection = false,
-				    Thread<unsigned long> *thr = NULL);
+				    Thread *thr = NULL);
 	template <typename t> const t fetch(unsigned long addr,
-					    Thread<unsigned long> *thr);
+					    Thread *thr);
 	EventTimestamp readMemory(unsigned long start, unsigned size,
 				  unsigned long *contents, bool ignore_protection,
-				  Thread<unsigned long> *thr,
+				  Thread *thr,
 				  unsigned long *storeAddr = NULL);
 	bool isAccessible(unsigned long start, unsigned size,
-			  bool isWrite, Thread<unsigned long> *thr);
+			  bool isWrite, Thread *thr);
 	bool isWritable(unsigned long start, unsigned size,
-			Thread<unsigned long> *thr = NULL) {
+			Thread *thr = NULL) {
 		return isAccessible(start, size, true, thr);
 	}
 	bool isReadable(unsigned long start, unsigned size,
-			Thread<unsigned long> *thr = NULL) {
+			Thread *thr = NULL) {
 		return isAccessible(start, size, false, thr);
 	}
 	unsigned long setBrk(unsigned long newBrk);
@@ -1894,7 +1891,7 @@ public:
 	void dumpBrkPtr(LogWriter<unsigned long> *lw) const;
 	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
 
-	char *readString(unsigned long start, Thread<unsigned long> *thr);
+	char *readString(unsigned long start, Thread *thr);
 
 	void destruct() { this->~AddressSpace(); }
 
@@ -1949,7 +1946,7 @@ private:
 };
 
 template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall<ait> *lrs,
-							 Thread<ait> *thr,
+							 Thread *thr,
 							 MachineState *&mach,
 							 LogReaderPtr ptr);
 

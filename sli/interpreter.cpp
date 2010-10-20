@@ -26,17 +26,15 @@ static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 
 #define REG_LAST 128
 
-template<typename ait>
 static void
-write_reg(Thread<ait> *state, unsigned offset, ait val)
+write_reg(Thread *state, unsigned offset, unsigned long val)
 {
 	assert(!(offset % 8));
 	state->regs.set_reg(offset / 8, val);
 }
 
-template<typename ait>
-static ait
-read_reg(Thread<ait> *state, unsigned offset)
+static unsigned long
+read_reg(Thread *state, unsigned offset)
 {
 	assert(!(offset % 8));
 	return state->regs.get_reg(offset / 8);
@@ -132,32 +130,32 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 #undef SET_ABCD
 }
 
-template<typename ait> void
-Thread<ait>::amd64g_dirtyhelper_loadF80le(MachineState *ms, IRTemp tmp, ait addr)
+void
+Thread::amd64g_dirtyhelper_loadF80le(MachineState *ms, IRTemp tmp, unsigned long addr)
 {
-	ait buf[10];
+	unsigned long buf[10];
 	ms->addressSpace->readMemory(addr, 10, buf, false, this, NULL);
 	UChar buf2[10];
 	for (unsigned x = 0; x < 10; x++)
 		buf2[x] = force(buf[x]);
 	ULong f64;
 	convert_f80le_to_f64le(buf2, (UChar*)&f64);
-	temporaries[tmp].lo = mkConst<ait>(f64);
-	temporaries[tmp].hi = mkConst<ait>(0);
+	temporaries[tmp].lo = mkConst<unsigned long>(f64);
+	temporaries[tmp].hi = mkConst<unsigned long>(0);
 }
 
-template <typename ait> void
-Thread<ait>::amd64g_dirtyhelper_storeF80le(MachineState *ms, ait addr, ait _f64)
+void
+Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsigned long _f64)
 {
 	unsigned long f64 = force(_f64);
 	unsigned char buf[10];
-	ait buf2[10];
+	unsigned long buf2[10];
 	unsigned x;
 
 	convert_f64le_to_f80le((UChar *)&f64, (UChar *)buf);
 
 	for (x = 0; x < 10; x++)
-		buf2[x] = mkConst<ait>(buf[x]);
+		buf2[x] = mkConst<unsigned long>(buf[x]);
 	ms->addressSpace->writeMemory(EventTimestamp(tid, nrEvents, ms->nrEvents,
 						     force(regs.rip())),
 				      addr,
@@ -167,25 +165,24 @@ Thread<ait>::amd64g_dirtyhelper_storeF80le(MachineState *ms, ait addr, ait _f64)
 				      this);
 }
 
-template <typename ait> ThreadEvent<ait> *
-Thread<ait>::do_load(EventTimestamp when, IRTemp tmp, ait addr, unsigned size,
+ThreadEvent<unsigned long> *
+Thread::do_load(EventTimestamp when, IRTemp tmp, unsigned long addr, unsigned size,
 		     MachineState *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, this))
-		return LoadEvent<ait>::get(when, tmp, addr, size);
+		return LoadEvent<unsigned long>::get(when, tmp, addr, size);
 	else
-		return SignalEvent<ait>::get(when, 11, addr);
+		return SignalEvent<unsigned long>::get(when, 11, addr);
 }
 
-template<typename ait>
-ThreadEvent<ait> *
-Thread<ait>::do_dirty_call(IRDirty *details, MachineState *ms)
+ThreadEvent<unsigned long> *
+Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 {
-	struct expression_result<ait> args[6];
+	struct expression_result<unsigned long> args[6];
 	unsigned x;
 
 	if (details->guard) {
-		expression_result<ait> guard = eval_expression(details->guard);
+		expression_result<unsigned long> guard = eval_expression(details->guard);
 		if (force(!guard.lo))
 			return NULL;
 	}
@@ -196,7 +193,7 @@ Thread<ait>::do_dirty_call(IRDirty *details, MachineState *ms)
 	assert(!details->cee->regparms);
 
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
-		return RdtscEvent<ait>::get(bumpEvent(ms), details->tmp);
+		return RdtscEvent<unsigned long>::get(bumpEvent(ms), details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
 		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 1, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
@@ -398,20 +395,19 @@ calculate_condition_flags_XXX(ait op,
 	sanity_check_ait(cf);
 }
 
-template<typename ait>
-expression_result<ait>
-Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
+expression_result<unsigned long>
+Thread::do_ccall_calculate_condition(struct expression_result<unsigned long> *args)
 {
-	struct expression_result<ait> condcode = args[0];
-	struct expression_result<ait> op       = args[1];
-	struct expression_result<ait> dep1     = args[2];
-	struct expression_result<ait> dep2     = args[3];
-	struct expression_result<ait> ndep     = args[4];
-	struct expression_result<ait> res;
-	ait inv;
-	ait cf, zf, sf, of, pf;
+	struct expression_result<unsigned long> condcode = args[0];
+	struct expression_result<unsigned long> op       = args[1];
+	struct expression_result<unsigned long> dep1     = args[2];
+	struct expression_result<unsigned long> dep2     = args[3];
+	struct expression_result<unsigned long> ndep     = args[4];
+	struct expression_result<unsigned long> res;
+	unsigned long inv;
+	unsigned long cf, zf, sf, of, pf;
 
-	calculate_condition_flags_XXX<ait>(op.lo,
+	calculate_condition_flags_XXX<unsigned long>(op.lo,
 					   dep1.lo,
 					   dep2.lo,
 					   ndep.lo,
@@ -421,8 +417,8 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 					   of,
 					   pf);
 
-	inv = condcode.lo & mkConst<ait>(1);
-	switch (force(condcode.lo & ~mkConst<ait>(1))) {
+	inv = condcode.lo & mkConst<unsigned long>(1);
+	switch (force(condcode.lo & ~mkConst<unsigned long>(1))) {
 	case AMD64CondZ:
 		res.lo = zf;
 		break;
@@ -454,16 +450,15 @@ Thread<ait>::do_ccall_calculate_condition(struct expression_result<ait> *args)
 	return res;
 }
 
-template<typename ait>
-expression_result<ait>
-Thread<ait>::do_ccall_calculate_rflags_c(expression_result<ait> *args)
+expression_result<unsigned long>
+Thread::do_ccall_calculate_rflags_c(expression_result<unsigned long> *args)
 {
-	struct expression_result<ait> op   = args[0];
-	struct expression_result<ait> dep1 = args[1];
-	struct expression_result<ait> dep2 = args[2];
-	struct expression_result<ait> ndep = args[3];
-	struct expression_result<ait> res;
-	ait cf, zf, sf, of, pf;
+	struct expression_result<unsigned long> op   = args[0];
+	struct expression_result<unsigned long> dep1 = args[1];
+	struct expression_result<unsigned long> dep2 = args[2];
+	struct expression_result<unsigned long> ndep = args[3];
+	struct expression_result<unsigned long> res;
+	unsigned long cf, zf, sf, of, pf;
 
 	calculate_condition_flags_XXX(op.lo,
 				      dep1.lo,
@@ -479,14 +474,13 @@ Thread<ait>::do_ccall_calculate_rflags_c(expression_result<ait> *args)
 	return res;
 }
 
-template<typename ait>
-expression_result<ait>
-Thread<ait>::do_ccall_generic(IRCallee *cee,
-			      struct expression_result<ait> *rargs)
+expression_result<unsigned long>
+Thread::do_ccall_generic(IRCallee *cee,
+			      struct expression_result<unsigned long> *rargs)
 {
-	struct expression_result<ait> res;
+	struct expression_result<unsigned long> res;
 
-	res.lo = mkConst<ait>(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
+	res.lo = mkConst<unsigned long>(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
 						  unsigned long, unsigned long, unsigned long))cee->addr)
 			      (force(rargs[0].lo),
 			       force(rargs[1].lo),
@@ -494,16 +488,15 @@ Thread<ait>::do_ccall_generic(IRCallee *cee,
 			       force(rargs[3].lo),
 			       force(rargs[4].lo),
 			       force(rargs[5].lo)));
-	res.hi = mkConst<ait>(0);
+	res.hi = mkConst<unsigned long>(0);
 	return res;
 }
 
-template<typename ait>
-expression_result<ait>
-Thread<ait>::do_ccall(IRCallee *cee,
+expression_result<unsigned long>
+Thread::do_ccall(IRCallee *cee,
 		      IRExpr **args)
 {
-	struct expression_result<ait> rargs[6];
+	struct expression_result<unsigned long> rargs[6];
 	unsigned x;
 
 	assert(cee->regparms == 0);
@@ -600,17 +593,16 @@ void mulls64(struct expression_result<unsigned long> *dest, const struct express
 	}
 }
 
-template<typename ait>
-expression_result<ait>
-Thread<ait>::eval_expression(IRExpr *expr)
+expression_result<unsigned long>
+Thread::eval_expression(IRExpr *expr)
 {
-	struct expression_result<ait> res;
-	struct expression_result<ait> *dest = &res;
+	struct expression_result<unsigned long> res;
+	struct expression_result<unsigned long> *dest = &res;
 	unsigned getOffset;
 	IRType getType;
 
-	res.lo = mkConst<ait>(0);
-	res.hi = mkConst<ait>(0);
+	res.lo = mkConst<unsigned long>(0);
+	res.hi = mkConst<unsigned long>(0);
 	
 	switch (expr->tag) {
 	case Iex_Get: {
@@ -618,7 +610,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		getType = expr->Iex.Get.ty;
 
 		do_get:
-		ait v1;
+		unsigned long v1;
 		unsigned sub_word_offset = getOffset & 7;
 		v1 = read_reg(this, getOffset - sub_word_offset);
 		switch (getType) {
@@ -635,14 +627,14 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		case Ity_I32:
 		case Ity_F32:
 			assert(!(sub_word_offset % 4));
-			dest->lo = (v1 >> mkConst<ait>(sub_word_offset * 8)) & mkConst<ait>(0xffffffff);
+			dest->lo = (v1 >> mkConst<unsigned long>(sub_word_offset * 8)) & mkConst<unsigned long>(0xffffffff);
 			break;
 		case Ity_I16:
 			assert(!(sub_word_offset % 2));
-			dest->lo = (v1 >> mkConst<ait>(sub_word_offset * 8)) & mkConst<ait>(0xffff);
+			dest->lo = (v1 >> mkConst<unsigned long>(sub_word_offset * 8)) & mkConst<unsigned long>(0xffff);
 			break;
 		case Ity_I8:
-			dest->lo = (v1 >> mkConst<ait>(sub_word_offset * 8)) & mkConst<ait>(0xff);
+			dest->lo = (v1 >> mkConst<unsigned long>(sub_word_offset * 8)) & mkConst<unsigned long>(0xff);
 			break;
 		default:
 			ppIRExpr(expr);
@@ -672,26 +664,26 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		IRConst *cnst = expr->Iex.Const.con;
 		switch (cnst->tag) {
 		case Ico_U1:
-			dest->lo = mkConst<ait>(cnst->Ico.U1);
+			dest->lo = mkConst<unsigned long>(cnst->Ico.U1);
 			break;
 		case Ico_U8:
-			dest->lo = mkConst<ait>(cnst->Ico.U8);
+			dest->lo = mkConst<unsigned long>(cnst->Ico.U8);
 			break;
 		case Ico_U16:
-			dest->lo = mkConst<ait>(cnst->Ico.U16);
+			dest->lo = mkConst<unsigned long>(cnst->Ico.U16);
 			break;
 		case Ico_U32:
-			dest->lo = mkConst<ait>(cnst->Ico.U32);
+			dest->lo = mkConst<unsigned long>(cnst->Ico.U32);
 			break;
 		case Ico_U64:
 		case Ico_F64:
 		case Ico_F64i:
-			dest->lo = mkConst<ait>(cnst->Ico.U64);
+			dest->lo = mkConst<unsigned long>(cnst->Ico.U64);
 			break;
 		case Ico_V128: {
 			unsigned long r = cnst->Ico.V128;
 			r = r | (r << 16) | (r << 32) | (r << 48);
-			dest->lo = mkConst<ait>(r);
+			dest->lo = mkConst<unsigned long>(r);
 			dest->hi = dest->lo;
 			break;
 		}
@@ -703,8 +695,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Binop: {
-		struct expression_result<ait> arg1 = eval_expression(expr->Iex.Binop.arg1);
-		struct expression_result<ait> arg2 = eval_expression(expr->Iex.Binop.arg2);
+		struct expression_result<unsigned long> arg1 = eval_expression(expr->Iex.Binop.arg1);
+		struct expression_result<unsigned long> arg2 = eval_expression(expr->Iex.Binop.arg2);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub8:
 		case Iop_Sub16:
@@ -795,7 +787,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 		case Iop_MullS32:
 			dest->lo =
-				mkConst<ait>((long)(int)force(arg1.lo) * (long)(int)force(arg2.lo));
+				mkConst<unsigned long>((long)(int)force(arg1.lo) * (long)(int)force(arg2.lo));
 			break;
 
 		case Iop_MullS64:
@@ -803,19 +795,19 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_MullU64: {
-			ait a1, a2, b1, b2;
+			unsigned long a1, a2, b1, b2;
 			dest->lo = arg1.lo * arg2.lo;
-			a1 = arg1.lo & mkConst<ait>(0xffffffff);
-			a2 = arg1.lo >> mkConst<ait>(32);
-			b1 = arg2.lo & mkConst<ait>(0xffffffff);
-			b2 = arg2.lo >> mkConst<ait>(32);
+			a1 = arg1.lo & mkConst<unsigned long>(0xffffffff);
+			a2 = arg1.lo >> mkConst<unsigned long>(32);
+			b1 = arg2.lo & mkConst<unsigned long>(0xffffffff);
+			b2 = arg2.lo >> mkConst<unsigned long>(32);
 			dest->hi = a2 * b2 +
 				( (a1 * b2 + a2 * b1 +
-				   ((a1 * b1) >> mkConst<ait>(32))) >> mkConst<ait>(32));
+				   ((a1 * b1) >> mkConst<unsigned long>(32))) >> mkConst<unsigned long>(32));
 			break;
 		}
 		case Iop_32HLto64:
-			dest->lo = (arg1.lo << mkConst<ait>(32)) | arg2.lo;
+			dest->lo = (arg1.lo << mkConst<unsigned long>(32)) | arg2.lo;
 			break;
 
 		case Iop_64HLtoV128:
@@ -826,13 +818,13 @@ Thread<ait>::eval_expression(IRExpr *expr)
 
 		case Iop_DivModU64to32:
 			dest->lo = (arg1.lo / arg2.lo) |
-				((arg1.lo % arg2.lo) << mkConst<ait>(32));
+				((arg1.lo % arg2.lo) << mkConst<unsigned long>(32));
 			break;
 
 		case Iop_DivModS64to32: {
 			long a1 = force(arg1.lo);
 			long a2 = force(arg2.lo);
-			dest->lo = mkConst<ait>(
+			dest->lo = mkConst<unsigned long>(
 				((a1 / a2) & 0xffffffff) | ((a1 % a2) << 32));
 			break;
 		}
@@ -846,8 +838,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("div %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = mkConst<ait>(dlo);
-			dest->hi = mkConst<ait>(dhi);
+			dest->lo = mkConst<unsigned long>(dlo);
+			dest->hi = mkConst<unsigned long>(dhi);
 			break;
 		}
 
@@ -857,16 +849,16 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("idiv %4\n"
 			     : "=a" (dlo), "=d" (dhi)
 			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
-			dest->lo = mkConst<ait>(dlo);
-			dest->hi = mkConst<ait>(dhi);
+			dest->lo = mkConst<unsigned long>(dlo);
+			dest->hi = mkConst<unsigned long>(dhi);
 			break;
 		}
 
 		case Iop_Add32x4:
-			dest->lo = ((arg1.lo + arg2.lo) & mkConst<ait>(0xffffffff)) +
-				((arg1.lo & mkConst<ait>(~0xfffffffful)) + (arg2.lo & mkConst<ait>(~0xfffffffful)));
-			dest->hi = ((arg1.hi + arg2.hi) & mkConst<ait>(0xffffffff)) +
-				((arg1.hi & mkConst<ait>(~0xfffffffful)) + (arg2.hi & mkConst<ait>(~0xfffffffful)));
+			dest->lo = ((arg1.lo + arg2.lo) & mkConst<unsigned long>(0xffffffff)) +
+				((arg1.lo & mkConst<unsigned long>(~0xfffffffful)) + (arg2.lo & mkConst<unsigned long>(~0xfffffffful)));
+			dest->hi = ((arg1.hi + arg2.hi) & mkConst<unsigned long>(0xffffffff)) +
+				((arg1.hi & mkConst<unsigned long>(~0xfffffffful)) + (arg2.hi & mkConst<unsigned long>(~0xfffffffful)));
 			break;
 
 		case Iop_InterleaveLO64x2:
@@ -880,13 +872,13 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_InterleaveLO32x4:
-			dest->lo = (arg2.lo & mkConst<ait>(0xffffffff)) | (arg1.lo << mkConst<ait>(32));
-			dest->hi = (arg2.lo >> mkConst<ait>(32)) | (arg1.lo & mkConst<ait>(0xffffffff00000000ul));
+			dest->lo = (arg2.lo & mkConst<unsigned long>(0xffffffff)) | (arg1.lo << mkConst<unsigned long>(32));
+			dest->hi = (arg2.lo >> mkConst<unsigned long>(32)) | (arg1.lo & mkConst<unsigned long>(0xffffffff00000000ul));
 			break;
 
 		case Iop_InterleaveHI32x4:
-			dest->lo = (arg2.hi & mkConst<ait>(0xffffffff)) | (arg1.hi << mkConst<ait>(32));
-			dest->hi = (arg2.hi >> mkConst<ait>(32)) | (arg1.hi & mkConst<ait>(0xffffffff00000000ul));
+			dest->lo = (arg2.hi & mkConst<unsigned long>(0xffffffff)) | (arg1.hi << mkConst<unsigned long>(32));
+			dest->hi = (arg2.hi >> mkConst<unsigned long>(32)) | (arg1.hi & mkConst<unsigned long>(0xffffffff00000000ul));
 			break;
 
 		case Iop_ShrN64x2:
@@ -905,13 +897,13 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			unsigned long a1h = force(arg1.hi);
 			unsigned long a2h = force(arg2.hi);
 			if ( (int)a1l > (int)a2l )
-				dest->lo |= mkConst<ait>(0xffffffff);
+				dest->lo |= mkConst<unsigned long>(0xffffffff);
 			if ( (int)(a1l >> 32) > (int)(a2l >> 32) )
-				dest->lo |= mkConst<ait>(0xffffffff00000000);
+				dest->lo |= mkConst<unsigned long>(0xffffffff00000000);
 			if ( (int)a1h > (int)a2h )
-				dest->hi |= mkConst<ait>(0xffffffff);
+				dest->hi |= mkConst<unsigned long>(0xffffffff);
 			if ( (int)(a1h >> 32) > (int)(a2h >> 32) )
-				dest->hi |= mkConst<ait>(0xffffffff00000000);
+				dest->hi |= mkConst<unsigned long>(0xffffffff00000000);
 			break;
 		}
 
@@ -924,7 +916,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.d = (long)force(arg2.lo);
-				dest->lo = mkConst<ait>(r.l);
+				dest->lo = mkConst<unsigned long>(r.l);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -941,7 +933,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					long l;
 				} r;
 				r.l = (long)force(arg2.lo);
-				dest->lo = mkConst<ait>((unsigned)r.d);
+				dest->lo = mkConst<unsigned long>((unsigned)r.d);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -958,7 +950,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 					unsigned long l;
 				} r;
 				r.l = force(arg2.lo);
-				dest->lo = mkConst<ait>(r.d);
+				dest->lo = mkConst<unsigned long>(r.d);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
@@ -978,7 +970,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			} out;
 			in.l = force(arg2.lo);
 			out.f = in.d;
-			dest->lo = mkConst<ait>(out.l);
+			dest->lo = mkConst<unsigned long>(out.l);
 			break;
 		}
 
@@ -1000,7 +992,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				r = 0;
 			else
 				r = 0x45;
-			dest->lo = mkConst<ait>(r);
+			dest->lo = mkConst<unsigned long>(r);
 			break;
 		}
 
@@ -1013,7 +1005,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("fsin\n"
 			     : "=t" (out.d)
 			     : "0" (in.d));
-			dest->lo = mkConst<ait>(out.l);
+			dest->lo = mkConst<unsigned long>(out.l);
 			break;
 		}
 
@@ -1026,7 +1018,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("fcos\n"
 			     : "=t" (out.d)
 			     : "0" (in.d));
-			dest->lo = mkConst<ait>(out.l);
+			dest->lo = mkConst<unsigned long>(out.l);
 			break;
 		}
 
@@ -1044,7 +1036,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				in1.l = force(arg1.lo);			\
 				in2.l = force(arg2.lo);			\
 				out.d = op;				\
-				dest->lo = mkConst<ait>(out.l);		\
+				dest->lo = mkConst<unsigned long>(out.l);		\
 				break;					\
 			}
 #define F0x2op(name, op) _F0x2op(name, in1.d op in2.d)
@@ -1059,8 +1051,8 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				in2.l = force(arg2.lo);			\
 				out.d = op;				\
 				dest->lo =				\
-					(arg1.lo & mkConst<ait>(0xffffffff00000000ul)) | \
-					mkConst<ait>(out.l);		\
+					(arg1.lo & mkConst<unsigned long>(0xffffffff00000000ul)) | \
+					mkConst<unsigned long>(out.l);		\
 				break;					\
 			}
 #define F0x4op(name, op) _F0x4op(name, in1.d op in2.d)
@@ -1099,16 +1091,16 @@ Thread<ait>::eval_expression(IRExpr *expr)
 		typeOfPrimop(expr->Iex.Binop.op, &t, &ign1, &ign2, &ign3, &ign4);
 		switch (t) {
 		case Ity_I1:
-			dest->lo &= mkConst<ait>(1);
+			dest->lo &= mkConst<unsigned long>(1);
 			break;
 		case Ity_I8:
-			dest->lo &= mkConst<ait>(0xff);
+			dest->lo &= mkConst<unsigned long>(0xff);
 			break;
 		case Ity_I16:
-			dest->lo &= mkConst<ait>(0xffff);
+			dest->lo &= mkConst<unsigned long>(0xffff);
 			break;
 		case Ity_I32:
-			dest->lo &= mkConst<ait>(0xffffffff);
+			dest->lo &= mkConst<unsigned long>(0xffffffff);
 			break;
 		case Ity_I64:
 			break;
@@ -1128,22 +1120,22 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Unop: {
-		struct expression_result<ait> arg = eval_expression(expr->Iex.Unop.arg);
+		struct expression_result<unsigned long> arg = eval_expression(expr->Iex.Unop.arg);
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
-			dest->lo = arg.lo >> mkConst<ait>(32);
+			dest->lo = arg.lo >> mkConst<unsigned long>(32);
 			break;
 		case Iop_64to32:
-			dest->lo = arg.lo & mkConst<ait>(0xffffffff);
+			dest->lo = arg.lo & mkConst<unsigned long>(0xffffffff);
 			break;
 		case Iop_64to16:
 		case Iop_32to16:
-			dest->lo = arg.lo & mkConst<ait>(0xffff);
+			dest->lo = arg.lo & mkConst<unsigned long>(0xffff);
 			break;
 		case Iop_64to8:
 		case Iop_32to8:
 		case Iop_16to8:
-			dest->lo = arg.lo & mkConst<ait>(0xff);
+			dest->lo = arg.lo & mkConst<unsigned long>(0xff);
 			break;
 		case Iop_128to64:
 		case Iop_V128to64:
@@ -1154,7 +1146,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			dest->lo = arg.lo;
 			break;
 		case Iop_64to1:
-			dest->lo = arg.lo & mkConst<ait>(1);
+			dest->lo = arg.lo & mkConst<unsigned long>(1);
 			break;
 		case Iop_32Uto64:
 		case Iop_16Uto64:
@@ -1171,22 +1163,22 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			*dest = arg;
 			break;
 		case Iop_8Sto16:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffff);
+			dest->lo = signed_shift_right(arg.lo << mkConst<unsigned long>(56), mkConst<unsigned long>(56)) & mkConst<unsigned long>(0xffff);
 			break;
 		case Iop_8Sto32:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56)) & mkConst<ait>(0xffffffff);
+			dest->lo = signed_shift_right(arg.lo << mkConst<unsigned long>(56), mkConst<unsigned long>(56)) & mkConst<unsigned long>(0xffffffff);
 			break;
 		case Iop_8Sto64:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(56), mkConst<ait>(56));
+			dest->lo = signed_shift_right(arg.lo << mkConst<unsigned long>(56), mkConst<unsigned long>(56));
 			break;
 		case Iop_16Sto32:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48)) & mkConst<ait>(0xffffffff);
+			dest->lo = signed_shift_right(arg.lo << mkConst<unsigned long>(48), mkConst<unsigned long>(48)) & mkConst<unsigned long>(0xffffffff);
 			break;
 		case Iop_16Sto64:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(48), mkConst<ait>(48));
+			dest->lo = signed_shift_right(arg.lo << mkConst<unsigned long>(48), mkConst<unsigned long>(48));
 			break;
 		case Iop_32Sto64:
-			dest->lo = signed_shift_right(arg.lo << mkConst<ait>(32), mkConst<ait>(32));
+			dest->lo = signed_shift_right(arg.lo << mkConst<unsigned long>(32), mkConst<unsigned long>(32));
 			break;
 		case Iop_128HIto64:
 		case Iop_V128HIto64:
@@ -1199,7 +1191,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 				double d;
 			} out;
 			out.d = (int)force(arg.lo);
-			dest->lo = mkConst<ait>(out.l);
+			dest->lo = mkConst<unsigned long>(out.l);
 			break;
 		}
 
@@ -1214,7 +1206,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			} out;
 			in.l = force(arg.lo);
 			out.d = in.f;
-			dest->lo = mkConst<ait>(out.l);
+			dest->lo = mkConst<unsigned long>(out.l);
 			break;
 		}
 
@@ -1223,7 +1215,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_Not32:
-			dest->lo = ~arg.lo & mkConst<ait>(0xffffffff);
+			dest->lo = ~arg.lo & mkConst<unsigned long>(0xffffffff);
 			break;
 
 		case Iop_Not64:
@@ -1241,7 +1233,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << (63 - res))) &&
 			       res < 63)
 				res++;
-			dest->lo = mkConst<ait>(res);
+			dest->lo = mkConst<unsigned long>(res);
 			break;
 		}
 
@@ -1251,7 +1243,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			while (!(v & (1ul << res)) &&
 			       res < 63)
 				res++;
-			dest->lo = mkConst<ait>(res);
+			dest->lo = mkConst<unsigned long>(res);
 			break;
 		}
 
@@ -1264,7 +1256,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("fsqrt\n"
 			     : "=t" (out.d)
 			     : "0" (in.d));
-			dest->lo = mkConst<ait>(out.l);
+			dest->lo = mkConst<unsigned long>(out.l);
 			break;
 		}
 
@@ -1279,9 +1271,9 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Triop: {
-		struct expression_result<ait> arg1 = eval_expression(expr->Iex.Triop.arg1);
-		struct expression_result<ait> arg2 = eval_expression(expr->Iex.Triop.arg2);
-		struct expression_result<ait> arg3 = eval_expression(expr->Iex.Triop.arg3);
+		struct expression_result<unsigned long> arg1 = eval_expression(expr->Iex.Triop.arg1);
+		struct expression_result<unsigned long> arg2 = eval_expression(expr->Iex.Triop.arg2);
+		struct expression_result<unsigned long> arg3 = eval_expression(expr->Iex.Triop.arg3);
 		switch (expr->Iex.Triop.op) {
 		case Iop_PRemF64: {
 			union {
@@ -1293,7 +1285,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			asm ("fprem\n"
 			     : "=t" (res.d)
 			     : "0" (a1.d), "u" (a2.d));
-			dest->lo = mkConst<ait>(res.l);
+			dest->lo = mkConst<unsigned long>(res.l);
 			break;
 		}
 		case Iop_PRemC3210F64: {
@@ -1308,7 +1300,7 @@ Thread<ait>::eval_expression(IRExpr *expr)
 			     : "=t" (clobber.d), "=a" (res)
 			     : "0" (a1.d), "u" (a2.d));
 			dest->lo =
-				mkConst<ait>(((res >> 8) & 7) | ((res & 0x400) >> 11));
+				mkConst<unsigned long>(((res >> 8) & 7) | ((res & 0x400) >> 11));
 			break;
 		}
 		default:
@@ -1319,10 +1311,10 @@ Thread<ait>::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Mux0X: {
-		struct expression_result<ait> cond = eval_expression(expr->Iex.Mux0X.cond);
-		struct expression_result<ait> res0 = eval_expression(expr->Iex.Mux0X.expr0);
-		struct expression_result<ait> resX = eval_expression(expr->Iex.Mux0X.exprX);
-		if (force(cond.lo == mkConst<ait>(0))) {
+		struct expression_result<unsigned long> cond = eval_expression(expr->Iex.Mux0X.cond);
+		struct expression_result<unsigned long> res0 = eval_expression(expr->Iex.Mux0X.expr0);
+		struct expression_result<unsigned long> resX = eval_expression(expr->Iex.Mux0X.exprX);
+		if (force(cond.lo == mkConst<unsigned long>(0))) {
 			*dest = res0;
 		} else {
 			*dest = resX;
@@ -1351,11 +1343,11 @@ Thread<ait>::eval_expression(IRExpr *expr)
 
 /* vsyscalls are weird (the redirection target effectively moves), and
  * cause a number of RIP mismatches during replay.  Skank it up. */
-template <typename ait> void
-Thread<ait>::redirectGuest(ait rip)
+void
+Thread::redirectGuest(unsigned long rip)
 {
-	if (force(rip == mkConst<ait>(0xFFFFFFFFFF600400ul) ||
-		  rip == mkConst<ait>(0xffffffffff600000ul)))
+	if (force(rip == mkConst<unsigned long>(0xFFFFFFFFFF600400ul) ||
+		  rip == mkConst<unsigned long>(0xffffffffff600000ul)))
 		allowRipMismatch = true;
 	if (force(rip) == 0x4382f8)
 		inInfrastructure = true;
@@ -1450,12 +1442,12 @@ AddressSpace::getIRSBForAddress(unsigned long rip)
 	return irsb;
 }
 
-template<typename ait> void
-Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
+void
+Thread::translateNextBlock(VexPtr<Thread > &ths,
 				VexPtr<AddressSpace > &addrSpace,
 				VexPtr<MachineState > &ms,
 				const LogReaderPtr &ptr,
-				ait rip,
+				unsigned long rip,
 				GarbageCollectionToken t)
 {
 	ths->redirectGuest(rip);
@@ -1464,13 +1456,13 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 		ths->inInfrastructure = false;
 
 	if (ths->decode_counter != 0 && !ths->inInfrastructure)
-		ths->controlLog.push(Thread<ait>::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+		ths->controlLog.push(Thread::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
 
 
 	ths->decode_counter++;
 
 	if (ths->decode_counter % 10000 == 0) {
-		ths->snapshotLog.push(Thread<ait>::snapshot_log_entry(ms, ptr));
+		ths->snapshotLog.push(Thread::snapshot_log_entry(ms, ptr));
 		ms = ms->dupeSelf();
 	}
 
@@ -1486,7 +1478,7 @@ Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 	ths->currentIRSB = irsb;
 	ths->currentIRSBOffset = 0;
 
-	ths->currentControlCondition = mkConst<ait>(1);
+	ths->currentControlCondition = mkConst<unsigned long>(1);
 
 	if (loud_mode)
 		ppIRSB(irsb);
@@ -1533,15 +1525,14 @@ extract_call_follower(IRSB *irsb)
 	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
 }
 
-template<typename ait>
-ThreadEvent<ait> *
-Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
+ThreadEvent<unsigned long> *
+Thread::runToEvent(VexPtr<Thread > &ths,
 			VexPtr<MachineState > &ms,
 			const LogReaderPtr &ptr,
 			GarbageCollectionToken t)
 {
 	unsigned put_offset;
-	struct expression_result<ait> put_data;
+	struct expression_result<unsigned long> put_data;
 	IRType put_type;
 
 	check_fpu_control();
@@ -1551,10 +1542,10 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			try {
 				VexPtr<AddressSpace > as(ms->addressSpace);
 			        ths->translateNextBlock(ths, as, ms, ptr, ths->regs.rip(), t);
-			} catch (BadMemoryException<ait> excn) {
-				return SignalEvent<ait>::get(ths->bumpEvent(ms), 11, excn.ptr);
+			} catch (BadMemoryException<unsigned long> excn) {
+				return SignalEvent<unsigned long>::get(ths->bumpEvent(ms), 11, excn.ptr);
 			} catch (ForceFailureException ffe) {
-				return new DetectedErrorEvent<ait>(ths->bumpEvent(ms), ffe.rip);
+				return new DetectedErrorEvent<unsigned long>(ths->bumpEvent(ms), ffe.rip);
 			}
 			assert(ths->currentIRSB);
 		}
@@ -1573,9 +1564,9 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 					ms->addressSpace->client_freed(ths->bumpEvent(ms),
 								       ths->regs.get_reg(REGISTER_IDX(RDI)));
 				ths->regs.set_reg(REGISTER_IDX(RIP),
-						  mkConst<ait>(stmt->Ist.IMark.addr));
+						  mkConst<unsigned long>(stmt->Ist.IMark.addr));
 #define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
-				return InstructionEvent<ait>::get(ths->bumpEvent(ms),
+				return InstructionEvent<unsigned long>::get(ths->bumpEvent(ms),
 								  GR(RIP),
 								  GR(FOOTSTEP_REG_0_NAME),
 								  GR(FOOTSTEP_REG_1_NAME),
@@ -1600,26 +1591,26 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			case Ist_Store: {
 				assert(stmt->Ist.Store.end == Iend_LE);
 				assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
-				struct expression_result<ait> data =
+				struct expression_result<unsigned long> data =
 					ths->eval_expression(stmt->Ist.Store.data);
-				struct expression_result<ait> addr =
+				struct expression_result<unsigned long> addr =
 					ths->eval_expression(stmt->Ist.Store.addr);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
 				if (ms->addressSpace->isWritable(addr.lo, size, ths)) {
 					DBG("Store %s to %s\n", data.name(), addr.name());
-					return StoreEvent<ait>::get(ths->bumpEvent(ms), addr.lo, size, data);
+					return StoreEvent<unsigned long>::get(ths->bumpEvent(ms), addr.lo, size, data);
 				}
 				EventTimestamp et;
-				ait free_addr;
-				if (ms->addressSpace->isOnFreeList(addr.lo, addr.lo + mkConst<ait>(size), ths->tid, &et,
+				unsigned long free_addr;
+				if (ms->addressSpace->isOnFreeList(addr.lo, addr.lo + mkConst<unsigned long>(size), ths->tid, &et,
 								   &free_addr))
-					return UseFreeMemoryEvent<ait>::get(ths->bumpEvent(ms), 
+					return UseFreeMemoryEvent<unsigned long>::get(ths->bumpEvent(ms), 
 									    addr.lo,
 									    free_addr,
 									    et);
 				else
-					return SignalEvent<ait>::get(ths->bumpEvent(ms), 11, addr.lo);
+					return SignalEvent<unsigned long>::get(ths->bumpEvent(ms), 11, addr.lo);
 			}
 
 			case Ist_CAS: {
@@ -1627,15 +1618,15 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				assert(stmt->Ist.CAS.details->expdHi == NULL);
 				assert(stmt->Ist.CAS.details->dataHi == NULL);
 				assert(stmt->Ist.CAS.details->end == Iend_LE);
-				struct expression_result<ait> data =
+				struct expression_result<unsigned long> data =
 					ths->eval_expression(stmt->Ist.CAS.details->dataLo);
-				struct expression_result<ait> addr =
+				struct expression_result<unsigned long> addr =
 					ths->eval_expression(stmt->Ist.CAS.details->addr);
-				struct expression_result<ait> expected =
+				struct expression_result<unsigned long> expected =
 					ths->eval_expression(stmt->Ist.CAS.details->expdLo);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
-				return CasEvent<ait>::get(ths->bumpEvent(ms), stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+				return CasEvent<unsigned long>::get(ths->bumpEvent(ms), stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 			}
 
 			case Ist_Put: {
@@ -1646,24 +1637,24 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				DBG("put offset %d type %d -> %s",
 				    put_offset, put_type, put_data.name());
 				unsigned byte_offset = put_offset & 7;
-				ait dest = read_reg(&*ths, put_offset - byte_offset);
+				unsigned long dest = read_reg(&*ths, put_offset - byte_offset);
 				switch (put_type) {
 				case Ity_I8:
-					dest &= mkConst<ait>(~(0xFF << (byte_offset * 8)));
-					dest |= put_data.lo << mkConst<ait>(byte_offset * 8);
+					dest &= mkConst<unsigned long>(~(0xFF << (byte_offset * 8)));
+					dest |= put_data.lo << mkConst<unsigned long>(byte_offset * 8);
 					break;
 
 				case Ity_I16:
 					assert(!(byte_offset % 2));
-					dest &= mkConst<ait>(~(0xFFFFul << (byte_offset * 8)));
-					dest |= put_data.lo << mkConst<ait>(byte_offset * 8);
+					dest &= mkConst<unsigned long>(~(0xFFFFul << (byte_offset * 8)));
+					dest |= put_data.lo << mkConst<unsigned long>(byte_offset * 8);
 					break;
 
 				case Ity_I32:
 				case Ity_F32:
 					assert(!(byte_offset % 4));
-					dest &= mkConst<ait>(~(0xFFFFFFFFul << (byte_offset * 8)));
-					dest |= put_data.lo << mkConst<ait>(byte_offset * 8);
+					dest &= mkConst<unsigned long>(~(0xFFFFFFFFul << (byte_offset * 8)));
+					dest |= put_data.lo << mkConst<unsigned long>(byte_offset * 8);
 					break;
 
 				case Ity_I64:
@@ -1690,11 +1681,11 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			}
 
 			case Ist_PutI: {
-				struct expression_result<ait> idx = ths->eval_expression(stmt->Ist.PutI.ix);
+				struct expression_result<unsigned long> idx = ths->eval_expression(stmt->Ist.PutI.ix);
 
 				/* Crazy bloody encoding scheme */
 				idx.lo =
-					mkConst<ait>(((force(idx.lo) + stmt->Ist.PutI.bias) %
+					mkConst<unsigned long>(((force(idx.lo) + stmt->Ist.PutI.bias) %
 						      stmt->Ist.PutI.descr->nElems) *
 						     sizeofIRType(stmt->Ist.PutI.descr->elemTy) +
 						     stmt->Ist.PutI.descr->base);
@@ -1706,7 +1697,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 			}
 
 			case Ist_Dirty: {
-				ThreadEvent<ait> *evt = ths->do_dirty_call(stmt->Ist.Dirty.details, ms);
+				ThreadEvent<unsigned long> *evt = ths->do_dirty_call(stmt->Ist.Dirty.details, ms);
 				if (evt)
 					return evt;
 				break;
@@ -1714,27 +1705,23 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 
 			case Ist_Exit: {
 				if (stmt->Ist.Exit.guard) {
-					struct expression_result<ait> guard =
+					struct expression_result<unsigned long> guard =
 						ths->eval_expression(stmt->Ist.Exit.guard);
 					bool controlCondIsConstant = isConstant(ths->currentControlCondition);
-					sanity_check_ait(ths->currentControlCondition);
-					sanity_check_ait(guard.lo);
 					if (force(!guard.lo)) {
-						ait inv_guard = !guard.lo;
+						unsigned long inv_guard = !guard.lo;
 						assert(force(inv_guard) == 1);
 						ths->currentControlCondition =
 							ths->currentControlCondition && inv_guard;
-						sanity_check_ait(ths->currentControlCondition);
 						if (!controlCondIsConstant)
 							assert(!isConstant(ths->currentControlCondition));
 						assert(force(ths->currentControlCondition));
 						break;
 					}
-					ait inv_inv_guard = !!guard.lo;
+					unsigned long inv_inv_guard = !!guard.lo;
 					assert(force(inv_inv_guard) == 1);
 					ths->currentControlCondition =
 						ths->currentControlCondition && inv_inv_guard;
-					sanity_check_ait(ths->currentControlCondition);
 					if (!controlCondIsConstant)
 						assert(!isConstant(ths->currentControlCondition));
 					assert(force(ths->currentControlCondition));
@@ -1746,11 +1733,10 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				}
 				assert(force(ths->currentControlCondition));
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
-				sanity_check_ait(ths->currentControlCondition);
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  ternary(ths->currentControlCondition,
-							  mkConst<ait>(stmt->Ist.Exit.dst->Ico.U64),
-							  mkConst<ait>(0xdeadbeef)));
+							  mkConst<unsigned long>(stmt->Ist.Exit.dst->Ico.U64),
+							  mkConst<unsigned long>(0xdeadbeef)));
 				ths->currentIRSB = NULL;
 				goto finished_block;
 			}
@@ -1786,15 +1772,13 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 		{
 			bool is_syscall = ths->currentIRSB->jumpkind == Ijk_Sys_syscall;
 			{
-				struct expression_result<ait> next_addr =
+				struct expression_result<unsigned long> next_addr =
 					ths->eval_expression(ths->currentIRSB->next);
-				sanity_check_ait(ths->currentControlCondition);
-				sanity_check_ait(next_addr.lo);
 				assert(force(ths->currentControlCondition));
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  ternary(ths->currentControlCondition,
 							  next_addr.lo,
-							  mkConst<ait>(0xdeadbeef)));
+							  mkConst<unsigned long>(0xdeadbeef)));
 				if (ths->currentIRSB->jumpkind == Ijk_Ret) {
 					/* Because of longjmp() etc.,
 					   the return address won't
@@ -1828,7 +1812,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 				ths->currentIRSB = NULL;
 			}
 			if (is_syscall)
-				return SyscallEvent<ait>::get(ths->bumpEvent(ms));
+				return SyscallEvent<unsigned long>::get(ths->bumpEvent(ms));
 		}
 
 finished_block:
@@ -1842,7 +1826,7 @@ InterpretResult Interpreter<ait>::getThreadMemoryTrace(ThreadId tid, MemoryTrace
 						       GarbageCollectionToken t)
 {
 	VexPtr<MemoryTrace<ait> > work(new MemoryTrace<ait>());
-	VexPtr<Thread<ait> > thr(currentState->findThread(tid));
+	VexPtr<Thread > thr(currentState->findThread(tid));
 	if (thr->cannot_make_progress) {
 		*output = work;
 		return InterpretResultIncomplete;
@@ -1881,7 +1865,7 @@ void Interpreter<ait>::runToAccessLoggingEvents(ThreadId tid,
 						GarbageCollectionToken t,
 						VexPtr<LogWriter<ait> > &output)
 {
-        VexPtr<Thread<ait> > thr(currentState->findThread(tid));
+        VexPtr<Thread > thr(currentState->findThread(tid));
         while (1) {
                 ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
@@ -1906,7 +1890,7 @@ void Interpreter<ait>::runToFailure(ThreadId tid,
 				    unsigned max_events)
 {
 	bool have_event_limit = max_events != 0;
-	VexPtr<Thread<ait> > thr(currentState->findThread(tid));
+	VexPtr<Thread > thr(currentState->findThread(tid));
 	while ((!have_event_limit || max_events) && thr->runnable()) {
 		VexPtr<MachineState > cs(currentState);
 		ThreadEvent<ait> *evt = thr->runToEvent(thr, cs, LogReaderPtr(), t);
@@ -1967,7 +1951,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		if (loud_mode)
 			printf("lr %s\n", lr->name());
 
-		VexPtr<Thread<ait> > thr(currentState->findThread(lr->thread()));
+		VexPtr<Thread > thr(currentState->findThread(lr->thread()));
 		assert(thr);
 		assert(!thr->exitted);
 		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, ptr2, t);
@@ -2045,7 +2029,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 		if (!lr)
 			break;
 
-		VexPtr<Thread<ait> > thr(currentState->findThread(lr->thread()));
+		VexPtr<Thread > thr(currentState->findThread(lr->thread()));
 		assert(thr->runnable());
 		ThreadEvent<ait> *evt = thr->runToEvent(thr, currentState, ptr2, t);
 
@@ -2323,12 +2307,5 @@ address_is_interesting(ThreadId tid, unsigned long addr)
 		if (addr == interesting_addresses[x])
 			return true;
 	return false;
-}
-
-template<> unsigned long
-load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestamp store,
-	 unsigned long storeAddr, unsigned size)
-{
-	return x;
 }
 
