@@ -2082,8 +2082,8 @@ public:
 	void record(Thread *thr, ThreadEvent *evt,
 		    MachineState *ms)
 	{
-		if (InstructionEvent<unsigned long> *ie =
-		    dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
+		if (InstructionEvent *ie =
+		    dynamic_cast<InstructionEvent *>(evt)) {
 			CrashTimestamp ts(thr);
 			ts.rip = ie->rip;
 			if (cm->hasKey(ts)) {
@@ -2385,8 +2385,8 @@ public:
 	void record(Thread *thr, ThreadEvent *evt,
 		    MachineState *ms)
 	{
-		if (InstructionEvent<unsigned long> *ie =
-		    dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
+		if (InstructionEvent *ie =
+		    dynamic_cast<InstructionEvent *>(evt)) {
 			CrashTimestamp ts(thr);
 			ts.rip = ie->rip;
 			if (ie->rip == 0x7f860d33acce)
@@ -2943,8 +2943,8 @@ public:
 void
 CIALEventRecorder::record(Thread *thr, ThreadEvent *evt)
 {
-	StoreEvent<unsigned long> *se =
-		dynamic_cast<StoreEvent<unsigned long> *>(evt);
+	StoreEvent *se =
+		dynamic_cast<StoreEvent *>(evt);
 	if (!se)
 		return;
 	if (oracle->interesting_addresses.count(se->addr) == 0)
@@ -4090,8 +4090,8 @@ MemTraceExtractor::record(Thread *thr,
 	if (thr->tid != oracle->crashingTid)
 		return;
 	rsp = thr->regs.get_reg(REGISTER_IDX(RSP));
-	if (LoadEvent<unsigned long> *le =
-	    dynamic_cast<LoadEvent<unsigned long> *>(evt)) {
+	if (LoadEvent *le =
+	    dynamic_cast<LoadEvent *>(evt)) {
 		/* Arbitrarily assume that stacks are never deeper
 		   than 8MB.  Also assume that the red zone is only
 		   128 bytes, and we never access more than 8 bytes
@@ -4099,8 +4099,8 @@ MemTraceExtractor::record(Thread *thr,
 		if (le->addr >= rsp - 136 &&
 		    le->addr < rsp + (8 << 20))
 			oracle->load_event(CrashTimestamp(thr), le->addr);
-	} else if (StoreEvent<unsigned long> *se =
-		   dynamic_cast<StoreEvent<unsigned long> *>(evt)) {
+	} else if (StoreEvent *se =
+		   dynamic_cast<StoreEvent *>(evt)) {
 		if (se->addr >= rsp - 136 &&
 		    se->addr < rsp + (8 << 20))
 			oracle->store_event(CrashTimestamp(thr), se->addr);

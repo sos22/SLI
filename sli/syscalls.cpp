@@ -363,7 +363,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	case __NR_tgkill: /* 234 */
 		/* Hack: assume that this came from raise() */
-		evt = SignalEvent<unsigned long>::get(thr->bumpEvent(mach), force(args[2]), mkConst<unsigned long>(0));
+		evt = SignalEvent::get(thr->bumpEvent(mach), force(args[2]), mkConst<unsigned long>(0));
 		break;
 
 	case __NR_set_robust_list: /* 273 */
@@ -384,13 +384,12 @@ replay_syscall(const LogRecordSyscall *lrs,
    more of its behaviour.  This is all very ad-hoc and hacky, but
    seems to work often enough to be useful (at least for some
    programs). */
-template <typename ait>
-InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
+InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 {
-	ait res;
+	unsigned long res;
 	Thread *thr = ms->findThread(this->when.tid);
-	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
-	ait args[6];
+	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
+	unsigned long args[6];
 	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));
 	args[1] = thr->regs.get_reg(REGISTER_IDX(RSI));
 	args[2] = thr->regs.get_reg(REGISTER_IDX(RDX));
@@ -398,7 +397,7 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 	args[4] = thr->regs.get_reg(REGISTER_IDX(R8));
 	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
-	res = mkConst<ait>(-ENOSYS);
+	res = mkConst<unsigned long>(-ENOSYS);
 	switch (force(sysnr)) {
 	case __NR_write: { /* 1 */
 		printf("write(%ld, 0x%lx, %ld)\n",
@@ -421,12 +420,12 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 		printf("Can't fake open syscall (file %s)\n",
 		       path);
 		free(path);
-		res = mkConst<ait>(-ENOENT);
+		res = mkConst<unsigned long>(-ENOENT);
 		break;
 	}
 
 	case __NR_close: /* 3 */
-		res = mkConst<ait>(0);
+		res = mkConst<unsigned long>(0);
 		break;
 
 	case __NR_poll: { /* 7 */
@@ -446,12 +445,12 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 		result = 0;
 		for (unsigned x = 0; x < n_fds && !fault; x++) {
 			fault |= ms->addressSpace->copyFromClient(this->when,
-								  args[0] + mkConst<ait>(x * sizeof(pfd)),
+								  args[0] + mkConst<unsigned long>(x * sizeof(pfd)),
 								  sizeof(pfd),
 								  &pfd);
 			pfd.revents = pfd.events & POLLOUT;
 			fault |= ms->addressSpace->copyToClient(this->when,
-								args[0] + mkConst<ait>(x * sizeof(pfd)),
+								args[0] + mkConst<unsigned long>(x * sizeof(pfd)),
 								sizeof(pfd),
 								&pfd);
 			if (pfd.revents)
@@ -459,13 +458,13 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 		}
 
 		if (fault)
-			res = mkConst<ait>(-EFAULT);
+			res = mkConst<unsigned long>(-EFAULT);
 		else if (result != 0)
-			res = mkConst<ait>(result);
+			res = mkConst<unsigned long>(result);
 		else {
 			printf("thread %d appears to have gone idle...\n",
 			       thr->tid._tid());
-			res = mkConst<ait>(-ENOSYS);
+			res = mkConst<unsigned long>(-ENOSYS);
 			thr->idle = true;
 		}
 		break;
@@ -479,39 +478,39 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 		written = 0;
 		for (unsigned x = 0; x < nr_iovs; x++) {
 			ms->addressSpace->copyFromClient(this->when,
-							 args[0] + mkConst<ait>(x * sizeof(iov)),
+							 args[0] + mkConst<unsigned long>(x * sizeof(iov)),
 							 sizeof(iov),
 							 &iov);
 			written += iov.iov_len;
 		}
-		res = mkConst<ait>(written);
+		res = mkConst<unsigned long>(written);
 		break;
 	}
 
 	case __NR_stat: /* 4 */
 	case __NR_lstat: /* 6 */
 	case __NR_access: /* 21 */
-		res = mkConst<ait>(-ENOENT);
+		res = mkConst<unsigned long>(-ENOENT);
 		break;
 
 	case __NR_select: { /* 23 */
 		/* Leave the masks unchanged, so every fd which was
 		 * polled on is flagged as ready, and return 1, so
 		 * that the client actually goes and looks at them. */
-		res = mkConst<ait>(1);		
+		res = mkConst<unsigned long>(1);		
 		break;
 	}
 
 	case __NR_nanosleep: /* 35 */
 		printf("Thread %d sleeping...\n", thr->tid._tid());
 		thr->idle = true;
-		res = mkConst<ait>(0);
+		res = mkConst<unsigned long>(0);
 		break;
 
 	case __NR_mkdir: /* 83 */
 	case __NR_rmdir: /* 84 */
 	case __NR_unlink: /* 87 */
-		res = mkConst<ait>(0);
+		res = mkConst<unsigned long>(0);
 		break;
 
 	case __NR_gettimeofday: { /* 96 */
@@ -528,30 +527,30 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 			fault |= ms->addressSpace->copyToClient(this->when, args[1], sizeof(tv),
 								&tv);
 		if (fault)
-			res = mkConst<ait>(-EFAULT);
+			res = mkConst<unsigned long>(-EFAULT);
 		else
-			res = mkConst<ait>(0);
+			res = mkConst<unsigned long>(0);
 		break;
 	}
 
 	case __NR_futex: { /* 202 */
 		switch (force(args[1]) & FUTEX_CMD_MASK) {
 		case FUTEX_WAIT: {
-			expression_result<ait> m =
+			expression_result<unsigned long> m =
 				ms->addressSpace->load(this->when,
 						       args[0],
 						       4,
 						       false,
 						       thr);
 			if (force(m.lo) == force(args[2])) {
-				res = mkConst<ait>(0);
+				res = mkConst<unsigned long>(0);
 			} else {
-				res = mkConst<ait>(-EWOULDBLOCK);
+				res = mkConst<unsigned long>(-EWOULDBLOCK);
 			}
 			break;
 		}
 		case FUTEX_WAKE: {
-			res = mkConst<ait>(ms->futexWake(args[0], false));
+			res = mkConst<unsigned long>(ms->futexWake(args[0], false));
 			break;
 		}
 		default:
@@ -567,13 +566,13 @@ InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 		clock_gettime(force(args[0]), &ts);
 		ms->addressSpace->copyToClient(this->when, args[1], sizeof(ts),
 					       &ts);
-		res = mkConst<ait>(0);
+		res = mkConst<unsigned long>(0);
 		break;
 	}
 
 	case __NR_exit: /* 60 */
 	case __NR_exit_group: { /* 231 */
-		res = mkConst<ait>(0);
+		res = mkConst<unsigned long>(0);
 		break;
 	}
 

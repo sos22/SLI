@@ -320,7 +320,7 @@ ContinueCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken t)
 		ThreadEvent *evt = thr->runToEvent(thr, ms, LogReaderPtr(), t);
                 InterpretResult res = evt->fake(ms);
 
-		if (dynamic_cast<SignalEvent<ait> *>(evt) ||
+		if (dynamic_cast<SignalEvent *>(evt) ||
 		    res != InterpretResultContinue)
 			break;
 	}

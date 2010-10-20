@@ -9,7 +9,6 @@ load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestam
 
 
 #include "logwriter.cpp"
-#include "replay.cpp"
 #include "thread.cpp"
 #include "machinestate.cpp"
 #include "logreader.cpp"
@@ -63,6 +62,7 @@ ait operator ==(expression_result<ait> a, expression_result<ait> b)
 }
 
 #include "interpreter.cpp"
+#include "replay.cpp"
 
 MK_INTERP(unsigned long);
 

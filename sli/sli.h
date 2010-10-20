@@ -981,16 +981,15 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait>
 class UseFreeMemoryEvent : public ThreadEvent {
 public:
-	ait free_addr;
-	ait use_addr;
+	unsigned long free_addr;
+	unsigned long use_addr;
 	EventTimestamp whenFreed;
 private:
 	UseFreeMemoryEvent(EventTimestamp _when,
-			   ait _use_addr,
-			   ait _free_addr,
+			   unsigned long _use_addr,
+			   unsigned long _free_addr,
 			   EventTimestamp _whenFreed)
 		: ThreadEvent(_when),
 		  free_addr(_free_addr),
@@ -1011,13 +1010,12 @@ public:
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static ThreadEvent *get(EventTimestamp when,
-				     ait use_addr,
-				     ait free_addr,
+				     unsigned long use_addr,
+				     unsigned long free_addr,
 				     EventTimestamp whenFreed)
-	{ return new UseFreeMemoryEvent<ait>(when, use_addr, free_addr, whenFreed); }
+	{ return new UseFreeMemoryEvent(when, use_addr, free_addr, whenFreed); }
 };
 
-template <typename ait>
 class RdtscEvent : public ThreadEvent {
 	IRTemp tmp;
 	RdtscEvent(EventTimestamp when, IRTemp _tmp) : ThreadEvent(when), tmp(_tmp) {};
@@ -1033,22 +1031,21 @@ public:
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
 	static ThreadEvent *get(EventTimestamp when, IRTemp temp)
-	{ return new RdtscEvent<ait>(when, temp); }
+	{ return new RdtscEvent(when, temp); }
 	NAMED_CLASS
 };
 
 template <typename ait> class MemoryAccessLoad;
 template <typename ait> class MemoryAccessStore;
 
-template <typename ait>
 class LoadEvent : public ThreadEvent {
-	friend class MemoryAccessLoad<ait>;
+	friend class MemoryAccessLoad<unsigned long>;
 	IRTemp tmp;
 public:
-	ait addr;
+	unsigned long addr;
 private:
 	unsigned size;
-	LoadEvent(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size) :
+	LoadEvent(EventTimestamp when, IRTemp _tmp, unsigned long _addr, unsigned _size) :
 		ThreadEvent(when),
 		tmp(_tmp),
 		addr(_addr),
@@ -1061,51 +1058,49 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when, IRTemp _tmp, ait _addr, unsigned _size)
+	static ThreadEvent *get(EventTimestamp when, IRTemp _tmp, unsigned long _addr, unsigned _size)
 	{
-		return new LoadEvent<ait>(when, _tmp, _addr, _size);
+		return new LoadEvent(when, _tmp, _addr, _size);
 	}
 	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); ThreadEvent::visit(hv); }
 	NAMED_CLASS
 };
 
-template <typename ait>
 class StoreEvent : public ThreadEvent {
-	friend class MemoryAccessStore<ait>;
+	friend class MemoryAccessStore<unsigned long>;
 public:
-	ait addr;
+	unsigned long addr;
 	unsigned size;
-	expression_result<ait> data;
+	expression_result<unsigned long> data;
 private:
-	StoreEvent(EventTimestamp when, ait addr, unsigned size, expression_result<ait> data);
+	StoreEvent(EventTimestamp when, unsigned long addr, unsigned size, expression_result<unsigned long> data);
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when, ait _addr, unsigned _size, expression_result<ait> data)
+	static ThreadEvent *get(EventTimestamp when, unsigned long _addr, unsigned _size, expression_result<unsigned long> data)
 	{
-		return new StoreEvent<ait>(when, _addr, _size, data);
+		return new StoreEvent(when, _addr, _size, data);
 	}
 
 	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); data.visit(hv); ThreadEvent::visit(hv); }
-	void destruct() { data.~expression_result<ait>(); ThreadEvent::destruct(); }
+	void destruct() { data.~expression_result<unsigned long>(); ThreadEvent::destruct(); }
 	NAMED_CLASS
 };
 
-template <typename ait>
 class InstructionEvent : public ThreadEvent {
 public:
-	ait rip;
-	ait reg0;
-	ait reg1;
-	ait reg2;
-	ait reg3;
-	ait reg4;
+	unsigned long rip;
+	unsigned long reg0;
+	unsigned long reg1;
+	unsigned long reg2;
+	unsigned long reg3;
+	unsigned long reg4;
 	bool allowRipMismatch;
-	InstructionEvent(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
-			 ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch) :
+	InstructionEvent(EventTimestamp when, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
+			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4, bool _allowRipMismatch) :
 		ThreadEvent(when),
 		rip(_rip),
 		reg0(_reg0),
@@ -1124,11 +1119,11 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static InstructionEvent<ait> *get(EventTimestamp when, ait _rip, ait _reg0, ait _reg1,
-					  ait _reg2, ait _reg3, ait _reg4, bool _allowRipMismatch)
+	static InstructionEvent *get(EventTimestamp when, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
+				     unsigned long _reg2, unsigned long _reg3, unsigned long _reg4, bool _allowRipMismatch)
 	{
-		return new InstructionEvent<ait>(when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4,
-						 _allowRipMismatch);
+		return new InstructionEvent(when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4,
+					    _allowRipMismatch);
 	}
 
 	void visit(HeapVisitor &hv)
@@ -1144,18 +1139,17 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait>
 class CasEvent : public ThreadEvent {
 	IRTemp dest;
-	expression_result<ait> addr;
-	expression_result<ait> data;
-	expression_result<ait> expected;
+	expression_result<unsigned long> addr;
+	expression_result<unsigned long> data;
+	expression_result<unsigned long> expected;
 	unsigned size;
 	CasEvent(EventTimestamp when,
 		 IRTemp _dest,
-		 expression_result<ait> _addr,
-		 expression_result<ait> _data,
-		 expression_result<ait> _expected,
+		 expression_result<unsigned long> _addr,
+		 expression_result<unsigned long> _data,
+		 expression_result<unsigned long> _expected,
 		 unsigned _size) :
 		ThreadEvent(when),
 		dest(_dest),
@@ -1179,7 +1173,7 @@ public:
 				     LogRecord **lr2 = NULL);
 	ThreadEvent *replay(LogRecord *lr, MachineState *ms,
 				 const LogReader *lf, LogReaderPtr ptr,
-				 LogReaderPtr *outPtr, LogWriter<ait> *lw);
+				 LogReaderPtr *outPtr, LogWriter<unsigned long> *lw);
 	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
 				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
@@ -1187,13 +1181,13 @@ public:
 				      GarbageCollectionToken);
 
 	static ThreadEvent *get(EventTimestamp when,
-				     IRTemp _dest,
-				     expression_result<ait> _addr,
-				     expression_result<ait> _data,
-				     expression_result<ait> _expected,
-				     unsigned _size)
+				IRTemp _dest,
+				expression_result<unsigned long> _addr,
+				expression_result<unsigned long> _data,
+				expression_result<unsigned long> _expected,
+				unsigned _size)
 	{
-		return new CasEvent<ait>(when, _dest, _addr, _data, _expected, _size);
+		return new CasEvent(when, _dest, _addr, _data, _expected, _size);
 	}
 
 	void visit(HeapVisitor &hv)
@@ -1205,15 +1199,14 @@ public:
 	}
 	void destruct()
 	{
-		addr.~expression_result<ait>();
-		data.~expression_result<ait>();
-		expected.~expression_result<ait>();
+		addr.~expression_result<unsigned long>();
+		data.~expression_result<unsigned long>();
+		expected.~expression_result<unsigned long>();
 		ThreadEvent::destruct();
 	}
 	NAMED_CLASS
 };
 
-template <typename ait>
 class SyscallEvent : public ThreadEvent {
 protected:
 	virtual char *mkName() const {
@@ -1234,7 +1227,6 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait>
 class DetectedErrorEvent : public ThreadEvent {
 protected:
 	char *mkName() const { return my_asprintf("Detected error at %lx\n", rip); }
@@ -1264,12 +1256,11 @@ public:
 	}
 };
 
-template <typename ait>
 class SignalEvent : public ThreadEvent {
 public:
 	unsigned signr;
-	ait virtaddr;
-	SignalEvent(EventTimestamp when, unsigned _signr, ait _va) :
+	unsigned long virtaddr;
+	SignalEvent(EventTimestamp when, unsigned _signr, unsigned long _va) :
 		ThreadEvent(when),
 		signr(_signr),
 		virtaddr(_va)
@@ -1283,9 +1274,9 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when, unsigned _signr, ait _virtaddr)
+	static ThreadEvent *get(EventTimestamp when, unsigned _signr, unsigned long _virtaddr)
 	{
-		return new SignalEvent<ait>(when, _signr, _virtaddr);
+		return new SignalEvent(when, _signr, _virtaddr);
 	}
 
 	void visit(HeapVisitor &hv)
@@ -1326,8 +1317,8 @@ public:
 };
 
 class LogRecordLoad : public LogRecord {
-	friend class LoadEvent<unsigned long>;
-	friend class CasEvent<unsigned long>;
+	friend class LoadEvent;
+	friend class CasEvent;
 	friend class MemoryAccessLoad<unsigned long>;
 	unsigned size;
 public:
@@ -1362,7 +1353,7 @@ protected:
 				   this->size);
 	}
 public:
-	MemoryAccessLoad(const class LoadEvent<ait> &evt)
+	MemoryAccessLoad(const class LoadEvent &evt)
 		: MemoryAccess<ait>(evt.when, evt.addr, evt.size)
 	{
 	}
@@ -1370,8 +1361,8 @@ public:
 };
 
 class LogRecordStore : public LogRecord {
-	friend class StoreEvent<unsigned long>;
-	friend class CasEvent<unsigned long>;
+	friend class StoreEvent;
+	friend class CasEvent;
 	friend class MemoryAccessStore<unsigned long>;
 	unsigned size;
 public:
@@ -1407,7 +1398,7 @@ protected:
 				   this->size);
 	}
 public:
-	MemoryAccessStore(const class StoreEvent<ait> &evt)
+	MemoryAccessStore(const class StoreEvent &evt)
 		: MemoryAccess<ait>(evt.when, evt.addr, evt.size)
 	{
 	}
@@ -1561,7 +1552,7 @@ public:
 };
 
 class LogRecordRdtsc : public LogRecord {
-	friend class RdtscEvent<unsigned long>;
+	friend class RdtscEvent;
 	unsigned long tsc;
 protected:
 	char *mkName() const {

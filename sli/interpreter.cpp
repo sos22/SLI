@@ -169,9 +169,9 @@ Thread::do_load(EventTimestamp when, IRTemp tmp, unsigned long addr, unsigned si
 		     MachineState *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, this))
-		return LoadEvent<unsigned long>::get(when, tmp, addr, size);
+		return LoadEvent::get(when, tmp, addr, size);
 	else
-		return SignalEvent<unsigned long>::get(when, 11, addr);
+		return SignalEvent::get(when, 11, addr);
 }
 
 ThreadEvent *
@@ -192,7 +192,7 @@ Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 	assert(!details->cee->regparms);
 
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
-		return RdtscEvent<unsigned long>::get(bumpEvent(ms), details->tmp);
+		return RdtscEvent::get(bumpEvent(ms), details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
 		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 1, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
@@ -1542,9 +1542,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				VexPtr<AddressSpace > as(ms->addressSpace);
 			        ths->translateNextBlock(ths, as, ms, ptr, ths->regs.rip(), t);
 			} catch (BadMemoryException<unsigned long> excn) {
-				return SignalEvent<unsigned long>::get(ths->bumpEvent(ms), 11, excn.ptr);
+				return SignalEvent::get(ths->bumpEvent(ms), 11, excn.ptr);
 			} catch (ForceFailureException ffe) {
-				return new DetectedErrorEvent<unsigned long>(ths->bumpEvent(ms), ffe.rip);
+				return new DetectedErrorEvent(ths->bumpEvent(ms), ffe.rip);
 			}
 			assert(ths->currentIRSB);
 		}
@@ -1565,7 +1565,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  mkConst<unsigned long>(stmt->Ist.IMark.addr));
 #define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
-				return InstructionEvent<unsigned long>::get(ths->bumpEvent(ms),
+				return InstructionEvent::get(ths->bumpEvent(ms),
 								  GR(RIP),
 								  GR(FOOTSTEP_REG_0_NAME),
 								  GR(FOOTSTEP_REG_1_NAME),
@@ -1598,18 +1598,18 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 									  stmt->Ist.Store.data));
 				if (ms->addressSpace->isWritable(addr.lo, size, ths)) {
 					DBG("Store %s to %s\n", data.name(), addr.name());
-					return StoreEvent<unsigned long>::get(ths->bumpEvent(ms), addr.lo, size, data);
+					return StoreEvent::get(ths->bumpEvent(ms), addr.lo, size, data);
 				}
 				EventTimestamp et;
 				unsigned long free_addr;
 				if (ms->addressSpace->isOnFreeList(addr.lo, addr.lo + mkConst<unsigned long>(size), ths->tid, &et,
 								   &free_addr))
-					return UseFreeMemoryEvent<unsigned long>::get(ths->bumpEvent(ms), 
+					return UseFreeMemoryEvent::get(ths->bumpEvent(ms), 
 									    addr.lo,
 									    free_addr,
 									    et);
 				else
-					return SignalEvent<unsigned long>::get(ths->bumpEvent(ms), 11, addr.lo);
+					return SignalEvent::get(ths->bumpEvent(ms), 11, addr.lo);
 			}
 
 			case Ist_CAS: {
@@ -1625,7 +1625,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					ths->eval_expression(stmt->Ist.CAS.details->expdLo);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
-				return CasEvent<unsigned long>::get(ths->bumpEvent(ms), stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+				return CasEvent::get(ths->bumpEvent(ms), stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 			}
 
 			case Ist_Put: {
@@ -1811,7 +1811,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				ths->currentIRSB = NULL;
 			}
 			if (is_syscall)
-				return SyscallEvent<unsigned long>::get(ths->bumpEvent(ms));
+				return SyscallEvent::get(ths->bumpEvent(ms));
 		}
 
 finished_block:
@@ -1842,10 +1842,10 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace<unsi
 			*output = work;
 			return res;
 		}
-		if (LoadEvent<unsigned long> *lr = dynamic_cast<LoadEvent <unsigned long> * > (evt)) {
+		if (LoadEvent *lr = dynamic_cast<LoadEvent *> (evt)) {
 			if (address_is_interesting(thr->tid, force(lr->addr)))
 				work->push_back(new MemoryAccessLoad<unsigned long>(*lr));
-	        } else if (StoreEvent<unsigned long> *sr = dynamic_cast<StoreEvent<unsigned long> *>(evt)) {
+	        } else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
 			if (address_is_interesting(thr->tid, force(sr->addr)))
 				work->push_back(new MemoryAccessStore<unsigned long>(*sr));
 		}
@@ -1866,8 +1866,8 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid,
         while (1) {
                 ThreadEvent *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
                 InterpretResult res = output->recordEvent(thr, currentState, evt);
-		if (dynamic_cast<LoadEvent<unsigned long> *>(evt) ||
-		    dynamic_cast<StoreEvent<unsigned long> *>(evt)) {
+		if (dynamic_cast<LoadEvent *>(evt) ||
+		    dynamic_cast<StoreEvent *>(evt)) {
 			nr_accesses--;
 			if (nr_accesses == 0)
 				return;

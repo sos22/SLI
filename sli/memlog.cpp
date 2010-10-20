@@ -3,7 +3,7 @@
 template <typename ait>
 InterpretResult LogWriter<ait>::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt)
 {
-	CasEvent<ait> *ce = dynamic_cast<CasEvent<ait> *>(evt);
+	CasEvent *ce = dynamic_cast<CasEvent *>(evt);
 	InterpretResult res;
 
 	if (ce) {
