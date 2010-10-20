@@ -6,10 +6,11 @@
 \#*#
 Makefile.mk
 core
-slir
 vgcore.*
 .depends
 crop
-symexec
-crashreason
-cftrace
+binpatch
+chunk
+dbg
+direct
+extra_config.h
