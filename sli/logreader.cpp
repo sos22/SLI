@@ -154,10 +154,10 @@ skip:
 				   startPtr.off + sizeof(rh) + sizeof(mrr));
 		val.lo = b[0];
 		val.hi = b[1];
-		return new LogRecordLoad<unsigned long>(tid,
-							rh.size - sizeof(mrr) - sizeof(rh),
-							mrr.ptr,
-							val);
+		return new LogRecordLoad(tid,
+					 rh.size - sizeof(mrr) - sizeof(rh),
+					 mrr.ptr,
+					 val);
 	}
 	case RECORD_mem_write: {
 		mem_write_record<unsigned long> mwr;
@@ -170,10 +170,10 @@ skip:
 		val.lo = b[0];
 		val.hi = b[1];
 		(void)r;
-		return new LogRecordStore<unsigned long>(tid,
-							 rh.size - sizeof(mwr) - sizeof(rh),
-							 mwr.ptr,
-							 val);
+		return new LogRecordStore(tid,
+					  rh.size - sizeof(mwr) - sizeof(rh),
+					  mwr.ptr,
+					  val);
 	}
 
 	case RECORD_new_thread:
@@ -219,7 +219,7 @@ skip:
 		initial_sighandlers_record<unsigned long> isr;
 		int r = buffered_pread(&isr, sizeof(isr), startPtr.off + sizeof(rh));
 		(void)r;
-		return new LogRecordInitialSighandlers<unsigned long>(tid, isr.handlers);
+		return new LogRecordInitialSighandlers(tid, isr.handlers);
 	}
 	case RECORD_vex_thread_state_1: {
 		vex_thread_state_record_1<unsigned long> *vtsr;

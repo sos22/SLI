@@ -31,7 +31,7 @@ public:
 
 MachineState *
 MachineState::initialMachineState(AddressSpace *as,
-				  const LogRecordInitialSighandlers<unsigned long> &handlers)
+				  const LogRecordInitialSighandlers &handlers)
 {
 	MachineState *work = new MachineState();
 
@@ -60,7 +60,7 @@ MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
         VexPtr<AddressSpace > as(AddressSpace::initialAddressSpace(lrib->brk));
 
 	lr = lf->read(ptr, &ptr);
-        LogRecordInitialSighandlers<unsigned long> *lris = dynamic_cast<LogRecordInitialSighandlers<unsigned long>*>(lr);
+        LogRecordInitialSighandlers *lris = dynamic_cast<LogRecordInitialSighandlers*>(lr);
 	if (!lris)
 		errx(1, "second record should have been initial signal handlers");
 	work = initialMachineState(as, *lris);

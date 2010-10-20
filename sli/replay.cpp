@@ -72,7 +72,7 @@ ThreadEvent<ait> *StoreEvent<ait>::replay(LogRecord *lr, MachineState **ms,
 					  bool &, LogReaderPtr)
 {
 	Thread *thr = (*ms)->findThread(this->when.tid);
-	LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr);
+	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store, got %s",
 					    lr->name());
@@ -95,7 +95,7 @@ InterpretResult StoreEvent<ait>::fake(MachineState *ms,
 {
 	Thread *thr = ms->findThread(this->when.tid);
 	if (lr)
-		*lr = new LogRecordStore<ait>(thr->tid, size, addr, data);
+		*lr = new LogRecordStore(thr->tid, size, addr, data);
 	ms->addressSpace->store(this->when, addr, size, data, false, thr);
 	thr->nrAccesses++;
 	return InterpretResultContinue;
@@ -107,7 +107,7 @@ ThreadEvent<ait> *LoadEvent<ait>::replay(LogRecord *lr, MachineState **ms,
 {
 	Thread *thr = (*ms)->findThread(this->when.tid);
 	if ((*ms)->addressSpace->isReadable(addr, size, thr)) {
-		LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
+		LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 		if (!lrl)
 			throw ReplayFailedException("wanted a load, got %s",
 						    lr->name());
@@ -141,7 +141,7 @@ InterpretResult LoadEvent<ait>::fake(MachineState *ms, LogRecord **lr)
 			ms->addressSpace->load(this->when, addr, size, false, thr);
 		thr->temporaries[tmp] = buf;
 		if (lr)
-			*lr = new LogRecordLoad<ait>(thr->tid, size, addr, buf);
+			*lr = new LogRecordLoad(thr->tid, size, addr, buf);
 		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
@@ -217,7 +217,7 @@ template <typename ait>
 ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord *lr, MachineState **ms,
 					bool &, LogReaderPtr)
 {
-	LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
+	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
 					    lr->name());
@@ -244,7 +244,7 @@ ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord *lr, MachineState *ms,
 					const LogReader<ait> *lf, LogReaderPtr ptr,
 					LogReaderPtr *outPtr, LogWriter<ait> *lw)
 {
-	LogRecordLoad<ait> *lrl = dynamic_cast<LogRecordLoad<ait> *>(lr);
+	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
 					    lr->name());
@@ -272,7 +272,7 @@ ThreadEvent<ait> *CasEvent<ait>::replay(LogRecord *lr, MachineState *ms,
 	}
 	if (lw)
 		lw->append(lr2, this->when.idx);
-        LogRecordStore<ait> *lrs = dynamic_cast<LogRecordStore<ait> *>(lr2);
+        LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");
         if (size != lrs->size || force(addr.lo != lrs->ptr))
@@ -295,12 +295,12 @@ InterpretResult CasEvent<ait>::fake(MachineState *ms, LogRecord **lr1,
 	Thread *thr = ms->findThread(this->when.tid);
 	expression_result<ait> seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
 	if (lr1)
-		*lr1 = new LogRecordLoad<ait>(this->when.tid, size, addr.lo, seen);
+		*lr1 = new LogRecordLoad(this->when.tid, size, addr.lo, seen);
 	thr->temporaries[dest] = seen;
 	if (force(seen == expected)) {
 		ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
 		if (lr2)
-			*lr2 = new LogRecordStore<ait>(this->when.tid, size, addr.lo, data);
+			*lr2 = new LogRecordStore(this->when.tid, size, addr.lo, data);
 	} else if (lr2)
 		*lr2 = NULL;
 	return InterpretResultContinue;

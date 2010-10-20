@@ -633,7 +633,6 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait>
 class LogRecordInitialSighandlers : public LogRecord {
 	friend class SignalHandlers;
 	struct sigaction handlers[64];
@@ -650,16 +649,12 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordInitialSighandlers<outtype> *abstract() const
-	{
-		return new LogRecordInitialSighandlers<outtype>(this->thread(), handlers);
-	}
 };
 
 class SignalHandlers {
 public:
 	struct sigaction handlers[64];
-	SignalHandlers(const LogRecordInitialSighandlers<unsigned long> &init) {
+	SignalHandlers(const LogRecordInitialSighandlers &init) {
 		memcpy(handlers, init.handlers, sizeof(init.handlers));
 	}
 	SignalHandlers() { memset(handlers, 0, sizeof(handlers)); }
@@ -724,7 +719,7 @@ public:
 
 private:
 	static MachineState *initialMachineState(AddressSpace *as,
-						 const LogRecordInitialSighandlers<unsigned long> &handlers);
+						 const LogRecordInitialSighandlers &handlers);
 public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
@@ -1335,16 +1330,15 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait>
 class LogRecordLoad : public LogRecord {
-	friend class LoadEvent<ait>;
-	friend class CasEvent<ait>;
-	friend class MemoryAccessLoad<ait>;
+	friend class LoadEvent<unsigned long>;
+	friend class CasEvent<unsigned long>;
+	friend class MemoryAccessLoad<unsigned long>;
 	unsigned size;
 public:
-	ait ptr;
+	unsigned long ptr;
 private:
-	expression_result<ait> value;
+	expression_result<unsigned long> value;
 protected:
 	char *mkName() const {
 		return my_asprintf("load(%x)", size);
@@ -1352,8 +1346,8 @@ protected:
 public:
 	LogRecordLoad(ThreadId _tid,
 		      unsigned _size,
-		      ait _ptr,
-		      expression_result<ait> _value) :
+		      unsigned long _ptr,
+		      expression_result<unsigned long> _value) :
 		LogRecord(_tid),
 		size(_size),
 		ptr(_ptr),
@@ -1362,15 +1356,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordLoad<outtype> *abstract() const
-	{
-		expression_result<outtype> nvalue;
-		value.abstract(&nvalue);
-		return new LogRecordLoad<outtype>(this->thread(),
-						  size,
-						  mkConst<outtype>(ptr),
-						  nvalue);
-	}
 	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
@@ -1389,16 +1374,15 @@ public:
 	virtual bool isLoad() { return true; }
 };
 
-template <typename ait>
 class LogRecordStore : public LogRecord {
-	friend class StoreEvent<ait>;
-	friend class CasEvent<ait>;
-	friend class MemoryAccessStore<ait>;
+	friend class StoreEvent<unsigned long>;
+	friend class CasEvent<unsigned long>;
+	friend class MemoryAccessStore<unsigned long>;
 	unsigned size;
 public:
-	ait ptr;
+	unsigned long ptr;
 private:
-	expression_result<ait> value;
+	expression_result<unsigned long> value;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("store(%x,%s)", size, name_aiv(ptr));
@@ -1406,8 +1390,8 @@ protected:
 public:
 	LogRecordStore(ThreadId _tid,
 		       unsigned _size,
-		       ait _ptr,
-		       expression_result<ait> _value) :
+		       unsigned long _ptr,
+		       expression_result<unsigned long> _value) :
 		LogRecord(_tid),
 		size(_size),
 		ptr(_ptr),
@@ -1416,15 +1400,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	template <typename outtype> LogRecordStore<outtype> *abstract() const
-	{
-		expression_result<outtype> res;
-		value.abstract(&res);
-		return new LogRecordStore<outtype>(this->thread(),
-						   size,
-						   mkConst<outtype>(ptr),
-						   res);
-	}
 	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
