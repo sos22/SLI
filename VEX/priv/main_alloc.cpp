@@ -262,10 +262,6 @@ LibVEX_gc(GarbageCollectionToken t)
 		ah->type->gc_visit(header_to_alloc(ah), gc);
 	}
 
-	/* Hack: the expression internment table still points at the
-	   old generation.  Fix it up. */
-	fixup_expression_table();
-
 	LibVEX_alloc_sanity_check();
 
 	for (x = 0; x < MAX_NR_GC_ASSISTANTS; x++)

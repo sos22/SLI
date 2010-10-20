@@ -351,6 +351,4 @@ public:
 
 void LibVEX_alloc_sanity_check();
 
-void fixup_expression_table();
-
 #endif /* !__LIBVEX_ALLOC_H */

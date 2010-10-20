@@ -562,12 +562,6 @@ gdb_concrete(const MachineState<unsigned long> *ms)
 	gdb_machine_state(ms);
 }
 
-void
-gdb_abstract(const MachineState<abstract_interpret_value> *ms)
-{
-	gdb_machine_state(ms);
-}
-
 /* Support for attaching gdb to ourself. */
 static volatile bool gdb_attached;
 static pid_t gdb_pid;
@@ -623,12 +617,3 @@ gdb(void)
 		sleep(1);
 	}
 }
-
-void RipHistogram::dump() {
-	for (std::map<void *, unsigned>::iterator it = m.begin();
-	     it != m.end();
-	     it++)
-		printf("%p\t%d\n", it->first, it->second);
-}
-
-RipHistogram __caller_histogram;

@@ -3,6 +3,7 @@
 #include <deque>
 #include <set>
 #include <queue>
+#include <map>
 
 #include "sli.h"
 
