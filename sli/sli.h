@@ -252,8 +252,6 @@ public:
 	}
 };
 
-template <typename ait> class AddressSpace;
-
 template <typename ait>
 class expression_result_array {
 public:
@@ -284,6 +282,7 @@ public:
 };
 
 class MachineState;
+class AddressSpace;
 
 template <typename ait> class ThreadEvent;
 template <typename ait> class LogRecordInitialRegisters;
@@ -299,7 +298,7 @@ public:
 template <typename abst_int_type>
 class Thread : public GarbageCollected<Thread<abst_int_type> > {
 	static void translateNextBlock(VexPtr<Thread<abst_int_type> > &ths,
-				       VexPtr<AddressSpace<abst_int_type> > &addrSpace,
+				       VexPtr<AddressSpace > &addrSpace,
 				       VexPtr<MachineState> &ms,
 				       const LogReaderPtr &ptr,
 				       abst_int_type rip,
@@ -405,7 +404,7 @@ public:
 
 	static void imposeState(VexPtr<Thread<abst_int_type> > &thr,
 				VexPtr<LogRecordVexThreadState<abst_int_type> > &rec,
-				VexPtr<AddressSpace<abst_int_type> > &as,
+				VexPtr<AddressSpace > &as,
 				VexPtr<MachineState > &ms,
 				const LogReaderPtr &ptr,
 				GarbageCollectionToken t);
@@ -748,10 +747,10 @@ public:
 	ThreadId nextTid;
 
 private:
-	static MachineState *initialMachineState(AddressSpace<unsigned long> *as,
+	static MachineState *initialMachineState(AddressSpace *as,
 						 const LogRecordInitialSighandlers<unsigned long> &handlers);
 public:
-	AddressSpace<unsigned long> *addressSpace;
+	AddressSpace *addressSpace;
 	SignalHandlers<unsigned long> signalHandlers;
 	unsigned long nrEvents;
 	static MachineState *initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
@@ -1712,7 +1711,7 @@ public:
 
 template <typename ait>
 class LogRecordAllocateMemory : public LogRecord<ait> {
-	friend class AddressSpace<ait>;
+	friend class AddressSpace;
 	ait start;
 	ait size;
 	unsigned prot;
@@ -1828,92 +1827,89 @@ public:
 	EventTimestamp when;
 };
 
-template <typename ait>
-class AddressSpace : public GarbageCollected<AddressSpace<ait> > {
+class AddressSpace : public GarbageCollected<AddressSpace > {
 public:
 	unsigned long brkptr;
 	unsigned long brkMapPtr;
 	VAMap *vamap;
-	PMap<ait> *pmap;
-	ait client_free;
+	PMap<unsigned long> *pmap;
+	unsigned long client_free;
 
-	bool isOnFreeList(ait start, ait end,
+	bool isOnFreeList(unsigned long start, unsigned long end,
 			  ThreadId asker,
 			  EventTimestamp *when = NULL,
-			  ait *free_addr = NULL) const;
+			  unsigned long *free_addr = NULL) const;
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
-	void checkFreeList(ait start, ait end, ThreadId asking, EventTimestamp now);
+	void checkFreeList(unsigned long start, unsigned long end, ThreadId asking, EventTimestamp now);
 public:
 	IRSB *getIRSBForAddress(unsigned long rip);
 
 	void findInterestingFunctions(const VAMap::VAMapEntry *vme);
 	void findInterestingFunctions();
 
-	void allocateMemory(ait start, ait size, VAMap::Protection prot,
+	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
-	void allocateMemory(const LogRecordAllocateMemory<ait> &rec)
+	void allocateMemory(const LogRecordAllocateMemory<unsigned long> &rec)
 	{
 		allocateMemory(rec.start, rec.size, rec.prot, rec.flags);
 	}
-	void releaseMemory(ait start, ait size);
-	void protectMemory(ait start, ait size, VAMap::Protection prot);
-	void populateMemory(const LogRecordMemory<ait> &rec)
+	void releaseMemory(unsigned long start, unsigned long size);
+	void protectMemory(unsigned long start, unsigned long size, VAMap::Protection prot);
+	void populateMemory(const LogRecordMemory<unsigned long> &rec)
 	{
 		writeMemory(EventTimestamp::invalid, rec.start, rec.size, rec.contents, true, NULL);
 	}
-	void store(EventTimestamp when, ait start, unsigned size, const expression_result<ait> &val,
+	void store(EventTimestamp when, unsigned long start, unsigned size, const expression_result<unsigned long> &val,
 		   bool ignore_protection = false,
-		   Thread<ait> *thr = NULL);
-	void writeMemory(EventTimestamp when, ait start, unsigned size,
-			 const ait *contents, bool ignore_protection,
-			 Thread<ait> *thr);
-	bool copyToClient(EventTimestamp when, ait start, unsigned size,
+		   Thread<unsigned long> *thr = NULL);
+	void writeMemory(EventTimestamp when, unsigned long start, unsigned size,
+			 const unsigned long *contents, bool ignore_protection,
+			 Thread<unsigned long> *thr);
+	bool copyToClient(EventTimestamp when, unsigned long start, unsigned size,
 			  const void *source);
-	bool copyFromClient(EventTimestamp when, ait start, unsigned size,
+	bool copyFromClient(EventTimestamp when, unsigned long start, unsigned size,
 			    void *dest);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
-	expression_result<ait> load(EventTimestamp when, ait start, unsigned size,
+	expression_result<unsigned long> load(EventTimestamp when, unsigned long start, unsigned size,
 				    bool ignore_protection = false,
-				    Thread<ait> *thr = NULL);
+				    Thread<unsigned long> *thr = NULL);
 	template <typename t> const t fetch(unsigned long addr,
-					    Thread<ait> *thr);
-	EventTimestamp readMemory(ait start, unsigned size,
-				  ait *contents, bool ignore_protection,
-				  Thread<ait> *thr,
-				  ait *storeAddr = NULL);
-	bool isAccessible(ait start, unsigned size,
-			  bool isWrite, Thread<ait> *thr);
-	bool isWritable(ait start, unsigned size,
-			Thread<ait> *thr = NULL) {
+					    Thread<unsigned long> *thr);
+	EventTimestamp readMemory(unsigned long start, unsigned size,
+				  unsigned long *contents, bool ignore_protection,
+				  Thread<unsigned long> *thr,
+				  unsigned long *storeAddr = NULL);
+	bool isAccessible(unsigned long start, unsigned size,
+			  bool isWrite, Thread<unsigned long> *thr);
+	bool isWritable(unsigned long start, unsigned size,
+			Thread<unsigned long> *thr = NULL) {
 		return isAccessible(start, size, true, thr);
 	}
-	bool isReadable(ait start, unsigned size,
-			Thread<ait> *thr = NULL) {
+	bool isReadable(unsigned long start, unsigned size,
+			Thread<unsigned long> *thr = NULL) {
 		return isAccessible(start, size, false, thr);
 	}
-	unsigned long setBrk(ait newBrk);
+	unsigned long setBrk(unsigned long newBrk);
 
-	static AddressSpace *initialAddressSpace(ait initialBrk);
+	static AddressSpace *initialAddressSpace(unsigned long initialBrk);
 	AddressSpace *dupeSelf() const;
 	void visit(HeapVisitor &hv);
 	void sanityCheck() const;
 
 	void addVsyscalls();
 
-	void dumpBrkPtr(LogWriter<ait> *lw) const;
-	void dumpSnapshot(LogWriter<ait> *lw) const;
+	void dumpBrkPtr(LogWriter<unsigned long> *lw) const;
+	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
 
-	char *readString(ait start, Thread<ait> *thr);
-
-	template <typename new_type> AddressSpace<new_type> *abstract() const;
+	char *readString(unsigned long start, Thread<unsigned long> *thr);
 
 	void destruct() { this->~AddressSpace(); }
 
-	typedef std::vector<client_freed_entry<ait> > freed_memory_t;
+	typedef std::vector<client_freed_entry<unsigned long> > freed_memory_t;
 	freed_memory_t freed_memory;
 
-	void client_freed(EventTimestamp when, ait ptr);
+	void client_freed(EventTimestamp when, unsigned long ptr);
 
 	NAMED_CLASS
 
@@ -1946,7 +1942,7 @@ public:
 
 	WeakRef<IRSB> *searchDecodeCache(unsigned long rip);
 
-	void relocate(AddressSpace<ait> *target, size_t sz);
+	void relocate(AddressSpace *target, size_t sz);
 
 	void sanityCheckDecodeCache(void) const
 #if 1
@@ -1965,7 +1961,7 @@ template<typename ait> ThreadEvent<ait> * replay_syscall(const LogRecordSyscall<
 							 MachineState *&mach,
 							 LogReaderPtr ptr);
 
-template<typename ait> void process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
+template<typename ait> void process_memory_records(VexPtr<AddressSpace > &addrSpace,
 						   VexPtr<LogReader<ait> > &lf,
 						   LogReaderPtr startOffset,
 						   LogReaderPtr *endOffset,

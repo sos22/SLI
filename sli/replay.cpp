@@ -402,7 +402,7 @@ SyscallEvent<ait>::fuzzyReplay(VexPtr<MachineState > &ms,
 			bool ign;
 			ThreadEvent<ait> *r = replay(lr, &ms.get(), ign, startPtr);
 			*endPtr = startPtr;
-			VexPtr<AddressSpace<ait> > as(ms->addressSpace);
+			VexPtr<AddressSpace> as(ms->addressSpace);
 		        VexPtr<LogWriter<ait> > dummy(NULL);
 			/* This might invalidate the this pointer... */
 			process_memory_records(as, lf, startPtr, endPtr, dummy, t);

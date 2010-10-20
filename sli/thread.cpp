@@ -79,7 +79,7 @@ void Thread<ait>::dumpSnapshot(LogWriter<ait> *lw)
 template<typename ait>
 void Thread<ait>::imposeState(VexPtr<Thread<ait> > &ths,
 			      VexPtr<LogRecordVexThreadState<ait> > &rec,
-			      VexPtr<AddressSpace<ait> > &as,
+			      VexPtr<AddressSpace> &as,
 			      VexPtr<MachineState > &ms,
 			      const LogReaderPtr &ptr,
 			      GarbageCollectionToken t)

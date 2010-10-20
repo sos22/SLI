@@ -87,11 +87,11 @@ public:
 	unsigned nr_prefixes;
 	std::vector<EarlyRelocation *> relocs;
 
-	AddressSpace<unsigned long> *as;
+	AddressSpace *as;
 
 	bool useful;
 
-	static Instruction *decode(AddressSpace<unsigned long> *as,
+	static Instruction *decode(AddressSpace *as,
 				   unsigned long rip,
 				   CFG *cfg);
 	static Instruction *pseudo(unsigned long rip);
@@ -107,7 +107,7 @@ public:
 };
 
 class CFG : public GarbageCollected<CFG> {
-	AddressSpace<unsigned long> *as;
+	AddressSpace *as;
 public:
 	static unsigned long __trivial_hash_function(const unsigned long &k) { return k; }
 	typedef gc_map<unsigned long, Instruction *, __trivial_hash_function,
@@ -118,7 +118,7 @@ private:
 	std::vector<unsigned long> neededRips;
 	void decodeInstruction(unsigned long rip, unsigned max_depth);
 public:
-	CFG(AddressSpace<unsigned long> *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
+	CFG(AddressSpace *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
 	void add_root(unsigned long root, unsigned max_depth)
 	{
 		pendingRips.push_back(std::pair<unsigned long, unsigned>(root, max_depth));
@@ -257,7 +257,7 @@ Instruction::pseudo(unsigned long rip)
 }
 
 Instruction *
-Instruction::decode(AddressSpace<unsigned long> *as,
+Instruction::decode(AddressSpace *as,
 		    unsigned long start,
 		    CFG *cfg)
 {
@@ -839,7 +839,7 @@ public:
 	bool exploreInstruction(Instruction *i) { return !(*sinkInstructions)[i->rip]; }
 	bool instructionUseful(Instruction *i) { return (*sinkInstructions)[i->rip]; }
 
-	SourceSinkCFG(AddressSpace<unsigned long> *as)
+	SourceSinkCFG(AddressSpace *as)
 		: CFG(as)
 	{
 		sinkInstructions = new gc_map<unsigned long, bool, __trivial_hash_function>();
@@ -877,7 +877,7 @@ struct CriticalSection {
 };
 
 static char *
-mkPatch(AddressSpace<unsigned long> *as, struct CriticalSection *csects, unsigned nr_csects)
+mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 {
 	SourceSinkCFG *cfg = new SourceSinkCFG(as);
 	for (unsigned x = 0; x < nr_csects; x++) {
@@ -989,7 +989,7 @@ main(int argc, char *argv[])
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 	MachineState *ms = MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
-	AddressSpace<unsigned long> *as = ms->addressSpace;
+	AddressSpace *as = ms->addressSpace;
 
 	CriticalSection *csects = (CriticalSection *)malloc(sizeof(CriticalSection) * (argc - 2) / 2);
 	for (int x = 0; x < (argc - 2) / 2; x++) {

@@ -6,9 +6,9 @@
 
 #define PAGE_MASK (~4095)
 
-template <typename ait>
-void AddressSpace<ait>::allocateMemory(ait _start, ait _size,
-				       VAMap::Protection prot, VAMap::AllocFlags flags)
+void
+AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
+			     VAMap::Protection prot, VAMap::AllocFlags flags)
 {
 	unsigned long start = force(_start);
 	unsigned long size = force(_size);
@@ -17,59 +17,59 @@ void AddressSpace<ait>::allocateMemory(ait _start, ait _size,
 
 	vamap->unmap(start, size);
 	while (size != 0) {
-		MemoryChunk<ait> *chunk = MemoryChunk<ait>::allocate();
+		MemoryChunk<unsigned long> *chunk = MemoryChunk<unsigned long>::allocate();
 		PhysicalAddress pa = pmap->introduce(chunk);
 		vamap->addTranslation(start, pa, prot, flags);
-		start += MemoryChunk<ait>::size;
-		size -= MemoryChunk<ait>::size;
+		start += MemoryChunk<unsigned long>::size;
+		size -= MemoryChunk<unsigned long>::size;
 	}
 
 	findInterestingFunctions();
 }
 
-template <typename ait>
-void AddressSpace<ait>::releaseMemory(ait start, ait size)
+void
+AddressSpace::releaseMemory(unsigned long start, unsigned long size)
 {
 	vamap->unmap(force(start), force(size));
 }
 
-template <typename ait>
-void AddressSpace<ait>::protectMemory(ait start, ait size,
-				      VAMap::Protection prot)
+void
+AddressSpace::protectMemory(unsigned long start, unsigned long size,
+			    VAMap::Protection prot)
 {
 	vamap->protect(force(start), force(size), prot);
 }
 
-template <typename ait> bool
-AddressSpace<ait>::copyToClient(EventTimestamp when, ait start, unsigned size,
-				const void *contents)
+bool
+AddressSpace::copyToClient(EventTimestamp when, unsigned long start, unsigned size,
+			   const void *contents)
 {
-	ait *buf = (ait *)malloc(sizeof(ait) * size);
+	unsigned long *buf = (unsigned long *)malloc(sizeof(unsigned long) * size);
 	bool fault;
 
 	for (unsigned x = 0; x < size; x++)
-		buf[x] = mkConst<ait>( ((unsigned char *)contents)[x] );
+		buf[x] = mkConst<unsigned long>( ((unsigned char *)contents)[x] );
 	fault = false;
 	try {
 		writeMemory(when, start, size, buf, false, NULL);
-	} catch (BadMemoryException<ait> &e) {
+	} catch (BadMemoryException<unsigned long> &e) {
 		fault = true;
 	}
 	free(buf);
 	return fault;
 }
 
-template <typename ait> bool
-AddressSpace<ait>::copyFromClient(EventTimestamp when, ait start, unsigned size,
-				  void *dest)
+bool
+AddressSpace::copyFromClient(EventTimestamp when, unsigned long start, unsigned size,
+			     void *dest)
 {
-	ait *buf = (ait *)calloc(sizeof(ait), size);
+	unsigned long *buf = (unsigned long *)calloc(sizeof(unsigned long), size);
 	bool fault;
 
 	fault = false;
 	try {
 		readMemory(start, size, buf, false, NULL, NULL);
-	} catch (BadMemoryException<ait> &e) {
+	} catch (BadMemoryException<unsigned long> &e) {
 		fault = true;
 	}
 	if (!fault) {
@@ -81,15 +81,15 @@ AddressSpace<ait>::copyFromClient(EventTimestamp when, ait start, unsigned size,
 	return fault;
 }
 
-template <typename ait>
-void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned size,
-				    const ait *contents, bool ignore_protection,
-				    Thread<ait> *thr)
+void
+AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned size,
+			  const unsigned long *contents, bool ignore_protection,
+			  Thread<unsigned long> *thr)
 {
 	unsigned long start = force(_start);
 	unsigned off = 0;
 	if (thr) {
-		checkFreeList(_start, _start + mkConst<ait>(size), thr->tid, EventTimestamp::invalid);
+		checkFreeList(_start, _start + mkConst<unsigned long>(size), thr->tid, EventTimestamp::invalid);
 		if (start == 0x456e9e0)
 			printf("Thread %d writes %d to %lx\n", thr->tid._tid(),
 			       size, start);
@@ -100,16 +100,16 @@ void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned si
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
 			if (!ignore_protection && !prot.writable)
-				throw BadMemoryException<ait>(true, _start, size);
+				throw BadMemoryException<unsigned long>(true, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			MemoryChunk<ait> *mc = pmap->lookup(pa, &mc_start);
+			MemoryChunk<unsigned long> *mc = pmap->lookup(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
 			mc->write(when, mc_start, contents, to_copy_this_time,
-				  _start + mkConst<ait>(off));
+				  _start + mkConst<unsigned long>(off));
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
@@ -118,53 +118,51 @@ void AddressSpace<ait>::writeMemory(EventTimestamp when, ait _start, unsigned si
 		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
 			continue;
 		} else {
-			throw BadMemoryException<ait>(true, _start, size);
+			throw BadMemoryException<unsigned long>(true, _start, size);
 		}
 	}
 }
 
-template <typename ait>
-expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
-					       ait start, unsigned size,
-					       bool ignore_protection,
-					       Thread<ait> *thr)
+expression_result<unsigned long>
+AddressSpace::load(EventTimestamp when,
+		   unsigned long start, unsigned size,
+		   bool ignore_protection,
+		   Thread<unsigned long> *thr)
 {
-	ait b[16];
-	ait storeAddr;
-	memset(b, 0, sizeof(ait) * size);
+	unsigned long b[16];
+	unsigned long storeAddr;
+	memset(b, 0, sizeof(unsigned long) * size);
 	for (unsigned x = 0; x < size; x++)
-		new (&b[x]) ait();
+		new (&b[x]) unsigned long();
 	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr, &storeAddr);
-	for (unsigned x = 0; x < size; x++)
-		sanity_check_ait(b[x]);
-	expression_result<ait> res;
-	res.lo = mkConst<ait>(0);
-	res.hi = mkConst<ait>(0);
+	expression_result<unsigned long> res;
+	res.lo = mkConst<unsigned long>(0);
+	res.hi = mkConst<unsigned long>(0);
 	switch(size) {
 	case 16:
 		res.hi = b[8] +
-			(b[9] << mkConst<ait>(8)) +
-			(b[10] << mkConst<ait>(16)) +
-			(b[11] << mkConst<ait>(24)) +
-			(b[12] << mkConst<ait>(32)) +
-			(b[13] << mkConst<ait>(40)) +
-			(b[14] << mkConst<ait>(48)) +
-			(b[15] << mkConst<ait>(56));
+			(b[9] << mkConst<unsigned long>(8)) +
+			(b[10] << mkConst<unsigned long>(16)) +
+			(b[11] << mkConst<unsigned long>(24)) +
+			(b[12] << mkConst<unsigned long>(32)) +
+			(b[13] << mkConst<unsigned long>(40)) +
+			(b[14] << mkConst<unsigned long>(48)) +
+			(b[15] << mkConst<unsigned long>(56));
 		/* Fall through */
 	case 8:
 		res.lo = res.lo +
-			(b[7] << mkConst<ait>(56)) +
-			(b[6] << mkConst<ait>(48)) +
-			(b[5] << mkConst<ait>(40)) +
-			(b[4] << mkConst<ait>(32));
+			(b[7] << mkConst<unsigned long>(56)) +
+			(b[6] << mkConst<unsigned long>(48)) +
+			(b[5] << mkConst<unsigned long>(40)) +
+			(b[4] << mkConst<unsigned long>(32));
 		/* Fall through */
 	case 4:
 		res.lo = res.lo +
-			(b[3] << mkConst<ait>(24)) +
-			(b[2] << mkConst<ait>(16));
+			(b[3] << mkConst<unsigned long>(24)) +
+			(b[2] << mkConst<unsigned long>(16));
 		/* Fall through */
 	case 2:
-		res.lo = res.lo + (b[1] << mkConst<ait>(8));
+		res.lo = res.lo + (b[1] << mkConst<unsigned long>(8));
 		/* Fall through */
 	case 1:
 		res.lo = res.lo + b[0];
@@ -187,45 +185,45 @@ expression_result<ait> AddressSpace<ait>::load(EventTimestamp when,
 #endif
 	if (!irrelevant || 1) {
 		if (size <= 8) {
-			res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr, size);
+			res.lo = load_ait<unsigned long>(res.lo, start, when, sto, storeAddr, size);
 		} else {
-			res.lo = load_ait<ait>(res.lo, start, when, sto, storeAddr, 8);
-			res.hi = load_ait<ait>(res.hi, start, when, sto, storeAddr, 8);
+			res.lo = load_ait<unsigned long>(res.lo, start, when, sto, storeAddr, 8);
+			res.hi = load_ait<unsigned long>(res.hi, start, when, sto, storeAddr, 8);
 		}
 	}
 	return res;
 }
 
-template <typename ait>
-void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
-			      const expression_result<ait> &val, bool ignore_protection,
-			      Thread<ait> *thr)
+void
+AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
+		    const expression_result<unsigned long> &val, bool ignore_protection,
+		    Thread<unsigned long> *thr)
 {
-	ait b[16];
+	unsigned long b[16];
 	sanity_check_ait(val.hi);
 	sanity_check_ait(val.lo);
 	switch (size) {
 	case 16:
-		b[15] = (val.hi >> mkConst<ait>(56)) & mkConst<ait>(0xff);
-		b[14] = (val.hi >> mkConst<ait>(48)) & mkConst<ait>(0xff);
-		b[13] = (val.hi >> mkConst<ait>(40)) & mkConst<ait>(0xff);
-		b[12] = (val.hi >> mkConst<ait>(32)) & mkConst<ait>(0xff);
-		b[11] = (val.hi >> mkConst<ait>(24)) & mkConst<ait>(0xff);
-		b[10] = (val.hi >> mkConst<ait>(16)) & mkConst<ait>(0xff);
-		b[9] = (val.hi >> mkConst<ait>(8)) & mkConst<ait>(0xff);
-		b[8] = val.hi & mkConst<ait>(0xff);
+		b[15] = (val.hi >> mkConst<unsigned long>(56)) & mkConst<unsigned long>(0xff);
+		b[14] = (val.hi >> mkConst<unsigned long>(48)) & mkConst<unsigned long>(0xff);
+		b[13] = (val.hi >> mkConst<unsigned long>(40)) & mkConst<unsigned long>(0xff);
+		b[12] = (val.hi >> mkConst<unsigned long>(32)) & mkConst<unsigned long>(0xff);
+		b[11] = (val.hi >> mkConst<unsigned long>(24)) & mkConst<unsigned long>(0xff);
+		b[10] = (val.hi >> mkConst<unsigned long>(16)) & mkConst<unsigned long>(0xff);
+		b[9] = (val.hi >> mkConst<unsigned long>(8)) & mkConst<unsigned long>(0xff);
+		b[8] = val.hi & mkConst<unsigned long>(0xff);
 	case 8:
-		b[7] = (val.lo >> mkConst<ait>(56)) & mkConst<ait>(0xff);
-		b[6] = (val.lo >> mkConst<ait>(48)) & mkConst<ait>(0xff);
-		b[5] = (val.lo >> mkConst<ait>(40)) & mkConst<ait>(0xff);
-		b[4] = (val.lo >> mkConst<ait>(32)) & mkConst<ait>(0xff);
+		b[7] = (val.lo >> mkConst<unsigned long>(56)) & mkConst<unsigned long>(0xff);
+		b[6] = (val.lo >> mkConst<unsigned long>(48)) & mkConst<unsigned long>(0xff);
+		b[5] = (val.lo >> mkConst<unsigned long>(40)) & mkConst<unsigned long>(0xff);
+		b[4] = (val.lo >> mkConst<unsigned long>(32)) & mkConst<unsigned long>(0xff);
 	case 4:
-		b[3] = (val.lo >> mkConst<ait>(24)) & mkConst<ait>(0xff);
-		b[2] = (val.lo >> mkConst<ait>(16)) & mkConst<ait>(0xff);
+		b[3] = (val.lo >> mkConst<unsigned long>(24)) & mkConst<unsigned long>(0xff);
+		b[2] = (val.lo >> mkConst<unsigned long>(16)) & mkConst<unsigned long>(0xff);
 	case 2:
-		b[1] = (val.lo >> mkConst<ait>(8)) & mkConst<ait>(0xff);
+		b[1] = (val.lo >> mkConst<unsigned long>(8)) & mkConst<unsigned long>(0xff);
 	case 1:
-		b[0] = val.lo & mkConst<ait>(0xff);
+		b[0] = val.lo & mkConst<unsigned long>(0xff);
 		break;
 	default:
 		abort();
@@ -235,13 +233,13 @@ void AddressSpace<ait>::store(EventTimestamp when, ait start, unsigned size,
 	writeMemory(when, start, size, b, ignore_protection, thr);
 }
 
-template <typename ait> template <typename t> const t
-AddressSpace<ait>::fetch(unsigned long start, Thread<ait> *thr)
+template <typename t> const t
+AddressSpace::fetch(unsigned long start, Thread<unsigned long> *thr)
 {
-	ait *res;
+	unsigned long *res;
 
-	res = (ait *)malloc(sizeof(ait) * sizeof(t));
-	readMemory(mkConst<ait>(start), sizeof(t), res, thr);
+	res = (unsigned long *)malloc(sizeof(unsigned long) * sizeof(t));
+	readMemory(mkConst<unsigned long>(start), sizeof(t), res, false, thr);
 	t tt;
 	for (unsigned x = 0; x < sizeof(t); x++)
 		((unsigned char *)&tt)[x] = force(res[x]);
@@ -249,27 +247,26 @@ AddressSpace<ait>::fetch(unsigned long start, Thread<ait> *thr)
 	return tt;
 }
 
-template <typename ait>
-EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
-					     ait *contents, bool ignore_protection,
-					     Thread<ait> *thr,
-					     ait *storeAddr)
+EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
+					unsigned long *contents, bool ignore_protection,
+					Thread<unsigned long> *thr,
+					unsigned long *storeAddr)
 {
 	EventTimestamp when;
 	unsigned long start = force(_start);
 	if (thr)
-		checkFreeList(_start, _start + mkConst<ait>(size), thr->tid, EventTimestamp::invalid);
+		checkFreeList(_start, _start + mkConst<unsigned long>(size), thr->tid, EventTimestamp::invalid);
 	if (storeAddr)
-		*storeAddr = mkConst<ait>(start);
+		*storeAddr = mkConst<unsigned long>(start);
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
 			if (!ignore_protection && !prot.readable)
-				throw BadMemoryException<ait>(false, _start, size);
+				throw BadMemoryException<unsigned long>(false, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &mc_start);
+			const MemoryChunk<unsigned long> *mc = pmap->lookupConst(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
@@ -289,19 +286,19 @@ EventTimestamp AddressSpace<ait>::readMemory(ait _start, unsigned size,
 			printf("Huh? Extended stack for a read?\n");
 			continue;
 		} else {
-			throw BadMemoryException<ait>(false, _start, size);
+			throw BadMemoryException<unsigned long>(false, _start, size);
 		}
 	}
 	return when;
 }
 
-template <typename ait> bool
-AddressSpace<ait>::isOnFreeList(ait start, ait end,
+bool
+AddressSpace::isOnFreeList(unsigned long start, unsigned long end,
 				ThreadId asking,
 				EventTimestamp *when,
-				ait *free_addr) const
+				unsigned long *free_addr) const
 {
-	class AddressSpace<ait>::freed_memory_t::const_iterator it;
+	AddressSpace::freed_memory_t::const_iterator it;
 
 	for (it = freed_memory.begin();
 	     it != freed_memory.end();
@@ -318,8 +315,8 @@ AddressSpace<ait>::isOnFreeList(ait start, ait end,
 	return false;
 }
 
-template <typename ait> void
-AddressSpace<ait>::checkFreeList(ait start, ait end,
+void
+AddressSpace::checkFreeList(unsigned long start, unsigned long end,
 				 ThreadId asking, EventTimestamp now)
 {
 	EventTimestamp when;
@@ -327,12 +324,11 @@ AddressSpace<ait>::checkFreeList(ait start, ait end,
 		throw UseOfFreeMemoryException(now, force(start), when);
 }
 
-template <typename ait>
-bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
-				     bool isWrite, Thread<ait> *thr)
+bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
+				     bool isWrite, Thread<unsigned long> *thr)
 {
 	unsigned long start = force(_start);
-	if (thr && isOnFreeList(_start, _start + mkConst<ait>(size), thr->tid))
+	if (thr && isOnFreeList(_start, _start + mkConst<unsigned long>(size), thr->tid))
 		return false;
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -343,7 +339,7 @@ bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 				return false;
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
-			const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &mc_start);
+			const MemoryChunk<unsigned long> *mc = pmap->lookupConst(pa, &mc_start);
 			assert(mc);
 			to_copy_this_time = size;
 			if (to_copy_this_time >
@@ -361,17 +357,16 @@ bool AddressSpace<ait>::isAccessible(ait _start, unsigned size,
 	return true;
 }
 
-template <typename ait>
-unsigned long AddressSpace<ait>::setBrk(ait _newBrk)
+unsigned long AddressSpace::setBrk(unsigned long _newBrk)
 {
 	unsigned long newBrk = force(_newBrk);
 	unsigned long newBrkMap = (newBrk + 4095) & PAGE_MASK;
 
 	if (newBrk != 0) {
 		if (newBrkMap > brkMapPtr)
-			allocateMemory(mkConst<ait>(brkMapPtr), mkConst<ait>(newBrkMap - brkMapPtr), VAMap::Protection(true, true, false));
+			allocateMemory(mkConst<unsigned long>(brkMapPtr), mkConst<unsigned long>(newBrkMap - brkMapPtr), VAMap::Protection(true, true, false));
 		else
-			releaseMemory(mkConst<ait>(newBrkMap), mkConst<ait>(brkMapPtr - newBrkMap));
+			releaseMemory(mkConst<unsigned long>(newBrkMap), mkConst<unsigned long>(brkMapPtr - newBrkMap));
 		brkptr = newBrk;
 		brkMapPtr = newBrkMap;
 	}
@@ -379,22 +374,20 @@ unsigned long AddressSpace<ait>::setBrk(ait _newBrk)
 	return brkptr;
 }
 
-template <typename ait>
-AddressSpace<ait> *AddressSpace<ait>::initialAddressSpace(ait _initialBrk)
+AddressSpace *AddressSpace::initialAddressSpace(unsigned long _initialBrk)
 {
 	unsigned long initialBrk = force(_initialBrk);
-	AddressSpace<ait> *work = new AddressSpace<ait>();
+	AddressSpace *work = new AddressSpace();
 	work->brkptr = initialBrk;
 	work->brkMapPtr = initialBrk /*+ 4096*/;
-	work->pmap = PMap<ait>::empty();
+	work->pmap = PMap<unsigned long>::empty();
 	work->vamap = VAMap::empty();
 	return work;	
 }
 
-template <typename ait>
-AddressSpace<ait> *AddressSpace<ait>::dupeSelf() const
+AddressSpace *AddressSpace::dupeSelf() const
 {
-	AddressSpace<ait> *work = new AddressSpace<ait>();
+	AddressSpace *work = new AddressSpace();
 	*work = *this;
 	work->pmap = pmap->dupeSelf();
 	work->vamap = vamap->dupeSelf();
@@ -402,8 +395,7 @@ AddressSpace<ait> *AddressSpace<ait>::dupeSelf() const
 	return work;
 }
 
-template <typename ait>
-void AddressSpace<ait>::visit(HeapVisitor &hv)
+void AddressSpace::visit(HeapVisitor &hv)
 {
 	hv(pmap);
 	vamap->visit(vamap, hv, pmap);
@@ -412,8 +404,7 @@ void AddressSpace<ait>::visit(HeapVisitor &hv)
 		hv(trans_hash[x]);
 }
 
-template <typename ait>
-bool AddressSpace<ait>::extendStack(unsigned long ptr, unsigned long rsp)
+bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 {
 	if (ptr + 65536 + 32 * sizeof(unsigned long) < rsp)
 		return false;
@@ -428,25 +419,22 @@ bool AddressSpace<ait>::extendStack(unsigned long ptr, unsigned long rsp)
 
 	printf("Extending stack from %lx to %lx\n", ptr, va);
 	ptr &= PAGE_MASK;
-	allocateMemory(mkConst<ait>(ptr), mkConst<ait>(va - ptr), prot, flags);
+	allocateMemory(mkConst<unsigned long>(ptr), mkConst<unsigned long>(va - ptr), prot, flags);
 	return true;
 }
 
-template <typename ait>
-void AddressSpace<ait>::sanityCheck() const
+void AddressSpace::sanityCheck() const
 {
 	vamap->sanityCheck();
 }
 
-template <typename ait>
-void AddressSpace<ait>::dumpBrkPtr(LogWriter<ait> *lw) const
+void AddressSpace::dumpBrkPtr(LogWriter<unsigned long> *lw) const
 {
-	lw->append(new LogRecordInitialBrk<ait>(ThreadId(0), mkConst<ait>(brkptr)),
+	lw->append(new LogRecordInitialBrk<unsigned long>(ThreadId(0), mkConst<unsigned long>(brkptr)),
 		   0);
 }
 
-template <typename ait>
-void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
+void AddressSpace::dumpSnapshot(LogWriter<unsigned long> *lw) const
 {
 	unsigned long end_of_last_block = 0;
 
@@ -477,9 +465,9 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 
 		end_va += 4096;
 
-		lw->append(new LogRecordAllocateMemory<ait>(ThreadId(0),
-							    mkConst<ait>(start_va),
-							    mkConst<ait>(end_va - start_va),
+		lw->append(new LogRecordAllocateMemory<unsigned long>(ThreadId(0),
+							    mkConst<unsigned long>(start_va),
+							    mkConst<unsigned long>(end_va - start_va),
 							    (unsigned long)prot,
 							    (unsigned long)alf),
 			   0);
@@ -502,13 +490,13 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 				r = vamap->translate(cursor_va, &pa);
 				assert(r);
 				unsigned long off;
-				const MemoryChunk<ait> *mc = pmap->lookupConst(pa, &off);
+				const MemoryChunk<unsigned long> *mc = pmap->lookupConst(pa, &off);
 				assert(off == 0);
-				ait *buf = (ait *)calloc(MemoryChunk<ait>::size, sizeof(ait));
-				mc->read(0, buf, MemoryChunk<ait>::size);
-				lw->append(new LogRecordMemory<ait>(ThreadId(0),
-								    MemoryChunk<ait>::size,
-								    mkConst<ait>(cursor_va),
+				unsigned long *buf = (unsigned long *)calloc(MemoryChunk<unsigned long>::size, sizeof(unsigned long));
+				mc->read(0, buf, MemoryChunk<unsigned long>::size);
+				lw->append(new LogRecordMemory<unsigned long>(ThreadId(0),
+								    MemoryChunk<unsigned long>::size,
+								    mkConst<unsigned long>(cursor_va),
 								    buf),
 					   0);
 			}
@@ -516,19 +504,6 @@ void AddressSpace<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 
 		end_of_last_block = end_va;
 	}
-}
-
-template <typename ait> template <typename new_type>
-AddressSpace<new_type> *AddressSpace<ait>::abstract() const
-{
-	AddressSpace<new_type> *work = new AddressSpace<new_type>();
-
-	work->brkptr = brkptr;
-	work->brkMapPtr = brkMapPtr;
-	work->vamap = vamap->dupeSelf();
-	work->pmap = pmap->abstract<new_type>();
-	work->client_free = mkConst<new_type>(force(client_free));
-	return work;
 }
 
 /* Valgrind handles vsyscalls in a slightly weird way, and we have to
@@ -550,25 +525,25 @@ extern unsigned char redirect_vtime[];
 extern unsigned char redirect_vgettimeofday[];
 extern unsigned char redirect_end[];
 
-template <typename ait> void
-AddressSpace<ait>::writeLiteralMemory(unsigned long start,
+void
+AddressSpace::writeLiteralMemory(unsigned long start,
 				      unsigned size,
 				      const unsigned char *content)
 {
-	ait *c = (ait *)malloc(sizeof(ait) * size);
+	unsigned long *c = (unsigned long *)malloc(sizeof(unsigned long) * size);
 	for (unsigned x = 0; x < size; x++)
-		c[x] = mkConst<ait>(content[x]);
-	writeMemory(EventTimestamp::invalid, mkConst<ait>(start),
+		c[x] = mkConst<unsigned long>(content[x]);
+	writeMemory(EventTimestamp::invalid, mkConst<unsigned long>(start),
 		    size, c, true, NULL);
 	free(c);
 }
 
-template <typename ait> void
-AddressSpace<ait>::addVsyscalls()
+void
+AddressSpace::addVsyscalls()
 {
 #if 0
-	allocateMemory(mkConst<ait>(0xFFFFFFFFFF600000),
-		       mkConst<ait>(0x1000),
+	allocateMemory(mkConst<unsigned long>(0xFFFFFFFFFF600000),
+		       mkConst<unsigned long>(0x1000),
 		       VAMap::Protection(true, false, true),
 		       VAMap::AllocFlags(false));
 	writeLiteralMemory(0xFFFFFFFFFF600000,
@@ -580,8 +555,8 @@ AddressSpace<ait>::addVsyscalls()
 #endif
 }
 
-template <typename ait> char *
-AddressSpace<ait>::readString(ait start, Thread<ait> *thr)
+char *
+AddressSpace::readString(unsigned long start, Thread<unsigned long> *thr)
 {
 	char *buf;
 	unsigned offset;
@@ -591,8 +566,8 @@ AddressSpace<ait>::readString(ait start, Thread<ait> *thr)
 	buf = (char *)malloc(buf_size);
 	offset = 0;
 	while (1) {
-		ait b;
-		readMemory(start + mkConst<ait>(offset), 1, &b, false, thr);
+		unsigned long b;
+		readMemory(start + mkConst<unsigned long>(offset), 1, &b, false, thr);
 		buf[offset] = force(b);
 		if (!buf[offset])
 			break;
@@ -605,8 +580,8 @@ AddressSpace<ait>::readString(ait start, Thread<ait> *thr)
 	return buf;
 }
 
-template <typename ait> int
-compare_ait_buffer_char_buffer(const ait *buffer,
+int
+compare_ait_buffer_char_buffer(const unsigned long *buffer,
 			       const char *bytes,
 			       size_t s)
 {
@@ -621,33 +596,33 @@ compare_ait_buffer_char_buffer(const ait *buffer,
 	return 0;
 }
 
-template <typename ait> void
-AddressSpace<ait>::findInterestingFunctions(const VAMap::VAMapEntry *it)
+void
+AddressSpace::findInterestingFunctions(const VAMap::VAMapEntry *it)
 {
-	ait buf[4096];
+	unsigned long buf[4096];
 
 	/* Try to spot malloc, free, realloc.  Hideous hack. */
 	if (it->end - it->start != 0x168000) {
 		/* Wrong size -> not libc. */
 		return;
 	}
-	readMemory(mkConst<ait>(it->start + 0x7a230),
+	readMemory(mkConst<unsigned long>(it->start + 0x7a230),
 		   293,
 		   buf,
 		   false,
 		   NULL);
-	if (compare_ait_buffer_char_buffer<ait>(
+	if (compare_ait_buffer_char_buffer(
 		    buf,
 		    "\x48\x8b\x05\x21\x1d\x2f\x00\x53\x49\x89\xf8\x48\x8b\x00\x48\x85\xc0\x74\x0d\x48\x8b\x74\x24\x08\x49\x89\xc3\x5b\x41\xff\xe3\x90\x48\x85\xff\x74\x6d\x48\x8b\x47\xf8\x48\x8d\x4f\xf0\xa8\x02\x75\x67\xa8\x04\x48\x8d\x1d\x96\x37\x2f\x00\x74\x0a\x48\x81\xe1\x00\x00\x00\xfc\x48\x8b\x19\xbe\x01\x00\x00\x00\x31\xc0\x83\x3d\xc4\x6d\x2f\x00\x00\x74\x0c\xf0\x0f\xb1\x33\x0f\x85\xb6\x3d\x00\x00\xeb\x09\x0f\xb1\x33\x0f\x85\xab\x3d\x00\x00\x4c\x89\xc6\x48\x89\xdf\xe8\x5a\xf6\xff\xff\x83\x3d\x9b\x6d\x2f\x00\x00\x74\x0b\xf0\xff\x0b\x0f\x85\xa9\x3d\x00\x00\xeb\x08\xff\x0b\x0f\x85\x9f\x3d\x00\x00\x5b\xc3\x0f\x1f\x40\x00\x8b\x15\xf6\x3f\x2f\x00\x85\xd2\x75\x2e\x48\x3b\x05\xd7\x3f\x2f\x00\x76\x25\x48\x3d\x00\x00\x00\x02\x77\x1d\x48\x89\xc2\x48\x83\xe2\xf8\x48\x8d\x04\x12\x48\x89\x15\xbb\x3f\x2f\x00\x48\x89\x05\xa4\x3f\x2f\x00\xeb\x09\x66\x90\x48\x89\xc2\x48\x83\xe2\xf8\x49\x8b\x40\xf0\x48\x89\xcf\x48\x29\xc7\x48\x8d\x34\x02\x8b\x05\xad\x3f\x2f\x00\x48\x89\xf2\x48\x09\xfa\x83\xe8\x01\x48\x85\xc2\x75\x14\x5b\x83\x2d\x87\x3f\x2f\x00\x01\x48\x29\x35\x98\x3f\x2f\x00\xe9\x23\x86\x06\x00\x5b\x8b\x3d\xa0\x1d\x2f\x00\x48\x8d\x51\x10\x48\x8d\x35\xc9\x21\x0c\x00\xe9\xdc\xd8\xff\xff\x66",
 		    293)) {
 		printf("free() mismatch -> not libc\n");
 		return;
 	}
-//	this->client_free = mkConst<ait>(it->start + 0x7a230);
+//	this->client_free = mkConst<unsigned long>(it->start + 0x7a230);
 }
 
-template <typename ait> void
-AddressSpace<ait>::findInterestingFunctions()
+void
+AddressSpace::findInterestingFunctions()
 {
 	for (VAMap::iterator it = vamap->begin();
 	     it != vamap->end();
@@ -661,14 +636,14 @@ AddressSpace<ait>::findInterestingFunctions()
 	fflush(NULL);
 }
 
-template <typename ait> void
-AddressSpace<ait>::client_freed(EventTimestamp when, ait ptr)
+void
+AddressSpace::client_freed(EventTimestamp when, unsigned long ptr)
 {
-	if (force(ptr == mkConst<ait>(0)))
+	if (force(ptr == mkConst<unsigned long>(0)))
 		return;
 
-	expression_result<ait> chk = load(when, ptr - mkConst<ait>(8), 8);
-	client_freed_entry<ait> cf;
+	expression_result<unsigned long> chk = load(when, ptr - mkConst<unsigned long>(8), 8);
+	client_freed_entry<unsigned long> cf;
 
 	cf.start = ptr;
 	cf.end = ptr + chk.lo;
@@ -689,8 +664,8 @@ rip_hash(unsigned long rip, unsigned nr_trans_hash_slots)
 }
 
 #if 0
-template <typename ait> void
-AddressSpace<ait>::sanityCheckDecodeCache() const
+void
+AddressSpace::sanityCheckDecodeCache() const
 {
 	trans_hash_entry *n;
 
@@ -711,8 +686,8 @@ AddressSpace<ait>::sanityCheckDecodeCache() const
 }
 #endif
 
-template <typename ait> void
-AddressSpace<ait>::relocate(AddressSpace<ait> *target, size_t)
+void
+AddressSpace::relocate(AddressSpace *target, size_t)
 {
 	for (unsigned x = 0; x < nr_trans_hash_slots; x++)
 		if (target->trans_hash[x])
@@ -720,8 +695,8 @@ AddressSpace<ait>::relocate(AddressSpace<ait> *target, size_t)
 	memset(trans_hash, 0x99, sizeof(trans_hash));
 }
 
-template <typename ait> WeakRef<IRSB> *
-AddressSpace<ait>::searchDecodeCache(unsigned long rip)
+WeakRef<IRSB> *
+AddressSpace::searchDecodeCache(unsigned long rip)
 {
 	unsigned long hash = rip_hash(rip, nr_trans_hash_slots);
 	trans_hash_entry **pprev, *n;

@@ -1370,7 +1370,7 @@ IRSB *instrument_func(void *closure,
 
 template <typename ait>
 class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
-	AddressSpace<ait> *aspace;
+	AddressSpace *aspace;
 	unsigned long offset;
 	VexGcVisitor<AddressSpaceGuestFetcher<ait> > visitor;
 	mutable UChar cache[16];
@@ -1390,7 +1390,7 @@ public:
 		have_cache = true;
 		return cache[0];
 	}
-	AddressSpaceGuestFetcher(AddressSpace<ait> *_aspace,
+	AddressSpaceGuestFetcher(AddressSpace *_aspace,
 				 unsigned long _offset) :
 		GuestMemoryFetcher(_offset),
 		aspace(_aspace),
@@ -1403,8 +1403,8 @@ public:
 	void visit(HeapVisitor &hv) { hv(aspace); }
 };
 
-template<typename ait> IRSB *
-AddressSpace<ait>::getIRSBForAddress(unsigned long rip)
+IRSB *
+AddressSpace::getIRSBForAddress(unsigned long rip)
 {
 	if (rip == ASSERT_FAILED_ADDRESS)
 		throw ForceFailureException(rip);
@@ -1423,7 +1423,7 @@ AddressSpace<ait>::getIRSBForAddress(unsigned long rip)
 		LibVEX_default_VexAbiInfo(&abiinfo_both);
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-		class AddressSpaceGuestFetcher<ait> fetcher(this, rip);
+		class AddressSpaceGuestFetcher<unsigned long> fetcher(this, rip);
 		irsb = bb_to_IR(&vge,
 				NULL, /* Context for chase_into_ok */
 				disInstr_AMD64,
@@ -1452,7 +1452,7 @@ AddressSpace<ait>::getIRSBForAddress(unsigned long rip)
 
 template<typename ait> void
 Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
-				VexPtr<AddressSpace<ait> > &addrSpace,
+				VexPtr<AddressSpace > &addrSpace,
 				VexPtr<MachineState > &ms,
 				const LogReaderPtr &ptr,
 				ait rip,
@@ -1549,7 +1549,7 @@ Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
 	while (1) {
 		if (!ths->currentIRSB) {
 			try {
-				VexPtr<AddressSpace<ait> > as(ms->addressSpace);
+				VexPtr<AddressSpace > as(ms->addressSpace);
 			        ths->translateNextBlock(ths, as, ms, ptr, ths->regs.rip(), t);
 			} catch (BadMemoryException<ait> excn) {
 				return SignalEvent<ait>::get(ths->bumpEvent(ms), 11, excn.ptr);
@@ -1943,7 +1943,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 	/* Memory records are special and should always be
 	   processed eagerly. */
 	{
-		VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
+		VexPtr<AddressSpace > as(currentState->addressSpace);
 		process_memory_records(as, lf, ptr, &ptr, lw, t);
 		if (eof)
 			*eof = ptr;
@@ -2014,7 +2014,7 @@ void Interpreter<ait>::replayLogfile(VexPtr<LogReader<ait> > &lf,
 		if (!lr) {
 			/* Memory records are special and should always be
 			   processed eagerly. */
-			VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
+			VexPtr<AddressSpace > as(currentState->addressSpace);
 	                process_memory_records(as, lf, ptr, &ptr, lw, t);
 			if (eof)
 				*eof = ptr;
@@ -2066,7 +2066,7 @@ void Interpreter<ait>::runToEvent(EventTimestamp end,
 
 		/* Memory records are special and should always be
 		   processed eagerly. */
-		VexPtr<AddressSpace<ait> > as(currentState->addressSpace);
+		VexPtr<AddressSpace > as(currentState->addressSpace);
 	        VexPtr<LogWriter<ait> > dummy(NULL);
 		process_memory_records(as, lf, ptr, &ptr, dummy, t);
 				if (eof)

@@ -17,7 +17,7 @@ isErrnoSysres(long x)
 }
 
 template<typename ait> void
-process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
+process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		       VexPtr<LogReader<ait> > &lf,
 		       LogReaderPtr startOffset,
 		       LogReaderPtr *endOffset,
@@ -50,7 +50,7 @@ process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
 }
 
 template<typename ait> static void
-handle_clone(AddressSpace<ait> *addrSpace,
+handle_clone(AddressSpace *addrSpace,
 	     Thread<ait> *thr,
 	     MachineState *&mach,
 	     ait flags,
@@ -106,7 +106,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
 	       MachineState *&mach,
 	       LogReaderPtr ptr)
 {
-	AddressSpace<ait> *addrSpace = mach->addressSpace;
+	AddressSpace *addrSpace = mach->addressSpace;
 	ait sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 	ait res = lrs->res;
 	ait args[6];
