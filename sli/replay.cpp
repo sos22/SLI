@@ -239,7 +239,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
 
 ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 					const LogReader *lf, LogReaderPtr ptr,
-					LogReaderPtr *outPtr, LogWriter<unsigned long> *lw)
+					LogReaderPtr *outPtr, LogWriter *lw)
 {
 	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 	if (!lrl)
@@ -400,7 +400,7 @@ SyscallEvent::fuzzyReplay(VexPtr<MachineState > &ms,
 			ThreadEvent *r = replay(lr, &ms.get(), ign, startPtr);
 			*endPtr = startPtr;
 			VexPtr<AddressSpace> as(ms->addressSpace);
-		        VexPtr<LogWriter<unsigned long> > dummy(NULL);
+		        VexPtr<LogWriter> dummy(NULL);
 			/* This might invalidate the this pointer... */
 			process_memory_records(as, lf, startPtr, endPtr, dummy, t);
 			return r;

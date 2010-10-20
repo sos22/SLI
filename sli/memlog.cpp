@@ -1,7 +1,6 @@
 #include "sli.h"
 
-template <typename ait>
-InterpretResult LogWriter<ait>::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt)
+InterpretResult LogWriter::recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt)
 {
 	CasEvent *ce = dynamic_cast<CasEvent *>(evt);
 	InterpretResult res;
@@ -22,14 +21,12 @@ InterpretResult LogWriter<ait>::recordEvent(Thread *thr, MachineState *ms, Threa
 	return res;
 }
 
-template <typename ait>
-void MemLog<ait>::append(LogRecord *lr, unsigned long ignore)
+void MemLog::append(LogRecord *lr, unsigned long ignore)
 {
 	content->push_back(lr);
 }
 
-template <typename ait>
-LogRecord *MemLog<ait>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
+LogRecord *MemLog::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
 {
 	unsigned o = unwrapPtr(startPtr);
 	if (o < offset) {
@@ -42,8 +39,7 @@ LogRecord *MemLog<ait>::read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const
 	return (*content)[o - offset];
 }
 
-template <typename ait>
-void MemLog<ait>::dump() const
+void MemLog::dump() const
 {
 	unsigned x;
 	if (parent)
@@ -53,21 +49,18 @@ void MemLog<ait>::dump() const
 	}
 }
 
-template <typename ait>
-void MemLog<ait>::destruct()
+void MemLog::destruct()
 {
 	delete content;
 }
 
-template <typename ait>
 void destroy_memlog(void *_ctxt)
 {
-	MemLog<ait> *ctxt = (MemLog<ait> *)_ctxt;
+	MemLog *ctxt = (MemLog *)_ctxt;
 	ctxt->destruct();
 }
 
-template <typename ait>
-void MemLog<ait>::visit(HeapVisitor &hv)
+void MemLog::visit(HeapVisitor &hv)
 {
 	hv(parent);
 	for (unsigned x = 0; x < content->size(); x++)
@@ -75,30 +68,20 @@ void MemLog<ait>::visit(HeapVisitor &hv)
 	hv(writer);
 }
 
-template <typename ait>
-static void visit_memlog(const void *_ctxt, HeapVisitor &hv)
+MemLog *MemLog::emptyMemlog()
 {
-	const MemLog<ait> *ctxt = (const MemLog<ait> *)_ctxt;
-	ctxt->visit(hv);
+	return new MemLog();
 }
 
-template <typename ait>
-MemLog<ait> *MemLog<ait>::emptyMemlog()
+MemLog *MemLog::dupeSelf() const
 {
-	return new MemLog<ait>();
-}
-
-template <typename ait>
-MemLog<ait> *MemLog<ait>::dupeSelf() const
-{
-	MemLog<ait> *w = emptyMemlog();
+	MemLog *w = emptyMemlog();
 	w->parent = this;
 	w->offset = offset + content->size();
 	return w;
 }
 
-template <typename ait>
-MemLog<ait>::MemLog()
+MemLog::MemLog()
 {
 	parent = NULL;
 	offset = 0;
@@ -106,8 +89,4 @@ MemLog<ait>::MemLog()
 	writer = new Writer(this);
 }
 
-#define MK_MEM_LOG(t)						       \
-	template MemLog<t> *MemLog<t>::dupeSelf() const;	       \
-	template MemLog<t>::MemLog();				       \
-	template MemLog<t> *MemLog<t>::emptyMemlog();		       \
-	template void MemLog<t>::append(LogRecord *lr, unsigned long)
+#define MK_MEM_LOG(t)

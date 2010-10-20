@@ -16,12 +16,12 @@ isErrnoSysres(long x)
 	return x >= -4096 && x < 0;
 }
 
-template<typename ait> void
+void
 process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		       VexPtr<LogReader > &lf,
 		       LogReaderPtr startOffset,
 		       LogReaderPtr *endOffset,
-		       VexPtr<LogWriter<ait> > &lw,
+		       VexPtr<LogWriter> &lw,
 		       GarbageCollectionToken tok)
 {
 	while (1) {
@@ -37,7 +37,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		try {
 			addrSpace->writeMemory(EventTimestamp::invalid, lrm->start, lrm->size, lrm->contents,
 					       true, NULL);
-		} catch (BadMemoryException<ait> bme) {
+		} catch (BadMemoryException<unsigned long> bme) {
 		}
 		startOffset = nextOffset;
 

@@ -428,13 +428,13 @@ void AddressSpace::sanityCheck() const
 	vamap->sanityCheck();
 }
 
-void AddressSpace::dumpBrkPtr(LogWriter<unsigned long> *lw) const
+void AddressSpace::dumpBrkPtr(LogWriter *lw) const
 {
 	lw->append(new LogRecordInitialBrk(ThreadId(0), mkConst<unsigned long>(brkptr)),
 		   0);
 }
 
-void AddressSpace::dumpSnapshot(LogWriter<unsigned long> *lw) const
+void AddressSpace::dumpSnapshot(LogWriter *lw) const
 {
 	unsigned long end_of_last_block = 0;
 

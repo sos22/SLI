@@ -280,12 +280,11 @@ class AddressSpace;
 class PMap;
 class SignalHandlers;
 class ThreadEvent;
+class LogWriter;
 
 class LogRecordFootstep;
 class LogRecordInitialRegisters;
 class LogRecordVexThreadState;
-
-template <typename ait> class LogWriter;
 
 class LogReaderPtr {
 public:
@@ -397,7 +396,7 @@ public:
 	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
 	Thread *fork(unsigned newPid);
 	Thread *dupeSelf() const;
-	void dumpSnapshot(LogWriter<unsigned long> *lw);
+	void dumpSnapshot(LogWriter *lw);
 
 	static void imposeState(VexPtr<Thread > &thr,
 				VexPtr<LogRecordVexThreadState> &rec,
@@ -660,7 +659,7 @@ public:
 		memcpy(handlers, init.handlers, sizeof(init.handlers));
 	}
 	SignalHandlers() { memset(handlers, 0, sizeof(handlers)); }
-	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
+	void dumpSnapshot(LogWriter *lw) const;
 };
 
 class LogReader : public GarbageCollected<LogReader> {
@@ -781,7 +780,7 @@ public:
 	}
 	MachineState *dupeSelf() const;
 
-	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
+	void dumpSnapshot(LogWriter *lw) const;
 
 	void visit(HeapVisitor &hv);
 	void sanityCheck() const;
@@ -830,7 +829,7 @@ public:
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken,
 			   LogReaderPtr *endingPoint,
-			   VexPtr<LogWriter<unsigned long> > &log,
+			   VexPtr<LogWriter > &log,
 			   VexPtr<EventRecorder> &er,
 			   EventTimestamp *lastEvent = NULL);
 	void replayLogfile(VexPtr<LogReader > &lf,
@@ -844,14 +843,14 @@ public:
 			   GarbageCollectionToken tok,
 			   LogReaderPtr *endingPoint)
 	{
-		VexPtr<LogWriter<unsigned long> > l(NULL);
+		VexPtr<LogWriter > l(NULL);
 		replayLogfile(lf, startingPoint, tok, endingPoint, l);
 	}
 	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok,
 			   LogReaderPtr *endingPoint,
-			   VexPtr<LogWriter<unsigned long> > &log)
+			   VexPtr<LogWriter > &log)
 	{
 		VexPtr<EventRecorder> er(NULL);
 		replayLogfile(lf, startingPoint, tok, endingPoint, log, er);
@@ -863,8 +862,8 @@ public:
 					     GarbageCollectionToken t);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      GarbageCollectionToken t,
-				      VexPtr<LogWriter<unsigned long> > &output);
-	void runToFailure(ThreadId tid, VexPtr<LogWriter<unsigned long> > &output,
+				      VexPtr<LogWriter > &output);
+	void runToFailure(ThreadId tid, VexPtr<LogWriter > &output,
 			  GarbageCollectionToken t,
 			  unsigned max_events = 0);
 	void runToEvent(EventTimestamp evt,
@@ -874,8 +873,7 @@ public:
 			LogReaderPtr *endPoint = NULL);
 };
 
-template <typename ait>
-class LogWriter : public GarbageCollected<LogWriter<ait> > {
+class LogWriter : public GarbageCollected<LogWriter> {
 public:
 	virtual void append(LogRecord *lr, unsigned long idx) = 0;
 	virtual ~LogWriter() {}
@@ -884,7 +882,7 @@ public:
 	NAMED_CLASS
 };
 
-class LogFileWriter : public LogWriter<unsigned long> {
+class LogFileWriter : public LogWriter {
 	int fd;
 public:
 	void append(LogRecord *lr, unsigned long idx);
@@ -896,11 +894,10 @@ public:
 
 template <typename ait> void destroy_memlog(void *_ctxt);
 
-template <typename ait>
 class MemLog : public LogReader {
 	std::vector<LogRecord *> *content;
 	unsigned offset;
-	const MemLog<ait> *parent;
+	const MemLog *parent;
 
 	static unsigned unwrapPtr(LogReaderPtr p) {
 		return *(unsigned *)p.cls_data;
@@ -919,10 +916,10 @@ protected:
 public:
 	/* Can't multiply inherit GarbageCollected, so use a proxy
 	 * object. */
-	class Writer : public LogWriter<ait> {
-		MemLog<ait> *underlying;
+	class Writer : public LogWriter {
+		MemLog *underlying;
 	public:
-		Writer(MemLog<ait> *_underlying) : underlying(_underlying) {}
+		Writer(MemLog *_underlying) : underlying(_underlying) {}
 		void append(LogRecord *lr, unsigned long idx) {
 			underlying->append(lr, idx);
 		}
@@ -934,7 +931,7 @@ public:
 
 	static MemLog *emptyMemlog();
 	static LogReaderPtr startPtr() { return mkPtr(0); }
-	MemLog<ait> *dupeSelf() const;
+	MemLog *dupeSelf() const;
 	LogRecord *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
 	void dump() const;
 
@@ -1173,7 +1170,7 @@ public:
 				     LogRecord **lr2 = NULL);
 	ThreadEvent *replay(LogRecord *lr, MachineState *ms,
 				 const LogReader *lf, LogReaderPtr ptr,
-				 LogReaderPtr *outPtr, LogWriter<unsigned long> *lw);
+				 LogReaderPtr *outPtr, LogWriter *lw);
 	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
 				      VexPtr<LogReader > &lf,
 				      LogReaderPtr startPtr,
@@ -1763,8 +1760,8 @@ public:
 
 	void addVsyscalls();
 
-	void dumpBrkPtr(LogWriter<unsigned long> *lw) const;
-	void dumpSnapshot(LogWriter<unsigned long> *lw) const;
+	void dumpBrkPtr(LogWriter *lw) const;
+	void dumpSnapshot(LogWriter *lw) const;
 
 	char *readString(unsigned long start, Thread *thr);
 
@@ -1825,12 +1822,12 @@ ThreadEvent * replay_syscall(const LogRecordSyscall *lrs,
 			     MachineState *&mach,
 			     LogReaderPtr ptr);
 
-template<typename ait> void process_memory_records(VexPtr<AddressSpace > &addrSpace,
-						   VexPtr<LogReader > &lf,
-						   LogReaderPtr startOffset,
-						   LogReaderPtr *endOffset,
-						   VexPtr<LogWriter<ait> > &lw,
-						   GarbageCollectionToken tok);
+void process_memory_records(VexPtr<AddressSpace > &addrSpace,
+			    VexPtr<LogReader > &lf,
+			    LogReaderPtr startOffset,
+			    LogReaderPtr *endOffset,
+			    VexPtr<LogWriter> &lw,
+			    GarbageCollectionToken tok);
 
 void debugger_attach(void);
 

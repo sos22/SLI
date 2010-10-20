@@ -97,7 +97,7 @@ MachineState::initialMachineState(VexPtr<LogReader > &lf,
 	return work->dupeSelf();;
 }
 
-void MachineState::dumpSnapshot(LogWriter<unsigned long> *lw) const
+void MachineState::dumpSnapshot(LogWriter *lw) const
 {
 	addressSpace->dumpBrkPtr(lw);
 	signalHandlers.dumpSnapshot(lw);

@@ -316,7 +316,7 @@ LogRecordVexThreadState::LogRecordVexThreadState(ThreadId tid, unsigned long _cu
 {
 }
 
-void SignalHandlers::dumpSnapshot(LogWriter<unsigned long> *lw) const
+void SignalHandlers::dumpSnapshot(LogWriter *lw) const
 {
 	lw->append(new LogRecordInitialSighandlers(ThreadId(0), handlers), 0);
 }

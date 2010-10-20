@@ -2108,7 +2108,7 @@ CrashMachine::foldRegisters(VexPtr<MachineState > &ms,
 	VexPtr<FREventRecorder> frer(new FREventRecorder(this));
 	VexPtr<EventRecorder> er(frer);
 	Interpreter i(ms->dupeSelf());
-	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	VexPtr<LogWriter> dummy(NULL);
 	start_replay();
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, er);
 	stop_replay();
@@ -2407,7 +2407,7 @@ CrashMachine::calculate_relevant_addresses(VexPtr<MachineState > &ms,
 {
 	VexPtr<EventRecorder> craer(new CRAEventRecorder(this));
 	Interpreter i(ms->dupeSelf());
-	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	VexPtr<LogWriter> dummy(NULL);
 	start_replay();
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, craer);
 	stop_replay();
@@ -2967,7 +2967,7 @@ Oracle::collect_interesting_access_log(
 
 	VexPtr<EventRecorder> er(new CIALEventRecorder(this));
 	Interpreter i(ms);
-	VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	VexPtr<LogWriter> dummy(NULL);
 	start_replay();
 	i.replayLogfile(lf, ptr, tok, NULL, dummy, er);
 	stop_replay();
@@ -4590,7 +4590,7 @@ main(int argc, char *argv[])
 	{
 		VexPtr<EventRecorder> mte(new MemTraceExtractor(&oracle));
 		Interpreter i2(ms->dupeSelf());
-		VexPtr<LogWriter<unsigned long> > dummy_lw(NULL);
+		VexPtr<LogWriter> dummy_lw(NULL);
 		start_replay();
 		i2.replayLogfile(lf, ptr,
 				 ALLOW_GC, NULL, dummy_lw, mte);

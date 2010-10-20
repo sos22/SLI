@@ -3,7 +3,7 @@
 
 #include "sli.h"
 
-class LogChunker : public LogWriter<unsigned long> {
+class LogChunker : public LogWriter {
 	unsigned long next_input_offset;
 	unsigned long chunk_size;
 	unsigned long chunk_period;
@@ -94,7 +94,7 @@ main(int argc, char *argv[])
 	printf("Slurped initial state\n");
 
 	Interpreter i(ms);
-	VexPtr<LogWriter<unsigned long> > chunker(new LogChunker(size, period, prefix, ms));
+	VexPtr<LogWriter> chunker(new LogChunker(size, period, prefix, ms));
 
 	i.replayLogfile(lf, ptr, ALLOW_GC, NULL, chunker);
 

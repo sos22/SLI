@@ -1860,7 +1860,7 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace<unsi
 void Interpreter::runToAccessLoggingEvents(ThreadId tid,
 					   unsigned nr_accesses,
 					   GarbageCollectionToken t,
-					   VexPtr<LogWriter<unsigned long> > &output)
+					   VexPtr<LogWriter> &output)
 {
         VexPtr<Thread > thr(currentState->findThread(tid));
         while (1) {
@@ -1881,9 +1881,9 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid,
 }
 
 void Interpreter::runToFailure(ThreadId tid,
-				    VexPtr<LogWriter<unsigned long> > &output,
-				    GarbageCollectionToken t,
-				    unsigned max_events)
+			       VexPtr<LogWriter> &output,
+			       GarbageCollectionToken t,
+			       unsigned max_events)
 {
 	bool have_event_limit = max_events != 0;
 	VexPtr<Thread > thr(currentState->findThread(tid));
@@ -1909,7 +1909,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				LogReaderPtr ptr,
 				GarbageCollectionToken t,
 				LogReaderPtr *eof,
-				VexPtr<LogWriter<unsigned long> > &lw,
+				VexPtr<LogWriter> &lw,
 				VexPtr<EventRecorder> &er,
 				EventTimestamp *lastEvent)
 {
@@ -2045,7 +2045,7 @@ void Interpreter::runToEvent(EventTimestamp end,
 		/* Memory records are special and should always be
 		   processed eagerly. */
 		VexPtr<AddressSpace > as(currentState->addressSpace);
-	        VexPtr<LogWriter<unsigned long> > dummy(NULL);
+	        VexPtr<LogWriter> dummy(NULL);
 		process_memory_records(as, lf, ptr, &ptr, dummy, t);
 				if (eof)
 					*eof = ptr;

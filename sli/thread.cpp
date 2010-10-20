@@ -47,7 +47,7 @@ Thread *Thread::dupeSelf() const
 	return work;
 }
 
-void Thread::dumpSnapshot(LogWriter<unsigned long> *lw)
+void Thread::dumpSnapshot(LogWriter *lw)
 {
 	VexGuestAMD64State r;
 

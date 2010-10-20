@@ -35,7 +35,7 @@ main(int argc, char *argv[])
 	i.replayLogfile(reduced_lf, ptr, ALLOW_GC, &ptr);
 	ms = i.currentState;
 
-	VexPtr<LogWriter<unsigned long> > lw(LogFileWriter::open(outp));
+	VexPtr<LogWriter> lw(LogFileWriter::open(outp));
 	if (!lw)
 		err(1, "opening %s", outp);
 
