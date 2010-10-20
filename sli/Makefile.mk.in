@@ -1,4 +1,4 @@
-targets="slir crop symexec crashreason cftrace binpatch fuzzsched tweaksched dbg chunk races direct"
+targets="crop binpatch dbg chunk direct"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,abstractlog,expression,events}.cpp
@@ -23,8 +23,6 @@ rules() {
 $targets: slir.a libVEX.a
 ${input_base}/instantiation.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/instantiation.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
-${input_base}/races.o: CPPFLAGS+=-I\$(libvex)/priv
-${input_base}/races.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/direct.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/direct.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/dbgbreak.o: OPTIMIZE_FLAGS=-O0
