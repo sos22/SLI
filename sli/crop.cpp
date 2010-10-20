@@ -31,7 +31,7 @@ main(int argc, char *argv[])
 
 	//ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
 
-	Interpreter<unsigned long> i(ms);
+	Interpreter i(ms);
 	i.replayLogfile(reduced_lf, ptr, ALLOW_GC, &ptr);
 	ms = i.currentState;
 
@@ -41,7 +41,7 @@ main(int argc, char *argv[])
 
 	ms->dumpSnapshot(lw);
 	
-	Interpreter<unsigned long> i2(ms);
+	Interpreter i2(ms);
 	VexPtr<LogReader<unsigned long> > lf_downcast(lf);
 	i2.replayLogfile(lf_downcast, ptr, ALLOW_GC, NULL, lw);
 

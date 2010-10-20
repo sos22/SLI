@@ -38,7 +38,7 @@ MemoryTrace<ait>::get(VexPtr<MachineState> &ms,
 {
 	VexPtr<MemoryTrace<ait> > work(new MemoryTrace<ait>);
 	VexPtr<MemTraceMaker<ait> > mtm(new MemTraceMaker<ait>(work));
-	Interpreter<ait> i(ms->dupeSelf());
+	Interpreter i(ms->dupeSelf());
 	VexPtr<LogWriter<ait> > dummy(NULL);
 	VexPtr<EventRecorder<ait> > mtm2(mtm);
 	i.replayLogfile(lf, ptr, t, NULL, dummy, mtm2);

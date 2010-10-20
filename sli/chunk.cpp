@@ -93,7 +93,7 @@ main(int argc, char *argv[])
 	
 	printf("Slurped initial state\n");
 
-	Interpreter<unsigned long> i(ms);
+	Interpreter i(ms);
 	VexPtr<LogWriter<unsigned long> > chunker(new LogChunker(size, period, prefix, ms));
 
 	i.replayLogfile(lf, ptr, ALLOW_GC, NULL, chunker);

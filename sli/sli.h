@@ -818,10 +818,9 @@ public:
 	NAMED_CLASS
 };
 
-template<typename abst_int_type>
 class Interpreter {
 	void replayFootstep(const LogRecordFootstep &lrf,
-			    const LogReader<abst_int_type> *lr,
+			    const LogReader<unsigned long> *lr,
 			    LogReaderPtr startOffset,
 			    LogReaderPtr *endOffset);
 
@@ -830,49 +829,49 @@ public:
 	Interpreter(MachineState *rootMachine) : currentState(rootMachine)
 	{
 	}
-	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken,
 			   LogReaderPtr *endingPoint,
-			   VexPtr<LogWriter<abst_int_type> > &log,
-			   VexPtr<EventRecorder<abst_int_type> > &er,
+			   VexPtr<LogWriter<unsigned long> > &log,
+			   VexPtr<EventRecorder<unsigned long> > &er,
 			   EventTimestamp *lastEvent = NULL);
-	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok)
 	{
 		replayLogfile(lf, startingPoint, tok, NULL);
 	}
-	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok,
 			   LogReaderPtr *endingPoint)
 	{
-		VexPtr<LogWriter<abst_int_type> > l(NULL);
+		VexPtr<LogWriter<unsigned long> > l(NULL);
 		replayLogfile(lf, startingPoint, tok, endingPoint, l);
 	}
-	void replayLogfile(VexPtr<LogReader<abst_int_type> > &lf,
+	void replayLogfile(VexPtr<LogReader<unsigned long> > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok,
 			   LogReaderPtr *endingPoint,
-			   VexPtr<LogWriter<abst_int_type> > &log)
+			   VexPtr<LogWriter<unsigned long> > &log)
 	{
-		VexPtr<EventRecorder<abst_int_type> > er(NULL);
+		VexPtr<EventRecorder<unsigned long> > er(NULL);
 		replayLogfile(lf, startingPoint, tok, endingPoint, log, er);
 	}
 
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
-					     MemoryTrace<abst_int_type> **output,
+					     MemoryTrace<unsigned long> **output,
 					     unsigned max_events,
 					     GarbageCollectionToken t);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      GarbageCollectionToken t,
-				      VexPtr<LogWriter<abst_int_type> > &output);
-	void runToFailure(ThreadId tid, VexPtr<LogWriter<abst_int_type> > &output,
+				      VexPtr<LogWriter<unsigned long> > &output);
+	void runToFailure(ThreadId tid, VexPtr<LogWriter<unsigned long> > &output,
 			  GarbageCollectionToken t,
 			  unsigned max_events = 0);
 	void runToEvent(EventTimestamp evt,
-			VexPtr<LogReader<abst_int_type> > &lf,
+			VexPtr<LogReader<unsigned long> > &lf,
 			LogReaderPtr startingPoint,
 			GarbageCollectionToken t,
 			LogReaderPtr *endPoint = NULL);

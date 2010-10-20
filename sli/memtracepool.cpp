@@ -13,7 +13,7 @@ MemTracePool<ait>::get(VexPtr<MachineState> &base_state,
 		if (tid == ignoredThread)
 			continue;
 		MachineState *ms = base_state->dupeSelf();
-		Interpreter<ait> i(ms);
+		Interpreter i(ms);
 		MemoryTrace<ait> *v;
 		try {
 			i.getThreadMemoryTrace(tid, &v, 100000, token);
