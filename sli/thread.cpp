@@ -5,8 +5,7 @@ template class LibvexVector<Thread>;
 const ThreadId ThreadId::invalidTid;
 const EventTimestamp EventTimestamp::invalid;
 
-template<>
-RegisterSet<unsigned long>::RegisterSet(VexGuestAMD64State const&r)
+RegisterSet::RegisterSet(VexGuestAMD64State const&r)
 {
 	for (unsigned x = 0; x < NR_REGS; x++)
 		registers[x] = ((unsigned long *)&r)[x];
@@ -52,7 +51,7 @@ void Thread::dumpSnapshot(LogWriter<unsigned long> *lw)
 {
 	VexGuestAMD64State r;
 
-	for (unsigned x = 0; x < RegisterSet<unsigned long>::NR_REGS; x++)
+	for (unsigned x = 0; x < RegisterSet::NR_REGS; x++)
 		((unsigned long *)&r)[x] = force(regs.get_reg(x));
 	lw->append(new LogRecordInitialRegisters<unsigned long>(tid, r), 0);
 	if (currentIRSB && currentIRSBOffset != 0) {
@@ -116,14 +115,6 @@ EventTimestamp Thread::bumpEvent(MachineState *ms)
 		printf("Producing the magic event %d:%lx\n",
 		       lastEvent.tid._tid(), lastEvent.idx);
 	return lastEvent;
-}
-
-template <typename ait> template <typename new_type>
-void RegisterSet<ait>::abstract(RegisterSet<new_type> *out) const
-{
-	memset(out, 0, sizeof(*out));
-	for (unsigned x = 0; x < NR_REGS; x++)
-		out->registers[x] = mkConst<new_type>(registers[x]);
 }
 
 template <typename ait> template <typename new_type>

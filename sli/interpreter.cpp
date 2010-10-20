@@ -40,19 +40,18 @@ read_reg(Thread *state, unsigned offset)
 	return state->regs.get_reg(offset / 8);
 }
 
-template<typename ait>
 static void
-amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
+amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet *regs)
 {
 #define SET_ABCD(_a,_b,_c,_d)						\
 	do {								\
-		regs->set_reg(REGISTER_IDX(RAX), mkConst<ait>(_a));	\
-		regs->set_reg(REGISTER_IDX(RBX), mkConst<ait>(_b));	\
-		regs->set_reg(REGISTER_IDX(RCX), mkConst<ait>(_c));	\
-		regs->set_reg(REGISTER_IDX(RDX), mkConst<ait>(_d));	\
+		regs->set_reg(REGISTER_IDX(RAX), mkConst<unsigned long>(_a));	\
+		regs->set_reg(REGISTER_IDX(RBX), mkConst<unsigned long>(_b));	\
+		regs->set_reg(REGISTER_IDX(RCX), mkConst<unsigned long>(_c));	\
+		regs->set_reg(REGISTER_IDX(RDX), mkConst<unsigned long>(_d));	\
 	} while (0)
 
-	switch (force(mkConst<ait>(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RAX)))) {
+	switch (force(mkConst<unsigned long>(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RAX)))) {
 	case 0x00000000:
 		SET_ABCD(0x0000000a, 0x756e6547, 0x6c65746e, 0x49656e69);
 		break;
@@ -66,7 +65,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
 		break;
 	case 0x00000004: {
-		switch (force(mkConst<ait>(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RCX)))) {
+		switch (force(mkConst<unsigned long>(0xFFFFFFFF) & regs->get_reg(REGISTER_IDX(RCX)))) {
 		case 0x00000000: SET_ABCD(0x04000121, 0x01c0003f,
 					  0x0000003f, 0x00000001); break;
 		case 0x00000001: SET_ABCD(0x04000122, 0x01c0003f,

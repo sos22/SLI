@@ -219,27 +219,21 @@ public:
 	}
 };
 
-template <typename underlying>
 class RegisterSet {
 public:
 	static const unsigned NR_REGS = sizeof(VexGuestAMD64State) / 8;
 #define REGISTER_IDX(x) (offsetof(VexGuestAMD64State, guest_ ## x) / 8)
-	underlying registers[NR_REGS];
+	unsigned long registers[NR_REGS];
 	RegisterSet(const VexGuestAMD64State &r);
 	RegisterSet() {};
-	underlying &get_reg(unsigned idx) { assert(idx < NR_REGS); return registers[idx]; }
-	void set_reg(unsigned idx, underlying val)
+	unsigned long &get_reg(unsigned idx) { assert(idx < NR_REGS); return registers[idx]; }
+	void set_reg(unsigned idx, unsigned long val)
 	{
-		sanity_check_ait(val);
 		assert(idx < NR_REGS);
 		registers[idx] = val;
-		if (idx == REGISTER_IDX(RSP))
-			mark_as_stack(registers[idx]);
 	}
-	underlying &rip() { return get_reg(REGISTER_IDX(RIP)); }
-	underlying &rsp() { return get_reg(REGISTER_IDX(RSP)); }
-
-	template <typename new_type> void abstract(RegisterSet<new_type> *out) const;
+	unsigned long &rip() { return get_reg(REGISTER_IDX(RIP)); }
+	unsigned long &rsp() { return get_reg(REGISTER_IDX(RSP)); }
 
 	void visit(HeapVisitor &hv) {
 		for (unsigned x = 0; x < NR_REGS; x++)
@@ -328,7 +322,7 @@ public:
 	EventTimestamp bumpEvent(MachineState *ms);
 	ThreadId tid;
 	unsigned pid;
-	RegisterSet<unsigned long> regs;
+	RegisterSet regs;
 	unsigned long clear_child_tid;
 	unsigned long robust_list;
 	unsigned long set_child_tid;
