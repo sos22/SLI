@@ -149,49 +149,6 @@ public:
 	unsigned hash() const { return total_timestamp; }
 };
 
-/* This is intended to be a measure of how ``relevant'' a given event
-   is to some other event, and is used when deciding which branch of
-   an expression to perform refinement on. */
-class Relevance {
-	/* Careful: This is a measure of the irrelevance of the
-	   target, so has a backwards sense to the enclosing
-	   structure.  0 is perfectly relevant, +ve numbers are
-	   increasingly irrelevance, and -ve numbers aren't used. */
-	long irrelevance;
-	Relevance(long _irr) : irrelevance(_irr) {}
-public:
-	Relevance(Relevance a, Relevance b) {
-		irrelevance = std::min<long>(a.irrelevance, b.irrelevance) + 1;
-	}
-	/* How relevant is @ev likely to be to an event at time
-	 * @to? */
-	Relevance(EventTimestamp ev, EventTimestamp to) {
-		long delta = ev.total_timestamp - to.total_timestamp;
-		if (delta > 0) {
-			irrelevance = (delta * delta) / 10 + delta;
-			if (irrelevance < 0)
-				irrelevance = 0;
-		} else {
-			irrelevance = -delta;
-		}
-		if (ev.tid != to.tid)
-			irrelevance += 100000;
-	}
-
-	/* These look backwards, because irrelevance is the opposite
-	   of relevance. */
-	bool operator>(const Relevance &r) const { return irrelevance < r.irrelevance; }
-	bool operator>=(const Relevance &r) const { return irrelevance <= r.irrelevance; }
-	bool operator<(const Relevance &r) const { return irrelevance > r.irrelevance; }
-	bool operator<=(const Relevance &r) const { return irrelevance >= r.irrelevance; }
-
-	Relevance operator-(long d) const { return Relevance(irrelevance + d); }
-	Relevance operator+(long d) const { return Relevance(irrelevance - d); }
-
-	static const Relevance irrelevant;
-	static const Relevance perfect;
-};
-
 template <typename t> t min(const t &a, const t &b)
 {
 	if (a < b)
