@@ -21,7 +21,7 @@ protected:
 	void sendResponse(const char *fmt, ...);
 public:
 	static GdbCommand *read(int fd);
-	virtual void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken) = 0;
+	virtual void doIt(VexPtr<MachineState > &, GarbageCollectionToken) = 0;
 	GdbCommand<ait>(GdbChannel<ait> *_chan)
 		: chan(_chan)
 	{
@@ -64,14 +64,14 @@ public:
 template <typename ait>
 class UnknownCommand : public GdbCommand<ait> {
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken) { this->sendResponse(""); }
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken) { this->sendResponse(""); }
 	UnknownCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
 template <typename ait>
 class GetSigCommand : public GdbCommand<ait> {
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken) { this->sendResponse("S00"); }
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken) { this->sendResponse("S00"); }
 	GetSigCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
@@ -79,7 +79,7 @@ template <typename ait>
 class QueryCommand : public GdbCommand<ait> {
 	char *q;
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken);
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken);
 	QueryCommand(GdbChannel<ait> *c, const char *n)
 		: GdbCommand<ait>(c),
 		  q(strdup(n))
@@ -91,7 +91,7 @@ public:
 template <typename ait>
 class GetRegistersCommand : public GdbCommand<ait> {
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken);
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken);
 	GetRegistersCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
@@ -99,7 +99,7 @@ template <typename ait>
 class GetRegisterCommand : public GdbCommand<ait> {
 	unsigned regNr;
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken);
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken);
 	GetRegisterCommand(GdbChannel<ait> *c, const char *b) : GdbCommand<ait>(c) { regNr = strtol(b, NULL, 16); }
 };
 
@@ -108,7 +108,7 @@ class GetMemoryCommand : public GdbCommand<ait> {
 	unsigned long addr;
 	unsigned size;
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken);
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken);
 	GetMemoryCommand(GdbChannel<ait> *c, const char *b) : GdbCommand<ait>(c) { sscanf(b, "%lx,%x", &addr, &size); }
 };
 
@@ -117,7 +117,7 @@ class SetThreadCommand : public GdbCommand<ait> {
 	ThreadId tid;
 	bool query;
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken)
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken)
 	{
 		if (query)
 			this->chan->currentTidQuery = tid;
@@ -137,7 +137,7 @@ template <typename ait>
 class ThreadAliveCommand : public GdbCommand<ait> {
 	ThreadId tid;
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken);
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken);
 	ThreadAliveCommand(GdbChannel<ait> *c, const char *b)
 		: GdbCommand<ait>(c),
 		  tid(ThreadId(strtol(b, NULL, 16)))
@@ -148,7 +148,7 @@ public:
 template <typename ait>
 class DetachCommand : public GdbCommand<ait> {
 public:
-	void doIt(VexPtr<MachineState<ait> > &, GarbageCollectionToken) {abort(); }
+	void doIt(VexPtr<MachineState > &, GarbageCollectionToken) {abort(); }
 	DetachCommand(GdbChannel<ait> *c) : GdbCommand<ait>(c) {}
 };
 
@@ -157,7 +157,7 @@ class ContinueCommand : public GdbCommand<ait> {
 	ait newRip;
 	bool haveNewRip;
 public:
-	void doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken);
+	void doIt(VexPtr<MachineState > &ms, GarbageCollectionToken);
 	ContinueCommand(GdbChannel<ait> *c, const char *buf)
 		: GdbCommand<ait>(c)
 	{
@@ -177,7 +177,7 @@ htonlong(unsigned long x)
 }
 
 template <typename ait> void
-GetMemoryCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken)
+GetMemoryCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
 	ait *membuf = (ait *)malloc(size * sizeof(ait));
 	try {
@@ -199,7 +199,7 @@ GetMemoryCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionTok
 }
 
 template <typename ait> void
-GetRegistersCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken)
+GetRegistersCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
 	Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
 
@@ -221,7 +221,7 @@ GetRegistersCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollection
 }
 
 template <typename ait> void
-GetRegisterCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken)
+GetRegisterCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
 	Thread<ait> *thr = ms->findThread(this->chan->currentTidQuery, true);
 	ait r;
@@ -268,7 +268,7 @@ GetRegisterCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionT
 }
 
 template <typename ait> void
-QueryCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken)
+QueryCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
 	if (!strcmp(q, "C")) {
 		this->sendResponse("QC%x", this->chan->currentTidQuery._tid());
@@ -296,7 +296,7 @@ QueryCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken)
 }
 
 template <typename ait> void
-ThreadAliveCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken)
+ThreadAliveCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
 	const Thread<ait> *thr = ms->findThread(tid, true);
 	if (!thr || thr->exitted || thr->crashed)
@@ -306,7 +306,7 @@ ThreadAliveCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionT
 }
 
 template <typename ait> void
-ContinueCommand<ait>::doIt(VexPtr<MachineState<ait> > &ms, GarbageCollectionToken t)
+ContinueCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken t)
 {
 	VexPtr<Thread<ait> > thr(ms->findThread(this->chan->currentTidRun, true));
 	if (!thr) {
@@ -523,27 +523,27 @@ GdbChannel<ait>::accept()
 	return new GdbChannel<ait>(fd);
 }
 
-template <typename ait> static void
-gdb_machine_state(const MachineState<ait> *_ms)
+static void
+gdb_machine_state(const MachineState *_ms)
 {
 	if (fork())
 		return;
 
 	/* Allowed because of the fork() */
-	VexPtr<MachineState<ait> > ms(const_cast<MachineState<ait> *>(_ms));
+	VexPtr<MachineState > ms(const_cast<MachineState *>(_ms));
 
 	/* Force a GC, so as to clear up any mess we had left over
 	 * from the parent. */
 	LibVEX_gc(ALLOW_GC);
 
-	GdbChannel<ait> *chan = GdbChannel<ait>::accept();
+	GdbChannel<unsigned long> *chan = GdbChannel<unsigned long>::accept();
 
 	while (1) {
-		GdbCommand<ait> *cmd = chan->getCommand();
+		GdbCommand<unsigned long> *cmd = chan->getCommand();
 		if (!cmd)
 			break;
 		/* Bit of a hack.  Oh well. */
-		if (dynamic_cast<DetachCommand<ait> *>(cmd)) {
+		if (dynamic_cast<DetachCommand<unsigned long> *>(cmd)) {
 			delete cmd;
 			break;
 		}
@@ -557,7 +557,7 @@ gdb_machine_state(const MachineState<ait> *_ms)
 }
 
 void
-gdb_concrete(const MachineState<unsigned long> *ms)
+gdb_concrete(const MachineState *ms)
 {
 	gdb_machine_state(ms);
 }

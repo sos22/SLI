@@ -25,7 +25,7 @@ main(int argc, char *argv[])
 	check_fpu_control();
 	VexPtr<LogReader<unsigned long> > reduced_lf(lf->truncate(lf->mkPtr(size, 0)));
 	check_fpu_control();
-	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
+	MachineState *ms = MachineState::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
 	check_fpu_control();
 	VexGcRoot ms_root((void **)&ms, "ms_root");
 

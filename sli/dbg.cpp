@@ -12,7 +12,7 @@ main(int argc, char *argv[])
 		err(1, "opening %s", argv[1]);
 	VexGcRoot((void **)&lf, "lf");
 
-	VexPtr<MachineState<unsigned long> > ms_base(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
+	VexPtr<MachineState> ms_base(MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
 	gdb_concrete(ms_base);
 

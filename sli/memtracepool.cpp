@@ -1,7 +1,7 @@
 #include "sli.h"
 
 template <typename ait> MemTracePool<ait> *
-MemTracePool<ait>::get(VexPtr<MachineState<ait> > &base_state,
+MemTracePool<ait>::get(VexPtr<MachineState> &base_state,
 		       ThreadId ignoredThread,
 		       GarbageCollectionToken token)
 {
@@ -12,7 +12,7 @@ MemTracePool<ait>::get(VexPtr<MachineState<ait> > &base_state,
 		ThreadId tid = base_state->threads->index(x)->tid;
 		if (tid == ignoredThread)
 			continue;
-		MachineState<ait> *ms = base_state->dupeSelf();
+		MachineState *ms = base_state->dupeSelf();
 		Interpreter<ait> i(ms);
 		MemoryTrace<ait> *v;
 		try {
@@ -82,7 +82,7 @@ void MemTracePool<t>::visit(HeapVisitor &hv)
 }
 
 #define MK_MEMTRACE_POOL(t)						\
-	template MemTracePool<t> *MemTracePool<t>::get(VexPtr<MachineState<t> > &, \
+	template MemTracePool<t> *MemTracePool<t>::get(VexPtr<MachineState> &, \
 						       ThreadId,	\
 						       GarbageCollectionToken); \
 	template gc_map<ThreadId, Maybe<unsigned> > *MemTracePool<t>::firstRacingAccessMap(); \

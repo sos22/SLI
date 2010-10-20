@@ -133,7 +133,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet<ait> *regs)
 }
 
 template<typename ait> void
-Thread<ait>::amd64g_dirtyhelper_loadF80le(MachineState<ait> *ms, IRTemp tmp, ait addr)
+Thread<ait>::amd64g_dirtyhelper_loadF80le(MachineState *ms, IRTemp tmp, ait addr)
 {
 	ait buf[10];
 	ms->addressSpace->readMemory(addr, 10, buf, false, this, NULL);
@@ -147,7 +147,7 @@ Thread<ait>::amd64g_dirtyhelper_loadF80le(MachineState<ait> *ms, IRTemp tmp, ait
 }
 
 template <typename ait> void
-Thread<ait>::amd64g_dirtyhelper_storeF80le(MachineState<ait> *ms, ait addr, ait _f64)
+Thread<ait>::amd64g_dirtyhelper_storeF80le(MachineState *ms, ait addr, ait _f64)
 {
 	unsigned long f64 = force(_f64);
 	unsigned char buf[10];
@@ -169,7 +169,7 @@ Thread<ait>::amd64g_dirtyhelper_storeF80le(MachineState<ait> *ms, ait addr, ait 
 
 template <typename ait> ThreadEvent<ait> *
 Thread<ait>::do_load(EventTimestamp when, IRTemp tmp, ait addr, unsigned size,
-		     MachineState<ait> *ms)
+		     MachineState *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, this))
 		return LoadEvent<ait>::get(when, tmp, addr, size);
@@ -179,7 +179,7 @@ Thread<ait>::do_load(EventTimestamp when, IRTemp tmp, ait addr, unsigned size,
 
 template<typename ait>
 ThreadEvent<ait> *
-Thread<ait>::do_dirty_call(IRDirty *details, MachineState<ait> *ms)
+Thread<ait>::do_dirty_call(IRDirty *details, MachineState *ms)
 {
 	struct expression_result<ait> args[6];
 	unsigned x;
@@ -1453,7 +1453,7 @@ AddressSpace<ait>::getIRSBForAddress(unsigned long rip)
 template<typename ait> void
 Thread<ait>::translateNextBlock(VexPtr<Thread<ait> > &ths,
 				VexPtr<AddressSpace<ait> > &addrSpace,
-				VexPtr<MachineState<ait> > &ms,
+				VexPtr<MachineState > &ms,
 				const LogReaderPtr &ptr,
 				ait rip,
 				GarbageCollectionToken t)
@@ -1536,7 +1536,7 @@ extract_call_follower(IRSB *irsb)
 template<typename ait>
 ThreadEvent<ait> *
 Thread<ait>::runToEvent(VexPtr<Thread<ait> > &ths,
-			VexPtr<MachineState<ait> > &ms,
+			VexPtr<MachineState > &ms,
 			const LogReaderPtr &ptr,
 			GarbageCollectionToken t)
 {
@@ -1908,7 +1908,7 @@ void Interpreter<ait>::runToFailure(ThreadId tid,
 	bool have_event_limit = max_events != 0;
 	VexPtr<Thread<ait> > thr(currentState->findThread(tid));
 	while ((!have_event_limit || max_events) && thr->runnable()) {
-		VexPtr<MachineState<ait> > cs(currentState);
+		VexPtr<MachineState > cs(currentState);
 		ThreadEvent<ait> *evt = thr->runToEvent(thr, cs, LogReaderPtr(), t);
 		InterpretResult res = output->recordEvent(thr, currentState, evt);
 		if (res != InterpretResultContinue) {

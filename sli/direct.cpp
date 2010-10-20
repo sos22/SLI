@@ -266,11 +266,11 @@ public:
 	virtual unsigned complexity() const = 0;
 
 	virtual void build_relevant_address_list(Thread<unsigned long> *thr,
-						 MachineState<unsigned long> *ms,
+						 MachineState *ms,
 						 gc_map<unsigned long, bool> *addresses,
 						 const concreteStoresT &stores) = 0;
 	virtual unsigned long eval(Thread<unsigned long> *thr,
-				   MachineState<unsigned long> *ms,
+				   MachineState *ms,
 				   const concreteStoresT &stores) = 0;
 
 	CrashExpression *simplify(unsigned hardness = 1) {
@@ -337,7 +337,7 @@ public:
 	unsigned complexity() const { return 2; }
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores) {
 		/* This can't happen, because we shouldn't be building
@@ -347,7 +347,7 @@ public:
 	}
 
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms,
+			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 	{
 		return thr->temporaries[tmp].lo;
@@ -378,13 +378,13 @@ public:
 		return offset == OFFSET_amd64_RSP;
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms,
+			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 
 	{
@@ -414,13 +414,13 @@ public:
 	unsigned complexity() const { return 1; }
 	bool isConstant(unsigned long &l) { l = value; return true; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms,
+			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 	{
 		return value;
@@ -466,13 +466,13 @@ public:
 	   simplification eliminates them whenever possible. */
 	unsigned complexity() const { return (unsigned)-1; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms,
+			   MachineState *ms,
 			   const std::vector<concrete_store> &)
 	{
 		/* Guess wildly. */
@@ -524,7 +524,7 @@ public:
 	unsigned complexity() const { return addr->complexity() + 3; }
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
@@ -542,7 +542,7 @@ public:
 	}
 	/* This doesn't really belong here, but nevermind. */
 	static unsigned long fetch(unsigned long addr,
-				   MachineState<unsigned long> *ms,
+				   MachineState *ms,
 				   Thread<unsigned long> *thr)
 	{
 		unsigned long res[8];
@@ -553,7 +553,7 @@ public:
 		return folded;
 	}
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms,
+			   MachineState *ms,
 			   const std::vector<concrete_store> &stores)
 	{
 		unsigned long concrete_addr = addr->eval(thr, ms, stores);
@@ -596,7 +596,7 @@ public:
 		return l->isConstant() && r->pointsAtStack();
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
@@ -637,7 +637,7 @@ public:
 		return get(l, r);					\
 	}								\
 	unsigned long eval(Thread<unsigned long> *thr,			\
-			   MachineState<unsigned long> *ms,		\
+			   MachineState *ms,		\
 			   const concreteStoresT &stores)		\
 	{								\
 		return l->eval(thr, ms, stores) op			\
@@ -747,7 +747,7 @@ protected:
 		return get(l, r);					
 	}								
 	unsigned long eval(Thread<unsigned long> *thr,
-			   MachineState<unsigned long> *ms,
+			   MachineState *ms,
 			   const concreteStoresT &stores)
 	{
 		return (long)l->eval(thr, ms, stores) < (long)r->eval(thr, ms, stores);
@@ -899,7 +899,7 @@ public:
 	}
 	unsigned complexity() const { return l->complexity() + 1; }
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
@@ -934,7 +934,7 @@ public:
 			return get(e);					\
 		}							\
 	unsigned long eval(Thread<unsigned long> *thr,			\
-			   MachineState<unsigned long> *ms,		\
+			   MachineState *ms,		\
 			   const concreteStoresT &stores);		\
 	};
 
@@ -952,21 +952,21 @@ mk_unop(Not, 0x7f8ff8ac608cb30d ^)
 mk_unop(BadAddr, 76348956389 *)
 
 unsigned long
-CrashExpressionNeg::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+CrashExpressionNeg::eval(Thread<unsigned long> *thr, MachineState *ms,
 			 const concreteStoresT &stores)
 {
 	return -l->eval(thr, ms, stores);
 }
 
 unsigned long
-CrashExpressionNot::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+CrashExpressionNot::eval(Thread<unsigned long> *thr, MachineState *ms,
 			 const concreteStoresT &stores)
 {
 	return !l->eval(thr, ms, stores);
 }
 
 unsigned long
-CrashExpressionBadAddr::eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+CrashExpressionBadAddr::eval(Thread<unsigned long> *thr, MachineState *ms,
 			     const concreteStoresT &stores)
 {
 	unsigned long a = l->eval(thr, ms, stores);
@@ -1159,7 +1159,7 @@ public:
 	CrashExpression *semiDupe(CrashExpression *l) {
 		return get(l);
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
 			   const concreteStoresT &stores) {
 		return l->eval(thr, ms, stores);
 	}
@@ -1194,7 +1194,7 @@ public:
 	CrashExpression *semiDupe(CrashExpression *l) {
 		return get(l, start, end);
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
 			   const concreteStoresT &stores) {
 		long a = l->eval(thr, ms, stores);
 		a <<= 64 - start;
@@ -1276,7 +1276,7 @@ public:
 			d->complexity() + 
 			e->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
 			   const concreteStoresT &stores)
 	{
 		/* If the simplifier doesn't know what to do with
@@ -1284,7 +1284,7 @@ public:
 		return 0;
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
@@ -1365,7 +1365,7 @@ public:
 			c->complexity() + 
 			d->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
 			   const concreteStoresT &stores)
 	{
 		/* If the simplifier doesn't know what to do with
@@ -1373,7 +1373,7 @@ public:
 		return 0;
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
@@ -1444,7 +1444,7 @@ public:
 			zero->complexity() + 
 			nzero->complexity();
 	}
-	unsigned long eval(Thread<unsigned long> *thr, MachineState<unsigned long> *ms,
+	unsigned long eval(Thread<unsigned long> *thr, MachineState *ms,
 			   const concreteStoresT &stores)
 	{
 		if (cond->eval(thr, ms, stores) == 0)
@@ -1453,7 +1453,7 @@ public:
 			return nzero->eval(thr, ms, stores);
 	}
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 const concreteStoresT &stores)
 	{
@@ -1537,12 +1537,12 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 	};
 	class ResolveLoadsMapper : public CPMapper {
 		std::map<unsigned long, unsigned long> &memory;
-		MachineState<unsigned long> *ms;
+		MachineState *ms;
 		concreteStoresT &stores;
 		std::set<unsigned long> &readAddrs;
 	public:
 		ResolveLoadsMapper(std::map<unsigned long, unsigned long> &_memory,
-				   MachineState<unsigned long> *_ms,
+				   MachineState *_ms,
 				   concreteStoresT &_stores,
 				   std::set<unsigned long> &_readAddrs)
 			: memory(_memory), ms(_ms), stores(_stores),
@@ -1595,10 +1595,10 @@ class CrashMachineNode : public GarbageCollected<CrashMachineNode>, public Named
 	class FoldInRegistersMapper : public CPMapper {
 	public:
 		Thread<unsigned long> *thr;
-		MachineState<unsigned long> *ms;
+		MachineState *ms;
 		const concreteStoresT &concreteStores;
 		FoldInRegistersMapper(Thread<unsigned long> *_thr,
-				      MachineState<unsigned long> *_ms,
+				      MachineState *_ms,
 				      const concreteStoresT &_concreteStores)
 			: thr(_thr), ms(_ms), concreteStores(_concreteStores)
 		{
@@ -1714,7 +1714,7 @@ public:
 	}
 
 	CrashMachineNode *foldInRegisters(Thread<unsigned long> *thr,
-					  MachineState<unsigned long> *ms,
+					  MachineState *ms,
 					  concreteStoresT &stores);
 
 	abstractStoresT stores;
@@ -1830,18 +1830,18 @@ public:
 	}
 	/* ms is used to resolve badAddr expressions */
 	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
-				       MachineState<unsigned long> *ms,
+				       MachineState *ms,
 				       concreteStoresT &stores,
 				       std::set<unsigned long> &readAddrs);
 	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
-				       MachineState<unsigned long> *ms,
+				       MachineState *ms,
 				       concreteStoresT &stores)
 	{
 		std::set<unsigned long> a;
 		return resolveLoads(memory, ms, stores, a);
 	}
 	CrashMachineNode *resolveLoads(std::map<unsigned long, unsigned long> &memory,
-				       MachineState<unsigned long> *ms)
+				       MachineState *ms)
 	{
 		concreteStoresT stores;
 		return resolveLoads(memory, ms, stores);
@@ -1893,7 +1893,7 @@ public:
 	}
 
 	void build_relevant_address_list(Thread<unsigned long> *thr,
-					 MachineState<unsigned long> *ms,
+					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
 					 concreteStoresT &stores);
 
@@ -2000,7 +2000,7 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 	}
 
 	void calc_relevant_addresses_snapshot(Thread<unsigned long> *ts,
-					      MachineState<unsigned long> *ms);
+					      MachineState *ms);
 public:
 	typedef gc_map<CrashTimestamp,
 		       std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> *>,
@@ -2049,14 +2049,14 @@ public:
 			     (v, t));
 	}
 
-	void calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
+	void calculate_relevant_addresses(VexPtr<MachineState > &ms,
 					  VexPtr<LogReader<unsigned long> > &lr,
 					  LogReaderPtr ptr,
 					  GarbageCollectionToken tok);
 
 	void deduplicate();
 
-	CrashMachine *foldRegisters(VexPtr<MachineState<unsigned long> > &ms,
+	CrashMachine *foldRegisters(VexPtr<MachineState > &ms,
 				    VexPtr<LogReader<unsigned long> > &lr,
 				    LogReaderPtr ptr,
 				    GarbageCollectionToken tok);
@@ -2080,7 +2080,7 @@ public:
 	{
 	}
 	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt,
-		    MachineState<unsigned long> *ms)
+		    MachineState *ms)
 	{
 		if (InstructionEvent<unsigned long> *ie =
 		    dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
@@ -2099,7 +2099,7 @@ public:
 
 
 CrashMachine *
-CrashMachine::foldRegisters(VexPtr<MachineState<unsigned long> > &ms,
+CrashMachine::foldRegisters(VexPtr<MachineState > &ms,
 			    VexPtr<LogReader<unsigned long> > &lr,
 			    LogReaderPtr ptr,
 			    GarbageCollectionToken tok)
@@ -2117,7 +2117,7 @@ CrashMachine::foldRegisters(VexPtr<MachineState<unsigned long> > &ms,
 
 CrashMachineNode *
 CrashMachineNode::foldInRegisters(Thread<unsigned long> *thr,
-				  MachineState<unsigned long> *ms,
+				  MachineState *ms,
 				  concreteStoresT &concrete_stores)
 {
 	FoldInRegistersMapper firm(thr, ms, concrete_stores);
@@ -2245,7 +2245,7 @@ CrashMachine::deduplicate()
 
 CrashMachineNode *
 CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
-			       MachineState<unsigned long> *ms,
+			       MachineState *ms,
 			       concreteStoresT &concrete_stores,
 			       std::set<unsigned long> &readAddrs)
 {
@@ -2305,7 +2305,7 @@ CrashMachineNode::resolveLoads(std::map<unsigned long, unsigned long> &memory,
 
 void
 CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
-					      MachineState<unsigned long> *ms,
+					      MachineState *ms,
 					      gc_map<unsigned long, bool> *addresses,
 					      concreteStoresT &concrete_stores)
 {
@@ -2354,7 +2354,7 @@ CrashMachineNode::build_relevant_address_list(Thread<unsigned long> *thr,
 
 void
 CrashMachine::calc_relevant_addresses_snapshot(Thread<unsigned long> *thr,
-					       MachineState<unsigned long> *ms)
+					       MachineState *ms)
 {
 	CrashTimestamp ts(thr);
 	std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> *> &slot(content->get(ts));
@@ -2383,7 +2383,7 @@ public:
 	CrashMachine *cm;
 	CRAEventRecorder(CrashMachine *_cm) : cm(_cm) {}
 	void record(Thread<unsigned long> *thr, ThreadEvent<unsigned long> *evt,
-		    MachineState<unsigned long> *ms)
+		    MachineState *ms)
 	{
 		if (InstructionEvent<unsigned long> *ie =
 		    dynamic_cast<InstructionEvent<unsigned long> *>(evt)) {
@@ -2400,7 +2400,7 @@ public:
 };
 
 void
-CrashMachine::calculate_relevant_addresses(VexPtr<MachineState<unsigned long> > &ms,
+CrashMachine::calculate_relevant_addresses(VexPtr<MachineState > &ms,
 					   VexPtr<LogReader<unsigned long> > &lr,
 					   LogReaderPtr ptr,
 					   GarbageCollectionToken tok)
@@ -2881,7 +2881,7 @@ public:
 	void findLoadsForStore(const CrashTimestamp &store, std::set<CrashTimestamp> *loads) const;
 
 	void collect_interesting_access_log(
-		VexPtr<MachineState<unsigned long> > &ms,
+		VexPtr<MachineState > &ms,
 		VexPtr<LogReader<unsigned long> > &lf,
 		LogReaderPtr ptr,
 		GarbageCollectionToken tok);
@@ -2958,7 +2958,7 @@ CIALEventRecorder::record(Thread<unsigned long> *thr, ThreadEvent<unsigned long>
 }
 void
 Oracle::collect_interesting_access_log(
-	VexPtr<MachineState<unsigned long> > &ms,
+	VexPtr<MachineState > &ms,
 	VexPtr<LogReader<unsigned long> > &lf,
 	LogReaderPtr ptr,
 	GarbageCollectionToken tok)
@@ -3216,13 +3216,13 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 
 	std::vector<CrashTimestamp> roots;
 
-	void build_cfg(MachineState<unsigned long> *ms, const Oracle &oracle,
+	void build_cfg(MachineState *ms, const Oracle &oracle,
 		       CrashMachine *partial_cm);
 		       
 	void resolve_stubs();
 	void break_cycles(const Oracle &oracle);
 	bool break_cycles_from(CrashCFGNode *n, const Oracle &oracle);
-	void calculate_cmns(MachineState<unsigned long> *ms,
+	void calculate_cmns(MachineState *ms,
 			    CrashMachine *cm,
 			    const Oracle &oracle,
 			    bool precious);
@@ -3253,7 +3253,7 @@ public:
 		roots.push_back(x);
 		grey.push(build_cfg_work(x, 20));
 	}
-	void build(MachineState<unsigned long> *ms,
+	void build(MachineState *ms,
 		   const Oracle &footstep_log,
 		   CrashMachine *partial_cm,
 		   bool precious);
@@ -3312,7 +3312,7 @@ fixup_rip(CrashTimestamp &ts)
 }
 
 void
-CrashCFG::build_cfg(MachineState<unsigned long> *ms,
+CrashCFG::build_cfg(MachineState *ms,
 		    const Oracle &oracle,
 		    CrashMachine *partial_cm)
 {
@@ -3709,7 +3709,7 @@ CrashCFG::break_cycles(const Oracle &oracle)
 }
 
 void
-CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
+CrashCFG::calculate_cmns(MachineState *ms,
 			 CrashMachine *cm,
 			 const Oracle &oracle,
 			 bool precious)
@@ -3880,7 +3880,7 @@ CrashCFG::calculate_cmns(MachineState<unsigned long> *ms,
 /* Build the acyclic CFG and use that to infer ``correct'' crash
    machine nodes for every instruction. */
 void
-CrashCFG::build(MachineState<unsigned long> *ms,
+CrashCFG::build(MachineState *ms,
 		const Oracle &oracle,
 		CrashMachine *cm,
 		bool precious)
@@ -4060,7 +4060,7 @@ simplify_cmn(CrashMachineNode *cmn)
 }
 
 static CrashMachineNode *
-buildCrashMachineNode(MachineState<unsigned long> *ms,
+buildCrashMachineNode(MachineState *ms,
 		      const CrashTimestamp &when,
 		      CrashMachine *cm,
 		      const Oracle &oracle)
@@ -4248,7 +4248,7 @@ public:
 		return false;
 	}
 
-	bool generate_patch(MachineState<unsigned long> *ms) const;
+	bool generate_patch(MachineState *ms) const;
 };
 
 class CollectLoadsMapper : public CPMapper {
@@ -4271,7 +4271,7 @@ static void
 findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 			   const CrashTimestamp &when,
 			   const Oracle &oracle,
-			   MachineState<unsigned long> *ms,
+			   MachineState *ms,
 			   std::set<SuggestedFix> &out)
 {
 	std::map<unsigned long, unsigned long> memory;
@@ -4382,11 +4382,11 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 class RemoveProbablyConstantReferencesMapper : public CPMapper {
 public:
 	const Oracle &oracle;
-	MachineState<unsigned long> *ms;
+	MachineState *ms;
 	Thread<unsigned long> *thr;
 	RemoveProbablyConstantReferencesMapper(
 		const Oracle &_oracle,
-		MachineState<unsigned long> *_ms,
+		MachineState *_ms,
 		Thread<unsigned long> *_thr)
 		: oracle(_oracle),
 		  ms(_ms),
@@ -4488,7 +4488,7 @@ removeRedundantStores(CrashMachineNode *n)
 static CrashMachineNode *
 removeProbablyConstantReferences(CrashMachineNode *start,
 				 const Oracle &oracle,
-				 MachineState<unsigned long> *ms,
+				 MachineState *ms,
 				 Thread<unsigned long> *thr)
 {
 	if (oracle.constant_addresses.empty())
@@ -4543,7 +4543,7 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	struct timeval start_read_initial_snapshot;
 	gettimeofday(&start_read_initial_snapshot, NULL);
-	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
+	VexPtr<MachineState > ms(MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 	struct timeval finish_read_initial_snapshot;
 	gettimeofday(&finish_read_initial_snapshot, NULL);
 
@@ -4824,7 +4824,7 @@ main(int argc, char *argv[])
 	sle.ms->findThread(ThreadId(7))->exitted = true;
 	sle.ms->findThread(ThreadId(10))->exitted = true;
 #endif
-        VexPtr<MachineState<unsigned long> > snapshotMs(sle.ms->dupeSelf());
+        VexPtr<MachineState > snapshotMs(sle.ms->dupeSelf());
 	cm->calculate_relevant_addresses(snapshotMs,
 					 lf,
 					 sle.ptr,

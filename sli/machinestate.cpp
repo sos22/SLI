@@ -2,17 +2,16 @@
 
 #include "sli.h"
 
-template<typename abs_int_type>
-void MachineState<abs_int_type>::visit(HeapVisitor &hv)
+void MachineState::visit(HeapVisitor &hv)
 {
 	hv(threads);
 	hv(addressSpace);
 }
 
-template<typename abs_int_type>
-void visit_machine_state(void *_ctxt, HeapVisitor &hv)
+static void
+visit_machine_state(void *_ctxt, HeapVisitor &hv)
 {
-	MachineState<abs_int_type> *ctxt = (MachineState<abs_int_type> *)_ctxt;
+	MachineState *ctxt = (MachineState *)_ctxt;
 	ctxt->visit(hv);
 }
 
@@ -23,45 +22,45 @@ class StupidTemplateHack1 {
 public:
 	VexAllocType t;
 	StupidTemplateHack1() {
-		t.nbytes = sizeof(MachineState<ait>);
-		t.gc_visit = visit_machine_state<ait>;
+		t.nbytes = sizeof(MachineState);
+		t.gc_visit = visit_machine_state;
 		t.destruct = NULL;
 		t.name = "MachineState";
 	}
 };
 
-template<typename abs_int_type>
-MachineState<abs_int_type> *MachineState<abs_int_type>::initialMachineState(AddressSpace<abs_int_type> *as,
-									    const LogRecordInitialSighandlers<abs_int_type> &handlers)
+MachineState *
+MachineState::initialMachineState(AddressSpace<unsigned long> *as,
+				  const LogRecordInitialSighandlers<unsigned long> &handlers)
 {
-	MachineState<abs_int_type> *work = new MachineState<abs_int_type>();
+	MachineState *work = new MachineState();
 
-	work->threads = LibvexVector<Thread<abs_int_type> >::empty();
+	work->threads = LibvexVector<Thread<unsigned long> >::empty();
 	work->nextTid = ThreadId(1);
 	work->addressSpace = as;
-	work->signalHandlers = SignalHandlers<abs_int_type>(handlers);
+	work->signalHandlers = SignalHandlers<unsigned long>(handlers);
 
 	return work;
 }
 
-template <typename ait>
-MachineState<ait> *MachineState<ait>::initialMachineState(VexPtr<LogReader<ait> > &lf,
+MachineState *
+MachineState::initialMachineState(VexPtr<LogReader<unsigned long> > &lf,
 							  LogReaderPtr ptr,
 							  LogReaderPtr *end,
 							  GarbageCollectionToken token)
 {
-	VexPtr<MachineState<ait> > work;
-	LogRecord<ait> *lr;
+	VexPtr<MachineState > work;
+	LogRecord<unsigned long> *lr;
 	
 	lr = lf->read(ptr, &ptr);
 	VexGcRoot lrkeeper((void **)&lr, "lrkeeper");
-	LogRecordInitialBrk<ait> *lrib = dynamic_cast<LogRecordInitialBrk<ait>*>(lr);
+	LogRecordInitialBrk<unsigned long> *lrib = dynamic_cast<LogRecordInitialBrk<unsigned long>*>(lr);
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
-        VexPtr<AddressSpace<ait> > as(AddressSpace<ait>::initialAddressSpace(lrib->brk));
+        VexPtr<AddressSpace<unsigned long> > as(AddressSpace<unsigned long>::initialAddressSpace(lrib->brk));
 
 	lr = lf->read(ptr, &ptr);
-        LogRecordInitialSighandlers<ait> *lris = dynamic_cast<LogRecordInitialSighandlers<ait>*>(lr);
+        LogRecordInitialSighandlers<unsigned long> *lris = dynamic_cast<LogRecordInitialSighandlers<unsigned long>*>(lr);
 	if (!lris)
 		errx(1, "second record should have been initial signal handlers");
 	work = initialMachineState(as, *lris);
@@ -72,15 +71,15 @@ MachineState<ait> *MachineState<ait>::initialMachineState(VexPtr<LogReader<ait> 
 		lr = lf->read(ptr, &nextPtr);
 		if (!lr)
 			break;
-		if (LogRecordAllocateMemory<ait> *lram = dynamic_cast<LogRecordAllocateMemory<ait>*>(lr)) {
+		if (LogRecordAllocateMemory<unsigned long> *lram = dynamic_cast<LogRecordAllocateMemory<unsigned long>*>(lr)) {
 			as->allocateMemory(*lram);
-	        } else if (LogRecordMemory<ait> *lrm = dynamic_cast<LogRecordMemory<ait>*>(lr)) {
+	        } else if (LogRecordMemory<unsigned long> *lrm = dynamic_cast<LogRecordMemory<unsigned long>*>(lr)) {
 			as->populateMemory(*lrm);
-		} else if (LogRecordInitialRegisters<ait> *lrir = dynamic_cast<LogRecordInitialRegisters<ait>*>(lr)) {
-			work->registerThread(Thread<ait>::initialThread(*lrir));
-	        } else if (LogRecordVexThreadState<ait> *lrvts = dynamic_cast<LogRecordVexThreadState<ait>*>(lr)) {
-			VexPtr<LogRecordVexThreadState<ait> > l(lrvts);
-			VexPtr<Thread<ait> > t(work->findThread(lrvts->thread()));
+		} else if (LogRecordInitialRegisters<unsigned long> *lrir = dynamic_cast<LogRecordInitialRegisters<unsigned long>*>(lr)) {
+			work->registerThread(Thread<unsigned long>::initialThread(*lrir));
+	        } else if (LogRecordVexThreadState<unsigned long> *lrvts = dynamic_cast<LogRecordVexThreadState<unsigned long>*>(lr)) {
+			VexPtr<LogRecordVexThreadState<unsigned long> > l(lrvts);
+			VexPtr<Thread<unsigned long> > t(work->findThread(lrvts->thread()));
 			t->imposeState(t, l, as, work, ptr, token);
 		} else {
 			break;
@@ -93,13 +92,12 @@ MachineState<ait> *MachineState<ait>::initialMachineState(VexPtr<LogReader<ait> 
 
 	for (unsigned x = 0; x < work->threads->size(); x++)
 		work->threads->index(x)->snapshotLog.push(
-			typename Thread<ait>::snapshot_log_entry(work, ptr));
+			Thread<unsigned long>::snapshot_log_entry(work, ptr));
 	*end = ptr;
 	return work->dupeSelf();;
 }
 
-template<typename ait>
-void MachineState<ait>::dumpSnapshot(LogWriter<ait> *lw) const
+void MachineState::dumpSnapshot(LogWriter<unsigned long> *lw) const
 {
 	addressSpace->dumpBrkPtr(lw);
 	signalHandlers.dumpSnapshot(lw);
@@ -108,28 +106,25 @@ void MachineState<ait>::dumpSnapshot(LogWriter<ait> *lw) const
 		threads->index(x)->dumpSnapshot(lw);
 }
 
-template<typename ait>
-MachineState<ait> *MachineState<ait>::dupeSelf() const
+MachineState *MachineState::dupeSelf() const
 {
-	MachineState<ait> *work = new MachineState<ait>();
+	MachineState *work = new MachineState();
 	*work = *this;
 
 	work->addressSpace = addressSpace->dupeSelf();
-	work->threads = LibvexVector<Thread<ait> >::empty();
+	work->threads = LibvexVector<Thread<unsigned long> >::empty();
 	work->threads->_set_size(threads->size());
 	for (unsigned x = 0; x < threads->size(); x++)
 		work->threads->set(x, threads->index(x)->dupeSelf());
 	return work;
 }
 
-template<typename ait>
-void MachineState<ait>::sanityCheck() const
+void MachineState::sanityCheck() const
 {
 	addressSpace->sanityCheck();
 }
 
-template<typename ait>
-bool MachineState<ait>::crashed() const
+bool MachineState::crashed() const
 {
 	unsigned x;
 	for (x = 0; x < threads->size(); x++)
@@ -138,34 +133,4 @@ bool MachineState<ait>::crashed() const
 	return false;
 }
 
-template <typename ait> template <typename new_type>
-MachineState<new_type> *MachineState<ait>::abstract() const
-{
-	MachineState<new_type> *work = new MachineState<new_type>();
-
-	work->exitted = exitted;
-	work->exit_status = mkConst<new_type>(exit_status);
-	work->nextTid = nextTid;
-	signalHandlers.abstract<new_type>(&work->signalHandlers);
-	work->addressSpace = addressSpace->abstract<new_type>();
-	work->threads = LibvexVector<Thread<new_type> >::empty();
-	work->threads->_set_size(threads->size());
-	for (unsigned x = 0; x < threads->size(); x++)
-		work->threads->set(x, threads->index(x)->abstract<new_type>());
-	return work;
-}
-
-#define MK_MACHINE_STATE(t)						\
-	template MachineState<t> *MachineState<t>::dupeSelf() const;	\
-	template bool MachineState<t>::crashed() const;			\
-	template MachineState<t> *MachineState<t>::initialMachineState(AddressSpace<t> *as, \
-								       const LogRecordInitialSighandlers<t> &handlers); \
-	template void MachineState<t>::dumpSnapshot(LogWriter<t> *lw) const; \
-	template MachineState<t> *MachineState<t>::initialMachineState(VexPtr<LogReader<t> > &lf, \
-								       LogReaderPtr ptr, \
-								       LogReaderPtr *end, \
-								       GarbageCollectionToken)
-
-#define MK_MACH_CONVERTOR(from, to)		\
-	template MachineState<to> *MachineState<from>::abstract() const
- 
+#define MK_MACHINE_STATE(t)

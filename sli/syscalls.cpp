@@ -52,7 +52,7 @@ process_memory_records(VexPtr<AddressSpace<ait> > &addrSpace,
 template<typename ait> static void
 handle_clone(AddressSpace<ait> *addrSpace,
 	     Thread<ait> *thr,
-	     MachineState<ait> *&mach,
+	     MachineState *&mach,
 	     ait flags,
 	     ait childRsp,
 	     ait parent_tidptr,
@@ -103,7 +103,7 @@ handle_clone(AddressSpace<ait> *addrSpace,
 template<typename ait> ThreadEvent<ait> *
 replay_syscall(const LogRecordSyscall<ait> *lrs,
 	       Thread<ait> *thr,
-	       MachineState<ait> *&mach,
+	       MachineState *&mach,
 	       LogReaderPtr ptr)
 {
 	AddressSpace<ait> *addrSpace = mach->addressSpace;
@@ -385,7 +385,7 @@ replay_syscall(const LogRecordSyscall<ait> *lrs,
    seems to work often enough to be useful (at least for some
    programs). */
 template <typename ait>
-InterpretResult SyscallEvent<ait>::fake(MachineState<ait> *ms, LogRecord<ait> **lr)
+InterpretResult SyscallEvent<ait>::fake(MachineState *ms, LogRecord<ait> **lr)
 {
 	ait res;
 	Thread<ait> *thr = ms->findThread(this->when.tid);

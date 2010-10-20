@@ -80,7 +80,7 @@ template<typename ait>
 void Thread<ait>::imposeState(VexPtr<Thread<ait> > &ths,
 			      VexPtr<LogRecordVexThreadState<ait> > &rec,
 			      VexPtr<AddressSpace<ait> > &as,
-			      VexPtr<MachineState<ait> > &ms,
+			      VexPtr<MachineState > &ms,
 			      const LogReaderPtr &ptr,
 			      GarbageCollectionToken t)
 {
@@ -115,7 +115,7 @@ void Thread<ait>::visit(HeapVisitor &hv)
 }
 
 template <typename ait>
-EventTimestamp Thread<ait>::bumpEvent(MachineState<ait> *ms)
+EventTimestamp Thread<ait>::bumpEvent(MachineState *ms)
 {
 	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++,
 				   force(regs.rip()));

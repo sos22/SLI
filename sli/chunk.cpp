@@ -10,11 +10,11 @@ class LogChunker : public LogWriter<unsigned long> {
 	const char *prefix;
 	unsigned next_index;
 
-	MachineState<unsigned long> *ms;
+	MachineState *ms;
 	std::vector<std::pair<unsigned long, LogFileWriter *> > writers;
 public:
 	LogChunker(unsigned long _chunk_size, unsigned long _chunk_period,
-		   const char *_prefix, MachineState<unsigned long> *_ms)
+		   const char *_prefix, MachineState *_ms)
 		: next_input_offset(0), chunk_size(_chunk_size),
 		  chunk_period(_chunk_period), prefix(_prefix),
 		  next_index(0), ms(_ms), writers()
@@ -87,7 +87,7 @@ main(int argc, char *argv[])
 	if (!lf)
 		err(1, "opening %s", inp);
 
-	VexPtr<MachineState<unsigned long> > ms(MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
+	VexPtr<MachineState> ms(MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 
 	ms->findThread(ThreadId(7))->clear_child_tid = 0x7faa32f5d9e0;
 	

@@ -31,7 +31,7 @@ MemTraceMaker<ait>::record(Thread<ait> *thr, ThreadEvent<ait> *evt)
 	}
 }
 template <typename ait> MemoryTrace<ait> *
-MemoryTrace<ait>::get(VexPtr<MachineState<ait> > &ms,
+MemoryTrace<ait>::get(VexPtr<MachineState> &ms,
 		      VexPtr<LogReader<ait> > &lf,
 		      LogReaderPtr ptr,
 		      GarbageCollectionToken t)
@@ -56,7 +56,7 @@ void MemoryTrace<ait>::dump() const
 
 #define MK_MEMTRACE(t)							\
 	template MemoryTrace<t>::MemoryTrace();				\
-	template MemoryTrace<t> *MemoryTrace<t>::get(VexPtr<MachineState<t> >&, \
+	template MemoryTrace<t> *MemoryTrace<t>::get(VexPtr<MachineState>&, \
 						     VexPtr<LogReader<t> > &, \
 						     LogReaderPtr,	\
 						     GarbageCollectionToken); \

@@ -988,7 +988,7 @@ main(int argc, char *argv[])
 	VexPtr<LogReader<unsigned long> > lf(LogFile::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	MachineState<unsigned long> *ms = MachineState<unsigned long>::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
+	MachineState *ms = MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC);
 	AddressSpace<unsigned long> *as = ms->addressSpace;
 
 	CriticalSection *csects = (CriticalSection *)malloc(sizeof(CriticalSection) * (argc - 2) / 2);
