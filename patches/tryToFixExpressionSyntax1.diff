@@ -1,0 +1,517 @@
+diff --git a/sli/crashreason.cpp b/sli/crashreason.cpp
+index 05037df..8c2ae33 100644
+--- a/sli/crashreason.cpp
++++ b/sli/crashreason.cpp
+@@ -44,21 +44,25 @@ private:
+ 		  when(_when),
+ 		  rips()
+ 	{
++		assert(when.tid._tid() != 0xf001beef);
+ 	}
+-	HistorySegment()
++	HistorySegment(EventTimestamp _when)
+ 		: condition(ConstExpression::get(1)),
+ 		  nr_memory_operations(0),
+-		  when(),
++		  when(_when),
+ 		  rips()
+ 	{
++		assert(when.tid._tid() != 0xf001beef);
+ 	}
+ 	HistorySegment(std::vector<unsigned long> &_rips,
+-		       unsigned long nr_memory_ops)
++		       unsigned long nr_memory_ops,
++		       EventTimestamp _when)
+ 		: condition(ConstExpression::get(1)),
+ 		  nr_memory_operations(nr_memory_ops),
+-		  when(),
++		  when(_when),
+ 		  rips(_rips)
+ 	{
++		assert(when.tid._tid() != 0xf001beef);
+ 	}
+ protected:
+ 	char *mkName() const {
+@@ -79,14 +83,15 @@ public:
+ 		return new (allocator.alloc()) HistorySegment(condition,
+ 							      when);
+ 	}
+-	static HistorySegment *get()
++	static HistorySegment *get(EventTimestamp when)
+ 	{
+-		return new (allocator.alloc()) HistorySegment();
++		return new (allocator.alloc()) HistorySegment(when);
+ 	}
+ 	static HistorySegment *get(std::vector<unsigned long> &rips,
+-				   unsigned long nr_memory_ops)
++				   unsigned long nr_memory_ops,
++				   EventTimestamp when)
+ 	{
+-		return new (allocator.alloc()) HistorySegment(rips, nr_memory_ops);
++		return new (allocator.alloc()) HistorySegment(rips, nr_memory_ops, when);
+ 	}
+ 	void destruct()
+ 	{
+@@ -142,14 +147,15 @@ private:
+ 	{
+ 		calc_last_valid_idx();
+ 	}
+-	History(std::vector<unsigned long> rips, unsigned long nr_memory_ops)
++	History(std::vector<unsigned long> rips, unsigned long nr_memory_ops,
++		EventTimestamp start)
+ 	{
+-		history.push_back(HistorySegment::get(rips, nr_memory_ops));
++		history.push_back(HistorySegment::get(rips, nr_memory_ops, start));
+ 		calc_last_valid_idx();
+ 	}
+-	History()
++	History(EventTimestamp when)
+ 	{
+-		history.push_back(HistorySegment::get());
++		history.push_back(HistorySegment::get(when));
+ 		calc_last_valid_idx();
+ 	}
+ protected:
+@@ -179,13 +185,14 @@ public:
+ 		return new (allocator.alloc()) History(start, end);
+ 	}
+ 	static History *get(std::vector<unsigned long> &rips,
+-			    unsigned long nr_memory_ops)
++			    unsigned long nr_memory_ops,
++			    EventTimestamp start)
+ 	{
+-		return new (allocator.alloc()) History(rips, nr_memory_ops);
++		return new (allocator.alloc()) History(rips, nr_memory_ops, start);
+ 	}
+-	static History *get()
++	static History *get(EventTimestamp start)
+ 	{
+-		return new (allocator.alloc()) History();
++		return new (allocator.alloc()) History(start);
+ 	}
+ 	void destruct()
+ 	{
+@@ -335,30 +342,156 @@ public:
+ 
+ VexAllocTypeWrapper<ExpressionBadPointer> ExpressionBadPointer::allocator;
+ 
++class HistoryLogTruncater : public LogWriter<abstract_interpret_value> {
++	History *hist;
++	std::vector<HistorySegment *>::iterator current_history_segment;
++	unsigned current_segment_index;
++	ThreadId desired_thread;
++	static const VexAllocTypeWrapper<HistoryLogTruncater> allocator;
++public:
++	static void *operator new(size_t s)
++	{
++		return (void *)LibVEX_Alloc_Sized(&allocator.type, s);
++	}
++	MemLog<abstract_interpret_value> *model1;
++	MemLog<abstract_interpret_value> *model2;
++	bool finishedFirstPhase;
++	void append(const LogRecord<abstract_interpret_value> &lr);
++	HistoryLogTruncater(ThreadId tid, History *_hist)
++		: hist(_hist),
++		  current_history_segment(hist->history.begin()),
++		  current_segment_index(0),
++		  desired_thread(tid),
++		  model1(MemLog<abstract_interpret_value>::emptyMemlog()),
++		  model2(MemLog<abstract_interpret_value>::emptyMemlog()),
++		  finishedFirstPhase(false)
++	{
++	}
++	void destruct() { this->~HistoryLogTruncater(); }
++	void visit(HeapVisitor &hv) const { hv(hist); hv(model1); hv(model2); }
++};
++const VexAllocTypeWrapper<HistoryLogTruncater> HistoryLogTruncater::allocator;
++
++void HistoryLogTruncater::append(const LogRecord<abstract_interpret_value> &lr)
++{
++	while (!finishedFirstPhase &&
++	       current_segment_index ==
++	       (*current_history_segment)->rips.size()) {
++		current_segment_index = 0;
++		current_history_segment++;
++		if (current_history_segment == hist->history.end())
++			finishedFirstPhase = true;
++	}
++
++	if (finishedFirstPhase) {
++		model2->append(lr);
++		return;
++	}
++
++	if (lr.thread() == desired_thread) {
++		const LogRecordFootstep<abstract_interpret_value> *lrf =
++			dynamic_cast<const LogRecordFootstep<abstract_interpret_value> *>(&lr);
++		if (lrf) {
++			assert(lrf->rip.v ==
++			       (*current_history_segment)->rips[current_segment_index]);
++			current_segment_index++;
++		}
++	}
++
++	return model1->append(lr);
++}
++
++/* We have discovered that expression @condition needs memory
++   references from thread @tid up to @to_idx, but only those up to
++   @from_idx are currently available.  Generate a RIP expression which
++   makes the necessary extra locations available, pulling history
++   segments from @hist and generating a model execution using @ms and
++   @lf.  We generate a new logfile which is lf with the bit we just added
++   stripped off the front and put it in @outlf. */
++static Expression *
++add_thread_history(Expression *condition,
++		   ThreadId tid,
++		   unsigned long from_idx,
++		   unsigned long to_idx,
++		   History *hist,
++		   const MachineState<abstract_interpret_value> *ms,
++		   LogReader<abstract_interpret_value> *lf,
++		   LogReaderPtr lfptr,
++		   LogReader<abstract_interpret_value> **lfout,
++		   LogReaderPtr *lfoutptr)
++{
++	/* Phase 1: build the History fragment */
++	std::vector<HistorySegment *>::const_iterator start;
++	std::vector<HistorySegment *>::const_iterator end;
++	to_idx -= from_idx;
++	for (start = hist->history.begin();
++	     from_idx != 0 && start != hist->history.end();
++	     start++) {
++		assert( (*start)->nr_memory_operations >= from_idx );
++		from_idx -= (*start)->nr_memory_operations;
++	}
++	assert(start != hist->history.end());
++	end = start;
++	while (1) {
++		assert(end != hist->history.end());
++		if ( (*end)->nr_memory_operations >= to_idx ) {
++			end++;
++			break;
++		}
++		to_idx -= (*end)->nr_memory_operations;
++		end++;
++	}
++	History *newHist = History::get(start, end);
++	VexGcRoot root1((void **)&newHist, "add_thread_history history");
++
++	/* Phase 2: build new model execution */
++	HistoryLogTruncater *trunc = new HistoryLogTruncater(tid, newHist);
++	VexGcRoot root2((void **)&trunc, "add_thread_history");
++	Interpreter<abstract_interpret_value> i(ms->dupeSelf());
++	i.replayLogfile(lf, lfptr, NULL, trunc);
++
++	/* Finally, return the results */
++	*lfout = trunc->model2;
++	*lfoutptr = trunc->model2->startPtr();
++	return ExpressionRip::get(tid, newHist, condition,
++				  trunc->model1, trunc->model1->startPtr());
++}
+ 
+ static bool
+-syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_valid_idx)
++syntax_check_expression(Expression **e, std::map<ThreadId, unsigned long> &last_valid_idx,
++			bool fix, std::map<ThreadId, History *> &thread_histories,
++			const MachineState<abstract_interpret_value> *ms,
++			LogReader<abstract_interpret_value> *lf,
++			LogReaderPtr lfptr)
+ {
+-	if (dynamic_cast<ConstExpression *>(e) ||
+-	    dynamic_cast<ImportExpression *>(e))
++	if (dynamic_cast<ConstExpression *>(*e) ||
++	    dynamic_cast<ImportExpression *>(*e))
+ 		return true;
+ 
+-	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(e))
+-		return syntax_check_expression(ue->l, last_valid_idx);
++	if (UnaryExpression *ue = dynamic_cast<UnaryExpression *>(*e))
++		return syntax_check_expression(&ue->l, last_valid_idx, fix,
++					       thread_histories, ms, lf, lfptr);
++
++	if (BinaryExpression *be = dynamic_cast<BinaryExpression *>(*e))
++		return syntax_check_expression(&be->l, last_valid_idx, fix,
++					       thread_histories, ms, lf, lfptr) &&
++			syntax_check_expression(&be->r, last_valid_idx, fix,
++						thread_histories, ms, lf, lfptr);
+ 
+-	if (BinaryExpression *be = dynamic_cast<BinaryExpression *>(e))
+-		return syntax_check_expression(be->l, last_valid_idx) &&
+-			syntax_check_expression(be->r, last_valid_idx);
+ 
+-	if (ternarycondition *tc = dynamic_cast<ternarycondition *>(e))
+-		return syntax_check_expression(tc->cond, last_valid_idx) &&
+-			syntax_check_expression(tc->t, last_valid_idx) &&
+-			syntax_check_expression(tc->f, last_valid_idx);
++	if (ternarycondition *tc = dynamic_cast<ternarycondition *>(*e))
++		return syntax_check_expression(&tc->cond, last_valid_idx, fix,
++					       thread_histories, ms, lf, lfptr) &&
++			syntax_check_expression(&tc->t, last_valid_idx, fix,
++						thread_histories, ms, lf, lfptr) &&
++			syntax_check_expression(&tc->f, last_valid_idx, fix,
++						thread_histories, ms, lf, lfptr);
+ 
+-	if (ExpressionBadPointer *ebp = dynamic_cast<ExpressionBadPointer *>(e))
+-		return syntax_check_expression(ebp->addr, last_valid_idx);
++	if (ExpressionBadPointer *ebp = dynamic_cast<ExpressionBadPointer *>(*e))
++		return syntax_check_expression(&ebp->addr, last_valid_idx, fix,
++					       thread_histories, ms, lf, lfptr);
+ 
+-	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(e)) {
++	if (ExpressionRip *er = dynamic_cast<ExpressionRip *>(*e)) {
+ 		std::vector<HistorySegment *>::iterator it;
+ 		std::map<ThreadId, unsigned long> new_last_valid_idx(last_valid_idx);
+ 		unsigned long &idx_entry = new_last_valid_idx[er->tid];
+@@ -366,29 +499,74 @@ syntax_check_expression(Expression *e, std::map<ThreadId, unsigned long> &last_v
+ 		     it != er->history->history.end();
+ 		     it++) {
+ 			HistorySegment *hs = *it;
+-			if (!syntax_check_expression(hs->condition,
+-						     new_last_valid_idx))
++			if (!syntax_check_expression(&hs->condition,
++						     new_last_valid_idx,
++						     fix,
++						     thread_histories,
++						     ms,
++						     lf,
++						     lfptr))
+ 				return false;
+ 			idx_entry += hs->nr_memory_operations;
+ 		}
+-		return syntax_check_expression(er->cond, new_last_valid_idx);
++		return syntax_check_expression(&er->cond, new_last_valid_idx, fix,
++					       thread_histories, ms, lf, lfptr);
+ 	}
+ 
+-	if (LoadExpression *le = dynamic_cast<LoadExpression *>(e)) {
+-		if (le->when.idx > last_valid_idx[le->when.tid]) {
++	if (LoadExpression *le = dynamic_cast<LoadExpression *>(*e)) {
++		if (le->when.idx > last_valid_idx[le->when.tid])
+ 			printf("Syntax check failed: %d:%ld is after %ld\n",
+ 			       le->when.tid._tid(), le->when.idx,
+ 			       last_valid_idx[le->when.tid]);
+-			return false;
+-		}
+-		if (le->store.idx > last_valid_idx[le->store.tid]) {
++		if (le->store.idx > last_valid_idx[le->store.tid])
+ 			printf("Syntax check failed: store %d:%ld is after %ld\n",
+ 			       le->store.tid._tid(), le->store.idx,
+ 			       last_valid_idx[le->store.tid]);
+-			return false;
++		if (le->store.idx > last_valid_idx[le->store.tid]) {
++			if (!fix)
++				return false;
++			LogReader<abstract_interpret_value> *r = NULL;
++			VexGcRoot root((void **)&r, "sce root");
++			LogReaderPtr rptr;
++			*e = add_thread_history(le,
++						le->store.tid,
++						last_valid_idx[le->store.tid],
++						le->store.idx,
++						thread_histories[le->store.tid],
++						ms,
++						lf,
++						lfptr,
++						&r,
++						&rptr);
++			return syntax_check_expression(e, last_valid_idx, fix,
++						       thread_histories, ms,
++						       r, rptr);
+ 		}
+-		return syntax_check_expression(le->val, last_valid_idx) &&
+-			syntax_check_expression(le->addr, last_valid_idx);
++		if (le->when.idx > last_valid_idx[le->when.tid]) {
++			if (!fix)
++				return false;
++			LogReader<abstract_interpret_value> *r = NULL;
++			VexGcRoot root((void **)&r, "sce root");
++			LogReaderPtr rptr;
++			*e = add_thread_history(le,
++						le->when.tid,
++						last_valid_idx[le->when.tid],
++						le->when.idx,
++						thread_histories[le->when.tid],
++						ms,
++						lf,
++						lfptr,
++						&r,
++						&rptr);
++			return syntax_check_expression(e, last_valid_idx, fix,
++						       thread_histories, ms,
++						       r, rptr);
++		}
++
++		return syntax_check_expression(&le->val, last_valid_idx, fix,
++					       thread_histories, ms, lf, lfptr) &&
++			syntax_check_expression(&le->addr, last_valid_idx, fix,
++						thread_histories, ms, lf, lfptr);
+ 	}
+ 
+ 	abort();
+@@ -420,7 +598,7 @@ public:
+ 	{
+ 		std::map<ThreadId, History *>::iterator it = thread_histories.find(tid);
+ 		if (it == thread_histories.end()) {
+-			History *r = History::get();
++			History *r = History::get(EventTimestamp(tid, 0));
+ 			thread_histories[tid] = r;
+ 			return r;
+ 		} else {
+@@ -459,16 +637,17 @@ void CrashReasonExtractor::record(Thread<abstract_interpret_value> *_thr, const
+ 		signal = (SignalEvent<abstract_interpret_value> *)es->dupe();
+ 	}
+ }
+-static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
++static Expression *getCrashReason(const MachineState<abstract_interpret_value> *ms,
+ 				  LogReader<abstract_interpret_value> *script,
+ 				  LogReaderPtr ptr)
+ {
+-	Interpreter<abstract_interpret_value> i(ms);
++	MachineState<abstract_interpret_value> *ms2 = ms->dupeSelf();
++	Interpreter<abstract_interpret_value> i(ms2);
+ 	CrashReasonExtractor *extr = CrashReasonExtractor::get();
+ 	VexGcRoot root1((void **)&extr, "root1");
+ 
+ 	i.replayLogfile(script, ptr, NULL, NULL, extr);
+-	if (!ms->crashed())
++	if (!ms2->crashed())
+ 		return NULL;
+ 
+ 	/* For now, we assume that the only reason to crash is
+@@ -482,17 +661,26 @@ static Expression *getCrashReason(MachineState<abstract_interpret_value> *ms,
+ 	   otherwise. */
+ 	assert(extr->signal);
+ 	assert(extr->thr->crashed);
++	Expression *res;
+ 	if (force(extr->thr->regs.rip() == extr->signal->virtaddr))
+-		return ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
+-					  equals::get(extr->thr->regs.rip().origin,
+-						      ConstExpression::get(extr->thr->regs.rip().v)),
+-					  script,
+-					  ptr);
++		res = ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
++					 equals::get(extr->thr->regs.rip().origin,
++						     ConstExpression::get(extr->thr->regs.rip().v)),
++					 script,
++					 ptr);
+ 	else
+-		return ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
+-					  ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin),
+-					  script,
+-					  ptr);
++		res = ExpressionRip::get(extr->thr->tid, (*extr)[extr->thr->tid],
++					 ExpressionBadPointer::get(extr->signal->when, extr->signal->virtaddr.origin),
++					 script,
++					 ptr);
++
++	VexGcRoot root((void **)&res, "getCrashResult result keeper");
++	bool isSane;
++	std::map<ThreadId, unsigned long> valid_map;
++	isSane = syntax_check_expression(&res, valid_map, true, extr->thread_histories,
++					 ms, script, ptr);
++	assert(isSane);
++	return res;
+ }
+ 
+ static Expression *refine(Expression *expr,
+@@ -558,7 +746,10 @@ static Expression *refine(ExpressionRip *er,
+ 		logicaland::get((*end)->condition,
+ 				ExpressionRip::get(er->tid,
+ 						   History::get((*end)->rips,
+-								(*end)->nr_memory_operations),
++								(*end)->nr_memory_operations,
++								EventTimestamp(er->tid,
++									       er->history->last_valid_idx -
++									       (*end)->nr_memory_operations)),
+ 						   er->cond,
+ 						   newModel2,
+ 						   newPtr2)),
+@@ -580,64 +771,6 @@ Expression *refine(Expression *expr,
+ 	}
+ }
+ 
+-class HistoryLogTruncater : public LogWriter<abstract_interpret_value> {
+-	History *hist;
+-	std::vector<HistorySegment *>::iterator current_history_segment;
+-	unsigned current_segment_index;
+-	ThreadId desired_thread;
+-	static const VexAllocTypeWrapper<HistoryLogTruncater> allocator;
+-public:
+-	static void *operator new(size_t s)
+-	{
+-		return (void *)LibVEX_Alloc_Sized(&allocator.type, s);
+-	}
+-	MemLog<abstract_interpret_value> *model1;
+-	MemLog<abstract_interpret_value> *model2;
+-	bool finishedFirstPhase;
+-	void append(const LogRecord<abstract_interpret_value> &lr);
+-	HistoryLogTruncater(ThreadId tid, History *_hist)
+-		: hist(_hist),
+-		  current_history_segment(hist->history.begin()),
+-		  current_segment_index(0),
+-		  desired_thread(tid),
+-		  model1(MemLog<abstract_interpret_value>::emptyMemlog()),
+-		  model2(MemLog<abstract_interpret_value>::emptyMemlog()),
+-		  finishedFirstPhase(false)
+-	{
+-	}
+-	void destruct() { this->~HistoryLogTruncater(); }
+-	void visit(HeapVisitor &hv) const { hv(hist); hv(model1); hv(model2); }
+-};
+-const VexAllocTypeWrapper<HistoryLogTruncater> HistoryLogTruncater::allocator;
+-
+-void HistoryLogTruncater::append(const LogRecord<abstract_interpret_value> &lr)
+-{
+-	while (!finishedFirstPhase &&
+-	       current_segment_index ==
+-	       (*current_history_segment)->rips.size()) {
+-		current_segment_index = 0;
+-		current_history_segment++;
+-		if (current_history_segment == hist->history.end())
+-			finishedFirstPhase = true;
+-	}
+-
+-	if (finishedFirstPhase) {
+-		model2->append(lr);
+-		return;
+-	}
+-
+-	if (lr.thread() == desired_thread) {
+-		const LogRecordFootstep<abstract_interpret_value> *lrf =
+-			dynamic_cast<const LogRecordFootstep<abstract_interpret_value> *>(&lr);
+-		if (lrf) {
+-			assert(lrf->rip.v ==
+-			       (*current_history_segment)->rips[current_segment_index]);
+-			current_segment_index++;
+-		}
+-	}
+-
+-	return model1->append(lr);
+-}
+ void History::extractSubModel(
+ 	ThreadId tid,
+ 	const MachineState<abstract_interpret_value> *ms,
+@@ -680,10 +813,9 @@ main(int argc, char *argv[])
+ 	LogReader<abstract_interpret_value> *al = lf->abstract<abstract_interpret_value>();
+ 	VexGcRoot al_keeper((void **)&al, "al_keeper");
+ 
+-	Expression *cr = getCrashReason(abstract->dupeSelf(), al, ptr);
++	Expression *cr = getCrashReason(abstract, al, ptr);
+ 	printf("%s\n", cr->name());
+ 	std::map<ThreadId, unsigned long> m1;
+-	assert(syntax_check_expression(cr, m1));
+ 	VexGcRoot crkeeper((void **)&cr, "crkeeper");
+ 
+ 	bool progress;
+@@ -691,7 +823,9 @@ main(int argc, char *argv[])
+ 	do {
+ 		progress = false;
+ 		printf("Crash reason %s\n", cr->name());
+-		assert(syntax_check_expression(cr, m1));
++		std::map<ThreadId, History *>m2;
++		assert(syntax_check_expression(&cr, m1, false, m2, NULL, NULL,
++					       ptr));
+ 		cr = refine(cr, abstract, al, ptr, &progress);
+ 	} while (progress);
+ 	printf("Crash reason %s\n", cr->name());

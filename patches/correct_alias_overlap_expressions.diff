@@ -1,0 +1,195 @@
+diff --git a/sli/expression.cpp b/sli/expression.cpp
+index 36a595e..e46bef4 100644
+--- a/sli/expression.cpp
++++ b/sli/expression.cpp
+@@ -159,9 +159,7 @@ mk_binop(times, *, false, false);
+ mk_binop(divide, /, false, false);
+ mk_binop(modulo, %, false, false);
+ mk_binop(greaterthanequals, >=, false, true);
+-mk_binop(greaterthan, >, false, true);
+ mk_binop(lessthanequals, <=, false, true);
+-mk_binop(lessthan, <, false, true);
+ mk_binop(notequals, !=, false, true);
+ 
+ mk_unop(unaryminus, -);
+@@ -182,6 +180,41 @@ Expression *logicalnot::get(Expression *l)
+ 			       ConstExpression::get(1));
+ }
+ 
++Expression *greaterthan::get(Expression *l, Expression *r)
++{
++	return lessthan::get(r, l);
++}
++
++bool lessthan::isLogical() const { return true; }
++Expression *lessthan::get(Expression *l, Expression *r)			
++{								
++	unsigned long lc, rc;				
++	unsigned long c;
++	bool lIsConstant = l->isConstant(&lc);			
++	bool rIsConstant = r->isConstant(&rc);
++	if (lIsConstant) {
++		if (rIsConstant)
++			return ConstExpression::get(lc < rc);		
++		plus *rplus = dynamic_cast<plus *>(r);
++		/* Rewrite c < (c' + x) to (c - c') < x */
++		if (rplus && rplus->l->isConstant(&c))
++			return lessthan::get(ConstExpression::get(lc - c),
++					     rplus->r);
++	} else if (rIsConstant) {
++		/* Rewrite (c + x) < c' to x < (c' - c) */
++		plus *lplus = dynamic_cast<plus *>(l);
++		if (lplus && lplus->l->isConstant(&c))
++			return lessthan::get(lplus->r,
++					     ConstExpression::get(rc - c));
++	}
++
++	binop_float_rip(lessthan);					
++	lessthan *work = new lessthan();					
++	work->l = l;						
++	work->r = r;						
++	return intern(work);					
++}
++
+ bool bitsaturate::isLogical() const { return true; }
+ Expression *bitsaturate::get(Expression *l)
+ {
+@@ -705,7 +738,8 @@ Expression *
+ ExpressionMapper::map(ExpressionLastStore *els)
+ {
+ 	return idmap(ExpressionLastStore::get(els->load, els->store,
+-					      els->vaddr->map(*this)));
++					      els->vaddr->map(*this),
++					      els->size));
+ }
+ 
+ Expression *
+diff --git a/sli/fixgen.cpp b/sli/fixgen.cpp
+index cabddcb..1b35563 100644
+--- a/sli/fixgen.cpp
++++ b/sli/fixgen.cpp
+@@ -70,7 +70,7 @@ public:
+ 		if (!va)
+ 			return NULL;
+ 		else
+-			return ExpressionLastStore::get(els->load, els->store, va);
++			return ExpressionLastStore::get(els->load, els->store, va, els->size);
+ 	}
+ 	Expression *map(ExpressionHappensBefore *ehb)
+ 	{
+diff --git a/sli/refinement.cpp b/sli/refinement.cpp
+index 2def473..6cf9d74 100644
+--- a/sli/refinement.cpp
++++ b/sli/refinement.cpp
+@@ -152,7 +152,7 @@ LoadExpression::refine(const MachineState<abstract_interpret_value> *ms,
+ 	*progress = true;
+ 	return onlyif::get(
+ 		logicaland::get(
+-			ExpressionLastStore::get(when, store, addr),
++			ExpressionLastStore::get(when, store, addr, size),
+ 			equals::get(addr, storeAddr)),
+ 		val);
+ }
+@@ -213,6 +213,7 @@ class LastStoreRefiner : public EventRecorder<abstract_interpret_value> {
+ 	EventTimestamp store;
+ 	EventTimestamp load;
+ 	Expression *addr;
++	unsigned size;
+ 	static VexAllocTypeWrapper<LastStoreRefiner> allocator;
+ 
+ 	std::map<ThreadId, History *> thread_histories;
+@@ -239,6 +240,7 @@ public:
+ 	LastStoreRefiner(EventTimestamp _store,
+ 			 EventTimestamp _load,
+ 			 Expression *_addr,
++			 unsigned _size,
+ 			 Expression *_result,
+ 			 LogReader<abstract_interpret_value> *_modelExec,
+ 			 LogReaderPtr _modelExecStart,
+@@ -246,6 +248,7 @@ public:
+ 		: store(_store),
+ 		  load(_load),
+ 		  addr(_addr),
++		  size(_size),
+ 		  modelExec(_modelExec),
+ 		  modelExecStart(_modelExecStart),
+ 		  validity(_validity),
+@@ -317,16 +320,20 @@ LastStoreRefiner::record(Thread<abstract_interpret_value> *thr,
+ 						happensInRange,
+ 						modelExec,
+ 						modelExecStart);
++			Expression *core =
++				logicalor::get(
++					lessthan::get(plus::get(se->addr.origin, ConstExpression::get(size)),
++						      addr),
++					lessthan::get(plus::get(addr, ConstExpression::get(size)),
++						      se->addr.origin));
++
+ 			result =
+ 				logicaland::get(
+ 					result,
+-					logicalor::get(
+-						logicalnot::get(
+-							alias::get(
+-								equals::get(
+-									se->addr.origin,
+-									addr))),
+-						logicalnot::get(happensInRange)));
++					alias::get(
++						logicalor::get(
++							core,
++							logicalnot::get(happensInRange))));
+ 		}
+ 	}
+ }
+@@ -391,6 +398,7 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
+ 			store,
+ 			load,
+ 			vaddr,
++			size,
+ 			ExpressionHappensBefore::get(store, load),
+ 			lf,
+ 			ptr,
+@@ -421,6 +429,7 @@ ExpressionLastStore::refine(const MachineState<abstract_interpret_value> *ms,
+ 				store,
+ 				load,
+ 				vaddr,
++				size,
+ 				work,
+ 				lf,
+ 				ptr,
+diff --git a/sli/sli.h b/sli/sli.h
+index f1d89f9..4ffa56a 100644
+--- a/sli/sli.h
++++ b/sli/sli.h
+@@ -2003,10 +2003,11 @@ public:
+ 	EventTimestamp load;
+ 	EventTimestamp store;
+ 	Expression *vaddr;
++	unsigned size;
+ private:
+ 	ExpressionLastStore(EventTimestamp _load, EventTimestamp _store,
+-			    Expression *_vaddr)
+-		: load(_load), store(_store), vaddr(_vaddr)
++			    Expression *_vaddr, unsigned _size)
++		: load(_load), store(_store), vaddr(_vaddr), size(_size)
+ 	{
+ 	}
+ protected:
+@@ -2035,13 +2036,13 @@ protected:
+ 		Expression *va = vaddr->concretise();
+ 		if (va == vaddr)
+ 			return this;
+-		return get(load, store, va);
++		return get(load, store, va, size);
+ 	}
+ public:
+ 	static Expression *get(EventTimestamp load, EventTimestamp store,
+-			       Expression *vaddr)
++			       Expression *vaddr, unsigned size)
+ 	{
+-		return intern(new ExpressionLastStore(load, store, vaddr));
++		return intern(new ExpressionLastStore(load, store, vaddr, size));
+ 	}
+ 	Expression *refine(const MachineState<abstract_interpret_value> *ms,
+ 			   LogReader<abstract_interpret_value> *lf,

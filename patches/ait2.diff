@@ -1,0 +1,222 @@
+diff --git a/sli/instantiation.cpp b/sli/instantiation.cpp
+index 3d7c7e1..ea37b67 100644
+--- a/sli/instantiation.cpp
++++ b/sli/instantiation.cpp
+@@ -52,8 +52,6 @@ ait operator ==(expression_result<ait> a, expression_result<ait> b)
+ 	return a.lo == b.lo && a.hi == b.hi;
+ }
+ 
+-MK_INTERP(unsigned long);
+-
+ template <>
+ void mulls64(struct expression_result<abstract_interpret_value> *dest,
+ 	     const struct expression_result<abstract_interpret_value> &src1,
+@@ -111,7 +109,8 @@ static inline abstract_interpret_value signed_l(abstract_interpret_value x, abst
+ 	return v;
+ }
+ 	
++MK_INTERP(unsigned long);
+ MK_INTERP(abstract_interpret_value);
+-
++MK_INTERP(ait2);
+ 
+ MK_MACH_CONVERTOR(unsigned long, abstract_interpret_value);
+diff --git a/sli/sli.h b/sli/sli.h
+index d9d35f1..493fdf3 100644
+--- a/sli/sli.h
++++ b/sli/sli.h
+@@ -2807,6 +2807,26 @@ static inline void mark_as_stack(abstract_interpret_value &aiv)
+ 	aiv.isStack = true;
+ }
+ 
++#define MKOPS					\
++	OP(<<, lshift, false)			\
++	OP(>>, rshift, false)			\
++	OP(&, bitwiseand, true)			\
++	OP(|, bitwiseor, false)			\
++	OP(^, bitwisexor, false)		\
++	OP(+, plus, true)			\
++	OP(*, times, false)			\
++	OP(/, divide, false)			\
++	OP(%, modulo, false)			\
++	OP(-, subtract, true)			\
++	OP(>=, greaterthanequals, false)	\
++	OP(>, greaterthan, false)		\
++	OP(<, lessthan, false)			\
++	OP(<=, lessthanequals, false)		\
++	OP(==, equals, false)			\
++	OP(!=, notequals, false)		\
++	OP(||, logicalor, false)		\
++	OP(&&, logicaland, false)
++
+ /* We track whether an AIV is likely to point at the stack.  The rule
+    is basically that if the operator is ``stack-like'', and one of the
+    operands is probably-stack, and the other operand is a constant,
+@@ -2828,24 +2848,8 @@ static inline void mark_as_stack(abstract_interpret_value &aiv)
+ 		return res;						\
+ 	}
+ 
+-OP(<<, lshift, false)
+-OP(>>, rshift, false)
+-OP(&, bitwiseand, true)
+-OP(|, bitwiseor, false)
+-OP(^, bitwisexor, false)
+-OP(+, plus, true)
+-OP(*, times, false)
+-OP(/, divide, false)
+-OP(%, modulo, false)
+-OP(-, subtract, true)
+-OP(>=, greaterthanequals, false)
+-OP(>, greaterthan, false)
+-OP(<, lessthan, false)
+-OP(<=, lessthanequals, false)
+-OP(==, equals, false)
+-OP(!=, notequals, false)
+-OP(||, logicalor, false)
+-OP(&&, logicaland, false)
++MKOPS
++
+ #undef OP
+ 
+ static inline abstract_interpret_value operator !(const abstract_interpret_value &aiv)
+@@ -3419,4 +3423,140 @@ public:
+ 
+ bool address_is_interesting(ThreadId tid, unsigned long addr);
+ 
++class Expression2 : public GarbageCollected<Expression2>,
++		    public Named {
++public:
++	virtual unsigned long force() = 0;
++	virtual void sanity_check() {};
++};
++
++class binop2 : public Expression2 {
++};
++
++#define mk_binop(name)							\
++class name : public binop2 {						\
++public:									\
++	static Expression2 *get(Expression2 *l, Expression2 *r);	\
++	static Expression2 *get(Expression2 *l, unsigned long r);	\
++	static Expression2 *get(unsigned long l, Expression2 *r);	\
++	static unsigned long fold(unsigned long l, unsigned long r);	\
++}
++
++mk_binop(lshift2);
++mk_binop(rshift2);
++mk_binop(bitwiseand2);
++mk_binop(bitwiseor2);
++mk_binop(bitwisexor2);
++
++mk_binop(plus2);
++mk_binop(subtract2);
++
++mk_binop(times2);
++mk_binop(modulo2);
++mk_binop(divide2);
++
++mk_binop(greaterthanequals2);
++mk_binop(greaterthan2);
++mk_binop(lessthan2);
++mk_binop(lessthanequals2);
++mk_binop(equals2);
++mk_binop(notequals2);
++mk_binop(logicalor2);
++mk_binop(logicaland2);
++
++#undef mk_binop
++
++class logicalnot2 : public Expression2 {
++public:
++	static Expression2 *get(Expression2 *x);
++	static unsigned long fold(unsigned long value);
++};
++
++class ait2 : public Named {
++	unsigned long value;
++	Expression2 *orig; /* NULL for constants */
++protected:
++	char *mkName() const {
++		if (orig)
++			return my_asprintf("%lx(%s)", value, orig->name());
++		else
++			return my_asprintf("%lx", value);
++	}
++public:
++	unsigned long force() const { return value; }
++	Expression2 *origin() const { return orig; }
++	ait2(unsigned long v = 0,
++	     Expression2 *o = NULL) : value(v), orig(o) {}
++	~ait2() throw () {}
++};
++
++unsigned long force(const ait2 &x) {return x.force();}
++
++#define OP(x, name, stackLike)						\
++	static inline ait2 operator x(const ait2 &l,			\
++				      const ait2 &r)			\
++	{								\
++		Expression2 *lo = l.origin(), *ro = r.origin();		\
++		Expression2 *no;					\
++		if (lo && ro) {						\
++			no = name ## 2 :: get(lo, ro);			\
++		} else if (lo) {					\
++			no = name ## 2 :: get(lo, r.force());		\
++		} else if (ro) {					\
++			no = name ## 2 :: get(l.force(), ro);		\
++		} else {						\
++			no = NULL;					\
++		}							\
++		return ait2(l.force() x r.force(), no);			\
++	}
++MKOPS
++#undef OP
++
++static inline ait2 operator!(const ait2 &x)
++{
++	if (x.origin())
++		return ait2(!x.force(), logicalnot2::get(x.origin()));
++	else
++		return ait2(!x.force(), NULL);
++}
++
++#define UPDATE_OP(n)							\
++	static inline void operator n ## = (ait2 &l, const ait2 &r)	\
++	{								\
++		l = l n r;						\
++	}
++UPDATE_OP(&)
++UPDATE_OP(|)
++UPDATE_OP(+)
++UPDATE_OP(^)
++UPDATE_OP(-)
++UPDATE_OP(*)
++UPDATE_OP(/)
++#undef UPDATE_OP
++
++static inline bool isConstant(ait2 &x)
++{
++	return x.origin() == NULL;
++}
++
++static inline void sanity_check_ait(ait2 &x)
++{
++	if (x.origin()) {
++		x.origin()->sanity_check();
++		assert(x.force() == x.origin()->force());
++	}
++}
++
++template <>
++class MemoryChunk<ait2> : public GarbageCollected<MemoryChunk<ait2> > {
++public:
++	static const unsigned long size = MEMORY_CHUNK_SIZE;
++	MemoryChunk<ait2> *dupeSelf() const;
++	PhysicalAddress base;
++	void write(EventTimestamp when, unsigned offset, const ait2 *source, unsigned nr_bytes,
++		   ait2 storeAddr);
++	EventTimestamp read(unsigned offset, ait2 *dest, unsigned nr_bytes,
++			    ait2 *storeAddr = NULL) const;
++};
++
+ #endif /* !SLI_H__ */
