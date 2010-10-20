@@ -49,8 +49,7 @@ VAMap::AllocFlags::operator unsigned long() const
 
 const VAMap::AllocFlags VAMap::defaultFlags(false);
 
-template <typename ait>
-void VAMap::VAMapEntry::visit(VAMapEntry *&ref, PMap<ait> *pmap, HeapVisitor &hv)
+void VAMap::VAMapEntry::visit(VAMapEntry *&ref, PMap *pmap, HeapVisitor &hv)
 {
 	unsigned x;
 	hv(ref);
@@ -549,8 +548,7 @@ void VAMap::visit(HeapVisitor &hv)
 	hv(parent);
 }
 
-template <typename ait>
-void VAMap::visit(VAMap *&ref, HeapVisitor &hv, PMap<ait> *pmap)
+void VAMap::visit(VAMap *&ref, HeapVisitor &hv, PMap *pmap)
 {
 	hv(ref);
 	if (ref->root) {
@@ -660,5 +658,4 @@ VAMap::iterator::operator++(int ignore)
 	}
 }
 
-#define MK_VAMAP(t)							\
-	template void VAMap::visit<t>(VAMap *&, HeapVisitor &hv, PMap<t> *pmap)
+#define MK_VAMAP(t)

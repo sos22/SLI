@@ -4,12 +4,11 @@
 #define TRACE_PMAP 0
 #endif
 
-template <typename ait>
-PMapEntry<ait> *PMapEntry<ait>::alloc(PhysicalAddress pa,
-				      MemoryChunk<ait> *mc,
-				      bool readonly)
+PMapEntry *PMapEntry::alloc(PhysicalAddress pa,
+			    MemoryChunk<unsigned long> *mc,
+			    bool readonly)
 {
-	PMapEntry<ait> *work = new PMapEntry<ait>();
+	PMapEntry *work = new PMapEntry();
 	work->pa = pa;
 	work->mc = mc;
 	work->readonly = readonly;
@@ -18,13 +17,12 @@ PMapEntry<ait> *PMapEntry<ait>::alloc(PhysicalAddress pa,
 	return work;
 }
 
-template <typename ait>
-PMapEntry<ait> *PMap<ait>::findPme(PhysicalAddress pa, unsigned h) const
+PMapEntry *PMap::findPme(PhysicalAddress pa, unsigned h) const
 {
-	PMapEntry<ait> *pme;
+	PMapEntry *pme;
 	for (pme = heads[h];
 	     pme != NULL && (pa < pme->pa ||
-			     pa >= pme->pa + MemoryChunk<ait>::size);
+			     pa >= pme->pa + MemoryChunk<unsigned long>::size);
 	     pme = pme->next)
 		;
 	if (!pme)
@@ -43,11 +41,10 @@ PMapEntry<ait> *PMap<ait>::findPme(PhysicalAddress pa, unsigned h) const
 	return pme;
 }
 
-template <typename ait>
-MemoryChunk<ait> *PMap<ait>::lookup(PhysicalAddress pa, unsigned long *mc_start)
+MemoryChunk<unsigned long> *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 {
 	unsigned h = paHash(pa);
-	PMapEntry<ait> *pme = findPme(pa, h);
+	PMapEntry *pme = findPme(pa, h);
 	if (pme) {
 		if (pme->readonly) {
 #if TRACE_PMAP
@@ -65,12 +62,12 @@ MemoryChunk<ait> *PMap<ait>::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	} else if (!parent) {
 		return NULL;
 	} else {
-		const MemoryChunk<ait> *parent_mc = parent->lookupConst(pa, mc_start, false);
+		const MemoryChunk<unsigned long> *parent_mc = parent->lookupConst(pa, mc_start, false);
 		if (!parent_mc)
 			return NULL;
 
-		PMapEntry<ait> *newPme;
-		newPme = PMapEntry<ait>::alloc(pa - *mc_start, parent_mc->dupeSelf(), false);
+		PMapEntry *newPme;
+		newPme = PMapEntry::alloc(pa - *mc_start, parent_mc->dupeSelf(), false);
 		newPme->next = heads[h];
 		newPme->pprev = &heads[h];
 		if (newPme->next)
@@ -85,12 +82,11 @@ MemoryChunk<ait> *PMap<ait>::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	}
 }
 
-template <typename ait>
-const MemoryChunk<ait> *PMap<ait>::lookupConst(PhysicalAddress pa, unsigned long *mc_start,
-					       bool pull_up) const
+const MemoryChunk<unsigned long> *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start,
+						    bool pull_up) const
 {
 	unsigned h = paHash(pa);
-	PMapEntry<ait> *pme = findPme(pa, h);
+	PMapEntry *pme = findPme(pa, h);
 	if (pme) {
 		*mc_start = pa - pme->pa;
 #if TRACE_PMAP
@@ -98,10 +94,10 @@ const MemoryChunk<ait> *PMap<ait>::lookupConst(PhysicalAddress pa, unsigned long
 #endif
 		return pme->mc;
 	} else if (parent) {
-		const MemoryChunk<ait> *parent_mc = parent->lookupConst(pa, mc_start, false);
+		const MemoryChunk<unsigned long> *parent_mc = parent->lookupConst(pa, mc_start, false);
 		if (pull_up) {
-			PMapEntry<ait> *newPme;
-			newPme = PMapEntry<ait>::alloc(pa - *mc_start, const_cast<MemoryChunk<ait> *>(parent_mc), true);
+			PMapEntry *newPme;
+			newPme = PMapEntry::alloc(pa - *mc_start, const_cast<MemoryChunk<unsigned long> *>(parent_mc), true);
 			newPme->next = heads[h];
 			newPme->pprev = &heads[h];
 			if (newPme->next)
@@ -118,13 +114,12 @@ const MemoryChunk<ait> *PMap<ait>::lookupConst(PhysicalAddress pa, unsigned long
 	}
 }
 
-template <typename ait>
-PhysicalAddress PMap<ait>::introduce(MemoryChunk<ait> *mc)
+PhysicalAddress PMap::introduce(MemoryChunk<unsigned long> *mc)
 {
 	PhysicalAddress pa = nextPa;
 	mc->base = pa;
-	nextPa = nextPa + MemoryChunk<ait>::size;
-	PMapEntry<ait> *pme = PMapEntry<ait>::alloc(pa, mc, false);
+	nextPa = nextPa + MemoryChunk<unsigned long>::size;
+	PMapEntry *pme = PMapEntry::alloc(pa, mc, false);
 	unsigned h = paHash(pa);
 	pme->next = heads[h];
 	pme->pprev = &heads[h];
@@ -137,46 +132,42 @@ PhysicalAddress PMap<ait>::introduce(MemoryChunk<ait> *mc)
 	return pa;
 }
 
-template <typename ait>
-PMap<ait> *PMap<ait>::empty()
+PMap *PMap::empty()
 {
-	PMap<ait> *work = new PMap<ait>();
+	PMap *work = new PMap();
 	work->nextPa._pa = 0xbeef0000;
 	return work;	
 }
 
-template <typename ait>
-PMap<ait> *PMap<ait>::dupeSelf(void) const
+PMap *PMap::dupeSelf(void) const
 {
-	PMap<ait> *work = empty();
+	PMap *work = empty();
 	
 	work->nextPa = nextPa;
-	work->parent = (PMap<ait> *)this;
+	work->parent = (PMap *)this;
 	return work;
 }
 
-template <typename ait>
-unsigned PMap<ait>::paHash(PhysicalAddress pa)
+unsigned PMap::paHash(PhysicalAddress pa)
 {
-	return (pa._pa / MemoryChunk<ait>::size) % nrHashBuckets;
+	return (pa._pa / MemoryChunk<unsigned long>::size) % nrHashBuckets;
 }
 
-template <typename ait>
-void PMap<ait>::visitPA(PhysicalAddress pa, HeapVisitor &hv)
+void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 {
 	unsigned h = paHash(pa);
-	PMap<ait> *cursor = this;
+	PMap *cursor = this;
 
 	while (1) {
 		assert(cursor);
 		/* Double indirection because the hv() might want to
 		   relocate it. */
-		PMapEntry<ait> **pme;
+		PMapEntry **pme;
 	
 		pme = &cursor->heads[h];
 		while (*pme) {
 			if ( pa >= (*pme)->pa &&
-			     pa < (*pme)->pa + MemoryChunk<ait>::size ) {
+			     pa < (*pme)->pa + MemoryChunk<unsigned long>::size ) {
 				hv(*pme);
 				return;
 			}
@@ -188,40 +179,13 @@ void PMap<ait>::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 	}
 }
 
-template <typename ait>
-void PMap<ait>::visit(HeapVisitor &hv)
+void PMap::visit(HeapVisitor &hv)
 {
 	hv(parent);
 }
 
-template <typename ait> template <typename new_type>
-PMap<new_type> *PMap<ait>::abstract() const
-{
-	PMap<new_type> *work = new PMap<new_type>();
-	work->nextPa = nextPa;
-	if (parent)
-		work->parent = parent->abstract<new_type>();
-	else
-		work->parent = NULL;
-	for (unsigned x = 0; x < nrHashBuckets; x++) {
-		PMapEntry<new_type> **p = &work->heads[x];
-		for (PMapEntry<ait> *src = heads[x];
-		     src;
-		     src = src->next) {
-			PMapEntry<new_type> *d;
-			d = PMapEntry<new_type>::alloc(src->pa,
-						       src->mc->abstract<new_type>(),
-						       src->readonly);
-			d->pprev = p;
-			*p = d;
-			p = &d->next;
-		}
-	}
-	return work;
-}
-
-template <typename ait> void
-PMapEntry<ait>::relocate(PMapEntry<ait> *target, size_t sz)
+void
+PMapEntry::relocate(PMapEntry *target, size_t sz)
 {
 	if (target->next)
 		target->next->pprev = &target->next;
@@ -229,8 +193,8 @@ PMapEntry<ait>::relocate(PMapEntry<ait> *target, size_t sz)
 	memset(this, 0x67, sizeof(*this));
 }
 
-template <typename ait> void
-PMap<ait>::relocate(PMap<ait> *target, size_t sz)
+void
+PMap::relocate(PMap *target, size_t sz)
 {
 	/* The pmap head pointers are slightly weak, in the sense that
 	   just being in the pmap isn't enough to keep them live (for
@@ -248,16 +212,4 @@ PMap<ait>::relocate(PMap<ait> *target, size_t sz)
 	memset(heads, 0x66, sizeof(heads));
 }
 
-#define MK_PMAP(t)							\
-	template MemoryChunk<t> *PMap<t>::lookup(PhysicalAddress pa,	\
-						 unsigned long *mc_start); \
-	template const MemoryChunk<t> *PMap<t>::lookupConst(PhysicalAddress pa, \
-							    unsigned long *mc_start, \
-							    bool pull_up) const; \
-	template PhysicalAddress PMap<t>::introduce(MemoryChunk<t> *mc); \
-	template PMap<t> *PMap<t>::empty();				\
-	template PMap<t> *PMap<t>::dupeSelf() const;			\
-	template void PMap<t>::visitPA(PhysicalAddress pa,		\
-				       HeapVisitor &hv);		\
-	template void PMap<t>::visit(HeapVisitor &hv)
-
+#define MK_PMAP(t)

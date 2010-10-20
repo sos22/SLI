@@ -5,7 +5,7 @@ class VAPMap {
 public:
 	static VexAllocTypeWrapper<VAPMap> allocator;
 	VAMap *vamap;
-	PMap<unsigned long> *pmap;
+	PMap *pmap;
 	void visit(HeapVisitor &hv) {
 		hv(pmap);
 		vamap->visit(vamap, hv, pmap);
@@ -20,7 +20,7 @@ main()
 {
 	vexInitHeap();
 
-	PMap<unsigned long> *pmap = PMap<unsigned long>::empty();
+	PMap *pmap = PMap::empty();
 	VAMap *vamap = VAMap::empty();
 
 	printf("Check that translating bad addresses gives back false\n");

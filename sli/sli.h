@@ -283,6 +283,7 @@ public:
 
 class MachineState;
 class AddressSpace;
+class PMap;
 
 template <typename ait> class ThreadEvent;
 template <typename ait> class LogRecordInitialRegisters;
@@ -418,8 +419,6 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait> class PMap;
-
 class VAMap {
 public:
 	class Protection {
@@ -471,7 +470,7 @@ public:
 					 Protection prot,
 					 AllocFlags alf);
 		void split(unsigned long where);
-		template <typename ait> static void visit(VAMapEntry *&ref, PMap<ait> *pmap, HeapVisitor &hv);
+		static void visit(VAMapEntry *&ref, PMap *pmap, HeapVisitor &hv);
 		VAMapEntry *promoteSmallest();
 		VAMapEntry *dupeSelf() const;
 		void sanityCheck(unsigned long max = 0,
@@ -524,7 +523,7 @@ public:
 
 	static VAMap *empty();
 	VAMap *dupeSelf();
-	template <typename ait> static void visit(VAMap *&ref, HeapVisitor &hv, PMap<ait> *pmap);
+	static void visit(VAMap *&ref, HeapVisitor &hv, PMap *pmap);
 	void visit(HeapVisitor &hv);
 
 	void sanityCheck() const;
@@ -576,27 +575,25 @@ private:
       reference them.  The helper function visitPA is provided to help
       with this: it keeps both the mapping and the memory chunk live.
 */
-template <typename ait>
-class PMapEntry : public GarbageCollected<PMapEntry<ait> > {
+class PMapEntry : public GarbageCollected<PMapEntry> {
 public:
 	PhysicalAddress pa;
-	MemoryChunk<ait> *mc;
-	PMapEntry<ait> *next;
-	PMapEntry<ait> **pprev;
+	MemoryChunk<unsigned long> *mc;
+	PMapEntry *next;
+	PMapEntry **pprev;
 	bool readonly;
-	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk<ait> *mc, bool readonly);
+	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk<unsigned long> *mc, bool readonly);
 	void visit(HeapVisitor &hv) { hv(mc); }
 	void destruct() {
 		*pprev = next;
 		if (next)
 			next->pprev = pprev;
 	}
-	void relocate(PMapEntry<ait> *target, size_t sz);
+	void relocate(PMapEntry *target, size_t sz);
 	NAMED_CLASS
 };
 
-template <typename ait>
-class PMap : public GarbageCollected<PMap<ait> > {
+class PMap : public GarbageCollected<PMap> {
 public:
 	static const unsigned nrHashBuckets = 1024;
 	static unsigned paHash(PhysicalAddress pa);
@@ -604,33 +601,32 @@ public:
 	/* mutable because we do pull-to-front in the lookup methods.
 	 * The denotation of the mapping is unchanged, but its
 	 * physical structure is. */
-	mutable PMapEntry<ait> *heads[nrHashBuckets];
-	PMap<ait> *parent;
+	mutable PMapEntry *heads[nrHashBuckets];
+	PMap *parent;
 
 private:
-	PMapEntry<ait> *findPme(PhysicalAddress pa, unsigned h) const;
+	PMapEntry *findPme(PhysicalAddress pa, unsigned h) const;
 public:
 	/* Look up the memory chunk for a physical address.  On
 	   success, *mc_start is set to the offset of the address in
 	   the chunk. */
-	MemoryChunk<ait> *lookup(PhysicalAddress pa, unsigned long *mc_start);
-	const MemoryChunk<ait> *lookupConst(PhysicalAddress pa, unsigned long *mc_start,
+	MemoryChunk<unsigned long> *lookup(PhysicalAddress pa, unsigned long *mc_start);
+	const MemoryChunk<unsigned long> *lookupConst(PhysicalAddress pa, unsigned long *mc_start,
 					    bool pull_up = true) const;
 
 	/* Add a new chunk to the map, and return a newly-assigned
 	   physical address for it. */
-	PhysicalAddress introduce(MemoryChunk<ait> *mc);
+	PhysicalAddress introduce(MemoryChunk<unsigned long> *mc);
 
-	static PMap<ait> *empty();
-	PMap<ait> *dupeSelf() const;
+	static PMap *empty();
+	PMap *dupeSelf() const;
 
 	void visitPA(PhysicalAddress pa, HeapVisitor &hv);
 	void visit(HeapVisitor &hv);
-	void relocate(PMap<ait> *target, size_t sz);
+	void relocate(PMap *target, size_t sz);
 
 	void destruct() {}
 
-	template <typename newtype> PMap<newtype> *abstract() const;
 	NAMED_CLASS
 };
 
@@ -1832,7 +1828,7 @@ public:
 	unsigned long brkptr;
 	unsigned long brkMapPtr;
 	VAMap *vamap;
-	PMap<unsigned long> *pmap;
+	PMap *pmap;
 	unsigned long client_free;
 
 	bool isOnFreeList(unsigned long start, unsigned long end,

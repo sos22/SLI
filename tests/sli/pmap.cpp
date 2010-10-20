@@ -8,7 +8,7 @@
 struct keeper {
 	PhysicalAddress pa1;
 	PhysicalAddress pa2;
-	PMap<unsigned long> *pmap;
+	PMap *pmap;
 };
 
 DECLARE_VEX_TYPE(keeper);
@@ -23,7 +23,7 @@ main()
 {
 	vexInitHeap();
 
-	PMap<unsigned long> *pmap1 = PMap<unsigned long>::empty();
+	PMap *pmap1 = PMap::empty();
 
 	MemoryChunk<unsigned long> *mc1;
 
@@ -107,8 +107,8 @@ main()
 		b[x] = "Hello world"[x];
 	mc1->write(EventTimestamp::invalid, 0, b, 11, 0);
 	pa1 = pmap1->introduce(mc1);
-	PMap<unsigned long> *pmap2 = pmap1->dupeSelf();
-	PMap<unsigned long> *pmap3 = pmap1->dupeSelf();
+	PMap *pmap2 = pmap1->dupeSelf();
+	PMap *pmap3 = pmap1->dupeSelf();
 
 	printf("Check forked state can see parent's MCs\n");
 	const MemoryChunk<unsigned long> *cmc = pmap2->lookupConst(pa1, &off1);

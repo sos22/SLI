@@ -380,7 +380,7 @@ AddressSpace *AddressSpace::initialAddressSpace(unsigned long _initialBrk)
 	AddressSpace *work = new AddressSpace();
 	work->brkptr = initialBrk;
 	work->brkMapPtr = initialBrk /*+ 4096*/;
-	work->pmap = PMap<unsigned long>::empty();
+	work->pmap = PMap::empty();
 	work->vamap = VAMap::empty();
 	return work;	
 }
