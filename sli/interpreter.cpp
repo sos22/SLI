@@ -2037,23 +2037,6 @@ void Interpreter::runToEvent(EventTimestamp end,
 	}
 }
 
-void visit_expression_result_array(void *_ctxt,
-				   HeapVisitor &hv)
-{
-	unsigned nr_entries = *(unsigned *)_ctxt;
-	expression_result *arr = (expression_result*)((unsigned *)_ctxt + 1);
-	for (unsigned x = 0; x < nr_entries; x++)
-		arr[x].visit(hv);
-}
-
-void destruct_expression_result_array(void *_ctxt)
-{
-	unsigned nr_entries = *(unsigned *)_ctxt;
-	expression_result *arr = (expression_result*)((unsigned *)_ctxt + 1);
-	for (unsigned x = 0; x < nr_entries; x++)
-		arr[x].~expression_result();
-}
-
 #define MK_INTERPRETER(t)
 
 

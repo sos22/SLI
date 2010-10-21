@@ -395,7 +395,6 @@ void AddressSpace::visit(HeapVisitor &hv)
 {
 	hv(pmap);
 	vamap->visit(vamap, hv, pmap);
-	visit_aiv(client_free, hv);
 	for (unsigned x = 0; x < nr_trans_hash_slots; x++)
 		hv(trans_hash[x]);
 }

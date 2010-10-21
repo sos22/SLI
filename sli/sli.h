@@ -91,10 +91,6 @@ public:
 	}
 };
 
-static inline void visit_aiv(unsigned long, HeapVisitor &)
-{
-}
-
 static inline char *name_aiv(unsigned long x)
 {
 	return vex_asprintf("%lx", x);
@@ -209,7 +205,6 @@ public:
 	unsigned long lo;
 	unsigned long hi;
 	expression_result() : Named() {}
-	void visit(HeapVisitor &hv) { visit_aiv(lo, hv); visit_aiv(hi, hv); }
 };
 
 class RegisterSet {
@@ -228,11 +223,6 @@ public:
 	unsigned long &rip() { return get_reg(REGISTER_IDX(RIP)); }
 	unsigned long &rsp() { return get_reg(REGISTER_IDX(RSP)); }
 
-	void visit(HeapVisitor &hv) {
-		for (unsigned x = 0; x < NR_REGS; x++)
-			visit_aiv(registers[x], hv);
-	}
-
 	void pretty_print() const {
 		for (unsigned x = 0; x < NR_REGS; x++)
 			printf("\treg%d: %s\n", x, name_aiv(registers[x]));
@@ -247,13 +237,6 @@ public:
 		content.resize(new_size);
 	}
 	expression_result &operator[](unsigned idx) { return content[idx]; }
-	void visit(HeapVisitor &hv) {
-		for (std::vector<expression_result >::iterator it = content.begin();
-		     it != content.end();
-		     it++)
-			it->visit(hv);
-
-	}
 	expression_result_array() :
 		content()
 	{
@@ -961,7 +944,7 @@ public:
 	 * from a class which has a private destructor. */
 	~ThreadEvent() { abort(); }
 
-	virtual void visit(HeapVisitor &hv){};
+	virtual void visit(HeapVisitor &hv){}
 	virtual void destruct() {}
 
 	NAMED_CLASS
@@ -1045,7 +1028,6 @@ public:
 	{
 		return new LoadEvent(when, _tmp, _addr, _size);
 	}
-	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); ThreadEvent::visit(hv); }
 	NAMED_CLASS
 };
 
@@ -1068,7 +1050,6 @@ public:
 		return new StoreEvent(when, _addr, _size, data);
 	}
 
-	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); data.visit(hv); ThreadEvent::visit(hv); }
 	void destruct() { data.~expression_result(); ThreadEvent::destruct(); }
 	NAMED_CLASS
 };
@@ -1109,16 +1090,6 @@ public:
 					    _allowRipMismatch);
 	}
 
-	void visit(HeapVisitor &hv)
-	{
-		visit_aiv(rip, hv);
-		visit_aiv(reg0, hv);
-		visit_aiv(reg1, hv);
-		visit_aiv(reg2, hv);
-		visit_aiv(reg3, hv);
-		visit_aiv(reg4, hv);
-		ThreadEvent::visit(hv);
-	}
 	NAMED_CLASS
 };
 
@@ -1173,13 +1144,6 @@ public:
 		return new CasEvent(when, _dest, _addr, _data, _expected, _size);
 	}
 
-	void visit(HeapVisitor &hv)
-	{
-		addr.visit(hv);
-		data.visit(hv);
-		expected.visit(hv);
-		ThreadEvent::visit(hv);
-	}
 	void destruct()
 	{
 		addr.~expression_result();
@@ -1262,11 +1226,6 @@ public:
 		return new SignalEvent(when, _signr, _virtaddr);
 	}
 
-	void visit(HeapVisitor &hv)
-	{
-		visit_aiv(virtaddr, hv);
-		ThreadEvent::visit(hv);
-	}
 	NAMED_CLASS
 };
 
@@ -1293,7 +1252,7 @@ public:
 	}
 	virtual bool isLoad() = 0;
 	void dump() const { printf("%s\n", name()); }
-	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); }
+	void visit(HeapVisitor &hv) { }
 	void destruct() {}
 	NAMED_CLASS
 };
@@ -1324,7 +1283,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
 class MemoryAccessLoad : public MemoryAccess {
@@ -1367,7 +1325,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
 class MemoryAccessStore : public MemoryAccess {
@@ -1445,15 +1402,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv)
-	{
-		visit_aiv(rip, hv);
-		visit_aiv(reg0, hv);
-		visit_aiv(reg1, hv);
-		visit_aiv(reg2, hv);
-		visit_aiv(reg3, hv);
-		visit_aiv(reg4, hv);
-	}
 };
 
 class LogRecordSyscall : public LogRecord {
@@ -1479,14 +1427,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv)
-	{
-		visit_aiv(sysnr, hv);
-		visit_aiv(res, hv);
-		visit_aiv(arg1, hv);
-		visit_aiv(arg2, hv);
-		visit_aiv(arg3, hv);
-	}
 };
 
 class LogRecordMemory : public LogRecord {
@@ -1517,10 +1457,6 @@ public:
 	void destruct() { this->~LogRecordMemory(); }
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv)
-	{
-		visit_aiv(start, hv);
-	}
 };
 
 class LogRecordRdtsc : public LogRecord {
@@ -1539,7 +1475,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv) { visit_aiv(tsc, hv); }
 };
 
 class LogRecordSignal : public LogRecord {
@@ -1566,12 +1501,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv)
-	{
-		visit_aiv(rip, hv);
-		visit_aiv(err, hv);
-		visit_aiv(virtaddr, hv);
-	}
 };
 
 class LogRecordAllocateMemory : public LogRecord {
@@ -1600,7 +1529,6 @@ public:
 	}      
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv){ visit_aiv(start, hv); visit_aiv(size, hv); }
 };
 
 class LogRecordInitialRegisters : public LogRecord {
@@ -1636,7 +1564,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv){ visit_aiv(brk, hv); }
 };
 
 class LogRecordVexThreadState : public LogRecord {
@@ -1652,7 +1579,6 @@ public:
 				unsigned _statement_nr, expression_result_array _tmp);
 	void *marshal(unsigned *sz) const;
 	unsigned marshal_size() const;
-	void visit(HeapVisitor &hv){ tmp.visit(hv); }
 };
 
 template <typename ait>

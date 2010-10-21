@@ -93,13 +93,6 @@ void Thread::imposeState(VexPtr<Thread > &ths,
 void Thread::visit(HeapVisitor &hv)
 {
 	hv(currentIRSB);
-	temporaries.visit(hv);
-	regs.visit(hv);
-	visit_aiv(currentControlCondition, hv);
-	visit_aiv(clear_child_tid, hv);
-	visit_aiv(robust_list, hv);
-	visit_aiv(set_child_tid, hv);
-	visit_aiv(futex_block_address, hv);
 
 	for (class ring_buffer<snapshot_log_entry, 2>::iterator it = snapshotLog.begin();
 	     it != snapshotLog.end();
