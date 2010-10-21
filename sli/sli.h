@@ -1728,15 +1728,6 @@ static inline unsigned long force(unsigned long x)
 	return x;
 }
 
-static inline bool is_stack(unsigned long x)
-{
-	return false;
-}
-
-static inline void mark_as_stack(unsigned long x)
-{
-}
-
 void gdb_concrete(const MachineState *ms);
 void gdb(void);
 void dbg_break(const char *msg, ...);
