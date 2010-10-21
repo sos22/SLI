@@ -51,8 +51,8 @@ gc_map<ThreadId, Maybe<unsigned> > *MemTracePool::firstRacingAccessMap()
 				     other_access < other_v->size();
 				     other_access++) {
 					MemoryAccess *other_ma = (*other_v)[other_access];
-					if (force(other_ma->addr + mkConst<unsigned long>(other_ma->size) <= ma->addr ||
-						  other_ma->addr >= ma->addr + mkConst<unsigned long>(ma->size)) )
+					if (force(other_ma->addr + other_ma->size <= ma->addr ||
+						  other_ma->addr >= ma->addr + ma->size) )
 						continue;
 					if (other_ma->isLoad() && ma->isLoad())
 						continue;

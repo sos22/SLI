@@ -165,7 +165,7 @@ public:
 			haveNewRip = false;
 		} else {
 			haveNewRip = true;
-			newRip = mkConst<ait>(strtol(buf, NULL, 16));
+			newRip = strtol(buf, NULL, 16);
 		}
 	}
 };
@@ -181,7 +181,7 @@ GetMemoryCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 {
 	ait *membuf = (ait *)malloc(size * sizeof(ait));
 	try {
-		ms->addressSpace->readMemory(mkConst<ait>(addr), size, membuf, true, NULL);
+		ms->addressSpace->readMemory(addr, size, membuf, true, NULL);
 	} catch (BadMemoryException<ait> exc) {
 		this->sendResponse("E12");
 		free(membuf);

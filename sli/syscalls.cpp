@@ -49,26 +49,26 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 	*endOffset = startOffset;
 }
 
-template<typename ait> static void
+static void
 handle_clone(AddressSpace *addrSpace,
 	     Thread *thr,
 	     MachineState *&mach,
-	     ait flags,
-	     ait childRsp,
-	     ait parent_tidptr,
-	     ait child_tidptr,
-	     ait set_tls,
+	     unsigned long flags,
+	     unsigned long childRsp,
+	     unsigned long parent_tidptr,
+	     unsigned long child_tidptr,
+	     unsigned long set_tls,
 	     unsigned pid,
 	     LogReaderPtr ptr)
 {
-	if (force(flags == mkConst<ait>(CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD))) {
+	if (force(flags == (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD))) {
 		/* Simple fork() -> don't need to do anything */
 		return;
 	}
 
-	if (force(flags != mkConst<ait>((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-					 CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
-					 CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)))) {
+	if (force(flags != ((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+			     CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
+			     CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)))) {
 		printf("can't handle clone flags %lx\n", force(flags));
 		abort();
 	}
@@ -76,24 +76,24 @@ handle_clone(AddressSpace *addrSpace,
 	/* Create a new thread.  This is, as you might expect, closely
 	   modelled on the kernel's version of the same process. */
 	Thread *newThread = thr->fork(pid);
-	if (force(flags & mkConst<ait>(CLONE_CHILD_SETTID)))
+	if (force(flags & CLONE_CHILD_SETTID))
 		newThread->set_child_tid = child_tidptr;
-	if (force(flags & mkConst<ait>(CLONE_CHILD_CLEARTID)))
+	if (force(flags & CLONE_CHILD_CLEARTID))
 		newThread->clear_child_tid = child_tidptr;
-	newThread->robust_list = mkConst<ait>(0);
+	newThread->robust_list = 0;
 #if 0
 	if (flags & CLONE_VM)
 		newThread->sas_ss_sp = newThread->sas_ss_size = 0;
 	newThread->exit_signal = (flags & CLONE_THREAD) ? -1 : (clone_flags & CSIGNAL);
 #endif
-	newThread->regs.set_reg(REGISTER_IDX(RAX), mkConst<ait>(0));
+	newThread->regs.set_reg(REGISTER_IDX(RAX), 0);
 	newThread->regs.set_reg(REGISTER_IDX(RSP), childRsp);
-	if (force(flags & mkConst<ait>(CLONE_SETTLS)))
+	if (force(flags & CLONE_SETTLS))
 		newThread->regs.set_reg(REGISTER_IDX(FS_ZERO), set_tls);
 
 	mach->registerThread(newThread);
 
-	newThread->snapshotLog.push(typename Thread::snapshot_log_entry(mach, ptr));
+	newThread->snapshotLog.push(Thread::snapshot_log_entry(mach, ptr));
 	mach = mach->dupeSelf();
 
 	printf("Clone created thread %d from %d\n", newThread->tid._tid(),
@@ -162,7 +162,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		unsigned long prot = args[2];
 		
 		if (!isErrnoSysres(force(lrs->res))) {
-			length = (length + mkConst<unsigned long>(4095)) & ~mkConst<unsigned long>(4095);
+			length = (length + 4095ul) & ~4095ul;
 			addrSpace->allocateMemory(addr, length, force(prot));
 		}
 		break;
@@ -176,15 +176,15 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	}
 	case __NR_munmap: { /* 11 */
-		addrSpace->releaseMemory(args[0], (args[1] + mkConst<unsigned long>(4095)) & mkConst<unsigned long>(~4095));
+		addrSpace->releaseMemory(args[0], (args[1] + 4095ul) & ~4095);
 		break;
 	}
 	case __NR_brk: /* 12 */
-		res = mkConst<unsigned long>(addrSpace->setBrk(args[0]));
+		res = addrSpace->setBrk(args[0]);
 		break;
 	case __NR_rt_sigaction: /* 13 */
 		if (!isErrnoSysres(force(lrs->res)) &&
-		    force(args[1] != mkConst<unsigned long>(0))) {
+		    force(args[1] != 0ul)) {
 			unsigned long buf[sizeof(struct sigaction)];
 			addrSpace->readMemory(args[1],
 					      sizeof(struct sigaction),
@@ -265,7 +265,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		thr->exitted = true;
 		if (force(thr->clear_child_tid)) {
 			struct expression_result v;
-			v.lo = mkConst<unsigned long>(0);
+			v.lo = 0ul;
 			try {
 				addrSpace->store(EventTimestamp(thr->tid,
 								thr->nrEvents,
@@ -335,9 +335,9 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
-		switch (force(args[1] & mkConst<unsigned long>(FUTEX_CMD_MASK))) {
+		switch (force(args[1] & FUTEX_CMD_MASK)) {
 		case FUTEX_WAIT:
-			if (force(res == mkConst<unsigned long>(0)))
+			if (force(res == 0ul))
 				thr->futexBlock(args[0]);
 			break;
 		case FUTEX_WAKE:
@@ -363,7 +363,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	case __NR_tgkill: /* 234 */
 		/* Hack: assume that this came from raise() */
-		evt = SignalEvent::get(thr->bumpEvent(mach), force(args[2]), mkConst<unsigned long>(0));
+		evt = SignalEvent::get(thr->bumpEvent(mach), force(args[2]), 0ul);
 		break;
 
 	case __NR_set_robust_list: /* 273 */
@@ -397,7 +397,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 	args[4] = thr->regs.get_reg(REGISTER_IDX(R8));
 	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
-	res = mkConst<unsigned long>(-ENOSYS);
+	res = -ENOSYS;
 	switch (force(sysnr)) {
 	case __NR_write: { /* 1 */
 		printf("write(%ld, 0x%lx, %ld)\n",
@@ -420,12 +420,12 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		printf("Can't fake open syscall (file %s)\n",
 		       path);
 		free(path);
-		res = mkConst<unsigned long>(-ENOENT);
+		res = -ENOENT;
 		break;
 	}
 
 	case __NR_close: /* 3 */
-		res = mkConst<unsigned long>(0);
+		res = 0ul;
 		break;
 
 	case __NR_poll: { /* 7 */
@@ -445,12 +445,12 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		result = 0;
 		for (unsigned x = 0; x < n_fds && !fault; x++) {
 			fault |= ms->addressSpace->copyFromClient(this->when,
-								  args[0] + mkConst<unsigned long>(x * sizeof(pfd)),
+								  args[0] + x * sizeof(pfd),
 								  sizeof(pfd),
 								  &pfd);
 			pfd.revents = pfd.events & POLLOUT;
 			fault |= ms->addressSpace->copyToClient(this->when,
-								args[0] + mkConst<unsigned long>(x * sizeof(pfd)),
+								args[0] + x * sizeof(pfd),
 								sizeof(pfd),
 								&pfd);
 			if (pfd.revents)
@@ -458,13 +458,13 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		}
 
 		if (fault)
-			res = mkConst<unsigned long>(-EFAULT);
+			res = -EFAULT;
 		else if (result != 0)
-			res = mkConst<unsigned long>(result);
+			res = result;
 		else {
 			printf("thread %d appears to have gone idle...\n",
 			       thr->tid._tid());
-			res = mkConst<unsigned long>(-ENOSYS);
+			res = -ENOSYS;
 			thr->idle = true;
 		}
 		break;
@@ -478,39 +478,39 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		written = 0;
 		for (unsigned x = 0; x < nr_iovs; x++) {
 			ms->addressSpace->copyFromClient(this->when,
-							 args[0] + mkConst<unsigned long>(x * sizeof(iov)),
+							 args[0] + x * sizeof(iov),
 							 sizeof(iov),
 							 &iov);
 			written += iov.iov_len;
 		}
-		res = mkConst<unsigned long>(written);
+		res = written;
 		break;
 	}
 
 	case __NR_stat: /* 4 */
 	case __NR_lstat: /* 6 */
 	case __NR_access: /* 21 */
-		res = mkConst<unsigned long>(-ENOENT);
+		res = -ENOENT;
 		break;
 
 	case __NR_select: { /* 23 */
 		/* Leave the masks unchanged, so every fd which was
 		 * polled on is flagged as ready, and return 1, so
 		 * that the client actually goes and looks at them. */
-		res = mkConst<unsigned long>(1);		
+		res = 1ul;		
 		break;
 	}
 
 	case __NR_nanosleep: /* 35 */
 		printf("Thread %d sleeping...\n", thr->tid._tid());
 		thr->idle = true;
-		res = mkConst<unsigned long>(0);
+		res = 0ul;
 		break;
 
 	case __NR_mkdir: /* 83 */
 	case __NR_rmdir: /* 84 */
 	case __NR_unlink: /* 87 */
-		res = mkConst<unsigned long>(0);
+		res = 0ul;
 		break;
 
 	case __NR_gettimeofday: { /* 96 */
@@ -527,9 +527,9 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 			fault |= ms->addressSpace->copyToClient(this->when, args[1], sizeof(tv),
 								&tv);
 		if (fault)
-			res = mkConst<unsigned long>(-EFAULT);
+			res = -EFAULT;
 		else
-			res = mkConst<unsigned long>(0);
+			res = 0ul;
 		break;
 	}
 
@@ -543,14 +543,14 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 						       false,
 						       thr);
 			if (force(m.lo) == force(args[2])) {
-				res = mkConst<unsigned long>(0);
+				res = 0ul;
 			} else {
-				res = mkConst<unsigned long>(-EWOULDBLOCK);
+				res = -EWOULDBLOCK;
 			}
 			break;
 		}
 		case FUTEX_WAKE: {
-			res = mkConst<unsigned long>(ms->futexWake(args[0], false));
+			res = ms->futexWake(args[0], false);
 			break;
 		}
 		default:
@@ -566,13 +566,13 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		clock_gettime(force(args[0]), &ts);
 		ms->addressSpace->copyToClient(this->when, args[1], sizeof(ts),
 					       &ts);
-		res = mkConst<unsigned long>(0);
+		res = 0ul;
 		break;
 	}
 
 	case __NR_exit: /* 60 */
 	case __NR_exit_group: { /* 231 */
-		res = mkConst<unsigned long>(0);
+		res = 0ul;
 		break;
 	}
 

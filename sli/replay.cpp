@@ -350,7 +350,7 @@ InterpretResult SignalEvent::fake(MachineState *ms, LogRecord **lr)
 {
 	Thread *thr = ms->findThread(this->when.tid);
 	if (lr)
-		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, mkConst<unsigned long>(0), virtaddr);
+		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, 0, virtaddr);
 	printf("Crash in thread %d signal %d\n", thr->tid._tid(),signr);
 	thr->crashed = true;
 	return InterpretResultCrash;

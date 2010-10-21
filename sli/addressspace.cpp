@@ -48,7 +48,7 @@ AddressSpace::copyToClient(EventTimestamp when, unsigned long start, unsigned si
 	bool fault;
 
 	for (unsigned x = 0; x < size; x++)
-		buf[x] = mkConst<unsigned long>( ((unsigned char *)contents)[x] );
+		buf[x] = ((unsigned char *)contents)[x];
 	fault = false;
 	try {
 		writeMemory(when, start, size, buf, false, NULL);
@@ -89,7 +89,7 @@ AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned si
 	unsigned long start = force(_start);
 	unsigned off = 0;
 	if (thr) {
-		checkFreeList(_start, _start + mkConst<unsigned long>(size), thr->tid, EventTimestamp::invalid);
+		checkFreeList(_start, _start + size, thr->tid, EventTimestamp::invalid);
 		if (start == 0x456e9e0)
 			printf("Thread %d writes %d to %lx\n", thr->tid._tid(),
 			       size, start);
@@ -109,7 +109,7 @@ AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned si
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
 			mc->write(when, mc_start, contents, to_copy_this_time,
-				  _start + mkConst<unsigned long>(off));
+				  _start + off);
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
@@ -136,33 +136,33 @@ AddressSpace::load(EventTimestamp when,
 		new (&b[x]) unsigned long();
 	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr, &storeAddr);
 	expression_result res;
-	res.lo = mkConst<unsigned long>(0);
-	res.hi = mkConst<unsigned long>(0);
+	res.lo = 0ul;
+	res.hi = 0ul;
 	switch(size) {
 	case 16:
 		res.hi = b[8] +
-			(b[9] << mkConst<unsigned long>(8)) +
-			(b[10] << mkConst<unsigned long>(16)) +
-			(b[11] << mkConst<unsigned long>(24)) +
-			(b[12] << mkConst<unsigned long>(32)) +
-			(b[13] << mkConst<unsigned long>(40)) +
-			(b[14] << mkConst<unsigned long>(48)) +
-			(b[15] << mkConst<unsigned long>(56));
+			(b[9] << 8ul) +
+			(b[10] << 16ul) +
+			(b[11] << 24ul) +
+			(b[12] << 32ul) +
+			(b[13] << 40ul) +
+			(b[14] << 48ul) +
+			(b[15] << 56ul);
 		/* Fall through */
 	case 8:
 		res.lo = res.lo +
-			(b[7] << mkConst<unsigned long>(56)) +
-			(b[6] << mkConst<unsigned long>(48)) +
-			(b[5] << mkConst<unsigned long>(40)) +
-			(b[4] << mkConst<unsigned long>(32));
+			(b[7] << 56ul) +
+			(b[6] << 48ul) +
+			(b[5] << 40ul) +
+			(b[4] << 32ul);
 		/* Fall through */
 	case 4:
 		res.lo = res.lo +
-			(b[3] << mkConst<unsigned long>(24)) +
-			(b[2] << mkConst<unsigned long>(16));
+			(b[3] << 24ul) +
+			(b[2] << 16ul);
 		/* Fall through */
 	case 2:
-		res.lo = res.lo + (b[1] << mkConst<unsigned long>(8));
+		res.lo = res.lo + (b[1] << 8ul);
 		/* Fall through */
 	case 1:
 		res.lo = res.lo + b[0];
@@ -182,26 +182,26 @@ AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
 	unsigned long b[16];
 	switch (size) {
 	case 16:
-		b[15] = (val.hi >> mkConst<unsigned long>(56)) & mkConst<unsigned long>(0xff);
-		b[14] = (val.hi >> mkConst<unsigned long>(48)) & mkConst<unsigned long>(0xff);
-		b[13] = (val.hi >> mkConst<unsigned long>(40)) & mkConst<unsigned long>(0xff);
-		b[12] = (val.hi >> mkConst<unsigned long>(32)) & mkConst<unsigned long>(0xff);
-		b[11] = (val.hi >> mkConst<unsigned long>(24)) & mkConst<unsigned long>(0xff);
-		b[10] = (val.hi >> mkConst<unsigned long>(16)) & mkConst<unsigned long>(0xff);
-		b[9] = (val.hi >> mkConst<unsigned long>(8)) & mkConst<unsigned long>(0xff);
-		b[8] = val.hi & mkConst<unsigned long>(0xff);
+		b[15] = (val.hi >> 56ul) & 0xfful;
+		b[14] = (val.hi >> 48ul) & 0xfful;
+		b[13] = (val.hi >> 40ul) & 0xfful;
+		b[12] = (val.hi >> 32ul) & 0xfful;
+		b[11] = (val.hi >> 24ul) & 0xfful;
+		b[10] = (val.hi >> 16ul) & 0xfful;
+		b[9] = (val.hi >> 8ul) & 0xfful;
+		b[8] = val.hi & 0xfful;
 	case 8:
-		b[7] = (val.lo >> mkConst<unsigned long>(56)) & mkConst<unsigned long>(0xff);
-		b[6] = (val.lo >> mkConst<unsigned long>(48)) & mkConst<unsigned long>(0xff);
-		b[5] = (val.lo >> mkConst<unsigned long>(40)) & mkConst<unsigned long>(0xff);
-		b[4] = (val.lo >> mkConst<unsigned long>(32)) & mkConst<unsigned long>(0xff);
+		b[7] = (val.lo >> 56ul) & 0xfful;
+		b[6] = (val.lo >> 48ul) & 0xfful;
+		b[5] = (val.lo >> 40ul) & 0xfful;
+		b[4] = (val.lo >> 32ul) & 0xfful;
 	case 4:
-		b[3] = (val.lo >> mkConst<unsigned long>(24)) & mkConst<unsigned long>(0xff);
-		b[2] = (val.lo >> mkConst<unsigned long>(16)) & mkConst<unsigned long>(0xff);
+		b[3] = (val.lo >> 24ul) & 0xfful;
+		b[2] = (val.lo >> 16ul) & 0xfful;
 	case 2:
-		b[1] = (val.lo >> mkConst<unsigned long>(8)) & mkConst<unsigned long>(0xff);
+		b[1] = (val.lo >> 8ul) & 0xfful;
 	case 1:
-		b[0] = val.lo & mkConst<unsigned long>(0xff);
+		b[0] = val.lo & 0xfful;
 		break;
 	default:
 		abort();
@@ -215,7 +215,7 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	unsigned long *res;
 
 	res = (unsigned long *)malloc(sizeof(unsigned long) * sizeof(t));
-	readMemory(mkConst<unsigned long>(start), sizeof(t), res, false, thr);
+	readMemory(start, sizeof(t), res, false, thr);
 	t tt;
 	for (unsigned x = 0; x < sizeof(t); x++)
 		((unsigned char *)&tt)[x] = force(res[x]);
@@ -231,9 +231,9 @@ EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
 	EventTimestamp when;
 	unsigned long start = force(_start);
 	if (thr)
-		checkFreeList(_start, _start + mkConst<unsigned long>(size), thr->tid, EventTimestamp::invalid);
+		checkFreeList(_start, _start + size, thr->tid, EventTimestamp::invalid);
 	if (storeAddr)
-		*storeAddr = mkConst<unsigned long>(start);
+		*storeAddr = start;
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -304,7 +304,7 @@ bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
 				     bool isWrite, Thread *thr)
 {
 	unsigned long start = force(_start);
-	if (thr && isOnFreeList(_start, _start + mkConst<unsigned long>(size), thr->tid))
+	if (thr && isOnFreeList(_start, _start + size, thr->tid))
 		return false;
 	while (size != 0) {
 		PhysicalAddress pa;
@@ -340,9 +340,9 @@ unsigned long AddressSpace::setBrk(unsigned long _newBrk)
 
 	if (newBrk != 0) {
 		if (newBrkMap > brkMapPtr)
-			allocateMemory(mkConst<unsigned long>(brkMapPtr), mkConst<unsigned long>(newBrkMap - brkMapPtr), VAMap::Protection(true, true, false));
+			allocateMemory(brkMapPtr, newBrkMap - brkMapPtr, VAMap::Protection(true, true, false));
 		else
-			releaseMemory(mkConst<unsigned long>(newBrkMap), mkConst<unsigned long>(brkMapPtr - newBrkMap));
+			releaseMemory(newBrkMap, brkMapPtr - newBrkMap);
 		brkptr = newBrk;
 		brkMapPtr = newBrkMap;
 	}
@@ -394,7 +394,7 @@ bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 
 	printf("Extending stack from %lx to %lx\n", ptr, va);
 	ptr &= PAGE_MASK;
-	allocateMemory(mkConst<unsigned long>(ptr), mkConst<unsigned long>(va - ptr), prot, flags);
+	allocateMemory(ptr, va - ptr, prot, flags);
 	return true;
 }
 
@@ -405,7 +405,7 @@ void AddressSpace::sanityCheck() const
 
 void AddressSpace::dumpBrkPtr(LogWriter *lw) const
 {
-	lw->append(new LogRecordInitialBrk(ThreadId(0), mkConst<unsigned long>(brkptr)),
+	lw->append(new LogRecordInitialBrk(ThreadId(0), brkptr),
 		   0);
 }
 
@@ -441,8 +441,8 @@ void AddressSpace::dumpSnapshot(LogWriter *lw) const
 		end_va += 4096;
 
 		lw->append(new LogRecordAllocateMemory(ThreadId(0),
-						       mkConst<unsigned long>(start_va),
-						       mkConst<unsigned long>(end_va - start_va),
+						       start_va,
+						       end_va - start_va,
 						       (unsigned long)prot,
 						       (unsigned long)alf),
 			   0);
@@ -471,7 +471,7 @@ void AddressSpace::dumpSnapshot(LogWriter *lw) const
 				mc->read(0, buf, MemoryChunk::size);
 				lw->append(new LogRecordMemory(ThreadId(0),
 							       MemoryChunk::size,
-							       mkConst<unsigned long>(cursor_va),
+							       cursor_va,
 							       buf),
 					   0);
 			}
@@ -507,8 +507,8 @@ AddressSpace::writeLiteralMemory(unsigned long start,
 {
 	unsigned long *c = (unsigned long *)malloc(sizeof(unsigned long) * size);
 	for (unsigned x = 0; x < size; x++)
-		c[x] = mkConst<unsigned long>(content[x]);
-	writeMemory(EventTimestamp::invalid, mkConst<unsigned long>(start),
+		c[x] = content[x];
+	writeMemory(EventTimestamp::invalid, start,
 		    size, c, true, NULL);
 	free(c);
 }
@@ -517,8 +517,8 @@ void
 AddressSpace::addVsyscalls()
 {
 #if 0
-	allocateMemory(mkConst<unsigned long>(0xFFFFFFFFFF600000),
-		       mkConst<unsigned long>(0x1000),
+	allocateMemory(0xFFFFFFFFFF600000ul,
+		       0x1000ul,
 		       VAMap::Protection(true, false, true),
 		       VAMap::AllocFlags(false));
 	writeLiteralMemory(0xFFFFFFFFFF600000,
@@ -542,7 +542,7 @@ AddressSpace::readString(unsigned long start, Thread *thr)
 	offset = 0;
 	while (1) {
 		unsigned long b;
-		readMemory(start + mkConst<unsigned long>(offset), 1, &b, false, thr);
+		readMemory(start + offset, 1, &b, false, thr);
 		buf[offset] = force(b);
 		if (!buf[offset])
 			break;
@@ -581,7 +581,7 @@ AddressSpace::findInterestingFunctions(const VAMap::VAMapEntry *it)
 		/* Wrong size -> not libc. */
 		return;
 	}
-	readMemory(mkConst<unsigned long>(it->start + 0x7a230),
+	readMemory(it->start + 0x7a230,
 		   293,
 		   buf,
 		   false,
@@ -593,7 +593,7 @@ AddressSpace::findInterestingFunctions(const VAMap::VAMapEntry *it)
 		printf("free() mismatch -> not libc\n");
 		return;
 	}
-//	this->client_free = mkConst<unsigned long>(it->start + 0x7a230);
+//	this->client_free = it->start + 0x7a230;
 }
 
 void
@@ -614,10 +614,10 @@ AddressSpace::findInterestingFunctions()
 void
 AddressSpace::client_freed(EventTimestamp when, unsigned long ptr)
 {
-	if (force(ptr == mkConst<unsigned long>(0)))
+	if (force(ptr == 0ul))
 		return;
 
-	expression_result chk = load(when, ptr - mkConst<unsigned long>(8), 8);
+	expression_result chk = load(when, ptr - 8ul, 8);
 	client_freed_entry<unsigned long> cf;
 
 	cf.start = ptr;

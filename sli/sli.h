@@ -184,14 +184,6 @@ public:
 	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
 };
 
-template <typename ait> static inline ait mkConst(unsigned long x);
-
-template <>
-unsigned long mkConst(unsigned long x)
-{
-	return x;
-}
-
 struct expression_result : public Named {
 protected:
 	char *mkName() const {

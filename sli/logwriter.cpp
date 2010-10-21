@@ -190,7 +190,7 @@ void *LogRecordAllocateMemory::marshal(unsigned *sz) const
 												  &r);
 	amr->start = start;
 	amr->size = size;
-	amr->prot = mkConst<unsigned long>(prot);
+	amr->prot = prot;
 	amr->flags = flags;
 	return r;
 }
