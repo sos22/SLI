@@ -1737,11 +1737,6 @@ static inline void mark_as_stack(unsigned long x)
 {
 }
 
-static inline bool isConstant(unsigned long x)
-{
-	return true;
-}
-
 void gdb_concrete(const MachineState *ms);
 void gdb(void);
 void dbg_break(const char *msg, ...);

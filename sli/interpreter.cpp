@@ -1688,14 +1688,11 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result guard =
 						ths->eval_expression(stmt->Ist.Exit.guard);
-					bool controlCondIsConstant = isConstant(ths->currentControlCondition);
 					if (force(!guard.lo)) {
 						unsigned long inv_guard = !guard.lo;
 						assert(force(inv_guard) == 1);
 						ths->currentControlCondition =
 							ths->currentControlCondition && inv_guard;
-						if (!controlCondIsConstant)
-							assert(!isConstant(ths->currentControlCondition));
 						assert(force(ths->currentControlCondition));
 						break;
 					}
@@ -1703,8 +1700,6 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					assert(force(inv_inv_guard) == 1);
 					ths->currentControlCondition =
 						ths->currentControlCondition && inv_inv_guard;
-					if (!controlCondIsConstant)
-						assert(!isConstant(ths->currentControlCondition));
 					assert(force(ths->currentControlCondition));
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
