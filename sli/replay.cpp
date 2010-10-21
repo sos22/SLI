@@ -45,8 +45,6 @@ StoreEvent::StoreEvent(EventTimestamp when, unsigned long _addr, unsigned _size,
 	  size(_size),
 	  data(_data)
 {
-	sanity_check_ait(data.lo);
-	sanity_check_ait(data.hi);
 }
 
 

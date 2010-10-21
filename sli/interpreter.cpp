@@ -264,10 +264,6 @@ calculate_condition_flags_XXX(ait op,
 			      ait &of,
 			      ait &pf)
 {
-	sanity_check_ait(op);
-	sanity_check_ait(dep1);
-	sanity_check_ait(dep2);
-	sanity_check_ait(ndep);
 	pf = cf = zf = sf = of = mkConst<ait>(0);
 
 	switch (force(op)) {
@@ -320,10 +316,8 @@ calculate_condition_flags_XXX(ait op,
 		do {							\
 			ait res;					\
 			res = (dep1 - dep2) & MASK(bits);		\
-			sanity_check_ait(res);				\
 			cf = (dep1 & MASK(bits)) < (dep2 & MASK(bits));	\
 			zf = (res == mkConst<ait>(0));			\
-			sanity_check_ait(zf);				\
 			sf = res >> bits;				\
 			of = ( (dep1 ^ dep2) &				\
 			       (dep1 ^ res) ) >> bits;			\
@@ -387,11 +381,6 @@ calculate_condition_flags_XXX(ait op,
 	sf &= mkConst<ait>(1);
 	zf &= mkConst<ait>(1);
 	cf &= mkConst<ait>(1);
-
-	sanity_check_ait(of);
-	sanity_check_ait(sf);
-	sanity_check_ait(zf);
-	sanity_check_ait(cf);
 }
 
 expression_result

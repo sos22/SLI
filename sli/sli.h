@@ -1842,8 +1842,6 @@ template<> unsigned long ternary(unsigned long cond,
 	return cond ? t : f;
 }
 
-static inline void sanity_check_ait(unsigned long x) {}
-
 void gdb_concrete(const MachineState *ms);
 void gdb(void);
 void dbg_break(const char *msg, ...);

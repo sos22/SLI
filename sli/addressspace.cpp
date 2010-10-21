@@ -200,8 +200,6 @@ AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
 		    Thread *thr)
 {
 	unsigned long b[16];
-	sanity_check_ait(val.hi);
-	sanity_check_ait(val.lo);
 	switch (size) {
 	case 16:
 		b[15] = (val.hi >> mkConst<unsigned long>(56)) & mkConst<unsigned long>(0xff);
@@ -228,8 +226,6 @@ AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
 	default:
 		abort();
 	}
-	for (unsigned x = 0; x < size; x++)
-		sanity_check_ait(b[x]);
 	writeMemory(when, start, size, b, ignore_protection, thr);
 }
 
