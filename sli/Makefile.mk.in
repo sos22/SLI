@@ -1,7 +1,7 @@
 targets="crop binpatch dbg chunk direct"
 
 defvars() {
-	echo SLIR_SOURCES= ${input_base}/{transform_expr,events}.cpp
+	echo SLIR_SOURCES= ${input_base}/transform_expr.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{debug,instantiation,dbgbreak}.cpp
 	echo SLIR_TARGETS=${targets}
