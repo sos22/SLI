@@ -51,7 +51,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet *regs)
 		regs->set_reg(REGISTER_IDX(RDX), (_d));	\
 	} while (0)
 
-	switch (force(0xFFFFFFFFul & regs->get_reg(REGISTER_IDX(RAX)))) {
+	switch (0xFFFFFFFFul & regs->get_reg(REGISTER_IDX(RAX))) {
 	case 0x00000000:
 		SET_ABCD(0x0000000a, 0x756e6547, 0x6c65746e, 0x49656e69);
 		break;
@@ -65,7 +65,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet *regs)
 		SET_ABCD(0x00000000, 0x00000000, 0x00000000, 0x00000000);
 		break;
 	case 0x00000004: {
-		switch (force(0xFFFFFFFFul & regs->get_reg(REGISTER_IDX(RCX)))) {
+		switch (0xFFFFFFFFul & regs->get_reg(REGISTER_IDX(RCX))) {
 		case 0x00000000: SET_ABCD(0x04000121, 0x01c0003f,
 					  0x0000003f, 0x00000001); break;
 		case 0x00000001: SET_ABCD(0x04000122, 0x01c0003f,
@@ -136,7 +136,7 @@ Thread::amd64g_dirtyhelper_loadF80le(MachineState *ms, IRTemp tmp, unsigned long
 	ms->addressSpace->readMemory(addr, 10, buf, false, this, NULL);
 	UChar buf2[10];
 	for (unsigned x = 0; x < 10; x++)
-		buf2[x] = force(buf[x]);
+		buf2[x] = buf[x];
 	ULong f64;
 	convert_f80le_to_f64le(buf2, (UChar*)&f64);
 	temporaries[tmp].lo = (f64);
@@ -146,7 +146,7 @@ Thread::amd64g_dirtyhelper_loadF80le(MachineState *ms, IRTemp tmp, unsigned long
 void
 Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsigned long _f64)
 {
-	unsigned long f64 = force(_f64);
+	unsigned long f64 = _f64;
 	unsigned char buf[10];
 	unsigned long buf2[10];
 	unsigned x;
@@ -156,7 +156,7 @@ Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsi
 	for (x = 0; x < 10; x++)
 		buf2[x] = (buf[x]);
 	ms->addressSpace->writeMemory(EventTimestamp(tid, nrEvents, ms->nrEvents,
-						     force(regs.rip())),
+						     regs.rip()),
 				      addr,
 				      10,
 				      buf2,
@@ -182,7 +182,7 @@ Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 
 	if (details->guard) {
 		expression_result guard = eval_expression(details->guard);
-		if (force(!guard.lo))
+		if (!guard.lo)
 			return NULL;
 	}
 	for (x = 0; details->args[x]; x++) {
@@ -265,7 +265,7 @@ calculate_condition_flags_XXX(unsigned long op,
 {
 	pf = cf = zf = sf = of = 0ul;
 
-	switch (force(op)) {
+	switch (op) {
 	case AMD64G_CC_OP_COPY:
 		cf = dep1;
 		zf = dep1 >> 6ul;
@@ -295,21 +295,21 @@ calculate_condition_flags_XXX(unsigned long op,
 			sf = (res >> bits);				\
 			of = (~(dep1 ^ dep2) &				\
 			      (dep1 ^ res)) >> bits;			\
-			pf = (parity_table[(UChar)force(res)]); \
+			pf = (parity_table[(UChar)res]); \
 		} while (0)
 #define ACTIONS_ADC(bits)	 		                        \
 		do {							\
 			unsigned long oldC = ndep & (AMD64G_CC_MASK_C); \
 			unsigned long argR = dep2 ^ oldC;				\
 			unsigned long res = ((dep1 + argR) + oldC) & MASK(bits);	\
-			if (force(oldC))				\
+			if (oldC)				\
 				cf = res <= (dep1 & MASK(bits));	\
 			else						\
 				cf = res < (dep1 & MASK(bits));		\
 			zf = res == 0ul;			\
 			sf = res >> bits;				\
 			of = (~(dep1 ^ argR) & (dep1 ^ res)) >> bits;	\
-			pf = (parity_table[(UChar)force(res)]); \
+			pf = (parity_table[(UChar)res]); \
 		} while (0)
 #define ACTIONS_SUB(bits)						\
 		do {							\
@@ -320,7 +320,7 @@ calculate_condition_flags_XXX(unsigned long op,
 			sf = res >> bits;				\
 			of = ( (dep1 ^ dep2) &				\
 			       (dep1 ^ res) ) >> bits;			\
-			pf = (parity_table[(UChar)force(res)]); \
+			pf = (parity_table[(UChar)res]); \
 		} while (0)
 #define ACTIONS_LOGIC(bits)						\
 		do {							\
@@ -328,7 +328,7 @@ calculate_condition_flags_XXX(unsigned long op,
 			zf = (dep1 & MASK(bits)) == 0ul;	\
 			sf = (dep1 & MASK(bits)) >> bits;		\
 			of = 0ul;				\
-			pf = (parity_table[(UChar)force(dep1)]); \
+			pf = (parity_table[(UChar)dep1]); \
 		} while (0)
 #define ACTIONS_INC(bits)			                        \
 		do {				                        \
@@ -337,7 +337,7 @@ calculate_condition_flags_XXX(unsigned long op,
 			zf = (res == 0ul);			\
 			sf = res >> bits;				\
 			of = res == (1ul << bits);		\
-			pf = (parity_table[(UChar)force(res)]); \
+			pf = (parity_table[(UChar)res]); \
 		} while (0)
 #define ACTIONS_DEC(bits)			                        \
 		do {				                        \
@@ -346,7 +346,7 @@ calculate_condition_flags_XXX(unsigned long op,
 			zf = (res == 0ul);			\
 			sf = res >> bits;				\
 			of = ((res + 1ul) & MASK(bits)) == (1ul << bits); \
-			pf = (parity_table[(UChar)force(res)]); \
+			pf = (parity_table[(UChar)res]); \
 		} while (0)
 #define ACTIONS_SHR(bits)			                        \
 		do {				                        \
@@ -354,7 +354,7 @@ calculate_condition_flags_XXX(unsigned long op,
 			zf = (dep1 == 0ul);			\
 			sf = dep1 >> bits;				\
 			of = (dep1 ^ dep2) >> bits;			\
-			pf = (parity_table[(UChar)force(dep1)]); \
+			pf = (parity_table[(UChar)dep1]); \
 		} while (0)
 	ACTION(ADD);
 	ACTION(SUB);
@@ -373,7 +373,7 @@ calculate_condition_flags_XXX(unsigned long op,
 #undef ACTIONS_SHR
 #undef ACTIONS_ADC
 	default:
-		throw NotImplementedException("Strange operation code %ld\n", force(op));
+		throw NotImplementedException("Strange operation code %ld\n", op);
 	}
 
 	of &= 1ul;
@@ -405,7 +405,7 @@ Thread::do_ccall_calculate_condition(struct expression_result *args)
 					   pf);
 
 	inv = condcode.lo & 1ul;
-	switch (force(condcode.lo & ~1ul)) {
+	switch (condcode.lo & ~1ul) {
 	case AMD64CondZ:
 		res.lo = zf;
 		break;
@@ -429,7 +429,7 @@ Thread::do_ccall_calculate_condition(struct expression_result *args)
 		break;
 
 	default:
-		throw NotImplementedException("Strange cond code %ld (op %ld)\n", force(condcode.lo), force(op.lo));
+		throw NotImplementedException("Strange cond code %ld (op %ld)\n", condcode.lo, op.lo);
 	}
 
 	res.lo ^= inv;
@@ -469,12 +469,12 @@ Thread::do_ccall_generic(IRCallee *cee,
 
 	res.lo = ((unsigned long (*)(unsigned long, unsigned long, unsigned long,
 				     unsigned long, unsigned long, unsigned long))cee->addr)
-		(force(rargs[0].lo),
-		 force(rargs[1].lo),
-		 force(rargs[2].lo),
-		 force(rargs[3].lo),
-		 force(rargs[4].lo),
-		 force(rargs[5].lo));
+		(rargs[0].lo,
+		 rargs[1].lo,
+		 rargs[2].lo,
+		 rargs[3].lo,
+		 rargs[4].lo,
+		 rargs[5].lo);
 	res.hi = 0ul;
 	return res;
 }
@@ -626,7 +626,7 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_GetI: {
-		getOffset = force(eval_expression(expr->Iex.GetI.ix).lo);
+		getOffset = eval_expression(expr->Iex.GetI.ix).lo;
 		getOffset += expr->Iex.GetI.bias;
 		getOffset %= expr->Iex.GetI.descr->nElems;
 		getOffset *= sizeofIRType(expr->Iex.GetI.descr->elemTy);
@@ -769,7 +769,7 @@ Thread::eval_expression(IRExpr *expr)
 			break;
 		case Iop_MullS32:
 			dest->lo =
-				(long)(int)force(arg1.lo) * (long)(int)force(arg2.lo);
+				(long)(int)arg1.lo * (long)(int)arg2.lo;
 			break;
 
 		case Iop_MullS64:
@@ -804,8 +804,8 @@ Thread::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_DivModS64to32: {
-			long a1 = force(arg1.lo);
-			long a2 = force(arg2.lo);
+			long a1 = arg1.lo;
+			long a2 = arg2.lo;
 			dest->lo = 
 				((a1 / a2) & 0xffffffff) | ((a1 % a2) << 32);
 			break;
@@ -819,7 +819,7 @@ Thread::eval_expression(IRExpr *expr)
 			unsigned long dlo, dhi;
 			asm ("div %4\n"
 			     : "=a" (dlo), "=d" (dhi)
-			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
+			     : "0" (arg1.lo), "1" (arg1.hi), "r" (arg2.lo));
 			dest->lo = (dlo);
 			dest->hi = (dhi);
 			break;
@@ -830,7 +830,7 @@ Thread::eval_expression(IRExpr *expr)
 			unsigned long dhi;
 			asm ("idiv %4\n"
 			     : "=a" (dlo), "=d" (dhi)
-			     : "0" (force(arg1.lo)), "1" (force(arg1.hi)), "r" (force(arg2.lo)));
+			     : "0" (arg1.lo), "1" (arg1.hi), "r" (arg2.lo));
 			dest->lo = (dlo);
 			dest->hi = (dhi);
 			break;
@@ -874,10 +874,10 @@ Thread::eval_expression(IRExpr *expr)
 			break;
 
 		case Iop_CmpGT32Sx4: {
-			unsigned long a1l = force(arg1.lo);
-			unsigned long a2l = force(arg2.lo);
-			unsigned long a1h = force(arg1.hi);
-			unsigned long a2h = force(arg2.hi);
+			unsigned long a1l = arg1.lo;
+			unsigned long a2l = arg2.lo;
+			unsigned long a1h = arg1.hi;
+			unsigned long a2h = arg2.hi;
 			if ( (int)a1l > (int)a2l )
 				dest->lo |= 0xfffffffful;
 			if ( (int)(a1l >> 32) > (int)(a2l >> 32) )
@@ -890,53 +890,53 @@ Thread::eval_expression(IRExpr *expr)
 		}
 
 		case Iop_I64toF64: {
-			switch (force(arg1.lo)) {
+			switch (arg1.lo) {
 			case 0:
 				/* Round to nearest even mode. */
 				union {
 					double d;
 					unsigned long l;
 				} r;
-				r.d = (long)force(arg2.lo);
+				r.d = (long)arg2.lo;
 				dest->lo = (r.l);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
-							      force(arg1.lo));
+							      arg1.lo);
 			}
 			break;
 		}
 
 		case Iop_F64toI32: {
-			switch (force(arg1.lo)) {
+			switch (arg1.lo) {
 			case 3:
 				union {
 					double d;
 					long l;
 				} r;
-				r.l = (long)force(arg2.lo);
+				r.l = (long)arg2.lo;
 				dest->lo = (unsigned)r.d;
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
-							      force(arg1.lo));
+							      arg1.lo);
 			}
 			break;
 		}
 
 		case Iop_F64toI64: {
-			switch (force(arg1.lo)) {
+			switch (arg1.lo) {
 			case 3:
 				union {
 					double d;
 					unsigned long l;
 				} r;
-				r.l = force(arg2.lo);
+				r.l = arg2.lo;
 				dest->lo = (r.d);
 				break;
 			default:
 				throw NotImplementedException("unknown rounding mode %ld\n",
-							      force(arg1.lo));
+							      arg1.lo);
 			}
 			break;
 		}
@@ -950,7 +950,7 @@ Thread::eval_expression(IRExpr *expr)
 				float f;
 				unsigned l;
 			} out;
-			in.l = force(arg2.lo);
+			in.l = arg2.lo;
 			out.f = in.d;
 			dest->lo = (out.l);
 			break;
@@ -961,8 +961,8 @@ Thread::eval_expression(IRExpr *expr)
 				double d;
 				unsigned long l;
 			} r1, r2;
-			r1.l = force(arg1.lo);
-			r2.l = force(arg2.lo);
+			r1.l = arg1.lo;
+			r2.l = arg2.lo;
 			double a1 = r1.d;
 			double a2 = r2.d;
 			unsigned long r;
@@ -983,7 +983,7 @@ Thread::eval_expression(IRExpr *expr)
 				unsigned long l;
 				double d;
 			} in, out;
-			in.l = force(arg2.lo);
+			in.l = arg2.lo;
 			asm ("fsin\n"
 			     : "=t" (out.d)
 			     : "0" (in.d));
@@ -996,7 +996,7 @@ Thread::eval_expression(IRExpr *expr)
 				unsigned long l;
 				double d;
 			} in, out;
-			in.l = force(arg2.lo);
+			in.l = arg2.lo;
 			asm ("fcos\n"
 			     : "=t" (out.d)
 			     : "0" (in.d));
@@ -1015,8 +1015,8 @@ Thread::eval_expression(IRExpr *expr)
 					unsigned long l;		\
 					double d;			\
 				} in1, in2, out;			\
-				in1.l = force(arg1.lo);			\
-				in2.l = force(arg2.lo);			\
+				in1.l = arg1.lo;			\
+				in2.l = arg2.lo;			\
 				out.d = op;				\
 				dest->lo = (out.l);		\
 				break;					\
@@ -1029,8 +1029,8 @@ Thread::eval_expression(IRExpr *expr)
 					unsigned l;			\
 					float d;			\
 				} in1, in2, out;			\
-				in1.l = force(arg1.lo);			\
-				in2.l = force(arg2.lo);			\
+				in1.l = arg1.lo;			\
+				in2.l = arg2.lo;			\
 				out.d = op;				\
 				dest->lo =				\
 					(arg1.lo & (0xffffffff00000000ul)) | \
@@ -1062,7 +1062,7 @@ Thread::eval_expression(IRExpr *expr)
 			printf("WARNING: can't handle ");
 			ppIRExpr(expr);
 			printf("\n");
-			if (force(arg1.lo))
+			if (arg1.lo)
 				*dest = arg1;
 			else
 				*dest = arg2;
@@ -1172,7 +1172,7 @@ Thread::eval_expression(IRExpr *expr)
 				long l;
 				double d;
 			} out;
-			out.d = (int)force(arg.lo);
+			out.d = (int)arg.lo;
 			dest->lo = (out.l);
 			break;
 		}
@@ -1186,7 +1186,7 @@ Thread::eval_expression(IRExpr *expr)
 				double d;
 				unsigned long l;
 			} out;
-			in.l = force(arg.lo);
+			in.l = arg.lo;
 			out.d = in.f;
 			dest->lo = (out.l);
 			break;
@@ -1210,7 +1210,7 @@ Thread::eval_expression(IRExpr *expr)
 			break;
 			
 		case Iop_Clz64: {
-			unsigned long v = force(arg.lo);
+			unsigned long v = arg.lo;
 			unsigned res = 0;
 			while (!(v & (1ul << (63 - res))) &&
 			       res < 63)
@@ -1220,7 +1220,7 @@ Thread::eval_expression(IRExpr *expr)
 		}
 
 		case Iop_Ctz64: {
-			unsigned long v = force(arg.lo);
+			unsigned long v = arg.lo;
 			unsigned res = 0;
 			while (!(v & (1ul << res)) &&
 			       res < 63)
@@ -1234,7 +1234,7 @@ Thread::eval_expression(IRExpr *expr)
 				unsigned long l;
 				double d;
 			} in, out;
-			in.l = force(arg.lo);
+			in.l = arg.lo;
 			asm ("fsqrt\n"
 			     : "=t" (out.d)
 			     : "0" (in.d));
@@ -1262,8 +1262,8 @@ Thread::eval_expression(IRExpr *expr)
 				double d;
 				unsigned long l;
 			} a1, a2, res;
-			a1.l = force(arg2.lo);
-			a2.l = force(arg3.lo);
+			a1.l = arg2.lo;
+			a2.l = arg3.lo;
 			asm ("fprem\n"
 			     : "=t" (res.d)
 			     : "0" (a1.d), "u" (a2.d));
@@ -1276,8 +1276,8 @@ Thread::eval_expression(IRExpr *expr)
 				unsigned long l;
 			} a1, a2, clobber;
 			unsigned short res;
-			a1.l = force(arg2.lo);
-			a2.l = force(arg3.lo);
+			a1.l = arg2.lo;
+			a2.l = arg3.lo;
 			asm ("fprem\nfstsw %%ax\n"
 			     : "=t" (clobber.d), "=a" (res)
 			     : "0" (a1.d), "u" (a2.d));
@@ -1296,7 +1296,7 @@ Thread::eval_expression(IRExpr *expr)
 		struct expression_result cond = eval_expression(expr->Iex.Mux0X.cond);
 		struct expression_result res0 = eval_expression(expr->Iex.Mux0X.expr0);
 		struct expression_result resX = eval_expression(expr->Iex.Mux0X.exprX);
-		if (force(cond.lo == 0ul)) {
+		if (cond.lo == 0ul) {
 			*dest = res0;
 		} else {
 			*dest = resX;
@@ -1328,10 +1328,10 @@ Thread::eval_expression(IRExpr *expr)
 void
 Thread::redirectGuest(unsigned long rip)
 {
-	if (force(rip == (0xFFFFFFFFFF600400ul) ||
-		  rip == (0xffffffffff600000ul)))
+	if (rip == (0xFFFFFFFFFF600400ul) ||
+	    rip == (0xffffffffff600000ul))
 		allowRipMismatch = true;
-	if (force(rip) == 0x4382f8)
+	if (rip == 0x4382f8)
 		inInfrastructure = true;
 }
 
@@ -1359,7 +1359,7 @@ public:
 		unsigned long v[16];
 		aspace->readMemory(desired, 16, v, false, NULL);
 		for (unsigned x = 0; x < sizeof(cache); x++)
-			cache[x] = force(v[x]);
+			cache[x] = v[x];
 		have_cache = true;
 		return cache[0];
 	}
@@ -1433,11 +1433,11 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 {
 	ths->redirectGuest(rip);
 
-	if (force(ths->currentIRSBRip) == 0xc822b0)
+	if (ths->currentIRSBRip == 0xc822b0)
 		ths->inInfrastructure = false;
 
 	if (ths->decode_counter != 0 && !ths->inInfrastructure)
-		ths->controlLog.push(Thread::control_log_entry(force(ths->currentIRSBRip), ths->currentIRSBOffset));
+		ths->controlLog.push(Thread::control_log_entry(ths->currentIRSBRip, ths->currentIRSBOffset));
 
 
 	ths->decode_counter++;
@@ -1449,7 +1449,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 
 	ths->currentIRSBRip = rip;
 
-	unsigned long _rip = force(rip);
+	unsigned long _rip = rip;
 	vexSetAllocModeTEMP_and_clear(t);
 
 	IRSB *irsb = addrSpace->getIRSBForAddress(_rip);
@@ -1468,7 +1468,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	assert(ths->currentIRSB->stmts[0]->tag == Ist_IMark);
 	/* Should be a mark for the IRSB rip */
 	assert(ths->currentIRSB->stmts[0]->Ist.IMark.addr ==
-	       force(ths->currentIRSBRip));
+	       ths->currentIRSBRip);
 }
 
 unsigned long
@@ -1530,18 +1530,18 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			}
 			assert(ths->currentIRSB);
 		}
-	        assert(force(ths->currentControlCondition));
+	        assert(ths->currentControlCondition);
 		while (ths->currentIRSBOffset < ths->currentIRSB->stmts_used) {
 			IRStmt *stmt = ths->currentIRSB->stmts[ths->currentIRSBOffset];
 			ths->currentIRSBOffset++;
 
-			assert(force(ths->currentControlCondition));
+			assert(ths->currentControlCondition);
 
 			switch (stmt->tag) {
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
-				if (force(ths->regs.rip() == ms->addressSpace->client_free))
+				if (ths->regs.rip() == ms->addressSpace->client_free)
 					ms->addressSpace->client_freed(ths->bumpEvent(ms),
 								       ths->regs.get_reg(REGISTER_IDX(RDI)));
 				ths->regs.set_reg(REGISTER_IDX(RIP),
@@ -1666,12 +1666,12 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 
 				/* Crazy bloody encoding scheme */
 				idx.lo =
-					((force(idx.lo) + stmt->Ist.PutI.bias) %
+					((idx.lo + stmt->Ist.PutI.bias) %
 					 stmt->Ist.PutI.descr->nElems) *
 					sizeofIRType(stmt->Ist.PutI.descr->elemTy) +
 					stmt->Ist.PutI.descr->base;
 
-				put_offset = force(idx.lo);
+				put_offset = idx.lo;
 				put_data = ths->eval_expression(stmt->Ist.PutI.data);
 				put_type = stmt->Ist.PutI.descr->elemTy;
 				goto do_put;
@@ -1688,26 +1688,26 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result guard =
 						ths->eval_expression(stmt->Ist.Exit.guard);
-					if (force(!guard.lo)) {
+					if (!guard.lo) {
 						unsigned long inv_guard = !guard.lo;
-						assert(force(inv_guard) == 1);
+						assert(inv_guard == 1);
 						ths->currentControlCondition =
 							ths->currentControlCondition && inv_guard;
-						assert(force(ths->currentControlCondition));
+						assert(ths->currentControlCondition);
 						break;
 					}
 					unsigned long inv_inv_guard = !!guard.lo;
-					assert(force(inv_inv_guard) == 1);
+					assert(inv_inv_guard == 1);
 					ths->currentControlCondition =
 						ths->currentControlCondition && inv_inv_guard;
-					assert(force(ths->currentControlCondition));
+					assert(ths->currentControlCondition);
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
 					printf("EMULATION WARNING %lx\n",
-					       force(ths->regs.get_reg(REGISTER_IDX(EMWARN))));
+					       ths->regs.get_reg(REGISTER_IDX(EMWARN)));
 				}
-				assert(force(ths->currentControlCondition));
+				assert(ths->currentControlCondition);
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  ths->currentControlCondition ?
@@ -1723,7 +1723,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				throw NotImplementedException();
 			}
 
-			assert(force(ths->currentControlCondition));
+			assert(ths->currentControlCondition);
 		}
 
 		ths->currentIRSBOffset++;
@@ -1750,7 +1750,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			{
 				struct expression_result next_addr =
 					ths->eval_expression(ths->currentIRSB->next);
-				assert(force(ths->currentControlCondition));
+				assert(ths->currentControlCondition);
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  ths->currentControlCondition ?
 						  next_addr.lo :
@@ -1766,7 +1766,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					     x >= 0;
 					     x--) {
 						if (ths->currentCallStack[x] ==
-						    force(ths->regs.rip())) {
+						    ths->regs.rip()) {
 							ths->currentCallStack.resize(x);
 							break;
 						}
@@ -1792,7 +1792,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 		}
 
 finished_block:
-		assert(force(ths->currentControlCondition));
+		assert(ths->currentControlCondition);
 		;
 	}
 }
@@ -1820,10 +1820,10 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **ou
 			return res;
 		}
 		if (LoadEvent *lr = dynamic_cast<LoadEvent *> (evt)) {
-			if (address_is_interesting(thr->tid, force(lr->addr)))
+			if (address_is_interesting(thr->tid, lr->addr))
 				work->push_back(new MemoryAccessLoad(*lr));
 	        } else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
-			if (address_is_interesting(thr->tid, force(sr->addr)))
+			if (address_is_interesting(thr->tid, sr->addr))
 				work->push_back(new MemoryAccessStore(*sr));
 		}
 		max_events--;

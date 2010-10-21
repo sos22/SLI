@@ -51,13 +51,13 @@ gc_map<ThreadId, Maybe<unsigned> > *MemTracePool::firstRacingAccessMap()
 				     other_access < other_v->size();
 				     other_access++) {
 					MemoryAccess *other_ma = (*other_v)[other_access];
-					if (force(other_ma->addr + other_ma->size <= ma->addr ||
-						  other_ma->addr >= ma->addr + ma->size) )
+					if (other_ma->addr + other_ma->size <= ma->addr ||
+					    other_ma->addr >= ma->addr + ma->size )
 						continue;
 					if (other_ma->isLoad() && ma->isLoad())
 						continue;
 					/* This is the one */
-					printf("Race on %lx, tids %d %d\n", force(other_ma->addr),
+					printf("Race on %lx, tids %d %d\n", other_ma->addr,
 					       tid._tid(), other_tid._tid());
 					goto found_race;
 				}

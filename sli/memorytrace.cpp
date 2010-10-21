@@ -16,13 +16,13 @@ void
 MemTraceMaker::record(Thread *thr, ThreadEvent *evt)
 {
 	if (const LoadEvent *le = dynamic_cast<const LoadEvent *>(evt)) {
-		if (address_is_interesting(thr->tid, force(le->addr))) {
+		if (address_is_interesting(thr->tid, le->addr)) {
 			MemoryAccess *ma = new MemoryAccessLoad(*le);
 			assert_gc_allocated(ma);
 			mt->push_back(ma);
 		}
 	} else if (const StoreEvent *se = dynamic_cast<const StoreEvent *>(evt)) {
-		if (address_is_interesting(thr->tid, force(se->addr))) {
+		if (address_is_interesting(thr->tid, se->addr)) {
 			MemoryAccess *ma = new MemoryAccessStore(*se);
 			assert_gc_allocated(ma);
 			mt->push_back(ma);

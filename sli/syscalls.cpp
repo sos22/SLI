@@ -61,24 +61,24 @@ handle_clone(AddressSpace *addrSpace,
 	     unsigned pid,
 	     LogReaderPtr ptr)
 {
-	if (force(flags == (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD))) {
+	if (flags == (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD)) {
 		/* Simple fork() -> don't need to do anything */
 		return;
 	}
 
-	if (force(flags != ((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-			     CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
-			     CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID)))) {
-		printf("can't handle clone flags %lx\n", force(flags));
+	if (flags != ((CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
+		       CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
+		       CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID))) {
+		printf("can't handle clone flags %lx\n", flags);
 		abort();
 	}
 
 	/* Create a new thread.  This is, as you might expect, closely
 	   modelled on the kernel's version of the same process. */
 	Thread *newThread = thr->fork(pid);
-	if (force(flags & CLONE_CHILD_SETTID))
+	if (flags & CLONE_CHILD_SETTID)
 		newThread->set_child_tid = child_tidptr;
-	if (force(flags & CLONE_CHILD_CLEARTID))
+	if (flags & CLONE_CHILD_CLEARTID)
 		newThread->clear_child_tid = child_tidptr;
 	newThread->robust_list = 0;
 #if 0
@@ -88,7 +88,7 @@ handle_clone(AddressSpace *addrSpace,
 #endif
 	newThread->regs.set_reg(REGISTER_IDX(RAX), 0);
 	newThread->regs.set_reg(REGISTER_IDX(RSP), childRsp);
-	if (force(flags & CLONE_SETTLS))
+	if (flags & CLONE_SETTLS)
 		newThread->regs.set_reg(REGISTER_IDX(FS_ZERO), set_tls);
 
 	mach->registerThread(newThread);
@@ -118,26 +118,26 @@ replay_syscall(const LogRecordSyscall *lrs,
 	args[4] = thr->regs.get_reg(REGISTER_IDX(R8));
 	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
-	if (force(sysnr != lrs->sysnr))
+	if (sysnr != lrs->sysnr)
 		throw ReplayFailedBadRegister("<sysnr>",
-					      force(sysnr),
-					      force(lrs->sysnr));
-	if (force(args[0] != lrs->arg1))
+					      sysnr,
+					      lrs->sysnr);
+	if (args[0] != lrs->arg1)
 		throw ReplayFailedBadRegister("<sys_arg1>",
-					      force(args[0]),
-					      force(lrs->arg1));
-	if (force(args[1] != lrs->arg2))
+					      args[0],
+					      lrs->arg1);
+	if (args[1] != lrs->arg2)
 		throw ReplayFailedBadRegister("<sys_arg2>",
-					      force(args[1]),
-					      force(lrs->arg2));
-	if (force(args[2] != lrs->arg3))
+					      args[1],
+					      lrs->arg2);
+	if (args[2] != lrs->arg3)
 		throw ReplayFailedBadRegister("<sys_arg3>",
-					      force(args[2]),
-					      force(lrs->arg3));
+					      args[2],
+					      lrs->arg3);
 
 	res = lrs->res;
 
-	switch (force(sysnr)) {
+	switch (sysnr) {
 	case __NR_read: /* 0 */
 		break;
 	case __NR_write: /* 1 */
@@ -161,9 +161,9 @@ replay_syscall(const LogRecordSyscall *lrs,
 		unsigned long length = args[1];
 		unsigned long prot = args[2];
 		
-		if (!isErrnoSysres(force(lrs->res))) {
+		if (!isErrnoSysres(lrs->res)) {
 			length = (length + 4095ul) & ~4095ul;
-			addrSpace->allocateMemory(addr, length, force(prot));
+			addrSpace->allocateMemory(addr, length, prot);
 		}
 		break;
 	}
@@ -171,8 +171,8 @@ replay_syscall(const LogRecordSyscall *lrs,
 		unsigned long addr = args[0];
 		unsigned long size = args[1];
 		unsigned long prot = args[2];
-		if (!isErrnoSysres(force(lrs->res)))
-			addrSpace->protectMemory(addr, size, force(prot));
+		if (!isErrnoSysres(lrs->res))
+			addrSpace->protectMemory(addr, size, prot);
 		break;
 	}
 	case __NR_munmap: { /* 11 */
@@ -183,18 +183,18 @@ replay_syscall(const LogRecordSyscall *lrs,
 		res = addrSpace->setBrk(args[0]);
 		break;
 	case __NR_rt_sigaction: /* 13 */
-		if (!isErrnoSysres(force(lrs->res)) &&
-		    force(args[1] != 0ul)) {
+		if (!isErrnoSysres(lrs->res) &&
+		    args[1] != 0ul) {
 			unsigned long buf[sizeof(struct sigaction)];
 			addrSpace->readMemory(args[1],
 					      sizeof(struct sigaction),
 					      buf,
 					      false,
 					      thr);
-			unsigned long arg0 = force(args[0]);
+			unsigned long arg0 = args[0];
 			for (unsigned x = 0; x < sizeof(struct sigaction); x++)
 				((unsigned char *)&mach->signalHandlers.handlers[arg0])[x] =
-					force(buf[x]);
+					buf[x];
 		}
 		/* A memory record will follow and handle the old
 		   handler if appropriate. */
@@ -248,7 +248,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_getsockopt: /* 55 */
 		break;
 	case __NR_clone: /* 56 */
-		if (!isErrnoSysres(force(lrs->res)))
+		if (!isErrnoSysres(lrs->res))
 			handle_clone(addrSpace,
 				     thr,
 				     mach,
@@ -257,20 +257,20 @@ replay_syscall(const LogRecordSyscall *lrs,
 				     args[2],
 				     args[3],
 				     args[4],
-				     force(lrs->res),
+				     lrs->res,
 				     ptr);
 		break;
 	case __NR_exit: /* 60 */
 		printf("Thread %d exits\n", thr->tid._tid());
 		thr->exitted = true;
-		if (force(thr->clear_child_tid)) {
+		if (thr->clear_child_tid) {
 			struct expression_result v;
 			v.lo = 0ul;
 			try {
 				addrSpace->store(EventTimestamp(thr->tid,
 								thr->nrEvents,
 								mach->nrEvents,
-								force(thr->regs.rip())),
+								thr->regs.rip()),
 						 thr->clear_child_tid, 4, v);
 			} catch (BadMemoryException<unsigned long> &e) {
 				/* Kernel ignores errors clearing the
@@ -335,9 +335,9 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
-		switch (force(args[1] & FUTEX_CMD_MASK)) {
+		switch (args[1] & FUTEX_CMD_MASK) {
 		case FUTEX_WAIT:
-			if (force(res == 0ul))
+			if (res == 0ul)
 				thr->futexBlock(args[0]);
 			break;
 		case FUTEX_WAKE:
@@ -363,17 +363,17 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	case __NR_tgkill: /* 234 */
 		/* Hack: assume that this came from raise() */
-		evt = SignalEvent::get(thr->bumpEvent(mach), force(args[2]), 0ul);
+		evt = SignalEvent::get(thr->bumpEvent(mach), args[2], 0ul);
 		break;
 
 	case __NR_set_robust_list: /* 273 */
 		thr->robust_list = args[0];
 		break;
 	default:
-		throw UnknownSyscallException(force(sysnr));
+		throw UnknownSyscallException(sysnr);
 	}
 
-	assert(force(res == lrs->res));
+	assert(res == lrs->res);
 	thr->regs.set_reg(REGISTER_IDX(RAX), res);
 
 	return evt;
@@ -398,17 +398,17 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 	args[5] = thr->regs.get_reg(REGISTER_IDX(R9));
 
 	res = -ENOSYS;
-	switch (force(sysnr)) {
+	switch (sysnr) {
 	case __NR_write: { /* 1 */
 		printf("write(%ld, 0x%lx, %ld)\n",
-		       force(args[0]), force(args[1]),
-		       force(args[2]));
-		if (force(args[0]) == 1 ||
-		    force(args[0]) == 2) {
+		       args[0], args[1],
+		       args[2]);
+		if (args[0] == 1 ||
+		    args[0] == 2) {
 			char *s = ms->addressSpace->readString(args[1], thr);
 			printf("Client %s %.*s",
-			       force(args[0]) == 1 ? "message" : "error",
-			       (int)force(args[2]), s);
+			       args[0] == 1 ? "message" : "error",
+			       (int)args[2], s);
 			free(s);
 		}
 		res = args[2];
@@ -430,7 +430,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 
 	case __NR_poll: { /* 7 */
 		struct pollfd pfd;
-		unsigned n_fds = force(args[1]);
+		unsigned n_fds = args[1];
 		bool fault;
 		int result;
 
@@ -473,7 +473,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 	case __NR_writev: { /* 20 */
 		/* Just say that everything went out fine */
 		struct iovec iov;
-		unsigned nr_iovs = force(args[3]);
+		unsigned nr_iovs = args[3];
 		ssize_t written;
 		written = 0;
 		for (unsigned x = 0; x < nr_iovs; x++) {
@@ -520,10 +520,10 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 
 		gettimeofday(&tv, &tz);
 		fault = false;
-		if (force(args[0]))
+		if (args[0])
 			fault |= ms->addressSpace->copyToClient(this->when, args[0], sizeof(tv),
 								&tv);
-		if (force(args[1]))
+		if (args[1])
 			fault |= ms->addressSpace->copyToClient(this->when, args[1], sizeof(tv),
 								&tv);
 		if (fault)
@@ -534,7 +534,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 	}
 
 	case __NR_futex: { /* 202 */
-		switch (force(args[1]) & FUTEX_CMD_MASK) {
+		switch (args[1] & FUTEX_CMD_MASK) {
 		case FUTEX_WAIT: {
 			expression_result m =
 				ms->addressSpace->load(this->when,
@@ -542,7 +542,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 						       4,
 						       false,
 						       thr);
-			if (force(m.lo) == force(args[2])) {
+			if (m.lo == args[2]) {
 				res = 0ul;
 			} else {
 				res = -EWOULDBLOCK;
@@ -554,7 +554,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 			break;
 		}
 		default:
-			printf("unknown futex op %lx\n", force(args[1]));
+			printf("unknown futex op %lx\n", args[1]);
 			break;
 		}
 
@@ -563,7 +563,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 
 	case __NR_clock_gettime: {
 		struct timespec ts;
-		clock_gettime(force(args[0]), &ts);
+		clock_gettime(args[0], &ts);
 		ms->addressSpace->copyToClient(this->when, args[1], sizeof(ts),
 					       &ts);
 		res = 0ul;
@@ -577,7 +577,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 	}
 
 	default:
-		printf("can't fake syscall %ld yet\n", force(sysnr));
+		printf("can't fake syscall %ld yet\n", sysnr);
 		break;
 	}
 	LogRecordSyscall *llr = new LogRecordSyscall(thr->tid,

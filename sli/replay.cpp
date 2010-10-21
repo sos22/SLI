@@ -53,13 +53,13 @@ static void checkSegv(LogRecord *lr, unsigned long addr)
 	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a segv for store to %lx, got %s",
-					    force(addr), lr->name());
+					    addr, lr->name());
 	if (lrs->signr != 11)
 		throw ReplayFailedException("wanted a segv, got signal %d",
 					    lrs->signr);
-        if (force(lrs->virtaddr != addr))
+        if (lrs->virtaddr != addr)
 		throw ReplayFailedException("wanted a segv at %lx, got one at %lx\n",
-					    force(lrs->virtaddr), force(addr));
+					    lrs->virtaddr, addr);
 }
 
 
@@ -71,13 +71,13 @@ ThreadEvent *StoreEvent::replay(LogRecord *lr, MachineState **ms,
 	if (!lrs)
 		throw ReplayFailedException("wanted a store, got %s",
 					    lr->name());
-	if (size != lrs->size || force(addr != lrs->ptr))
+	if (size != lrs->size || addr != lrs->ptr)
 		printf("WARNING: wanted %d byte store to %lx, got %d to %lx\n",
-		       lrs->size, force(lrs->ptr),
-		       size, force(addr));
-	if (force(data != lrs->value))
+		       lrs->size, lrs->ptr,
+		       size, addr);
+	if (data != lrs->value)
 		printf("WARNING: memory mismatch on store to %lx: %s != %s\n",
-		       force(addr), data.name(), lrs->value.name());
+		       addr, data.name(), lrs->value.name());
 	(*ms)->addressSpace->store(this->when, lrs->ptr, lrs->size, lrs->value, false, thr);
 	thr->nrAccesses++;
 
@@ -106,18 +106,18 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 		if (!lrl)
 			throw ReplayFailedException("wanted a load, got %s",
 						    lr->name());
-		if (size != lrl->size || force(addr != lrl->ptr))
+		if (size != lrl->size || addr != lrl->ptr)
 			printf("ReplayFailedException(\"wanted %d byte load from %lx, got %d from %lx\","
-			       "lrl->size, force(lrl->ptr),"
-			       "size, force(addr));\n",
-			       lrl->size, force(lrl->ptr),
-			       size, force(addr));
+			       "lrl->size, lrl->ptr,"
+			       "size, addr);\n",
+			       lrl->size, lrl->ptr,
+			       size, addr);
 		expression_result buf =
 			(*ms)->addressSpace->load(this->when, addr, size, false, thr);
-		if (force(buf != lrl->value) &&
-		    force(addr) < 0xFFFFFFFFFF600000)
+		if (buf != lrl->value &&
+		    addr < 0xFFFFFFFFFF600000)
 			printf("WARNING: memory mismatch on load from %lx (%s != %s)",
-			       force(addr), buf.name(), lrl->value.name());
+			       addr, buf.name(), lrl->value.name());
 		thr->temporaries[tmp] = lrl->value;
 		thr->nrAccesses++;
 	} else {
@@ -156,8 +156,8 @@ ThreadEvent *InstructionEvent::replay(LogRecord *lr, MachineState **ms,
 	if (!lrf)
 		throw ReplayFailedException("wanted a footstep, got %s",
 					    lr->name());
-        if (!allowRipMismatch && force(rip != lrf->rip))
-		printf("ReplayFailedBadRip(%lx, %lx)", force(rip), force(lrf->rip));
+        if (!allowRipMismatch && rip != lrf->rip)
+		printf("ReplayFailedBadRip(%lx, %lx)", rip, lrf->rip);
 #define PASTE(x, y) x ## y
 #define PASTE2(x, y) PASTE(x, y)
 #define STRING(x) #x
@@ -165,11 +165,11 @@ ThreadEvent *InstructionEvent::replay(LogRecord *lr, MachineState **ms,
 #define FR_REG_NAME(x) PASTE2(PASTE2(FOOTSTEP_REG_, x), _NAME)
 #define CHECK_REGISTER(x)						\
 	do {                                                            \
-		if (force(reg ## x != lrf-> reg ## x))			\
+		if (reg ## x != lrf-> reg ## x)			\
 			printf("ReplayFailedBadRegister("		\
 			       STRING2( FR_REG_NAME(x))", %lx, %lx)",	\
-			       force(reg ## x),				\
-			       force(lrf-> reg ## x));			\
+			       reg ## x,				\
+			       lrf-> reg ## x);			\
 	} while (0)
        CHECK_REGISTER(0);
        CHECK_REGISTER(1);
@@ -216,19 +216,19 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
 					    lr->name());
-        if (size != lrl->size || force(addr.lo != lrl->ptr))
+        if (size != lrl->size || addr.lo != lrl->ptr)
 		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
-					    lrl->size, force(lrl->ptr),
-					    size, force(addr.lo));
+					    lrl->size, lrl->ptr,
+					    size, addr.lo);
 
         expression_result seen;
 	Thread *thr = (*ms)->findThread(this->when.tid);
         seen = (*ms)->addressSpace->load(this->when, addr.lo, size, false, thr);
-        if (force(seen != lrl->value))
+        if (seen != lrl->value)
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
-					    force(addr.lo));
+					    addr.lo);
 	thr->temporaries[dest] = seen;
-        if (force(seen != expected))
+        if (seen != expected)
 		return NULL;
 
 	return StoreEvent::get(this->when, addr.lo, size, data);
@@ -243,19 +243,19 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 	if (!lrl)
 		throw ReplayFailedException("wanted a load for CAS, got %s",
 					    lr->name());
-        if (size != lrl->size || force(addr.lo != lrl->ptr))
+        if (size != lrl->size || addr.lo != lrl->ptr)
 		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
-					    lrl->size, force(lrl->ptr),
-					    size, force(addr.lo));
+					    lrl->size, lrl->ptr,
+					    size, addr.lo);
 
         expression_result seen;
 	Thread *thr = ms->findThread(this->when.tid);
         seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
-        if (force(seen != lrl->value))
+        if (seen != lrl->value)
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
-					    force(addr.lo));
+					    addr.lo);
 	thr->temporaries[dest] = seen;
-        if (force(seen != expected))
+        if (seen != expected)
 		return NULL;
 
         LogRecord *lr2 = lf->read(ptr, outPtr);
@@ -270,13 +270,13 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
         LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");
-        if (size != lrs->size || force(addr.lo != lrs->ptr))
+        if (size != lrs->size || addr.lo != lrs->ptr)
 		throw ReplayFailedException("wanted %d byte CAS to %lx, got %d to %lx",
-					    lrs->size, force(lrs->ptr),
-					    size, force(addr.lo));
-        if (force(data != lrs->value))
+					    lrs->size, lrs->ptr,
+					    size, addr.lo);
+        if (data != lrs->value)
 		throw ReplayFailedException("memory mismatch on CAS to %lx",
-					    force(addr.lo));
+					    addr.lo);
 
 	ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
 
@@ -292,7 +292,7 @@ InterpretResult CasEvent::fake(MachineState *ms, LogRecord **lr1,
 	if (lr1)
 		*lr1 = new LogRecordLoad(this->when.tid, size, addr.lo, seen);
 	thr->temporaries[dest] = seen;
-	if (force(seen == expected)) {
+	if (seen == expected) {
 		ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
 		if (lr2)
 			*lr2 = new LogRecordStore(this->when.tid, size, addr.lo, data);
@@ -325,7 +325,7 @@ ThreadEvent *SignalEvent::replay(LogRecord *lr, MachineState **ms,
 	case 11:
 		if ((*ms)->addressSpace->isReadable(lrs->virtaddr, 1, thr))
 			throw ReplayFailedException("got a segv at %lx, but that location is readable?",
-						    force(lrs->virtaddr));
+						    lrs->virtaddr);
 		/* Can't actually do much with this, because we pick
 		   up the Valgrind sighandlers when we start.  Oh
 		   well. */
@@ -423,7 +423,7 @@ CasEvent::fuzzyReplay(VexPtr<MachineState > &ms,
 	Thread *thr = ms->findThread(this->when.tid);
         seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
 	thr->temporaries[dest] = seen;
-        if (force(seen != expected))
+        if (seen != expected)
 		return NULL;
 	return StoreEvent::get(this->when, addr.lo, size, data);
 }

@@ -10,8 +10,8 @@ void
 AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
 			     VAMap::Protection prot, VAMap::AllocFlags flags)
 {
-	unsigned long start = force(_start);
-	unsigned long size = force(_size);
+	unsigned long start = _start;
+	unsigned long size = _size;
 	assert(!(start & ~PAGE_MASK));
 	assert(!(size & ~PAGE_MASK));
 
@@ -30,14 +30,14 @@ AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
 void
 AddressSpace::releaseMemory(unsigned long start, unsigned long size)
 {
-	vamap->unmap(force(start), force(size));
+	vamap->unmap(start, size);
 }
 
 void
 AddressSpace::protectMemory(unsigned long start, unsigned long size,
 			    VAMap::Protection prot)
 {
-	vamap->protect(force(start), force(size), prot);
+	vamap->protect(start, size, prot);
 }
 
 bool
@@ -74,7 +74,7 @@ AddressSpace::copyFromClient(EventTimestamp when, unsigned long start, unsigned 
 	}
 	if (!fault) {
 		for (unsigned x = 0; x < size; x++) {
-			((unsigned char *)dest)[x] = force(buf[x]);
+			((unsigned char *)dest)[x] = buf[x];
 		}
 	}
 	free(buf);
@@ -86,7 +86,7 @@ AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned si
 			  const unsigned long *contents, bool ignore_protection,
 			  Thread *thr)
 {
-	unsigned long start = force(_start);
+	unsigned long start = _start;
 	unsigned off = 0;
 	if (thr) {
 		checkFreeList(_start, _start + size, thr->tid, EventTimestamp::invalid);
@@ -115,7 +115,7 @@ AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned si
 			size -= to_copy_this_time;
 			off += to_copy_this_time;
 			contents = contents + to_copy_this_time;
-		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
+		} else if (thr && extendStack(start, thr->regs.rsp())) {
 			continue;
 		} else {
 			throw BadMemoryException<unsigned long>(true, _start, size);
@@ -218,7 +218,7 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	readMemory(start, sizeof(t), res, false, thr);
 	t tt;
 	for (unsigned x = 0; x < sizeof(t); x++)
-		((unsigned char *)&tt)[x] = force(res[x]);
+		((unsigned char *)&tt)[x] = res[x];
 	free(res);
 	return tt;
 }
@@ -229,7 +229,7 @@ EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
 					unsigned long *storeAddr)
 {
 	EventTimestamp when;
-	unsigned long start = force(_start);
+	unsigned long start = _start;
 	if (thr)
 		checkFreeList(_start, _start + size, thr->tid, EventTimestamp::invalid);
 	if (storeAddr)
@@ -253,7 +253,7 @@ EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
 			contents = contents + to_copy_this_time;
-		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
+		} else if (thr && extendStack(start, thr->regs.rsp())) {
 			/* This is what Linux does, but it doesn't
 			   make a great deal of sense: any time you
 			   hit this the program will definitely have
@@ -279,8 +279,8 @@ AddressSpace::isOnFreeList(unsigned long start, unsigned long end,
 	for (it = freed_memory.begin();
 	     it != freed_memory.end();
 	     it++) {
-		if (it->when.tid != asking && force(it->start < end) &&
-		    force(it->end > start)) {
+		if (it->when.tid != asking && it->start < end &&
+		    it->end > start) {
 			if (when)
 				*when = it->when;
 			if (free_addr)
@@ -297,13 +297,13 @@ AddressSpace::checkFreeList(unsigned long start, unsigned long end,
 {
 	EventTimestamp when;
 	if (isOnFreeList(start, end, asking, &when))
-		throw UseOfFreeMemoryException(now, force(start), when);
+		throw UseOfFreeMemoryException(now, start, when);
 }
 
 bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
 				     bool isWrite, Thread *thr)
 {
-	unsigned long start = force(_start);
+	unsigned long start = _start;
 	if (thr && isOnFreeList(_start, _start + size, thr->tid))
 		return false;
 	while (size != 0) {
@@ -324,7 +324,7 @@ bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
-		} else if (thr && extendStack(start, force(thr->regs.rsp()))) {
+		} else if (thr && extendStack(start, thr->regs.rsp())) {
 			continue;
 		} else {
 			return false;
@@ -335,7 +335,7 @@ bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
 
 unsigned long AddressSpace::setBrk(unsigned long _newBrk)
 {
-	unsigned long newBrk = force(_newBrk);
+	unsigned long newBrk = _newBrk;
 	unsigned long newBrkMap = (newBrk + 4095) & PAGE_MASK;
 
 	if (newBrk != 0) {
@@ -352,7 +352,7 @@ unsigned long AddressSpace::setBrk(unsigned long _newBrk)
 
 AddressSpace *AddressSpace::initialAddressSpace(unsigned long _initialBrk)
 {
-	unsigned long initialBrk = force(_initialBrk);
+	unsigned long initialBrk = _initialBrk;
 	AddressSpace *work = new AddressSpace();
 	work->brkptr = initialBrk;
 	work->brkMapPtr = initialBrk /*+ 4096*/;
@@ -543,7 +543,7 @@ AddressSpace::readString(unsigned long start, Thread *thr)
 	while (1) {
 		unsigned long b;
 		readMemory(start + offset, 1, &b, false, thr);
-		buf[offset] = force(b);
+		buf[offset] = b;
 		if (!buf[offset])
 			break;
 		offset++;
@@ -561,7 +561,7 @@ compare_ait_buffer_char_buffer(const unsigned long *buffer,
 			       size_t s)
 {
 	for (unsigned x = 0; x < s; x++) {
-		unsigned long b = force(buffer[x]);
+		unsigned long b = buffer[x];
 		unsigned long b2 = ((unsigned char *)bytes)[x];
 		if (b < b2)
 			return -1;
@@ -614,7 +614,7 @@ AddressSpace::findInterestingFunctions()
 void
 AddressSpace::client_freed(EventTimestamp when, unsigned long ptr)
 {
-	if (force(ptr == 0ul))
+	if (ptr == 0ul)
 		return;
 
 	expression_result chk = load(when, ptr - 8ul, 8);
@@ -623,7 +623,7 @@ AddressSpace::client_freed(EventTimestamp when, unsigned long ptr)
 	cf.start = ptr;
 	cf.end = ptr + chk.lo;
 	cf.when = when;
-	printf("client_free(%lx, %lx)\n", force(cf.start), force(cf.end));
+	printf("client_free(%lx, %lx)\n", cf.start, cf.end);
 	freed_memory.push_back(cf);
 }
 

@@ -52,14 +52,14 @@ void Thread::dumpSnapshot(LogWriter *lw)
 	VexGuestAMD64State r;
 
 	for (unsigned x = 0; x < RegisterSet::NR_REGS; x++)
-		((unsigned long *)&r)[x] = force(regs.get_reg(x));
+		((unsigned long *)&r)[x] = regs.get_reg(x);
 	lw->append(new LogRecordInitialRegisters(tid, r), 0);
 	if (currentIRSB && currentIRSBOffset != 0) {
 		/* First statement in block should be a mark */
 		assert(currentIRSB->stmts[0]->tag == Ist_IMark);
 		/* Should be a mark for the IRSB rip */
 		assert(currentIRSB->stmts[0]->Ist.IMark.addr ==
-		       force(currentIRSBRip));
+		       currentIRSBRip);
 		lw->append(new LogRecordVexThreadState(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
 	}
 
@@ -103,7 +103,7 @@ void Thread::visit(HeapVisitor &hv)
 EventTimestamp Thread::bumpEvent(MachineState *ms)
 {
 	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++,
-				   force(regs.rip()));
+				   regs.rip());
 	if (lastEvent.tid._tid() == 9 && lastEvent.idx == 0x1ab6fe)
 		printf("Producing the magic event %d:%lx\n",
 		       lastEvent.tid._tid(), lastEvent.idx);

@@ -1723,11 +1723,6 @@ void debugger_attach(void);
 
 void init_sli(void);
 
-static inline unsigned long force(unsigned long x)
-{
-	return x;
-}
-
 void gdb_concrete(const MachineState *ms);
 void gdb(void);
 void dbg_break(const char *msg, ...);

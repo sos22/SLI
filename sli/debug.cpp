@@ -192,7 +192,7 @@ GetMemoryCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 	unsigned x;
 
 	for (x = 0; x < size; x++)
-		sprintf(chrbuf + x * 2, "%02x", (unsigned char)force(membuf[x]));
+		sprintf(chrbuf + x * 2, "%02x", (unsigned char)membuf[x]);
 	free(membuf);
 	this->sendResponse(chrbuf);
 	free(chrbuf);
@@ -205,14 +205,14 @@ GetRegistersCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken
 
 	if (thr) {
 		char *buf = my_asprintf("%016lx%016lx%016lx%016lx%016lx%016lx%016lx%016lx",
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RAX)))),
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBX)))),
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RCX)))),
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDX)))),
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSI)))),
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RDI)))),
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RBP)))),
-					htonlong(force(thr->regs.get_reg(REGISTER_IDX(RSP)))));
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RAX))),
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RBX))),
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RCX))),
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RDX))),
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RSI))),
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RDI))),
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RBP))),
+					htonlong(thr->regs.get_reg(REGISTER_IDX(RSP))));
 		this->sendResponse(buf);
 		free(buf);
 	} else {
@@ -259,7 +259,7 @@ GetRegisterCommand<ait>::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 	}
 
 	if (haveIt) {
-		char *b = my_asprintf("%016lx", htonlong(force(r)));
+		char *b = my_asprintf("%016lx", htonlong(r));
 		this->sendResponse(b);
 		free(b);
 	} else {

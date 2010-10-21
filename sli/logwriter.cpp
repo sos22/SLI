@@ -59,12 +59,12 @@ void *LogRecordSyscall::marshal(unsigned *sz) const
 	void *r;
 	syscall_record<unsigned long> *sr = (syscall_record<unsigned long> *)LogRecord::marshal(RECORD_syscall, sizeof(syscall_record<unsigned long>), sz, &r);
 	sr->syscall_nr = sysnr;
-	if ((long)force(res) >= 0 || (long)force(res) < -4096) {
+	if ((long)res >= 0 || (long)res < -4096) {
 		sr->syscall_res._isError = false;
-		sr->syscall_res._val = force(res);
+		sr->syscall_res._val = res;
 	} else {
 		sr->syscall_res._isError = true;
-		sr->syscall_res._val = -force(res);
+		sr->syscall_res._val = -res;
 	}
 	sr->arg1 = arg1;
 	sr->arg2 = arg2;
@@ -88,7 +88,7 @@ void *LogRecordMemory::marshal(unsigned *sz) const
 									       &r);
 	mr->ptr = start;
 	for (x = 0; x < size; x++)
-		((unsigned char *)(mr + 1))[x] = force(contents[x]);
+		((unsigned char *)(mr + 1))[x] = contents[x];
 	return r;
 }
 
@@ -125,8 +125,8 @@ void *LogRecordLoad::marshal(unsigned *sz) const
 												  &r);
 	unsigned long v[2];
 	lr->ptr = ptr;
-	v[0] = force(value.lo);
-	v[1] = force(value.hi);
+	v[0] = value.lo;
+	v[1] = value.hi;
 	memcpy(lr + 1, v, size);
 	return r;
 }
@@ -147,8 +147,8 @@ void *LogRecordStore::marshal(unsigned *sz) const
 								      &r);
 	unsigned long v[2];
 	sr->ptr = ptr;
-	v[0] = force(value.lo);
-	v[1] = force(value.hi);
+	v[0] = value.lo;
+	v[1] = value.hi;
 	memcpy(sr + 1, v, size);
 	return r;
 }
