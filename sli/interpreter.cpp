@@ -1757,9 +1757,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					ths->eval_expression(ths->currentIRSB->next);
 				assert(force(ths->currentControlCondition));
 				ths->regs.set_reg(REGISTER_IDX(RIP),
-						  ternary(ths->currentControlCondition,
-							  next_addr.lo,
-							  0xdeadbeeful));
+						  ths->currentControlCondition ?
+						  next_addr.lo :
+						  0xdeadbeeful);
 				if (ths->currentIRSB->jumpkind == Ijk_Ret) {
 					/* Because of longjmp() etc.,
 					   the return address won't

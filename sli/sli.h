@@ -1742,21 +1742,6 @@ static inline bool isConstant(unsigned long x)
 	return true;
 }
 
-/* For some obscure reason C++ doesn't let you overload the ?:
-   operator, so do something almost but not equivalent here (not quite
-   because the laziness is wrong.  Then again, the laziness is wrong
-   on || and && as well, so what the hell.). */
-template<typename ait> static inline ait ternary(ait cond,
-						 ait t,
-						 ait f);
-
-template<> unsigned long ternary(unsigned long cond,
-				 unsigned long t,
-				 unsigned long f)
-{
-	return cond ? t : f;
-}
-
 void gdb_concrete(const MachineState *ms);
 void gdb(void);
 void dbg_break(const char *msg, ...);
