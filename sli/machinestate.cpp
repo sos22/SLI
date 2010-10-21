@@ -88,7 +88,6 @@ MachineState::initialMachineState(VexPtr<LogReader > &lf,
 	}
 
 	as->addVsyscalls();
-	as->findInterestingFunctions();
 
 	for (unsigned x = 0; x < work->threads->size(); x++)
 		work->threads->index(x)->snapshotLog.push(

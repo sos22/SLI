@@ -1584,20 +1584,11 @@ public:
 	unsigned long brkMapPtr;
 	VAMap *vamap;
 	PMap *pmap;
-	unsigned long client_free;
 
-	bool isOnFreeList(unsigned long start, unsigned long end,
-			  ThreadId asker,
-			  EventTimestamp *when = NULL,
-			  unsigned long *free_addr = NULL) const;
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
-	void checkFreeList(unsigned long start, unsigned long end, ThreadId asking, EventTimestamp now);
 public:
 	IRSB *getIRSBForAddress(unsigned long rip);
-
-	void findInterestingFunctions(const VAMap::VAMapEntry *vme);
-	void findInterestingFunctions();
 
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
@@ -1656,11 +1647,6 @@ public:
 	char *readString(unsigned long start, Thread *thr);
 
 	void destruct() { this->~AddressSpace(); }
-
-	typedef std::vector<client_freed_entry<unsigned long> > freed_memory_t;
-	freed_memory_t freed_memory;
-
-	void client_freed(EventTimestamp when, unsigned long ptr);
 
 	NAMED_CLASS
 

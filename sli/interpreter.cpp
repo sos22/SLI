@@ -1541,9 +1541,6 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
-				if (ths->regs.rip() == ms->addressSpace->client_free)
-					ms->addressSpace->client_freed(ths->bumpEvent(ms),
-								       ths->regs.get_reg(REGISTER_IDX(RDI)));
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  (stmt->Ist.IMark.addr));
 #define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
@@ -1582,16 +1579,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					DBG("Store %s to %s\n", data.name(), addr.name());
 					return StoreEvent::get(ths->bumpEvent(ms), addr.lo, size, data);
 				}
-				EventTimestamp et;
-				unsigned long free_addr;
-				if (ms->addressSpace->isOnFreeList(addr.lo, addr.lo + (size), ths->tid, &et,
-								   &free_addr))
-					return UseFreeMemoryEvent::get(ths->bumpEvent(ms), 
-									    addr.lo,
-									    free_addr,
-									    et);
-				else
-					return SignalEvent::get(ths->bumpEvent(ms), 11, addr.lo);
+				return SignalEvent::get(ths->bumpEvent(ms), 11, addr.lo);
 			}
 
 			case Ist_CAS: {
