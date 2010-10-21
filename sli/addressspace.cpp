@@ -171,26 +171,6 @@ AddressSpace::load(EventTimestamp when,
 		abort();
 	}
 
-	/* We cheat slightly and assume that you don't race on stack
-	   accesses.  This isn't *entirely* valid, but it makes things
-	   so much easier that it's worth it. */
-	bool irrelevant;
-#if 1
-	irrelevant = (is_stack(start) ||
-		      (thr &&
-		       force(start) > force(thr->regs.rsp()) - 1000000 &&
-		       force(start) < force(thr->regs.rsp()) + 1000000));
-#else
-	irrelevant = force(start) != 0x601080 && force(start) != 0x4221010;
-#endif
-	if (!irrelevant || 1) {
-		if (size <= 8) {
-			res.lo = load_ait<unsigned long>(res.lo, start, when, sto, storeAddr, size);
-		} else {
-			res.lo = load_ait<unsigned long>(res.lo, start, when, sto, storeAddr, 8);
-			res.hi = load_ait<unsigned long>(res.hi, start, when, sto, storeAddr, 8);
-		}
-	}
 	return res;
 }
 

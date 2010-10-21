@@ -184,9 +184,6 @@ public:
 	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
 };
 
-template<typename ait> ait load_ait(ait x, ait addr, EventTimestamp when, EventTimestamp store,
-				    ait storeAddr, unsigned size);
-
 template <typename ait> static inline ait mkConst(unsigned long x);
 
 template <>

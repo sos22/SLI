@@ -1,13 +1,5 @@
 #include "sli.h"
 
-template<> unsigned long
-load_ait(unsigned long x, unsigned long addr, EventTimestamp when, EventTimestamp store,
-	 unsigned long storeAddr, unsigned size)
-{
-	return x;
-}
-
-
 #include "logwriter.cpp"
 #include "thread.cpp"
 #include "machinestate.cpp"
