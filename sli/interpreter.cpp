@@ -1815,10 +1815,10 @@ finished_block:
 	}
 }
 
-InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace<unsigned long> **output, unsigned max_events,
+InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output, unsigned max_events,
 						  GarbageCollectionToken t)
 {
-	VexPtr<MemoryTrace<unsigned long> > work(new MemoryTrace<unsigned long>());
+	VexPtr<MemoryTrace> work(new MemoryTrace());
 	VexPtr<Thread > thr(currentState->findThread(tid));
 	if (thr->cannot_make_progress) {
 		*output = work;
@@ -1839,10 +1839,10 @@ InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace<unsi
 		}
 		if (LoadEvent *lr = dynamic_cast<LoadEvent *> (evt)) {
 			if (address_is_interesting(thr->tid, force(lr->addr)))
-				work->push_back(new MemoryAccessLoad<unsigned long>(*lr));
+				work->push_back(new MemoryAccessLoad(*lr));
 	        } else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
 			if (address_is_interesting(thr->tid, force(sr->addr)))
-				work->push_back(new MemoryAccessStore<unsigned long>(*sr));
+				work->push_back(new MemoryAccessStore(*sr));
 		}
 		max_events--;
 	}

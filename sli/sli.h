@@ -271,6 +271,9 @@ class PMap;
 class SignalHandlers;
 class ThreadEvent;
 class LogWriter;
+class MemoryTrace;
+class MemoryAccessLoad;
+class MemoryAccessStore;
 
 class LogRecordFootstep;
 class LogRecordInitialRegisters;
@@ -788,8 +791,6 @@ enum InterpretResult {
 	InterpretResultTimedOut
 };
 
-template <typename ait> class MemoryTrace;
-
 class EventRecorder : public GarbageCollected<EventRecorder> {
 protected:
 	virtual ~EventRecorder() {}
@@ -847,7 +848,7 @@ public:
 	}
 
 	InterpretResult getThreadMemoryTrace(ThreadId tid,
-					     MemoryTrace<unsigned long> **output,
+					     MemoryTrace **output,
 					     unsigned max_events,
 					     GarbageCollectionToken t);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
@@ -1020,11 +1021,8 @@ public:
 	NAMED_CLASS
 };
 
-template <typename ait> class MemoryAccessLoad;
-template <typename ait> class MemoryAccessStore;
-
 class LoadEvent : public ThreadEvent {
-	friend class MemoryAccessLoad<unsigned long>;
+	friend class MemoryAccessLoad;
 	IRTemp tmp;
 public:
 	unsigned long addr;
@@ -1052,7 +1050,7 @@ public:
 };
 
 class StoreEvent : public ThreadEvent {
-	friend class MemoryAccessStore<unsigned long>;
+	friend class MemoryAccessStore;
 public:
 	unsigned long addr;
 	unsigned size;
@@ -1281,13 +1279,12 @@ visit_container(t &vector, HeapVisitor &hv)
 		hv(*it);
 }
 
-template <typename ait>
-class MemoryAccess : public GarbageCollected<MemoryAccess<ait> >, public Named {
+class MemoryAccess : public GarbageCollected<MemoryAccess>, public Named {
 public:
 	EventTimestamp when;
-	ait addr;
+	unsigned long addr;
 	unsigned size;
-	MemoryAccess(EventTimestamp _when, ait _addr, unsigned _size)
+	MemoryAccess(EventTimestamp _when, unsigned long _addr, unsigned _size)
 		: when(_when),
 		  addr(_addr),
 		  size(_size)
@@ -1304,7 +1301,7 @@ public:
 class LogRecordLoad : public LogRecord {
 	friend class LoadEvent;
 	friend class CasEvent;
-	friend class MemoryAccessLoad<unsigned long>;
+	friend class MemoryAccessLoad;
 	unsigned size;
 public:
 	unsigned long ptr;
@@ -1330,8 +1327,7 @@ public:
 	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
-template <typename ait>
-class MemoryAccessLoad : public MemoryAccess<ait> {
+class MemoryAccessLoad : public MemoryAccess {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("%d: Load(%x)", this->when.tid._tid(),
@@ -1339,7 +1335,7 @@ protected:
 	}
 public:
 	MemoryAccessLoad(const class LoadEvent &evt)
-		: MemoryAccess<ait>(evt.when, evt.addr, evt.size)
+		: MemoryAccess(evt.when, evt.addr, evt.size)
 	{
 	}
 	virtual bool isLoad() { return true; }
@@ -1348,7 +1344,7 @@ public:
 class LogRecordStore : public LogRecord {
 	friend class StoreEvent;
 	friend class CasEvent;
-	friend class MemoryAccessStore<unsigned long>;
+	friend class MemoryAccessStore;
 	unsigned size;
 public:
 	unsigned long ptr;
@@ -1374,8 +1370,7 @@ public:
 	void visit(HeapVisitor &hv){ value.visit(hv); visit_aiv(ptr, hv); }
 };
 
-template <typename ait>
-class MemoryAccessStore : public MemoryAccess<ait> {
+class MemoryAccessStore : public MemoryAccess {
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("%d: Store(%x)",
@@ -1384,44 +1379,36 @@ protected:
 	}
 public:
 	MemoryAccessStore(const class StoreEvent &evt)
-		: MemoryAccess<ait>(evt.when, evt.addr, evt.size)
+		: MemoryAccess(evt.when, evt.addr, evt.size)
 	{
 	}
 	virtual bool isLoad() { return false; }
 };
 
 /* Essentially a thin wrapper around std::vector */
-template <typename ait>
-class MemoryTrace : public GarbageCollected<MemoryTrace<ait> > {
+class MemoryTrace : public GarbageCollected<MemoryTrace> {
 public:
-	std::vector<MemoryAccess<ait> *> content;
-	static MemoryTrace<ait> *get(VexPtr<MachineState > &,
-				     VexPtr<LogReader > &,
-				     LogReaderPtr,
-				     GarbageCollectionToken);
+	std::vector<MemoryAccess*> content;
+	static MemoryTrace *get(VexPtr<MachineState > &,
+				VexPtr<LogReader > &,
+				LogReaderPtr,
+				GarbageCollectionToken);
 	size_t size() const { return content.size(); }
-	MemoryAccess<ait> *&operator[](unsigned idx) { return content[idx]; }
-	void push_back(MemoryAccess<ait> *x) { content.push_back(x); }
+	MemoryAccess *&operator[](unsigned idx) { return content[idx]; }
+	void push_back(MemoryAccess *x) { content.push_back(x); }
 	MemoryTrace() : content() {}
 	void dump() const;
 	void visit(HeapVisitor &hv){ visit_container(content, hv); }
-	void destruct() { this->~MemoryTrace<ait>(); }
+	void destruct() { this->~MemoryTrace(); }
 	NAMED_CLASS
 };
 
-template <typename ait> void
-visit_memory_trace_fn(MemoryTrace<ait> *&h, HeapVisitor &hv)
-{
-	hv(h);
-}
-
-template <typename ait>
-class MemTracePool : public GarbageCollected<MemTracePool<ait> > {
-	typedef gc_map<ThreadId, MemoryTrace<ait> *, __default_hash_function, __default_eq_function,
-		       visit_memory_trace_fn<ait> > contentT;
+class MemTracePool : public GarbageCollected<MemTracePool> {
+	typedef gc_map<ThreadId, MemoryTrace*, __default_hash_function, __default_eq_function,
+		       __visit_function_heap<MemoryTrace *> > contentT;
 	contentT *content;
 public:
-	static MemTracePool<ait> *get(VexPtr<MachineState > &base_state, ThreadId ignoredThread, GarbageCollectionToken t);
+	static MemTracePool *get(VexPtr<MachineState > &base_state, ThreadId ignoredThread, GarbageCollectionToken t);
 	gc_map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
 	void visit(HeapVisitor &hv);
 	void destruct() { }

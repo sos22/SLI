@@ -1,10 +1,9 @@
 #include "sli.h"
 
-template <typename ait>
 class MemTraceMaker : public EventRecorder {
-	MemoryTrace<ait> *mt;
+	MemoryTrace *mt;
 public:
-	MemTraceMaker(MemoryTrace<ait> *_mt)
+	MemTraceMaker(MemoryTrace *_mt)
 		: mt(_mt)
 	{
 	}
@@ -13,31 +12,31 @@ public:
 	void destruct() {}
 	NAMED_CLASS
 };
-template <typename ait> void
-MemTraceMaker<ait>::record(Thread *thr, ThreadEvent *evt)
+void
+MemTraceMaker::record(Thread *thr, ThreadEvent *evt)
 {
 	if (const LoadEvent *le = dynamic_cast<const LoadEvent *>(evt)) {
 		if (address_is_interesting(thr->tid, force(le->addr))) {
-			MemoryAccess<ait> *ma = new MemoryAccessLoad<ait>(*le);
+			MemoryAccess *ma = new MemoryAccessLoad(*le);
 			assert_gc_allocated(ma);
 			mt->push_back(ma);
 		}
 	} else if (const StoreEvent *se = dynamic_cast<const StoreEvent *>(evt)) {
 		if (address_is_interesting(thr->tid, force(se->addr))) {
-			MemoryAccess<ait> *ma = new MemoryAccessStore<ait>(*se);
+			MemoryAccess *ma = new MemoryAccessStore(*se);
 			assert_gc_allocated(ma);
 			mt->push_back(ma);
 		}
 	}
 }
-template <typename ait> MemoryTrace<ait> *
-MemoryTrace<ait>::get(VexPtr<MachineState> &ms,
-		      VexPtr<LogReader> &lf,
-		      LogReaderPtr ptr,
-		      GarbageCollectionToken t)
+MemoryTrace *
+MemoryTrace::get(VexPtr<MachineState> &ms,
+		 VexPtr<LogReader> &lf,
+		 LogReaderPtr ptr,
+		 GarbageCollectionToken t)
 {
-	VexPtr<MemoryTrace<ait> > work(new MemoryTrace<ait>);
-	VexPtr<MemTraceMaker<ait> > mtm(new MemTraceMaker<ait>(work));
+	VexPtr<MemoryTrace> work(new MemoryTrace);
+	VexPtr<MemTraceMaker> mtm(new MemTraceMaker(work));
 	Interpreter i(ms->dupeSelf());
 	VexPtr<LogWriter> dummy(NULL);
 	VexPtr<EventRecorder> mtm2(mtm);
@@ -45,19 +44,12 @@ MemoryTrace<ait>::get(VexPtr<MachineState> &ms,
 	return work;
 }
 
-template <typename ait>
-void MemoryTrace<ait>::dump() const
+void MemoryTrace::dump() const
 {
-	for (class std::vector<MemoryAccess<ait> *>::const_iterator it = content.begin();
+	for (std::vector<MemoryAccess*>::const_iterator it = content.begin();
 	     it != content.end();
 	     it++)
 		(*it)->dump();
 }
 
-#define MK_MEMTRACE(t)							\
-	template MemoryTrace<t>::MemoryTrace();				\
-	template MemoryTrace<t> *MemoryTrace<t>::get(VexPtr<MachineState>&, \
-						     VexPtr<LogReader > &, \
-						     LogReaderPtr,	\
-						     GarbageCollectionToken); \
-	template void MemoryTrace<t>::dump() const
+#define MK_MEMTRACE(t)
