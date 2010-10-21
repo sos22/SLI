@@ -147,7 +147,7 @@ skip:
 	case RECORD_mem_read: {
 		mem_read_record<unsigned long> mrr;
 		int r = buffered_pread(&mrr, sizeof(mrr), startPtr.off + sizeof(rh));
-		expression_result<unsigned long> val;
+		expression_result val;
 		unsigned long b[2];
 		memset(b, 0, sizeof(b));
 		r = buffered_pread(b, rh.size - sizeof(mrr) - sizeof(rh),
@@ -162,7 +162,7 @@ skip:
 	case RECORD_mem_write: {
 		mem_write_record<unsigned long> mwr;
 		int r = buffered_pread(&mwr, sizeof(mwr), startPtr.off + sizeof(rh));
-		expression_result<unsigned long> val;
+		expression_result val;
 		unsigned long b[2];
 		memset(b, 0, sizeof(b));
 		r = buffered_pread(b, rh.size - sizeof(mwr) - sizeof(rh),

@@ -199,7 +199,6 @@ unsigned long mkConst(unsigned long x)
 	return x;
 }
 
-template<typename abst_int_value>
 struct expression_result : public Named {
 protected:
 	char *mkName() const {
@@ -207,16 +206,10 @@ protected:
 				   name_aiv(lo), name_aiv(hi));
 	}
 public:
-	abst_int_value lo;
-	abst_int_value hi;
+	unsigned long lo;
+	unsigned long hi;
 	expression_result() : Named() {}
 	void visit(HeapVisitor &hv) { visit_aiv(lo, hv); visit_aiv(hi, hv); }
-	
-	template <typename new_type> void abstract(expression_result<new_type> *out) const
-	{
-		out->lo = mkConst<new_type>(lo);
-		out->hi = mkConst<new_type>(hi);
-	}
 };
 
 class RegisterSet {
@@ -248,14 +241,14 @@ public:
 
 class expression_result_array {
 public:
-	std::vector<expression_result<unsigned long> > content;
+	std::vector<expression_result > content;
 	void setSize(unsigned new_size) {
 		content.clear();
 		content.resize(new_size);
 	}
-	expression_result<unsigned long> &operator[](unsigned idx) { return content[idx]; }
+	expression_result &operator[](unsigned idx) { return content[idx]; }
 	void visit(HeapVisitor &hv) {
-		for (std::vector<expression_result<unsigned long> >::iterator it = content.begin();
+		for (std::vector<expression_result >::iterator it = content.begin();
 		     it != content.end();
 		     it++)
 			it->visit(hv);
@@ -296,17 +289,17 @@ class Thread : public GarbageCollected<Thread> {
 				       const LogReaderPtr &ptr,
 				       unsigned long rip,
 				       GarbageCollectionToken t);
-	struct expression_result<unsigned long> eval_expression(IRExpr *expr);
+	struct expression_result eval_expression(IRExpr *expr);
 	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms);
 	ThreadEvent *do_load(EventTimestamp when,
 					    IRTemp tmp,
 					    unsigned long addr,
 					    unsigned size,
 					    MachineState *ms);
-	expression_result<unsigned long> do_ccall_calculate_condition(struct expression_result<unsigned long> *args);
-	expression_result<unsigned long> do_ccall_calculate_rflags_c(expression_result<unsigned long> *args);
-	expression_result<unsigned long> do_ccall_generic(IRCallee *cee, struct expression_result<unsigned long> *rargs);
-	expression_result<unsigned long> do_ccall(IRCallee *cee, IRExpr **args);
+	expression_result do_ccall_calculate_condition(struct expression_result *args);
+	expression_result do_ccall_calculate_rflags_c(expression_result *args);
+	expression_result do_ccall_generic(IRCallee *cee, struct expression_result *rargs);
+	expression_result do_ccall(IRCallee *cee, IRExpr **args);
 
 	void amd64g_dirtyhelper_loadF80le(MachineState *, IRTemp tmp, unsigned long addr);
 	void amd64g_dirtyhelper_storeF80le(MachineState *, unsigned long addr, unsigned long _f64);
@@ -1063,22 +1056,22 @@ class StoreEvent : public ThreadEvent {
 public:
 	unsigned long addr;
 	unsigned size;
-	expression_result<unsigned long> data;
+	expression_result data;
 private:
-	StoreEvent(EventTimestamp when, unsigned long addr, unsigned size, expression_result<unsigned long> data);
+	StoreEvent(EventTimestamp when, unsigned long addr, unsigned size, expression_result data);
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when, unsigned long _addr, unsigned _size, expression_result<unsigned long> data)
+	static ThreadEvent *get(EventTimestamp when, unsigned long _addr, unsigned _size, expression_result data)
 	{
 		return new StoreEvent(when, _addr, _size, data);
 	}
 
 	void visit(HeapVisitor &hv){ visit_aiv(addr, hv); data.visit(hv); ThreadEvent::visit(hv); }
-	void destruct() { data.~expression_result<unsigned long>(); ThreadEvent::destruct(); }
+	void destruct() { data.~expression_result(); ThreadEvent::destruct(); }
 	NAMED_CLASS
 };
 
@@ -1133,15 +1126,15 @@ public:
 
 class CasEvent : public ThreadEvent {
 	IRTemp dest;
-	expression_result<unsigned long> addr;
-	expression_result<unsigned long> data;
-	expression_result<unsigned long> expected;
+	expression_result addr;
+	expression_result data;
+	expression_result expected;
 	unsigned size;
 	CasEvent(EventTimestamp when,
 		 IRTemp _dest,
-		 expression_result<unsigned long> _addr,
-		 expression_result<unsigned long> _data,
-		 expression_result<unsigned long> _expected,
+		 expression_result _addr,
+		 expression_result _data,
+		 expression_result _expected,
 		 unsigned _size) :
 		ThreadEvent(when),
 		dest(_dest),
@@ -1174,9 +1167,9 @@ public:
 
 	static ThreadEvent *get(EventTimestamp when,
 				IRTemp _dest,
-				expression_result<unsigned long> _addr,
-				expression_result<unsigned long> _data,
-				expression_result<unsigned long> _expected,
+				expression_result _addr,
+				expression_result _data,
+				expression_result _expected,
 				unsigned _size)
 	{
 		return new CasEvent(when, _dest, _addr, _data, _expected, _size);
@@ -1191,9 +1184,9 @@ public:
 	}
 	void destruct()
 	{
-		addr.~expression_result<unsigned long>();
-		data.~expression_result<unsigned long>();
-		expected.~expression_result<unsigned long>();
+		addr.~expression_result();
+		data.~expression_result();
+		expected.~expression_result();
 		ThreadEvent::destruct();
 	}
 	NAMED_CLASS
@@ -1316,7 +1309,7 @@ class LogRecordLoad : public LogRecord {
 public:
 	unsigned long ptr;
 private:
-	expression_result<unsigned long> value;
+	expression_result value;
 protected:
 	char *mkName() const {
 		return my_asprintf("load(%x)", size);
@@ -1325,7 +1318,7 @@ public:
 	LogRecordLoad(ThreadId _tid,
 		      unsigned _size,
 		      unsigned long _ptr,
-		      expression_result<unsigned long> _value) :
+		      expression_result _value) :
 		LogRecord(_tid),
 		size(_size),
 		ptr(_ptr),
@@ -1360,7 +1353,7 @@ class LogRecordStore : public LogRecord {
 public:
 	unsigned long ptr;
 private:
-	expression_result<unsigned long> value;
+	expression_result value;
 protected:
 	virtual char *mkName() const {
 		return my_asprintf("store(%x,%s)", size, name_aiv(ptr));
@@ -1369,7 +1362,7 @@ public:
 	LogRecordStore(ThreadId _tid,
 		       unsigned _size,
 		       unsigned long _ptr,
-		       expression_result<unsigned long> _value) :
+		       expression_result _value) :
 		LogRecord(_tid),
 		size(_size),
 		ptr(_ptr),
@@ -1716,7 +1709,7 @@ public:
 	{
 		writeMemory(EventTimestamp::invalid, rec.start, rec.size, rec.contents, true, NULL);
 	}
-	void store(EventTimestamp when, unsigned long start, unsigned size, const expression_result<unsigned long> &val,
+	void store(EventTimestamp when, unsigned long start, unsigned size, const expression_result &val,
 		   bool ignore_protection = false,
 		   Thread *thr = NULL);
 	void writeMemory(EventTimestamp when, unsigned long start, unsigned size,
@@ -1727,7 +1720,7 @@ public:
 	bool copyFromClient(EventTimestamp when, unsigned long start, unsigned size,
 			    void *dest);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
-	expression_result<unsigned long> load(EventTimestamp when, unsigned long start, unsigned size,
+	expression_result load(EventTimestamp when, unsigned long start, unsigned size,
 				    bool ignore_protection = false,
 				    Thread *thr = NULL);
 	template <typename t> const t fetch(unsigned long addr,

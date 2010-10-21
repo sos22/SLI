@@ -39,7 +39,7 @@ InterpretResult RdtscEvent::fake(MachineState *ms, LogRecord **lr)
 	return InterpretResultIncomplete;
 }
 
-StoreEvent::StoreEvent(EventTimestamp when, unsigned long _addr, unsigned _size, expression_result<unsigned long> _data)
+StoreEvent::StoreEvent(EventTimestamp when, unsigned long _addr, unsigned _size, expression_result _data)
 	: ThreadEvent(when),
 	  addr(_addr),
 	  size(_size),
@@ -114,7 +114,7 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 			       "size, force(addr));\n",
 			       lrl->size, force(lrl->ptr),
 			       size, force(addr));
-		expression_result<unsigned long> buf =
+		expression_result buf =
 			(*ms)->addressSpace->load(this->when, addr, size, false, thr);
 		if (force(buf != lrl->value) &&
 		    force(addr) < 0xFFFFFFFFFF600000)
@@ -134,7 +134,7 @@ InterpretResult LoadEvent::fake(MachineState *ms, LogRecord **lr)
 {
 	Thread *thr = ms->findThread(this->when.tid);
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
-		expression_result<unsigned long> buf =
+		expression_result buf =
 			ms->addressSpace->load(this->when, addr, size, false, thr);
 		thr->temporaries[tmp] = buf;
 		if (lr)
@@ -223,7 +223,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
 					    lrl->size, force(lrl->ptr),
 					    size, force(addr.lo));
 
-        expression_result<unsigned long> seen;
+        expression_result seen;
 	Thread *thr = (*ms)->findThread(this->when.tid);
         seen = (*ms)->addressSpace->load(this->when, addr.lo, size, false, thr);
         if (force(seen != lrl->value))
@@ -250,7 +250,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 					    lrl->size, force(lrl->ptr),
 					    size, force(addr.lo));
 
-        expression_result<unsigned long> seen;
+        expression_result seen;
 	Thread *thr = ms->findThread(this->when.tid);
         seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
         if (force(seen != lrl->value))
@@ -290,7 +290,7 @@ InterpretResult CasEvent::fake(MachineState *ms, LogRecord **lr1,
 				    LogRecord **lr2)
 {
 	Thread *thr = ms->findThread(this->when.tid);
-	expression_result<unsigned long> seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
+	expression_result seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
 	if (lr1)
 		*lr1 = new LogRecordLoad(this->when.tid, size, addr.lo, seen);
 	thr->temporaries[dest] = seen;
@@ -421,7 +421,7 @@ CasEvent::fuzzyReplay(VexPtr<MachineState > &ms,
 			   LogReaderPtr *endPtr,
 			   GarbageCollectionToken)
 {
-        expression_result<unsigned long> seen;
+        expression_result seen;
 	Thread *thr = ms->findThread(this->when.tid);
         seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
 	thr->temporaries[dest] = seen;

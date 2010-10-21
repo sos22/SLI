@@ -123,7 +123,7 @@ AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned si
 	}
 }
 
-expression_result<unsigned long>
+expression_result
 AddressSpace::load(EventTimestamp when,
 		   unsigned long start, unsigned size,
 		   bool ignore_protection,
@@ -135,7 +135,7 @@ AddressSpace::load(EventTimestamp when,
 	for (unsigned x = 0; x < size; x++)
 		new (&b[x]) unsigned long();
 	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr, &storeAddr);
-	expression_result<unsigned long> res;
+	expression_result res;
 	res.lo = mkConst<unsigned long>(0);
 	res.hi = mkConst<unsigned long>(0);
 	switch(size) {
@@ -196,7 +196,7 @@ AddressSpace::load(EventTimestamp when,
 
 void
 AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
-		    const expression_result<unsigned long> &val, bool ignore_protection,
+		    const expression_result &val, bool ignore_protection,
 		    Thread *thr)
 {
 	unsigned long b[16];
@@ -642,7 +642,7 @@ AddressSpace::client_freed(EventTimestamp when, unsigned long ptr)
 	if (force(ptr == mkConst<unsigned long>(0)))
 		return;
 
-	expression_result<unsigned long> chk = load(when, ptr - mkConst<unsigned long>(8), 8);
+	expression_result chk = load(when, ptr - mkConst<unsigned long>(8), 8);
 	client_freed_entry<unsigned long> cf;
 
 	cf.start = ptr;

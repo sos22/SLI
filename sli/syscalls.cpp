@@ -264,7 +264,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		printf("Thread %d exits\n", thr->tid._tid());
 		thr->exitted = true;
 		if (force(thr->clear_child_tid)) {
-			struct expression_result<unsigned long> v;
+			struct expression_result v;
 			v.lo = mkConst<unsigned long>(0);
 			try {
 				addrSpace->store(EventTimestamp(thr->tid,
@@ -536,7 +536,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 	case __NR_futex: { /* 202 */
 		switch (force(args[1]) & FUTEX_CMD_MASK) {
 		case FUTEX_WAIT: {
-			expression_result<unsigned long> m =
+			expression_result m =
 				ms->addressSpace->load(this->when,
 						       args[0],
 						       4,

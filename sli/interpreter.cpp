@@ -177,11 +177,11 @@ Thread::do_load(EventTimestamp when, IRTemp tmp, unsigned long addr, unsigned si
 ThreadEvent *
 Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 {
-	struct expression_result<unsigned long> args[6];
+	struct expression_result args[6];
 	unsigned x;
 
 	if (details->guard) {
-		expression_result<unsigned long> guard = eval_expression(details->guard);
+		expression_result guard = eval_expression(details->guard);
 		if (force(!guard.lo))
 			return NULL;
 	}
@@ -394,15 +394,15 @@ calculate_condition_flags_XXX(ait op,
 	sanity_check_ait(cf);
 }
 
-expression_result<unsigned long>
-Thread::do_ccall_calculate_condition(struct expression_result<unsigned long> *args)
+expression_result
+Thread::do_ccall_calculate_condition(struct expression_result *args)
 {
-	struct expression_result<unsigned long> condcode = args[0];
-	struct expression_result<unsigned long> op       = args[1];
-	struct expression_result<unsigned long> dep1     = args[2];
-	struct expression_result<unsigned long> dep2     = args[3];
-	struct expression_result<unsigned long> ndep     = args[4];
-	struct expression_result<unsigned long> res;
+	struct expression_result condcode = args[0];
+	struct expression_result op       = args[1];
+	struct expression_result dep1     = args[2];
+	struct expression_result dep2     = args[3];
+	struct expression_result ndep     = args[4];
+	struct expression_result res;
 	unsigned long inv;
 	unsigned long cf, zf, sf, of, pf;
 
@@ -449,14 +449,14 @@ Thread::do_ccall_calculate_condition(struct expression_result<unsigned long> *ar
 	return res;
 }
 
-expression_result<unsigned long>
-Thread::do_ccall_calculate_rflags_c(expression_result<unsigned long> *args)
+expression_result
+Thread::do_ccall_calculate_rflags_c(expression_result *args)
 {
-	struct expression_result<unsigned long> op   = args[0];
-	struct expression_result<unsigned long> dep1 = args[1];
-	struct expression_result<unsigned long> dep2 = args[2];
-	struct expression_result<unsigned long> ndep = args[3];
-	struct expression_result<unsigned long> res;
+	struct expression_result op   = args[0];
+	struct expression_result dep1 = args[1];
+	struct expression_result dep2 = args[2];
+	struct expression_result ndep = args[3];
+	struct expression_result res;
 	unsigned long cf, zf, sf, of, pf;
 
 	calculate_condition_flags_XXX(op.lo,
@@ -473,11 +473,11 @@ Thread::do_ccall_calculate_rflags_c(expression_result<unsigned long> *args)
 	return res;
 }
 
-expression_result<unsigned long>
+expression_result
 Thread::do_ccall_generic(IRCallee *cee,
-			      struct expression_result<unsigned long> *rargs)
+			      struct expression_result *rargs)
 {
-	struct expression_result<unsigned long> res;
+	struct expression_result res;
 
 	res.lo = mkConst<unsigned long>(((unsigned long (*)(unsigned long, unsigned long, unsigned long,
 						  unsigned long, unsigned long, unsigned long))cee->addr)
@@ -491,11 +491,11 @@ Thread::do_ccall_generic(IRCallee *cee,
 	return res;
 }
 
-expression_result<unsigned long>
+expression_result
 Thread::do_ccall(IRCallee *cee,
 		      IRExpr **args)
 {
-	struct expression_result<unsigned long> rargs[6];
+	struct expression_result rargs[6];
 	unsigned x;
 
 	assert(cee->regparms == 0);
@@ -515,13 +515,8 @@ Thread::do_ccall(IRCallee *cee,
 }
 
 /* Borrowed from gnucash */
-template <typename ait>
-static void mulls64(struct expression_result<ait> *dest, const struct expression_result<ait> &src1,
-		    const struct expression_result<ait> &src2);
-
-template <>
-void mulls64(struct expression_result<unsigned long> *dest, const struct expression_result<unsigned long> &src1,
-	     const struct expression_result<unsigned long> &src2)
+static void mulls64(struct expression_result *dest, const struct expression_result &src1,
+		    const struct expression_result &src2)
 {
 	bool isneg = false;
 	unsigned long a = src1.lo;
@@ -592,11 +587,11 @@ void mulls64(struct expression_result<unsigned long> *dest, const struct express
 	}
 }
 
-expression_result<unsigned long>
+expression_result
 Thread::eval_expression(IRExpr *expr)
 {
-	struct expression_result<unsigned long> res;
-	struct expression_result<unsigned long> *dest = &res;
+	struct expression_result res;
+	struct expression_result *dest = &res;
 	unsigned getOffset;
 	IRType getType;
 
@@ -694,8 +689,8 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Binop: {
-		struct expression_result<unsigned long> arg1 = eval_expression(expr->Iex.Binop.arg1);
-		struct expression_result<unsigned long> arg2 = eval_expression(expr->Iex.Binop.arg2);
+		struct expression_result arg1 = eval_expression(expr->Iex.Binop.arg1);
+		struct expression_result arg2 = eval_expression(expr->Iex.Binop.arg2);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub8:
 		case Iop_Sub16:
@@ -1119,7 +1114,7 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Unop: {
-		struct expression_result<unsigned long> arg = eval_expression(expr->Iex.Unop.arg);
+		struct expression_result arg = eval_expression(expr->Iex.Unop.arg);
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
 			dest->lo = arg.lo >> mkConst<unsigned long>(32);
@@ -1270,9 +1265,9 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Triop: {
-		struct expression_result<unsigned long> arg1 = eval_expression(expr->Iex.Triop.arg1);
-		struct expression_result<unsigned long> arg2 = eval_expression(expr->Iex.Triop.arg2);
-		struct expression_result<unsigned long> arg3 = eval_expression(expr->Iex.Triop.arg3);
+		struct expression_result arg1 = eval_expression(expr->Iex.Triop.arg1);
+		struct expression_result arg2 = eval_expression(expr->Iex.Triop.arg2);
+		struct expression_result arg3 = eval_expression(expr->Iex.Triop.arg3);
 		switch (expr->Iex.Triop.op) {
 		case Iop_PRemF64: {
 			union {
@@ -1310,9 +1305,9 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Mux0X: {
-		struct expression_result<unsigned long> cond = eval_expression(expr->Iex.Mux0X.cond);
-		struct expression_result<unsigned long> res0 = eval_expression(expr->Iex.Mux0X.expr0);
-		struct expression_result<unsigned long> resX = eval_expression(expr->Iex.Mux0X.exprX);
+		struct expression_result cond = eval_expression(expr->Iex.Mux0X.cond);
+		struct expression_result res0 = eval_expression(expr->Iex.Mux0X.expr0);
+		struct expression_result resX = eval_expression(expr->Iex.Mux0X.exprX);
 		if (force(cond.lo == mkConst<unsigned long>(0))) {
 			*dest = res0;
 		} else {
@@ -1531,7 +1526,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			GarbageCollectionToken t)
 {
 	unsigned put_offset;
-	struct expression_result<unsigned long> put_data;
+	struct expression_result put_data;
 	IRType put_type;
 
 	check_fpu_control();
@@ -1590,9 +1585,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			case Ist_Store: {
 				assert(stmt->Ist.Store.end == Iend_LE);
 				assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
-				struct expression_result<unsigned long> data =
+				struct expression_result data =
 					ths->eval_expression(stmt->Ist.Store.data);
-				struct expression_result<unsigned long> addr =
+				struct expression_result addr =
 					ths->eval_expression(stmt->Ist.Store.addr);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
@@ -1617,11 +1612,11 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				assert(stmt->Ist.CAS.details->expdHi == NULL);
 				assert(stmt->Ist.CAS.details->dataHi == NULL);
 				assert(stmt->Ist.CAS.details->end == Iend_LE);
-				struct expression_result<unsigned long> data =
+				struct expression_result data =
 					ths->eval_expression(stmt->Ist.CAS.details->dataLo);
-				struct expression_result<unsigned long> addr =
+				struct expression_result addr =
 					ths->eval_expression(stmt->Ist.CAS.details->addr);
-				struct expression_result<unsigned long> expected =
+				struct expression_result expected =
 					ths->eval_expression(stmt->Ist.CAS.details->expdLo);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
@@ -1680,7 +1675,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			}
 
 			case Ist_PutI: {
-				struct expression_result<unsigned long> idx = ths->eval_expression(stmt->Ist.PutI.ix);
+				struct expression_result idx = ths->eval_expression(stmt->Ist.PutI.ix);
 
 				/* Crazy bloody encoding scheme */
 				idx.lo =
@@ -1704,7 +1699,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 
 			case Ist_Exit: {
 				if (stmt->Ist.Exit.guard) {
-					struct expression_result<unsigned long> guard =
+					struct expression_result guard =
 						ths->eval_expression(stmt->Ist.Exit.guard);
 					bool controlCondIsConstant = isConstant(ths->currentControlCondition);
 					if (force(!guard.lo)) {
@@ -1771,7 +1766,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 		{
 			bool is_syscall = ths->currentIRSB->jumpkind == Ijk_Sys_syscall;
 			{
-				struct expression_result<unsigned long> next_addr =
+				struct expression_result next_addr =
 					ths->eval_expression(ths->currentIRSB->next);
 				assert(force(ths->currentControlCondition));
 				ths->regs.set_reg(REGISTER_IDX(RIP),
@@ -2053,21 +2048,21 @@ void Interpreter::runToEvent(EventTimestamp end,
 	}
 }
 
-template <typename ait> void visit_expression_result_array(void *_ctxt,
-							   HeapVisitor &hv)
+void visit_expression_result_array(void *_ctxt,
+				   HeapVisitor &hv)
 {
 	unsigned nr_entries = *(unsigned *)_ctxt;
-	expression_result<ait> *arr = (expression_result<ait> *)((unsigned *)_ctxt + 1);
+	expression_result *arr = (expression_result*)((unsigned *)_ctxt + 1);
 	for (unsigned x = 0; x < nr_entries; x++)
 		arr[x].visit(hv);
 }
 
-template <typename ait> void destruct_expression_result_array(void *_ctxt)
+void destruct_expression_result_array(void *_ctxt)
 {
 	unsigned nr_entries = *(unsigned *)_ctxt;
-	expression_result<ait> *arr = (expression_result<ait> *)((unsigned *)_ctxt + 1);
+	expression_result *arr = (expression_result*)((unsigned *)_ctxt + 1);
 	for (unsigned x = 0; x < nr_entries; x++)
-		arr[x].~expression_result<ait>();
+		arr[x].~expression_result();
 }
 
 #define MK_INTERPRETER(t)

@@ -49,16 +49,14 @@ static unsigned long signed_l(unsigned long x, unsigned long y)
 	return (long)x < (long)y;
 }
 
-template <typename ait>
-ait operator !=(expression_result<ait> a, expression_result<ait> b)
-{
-	return !(a == b);
-}
-
-template<typename ait>
-ait operator ==(expression_result<ait> a, expression_result<ait> b)
+static unsigned long operator ==(expression_result a, expression_result b)
 {
 	return a.lo == b.lo && a.hi == b.hi;
+}
+
+static unsigned long operator !=(expression_result a, expression_result b)
+{
+	return !(a == b);
 }
 
 #include "interpreter.cpp"
