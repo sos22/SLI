@@ -1,6 +1,5 @@
 #include "sli.h"
 
-#include "logwriter.cpp"
 #include "thread.cpp"
 #include "machinestate.cpp"
 #include "logreader.cpp"
@@ -13,7 +12,6 @@
 	MK_MACHINE_STATE(t);			\
 	MK_INTERPRETER(t);			\
 	MK_THREAD(t);				\
-	MK_LOGWRITER(t);			\
 	MK_ADDRESS_SPACE(t);			\
 	MK_LOGREADER(t);                        \
         MK_PMAP(t);				\

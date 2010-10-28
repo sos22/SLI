@@ -1498,9 +1498,9 @@ extract_call_follower(IRSB *irsb)
 
 ThreadEvent *
 Thread::runToEvent(VexPtr<Thread > &ths,
-			VexPtr<MachineState > &ms,
-			const LogReaderPtr &ptr,
-			GarbageCollectionToken t)
+		   VexPtr<MachineState > &ms,
+		   const LogReaderPtr &ptr,
+		   GarbageCollectionToken t)
 {
 	unsigned put_offset;
 	struct expression_result put_data;

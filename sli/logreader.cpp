@@ -8,8 +8,14 @@
 typedef unsigned long Word;
 typedef unsigned long UWord;
 typedef unsigned char Bool;
+typedef struct {
+	UWord _val;
+	Bool  _isError;
+} SysRes;
 
 typedef struct sigaction sigaction_t;
+
+#include "ppres.h"
 
 LogReader *LogReader::open(const char *path, LogReaderPtr *initial_ptr)
 {

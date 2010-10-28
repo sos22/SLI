@@ -320,5 +320,3 @@ void SignalHandlers::dumpSnapshot(LogWriter *lw) const
 {
 	lw->append(new LogRecordInitialSighandlers(ThreadId(0), handlers));
 }
-
-#define MK_LOGWRITER(t)
