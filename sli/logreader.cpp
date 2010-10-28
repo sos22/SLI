@@ -238,7 +238,3 @@ skip:
 		abort();
 	}
 }
-
-
-#define MK_LOGREADER(t)				
-

@@ -211,5 +211,3 @@ PMap::relocate(PMap *target, size_t sz)
 			target->heads[x]->pprev = &target->heads[x];			
 	memset(heads, 0x66, sizeof(heads));
 }
-
-#define MK_PMAP(t)

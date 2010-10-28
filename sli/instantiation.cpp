@@ -1,19 +1,7 @@
 #include "sli.h"
 
-#include "machinestate.cpp"
-#include "logreader.cpp"
-#include "syscalls.cpp"
-#include "addressspace.cpp"
-#include "pmap.cpp"
-#include "vamap.cpp"
-
 #define MK_INTERP(t)				\
-	MK_MACHINE_STATE(t);			\
-	MK_INTERPRETER(t);			\
-	MK_ADDRESS_SPACE(t);			\
-	MK_LOGREADER(t);                        \
-        MK_PMAP(t);				\
-	MK_VAMAP(t)
+	MK_INTERPRETER(t);
 
 
 static unsigned long signed_shift_right(unsigned long x, unsigned long y)

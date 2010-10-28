@@ -591,5 +591,3 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		pa = (PhysicalAddress *)LibVEX_realloc(pa, sizeof(pa[0]) * dchunk(start, end));
 	}
 }
-
-#define MK_VAMAP(t)

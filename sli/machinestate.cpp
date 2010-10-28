@@ -103,5 +103,3 @@ bool MachineState::crashed() const
 			return true;
 	return false;
 }
-
-#define MK_MACHINE_STATE(t)

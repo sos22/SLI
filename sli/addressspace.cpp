@@ -527,5 +527,3 @@ AddressSpace::searchDecodeCache(unsigned long rip)
 
 	return n->irsb;
 }
-
-#define MK_ADDRESS_SPACE(t)
