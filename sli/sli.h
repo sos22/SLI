@@ -805,9 +805,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	ThreadEvent *replay(LogRecord *lr, MachineState *ms,
-				 const LogReader *lf, LogReaderPtr ptr,
-				 LogReaderPtr *outPtr, LogWriter *lw);
 
 	static ThreadEvent *get(ThreadId _tid,
 				IRTemp _dest,

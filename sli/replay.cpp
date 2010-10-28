@@ -135,55 +135,6 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
 }
 
 
-ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
-					const LogReader *lf, LogReaderPtr ptr,
-					LogReaderPtr *outPtr, LogWriter *lw)
-{
-	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
-	if (!lrl)
-		throw ReplayFailedException("wanted a load for CAS, got %s",
-					    lr->name());
-        if (size != lrl->size || addr.lo != lrl->ptr)
-		throw ReplayFailedException("wanted %d byte CAS from %lx, got %d from %lx",
-					    lrl->size, lrl->ptr,
-					    size, addr.lo);
-
-        expression_result seen;
-	Thread *thr = ms->findThread(this->tid);
-        seen = ms->addressSpace->load(addr.lo, size, false, thr);
-        if (seen != lrl->value)
-		throw ReplayFailedException("memory mismatch on CAS load from %lx",
-					    addr.lo);
-	thr->temporaries[dest] = seen;
-        if (seen != expected)
-		return NULL;
-
-        LogRecord *lr2 = lf->read(ptr, outPtr);
-	if (!lr2) {
-		/* We've hit the end of the log, which means that we
-		   were supposed to replay the load part of the CAS
-		   but not the store.  Meh. */
-		return NULL;
-	}
-	if (lw)
-		lw->append(lr2);
-        LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
-	if (!lrs)
-		throw ReplayFailedException("wanted a store for CAS, got something else");
-        if (size != lrs->size || addr.lo != lrs->ptr)
-		throw ReplayFailedException("wanted %d byte CAS to %lx, got %d to %lx",
-					    lrs->size, lrs->ptr,
-					    size, addr.lo);
-        if (data != lrs->value)
-		throw ReplayFailedException("memory mismatch on CAS to %lx",
-					    addr.lo);
-
-	ms->addressSpace->store(addr.lo, size, data, false, thr);
-
-	return NULL;
-}
-
-
 ThreadEvent *SignalEvent::replay(LogRecord *lr, MachineState **ms,
 					   bool &, LogReaderPtr)
 {
