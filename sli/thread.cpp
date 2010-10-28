@@ -3,7 +3,6 @@
 template class LibvexVector<Thread>;
 
 const ThreadId ThreadId::invalidTid;
-const EventTimestamp EventTimestamp::invalid;
 
 RegisterSet::RegisterSet(VexGuestAMD64State const&r)
 {

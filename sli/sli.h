@@ -85,36 +85,6 @@ public:
 	unsigned long hash() const { return tid; }
 };
 
-class EventTimestamp {
-public:
-	EventTimestamp(ThreadId _tid, unsigned long _idx, unsigned long _total_timestamp,
-		       unsigned long _rip)
-		: tid(_tid), idx(_idx), total_timestamp(_total_timestamp),
-		  rip(_rip)
-	{}
-	EventTimestamp() : tid(ThreadId::invalidTid), idx(0), total_timestamp(0) {}
-	static const EventTimestamp invalid;
-	ThreadId tid;
-	unsigned long idx;
-
-	/* Count of all events over every thread.  This could, in
-	   principle, be derived from tid and idx, but doing so is
-	   often difficult. */
-	unsigned long total_timestamp;
-
-	/* RIP when the event was generated.  Again, could be derived,
-	   given the tid, idx, and context, but doing so is a pain. */
-	unsigned long rip;
-
-	bool operator ==(const EventTimestamp &b) const { return tid == b.tid && idx == b.idx; }
-	bool operator !=(const EventTimestamp &b) const { return tid != b.tid || idx != b.idx; }
-
-	bool operator >(const EventTimestamp &b) const { return total_timestamp > b.total_timestamp; }
-	bool operator <(const EventTimestamp &b) const { return total_timestamp < b.total_timestamp; }
-
-	unsigned hash() const { return total_timestamp; }
-};
-
 template <typename t> t min(const t &a, const t &b)
 {
 	if (a < b)
