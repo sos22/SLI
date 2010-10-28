@@ -1456,8 +1456,6 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	ths->currentIRSB = irsb;
 	ths->currentIRSBOffset = 0;
 
-	ths->currentControlCondition = 1ul;
-
 	if (loud_mode)
 		ppIRSB(irsb);
 
@@ -1527,12 +1525,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			}
 			assert(ths->currentIRSB);
 		}
-	        assert(ths->currentControlCondition);
 		while (ths->currentIRSBOffset < ths->currentIRSB->stmts_used) {
 			IRStmt *stmt = ths->currentIRSB->stmts[ths->currentIRSBOffset];
 			ths->currentIRSBOffset++;
-
-			assert(ths->currentControlCondition);
 
 			switch (stmt->tag) {
 			case Ist_NoOp:
@@ -1673,31 +1668,17 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result guard =
 						ths->eval_expression(stmt->Ist.Exit.guard);
-					if (!guard.lo) {
-						unsigned long inv_guard = !guard.lo;
-						assert(inv_guard == 1);
-						ths->currentControlCondition =
-							ths->currentControlCondition && inv_guard;
-						assert(ths->currentControlCondition);
+					if (!guard.lo)
 						break;
-					}
-					unsigned long inv_inv_guard = !!guard.lo;
-					assert(inv_inv_guard == 1);
-					ths->currentControlCondition =
-						ths->currentControlCondition && inv_inv_guard;
-					assert(ths->currentControlCondition);
 				}
 				if (stmt->Ist.Exit.jk != Ijk_Boring) {
 					assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
 					printf("EMULATION WARNING %lx\n",
 					       ths->regs.get_reg(REGISTER_IDX(EMWARN)));
 				}
-				assert(ths->currentControlCondition);
 				assert(stmt->Ist.Exit.dst->tag == Ico_U64);
 				ths->regs.set_reg(REGISTER_IDX(RIP),
-						  ths->currentControlCondition ?
-						  stmt->Ist.Exit.dst->Ico.U64 :
-						  0xdeadbeeful);
+						  stmt->Ist.Exit.dst->Ico.U64);
 				ths->currentIRSB = NULL;
 				goto finished_block;
 			}
@@ -1707,8 +1688,6 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				ppIRStmt(stmt);
 				throw NotImplementedException();
 			}
-
-			assert(ths->currentControlCondition);
 		}
 
 		ths->currentIRSBOffset++;
@@ -1735,11 +1714,8 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			{
 				struct expression_result next_addr =
 					ths->eval_expression(ths->currentIRSB->next);
-				assert(ths->currentControlCondition);
 				ths->regs.set_reg(REGISTER_IDX(RIP),
-						  ths->currentControlCondition ?
-						  next_addr.lo :
-						  0xdeadbeeful);
+						  next_addr.lo);
 				if (ths->currentIRSB->jumpkind == Ijk_Ret) {
 					/* Because of longjmp() etc.,
 					   the return address won't
@@ -1777,7 +1753,6 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 		}
 
 finished_block:
-		assert(ths->currentControlCondition);
 		;
 	}
 }

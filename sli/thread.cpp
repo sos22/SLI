@@ -117,10 +117,9 @@ Thread::pretty_print(void) const
 	if (currentIRSB) {
 		printf("Current IRSB:\n");
 		ppIRSB(currentIRSB);
-		printf("Offset %d, origin %lx, CCC %lx\n",
+		printf("Offset %d, origin %lx\n",
 		       currentIRSBOffset,
-		       currentIRSBRip,
-		       currentControlCondition);
+		       currentIRSBRip);
 	}
 }
 

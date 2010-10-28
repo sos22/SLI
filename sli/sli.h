@@ -251,8 +251,6 @@ public:
 	/* mutable because we have to nuke it from dupeSelf. */
 	mutable ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
-	unsigned long currentControlCondition;
-
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
 	void futexBlock(unsigned long fba) { blocked = true; futex_block_address = fba; }
 	void futexUnblock() { blocked = false; }
