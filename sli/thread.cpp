@@ -102,12 +102,11 @@ void Thread::visit(HeapVisitor &hv)
 void
 Thread::pretty_print(void) const
 {
-	printf("Thread tid %d, pid %d %s%s%s\n",
+	printf("Thread tid %d, pid %d %s%s\n",
 	       tid._tid(), pid,
 #define f(n) n ? "(" #n ")" : ""
 	       f(exitted),
-	       f(crashed),
-	       f(idle));
+	       f(crashed));
 #undef f
 	regs.pretty_print();
 	temporaries.pretty_print();

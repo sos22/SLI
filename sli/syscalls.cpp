@@ -444,7 +444,6 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 			printf("thread %d appears to have gone idle...\n",
 			       thr->tid._tid());
 			res = -ENOSYS;
-			thr->idle = true;
 		}
 		break;
 	}
@@ -481,7 +480,6 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 
 	case __NR_nanosleep: /* 35 */
 		printf("Thread %d sleeping...\n", thr->tid._tid());
-		thr->idle = true;
 		res = 0ul;
 		break;
 

@@ -213,7 +213,6 @@ public:
 	unsigned long set_child_tid;
 	bool exitted;
 	bool crashed;
-	bool idle;
 
 	IRSB *currentIRSB;
 	unsigned long currentIRSBRip;
