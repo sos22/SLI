@@ -2067,10 +2067,6 @@ public:
 };
 
 class FREventRecorder : public EventRecorder {
-protected:
-	void record(Thread *thr, ThreadEvent  *evt) {
-		abort();
-	}
 public:
 	CrashMachine *cm;
 	CrashMachine *new_cm;
@@ -2079,19 +2075,15 @@ public:
 		  new_cm(new CrashMachine())
 	{
 	}
-	void record(Thread *thr, ThreadEvent *evt,
-		    MachineState *ms)
+	void instruction(Thread *thr, unsigned long rip, MachineState *ms)
 	{
-		if (InstructionEvent *ie =
-		    dynamic_cast<InstructionEvent *>(evt)) {
-			CrashTimestamp ts(thr);
-			ts.rip = ie->rip;
-			if (cm->hasKey(ts)) {
-				CrashMachineNode *cmn = cm->get(ts, 0);
-				assert(cmn != NULL);
-				concreteStoresT stores;
-				new_cm->set(ts, cmn->foldInRegisters(thr, ms, stores), true);
-			}
+		CrashTimestamp ts(thr);
+		ts.rip = rip;
+		if (cm->hasKey(ts)) {
+			CrashMachineNode *cmn = cm->get(ts, 0);
+			assert(cmn != NULL);
+			concreteStoresT stores;
+			new_cm->set(ts, cmn->foldInRegisters(thr, ms, stores), true);
 		}
 	}
 	void visit(HeapVisitor &hv) { hv(cm); hv(new_cm); }
@@ -2375,26 +2367,15 @@ CrashMachine::calc_relevant_addresses_snapshot(Thread *thr,
 }
 
 class CRAEventRecorder : public EventRecorder {
-protected:
-	void record(Thread *thr, ThreadEvent *evt) {
-		abort();
-	}
 public:
 	CrashMachine *cm;
 	CRAEventRecorder(CrashMachine *_cm) : cm(_cm) {}
-	void record(Thread *thr, ThreadEvent *evt,
-		    MachineState *ms)
+	void instruction(Thread *thr, unsigned long rip, MachineState *ms)
 	{
-		if (InstructionEvent *ie =
-		    dynamic_cast<InstructionEvent *>(evt)) {
-			CrashTimestamp ts(thr);
-			ts.rip = ie->rip;
-			if (ie->rip == 0x7f860d33acce)
-				dbg_break("Evaluating at the magic address\n");
-			if (cm->hasKey(ts)) {
-				cm->calc_relevant_addresses_snapshot(thr, ms);
-			}
-		}
+		CrashTimestamp ts(thr);
+		ts.rip = rip;
+		if (cm->hasKey(ts))
+			cm->calc_relevant_addresses_snapshot(thr, ms);
 	}
 	void visit(HeapVisitor &hv) { hv(cm); }
 };
@@ -2931,30 +2912,25 @@ Oracle::findLoadsForStore(const CrashTimestamp &store_rip,
 class CIALEventRecorder : public EventRecorder {
 	Oracle *oracle; /* Note that the oracle isn't garbage
 			 * collected! */
-protected:
-	void record(Thread *thr, ThreadEvent *evt);
 public:
 	CIALEventRecorder(Oracle *_oracle)
 		: oracle(_oracle)
 	{
 	}
+	void store(Thread *thr, unsigned long addr, unsigned long val);
 	void visit(HeapVisitor &hv) {}
 };
 void
-CIALEventRecorder::record(Thread *thr, ThreadEvent *evt)
+CIALEventRecorder::store(Thread *thr, unsigned long addr, unsigned long val)
 {
-	StoreEvent *se =
-		dynamic_cast<StoreEvent *>(evt);
-	if (!se)
+	if (oracle->interesting_addresses.count(addr) == 0)
 		return;
-	if (oracle->interesting_addresses.count(se->addr) == 0)
-		return;
-	oracle->constant_addresses.erase(se->addr);
+	oracle->constant_addresses.erase(addr);
 	oracle->address_log.push_back(
 		Oracle::address_log_entry(
 			CrashTimestamp(thr->tid, thr->regs.rip(), thr->currentCallStack),
-			se->addr,
-			se->data.lo));
+			addr,
+			val));
 }
 void
 Oracle::collect_interesting_access_log(
@@ -4077,34 +4053,32 @@ class MemTraceExtractor : public EventRecorder {
 public:
 	Oracle *oracle;
 	MemTraceExtractor(Oracle *o) : oracle(o) {}
-	void record(Thread *thr,
-		    ThreadEvent *evt);
+	void store(Thread *thr, unsigned long addr, unsigned long val);
+	void load(Thread *thr, unsigned long addr);
 	void visit(HeapVisitor &hv) {}
 };
-
 void
-MemTraceExtractor::record(Thread *thr,
-			  ThreadEvent *evt)
+MemTraceExtractor::store(Thread *thr, unsigned long addr, unsigned long val)
 {
 	unsigned long rsp;
 	if (thr->tid != oracle->crashingTid)
 		return;
 	rsp = thr->regs.get_reg(REGISTER_IDX(RSP));
-	if (LoadEvent *le =
-	    dynamic_cast<LoadEvent *>(evt)) {
-		/* Arbitrarily assume that stacks are never deeper
-		   than 8MB.  Also assume that the red zone is only
-		   128 bytes, and we never access more than 8 bytes
-		   past its nominal end. */
-		if (le->addr >= rsp - 136 &&
-		    le->addr < rsp + (8 << 20))
-			oracle->load_event(CrashTimestamp(thr), le->addr);
-	} else if (StoreEvent *se =
-		   dynamic_cast<StoreEvent *>(evt)) {
-		if (se->addr >= rsp - 136 &&
-		    se->addr < rsp + (8 << 20))
-			oracle->store_event(CrashTimestamp(thr), se->addr);
-	}
+	if (addr >= rsp - 136 && addr < rsp + (8 << 20))
+		oracle->store_event(CrashTimestamp(thr), addr);
+}
+void
+MemTraceExtractor::load(Thread *thr, unsigned long addr)
+{
+	unsigned long rsp;
+	if (thr->tid != oracle->crashingTid)
+		return;
+	rsp = thr->regs.get_reg(REGISTER_IDX(RSP));
+	/* Arbitrarily assume that stacks are never deeper than 8MB.
+	   Also assume that the red zone is only 128 bytes, and we
+	   never access more than 8 bytes past its nominal end. */
+	if (addr >= rsp - 136 && addr < rsp + (8 << 20))
+		oracle->load_event(CrashTimestamp(thr), addr);
 }
 
 unsigned long

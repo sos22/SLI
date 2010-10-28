@@ -587,18 +587,7 @@ public:
 	NAMED_CLASS
 };
 
-class EventRecorder : public GarbageCollected<EventRecorder> {
-protected:
-	virtual ~EventRecorder() {}
-	virtual void record(Thread *thr, ThreadEvent *evt) = 0;
-public:
-	virtual void record(Thread *thr, ThreadEvent *evt,
-			    MachineState *ms)
-	{
-		record(thr, evt);
-	}
-	NAMED_CLASS
-};
+class EventRecorder;
 
 class Interpreter {
 	void replayFootstep(const LogRecordFootstep &lrf,
@@ -868,6 +857,32 @@ public:
 		return new SignalEvent(_tid, _signr, _virtaddr);
 	}
 
+	NAMED_CLASS
+};
+
+class EventRecorder : public GarbageCollected<EventRecorder> {
+protected:
+	virtual ~EventRecorder() {}
+public:
+	void record(Thread *thr, ThreadEvent *evt, MachineState *ms)
+	{
+		if (InstructionEvent *ie = dynamic_cast<InstructionEvent *>(evt))
+			instruction(thr, ie->rip, ms);
+		else if (StoreEvent *se = dynamic_cast<StoreEvent *>(evt))
+			store(thr, se->addr, se->data.lo);
+		else if (LoadEvent *le = dynamic_cast<LoadEvent *>(evt))
+			load(thr, le->addr);
+	}
+
+	virtual void instruction(Thread *thr, unsigned long rip, MachineState *ms)
+	{
+	}
+	virtual void store(Thread *thr, unsigned long addr, unsigned long val)
+	{
+	}
+	virtual void load(Thread *thr, unsigned long addr)
+	{
+	}
 	NAMED_CLASS
 };
 
