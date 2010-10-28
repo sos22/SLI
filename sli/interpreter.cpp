@@ -1325,9 +1325,6 @@ Thread::eval_expression(IRExpr *expr)
 void
 Thread::redirectGuest(unsigned long rip)
 {
-	if (rip == (0xFFFFFFFFFF600400ul) ||
-	    rip == (0xffffffffff600000ul))
-		allowRipMismatch = true;
 	if (rip == 0x4382f8)
 		inInfrastructure = true;
 }
@@ -1542,8 +1539,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 								  GR(FOOTSTEP_REG_1_NAME),
 								  ths->regs.get_reg(REGISTER_IDX(XMM0) + 1),
 								  GR(FOOTSTEP_REG_3_NAME),
-								  GR(FOOTSTEP_REG_4_NAME),
-								  ths->allowRipMismatch);
+							     GR(FOOTSTEP_REG_4_NAME));
 #undef GR
 
 			case Ist_AbiHint:
@@ -1705,9 +1701,6 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 		if (ths->currentIRSB->jumpkind == Ijk_Yield ||
 		    ths->currentIRSB->jumpkind == Ijk_ClientReq)
 			ths->currentIRSB->jumpkind = Ijk_Boring;
-
-		if (ths->currentIRSB->jumpkind == Ijk_Ret)
-			ths->allowRipMismatch = false;
 
 		{
 			bool is_syscall = ths->currentIRSB->jumpkind == Ijk_Sys_syscall;

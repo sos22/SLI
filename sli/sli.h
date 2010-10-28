@@ -258,7 +258,7 @@ public:
 
 	void pretty_print() const;
 private:
-	bool allowRipMismatch;
+	//bool allowRipMismatch;
 public:
 	static ThreadEvent *runToEvent(VexPtr<Thread > &ths,
 						      VexPtr<MachineState > &ms,
@@ -808,17 +808,15 @@ public:
 	unsigned long reg2;
 	unsigned long reg3;
 	unsigned long reg4;
-	bool allowRipMismatch;
 	InstructionEvent(ThreadId _tid, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
-			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4, bool _allowRipMismatch) :
+			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4) :
 		ThreadEvent(_tid),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
 		reg2(_reg2),
 		reg3(_reg3),
-		reg4(_reg4),
-		allowRipMismatch(_allowRipMismatch)
+		reg4(_reg4)
 	{
 	}
 protected:
@@ -830,10 +828,9 @@ public:
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static InstructionEvent *get(ThreadId _tid, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
-				     unsigned long _reg2, unsigned long _reg3, unsigned long _reg4, bool _allowRipMismatch)
+				     unsigned long _reg2, unsigned long _reg3, unsigned long _reg4)
 	{
-		return new InstructionEvent(_tid, _rip, _reg0, _reg1, _reg2, _reg3, _reg4,
-					    _allowRipMismatch);
+		return new InstructionEvent(_tid, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
 	}
 
 	NAMED_CLASS
