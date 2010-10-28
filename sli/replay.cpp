@@ -2,6 +2,16 @@
  * methods on events. */
 #include "sli.h"
 
+static unsigned long operator ==(expression_result a, expression_result b)
+{
+	return a.lo == b.lo && a.hi == b.hi;
+}
+
+static unsigned long operator !=(expression_result a, expression_result b)
+{
+	return !(a == b);
+}
+
 ThreadEvent *RdtscEvent::replay(LogRecord *lr, MachineState **ms,
 					  bool &, LogReaderPtr)
 {

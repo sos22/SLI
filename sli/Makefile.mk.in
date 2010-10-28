@@ -3,8 +3,8 @@ targets="crop binpatch dbg chunk direct"
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,logwriter,thread,machinestate}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk,logreader,syscalls}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{debug,instantiation,dbgbreak,addressspace}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{debug,dbgbreak,addressspace,replay}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
@@ -22,8 +22,8 @@ rules() {
 \$(SLIR_OBJECTS) \$(SLIR_TARGET_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
 \$(SLIR_DEPS) \$(SLIR_TARGET_DEPS): CPPFLAGS+=-I\$(libvex)/pub
 $targets: slir.a libVEX.a
-${input_base}/instantiation.o: CPPFLAGS+=-I\$(libvex)/priv
-${input_base}/instantiation.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
+${input_base}/interpreter.o: CPPFLAGS+=-I\$(libvex)/priv
+${input_base}/interpreter.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/syscalls.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/syscalls.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/direct.o: CPPFLAGS+=-I\$(libvex)/priv

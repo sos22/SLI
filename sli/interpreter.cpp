@@ -24,6 +24,21 @@ static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 	return False;
 }
 
+static unsigned long signed_shift_right(unsigned long x, unsigned long y)
+{
+	return (long)x >> y;
+}
+
+static unsigned long signed_le(unsigned long x, unsigned long y)
+{
+	return (long)x <= (long)y;
+}
+	
+static unsigned long signed_l(unsigned long x, unsigned long y)
+{
+	return (long)x < (long)y;
+}
+
 #define REG_LAST 128
 
 static void
