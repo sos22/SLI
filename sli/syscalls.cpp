@@ -33,7 +33,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		if (!lrm)
 			break;
 		if (lw)
-			lw->append(lr, 0);
+			lw->append(lr);
 		try {
 			addrSpace->writeMemory(lrm->start, lrm->size, lrm->contents,
 					       true, NULL);

@@ -53,14 +53,14 @@ void Thread::dumpSnapshot(LogWriter *lw)
 
 	for (unsigned x = 0; x < RegisterSet::NR_REGS; x++)
 		((unsigned long *)&r)[x] = regs.get_reg(x);
-	lw->append(new LogRecordInitialRegisters(tid, r), 0);
+	lw->append(new LogRecordInitialRegisters(tid, r));
 	if (currentIRSB && currentIRSBOffset != 0) {
 		/* First statement in block should be a mark */
 		assert(currentIRSB->stmts[0]->tag == Ist_IMark);
 		/* Should be a mark for the IRSB rip */
 		assert(currentIRSB->stmts[0]->Ist.IMark.addr ==
 		       currentIRSBRip);
-		lw->append(new LogRecordVexThreadState(tid, currentIRSBRip, currentIRSBOffset, temporaries), 0);
+		lw->append(new LogRecordVexThreadState(tid, currentIRSBRip, currentIRSBOffset, temporaries));
 	}
 
 	printf("Tid %d is at %d, irsb: \n", tid._tid(),

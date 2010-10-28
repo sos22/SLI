@@ -352,8 +352,7 @@ bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 
 void AddressSpace::dumpBrkPtr(LogWriter *lw) const
 {
-	lw->append(new LogRecordInitialBrk(ThreadId(0), brkptr),
-		   0);
+	lw->append(new LogRecordInitialBrk(ThreadId(0), brkptr));
 }
 
 void AddressSpace::dumpSnapshot(LogWriter *lw) const
@@ -391,8 +390,7 @@ void AddressSpace::dumpSnapshot(LogWriter *lw) const
 						       start_va,
 						       end_va - start_va,
 						       (unsigned long)prot,
-						       (unsigned long)alf),
-			   0);
+						       (unsigned long)alf));
 
 		/* Now do the contents of the block */
 
@@ -419,8 +417,7 @@ void AddressSpace::dumpSnapshot(LogWriter *lw) const
 				lw->append(new LogRecordMemory(ThreadId(0),
 							       MemoryChunk::size,
 							       cursor_va,
-							       buf),
-					   0);
+							       buf));
 			}
 		}
 

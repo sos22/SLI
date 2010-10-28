@@ -1841,7 +1841,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 			evt = oldEvent->replay(lr, &currentState.get(), consumed, ptr);
 			if (consumed) {
 				if (lw && !appendedRecord) {
-					lw->append(lr, oldEvent->when.idx);
+					lw->append(lr);
 					appendedRecord = true;
 				}
 				if (!lw) {

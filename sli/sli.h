@@ -780,7 +780,7 @@ public:
 
 class LogWriter : public GarbageCollected<LogWriter> {
 public:
-	virtual void append(LogRecord *lr, unsigned long idx) = 0;
+	virtual void append(LogRecord *lr) = 0;
 	virtual ~LogWriter() {}
 	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt);
 
@@ -790,7 +790,7 @@ public:
 class LogFileWriter : public LogWriter {
 	int fd;
 public:
-	void append(LogRecord *lr, unsigned long idx);
+	void append(LogRecord *lr);
 	static LogFileWriter *open(const char *fname);
 	~LogFileWriter();
 	void visit(HeapVisitor &hv) {}

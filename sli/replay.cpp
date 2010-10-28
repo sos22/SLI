@@ -249,7 +249,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 		return NULL;
 	}
 	if (lw)
-		lw->append(lr2, this->when.idx);
+		lw->append(lr2);
         LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr2);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store for CAS, got something else");

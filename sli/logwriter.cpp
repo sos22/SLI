@@ -289,7 +289,7 @@ LogFileWriter::~LogFileWriter()
 	close(fd);
 }
 
-void LogFileWriter::append(LogRecord *lr, unsigned long ignore)
+void LogFileWriter::append(LogRecord *lr)
 {
 	void *b;
 	unsigned s;
@@ -318,7 +318,7 @@ LogRecordVexThreadState::LogRecordVexThreadState(ThreadId tid, unsigned long _cu
 
 void SignalHandlers::dumpSnapshot(LogWriter *lw) const
 {
-	lw->append(new LogRecordInitialSighandlers(ThreadId(0), handlers), 0);
+	lw->append(new LogRecordInitialSighandlers(ThreadId(0), handlers));
 }
 
 #define MK_LOGWRITER(t)
