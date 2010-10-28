@@ -178,16 +178,18 @@ Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsi
 }
 
 ThreadEvent *
-Thread::do_load(IRTemp tmp, unsigned long addr, unsigned size, MachineState *ms)
+Thread::do_load(IRTemp tmp, unsigned long addr, unsigned size, MachineState *ms,
+		EventRecorder *er)
 {
-	if (ms->addressSpace->isReadable(addr, size, this))
+	if (ms->addressSpace->isReadable(addr, size, this)) {
+		er->load(this, addr);
 		return LoadEvent::get(tid, tmp, addr, size);
-	else
+	} else
 		return SignalEvent::get(tid, 11, addr);
 }
 
 ThreadEvent *
-Thread::do_dirty_call(IRDirty *details, MachineState *ms)
+Thread::do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er)
 {
 	struct expression_result args[6];
 	unsigned x;
@@ -206,15 +208,15 @@ Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 		return RdtscEvent::get(tid, details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		return do_load(details->tmp, args[0].lo, 1, ms);
+		return do_load(details->tmp, args[0].lo, 1, ms, er);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		return do_load(details->tmp, args[0].lo, 2, ms);
+		return do_load(details->tmp, args[0].lo, 2, ms, er);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		return do_load(details->tmp, args[0].lo, 4, ms);
+		return do_load(details->tmp, args[0].lo, 4, ms, er);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		return do_load(details->tmp, args[0].lo, 8, ms);
+		return do_load(details->tmp, args[0].lo, 8, ms, er);
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
-		return do_load(details->tmp, args[0].lo, 16, ms);
+		return do_load(details->tmp, args[0].lo, 16, ms, er);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;
@@ -1515,7 +1517,8 @@ ThreadEvent *
 Thread::runToEvent(VexPtr<Thread > &ths,
 		   VexPtr<MachineState > &ms,
 		   const LogReaderPtr &ptr,
-		   GarbageCollectionToken t)
+		   GarbageCollectionToken t,
+		   VexPtr<EventRecorder> &er)
 {
 	unsigned put_offset;
 	struct expression_result put_data;
@@ -1544,6 +1547,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  (stmt->Ist.IMark.addr));
 #define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
+				er->instruction(ths,
+						ths->regs.get_reg(REGISTER_IDX(RIP)),
+						ms);
 				return InstructionEvent::get(ths->tid,
 								  GR(RIP),
 								  GR(FOOTSTEP_REG_0_NAME),
@@ -1576,6 +1582,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 									  stmt->Ist.Store.data));
 				if (ms->addressSpace->isWritable(addr.lo, size, ths)) {
 					DBG("Store %s to %s\n", data.name(), addr.name());
+					er->store(ths, addr.lo, data.lo);
 					return StoreEvent::get(ths->tid, addr.lo, size, data);
 				}
 				return SignalEvent::get(ths->tid, 11, addr.lo);
@@ -1665,7 +1672,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			}
 
 			case Ist_Dirty: {
-				ThreadEvent *evt = ths->do_dirty_call(stmt->Ist.Dirty.details, ms);
+				ThreadEvent *evt = ths->do_dirty_call(stmt->Ist.Dirty.details, ms, er);
 				if (evt)
 					return evt;
 				break;
@@ -1802,11 +1809,9 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 		VexPtr<Thread > thr(currentState->findThread(lr->thread()));
 		assert(thr);
 		assert(!thr->exitted);
-		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t);
+		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t, er);
 
 		while (evt && lr) {
-			if (er)
-				er->record(thr, evt, currentState);
 			if (loud_mode)
 				printf("Event %s in thread %d, lr %s\n",
 				       evt->name(), lr->thread()._tid(),

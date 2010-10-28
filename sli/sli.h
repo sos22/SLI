@@ -177,6 +177,8 @@ public:
 	LogReaderPtr() : off(0), record_nr(0), valid(false) {}
 };
 
+class EventRecorder;
+
 class Thread : public GarbageCollected<Thread> {
 	static void translateNextBlock(VexPtr<Thread > &ths,
 				       VexPtr<AddressSpace > &addrSpace,
@@ -185,11 +187,12 @@ class Thread : public GarbageCollected<Thread> {
 				       unsigned long rip,
 				       GarbageCollectionToken t);
 	struct expression_result eval_expression(IRExpr *expr);
-	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms);
+	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er);
 	ThreadEvent *do_load(IRTemp tmp,
 			     unsigned long addr,
 			     unsigned size,
-			     MachineState *ms);
+			     MachineState *ms,
+			     EventRecorder *er);
 	expression_result do_ccall_calculate_condition(struct expression_result *args);
 	expression_result do_ccall_calculate_rflags_c(expression_result *args);
 	expression_result do_ccall_generic(IRCallee *cee, struct expression_result *rargs);
@@ -256,9 +259,10 @@ public:
 	void pretty_print() const;
 public:
 	static ThreadEvent *runToEvent(VexPtr<Thread > &ths,
-						      VexPtr<MachineState > &ms,
-						      const LogReaderPtr &ptr,
-						      GarbageCollectionToken t);
+				       VexPtr<MachineState > &ms,
+				       const LogReaderPtr &ptr,
+				       GarbageCollectionToken t,
+				       VexPtr<EventRecorder> &er);
 
 	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
 	Thread *fork(unsigned newPid);
@@ -864,16 +868,6 @@ class EventRecorder : public GarbageCollected<EventRecorder> {
 protected:
 	virtual ~EventRecorder() {}
 public:
-	void record(Thread *thr, ThreadEvent *evt, MachineState *ms)
-	{
-		if (InstructionEvent *ie = dynamic_cast<InstructionEvent *>(evt))
-			instruction(thr, ie->rip, ms);
-		else if (StoreEvent *se = dynamic_cast<StoreEvent *>(evt))
-			store(thr, se->addr, se->data.lo);
-		else if (LoadEvent *le = dynamic_cast<LoadEvent *>(evt))
-			load(thr, le->addr);
-	}
-
 	virtual void instruction(Thread *thr, unsigned long rip, MachineState *ms)
 	{
 	}
