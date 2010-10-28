@@ -592,34 +592,6 @@ void VAMap::VAMapEntry::split(unsigned long at)
 	}
 }
 
-void VAMap::sanityCheck() const
-{
-	if (parent) {
-		assert(!root);
-		parent->sanityCheck();
-	}
-	if (root)
-		root->sanityCheck();
-}
-
-void VAMap::VAMapEntry::sanityCheck(unsigned long max,
-				    bool have_max,
-				    unsigned long min,
-				    bool have_min) const
-{
-	assert(end > start);
-	if (have_max)
-		assert(end <= max);
-	if (have_min)
-		assert(start >= min);
-	if (prev)
-		prev->sanityCheck(start, true, min, have_min);
-	if (succ)
-		succ->sanityCheck(max, have_max, end, true);
-	for (unsigned x = 0; x < dchunk(start, end); x++)
-		assert(pa[x]._pa != 0);
-}
-
 VAMap::iterator::iterator(VAMap *_m)
 	: current(_m->root),
 	  m(_m)

@@ -13,9 +13,7 @@ MemoryChunk *MemoryChunk::allocate()
 MemoryChunk *MemoryChunk::dupeSelf() const
 {
 	MemoryChunk *r = new MemoryChunk();
-	sanity_check();
 	memcpy(r, this, sizeof(*r));
-	r->sanity_check();
 	return r;
 }
 
@@ -43,17 +41,3 @@ EventTimestamp MemoryChunk::read(unsigned offset, unsigned long *dest, unsigned 
 		dest[x] = content[offset + x];
 	return EventTimestamp();
 }
-
-void
-MemoryChunk::sanity_check(void) const
-{
-#ifndef NDEBUG
-	unsigned long desired_csum;
-	unsigned x;
-	desired_csum = 0;
-	for (x = 0; x < size; x++)
-		desired_csum += content[x];
-	assert(desired_csum == checksum);
-#endif
-}
-

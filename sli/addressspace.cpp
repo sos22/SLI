@@ -354,11 +354,6 @@ bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 	return true;
 }
 
-void AddressSpace::sanityCheck() const
-{
-	vamap->sanityCheck();
-}
-
 void AddressSpace::dumpBrkPtr(LogWriter *lw) const
 {
 	lw->append(new LogRecordInitialBrk(ThreadId(0), brkptr),
@@ -553,8 +548,6 @@ AddressSpace::searchDecodeCache(unsigned long rip)
 	unsigned long hash = rip_hash(rip, nr_trans_hash_slots);
 	trans_hash_entry **pprev, *n;
 
-	sanityCheckDecodeCache();
-
 	pprev = &trans_hash[hash];
 	if (trans_hash[hash])
 		assert(trans_hash[hash]->pprev == &trans_hash[hash]);
@@ -582,7 +575,6 @@ AddressSpace::searchDecodeCache(unsigned long rip)
 			if (n->next)
 				assert(n->next->pprev == &n->next);
 			assert(*n->pprev == n);
-			sanityCheckDecodeCache();
 			return n->irsb;
 		}
 
@@ -605,7 +597,6 @@ AddressSpace::searchDecodeCache(unsigned long rip)
 	n->pprev = &trans_hash[hash];
 	trans_hash[hash] = n;
 
-	sanityCheckDecodeCache();
 	return n->irsb;
 }
 

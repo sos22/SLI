@@ -431,10 +431,6 @@ public:
 		static void visit(VAMapEntry *&ref, PMap *pmap, HeapVisitor &hv);
 		VAMapEntry *promoteSmallest();
 		VAMapEntry *dupeSelf() const;
-		void sanityCheck(unsigned long max = 0,
-				 bool have_max = false,
-				 unsigned long min = 0,
-				 bool have_min = false) const;
 	};
 
 	class iterator {
@@ -483,8 +479,6 @@ public:
 	VAMap *dupeSelf();
 	static void visit(VAMap *&ref, HeapVisitor &hv, PMap *pmap);
 	void visit(HeapVisitor &hv);
-
-	void sanityCheck() const;
 };
 
 #define MEMORY_CHUNK_SIZE 4096
@@ -504,8 +498,7 @@ public:
 	PhysicalAddress base;
 	unsigned serial;
 	unsigned long checksum;
-	void sanity_check(void) const;
-	void visit(HeapVisitor &hv) { sanity_check(); }
+	void visit(HeapVisitor &hv) {}
 	void destruct() {}
 
 	NAMED_CLASS
@@ -748,7 +741,6 @@ public:
 	void dumpSnapshot(LogWriter *lw) const;
 
 	void visit(HeapVisitor &hv);
-	void sanityCheck() const;
 
 	void destruct() {}
 
@@ -1629,7 +1621,6 @@ public:
 	static AddressSpace *initialAddressSpace(unsigned long initialBrk);
 	AddressSpace *dupeSelf() const;
 	void visit(HeapVisitor &hv);
-	void sanityCheck() const;
 
 	void addVsyscalls();
 
@@ -1672,13 +1663,6 @@ public:
 	WeakRef<IRSB> *searchDecodeCache(unsigned long rip);
 
 	void relocate(AddressSpace *target, size_t sz);
-
-	void sanityCheckDecodeCache(void) const
-#if 1
-	{}
-#else
-	;
-#endif
 
 private:
 	static const unsigned nr_trans_hash_slots = 2048;
