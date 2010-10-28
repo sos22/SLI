@@ -4298,7 +4298,7 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 	     it++) {
 		try {
 			memory[*it] = CrashExpressionLoad::fetch(*it, ms, NULL);
-		} catch (BadMemoryException<unsigned long> bme) {
+		} catch (BadMemoryException bme) {
 			/* Can sometimes happen if the guest crashed
 			   because it dereferenced NULL or some
 			   such. */

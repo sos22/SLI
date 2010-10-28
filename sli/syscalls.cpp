@@ -37,7 +37,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		try {
 			addrSpace->writeMemory(lrm->start, lrm->size, lrm->contents,
 					       true, NULL);
-		} catch (BadMemoryException<unsigned long> bme) {
+		} catch (BadMemoryException bme) {
 		}
 		startOffset = nextOffset;
 
@@ -263,7 +263,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 			v.lo = 0ul;
 			try {
 				addrSpace->store(thr->clear_child_tid, 4, v);
-			} catch (BadMemoryException<unsigned long> &e) {
+			} catch (BadMemoryException &e) {
 				/* Kernel ignores errors clearing the
 				   child TID pointer, and so we do
 				   to. */

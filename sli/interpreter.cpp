@@ -1511,7 +1511,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			try {
 				VexPtr<AddressSpace > as(ms->addressSpace);
 			        ths->translateNextBlock(ths, as, ms, ptr, ths->regs.rip(), t);
-			} catch (BadMemoryException<unsigned long> excn) {
+			} catch (BadMemoryException excn) {
 				return SignalEvent::get(ths->tid, 11, excn.ptr);
 			} catch (ForceFailureException ffe) {
 				return new DetectedErrorEvent(ths->tid, ffe.rip);

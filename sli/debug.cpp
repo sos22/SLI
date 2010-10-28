@@ -170,7 +170,7 @@ GetMemoryCommand::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 	unsigned long *membuf = (unsigned long *)malloc(size * sizeof(unsigned long));
 	try {
 		ms->addressSpace->readMemory(addr, size, membuf, true, NULL);
-	} catch (BadMemoryException<unsigned long> exc) {
+	} catch (BadMemoryException exc) {
 		this->sendResponse("E12");
 		free(membuf);
 		return;
