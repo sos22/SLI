@@ -274,8 +274,6 @@ public:
 
 	void visit(HeapVisitor &hv);
 
-	void destruct() { temporaries.~expression_result_array(); }
-
 	NAMED_CLASS
 };
 
@@ -401,7 +399,6 @@ public:
 	unsigned serial;
 	unsigned long checksum;
 	void visit(HeapVisitor &hv) {}
-	void destruct() {}
 
 	NAMED_CLASS
 
@@ -474,8 +471,6 @@ public:
 	void visit(HeapVisitor &hv);
 	void relocate(PMap *target, size_t sz);
 
-	void destruct() {}
-
 	NAMED_CLASS
 };
 
@@ -489,7 +484,6 @@ public:
 	virtual unsigned marshal_size() const = 0;
 	virtual void *marshal(unsigned *size) const = 0;
 	virtual ~LogRecord() {};
-	virtual void destruct() {}
 	virtual void visit(HeapVisitor &hv) {}
 	NAMED_CLASS
 };
@@ -607,8 +601,6 @@ public:
 
 	void visit(HeapVisitor &hv);
 
-	void destruct() {}
-
 	NAMED_CLASS
 };
 
@@ -630,7 +622,6 @@ public:
 	{
 		record(thr, evt);
 	}
-	void destruct() { this->~EventRecorder(); }
 	NAMED_CLASS
 };
 
@@ -718,12 +709,7 @@ public:
 		return NULL;
 	}
 
-	/* This should really be DNI, but g++ doesn't let you inherit
-	 * from a class which has a private destructor. */
-	~ThreadEvent() { abort(); }
-
 	virtual void visit(HeapVisitor &hv){}
-	virtual void destruct() {}
 
 	NAMED_CLASS
 };
@@ -791,7 +777,6 @@ public:
 		return new StoreEvent(tid, _addr, _size, data);
 	}
 
-	void destruct() { data.~expression_result(); ThreadEvent::destruct(); }
 	NAMED_CLASS
 };
 
@@ -882,13 +867,6 @@ public:
 		return new CasEvent(_tid, _dest, _addr, _data, _expected, _size);
 	}
 
-	void destruct()
-	{
-		addr.~expression_result();
-		data.~expression_result();
-		expected.~expression_result();
-		ThreadEvent::destruct();
-	}
 	NAMED_CLASS
 };
 
@@ -1113,7 +1091,6 @@ public:
 	{ 
 		free((void *)contents);
 	}
-	void destruct() { this->~LogRecordMemory(); }
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
 };
@@ -1302,8 +1279,6 @@ public:
 	void dumpSnapshot(LogWriter *lw) const;
 
 	char *readString(unsigned long start, Thread *thr);
-
-	void destruct() { this->~AddressSpace(); }
 
 	NAMED_CLASS
 
