@@ -243,7 +243,6 @@ class PMap;
 class SignalHandlers;
 class ThreadEvent;
 class LogWriter;
-class MemoryTrace;
 class MemoryAccessLoad;
 class MemoryAccessStore;
 
@@ -1311,24 +1310,6 @@ public:
 	{
 	}
 	virtual bool isLoad() { return false; }
-};
-
-/* Essentially a thin wrapper around std::vector */
-class MemoryTrace : public GarbageCollected<MemoryTrace> {
-public:
-	std::vector<MemoryAccess*> content;
-	static MemoryTrace *get(VexPtr<MachineState > &,
-				VexPtr<LogReader > &,
-				LogReaderPtr,
-				GarbageCollectionToken);
-	size_t size() const { return content.size(); }
-	MemoryAccess *&operator[](unsigned idx) { return content[idx]; }
-	void push_back(MemoryAccess *x) { content.push_back(x); }
-	MemoryTrace() : content() {}
-	void dump() const;
-	void visit(HeapVisitor &hv){ visit_container(content, hv); }
-	void destruct() { this->~MemoryTrace(); }
-	NAMED_CLASS
 };
 
 class LogRecordFootstep : public LogRecord {
