@@ -119,6 +119,3 @@ Thread::pretty_print(void) const
 		       currentIRSBRip);
 	}
 }
-
-#define MK_THREAD(t)
-
