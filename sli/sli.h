@@ -31,7 +31,7 @@ static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__prin
 
 char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 char *vex_vasprintf(const char *fmt, va_list args);
-	
+
 class Named {
 	mutable char *_name;
 protected:
@@ -84,22 +84,6 @@ public:
 	const unsigned _tid() const { return tid; }
 	unsigned long hash() const { return tid; }
 };
-
-template <typename t> t min(const t &a, const t &b)
-{
-	if (a < b)
-		return a;
-	else
-		return b;
-}
-
-template <typename t> t max(const t &a, const t &b)
-{
-	if (a > b)
-		return a;
-	else
-		return b;
-}
 
 class PhysicalAddress {
 public:
