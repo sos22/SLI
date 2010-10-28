@@ -206,13 +206,11 @@ public:
 	unsigned long clear_child_tid;
 	unsigned long robust_list;
 	unsigned long set_child_tid;
-	unsigned long futex_block_address;
 	bool exitted;
 	bool crashed;
 	bool idle;
 
 	bool cannot_make_progress;
-	bool blocked;
 
 	IRSB *currentIRSB;
 	unsigned long currentIRSBRip;
@@ -252,8 +250,8 @@ public:
 	mutable ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
-	void futexBlock(unsigned long fba) { blocked = true; futex_block_address = fba; }
-	void futexUnblock() { blocked = false; }
+	void futexBlock(unsigned long fba) { }
+	void futexUnblock() { }
 
 	void pretty_print() const;
 private:
@@ -630,17 +628,9 @@ public:
 		exit_status = result;
 	}
 	bool crashed() const;
-	
+
 	unsigned futexWake(unsigned long key, bool do_it) {
-		unsigned cntr = 0;
-		for (unsigned x = 0; x < threads->size(); x++)
-			if (threads->index(x)->blocked &&
-			    threads->index(x)->futex_block_address == key) {
-				cntr++;
-				if (do_it)
-					threads->index(x)->futexUnblock();
-			}
-		return cntr;
+		return 0;
 	}
 	MachineState *dupeSelf() const;
 
