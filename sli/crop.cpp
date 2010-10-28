@@ -23,7 +23,7 @@ main(int argc, char *argv[])
 		err(1, "opening %s", inp);
 
 	check_fpu_control();
-	VexPtr<LogReader> reduced_lf(lf->truncate(lf->mkPtr(size, 0)));
+	VexPtr<LogReader> reduced_lf(lf->truncate(LogReaderPtr(size, 0)));
 	check_fpu_control();
 	MachineState *ms = MachineState::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
 	check_fpu_control();

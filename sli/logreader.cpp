@@ -20,7 +20,7 @@ LogReader *LogReader::open(const char *path, LogReaderPtr *initial_ptr)
 
 	LogReader *work = new LogReader();
 	work->fd = fd;
-	*initial_ptr = work->mkPtr(0, 0);
+	*initial_ptr = LogReaderPtr(0, 0);
 	return work;
 }
 
@@ -28,7 +28,7 @@ LogReader *LogReader::truncate(LogReaderPtr eof)
 {
 	LogReader *work;
 	work = new LogReader();
-	work->forcedEof = unwrapPtr(eof);
+	work->forcedEof = eof;
 	work->fd = fd;
 	return work;
 }
@@ -80,36 +80,23 @@ LogReader::buffered_pread(void *output, size_t output_size, off_t start_offset) 
 LogRecord *LogReader::read(LogReaderPtr _startPtr, LogReaderPtr *_nextPtr) const
 {
 	struct record_header rh;
-	_ptr startPtr = unwrapPtr(_startPtr);
+	LogReaderPtr startPtr = _startPtr;
 
 	assert(startPtr.valid);
 skip:
-	if (forcedEof.valid && startPtr >= forcedEof)
+	if (forcedEof.valid && startPtr.off >= forcedEof.off)
 		return NULL;
 	if (buffered_pread(&rh, sizeof(rh), startPtr.off) <= 0)
 		return NULL;
 	ThreadId tid(rh.tid);
-	*_nextPtr = mkPtr(startPtr.off + rh.size, startPtr.record_nr+1);
+	*_nextPtr = LogReaderPtr(startPtr.off + rh.size, startPtr.record_nr+1);
 	if (startPtr.off / 1000000 != (startPtr.off + rh.size) / 1000000)
 		printf("Read %ldM\n", startPtr.off / 1000000);
 
 	switch (rh.cls) {
 	case RECORD_footstep: {
-#if 1
-		startPtr = unwrapPtr(*_nextPtr);
+		startPtr = *_nextPtr;
 		goto skip;
-#else
-		footstep_record<unsigned long> fr;
-		int r = buffered_pread(&fr, sizeof(fr), startPtr.off + sizeof(rh));
-		(void)r;
-		return new LogRecordFootstep(tid,
-							    fr.rip,
-							    fr.FOOTSTEP_REG_0_NAME,
-							    fr.FOOTSTEP_REG_1_NAME,
-							    fr.FOOTSTEP_REG_2_NAME,
-							    fr.FOOTSTEP_REG_3_NAME,
-							    fr.FOOTSTEP_REG_4_NAME);
-#endif
 	}
 	case RECORD_syscall: {
 		syscall_record<unsigned long> sr;
@@ -181,7 +168,7 @@ skip:
 	case RECORD_thread_unblocked:
 	{
 		/* Don't need these in the current world order */
-		startPtr = unwrapPtr(*_nextPtr);
+		startPtr = *_nextPtr;
 		goto skip;
 	}
 

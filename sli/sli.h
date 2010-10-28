@@ -168,8 +168,13 @@ class LogRecordVexThreadState;
 
 class LogReaderPtr {
 public:
-	unsigned char cls_data[32];
-	LogReaderPtr() { memset(cls_data, 0, sizeof(cls_data)); }
+	uint64_t off;
+	unsigned record_nr;
+	bool valid;
+	LogReaderPtr(uint64_t _off, unsigned _record_nr)
+		: off(_off), record_nr(_record_nr), valid(true)
+	{ }
+	LogReaderPtr() : off(0), record_nr(0), valid(false) {}
 };
 
 class Thread : public GarbageCollected<Thread> {
@@ -524,17 +529,7 @@ public:
 
 class LogReader : public GarbageCollected<LogReader> {
 	int fd;
-	struct _ptr {
-		uint64_t off;
-		unsigned record_nr;
-		bool valid;
-		_ptr() : off(0xcafebabe00000000ul), record_nr(0xbeeffeed), valid(false) {}
-		bool operator>=(const _ptr &b) const { return off >= b.off; }
-	};
-	_ptr unwrapPtr(LogReaderPtr p) const {
-		return *(_ptr *)p.cls_data;
-	}
-	_ptr forcedEof;
+	LogReaderPtr forcedEof;
 
 	ssize_t buffered_pread(void *output, size_t output_size, off_t start_offset) const;
 
@@ -544,14 +539,6 @@ class LogReader : public GarbageCollected<LogReader> {
 
 	LogReader() {}
 public:
-	LogReaderPtr mkPtr(uint64_t off, unsigned record_nr) const {
-		LogReaderPtr w;
-		_ptr *p = (_ptr *)w.cls_data;
-		p->off = off;
-		p->record_nr = record_nr;
-		p->valid = true;
-		return w;
-	}
 	LogRecord *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
 	~LogReader();
 	static LogReader *open(const char *path, LogReaderPtr *initial_ptr);
