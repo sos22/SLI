@@ -1808,31 +1808,6 @@ void Interpreter::runToAccessLoggingEvents(ThreadId tid,
 	}
 }
 
-void Interpreter::runToFailure(ThreadId tid,
-			       VexPtr<LogWriter> &output,
-			       GarbageCollectionToken t,
-			       unsigned max_events)
-{
-	bool have_event_limit = max_events != 0;
-	VexPtr<Thread > thr(currentState->findThread(tid));
-	while ((!have_event_limit || max_events) && thr->runnable()) {
-		VexPtr<MachineState > cs(currentState);
-		ThreadEvent *evt = thr->runToEvent(thr, cs, LogReaderPtr(), t);
-		InterpretResult res = output->recordEvent(thr, currentState, evt);
-		if (res != InterpretResultContinue) {
-			thr->cannot_make_progress = true;
-			return;
-		}
-		max_events--;
-		if (thr->blocked) {
-			if (max_events >= 1000)
-				max_events -= 1000;
-			else
-				max_events = 0;
-		}
-	}
-}
-
 void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				LogReaderPtr ptr,
 				GarbageCollectionToken t,

@@ -814,9 +814,6 @@ public:
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      GarbageCollectionToken t,
 				      VexPtr<LogWriter > &output);
-	void runToFailure(ThreadId tid, VexPtr<LogWriter > &output,
-			  GarbageCollectionToken t,
-			  unsigned max_events = 0);
 	void runToEvent(EventTimestamp evt,
 			VexPtr<LogReader > &lf,
 			LogReaderPtr startingPoint,
