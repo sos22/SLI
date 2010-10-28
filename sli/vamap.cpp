@@ -592,42 +592,4 @@ void VAMap::VAMapEntry::split(unsigned long at)
 	}
 }
 
-VAMap::iterator::iterator(VAMap *_m)
-	: current(_m->root),
-	  m(_m)
-{
-	if (current) {
-		while (current->prev)
-			current = current->prev;
-	}
-}
-
-void
-VAMap::iterator::operator++(int ignore)
-{
-	if (current->succ) {
-		current = current->succ;
-		while (current->prev)
-			current = current->prev;
-	} else {
-		VAMapEntry *cursor = m->root;
-		VAMapEntry *prevLeft = NULL;
-		while (cursor != current) {
-			assert(cursor != NULL);
-			if (cursor->start == current->end) {
-				/* Easy case */
-				current = cursor;
-				return;
-			}
-			if (cursor->start < current->end) {
-				cursor = cursor->succ;
-			} else {
-				prevLeft = cursor;
-				cursor = cursor->prev;
-			}
-		}
-		current = prevLeft;
-	}
-}
-
 #define MK_VAMAP(t)

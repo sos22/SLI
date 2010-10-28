@@ -333,22 +333,6 @@ public:
 		VAMapEntry *dupeSelf() const;
 	};
 
-	class iterator {
-		VAMapEntry *current;
-		VAMap *m;
-	public:
-		iterator(VAMap *_m);
-		iterator(VAMap *_m, void *ign) : current(NULL), m(_m) {}
-		const VAMapEntry &operator*() const { return *current; }
-		const VAMapEntry *operator->() const { return current; }
-		void operator++(int);
-		bool operator==(const iterator &x) const { return current == x.current && m == x.m; }
-		bool operator!=(const iterator &x) const { return !(x == *this); }
-	};
-
-	iterator begin() { return iterator(this); }
-	iterator end() { return iterator(this, NULL); }
-
 private:
 	/* Mutable because we splay the tree on lookup */
 	mutable VAMapEntry *root;
