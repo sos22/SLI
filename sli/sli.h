@@ -1347,7 +1347,6 @@ force_linkage()
 	gdb_concrete(NULL);
 }
 
-bool address_is_interesting(ThreadId tid, unsigned long addr);
 unsigned long extract_call_follower(IRSB *irsb);
 
 void check_fpu_control(void);
