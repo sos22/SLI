@@ -587,14 +587,6 @@ public:
 	NAMED_CLASS
 };
 
-enum InterpretResult {
-	InterpretResultContinue = 0xf001,
-	InterpretResultExit,
-	InterpretResultCrash,
-	InterpretResultIncomplete,
-	InterpretResultTimedOut
-};
-
 class EventRecorder : public GarbageCollected<EventRecorder> {
 protected:
 	virtual ~EventRecorder() {}
@@ -654,7 +646,6 @@ class LogWriter : public GarbageCollected<LogWriter> {
 public:
 	virtual void append(LogRecord *lr) = 0;
 	virtual ~LogWriter() {}
-	InterpretResult recordEvent(Thread *thr, MachineState *ms, ThreadEvent *evt);
 
 	NAMED_CLASS
 };
@@ -666,7 +657,6 @@ public:
 	static LogFileWriter *open(const char *fname);
 	~LogFileWriter();
 	void visit(HeapVisitor &hv) {}
-	void destruct() { this->~LogFileWriter(); }
 };
 
 class ThreadEvent : public Named, public GarbageCollected<ThreadEvent > {

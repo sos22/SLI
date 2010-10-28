@@ -60,22 +60,6 @@ public:
 	}
 };
 
-class ReplayFailedBadRip : public ReplayFailedException {
-public:
-	unsigned long observed;
-	unsigned long expected;
-	ReplayFailedBadRip(unsigned long _observed,
-			   unsigned long _expected) :
-		ReplayFailedException(
-			"replay failed due to bad RIP: wanted %lx, got %lx\n",
-			_expected,
-			_observed),
-		observed(_observed),
-		expected(_expected)
-	{
-	}
-};
-
 class ReplayFailedBadRegister : public ReplayFailedException {
 public:
 	const char *reg_name;
