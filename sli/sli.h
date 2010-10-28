@@ -679,18 +679,6 @@ public:
 					 bool &consumedRecord, LogReaderPtr ptr) = 0;
 	/* Try to ``replay'' the event without reference to a pre-existing logfile */
 	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL) = 0;
-	/* Use the logfile if it matches, and otherwise fake it.  This
-	   can fast-forward through the log e.g. to find a matching
-	   syscall. */
-	virtual ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
-					      VexPtr<LogReader> &lf,
-					      LogReaderPtr startPtr,
-					      LogReaderPtr *endPtr,
-					      GarbageCollectionToken t)
-	{
-		fake(ms, NULL);
-		return NULL;
-	}
 
 	virtual void visit(HeapVisitor &hv){}
 
@@ -706,11 +694,6 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
-				      VexPtr<LogReader > &lf,
-				      LogReaderPtr startPtr,
-				      LogReaderPtr *endPtr,
-				      GarbageCollectionToken);
 	static ThreadEvent *get(ThreadId tid, IRTemp temp)
 	{ return new RdtscEvent(tid, temp); }
 	NAMED_CLASS
@@ -834,11 +817,6 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState *ms,
 				 const LogReader *lf, LogReaderPtr ptr,
 				 LogReaderPtr *outPtr, LogWriter *lw);
-	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
-				      VexPtr<LogReader > &lf,
-				      LogReaderPtr startPtr,
-				      LogReaderPtr *endPtr,
-				      GarbageCollectionToken);
 
 	static ThreadEvent *get(ThreadId _tid,
 				IRTemp _dest,
@@ -863,11 +841,6 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr ptr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	ThreadEvent *fuzzyReplay(VexPtr<MachineState > &ms,
-				      VexPtr<LogReader > &lf,
-				      LogReaderPtr startPtr,
-				      LogReaderPtr *endPtr,
-				      GarbageCollectionToken);
 	static ThreadEvent *get(ThreadId _tid)
 	{ return new SyscallEvent(_tid); }
 	NAMED_CLASS
