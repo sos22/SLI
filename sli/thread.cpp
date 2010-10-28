@@ -102,10 +102,8 @@ void Thread::visit(HeapVisitor &hv)
 void
 Thread::pretty_print(void) const
 {
-	printf("Thread tid %d, pid %d access %ld event %ld, last %s%s%s%s%s\n",
+	printf("Thread tid %d, pid %d %s%s%s%s%s\n",
 	       tid._tid(), pid,
-	       nrAccesses,
-	       nrEvents,
 #define f(n) n ? "(" #n ")" : ""
 	       f(exitted),
 	       f(crashed),

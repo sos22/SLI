@@ -62,7 +62,6 @@ ThreadEvent *StoreEvent::replay(LogRecord *lr, MachineState **ms,
 		printf("WARNING: memory mismatch on store to %lx: %s != %s\n",
 		       addr, data.name(), lrs->value.name());
 	(*ms)->addressSpace->store(lrs->ptr, lrs->size, lrs->value, false, thr);
-	thr->nrAccesses++;
 
 	return NULL;
 }
@@ -75,7 +74,6 @@ InterpretResult StoreEvent::fake(MachineState *ms,
 	if (lr)
 		*lr = new LogRecordStore(thr->tid, size, addr, data);
 	ms->addressSpace->store(addr, size, data, false, thr);
-	thr->nrAccesses++;
 	return InterpretResultContinue;
 }
 
@@ -102,7 +100,6 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 			printf("WARNING: memory mismatch on load from %lx (%s != %s)",
 			       addr, buf.name(), lrl->value.name());
 		thr->temporaries[tmp] = lrl->value;
-		thr->nrAccesses++;
 	} else {
 		checkSegv(lr, addr);
 	}
@@ -120,7 +117,6 @@ InterpretResult LoadEvent::fake(MachineState *ms, LogRecord **lr)
 		thr->temporaries[tmp] = buf;
 		if (lr)
 			*lr = new LogRecordLoad(thr->tid, size, addr, buf);
-		thr->nrAccesses++;
 		return InterpretResultContinue;
 	} else {
 		if (lr)

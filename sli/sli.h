@@ -220,9 +220,6 @@ public:
 	bool cannot_make_progress;
 	bool blocked;
 
-	unsigned long nrAccesses;
-	unsigned long nrEvents;
-
 	IRSB *currentIRSB;
 	unsigned long currentIRSBRip;
 	expression_result_array temporaries;
