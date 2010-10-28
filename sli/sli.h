@@ -61,11 +61,6 @@ public:
 	~Named() { clearName(); }
 };
 
-static inline char *name_aiv(unsigned long x)
-{
-	return vex_asprintf("%lx", x);
-}
-
 class ThreadId {
 	unsigned tid;
 public:
@@ -111,8 +106,7 @@ public:
 struct expression_result : public Named {
 protected:
 	char *mkName() const {
-		return my_asprintf("{%s, %s}",
-				   name_aiv(lo), name_aiv(hi));
+		return my_asprintf("{%lx, %lx}", lo, hi);
 	}
 public:
 	unsigned long lo;
@@ -138,7 +132,7 @@ public:
 
 	void pretty_print() const {
 		for (unsigned x = 0; x < NR_REGS; x++)
-			printf("\treg%d: %s\n", x, name_aiv(registers[x]));
+			printf("\treg%d: %lx\n", x, registers[x]);
 	}
 };
 
@@ -810,7 +804,7 @@ private:
 	{
 	}
 protected:
-	virtual char *mkName() const { return my_asprintf("load(%s, %d, %d)", name_aiv(addr), tmp, size); }
+	virtual char *mkName() const { return my_asprintf("load(%lx, %d, %d)", addr, tmp, size); }
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
@@ -830,7 +824,7 @@ public:
 private:
 	StoreEvent(ThreadId tid, unsigned long addr, unsigned size, expression_result data);
 protected:
-	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
+	virtual char *mkName() const { return my_asprintf("store(%d, %lx, %s)", size, addr, data.name()); }
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
@@ -867,7 +861,7 @@ public:
 	}
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("footstep(%s)", name_aiv(rip));
+		return my_asprintf("footstep(%lx)", rip);
 	}
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
@@ -1066,7 +1060,7 @@ private:
 	expression_result value;
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("store(%x,%s)", size, name_aiv(ptr));
+		return my_asprintf("store(%x,%lx)", size, ptr);
 	}
 public:
 	LogRecordStore(ThreadId _tid,

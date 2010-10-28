@@ -1757,8 +1757,8 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 						}
 					}
 					if (x == -1) {
-						printf("WARNING: couldn't find where to return to (looking for %s, stack [",
-						       name_aiv(ths->regs.rip()));
+						printf("WARNING: couldn't find where to return to (looking for %lx, stack [",
+						       ths->regs.rip());
 						for (int x = 0;
 						     x < (int)ths->currentCallStack.size();
 						     x++)
