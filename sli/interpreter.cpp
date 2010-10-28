@@ -1785,43 +1785,6 @@ finished_block:
 	}
 }
 
-InterpretResult Interpreter::getThreadMemoryTrace(ThreadId tid, MemoryTrace **output, unsigned max_events,
-						  GarbageCollectionToken t)
-{
-	VexPtr<MemoryTrace> work(new MemoryTrace());
-	VexPtr<Thread > thr(currentState->findThread(tid));
-	if (thr->cannot_make_progress) {
-		*output = work;
-		return InterpretResultIncomplete;
-	}
-	while (max_events && thr->runnable() &&
-
-	       /* Since we're running the thread in isolation, if it
-		  goes idle it's unlikely to ever wake up again. */
-	       !thr->idle) {
-		ThreadEvent *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
-
-		InterpretResult res = evt->fake(currentState);
-		if (res != InterpretResultContinue) {
-			printf("Stop memory trace because can't fake %s\n", evt->name());
-			*output = work;
-			return res;
-		}
-		if (LoadEvent *lr = dynamic_cast<LoadEvent *> (evt)) {
-			if (address_is_interesting(thr->tid, lr->addr))
-				work->push_back(new MemoryAccessLoad(*lr));
-	        } else if (StoreEvent *sr = dynamic_cast<StoreEvent *>(evt)) {
-			if (address_is_interesting(thr->tid, sr->addr))
-				work->push_back(new MemoryAccessStore(*sr));
-		}
-		max_events--;
-	}
-	*output = work;
-	if (max_events)
-		return InterpretResultExit;
-	return InterpretResultTimedOut;
-}
-
 void Interpreter::runToAccessLoggingEvents(ThreadId tid,
 					   unsigned nr_accesses,
 					   GarbageCollectionToken t,

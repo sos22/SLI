@@ -811,10 +811,6 @@ public:
 		replayLogfile(lf, startingPoint, tok, endingPoint, log, er);
 	}
 
-	InterpretResult getThreadMemoryTrace(ThreadId tid,
-					     MemoryTrace **output,
-					     unsigned max_events,
-					     GarbageCollectionToken t);
 	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
 				      GarbageCollectionToken t,
 				      VexPtr<LogWriter > &output);
