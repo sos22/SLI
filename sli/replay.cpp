@@ -14,23 +14,6 @@ ThreadEvent *RdtscEvent::replay(LogRecord *lr, MachineState **ms,
 	return NULL;
 }
 
-ThreadEvent *
-UseFreeMemoryEvent::replay(LogRecord *lr, MachineState **ms,
-				bool &, LogReaderPtr)
-{
-	(*ms)->findThread(this->when.tid)->crashed = true;
-	return NULL;
-}
-
-InterpretResult
-UseFreeMemoryEvent::fake(MachineState *ms, LogRecord **lr)
-{
-        ms->findThread(this->when.tid)->crashed = true;
-	if (lr)
-		*lr = NULL;
-	return InterpretResultCrash;
-}
-
 InterpretResult RdtscEvent::fake(MachineState *ms, LogRecord **lr)
 {
 	printf("fake rdtsc\n");

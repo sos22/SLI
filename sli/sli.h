@@ -918,41 +918,6 @@ public:
 	NAMED_CLASS
 };
 
-class UseFreeMemoryEvent : public ThreadEvent {
-public:
-	unsigned long free_addr;
-	unsigned long use_addr;
-	EventTimestamp whenFreed;
-private:
-	UseFreeMemoryEvent(EventTimestamp _when,
-			   unsigned long _use_addr,
-			   unsigned long _free_addr,
-			   EventTimestamp _whenFreed)
-		: ThreadEvent(_when),
-		  free_addr(_free_addr),
-		  use_addr(_use_addr),
-		  whenFreed(_whenFreed)
-	{
-	}
-protected:
-	char *mkName() const { return my_asprintf("useFree(%d:%lx, %s==%s, %d:%lx)",
-						  this->when.tid._tid(),
-						  this->when.idx,
-						  name_aiv(use_addr),
-						  name_aiv(free_addr),
-						  whenFreed.tid._tid(),
-						  whenFreed.idx); }
-public:
-	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
-				 bool &consumedRecord, LogReaderPtr);
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when,
-				     unsigned long use_addr,
-				     unsigned long free_addr,
-				     EventTimestamp whenFreed)
-	{ return new UseFreeMemoryEvent(when, use_addr, free_addr, whenFreed); }
-};
-
 class RdtscEvent : public ThreadEvent {
 	IRTemp tmp;
 	RdtscEvent(EventTimestamp when, IRTemp _tmp) : ThreadEvent(when), tmp(_tmp) {};
