@@ -5,7 +5,6 @@
 #include "machinestate.cpp"
 #include "logreader.cpp"
 #include "syscalls.cpp"
-#include "memlog.cpp"
 #include "addressspace.cpp"
 #include "pmap.cpp"
 #include "vamap.cpp"
@@ -14,7 +13,6 @@
 	MK_MACHINE_STATE(t);			\
 	MK_INTERPRETER(t);			\
 	MK_THREAD(t);				\
-	MK_MEM_LOG(t);				\
 	MK_LOGWRITER(t);			\
 	MK_ADDRESS_SPACE(t);			\
 	MK_LOGREADER(t);                        \

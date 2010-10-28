@@ -834,57 +834,6 @@ public:
 	void destruct() { this->~LogFileWriter(); }
 };
 
-class MemLog : public LogReader {
-	std::vector<LogRecord *> *content;
-	unsigned offset;
-	const MemLog *parent;
-
-	static unsigned unwrapPtr(LogReaderPtr p) {
-		return *(unsigned *)p.cls_data;
-	}
-	static LogReaderPtr mkPtr(unsigned o) {
-		LogReaderPtr p;
-		*(unsigned *)p.cls_data = o;
-		return p;
-	}
-
-	/* Special, need to use placement new.  Should only really be
-	   invoked from emptyMemlog(). */
-protected:
-	MemLog();
-
-public:
-	/* Can't multiply inherit GarbageCollected, so use a proxy
-	 * object. */
-	class Writer : public LogWriter {
-		MemLog *underlying;
-	public:
-		Writer(MemLog *_underlying) : underlying(_underlying) {}
-		void append(LogRecord *lr, unsigned long idx) {
-			underlying->append(lr, idx);
-		}
-		void visit(HeapVisitor &hv) { hv(underlying); }
-		void destruct() {}
-		NAMED_CLASS
-	};
-	Writer *writer;
-
-	static MemLog *emptyMemlog();
-	static LogReaderPtr startPtr() { return mkPtr(0); }
-	MemLog *dupeSelf() const;
-	LogRecord *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
-	void dump() const;
-
-	void append(LogRecord *lr, unsigned long idx);
-
-	/* Should only be called by GC destruct routine */
-	virtual void destruct();
-
-	virtual void visit(HeapVisitor &hv);
-
-	NAMED_CLASS
-};
-
 class ThreadEvent : public Named, public GarbageCollected<ThreadEvent > {
 protected:
 	ThreadEvent(EventTimestamp _when) : when(_when) {}
