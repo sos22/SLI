@@ -724,41 +724,6 @@ public:
 	NAMED_CLASS
 };
 
-class InstructionEvent : public ThreadEvent {
-public:
-	unsigned long rip;
-	unsigned long reg0;
-	unsigned long reg1;
-	unsigned long reg2;
-	unsigned long reg3;
-	unsigned long reg4;
-	InstructionEvent(ThreadId _tid, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
-			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4) :
-		ThreadEvent(_tid),
-		rip(_rip),
-		reg0(_reg0),
-		reg1(_reg1),
-		reg2(_reg2),
-		reg3(_reg3),
-		reg4(_reg4)
-	{
-	}
-protected:
-	virtual char *mkName() const {
-		return my_asprintf("footstep(%lx)", rip);
-	}
-public:
-	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
-				 bool &consumedRecord, LogReaderPtr);
-	static InstructionEvent *get(ThreadId _tid, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
-				     unsigned long _reg2, unsigned long _reg3, unsigned long _reg4)
-	{
-		return new InstructionEvent(_tid, _rip, _reg0, _reg1, _reg2, _reg3, _reg4);
-	}
-
-	NAMED_CLASS
-};
-
 class CasEvent : public ThreadEvent {
 	IRTemp dest;
 	expression_result addr;

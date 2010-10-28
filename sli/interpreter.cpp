@@ -1546,19 +1546,10 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			case Ist_IMark:
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  (stmt->Ist.IMark.addr));
-#define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
 				er->instruction(ths,
 						ths->regs.get_reg(REGISTER_IDX(RIP)),
 						ms);
-				return InstructionEvent::get(ths->tid,
-								  GR(RIP),
-								  GR(FOOTSTEP_REG_0_NAME),
-								  GR(FOOTSTEP_REG_1_NAME),
-								  ths->regs.get_reg(REGISTER_IDX(XMM0) + 1),
-								  GR(FOOTSTEP_REG_3_NAME),
-							     GR(FOOTSTEP_REG_4_NAME));
-#undef GR
-
+				return NULL;
 			case Ist_AbiHint:
 				break;
 			case Ist_MBE:

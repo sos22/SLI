@@ -99,14 +99,6 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 }
 
 
-ThreadEvent *InstructionEvent::replay(LogRecord *lr, MachineState **ms,
-						bool &consumedRecord, LogReaderPtr)
-{
-       consumedRecord = false;
-       return NULL;
-}
-
-
 ThreadEvent *SyscallEvent::replay(LogRecord *lr, MachineState **ms,
 				       bool &, LogReaderPtr ptr)
 {
