@@ -1570,14 +1570,6 @@ public:
 	unsigned marshal_size() const;
 };
 
-template <typename ait>
-class client_freed_entry {
-public:
-	ait start;
-	ait end;
-	EventTimestamp when;
-};
-
 class AddressSpace : public GarbageCollected<AddressSpace > {
 public:
 	unsigned long brkptr;
@@ -1721,18 +1713,6 @@ force_linkage()
 {
 	gdb_concrete(NULL);
 }
-
-class UseOfFreeMemoryException : public SliException {
-public:
-	UseOfFreeMemoryException(EventTimestamp _when,
-				 unsigned long _ptr,
-				 EventTimestamp _whenFreed)
-		: SliException(
-			"guest used freed memory at %lx at %d:%lx (freed at %d:%lx)\n",
-			_ptr, _when.tid._tid(), _when.idx, _whenFreed.tid._tid(), _whenFreed.idx)
-	{
-	}
-};
 
 bool address_is_interesting(ThreadId tid, unsigned long addr);
 unsigned long extract_call_follower(IRSB *irsb);
