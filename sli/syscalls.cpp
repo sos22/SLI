@@ -359,7 +359,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 		break;
 	case __NR_tgkill: /* 234 */
 		/* Hack: assume that this came from raise() */
-		evt = SignalEvent::get(thr->bumpEvent(mach), args[2], 0ul);
+		evt = SignalEvent::get(thr->tid, args[2], 0ul);
 		break;
 
 	case __NR_set_robust_list: /* 273 */
@@ -383,7 +383,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 {
 	unsigned long res;
-	Thread *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->tid);
 	unsigned long sysnr = thr->regs.get_reg(REGISTER_IDX(RAX));
 	unsigned long args[6];
 	args[0] = thr->regs.get_reg(REGISTER_IDX(RDI));

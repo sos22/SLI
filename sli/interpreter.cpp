@@ -167,9 +167,9 @@ Thread::do_load(EventTimestamp when, IRTemp tmp, unsigned long addr, unsigned si
 		     MachineState *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, this))
-		return LoadEvent::get(when, tmp, addr, size);
+		return LoadEvent::get(tid, tmp, addr, size);
 	else
-		return SignalEvent::get(when, 11, addr);
+		return SignalEvent::get(tid, 11, addr);
 }
 
 ThreadEvent *
@@ -190,7 +190,7 @@ Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 	assert(!details->cee->regparms);
 
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
-		return RdtscEvent::get(bumpEvent(ms), details->tmp);
+		return RdtscEvent::get(tid, details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
 		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 1, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
@@ -1522,9 +1522,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				VexPtr<AddressSpace > as(ms->addressSpace);
 			        ths->translateNextBlock(ths, as, ms, ptr, ths->regs.rip(), t);
 			} catch (BadMemoryException<unsigned long> excn) {
-				return SignalEvent::get(ths->bumpEvent(ms), 11, excn.ptr);
+				return SignalEvent::get(ths->tid, 11, excn.ptr);
 			} catch (ForceFailureException ffe) {
-				return new DetectedErrorEvent(ths->bumpEvent(ms), ffe.rip);
+				return new DetectedErrorEvent(ths->tid, ffe.rip);
 			}
 			assert(ths->currentIRSB);
 		}
@@ -1542,7 +1542,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  (stmt->Ist.IMark.addr));
 #define GR(x) ths->regs.get_reg(REGISTER_IDX(x))
-				return InstructionEvent::get(ths->bumpEvent(ms),
+				return InstructionEvent::get(ths->tid,
 								  GR(RIP),
 								  GR(FOOTSTEP_REG_0_NAME),
 								  GR(FOOTSTEP_REG_1_NAME),
@@ -1575,9 +1575,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 									  stmt->Ist.Store.data));
 				if (ms->addressSpace->isWritable(addr.lo, size, ths)) {
 					DBG("Store %s to %s\n", data.name(), addr.name());
-					return StoreEvent::get(ths->bumpEvent(ms), addr.lo, size, data);
+					return StoreEvent::get(ths->tid, addr.lo, size, data);
 				}
-				return SignalEvent::get(ths->bumpEvent(ms), 11, addr.lo);
+				return SignalEvent::get(ths->tid, 11, addr.lo);
 			}
 
 			case Ist_CAS: {
@@ -1593,7 +1593,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					ths->eval_expression(stmt->Ist.CAS.details->expdLo);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
-				return CasEvent::get(ths->bumpEvent(ms), stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+				return CasEvent::get(ths->tid, stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 			}
 
 			case Ist_Put: {
@@ -1774,7 +1774,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				ths->currentIRSB = NULL;
 			}
 			if (is_syscall)
-				return SyscallEvent::get(ths->bumpEvent(ms));
+				return SyscallEvent::get(ths->tid);
 		}
 
 finished_block:

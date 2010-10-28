@@ -9,7 +9,7 @@ ThreadEvent *RdtscEvent::replay(LogRecord *lr, MachineState **ms,
 	if (!lrr)
 		throw ReplayFailedException("wanted a rdtsc, got %s",
 					    lr->name());
-        (*ms)->findThread(this->when.tid)->temporaries[tmp].lo = lrr->tsc;
+        (*ms)->findThread(this->tid)->temporaries[tmp].lo = lrr->tsc;
 
 	return NULL;
 }
@@ -22,8 +22,8 @@ InterpretResult RdtscEvent::fake(MachineState *ms, LogRecord **lr)
 	return InterpretResultIncomplete;
 }
 
-StoreEvent::StoreEvent(EventTimestamp when, unsigned long _addr, unsigned _size, expression_result _data)
-	: ThreadEvent(when),
+StoreEvent::StoreEvent(ThreadId tid, unsigned long _addr, unsigned _size, expression_result _data)
+	: ThreadEvent(tid),
 	  addr(_addr),
 	  size(_size),
 	  data(_data)
@@ -49,7 +49,7 @@ static void checkSegv(LogRecord *lr, unsigned long addr)
 ThreadEvent *StoreEvent::replay(LogRecord *lr, MachineState **ms,
 					  bool &, LogReaderPtr)
 {
-	Thread *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->tid);
 	LogRecordStore *lrs = dynamic_cast<LogRecordStore *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a store, got %s",
@@ -71,7 +71,7 @@ ThreadEvent *StoreEvent::replay(LogRecord *lr, MachineState **ms,
 InterpretResult StoreEvent::fake(MachineState *ms,
 				      LogRecord **lr)
 {
-	Thread *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->tid);
 	if (lr)
 		*lr = new LogRecordStore(thr->tid, size, addr, data);
 	ms->addressSpace->store(addr, size, data, false, thr);
@@ -83,7 +83,7 @@ InterpretResult StoreEvent::fake(MachineState *ms,
 ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 					 bool &, LogReaderPtr)
 {
-	Thread *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->tid);
 	if ((*ms)->addressSpace->isReadable(addr, size, thr)) {
 		LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 		if (!lrl)
@@ -113,7 +113,7 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 
 InterpretResult LoadEvent::fake(MachineState *ms, LogRecord **lr)
 {
-	Thread *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->tid);
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		expression_result buf =
 			ms->addressSpace->load(addr, size, false, thr);
@@ -171,7 +171,7 @@ InterpretResult InstructionEvent::fake(MachineState *ms,
 {
 #if 0
 	if (lr)
-		*lr = new LogRecordFootstep(this->when.tid, rip, reg0, reg1, reg2, reg3, reg4);
+		*lr = new LogRecordFootstep(this->tid, rip, reg0, reg1, reg2, reg3, reg4);
 #else
 	if (lr)
 		*lr = NULL;
@@ -188,7 +188,7 @@ ThreadEvent *SyscallEvent::replay(LogRecord *lr, MachineState **ms,
 		throw ReplayFailedException("wanted a syscall, got %s",
 					    lr->name());
 		
-	return replay_syscall(lrs, (*ms)->findThread(this->when.tid), *ms, ptr);
+	return replay_syscall(lrs, (*ms)->findThread(this->tid), *ms, ptr);
 }
 
 
@@ -205,7 +205,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
 					    size, addr.lo);
 
         expression_result seen;
-	Thread *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->tid);
         seen = (*ms)->addressSpace->load(addr.lo, size, false, thr);
         if (seen != lrl->value)
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
@@ -214,7 +214,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
         if (seen != expected)
 		return NULL;
 
-	return StoreEvent::get(this->when, addr.lo, size, data);
+	return StoreEvent::get(this->tid, addr.lo, size, data);
 }
 
 
@@ -232,7 +232,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 					    size, addr.lo);
 
         expression_result seen;
-	Thread *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->tid);
         seen = ms->addressSpace->load(addr.lo, size, false, thr);
         if (seen != lrl->value)
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
@@ -270,15 +270,15 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 InterpretResult CasEvent::fake(MachineState *ms, LogRecord **lr1,
 				    LogRecord **lr2)
 {
-	Thread *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->tid);
 	expression_result seen = ms->addressSpace->load(addr.lo, size, false, thr);
 	if (lr1)
-		*lr1 = new LogRecordLoad(this->when.tid, size, addr.lo, seen);
+		*lr1 = new LogRecordLoad(this->tid, size, addr.lo, seen);
 	thr->temporaries[dest] = seen;
 	if (seen == expected) {
 		ms->addressSpace->store(addr.lo, size, data, false, thr);
 		if (lr2)
-			*lr2 = new LogRecordStore(this->when.tid, size, addr.lo, data);
+			*lr2 = new LogRecordStore(this->tid, size, addr.lo, data);
 	} else if (lr2)
 		*lr2 = NULL;
 	return InterpretResultContinue;
@@ -294,7 +294,7 @@ InterpretResult CasEvent::fake(MachineState *ms, LogRecord **lr1)
 ThreadEvent *SignalEvent::replay(LogRecord *lr, MachineState **ms,
 					   bool &, LogReaderPtr)
 {
-	Thread *thr = (*ms)->findThread(this->when.tid);
+	Thread *thr = (*ms)->findThread(this->tid);
 	LogRecordSignal *lrs = dynamic_cast<LogRecordSignal *>(lr);
 	if (!lrs)
 		throw ReplayFailedException("wanted a signal record, got %s",
@@ -331,7 +331,7 @@ ThreadEvent *SignalEvent::replay(LogRecord *lr, MachineState **ms,
 
 InterpretResult SignalEvent::fake(MachineState *ms, LogRecord **lr)
 {
-	Thread *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->tid);
 	if (lr)
 		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, 0, virtaddr);
 	printf("Crash in thread %d signal %d\n", thr->tid._tid(),signr);
@@ -403,11 +403,11 @@ CasEvent::fuzzyReplay(VexPtr<MachineState > &ms,
 			   GarbageCollectionToken)
 {
         expression_result seen;
-	Thread *thr = ms->findThread(this->when.tid);
+	Thread *thr = ms->findThread(this->tid);
         seen = ms->addressSpace->load(addr.lo, size, false, thr);
 	thr->temporaries[dest] = seen;
         if (seen != expected)
 		return NULL;
-	return StoreEvent::get(this->when, addr.lo, size, data);
+	return StoreEvent::get(this->tid, addr.lo, size, data);
 }
 

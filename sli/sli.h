@@ -799,9 +799,9 @@ public:
 
 class ThreadEvent : public Named, public GarbageCollected<ThreadEvent > {
 protected:
-	ThreadEvent(EventTimestamp _when) : when(_when) {}
+	ThreadEvent(ThreadId _tid) : tid(_tid) {}
 public:
-	EventTimestamp when;
+	ThreadId tid;
 	/* Replay the event using information in the log record */
 	virtual ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 					 bool &consumedRecord, LogReaderPtr ptr) = 0;
@@ -832,7 +832,7 @@ public:
 
 class RdtscEvent : public ThreadEvent {
 	IRTemp tmp;
-	RdtscEvent(EventTimestamp when, IRTemp _tmp) : ThreadEvent(when), tmp(_tmp) {};
+	RdtscEvent(ThreadId tid, IRTemp _tmp) : ThreadEvent(tid), tmp(_tmp) {};
 protected:
 	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
 public:
@@ -844,8 +844,8 @@ public:
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
-	static ThreadEvent *get(EventTimestamp when, IRTemp temp)
-	{ return new RdtscEvent(when, temp); }
+	static ThreadEvent *get(ThreadId tid, IRTemp temp)
+	{ return new RdtscEvent(tid, temp); }
 	NAMED_CLASS
 };
 
@@ -855,8 +855,8 @@ public:
 	unsigned long addr;
 private:
 	unsigned size;
-	LoadEvent(EventTimestamp when, IRTemp _tmp, unsigned long _addr, unsigned _size) :
-		ThreadEvent(when),
+	LoadEvent(ThreadId _tid, IRTemp _tmp, unsigned long _addr, unsigned _size) :
+		ThreadEvent(_tid),
 		tmp(_tmp),
 		addr(_addr),
 		size(_size)
@@ -868,9 +868,9 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when, IRTemp _tmp, unsigned long _addr, unsigned _size)
+	static ThreadEvent *get(ThreadId _tid, IRTemp _tmp, unsigned long _addr, unsigned _size)
 	{
-		return new LoadEvent(when, _tmp, _addr, _size);
+		return new LoadEvent(_tid, _tmp, _addr, _size);
 	}
 	NAMED_CLASS
 };
@@ -881,16 +881,16 @@ public:
 	unsigned size;
 	expression_result data;
 private:
-	StoreEvent(EventTimestamp when, unsigned long addr, unsigned size, expression_result data);
+	StoreEvent(ThreadId tid, unsigned long addr, unsigned size, expression_result data);
 protected:
 	virtual char *mkName() const { return my_asprintf("store(%d, %s, %s)", size, name_aiv(addr), data.name()); }
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when, unsigned long _addr, unsigned _size, expression_result data)
+	static ThreadEvent *get(ThreadId tid, unsigned long _addr, unsigned _size, expression_result data)
 	{
-		return new StoreEvent(when, _addr, _size, data);
+		return new StoreEvent(tid, _addr, _size, data);
 	}
 
 	void destruct() { data.~expression_result(); ThreadEvent::destruct(); }
@@ -906,9 +906,9 @@ public:
 	unsigned long reg3;
 	unsigned long reg4;
 	bool allowRipMismatch;
-	InstructionEvent(EventTimestamp when, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
+	InstructionEvent(ThreadId _tid, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
 			 unsigned long _reg2, unsigned long _reg3, unsigned long _reg4, bool _allowRipMismatch) :
-		ThreadEvent(when),
+		ThreadEvent(_tid),
 		rip(_rip),
 		reg0(_reg0),
 		reg1(_reg1),
@@ -926,10 +926,10 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static InstructionEvent *get(EventTimestamp when, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
+	static InstructionEvent *get(ThreadId _tid, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
 				     unsigned long _reg2, unsigned long _reg3, unsigned long _reg4, bool _allowRipMismatch)
 	{
-		return new InstructionEvent(when, _rip, _reg0, _reg1, _reg2, _reg3, _reg4,
+		return new InstructionEvent(_tid, _rip, _reg0, _reg1, _reg2, _reg3, _reg4,
 					    _allowRipMismatch);
 	}
 
@@ -942,13 +942,13 @@ class CasEvent : public ThreadEvent {
 	expression_result data;
 	expression_result expected;
 	unsigned size;
-	CasEvent(EventTimestamp when,
+	CasEvent(ThreadId _tid,
 		 IRTemp _dest,
 		 expression_result _addr,
 		 expression_result _data,
 		 expression_result _expected,
 		 unsigned _size) :
-		ThreadEvent(when),
+		ThreadEvent(_tid),
 		dest(_dest),
 		addr(_addr),
 		data(_data),
@@ -977,14 +977,14 @@ public:
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
 
-	static ThreadEvent *get(EventTimestamp when,
+	static ThreadEvent *get(ThreadId _tid,
 				IRTemp _dest,
 				expression_result _addr,
 				expression_result _data,
 				expression_result _expected,
 				unsigned _size)
 	{
-		return new CasEvent(when, _dest, _addr, _data, _expected, _size);
+		return new CasEvent(_tid, _dest, _addr, _data, _expected, _size);
 	}
 
 	void destruct()
@@ -1002,7 +1002,7 @@ protected:
 	virtual char *mkName() const {
 		return my_asprintf("syscall");
 	}
-	SyscallEvent(EventTimestamp when) : ThreadEvent(when) {}
+	SyscallEvent(ThreadId _tid) : ThreadEvent(_tid) {}
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr ptr);
@@ -1012,8 +1012,8 @@ public:
 				      LogReaderPtr startPtr,
 				      LogReaderPtr *endPtr,
 				      GarbageCollectionToken);
-	static ThreadEvent *get(EventTimestamp when)
-	{ return new SyscallEvent(when); }
+	static ThreadEvent *get(ThreadId _tid)
+	{ return new SyscallEvent(_tid); }
 	NAMED_CLASS
 };
 
@@ -1022,8 +1022,8 @@ protected:
 	char *mkName() const { return my_asprintf("Detected error at %lx\n", rip); }
 public:
 	unsigned long rip;
-	DetectedErrorEvent(EventTimestamp when, unsigned long _rip)
-		: ThreadEvent(when), rip(_rip)
+	DetectedErrorEvent(ThreadId _tid, unsigned long _rip)
+		: ThreadEvent(_tid), rip(_rip)
 	{
 	}
 	/* Okay, we've crashed.  Consume to the end of the log and
@@ -1033,14 +1033,14 @@ public:
 				 bool &consumed,
 				 LogReaderPtr)
 	{
-		Thread *thr = (*ms)->findThread(this->when.tid);
+		Thread *thr = (*ms)->findThread(this->tid);
 		thr->crashed = true;
 		consumed = true;
 		return this;
 	}
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL)
 	{
-		Thread *thr = ms->findThread(this->when.tid);
+		Thread *thr = ms->findThread(this->tid);
 		thr->crashed = true;
 		return InterpretResultCrash;
 	}
@@ -1050,8 +1050,8 @@ class SignalEvent : public ThreadEvent {
 public:
 	unsigned signr;
 	unsigned long virtaddr;
-	SignalEvent(EventTimestamp when, unsigned _signr, unsigned long _va) :
-		ThreadEvent(when),
+	SignalEvent(ThreadId _tid, unsigned _signr, unsigned long _va) :
+		ThreadEvent(_tid),
 		signr(_signr),
 		virtaddr(_va)
 	{
@@ -1064,9 +1064,9 @@ public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	static ThreadEvent *get(EventTimestamp when, unsigned _signr, unsigned long _virtaddr)
+	static ThreadEvent *get(ThreadId _tid, unsigned _signr, unsigned long _virtaddr)
 	{
-		return new SignalEvent(when, _signr, _virtaddr);
+		return new SignalEvent(_tid, _signr, _virtaddr);
 	}
 
 	NAMED_CLASS
