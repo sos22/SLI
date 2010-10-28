@@ -331,21 +331,6 @@ replay_syscall(const LogRecordSyscall *lrs,
 	case __NR_time: /* 201 */
 		break;
 	case __NR_futex: /* 202 */
-		switch (args[1] & FUTEX_CMD_MASK) {
-		case FUTEX_WAIT:
-			if (res == 0ul)
-				thr->futexBlock(args[0]);
-			break;
-		case FUTEX_WAKE:
-			mach->futexWake(args[0], true);
-			break;
-		case FUTEX_CMP_REQUEUE:
-			break;
-		case FUTEX_WAKE_OP:
-			break;
-		default:
-			break;
-		}
 		break;
 	case __NR_set_tid_address: /* 218 */
 		thr->clear_child_tid = args[0];
@@ -540,7 +525,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 			break;
 		}
 		case FUTEX_WAKE: {
-			res = ms->futexWake(args[0], false);
+			res = 1;
 			break;
 		}
 		default:

@@ -250,8 +250,6 @@ public:
 	mutable ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
-	void futexBlock(unsigned long fba) { }
-	void futexUnblock() { }
 
 	void pretty_print() const;
 private:
@@ -629,9 +627,6 @@ public:
 	}
 	bool crashed() const;
 
-	unsigned futexWake(unsigned long key, bool do_it) {
-		return 0;
-	}
 	MachineState *dupeSelf() const;
 
 	void dumpSnapshot(LogWriter *lw) const;
