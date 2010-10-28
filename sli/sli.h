@@ -32,21 +32,6 @@ static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__prin
 char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 char *vex_vasprintf(const char *fmt, va_list args);
 	
-template <typename underlying>
-class Maybe {
-public:
-	underlying value;
-	bool full;
-	Maybe(const underlying &x)
-		: value(x),
-		  full(true)
-	{
-	}
-	Maybe() : full(false)
-	{
-	}		
-};
-
 class Named {
 	mutable char *_name;
 protected:
@@ -74,21 +59,6 @@ public:
 		return _name;
 	}
 	~Named() { clearName(); }
-};
-
-template <typename t, const char *(*get_name)(const void *) = get_name<t>, void (*visit)(void *, HeapVisitor &) = visit_object<t>, void (*destruct)(void *) = destruct_object<t> >
-class VexAllocTypeWrapper {
-public:
-	VexAllocType type;
-	VexAllocTypeWrapper() {
-		type.nbytes = sizeof(t);
-		type.gc_visit = visit;
-		type.destruct = destruct;
-		type.get_name = get_name;
-	}
-	t *alloc() {
-		return (t *)__LibVEX_Alloc(&type);
-	}
 };
 
 static inline char *name_aiv(unsigned long x)

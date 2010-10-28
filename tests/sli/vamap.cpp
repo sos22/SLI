@@ -1,19 +1,16 @@
 #include <stdio.h>
 #include "sli.h"
 
-class VAPMap {
+class VAPMap : public GarbageCollected<VAPMap> {
 public:
-	static VexAllocTypeWrapper<VAPMap> allocator;
 	VAMap *vamap;
 	PMap *pmap;
 	void visit(HeapVisitor &hv) {
 		hv(pmap);
 		vamap->visit(vamap, hv, pmap);
 	}
-	void destruct() {}
 	NAMED_CLASS
 };
-VexAllocTypeWrapper<VAPMap> VAPMap::allocator;
 
 int
 main()
@@ -128,7 +125,7 @@ main()
 	assert(alf == VAMap::AllocFlags(false));
 
 	printf("Check GC behaviour: VAMap keeps physical addresses live\n");
-	VAPMap *vap = VAPMap::allocator.alloc();
+	VAPMap *vap = new VAPMap();
 	vap->vamap = vamap;
 	vap->pmap = pmap;
 	VexGcRoot vgc((void **)&vap, "test vamap");
