@@ -1341,18 +1341,6 @@ public:
 	NAMED_CLASS
 };
 
-class MemTracePool : public GarbageCollected<MemTracePool> {
-	typedef gc_map<ThreadId, MemoryTrace*, __default_hash_function, __default_eq_function,
-		       __visit_function_heap<MemoryTrace *> > contentT;
-	contentT *content;
-public:
-	static MemTracePool *get(VexPtr<MachineState > &base_state, ThreadId ignoredThread, GarbageCollectionToken t);
-	gc_map<ThreadId, Maybe<unsigned> > *firstRacingAccessMap();
-	void visit(HeapVisitor &hv);
-	void destruct() { }
-	NAMED_CLASS
-};
-
 class LogRecordFootstep : public LogRecord {
 protected:
 	virtual char *mkName() const {
@@ -1598,8 +1586,8 @@ public:
 			    void *dest);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result load(EventTimestamp when, unsigned long start, unsigned size,
-				    bool ignore_protection = false,
-				    Thread *thr = NULL);
+			       bool ignore_protection = false,
+			       Thread *thr = NULL);
 	template <typename t> const t fetch(unsigned long addr,
 					    Thread *thr);
 	EventTimestamp readMemory(unsigned long start, unsigned size,

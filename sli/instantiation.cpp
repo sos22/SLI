@@ -6,7 +6,6 @@
 #include "logreader.cpp"
 #include "syscalls.cpp"
 #include "memlog.cpp"
-#include "memtracepool.cpp"
 #include "memorytrace.cpp"
 #include "addressspace.cpp"
 #include "pmap.cpp"
@@ -17,7 +16,6 @@
 	MK_INTERPRETER(t);			\
 	MK_THREAD(t);				\
 	MK_MEM_LOG(t);				\
-	MK_MEMTRACE_POOL(t);			\
 	MK_MEMTRACE(t);				\
 	MK_LOGWRITER(t);			\
 	MK_ADDRESS_SPACE(t);			\
