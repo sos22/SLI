@@ -1788,8 +1788,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				GarbageCollectionToken t,
 				LogReaderPtr *eof,
 				VexPtr<LogWriter> &lw,
-				VexPtr<EventRecorder> &er,
-				EventTimestamp *lastEvent)
+				VexPtr<EventRecorder> &er)
 {
 	unsigned long event_counter = 0;
 	VexPtr<LogRecord> lr;
@@ -1830,8 +1829,6 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t);
 
 		while (evt && lr) {
-			if (lastEvent && evt->when == *lastEvent)
-				finished = true;
 			if (er)
 				er->record(thr, evt, currentState);
 			if (loud_mode)

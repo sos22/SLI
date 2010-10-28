@@ -752,8 +752,7 @@ public:
 			   GarbageCollectionToken,
 			   LogReaderPtr *endingPoint,
 			   VexPtr<LogWriter > &log,
-			   VexPtr<EventRecorder> &er,
-			   EventTimestamp *lastEvent = NULL);
+			   VexPtr<EventRecorder> &er);
 	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken tok)
