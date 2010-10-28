@@ -457,8 +457,8 @@ public:
 
 	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes,
 		   unsigned long sa);
-	EventTimestamp read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
-			    unsigned long *sa = NULL) const;
+	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
+		  unsigned long *sa = NULL) const;
 
 	MemoryChunk *dupeSelf() const;
 
