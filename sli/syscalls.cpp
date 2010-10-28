@@ -35,7 +35,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		if (lw)
 			lw->append(lr, 0);
 		try {
-			addrSpace->writeMemory(EventTimestamp::invalid, lrm->start, lrm->size, lrm->contents,
+			addrSpace->writeMemory(lrm->start, lrm->size, lrm->contents,
 					       true, NULL);
 		} catch (BadMemoryException<unsigned long> bme) {
 		}
@@ -448,8 +448,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 								  sizeof(pfd),
 								  &pfd);
 			pfd.revents = pfd.events & POLLOUT;
-			fault |= ms->addressSpace->copyToClient(this->when,
-								args[0] + x * sizeof(pfd),
+			fault |= ms->addressSpace->copyToClient(args[0] + x * sizeof(pfd),
 								sizeof(pfd),
 								&pfd);
 			if (pfd.revents)
@@ -519,11 +518,9 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		gettimeofday(&tv, &tz);
 		fault = false;
 		if (args[0])
-			fault |= ms->addressSpace->copyToClient(this->when, args[0], sizeof(tv),
-								&tv);
+			fault |= ms->addressSpace->copyToClient(args[0], sizeof(tv), &tv);
 		if (args[1])
-			fault |= ms->addressSpace->copyToClient(this->when, args[1], sizeof(tv),
-								&tv);
+			fault |= ms->addressSpace->copyToClient(args[1], sizeof(tv), &tv);
 		if (fault)
 			res = -EFAULT;
 		else
@@ -562,8 +559,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 	case __NR_clock_gettime: {
 		struct timespec ts;
 		clock_gettime(args[0], &ts);
-		ms->addressSpace->copyToClient(this->when, args[1], sizeof(ts),
-					       &ts);
+		ms->addressSpace->copyToClient(args[1], sizeof(ts), &ts);
 		res = 0ul;
 		break;
 	}

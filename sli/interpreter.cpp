@@ -155,9 +155,7 @@ Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsi
 
 	for (x = 0; x < 10; x++)
 		buf2[x] = (buf[x]);
-	ms->addressSpace->writeMemory(EventTimestamp(tid, nrEvents, ms->nrEvents,
-						     regs.rip()),
-				      addr,
+	ms->addressSpace->writeMemory(addr,
 				      10,
 				      buf2,
 				      false,

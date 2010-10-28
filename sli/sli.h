@@ -1374,16 +1374,15 @@ public:
 	void protectMemory(unsigned long start, unsigned long size, VAMap::Protection prot);
 	void populateMemory(const LogRecordMemory &rec)
 	{
-		writeMemory(EventTimestamp::invalid, rec.start, rec.size, rec.contents, true, NULL);
+		writeMemory(rec.start, rec.size, rec.contents, true, NULL);
 	}
 	void store(EventTimestamp when, unsigned long start, unsigned size, const expression_result &val,
 		   bool ignore_protection = false,
 		   Thread *thr = NULL);
-	void writeMemory(EventTimestamp when, unsigned long start, unsigned size,
+	void writeMemory(unsigned long start, unsigned size,
 			 const unsigned long *contents, bool ignore_protection,
 			 Thread *thr);
-	bool copyToClient(EventTimestamp when, unsigned long start, unsigned size,
-			  const void *source);
+	bool copyToClient(unsigned long start, unsigned size, const void *source);
 	bool copyFromClient(unsigned long start, unsigned size, void *dest);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result load(EventTimestamp when, unsigned long start, unsigned size,

@@ -39,7 +39,7 @@ AddressSpace::protectMemory(unsigned long start, unsigned long size,
 }
 
 bool
-AddressSpace::copyToClient(EventTimestamp when, unsigned long start, unsigned size,
+AddressSpace::copyToClient(unsigned long start, unsigned size,
 			   const void *contents)
 {
 	unsigned long *buf = (unsigned long *)malloc(sizeof(unsigned long) * size);
@@ -49,7 +49,7 @@ AddressSpace::copyToClient(EventTimestamp when, unsigned long start, unsigned si
 		buf[x] = ((unsigned char *)contents)[x];
 	fault = false;
 	try {
-		writeMemory(when, start, size, buf, false, NULL);
+		writeMemory(start, size, buf, false, NULL);
 	} catch (BadMemoryException<unsigned long> &e) {
 		fault = true;
 	}
@@ -79,7 +79,7 @@ AddressSpace::copyFromClient(unsigned long start, unsigned size, void *dest)
 }
 
 void
-AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned size,
+AddressSpace::writeMemory(unsigned long _start, unsigned size,
 			  const unsigned long *contents, bool ignore_protection,
 			  Thread *thr)
 {
@@ -197,7 +197,7 @@ AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
 	default:
 		abort();
 	}
-	writeMemory(when, start, size, b, ignore_protection, thr);
+	writeMemory(start, size, b, ignore_protection, thr);
 }
 
 template <typename t> const t
@@ -431,25 +431,6 @@ void AddressSpace::dumpSnapshot(LogWriter *lw) const
 	}
 }
 
-/* Valgrind handles vsyscalls in a slightly weird way, and we have to
-   emulate that here. */
-#define STRING(x) #x
-#define STRING2(x) STRING(x)
-asm (
-"redirect_vtime:\n"
-"        movq $" STRING2(__NR_time) ", %rax\n"
-"        syscall\n"
-"        ret\n"
-"redirect_vgettimeofday:\n"
-"        movq $" STRING2(__NR_gettimeofday) ", %rax\n"
-"        syscall\n"
-"        ret\n"
-"redirect_end:\n"
-	);
-extern unsigned char redirect_vtime[];
-extern unsigned char redirect_vgettimeofday[];
-extern unsigned char redirect_end[];
-
 void
 AddressSpace::writeLiteralMemory(unsigned long start,
 				      unsigned size,
@@ -458,8 +439,7 @@ AddressSpace::writeLiteralMemory(unsigned long start,
 	unsigned long *c = (unsigned long *)malloc(sizeof(unsigned long) * size);
 	for (unsigned x = 0; x < size; x++)
 		c[x] = content[x];
-	writeMemory(EventTimestamp::invalid, start,
-		    size, c, true, NULL);
+	writeMemory(start, size, c, true, NULL);
 	free(c);
 }
 
