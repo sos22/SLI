@@ -444,8 +444,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		fault = false;
 		result = 0;
 		for (unsigned x = 0; x < n_fds && !fault; x++) {
-			fault |= ms->addressSpace->copyFromClient(this->when,
-								  args[0] + x * sizeof(pfd),
+			fault |= ms->addressSpace->copyFromClient(args[0] + x * sizeof(pfd),
 								  sizeof(pfd),
 								  &pfd);
 			pfd.revents = pfd.events & POLLOUT;
@@ -477,8 +476,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		ssize_t written;
 		written = 0;
 		for (unsigned x = 0; x < nr_iovs; x++) {
-			ms->addressSpace->copyFromClient(this->when,
-							 args[0] + x * sizeof(iov),
+			ms->addressSpace->copyFromClient(args[0] + x * sizeof(iov),
 							 sizeof(iov),
 							 &iov);
 			written += iov.iov_len;

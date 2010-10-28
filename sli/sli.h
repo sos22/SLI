@@ -455,7 +455,7 @@ public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk *allocate();
 
-	void write(EventTimestamp, unsigned offset, const unsigned long *source, unsigned nr_bytes,
+	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes,
 		   unsigned long sa);
 	EventTimestamp read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
 			    unsigned long *sa = NULL) const;
@@ -1384,8 +1384,7 @@ public:
 			 Thread *thr);
 	bool copyToClient(EventTimestamp when, unsigned long start, unsigned size,
 			  const void *source);
-	bool copyFromClient(EventTimestamp when, unsigned long start, unsigned size,
-			    void *dest);
+	bool copyFromClient(unsigned long start, unsigned size, void *dest);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result load(EventTimestamp when, unsigned long start, unsigned size,
 			       bool ignore_protection = false,

@@ -58,8 +58,7 @@ AddressSpace::copyToClient(EventTimestamp when, unsigned long start, unsigned si
 }
 
 bool
-AddressSpace::copyFromClient(EventTimestamp when, unsigned long start, unsigned size,
-			     void *dest)
+AddressSpace::copyFromClient(unsigned long start, unsigned size, void *dest)
 {
 	unsigned long *buf = (unsigned long *)calloc(sizeof(unsigned long), size);
 	bool fault;
@@ -100,7 +99,7 @@ AddressSpace::writeMemory(EventTimestamp when, unsigned long _start, unsigned si
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			mc->write(when, mc_start, contents, to_copy_this_time,
+			mc->write(mc_start, contents, to_copy_this_time,
 				  _start + off);
 
 			start += to_copy_this_time;
