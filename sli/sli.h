@@ -811,9 +811,6 @@ public:
 		replayLogfile(lf, startingPoint, tok, endingPoint, log, er);
 	}
 
-	void runToAccessLoggingEvents(ThreadId tid, unsigned nr_accesses,
-				      GarbageCollectionToken t,
-				      VexPtr<LogWriter > &output);
 	void runToEvent(EventTimestamp evt,
 			VexPtr<LogReader > &lf,
 			LogReaderPtr startingPoint,

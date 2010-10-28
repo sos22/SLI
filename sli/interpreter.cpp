@@ -1785,29 +1785,6 @@ finished_block:
 	}
 }
 
-void Interpreter::runToAccessLoggingEvents(ThreadId tid,
-					   unsigned nr_accesses,
-					   GarbageCollectionToken t,
-					   VexPtr<LogWriter> &output)
-{
-        VexPtr<Thread > thr(currentState->findThread(tid));
-        while (1) {
-                ThreadEvent *evt = thr->runToEvent(thr, currentState, LogReaderPtr(), t);
-                InterpretResult res = output->recordEvent(thr, currentState, evt);
-		if (dynamic_cast<LoadEvent *>(evt) ||
-		    dynamic_cast<StoreEvent *>(evt)) {
-			nr_accesses--;
-			if (nr_accesses == 0)
-				return;
-		}
-
-		/* Caller should have made sure that we can actually
-		   make progress. */
-		assert(res == InterpretResultContinue);
-		(void)res;
-	}
-}
-
 void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				LogReaderPtr ptr,
 				GarbageCollectionToken t,
