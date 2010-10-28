@@ -233,11 +233,10 @@ class Thread : public GarbageCollected<Thread> {
 				       GarbageCollectionToken t);
 	struct expression_result eval_expression(IRExpr *expr);
 	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms);
-	ThreadEvent *do_load(EventTimestamp when,
-					    IRTemp tmp,
-					    unsigned long addr,
-					    unsigned size,
-					    MachineState *ms);
+	ThreadEvent *do_load(IRTemp tmp,
+			     unsigned long addr,
+			     unsigned size,
+			     MachineState *ms);
 	expression_result do_ccall_calculate_condition(struct expression_result *args);
 	expression_result do_ccall_calculate_rflags_c(expression_result *args);
 	expression_result do_ccall_generic(IRCallee *cee, struct expression_result *rargs);
@@ -253,7 +252,6 @@ public:
 	bool inInfrastructure;
 
 	unsigned decode_counter;
-	EventTimestamp bumpEvent(MachineState *ms);
 	ThreadId tid;
 	unsigned pid;
 	RegisterSet regs;
@@ -309,8 +307,6 @@ public:
 	mutable ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
 	unsigned long currentControlCondition;
-
-	EventTimestamp lastEvent;
 
 	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
 	void futexBlock(unsigned long fba) { blocked = true; futex_block_address = fba; }

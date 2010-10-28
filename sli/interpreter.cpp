@@ -163,8 +163,7 @@ Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsi
 }
 
 ThreadEvent *
-Thread::do_load(EventTimestamp when, IRTemp tmp, unsigned long addr, unsigned size,
-		     MachineState *ms)
+Thread::do_load(IRTemp tmp, unsigned long addr, unsigned size, MachineState *ms)
 {
 	if (ms->addressSpace->isReadable(addr, size, this))
 		return LoadEvent::get(tid, tmp, addr, size);
@@ -192,15 +191,15 @@ Thread::do_dirty_call(IRDirty *details, MachineState *ms)
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 		return RdtscEvent::get(tid, details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 1, ms);
+		return do_load(details->tmp, args[0].lo, 1, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 2, ms);
+		return do_load(details->tmp, args[0].lo, 2, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 4, ms);
+		return do_load(details->tmp, args[0].lo, 4, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 8, ms);
+		return do_load(details->tmp, args[0].lo, 8, ms);
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
-		return do_load(bumpEvent(ms), details->tmp, args[0].lo, 16, ms);
+		return do_load(details->tmp, args[0].lo, 16, ms);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;

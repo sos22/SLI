@@ -100,26 +100,13 @@ void Thread::visit(HeapVisitor &hv)
 		hv(it->ms);
 }
 
-EventTimestamp Thread::bumpEvent(MachineState *ms)
-{
-	lastEvent = EventTimestamp(tid, nrEvents++, ms->nrEvents++,
-				   regs.rip());
-	if (lastEvent.tid._tid() == 9 && lastEvent.idx == 0x1ab6fe)
-		printf("Producing the magic event %d:%lx\n",
-		       lastEvent.tid._tid(), lastEvent.idx);
-	return lastEvent;
-}
-
 void
 Thread::pretty_print(void) const
 {
-	printf("Thread tid %d, pid %d access %ld event %ld, last event %lx:%lx:%lx %s%s%s%s%s\n",
+	printf("Thread tid %d, pid %d access %ld event %ld, last %s%s%s%s%s\n",
 	       tid._tid(), pid,
 	       nrAccesses,
 	       nrEvents,
-	       lastEvent.idx,
-	       lastEvent.total_timestamp,
-	       lastEvent.rip,
 #define f(n) n ? "(" #n ")" : ""
 	       f(exitted),
 	       f(crashed),
