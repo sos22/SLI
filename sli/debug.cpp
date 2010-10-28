@@ -141,23 +141,6 @@ public:
 	DetachCommand(GdbChannel *c) : GdbCommand(c) {}
 };
 
-class ContinueCommand : public GdbCommand {
-	unsigned long newRip;
-	bool haveNewRip;
-public:
-	void doIt(VexPtr<MachineState > &ms, GarbageCollectionToken);
-	ContinueCommand(GdbChannel *c, const char *buf)
-		: GdbCommand(c)
-	{
-		if (buf[0] == '0') {
-			haveNewRip = false;
-		} else {
-			haveNewRip = true;
-			newRip = strtol(buf, NULL, 16);
-		}
-	}
-};
-
 static unsigned long
 htonlong(unsigned long x)
 {
@@ -294,29 +277,6 @@ ThreadAliveCommand::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 }
 
 void
-ContinueCommand::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken t)
-{
-	VexPtr<Thread > thr(ms->findThread(this->chan->currentTidRun, true));
-	if (!thr) {
-		this->sendResponse("E99");
-		return;
-	}
-	if (haveNewRip)
-		thr->regs.set_reg(REGISTER_IDX(RIP), newRip);
-
-        while (1) {
-		ThreadEvent *evt = thr->runToEvent(thr, ms, LogReaderPtr(), t);
-                InterpretResult res = evt->fake(ms);
-
-		if (dynamic_cast<SignalEvent *>(evt) ||
-		    res != InterpretResultContinue)
-			break;
-	}
-
-	this->sendResponse("S03");
-}
-
-void
 GdbCommand::sendResponse(const char *fmt, ...)
 {
 	va_list args;
@@ -442,9 +402,6 @@ GdbChannel::getCommand()
 	switch (buf[0]) {
 	case '?':
 		r = new GetSigCommand(this);
-		break;
-	case 'c':
-		r = new ContinueCommand(this, buf + 1);
 		break;
 	case 'D':
 		r = new DetachCommand(this);

@@ -677,8 +677,6 @@ public:
 	/* Replay the event using information in the log record */
 	virtual ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 					 bool &consumedRecord, LogReaderPtr ptr) = 0;
-	/* Try to ``replay'' the event without reference to a pre-existing logfile */
-	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL) = 0;
 
 	virtual void visit(HeapVisitor &hv){}
 
@@ -693,7 +691,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static ThreadEvent *get(ThreadId tid, IRTemp temp)
 	{ return new RdtscEvent(tid, temp); }
 	NAMED_CLASS
@@ -717,7 +714,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static ThreadEvent *get(ThreadId _tid, IRTemp _tmp, unsigned long _addr, unsigned _size)
 	{
 		return new LoadEvent(_tid, _tmp, _addr, _size);
@@ -737,7 +733,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static ThreadEvent *get(ThreadId tid, unsigned long _addr, unsigned _size, expression_result data)
 	{
 		return new StoreEvent(tid, _addr, _size, data);
@@ -772,7 +767,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static InstructionEvent *get(ThreadId _tid, unsigned long _rip, unsigned long _reg0, unsigned long _reg1,
 				     unsigned long _reg2, unsigned long _reg3, unsigned long _reg4)
 	{
@@ -811,9 +805,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
-	virtual InterpretResult fake(MachineState *ms, LogRecord **lr = NULL,
-				     LogRecord **lr2 = NULL);
 	ThreadEvent *replay(LogRecord *lr, MachineState *ms,
 				 const LogReader *lf, LogReaderPtr ptr,
 				 LogReaderPtr *outPtr, LogWriter *lw);
@@ -840,7 +831,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr ptr);
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static ThreadEvent *get(ThreadId _tid)
 	{ return new SyscallEvent(_tid); }
 	NAMED_CLASS
@@ -867,12 +857,6 @@ public:
 		consumed = true;
 		return this;
 	}
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL)
-	{
-		Thread *thr = ms->findThread(this->tid);
-		thr->crashed = true;
-		return InterpretResultCrash;
-	}
 };
 
 class SignalEvent : public ThreadEvent {
@@ -892,7 +876,6 @@ protected:
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	InterpretResult fake(MachineState *ms, LogRecord **lr = NULL);
 	static ThreadEvent *get(ThreadId _tid, unsigned _signr, unsigned long _virtaddr)
 	{
 		return new SignalEvent(_tid, _signr, _virtaddr);

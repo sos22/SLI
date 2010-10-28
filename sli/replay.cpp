@@ -14,14 +14,6 @@ ThreadEvent *RdtscEvent::replay(LogRecord *lr, MachineState **ms,
 	return NULL;
 }
 
-InterpretResult RdtscEvent::fake(MachineState *ms, LogRecord **lr)
-{
-	printf("fake rdtsc\n");
-	if (lr)
-		*lr = NULL;
-	return InterpretResultIncomplete;
-}
-
 StoreEvent::StoreEvent(ThreadId tid, unsigned long _addr, unsigned _size, expression_result _data)
 	: ThreadEvent(tid),
 	  addr(_addr),
@@ -67,17 +59,6 @@ ThreadEvent *StoreEvent::replay(LogRecord *lr, MachineState **ms,
 }
 
 
-InterpretResult StoreEvent::fake(MachineState *ms,
-				      LogRecord **lr)
-{
-	Thread *thr = ms->findThread(this->tid);
-	if (lr)
-		*lr = new LogRecordStore(thr->tid, size, addr, data);
-	ms->addressSpace->store(addr, size, data, false, thr);
-	return InterpretResultContinue;
-}
-
-
 ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 					 bool &, LogReaderPtr)
 {
@@ -108,39 +89,11 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 }
 
 
-InterpretResult LoadEvent::fake(MachineState *ms, LogRecord **lr)
-{
-	Thread *thr = ms->findThread(this->tid);
-	if (ms->addressSpace->isReadable(addr, size, thr)) {
-		expression_result buf =
-			ms->addressSpace->load(addr, size, false, thr);
-		thr->temporaries[tmp] = buf;
-		if (lr)
-			*lr = new LogRecordLoad(thr->tid, size, addr, buf);
-		return InterpretResultContinue;
-	} else {
-		if (lr)
-			*lr = NULL;
-		thr->crashed = true;
-		return InterpretResultCrash;
-	}
-}
-
-
 ThreadEvent *InstructionEvent::replay(LogRecord *lr, MachineState **ms,
 						bool &consumedRecord, LogReaderPtr)
 {
        consumedRecord = false;
        return NULL;
-}
-
-
-InterpretResult InstructionEvent::fake(MachineState *ms,
-					    LogRecord **lr)
-{
-	if (lr)
-		*lr = NULL;
-	return InterpretResultContinue;
 }
 
 
@@ -231,30 +184,6 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 }
 
 
-InterpretResult CasEvent::fake(MachineState *ms, LogRecord **lr1,
-				    LogRecord **lr2)
-{
-	Thread *thr = ms->findThread(this->tid);
-	expression_result seen = ms->addressSpace->load(addr.lo, size, false, thr);
-	if (lr1)
-		*lr1 = new LogRecordLoad(this->tid, size, addr.lo, seen);
-	thr->temporaries[dest] = seen;
-	if (seen == expected) {
-		ms->addressSpace->store(addr.lo, size, data, false, thr);
-		if (lr2)
-			*lr2 = new LogRecordStore(this->tid, size, addr.lo, data);
-	} else if (lr2)
-		*lr2 = NULL;
-	return InterpretResultContinue;
-}
-
-
-InterpretResult CasEvent::fake(MachineState *ms, LogRecord **lr1)
-{
-	return fake(ms, lr1, NULL);
-}
-
-
 ThreadEvent *SignalEvent::replay(LogRecord *lr, MachineState **ms,
 					   bool &, LogReaderPtr)
 {
@@ -293,12 +222,3 @@ ThreadEvent *SignalEvent::replay(LogRecord *lr, MachineState **ms,
 }
 
 
-InterpretResult SignalEvent::fake(MachineState *ms, LogRecord **lr)
-{
-	Thread *thr = ms->findThread(this->tid);
-	if (lr)
-		*lr = new LogRecordSignal(thr->tid, thr->regs.rip(), signr, 0, virtaddr);
-	printf("Crash in thread %d signal %d\n", thr->tid._tid(),signr);
-	thr->crashed = true;
-	return InterpretResultCrash;
-}
