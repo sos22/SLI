@@ -9,14 +9,6 @@
 #define FOOTSTEP_REGS_ONLY
 #include "ppres.h"
 
-static void load_event(const void *ptr, unsigned sz, void *outbuf,
-		       unsigned long rsp, unsigned long rip)
-{
-	/* placeholder, should never actually be called */
-	abort();
-}
-
-
 #define load_worker_function load_event
 
 #define mk_helper_load(typ, suffix)                            \
@@ -24,10 +16,8 @@ static typ                                                     \
  helper_load_ ## suffix (const typ *ptr, unsigned long rsp,    \
 			 unsigned long rip)		       \
 {							       \
-        typ val;					       \
-	load_worker_function(ptr, sizeof(val), &val, rsp,      \
-			     rip);			       \
-	return val;					       \
+	/* Placeholder, never actually called. */	       \
+	abort();					       \
 }
 
 #define mk_helpers(typ, suffix)                        \

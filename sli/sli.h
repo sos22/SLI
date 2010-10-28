@@ -397,7 +397,6 @@ public:
 
 	PhysicalAddress base;
 	unsigned serial;
-	unsigned long checksum;
 	void visit(HeapVisitor &hv) {}
 
 	NAMED_CLASS
@@ -1249,7 +1248,6 @@ public:
 			 Thread *thr);
 	bool copyToClient(unsigned long start, unsigned size, const void *source);
 	bool copyFromClient(unsigned long start, unsigned size, void *dest);
-	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
 	expression_result load(unsigned long start, unsigned size,
 			       bool ignore_protection = false,
 			       Thread *thr = NULL);
@@ -1348,7 +1346,5 @@ force_linkage()
 }
 
 unsigned long extract_call_follower(IRSB *irsb);
-
-void check_fpu_control(void);
 
 #endif /* !SLI_H__ */

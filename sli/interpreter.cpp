@@ -1320,8 +1320,6 @@ Thread::eval_expression(IRExpr *expr)
 	return res;
 }
 
-/* vsyscalls are weird (the redirection target effectively moves), and
- * cause a number of RIP mismatches during replay.  Skank it up. */
 void
 Thread::redirectGuest(unsigned long rip)
 {
@@ -1507,8 +1505,6 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 	unsigned put_offset;
 	struct expression_result put_data;
 	IRType put_type;
-
-	check_fpu_control();
 
 	while (1) {
 		if (!ths->currentIRSB) {
@@ -1777,8 +1773,6 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 		event_counter++;
 		if (event_counter % 100000 == 0)
 			printf("event %ld\n", event_counter);
-		if (event_counter > 677000 && 0)
-			loud_mode = true;
 
 		if (!lr) {
 			lr = lf->read(ptr, &ptr);

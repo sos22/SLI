@@ -8,27 +8,6 @@ void MachineState::visit(HeapVisitor &hv)
 	hv(addressSpace);
 }
 
-static void
-visit_machine_state(void *_ctxt, HeapVisitor &hv)
-{
-	MachineState *ctxt = (MachineState *)_ctxt;
-	ctxt->visit(hv);
-}
-
-/* C++ doesn't allow template global variables, so wrap it up in its
-   own class.  Sigh. */
-template<typename ait>
-class StupidTemplateHack1 {
-public:
-	VexAllocType t;
-	StupidTemplateHack1() {
-		t.nbytes = sizeof(MachineState);
-		t.gc_visit = visit_machine_state;
-		t.destruct = NULL;
-		t.name = "MachineState";
-	}
-};
-
 MachineState *
 MachineState::initialMachineState(AddressSpace *as,
 				  const LogRecordInitialSighandlers &handlers)

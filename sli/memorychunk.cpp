@@ -24,8 +24,6 @@ void MemoryChunk::write(unsigned offset, const unsigned long *source, unsigned n
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
 	for (unsigned x = 0; x < nr_bytes; x++) {
-		checksum -= content[offset + x];
-		checksum += source[x];
 		content[offset + x] = source[x];
 	}
 }

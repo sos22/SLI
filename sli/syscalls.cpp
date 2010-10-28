@@ -81,11 +81,6 @@ handle_clone(AddressSpace *addrSpace,
 	if (flags & CLONE_CHILD_CLEARTID)
 		newThread->clear_child_tid = child_tidptr;
 	newThread->robust_list = 0;
-#if 0
-	if (flags & CLONE_VM)
-		newThread->sas_ss_sp = newThread->sas_ss_size = 0;
-	newThread->exit_signal = (flags & CLONE_THREAD) ? -1 : (clone_flags & CSIGNAL);
-#endif
 	newThread->regs.set_reg(REGISTER_IDX(RAX), 0);
 	newThread->regs.set_reg(REGISTER_IDX(RSP), childRsp);
 	if (flags & CLONE_SETTLS)

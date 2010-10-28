@@ -100,8 +100,7 @@ skip:
 	}
 	case RECORD_syscall: {
 		syscall_record<unsigned long> sr;
-		int r = buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
 		return new LogRecordSyscall(tid,
 							   sr.syscall_nr & 0xffffffff,
 							   sr.syscall_res._isError ? -(long)sr.syscall_res._val : sr.syscall_res._val,
@@ -112,11 +111,10 @@ skip:
 	case RECORD_memory: {
 		memory_record<unsigned long> mr;
 		unsigned s;
-		int r = buffered_pread(&mr, sizeof(mr), startPtr.off + sizeof(rh));
+		buffered_pread(&mr, sizeof(mr), startPtr.off + sizeof(rh));
 		s = rh.size - sizeof(mr) - sizeof(rh);
 		void *buf = alloca(s);
-		r = buffered_pread(buf, s, startPtr.off + sizeof(rh) + sizeof(mr));
-		(void)r;
+		buffered_pread(buf, s, startPtr.off + sizeof(rh) + sizeof(mr));
 		unsigned long *b = (unsigned long *)malloc(sizeof(unsigned long) * s);
 		for (unsigned x = 0; x < s; x++)
 			b[x] = ((unsigned char *)buf)[x];
@@ -127,18 +125,17 @@ skip:
 	}
 	case RECORD_rdtsc: {
 		rdtsc_record<unsigned long> rr;
-		int r = buffered_pread(&rr, sizeof(rr), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(&rr, sizeof(rr), startPtr.off + sizeof(rh));
 		return new LogRecordRdtsc(tid, rr.stashed_tsc);
 	}
 	case RECORD_mem_read: {
 		mem_read_record<unsigned long> mrr;
-		int r = buffered_pread(&mrr, sizeof(mrr), startPtr.off + sizeof(rh));
+		buffered_pread(&mrr, sizeof(mrr), startPtr.off + sizeof(rh));
 		expression_result val;
 		unsigned long b[2];
 		memset(b, 0, sizeof(b));
-		r = buffered_pread(b, rh.size - sizeof(mrr) - sizeof(rh),
-				   startPtr.off + sizeof(rh) + sizeof(mrr));
+		buffered_pread(b, rh.size - sizeof(mrr) - sizeof(rh),
+			       startPtr.off + sizeof(rh) + sizeof(mrr));
 		val.lo = b[0];
 		val.hi = b[1];
 		return new LogRecordLoad(tid,
@@ -148,15 +145,14 @@ skip:
 	}
 	case RECORD_mem_write: {
 		mem_write_record<unsigned long> mwr;
-		int r = buffered_pread(&mwr, sizeof(mwr), startPtr.off + sizeof(rh));
+		buffered_pread(&mwr, sizeof(mwr), startPtr.off + sizeof(rh));
 		expression_result val;
 		unsigned long b[2];
 		memset(b, 0, sizeof(b));
-		r = buffered_pread(b, rh.size - sizeof(mwr) - sizeof(rh),
-				   startPtr.off + sizeof(rh) + sizeof(mwr));
+		buffered_pread(b, rh.size - sizeof(mwr) - sizeof(rh),
+			       startPtr.off + sizeof(rh) + sizeof(mwr));
 		val.lo = b[0];
 		val.hi = b[1];
-		(void)r;
 		return new LogRecordStore(tid,
 					  rh.size - sizeof(mwr) - sizeof(rh),
 					  mwr.ptr,
@@ -174,16 +170,14 @@ skip:
 
 	case RECORD_signal: {
 		signal_record<unsigned long> sr;
-		int r = buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(&sr, sizeof(sr), startPtr.off + sizeof(rh));
 		return new LogRecordSignal(tid, sr.rip, sr.signo, sr.err,
-							  sr.virtaddr);
+					   sr.virtaddr);
 	}
 		
 	case RECORD_allocate_memory: {
 		allocate_memory_record<unsigned long> amr;
-		int r = buffered_pread(&amr, sizeof(amr), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(&amr, sizeof(amr), startPtr.off + sizeof(rh));
 		return new LogRecordAllocateMemory(tid,
 								  amr.start,
 								  amr.size,
@@ -192,27 +186,23 @@ skip:
 	}
 	case RECORD_initial_registers: {
 		VexGuestAMD64State regs;
-		int r = buffered_pread(&regs, sizeof(regs), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(&regs, sizeof(regs), startPtr.off + sizeof(rh));
 		return new LogRecordInitialRegisters(tid, regs);
 	}
 	case RECORD_initial_brk: {
 		initial_brk_record<unsigned long> ibr;
-		int r = buffered_pread(&ibr, sizeof(ibr), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(&ibr, sizeof(ibr), startPtr.off + sizeof(rh));
 		return new LogRecordInitialBrk(tid, ibr.initial_brk);
 	}
 	case RECORD_initial_sighandlers: {
 		initial_sighandlers_record<unsigned long> isr;
-		int r = buffered_pread(&isr, sizeof(isr), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(&isr, sizeof(isr), startPtr.off + sizeof(rh));
 		return new LogRecordInitialSighandlers(tid, isr.handlers);
 	}
 	case RECORD_vex_thread_state_1: {
 		vex_thread_state_record_1<unsigned long> *vtsr;
 		vtsr = (vex_thread_state_record_1<unsigned long> *)alloca(rh.size - sizeof(rh));
-		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		expression_result_array era;
 		unsigned sz = (rh.size - sizeof(rh) - sizeof(*vtsr)) / 16;
 		era.setSize(sz);
@@ -226,8 +216,7 @@ skip:
 	case RECORD_vex_thread_state_2: {
 		vex_thread_state_record_2<unsigned long> *vtsr;
 		vtsr = (vex_thread_state_record_2<unsigned long> *)alloca(rh.size - sizeof(rh));
-		int r = buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
-		(void)r;
+		buffered_pread(vtsr, rh.size - sizeof(rh), startPtr.off + sizeof(rh));
 		expression_result_array era;
 		unsigned sz = (rh.size - sizeof(rh) - sizeof(*vtsr)) / 16;
 		era.setSize(sz);

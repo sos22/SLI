@@ -425,18 +425,6 @@ void AddressSpace::dumpSnapshot(LogWriter *lw) const
 	}
 }
 
-void
-AddressSpace::writeLiteralMemory(unsigned long start,
-				      unsigned size,
-				      const unsigned char *content)
-{
-	unsigned long *c = (unsigned long *)malloc(sizeof(unsigned long) * size);
-	for (unsigned x = 0; x < size; x++)
-		c[x] = content[x];
-	writeMemory(start, size, c, true, NULL);
-	free(c);
-}
-
 char *
 AddressSpace::readString(unsigned long start, Thread *thr)
 {
@@ -460,22 +448,6 @@ AddressSpace::readString(unsigned long start, Thread *thr)
 		}
 	}
 	return buf;
-}
-
-int
-compare_ait_buffer_char_buffer(const unsigned long *buffer,
-			       const char *bytes,
-			       size_t s)
-{
-	for (unsigned x = 0; x < s; x++) {
-		unsigned long b = buffer[x];
-		unsigned long b2 = ((unsigned char *)bytes)[x];
-		if (b < b2)
-			return -1;
-		else if (b > b2)
-			return 1;
-	}
-	return 0;
 }
 
 static unsigned long

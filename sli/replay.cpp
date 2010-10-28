@@ -130,34 +130,7 @@ InterpretResult LoadEvent::fake(MachineState *ms, LogRecord **lr)
 ThreadEvent *InstructionEvent::replay(LogRecord *lr, MachineState **ms,
 						bool &consumedRecord, LogReaderPtr)
 {
-#if 0
-	LogRecordFootstep *lrf = dynamic_cast<LogRecordFootstep *>(lr);
-	if (!lrf)
-		throw ReplayFailedException("wanted a footstep, got %s",
-					    lr->name());
-        if (!allowRipMismatch && rip != lrf->rip)
-		printf("ReplayFailedBadRip(%lx, %lx)", rip, lrf->rip);
-#define PASTE(x, y) x ## y
-#define PASTE2(x, y) PASTE(x, y)
-#define STRING(x) #x
-#define STRING2(x) STRING(x)
-#define FR_REG_NAME(x) PASTE2(PASTE2(FOOTSTEP_REG_, x), _NAME)
-#define CHECK_REGISTER(x)						\
-	do {                                                            \
-		if (reg ## x != lrf-> reg ## x)			\
-			printf("ReplayFailedBadRegister("		\
-			       STRING2( FR_REG_NAME(x))", %lx, %lx)",	\
-			       reg ## x,				\
-			       lrf-> reg ## x);			\
-	} while (0)
-       CHECK_REGISTER(0);
-       CHECK_REGISTER(1);
-       CHECK_REGISTER(2);
-       CHECK_REGISTER(3);
-       CHECK_REGISTER(4);
-#else
        consumedRecord = false;
-#endif
        return NULL;
 }
 
@@ -165,13 +138,8 @@ ThreadEvent *InstructionEvent::replay(LogRecord *lr, MachineState **ms,
 InterpretResult InstructionEvent::fake(MachineState *ms,
 					    LogRecord **lr)
 {
-#if 0
-	if (lr)
-		*lr = new LogRecordFootstep(this->tid, rip, reg0, reg1, reg2, reg3, reg4);
-#else
 	if (lr)
 		*lr = NULL;
-#endif
 	return InterpretResultContinue;
 }
 
