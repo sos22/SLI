@@ -464,23 +464,6 @@ AddressSpace::writeLiteralMemory(unsigned long start,
 	free(c);
 }
 
-void
-AddressSpace::addVsyscalls()
-{
-#if 0
-	allocateMemory(0xFFFFFFFFFF600000ul,
-		       0x1000ul,
-		       VAMap::Protection(true, false, true),
-		       VAMap::AllocFlags(false));
-	writeLiteralMemory(0xFFFFFFFFFF600000,
-			   redirect_end - redirect_vgettimeofday,
-			   redirect_vgettimeofday);
-	writeLiteralMemory(0xFFFFFFFFFF600400,
-			   redirect_vgettimeofday - redirect_vtime,
-			   redirect_vtime);
-#endif
-}
-
 char *
 AddressSpace::readString(unsigned long start, Thread *thr)
 {

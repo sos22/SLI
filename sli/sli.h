@@ -1622,8 +1622,6 @@ public:
 	AddressSpace *dupeSelf() const;
 	void visit(HeapVisitor &hv);
 
-	void addVsyscalls();
-
 	void dumpBrkPtr(LogWriter *lw) const;
 	void dumpSnapshot(LogWriter *lw) const;
 

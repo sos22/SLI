@@ -87,8 +87,6 @@ MachineState::initialMachineState(VexPtr<LogReader > &lf,
 		ptr = nextPtr;
 	}
 
-	as->addVsyscalls();
-
 	for (unsigned x = 0; x < work->threads->size(); x++)
 		work->threads->index(x)->snapshotLog.push(
 			Thread::snapshot_log_entry(work, ptr));
