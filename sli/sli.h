@@ -523,13 +523,6 @@ public:
 };
 
 class LogReader : public GarbageCollected<LogReader> {
-public:
-	virtual LogRecord *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const = 0;
-	virtual ~LogReader() {}
-	NAMED_CLASS
-};
-
-class LogFile : public LogReader {
 	int fd;
 	struct _ptr {
 		uint64_t off;
@@ -549,7 +542,7 @@ class LogFile : public LogReader {
 	mutable off_t buffer_start;
 	mutable off_t buffer_end;
 
-	LogFile() {}
+	LogReader() {}
 public:
 	LogReaderPtr mkPtr(uint64_t off, unsigned record_nr) const {
 		LogReaderPtr w;
@@ -559,12 +552,11 @@ public:
 		p->valid = true;
 		return w;
 	}
-	virtual LogRecord *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
-	~LogFile();
-	static LogFile *open(const char *path, LogReaderPtr *initial_ptr);
-	LogFile *truncate(LogReaderPtr eof);
+	LogRecord *read(LogReaderPtr startPtr, LogReaderPtr *outPtr) const;
+	~LogReader();
+	static LogReader *open(const char *path, LogReaderPtr *initial_ptr);
+	LogReader *truncate(LogReaderPtr eof);
 	void visit(HeapVisitor &hv){}
-	void destruct() { this->~LogFile(); }
 	NAMED_CLASS
 };
 

@@ -18,7 +18,7 @@ main(int argc, char *argv[])
 
 	LogReaderPtr ptr;
 
-	VexPtr<LogFile> lf(LogFile::open(inp, &ptr));
+	VexPtr<LogReader> lf(LogReader::open(inp, &ptr));
 	if (!lf)
 		err(1, "opening %s", inp);
 

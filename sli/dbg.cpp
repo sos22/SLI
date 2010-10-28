@@ -7,10 +7,9 @@ main(int argc, char *argv[])
 	init_sli();
 
 	LogReaderPtr ptr;
-	VexPtr<LogReader> lf(LogFile::open(argv[1], &ptr));
+	VexPtr<LogReader> lf(LogReader::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
-	VexGcRoot((void **)&lf, "lf");
 
 	VexPtr<MachineState> ms_base(MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC));
 

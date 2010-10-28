@@ -985,7 +985,7 @@ main(int argc, char *argv[])
 	   changes while you're trying to fix it that it's not worth
 	   it. */
 	LogReaderPtr ptr;
-	VexPtr<LogReader> lf(LogFile::open(argv[1], &ptr));
+	VexPtr<LogReader> lf(LogReader::open(argv[1], &ptr));
 	if (!lf)
 		err(1, "opening %s", argv[1]);
 	MachineState *ms = MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC);

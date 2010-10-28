@@ -4540,7 +4540,7 @@ main(int argc, char *argv[])
 	init_sli();
 
 	LogReaderPtr ptr;
-	VexPtr<LogReader > lf(LogFile::open(argv[1], &ptr));
+	VexPtr<LogReader > lf(LogReader::open(argv[1], &ptr));
 	struct timeval start_read_initial_snapshot;
 	gettimeofday(&start_read_initial_snapshot, NULL);
 	VexPtr<MachineState > ms(MachineState::initialMachineState(lf, ptr, &ptr, ALLOW_GC));

@@ -11,35 +11,35 @@ typedef unsigned char Bool;
 
 typedef struct sigaction sigaction_t;
 
-LogFile *LogFile::open(const char *path, LogReaderPtr *initial_ptr)
+LogReader *LogReader::open(const char *path, LogReaderPtr *initial_ptr)
 {
 	int fd;
 	fd = ::open(path, O_RDONLY);
 	if (fd < 0)
 		return NULL;
 
-	LogFile *work = new LogFile();
+	LogReader *work = new LogReader();
 	work->fd = fd;
 	*initial_ptr = work->mkPtr(0, 0);
 	return work;
 }
 
-LogFile *LogFile::truncate(LogReaderPtr eof)
+LogReader *LogReader::truncate(LogReaderPtr eof)
 {
-	LogFile *work;
-	work = new LogFile();
+	LogReader *work;
+	work = new LogReader();
 	work->forcedEof = unwrapPtr(eof);
 	work->fd = fd;
 	return work;
 }
 
-LogFile::~LogFile()
+LogReader::~LogReader()
 {
 	close(fd);
 }
 
 ssize_t
-LogFile::buffered_pread(void *output, size_t output_size, off_t start_offset) const
+LogReader::buffered_pread(void *output, size_t output_size, off_t start_offset) const
 {
 	off_t end_offset = start_offset + output_size;
 	off_t next_offset = start_offset;
@@ -77,7 +77,7 @@ LogFile::buffered_pread(void *output, size_t output_size, off_t start_offset) co
 	return next_offset - start_offset;
 }
 
-LogRecord *LogFile::read(LogReaderPtr _startPtr, LogReaderPtr *_nextPtr) const
+LogRecord *LogReader::read(LogReaderPtr _startPtr, LogReaderPtr *_nextPtr) const
 {
 	struct record_header rh;
 	_ptr startPtr = unwrapPtr(_startPtr);
