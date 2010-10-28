@@ -215,8 +215,6 @@ public:
 	bool crashed;
 	bool idle;
 
-	bool cannot_make_progress;
-
 	IRSB *currentIRSB;
 	unsigned long currentIRSBRip;
 	expression_result_array temporaries;
@@ -254,11 +252,9 @@ public:
 	/* mutable because we have to nuke it from dupeSelf. */
 	mutable ring_buffer<snapshot_log_entry, 2> snapshotLog;
 
-	bool runnable() const { return !exitted && !crashed && !cannot_make_progress; }
+	bool runnable() const { return !exitted && !crashed; }
 
 	void pretty_print() const;
-private:
-	//bool allowRipMismatch;
 public:
 	static ThreadEvent *runToEvent(VexPtr<Thread > &ths,
 						      VexPtr<MachineState > &ms,
