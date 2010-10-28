@@ -243,8 +243,6 @@ class PMap;
 class SignalHandlers;
 class ThreadEvent;
 class LogWriter;
-class MemoryAccessLoad;
-class MemoryAccessStore;
 
 class LogRecordFootstep;
 class LogRecordInitialRegisters;
@@ -975,7 +973,6 @@ public:
 };
 
 class LoadEvent : public ThreadEvent {
-	friend class MemoryAccessLoad;
 	IRTemp tmp;
 public:
 	unsigned long addr;
@@ -1002,7 +999,6 @@ public:
 };
 
 class StoreEvent : public ThreadEvent {
-	friend class MemoryAccessStore;
 public:
 	unsigned long addr;
 	unsigned size;
@@ -1208,29 +1204,9 @@ visit_container(t &vector, HeapVisitor &hv)
 		hv(*it);
 }
 
-class MemoryAccess : public GarbageCollected<MemoryAccess>, public Named {
-public:
-	EventTimestamp when;
-	unsigned long addr;
-	unsigned size;
-	MemoryAccess(EventTimestamp _when, unsigned long _addr, unsigned _size)
-		: when(_when),
-		  addr(_addr),
-		  size(_size)
-	{
-		assert_gc_allocated(this);
-	}
-	virtual bool isLoad() = 0;
-	void dump() const { printf("%s\n", name()); }
-	void visit(HeapVisitor &hv) { }
-	void destruct() {}
-	NAMED_CLASS
-};
-
 class LogRecordLoad : public LogRecord {
 	friend class LoadEvent;
 	friend class CasEvent;
-	friend class MemoryAccessLoad;
 	unsigned size;
 public:
 	unsigned long ptr;
@@ -1253,20 +1229,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-};
-
-class MemoryAccessLoad : public MemoryAccess {
-protected:
-	virtual char *mkName() const {
-		return my_asprintf("%d: Load(%x)", this->when.tid._tid(),
-				   this->size);
-	}
-public:
-	MemoryAccessLoad(const class LoadEvent &evt)
-		: MemoryAccess(evt.when, evt.addr, evt.size)
-	{
-	}
-	virtual bool isLoad() { return true; }
 };
 
 class LogRecordStore : public LogRecord {
@@ -1295,21 +1257,6 @@ public:
 	}
 	void *marshal(unsigned *size) const;
 	unsigned marshal_size() const;
-};
-
-class MemoryAccessStore : public MemoryAccess {
-protected:
-	virtual char *mkName() const {
-		return my_asprintf("%d: Store(%x)",
-				   this->when.tid._tid(),
-				   this->size);
-	}
-public:
-	MemoryAccessStore(const class StoreEvent &evt)
-		: MemoryAccess(evt.when, evt.addr, evt.size)
-	{
-	}
-	virtual bool isLoad() { return false; }
 };
 
 class LogRecordFootstep : public LogRecord {
