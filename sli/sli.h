@@ -776,12 +776,6 @@ public:
 		VexPtr<EventRecorder> er(NULL);
 		replayLogfile(lf, startingPoint, tok, endingPoint, log, er);
 	}
-
-	void runToEvent(EventTimestamp evt,
-			VexPtr<LogReader > &lf,
-			LogReaderPtr startingPoint,
-			GarbageCollectionToken t,
-			LogReaderPtr *endPoint = NULL);
 };
 
 class LogWriter : public GarbageCollected<LogWriter> {

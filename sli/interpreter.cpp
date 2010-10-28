@@ -1878,56 +1878,6 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 	printf("Done replay, counter %ld\n", event_counter);
 }
 
-void Interpreter::runToEvent(EventTimestamp end,
-				  VexPtr<LogReader> &lf,
-				  LogReaderPtr ptr,
-				  GarbageCollectionToken t, LogReaderPtr *eof)
-{
-	LogReaderPtr ptr2 = ptr;
-	VexPtr<LogRecord> lr;
-	/* Mostly a debugging aide */
-	volatile static unsigned long event_counter;
-
-	bool finished = false;
-	while (!finished) {
-		event_counter++;
-		printf("event %ld\n", event_counter);
-
-		if (!lr)
-			lr = lf->read(ptr, &ptr);
-		if (!lr)
-			break;
-
-		VexPtr<Thread > thr(currentState->findThread(lr->thread()));
-		assert(thr->runnable());
-		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t);
-
-		while (evt && !finished) {
-			if (evt->when == end)
-				finished = true;
-			bool consumed = true;
-			evt = evt->replay(lr, &currentState.get(), consumed, ptr);
-			if (consumed) {
-				lr = NULL;
-				if (eof)
-					*eof = ptr;
-				ptr2 = ptr;
-			}
-			if (!finished && evt && !lr)
-				lr = lf->read(ptr, &ptr);
-		}
-
-		/* Memory records are special and should always be
-		   processed eagerly. */
-		VexPtr<AddressSpace > as(currentState->addressSpace);
-	        VexPtr<LogWriter> dummy(NULL);
-		process_memory_records(as, lf, ptr, &ptr, dummy, t);
-				if (eof)
-					*eof = ptr;
-				ptr2 = ptr;
-	}
-}
-
 #define MK_INTERPRETER(t)
 
 
