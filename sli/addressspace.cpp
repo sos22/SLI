@@ -115,8 +115,7 @@ AddressSpace::writeMemory(unsigned long _start, unsigned size,
 }
 
 expression_result
-AddressSpace::load(EventTimestamp when,
-		   unsigned long start, unsigned size,
+AddressSpace::load(unsigned long start, unsigned size,
 		   bool ignore_protection,
 		   Thread *thr)
 {
@@ -125,7 +124,7 @@ AddressSpace::load(EventTimestamp when,
 	memset(b, 0, sizeof(unsigned long) * size);
 	for (unsigned x = 0; x < size; x++)
 		new (&b[x]) unsigned long();
-	EventTimestamp sto = readMemory(start, size, b, ignore_protection, thr, &storeAddr);
+	readMemory(start, size, b, ignore_protection, thr, &storeAddr);
 	expression_result res;
 	res.lo = 0ul;
 	res.hi = 0ul;
@@ -166,7 +165,7 @@ AddressSpace::load(EventTimestamp when,
 }
 
 void
-AddressSpace::store(EventTimestamp when, unsigned long start, unsigned size,
+AddressSpace::store(unsigned long start, unsigned size,
 		    const expression_result &val, bool ignore_protection,
 		    Thread *thr)
 {
@@ -214,12 +213,11 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	return tt;
 }
 
-EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
-					unsigned long *contents, bool ignore_protection,
-					Thread *thr,
-					unsigned long *storeAddr)
+void AddressSpace::readMemory(unsigned long _start, unsigned size,
+			      unsigned long *contents, bool ignore_protection,
+			      Thread *thr,
+			      unsigned long *storeAddr)
 {
-	EventTimestamp when;
 	unsigned long start = _start;
 	if (storeAddr)
 		*storeAddr = start;
@@ -236,8 +234,8 @@ EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			when = mc->read(mc_start, contents, to_copy_this_time,
-					storeAddr);
+			mc->read(mc_start, contents, to_copy_this_time,
+				 storeAddr);
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
@@ -254,7 +252,6 @@ EventTimestamp AddressSpace::readMemory(unsigned long _start, unsigned size,
 			throw BadMemoryException<unsigned long>(false, _start, size);
 		}
 	}
-	return when;
 }
 
 bool AddressSpace::isAccessible(unsigned long _start, unsigned size,

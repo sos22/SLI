@@ -61,7 +61,7 @@ ThreadEvent *StoreEvent::replay(LogRecord *lr, MachineState **ms,
 	if (data != lrs->value)
 		printf("WARNING: memory mismatch on store to %lx: %s != %s\n",
 		       addr, data.name(), lrs->value.name());
-	(*ms)->addressSpace->store(this->when, lrs->ptr, lrs->size, lrs->value, false, thr);
+	(*ms)->addressSpace->store(lrs->ptr, lrs->size, lrs->value, false, thr);
 	thr->nrAccesses++;
 
 	return NULL;
@@ -74,7 +74,7 @@ InterpretResult StoreEvent::fake(MachineState *ms,
 	Thread *thr = ms->findThread(this->when.tid);
 	if (lr)
 		*lr = new LogRecordStore(thr->tid, size, addr, data);
-	ms->addressSpace->store(this->when, addr, size, data, false, thr);
+	ms->addressSpace->store(addr, size, data, false, thr);
 	thr->nrAccesses++;
 	return InterpretResultContinue;
 }
@@ -96,7 +96,7 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 			       lrl->size, lrl->ptr,
 			       size, addr);
 		expression_result buf =
-			(*ms)->addressSpace->load(this->when, addr, size, false, thr);
+			(*ms)->addressSpace->load(addr, size, false, thr);
 		if (buf != lrl->value &&
 		    addr < 0xFFFFFFFFFF600000)
 			printf("WARNING: memory mismatch on load from %lx (%s != %s)",
@@ -116,7 +116,7 @@ InterpretResult LoadEvent::fake(MachineState *ms, LogRecord **lr)
 	Thread *thr = ms->findThread(this->when.tid);
 	if (ms->addressSpace->isReadable(addr, size, thr)) {
 		expression_result buf =
-			ms->addressSpace->load(this->when, addr, size, false, thr);
+			ms->addressSpace->load(addr, size, false, thr);
 		thr->temporaries[tmp] = buf;
 		if (lr)
 			*lr = new LogRecordLoad(thr->tid, size, addr, buf);
@@ -206,7 +206,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
 
         expression_result seen;
 	Thread *thr = (*ms)->findThread(this->when.tid);
-        seen = (*ms)->addressSpace->load(this->when, addr.lo, size, false, thr);
+        seen = (*ms)->addressSpace->load(addr.lo, size, false, thr);
         if (seen != lrl->value)
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
 					    addr.lo);
@@ -233,7 +233,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 
         expression_result seen;
 	Thread *thr = ms->findThread(this->when.tid);
-        seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
+        seen = ms->addressSpace->load(addr.lo, size, false, thr);
         if (seen != lrl->value)
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
 					    addr.lo);
@@ -261,7 +261,7 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState *ms,
 		throw ReplayFailedException("memory mismatch on CAS to %lx",
 					    addr.lo);
 
-	ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
+	ms->addressSpace->store(addr.lo, size, data, false, thr);
 
 	return NULL;
 }
@@ -271,12 +271,12 @@ InterpretResult CasEvent::fake(MachineState *ms, LogRecord **lr1,
 				    LogRecord **lr2)
 {
 	Thread *thr = ms->findThread(this->when.tid);
-	expression_result seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
+	expression_result seen = ms->addressSpace->load(addr.lo, size, false, thr);
 	if (lr1)
 		*lr1 = new LogRecordLoad(this->when.tid, size, addr.lo, seen);
 	thr->temporaries[dest] = seen;
 	if (seen == expected) {
-		ms->addressSpace->store(this->when, addr.lo, size, data, false, thr);
+		ms->addressSpace->store(addr.lo, size, data, false, thr);
 		if (lr2)
 			*lr2 = new LogRecordStore(this->when.tid, size, addr.lo, data);
 	} else if (lr2)
@@ -404,7 +404,7 @@ CasEvent::fuzzyReplay(VexPtr<MachineState > &ms,
 {
         expression_result seen;
 	Thread *thr = ms->findThread(this->when.tid);
-        seen = ms->addressSpace->load(this->when, addr.lo, size, false, thr);
+        seen = ms->addressSpace->load(addr.lo, size, false, thr);
 	thr->temporaries[dest] = seen;
         if (seen != expected)
 		return NULL;

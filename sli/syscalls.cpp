@@ -267,11 +267,7 @@ replay_syscall(const LogRecordSyscall *lrs,
 			struct expression_result v;
 			v.lo = 0ul;
 			try {
-				addrSpace->store(EventTimestamp(thr->tid,
-								thr->nrEvents,
-								mach->nrEvents,
-								thr->regs.rip()),
-						 thr->clear_child_tid, 4, v);
+				addrSpace->store(thr->clear_child_tid, 4, v);
 			} catch (BadMemoryException<unsigned long> &e) {
 				/* Kernel ignores errors clearing the
 				   child TID pointer, and so we do
@@ -532,8 +528,7 @@ InterpretResult SyscallEvent::fake(MachineState *ms, LogRecord **lr)
 		switch (args[1] & FUTEX_CMD_MASK) {
 		case FUTEX_WAIT: {
 			expression_result m =
-				ms->addressSpace->load(this->when,
-						       args[0],
+				ms->addressSpace->load(args[0],
 						       4,
 						       false,
 						       thr);

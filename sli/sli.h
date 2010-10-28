@@ -1376,7 +1376,7 @@ public:
 	{
 		writeMemory(rec.start, rec.size, rec.contents, true, NULL);
 	}
-	void store(EventTimestamp when, unsigned long start, unsigned size, const expression_result &val,
+	void store(unsigned long start, unsigned size, const expression_result &val,
 		   bool ignore_protection = false,
 		   Thread *thr = NULL);
 	void writeMemory(unsigned long start, unsigned size,
@@ -1385,15 +1385,15 @@ public:
 	bool copyToClient(unsigned long start, unsigned size, const void *source);
 	bool copyFromClient(unsigned long start, unsigned size, void *dest);
 	void writeLiteralMemory(unsigned long start, unsigned size, const unsigned char *content);
-	expression_result load(EventTimestamp when, unsigned long start, unsigned size,
+	expression_result load(unsigned long start, unsigned size,
 			       bool ignore_protection = false,
 			       Thread *thr = NULL);
 	template <typename t> const t fetch(unsigned long addr,
 					    Thread *thr);
-	EventTimestamp readMemory(unsigned long start, unsigned size,
-				  unsigned long *contents, bool ignore_protection,
-				  Thread *thr,
-				  unsigned long *storeAddr = NULL);
+	void readMemory(unsigned long start, unsigned size,
+			unsigned long *contents, bool ignore_protection,
+			Thread *thr,
+			unsigned long *storeAddr = NULL);
 	bool isAccessible(unsigned long start, unsigned size,
 			  bool isWrite, Thread *thr);
 	bool isWritable(unsigned long start, unsigned size,
