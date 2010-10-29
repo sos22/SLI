@@ -577,22 +577,6 @@ __LibVEX_Alloc_Ptr_Array(unsigned long len)
 }
 
 
-void __visit_vector(void *_ctxt, HeapVisitor &hv)
-{
-	LibvexVector<void *> *ctxt = (LibvexVector<void *>*)_ctxt;
-	unsigned x;
-	for (x = 0; x < ctxt->sz; x++)
-		hv(ctxt->items[x]);
-}
-VexAllocType LibvexVectorType = {
-nbytes: sizeof(LibvexVector<void *>),
-relocate: NULL,
-gc_visit: __visit_vector,
-destruct: NULL,
-name: "LibvexVector"
-};
-
-
 static void
 sanity_check_arena(struct arena *a)
 {

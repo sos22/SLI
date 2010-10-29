@@ -1,7 +1,5 @@
 #include "sli.h"
 
-template class LibvexVector<Thread>;
-
 const ThreadId ThreadId::invalidTid;
 
 RegisterSet::RegisterSet(VexGuestAMD64State const&r)

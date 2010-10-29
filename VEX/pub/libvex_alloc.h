@@ -163,67 +163,6 @@ template <typename t> VexAllocType VexGcVisitor<t>::type = {
 	"vex_gc_visitor"
 };
 
-extern VexAllocType LibvexVectorType;
-
-template <typename content>
-class LibvexVector {
-	friend void __visit_vector(void *_ctxt, HeapVisitor &hv);
-	unsigned sz;
-	unsigned maxSz;
-	content **items;
-
-	/* DNI */
-	LibvexVector();
-	~LibvexVector();
-public:
-	unsigned size() const { return sz; }
-	content *index(unsigned idx) {
-		if (idx >= sz)
-			abort();
-		return items[idx];
-	}
-	void set(unsigned idx, content *x) {
-		assert(idx < sz);
-		items[idx] = x;
-	}
-	void push(content *v) {
-		sz++;
-		if (sz > maxSz) {
-			items = (content **)realloc(items, sizeof(content *) * sz);
-			maxSz = sz;
-		}
-		items[sz-1] = v;
-	}
-	content *pop() {
-		assert(sz != 0);
-		sz--;
-		return items[sz];
-	}
-	content *pop_first() {
-		assert(sz != 0);
-		content *r = items[0];
-		sz--;
-		memmove(items, items + 1, sizeof(items[0]) * sz);
-		return r;
-	}
-
-	/* This gets a leading underscore because it throws away the
-	   existing content of the array. */
-	void _set_size(unsigned new_size) {
-		free(items);
-		items = (content **)malloc(sizeof(content *) * new_size);
-		memset(items, 0, sizeof(content *) * new_size);
-		maxSz = sz = new_size;
-	}
-
-	static LibvexVector<content> *empty() {
-		struct libvex_alloc_type *t = __LibVEX_Alloc(&LibvexVectorType);
-		LibvexVector<content> *t2 = (LibvexVector<content> *)t;
-		memset(t2, 0, sizeof(*t2));
-		return t2;
-	}
-};
-
 template <typename underlying>
 void visit_object(void *_ctxt, HeapVisitor &hv)
 {
