@@ -72,31 +72,6 @@ struct libvex_allocation_site {
 	unsigned flags;
 };
 
-#define DEFINE_VEX_TYPE(t) VexAllocType __vex_type_ ## t = { sizeof(t), NULL, NULL, NULL, #t }
-#define __DEFINE_VEX_TYPE_NO_DESTRUCT(__t, __visit)			\
-  VexAllocType __vex_type_ ## __t = {				        \
-    sizeof(__t),							\
-    NULL,							        \
-    (void (*)(void *, HeapVisitor &visit))__visit,			\
-    NULL,								\
-    # __t								\
-  }
-#define DEFINE_VEX_TYPE_NO_DESTRUCT(__t, __visit)			\
-	static void __visit_ ## __t(__t *ths, HeapVisitor &visit)	\
-       __visit								\
-  __DEFINE_VEX_TYPE_NO_DESTRUCT(__t, __visit_ ## __t)
-
-#define DECLARE_VEX_TYPE(t)						\
-  extern VexAllocType __vex_type_ ## t;					\
-  static inline t *LibVEX_Alloc_ ## t()					\
-  {									\
-	  return (t *)__LibVEX_Alloc(&main_heap, &__vex_type_ ## t);	\
-  }									\
-  static inline t **LibVEX_Alloc_Array_ ## t(unsigned nr)		\
-  {									\
-	  return (t **)__LibVEX_Alloc_Ptr_Array(&main_heap, nr);	\
-  }
-
 struct libvex_alloc_type;
 
 void assert_gc_allocated(const void *ptr);
