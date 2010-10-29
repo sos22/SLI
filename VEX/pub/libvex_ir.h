@@ -1717,14 +1717,14 @@ extern void ppIRStmt ( IRStmt* );
    them.
 */
 typedef
-   struct {
+   struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv> {
       IRType* types;
       Int     types_size;
       Int     types_used;
+      void visit(HeapVisitor &hv) { hv(types); }
+      NAMED_CLASS
    }
    IRTypeEnv;
-
-DECLARE_VEX_TYPE(IRTypeEnv)
 
 /* Obtain a new IRTemp */
 extern IRTemp newIRTemp ( IRTypeEnv*, IRType );

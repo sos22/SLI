@@ -139,7 +139,6 @@ _IRStmt::visit(HeapVisitor &visit)
    }
 }
 
-DEFINE_VEX_TYPE_NO_DESTRUCT(IRTypeEnv, { visit(ths->types); });
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRSB, {
     visit(ths->tyenv);
     visit(ths->stmts);
@@ -1401,7 +1400,7 @@ IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst ) {
 
 IRTypeEnv* emptyIRTypeEnv ( void )
 {
-   IRTypeEnv* env   = LibVEX_Alloc_IRTypeEnv();
+   IRTypeEnv* env   = new IRTypeEnv();
    env->types       = (IRType *)LibVEX_Alloc_Bytes(8 * sizeof(IRType));
    env->types_size  = 8;
    env->types_used  = 0;
@@ -1610,7 +1609,7 @@ IRStmt* deepCopyIRStmt ( IRStmt* s )
 IRTypeEnv* deepCopyIRTypeEnv ( IRTypeEnv* src )
 {
    Int        i;
-   IRTypeEnv* dst = LibVEX_Alloc_IRTypeEnv();
+   IRTypeEnv* dst = new IRTypeEnv();
    dst->types_size = src->types_size;
    dst->types_used = src->types_used;
    dst->types = (IRType *)LibVEX_Alloc_Bytes(dst->types_size * sizeof(IRType));
