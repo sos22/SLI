@@ -12,7 +12,7 @@
 
 /* The heap sanity checks are expensive enough that we're better off
    leaving them off even during normal debug runs. */
-#define NDEBUG
+//#define NDEBUG
 
 /* If we're given an opportunity to garbage collect and the heap is
    bigger than this then we always take it. */
@@ -77,6 +77,7 @@ struct arena {
 static struct allocation_header *raw_alloc(Heap *h, VexAllocType *t, unsigned long size);
 
 Heap main_heap;
+extern Heap ir_heap;
 
 static void *
 header_to_alloc(struct allocation_header *ah)
@@ -193,7 +194,7 @@ _LibVEX_free(Heap *h, const void *_ptr)
 	}		
 }
 
-void
+static void
 LibVEX_gc(Heap *h, GarbageCollectionToken t)
 {
 	struct arena *old_arena;
@@ -291,21 +292,40 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 	LibVEX_alloc_sanity_check(h);
 
 	printf("Major GC finished; %ld bytes in heap\n", h->heap_used);
+}
 
-	if (h->heap_used >= GC_MAX_SIZE) {
+void
+LibVEX_gc(GarbageCollectionToken t)
+{
+	/* Force a full GC of both heaps */
+	LibVEX_gc(&main_heap, t);
+	LibVEX_gc(&ir_heap, t);
+}
+
+void
+LibVEX_maybe_gc(GarbageCollectionToken t)
+{
+	/* The main heap points into the IR heap, but not vice versa.
+	   GC'ing the IR heap is generally pretty productive, but
+	   GC'ing the main heap usually isn't all that great.  We
+	   therefore GC the IR heap first, and then if we're still
+	   close to limit GC the main heap.  If we're still over the
+	   limit after that we try the IR heap again, and then finally
+	   give up. */
+	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE)
+		LibVEX_gc(&ir_heap, t);
+	if (main_heap.heap_used >= GC_MAX_SIZE / 2)
+		LibVEX_gc(&main_heap, t);
+	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE)
+		LibVEX_gc(&ir_heap, t);
+	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE) {
 		/* We're pretty much boned at this point: every
 		   vexSetAllocModeTEMP_and_clear will trigger a full
 		   GC, and performance will go through the floor. */
 		extern void dbg_break(const char *msg, ...);
-		dbg_break("Heap is enormous (%ld bytes) after a full garbage collect!\n",
-			  h->heap_used);
+		dbg_break("Heap is enormous (%ld bytes main, %ld bytes IR) after a full garbage collect!\n",
+			  main_heap.heap_used, ir_heap.heap_used);
 	}
-}
-
-void LibVEX_maybe_gc(Heap *h, GarbageCollectionToken t)
-{
-	if (h->heap_used >= GC_MAX_SIZE)
-		LibVEX_gc(h, t);
 }
 
 static struct allocation_header *
@@ -400,12 +420,12 @@ LibVEX_realloc(Heap *h, void *ptr, unsigned long new_size)
 }
 
 void
-vexRegisterGCRoot(Heap *h, void **w, const char *name)
+vexRegisterGCRoot(Heap *h, void **w)
 {
-	vassert(nr_gc_roots < NR_GC_ROOTS);
+	assert(h->nr_gc_roots < NR_GC_ROOTS);
 	h->gc_roots[h->nr_gc_roots] = w;
-	h->gc_root_names[h->nr_gc_roots] = name;
 	h->nr_gc_roots++;
+	assert(h->nr_gc_roots < NR_GC_ROOTS);
 }
 
 void
@@ -414,10 +434,12 @@ vexUnregisterGCRoot(Heap *h, void **w)
 	unsigned x;
 	if (*w)
 		assert_gc_allocated(*w);
+	assert(h->nr_gc_roots < NR_GC_ROOTS);
 	for (x = 0; x < h->nr_gc_roots; x++) {
 		if (h->gc_roots[x] == w) {
+			assert(h->nr_gc_roots < NR_GC_ROOTS);
 			memmove(h->gc_roots + x, h->gc_roots + x + 1, (h->nr_gc_roots - x - 1) * sizeof(h->gc_roots[0]));
-			memmove(h->gc_root_names, h->gc_root_names + x + 1, (h->nr_gc_roots - x - 1) * sizeof(h->gc_root_names[0]));
+			assert(h->nr_gc_roots < NR_GC_ROOTS);
 			h->nr_gc_roots--;
 			return;
 		}
@@ -575,7 +597,6 @@ sanity_check_arena(struct arena *a)
 		assert(ah->magic == ALLOCATION_HEADER_MAGIC);
 		assert(ah->type != NULL);
 		assert(ah->size() <= a->size - offset);
-		assert(!ah->mark());
 		assert(ah->redirection == ah || ah->redirection == NULL);
 	}
 }

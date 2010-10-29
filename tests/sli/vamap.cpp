@@ -125,12 +125,11 @@ main()
 	assert(alf == VAMap::AllocFlags(false));
 
 	printf("Check GC behaviour: VAMap keeps physical addresses live\n");
-	VAPMap *vap = new VAPMap();
+	VexPtr<VAPMap> vap(new VAPMap());
 	vap->vamap = vamap;
 	vap->pmap = pmap;
-	VexGcRoot<> vgc((void **)&vap, "test vamap");
 	
-	LibVEX_gc(&main_heap, ALLOW_GC);
+	LibVEX_gc(ALLOW_GC);
 
 	pmap = vap->pmap;
 	vamap = vap->vamap;

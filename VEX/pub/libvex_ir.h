@@ -50,7 +50,9 @@
 #include "libvex_basictypes.h"
 #include "libvex_alloc.h"
 
-   
+
+extern Heap ir_heap;
+
 /*---------------------------------------------------------------*/
 /*--- High-level IR description                               ---*/
 /*---------------------------------------------------------------*/
@@ -286,7 +288,7 @@ typedef
    IRConst 'c' has c.tag equal to Ico_U32, then it's a 32-bit constant,
    and its value can be accessed with 'c.Ico.U32'. */
 typedef
-   struct _IRConst : public GarbageCollected<_IRConst>{
+struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
       IRConstTag tag;
       union {
          Bool   U1;
@@ -340,7 +342,7 @@ extern Bool eqIRConst ( IRConst*, IRConst* );
 */
 
 typedef
-   struct _IRCallee : public GarbageCollected<_IRCallee>{
+   struct _IRCallee : public GarbageCollected<_IRCallee, &ir_heap>{
       Int    regparms;
       const char* name;
       void*  addr;
@@ -366,7 +368,7 @@ extern void ppIRCallee ( IRCallee* );
    be able to index at run time, so as to be able to describe 
    indexed or rotating register files on the guest. */
 typedef
-   struct _IRRegArray : public GarbageCollected<_IRRegArray> {
+struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
       Int    base;   /* guest state offset of start of indexed area */
       IRType elemTy; /* type of each element in the indexed area */
       Int    nElems; /* number of elements in the indexed area */
@@ -945,7 +947,7 @@ typedef
    struct _IRExpr
    IRExpr;
 
-struct _IRExpr : public GarbageCollected<_IRExpr> {
+struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
    IRExprTag tag;
    union {
       /* Used only in pattern matching within Vex.  Should not be seen
@@ -1322,7 +1324,7 @@ extern void ppIREffect ( IREffect );
 
 
 typedef
-   struct _IRDirty : public GarbageCollected<_IRDirty> {
+struct _IRDirty : public GarbageCollected<_IRDirty, &ir_heap> {
       /* What to call, and details of args/results */
       IRCallee* cee;    /* where to call */
       IRExpr*   guard;  /* :: Ity_Bit.  Controls whether call happens */
@@ -1456,7 +1458,7 @@ extern void ppIRMBusEvent ( IRMBusEvent );
    Hence it is easy to know whether or not the CAS succeeded.
 */
 typedef
-   struct _IRCAS : public GarbageCollected<_IRCAS> {
+struct _IRCAS : public GarbageCollected<_IRCAS, &ir_heap> {
       IRTemp    oldHi;  /* old value of *addr is written here */
       IRTemp    oldLo;
       IREndness end;    /* endianness of the data in memory */
@@ -1523,7 +1525,7 @@ typedef
    pretty-printed with ppIRStmt().
 */
 typedef
-   struct _IRStmt : public GarbageCollected<_IRStmt> {
+struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
       IRStmtTag tag;
       union {
          /* A no-op (usually resulting from IR optimisation).  Can be
@@ -1717,7 +1719,7 @@ extern void ppIRStmt ( IRStmt* );
    them.
 */
 typedef
-   struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv> {
+struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
       IRType* types;
       Int     types_size;
       Int     types_used;
@@ -1750,7 +1752,7 @@ extern void ppIRTypeEnv ( IRTypeEnv* );
    "IRSB" stands for "IR Super Block".
 */
 typedef
-   struct _IRSB : public GarbageCollected<_IRSB> {
+struct _IRSB : public GarbageCollected<_IRSB, &ir_heap> {
       IRTypeEnv* tyenv;
       IRStmt**   stmts;
       Int        stmts_size;

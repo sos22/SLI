@@ -50,6 +50,8 @@
 
 #include "main_util.h"
 
+Heap ir_heap;
+
 void
 IRExpr::visit(HeapVisitor &visit)
 {
@@ -1187,7 +1189,7 @@ IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
    suitable for use as arg lists in clean/dirty helper calls. */
 static IRExpr **alloc_irexpr_array(unsigned nr)
 {
-   return (IRExpr **)__LibVEX_Alloc_Ptr_Array(&main_heap, nr);
+   return (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr);
 }
 
 IRExpr** mkIRExprVec_0 ( void ) {
@@ -1395,7 +1397,7 @@ IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst ) {
 IRTypeEnv* emptyIRTypeEnv ( void )
 {
    IRTypeEnv* env   = new IRTypeEnv();
-   env->types       = (IRType *)LibVEX_Alloc_Bytes(8 * sizeof(IRType));
+   env->types       = (IRType *)__LibVEX_Alloc_Bytes(&ir_heap, 8 * sizeof(IRType), NULL);
    env->types_size  = 8;
    env->types_used  = 0;
    return env;
@@ -1410,7 +1412,7 @@ IRSB* emptyIRSB ( void )
    bb->tyenv      = emptyIRTypeEnv();
    bb->stmts_used = 0;
    bb->stmts_size = 8;
-   bb->stmts      = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&main_heap, bb->stmts_size);
+   bb->stmts      = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, bb->stmts_size);
    bb->next       = NULL;
    bb->jumpkind   = Ijk_Boring;
    return bb;
@@ -1606,7 +1608,7 @@ IRTypeEnv* deepCopyIRTypeEnv ( IRTypeEnv* src )
    IRTypeEnv* dst = new IRTypeEnv();
    dst->types_size = src->types_size;
    dst->types_used = src->types_used;
-   dst->types = (IRType *)LibVEX_Alloc_Bytes(dst->types_size * sizeof(IRType));
+   dst->types = (IRType *)__LibVEX_Alloc_Bytes(&ir_heap, dst->types_size * sizeof(IRType), NULL);
    for (i = 0; i < src->types_used; i++)
       dst->types[i] = src->types[i];
    return dst;
@@ -1618,7 +1620,7 @@ IRSB* deepCopyIRSB ( IRSB* bb )
    IRStmt** sts2;
    IRSB* bb2 = deepCopyIRSBExceptStmts(bb);
    bb2->stmts_used = bb2->stmts_size = bb->stmts_used;
-   sts2 = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&main_heap, bb2->stmts_used);
+   sts2 = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, bb2->stmts_used);
    for (i = 0; i < bb2->stmts_used; i++)
       sts2[i] = deepCopyIRStmt(bb->stmts[i]);
    bb2->stmts    = sts2;
@@ -2022,7 +2024,7 @@ void addStmtToIRSB ( IRSB* bb, IRStmt* st )
 {
    Int i;
    if (bb->stmts_used == bb->stmts_size) {
-     IRStmt** stmts2 = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&main_heap, 2 * bb->stmts_size);
+     IRStmt** stmts2 = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, 2 * bb->stmts_size);
       for (i = 0; i < bb->stmts_size; i++)
          stmts2[i] = bb->stmts[i];
       bb->stmts = stmts2;
@@ -2053,7 +2055,7 @@ IRTemp newIRTemp ( IRTypeEnv* env, IRType ty )
       Int i;
       Int new_size = env->types_size==0 ? 8 : 2*env->types_size;
       IRType* new_types 
-	= (IRType *)LibVEX_Alloc_Bytes(new_size * sizeof(IRType));
+	= (IRType *)__LibVEX_Alloc_Bytes(&ir_heap, new_size * sizeof(IRType), NULL);
       for (i = 0; i < env->types_used; i++)
          new_types[i] = env->types[i];
       env->types      = new_types;

@@ -1388,7 +1388,7 @@ AddressSpace::getIRSBForAddress(unsigned long rip)
 	if (rip == ASSERT_FAILED_ADDRESS)
 		throw ForceFailureException(rip);
 
-	WeakRef<IRSB> *cacheSlot = searchDecodeCache(rip);
+	WeakRef<IRSB, &ir_heap> *cacheSlot = searchDecodeCache(rip);
 	assert(cacheSlot != NULL);
 	IRSB *irsb = cacheSlot->get();
 	if (!irsb) {
@@ -1456,13 +1456,13 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	ths->currentIRSBRip = rip;
 
 	unsigned long _rip = rip;
-	LibVEX_maybe_gc(&main_heap, t);
+	LibVEX_maybe_gc(t);
 
 	IRSB *irsb = addrSpace->getIRSBForAddress(_rip);
 
 	ths->temporaries.setSize(irsb->tyenv->types_used);
 
-	ths->currentIRSB = irsb;
+	ths->currentIRSB.set(irsb);
 	ths->currentIRSBOffset = 0;
 
 	if (loud_mode)

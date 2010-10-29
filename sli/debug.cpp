@@ -479,7 +479,7 @@ gdb_machine_state(const MachineState *_ms)
 
 	/* Force a GC, so as to clear up any mess we had left over
 	 * from the parent. */
-	LibVEX_gc(&main_heap, ALLOW_GC);
+	LibVEX_gc(ALLOW_GC);
 
 	GdbChannel *chan = GdbChannel::accept();
 

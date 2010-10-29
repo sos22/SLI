@@ -15,12 +15,11 @@ public:
 
 #define ALLOW_GC GarbageCollectionToken::GarbageCollectionAllowed()
 
-#define NR_GC_ROOTS 128
+#define NR_GC_ROOTS (65536*8)
 class Heap {
 public:
 	unsigned nr_gc_roots;
 	void **gc_roots[NR_GC_ROOTS];
-	const char *gc_root_names[NR_GC_ROOTS];
 	struct arena *head_arena;
 	struct arena *current_arena;
 	struct _VexAllocType *headType;
@@ -79,10 +78,12 @@ extern struct libvex_alloc_type *__LibVEX_Alloc(Heap *h, VexAllocType *t);
 extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(Heap *h, unsigned long len);
 extern void _LibVEX_free(Heap *h, const void *_ptr);
 template <typename t, Heap *h> void
-LibVEX_free(const GarbageCollected<t, h> *ptr)
+__LibVEX_free(const GarbageCollected<t, h> *ign, void *ptr)
 {
 	_LibVEX_free(h, ptr);
 }
+#define LibVEX_free(x) __LibVEX_free((x), (x))
+
 extern void *__LibVEX_Alloc_Bytes(Heap *h,
 				  unsigned long nbytes,
 				  struct libvex_allocation_site *las);
@@ -96,24 +97,32 @@ extern void *__LibVEX_Alloc_Bytes(Heap *h,
 extern void *LibVEX_Alloc_Sized(Heap *h, VexAllocType *t, unsigned long size);
 extern void *LibVEX_realloc(Heap *h, void *base, unsigned long new_size);
 
-void vexRegisterGCRoot(Heap *h, void **, const char *name);
+void vexRegisterGCRoot(Heap *h, void **);
 void vexUnregisterGCRoot(Heap *h, void **);
 void vexInitHeap(void);
-void LibVEX_gc(Heap *h, GarbageCollectionToken t);
-void LibVEX_maybe_gc(Heap *h, GarbageCollectionToken t);
+void LibVEX_gc(GarbageCollectionToken t);
+void LibVEX_maybe_gc(GarbageCollectionToken t);
 
-template <Heap *heap = &main_heap>
+template <Heap *heap>
 class VexGcRoot {
 	void **root;
 public:
-	VexGcRoot(void **x, const char *name) :
-		root(x)
+	void init(void **x)
 	{
-		vexRegisterGCRoot(heap, x, name);
+		root = x;
+		vexRegisterGCRoot(heap, x);
+	}
+	VexGcRoot(void **x, const char *name)
+	{
+		init(x);		
+	}
+	void destruct()
+	{
+		vexUnregisterGCRoot(heap, root);
 	}
 	~VexGcRoot()
 	{
-		vexUnregisterGCRoot(heap, root);
+		destruct();
 	}
 };
 
@@ -159,7 +168,7 @@ class GarbageCollected {
 	static VexAllocType type;
 protected:
 	static void release(const t *x) {
-		LibVEX_free(&heap, x);
+		_LibVEX_free(&heap, x);
 	}
 	virtual ~GarbageCollected() {}
 public:
@@ -186,31 +195,34 @@ class VexPtr {
 public:
 	VexPtr() : content(NULL), root((void **)&content, "VexPtr") {}
 	VexPtr(p *_content) : content(_content), root((void **)&content, "VexPtr") {}
-	VexPtr(VexPtr<p> &c) : content(c.content), root((void **)&content, "VexPtr") {}
-	const VexPtr<p> &operator=(VexPtr<p> &x) { content = x.content; return *this; }
-	const VexPtr<p> &operator=(p *x) { content = x; return *this; }
+	VexPtr(VexPtr<p,heap> &c) : content(c.content), root((void **)&content, "VexPtr") {}
+	const VexPtr<p,heap> &operator=(const VexPtr<p,heap> &x) { content = x.content; return *this; }
+	const VexPtr<p,heap> &operator=(p *x) { content = x; return *this; }
 	p &operator*() const { return *content; }
 	p *operator->() const { return content; }
 	operator p*() const { return content; }
 	p *&get() { return content; }
 	p * const &get() const { return content; }
 	void set(p *x) { content = x; }
+	void relocate(VexPtr<p, heap> *to) {
+		root.destruct();
+		to->root.init((void **)&to->content);
+	}
 };
 
 template <typename t, Heap *heap> class WeakRef;
 
 struct wr_core {
 	template <typename t, Heap *heap> friend class WeakRef;
-	friend void LibVEX_gc(Heap *, GarbageCollectionToken);
-private:
+public:
 	struct wr_core *next;
 	void *content;
-public:
+
 	wr_core() : next(), content() {}
 };
 
-template <typename t, Heap *heap = &main_heap>
-class WeakRef : public GarbageCollected<WeakRef<t,heap> > {
+template <typename t, Heap *heap>
+class WeakRef : public GarbageCollected<WeakRef<t,heap>, heap > {
 	wr_core core;
 public:
 	WeakRef() : core() {}

@@ -1863,7 +1863,7 @@ IRSB* cprop_BB ( IRSB* in )
    IRSB*    out;
    IRStmt*  st2;
    Int      n_tmps = in->tyenv->types_used;
-   IRExpr** env = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&main_heap, n_tmps);
+   IRExpr** env = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, n_tmps);
 
    out = emptyIRSB();
    out->tyenv = deepCopyIRTypeEnv( in->tyenv );
@@ -2321,7 +2321,7 @@ GSAliasing getAliasingRelation_II (
 */
 
 typedef
-   struct _AvailExpr : public GarbageCollected<_AvailExpr> {
+struct _AvailExpr : public GarbageCollected<_AvailExpr, &ir_heap> {
       enum { Ut, Btt, Btc, Bct, Cf64i, Mttt, GetIt } tag;
       union {
          /* unop(tmp) */
@@ -2413,7 +2413,6 @@ static Bool eq_AvailExpr ( AvailExpr* a1, AvailExpr* a2 )
 
 static IRExpr* availExpr_to_IRExpr ( AvailExpr* ae ) 
 {
-   IRConst* con;
    switch (ae->tag) {
       case AvailExpr::Ut:
          return IRExpr_Unop( ae->u.Ut.op, IRExpr_RdTmp(ae->u.Ut.arg) );
@@ -2422,14 +2421,12 @@ static IRExpr* availExpr_to_IRExpr ( AvailExpr* ae )
                               IRExpr_RdTmp(ae->u.Btt.arg1),
                               IRExpr_RdTmp(ae->u.Btt.arg2) );
       case AvailExpr::Btc:
-	 con = ae->u.Btc.con2;
          return IRExpr_Binop( ae->u.Btc.op,
                               IRExpr_RdTmp(ae->u.Btc.arg1), 
-                              IRExpr_Const(con) );
+                              IRExpr_Const(ae->u.Btc.con2) );
       case AvailExpr::Bct:
-         con = ae->u.Bct.con1;
          return IRExpr_Binop( ae->u.Bct.op,
-                              IRExpr_Const(con), 
+                              IRExpr_Const(ae->u.Bct.con1), 
                               IRExpr_RdTmp(ae->u.Bct.arg2) );
       case AvailExpr::Cf64i:
          return IRExpr_Const(IRConst_F64i(ae->u.Cf64i.f64i));

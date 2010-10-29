@@ -217,7 +217,7 @@ public:
 	bool exitted;
 	bool crashed;
 
-	IRSB *currentIRSB;
+	VexPtr<IRSB, &ir_heap> currentIRSB;
 	unsigned long currentIRSBRip;
 	expression_result_array temporaries;
 	int currentIRSBOffset;
@@ -277,6 +277,10 @@ public:
 				GarbageCollectionToken t);
 
 	void visit(HeapVisitor &hv);
+
+	void relocate(Thread *thr, size_t s) {
+		currentIRSB.relocate(&thr->currentIRSB);
+	}
 
 	NAMED_CLASS
 };
@@ -1189,28 +1193,24 @@ public:
 		trans_hash_entry **pprev;
 
 		unsigned long rip;
-		WeakRef<IRSB> *irsb;
+		VexPtr<WeakRef<IRSB, &ir_heap>, &ir_heap > irsb;
 
-		void visit(HeapVisitor &hv) { hv(next); hv(irsb); }
+		/* Shouldn't ever get visited: we're blown away on
+		 * every GC. */
+		void visit(HeapVisitor &hv) { abort(); }
 		void destruct() { this->~trans_hash_entry(); }
 
-		void relocate(trans_hash_entry *target, size_t sz) {
-			if (target->next)
-				target->next->pprev = &target->next;
-			*target->pprev = target;
-			memset(this, 0x73, sizeof(*this));
-		}
 		trans_hash_entry(unsigned long _rip)
 			: next(NULL),
 			  pprev(NULL),
 			  rip(_rip)
 		{
-			irsb = new WeakRef<IRSB>();
+			irsb = new WeakRef<IRSB, &ir_heap>();
 		}
 		NAMED_CLASS
 	};
 
-	WeakRef<IRSB> *searchDecodeCache(unsigned long rip);
+	WeakRef<IRSB, &ir_heap> *searchDecodeCache(unsigned long rip);
 
 	void relocate(AddressSpace *target, size_t sz);
 

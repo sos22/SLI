@@ -327,8 +327,6 @@ void AddressSpace::visit(HeapVisitor &hv)
 {
 	hv(pmap);
 	vamap->visit(vamap, hv, pmap);
-	for (unsigned x = 0; x < nr_trans_hash_slots; x++)
-		hv(trans_hash[x]);
 }
 
 bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
@@ -464,13 +462,11 @@ rip_hash(unsigned long rip, unsigned nr_trans_hash_slots)
 void
 AddressSpace::relocate(AddressSpace *target, size_t)
 {
-	for (unsigned x = 0; x < nr_trans_hash_slots; x++)
-		if (target->trans_hash[x])
-			target->trans_hash[x]->pprev = &target->trans_hash[x];
+	memset(target->trans_hash, 0, sizeof(target->trans_hash));
 	memset(trans_hash, 0x99, sizeof(trans_hash));
 }
 
-WeakRef<IRSB> *
+WeakRef<IRSB, &ir_heap> *
 AddressSpace::searchDecodeCache(unsigned long rip)
 {
 	unsigned long hash = rip_hash(rip, nr_trans_hash_slots);

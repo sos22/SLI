@@ -89,7 +89,9 @@ void Thread::imposeState(VexPtr<Thread > &ths,
 
 void Thread::visit(HeapVisitor &hv)
 {
-	hv(currentIRSB);
+	IRSB *i = currentIRSB.get();
+	hv(i);
+	currentIRSB.set(i);
 
 	for (class ring_buffer<snapshot_log_entry, 2>::iterator it = snapshotLog.begin();
 	     it != snapshotLog.end();

@@ -60,8 +60,8 @@ main()
 	assert(mc3 == mc2);
 	
 	printf("GC behaviour.  There are no external references, so a GC cycle should cause the pmap to empty itself.\n");
-	vexRegisterGCRoot(&main_heap, (void **)&pmap1, "testpmap");
-	LibVEX_gc(&main_heap, ALLOW_GC);
+	vexRegisterGCRoot(&main_heap, (void **)&pmap1);
+	LibVEX_gc(ALLOW_GC);
 
 	mc1 = pmap1->lookup(pa1, &off1);
 	assert(mc1 == NULL);
@@ -81,8 +81,8 @@ main()
 	k->pa2 = pa2;
 	k->pmap = pmap1;
 
-	vexRegisterGCRoot(&main_heap, (void **)&k, "testpmap2");
-	LibVEX_gc(&main_heap, ALLOW_GC);
+	vexRegisterGCRoot(&main_heap, (void **)&k);
+	LibVEX_gc(ALLOW_GC);
 
 	pmap1 = k->pmap;
 
@@ -93,7 +93,7 @@ main()
 
 	printf("Unregister the keeper and check that everything drops away\n");
 	vexUnregisterGCRoot(&main_heap, (void **)&k);
-	LibVEX_gc(&main_heap, ALLOW_GC);
+	LibVEX_gc(ALLOW_GC);
 	mc3 = pmap1->lookup(pa1, &off1);
 	assert(mc3 == NULL);
 	mc3 = pmap1->lookup(pa2, &off1);
