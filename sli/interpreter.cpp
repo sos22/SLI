@@ -1354,7 +1354,6 @@ IRSB *instrument_func(void *closure,
 class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	AddressSpace *aspace;
 	unsigned long offset;
-	VexGcVisitor<AddressSpaceGuestFetcher> visitor;
 	mutable UChar cache[16];
 	mutable unsigned long cache_start;
 	mutable bool have_cache;
@@ -1377,12 +1376,10 @@ public:
 		GuestMemoryFetcher(_offset),
 		aspace(_aspace),
 		offset(_offset),
-		visitor(this, "AddressSpaceGuestFetcher"),
 		cache_start(0),
 		have_cache(false)
 	{
 	}
-	void visit(HeapVisitor &hv) { hv(aspace); }
 };
 
 IRSB *
