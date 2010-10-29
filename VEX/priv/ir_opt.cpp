@@ -169,21 +169,24 @@
    faster. */
 
 typedef
-   struct {
+   struct _HashHW : public GarbageCollected<_HashHW> {
       Bool*  inuse;
       HWord* key;
       HWord* val;
       Int    size;
       Int    used;
+      void visit(HeapVisitor &hv) {
+	 hv(inuse);
+	 hv(key);
+	 hv(val);
+      }
+      NAMED_CLASS
    }
    HashHW;
 
-DECLARE_VEX_TYPE(HashHW);
-DEFINE_VEX_TYPE_NO_DESTRUCT(HashHW, { visit(ths->inuse); visit(ths->key); visit(ths->val); });
-
 static HashHW* newHHW ( void )
 {
-   HashHW* h = LibVEX_Alloc_HashHW();
+   HashHW* h = new HashHW();
    h->size   = 8;
    h->used   = 0;
    h->inuse  = (Bool *)LibVEX_Alloc_Bytes(h->size * sizeof(Bool));
@@ -2318,7 +2321,7 @@ GSAliasing getAliasingRelation_II (
 */
 
 typedef
-   struct {
+   struct _AvailExpr : public GarbageCollected<_AvailExpr> {
       enum { Ut, Btt, Btc, Bct, Cf64i, Mttt, GetIt } tag;
       union {
          /* unop(tmp) */
@@ -2361,15 +2364,14 @@ typedef
             Int         bias;
          } GetIt;
       } u;
+      void visit(HeapVisitor &hv) {
+	 if (tag == GetIt) hv(u.GetIt.descr);
+	 else if (tag == Btc) hv(u.Btc.con2);
+	 else if (tag == Bct) hv(u.Bct.con1);
+     }
+     NAMED_CLASS
    }
    AvailExpr;
-
-DECLARE_VEX_TYPE(AvailExpr)
-DEFINE_VEX_TYPE_NO_DESTRUCT(AvailExpr, {
-    if (ths->tag == AvailExpr::GetIt) visit(ths->u.GetIt.descr);
-    else if (ths->tag == AvailExpr::Btc) visit(ths->u.Btc.con2);
-    else if (ths->tag == AvailExpr::Bct) visit(ths->u.Bct.con1);
-  });
 
 static Bool eq_AvailExpr ( AvailExpr* a1, AvailExpr* a2 )
 {
@@ -2493,7 +2495,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_Unop
        && e->Iex.Unop.arg->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc_AvailExpr();
+      ae = new AvailExpr();
       ae->tag      = AvailExpr::Ut;
       ae->u.Ut.op  = e->Iex.Unop.op;
       ae->u.Ut.arg = e->Iex.Unop.arg->Iex.RdTmp.tmp;
@@ -2503,7 +2505,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
        && e->Iex.Binop.arg1->tag == Iex_RdTmp
        && e->Iex.Binop.arg2->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc_AvailExpr();
+      ae = new AvailExpr();
       ae->tag        = AvailExpr::Btt;
       ae->u.Btt.op   = e->Iex.Binop.op;
       ae->u.Btt.arg1 = e->Iex.Binop.arg1->Iex.RdTmp.tmp;
@@ -2514,7 +2516,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
       && e->Iex.Binop.arg1->tag == Iex_RdTmp
       && e->Iex.Binop.arg2->tag == Iex_Const) {
-      ae = LibVEX_Alloc_AvailExpr();
+      ae = new AvailExpr();
       ae->tag        = AvailExpr::Btc;
       ae->u.Btc.op   = e->Iex.Binop.op;
       ae->u.Btc.arg1 = e->Iex.Binop.arg1->Iex.RdTmp.tmp;
@@ -2525,7 +2527,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
    if (e->tag == Iex_Binop
       && e->Iex.Binop.arg1->tag == Iex_Const
       && e->Iex.Binop.arg2->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc_AvailExpr();
+      ae = new AvailExpr();
       ae->tag        = AvailExpr::Bct;
       ae->u.Bct.op   = e->Iex.Binop.op;
       ae->u.Bct.arg2 = e->Iex.Binop.arg2->Iex.RdTmp.tmp;
@@ -2535,7 +2537,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_Const
        && e->Iex.Const.con->tag == Ico_F64i) {
-      ae = LibVEX_Alloc_AvailExpr();
+      ae = new AvailExpr();
       ae->tag          = AvailExpr::Cf64i;
       ae->u.Cf64i.f64i = e->Iex.Const.con->Ico.F64i;
       return ae;
@@ -2545,7 +2547,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
        && e->Iex.Mux0X.cond->tag == Iex_RdTmp
        && e->Iex.Mux0X.expr0->tag == Iex_RdTmp
        && e->Iex.Mux0X.exprX->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc_AvailExpr();
+      ae = new AvailExpr();
       ae->tag       = AvailExpr::Mttt;
       ae->u.Mttt.co = e->Iex.Mux0X.cond->Iex.RdTmp.tmp;
       ae->u.Mttt.e0 = e->Iex.Mux0X.expr0->Iex.RdTmp.tmp;
@@ -2555,7 +2557,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 
    if (e->tag == Iex_GetI
        && e->Iex.GetI.ix->tag == Iex_RdTmp) {
-      ae = LibVEX_Alloc_AvailExpr();
+      ae = new AvailExpr();
       ae->tag           = AvailExpr::GetIt;
       ae->u.GetIt.descr = e->Iex.GetI.descr;
       ae->u.GetIt.ix    = e->Iex.GetI.ix->Iex.RdTmp.tmp;
