@@ -139,12 +139,6 @@ _IRStmt::visit(HeapVisitor &visit)
    }
 }
 
-DEFINE_VEX_TYPE_NO_DESTRUCT(IRSB, {
-    visit(ths->tyenv);
-    visit(ths->stmts);
-    visit(ths->next);
-  });
-
 /*---------------------------------------------------------------*/
 /*--- Printing the IR                                         ---*/
 /*---------------------------------------------------------------*/
@@ -1412,7 +1406,7 @@ IRTypeEnv* emptyIRTypeEnv ( void )
 
 IRSB* emptyIRSB ( void )
 {
-   IRSB* bb       = LibVEX_Alloc_IRSB();
+   IRSB* bb       = new IRSB();
    bb->tyenv      = emptyIRTypeEnv();
    bb->stmts_used = 0;
    bb->stmts_size = 8;

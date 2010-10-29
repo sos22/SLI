@@ -1750,17 +1750,21 @@ extern void ppIRTypeEnv ( IRTypeEnv* );
    "IRSB" stands for "IR Super Block".
 */
 typedef
-   struct {
+   struct _IRSB : public GarbageCollected<_IRSB> {
       IRTypeEnv* tyenv;
       IRStmt**   stmts;
       Int        stmts_size;
       Int        stmts_used;
       IRExpr*    next;
       IRJumpKind jumpkind;
+      void visit(HeapVisitor &hv) {
+	 hv(tyenv);
+	 hv(stmts);
+	 hv(next);
+      }
+      NAMED_CLASS
    }
    IRSB;
-
-DECLARE_VEX_TYPE(IRSB)
 
 /* Allocate a new, uninitialised IRSB */
 extern IRSB* emptyIRSB ( void );
