@@ -340,15 +340,15 @@ extern Bool eqIRConst ( IRConst*, IRConst* );
 */
 
 typedef
-   struct {
+   struct _IRCallee : public GarbageCollected<_IRCallee>{
       Int    regparms;
       const char* name;
       void*  addr;
       UInt   mcx_mask;
+      void visit(HeapVisitor &hv) {}
+      NAMED_CLASS
    }
    IRCallee;
-
-DECLARE_VEX_TYPE(IRCallee)
 
 /* Create an IRCallee. */
 extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr );

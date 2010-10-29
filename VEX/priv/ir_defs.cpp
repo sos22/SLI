@@ -50,7 +50,6 @@
 
 #include "main_util.h"
 
-DEFINE_VEX_TYPE(IRCallee);
 DEFINE_VEX_TYPE(IRRegArray);
 
 static void
@@ -1084,7 +1083,7 @@ IRConst* IRConst_V128 ( UShort con )
 
 IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr )
 {
-   IRCallee* ce = LibVEX_Alloc_IRCallee();
+   IRCallee* ce = new IRCallee();
    ce->regparms = regparms;
    ce->name     = name;
    ce->addr     = addr;
