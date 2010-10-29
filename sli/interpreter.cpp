@@ -1456,7 +1456,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	ths->currentIRSBRip = rip;
 
 	unsigned long _rip = rip;
-	vexSetAllocModeTEMP_and_clear(t);
+	LibVEX_maybe_gc(&main_heap, t);
 
 	IRSB *irsb = addrSpace->getIRSBForAddress(_rip);
 
@@ -1818,7 +1818,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 						LibVEX_free(oldEvent);
 						oldEvent = NULL;
 					}
-					LibVEX_free(lr);
+					LibVEX_free(lr.get());
 				}
 				lr = NULL;
 				if (eof)

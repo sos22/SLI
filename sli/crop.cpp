@@ -22,8 +22,7 @@ main(int argc, char *argv[])
 		err(1, "opening %s", inp);
 
 	VexPtr<LogReader> reduced_lf(lf->truncate(LogReaderPtr(size, 0)));
-	MachineState *ms = MachineState::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC);
-	VexGcRoot ms_root((void **)&ms, "ms_root");
+	VexPtr<MachineState> ms(MachineState::initialMachineState(reduced_lf, ptr, &ptr, ALLOW_GC));
 
 	//ms->findThread(ThreadId(3))->clear_child_tid = 0x7fbc4d69e9e0;
 

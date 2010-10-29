@@ -4897,7 +4897,7 @@ main(int argc, char *argv[])
 					   csectPool);
 		timing("calculated critical sections for %s",
 		       cmn_it.key().name());
-		LibVEX_maybe_gc(ALLOW_GC);
+		LibVEX_maybe_gc(&main_heap, ALLOW_GC);
 	}
 	struct timeval finish_deriving_fixes;
 	gettimeofday(&finish_deriving_fixes, NULL);

@@ -174,10 +174,8 @@ GcVisitor::visit(void *&what)
 }
 
 void
-LibVEX_free(const void *_ptr)
+_LibVEX_free(Heap *h, const void *_ptr)
 {
-	Heap *h = &main_heap;
-
 	assert_gc_allocated(_ptr);
 
 	struct allocation_header *ah = alloc_to_header(_ptr);
@@ -196,15 +194,13 @@ LibVEX_free(const void *_ptr)
 }
 
 void
-LibVEX_gc(GarbageCollectionToken t)
+LibVEX_gc(Heap *h, GarbageCollectionToken t)
 {
-	Heap *h = &main_heap;
-
 	struct arena *old_arena;
 	struct arena *next_old;
 	GcVisitor gc;
 
-	LibVEX_alloc_sanity_check();
+	LibVEX_alloc_sanity_check(h);
 
 	printf("Major GC starts\n");
 
@@ -244,7 +240,7 @@ LibVEX_gc(GarbageCollectionToken t)
 		ah->type->gc_visit(header_to_alloc(ah), gc);
 	}
 
-	LibVEX_alloc_sanity_check();
+	LibVEX_alloc_sanity_check(h);
 
 	/* Handle weak references.  They're strung together in the
 	   global list automatically during the visit pass. */
@@ -292,7 +288,7 @@ LibVEX_gc(GarbageCollectionToken t)
 		old_arena = next_old;
 	}
 
-	LibVEX_alloc_sanity_check();
+	LibVEX_alloc_sanity_check(h);
 
 	printf("Major GC finished; %ld bytes in heap\n", h->heap_used);
 
@@ -306,15 +302,10 @@ LibVEX_gc(GarbageCollectionToken t)
 	}
 }
 
-void LibVEX_maybe_gc(GarbageCollectionToken t)
+void LibVEX_maybe_gc(Heap *h, GarbageCollectionToken t)
 {
-	if (main_heap.heap_used >= GC_MAX_SIZE)
-		LibVEX_gc(t);
-}
-
-void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t)
-{
-	LibVEX_maybe_gc(t);
+	if (h->heap_used >= GC_MAX_SIZE)
+		LibVEX_gc(h, t);
 }
 
 static struct allocation_header *
@@ -322,7 +313,7 @@ raw_alloc(Heap *h, VexAllocType *t, unsigned long size)
 {
 	struct arena *a;
 
-	LibVEX_alloc_sanity_check();
+	LibVEX_alloc_sanity_check(h);
 
 	size += sizeof(struct allocation_header);
 	size = (size + 31) & ~31;
@@ -359,7 +350,7 @@ raw_alloc(Heap *h, VexAllocType *t, unsigned long size)
 	res->magic = ALLOCATION_HEADER_MAGIC;
 #endif
 
-	LibVEX_alloc_sanity_check();
+	LibVEX_alloc_sanity_check(h);
 
 	return res;
 }
@@ -373,27 +364,26 @@ alloc_bytes(Heap *h, VexAllocType *type, unsigned long size)
 
 static VexAllocType byte_alloc_type = { -1, NULL, NULL, NULL, "<bytes>" };
 void *
-__LibVEX_Alloc_Bytes(unsigned long nbytes, struct libvex_allocation_site *site)
+__LibVEX_Alloc_Bytes(Heap *h, unsigned long nbytes, struct libvex_allocation_site *site)
 {
-	return alloc_bytes(&main_heap, &byte_alloc_type, nbytes);
+	return alloc_bytes(h, &byte_alloc_type, nbytes);
 }
 
 void *
-LibVEX_Alloc_Sized(VexAllocType *t, unsigned long nbytes)
+LibVEX_Alloc_Sized(Heap *h, VexAllocType *t, unsigned long nbytes)
 {
-	return alloc_bytes(&main_heap, t, nbytes);
+	return alloc_bytes(h, t, nbytes);
 }
 
 struct libvex_alloc_type *
-__LibVEX_Alloc(VexAllocType *t)
+__LibVEX_Alloc(Heap *h, VexAllocType *t)
 {
-	return (struct libvex_alloc_type *)alloc_bytes(&main_heap, t, t->nbytes);
+	return (struct libvex_alloc_type *)alloc_bytes(h, t, t->nbytes);
 }
 
 void *
-LibVEX_realloc(void *ptr, unsigned long new_size)
+LibVEX_realloc(Heap *h, void *ptr, unsigned long new_size)
 {
-	Heap *h = &main_heap;
 	assert_gc_allocated(ptr);
 	struct allocation_header *ah = alloc_to_header(ptr);
 	void *newptr;
@@ -410,9 +400,8 @@ LibVEX_realloc(void *ptr, unsigned long new_size)
 }
 
 void
-vexRegisterGCRoot(void **w, const char *name)
+vexRegisterGCRoot(Heap *h, void **w, const char *name)
 {
-	Heap *h = &main_heap;
 	vassert(nr_gc_roots < NR_GC_ROOTS);
 	h->gc_roots[h->nr_gc_roots] = w;
 	h->gc_root_names[h->nr_gc_roots] = name;
@@ -420,9 +409,8 @@ vexRegisterGCRoot(void **w, const char *name)
 }
 
 void
-vexUnregisterGCRoot(void **w)
+vexUnregisterGCRoot(Heap *h, void **w)
 {
-	Heap *h = &main_heap;
 	unsigned x;
 	if (*w)
 		assert_gc_allocated(*w);
@@ -478,9 +466,8 @@ void HeapUsageVisitor::visit(void *&ptr)
 }
 
 void
-dump_heap_usage(void)
+dump_heap_usage(Heap *h)
 {
-	Heap *h = &main_heap;
 	VexAllocType *cursor;
 	for (cursor = h->headType; cursor; cursor = cursor->next) {
 		cursor->total_allocated = 0;
@@ -562,9 +549,8 @@ visit_ptr_array(void *ths, HeapVisitor &visitor)
 }
 static VexAllocType ptr_array_type = { -1, NULL, visit_ptr_array, NULL, "<array>" };
 struct libvex_alloc_type *
-__LibVEX_Alloc_Ptr_Array(unsigned long len)
+__LibVEX_Alloc_Ptr_Array(Heap *h, unsigned long len)
 {
-	Heap *h = &main_heap;
 	struct allocation_header *ah;
 	void **res;
 	unsigned x;
@@ -575,7 +561,6 @@ __LibVEX_Alloc_Ptr_Array(unsigned long len)
 		res[x] = NULL;
 	return (struct libvex_alloc_type *)res;
 }
-
 
 static void
 sanity_check_arena(struct arena *a)
@@ -596,9 +581,8 @@ sanity_check_arena(struct arena *a)
 }
 
 void
-_LibVEX_alloc_sanity_check()
+_LibVEX_alloc_sanity_check(Heap *h)
 {
-	Heap *h = &main_heap;
 	struct arena *fast, *slow;
 	bool found_current;
 
@@ -624,7 +608,7 @@ _LibVEX_alloc_sanity_check()
 }
 
 void
-LibVEX_alloc_sanity_check()
+LibVEX_alloc_sanity_check(Heap *h)
 {
 #ifndef NDEBUG
 	static int counter;
@@ -632,7 +616,7 @@ LibVEX_alloc_sanity_check()
 	if (counter++ % 10000000 != 0)
 		return;
 
-	_LibVEX_alloc_sanity_check();
+	_LibVEX_alloc_sanity_check(h);
 #endif
 }
 

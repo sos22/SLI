@@ -128,9 +128,9 @@ main()
 	VAPMap *vap = new VAPMap();
 	vap->vamap = vamap;
 	vap->pmap = pmap;
-	VexGcRoot vgc((void **)&vap, "test vamap");
+	VexGcRoot<> vgc((void **)&vap, "test vamap");
 	
-	LibVEX_gc(ALLOW_GC);
+	LibVEX_gc(&main_heap, ALLOW_GC);
 
 	pmap = vap->pmap;
 	vamap = vap->vamap;

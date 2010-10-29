@@ -30,6 +30,7 @@ public:
 
 extern Heap main_heap;
 
+template <typename t, Heap *heap> class GarbageCollected;
 
 class HeapVisitor {
 public:
@@ -87,50 +88,57 @@ struct libvex_allocation_site {
 
 #define DECLARE_VEX_TYPE(t)						\
   extern VexAllocType __vex_type_ ## t;					\
-  static inline t *LibVEX_Alloc_ ## t(void)				\
+  static inline t *LibVEX_Alloc_ ## t()					\
   {									\
-    return (t *)__LibVEX_Alloc(&__vex_type_ ## t);			\
+	  return (t *)__LibVEX_Alloc(&main_heap, &__vex_type_ ## t);	\
   }									\
   static inline t **LibVEX_Alloc_Array_ ## t(unsigned nr)		\
   {									\
-    return (t **)__LibVEX_Alloc_Ptr_Array(nr);				\
+	  return (t **)__LibVEX_Alloc_Ptr_Array(&main_heap, nr);	\
   }
 
 struct libvex_alloc_type;
 
 void assert_gc_allocated(const void *ptr);
-extern struct libvex_alloc_type *__LibVEX_Alloc(VexAllocType *t);
-extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(unsigned long len);
-extern void LibVEX_free(const void *_ptr);
-extern void *__LibVEX_Alloc_Bytes(unsigned long nbytes,
+extern struct libvex_alloc_type *__LibVEX_Alloc(Heap *h, VexAllocType *t);
+extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(Heap *h, unsigned long len);
+extern void _LibVEX_free(Heap *h, const void *_ptr);
+template <typename t, Heap *h> void
+LibVEX_free(const GarbageCollected<t, h> *ptr)
+{
+	_LibVEX_free(h, ptr);
+}
+extern void *__LibVEX_Alloc_Bytes(Heap *h,
+				  unsigned long nbytes,
 				  struct libvex_allocation_site *las);
 #define LibVEX_Alloc_Bytes(_n)						\
 	({								\
 		static libvex_allocation_site __las = {0, __FILE__,	\
 						       __LINE__};	\
-		__LibVEX_Alloc_Bytes(_n, &__las);			\
+		__LibVEX_Alloc_Bytes(&main_heap, (_n), &__las);		\
 	})
 
-extern void *LibVEX_Alloc_Sized(VexAllocType *t, unsigned long size);
-extern void *LibVEX_realloc(void *base, unsigned long new_size);
+extern void *LibVEX_Alloc_Sized(Heap *h, VexAllocType *t, unsigned long size);
+extern void *LibVEX_realloc(Heap *h, void *base, unsigned long new_size);
 
-void vexRegisterGCRoot(void **, const char *name);
-void vexUnregisterGCRoot(void **);
+void vexRegisterGCRoot(Heap *h, void **, const char *name);
+void vexUnregisterGCRoot(Heap *h, void **);
 void vexInitHeap(void);
-void LibVEX_gc(GarbageCollectionToken t);
-void LibVEX_maybe_gc(GarbageCollectionToken t);
+void LibVEX_gc(Heap *h, GarbageCollectionToken t);
+void LibVEX_maybe_gc(Heap *h, GarbageCollectionToken t);
 
+template <Heap *heap = &main_heap>
 class VexGcRoot {
 	void **root;
 public:
 	VexGcRoot(void **x, const char *name) :
 		root(x)
 	{
-		vexRegisterGCRoot(x, name);
+		vexRegisterGCRoot(heap, x, name);
 	}
 	~VexGcRoot()
 	{
-		vexUnregisterGCRoot(root);
+		vexUnregisterGCRoot(heap, root);
 	}
 };
 
@@ -171,18 +179,18 @@ const char *get_name(const void *_ctxt)
 
 #define NAMED_CLASS static const char *cls_name() { return __PRETTY_FUNCTION__ + 19; }
 
-template <typename t>
+template <typename t, Heap *heap = &main_heap>
 class GarbageCollected {
 	static VexAllocType type;
 protected:
 	static void release(const t *x) {
-		LibVEX_free(x);
+		LibVEX_free(&heap, x);
 	}
 	virtual ~GarbageCollected() {}
 public:
 	static void *operator new(size_t s)
 	{
-		void *res = LibVEX_Alloc_Sized(&type, s);
+		void *res = LibVEX_Alloc_Sized(heap, &type, s);
 		memset(res, 0, s);
 		return res;
 	}
@@ -194,12 +202,12 @@ public:
 	virtual void destruct() { this->~GarbageCollected(); }
 	virtual void relocate(t *target, size_t sz) { }
 };
-template <typename t> VexAllocType GarbageCollected<t>::type = {-1, relocate_object<t>, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
+template <typename t, Heap *heap> VexAllocType GarbageCollected<t,heap>::type = {-1, relocate_object<t>, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
 
-template <typename p>
+template <typename p, Heap *heap = &main_heap>
 class VexPtr {
 	p *content;
-	VexGcRoot root;
+	VexGcRoot<heap> root;
 public:
 	VexPtr() : content(NULL), root((void **)&content, "VexPtr") {}
 	VexPtr(p *_content) : content(_content), root((void **)&content, "VexPtr") {}
@@ -214,11 +222,11 @@ public:
 	void set(p *x) { content = x; }
 };
 
-template <typename t> class WeakRef;
+template <typename t, Heap *heap> class WeakRef;
 
 struct wr_core {
-	template <typename t> friend class WeakRef;
-	friend void LibVEX_gc(GarbageCollectionToken);
+	template <typename t, Heap *heap> friend class WeakRef;
+	friend void LibVEX_gc(Heap *, GarbageCollectionToken);
 private:
 	struct wr_core *next;
 	void *content;
@@ -226,8 +234,8 @@ public:
 	wr_core() : next(), content() {}
 };
 
-template <typename t>
-class WeakRef : public GarbageCollected<WeakRef<t> > {
+template <typename t, Heap *heap = &main_heap>
+class WeakRef : public GarbageCollected<WeakRef<t,heap> > {
 	wr_core core;
 public:
 	WeakRef() : core() {}
@@ -237,14 +245,14 @@ public:
 	void visit(HeapVisitor &hv) {
 		if (core.content) {
 			assert(core.content != (void *)0x93939393939393b3);
-			core.next = main_heap.headVisitedWeakRef;
-			main_heap.headVisitedWeakRef = &core;
+			core.next = heap->headVisitedWeakRef;
+			heap->headVisitedWeakRef = &core;
 		}
 	}
 	void destruct() {}
 	NAMED_CLASS
 };
 
-void LibVEX_alloc_sanity_check();
+void LibVEX_alloc_sanity_check(Heap *h);
 
 #endif /* !__LIBVEX_ALLOC_H */

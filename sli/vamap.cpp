@@ -80,7 +80,7 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 					    Protection prot,
 					    AllocFlags alf)
 {
-	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type);
+	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&main_heap, &vme_type);
 	memset(work, 0, sizeof(*work));
 	work->start = start;
 	work->end = end;
@@ -92,7 +92,7 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 
 VAMap::VAMapEntry *VAMap::VAMapEntry::dupeSelf() const
 {
-	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&vme_type);
+	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&main_heap, &vme_type);
 	*work = *this;
 	if (prev)
 		work->prev = prev->dupeSelf();
@@ -318,7 +318,8 @@ void VAMap::addTranslation(unsigned long start,
 				printf("%p, merge before with %lx:%lx\n", this,
 				       vme->start, vme->end);
 #endif
-				vme->pa = (PhysicalAddress *)LibVEX_realloc(vme->pa,
+				vme->pa = (PhysicalAddress *)LibVEX_realloc(&main_heap,
+									    vme->pa,
 									    sizeof(vme->pa[0]) *
 									    dchunk(start, vme->end));
 				memmove(vme->pa + dchunk(start, vme->start),
@@ -333,7 +334,8 @@ void VAMap::addTranslation(unsigned long start,
 				printf("%p, merge after with %lx:%lx\n", this,
 				       vme->start, vme->end);
 #endif
-				vme->pa = (PhysicalAddress *)LibVEX_realloc(vme->pa,
+				vme->pa = (PhysicalAddress *)LibVEX_realloc(&main_heap,
+									    vme->pa,
 									    sizeof(vme->pa[0]) *
 									    dchunk(vme->start, end));
 				vme->pa[dchunk(vme->start, vme->end)] = pa;
@@ -576,11 +578,13 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		       newVme->pa + dchunk(newVme->start, newVme->end),
 		       sizeof(pa[0]) * dchunk(start, end));
 		newVme->pa =
-			(PhysicalAddress *)LibVEX_realloc(newVme->pa,
+			(PhysicalAddress *)LibVEX_realloc(&main_heap,
+							  newVme->pa,
 							  sizeof(pa[0]) * dchunk(newVme->start, newVme->end));
 		prev = newVme;
 	} else {
-		PhysicalAddress *newPas = (PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(pa[0]) * dchunk(at, end));
+		PhysicalAddress *newPas =
+			(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(pa[0]) * dchunk(at, end));
 		memcpy(newPas,
 		       pa + dchunk(start, at),
 		       sizeof(pa[0]) * dchunk(at, end));
@@ -588,6 +592,6 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		end = at;
 		newVme->succ = succ;
 		succ = newVme;
-		pa = (PhysicalAddress *)LibVEX_realloc(pa, sizeof(pa[0]) * dchunk(start, end));
+		pa = (PhysicalAddress *)LibVEX_realloc(&main_heap, pa, sizeof(pa[0]) * dchunk(start, end));
 	}
 }

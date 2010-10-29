@@ -44,7 +44,7 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		/* That can sometimes do a lot of work (e.g. mmap()ing
 		   a new shared library).  That makes this loop a good
 		   place to try to do a GC pass. */
-		vexSetAllocModeTEMP_and_clear(tok);
+		LibVEX_maybe_gc(&main_heap, tok);
 	}
 	*endOffset = startOffset;
 }

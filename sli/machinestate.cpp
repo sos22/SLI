@@ -28,34 +28,32 @@ MachineState::initialMachineState(VexPtr<LogReader > &lf,
 							  GarbageCollectionToken token)
 {
 	VexPtr<MachineState > work;
-	LogRecord *lr;
+	VexPtr<LogRecord> lr;
 	
 	lr = lf->read(ptr, &ptr);
-	VexGcRoot lrkeeper((void **)&lr, "lrkeeper");
-	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr);
+	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr.get());
 	if (!lrib)
 		errx(1, "first record should have been initial brk");
         VexPtr<AddressSpace > as(AddressSpace::initialAddressSpace(lrib->brk));
 
 	lr = lf->read(ptr, &ptr);
-        LogRecordInitialSighandlers *lris = dynamic_cast<LogRecordInitialSighandlers*>(lr);
+        LogRecordInitialSighandlers *lris = dynamic_cast<LogRecordInitialSighandlers*>(lr.get());
 	if (!lris)
 		errx(1, "second record should have been initial signal handlers");
 	work = initialMachineState(as, *lris);
-	VexGcRoot keeper((void **)&work, "initialMachineState");
 
 	while (1) {
 		LogReaderPtr nextPtr;
 		lr = lf->read(ptr, &nextPtr);
 		if (!lr)
 			break;
-		if (LogRecordAllocateMemory *lram = dynamic_cast<LogRecordAllocateMemory*>(lr)) {
+		if (LogRecordAllocateMemory *lram = dynamic_cast<LogRecordAllocateMemory*>(lr.get())) {
 			as->allocateMemory(*lram);
-	        } else if (LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr)) {
+	        } else if (LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr.get())) {
 			as->populateMemory(*lrm);
-		} else if (LogRecordInitialRegisters *lrir = dynamic_cast<LogRecordInitialRegisters*>(lr)) {
+		} else if (LogRecordInitialRegisters *lrir = dynamic_cast<LogRecordInitialRegisters*>(lr.get())) {
 			work->registerThread(Thread::initialThread(*lrir));
-	        } else if (LogRecordVexThreadState *lrvts = dynamic_cast<LogRecordVexThreadState*>(lr)) {
+	        } else if (LogRecordVexThreadState *lrvts = dynamic_cast<LogRecordVexThreadState*>(lr.get())) {
 			VexPtr<LogRecordVexThreadState > l(lrvts);
 			VexPtr<Thread > t(work->findThread(lrvts->thread()));
 			t->imposeState(t, l, as, work, ptr, token);
