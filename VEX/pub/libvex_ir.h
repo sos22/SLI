@@ -1523,7 +1523,7 @@ typedef
    pretty-printed with ppIRStmt().
 */
 typedef
-   struct _IRStmt {
+   struct _IRStmt : public GarbageCollected<_IRStmt> {
       IRStmtTag tag;
       union {
          /* A no-op (usually resulting from IR optimisation).  Can be
@@ -1681,10 +1681,10 @@ typedef
             IRConst*   dst;      /* Jump target (constant only) */
          } Exit;
       } Ist;
+      void visit(HeapVisitor &hv);
+      NAMED_CLASS
    }
    IRStmt;
-
-DECLARE_VEX_TYPE(IRStmt)
 
 /* Statement constructors. */
 extern IRStmt* IRStmt_NoOp    ( void );

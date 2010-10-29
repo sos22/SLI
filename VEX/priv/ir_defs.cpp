@@ -98,47 +98,46 @@ IRExpr::visit(HeapVisitor &visit)
    }
 }
 
-static void
-visit_IRStmt(IRStmt *ist, HeapVisitor &visit)
+void
+_IRStmt::visit(HeapVisitor &visit)
 {
-   switch (ist->tag) {
+   switch (tag) {
    case Ist_NoOp:
    case Ist_IMark:
      break;
    case Ist_AbiHint:
-     visit(ist->Ist.AbiHint.base);
-     visit(ist->Ist.AbiHint.nia);
+     visit(Ist.AbiHint.base);
+     visit(Ist.AbiHint.nia);
      break;
    case Ist_Put:
-     visit(ist->Ist.Put.data);
+     visit(Ist.Put.data);
      break;
    case Ist_PutI:
-     visit(ist->Ist.PutI.descr);
-     visit(ist->Ist.PutI.ix);
-     visit(ist->Ist.PutI.data);
+     visit(Ist.PutI.descr);
+     visit(Ist.PutI.ix);
+     visit(Ist.PutI.data);
      break;
    case Ist_WrTmp:
-     visit(ist->Ist.WrTmp.data);
+     visit(Ist.WrTmp.data);
      break;
    case Ist_Store:
-     visit(ist->Ist.Store.addr);
-     visit(ist->Ist.Store.data);
+     visit(Ist.Store.addr);
+     visit(Ist.Store.data);
      break;
    case Ist_CAS:
-     visit(ist->Ist.CAS.details);
+     visit(Ist.CAS.details);
      break;
    case Ist_Dirty:
-     visit(ist->Ist.Dirty.details);
+     visit(Ist.Dirty.details);
      break;
    case Ist_MBE:
      break;
    case Ist_Exit:
-     visit(ist->Ist.Exit.guard);
-     visit(ist->Ist.Exit.dst);
+     visit(Ist.Exit.guard);
+     visit(Ist.Exit.dst);
      break;
    }
 }
-__DEFINE_VEX_TYPE_NO_DESTRUCT(IRStmt, visit_IRStmt);
 
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRTypeEnv, { visit(ths->types); });
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRSB, {
@@ -1319,14 +1318,14 @@ IRStmt* IRStmt_NoOp ( void )
    return &static_closure;
 }
 IRStmt* IRStmt_IMark ( Addr64 addr, Int len ) {
-   IRStmt* s         = LibVEX_Alloc_IRStmt();
+   IRStmt* s         = new IRStmt();
    s->tag            = Ist_IMark;
    s->Ist.IMark.addr = addr;
    s->Ist.IMark.len  = len;
    return s;
 }
 IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia ) {
-   IRStmt* s           = LibVEX_Alloc_IRStmt();
+   IRStmt* s           = new IRStmt();
    s->tag              = Ist_AbiHint;
    s->Ist.AbiHint.base = base;
    s->Ist.AbiHint.len  = len;
@@ -1334,7 +1333,7 @@ IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia ) {
    return s;
 }
 IRStmt* IRStmt_Put ( Int off, IRExpr* data ) {
-   IRStmt* s         = LibVEX_Alloc_IRStmt();
+   IRStmt* s         = new IRStmt();
    s->tag            = Ist_Put;
    s->Ist.Put.offset = off;
    s->Ist.Put.data   = data;
@@ -1342,7 +1341,7 @@ IRStmt* IRStmt_Put ( Int off, IRExpr* data ) {
 }
 IRStmt* IRStmt_PutI ( IRRegArray* descr, IRExpr* ix,
                       Int bias, IRExpr* data ) {
-   IRStmt* s         = LibVEX_Alloc_IRStmt();
+   IRStmt* s         = new IRStmt();
    s->tag            = Ist_PutI;
    s->Ist.PutI.descr = descr;
    s->Ist.PutI.ix    = ix;
@@ -1351,7 +1350,7 @@ IRStmt* IRStmt_PutI ( IRRegArray* descr, IRExpr* ix,
    return s;
 }
 IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data ) {
-   IRStmt* s         = LibVEX_Alloc_IRStmt();
+   IRStmt* s         = new IRStmt();
    s->tag            = Ist_WrTmp;
    s->Ist.WrTmp.tmp  = tmp;
    s->Ist.WrTmp.data = data;
@@ -1359,7 +1358,7 @@ IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data ) {
 }
 IRStmt* IRStmt_Store ( IREndness end,
                        IRTemp resSC, IRExpr* addr, IRExpr* data ) {
-   IRStmt* s          = LibVEX_Alloc_IRStmt();
+   IRStmt* s          = new IRStmt();
    s->tag             = Ist_Store;
    s->Ist.Store.end   = end;
    s->Ist.Store.resSC = resSC;
@@ -1369,27 +1368,27 @@ IRStmt* IRStmt_Store ( IREndness end,
    return s;
 }
 IRStmt* IRStmt_CAS ( IRCAS* cas ) {
-   IRStmt* s          = LibVEX_Alloc_IRStmt();
+   IRStmt* s          = new IRStmt();
    s->tag             = Ist_CAS;
    s->Ist.CAS.details = cas;
    return s;
 }
 IRStmt* IRStmt_Dirty ( IRDirty* d )
 {
-   IRStmt* s            = LibVEX_Alloc_IRStmt();
+   IRStmt* s            = new IRStmt();
    s->tag               = Ist_Dirty;
    s->Ist.Dirty.details = d;
    return s;
 }
 IRStmt* IRStmt_MBE ( IRMBusEvent event )
 {
-   IRStmt* s        = LibVEX_Alloc_IRStmt();
+   IRStmt* s        = new IRStmt();
    s->tag           = Ist_MBE;
    s->Ist.MBE.event = event;
    return s;
 }
 IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst ) {
-   IRStmt* s         = LibVEX_Alloc_IRStmt();
+   IRStmt* s         = new IRStmt();
    s->tag            = Ist_Exit;
    s->Ist.Exit.guard = guard;
    s->Ist.Exit.jk    = jk;
@@ -1418,7 +1417,7 @@ IRSB* emptyIRSB ( void )
    bb->tyenv      = emptyIRTypeEnv();
    bb->stmts_used = 0;
    bb->stmts_size = 8;
-   bb->stmts      = LibVEX_Alloc_Array_IRStmt(bb->stmts_size);
+   bb->stmts      = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&main_heap, bb->stmts_size);
    bb->next       = NULL;
    bb->jumpkind   = Ijk_Boring;
    return bb;
@@ -1626,7 +1625,7 @@ IRSB* deepCopyIRSB ( IRSB* bb )
    IRStmt** sts2;
    IRSB* bb2 = deepCopyIRSBExceptStmts(bb);
    bb2->stmts_used = bb2->stmts_size = bb->stmts_used;
-   sts2 = LibVEX_Alloc_Array_IRStmt(bb2->stmts_used);
+   sts2 = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&main_heap, bb2->stmts_used);
    for (i = 0; i < bb2->stmts_used; i++)
       sts2[i] = deepCopyIRStmt(bb->stmts[i]);
    bb2->stmts    = sts2;
@@ -2030,7 +2029,7 @@ void addStmtToIRSB ( IRSB* bb, IRStmt* st )
 {
    Int i;
    if (bb->stmts_used == bb->stmts_size) {
-     IRStmt** stmts2 = (IRStmt **)LibVEX_Alloc_Array_IRStmt(2 * bb->stmts_size);
+     IRStmt** stmts2 = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&main_heap, 2 * bb->stmts_size);
       for (i = 0; i < bb->stmts_size; i++)
          stmts2[i] = bb->stmts[i];
       bb->stmts = stmts2;
