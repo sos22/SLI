@@ -98,14 +98,6 @@ IRExpr::visit(HeapVisitor &visit)
    }
 }
 
-DEFINE_VEX_TYPE_NO_DESTRUCT(IRCAS, {
-    visit(ths->addr);
-    visit(ths->expdHi);
-    visit(ths->expdLo);
-    visit(ths->dataHi);
-    visit(ths->dataLo);
-  });
-
 static void
 visit_IRStmt(IRStmt *ist, HeapVisitor &visit)
 {
@@ -1304,7 +1296,7 @@ IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
                  IREndness end, IRExpr* addr, 
                  IRExpr* expdHi, IRExpr* expdLo,
                  IRExpr* dataHi, IRExpr* dataLo ) {
-   IRCAS* cas = LibVEX_Alloc_IRCAS();
+   IRCAS* cas = new IRCAS();
    cas->oldHi  = oldHi;
    cas->oldLo  = oldLo;
    cas->end    = end;

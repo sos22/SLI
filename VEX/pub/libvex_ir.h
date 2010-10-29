@@ -1456,7 +1456,7 @@ extern void ppIRMBusEvent ( IRMBusEvent );
    Hence it is easy to know whether or not the CAS succeeded.
 */
 typedef
-   struct {
+   struct _IRCAS : public GarbageCollected<_IRCAS> {
       IRTemp    oldHi;  /* old value of *addr is written here */
       IRTemp    oldLo;
       IREndness end;    /* endianness of the data in memory */
@@ -1465,10 +1465,16 @@ typedef
       IRExpr*   expdLo;
       IRExpr*   dataHi; /* new value for *addr */
       IRExpr*   dataLo;
+      void visit(HeapVisitor &hv) {
+	 hv(addr);
+	 hv(expdHi);
+	 hv(expdLo);
+	 hv(dataHi);
+	 hv(dataLo);
+      }
+      NAMED_CLASS
    }
    IRCAS;
-
-DECLARE_VEX_TYPE(IRCAS)
 
 extern void ppIRCAS ( IRCAS* cas );
 
