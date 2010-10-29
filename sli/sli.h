@@ -525,7 +525,7 @@ public:
 
 class MachineState : public GarbageCollected<MachineState > {
 public:
-	LibvexVector<Thread > *threads;
+	std::vector<Thread *> threads;
 
 	bool exitted;
 	unsigned long exit_status;
@@ -547,33 +547,33 @@ public:
 		ThreadId tid;
 		tid = 1;
 	top:
-		for (unsigned x = 0; x < threads->size(); x++) {
-			if (threads->index(x)->exitted) {
+		for (unsigned x = 0; x < threads.size(); x++) {
+			if (threads[x]->exitted) {
 				t->tid = tid;
-				threads->set(x, t);
+				threads[x] = t;
 				return;
 			}
-			if (threads->index(x)->tid == tid) {
+			if (threads[x]->tid == tid) {
 				++tid;
 				goto top;
 			}
 		}
 		t->tid = tid;
-		threads->push(t);
+		threads.push_back(t);
 	}
 	Thread *findThread(ThreadId id, bool allow_failure = false) {
 		unsigned x;
-		for (x = 0; x < threads->size(); x++)
-			if (threads->index(x)->tid == id)
-				return threads->index(x);
+		for (x = 0; x < threads.size(); x++)
+			if (threads[x]->tid == id)
+				return threads[x];
 		assert(allow_failure);
 		return NULL;
 	}
 	const Thread *findThread(ThreadId id) const {
 		unsigned x;
-		for (x = 0; x < threads->size(); x++)
-			if (threads->index(x)->tid == id)
-				return threads->index(x);
+		for (x = 0; x < threads.size(); x++)
+			if (threads[x]->tid == id)
+				return threads[x];
 		return NULL;
 	}
 	void exitGroup(unsigned long result) {

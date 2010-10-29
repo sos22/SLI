@@ -247,12 +247,12 @@ QueryCommand::doIt(VexPtr<MachineState > &ms, GarbageCollectionToken)
 		this->sendResponse("");
 	} else if (!strcmp(q, "fThreadInfo")) {
 		this->chan->threadInfoIndex = 1;
-		this->sendResponse("m%d", ms->threads->index(0)->tid._tid());
+		this->sendResponse("m%d", ms->threads[0]->tid._tid());
 	} else if (!strcmp(q, "sThreadInfo")) {
-		if (this->chan->threadInfoIndex >= ms->threads->size()) {
+		if (this->chan->threadInfoIndex >= ms->threads.size()) {
 			this->sendResponse("l");
 		} else {
-			this->sendResponse("m%d", ms->threads->index(this->chan->threadInfoIndex)->tid._tid());
+			this->sendResponse("m%d", ms->threads[this->chan->threadInfoIndex]->tid._tid());
 			this->chan->threadInfoIndex++;
 		}
 	} else if (!strcmp(q, "Offsets") || !strcmp(q, "Symbol::")) {

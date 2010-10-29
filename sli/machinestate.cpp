@@ -4,7 +4,7 @@
 
 void MachineState::visit(HeapVisitor &hv)
 {
-	hv(threads);
+	visit_container<std::vector<Thread *> >(threads, hv);
 	hv(addressSpace);
 }
 
@@ -14,7 +14,6 @@ MachineState::initialMachineState(AddressSpace *as,
 {
 	MachineState *work = new MachineState();
 
-	work->threads = LibvexVector<Thread >::empty();
 	work->nextTid = ThreadId(1);
 	work->addressSpace = as;
 	work->signalHandlers = SignalHandlers(handlers);
@@ -66,8 +65,8 @@ MachineState::initialMachineState(VexPtr<LogReader > &lf,
 		ptr = nextPtr;
 	}
 
-	for (unsigned x = 0; x < work->threads->size(); x++)
-		work->threads->index(x)->snapshotLog.push(
+	for (unsigned x = 0; x < work->threads.size(); x++)
+		work->threads[x]->snapshotLog.push(
 			Thread::snapshot_log_entry(work, ptr));
 	*end = ptr;
 	return work->dupeSelf();;
@@ -78,8 +77,8 @@ void MachineState::dumpSnapshot(LogWriter *lw) const
 	addressSpace->dumpBrkPtr(lw);
 	signalHandlers.dumpSnapshot(lw);
 	addressSpace->dumpSnapshot(lw);
-	for (unsigned x = 0; x < threads->size(); x++)
-		threads->index(x)->dumpSnapshot(lw);
+	for (unsigned x = 0; x < threads.size(); x++)
+		threads[x]->dumpSnapshot(lw);
 }
 
 MachineState *MachineState::dupeSelf() const
@@ -88,18 +87,17 @@ MachineState *MachineState::dupeSelf() const
 	*work = *this;
 
 	work->addressSpace = addressSpace->dupeSelf();
-	work->threads = LibvexVector<Thread >::empty();
-	work->threads->_set_size(threads->size());
-	for (unsigned x = 0; x < threads->size(); x++)
-		work->threads->set(x, threads->index(x)->dupeSelf());
+	work->threads.resize(threads.size());
+	for (unsigned x = 0; x < threads.size(); x++)
+		work->threads[x] = threads[x]->dupeSelf();
 	return work;
 }
 
 bool MachineState::crashed() const
 {
 	unsigned x;
-	for (x = 0; x < threads->size(); x++)
-		if (threads->index(x)->crashed)
+	for (x = 0; x < threads.size(); x++)
+		if (threads[x]->crashed)
 			return true;
 	return false;
 }
