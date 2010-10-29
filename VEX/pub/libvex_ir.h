@@ -1322,7 +1322,7 @@ extern void ppIREffect ( IREffect );
 
 
 typedef
-   struct {
+   struct _IRDirty : public GarbageCollected<_IRDirty> {
       /* What to call, and details of args/results */
       IRCallee* cee;    /* where to call */
       IRExpr*   guard;  /* :: Ity_Bit.  Controls whether call happens */
@@ -1342,10 +1342,15 @@ typedef
          Int      offset;
          Int      size;
       } fxState[VEX_N_FXSTATE];
+      void visit(HeapVisitor &hv) {
+	 hv(cee);
+	 hv(guard);
+	 hv(args);
+	 hv(mAddr);
+      }
+      NAMED_CLASS
    }
    IRDirty;
-
-DECLARE_VEX_TYPE(IRDirty)
 
 /* Pretty-print a dirty call */
 extern void     ppIRDirty ( IRDirty* );

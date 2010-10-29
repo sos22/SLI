@@ -98,13 +98,6 @@ IRExpr::visit(HeapVisitor &visit)
    }
 }
 
-DEFINE_VEX_TYPE_NO_DESTRUCT(IRDirty, {
-    visit(ths->cee);
-    visit(ths->guard);
-    visit(ths->args);
-    visit(ths->mAddr);
-  });
-
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRCAS, {
     visit(ths->addr);
     visit(ths->expdHi);
@@ -1291,7 +1284,7 @@ IRExpr** mkIRExprVec_7 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 /* Constructors -- IRDirty */
 
 IRDirty* emptyIRDirty ( void ) {
-   IRDirty* d = LibVEX_Alloc_IRDirty();
+   IRDirty* d = new IRDirty();
    d->cee      = NULL;
    d->guard    = NULL;
    d->args     = NULL;
