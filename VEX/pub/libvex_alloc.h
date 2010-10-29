@@ -15,6 +15,22 @@ public:
 
 #define ALLOW_GC GarbageCollectionToken::GarbageCollectionAllowed()
 
+#define NR_GC_ROOTS 128
+class Heap {
+public:
+	unsigned nr_gc_roots;
+	void **gc_roots[NR_GC_ROOTS];
+	const char *gc_root_names[NR_GC_ROOTS];
+	struct arena *head_arena;
+	struct arena *current_arena;
+	struct _VexAllocType *headType;
+	struct wr_core *headVisitedWeakRef;
+	unsigned long heap_used;
+};
+
+extern Heap main_heap;
+
+
 class HeapVisitor {
 public:
 	virtual void visit(void *&ptr) = 0;
@@ -303,7 +319,6 @@ private:
 public:
 	wr_core() : next(), content() {}
 };
-extern struct wr_core *headVisitedWeakRef;
 
 template <typename t>
 class WeakRef : public GarbageCollected<WeakRef<t> > {
@@ -316,8 +331,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		if (core.content) {
 			assert(core.content != (void *)0x93939393939393b3);
-			core.next = headVisitedWeakRef;
-			headVisitedWeakRef = &core;
+			core.next = main_heap.headVisitedWeakRef;
+			main_heap.headVisitedWeakRef = &core;
 		}
 	}
 	void destruct() {}

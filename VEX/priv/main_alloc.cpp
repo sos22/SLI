@@ -75,17 +75,9 @@ struct arena {
 /* Make the arena allocations be precisely 2MB. */
 #define ARENA_CONTENT_SIZE ((2ul << 20) - sizeof(struct arena))
 
-static struct allocation_header *raw_alloc(VexAllocType *t, unsigned long size);
+static struct allocation_header *raw_alloc(Heap *h, VexAllocType *t, unsigned long size);
 
-#define NR_GC_ROOTS 128
-static unsigned nr_gc_roots;
-static void **gc_roots[NR_GC_ROOTS];
-static const char *gc_root_names[NR_GC_ROOTS];
-static struct arena *head_arena;
-static struct arena *current_arena;
-static VexAllocType *headType;
-struct wr_core *headVisitedWeakRef;
-static unsigned long heap_used;
+Heap main_heap;
 
 static void *
 header_to_alloc(struct allocation_header *ah)
@@ -100,7 +92,7 @@ alloc_to_header(const void *x)
 }
 
 static struct arena *
-new_arena(size_t content_size)
+new_arena(Heap *h, size_t content_size)
 {
 	struct arena *r;
 
@@ -112,16 +104,17 @@ new_arena(size_t content_size)
 	if (r == MAP_FAILED)
 		err(1, "mmap() for %'zd bytes", content_size);
 	r->size = content_size;
-	r->next = head_arena;
-	head_arena = r;
+	r->next = h->head_arena;
+	h->head_arena = r;
 
-	heap_used += content_size;
+	h->heap_used += content_size;
 
 	return r;
 }
 
 class GcVisitor : public HeapVisitor {
 public:
+	Heap *h;
 	std::vector<struct allocation_header *> deferredVisit;
 	unsigned depth;
 	void visit(void *&ptr);
@@ -142,7 +135,7 @@ top:
 	DBG("Visit %p\n", what);
 	if (!what_header->redirection) {
 		struct allocation_header *redir;
-		redir = raw_alloc(what_header->type, what_header->size() - sizeof(struct allocation_header));
+		redir = raw_alloc(h, what_header->type, what_header->size() - sizeof(struct allocation_header));
 		what_header->redirection = redir;
 
 		memcpy(redir->content, what_header->content, what_header->size() - sizeof(struct allocation_header));
@@ -190,6 +183,8 @@ top:
 void
 LibVEX_free(const void *_ptr)
 {
+	Heap *h = &main_heap;
+
 	assert_gc_allocated(_ptr);
 
 	struct allocation_header *ah = alloc_to_header(_ptr);
@@ -197,10 +192,10 @@ LibVEX_free(const void *_ptr)
 	/* We support one special case, which is just rewinding the
 	   allocation pointer if you allocate something and then
 	   immediately free it. */
-	if (current_arena &&
-	    (unsigned long)ah + ah->size() == (unsigned long)current_arena->content + current_arena->bytes_used) {
-		assert(current_arena->bytes_used >= ah->size());
-		current_arena->bytes_used -= ah->size();
+	if (h->current_arena &&
+	    (unsigned long)ah + ah->size() == (unsigned long)h->current_arena->content + h->current_arena->bytes_used) {
+		assert(h->current_arena->bytes_used >= ah->size());
+		h->current_arena->bytes_used -= ah->size();
 		/* memset to zero, for the benefit of whoever uses
 		   this bit of memory after us. */
 		memset(ah, 0, ah->size());
@@ -210,6 +205,8 @@ LibVEX_free(const void *_ptr)
 void
 LibVEX_gc(GarbageCollectionToken t)
 {
+	Heap *h = &main_heap;
+
 	struct arena *old_arena;
 	struct arena *next_old;
 	GcVisitor gc;
@@ -219,9 +216,10 @@ LibVEX_gc(GarbageCollectionToken t)
 	printf("Major GC starts\n");
 
 	gc.depth = 0;
+	gc.h = h;
 
 	/* Zap the redirection pointers */
-	for (struct arena *a = head_arena; a; a = a->next) {
+	for (struct arena *a = h->head_arena; a; a = a->next) {
 		unsigned offset;
 		struct allocation_header *ah;
 		for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
@@ -232,19 +230,19 @@ LibVEX_gc(GarbageCollectionToken t)
 	}
 
 	/* Swizzle out the old arena */
-	old_arena = head_arena;
-	head_arena = NULL;
-	current_arena = NULL;
-	heap_used = 0;
+	old_arena = h->head_arena;
+	h->head_arena = NULL;
+	h->current_arena = NULL;
+	h->heap_used = 0;
 
 	/* Any allocations made from this point onwards will
 	   automatically go to the new generation. */
 
-	assert(headVisitedWeakRef == NULL);
+	assert(h->headVisitedWeakRef == NULL);
 
 	/* Do the copy phase */
-	for (unsigned x = 0; x < nr_gc_roots; x++)
-		gc.visit(*gc_roots[x]);
+	for (unsigned x = 0; x < h->nr_gc_roots; x++)
+		gc.visit(*h->gc_roots[x]);
 	while (!gc.deferredVisit.empty()) {
 		struct allocation_header *ah;
 		ah = gc.deferredVisit.back();
@@ -258,7 +256,7 @@ LibVEX_gc(GarbageCollectionToken t)
 
 	/* Handle weak references.  They're strung together in the
 	   global list automatically during the visit pass. */
-	for (struct wr_core *weak = headVisitedWeakRef;
+	for (struct wr_core *weak = h->headVisitedWeakRef;
 	     weak != NULL;
 	     weak = weak->next) {
 		assert(weak->content);
@@ -274,7 +272,7 @@ LibVEX_gc(GarbageCollectionToken t)
 		else
 			weak->content = NULL;
 	}
-	headVisitedWeakRef = NULL;
+	h->headVisitedWeakRef = NULL;
 
 	/* Run destructors and release memory */
 	while (old_arena) {
@@ -304,21 +302,21 @@ LibVEX_gc(GarbageCollectionToken t)
 
 	LibVEX_alloc_sanity_check();
 
-	printf("Major GC finished; %ld bytes in heap\n", heap_used);
+	printf("Major GC finished; %ld bytes in heap\n", h->heap_used);
 
-	if (heap_used >= GC_MAX_SIZE) {
+	if (h->heap_used >= GC_MAX_SIZE) {
 		/* We're pretty much boned at this point: every
 		   vexSetAllocModeTEMP_and_clear will trigger a full
 		   GC, and performance will go through the floor. */
 		extern void dbg_break(const char *msg, ...);
 		dbg_break("Heap is enormous (%ld bytes) after a full garbage collect!\n",
-			  heap_used);
+			  h->heap_used);
 	}
 }
 
 void LibVEX_maybe_gc(GarbageCollectionToken t)
 {
-	if (heap_used >= GC_MAX_SIZE)
+	if (main_heap.heap_used >= GC_MAX_SIZE)
 		LibVEX_gc(t);
 }
 
@@ -328,7 +326,7 @@ void vexSetAllocModeTEMP_and_clear(GarbageCollectionToken t)
 }
 
 static struct allocation_header *
-raw_alloc(VexAllocType *t, unsigned long size)
+raw_alloc(Heap *h, VexAllocType *t, unsigned long size)
 {
 	struct arena *a;
 
@@ -339,12 +337,12 @@ raw_alloc(VexAllocType *t, unsigned long size)
 	if (size > ARENA_CONTENT_SIZE) {
 		/* Allocate a dedicated arena for this very large
 		 * allocation. */
-		a = new_arena(size);
+		a = new_arena(h, size);
 	} else {
-		a = current_arena;
+		a = h->current_arena;
 		if (!a || a->bytes_used + size > ARENA_CONTENT_SIZE) {
-			a = new_arena(ARENA_CONTENT_SIZE);
-			current_arena = a;
+			a = new_arena(h, ARENA_CONTENT_SIZE);
+			h->current_arena = a;
 		}
 	}
 
@@ -375,9 +373,9 @@ raw_alloc(VexAllocType *t, unsigned long size)
 }
 
 static void *
-alloc_bytes(VexAllocType *type, unsigned long size)
+alloc_bytes(Heap *h, VexAllocType *type, unsigned long size)
 {
-	struct allocation_header *ah = raw_alloc(type, size);
+	struct allocation_header *ah = raw_alloc(h, type, size);
 	return header_to_alloc(ah);
 }
 
@@ -385,24 +383,25 @@ static VexAllocType byte_alloc_type = { -1, NULL, NULL, NULL, "<bytes>" };
 void *
 __LibVEX_Alloc_Bytes(unsigned long nbytes, struct libvex_allocation_site *site)
 {
-	return alloc_bytes(&byte_alloc_type, nbytes);
+	return alloc_bytes(&main_heap, &byte_alloc_type, nbytes);
 }
 
 void *
 LibVEX_Alloc_Sized(VexAllocType *t, unsigned long nbytes)
 {
-	return alloc_bytes(t, nbytes);
+	return alloc_bytes(&main_heap, t, nbytes);
 }
 
 struct libvex_alloc_type *
 __LibVEX_Alloc(VexAllocType *t)
 {
-	return (struct libvex_alloc_type *)alloc_bytes(t, t->nbytes);
+	return (struct libvex_alloc_type *)alloc_bytes(&main_heap, t, t->nbytes);
 }
 
 void *
 LibVEX_realloc(void *ptr, unsigned long new_size)
 {
+	Heap *h = &main_heap;
 	assert_gc_allocated(ptr);
 	struct allocation_header *ah = alloc_to_header(ptr);
 	void *newptr;
@@ -413,7 +412,7 @@ LibVEX_realloc(void *ptr, unsigned long new_size)
 	/* The *2 is because if you've had to grow it once you're
 	   likely to have to do so again, and we want to grow the
 	   actual allocation as few times as possible. */
-	newptr = alloc_bytes(ah->type, new_size * 2);
+	newptr = alloc_bytes(h, ah->type, new_size * 2);
 	memcpy(newptr, ptr, ah->size() - sizeof(*ah));
 	return newptr;
 }
@@ -421,23 +420,25 @@ LibVEX_realloc(void *ptr, unsigned long new_size)
 void
 vexRegisterGCRoot(void **w, const char *name)
 {
+	Heap *h = &main_heap;
 	vassert(nr_gc_roots < NR_GC_ROOTS);
-	gc_roots[nr_gc_roots] = w;
-	gc_root_names[nr_gc_roots] = name;
-	nr_gc_roots++;
+	h->gc_roots[h->nr_gc_roots] = w;
+	h->gc_root_names[h->nr_gc_roots] = name;
+	h->nr_gc_roots++;
 }
 
 void
 vexUnregisterGCRoot(void **w)
 {
+	Heap *h = &main_heap;
 	unsigned x;
 	if (*w)
 		assert_gc_allocated(*w);
-	for (x = 0; x < nr_gc_roots; x++) {
-		if (gc_roots[x] == w) {
-			memmove(gc_roots + x, gc_roots + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_roots[0]));
-			memmove(gc_root_names, gc_root_names + x + 1, (nr_gc_roots - x - 1) * sizeof(gc_root_names[0]));
-			nr_gc_roots--;
+	for (x = 0; x < h->nr_gc_roots; x++) {
+		if (h->gc_roots[x] == w) {
+			memmove(h->gc_roots + x, h->gc_roots + x + 1, (h->nr_gc_roots - x - 1) * sizeof(h->gc_roots[0]));
+			memmove(h->gc_root_names, h->gc_root_names + x + 1, (h->nr_gc_roots - x - 1) * sizeof(h->gc_root_names[0]));
+			h->nr_gc_roots--;
 			return;
 		}
 	}
@@ -446,6 +447,7 @@ vexUnregisterGCRoot(void **w)
 
 class HeapUsageVisitor : public HeapVisitor {
 public:
+	Heap *h;
 	unsigned long heap_used;
 	unsigned nr_allocations;
 	void visit(void *&ptr);
@@ -457,10 +459,10 @@ HeapUsageVisitor::account_one_allocation(allocation_header *hdr)
 {
 	VexAllocType *t = hdr->type;
 	if (!t->total_allocated) {
-		t->next = headType;
+		t->next = h->headType;
 		if (!t->name)
 			t->name = t->get_name(hdr + 1);
-		headType = t;
+		h->headType = t;
 	}
 	t->total_allocated += hdr->size();
 	t->nr_allocated++;
@@ -486,14 +488,15 @@ void HeapUsageVisitor::visit(void *&ptr)
 void
 dump_heap_usage(void)
 {
+	Heap *h = &main_heap;
 	VexAllocType *cursor;
-	for (cursor = headType; cursor; cursor = cursor->next) {
+	for (cursor = h->headType; cursor; cursor = cursor->next) {
 		cursor->total_allocated = 0;
 		cursor->nr_allocated = 0;
 	}
-	headType = NULL;
+	h->headType = NULL;
 
-	for (struct arena *a = head_arena; a; a = a->next) {
+	for (struct arena *a = h->head_arena; a; a = a->next) {
 		unsigned offset;
 		struct allocation_header *ah;
 		for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
@@ -505,24 +508,25 @@ dump_heap_usage(void)
 	HeapUsageVisitor visitor;
 	visitor.heap_used = 0;
 	visitor.nr_allocations = 0;
+	visitor.h = h;
 
-	for (unsigned x = 0; x < nr_gc_roots; x++)
-		visitor.visit(*gc_roots[x]);
+	for (unsigned x = 0; x < h->nr_gc_roots; x++)
+		visitor.visit(*h->gc_roots[x]);
 
 	printf("Live:\n");
-	for (cursor = headType; cursor; cursor = cursor->next)
+	for (cursor = h->headType; cursor; cursor = cursor->next)
 		printf("%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
 	printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
 	visitor.heap_used = 0;
 	visitor.nr_allocations = 0;
 
-	for (cursor = headType; cursor; cursor = cursor->next) {
+	for (cursor = h->headType; cursor; cursor = cursor->next) {
 		cursor->total_allocated = 0;
 		cursor->nr_allocated = 0;
 	}
-	headType = NULL;
+	h->headType = NULL;
 	
-	for (struct arena *a = head_arena; a; a = a->next) {
+	for (struct arena *a = h->head_arena; a; a = a->next) {
 		unsigned offset;
 		struct allocation_header *ah;
 		for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
@@ -533,11 +537,11 @@ dump_heap_usage(void)
 	}
 
 	printf("\nDragging:\n");
-	for (cursor = headType; cursor; cursor = cursor->next)
+	for (cursor = h->headType; cursor; cursor = cursor->next)
 		printf("%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
 	printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
 
-	for (struct arena *a = head_arena; a; a = a->next) {
+	for (struct arena *a = h->head_arena; a; a = a->next) {
 		unsigned offset;
 		struct allocation_header *ah;
 		for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
@@ -546,7 +550,7 @@ dump_heap_usage(void)
 		}
 	}
 
-	headVisitedWeakRef = NULL;
+	h->headVisitedWeakRef = NULL;
 }
 
 void
@@ -568,11 +572,12 @@ static VexAllocType ptr_array_type = { -1, NULL, visit_ptr_array, NULL, "<array>
 struct libvex_alloc_type *
 __LibVEX_Alloc_Ptr_Array(unsigned long len)
 {
+	Heap *h = &main_heap;
 	struct allocation_header *ah;
 	void **res;
 	unsigned x;
 
-	res = (void **)alloc_bytes(&ptr_array_type, sizeof(void *) * len);
+	res = (void **)alloc_bytes(h, &ptr_array_type, sizeof(void *) * len);
 	ah = alloc_to_header(res);
 	for (x = 0; x < (ah->size() - sizeof(*ah)) / sizeof(void *); x++)
 		res[x] = NULL;
@@ -617,19 +622,20 @@ sanity_check_arena(struct arena *a)
 void
 _LibVEX_alloc_sanity_check()
 {
+	Heap *h = &main_heap;
 	struct arena *fast, *slow;
 	bool found_current;
 
-	slow = fast = head_arena;
+	slow = fast = h->head_arena;
 	found_current = false;
 	while (1) {
-		if (fast == current_arena)
+		if (fast == h->current_arena)
 			found_current = true;
 		if (!fast)
 			break;
 		sanity_check_arena(fast);
 		fast = fast->next;
-		if (fast == current_arena)
+		if (fast == h->current_arena)
 			found_current = true;
 		if (!fast)
 			break;
