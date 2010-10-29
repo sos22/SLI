@@ -5,18 +5,17 @@
 #include "libvex_alloc.h"
 #include "main_util.h"
 
-struct keeper {
+struct keeper : public GarbageCollected<keeper> {
 	PhysicalAddress pa1;
 	PhysicalAddress pa2;
 	PMap *pmap;
+	void visit(HeapVisitor &hv) {
+		hv(pmap);
+		pmap->visitPA(pa1, hv);
+		pmap->visitPA(pa2, hv);
+	}
+	NAMED_CLASS
 };
-
-DECLARE_VEX_TYPE(keeper);
-DEFINE_VEX_TYPE_NO_DESTRUCT(keeper, {
-		visit(ths->pmap);
-		ths->pmap->visitPA(ths->pa1, visit);
-		ths->pmap->visitPA(ths->pa2, visit);
-	});
 
 int
 main()
@@ -77,7 +76,7 @@ main()
 	pa1 = pmap1->introduce(mc1);
 	pa2 = pmap1->introduce(mc2);
 
-	keeper *k = LibVEX_Alloc_keeper();
+	keeper *k = new keeper();
 	k->pa1 = pa1;
 	k->pa2 = pa2;
 	k->pmap = pmap1;
