@@ -366,14 +366,14 @@ extern void ppIRCallee ( IRCallee* );
    be able to index at run time, so as to be able to describe 
    indexed or rotating register files on the guest. */
 typedef
-   struct {
+   struct _IRRegArray : public GarbageCollected<_IRRegArray> {
       Int    base;   /* guest state offset of start of indexed area */
       IRType elemTy; /* type of each element in the indexed area */
       Int    nElems; /* number of elements in the indexed area */
+      void visit(HeapVisitor &hv) {}
+      NAMED_CLASS
    }
    IRRegArray;
-
-DECLARE_VEX_TYPE(IRRegArray)
 
 extern IRRegArray* mkIRRegArray ( Int, IRType, Int );
 

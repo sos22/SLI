@@ -50,8 +50,6 @@
 
 #include "main_util.h"
 
-DEFINE_VEX_TYPE(IRRegArray);
-
 static void
 visit_IRExpr(IRExpr *iex, HeapVisitor &visit)
 {
@@ -1099,7 +1097,7 @@ IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr )
 
 IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 {
-   IRRegArray* arr = LibVEX_Alloc_IRRegArray();
+   IRRegArray* arr = new IRRegArray();
    arr->base       = base;
    arr->elemTy     = elemTy;
    arr->nElems     = nElems;
