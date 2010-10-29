@@ -53,7 +53,6 @@ struct allocation_header {
 	unsigned long magic;
 #endif
 	unsigned long _size;
-	bool manual_redirection;
 	struct allocation_header *redirection;
 
 	unsigned long size() const { return _size & ~1ul; }
@@ -125,7 +124,6 @@ GcVisitor::visit(void *&what)
 {
 	struct allocation_header *what_header;
 
-top:
 	if (!what)
 		return;
 	assert_gc_allocated(what);
@@ -167,11 +165,6 @@ top:
 		assert(!((unsigned long)what_header->redirection & 0x8000000000000000ul));
 		assert((unsigned long)header_to_alloc(what_header->redirection) != 0x93939393939393ab);
 		assert(what_header->redirection->type == what_header->type);
-		if (what_header->redirection->manual_redirection) {
-			assert(what != header_to_alloc(what_header->redirection));
-			what = header_to_alloc(what_header->redirection);
-			goto top;
-		}
 		what = header_to_alloc(what_header->redirection);
 		assert(what != NULL);
 		assert_gc_allocated(what);
@@ -224,8 +217,7 @@ LibVEX_gc(GarbageCollectionToken t)
 		struct allocation_header *ah;
 		for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
 			ah = (struct allocation_header *)(a->content + offset);
-			if (!ah->manual_redirection)
-				ah->redirection = NULL;
+			ah->redirection = NULL;
 		}
 	}
 
@@ -267,7 +259,7 @@ LibVEX_gc(GarbageCollectionToken t)
 		   it'll have a redirection.  Otherwise, it's garbage.
 		   Update the content of the reference
 		   appropriately. */
-		if (ah->redirection && !ah->manual_redirection)
+		if (ah->redirection)
 			weak->content = header_to_alloc(ah->redirection);
 		else
 			weak->content = NULL;
@@ -281,7 +273,7 @@ LibVEX_gc(GarbageCollectionToken t)
 
 		for (offset = 0; offset < old_arena->bytes_used; offset += ah->size()) {
 			ah = (struct allocation_header *)(&old_arena->content[offset]);
-			if (ah->redirection && !ah->manual_redirection) {
+			if (ah->redirection) {
 				/* This one is still alive, so don't
 				   run its destructor.  The underlying
 				   memory will be released, though,
@@ -615,7 +607,7 @@ sanity_check_arena(struct arena *a)
 		assert(ah->type != NULL);
 		assert(ah->size() <= a->size - offset);
 		assert(!ah->mark());
-		assert(ah->redirection == ah || ah->redirection == NULL || ah->manual_redirection);
+		assert(ah->redirection == ah || ah->redirection == NULL);
 	}
 }
 
@@ -667,18 +659,4 @@ assert_gc_allocated(const void *ptr)
 	struct allocation_header *ah = alloc_to_header(ptr);
 	assert(ah->magic == ALLOCATION_HEADER_MAGIC);
 #endif
-}
-
-/* Arrange that on the next GC pass every reference to what gets
-   turned into a reference to to. */
-void
-libvex_redirect(void *what, void *to)
-{
-	assert(what != to);
-	assert_gc_allocated(what);
-	assert_gc_allocated(to);
-
-	struct allocation_header *ah = alloc_to_header(what);
-	ah->redirection = alloc_to_header(to);
-	ah->manual_redirection = true;
 }
