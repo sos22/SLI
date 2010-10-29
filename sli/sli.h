@@ -281,7 +281,7 @@ public:
 	NAMED_CLASS
 };
 
-class VAMap {
+class VAMap : public GarbageCollected<VAMap> {
 public:
 	class Protection {
 	public:
@@ -367,6 +367,8 @@ public:
 	VAMap *dupeSelf();
 	static void visit(VAMap *&ref, HeapVisitor &hv, PMap *pmap);
 	void visit(HeapVisitor &hv);
+
+	NAMED_CLASS
 };
 
 #define MEMORY_CHUNK_SIZE 4096

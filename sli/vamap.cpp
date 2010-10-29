@@ -13,9 +13,6 @@
 /* Distance in chunks */
 #define dchunk(start, end) (((end) - (start))/MEMORY_CHUNK_SIZE)
 
-DECLARE_VEX_TYPE(VAMap)
-DEFINE_VEX_TYPE_NO_DESTRUCT(VAMap, {ths->visit(visit);});
-
 VAMap::Protection::Protection(unsigned prot)
 {
 	readable = writable = executable = false;
@@ -529,10 +526,7 @@ void VAMap::unmap(unsigned long start, unsigned long size)
 
 VAMap *VAMap::empty()
 {
-	VAMap *work = LibVEX_Alloc_VAMap();
-
-	memset(work, 0, sizeof(*work));
-	return work;
+	return new VAMap();
 }
 
 VAMap *VAMap::dupeSelf()
