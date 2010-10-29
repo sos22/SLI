@@ -28,31 +28,6 @@ public:
 	}
 };
 
-/* Derive from and instantiate one of these if you need special hooks
-   into the garbage collector.  These structures cannot be on the
-   garbage-collected heap. */
-class GcAssistant {
-protected:
-  GcAssistant();
-  virtual ~GcAssistant();
-public:
-  /* The order is:
-
-     <GC starts, new arena activated>
-     pre_copy_phase()
-     <visit all of the roots and everything reachable from them>
-     post_copy_phase() <-- this is the last point at which anything can be saved
-     <fix up all weak references>
-     pre_destruct_phase()
-     <run all destructors>
-     post_destruct_phase()
-  */
-  virtual void pre_copy_phase(HeapVisitor &hv) {}
-  virtual void post_copy_phase(HeapVisitor &hv) {}
-  virtual void pre_destruct_phase() {}
-  virtual void post_destruct_phase() {}
-};
-
 /* Allocate in Vex's temporary allocation area.  Be careful with this.
    You can only call it inside an instrumentation or optimisation
    callback that you have previously specified in a call to

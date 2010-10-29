@@ -87,9 +87,6 @@ static VexAllocType *headType;
 struct wr_core *headVisitedWeakRef;
 static unsigned long heap_used;
 
-#define MAX_NR_GC_ASSISTANTS 16
-static GcAssistant *gc_assistants[MAX_NR_GC_ASSISTANTS];
-
 static void *
 header_to_alloc(struct allocation_header *ah)
 {
@@ -216,7 +213,6 @@ LibVEX_gc(GarbageCollectionToken t)
 	struct arena *old_arena;
 	struct arena *next_old;
 	GcVisitor gc;
-	int x;
 
 	LibVEX_alloc_sanity_check();
 
@@ -241,10 +237,6 @@ LibVEX_gc(GarbageCollectionToken t)
 	current_arena = NULL;
 	heap_used = 0;
 
-	for (x = 0; x < MAX_NR_GC_ASSISTANTS; x++)
-		if (gc_assistants[x])
-			gc_assistants[x]->pre_copy_phase(gc);
-
 	/* Any allocations made from this point onwards will
 	   automatically go to the new generation. */
 
@@ -263,10 +255,6 @@ LibVEX_gc(GarbageCollectionToken t)
 	}
 
 	LibVEX_alloc_sanity_check();
-
-	for (x = 0; x < MAX_NR_GC_ASSISTANTS; x++)
-		if (gc_assistants[x])
-			gc_assistants[x]->post_copy_phase(gc);
 
 	/* Handle weak references.  They're strung together in the
 	   global list automatically during the visit pass. */
@@ -287,10 +275,6 @@ LibVEX_gc(GarbageCollectionToken t)
 			weak->content = NULL;
 	}
 	headVisitedWeakRef = NULL;
-
-	for (x = 0; x < MAX_NR_GC_ASSISTANTS; x++)
-		if (gc_assistants[x])
-			gc_assistants[x]->pre_destruct_phase();
 
 	/* Run destructors and release memory */
 	while (old_arena) {
@@ -319,10 +303,6 @@ LibVEX_gc(GarbageCollectionToken t)
 	}
 
 	LibVEX_alloc_sanity_check();
-
-	for (x = 0; x < MAX_NR_GC_ASSISTANTS; x++)
-		if (gc_assistants[x])
-			gc_assistants[x]->post_destruct_phase();
 
 	printf("Major GC finished; %ld bytes in heap\n", heap_used);
 
@@ -695,28 +675,4 @@ libvex_redirect(void *what, void *to)
 	struct allocation_header *ah = alloc_to_header(what);
 	ah->redirection = alloc_to_header(to);
 	ah->manual_redirection = true;
-}
-
-GcAssistant::GcAssistant()
-{
-	int x;
-	for (x = 0; x < MAX_NR_GC_ASSISTANTS; x++)
-		if (!gc_assistants[x]) {
-			gc_assistants[x] = this;
-			return;
-		}
-	abort();
-}
-
-GcAssistant::~GcAssistant()
-{
-	bool done = false;
-	for (unsigned x = 0; x < MAX_NR_GC_ASSISTANTS; x++) {
-		if (gc_assistants[x] == this) {
-			assert(!done);
-			gc_assistants[x] = NULL;
-			done = true;
-		}
-	}
-	assert(done);
 }
