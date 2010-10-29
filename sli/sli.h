@@ -270,7 +270,7 @@ public:
 	void dumpSnapshot(LogWriter *lw);
 
 	static void imposeState(VexPtr<Thread > &thr,
-				VexPtr<LogRecordVexThreadState> &rec,
+				VexPtr<LogRecordVexThreadState, &ir_heap> &rec,
 				VexPtr<AddressSpace > &as,
 				VexPtr<MachineState > &ms,
 				const LogReaderPtr &ptr,
@@ -467,7 +467,7 @@ public:
 	NAMED_CLASS
 };
 
-class LogRecord : public Named, public GarbageCollected<LogRecord> {
+class LogRecord : public Named, public GarbageCollected<LogRecord, &ir_heap> {
 	ThreadId tid;
 protected:
 	void *marshal(unsigned cls, unsigned psize, unsigned *sz, void **r) const;

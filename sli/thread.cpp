@@ -69,7 +69,7 @@ void Thread::dumpSnapshot(LogWriter *lw)
 }
 
 void Thread::imposeState(VexPtr<Thread > &ths,
-			      VexPtr<LogRecordVexThreadState > &rec,
+			 VexPtr<LogRecordVexThreadState, &ir_heap > &rec,
 			      VexPtr<AddressSpace> &as,
 			      VexPtr<MachineState > &ms,
 			      const LogReaderPtr &ptr,
@@ -89,10 +89,6 @@ void Thread::imposeState(VexPtr<Thread > &ths,
 
 void Thread::visit(HeapVisitor &hv)
 {
-	IRSB *i = currentIRSB.get();
-	hv(i);
-	currentIRSB.set(i);
-
 	for (class ring_buffer<snapshot_log_entry, 2>::iterator it = snapshotLog.begin();
 	     it != snapshotLog.end();
 	     it++)

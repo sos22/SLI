@@ -28,7 +28,7 @@ MachineState::initialMachineState(VexPtr<LogReader > &lf,
 							  GarbageCollectionToken token)
 {
 	VexPtr<MachineState > work;
-	VexPtr<LogRecord> lr;
+	VexPtr<LogRecord, &ir_heap> lr;
 	
 	lr = lf->read(ptr, &ptr);
 	LogRecordInitialBrk *lrib = dynamic_cast<LogRecordInitialBrk*>(lr.get());
@@ -54,7 +54,7 @@ MachineState::initialMachineState(VexPtr<LogReader > &lf,
 		} else if (LogRecordInitialRegisters *lrir = dynamic_cast<LogRecordInitialRegisters*>(lr.get())) {
 			work->registerThread(Thread::initialThread(*lrir));
 	        } else if (LogRecordVexThreadState *lrvts = dynamic_cast<LogRecordVexThreadState*>(lr.get())) {
-			VexPtr<LogRecordVexThreadState > l(lrvts);
+			VexPtr<LogRecordVexThreadState, &ir_heap> l(lrvts);
 			VexPtr<Thread > t(work->findThread(lrvts->thread()));
 			t->imposeState(t, l, as, work, ptr, token);
 		} else {

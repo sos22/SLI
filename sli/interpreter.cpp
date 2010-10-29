@@ -1764,7 +1764,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				VexPtr<EventRecorder> &er)
 {
 	unsigned long event_counter = 0;
-	VexPtr<LogRecord> lr;
+	VexPtr<LogRecord, &ir_heap> lr;
 	bool appendedRecord = false;
 	bool finished = false;
 	LogReaderPtr ptr2 = ptr;
