@@ -50,7 +50,6 @@
 
 #include "main_util.h"
 
-DEFINE_VEX_TYPE(IRConst);
 DEFINE_VEX_TYPE(IRCallee);
 DEFINE_VEX_TYPE(IRRegArray);
 
@@ -1024,7 +1023,7 @@ void ppIRSB ( IRSB* bb )
 
 IRConst* IRConst_U1 ( Bool bit )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag     = Ico_U1;
    c->Ico.U1  = bit;
    /* call me paranoid; I don't care :-) */
@@ -1033,49 +1032,49 @@ IRConst* IRConst_U1 ( Bool bit )
 }
 IRConst* IRConst_U8 ( UChar u8 )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag     = Ico_U8;
    c->Ico.U8  = u8;
    return c;
 }
 IRConst* IRConst_U16 ( UShort u16 )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag     = Ico_U16;
    c->Ico.U16 = u16;
    return c;
 }
 IRConst* IRConst_U32 ( UInt u32 )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag     = Ico_U32;
    c->Ico.U32 = u32;
    return c;
 }
 IRConst* IRConst_U64 ( ULong u64 )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag     = Ico_U64;
    c->Ico.U64 = u64;
    return c;
 }
 IRConst* IRConst_F64 ( Double f64 )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag     = Ico_F64;
    c->Ico.F64 = f64;
    return c;
 }
 IRConst* IRConst_F64i ( ULong f64i )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag      = Ico_F64i;
    c->Ico.F64i = f64i;
    return c;
 }
 IRConst* IRConst_V128 ( UShort con )
 {
-   IRConst* c = LibVEX_Alloc_IRConst();
+   IRConst* c = new IRConst();
    c->tag      = Ico_V128;
    c->Ico.V128 = con;
    return c;

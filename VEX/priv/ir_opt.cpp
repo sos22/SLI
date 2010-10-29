@@ -2336,12 +2336,12 @@ typedef
          struct {
             IROp    op;
             IRTemp  arg1;
-            IRConst con2;
+            IRConst *con2;
          } Btc;
          /* binop(const,tmp) */
          struct {
             IROp    op;
-            IRConst con1;
+            IRConst *con1;
             IRTemp  arg2;
          } Bct;
          /* F64i-style const */
@@ -2365,7 +2365,11 @@ typedef
    AvailExpr;
 
 DECLARE_VEX_TYPE(AvailExpr)
-DEFINE_VEX_TYPE_NO_DESTRUCT(AvailExpr, { if (ths->tag == AvailExpr::GetIt) visit(ths->u.GetIt.descr); });
+DEFINE_VEX_TYPE_NO_DESTRUCT(AvailExpr, {
+    if (ths->tag == AvailExpr::GetIt) visit(ths->u.GetIt.descr);
+    else if (ths->tag == AvailExpr::Btc) visit(ths->u.Btc.con2);
+    else if (ths->tag == AvailExpr::Bct) visit(ths->u.Bct.con1);
+  });
 
 static Bool eq_AvailExpr ( AvailExpr* a1, AvailExpr* a2 )
 {
@@ -2385,12 +2389,12 @@ static Bool eq_AvailExpr ( AvailExpr* a1, AvailExpr* a2 )
          return toBool(
                 a1->u.Btc.op == a2->u.Btc.op
                 && a1->u.Btc.arg1 == a2->u.Btc.arg1
-                && eqIRConst(&a1->u.Btc.con2, &a2->u.Btc.con2));
+                && eqIRConst(a1->u.Btc.con2, a2->u.Btc.con2));
       case AvailExpr::Bct: 
          return toBool(
                 a1->u.Bct.op == a2->u.Bct.op
                 && a1->u.Bct.arg2 == a2->u.Bct.arg2
-                && eqIRConst(&a1->u.Bct.con1, &a2->u.Bct.con1));
+                && eqIRConst(a1->u.Bct.con1, a2->u.Bct.con1));
       case AvailExpr::Cf64i: 
          return toBool(a1->u.Cf64i.f64i == a2->u.Cf64i.f64i);
       case AvailExpr::Mttt:
@@ -2416,14 +2420,12 @@ static IRExpr* availExpr_to_IRExpr ( AvailExpr* ae )
                               IRExpr_RdTmp(ae->u.Btt.arg1),
                               IRExpr_RdTmp(ae->u.Btt.arg2) );
       case AvailExpr::Btc:
-         con = LibVEX_Alloc_IRConst();
-         *con = ae->u.Btc.con2;
+	 con = ae->u.Btc.con2;
          return IRExpr_Binop( ae->u.Btc.op,
                               IRExpr_RdTmp(ae->u.Btc.arg1), 
                               IRExpr_Const(con) );
       case AvailExpr::Bct:
-         con = LibVEX_Alloc_IRConst();
-         *con = ae->u.Bct.con1;
+         con = ae->u.Bct.con1;
          return IRExpr_Binop( ae->u.Bct.op,
                               IRExpr_Const(con), 
                               IRExpr_RdTmp(ae->u.Bct.arg2) );
@@ -2516,7 +2518,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
       ae->tag        = AvailExpr::Btc;
       ae->u.Btc.op   = e->Iex.Binop.op;
       ae->u.Btc.arg1 = e->Iex.Binop.arg1->Iex.RdTmp.tmp;
-      ae->u.Btc.con2 = *(e->Iex.Binop.arg2->Iex.Const.con);
+      ae->u.Btc.con2 = e->Iex.Binop.arg2->Iex.Const.con;
       return ae;
    }
 
@@ -2527,7 +2529,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
       ae->tag        = AvailExpr::Bct;
       ae->u.Bct.op   = e->Iex.Binop.op;
       ae->u.Bct.arg2 = e->Iex.Binop.arg2->Iex.RdTmp.tmp;
-      ae->u.Bct.con1 = *(e->Iex.Binop.arg1->Iex.Const.con);
+      ae->u.Bct.con1 = e->Iex.Binop.arg1->Iex.Const.con;
       return ae;
    }
 

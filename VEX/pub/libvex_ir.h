@@ -286,7 +286,7 @@ typedef
    IRConst 'c' has c.tag equal to Ico_U32, then it's a 32-bit constant,
    and its value can be accessed with 'c.Ico.U32'. */
 typedef
-   struct _IRConst {
+   struct _IRConst : public GarbageCollected<_IRConst>{
       IRConstTag tag;
       union {
          Bool   U1;
@@ -298,10 +298,10 @@ typedef
          ULong  F64i;
          UShort V128;   /* 16-bit value; see Ico_V128 comment above */
       } Ico;
+      void visit(HeapVisitor &hv) {}
+      NAMED_CLASS
    }
    IRConst;
-
-DECLARE_VEX_TYPE(IRConst)
 
 /* IRConst constructors */
 extern IRConst* IRConst_U1   ( Bool );
