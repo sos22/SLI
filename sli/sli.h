@@ -658,7 +658,7 @@ public:
 	void visit(HeapVisitor &hv) {}
 };
 
-class ThreadEvent : public Named, public GarbageCollected<ThreadEvent > {
+class ThreadEvent : public Named, public GarbageCollected<ThreadEvent, &ir_heap> {
 protected:
 	ThreadEvent(ThreadId _tid) : tid(_tid) {}
 public:
