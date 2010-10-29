@@ -1860,7 +1860,7 @@ IRSB* cprop_BB ( IRSB* in )
    IRSB*    out;
    IRStmt*  st2;
    Int      n_tmps = in->tyenv->types_used;
-   IRExpr** env = LibVEX_Alloc_Array_IRExpr(n_tmps);
+   IRExpr** env = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&main_heap, n_tmps);
 
    out = emptyIRSB();
    out->tyenv = deepCopyIRTypeEnv( in->tyenv );

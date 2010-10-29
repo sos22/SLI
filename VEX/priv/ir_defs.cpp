@@ -50,54 +50,53 @@
 
 #include "main_util.h"
 
-static void
-visit_IRExpr(IRExpr *iex, HeapVisitor &visit)
+void
+IRExpr::visit(HeapVisitor &visit)
 {
-   switch (iex->tag) {
+   switch (tag) {
    case Iex_Binder:
    case Iex_Get:
    case Iex_RdTmp:
      break;
    case Iex_GetI:
-     visit(iex->Iex.GetI.descr);
-     visit(iex->Iex.GetI.ix);
+     visit(Iex.GetI.descr);
+     visit(Iex.GetI.ix);
      break;
    case Iex_Qop:
-     visit(iex->Iex.Qop.arg1);
-     visit(iex->Iex.Qop.arg2);
-     visit(iex->Iex.Qop.arg3);
-     visit(iex->Iex.Qop.arg4);
+     visit(Iex.Qop.arg1);
+     visit(Iex.Qop.arg2);
+     visit(Iex.Qop.arg3);
+     visit(Iex.Qop.arg4);
      break;
    case Iex_Triop:
-     visit(iex->Iex.Triop.arg1);
-     visit(iex->Iex.Triop.arg2);
-     visit(iex->Iex.Triop.arg3);
+     visit(Iex.Triop.arg1);
+     visit(Iex.Triop.arg2);
+     visit(Iex.Triop.arg3);
      break;
    case Iex_Binop:
-     visit(iex->Iex.Binop.arg1);
-     visit(iex->Iex.Binop.arg2);
+     visit(Iex.Binop.arg1);
+     visit(Iex.Binop.arg2);
      break;
    case Iex_Unop:
-     visit(iex->Iex.Unop.arg);
+     visit(Iex.Unop.arg);
      break;
    case Iex_Load:
-     visit(iex->Iex.Load.addr);
+     visit(Iex.Load.addr);
      break;
    case Iex_Const:
-     visit(iex->Iex.Const.con);
+     visit(Iex.Const.con);
      break;
    case Iex_CCall:
-     visit(iex->Iex.CCall.cee);
-     visit(iex->Iex.CCall.args);
+     visit(Iex.CCall.cee);
+     visit(Iex.CCall.args);
      break;
    case Iex_Mux0X:
-     visit(iex->Iex.Mux0X.cond);
-     visit(iex->Iex.Mux0X.expr0);
-     visit(iex->Iex.Mux0X.exprX);
+     visit(Iex.Mux0X.cond);
+     visit(Iex.Mux0X.expr0);
+     visit(Iex.Mux0X.exprX);
      break;
    }
 }
-__DEFINE_VEX_TYPE_NO_DESTRUCT(IRExpr, visit_IRExpr);
 
 DEFINE_VEX_TYPE_NO_DESTRUCT(IRDirty, {
     visit(ths->cee);
@@ -1111,20 +1110,20 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 /* Constructors -- IRExpr */
 
 IRExpr* IRExpr_Binder ( Int binder ) {
-   IRExpr* e            = LibVEX_Alloc_IRExpr();
+   IRExpr* e            = new IRExpr();
    e->tag               = Iex_Binder;
    e->Iex.Binder.binder = binder;
    return e;
 }
 IRExpr* IRExpr_Get ( Int off, IRType ty ) {
-   IRExpr* e         = LibVEX_Alloc_IRExpr();
+   IRExpr* e         = new IRExpr();
    e->tag            = Iex_Get;
    e->Iex.Get.offset = off;
    e->Iex.Get.ty     = ty;
    return e;
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias ) {
-   IRExpr* e         = LibVEX_Alloc_IRExpr();
+   IRExpr* e         = new IRExpr();
    e->tag            = Iex_GetI;
    e->Iex.GetI.descr = descr;
    e->Iex.GetI.ix    = ix;
@@ -1132,14 +1131,14 @@ IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias ) {
    return e;
 }
 IRExpr* IRExpr_RdTmp ( IRTemp tmp ) {
-   IRExpr* e        = LibVEX_Alloc_IRExpr();
+   IRExpr* e        = new IRExpr();
    e->tag           = Iex_RdTmp;
    e->Iex.RdTmp.tmp = tmp;
    return e;
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {
-   IRExpr* e       = LibVEX_Alloc_IRExpr();
+   IRExpr* e       = new IRExpr();
    e->tag          = Iex_Qop;
    e->Iex.Qop.op   = op;
    e->Iex.Qop.arg1 = arg1;
@@ -1150,7 +1149,7 @@ IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2,
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                  IRExpr* arg2, IRExpr* arg3 ) {
-   IRExpr* e         = LibVEX_Alloc_IRExpr();
+   IRExpr* e         = new IRExpr();
    e->tag            = Iex_Triop;
    e->Iex.Triop.op   = op;
    e->Iex.Triop.arg1 = arg1;
@@ -1159,7 +1158,7 @@ IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
    return e;
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
-   IRExpr* e         = LibVEX_Alloc_IRExpr();
+   IRExpr* e         = new IRExpr();
    e->tag            = Iex_Binop;
    e->Iex.Binop.op   = op;
    e->Iex.Binop.arg1 = arg1;
@@ -1167,14 +1166,14 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    return e;
 }
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
-   IRExpr* e       = LibVEX_Alloc_IRExpr();
+   IRExpr* e       = new IRExpr();
    e->tag          = Iex_Unop;
    e->Iex.Unop.op  = op;
    e->Iex.Unop.arg = arg;
    return e;
 }
 IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
-   IRExpr* e        = LibVEX_Alloc_IRExpr();
+   IRExpr* e        = new IRExpr();
    e->tag           = Iex_Load;
    e->Iex.Load.isLL = isLL;
    e->Iex.Load.end  = end;
@@ -1184,13 +1183,13 @@ IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {
-   IRExpr* e        = LibVEX_Alloc_IRExpr();
+   IRExpr* e        = new IRExpr();
    e->tag           = Iex_Const;
    e->Iex.Const.con = con;
    return e;
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
-   IRExpr* e          = LibVEX_Alloc_IRExpr();
+   IRExpr* e          = new IRExpr();
    e->tag             = Iex_CCall;
    e->Iex.CCall.cee   = cee;
    e->Iex.CCall.retty = retty;
@@ -1198,7 +1197,7 @@ IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
    return e;
 }
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
-   IRExpr* e          = LibVEX_Alloc_IRExpr();
+   IRExpr* e          = new IRExpr();
    e->tag             = Iex_Mux0X;
    e->Iex.Mux0X.cond  = cond;
    e->Iex.Mux0X.expr0 = expr0;
@@ -1209,27 +1208,31 @@ IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
 
 /* Constructors for NULL-terminated IRExpr expression vectors,
    suitable for use as arg lists in clean/dirty helper calls. */
+static IRExpr **alloc_irexpr_array(unsigned nr)
+{
+   return (IRExpr **)__LibVEX_Alloc_Ptr_Array(&main_heap, nr);
+}
 
 IRExpr** mkIRExprVec_0 ( void ) {
-   IRExpr** vec = LibVEX_Alloc_Array_IRExpr(1);
+   IRExpr** vec = alloc_irexpr_array(1);
    vec[0] = NULL;
    return vec;
 }
 IRExpr** mkIRExprVec_1 ( IRExpr* arg1 ) {
-   IRExpr** vec = LibVEX_Alloc_Array_IRExpr(2);
+   IRExpr** vec = alloc_irexpr_array(2);
    vec[0] = arg1;
    vec[1] = NULL;
    return vec;
 }
 IRExpr** mkIRExprVec_2 ( IRExpr* arg1, IRExpr* arg2 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(3);
+   IRExpr** vec = alloc_irexpr_array(3);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = NULL;
    return vec;
 }
 IRExpr** mkIRExprVec_3 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(4);
+   IRExpr** vec = alloc_irexpr_array(4);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1238,7 +1241,7 @@ IRExpr** mkIRExprVec_3 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3 ) {
 }
 IRExpr** mkIRExprVec_4 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(5);
+   IRExpr** vec = alloc_irexpr_array(5);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1248,7 +1251,7 @@ IRExpr** mkIRExprVec_4 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 }
 IRExpr** mkIRExprVec_5 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4, IRExpr* arg5 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(6);
+   IRExpr** vec = alloc_irexpr_array(6);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1259,7 +1262,7 @@ IRExpr** mkIRExprVec_5 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 }
 IRExpr** mkIRExprVec_6 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4, IRExpr* arg5, IRExpr* arg6 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(7);
+   IRExpr** vec = alloc_irexpr_array(7);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1272,7 +1275,7 @@ IRExpr** mkIRExprVec_6 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 IRExpr** mkIRExprVec_7 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
                          IRExpr* arg4, IRExpr* arg5, IRExpr* arg6,
                          IRExpr* arg7 ) {
-   IRExpr** vec = (IRExpr **)LibVEX_Alloc_Array_IRExpr(8);
+   IRExpr** vec = alloc_irexpr_array(8);
    vec[0] = arg1;
    vec[1] = arg2;
    vec[2] = arg3;
@@ -1453,7 +1456,7 @@ IRExpr** shallowCopyIRExprVec ( IRExpr** vec )
    IRExpr** newvec;
    for (i = 0; vec[i]; i++)
       ;
-   newvec = LibVEX_Alloc_Array_IRExpr(i+1);
+   newvec = alloc_irexpr_array(i+1);
    for (i = 0; vec[i]; i++)
       newvec[i] = vec[i];
    newvec[i] = NULL;

@@ -945,7 +945,7 @@ typedef
    struct _IRExpr
    IRExpr;
 
-struct _IRExpr {
+struct _IRExpr : public GarbageCollected<_IRExpr> {
    IRExprTag tag;
    union {
       /* Used only in pattern matching within Vex.  Should not be seen
@@ -1135,9 +1135,9 @@ struct _IRExpr {
          IRExpr* exprX;    /* False expression */
       } Mux0X;
    } Iex;
+   void visit(HeapVisitor &hv);
+   NAMED_CLASS
 };
-
-DECLARE_VEX_TYPE(IRExpr)
 
 /* Expression constructors. */
 extern IRExpr* IRExpr_Binder ( Int binder );
