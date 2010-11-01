@@ -1382,15 +1382,74 @@ public:
 	}
 };
 
+class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
+	class DecodeCacheEntry : public GarbageCollected<DecodeCacheEntry, &ir_heap> {
+	public:
+		DecodeCacheEntry *next;
+		unsigned long rip;
+		IRSB *irsb;
+
+		void visit(HeapVisitor &hv) { abort(); }
+
+		NAMED_CLASS
+	};
+
+	static const unsigned nr_slots = 2048;
+	DecodeCacheEntry *slots[nr_slots];
+	static unsigned long rip_hash(unsigned long rip)
+	{
+		unsigned long hash = 0;
+		while (rip) {
+			hash ^= rip % nr_slots;
+			rip /= nr_slots;
+		}
+		return hash;
+	}
+
+public:
+	IRSB **search(unsigned long rip);
+
+	void visit(HeapVisitor &hv) { abort(); }
+	NAMED_CLASS
+};
+IRSB **
+DecodeCache::search(unsigned long rip)
+{
+	DecodeCacheEntry **pdce, *dce;
+	unsigned hash = rip_hash(rip);
+	pdce = &slots[hash];
+	while (*pdce && (*pdce)->rip != rip)
+		pdce = &(*pdce)->next;
+	dce = *pdce;
+	if (dce) {
+		*pdce = dce->next;
+	} else {
+		dce = new DecodeCacheEntry();
+		dce->rip = rip;
+	}
+	dce->next = slots[hash];
+	slots[hash] = dce;
+	return &dce->irsb;
+}
+
+static VexPtr<WeakRef<DecodeCache, &ir_heap>, &ir_heap> decode_cache;
+
 IRSB *
 AddressSpace::getIRSBForAddress(unsigned long rip)
 {
 	if (rip == ASSERT_FAILED_ADDRESS)
 		throw ForceFailureException(rip);
 
-	WeakRef<IRSB, &ir_heap> *cacheSlot = searchDecodeCache(rip);
+	if (!decode_cache.get())
+		decode_cache.set(new WeakRef<DecodeCache, &ir_heap>());
+	DecodeCache *dc = decode_cache.get()->get();
+	if (!dc) {
+		dc = new DecodeCache();
+		decode_cache.get()->set(dc);
+	}
+	IRSB **cacheSlot = dc->search(rip);
 	assert(cacheSlot != NULL);
-	IRSB *irsb = cacheSlot->get();
+	IRSB *irsb = *cacheSlot;
 	if (!irsb) {
 		VexArchInfo archinfo_guest;
 		VexAbiInfo abiinfo_both;
@@ -1423,7 +1482,7 @@ AddressSpace::getIRSBForAddress(unsigned long rip)
 
 		irsb = instrument_func(NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
 
-		cacheSlot->set(irsb);
+		*cacheSlot = irsb;
 	}
 
 	return irsb;

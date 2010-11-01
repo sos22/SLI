@@ -1186,37 +1186,6 @@ public:
 	char *readString(unsigned long start, Thread *thr);
 
 	NAMED_CLASS
-
-	class trans_hash_entry : public GarbageCollected<trans_hash_entry> {
-	public:
-		trans_hash_entry *next;
-		trans_hash_entry **pprev;
-
-		unsigned long rip;
-		VexPtr<WeakRef<IRSB, &ir_heap>, &ir_heap > irsb;
-
-		/* Shouldn't ever get visited: we're blown away on
-		 * every GC. */
-		void visit(HeapVisitor &hv) { abort(); }
-		void destruct() { this->~trans_hash_entry(); }
-
-		trans_hash_entry(unsigned long _rip)
-			: next(NULL),
-			  pprev(NULL),
-			  rip(_rip)
-		{
-			irsb = new WeakRef<IRSB, &ir_heap>();
-		}
-		NAMED_CLASS
-	};
-
-	WeakRef<IRSB, &ir_heap> *searchDecodeCache(unsigned long rip);
-
-	void relocate(AddressSpace *target, size_t sz);
-
-private:
-	static const unsigned nr_trans_hash_slots = 2048;
-	trans_hash_entry *trans_hash[nr_trans_hash_slots];
 };
 
 ThreadEvent * replay_syscall(const LogRecordSyscall *lrs,
