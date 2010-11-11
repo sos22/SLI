@@ -548,6 +548,7 @@ public:
 						 LogReaderPtr startPtr,
 						 LogReaderPtr *endPtr,
 						 GarbageCollectionToken t);
+	static MachineState *readCoredump(const char *fname);
 
 	void registerThread(Thread *t) {
 		ThreadId tid;

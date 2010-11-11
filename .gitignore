@@ -13,4 +13,5 @@ binpatch
 chunk
 dbg
 direct
+dbg_core
 extra_config.h
