@@ -199,20 +199,6 @@ AddressSpace::store(unsigned long start, unsigned size,
 	writeMemory(start, size, b, ignore_protection, thr);
 }
 
-template <typename t> const t
-AddressSpace::fetch(unsigned long start, Thread *thr)
-{
-	unsigned long *res;
-
-	res = (unsigned long *)malloc(sizeof(unsigned long) * sizeof(t));
-	readMemory(start, sizeof(t), res, false, thr);
-	t tt;
-	for (unsigned x = 0; x < sizeof(t); x++)
-		((unsigned char *)&tt)[x] = res[x];
-	free(res);
-	return tt;
-}
-
 void AddressSpace::readMemory(unsigned long _start, unsigned size,
 			      unsigned long *contents, bool ignore_protection,
 			      Thread *thr,
@@ -446,4 +432,3 @@ AddressSpace::readString(unsigned long start, Thread *thr)
 	}
 	return buf;
 }
-

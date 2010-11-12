@@ -1,4 +1,4 @@
-targets="crop binpatch dbg chunk direct dbg_core"
+targets="crop binpatch dbg chunk direct dbg_core get_dominator"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,logwriter,thread,machinestate}.cpp

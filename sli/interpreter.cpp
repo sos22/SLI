@@ -19,10 +19,6 @@ static bool loud_mode;
 
 #define DBG(x, args...) do { if (loud_mode) printf("%s:%d:%d: " x, __FILE__, __LINE__, ths->tid._tid(), ##args); } while (0)
 
-static expression_result eval_expression(const RegisterSet *rs,
-					 IRExpr *expr,
-					 const std::vector<expression_result> &temporaries);
-
 static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 {
 	return False;
@@ -592,7 +588,7 @@ static void mulls64(struct expression_result *dest, const struct expression_resu
 	}
 }
 
-static expression_result
+expression_result
 eval_expression(const RegisterSet *rs,
 		IRExpr *expr,
 		const std::vector<expression_result> &temporaries)
@@ -1574,7 +1570,7 @@ extract_call_follower(IRSB *irsb)
 	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
 }
 
-static void
+void
 put_stmt(RegisterSet *rs, unsigned put_offset, struct expression_result put_data, IRType put_type)
 {
 	unsigned byte_offset = put_offset & 7;

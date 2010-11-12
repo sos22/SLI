@@ -1216,5 +1216,23 @@ force_linkage()
 }
 
 unsigned long extract_call_follower(IRSB *irsb);
+expression_result eval_expression(const RegisterSet *rs,
+				  IRExpr *expr,
+				  const std::vector<expression_result> &temporaries);
+void put_stmt(RegisterSet *rs, unsigned put_offset, struct expression_result put_data, IRType put_type);
+
+template <typename t> const t
+AddressSpace::fetch(unsigned long start, Thread *thr)
+{
+	unsigned long *res;
+
+	res = (unsigned long *)malloc(sizeof(unsigned long) * sizeof(t));
+	readMemory(start, sizeof(t), res, false, thr);
+	t tt;
+	for (unsigned x = 0; x < sizeof(t); x++)
+		((unsigned char *)&tt)[x] = res[x];
+	free(res);
+	return tt;
+}
 
 #endif /* !SLI_H__ */
