@@ -1154,7 +1154,8 @@ public:
 	void writeMemory(unsigned long start, unsigned size,
 			 const unsigned long *contents, bool ignore_protection,
 			 Thread *thr);
-	bool copyToClient(unsigned long start, unsigned size, const void *source);
+	bool copyToClient(unsigned long start, unsigned size, const void *source,
+			  bool ignore_protection = false);
 	bool copyFromClient(unsigned long start, unsigned size, void *dest);
 	expression_result load(unsigned long start, unsigned size,
 			       bool ignore_protection = false,

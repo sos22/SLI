@@ -40,7 +40,7 @@ AddressSpace::protectMemory(unsigned long start, unsigned long size,
 
 bool
 AddressSpace::copyToClient(unsigned long start, unsigned size,
-			   const void *contents)
+			   const void *contents, bool ignore_protection)
 {
 	unsigned long *buf = (unsigned long *)malloc(sizeof(unsigned long) * size);
 	bool fault;
@@ -49,7 +49,7 @@ AddressSpace::copyToClient(unsigned long start, unsigned size,
 		buf[x] = ((unsigned char *)contents)[x];
 	fault = false;
 	try {
-		writeMemory(start, size, buf, false, NULL);
+		writeMemory(start, size, buf, ignore_protection, NULL);
 	} catch (BadMemoryException &e) {
 		fault = true;
 	}
