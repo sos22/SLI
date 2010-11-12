@@ -19,6 +19,10 @@ static bool loud_mode;
 
 #define DBG(x, args...) do { if (loud_mode) printf("%s:%d:%d: " x, __FILE__, __LINE__, ths->tid._tid(), ##args); } while (0)
 
+static expression_result eval_expression(const RegisterSet *rs,
+					 IRExpr *expr,
+					 const std::vector<expression_result> &temporaries);
+
 static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
 {
 	return False;
@@ -42,17 +46,17 @@ static unsigned long signed_l(unsigned long x, unsigned long y)
 #define REG_LAST 128
 
 static void
-write_reg(Thread *state, unsigned offset, unsigned long val)
+write_reg(RegisterSet *regs, unsigned offset, unsigned long val)
 {
 	assert(!(offset % 8));
-	state->regs.set_reg(offset / 8, val);
+	regs->set_reg(offset / 8, val);
 }
 
 static unsigned long
-read_reg(Thread *state, unsigned offset)
+read_reg(const RegisterSet *state, unsigned offset)
 {
 	assert(!(offset % 8));
-	return state->regs.get_reg(offset / 8);
+	return state->get_reg(offset / 8);
 }
 
 static void
@@ -195,13 +199,13 @@ Thread::do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er)
 	unsigned x;
 
 	if (details->guard) {
-		expression_result guard = eval_expression(details->guard);
+		expression_result guard = eval_expression(&regs, details->guard, temporaries.content);
 		if (!guard.lo)
 			return NULL;
 	}
 	for (x = 0; details->args[x]; x++) {
 		assert(x < 6);
-		args[x] = eval_expression(details->args[x]);
+		args[x] = eval_expression(&regs, details->args[x], temporaries.content);
 	}
 	assert(!details->cee->regparms);
 
@@ -396,8 +400,8 @@ calculate_condition_flags_XXX(unsigned long op,
 	cf &= 1ul;
 }
 
-expression_result
-Thread::do_ccall_calculate_condition(struct expression_result *args)
+static expression_result
+do_ccall_calculate_condition(struct expression_result *args)
 {
 	struct expression_result condcode = args[0];
 	struct expression_result op       = args[1];
@@ -451,8 +455,8 @@ Thread::do_ccall_calculate_condition(struct expression_result *args)
 	return res;
 }
 
-expression_result
-Thread::do_ccall_calculate_rflags_c(expression_result *args)
+static expression_result
+do_ccall_calculate_rflags_c(expression_result *args)
 {
 	struct expression_result op   = args[0];
 	struct expression_result dep1 = args[1];
@@ -475,9 +479,9 @@ Thread::do_ccall_calculate_rflags_c(expression_result *args)
 	return res;
 }
 
-expression_result
-Thread::do_ccall_generic(IRCallee *cee,
-			      struct expression_result *rargs)
+static expression_result
+do_ccall_generic(IRCallee *cee,
+		 struct expression_result *rargs)
 {
 	struct expression_result res;
 
@@ -493,9 +497,8 @@ Thread::do_ccall_generic(IRCallee *cee,
 	return res;
 }
 
-expression_result
-Thread::do_ccall(IRCallee *cee,
-		      IRExpr **args)
+static expression_result
+do_ccall(const RegisterSet *rs, IRCallee *cee, IRExpr **args, const std::vector<expression_result> &temporaries)
 {
 	struct expression_result rargs[6];
 	unsigned x;
@@ -503,7 +506,7 @@ Thread::do_ccall(IRCallee *cee,
 	assert(cee->regparms == 0);
 	for (x = 0; args[x]; x++) {
 		assert(x < 6);
-		rargs[x] = eval_expression(args[x]);
+		rargs[x] = eval_expression(rs, args[x], temporaries);
 	}
 	if (!strcmp(cee->name, "amd64g_calculate_condition")) {
 		return do_ccall_calculate_condition(rargs);
@@ -589,8 +592,10 @@ static void mulls64(struct expression_result *dest, const struct expression_resu
 	}
 }
 
-expression_result
-Thread::eval_expression(IRExpr *expr)
+static expression_result
+eval_expression(const RegisterSet *rs,
+		IRExpr *expr,
+		const std::vector<expression_result> &temporaries)
 {
 	struct expression_result res;
 	struct expression_result *dest = &res;
@@ -608,7 +613,7 @@ Thread::eval_expression(IRExpr *expr)
 		do_get:
 		unsigned long v1;
 		unsigned sub_word_offset = getOffset & 7;
-		v1 = read_reg(this, getOffset - sub_word_offset);
+		v1 = read_reg(rs, getOffset - sub_word_offset);
 		switch (getType) {
 		case Ity_I64:
 		case Ity_F64:
@@ -618,7 +623,7 @@ Thread::eval_expression(IRExpr *expr)
 		case Ity_V128:
 			assert(!sub_word_offset);
 			dest->lo = v1;
-			dest->hi = read_reg(this, getOffset - sub_word_offset + 8);
+			dest->hi = read_reg(rs, getOffset - sub_word_offset + 8);
 			break;
 		case Ity_I32:
 		case Ity_F32:
@@ -640,7 +645,7 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_GetI: {
-		getOffset = eval_expression(expr->Iex.GetI.ix).lo;
+		getOffset = eval_expression(rs, expr->Iex.GetI.ix, temporaries).lo;
 		getOffset += expr->Iex.GetI.bias;
 		getOffset %= expr->Iex.GetI.descr->nElems;
 		getOffset *= sizeofIRType(expr->Iex.GetI.descr->elemTy);
@@ -691,8 +696,8 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Binop: {
-		struct expression_result arg1 = eval_expression(expr->Iex.Binop.arg1);
-		struct expression_result arg2 = eval_expression(expr->Iex.Binop.arg2);
+		struct expression_result arg1 = eval_expression(rs, expr->Iex.Binop.arg1, temporaries);
+		struct expression_result arg2 = eval_expression(rs, expr->Iex.Binop.arg2, temporaries);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub8:
 		case Iop_Sub16:
@@ -1116,7 +1121,7 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Unop: {
-		struct expression_result arg = eval_expression(expr->Iex.Unop.arg);
+		struct expression_result arg = eval_expression(rs, expr->Iex.Unop.arg, temporaries);
 		switch (expr->Iex.Unop.op) {
 		case Iop_64HIto32:
 			dest->lo = arg.lo >> 32ul;
@@ -1267,9 +1272,9 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Triop: {
-		struct expression_result arg1 = eval_expression(expr->Iex.Triop.arg1);
-		struct expression_result arg2 = eval_expression(expr->Iex.Triop.arg2);
-		struct expression_result arg3 = eval_expression(expr->Iex.Triop.arg3);
+		struct expression_result arg1 = eval_expression(rs, expr->Iex.Triop.arg1, temporaries);
+		struct expression_result arg2 = eval_expression(rs, expr->Iex.Triop.arg2, temporaries);
+		struct expression_result arg3 = eval_expression(rs, expr->Iex.Triop.arg3, temporaries);
 		switch (expr->Iex.Triop.op) {
 		case Iop_PRemF64: {
 			union {
@@ -1307,9 +1312,9 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_Mux0X: {
-		struct expression_result cond = eval_expression(expr->Iex.Mux0X.cond);
-		struct expression_result res0 = eval_expression(expr->Iex.Mux0X.expr0);
-		struct expression_result resX = eval_expression(expr->Iex.Mux0X.exprX);
+		struct expression_result cond = eval_expression(rs, expr->Iex.Mux0X.cond, temporaries);
+		struct expression_result res0 = eval_expression(rs, expr->Iex.Mux0X.expr0, temporaries);
+		struct expression_result resX = eval_expression(rs, expr->Iex.Mux0X.exprX, temporaries);
 		if (cond.lo == 0ul) {
 			*dest = res0;
 		} else {
@@ -1319,7 +1324,7 @@ Thread::eval_expression(IRExpr *expr)
 	}
 
 	case Iex_CCall: {
-		res = do_ccall(expr->Iex.CCall.cee, expr->Iex.CCall.args);
+		res = do_ccall(rs, expr->Iex.CCall.cee, expr->Iex.CCall.args, temporaries);
 		break;
 	}
 
@@ -1569,6 +1574,51 @@ extract_call_follower(IRSB *irsb)
 	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
 }
 
+static void
+put_stmt(RegisterSet *rs, unsigned put_offset, struct expression_result put_data, IRType put_type)
+{
+	unsigned byte_offset = put_offset & 7;
+	unsigned long dest = read_reg(rs, put_offset - byte_offset);
+	switch (put_type) {
+	case Ity_I8:
+		dest &= ~(0xFF << (byte_offset * 8));
+		dest |= put_data.lo << (byte_offset * 8);
+		break;
+
+	case Ity_I16:
+		assert(!(byte_offset % 2));
+		dest &= ~(0xFFFFul << (byte_offset * 8));
+		dest |= put_data.lo << (byte_offset * 8);
+		break;
+
+	case Ity_I32:
+	case Ity_F32:
+		assert(!(byte_offset % 4));
+		dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
+		dest |= put_data.lo << (byte_offset * 8);
+		break;
+
+	case Ity_I64:
+	case Ity_F64:
+		assert(byte_offset == 0);
+		dest = put_data.lo;
+		break;
+
+	case Ity_I128:
+	case Ity_V128:
+		assert(byte_offset == 0);
+		dest = put_data.lo;
+		write_reg(rs,
+			  put_offset + 8,
+			  put_data.hi);
+		break;
+	default:
+		throw NotImplementedException();
+	}
+
+	write_reg(rs, put_offset - byte_offset, dest);
+}
+
 ThreadEvent *
 Thread::runToEvent(VexPtr<Thread > &ths,
 		   VexPtr<MachineState > &ms,
@@ -1576,10 +1626,6 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 		   GarbageCollectionToken t,
 		   VexPtr<EventRecorder> &er)
 {
-	unsigned put_offset;
-	struct expression_result put_data;
-	IRType put_type;
-
 	while (1) {
 		if (!ths->currentIRSB) {
 			try {
@@ -1612,7 +1658,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				break;
 			case Ist_WrTmp:
 				ths->temporaries[stmt->Ist.WrTmp.tmp] =
-					ths->eval_expression(stmt->Ist.WrTmp.data);
+					eval_expression(&ths->regs, stmt->Ist.WrTmp.data, ths->temporaries.content);
 				DBG("wrtmp %d -> %s",
 				    stmt->Ist.WrTmp.tmp,
 				    ths->temporaries[stmt->Ist.WrTmp.tmp].name());
@@ -1622,9 +1668,9 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				assert(stmt->Ist.Store.end == Iend_LE);
 				assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
 				struct expression_result data =
-					ths->eval_expression(stmt->Ist.Store.data);
+					eval_expression(&ths->regs, stmt->Ist.Store.data, ths->temporaries.content);
 				struct expression_result addr =
-					ths->eval_expression(stmt->Ist.Store.addr);
+					eval_expression(&ths->regs, stmt->Ist.Store.addr, ths->temporaries.content);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.Store.data));
 				if (ms->addressSpace->isWritable(addr.lo, size, ths)) {
@@ -1641,69 +1687,25 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 				assert(stmt->Ist.CAS.details->dataHi == NULL);
 				assert(stmt->Ist.CAS.details->end == Iend_LE);
 				struct expression_result data =
-					ths->eval_expression(stmt->Ist.CAS.details->dataLo);
+					eval_expression(&ths->regs, stmt->Ist.CAS.details->dataLo, ths->temporaries.content);
 				struct expression_result addr =
-					ths->eval_expression(stmt->Ist.CAS.details->addr);
+					eval_expression(&ths->regs, stmt->Ist.CAS.details->addr, ths->temporaries.content);
 				struct expression_result expected =
-					ths->eval_expression(stmt->Ist.CAS.details->expdLo);
+					eval_expression(&ths->regs, stmt->Ist.CAS.details->expdLo, ths->temporaries.content);
 				unsigned size = sizeofIRType(typeOfIRExpr(ths->currentIRSB->tyenv,
 									  stmt->Ist.CAS.details->dataLo));
 				return CasEvent::get(ths->tid, stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 			}
 
-			case Ist_Put: {
-				put_offset = stmt->Ist.Put.offset;
-				put_data = ths->eval_expression(stmt->Ist.Put.data);
-				put_type = typeOfIRExpr(ths->currentIRSB->tyenv, stmt->Ist.Put.data);
-				do_put:
-				DBG("put offset %d type %d -> %s",
-				    put_offset, put_type, put_data.name());
-				unsigned byte_offset = put_offset & 7;
-				unsigned long dest = read_reg(&*ths, put_offset - byte_offset);
-				switch (put_type) {
-				case Ity_I8:
-					dest &= ~(0xFF << (byte_offset * 8));
-					dest |= put_data.lo << (byte_offset * 8);
-					break;
-
-				case Ity_I16:
-					assert(!(byte_offset % 2));
-					dest &= ~(0xFFFFul << (byte_offset * 8));
-					dest |= put_data.lo << (byte_offset * 8);
-					break;
-
-				case Ity_I32:
-				case Ity_F32:
-					assert(!(byte_offset % 4));
-					dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
-					dest |= put_data.lo << (byte_offset * 8);
-					break;
-
-				case Ity_I64:
-				case Ity_F64:
-					assert(byte_offset == 0);
-					dest = put_data.lo;
-					break;
-
-				case Ity_I128:
-				case Ity_V128:
-					assert(byte_offset == 0);
-					dest = put_data.lo;
-					write_reg(&*ths,
-						  put_offset + 8,
-						  put_data.hi);
-					break;
-				default:
-					ppIRStmt(stmt);
-					throw NotImplementedException();
-				}
-
-				write_reg(&*ths, put_offset - byte_offset, dest);
+			case Ist_Put:
+				put_stmt(&ths->regs,
+					 stmt->Ist.Put.offset,
+					 eval_expression(&ths->regs, stmt->Ist.Put.data, ths->temporaries.content),
+					 typeOfIRExpr(ths->currentIRSB->tyenv, stmt->Ist.Put.data));
 				break;
-			}
 
 			case Ist_PutI: {
-				struct expression_result idx = ths->eval_expression(stmt->Ist.PutI.ix);
+				struct expression_result idx = eval_expression(&ths->regs, stmt->Ist.PutI.ix, ths->temporaries.content);
 
 				/* Crazy bloody encoding scheme */
 				idx.lo =
@@ -1712,10 +1714,11 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					sizeofIRType(stmt->Ist.PutI.descr->elemTy) +
 					stmt->Ist.PutI.descr->base;
 
-				put_offset = idx.lo;
-				put_data = ths->eval_expression(stmt->Ist.PutI.data);
-				put_type = stmt->Ist.PutI.descr->elemTy;
-				goto do_put;
+				put_stmt(&ths->regs,
+					 idx.lo,
+					 eval_expression(&ths->regs, stmt->Ist.PutI.data, ths->temporaries.content),
+					 stmt->Ist.PutI.descr->elemTy);
+				break;
 			}
 
 			case Ist_Dirty: {
@@ -1728,7 +1731,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			case Ist_Exit: {
 				if (stmt->Ist.Exit.guard) {
 					struct expression_result guard =
-						ths->eval_expression(stmt->Ist.Exit.guard);
+						eval_expression(&ths->regs, stmt->Ist.Exit.guard, ths->temporaries.content);
 					if (!guard.lo)
 						break;
 				}
@@ -1771,7 +1774,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			bool is_syscall = ths->currentIRSB->jumpkind == Ijk_Sys_syscall;
 			{
 				struct expression_result next_addr =
-					ths->eval_expression(ths->currentIRSB->next);
+					eval_expression(&ths->regs, ths->currentIRSB->next, ths->temporaries.content);
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  next_addr.lo);
 				if (ths->currentIRSB->jumpkind == Ijk_Ret) {

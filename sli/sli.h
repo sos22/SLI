@@ -122,6 +122,7 @@ public:
 	RegisterSet(const VexGuestAMD64State &r);
 	RegisterSet() {};
 	unsigned long &get_reg(unsigned idx) { assert(idx < NR_REGS); return registers[idx]; }
+	const unsigned long &get_reg(unsigned idx) const { assert(idx < NR_REGS); return registers[idx]; }
 	void set_reg(unsigned idx, unsigned long val)
 	{
 		assert(idx < NR_REGS);
@@ -186,17 +187,12 @@ class Thread : public GarbageCollected<Thread> {
 				       const LogReaderPtr &ptr,
 				       unsigned long rip,
 				       GarbageCollectionToken t);
-	struct expression_result eval_expression(IRExpr *expr);
 	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er);
 	ThreadEvent *do_load(IRTemp tmp,
 			     unsigned long addr,
 			     unsigned size,
 			     MachineState *ms,
 			     EventRecorder *er);
-	expression_result do_ccall_calculate_condition(struct expression_result *args);
-	expression_result do_ccall_calculate_rflags_c(expression_result *args);
-	expression_result do_ccall_generic(IRCallee *cee, struct expression_result *rargs);
-	expression_result do_ccall(IRCallee *cee, IRExpr **args);
 
 	void amd64g_dirtyhelper_loadF80le(MachineState *, IRTemp tmp, unsigned long addr);
 	void amd64g_dirtyhelper_storeF80le(MachineState *, unsigned long addr, unsigned long _f64);
