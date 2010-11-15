@@ -3,6 +3,8 @@
    executed recently (prior to the one which it's executing right now
    :)) */
 #include <set>
+#include <map>
+#include <queue>
 
 #include "sli.h"
 
@@ -166,15 +168,31 @@ return_address(RegisterSet &regs, AddressSpace *as)
 			}
 		}
 
-		s.regs.rip() = eval_expression(&s.regs, irsb->next, temporaries).lo;
-		if (irsb->jumpkind == Ijk_Ret) {
-			/* We're done */
-			return s.regs.rip();
+		if (irsb->jumpkind == Ijk_Call) {
+			/* Calls are special, and we assume that we
+			 * just resume at the next instruction. */
+			s.regs.rip() = extract_call_follower(irsb);
+			s.regs.rsp() += 8;
+		} else {
+			s.regs.rip() = eval_expression(&s.regs, irsb->next, temporaries).lo;
+			if (irsb->jumpkind == Ijk_Ret) {
+				/* We're done */
+				return s.regs.rip();
+			}
 		}
 	}
 
 	/* Failed. */
 	abort();
+}
+
+static void
+compensateForBadVCall(Thread *thr, AddressSpace *as)
+{
+	if (!as->isReadable(thr->regs.rip(), 1)) {
+		thr->regs.rip() = as->fetch<unsigned long>(thr->regs.rsp(), NULL) - 2;
+		thr->regs.rsp() += 8;
+	}
 }
 
 /* Figure out where the first instruction in the current function
@@ -201,6 +219,202 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 	abort();
 }
 
+/* Given the starting point of a function and the address of an
+   instruction in that function, find all of the instructions which
+   are guaranteed to be executed at least once on any path from the
+   starting point to the target instruction.  We try to order them so
+   that the dominators nearest to the target are reported first. */
+/* Algorithm for finding dominators is a fairly standard Tarski-style
+   iteration to fixed point: start out assuming that everything is a
+   dominator, then flag any return instructions or unresolvable
+   dynamic branches as not dominators, and fix up any resulting
+   contradictions. */
+struct fd_cfg_node : public GarbageCollected<fd_cfg_node> {
+	unsigned long rip;
+	union ptr_or_ulong {
+		fd_cfg_node *ptr;
+		unsigned long ulong;
+		bool operator<(const ptr_or_ulong &x) const {
+			return ulong < x.ulong;
+		}
+	};
+	std::set<ptr_or_ulong> predecessors;
+	std::set<ptr_or_ulong> successors;
+	bool is_exit_node; /* Definitely not a dominator */
+	bool is_dominator;
+	bool already_output;
+
+	/* These should never be live across a GC pass */
+	void visit(HeapVisitor &hv) { abort(); }
+
+	NAMED_CLASS
+};
+static void
+findDominators(unsigned long functionHead,
+	       unsigned long rip,
+	       AddressSpace *as,
+	       std::vector<unsigned long> &out)
+{
+	std::vector<unsigned long> remainingToExplore;
+	std::map<unsigned long, fd_cfg_node *> cfg;
+
+	/* First: build the CFG, representing all of the successor
+	   pointers as straight ulongs and not bothing about
+	   predecessors. */
+	remainingToExplore.push_back(functionHead);
+	while (!remainingToExplore.empty()) {
+		unsigned long rip = remainingToExplore.back();
+		remainingToExplore.pop_back();
+		if (cfg.count(rip))
+			continue;
+		IRSB *irsb = as->getIRSBForAddress(rip);
+		ppIRSB(irsb);
+		fd_cfg_node *work = NULL;
+		assert(irsb->stmts[0]->tag == Ist_IMark);
+		assert(irsb->stmts[0]->Ist.IMark.addr == rip);
+		for (int idx = 0; idx < irsb->stmts_used; idx++) {
+			IRStmt *stmt = irsb->stmts[idx];
+			switch (stmt->tag) {
+			case Ist_IMark:
+				rip = stmt->Ist.IMark.addr;
+				if (work) {
+					fd_cfg_node::ptr_or_ulong p;
+					p.ulong = rip;
+					work->successors.insert(p);
+				}
+				if (cfg.count(rip))
+					goto done_this_entry;
+				work = new fd_cfg_node();
+				work->rip = rip;
+				cfg[rip] = work;
+				break;
+			case Ist_Exit: {
+				fd_cfg_node::ptr_or_ulong p;
+				p.ulong = stmt->Ist.Exit.dst->Ico.U64;
+				work->successors.insert(p);
+				remainingToExplore.push_back(p.ulong);
+				break;
+			}
+			default:
+				break;
+			}
+		}
+
+		if (irsb->jumpkind == Ijk_Call) {
+			fd_cfg_node::ptr_or_ulong p;
+			p.ulong = extract_call_follower(irsb);
+			work->successors.insert(p);
+			remainingToExplore.push_back(p.ulong);
+		} else if (irsb->next->tag == Iex_Const) {
+			fd_cfg_node::ptr_or_ulong p;
+			p.ulong = irsb->next->Iex.Const.con->Ico.U64;
+			work->successors.insert(p);
+			remainingToExplore.push_back(p.ulong);
+		} else {
+			work->is_exit_node = true;
+		}
+	done_this_entry:
+		;
+	}
+
+	/* Resolve successor pointers. */
+	for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
+	     it != cfg.end();
+	     it++) {
+		for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it2 =
+			     it->second->successors.begin();
+		     it2 != it->second->successors.end();
+		     it2++) {
+			fd_cfg_node *ptr = cfg[it2->ulong];
+			assert(ptr != NULL);
+			assert(ptr->rip == it2->ulong);
+			((fd_cfg_node::ptr_or_ulong *)&*it2)->ptr = ptr;
+		}
+	}
+	/* And now do predecessor ones */
+	for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
+	     it != cfg.end();
+	     it++) {
+		for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it2 =
+			     it->second->successors.begin();
+		     it2 != it->second->successors.end();
+		     it2++) {
+			fd_cfg_node *ptr = it2->ptr;
+			fd_cfg_node::ptr_or_ulong p;
+			p.ptr = it->second;
+			ptr->predecessors.insert(p);
+		}
+	}
+
+	/* Now do the Tarski thing to find dominators. */
+	for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
+	     it != cfg.end();
+	     it++) {
+		assert(it->first == it->second->rip);
+		if (it->second->is_exit_node)
+			it->second->is_dominator = false;
+		else
+			it->second->is_dominator = true;
+	}
+	bool progress;
+	do {
+		progress = false;
+		for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
+		     it != cfg.end();
+		     it++) {
+			fd_cfg_node *node = it->second;
+			/* The target instruction is always considered
+			   to be a dominator of itself. */
+			if (node->rip == rip)
+				continue;
+			/* Never need to make any further changes once
+			   we've flagged something as definitely not a
+			   dominator. */
+			if (!node->is_dominator)
+				continue;
+			/* Otherwise, flag as not-a-dominator if any
+			   successor is not a dominator. */
+			for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it2 = node->successors.begin();
+			     it2 != node->successors.end();
+			     it2++) {
+				if (!it2->ptr->is_dominator) {
+					progress = true;
+					node->is_dominator = false;
+					break;
+				}
+			}
+		}
+	} while (progress);
+
+	/* There are now no is_dominator=true nodes with
+	   is_dominator=false nodes in their successor sets (except
+	   for the target), which is what we want.  Now we do a
+	   topological sort of the CFG graph into the output set,
+	   using a breadth-first iteration starting from the target to
+	   get a reasonable ordering. */
+	std::queue<fd_cfg_node *> queue;
+	queue.push(cfg[rip]);
+	assert(queue.front());
+	while (!queue.empty()) {
+		fd_cfg_node *n = queue.front();
+		assert(n);
+		queue.pop();
+		assert(n->is_dominator);
+		if (n->already_output)
+			continue;
+		n->already_output = true;
+		out.push_back(n->rip);
+		for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it = n->predecessors.begin();
+		     it != n->predecessors.end();
+		     it++) {
+			assert(it->ptr);
+			queue.push(it->ptr);
+		}
+	}
+
+	/* And we're done. */
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -208,6 +422,16 @@ main(int argc, char *argv[])
 	MachineState *ms = MachineState::readCoredump(argv[1]);
 	Thread *thr = ms->findThread(ThreadId(1));
 
-	printf("%lx\n", findFunctionHead(&thr->regs, ms->addressSpace));
+	unsigned long head = findFunctionHead(&thr->regs, ms->addressSpace);
+	printf("head %lx\n", head);
+	std::vector<unsigned long> dominators;
+	compensateForBadVCall(thr, ms->addressSpace);
+	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
+	for (std::vector<unsigned long>::iterator it = dominators.begin();
+	     it != dominators.end();
+	     it++) {
+		printf("%lx\n", *it);
+	}
+
 	return 0;
 }
