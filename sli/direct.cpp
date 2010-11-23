@@ -33,11 +33,6 @@ stop_replay()
 	memset(&now, 0, sizeof(now));
 }
     
-/* Do it this way so that we still get format argument checking even
-   when a particular type of debug is disabled. */
-#define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
-#define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
-
 #define DBG_CYCLE_BREAKER(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 #define DBG_CALC_CMNS(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
 #define DBG_BUILD_CFG(fmt, ...) DBG_DISCARD(fmt, ## __VA_ARGS__)
@@ -2647,7 +2642,7 @@ CrashExpression::get(IRExpr *e)
 
 failed:
 	printf("Failed to translate expression ");
-	ppIRExpr(e);
+	ppIRExpr(e, stdout);
 	printf("\n");
 	return CrashExpressionFailed::get("expression tag 0x%x op 0x%x",
 					  e->tag,
@@ -4530,12 +4525,12 @@ main(int argc, char *argv[])
 
 	Oracle oracle;
 
-	/* Figure out which thread crashed.  We usei sby replaying the
-	   entire log and then looking at the very last record, but
-	   hat's really stupid, because all we really need to know is
-	   which thread got signalled.  Could trivially do that by
-	   just looking at the last record, but I'm lazy, so hard-code
-	   for now. */
+	/* Figure out which thread crashed.  We used to do this by
+	   replaying the entire log and then looking at the very last
+	   record, but that's really stupid, because all we really
+	   need to know is which thread got signalled.  Could
+	   trivially do that by just looking at the last record, but
+	   I'm lazy, so hard-code for now. */
 	oracle.crashingTid = ThreadId(CRASHED_THREAD);
 
 #if 0
@@ -4580,7 +4575,7 @@ main(int argc, char *argv[])
 
 	if (crashedThread->currentIRSB) {
 		printf("Crashed at step %d in:\n", crashedThread->currentIRSBOffset);
-		ppIRSB(crashedThread->currentIRSB);
+		ppIRSB(crashedThread->currentIRSB, stdout);
 		assert(crashedThread->currentIRSBOffset != 0);
 	} else if (1) {
 		printf("Crashed because we jumped at a bad RIP %lx\n",

@@ -66,20 +66,6 @@ __attribute__ ((__noreturn__))
 extern void vpanic ( const char* str );
 
 
-/* Printing */
-
-#ifdef SLI
-#include <stdio.h>
-#define vex_printf printf
-#define vex_sprintf sprintf
-#else
-__attribute__ ((format (printf, 1, 2)))
-extern UInt vex_printf ( const char *format, ... );
-
-__attribute__ ((format (printf, 2, 3)))
-extern UInt vex_sprintf ( char* buf, const char *format, ... );
-#endif
-
 /* String ops */
 
 extern Bool vex_streq ( const char* s1, const char* s2 );
@@ -101,6 +87,8 @@ typedef
 extern void         vexSetAllocMode ( VexAllocMode );
 extern VexAllocMode vexGetAllocMode ( void );
 extern void         vexAllocSanityCheck ( void );
+
+extern void vex_panic(const char *fmt, ...) __attribute__((format(printf,1,2))) __attribute__((__noreturn__));
 
 #endif /* ndef __VEX_MAIN_UTIL_H */
 

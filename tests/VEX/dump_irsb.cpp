@@ -71,7 +71,7 @@ main()
 	if (!irsb)
 		errx(1, "decoding self");
 
-	ppIRSB(irsb);
+	ppIRSB(irsb, stdout);
 
 	return 0;
 }

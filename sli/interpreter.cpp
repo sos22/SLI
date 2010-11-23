@@ -634,7 +634,7 @@ eval_expression(const RegisterSet *rs,
 			dest->lo = (v1 >> (sub_word_offset * 8)) & 0xfful;
 			break;
 		default:
-			ppIRExpr(expr);
+			ppIRExpr(expr, stderr);
 			throw NotImplementedException();
 		}
 		break;
@@ -685,7 +685,7 @@ eval_expression(const RegisterSet *rs,
 			break;
 		}
 		default:
-			ppIRExpr(expr);
+			ppIRExpr(expr, stderr);
 			throw NotImplementedException();
 		}
 		break;
@@ -1075,7 +1075,7 @@ eval_expression(const RegisterSet *rs,
 			
 		default:
 			printf("WARNING: can't handle ");
-			ppIRExpr(expr);
+		        ppIRExpr(expr, stdout);
 			printf("\n");
 			if (arg1.lo)
 				*dest = arg1;
@@ -1259,7 +1259,7 @@ eval_expression(const RegisterSet *rs,
 
 		default:
 			printf("WARNING: can't handle ");
-			ppIRExpr(expr);
+			ppIRExpr(expr, stdout);
 			printf("; guessing\n");
 			*dest = arg;
 			break;
@@ -1301,7 +1301,7 @@ eval_expression(const RegisterSet *rs,
 			break;
 		}
 		default:
-			ppIRExpr(expr);
+			ppIRExpr(expr, stderr);
 			throw NotImplementedException();
 		}
 		break;
@@ -1325,13 +1325,13 @@ eval_expression(const RegisterSet *rs,
 	}
 
 	default:
-		ppIRExpr(expr);
+		ppIRExpr(expr, stderr);
 		throw NotImplementedException("Bad expression tag %x\n", expr->tag);
 	}
 
 	if (loud_mode) {
 		printf("eval ");
-		ppIRExpr(expr);
+		ppIRExpr(expr, stdout);
 		printf(" -> %s\n", dest->name());
 	}
 
@@ -1526,7 +1526,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	ths->currentIRSBOffset = 0;
 
 	if (loud_mode)
-		ppIRSB(irsb);
+		ppIRSB(irsb, stdout);
 
 	/* First statement in block should be a mark */
 	assert(ths->currentIRSB->stmts[0]->tag == Ist_IMark);
@@ -1745,7 +1745,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 
 			default:
 				printf("Don't know how to interpret statement ");
-				ppIRStmt(stmt);
+				ppIRStmt(stmt, stderr);
 				throw NotImplementedException();
 			}
 		}

@@ -44,6 +44,8 @@
    without prior written permission.
 */
 
+#include <stdarg.h>
+
 #include "libvex_basictypes.h"
 #include "libvex.h"
 
@@ -226,7 +228,16 @@ void vex_assert_fail ( const char* expr,
 __attribute__ ((noreturn))
 void vpanic ( const char* str )
 {
-   vex_printf("\nvex: the `impossible' happened:\n   %s\n", str);
+   fprintf(stderr, "\nvex: the `impossible' happened:\n   %s\n", str);
+   (*vex_failure_exit)();
+}
+
+void vex_panic(const char *fmt, ...)
+{
+   va_list args;
+   va_start(args, fmt);
+   vfprintf(stderr, fmt, args);
+   va_end(args);
    (*vex_failure_exit)();
 }
 

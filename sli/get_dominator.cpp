@@ -268,7 +268,7 @@ findDominators(unsigned long functionHead,
 		if (cfg.count(rip))
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(rip);
-		ppIRSB(irsb);
+		ppIRSB(irsb, stdout);
 		fd_cfg_node *work = NULL;
 		assert(irsb->stmts[0]->tag == Ist_IMark);
 		assert(irsb->stmts[0]->Ist.IMark.addr == rip);
@@ -415,6 +415,15 @@ findDominators(unsigned long functionHead,
 	/* And we're done. */
 }
 
+static void
+getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators)
+{
+	unsigned long head = findFunctionHead(&thr->regs, ms->addressSpace);
+	printf("head %lx\n", head);
+	compensateForBadVCall(thr, ms->addressSpace);
+	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -422,11 +431,9 @@ main(int argc, char *argv[])
 	MachineState *ms = MachineState::readCoredump(argv[1]);
 	Thread *thr = ms->findThread(ThreadId(1));
 
-	unsigned long head = findFunctionHead(&thr->regs, ms->addressSpace);
-	printf("head %lx\n", head);
 	std::vector<unsigned long> dominators;
-	compensateForBadVCall(thr, ms->addressSpace);
-	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
+	getDominators(thr, ms, dominators);
+
 	for (std::vector<unsigned long>::iterator it = dominators.begin();
 	     it != dominators.end();
 	     it++) {

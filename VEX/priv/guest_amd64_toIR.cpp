@@ -371,17 +371,17 @@ IRExpr* doScalarWidening ( Int szSmall, Int szBig, Bool signd, IRExpr* src )
 __attribute__ ((noreturn))
 static void unimplemented ( const char* str )
 {
-   vex_printf("amd64toIR: unimplemented feature\n");
+   fprintf(stderr, "amd64toIR: unimplemented feature\n");
    vpanic(str);
 }
 
 #define DIP(format, args...)           \
    if (vex_traceflags & VEX_TRACE_FE)  \
-      vex_printf(format, ## args)
+      fprintf(stderr, format, ## args)
 
 #define DIS(buf, format, args...)      \
    if (vex_traceflags & VEX_TRACE_FE)  \
-      vex_sprintf(buf, format, ## args)
+      sprintf(buf, format, ## args)
 
 
 /*------------------------------------------------------------*/
@@ -638,8 +638,7 @@ static IRType szToITy ( Int n )
       case 2: return Ity_I16;
       case 4: return Ity_I32;
       case 8: return Ity_I64;
-      default: vex_printf("\nszToITy(%d)\n", n);
-               vpanic("szToITy(amd64)");
+      default: vex_panic("\nszToITy(%d)\n", n);
    }
 }
 
@@ -1583,11 +1582,11 @@ static IRExpr* narrowTo ( IRType dst_ty, IRExpr* e )
    if (src_ty == Ity_I64 && dst_ty == Ity_I8)
       return unop(Iop_64to8, e);
 
-   vex_printf("\nsrc, dst tys are: ");
-   ppIRType(src_ty);
-   vex_printf(", ");
-   ppIRType(dst_ty);
-   vex_printf("\n");
+   fprintf(stderr, "\nsrc, dst tys are: ");
+   ppIRType(src_ty, stderr);
+   fprintf(stderr, ", ");
+   ppIRType(dst_ty, stderr);
+   fprintf(stderr, "\n");
    vpanic("narrowTo(amd64)");
 }
 
@@ -1609,7 +1608,7 @@ void setFlags_DEP1_DEP2 ( IROp op8, IRTemp dep1, IRTemp dep2, IRType ty )
    switch (op8) {
       case Iop_Add8: ccOp += AMD64G_CC_OP_ADDB;   break;
       case Iop_Sub8: ccOp += AMD64G_CC_OP_SUBB;   break;
-      default:       ppIROp(op8);
+      default:       ppIROp(op8, stderr);
                      vpanic("setFlags_DEP1_DEP2(amd64)");
    }
    stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(ccOp)) );
@@ -1635,7 +1634,7 @@ void setFlags_DEP1 ( IROp op8, IRTemp dep1, IRType ty )
       case Iop_Or8:
       case Iop_And8:
       case Iop_Xor8: ccOp += AMD64G_CC_OP_LOGICB; break;
-      default:       ppIROp(op8);
+      default:       ppIROp(op8, stderr);
                      vpanic("setFlags_DEP1(amd64)");
    }
    stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(ccOp)) );
@@ -1671,7 +1670,7 @@ static void setFlags_DEP1_DEP2_shift ( IROp    op64,
       case Iop_Shr64:
       case Iop_Sar64: ccOp += AMD64G_CC_OP_SHRB; break;
       case Iop_Shl64: ccOp += AMD64G_CC_OP_SHLB; break;
-      default:        ppIROp(op64);
+      default:        ppIROp(op64, stderr);
                       vpanic("setFlags_DEP1_DEP2_shift(amd64)");
    }
 
@@ -2075,7 +2074,6 @@ void make_redzone_AbiHint ( VexAbiInfo* vbi,
       (paranoia). */
    vassert(szB == 128);
 
-   if (0) vex_printf("AbiHint: %s\n", who);
    vassert(typeOfIRTemp(irsb->tyenv, new_rsp) == Ity_I64);
    vassert(typeOfIRTemp(irsb->tyenv, nia) == Ity_I64);
    if (szB > 0)
@@ -2645,8 +2643,6 @@ ULong dis_op2_E_G ( GuestMemoryFetcher &guest_code,
          dependency. */
       if ((op8 == Iop_Xor8 || (op8 == Iop_Sub8 && addSubCarry))
           && offsetIRegG(size,pfx,rm) == offsetIRegE(size,pfx,rm)) {
-         if (False && op8 == Iop_Sub8)
-            vex_printf("vex amd64->IR: sbb %%r,%%r optimisation(1)\n");
 	 putIRegG(size,pfx,rm, mkU(ty,0));
       }
 
@@ -2824,12 +2820,10 @@ ULong dis_op2_G_E ( GuestMemoryFetcher &guest_code,
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0), mkexpr(src)));
          if (keep) {
             if (pfx & PFX_LOCK) {
-               if (0) vex_printf("locked case\n" );
                casLE( mkexpr(addr),
                       mkexpr(dst0)/*expval*/, 
                       mkexpr(dst1)/*newval*/, guest_RIP_curr_instr );
             } else {
-               if (0) vex_printf("nonlocked case\n");
                storeLE(mkexpr(addr), mkexpr(dst1));
             }
          }
@@ -3458,24 +3452,24 @@ ULong dis_Grp2 ( GuestMemoryFetcher &guest_code,
    if (epartIsReg(modrm)) {
       putIRegE(sz, pfx, modrm, mkexpr(dst1));
       if (vex_traceflags & VEX_TRACE_FE) {
-         vex_printf("%s%c ",
-                    nameGrp2(gregLO3ofRM(modrm)), nameISize(sz) );
+	 printf("%s%c ",
+		nameGrp2(gregLO3ofRM(modrm)), nameISize(sz) );
          if (shift_expr_txt)
-            vex_printf("%s", shift_expr_txt);
+            printf("%s", shift_expr_txt);
          else
-            ppIRExpr(shift_expr);
-         vex_printf(", %s\n", nameIRegE(sz,pfx,modrm));
+	    ppIRExpr(shift_expr, stdout);
+         printf(", %s\n", nameIRegE(sz,pfx,modrm));
       }
    } else {
       storeLE(mkexpr(addr), mkexpr(dst1));
       if (vex_traceflags & VEX_TRACE_FE) {
-         vex_printf("%s%c ",
+         printf("%s%c ",
                     nameGrp2(gregLO3ofRM(modrm)), nameISize(sz) );
          if (shift_expr_txt)
-            vex_printf("%s", shift_expr_txt);
+            printf("%s", shift_expr_txt);
          else
-            ppIRExpr(shift_expr);
-         vex_printf(", %s\n", dis_buf);
+	    ppIRExpr(shift_expr, stdout);
+         printf(", %s\n", dis_buf);
       }
    }
    return delta;
@@ -3667,7 +3661,7 @@ static void codegen_mulL_A_D ( Int sz, Bool syned,
          break;
       }
       default:
-         ppIRType(ty);
+	 ppIRType(ty, stderr);
          vpanic("codegen_mulL_A_D(amd64)");
    }
    DIP("%s%c %s\n", syned ? "imul" : "mul", nameISize(sz), tmp_txt);
@@ -4746,8 +4740,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
                break;
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xD8\n");
+	       printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xD8\n");
                goto decode_fail;
          }
       } else {
@@ -5003,8 +4997,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
                break;
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xD9\n");
+               printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xD9\n");
                goto decode_fail;
          }
 
@@ -5371,8 +5365,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
                break;
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xDA\n");
+               printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xDA\n");
                goto decode_fail;
          }
 
@@ -5539,8 +5533,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
             }
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xDB\n");
+               printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xDB\n");
                goto decode_fail;
          }
 
@@ -5726,8 +5720,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
                break;
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xDC\n");
+               printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xDC\n");
                goto decode_fail;
          }
 
@@ -5916,8 +5910,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
             }
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xDD\n");
+               printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xDD\n");
                goto decode_fail;
          }
       } else {
@@ -6049,8 +6043,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
                break;
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xDE\n");
+               printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xDE\n");
                goto decode_fail;
          }
 
@@ -6164,8 +6158,8 @@ ULong dis_FPU ( GuestMemoryFetcher &guest_code, /*OUT*/Bool* decode_ok,
                break;
 
             default:
-               vex_printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
-               vex_printf("first_opcode == 0xDF\n");
+               printf("unhandled opc_aux = 0x%2x\n", gregLO3ofRM(modrm));
+               printf("first_opcode == 0xDF\n");
                goto decode_fail;
          }
 
@@ -6381,8 +6375,7 @@ ULong dis_MMXop_regmem_to_reg ( GuestMemoryFetcher &guest_code,
       case 0xFB: op = Iop_Sub64; break;
 
       default: 
-         vex_printf("\n0x%x\n", (Int)opc);
-         vpanic("dis_MMXop_regmem_to_reg");
+         vex_panic("dis_MMXop_regmem_to_reg\n0x%x\n", (Int)opc);
    }
 
 #  undef XXX
@@ -15883,7 +15876,7 @@ DisResult disInstr_AMD64_WRK (
       case 0xA4: /* SHLDv imm8,Gv,Ev */
          modrm = getUChar(guest_code, delta);
          d64   = delta + lengthAMode(guest_code, pfx, delta);
-         vex_sprintf(dis_buf, "$%d", (Int)getUChar(guest_code, d64));
+         sprintf(dis_buf, "$%d", (Int)getUChar(guest_code, d64));
          delta = dis_SHLRD_Gv_Ev ( guest_code, 
                     vbi, pfx, delta, modrm, sz, 
                     mkU8(getUChar(guest_code, d64)), True, /* literal */
@@ -15900,7 +15893,7 @@ DisResult disInstr_AMD64_WRK (
       case 0xAC: /* SHRDv imm8,Gv,Ev */
          modrm = getUChar(guest_code, delta);
          d64   = delta + lengthAMode(guest_code, pfx, delta);
-         vex_sprintf(dis_buf, "$%d", (Int)getUChar(guest_code, d64));
+         sprintf(dis_buf, "$%d", (Int)getUChar(guest_code, d64));
          delta = dis_SHLRD_Gv_Ev ( guest_code, 
                     vbi, pfx, delta, modrm, sz, 
                     mkU8(getUChar(guest_code, d64)), True, /* literal */
@@ -16055,7 +16048,7 @@ DisResult disInstr_AMD64_WRK (
   default:
   decode_failure:
    /* All decode failures end up here. */
-   vex_printf("vex amd64->IR: unhandled instruction bytes: "
+   printf("vex amd64->IR: unhandled instruction bytes: "
               "0x%x 0x%x 0x%x 0x%x 0x%x 0x%x at %llx:%lx\n",
               (Int)getUChar(guest_code, delta_start+0),
               (Int)getUChar(guest_code, delta_start+1),
@@ -16143,12 +16136,8 @@ DisResult disInstr_AMD64 ( IRSB*        irsb_IN,
       a bug in disInstr. */
    if (guest_RIP_next_mustcheck 
        && guest_RIP_next_assumed != guest_RIP_curr_instr + dres.len) {
-      vex_printf("\n");
-      vex_printf("assumed next %%rip = 0x%llx\n", 
-                 guest_RIP_next_assumed );
-      vex_printf(" actual next %%rip = 0x%llx\n", 
-                 guest_RIP_curr_instr + dres.len );
-      vpanic("disInstr_AMD64: disInstr miscalculated next %rip");
+      vex_panic("disInstr_AMD64: disInstr miscalculated next rip (assumed %#llx, actual %#llx)\n",
+		guest_RIP_next_assumed, guest_RIP_curr_instr + dres.len);
    }
 
    /* See comment at the top of disInstr_AMD64_WRK for meaning of
@@ -16168,9 +16157,9 @@ DisResult disInstr_AMD64 ( IRSB*        irsb_IN,
                                   callback_opaque,
                                   delta, archinfo, abiinfo );
       for (i = x1; i < x2; i++) {
-         vex_printf("\t\t");
-         ppIRStmt(irsb_IN->stmts[i]);
-         vex_printf("\n");
+	 fprintf(stderr, "\t\t");
+         ppIRStmt(irsb_IN->stmts[i], stderr);
+         fprintf(stderr, "\n");
       }
       /* Failure of this assertion is serious and denotes a bug in
          disInstr. */

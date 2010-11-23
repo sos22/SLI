@@ -63,7 +63,7 @@ void Thread::dumpSnapshot(LogWriter *lw)
 	printf("Tid %d is at %d, irsb: \n", tid._tid(),
 	       currentIRSBOffset);
 	if (currentIRSB)
-		ppIRSB(currentIRSB);
+	  ppIRSB(currentIRSB, stdout);
 	else
 		printf("<null>\n");
 }
@@ -109,7 +109,7 @@ Thread::pretty_print(void) const
 
 	if (currentIRSB) {
 		printf("Current IRSB:\n");
-		ppIRSB(currentIRSB);
+		ppIRSB(currentIRSB, stdout);
 		printf("Offset %d, origin %lx\n",
 		       currentIRSBOffset,
 		       currentIRSBRip);

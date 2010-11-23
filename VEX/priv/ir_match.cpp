@@ -100,7 +100,7 @@ Bool matchWrk ( MatchInfo* mi, IRExpr* p/*attern*/, IRExpr* e/*xpr*/ )
          if (e->tag != Iex_Const) return False;
          return eqIRConst(p->Iex.Const.con, e->Iex.Const.con);
       default: 
-         ppIRExpr(p);
+	 ppIRExpr(p, stderr);
          vpanic("match");
    }
 }

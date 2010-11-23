@@ -667,9 +667,9 @@ ULong amd64g_calculate_rflags_all_WRK ( ULong cc_op,
 
       default:
          /* shouldn't really make these calls from generated code */
-         vex_printf("amd64g_calculate_rflags_all_WRK(AMD64)"
-                    "( %llu, 0x%llx, 0x%llx, 0x%llx )\n",
-                    cc_op, cc_dep1_formal, cc_dep2_formal, cc_ndep_formal );
+	 fprintf(stderr, "amd64g_calculate_rflags_all_WRK(AMD64)"
+		 "( %llu, 0x%llx, 0x%llx, 0x%llx )\n",
+		 cc_op, cc_dep1_formal, cc_dep2_formal, cc_ndep_formal );
          vpanic("amd64g_calculate_rflags_all_WRK(AMD64)");
    }
 }
@@ -812,7 +812,7 @@ ULong amd64g_calculate_condition ( ULong/*AMD64Condcode*/ cond,
 
       default:
          /* shouldn't really make these calls from generated code */
-         vex_printf("amd64g_calculate_condition"
+	 fprintf(stderr, "amd64g_calculate_condition"
                     "( %llu, %llu, 0x%llx, 0x%llx, 0x%llx )\n",
                     cond, cc_op, cc_dep1, cc_dep2, cc_ndep );
          vpanic("amd64g_calculate_condition");

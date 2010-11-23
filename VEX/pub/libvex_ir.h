@@ -47,6 +47,8 @@
 #ifndef __LIBVEX_IR_H
 #define __LIBVEX_IR_H
 
+#include <stdio.h>
+
 #include "libvex_basictypes.h"
 #include "libvex_alloc.h"
 
@@ -246,7 +248,7 @@ typedef
    IRType;
 
 /* Pretty-print an IRType */
-extern void ppIRType ( IRType );
+extern void ppIRType ( IRType, FILE *f );
 
 /* Get the size (in bytes) of an IRType */ 
 extern Int sizeofIRType ( IRType );
@@ -319,7 +321,7 @@ extern IRConst* IRConst_V128 ( UShort );
 extern IRConst* deepCopyIRConst ( IRConst* );
 
 /* Pretty-print an IRConst */
-extern void ppIRConst ( IRConst* );
+extern void ppIRConst ( IRConst*, FILE* );
 
 /* Compare two IRConsts for equality */
 extern Bool eqIRConst ( IRConst*, IRConst* );
@@ -359,7 +361,7 @@ extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr );
 extern IRCallee* deepCopyIRCallee ( IRCallee* );
 
 /* Pretty-print an IRCallee. */
-extern void ppIRCallee ( IRCallee* );
+extern void ppIRCallee ( IRCallee*, FILE* );
 
 
 /* ------------------ Guest state arrays ------------------ */
@@ -381,7 +383,7 @@ extern IRRegArray* mkIRRegArray ( Int, IRType, Int );
 
 extern IRRegArray* deepCopyIRRegArray ( IRRegArray* );
 
-extern void ppIRRegArray ( IRRegArray* );
+extern void ppIRRegArray ( IRRegArray*, FILE * );
 extern Bool eqIRRegArray ( IRRegArray*, IRRegArray* );
 
 
@@ -393,7 +395,7 @@ extern Bool eqIRRegArray ( IRRegArray*, IRRegArray* );
 typedef UInt IRTemp;
 
 /* Pretty-print an IRTemp. */
-extern void ppIRTemp ( IRTemp );
+extern void ppIRTemp ( IRTemp, FILE* );
 
 #define IRTemp_INVALID ((IRTemp)0xFFFFFFFF)
 
@@ -885,7 +887,7 @@ typedef
    IROp;
 
 /* Pretty-print an op. */
-extern void ppIROp ( IROp );
+extern void ppIROp ( IROp, FILE* );
 
 
 /* Encoding of IEEE754-specified rounding modes.  This is the same as
@@ -1162,7 +1164,7 @@ extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* deepCopyIRExpr ( IRExpr* );
 
 /* Pretty-print an IRExpr. */
-extern void ppIRExpr ( IRExpr* );
+extern void ppIRExpr ( IRExpr*, FILE *f );
 
 /* NULL-terminated IRExpr vector constructors, suitable for
    use as arg lists in clean/dirty helper calls. */
@@ -1262,7 +1264,7 @@ typedef
    }
    IRJumpKind;
 
-extern void ppIRJumpKind ( IRJumpKind );
+extern void ppIRJumpKind ( IRJumpKind, FILE* );
 
 
 /* ------------------ Dirty helper calls ------------------ */
@@ -1707,7 +1709,7 @@ extern IRStmt* IRStmt_Exit    ( IRExpr* guard, IRJumpKind jk, IRConst* dst );
 extern IRStmt* deepCopyIRStmt ( IRStmt* );
 
 /* Pretty-print an IRStmt. */
-extern void ppIRStmt ( IRStmt* );
+extern void ppIRStmt ( IRStmt*, FILE* );
 
 
 /* ------------------ Basic Blocks ------------------ */
@@ -1779,7 +1781,7 @@ extern IRSB* deepCopyIRSB ( IRSB* );
 extern IRSB* deepCopyIRSBExceptStmts ( IRSB* );
 
 /* Pretty-print an IRSB */
-extern void ppIRSB ( IRSB* );
+extern void ppIRSB ( IRSB*, FILE* );
 
 /* Append an IRStmt to an IRSB */
 extern void addStmtToIRSB ( IRSB*, IRStmt* );

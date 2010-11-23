@@ -1235,4 +1235,9 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	return tt;
 }
 
+/* Do it this way so that we still get format argument checking even
+   when a particular type of debug is disabled. */
+#define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
+#define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
+
 #endif /* !SLI_H__ */

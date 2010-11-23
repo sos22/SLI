@@ -145,69 +145,69 @@ _IRStmt::visit(HeapVisitor &visit)
 /*--- Printing the IR                                         ---*/
 /*---------------------------------------------------------------*/
 
-void ppIRType ( IRType ty )
+void ppIRType ( IRType ty, FILE *f )
 {
    switch (ty) {
-      case Ity_INVALID: vex_printf("Ity_INVALID"); break;
-      case Ity_I1:      vex_printf( "I1");   break;
-      case Ity_I8:      vex_printf( "I8");   break;
-      case Ity_I16:     vex_printf( "I16");  break;
-      case Ity_I32:     vex_printf( "I32");  break;
-      case Ity_I64:     vex_printf( "I64");  break;
-      case Ity_I128:    vex_printf( "I128"); break;
-      case Ity_F32:     vex_printf( "F32");  break;
-      case Ity_F64:     vex_printf( "F64");  break;
-      case Ity_V128:    vex_printf( "V128"); break;
-      default: vex_printf("ty = 0x%x\n", (Int)ty);
+      case Ity_INVALID: fprintf(f, "Ity_INVALID"); break;
+      case Ity_I1:      fprintf(f,  "I1");   break;
+      case Ity_I8:      fprintf(f,  "I8");   break;
+      case Ity_I16:     fprintf(f,  "I16");  break;
+      case Ity_I32:     fprintf(f,  "I32");  break;
+      case Ity_I64:     fprintf(f,  "I64");  break;
+      case Ity_I128:    fprintf(f,  "I128"); break;
+      case Ity_F32:     fprintf(f,  "F32");  break;
+      case Ity_F64:     fprintf(f,  "F64");  break;
+      case Ity_V128:    fprintf(f,  "V128"); break;
+      default: fprintf(f, "ty = 0x%x\n", (Int)ty);
                vpanic("ppIRType");
    }
 }
 
-void ppIRConst ( IRConst* con )
+void ppIRConst ( IRConst* con, FILE* f )
 {
    union { ULong i64; Double f64; } u;
    vassert(sizeof(ULong) == sizeof(Double));
    switch (con->tag) {
-      case Ico_U1:   vex_printf( "%d:I1",        con->Ico.U1 ? 1 : 0); break;
-      case Ico_U8:   vex_printf( "0x%x:I8",      (UInt)(con->Ico.U8)); break;
-      case Ico_U16:  vex_printf( "0x%x:I16",     (UInt)(con->Ico.U16)); break;
-      case Ico_U32:  vex_printf( "0x%x:I32",     (UInt)(con->Ico.U32)); break;
-      case Ico_U64:  vex_printf( "0x%llx:I64",   (ULong)(con->Ico.U64)); break;
+      case Ico_U1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); break;
+      case Ico_U8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); break;
+      case Ico_U16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); break;
+      case Ico_U32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); break;
+      case Ico_U64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); break;
       case Ico_F64:  u.f64 = con->Ico.F64;
-                     vex_printf( "F64{0x%llx}",  u.i64);
+                     fprintf(f,  "F64{0x%llx}",  u.i64);
                      break;
-      case Ico_F64i: vex_printf( "F64i{0x%llx}", con->Ico.F64i); break;
-      case Ico_V128: vex_printf( "V128{0x%04x}", (UInt)(con->Ico.V128)); break;
+      case Ico_F64i: fprintf(f,  "F64i{0x%llx}", con->Ico.F64i); break;
+      case Ico_V128: fprintf(f,  "V128{0x%04x}", (UInt)(con->Ico.V128)); break;
       default: vpanic("ppIRConst");
    }
 }
 
-void ppIRCallee ( IRCallee* ce )
+void ppIRCallee ( IRCallee* ce, FILE* f )
 {
-   vex_printf("%s", ce->name);
+   fprintf(f, "%s", ce->name);
    if (ce->regparms > 0)
-      vex_printf("[rp=%d]", ce->regparms);
+      fprintf(f, "[rp=%d]", ce->regparms);
    if (ce->mcx_mask > 0)
-      vex_printf("[mcx=0x%x]", ce->mcx_mask);
-   vex_printf("{%p}", (void*)ce->addr);
+      fprintf(f, "[mcx=0x%x]", ce->mcx_mask);
+   fprintf(f, "{%p}", (void*)ce->addr);
 }
 
-void ppIRRegArray ( IRRegArray* arr )
+void ppIRRegArray ( IRRegArray* arr, FILE* f )
 {
-   vex_printf("(%d:%dx", arr->base, arr->nElems);
-   ppIRType(arr->elemTy);
-   vex_printf(")");
+   fprintf(f, "(%d:%dx", arr->base, arr->nElems);
+   ppIRType(arr->elemTy, f);
+   fprintf(f, ")");
 }
 
-void ppIRTemp ( IRTemp tmp )
+void ppIRTemp ( IRTemp tmp, FILE* f )
 {
    if (tmp == IRTemp_INVALID)
-      vex_printf("IRTemp_INVALID");
+      fprintf(f, "IRTemp_INVALID");
    else
-      vex_printf( "t%d", (Int)tmp);
+      fprintf(f,  "t%d", (Int)tmp);
 }
 
-void ppIROp ( IROp op )
+void ppIROp ( IROp op, FILE* f )
 {
    const char* str = NULL; 
    IROp   base;
@@ -241,751 +241,751 @@ void ppIROp ( IROp op )
       case Iop_Not8 ... Iop_Not64:
          str = "Not"; base = Iop_Not8; break;
       /* other cases must explicitly "return;" */
-      case Iop_8Uto16:   vex_printf("8Uto16");  return;
-      case Iop_8Uto32:   vex_printf("8Uto32");  return;
-      case Iop_16Uto32:  vex_printf("16Uto32"); return;
-      case Iop_8Sto16:   vex_printf("8Sto16");  return;
-      case Iop_8Sto32:   vex_printf("8Sto32");  return;
-      case Iop_16Sto32:  vex_printf("16Sto32"); return;
-      case Iop_32Sto64:  vex_printf("32Sto64"); return;
-      case Iop_32Uto64:  vex_printf("32Uto64"); return;
-      case Iop_32to8:    vex_printf("32to8");   return;
-      case Iop_16Uto64:  vex_printf("16Uto64"); return;
-      case Iop_16Sto64:  vex_printf("16Sto64"); return;
-      case Iop_8Uto64:   vex_printf("8Uto64"); return;
-      case Iop_8Sto64:   vex_printf("8Sto64"); return;
-      case Iop_64to16:   vex_printf("64to16"); return;
-      case Iop_64to8:    vex_printf("64to8");  return;
-
-      case Iop_Not1:     vex_printf("Not1");    return;
-      case Iop_32to1:    vex_printf("32to1");   return;
-      case Iop_64to1:    vex_printf("64to1");   return;
-      case Iop_1Uto8:    vex_printf("1Uto8");   return;
-      case Iop_1Uto32:   vex_printf("1Uto32");  return;
-      case Iop_1Uto64:   vex_printf("1Uto64");  return;
-      case Iop_1Sto8:    vex_printf("1Sto8");  return;
-      case Iop_1Sto16:   vex_printf("1Sto16");  return;
-      case Iop_1Sto32:   vex_printf("1Sto32");  return;
-      case Iop_1Sto64:   vex_printf("1Sto64");  return;
-
-      case Iop_MullS8:   vex_printf("MullS8");  return;
-      case Iop_MullS16:  vex_printf("MullS16"); return;
-      case Iop_MullS32:  vex_printf("MullS32"); return;
-      case Iop_MullS64:  vex_printf("MullS64"); return;
-      case Iop_MullU8:   vex_printf("MullU8");  return;
-      case Iop_MullU16:  vex_printf("MullU16"); return;
-      case Iop_MullU32:  vex_printf("MullU32"); return;
-      case Iop_MullU64:  vex_printf("MullU64"); return;
-
-      case Iop_Clz64:    vex_printf("Clz64"); return;
-      case Iop_Clz32:    vex_printf("Clz32"); return;
-      case Iop_Ctz64:    vex_printf("Ctz64"); return;
-      case Iop_Ctz32:    vex_printf("Ctz32"); return;
-
-      case Iop_CmpLT32S: vex_printf("CmpLT32S"); return;
-      case Iop_CmpLE32S: vex_printf("CmpLE32S"); return;
-      case Iop_CmpLT32U: vex_printf("CmpLT32U"); return;
-      case Iop_CmpLE32U: vex_printf("CmpLE32U"); return;
-
-      case Iop_CmpLT64S: vex_printf("CmpLT64S"); return;
-      case Iop_CmpLE64S: vex_printf("CmpLE64S"); return;
-      case Iop_CmpLT64U: vex_printf("CmpLT64U"); return;
-      case Iop_CmpLE64U: vex_printf("CmpLE64U"); return;
-
-      case Iop_CmpNEZ8:  vex_printf("CmpNEZ8"); return;
-      case Iop_CmpNEZ16: vex_printf("CmpNEZ16"); return;
-      case Iop_CmpNEZ32: vex_printf("CmpNEZ32"); return;
-      case Iop_CmpNEZ64: vex_printf("CmpNEZ64"); return;
-
-      case Iop_CmpwNEZ32: vex_printf("CmpwNEZ32"); return;
-      case Iop_CmpwNEZ64: vex_printf("CmpwNEZ64"); return;
-
-      case Iop_Left8:  vex_printf("Left8"); return;
-      case Iop_Left16: vex_printf("Left16"); return;
-      case Iop_Left32: vex_printf("Left32"); return;
-      case Iop_Left64: vex_printf("Left64"); return;
-      case Iop_Max32U: vex_printf("Max32U"); return;
-
-      case Iop_CmpORD32U: vex_printf("CmpORD32U"); return;
-      case Iop_CmpORD32S: vex_printf("CmpORD32S"); return;
-
-      case Iop_CmpORD64U: vex_printf("CmpORD64U"); return;
-      case Iop_CmpORD64S: vex_printf("CmpORD64S"); return;
-
-      case Iop_DivU32: vex_printf("DivU32"); return;
-      case Iop_DivS32: vex_printf("DivS32"); return;
-      case Iop_DivU64: vex_printf("DivU64"); return;
-      case Iop_DivS64: vex_printf("DivS64"); return;
-
-      case Iop_DivModU64to32: vex_printf("DivModU64to32"); return;
-      case Iop_DivModS64to32: vex_printf("DivModS64to32"); return;
-
-      case Iop_DivModU128to64: vex_printf("DivModU128to64"); return;
-      case Iop_DivModS128to64: vex_printf("DivModS128to64"); return;
-
-      case Iop_16HIto8:  vex_printf("16HIto8"); return;
-      case Iop_16to8:    vex_printf("16to8");   return;
-      case Iop_8HLto16:  vex_printf("8HLto16"); return;
-
-      case Iop_32HIto16: vex_printf("32HIto16"); return;
-      case Iop_32to16:   vex_printf("32to16");   return;
-      case Iop_16HLto32: vex_printf("16HLto32"); return;
-
-      case Iop_64HIto32: vex_printf("64HIto32"); return;
-      case Iop_64to32:   vex_printf("64to32");   return;
-      case Iop_32HLto64: vex_printf("32HLto64"); return;
-
-      case Iop_128HIto64: vex_printf("128HIto64"); return;
-      case Iop_128to64:   vex_printf("128to64");   return;
-      case Iop_64HLto128: vex_printf("64HLto128"); return;
-
-      case Iop_AddF64:    vex_printf("AddF64"); return;
-      case Iop_SubF64:    vex_printf("SubF64"); return;
-      case Iop_MulF64:    vex_printf("MulF64"); return;
-      case Iop_DivF64:    vex_printf("DivF64"); return;
-      case Iop_AddF64r32: vex_printf("AddF64r32"); return;
-      case Iop_SubF64r32: vex_printf("SubF64r32"); return;
-      case Iop_MulF64r32: vex_printf("MulF64r32"); return;
-      case Iop_DivF64r32: vex_printf("DivF64r32"); return;
-
-      case Iop_ScaleF64:      vex_printf("ScaleF64"); return;
-      case Iop_AtanF64:       vex_printf("AtanF64"); return;
-      case Iop_Yl2xF64:       vex_printf("Yl2xF64"); return;
-      case Iop_Yl2xp1F64:     vex_printf("Yl2xp1F64"); return;
-      case Iop_PRemF64:       vex_printf("PRemF64"); return;
-      case Iop_PRemC3210F64:  vex_printf("PRemC3210F64"); return;
-      case Iop_PRem1F64:      vex_printf("PRem1F64"); return;
-      case Iop_PRem1C3210F64: vex_printf("PRem1C3210F64"); return;
-      case Iop_NegF64:        vex_printf("NegF64"); return;
-      case Iop_SqrtF64:       vex_printf("SqrtF64"); return;
-
-      case Iop_AbsF64:    vex_printf("AbsF64"); return;
-      case Iop_SinF64:    vex_printf("SinF64"); return;
-      case Iop_CosF64:    vex_printf("CosF64"); return;
-      case Iop_TanF64:    vex_printf("TanF64"); return;
-      case Iop_2xm1F64:   vex_printf("2xm1F64"); return;
-
-      case Iop_MAddF64:    vex_printf("MAddF64"); return;
-      case Iop_MSubF64:    vex_printf("MSubF64"); return;
-      case Iop_MAddF64r32: vex_printf("MAddF64r32"); return;
-      case Iop_MSubF64r32: vex_printf("MSubF64r32"); return;
-
-      case Iop_Est5FRSqrt:    vex_printf("Est5FRSqrt"); return;
-      case Iop_RoundF64toF64_NEAREST: vex_printf("RoundF64toF64_NEAREST"); return;
-      case Iop_RoundF64toF64_NegINF: vex_printf("RoundF64toF64_NegINF"); return;
-      case Iop_RoundF64toF64_PosINF: vex_printf("RoundF64toF64_PosINF"); return;
-      case Iop_RoundF64toF64_ZERO: vex_printf("RoundF64toF64_ZERO"); return;
-
-      case Iop_TruncF64asF32: vex_printf("TruncF64asF32"); return;
-      case Iop_CalcFPRF:      vex_printf("CalcFPRF"); return;
-
-      case Iop_CmpF64:    vex_printf("CmpF64"); return;
-
-      case Iop_F64toI16: vex_printf("F64toI16"); return;
-      case Iop_F64toI32: vex_printf("F64toI32"); return;
-      case Iop_F64toI64: vex_printf("F64toI64"); return;
-
-      case Iop_I16toF64: vex_printf("I16toF64"); return;
-      case Iop_I32toF64: vex_printf("I32toF64"); return;
-      case Iop_I64toF64: vex_printf("I64toF64"); return;
-
-      case Iop_F32toF64: vex_printf("F32toF64"); return;
-      case Iop_F64toF32: vex_printf("F64toF32"); return;
-
-      case Iop_RoundF64toInt: vex_printf("RoundF64toInt"); return;
-      case Iop_RoundF64toF32: vex_printf("RoundF64toF32"); return;
-
-      case Iop_ReinterpF64asI64: vex_printf("ReinterpF64asI64"); return;
-      case Iop_ReinterpI64asF64: vex_printf("ReinterpI64asF64"); return;
-      case Iop_ReinterpF32asI32: vex_printf("ReinterpF32asI32"); return;
-      case Iop_ReinterpI32asF32: vex_printf("ReinterpI32asF32"); return;
-
-      case Iop_I32UtoFx4: vex_printf("I32UtoFx4"); return;
-      case Iop_I32StoFx4: vex_printf("I32StoFx4"); return;
-
-      case Iop_QFtoI32Ux4_RZ: vex_printf("QFtoI32Ux4_RZ"); return;
-      case Iop_QFtoI32Sx4_RZ: vex_printf("QFtoI32Sx4_RZ"); return;
-
-      case Iop_RoundF32x4_RM: vex_printf("RoundF32x4_RM"); return;
-      case Iop_RoundF32x4_RP: vex_printf("RoundF32x4_RP"); return;
-      case Iop_RoundF32x4_RN: vex_printf("RoundF32x4_RN"); return;
-      case Iop_RoundF32x4_RZ: vex_printf("RoundF32x4_RZ"); return;
-
-      case Iop_Add8x8: vex_printf("Add8x8"); return;
-      case Iop_Add16x4: vex_printf("Add16x4"); return;
-      case Iop_Add32x2: vex_printf("Add32x2"); return;
-      case Iop_QAdd8Ux8: vex_printf("QAdd8Ux8"); return;
-      case Iop_QAdd16Ux4: vex_printf("QAdd16Ux4"); return;
-      case Iop_QAdd8Sx8: vex_printf("QAdd8Sx8"); return;
-      case Iop_QAdd16Sx4: vex_printf("QAdd16Sx4"); return;
-      case Iop_Sub8x8: vex_printf("Sub8x8"); return;
-      case Iop_Sub16x4: vex_printf("Sub16x4"); return;
-      case Iop_Sub32x2: vex_printf("Sub32x2"); return;
-      case Iop_QSub8Ux8: vex_printf("QSub8Ux8"); return;
-      case Iop_QSub16Ux4: vex_printf("QSub16Ux4"); return;
-      case Iop_QSub8Sx8: vex_printf("QSub8Sx8"); return;
-      case Iop_QSub16Sx4: vex_printf("QSub16Sx4"); return;
-      case Iop_Mul16x4: vex_printf("Mul16x4"); return;
-      case Iop_Mul32x2: vex_printf("Mul32x2"); return;
-      case Iop_MulHi16Ux4: vex_printf("MulHi16Ux4"); return;
-      case Iop_MulHi16Sx4: vex_printf("MulHi16Sx4"); return;
-      case Iop_Avg8Ux8: vex_printf("Avg8Ux8"); return;
-      case Iop_Avg16Ux4: vex_printf("Avg16Ux4"); return;
-      case Iop_Max16Sx4: vex_printf("Max16Sx4"); return;
-      case Iop_Max8Ux8: vex_printf("Max8Ux8"); return;
-      case Iop_Min16Sx4: vex_printf("Min16Sx4"); return;
-      case Iop_Min8Ux8: vex_printf("Min8Ux8"); return;
-      case Iop_CmpEQ8x8: vex_printf("CmpEQ8x8"); return;
-      case Iop_CmpEQ16x4: vex_printf("CmpEQ16x4"); return;
-      case Iop_CmpEQ32x2: vex_printf("CmpEQ32x2"); return;
-      case Iop_CmpGT8Sx8: vex_printf("CmpGT8Sx8"); return;
-      case Iop_CmpGT16Sx4: vex_printf("CmpGT16Sx4"); return;
-      case Iop_CmpGT32Sx2: vex_printf("CmpGT32Sx2"); return;
-      case Iop_ShlN8x8: vex_printf("ShlN8x8"); return;
-      case Iop_ShlN16x4: vex_printf("ShlN16x4"); return;
-      case Iop_ShlN32x2: vex_printf("ShlN32x2"); return;
-      case Iop_ShrN16x4: vex_printf("ShrN16x4"); return;
-      case Iop_ShrN32x2: vex_printf("ShrN32x2"); return;
-      case Iop_SarN8x8: vex_printf("SarN8x8"); return;
-      case Iop_SarN16x4: vex_printf("SarN16x4"); return;
-      case Iop_SarN32x2: vex_printf("SarN32x2"); return;
-      case Iop_QNarrow16Ux4: vex_printf("QNarrow16Ux4"); return;
-      case Iop_QNarrow16Sx4: vex_printf("QNarrow16Sx4"); return;
-      case Iop_QNarrow32Sx2: vex_printf("QNarrow32Sx2"); return;
-      case Iop_InterleaveHI8x8: vex_printf("InterleaveHI8x8"); return;
-      case Iop_InterleaveHI16x4: vex_printf("InterleaveHI16x4"); return;
-      case Iop_InterleaveHI32x2: vex_printf("InterleaveHI32x2"); return;
-      case Iop_InterleaveLO8x8: vex_printf("InterleaveLO8x8"); return;
-      case Iop_InterleaveLO16x4: vex_printf("InterleaveLO16x4"); return;
-      case Iop_InterleaveLO32x2: vex_printf("InterleaveLO32x2"); return;
-      case Iop_CatOddLanes16x4: vex_printf("CatOddLanes16x4"); return;
-      case Iop_CatEvenLanes16x4: vex_printf("CatEvenLanes16x4"); return;
-      case Iop_Perm8x8: vex_printf("Perm8x8"); return;
-
-      case Iop_CmpNEZ32x2: vex_printf("CmpNEZ32x2"); return;
-      case Iop_CmpNEZ16x4: vex_printf("CmpNEZ16x4"); return;
-      case Iop_CmpNEZ8x8:  vex_printf("CmpNEZ8x8"); return;
-
-      case Iop_Add32Fx4:  vex_printf("Add32Fx4"); return;
-      case Iop_Add32F0x4: vex_printf("Add32F0x4"); return;
-      case Iop_Add64Fx2:  vex_printf("Add64Fx2"); return;
-      case Iop_Add64F0x2: vex_printf("Add64F0x2"); return;
-
-      case Iop_Div32Fx4:  vex_printf("Div32Fx4"); return;
-      case Iop_Div32F0x4: vex_printf("Div32F0x4"); return;
-      case Iop_Div64Fx2:  vex_printf("Div64Fx2"); return;
-      case Iop_Div64F0x2: vex_printf("Div64F0x2"); return;
-
-      case Iop_Max32Fx4:  vex_printf("Max32Fx4"); return;
-      case Iop_Max32F0x4: vex_printf("Max32F0x4"); return;
-      case Iop_Max64Fx2:  vex_printf("Max64Fx2"); return;
-      case Iop_Max64F0x2: vex_printf("Max64F0x2"); return;
-
-      case Iop_Min32Fx4:  vex_printf("Min32Fx4"); return;
-      case Iop_Min32F0x4: vex_printf("Min32F0x4"); return;
-      case Iop_Min64Fx2:  vex_printf("Min64Fx2"); return;
-      case Iop_Min64F0x2: vex_printf("Min64F0x2"); return;
-
-      case Iop_Mul32Fx4:  vex_printf("Mul32Fx4"); return;
-      case Iop_Mul32F0x4: vex_printf("Mul32F0x4"); return;
-      case Iop_Mul64Fx2:  vex_printf("Mul64Fx2"); return;
-      case Iop_Mul64F0x2: vex_printf("Mul64F0x2"); return;
-
-      case Iop_Recip32Fx4:  vex_printf("Recip32Fx4"); return;
-      case Iop_Recip32F0x4: vex_printf("Recip32F0x4"); return;
-      case Iop_Recip64Fx2:  vex_printf("Recip64Fx2"); return;
-      case Iop_Recip64F0x2: vex_printf("Recip64F0x2"); return;
-
-      case Iop_RSqrt32Fx4:  vex_printf("RSqrt32Fx4"); return;
-      case Iop_RSqrt32F0x4: vex_printf("RSqrt32F0x4"); return;
-      case Iop_RSqrt64Fx2:  vex_printf("RSqrt64Fx2"); return;
-      case Iop_RSqrt64F0x2: vex_printf("RSqrt64F0x2"); return;
-
-      case Iop_Sqrt32Fx4:  vex_printf("Sqrt32Fx4"); return;
-      case Iop_Sqrt32F0x4: vex_printf("Sqrt32F0x4"); return;
-      case Iop_Sqrt64Fx2:  vex_printf("Sqrt64Fx2"); return;
-      case Iop_Sqrt64F0x2: vex_printf("Sqrt64F0x2"); return;
-
-      case Iop_Sub32Fx4:  vex_printf("Sub32Fx4"); return;
-      case Iop_Sub32F0x4: vex_printf("Sub32F0x4"); return;
-      case Iop_Sub64Fx2:  vex_printf("Sub64Fx2"); return;
-      case Iop_Sub64F0x2: vex_printf("Sub64F0x2"); return;
-
-      case Iop_CmpEQ32Fx4: vex_printf("CmpEQ32Fx4"); return;
-      case Iop_CmpLT32Fx4: vex_printf("CmpLT32Fx4"); return;
-      case Iop_CmpLE32Fx4: vex_printf("CmpLE32Fx4"); return;
-      case Iop_CmpGT32Fx4: vex_printf("CmpGT32Fx4"); return;
-      case Iop_CmpGE32Fx4: vex_printf("CmpGE32Fx4"); return;
-      case Iop_CmpUN32Fx4: vex_printf("CmpUN32Fx4"); return;
-      case Iop_CmpEQ64Fx2: vex_printf("CmpEQ64Fx2"); return;
-      case Iop_CmpLT64Fx2: vex_printf("CmpLT64Fx2"); return;
-      case Iop_CmpLE64Fx2: vex_printf("CmpLE64Fx2"); return;
-      case Iop_CmpUN64Fx2: vex_printf("CmpUN64Fx2"); return;
-
-      case Iop_CmpEQ32F0x4: vex_printf("CmpEQ32F0x4"); return;
-      case Iop_CmpLT32F0x4: vex_printf("CmpLT32F0x4"); return;
-      case Iop_CmpLE32F0x4: vex_printf("CmpLE32F0x4"); return;
-      case Iop_CmpUN32F0x4: vex_printf("CmpUN32F0x4"); return;
-      case Iop_CmpEQ64F0x2: vex_printf("CmpEQ64F0x2"); return;
-      case Iop_CmpLT64F0x2: vex_printf("CmpLT64F0x2"); return;
-      case Iop_CmpLE64F0x2: vex_printf("CmpLE64F0x2"); return;
-      case Iop_CmpUN64F0x2: vex_printf("CmpUN64F0x2"); return;
-
-      case Iop_V128to64:   vex_printf("V128to64");   return;
-      case Iop_V128HIto64: vex_printf("V128HIto64"); return;
-      case Iop_64HLtoV128: vex_printf("64HLtoV128"); return;
-
-      case Iop_64UtoV128:   vex_printf("64UtoV128"); return;
-      case Iop_SetV128lo64: vex_printf("SetV128lo64"); return;
-
-      case Iop_32UtoV128:   vex_printf("32UtoV128"); return;
-      case Iop_V128to32:    vex_printf("V128to32"); return;
-      case Iop_SetV128lo32: vex_printf("SetV128lo32"); return;
-
-      case Iop_Dup8x16: vex_printf("Dup8x16"); return;
-      case Iop_Dup16x8: vex_printf("Dup16x8"); return;
-      case Iop_Dup32x4: vex_printf("Dup32x4"); return;
-
-      case Iop_NotV128:    vex_printf("NotV128"); return;
-      case Iop_AndV128:    vex_printf("AndV128"); return;
-      case Iop_OrV128:     vex_printf("OrV128");  return;
-      case Iop_XorV128:    vex_printf("XorV128"); return;
-
-      case Iop_CmpNEZ8x16: vex_printf("CmpNEZ8x16"); return;
-      case Iop_CmpNEZ16x8: vex_printf("CmpNEZ16x8"); return;
-      case Iop_CmpNEZ32x4: vex_printf("CmpNEZ32x4"); return;
-      case Iop_CmpNEZ64x2: vex_printf("CmpNEZ64x2"); return;
-
-      case Iop_Add8x16:   vex_printf("Add8x16"); return;
-      case Iop_Add16x8:   vex_printf("Add16x8"); return;
-      case Iop_Add32x4:   vex_printf("Add32x4"); return;
-      case Iop_Add64x2:   vex_printf("Add64x2"); return;
-      case Iop_QAdd8Ux16: vex_printf("QAdd8Ux16"); return;
-      case Iop_QAdd16Ux8: vex_printf("QAdd16Ux8"); return;
-      case Iop_QAdd32Ux4: vex_printf("QAdd32Ux4"); return;
-      case Iop_QAdd8Sx16: vex_printf("QAdd8Sx16"); return;
-      case Iop_QAdd16Sx8: vex_printf("QAdd16Sx8"); return;
-      case Iop_QAdd32Sx4: vex_printf("QAdd32Sx4"); return;
-
-      case Iop_Sub8x16:   vex_printf("Sub8x16"); return;
-      case Iop_Sub16x8:   vex_printf("Sub16x8"); return;
-      case Iop_Sub32x4:   vex_printf("Sub32x4"); return;
-      case Iop_Sub64x2:   vex_printf("Sub64x2"); return;
-      case Iop_QSub8Ux16: vex_printf("QSub8Ux16"); return;
-      case Iop_QSub16Ux8: vex_printf("QSub16Ux8"); return;
-      case Iop_QSub32Ux4: vex_printf("QSub32Ux4"); return;
-      case Iop_QSub8Sx16: vex_printf("QSub8Sx16"); return;
-      case Iop_QSub16Sx8: vex_printf("QSub16Sx8"); return;
-      case Iop_QSub32Sx4: vex_printf("QSub32Sx4"); return;
-
-      case Iop_Mul16x8:    vex_printf("Mul16x8"); return;
-      case Iop_MulHi16Ux8: vex_printf("MulHi16Ux8"); return;
-      case Iop_MulHi32Ux4: vex_printf("MulHi32Ux4"); return;
-      case Iop_MulHi16Sx8: vex_printf("MulHi16Sx8"); return;
-      case Iop_MulHi32Sx4: vex_printf("MulHi32Sx4"); return;
-
-      case Iop_MullEven8Ux16: vex_printf("MullEven8Ux16"); return;
-      case Iop_MullEven16Ux8: vex_printf("MullEven16Ux8"); return;
-      case Iop_MullEven8Sx16: vex_printf("MullEven8Sx16"); return;
-      case Iop_MullEven16Sx8: vex_printf("MullEven16Sx8"); return;
-
-      case Iop_Avg8Ux16: vex_printf("Avg8Ux16"); return;
-      case Iop_Avg16Ux8: vex_printf("Avg16Ux8"); return;
-      case Iop_Avg32Ux4: vex_printf("Avg32Ux4"); return;
-      case Iop_Avg8Sx16: vex_printf("Avg8Sx16"); return;
-      case Iop_Avg16Sx8: vex_printf("Avg16Sx8"); return;
-      case Iop_Avg32Sx4: vex_printf("Avg32Sx4"); return;
-
-      case Iop_Max8Sx16: vex_printf("Max8Sx16"); return;
-      case Iop_Max16Sx8: vex_printf("Max16Sx8"); return;
-      case Iop_Max32Sx4: vex_printf("Max32Sx4"); return;
-      case Iop_Max8Ux16: vex_printf("Max8Ux16"); return;
-      case Iop_Max16Ux8: vex_printf("Max16Ux8"); return;
-      case Iop_Max32Ux4: vex_printf("Max32Ux4"); return;
-
-      case Iop_Min8Sx16: vex_printf("Min8Sx16"); return;
-      case Iop_Min16Sx8: vex_printf("Min16Sx8"); return;
-      case Iop_Min32Sx4: vex_printf("Min32Sx4"); return;
-      case Iop_Min8Ux16: vex_printf("Min8Ux16"); return;
-      case Iop_Min16Ux8: vex_printf("Min16Ux8"); return;
-      case Iop_Min32Ux4: vex_printf("Min32Ux4"); return;
-
-      case Iop_CmpEQ8x16:  vex_printf("CmpEQ8x16"); return;
-      case Iop_CmpEQ16x8:  vex_printf("CmpEQ16x8"); return;
-      case Iop_CmpEQ32x4:  vex_printf("CmpEQ32x4"); return;
-      case Iop_CmpGT8Sx16: vex_printf("CmpGT8Sx16"); return;
-      case Iop_CmpGT16Sx8: vex_printf("CmpGT16Sx8"); return;
-      case Iop_CmpGT32Sx4: vex_printf("CmpGT32Sx4"); return;
-      case Iop_CmpGT8Ux16: vex_printf("CmpGT8Ux16"); return;
-      case Iop_CmpGT16Ux8: vex_printf("CmpGT16Ux8"); return;
-      case Iop_CmpGT32Ux4: vex_printf("CmpGT32Ux4"); return;
-
-      case Iop_ShlV128: vex_printf("ShlV128"); return;
-      case Iop_ShrV128: vex_printf("ShrV128"); return;
-
-      case Iop_ShlN8x16: vex_printf("ShlN8x16"); return;
-      case Iop_ShlN16x8: vex_printf("ShlN16x8"); return;
-      case Iop_ShlN32x4: vex_printf("ShlN32x4"); return;
-      case Iop_ShlN64x2: vex_printf("ShlN64x2"); return;
-      case Iop_ShrN8x16: vex_printf("ShrN8x16"); return;
-      case Iop_ShrN16x8: vex_printf("ShrN16x8"); return;
-      case Iop_ShrN32x4: vex_printf("ShrN32x4"); return;
-      case Iop_ShrN64x2: vex_printf("ShrN64x2"); return;
-      case Iop_SarN8x16: vex_printf("SarN8x16"); return;
-      case Iop_SarN16x8: vex_printf("SarN16x8"); return;
-      case Iop_SarN32x4: vex_printf("SarN32x4"); return;
-
-      case Iop_Shl8x16: vex_printf("Shl8x16"); return;
-      case Iop_Shl16x8: vex_printf("Shl16x8"); return;
-      case Iop_Shl32x4: vex_printf("Shl32x4"); return;
-      case Iop_Shr8x16: vex_printf("Shr8x16"); return;
-      case Iop_Shr16x8: vex_printf("Shr16x8"); return;
-      case Iop_Shr32x4: vex_printf("Shr32x4"); return;
-      case Iop_Sar8x16: vex_printf("Sar8x16"); return;
-      case Iop_Sar16x8: vex_printf("Sar16x8"); return;
-      case Iop_Sar32x4: vex_printf("Sar32x4"); return;
-      case Iop_Rol8x16: vex_printf("Rol8x16"); return;
-      case Iop_Rol16x8: vex_printf("Rol16x8"); return;
-      case Iop_Rol32x4: vex_printf("Rol32x4"); return;
-
-      case Iop_Narrow16x8:   vex_printf("Narrow16x8"); return;
-      case Iop_Narrow32x4:   vex_printf("Narrow32x4"); return;
-      case Iop_QNarrow16Ux8: vex_printf("QNarrow16Ux8"); return;
-      case Iop_QNarrow32Ux4: vex_printf("QNarrow32Ux4"); return;
-      case Iop_QNarrow16Sx8: vex_printf("QNarrow16Sx8"); return;
-      case Iop_QNarrow32Sx4: vex_printf("QNarrow32Sx4"); return;
-
-      case Iop_InterleaveHI8x16: vex_printf("InterleaveHI8x16"); return;
-      case Iop_InterleaveHI16x8: vex_printf("InterleaveHI16x8"); return;
-      case Iop_InterleaveHI32x4: vex_printf("InterleaveHI32x4"); return;
-      case Iop_InterleaveHI64x2: vex_printf("InterleaveHI64x2"); return;
-      case Iop_InterleaveLO8x16: vex_printf("InterleaveLO8x16"); return;
-      case Iop_InterleaveLO16x8: vex_printf("InterleaveLO16x8"); return;
-      case Iop_InterleaveLO32x4: vex_printf("InterleaveLO32x4"); return;
-      case Iop_InterleaveLO64x2: vex_printf("InterleaveLO64x2"); return;
-
-      case Iop_Perm8x16: vex_printf("Perm8x16"); return;
+      case Iop_8Uto16:   fprintf(f, "8Uto16");  return;
+      case Iop_8Uto32:   fprintf(f, "8Uto32");  return;
+      case Iop_16Uto32:  fprintf(f, "16Uto32"); return;
+      case Iop_8Sto16:   fprintf(f, "8Sto16");  return;
+      case Iop_8Sto32:   fprintf(f, "8Sto32");  return;
+      case Iop_16Sto32:  fprintf(f, "16Sto32"); return;
+      case Iop_32Sto64:  fprintf(f, "32Sto64"); return;
+      case Iop_32Uto64:  fprintf(f, "32Uto64"); return;
+      case Iop_32to8:    fprintf(f, "32to8");   return;
+      case Iop_16Uto64:  fprintf(f, "16Uto64"); return;
+      case Iop_16Sto64:  fprintf(f, "16Sto64"); return;
+      case Iop_8Uto64:   fprintf(f, "8Uto64"); return;
+      case Iop_8Sto64:   fprintf(f, "8Sto64"); return;
+      case Iop_64to16:   fprintf(f, "64to16"); return;
+      case Iop_64to8:    fprintf(f, "64to8");  return;
+
+      case Iop_Not1:     fprintf(f, "Not1");    return;
+      case Iop_32to1:    fprintf(f, "32to1");   return;
+      case Iop_64to1:    fprintf(f, "64to1");   return;
+      case Iop_1Uto8:    fprintf(f, "1Uto8");   return;
+      case Iop_1Uto32:   fprintf(f, "1Uto32");  return;
+      case Iop_1Uto64:   fprintf(f, "1Uto64");  return;
+      case Iop_1Sto8:    fprintf(f, "1Sto8");  return;
+      case Iop_1Sto16:   fprintf(f, "1Sto16");  return;
+      case Iop_1Sto32:   fprintf(f, "1Sto32");  return;
+      case Iop_1Sto64:   fprintf(f, "1Sto64");  return;
+
+      case Iop_MullS8:   fprintf(f, "MullS8");  return;
+      case Iop_MullS16:  fprintf(f, "MullS16"); return;
+      case Iop_MullS32:  fprintf(f, "MullS32"); return;
+      case Iop_MullS64:  fprintf(f, "MullS64"); return;
+      case Iop_MullU8:   fprintf(f, "MullU8");  return;
+      case Iop_MullU16:  fprintf(f, "MullU16"); return;
+      case Iop_MullU32:  fprintf(f, "MullU32"); return;
+      case Iop_MullU64:  fprintf(f, "MullU64"); return;
+
+      case Iop_Clz64:    fprintf(f, "Clz64"); return;
+      case Iop_Clz32:    fprintf(f, "Clz32"); return;
+      case Iop_Ctz64:    fprintf(f, "Ctz64"); return;
+      case Iop_Ctz32:    fprintf(f, "Ctz32"); return;
+
+      case Iop_CmpLT32S: fprintf(f, "CmpLT32S"); return;
+      case Iop_CmpLE32S: fprintf(f, "CmpLE32S"); return;
+      case Iop_CmpLT32U: fprintf(f, "CmpLT32U"); return;
+      case Iop_CmpLE32U: fprintf(f, "CmpLE32U"); return;
+
+      case Iop_CmpLT64S: fprintf(f, "CmpLT64S"); return;
+      case Iop_CmpLE64S: fprintf(f, "CmpLE64S"); return;
+      case Iop_CmpLT64U: fprintf(f, "CmpLT64U"); return;
+      case Iop_CmpLE64U: fprintf(f, "CmpLE64U"); return;
+
+      case Iop_CmpNEZ8:  fprintf(f, "CmpNEZ8"); return;
+      case Iop_CmpNEZ16: fprintf(f, "CmpNEZ16"); return;
+      case Iop_CmpNEZ32: fprintf(f, "CmpNEZ32"); return;
+      case Iop_CmpNEZ64: fprintf(f, "CmpNEZ64"); return;
+
+      case Iop_CmpwNEZ32: fprintf(f, "CmpwNEZ32"); return;
+      case Iop_CmpwNEZ64: fprintf(f, "CmpwNEZ64"); return;
+
+      case Iop_Left8:  fprintf(f, "Left8"); return;
+      case Iop_Left16: fprintf(f, "Left16"); return;
+      case Iop_Left32: fprintf(f, "Left32"); return;
+      case Iop_Left64: fprintf(f, "Left64"); return;
+      case Iop_Max32U: fprintf(f, "Max32U"); return;
+
+      case Iop_CmpORD32U: fprintf(f, "CmpORD32U"); return;
+      case Iop_CmpORD32S: fprintf(f, "CmpORD32S"); return;
+
+      case Iop_CmpORD64U: fprintf(f, "CmpORD64U"); return;
+      case Iop_CmpORD64S: fprintf(f, "CmpORD64S"); return;
+
+      case Iop_DivU32: fprintf(f, "DivU32"); return;
+      case Iop_DivS32: fprintf(f, "DivS32"); return;
+      case Iop_DivU64: fprintf(f, "DivU64"); return;
+      case Iop_DivS64: fprintf(f, "DivS64"); return;
+
+      case Iop_DivModU64to32: fprintf(f, "DivModU64to32"); return;
+      case Iop_DivModS64to32: fprintf(f, "DivModS64to32"); return;
+
+      case Iop_DivModU128to64: fprintf(f, "DivModU128to64"); return;
+      case Iop_DivModS128to64: fprintf(f, "DivModS128to64"); return;
+
+      case Iop_16HIto8:  fprintf(f, "16HIto8"); return;
+      case Iop_16to8:    fprintf(f, "16to8");   return;
+      case Iop_8HLto16:  fprintf(f, "8HLto16"); return;
+
+      case Iop_32HIto16: fprintf(f, "32HIto16"); return;
+      case Iop_32to16:   fprintf(f, "32to16");   return;
+      case Iop_16HLto32: fprintf(f, "16HLto32"); return;
+
+      case Iop_64HIto32: fprintf(f, "64HIto32"); return;
+      case Iop_64to32:   fprintf(f, "64to32");   return;
+      case Iop_32HLto64: fprintf(f, "32HLto64"); return;
+
+      case Iop_128HIto64: fprintf(f, "128HIto64"); return;
+      case Iop_128to64:   fprintf(f, "128to64");   return;
+      case Iop_64HLto128: fprintf(f, "64HLto128"); return;
+
+      case Iop_AddF64:    fprintf(f, "AddF64"); return;
+      case Iop_SubF64:    fprintf(f, "SubF64"); return;
+      case Iop_MulF64:    fprintf(f, "MulF64"); return;
+      case Iop_DivF64:    fprintf(f, "DivF64"); return;
+      case Iop_AddF64r32: fprintf(f, "AddF64r32"); return;
+      case Iop_SubF64r32: fprintf(f, "SubF64r32"); return;
+      case Iop_MulF64r32: fprintf(f, "MulF64r32"); return;
+      case Iop_DivF64r32: fprintf(f, "DivF64r32"); return;
+
+      case Iop_ScaleF64:      fprintf(f, "ScaleF64"); return;
+      case Iop_AtanF64:       fprintf(f, "AtanF64"); return;
+      case Iop_Yl2xF64:       fprintf(f, "Yl2xF64"); return;
+      case Iop_Yl2xp1F64:     fprintf(f, "Yl2xp1F64"); return;
+      case Iop_PRemF64:       fprintf(f, "PRemF64"); return;
+      case Iop_PRemC3210F64:  fprintf(f, "PRemC3210F64"); return;
+      case Iop_PRem1F64:      fprintf(f, "PRem1F64"); return;
+      case Iop_PRem1C3210F64: fprintf(f, "PRem1C3210F64"); return;
+      case Iop_NegF64:        fprintf(f, "NegF64"); return;
+      case Iop_SqrtF64:       fprintf(f, "SqrtF64"); return;
+
+      case Iop_AbsF64:    fprintf(f, "AbsF64"); return;
+      case Iop_SinF64:    fprintf(f, "SinF64"); return;
+      case Iop_CosF64:    fprintf(f, "CosF64"); return;
+      case Iop_TanF64:    fprintf(f, "TanF64"); return;
+      case Iop_2xm1F64:   fprintf(f, "2xm1F64"); return;
+
+      case Iop_MAddF64:    fprintf(f, "MAddF64"); return;
+      case Iop_MSubF64:    fprintf(f, "MSubF64"); return;
+      case Iop_MAddF64r32: fprintf(f, "MAddF64r32"); return;
+      case Iop_MSubF64r32: fprintf(f, "MSubF64r32"); return;
+
+      case Iop_Est5FRSqrt:    fprintf(f, "Est5FRSqrt"); return;
+      case Iop_RoundF64toF64_NEAREST: fprintf(f, "RoundF64toF64_NEAREST"); return;
+      case Iop_RoundF64toF64_NegINF: fprintf(f, "RoundF64toF64_NegINF"); return;
+      case Iop_RoundF64toF64_PosINF: fprintf(f, "RoundF64toF64_PosINF"); return;
+      case Iop_RoundF64toF64_ZERO: fprintf(f, "RoundF64toF64_ZERO"); return;
+
+      case Iop_TruncF64asF32: fprintf(f, "TruncF64asF32"); return;
+      case Iop_CalcFPRF:      fprintf(f, "CalcFPRF"); return;
+
+      case Iop_CmpF64:    fprintf(f, "CmpF64"); return;
+
+      case Iop_F64toI16: fprintf(f, "F64toI16"); return;
+      case Iop_F64toI32: fprintf(f, "F64toI32"); return;
+      case Iop_F64toI64: fprintf(f, "F64toI64"); return;
+
+      case Iop_I16toF64: fprintf(f, "I16toF64"); return;
+      case Iop_I32toF64: fprintf(f, "I32toF64"); return;
+      case Iop_I64toF64: fprintf(f, "I64toF64"); return;
+
+      case Iop_F32toF64: fprintf(f, "F32toF64"); return;
+      case Iop_F64toF32: fprintf(f, "F64toF32"); return;
+
+      case Iop_RoundF64toInt: fprintf(f, "RoundF64toInt"); return;
+      case Iop_RoundF64toF32: fprintf(f, "RoundF64toF32"); return;
+
+      case Iop_ReinterpF64asI64: fprintf(f, "ReinterpF64asI64"); return;
+      case Iop_ReinterpI64asF64: fprintf(f, "ReinterpI64asF64"); return;
+      case Iop_ReinterpF32asI32: fprintf(f, "ReinterpF32asI32"); return;
+      case Iop_ReinterpI32asF32: fprintf(f, "ReinterpI32asF32"); return;
+
+      case Iop_I32UtoFx4: fprintf(f, "I32UtoFx4"); return;
+      case Iop_I32StoFx4: fprintf(f, "I32StoFx4"); return;
+
+      case Iop_QFtoI32Ux4_RZ: fprintf(f, "QFtoI32Ux4_RZ"); return;
+      case Iop_QFtoI32Sx4_RZ: fprintf(f, "QFtoI32Sx4_RZ"); return;
+
+      case Iop_RoundF32x4_RM: fprintf(f, "RoundF32x4_RM"); return;
+      case Iop_RoundF32x4_RP: fprintf(f, "RoundF32x4_RP"); return;
+      case Iop_RoundF32x4_RN: fprintf(f, "RoundF32x4_RN"); return;
+      case Iop_RoundF32x4_RZ: fprintf(f, "RoundF32x4_RZ"); return;
+
+      case Iop_Add8x8: fprintf(f, "Add8x8"); return;
+      case Iop_Add16x4: fprintf(f, "Add16x4"); return;
+      case Iop_Add32x2: fprintf(f, "Add32x2"); return;
+      case Iop_QAdd8Ux8: fprintf(f, "QAdd8Ux8"); return;
+      case Iop_QAdd16Ux4: fprintf(f, "QAdd16Ux4"); return;
+      case Iop_QAdd8Sx8: fprintf(f, "QAdd8Sx8"); return;
+      case Iop_QAdd16Sx4: fprintf(f, "QAdd16Sx4"); return;
+      case Iop_Sub8x8: fprintf(f, "Sub8x8"); return;
+      case Iop_Sub16x4: fprintf(f, "Sub16x4"); return;
+      case Iop_Sub32x2: fprintf(f, "Sub32x2"); return;
+      case Iop_QSub8Ux8: fprintf(f, "QSub8Ux8"); return;
+      case Iop_QSub16Ux4: fprintf(f, "QSub16Ux4"); return;
+      case Iop_QSub8Sx8: fprintf(f, "QSub8Sx8"); return;
+      case Iop_QSub16Sx4: fprintf(f, "QSub16Sx4"); return;
+      case Iop_Mul16x4: fprintf(f, "Mul16x4"); return;
+      case Iop_Mul32x2: fprintf(f, "Mul32x2"); return;
+      case Iop_MulHi16Ux4: fprintf(f, "MulHi16Ux4"); return;
+      case Iop_MulHi16Sx4: fprintf(f, "MulHi16Sx4"); return;
+      case Iop_Avg8Ux8: fprintf(f, "Avg8Ux8"); return;
+      case Iop_Avg16Ux4: fprintf(f, "Avg16Ux4"); return;
+      case Iop_Max16Sx4: fprintf(f, "Max16Sx4"); return;
+      case Iop_Max8Ux8: fprintf(f, "Max8Ux8"); return;
+      case Iop_Min16Sx4: fprintf(f, "Min16Sx4"); return;
+      case Iop_Min8Ux8: fprintf(f, "Min8Ux8"); return;
+      case Iop_CmpEQ8x8: fprintf(f, "CmpEQ8x8"); return;
+      case Iop_CmpEQ16x4: fprintf(f, "CmpEQ16x4"); return;
+      case Iop_CmpEQ32x2: fprintf(f, "CmpEQ32x2"); return;
+      case Iop_CmpGT8Sx8: fprintf(f, "CmpGT8Sx8"); return;
+      case Iop_CmpGT16Sx4: fprintf(f, "CmpGT16Sx4"); return;
+      case Iop_CmpGT32Sx2: fprintf(f, "CmpGT32Sx2"); return;
+      case Iop_ShlN8x8: fprintf(f, "ShlN8x8"); return;
+      case Iop_ShlN16x4: fprintf(f, "ShlN16x4"); return;
+      case Iop_ShlN32x2: fprintf(f, "ShlN32x2"); return;
+      case Iop_ShrN16x4: fprintf(f, "ShrN16x4"); return;
+      case Iop_ShrN32x2: fprintf(f, "ShrN32x2"); return;
+      case Iop_SarN8x8: fprintf(f, "SarN8x8"); return;
+      case Iop_SarN16x4: fprintf(f, "SarN16x4"); return;
+      case Iop_SarN32x2: fprintf(f, "SarN32x2"); return;
+      case Iop_QNarrow16Ux4: fprintf(f, "QNarrow16Ux4"); return;
+      case Iop_QNarrow16Sx4: fprintf(f, "QNarrow16Sx4"); return;
+      case Iop_QNarrow32Sx2: fprintf(f, "QNarrow32Sx2"); return;
+      case Iop_InterleaveHI8x8: fprintf(f, "InterleaveHI8x8"); return;
+      case Iop_InterleaveHI16x4: fprintf(f, "InterleaveHI16x4"); return;
+      case Iop_InterleaveHI32x2: fprintf(f, "InterleaveHI32x2"); return;
+      case Iop_InterleaveLO8x8: fprintf(f, "InterleaveLO8x8"); return;
+      case Iop_InterleaveLO16x4: fprintf(f, "InterleaveLO16x4"); return;
+      case Iop_InterleaveLO32x2: fprintf(f, "InterleaveLO32x2"); return;
+      case Iop_CatOddLanes16x4: fprintf(f, "CatOddLanes16x4"); return;
+      case Iop_CatEvenLanes16x4: fprintf(f, "CatEvenLanes16x4"); return;
+      case Iop_Perm8x8: fprintf(f, "Perm8x8"); return;
+
+      case Iop_CmpNEZ32x2: fprintf(f, "CmpNEZ32x2"); return;
+      case Iop_CmpNEZ16x4: fprintf(f, "CmpNEZ16x4"); return;
+      case Iop_CmpNEZ8x8:  fprintf(f, "CmpNEZ8x8"); return;
+
+      case Iop_Add32Fx4:  fprintf(f, "Add32Fx4"); return;
+      case Iop_Add32F0x4: fprintf(f, "Add32F0x4"); return;
+      case Iop_Add64Fx2:  fprintf(f, "Add64Fx2"); return;
+      case Iop_Add64F0x2: fprintf(f, "Add64F0x2"); return;
+
+      case Iop_Div32Fx4:  fprintf(f, "Div32Fx4"); return;
+      case Iop_Div32F0x4: fprintf(f, "Div32F0x4"); return;
+      case Iop_Div64Fx2:  fprintf(f, "Div64Fx2"); return;
+      case Iop_Div64F0x2: fprintf(f, "Div64F0x2"); return;
+
+      case Iop_Max32Fx4:  fprintf(f, "Max32Fx4"); return;
+      case Iop_Max32F0x4: fprintf(f, "Max32F0x4"); return;
+      case Iop_Max64Fx2:  fprintf(f, "Max64Fx2"); return;
+      case Iop_Max64F0x2: fprintf(f, "Max64F0x2"); return;
+
+      case Iop_Min32Fx4:  fprintf(f, "Min32Fx4"); return;
+      case Iop_Min32F0x4: fprintf(f, "Min32F0x4"); return;
+      case Iop_Min64Fx2:  fprintf(f, "Min64Fx2"); return;
+      case Iop_Min64F0x2: fprintf(f, "Min64F0x2"); return;
+
+      case Iop_Mul32Fx4:  fprintf(f, "Mul32Fx4"); return;
+      case Iop_Mul32F0x4: fprintf(f, "Mul32F0x4"); return;
+      case Iop_Mul64Fx2:  fprintf(f, "Mul64Fx2"); return;
+      case Iop_Mul64F0x2: fprintf(f, "Mul64F0x2"); return;
+
+      case Iop_Recip32Fx4:  fprintf(f, "Recip32Fx4"); return;
+      case Iop_Recip32F0x4: fprintf(f, "Recip32F0x4"); return;
+      case Iop_Recip64Fx2:  fprintf(f, "Recip64Fx2"); return;
+      case Iop_Recip64F0x2: fprintf(f, "Recip64F0x2"); return;
+
+      case Iop_RSqrt32Fx4:  fprintf(f, "RSqrt32Fx4"); return;
+      case Iop_RSqrt32F0x4: fprintf(f, "RSqrt32F0x4"); return;
+      case Iop_RSqrt64Fx2:  fprintf(f, "RSqrt64Fx2"); return;
+      case Iop_RSqrt64F0x2: fprintf(f, "RSqrt64F0x2"); return;
+
+      case Iop_Sqrt32Fx4:  fprintf(f, "Sqrt32Fx4"); return;
+      case Iop_Sqrt32F0x4: fprintf(f, "Sqrt32F0x4"); return;
+      case Iop_Sqrt64Fx2:  fprintf(f, "Sqrt64Fx2"); return;
+      case Iop_Sqrt64F0x2: fprintf(f, "Sqrt64F0x2"); return;
+
+      case Iop_Sub32Fx4:  fprintf(f, "Sub32Fx4"); return;
+      case Iop_Sub32F0x4: fprintf(f, "Sub32F0x4"); return;
+      case Iop_Sub64Fx2:  fprintf(f, "Sub64Fx2"); return;
+      case Iop_Sub64F0x2: fprintf(f, "Sub64F0x2"); return;
+
+      case Iop_CmpEQ32Fx4: fprintf(f, "CmpEQ32Fx4"); return;
+      case Iop_CmpLT32Fx4: fprintf(f, "CmpLT32Fx4"); return;
+      case Iop_CmpLE32Fx4: fprintf(f, "CmpLE32Fx4"); return;
+      case Iop_CmpGT32Fx4: fprintf(f, "CmpGT32Fx4"); return;
+      case Iop_CmpGE32Fx4: fprintf(f, "CmpGE32Fx4"); return;
+      case Iop_CmpUN32Fx4: fprintf(f, "CmpUN32Fx4"); return;
+      case Iop_CmpEQ64Fx2: fprintf(f, "CmpEQ64Fx2"); return;
+      case Iop_CmpLT64Fx2: fprintf(f, "CmpLT64Fx2"); return;
+      case Iop_CmpLE64Fx2: fprintf(f, "CmpLE64Fx2"); return;
+      case Iop_CmpUN64Fx2: fprintf(f, "CmpUN64Fx2"); return;
+
+      case Iop_CmpEQ32F0x4: fprintf(f, "CmpEQ32F0x4"); return;
+      case Iop_CmpLT32F0x4: fprintf(f, "CmpLT32F0x4"); return;
+      case Iop_CmpLE32F0x4: fprintf(f, "CmpLE32F0x4"); return;
+      case Iop_CmpUN32F0x4: fprintf(f, "CmpUN32F0x4"); return;
+      case Iop_CmpEQ64F0x2: fprintf(f, "CmpEQ64F0x2"); return;
+      case Iop_CmpLT64F0x2: fprintf(f, "CmpLT64F0x2"); return;
+      case Iop_CmpLE64F0x2: fprintf(f, "CmpLE64F0x2"); return;
+      case Iop_CmpUN64F0x2: fprintf(f, "CmpUN64F0x2"); return;
+
+      case Iop_V128to64:   fprintf(f, "V128to64");   return;
+      case Iop_V128HIto64: fprintf(f, "V128HIto64"); return;
+      case Iop_64HLtoV128: fprintf(f, "64HLtoV128"); return;
+
+      case Iop_64UtoV128:   fprintf(f, "64UtoV128"); return;
+      case Iop_SetV128lo64: fprintf(f, "SetV128lo64"); return;
+
+      case Iop_32UtoV128:   fprintf(f, "32UtoV128"); return;
+      case Iop_V128to32:    fprintf(f, "V128to32"); return;
+      case Iop_SetV128lo32: fprintf(f, "SetV128lo32"); return;
+
+      case Iop_Dup8x16: fprintf(f, "Dup8x16"); return;
+      case Iop_Dup16x8: fprintf(f, "Dup16x8"); return;
+      case Iop_Dup32x4: fprintf(f, "Dup32x4"); return;
+
+      case Iop_NotV128:    fprintf(f, "NotV128"); return;
+      case Iop_AndV128:    fprintf(f, "AndV128"); return;
+      case Iop_OrV128:     fprintf(f, "OrV128");  return;
+      case Iop_XorV128:    fprintf(f, "XorV128"); return;
+
+      case Iop_CmpNEZ8x16: fprintf(f, "CmpNEZ8x16"); return;
+      case Iop_CmpNEZ16x8: fprintf(f, "CmpNEZ16x8"); return;
+      case Iop_CmpNEZ32x4: fprintf(f, "CmpNEZ32x4"); return;
+      case Iop_CmpNEZ64x2: fprintf(f, "CmpNEZ64x2"); return;
+
+      case Iop_Add8x16:   fprintf(f, "Add8x16"); return;
+      case Iop_Add16x8:   fprintf(f, "Add16x8"); return;
+      case Iop_Add32x4:   fprintf(f, "Add32x4"); return;
+      case Iop_Add64x2:   fprintf(f, "Add64x2"); return;
+      case Iop_QAdd8Ux16: fprintf(f, "QAdd8Ux16"); return;
+      case Iop_QAdd16Ux8: fprintf(f, "QAdd16Ux8"); return;
+      case Iop_QAdd32Ux4: fprintf(f, "QAdd32Ux4"); return;
+      case Iop_QAdd8Sx16: fprintf(f, "QAdd8Sx16"); return;
+      case Iop_QAdd16Sx8: fprintf(f, "QAdd16Sx8"); return;
+      case Iop_QAdd32Sx4: fprintf(f, "QAdd32Sx4"); return;
+
+      case Iop_Sub8x16:   fprintf(f, "Sub8x16"); return;
+      case Iop_Sub16x8:   fprintf(f, "Sub16x8"); return;
+      case Iop_Sub32x4:   fprintf(f, "Sub32x4"); return;
+      case Iop_Sub64x2:   fprintf(f, "Sub64x2"); return;
+      case Iop_QSub8Ux16: fprintf(f, "QSub8Ux16"); return;
+      case Iop_QSub16Ux8: fprintf(f, "QSub16Ux8"); return;
+      case Iop_QSub32Ux4: fprintf(f, "QSub32Ux4"); return;
+      case Iop_QSub8Sx16: fprintf(f, "QSub8Sx16"); return;
+      case Iop_QSub16Sx8: fprintf(f, "QSub16Sx8"); return;
+      case Iop_QSub32Sx4: fprintf(f, "QSub32Sx4"); return;
+
+      case Iop_Mul16x8:    fprintf(f, "Mul16x8"); return;
+      case Iop_MulHi16Ux8: fprintf(f, "MulHi16Ux8"); return;
+      case Iop_MulHi32Ux4: fprintf(f, "MulHi32Ux4"); return;
+      case Iop_MulHi16Sx8: fprintf(f, "MulHi16Sx8"); return;
+      case Iop_MulHi32Sx4: fprintf(f, "MulHi32Sx4"); return;
+
+      case Iop_MullEven8Ux16: fprintf(f, "MullEven8Ux16"); return;
+      case Iop_MullEven16Ux8: fprintf(f, "MullEven16Ux8"); return;
+      case Iop_MullEven8Sx16: fprintf(f, "MullEven8Sx16"); return;
+      case Iop_MullEven16Sx8: fprintf(f, "MullEven16Sx8"); return;
+
+      case Iop_Avg8Ux16: fprintf(f, "Avg8Ux16"); return;
+      case Iop_Avg16Ux8: fprintf(f, "Avg16Ux8"); return;
+      case Iop_Avg32Ux4: fprintf(f, "Avg32Ux4"); return;
+      case Iop_Avg8Sx16: fprintf(f, "Avg8Sx16"); return;
+      case Iop_Avg16Sx8: fprintf(f, "Avg16Sx8"); return;
+      case Iop_Avg32Sx4: fprintf(f, "Avg32Sx4"); return;
+
+      case Iop_Max8Sx16: fprintf(f, "Max8Sx16"); return;
+      case Iop_Max16Sx8: fprintf(f, "Max16Sx8"); return;
+      case Iop_Max32Sx4: fprintf(f, "Max32Sx4"); return;
+      case Iop_Max8Ux16: fprintf(f, "Max8Ux16"); return;
+      case Iop_Max16Ux8: fprintf(f, "Max16Ux8"); return;
+      case Iop_Max32Ux4: fprintf(f, "Max32Ux4"); return;
+
+      case Iop_Min8Sx16: fprintf(f, "Min8Sx16"); return;
+      case Iop_Min16Sx8: fprintf(f, "Min16Sx8"); return;
+      case Iop_Min32Sx4: fprintf(f, "Min32Sx4"); return;
+      case Iop_Min8Ux16: fprintf(f, "Min8Ux16"); return;
+      case Iop_Min16Ux8: fprintf(f, "Min16Ux8"); return;
+      case Iop_Min32Ux4: fprintf(f, "Min32Ux4"); return;
+
+      case Iop_CmpEQ8x16:  fprintf(f, "CmpEQ8x16"); return;
+      case Iop_CmpEQ16x8:  fprintf(f, "CmpEQ16x8"); return;
+      case Iop_CmpEQ32x4:  fprintf(f, "CmpEQ32x4"); return;
+      case Iop_CmpGT8Sx16: fprintf(f, "CmpGT8Sx16"); return;
+      case Iop_CmpGT16Sx8: fprintf(f, "CmpGT16Sx8"); return;
+      case Iop_CmpGT32Sx4: fprintf(f, "CmpGT32Sx4"); return;
+      case Iop_CmpGT8Ux16: fprintf(f, "CmpGT8Ux16"); return;
+      case Iop_CmpGT16Ux8: fprintf(f, "CmpGT16Ux8"); return;
+      case Iop_CmpGT32Ux4: fprintf(f, "CmpGT32Ux4"); return;
+
+      case Iop_ShlV128: fprintf(f, "ShlV128"); return;
+      case Iop_ShrV128: fprintf(f, "ShrV128"); return;
+
+      case Iop_ShlN8x16: fprintf(f, "ShlN8x16"); return;
+      case Iop_ShlN16x8: fprintf(f, "ShlN16x8"); return;
+      case Iop_ShlN32x4: fprintf(f, "ShlN32x4"); return;
+      case Iop_ShlN64x2: fprintf(f, "ShlN64x2"); return;
+      case Iop_ShrN8x16: fprintf(f, "ShrN8x16"); return;
+      case Iop_ShrN16x8: fprintf(f, "ShrN16x8"); return;
+      case Iop_ShrN32x4: fprintf(f, "ShrN32x4"); return;
+      case Iop_ShrN64x2: fprintf(f, "ShrN64x2"); return;
+      case Iop_SarN8x16: fprintf(f, "SarN8x16"); return;
+      case Iop_SarN16x8: fprintf(f, "SarN16x8"); return;
+      case Iop_SarN32x4: fprintf(f, "SarN32x4"); return;
+
+      case Iop_Shl8x16: fprintf(f, "Shl8x16"); return;
+      case Iop_Shl16x8: fprintf(f, "Shl16x8"); return;
+      case Iop_Shl32x4: fprintf(f, "Shl32x4"); return;
+      case Iop_Shr8x16: fprintf(f, "Shr8x16"); return;
+      case Iop_Shr16x8: fprintf(f, "Shr16x8"); return;
+      case Iop_Shr32x4: fprintf(f, "Shr32x4"); return;
+      case Iop_Sar8x16: fprintf(f, "Sar8x16"); return;
+      case Iop_Sar16x8: fprintf(f, "Sar16x8"); return;
+      case Iop_Sar32x4: fprintf(f, "Sar32x4"); return;
+      case Iop_Rol8x16: fprintf(f, "Rol8x16"); return;
+      case Iop_Rol16x8: fprintf(f, "Rol16x8"); return;
+      case Iop_Rol32x4: fprintf(f, "Rol32x4"); return;
+
+      case Iop_Narrow16x8:   fprintf(f, "Narrow16x8"); return;
+      case Iop_Narrow32x4:   fprintf(f, "Narrow32x4"); return;
+      case Iop_QNarrow16Ux8: fprintf(f, "QNarrow16Ux8"); return;
+      case Iop_QNarrow32Ux4: fprintf(f, "QNarrow32Ux4"); return;
+      case Iop_QNarrow16Sx8: fprintf(f, "QNarrow16Sx8"); return;
+      case Iop_QNarrow32Sx4: fprintf(f, "QNarrow32Sx4"); return;
+
+      case Iop_InterleaveHI8x16: fprintf(f, "InterleaveHI8x16"); return;
+      case Iop_InterleaveHI16x8: fprintf(f, "InterleaveHI16x8"); return;
+      case Iop_InterleaveHI32x4: fprintf(f, "InterleaveHI32x4"); return;
+      case Iop_InterleaveHI64x2: fprintf(f, "InterleaveHI64x2"); return;
+      case Iop_InterleaveLO8x16: fprintf(f, "InterleaveLO8x16"); return;
+      case Iop_InterleaveLO16x8: fprintf(f, "InterleaveLO16x8"); return;
+      case Iop_InterleaveLO32x4: fprintf(f, "InterleaveLO32x4"); return;
+      case Iop_InterleaveLO64x2: fprintf(f, "InterleaveLO64x2"); return;
+
+      case Iop_Perm8x16: fprintf(f, "Perm8x16"); return;
 
       default: vpanic("ppIROp(1)");
    }
 
    vassert(str);  
    switch (op - base) {
-      case 0: vex_printf("%s",str); vex_printf("8"); break;
-      case 1: vex_printf("%s",str); vex_printf("16"); break;
-      case 2: vex_printf("%s",str); vex_printf("32"); break;
-      case 3: vex_printf("%s",str); vex_printf("64"); break;
+      case 0: fprintf(f, "%s",str); fprintf(f, "8"); break;
+      case 1: fprintf(f, "%s",str); fprintf(f, "16"); break;
+      case 2: fprintf(f, "%s",str); fprintf(f, "32"); break;
+      case 3: fprintf(f, "%s",str); fprintf(f, "64"); break;
       default: vpanic("ppIROp(2)");
    }
 }
 
-void ppIRExpr ( IRExpr* e )
+void ppIRExpr ( IRExpr* e, FILE *f )
 {
   Int i;
   switch (e->tag) {
     case Iex_Binder:
-      vex_printf("BIND-%d", e->Iex.Binder.binder);
+      fprintf(f, "BIND-%d", e->Iex.Binder.binder);
       break;
     case Iex_Get:
-      vex_printf( "GET:" );
-      ppIRType(e->Iex.Get.ty);
-      vex_printf("(%d)", e->Iex.Get.offset);
+      fprintf(f,  "GET:" );
+      ppIRType(e->Iex.Get.ty, f);
+      fprintf(f, "(%d)", e->Iex.Get.offset);
       break;
     case Iex_GetI:
-      vex_printf( "GETI" );
-      ppIRRegArray(e->Iex.GetI.descr);
-      vex_printf("[");
-      ppIRExpr(e->Iex.GetI.ix);
-      vex_printf(",%d]", e->Iex.GetI.bias);
+      fprintf(f,  "GETI" );
+      ppIRRegArray(e->Iex.GetI.descr, f);
+      fprintf(f, "[");
+      ppIRExpr(e->Iex.GetI.ix, f);
+      fprintf(f, ",%d]", e->Iex.GetI.bias);
       break;
     case Iex_RdTmp:
-      ppIRTemp(e->Iex.RdTmp.tmp);
+      ppIRTemp(e->Iex.RdTmp.tmp, f);
       break;
     case Iex_Qop:
-      ppIROp(e->Iex.Qop.op);
-      vex_printf( "(" );
-      ppIRExpr(e->Iex.Qop.arg1);
-      vex_printf( "," );
-      ppIRExpr(e->Iex.Qop.arg2);
-      vex_printf( "," );
-      ppIRExpr(e->Iex.Qop.arg3);
-      vex_printf( "," );
-      ppIRExpr(e->Iex.Qop.arg4);
-      vex_printf( ")" );
+      ppIROp(e->Iex.Qop.op, f);
+      fprintf(f,  "(" );
+      ppIRExpr(e->Iex.Qop.arg1, f);
+      fprintf(f,  "," );
+      ppIRExpr(e->Iex.Qop.arg2, f);
+      fprintf(f,  "," );
+      ppIRExpr(e->Iex.Qop.arg3, f);
+      fprintf(f,  "," );
+      ppIRExpr(e->Iex.Qop.arg4, f);
+      fprintf(f,  ")" );
       break;
     case Iex_Triop:
-      ppIROp(e->Iex.Triop.op);
-      vex_printf( "(" );
-      ppIRExpr(e->Iex.Triop.arg1);
-      vex_printf( "," );
-      ppIRExpr(e->Iex.Triop.arg2);
-      vex_printf( "," );
-      ppIRExpr(e->Iex.Triop.arg3);
-      vex_printf( ")" );
+      ppIROp(e->Iex.Triop.op, f);
+      fprintf(f,  "(" );
+      ppIRExpr(e->Iex.Triop.arg1, f);
+      fprintf(f,  "," );
+      ppIRExpr(e->Iex.Triop.arg2, f);
+      fprintf(f,  "," );
+      ppIRExpr(e->Iex.Triop.arg3, f);
+      fprintf(f,  ")" );
       break;
     case Iex_Binop:
-      ppIROp(e->Iex.Binop.op);
-      vex_printf( "(" );
-      ppIRExpr(e->Iex.Binop.arg1);
-      vex_printf( "," );
-      ppIRExpr(e->Iex.Binop.arg2);
-      vex_printf( ")" );
+      ppIROp(e->Iex.Binop.op, f);
+      fprintf(f,  "(" );
+      ppIRExpr(e->Iex.Binop.arg1, f);
+      fprintf(f,  "," );
+      ppIRExpr(e->Iex.Binop.arg2, f);
+      fprintf(f,  ")" );
       break;
     case Iex_Unop:
-      ppIROp(e->Iex.Unop.op);
-      vex_printf( "(" );
-      ppIRExpr(e->Iex.Unop.arg);
-      vex_printf( ")" );
+      ppIROp(e->Iex.Unop.op, f);
+      fprintf(f,  "(" );
+      ppIRExpr(e->Iex.Unop.arg, f);
+      fprintf(f,  ")" );
       break;
     case Iex_Load:
-      vex_printf( "LD%s%s:", e->Iex.Load.end==Iend_LE ? "le" : "be",
+      fprintf(f,  "LD%s%s:", e->Iex.Load.end==Iend_LE ? "le" : "be",
                              e->Iex.Load.isLL ? "-LL" : "" );
-      ppIRType(e->Iex.Load.ty);
-      vex_printf( "(" );
-      ppIRExpr(e->Iex.Load.addr);
-      vex_printf( ")" );
+      ppIRType(e->Iex.Load.ty, f);
+      fprintf(f,  "(" );
+      ppIRExpr(e->Iex.Load.addr, f);
+      fprintf(f,  ")" );
       break;
     case Iex_Const:
-      ppIRConst(e->Iex.Const.con);
+      ppIRConst(e->Iex.Const.con, f);
       break;
     case Iex_CCall:
-      ppIRCallee(e->Iex.CCall.cee);
-      vex_printf("(");
+      ppIRCallee(e->Iex.CCall.cee, f);
+      fprintf(f, "(");
       for (i = 0; e->Iex.CCall.args[i] != NULL; i++) {
-        ppIRExpr(e->Iex.CCall.args[i]);
+        ppIRExpr(e->Iex.CCall.args[i], f);
         if (e->Iex.CCall.args[i+1] != NULL)
-          vex_printf(",");
+          fprintf(f, ",");
       }
-      vex_printf("):");
-      ppIRType(e->Iex.CCall.retty);
+      fprintf(f, "):");
+      ppIRType(e->Iex.CCall.retty, f);
       break;
     case Iex_Mux0X:
-      vex_printf("Mux0X(");
-      ppIRExpr(e->Iex.Mux0X.cond);
-      vex_printf(",");
-      ppIRExpr(e->Iex.Mux0X.expr0);
-      vex_printf(",");
-      ppIRExpr(e->Iex.Mux0X.exprX);
-      vex_printf(")");
+      fprintf(f, "Mux0X(");
+      ppIRExpr(e->Iex.Mux0X.cond, f);
+      fprintf(f, ",");
+      ppIRExpr(e->Iex.Mux0X.expr0, f);
+      fprintf(f, ",");
+      ppIRExpr(e->Iex.Mux0X.exprX, f);
+      fprintf(f, ")");
       break;
     default:
       vpanic("ppIRExpr");
   }
 }
 
-void ppIREffect ( IREffect fx )
+void ppIREffect ( IREffect fx, FILE* f )
 {
    switch (fx) {
-      case Ifx_None:   vex_printf("noFX"); return;
-      case Ifx_Read:   vex_printf("RdFX"); return;
-      case Ifx_Write:  vex_printf("WrFX"); return;
-      case Ifx_Modify: vex_printf("MoFX"); return;
+      case Ifx_None:   fprintf(f, "noFX"); return;
+      case Ifx_Read:   fprintf(f, "RdFX"); return;
+      case Ifx_Write:  fprintf(f, "WrFX"); return;
+      case Ifx_Modify: fprintf(f, "MoFX"); return;
       default: vpanic("ppIREffect");
    }
 }
 
-void ppIRDirty ( IRDirty* d )
+void ppIRDirty ( IRDirty* d, FILE *f )
 {
    Int i;
    if (d->tmp != IRTemp_INVALID) {
-      ppIRTemp(d->tmp);
-      vex_printf(" = ");
+      ppIRTemp(d->tmp, f);
+      fprintf(f, " = ");
    }
-   vex_printf("DIRTY ");
-   ppIRExpr(d->guard);
+   fprintf(f, "DIRTY ");
+   ppIRExpr(d->guard, f);
    if (d->needsBBP)
-      vex_printf(" NeedsBBP");
+      fprintf(f, " NeedsBBP");
    if (d->mFx != Ifx_None) {
-      vex_printf(" ");
-      ppIREffect(d->mFx);
-      vex_printf("-mem(");
-      ppIRExpr(d->mAddr);
-      vex_printf(",%d)", d->mSize);
+      fprintf(f, " ");
+      ppIREffect(d->mFx, f);
+      fprintf(f, "-mem(");
+      ppIRExpr(d->mAddr, f);
+      fprintf(f, ",%d)", d->mSize);
    }
    for (i = 0; i < d->nFxState; i++) {
-      vex_printf(" ");
-      ppIREffect(d->fxState[i].fx);
-      vex_printf("-gst(%d,%d)", d->fxState[i].offset, d->fxState[i].size);
+      fprintf(f, " ");
+      ppIREffect(d->fxState[i].fx, f);
+      fprintf(f, "-gst(%d,%d)", d->fxState[i].offset, d->fxState[i].size);
    }
-   vex_printf(" ::: ");
-   ppIRCallee(d->cee);
-   vex_printf("(");
+   fprintf(f, " ::: ");
+   ppIRCallee(d->cee, f);
+   fprintf(f, "(");
    for (i = 0; d->args[i] != NULL; i++) {
-      ppIRExpr(d->args[i]);
+      ppIRExpr(d->args[i], f);
       if (d->args[i+1] != NULL) {
-         vex_printf(",");
+         fprintf(f, ",");
       }
    }
-   vex_printf(")");
+   fprintf(f, ")");
 }
 
-void ppIRCAS ( IRCAS* cas )
+void ppIRCAS ( IRCAS* cas, FILE* f )
 {
    /* Print even structurally invalid constructions, as an aid to
       debugging. */
    if (cas->oldHi != IRTemp_INVALID) {
-      ppIRTemp(cas->oldHi);
-      vex_printf(",");
+      ppIRTemp(cas->oldHi, f);
+      fprintf(f, ",");
    }
-   ppIRTemp(cas->oldLo);
-   vex_printf(" = CAS%s(", cas->end==Iend_LE ? "le" : "be" );
-   ppIRExpr(cas->addr);
-   vex_printf("::");
+   ppIRTemp(cas->oldLo, f);
+   fprintf(f, " = CAS%s(", cas->end==Iend_LE ? "le" : "be" );
+   ppIRExpr(cas->addr, f);
+   fprintf(f, "::");
    if (cas->expdHi) {
-      ppIRExpr(cas->expdHi);
-      vex_printf(",");
+      ppIRExpr(cas->expdHi, f);
+      fprintf(f, ",");
    }
-   ppIRExpr(cas->expdLo);
-   vex_printf("->");
+   ppIRExpr(cas->expdLo, f);
+   fprintf(f, "->");
    if (cas->dataHi) {
-      ppIRExpr(cas->dataHi);
-      vex_printf(",");
+      ppIRExpr(cas->dataHi, f);
+      fprintf(f, ",");
    }
-   ppIRExpr(cas->dataLo);
-   vex_printf(")");
+   ppIRExpr(cas->dataLo, f);
+   fprintf(f, ")");
 }
 
-void ppIRJumpKind ( IRJumpKind kind )
+void ppIRJumpKind ( IRJumpKind kind, FILE* f )
 {
    switch (kind) {
-      case Ijk_Boring:       vex_printf("Boring"); break;
-      case Ijk_Call:         vex_printf("Call"); break;
-      case Ijk_Ret:          vex_printf("Return"); break;
-      case Ijk_ClientReq:    vex_printf("ClientReq"); break;
-      case Ijk_Yield:        vex_printf("Yield"); break;
-      case Ijk_EmWarn:       vex_printf("EmWarn"); break;
-      case Ijk_EmFail:       vex_printf("EmFail"); break;
-      case Ijk_NoDecode:     vex_printf("NoDecode"); break;
-      case Ijk_MapFail:      vex_printf("MapFail"); break;
-      case Ijk_TInval:       vex_printf("Invalidate"); break;
-      case Ijk_NoRedir:      vex_printf("NoRedir"); break;
-      case Ijk_SigTRAP:      vex_printf("SigTRAP"); break;
-      case Ijk_SigSEGV:      vex_printf("SigSEGV"); break;
-      case Ijk_SigBUS:       vex_printf("SigBUS"); break;
-      case Ijk_Sys_syscall:  vex_printf("Sys_syscall"); break;
-      case Ijk_Sys_int32:    vex_printf("Sys_int32"); break;
-      case Ijk_Sys_int128:   vex_printf("Sys_int128"); break;
-      case Ijk_Sys_int129:   vex_printf("Sys_int129"); break;
-      case Ijk_Sys_int130:   vex_printf("Sys_int130"); break;
-      case Ijk_Sys_sysenter: vex_printf("Sys_sysenter"); break;
+      case Ijk_Boring:       fprintf(f, "Boring"); break;
+      case Ijk_Call:         fprintf(f, "Call"); break;
+      case Ijk_Ret:          fprintf(f, "Return"); break;
+      case Ijk_ClientReq:    fprintf(f, "ClientReq"); break;
+      case Ijk_Yield:        fprintf(f, "Yield"); break;
+      case Ijk_EmWarn:       fprintf(f, "EmWarn"); break;
+      case Ijk_EmFail:       fprintf(f, "EmFail"); break;
+      case Ijk_NoDecode:     fprintf(f, "NoDecode"); break;
+      case Ijk_MapFail:      fprintf(f, "MapFail"); break;
+      case Ijk_TInval:       fprintf(f, "Invalidate"); break;
+      case Ijk_NoRedir:      fprintf(f, "NoRedir"); break;
+      case Ijk_SigTRAP:      fprintf(f, "SigTRAP"); break;
+      case Ijk_SigSEGV:      fprintf(f, "SigSEGV"); break;
+      case Ijk_SigBUS:       fprintf(f, "SigBUS"); break;
+      case Ijk_Sys_syscall:  fprintf(f, "Sys_syscall"); break;
+      case Ijk_Sys_int32:    fprintf(f, "Sys_int32"); break;
+      case Ijk_Sys_int128:   fprintf(f, "Sys_int128"); break;
+      case Ijk_Sys_int129:   fprintf(f, "Sys_int129"); break;
+      case Ijk_Sys_int130:   fprintf(f, "Sys_int130"); break;
+      case Ijk_Sys_sysenter: fprintf(f, "Sys_sysenter"); break;
       default:               vpanic("ppIRJumpKind");
    }
 }
 
-void ppIRMBusEvent ( IRMBusEvent event )
+void ppIRMBusEvent ( IRMBusEvent event, FILE* f )
 {
    switch (event) {
-      case Imbe_Fence: vex_printf("Fence"); break;
+      case Imbe_Fence: fprintf(f, "Fence"); break;
       default:         vpanic("ppIRMBusEvent");
    }
 }
 
-void ppIRStmt ( IRStmt* s )
+void ppIRStmt ( IRStmt* s, FILE* f )
 {
    if (!s) {
-      vex_printf("!!! IRStmt* which is NULL !!!");
+      fprintf(f, "!!! IRStmt* which is NULL !!!");
       return;
    }
    switch (s->tag) {
       case Ist_NoOp:
-         vex_printf("IR-NoOp");
+         fprintf(f, "IR-NoOp");
          break;
       case Ist_IMark:
-         vex_printf( "------ IMark(0x%llx, %d) ------", 
+         fprintf(f,  "------ IMark(0x%llx, %d) ------", 
                      s->Ist.IMark.addr, s->Ist.IMark.len);
          break;
       case Ist_AbiHint:
-         vex_printf("====== AbiHint(");
-         ppIRExpr(s->Ist.AbiHint.base);
-         vex_printf(", %d, ", s->Ist.AbiHint.len);
-         ppIRExpr(s->Ist.AbiHint.nia);
-         vex_printf(") ======");
+         fprintf(f, "====== AbiHint(");
+         ppIRExpr(s->Ist.AbiHint.base, f);
+         fprintf(f, ", %d, ", s->Ist.AbiHint.len);
+         ppIRExpr(s->Ist.AbiHint.nia, f);
+         fprintf(f, ") ======");
          break;
       case Ist_Put:
-         vex_printf( "PUT(%d) = ", s->Ist.Put.offset);
-         ppIRExpr(s->Ist.Put.data);
+         fprintf(f,  "PUT(%d) = ", s->Ist.Put.offset);
+         ppIRExpr(s->Ist.Put.data, f);
          break;
       case Ist_PutI:
-         vex_printf( "PUTI" );
-         ppIRRegArray(s->Ist.PutI.descr);
-         vex_printf("[");
-         ppIRExpr(s->Ist.PutI.ix);
-         vex_printf(",%d] = ", s->Ist.PutI.bias);
-         ppIRExpr(s->Ist.PutI.data);
+         fprintf(f,  "PUTI" );
+         ppIRRegArray(s->Ist.PutI.descr, f);
+         fprintf(f, "[");
+         ppIRExpr(s->Ist.PutI.ix, f);
+         fprintf(f, ",%d] = ", s->Ist.PutI.bias);
+         ppIRExpr(s->Ist.PutI.data, f);
          break;
       case Ist_WrTmp:
-         ppIRTemp(s->Ist.WrTmp.tmp);
-         vex_printf( " = " );
-         ppIRExpr(s->Ist.WrTmp.data);
+         ppIRTemp(s->Ist.WrTmp.tmp, f);
+         fprintf(f,  " = " );
+         ppIRExpr(s->Ist.WrTmp.data, f);
          break;
       case Ist_Store:
          if (s->Ist.Store.resSC != IRTemp_INVALID) {
-            ppIRTemp(s->Ist.Store.resSC);
-            vex_printf( " = SC( " );
+            ppIRTemp(s->Ist.Store.resSC, f);
+            fprintf(f,  " = SC( " );
          }
-         vex_printf( "ST%s(", s->Ist.Store.end==Iend_LE ? "le" : "be" );
-         ppIRExpr(s->Ist.Store.addr);
-         vex_printf( ") = ");
-         ppIRExpr(s->Ist.Store.data);
+         fprintf(f,  "ST%s(", s->Ist.Store.end==Iend_LE ? "le" : "be" );
+         ppIRExpr(s->Ist.Store.addr, f);
+         fprintf(f,  ") = ");
+         ppIRExpr(s->Ist.Store.data, f);
          if (s->Ist.Store.resSC != IRTemp_INVALID)
-            vex_printf( " )" );
+            fprintf(f,  " )" );
          break;
       case Ist_CAS:
-         ppIRCAS(s->Ist.CAS.details);
+         ppIRCAS(s->Ist.CAS.details, f);
          break;
       case Ist_Dirty:
-         ppIRDirty(s->Ist.Dirty.details);
+         ppIRDirty(s->Ist.Dirty.details, f);
          break;
       case Ist_MBE:
-         vex_printf("IR-");
-         ppIRMBusEvent(s->Ist.MBE.event);
+         fprintf(f, "IR-");
+         ppIRMBusEvent(s->Ist.MBE.event, f);
          break;
       case Ist_Exit:
-         vex_printf( "if (" );
-         ppIRExpr(s->Ist.Exit.guard);
-         vex_printf( ") goto {");
-         ppIRJumpKind(s->Ist.Exit.jk);
-         vex_printf("} ");
-         ppIRConst(s->Ist.Exit.dst);
+         fprintf(f,  "if (" );
+         ppIRExpr(s->Ist.Exit.guard, f);
+         fprintf(f,  ") goto {");
+         ppIRJumpKind(s->Ist.Exit.jk, f);
+         fprintf(f, "} ");
+         ppIRConst(s->Ist.Exit.dst, f);
          break;
       default: 
          vpanic("ppIRStmt");
    }
 }
 
-void ppIRTypeEnv ( IRTypeEnv* env ) {
+void ppIRTypeEnv ( IRTypeEnv* env, FILE* f ) {
    Int i;
    for (i = 0; i < env->types_used; i++) {
       if (i % 8 == 0)
-         vex_printf( "   ");
-      ppIRTemp(i);
-      vex_printf( ":");
-      ppIRType(env->types[i]);
+         fprintf(f,  "   ");
+      ppIRTemp(i, f);
+      fprintf(f,  ":");
+      ppIRType(env->types[i], f);
       if (i % 8 == 7) 
-         vex_printf( "\n"); 
+         fprintf(f,  "\n"); 
       else 
-         vex_printf( "   ");
+         fprintf(f,  "   ");
    }
    if (env->types_used > 0 && env->types_used % 8 != 7) 
-      vex_printf( "\n"); 
+      fprintf(f,  "\n"); 
 }
 
-void ppIRSB ( IRSB* bb )
+void ppIRSB ( IRSB* bb, FILE* f )
 {
    Int i;
-   vex_printf("IRSB {\n");
-   ppIRTypeEnv(bb->tyenv);
-   vex_printf("\n");
+   fprintf(f, "IRSB {\n");
+   ppIRTypeEnv(bb->tyenv, f);
+   fprintf(f, "\n");
    for (i = 0; i < bb->stmts_used; i++) {
-      vex_printf( "%d:   ", i);
-      ppIRStmt(bb->stmts[i]);
-      vex_printf( "\n");
+      fprintf(f,  "%d:   ", i);
+      ppIRStmt(bb->stmts[i], f);
+      fprintf(f,  "\n");
    }
-   vex_printf( "   goto {");
-   ppIRJumpKind(bb->jumpkind);
-   vex_printf( "} ");
-   ppIRExpr( bb->next );
-   vex_printf( "\n}\n");
+   fprintf(f,  "   goto {");
+   ppIRJumpKind(bb->jumpkind, f);
+   fprintf(f,  "} ");
+   ppIRExpr( bb->next, f );
+   fprintf(f,  "\n}\n");
 }
 
 
@@ -2005,7 +2005,7 @@ void typeOfPrimop ( IROp op,
          BINARY(Ity_V128,Ity_I8, Ity_V128);
 
       default:
-         ppIROp(op);
+	 ppIROp(op, stderr);
          vpanic("typeOfPrimop");
    }
 #  undef UNARY
@@ -2132,7 +2132,7 @@ IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
       case Iex_Binder:
          vpanic("typeOfIRExpr: Binder is not a valid expression");
       default:
-         ppIRExpr(e);
+	 ppIRExpr(e, stderr);
          vpanic("typeOfIRExpr");
    }
 }
@@ -2278,13 +2278,13 @@ static
 __attribute((noreturn))
 void sanityCheckFail ( IRSB* bb, IRStmt* stmt, const char* what )
 {
-   vex_printf("\nIR SANITY CHECK FAILURE\n\n");
-   ppIRSB(bb);
+   fprintf(stderr, "\nIR SANITY CHECK FAILURE\n\n");
+   ppIRSB(bb, stderr);
    if (stmt) {
-      vex_printf("\nIN STATEMENT:\n\n");
-      ppIRStmt(stmt);
+      fprintf(stderr, "\nIN STATEMENT:\n\n");
+      ppIRStmt(stmt, stderr);
    }
-   vex_printf("\n\nERROR = %s\n\n", what );
+   fprintf(stderr, "\n\nERROR = %s\n\n", what );
    vpanic("sanityCheckFail: exiting due to bad IR");
 }
 
@@ -2465,9 +2465,9 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
                       &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
          if (t_arg1 == Ity_INVALID || t_arg2 == Ity_INVALID 
              || t_arg3 == Ity_INVALID || t_arg4 == Ity_INVALID) {
-            vex_printf(" op name: " );
-            ppIROp(expr->Iex.Qop.op);
-            vex_printf("\n");
+            fprintf(stderr, " op name: " );
+            ppIROp(expr->Iex.Qop.op, stderr);
+            fprintf(stderr, "\n");
             sanityCheckFail(bb,stmt,
                "Iex.Qop: wrong arity op\n"
                "... name of op precedes BB printout\n");
@@ -2478,28 +2478,28 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
          ttarg4 = typeOfIRExpr(tyenv, expr->Iex.Qop.arg4);
          if (t_arg1 != ttarg1 || t_arg2 != ttarg2 
              || t_arg3 != ttarg3 || t_arg4 != ttarg4) {
-            vex_printf(" op name: ");
-            ppIROp(expr->Iex.Qop.op);
-            vex_printf("\n");
-            vex_printf(" op type is (");
-            ppIRType(t_arg1);
-            vex_printf(",");
-            ppIRType(t_arg2);
-            vex_printf(",");
-            ppIRType(t_arg3);
-            vex_printf(",");
-            ppIRType(t_arg4);
-            vex_printf(") -> ");
-            ppIRType (t_dst);
-            vex_printf("\narg tys are (");
-            ppIRType(ttarg1);
-            vex_printf(",");
-            ppIRType(ttarg2);
-            vex_printf(",");
-            ppIRType(ttarg3);
-            vex_printf(",");
-            ppIRType(ttarg4);
-            vex_printf(")\n");
+            fprintf(stderr, " op name: ");
+            ppIROp(expr->Iex.Qop.op, stderr);
+            fprintf(stderr, "\n");
+            fprintf(stderr, " op type is (");
+            ppIRType(t_arg1, stderr);
+            fprintf(stderr, ",");
+            ppIRType(t_arg2, stderr);
+            fprintf(stderr, ",");
+            ppIRType(t_arg3, stderr);
+            fprintf(stderr, ",");
+            ppIRType(t_arg4, stderr);
+            fprintf(stderr, ") -> ");
+            ppIRType (t_dst, stderr);
+            fprintf(stderr, "\narg tys are (");
+            ppIRType(ttarg1, stderr);
+            fprintf(stderr, ",");
+            ppIRType(ttarg2, stderr);
+            fprintf(stderr, ",");
+            ppIRType(ttarg3, stderr);
+            fprintf(stderr, ",");
+            ppIRType(ttarg4, stderr);
+            fprintf(stderr, ")\n");
             sanityCheckFail(bb,stmt,
                "Iex.Qop: arg tys don't match op tys\n"
                "... additional details precede BB printout\n");
@@ -2515,9 +2515,9 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
                       &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
          if (t_arg1 == Ity_INVALID || t_arg2 == Ity_INVALID 
              || t_arg3 == Ity_INVALID || t_arg4 != Ity_INVALID) {
-            vex_printf(" op name: " );
-            ppIROp(expr->Iex.Triop.op);
-            vex_printf("\n");
+            fprintf(stderr, " op name: " );
+            ppIROp(expr->Iex.Triop.op, stderr);
+            fprintf(stderr, "\n");
             sanityCheckFail(bb,stmt,
                "Iex.Triop: wrong arity op\n"
                "... name of op precedes BB printout\n");
@@ -2526,24 +2526,24 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
          ttarg2 = typeOfIRExpr(tyenv, expr->Iex.Triop.arg2);
          ttarg3 = typeOfIRExpr(tyenv, expr->Iex.Triop.arg3);
          if (t_arg1 != ttarg1 || t_arg2 != ttarg2 || t_arg3 != ttarg3) {
-            vex_printf(" op name: ");
-            ppIROp(expr->Iex.Triop.op);
-            vex_printf("\n");
-            vex_printf(" op type is (");
-            ppIRType(t_arg1);
-            vex_printf(",");
-            ppIRType(t_arg2);
-            vex_printf(",");
-            ppIRType(t_arg3);
-            vex_printf(") -> ");
-            ppIRType (t_dst);
-            vex_printf("\narg tys are (");
-            ppIRType(ttarg1);
-            vex_printf(",");
-            ppIRType(ttarg2);
-            vex_printf(",");
-            ppIRType(ttarg3);
-            vex_printf(")\n");
+            fprintf(stderr, " op name: ");
+            ppIROp(expr->Iex.Triop.op, stderr);
+            fprintf(stderr, "\n");
+            fprintf(stderr, " op type is (");
+            ppIRType(t_arg1, stderr);
+            fprintf(stderr, ",");
+            ppIRType(t_arg2, stderr);
+            fprintf(stderr, ",");
+            ppIRType(t_arg3, stderr);
+            fprintf(stderr, ") -> ");
+            ppIRType (t_dst, stderr);
+            fprintf(stderr, "\narg tys are (");
+            ppIRType(ttarg1, stderr);
+            fprintf(stderr, ",");
+            ppIRType(ttarg2, stderr);
+            fprintf(stderr, ",");
+            ppIRType(ttarg3, stderr);
+            fprintf(stderr, ")\n");
             sanityCheckFail(bb,stmt,
                "Iex.Triop: arg tys don't match op tys\n"
                "... additional details precede BB printout\n");
@@ -2558,9 +2558,9 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
                       &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
          if (t_arg1 == Ity_INVALID || t_arg2 == Ity_INVALID 
              || t_arg3 != Ity_INVALID || t_arg4 != Ity_INVALID) {
-            vex_printf(" op name: " );
-            ppIROp(expr->Iex.Binop.op);
-            vex_printf("\n");
+            fprintf(stderr, " op name: " );
+            ppIROp(expr->Iex.Binop.op, stderr);
+            fprintf(stderr, "\n");
             sanityCheckFail(bb,stmt,
                "Iex.Binop: wrong arity op\n"
                "... name of op precedes BB printout\n");
@@ -2568,20 +2568,20 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
          ttarg1 = typeOfIRExpr(tyenv, expr->Iex.Binop.arg1);
          ttarg2 = typeOfIRExpr(tyenv, expr->Iex.Binop.arg2);
          if (t_arg1 != ttarg1 || t_arg2 != ttarg2) {
-            vex_printf(" op name: ");
-            ppIROp(expr->Iex.Binop.op);
-            vex_printf("\n");
-            vex_printf(" op type is (");
-            ppIRType(t_arg1);
-            vex_printf(",");
-            ppIRType(t_arg2);
-            vex_printf(") -> ");
-            ppIRType (t_dst);
-            vex_printf("\narg tys are (");
-            ppIRType(ttarg1);
-            vex_printf(",");
-            ppIRType(ttarg2);
-            vex_printf(")\n");
+            fprintf(stderr, " op name: ");
+            ppIROp(expr->Iex.Binop.op, stderr);
+            fprintf(stderr, "\n");
+            fprintf(stderr, " op type is (");
+            ppIRType(t_arg1, stderr);
+            fprintf(stderr, ",");
+            ppIRType(t_arg2, stderr);
+            fprintf(stderr, ") -> ");
+            ppIRType (t_dst, stderr);
+            fprintf(stderr, "\narg tys are (");
+            ppIRType(ttarg1, stderr);
+            fprintf(stderr, ",");
+            ppIRType(ttarg2, stderr);
+            fprintf(stderr, ")\n");
             sanityCheckFail(bb,stmt,
                "Iex.Binop: arg tys don't match op tys\n"
                "... additional details precede BB printout\n");
@@ -2823,7 +2823,7 @@ void sanityCheckIRSB ( IRSB* bb,          const char* caller,
    Int*    def_counts = (Int *)LibVEX_Alloc_Bytes(n_temps * sizeof(Int));
 
    if (0)
-      vex_printf("sanityCheck: %s\n", caller);
+      fprintf(stderr, "sanityCheck: %s\n", caller);
 
    vassert(guest_word_size == Ity_I32
            || guest_word_size == Ity_I64);
@@ -2837,7 +2837,7 @@ void sanityCheckIRSB ( IRSB* bb,          const char* caller,
    for (i = 0; i < n_temps; i++) {
       IRType ty = typeOfIRTemp(bb->tyenv,(IRTemp)i);
       if (!isPlausibleIRType(ty)) {
-         vex_printf("Temp t%d declared with implausible type 0x%x\n",
+         fprintf(stderr, "Temp t%d declared with implausible type 0x%x\n",
                     i, (UInt)ty);
          sanityCheckFail(bb,NULL,"Temp declared with implausible type");
       }
@@ -2964,7 +2964,7 @@ Int sizeofIRType ( IRType ty )
       case Ity_F32:  return 4;
       case Ity_F64:  return 8;
       case Ity_V128: return 16;
-      default: vex_printf("\n"); ppIRType(ty); vex_printf("\n");
+      default: fprintf(stderr, "\n"); ppIRType(ty, stderr); fprintf(stderr, "\n");
                vpanic("sizeofIRType");
    }
 }

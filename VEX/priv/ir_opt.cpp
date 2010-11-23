@@ -53,6 +53,7 @@
 #include "ir_opt.h"
 
 
+#define vex_printf(fmt, ...) fprintf(stderr, fmt, ## __VA_ARGS__)
 /* Set to 1 for lots of debugging output. */
 #define DEBUG_IROPT 0
 
@@ -383,7 +384,7 @@ static IRExpr* flatten_Expr ( IRSB* bb, IRExpr* ex )
 
       default:
          vex_printf("\n");
-         ppIRExpr(ex); 
+         ppIRExpr(ex, stderr); 
          vex_printf("\n");
          vpanic("flatten_Expr");
    }
@@ -478,7 +479,7 @@ static void flatten_Stmt ( IRSB* bb, IRStmt* st )
          break;
       default:
          vex_printf("\n");
-         ppIRStmt(st); 
+         ppIRStmt(st, stderr); 
          vex_printf("\n");
          vpanic("flatten_Stmt");
    }
@@ -609,8 +610,8 @@ static void redundant_get_removal_BB ( IRSB* bb )
             Bool    typesOK = toBool( typeOfIRExpr(bb->tyenv,valE) 
                                       == st->Ist.WrTmp.data->Iex.Get.ty );
             if (typesOK && DEBUG_IROPT) {
-               vex_printf("rGET: "); ppIRExpr(get);
-               vex_printf("  ->  "); ppIRExpr(valE);
+	      vex_printf("rGET: "); ppIRExpr(get, stderr);
+	      vex_printf("  ->  "); ppIRExpr(valE, stderr);
                vex_printf("\n");
             }
             if (typesOK)
@@ -764,7 +765,7 @@ static void handle_gets_Stmt (
 
       default:
          vex_printf("\n");
-         ppIRStmt(st);
+         ppIRStmt(st, stderr);
          vex_printf("\n");
          vpanic("handle_gets_Stmt");
    }
@@ -866,7 +867,7 @@ static void redundant_put_removal_BB (
             /* This Put is redundant because a later one will overwrite
                it.  So NULL (nop) it out. */
             if (DEBUG_IROPT) {
-               vex_printf("rPUT: "); ppIRStmt(st);
+               vex_printf("rPUT: "); ppIRStmt(st, stderr);
                vex_printf("\n");
             }
             bb->stmts[i] = IRStmt_NoOp();
@@ -1589,8 +1590,8 @@ static IRExpr* fold_Expr ( IRExpr* e )
 
    if (DEBUG_IROPT && e2 != e) {
       vex_printf("FOLD: "); 
-      ppIRExpr(e); vex_printf("  ->  ");
-      ppIRExpr(e2); vex_printf("\n");
+      ppIRExpr(e, stderr); vex_printf("  ->  ");
+      ppIRExpr(e2, stderr); vex_printf("\n");
    }
 
    return e2;
@@ -1598,12 +1599,12 @@ static IRExpr* fold_Expr ( IRExpr* e )
  unhandled:
 #  if 0
    vex_printf("\n\n");
-   ppIRExpr(e);
+   ppIRExpr(e, stderr);
    vpanic("fold_Expr: no rule for the above");
 #  else
    if (vex_control.iropt_verbosity > 0) {
       vex_printf("vex iropt: fold_Expr: no rule for: ");
-      ppIRExpr(e);
+      ppIRExpr(e, stderr);
       vex_printf("\n");
    }
    return e2;
@@ -1711,7 +1712,7 @@ static IRExpr* subst_Expr ( IRExpr** env, IRExpr* ex )
                 );
 
       default:
-         vex_printf("\n\n"); ppIRExpr(ex);
+         vex_printf("\n\n"); ppIRExpr(ex, stderr);
          vpanic("subst_Expr");
       
    }
@@ -1726,7 +1727,7 @@ static IRStmt* subst_and_fold_Stmt ( IRExpr** env, IRStmt* st )
 {
 #  if 0
    vex_printf("\nsubst and fold stmt\n");
-   ppIRStmt(st);
+   ppIRStmt(st, stderr);
    vex_printf("\n");
 #  endif
 
@@ -1851,7 +1852,7 @@ static IRStmt* subst_and_fold_Stmt ( IRExpr** env, IRStmt* st )
       }
 
    default:
-      vex_printf("\n"); ppIRStmt(st);
+      vex_printf("\n"); ppIRStmt(st, stderr);
       vpanic("subst_and_fold_Stmt");
    }
 }
@@ -1989,7 +1990,7 @@ static void addUses_Expr ( Bool* set, IRExpr* e )
          return;
       default:
          vex_printf("\n");
-         ppIRExpr(e);
+         ppIRExpr(e, stderr);
          vpanic("addUses_Expr");
    }
 }
@@ -2045,7 +2046,7 @@ static void addUses_Stmt ( Bool* set, IRStmt* st )
          return;
       default:
          vex_printf("\n");
-         ppIRStmt(st);
+         ppIRStmt(st, stderr);
          vpanic("addUses_Stmt");
    }
 }
@@ -2112,7 +2113,7 @@ static Bool isOneU1 ( IRExpr* e )
           /* it's an IRTemp which never got used.  Delete it. */
          if (DEBUG_IROPT) {
             vex_printf("DEAD: ");
-            ppIRStmt(st);
+            ppIRStmt(st, stderr);
             vex_printf("\n");
          }
          bb->stmts[i] = IRStmt_NoOp();
@@ -2183,9 +2184,9 @@ IRSB* spec_helpers_BB ( IRSB* bb,
 
       if (0) {
          vex_printf("SPEC: ");
-         ppIRExpr(st->Ist.WrTmp.data);
+         ppIRExpr(st->Ist.WrTmp.data, stderr);
          vex_printf("  -->  ");
-         ppIRExpr(ex);
+         ppIRExpr(ex, stderr);
          vex_printf("\n");
       }
    }
@@ -2584,8 +2585,6 @@ static Bool do_cse_BB ( IRSB* bb )
 
    vassert(sizeof(IRTemp) <= sizeof(HWord));
 
-   if (0) { ppIRSB(bb); vex_printf("\n\n"); }
-
    /* Iterate forwards over the stmts.  
       On seeing "t = E", where E is one of the 5 AvailExpr forms:
          let E' = apply tenv substitution to E
@@ -2815,7 +2814,7 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
          if (collapseChain(bb, i-1, var, &var2, &con2)) {
             if (DEBUG_IROPT) {
                vex_printf("replacing1 ");
-               ppIRStmt(st);
+               ppIRStmt(st, stderr);
                vex_printf(" with ");
             }
             con2 += con;
@@ -2831,7 +2830,7 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
                                      IRExpr_Const(IRConst_U32(-con2)))
                  );
             if (DEBUG_IROPT) {
-               ppIRStmt(bb->stmts[i]);
+	       ppIRStmt(bb->stmts[i], stderr);
                vex_printf("\n");
             }
          }
@@ -2848,7 +2847,7 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
                                       ->Iex.RdTmp.tmp, &var2, &con2)) {
          if (DEBUG_IROPT) {
             vex_printf("replacing3 ");
-            ppIRStmt(st);
+            ppIRStmt(st, stderr);
             vex_printf(" with ");
          }
          con2 += st->Ist.WrTmp.data->Iex.GetI.bias;
@@ -2859,7 +2858,7 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
                              IRExpr_RdTmp(var2),
                              con2));
          if (DEBUG_IROPT) {
-            ppIRStmt(bb->stmts[i]);
+	    ppIRStmt(bb->stmts[i], stderr);
             vex_printf("\n");
          }
          continue;
@@ -2873,7 +2872,7 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
                                &var2, &con2)) {
          if (DEBUG_IROPT) {
             vex_printf("replacing2 ");
-            ppIRStmt(st);
+            ppIRStmt(st, stderr);
             vex_printf(" with ");
          }
          con2 += st->Ist.PutI.bias;
@@ -2883,7 +2882,7 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
                          con2,
                          st->Ist.PutI.data);
          if (DEBUG_IROPT) {
-            ppIRStmt(bb->stmts[i]);
+	    ppIRStmt(bb->stmts[i], stderr);
             vex_printf("\n");
          }
          continue;
@@ -2912,9 +2911,9 @@ IRExpr* findPutI ( IRSB* bb, Int startHere,
 
    if (0) {
       vex_printf("\nfindPutI ");
-      ppIRRegArray(descrG);
+      ppIRRegArray(descrG, stderr);
       vex_printf(" ");
-      ppIRExpr(ixG);
+      ppIRExpr(ixG, stderr);
       vex_printf(" %d\n", biasG);
    }
 
@@ -3103,7 +3102,7 @@ Bool guestAccessWhichMightOverlapPutI (
          return False;
 
       default:
-         vex_printf("\n"); ppIRStmt(s2); vex_printf("\n");
+	 vex_printf("\n"); ppIRStmt(s2, stderr); vex_printf("\n");
          vpanic("guestAccessWhichMightOverlapPutI");
    }
 
@@ -3145,9 +3144,9 @@ void do_redundant_GetI_elimination ( IRSB* bb )
              && typeOfIRExpr(bb->tyenv, replacement) == descr->elemTy) {
             if (DEBUG_IROPT) {
                vex_printf("rGI:  "); 
-               ppIRExpr(st->Ist.WrTmp.data);
+               ppIRExpr(st->Ist.WrTmp.data, stderr);
                vex_printf(" -> ");
-               ppIRExpr(replacement);
+               ppIRExpr(replacement, stderr);
                vex_printf("\n");
             }
             bb->stmts[i] = IRStmt_WrTmp(st->Ist.WrTmp.tmp, replacement);
@@ -3209,7 +3208,7 @@ void do_redundant_PutI_elimination ( IRSB* bb )
       if (do_delete) {
          if (DEBUG_IROPT) {
             vex_printf("rPI:  "); 
-            ppIRStmt(st); 
+            ppIRStmt(st, stderr); 
             vex_printf("\n");
          }
          bb->stmts[i] = IRStmt_NoOp();
@@ -3270,7 +3269,7 @@ static void deltaIRExpr ( IRExpr* e, Int delta )
          deltaIRExpr(e->Iex.Mux0X.exprX, delta);
          break;
       default: 
-         vex_printf("\n"); ppIRExpr(e); vex_printf("\n");
+         vex_printf("\n"); ppIRExpr(e, stderr); vex_printf("\n");
          vpanic("deltaIRExpr");
    }
 }
@@ -3334,7 +3333,7 @@ static void deltaIRStmt ( IRStmt* st, Int delta )
             deltaIRExpr(d->mAddr, delta);
          break;
       default: 
-         vex_printf("\n"); ppIRStmt(st); vex_printf("\n");
+         vex_printf("\n"); ppIRStmt(st, stderr); vex_printf("\n");
          vpanic("deltaIRStmt");
    }
 }
@@ -3557,7 +3556,7 @@ static IRSB* maybe_loop_unroll_BB ( IRSB* bb0, Addr64 my_addr )
 
    if (DEBUG_IROPT) {
       vex_printf("\nUNROLLED (%llx)\n", my_addr);
-      ppIRSB(bb1);
+      ppIRSB(bb1, stderr);
       vex_printf("\n");
    }
 
@@ -3604,7 +3603,7 @@ static void ppAEnv ( ATmpInfo* env )
    for (i = 0; i < A_NENV; i++) {
       vex_printf("%d  tmp %d  val ", i, (Int)env[i].binder);
       if (env[i].bindee) 
-         ppIRExpr(env[i].bindee);
+         ppIRExpr(env[i].bindee, stderr);
       else 
          vex_printf("(null)");
       vex_printf("\n");
@@ -3663,7 +3662,7 @@ static void setHints_Expr (Bool* doesLoad, Bool* doesGet, IRExpr* e )
       case Iex_Const:
          return;
       default: 
-         vex_printf("\n"); ppIRExpr(e); vex_printf("\n");
+         vex_printf("\n"); ppIRExpr(e, stderr); vex_printf("\n");
          vpanic("setHints_Expr");
    }
 }
@@ -3743,7 +3742,7 @@ static void aoccCount_Expr ( UShort* uses, IRExpr* e )
          return;
 
       default: 
-         vex_printf("\n"); ppIRExpr(e); vex_printf("\n");
+         vex_printf("\n"); ppIRExpr(e, stderr); vex_printf("\n");
          vpanic("aoccCount_Expr");
     }
 }
@@ -3803,7 +3802,7 @@ static void aoccCount_Stmt ( UShort* uses, IRStmt* st )
          aoccCount_Expr(uses, st->Ist.Exit.guard);
          return;
       default: 
-         vex_printf("\n"); ppIRStmt(st); vex_printf("\n");
+         vex_printf("\n"); ppIRStmt(st, stderr); vex_printf("\n");
          vpanic("aoccCount_Stmt");
    }
 }
@@ -3988,7 +3987,7 @@ static IRExpr* atbSubst_Expr ( ATmpInfo* env, IRExpr* e )
       case Iex_Get:
          return e;
       default: 
-         vex_printf("\n"); ppIRExpr(e); vex_printf("\n");
+         vex_printf("\n"); ppIRExpr(e, stderr); vex_printf("\n");
          vpanic("atbSubst_Expr");
    }
 }
@@ -4066,7 +4065,7 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
             d2->args[i] = atbSubst_Expr(env, d2->args[i]);
          return IRStmt_Dirty(d2);
       default: 
-         vex_printf("\n"); ppIRStmt(st); vex_printf("\n");
+         vex_printf("\n"); ppIRStmt(st, stderr); vex_printf("\n");
          vpanic("atbSubst_Stmt");
    }
 }
@@ -4291,32 +4290,32 @@ IRSB* cheap_transformations (
    redundant_get_removal_BB ( bb );
    if (iropt_verbose) {
       vex_printf("\n========= REDUNDANT GET\n\n" );
-      ppIRSB(bb);
+      ppIRSB(bb, stderr);
    }
 
    redundant_put_removal_BB ( bb, preciseMemExnsFn );
    if (iropt_verbose) {
       vex_printf("\n========= REDUNDANT PUT\n\n" );
-      ppIRSB(bb);
+      ppIRSB(bb, stderr);
    }
 
    bb = cprop_BB ( bb );
    if (iropt_verbose) {
       vex_printf("\n========= CPROPD\n\n" );
-      ppIRSB(bb);
+      ppIRSB(bb, stderr);
    }
 
    do_deadcode_BB ( bb );
    if (iropt_verbose) {
       vex_printf("\n========= DEAD\n\n" );
-      ppIRSB(bb);
+      ppIRSB(bb, stderr);
    }
 
    bb = spec_helpers_BB ( bb, specHelper );
    do_deadcode_BB ( bb );
    if (iropt_verbose) {
       vex_printf("\n========= SPECd \n\n" );
-      ppIRSB(bb);
+      ppIRSB(bb, stderr);
    }
 
    return bb;
@@ -4412,7 +4411,7 @@ static void considerExpensives ( /*OUT*/Bool* hasGetIorPutI,
             break;
          default: 
          bad:
-            ppIRStmt(st);
+            ppIRStmt(st, stderr);
             vpanic("hasGetIorPutI");
       }
    }
@@ -4450,7 +4449,7 @@ IRSB* do_iropt_BB ( IRSB* bb0,
 
    if (iropt_verbose) {
       vex_printf("\n========= FLAT\n\n" );
-      ppIRSB(bb);
+      ppIRSB(bb, stderr);
    }
 
    /* If at level 0, stop now. */

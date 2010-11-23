@@ -253,9 +253,9 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
       /* Print the resulting IR, if needed. */
       if (vex_traceflags & VEX_TRACE_FE) {
          for (i = first_stmt_idx; i < irsb->stmts_used; i++) {
-            vex_printf("              ");
-            ppIRStmt(irsb->stmts[i]);
-            vex_printf("\n");
+	    printf("              ");
+            ppIRStmt(irsb->stmts[i], stdout);
+            printf("\n");
          }
       }
 
@@ -264,12 +264,12 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
       if (dres.whatNext == DisResult::Dis_StopHere) {
          vassert(irsb->next != NULL);
          if (debug_print) {
-            vex_printf("              ");
-            vex_printf( "goto {");
-            ppIRJumpKind(irsb->jumpkind);
-            vex_printf( "} ");
-            ppIRExpr( irsb->next );
-            vex_printf( "\n");
+            printf("              ");
+            printf( "goto {");
+            ppIRJumpKind(irsb->jumpkind, stdout);
+            printf( "} ");
+            ppIRExpr( irsb->next, stdout );
+            printf( "\n");
          }
       }
 
@@ -283,7 +283,7 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
          = toUShort(toUInt( vge->len[vge->n_used-1] + dres.len ));
       n_instrs++;
       if (debug_print) 
-         vex_printf("\n");
+	 printf("\n");
 
       /* Advance delta (inconspicuous but very important :-) */
       delta += (Long)dres.len;
@@ -321,10 +321,6 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
             vge->len[vge->n_used-1] = 0;
             n_resteers++;
             d_resteers++;
-            if (0 && (n_resteers & 0xFF) == 0)
-            vex_printf("resteer[%d,%d] to 0x%llx (delta = %lld)\n",
-                       n_resteers, d_resteers,
-                       dres.continueAt, delta);
             break;
          default:
             vpanic("bb_to_IR");
