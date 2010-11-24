@@ -224,11 +224,6 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
    are guaranteed to be executed at least once on any path from the
    starting point to the target instruction.  We try to order them so
    that the dominators nearest to the target are reported first. */
-/* Algorithm for finding dominators is a fairly standard Tarski-style
-   iteration to fixed point: start out assuming that everything is a
-   dominator, then flag any return instructions or unresolvable
-   dynamic branches as not dominators, and fix up any resulting
-   contradictions. */
 struct fd_cfg_node : public GarbageCollected<fd_cfg_node> {
 	unsigned long rip;
 	union ptr_or_ulong {
@@ -240,9 +235,9 @@ struct fd_cfg_node : public GarbageCollected<fd_cfg_node> {
 	};
 	std::set<ptr_or_ulong> predecessors;
 	std::set<ptr_or_ulong> successors;
-	bool is_exit_node; /* Definitely not a dominator */
-	bool is_dominator;
 	bool already_output;
+
+	std::set<fd_cfg_node *> dominators;
 
 	/* These should never be live across a GC pass */
 	void visit(HeapVisitor &hv) { abort(); }
@@ -310,8 +305,6 @@ findDominators(unsigned long functionHead,
 			p.ulong = irsb->next->Iex.Const.con->Ico.U64;
 			work->successors.insert(p);
 			remainingToExplore.push_back(p.ulong);
-		} else {
-			work->is_exit_node = true;
 		}
 	done_this_entry:
 		;
@@ -346,15 +339,21 @@ findDominators(unsigned long functionHead,
 		}
 	}
 
-	/* Now do the Tarski thing to find dominators. */
+	/* Now iterate to build a dominator map. */
 	for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
 	     it != cfg.end();
 	     it++) {
 		assert(it->first == it->second->rip);
-		if (it->second->is_exit_node)
-			it->second->is_dominator = false;
-		else
-			it->second->is_dominator = true;
+		it->second->dominators.clear();
+		if (it->first == functionHead) {
+			it->second->dominators.insert(it->second);
+		} else {
+			for (std::map<unsigned long, fd_cfg_node *>::iterator it2 = cfg.begin();
+			     it2 != cfg.end();
+			     it2++) {
+				it->second->dominators.insert(it2->second);
+			}
+		}
 	}
 	bool progress;
 	do {
@@ -363,54 +362,45 @@ findDominators(unsigned long functionHead,
 		     it != cfg.end();
 		     it++) {
 			fd_cfg_node *node = it->second;
-			/* The target instruction is always considered
-			   to be a dominator of itself. */
-			if (node->rip == rip)
-				continue;
-			/* Never need to make any further changes once
-			   we've flagged something as definitely not a
-			   dominator. */
-			if (!node->is_dominator)
-				continue;
-			/* Otherwise, flag as not-a-dominator if any
-			   successor is not a dominator. */
-			for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it2 = node->successors.begin();
-			     it2 != node->successors.end();
-			     it2++) {
-				if (!it2->ptr->is_dominator) {
+			/* A node N is dominated by a node X if all of
+			   its predecessors are dominated by X, or if
+			   it is X itself.  The iteration is monotone,
+			   and so we only need to consider the things
+			   which are currently flagged as dominators
+			   and consider unflagging them. */
+			for (std::set<fd_cfg_node *>::iterator it2 = node->dominators.begin();
+			     it2 != node->dominators.end();
+				) {
+				if (*it2 == node) {
+					it2++;
+					continue;
+				}
+				bool should_be_dominator = true;
+				for (std::set<fd_cfg_node::ptr_or_ulong>::const_iterator pred =
+					     node->predecessors.begin();
+				     should_be_dominator && pred != node->predecessors.end();
+				     pred++) {
+					if (!pred->ptr->dominators.count(*it2))
+						should_be_dominator = false;
+				}
+				if (!should_be_dominator) {
+					node->dominators.erase(it2++);
 					progress = true;
-					node->is_dominator = false;
-					break;
+				} else {
+					it2++;
 				}
 			}
+
 		}
 	} while (progress);
 
-	/* There are now no is_dominator=true nodes with
-	   is_dominator=false nodes in their successor sets (except
-	   for the target), which is what we want.  Now we do a
-	   topological sort of the CFG graph into the output set,
-	   using a breadth-first iteration starting from the target to
-	   get a reasonable ordering. */
-	std::queue<fd_cfg_node *> queue;
-	queue.push(cfg[rip]);
-	assert(queue.front());
-	while (!queue.empty()) {
-		fd_cfg_node *n = queue.front();
-		assert(n);
-		queue.pop();
-		assert(n->is_dominator);
-		if (n->already_output)
-			continue;
-		n->already_output = true;
-		out.push_back(n->rip);
-		for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it = n->predecessors.begin();
-		     it != n->predecessors.end();
-		     it++) {
-			assert(it->ptr);
-			queue.push(it->ptr);
-		}
-	}
+	/* Now we just need to output the dominator set for the target
+	 * instruction's node. */
+	fd_cfg_node *target = cfg[rip];
+	for (std::set<fd_cfg_node *>::reverse_iterator it = target->dominators.rbegin();
+	     it != target->dominators.rend();
+	     it++)
+		out.push_back((*it)->rip);
 
 	/* And we're done. */
 }
