@@ -790,6 +790,77 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
 	getDominators(crashedThread, ms, out);
 }
 
+static void
+enumerateCFG(CFGNode *root, std::map<unsigned long, CFGNode *> &rips)
+{
+	if (!root)
+		return;
+	if (rips.count(root->my_rip))
+		return;
+	rips[root->my_rip] = root;
+	enumerateCFG(root->branch, rips);
+	enumerateCFG(root->fallThrough, rips);
+}
+
+/* Remove all of the nodes which appear to be uninteresting.  A node
+   is uninteresting if it is not in the initial interesting set and
+   there are no paths from it to an interesting node. */
+static void
+trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
+{
+	std::map<unsigned long, CFGNode *> uninteresting;
+	std::map<unsigned long, CFGNode *> interesting;
+	/* Start on the assumption that everything is uninteresting. */
+	enumerateCFG(root, uninteresting);
+	/* addresses which are explicitly flagged as interesting are
+	   not uninteresting. */
+	for (std::set<unsigned long>::iterator it = interestingAddresses.begin();
+	     it != interestingAddresses.end();
+	     it++) {
+		interesting[*it] = uninteresting[*it];
+		uninteresting.erase(*it);
+	}
+
+	/* Tarski iteration */
+	bool progress;
+	do {
+		progress = false;
+		for (std::map<unsigned long, CFGNode *>::iterator it = uninteresting.begin();
+		     it != uninteresting.end();
+			) {
+			CFGNode *n = it->second;
+			bool shouldBeUninteresting = true;
+			if (n->branch &&
+			    !uninteresting.count(n->branch->my_rip))
+				shouldBeUninteresting = false;
+			if (n->fallThrough &&
+			    !uninteresting.count(n->fallThrough->my_rip))
+				shouldBeUninteresting = false;
+			if (shouldBeUninteresting) {
+				it++;
+			} else {
+				progress = true;
+				interesting[it->first] = it->second;
+				uninteresting.erase(it++);
+			}
+		}
+	} while (progress);
+
+	/* The uninteresting set should now be correct.  Eliminate any
+	   edges which go to an uninteresting target. */
+	for (std::map<unsigned long, CFGNode *>::iterator it = interesting.begin();
+	     it != interesting.end();
+	     it++) {
+		CFGNode *n = it->second;
+		if (n->branch && uninteresting.count(n->branch->my_rip))
+			n->branch = NULL;
+		if (n->fallThrough && uninteresting.count(n->fallThrough->my_rip))
+			n->fallThrough = NULL;
+	}
+
+	/* All done. */
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -818,6 +889,9 @@ main(int argc, char *argv[])
 	     it != previousInstructions.end();
 	     it++) {
 		CFGNode *cfg = ii->CFGFromRip(*it);
+		std::set<unsigned long> interesting;
+		interesting.insert(proximal->rip.rip);
+		trimCFG(cfg, interesting);
 		printf("CFG from %lx:\n", *it);
 		printCFG(cfg);
 	}
