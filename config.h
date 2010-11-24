@@ -9,7 +9,7 @@
 #endif
 
 #ifndef CRASHED_THREAD
-#define CRASHED_THREAD 2
+#define CRASHED_THREAD 1
 #endif
 
 #ifndef DROP_STORES_DEPTH

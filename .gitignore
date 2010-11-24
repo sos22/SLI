@@ -16,3 +16,5 @@ direct
 dbg_core
 get_dominator
 extra_config.h
+direct_cd
+timing.txt
