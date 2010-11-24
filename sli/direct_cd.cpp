@@ -7,14 +7,6 @@
 
 #include "sli.h"
 
-/* All of the information from sources other than the main crash dump.
- * Information from the oracle will be true of some executions but not
- * necessarily all of them, so should only really be used where static
- * analysis is insufficient. */
-class Oracle {
-	
-};
-
 class PrettyPrintable {
 public:
 	void prettyPrint(void) const { prettyPrint(stdout); }
@@ -214,6 +206,9 @@ public:
 	unsigned long rip;
 	unsigned idx;	
 	void changedIdx() { clearName(); }
+	bool operator<(const VexRip &a) const {
+		return rip < a.rip || (rip == a.rip && idx < a.idx);
+	}
 };
 
 class CrashReason : public GarbageCollected<CrashReason>,
@@ -636,6 +631,165 @@ printStateMachine(const StateMachine *sm, FILE *f)
 	}
 }
 
+/* All of the information from sources other than the main crash dump.
+ * Information from the oracle will be true of some executions but not
+ * necessarily all of them, so should only really be used where static
+ * analysis is insufficient. */
+class Oracle : public GarbageCollected<Oracle> {
+public:
+	MachineState *ms;
+	Thread *crashedThread;
+
+	void findPreviousInstructions(std::vector<unsigned long> &output);
+
+	Oracle(MachineState *_ms, Thread *_thr)
+		: ms(_ms), crashedThread(_thr)
+	{
+	}
+	void visit(HeapVisitor &hv) {
+		hv(ms);
+		hv(crashedThread);
+	}
+	NAMED_CLASS
+};
+
+class CFGNode : public GarbageCollected<CFGNode>, public PrettyPrintable {
+public:
+	unsigned long fallThroughRip;
+	unsigned long branchRip;
+	CFGNode *fallThrough;
+	CFGNode *branch;
+
+	unsigned long my_rip;
+
+	CFGNode(unsigned long rip) : my_rip(rip) {}
+
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "%#lx: %#lx(%p), %#lx(%p)",
+			my_rip, fallThroughRip, fallThrough,
+			branchRip, branch);
+	}
+	void visit(HeapVisitor &hv) {
+		hv(fallThrough);
+		hv(branch);
+	}
+	NAMED_CLASS
+};
+
+/* All the various bits and pieces which we've discovered so far, in one
+ * convenient place. */
+class InferredInformation : public GarbageCollected<InferredInformation> {
+public:
+	Oracle *oracle;
+	std::map<VexRip, CrashReason *> crashReasons;
+
+	InferredInformation(Oracle *_oracle) : oracle(_oracle) {}
+	void addCrashReason(CrashReason *cr) { crashReasons[cr->rip] = cr; }
+	CFGNode *CFGFromRip(unsigned long rip);
+
+	void visit(HeapVisitor &hv) {
+		hv(oracle);
+		for (std::map<VexRip, CrashReason *>::iterator it =
+			     crashReasons.begin();
+		     it != crashReasons.end();
+		     it++)
+			hv(it->second);
+	}
+	NAMED_CLASS
+};
+
+CFGNode *
+InferredInformation::CFGFromRip(unsigned long start)
+{
+	std::map<unsigned long, CFGNode *> builtSoFar;
+	std::vector<unsigned long> needed;
+	unsigned long rip;
+
+	/* Mild hack to make some corned cases easier. */
+	builtSoFar[0] = NULL;
+
+	/* Step one: discover all of the instructions which we're
+	 * going to need. */
+	needed.push_back(start);
+	while (!needed.empty()) {
+		rip = needed.back();
+		needed.pop_back();
+		if (builtSoFar.count(rip))
+			continue;
+		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(rip);
+		CFGNode *work = new CFGNode(rip);
+		int x;
+		for (x = 1; x < irsb->stmts_used; x++) {
+			if (irsb->stmts[x]->tag == Ist_IMark) {
+				work->fallThroughRip = irsb->stmts[x]->Ist.IMark.addr;
+				needed.push_back(work->fallThroughRip);
+				break;
+			}
+			if (irsb->stmts[x]->tag == Ist_Exit) {
+				assert(work->branch == 0);
+				work->branchRip = irsb->stmts[x]->Ist.Exit.dst->Ico.U64;
+				needed.push_back(work->branchRip);
+			}
+		}
+		if (x == irsb->stmts_used) {
+			if (irsb->jumpkind == Ijk_Call) {
+				work->fallThroughRip = extract_call_follower(irsb);
+				needed.push_back(work->fallThroughRip);
+			} else {
+				/* Don't currently try to trace across indirect branches. */
+				if (irsb->next->tag == Iex_Const) {
+					work->fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
+					needed.push_back(work->fallThroughRip);
+				}
+			}
+		}
+		builtSoFar[rip] = work;
+	}
+
+	/* Now we have a CFG node for every needed instruction.  Go
+	   through and resolve exit branches. */
+	for (std::map<unsigned long, CFGNode *>::iterator it = builtSoFar.begin();
+	     it != builtSoFar.end();
+	     it++) {
+		if (it->second) {
+			it->second->fallThrough = builtSoFar[it->second->fallThroughRip];
+			it->second->branch = builtSoFar[it->second->branchRip];
+		}
+	}
+
+	/* That should do it */
+	return builtSoFar[start];
+}
+
+static void
+printCFG(const CFGNode *cfg)
+{
+	std::vector<const CFGNode *> pending;
+	std::set<const CFGNode *> done;
+
+	pending.push_back(cfg);
+	while (!pending.empty()) {
+		cfg = pending.back();
+		pending.pop_back();
+		if (done.count(cfg))
+			continue;
+		printf("%p: ", cfg);
+		cfg->prettyPrint(stdout);
+		printf("\n");
+		if (cfg->fallThrough)
+			pending.push_back(cfg->fallThrough);
+		if (cfg->branch)
+			pending.push_back(cfg->branch);
+		done.insert(cfg);
+	}
+}
+
+void
+Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
+{
+	getDominators(crashedThread, ms, out);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -643,6 +797,7 @@ main(int argc, char *argv[])
 
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
+	VexPtr<Oracle> oracle(new Oracle(ms, thr));
 
 	CrashReason *proximal = getProximalCause(ms, thr);
 	if (!proximal)
@@ -653,6 +808,19 @@ main(int argc, char *argv[])
 	proximal = backtrackToStartOfInstruction(proximal, ms->addressSpace);
 	printf("Cause at start of this instruction:\n");
 	printStateMachine(proximal->sm, stdout);
+
+	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
+	ii->addCrashReason(proximal);
+
+	std::vector<unsigned long> previousInstructions;
+	oracle->findPreviousInstructions(previousInstructions);
+	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
+	     it != previousInstructions.end();
+	     it++) {
+		CFGNode *cfg = ii->CFGFromRip(*it);
+		printf("CFG from %lx:\n", *it);
+		printCFG(cfg);
+	}
 
 	return 0;
 }
