@@ -2,6 +2,7 @@
    dump, rather than needing the full trace. */
 #include <err.h>
 
+#include <queue>
 #include <map>
 #include <set>
 
@@ -861,6 +862,79 @@ trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
 	/* All done. */
 }
 
+/* Break cycles using a simple depth-first iteration.  @cfg is the
+   current node in the iteration and @onPath is the set of nodes on
+   the path from the root to the current node.  We will always try to
+   break the cycle on a back edge, defined to be one where the value
+   in @numbering decreases.  *@lastBackEdge should be the last back
+   pointer which we followed on this path, and it is where we will
+   break the cycle.  Returns false if we broke a cycle, in which case
+   the whole thing needs to be re-run, or true otherwise. */
+static bool
+breakCycles(CFGNode *cfg, std::map<CFGNode *, unsigned> &numbering,
+	    CFGNode **lastBackEdge, std::set<CFGNode *> &onPath)
+{
+	if (onPath.count(cfg)) {
+		/* We have a cycle.  Break it. */
+		assert(lastBackEdge);
+		lastBackEdge = NULL;
+		return false;
+	}
+
+	onPath.insert(cfg);
+	if (cfg->branch) {
+		CFGNode **p = lastBackEdge;
+		if (numbering[cfg->branch] < numbering[cfg])
+			p = &cfg->branch;
+		if (!breakCycles(cfg->branch, numbering, p, onPath))
+			return false;
+	}
+	if (cfg->fallThrough) {
+		CFGNode **p = lastBackEdge;
+		if (numbering[cfg->fallThrough] < numbering[cfg])
+			p = &cfg->fallThrough;
+		if (!breakCycles(cfg->fallThrough, numbering, p, onPath))
+			return false;
+	}
+
+	onPath.erase(cfg);
+
+	return true;
+}
+
+/* We use a breadth first search to number the nodes and then use a
+   variant of Tarjan's algorithm to detect cycles.  When we detect a
+   cycle, we use the numbering scheme to identify a back edge and
+   eliminate it. */
+static void
+breakCycles(CFGNode *cfg)
+{
+	std::map<CFGNode *, unsigned> numbering;
+	std::queue<CFGNode *> queue;
+	CFGNode *t;
+
+	/* Assign numbering */
+	unsigned idx;
+	idx = 0;
+	queue.push(cfg);
+	while (!queue.empty()) {
+		t = queue.front();
+		queue.pop();
+		if (numbering.count(t))
+			continue;
+		numbering[t] = idx;
+		idx++;
+		if (t->branch)
+			queue.push(t->branch);
+		if (t->fallThrough)
+			queue.push(t->fallThrough);
+	}
+
+	std::set<CFGNode *> visited;
+	while (!breakCycles(cfg, numbering, NULL, visited))
+		visited.clear();
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -892,6 +966,7 @@ main(int argc, char *argv[])
 		std::set<unsigned long> interesting;
 		interesting.insert(proximal->rip.rip);
 		trimCFG(cfg, interesting);
+		breakCycles(cfg);
 		printf("CFG from %lx:\n", *it);
 		printCFG(cfg);
 	}
