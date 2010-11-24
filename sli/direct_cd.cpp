@@ -3,6 +3,7 @@
 #include <err.h>
 
 #include <map>
+#include <set>
 
 #include "sli.h"
 
@@ -146,10 +147,11 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "if (");
 		ppIRExpr(condition, f);
-		fprintf(f,
-			") then {%p} else {%p}",
-			trueTarget,
-			falseTarget);
+		fprintf(f, ") then {");
+		trueTarget->prettyPrint(f);
+		fprintf(f, "} else {");
+		falseTarget->prettyPrint(f);
+		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
 	{
@@ -602,16 +604,36 @@ backtrackToStartOfInstruction(CrashReason *cr, AddressSpace *as)
 {
 	IRSB *irsb = as->getIRSBForAddress(cr->rip.rip);
 	assert((int)cr->rip.idx <= irsb->stmts_used);
-	while (cr->rip.idx != 0) {
-		printf("CR pre-backtrack ");
-		cr->prettyPrint(stdout);
-		printf("\n");
+	while (cr->rip.idx != 0)
 		cr = backtrackOneStatement(cr, irsb->stmts[cr->rip.idx-1]);
-		printf("CR post-backtrack ");
-		cr->prettyPrint(stdout);
-		printf("\n");
-	}
 	return cr;
+}
+
+static void
+printStateMachine(const StateMachine *sm, FILE *f)
+{
+	std::set<const StateMachine *> emitted;
+	std::vector<const StateMachine *> toEmit;
+
+	toEmit.push_back(sm);
+	while (!toEmit.empty()) {
+		sm = toEmit.back();
+		toEmit.pop_back();
+		if (emitted.count(sm))
+			continue;
+		emitted.insert(sm);
+		fprintf(f, "%p: ", sm);
+		sm->prettyPrint(f);
+		fprintf(f, "\n");
+		if (const StateMachineBifurcate *smb =
+		    dynamic_cast<const StateMachineBifurcate *>(sm)) {
+			toEmit.push_back(smb->trueTarget->target);
+			toEmit.push_back(smb->falseTarget->target);
+		} else if (const StateMachineProxy *smp =
+			   dynamic_cast<const StateMachineProxy *>(sm)) {
+			toEmit.push_back(smp->target->target);
+		}
+	}
 }
 
 int
@@ -625,11 +647,12 @@ main(int argc, char *argv[])
 	CrashReason *proximal = getProximalCause(ms, thr);
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
-	proximal->prettyPrint();
-	printf("\n");
+	printf("Immediate proximal cause:\n");
+	printStateMachine(proximal->sm, stdout);
 
 	proximal = backtrackToStartOfInstruction(proximal, ms->addressSpace);
-	proximal->prettyPrint();
+	printf("Cause at start of this instruction:\n");
+	printStateMachine(proximal->sm, stdout);
 
 	return 0;
 }
