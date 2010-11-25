@@ -30,12 +30,17 @@ public:
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, public PrettyPrintable {
-	StateMachineSideEffect(IRExpr *_addr, IRExpr *_data)
+public:
+	virtual void optimise() = 0;
+	NAMED_CLASS
+};
+
+class StateMachineSideEffectStore : public StateMachineSideEffect {
+public:
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data)
 		: addr(_addr), data(_data)
 	{
 	}
-public:
-	StateMachineSideEffect() : addr(NULL), data(NULL) {}
 	IRExpr *addr;
 	IRExpr *data;
 	void prettyPrint(FILE *f) const {
@@ -43,9 +48,6 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ") <- ");
 		ppIRExpr(data, f);
-	}
-	static StateMachineSideEffect *store(IRExpr *addr, IRExpr *data) {
-		return new StateMachineSideEffect(addr, data);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(addr);
@@ -55,8 +57,35 @@ public:
 		addr = optimiseIRExpr(addr);
 		data = optimiseIRExpr(data);
 	}
-	NAMED_CLASS
 };
+
+class StateMachineSideEffectLoad : public StateMachineSideEffect {
+	static Int next_key;
+public:
+	StateMachineSideEffectLoad(IRExpr *_addr)
+		: addr(_addr)
+	{
+		key = next_key++;
+	}
+	StateMachineSideEffectLoad(Int k, IRExpr *_addr)
+		: key(k), addr(_addr)
+	{
+	}
+	Int key;
+	IRExpr *addr;
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "B%d <- *(", key);
+		ppIRExpr(addr, f);
+		fprintf(f, ")");
+	}
+	void visit(HeapVisitor &hv) {
+		hv(addr);
+	}
+	void optimise() {
+		addr = optimiseIRExpr(addr);
+	}
+};
+Int StateMachineSideEffectLoad::next_key;
 
 class StateMachineEdge : public GarbageCollected<StateMachineEdge>, public PrettyPrintable {
 public:
@@ -467,10 +496,21 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 	for (std::vector<StateMachineSideEffect *>::iterator it = inp->sideEffects.begin();
 	     it != inp->sideEffects.end();
 	     it++) {
-		res->sideEffects.push_back(
-			StateMachineSideEffect::store(
-				transformIRExpr((*it)->addr),
-				transformIRExpr((*it)->data)));
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			res->sideEffects.push_back(
+				new StateMachineSideEffectStore(
+					transformIRExpr(smses->addr),
+					transformIRExpr(smses->data)));
+		} else if (StateMachineSideEffectLoad *smsel =
+			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			res->sideEffects.push_back(
+				new StateMachineSideEffectLoad(
+					smsel->key,
+					transformIRExpr(smsel->addr)));
+		} else {
+			abort();
+		}
 	}
 	return res;
 }
@@ -636,7 +676,7 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 	case Ist_Store: {
 		StateMachineProxy *smp = new StateMachineProxy(sm);
 		smp->target->prependSideEffect(
-			StateMachineSideEffect::store(
+			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
 				stmt->Ist.Store.data));
 		return new CrashReason(newRip, smp);
@@ -647,12 +687,15 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 			    "helper_load_64") ||
 		    !strcmp(stmt->Ist.Dirty.details->cee->name,
 			    "helper_load_32")) {
+			StateMachineSideEffectLoad *smsel =
+				new StateMachineSideEffectLoad(stmt->Ist.Dirty.details->args[0]);
 			sm = rewriteTemporary(
 				sm,
 				stmt->Ist.Dirty.details->tmp,
-				IRExpr_SLI_Load(
-					stmt->Ist.Dirty.details->args[0],
-					cr->rip.rip));
+				IRExpr_Binder(smsel->key));
+			StateMachineProxy *smp = new StateMachineProxy(sm);
+			smp->target->prependSideEffect(smsel);
+			return new CrashReason(newRip, smp);
 		}  else {
 			abort();
 		}
