@@ -1083,9 +1083,18 @@ breakCycles(CFGNode *cfg)
 		visited.clear();
 }
 
+/* Returns true if the operation definitely commutes, or false if
+ * we're not sure. */
+static bool
+operationCommutes(IROp op)
+{
+	return op >= Iop_Add8 && op <= Iop_Add64;
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src)
 {
+	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
 		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4);
@@ -1111,6 +1120,58 @@ optimiseIRExpr(IRExpr *src)
 		break;
 	}
 
+	/* Now use some special rules to simplify a few classes of binops. */
+	if (src->tag == Iex_Binop) {
+		if (src->Iex.Binop.op >= Iop_Sub8 &&
+		    src->Iex.Binop.op <= Iop_Sub64) {
+			/* Replace a - b with a + (-b), so as to
+			   eliminate binary -. */
+			src->Iex.Binop.op = (IROp)(src->Iex.Binop.op - Iop_Sub8 + Iop_Add8);
+			src->Iex.Binop.arg2 =
+				optimiseIRExpr(
+					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
+						     src->Iex.Binop.arg2 ) );
+		}
+		/* If a op b commutes, and b is a constant and a
+		   isn't, rewrite to b op a. */
+		if (operationCommutes(src->Iex.Binop.op) &&
+		    src->Iex.Binop.arg1->tag == Iex_Const &&
+		    src->Iex.Binop.arg2->tag != Iex_Const) {
+			IRExpr *a = src->Iex.Binop.arg1;
+			src->Iex.Binop.arg1 = src->Iex.Binop.arg2;
+			src->Iex.Binop.arg2 = a;
+		}
+		/* If both arguments are constant, try to constant
+		 * fold everything away. */
+		if (src->Iex.Binop.arg1->tag == Iex_Const &&
+		    src->Iex.Binop.arg2->tag == Iex_Const) {
+			switch (src->Iex.Binop.op) {
+			case Iop_Add8:
+				return IRExpr_Const(
+					IRConst_U8(
+						(src->Iex.Binop.arg1->Iex.Const.con->Ico.U8 +
+						 src->Iex.Binop.arg2->Iex.Const.con->Ico.U8) & 0xff));
+			case Iop_Add16:
+				return IRExpr_Const(
+					IRConst_U16(
+						(src->Iex.Binop.arg1->Iex.Const.con->Ico.U16 +
+						 src->Iex.Binop.arg2->Iex.Const.con->Ico.U16) & 0xffff));
+			case Iop_Add32:
+				return IRExpr_Const(
+					IRConst_U32(
+						(src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 +
+						 src->Iex.Binop.arg2->Iex.Const.con->Ico.U32) & 0xffffffff));
+			case Iop_Add64:
+				return IRExpr_Const(
+					IRConst_U64(
+						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 +
+						src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+			default:
+				break;
+			}
+		}
+	}
+				      
 	return src;
 }
 

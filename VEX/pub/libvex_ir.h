@@ -433,6 +433,7 @@ typedef
       Iop_CmpNE8,  Iop_CmpNE16,  Iop_CmpNE32,  Iop_CmpNE64,
       /* Tags for unary ops */
       Iop_Not8,  Iop_Not16,  Iop_Not32,  Iop_Not64,
+      Iop_Neg8,  Iop_Neg16,  Iop_Neg32,  Iop_Neg64,
 
       /* Exactly like CmpEQ8/16/32/64, but carrying the additional
          hint that these compute the success/failure of a CAS

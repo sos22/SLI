@@ -243,6 +243,8 @@ void ppIROp ( IROp op, FILE* f )
          str = "CasCmpNE"; base = Iop_CasCmpNE8; break;
       case Iop_Not8 ... Iop_Not64:
          str = "Not"; base = Iop_Not8; break;
+      case Iop_Neg8 ... Iop_Neg64:
+         str = "Neg"; base = Iop_Neg8; break;
       /* other cases must explicitly "return;" */
       case Iop_8Uto16:   fprintf(f, "8Uto16");  return;
       case Iop_8Uto32:   fprintf(f, "8Uto32");  return;
