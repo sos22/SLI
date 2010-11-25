@@ -14,8 +14,18 @@ public:
 	virtual void prettyPrint(FILE *f) const = 0;
 };
 
+/* Perform simple peephole optimisation on the IRExpr.  The resulting
+   expression is guaranteed to be equivalent to the old one in any
+   context.  We may mutate the expression in-place, which is okay
+   because there are no semantic changes. */
+static IRExpr *optimiseIRExpr(IRExpr *e);
+
 class StateMachine : public GarbageCollected<StateMachine>, public PrettyPrintable {
 public:
+	/* Another peephole optimiser.  Again, must be
+	   context-independent and result in no changes to the
+	   semantic value of the machine, and can mutate in-place. */
+	virtual StateMachine *optimise() = 0;
 	NAMED_CLASS
 };
 
@@ -40,6 +50,10 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(addr);
 		hv(data);
+	}
+	void optimise() {
+		addr = optimiseIRExpr(addr);
+		data = optimiseIRExpr(data);
 	}
 };
 
@@ -83,6 +97,7 @@ public:
 		     it++)
 			it->visit(hv);
 	}
+	StateMachineEdge *optimise();
 	NAMED_CLASS
 };
 
@@ -95,6 +110,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
+	StateMachine *optimise() { return this; }
 	void visit(HeapVisitor &hv) {}
 };
 VexPtr<StateMachineCrash> StateMachineCrash::_this;
@@ -108,6 +124,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
+	StateMachine *optimise() { return this; }
 	void visit(HeapVisitor &hv) {}
 };
 VexPtr<StateMachineNoCrash> StateMachineNoCrash::_this;
@@ -152,6 +169,13 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
+	StateMachine *optimise()
+	{
+		condition = optimiseIRExpr(condition);
+		trueTarget = trueTarget->optimise();
+		falseTarget = falseTarget->optimise();
+		return this;
+	}
 };
 
 /* A state machine node which always advances to another one.  These
@@ -177,6 +201,13 @@ public:
 	{
 		hv(target);
 	}
+	StateMachine *optimise()
+	{
+		if (target->sideEffects.size() == 0)
+			return target->target->optimise();
+		target = target->optimise();
+		return this;
+	}
 };
 
 /* A node in the state machine representing a bit of code which we
@@ -194,7 +225,31 @@ public:
 		fprintf(f, ">");
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
+	StateMachine *optimise() { return this; }
 };
+
+StateMachineEdge *
+StateMachineEdge::optimise()
+{
+	if (StateMachineProxy *smp =
+	    dynamic_cast<StateMachineProxy *>(target)) {
+		StateMachineEdge *sme =
+			new StateMachineEdge(smp->target->target);
+		sme->sideEffects = sideEffects;
+		for (std::vector<StateMachineSideEffect>::iterator it =
+			     smp->target->sideEffects.begin();
+		     it != smp->target->sideEffects.end();
+		     it++)
+			sme->sideEffects.push_back(*it);
+		return sme->optimise();
+	}
+	target = target->optimise();
+	for (std::vector<StateMachineSideEffect>::iterator it = sideEffects.begin();
+	     it != sideEffects.end();
+	     it++)
+		it->optimise();
+	return this;
+}
 
 /* A VEX RIP combines an ordinary machine code RIP with an offset into
    a VEX IRSB.  An idx of 0 corresponds to just before the start of
@@ -1028,6 +1083,37 @@ breakCycles(CFGNode *cfg)
 		visited.clear();
 }
 
+static IRExpr *
+optimiseIRExpr(IRExpr *src)
+{
+	switch (src->tag) {
+	case Iex_Qop:
+		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4);
+	case Iex_Triop:
+		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3);
+	case Iex_Binop:
+		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2);
+	case Iex_Unop:
+		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg);
+		break;
+	case Iex_Load:
+		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr);
+		break;
+	case Iex_Mux0X:
+		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond);
+		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0);
+		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX);
+		break;
+	case Iex_SLI_Load:
+		src->Iex.SLI_Load.addr = optimiseIRExpr(src->Iex.SLI_Load.addr);
+		break;
+	default:
+		break;
+	}
+
+	return src;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1060,11 +1146,12 @@ main(int argc, char *argv[])
 		interesting.insert(proximal->rip.rip);
 		trimCFG(cfg, interesting);
 		breakCycles(cfg);
-		printf("CFG from %lx:\n", *it);
-		printCFG(cfg);
 
 		CrashReason *cr = ii->CFGtoCrashReason(cfg);
 		printf("Crash reason %s:\n", cr->rip.name());
+		printStateMachine(cr->sm, stdout);
+		cr->sm = cr->sm->optimise();
+		printf("After optimisation:\n");
 		printStateMachine(cr->sm, stdout);
 	}
 
