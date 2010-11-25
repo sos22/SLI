@@ -1091,6 +1091,14 @@ operationCommutes(IROp op)
 	return op >= Iop_Add8 && op <= Iop_Add64;
 }
 
+/* Returns true if the operation definitely associates in the sense
+ * that (a op b) op c == a op (b op c), or false if we're not sure. */
+static bool
+operationAssociates(IROp op)
+{
+	return op >= Iop_Add8 && op <= Iop_Add64;
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src)
 {
@@ -1120,8 +1128,24 @@ optimiseIRExpr(IRExpr *src)
 		break;
 	}
 
-	/* Now use some special rules to simplify a few classes of binops. */
-	if (src->tag == Iex_Binop) {
+	/* Now use some special rules to simplify a few classes of binops and unops. */
+	if (src->tag == Iex_Unop) {
+		if (src->Iex.Unop.arg->tag == Iex_Const) {
+			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;
+			switch (src->Iex.Unop.op) {
+			case Iop_Neg8:
+				return IRExpr_Const(IRConst_U8(-c->Ico.U8));
+			case Iop_Neg16:
+				return IRExpr_Const(IRConst_U16(-c->Ico.U16));
+			case Iop_Neg32:
+				return IRExpr_Const(IRConst_U32(-c->Ico.U32));
+			case Iop_Neg64:
+				return IRExpr_Const(IRConst_U64(-c->Ico.U64));
+			default:
+				break;
+			}
+		}
+	} else if (src->tag == Iex_Binop) {
 		if (src->Iex.Binop.op >= Iop_Sub8 &&
 		    src->Iex.Binop.op <= Iop_Sub64) {
 			/* Replace a - b with a + (-b), so as to
@@ -1141,6 +1165,23 @@ optimiseIRExpr(IRExpr *src)
 			src->Iex.Binop.arg1 = src->Iex.Binop.arg2;
 			src->Iex.Binop.arg2 = a;
 		}
+		/* (a op CONST) op CONST gets rewritten to a op (CONST op CONST)
+		   if op is associative. */
+		if (src->Iex.Binop.arg1->tag == Iex_Binop &&
+		    src->Iex.Binop.op == src->Iex.Binop.arg1->Iex.Binop.op &&
+		    src->Iex.Binop.arg2->tag == Iex_Const &&
+		    src->Iex.Binop.arg1->Iex.Binop.arg2->tag == Iex_Const &&
+		    operationAssociates(src->Iex.Binop.op)) {
+			IRExpr *a;
+			a = src->Iex.Binop.arg1;
+			src->Iex.Binop.arg1 = a->Iex.Binop.arg1;
+			src->Iex.Binop.arg2 =
+				optimiseIRExpr(
+					IRExpr_Binop(src->Iex.Binop.op,
+						     a->Iex.Binop.arg2,
+						     src->Iex.Binop.arg2));
+		}
+
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
 		if (src->Iex.Binop.arg1->tag == Iex_Const &&
@@ -1170,6 +1211,8 @@ optimiseIRExpr(IRExpr *src)
 				break;
 			}
 		}
+
+
 	}
 				      
 	return src;
