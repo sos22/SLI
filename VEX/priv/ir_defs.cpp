@@ -97,6 +97,9 @@ IRExpr::visit(HeapVisitor &visit)
      visit(Iex.Mux0X.expr0);
      visit(Iex.Mux0X.exprX);
      break;
+   case Iex_SLI_Load:
+     visit(Iex.SLI_Load.addr);
+     break;
    }
 }
 
@@ -745,6 +748,11 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       ppIRExpr(e->Iex.Load.addr, f);
       fprintf(f,  ")" );
       break;
+    case Iex_SLI_Load:
+      fprintf(f,  "load@%#lx(", e->Iex.SLI_Load.rip);
+      ppIRExpr(e->Iex.SLI_Load.addr, f);
+      fprintf(f,  ")" );
+      break;
     case Iex_Const:
       ppIRConst(e->Iex.Const.con, f);
       break;
@@ -1159,6 +1167,13 @@ IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
    e->Iex.Load.ty   = ty;
    e->Iex.Load.addr = addr;
    vassert(end == Iend_LE || end == Iend_BE);
+   return e;
+}
+IRExpr* IRExpr_SLI_Load ( IRExpr* addr, unsigned long rip ) {
+   IRExpr* e        = new IRExpr();
+   e->tag           = Iex_SLI_Load;
+   e->Iex.SLI_Load.addr = addr;
+   e->Iex.SLI_Load.rip = rip;
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {

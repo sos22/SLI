@@ -930,6 +930,7 @@ typedef
       Iex_Binop,
       Iex_Unop,
       Iex_Load,
+      Iex_SLI_Load,
       Iex_Const,
       Iex_Mux0X,
       Iex_CCall
@@ -1138,6 +1139,11 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          IRExpr* expr0;    /* True expression */
          IRExpr* exprX;    /* False expression */
       } Mux0X;
+
+      struct {
+	 IRExpr *addr;
+	 unsigned long rip;
+      } SLI_Load;
    } Iex;
    void visit(HeapVisitor &hv);
    NAMED_CLASS
@@ -1156,6 +1162,7 @@ extern IRExpr* IRExpr_Binop  ( IROp op, IRExpr* arg1, IRExpr* arg2 );
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
 extern IRExpr* IRExpr_Load   ( Bool isLL, IREndness end,
                                IRType ty, IRExpr* addr );
+extern IRExpr* IRExpr_SLI_Load ( IRExpr* addr, unsigned long rip );
 extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );

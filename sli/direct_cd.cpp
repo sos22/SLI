@@ -210,6 +210,9 @@ public:
 	bool operator<(const VexRip &a) const {
 		return rip < a.rip || (rip == a.rip && idx < a.idx);
 	}
+	bool operator==(const VexRip &a) const {
+		return rip == a.rip && idx == a.idx;
+	}
 };
 
 class CrashReason : public GarbageCollected<CrashReason>,
@@ -348,6 +351,11 @@ protected:
 				   e->Iex.Load.ty,
 				   transformIRExpr(e->Iex.Load.addr));
 	}
+	virtual IRExpr *transformIexSLILoad(IRExpr *e)
+	{
+		return IRExpr_SLI_Load(transformIRExpr(e->Iex.SLI_Load.addr),
+				       e->Iex.SLI_Load.rip);
+	}
 	virtual IRExpr *transformIexConst(IRExpr *e)
 	{
 		return e;
@@ -453,6 +461,8 @@ StateMachineTransformer::transformIRExpr(IRExpr *e)
 		return transformIexUnop(e);
 	case Iex_Load:
 		return transformIexLoad(e);
+	case Iex_SLI_Load:
+		return transformIexSLILoad(e);
 	case Iex_Const:
 		return transformIexConst(e);
 	case Iex_CCall:
@@ -560,6 +570,7 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 		break;
 	case Ist_PutI:
 		/* We can't handle these correctly. */
+		abort();
 		return NULL;
 	case Ist_WrTmp:
 		sm = rewriteTemporary(sm,
@@ -575,9 +586,25 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 		return new CrashReason(newRip, smp);
 	}
 
-	case Ist_CAS:
 	case Ist_Dirty:
+		if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			    "helper_load_64") ||
+		    !strcmp(stmt->Ist.Dirty.details->cee->name,
+			    "helper_load_32")) {
+			sm = rewriteTemporary(
+				sm,
+				stmt->Ist.Dirty.details->tmp,
+				IRExpr_SLI_Load(
+					stmt->Ist.Dirty.details->args[0],
+					cr->rip.rip));
+		}  else {
+			abort();
+		}
+		break;
+
+	case Ist_CAS:
 		/* Can't backtrack across these */
+		abort();
 		return NULL;
 	case Ist_MBE:
 		return cr;
@@ -687,6 +714,7 @@ public:
 	InferredInformation(Oracle *_oracle) : oracle(_oracle) {}
 	void addCrashReason(CrashReason *cr) { crashReasons[cr->rip] = cr; }
 	CFGNode *CFGFromRip(unsigned long rip);
+	CrashReason *CFGtoCrashReason(CFGNode *cfg);
 
 	void visit(HeapVisitor &hv) {
 		hv(oracle);
@@ -760,6 +788,71 @@ InferredInformation::CFGFromRip(unsigned long start)
 
 	/* That should do it */
 	return builtSoFar[start];
+}
+
+CrashReason *
+InferredInformation::CFGtoCrashReason(CFGNode *cfg)
+{
+	VexRip finalRip(cfg->my_rip, 0);
+	if (crashReasons.count(finalRip)) {
+		assert(crashReasons[finalRip]);
+		return crashReasons[finalRip];
+	}
+	CrashReason *res;
+	if (!cfg->branch && !cfg->fallThrough) {
+		res = new CrashReason(finalRip, StateMachineNoCrash::get());
+	} else {
+		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(finalRip.rip);
+		int x;
+		for (x = 1; x < irsb->stmts_used; x++)
+			if (irsb->stmts[x]->tag == Ist_IMark)
+				break;
+		if (cfg->fallThrough) {
+			CrashReason *ft = CFGtoCrashReason(cfg->fallThrough);
+
+			ft = new CrashReason(VexRip(finalRip.rip, x), ft->sm);
+			while (ft->rip.idx != 0) {
+				IRStmt *stmt = irsb->stmts[ft->rip.idx-1];
+				if (stmt->tag == Ist_Exit) {
+					VexRip newRip(ft->rip);
+					newRip.idx--;
+					newRip.changedIdx();
+					if (cfg->branch) {
+						ft = new CrashReason(
+							newRip,
+							new StateMachineBifurcate(
+								stmt->Ist.Exit.guard,
+								CFGtoCrashReason(cfg->branch)->sm,
+								ft->sm));
+					} else {
+						ft = new CrashReason(
+							newRip,
+							ft->sm);
+					}
+				} else {
+					ft = backtrackOneStatement(ft, stmt);
+				}
+			}
+			res = ft;
+		} else {
+			assert(cfg->branch);
+			CrashReason *b = CFGtoCrashReason(cfg->branch);
+			for (; x >= 0; x--)
+				if (irsb->stmts[x]->tag == Ist_Exit)
+					break;
+			assert(x > 0);
+			b = new CrashReason(VexRip(finalRip.rip, x), b->sm);
+			while (b->rip.idx != 0) {
+				IRStmt *stmt = irsb->stmts[b->rip.idx-1];
+				b = backtrackOneStatement(b, stmt);
+			}
+			res = b;
+		}
+	}
+	assert(finalRip == res->rip);
+	assert(res);
+	crashReasons[finalRip] = res;
+	return res;
 }
 
 static void
@@ -969,6 +1062,10 @@ main(int argc, char *argv[])
 		breakCycles(cfg);
 		printf("CFG from %lx:\n", *it);
 		printCFG(cfg);
+
+		CrashReason *cr = ii->CFGtoCrashReason(cfg);
+		printf("Crash reason %s:\n", cr->rip.name());
+		printStateMachine(cr->sm, stdout);
 	}
 
 	return 0;
