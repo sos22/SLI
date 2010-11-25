@@ -29,7 +29,7 @@ public:
 	NAMED_CLASS
 };
 
-class StateMachineSideEffect : public PrettyPrintable {
+class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, public PrettyPrintable {
 	StateMachineSideEffect(IRExpr *_addr, IRExpr *_data)
 		: addr(_addr), data(_data)
 	{
@@ -44,8 +44,8 @@ public:
 		fprintf(f, ") <- ");
 		ppIRExpr(data, f);
 	}
-	static StateMachineSideEffect store(IRExpr *addr, IRExpr *data) {
-		return StateMachineSideEffect(addr, data);
+	static StateMachineSideEffect *store(IRExpr *addr, IRExpr *data) {
+		return new StateMachineSideEffect(addr, data);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(addr);
@@ -55,19 +55,20 @@ public:
 		addr = optimiseIRExpr(addr);
 		data = optimiseIRExpr(data);
 	}
+	NAMED_CLASS
 };
 
 class StateMachineEdge : public GarbageCollected<StateMachineEdge>, public PrettyPrintable {
 public:
 	StateMachineEdge(StateMachine *t) : target(t) {}
 	StateMachine *target;
-	std::vector<StateMachineSideEffect> sideEffects;
+	std::vector<StateMachineSideEffect *> sideEffects;
 
-	void prependSideEffect(const StateMachineSideEffect &k) {
-		std::vector<StateMachineSideEffect> n;
+	void prependSideEffect(StateMachineSideEffect *k) {
+		std::vector<StateMachineSideEffect *> n;
 		n.reserve(sideEffects.size() + 1);
 		n.push_back(k);
-		for (std::vector<StateMachineSideEffect>::iterator it = sideEffects.begin();
+		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
 		     it != sideEffects.end();
 		     it++)
 			n.push_back(*it);
@@ -78,13 +79,13 @@ public:
 		if (sideEffects.size() != 0) {
 			fprintf(f, "{");
 			bool b = true;
-			for (std::vector<StateMachineSideEffect>::const_iterator it = sideEffects.begin();
+			for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
 			     it != sideEffects.end();
 			     it++) {
 				if (!b)
 					fprintf(f, "; ");
 				b = false;
-				it->prettyPrint(f);
+				(*it)->prettyPrint(f);
 			}
 			fprintf(f, "} ");
 		}
@@ -92,10 +93,10 @@ public:
 	}
 	void visit(HeapVisitor &hv) {
 		hv(target);
-		for (std::vector<StateMachineSideEffect>::iterator it = sideEffects.begin();
+		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
 		     it != sideEffects.end();
 		     it++)
-			it->visit(hv);
+			hv(*it);
 	}
 	StateMachineEdge *optimise();
 	NAMED_CLASS
@@ -236,7 +237,7 @@ StateMachineEdge::optimise()
 		StateMachineEdge *sme =
 			new StateMachineEdge(smp->target->target);
 		sme->sideEffects = sideEffects;
-		for (std::vector<StateMachineSideEffect>::iterator it =
+		for (std::vector<StateMachineSideEffect *>::iterator it =
 			     smp->target->sideEffects.begin();
 		     it != smp->target->sideEffects.end();
 		     it++)
@@ -244,10 +245,10 @@ StateMachineEdge::optimise()
 		return sme->optimise();
 	}
 	target = target->optimise();
-	for (std::vector<StateMachineSideEffect>::iterator it = sideEffects.begin();
+	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
 	     it != sideEffects.end();
 	     it++)
-		it->optimise();
+		(*it)->optimise();
 	return this;
 }
 
@@ -463,13 +464,13 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 {
 	StateMachine *t = doit(inp->target);
 	StateMachineEdge *res = new StateMachineEdge(t);
-	for (std::vector<StateMachineSideEffect>::iterator it = inp->sideEffects.begin();
+	for (std::vector<StateMachineSideEffect *>::iterator it = inp->sideEffects.begin();
 	     it != inp->sideEffects.end();
 	     it++) {
 		res->sideEffects.push_back(
 			StateMachineSideEffect::store(
-				transformIRExpr(it->addr),
-				transformIRExpr(it->data)));
+				transformIRExpr((*it)->addr),
+				transformIRExpr((*it)->data)));
 	}
 	return res;
 }
