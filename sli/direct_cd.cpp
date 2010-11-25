@@ -1116,6 +1116,13 @@ optimiseIRExpr(IRExpr *src)
 	case Iex_Load:
 		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr);
 		break;
+	case Iex_CCall: {
+		for (int x = 0; src->Iex.CCall.args[x]; x++) {
+			src->Iex.CCall.args[x] =
+				optimiseIRExpr(src->Iex.CCall.args[x]);
+		}
+		break;
+	}
 	case Iex_Mux0X:
 		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond);
 		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0);
