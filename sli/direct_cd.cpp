@@ -23,8 +23,8 @@ public:
 };
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(true);
 
-static bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt = AllowableOptimisations::defaultOptimisations);
-static bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt = AllowableOptimisations::defaultOptimisations);
+static bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
+static bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 
 static bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 
@@ -38,22 +38,22 @@ public:
    expression is guaranteed to be equivalent to the old one in any
    context.  We may mutate the expression in-place, which is okay
    because there are no semantic changes. */
-static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt = AllowableOptimisations::defaultOptimisations);
+static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &);
 
 class StateMachine : public GarbageCollected<StateMachine>, public PrettyPrintable {
 public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachine *optimise() = 0;
-	virtual void findLoadedAddresses(std::set<IRExpr *> &) = 0;
+	virtual StateMachine *optimise(const AllowableOptimisations &) = 0;
+	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, public PrettyPrintable {
 public:
-	virtual void optimise() = 0;
-	virtual void updateLoadedAddresses(std::set<IRExpr *> &l) = 0;
+	virtual void optimise(const AllowableOptimisations &) = 0;
+	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
 };
 
@@ -75,15 +75,15 @@ public:
 		hv(addr);
 		hv(data);
 	}
-	void optimise() {
-		addr = optimiseIRExpr(addr);
-		data = optimiseIRExpr(data);
+	void optimise(const AllowableOptimisations &opt) {
+		addr = optimiseIRExpr(addr, opt);
+		data = optimiseIRExpr(data, opt);
 	}
-	void updateLoadedAddresses(std::set<IRExpr *> &l) {
+	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt) {
 		for (std::set<IRExpr *>::iterator it = l.begin();
 		     it != l.end();
 			) {
-			if (definitelyEqual(*it, addr))
+			if (definitelyEqual(*it, addr, opt))
 				l.erase(it++);
 			else
 				it++;
@@ -113,10 +113,10 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
-	void optimise() {
-		addr = optimiseIRExpr(addr);
+	void optimise(const AllowableOptimisations &opt) {
+		addr = optimiseIRExpr(addr, opt);
 	}
-	void updateLoadedAddresses(std::set<IRExpr *> &l) {
+	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
 	}
 };
@@ -162,13 +162,13 @@ public:
 		     it++)
 			hv(*it);
 	}
-	StateMachineEdge *optimise();
-	void findLoadedAddresses(std::set<IRExpr *> &s) {
-		target->findLoadedAddresses(s);
+	StateMachineEdge *optimise(const AllowableOptimisations &);
+	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
+		target->findLoadedAddresses(s, opt);
 		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
 		     it != sideEffects.rend();
 		     it++)
-			(*it)->updateLoadedAddresses(s);
+			(*it)->updateLoadedAddresses(s, opt);
 	}
 	NAMED_CLASS
 };
@@ -182,9 +182,9 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-	StateMachine *optimise() { return this; }
+	StateMachine *optimise(const AllowableOptimisations &) { return this; }
 	void visit(HeapVisitor &hv) {}
-	void findLoadedAddresses(std::set<IRExpr *> &) {}
+	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 };
 VexPtr<StateMachineCrash> StateMachineCrash::_this;
 
@@ -197,9 +197,9 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-	StateMachine *optimise() { return this; }
+	StateMachine *optimise(const AllowableOptimisations &) { return this; }
 	void visit(HeapVisitor &hv) {}
-	void findLoadedAddresses(std::set<IRExpr *> &) {}
+	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 };
 VexPtr<StateMachineNoCrash> StateMachineNoCrash::_this;
 
@@ -243,17 +243,17 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachine *optimise()
+	StateMachine *optimise(const AllowableOptimisations &opt)
 	{
-		condition = optimiseIRExpr(condition);
-		trueTarget = trueTarget->optimise();
-		falseTarget = falseTarget->optimise();
+		condition = optimiseIRExpr(condition, opt);
+		trueTarget = trueTarget->optimise(opt);
+		falseTarget = falseTarget->optimise(opt);
 		return this;
 	}
-	void findLoadedAddresses(std::set<IRExpr *> &s) {
+	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		std::set<IRExpr *> t(s);
-		trueTarget->findLoadedAddresses(t);
-		falseTarget->findLoadedAddresses(s);
+		trueTarget->findLoadedAddresses(t, opt);
+		falseTarget->findLoadedAddresses(s, opt);
 		/* Result is the union of the two branches */
 		for (std::set<IRExpr *>::iterator it = t.begin();
 		     it != t.end();
@@ -285,15 +285,15 @@ public:
 	{
 		hv(target);
 	}
-	StateMachine *optimise()
+	StateMachine *optimise(const AllowableOptimisations &opt)
 	{
 		if (target->sideEffects.size() == 0)
-			return target->target->optimise();
-		target = target->optimise();
+			return target->target->optimise(opt);
+		target = target->optimise(opt);
 		return this;
 	}
-	void findLoadedAddresses(std::set<IRExpr *> &s) {
-		target->findLoadedAddresses(s);
+	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
+		target->findLoadedAddresses(s, opt);
 	}
 };
 
@@ -312,12 +312,12 @@ public:
 		fprintf(f, ">");
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
-	StateMachine *optimise() { return this; }
-	void findLoadedAddresses(std::set<IRExpr *> &) {}
+	StateMachine *optimise(const AllowableOptimisations &) { return this; }
+	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 };
 
 StateMachineEdge *
-StateMachineEdge::optimise()
+StateMachineEdge::optimise(const AllowableOptimisations &opt)
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
@@ -329,33 +329,33 @@ StateMachineEdge::optimise()
 		     it != smp->target->sideEffects.end();
 		     it++)
 			sme->sideEffects.push_back(*it);
-		return sme->optimise();
+		return sme->optimise(opt);
 	}
-	target = target->optimise();
+	target = target->optimise(opt);
 
 	std::set<IRExpr *> loadedAddresses;
-	target->findLoadedAddresses(loadedAddresses);
+	target->findLoadedAddresses(loadedAddresses, opt);
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 	it = sideEffects.end();
 	while (it != sideEffects.begin()) {
 		bool isDead = false;
 		it--;
-		(*it)->optimise();
+		(*it)->optimise(opt);
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			isDead = true;
 			for (std::set<IRExpr *>::iterator it2 = loadedAddresses.begin();
 			     isDead && it2 != loadedAddresses.end();
 			     it2++) {
-				if (!definitelyNotEqual(*it2, smses->addr))
+				if (!definitelyNotEqual(*it2, smses->addr, opt))
 					isDead = false;
 			}
 			if (isDead)
 				it = sideEffects.erase(it);
 		}
 		if (!isDead)
-			(*it)->updateLoadedAddresses(loadedAddresses);
+			(*it)->updateLoadedAddresses(loadedAddresses, opt);
 	}
 	return this;
 }
@@ -1615,7 +1615,7 @@ main(int argc, char *argv[])
 		CrashReason *cr = ii->CFGtoCrashReason(cfg);
 		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
-		cr->sm = cr->sm->optimise();
+		cr->sm = cr->sm->optimise(AllowableOptimisations::defaultOptimisations);
 		printf("After optimisation:\n");
 		printStateMachine(cr->sm, stdout);
 	}
