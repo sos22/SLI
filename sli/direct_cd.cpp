@@ -8,6 +8,26 @@
 
 #include "sli.h"
 
+class AllowableOptimisations {
+public:
+	static AllowableOptimisations defaultOptimisations;
+	AllowableOptimisations(bool x)
+		: xPlusMinusX(x)
+	{
+	}
+	bool xPlusMinusX;
+	AllowableOptimisations disablexPlusMinusX() const
+	{
+		return AllowableOptimisations(false);
+	}
+};
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(true);
+
+static bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt = AllowableOptimisations::defaultOptimisations);
+static bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt = AllowableOptimisations::defaultOptimisations);
+
+static bool physicallyEqual(const IRExpr *a, const IRExpr *b);
+
 class PrettyPrintable {
 public:
 	void prettyPrint(void) const { prettyPrint(stdout); }
@@ -18,7 +38,7 @@ public:
    expression is guaranteed to be equivalent to the old one in any
    context.  We may mutate the expression in-place, which is okay
    because there are no semantic changes. */
-static IRExpr *optimiseIRExpr(IRExpr *e);
+static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt = AllowableOptimisations::defaultOptimisations);
 
 class StateMachine : public GarbageCollected<StateMachine>, public PrettyPrintable {
 public:
@@ -26,12 +46,14 @@ public:
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
 	virtual StateMachine *optimise() = 0;
+	virtual void findLoadedAddresses(std::set<IRExpr *> &) = 0;
 	NAMED_CLASS
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, public PrettyPrintable {
 public:
 	virtual void optimise() = 0;
+	virtual void updateLoadedAddresses(std::set<IRExpr *> &l) = 0;
 	NAMED_CLASS
 };
 
@@ -56,6 +78,16 @@ public:
 	void optimise() {
 		addr = optimiseIRExpr(addr);
 		data = optimiseIRExpr(data);
+	}
+	void updateLoadedAddresses(std::set<IRExpr *> &l) {
+		for (std::set<IRExpr *>::iterator it = l.begin();
+		     it != l.end();
+			) {
+			if (definitelyEqual(*it, addr))
+				l.erase(it++);
+			else
+				it++;
+		}
 	}
 };
 
@@ -83,6 +115,9 @@ public:
 	}
 	void optimise() {
 		addr = optimiseIRExpr(addr);
+	}
+	void updateLoadedAddresses(std::set<IRExpr *> &l) {
+		l.insert(addr);
 	}
 };
 Int StateMachineSideEffectLoad::next_key;
@@ -128,6 +163,13 @@ public:
 			hv(*it);
 	}
 	StateMachineEdge *optimise();
+	void findLoadedAddresses(std::set<IRExpr *> &s) {
+		target->findLoadedAddresses(s);
+		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
+		     it != sideEffects.rend();
+		     it++)
+			(*it)->updateLoadedAddresses(s);
+	}
 	NAMED_CLASS
 };
 
@@ -142,6 +184,7 @@ public:
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
 	StateMachine *optimise() { return this; }
 	void visit(HeapVisitor &hv) {}
+	void findLoadedAddresses(std::set<IRExpr *> &) {}
 };
 VexPtr<StateMachineCrash> StateMachineCrash::_this;
 
@@ -156,6 +199,7 @@ public:
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
 	StateMachine *optimise() { return this; }
 	void visit(HeapVisitor &hv) {}
+	void findLoadedAddresses(std::set<IRExpr *> &) {}
 };
 VexPtr<StateMachineNoCrash> StateMachineNoCrash::_this;
 
@@ -206,6 +250,16 @@ public:
 		falseTarget = falseTarget->optimise();
 		return this;
 	}
+	void findLoadedAddresses(std::set<IRExpr *> &s) {
+		std::set<IRExpr *> t(s);
+		trueTarget->findLoadedAddresses(t);
+		falseTarget->findLoadedAddresses(s);
+		/* Result is the union of the two branches */
+		for (std::set<IRExpr *>::iterator it = t.begin();
+		     it != t.end();
+		     it++)
+			s.insert(*it);
+	}
 };
 
 /* A state machine node which always advances to another one.  These
@@ -238,6 +292,9 @@ public:
 		target = target->optimise();
 		return this;
 	}
+	void findLoadedAddresses(std::set<IRExpr *> &s) {
+		target->findLoadedAddresses(s);
+	}
 };
 
 /* A node in the state machine representing a bit of code which we
@@ -256,6 +313,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
 	StateMachine *optimise() { return this; }
+	void findLoadedAddresses(std::set<IRExpr *> &) {}
 };
 
 StateMachineEdge *
@@ -274,10 +332,31 @@ StateMachineEdge::optimise()
 		return sme->optimise();
 	}
 	target = target->optimise();
-	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++)
+
+	std::set<IRExpr *> loadedAddresses;
+	target->findLoadedAddresses(loadedAddresses);
+
+	std::vector<StateMachineSideEffect *>::iterator it;
+	it = sideEffects.end();
+	while (it != sideEffects.begin()) {
+		bool isDead = false;
+		it--;
 		(*it)->optimise();
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			isDead = true;
+			for (std::set<IRExpr *>::iterator it2 = loadedAddresses.begin();
+			     isDead && it2 != loadedAddresses.end();
+			     it2++) {
+				if (!definitelyNotEqual(*it2, smses->addr))
+					isDead = false;
+			}
+			if (isDead)
+				it = sideEffects.erase(it);
+		}
+		if (!isDead)
+			(*it)->updateLoadedAddresses(loadedAddresses);
+	}
 	return this;
 }
 
@@ -1132,7 +1211,8 @@ breakCycles(CFGNode *cfg)
 static bool
 operationCommutes(IROp op)
 {
-	return op >= Iop_Add8 && op <= Iop_Add64;
+	return (op >= Iop_Add8 && op <= Iop_Add64) ||
+		(op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64);
 }
 
 /* Returns true if the operation definitely associates in the sense
@@ -1143,37 +1223,148 @@ operationAssociates(IROp op)
 	return op >= Iop_Add8 && op <= Iop_Add64;
 }
 
-static IRExpr *
-optimiseIRExpr(IRExpr *src)
+static bool
+physicallyEqual(const IRConst *a, const IRConst *b)
 {
+	if (a->tag != b->tag)
+		return false;
+	switch (a->tag) {
+#define do_case(t)					\
+		case Ico_ ## t:				\
+			return a->Ico. t == b->Ico. t
+		do_case(U1);
+		do_case(U8);
+		do_case(U16);
+		do_case(U32);
+		do_case(U64);
+		do_case(F64);
+		do_case(F64i);
+		do_case(V128);
+	}
+	abort();
+}
+
+static bool
+physicallyEqual(const IRRegArray *a, const IRRegArray *b)
+{
+	return a->base == b->base && a->elemTy == b->elemTy && a->nElems == b->nElems;
+}
+
+static bool
+physicallyEqual(const IRCallee *a, const IRCallee *b)
+{
+	return a->addr == b->addr;
+}
+
+static bool
+physicallyEqual(const IRExpr *a, const IRExpr *b)
+{
+	if (a == b)
+		return true;
+	if (a->tag != b->tag)
+		return false;
+	switch (a->tag) {
+	case Iex_Binder:
+		return a->Iex.Binder.binder == b->Iex.Binder.binder;
+	case Iex_Get:
+		return a->Iex.Get.offset == b->Iex.Get.offset &&
+			a->Iex.Get.ty == b->Iex.Get.ty;
+	case Iex_GetI:
+		return a->Iex.GetI.bias == b->Iex.GetI.bias &&
+			physicallyEqual(a->Iex.GetI.descr,
+					b->Iex.GetI.descr) &&
+			physicallyEqual(a->Iex.GetI.ix,
+					b->Iex.GetI.ix);
+	case Iex_RdTmp:
+		return a->Iex.RdTmp.tmp == b->Iex.RdTmp.tmp;
+
+	case Iex_Qop:
+		if (!physicallyEqual(a->Iex.Qop.arg4,
+				     b->Iex.Qop.arg4))
+			return false;
+	case Iex_Triop:
+		if (!physicallyEqual(a->Iex.Qop.arg3,
+				     b->Iex.Qop.arg3))
+			return false;
+	case Iex_Binop:
+		if (!physicallyEqual(a->Iex.Qop.arg2,
+				     b->Iex.Qop.arg2))
+			return false;
+	case Iex_Unop:
+		if (!physicallyEqual(a->Iex.Qop.arg1,
+				     b->Iex.Qop.arg1))
+			return false;
+		return a->Iex.Qop.op == b->Iex.Qop.op;
+	case Iex_Load:
+		abort();
+	case Iex_Const:
+		return physicallyEqual(a->Iex.Const.con, b->Iex.Const.con);
+	case Iex_CCall: {
+		if (a->Iex.CCall.retty != b->Iex.CCall.retty ||
+		    !physicallyEqual(a->Iex.CCall.cee, b->Iex.CCall.cee))
+			return false;
+		int x;
+		for (x = 0; a->Iex.CCall.args[x]; x++) {
+			if (!b->Iex.CCall.args[x])
+				return false;
+			if (!physicallyEqual(a->Iex.CCall.args[x],
+					     b->Iex.CCall.args[x]))
+				return false;
+		}
+		if (b->Iex.CCall.args[x])
+			return false;
+		return true;
+	}
+	case Iex_Mux0X:
+		return physicallyEqual(a->Iex.Mux0X.cond,
+				       b->Iex.Mux0X.cond) &&
+			physicallyEqual(a->Iex.Mux0X.expr0,
+					b->Iex.Mux0X.expr0) &&
+			physicallyEqual(a->Iex.Mux0X.exprX,
+					b->Iex.Mux0X.exprX);
+	case Iex_SLI_Load:
+		return a->Iex.SLI_Load.rip == b->Iex.SLI_Load.rip &&
+			physicallyEqual(a->Iex.SLI_Load.addr,
+					b->Iex.SLI_Load.addr);
+	}
+	abort();
+}
+
+static IRExpr *
+optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
+{
+	printf("Optimise ");
+	ppIRExpr(src, stdout);
+	printf("\n");
+
 	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
-		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4);
+		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt);
 	case Iex_Triop:
-		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3);
+		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt);
 	case Iex_Binop:
-		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2);
+		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt);
 	case Iex_Unop:
-		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg);
+		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt);
 		break;
 	case Iex_Load:
-		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr);
+		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt);
 		break;
 	case Iex_CCall: {
 		for (int x = 0; src->Iex.CCall.args[x]; x++) {
 			src->Iex.CCall.args[x] =
-				optimiseIRExpr(src->Iex.CCall.args[x]);
+				optimiseIRExpr(src->Iex.CCall.args[x], opt);
 		}
 		break;
 	}
 	case Iex_Mux0X:
-		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond);
-		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0);
-		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX);
+		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt);
+		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt);
+		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt);
 		break;
 	case Iex_SLI_Load:
-		src->Iex.SLI_Load.addr = optimiseIRExpr(src->Iex.SLI_Load.addr);
+		src->Iex.SLI_Load.addr = optimiseIRExpr(src->Iex.SLI_Load.addr, opt);
 		break;
 	default:
 		break;
@@ -1205,7 +1396,8 @@ optimiseIRExpr(IRExpr *src)
 			src->Iex.Binop.arg2 =
 				optimiseIRExpr(
 					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
-						     src->Iex.Binop.arg2 ) );
+						     src->Iex.Binop.arg2 ),
+					opt);
 		}
 		/* If a op b commutes, and b is a constant and a
 		   isn't, rewrite to b op a. */
@@ -1230,9 +1422,98 @@ optimiseIRExpr(IRExpr *src)
 				optimiseIRExpr(
 					IRExpr_Binop(src->Iex.Binop.op,
 						     a->Iex.Binop.arg2,
-						     src->Iex.Binop.arg2));
+						     src->Iex.Binop.arg2),
+					opt);
 		}
 
+		/* We simplify == expressions with sums on the left
+		   and right by trying to move all of the constants to
+		   the right and all of the non-constants to the
+		   left. */
+		if (src->Iex.Binop.op == Iop_CmpEQ64) {
+			if (src->Iex.Binop.arg1->tag == Iex_Binop &&
+			    src->Iex.Binop.arg1->Iex.Binop.op == Iop_Add64 &&
+			    src->Iex.Binop.arg1->Iex.Binop.arg2->tag == Iex_Const) {
+				/* a + C == b -> a == b - C */
+				IRExpr *r =
+					optimiseIRExpr(
+						IRExpr_Binop(
+							Iop_Add64,
+							src->Iex.Binop.arg2,
+							IRExpr_Unop(
+								Iop_Neg64,
+								src->Iex.Binop.arg1->Iex.Binop.arg2)),
+						opt);
+				src->Iex.Binop.arg1 =
+					src->Iex.Binop.arg1->Iex.Binop.arg1;
+				src->Iex.Binop.arg2 = r;
+				return optimiseIRExpr(src, opt);
+			}
+			if (src->Iex.Binop.arg2->tag == Iex_Binop &&
+			    src->Iex.Binop.arg2->Iex.Binop.op == Iop_Add64) {
+				/* a == b + c -> a - b == c */
+
+				/* because the constant, if present,
+				   will always be on the right, and
+				   they can't both be constants
+				   because then we'd have constant
+				   folded it. */
+				assert(src->Iex.Binop.arg2->Iex.Binop.arg1->tag != Iex_Const);
+
+				IRExpr *l =
+					optimiseIRExpr(
+						IRExpr_Binop(
+							Iop_Add64,
+							src->Iex.Binop.arg1,
+							IRExpr_Unop(
+								Iop_Neg64,
+								src->Iex.Binop.arg2->Iex.Binop.arg1)),
+						opt);
+				src->Iex.Binop.arg2 =
+					src->Iex.Binop.arg2->Iex.Binop.arg2;
+				src->Iex.Binop.arg1 = l;
+				return optimiseIRExpr(src, opt);
+			}
+			/* If, in a == b, a and b are physically
+			 * identical, the result is a constant 1. */
+			if (physicallyEqual(src->Iex.Binop.arg1, src->Iex.Binop.arg2))
+				return IRExpr_Const(IRConst_U1(1));
+
+			/* Otherwise, a == b -> a - b == 0, provided that b is not a constant. */
+			if (src->Iex.Binop.arg2->tag != Iex_Const) {
+				src->Iex.Binop.arg1 =
+					IRExpr_Binop(
+						Iop_Add64,
+						src->Iex.Binop.arg1,
+						IRExpr_Unop(
+							Iop_Neg64,
+							src->Iex.Binop.arg2));
+				src->Iex.Binop.arg2 = IRExpr_Const(IRConst_U64(0));
+				return optimiseIRExpr(src, opt);
+			}
+		}
+
+		/* Another special case: x + (-x) -> 0. */
+		if (opt.xPlusMinusX &&
+		    src->Iex.Binop.op == Iop_Add64 &&
+		    src->Iex.Binop.arg2->tag == Iex_Unop &&
+		    src->Iex.Binop.arg2->Iex.Unop.op == Iop_Neg64 &&
+		    definitelyEqual(src->Iex.Binop.arg1,
+				    src->Iex.Binop.arg2->Iex.Unop.arg,
+				    opt.disablexPlusMinusX()))
+			return IRExpr_Const(IRConst_U64(0));
+
+		/* And another one: -x == c -> x == -c if c is a constant. */
+		if (src->Iex.Binop.op == Iop_CmpEQ64 &&
+		    src->Iex.Binop.arg1->tag == Iex_Unop &&
+		    src->Iex.Binop.arg1->Iex.Unop.op == Iop_Neg64 &&
+		    src->Iex.Binop.arg2->tag == Iex_Const) {
+			src->Iex.Binop.arg1 = src->Iex.Binop.arg1->Iex.Unop.arg;
+			src->Iex.Binop.arg2 = IRExpr_Const(
+				IRConst_U64(-src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+			return optimiseIRExpr(src, opt);
+		}
+				
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
 		if (src->Iex.Binop.arg1->tag == Iex_Const &&
@@ -1267,6 +1548,35 @@ optimiseIRExpr(IRExpr *src)
 	}
 				      
 	return src;
+}
+
+static bool
+definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
+{
+	printf("Simplify ");
+	ppIRExpr(a, stdout);
+	printf(" == ");
+	ppIRExpr(b, stdout);
+	printf("\n");
+	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
+	printf("Reduced: ");
+	ppIRExpr(r, stdout);
+	printf("\n");
+	return r->tag == Iex_Const && r->Iex.Const.con->Ico.U1;
+}
+static bool
+definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
+{
+	printf("SimplifyA ");
+	ppIRExpr(a, stdout);
+	printf(" == ");
+	ppIRExpr(b, stdout);
+	printf("\n");
+	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
+	printf("Reduced: ");
+	ppIRExpr(r, stdout);
+	printf("\n");
+	return r->tag == Iex_Const && !r->Iex.Const.con->Ico.U1;
 }
 
 int
