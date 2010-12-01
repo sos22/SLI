@@ -2039,6 +2039,340 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 		opt);
 }
 
+typedef std::pair<StateMachine *, StateMachine *> st_pair_t;
+
+static bool
+hasDisallowedSideEffects(StateMachineEdge *sme,
+			 const AllowableOptimisations &opt)
+{
+	if (opt.ignoreSideEffects)
+		return false;
+	for (std::vector<StateMachineSideEffect *>::iterator sideEffect =
+		     sme->sideEffects.begin();
+	     sideEffect != sme->sideEffects.end();
+	     sideEffect++) {
+		if (dynamic_cast<StateMachineSideEffectStore *>(*sideEffect))
+			return false;
+	}
+	return true;
+}
+
+static bool
+sideEffectsBisimilar(StateMachineSideEffect *smse1,
+		     StateMachineSideEffect *smse2,
+		     const AllowableOptimisations &opt)
+{
+	if (StateMachineSideEffectStore *smses1 =
+	    dynamic_cast<StateMachineSideEffectStore *>(smse1)) {
+		StateMachineSideEffectStore *smses2 =
+			dynamic_cast<StateMachineSideEffectStore *>(smse2);
+		if (!smses2)
+			return false;
+		return definitelyEqual(smses1->addr, smses2->addr, opt) &&
+			definitelyEqual(smses1->data, smses2->data, opt);
+	} else if (StateMachineSideEffectLoad *smsel1 =
+		   dynamic_cast<StateMachineSideEffectLoad *>(smse1)) {
+		StateMachineSideEffectLoad *smsel2 =
+			dynamic_cast<StateMachineSideEffectLoad *>(smse2);
+		if (!smsel2)
+			return false;
+		return smsel1->key == smsel2->key &&
+			definitelyEqual(smsel1->addr, smsel2->addr, opt);
+	} else if (StateMachineSideEffectCopy *smsec1 =
+		   dynamic_cast<StateMachineSideEffectCopy *>(smse1)) {
+		StateMachineSideEffectCopy *smsec2 =
+			dynamic_cast<StateMachineSideEffectCopy *>(smse2);
+		if (!smsec2)
+			return false;
+		return smsec1->key == smsec2->key &&
+			definitelyEqual(smsec1->value, smsec2->value, opt);
+	} else {
+		abort();
+	}
+}
+
+static bool
+edgesLocallyBisimilar(StateMachineEdge *sme1,
+		      StateMachineEdge *sme2,
+		      const std::set<st_pair_t> &others,
+		      const AllowableOptimisations &opt)
+{
+	if (sme1->sideEffects.size() !=
+	    sme2->sideEffects.size())
+		return false;
+	for (unsigned x = 0; x < sme1->sideEffects.size(); x++) {
+		if (!sideEffectsBisimilar(sme1->sideEffects[x],
+					  sme2->sideEffects[x],
+					  opt))
+			return false;
+	}
+	if (others.count(st_pair_t(sme1->target, sme2->target)))
+		return true;
+	else
+		return false;
+}
+
+static bool
+statesLocallyBisimilar(StateMachine *sm1,
+		       StateMachine *sm2,
+		       const std::set<st_pair_t> &others,
+		       const AllowableOptimisations &opt)
+{
+	/* Sort our arguments by type.  Ordering is:
+
+	   Crash
+	   NoCrash
+	   Stub
+	   Proxy
+	   Bifurcation
+	*/
+	bool swapArgs = false;
+	if (!dynamic_cast<StateMachineCrash *>(sm1)) {
+		if (dynamic_cast<StateMachineCrash *>(sm2)) {
+			swapArgs = true;
+		} else if (!dynamic_cast<StateMachineNoCrash *>(sm1)) {
+			if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
+				swapArgs = true;
+			} else if (!dynamic_cast<StateMachineStub *>(sm1)) {
+				if (dynamic_cast<StateMachineStub *>(sm2)) {
+					swapArgs = true;
+				} else if (!dynamic_cast<StateMachineProxy *>(sm1)) {
+					assert(dynamic_cast<StateMachineBifurcate *>(sm1));
+					if (dynamic_cast<StateMachineProxy *>(sm2)) {
+						swapArgs = true;
+					}
+				}
+			}
+		}
+	}
+	if (swapArgs)
+		return statesLocallyBisimilar(sm2, sm1, others, opt);
+
+	if (dynamic_cast<StateMachineCrash *>(sm1)) {
+		if (dynamic_cast<StateMachineCrash *>(sm2)) {
+			return true;
+		} else if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
+			return false;
+		} else if (StateMachineProxy *smp =
+			   dynamic_cast<StateMachineProxy *>(sm2)) {
+			/* We're locally bisimilar to a proxy if the
+			   proxy's target is bisimilar to us and the
+			   proxy has no disallowed side effects. */
+			if (!hasDisallowedSideEffects(smp->target, opt) &&
+			    others.count(st_pair_t(sm1, smp->target->target)))
+				return true;
+			else
+				return false;
+		} else if (StateMachineBifurcate *smb =
+			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
+			/* Likewise, we're similar to a proxy if it
+			   has no disallowed side-effects and both
+			   targets are crash nodes. */
+			if (!hasDisallowedSideEffects(smb->trueTarget, opt) &&
+			    others.count(st_pair_t(sm1, smb->trueTarget->target)) &&
+			    !hasDisallowedSideEffects(smb->falseTarget, opt) &&
+			    others.count(st_pair_t(sm1, smb->falseTarget->target)))
+				return true;
+			else
+				return false;
+		} else {
+			assert(dynamic_cast<StateMachineStub *>(sm2));
+			return false;
+		}
+	}
+
+	if (dynamic_cast<StateMachineNoCrash *>(sm1)) {
+		if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
+			return true;
+		} else if (StateMachineProxy *smp =
+			   dynamic_cast<StateMachineProxy *>(sm2)) {
+			if (!hasDisallowedSideEffects(smp->target, opt) &&
+			    others.count(st_pair_t(sm1, smp->target->target)))
+				return true;
+			else
+				return false;
+		} else if (StateMachineBifurcate *smb =
+			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
+			if (!hasDisallowedSideEffects(smb->trueTarget, opt) &&
+			    others.count(st_pair_t(sm1, smb->trueTarget->target)) &&
+			    !hasDisallowedSideEffects(smb->falseTarget, opt) &&
+			    others.count(st_pair_t(sm1, smb->falseTarget->target)))
+				return true;
+			else
+				return false;
+		} else {
+			assert(dynamic_cast<StateMachineStub *>(sm2));
+			return false;
+		}
+	}
+
+	if (StateMachineStub *sms1 =
+	    dynamic_cast<StateMachineStub *>(sm1)) {
+		if (StateMachineStub *sms2 = dynamic_cast<StateMachineStub *>(sm2))
+			return definitelyEqual(sms1->target, sms2->target, opt);
+		else
+			return false;
+	}
+
+	if (StateMachineProxy *smp1 =
+	    dynamic_cast<StateMachineProxy *>(sm1)) {
+		if (StateMachineProxy *smp2 =
+		    dynamic_cast<StateMachineProxy *>(sm2)) {
+			return edgesLocallyBisimilar(smp1->target,
+						     smp2->target,
+						     others,
+						     opt);
+		} else if (StateMachineBifurcate *smb2 =
+			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
+			return edgesLocallyBisimilar(smp1->target,
+						     smb2->trueTarget,
+						     others,
+						     opt) &&
+				edgesLocallyBisimilar(smp1->target,
+						      smb2->falseTarget,
+						      others,
+						      opt);
+		} else {
+			abort();
+		}
+	}
+
+	StateMachineBifurcate *smb1 =
+		dynamic_cast<StateMachineBifurcate *>(sm1);
+	StateMachineBifurcate *smb2 =
+		dynamic_cast<StateMachineBifurcate *>(sm2);
+	assert(smb1);
+	assert(smb2);
+	return
+		edgesLocallyBisimilar(smb1->trueTarget, smb2->trueTarget, others, opt) &&
+		edgesLocallyBisimilar(smb1->falseTarget, smb2->falseTarget, others, opt) &&
+		definitelyEqual(smb1->condition, smb2->condition, opt);
+}
+
+static StateMachine *
+rewriteStateMachine(StateMachine *sm,
+		    std::map<StateMachine *, StateMachine *> &rules,
+		    std::set<StateMachine *> &memo)
+{
+	if (rules.count(sm) && rules[sm] != sm)
+		return rewriteStateMachine(rules[sm], rules, memo);
+	if (dynamic_cast<StateMachineCrash *>(sm) ||
+	    dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm))
+		return sm;
+	memo.insert(sm);
+	if (StateMachineBifurcate *smb =
+	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+		smb->trueTarget->target = rewriteStateMachine(
+			smb->trueTarget->target,
+			rules,
+			memo);
+		smb->falseTarget->target = rewriteStateMachine(
+			smb->falseTarget->target,
+			rules,
+			memo);
+		return sm;
+	}
+	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+		smp->target->target = rewriteStateMachine(
+			smp->target->target,
+			rules,
+			memo);
+		return sm;
+	}
+
+	abort();
+}
+
+static StateMachine *
+rewriteStateMachine(StateMachine *sm, std::map<StateMachine *, StateMachine *> &rules)
+{
+	std::set<StateMachine *> memo;
+	return rewriteStateMachine(sm, rules, memo);
+}
+
+/* Try to identify states which are bisimilar, and then go and merge
+ * them.  This is in-place, so should really be part of ::optimise();
+ * nevermind. */
+static StateMachine *
+bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
+{
+	/* We start by assuming that all states are bisimilar to each
+	   other, and then use Tarski iteration to eliminate the
+	   contradictions.  That allows us to build up maximal sets of
+	   states such that the states in the sets are bisimilar to
+	   each other.  Once we've got that, we pick one of the states
+	   as being representative of the set, and then use it in
+	   place of the other states. */
+
+	std::set<StateMachine *> allStates;
+	findAllStates(sm, allStates);
+
+	std::set<st_pair_t> bisimilarStates;
+
+	/* Initially, everything is bisimilar to everything else. */
+	for (std::set<StateMachine *>::iterator it = allStates.begin();
+	     it != allStates.end();
+	     it++)
+		for (std::set<StateMachine *>::iterator it2 = allStates.begin();
+		     it2 != allStates.end();
+		     it2++)
+			bisimilarStates.insert(st_pair_t(*it, *it2));
+
+	bool progress;
+	do {
+		progress = false;
+
+		/* Iterate over every suspected bisimilarity pair and
+		   check for ``local bisimilarity''.  Once we're
+		   consistent with the local bisimilarity
+		   relationship, we will also be consistent with
+		   global bismilarity. */
+		for (std::set<st_pair_t>::iterator it = bisimilarStates.begin();
+		     it != bisimilarStates.end();
+			) {
+			if (statesLocallyBisimilar(it->first, it->second, bisimilarStates, opt)) {
+				it++;
+			} else {
+				bisimilarStates.erase(it++);
+				progress = true;
+			}
+		}
+	} while (progress);
+
+	/* Now build a mapping from states to canonical states, using
+	   the bisimilarity information, such that two states map to
+	   the same canonical state iff they are bisimilar. */
+	/* The canonMap effectively forms an inverted forest.  Each
+	   tree in the forest represents some set of bisimilar nodes,
+	   and each node's entry points at its parent in the tree, if
+	   it has one.  The canonical representation of each set is
+	   the root of its corresponding tree.  We advance by merging
+	   sets, by inserting one as a child of the root of the other,
+	   in response to bisimilar state entries. */
+	std::map<StateMachine *, StateMachine *> canonMap;
+
+	for (std::set<st_pair_t>::iterator it = bisimilarStates.begin();
+	     it != bisimilarStates.end();
+	     it++) {
+		StateMachine *s1 = it->first;
+		StateMachine *s2 = it->second;
+
+		/* Map the two nodes to their canonicalisations, if
+		 * they have them. */
+		while (canonMap.count(s1))
+			s1 = canonMap[s1];
+		while (canonMap.count(s2))
+			s2 = canonMap[s2];
+		if (s1 != s2)
+			canonMap[s1] = s2;
+	}
+
+	/* Perform the rewrite.  We do this in-place, because it's not
+	   context-dependent. */
+	return rewriteStateMachine(sm, canonMap);
+}
+	
 int
 main(int argc, char *argv[])
 {
@@ -2085,6 +2419,10 @@ main(int argc, char *argv[])
 		printStateMachine(cr->sm, stdout);
 		cr->sm = availExpressionAnalysis(cr->sm, opt);
 		printf("After AVAIL:\n");
+		printStateMachine(cr->sm, stdout);
+
+		cr->sm = bisimilarityReduction(cr->sm, opt);
+		printf("After BISIM:\n");
 		printStateMachine(cr->sm, stdout);
 	}
 
