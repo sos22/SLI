@@ -1673,29 +1673,13 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 static bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
-	printf("Simplify ");
-	ppIRExpr(a, stdout);
-	printf(" == ");
-	ppIRExpr(b, stdout);
-	printf("\n");
 	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
-	printf("Reduced: ");
-	ppIRExpr(r, stdout);
-	printf("\n");
 	return r->tag == Iex_Const && r->Iex.Const.con->Ico.U1;
 }
 static bool
 definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
-	printf("SimplifyA ");
-	ppIRExpr(a, stdout);
-	printf(" == ");
-	ppIRExpr(b, stdout);
-	printf("\n");
 	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
-	printf("Reduced: ");
-	ppIRExpr(r, stdout);
-	printf("\n");
 	return r->tag == Iex_Const && !r->Iex.Const.con->Ico.U1;
 }
 
@@ -1817,17 +1801,6 @@ buildNewStateMachineWithLoadsEliminated(
 
 	std::set<StateMachineSideEffectStore *> currentlyAvailable(initialAvail);
 
-	printf("Rebuild edge ");
-	sme->prettyPrint(stdout);
-	printf(" with avail set ");
-	for (std::set<StateMachineSideEffectStore *>::iterator it = currentlyAvailable.begin();
-	     it != currentlyAvailable.end();
-	     it++) {
-		(*it)->prettyPrint(stdout);
-		printf(", ");
-	}
-	printf("\n");
-
 	for (std::vector<StateMachineSideEffect *>::const_iterator it =
 		     sme->sideEffects.begin();
 	     it != sme->sideEffects.end();
@@ -1839,17 +1812,11 @@ buildNewStateMachineWithLoadsEliminated(
 			     it2 != currentlyAvailable.end();
 				) {
 				if ( !definitelyNotEqual((*it2)->addr, smses->addr, opt) ) {
-					printf("Lose ");
-					(*it2)->prettyPrint(stdout);
-					printf("\n");
 					currentlyAvailable.erase(it2++);
 				} else {
 					it2++;
 				}
 			}
-			printf("Gain ");
-			smses->prettyPrint(stdout);
-			printf("\n");
 			currentlyAvailable.insert(smses);
 			res->sideEffects.push_back(*it);
 		} else if (StateMachineSideEffectLoad *smsel =
@@ -1860,20 +1827,11 @@ buildNewStateMachineWithLoadsEliminated(
 			     !done && it2 != currentlyAvailable.end();
 			     it2++) {
 				if ( definitelyEqual((*it2)->addr, smsel->addr, opt) ) {
-					printf("Use ");
-					(*it2)->prettyPrint(stdout);
-					printf("\n");
 					res->sideEffects.push_back(
 						new StateMachineSideEffectCopy(
 							smsel->key,
 							(*it2)->data));
 					done = true;
-				} else {
-					printf("Fail to use ");
-					(*it2)->prettyPrint(stdout);
-					printf(" for ");
-					smsel->prettyPrint(stdout);
-					printf("\n");
 				}
 			}
 			if (!done)
@@ -1883,9 +1841,6 @@ buildNewStateMachineWithLoadsEliminated(
 			res->sideEffects.push_back(*it);
 		}
 	}
-	printf("Result: ");
-	res->prettyPrint(stdout);
-	printf("\n");
 	return res;
 }
 
@@ -1979,33 +1934,6 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 		availOnEntry[*it] = potentiallyAvailable;
 	availOnEntry[sm].clear();
 
-	/* Dump the availOnEntry sets */
-	for (std::map<StateMachine *, avail_t>::iterator it = availOnEntry.begin();
-	     it != availOnEntry.end();
-	     it++) {
-		printf("Initial AVAIL entry: %p --> ", it->first);
-		for (avail_t::iterator it2 = it->second.begin();
-		     it2 != it->second.end();
-		     it2++) {
-			(*it2)->prettyPrint(stdout);
-			printf("(%p), ", *it2);
-		}
-		printf("\n");
-	}
-	/* And availOnExit */
-	for (std::map<StateMachineEdge *, avail_t>::iterator it = availOnExit.begin();
-	     it != availOnExit.end();
-	     it++) {
-		printf("Initial AVAIL exit: %p --> ", it->first);
-		for (avail_t::iterator it2 = it->second.begin();
-		     it2 != it->second.end();
-		     it2++) {
-			(*it2)->prettyPrint(stdout);
-			printf("(%p), ", *it2);
-		}
-		printf("\n");
-	}
-
 	/* Tarski iteration.  */
 	bool progress;
 	do {
@@ -2027,9 +1955,6 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 			     it2 != avail_at_start_of_target.end();
 				) {
 				if (avail_at_end_of_edge.count(*it2) == 0) {
-					printf("entry clear ");
-					(*it2)->prettyPrint(stdout);
-					printf(" (%p) from %p for %p\n", *it2, target, *it);
 					avail_at_start_of_target.erase(it2++); 
 					progress = true;
 				} else {
@@ -2067,16 +1992,6 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 				StateMachineEdge *edge = edges[x];
 				assert(availOnEntry.count(*it));
 				avail_t outputAvail(availOnEntry[*it]);
-				printf("Recalculate exit for %p from %p, inp avail ", edge,
-					*it);
-				
-				for (avail_t::iterator it2 = outputAvail.begin();
-				     it2 != outputAvail.end();
-				     it2++) {
-					(*it2)->prettyPrint(stdout);
-					printf("(%p), ", *it2);
-				}
-				printf("\n");
 
 				/* Build the output set. */
 				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
@@ -2113,20 +2028,6 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 			}
 		}
 	} while (progress);
-
-	/* Dump the availOnEntry sets */
-	for (std::map<StateMachine *, avail_t>::iterator it = availOnEntry.begin();
-	     it != availOnEntry.end();
-	     it++) {
-		printf("AVAIL entry: %p --> ", it->first);
-		for (avail_t::iterator it2 = it->second.begin();
-		     it2 != it->second.end();
-		     it2++) {
-			(*it2)->prettyPrint(stdout);
-			printf(", ");
-		}
-		printf("\n");
-	}
 
 	/* So after all that we now have a complete map of what's
 	   available where.  Given that, we should be able to
