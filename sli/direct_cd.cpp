@@ -1699,6 +1699,445 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	return r->tag == Iex_Const && !r->Iex.Const.con->Ico.U1;
 }
 
+static void
+findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out,
+	      std::set<StateMachine *> &visited);
+
+static void
+findAllStores(StateMachineEdge *sme,
+	      std::set<StateMachineSideEffectStore *> &out,
+	      std::set<StateMachine *> &visited)
+{
+	for (std::vector<StateMachineSideEffect *>::const_iterator it = sme->sideEffects.begin();
+	     it != sme->sideEffects.end();
+	     it++) {
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it))
+			out.insert(smses);
+	}
+	findAllStores(sme->target, out, visited);
+}
+static void
+findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out,
+	      std::set<StateMachine *> &visited)
+{
+	if (visited.count(sm))
+		return;
+	visited.insert(sm);
+	if (dynamic_cast<StateMachineCrash *>(sm) ||
+	    dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm))
+		return;
+	if (StateMachineBifurcate *smb =
+	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+		findAllStores(smb->trueTarget, out, visited);
+		findAllStores(smb->falseTarget, out, visited);
+	} else if (StateMachineProxy *smp =
+		   dynamic_cast<StateMachineProxy *>(sm)) {
+		findAllStores(smp->target, out, visited);
+	} else {
+		abort();
+	}
+}
+static void
+findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
+{
+	std::set<StateMachine *> visited;
+	findAllStores(sm, out, visited);
+}
+
+static void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
+static void
+findAllEdges(StateMachineEdge *sme, std::set<StateMachineEdge *> &out)
+{
+	if (out.count(sme))
+		return;
+	out.insert(sme);
+	findAllEdges(sme->target, out);
+}
+static void
+findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out)
+{
+	if (dynamic_cast<StateMachineCrash *>(sm) ||
+	    dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm))
+		return;
+	if (StateMachineBifurcate *smb =
+	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+		findAllEdges(smb->trueTarget, out);
+		findAllEdges(smb->falseTarget, out);
+	} else if (StateMachineProxy *smp =
+		   dynamic_cast<StateMachineProxy *>(sm)) {
+		findAllEdges(smp->target, out);
+	} else {
+		abort();
+	}
+}
+
+static void
+findAllStates(StateMachine *sm, std::set<StateMachine *> &out)
+{
+	if (out.count(sm))
+		return;
+	out.insert(sm);
+	if (dynamic_cast<StateMachineCrash *>(sm) ||
+	    dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm))
+		return;
+	if (StateMachineBifurcate *smb =
+	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+		findAllStates(smb->trueTarget->target, out);
+		findAllStates(smb->falseTarget->target, out);
+	} else if (StateMachineProxy *smp =
+		   dynamic_cast<StateMachineProxy *>(sm)) {
+		findAllStates(smp->target->target, out);
+	} else {
+		abort();
+	}
+}
+
+static StateMachine *buildNewStateMachineWithLoadsEliminated(
+	StateMachine *sm,
+	std::map<StateMachine *,
+	               std::set<StateMachineSideEffectStore *> > &availMap,
+	std::map<StateMachine *, StateMachine *> &memo,
+	const AllowableOptimisations &opt);
+
+static StateMachineEdge *
+buildNewStateMachineWithLoadsEliminated(
+	StateMachineEdge *sme,
+	std::set<StateMachineSideEffectStore *> &initialAvail,
+	std::map<StateMachine *,
+	               std::set<StateMachineSideEffectStore *> > &availMap,
+	std::map<StateMachine *, StateMachine *> &memo,
+	const AllowableOptimisations &opt)
+{
+	StateMachineEdge *res =
+		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt));
+
+	std::set<StateMachineSideEffectStore *> currentlyAvailable(initialAvail);
+
+	printf("Rebuild edge ");
+	sme->prettyPrint(stdout);
+	printf(" with avail set ");
+	for (std::set<StateMachineSideEffectStore *>::iterator it = currentlyAvailable.begin();
+	     it != currentlyAvailable.end();
+	     it++) {
+		(*it)->prettyPrint(stdout);
+		printf(", ");
+	}
+	printf("\n");
+
+	for (std::vector<StateMachineSideEffect *>::const_iterator it =
+		     sme->sideEffects.begin();
+	     it != sme->sideEffects.end();
+	     it++) {
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			for (std::set<StateMachineSideEffectStore *>::iterator it2 =
+				     currentlyAvailable.begin();
+			     it2 != currentlyAvailable.end();
+				) {
+				if ( !definitelyNotEqual((*it2)->addr, smses->addr, opt) ) {
+					printf("Lose ");
+					(*it2)->prettyPrint(stdout);
+					printf("\n");
+					currentlyAvailable.erase(it2++);
+				} else {
+					it2++;
+				}
+			}
+			printf("Gain ");
+			smses->prettyPrint(stdout);
+			printf("\n");
+			currentlyAvailable.insert(smses);
+			res->sideEffects.push_back(*it);
+		} else if (StateMachineSideEffectLoad *smsel =
+			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			bool done = false;
+			for (std::set<StateMachineSideEffectStore *>::iterator it2 =
+				     currentlyAvailable.begin();
+			     !done && it2 != currentlyAvailable.end();
+			     it2++) {
+				if ( definitelyEqual((*it2)->addr, smsel->addr, opt) ) {
+					printf("Use ");
+					(*it2)->prettyPrint(stdout);
+					printf("\n");
+					res->sideEffects.push_back(
+						new StateMachineSideEffectCopy(
+							smsel->key,
+							(*it2)->data));
+					done = true;
+				} else {
+					printf("Fail to use ");
+					(*it2)->prettyPrint(stdout);
+					printf(" for ");
+					smsel->prettyPrint(stdout);
+					printf("\n");
+				}
+			}
+			if (!done)
+				res->sideEffects.push_back(*it);
+		} else {
+			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
+			res->sideEffects.push_back(*it);
+		}
+	}
+	printf("Result: ");
+	res->prettyPrint(stdout);
+	printf("\n");
+	return res;
+}
+
+static StateMachine *
+buildNewStateMachineWithLoadsEliminated(
+	StateMachine *sm,
+	std::map<StateMachine *,
+	               std::set<StateMachineSideEffectStore *> > &availMap,
+	std::map<StateMachine *, StateMachine *> &memo,
+	const AllowableOptimisations &opt)
+{
+	if (dynamic_cast<StateMachineCrash *>(sm) ||
+	    dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm))
+		return sm;
+	if (memo.count(sm))
+		return memo[sm];
+	if (StateMachineBifurcate *smb =
+	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+		StateMachineBifurcate *res;
+		res = new StateMachineBifurcate(smb->condition, (StateMachineEdge *)NULL, NULL);
+		memo[sm] = res;
+		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
+			smb->trueTarget, availMap[sm], availMap, memo, opt);
+		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
+			smb->falseTarget, availMap[sm], availMap, memo, opt);
+		return res;
+	} if (StateMachineProxy *smp =
+	      dynamic_cast<StateMachineProxy *>(sm)) {
+		StateMachineProxy *res;
+		res = new StateMachineProxy((StateMachineEdge *)NULL);
+		memo[sm] = res;
+		res->target = buildNewStateMachineWithLoadsEliminated(
+			smp->target, availMap[sm], availMap, memo, opt);
+		return res;
+	} else {
+		abort();
+	}
+}
+
+static StateMachine *
+buildNewStateMachineWithLoadsEliminated(
+	StateMachine *sm,
+	std::map<StateMachine *,
+	         std::set<StateMachineSideEffectStore *> > &availMap,
+	const AllowableOptimisations &opt)
+{
+	std::map<StateMachine *, StateMachine *> memo;
+	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt);
+}
+
+/* Available expression analysis on memory locations.  This isn't
+   included in the normal optimise() operation because it's
+   context-sensitive, and therefore isn't allowed to mutate nodes
+   in-place. */
+static StateMachine *
+availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
+{
+	/* Fairly standard available expression analysis.  Each edge
+	   in the state machine has two sets of
+	   StateMachineSideEffectStores representing the set of things
+	   which are available at the start and end of the edge.  We
+	   start off with everything available everywhere except at
+	   the start node (which has nothing) and then do a Tarski
+	   iteration to remove all of the contradictions.  Once we
+	   know what's available, it's easy enough to go through and
+	   forward all of the remaining stores. */
+	/* Minor tweak: the onEntry map is keyed on states rather than
+	   edges, since every edge starting at a given state will have
+	   the same entry map. */
+	typedef std::set<StateMachineSideEffectStore *> avail_t;
+
+	/* build the set of potentially-available expressions. */
+	avail_t potentiallyAvailable;
+	findAllStores(sm, potentiallyAvailable);
+
+	/* build the initial availability map. */
+	std::set<StateMachineEdge *> allEdges;
+	std::set<StateMachine *> allStates;
+	findAllEdges(sm, allEdges);
+	findAllStates(sm, allStates);
+	std::map<StateMachine *, avail_t> availOnEntry;
+	std::map<StateMachineEdge *, avail_t> availOnExit;
+	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
+	     it != allEdges.end();
+	     it++)
+		availOnExit[*it] = potentiallyAvailable;
+	for (std::set<StateMachine *>::iterator it = allStates.begin();
+	     it != allStates.end();
+	     it++)
+		availOnEntry[*it] = potentiallyAvailable;
+	availOnEntry[sm].clear();
+
+	/* Dump the availOnEntry sets */
+	for (std::map<StateMachine *, avail_t>::iterator it = availOnEntry.begin();
+	     it != availOnEntry.end();
+	     it++) {
+		printf("Initial AVAIL entry: %p --> ", it->first);
+		for (avail_t::iterator it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			(*it2)->prettyPrint(stdout);
+			printf("(%p), ", *it2);
+		}
+		printf("\n");
+	}
+	/* And availOnExit */
+	for (std::map<StateMachineEdge *, avail_t>::iterator it = availOnExit.begin();
+	     it != availOnExit.end();
+	     it++) {
+		printf("Initial AVAIL exit: %p --> ", it->first);
+		for (avail_t::iterator it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			(*it2)->prettyPrint(stdout);
+			printf("(%p), ", *it2);
+		}
+		printf("\n");
+	}
+
+	/* Tarski iteration.  */
+	bool progress;
+	do {
+		progress = false;
+
+		/* Update the set of things which are available on
+		   entry.  This means walking the set of edges and
+		   looking at the targets.  If there's something which
+		   is available at the start of the target, but not at
+		   the end of this edge, remove it from the target. */
+		for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
+		     it != allEdges.end();
+		     it++) {
+			StateMachineEdge *edge = *it;
+			StateMachine *target = edge->target;
+			avail_t &avail_at_end_of_edge(availOnExit[edge]);
+			avail_t &avail_at_start_of_target(availOnEntry[target]);
+			for (avail_t::iterator it2 = avail_at_start_of_target.begin();
+			     it2 != avail_at_start_of_target.end();
+				) {
+				if (avail_at_end_of_edge.count(*it2) == 0) {
+					printf("entry clear ");
+					(*it2)->prettyPrint(stdout);
+					printf(" (%p) from %p for %p\n", *it2, target, *it);
+					avail_at_start_of_target.erase(it2++); 
+					progress = true;
+				} else {
+					it2++;
+				}
+			}
+		}
+
+		/* Now go through and update the avail-on-exit set.
+		   Use a slightly weird-looking iteration over states
+		   instead of over edges because that makes things a
+		   bit easier. */
+		for (std::set<StateMachine *>::iterator it = allStates.begin();
+		     it != allStates.end();
+		     it++) {
+			if (dynamic_cast<StateMachineCrash *>(*it) ||
+			    dynamic_cast<StateMachineNoCrash *>(*it) ||
+			    dynamic_cast<StateMachineStub *>(*it))
+				continue;
+			StateMachineEdge *edges[2];
+			int nr_edges;
+			if (StateMachineBifurcate *smb =
+			    dynamic_cast<StateMachineBifurcate *>(*it)) {
+				edges[0] = smb->trueTarget;
+				edges[1] = smb->falseTarget;
+				nr_edges = 2;
+			} else if (StateMachineProxy *smp =
+				   dynamic_cast<StateMachineProxy *>(*it)) {
+				edges[0] = smp->target;
+				nr_edges = 1;
+			} else {
+				abort();
+			}
+			for (int x = 0; x < nr_edges; x++) {
+				StateMachineEdge *edge = edges[x];
+				assert(availOnEntry.count(*it));
+				avail_t outputAvail(availOnEntry[*it]);
+				printf("Recalculate exit for %p from %p, inp avail ", edge,
+					*it);
+				
+				for (avail_t::iterator it2 = outputAvail.begin();
+				     it2 != outputAvail.end();
+				     it2++) {
+					(*it2)->prettyPrint(stdout);
+					printf("(%p), ", *it2);
+				}
+				printf("\n");
+
+				/* Build the output set. */
+				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
+					     edge->sideEffects.begin();
+				     it2 != edge->sideEffects.end();
+				     it2++) {
+					StateMachineSideEffectStore *smses =
+						dynamic_cast<StateMachineSideEffectStore *>(*it2);
+					if (!smses)
+						continue;
+					/* Eliminate anything which is killed */
+					for (avail_t::iterator it3 = outputAvail.begin();
+					     it3 != outputAvail.end();
+						) {
+						if (!definitelyNotEqual( (*it3)->addr,
+									 smses->addr,
+									 opt) )
+							outputAvail.erase(it3++);
+						else
+							it3++;
+					}
+					/* Introduce the store which was generated. */
+					outputAvail.insert(smses);
+				}
+				/* Now check whether we actually did anything. */
+				avail_t &currentAvail(availOnExit[edge]);
+				for (avail_t::iterator it2 = currentAvail.begin();
+				     it2 != currentAvail.end();
+				     it2++) {
+					if (!outputAvail.count(*it2))
+						progress = true;
+				}
+				currentAvail = outputAvail;
+			}
+		}
+	} while (progress);
+
+	/* Dump the availOnEntry sets */
+	for (std::map<StateMachine *, avail_t>::iterator it = availOnEntry.begin();
+	     it != availOnEntry.end();
+	     it++) {
+		printf("AVAIL entry: %p --> ", it->first);
+		for (avail_t::iterator it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			(*it2)->prettyPrint(stdout);
+			printf(", ");
+		}
+		printf("\n");
+	}
+
+	/* So after all that we now have a complete map of what's
+	   available where.  Given that, we should be able to
+	   construct a new state machine with redundant loads replaced
+	   with copy side effects. */
+	return buildNewStateMachineWithLoadsEliminated(
+		sm,
+		availOnEntry,
+		opt);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1735,12 +2174,16 @@ main(int argc, char *argv[])
 		CrashReason *cr = ii->CFGtoCrashReason(cfg);
 		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
-		cr->sm = cr->sm->optimise(
+		AllowableOptimisations opt =
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
 			.enableassumeExecutesAtomically()
-			.enableignoreSideEffects());
+			.enableignoreSideEffects();
+		cr->sm = cr->sm->optimise(opt);
 		printf("After optimisation:\n");
+		printStateMachine(cr->sm, stdout);
+		cr->sm = availExpressionAnalysis(cr->sm, opt);
+		printf("After AVAIL:\n");
 		printStateMachine(cr->sm, stdout);
 	}
 
