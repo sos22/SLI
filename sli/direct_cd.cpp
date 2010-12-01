@@ -8,20 +8,27 @@
 
 #include "sli.h"
 
+#include "libvex_guest_offsets.h"
+
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool x)
-		: xPlusMinusX(x)
+	AllowableOptimisations(bool x, bool s)
+		: xPlusMinusX(x), assumePrivateStack(s)
 	{
 	}
 	bool xPlusMinusX;
+	bool assumePrivateStack;
 	AllowableOptimisations disablexPlusMinusX() const
 	{
-		return AllowableOptimisations(false);
+		return AllowableOptimisations(false, assumePrivateStack);
+	}
+	AllowableOptimisations enableassumePrivateStack() const
+	{
+		return AllowableOptimisations(xPlusMinusX, true);
 	}
 };
-AllowableOptimisations AllowableOptimisations::defaultOptimisations(true);
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false);
 
 static bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 static bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
@@ -1513,7 +1520,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 				IRConst_U64(-src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
 			return optimiseIRExpr(src, opt);
 		}
-				
+
+		/* If enabled, assume that the stack is ``private'',
+		   in the sense that it doesn't alias with any global
+		   variables, and is therefore never equal to any
+		   constants which are present in the machine code. */
+		if (opt.assumePrivateStack &&
+		    src->Iex.Binop.op == Iop_CmpEQ64 &&
+		    src->Iex.Binop.arg1->tag == Iex_Get &&
+		    src->Iex.Binop.arg1->Iex.Get.offset == OFFSET_amd64_RSP &&
+		    src->Iex.Binop.arg2->tag == Iex_Const)
+			return IRExpr_Const(IRConst_U1(0));
+
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
 		if (src->Iex.Binop.arg1->tag == Iex_Const &&
@@ -1615,7 +1633,7 @@ main(int argc, char *argv[])
 		CrashReason *cr = ii->CFGtoCrashReason(cfg);
 		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
-		cr->sm = cr->sm->optimise(AllowableOptimisations::defaultOptimisations);
+		cr->sm = cr->sm->optimise(AllowableOptimisations::defaultOptimisations.enableassumePrivateStack());
 		printf("After optimisation:\n");
 		printStateMachine(cr->sm, stdout);
 	}
