@@ -1536,6 +1536,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 			   fix: strip off the outer 64to1. */
 			return src->Iex.Unop.arg;
 		}
+
+		if (src->Iex.Unop.op >= Iop_8Uto16 &&
+		    src->Iex.Unop.op <= Iop_32Uto64 &&
+		    src->Iex.Unop.arg->tag == Iex_Binder) {
+			/* Binders don't have any type information, so
+			   trying to upcast them is a bit silly.
+			   Don't do this for signed upcasts, though,
+			   as they have effects beyond the type
+			   level. */
+			return src->Iex.Unop.arg;
+		}
+
 		if (src->Iex.Unop.arg->tag == Iex_Const) {
 			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;
 			switch (src->Iex.Unop.op) {
@@ -1688,6 +1700,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 		    src->Iex.Binop.arg1->Iex.Get.offset == OFFSET_amd64_RSP &&
 		    src->Iex.Binop.arg2->tag == Iex_Const)
 			return IRExpr_Const(IRConst_U1(0));
+
+		/* x & x -> x */
+		if (src->Iex.Binop.op >= Iop_And8 &&
+		    src->Iex.Binop.op <= Iop_And64 &&
+		    definitelyEqual(src->Iex.Binop.arg1,
+				    src->Iex.Binop.arg2,
+				    opt))
+			return src->Iex.Binop.arg1;
 
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
