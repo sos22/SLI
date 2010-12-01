@@ -13,22 +13,51 @@
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool x, bool s)
-		: xPlusMinusX(x), assumePrivateStack(s)
+	AllowableOptimisations(bool x, bool s, bool a, bool i)
+		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
+		  ignoreSideEffects(i)
 	{
 	}
+
+	/* Transform x + (-x) to 0.  This is always safe, in the sense
+	   that x + (-x) is always zero, but actually checking it can
+	   sometimes lead to an infinite recursion if you're not a bit
+	   careful.  This should pretty much only be turned off from
+	   inside the optimiser. */
 	bool xPlusMinusX;
+
+	/* Assume that the stack is ``private'', in the sense that no
+	   constant expressions can ever alias with rsp. */
 	bool assumePrivateStack;
+
+	/* Assume that the state machine executes atomically.  This is
+	   useful for the read-side machine, but not for the
+	   write-side ones. */
+	bool assumeExecutesAtomically;
+
+	/* Effectively assume that the program terminates as soon as
+	   the machine completes, so that stores which aren't loaded
+	   by this machine are necessarily redundant. */
+	bool ignoreSideEffects;
+
 	AllowableOptimisations disablexPlusMinusX() const
 	{
-		return AllowableOptimisations(false, assumePrivateStack);
+		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects);
 	}
 	AllowableOptimisations enableassumePrivateStack() const
 	{
-		return AllowableOptimisations(xPlusMinusX, true);
+		return AllowableOptimisations(xPlusMinusX, true, assumeExecutesAtomically, ignoreSideEffects);
+	}
+	AllowableOptimisations enableassumeExecutesAtomically() const
+	{
+		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, true, ignoreSideEffects);
+	}
+	AllowableOptimisations enableignoreSideEffects() const
+	{
+		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true);
 	}
 };
-AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false);
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false);
 
 static bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 static bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
@@ -362,73 +391,79 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt)
 	}
 	target = target->optimise(opt);
 
+	std::vector<StateMachineSideEffect *>::iterator it;
+
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
 	   that's moderately tricky. */
-	std::set<std::pair<IRExpr *, IRExpr *> > availExpressions;
-	std::vector<StateMachineSideEffect *>::iterator it;
-	for (it = sideEffects.begin(); it != sideEffects.end(); it++) {
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
-			/* Kill anything which might be clobbered by
-			   this store. */
-			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
-				     availExpressions.begin();
-			     it2 != availExpressions.end();
-				) {
-				IRExpr *addr = it2->first;
-				if (!definitelyNotEqual(addr, smses->addr, opt))
-					availExpressions.erase(it2++);
-				else
-					it2++;
-			}
-			/* And add this one to the set */
-			availExpressions.insert( std::pair<IRExpr *, IRExpr *>(
-							 smses->addr,
-							 smses->data) );
-		} else if (StateMachineSideEffectLoad *smsel =
-			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			/* If the load was definitely satisfied by a
-			   known store, eliminate it. */
-			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
-				     availExpressions.begin();
-			     it2 != availExpressions.end();
-			     it2++) {
-				if (definitelyEqual(it2->first, smsel->addr, opt)) {
-					*it = new StateMachineSideEffectCopy(smsel->key,
-									     it2->second);
-					break;
+	if (opt.assumeExecutesAtomically) {
+		std::set<std::pair<IRExpr *, IRExpr *> > availExpressions;
+		for (it = sideEffects.begin(); it != sideEffects.end(); it++) {
+			if (StateMachineSideEffectStore *smses =
+			    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+				/* Kill anything which might be clobbered by
+				   this store. */
+				for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
+					     availExpressions.begin();
+				     it2 != availExpressions.end();
+					) {
+					IRExpr *addr = it2->first;
+					if (!definitelyNotEqual(addr, smses->addr, opt))
+						availExpressions.erase(it2++);
+					else
+						it2++;
 				}
-			}			
-		} else {
-			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
-		}
-	}
-
-	/* Now cull completely redundant stores. */
-	std::set<IRExpr *> loadedAddresses;
-	target->findLoadedAddresses(loadedAddresses, opt);
-
-	it = sideEffects.end();
-	while (it != sideEffects.begin()) {
-		bool isDead = false;
-		it--;
-		(*it)->optimise(opt);
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
-			isDead = true;
-			for (std::set<IRExpr *>::iterator it2 = loadedAddresses.begin();
-			     isDead && it2 != loadedAddresses.end();
-			     it2++) {
-				if (!definitelyNotEqual(*it2, smses->addr, opt))
-					isDead = false;
+				/* And add this one to the set */
+				availExpressions.insert( std::pair<IRExpr *, IRExpr *>(
+								 smses->addr,
+								 smses->data) );
+			} else if (StateMachineSideEffectLoad *smsel =
+				   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+				/* If the load was definitely satisfied by a
+				   known store, eliminate it. */
+				for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
+					     availExpressions.begin();
+				     it2 != availExpressions.end();
+				     it2++) {
+					if (definitelyEqual(it2->first, smsel->addr, opt)) {
+						*it = new StateMachineSideEffectCopy(smsel->key,
+										     it2->second);
+						break;
+					}
+				}			
+			} else {
+				assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
 			}
-			if (isDead)
-				it = sideEffects.erase(it);
 		}
-		if (!isDead)
-			(*it)->updateLoadedAddresses(loadedAddresses, opt);
 	}
+
+	if (opt.ignoreSideEffects) {
+		/* Now cull completely redundant stores. */
+		std::set<IRExpr *> loadedAddresses;
+		target->findLoadedAddresses(loadedAddresses, opt);
+
+		it = sideEffects.end();
+		while (it != sideEffects.begin()) {
+			bool isDead = false;
+			it--;
+			(*it)->optimise(opt);
+			if (StateMachineSideEffectStore *smses =
+			    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+				isDead = true;
+				for (std::set<IRExpr *>::iterator it2 = loadedAddresses.begin();
+				     isDead && it2 != loadedAddresses.end();
+				     it2++) {
+					if (!definitelyNotEqual(*it2, smses->addr, opt))
+						isDead = false;
+				}
+				if (isDead)
+					it = sideEffects.erase(it);
+			}
+			if (!isDead)
+				(*it)->updateLoadedAddresses(loadedAddresses, opt);
+		}
+	}
+
 	return this;
 }
 
@@ -1700,7 +1735,11 @@ main(int argc, char *argv[])
 		CrashReason *cr = ii->CFGtoCrashReason(cfg);
 		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
-		cr->sm = cr->sm->optimise(AllowableOptimisations::defaultOptimisations.enableassumePrivateStack());
+		cr->sm = cr->sm->optimise(
+			AllowableOptimisations::defaultOptimisations
+			.enableassumePrivateStack()
+			.enableassumeExecutesAtomically()
+			.enableignoreSideEffects());
 		printf("After optimisation:\n");
 		printStateMachine(cr->sm, stdout);
 	}
