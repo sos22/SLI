@@ -10,6 +10,9 @@
 
 #include "libvex_guest_offsets.h"
 
+#include "../VEX/priv/guest_generic_bb_to_IR.h"
+#include "../VEX/priv/guest_amd64_defs.h"
+
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
@@ -1444,6 +1447,36 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 }
 
 static IRExpr *
+optimise_condition_calculation(
+	IRExpr *cond,
+	IRExpr *cc_op,
+	IRExpr *dep1,
+	IRExpr *dep2,
+	IRExpr *ndep,
+	const AllowableOptimisations &opt)
+{
+	/* We only handle a few very special cases here. */
+	if (cond->tag != Iex_Const || cc_op->tag != Iex_Const)
+		return NULL;
+	if (cond->Iex.Const.con->Ico.U64 != AMD64CondZ)
+		return NULL;
+	switch (cc_op->Iex.Const.con->Ico.U64) {
+	case AMD64G_CC_OP_SUBQ:
+		return IRExpr_Binop(
+			Iop_CmpEQ64,
+			dep1,
+			dep2);
+	case AMD64G_CC_OP_LOGICL:
+		return IRExpr_Binop(
+			Iop_CmpEQ64,
+			dep1,
+			IRExpr_Const(IRConst_U64(0)));
+	default:
+		return NULL;
+	}
+}
+
+static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 {
 	/* First, recursively optimise our arguments. */
@@ -1465,6 +1498,20 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 			src->Iex.CCall.args[x] =
 				optimiseIRExpr(src->Iex.CCall.args[x], opt);
 		}
+		/* Special cases for amd64g_calculate_condition. */
+		if (!strcmp(src->Iex.CCall.cee->name,
+			    "amd64g_calculate_condition")) {
+			IRExpr *e;
+			e = optimise_condition_calculation(
+				src->Iex.CCall.args[0],
+				src->Iex.CCall.args[1],
+				src->Iex.CCall.args[2],
+				src->Iex.CCall.args[3],
+				src->Iex.CCall.args[4],
+				opt);
+			if (e)
+				src = e;
+		}
 		break;
 	}
 	case Iex_Mux0X:
@@ -1481,6 +1528,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 
 	/* Now use some special rules to simplify a few classes of binops and unops. */
 	if (src->tag == Iex_Unop) {
+		if (src->Iex.Unop.op == Iop_64to1 &&
+		    src->Iex.Unop.arg->tag == Iex_Binop &&
+		    src->Iex.Unop.arg->Iex.Binop.op == Iop_CmpEQ64) {
+			/* This can happen sometimes because of the
+			   way we simplify condition codes.  Very easy
+			   fix: strip off the outer 64to1. */
+			return src->Iex.Unop.arg;
+		}
 		if (src->Iex.Unop.arg->tag == Iex_Const) {
 			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;
 			switch (src->Iex.Unop.op) {
