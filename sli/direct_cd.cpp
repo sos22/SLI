@@ -129,6 +129,28 @@ public:
 };
 Int StateMachineSideEffectLoad::next_key;
 
+class StateMachineSideEffectCopy : public StateMachineSideEffect {
+public:
+	StateMachineSideEffectCopy(Int k, IRExpr *_value)
+		: key(k), value(_value)
+	{
+	}
+	Int key;
+	IRExpr *value;
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "B%d = (", key);
+		ppIRExpr(value, f);
+		fprintf(f, ")");
+	}
+	void visit(HeapVisitor &hv) {
+		hv(value);
+	}
+	void optimise(const AllowableOptimisations &opt) {
+		value = optimiseIRExpr(value, opt);
+	}
+	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
+};
+
 class StateMachineEdge : public GarbageCollected<StateMachineEdge>, public PrettyPrintable {
 public:
 	StateMachineEdge(StateMachine *t) : target(t) {}
@@ -340,10 +362,53 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt)
 	}
 	target = target->optimise(opt);
 
+	/* Try to forward stuff from stores to loads wherever
+	   possible.  We don't currently do this inter-state, because
+	   that's moderately tricky. */
+	std::set<std::pair<IRExpr *, IRExpr *> > availExpressions;
+	std::vector<StateMachineSideEffect *>::iterator it;
+	for (it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			/* Kill anything which might be clobbered by
+			   this store. */
+			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
+				     availExpressions.begin();
+			     it2 != availExpressions.end();
+				) {
+				IRExpr *addr = it2->first;
+				if (!definitelyNotEqual(addr, smses->addr, opt))
+					availExpressions.erase(it2++);
+				else
+					it2++;
+			}
+			/* And add this one to the set */
+			availExpressions.insert( std::pair<IRExpr *, IRExpr *>(
+							 smses->addr,
+							 smses->data) );
+		} else if (StateMachineSideEffectLoad *smsel =
+			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			/* If the load was definitely satisfied by a
+			   known store, eliminate it. */
+			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
+				     availExpressions.begin();
+			     it2 != availExpressions.end();
+			     it2++) {
+				if (definitelyEqual(it2->first, smsel->addr, opt)) {
+					*it = new StateMachineSideEffectCopy(smsel->key,
+									     it2->second);
+					break;
+				}
+			}			
+		} else {
+			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
+		}
+	}
+
+	/* Now cull completely redundant stores. */
 	std::set<IRExpr *> loadedAddresses;
 	target->findLoadedAddresses(loadedAddresses, opt);
 
-	std::vector<StateMachineSideEffect *>::iterator it;
 	it = sideEffects.end();
 	while (it != sideEffects.begin()) {
 		bool isDead = false;
@@ -594,6 +659,12 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 				new StateMachineSideEffectLoad(
 					smsel->key,
 					transformIRExpr(smsel->addr)));
+		} else if (StateMachineSideEffectCopy *smsec =
+			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			res->sideEffects.push_back(
+				new StateMachineSideEffectCopy(
+					smsec->key,
+					transformIRExpr(smsec->value)));
 		} else {
 			abort();
 		}
@@ -1340,10 +1411,6 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 {
-	printf("Optimise ");
-	ppIRExpr(src, stdout);
-	printf("\n");
-
 	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
