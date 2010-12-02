@@ -397,6 +397,9 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt)
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 
+	for (it = sideEffects.begin(); it != sideEffects.end(); it++)
+		(*it)->optimise(opt);
+
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
 	   that's moderately tricky. */
