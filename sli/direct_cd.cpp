@@ -2250,9 +2250,9 @@ hasDisallowedSideEffects(StateMachineEdge *sme,
 	     sideEffect != sme->sideEffects.end();
 	     sideEffect++) {
 		if (dynamic_cast<StateMachineSideEffectStore *>(*sideEffect))
-			return false;
+			return true;
 	}
-	return true;
+	return false;
 }
 
 static bool
