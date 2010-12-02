@@ -133,21 +133,22 @@ public:
 class StateMachineSideEffectLoad : public StateMachineSideEffect {
 	static Int next_key;
 public:
-	StateMachineSideEffectLoad(IRExpr *_addr)
-		: addr(_addr)
+	StateMachineSideEffectLoad(IRExpr *_addr, unsigned long _rip)
+		: addr(_addr), rip(_rip)
 	{
 		key = next_key++;
 	}
-	StateMachineSideEffectLoad(Int k, IRExpr *_addr)
-		: key(k), addr(_addr)
+	StateMachineSideEffectLoad(Int k, IRExpr *_addr, unsigned long _rip)
+		: key(k), addr(_addr), rip(_rip)
 	{
 	}
 	Int key;
 	IRExpr *addr;
+	unsigned long rip;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "B%d <- *(", key);
 		ppIRExpr(addr, f);
-		fprintf(f, ")");
+		fprintf(f, ")@%lx", rip);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(addr);
@@ -696,7 +697,8 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 			res->sideEffects.push_back(
 				new StateMachineSideEffectLoad(
 					smsel->key,
-					transformIRExpr(smsel->addr)));
+					transformIRExpr(smsel->addr),
+					smsel->rip));
 		} else if (StateMachineSideEffectCopy *smsec =
 			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
 			res->sideEffects.push_back(
@@ -883,7 +885,9 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 		    !strcmp(stmt->Ist.Dirty.details->cee->name,
 			    "helper_load_32")) {
 			StateMachineSideEffectLoad *smsel =
-				new StateMachineSideEffectLoad(stmt->Ist.Dirty.details->args[0]);
+				new StateMachineSideEffectLoad(
+					stmt->Ist.Dirty.details->args[0],
+					cr->rip.rip);
 			sm = rewriteTemporary(
 				sm,
 				stmt->Ist.Dirty.details->tmp,
@@ -1805,6 +1809,52 @@ findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
 	findAllStores(sm, out, visited);
 }
 
+static void
+findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out,
+	     std::set<StateMachine *> &visited);
+static void
+findAllLoads(StateMachineEdge *sme,
+	     std::set<StateMachineSideEffectLoad *> &out,
+	     std::set<StateMachine *> &visited)
+{
+	for (std::vector<StateMachineSideEffect *>::const_iterator it = sme->sideEffects.begin();
+	     it != sme->sideEffects.end();
+	     it++) {
+		if (StateMachineSideEffectLoad *smsel =
+		    dynamic_cast<StateMachineSideEffectLoad *>(*it))
+			out.insert(smsel);
+	}
+	findAllLoads(sme->target, out, visited);
+}
+static void
+findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out,
+	      std::set<StateMachine *> &visited)
+{
+	if (visited.count(sm))
+		return;
+	visited.insert(sm);
+	if (dynamic_cast<StateMachineCrash *>(sm) ||
+	    dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm))
+		return;
+	if (StateMachineBifurcate *smb =
+	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+		findAllLoads(smb->trueTarget, out, visited);
+		findAllLoads(smb->falseTarget, out, visited);
+	} else if (StateMachineProxy *smp =
+		   dynamic_cast<StateMachineProxy *>(sm)) {
+		findAllLoads(smp->target, out, visited);
+	} else {
+		abort();
+	}
+}
+static void
+findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
+{
+	std::set<StateMachine *> visited;
+	findAllLoads(sm, out, visited);
+}
+
 static void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
 static void
 findAllEdges(StateMachineEdge *sme, std::set<StateMachineEdge *> &out)
@@ -2499,6 +2549,16 @@ main(int argc, char *argv[])
 		cr->sm = bisimilarityReduction(cr->sm, opt);
 		printf("After BISIM:\n");
 		printStateMachine(cr->sm, stdout);
+
+		std::set<StateMachineSideEffectLoad *> allLoads;
+		findAllLoads(cr->sm, allLoads);
+		for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
+		     it != allLoads.end();
+		     it++) {
+			printf("Relevant load at: ");
+			(*it)->prettyPrint(stdout);
+			printf("\n");
+		}
 	}
 
 	return 0;
