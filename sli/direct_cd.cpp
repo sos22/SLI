@@ -1762,147 +1762,130 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	return r->tag == Iex_Const && !r->Iex.Const.con->Ico.U1;
 }
 
-static void
-findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out,
-	      std::set<StateMachine *> &visited);
+class StateMachineWalker {
+	void doit(StateMachine *s, std::set<StateMachine *> &visited);
+	void doit(StateMachineEdge *s, std::set<StateMachine *> &visited);
+public:
+	virtual void visitEdge(StateMachineEdge *e) {}
+	virtual void visitState(StateMachine *s) {}
+	virtual void visitSideEffect(StateMachineSideEffect *smse) {}
+	void doit(StateMachine *s);
+};
 
-static void
-findAllStores(StateMachineEdge *sme,
-	      std::set<StateMachineSideEffectStore *> &out,
-	      std::set<StateMachine *> &visited)
-{
-	for (std::vector<StateMachineSideEffect *>::const_iterator it = sme->sideEffects.begin();
-	     it != sme->sideEffects.end();
-	     it++) {
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(*it))
-			out.insert(smses);
-	}
-	findAllStores(sme->target, out, visited);
-}
-static void
-findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out,
-	      std::set<StateMachine *> &visited)
+void
+StateMachineWalker::doit(StateMachine *sm, std::set<StateMachine *> &visited)
 {
 	if (visited.count(sm))
 		return;
 	visited.insert(sm);
+
+	visitState(sm);
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
 	    dynamic_cast<StateMachineStub *>(sm))
 		return;
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		findAllStores(smb->trueTarget, out, visited);
-		findAllStores(smb->falseTarget, out, visited);
+		doit(smb->trueTarget, visited);
+		doit(smb->falseTarget, visited);
 	} else if (StateMachineProxy *smp =
 		   dynamic_cast<StateMachineProxy *>(sm)) {
-		findAllStores(smp->target, out, visited);
+		doit(smp->target, visited);
 	} else {
 		abort();
 	}
 }
+void
+StateMachineWalker::doit(StateMachineEdge *se, std::set<StateMachine *> &visited)
+{
+	visitEdge(se);
+	for (std::vector<StateMachineSideEffect *>::iterator it = se->sideEffects.begin();
+	     it != se->sideEffects.end();
+	     it++)
+		visitSideEffect(*it);
+	doit(se->target, visited);
+}
+void
+StateMachineWalker::doit(StateMachine *s)
+{
+	std::set<StateMachine *> visited;
+	doit(s, visited);
+}
+
+class findAllStoresVisitor : public StateMachineWalker {
+public:
+	std::set<StateMachineSideEffectStore *> &out;
+	findAllStoresVisitor(std::set<StateMachineSideEffectStore *> &o)
+		: out(o)
+	{}
+	void visitSideEffect(StateMachineSideEffect *smse)
+	{
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(smse))
+			out.insert(smses);
+	}
+};
 static void
 findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
 {
-	std::set<StateMachine *> visited;
-	findAllStores(sm, out, visited);
+	findAllStoresVisitor v(out);
+	v.doit(sm);
 }
 
-static void
-findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out,
-	     std::set<StateMachine *> &visited);
-static void
-findAllLoads(StateMachineEdge *sme,
-	     std::set<StateMachineSideEffectLoad *> &out,
-	     std::set<StateMachine *> &visited)
-{
-	for (std::vector<StateMachineSideEffect *>::const_iterator it = sme->sideEffects.begin();
-	     it != sme->sideEffects.end();
-	     it++) {
+class findAllLoadsVisitor : public StateMachineWalker {
+public:
+	std::set<StateMachineSideEffectLoad *> &out;
+	findAllLoadsVisitor(std::set<StateMachineSideEffectLoad *> &o)
+		: out(o)
+	{}
+	void visitSideEffect(StateMachineSideEffect *smse)
+	{
 		if (StateMachineSideEffectLoad *smsel =
-		    dynamic_cast<StateMachineSideEffectLoad *>(*it))
+		    dynamic_cast<StateMachineSideEffectLoad *>(smse))
 			out.insert(smsel);
 	}
-	findAllLoads(sme->target, out, visited);
-}
-static void
-findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out,
-	      std::set<StateMachine *> &visited)
-{
-	if (visited.count(sm))
-		return;
-	visited.insert(sm);
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm))
-		return;
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		findAllLoads(smb->trueTarget, out, visited);
-		findAllLoads(smb->falseTarget, out, visited);
-	} else if (StateMachineProxy *smp =
-		   dynamic_cast<StateMachineProxy *>(sm)) {
-		findAllLoads(smp->target, out, visited);
-	} else {
-		abort();
-	}
-}
+};
 static void
 findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
 {
-	std::set<StateMachine *> visited;
-	findAllLoads(sm, out, visited);
+	findAllLoadsVisitor v(out);
+	v.doit(sm);
 }
 
-static void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
-static void
-findAllEdges(StateMachineEdge *sme, std::set<StateMachineEdge *> &out)
-{
-	if (out.count(sme))
-		return;
-	out.insert(sme);
-	findAllEdges(sme->target, out);
-}
+class findAllEdgesVisitor : public StateMachineWalker {
+public:
+	std::set<StateMachineEdge *> &out;
+	findAllEdgesVisitor(std::set<StateMachineEdge *> &o)
+		: out(o)
+	{}
+	void visitEdge(StateMachineEdge *sme)
+	{
+		out.insert(sme);
+	}
+};
 static void
 findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out)
 {
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm))
-		return;
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		findAllEdges(smb->trueTarget, out);
-		findAllEdges(smb->falseTarget, out);
-	} else if (StateMachineProxy *smp =
-		   dynamic_cast<StateMachineProxy *>(sm)) {
-		findAllEdges(smp->target, out);
-	} else {
-		abort();
-	}
+	findAllEdgesVisitor v(out);
+	v.doit(sm);
 }
 
+class findAllStatesVisitor : public StateMachineWalker {
+public:
+	std::set<StateMachine *> &out;
+	findAllStatesVisitor(std::set<StateMachine *> &o)
+		: out(o)
+	{}
+	void visitState(StateMachine *sm)
+	{
+		out.insert(sm);
+	}
+};
 static void
 findAllStates(StateMachine *sm, std::set<StateMachine *> &out)
 {
-	if (out.count(sm))
-		return;
-	out.insert(sm);
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm))
-		return;
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		findAllStates(smb->trueTarget->target, out);
-		findAllStates(smb->falseTarget->target, out);
-	} else if (StateMachineProxy *smp =
-		   dynamic_cast<StateMachineProxy *>(sm)) {
-		findAllStates(smp->target->target, out);
-	} else {
-		abort();
-	}
+	findAllStatesVisitor v(out);
+	v.doit(sm);
 }
 
 static StateMachine *buildNewStateMachineWithLoadsEliminated(
