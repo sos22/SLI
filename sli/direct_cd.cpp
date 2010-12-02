@@ -1259,7 +1259,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 #warning Do this properly
 	switch (smsel->rip) {
 	case 0x40063a: /* Load of gcc_s_forcedunwind */
-		out.insert(0x400661);
+		out.insert(0x400656);
 		break;
 	case 0x40064c: /* Load of done_init */
 		out.insert(0x40066c);
