@@ -2562,8 +2562,18 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 			s1 = canonMap[s1];
 		while (canonMap.count(s2))
 			s2 = canonMap[s2];
+		/* This is more subtle than it looks.  It might appear
+		   that we should be able to pick pretty much
+		   arbitrarily which way round we perform the mapping
+		   (s2 -> s1 or s1 -> s2).  Not so: the mapping we
+		   build has to respect a depth-first ordering of the
+		   graph, or you risk introducing loops.  This way
+		   around does respect that ordering, whereas the
+		   other way around wouldn't. */
+		/* XXX I'm not entirely convinced I believe that
+		 * explanation. */
 		if (s1 != s2)
-			canonMap[s1] = s2;
+			canonMap[s2] = s1;
 	}
 
 	/* Perform the rewrite.  We do this in-place, because it's not
