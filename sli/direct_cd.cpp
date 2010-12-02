@@ -1029,8 +1029,26 @@ public:
 	NAMED_CLASS
 };
 
-CFGNode *
-InferredInformation::CFGFromRip(unsigned long start)
+static void
+enumerateReachableStates(CFGNode *from, std::set<CFGNode *> &out)
+{
+	if (!from || out.count(from))
+		return;
+	out.insert(from);
+	enumerateReachableStates(from->fallThrough, out);
+	enumerateReachableStates(from->branch, out);
+}
+
+/* Build a control flow graph which covers all of the RIPs in @rips.
+ * @output is filled in with pointers to all of the possible start
+ * nodes.
+ */
+/* This only really makes sense if @rips are similar enough that the
+ * CFGs are likely to overlap. */
+static void
+buildCFGForRipSet(AddressSpace *as,
+		  const std::set<unsigned long> &rips,
+		  std::set<CFGNode *> &output)
 {
 	std::map<unsigned long, CFGNode *> builtSoFar;
 	std::vector<unsigned long> needed;
@@ -1041,13 +1059,16 @@ InferredInformation::CFGFromRip(unsigned long start)
 
 	/* Step one: discover all of the instructions which we're
 	 * going to need. */
-	needed.push_back(start);
+	for (std::set<unsigned long>::const_iterator it = rips.begin();
+	     it != rips.end();
+	     it++)
+		needed.push_back(*it);
 	while (!needed.empty()) {
 		rip = needed.back();
 		needed.pop_back();
 		if (builtSoFar.count(rip))
 			continue;
-		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(rip);
+		IRSB *irsb = as->getIRSBForAddress(rip);
 		CFGNode *work = new CFGNode(rip);
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
@@ -1088,8 +1109,34 @@ InferredInformation::CFGFromRip(unsigned long start)
 		}
 	}
 
-	/* That should do it */
-	return builtSoFar[start];
+	/* Extract the start states.  These will be some subset of the
+	   input root nodes. */
+	std::set<CFGNode *> outputSoFar;
+	for (std::set<unsigned long>::const_iterator it = rips.begin();
+	     it != rips.end();
+	     it++) {
+		CFGNode *startnode = builtSoFar[*it];
+		if (outputSoFar.count(startnode))
+			continue;
+		output.insert(startnode);
+
+		enumerateReachableStates(startnode, outputSoFar);
+	}
+}
+
+/* Special case of buildCFGForRipSet() when you only have one entry
+ * RIP */
+CFGNode *
+InferredInformation::CFGFromRip(unsigned long start)
+{
+	std::set<unsigned long> rips;
+	std::set<CFGNode *> out;
+	rips.insert(start);
+	buildCFGForRipSet(oracle->ms->addressSpace, rips, out);
+	if (out.size() == 0)
+		return NULL;
+	assert(out.size() == 1);
+	return *out.begin();
 }
 
 CrashReason *
@@ -2660,7 +2707,7 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 		outputClusters.insert(thisSet);
 	}
 }
-	
+
 int
 main(int argc, char *argv[])
 {
@@ -2739,6 +2786,17 @@ main(int argc, char *argv[])
 			     it2++)
 				printf(" %lx", *it2);
 			printf("\n");
+
+			std::set<CFGNode *> storeCFGs;
+			buildCFGForRipSet(ms->addressSpace, *it, storeCFGs);
+			for (std::set<CFGNode *>::iterator it2 = storeCFGs.begin();
+			     it2 != storeCFGs.end();
+			     it2++) {
+				printf("Turns into CFG:\n");
+				trimCFG(*it2, *it);
+				breakCycles(*it2);
+				printCFG(*it2);
+			}
 		}
 	}
 
