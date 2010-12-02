@@ -2720,46 +2720,44 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 static StateMachine *
 CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachine *> &memo)
 {
+	if (!cfg)
+		return StateMachineNoCrash::get();
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
-	if (!cfg->branch && !cfg->fallThrough) {
-		res = StateMachineNoCrash::get();
-	} else {
-		IRSB *irsb = as->getIRSBForAddress(cfg->my_rip);
-		int endOfInstr;
-		for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
-			if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
-				break;
-		if (cfg->fallThrough) {
-			res = CFGtoStoreMachine(as, cfg->fallThrough, memo);
-			int idx = endOfInstr;
-			while (idx != 0) {
-				IRStmt *stmt = irsb->stmts[idx-1];
-				if (stmt->tag == Ist_Exit) {
-					if (cfg->branch) {
-						res = new StateMachineBifurcate(
-							stmt->Ist.Exit.guard,
-							CFGtoStoreMachine(as, cfg->branch, memo),
-							res);
-					}
-				} else {
-					res = backtrackStateMachineOneStatement(res, stmt, cfg->my_rip);
+	IRSB *irsb = as->getIRSBForAddress(cfg->my_rip);
+	int endOfInstr;
+	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
+		if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
+			break;
+	if (cfg->fallThrough || !cfg->branch) {
+		res = CFGtoStoreMachine(as, cfg->fallThrough, memo);
+		int idx = endOfInstr;
+		while (idx != 0) {
+			IRStmt *stmt = irsb->stmts[idx-1];
+			if (stmt->tag == Ist_Exit) {
+				if (cfg->branch) {
+					res = new StateMachineBifurcate(
+						stmt->Ist.Exit.guard,
+						CFGtoStoreMachine(as, cfg->branch, memo),
+						res);
 				}
-				idx--;
-			}
-		} else {
-			assert(cfg->branch);
-			res = CFGtoStoreMachine(as, cfg->branch, memo);
-			int idx;
-			for (idx = endOfInstr - 1; idx >= 0; idx--)
-				if (irsb->stmts[idx]->tag == Ist_Exit)
-					break;
-			assert(idx > 0);
-			while (idx != 0) {
-				IRStmt *stmt = irsb->stmts[idx-1];
+			} else {
 				res = backtrackStateMachineOneStatement(res, stmt, cfg->my_rip);
 			}
+			idx--;
+		}
+	} else {
+		assert(cfg->branch);
+		res = CFGtoStoreMachine(as, cfg->branch, memo);
+		int idx;
+		for (idx = endOfInstr - 1; idx >= 0; idx--)
+			if (irsb->stmts[idx]->tag == Ist_Exit)
+				break;
+		assert(idx > 0);
+		while (idx != 0) {
+			IRStmt *stmt = irsb->stmts[idx-1];
+			res = backtrackStateMachineOneStatement(res, stmt, cfg->my_rip);
 		}
 	}
 	memo[cfg] = res;
