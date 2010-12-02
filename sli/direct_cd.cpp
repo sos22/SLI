@@ -2873,6 +2873,15 @@ main(int argc, char *argv[])
 				printf("Turns into state machine:\n");
 				StateMachine *sm = CFGtoStoreMachine(ms->addressSpace, *it2);
 				printStateMachine(sm, stdout);
+
+				printf("Optimise:\n");
+				AllowableOptimisations opt2 =
+					AllowableOptimisations::defaultOptimisations
+					.enableassumePrivateStack();
+				sm = sm->optimise(opt2);
+				sm = availExpressionAnalysis(sm, opt2);
+				sm = bisimilarityReduction(sm, opt2);
+				printStateMachine(sm, stdout);
 			}
 		}
 	}
