@@ -842,15 +842,9 @@ rewriteTemporary(StateMachine *sm,
 	return rt.transform(sm);
 }
 
-static CrashReason *
-backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
+static StateMachine *
+backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 {
-	StateMachine *sm = cr->sm;
-
-	VexRip newRip(cr->rip);
-	assert(newRip.idx > 0);
-	newRip.idx--;
-	newRip.changedIdx();
 	switch (stmt->tag) {
 	case Ist_NoOp:
 	case Ist_IMark:
@@ -876,7 +870,8 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
 				stmt->Ist.Store.data));
-		return new CrashReason(newRip, smp);
+		sm = smp;
+		break;
 	}
 
 	case Ist_Dirty:
@@ -887,14 +882,14 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 			StateMachineSideEffectLoad *smsel =
 				new StateMachineSideEffectLoad(
 					stmt->Ist.Dirty.details->args[0],
-					cr->rip.rip);
+					rip);
 			sm = rewriteTemporary(
 				sm,
 				stmt->Ist.Dirty.details->tmp,
 				IRExpr_Binder(smsel->key));
 			StateMachineProxy *smp = new StateMachineProxy(sm);
 			smp->target->prependSideEffect(smsel);
-			return new CrashReason(newRip, smp);
+			sm = smp;
 		}  else {
 			abort();
 		}
@@ -903,9 +898,11 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 	case Ist_CAS:
 		/* Can't backtrack across these */
 		abort();
-		return NULL;
+		sm = NULL;
+		break;
+
 	case Ist_MBE:
-		return cr;
+		break;
 	case Ist_Exit:
 		sm = new StateMachineBifurcate(
 			stmt->Ist.Exit.guard,
@@ -916,7 +913,19 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 	default:
 		abort();
 	}
+	return sm;
+}
 
+static CrashReason *
+backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
+{
+	StateMachine *sm = cr->sm;
+
+	VexRip newRip(cr->rip);
+	assert(newRip.idx > 0);
+	newRip.idx--;
+	newRip.changedIdx();
+	sm = backtrackStateMachineOneStatement(sm, stmt, cr->rip.rip);
 	return new CrashReason(newRip, sm);
 }
 
@@ -2708,6 +2717,62 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 	}
 }
 
+static StateMachine *
+CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachine *> &memo)
+{
+	if (memo.count(cfg))
+		return memo[cfg];
+	StateMachine *res;
+	if (!cfg->branch && !cfg->fallThrough) {
+		res = StateMachineNoCrash::get();
+	} else {
+		IRSB *irsb = as->getIRSBForAddress(cfg->my_rip);
+		int endOfInstr;
+		for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
+			if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
+				break;
+		if (cfg->fallThrough) {
+			res = CFGtoStoreMachine(as, cfg->fallThrough, memo);
+			int idx = endOfInstr;
+			while (idx != 0) {
+				IRStmt *stmt = irsb->stmts[idx-1];
+				if (stmt->tag == Ist_Exit) {
+					if (cfg->branch) {
+						res = new StateMachineBifurcate(
+							stmt->Ist.Exit.guard,
+							CFGtoStoreMachine(as, cfg->branch, memo),
+							res);
+					}
+				} else {
+					res = backtrackStateMachineOneStatement(res, stmt, cfg->my_rip);
+				}
+				idx--;
+			}
+		} else {
+			assert(cfg->branch);
+			res = CFGtoStoreMachine(as, cfg->branch, memo);
+			int idx;
+			for (idx = endOfInstr - 1; idx >= 0; idx--)
+				if (irsb->stmts[idx]->tag == Ist_Exit)
+					break;
+			assert(idx > 0);
+			while (idx != 0) {
+				IRStmt *stmt = irsb->stmts[idx-1];
+				res = backtrackStateMachineOneStatement(res, stmt, cfg->my_rip);
+			}
+		}
+	}
+	memo[cfg] = res;
+	return res;		
+}
+
+static StateMachine *
+CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg)
+{
+	std::map<CFGNode *, StateMachine *> memo;
+	return CFGtoStoreMachine(as, cfg, memo);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -2796,6 +2861,10 @@ main(int argc, char *argv[])
 				trimCFG(*it2, *it);
 				breakCycles(*it2);
 				printCFG(*it2);
+
+				printf("Turns into state machine:\n");
+				StateMachine *sm = CFGtoStoreMachine(ms->addressSpace, *it2);
+				printStateMachine(sm, stdout);
 			}
 		}
 	}
