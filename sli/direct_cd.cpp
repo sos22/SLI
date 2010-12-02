@@ -967,7 +967,8 @@ public:
 	Thread *crashedThread;
 
 	void findPreviousInstructions(std::vector<unsigned long> &output);
-
+	void findConflictingStores(StateMachineSideEffectLoad *smsel,
+				   std::set<unsigned long> &out);
 	Oracle(MachineState *_ms, Thread *_thr)
 		: ms(_ms), crashedThread(_thr)
 	{
@@ -1180,6 +1181,36 @@ void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
 {
 	getDominators(crashedThread, ms, out);
+}
+
+/* Try to find the RIPs of some stores which might conceivably have
+   interfered with the observed load.  Stack accesses are not tracked
+   by this mechanism. */
+/* We do this using a profiling-based scheme.  There's some initial
+   training phase during which we log, for every memory location, the
+   set of loads and stores which access it, and we then just return
+   the union of the store sets for all the locations whose load set
+   includes the observed address. */
+/* XXX or we will do, eventually.  For now just hard-code a few known
+   values. */
+void
+Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
+			      std::set<unsigned long> &out)
+{
+#warning Do this properly
+	switch (smsel->rip) {
+	case 0x40063a: /* Load of gcc_s_forcedunwind */
+		out.insert(0x400661);
+		break;
+	case 0x40064c: /* Load of done_init */
+		out.insert(0x40066c);
+		break;
+	case 0x400645: /* stack access */
+	case 0x400676:
+		break;
+	default:
+		abort();
+	}
 }
 
 static void
@@ -2535,13 +2566,19 @@ main(int argc, char *argv[])
 
 		std::set<StateMachineSideEffectLoad *> allLoads;
 		findAllLoads(cr->sm, allLoads);
+		std::set<unsigned long> potentiallyConflictingStores;
 		for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 		     it != allLoads.end();
 		     it++) {
 			printf("Relevant load at: ");
 			(*it)->prettyPrint(stdout);
 			printf("\n");
+			oracle->findConflictingStores(*it, potentiallyConflictingStores);
 		}
+		for (std::set<unsigned long>::iterator it = potentiallyConflictingStores.begin();
+		     it != potentiallyConflictingStores.end();
+		     it++)
+			printf("Relevant store at: %lx\n", *it);
 	}
 
 	return 0;
