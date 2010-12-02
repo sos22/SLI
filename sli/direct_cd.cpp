@@ -969,6 +969,9 @@ public:
 	void findPreviousInstructions(std::vector<unsigned long> &output);
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
 				   std::set<unsigned long> &out);
+	void clusterRips(const std::set<unsigned long> &inputRips,
+			 std::set<std::set<unsigned long> > &outputClusters);
+
 	Oracle(MachineState *_ms, Thread *_thr)
 		: ms(_ms), crashedThread(_thr)
 	{
@@ -2511,6 +2514,152 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	   context-dependent. */
 	return rewriteStateMachine(sm, canonMap);
 }
+
+template <typename t>
+class union_find {
+public:
+	struct entry {
+		entry(const t &_parent, unsigned _d)
+			: parent(_parent), depth(_d)
+		{}
+		entry() { abort(); /* shouldn't happen */ }
+		t parent;
+		unsigned depth;
+	};
+	std::map<t, entry> content;
+
+	/* Check whether we know anything at all about x */
+	bool present(t x) { return content.count(x) != 0; }
+
+	/* Insert x into the structure as a singleton, if it's not
+	   already present. */
+	void insert(t x) { if (!present(x)) content.insert(std::pair<t, entry>(x, entry(x, 0))); }
+
+	/* Insert x and y into the structure, if they're not present,
+	   and then merge their containing sets. */
+	void insert(t x, t y) {
+		t xr = representative(x);
+		t yr = representative(y);
+		if (xr != yr) {
+			entry &xe(content[xr]);
+			entry &ye(content[yr]);
+			if (xe.depth < ye.depth)
+				xe.parent = yr;
+			else
+				ye.parent = xr;
+		}
+		assert(representative(x) == representative(y));
+	}
+
+	/* Find the representative for the set to which a given item
+	   belongs.  Create the item as a singleton if it isn't
+	   already present. */
+	t representative(t x) {
+		if (!present(x)) {
+			insert(x);
+			return x;
+		}
+		while (1) {
+			assert(content.count(x) != 0);
+			entry *e = &content[x];
+			if (e->parent == x)
+				return x;
+			assert(content.count(e->parent) != 0);
+			entry *pe = &content[e->parent];
+			if (pe->parent)
+				e->parent = pe->parent;
+			x = e->parent;
+		}
+	}
+};
+
+static void
+findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
+{
+	IRSB *irsb = as->getIRSBForAddress(rip);
+	int i;
+
+	for (i = 1; i < irsb->stmts_used; i++) {
+		if (irsb->stmts[i]->tag == Ist_IMark) {
+			/* That's the end of this instruction */
+			out.push_back(irsb->stmts[i]->Ist.IMark.addr);
+			return;
+		}
+		if (irsb->stmts[i]->tag == Ist_Exit)
+			out.push_back(irsb->stmts[i]->Ist.Exit.dst->Ico.U64);
+	}
+
+	/* If we get here then there are no other marks in the IRSB,
+	   so we need to look at the fall through addresses. */
+	if (irsb->jumpkind == Ijk_Call) {
+		out.push_back(extract_call_follower(irsb));
+		/* Emit the target as well, if possible. */
+	}
+
+	if (irsb->next->tag == Iex_Const) {
+		out.push_back(irsb->next->Iex.Const.con->Ico.U64);
+	} else {
+		/* Should really do something more clever here,
+		   possibly based on dynamic analysis. */
+	}
+}
+
+/* Try to group the RIPs into clusters which are likely to execute
+ * together.  We'll eventually build state machines for each cluster,
+ * rather than for individual RIPs. */
+/* The mechanism used is a bit stupid: pick a RIP pretty much at
+ * random out of the input set and create a new output set for it.  We
+ * then explore the machine code from that address, and if we find any
+ * other input RIPs we add them to the current output set.  If we find
+ * a RIP which has already been assigned an output set then we merge
+ * the relevant output sets. */
+void
+Oracle::clusterRips(const std::set<unsigned long> &inputRips,
+		    std::set<std::set<unsigned long> > &outputClusters)
+{
+	union_find<unsigned long> output;
+	std::set<unsigned long> explored;
+
+	for (std::set<unsigned long>::const_iterator it = inputRips.begin();
+	     it != inputRips.end();
+	     it++) {
+		unsigned long r = *it;
+		if (output.present(r))
+			continue;
+
+		output.insert(r);
+		std::vector<unsigned long> discoveredInstructions;
+		discoveredInstructions.push_back(r);
+		while (!discoveredInstructions.empty()) {
+			unsigned long r2 = discoveredInstructions.back();
+			discoveredInstructions.pop_back();
+			if (!explored.count(r2))
+				findSuccessors(ms->addressSpace, r2, discoveredInstructions);
+			output.insert(r, r2);
+			explored.insert(r2);
+		}
+	}
+
+	/* Now explode the union-find structure into a set of sets. */
+	std::set<unsigned long> unprocessedInput(inputRips);
+	while (!unprocessedInput.empty()) {
+		unsigned long r = *unprocessedInput.begin();
+
+		std::set<unsigned long> thisSet;
+		unsigned long representative = output.representative(r);
+		for (std::set<unsigned long>::iterator it = unprocessedInput.begin();
+		     it != unprocessedInput.end();
+			) {
+			if (output.representative(*it) == representative) {
+				thisSet.insert(*it);
+				unprocessedInput.erase(it++);
+			} else {
+				it++;
+			}
+		}
+		outputClusters.insert(thisSet);
+	}
+}
 	
 int
 main(int argc, char *argv[])
@@ -2579,6 +2728,18 @@ main(int argc, char *argv[])
 		     it != potentiallyConflictingStores.end();
 		     it++)
 			printf("Relevant store at: %lx\n", *it);
+		std::set<std::set<unsigned long> > conflictClusters;
+		oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
+		for (std::set<std::set<unsigned long> >::iterator it = conflictClusters.begin();
+		     it != conflictClusters.end();
+		     it++) {
+			printf("Cluster:");
+			for (std::set<unsigned long>::iterator it2 = it->begin();
+			     it2 != it->end();
+			     it2++)
+				printf(" %lx", *it2);
+			printf("\n");
+		}
 	}
 
 	return 0;
