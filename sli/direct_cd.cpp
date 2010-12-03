@@ -1436,7 +1436,7 @@ breakCycles(CFGNode *cfg, std::map<CFGNode *, unsigned> &numbering,
 	if (onPath.count(cfg)) {
 		/* We have a cycle.  Break it. */
 		assert(lastBackEdge);
-		lastBackEdge = NULL;
+		*lastBackEdge = NULL;
 		return false;
 	}
 
