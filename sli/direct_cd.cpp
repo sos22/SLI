@@ -1350,7 +1350,21 @@ bool
 Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 {
 #warning Do this properly as well.
-	return s->rip != 0x400656 && s->rip != 0x40066c && s->rip != 0x4006fc && s->rip != 0x4006f2;
+	switch (s->rip) {
+	case 0x400656:
+	case 0x40066c:
+	case 0x4006fc:
+	case 0x4006f2:
+	case 0x4006ec:
+		return false;
+	case 0x400668:
+	case 0x40070c:
+	case 0x400711:
+	case 0x40071b:
+		return true;
+	default:
+		abort();
+	}
 }
 
 static void
