@@ -1375,6 +1375,7 @@ trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
 	for (std::set<unsigned long>::iterator it = interestingAddresses.begin();
 	     it != interestingAddresses.end();
 	     it++) {
+		assert(uninteresting[*it]);
 		interesting[*it] = uninteresting[*it];
 		uninteresting.erase(*it);
 	}
@@ -1410,6 +1411,7 @@ trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
 	     it != interesting.end();
 	     it++) {
 		CFGNode *n = it->second;
+		assert(n);
 		if (n->branch && uninteresting.count(n->branch->my_rip))
 			n->branch = NULL;
 		if (n->fallThrough && uninteresting.count(n->fallThrough->my_rip))
@@ -2782,6 +2784,12 @@ findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &
 	if (irsb->jumpkind == Ijk_Call) {
 		out.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
+
+#warning This is arguably wrong
+		/* Actually, don't bother: the state machine inferring
+		   bits don't do so, and get very confused when they
+		   can't match everything up properly. */
+		return;
 	}
 
 	if (irsb->next->tag == Iex_Const) {
