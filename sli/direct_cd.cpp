@@ -548,6 +548,11 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			if (!usedBinders.count(smsec->key))
 				isDead = true;
 		}
+		if (StateMachineSideEffectLoad *smsel =
+		    dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			if (!usedBinders.count(smsel->key))
+				isDead = true;
+		}
 		if (isDead) {
 			it = sideEffects.erase(it);
 		} else {
