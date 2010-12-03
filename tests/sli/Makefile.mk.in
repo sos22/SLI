@@ -1,5 +1,5 @@
 targets=''
-sli_tests="pmap vamap"
+sli_tests="pmap vamap nd_chooser"
 
 defvars() {
     echo "SLI_TESTS=\$(patsubst %,${input_base}/%,${sli_tests})"
