@@ -13,6 +13,8 @@
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
 
+class Oracle;
+
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
@@ -84,37 +86,39 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachine *optimise(const AllowableOptimisations &) = 0;
+	virtual StateMachine *optimise(const AllowableOptimisations &, Oracle *) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, public PrettyPrintable {
 public:
-	virtual void optimise(const AllowableOptimisations &) = 0;
+	virtual void optimise(const AllowableOptimisations &, Oracle *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
 };
 
 class StateMachineSideEffectStore : public StateMachineSideEffect {
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data)
-		: addr(_addr), data(_data)
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, unsigned long _rip)
+		: addr(_addr), data(_data), rip(_rip)
 	{
 	}
 	IRExpr *addr;
 	IRExpr *data;
+	unsigned long rip;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "*(");
 		ppIRExpr(addr, f);
 		fprintf(f, ") <- ");
 		ppIRExpr(data, f);
+		fprintf(f, " @ %lx", rip);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(addr);
 		hv(data);
 	}
-	void optimise(const AllowableOptimisations &opt) {
+	void optimise(const AllowableOptimisations &opt, Oracle *) {
 		addr = optimiseIRExpr(addr, opt);
 		data = optimiseIRExpr(data, opt);
 	}
@@ -153,7 +157,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
-	void optimise(const AllowableOptimisations &opt) {
+	void optimise(const AllowableOptimisations &opt, Oracle *) {
 		addr = optimiseIRExpr(addr, opt);
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
@@ -178,7 +182,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	void optimise(const AllowableOptimisations &opt) {
+	void optimise(const AllowableOptimisations &opt, Oracle *) {
 		value = optimiseIRExpr(value, opt);
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
@@ -224,7 +228,7 @@ public:
 		     it++)
 			hv(*it);
 	}
-	StateMachineEdge *optimise(const AllowableOptimisations &);
+	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		target->findLoadedAddresses(s, opt);
 		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
@@ -244,7 +248,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-	StateMachine *optimise(const AllowableOptimisations &) { return this; }
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
 	void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 };
@@ -259,7 +263,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-	StateMachine *optimise(const AllowableOptimisations &) { return this; }
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
 	void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 };
@@ -305,11 +309,11 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt)
+	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle)
 	{
 		condition = optimiseIRExpr(condition, opt);
-		trueTarget = trueTarget->optimise(opt);
-		falseTarget = falseTarget->optimise(opt);
+		trueTarget = trueTarget->optimise(opt, oracle);
+		falseTarget = falseTarget->optimise(opt, oracle);
 		return this;
 	}
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
@@ -347,11 +351,11 @@ public:
 	{
 		hv(target);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt)
+	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle)
 	{
 		if (target->sideEffects.size() == 0)
-			return target->target->optimise(opt);
-		target = target->optimise(opt);
+			return target->target->optimise(opt, oracle);
+		target = target->optimise(opt, oracle);
 		return this;
 	}
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
@@ -374,12 +378,40 @@ public:
 		fprintf(f, ">");
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
-	StateMachine *optimise(const AllowableOptimisations &) { return this; }
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 };
 
+/* All of the information from sources other than the main crash dump.
+ * Information from the oracle will be true of some executions but not
+ * necessarily all of them, so should only really be used where static
+ * analysis is insufficient. */
+class Oracle : public GarbageCollected<Oracle> {
+public:
+	MachineState *ms;
+	Thread *crashedThread;
+
+	void findPreviousInstructions(std::vector<unsigned long> &output);
+	void findConflictingStores(StateMachineSideEffectLoad *smsel,
+				   std::set<unsigned long> &out);
+	void clusterRips(const std::set<unsigned long> &inputRips,
+			 std::set<std::set<unsigned long> > &outputClusters);
+	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
+
+	Oracle(MachineState *_ms, Thread *_thr)
+		: ms(_ms), crashedThread(_thr)
+	{
+	}
+	void visit(HeapVisitor &hv) {
+		hv(ms);
+		hv(crashedThread);
+	}
+	NAMED_CLASS
+};
+
 StateMachineEdge *
-StateMachineEdge::optimise(const AllowableOptimisations &opt)
+StateMachineEdge::optimise(const AllowableOptimisations &opt,
+			   Oracle *oracle)
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
@@ -391,14 +423,14 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt)
 		     it != smp->target->sideEffects.end();
 		     it++)
 			sme->sideEffects.push_back(*it);
-		return sme->optimise(opt);
+		return sme->optimise(opt, oracle);
 	}
-	target = target->optimise(opt);
+	target = target->optimise(opt, oracle);
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 
 	for (it = sideEffects.begin(); it != sideEffects.end(); it++)
-		(*it)->optimise(opt);
+		(*it)->optimise(opt, oracle);
 
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
@@ -444,31 +476,33 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt)
 		}
 	}
 
-	if (opt.ignoreSideEffects) {
-		/* Now cull completely redundant stores. */
-		std::set<IRExpr *> loadedAddresses;
-		target->findLoadedAddresses(loadedAddresses, opt);
+	/* Now cull completely redundant stores. */
+	std::set<IRExpr *> loadedAddresses;
+	target->findLoadedAddresses(loadedAddresses, opt);
 
-		it = sideEffects.end();
-		while (it != sideEffects.begin()) {
-			bool isDead = false;
-			it--;
-			(*it)->optimise(opt);
-			if (StateMachineSideEffectStore *smses =
-			    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+	it = sideEffects.end();
+	while (it != sideEffects.begin()) {
+		bool isDead = false;
+		it--;
+		(*it)->optimise(opt, oracle);
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			if (opt.ignoreSideEffects ||
+			    oracle->storeIsThreadLocal(smses))
 				isDead = true;
-				for (std::set<IRExpr *>::iterator it2 = loadedAddresses.begin();
-				     isDead && it2 != loadedAddresses.end();
-				     it2++) {
-					if (!definitelyNotEqual(*it2, smses->addr, opt))
-						isDead = false;
-				}
-				if (isDead)
-					it = sideEffects.erase(it);
+			else
+				isDead = false;
+			for (std::set<IRExpr *>::iterator it2 = loadedAddresses.begin();
+			     isDead && it2 != loadedAddresses.end();
+			     it2++) {
+				if (!definitelyNotEqual(*it2, smses->addr, opt))
+					isDead = false;
 			}
-			if (!isDead)
-				(*it)->updateLoadedAddresses(loadedAddresses, opt);
+			if (isDead)
+				it = sideEffects.erase(it);
 		}
+		if (!isDead)
+			(*it)->updateLoadedAddresses(loadedAddresses, opt);
 	}
 
 	return this;
@@ -694,7 +728,8 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 			res->sideEffects.push_back(
 				new StateMachineSideEffectStore(
 					transformIRExpr(smses->addr),
-					transformIRExpr(smses->data)));
+					transformIRExpr(smses->data),
+					smses->rip));
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
 			res->sideEffects.push_back(
@@ -872,7 +907,8 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 		smp->target->prependSideEffect(
 			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
-				stmt->Ist.Store.data));
+				stmt->Ist.Store.data,
+				rip));
 		sm = smp;
 		break;
 	}
@@ -968,32 +1004,6 @@ printStateMachine(const StateMachine *sm, FILE *f)
 		}
 	}
 }
-
-/* All of the information from sources other than the main crash dump.
- * Information from the oracle will be true of some executions but not
- * necessarily all of them, so should only really be used where static
- * analysis is insufficient. */
-class Oracle : public GarbageCollected<Oracle> {
-public:
-	MachineState *ms;
-	Thread *crashedThread;
-
-	void findPreviousInstructions(std::vector<unsigned long> &output);
-	void findConflictingStores(StateMachineSideEffectLoad *smsel,
-				   std::set<unsigned long> &out);
-	void clusterRips(const std::set<unsigned long> &inputRips,
-			 std::set<std::set<unsigned long> > &outputClusters);
-
-	Oracle(MachineState *_ms, Thread *_thr)
-		: ms(_ms), crashedThread(_thr)
-	{
-	}
-	void visit(HeapVisitor &hv) {
-		hv(ms);
-		hv(crashedThread);
-	}
-	NAMED_CLASS
-};
 
 class CFGNode : public GarbageCollected<CFGNode>, public PrettyPrintable {
 public:
@@ -1273,6 +1283,16 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	default:
 		abort();
 	}
+}
+
+/* Try to guess whether this store might ever be consumed by another
+   thread.  We approximate this by saying that anything not included
+   in our database of dynamic information is thread-local. */
+bool
+Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
+{
+#warning Do this properly as well.
+	return s->rip != 0x400656 && s->rip != 0x40066c;
 }
 
 static void
@@ -2825,7 +2845,7 @@ main(int argc, char *argv[])
 			.enableassumePrivateStack()
 			.enableassumeExecutesAtomically()
 			.enableignoreSideEffects();
-		cr->sm = cr->sm->optimise(opt);
+		cr->sm = cr->sm->optimise(opt, oracle);
 		printf("After optimisation:\n");
 		printStateMachine(cr->sm, stdout);
 		cr->sm = availExpressionAnalysis(cr->sm, opt);
@@ -2881,7 +2901,7 @@ main(int argc, char *argv[])
 				AllowableOptimisations opt2 =
 					AllowableOptimisations::defaultOptimisations
 					.enableassumePrivateStack();
-				sm = sm->optimise(opt2);
+				sm = sm->optimise(opt2, oracle);
 				sm = availExpressionAnalysis(sm, opt2);
 				sm = bisimilarityReduction(sm, opt2);
 				printStateMachine(sm, stdout);
