@@ -1324,9 +1324,11 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	switch (smsel->rip) {
 	case 0x40063a: /* Load of gcc_s_forcedunwind */
 		out.insert(0x400656);
+		out.insert(0x4006fc);
 		break;
 	case 0x40064c: /* Load of done_init */
 		out.insert(0x40066c);
+		out.insert(0x4006f2);
 		break;
 	case 0x400645: /* stack access */
 	case 0x400676:
