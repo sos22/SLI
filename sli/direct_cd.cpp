@@ -7,6 +7,7 @@
 #include <set>
 
 #include "sli.h"
+#include "nd_chooser.h"
 
 #include "libvex_guest_offsets.h"
 
@@ -2942,12 +2943,7 @@ main(int argc, char *argv[])
 	CrashReason *proximal = getProximalCause(ms, thr);
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
-	printf("Immediate proximal cause:\n");
-	printStateMachine(proximal->sm, stdout);
-
 	proximal = backtrackToStartOfInstruction(proximal, ms->addressSpace);
-	printf("Cause at start of this instruction:\n");
-	printStateMachine(proximal->sm, stdout);
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
 	ii->addCrashReason(proximal);
@@ -2964,22 +2960,15 @@ main(int argc, char *argv[])
 		breakCycles(cfg);
 
 		CrashReason *cr = ii->CFGtoCrashReason(cfg);
-		printf("Crash reason %s:\n", cr->rip.name());
-		printStateMachine(cr->sm, stdout);
 		AllowableOptimisations opt =
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
 			.enableassumeExecutesAtomically()
 			.enableignoreSideEffects();
 		cr->sm = cr->sm->optimise(opt, oracle);
-		printf("After optimisation:\n");
-		printStateMachine(cr->sm, stdout);
 		cr->sm = availExpressionAnalysis(cr->sm, opt);
-		printf("After AVAIL:\n");
-		printStateMachine(cr->sm, stdout);
-
 		cr->sm = bisimilarityReduction(cr->sm, opt);
-		printf("After BISIM:\n");
+		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
 
 		std::set<StateMachineSideEffectLoad *> allLoads;
@@ -2987,16 +2976,8 @@ main(int argc, char *argv[])
 		std::set<unsigned long> potentiallyConflictingStores;
 		for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 		     it != allLoads.end();
-		     it++) {
-			printf("Relevant load at: ");
-			(*it)->prettyPrint(stdout);
-			printf("\n");
-			oracle->findConflictingStores(*it, potentiallyConflictingStores);
-		}
-		for (std::set<unsigned long>::iterator it = potentiallyConflictingStores.begin();
-		     it != potentiallyConflictingStores.end();
 		     it++)
-			printf("Relevant store at: %lx\n", *it);
+			oracle->findConflictingStores(*it, potentiallyConflictingStores);
 		std::set<std::set<unsigned long> > conflictClusters;
 		oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
 		for (std::set<std::set<unsigned long> >::iterator it = conflictClusters.begin();
@@ -3014,16 +2995,11 @@ main(int argc, char *argv[])
 			for (std::set<CFGNode *>::iterator it2 = storeCFGs.begin();
 			     it2 != storeCFGs.end();
 			     it2++) {
-				printf("Turns into CFG:\n");
 				trimCFG(*it2, *it);
 				breakCycles(*it2);
-				printCFG(*it2);
 
-				printf("Turns into state machine:\n");
 				StateMachine *sm = CFGtoStoreMachine(ms->addressSpace, *it2);
-				printStateMachine(sm, stdout);
 
-				printf("Optimise:\n");
 				AllowableOptimisations opt2 =
 					AllowableOptimisations::defaultOptimisations
 					.enableassumePrivateStack();
@@ -3031,6 +3007,7 @@ main(int argc, char *argv[])
 				sm = availExpressionAnalysis(sm, opt2);
 				sm = bisimilarityReduction(sm, opt2);
 				sm = sm->optimise(opt2, oracle);
+				printf("Turns into state machine:\n");
 				printStateMachine(sm, stdout);
 			}
 		}

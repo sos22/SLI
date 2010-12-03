@@ -263,7 +263,6 @@ findDominators(unsigned long functionHead,
 		if (cfg.count(rip))
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(rip);
-		ppIRSB(irsb, stdout);
 		fd_cfg_node *work = NULL;
 		assert(irsb->stmts[0]->tag == Ist_IMark);
 		assert(irsb->stmts[0]->Ist.IMark.addr == rip);
