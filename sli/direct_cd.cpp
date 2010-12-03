@@ -81,6 +81,8 @@ public:
    because there are no semantic changes. */
 static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &);
 
+static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
+
 class StateMachine : public GarbageCollected<StateMachine>, public PrettyPrintable {
 public:
 	/* Another peephole optimiser.  Again, must be
@@ -88,6 +90,7 @@ public:
 	   semantic value of the machine, and can mutate in-place. */
 	virtual StateMachine *optimise(const AllowableOptimisations &, Oracle *) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
+	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
 };
 
@@ -95,6 +98,7 @@ class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, 
 public:
 	virtual void optimise(const AllowableOptimisations &, Oracle *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
+	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
 };
 
@@ -132,6 +136,10 @@ public:
 				it++;
 		}
 	}
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
+		::findUsedBinders(addr, s, opt);
+		::findUsedBinders(data, s, opt);
+	}
 };
 
 class StateMachineSideEffectLoad : public StateMachineSideEffect {
@@ -163,6 +171,10 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
 	}
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
+		s.erase(key);
+		::findUsedBinders(addr, s, opt);
+	}
 };
 Int StateMachineSideEffectLoad::next_key;
 
@@ -186,6 +198,10 @@ public:
 		value = optimiseIRExpr(value, opt);
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
+		s.erase(key);
+		::findUsedBinders(value, s, opt);
+	}
 };
 
 class StateMachineEdge : public GarbageCollected<StateMachineEdge>, public PrettyPrintable {
@@ -236,6 +252,13 @@ public:
 		     it++)
 			(*it)->updateLoadedAddresses(s, opt);
 	}
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
+		target->findUsedBinders(s, opt);
+		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
+		     it != sideEffects.rend();
+		     it++)
+			(*it)->findUsedBinders(s, opt);
+	}
 	NAMED_CLASS
 };
 
@@ -251,6 +274,7 @@ public:
 	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
 	void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 };
 VexPtr<StateMachineCrash> StateMachineCrash::_this;
 
@@ -266,6 +290,7 @@ public:
 	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
 	void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 };
 VexPtr<StateMachineNoCrash> StateMachineNoCrash::_this;
 
@@ -316,8 +341,9 @@ public:
 		falseTarget = falseTarget->optimise(opt, oracle);
 		return this;
 	}
-	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
-		std::set<IRExpr *> t(s);
+	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
+	{
+		std::set<IRExpr *> t;
 		trueTarget->findLoadedAddresses(t, opt);
 		falseTarget->findLoadedAddresses(s, opt);
 		/* Result is the union of the two branches */
@@ -325,6 +351,18 @@ public:
 		     it != t.end();
 		     it++)
 			s.insert(*it);
+	}
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
+	{
+		assert(s.empty());
+		std::set<Int> t;
+		trueTarget->findUsedBinders(t, opt);
+		falseTarget->findUsedBinders(s, opt);
+		for (std::set<Int>::iterator it = t.begin();
+		     it != t.end();
+		     it++)
+			s.insert(*it);
+		::findUsedBinders(condition, s, opt);
 	}
 };
 
@@ -361,6 +399,9 @@ public:
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		target->findLoadedAddresses(s, opt);
 	}
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
+		target->findUsedBinders(s, opt);
+	}
 };
 
 /* A node in the state machine representing a bit of code which we
@@ -380,6 +421,7 @@ public:
 	void visit(HeapVisitor &hv) { hv(target); }
 	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) { }
 };
 
 /* All of the information from sources other than the main crash dump.
@@ -479,6 +521,8 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	/* Now cull completely redundant stores. */
 	std::set<IRExpr *> loadedAddresses;
 	target->findLoadedAddresses(loadedAddresses, opt);
+	std::set<Int> usedBinders;
+	target->findUsedBinders(usedBinders, opt);
 
 	it = sideEffects.end();
 	while (it != sideEffects.begin()) {
@@ -498,11 +542,18 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				if (!definitelyNotEqual(*it2, smses->addr, opt))
 					isDead = false;
 			}
-			if (isDead)
-				it = sideEffects.erase(it);
 		}
-		if (!isDead)
+		if (StateMachineSideEffectCopy *smsec =
+		    dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			if (!usedBinders.count(smsec->key))
+				isDead = true;
+		}
+		if (isDead) {
+			it = sideEffects.erase(it);
+		} else {
 			(*it)->updateLoadedAddresses(loadedAddresses, opt);
+			(*it)->findUsedBinders(usedBinders, opt);
+		}
 	}
 
 	return this;
@@ -2001,6 +2052,52 @@ findAllStates(StateMachine *sm, std::set<StateMachine *> &out)
 	v.doit(sm);
 }
 
+static void
+findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt)
+{
+	switch (e->tag) {
+	case Iex_Binder:
+		out.insert(e->Iex.Binder.binder);
+		return;
+	case Iex_Get:
+		return;
+	case Iex_GetI:
+		findUsedBinders(e->Iex.GetI.ix, out, opt);
+		return;
+	case Iex_RdTmp:
+		return;
+	case Iex_Qop:
+		findUsedBinders(e->Iex.Qop.arg4, out, opt);
+	case Iex_Triop:
+		findUsedBinders(e->Iex.Qop.arg3, out, opt);
+	case Iex_Binop:
+		findUsedBinders(e->Iex.Qop.arg2, out, opt);
+	case Iex_Unop:
+		findUsedBinders(e->Iex.Qop.arg1, out, opt);
+		return;
+	case Iex_Load:
+		findUsedBinders(e->Iex.Load.addr, out, opt);
+		return;
+	case Iex_Const:
+		return;
+	case Iex_CCall: {
+		for (int x = 0; e->Iex.CCall.args[x]; x++)
+			findUsedBinders(e->Iex.CCall.args[x], out, opt);
+		return;
+	}
+	case Iex_Mux0X:
+		findUsedBinders(e->Iex.Mux0X.cond, out, opt);
+		findUsedBinders(e->Iex.Mux0X.expr0, out, opt);
+		findUsedBinders(e->Iex.Mux0X.exprX, out, opt);
+		return;
+	case Iex_SLI_Load:
+		findUsedBinders(e->Iex.SLI_Load.addr, out, opt);
+		return;
+	}
+	abort();
+}
+
+
 static StateMachine *buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
 	std::map<StateMachine *,
@@ -2904,6 +3001,7 @@ main(int argc, char *argv[])
 				sm = sm->optimise(opt2, oracle);
 				sm = availExpressionAnalysis(sm, opt2);
 				sm = bisimilarityReduction(sm, opt2);
+				sm = sm->optimise(opt2, oracle);
 				printStateMachine(sm, stdout);
 			}
 		}
