@@ -720,11 +720,6 @@ protected:
 				   e->Iex.Load.ty,
 				   transformIRExpr(e->Iex.Load.addr));
 	}
-	virtual IRExpr *transformIexSLILoad(IRExpr *e)
-	{
-		return IRExpr_SLI_Load(transformIRExpr(e->Iex.SLI_Load.addr),
-				       e->Iex.SLI_Load.rip);
-	}
 	virtual IRExpr *transformIexConst(IRExpr *e)
 	{
 		return e;
@@ -849,8 +844,6 @@ StateMachineTransformer::transformIRExpr(IRExpr *e)
 		return transformIexUnop(e);
 	case Iex_Load:
 		return transformIexLoad(e);
-	case Iex_SLI_Load:
-		return transformIexSLILoad(e);
 	case Iex_Const:
 		return transformIexConst(e);
 	case Iex_CCall:
@@ -1630,10 +1623,6 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 					b->Iex.Mux0X.expr0) &&
 			physicallyEqual(a->Iex.Mux0X.exprX,
 					b->Iex.Mux0X.exprX);
-	case Iex_SLI_Load:
-		return a->Iex.SLI_Load.rip == b->Iex.SLI_Load.rip &&
-			physicallyEqual(a->Iex.SLI_Load.addr,
-					b->Iex.SLI_Load.addr);
 	}
 	abort();
 }
@@ -1710,9 +1699,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt);
 		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt);
 		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt);
-		break;
-	case Iex_SLI_Load:
-		src->Iex.SLI_Load.addr = optimiseIRExpr(src->Iex.SLI_Load.addr, opt);
 		break;
 	default:
 		break;
@@ -2113,9 +2099,6 @@ findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt
 		findUsedBinders(e->Iex.Mux0X.cond, out, opt);
 		findUsedBinders(e->Iex.Mux0X.expr0, out, opt);
 		findUsedBinders(e->Iex.Mux0X.exprX, out, opt);
-		return;
-	case Iex_SLI_Load:
-		findUsedBinders(e->Iex.SLI_Load.addr, out, opt);
 		return;
 	}
 	abort();
