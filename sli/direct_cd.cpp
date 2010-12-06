@@ -3022,28 +3022,75 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 static bool
 expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 {
-	exp = specialiseIRExpr(exp, ctxt);
+	exp = optimiseIRExpr(
+		specialiseIRExpr(exp, ctxt),
+		AllowableOptimisations::defaultOptimisations);
 	printf("Check whether ");
 	ppIRExpr(exp, stdout);
-	printf(" is true\n");
-#warning Write me
-	if (chooser.nd_choice(2) == 0) {
-		printf("Assume true\n");
-		ctxt.pathConstraint =
+	printf(" is true using ");
+	ppIRExpr(ctxt.pathConstraint, stdout);
+	printf("\n");
+
+	/* Combine the path constraint with the new expression and see
+	   if that produces a contradiction.  If it does then we know
+	   for sure that the new expression is false. */
+	IRExpr *e =
+		optimiseIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
 				ctxt.pathConstraint,
-				exp);
-		return true;
-	} else {
-		printf("Assume false\n");
-		ctxt.pathConstraint =
+				exp),
+			AllowableOptimisations::defaultOptimisations);
+	if (e->tag == Iex_Const) {
+		/* That shouldn't produce the constant 1 very often.
+		   If it does, it indicates that the path constraint
+		   is definitely true, and the new expression is
+		   definitely true, but for some reason we weren't
+		   able to simplify the path constraint down to 1
+		   earlier.  Consider that a lucky break and simplify
+		   it now. */
+		if (e->Iex.Const.con->Ico.U1) {
+			ctxt.pathConstraint = e;
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	/* Now try it the other way around, by combining the path
+	   constraint with ¬exp.  If we had a perfect theorem prover
+	   this would be redundant with the previous version, but we
+	   don't, so it isn't. */
+	IRExpr *e2 =
+		optimiseIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
 				ctxt.pathConstraint,
 				IRExpr_Unop(
 					Iop_Not1,
-					exp));
+					exp)),
+			AllowableOptimisations::defaultOptimisations);
+	if (e2->tag == Iex_Const) {
+		/* If X & ¬Y is definitely true, Y is definitely
+		 * false and X is definitely true. */
+		if (e2->Iex.Const.con->Ico.U1) {
+			ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
+			return false;
+		}
+
+		/* So now we know that X & ¬Y is definitely false, and
+		 * we assume that X is true.  Therefore ¬Y is false
+		 * and Y is true. */
+		return true;
+	}
+
+	if (chooser.nd_choice(2) == 0) {
+		printf("Assume true\n");
+		ctxt.pathConstraint = e;
+		return true;
+	} else {
+		printf("Assume false\n");
+		ctxt.pathConstraint = e2;
 		return false;
 	}
 }
