@@ -806,21 +806,7 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 StateMachine *
 StateMachineTransformer::transform(StateMachine *inp)
 {
-	StateMachine *transformed = doit(inp);
-
-	/* Now eliminate redundant states.  The algorithm for doing so
-	   is essentially a Tarski iteration: we start by assuming
-	   that all states are equivalent, and then look for
-	   contradictions.  When we find one, we weaken the
-	   assumption.  Iterate until there are no more
-	   contradictions, and then collapse the machine by
-	   eliminating redundancies. */
-
-	/* Leave that alone for now so that I can look at other
-	 * bits. */
-#warning Write me
-
-	return transformed;
+	return doit(inp);
 }
 
 IRExpr *
