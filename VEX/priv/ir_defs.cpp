@@ -269,6 +269,7 @@ void ppIROp ( IROp op, FILE* f )
       case Iop_1Sto16:   fprintf(f, "1Sto16");  return;
       case Iop_1Sto32:   fprintf(f, "1Sto32");  return;
       case Iop_1Sto64:   fprintf(f, "1Sto64");  return;
+      case Iop_And1:     fprintf(f, "And1");    return;
 
       case Iop_MullS8:   fprintf(f, "MullS8");  return;
       case Iop_MullS16:  fprintf(f, "MullS16"); return;

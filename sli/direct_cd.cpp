@@ -440,6 +440,7 @@ public:
 	void clusterRips(const std::set<unsigned long> &inputRips,
 			 std::set<std::set<unsigned long> > &outputClusters);
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
+	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 
 	Oracle(MachineState *_ms, Thread *_thr)
 		: ms(_ms), crashedThread(_thr)
@@ -1361,6 +1362,29 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	}
 }
 
+bool
+Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
+				 StateMachineSideEffectStore *smses)
+{
+	switch (smsel->rip) {
+	case 0x400676:
+		return true;
+	case 0x40064c:
+		switch (smses->rip) {
+		case 0x40066c:
+		case 0x4006f2:
+			return true;
+		case 0x400641:
+			return false;
+		default:
+			abort();
+		}
+		abort();
+	default:
+		abort();
+	}
+}
+
 static void
 enumerateCFG(CFGNode *root, std::map<unsigned long, CFGNode *> &rips)
 {
@@ -1513,7 +1537,8 @@ static bool
 operationCommutes(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) ||
-		(op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64);
+		(op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64) ||
+		(op == Iop_And1);
 }
 
 /* Returns true if the operation definitely associates in the sense
@@ -1521,7 +1546,7 @@ operationCommutes(IROp op)
 static bool
 operationAssociates(IROp op)
 {
-	return op >= Iop_Add8 && op <= Iop_Add64;
+	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1);
 }
 
 static bool
@@ -1597,7 +1622,10 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 			return false;
 		return a->Iex.Qop.op == b->Iex.Qop.op;
 	case Iex_Load:
-		abort();
+		return a->Iex.Load.isLL == b->Iex.Load.isLL &&
+			a->Iex.Load.end == b->Iex.Load.end &&
+			a->Iex.Load.ty == b->Iex.Load.ty &&
+			physicallyEqual(a->Iex.Load.addr, b->Iex.Load.addr);
 	case Iex_Const:
 		return physicallyEqual(a->Iex.Const.con, b->Iex.Const.con);
 	case Iex_CCall: {
@@ -1737,6 +1765,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 				return IRExpr_Const(IRConst_U32(-c->Ico.U32));
 			case Iop_Neg64:
 				return IRExpr_Const(IRConst_U64(-c->Ico.U64));
+			case Iop_Not1:
+				return IRExpr_Const(IRConst_U1(c->Ico.U1 ^ 1));
 			default:
 				break;
 			}
@@ -1880,13 +1910,22 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 			return IRExpr_Const(IRConst_U1(0));
 
 		/* x & x -> x */
-		if (src->Iex.Binop.op >= Iop_And8 &&
-		    src->Iex.Binop.op <= Iop_And64 &&
+		if (((src->Iex.Binop.op >= Iop_And8 &&
+		      src->Iex.Binop.op <= Iop_And64) ||
+		     src->Iex.Binop.op == Iop_And1) &&
 		    definitelyEqual(src->Iex.Binop.arg1,
 				    src->Iex.Binop.arg2,
 				    opt))
 			return src->Iex.Binop.arg1;
 
+		/* x & 0 -> 0, x & 1 -> x */
+		if (src->Iex.Binop.op == Iop_And1 &&
+		    src->Iex.Binop.arg2->tag == Iex_Const) {
+			if (src->Iex.Binop.arg2->Iex.Const.con->Ico.U1)
+				return src->Iex.Binop.arg1;
+			else
+				return src->Iex.Binop.arg2;
+		}
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
 		if (src->Iex.Binop.arg1->tag == Iex_Const &&
@@ -1911,6 +1950,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 				return IRExpr_Const(
 					IRConst_U64(
 						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 +
+						src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+			case Iop_CmpEQ64:
+				return IRExpr_Const(
+					IRConst_U1(
+						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 ==
 						src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
 			default:
 				break;
@@ -2914,6 +2958,250 @@ CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg)
 	return CFGtoStoreMachine(as, cfg, memo);
 }
 
+class StateMachineEvalContext {
+public:
+	std::vector<StateMachineSideEffectStore *> stores;
+	std::map<Int, IRExpr *> binders;
+	IRExpr *pathConstraint;
+};
+
+static IRExpr *
+specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
+{
+	switch (iex->tag) {
+	case Iex_Binder:
+		assert(ctxt.binders[iex->Iex.Binder.binder]);
+		return ctxt.binders[iex->Iex.Binder.binder];
+	case Iex_Get:
+		return iex;
+	case Iex_GetI:
+		return IRExpr_GetI(
+			iex->Iex.GetI.descr,
+			specialiseIRExpr(iex->Iex.GetI.ix, ctxt),
+			iex->Iex.GetI.bias);
+	case Iex_RdTmp:
+		return iex;
+	case Iex_Qop:
+		return IRExpr_Qop(
+			iex->Iex.Qop.op,
+			specialiseIRExpr(iex->Iex.Qop.arg1, ctxt),
+			specialiseIRExpr(iex->Iex.Qop.arg2, ctxt),
+			specialiseIRExpr(iex->Iex.Qop.arg3, ctxt),
+			specialiseIRExpr(iex->Iex.Qop.arg4, ctxt));
+	case Iex_Triop:
+		return IRExpr_Triop(
+			iex->Iex.Triop.op,
+			specialiseIRExpr(iex->Iex.Triop.arg1, ctxt),
+			specialiseIRExpr(iex->Iex.Triop.arg2, ctxt),
+			specialiseIRExpr(iex->Iex.Triop.arg3, ctxt));
+	case Iex_Binop:
+		return IRExpr_Binop(
+			iex->Iex.Binop.op,
+			specialiseIRExpr(iex->Iex.Binop.arg1, ctxt),
+			specialiseIRExpr(iex->Iex.Binop.arg2, ctxt));
+	case Iex_Unop:
+		return IRExpr_Unop(
+			iex->Iex.Unop.op,
+			specialiseIRExpr(iex->Iex.Unop.arg, ctxt));
+	case Iex_Load:
+		return IRExpr_Load(
+			iex->Iex.Load.isLL,
+			iex->Iex.Load.end,
+			iex->Iex.Load.ty,
+			specialiseIRExpr(iex->Iex.Load.addr, ctxt));
+	case Iex_Const:
+		return iex;
+	case Iex_CCall: {
+		IRExpr **args;
+		int n;
+		for (n = 0; iex->Iex.CCall.args[n]; n++)
+			;
+		args = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, n + 1);
+		for (n = 0; iex->Iex.CCall.args[n]; n++)
+			args[n] = specialiseIRExpr(iex->Iex.CCall.args[n], ctxt);
+		return IRExpr_CCall(
+			iex->Iex.CCall.cee,
+			iex->Iex.CCall.retty,
+			args);
+	}
+	case Iex_Mux0X:
+		return IRExpr_Mux0X(
+			specialiseIRExpr(iex->Iex.Mux0X.cond, ctxt),
+			specialiseIRExpr(iex->Iex.Mux0X.expr0, ctxt),
+			specialiseIRExpr(iex->Iex.Mux0X.exprX, ctxt));
+	}
+	abort();
+}
+
+static bool
+expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
+{
+	exp = specialiseIRExpr(exp, ctxt);
+	printf("Check whether ");
+	ppIRExpr(exp, stdout);
+	printf(" is true\n");
+#warning Write me
+	if (chooser.nd_choice(2) == 0) {
+		printf("Assume true\n");
+		ctxt.pathConstraint =
+			IRExpr_Binop(
+				Iop_And1,
+				ctxt.pathConstraint,
+				exp);
+		return true;
+	} else {
+		printf("Assume false\n");
+		ctxt.pathConstraint =
+			IRExpr_Binop(
+				Iop_And1,
+				ctxt.pathConstraint,
+				IRExpr_Unop(
+					Iop_Not1,
+					exp));
+		return false;
+	}
+}
+
+static bool
+evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, StateMachineEvalContext &ctxt)
+{
+	return expressionIsTrue(IRExpr_Binop(
+					Iop_CmpEQ64,
+					exp1,
+					exp2),
+				chooser,
+				ctxt);
+}
+
+static void evalStateMachine(StateMachine *sm,
+			     bool *crashes,
+			     NdChooser &chooser,
+			     Oracle *oracle,
+			     StateMachineEvalContext &ctxt);
+
+static void
+evalStateMachineSideEffect(StateMachineSideEffect *smse,
+			   NdChooser &chooser,
+			   Oracle *oracle,
+			   StateMachineEvalContext &ctxt)
+{
+	if (StateMachineSideEffectStore *smses =
+	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+		ctxt.stores.push_back(
+			new StateMachineSideEffectStore(
+				specialiseIRExpr(smses->addr, ctxt),
+				specialiseIRExpr(smses->data, ctxt),
+				smses->rip
+				)
+				);
+	} else if (StateMachineSideEffectLoad *smsel =
+		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+		IRExpr *val;
+		val = NULL;
+		for (std::vector<StateMachineSideEffectStore *>::reverse_iterator it = ctxt.stores.rbegin();
+		     !val && it != ctxt.stores.rend();
+		     it++) {
+			StateMachineSideEffectStore *smses = *it;
+			if (!oracle->memoryAccessesMightAlias(smsel, smses))
+				continue;
+			if (evalExpressionsEqual(smses->addr, smsel->addr, chooser, ctxt))
+				val = smses->data;
+		}
+		if (!val)
+			val = IRExpr_Load(False, Iend_LE, Ity_I64, smsel->addr);
+		ctxt.binders[smsel->key] = val;
+	} else if (StateMachineSideEffectCopy *smsec =
+		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
+		ctxt.binders[smsec->key] =
+			specialiseIRExpr(smsec->value, ctxt);
+	} else {
+		abort();
+	}
+}
+
+static void
+evalStateMachineEdge(StateMachineEdge *sme,
+		     bool *crashes,
+		     NdChooser &chooser,
+		     Oracle *oracle,
+		     StateMachineEvalContext &ctxt)
+{
+	for (std::vector<StateMachineSideEffect *>::iterator it = sme->sideEffects.begin();
+	     it != sme->sideEffects.end();
+	     it++)
+		evalStateMachineSideEffect(*it, chooser, oracle, ctxt);
+	evalStateMachine(sme->target, crashes, chooser, oracle, ctxt);
+}
+
+/* Walk the state machine and figure out whether it's going to crash.
+   If we hit something which we can't solve statically or via the
+   oracle, ask the chooser which way we should go, and then emit a
+   path constraint saying which way we went.  Stubs are assumed to
+   never crash. */
+static void
+evalStateMachine(StateMachine *sm,
+		 bool *crashes,
+		 NdChooser &chooser,
+		 Oracle *oracle,
+		 StateMachineEvalContext &ctxt)
+{
+	if (dynamic_cast<StateMachineCrash *>(sm)) {
+		*crashes = true;
+		return;
+	}
+	if (dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm)) {
+		*crashes = false;
+		return;
+	}
+	if (StateMachineProxy *smp =
+	    dynamic_cast<StateMachineProxy *>(sm)) {
+		evalStateMachineEdge(smp->target, crashes, chooser, oracle, ctxt);
+		return;
+	}
+	if (StateMachineBifurcate *smb =
+	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+		if (expressionIsTrue(smb->condition, chooser, ctxt)) {
+			evalStateMachineEdge(smb->trueTarget, crashes, chooser, oracle, ctxt);
+		} else {
+			evalStateMachineEdge(smb->falseTarget, crashes, chooser, oracle, ctxt);
+		}
+		return;
+	}
+	abort();
+}
+
+/* Assume that @sm executes atomically.  Figure out a constraint on
+   the initial state which will lead to it not crashing. */
+static IRExpr *
+survivalConstraintIfExecutedAtomically(StateMachine *sm, Oracle *oracle)
+{
+	NdChooser chooser;
+	IRExpr *currentConstraint = IRExpr_Const(IRConst_U1(1));
+	bool crashes;
+
+	do {
+		printf("Starting eval run\n");
+		StateMachineEvalContext ctxt;
+		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
+		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
+		if (crashes) {
+			/* This path leads to a crash, so the
+			   constraint should include something to make
+			   sure that we don't go down here. */
+			currentConstraint =
+				IRExpr_Binop(
+					Iop_And1,
+					currentConstraint,
+					IRExpr_Unop(
+						Iop_Not1,
+						ctxt.pathConstraint));
+		}
+	} while (chooser.advance());
+
+	return currentConstraint;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -2953,6 +3241,14 @@ main(int argc, char *argv[])
 		cr->sm = bisimilarityReduction(cr->sm, opt);
 		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
+
+		printf("Survival constraint: \n");
+		IRExpr *survive =
+			optimiseIRExpr(
+				survivalConstraintIfExecutedAtomically(cr->sm, oracle),
+				opt);
+		ppIRExpr(survive, stdout);
+		printf("\n");
 
 		std::set<StateMachineSideEffectLoad *> allLoads;
 		findAllLoads(cr->sm, allLoads);

@@ -534,6 +534,7 @@ typedef
       Iop_1Sto16, /* :: Ity_Bit -> Ity_I16, signed widen */
       Iop_1Sto32, /* :: Ity_Bit -> Ity_I32, signed widen */
       Iop_1Sto64, /* :: Ity_Bit -> Ity_I64, signed widen */
+      Iop_And1,
 
       /* ------ Floating point.  We try to be IEEE754 compliant. ------ */
 
