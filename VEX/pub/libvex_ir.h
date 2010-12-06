@@ -48,6 +48,7 @@
 #define __LIBVEX_IR_H
 
 #include <stdio.h>
+#include <vector>
 
 #include "libvex_basictypes.h"
 #include "libvex_alloc.h"
@@ -934,7 +935,8 @@ typedef
       Iex_Load,
       Iex_Const,
       Iex_Mux0X,
-      Iex_CCall
+      Iex_CCall,
+      Iex_Associative /* n-ary associative operator */
    }
    IRExprTag;
 
@@ -1140,8 +1142,17 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          IRExpr* expr0;    /* True expression */
          IRExpr* exprX;    /* False expression */
       } Mux0X;
+
+      /* An associative operator with as many arguments as are needed.
+	 Because it's associative, the exact nesting order doesn't
+	 matter. */
+      struct {
+	 IROp op;
+	 std::vector<IRExpr *> *content;
+      } Associative;
    } Iex;
    void visit(HeapVisitor &hv);
+   void destruct() { if (tag == Iex_Associative) delete Iex.Associative.content; }
    NAMED_CLASS
 };
 
@@ -1161,6 +1172,7 @@ extern IRExpr* IRExpr_Load   ( Bool isLL, IREndness end,
 extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
+extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 
 /* Deep-copy an IRExpr. */
 extern IRExpr* deepCopyIRExpr ( IRExpr* );

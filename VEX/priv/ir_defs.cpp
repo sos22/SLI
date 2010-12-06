@@ -43,6 +43,7 @@
    used to endorse or promote products derived from this software
    without prior written permission.
 */
+#include <stdarg.h>
 
 #include "libvex_basictypes.h"
 #include "libvex_ir.h"
@@ -96,6 +97,10 @@ IRExpr::visit(HeapVisitor &visit)
      visit(Iex.Mux0X.cond);
      visit(Iex.Mux0X.expr0);
      visit(Iex.Mux0X.exprX);
+     break;
+   case Iex_Associative: 
+     for (unsigned x = 0; x < Iex.Associative.content->size(); x++)
+       visit((*Iex.Associative.content)[x]);
      break;
    }
 }
@@ -688,22 +693,22 @@ void ppIRExpr ( IRExpr* e, FILE *f )
   switch (e->tag) {
     case Iex_Binder:
       fprintf(f, "BIND-%d", e->Iex.Binder.binder);
-      break;
+      return;
     case Iex_Get:
       fprintf(f,  "GET:" );
       ppIRType(e->Iex.Get.ty, f);
       fprintf(f, "(%d)", e->Iex.Get.offset);
-      break;
+      return;
     case Iex_GetI:
       fprintf(f,  "GETI" );
       ppIRRegArray(e->Iex.GetI.descr, f);
       fprintf(f, "[");
       ppIRExpr(e->Iex.GetI.ix, f);
       fprintf(f, ",%d]", e->Iex.GetI.bias);
-      break;
+      return;
     case Iex_RdTmp:
       ppIRTemp(e->Iex.RdTmp.tmp, f);
-      break;
+      return;
     case Iex_Qop:
       ppIROp(e->Iex.Qop.op, f);
       fprintf(f,  "(" );
@@ -715,7 +720,7 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f,  "," );
       ppIRExpr(e->Iex.Qop.arg4, f);
       fprintf(f,  ")" );
-      break;
+      return;
     case Iex_Triop:
       ppIROp(e->Iex.Triop.op, f);
       fprintf(f,  "(" );
@@ -725,7 +730,7 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f,  "," );
       ppIRExpr(e->Iex.Triop.arg3, f);
       fprintf(f,  ")" );
-      break;
+      return;
     case Iex_Binop:
       ppIROp(e->Iex.Binop.op, f);
       fprintf(f,  "(" );
@@ -733,13 +738,13 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f,  "," );
       ppIRExpr(e->Iex.Binop.arg2, f);
       fprintf(f,  ")" );
-      break;
+      return;
     case Iex_Unop:
       ppIROp(e->Iex.Unop.op, f);
       fprintf(f,  "(" );
       ppIRExpr(e->Iex.Unop.arg, f);
       fprintf(f,  ")" );
-      break;
+      return;
     case Iex_Load:
       fprintf(f,  "LD%s%s:", e->Iex.Load.end==Iend_LE ? "le" : "be",
                              e->Iex.Load.isLL ? "-LL" : "" );
@@ -747,10 +752,10 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f,  "(" );
       ppIRExpr(e->Iex.Load.addr, f);
       fprintf(f,  ")" );
-      break;
+      return;
     case Iex_Const:
       ppIRConst(e->Iex.Const.con, f);
-      break;
+      return;
     case Iex_CCall:
       ppIRCallee(e->Iex.CCall.cee, f);
       fprintf(f, "(");
@@ -761,7 +766,7 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       }
       fprintf(f, "):");
       ppIRType(e->Iex.CCall.retty, f);
-      break;
+      return;
     case Iex_Mux0X:
       fprintf(f, "Mux0X(");
       ppIRExpr(e->Iex.Mux0X.cond, f);
@@ -770,10 +775,20 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f, ",");
       ppIRExpr(e->Iex.Mux0X.exprX, f);
       fprintf(f, ")");
-      break;
-    default:
-      vpanic("ppIRExpr");
+      return;
+    case Iex_Associative:
+      fprintf(f, "Assoc(");
+      ppIROp(e->Iex.Associative.op, stdout);
+      fprintf(f, ":");
+      for (unsigned x = 0; x < e->Iex.Associative.content->size(); x++) {
+	 if (x != 0)
+	   fprintf(f, ", ");
+	 ppIRExpr((*e->Iex.Associative.content)[x], stdout);
+      }
+      fprintf(f, ")");
+      return;
   }
+  vpanic("ppIRExpr");
 }
 
 void ppIREffect ( IREffect fx, FILE* f )
@@ -1186,7 +1201,22 @@ IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
    e->Iex.Mux0X.exprX = exprX;
    return e;
 }
-
+IRExpr* IRExpr_Associative(IROp op, ...) {
+  IRExpr* e           = new IRExpr();
+  e->tag              = Iex_Associative;
+  e->Iex.Associative.op = op;
+  e->Iex.Associative.content = new std::vector<IRExpr *>();
+  va_list args;
+  va_start(args, op);
+  IRExpr *arg;
+  arg = va_arg(args, IRExpr *);
+  while (arg) {
+     e->Iex.Associative.content->push_back(arg);
+     arg = va_arg(args, IRExpr *);
+  }
+  va_end(args);
+  return e;
+}
 
 /* Constructors for NULL-terminated IRExpr expression vectors,
    suitable for use as arg lists in clean/dirty helper calls. */
@@ -1488,6 +1518,8 @@ IRRegArray* deepCopyIRRegArray ( IRRegArray* d )
 IRExpr* deepCopyIRExpr ( IRExpr* e )
 {
    switch (e->tag) {
+      case Iex_Binder:
+	 return IRExpr_Binder(e->Iex.Binder.binder);
       case Iex_Get: 
          return IRExpr_Get(e->Iex.Get.offset, e->Iex.Get.ty);
       case Iex_GetI: 
@@ -1530,9 +1562,16 @@ IRExpr* deepCopyIRExpr ( IRExpr* e )
          return IRExpr_Mux0X(deepCopyIRExpr(e->Iex.Mux0X.cond),
                              deepCopyIRExpr(e->Iex.Mux0X.expr0),
                              deepCopyIRExpr(e->Iex.Mux0X.exprX));
-      default:
-         vpanic("deepCopyIRExpr");
+      case Iex_Associative: {
+	 IRExpr *e2 = IRExpr_Associative(e->Iex.Associative.op, NULL);
+	 for (std::vector<IRExpr *>::iterator it = e->Iex.Associative.content->begin();
+	      it != e->Iex.Associative.content->end();
+	      it++)
+	    e2->Iex.Associative.content->push_back(*it);
+	 return e2;
+      }
    }
+   vpanic("deepCopyIRExpr");
 }
 
 IRDirty* deepCopyIRDirty ( IRDirty* d )
@@ -2110,20 +2149,12 @@ IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
          return typeOfIRTemp(tyenv, e->Iex.RdTmp.tmp);
       case Iex_Const:
          return typeOfIRConst(e->Iex.Const.con);
+      case Iex_Associative:
       case Iex_Qop:
-         typeOfPrimop(e->Iex.Qop.op, 
-                      &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
-         return t_dst;
       case Iex_Triop:
-         typeOfPrimop(e->Iex.Triop.op, 
-                      &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
-         return t_dst;
       case Iex_Binop:
-         typeOfPrimop(e->Iex.Binop.op, 
-                      &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
-         return t_dst;
       case Iex_Unop:
-         typeOfPrimop(e->Iex.Unop.op, 
+         typeOfPrimop(e->Iex.Qop.op, 
                       &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
          return t_dst;
       case Iex_CCall:
@@ -2134,10 +2165,10 @@ IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
          /* return typeOfIRExpr(tyenv, e->Iex.Mux0X.expr0); */
       case Iex_Binder:
          vpanic("typeOfIRExpr: Binder is not a valid expression");
-      default:
-	 ppIRExpr(e, stderr);
-         vpanic("typeOfIRExpr");
+	 break;
    }
+   ppIRExpr(e, stderr);
+   vpanic("typeOfIRExpr");
 }
 
 /* Is this any value actually in the enumeration 'IRType' ? */
@@ -2220,9 +2251,9 @@ Bool isFlatIRStmt ( IRStmt* st )
                                     isIRAtom(e->Iex.Mux0X.cond) 
                                     && isIRAtom(e->Iex.Mux0X.expr0) 
                                     && isIRAtom(e->Iex.Mux0X.exprX));
-            default:         vpanic("isFlatIRStmt(e)");
+	    case Iex_Associative: return False;
          }
-         /*notreached*/
+         vpanic("isFlatIRStmt(e)");
          vassert(0);
       case Ist_Store:
          return toBool( isIRAtom(st->Ist.Store.addr) 
@@ -2341,49 +2372,56 @@ void useBeforeDef_Expr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, Int* def_counts )
 {
    Int i;
    switch (expr->tag) {
+      case Iex_Binder:
+	 return;
       case Iex_Get: 
-         break;
+         return;
       case Iex_GetI:
          useBeforeDef_Expr(bb,stmt,expr->Iex.GetI.ix,def_counts);
-         break;
+         return;
       case Iex_RdTmp:
          useBeforeDef_Temp(bb,stmt,expr->Iex.RdTmp.tmp,def_counts);
-         break;
+         return;
       case Iex_Qop:
          useBeforeDef_Expr(bb,stmt,expr->Iex.Qop.arg1,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Qop.arg2,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Qop.arg3,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Qop.arg4,def_counts);
-         break;
+         return;
       case Iex_Triop:
          useBeforeDef_Expr(bb,stmt,expr->Iex.Triop.arg1,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Triop.arg2,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Triop.arg3,def_counts);
-         break;
+         return;
       case Iex_Binop:
          useBeforeDef_Expr(bb,stmt,expr->Iex.Binop.arg1,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Binop.arg2,def_counts);
-         break;
+         return;
       case Iex_Unop:
          useBeforeDef_Expr(bb,stmt,expr->Iex.Unop.arg,def_counts);
-         break;
+         return;
       case Iex_Load:
          useBeforeDef_Expr(bb,stmt,expr->Iex.Load.addr,def_counts);
-         break;
+         return;
       case Iex_Const:
-         break;
+         return;
       case Iex_CCall:
          for (i = 0; expr->Iex.CCall.args[i]; i++)
             useBeforeDef_Expr(bb,stmt,expr->Iex.CCall.args[i],def_counts);
-         break;
+         return;
       case Iex_Mux0X:
          useBeforeDef_Expr(bb,stmt,expr->Iex.Mux0X.cond,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Mux0X.expr0,def_counts);
          useBeforeDef_Expr(bb,stmt,expr->Iex.Mux0X.exprX,def_counts);
-         break;
-      default:
-         vpanic("useBeforeDef_Expr");
+         return;
+      case Iex_Associative:
+	 for (std::vector<IRExpr *>::iterator it = expr->Iex.Associative.content->begin();
+	      it != expr->Iex.Associative.content->end();
+	      it++)
+	    useBeforeDef_Expr(bb,stmt,*it,def_counts);
+         return;
    }
+   vpanic("useBeforeDef_Expr");
 }
 
 static
@@ -2450,14 +2488,15 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
    switch (expr->tag) {
       case Iex_Get:
       case Iex_RdTmp:
-         break;
+      case Iex_Binder:
+         return;
       case Iex_GetI:
          tcExpr(bb,stmt, expr->Iex.GetI.ix, gWordTy );
          if (typeOfIRExpr(tyenv,expr->Iex.GetI.ix) != Ity_I32)
             sanityCheckFail(bb,stmt,"IRExpr.GetI.ix: not :: Ity_I32");
          if (!saneIRRegArray(expr->Iex.GetI.descr))
             sanityCheckFail(bb,stmt,"IRExpr.GetI.descr: invalid descr");
-         break;
+         return;
       case Iex_Qop: {
          IRType ttarg1, ttarg2, ttarg3, ttarg4;
          tcExpr(bb,stmt, expr->Iex.Qop.arg1, gWordTy );
@@ -2507,7 +2546,7 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
                "Iex.Qop: arg tys don't match op tys\n"
                "... additional details precede BB printout\n");
          }
-         break;
+         return;
       }
       case Iex_Triop: {
          IRType ttarg1, ttarg2, ttarg3;
@@ -2551,7 +2590,7 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
                "Iex.Triop: arg tys don't match op tys\n"
                "... additional details precede BB printout\n");
          }
-         break;
+         return;
       }
       case Iex_Binop: {
          IRType ttarg1, ttarg2;
@@ -2589,7 +2628,7 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
                "Iex.Binop: arg tys don't match op tys\n"
                "... additional details precede BB printout\n");
          }
-         break;
+         return;
       }
       case Iex_Unop:
          tcExpr(bb,stmt, expr->Iex.Unop.arg, gWordTy );
@@ -2600,14 +2639,14 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
             sanityCheckFail(bb,stmt,"Iex.Unop: wrong arity op");
          if (t_arg1 != typeOfIRExpr(tyenv, expr->Iex.Unop.arg))
             sanityCheckFail(bb,stmt,"Iex.Unop: arg ty doesn't match op ty");
-         break;
+         return;
       case Iex_Load:
          tcExpr(bb,stmt, expr->Iex.Load.addr, gWordTy);
          if (typeOfIRExpr(tyenv, expr->Iex.Load.addr) != gWordTy)
             sanityCheckFail(bb,stmt,"Iex.Load.addr: not :: guest word type");
          if (expr->Iex.Load.end != Iend_LE && expr->Iex.Load.end != Iend_BE)
             sanityCheckFail(bb,stmt,"Iex.Load.end: bogus endianness");
-         break;
+         return;
       case Iex_CCall:
          if (!saneIRCallee(expr->Iex.CCall.cee))
             sanityCheckFail(bb,stmt,"Iex.CCall.cee: bad IRCallee");
@@ -2623,11 +2662,11 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
          for (i = 0; expr->Iex.CCall.args[i]; i++)
             if (typeOfIRExpr(tyenv, expr->Iex.CCall.args[i]) == Ity_I1)
                sanityCheckFail(bb,stmt,"Iex.CCall.arg: arg :: Ity_I1");
-         break;
+         return;
       case Iex_Const:
          if (!saneIRConst(expr->Iex.Const.con))
             sanityCheckFail(bb,stmt,"Iex.Const.con: invalid const");
-         break;
+         return;
       case Iex_Mux0X:
          tcExpr(bb,stmt, expr->Iex.Mux0X.cond, gWordTy);
          tcExpr(bb,stmt, expr->Iex.Mux0X.expr0, gWordTy);
@@ -2637,10 +2676,11 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
          if (typeOfIRExpr(tyenv, expr->Iex.Mux0X.expr0)
              != typeOfIRExpr(tyenv, expr->Iex.Mux0X.exprX))
             sanityCheckFail(bb,stmt,"Iex.Mux0X: expr0/exprX mismatch");
-         break;
-       default: 
-         vpanic("tcExpr");
+         return;
+      case Iex_Associative:
+	 return;
    }
+   vpanic("tcExpr");
 }
 
 
