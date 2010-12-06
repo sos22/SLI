@@ -80,7 +80,7 @@ public:
    expression is guaranteed to be equivalent to the old one in any
    context.  We may mutate the expression in-place, which is okay
    because there are no semantic changes. */
-static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &);
+static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, IRExpr *assumption = NULL);
 
 static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
 
@@ -1925,26 +1925,26 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
+optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumption)
 {
 	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
-		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt);
+		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt, assumption);
 	case Iex_Triop:
-		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt);
+		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt, assumption);
 	case Iex_Binop:
-		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt);
+		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt, assumption);
 	case Iex_Unop:
-		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt);
+		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt, assumption);
 		break;
 	case Iex_Load:
-		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt);
+		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt, assumption);
 		break;
 	case Iex_CCall: {
 		for (int x = 0; src->Iex.CCall.args[x]; x++) {
 			src->Iex.CCall.args[x] =
-				optimiseIRExpr(src->Iex.CCall.args[x], opt);
+				optimiseIRExpr(src->Iex.CCall.args[x], opt, assumption);
 		}
 		/* Special cases for amd64g_calculate_condition. */
 		if (!strcmp(src->Iex.CCall.cee->name,
@@ -1963,19 +1963,22 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 		break;
 	}
 	case Iex_Mux0X:
-		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt);
-		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt);
-		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt);
+		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt, assumption);
+		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt, assumption);
+		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt, assumption);
 		break;
 	case Iex_Associative:
 		for (std::vector<IRExpr *>::iterator it = src->Iex.Associative.content->begin();
 		     it != src->Iex.Associative.content->end();
 		     it++)
-			*it = optimiseIRExpr(*it, opt);
+			*it = optimiseIRExpr(*it, opt, assumption);
 		break;
 	default:
 		break;
 	}
+
+	if (assumption && physicallyEqual(src, assumption))
+		return IRExpr_Const(IRConst_U1(1));
 
 	if (src->tag == Iex_Associative) {
 		/* Drag up nested associatives. */
@@ -2053,6 +2056,17 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 				else
 					return *newArgs->begin();
 			}
+
+			/* Also: in x & y, when optimising y, you can
+			   assume that y is true. */
+			for (std::vector<IRExpr *>::iterator it1 = newArgs->begin();
+			     it1 != newArgs->end();
+			     it1++) {
+				for (std::vector<IRExpr *>::iterator it2 = it1 + 1;
+				     it2 != newArgs->end();
+				     it2++)
+					*it2 = optimiseIRExpr(*it2, opt, *it1);
+			}
 		}
 
 		/* If the size is reduced to one, eliminate the assoc list */
@@ -2108,7 +2122,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 					src->Iex.Binop.arg1,
 					src->Iex.Binop.arg2,
 					NULL),
-				opt);
+				opt, assumption);
 		}
 		if (src->Iex.Binop.op >= Iop_Sub8 &&
 		    src->Iex.Binop.op <= Iop_Sub64) {
@@ -2119,7 +2133,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 				optimiseIRExpr(
 					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
 						     src->Iex.Binop.arg2 ),
-					opt);
+					opt, assumption);
 		}
 		/* If a op b commutes, and b is a constant and a
 		   isn't, rewrite to b op a. */
@@ -2145,7 +2159,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 					IRExpr_Binop(src->Iex.Binop.op,
 						     a->Iex.Binop.arg2,
 						     src->Iex.Binop.arg2),
-					opt);
+					opt, assumption);
 		}
 
 		/* We simplify == expressions with sums on the left
@@ -2165,11 +2179,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 							IRExpr_Unop(
 								Iop_Neg64,
 								src->Iex.Binop.arg1->Iex.Binop.arg2)),
-						opt);
+						opt, assumption);
 				src->Iex.Binop.arg1 =
 					src->Iex.Binop.arg1->Iex.Binop.arg1;
 				src->Iex.Binop.arg2 = r;
-				return optimiseIRExpr(src, opt);
+				return optimiseIRExpr(src, opt, assumption);
 			}
 			if (src->Iex.Binop.arg2->tag == Iex_Binop &&
 			    src->Iex.Binop.arg2->Iex.Binop.op == Iop_Add64) {
@@ -2190,11 +2204,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 							IRExpr_Unop(
 								Iop_Neg64,
 								src->Iex.Binop.arg2->Iex.Binop.arg1)),
-						opt);
+						opt, assumption);
 				src->Iex.Binop.arg2 =
 					src->Iex.Binop.arg2->Iex.Binop.arg2;
 				src->Iex.Binop.arg1 = l;
-				return optimiseIRExpr(src, opt);
+				return optimiseIRExpr(src, opt, assumption);
 			}
 			/* If, in a == b, a and b are physically
 			 * identical, the result is a constant 1. */
@@ -2211,7 +2225,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 							Iop_Neg64,
 							src->Iex.Binop.arg2));
 				src->Iex.Binop.arg2 = IRExpr_Const(IRConst_U64(0));
-				return optimiseIRExpr(src, opt);
+				return optimiseIRExpr(src, opt, assumption);
 			}
 		}
 
@@ -2233,7 +2247,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt)
 			src->Iex.Binop.arg1 = src->Iex.Binop.arg1->Iex.Unop.arg;
 			src->Iex.Binop.arg2 = IRExpr_Const(
 				IRConst_U64(-src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
-			return optimiseIRExpr(src, opt);
+			return optimiseIRExpr(src, opt, assumption);
 		}
 
 		/* If enabled, assume that the stack is ``private'',
