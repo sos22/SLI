@@ -1560,7 +1560,8 @@ operationCommutes(IROp op)
 static bool
 operationAssociates(IROp op)
 {
-	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1);
+	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
+		(op >= Iop_And8 && op <= Iop_And64);
 }
 
 static bool
@@ -1977,7 +1978,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		break;
 	}
 
-	if (assumption && physicallyEqual(src, assumption))
+	if (assumption && definitelyEqual(src, assumption, opt))
 		return IRExpr_Const(IRConst_U1(1));
 
 	if (src->tag == Iex_Associative) {
@@ -2069,6 +2070,21 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			}
 		}
 
+		/* x & x -> x, for any and-like operator */
+		if (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) {
+			for (std::vector<IRExpr *>::iterator it1 = newArgs->begin();
+			     it1 != newArgs->end();
+			     it1++) {
+				for (std::vector<IRExpr *>::iterator it2 = it1 + 1;
+				     it2 != newArgs->end();
+					)
+					if (definitelyEqual(*it1, *it2, opt))
+						it2 = newArgs->erase(it2);
+					else
+						it2++;
+			}
+		}
+
 		/* If the size is reduced to one, eliminate the assoc list */
 		if (newArgs->size() == 1)
 			return *newArgs->begin();
@@ -2143,23 +2159,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			IRExpr *a = src->Iex.Binop.arg1;
 			src->Iex.Binop.arg1 = src->Iex.Binop.arg2;
 			src->Iex.Binop.arg2 = a;
-		}
-		/* (a op CONST) op CONST gets rewritten to a op (CONST op CONST)
-		   if op is associative. */
-		if (src->Iex.Binop.arg1->tag == Iex_Binop &&
-		    src->Iex.Binop.op == src->Iex.Binop.arg1->Iex.Binop.op &&
-		    src->Iex.Binop.arg2->tag == Iex_Const &&
-		    src->Iex.Binop.arg1->Iex.Binop.arg2->tag == Iex_Const &&
-		    operationAssociates(src->Iex.Binop.op)) {
-			IRExpr *a;
-			a = src->Iex.Binop.arg1;
-			src->Iex.Binop.arg1 = a->Iex.Binop.arg1;
-			src->Iex.Binop.arg2 =
-				optimiseIRExpr(
-					IRExpr_Binop(src->Iex.Binop.op,
-						     a->Iex.Binop.arg2,
-						     src->Iex.Binop.arg2),
-					opt, assumption);
 		}
 
 		/* We simplify == expressions with sums on the left
@@ -2261,23 +2260,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		    src->Iex.Binop.arg2->tag == Iex_Const)
 			return IRExpr_Const(IRConst_U1(0));
 
-		/* x & x -> x */
-		if (((src->Iex.Binop.op >= Iop_And8 &&
-		      src->Iex.Binop.op <= Iop_And64) ||
-		     src->Iex.Binop.op == Iop_And1) &&
-		    definitelyEqual(src->Iex.Binop.arg1,
-				    src->Iex.Binop.arg2,
-				    opt))
-			return src->Iex.Binop.arg1;
-
-		/* x & 0 -> 0, x & 1 -> x */
-		if (src->Iex.Binop.op == Iop_And1 &&
-		    src->Iex.Binop.arg2->tag == Iex_Const) {
-			if (src->Iex.Binop.arg2->Iex.Const.con->Ico.U1)
-				return src->Iex.Binop.arg1;
-			else
-				return src->Iex.Binop.arg2;
-		}
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
 		if (src->Iex.Binop.arg1->tag == Iex_Const &&
