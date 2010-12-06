@@ -3387,11 +3387,6 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 	exp = optimiseIRExpr(
 		specialiseIRExpr(exp, ctxt),
 		AllowableOptimisations::defaultOptimisations);
-	printf("Check whether ");
-	ppIRExpr(exp, stdout);
-	printf(" is true using ");
-	ppIRExpr(ctxt.pathConstraint, stdout);
-	printf("\n");
 
 	/* Combine the path constraint with the new expression and see
 	   if that produces a contradiction.  If it does then we know
@@ -3446,12 +3441,12 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		return true;
 	}
 
+	/* Can't prove it one way or another.  Use the
+	   non-deterministic chooser to guess. */
 	if (chooser.nd_choice(2) == 0) {
-		printf("Assume true\n");
 		ctxt.pathConstraint = e;
 		return true;
 	} else {
-		printf("Assume false\n");
 		ctxt.pathConstraint = e2;
 		return false;
 	}
@@ -3576,7 +3571,6 @@ survivalConstraintIfExecutedAtomically(StateMachine *sm, Oracle *oracle)
 	bool crashes;
 
 	do {
-		printf("Starting eval run\n");
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
 		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
