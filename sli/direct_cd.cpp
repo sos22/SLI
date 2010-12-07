@@ -1939,6 +1939,17 @@ addArgumentToAssoc(IRExpr *e, IRExpr *arg)
 	e->Iex.Associative.nr_arguments++;
 }
 
+static void
+purgeAssocArgument(IRExpr *e, int idx)
+{
+	assert(e->tag == Iex_Associative);
+	assert(idx < e->Iex.Associative.nr_arguments);
+	memmove(e->Iex.Associative.contents + idx,
+		e->Iex.Associative.contents + idx + 1,
+		sizeof(IRExpr *) * (e->Iex.Associative.nr_arguments - idx - 1));
+	e->Iex.Associative.nr_arguments--;
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumption)
 {
@@ -2065,14 +2076,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		}
 		/* Some special cases for And1: 1 & x -> x, 0 & x -> 0 */
 		if (src->Iex.Associative.op == Iop_And1) {
+			/* If there are any constants, they'll be at the start. */
 			while (src->Iex.Associative.nr_arguments > 1 &&
 			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
 				IRConst *c = src->Iex.Associative.contents[0]->Iex.Const.con;
 				if (c->Ico.U1) {
-					memmove(src->Iex.Associative.contents,
-						src->Iex.Associative.contents + 1,
-						sizeof(IRExpr *) * (src->Iex.Associative.nr_arguments - 1));
-					src->Iex.Associative.nr_arguments--;
+					purgeAssocArgument(src, 0);
 				} else {
 					return src->Iex.Associative.contents[0];
 				}
@@ -2096,19 +2105,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		/* x & x -> x, for any and-like operator */
 		if (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) {
 			for (int it1 = 0;
-			     it1 != src->Iex.Associative.nr_arguments;
+			     it1 < src->Iex.Associative.nr_arguments;
 			     it1++) {
 				for (int it2 = it1 + 1;
-				     it2 != src->Iex.Associative.nr_arguments;
+				     it2 < src->Iex.Associative.nr_arguments;
 					) {
 					if (definitelyEqual(src->Iex.Associative.contents[it1],
 							    src->Iex.Associative.contents[it2],
 							    opt)) {
-						memmove(src->Iex.Associative.contents + it2,
-							src->Iex.Associative.contents + it2 + 1,
-							sizeof(IRExpr*) *
-							(src->Iex.Associative.nr_arguments - it2 - 1));
-						src->Iex.Associative.nr_arguments--;
+						purgeAssocArgument(src, it2);
 					} else {
 						it2++;
 					}
@@ -2116,6 +2121,44 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			}
 		}
 
+		/* x + -x -> 0, for any plus-like operator, so remove
+		 * both x and -x from the list. */
+		if (opt.xPlusMinusX) {
+			if (src->Iex.Associative.op >= Iop_Add8 && src->Iex.Associative.op <= Iop_Add64) {
+				for (int it1 = 0;
+				     it1 < src->Iex.Associative.nr_arguments;
+					) {
+					IRExpr *l = src->Iex.Associative.contents[it1];
+					int it2;
+					for (it2 = 0;
+					     it2 < src->Iex.Associative.nr_arguments;
+					     it2++) {
+						if (it2 == it1)
+							continue;
+						IRExpr *r = src->Iex.Associative.contents[it2];
+						if (r->tag == Iex_Unop &&
+						    r->Iex.Unop.op >= Iop_Neg8 &&
+						    r->Iex.Unop.op <= Iop_Neg64 &&
+						    definitelyEqual(l, r->Iex.Unop.arg, opt.disablexPlusMinusX())) {
+							/* Careful: do the largest index first so that the
+							   other index remains valid. */
+							if (it1 < it2) {
+								purgeAssocArgument(src, it2);
+								purgeAssocArgument(src, it1);
+							} else {
+								purgeAssocArgument(src, it1);
+								purgeAssocArgument(src, it2);
+							}
+							break;
+						}
+					}
+					if (it2 == src->Iex.Associative.nr_arguments)
+						it1++;
+				}
+			}
+			if (src->Iex.Associative.nr_arguments == 0)
+				return IRExpr_Const(IRConst_U64(0));
+		}
 		/* If the size is reduced to one, eliminate the assoc list */
 		if (src->Iex.Associative.nr_arguments == 1)
 			return src->Iex.Associative.contents[0];
@@ -2207,10 +2250,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 				/* a == C + b -> -C + a == b */
 				IRExpr *cnst = r->Iex.Associative.contents[0];
 				IRExpr *newRight = IRExpr_Associative(r);
-				memmove(newRight->Iex.Associative.contents,
-					newRight->Iex.Associative.contents + 1,
-					sizeof(IRExpr *) * newRight->Iex.Associative.nr_arguments);
-				newRight->Iex.Associative.nr_arguments--;
+				purgeAssocArgument(newRight, 0);
 				IRExpr *newLeft = IRExpr_Associative(
 					Iop_Add64,
 					IRExpr_Unop(
@@ -2262,16 +2302,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 				return optimiseIRExpr(src, opt, assumption);
 			}
 		}
-
-		/* Another special case: x + (-x) -> 0. */
-		if (opt.xPlusMinusX &&
-		    src->Iex.Binop.op == Iop_Add64 &&
-		    src->Iex.Binop.arg2->tag == Iex_Unop &&
-		    src->Iex.Binop.arg2->Iex.Unop.op == Iop_Neg64 &&
-		    definitelyEqual(src->Iex.Binop.arg1,
-				    src->Iex.Binop.arg2->Iex.Unop.arg,
-				    opt.disablexPlusMinusX()))
-			return IRExpr_Const(IRConst_U64(0));
 
 		/* And another one: -x == c -> x == -c if c is a constant. */
 		if (src->Iex.Binop.op == Iop_CmpEQ64 &&
@@ -3814,13 +3844,40 @@ sanity_check_irexpr_sorter(void)
 			assert(!sortIRExprs(exprs2[y], exprs2[x]));
 }
 
+static void
+sanity_check_optimiser(void)
+{
+	/* x + -x -> 0 */
+	IRExpr *start =
+		IRExpr_Associative(
+			Iop_Add64,
+			IRExpr_Get(0, Ity_I64),
+			IRExpr_Unop(
+				Iop_Neg64,
+				IRExpr_Get(0, Ity_I64)),
+			NULL);
+	IRExpr *end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
+	ppIRExpr(start, stdout);
+	printf(" -> ");
+	ppIRExpr(end, stdout);
+	printf("\n");
+	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
+}
+
 int
 main(int argc, char *argv[])
 {
+	if (argc <= 1)
+		errx(1, "need at least one argument");
+
 	init_sli();
 
-	if (argc > 1 && !strcmp(argv[1], "--check-sorter")) {
+	if (!strcmp(argv[1], "--check-sorter")) {
 		sanity_check_irexpr_sorter();
+		return 0;
+	}
+	if (!strcmp(argv[1], "--check-optimiser")) {
+		sanity_check_optimiser();
 		return 0;
 	}
 
