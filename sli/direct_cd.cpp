@@ -866,12 +866,10 @@ StateMachineTransformer::transformIexCCall(IRExpr *e)
 IRExpr *
 StateMachineTransformer::transformIexAssociative(IRExpr *e)
 {
-	IRExpr *r = IRExpr_Associative(e->Iex.Associative.op, NULL);
-	for (std::vector<IRExpr *>::iterator it = e->Iex.Associative.content->begin();
-	     it != e->Iex.Associative.content->end();
-	     it++)
-		r->Iex.Associative.content->push_back(
-			transformIRExpr(*it));
+	IRExpr *r = IRExpr_Associative(e);
+	for (int x = 0; x < r->Iex.Associative.nr_arguments; x++)
+		r->Iex.Associative.contents[x] =
+			transformIRExpr(r->Iex.Associative.contents[x]);
 	return r;
 }
 
@@ -1370,6 +1368,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 {
 	switch (smsel->rip) {
 	case 0x400676:
+	case 0x400645:
 		return true;
 	case 0x400661:
 	case 0x40063a:
@@ -1669,12 +1668,11 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 					b->Iex.Mux0X.exprX);
 	case Iex_Associative:
 		if (a->Iex.Associative.op != b->Iex.Associative.op ||
-		    a->Iex.Associative.content->size() !=
-		            b->Iex.Associative.content->size())
+		    a->Iex.Associative.nr_arguments != b->Iex.Associative.nr_arguments)
 			return false;
-		for (unsigned x = 0; x < a->Iex.Associative.content->size(); x++)
-			if (!physicallyEqual( (*a->Iex.Associative.content)[x],
-					      (*b->Iex.Associative.content)[x]))
+		for (int x = 0; x < a->Iex.Associative.nr_arguments; x++)
+			if (!physicallyEqual(a->Iex.Associative.contents[x],
+					     b->Iex.Associative.contents[x]))
 				return false;
 		return true;
 	}
@@ -1791,10 +1789,11 @@ sortIRConsts(IRConst *a, IRConst *b)
 static bool
 sortIRExprs(IRExpr *a, IRExpr *b)
 {
-	if (IexTagLessThan(a->tag, b->tag))
+	if (IexTagLessThan(a->tag, b->tag)) {
 		return true;
-	else if (a->tag != b->tag)
+	} else if (a->tag != b->tag) {
 		return false;
+	}
 
 	switch (a->tag) {
 	case Iex_Binder:
@@ -1904,26 +1903,40 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 			return true;
 		if (a->Iex.Associative.op > b->Iex.Associative.op)
 			return false;
-		unsigned x;
+		int x;
 		x = 0;
 		while (1) {
-			if (x == a->Iex.Associative.content->size() &&
-			    x == b->Iex.Associative.content->size())
+			if (x == a->Iex.Associative.nr_arguments &&
+			    x == b->Iex.Associative.nr_arguments)
 				return false;
-			if (x == a->Iex.Associative.content->size())
+			if (x == a->Iex.Associative.nr_arguments)
 				return true;
-			if (x == b->Iex.Associative.content->size())
+			if (x == b->Iex.Associative.nr_arguments)
 				return false;
-			if (!physicallyEqual( (*a->Iex.Associative.content)[x],
-					      (*b->Iex.Associative.content)[x] ))
-				return sortIRExprs( (*a->Iex.Associative.content)[x],
-						    (*b->Iex.Associative.content)[x] );
+			if (!physicallyEqual( a->Iex.Associative.contents[x],
+					      b->Iex.Associative.contents[x] ))
+				return sortIRExprs( a->Iex.Associative.contents[x],
+						    b->Iex.Associative.contents[x] );
 			x++;
 		}
 	}
 	}
 
 	abort();
+}
+
+static void
+addArgumentToAssoc(IRExpr *e, IRExpr *arg)
+{
+	if (e->Iex.Associative.nr_arguments == e->Iex.Associative.nr_arguments_allocated) {
+		e->Iex.Associative.nr_arguments_allocated += 8;
+		e->Iex.Associative.contents = (IRExpr **)
+			LibVEX_realloc(&main_heap,
+				       e->Iex.Associative.contents,
+				       sizeof(IRExpr *) * e->Iex.Associative.nr_arguments_allocated);
+	}
+	e->Iex.Associative.contents[e->Iex.Associative.nr_arguments] = arg;
+	e->Iex.Associative.nr_arguments++;
 }
 
 static IRExpr *
@@ -1970,10 +1983,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt, assumption);
 		break;
 	case Iex_Associative:
-		for (std::vector<IRExpr *>::iterator it = src->Iex.Associative.content->begin();
-		     it != src->Iex.Associative.content->end();
-		     it++)
-			*it = optimiseIRExpr(*it, opt, assumption);
+		for (int x = 0; x < src->Iex.Associative.nr_arguments; x++)
+			src->Iex.Associative.contents[x] =
+				optimiseIRExpr(src->Iex.Associative.contents[x], opt, assumption);
 		break;
 	default:
 		break;
@@ -1984,43 +1996,43 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 
 	if (src->tag == Iex_Associative) {
 		/* Drag up nested associatives. */
-		std::vector<IRExpr *> *newArgs;
-		newArgs = new std::vector<IRExpr *>();
-		for (std::vector<IRExpr *>::iterator it = src->Iex.Associative.content->begin();
-		     it != src->Iex.Associative.content->end();
-		     it++) {
-			if ((*it)->tag == Iex_Associative) {
-				std::vector<IRExpr *> *t = (*it)->Iex.Associative.content;
-				for (std::vector<IRExpr *>::iterator it2 = t->begin();
-				     it2 != t->end();
-				     it2++)
-					newArgs->push_back(*it2);
-			} else {
-				newArgs->push_back(*it);
+		bool haveNestedAssocs = false;
+		for (int x = 0; !haveNestedAssocs && x < src->Iex.Associative.nr_arguments; x++)
+			if (src->Iex.Associative.contents[x]->tag == Iex_Associative)
+				haveNestedAssocs = true;
+		if (haveNestedAssocs) {
+			IRExpr *e = IRExpr_Associative(src->Iex.Associative.op, NULL);
+			for (int x = 0; x < src->Iex.Associative.nr_arguments; x++) {
+				IRExpr *arg = src->Iex.Associative.contents[x];
+				if (arg->tag == Iex_Associative) {
+					for (int y = 0; y < arg->Iex.Associative.nr_arguments; y++)
+						addArgumentToAssoc(e, arg->Iex.Associative.contents[y]);
+				} else {
+					addArgumentToAssoc(e, arg);
+				}
 			}
+			src = e;
 		}
-		delete src->Iex.Associative.content;
-		src->Iex.Associative.content = newArgs;
 
 		/* Sort IRExprs so that ``related'' expressions are likely to
 		 * be close together. */
 		if (operationCommutes(src->Iex.Associative.op))
-			std::sort(newArgs->begin(),
-				  newArgs->end(),
+			std::sort(src->Iex.Associative.contents,
+				  src->Iex.Associative.contents + src->Iex.Associative.nr_arguments,
 				  sortIRExprs);
 		/* Fold together constants.  For commutative
 		   operations they'll all be at the beginning, but
 		   don't assume that associativity implies
 		   commutativity. */
-		for (unsigned x = 0;
-		     x + 1 < newArgs->size();
-		     x++) {
-			if ( (*newArgs)[x]->tag == Iex_Const &&
-			     (*newArgs)[x+1]->tag == Iex_Const ) {
+		for (int x = 0; x + 1 < src->Iex.Associative.nr_arguments; x++) {
+			IRExpr *a, *b;
+			a = src->Iex.Associative.contents[x];
+			b = src->Iex.Associative.contents[x+1];
+			if (a->tag == Iex_Const && b->tag == Iex_Const) {
 				IRExpr *res;
 				IRConst *l, *r;
-				l = (*newArgs)[x]->Iex.Const.con;
-				r = (*newArgs)[x+1]->Iex.Const.con;
+				l = a->Iex.Const.con;
+				r = b->Iex.Const.con;
 				switch (src->Iex.Associative.op) {
 				case Iop_Add8:
 					res = IRExpr_Const(
@@ -2042,53 +2054,71 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 					break;
 				}
 				if (res) {
-					newArgs->erase(newArgs->begin() + x + 1);
-					(*newArgs)[x] = res;
+					memmove(src->Iex.Associative.contents + x + 1,
+						src->Iex.Associative.contents + x + 2,
+						sizeof(IRExpr *) * (src->Iex.Associative.nr_arguments - x - 2));
+					src->Iex.Associative.nr_arguments--;
+					src->Iex.Associative.contents[x] = res;
 					x--;
 				}
 			}
 		}
 		/* Some special cases for And1: 1 & x -> x, 0 & x -> 0 */
 		if (src->Iex.Associative.op == Iop_And1) {
-			while (newArgs->size() > 1 &&
-			       (*newArgs->begin())->tag == Iex_Const) {
-				IRConst *c = (*newArgs->begin())->Iex.Const.con;
-				if (c->Ico.U8)
-					newArgs->erase(newArgs->begin());
-				else
-					return *newArgs->begin();
+			while (src->Iex.Associative.nr_arguments > 1 &&
+			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
+				IRConst *c = src->Iex.Associative.contents[0]->Iex.Const.con;
+				if (c->Ico.U1) {
+					memmove(src->Iex.Associative.contents,
+						src->Iex.Associative.contents + 1,
+						sizeof(IRExpr *) * (src->Iex.Associative.nr_arguments - 1));
+					src->Iex.Associative.nr_arguments--;
+				} else {
+					return src->Iex.Associative.contents[0];
+				}
 			}
-
+			
 			/* Also: in x & y, when optimising y, you can
 			   assume that y is true. */
-			for (std::vector<IRExpr *>::iterator it1 = newArgs->begin();
-			     it1 != newArgs->end();
+			for (int it1 = 0;
+			     it1 < src->Iex.Associative.nr_arguments;
 			     it1++) {
-				for (std::vector<IRExpr *>::iterator it2 = it1 + 1;
-				     it2 != newArgs->end();
+				for (int it2 = it1 + 1;
+				     it2 < src->Iex.Associative.nr_arguments;
 				     it2++)
-					*it2 = optimiseIRExpr(*it2, opt, *it1);
+					src->Iex.Associative.contents[it2] =
+						optimiseIRExpr(src->Iex.Associative.contents[it2],
+							       opt,
+							       src->Iex.Associative.contents[it1]);
 			}
 		}
 
 		/* x & x -> x, for any and-like operator */
 		if (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) {
-			for (std::vector<IRExpr *>::iterator it1 = newArgs->begin();
-			     it1 != newArgs->end();
+			for (int it1 = 0;
+			     it1 != src->Iex.Associative.nr_arguments;
 			     it1++) {
-				for (std::vector<IRExpr *>::iterator it2 = it1 + 1;
-				     it2 != newArgs->end();
-					)
-					if (definitelyEqual(*it1, *it2, opt))
-						it2 = newArgs->erase(it2);
-					else
+				for (int it2 = it1 + 1;
+				     it2 != src->Iex.Associative.nr_arguments;
+					) {
+					if (definitelyEqual(src->Iex.Associative.contents[it1],
+							    src->Iex.Associative.contents[it2],
+							    opt)) {
+						memmove(src->Iex.Associative.contents + it2,
+							src->Iex.Associative.contents + it2 + 1,
+							sizeof(IRExpr*) *
+							(src->Iex.Associative.nr_arguments - it2 - 1));
+						src->Iex.Associative.nr_arguments--;
+					} else {
 						it2++;
+					}
+				}
 			}
 		}
 
 		/* If the size is reduced to one, eliminate the assoc list */
-		if (newArgs->size() == 1)
-			return *newArgs->begin();
+		if (src->Iex.Associative.nr_arguments == 1)
+			return src->Iex.Associative.contents[0];
 	}
 
 	/* Now use some special rules to simplify a few classes of binops and unops. */
@@ -2131,15 +2161,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			}
 		}
 	} else if (src->tag == Iex_Binop) {
+		IRExpr *l = src->Iex.Binop.arg1;
+		IRExpr *r = src->Iex.Binop.arg2;
 		if (operationAssociates(src->Iex.Binop.op)) {
 			/* Convert to an associative operation. */
 			return optimiseIRExpr(
 				IRExpr_Associative(
 					src->Iex.Binop.op,
-					src->Iex.Binop.arg1,
-					src->Iex.Binop.arg2,
+					l,
+					r,
 					NULL),
-				opt, assumption);
+				opt,
+				assumption);
 		}
 		if (src->Iex.Binop.op >= Iop_Sub8 &&
 		    src->Iex.Binop.op <= Iop_Sub64) {
@@ -2149,82 +2182,83 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			src->Iex.Binop.arg2 =
 				optimiseIRExpr(
 					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
-						     src->Iex.Binop.arg2 ),
-					opt, assumption);
+						     r ),
+					opt,
+					assumption);
 		}
-		/* If a op b commutes, and b is a constant and a
-		   isn't, rewrite to b op a. */
+		/* If a op b commutes, sort the arguments. */
 		if (operationCommutes(src->Iex.Binop.op) &&
-		    src->Iex.Binop.arg1->tag == Iex_Const &&
-		    src->Iex.Binop.arg2->tag != Iex_Const) {
-			IRExpr *a = src->Iex.Binop.arg1;
-			src->Iex.Binop.arg1 = src->Iex.Binop.arg2;
-			src->Iex.Binop.arg2 = a;
+		    sortIRExprs(r, l)) {
+			src->Iex.Binop.arg1 = r;
+			src->Iex.Binop.arg2 = l;
+			l = src->Iex.Binop.arg1;
+			r = src->Iex.Binop.arg2;
 		}
 
 		/* We simplify == expressions with sums on the left
 		   and right by trying to move all of the constants to
-		   the right and all of the non-constants to the
-		   left. */
+		   the left and all of the non-constants to the
+		   right. */
 		if (src->Iex.Binop.op == Iop_CmpEQ64) {
-			if (src->Iex.Binop.arg1->tag == Iex_Binop &&
-			    src->Iex.Binop.arg1->Iex.Binop.op == Iop_Add64 &&
-			    src->Iex.Binop.arg1->Iex.Binop.arg2->tag == Iex_Const) {
-				/* a + C == b -> a == b - C */
-				IRExpr *r =
-					optimiseIRExpr(
-						IRExpr_Binop(
-							Iop_Add64,
-							src->Iex.Binop.arg2,
-							IRExpr_Unop(
-								Iop_Neg64,
-								src->Iex.Binop.arg1->Iex.Binop.arg2)),
-						opt, assumption);
-				src->Iex.Binop.arg1 =
-					src->Iex.Binop.arg1->Iex.Binop.arg1;
-				src->Iex.Binop.arg2 = r;
-				return optimiseIRExpr(src, opt, assumption);
+			if (r->tag == Iex_Associative &&
+			    r->Iex.Associative.op == Iop_Add64 &&
+			    r->Iex.Associative.contents[0]->tag == Iex_Const) {
+				assert(r->Iex.Associative.nr_arguments > 1);
+				/* a == C + b -> -C + a == b */
+				IRExpr *cnst = r->Iex.Associative.contents[0];
+				IRExpr *newRight = IRExpr_Associative(r);
+				memmove(newRight->Iex.Associative.contents,
+					newRight->Iex.Associative.contents + 1,
+					sizeof(IRExpr *) * newRight->Iex.Associative.nr_arguments);
+				newRight->Iex.Associative.nr_arguments--;
+				IRExpr *newLeft = IRExpr_Associative(
+					Iop_Add64,
+					IRExpr_Unop(
+						Iop_Neg64,
+						cnst),
+					l,
+					NULL);
+				l = src->Iex.Binop.arg1 = optimiseIRExpr(newLeft, opt, assumption);
+				r = src->Iex.Binop.arg2 = optimiseIRExpr(newRight, opt, assumption);
 			}
-			if (src->Iex.Binop.arg2->tag == Iex_Binop &&
-			    src->Iex.Binop.arg2->Iex.Binop.op == Iop_Add64) {
-				/* a == b + c -> a - b == c */
-
-				/* because the constant, if present,
-				   will always be on the right, and
-				   they can't both be constants
-				   because then we'd have constant
-				   folded it. */
-				assert(src->Iex.Binop.arg2->Iex.Binop.arg1->tag != Iex_Const);
-
-				IRExpr *l =
-					optimiseIRExpr(
-						IRExpr_Binop(
-							Iop_Add64,
-							src->Iex.Binop.arg1,
-							IRExpr_Unop(
-								Iop_Neg64,
-								src->Iex.Binop.arg2->Iex.Binop.arg1)),
-						opt, assumption);
-				src->Iex.Binop.arg2 =
-					src->Iex.Binop.arg2->Iex.Binop.arg2;
-				src->Iex.Binop.arg1 = l;
-				return optimiseIRExpr(src, opt, assumption);
+			if (l->tag == Iex_Associative &&
+			    l->Iex.Associative.op == Iop_Add64) {
+				/* C + a == b -> C == b - a */
+				assert(l->Iex.Associative.nr_arguments > 1);
+				IRExpr *newR = IRExpr_Associative(Iop_Add64, r, NULL);
+				for (int it = 1;
+				     it < l->Iex.Associative.nr_arguments;
+				     it++)
+					addArgumentToAssoc(newR,
+							   IRExpr_Unop(
+								   Iop_Neg64,
+								   l->Iex.Associative.contents[it]));
+				IRExpr *cnst = l->Iex.Associative.contents[0];
+				if (cnst->tag != Iex_Const) {
+					cnst = IRExpr_Const(IRConst_U64(0));
+					addArgumentToAssoc(newR,
+							   IRExpr_Unop(
+								   Iop_Neg64,
+								   cnst));
+				}
+				l = src->Iex.Binop.arg1 = cnst;
+				r = src->Iex.Binop.arg2 = optimiseIRExpr(newR, opt, assumption);
 			}
 			/* If, in a == b, a and b are physically
 			 * identical, the result is a constant 1. */
-			if (physicallyEqual(src->Iex.Binop.arg1, src->Iex.Binop.arg2))
+			if (physicallyEqual(l, r))
 				return IRExpr_Const(IRConst_U1(1));
 
-			/* Otherwise, a == b -> a - b == 0, provided that b is not a constant. */
-			if (src->Iex.Binop.arg2->tag != Iex_Const) {
-				src->Iex.Binop.arg1 =
+			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
+			if (l->tag != Iex_Const) {
+				src->Iex.Binop.arg1 = IRExpr_Const(IRConst_U64(0));
+				src->Iex.Binop.arg2 =
 					IRExpr_Binop(
 						Iop_Add64,
-						src->Iex.Binop.arg1,
+						r,
 						IRExpr_Unop(
 							Iop_Neg64,
-							src->Iex.Binop.arg2));
-				src->Iex.Binop.arg2 = IRExpr_Const(IRConst_U64(0));
+							l));
 				return optimiseIRExpr(src, opt, assumption);
 			}
 		}
@@ -2280,7 +2314,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 	}
 				      
 	return src;
-}
+	}
 
 static bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
@@ -2460,10 +2494,10 @@ findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt
 		findUsedBinders(e->Iex.Mux0X.exprX, out, opt);
 		return;
 	case Iex_Associative:
-		for (std::vector<IRExpr *>::iterator it = e->Iex.Associative.content->begin();
-		     it != e->Iex.Associative.content->end();
+		for (int it = 0;
+		     it < e->Iex.Associative.nr_arguments;
 		     it++)
-			findUsedBinders(*it, out, opt);
+			findUsedBinders(e->Iex.Associative.contents[it], out, opt);
 		return;
 	}
 	abort();
@@ -3351,13 +3385,13 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 			specialiseIRExpr(iex->Iex.Mux0X.expr0, ctxt),
 			specialiseIRExpr(iex->Iex.Mux0X.exprX, ctxt));
 	case Iex_Associative: {
-		IRExpr *res;
-		res = IRExpr_Associative(iex->Iex.Associative.op, NULL);
-		for (std::vector<IRExpr *>::iterator it = iex->Iex.Associative.content->begin();
-		     it != iex->Iex.Associative.content->end();
+		IRExpr *res = IRExpr_Associative(iex);
+		for (int it = 0;
+		     it < res->Iex.Associative.nr_arguments;
 		     it++)
-			res->Iex.Associative.content->push_back(
-				specialiseIRExpr(*it, ctxt));
+			res->Iex.Associative.contents[it] =
+				specialiseIRExpr(res->Iex.Associative.contents[it],
+						 ctxt);
 		return res;
 	}
 	}
@@ -3660,7 +3694,7 @@ random_irexpr(unsigned depth)
 				random_irexpr(depth - 1),
 				NULL);
 			while (random() % 2)
-				e->Iex.Associative.content->push_back(random_irexpr(depth - 1));
+				addArgumentToAssoc(e, random_irexpr(depth - 1));
 			return e;
 		}
 		default:

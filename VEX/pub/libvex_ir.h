@@ -48,7 +48,6 @@
 #define __LIBVEX_IR_H
 
 #include <stdio.h>
-#include <vector>
 
 #include "libvex_basictypes.h"
 #include "libvex_alloc.h"
@@ -1148,11 +1147,12 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
 	 matter. */
       struct {
 	 IROp op;
-	 std::vector<IRExpr *> *content;
+	 int nr_arguments;
+	 int nr_arguments_allocated;
+	 IRExpr **contents;
       } Associative;
    } Iex;
    void visit(HeapVisitor &hv);
-   void destruct() { if (tag == Iex_Associative) delete Iex.Associative.content; }
    NAMED_CLASS
 };
 
@@ -1173,6 +1173,7 @@ extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
+extern IRExpr* IRExpr_Associative (IRExpr *);
 
 /* Deep-copy an IRExpr. */
 extern IRExpr* deepCopyIRExpr ( IRExpr* );

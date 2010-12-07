@@ -99,8 +99,9 @@ IRExpr::visit(HeapVisitor &visit)
      visit(Iex.Mux0X.exprX);
      break;
    case Iex_Associative: 
-     for (unsigned x = 0; x < Iex.Associative.content->size(); x++)
-       visit((*Iex.Associative.content)[x]);
+     visit(Iex.Associative.contents);
+     for (int x = 0; x < Iex.Associative.nr_arguments; x++)
+       visit(Iex.Associative.contents[x]);
      break;
    }
 }
@@ -780,10 +781,10 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f, "Assoc(");
       ppIROp(e->Iex.Associative.op, stdout);
       fprintf(f, ":");
-      for (unsigned x = 0; x < e->Iex.Associative.content->size(); x++) {
+      for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
 	 if (x != 0)
 	   fprintf(f, ", ");
-	 ppIRExpr((*e->Iex.Associative.content)[x], stdout);
+	 ppIRExpr(e->Iex.Associative.contents[x], stdout);
       }
       fprintf(f, ")");
       return;
@@ -1201,21 +1202,54 @@ IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
    e->Iex.Mux0X.exprX = exprX;
    return e;
 }
-IRExpr* IRExpr_Associative(IROp op, ...) {
-  IRExpr* e           = new IRExpr();
-  e->tag              = Iex_Associative;
-  e->Iex.Associative.op = op;
-  e->Iex.Associative.content = new std::vector<IRExpr *>();
-  va_list args;
-  va_start(args, op);
-  IRExpr *arg;
-  arg = va_arg(args, IRExpr *);
-  while (arg) {
-     e->Iex.Associative.content->push_back(arg);
-     arg = va_arg(args, IRExpr *);
-  }
-  va_end(args);
-  return e;
+IRExpr* IRExpr_Associative(IROp op, ...)
+{
+   IRExpr* e          = new IRExpr();
+   e->tag             = Iex_Associative;
+   e->Iex.Associative.op = op;
+
+   va_list args;
+   int nr_args;
+   IRExpr *arg;
+
+   va_start(args, op);
+   nr_args = 0;
+   while (1) {
+      arg = va_arg(args, IRExpr *);
+      if (!arg)
+	 break;
+      nr_args++;
+   }
+   va_end(args);
+
+   e->Iex.Associative.nr_arguments_allocated = nr_args * 2;
+   e->Iex.Associative.contents = (IRExpr **)LibVEX_Alloc_Bytes(sizeof(e->Iex.Associative.contents[0]) * nr_args * 2);
+   va_start(args, op);
+   while (e->Iex.Associative.nr_arguments < nr_args) {
+      arg = va_arg(args, IRExpr *);
+      e->Iex.Associative.contents[e->Iex.Associative.nr_arguments] =
+	 arg;
+      e->Iex.Associative.nr_arguments++;
+   }
+   va_end(args);
+   return e;
+}
+IRExpr* IRExpr_Associative(IRExpr *src)
+{
+   assert(src->tag == Iex_Associative);
+   IRExpr* e           = new IRExpr();
+   e->tag              = Iex_Associative;
+   e->Iex.Associative.op = src->Iex.Associative.op;
+   e->Iex.Associative.nr_arguments = src->Iex.Associative.nr_arguments;
+   e->Iex.Associative.nr_arguments_allocated = src->Iex.Associative.nr_arguments * 2;
+   e->Iex.Associative.contents = (IRExpr **)
+      LibVEX_Alloc_Bytes(sizeof(e->Iex.Associative.contents[0]) *
+			 e->Iex.Associative.nr_arguments_allocated);
+   memcpy(e->Iex.Associative.contents,
+	  src->Iex.Associative.contents,
+	  sizeof(e->Iex.Associative.contents[0]) *
+	  e->Iex.Associative.nr_arguments_allocated);
+   return e;
 }
 
 /* Constructors for NULL-terminated IRExpr expression vectors,
@@ -1562,14 +1596,8 @@ IRExpr* deepCopyIRExpr ( IRExpr* e )
          return IRExpr_Mux0X(deepCopyIRExpr(e->Iex.Mux0X.cond),
                              deepCopyIRExpr(e->Iex.Mux0X.expr0),
                              deepCopyIRExpr(e->Iex.Mux0X.exprX));
-      case Iex_Associative: {
-	 IRExpr *e2 = IRExpr_Associative(e->Iex.Associative.op, NULL);
-	 for (std::vector<IRExpr *>::iterator it = e->Iex.Associative.content->begin();
-	      it != e->Iex.Associative.content->end();
-	      it++)
-	    e2->Iex.Associative.content->push_back(*it);
-	 return e2;
-      }
+      case Iex_Associative:
+	 return IRExpr_Associative(e);
    }
    vpanic("deepCopyIRExpr");
 }
@@ -2415,10 +2443,10 @@ void useBeforeDef_Expr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, Int* def_counts )
          useBeforeDef_Expr(bb,stmt,expr->Iex.Mux0X.exprX,def_counts);
          return;
       case Iex_Associative:
-	 for (std::vector<IRExpr *>::iterator it = expr->Iex.Associative.content->begin();
-	      it != expr->Iex.Associative.content->end();
-	      it++)
-	    useBeforeDef_Expr(bb,stmt,*it,def_counts);
+	 for (int x = 0;
+	      x < expr->Iex.Associative.nr_arguments;
+	      x++)
+	    useBeforeDef_Expr(bb,stmt,expr->Iex.Associative.contents[x],def_counts);
          return;
    }
    vpanic("useBeforeDef_Expr");

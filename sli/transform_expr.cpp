@@ -66,12 +66,12 @@ log_reads_expr(IRSB *sb, IRExpr *exp)
 				    log_reads_expr(sb, exp->Iex.Binop.arg1),
 				    log_reads_expr(sb, exp->Iex.Binop.arg2));
 	case Iex_Associative: {
-		IRExpr *out = IRExpr_Associative(exp->Iex.Associative.op, NULL);
-		for (std::vector<IRExpr *>::iterator it = exp->Iex.Associative.content->begin();
-		     it != exp->Iex.Associative.content->end();
-		     it++)
-			out->Iex.Associative.content->push_back(
-				log_reads_expr(sb, *it));
+		IRExpr *out = IRExpr_Associative(exp);
+		for (int x = 0;
+		     x < exp->Iex.Associative.nr_arguments;
+		     x++)
+			out->Iex.Associative.contents[x] =
+				log_reads_expr(sb, out->Iex.Associative.contents[x]);
 		return out;
 	}
 	case Iex_Unop:
