@@ -82,6 +82,7 @@ public:
    expression is guaranteed to be equivalent to the old one in any
    context.  We may mutate the expression in-place, which is okay
    because there are no semantic changes. */
+static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, bool *done_something, IRExpr *assumption = NULL);
 static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, IRExpr *assumption = NULL);
 
 static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
@@ -91,7 +92,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachine *optimise(const AllowableOptimisations &, Oracle *) = 0;
+	virtual StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
@@ -99,7 +100,7 @@ public:
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, public PrettyPrintable {
 public:
-	virtual void optimise(const AllowableOptimisations &, Oracle *) = 0;
+	virtual void optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
@@ -125,9 +126,9 @@ public:
 		hv(addr);
 		hv(data);
 	}
-	void optimise(const AllowableOptimisations &opt, Oracle *) {
-		addr = optimiseIRExpr(addr, opt);
-		data = optimiseIRExpr(data, opt);
+	void optimise(const AllowableOptimisations &opt, Oracle *, bool *done_something) {
+		addr = optimiseIRExpr(addr, opt, done_something);
+		data = optimiseIRExpr(data, opt, done_something);
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt) {
 		for (std::set<IRExpr *>::iterator it = l.begin();
@@ -168,8 +169,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
-	void optimise(const AllowableOptimisations &opt, Oracle *) {
-		addr = optimiseIRExpr(addr, opt);
+	void optimise(const AllowableOptimisations &opt, Oracle *, bool *done_something) {
+		addr = optimiseIRExpr(addr, opt, done_something);
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
@@ -197,8 +198,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	void optimise(const AllowableOptimisations &opt, Oracle *) {
-		value = optimiseIRExpr(value, opt);
+	void optimise(const AllowableOptimisations &opt, Oracle *, bool *done_something) {
+		value = optimiseIRExpr(value, opt, done_something);
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
@@ -247,7 +248,7 @@ public:
 		     it++)
 			hv(*it);
 	}
-	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *);
+	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *, bool *done_something);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		target->findLoadedAddresses(s, opt);
 		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
@@ -274,7 +275,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
 	void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
@@ -290,7 +291,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
 	void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
@@ -337,11 +338,11 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle)
+	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 	{
-		condition = optimiseIRExpr(condition, opt);
-		trueTarget = trueTarget->optimise(opt, oracle);
-		falseTarget = falseTarget->optimise(opt, oracle);
+		condition = optimiseIRExpr(condition, opt, done_something);
+		trueTarget = trueTarget->optimise(opt, oracle, done_something);
+		falseTarget = falseTarget->optimise(opt, oracle, done_something);
 		return this;
 	}
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
@@ -392,11 +393,13 @@ public:
 	{
 		hv(target);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle)
+	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 	{
-		if (target->sideEffects.size() == 0)
-			return target->target->optimise(opt, oracle);
-		target = target->optimise(opt, oracle);
+		if (target->sideEffects.size() == 0) {
+			*done_something = true;
+			return target->target->optimise(opt, oracle, done_something);
+		}
+		target = target->optimise(opt, oracle, done_something);
 		return this;
 	}
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
@@ -422,7 +425,7 @@ public:
 		fprintf(f, ">");
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *) { return this; }
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) { }
 };
@@ -457,7 +460,8 @@ public:
 
 StateMachineEdge *
 StateMachineEdge::optimise(const AllowableOptimisations &opt,
-			   Oracle *oracle)
+			   Oracle *oracle,
+			   bool *done_something)
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
@@ -469,14 +473,15 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		     it != smp->target->sideEffects.end();
 		     it++)
 			sme->sideEffects.push_back(*it);
-		return sme->optimise(opt, oracle);
+		*done_something = true;
+		return sme->optimise(opt, oracle, done_something);
 	}
-	target = target->optimise(opt, oracle);
+	target = target->optimise(opt, oracle, done_something);
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 
 	for (it = sideEffects.begin(); it != sideEffects.end(); it++)
-		(*it)->optimise(opt, oracle);
+		(*it)->optimise(opt, oracle, done_something);
 
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
@@ -513,6 +518,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 					if (definitelyEqual(it2->first, smsel->addr, opt)) {
 						*it = new StateMachineSideEffectCopy(smsel->key,
 										     it2->second);
+						*done_something = true;
 						break;
 					}
 				}			
@@ -532,7 +538,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	while (it != sideEffects.begin()) {
 		bool isDead = false;
 		it--;
-		(*it)->optimise(opt, oracle);
+		(*it)->optimise(opt, oracle, done_something);
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			if (opt.ignoreSideEffects ||
@@ -558,6 +564,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				isDead = true;
 		}
 		if (isDead) {
+			*done_something = true;
 			it = sideEffects.erase(it);
 		} else {
 			(*it)->updateLoadedAddresses(loadedAddresses, opt);
@@ -2005,26 +2012,26 @@ purgeAssocArgument(IRExpr *e, int idx)
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumption)
+optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something, IRExpr *assumption)
 {
 	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
-		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt, assumption);
+		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt, done_something, assumption);
 	case Iex_Triop:
-		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt, assumption);
+		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt, done_something, assumption);
 	case Iex_Binop:
-		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt, assumption);
+		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt, done_something, assumption);
 	case Iex_Unop:
-		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt, assumption);
+		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt, done_something, assumption);
 		break;
 	case Iex_Load:
-		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt, assumption);
+		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt, done_something, assumption);
 		break;
 	case Iex_CCall: {
 		for (int x = 0; src->Iex.CCall.args[x]; x++) {
 			src->Iex.CCall.args[x] =
-				optimiseIRExpr(src->Iex.CCall.args[x], opt, assumption);
+				optimiseIRExpr(src->Iex.CCall.args[x], opt, done_something, assumption);
 		}
 		/* Special cases for amd64g_calculate_condition. */
 		if (!strcmp(src->Iex.CCall.cee->name,
@@ -2037,27 +2044,31 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 				src->Iex.CCall.args[3],
 				src->Iex.CCall.args[4],
 				opt);
-			if (e)
+			if (e) {
+				*done_something = true;
 				src = e;
+			}
 		}
 		break;
 	}
 	case Iex_Mux0X:
-		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt, assumption);
-		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt, assumption);
-		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt, assumption);
+		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt, done_something, assumption);
+		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt, done_something, assumption);
+		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt, done_something, assumption);
 		break;
 	case Iex_Associative:
 		for (int x = 0; x < src->Iex.Associative.nr_arguments; x++)
 			src->Iex.Associative.contents[x] =
-				optimiseIRExpr(src->Iex.Associative.contents[x], opt, assumption);
+				optimiseIRExpr(src->Iex.Associative.contents[x], opt, done_something, assumption);
 		break;
 	default:
 		break;
 	}
 
-	if (assumption && definitelyEqual(src, assumption, opt))
+	if (assumption && definitelyEqual(src, assumption, opt)) {
+		*done_something = true;
 		return IRExpr_Const(IRConst_U1(1));
+	}
 
 	if (src->tag == Iex_Associative) {
 		/* Drag up nested associatives. */
@@ -2077,6 +2088,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 				}
 			}
 			src = e;
+			*done_something = true;
 		}
 
 		/* Sort IRExprs so that ``related'' expressions are likely to
@@ -2125,6 +2137,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 					src->Iex.Associative.nr_arguments--;
 					src->Iex.Associative.contents[x] = res;
 					x--;
+					*done_something = true;
 				}
 			}
 		}
@@ -2134,6 +2147,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			while (src->Iex.Associative.nr_arguments > 1 &&
 			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
 				IRConst *c = src->Iex.Associative.contents[0]->Iex.Const.con;
+				*done_something = true;
 				if (c->Ico.U1) {
 					purgeAssocArgument(src, 0);
 				} else {
@@ -2152,6 +2166,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 					src->Iex.Associative.contents[it2] =
 						optimiseIRExpr(src->Iex.Associative.contents[it2],
 							       opt,
+							       done_something,
 							       src->Iex.Associative.contents[it1]);
 			}
 		}
@@ -2167,6 +2182,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 					if (definitelyEqual(src->Iex.Associative.contents[it1],
 							    src->Iex.Associative.contents[it2],
 							    opt)) {
+						*done_something = true;
 						purgeAssocArgument(src, it2);
 					} else {
 						it2++;
@@ -2207,6 +2223,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 						    definitelyEqual(l, r->Iex.Unop.arg, opt.disablexPlusMinusX())) {
 							/* Careful: do the largest index first so that the
 							   other index remains valid. */
+							*done_something = true;
 							if (it1 < it2) {
 								purgeAssocArgument(src, it2);
 								purgeAssocArgument(src, it1);
@@ -2222,6 +2239,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 				}
 			}
 			if (src->Iex.Associative.nr_arguments == 0) {
+				*done_something = true;
 				switch (src->Iex.Associative.op) {
 				case Iop_And1:
 					return IRExpr_Const(IRConst_U1(0));
@@ -2243,8 +2261,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			}
 		}
 		/* If the size is reduced to one, eliminate the assoc list */
-		if (src->Iex.Associative.nr_arguments == 1)
+		if (src->Iex.Associative.nr_arguments == 1) {
+			*done_something = true;
 			return src->Iex.Associative.contents[0];
+		}
 	}
 
 	/* Now use some special rules to simplify a few classes of binops and unops. */
@@ -2255,6 +2275,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			/* This can happen sometimes because of the
 			   way we simplify condition codes.  Very easy
 			   fix: strip off the outer 64to1. */
+			*done_something = true;
 			return src->Iex.Unop.arg;
 		}
 
@@ -2266,6 +2287,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			   Don't do this for signed upcasts, though,
 			   as they have effects beyond the type
 			   level. */
+			*done_something = true;
 			return src->Iex.Unop.arg;
 		}
 
@@ -2273,14 +2295,19 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;
 			switch (src->Iex.Unop.op) {
 			case Iop_Neg8:
+				*done_something = true;
 				return IRExpr_Const(IRConst_U8(-c->Ico.U8));
 			case Iop_Neg16:
+				*done_something = true;
 				return IRExpr_Const(IRConst_U16(-c->Ico.U16));
 			case Iop_Neg32:
+				*done_something = true;
 				return IRExpr_Const(IRConst_U32(-c->Ico.U32));
 			case Iop_Neg64:
+				*done_something = true;
 				return IRExpr_Const(IRConst_U64(-c->Ico.U64));
 			case Iop_Not1:
+				*done_something = true;
 				return IRExpr_Const(IRConst_U1(c->Ico.U1 ^ 1));
 			default:
 				break;
@@ -2291,6 +2318,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		IRExpr *r = src->Iex.Binop.arg2;
 		if (operationAssociates(src->Iex.Binop.op)) {
 			/* Convert to an associative operation. */
+			*done_something = true;
 			return optimiseIRExpr(
 				IRExpr_Associative(
 					src->Iex.Binop.op,
@@ -2298,18 +2326,21 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 					r,
 					NULL),
 				opt,
+				done_something,
 				assumption);
 		}
 		if (src->Iex.Binop.op >= Iop_Sub8 &&
 		    src->Iex.Binop.op <= Iop_Sub64) {
 			/* Replace a - b with a + (-b), so as to
 			   eliminate binary -. */
+			*done_something = true;
 			src->Iex.Binop.op = (IROp)(src->Iex.Binop.op - Iop_Sub8 + Iop_Add8);
 			src->Iex.Binop.arg2 =
 				optimiseIRExpr(
 					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
 						     r ),
 					opt,
+					done_something,
 					assumption);
 		}
 		/* If a op b commutes, sort the arguments. */
@@ -2319,6 +2350,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			src->Iex.Binop.arg2 = l;
 			l = src->Iex.Binop.arg1;
 			r = src->Iex.Binop.arg2;
+			*done_something = true;
 		}
 
 		/* We simplify == expressions with sums on the left
@@ -2341,8 +2373,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 						cnst),
 					l,
 					NULL);
-				l = src->Iex.Binop.arg1 = optimiseIRExpr(newLeft, opt, assumption);
-				r = src->Iex.Binop.arg2 = optimiseIRExpr(newRight, opt, assumption);
+				l = src->Iex.Binop.arg1 = optimiseIRExpr(newLeft, opt, done_something, assumption);
+				r = src->Iex.Binop.arg2 = optimiseIRExpr(newRight, opt, done_something, assumption);
+				*done_something = true;
 			}
 			if (l->tag == Iex_Associative &&
 			    l->Iex.Associative.op == Iop_Add64) {
@@ -2365,12 +2398,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 								   cnst));
 				}
 				l = src->Iex.Binop.arg1 = cnst;
-				r = src->Iex.Binop.arg2 = optimiseIRExpr(newR, opt, assumption);
+				r = src->Iex.Binop.arg2 = optimiseIRExpr(newR, opt, done_something, assumption);
+				*done_something = true;
 			}
 			/* If, in a == b, a and b are physically
 			 * identical, the result is a constant 1. */
-			if (physicallyEqual(l, r))
+			if (physicallyEqual(l, r)) {
+				*done_something = true;
 				return IRExpr_Const(IRConst_U1(1));
+			}
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
 			if (l->tag != Iex_Const) {
@@ -2382,7 +2418,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 						IRExpr_Unop(
 							Iop_Neg64,
 							l));
-				return optimiseIRExpr(src, opt, assumption);
+				*done_something = true;
+				return optimiseIRExpr(src, opt, done_something, assumption);
 			}
 		}
 
@@ -2394,7 +2431,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 			src->Iex.Binop.arg1 = src->Iex.Binop.arg1->Iex.Unop.arg;
 			src->Iex.Binop.arg2 = IRExpr_Const(
 				IRConst_U64(-src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
-			return optimiseIRExpr(src, opt, assumption);
+			*done_something = true;
+			return optimiseIRExpr(src, opt, done_something, assumption);
 		}
 
 		/* If enabled, assume that the stack is ``private'',
@@ -2405,8 +2443,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		    src->Iex.Binop.op == Iop_CmpEQ64 &&
 		    src->Iex.Binop.arg1->tag == Iex_Get &&
 		    src->Iex.Binop.arg1->Iex.Get.offset == OFFSET_amd64_RSP &&
-		    src->Iex.Binop.arg2->tag == Iex_Const)
+		    src->Iex.Binop.arg2->tag == Iex_Const) {
+			*done_something = true;
 			return IRExpr_Const(IRConst_U1(0));
+		}
 
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
@@ -2414,6 +2454,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 		    src->Iex.Binop.arg2->tag == Iex_Const) {
 			switch (src->Iex.Binop.op) {
 			case Iop_CmpEQ64:
+				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U1(
 						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 ==
@@ -2427,7 +2468,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 	}
 				      
 	return src;
-	}
+}
+
+static IRExpr *
+optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt, IRExpr *assumption)
+{
+	bool progress;
+	do {
+		progress = false;
+		e = optimiseIRExpr(e, opt, &progress, assumption);
+	} while (progress);
+	return e;
+}
 
 static bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
@@ -4025,7 +4077,11 @@ main(int argc, char *argv[])
 			.enableassumePrivateStack()
 			.enableassumeExecutesAtomically()
 			.enableignoreSideEffects();
-		cr->sm = cr->sm->optimise(opt, oracle);
+		bool done_something;
+		do {
+			done_something = false;
+			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
+		} while (done_something);
 		cr->sm = availExpressionAnalysis(cr->sm, opt);
 		cr->sm = bisimilarityReduction(cr->sm, opt);
 		printf("Crash reason %s:\n", cr->rip.name());
@@ -4076,10 +4132,16 @@ main(int argc, char *argv[])
 				AllowableOptimisations opt2 =
 					AllowableOptimisations::defaultOptimisations
 					.enableassumePrivateStack();
-				sm = sm->optimise(opt2, oracle);
+				do {
+					done_something = false;
+					sm = sm->optimise(opt2, oracle, &done_something);
+				} while (done_something);
 				sm = availExpressionAnalysis(sm, opt2);
 				sm = bisimilarityReduction(sm, opt2);
-				sm = sm->optimise(opt2, oracle);
+				do {
+					done_something = false;
+					sm = sm->optimise(opt2, oracle, &done_something);
+				} while (done_something);
 				printf("Turns into state machine:\n");
 				printStateMachine(sm, stdout);
 			}
