@@ -3785,7 +3785,7 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	if (!strcmp(argv[1], "--check-sorter")) {
+	if (argc > 1 && !strcmp(argv[1], "--check-sorter")) {
 		sanity_check_irexpr_sorter();
 		return 0;
 	}
