@@ -1,6 +1,7 @@
 /* Re-implementation of direct which tries to work off of just a core
    dump, rather than needing the full trace. */
 #include <err.h>
+#include <time.h>
 
 #include <queue>
 #include <map>
@@ -3708,6 +3709,7 @@ random_irexpr(unsigned depth)
 static void
 sanity_check_irexpr_sorter(void)
 {
+	srandom(time(NULL));
 #define NR_EXPRS 10000
 	IRExpr *exprs[NR_EXPRS];
 	int x;
