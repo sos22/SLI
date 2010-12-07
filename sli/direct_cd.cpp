@@ -1744,10 +1744,10 @@ IexTagLessThan(IRExprTag a, IRExprTag b)
 		return true;
 	if (b == Iex_RdTmp)
 		return false;
-	if (a == Iex_Qop || a == Iex_Triop || a == Iex_Binop || a == Iex_Unop || a == Iex_Associative)
-		return true;
 	if (b == Iex_Qop || b == Iex_Triop || b == Iex_Binop || b == Iex_Unop || b == Iex_Associative)
 		return false;
+	if (a == Iex_Qop || a == Iex_Triop || a == Iex_Binop || a == Iex_Unop || a == Iex_Associative)
+		return true;
 	if (a == Iex_Mux0X)
 		return true;
 	if (b == Iex_Mux0X)
@@ -1876,7 +1876,7 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 		for (int x = 0; 1; x++) {
 			if (!a->Iex.CCall.args[x] &&
 			    !b->Iex.CCall.args[x])
-				return true;
+				return false;
 			if (!a->Iex.CCall.args[x])
 				return false;
 			if (!b->Iex.CCall.args[x])
@@ -3573,10 +3573,220 @@ survivalConstraintIfExecutedAtomically(StateMachine *sm, Oracle *oracle)
 	return currentConstraint;
 }
 
+static IROp
+random_irop(void)
+{
+	return (IROp)((unsigned long)Iop_Add8 + random() % (Iop_Perm8x16 - Iop_Add8 + 1));
+}
+
+static IRType
+random_irtype(void)
+{
+	return (IRType)((unsigned long)Ity_I8 + random() % 7);
+}
+
+static IRConst *
+random_irconst(void)
+{
+	switch (random_irtype()) {
+	case Ity_I8:
+		return IRConst_U8(random() % 256);
+	case Ity_I16:
+		return IRConst_U16(random() % 65536);
+	case Ity_I32:
+		return IRConst_U32(random());
+	case Ity_I64:
+		return IRConst_U64(random());
+	case Ity_F32:
+	case Ity_I128:
+		return random_irconst();
+	case Ity_F64:
+		return IRConst_F64(random() / (double)random());
+	case Ity_V128:
+		return IRConst_V128(random());
+	default:
+		abort();
+	}
+}
+
+static IRRegArray *
+random_irregarray(void)
+{
+	return mkIRRegArray( (random() % 10) * 8,
+			     random_irtype(),
+			     random() % 16 );
+}
+
+static IRExpr *
+random_irexpr(unsigned depth)
+{
+	if (!depth)
+		return IRExpr_Const(random_irconst());
+	switch (random() % 8) {
+	case 0:
+		return IRExpr_Binder(random() % 30);
+	case 1:
+		return IRExpr_Get((random() % 40) * 8,
+				  random_irtype());
+	case 2:
+		return IRExpr_RdTmp(random() % 5);
+	case 3:
+		switch (random() % 5) {
+		case 0:
+			return IRExpr_Unop(random_irop(), random_irexpr(depth - 1));
+		case 1:
+			return IRExpr_Binop(
+				random_irop(),
+				random_irexpr(depth - 1),
+				random_irexpr(depth - 1));
+		case 2:
+			return IRExpr_Triop(
+				random_irop(),
+				random_irexpr(depth - 1),
+				random_irexpr(depth - 1),
+				random_irexpr(depth - 1));
+		case 3:
+			return IRExpr_Qop(
+				random_irop(),
+				random_irexpr(depth - 1),
+				random_irexpr(depth - 1),
+				random_irexpr(depth - 1),
+				random_irexpr(depth - 1));
+		case 4: {
+			IRExpr *e = IRExpr_Associative(
+				random_irop(),
+				random_irexpr(depth - 1),
+				random_irexpr(depth - 1),
+				NULL);
+			while (random() % 2)
+				e->Iex.Associative.content->push_back(random_irexpr(depth - 1));
+			return e;
+		}
+		default:
+			abort();
+		}
+	case 4:
+		return IRExpr_Load(
+			False,
+			Iend_LE,
+			random_irtype(),
+			random_irexpr(depth - 1));
+	case 5:
+		return IRExpr_Const(random_irconst());
+	case 6: {
+		IRExpr **args;
+		switch (random() % 4) {
+		case 0:
+			args = mkIRExprVec_0();
+			break;
+		case 1:
+			args = mkIRExprVec_1(random_irexpr(depth - 1));
+			break;
+		case 2:
+			args = mkIRExprVec_2(random_irexpr(depth - 1), random_irexpr(depth - 1));
+			break;
+		case 3:
+			args = mkIRExprVec_3(random_irexpr(depth - 1), random_irexpr(depth - 1), random_irexpr(depth - 1));
+			break;
+		default:
+			abort();
+		}
+		return IRExpr_CCall(mkIRCallee(0, "random_ccall", (void *)0x52),
+				    random_irtype(),
+				    args);
+	}
+	case 7:
+		return IRExpr_Mux0X(random_irexpr(depth - 1), random_irexpr(depth - 1), random_irexpr(depth - 1));
+	case 8:
+		return IRExpr_GetI(random_irregarray(), random_irexpr(depth - 1), (random() % 20) * 8);
+	default:
+		abort();
+	}		
+}
+
+/* Check that sortIRExprs() produces vaguely sane results. */
+static void
+sanity_check_irexpr_sorter(void)
+{
+#define NR_EXPRS 10000
+	IRExpr *exprs[NR_EXPRS];
+	int x;
+	int y;
+
+	printf("Generating %d random expressions\n", NR_EXPRS);
+	for (x = 0; x < NR_EXPRS; x++)
+		exprs[x] = random_irexpr(3);
+
+	printf("Ordering should be anti-reflexive.\n");
+	for (x = 0; x < NR_EXPRS; x++)
+		assert(!sortIRExprs(exprs[x], exprs[x]));
+
+	printf("Ordering should be anti-symmetric.\n");
+	for (x = 0; x < NR_EXPRS; x++) {
+		for (y = x + 1; y < NR_EXPRS; y++) {
+			if (sortIRExprs(exprs[x], exprs[y]))
+				assert(!sortIRExprs(exprs[y], exprs[x]));
+		}
+	}
+
+	/* Ordering must be transitive and total.  We check this by
+	 * performing a naive topological sort on the expressions and
+	 * then checking that whenever x < y exprs[x] < exprs[y]. */
+	IRExpr *exprs2[NR_EXPRS];
+
+	int nr_exprs2 = 0;
+	int candidate;
+	int probe;
+	bool progress = true;
+	printf("Toposorting...\n");
+	while (nr_exprs2 < NR_EXPRS) {
+		/* Try to find an ordering-minimal entry in the
+		 * array.  */
+		assert(progress);
+		progress = false;
+		for (candidate = 0; candidate < NR_EXPRS; candidate++) {
+			if (!exprs[candidate])
+				continue;
+			for (probe = 0; probe < NR_EXPRS; probe++) {
+				if (!exprs[probe])
+					continue;
+				if (sortIRExprs(exprs[probe], exprs[candidate])) {
+					/* probe is less than
+					   candidate, so candidate
+					   fails. */
+					break;
+				}
+			}
+			if (probe == NR_EXPRS) {
+				/* This candidate passes.  Add it to
+				   the list. */
+				exprs2[nr_exprs2] = exprs[candidate];
+				exprs[candidate] = NULL;
+				nr_exprs2++;
+				progress = true;
+			}
+		}
+	}
+
+	/* Okay, have a topo sort.  The ordering is supposed to be
+	   total, so that should have just been an O(n^3) selection
+	   sort, and the array should now be totally sorted.  check
+	   it. */
+	printf("Check toposort is total...\n");
+	for (x = 0; x < NR_EXPRS; x++)
+		for (y = x + 1; y < NR_EXPRS; y++)
+			assert(!sortIRExprs(exprs2[y], exprs2[x]));
+}
+
 int
 main(int argc, char *argv[])
 {
 	init_sli();
+
+	if (!strcmp(argv[1], "--check-sorter")) {
+		sanity_check_irexpr_sorter();
+		return 0;
+	}
 
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
