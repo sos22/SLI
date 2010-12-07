@@ -82,8 +82,8 @@ public:
    expression is guaranteed to be equivalent to the old one in any
    context.  We may mutate the expression in-place, which is okay
    because there are no semantic changes. */
-static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, bool *done_something, IRExpr *assumption = NULL);
-static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, IRExpr *assumption = NULL);
+static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, bool *done_something);
+static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &);
 static void assertUnoptimisable(IRExpr *e, const AllowableOptimisations &);
 
 static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
@@ -2013,26 +2013,26 @@ purgeAssocArgument(IRExpr *e, int idx)
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something, IRExpr *assumption)
+optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
 	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
-		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt, done_something, assumption);
+		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt, done_something);
 	case Iex_Triop:
-		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt, done_something, assumption);
+		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt, done_something);
 	case Iex_Binop:
-		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt, done_something, assumption);
+		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt, done_something);
 	case Iex_Unop:
-		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt, done_something, assumption);
+		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt, done_something);
 		break;
 	case Iex_Load:
-		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt, done_something, assumption);
+		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt, done_something);
 		break;
 	case Iex_CCall: {
 		for (int x = 0; src->Iex.CCall.args[x]; x++) {
 			src->Iex.CCall.args[x] =
-				optimiseIRExpr(src->Iex.CCall.args[x], opt, done_something, assumption);
+				optimiseIRExpr(src->Iex.CCall.args[x], opt, done_something);
 		}
 		/* Special cases for amd64g_calculate_condition. */
 		if (!strcmp(src->Iex.CCall.cee->name,
@@ -2053,22 +2053,17 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		break;
 	}
 	case Iex_Mux0X:
-		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt, done_something, assumption);
-		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt, done_something, assumption);
-		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt, done_something, assumption);
+		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt, done_something);
+		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt, done_something);
+		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt, done_something);
 		break;
 	case Iex_Associative:
 		for (int x = 0; x < src->Iex.Associative.nr_arguments; x++)
 			src->Iex.Associative.contents[x] =
-				optimiseIRExpr(src->Iex.Associative.contents[x], opt, done_something, assumption);
+				optimiseIRExpr(src->Iex.Associative.contents[x], opt, done_something);
 		break;
 	default:
 		break;
-	}
-
-	if (assumption && definitelyEqual(src, assumption, opt)) {
-		*done_something = true;
-		return IRExpr_Const(IRConst_U1(1));
 	}
 
 	if (src->tag == Iex_Associative) {
@@ -2154,21 +2149,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				} else {
 					return src->Iex.Associative.contents[0];
 				}
-			}
-			
-			/* Also: in x & y, when optimising y, you can
-			   assume that y is true. */
-			for (int it1 = 0;
-			     it1 < src->Iex.Associative.nr_arguments;
-			     it1++) {
-				for (int it2 = it1 + 1;
-				     it2 < src->Iex.Associative.nr_arguments;
-				     it2++)
-					src->Iex.Associative.contents[it2] =
-						optimiseIRExpr(src->Iex.Associative.contents[it2],
-							       opt,
-							       done_something,
-							       src->Iex.Associative.contents[it1]);
 			}
 		}
 
@@ -2327,8 +2307,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					r,
 					NULL),
 				opt,
-				done_something,
-				assumption);
+				done_something);
 		}
 		if (src->Iex.Binop.op >= Iop_Sub8 &&
 		    src->Iex.Binop.op <= Iop_Sub64) {
@@ -2341,8 +2320,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
 						     r ),
 					opt,
-					done_something,
-					assumption);
+					done_something);
 		}
 		/* If a op b commutes, sort the arguments. */
 		if (operationCommutes(src->Iex.Binop.op) &&
@@ -2374,8 +2352,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						cnst),
 					l,
 					NULL);
-				l = src->Iex.Binop.arg1 = optimiseIRExpr(newLeft, opt, done_something, assumption);
-				r = src->Iex.Binop.arg2 = optimiseIRExpr(newRight, opt, done_something, assumption);
+				l = src->Iex.Binop.arg1 = optimiseIRExpr(newLeft, opt, done_something);
+				r = src->Iex.Binop.arg2 = optimiseIRExpr(newRight, opt, done_something);
 				*done_something = true;
 			}
 			if (l->tag == Iex_Associative &&
@@ -2399,7 +2377,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								   cnst));
 				}
 				l = src->Iex.Binop.arg1 = cnst;
-				r = src->Iex.Binop.arg2 = optimiseIRExpr(newR, opt, done_something, assumption);
+				r = src->Iex.Binop.arg2 = optimiseIRExpr(newR, opt, done_something);
 				*done_something = true;
 			}
 			/* If, in a == b, a and b are physically
@@ -2420,7 +2398,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 							Iop_Neg64,
 							l));
 				*done_something = true;
-				return optimiseIRExpr(src, opt, done_something, assumption);
+				return optimiseIRExpr(src, opt, done_something);
 			}
 		}
 
@@ -2433,7 +2411,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			src->Iex.Binop.arg2 = IRExpr_Const(
 				IRConst_U64(-src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
 			*done_something = true;
-			return optimiseIRExpr(src, opt, done_something, assumption);
+			return optimiseIRExpr(src, opt, done_something);
 		}
 
 		/* If enabled, assume that the stack is ``private'',
@@ -2472,12 +2450,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt, IRExpr *assumption)
+optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
 {
 	bool progress;
 	do {
 		progress = false;
-		e = optimiseIRExpr(e, opt, &progress, assumption);
+		e = optimiseIRExpr(e, opt, &progress);
 	} while (progress);
 	return e;
 }
