@@ -3901,6 +3901,31 @@ sanity_check_optimiser(void)
 	assert(physicallyEqual(end, IRExpr_Const(IRConst_U1(0))));
 }
 
+static void
+evalMachineUnderAssumption(StateMachine *sm, Oracle *oracle, IRExpr *assumption,
+			   bool *mightSurvive, bool *mightCrash)
+{
+	NdChooser chooser;
+	bool crashes;
+
+	*mightSurvive = false;
+	*mightCrash = false;
+	while (!*mightCrash || !*mightSurvive) {
+		StateMachineEvalContext ctxt;
+		ctxt.pathConstraint = assumption;
+		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
+		if (crashes) {
+			*mightCrash = true;
+			printf("Eventual crash, path constraint ");
+			ppIRExpr(ctxt.pathConstraint, stdout);
+			printf("\n");
+		} else
+			*mightSurvive = true;
+		if (!chooser.advance())
+			break;
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -3960,6 +3985,11 @@ main(int argc, char *argv[])
 				opt);
 		ppIRExpr(survive, stdout);
 		printf("\n");
+
+		bool mightSurvive, mightCrash;
+		evalMachineUnderAssumption(cr->sm, oracle, survive, &mightSurvive, &mightCrash);
+		printf("Might survive: %d, might crash: %d\n", mightSurvive,
+		       mightCrash);
 
 		std::set<StateMachineSideEffectLoad *> allLoads;
 		findAllLoads(cr->sm, allLoads);
