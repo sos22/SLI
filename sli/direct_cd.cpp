@@ -1710,19 +1710,66 @@ optimise_condition_calculation(
 	}
 }
 
-/* The sort order is:
+/* Wherever we have a choice as to the ordering of an expression's
+   sub-expressions, we sort them into ascending order of complexity,
+   where complexity is defined by this function.  The main requirement
+   is that if both x and -x occur in the argument list, x will occur
+   before -x. */
+/* If two expressions have the same complexity, we use a lexicographic
+   ordering to distinguish them. */
+static int
+exprComplexity(const IRExpr *e)
+{
+	switch (e->tag) {
+	case Iex_Binder:
+		return 10;
+	case Iex_Get:
+		return 20;
+	case Iex_GetI:
+		return 20 + exprComplexity(e->Iex.GetI.ix);
+	case Iex_RdTmp:
+		return 30;
+	case Iex_Qop:
+		return 10 +
+			exprComplexity(e->Iex.Qop.arg1) +
+			exprComplexity(e->Iex.Qop.arg2) +
+			exprComplexity(e->Iex.Qop.arg3) +
+			exprComplexity(e->Iex.Qop.arg4);
+	case Iex_Triop:
+		return 10 +
+			exprComplexity(e->Iex.Qop.arg1) +
+			exprComplexity(e->Iex.Qop.arg2) +
+			exprComplexity(e->Iex.Qop.arg3);
+	case Iex_Binop:
+		return 10 +
+			exprComplexity(e->Iex.Qop.arg1) +
+			exprComplexity(e->Iex.Qop.arg2);
+	case Iex_Unop:
+		return 10 + exprComplexity(e->Iex.Qop.arg1);
+	case Iex_Load:
+		return 10 + exprComplexity(e->Iex.Load.addr);
+	case Iex_Const:
+		return 0;
+	case Iex_Mux0X:
+		return 10 + exprComplexity(e->Iex.Mux0X.cond) +
+			exprComplexity(e->Iex.Mux0X.expr0) +
+			exprComplexity(e->Iex.Mux0X.exprX);
+	case Iex_CCall: {
+		int acc = 50;
+		for (int x = 0; e->Iex.CCall.args[x]; x++)
+			acc += exprComplexity(e->Iex.CCall.args[x]);
+		return acc;
+	}
+	case Iex_Associative: {
+		int acc = 10;
+		for (int x = 0; x < e->Iex.Associative.nr_arguments; x++)
+			acc += exprComplexity(e->Iex.Associative.contents[x]);
+		return acc;
+	}
+	}
+	abort();
+}
 
-   Constants, in order of size then value.
-   Gets, in order of offset
-   GetIs, in order of ix
-   RdTmps, in order of temporary
-   Associatives, qops, triops, binops, and unops, sorted first on
-      operator and then lexicographically on arguments.
-   Mux0X, sorted lexicographically
-   Loads, sorted by loaded address
-   CCalls, ordered first by callee name and then lexicographic arguments
-   Binders, in order of key
-*/
 static bool
 IexTagLessThan(IRExprTag a, IRExprTag b)
 {
@@ -1790,6 +1837,12 @@ sortIRConsts(IRConst *a, IRConst *b)
 static bool
 sortIRExprs(IRExpr *a, IRExpr *b)
 {
+	int ac = exprComplexity(a);
+	int bc = exprComplexity(b);
+	if (ac < bc)
+		return true;
+	if (ac > bc)
+		return false;
 	if (IexTagLessThan(a->tag, b->tag)) {
 		return true;
 	} else if (a->tag != b->tag) {
