@@ -1908,7 +1908,7 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 		while (1) {
 			if (x == a->Iex.Associative.content->size() &&
 			    x == b->Iex.Associative.content->size())
-				return true;
+				return false;
 			if (x == a->Iex.Associative.content->size())
 				return true;
 			if (x == b->Iex.Associative.content->size())
