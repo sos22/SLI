@@ -31,6 +31,7 @@ public:
 	   sometimes lead to an infinite recursion if you're not a bit
 	   careful.  This should pretty much only be turned off from
 	   inside the optimiser. */
+	/* (The same toggle also controls the rule x & ~x -> 0) */
 	bool xPlusMinusX;
 
 	/* Assume that the stack is ``private'', in the sense that no
@@ -2123,8 +2124,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 
 		/* x + -x -> 0, for any plus-like operator, so remove
 		 * both x and -x from the list. */
+		/* Also do x & ~x -> 0, while we're here. */
 		if (opt.xPlusMinusX) {
-			if (src->Iex.Associative.op >= Iop_Add8 && src->Iex.Associative.op <= Iop_Add64) {
+			bool plus_like;
+			bool and_like;
+			plus_like = src->Iex.Associative.op >= Iop_Add8 && src->Iex.Associative.op <= Iop_Add64;
+			and_like = (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) ||
+				src->Iex.Associative.op == Iop_And1;
+			if (plus_like || and_like) {
 				for (int it1 = 0;
 				     it1 < src->Iex.Associative.nr_arguments;
 					) {
@@ -2137,8 +2144,13 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 							continue;
 						IRExpr *r = src->Iex.Associative.contents[it2];
 						if (r->tag == Iex_Unop &&
-						    r->Iex.Unop.op >= Iop_Neg8 &&
-						    r->Iex.Unop.op <= Iop_Neg64 &&
+						    ((plus_like &&
+						      r->Iex.Unop.op >= Iop_Neg8 &&
+						      r->Iex.Unop.op <= Iop_Neg64) ||
+						     (and_like &&
+						      ((r->Iex.Unop.op >= Iop_Not8 &&
+							r->Iex.Unop.op <= Iop_Not64) ||
+						       r->Iex.Unop.op == Iop_Not1))) &&
 						    definitelyEqual(l, r->Iex.Unop.arg, opt.disablexPlusMinusX())) {
 							/* Careful: do the largest index first so that the
 							   other index remains valid. */
@@ -2156,8 +2168,26 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, IRExpr *assumptio
 						it1++;
 				}
 			}
-			if (src->Iex.Associative.nr_arguments == 0)
-				return IRExpr_Const(IRConst_U64(0));
+			if (src->Iex.Associative.nr_arguments == 0) {
+				switch (src->Iex.Associative.op) {
+				case Iop_And1:
+					return IRExpr_Const(IRConst_U1(0));
+				case Iop_Add8:
+				case Iop_And8:
+					return IRExpr_Const(IRConst_U8(0));
+				case Iop_Add16:
+				case Iop_And16:
+					return IRExpr_Const(IRConst_U16(0));
+				case Iop_Add32:
+				case Iop_And32:
+					return IRExpr_Const(IRConst_U32(0));
+				case Iop_Add64:
+				case Iop_And64:
+					return IRExpr_Const(IRConst_U64(0));
+				default:
+					abort();
+				}
+			}
 		}
 		/* If the size is reduced to one, eliminate the assoc list */
 		if (src->Iex.Associative.nr_arguments == 1)
@@ -3857,11 +3887,18 @@ sanity_check_optimiser(void)
 				IRExpr_Get(0, Ity_I64)),
 			NULL);
 	IRExpr *end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	ppIRExpr(start, stdout);
-	printf(" -> ");
-	ppIRExpr(end, stdout);
-	printf("\n");
 	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
+	/* x & ~x -> 0 */
+	start = IRExpr_Associative(
+		Iop_And1,
+		IRExpr_Unop(
+			Iop_Not1,
+			IRExpr_Get(0, Ity_I64)),
+		IRExpr_Get(0, Ity_I64),
+		NULL);
+	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
+	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
+	assert(physicallyEqual(end, IRExpr_Const(IRConst_U1(0))));
 }
 
 int
