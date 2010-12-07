@@ -84,6 +84,7 @@ public:
    because there are no semantic changes. */
 static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, bool *done_something, IRExpr *assumption = NULL);
 static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, IRExpr *assumption = NULL);
+static void assertUnoptimisable(IRExpr *e, const AllowableOptimisations &);
 
 static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
 
@@ -2481,6 +2482,14 @@ optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt, IRExpr *assumption)
 	return e;
 }
 
+static void
+assertUnoptimisable(IRExpr *e, const AllowableOptimisations &opt)
+{
+	bool progress = false;
+	optimiseIRExpr(e, opt, &progress);
+	assert(!progress);
+}
+
 static bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
@@ -3589,6 +3598,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		   earlier.  Consider that a lucky break and simplify
 		   it now. */
 		if (e->Iex.Const.con->Ico.U1) {
+			assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 			ctxt.pathConstraint = e;
 			return true;
 		} else {
@@ -3623,12 +3633,26 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		return true;
 	}
 
+	printf("Can't prove value of ");
+	ppIRExpr(exp, stdout);
+	printf(" using ");
+	ppIRExpr(ctxt.pathConstraint, stdout);
+	printf(" (-> ");
+	ppIRExpr(e, stdout);
+	printf(" and ");
+	ppIRExpr(e2, stdout);
+	printf("; ");
+
 	/* Can't prove it one way or another.  Use the
 	   non-deterministic chooser to guess. */
 	if (chooser.nd_choice(2) == 0) {
+		printf("assuming true.\n");
+		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = e;
 		return true;
 	} else {
+		printf("assuming false.\n");
+		assertUnoptimisable(e2, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = e2;
 		return false;
 	}
@@ -4013,16 +4037,30 @@ evalMachineUnderAssumption(StateMachine *sm, Oracle *oracle, IRExpr *assumption,
 	NdChooser chooser;
 	bool crashes;
 
+	assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 	*mightSurvive = false;
 	*mightCrash = false;
 	while (!*mightCrash || !*mightSurvive) {
 		StateMachineEvalContext ctxt;
+		printf("Current assumption: ");
+		ppIRExpr(assumption, stdout);
+		printf("\n");
+		assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = assumption;
 		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
+		printf("After eval: ");
+		ppIRExpr(assumption, stdout);
+		printf("\n");
+		assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 		if (crashes) {
 			*mightCrash = true;
 			printf("Eventual crash, path constraint ");
 			ppIRExpr(ctxt.pathConstraint, stdout);
+			printf("\n");
+			IRExpr *e = optimiseIRExpr(ctxt.pathConstraint,
+						   AllowableOptimisations::defaultOptimisations);
+			printf("Optimises to ");
+			ppIRExpr(e, stdout);
 			printf("\n");
 		} else
 			*mightSurvive = true;
@@ -4096,6 +4134,7 @@ main(int argc, char *argv[])
 		printf("\n");
 
 		bool mightSurvive, mightCrash;
+		printf("Checking that that actually worked...\n");
 		evalMachineUnderAssumption(cr->sm, oracle, survive, &mightSurvive, &mightCrash);
 		printf("Might survive: %d, might crash: %d\n", mightSurvive,
 		       mightCrash);
