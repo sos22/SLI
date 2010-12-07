@@ -3814,25 +3814,13 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		return true;
 	}
 
-	printf("Can't prove value of ");
-	ppIRExpr(exp, stdout);
-	printf(" using ");
-	ppIRExpr(ctxt.pathConstraint, stdout);
-	printf(" (-> ");
-	ppIRExpr(e, stdout);
-	printf(" and ");
-	ppIRExpr(e2, stdout);
-	printf("; ");
-
 	/* Can't prove it one way or another.  Use the
 	   non-deterministic chooser to guess. */
 	if (chooser.nd_choice(2) == 0) {
-		printf("assuming true.\n");
 		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = e;
 		return true;
 	} else {
-		printf("assuming false.\n");
 		assertUnoptimisable(e2, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = e2;
 		return false;
@@ -4223,27 +4211,13 @@ evalMachineUnderAssumption(StateMachine *sm, Oracle *oracle, IRExpr *assumption,
 	*mightCrash = false;
 	while (!*mightCrash || !*mightSurvive) {
 		StateMachineEvalContext ctxt;
-		printf("Current assumption: ");
-		ppIRExpr(assumption, stdout);
-		printf("\n");
 		assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = assumption;
 		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
-		printf("After eval: ");
-		ppIRExpr(assumption, stdout);
-		printf("\n");
 		assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
-		if (crashes) {
+		if (crashes)
 			*mightCrash = true;
-			printf("Eventual crash, path constraint ");
-			ppIRExpr(ctxt.pathConstraint, stdout);
-			printf("\n");
-			IRExpr *e = optimiseIRExpr(ctxt.pathConstraint,
-						   AllowableOptimisations::defaultOptimisations);
-			printf("Optimises to ");
-			ppIRExpr(e, stdout);
-			printf("\n");
-		} else
+		else
 			*mightSurvive = true;
 		if (!chooser.advance())
 			break;
@@ -4314,8 +4288,13 @@ main(int argc, char *argv[])
 		ppIRExpr(survive, stdout);
 		printf("\n");
 
+		/* Quick check that that vaguely worked.  If this
+		   reports mightCrash == true then that probably means
+		   that the theorem prover bits need more work.  If it
+		   reports mightSurvive == false then the program is
+		   doomed and it's not possible to fix it from this
+		   point. */
 		bool mightSurvive, mightCrash;
-		printf("Checking that that actually worked...\n");
 		evalMachineUnderAssumption(cr->sm, oracle, survive, &mightSurvive, &mightCrash);
 		printf("Might survive: %d, might crash: %d\n", mightSurvive,
 		       mightCrash);
