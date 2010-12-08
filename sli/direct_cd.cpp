@@ -4259,9 +4259,11 @@ public:
 	StateMachineEdge *currentEdge;
 	unsigned nextEdgeSideEffectIdx;
 	bool finished;
+	bool crashed;
 	std::map<Int, IRExpr *> binders;
 	CrossEvalState(StateMachineEdge *_e, int _i)
-		: currentEdge(_e), nextEdgeSideEffectIdx(_i), finished(false)
+		: currentEdge(_e), nextEdgeSideEffectIdx(_i), finished(false),
+		  crashed(false)
 	{}
 };
 
@@ -4270,15 +4272,13 @@ public:
 	IRExpr *pathConstraint;
 	std::vector<StateMachineSideEffectStore *> stores;
 	CrossEvalState *states[2];
-	void advanceMachine(unsigned tid, NdChooser &chooser, Oracle *oracle, bool *crashes, bool *survives);
+	void advanceMachine(unsigned tid, NdChooser &chooser, Oracle *oracle);
 };
 
 void
 CrossMachineEvalContext::advanceMachine(unsigned tid,
 					NdChooser &chooser,
-					Oracle *oracle,
-					bool *crashes,
-					bool *survives)
+					Oracle *oracle)
 {
 	CrossEvalState *machine = states[tid];
 	StateMachine *s;
@@ -4291,13 +4291,12 @@ top:
 		s = machine->currentEdge->target;
 		if (dynamic_cast<StateMachineCrash *>(s)) {
 			machine->finished = true;
-			*crashes = true;
+			machine->crashed = true;
 			return;
 		}
 		if (dynamic_cast<StateMachineNoCrash *>(s) ||
 		    dynamic_cast<StateMachineStub *>(s)) {
 			machine->finished = true;
-			*survives = true;
 			return;
 		}
 		if (StateMachineProxy *smp =
@@ -4328,6 +4327,11 @@ top:
 		goto top;
 }
 
+/* Run sm1 and sm2 in parallel, ***stopping as soon as sm1
+ * terminates***.  Consider every possible interleaving of the
+ * machines, and every possible aliasing pattern.  Set *mightSurvive
+ * to true if any run caused sm1 to reach a NoCrash state, otherwise
+ * set it to false; likewise *mightCrash for Crash states. */
 static void
 evalCrossProductMachine(StateMachine *sm1,
 			StateMachine *sm2,
@@ -4337,8 +4341,6 @@ evalCrossProductMachine(StateMachine *sm1,
 			bool *mightCrash)
 {
 	NdChooser chooser;
-	bool crashes;
-	bool survives;
 
 	*mightSurvive = false;
 	*mightCrash = false;
@@ -4352,17 +4354,15 @@ evalCrossProductMachine(StateMachine *sm1,
 		CrossEvalState s2(sme2, 0);
 		ctxt.states[0] = &s1;
 		ctxt.states[1] = &s2;
-		crashes = survives = false;
-		while (!crashes && !survives) {
+		while (!s1.finished && !s2.finished)
 			ctxt.advanceMachine(chooser.nd_choice(2),
 					    chooser,
-					    oracle,
-					    &crashes,
-					    &survives);
-		}
-		if (crashes)
+					    oracle);
+		while (!s1.finished)
+			ctxt.advanceMachine(0, chooser, oracle);
+		if (s1.crashed)
 			*mightCrash = true;
-		if (survives)
+		else
 			*mightSurvive = true;
 		if (!chooser.advance())
 			break;
@@ -4446,6 +4446,11 @@ main(int argc, char *argv[])
 		printf("Might survive: %d, might crash: %d\n", mightSurvive,
 		       mightCrash);
 
+		if (!mightSurvive)
+			continue;
+		if (mightCrash)
+			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+
 		std::set<StateMachineSideEffectLoad *> allLoads;
 		findAllLoads(cr->sm, allLoads);
 		std::set<unsigned long> potentiallyConflictingStores;
@@ -4495,9 +4500,33 @@ main(int argc, char *argv[])
 				   with the probe machine, and see if
 				   it might lead to a crash. */
 				printf("Running cross-product machine...\n");
-				evalCrossProductMachine(cr->sm, sm, oracle, survive, &mightSurvive, &mightCrash);
+				evalCrossProductMachine(cr->sm,
+							sm,
+							oracle,
+							survive,
+							&mightSurvive,
+							&mightCrash);
 				printf("Run in parallel with the probe machine, might survive %d, might crash %d\n",
 				       mightSurvive, mightCrash);
+
+				/* We know that mightSurvive is true
+				 * when the load machine is run
+				 * atomically, so if mightSurvive is
+				 * now false then that means that
+				 * evalCrossProductMachine didn't
+				 * consider that case, which is a
+				 * bug. */
+				assert(mightSurvive);
+
+				if (!mightCrash) {
+					/* Executing in parallel with
+					 * this machine cannot lead to
+					 * a crash, so there's no
+					 * point in doing any more
+					 * work with it. */
+					continue;
+				}
+
 			}
 		}
 		break;
