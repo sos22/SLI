@@ -227,6 +227,7 @@ public:
 	}
 
 	void prettyPrint(FILE *f) const {
+		fprintf(f, "%p", this);
 		if (sideEffects.size() != 0) {
 			fprintf(f, "{");
 			bool b = true;
@@ -1388,6 +1389,9 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 			return true;
 		case 0x400632:
 		case 0x400641:
+		case 0x4006f2:
+		case 0x40066c:
+		case 0x4006ec:
 			return false;
 		default:
 			abort();
@@ -1399,6 +1403,21 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 			return true;
 		case 0x400641:
 		case 0x400632:
+		case 0x400656:
+		case 0x4006fc:
+		case 0x4006ec:
+			return false;
+		default:
+			abort();
+		}
+		abort();
+	case 0x4006e3:
+		switch (smses->rip) {
+		case 0x4006ec:
+			return true;
+		case 0x4006fc:
+		case 0x4006f2:
+		case 0x400641:
 			return false;
 		default:
 			abort();
@@ -3677,18 +3696,18 @@ public:
 };
 
 static IRExpr *
-specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
+specialiseIRExpr(IRExpr *iex, std::map<Int,IRExpr *> &binders)
 {
 	switch (iex->tag) {
 	case Iex_Binder:
-		assert(ctxt.binders[iex->Iex.Binder.binder]);
-		return ctxt.binders[iex->Iex.Binder.binder];
+		assert(binders[iex->Iex.Binder.binder]);
+		return binders[iex->Iex.Binder.binder];
 	case Iex_Get:
 		return iex;
 	case Iex_GetI:
 		return IRExpr_GetI(
 			iex->Iex.GetI.descr,
-			specialiseIRExpr(iex->Iex.GetI.ix, ctxt),
+			specialiseIRExpr(iex->Iex.GetI.ix, binders),
 			iex->Iex.GetI.bias,
 			iex->Iex.GetI.tid);
 	case Iex_RdTmp:
@@ -3696,31 +3715,31 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 	case Iex_Qop:
 		return IRExpr_Qop(
 			iex->Iex.Qop.op,
-			specialiseIRExpr(iex->Iex.Qop.arg1, ctxt),
-			specialiseIRExpr(iex->Iex.Qop.arg2, ctxt),
-			specialiseIRExpr(iex->Iex.Qop.arg3, ctxt),
-			specialiseIRExpr(iex->Iex.Qop.arg4, ctxt));
+			specialiseIRExpr(iex->Iex.Qop.arg1, binders),
+			specialiseIRExpr(iex->Iex.Qop.arg2, binders),
+			specialiseIRExpr(iex->Iex.Qop.arg3, binders),
+			specialiseIRExpr(iex->Iex.Qop.arg4, binders));
 	case Iex_Triop:
 		return IRExpr_Triop(
 			iex->Iex.Triop.op,
-			specialiseIRExpr(iex->Iex.Triop.arg1, ctxt),
-			specialiseIRExpr(iex->Iex.Triop.arg2, ctxt),
-			specialiseIRExpr(iex->Iex.Triop.arg3, ctxt));
+			specialiseIRExpr(iex->Iex.Triop.arg1, binders),
+			specialiseIRExpr(iex->Iex.Triop.arg2, binders),
+			specialiseIRExpr(iex->Iex.Triop.arg3, binders));
 	case Iex_Binop:
 		return IRExpr_Binop(
 			iex->Iex.Binop.op,
-			specialiseIRExpr(iex->Iex.Binop.arg1, ctxt),
-			specialiseIRExpr(iex->Iex.Binop.arg2, ctxt));
+			specialiseIRExpr(iex->Iex.Binop.arg1, binders),
+			specialiseIRExpr(iex->Iex.Binop.arg2, binders));
 	case Iex_Unop:
 		return IRExpr_Unop(
 			iex->Iex.Unop.op,
-			specialiseIRExpr(iex->Iex.Unop.arg, ctxt));
+			specialiseIRExpr(iex->Iex.Unop.arg, binders));
 	case Iex_Load:
 		return IRExpr_Load(
 			iex->Iex.Load.isLL,
 			iex->Iex.Load.end,
 			iex->Iex.Load.ty,
-			specialiseIRExpr(iex->Iex.Load.addr, ctxt));
+			specialiseIRExpr(iex->Iex.Load.addr, binders));
 	case Iex_Const:
 		return iex;
 	case Iex_CCall: {
@@ -3730,7 +3749,7 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 			;
 		args = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, n + 1);
 		for (n = 0; iex->Iex.CCall.args[n]; n++)
-			args[n] = specialiseIRExpr(iex->Iex.CCall.args[n], ctxt);
+			args[n] = specialiseIRExpr(iex->Iex.CCall.args[n], binders);
 		return IRExpr_CCall(
 			iex->Iex.CCall.cee,
 			iex->Iex.CCall.retty,
@@ -3738,9 +3757,9 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 	}
 	case Iex_Mux0X:
 		return IRExpr_Mux0X(
-			specialiseIRExpr(iex->Iex.Mux0X.cond, ctxt),
-			specialiseIRExpr(iex->Iex.Mux0X.expr0, ctxt),
-			specialiseIRExpr(iex->Iex.Mux0X.exprX, ctxt));
+			specialiseIRExpr(iex->Iex.Mux0X.cond, binders),
+			specialiseIRExpr(iex->Iex.Mux0X.expr0, binders),
+			specialiseIRExpr(iex->Iex.Mux0X.exprX, binders));
 	case Iex_Associative: {
 		IRExpr *res = IRExpr_Associative(iex);
 		for (int it = 0;
@@ -3748,7 +3767,7 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 		     it++)
 			res->Iex.Associative.contents[it] =
 				specialiseIRExpr(res->Iex.Associative.contents[it],
-						 ctxt);
+						 binders);
 		return res;
 	}
 	}
@@ -3756,10 +3775,10 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 }
 
 static bool
-expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
+expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binders, IRExpr **assumption)
 {
 	exp = optimiseIRExpr(
-		specialiseIRExpr(exp, ctxt),
+		specialiseIRExpr(exp, binders),
 		AllowableOptimisations::defaultOptimisations);
 
 	/* Combine the path constraint with the new expression and see
@@ -3769,7 +3788,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		optimiseIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
-				ctxt.pathConstraint,
+				*assumption,
 				exp),
 			AllowableOptimisations::defaultOptimisations);
 	if (e->tag == Iex_Const) {
@@ -3782,7 +3801,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		   it now. */
 		if (e->Iex.Const.con->Ico.U1) {
 			assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
-			ctxt.pathConstraint = e;
+			*assumption = e;
 			return true;
 		} else {
 			return false;
@@ -3797,7 +3816,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		optimiseIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
-				ctxt.pathConstraint,
+				*assumption,
 				IRExpr_Unop(
 					Iop_Not1,
 					exp)),
@@ -3806,7 +3825,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 		/* If X & ¬Y is definitely true, Y is definitely
 		 * false and X is definitely true. */
 		if (e2->Iex.Const.con->Ico.U1) {
-			ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
+			*assumption = IRExpr_Const(IRConst_U1(1));
 			return false;
 		}
 
@@ -3820,24 +3839,26 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, StateMachineEvalContext &ctxt)
 	   non-deterministic chooser to guess. */
 	if (chooser.nd_choice(2) == 0) {
 		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
-		ctxt.pathConstraint = e;
+		*assumption = e;
 		return true;
 	} else {
 		assertUnoptimisable(e2, AllowableOptimisations::defaultOptimisations);
-		ctxt.pathConstraint = e2;
+		*assumption = e2;
 		return false;
 	}
 }
 
 static bool
-evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, StateMachineEvalContext &ctxt)
+evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, std::map<Int, IRExpr *> &binders,
+		     IRExpr **assumption)
 {
 	return expressionIsTrue(IRExpr_Binop(
 					Iop_CmpEQ64,
 					exp1,
 					exp2),
 				chooser,
-				ctxt);
+				binders,
+				assumption);
 }
 
 static void evalStateMachine(StateMachine *sm,
@@ -3850,14 +3871,16 @@ static void
 evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			   NdChooser &chooser,
 			   Oracle *oracle,
-			   StateMachineEvalContext &ctxt)
+			   std::map<Int, IRExpr *> &binders,
+			   std::vector<StateMachineSideEffectStore *> &stores,
+			   IRExpr **assumption)
 {
 	if (StateMachineSideEffectStore *smses =
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
-		ctxt.stores.push_back(
+		stores.push_back(
 			new StateMachineSideEffectStore(
-				specialiseIRExpr(smses->addr, ctxt),
-				specialiseIRExpr(smses->data, ctxt),
+				specialiseIRExpr(smses->addr, binders),
+				specialiseIRExpr(smses->data, binders),
 				smses->rip
 				)
 				);
@@ -3865,22 +3888,22 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 		IRExpr *val;
 		val = NULL;
-		for (std::vector<StateMachineSideEffectStore *>::reverse_iterator it = ctxt.stores.rbegin();
-		     !val && it != ctxt.stores.rend();
+		for (std::vector<StateMachineSideEffectStore *>::reverse_iterator it = stores.rbegin();
+		     !val && it != stores.rend();
 		     it++) {
 			StateMachineSideEffectStore *smses = *it;
 			if (!oracle->memoryAccessesMightAlias(smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, smsel->addr, chooser, ctxt))
+			if (evalExpressionsEqual(smses->addr, smsel->addr, chooser, binders, assumption))
 				val = smses->data;
 		}
 		if (!val)
 			val = IRExpr_Load(False, Iend_LE, Ity_I64, smsel->addr);
-		ctxt.binders[smsel->key] = val;
+		binders[smsel->key] = val;
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
-		ctxt.binders[smsec->key] =
-			specialiseIRExpr(smsec->value, ctxt);
+		binders[smsec->key] =
+			specialiseIRExpr(smsec->value, binders);
 	} else {
 		abort();
 	}
@@ -3896,7 +3919,8 @@ evalStateMachineEdge(StateMachineEdge *sme,
 	for (std::vector<StateMachineSideEffect *>::iterator it = sme->sideEffects.begin();
 	     it != sme->sideEffects.end();
 	     it++)
-		evalStateMachineSideEffect(*it, chooser, oracle, ctxt);
+		evalStateMachineSideEffect(*it, chooser, oracle, ctxt.binders,
+					   ctxt.stores, &ctxt.pathConstraint);
 	evalStateMachine(sme->target, crashes, chooser, oracle, ctxt);
 }
 
@@ -3928,7 +3952,7 @@ evalStateMachine(StateMachine *sm,
 	}
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		if (expressionIsTrue(smb->condition, chooser, ctxt)) {
+		if (expressionIsTrue(smb->condition, chooser, ctxt.binders, &ctxt.pathConstraint)) {
 			evalStateMachineEdge(smb->trueTarget, crashes, chooser, oracle, ctxt);
 		} else {
 			evalStateMachineEdge(smb->falseTarget, crashes, chooser, oracle, ctxt);
@@ -4227,6 +4251,121 @@ evalMachineUnderAssumption(StateMachine *sm, Oracle *oracle, IRExpr *assumption,
 	}
 }
 
+class CrossEvalState {
+public:
+	StateMachineEdge *currentEdge;
+	unsigned nextEdgeSideEffectIdx;
+	bool finished;
+	std::map<Int, IRExpr *> binders;
+	CrossEvalState(StateMachineEdge *_e, int _i)
+		: currentEdge(_e), nextEdgeSideEffectIdx(_i), finished(false)
+	{}
+};
+
+class CrossMachineEvalContext {
+public:
+	IRExpr *pathConstraint;
+	std::vector<StateMachineSideEffectStore *> stores;
+	CrossEvalState *states[2];
+	void advanceMachine(unsigned tid, NdChooser &chooser, Oracle *oracle, bool *crashes, bool *survives);
+};
+
+void
+CrossMachineEvalContext::advanceMachine(unsigned tid,
+					NdChooser &chooser,
+					Oracle *oracle,
+					bool *crashes,
+					bool *survives)
+{
+	CrossEvalState *machine = states[tid];
+	StateMachine *s;
+top:
+	if (machine->finished)
+		return;
+	if (machine->nextEdgeSideEffectIdx == machine->currentEdge->sideEffects.size()) {
+		/* We've hit the end of the edge.  Move to the next
+		 * state. */
+		s = machine->currentEdge->target;
+		if (dynamic_cast<StateMachineCrash *>(s)) {
+			machine->finished = true;
+			*crashes = true;
+			return;
+		}
+		if (dynamic_cast<StateMachineNoCrash *>(s) ||
+		    dynamic_cast<StateMachineStub *>(s)) {
+			machine->finished = true;
+			*survives = true;
+			return;
+		}
+		if (StateMachineProxy *smp =
+		    dynamic_cast<StateMachineProxy *>(s)) {
+			machine->currentEdge = smp->target;
+			machine->nextEdgeSideEffectIdx = 0;
+			goto top;
+		}
+		if (StateMachineBifurcate *smb =
+		    dynamic_cast<StateMachineBifurcate *>(s)) {
+			if (expressionIsTrue(smb->condition, chooser, machine->binders, &pathConstraint))
+				machine->currentEdge = smb->trueTarget;
+			else
+				machine->currentEdge = smb->falseTarget;
+			machine->nextEdgeSideEffectIdx = 0;
+			goto top;
+		}
+	}
+
+	StateMachineSideEffect *se;
+	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];
+	evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint);
+	machine->nextEdgeSideEffectIdx++;
+
+	/* You don't need to context switch after a copy, because
+	   they're purely local. */
+	if (dynamic_cast<StateMachineSideEffectCopy *>(se))
+		goto top;
+}
+
+static void
+evalCrossProductMachine(StateMachine *sm1,
+			StateMachine *sm2,
+			Oracle *oracle,
+			IRExpr *initialStateCondition,
+			bool *mightSurvive,
+			bool *mightCrash)
+{
+	NdChooser chooser;
+	bool crashes;
+	bool survives;
+
+	*mightSurvive = false;
+	*mightCrash = false;
+
+	StateMachineEdge *sme1 = new StateMachineEdge(sm1);
+	StateMachineEdge *sme2 = new StateMachineEdge(sm2);
+	while (!*mightCrash || !*mightSurvive) {
+		CrossMachineEvalContext ctxt;
+		ctxt.pathConstraint = initialStateCondition;
+		CrossEvalState s1(sme1, 0);
+		CrossEvalState s2(sme2, 0);
+		ctxt.states[0] = &s1;
+		ctxt.states[1] = &s2;
+		crashes = survives = false;
+		while (!crashes && !survives) {
+			ctxt.advanceMachine(chooser.nd_choice(2),
+					    chooser,
+					    oracle,
+					    &crashes,
+					    &survives);
+		}
+		if (crashes)
+			*mightCrash = true;
+		if (survives)
+			*mightSurvive = true;
+		if (!chooser.advance())
+			break;
+	}
+}
+
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
@@ -4261,8 +4400,8 @@ main(int argc, char *argv[])
 
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
-	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
-	     it != previousInstructions.end();
+	for (std::vector<unsigned long>::reverse_iterator it = previousInstructions.rbegin();
+	     it != previousInstructions.rend();
 	     it++) {
 		CFGNode *cfg = ii->CFGFromRip(*it);
 		std::set<unsigned long> interesting;
@@ -4349,8 +4488,17 @@ main(int argc, char *argv[])
 				} while (done_something);
 				printf("Turns into state machine:\n");
 				printStateMachine(sm, stdout);
+
+				/* Now try running that in parallel
+				   with the probe machine, and see if
+				   it might lead to a crash. */
+				printf("Running cross-product machine...\n");
+				evalCrossProductMachine(cr->sm, sm, oracle, survive, &mightSurvive, &mightCrash);
+				printf("Run in parallel with the probe machine, might survive %d, might crash %d\n",
+				       mightSurvive, mightCrash);
 			}
 		}
+		break;
 	}
 
 	return 0;
