@@ -3,6 +3,7 @@
 #include <err.h>
 #include <time.h>
 
+#include <algorithm>
 #include <queue>
 #include <map>
 #include <set>
@@ -4369,6 +4370,130 @@ evalCrossProductMachine(StateMachine *sm1,
 	}
 }
 
+/* Run the write machine, covering every possible schedule and
+ * aliasing pattern.  After every store, run the read machine
+ * atomically.  Find ranges of the store machine where the read
+ * machine predicts a crash; these ranges are the remote macro
+ * sections (as opposed to remote micro sections, which are just the
+ * individual stores).  We assume that @assumption holds before
+ * either machine starts running. */
+/* Returns false if we discover something which suggests that this is
+ * a bad choice of write machine, or true otherwise. */
+static bool
+findRemoteMacroSections(StateMachine *readMachine,
+			StateMachine *writeMachine,
+			IRExpr *assumption,
+			Oracle *oracle,
+			std::set<std::pair<StateMachineSideEffectStore *,
+			                   StateMachineSideEffectStore *> > &output)
+{
+	NdChooser chooser;
+
+	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
+	do {
+		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
+		std::map<Int, IRExpr *> writerBinders;
+		StateMachineEdge *writerEdge;
+		unsigned writeEdgeIdx;
+		IRExpr *pathConstraint;
+		StateMachineSideEffectStore *sectionStart;
+
+		writeEdgeIdx = 0;
+		pathConstraint = assumption;
+		writerEdge = writeStartEdge;
+		sectionStart = NULL;
+		while (1) {
+			/* Have we hit the end of the current writer edge? */
+			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
+				/* Yes, move to the next state. */
+				StateMachine *s = writerEdge->target;
+				if (dynamic_cast<StateMachineCrash *>(s) ||
+				    dynamic_cast<StateMachineNoCrash *>(s) ||
+				    dynamic_cast<StateMachineStub *>(s)) {
+					/* Hit the end of the writer
+					 * -> we're done. */
+					break;
+				}
+				if (StateMachineProxy *smp =
+				    dynamic_cast<StateMachineProxy *>(s)) {
+					writerEdge = smp->target;
+					writeEdgeIdx = 0;
+					continue;
+				}
+				StateMachineBifurcate *smb =
+					dynamic_cast<StateMachineBifurcate *>(s);
+				assert(smb);
+				if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint))
+					writerEdge = smb->trueTarget;
+				else
+					writerEdge = smb->falseTarget;
+				writeEdgeIdx = 0;
+				continue;				
+			}
+
+			/* Advance the writer by one state.  Note that
+			   we *don't* consider running the read before
+			   any write states, as that's already been
+			   handled and is known to lead to
+			   no-crash. */
+			StateMachineSideEffect *se;
+			se = writerEdge->sideEffects[writeEdgeIdx];
+			evalStateMachineSideEffect(se, chooser, oracle, writerBinders, storesIssuedByWriter, &pathConstraint);
+			writeEdgeIdx++;
+
+			/* Advance to a store */
+			StateMachineSideEffectStore *smses =
+				dynamic_cast<StateMachineSideEffectStore *>(se);
+			if (!smses)
+				continue;
+
+			/* The writer just issued a store, so we
+			   should now try running the reader
+			   atomically.  We discard any stores issued
+			   by the reader once it's finished, but we
+			   need to track them while it's running, so
+			   need a fresh eval ctxt and a fresh copy of
+			   the stores list every time around the
+			   loop. */
+			StateMachineEvalContext readEvalCtxt;
+			readEvalCtxt.pathConstraint = pathConstraint;
+			readEvalCtxt.stores = storesIssuedByWriter;
+			bool crashes;
+			evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
+			if (crashes) {
+				if (!sectionStart) {
+					/* The previous attempt at
+					   evaluating the read machine
+					   didn't lead to a crash, so
+					   this is the start of a
+					   critical section. */
+					sectionStart = smses;
+				} else {
+					/* Critical section
+					 * continues. */
+				}
+			} else {
+				if (sectionStart) {
+					/* Previous attempt did crash
+					   -> this is the end of the
+					   section. */
+					output.insert(std::pair<StateMachineSideEffectStore *,
+						                StateMachineSideEffectStore *>(sectionStart, smses));
+					sectionStart = NULL;
+				}
+			}
+		}
+		if (sectionStart) {
+			/* We get a crash if we evaluate the read
+			   machine after running the store machine to
+			   completion -> this is a poor choice of
+			   store machines. */
+			return false;
+		}
+	} while (chooser.advance());
+	return true;
+}
+
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
@@ -4525,6 +4650,25 @@ main(int argc, char *argv[])
 					 * point in doing any more
 					 * work with it. */
 					continue;
+				}
+
+				std::set<std::pair<StateMachineSideEffectStore *,
+					           StateMachineSideEffectStore *> >
+					remoteMacroSections;
+				if (!findRemoteMacroSections(cr->sm, sm, survive, oracle, remoteMacroSections)) {
+					printf("Chose a bad write machine...\n");
+					continue;
+				}
+				for (std::set<std::pair<StateMachineSideEffectStore *,
+					                StateMachineSideEffectStore *> >::iterator it =
+					     remoteMacroSections.begin();
+				     it != remoteMacroSections.end();
+				     it++) {
+					printf("Remote macro section ");
+					it->first->prettyPrint(stdout);
+					printf(" -> ");
+					it->second->prettyPrint(stdout);
+					printf("\n");
 				}
 
 			}
