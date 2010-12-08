@@ -4528,8 +4528,8 @@ main(int argc, char *argv[])
 
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
-	for (std::vector<unsigned long>::reverse_iterator it = previousInstructions.rbegin();
-	     it != previousInstructions.rend();
+	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
+	     it != previousInstructions.end();
 	     it++) {
 		CFGNode *cfg = ii->CFGFromRip(*it);
 		std::set<unsigned long> interesting;
@@ -4673,7 +4673,6 @@ main(int argc, char *argv[])
 
 			}
 		}
-		break;
 	}
 
 	return 0;
