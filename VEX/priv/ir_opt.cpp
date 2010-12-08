@@ -281,7 +281,7 @@ static Bool isFlat ( IRExpr* e )
    the same value, after having appended extra IRTemp assignments to
    the end of 'bb'. */
 
-static IRExpr* flatten_Expr ( IRSB* bb, IRExpr* ex )
+static IRExpr* flatten_Expr ( unsigned tid, IRSB* bb, IRExpr* ex )
 {
    Int i;
    IRExpr** newargs;
@@ -294,49 +294,50 @@ static IRExpr* flatten_Expr ( IRSB* bb, IRExpr* ex )
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, IRStmt_WrTmp(t1,
             IRExpr_GetI(ex->Iex.GetI.descr,
-                        flatten_Expr(bb, ex->Iex.GetI.ix),
-                        ex->Iex.GetI.bias)));
-         return IRExpr_RdTmp(t1);
+                        flatten_Expr(tid, bb, ex->Iex.GetI.ix),
+                        ex->Iex.GetI.bias,
+			ex->Iex.GetI.tid)));
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Get:
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, 
             IRStmt_WrTmp(t1, ex));
-         return IRExpr_RdTmp(t1);
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Qop:
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, IRStmt_WrTmp(t1, 
             IRExpr_Qop(ex->Iex.Qop.op,
-                         flatten_Expr(bb, ex->Iex.Qop.arg1),
-                         flatten_Expr(bb, ex->Iex.Qop.arg2),
-                         flatten_Expr(bb, ex->Iex.Qop.arg3),
-                         flatten_Expr(bb, ex->Iex.Qop.arg4))));
-         return IRExpr_RdTmp(t1);
+                         flatten_Expr(tid, bb, ex->Iex.Qop.arg1),
+                         flatten_Expr(tid, bb, ex->Iex.Qop.arg2),
+                         flatten_Expr(tid, bb, ex->Iex.Qop.arg3),
+                         flatten_Expr(tid, bb, ex->Iex.Qop.arg4))));
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Triop:
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, IRStmt_WrTmp(t1, 
             IRExpr_Triop(ex->Iex.Triop.op,
-                         flatten_Expr(bb, ex->Iex.Triop.arg1),
-                         flatten_Expr(bb, ex->Iex.Triop.arg2),
-                         flatten_Expr(bb, ex->Iex.Triop.arg3))));
-         return IRExpr_RdTmp(t1);
+                         flatten_Expr(tid, bb, ex->Iex.Triop.arg1),
+                         flatten_Expr(tid, bb, ex->Iex.Triop.arg2),
+                         flatten_Expr(tid, bb, ex->Iex.Triop.arg3))));
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Binop:
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, IRStmt_WrTmp(t1, 
             IRExpr_Binop(ex->Iex.Binop.op,
-                         flatten_Expr(bb, ex->Iex.Binop.arg1),
-                         flatten_Expr(bb, ex->Iex.Binop.arg2))));
-         return IRExpr_RdTmp(t1);
+                         flatten_Expr(tid, bb, ex->Iex.Binop.arg1),
+                         flatten_Expr(tid, bb, ex->Iex.Binop.arg2))));
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Unop:
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, IRStmt_WrTmp(t1, 
             IRExpr_Unop(ex->Iex.Unop.op,
-                        flatten_Expr(bb, ex->Iex.Unop.arg))));
-         return IRExpr_RdTmp(t1);
+                        flatten_Expr(tid, bb, ex->Iex.Unop.arg))));
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Load:
          t1 = newIRTemp(bb->tyenv, ty);
@@ -344,27 +345,27 @@ static IRExpr* flatten_Expr ( IRSB* bb, IRExpr* ex )
             IRExpr_Load(ex->Iex.Load.isLL,
                         ex->Iex.Load.end,
                         ex->Iex.Load.ty, 
-                        flatten_Expr(bb, ex->Iex.Load.addr))));
-         return IRExpr_RdTmp(t1);
+                        flatten_Expr(tid, bb, ex->Iex.Load.addr))));
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_CCall:
          newargs = shallowCopyIRExprVec(ex->Iex.CCall.args);
          for (i = 0; newargs[i]; i++)
-            newargs[i] = flatten_Expr(bb, newargs[i]);
+            newargs[i] = flatten_Expr(tid, bb, newargs[i]);
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, IRStmt_WrTmp(t1,
             IRExpr_CCall(ex->Iex.CCall.cee,
                          ex->Iex.CCall.retty,
                          newargs)));
-         return IRExpr_RdTmp(t1);
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Mux0X:
          t1 = newIRTemp(bb->tyenv, ty);
          addStmtToIRSB(bb, IRStmt_WrTmp(t1,
-            IRExpr_Mux0X(flatten_Expr(bb, ex->Iex.Mux0X.cond),
-                         flatten_Expr(bb, ex->Iex.Mux0X.expr0),
-                         flatten_Expr(bb, ex->Iex.Mux0X.exprX))));
-         return IRExpr_RdTmp(t1);
+            IRExpr_Mux0X(flatten_Expr(tid, bb, ex->Iex.Mux0X.cond),
+                         flatten_Expr(tid, bb, ex->Iex.Mux0X.expr0),
+                         flatten_Expr(tid, bb, ex->Iex.Mux0X.exprX))));
+         return IRExpr_RdTmp(t1, tid);
 
       case Iex_Const:
          /* Lift F64i constants out onto temps so they can be CSEd
@@ -373,7 +374,7 @@ static IRExpr* flatten_Expr ( IRSB* bb, IRExpr* ex )
             t1 = newIRTemp(bb->tyenv, ty);
             addStmtToIRSB(bb, IRStmt_WrTmp(t1,
                IRExpr_Const(ex->Iex.Const.con)));
-            return IRExpr_RdTmp(t1);
+            return IRExpr_RdTmp(t1, tid);
          } else {
             /* Leave all other constants alone. */
             return ex;
@@ -393,7 +394,7 @@ static IRExpr* flatten_Expr ( IRSB* bb, IRExpr* ex )
 
 /* Append a completely flattened form of 'st' to the end of 'bb'. */
 
-static void flatten_Stmt ( IRSB* bb, IRStmt* st )
+static void flatten_Stmt ( unsigned tid, IRSB* bb, IRStmt* st )
 {
    Int i;
    IRExpr  *e1, *e2, *e3, *e4, *e5;
@@ -407,13 +408,13 @@ static void flatten_Stmt ( IRSB* bb, IRStmt* st )
             addStmtToIRSB(bb, st);
          } else {
             /* general case, always correct */
-            e1 = flatten_Expr(bb, st->Ist.Put.data);
+            e1 = flatten_Expr(tid, bb, st->Ist.Put.data);
             addStmtToIRSB(bb, IRStmt_Put(st->Ist.Put.offset, e1));
          }
          break;
       case Ist_PutI:
-         e1 = flatten_Expr(bb, st->Ist.PutI.ix);
-         e2 = flatten_Expr(bb, st->Ist.PutI.data);
+         e1 = flatten_Expr(tid, bb, st->Ist.PutI.ix);
+         e2 = flatten_Expr(tid, bb, st->Ist.PutI.data);
          addStmtToIRSB(bb, IRStmt_PutI(st->Ist.PutI.descr,
                                        e1,
                                        st->Ist.PutI.bias,
@@ -426,23 +427,23 @@ static void flatten_Stmt ( IRSB* bb, IRStmt* st )
             addStmtToIRSB(bb, st);
          } else {
             /* general case, always correct */
-            e1 = flatten_Expr(bb, st->Ist.WrTmp.data);
+            e1 = flatten_Expr(tid, bb, st->Ist.WrTmp.data);
             addStmtToIRSB(bb, IRStmt_WrTmp(st->Ist.WrTmp.tmp, e1));
          }
          break;
       case Ist_Store:
-         e1 = flatten_Expr(bb, st->Ist.Store.addr);
-         e2 = flatten_Expr(bb, st->Ist.Store.data);
+         e1 = flatten_Expr(tid, bb, st->Ist.Store.addr);
+         e2 = flatten_Expr(tid, bb, st->Ist.Store.data);
          addStmtToIRSB(bb, IRStmt_Store(st->Ist.Store.end,
                                         st->Ist.Store.resSC, e1,e2));
          break;
       case Ist_CAS:
          cas  = st->Ist.CAS.details;
-         e1   = flatten_Expr(bb, cas->addr);
-         e2   = cas->expdHi ? flatten_Expr(bb, cas->expdHi) : NULL;
-         e3   = flatten_Expr(bb, cas->expdLo);
-         e4   = cas->dataHi ? flatten_Expr(bb, cas->dataHi) : NULL;
-         e5   = flatten_Expr(bb, cas->dataLo);
+         e1   = flatten_Expr(tid, bb, cas->addr);
+         e2   = cas->expdHi ? flatten_Expr(tid, bb, cas->expdHi) : NULL;
+         e3   = flatten_Expr(tid, bb, cas->expdLo);
+         e4   = cas->dataHi ? flatten_Expr(tid, bb, cas->dataHi) : NULL;
+         e5   = flatten_Expr(tid, bb, cas->dataLo);
          cas2 = mkIRCAS( cas->oldHi, cas->oldLo, cas->end,
                          e1, e2, e3, e4, e5 );
          addStmtToIRSB(bb, IRStmt_CAS(cas2));
@@ -453,13 +454,13 @@ static void flatten_Stmt ( IRSB* bb, IRStmt* st )
          *d2 = *d;
          d2->args = shallowCopyIRExprVec(d2->args);
          if (d2->mFx != Ifx_None) {
-            d2->mAddr = flatten_Expr(bb, d2->mAddr);
+            d2->mAddr = flatten_Expr(tid, bb, d2->mAddr);
          } else {
             vassert(d2->mAddr == NULL);
          }
-         d2->guard = flatten_Expr(bb, d2->guard);
+         d2->guard = flatten_Expr(tid, bb, d2->guard);
          for (i = 0; d2->args[i]; i++)
-            d2->args[i] = flatten_Expr(bb, d2->args[i]);
+            d2->args[i] = flatten_Expr(tid, bb, d2->args[i]);
          addStmtToIRSB(bb, IRStmt_Dirty(d2));
          break;
       case Ist_NoOp:
@@ -468,12 +469,12 @@ static void flatten_Stmt ( IRSB* bb, IRStmt* st )
          addStmtToIRSB(bb, st);
          break;
       case Ist_AbiHint:
-         e1 = flatten_Expr(bb, st->Ist.AbiHint.base);
-         e2 = flatten_Expr(bb, st->Ist.AbiHint.nia);
+         e1 = flatten_Expr(tid, bb, st->Ist.AbiHint.base);
+         e2 = flatten_Expr(tid, bb, st->Ist.AbiHint.nia);
          addStmtToIRSB(bb, IRStmt_AbiHint(e1, st->Ist.AbiHint.len, e2));
          break;
       case Ist_Exit:
-         e1 = flatten_Expr(bb, st->Ist.Exit.guard);
+         e1 = flatten_Expr(tid, bb, st->Ist.Exit.guard);
          addStmtToIRSB(bb, IRStmt_Exit(e1, st->Ist.Exit.jk,
                                            st->Ist.Exit.dst));
          break;
@@ -486,7 +487,7 @@ static void flatten_Stmt ( IRSB* bb, IRStmt* st )
 }
 
 
-static IRSB* flatten_BB ( IRSB* in )
+static IRSB* flatten_BB ( unsigned tid, IRSB* in )
 {
    Int   i;
    IRSB* out;
@@ -494,8 +495,8 @@ static IRSB* flatten_BB ( IRSB* in )
    out->tyenv = deepCopyIRTypeEnv( in->tyenv );
    for (i = 0; i < in->stmts_used; i++)
       if (in->stmts[i])
-         flatten_Stmt( out, in->stmts[i] );
-   out->next     = flatten_Expr( out, in->next );
+         flatten_Stmt(tid,  out, in->stmts[i] );
+   out->next     = flatten_Expr(tid,  out, in->next );
    out->jumpkind = in->jumpkind;
    return out;
 }
@@ -578,7 +579,7 @@ static void invalidateOverlaps ( HashHW* h, UInt k_lo, UInt k_hi )
 }
 
 
-static void redundant_get_removal_BB ( IRSB* bb )
+static void redundant_get_removal_BB ( unsigned tid, IRSB* bb )
 {
    HashHW* env = newHHW();
    UInt    key = 0; /* keep gcc -O happy */
@@ -621,7 +622,7 @@ static void redundant_get_removal_BB ( IRSB* bb )
                are now associated.  So add a binding to reflect that
                fact. */
             addToHHW( env, (HWord)key, 
-                           (HWord)(void*)(IRExpr_RdTmp(st->Ist.WrTmp.tmp)) );
+		      (HWord)(void*)(IRExpr_RdTmp(st->Ist.WrTmp.tmp, tid)) );
          }
       }
 
@@ -1635,7 +1636,8 @@ static IRExpr* subst_Expr ( IRExpr** env, IRExpr* ex )
          return IRExpr_GetI(
             ex->Iex.GetI.descr,
             subst_Expr(env, ex->Iex.GetI.ix),
-            ex->Iex.GetI.bias
+            ex->Iex.GetI.bias,
+	    ex->Iex.GetI.tid
          );
 
       case Iex_Qop:
@@ -2156,7 +2158,8 @@ static Bool isOneU1 ( IRExpr* e )
 /*---------------------------------------------------------------*/
 
 static 
-IRSB* spec_helpers_BB ( IRSB* bb,
+IRSB* spec_helpers_BB ( unsigned tid,
+			IRSB* bb,
                         IRExpr* (*specHelper) ( const char*, IRExpr**) )   
 {
    Int     i;
@@ -2192,7 +2195,7 @@ IRSB* spec_helpers_BB ( IRSB* bb,
    }
 
    if (any)
-      bb = flatten_BB(bb);
+      bb = flatten_BB(tid, bb);
    return bb;
 }
 
@@ -2412,33 +2415,34 @@ static Bool eq_AvailExpr ( AvailExpr* a1, AvailExpr* a2 )
    }
 }
 
-static IRExpr* availExpr_to_IRExpr ( AvailExpr* ae ) 
+static IRExpr* availExpr_to_IRExpr ( unsigned tid, AvailExpr* ae ) 
 {
    switch (ae->tag) {
       case AvailExpr::Ut:
-         return IRExpr_Unop( ae->u.Ut.op, IRExpr_RdTmp(ae->u.Ut.arg) );
+	 return IRExpr_Unop( ae->u.Ut.op, IRExpr_RdTmp(ae->u.Ut.arg, tid) );
       case AvailExpr::Btt:
          return IRExpr_Binop( ae->u.Btt.op,
-                              IRExpr_RdTmp(ae->u.Btt.arg1),
-                              IRExpr_RdTmp(ae->u.Btt.arg2) );
+                              IRExpr_RdTmp(ae->u.Btt.arg1, tid),
+                              IRExpr_RdTmp(ae->u.Btt.arg2, tid) );
       case AvailExpr::Btc:
          return IRExpr_Binop( ae->u.Btc.op,
-                              IRExpr_RdTmp(ae->u.Btc.arg1), 
+                              IRExpr_RdTmp(ae->u.Btc.arg1, tid), 
                               IRExpr_Const(ae->u.Btc.con2) );
       case AvailExpr::Bct:
          return IRExpr_Binop( ae->u.Bct.op,
                               IRExpr_Const(ae->u.Bct.con1), 
-                              IRExpr_RdTmp(ae->u.Bct.arg2) );
+                              IRExpr_RdTmp(ae->u.Bct.arg2, tid) );
       case AvailExpr::Cf64i:
          return IRExpr_Const(IRConst_F64i(ae->u.Cf64i.f64i));
       case AvailExpr::Mttt:
-         return IRExpr_Mux0X(IRExpr_RdTmp(ae->u.Mttt.co), 
-                             IRExpr_RdTmp(ae->u.Mttt.e0), 
-                             IRExpr_RdTmp(ae->u.Mttt.eX));
+	 return IRExpr_Mux0X(IRExpr_RdTmp(ae->u.Mttt.co, tid), 
+                             IRExpr_RdTmp(ae->u.Mttt.e0, tid), 
+                             IRExpr_RdTmp(ae->u.Mttt.eX, tid));
       case AvailExpr::GetIt:
          return IRExpr_GetI(ae->u.GetIt.descr,
-                            IRExpr_RdTmp(ae->u.GetIt.ix),
-                            ae->u.GetIt.bias);
+                            IRExpr_RdTmp(ae->u.GetIt.ix, tid),
+                            ae->u.GetIt.bias,
+			    tid);
       default:
          vpanic("availExpr_to_IRExpr");
    }
@@ -2570,7 +2574,7 @@ static AvailExpr* irExpr_to_AvailExpr ( IRExpr* e )
 /* The BB is modified in-place.  Returns True if any changes were
    made. */
 
-static Bool do_cse_BB ( IRSB* bb )
+static Bool do_cse_BB ( unsigned tid, IRSB* bb )
 {
    Int        i, j, paranoia;
    IRTemp     t, q;
@@ -2640,7 +2644,7 @@ static Bool do_cse_BB ( IRSB* bb )
                if (st->tag == Ist_Put) {
                   if (getAliasingRelation_IC(
                          ae->u.GetIt.descr, 
-                         IRExpr_RdTmp(ae->u.GetIt.ix), 
+                         IRExpr_RdTmp(ae->u.GetIt.ix, tid), 
                          st->Ist.Put.offset, 
                          typeOfIRExpr(bb->tyenv,st->Ist.Put.data) 
                       ) != NoAlias) 
@@ -2650,7 +2654,7 @@ static Bool do_cse_BB ( IRSB* bb )
                if (st->tag == Ist_PutI) {
                   if (getAliasingRelation_II(
                          ae->u.GetIt.descr, 
-                         IRExpr_RdTmp(ae->u.GetIt.ix), 
+                         IRExpr_RdTmp(ae->u.GetIt.ix, tid), 
                          ae->u.GetIt.bias,
                          st->Ist.PutI.descr,
                          st->Ist.PutI.ix,
@@ -2696,14 +2700,14 @@ static Bool do_cse_BB ( IRSB* bb )
             note the t->q binding in tenv. */
          /* (this is the core of the CSE action) */
          q = (IRTemp)aenv->val[j];
-         bb->stmts[i] = IRStmt_WrTmp( t, IRExpr_RdTmp(q) );
+         bb->stmts[i] = IRStmt_WrTmp( t, IRExpr_RdTmp(q, tid) );
          addToHHW( tenv, (HWord)t, (HWord)q );
          anyDone = True;
       } else {
          /* No binding was found, so instead we add E' -> t to our
             collection of available expressions, replace this stmt
             with "t = E'", and move on. */
-         bb->stmts[i] = IRStmt_WrTmp( t, availExpr_to_IRExpr(eprime) );
+	 bb->stmts[i] = IRStmt_WrTmp( t, availExpr_to_IRExpr(tid, eprime) );
          addToHHW( aenv, (HWord)eprime, (HWord)t );
       }
    }
@@ -2793,7 +2797,7 @@ static Bool collapseChain ( IRSB* bb, Int startHere,
 
 /* ------- Main function for Add32/Sub32 chain collapsing ------ */
 
-static void collapse_AddSub_chains_BB ( IRSB* bb )
+static void collapse_AddSub_chains_BB ( unsigned tid, IRSB* bb )
 {
    IRStmt *st;
    IRTemp var, var2;
@@ -2823,10 +2827,10 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
                     st->Ist.WrTmp.tmp,
                     (con2 >= 0) 
                       ? IRExpr_Binop(Iop_Add32, 
-                                     IRExpr_RdTmp(var2),
+                                     IRExpr_RdTmp(var2, tid),
                                      IRExpr_Const(IRConst_U32(con2)))
                       : IRExpr_Binop(Iop_Sub32, 
-                                     IRExpr_RdTmp(var2),
+                                     IRExpr_RdTmp(var2, tid),
                                      IRExpr_Const(IRConst_U32(-con2)))
                  );
             if (DEBUG_IROPT) {
@@ -2855,8 +2859,9 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
             = IRStmt_WrTmp(
                  st->Ist.WrTmp.tmp,
                  IRExpr_GetI(st->Ist.WrTmp.data->Iex.GetI.descr,
-                             IRExpr_RdTmp(var2),
-                             con2));
+                             IRExpr_RdTmp(var2, tid),
+                             con2,
+			     tid));
          if (DEBUG_IROPT) {
 	    ppIRStmt(bb->stmts[i], stderr);
             vex_printf("\n");
@@ -2878,7 +2883,7 @@ static void collapse_AddSub_chains_BB ( IRSB* bb )
          con2 += st->Ist.PutI.bias;
          bb->stmts[i]
            = IRStmt_PutI(st->Ist.PutI.descr,
-                         IRExpr_RdTmp(var2),
+                         IRExpr_RdTmp(var2, tid),
                          con2,
                          st->Ist.PutI.data);
          if (DEBUG_IROPT) {
@@ -3395,7 +3400,7 @@ static Int calc_unroll_factor( IRSB* bb )
 }
 
 
-static IRSB* maybe_loop_unroll_BB ( IRSB* bb0, Addr64 my_addr )
+static IRSB* maybe_loop_unroll_BB ( unsigned tid, IRSB* bb0, Addr64 my_addr )
 {
    Int      i, j, jmax, n_vars;
    Bool     xxx_known;
@@ -3563,7 +3568,7 @@ static IRSB* maybe_loop_unroll_BB ( IRSB* bb0, Addr64 my_addr )
    /* Flattening; sigh.  The unroller succeeds in breaking flatness
       by negating the test condition.  This should be fixed properly.
       For the moment use this shotgun approach.  */
-   return flatten_BB(bb1);
+   return flatten_BB(tid, bb1);
 }
 
 
@@ -3918,7 +3923,7 @@ static IRExpr* fold_IRExpr_Unop ( IROp op, IRExpr* aa )
    return IRExpr_Unop( op, aa );
 }
 
-static IRExpr* atbSubst_Expr ( ATmpInfo* env, IRExpr* e )
+static IRExpr* atbSubst_Expr ( unsigned tid, ATmpInfo* env, IRExpr* e )
 {
    IRExpr*  e2;
    IRExpr** args2;
@@ -3929,7 +3934,7 @@ static IRExpr* atbSubst_Expr ( ATmpInfo* env, IRExpr* e )
       case Iex_CCall:
          args2 = shallowCopyIRExprVec(e->Iex.CCall.args);
          for (i = 0; args2[i]; i++)
-            args2[i] = atbSubst_Expr(env,args2[i]);
+            args2[i] = atbSubst_Expr(tid, env,args2[i]);
          return IRExpr_CCall(
                    e->Iex.CCall.cee,
                    e->Iex.CCall.retty,
@@ -3940,48 +3945,49 @@ static IRExpr* atbSubst_Expr ( ATmpInfo* env, IRExpr* e )
          return e2 ? e2 : e;
       case Iex_Mux0X:
          return IRExpr_Mux0X(
-                   atbSubst_Expr(env, e->Iex.Mux0X.cond),
-                   atbSubst_Expr(env, e->Iex.Mux0X.expr0),
-                   atbSubst_Expr(env, e->Iex.Mux0X.exprX)
+                   atbSubst_Expr(tid, env, e->Iex.Mux0X.cond),
+                   atbSubst_Expr(tid, env, e->Iex.Mux0X.expr0),
+                   atbSubst_Expr(tid, env, e->Iex.Mux0X.exprX)
                 );
       case Iex_Qop:
          return IRExpr_Qop(
                    e->Iex.Qop.op,
-                   atbSubst_Expr(env, e->Iex.Qop.arg1),
-                   atbSubst_Expr(env, e->Iex.Qop.arg2),
-                   atbSubst_Expr(env, e->Iex.Qop.arg3),
-                   atbSubst_Expr(env, e->Iex.Qop.arg4)
+                   atbSubst_Expr(tid, env, e->Iex.Qop.arg1),
+                   atbSubst_Expr(tid, env, e->Iex.Qop.arg2),
+                   atbSubst_Expr(tid, env, e->Iex.Qop.arg3),
+                   atbSubst_Expr(tid, env, e->Iex.Qop.arg4)
                 );
       case Iex_Triop:
          return IRExpr_Triop(
                    e->Iex.Triop.op,
-                   atbSubst_Expr(env, e->Iex.Triop.arg1),
-                   atbSubst_Expr(env, e->Iex.Triop.arg2),
-                   atbSubst_Expr(env, e->Iex.Triop.arg3)
+                   atbSubst_Expr(tid, env, e->Iex.Triop.arg1),
+                   atbSubst_Expr(tid, env, e->Iex.Triop.arg2),
+                   atbSubst_Expr(tid, env, e->Iex.Triop.arg3)
                 );
       case Iex_Binop:
          return fold_IRExpr_Binop(
                    e->Iex.Binop.op,
-                   atbSubst_Expr(env, e->Iex.Binop.arg1),
-                   atbSubst_Expr(env, e->Iex.Binop.arg2)
+                   atbSubst_Expr(tid, env, e->Iex.Binop.arg1),
+                   atbSubst_Expr(tid, env, e->Iex.Binop.arg2)
                 );
       case Iex_Unop:
          return fold_IRExpr_Unop(
                    e->Iex.Unop.op,
-                   atbSubst_Expr(env, e->Iex.Unop.arg)
+                   atbSubst_Expr(tid, env, e->Iex.Unop.arg)
                 );
       case Iex_Load:
          return IRExpr_Load(
                    e->Iex.Load.isLL,
                    e->Iex.Load.end,
                    e->Iex.Load.ty,
-                   atbSubst_Expr(env, e->Iex.Load.addr)
+                   atbSubst_Expr(tid, env, e->Iex.Load.addr)
                 );
       case Iex_GetI:
          return IRExpr_GetI(
                    e->Iex.GetI.descr,
-                   atbSubst_Expr(env, e->Iex.GetI.ix),
-                   e->Iex.GetI.bias
+                   atbSubst_Expr(tid, env, e->Iex.GetI.ix),
+                   e->Iex.GetI.bias,
+		   tid
                 );
       case Iex_Const:
       case Iex_Get:
@@ -3994,7 +4000,7 @@ static IRExpr* atbSubst_Expr ( ATmpInfo* env, IRExpr* e )
 
 /* Same deal as atbSubst_Expr, except for stmts. */
 
-static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
+static IRStmt* atbSubst_Stmt ( unsigned tid, ATmpInfo* env, IRStmt* st )
 {
    Int     i;
    IRDirty *d, *d2;
@@ -4002,38 +4008,38 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
    switch (st->tag) {
       case Ist_AbiHint:
          return IRStmt_AbiHint(
-                   atbSubst_Expr(env, st->Ist.AbiHint.base),
+                   atbSubst_Expr(tid, env, st->Ist.AbiHint.base),
                    st->Ist.AbiHint.len,
-                   atbSubst_Expr(env, st->Ist.AbiHint.nia)
+                   atbSubst_Expr(tid, env, st->Ist.AbiHint.nia)
                 );
       case Ist_Store:
          return IRStmt_Store(
                    st->Ist.Store.end,
                    st->Ist.Store.resSC,
-                   atbSubst_Expr(env, st->Ist.Store.addr),
-                   atbSubst_Expr(env, st->Ist.Store.data)
+                   atbSubst_Expr(tid, env, st->Ist.Store.addr),
+                   atbSubst_Expr(tid, env, st->Ist.Store.data)
                 );
       case Ist_WrTmp:
          return IRStmt_WrTmp(
                    st->Ist.WrTmp.tmp,
-                   atbSubst_Expr(env, st->Ist.WrTmp.data)
+                   atbSubst_Expr(tid, env, st->Ist.WrTmp.data)
                 );
       case Ist_Put:
          return IRStmt_Put(
                    st->Ist.Put.offset,
-                   atbSubst_Expr(env, st->Ist.Put.data)
+                   atbSubst_Expr(tid, env, st->Ist.Put.data)
                 );
       case Ist_PutI:
          return IRStmt_PutI(
                    st->Ist.PutI.descr,
-                   atbSubst_Expr(env, st->Ist.PutI.ix),
+                   atbSubst_Expr(tid, env, st->Ist.PutI.ix),
                    st->Ist.PutI.bias,
-                   atbSubst_Expr(env, st->Ist.PutI.data)
+                   atbSubst_Expr(tid, env, st->Ist.PutI.data)
                 );
 
       case Ist_Exit:
          return IRStmt_Exit(
-                   atbSubst_Expr(env, st->Ist.Exit.guard),
+                   atbSubst_Expr(tid, env, st->Ist.Exit.guard),
                    st->Ist.Exit.jk,
                    st->Ist.Exit.dst
                 );
@@ -4047,11 +4053,11 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
          cas  = st->Ist.CAS.details;
          cas2 = mkIRCAS(
                    cas->oldHi, cas->oldLo, cas->end, 
-                   atbSubst_Expr(env, cas->addr),
-                   cas->expdHi ? atbSubst_Expr(env, cas->expdHi) : NULL,
-                   atbSubst_Expr(env, cas->expdLo),
-                   cas->dataHi ? atbSubst_Expr(env, cas->dataHi) : NULL,
-                   atbSubst_Expr(env, cas->dataLo)
+                   atbSubst_Expr(tid, env, cas->addr),
+                   cas->expdHi ? atbSubst_Expr(tid, env, cas->expdHi) : NULL,
+                   atbSubst_Expr(tid, env, cas->expdLo),
+                   cas->dataHi ? atbSubst_Expr(tid, env, cas->dataHi) : NULL,
+                   atbSubst_Expr(tid, env, cas->dataLo)
                 );
          return IRStmt_CAS(cas2);
       case Ist_Dirty:
@@ -4059,10 +4065,10 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
          d2 = emptyIRDirty();
          *d2 = *d;
          if (d2->mFx != Ifx_None)
-            d2->mAddr = atbSubst_Expr(env, d2->mAddr);
-         d2->guard = atbSubst_Expr(env, d2->guard);
+            d2->mAddr = atbSubst_Expr(tid, env, d2->mAddr);
+         d2->guard = atbSubst_Expr(tid, env, d2->guard);
          for (i = 0; d2->args[i]; i++)
-            d2->args[i] = atbSubst_Expr(env, d2->args[i]);
+            d2->args[i] = atbSubst_Expr(tid, env, d2->args[i]);
          return IRStmt_Dirty(d2);
       default: 
          vex_printf("\n"); ppIRStmt(st, stderr); vex_printf("\n");
@@ -4070,7 +4076,7 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
    }
 }
 
-/* notstatic */ void ado_treebuild_BB ( IRSB* bb )
+/* notstatic */ void ado_treebuild_BB ( unsigned tid, IRSB* bb )
 {
    Int      i, j, k, m;
    Bool     stmtPuts, stmtStores, invalidateMe;
@@ -4169,7 +4175,7 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
          /* ok, we have 't = E', occ(t)==1.  Do the abovementioned
             actions. */
          e  = st->Ist.WrTmp.data;
-         e2 = atbSubst_Expr(env, e);
+         e2 = atbSubst_Expr(tid, env, e);
          addToEnvFront(env, st->Ist.WrTmp.tmp, e2);
          setHints_Expr(&env[0].doesLoad, &env[0].doesGet, e2);
          /* don't advance j, as we are deleting this stmt and instead
@@ -4179,7 +4185,7 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
 
       /* we get here for any other kind of statement. */
       /* 'use up' any bindings required by the current statement. */
-      st2 = atbSubst_Stmt(env, st);
+      st2 = atbSubst_Stmt(tid, env, st);
 
       /* Now, before this stmt, dump any bindings in env that it
          invalidates.  These need to be dumped in the order in which
@@ -4262,7 +4268,7 @@ static IRStmt* atbSubst_Stmt ( ATmpInfo* env, IRStmt* st )
       dump any left-over bindings.  Hmm.  Perhaps there should be no
       left over bindings?  Or any left-over bindings are
       by definition dead? */
-   bb->next = atbSubst_Expr(env, bb->next);
+   bb->next = atbSubst_Expr(tid, env, bb->next);
    bb->stmts_used = j;
 }
 
@@ -4282,12 +4288,13 @@ static Bool iropt_verbose = False; /* True; */
 
 static 
 IRSB* cheap_transformations ( 
+			     unsigned tid,
          IRSB* bb,
          IRExpr* (*specHelper) (const char*, IRExpr**),
          Bool (*preciseMemExnsFn)(Int,Int)
       )
 {
-   redundant_get_removal_BB ( bb );
+   redundant_get_removal_BB ( tid, bb );
    if (iropt_verbose) {
       vex_printf("\n========= REDUNDANT GET\n\n" );
       ppIRSB(bb, stderr);
@@ -4311,7 +4318,7 @@ IRSB* cheap_transformations (
       ppIRSB(bb, stderr);
    }
 
-   bb = spec_helpers_BB ( bb, specHelper );
+   bb = spec_helpers_BB ( tid, bb, specHelper );
    do_deadcode_BB ( bb );
    if (iropt_verbose) {
       vex_printf("\n========= SPECd \n\n" );
@@ -4326,10 +4333,10 @@ IRSB* cheap_transformations (
    optimising as much as possible in the presence of GetI and PutI.  */
 
 static
-IRSB* expensive_transformations( IRSB* bb )
+IRSB* expensive_transformations( unsigned tid, IRSB* bb )
 {
-   (void)do_cse_BB( bb );
-   collapse_AddSub_chains_BB( bb );
+   (void)do_cse_BB( tid, bb );
+   collapse_AddSub_chains_BB( tid, bb );
    do_redundant_GetI_elimination( bb );
    do_redundant_PutI_elimination( bb );
    do_deadcode_BB( bb );
@@ -4429,7 +4436,8 @@ static void considerExpensives ( /*OUT*/Bool* hasGetIorPutI,
 */
 
 
-IRSB* do_iropt_BB ( IRSB* bb0,
+IRSB* do_iropt_BB ( unsigned tid,
+		    IRSB* bb0,
                     IRExpr* (*specHelper) (const char*, IRExpr**),
                     Bool (*preciseMemExnsFn)(Int,Int),
                     Addr64 guest_addr )
@@ -4445,7 +4453,7 @@ IRSB* do_iropt_BB ( IRSB* bb0,
    /* First flatten the block out, since all other
       phases assume flat code. */
 
-   bb = flatten_BB ( bb0 );
+   bb = flatten_BB ( tid, bb0 );
 
    if (iropt_verbose) {
       vex_printf("\n========= FLAT\n\n" );
@@ -4461,7 +4469,7 @@ IRSB* do_iropt_BB ( IRSB* bb0,
       If needed, do expensive transformations and then another cheap
       cleanup pass. */
 
-   bb = cheap_transformations( bb, specHelper, preciseMemExnsFn );
+   bb = cheap_transformations( tid, bb, specHelper, preciseMemExnsFn );
 
    if (vex_control.iropt_level > 1) {
 
@@ -4475,7 +4483,7 @@ IRSB* do_iropt_BB ( IRSB* bb0,
             rounding modes.  Don't bother if hasGetIorPutI since that
             case leads into the expensive transformations, which do
             CSE anyway. */
-         (void)do_cse_BB( bb );
+	 (void)do_cse_BB( tid, bb );
          do_deadcode_BB( bb );
       }
 
@@ -4484,26 +4492,26 @@ IRSB* do_iropt_BB ( IRSB* bb0,
          n_expensive++;
          if (DEBUG_IROPT)
             vex_printf("***** EXPENSIVE %d %d\n", n_total, n_expensive);
-         bb = expensive_transformations( bb );
-         bb = cheap_transformations( bb, specHelper, preciseMemExnsFn );
+         bb = expensive_transformations( tid, bb );
+         bb = cheap_transformations( tid, bb, specHelper, preciseMemExnsFn );
          /* Potentially common up GetIs */
-         cses = do_cse_BB( bb );
+         cses = do_cse_BB( tid, bb );
          if (cses)
-            bb = cheap_transformations( bb, specHelper, preciseMemExnsFn );
+            bb = cheap_transformations( tid, bb, specHelper, preciseMemExnsFn );
       }
 
       /* Now have a go at unrolling simple (single-BB) loops.  If
          successful, clean up the results as much as possible. */
 
-      bb2 = maybe_loop_unroll_BB( bb, guest_addr );
+      bb2 = maybe_loop_unroll_BB( tid, bb, guest_addr );
       if (bb2) {
-         bb = cheap_transformations( bb2, specHelper, preciseMemExnsFn );
+         bb = cheap_transformations( tid, bb2, specHelper, preciseMemExnsFn );
          if (hasGetIorPutI) {
-            bb = expensive_transformations( bb );
-            bb = cheap_transformations( bb, specHelper, preciseMemExnsFn );
+            bb = expensive_transformations( tid, bb );
+            bb = cheap_transformations( tid, bb, specHelper, preciseMemExnsFn );
          } else {
             /* at least do CSE and dead code removal */
-            do_cse_BB( bb );
+            do_cse_BB( tid, bb );
             do_deadcode_BB( bb );
          }
          if (0) vex_printf("vex iropt: unrolled a loop\n");

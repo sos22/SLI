@@ -698,17 +698,20 @@ void ppIRExpr ( IRExpr* e, FILE *f )
     case Iex_Get:
       fprintf(f,  "GET:" );
       ppIRType(e->Iex.Get.ty, f);
-      fprintf(f, "(%d)", e->Iex.Get.offset);
+      fprintf(f, "(%d, %d)", e->Iex.Get.offset,
+	      e->Iex.Get.tid);
       return;
     case Iex_GetI:
       fprintf(f,  "GETI" );
       ppIRRegArray(e->Iex.GetI.descr, f);
       fprintf(f, "[");
       ppIRExpr(e->Iex.GetI.ix, f);
-      fprintf(f, ",%d]", e->Iex.GetI.bias);
+      fprintf(f, ",%d](%d)", e->Iex.GetI.bias,
+	      e->Iex.Get.tid);
       return;
     case Iex_RdTmp:
       ppIRTemp(e->Iex.RdTmp.tmp, f);
+      fprintf(f, ":%d", e->Iex.RdTmp.tid);
       return;
     case Iex_Qop:
       ppIROp(e->Iex.Qop.op, f);
@@ -1113,25 +1116,28 @@ IRExpr* IRExpr_Binder ( Int binder ) {
    e->Iex.Binder.binder = binder;
    return e;
 }
-IRExpr* IRExpr_Get ( Int off, IRType ty ) {
+IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid ) {
    IRExpr* e         = new IRExpr();
    e->tag            = Iex_Get;
    e->Iex.Get.offset = off;
    e->Iex.Get.ty     = ty;
+   e->Iex.Get.tid    = tid;
    return e;
 }
-IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias ) {
+IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
    IRExpr* e         = new IRExpr();
    e->tag            = Iex_GetI;
    e->Iex.GetI.descr = descr;
    e->Iex.GetI.ix    = ix;
    e->Iex.GetI.bias  = bias;
+   e->Iex.GetI.tid   = tid;
    return e;
 }
-IRExpr* IRExpr_RdTmp ( IRTemp tmp ) {
+IRExpr* IRExpr_RdTmp ( IRTemp tmp, unsigned tid ) {
    IRExpr* e        = new IRExpr();
    e->tag           = Iex_RdTmp;
    e->Iex.RdTmp.tmp = tmp;
+   e->Iex.RdTmp.tid = tid;
    return e;
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
@@ -1555,13 +1561,14 @@ IRExpr* deepCopyIRExpr ( IRExpr* e )
       case Iex_Binder:
 	 return IRExpr_Binder(e->Iex.Binder.binder);
       case Iex_Get: 
-         return IRExpr_Get(e->Iex.Get.offset, e->Iex.Get.ty);
+	 return IRExpr_Get(e->Iex.Get.offset, e->Iex.Get.ty, e->Iex.Get.tid);
       case Iex_GetI: 
          return IRExpr_GetI(deepCopyIRRegArray(e->Iex.GetI.descr), 
                             deepCopyIRExpr(e->Iex.GetI.ix),
-                            e->Iex.GetI.bias);
+                            e->Iex.GetI.bias,
+			    e->Iex.GetI.tid);
       case Iex_RdTmp: 
-         return IRExpr_RdTmp(e->Iex.RdTmp.tmp);
+	 return IRExpr_RdTmp(e->Iex.RdTmp.tmp, e->Iex.RdTmp.tid);
       case Iex_Qop: 
          return IRExpr_Qop(e->Iex.Qop.op,
                            deepCopyIRExpr(e->Iex.Qop.arg1),

@@ -79,7 +79,7 @@ return_address(RegisterSet &regs, AddressSpace *as)
 			continue;
 		IRSB *irsb;
 		try {
-			irsb = as->getIRSBForAddress(s.regs.rip());
+			irsb = as->getIRSBForAddress(1, s.regs.rip());
 		} catch (BadMemoryException &x) {
 			/* Okay, that didn't work.  Guess we don't
 			   want to go down here... */
@@ -262,7 +262,7 @@ findDominators(unsigned long functionHead,
 		remainingToExplore.pop_back();
 		if (cfg.count(rip))
 			continue;
-		IRSB *irsb = as->getIRSBForAddress(rip);
+		IRSB *irsb = as->getIRSBForAddress(1, rip);
 		fd_cfg_node *work = NULL;
 		assert(irsb->stmts[0]->tag == Ist_IMark);
 		assert(irsb->stmts[0]->Ist.IMark.addr == rip);

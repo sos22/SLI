@@ -52,7 +52,8 @@ main()
 
 	TrivMemoryFetcher tmf((const UChar *)main,
 			      128);
-	irsb = bb_to_IR(&vge,
+	irsb = bb_to_IR(97,
+			&vge,
 			NULL, /* Context for chase_into_ok */
 			disInstr_AMD64,
 			tmf,

@@ -967,6 +967,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       struct {
          Int    offset;    /* Offset into the guest state */
          IRType ty;        /* Type of the value being read */
+	 unsigned tid;     /* The thread whose register is to be read */
       } Get;
 
       /* Read a guest register at a non-fixed offset in the guest
@@ -1009,6 +1010,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          IRRegArray* descr; /* Part of guest state treated as circular */
          IRExpr*     ix;    /* Variable part of index into array */
          Int         bias;  /* Constant offset part of index into array */
+	 unsigned tid;     /* The thread whose register is to be read */
       } GetI;
 
       /* The value held by a temporary.
@@ -1016,6 +1018,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       */
       struct {
          IRTemp tmp;       /* The temporary number */
+	 unsigned tid;     /* The thread whose temporary is to be read */
       } RdTmp;
 
       /* A quaternary operation.
@@ -1158,9 +1161,10 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
 
 /* Expression constructors. */
 extern IRExpr* IRExpr_Binder ( Int binder );
-extern IRExpr* IRExpr_Get    ( Int off, IRType ty );
-extern IRExpr* IRExpr_GetI   ( IRRegArray* descr, IRExpr* ix, Int bias );
-extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp );
+extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid );
+extern IRExpr* IRExpr_GetI   ( IRRegArray* descr, IRExpr* ix, Int bias,
+			       unsigned tid );
+extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp, unsigned tid );
 extern IRExpr* IRExpr_Qop    ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                                         IRExpr* arg3, IRExpr* arg4 );
 extern IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 

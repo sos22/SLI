@@ -1130,7 +1130,7 @@ public:
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
 public:
-	IRSB *getIRSBForAddress(unsigned long rip);
+	IRSB *getIRSBForAddress(unsigned tid, unsigned long rip);
 
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
@@ -1236,6 +1236,14 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 }
 
 void getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators);
+
+IRSB *instrument_func(unsigned tid,
+		      void *closure,
+		      IRSB *sb_in,
+		      VexGuestLayout *layout,
+		      VexGuestExtents *vge,
+		      IRType gWordTy,
+		      IRType hWordTy);
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */

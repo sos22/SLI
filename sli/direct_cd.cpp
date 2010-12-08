@@ -637,7 +637,7 @@ getProximalCause(MachineState *ms, Thread *thr)
 		/* Probably caused by calling a bad function pointer.
 		 * Look at the call site. */
 		rip = ms->addressSpace->fetch<unsigned long>(thr->regs.rsp(), NULL) - 2;
-		irsb = ms->addressSpace->getIRSBForAddress(rip);
+		irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
 		if (!irsb) {
 			/* I guess that wasn't it.  Give up. */
 			return NULL;
@@ -695,7 +695,8 @@ protected:
 	{
 		return IRExpr_GetI(e->Iex.GetI.descr,
 				   transformIRExpr(e->Iex.GetI.ix),
-				   e->Iex.GetI.bias);
+				   e->Iex.GetI.bias,
+				   e->Iex.GetI.tid);
 	}
 	virtual IRExpr *transformIexRdTmp(IRExpr *e) { return e; }
 	virtual IRExpr *transformIexQop(IRExpr *e)
@@ -1028,9 +1029,9 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 }
 
 static CrashReason *
-backtrackToStartOfInstruction(CrashReason *cr, AddressSpace *as)
+backtrackToStartOfInstruction(unsigned tid, CrashReason *cr, AddressSpace *as)
 {
-	IRSB *irsb = as->getIRSBForAddress(cr->rip.rip);
+	IRSB *irsb = as->getIRSBForAddress(tid, cr->rip.rip);
 	assert((int)cr->rip.idx <= irsb->stmts_used);
 	while (cr->rip.idx != 0)
 		cr = backtrackOneStatement(cr, irsb->stmts[cr->rip.idx-1]);
@@ -1097,7 +1098,7 @@ public:
 	InferredInformation(Oracle *_oracle) : oracle(_oracle) {}
 	void addCrashReason(CrashReason *cr) { crashReasons[cr->rip] = cr; }
 	CFGNode *CFGFromRip(unsigned long rip);
-	CrashReason *CFGtoCrashReason(CFGNode *cfg);
+	CrashReason *CFGtoCrashReason(unsigned tid, CFGNode *cfg);
 
 	void visit(HeapVisitor &hv) {
 		hv(oracle);
@@ -1149,7 +1150,7 @@ buildCFGForRipSet(AddressSpace *as,
 		needed.pop_back();
 		if (builtSoFar.count(rip))
 			continue;
-		IRSB *irsb = as->getIRSBForAddress(rip);
+		IRSB *irsb = as->getIRSBForAddress(-1, rip);
 		CFGNode *work = new CFGNode(rip);
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
@@ -1221,7 +1222,7 @@ InferredInformation::CFGFromRip(unsigned long start)
 }
 
 CrashReason *
-InferredInformation::CFGtoCrashReason(CFGNode *cfg)
+InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode *cfg)
 {
 	VexRip finalRip(cfg->my_rip, 0);
 	if (crashReasons.count(finalRip)) {
@@ -1232,13 +1233,13 @@ InferredInformation::CFGtoCrashReason(CFGNode *cfg)
 	if (!cfg->branch && !cfg->fallThrough) {
 		res = new CrashReason(finalRip, StateMachineNoCrash::get());
 	} else {
-		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(finalRip.rip);
+		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, finalRip.rip);
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++)
 			if (irsb->stmts[x]->tag == Ist_IMark)
 				break;
 		if (cfg->fallThrough) {
-			CrashReason *ft = CFGtoCrashReason(cfg->fallThrough);
+			CrashReason *ft = CFGtoCrashReason(tid, cfg->fallThrough);
 
 			ft = new CrashReason(VexRip(finalRip.rip, x), ft->sm);
 			while (ft->rip.idx != 0) {
@@ -1252,7 +1253,7 @@ InferredInformation::CFGtoCrashReason(CFGNode *cfg)
 							newRip,
 							new StateMachineBifurcate(
 								stmt->Ist.Exit.guard,
-								CFGtoCrashReason(cfg->branch)->sm,
+								CFGtoCrashReason(tid, cfg->branch)->sm,
 								ft->sm));
 					} else {
 						ft = new CrashReason(
@@ -1266,7 +1267,7 @@ InferredInformation::CFGtoCrashReason(CFGNode *cfg)
 			res = ft;
 		} else {
 			assert(cfg->branch);
-			CrashReason *b = CFGtoCrashReason(cfg->branch);
+			CrashReason *b = CFGtoCrashReason(tid, cfg->branch);
 			for (; x >= 0; x--)
 				if (irsb->stmts[x]->tag == Ist_Exit)
 					break;
@@ -3523,7 +3524,7 @@ public:
 static void
 findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
 {
-	IRSB *irsb = as->getIRSBForAddress(rip);
+	IRSB *irsb = as->getIRSBForAddress(-1, rip);
 	int i;
 
 	for (i = 1; i < irsb->stmts_used; i++) {
@@ -3615,20 +3616,20 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 }
 
 static StateMachine *
-CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachine *> &memo)
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachine *> &memo)
 {
 	if (!cfg)
 		return StateMachineNoCrash::get();
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
-	IRSB *irsb = as->getIRSBForAddress(cfg->my_rip);
+	IRSB *irsb = as->getIRSBForAddress(tid, cfg->my_rip);
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
 		if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
 			break;
 	if (cfg->fallThrough || !cfg->branch) {
-		res = CFGtoStoreMachine(as, cfg->fallThrough, memo);
+		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo);
 		int idx = endOfInstr;
 		while (idx != 0) {
 			IRStmt *stmt = irsb->stmts[idx-1];
@@ -3636,7 +3637,7 @@ CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachi
 				if (cfg->branch) {
 					res = new StateMachineBifurcate(
 						stmt->Ist.Exit.guard,
-						CFGtoStoreMachine(as, cfg->branch, memo),
+						CFGtoStoreMachine(tid, as, cfg->branch, memo),
 						res);
 				}
 			} else {
@@ -3646,7 +3647,7 @@ CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachi
 		}
 	} else {
 		assert(cfg->branch);
-		res = CFGtoStoreMachine(as, cfg->branch, memo);
+		res = CFGtoStoreMachine(tid, as, cfg->branch, memo);
 		int idx;
 		for (idx = endOfInstr - 1; idx >= 0; idx--)
 			if (irsb->stmts[idx]->tag == Ist_Exit)
@@ -3662,10 +3663,10 @@ CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachi
 }
 
 static StateMachine *
-CFGtoStoreMachine(AddressSpace *as, CFGNode *cfg)
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode *cfg)
 {
 	std::map<CFGNode *, StateMachine *> memo;
-	return CFGtoStoreMachine(as, cfg, memo);
+	return CFGtoStoreMachine(tid, as, cfg, memo);
 }
 
 class StateMachineEvalContext {
@@ -3688,7 +3689,8 @@ specialiseIRExpr(IRExpr *iex, StateMachineEvalContext &ctxt)
 		return IRExpr_GetI(
 			iex->Iex.GetI.descr,
 			specialiseIRExpr(iex->Iex.GetI.ix, ctxt),
-			iex->Iex.GetI.bias);
+			iex->Iex.GetI.bias,
+			iex->Iex.GetI.tid);
 	case Iex_RdTmp:
 		return iex;
 	case Iex_Qop:
@@ -4020,9 +4022,10 @@ random_irexpr(unsigned depth)
 		return IRExpr_Binder(random() % 30);
 	case 1:
 		return IRExpr_Get((random() % 40) * 8,
-				  random_irtype());
+				  random_irtype(),
+				  73);
 	case 2:
-		return IRExpr_RdTmp(random() % 5);
+		return IRExpr_RdTmp(random() % 5, 73);
 	case 3:
 		switch (random() % 5) {
 		case 0:
@@ -4091,7 +4094,7 @@ random_irexpr(unsigned depth)
 	case 7:
 		return IRExpr_Mux0X(random_irexpr(depth - 1), random_irexpr(depth - 1), random_irexpr(depth - 1));
 	case 8:
-		return IRExpr_GetI(random_irregarray(), random_irexpr(depth - 1), (random() % 20) * 8);
+		return IRExpr_GetI(random_irregarray(), random_irexpr(depth - 1), (random() % 20) * 8, 98);
 	default:
 		abort();
 	}		
@@ -4179,10 +4182,10 @@ sanity_check_optimiser(void)
 	IRExpr *start =
 		IRExpr_Associative(
 			Iop_Add64,
-			IRExpr_Get(0, Ity_I64),
+			IRExpr_Get(0, Ity_I64, 0),
 			IRExpr_Unop(
 				Iop_Neg64,
-				IRExpr_Get(0, Ity_I64)),
+				IRExpr_Get(0, Ity_I64, 0)),
 			NULL);
 	IRExpr *end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
 	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
@@ -4191,8 +4194,8 @@ sanity_check_optimiser(void)
 		Iop_And1,
 		IRExpr_Unop(
 			Iop_Not1,
-			IRExpr_Get(0, Ity_I64)),
-		IRExpr_Get(0, Ity_I64),
+			IRExpr_Get(0, Ity_I64, 0)),
+		IRExpr_Get(0, Ity_I64, 0),
 		NULL);
 	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
 	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
@@ -4224,6 +4227,9 @@ evalMachineUnderAssumption(StateMachine *sm, Oracle *oracle, IRExpr *assumption,
 	}
 }
 
+#define CRASHING_THREAD 73
+#define STORING_THREAD 97
+
 int
 main(int argc, char *argv[])
 {
@@ -4248,7 +4254,7 @@ main(int argc, char *argv[])
 	CrashReason *proximal = getProximalCause(ms, thr);
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
-	proximal = backtrackToStartOfInstruction(proximal, ms->addressSpace);
+	proximal = backtrackToStartOfInstruction(CRASHING_THREAD, proximal, ms->addressSpace);
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
 	ii->addCrashReason(proximal);
@@ -4264,7 +4270,7 @@ main(int argc, char *argv[])
 		trimCFG(cfg, interesting);
 		breakCycles(cfg);
 
-		CrashReason *cr = ii->CFGtoCrashReason(cfg);
+		CrashReason *cr = ii->CFGtoCrashReason(CRASHING_THREAD, cfg);
 		AllowableOptimisations opt =
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
@@ -4326,7 +4332,7 @@ main(int argc, char *argv[])
 				trimCFG(*it2, *it);
 				breakCycles(*it2);
 
-				StateMachine *sm = CFGtoStoreMachine(ms->addressSpace, *it2);
+				StateMachine *sm = CFGtoStoreMachine(STORING_THREAD, ms->addressSpace, *it2);
 
 				AllowableOptimisations opt2 =
 					AllowableOptimisations::defaultOptimisations

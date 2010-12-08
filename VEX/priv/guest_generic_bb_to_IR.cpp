@@ -88,7 +88,8 @@ static Bool const_False ( void* callback_opaque, Addr64 a ) {
    (In fact it's a VgInstrumentClosure.)
 */
 
-IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
+IRSB* bb_to_IR ( unsigned tid,
+		 /*OUT*/VexGuestExtents* vge,
                  /*IN*/ void*            callback_opaque,
                  /*IN*/ DisOneInstrFn    dis_instr_fn,
                  /*IN*/ GuestMemoryFetcher &guest_code,
@@ -222,7 +223,8 @@ IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
       need_to_put_IP = toBool(n_instrs > 0);
 
       /* Finally, actually disassemble an instruction. */
-      dres = dis_instr_fn ( irsb,
+      dres = dis_instr_fn ( tid,
+			    irsb,
                             need_to_put_IP,
                             resteerOKfn,
                             callback_opaque,

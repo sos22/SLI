@@ -3193,7 +3193,8 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	void resolve_stubs();
 	void break_cycles(const Oracle &oracle);
 	bool break_cycles_from(CrashCFGNode *n, const Oracle &oracle);
-	void calculate_cmns(MachineState *ms,
+	void calculate_cmns(ThreadId tid,
+			    MachineState *ms,
 			    CrashMachine *cm,
 			    const Oracle &oracle,
 			    bool precious);
@@ -3318,7 +3319,7 @@ CrashCFG::build_cfg(MachineState *ms,
 
 			DBG_BUILD_CFG("Not dynamically available\n");
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(work.time.rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(tid._tid(), work.time.rip);
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used &&
@@ -3680,7 +3681,8 @@ CrashCFG::break_cycles(const Oracle &oracle)
 }
 
 void
-CrashCFG::calculate_cmns(MachineState *ms,
+CrashCFG::calculate_cmns(ThreadId tid,
+			 MachineState *ms,
 			 CrashMachine *cm,
 			 const Oracle &oracle,
 			 bool precious)
@@ -3750,7 +3752,7 @@ CrashCFG::calculate_cmns(MachineState *ms,
 				continue;
 			}
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(node->when.rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(tid._tid(), node->when.rip);
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used && irsb->stmts[instr_end]->tag != Ist_IMark;
@@ -3859,7 +3861,7 @@ CrashCFG::build(MachineState *ms,
 	build_cfg(ms, oracle, cm);
 	resolve_stubs();
 	break_cycles(oracle);
-	calculate_cmns(ms, cm, oracle, precious);
+	calculate_cmns(oracle.crashingTid, ms, cm, oracle, precious);
 }
 
 /* Construct a new CMN which is equivalent to running all of the
@@ -4585,6 +4587,7 @@ main(int argc, char *argv[])
 		 * the last thing in the ring buffer. */
 		crashedThread->currentIRSB =
 			ms->addressSpace->getIRSBForAddress(
+				oracle.crashingTid._tid(),
 				crashedThread->controlLog.rbegin()->translated_rip);
 		/* We should be at the end of that... */
 		assert(crashedThread->currentIRSBOffset ==
@@ -4599,6 +4602,7 @@ main(int argc, char *argv[])
 		printf("Crashed by syscall\n");
 		crashedThread->currentIRSB =
 			ms->addressSpace->getIRSBForAddress(
+				oracle.crashingTid._tid(),
 				crashedThread->currentIRSBRip);
 	}
 
@@ -4635,7 +4639,8 @@ main(int argc, char *argv[])
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
 	     it++) {
-	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(it->translated_rip);
+	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(oracle.crashingTid._tid(),
+								 it->translated_rip);
 		bool exited_by_branch;
 		int exit_idx;
 		if (it->exit_idx == irsb->stmts_used + 1) {

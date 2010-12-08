@@ -142,6 +142,7 @@ typedef
 typedef
 
    DisResult (*DisOneInstrFn) ( 
+			       unsigned tid,
 
       /* This is the IRSB to which the resulting IR is to be appended. */
       /*OUT*/ IRSB*        irbb,
@@ -185,7 +186,8 @@ typedef
 
 /* See detailed comment in bb_to_IR.c. */
 extern
-IRSB* bb_to_IR ( /*OUT*/VexGuestExtents* vge,
+IRSB* bb_to_IR ( unsigned                tid,
+		 /*OUT*/VexGuestExtents* vge,
                  /*IN*/ void*            closure_opaque,
                  /*IN*/ DisOneInstrFn    dis_instr_fn,
                  /*IN*/ GuestMemoryFetcher &guest_code,

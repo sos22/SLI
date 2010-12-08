@@ -1345,13 +1345,6 @@ Thread::redirectGuest(unsigned long rip)
 		inInfrastructure = true;
 }
 
-IRSB *instrument_func(void *closure,
-		      IRSB *sb_in,
-		      VexGuestLayout *layout,
-		      VexGuestExtents *vge,
-		      IRType gWordTy,
-		      IRType hWordTy);
-
 class AddressSpaceGuestFetcher : public GuestMemoryFetcher {
 	AddressSpace *aspace;
 	unsigned long offset;
@@ -1387,6 +1380,7 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 	class DecodeCacheEntry : public GarbageCollected<DecodeCacheEntry, &ir_heap> {
 	public:
 		DecodeCacheEntry *next;
+		unsigned tid;
 		unsigned long rip;
 		IRSB *irsb;
 
@@ -1397,9 +1391,9 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 
 	static const unsigned nr_slots = 2048;
 	DecodeCacheEntry *slots[nr_slots];
-	static unsigned long rip_hash(unsigned long rip)
+	static unsigned long rip_hash(unsigned tid, unsigned long rip)
 	{
-		unsigned long hash = 0;
+		unsigned long hash = tid % nr_slots;
 		while (rip) {
 			hash ^= rip % nr_slots;
 			rip /= nr_slots;
@@ -1408,18 +1402,18 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 	}
 
 public:
-	IRSB **search(unsigned long rip);
+	IRSB **search(unsigned tid, unsigned long rip);
 
 	void visit(HeapVisitor &hv) { abort(); }
 	NAMED_CLASS
 };
 IRSB **
-DecodeCache::search(unsigned long rip)
+DecodeCache::search(unsigned tid, unsigned long rip)
 {
 	DecodeCacheEntry **pdce, *dce;
-	unsigned hash = rip_hash(rip);
+	unsigned hash = rip_hash(tid, rip);
 	pdce = &slots[hash];
-	while (*pdce && (*pdce)->rip != rip)
+	while (*pdce && ((*pdce)->rip != rip || (*pdce)->tid != tid))
 		pdce = &(*pdce)->next;
 	dce = *pdce;
 	if (dce) {
@@ -1427,6 +1421,7 @@ DecodeCache::search(unsigned long rip)
 	} else {
 		dce = new DecodeCacheEntry();
 		dce->rip = rip;
+		dce->tid = tid;
 	}
 	dce->next = slots[hash];
 	slots[hash] = dce;
@@ -1436,7 +1431,7 @@ DecodeCache::search(unsigned long rip)
 static VexPtr<WeakRef<DecodeCache, &ir_heap>, &ir_heap> decode_cache;
 
 IRSB *
-AddressSpace::getIRSBForAddress(unsigned long rip)
+AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
 {
 	if (rip == ASSERT_FAILED_ADDRESS)
 		throw ForceFailureException(rip);
@@ -1448,7 +1443,7 @@ AddressSpace::getIRSBForAddress(unsigned long rip)
 		dc = new DecodeCache();
 		decode_cache.get()->set(dc);
 	}
-	IRSB **cacheSlot = dc->search(rip);
+	IRSB **cacheSlot = dc->search(tid, rip);
 	assert(cacheSlot != NULL);
 	IRSB *irsb = *cacheSlot;
 	if (!irsb) {
@@ -1463,7 +1458,8 @@ AddressSpace::getIRSBForAddress(unsigned long rip)
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
 		AddressSpaceGuestFetcher fetcher(this, rip);
-		irsb = bb_to_IR(&vge,
+		irsb = bb_to_IR(tid,
+				&vge,
 				NULL, /* Context for chase_into_ok */
 				disInstr_AMD64,
 				fetcher,
@@ -1481,7 +1477,7 @@ AddressSpace::getIRSBForAddress(unsigned long rip)
 		if (!irsb)
 			throw InstructionDecodeFailedException();
 
-		irsb = instrument_func(NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
+		irsb = instrument_func(tid, NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
 
 		*cacheSlot = irsb;
 	}
@@ -1518,7 +1514,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	unsigned long _rip = rip;
 	LibVEX_maybe_gc(t);
 
-	IRSB *irsb = addrSpace->getIRSBForAddress(_rip);
+	IRSB *irsb = addrSpace->getIRSBForAddress(ths->tid._tid(), _rip);
 
 	ths->temporaries.setSize(irsb->tyenv->types_used);
 

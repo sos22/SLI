@@ -57,7 +57,8 @@
 /* Convert one amd64 insn to IR.  See the type DisOneInstrFn in
    bb_to_IR.h. */
 extern
-DisResult disInstr_AMD64 ( IRSB*        irbb,
+DisResult disInstr_AMD64 ( unsigned     tid,
+			   IRSB*        irbb,
                            Bool         put_IP,
                            Bool         (*resteerOkFn) ( void*, Addr64 ),
                            void*        callback_opaque,
