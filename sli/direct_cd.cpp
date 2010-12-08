@@ -2623,9 +2623,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		   constants which are present in the machine code. */
 		if (opt.assumePrivateStack &&
 		    src->Iex.Binop.op == Iop_CmpEQ64 &&
-		    src->Iex.Binop.arg1->tag == Iex_Get &&
-		    src->Iex.Binop.arg1->Iex.Get.offset == OFFSET_amd64_RSP &&
-		    src->Iex.Binop.arg2->tag == Iex_Const) {
+		    src->Iex.Binop.arg2->tag == Iex_Get &&
+		    src->Iex.Binop.arg2->Iex.Get.offset == OFFSET_amd64_RSP &&
+		    src->Iex.Binop.arg1->tag == Iex_Const) {
 			*done_something = true;
 			return IRExpr_Const(IRConst_U1(0));
 		}
