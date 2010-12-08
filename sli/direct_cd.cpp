@@ -488,45 +488,50 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
 	   that's moderately tricky. */
-	if (opt.assumeExecutesAtomically) {
-		std::set<std::pair<IRExpr *, IRExpr *> > availExpressions;
-		for (it = sideEffects.begin(); it != sideEffects.end(); it++) {
-			if (StateMachineSideEffectStore *smses =
-			    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
-				/* Kill anything which might be clobbered by
-				   this store. */
-				for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
-					     availExpressions.begin();
-				     it2 != availExpressions.end();
-					) {
-					IRExpr *addr = it2->first;
-					if (!definitelyNotEqual(addr, smses->addr, opt))
-						availExpressions.erase(it2++);
-					else
-						it2++;
-				}
-				/* And add this one to the set */
-				availExpressions.insert( std::pair<IRExpr *, IRExpr *>(
-								 smses->addr,
-								 smses->data) );
-			} else if (StateMachineSideEffectLoad *smsel =
-				   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-				/* If the load was definitely satisfied by a
-				   known store, eliminate it. */
-				for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
-					     availExpressions.begin();
-				     it2 != availExpressions.end();
-				     it2++) {
-					if (definitelyEqual(it2->first, smsel->addr, opt)) {
-						*it = new StateMachineSideEffectCopy(smsel->key,
-										     it2->second);
-						*done_something = true;
-						break;
-					}
-				}			
-			} else {
-				assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
+	std::set<std::pair<IRExpr *, IRExpr *> > availExpressions;
+	for (it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			/* If the store isn't thread local, and we're
+			   not in execute-atomically mode, we can't do
+			   any forwarding at all. */
+			if (!opt.assumeExecutesAtomically &&
+			    !oracle->storeIsThreadLocal(smses))
+				continue;
+
+			/* Kill anything which might be clobbered by
+			   this store. */
+			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
+				     availExpressions.begin();
+			     it2 != availExpressions.end();
+				) {
+				IRExpr *addr = it2->first;
+				if (!definitelyNotEqual(addr, smses->addr, opt))
+					availExpressions.erase(it2++);
+				else
+					it2++;
 			}
+			/* And add this one to the set */
+			availExpressions.insert( std::pair<IRExpr *, IRExpr *>(
+							 smses->addr,
+							 smses->data) );
+		} else if (StateMachineSideEffectLoad *smsel =
+			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			/* If the load was definitely satisfied by a
+			   known store, eliminate it. */
+			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
+				     availExpressions.begin();
+			     it2 != availExpressions.end();
+			     it2++) {
+				if (definitelyEqual(it2->first, smsel->addr, opt)) {
+					*it = new StateMachineSideEffectCopy(smsel->key,
+									     it2->second);
+					*done_something = true;
+					break;
+				}
+			}			
+		} else {
+			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
 		}
 	}
 
@@ -1363,6 +1368,9 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	case 0x4006f2:
 	case 0x4006ec:
 		return false;
+	case 0x400632:
+	case 0x400641:
+	case 0x40067a:
 	case 0x400668:
 	case 0x40070c:
 	case 0x400711:
@@ -1415,14 +1423,9 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 		switch (smses->rip) {
 		case 0x4006ec:
 			return true;
-		case 0x4006fc:
-		case 0x4006f2:
-		case 0x400641:
-			return false;
 		default:
-			abort();
+			return false;
 		}
-		abort();
 	default:
 		abort();
 	}
@@ -4413,7 +4416,6 @@ main(int argc, char *argv[])
 		AllowableOptimisations opt =
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
-			.enableassumeExecutesAtomically()
 			.enableignoreSideEffects();
 		bool done_something;
 		do {
