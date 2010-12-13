@@ -4597,7 +4597,17 @@ public:
 	std::set<std::pair<unsigned long, unsigned long> > callees;
 	std::set<unsigned long> instructions;
 
-	void visit(HeapVisitor &hv) { }
+	/* The same information as callees in a slightly different
+	   format. */
+	std::map<unsigned long, CallGraphEntry *> calls;
+
+	void visit(HeapVisitor &hv) {
+		for (std::map<unsigned long, CallGraphEntry *>::iterator it =
+			     calls.begin();
+		     it != calls.end();
+		     it++)
+			hv(it->second);
+	}
 	NAMED_CLASS
 };
 static CallGraphEntry *
@@ -4657,8 +4667,39 @@ exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
 	}
 	return cge;
 }
+static unsigned
+countReachableCGEs(CallGraphEntry *s)
+{
+	std::set<CallGraphEntry *> reachable;
+	std::queue<CallGraphEntry *> toExplore;
+	toExplore.push(s);
+	while (!toExplore.empty()) {
+		s = toExplore.front();
+		toExplore.pop();
+		if (reachable.count(s))
+			continue;
+		reachable.insert(s);
+		for (std::map<unsigned long,CallGraphEntry *>::iterator it = s->calls.begin();
+		     it != s->calls.end();
+		     it++)
+			toExplore.push(it->second);
+	}
+	return reachable.size();
+}
 static void
-buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips)
+purgeCGFromCGESet(std::set<CallGraphEntry *> &s, CallGraphEntry *root)
+{
+	if (!s.count(root))
+		return;
+	s.erase(root);
+	for (std::map<unsigned long, CallGraphEntry *>::iterator it = root->calls.begin();
+	     it != root->calls.end();
+	     it++)
+		purgeCGFromCGESet(s, it->second);
+}
+static void
+buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
+			std::set<CallGraphEntry *> &roots)
 {
 	std::set<unsigned long> unexploredRips(rips);
 	std::map<unsigned long, CallGraphEntry *> instrsToCGEntries;
@@ -4819,9 +4860,97 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips)
 			it++;
 	}
 
-	/* Now we go and break all the recursive cycles. */
+	/* Resolve any remaining edges into pointers. */
+	for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
+	     it != allCGEs.end();
+	     it++) {
+		for (std::set<std::pair<unsigned long, unsigned long> >::iterator it2 =
+			     (*it)->callees.begin();
+		     it2 != (*it)->callees.end();
+		     it2++) {
+			assert(instrsToCGEntries[it2->second]);
+			(*it)->calls[it2->first] =
+				instrsToCGEntries[it2->second];
+		}
+	}
+
+	/* Build the root set. */
+	while (!allCGEs.empty()) {
+		/* Pick a new root.  If there's anything with no
+		   parents, we make that our root. */
+		CallGraphEntry *res = NULL;
+		for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
+		     !res && it != allCGEs.end();
+		     it++) {
+			bool hasParent = false;
+			for (std::set<CallGraphEntry *>::iterator it2 = allCGEs.begin();
+			     !hasParent && it2 != allCGEs.end();
+			     it2++) {
+				if ( (*it2)->calls.count( (*it)->headRip) )
+					hasParent = true;
+			}
+			if (!hasParent)
+				res = *it;
+		}
+		if (!res) {
+			/* Okay, every node we have left has a parent.
+			   That means that they're either in a cycle
+			   or reachable from a cycle.  In that case,
+			   we pick whichever node has the most
+			   reachable nodes. */
+			std::map<CallGraphEntry *, int> nrReachable;
+			std::set<CallGraphEntry *> unexaminedCGEs(allCGEs);
+			while (!unexaminedCGEs.empty()) {
+				CallGraphEntry *t = *unexaminedCGEs.begin();
+				unexaminedCGEs.erase(unexaminedCGEs.begin());
+				nrReachable[t] = countReachableCGEs(t);
+			}
+			CallGraphEntry *best = NULL;
+			for (std::map<CallGraphEntry *, int>::iterator it = nrReachable.begin();
+			     it != nrReachable.end();
+			     it++) {
+				if (!best || it->second > nrReachable[best])
+					best = it->first;
+			}
+			assert(best != NULL);
+			res = best;
+		}
+
+		roots.insert(res);
+
+		purgeCGFromCGESet(allCGEs, res);
+	}
 
 #warning do something with the results.
+}
+
+static void
+printCallGraph(CallGraphEntry *root, FILE *f, std::set<CallGraphEntry *> &memo)
+{
+	if (memo.count(root))
+		return;
+	memo.insert(root);
+	fprintf(f, "%p: %#lx%s {", root, root->headRip, root->isRealHead ? "" : " (fake)");
+	for (std::set<unsigned long>::iterator it = root->instructions.begin();
+	     it != root->instructions.end();
+	     it++)
+		fprintf(f, "%#lx, ", *it);
+	fprintf(f, "} (");
+	for (std::map<unsigned long, CallGraphEntry *>::iterator it = root->calls.begin();
+	     it != root->calls.end();
+	     it++)
+		fprintf(f, "%#lx:%p; ", it->first, it->second);
+	fprintf(f, ")\n");
+	for (std::map<unsigned long, CallGraphEntry *>::iterator it = root->calls.begin();
+	     it != root->calls.end();
+	     it++)
+		printCallGraph(it->second, f, memo);
+}
+static void
+printCallGraph(CallGraphEntry *root, FILE *f)
+{
+	std::set<CallGraphEntry *> alreadyDone;
+	printCallGraph(root, f, alreadyDone);
 }
 
 #define CRASHING_THREAD 73
@@ -4925,7 +5054,14 @@ main(int argc, char *argv[])
 				printf(" %lx", *it2);
 			printf("\n");
 
-			buildCallGraphForRipSet(ms->addressSpace, *it);
+			std::set<CallGraphEntry *> cgRoots;
+			buildCallGraphForRipSet(ms->addressSpace, *it, cgRoots);
+			for (std::set<CallGraphEntry *>::iterator it2 = cgRoots.begin();
+			     it2 != cgRoots.end();
+			     it2++) {
+				printf("Possible call graph:\n");
+				printCallGraph(*it2, stdout);
+			}
 
 			std::set<CFGNode *> storeCFGs;
 			buildCFGForRipSet(ms->addressSpace, *it, storeCFGs);
