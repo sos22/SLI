@@ -1459,7 +1459,9 @@ trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
 	for (std::set<unsigned long>::iterator it = interestingAddresses.begin();
 	     it != interestingAddresses.end();
 	     it++) {
+		/* If this isn't true then the CFG is incomplete. */
 		assert(uninteresting[*it]);
+
 		interesting[*it] = uninteresting[*it];
 		uninteresting.erase(*it);
 	}
@@ -3547,6 +3549,7 @@ public:
 static void
 findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
 {
+#warning reimplement in terms of findInstrSuccessorsAndCallees
 	IRSB *irsb = as->getIRSBForAddress(-1, rip);
 	int i;
 
@@ -3565,12 +3568,6 @@ findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &
 	if (irsb->jumpkind == Ijk_Call) {
 		out.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
-
-#warning This is arguably wrong
-		/* Actually, don't bother: the state machine inferring
-		   bits don't do so, and get very confused when they
-		   can't match everything up properly. */
-		return;
 	}
 
 	if (irsb->next->tag == Iex_Const) {
@@ -4494,6 +4491,339 @@ findRemoteMacroSections(StateMachine *readMachine,
 	return true;
 }
 
+template<typename t> void
+operator |=(std::set<t> &x, const std::set<t> &y)
+{
+	for (typename std::set<t>::iterator it = y.begin();
+	     it != y.end();
+	     it++)
+		x.insert(*it);
+}
+
+template <typename s, typename t> void
+purgeMapByValue(std::map<s, t> &m, t w)
+{
+	for (typename std::map<s, t>::iterator it = m.begin();
+	     it != m.end();
+		) {
+		if (w == it->second)
+			m.erase(it++);
+		else
+			it++;
+	}		
+}
+
+static void
+findInstrSuccessorsAndCallees(AddressSpace *as,
+			      unsigned long rip,
+			      std::vector<unsigned long> &directExits,
+			      std::set<std::pair<unsigned long, unsigned long> > &callees)
+{
+	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	int i;
+
+	for (i = 1; i < irsb->stmts_used; i++) {
+		if (irsb->stmts[i]->tag == Ist_IMark) {
+			/* That's the end of this instruction */
+			directExits.push_back(irsb->stmts[i]->Ist.IMark.addr);
+			return;
+		}
+		if (irsb->stmts[i]->tag == Ist_Exit)
+			directExits.push_back(irsb->stmts[i]->Ist.Exit.dst->Ico.U64);
+	}
+
+	/* If we get here then there are no other marks in the IRSB,
+	   so we need to look at the fall through addresses. */
+	if (irsb->jumpkind == Ijk_Call) {
+		directExits.push_back(extract_call_follower(irsb));
+		/* Emit the target as well, if possible. */
+		if (irsb->next->tag == Iex_Const)
+			callees.insert(std::pair<unsigned long, unsigned long>(rip, irsb->next->Iex.Const.con->Ico.U64));
+		return;
+	}
+
+	if (irsb->next->tag == Iex_Const) {
+		directExits.push_back(irsb->next->Iex.Const.con->Ico.U64);
+	} else {
+		/* Should really do something more clever here,
+		   possibly based on dynamic analysis. */
+	}
+}
+
+/* Build up a static call graph which covers, at a minimum, all of the
+ * RIPs included in the input set.  Functions in the graph are
+ * represented by a combination of the set of RIPs in the function,
+ * plus a set of functions which are statically called from that
+ * function. */
+/* Tail calls are a fairly major complication here.  If you see a call
+ * to X, and another call to Y where Y tail calls into X, it would
+ * naturally look like X and Y overlap, which confuses things.  In
+ * that case, we have to split Y so that they no longer overlap.  If X
+ * is discovered first then that's actually trivial (you just stop
+ * exploring Y when you hit X's head), but if Y is discovered first
+ * then it's quite messy.  We give up at that point, removing Y from
+ * the known set, exploring X, and then re-exploring Y.
+ */
+/* There's also a bit of a bootstrapping problem.  We're given a bunch
+ * of RIPs, but function heads to start from.  We start by picking a
+ * RIP pretty much at random and assuming that it's a function head.
+ * That mostly works reasonably well, even if it isn't, because we
+ * effectively just cut off the part of the function before that
+ * instruction.  The problem comes if there's another root instruction
+ * in the same ``real'' function from which the speculative head is
+ * reachable.  In that case, we'll insert a function boundary where
+ * there isn't one (due to the tail-call elimination heuristic
+ * discussed above), which can in turn lead to the introduction of
+ * bogus recursion, which screws with the cycle breaking heuristic.
+ * The fix for that is to purge the function which we derived from the
+ * assumed head and continue.
+ *
+ * Note that this is pretty much the opposite to what we do if we
+ * suspect a tail call, so we need to track whether a head is real
+ * (obtained from following a call instruction) or assumed (obtained
+ * directly from a root).  Note also that we *don't* purge the
+ * functions which were obtained by tracing from the assumed head, as
+ * the new subsuming head is guaranteed to find them again, and
+ * this makes things a little bit quicker.
+ */
+class CallGraphEntry : public GarbageCollected<CallGraphEntry> {
+public:
+	unsigned long headRip;
+	bool isRealHead; /* Head is derived from a call instruction,
+			    as opposed to one of the exploration
+			    roots. */
+
+	/* Pair of call instruction and callee address */
+	std::set<std::pair<unsigned long, unsigned long> > callees;
+	std::set<unsigned long> instructions;
+
+	void visit(HeapVisitor &hv) { }
+	NAMED_CLASS
+};
+static CallGraphEntry *
+exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
+			       std::map<unsigned long, CallGraphEntry *> &instrsToCGEntries,
+			       AddressSpace *as)
+{
+	CallGraphEntry *cge;
+
+	cge = new CallGraphEntry();
+	cge->headRip = head;
+	cge->isRealHead = isRealHead;
+
+	std::vector<unsigned long> unexploredInstrsThisFunction;
+	unexploredInstrsThisFunction.push_back(head);
+	unsigned long prev = head;
+	while (!unexploredInstrsThisFunction.empty()) {
+		unsigned long i = unexploredInstrsThisFunction.back();
+		unexploredInstrsThisFunction.pop_back();
+
+		printf("\texplore %lx\n", i);
+		if (cge->instructions.count(i)) {
+			/* Done this instruction already -> move
+			 * on. */
+			printf("\tAlready dealt with\n");
+			continue;
+		}
+		CallGraphEntry *old = instrsToCGEntries[i];
+		if (old) {
+			assert(old != cge);
+			assert(old->headRip != cge->headRip);
+			if (old->isRealHead) {
+				/* This is a tail call. */
+				printf("\ttail call to existing real head %lx\n", old->headRip);
+				cge->callees.insert(std::pair<unsigned long, unsigned long>(prev, i) );
+				continue;
+			} else {
+				printf("\tSubsumes assumed head %lx\n", old->headRip);
+				/* We have a branch from the current
+				   function to a previous assumed
+				   function head.  That means that the
+				   assumed function head wasn't
+				   actually a function head at all.
+				   Kill it. */
+				purgeMapByValue(instrsToCGEntries, old);
+			}
+		}
+				
+		/* Add this instruction to the current function. */
+		cge->instructions.insert(i);
+		instrsToCGEntries[i] = cge;
+
+		/* Where are we going next? */
+		findInstrSuccessorsAndCallees(as, i, unexploredInstrsThisFunction,
+					      cge->callees);
+		prev = i;
+	}
+	return cge;
+}
+static void
+buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips)
+{
+	std::set<unsigned long> unexploredRips(rips);
+	std::map<unsigned long, CallGraphEntry *> instrsToCGEntries;
+
+	printf("Building call graph...\n");
+	while (!unexploredRips.empty()) {
+		std::set<unsigned long>::iterator it = unexploredRips.begin();
+		unsigned long head = *it;
+		unexploredRips.erase(it);
+
+		printf("Have head %lx\n", head);
+		if (instrsToCGEntries.count(head)) {
+			/* We already have a function which contains
+			   this instruction, so we're finished. */
+			printf("Already handled, continuing.\n");
+			continue;			
+		}
+
+		/* Explore the current function, starting from this
+		 * instruction. */
+		CallGraphEntry *cge =
+			exploreOneFunctionForCallGraph(head, false, instrsToCGEntries, as);
+		assert(instrsToCGEntries[head] == cge);
+
+		/* Now explore the functions which were called by that
+		 * root. */
+		/* Only really need the second half of the pair, but,
+		   frankly, I can't be bothered to write all the
+		   boiler plate for a C++ map operation. */
+		std::set<std::pair<unsigned long, unsigned long> > unexploredRealHeads(cge->callees);
+		while (!unexploredRealHeads.empty()) {
+			std::set<std::pair<unsigned long, unsigned long> >::iterator it = unexploredRealHeads.begin();
+			unsigned long h = it->second;
+			unexploredRealHeads.erase(it);
+
+			printf("Real head %lx\n", h);
+
+			CallGraphEntry *old = instrsToCGEntries[h];
+			if (old) {
+				/* Already have a CG node for this
+				   instruction.  What kind of node? */
+				if (!old->isRealHead) {
+					/* It was an inferred head
+					   from an earlier pass, so we
+					   need to get rid of it. */
+					printf("Subsumes assumed head %lx\n", old->headRip);
+					purgeMapByValue(instrsToCGEntries, old);
+				} else if (old->headRip == h) {
+					/* It's the head of an
+					   existing function ->
+					   everything is fine and we
+					   don't need to do
+					   anything. */
+					printf("Already discovered on other path\n");
+					continue;
+				} else {
+					printf("Break tall-call merged functions (%lx)\n",
+					       old->headRip);
+					/* Urk.  We previously saw a
+					   tail call to this location,
+					   and now we're seeing a real
+					   call.  The result is that
+					   we need to purge the old
+					   call and introduce a new
+					   one. */
+					purgeMapByValue(instrsToCGEntries, old);
+					/* Need to re-explore whatever
+					   it was that tail-called
+					   into this function. */
+					unexploredRealHeads.insert(std::pair<unsigned long, unsigned long>(0xf001dead, old->headRip));
+				}
+			}
+
+			/* Now explore that function */
+			cge = exploreOneFunctionForCallGraph(h, true,
+							     instrsToCGEntries,
+							     as);
+			unexploredRealHeads |= cge->callees;
+			assert(instrsToCGEntries[h] == cge);
+		}
+	}
+
+	/* Build a set of all of the CGEs which still exist */
+	std::set<CallGraphEntry *> allCGEs;
+	for (std::map<unsigned long, CallGraphEntry *>::iterator it = instrsToCGEntries.begin();
+	     it != instrsToCGEntries.end();
+	     it++)
+		allCGEs.insert(it->second);
+
+	/* Figure out which call graph entries are actually
+	 * interesting. */
+	std::set<CallGraphEntry *> interesting;
+
+	/* Anything which contains one of the root RIPs is
+	 * automatically interesting. */
+	for (std::set<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++) {
+		assert(instrsToCGEntries[*it]);
+		interesting.insert(instrsToCGEntries[*it]);
+	}
+	/* Tarski iteration: anything which calls an interesting
+	   function is itself interesting. */
+	bool done_something;
+	do {
+		done_something = false;
+		for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
+		     it != allCGEs.end();
+		     it++) {
+			if (interesting.count(*it))
+				continue;
+			for (std::set<std::pair<unsigned long, unsigned long> >::iterator it2 = (*it)->callees.begin();
+			     it2 != (*it)->callees.end();
+			     it2++) {
+				CallGraphEntry *callee = instrsToCGEntries[it2->second];
+				if (interesting.count(callee)) {
+					/* Uninteresting function
+					   calling an interesting ->
+					   not allowed.  Fix it. */
+					interesting.insert(*it);
+					done_something = true;
+					break;
+				}
+			}
+		}
+	} while (done_something);
+
+	/* Now strip anything which isn't interesting. */
+	/* Strip the uninteresting entries from the allCGEs set.  At
+	   the same time, remove them from the callee lists. */
+	for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
+	     it != allCGEs.end();
+		) {
+		CallGraphEntry *cge = *it;
+		if (!interesting.count(cge)) {
+			allCGEs.erase(it++);
+		} else {
+			for (std::set<std::pair<unsigned long, unsigned long> >::iterator it2 = cge->callees.begin();
+			     it2 != cge->callees.end();
+				) {
+				if (!interesting.count(instrsToCGEntries[it2->second])) {
+					cge->callees.erase(it2++);
+				} else {
+					it2++;
+				}
+			}
+			it++;
+		}
+	}
+	/* And now drop them from the instructions map */
+	for (std::map<unsigned long, CallGraphEntry *>::iterator it =
+		     instrsToCGEntries.begin();
+	     it != instrsToCGEntries.end();
+		) {
+		if (!interesting.count(it->second))
+			instrsToCGEntries.erase(it++);
+		else
+			it++;
+	}
+
+	/* Now we go and break all the recursive cycles. */
+
+#warning do something with the results.
+}
+
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
@@ -4594,6 +4924,8 @@ main(int argc, char *argv[])
 			     it2++)
 				printf(" %lx", *it2);
 			printf("\n");
+
+			buildCallGraphForRipSet(ms->addressSpace, *it);
 
 			std::set<CFGNode *> storeCFGs;
 			buildCFGForRipSet(ms->addressSpace, *it, storeCFGs);
