@@ -4956,6 +4956,76 @@ printCallGraph(CallGraphEntry *root, FILE *f)
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
+static void
+considerStoreCFG(CFGNode *cfg, AddressSpace *as, Oracle *oracle,
+		 IRExpr *assumption, StateMachine *probeMachine)
+{
+	StateMachine *sm = CFGtoStoreMachine(STORING_THREAD, as, cfg);
+
+	AllowableOptimisations opt2 =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack();
+	bool done_something;
+	do {
+		done_something = false;
+		sm = sm->optimise(opt2, oracle, &done_something);
+	} while (done_something);
+	sm = availExpressionAnalysis(sm, opt2);
+	sm = bisimilarityReduction(sm, opt2);
+	do {
+		done_something = false;
+		sm = sm->optimise(opt2, oracle, &done_something);
+	} while (done_something);
+	printf("Turns into state machine:\n");
+	printStateMachine(sm, stdout);
+	
+	/* Now try running that in parallel with the probe machine,
+	   and see if it might lead to a crash. */
+	printf("Running cross-product machine...\n");
+	bool mightSurvive;
+	bool mightCrash;
+	evalCrossProductMachine(probeMachine,
+				sm,
+				oracle,
+				assumption,
+				&mightSurvive,
+				&mightCrash);
+	printf("Run in parallel with the probe machine, might survive %d, might crash %d\n",
+	       mightSurvive, mightCrash);
+	
+	/* We know that mightSurvive is true when the load machine is
+	 * run atomically, so if mightSurvive is now false then that
+	 * means that evalCrossProductMachine didn't consider that
+	 * case, which is a bug. */
+	assert(mightSurvive);
+
+	if (!mightCrash) {
+		/* Executing in parallel with this machine cannot lead
+		 * to a crash, so there's no point in doing any more
+		 * work with it. */
+		return;
+	}
+
+	std::set<std::pair<StateMachineSideEffectStore *,
+		StateMachineSideEffectStore *> >
+		remoteMacroSections;
+	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections)) {
+		printf("Chose a bad write machine...\n");
+		return;
+	}
+	for (std::set<std::pair<StateMachineSideEffectStore *,
+		     StateMachineSideEffectStore *> >::iterator it =
+		     remoteMacroSections.begin();
+	     it != remoteMacroSections.end();
+	     it++) {
+		printf("Remote macro section ");
+		it->first->prettyPrint(stdout);
+		printf(" -> ");
+		it->second->prettyPrint(stdout);
+		printf("\n");
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -5071,74 +5141,8 @@ main(int argc, char *argv[])
 				trimCFG(*it2, *it);
 				breakCycles(*it2);
 
-				StateMachine *sm = CFGtoStoreMachine(STORING_THREAD, ms->addressSpace, *it2);
-
-				AllowableOptimisations opt2 =
-					AllowableOptimisations::defaultOptimisations
-					.enableassumePrivateStack();
-				do {
-					done_something = false;
-					sm = sm->optimise(opt2, oracle, &done_something);
-				} while (done_something);
-				sm = availExpressionAnalysis(sm, opt2);
-				sm = bisimilarityReduction(sm, opt2);
-				do {
-					done_something = false;
-					sm = sm->optimise(opt2, oracle, &done_something);
-				} while (done_something);
-				printf("Turns into state machine:\n");
-				printStateMachine(sm, stdout);
-
-				/* Now try running that in parallel
-				   with the probe machine, and see if
-				   it might lead to a crash. */
-				printf("Running cross-product machine...\n");
-				evalCrossProductMachine(cr->sm,
-							sm,
-							oracle,
-							survive,
-							&mightSurvive,
-							&mightCrash);
-				printf("Run in parallel with the probe machine, might survive %d, might crash %d\n",
-				       mightSurvive, mightCrash);
-
-				/* We know that mightSurvive is true
-				 * when the load machine is run
-				 * atomically, so if mightSurvive is
-				 * now false then that means that
-				 * evalCrossProductMachine didn't
-				 * consider that case, which is a
-				 * bug. */
-				assert(mightSurvive);
-
-				if (!mightCrash) {
-					/* Executing in parallel with
-					 * this machine cannot lead to
-					 * a crash, so there's no
-					 * point in doing any more
-					 * work with it. */
-					continue;
-				}
-
-				std::set<std::pair<StateMachineSideEffectStore *,
-					           StateMachineSideEffectStore *> >
-					remoteMacroSections;
-				if (!findRemoteMacroSections(cr->sm, sm, survive, oracle, remoteMacroSections)) {
-					printf("Chose a bad write machine...\n");
-					continue;
-				}
-				for (std::set<std::pair<StateMachineSideEffectStore *,
-					                StateMachineSideEffectStore *> >::iterator it =
-					     remoteMacroSections.begin();
-				     it != remoteMacroSections.end();
-				     it++) {
-					printf("Remote macro section ");
-					it->first->prettyPrint(stdout);
-					printf(" -> ");
-					it->second->prettyPrint(stdout);
-					printf("\n");
-				}
-
+				considerStoreCFG(*it2, ms->addressSpace, oracle,
+						 survive, cr->sm);
 			}
 		}
 	}
