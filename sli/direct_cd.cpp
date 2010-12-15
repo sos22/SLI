@@ -1827,6 +1827,11 @@ optimise_condition_calculation(
 	if (cond->Iex.Const.con->Ico.U64 != AMD64CondZ)
 		return NULL;
 	switch (cc_op->Iex.Const.con->Ico.U64) {
+	case AMD64G_CC_OP_SUBL:
+		return IRExpr_Binop(
+			Iop_CmpEQ32,
+			dep1,
+			dep2);
 	case AMD64G_CC_OP_SUBQ:
 		return IRExpr_Binop(
 			Iop_CmpEQ64,
