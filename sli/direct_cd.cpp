@@ -4297,8 +4297,22 @@ public:
 	IRExpr *pathConstraint;
 	std::vector<StateMachineSideEffectStore *> stores;
 	CrossEvalState *states[2];
+	std::vector<StateMachineSideEffect *> history;
 	void advanceMachine(unsigned tid, NdChooser &chooser, Oracle *oracle);
+	void dumpHistory(void) const;
 };
+
+void
+CrossMachineEvalContext::dumpHistory(void) const
+{
+	for (std::vector<StateMachineSideEffect *>::const_iterator it = history.begin();
+	     it != history.end();
+	     it++) {
+		printf("\t");
+		(*it)->prettyPrint(stdout);
+		printf("\n");
+	}
+}
 
 void
 CrossMachineEvalContext::advanceMachine(unsigned tid,
@@ -4344,6 +4358,7 @@ top:
 	StateMachineSideEffect *se;
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];
 	evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint);
+	history.push_back(se);
 	machine->nextEdgeSideEffectIdx++;
 
 	/* You don't need to context switch after a copy, because
@@ -4374,6 +4389,7 @@ evalCrossProductMachine(StateMachine *sm1,
 	StateMachineEdge *sme2 = new StateMachineEdge(sm2);
 	while (!*mightCrash || !*mightSurvive) {
 		CrossMachineEvalContext ctxt;
+		assert(ctxt.stores.size() == 0);
 		ctxt.pathConstraint = initialStateCondition;
 		CrossEvalState s1(sme1, 0);
 		CrossEvalState s2(sme2, 0);
@@ -4385,10 +4401,19 @@ evalCrossProductMachine(StateMachine *sm1,
 					    oracle);
 		while (!s1.finished)
 			ctxt.advanceMachine(0, chooser, oracle);
-		if (s1.crashed)
+		if (s1.crashed) {
+			if (!*mightCrash) {
+				printf("First crashing history:\n");
+				ctxt.dumpHistory();
+			}
 			*mightCrash = true;
-		else
+		} else {
+			if (!*mightSurvive) {
+				printf("First surviving history:\n");
+				ctxt.dumpHistory();
+			}
 			*mightSurvive = true;
+		}
 		if (!chooser.advance())
 			break;
 	}
