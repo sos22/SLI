@@ -1164,7 +1164,9 @@ public:
 
 	t my_rip;
 
-	CFGNode(t rip) : my_rip(rip) {}
+	bool accepting;
+
+	CFGNode(t rip) : my_rip(rip), accepting(false) {}
 
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%#lx: %#lx(%p), %#lx(%p)",
@@ -1262,6 +1264,8 @@ buildCFGForRipSet(AddressSpace *as,
 			if (irsb->jumpkind == Ijk_Call) {
 				work->fallThroughRip = extract_call_follower(irsb);
 				needed.push_back(work->fallThroughRip);
+			} else if (irsb->jumpkind == Ijk_Ret) {
+				work->accepting = true;
 			} else {
 				/* Don't currently try to trace across indirect branches. */
 				if (irsb->next->tag == Iex_Const) {
@@ -1551,7 +1555,8 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses)
 	for (typename std::map<t, CFGNode<t> *>::iterator it = uninteresting.begin();
 	     it != uninteresting.end();
 		) {
-		if (instructionIsInteresting(interestingAddresses, it->first)) {
+		if (it->second->accepting ||
+		    instructionIsInteresting(interestingAddresses, it->first)) {
 			interesting[it->first] = it->second;
 			uninteresting.erase(it++);
 		} else {
@@ -5224,6 +5229,7 @@ buildCFGForCallGraph(AddressSpace *as,
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				if (r.callStack.size() == 0) {
 					/* End of the line. */
+					work->accepting = true;
 				} else {
 					/* Return to calling function. */
 					work->fallThroughRip = r.rtrn();
