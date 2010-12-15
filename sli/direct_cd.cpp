@@ -2580,7 +2580,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 	if (src->tag == Iex_Unop) {
 		if (src->Iex.Unop.op == Iop_64to1 &&
 		    src->Iex.Unop.arg->tag == Iex_Binop &&
-		    src->Iex.Unop.arg->Iex.Binop.op == Iop_CmpEQ64) {
+		    (src->Iex.Unop.arg->Iex.Binop.op == Iop_CmpEQ64 ||
+		     src->Iex.Unop.arg->Iex.Binop.op == Iop_CmpEQ32)) {
 			/* This can happen sometimes because of the
 			   way we simplify condition codes.  Very easy
 			   fix: strip off the outer 64to1. */
@@ -2763,6 +2764,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		if (src->Iex.Binop.arg1->tag == Iex_Const &&
 		    src->Iex.Binop.arg2->tag == Iex_Const) {
 			switch (src->Iex.Binop.op) {
+			case Iop_CmpEQ32:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U1(
+						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 ==
+						src->Iex.Binop.arg2->Iex.Const.con->Ico.U32));
 			case Iop_CmpEQ64:
 				*done_something = true;
 				return IRExpr_Const(
