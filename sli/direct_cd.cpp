@@ -433,6 +433,16 @@ public:
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) { }
 };
 
+class InstructionSet {
+public:
+	std::set<unsigned long> rips;
+};
+static bool
+operator<(const InstructionSet &a, const InstructionSet &b)
+{
+	return a.rips < b.rips;
+}
+
 /* All of the information from sources other than the main crash dump.
  * Information from the oracle will be true of some executions but not
  * necessarily all of them, so should only really be used where static
@@ -446,7 +456,7 @@ public:
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
 				   std::set<unsigned long> &out);
 	void clusterRips(const std::set<unsigned long> &inputRips,
-			 std::set<std::set<unsigned long> > &outputClusters);
+			 std::set<InstructionSet> &outputClusters);
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 
@@ -1072,21 +1082,25 @@ printStateMachine(const StateMachine *sm, FILE *f)
 	}
 }
 
-class CFGNode : public GarbageCollected<CFGNode>, public PrettyPrintable {
+template <typename t>
+class CFGNode : public GarbageCollected<CFGNode<t> >, public PrettyPrintable {
 public:
-	unsigned long fallThroughRip;
-	unsigned long branchRip;
-	CFGNode *fallThrough;
-	CFGNode *branch;
+	t fallThroughRip;
+	t branchRip;
+	CFGNode<t> *fallThrough;
+	CFGNode<t> *branch;
 
-	unsigned long my_rip;
+	t my_rip;
 
-	CFGNode(unsigned long rip) : my_rip(rip) {}
+	CFGNode(t rip) : my_rip(rip) {}
 
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%#lx: %#lx(%p), %#lx(%p)",
-			my_rip, fallThroughRip, fallThrough,
-			branchRip, branch);
+			wrappedRipToRip(my_rip),
+			wrappedRipToRip(fallThroughRip),
+			fallThrough,
+			wrappedRipToRip(branchRip),
+			branch);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(fallThrough);
@@ -1104,8 +1118,8 @@ public:
 
 	InferredInformation(Oracle *_oracle) : oracle(_oracle) {}
 	void addCrashReason(CrashReason *cr) { crashReasons[cr->rip] = cr; }
-	CFGNode *CFGFromRip(unsigned long rip);
-	CrashReason *CFGtoCrashReason(unsigned tid, CFGNode *cfg);
+	CFGNode<unsigned long> *CFGFromRip(unsigned long rip);
+	CrashReason *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg);
 
 	void visit(HeapVisitor &hv) {
 		hv(oracle);
@@ -1119,7 +1133,7 @@ public:
 };
 
 static void
-enumerateReachableStates(CFGNode *from, std::set<CFGNode *> &out)
+enumerateReachableStates(CFGNode<unsigned long> *from, std::set<CFGNode<unsigned long> *> &out)
 {
 	if (!from || out.count(from))
 		return;
@@ -1137,9 +1151,9 @@ enumerateReachableStates(CFGNode *from, std::set<CFGNode *> &out)
 static void
 buildCFGForRipSet(AddressSpace *as,
 		  const std::set<unsigned long> &rips,
-		  std::set<CFGNode *> &output)
+		  std::set<CFGNode<unsigned long> *> &output)
 {
-	std::map<unsigned long, CFGNode *> builtSoFar;
+	std::map<unsigned long, CFGNode<unsigned long> *> builtSoFar;
 	std::vector<unsigned long> needed;
 	unsigned long rip;
 
@@ -1158,7 +1172,7 @@ buildCFGForRipSet(AddressSpace *as,
 		if (builtSoFar.count(rip))
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(-1, rip);
-		CFGNode *work = new CFGNode(rip);
+		CFGNode<unsigned long> *work = new CFGNode<unsigned long>(rip);
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
@@ -1189,7 +1203,7 @@ buildCFGForRipSet(AddressSpace *as,
 
 	/* Now we have a CFG node for every needed instruction.  Go
 	   through and resolve exit branches. */
-	for (std::map<unsigned long, CFGNode *>::iterator it = builtSoFar.begin();
+	for (std::map<unsigned long, CFGNode<unsigned long> *>::iterator it = builtSoFar.begin();
 	     it != builtSoFar.end();
 	     it++) {
 		if (it->second) {
@@ -1200,11 +1214,11 @@ buildCFGForRipSet(AddressSpace *as,
 
 	/* Extract the start states.  These will be some subset of the
 	   input root nodes. */
-	std::set<CFGNode *> outputSoFar;
+	std::set<CFGNode<unsigned long> *> outputSoFar;
 	for (std::set<unsigned long>::const_iterator it = rips.begin();
 	     it != rips.end();
 	     it++) {
-		CFGNode *startnode = builtSoFar[*it];
+		CFGNode<unsigned long> *startnode = builtSoFar[*it];
 		if (outputSoFar.count(startnode))
 			continue;
 		output.insert(startnode);
@@ -1215,11 +1229,11 @@ buildCFGForRipSet(AddressSpace *as,
 
 /* Special case of buildCFGForRipSet() when you only have one entry
  * RIP */
-CFGNode *
+CFGNode<unsigned long> *
 InferredInformation::CFGFromRip(unsigned long start)
 {
 	std::set<unsigned long> rips;
-	std::set<CFGNode *> out;
+	std::set<CFGNode<unsigned long> *> out;
 	rips.insert(start);
 	buildCFGForRipSet(oracle->ms->addressSpace, rips, out);
 	if (out.size() == 0)
@@ -1229,7 +1243,7 @@ InferredInformation::CFGFromRip(unsigned long start)
 }
 
 CrashReason *
-InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode *cfg)
+InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 {
 	VexRip finalRip(cfg->my_rip, 0);
 	if (crashReasons.count(finalRip)) {
@@ -1293,11 +1307,11 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode *cfg)
 	return res;
 }
 
-static void
-printCFG(const CFGNode *cfg)
+template <typename t> void
+printCFG(const CFGNode<t> *cfg)
 {
-	std::vector<const CFGNode *> pending;
-	std::set<const CFGNode *> done;
+	std::vector<const CFGNode<t> *> pending;
+	std::set<const CFGNode<t> *> done;
 
 	pending.push_back(cfg);
 	while (!pending.empty()) {
@@ -1432,8 +1446,8 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 	}
 }
 
-static void
-enumerateCFG(CFGNode *root, std::map<unsigned long, CFGNode *> &rips)
+template <typename t> void
+enumerateCFG(CFGNode<t> *root, std::map<t, CFGNode<t> *> &rips)
 {
 	if (!root)
 		return;
@@ -1444,36 +1458,43 @@ enumerateCFG(CFGNode *root, std::map<unsigned long, CFGNode *> &rips)
 	enumerateCFG(root->fallThrough, rips);
 }
 
+static bool
+instructionIsInteresting(const InstructionSet &i, unsigned long r)
+{
+	return i.rips.count(r) != 0;
+}
+
 /* Remove all of the nodes which appear to be uninteresting.  A node
    is uninteresting if it is not in the initial interesting set and
    there are no paths from it to an interesting node. */
-static void
-trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
+template <typename t> void
+trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses)
 {
-	std::map<unsigned long, CFGNode *> uninteresting;
-	std::map<unsigned long, CFGNode *> interesting;
+	std::map<t, CFGNode<t> *> uninteresting;
+	std::map<t, CFGNode<t> *> interesting;
 	/* Start on the assumption that everything is uninteresting. */
-	enumerateCFG(root, uninteresting);
+	enumerateCFG<t>(root, uninteresting);
 	/* addresses which are explicitly flagged as interesting are
 	   not uninteresting. */
-	for (std::set<unsigned long>::iterator it = interestingAddresses.begin();
-	     it != interestingAddresses.end();
-	     it++) {
-		/* If this isn't true then the CFG is incomplete. */
-		assert(uninteresting[*it]);
-
-		interesting[*it] = uninteresting[*it];
-		uninteresting.erase(*it);
+	for (typename std::map<t, CFGNode<t> *>::iterator it = uninteresting.begin();
+	     it != uninteresting.end();
+		) {
+		if (instructionIsInteresting(interestingAddresses, it->first)) {
+			interesting[it->first] = it->second;
+			uninteresting.erase(it++);
+		} else {
+			it++;
+		}
 	}
 
 	/* Tarski iteration */
 	bool progress;
 	do {
 		progress = false;
-		for (std::map<unsigned long, CFGNode *>::iterator it = uninteresting.begin();
+		for (typename std::map<t, CFGNode<t> *>::iterator it = uninteresting.begin();
 		     it != uninteresting.end();
 			) {
-			CFGNode *n = it->second;
+			CFGNode<t> *n = it->second;
 			bool shouldBeUninteresting = true;
 			if (n->branch &&
 			    !uninteresting.count(n->branch->my_rip))
@@ -1493,10 +1514,10 @@ trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
 
 	/* The uninteresting set should now be correct.  Eliminate any
 	   edges which go to an uninteresting target. */
-	for (std::map<unsigned long, CFGNode *>::iterator it = interesting.begin();
+	for (typename std::map<t, CFGNode<t> *>::iterator it = interesting.begin();
 	     it != interesting.end();
 	     it++) {
-		CFGNode *n = it->second;
+		CFGNode<t> *n = it->second;
 		assert(n);
 		if (n->branch && uninteresting.count(n->branch->my_rip))
 			n->branch = NULL;
@@ -1515,9 +1536,9 @@ trimCFG(CFGNode *root, std::set<unsigned long> interestingAddresses)
    pointer which we followed on this path, and it is where we will
    break the cycle.  Returns false if we broke a cycle, in which case
    the whole thing needs to be re-run, or true otherwise. */
-static bool
-breakCycles(CFGNode *cfg, std::map<CFGNode *, unsigned> &numbering,
-	    CFGNode **lastBackEdge, std::set<CFGNode *> &onPath)
+template <typename t> bool
+breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
+	    CFGNode<t> **lastBackEdge, std::set<CFGNode<t> *> &onPath)
 {
 	if (onPath.count(cfg)) {
 		/* We have a cycle.  Break it. */
@@ -1528,14 +1549,14 @@ breakCycles(CFGNode *cfg, std::map<CFGNode *, unsigned> &numbering,
 
 	onPath.insert(cfg);
 	if (cfg->branch) {
-		CFGNode **p = lastBackEdge;
+		CFGNode<t> **p = lastBackEdge;
 		if (numbering[cfg->branch] < numbering[cfg])
 			p = &cfg->branch;
 		if (!breakCycles(cfg->branch, numbering, p, onPath))
 			return false;
 	}
 	if (cfg->fallThrough) {
-		CFGNode **p = lastBackEdge;
+		CFGNode<t> **p = lastBackEdge;
 		if (numbering[cfg->fallThrough] < numbering[cfg])
 			p = &cfg->fallThrough;
 		if (!breakCycles(cfg->fallThrough, numbering, p, onPath))
@@ -1551,32 +1572,32 @@ breakCycles(CFGNode *cfg, std::map<CFGNode *, unsigned> &numbering,
    variant of Tarjan's algorithm to detect cycles.  When we detect a
    cycle, we use the numbering scheme to identify a back edge and
    eliminate it. */
-static void
-breakCycles(CFGNode *cfg)
+template <typename t> void
+breakCycles(CFGNode<t> *cfg)
 {
-	std::map<CFGNode *, unsigned> numbering;
-	std::queue<CFGNode *> queue;
-	CFGNode *t;
+	std::map<CFGNode<t> *, unsigned> numbering;
+	std::queue<CFGNode<t> *> queue;
+	CFGNode<t> *tmp;
 
 	/* Assign numbering */
 	unsigned idx;
 	idx = 0;
 	queue.push(cfg);
 	while (!queue.empty()) {
-		t = queue.front();
+		tmp = queue.front();
 		queue.pop();
-		if (numbering.count(t))
+		if (numbering.count(tmp))
 			continue;
-		numbering[t] = idx;
+		numbering[tmp] = idx;
 		idx++;
-		if (t->branch)
-			queue.push(t->branch);
-		if (t->fallThrough)
-			queue.push(t->fallThrough);
+		if (tmp->branch)
+			queue.push(tmp->branch);
+		if (tmp->fallThrough)
+			queue.push(tmp->fallThrough);
 	}
 
-	std::set<CFGNode *> visited;
-	while (!breakCycles(cfg, numbering, NULL, visited))
+	std::set<CFGNode<t> *> visited;
+	while (!breakCycles<t>(cfg, numbering, NULL, visited))
 		visited.clear();
 }
 
@@ -3589,7 +3610,7 @@ findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &
  * the relevant output sets. */
 void
 Oracle::clusterRips(const std::set<unsigned long> &inputRips,
-		    std::set<std::set<unsigned long> > &outputClusters)
+		    std::set<InstructionSet> &outputClusters)
 {
 	union_find<unsigned long> output;
 	std::set<unsigned long> explored;
@@ -3619,13 +3640,13 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 	while (!unprocessedInput.empty()) {
 		unsigned long r = *unprocessedInput.begin();
 
-		std::set<unsigned long> thisSet;
+		InstructionSet thisSet;
 		unsigned long representative = output.representative(r);
 		for (std::set<unsigned long>::iterator it = unprocessedInput.begin();
 		     it != unprocessedInput.end();
 			) {
 			if (output.representative(*it) == representative) {
-				thisSet.insert(*it);
+				thisSet.rips.insert(*it);
 				unprocessedInput.erase(it++);
 			} else {
 				it++;
@@ -3635,15 +3656,21 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 	}
 }
 
-static StateMachine *
-CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode *cfg, std::map<CFGNode *, StateMachine *> &memo)
+static unsigned long
+wrappedRipToRip(unsigned long r)
+{
+	return r;
+}
+
+template <typename t> StateMachine *
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGNode<t> *, StateMachine *> &memo)
 {
 	if (!cfg)
 		return StateMachineNoCrash::get();
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
-	IRSB *irsb = as->getIRSBForAddress(tid, cfg->my_rip);
+	IRSB *irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
 		if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
@@ -3661,7 +3688,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode *cfg, std::map<CFGNode
 						res);
 				}
 			} else {
-				res = backtrackStateMachineOneStatement(res, stmt, cfg->my_rip);
+				res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
 			}
 			idx--;
 		}
@@ -3675,17 +3702,17 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode *cfg, std::map<CFGNode
 		assert(idx > 0);
 		while (idx != 0) {
 			IRStmt *stmt = irsb->stmts[idx-1];
-			res = backtrackStateMachineOneStatement(res, stmt, cfg->my_rip);
+			res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
 		}
 	}
 	memo[cfg] = res;
 	return res;		
 }
 
-static StateMachine *
-CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode *cfg)
+template <typename t> StateMachine *
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg)
 {
-	std::map<CFGNode *, StateMachine *> memo;
+	std::map<CFGNode<t> *, StateMachine *> memo;
 	return CFGtoStoreMachine(tid, as, cfg, memo);
 }
 
@@ -4628,11 +4655,9 @@ exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
 		unsigned long i = unexploredInstrsThisFunction.back();
 		unexploredInstrsThisFunction.pop_back();
 
-		printf("\texplore %lx\n", i);
 		if (cge->instructions.count(i)) {
 			/* Done this instruction already -> move
 			 * on. */
-			printf("\tAlready dealt with\n");
 			continue;
 		}
 		CallGraphEntry *old = instrsToCGEntries[i];
@@ -4641,11 +4666,9 @@ exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
 			assert(old->headRip != cge->headRip);
 			if (old->isRealHead) {
 				/* This is a tail call. */
-				printf("\ttail call to existing real head %lx\n", old->headRip);
 				cge->callees.insert(std::pair<unsigned long, unsigned long>(prev, i) );
 				continue;
 			} else {
-				printf("\tSubsumes assumed head %lx\n", old->headRip);
 				/* We have a branch from the current
 				   function to a previous assumed
 				   function head.  That means that the
@@ -4704,17 +4727,14 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	std::set<unsigned long> unexploredRips(rips);
 	std::map<unsigned long, CallGraphEntry *> instrsToCGEntries;
 
-	printf("Building call graph...\n");
 	while (!unexploredRips.empty()) {
 		std::set<unsigned long>::iterator it = unexploredRips.begin();
 		unsigned long head = *it;
 		unexploredRips.erase(it);
 
-		printf("Have head %lx\n", head);
 		if (instrsToCGEntries.count(head)) {
 			/* We already have a function which contains
 			   this instruction, so we're finished. */
-			printf("Already handled, continuing.\n");
 			continue;			
 		}
 
@@ -4735,8 +4755,6 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			unsigned long h = it->second;
 			unexploredRealHeads.erase(it);
 
-			printf("Real head %lx\n", h);
-
 			CallGraphEntry *old = instrsToCGEntries[h];
 			if (old) {
 				/* Already have a CG node for this
@@ -4745,7 +4763,6 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					/* It was an inferred head
 					   from an earlier pass, so we
 					   need to get rid of it. */
-					printf("Subsumes assumed head %lx\n", old->headRip);
 					purgeMapByValue(instrsToCGEntries, old);
 				} else if (old->headRip == h) {
 					/* It's the head of an
@@ -4753,11 +4770,8 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					   everything is fine and we
 					   don't need to do
 					   anything. */
-					printf("Already discovered on other path\n");
 					continue;
 				} else {
-					printf("Break tall-call merged functions (%lx)\n",
-					       old->headRip);
 					/* Urk.  We previously saw a
 					   tail call to this location,
 					   and now we're seeing a real
@@ -4920,8 +4934,6 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 
 		purgeCGFromCGESet(allCGEs, res);
 	}
-
-#warning do something with the results.
 }
 
 static void
@@ -4953,11 +4965,183 @@ printCallGraph(CallGraphEntry *root, FILE *f)
 	printCallGraph(root, f, alreadyDone);
 }
 
+class StackRip {
+public:
+	unsigned long rip;
+	std::vector<unsigned long> callStack;
+	bool valid;
+	StackRip(unsigned long _rip) : rip(_rip), valid(true) {}
+	StackRip() : valid(false) {}
+
+	StackRip jump(unsigned long r) {
+		StackRip w(*this);
+		w.rip = r;
+		return w;
+	}
+	StackRip call(unsigned long target, unsigned long rtrn) {
+		StackRip w(*this);
+		w.callStack.push_back(rtrn);
+		w.rip = target;
+		return w;
+	}
+	StackRip rtrn(void) {
+		StackRip w(*this);
+		w.rip = w.callStack.back();
+		w.callStack.pop_back();
+		return w;
+	}
+};
+
+static unsigned long
+wrappedRipToRip(const StackRip &r)
+{
+	return r.rip;
+}
+
+static bool
+instructionIsInteresting(const InstructionSet &i, const StackRip &r)
+{
+	return i.rips.count(r.rip) != 0;
+}
+
+static bool
+operator<(const StackRip &a, const StackRip &b)
+{
+	if (!b.valid)
+		return false;
+	if (!a.valid)
+		return true;
+	if (a.rip < b.rip)
+		return true;
+	else if (a.rip > b.rip)
+		return false;
+	if (a.callStack.size() < b.callStack.size())
+		return true;
+	else if (a.callStack.size() > b.callStack.size())
+		return false;
+	for (unsigned x = 0; x < a.callStack.size(); x++)
+		if (a.callStack[x] < b.callStack[x])
+			return true;
+		else if (a.callStack[x] > b.callStack[x])
+			return false;
+	return false;
+}
+
+static CFGNode<StackRip> *
+buildCFGForCallGraph(AddressSpace *as,
+		     CallGraphEntry *root)
+{
+	/* Build a map from instruction RIPs to CGEs. */
+	std::set<CallGraphEntry *> explored;
+	std::queue<CallGraphEntry *> toExplore;
+	std::map<unsigned long, CallGraphEntry *> ripToCFGNode;
+	toExplore.push(root);
+	while (!toExplore.empty()) {
+		CallGraphEntry *cge = toExplore.front();
+		toExplore.pop();
+		if (explored.count(cge))
+			continue;
+		explored.insert(cge);
+		for (std::set<unsigned long>::iterator it = cge->instructions.begin();
+		     it != cge->instructions.end();
+		     it++) {
+			/* Functions should be disjoint */
+			assert(!ripToCFGNode.count(*it));
+			ripToCFGNode[*it] = cge;
+		}
+		for (std::map<unsigned long, CallGraphEntry *>::iterator it = cge->calls.begin();
+		     it != cge->calls.end();
+		     it++)
+			toExplore.push(it->second);
+	}
+
+	/* Now, starting from the head of the root node, work our way
+	 * forwards and build up the state machine.  We identify
+	 * instructions by a combination of the RIP and call stack,
+	 * encapsulated as a StackRip; this effectively allows us to
+	 * inline chosen functions. */
+	std::map<StackRip, CFGNode<StackRip> *> builtSoFar;
+	std::queue<StackRip> needed;
+
+	needed.push(StackRip(root->headRip));
+	while (!needed.empty()) {
+		StackRip &r(needed.front());
+		assert(ripToCFGNode[r.rip] != NULL);
+		if (builtSoFar.count(r)) {
+			needed.pop();
+			continue;
+		}
+		CFGNode<StackRip> *work = new CFGNode<StackRip>(r);
+		builtSoFar[r] = work;
+		IRSB *irsb = as->getIRSBForAddress(-1, r.rip);
+		int x;
+		for (x = 1; x < irsb->stmts_used; x++) {
+			if (irsb->stmts[x]->tag == Ist_IMark) {
+				work->fallThroughRip = r.jump(irsb->stmts[x]->Ist.IMark.addr);
+				break;
+			}
+			if (irsb->stmts[x]->tag == Ist_Exit) {
+				assert(!work->branchRip.valid);
+				work->branchRip = r.jump(irsb->stmts[x]->Ist.Exit.dst->Ico.U64);
+				assert(work->branchRip.valid);
+				needed.push(work->branchRip);
+			}
+		}
+		if (x == irsb->stmts_used) {
+			if (irsb->jumpkind == Ijk_Call) {
+				if (ripToCFGNode[r.rip]->calls.count(r.rip)) {
+					/* We should inline this call. */
+					work->fallThroughRip = r.call(
+						ripToCFGNode[r.rip]->calls[r.rip]->headRip,
+						extract_call_follower(irsb));
+				} else {
+					/* Skip over this call. */
+					work->fallThroughRip = r.jump(extract_call_follower(irsb));
+				}
+			} else if (irsb->jumpkind == Ijk_Ret) {
+				if (r.callStack.size() == 0) {
+					/* End of the line. */
+				} else {
+					/* Return to calling function. */
+					work->fallThroughRip = r.rtrn();
+				}
+			} else if (irsb->next->tag == Iex_Const) {
+				work->fallThroughRip = r.jump(irsb->next->Iex.Const.con->Ico.U64);
+			} else {
+				/* Don't currently try to trace across indirect branches. */
+			}
+		}
+		needed.pop();
+		if (work->fallThroughRip.valid)
+			needed.push(work->fallThroughRip);
+	}
+
+	/* We have now built all of the needed CFG nodes.  Resolve
+	 * references. */
+	for (std::map<StackRip, CFGNode<StackRip> *>::iterator it = builtSoFar.begin();
+	     it != builtSoFar.end();
+	     it++) {
+		if (it->second->fallThroughRip.valid) {
+			it->second->fallThrough = builtSoFar[it->second->fallThroughRip];
+			assert(it->second->fallThrough);
+		}
+		if (it->second->branchRip.valid) {
+			it->second->branch = builtSoFar[it->second->branchRip];
+			assert(it->second->branch);
+		}
+	}
+
+	/* All done */
+	CFGNode<StackRip> *res = builtSoFar[StackRip(root->headRip)];
+	assert(res != NULL);
+	return res;
+}
+
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
 static void
-considerStoreCFG(CFGNode *cfg, AddressSpace *as, Oracle *oracle,
+considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		 IRExpr *assumption, StateMachine *probeMachine)
 {
 	StateMachine *sm = CFGtoStoreMachine(STORING_THREAD, as, cfg);
@@ -5060,9 +5244,9 @@ main(int argc, char *argv[])
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     it != previousInstructions.end();
 	     it++) {
-		CFGNode *cfg = ii->CFGFromRip(*it);
-		std::set<unsigned long> interesting;
-		interesting.insert(proximal->rip.rip);
+		CFGNode<unsigned long> *cfg = ii->CFGFromRip(*it);
+		InstructionSet interesting;
+		interesting.rips.insert(proximal->rip.rip);
 		trimCFG(cfg, interesting);
 		breakCycles(cfg);
 
@@ -5112,36 +5296,32 @@ main(int argc, char *argv[])
 		     it != allLoads.end();
 		     it++)
 			oracle->findConflictingStores(*it, potentiallyConflictingStores);
-		std::set<std::set<unsigned long> > conflictClusters;
+		std::set<InstructionSet> conflictClusters;
 		oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
-		for (std::set<std::set<unsigned long> >::iterator it = conflictClusters.begin();
+		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
 		     it++) {
 			printf("Cluster:");
-			for (std::set<unsigned long>::iterator it2 = it->begin();
-			     it2 != it->end();
+			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
+			     it2 != it->rips.end();
 			     it2++)
 				printf(" %lx", *it2);
 			printf("\n");
 
 			std::set<CallGraphEntry *> cgRoots;
-			buildCallGraphForRipSet(ms->addressSpace, *it, cgRoots);
+			buildCallGraphForRipSet(ms->addressSpace, it->rips, cgRoots);
 			for (std::set<CallGraphEntry *>::iterator it2 = cgRoots.begin();
 			     it2 != cgRoots.end();
 			     it2++) {
 				printf("Possible call graph:\n");
 				printCallGraph(*it2, stdout);
-			}
 
-			std::set<CFGNode *> storeCFGs;
-			buildCFGForRipSet(ms->addressSpace, *it, storeCFGs);
-			for (std::set<CFGNode *>::iterator it2 = storeCFGs.begin();
-			     it2 != storeCFGs.end();
-			     it2++) {
-				trimCFG(*it2, *it);
-				breakCycles(*it2);
+				CFGNode<StackRip> *storeCFG;
+				storeCFG = buildCFGForCallGraph(ms->addressSpace, *it2);
+				trimCFG(storeCFG, *it);
+				breakCycles(storeCFG);
 
-				considerStoreCFG(*it2, ms->addressSpace, oracle,
+				considerStoreCFG(storeCFG, ms->addressSpace, oracle,
 						 survive, cr->sm);
 			}
 		}
