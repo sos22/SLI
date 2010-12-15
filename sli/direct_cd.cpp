@@ -689,8 +689,65 @@ getProximalCause(MachineState *ms, Thread *thr)
 	   results in a crash, we can be pretty confident that we've
 	   found the problem. */
 	irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
-	ppIRSB(irsb, stdout);
+	thr->temporaries.setSize(irsb->tyenv->types_used);
+	for (int x = 1 /* Skip the initial IMark */;
+	     x < irsb->stmts_used;
+	     x++) {
+		IRStmt *stmt = irsb->stmts[x];
+		ThreadEvent *evt = interpretStatement(stmt,
+						      thr,
+						      NULL,
+						      ms);
+		if (evt == NULL)
+			continue;
+		if (evt == DUMMY_EVENT || evt == FINISHED_BLOCK) {
+			/* Okay, so re-interpreting this instruction
+			   didn't give us any clues as to why we're
+			   crashing.  Give up. */
+			break;
+		}
 
+		SignalEvent *se = dynamic_cast<SignalEvent *>(evt);
+		if (se && se->signr == 11) {
+			/* Program tripped over a segfault -> almost
+			   certainly the cause of the crash.  It'll be
+			   from either a load or a store, and we
+			   special case the two cases here. */
+			IRExpr *addr = NULL;
+			if (stmt->tag == Ist_Dirty &&
+			    (!strcmp(stmt->Ist.Dirty.details->cee->name,
+				     "helper_load_8") ||
+			     !strcmp(stmt->Ist.Dirty.details->cee->name,
+				     "helper_load_16") ||
+			     !strcmp(stmt->Ist.Dirty.details->cee->name,
+				     "helper_load_32") ||			     
+			     !strcmp(stmt->Ist.Dirty.details->cee->name,
+				     "helper_load_64"))) {
+				/* It's a load; the address loaded is
+				   in the first argument. */
+				addr = stmt->Ist.Dirty.details->args[0];
+			} else if (stmt->tag == Ist_Store) {
+				addr = stmt->Ist.Store.addr;
+			} else {
+				/* Neither a load nor a store.  That
+				   shouldn't be generating a segfault,
+				   then. */
+				abort();
+			}
+			assert(addr != NULL);
+			return new CrashReason(VexRip(rip, x),
+					       new StateMachineBifurcate(
+						       IRExpr_Binop(
+							       Iop_CmpEQ64,
+							       addr,
+							       IRExpr_Const(IRConst_U64(se->virtaddr))),
+						       StateMachineCrash::get(),
+						       StateMachineNoCrash::get()));
+		}
+		printf("Generated event %s\n", evt->name());
+	}
+
+	printf("Hit end of block without any events -> no idea why we crashed.\n");
 	return NULL;
 }
 

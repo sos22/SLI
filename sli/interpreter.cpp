@@ -180,7 +180,8 @@ Thread::do_load(IRTemp tmp, unsigned long addr, unsigned size, MachineState *ms,
 		EventRecorder *er)
 {
 	if (ms->addressSpace->isReadable(addr, size, this)) {
-		er->load(this, addr);
+		if (er)
+			er->load(this, addr);
 		return LoadEvent::get(tid, tmp, addr, size);
 	} else
 		return SignalEvent::get(tid, 11, addr);
@@ -1622,9 +1623,10 @@ interpretStatement(IRStmt *stmt,
 	case Ist_IMark:
 		thr->regs.set_reg(REGISTER_IDX(RIP),
 				  (stmt->Ist.IMark.addr));
-		er->instruction(thr,
-				thr->regs.get_reg(REGISTER_IDX(RIP)),
-				ms);
+		if (er)
+			er->instruction(thr,
+					thr->regs.get_reg(REGISTER_IDX(RIP)),
+					ms);
 		return DUMMY_EVENT;
 
 	case Ist_AbiHint:
@@ -1648,7 +1650,8 @@ interpretStatement(IRStmt *stmt,
 		unsigned size = sizeofIRType(typeOfIRExpr(thr->currentIRSB->tyenv,
 							  stmt->Ist.Store.data));
 		if (ms->addressSpace->isWritable(addr.lo, size, thr)) {
-			er->store(thr, addr.lo, data.lo);
+			if (er)
+				er->store(thr, addr.lo, data.lo);
 			return StoreEvent::get(thr->tid, addr.lo, size, data);
 		}
 		return SignalEvent::get(thr->tid, 11, addr.lo);
