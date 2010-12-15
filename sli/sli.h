@@ -1252,7 +1252,8 @@ IRSB *instrument_func(unsigned tid,
 ThreadEvent *interpretStatement(IRStmt *stmt,
 				Thread *thr,
 				EventRecorder *er,
-				MachineState *ms);
+				MachineState *ms,
+				IRSB *irsb);
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */

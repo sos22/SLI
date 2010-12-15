@@ -301,6 +301,46 @@ public:
 };
 VexPtr<StateMachineNoCrash> StateMachineNoCrash::_this;
 
+/* A state machine node which always advances to another one.  These
+   can be safely eliminated, but they're sometimes kind of handy when
+   you're building the machine. */
+class StateMachineProxy : public StateMachine {
+public:
+	StateMachineEdge *target;
+
+	StateMachineProxy(StateMachine *t)
+		: target(new StateMachineEdge(t))
+	{
+	}
+	StateMachineProxy(StateMachineEdge *t)
+		: target(t)
+	{
+	}
+	void prettyPrint(FILE *f) const
+	{
+		target->prettyPrint(f);
+	}
+	void visit(HeapVisitor &hv)
+	{
+		hv(target);
+	}
+	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+	{
+		if (target->sideEffects.size() == 0) {
+			*done_something = true;
+			return target->target->optimise(opt, oracle, done_something);
+		}
+		target = target->optimise(opt, oracle, done_something);
+		return this;
+	}
+	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
+		target->findLoadedAddresses(s, opt);
+	}
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
+		target->findUsedBinders(s, opt);
+	}
+};
+
 class StateMachineBifurcate : public StateMachine {
 public:
 	StateMachineBifurcate(IRExpr *_condition,
@@ -344,6 +384,13 @@ public:
 	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 	{
 		condition = optimiseIRExpr(condition, opt, done_something);
+		if (condition->tag == Iex_Const) {
+			*done_something = true;
+			if (condition->Iex.Const.con->Ico.U1)
+				return new StateMachineProxy(trueTarget->optimise(opt, oracle, done_something));
+			else
+				return new StateMachineProxy(falseTarget->optimise(opt, oracle, done_something));
+		}
 		trueTarget = trueTarget->optimise(opt, oracle, done_something);
 		falseTarget = falseTarget->optimise(opt, oracle, done_something);
 		return this;
@@ -370,46 +417,6 @@ public:
 		     it++)
 			s.insert(*it);
 		::findUsedBinders(condition, s, opt);
-	}
-};
-
-/* A state machine node which always advances to another one.  These
-   can be safely eliminated, but they're sometimes kind of handy when
-   you're building the machine. */
-class StateMachineProxy : public StateMachine {
-public:
-	StateMachineEdge *target;
-
-	StateMachineProxy(StateMachine *t)
-		: target(new StateMachineEdge(t))
-	{
-	}
-	StateMachineProxy(StateMachineEdge *t)
-		: target(t)
-	{
-	}
-	void prettyPrint(FILE *f) const
-	{
-		target->prettyPrint(f);
-	}
-	void visit(HeapVisitor &hv)
-	{
-		hv(target);
-	}
-	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
-	{
-		if (target->sideEffects.size() == 0) {
-			*done_something = true;
-			return target->target->optimise(opt, oracle, done_something);
-		}
-		target = target->optimise(opt, oracle, done_something);
-		return this;
-	}
-	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
-		target->findLoadedAddresses(s, opt);
-	}
-	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
-		target->findUsedBinders(s, opt);
 	}
 };
 
@@ -697,7 +704,8 @@ getProximalCause(MachineState *ms, Thread *thr)
 		ThreadEvent *evt = interpretStatement(stmt,
 						      thr,
 						      NULL,
-						      ms);
+						      ms,
+						      irsb);
 		if (evt == NULL)
 			continue;
 		if (evt == DUMMY_EVENT || evt == FINISHED_BLOCK) {
@@ -2604,6 +2612,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			case Iop_Not1:
 				*done_something = true;
 				return IRExpr_Const(IRConst_U1(c->Ico.U1 ^ 1));
+			case Iop_32Uto64:
+				*done_something = true;
+				return IRExpr_Const(IRConst_U64(c->Ico.U32));
 			default:
 				break;
 			}

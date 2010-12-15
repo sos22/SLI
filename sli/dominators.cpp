@@ -19,7 +19,10 @@ handle_dirty_call(struct representative_state *rs,
 		  std::vector<expression_result> &temporaries,
 		  AddressSpace *as)
 {
-	if (!strcmp(details->cee->name, "helper_load_64")) {
+	if (!strcmp(details->cee->name, "helper_load_64") ||
+	    !strcmp(details->cee->name, "helper_load_32") ||
+	    !strcmp(details->cee->name, "helper_load_16") ||
+	    !strcmp(details->cee->name, "helper_load_8")) {
 		unsigned long addr = eval_expression(&rs->regs, details->args[0], temporaries).lo;
 		unsigned long res;
 		bool have_res;
@@ -30,8 +33,25 @@ handle_dirty_call(struct representative_state *rs,
 				res = rs->stores[idx].second;
 			}
 		}
-		if (!have_res)
-			res = as->fetch<unsigned long>(addr, NULL);
+		if (!have_res) {
+			try {
+				if (!strcmp(details->cee->name, "helper_load_64"))
+					res = as->fetch<unsigned long>(addr, NULL);
+				else if (!strcmp(details->cee->name, "helper_load_32"))
+					res = as->fetch<unsigned int>(addr, NULL);
+				else if (!strcmp(details->cee->name, "helper_load_16"))
+					res = as->fetch<unsigned short>(addr, NULL);
+				else if (!strcmp(details->cee->name, "helper_load_8"))
+					res = as->fetch<unsigned char>(addr, NULL);
+				else
+					abort();
+			} catch (BadMemoryException &e) {
+				/* Don't crash when teh guest
+				 * dereferences a bad pointer. */
+				res = 0;
+			}
+		}
+
 		temporaries[details->tmp].lo = res;
 	} else {
 		abort();

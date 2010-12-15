@@ -1614,7 +1614,8 @@ ThreadEvent *
 interpretStatement(IRStmt *stmt,
 		   Thread *thr,
 		   EventRecorder *er,
-		   MachineState *ms)
+		   MachineState *ms,
+		   IRSB *irsb)
 {
 	switch (stmt->tag) {
 	case Ist_NoOp:
@@ -1647,7 +1648,7 @@ interpretStatement(IRStmt *stmt,
 			eval_expression(&thr->regs, stmt->Ist.Store.data, thr->temporaries.content);
 		struct expression_result addr =
 			eval_expression(&thr->regs, stmt->Ist.Store.addr, thr->temporaries.content);
-		unsigned size = sizeofIRType(typeOfIRExpr(thr->currentIRSB->tyenv,
+		unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
 							  stmt->Ist.Store.data));
 		if (ms->addressSpace->isWritable(addr.lo, size, thr)) {
 			if (er)
@@ -1749,7 +1750,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			IRStmt *stmt = ths->currentIRSB->stmts[ths->currentIRSBOffset];
 			ths->currentIRSBOffset++;
 
-			ThreadEvent *evt = interpretStatement(stmt, ths, er, ms);
+			ThreadEvent *evt = interpretStatement(stmt, ths, er, ms, ths->currentIRSB);
 			if (evt == DUMMY_EVENT)
 				return NULL;
 			else if (evt == FINISHED_BLOCK)
