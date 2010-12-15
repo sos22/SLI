@@ -682,9 +682,16 @@ getProximalCause(MachineState *ms, Thread *thr)
 						       IRExpr_Const(IRConst_U64(0))),
 					       StateMachineCrash::get(),
 					       StateMachineNoCrash::get()));
-	} else {
-		return NULL;
 	}
+
+	/* Next guess: it's caused by dereferencing a bad pointer.
+	   Grab the crashing instruction and try emulating it.  If it
+	   results in a crash, we can be pretty confident that we've
+	   found the problem. */
+	irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
+	ppIRSB(irsb, stdout);
+
+	return NULL;
 }
 
 class StateMachineTransformer {

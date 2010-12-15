@@ -187,7 +187,6 @@ class Thread : public GarbageCollected<Thread> {
 				       const LogReaderPtr &ptr,
 				       unsigned long rip,
 				       GarbageCollectionToken t);
-	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er);
 	ThreadEvent *do_load(IRTemp tmp,
 			     unsigned long addr,
 			     unsigned size,
@@ -200,6 +199,8 @@ class Thread : public GarbageCollected<Thread> {
 	void redirectGuest(unsigned long rip);
 
 public:
+	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er);
+
 	std::vector<unsigned long> currentCallStack;
 	bool inInfrastructure;
 
@@ -1244,6 +1245,14 @@ IRSB *instrument_func(unsigned tid,
 		      VexGuestExtents *vge,
 		      IRType gWordTy,
 		      IRType hWordTy);
+
+#define DUMMY_EVENT ((ThreadEvent *)1)
+#define FINISHED_BLOCK ((ThreadEvent *)2)
+
+ThreadEvent *interpretStatement(IRStmt *stmt,
+				Thread *thr,
+				EventRecorder *er,
+				MachineState *ms);
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */
