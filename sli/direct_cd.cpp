@@ -2911,7 +2911,8 @@ static StateMachine *buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *,
 	               std::set<StateMachineSideEffectStore *> > &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
-	const AllowableOptimisations &opt);
+	const AllowableOptimisations &opt,
+	Oracle *oracle);
 
 static StateMachineEdge *
 buildNewStateMachineWithLoadsEliminated(
@@ -2920,10 +2921,11 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *,
 	               std::set<StateMachineSideEffectStore *> > &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
-	const AllowableOptimisations &opt)
+	const AllowableOptimisations &opt,
+	Oracle *oracle)
 {
 	StateMachineEdge *res =
-		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt));
+		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, oracle));
 
 	std::set<StateMachineSideEffectStore *> currentlyAvailable(initialAvail);
 
@@ -2943,7 +2945,8 @@ buildNewStateMachineWithLoadsEliminated(
 					it2++;
 				}
 			}
-			currentlyAvailable.insert(smses);
+			if (opt.assumeExecutesAtomically || oracle->storeIsThreadLocal(smses))
+				currentlyAvailable.insert(smses);
 			res->sideEffects.push_back(*it);
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
@@ -2976,7 +2979,8 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *,
 	               std::set<StateMachineSideEffectStore *> > &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
-	const AllowableOptimisations &opt)
+	const AllowableOptimisations &opt,
+	Oracle *oracle)
 {
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
@@ -2990,9 +2994,9 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineBifurcate(smb->condition, (StateMachineEdge *)NULL, NULL);
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->trueTarget, availMap[sm], availMap, memo, opt);
+			smb->trueTarget, availMap[sm], availMap, memo, opt, oracle);
 		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->falseTarget, availMap[sm], availMap, memo, opt);
+			smb->falseTarget, availMap[sm], availMap, memo, opt, oracle);
 		return res;
 	} if (StateMachineProxy *smp =
 	      dynamic_cast<StateMachineProxy *>(sm)) {
@@ -3000,7 +3004,7 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineProxy((StateMachineEdge *)NULL);
 		memo[sm] = res;
 		res->target = buildNewStateMachineWithLoadsEliminated(
-			smp->target, availMap[sm], availMap, memo, opt);
+			smp->target, availMap[sm], availMap, memo, opt, oracle);
 		return res;
 	} else {
 		abort();
@@ -3012,10 +3016,11 @@ buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
 	std::map<StateMachine *,
 	         std::set<StateMachineSideEffectStore *> > &availMap,
-	const AllowableOptimisations &opt)
+	const AllowableOptimisations &opt,
+	Oracle *oracle)
 {
 	std::map<StateMachine *, StateMachine *> memo;
-	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt);
+	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt, oracle);
 }
 
 /* Available expression analysis on memory locations.  This isn't
@@ -3023,7 +3028,7 @@ buildNewStateMachineWithLoadsEliminated(
    context-sensitive, and therefore isn't allowed to mutate nodes
    in-place. */
 static StateMachine *
-availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
+availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracle *oracle)
 {
 	/* Fairly standard available expression analysis.  Each edge
 	   in the state machine has two sets of
@@ -3042,6 +3047,21 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 	/* build the set of potentially-available expressions. */
 	avail_t potentiallyAvailable;
 	findAllStores(sm, potentiallyAvailable);
+
+	/* If we're not executing atomically, stores to
+	   non-thread-local memory locations are never considered to
+	   be available. */
+	if (!opt.assumeExecutesAtomically) {
+		for (avail_t::iterator it = potentiallyAvailable.begin();
+		     it != potentiallyAvailable.end();
+			) {
+			if (oracle->storeIsThreadLocal(*it)) {
+				it++;
+			} else {
+				potentiallyAvailable.erase(it++);
+			}
+		}
+	}
 
 	/* build the initial availability map. */
 	std::set<StateMachineEdge *> allEdges;
@@ -3140,7 +3160,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 							it3++;
 					}
 					/* Introduce the store which was generated. */
-					outputAvail.insert(smses);
+					if (opt.assumeExecutesAtomically ||
+					    oracle->storeIsThreadLocal(smses))
+						outputAvail.insert(smses);
 				}
 				/* Now check whether we actually did anything. */
 				avail_t &currentAvail(availOnExit[edge]);
@@ -3162,7 +3184,8 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt)
 	return buildNewStateMachineWithLoadsEliminated(
 		sm,
 		availOnEntry,
-		opt);
+		opt,
+		oracle);
 }
 
 typedef std::pair<StateMachine *, StateMachine *> st_pair_t;
@@ -5179,7 +5202,7 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		done_something = false;
 		sm = sm->optimise(opt2, oracle, &done_something);
 	} while (done_something);
-	sm = availExpressionAnalysis(sm, opt2);
+	sm = availExpressionAnalysis(sm, opt2, oracle);
 	sm = bisimilarityReduction(sm, opt2);
 	do {
 		done_something = false;
@@ -5285,7 +5308,7 @@ main(int argc, char *argv[])
 			done_something = false;
 			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
 		} while (done_something);
-		cr->sm = availExpressionAnalysis(cr->sm, opt);
+		cr->sm = availExpressionAnalysis(cr->sm, opt, oracle);
 		cr->sm = bisimilarityReduction(cr->sm, opt);
 		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
