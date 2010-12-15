@@ -1427,6 +1427,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 			      std::set<unsigned long> &out)
 {
 #warning Do this properly
+#if 0
 	switch (smsel->rip) {
 	case 0x40063a: /* Load of gcc_s_forcedunwind */
 	case 0x400661:
@@ -1443,6 +1444,23 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	default:
 		abort();
 	}
+#else
+	switch (smsel->rip) {
+	case 0x4002e8: /* Load of global1 */
+		out.insert(0x400347);
+		out.insert(0x40035b);
+		break;
+	case 0x4002f1: /* Load of global2 */
+		out.insert(0x400351);
+		out.insert(0x400365);
+		break;
+	case 0x4002fa:
+	case 0x4002fd: /* Stack access */
+		break;
+	default:
+		abort();
+	}
+#endif
 }
 
 /* Try to guess whether this store might ever be consumed by another
@@ -1452,6 +1470,7 @@ bool
 Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 {
 #warning Do this properly as well.
+#if 0
 	switch (s->rip) {
 	case 0x400656:
 	case 0x40066c:
@@ -1470,56 +1489,33 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	default:
 		abort();
 	}
+#else
+	switch (s->rip) {
+	case 0x400347:
+	case 0x400351:
+	case 0x40035b:
+	case 0x400365:
+		return false;
+	case 0x4002e4:
+	case 0x4002ee:
+	case 0x4002f7:
+		return true;
+	default:
+		abort();
+	}
+#endif
 }
 
 bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 				 StateMachineSideEffectStore *smses)
 {
-	switch (smsel->rip) {
-	case 0x400676:
-	case 0x400645:
+	std::set<unsigned long> s;
+	findConflictingStores(smsel, s);
+	if (s.count(smses->rip))
 		return true;
-	case 0x400661:
-	case 0x40063a:
-		switch (smses->rip) {
-		case 0x400656:
-		case 0x4006fc:
-			return true;
-		case 0x400632:
-		case 0x400641:
-		case 0x4006f2:
-		case 0x40066c:
-		case 0x4006ec:
-			return false;
-		default:
-			abort();
-		}
-	case 0x40064c:
-		switch (smses->rip) {
-		case 0x40066c:
-		case 0x4006f2:
-			return true;
-		case 0x400641:
-		case 0x400632:
-		case 0x400656:
-		case 0x4006fc:
-		case 0x4006ec:
-			return false;
-		default:
-			abort();
-		}
-		abort();
-	case 0x4006e3:
-		switch (smses->rip) {
-		case 0x4006ec:
-			return true;
-		default:
-			return false;
-		}
-	default:
-		abort();
-	}
+	else
+		return false;
 }
 
 template <typename t> void
