@@ -4681,19 +4681,6 @@ operator |=(std::set<t> &x, const std::set<t> &y)
 		x.insert(*it);
 }
 
-template <typename s, typename t> void
-purgeMapByValue(std::map<s, t> &m, t w)
-{
-	for (typename std::map<s, t>::iterator it = m.begin();
-	     it != m.end();
-		) {
-		if (w == it->second)
-			m.erase(it++);
-		else
-			it++;
-	}		
-}
-
 static void
 findInstrSuccessorsAndCallees(AddressSpace *as,
 			      unsigned long rip,
@@ -4778,6 +4765,7 @@ public:
 	bool isRealHead; /* Head is derived from a call instruction,
 			    as opposed to one of the exploration
 			    roots. */
+	bool obsolete;
 
 	/* Pair of call instruction and callee address */
 	std::set<std::pair<unsigned long, unsigned long> > callees;
@@ -4820,7 +4808,7 @@ exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
 			continue;
 		}
 		CallGraphEntry *old = instrsToCGEntries[i];
-		if (old) {
+		if (old && !old->obsolete) {
 			assert(old != cge);
 			assert(old->headRip != cge->headRip);
 			if (old->isRealHead) {
@@ -4834,7 +4822,7 @@ exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
 				   assumed function head wasn't
 				   actually a function head at all.
 				   Kill it. */
-				purgeMapByValue(instrsToCGEntries, old);
+				old->obsolete = true;
 			}
 		}
 				
@@ -4891,7 +4879,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		unsigned long head = *it;
 		unexploredRips.erase(it);
 
-		if (instrsToCGEntries.count(head)) {
+		if (instrsToCGEntries.count(head) && !instrsToCGEntries[head]->obsolete) {
 			/* We already have a function which contains
 			   this instruction, so we're finished. */
 			continue;			
@@ -4902,6 +4890,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		CallGraphEntry *cge =
 			exploreOneFunctionForCallGraph(head, false, instrsToCGEntries, as);
 		assert(instrsToCGEntries[head] == cge);
+		assert(!cge->obsolete);
 
 		/* Now explore the functions which were called by that
 		 * root. */
@@ -4915,14 +4904,14 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			unexploredRealHeads.erase(it);
 
 			CallGraphEntry *old = instrsToCGEntries[h];
-			if (old) {
+			if (old && !old->obsolete) {
 				/* Already have a CG node for this
 				   instruction.  What kind of node? */
 				if (!old->isRealHead) {
 					/* It was an inferred head
 					   from an earlier pass, so we
 					   need to get rid of it. */
-					purgeMapByValue(instrsToCGEntries, old);
+					old->obsolete = true;
 				} else if (old->headRip == h) {
 					/* It's the head of an
 					   existing function ->
@@ -4938,7 +4927,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					   we need to purge the old
 					   call and introduce a new
 					   one. */
-					purgeMapByValue(instrsToCGEntries, old);
+					old->obsolete = true;
 					/* Need to re-explore whatever
 					   it was that tail-called
 					   into this function. */
@@ -4959,8 +4948,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	std::set<CallGraphEntry *> allCGEs;
 	for (std::map<unsigned long, CallGraphEntry *>::iterator it = instrsToCGEntries.begin();
 	     it != instrsToCGEntries.end();
-	     it++)
+	     it++) {
+		assert(!it->second->obsolete);
 		allCGEs.insert(it->second);
+	}
 
 	/* Figure out which call graph entries are actually
 	 * interesting. */
