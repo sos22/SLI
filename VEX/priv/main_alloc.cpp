@@ -649,3 +649,24 @@ assert_gc_allocated(const void *ptr)
 	assert(ah->magic == ALLOCATION_HEADER_MAGIC);
 #endif
 }
+
+#include <malloc.h>
+void
+dump_malloc_info(void)
+{
+	struct mallinfo mi;
+	mi = mallinfo();
+	printf("Malloc info:\n");
+#define field(n) printf( #n "\t%d\n", mi. n)
+	field(arena);
+	field(ordblks);
+	field(smblks);
+	field(hblks);
+	field(hblkhd);
+	field(usmblks);
+	field(fsmblks);
+	field(uordblks);
+	field(fordblks);
+	field(keepcost);
+#undef field
+}
