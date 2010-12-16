@@ -1468,6 +1468,13 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 		out.insert(0x40035f);
 		out.insert(0x400374);
 		break;
+	case 0x4002e8:
+		out.insert(0x400354);
+		out.insert(0x400369);
+		break;
+	case 0x4002f3:
+	case 0x4002fa:
+		break;
 	default:
 		abort();
 	}
@@ -1500,7 +1507,7 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	default:
 		abort();
 	}
-#else
+#elif 0
 	switch (s->rip) {
 	case 0x400347:
 	case 0x400351:
@@ -1510,6 +1517,22 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	case 0x4002e4:
 	case 0x4002ee:
 	case 0x4002f7:
+		return true;
+	default:
+		abort();
+	}
+#else
+	switch (s->rip) {
+	case 0x400332:
+	case 0x400354:
+	case 0x40035f:
+	case 0x400369:
+	case 0x400374:
+		return false;
+	case 0x4002e4:
+	case 0x4002ef:
+	case 0x40033c:
+	case 0x40034f:
 		return true;
 	default:
 		abort();
