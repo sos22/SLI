@@ -1444,7 +1444,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	default:
 		abort();
 	}
-#else
+#elif 0
 	switch (smsel->rip) {
 	case 0x4002e8: /* Load of global1 */
 		out.insert(0x400347);
@@ -1456,6 +1456,16 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 		break;
 	case 0x4002fa:
 	case 0x4002fd: /* Stack access */
+		break;
+	default:
+		abort();
+	}
+#else
+	switch (smsel->rip) {
+	case 0x4002fe:
+		out.insert(0x400332);
+		out.insert(0x40035f);
+		out.insert(0x400374);
 		break;
 	default:
 		abort();
@@ -3682,7 +3692,13 @@ static void
 findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
 {
 #warning reimplement in terms of findInstrSuccessorsAndCallees
-	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRSB *irsb;
+	try {
+		irsb = as->getIRSBForAddress(-1, rip);
+	} catch (BadMemoryException &e) {
+		printf("Client tried to jump at a bad address %#lx?\n", rip);
+		return;
+	}
 	int i;
 
 	for (i = 1; i < irsb->stmts_used; i++) {
@@ -3698,7 +3714,8 @@ findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &
 	/* If we get here then there are no other marks in the IRSB,
 	   so we need to look at the fall through addresses. */
 	if (irsb->jumpkind == Ijk_Call) {
-		out.push_back(extract_call_follower(irsb));
+		unsigned long f = extract_call_follower(irsb);
+		out.push_back(f);
 		/* Emit the target as well, if possible. */
 	}
 
@@ -3730,6 +3747,7 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 	     it != inputRips.end();
 	     it++) {
 		unsigned long r = *it;
+		assert(r);
 		if (output.present(r))
 			continue;
 
@@ -4682,7 +4700,12 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 			      std::vector<unsigned long> &directExits,
 			      std::set<std::pair<unsigned long, unsigned long> > &callees)
 {
-	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRSB *irsb;
+	try {
+		irsb = as->getIRSBForAddress(-1, rip);
+	} catch (BadMemoryException &e) {
+		return;
+	}
 	int i;
 
 	for (i = 1; i < irsb->stmts_used; i++) {
