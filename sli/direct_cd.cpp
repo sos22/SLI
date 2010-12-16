@@ -10,6 +10,7 @@
 
 #include "sli.h"
 #include "nd_chooser.h"
+#include "range_tree.h"
 
 #include "libvex_guest_offsets.h"
 
@@ -4715,7 +4716,8 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 		return;
 	}
 
-	if (irsb->next->tag == Iex_Const) {
+	if (irsb->jumpkind != Ijk_NoDecode &&
+	    irsb->next->tag == Iex_Const) {
 		directExits.push_back(irsb->next->Iex.Const.con->Ico.U64);
 	} else {
 		/* Should really do something more clever here,
@@ -4761,21 +4763,25 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
  */
 class CallGraphEntry : public GarbageCollected<CallGraphEntry> {
 public:
+	CallGraphEntry(unsigned long r)
+		: headRip(r),
+		  instructions(new RangeSet())
+	{}
 	unsigned long headRip;
 	bool isRealHead; /* Head is derived from a call instruction,
 			    as opposed to one of the exploration
 			    roots. */
-	bool obsolete;
 
 	/* Pair of call instruction and callee address */
 	std::set<std::pair<unsigned long, unsigned long> > callees;
-	std::set<unsigned long> instructions;
+	RangeSet *instructions;
 
 	/* The same information as callees in a slightly different
 	   format. */
 	std::map<unsigned long, CallGraphEntry *> calls;
 
 	void visit(HeapVisitor &hv) {
+		hv(instructions);
 		for (std::map<unsigned long, CallGraphEntry *>::iterator it =
 			     calls.begin();
 		     it != calls.end();
@@ -4784,15 +4790,29 @@ public:
 	}
 	NAMED_CLASS
 };
+static unsigned long
+getInstrLength(AddressSpace *as, unsigned long a)
+{
+	IRSB *irsb;
+	try {
+		irsb = as->getIRSBForAddress(0xabcde, a);
+	} catch (BadMemoryException &e) {
+		return 0;
+	}
+	assert(irsb != NULL);
+	assert(irsb->stmts_used > 0);
+	assert(irsb->stmts[0]->tag == Ist_IMark);
+	return irsb->stmts[0]->Ist.IMark.len;
+}
 static CallGraphEntry *
 exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
-			       std::map<unsigned long, CallGraphEntry *> &instrsToCGEntries,
-			       AddressSpace *as)
+			       RangeTree<CallGraphEntry> *instrsToCGEntries,
+			       AddressSpace *as,
+			       std::set<unsigned long> &realFunctionHeads)
 {
 	CallGraphEntry *cge;
 
-	cge = new CallGraphEntry();
-	cge->headRip = head;
+	cge = new CallGraphEntry(head);
 	cge->isRealHead = isRealHead;
 
 	std::vector<unsigned long> unexploredInstrsThisFunction;
@@ -4802,13 +4822,18 @@ exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
 		unsigned long i = unexploredInstrsThisFunction.back();
 		unexploredInstrsThisFunction.pop_back();
 
-		if (cge->instructions.count(i)) {
+		if (cge->instructions->test(i)) {
 			/* Done this instruction already -> move
 			 * on. */
 			continue;
 		}
-		CallGraphEntry *old = instrsToCGEntries[i];
-		if (old && !old->obsolete) {
+		if (i != head && realFunctionHeads.count(i)) {
+			/* This is a tail call. */
+			cge->callees.insert(std::pair<unsigned long, unsigned long>(prev, i) );
+			continue;
+		}
+		CallGraphEntry *old = instrsToCGEntries->get(i);
+		if (old) {
 			assert(old != cge);
 			assert(old->headRip != cge->headRip);
 			if (old->isRealHead) {
@@ -4822,13 +4847,22 @@ exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
 				   assumed function head wasn't
 				   actually a function head at all.
 				   Kill it. */
-				old->obsolete = true;
+				instrsToCGEntries->purgeByValue(old);
+				printf("Purge %lx for %lx\n", old->headRip, i);
 			}
 		}
-				
+
+		unsigned long end = i + getInstrLength(as, i);
+		if (end == i) {
+			/* Valgrind occasionally gets confused and
+			   returns empty instructions.  Treat them as
+			   single-byte ones for these purposes. */
+			end = i + 1;
+		}
+
 		/* Add this instruction to the current function. */
-		cge->instructions.insert(i);
-		instrsToCGEntries[i] = cge;
+		cge->instructions->set(i, end);
+		instrsToCGEntries->set(i, end, cge);
 
 		/* Where are we going next? */
 		findInstrSuccessorsAndCallees(as, i, unexploredInstrsThisFunction,
@@ -4872,14 +4906,17 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			std::set<CallGraphEntry *> &roots)
 {
 	std::set<unsigned long> unexploredRips(rips);
-	std::map<unsigned long, CallGraphEntry *> instrsToCGEntries;
+	RangeTree<CallGraphEntry> *instrsToCGEntries = new RangeTree<CallGraphEntry>();
+	std::set<unsigned long> realFunctionHeads;
 
 	while (!unexploredRips.empty()) {
 		std::set<unsigned long>::iterator it = unexploredRips.begin();
 		unsigned long head = *it;
 		unexploredRips.erase(it);
 
-		if (instrsToCGEntries.count(head) && !instrsToCGEntries[head]->obsolete) {
+		CallGraphEntry *cge;
+		cge = instrsToCGEntries->get(head);
+		if (cge) {
 			/* We already have a function which contains
 			   this instruction, so we're finished. */
 			continue;			
@@ -4887,10 +4924,8 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 
 		/* Explore the current function, starting from this
 		 * instruction. */
-		CallGraphEntry *cge =
-			exploreOneFunctionForCallGraph(head, false, instrsToCGEntries, as);
-		assert(instrsToCGEntries[head] == cge);
-		assert(!cge->obsolete);
+		cge = exploreOneFunctionForCallGraph(head, false, instrsToCGEntries, as, realFunctionHeads);
+		assert(instrsToCGEntries->get(head) == cge);
 
 		/* Now explore the functions which were called by that
 		 * root. */
@@ -4903,15 +4938,18 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			unsigned long h = it->second;
 			unexploredRealHeads.erase(it);
 
-			CallGraphEntry *old = instrsToCGEntries[h];
-			if (old && !old->obsolete) {
+			realFunctionHeads.insert(h);
+
+			CallGraphEntry *old = instrsToCGEntries->get(h);
+			if (old) {
 				/* Already have a CG node for this
 				   instruction.  What kind of node? */
 				if (!old->isRealHead) {
 					/* It was an inferred head
 					   from an earlier pass, so we
 					   need to get rid of it. */
-					old->obsolete = true;
+					printf("%lx was a pseudo-root; purge.\n", h);
+					instrsToCGEntries->purgeByValue(old);
 				} else if (old->headRip == h) {
 					/* It's the head of an
 					   existing function ->
@@ -4927,7 +4965,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					   we need to purge the old
 					   call and introduce a new
 					   one. */
-					old->obsolete = true;
+					instrsToCGEntries->purgeByValue(old);
 					/* Need to re-explore whatever
 					   it was that tail-called
 					   into this function. */
@@ -4938,19 +4976,20 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			/* Now explore that function */
 			cge = exploreOneFunctionForCallGraph(h, true,
 							     instrsToCGEntries,
-							     as);
+							     as,
+							     realFunctionHeads);
 			unexploredRealHeads |= cge->callees;
-			assert(instrsToCGEntries[h] == cge);
+			assert(instrsToCGEntries->get(h) == cge);
 		}
 	}
 
 	/* Build a set of all of the CGEs which still exist */
 	std::set<CallGraphEntry *> allCGEs;
-	for (std::map<unsigned long, CallGraphEntry *>::iterator it = instrsToCGEntries.begin();
-	     it != instrsToCGEntries.end();
+	for (RangeTree<CallGraphEntry>::iterator it = instrsToCGEntries->begin();
+	     it != instrsToCGEntries->end();
 	     it++) {
-		assert(!it->second->obsolete);
-		allCGEs.insert(it->second);
+		assert(it->value);
+		allCGEs.insert(it->value);
 	}
 
 	/* Figure out which call graph entries are actually
@@ -4962,8 +5001,9 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	for (std::set<unsigned long>::iterator it = rips.begin();
 	     it != rips.end();
 	     it++) {
-		assert(instrsToCGEntries[*it]);
-		interesting.insert(instrsToCGEntries[*it]);
+		CallGraphEntry *i = instrsToCGEntries->get(*it);
+		assert(i != NULL);
+		interesting.insert(i);
 	}
 	/* Tarski iteration: anything which calls an interesting
 	   function is itself interesting. */
@@ -4978,7 +5018,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			for (std::set<std::pair<unsigned long, unsigned long> >::iterator it2 = (*it)->callees.begin();
 			     it2 != (*it)->callees.end();
 			     it2++) {
-				CallGraphEntry *callee = instrsToCGEntries[it2->second];
+				CallGraphEntry *callee = instrsToCGEntries->get(it2->second);
 				if (interesting.count(callee)) {
 					/* Uninteresting function
 					   calling an interesting ->
@@ -5004,7 +5044,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			for (std::set<std::pair<unsigned long, unsigned long> >::iterator it2 = cge->callees.begin();
 			     it2 != cge->callees.end();
 				) {
-				if (!interesting.count(instrsToCGEntries[it2->second])) {
+				if (!interesting.count(instrsToCGEntries->get(it2->second))) {
 					cge->callees.erase(it2++);
 				} else {
 					it2++;
@@ -5014,12 +5054,11 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		}
 	}
 	/* And now drop them from the instructions map */
-	for (std::map<unsigned long, CallGraphEntry *>::iterator it =
-		     instrsToCGEntries.begin();
-	     it != instrsToCGEntries.end();
+	for (RangeTree<CallGraphEntry>::iterator it = instrsToCGEntries->begin();
+	     it != instrsToCGEntries->end();
 		) {
-		if (!interesting.count(it->second))
-			instrsToCGEntries.erase(it++);
+		if (!interesting.count(it->value))
+			it = instrsToCGEntries->erase(it);
 		else
 			it++;
 	}
@@ -5032,9 +5071,9 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			     (*it)->callees.begin();
 		     it2 != (*it)->callees.end();
 		     it2++) {
-			assert(instrsToCGEntries[it2->second]);
-			(*it)->calls[it2->first] =
-				instrsToCGEntries[it2->second];
+			CallGraphEntry *cge = instrsToCGEntries->get(it2->second);
+			assert(cge != NULL);
+			(*it)->calls[it2->first] = cge;
 		}
 	}
 
@@ -5093,10 +5132,10 @@ printCallGraph(CallGraphEntry *root, FILE *f, std::set<CallGraphEntry *> &memo)
 		return;
 	memo.insert(root);
 	fprintf(f, "%p: %#lx%s {", root, root->headRip, root->isRealHead ? "" : " (fake)");
-	for (std::set<unsigned long>::iterator it = root->instructions.begin();
-	     it != root->instructions.end();
+	for (RangeSet::iterator it = root->instructions->begin();
+	     it != root->instructions->end();
 	     it++)
-		fprintf(f, "%#lx, ", *it);
+		fprintf(f, "%#lx-%#lx, ", it->start, it->end1);
 	fprintf(f, "} (");
 	for (std::map<unsigned long, CallGraphEntry *>::iterator it = root->calls.begin();
 	     it != root->calls.end();
@@ -5184,7 +5223,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	/* Build a map from instruction RIPs to CGEs. */
 	std::set<CallGraphEntry *> explored;
 	std::queue<CallGraphEntry *> toExplore;
-	std::map<unsigned long, CallGraphEntry *> ripToCFGNode;
+	RangeTree<CallGraphEntry> *ripToCFGNode = new RangeTree<CallGraphEntry>();
 	toExplore.push(root);
 	while (!toExplore.empty()) {
 		CallGraphEntry *cge = toExplore.front();
@@ -5192,12 +5231,10 @@ buildCFGForCallGraph(AddressSpace *as,
 		if (explored.count(cge))
 			continue;
 		explored.insert(cge);
-		for (std::set<unsigned long>::iterator it = cge->instructions.begin();
-		     it != cge->instructions.end();
+		for (RangeSet::iterator it = cge->instructions->begin();
+		     it != cge->instructions->end();
 		     it++) {
-			/* Functions should be disjoint */
-			assert(!ripToCFGNode.count(*it));
-			ripToCFGNode[*it] = cge;
+			ripToCFGNode->set(it->start, it->end1, cge);
 		}
 		for (std::map<unsigned long, CallGraphEntry *>::iterator it = cge->calls.begin();
 		     it != cge->calls.end();
@@ -5216,7 +5253,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	needed.push(StackRip(root->headRip));
 	while (!needed.empty()) {
 		StackRip &r(needed.front());
-		assert(ripToCFGNode[r.rip] != NULL);
+		assert(ripToCFGNode->get(r.rip) != NULL);
 		if (builtSoFar.count(r)) {
 			needed.pop();
 			continue;
@@ -5239,10 +5276,10 @@ buildCFGForCallGraph(AddressSpace *as,
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
-				if (ripToCFGNode[r.rip]->calls.count(r.rip)) {
+				if (ripToCFGNode->get(r.rip)->calls.count(r.rip)) {
 					/* We should inline this call. */
 					work->fallThroughRip = r.call(
-						ripToCFGNode[r.rip]->calls[r.rip]->headRip,
+						ripToCFGNode->get(r.rip)->calls[r.rip]->headRip,
 						extract_call_follower(irsb));
 				} else {
 					/* Skip over this call. */
