@@ -3745,14 +3745,15 @@ public:
 };
 
 static void
-findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
+findInstrSuccessorsAndCallees(AddressSpace *as,
+			      unsigned long rip,
+			      std::vector<unsigned long> &directExits,
+			      std::set<std::pair<unsigned long, unsigned long> > &callees)
 {
-#warning reimplement in terms of findInstrSuccessorsAndCallees
 	IRSB *irsb;
 	try {
 		irsb = as->getIRSBForAddress(-1, rip);
 	} catch (BadMemoryException &e) {
-		printf("Client tried to jump at a bad address %#lx?\n", rip);
 		return;
 	}
 	int i;
@@ -3760,27 +3761,41 @@ findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &
 	for (i = 1; i < irsb->stmts_used; i++) {
 		if (irsb->stmts[i]->tag == Ist_IMark) {
 			/* That's the end of this instruction */
-			out.push_back(irsb->stmts[i]->Ist.IMark.addr);
+			directExits.push_back(irsb->stmts[i]->Ist.IMark.addr);
 			return;
 		}
 		if (irsb->stmts[i]->tag == Ist_Exit)
-			out.push_back(irsb->stmts[i]->Ist.Exit.dst->Ico.U64);
+			directExits.push_back(irsb->stmts[i]->Ist.Exit.dst->Ico.U64);
 	}
 
 	/* If we get here then there are no other marks in the IRSB,
 	   so we need to look at the fall through addresses. */
 	if (irsb->jumpkind == Ijk_Call) {
-		unsigned long f = extract_call_follower(irsb);
-		out.push_back(f);
+		directExits.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
+		if (irsb->next->tag == Iex_Const)
+			callees.insert(std::pair<unsigned long, unsigned long>(rip, irsb->next->Iex.Const.con->Ico.U64));
+		return;
 	}
 
-	if (irsb->next->tag == Iex_Const) {
-		out.push_back(irsb->next->Iex.Const.con->Ico.U64);
+	if (irsb->jumpkind != Ijk_NoDecode &&
+	    irsb->next->tag == Iex_Const) {
+		directExits.push_back(irsb->next->Iex.Const.con->Ico.U64);
 	} else {
 		/* Should really do something more clever here,
 		   possibly based on dynamic analysis. */
 	}
+}
+
+static void
+findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
+{
+	std::set<std::pair<unsigned long, unsigned long> > callees;
+	findInstrSuccessorsAndCallees(as, rip, out, callees);
+	for (std::set<std::pair<unsigned long, unsigned long> >::iterator it = callees.begin();
+	     it != callees.end();
+	     it++)
+		out.push_back(it->second);
 }
 
 /* Try to group the RIPs into clusters which are likely to execute
@@ -4735,49 +4750,6 @@ operator |=(std::set<t> &x, const std::set<t> &y)
 	     it != y.end();
 	     it++)
 		x.insert(*it);
-}
-
-static void
-findInstrSuccessorsAndCallees(AddressSpace *as,
-			      unsigned long rip,
-			      std::vector<unsigned long> &directExits,
-			      std::set<std::pair<unsigned long, unsigned long> > &callees)
-{
-	IRSB *irsb;
-	try {
-		irsb = as->getIRSBForAddress(-1, rip);
-	} catch (BadMemoryException &e) {
-		return;
-	}
-	int i;
-
-	for (i = 1; i < irsb->stmts_used; i++) {
-		if (irsb->stmts[i]->tag == Ist_IMark) {
-			/* That's the end of this instruction */
-			directExits.push_back(irsb->stmts[i]->Ist.IMark.addr);
-			return;
-		}
-		if (irsb->stmts[i]->tag == Ist_Exit)
-			directExits.push_back(irsb->stmts[i]->Ist.Exit.dst->Ico.U64);
-	}
-
-	/* If we get here then there are no other marks in the IRSB,
-	   so we need to look at the fall through addresses. */
-	if (irsb->jumpkind == Ijk_Call) {
-		directExits.push_back(extract_call_follower(irsb));
-		/* Emit the target as well, if possible. */
-		if (irsb->next->tag == Iex_Const)
-			callees.insert(std::pair<unsigned long, unsigned long>(rip, irsb->next->Iex.Const.con->Ico.U64));
-		return;
-	}
-
-	if (irsb->jumpkind != Ijk_NoDecode &&
-	    irsb->next->tag == Iex_Const) {
-		directExits.push_back(irsb->next->Iex.Const.con->Ico.U64);
-	} else {
-		/* Should really do something more clever here,
-		   possibly based on dynamic analysis. */
-	}
 }
 
 /* Build up a static call graph which covers, at a minimum, all of the
