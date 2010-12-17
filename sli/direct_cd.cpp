@@ -456,6 +456,12 @@ operator<(const InstructionSet &a, const InstructionSet &b)
  * necessarily all of them, so should only really be used where static
  * analysis is insufficient. */
 class Oracle : public GarbageCollected<Oracle> {
+	struct tag_entry {
+		std::set<unsigned long> loads;
+		std::set<unsigned long> stores;
+	};
+	std::vector<tag_entry> tag_table;
+	void loadTagTable(const char *path);
 public:
 	MachineState *ms;
 	Thread *crashedThread;
@@ -468,9 +474,10 @@ public:
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 
-	Oracle(MachineState *_ms, Thread *_thr)
+	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)
 	{
+		loadTagTable(tags);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(ms);
@@ -1413,6 +1420,15 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
 	getDominators(crashedThread, ms, out);
 }
 
+template<typename t> void
+operator |=(std::set<t> &x, const std::set<t> &y)
+{
+	for (typename std::set<t>::iterator it = y.begin();
+	     it != y.end();
+	     it++)
+		x.insert(*it);
+}
+
 /* Try to find the RIPs of some stores which might conceivably have
    interfered with the observed load.  Stack accesses are not tracked
    by this mechanism. */
@@ -1421,81 +1437,17 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
    set of loads and stores which access it, and we then just return
    the union of the store sets for all the locations whose load set
    includes the observed address. */
-/* XXX or we will do, eventually.  For now just hard-code a few known
-   values. */
 void
 Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 			      std::set<unsigned long> &out)
 {
-#warning Do this properly
-#if 0
-	switch (smsel->rip) {
-	case 0x40063a: /* Load of gcc_s_forcedunwind */
-	case 0x400661:
-		out.insert(0x400656);
-		out.insert(0x4006fc);
-		break;
-	case 0x40064c: /* Load of done_init */
-		out.insert(0x40066c);
-		out.insert(0x4006f2);
-		break;
-	case 0x400645: /* stack access */
-	case 0x400676:
-		break;
-	default:
-		abort();
+	out.clear();
+	for (std::vector<tag_entry>::iterator it = tag_table.begin();
+	     it != tag_table.end();
+	     it++) {
+		if (it->loads.count(smsel->rip))
+			out |= it->stores;
 	}
-#elif 0
-	switch (smsel->rip) {
-	case 0x4002e8: /* Load of global1 */
-		out.insert(0x400347);
-		out.insert(0x40035b);
-		break;
-	case 0x4002f1: /* Load of global2 */
-		out.insert(0x400351);
-		out.insert(0x400365);
-		break;
-	case 0x4002fa:
-	case 0x4002fd: /* Stack access */
-		break;
-	default:
-		abort();
-	}
-#elif 0
-	switch (smsel->rip) {
-	case 0x4002fe:
-		out.insert(0x400332);
-		out.insert(0x40035f);
-		out.insert(0x400374);
-		break;
-	case 0x4002e8:
-		out.insert(0x400354);
-		out.insert(0x400369);
-		break;
-	case 0x4002f3:
-	case 0x4002fa:
-		break;
-	default:
-		abort();
-	}
-#else
-	switch (smsel->rip) {
-	case 0x4002e8:
-		out.insert(0x40035e);
-		out.insert(0x400369);
-		break;
-	case 0x4002fe:
-		out.insert(0x400332);
-		out.insert(0x400354);
-		out.insert(0x400374);
-		break;
-	case 0x4002f3:
-	case 0x4002fa:
-		break;
-	default:
-		abort();
-	}
-#endif
 }
 
 /* Try to guess whether this store might ever be consumed by another
@@ -1504,84 +1456,25 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 bool
 Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 {
-#warning Do this properly as well.
-#if 0
-	switch (s->rip) {
-	case 0x400656:
-	case 0x40066c:
-	case 0x4006fc:
-	case 0x4006f2:
-	case 0x4006ec:
-		return false;
-	case 0x400632:
-	case 0x400641:
-	case 0x40067a:
-	case 0x400668:
-	case 0x40070c:
-	case 0x400711:
-	case 0x40071b:
-		return true;
-	default:
-		abort();
-	}
-#elif 0
-	switch (s->rip) {
-	case 0x400347:
-	case 0x400351:
-	case 0x40035b:
-	case 0x400365:
-		return false;
-	case 0x4002e4:
-	case 0x4002ee:
-	case 0x4002f7:
-		return true;
-	default:
-		abort();
-	}
-#elif 0
-	switch (s->rip) {
-	case 0x400332:
-	case 0x400354:
-	case 0x40035f:
-	case 0x400369:
-	case 0x400374:
-		return false;
-	case 0x4002e4:
-	case 0x4002ef:
-	case 0x40033c:
-	case 0x40034f:
-		return true;
-	default:
-		abort();
-	}
-#else
-	switch (s->rip) {
-	case 0x400332:
-	case 0x400354:
-	case 0x40035e:
-	case 0x400369:
-	case 0x400374:
-		return false;
-	case 0x40034f:
-	case 0x4002e4:
-	case 0x4002ef:
-		return true;
-	default:
-		abort();
-	}
-#endif
+	for (std::vector<tag_entry>::iterator it = tag_table.begin();
+	     it != tag_table.end();
+	     it++)
+		if (it->stores.count(s->rip))
+			return false;
+	return true;
 }
 
 bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 				 StateMachineSideEffectStore *smses)
 {
-	std::set<unsigned long> s;
-	findConflictingStores(smsel, s);
-	if (s.count(smses->rip))
-		return true;
-	else
-		return false;
+	for (std::vector<tag_entry>::iterator it = tag_table.begin();
+	     it != tag_table.end();
+	     it++)
+		if (it->loads.count(smsel->rip) &&
+		    it->stores.count(smses->rip))
+			return true;
+	return false;
 }
 
 template <typename t> void
@@ -4743,15 +4636,6 @@ findRemoteMacroSections(StateMachine *readMachine,
 	return true;
 }
 
-template<typename t> void
-operator |=(std::set<t> &x, const std::set<t> &y)
-{
-	for (typename std::set<t>::iterator it = y.begin();
-	     it != y.end();
-	     it++)
-		x.insert(*it);
-}
-
 /* Build up a static call graph which covers, at a minimum, all of the
  * RIPs included in the input set.  Functions in the graph are
  * represented by a combination of the set of RIPs in the function,
@@ -5425,6 +5309,43 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 	}
 }
 
+struct tag_hdr {
+	int nr_loads;
+	int nr_stores;
+};
+
+void
+Oracle::loadTagTable(const char *path)
+{
+
+	FILE *f = fopen(path, "r");
+	if (!f)
+		err(1, "opening %s", path);
+	while (!feof(f)) {
+		struct tag_hdr hdr;
+		if (fread(&hdr, sizeof(hdr), 1, f) < 1) {
+			if (ferror(f)) 
+				err(1, "reading %s", path);
+			assert(feof(f));
+			continue;
+		}
+		tag_entry t;
+		for (int x = 0; x < hdr.nr_loads; x++) {
+			unsigned long buf;
+			if (fread(&buf, sizeof(buf), 1, f) != 1)
+				err(1, "reading load address from %s", path);
+			t.loads.insert(buf);
+		}
+		for (int x = 0; x < hdr.nr_stores; x++) {
+			unsigned long buf;
+			if (fread(&buf, sizeof(buf), 1, f) != 1)
+				err(1, "reading load address from %s", path);
+			t.stores.insert(buf);
+		}
+		tag_table.push_back(t);
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -5444,7 +5365,7 @@ main(int argc, char *argv[])
 
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
-	VexPtr<Oracle> oracle(new Oracle(ms, thr));
+	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 
 	CrashReason *proximal = getProximalCause(ms, thr);
 	if (!proximal)
