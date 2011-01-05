@@ -59,7 +59,7 @@ handle_dirty_call(struct representative_state *rs,
 }
 
 static unsigned long
-return_address(RegisterSet &regs, AddressSpace *as)
+return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 {
 	unsigned long rip = regs.rip();
 	unsigned long rsp = regs.rsp();
@@ -197,6 +197,7 @@ return_address(RegisterSet &regs, AddressSpace *as)
 			s.regs.rip() = eval_expression(&s.regs, irsb->next, temporaries).lo;
 			if (irsb->jumpkind == Ijk_Ret) {
 				/* We're done */
+				return_rsp = s.regs.rsp();
 				return s.regs.rip();
 			}
 		}
@@ -223,11 +224,12 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 {
 	unsigned long ra;
 	unsigned char h;
+	unsigned long ign;
 
 	/* First heuristic: figure out where this function is going to
 	   return to, and then see if its right after a call
 	   instruction. */
-	ra = return_address(*rs, as);
+	ra = return_address(*rs, as, ign);
 
 	/* Call is five bytes */
 	h = as->fetch<unsigned char>(ra - 5, NULL);
@@ -431,4 +433,9 @@ getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominat
 	unsigned long head = findFunctionHead(&thr->regs, ms->addressSpace);
 	compensateForBadVCall(thr, ms->addressSpace);
 	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
+
+	RegisterSet rs = thr->regs;
+	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp());
+	head = findFunctionHead(&rs, ms->addressSpace);
+	findDominators(head, rs.rip(), ms->addressSpace, dominators);
 }
