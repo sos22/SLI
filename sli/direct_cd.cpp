@@ -394,6 +394,12 @@ public:
 		}
 		trueTarget = trueTarget->optimise(opt, oracle, done_something);
 		falseTarget = falseTarget->optimise(opt, oracle, done_something);
+		if (trueTarget->target == falseTarget->target &&
+		    trueTarget->sideEffects.size() == 0 &&
+		    falseTarget->sideEffects.size() == 0) {
+			*done_something = true;
+			return trueTarget->target;
+		}
 		return this;
 	}
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
