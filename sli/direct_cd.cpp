@@ -1570,8 +1570,12 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses)
    the whole thing needs to be re-run, or true otherwise. */
 template <typename t> bool
 breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
-	    CFGNode<t> **lastBackEdge, std::set<CFGNode<t> *> &onPath)
+	    CFGNode<t> **lastBackEdge, std::set<CFGNode<t> *> &onPath,
+	    std::set<CFGNode<t> *> &clean)
 {
+	if (clean.count(cfg))
+		return true;
+
 	if (onPath.count(cfg)) {
 		/* We have a cycle.  Break it. */
 		assert(lastBackEdge);
@@ -1584,19 +1588,20 @@ breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
 		CFGNode<t> **p = lastBackEdge;
 		if (numbering[cfg->branch] < numbering[cfg])
 			p = &cfg->branch;
-		if (!breakCycles(cfg->branch, numbering, p, onPath))
+		if (!breakCycles(cfg->branch, numbering, p, onPath, clean))
 			return false;
 	}
 	if (cfg->fallThrough) {
 		CFGNode<t> **p = lastBackEdge;
 		if (numbering[cfg->fallThrough] < numbering[cfg])
 			p = &cfg->fallThrough;
-		if (!breakCycles(cfg->fallThrough, numbering, p, onPath))
+		if (!breakCycles(cfg->fallThrough, numbering, p, onPath, clean))
 			return false;
 	}
 
 	onPath.erase(cfg);
 
+        clean.insert(cfg);
 	return true;
 }
 
@@ -1629,8 +1634,11 @@ breakCycles(CFGNode<t> *cfg)
 	}
 
 	std::set<CFGNode<t> *> visited;
-	while (!breakCycles<t>(cfg, numbering, NULL, visited))
+	std::set<CFGNode<t> *> clean;
+	while (!breakCycles<t>(cfg, numbering, NULL, visited, clean)) {
 		visited.clear();
+		clean.clear();
+	}
 }
 
 /* Returns true if the operation definitely commutes, or false if
