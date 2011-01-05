@@ -435,7 +435,7 @@ getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominat
 	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
 
 	RegisterSet rs = thr->regs;
-	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp());
+	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
 	head = findFunctionHead(&rs, ms->addressSpace);
 	findDominators(head, rs.rip(), ms->addressSpace, dominators);
 }

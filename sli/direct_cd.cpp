@@ -1200,7 +1200,7 @@ public:
 
 	InferredInformation(Oracle *_oracle) : oracle(_oracle) {}
 	void addCrashReason(CrashReason *cr) { crashReasons[cr->rip] = cr; }
-	CFGNode<unsigned long> *CFGFromRip(unsigned long rip);
+	CFGNode<unsigned long> *CFGFromRip(unsigned long rip, const std::set<unsigned long> &terminalFunctions);
 	CrashReason *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg);
 
 	void visit(HeapVisitor &hv) {
@@ -1233,6 +1233,7 @@ enumerateReachableStates(CFGNode<unsigned long> *from, std::set<CFGNode<unsigned
 static void
 buildCFGForRipSet(AddressSpace *as,
 		  const std::set<unsigned long> &rips,
+		  const std::set<unsigned long> &terminalFunctions,
 		  std::set<CFGNode<unsigned long> *> &output)
 {
 	std::map<unsigned long, CFGNode<unsigned long> *> builtSoFar;
@@ -1270,7 +1271,12 @@ buildCFGForRipSet(AddressSpace *as,
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
-				work->fallThroughRip = extract_call_follower(irsb);
+				if (irsb->next->tag == Iex_Const &&
+				    terminalFunctions.count(irsb->next->Iex.Const.con->Ico.U64)) {
+					work->fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
+				} else {
+					work->fallThroughRip = extract_call_follower(irsb);
+				}
 				needed.push_back(work->fallThroughRip);
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				work->accepting = true;
@@ -1314,12 +1320,12 @@ buildCFGForRipSet(AddressSpace *as,
 /* Special case of buildCFGForRipSet() when you only have one entry
  * RIP */
 CFGNode<unsigned long> *
-InferredInformation::CFGFromRip(unsigned long start)
+InferredInformation::CFGFromRip(unsigned long start, const std::set<unsigned long> &terminalFunctions)
 {
 	std::set<unsigned long> rips;
 	std::set<CFGNode<unsigned long> *> out;
 	rips.insert(start);
-	buildCFGForRipSet(oracle->ms->addressSpace, rips, out);
+	buildCFGForRipSet(oracle->ms->addressSpace, rips, terminalFunctions, out);
 	if (out.size() == 0)
 		return NULL;
 	assert(out.size() == 1);
@@ -5388,7 +5394,9 @@ main(int argc, char *argv[])
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     it != previousInstructions.end();
 	     it++) {
-		CFGNode<unsigned long> *cfg = ii->CFGFromRip(*it);
+		std::set<unsigned long> terminalFunctions;
+		terminalFunctions.insert(0x757bf0);
+		CFGNode<unsigned long> *cfg = ii->CFGFromRip(*it, terminalFunctions);
 		InstructionSet interesting;
 		interesting.rips.insert(proximal->rip.rip);
 		trimCFG(cfg, interesting);
