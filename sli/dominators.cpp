@@ -200,6 +200,7 @@ return_address(RegisterSet &regs, AddressSpace *as)
 				return s.regs.rip();
 			}
 		}
+		unexplored_instructions.push_back(s);
 	}
 
 	/* Failed. */
