@@ -796,44 +796,80 @@ protected:
 	virtual IRExpr *transformIexGet(IRExpr *e) { return e; }
 	virtual IRExpr *transformIexGetI(IRExpr *e)
 	{
-		return IRExpr_GetI(e->Iex.GetI.descr,
-				   transformIRExpr(e->Iex.GetI.ix),
-				   e->Iex.GetI.bias,
-				   e->Iex.GetI.tid);
+		IRExpr *e2 = transformIRExpr(e->Iex.GetI.ix);
+		if (e2 == e)
+			return e;
+		else
+			return IRExpr_GetI(e->Iex.GetI.descr,
+					   e2,
+					   e->Iex.GetI.bias,
+					   e->Iex.GetI.tid);
 	}
 	virtual IRExpr *transformIexRdTmp(IRExpr *e) { return e; }
 	virtual IRExpr *transformIexQop(IRExpr *e)
 	{
-		return IRExpr_Qop(e->Iex.Qop.op,
-				  transformIRExpr(e->Iex.Qop.arg1),
-				  transformIRExpr(e->Iex.Qop.arg2),
-				  transformIRExpr(e->Iex.Qop.arg3),
-				  transformIRExpr(e->Iex.Qop.arg4));
+		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
+		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2);
+		IRExpr *a3 = transformIRExpr(e->Iex.Qop.arg3);
+		IRExpr *a4 = transformIRExpr(e->Iex.Qop.arg4);
+		if (a1 == e->Iex.Qop.arg1 &&
+		    a2 == e->Iex.Qop.arg2 &&
+		    a3 == e->Iex.Qop.arg3 &&
+		    a4 == e->Iex.Qop.arg4)
+			return e;
+		else
+			return IRExpr_Qop(e->Iex.Qop.op,
+					  a1,
+					  a2,
+					  a3,
+					  a4);
 	}
 	virtual IRExpr *transformIexTriop(IRExpr *e)
 	{
-		return IRExpr_Triop(e->Iex.Triop.op,
-				    transformIRExpr(e->Iex.Triop.arg1),
-				    transformIRExpr(e->Iex.Triop.arg2),
-				    transformIRExpr(e->Iex.Triop.arg3));
+		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
+		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2);
+		IRExpr *a3 = transformIRExpr(e->Iex.Qop.arg3);
+		if (a1 == e->Iex.Qop.arg1 &&
+		    a2 == e->Iex.Qop.arg2 &&
+		    a3 == e->Iex.Qop.arg3)
+			return e;
+		else
+			return IRExpr_Triop(e->Iex.Qop.op,
+					    a1,
+					    a2,
+					    a3);
 	}
 	virtual IRExpr *transformIexBinop(IRExpr *e)
 	{
-		return IRExpr_Binop(e->Iex.Binop.op,
-				    transformIRExpr(e->Iex.Binop.arg1),
-				    transformIRExpr(e->Iex.Binop.arg2));
+		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
+		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2);
+		if (a1 == e->Iex.Qop.arg1 &&
+		    a2 == e->Iex.Qop.arg2)
+			return e;
+		else
+			return IRExpr_Binop(e->Iex.Qop.op,
+					    a1,
+					    a2);
 	}
 	virtual IRExpr *transformIexUnop(IRExpr *e)
 	{
-		return IRExpr_Unop(e->Iex.Unop.op,
-				   transformIRExpr(e->Iex.Unop.arg));
+		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
+		if (a1 == e->Iex.Qop.arg1)
+			return e;
+		else
+			return IRExpr_Unop(e->Iex.Qop.op,
+					    a1);
 	}
 	virtual IRExpr *transformIexLoad(IRExpr *e)
 	{
-		return IRExpr_Load(e->Iex.Load.isLL,
-				   e->Iex.Load.end,
-				   e->Iex.Load.ty,
-				   transformIRExpr(e->Iex.Load.addr));
+		IRExpr *addr = transformIRExpr(e->Iex.Load.addr);
+		if (addr == e->Iex.Load.addr)
+			return e;
+		else
+			return IRExpr_Load(e->Iex.Load.isLL,
+					   e->Iex.Load.end,
+					   e->Iex.Load.ty,
+					   addr);
 	}
 	virtual IRExpr *transformIexConst(IRExpr *e)
 	{
@@ -841,10 +877,15 @@ protected:
 	}
 	virtual IRExpr *transformIexMux0X(IRExpr *e)
 	{
-		return IRExpr_Mux0X(
-			transformIRExpr(e->Iex.Mux0X.cond),
-			transformIRExpr(e->Iex.Mux0X.expr0),
-			transformIRExpr(e->Iex.Mux0X.exprX));
+		IRExpr *c = transformIRExpr(e->Iex.Mux0X.cond);
+		IRExpr *z = transformIRExpr(e->Iex.Mux0X.expr0);
+		IRExpr *x = transformIRExpr(e->Iex.Mux0X.exprX);
+		if (c == e->Iex.Mux0X.cond &&
+		    z == e->Iex.Mux0X.expr0 &&
+		    x == e->Iex.Mux0X.exprX)
+			return e;
+		else
+			return IRExpr_Mux0X(c, z, x);
 	}
 	virtual IRExpr *transformIexCCall(IRExpr *);
 	virtual IRExpr *transformIexAssociative(IRExpr *);
@@ -867,15 +908,24 @@ StateMachineTransformer::doit(StateMachine *inp)
 		StateMachineEdge *t = doit(smb->trueTarget);
 		StateMachineEdge *f = doit(smb->falseTarget);
 		IRExpr *cond = transformIRExpr(smb->condition);
-		out = new StateMachineBifurcate(cond, t, f);
+		if (t == smb->trueTarget && f == smb->falseTarget && cond == smb->condition)
+			out = inp;
+		else
+			out = new StateMachineBifurcate(cond, t, f);
 	} else if (StateMachineProxy *smp =
 		   dynamic_cast<StateMachineProxy *>(inp)) {
 		StateMachineEdge *t = doit(smp->target);
-		out = new StateMachineProxy(t);
+		if (t == smp->target)
+			out = inp;
+		else
+			out = new StateMachineProxy(t);
 	} else if (StateMachineStub *sms =
 		   dynamic_cast<StateMachineStub *>(inp)) {
 		IRExpr *target = transformIRExpr(sms->target);
-		out = new StateMachineStub(target);
+		if (target == sms->target)
+			out = inp;
+		else
+			out = new StateMachineStub(target);
 	} else {
 		abort();
 	}
@@ -888,34 +938,49 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 {
 	StateMachine *t = doit(inp->target);
 	StateMachineEdge *res = new StateMachineEdge(t);
+	bool changedSideEffect = false;
 	for (std::vector<StateMachineSideEffect *>::iterator it = inp->sideEffects.begin();
 	     it != inp->sideEffects.end();
 	     it++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			IRExpr *a, *d;
+			a = transformIRExpr(smses->addr);
+			d = transformIRExpr(smses->data);
+			if (a != smses->addr || d != smses->data)
+				changedSideEffect = true;
 			res->sideEffects.push_back(
 				new StateMachineSideEffectStore(
-					transformIRExpr(smses->addr),
-					transformIRExpr(smses->data),
+					a,
+					d,
 					smses->rip));
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			IRExpr *a = transformIRExpr(smsel->addr);
+			if (a != smsel->addr)
+				changedSideEffect = true;
 			res->sideEffects.push_back(
 				new StateMachineSideEffectLoad(
 					smsel->key,
-					transformIRExpr(smsel->addr),
+					a,
 					smsel->rip));
 		} else if (StateMachineSideEffectCopy *smsec =
 			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			IRExpr *v = transformIRExpr(smsec->value);
+			if (v != smsec->value)
+				changedSideEffect = true;
 			res->sideEffects.push_back(
 				new StateMachineSideEffectCopy(
 					smsec->key,
-					transformIRExpr(smsec->value)));
+					v));
 		} else {
 			abort();
 		}
 	}
-	return res;
+	if (!changedSideEffect && t == inp->target)
+		return inp;
+	else
+		return res;
 }
 
 StateMachine *
@@ -964,26 +1029,42 @@ StateMachineTransformer::transformIexCCall(IRExpr *e)
 	IRExpr **newArgs;
 	int nr_args;
 	int x;
+	bool changedSomething;
 
 	for (nr_args = 0; e->Iex.CCall.args[nr_args]; nr_args++)
 		;
 	newArgs = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_args + 1);
-	for (x = 0; x < nr_args; x++)
+	changedSomething = false;
+	for (x = 0; x < nr_args; x++) {
 		newArgs[x] = transformIRExpr(e->Iex.CCall.args[x]);
+		if (newArgs[x] != e->Iex.CCall.args[x])
+			changedSomething = true;
+	}
 	newArgs[nr_args] = NULL;
-	return IRExpr_CCall(e->Iex.CCall.cee,
-			    e->Iex.CCall.retty,
-			    newArgs);
+	if (!changedSomething)
+		return e;
+	else
+		return IRExpr_CCall(e->Iex.CCall.cee,
+				    e->Iex.CCall.retty,
+				    newArgs);
 }
 
 IRExpr *
 StateMachineTransformer::transformIexAssociative(IRExpr *e)
 {
 	IRExpr *r = IRExpr_Associative(e);
-	for (int x = 0; x < r->Iex.Associative.nr_arguments; x++)
+	bool changedSomething = false;
+	for (int x = 0; x < r->Iex.Associative.nr_arguments; x++) {
 		r->Iex.Associative.contents[x] =
 			transformIRExpr(r->Iex.Associative.contents[x]);
-	return r;
+		if (e->Iex.Associative.contents[x] !=
+		    r->Iex.Associative.contents[x])
+			changedSomething = true;
+	}
+	if (!changedSomething)
+		return e;
+	else
+		return r;
 }
 
 class RewriteRegister : public StateMachineTransformer {
