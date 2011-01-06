@@ -2586,6 +2586,30 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			return src->Iex.Unop.arg;
 		}
 
+		if (src->Iex.Unop.op == Iop_Not1 &&
+		    src->Iex.Unop.arg->tag == Iex_Associative &&
+		    (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
+		     src->Iex.Unop.arg->Iex.Associative.op == Iop_Or1)) {
+			/* Convert ~(x & y) to ~x | ~y */
+			IRExpr *a = IRExpr_Associative(src->Iex.Unop.arg);
+			for (int i = 0;
+			     i < a->Iex.Associative.nr_arguments;
+			     i++) {
+				a->Iex.Associative.contents[i] =
+					optimiseIRExpr(
+						IRExpr_Unop(
+							Iop_Not1,
+							a->Iex.Associative.contents[i]),
+						opt,
+						done_something);
+			}
+			if (a->Iex.Associative.op == Iop_And1)
+				a->Iex.Associative.op = Iop_Or1;
+			else
+				a->Iex.Associative.op = Iop_And1;
+			*done_something = true;
+			return a;
+		}
 		if (src->Iex.Unop.arg->tag == Iex_Const) {
 			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;
 			switch (src->Iex.Unop.op) {
