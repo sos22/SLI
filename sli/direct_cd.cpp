@@ -90,7 +90,7 @@ static void assertUnoptimisable(IRExpr *e, const AllowableOptimisations &);
 
 static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
 
-class StateMachine : public GarbageCollected<StateMachine>, public PrettyPrintable {
+class StateMachine : public GarbageCollected<StateMachine, &ir_heap>, public PrettyPrintable {
 public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
@@ -101,7 +101,7 @@ public:
 	NAMED_CLASS
 };
 
-class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect>, public PrettyPrintable {
+class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
 public:
 	virtual void optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
@@ -211,7 +211,7 @@ public:
 	}
 };
 
-class StateMachineEdge : public GarbageCollected<StateMachineEdge>, public PrettyPrintable {
+class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap>, public PrettyPrintable {
 public:
 	StateMachineEdge(StateMachine *t) : target(t) {}
 	StateMachine *target;
@@ -272,7 +272,7 @@ public:
 
 class StateMachineCrash : public StateMachine {
 	StateMachineCrash() {}
-	static VexPtr<StateMachineCrash> _this;
+	static VexPtr<StateMachineCrash, &ir_heap> _this;
 public:
 	static StateMachineCrash *get() {
 		if (!_this) _this = new StateMachineCrash();
@@ -284,11 +284,11 @@ public:
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 };
-VexPtr<StateMachineCrash> StateMachineCrash::_this;
+VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 
 class StateMachineNoCrash : public StateMachine {
 	StateMachineNoCrash() {}
-	static VexPtr<StateMachineNoCrash> _this;
+	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
 public:
 	static StateMachineNoCrash *get() {
 		if (!_this) _this = new StateMachineNoCrash();
@@ -300,7 +300,7 @@ public:
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 };
-VexPtr<StateMachineNoCrash> StateMachineNoCrash::_this;
+VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
 
 /* A state machine node which always advances to another one.  These
    can be safely eliminated, but they're sometimes kind of handy when
@@ -461,7 +461,7 @@ operator<(const InstructionSet &a, const InstructionSet &b)
  * Information from the oracle will be true of some executions but not
  * necessarily all of them, so should only really be used where static
  * analysis is insufficient. */
-class Oracle : public GarbageCollected<Oracle> {
+class Oracle : public GarbageCollected<Oracle, &ir_heap> {
 	struct tag_entry {
 		std::set<unsigned long> loads;
 		std::set<unsigned long> stores;
@@ -469,8 +469,8 @@ class Oracle : public GarbageCollected<Oracle> {
 	std::vector<tag_entry> tag_table;
 	void loadTagTable(const char *path);
 public:
-	MachineState *ms;
-	Thread *crashedThread;
+	VexPtr<MachineState> ms;
+	VexPtr<Thread> crashedThread;
 
 	void findPreviousInstructions(std::vector<unsigned long> &output);
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
@@ -485,10 +485,7 @@ public:
 	{
 		loadTagTable(tags);
 	}
-	void visit(HeapVisitor &hv) {
-		hv(ms);
-		hv(crashedThread);
-	}
+	void visit(HeapVisitor &hv) {}
 	NAMED_CLASS
 };
 
@@ -633,7 +630,7 @@ public:
 	}
 };
 
-class CrashReason : public GarbageCollected<CrashReason>,
+class CrashReason : public GarbageCollected<CrashReason, &ir_heap>,
 		    public PrettyPrintable {
 public:
 	/* A crash reason represents a summary of information which is
@@ -1169,7 +1166,7 @@ printStateMachine(const StateMachine *sm, FILE *f)
 }
 
 template <typename t>
-class CFGNode : public GarbageCollected<CFGNode<t> >, public PrettyPrintable {
+class CFGNode : public GarbageCollected<CFGNode<t>, &ir_heap>, public PrettyPrintable {
 public:
 	t fallThroughRip;
 	t branchRip;
@@ -1199,7 +1196,7 @@ public:
 
 /* All the various bits and pieces which we've discovered so far, in one
  * convenient place. */
-class InferredInformation : public GarbageCollected<InferredInformation> {
+class InferredInformation : public GarbageCollected<InferredInformation, &ir_heap> {
 public:
 	Oracle *oracle;
 	std::map<VexRip, CrashReason *> crashReasons;
@@ -3636,6 +3633,19 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 		}
 	} while (progress);
 
+	std::map<StateMachine *, StateMachine *> canonMap;
+	/* While we're here, iterate over every bifurcation node, and
+	   if the branches are bisimilar to each other then replace it
+	   with a proxy. */
+
+	for (std::set<StateMachine *>::iterator it = allStates.begin();
+	     it != allStates.end();
+	     it++) {
+		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(*it);
+		if (smb && bisimilarEdges.count(st_edge_pair_t(smb->trueTarget, smb->falseTarget)))
+			canonMap[*it] = new StateMachineProxy(smb->trueTarget);
+	}
+
 	/* Now build a mapping from states to canonical states, using
 	   the bisimilarity information, such that two states map to
 	   the same canonical state iff they are bisimilar. */
@@ -3646,7 +3656,6 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	   the root of its corresponding tree.  We advance by merging
 	   sets, by inserting one as a child of the root of the other,
 	   in response to bisimilar state entries. */
-	std::map<StateMachine *, StateMachine *> canonMap;
 
 	for (std::set<st_pair_t>::iterator it = bisimilarStates.begin();
 	     it != bisimilarStates.end();
@@ -4787,7 +4796,7 @@ findRemoteMacroSections(StateMachine *readMachine,
  * the new subsuming head is guaranteed to find them again, and
  * this makes things a little bit quicker.
  */
-class CallGraphEntry : public GarbageCollected<CallGraphEntry> {
+class CallGraphEntry : public GarbageCollected<CallGraphEntry, &ir_heap> {
 public:
 	CallGraphEntry(unsigned long r)
 		: headRip(r),
@@ -5480,14 +5489,14 @@ main(int argc, char *argv[])
 
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
-	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
+	VexPtr<Oracle, &ir_heap> oracle(new Oracle(ms, thr, argv[2]));
 
 	CrashReason *proximal = getProximalCause(ms, thr);
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
 	proximal = backtrackToStartOfInstruction(CRASHING_THREAD, proximal, ms->addressSpace);
 
-	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
+	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation(oracle));
 	ii->addCrashReason(proximal);
 
 	std::vector<unsigned long> previousInstructions;
