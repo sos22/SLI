@@ -32,15 +32,21 @@ __visit_function_heap(v &h, HeapVisitor &hv)
 
 template <typename keyt, typename valuet, unsigned long hashfn(const keyt &k) = __default_hash_function<keyt>,
 	  bool equalfn(const keyt &k1, const keyt &k2) = __default_eq_function<keyt>,
-	  void visitvalue(valuet &, HeapVisitor &hv) = __default_visit_function<valuet> >
-class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, visitvalue> > {
-	typedef gc_map<keyt, valuet, hashfn, equalfn, visitvalue> self_t;
+	  void visitvalue(valuet &, HeapVisitor &hv) = __default_visit_function<valuet>,
+	  Heap *heap = &main_heap>
+class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, visitvalue, heap>, heap > {
+	typedef gc_map<keyt, valuet, hashfn, equalfn, visitvalue, heap> self_t;
 
-	struct hash_entry : public GarbageCollected<self_t::hash_entry> {
+	struct hash_entry : public GarbageCollected<self_t::hash_entry, heap> {
 		struct hash_entry *next;
 		keyt key;
 		valuet value;
 
+		hash_entry(struct hash_entry *_next,
+			   const keyt &_key)
+			: next(_next), key(_key), value()
+		{
+		}
 		void visit(HeapVisitor &hv) {
 			visitvalue(value, hv);
 			hv(next); /* Hope it tail calls correctly... */
@@ -62,7 +68,8 @@ class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, vis
 			if (!create)
 				return NULL;
 			nr_heads = 128;
-			heads = (hash_entry **)LibVEX_Alloc_Bytes(sizeof(heads[0]) * nr_heads);
+			static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+			heads = (hash_entry **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(heads[0]) * nr_heads, &__las);
 		}
 
 		unsigned long h = hashfn(k);
@@ -75,10 +82,8 @@ class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, vis
 		if (head || !create)
 			return head;
 
-		head = new hash_entry();
+		head = new hash_entry(heads[h], k);
 		nr_items++;
-		head->next = heads[h];
-		head->key = k;
 		heads[h] = head;
 		return head;
 	}
@@ -96,7 +101,7 @@ public:
 
 	bool hasKey(const keyt &k) { return lookup(k, false) != NULL; }
 	class iterator {
-		friend class gc_map<keyt, valuet, hashfn, equalfn, visitvalue>;
+		friend class gc_map<keyt, valuet, hashfn, equalfn, visitvalue, heap>;
 		unsigned bucket_idx;
 		VexPtr<struct hash_entry> cursor;
 		VexPtr<self_t> htable;
@@ -173,6 +178,9 @@ public:
 		return rv;
 	}
 
+	bool empty() {
+		return nr_items == 0;
+	}
 	void clear() {
 		heads = NULL;
 		nr_heads = 0;
@@ -185,6 +193,17 @@ public:
 	}
 	void destruct() {}
 	NAMED_CLASS
+};
+
+/* C++ was apparently designed by morons.  Why can't you have a
+   template typedef?  Nobody seems to know.  Work around this glaring
+   omission using a stupid stub class; ugly as sin, but slightly less
+   hideous than the alternative. */
+template <typename k, typename v, Heap *heap = &main_heap>
+class gc_heap_map {
+public:
+	typedef gc_map<k, v *, __default_hash_function<k>,
+		       __default_eq_function<k>, __visit_function_heap<v *>, heap > type;
 };
 
 #endif /* !MAP_H__ */

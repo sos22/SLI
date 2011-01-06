@@ -1229,7 +1229,9 @@ IRExpr* IRExpr_Associative(IROp op, ...)
    va_end(args);
 
    e->Iex.Associative.nr_arguments_allocated = nr_args * 2;
-   e->Iex.Associative.contents = (IRExpr **)LibVEX_Alloc_Bytes(sizeof(e->Iex.Associative.contents[0]) * nr_args * 2);
+   static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+   e->Iex.Associative.contents =
+      (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->Iex.Associative.contents[0]) * nr_args * 2, &__las);
    va_start(args, op);
    while (e->Iex.Associative.nr_arguments < nr_args) {
       arg = va_arg(args, IRExpr *);
@@ -1248,9 +1250,12 @@ IRExpr* IRExpr_Associative(IRExpr *src)
    e->Iex.Associative.op = src->Iex.Associative.op;
    e->Iex.Associative.nr_arguments = src->Iex.Associative.nr_arguments;
    e->Iex.Associative.nr_arguments_allocated = src->Iex.Associative.nr_arguments * 2;
+   static libvex_allocation_site __las = {0, __FILE__, __LINE__};
    e->Iex.Associative.contents = (IRExpr **)
-      LibVEX_Alloc_Bytes(sizeof(e->Iex.Associative.contents[0]) *
-			 e->Iex.Associative.nr_arguments_allocated);
+      __LibVEX_Alloc_Bytes(&ir_heap,
+			   sizeof(e->Iex.Associative.contents[0]) *
+			   e->Iex.Associative.nr_arguments_allocated,
+			   &__las);
    memcpy(e->Iex.Associative.contents,
 	  src->Iex.Associative.contents,
 	  sizeof(e->Iex.Associative.contents[0]) *
