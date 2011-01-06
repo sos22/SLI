@@ -76,7 +76,6 @@ static bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 
 class PrettyPrintable {
 public:
-	void prettyPrint(void) const { prettyPrint(stdout); }
 	virtual void prettyPrint(FILE *f) const = 0;
 };
 
@@ -657,9 +656,6 @@ public:
 		fprintf(f, "%s: ", rip.name());
 		sm->prettyPrint(f);
 	}
-
-	/* Don't really understand why this is necessary... */
-	void prettyPrint() const { PrettyPrintable::prettyPrint(); }
 
 	NAMED_CLASS
 };
