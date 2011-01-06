@@ -1807,7 +1807,7 @@ static bool
 operationAssociates(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
-		(op >= Iop_And8 && op <= Iop_And64);
+		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64);
 }
 
 static bool
@@ -2549,7 +2549,16 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				case Iop_Add64:
 					res = IRExpr_Const(IRConst_U64(l->Ico.U64 + r->Ico.U64));
 					break;
+				case Iop_And32:
+					res = IRExpr_Const(IRConst_U64(l->Ico.U32 & r->Ico.U32));
+					break;
+				case Iop_Xor32:
+					res = IRExpr_Const(IRConst_U64(l->Ico.U32 ^ r->Ico.U32));
+					break;
 				default:
+					printf("Warning: can't constant-fold in ");
+					ppIRExpr(src, stdout);
+					printf("\n");
 					res = NULL;
 					break;
 				}
