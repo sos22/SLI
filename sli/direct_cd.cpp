@@ -1481,7 +1481,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 		} else {
 			assert(cfg->branch);
 			CrashReason *b = CFGtoCrashReason(tid, cfg->branch);
-			for (; x >= 0; x--)
+			for (x--; x >= 0; x--)
 				if (irsb->stmts[x]->tag == Ist_Exit)
 					break;
 			assert(x > 0);
