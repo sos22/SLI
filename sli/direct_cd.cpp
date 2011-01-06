@@ -478,6 +478,7 @@ public:
 			 std::set<InstructionSet> &outputClusters);
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
+	bool functionCanReturn(unsigned long rip);
 
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)
@@ -1242,7 +1243,8 @@ static void
 buildCFGForRipSet(AddressSpace *as,
 		  const std::set<unsigned long> &rips,
 		  const std::set<unsigned long> &terminalFunctions,
-		  std::set<CFGNode<unsigned long> *> &output)
+		  std::set<CFGNode<unsigned long> *> &output,
+		  Oracle *oracle)
 {
 	std::map<unsigned long, CFGNode<unsigned long> *> builtSoFar;
 	std::vector<unsigned long> needed;
@@ -1279,13 +1281,15 @@ buildCFGForRipSet(AddressSpace *as,
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
-				if (irsb->next->tag == Iex_Const &&
-				    terminalFunctions.count(irsb->next->Iex.Const.con->Ico.U64)) {
-					work->fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
-				} else {
-					work->fallThroughRip = extract_call_follower(irsb);
+				work->fallThroughRip = extract_call_follower(irsb);
+				if (irsb->next->tag == Iex_Const) {
+					if (terminalFunctions.count(irsb->next->Iex.Const.con->Ico.U64))
+						work->fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
+					else if (!oracle->functionCanReturn(irsb->next->Iex.Const.con->Ico.U64))
+						work->fallThroughRip = 0;
 				}
-				needed.push_back(work->fallThroughRip);
+				if (work->fallThroughRip)
+					needed.push_back(work->fallThroughRip);
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				work->accepting = true;
 			} else {
@@ -1333,7 +1337,7 @@ InferredInformation::CFGFromRip(unsigned long start, const std::set<unsigned lon
 	std::set<unsigned long> rips;
 	std::set<CFGNode<unsigned long> *> out;
 	rips.insert(start);
-	buildCFGForRipSet(oracle->ms->addressSpace, rips, terminalFunctions, out);
+	buildCFGForRipSet(oracle->ms->addressSpace, rips, terminalFunctions, out, oracle);
 	if (out.size() == 0)
 		return NULL;
 	assert(out.size() == 1);
@@ -1441,6 +1445,17 @@ void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
 {
 	getDominators(crashedThread, ms, out);
+}
+
+bool
+Oracle::functionCanReturn(unsigned long rip)
+{
+#warning Horrible, horrible hack
+	if (rip == 0x768440 /* ut_dbg_assertion_failed */ ||
+	    rip == 0x7683e0 /* ut_dbg_stop_thread */)
+		return false;
+	else
+		return true;
 }
 
 unsigned long
