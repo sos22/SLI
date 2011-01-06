@@ -1597,11 +1597,20 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 bool
 Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 {
+	static std::set<unsigned long> threadLocal;
+	static std::set<unsigned long> notThreadLocal;
+	if (threadLocal.count(s->rip))
+		return true;
+	if (notThreadLocal.count(s->rip))
+		return false;
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++)
-		if (it->stores.count(s->rip))
+		if (it->stores.count(s->rip)) {
+			notThreadLocal.insert(s->rip);
 			return false;
+		}
+	threadLocal.insert(s->rip);
 	return true;
 }
 
@@ -3300,6 +3309,8 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 		availOnEntry[*it] = potentiallyAvailable;
 	availOnEntry[sm].clear();
 
+	std::set<StateMachine *> statesNeedingRefresh(allStates);
+
 	/* Tarski iteration.  */
 	bool progress;
 	do {
@@ -3321,6 +3332,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 			     it2 != avail_at_start_of_target.end();
 				) {
 				if (avail_at_end_of_edge.count(*it2) == 0) {
+					statesNeedingRefresh.insert(target);
 					avail_at_start_of_target.erase(it2++); 
 					progress = true;
 				} else {
@@ -3333,8 +3345,8 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 		   Use a slightly weird-looking iteration over states
 		   instead of over edges because that makes things a
 		   bit easier. */
-		for (std::set<StateMachine *>::iterator it = allStates.begin();
-		     it != allStates.end();
+		for (std::set<StateMachine *>::iterator it = statesNeedingRefresh.begin();
+		     it != statesNeedingRefresh.end();
 		     it++) {
 			if (dynamic_cast<StateMachineCrash *>(*it) ||
 			    dynamic_cast<StateMachineNoCrash *>(*it) ||
@@ -3395,6 +3407,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 				currentAvail = outputAvail;
 			}
 		}
+		statesNeedingRefresh.clear();
 	} while (progress);
 
 	/* So after all that we now have a complete map of what's
