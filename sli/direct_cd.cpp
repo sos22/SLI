@@ -1356,29 +1356,38 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 			if (irsb->stmts[x]->tag == Ist_IMark)
 				break;
 		if (cfg->fallThrough) {
-			CrashReason *ft = CFGtoCrashReason(tid, cfg->fallThrough);
-
-			ft = new CrashReason(VexRip(finalRip.rip, x), ft->sm);
-			while (ft->rip.idx != 0) {
-				IRStmt *stmt = irsb->stmts[ft->rip.idx-1];
-				if (stmt->tag == Ist_Exit) {
-					VexRip newRip(ft->rip);
-					newRip.idx--;
-					newRip.changedIdx();
-					if (cfg->branch) {
-						ft = new CrashReason(
-							newRip,
-							new StateMachineBifurcate(
-								stmt->Ist.Exit.guard,
-								CFGtoCrashReason(tid, cfg->branch)->sm,
-								ft->sm));
+			CrashReason *ft;
+			ft = CFGtoCrashReason(tid, cfg->fallThrough);
+			if (x == irsb->stmts_used &&
+			    irsb->jumpkind == Ijk_Call &&
+			    cfg->fallThroughRip == extract_call_follower(irsb)) {
+				/* This call is suppressed -> ignore
+				   it, rather than doing the
+				   backtracking thing. */
+				ft = new CrashReason(finalRip, ft->sm);
+			} else {
+				ft = new CrashReason(VexRip(finalRip.rip, x), ft->sm);
+				while (ft->rip.idx != 0) {
+					IRStmt *stmt = irsb->stmts[ft->rip.idx-1];
+					if (stmt->tag == Ist_Exit) {
+						VexRip newRip(ft->rip);
+						newRip.idx--;
+						newRip.changedIdx();
+						if (cfg->branch) {
+							ft = new CrashReason(
+								newRip,
+								new StateMachineBifurcate(
+									stmt->Ist.Exit.guard,
+									CFGtoCrashReason(tid, cfg->branch)->sm,
+									ft->sm));
+						} else {
+							ft = new CrashReason(
+								newRip,
+								ft->sm);
+						}
 					} else {
-						ft = new CrashReason(
-							newRip,
-							ft->sm);
+						ft = backtrackOneStatement(ft, stmt);
 					}
-				} else {
-					ft = backtrackOneStatement(ft, stmt);
 				}
 			}
 			res = ft;
