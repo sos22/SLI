@@ -5638,7 +5638,7 @@ main(int argc, char *argv[])
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 
-	CrashReason *proximal = getProximalCause(ms, thr);
+	VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, thr));
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
 	proximal = backtrackToStartOfInstruction(CRASHING_THREAD, proximal, ms->addressSpace);
