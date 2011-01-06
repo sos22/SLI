@@ -3265,6 +3265,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 }
 
 typedef std::pair<StateMachine *, StateMachine *> st_pair_t;
+typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
 
 static bool
 hasDisallowedSideEffects(StateMachineEdge *sme,
@@ -3319,7 +3320,8 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 static bool
 edgesLocallyBisimilar(StateMachineEdge *sme1,
 		      StateMachineEdge *sme2,
-		      const std::set<st_pair_t> &others,
+		      const std::set<st_pair_t> &states,
+		      const std::set<st_edge_pair_t> &edges,
 		      const AllowableOptimisations &opt)
 {
 	if (sme1->sideEffects.size() !=
@@ -3331,7 +3333,7 @@ edgesLocallyBisimilar(StateMachineEdge *sme1,
 					  opt))
 			return false;
 	}
-	if (others.count(st_pair_t(sme1->target, sme2->target)))
+	if (states.count(st_pair_t(sme1->target, sme2->target)))
 		return true;
 	else
 		return false;
@@ -3340,6 +3342,7 @@ edgesLocallyBisimilar(StateMachineEdge *sme1,
 static bool
 statesLocallyBisimilar(StateMachine *sm1,
 		       StateMachine *sm2,
+		       const std::set<st_edge_pair_t> &edges,
 		       const std::set<st_pair_t> &others,
 		       const AllowableOptimisations &opt)
 {
@@ -3371,7 +3374,7 @@ statesLocallyBisimilar(StateMachine *sm1,
 		}
 	}
 	if (swapArgs)
-		return statesLocallyBisimilar(sm2, sm1, others, opt);
+		return statesLocallyBisimilar(sm2, sm1, edges, others, opt);
 
 	if (dynamic_cast<StateMachineCrash *>(sm1)) {
 		if (dynamic_cast<StateMachineCrash *>(sm2)) {
@@ -3443,20 +3446,28 @@ statesLocallyBisimilar(StateMachine *sm1,
 	    dynamic_cast<StateMachineProxy *>(sm1)) {
 		if (StateMachineProxy *smp2 =
 		    dynamic_cast<StateMachineProxy *>(sm2)) {
-			return edgesLocallyBisimilar(smp1->target,
-						     smp2->target,
-						     others,
-						     opt);
+			return edges.count(st_edge_pair_t(smp1->target, smp2->target)) ||
+				edgesLocallyBisimilar(smp1->target,
+						      smp2->target,
+						      others,
+						      edges,
+						      opt);
 		} else if (StateMachineBifurcate *smb2 =
 			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
-			return edgesLocallyBisimilar(smp1->target,
-						     smb2->trueTarget,
-						     others,
-						     opt) &&
+			return (edges.count(st_edge_pair_t(smp1->target,
+							   smb2->trueTarget)) ||
 				edgesLocallyBisimilar(smp1->target,
-						      smb2->falseTarget,
+						      smb2->trueTarget,
 						      others,
-						      opt);
+						      edges,
+						      opt)) &&
+				(edges.count(st_edge_pair_t(smp1->target,
+							    smb2->falseTarget)) ||
+				 edgesLocallyBisimilar(smp1->target,
+						       smb2->falseTarget,
+						       others,
+						       edges,
+						       opt));
 		} else {
 			abort();
 		}
@@ -3469,51 +3480,91 @@ statesLocallyBisimilar(StateMachine *sm1,
 	assert(smb1);
 	assert(smb2);
 	return
-		edgesLocallyBisimilar(smb1->trueTarget, smb2->trueTarget, others, opt) &&
-		edgesLocallyBisimilar(smb1->falseTarget, smb2->falseTarget, others, opt) &&
+		(edges.count(st_edge_pair_t(smb1->trueTarget, smb2->trueTarget)) ||
+		 edgesLocallyBisimilar(smb1->trueTarget, smb2->trueTarget, others, edges, opt)) &&
+		(edges.count(st_edge_pair_t(smb1->falseTarget, smb2->falseTarget)) ||
+		 edgesLocallyBisimilar(smb1->falseTarget, smb2->falseTarget, others, edges, opt)) &&
 		definitelyEqual(smb1->condition, smb2->condition, opt);
 }
 
 static StateMachine *
 rewriteStateMachine(StateMachine *sm,
 		    std::map<StateMachine *, StateMachine *> &rules,
-		    std::set<StateMachine *> &memo)
-{
-	if (rules.count(sm) && rules[sm] != sm)
-		return rewriteStateMachine(rules[sm], rules, memo);
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm))
-		return sm;
-	memo.insert(sm);
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		smb->trueTarget->target = rewriteStateMachine(
-			smb->trueTarget->target,
-			rules,
-			memo);
-		smb->falseTarget->target = rewriteStateMachine(
-			smb->falseTarget->target,
-			rules,
-			memo);
-		return sm;
-	}
-	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
-		smp->target->target = rewriteStateMachine(
-			smp->target->target,
-			rules,
-			memo);
-		return sm;
-	}
+		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
+		    std::set<StateMachine *> &memo,
+		    std::set<StateMachineEdge *> &edgeMemo);
 
-	abort();
+static StateMachineEdge *
+rewriteStateMachineEdge(StateMachineEdge *sme,
+			std::map<StateMachine *, StateMachine *> &rules,
+			std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
+			std::set<StateMachine *> &memo,
+			std::set<StateMachineEdge *> &edgeMemo)
+{
+	if (edgeRules.count(sme)) {
+		edgeMemo.insert(edgeRules[sme]);
+		return rewriteStateMachineEdge(edgeRules[sme], rules, edgeRules, memo, edgeMemo);
+	}
+	edgeMemo.insert(sme);
+	sme->target = rewriteStateMachine(sme->target,
+					  rules,
+					  edgeRules,
+					  memo,
+					  edgeMemo);
+	return sme;
 }
 
 static StateMachine *
-rewriteStateMachine(StateMachine *sm, std::map<StateMachine *, StateMachine *> &rules)
+rewriteStateMachine(StateMachine *sm,
+		    std::map<StateMachine *, StateMachine *> &rules,
+		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
+		    std::set<StateMachine *> &memo,
+		    std::set<StateMachineEdge *> &edgeMemo)
+{
+	if (rules.count(sm) && rules[sm] != sm) {
+		memo.insert(rules[sm]);
+		return rewriteStateMachine(rules[sm], rules, edgeRules, memo, edgeMemo);
+	}
+	memo.insert(sm);
+	if (dynamic_cast<StateMachineCrash *>(sm) ||
+	    dynamic_cast<StateMachineNoCrash *>(sm) ||
+	    dynamic_cast<StateMachineStub *>(sm)) {
+		return sm;
+	} else if (StateMachineBifurcate *smb =
+		   dynamic_cast<StateMachineBifurcate *>(sm)) {
+		smb->trueTarget = rewriteStateMachineEdge(
+			smb->trueTarget,
+			rules,
+			edgeRules,
+			memo,
+			edgeMemo);
+		smb->falseTarget = rewriteStateMachineEdge(
+			smb->falseTarget,
+			rules,
+			edgeRules,
+			memo,
+			edgeMemo);
+		return sm;
+	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+		smp->target = rewriteStateMachineEdge(
+			smp->target,
+			rules,
+			edgeRules,
+			memo,
+			edgeMemo);
+		return sm;
+	} else {
+		abort();
+	}
+}
+
+static StateMachine *
+rewriteStateMachine(StateMachine *sm, std::map<StateMachine *, StateMachine *> &rules,
+		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules)
 {
 	std::set<StateMachine *> memo;
-	return rewriteStateMachine(sm, rules, memo);
+	std::set<StateMachineEdge *> edgeMemo;
+	return rewriteStateMachine(sm, rules, edgeRules, memo, edgeMemo);
 }
 
 /* Try to identify states which are bisimilar, and then go and merge
@@ -3532,8 +3583,11 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 
 	std::set<StateMachine *> allStates;
 	findAllStates(sm, allStates);
+	std::set<StateMachineEdge *> allEdges;
+	findAllEdges(sm, allEdges);
 
 	std::set<st_pair_t> bisimilarStates;
+	std::set<st_edge_pair_t> bisimilarEdges;
 
 	/* Initially, everything is bisimilar to everything else. */
 	for (std::set<StateMachine *>::iterator it = allStates.begin();
@@ -3543,6 +3597,13 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 		     it2 != allStates.end();
 		     it2++)
 			bisimilarStates.insert(st_pair_t(*it, *it2));
+	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
+	     it != allEdges.end();
+	     it++)
+		for (std::set<StateMachineEdge *>::iterator it2 = allEdges.begin();
+		     it2 != allEdges.end();
+		     it2++)
+			bisimilarEdges.insert(st_edge_pair_t(*it, *it2));
 
 	bool progress;
 	do {
@@ -3556,10 +3617,20 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 		for (std::set<st_pair_t>::iterator it = bisimilarStates.begin();
 		     it != bisimilarStates.end();
 			) {
-			if (statesLocallyBisimilar(it->first, it->second, bisimilarStates, opt)) {
+			if (statesLocallyBisimilar(it->first, it->second, bisimilarEdges, bisimilarStates, opt)) {
 				it++;
 			} else {
 				bisimilarStates.erase(it++);
+				progress = true;
+			}
+		}
+		for (std::set<st_edge_pair_t>::iterator it = bisimilarEdges.begin();
+		     it != bisimilarEdges.end();
+			) {
+			if (edgesLocallyBisimilar(it->first, it->second, bisimilarStates, bisimilarEdges, opt)) {
+				it++;
+			} else {
+				bisimilarEdges.erase(it++);
 				progress = true;
 			}
 		}
@@ -3603,9 +3674,24 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 			canonMap[s2] = s1;
 	}
 
+	/* Do the same thing for edges */
+	std::map<StateMachineEdge *, StateMachineEdge *> canonEdgeMap;
+	for (std::set<st_edge_pair_t>::iterator it = bisimilarEdges.begin();
+	     it != bisimilarEdges.end();
+	     it++) {
+		StateMachineEdge *s1 = it->first;
+		StateMachineEdge *s2 = it->second;
+		while (canonEdgeMap.count(s1))
+			s1 = canonEdgeMap[s1];
+		while (canonEdgeMap.count(s2))
+			s2 = canonEdgeMap[s2];
+		if (s1 != s2)
+			canonEdgeMap[s2] = s1;
+	}
+
 	/* Perform the rewrite.  We do this in-place, because it's not
 	   context-dependent. */
-	return rewriteStateMachine(sm, canonMap);
+	return rewriteStateMachine(sm, canonMap, canonEdgeMap);
 }
 
 template <typename t>
