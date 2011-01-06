@@ -2103,7 +2103,7 @@ addArgumentToAssoc(IRExpr *e, IRExpr *arg)
 	if (e->Iex.Associative.nr_arguments == e->Iex.Associative.nr_arguments_allocated) {
 		e->Iex.Associative.nr_arguments_allocated += 8;
 		e->Iex.Associative.contents = (IRExpr **)
-			LibVEX_realloc(&main_heap,
+			LibVEX_realloc(&ir_heap,
 				       e->Iex.Associative.contents,
 				       sizeof(IRExpr *) * e->Iex.Associative.nr_arguments_allocated);
 	}
