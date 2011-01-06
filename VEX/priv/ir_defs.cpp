@@ -782,12 +782,12 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       return;
     case Iex_Associative:
       fprintf(f, "Assoc(");
-      ppIROp(e->Iex.Associative.op, stdout);
+      ppIROp(e->Iex.Associative.op, f);
       fprintf(f, ":");
       for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
 	 if (x != 0)
 	   fprintf(f, ", ");
-	 ppIRExpr(e->Iex.Associative.contents[x], stdout);
+	 ppIRExpr(e->Iex.Associative.contents[x], f);
       }
       fprintf(f, ")");
       return;
