@@ -2839,13 +2839,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		}
 
 		if (src->Iex.Unop.op >= Iop_8Uto16 &&
-		    src->Iex.Unop.op <= Iop_32Uto64 &&
-		    src->Iex.Unop.arg->tag == Iex_Binder) {
-			/* Binders don't have any type information, so
-			   trying to upcast them is a bit silly.
-			   Don't do this for signed upcasts, though,
-			   as they have effects beyond the type
-			   level. */
+		    src->Iex.Unop.op <= Iop_32Uto64) {
+			/* Get rid of signed upcasts; they tend to
+			   show up where you don't want them, and they
+			   don't actually do anything useful. */
 			*done_something = true;
 			return src->Iex.Unop.arg;
 		}
