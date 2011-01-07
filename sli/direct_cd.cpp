@@ -2648,14 +2648,16 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 		/* x + -x -> 0, for any plus-like operator, so remove
 		 * both x and -x from the list. */
-		/* Also do x & ~x -> 0, while we're here. */
+		/* Also do x & ~x -> 0 and x ^ x -> 0 while we're here. */
 		if (opt.xPlusMinusX) {
 			bool plus_like;
 			bool and_like;
+			bool xor_like;
 			plus_like = src->Iex.Associative.op >= Iop_Add8 && src->Iex.Associative.op <= Iop_Add64;
 			and_like = (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) ||
 				src->Iex.Associative.op == Iop_And1;
-			if (plus_like || and_like) {
+			xor_like = src->Iex.Associative.op >= Iop_Xor8 && src->Iex.Associative.op <= Iop_Xor64;
+			if (plus_like || and_like || xor_like) {
 				for (int it1 = 0;
 				     it1 < src->Iex.Associative.nr_arguments;
 					) {
@@ -2667,15 +2669,29 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						if (it2 == it1)
 							continue;
 						IRExpr *r = src->Iex.Associative.contents[it2];
-						if (r->tag == Iex_Unop &&
-						    ((plus_like &&
-						      r->Iex.Unop.op >= Iop_Neg8 &&
-						      r->Iex.Unop.op <= Iop_Neg64) ||
-						     (and_like &&
-						      ((r->Iex.Unop.op >= Iop_Not8 &&
-							r->Iex.Unop.op <= Iop_Not64) ||
-						       r->Iex.Unop.op == Iop_Not1))) &&
-						    definitelyEqual(l, r->Iex.Unop.arg, opt.disablexPlusMinusX())) {
+						bool purge;
+						if (plus_like || and_like) {
+							if (r->tag == Iex_Unop) {
+								if (plus_like)
+									purge = r->Iex.Unop.op >= Iop_Neg8 &&
+										r->Iex.Unop.op <= Iop_Neg64;
+								else
+									purge = (r->Iex.Unop.op >= Iop_Not8 &&
+										 r->Iex.Unop.op <= Iop_Not64) ||
+										r->Iex.Unop.op == Iop_Not1;
+							} else {
+								purge = false;
+							}
+							if (purge)
+								purge = definitelyEqual(l, r->Iex.Unop.arg,
+											opt.disablexPlusMinusX());
+						} else {
+							assert(xor_like);
+							purge = definitelyEqual(l, r,
+										opt.disablexPlusMinusX());
+						}
+
+						if (purge) {
 							/* Careful: do the largest index first so that the
 							   other index remains valid. */
 							*done_something = true;
@@ -2700,21 +2716,27 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(IRConst_U1(0));
 				case Iop_Add8:
 				case Iop_And8:
+				case Iop_Xor8:
 					return IRExpr_Const(IRConst_U8(0));
 				case Iop_Add16:
 				case Iop_And16:
+				case Iop_Xor16:
 					return IRExpr_Const(IRConst_U16(0));
 				case Iop_Add32:
 				case Iop_And32:
+				case Iop_Xor32:
 					return IRExpr_Const(IRConst_U32(0));
 				case Iop_Add64:
 				case Iop_And64:
+				case Iop_Xor64:
 					return IRExpr_Const(IRConst_U64(0));
+
 				default:
 					abort();
 				}
 			}
 		}
+
 		/* If the size is reduced to one, eliminate the assoc list */
 		if (src->Iex.Associative.nr_arguments == 1) {
 			*done_something = true;
