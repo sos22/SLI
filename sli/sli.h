@@ -36,8 +36,8 @@ class Named {
 	mutable char *_name;
 protected:
 	virtual char *mkName(void) const = 0;
-	void clearName() const { free(_name); _name = NULL; }
 public:
+	void clearName() const { free(_name); _name = NULL; }
 	Named &operator=(const Named &src) {
 		clearName();
 		if (src._name)

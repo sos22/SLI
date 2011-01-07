@@ -6066,6 +6066,437 @@ internIRExpr(IRExpr *x)
 	return internIRExpr(x, t);
 }
 
+class CnfExpression : public GarbageCollected<CnfExpression>, public Named {
+public:
+	virtual CnfExpression *CNF(void) = 0;
+	virtual CnfExpression *invert() = 0;
+	virtual IRExpr *asIRExpr(std::map<int, IRExpr *> &) = 0;
+	NAMED_CLASS
+};
+
+class CnfAtom : public CnfExpression {
+public:
+	virtual int getId() = 0;
+};
+
+class CnfVariable : public CnfAtom {
+	static int nextId;
+protected:
+	char *mkName() const { return my_asprintf("v%d", id); }
+public:
+	CnfExpression *CNF() { return this; }
+	CnfVariable() : id(nextId++) {}
+	void visit(HeapVisitor &hv) {}
+	CnfExpression *invert();
+	int getId() { return id; }
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) { return m[id]; }
+	int id;
+};
+int CnfVariable::nextId = 450;
+
+class CnfNot : public CnfAtom {
+protected:
+	char *mkName() const { return my_asprintf("(~%s)", arg->name()); }
+public:
+	CnfNot(CnfExpression *a) : arg(a) {}
+	void visit(HeapVisitor &hv) { hv(arg); }
+	CnfExpression *invert() { return arg; }
+	CnfExpression *CNF();
+	int getId() {
+		CnfAtom *a = dynamic_cast<CnfAtom *>(arg);
+		assert(a);
+		return a->getId();
+	}
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) { return IRExpr_Unop(Iop_Not1, arg->asIRExpr(m)); }
+	CnfExpression *arg;
+};
+
+class CnfGrouping : public CnfExpression {
+protected:
+	virtual char op() const = 0;
+	virtual IROp irexpr_op() const = 0;
+	char *mkName() const {
+		char *acc = NULL;
+		char *acc2;
+		for (unsigned x = 0; x < args.size(); x++) {
+			if (x == 0)
+				acc2 = my_asprintf("(%s", args[x]->name());
+			else
+				acc2 = my_asprintf("%s %c %s", acc, op(), args[x]->name());
+			free(acc);
+			acc = acc2;
+		}
+		acc2 = my_asprintf("%s)", acc);
+		free(acc);
+		return acc2;
+	}
+public:
+	void visit(HeapVisitor &hv) {
+		for (unsigned x; x < args.size(); x++)
+			hv(args[x]);
+	}
+	void addChild(CnfExpression *e) { args.push_back(e); }
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) {
+		IRExpr *work = IRExpr_Associative(irexpr_op(), NULL);
+		for (unsigned x = 0; x < args.size(); x++) {
+			addArgumentToAssoc(work, args[x]->asIRExpr(m));
+		}
+		return work;
+	}
+	std::vector<CnfExpression *> args;
+};
+
+class CnfOr : public CnfGrouping {
+protected:
+	char op() const { return '|'; }
+	IROp irexpr_op() const { return Iop_Or1; }
+public:
+	CnfExpression *CNF();
+	CnfExpression *invert();
+	void sort();
+	CnfAtom *getArg(unsigned x) {
+		assert(x < args.size());
+		CnfAtom *r = dynamic_cast<CnfAtom *>(args[x]);
+		assert(r);
+		return r;
+	}
+};
+
+class CnfAnd : public CnfGrouping {
+protected:
+	char op() const { return '&'; }
+	IROp irexpr_op() const { return Iop_And1; }
+public:
+	CnfExpression *CNF();
+	CnfExpression *invert();
+	void sort();
+	CnfOr *getArg(unsigned x) {
+		assert(x < args.size());
+		CnfOr *r = dynamic_cast<CnfOr *>(args[x]);
+		assert(r);
+		return r;
+	}
+	void optimise();
+};
+
+CnfExpression *
+CnfVariable::invert(void)
+{
+	return new CnfNot(this);
+}
+
+CnfExpression *
+CnfNot::CNF()
+{
+	if (dynamic_cast<CnfVariable *>(arg))
+		return this;
+	return arg->invert()->CNF();
+}
+
+static bool
+__comparator1(CnfExpression *_a, CnfExpression *_b)
+{
+	CnfAtom *a = dynamic_cast<CnfAtom *>(_a);
+	CnfAtom *b = dynamic_cast<CnfAtom *>(_b);
+	assert(a && b);
+	return a->getId() < b->getId();
+}
+
+void
+CnfOr::sort()
+{
+	std::sort(args.begin(), args.end(), __comparator1);
+}
+
+static bool
+__comparator2(CnfExpression *_a, CnfExpression *_b)
+{
+	CnfOr *a = dynamic_cast<CnfOr *>(_a);
+	CnfOr *b = dynamic_cast<CnfOr *>(_b);
+	assert(a && b);
+	for (unsigned x = 0;
+	     x < a->args.size() && x < b->args.size();
+	     x++) {
+		if (a->getArg(x)->getId() <
+		    b->getArg(x)->getId())
+			return true;
+		if (a->getArg(x)->getId() >
+		    b->getArg(x)->getId())
+			return false;
+	}
+	if (a->args.size() < b->args.size())
+		return true;
+	return false;
+}
+
+void
+CnfAnd::sort()
+{
+	for (unsigned x = 0; x < args.size(); x++)
+		getArg(x)->sort();
+	std::sort(args.begin(), args.end(), __comparator2);
+}
+
+/* Or expressions are allowed to have variables or negations of
+   variables as arguments, but not other or expressions or and
+   expressions. */
+CnfExpression *
+CnfOr::CNF()
+{
+	for (unsigned x = 0; x < args.size(); x++)
+		args[x] = args[x]->CNF();
+	for (unsigned x = 0; x < args.size(); x++) {
+		if (dynamic_cast<CnfNot *>(args[x]) ||
+		    dynamic_cast<CnfVariable *>(args[x]))
+			continue;
+		if (CnfOr *cor = dynamic_cast<CnfOr *>(args[x])) {
+			/* Flatten nested ORs. */
+			for (unsigned y = 0; y < args.size(); y++) {
+				args.push_back(cor->args[y]);
+			}
+			args.erase(args.begin() + x);
+			x--;
+		} else {
+			/* Deal with these in a second pass */
+			assert(dynamic_cast<CnfAnd *>(args[x]));
+		}
+	}
+
+	for (unsigned x = 0; x < args.size(); x++) {
+		CnfAnd *cad = dynamic_cast<CnfAnd *>(args[x]);
+		if (!cad)
+			continue;
+		if (args.size() == 1)
+			return args[0];
+		if (cad->args.size() == 1) {
+			args[x] = cad->args[0];
+			continue;
+		}
+		/* Okay, we have something of the form
+		   a | b | c | (1 & 2 & 3 & ...) ... .
+		   Convert it to
+		   (a | b | c | 1) & (a | b | c | 2) & (a | b | c | 3) & ...
+
+		*/
+		CnfAnd *newRoot = new CnfAnd();
+		std::vector<CnfExpression *> newArgs = args;
+		newArgs.erase(newArgs.begin() + x);
+		newRoot->args.resize(cad->args.size());
+		for (unsigned y = 0; y < cad->args.size(); y++) {
+			CnfGrouping *cg = new CnfOr();
+			cg->args = newArgs;
+			cg->addChild(cad->args[y]);
+			newRoot->args[x] = cg;
+		}
+		return newRoot->CNF();
+	}
+	return this;
+}
+
+/* And expressions are only allowed to have or expressions as
+ * children. */
+CnfExpression *
+CnfAnd::CNF()
+{
+	for (unsigned x = 0; x < args.size(); x++)
+		args[x] = args[x]->CNF();
+	for (unsigned x = 0; x < args.size(); x++) {
+		if (dynamic_cast<CnfNot *>(args[x]) ||
+		    dynamic_cast<CnfVariable *>(args[x])) {
+			CnfGrouping *n = new CnfOr();
+			n->addChild(args[x]);
+			args[x] = n;
+			continue;
+		}
+		if (CnfAnd *car = dynamic_cast<CnfAnd *>(args[x])) {
+			for (unsigned y = 0; y < args.size(); y++) {
+				args.push_back(car->args[y]);
+			}
+			args.erase(args.begin() + x);
+			x--;
+		}
+	}
+	return this;
+}
+
+CnfExpression *
+CnfOr::invert()
+{
+	CnfAnd *a = new CnfAnd();
+	a->args.resize(args.size());
+	for (unsigned x = 0; x < args.size(); x++)
+		a->args[x] = args[x]->invert();
+	return a;
+}
+
+CnfExpression *
+CnfAnd::invert()
+{
+	CnfOr *a = new CnfOr();
+	a->args.resize(args.size());
+	for (unsigned x = 0; x < args.size(); x++)
+		a->args[x] = args[x]->invert();
+	return a;
+}
+
+void
+CnfAnd::optimise()
+{
+	bool progress;
+	do {
+		progress = false;
+		for (unsigned i = 0; i < args.size(); i++) {
+			for (unsigned j = i + 1; j < args.size(); j++) {
+				/* If two terms differ in a single
+				   atom, and that difference is just
+				   whether the atom is negatated, they
+				   can be merged. */
+				bool haveDifference;
+				bool haveDisallowedDifference;
+				CnfOr *argi = getArg(i);
+				CnfOr *argj = getArg(j);
+				if (argi->args.size() !=
+				    argj->args.size())
+					continue;
+				haveDifference = false;
+				haveDisallowedDifference = false;
+				for (unsigned k = 0;
+				     k < argi->args.size();
+				     k++) {
+					if (argi->getArg(k)->getId() !=
+					    argj->getArg(k)->getId())
+						haveDisallowedDifference = true;
+					if (!!dynamic_cast<CnfNot *>(argi->getArg(k)) !=
+					    !!dynamic_cast<CnfNot *>(argj->getArg(k))) {
+						if (haveDifference)
+							haveDisallowedDifference = true;
+						else
+							haveDifference = true;
+					}
+				}
+				if (haveDisallowedDifference)
+					continue;
+				if (!haveDifference) {
+					/* i and j are identical ->
+					 * just kill of j */
+				} else {
+					/* Yay.  We're going to
+					   eliminate a single atom
+					   from argi, and eliminate
+					   argj completely. */
+					for (unsigned k = 0;
+					     1;
+					     k++) {
+						assert(k < argi->args.size());
+						assert(argi->getArg(k)->getId() ==
+						       argj->getArg(k)->getId());
+						if (!!dynamic_cast<CnfNot *>(argi->getArg(k)) !=
+						    !!dynamic_cast<CnfNot *>(argj->getArg(k))) {
+							/* This is the one */
+							argi->args.erase(argi->args.begin() + k);
+							argi->clearName();
+							break;
+						}
+					}
+				}
+				args.erase(args.begin() + j);
+				clearName();
+				progress = true;
+				j--;
+			}
+		}
+	} while (progress);
+}
+
+static void
+buildVarMap(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &toVars,
+	    std::map<int, IRExpr *> &toExprs)
+{
+	if (toVars.count(inp))
+		return;
+	if (inp->tag == Iex_Associative &&
+	    (inp->Iex.Associative.op == Iop_And1 ||
+	     inp->Iex.Associative.op == Iop_Or1)) {
+		for (int x = 0; x < inp->Iex.Associative.nr_arguments; x++)
+			buildVarMap(inp->Iex.Associative.contents[x],
+				    toVars,
+				    toExprs);
+	} else if (inp->tag == Iex_Unop &&
+		   inp->Iex.Unop.op == Iop_Not1) {
+		buildVarMap(inp->Iex.Unop.arg, toVars, toExprs);
+	} else {
+		CnfVariable *v = new CnfVariable();
+		toExprs[v->id] = inp;
+		toVars[inp] = v;
+	}
+}
+
+static CnfExpression *
+convertIRExprToCNF(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &m)
+{
+	CnfExpression *r;
+	if (m.count(inp))
+		return m[inp];
+	if (inp->tag == Iex_Unop) {
+		assert(inp->Iex.Unop.op == Iop_Not1);
+		r = new CnfNot(convertIRExprToCNF(inp->Iex.Unop.arg, m));
+	} else {
+		CnfGrouping *r2;
+		assert(inp->tag == Iex_Associative);
+		if (inp->Iex.Associative.op == Iop_And1) {
+			r2 = new CnfAnd();
+		} else {
+			assert(inp->Iex.Associative.op == Iop_Or1);
+			r2 = new CnfOr();
+		}
+		for (int x = 0; x < inp->Iex.Associative.nr_arguments; x++)
+			r2->addChild(convertIRExprToCNF(inp->Iex.Associative.contents[x], m));
+		r = r2;
+	}
+	return r;
+}
+
+/* A different kind of simplification: assume that @inp is a boolean
+   expression, and consists of some tree of And1, Or1, and Not1
+   expressions with other stuff at the leaves.  Treat all of the other
+   stuff as opaque boolean variables, and then convert to CNF.  Try to
+   simplify it there.  If we make any reasonable progress, convert
+   back to the standard IRExpr form and return the result.  Otherwise,
+   just return @inp. */
+static IRExpr *
+simplifyIRExprAsBoolean(IRExpr *inp)
+{
+	std::map<IRExpr *, CnfExpression *> exprsToVars;
+	std::map<int, IRExpr *> varsToExprs;
+	CnfExpression *root;
+	CnfAnd *a;
+
+	buildVarMap(inp, exprsToVars, varsToExprs);
+	root = convertIRExprToCNF(inp, exprsToVars);
+	root = root->CNF();
+	a = dynamic_cast<CnfAnd *>(root);
+	if (!a) {
+		CnfOr *o = dynamic_cast<CnfOr *>(root);
+		if (!o) {
+			assert(dynamic_cast<CnfNot *>(root) ||
+			       dynamic_cast<CnfVariable *>(root));
+			o = new CnfOr();
+			o->addChild(root);
+		}
+		a = new CnfAnd();
+		a->addChild(o);
+	}
+	a->sort();
+	printf("As CNF: %s\n", a->name());
+	a->optimise();
+	printf("After CNF optimise: %s\n", a->name());
+	IRExpr *res = a->asIRExpr(varsToExprs);
+	printf("Turns into IR expression ");
+	ppIRExpr(res, stdout);
+	printf("\n");
+	return res;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -6136,7 +6567,13 @@ main(int argc, char *argv[])
 					survivalConstraintIfExecutedAtomically(crSm, oracle, ALLOW_GC),
 					opt);
 		}
+		ppIRExpr(survive, stdout);
+		printf("\n");
+
 		survive = internIRExpr(survive);
+		survive = simplifyIRExprAsBoolean(survive);
+		survive = optimiseIRExpr(survive, opt);
+		printf("After boolean reduction: ");
 		ppIRExpr(survive, stdout);
 		printf("\n");
 
