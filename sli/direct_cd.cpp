@@ -4561,13 +4561,16 @@ evalStateMachine(StateMachine *sm,
 /* Assume that @sm executes atomically.  Figure out a constraint on
    the initial state which will lead to it not crashing. */
 static IRExpr *
-survivalConstraintIfExecutedAtomically(StateMachine *sm, Oracle *oracle)
+survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
+				       VexPtr<Oracle> &oracle,
+				       GarbageCollectionToken token)
 {
 	NdChooser chooser;
-	IRExpr *currentConstraint = IRExpr_Const(IRConst_U1(1));
+	VexPtr<IRExpr, &ir_heap> currentConstraint(IRExpr_Const(IRConst_U1(1)));
 	bool crashes;
 
 	do {
+		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
 		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
@@ -4823,8 +4826,10 @@ sanity_check_optimiser(void)
 }
 
 static void
-evalMachineUnderAssumption(StateMachine *sm, Oracle *oracle, IRExpr *assumption,
-			   bool *mightSurvive, bool *mightCrash)
+evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &oracle,
+			   VexPtr<IRExpr, &ir_heap> assumption,
+			   bool *mightSurvive, bool *mightCrash,
+			   GarbageCollectionToken token)
 {
 	NdChooser chooser;
 	bool crashes;
@@ -4833,6 +4838,7 @@ evalMachineUnderAssumption(StateMachine *sm, Oracle *oracle, IRExpr *assumption,
 	*mightSurvive = false;
 	*mightCrash = false;
 	while (!*mightCrash || !*mightSurvive) {
+		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = assumption;
@@ -5906,17 +5912,19 @@ main(int argc, char *argv[])
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     it != previousInstructions.end();
 	     it++) {
-		LibVEX_gc(ALLOW_GC);
+		LibVEX_maybe_gc(ALLOW_GC);
 
 		std::set<unsigned long> terminalFunctions;
 		terminalFunctions.insert(0x757bf0);
-		CFGNode<unsigned long> *cfg = ii->CFGFromRip(*it, terminalFunctions);
+		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
+			ii->CFGFromRip(*it, terminalFunctions));
 		InstructionSet interesting;
 		interesting.rips.insert(proximal->rip.rip);
-		trimCFG(cfg, interesting);
-		breakCycles(cfg);
+		trimCFG(cfg.get(), interesting);
+		breakCycles(cfg.get());
 
-		CrashReason *cr = ii->CFGtoCrashReason(CRASHING_THREAD, cfg);
+		VexPtr<CrashReason, &ir_heap> cr(
+			ii->CFGtoCrashReason(CRASHING_THREAD, cfg));
 		AllowableOptimisations opt =
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
@@ -5932,10 +5940,14 @@ main(int argc, char *argv[])
 		printStateMachine(cr->sm, stdout);
 
 		printf("Survival constraint: \n");
-		IRExpr *survive =
-			optimiseIRExpr(
-				survivalConstraintIfExecutedAtomically(cr->sm, oracle),
-				opt);
+		VexPtr<IRExpr, &ir_heap> survive;
+		{
+			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
+			survive =
+				optimiseIRExpr(
+					survivalConstraintIfExecutedAtomically(crSm, oracle, ALLOW_GC),
+					opt);
+		}
 		ppIRExpr(survive, stdout);
 		printf("\n");
 
@@ -5946,7 +5958,10 @@ main(int argc, char *argv[])
 		   doomed and it's not possible to fix it from this
 		   point. */
 		bool mightSurvive, mightCrash;
-		evalMachineUnderAssumption(cr->sm, oracle, survive, &mightSurvive, &mightCrash);
+		{
+			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
+			evalMachineUnderAssumption(crSm, oracle, survive, &mightSurvive, &mightCrash, ALLOW_GC);
+		}
 		printf("Might survive: %d, might crash: %d\n", mightSurvive,
 		       mightCrash);
 
