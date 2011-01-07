@@ -41,13 +41,19 @@
 #include <stdlib.h>
 #include <assert.h>
 
+#include <stdio.h>
+
 int
-NdChooser::nd_choice(int nr_options)
+NdChooser::nd_choice(int nr_options, bool *isNew)
 {
 	int r;
+	if (isNew)
+		*isNew = false;
 	if (current_stack_index == stack.size()) {
 		stack.push_back(choicepoint(nr_options));
 		r = 0;
+		if (isNew)
+			*isNew = true;
 	} else {
 		assert(current_stack_index < stack.size());
 		assert(stack[current_stack_index].nr_options == nr_options);
@@ -67,8 +73,15 @@ NdChooser::advance(void)
 		choicepoint &cp(stack.back());
 		/* Advance the last choice */
 		cp.current_value++;
-		if (cp.current_value < cp.nr_options)
+		if (cp.current_value < cp.nr_options) {
+			printf("ND stack: ");
+			for (std::vector<choicepoint>::iterator it = stack.begin();
+			     it != stack.end();
+			     it++)
+				printf("%d/%d\t", it->current_value, it->nr_options);
+			printf("\n");
 			return true;
+		}
 		/* This choicepoint is exhausted, try another one. */
 		stack.pop_back();
 	}

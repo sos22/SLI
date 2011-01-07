@@ -19,7 +19,7 @@ class NdChooser {
 	unsigned current_stack_index;
 public:
 	NdChooser() : stack(), current_stack_index(0) {}
-	int nd_choice(int nr_options);
+	int nd_choice(int nr_options, bool *isNew = NULL);
 	bool advance(void);
 };
 

@@ -150,36 +150,52 @@ public:
 
 class StateMachineSideEffectLoad : public StateMachineSideEffect {
 	static Int next_key;
+	void constructed()
+	{
+		IRExpr *old = smsel_addr;
+		bool ign;
+		smsel_addr = optimiseIRExpr(smsel_addr, AllowableOptimisations::defaultOptimisations, &ign);
+		if (smsel_addr->tag == Iex_Const &&
+		    (long)smsel_addr->Iex.Const.con->Ico.U64 < 4096)
+			dbg_break("constructing funny (StateMachineSideEffectLoad *)%p\n",
+				  this);
+		(void)old;
+	}
 public:
 	StateMachineSideEffectLoad(IRExpr *_addr, unsigned long _rip)
-		: addr(_addr), rip(_rip)
+		: smsel_addr(_addr), rip(_rip)
 	{
 		key = next_key++;
+		constructed();
 	}
 	StateMachineSideEffectLoad(Int k, IRExpr *_addr, unsigned long _rip)
-		: key(k), addr(_addr), rip(_rip)
+		: key(k), smsel_addr(_addr), rip(_rip)
 	{
+		constructed();
 	}
 	Int key;
-	IRExpr *addr;
+	IRExpr *smsel_addr;
 	unsigned long rip;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "B%d <- *(", key);
-		ppIRExpr(addr, f);
+		ppIRExpr(smsel_addr, f);
 		fprintf(f, ")@%lx", rip);
 	}
 	void visit(HeapVisitor &hv) {
-		hv(addr);
+		hv(smsel_addr);
 	}
 	void optimise(const AllowableOptimisations &opt, Oracle *, bool *done_something) {
-		addr = optimiseIRExpr(addr, opt, done_something);
+		IRExpr *old = smsel_addr;
+		smsel_addr = optimiseIRExpr(smsel_addr, opt, done_something);
+		constructed();
+		(void)old;
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
-		l.insert(addr);
+		l.insert(smsel_addr);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
 		s.erase(key);
-		::findUsedBinders(addr, s, opt);
+		::findUsedBinders(smsel_addr, s, opt);
 	}
 };
 Int StateMachineSideEffectLoad::next_key;
@@ -555,7 +571,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				     availExpressions.begin();
 			     it2 != availExpressions.end();
 			     it2++) {
-				if (definitelyEqual(it2->first, smsel->addr, opt)) {
+				if (definitelyEqual(it2->first, smsel->smsel_addr, opt)) {
 					*it = new StateMachineSideEffectCopy(smsel->key,
 									     it2->second);
 					*done_something = true;
@@ -956,8 +972,8 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 					smses->rip));
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			IRExpr *a = transformIRExpr(smsel->addr);
-			if (a != smsel->addr)
+			IRExpr *a = transformIRExpr(smsel->smsel_addr);
+			if (a != smsel->smsel_addr)
 				changedSideEffect = true;
 			res->sideEffects.push_back(
 				new StateMachineSideEffectLoad(
@@ -2455,6 +2471,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		break;
 	case Iex_Load:
 		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt, done_something);
+		if (src->Iex.Load.addr->tag == Iex_Const &&
+		    (long)src->Iex.Load.addr->Iex.Const.con->Ico.U64 < 4096)
+			dbg_break("optimising load to load of strange constant address (IRExpr *)%p\n",
+				  src);
 		break;
 	case Iex_CCall: {
 		for (int x = 0; src->Iex.CCall.args[x]; x++) {
@@ -3193,7 +3213,7 @@ buildNewStateMachineWithLoadsEliminated(
 				     currentlyAvailable.begin();
 			     !done && it2 != currentlyAvailable.end();
 			     it2++) {
-				if ( definitelyEqual((*it2)->addr, smsel->addr, opt) ) {
+				if ( definitelyEqual((*it2)->addr, smsel->smsel_addr, opt) ) {
 					res->sideEffects.push_back(
 						new StateMachineSideEffectCopy(
 							smsel->key,
@@ -3469,7 +3489,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		if (!smsel2)
 			return false;
 		return smsel1->key == smsel2->key &&
-			definitelyEqual(smsel1->addr, smsel2->addr, opt);
+			definitelyEqual(smsel1->smsel_addr, smsel2->smsel_addr, opt);
 	} else if (StateMachineSideEffectCopy *smsec1 =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse1)) {
 		StateMachineSideEffectCopy *smsec2 =
@@ -4252,7 +4272,17 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 
 	/* Can't prove it one way or another.  Use the
 	   non-deterministic chooser to guess. */
-	if (chooser.nd_choice(2) == 0) {
+	int res;
+	bool isNewChoice;
+	res = chooser.nd_choice(2, &isNewChoice);
+	if (isNewChoice) {
+		printf("Having to use state split to check whether ");
+		ppIRExpr(exp, stdout);
+		printf(" is true under assumption ");
+		ppIRExpr(*assumption, stdout);
+		printf("\n");
+	}
+	if (res == 0) {
 		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 		*assumption = e;
 		return true;
@@ -4309,11 +4339,11 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			StateMachineSideEffectStore *smses = *it;
 			if (!oracle->memoryAccessesMightAlias(smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, smsel->addr, chooser, binders, assumption))
+			if (evalExpressionsEqual(smses->addr, smsel->smsel_addr, chooser, binders, assumption))
 				val = smses->data;
 		}
 		if (!val)
-			val = IRExpr_Load(False, Iend_LE, Ity_I64, smsel->addr);
+			val = IRExpr_Load(False, Iend_LE, Ity_I64, smsel->smsel_addr);
 		binders[smsel->key] = val;
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {

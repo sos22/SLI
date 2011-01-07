@@ -1176,6 +1176,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    e->Iex.Unop.arg = arg;
    return e;
 }
+void dbg_break(const char *msg, ...);
 IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
    IRExpr* e        = new IRExpr();
    e->tag           = Iex_Load;
@@ -1184,6 +1185,9 @@ IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
    e->Iex.Load.ty   = ty;
    e->Iex.Load.addr = addr;
    vassert(end == Iend_LE || end == Iend_BE);
+   if (addr->tag == Iex_Const &&
+       (long)addr->Iex.Const.con->Ico.U64 < 4096)
+     dbg_break("loading from a funny constant address (IRExpr *)%p\n", addr);
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {
