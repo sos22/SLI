@@ -2851,6 +2851,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		}
 
 		if (src->Iex.Unop.op == Iop_Not1 &&
+		    src->Iex.Unop.arg->tag == Iex_Unop &&
+		    src->Iex.Unop.arg->Iex.Unop.op == src->Iex.Unop.op) {
+			*done_something = true;
+			return src->Iex.Unop.arg->Iex.Unop.arg;
+		}
+		if (src->Iex.Unop.op == Iop_Not1 &&
 		    src->Iex.Unop.arg->tag == Iex_Associative &&
 		    (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
 		     src->Iex.Unop.arg->Iex.Associative.op == Iop_Or1)) {
