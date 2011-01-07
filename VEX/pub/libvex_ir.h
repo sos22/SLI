@@ -954,6 +954,7 @@ typedef
 
 struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
    IRExprTag tag;
+   unsigned optimisationsApplied;
    union {
       /* Used only in pattern matching within Vex.  Should not be seen
          outside of Vex. */

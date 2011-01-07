@@ -66,6 +66,18 @@ public:
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true);
 	}
+	unsigned asUnsigned() const {
+		unsigned x = 0;
+		if (xPlusMinusX)
+			x |= 1;
+		if (assumePrivateStack)
+			x |= 2;
+		if (assumeExecutesAtomically)
+			x |= 3;
+		if (ignoreSideEffects)
+			x |= 4;
+		return x;
+	}
 };
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false);
 
@@ -2328,6 +2340,7 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 static void
 addArgumentToAssoc(IRExpr *e, IRExpr *arg)
 {
+	assert( (e->optimisationsApplied & ~arg->optimisationsApplied) == 0);
 	if (e->Iex.Associative.nr_arguments == e->Iex.Associative.nr_arguments_allocated) {
 		e->Iex.Associative.nr_arguments_allocated += 8;
 		e->Iex.Associative.contents = (IRExpr **)
@@ -2543,6 +2556,8 @@ optimiseIRExprUnderAssumption(IRExpr *src, const AllowableOptimisations &opt,
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
+	if (!(opt.asUnsigned() & ~src->optimisationsApplied))
+		return src;
 	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
@@ -2683,6 +2698,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					break;
 				}
 				if (res) {
+					res = optimiseIRExpr(res, opt, done_something);
 					memmove(src->Iex.Associative.contents + x + 1,
 						src->Iex.Associative.contents + x + 2,
 						sizeof(IRExpr *) * (src->Iex.Associative.nr_arguments - x - 2));
@@ -2751,11 +2767,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				     it2 < src->Iex.Associative.nr_arguments;
 				     it2++)
 					src->Iex.Associative.contents[it2] =
-						optimiseIRExprUnderAssumption(
-						src->Iex.Associative.contents[it2],
-						opt,
-						done_something,
-						src->Iex.Associative.contents[it1]);
+						optimiseIRExpr(
+							optimiseIRExprUnderAssumption(
+								src->Iex.Associative.contents[it2],
+								opt,
+								done_something,
+								src->Iex.Associative.contents[it1]),
+							opt,
+							done_something);
 			}
 		}
 
@@ -3112,7 +3131,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 
 	}
-				      
+
 	return src;
 }
 
@@ -3124,6 +3143,7 @@ optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
 		progress = false;
 		e = optimiseIRExpr(e, opt, &progress);
 	} while (progress);
+	e->optimisationsApplied |= opt.asUnsigned();
 	return e;
 }
 
@@ -6054,6 +6074,13 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 		}
 
 		/* If we get here, they match and we're done. */
+
+		/* If the expressions are equal, then any optimisation
+		   which has been applied to one can be assumed to
+		   have been applied to the other. */
+		e->optimisationsApplied |= it->second->optimisationsApplied;
+		it->second->optimisationsApplied |= e->optimisationsApplied;
+
 		lookupTable[e] = it->second;
 		return it->second;
 	}
