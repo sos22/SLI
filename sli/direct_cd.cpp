@@ -2694,6 +2694,19 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				}
 			}
 		}
+		/* Likewise for Or1 */
+		if (src->Iex.Associative.op == Iop_Or1) {
+			while (src->Iex.Associative.nr_arguments > 1 &&
+			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
+				IRConst *c = src->Iex.Associative.contents[0]->Iex.Const.con;
+				*done_something = true;
+				if (!c->Ico.U1) {
+					purgeAssocArgument(src, 0);
+				} else {
+					return src->Iex.Associative.contents[0];
+				}
+			}
+		}
 
 		/* x & x -> x, for any and-like operator */
 		if (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) {
@@ -2735,7 +2748,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 		/* x + -x -> 0, for any plus-like operator, so remove
 		 * both x and -x from the list. */
-		/* Also do x & ~x -> 0 and x ^ x -> 0 while we're here. */
+		/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
 		if (opt.xPlusMinusX) {
 			bool plus_like;
 			bool and_like;
@@ -2757,18 +2770,23 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 							continue;
 						IRExpr *r = src->Iex.Associative.contents[it2];
 						bool purge;
-						if (plus_like || and_like) {
+						if (plus_like) {
 							if (r->tag == Iex_Unop) {
-								if (plus_like)
-									purge = r->Iex.Unop.op >= Iop_Neg8 &&
-										r->Iex.Unop.op <= Iop_Neg64;
-								else
-									purge = (r->Iex.Unop.op >= Iop_Not8 &&
-										 r->Iex.Unop.op <= Iop_Not64) ||
-										r->Iex.Unop.op == Iop_Not1;
+								purge = r->Iex.Unop.op >= Iop_Neg8 &&
+									r->Iex.Unop.op <= Iop_Neg64;
 							} else {
 								purge = false;
 							}
+							if (purge)
+								purge = definitelyEqual(l, r->Iex.Unop.arg,
+											opt.disablexPlusMinusX());
+						} else if (and_like) {
+							if (r->tag == Iex_Unop)
+								purge = (r->Iex.Unop.op >= Iop_Not8 &&
+									 r->Iex.Unop.op <= Iop_Not64) ||
+									r->Iex.Unop.op == Iop_Not1;
+							else
+								purge = false;
 							if (purge)
 								purge = definitelyEqual(l, r->Iex.Unop.arg,
 											opt.disablexPlusMinusX());
@@ -2784,10 +2802,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 							*done_something = true;
 							if (it1 < it2) {
 								purgeAssocArgument(src, it2);
-								purgeAssocArgument(src, it1);
+								src->Iex.Associative.contents[it1] =
+									IRExpr_Const(IRConst_U64(0));
 							} else {
 								purgeAssocArgument(src, it1);
-								purgeAssocArgument(src, it2);
+								src->Iex.Associative.contents[it2] =
+									IRExpr_Const(IRConst_U64(0));
 							}
 							break;
 						}
@@ -2799,24 +2819,29 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			if (src->Iex.Associative.nr_arguments == 0) {
 				*done_something = true;
 				switch (src->Iex.Associative.op) {
-				case Iop_And1:
-					return IRExpr_Const(IRConst_U1(0));
 				case Iop_Add8:
-				case Iop_And8:
 				case Iop_Xor8:
 					return IRExpr_Const(IRConst_U8(0));
 				case Iop_Add16:
-				case Iop_And16:
 				case Iop_Xor16:
 					return IRExpr_Const(IRConst_U16(0));
 				case Iop_Add32:
-				case Iop_And32:
 				case Iop_Xor32:
 					return IRExpr_Const(IRConst_U32(0));
 				case Iop_Add64:
-				case Iop_And64:
 				case Iop_Xor64:
 					return IRExpr_Const(IRConst_U64(0));
+
+				case Iop_And1:
+					return IRExpr_Const(IRConst_U1(1));
+				case Iop_And8:
+					return IRExpr_Const(IRConst_U8(0xff));
+				case Iop_And16:
+					return IRExpr_Const(IRConst_U16(0xffff));
+				case Iop_And32:
+					return IRExpr_Const(IRConst_U32(0xffffffff));
+				case Iop_And64:
+					return IRExpr_Const(IRConst_U64(0xfffffffffffffffful));
 
 				default:
 					abort();
@@ -4563,8 +4588,10 @@ evalStateMachine(StateMachine *sm,
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		if (expressionIsTrue(smb->condition, chooser, ctxt.binders, &ctxt.pathConstraint)) {
+			printf("At %p, go true\n", smb);
 			evalStateMachineEdge(smb->trueTarget, crashes, chooser, oracle, ctxt);
 		} else {
+			printf("At %p, go false\n", smb);
 			evalStateMachineEdge(smb->falseTarget, crashes, chooser, oracle, ctxt);
 		}
 		return;
