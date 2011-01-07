@@ -1892,7 +1892,8 @@ operationCommutes(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) ||
 		(op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64) ||
-		(op == Iop_And1);
+		(op == Iop_And1) ||
+		(op == Iop_Or1);
 }
 
 /* Returns true if the operation definitely associates in the sense
