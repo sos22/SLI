@@ -102,11 +102,30 @@ public:
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
 public:
-	virtual void optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
+	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	NAMED_CLASS
 };
+
+static bool isBadAddress(IRExpr *, const AllowableOptimisations &, Oracle *);
+static bool definitelyUnevaluatable(IRExpr *, const AllowableOptimisations &, Oracle *);
+
+class StateMachineSideEffectUnreached : public StateMachineSideEffect {
+	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
+	StateMachineSideEffectUnreached() {}
+public:
+	static StateMachineSideEffectUnreached *get() {
+		if (!_this) _this = new StateMachineSideEffectUnreached();
+		return _this;
+	}
+	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
+	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+	void visit(HeapVisitor &hv) {}
+};
+VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 
 class StateMachineSideEffectStore : public StateMachineSideEffect {
 public:
@@ -128,9 +147,15 @@ public:
 		hv(addr);
 		hv(data);
 	}
-	void optimise(const AllowableOptimisations &opt, Oracle *, bool *done_something) {
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something) {
 		addr = optimiseIRExpr(addr, opt, done_something);
 		data = optimiseIRExpr(data, opt, done_something);
+		if (isBadAddress(addr, opt, oracle) ||
+		    definitelyUnevaluatable(data, opt, oracle)) {
+			*done_something = true;
+			return StateMachineSideEffectUnreached::get();
+		}
+		return this;
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt) {
 		for (std::set<IRExpr *>::iterator it = l.begin();
@@ -184,11 +209,14 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(smsel_addr);
 	}
-	void optimise(const AllowableOptimisations &opt, Oracle *, bool *done_something) {
-		IRExpr *old = smsel_addr;
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something) {
 		smsel_addr = optimiseIRExpr(smsel_addr, opt, done_something);
+		if (isBadAddress(smsel_addr, opt, oracle)) {
+			*done_something = true;
+			return StateMachineSideEffectUnreached::get();
+		}
 		constructed();
-		(void)old;
+		return this;
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(smsel_addr);
@@ -216,8 +244,13 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	void optimise(const AllowableOptimisations &opt, Oracle *, bool *done_something) {
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something) {
 		value = optimiseIRExpr(value, opt, done_something);
+		if (definitelyUnevaluatable(value, opt, oracle)) {
+			*done_something = true;
+			return StateMachineSideEffectUnreached::get();
+		}
+		return this;
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
@@ -285,6 +318,22 @@ public:
 	NAMED_CLASS
 };
 
+class StateMachineUnreached : public StateMachine {
+	StateMachineUnreached() {}
+	static VexPtr<StateMachineUnreached, &ir_heap> _this;
+public:
+	static StateMachineUnreached *get() {
+		if (!_this) _this = new StateMachineUnreached();
+		return _this;
+	}
+	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
+	void visit(HeapVisitor &hv) {}
+	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+};
+VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
+
 class StateMachineCrash : public StateMachine {
 	StateMachineCrash() {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
@@ -342,6 +391,10 @@ public:
 	}
 	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 	{
+		if (target->target == StateMachineUnreached::get()) {
+			*done_something = true;
+			return target->target;
+		}
 		if (target->sideEffects.size() == 0) {
 			*done_something = true;
 			return target->target->optimise(opt, oracle, done_something);
@@ -399,6 +452,17 @@ public:
 	}
 	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 	{
+		if (trueTarget->target == StateMachineUnreached::get()) {
+			*done_something = true;
+			if (falseTarget->target == StateMachineUnreached::get())
+				return StateMachineUnreached::get();
+			else
+				return new StateMachineProxy(falseTarget->optimise(opt, oracle, done_something));
+		}
+		if (falseTarget->target == StateMachineUnreached::get()) {
+			*done_something = true;
+			return new StateMachineProxy(trueTarget->optimise(opt, oracle, done_something));
+		}
 		condition = optimiseIRExpr(condition, opt, done_something);
 		if (condition->tag == Iex_Const) {
 			*done_something = true;
@@ -531,7 +595,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	std::vector<StateMachineSideEffect *>::iterator it;
 
 	for (it = sideEffects.begin(); it != sideEffects.end(); it++)
-		(*it)->optimise(opt, oracle, done_something);
+		*it = (*it)->optimise(opt, oracle, done_something);
 
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
@@ -578,6 +642,12 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 					break;
 				}
 			}			
+		} else if (dynamic_cast<StateMachineSideEffectUnreached *>(*it)) {
+			/* Okay, we know we can't go down this edge.
+			 * Turn it into an unreached one. */
+			sideEffects.clear();
+			target = StateMachineUnreached::get();
+/**/			break;
 		} else {
 			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
 		}
@@ -807,6 +877,10 @@ protected:
 	{
 		return StateMachineNoCrash::get();
 	}
+	virtual StateMachine *transformedUnreached()
+	{
+		return StateMachineUnreached::get();
+	}
 	virtual IRExpr *transformIRExpr(IRExpr *e);
 
 	virtual IRExpr *transformIexGet(IRExpr *e) { return e; }
@@ -919,6 +993,8 @@ StateMachineTransformer::doit(StateMachine *inp)
 		out = transformedCrash();
 	} else if (inp == StateMachineNoCrash::get()) {
 		out = transformedNoCrash();
+	} else if (inp == StateMachineUnreached::get()) {
+		out = transformedUnreached();
 	} else if (StateMachineBifurcate *smb =
 		   dynamic_cast<StateMachineBifurcate *>(inp)) {
 		StateMachineEdge *t = doit(smb->trueTarget);
@@ -989,6 +1065,8 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 				new StateMachineSideEffectCopy(
 					smsec->key,
 					v));
+		} else if (dynamic_cast<StateMachineSideEffectUnreached *>(*it)) {
+			res->sideEffects.push_back(*it);
 		} else {
 			abort();
 		}
@@ -3031,7 +3109,8 @@ StateMachineWalker::doit(StateMachine *sm, std::set<StateMachine *> &visited)
 	visitState(sm);
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm))
+	    dynamic_cast<StateMachineStub *>(sm) ||
+	    dynamic_cast<StateMachineUnreached *>(sm))
 		return;
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
@@ -3246,7 +3325,8 @@ buildNewStateMachineWithLoadsEliminated(
 			if (!done)
 				res->sideEffects.push_back(*it);
 		} else {
-			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
+			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it) ||
+			       dynamic_cast<StateMachineSideEffectUnreached *>(*it));
 			res->sideEffects.push_back(*it);
 		}
 	}
@@ -3264,7 +3344,8 @@ buildNewStateMachineWithLoadsEliminated(
 {
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm))
+	    dynamic_cast<StateMachineStub *>(sm) ||
+	    dynamic_cast<StateMachineUnreached *>(sm))
 		return sm;
 	if (memo.count(sm))
 		return memo[sm];
@@ -3401,7 +3482,8 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 		     it++) {
 			if (dynamic_cast<StateMachineCrash *>(*it) ||
 			    dynamic_cast<StateMachineNoCrash *>(*it) ||
-			    dynamic_cast<StateMachineStub *>(*it))
+			    dynamic_cast<StateMachineStub *>(*it) ||
+			    dynamic_cast<StateMachineUnreached *>(*it))
 				continue;
 			StateMachineEdge *edges[2];
 			int nr_edges;
@@ -3520,6 +3602,11 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			return false;
 		return smsec1->key == smsec2->key &&
 			definitelyEqual(smsec1->value, smsec2->value, opt);
+	} else if (dynamic_cast<StateMachineSideEffectUnreached *>(smse1)) {
+		if (dynamic_cast<StateMachineSideEffectUnreached *>(smse2))
+			return true;
+		else
+			return false;
 	} else {
 		abort();
 	}
@@ -3559,6 +3646,7 @@ statesLocallyBisimilar(StateMachine *sm1,
 	   Crash
 	   NoCrash
 	   Stub
+	   Unreached
 	   Proxy
 	   Bifurcation
 	*/
@@ -3572,10 +3660,14 @@ statesLocallyBisimilar(StateMachine *sm1,
 			} else if (!dynamic_cast<StateMachineStub *>(sm1)) {
 				if (dynamic_cast<StateMachineStub *>(sm2)) {
 					swapArgs = true;
-				} else if (!dynamic_cast<StateMachineProxy *>(sm1)) {
-					assert(dynamic_cast<StateMachineBifurcate *>(sm1));
-					if (dynamic_cast<StateMachineProxy *>(sm2)) {
+				} else if (!dynamic_cast<StateMachineUnreached *>(sm1)) {
+					if (dynamic_cast<StateMachineUnreached *>(sm2)) {
 						swapArgs = true;
+					} else if (!dynamic_cast<StateMachineProxy *>(sm1)) {
+						assert(dynamic_cast<StateMachineBifurcate *>(sm1));
+						if (dynamic_cast<StateMachineProxy *>(sm2)) {
+							swapArgs = true;
+						}
 					}
 				}
 			}
@@ -3588,6 +3680,8 @@ statesLocallyBisimilar(StateMachine *sm1,
 		if (dynamic_cast<StateMachineCrash *>(sm2)) {
 			return true;
 		} else if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
+			return false;
+		} else if (dynamic_cast<StateMachineUnreached *>(sm2)) {
 			return false;
 		} else if (StateMachineProxy *smp =
 			   dynamic_cast<StateMachineProxy *>(sm2)) {
@@ -3620,6 +3714,8 @@ statesLocallyBisimilar(StateMachine *sm1,
 	if (dynamic_cast<StateMachineNoCrash *>(sm1)) {
 		if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
 			return true;
+		} else if (dynamic_cast<StateMachineUnreached *>(sm2)) {
+			return false;
 		} else if (StateMachineProxy *smp =
 			   dynamic_cast<StateMachineProxy *>(sm2)) {
 			if (!hasDisallowedSideEffects(smp->target, opt) &&
@@ -3642,6 +3738,30 @@ statesLocallyBisimilar(StateMachine *sm1,
 		}
 	}
 
+	if (dynamic_cast<StateMachineUnreached *>(sm1)) {
+		/* We ignore side effects for unreached states: since
+		   we never go down here, any side effects are
+		   completely irrelevant. */
+		if (dynamic_cast<StateMachineUnreached *>(sm2)) {
+			return true;
+		} else if (StateMachineProxy *smp =
+			   dynamic_cast<StateMachineProxy *>(sm2)) {
+			if (others.count(st_pair_t(sm1, smp->target->target)))
+				return true;
+			else
+				return false;
+		} else if (StateMachineBifurcate *smb =
+			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
+			if (others.count(st_pair_t(sm1, smb->trueTarget->target)) &&
+			    others.count(st_pair_t(sm1, smb->falseTarget->target)))
+				return true;
+			else
+				return false;
+		} else {
+			assert(dynamic_cast<StateMachineStub *>(sm2));
+			return false;
+		}
+	}
 	if (StateMachineStub *sms1 =
 	    dynamic_cast<StateMachineStub *>(sm1)) {
 		if (StateMachineStub *sms2 = dynamic_cast<StateMachineStub *>(sm2))
@@ -3736,7 +3856,8 @@ rewriteStateMachine(StateMachine *sm,
 	memo.insert(sm);
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm)) {
+	    dynamic_cast<StateMachineStub *>(sm) ||
+	    dynamic_cast<StateMachineUnreached *>(sm)) {
 		return sm;
 	} else if (StateMachineBifurcate *smb =
 		   dynamic_cast<StateMachineBifurcate *>(sm)) {
@@ -4767,6 +4888,7 @@ top:
 		/* We've hit the end of the edge.  Move to the next
 		 * state. */
 		s = machine->currentEdge->target;
+		assert(!dynamic_cast<StateMachineUnreached *>(s));
 		if (dynamic_cast<StateMachineCrash *>(s)) {
 			machine->finished = true;
 			machine->crashed = true;
@@ -4895,6 +5017,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
 				/* Yes, move to the next state. */
 				StateMachine *s = writerEdge->target;
+				assert(!dynamic_cast<StateMachineUnreached *>(s));
 				if (dynamic_cast<StateMachineCrash *>(s) ||
 				    dynamic_cast<StateMachineNoCrash *>(s) ||
 				    dynamic_cast<StateMachineStub *>(s)) {
@@ -5689,6 +5812,56 @@ Oracle::loadTagTable(const char *path)
 		}
 		tag_table.push_back(t);
 	}
+}
+
+static bool
+isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+{
+	return e->tag == Iex_Const &&
+		(long)e->Iex.Const.con->Ico.U64 < 4096;
+}
+
+static bool
+definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+{
+	switch (e->tag) {
+	case Iex_Binder:
+	case Iex_Get:
+	case Iex_RdTmp:
+	case Iex_Const:
+		return false;
+	case Iex_GetI:
+		return definitelyUnevaluatable(e->Iex.GetI.ix, opt, oracle);
+	case Iex_Qop:
+		if (definitelyUnevaluatable(e->Iex.Qop.arg4, opt, oracle))
+			return true;
+	case Iex_Triop:
+		if (definitelyUnevaluatable(e->Iex.Qop.arg3, opt, oracle))
+			return true;
+	case Iex_Binop:
+		if (definitelyUnevaluatable(e->Iex.Qop.arg2, opt, oracle))
+			return true;
+	case Iex_Unop:
+		if (definitelyUnevaluatable(e->Iex.Qop.arg1, opt, oracle))
+			return true;
+		return false;
+	case Iex_CCall:
+		for (int x = 0; e->Iex.CCall.args[x]; x++)
+			if (definitelyUnevaluatable(e->Iex.CCall.args[x], opt, oracle))
+				return true;
+		return false;
+	case Iex_Mux0X:
+		return definitelyUnevaluatable(e->Iex.Mux0X.cond, opt, oracle);
+	case Iex_Associative:
+		for (int x = 0; x < e->Iex.Associative.nr_arguments; x++)
+			if (definitelyUnevaluatable(e->Iex.Associative.contents[x], opt, oracle))
+				return true;
+		return false;
+	case Iex_Load:
+		return isBadAddress(e->Iex.Load.addr, opt, oracle) ||
+			definitelyUnevaluatable(e->Iex.Load.addr, opt, oracle);
+	}
+	abort();
 }
 
 int
