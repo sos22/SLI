@@ -2610,7 +2610,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			for (int x = 0; x < src->Iex.Associative.nr_arguments; x++) {
 				IRExpr *arg = src->Iex.Associative.contents[x];
 				if (arg->tag == Iex_Associative &&
-				    arg->Iex.Associative.op == arg->Iex.Associative.op) {
+				    arg->Iex.Associative.op == src->Iex.Associative.op) {
 					for (int y = 0; y < arg->Iex.Associative.nr_arguments; y++)
 						addArgumentToAssoc(e, arg->Iex.Associative.contents[y]);
 				} else {
@@ -2658,6 +2658,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					break;
 				case Iop_And1:
 					res = IRExpr_Const(IRConst_U1(l->Ico.U1 & r->Ico.U1));
+					break;
+				case Iop_Or1:
+					res = IRExpr_Const(IRConst_U1(l->Ico.U1 | r->Ico.U1));
 					break;
 				case Iop_And32:
 					res = IRExpr_Const(IRConst_U32(l->Ico.U32 & r->Ico.U32));
@@ -4595,10 +4598,8 @@ evalStateMachine(StateMachine *sm,
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		if (expressionIsTrue(smb->condition, chooser, ctxt.binders, &ctxt.pathConstraint)) {
-			printf("At %p, go true\n", smb);
 			evalStateMachineEdge(smb->trueTarget, crashes, chooser, oracle, ctxt);
 		} else {
-			printf("At %p, go false\n", smb);
 			evalStateMachineEdge(smb->falseTarget, crashes, chooser, oracle, ctxt);
 		}
 		return;
