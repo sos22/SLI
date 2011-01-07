@@ -1922,6 +1922,7 @@ physicallyEqual(const IRConst *a, const IRConst *b)
 		do_case(F64);
 		do_case(F64i);
 		do_case(V128);
+#undef do_case
 	}
 	abort();
 }
@@ -4634,7 +4635,13 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					IRExpr_Unop(
 						Iop_Not1,
 						ctxt.pathConstraint));
-#if 0
+#if 1
+			ctxt.pathConstraint =
+				optimiseIRExpr(
+					IRExpr_Unop(Iop_Not1, ctxt.pathConstraint),
+					AllowableOptimisations::defaultOptimisations);
+			newConstraint = optimiseIRExpr(newConstraint,
+						       AllowableOptimisations::defaultOptimisations);
 			printf("Add ");
 			ppIRExpr(ctxt.pathConstraint, stdout);
 			printf(" to ");
@@ -5937,6 +5944,128 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *or
 	abort();
 }
 
+static IRExpr *
+internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
+{
+	if (lookupTable.count(e))
+		return lookupTable[e];
+	switch (e->tag) {
+	case Iex_Binder:
+	case Iex_Get:
+	case Iex_RdTmp:
+	case Iex_Const:
+		break;
+	case Iex_GetI:
+		e->Iex.GetI.ix = internIRExpr(e->Iex.GetI.ix, lookupTable);
+		break;
+	case Iex_Qop:
+		e->Iex.Qop.arg4 = internIRExpr(e->Iex.Qop.arg4, lookupTable);
+	case Iex_Triop:
+		e->Iex.Qop.arg3 = internIRExpr(e->Iex.Qop.arg3, lookupTable);
+	case Iex_Binop:
+		e->Iex.Qop.arg2 = internIRExpr(e->Iex.Qop.arg2, lookupTable);
+	case Iex_Unop:
+		e->Iex.Qop.arg1 = internIRExpr(e->Iex.Qop.arg1, lookupTable);
+		break;
+	case Iex_Load:
+		e->Iex.Load.addr = internIRExpr(e->Iex.Load.addr, lookupTable);
+		break;
+	case Iex_CCall:
+		for (int x = 0; e->Iex.CCall.args[x]; x++)
+			e->Iex.CCall.args[x] =
+				internIRExpr(e->Iex.CCall.args[x], lookupTable);
+		break;
+	case Iex_Mux0X:
+		e->Iex.Mux0X.cond = internIRExpr(e->Iex.Mux0X.cond, lookupTable);
+		e->Iex.Mux0X.expr0 = internIRExpr(e->Iex.Mux0X.expr0, lookupTable);
+		e->Iex.Mux0X.exprX = internIRExpr(e->Iex.Mux0X.exprX, lookupTable);
+		break;
+	case Iex_Associative:
+		for (int x = 0; x < e->Iex.Associative.nr_arguments; x++)
+			e->Iex.Associative.contents[x] =
+				internIRExpr(e->Iex.Associative.contents[x], lookupTable);
+		break;
+	}
+	for (std::map<IRExpr *, IRExpr *>::iterator it = lookupTable.begin();
+	     it != lookupTable.end();
+	     it++) {
+		IRExpr *other = it->first;
+		if (other->tag != e->tag)
+			continue;
+		switch (e->tag) {
+			/* For some structures, equality can be
+			   checked by bitwise comparison. */
+#define do_case(n)							\
+			case Iex_ ## n:					\
+				if (memcmp(&other->Iex. n,		\
+					   &e->Iex. n,			\
+					   sizeof(e->Iex. n)))		\
+					continue;			\
+			break
+			do_case(Binder);
+			do_case(Get);
+			do_case(GetI);
+			do_case(RdTmp);
+			do_case(Qop);
+			do_case(Triop);
+			do_case(Binop);
+			do_case(Unop);
+			do_case(Load);
+			do_case(Mux0X);
+#undef do_case
+			/* Others are harder. */
+		case Iex_CCall: {
+			bool bad;
+			if (other->Iex.CCall.retty != e->Iex.CCall.retty)
+				continue;
+			bad = false;
+			for (int x = 0; !bad && e->Iex.CCall.args[x]; x++) {
+				if (e->Iex.CCall.args[x] !=
+				    other->Iex.CCall.args[x])
+					bad = true;
+			}
+			if (bad)
+				continue;
+			break;
+		}
+
+		case Iex_Associative: {
+			if (other->Iex.Associative.op != e->Iex.Associative.op ||
+			    other->Iex.Associative.nr_arguments != e->Iex.Associative.nr_arguments)
+				continue;
+			bool bad = false;
+			for (int x = 0; !bad && x < e->Iex.Associative.nr_arguments; x++)
+				if (e->Iex.Associative.contents[x] !=
+				    other->Iex.Associative.contents[x])
+					bad = true;
+			if (bad)
+				continue;
+			break;
+		}
+
+		case Iex_Const:
+			if (!physicallyEqual(e->Iex.Const.con,
+					     other->Iex.Const.con))
+				continue;
+			break;
+		}
+
+		/* If we get here, they match and we're done. */
+		lookupTable[e] = it->second;
+		return it->second;
+	}
+	/* No duplicates of this IRExpr found so far */
+	lookupTable[e] = e;
+	return e;
+}
+
+static IRExpr *
+internIRExpr(IRExpr *x)
+{
+	std::map<IRExpr *, IRExpr *> t;
+	return internIRExpr(x, t);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -6007,6 +6136,7 @@ main(int argc, char *argv[])
 					survivalConstraintIfExecutedAtomically(crSm, oracle, ALLOW_GC),
 					opt);
 		}
+		survive = internIRExpr(survive);
 		ppIRExpr(survive, stdout);
 		printf("\n");
 
