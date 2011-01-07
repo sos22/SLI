@@ -2595,13 +2595,16 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		/* Drag up nested associatives. */
 		bool haveNestedAssocs = false;
 		for (int x = 0; !haveNestedAssocs && x < src->Iex.Associative.nr_arguments; x++)
-			if (src->Iex.Associative.contents[x]->tag == Iex_Associative)
+			if (src->Iex.Associative.contents[x]->tag == Iex_Associative &&
+			    src->Iex.Associative.contents[x]->Iex.Associative.op ==
+				src->Iex.Associative.op)
 				haveNestedAssocs = true;
 		if (haveNestedAssocs) {
 			IRExpr *e = IRExpr_Associative(src->Iex.Associative.op, NULL);
 			for (int x = 0; x < src->Iex.Associative.nr_arguments; x++) {
 				IRExpr *arg = src->Iex.Associative.contents[x];
-				if (arg->tag == Iex_Associative) {
+				if (arg->tag == Iex_Associative &&
+				    arg->Iex.Associative.op == arg->Iex.Associative.op) {
 					for (int y = 0; y < arg->Iex.Associative.nr_arguments; y++)
 						addArgumentToAssoc(e, arg->Iex.Associative.contents[y]);
 				} else {
@@ -2651,10 +2654,13 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					res = IRExpr_Const(IRConst_U1(l->Ico.U1 & r->Ico.U1));
 					break;
 				case Iop_And32:
-					res = IRExpr_Const(IRConst_U64(l->Ico.U32 & r->Ico.U32));
+					res = IRExpr_Const(IRConst_U32(l->Ico.U32 & r->Ico.U32));
+					break;
+				case Iop_And64:
+					res = IRExpr_Const(IRConst_U64(l->Ico.U64 & r->Ico.U64));
 					break;
 				case Iop_Xor32:
-					res = IRExpr_Const(IRConst_U64(l->Ico.U32 ^ r->Ico.U32));
+					res = IRExpr_Const(IRConst_U32(l->Ico.U32 ^ r->Ico.U32));
 					break;
 				default:
 					printf("Warning: can't constant-fold in ");
@@ -4432,6 +4438,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 	int res;
 	bool isNewChoice;
 	res = chooser.nd_choice(2, &isNewChoice);
+#if 0
 	if (isNewChoice) {
 		printf("Having to use state split to check whether ");
 		ppIRExpr(exp, stdout);
@@ -4439,6 +4446,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 		ppIRExpr(*assumption, stdout);
 		printf("\n");
 	}
+#endif
 	if (res == 0) {
 		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 		*assumption = e;
@@ -4584,13 +4592,23 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 			/* This path leads to a crash, so the
 			   constraint should include something to make
 			   sure that we don't go down here. */
-			currentConstraint =
+			IRExpr *newConstraint =
 				IRExpr_Binop(
 					Iop_And1,
 					currentConstraint,
 					IRExpr_Unop(
 						Iop_Not1,
 						ctxt.pathConstraint));
+#if 0
+			printf("Add ");
+			ppIRExpr(ctxt.pathConstraint, stdout);
+			printf(" to ");
+			ppIRExpr(currentConstraint, stdout);
+			printf(" -> ");
+			ppIRExpr(newConstraint, stdout);
+			printf("\n");
+#endif
+			currentConstraint = newConstraint;
 		}
 	} while (chooser.advance());
 
