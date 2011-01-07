@@ -2529,6 +2529,11 @@ optimiseIRExprUnderAssumption(IRExpr *src, const AllowableOptimisations &opt,
 	if (definitelyEqual(src, assumption, opt)) {
 		*done_something = true;
 		return IRExpr_Const(IRConst_U1(1));
+	} else if (assumption->tag == Iex_Unop &&
+		   assumption->Iex.Unop.op == Iop_Not1 &&
+		   definitelyEqual(src, assumption->Iex.Unop.arg, opt)) {
+		*done_something = true;
+		return IRExpr_Const(IRConst_U1(0));
 	} else {
 		return src;
 	}
@@ -2885,6 +2890,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			*done_something = true;
 			return src->Iex.Unop.arg->Iex.Unop.arg;
 		}
+
 		if (src->Iex.Unop.op == Iop_Not1 &&
 		    src->Iex.Unop.arg->tag == Iex_Associative &&
 		    (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
