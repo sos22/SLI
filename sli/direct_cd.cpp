@@ -2934,6 +2934,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			*done_something = true;
 		}
 
+		/* x << 0 -> x */
+		if (src->Iex.Binop.op >= Iop_Shl8 && src->Iex.Binop.op <= Iop_Shl64 &&
+		    src->Iex.Binop.arg2->tag == Iex_Const &&
+		    src->Iex.Binop.arg2->Iex.Const.con->Ico.U8 == 0) {
+			*done_something = true;
+			return src->Iex.Binop.arg1;
+		}
+
 		/* We simplify == expressions with sums on the left
 		   and right by trying to move all of the constants to
 		   the left and all of the non-constants to the
