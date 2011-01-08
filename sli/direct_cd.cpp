@@ -4665,13 +4665,6 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					AllowableOptimisations::defaultOptimisations);
 			newConstraint = optimiseIRExpr(newConstraint,
 						       AllowableOptimisations::defaultOptimisations);
-			printf("Add ");
-			ppIRExpr(ctxt.pathConstraint, stdout);
-			printf(" to ");
-			ppIRExpr(currentConstraint, stdout);
-			printf(" -> ");
-			ppIRExpr(newConstraint, stdout);
-			printf("\n");
 #endif
 			currentConstraint = newConstraint;
 		}
