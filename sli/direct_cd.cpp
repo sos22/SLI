@@ -2365,196 +2365,6 @@ purgeAssocArgument(IRExpr *e, int idx)
 }
 
 static IRExpr *
-optimiseIRExprUnderAssumption(IRExpr *src, const AllowableOptimisations &opt,
-			      bool *done_something, IRExpr *assumption)
-{
-	switch (src->tag) {
-	case Iex_Qop: {
-		bool p1, p2, p3, p4;
-		p1 = p2 = p3 = p4 = false;
-		IRExpr *arg1, *arg2, *arg3, *arg4;
-#define do_arg(x)							\
-		arg ## x = optimiseIRExprUnderAssumption(		\
-			src->Iex.Qop.arg ## x, opt, &p ## x,		\
-			assumption)
-		do_arg(1);
-		do_arg(2);
-		do_arg(3);
-		do_arg(4);
-#undef do_arg
-		if (p1 || p2 || p3 || p4) {
-			*done_something = true;
-			src = IRExpr_Qop(src->Iex.Qop.op,
-					 arg1, arg2, arg3, arg4);
-		}
-		break;
-	}
-
-	case Iex_Triop: {
-		bool p1, p2, p3;
-		p1 = p2 = p3 = false;
-		IRExpr *arg1, *arg2, *arg3;
-#define do_arg(x)							\
-		arg ## x = optimiseIRExprUnderAssumption(		\
-			src->Iex.Triop.arg ## x, opt, &p ## x,		\
-			assumption)
-		do_arg(1);
-		do_arg(2);
-		do_arg(3);
-#undef do_arg
-		if (p1 || p2 || p3) {
-			*done_something = true;
-			src = IRExpr_Triop(src->Iex.Triop.op,
-					   arg1, arg2, arg3);
-		}
-		break;
-	}
-
-	case Iex_Binop: {
-		bool p1, p2;
-		p1 = p2 = false;
-		IRExpr *arg1, *arg2;
-#define do_arg(x)							\
-		arg ## x = optimiseIRExprUnderAssumption(		\
-			src->Iex.Binop.arg ## x, opt, &p ## x,		\
-			assumption)
-		do_arg(1);
-		do_arg(2);
-#undef do_arg
-		if (p1 || p2) {
-			*done_something = true;
-			src = IRExpr_Binop(src->Iex.Binop.op,
-					   arg1, arg2);
-		}
-		break;
-	}
-
-	case Iex_Unop: {
-		bool p;
-		p = false;
-		IRExpr *arg = optimiseIRExprUnderAssumption(
-			src->Iex.Unop.arg, opt, &p, assumption);
-		if (p) {
-			*done_something = true;
-			src = IRExpr_Unop(src->Iex.Unop.op, arg);
-		}
-		break;
-	}
-
-	case Iex_Load: {
-		bool p;
-		p = false;
-		IRExpr *addr = optimiseIRExprUnderAssumption(
-			src->Iex.Load.addr, opt, &p, assumption);
-		if (p) {
-			*done_something = true;
-			src = IRExpr_Load(
-				src->Iex.Load.isLL,
-				src->Iex.Load.end,
-				src->Iex.Load.ty,
-				addr);
-		}
-		break;
-	}
-
-	case Iex_CCall: {
-		int x;
-		bool progress = false;
-		IRExpr *arg = NULL;
-		for (x = 0; src->Iex.CCall.args[x]; x++) {
-			arg = optimiseIRExprUnderAssumption(
-				src->Iex.CCall.args[x],
-				opt,
-				&progress,
-				assumption);
-			if (progress)
-				break;
-		}
-		if (progress) {
-			*done_something = true;
-			src = deepCopyIRExpr(src);
-			assert(src->Iex.CCall.args[x]);
-			assert(arg);
-			src->Iex.CCall.args[x] = arg;
-			while (src->Iex.CCall.args[x]) {
-				src->Iex.CCall.args[x] =
-					optimiseIRExprUnderAssumption(
-						src->Iex.CCall.args[x],
-						opt,
-						&progress,
-						assumption);
-				x++;
-			}
-		}
-		break;
-	}
-
-	case Iex_Mux0X: {
-		bool pcond, pexpr0, pexprX;
-		pcond = pexpr0 = pexprX = false;
-		IRExpr *cond, *expr0, *exprX;
-#define do_arg(arg)							\
-		arg = optimiseIRExprUnderAssumption(		\
-			src->Iex.Mux0X.arg, opt, &p ## arg,	\
-			assumption)
-		do_arg(cond);
-		do_arg(expr0);
-		do_arg(exprX);
-#undef do_arg
-		if (pcond || pexpr0 || pexprX) {
-			*done_something = true;
-			src = IRExpr_Mux0X(cond, expr0, exprX);
-		}
-		break;
-	}
-
-	case Iex_Associative: {
-		int x;
-		bool progress = false;
-		IRExpr *arg = NULL;
-		for (x = 0; x < src->Iex.Associative.nr_arguments; x++) {
-			arg = optimiseIRExprUnderAssumption(
-				src->Iex.Associative.contents[x],
-				opt,
-				&progress,
-				assumption);
-			if (progress)
-				break;
-		}
-		if (progress) {
-			*done_something = true;
-			src = deepCopyIRExpr(src);
-			src->Iex.Associative.contents[x] = arg;
-			while (x < src->Iex.Associative.nr_arguments) {
-				src->Iex.Associative.contents[x] =
-					optimiseIRExprUnderAssumption(
-						src->Iex.Associative.contents[x],
-						opt,
-						&progress,
-						assumption);
-				x++;
-			}
-		}
-		break;
-	}
-
-	default:
-		break;
-	}
-	if (definitelyEqual(src, assumption, opt)) {
-		*done_something = true;
-		return IRExpr_Const(IRConst_U1(1));
-	} else if (assumption->tag == Iex_Unop &&
-		   assumption->Iex.Unop.op == Iop_Not1 &&
-		   definitelyEqual(src, assumption->Iex.Unop.arg, opt)) {
-		*done_something = true;
-		return IRExpr_Const(IRConst_U1(0));
-	} else {
-		return src;
-	}
-}
-
-static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
 	if (!(opt.asUnsigned() & ~src->optimisationsApplied))
@@ -2755,27 +2565,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						it2++;
 					}
 				}
-			}
-		}
-
-		/* When evaluating the y in x & y, you can safely
-		   assume that x holds.  Take advantage of this. */
-		if (src->Iex.Associative.op == Iop_And1) {
-			for (int it1 = 0;
-			     it1 < src->Iex.Associative.nr_arguments;
-			     it1++) {
-				for (int it2 = it1 + 1;
-				     it2 < src->Iex.Associative.nr_arguments;
-				     it2++)
-					src->Iex.Associative.contents[it2] =
-						optimiseIRExprFP(
-							optimiseIRExprUnderAssumption(
-								src->Iex.Associative.contents[it2],
-								opt,
-								done_something,
-								src->Iex.Associative.contents[it1]),
-							opt,
-							done_something);
 			}
 		}
 
@@ -6652,8 +6441,10 @@ main(int argc, char *argv[])
 
 		if (!mightSurvive)
 			continue;
-		if (mightCrash)
+		if (mightCrash) {
 			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+			dbg_break("whoops");
+		}
 
 		std::set<StateMachineSideEffectLoad *> allLoads;
 		findAllLoads(cr->sm, allLoads);
