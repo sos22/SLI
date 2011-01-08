@@ -175,6 +175,7 @@ public:
 			pprev = &he->next;
 		}
 		*pprev = he->next;
+		nr_items--;
 		return rv;
 	}
 
