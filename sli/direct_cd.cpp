@@ -6094,6 +6094,7 @@ public:
 	virtual CnfExpression *CNF(void) = 0;
 	virtual CnfExpression *invert() = 0;
 	virtual IRExpr *asIRExpr(std::map<int, IRExpr *> &) = 0;
+	virtual int complexity() = 0;
 	NAMED_CLASS
 };
 
@@ -6113,6 +6114,7 @@ public:
 	CnfExpression *invert();
 	int getId() { return id; }
 	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) { return m[id]; }
+	int complexity() { return 0; }
 	int id;
 };
 int CnfVariable::nextId = 450;
@@ -6131,6 +6133,7 @@ public:
 		return a->getId();
 	}
 	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) { return IRExpr_Unop(Iop_Not1, arg->asIRExpr(m)); }
+	int complexity() { return arg->complexity() + 1; }
 	CnfExpression *arg;
 };
 
@@ -6165,6 +6168,12 @@ public:
 			addArgumentToAssoc(work, args[x]->asIRExpr(m));
 		}
 		return work;
+	}
+	int complexity() {
+		int acc = 1;
+		for (unsigned x = 0; x < args.size(); x++)
+			acc += args[x]->complexity();
+		return acc;
 	}
 	std::vector<CnfExpression *> args;
 };
@@ -6493,9 +6502,11 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 	std::map<int, IRExpr *> varsToExprs;
 	CnfExpression *root;
 	CnfAnd *a;
+	int nr_terms;
 
 	buildVarMap(inp, exprsToVars, varsToExprs);
 	root = convertIRExprToCNF(inp, exprsToVars);
+	nr_terms = root->complexity();
 	root = root->CNF();
 	a = dynamic_cast<CnfAnd *>(root);
 	if (!a) {
@@ -6513,11 +6524,15 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 	printf("As CNF: %s\n", a->name());
 	a->optimise();
 	printf("After CNF optimise: %s\n", a->name());
-	IRExpr *res = a->asIRExpr(varsToExprs);
-	printf("Turns into IR expression ");
-	ppIRExpr(res, stdout);
-	printf("\n");
-	return res;
+	if (nr_terms > a->complexity()) {
+		IRExpr *res = a->asIRExpr(varsToExprs);
+		printf("Turns into IR expression ");
+		ppIRExpr(res, stdout);
+		printf("\n");
+		return res;
+	} else {
+		return inp;
+	}
 }
 
 int
