@@ -6517,6 +6517,8 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 		inp->Iex.Associative.op == Iop_And1))))
 		return inp;
 
+	inp = internIRExpr(inp);
+
 	buildVarMap(inp, exprsToVars, varsToExprs);
 	root = convertIRExprToCNF(inp, exprsToVars);
 	nr_terms = root->complexity();
@@ -6548,7 +6550,6 @@ optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
 	bool ign;
 	ign = false;
 	e = optimiseIRExprFP(e, opt, &ign);
-	e = internIRExpr(e);
 	e = simplifyIRExprAsBoolean(e);
 	e = optimiseIRExprFP(e, opt, &ign);
 	return e;
