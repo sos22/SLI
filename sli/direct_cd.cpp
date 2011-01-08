@@ -96,6 +96,7 @@ public:
    context.  We may mutate the expression in-place, which is okay
    because there are no semantic changes. */
 static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &, bool *done_something);
+static IRExpr *optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &, bool *done_something);
 static IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &);
 static void assertUnoptimisable(IRExpr *e, const AllowableOptimisations &);
 
@@ -160,8 +161,8 @@ public:
 		hv(data);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something) {
-		addr = optimiseIRExpr(addr, opt, done_something);
-		data = optimiseIRExpr(data, opt, done_something);
+		addr = optimiseIRExprFP(addr, opt, done_something);
+		data = optimiseIRExprFP(data, opt, done_something);
 		if (isBadAddress(addr, opt, oracle) ||
 		    definitelyUnevaluatable(data, opt, oracle)) {
 			*done_something = true;
@@ -191,7 +192,7 @@ class StateMachineSideEffectLoad : public StateMachineSideEffect {
 	{
 		IRExpr *old = smsel_addr;
 		bool ign;
-		smsel_addr = optimiseIRExpr(smsel_addr, AllowableOptimisations::defaultOptimisations, &ign);
+		smsel_addr = optimiseIRExprFP(smsel_addr, AllowableOptimisations::defaultOptimisations, &ign);
 		if (smsel_addr->tag == Iex_Const &&
 		    (long)smsel_addr->Iex.Const.con->Ico.U64 < 4096)
 			dbg_break("constructing funny (StateMachineSideEffectLoad *)%p\n",
@@ -222,7 +223,7 @@ public:
 		hv(smsel_addr);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something) {
-		smsel_addr = optimiseIRExpr(smsel_addr, opt, done_something);
+		smsel_addr = optimiseIRExprFP(smsel_addr, opt, done_something);
 		if (isBadAddress(smsel_addr, opt, oracle)) {
 			*done_something = true;
 			return StateMachineSideEffectUnreached::get();
@@ -257,7 +258,7 @@ public:
 		hv(value);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something) {
-		value = optimiseIRExpr(value, opt, done_something);
+		value = optimiseIRExprFP(value, opt, done_something);
 		if (definitelyUnevaluatable(value, opt, oracle)) {
 			*done_something = true;
 			return StateMachineSideEffectUnreached::get();
@@ -475,7 +476,7 @@ public:
 			*done_something = true;
 			return new StateMachineProxy(trueTarget->optimise(opt, oracle, done_something));
 		}
-		condition = optimiseIRExpr(condition, opt, done_something);
+		condition = optimiseIRExprFP(condition, opt, done_something);
 		if (condition->tag == Iex_Const) {
 			*done_something = true;
 			if (condition->Iex.Const.con->Ico.U1)
@@ -2561,16 +2562,16 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 	/* First, recursively optimise our arguments. */
 	switch (src->tag) {
 	case Iex_Qop:
-		src->Iex.Qop.arg4 = optimiseIRExpr(src->Iex.Qop.arg4, opt, done_something);
+		src->Iex.Qop.arg4 = optimiseIRExprFP(src->Iex.Qop.arg4, opt, done_something);
 	case Iex_Triop:
-		src->Iex.Triop.arg3 = optimiseIRExpr(src->Iex.Triop.arg3, opt, done_something);
+		src->Iex.Triop.arg3 = optimiseIRExprFP(src->Iex.Triop.arg3, opt, done_something);
 	case Iex_Binop:
-		src->Iex.Binop.arg2 = optimiseIRExpr(src->Iex.Binop.arg2, opt, done_something);
+		src->Iex.Binop.arg2 = optimiseIRExprFP(src->Iex.Binop.arg2, opt, done_something);
 	case Iex_Unop:
-		src->Iex.Unop.arg = optimiseIRExpr(src->Iex.Unop.arg, opt, done_something);
+		src->Iex.Unop.arg = optimiseIRExprFP(src->Iex.Unop.arg, opt, done_something);
 		break;
 	case Iex_Load:
-		src->Iex.Load.addr = optimiseIRExpr(src->Iex.Load.addr, opt, done_something);
+		src->Iex.Load.addr = optimiseIRExprFP(src->Iex.Load.addr, opt, done_something);
 		if (src->Iex.Load.addr->tag == Iex_Const &&
 		    (long)src->Iex.Load.addr->Iex.Const.con->Ico.U64 < 4096)
 			dbg_break("optimising load to load of strange constant address (IRExpr *)%p\n",
@@ -2579,7 +2580,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 	case Iex_CCall: {
 		for (int x = 0; src->Iex.CCall.args[x]; x++) {
 			src->Iex.CCall.args[x] =
-				optimiseIRExpr(src->Iex.CCall.args[x], opt, done_something);
+				optimiseIRExprFP(src->Iex.CCall.args[x], opt, done_something);
 		}
 		/* Special cases for amd64g_calculate_condition. */
 		if (!strcmp(src->Iex.CCall.cee->name,
@@ -2600,14 +2601,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		break;
 	}
 	case Iex_Mux0X:
-		src->Iex.Mux0X.cond = optimiseIRExpr(src->Iex.Mux0X.cond, opt, done_something);
-		src->Iex.Mux0X.expr0 = optimiseIRExpr(src->Iex.Mux0X.expr0, opt, done_something);
-		src->Iex.Mux0X.exprX = optimiseIRExpr(src->Iex.Mux0X.exprX, opt, done_something);
+		src->Iex.Mux0X.cond = optimiseIRExprFP(src->Iex.Mux0X.cond, opt, done_something);
+		src->Iex.Mux0X.expr0 = optimiseIRExprFP(src->Iex.Mux0X.expr0, opt, done_something);
+		src->Iex.Mux0X.exprX = optimiseIRExprFP(src->Iex.Mux0X.exprX, opt, done_something);
 		break;
 	case Iex_Associative:
 		for (int x = 0; x < src->Iex.Associative.nr_arguments; x++)
 			src->Iex.Associative.contents[x] =
-				optimiseIRExpr(src->Iex.Associative.contents[x], opt, done_something);
+				optimiseIRExprFP(src->Iex.Associative.contents[x], opt, done_something);
 		break;
 	default:
 		break;
@@ -2698,7 +2699,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					break;
 				}
 				if (res) {
-					res = optimiseIRExpr(res, opt, done_something);
+					res = optimiseIRExprFP(res, opt, done_something);
 					memmove(src->Iex.Associative.contents + x + 1,
 						src->Iex.Associative.contents + x + 2,
 						sizeof(IRExpr *) * (src->Iex.Associative.nr_arguments - x - 2));
@@ -2767,7 +2768,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				     it2 < src->Iex.Associative.nr_arguments;
 				     it2++)
 					src->Iex.Associative.contents[it2] =
-						optimiseIRExpr(
+						optimiseIRExprFP(
 							optimiseIRExprUnderAssumption(
 								src->Iex.Associative.contents[it2],
 								opt,
@@ -2927,7 +2928,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			     i < a->Iex.Associative.nr_arguments;
 			     i++) {
 				a->Iex.Associative.contents[i] =
-					optimiseIRExpr(
+					optimiseIRExprFP(
 						IRExpr_Unop(
 							Iop_Not1,
 							a->Iex.Associative.contents[i]),
@@ -2988,7 +2989,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			*done_something = true;
 			src->Iex.Binop.op = (IROp)(src->Iex.Binop.op - Iop_Sub8 + Iop_Add8);
 			src->Iex.Binop.arg2 =
-				optimiseIRExpr(
+				optimiseIRExprFP(
 					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
 						     r ),
 					opt,
@@ -3032,8 +3033,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						cnst),
 					l,
 					NULL);
-				l = src->Iex.Binop.arg1 = optimiseIRExpr(newLeft, opt, done_something);
-				r = src->Iex.Binop.arg2 = optimiseIRExpr(newRight, opt, done_something);
+				l = src->Iex.Binop.arg1 = optimiseIRExprFP(newLeft, opt, done_something);
+				r = src->Iex.Binop.arg2 = optimiseIRExprFP(newRight, opt, done_something);
 				*done_something = true;
 			}
 			if (l->tag == Iex_Associative &&
@@ -3057,7 +3058,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								   cnst));
 				}
 				l = src->Iex.Binop.arg1 = cnst;
-				r = src->Iex.Binop.arg2 = optimiseIRExpr(newR, opt, done_something);
+				r = src->Iex.Binop.arg2 = optimiseIRExprFP(newR, opt, done_something);
 				*done_something = true;
 			}
 			/* If, in a == b, a and b are physically
@@ -3136,13 +3137,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
+optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_something)
 {
 	bool progress;
-	do {
-		progress = false;
-		e = optimiseIRExpr(e, opt, &progress);
-	} while (progress);
+	progress = false;
+	e = optimiseIRExpr(e, opt, &progress);
+	if (progress) {
+		*done_something = true;
+		while (progress) {
+			progress = false;
+			e = optimiseIRExpr(e, opt, &progress);
+		}
+	}
 	e->optimisationsApplied |= opt.asUnsigned();
 	return e;
 }
@@ -6504,6 +6510,13 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 	CnfAnd *a;
 	int nr_terms;
 
+	if (!((inp->tag == Iex_Unop &&
+	       inp->Iex.Unop.op == Iop_Not1) ||
+	      (inp->tag == Iex_Associative &&
+	       (inp->Iex.Associative.op == Iop_Or1 ||
+		inp->Iex.Associative.op == Iop_And1))))
+		return inp;
+
 	buildVarMap(inp, exprsToVars, varsToExprs);
 	root = convertIRExprToCNF(inp, exprsToVars);
 	nr_terms = root->complexity();
@@ -6521,19 +6534,26 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 		a->addChild(o);
 	}
 	a->sort();
-	printf("As CNF: %s\n", a->name());
 	a->optimise();
-	printf("After CNF optimise: %s\n", a->name());
 	if (nr_terms > a->complexity()) {
-		IRExpr *res = a->asIRExpr(varsToExprs);
-		printf("Turns into IR expression ");
-		ppIRExpr(res, stdout);
-		printf("\n");
-		return res;
+		return a->asIRExpr(varsToExprs);
 	} else {
 		return inp;
 	}
 }
+
+static IRExpr *
+optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
+{
+	bool ign;
+	ign = false;
+	e = optimiseIRExprFP(e, opt, &ign);
+	e = internIRExpr(e);
+	e = simplifyIRExprAsBoolean(e);
+	e = optimiseIRExprFP(e, opt, &ign);
+	return e;
+}
+
 
 int
 main(int argc, char *argv[])
