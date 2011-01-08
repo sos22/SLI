@@ -5939,6 +5939,8 @@ protected:
 	char *mkName() const {
 		char *acc = NULL;
 		char *acc2;
+		if (args.size() == 0)
+			return my_asprintf("(%c)", op());
 		for (unsigned x = 0; x < args.size(); x++) {
 			if (x == 0)
 				acc2 = my_asprintf("(%s", args[x]->name());
@@ -5958,13 +5960,22 @@ public:
 	}
 	void addChild(CnfExpression *e) { args.push_back(e); }
 	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) {
-		IRExpr *work = IRExpr_Associative(irexpr_op(), NULL);
-		for (unsigned x = 0; x < args.size(); x++) {
-			addArgumentToAssoc(work, args[x]->asIRExpr(m));
+		if (args.size() == 0) {
+			if (irexpr_op() == Iop_Or1)
+				return IRExpr_Const(IRConst_U1(0));
+			else
+				return IRExpr_Const(IRConst_U1(1));
+		} else {
+			IRExpr *work = IRExpr_Associative(irexpr_op(), NULL);
+			for (unsigned x = 0; x < args.size(); x++) {
+				addArgumentToAssoc(work, args[x]->asIRExpr(m));
+			}
+			return work;
 		}
-		return work;
 	}
 	int complexity() {
+		if (args.size() == 0)
+			return 0;
 		int acc = 1;
 		for (unsigned x = 0; x < args.size(); x++)
 			acc += args[x]->complexity();
@@ -6172,6 +6183,7 @@ CnfAnd::optimise()
 	bool progress;
 	do {
 		progress = false;
+		/* First rule: (A | b) & (A | ~b) -> just A. */
 		for (unsigned i = 0; i < args.size(); i++) {
 			for (unsigned j = i + 1; j < args.size(); j++) {
 				/* If two terms differ in a single
@@ -6232,6 +6244,68 @@ CnfAnd::optimise()
 				j--;
 			}
 		}
+
+		/* Second rule: A & (A | B) -> A */
+		for (unsigned i = 0; i < args.size(); i++) {
+			for (unsigned j = 0; j < args.size(); j++) {
+				if (i == j)
+					continue;
+				CnfOr *argi = getArg(i);
+				CnfOr *argj = getArg(j);
+				bool iSubsetJ = true;
+				for (unsigned k = 0; iSubsetJ && k < argi->args.size(); k++) {
+					bool present = false;
+					for (unsigned m = 0; !present && m < argj->args.size(); m++) {
+						if (argi->getArg(k)->getId() ==
+						    argj->getArg(m)->getId() &&
+						    !!dynamic_cast<CnfNot *>(argi->getArg(k)) ==
+						    !!dynamic_cast<CnfNot *>(argj->getArg(m)))
+							present = true;
+					}
+					if (!present)
+						iSubsetJ = false;
+				}
+				if (iSubsetJ) {
+					/* argi is a subset of argj,
+					 * so argj can be safely
+					 * eliminated. */
+					progress = true;
+					args.erase(args.begin() + j);
+					clearName();
+					/* Start again from the
+					 * beginning. */
+					i = j = 0;
+				}
+			}
+		}
+
+		/* Third rule: a & (B | ~a) -> a & B. */
+		for (unsigned i = 0; i < args.size(); i++) {
+			CnfOr *argi = getArg(i);
+			if (argi->args.size() != 1)
+				continue;
+			CnfAtom *argiA = argi->getArg(0);
+			for (unsigned j = 0; j < args.size(); j++) {
+				if (j == i)
+					continue;
+				CnfOr *argj = getArg(j);
+				for (unsigned k = 0; k < argj->args.size(); k++) {
+					CnfAtom *argjA = argj->getArg(k);
+					if (argjA->getId() != argiA->getId())
+						continue;
+					/* Otherwise, the second rule
+					   should have already
+					   eliminated argj. */
+					assert(!!dynamic_cast<CnfNot *>(argjA) !=
+					       !!dynamic_cast<CnfNot *>(argiA));
+					progress = true;
+					argj->args.erase(argj->args.begin() + k);
+					argj->clearName();
+					k--;
+				}
+			}
+		}
+
 	} while (progress);
 }
 
