@@ -2910,11 +2910,11 @@ public:
 		: oracle(_oracle)
 	{
 	}
-	void store(Thread *thr, unsigned long addr, unsigned long val);
+	void store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms);
 	void visit(HeapVisitor &hv) {}
 };
 void
-CIALEventRecorder::store(Thread *thr, unsigned long addr, unsigned long val)
+CIALEventRecorder::store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms)
 {
 	if (oracle->interesting_addresses.count(addr) == 0)
 		return;
@@ -4048,12 +4048,12 @@ class MemTraceExtractor : public EventRecorder {
 public:
 	Oracle *oracle;
 	MemTraceExtractor(Oracle *o) : oracle(o) {}
-	void store(Thread *thr, unsigned long addr, unsigned long val);
+	void store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms);
 	void load(Thread *thr, unsigned long addr);
 	void visit(HeapVisitor &hv) {}
 };
 void
-MemTraceExtractor::store(Thread *thr, unsigned long addr, unsigned long val)
+MemTraceExtractor::store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms)
 {
 	unsigned long rsp;
 	if (thr->tid != oracle->crashingTid)

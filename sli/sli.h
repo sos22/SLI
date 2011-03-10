@@ -840,7 +840,7 @@ public:
 	virtual void instruction(Thread *thr, unsigned long rip, MachineState *ms)
 	{
 	}
-	virtual void store(Thread *thr, unsigned long addr, unsigned long val)
+	virtual void store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms)
 	{
 	}
 	virtual void load(Thread *thr, unsigned long addr)

@@ -1652,7 +1652,7 @@ interpretStatement(IRStmt *stmt,
 							  stmt->Ist.Store.data));
 		if (ms->addressSpace->isWritable(addr.lo, size, thr)) {
 			if (er)
-				er->store(thr, addr.lo, data.lo);
+				er->store(thr, addr.lo, data.lo, ms);
 			return StoreEvent::get(thr->tid, addr.lo, size, data);
 		}
 		return SignalEvent::get(thr->tid, 11, addr.lo);
