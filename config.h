@@ -19,3 +19,11 @@
 #ifndef DROP_BRANCHES_DEPTH
 #define DROP_BRANCHES_DEPTH 10
 #endif
+
+#ifndef MALLOC_ADDRESS
+#define MALLOC_ADDRESS 0
+#endif
+
+#ifndef FREE_ADDRESS
+#define FREE_ADDRESS 0
+#endif

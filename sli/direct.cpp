@@ -267,6 +267,10 @@ public:
 	virtual unsigned long eval(Thread *thr,
 				   MachineState *ms,
 				   const concreteStoresT &stores) = 0;
+	virtual unsigned long discoverRelevantMallocs(Thread *thr,
+						      MachineState *ms,
+						      const concreteStoresT &stores,
+						      std::set<unsigned long> &out) = 0;
 
 	CrashExpression *simplify(unsigned hardness = 1) {
 		if (simplified_hardness < hardness) {
@@ -285,7 +289,7 @@ public:
 		return simplified;
 	}
 	virtual bool pointsAtStack() const { return false; }
-
+	
 	void relocate(CrashExpression *target, size_t sz)
 	{
 		if (target->next_intern)
@@ -347,6 +351,13 @@ public:
 	{
 		return thr->temporaries[tmp].lo;
 	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const std::vector<concrete_store> &cs,
+					      std::set<unsigned long> &out)
+	{
+		return eval(thr, ms, cs);
+	}
 };
 
 class CrashExpressionRegister : public CrashExpression {
@@ -385,6 +396,13 @@ public:
 	{
 		return thr->regs.get_reg(offset / 8);
 	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const std::vector<concrete_store> &cs,
+					      std::set<unsigned long> &out)
+	{
+		return eval(thr, ms, cs);
+	}
 };
 
 class CrashExpressionConst : public CrashExpression {
@@ -419,6 +437,13 @@ public:
 			   const std::vector<concrete_store> &)
 	{
 		return value;
+	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const std::vector<concrete_store> &cs,
+					      std::set<unsigned long> &out)
+	{
+		return eval(thr, ms, cs);
 	}
 };
 
@@ -472,6 +497,13 @@ public:
 	{
 		/* Guess wildly. */
 		return 0;
+	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const std::vector<concrete_store> &cs,
+					      std::set<unsigned long> &out)
+	{
+		return eval(thr, ms, cs);
 	}
 };
 
@@ -558,7 +590,23 @@ public:
 			if (it->addr == concrete_addr)
 				return it->value;
 		}
-		return fetch(addr->eval(thr, ms, stores), ms, thr);
+		return fetch(concrete_addr, ms, thr);
+	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const std::vector<concrete_store> &cs,
+					      std::set<unsigned long> &out)
+	{
+		unsigned long concrete_addr = addr->discoverRelevantMallocs(thr, ms, cs, out);
+		out.insert(ms->addressSpace->vamap->findMallocForAddr(concrete_addr));
+		for (std::vector<concrete_store>::const_reverse_iterator it = cs.rbegin();
+		     it != cs.rend();
+		     it++) {
+			if (it->addr == concrete_addr)
+				return it->value;
+		}
+		return fetch(concrete_addr, ms, thr);
+
 	}
 };
 
@@ -631,12 +679,20 @@ public:
 			return this;					\
 		return get(l, r);					\
 	}								\
-	unsigned long eval(Thread *thr,			\
-			   MachineState *ms,		\
+	unsigned long eval(Thread *thr,					\
+			   MachineState *ms,				\
 			   const concreteStoresT &stores)		\
 	{								\
 		return l->eval(thr, ms, stores) op			\
 			r->eval(thr, ms, stores);			\
+	}								\
+	unsigned long discoverRelevantMallocs(Thread *thr,		\
+					      MachineState *ms,		\
+					      const concreteStoresT &stores,\
+					      std::set<unsigned long> &out) \
+	{								\
+		return l->discoverRelevantMallocs(thr, ms, stores, out) op \
+			r->discoverRelevantMallocs(thr, ms, stores, out); \
 	}								\
 	};
 
@@ -746,6 +802,13 @@ protected:
 			   const concreteStoresT &stores)
 	{
 		return (long)l->eval(thr, ms, stores) < (long)r->eval(thr, ms, stores);
+	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const concreteStoresT &stores,
+					      std::set<unsigned long> &out)
+	{
+		return (long)l->discoverRelevantMallocs(thr, ms, stores, out) < (long)r->discoverRelevantMallocs(thr, ms, stores, out);
 	}
 };
 
@@ -931,6 +994,10 @@ public:
 	unsigned long eval(Thread *thr,			\
 			   MachineState *ms,		\
 			   const concreteStoresT &stores);		\
+	unsigned long discoverRelevantMallocs(Thread *thr,		\
+					      MachineState *ms,		\
+					      const concreteStoresT &stores, \
+					      std::set<unsigned long> &out); \
 	};
 
 mk_unop(Neg, -)
@@ -965,6 +1032,35 @@ CrashExpressionBadAddr::eval(Thread *thr, MachineState *ms,
 			     const concreteStoresT &stores)
 {
 	unsigned long a = l->eval(thr, ms, stores);
+	if (ms->addressSpace->isAccessible(a, 8, false, thr))
+		return 0;
+	else
+		return 1;
+}
+
+
+unsigned long
+CrashExpressionNeg::discoverRelevantMallocs(Thread *thr, MachineState *ms,
+					    const concreteStoresT &stores,
+					    std::set<unsigned long> &out)
+{
+	return -l->discoverRelevantMallocs(thr, ms, stores, out);
+}
+
+unsigned long
+CrashExpressionNot::discoverRelevantMallocs(Thread *thr, MachineState *ms,
+					    const concreteStoresT &stores,
+					    std::set<unsigned long> &out)
+{
+	return !l->discoverRelevantMallocs(thr, ms, stores, out);
+}
+
+unsigned long
+CrashExpressionBadAddr::discoverRelevantMallocs(Thread *thr, MachineState *ms,
+						const concreteStoresT &stores,
+						std::set<unsigned long> &out)
+{
+	unsigned long a = l->discoverRelevantMallocs(thr, ms, stores, out);
 	if (ms->addressSpace->isAccessible(a, 8, false, thr))
 		return 0;
 	else
@@ -1158,6 +1254,11 @@ public:
 			   const concreteStoresT &stores) {
 		return l->eval(thr, ms, stores);
 	}
+	unsigned long discoverRelevantMallocs(Thread *thr, MachineState *ms,
+					      const concreteStoresT &stores,
+					      std::set<unsigned long> &out) {
+		return l->discoverRelevantMallocs(thr, ms, stores, out);
+	}
 };
 
 class CrashExpressionWiden : public CrashExpressionUnary {
@@ -1192,6 +1293,16 @@ public:
 	unsigned long eval(Thread *thr, MachineState *ms,
 			   const concreteStoresT &stores) {
 		long a = l->eval(thr, ms, stores);
+		a <<= 64 - start;
+		a >>= 64 - start;
+		if (end != 64)
+			a &= (1 << end) - 1;
+		return a;
+	}
+	unsigned long discoverRelevantMallocs(Thread *thr, MachineState *ms,
+					      const concreteStoresT &stores,
+					      std::set<unsigned long> &out) {
+		long a = l->discoverRelevantMallocs(thr, ms, stores, out);
 		a <<= 64 - start;
 		a >>= 64 - start;
 		if (end != 64)
@@ -1276,6 +1387,18 @@ public:
 	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
+		return 0;
+	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const concreteStoresT &stores,
+					      std::set<unsigned long> &out)
+	{
+		a->discoverRelevantMallocs(thr, ms, stores, out);
+		b->discoverRelevantMallocs(thr, ms, stores, out);
+		c->discoverRelevantMallocs(thr, ms, stores, out);
+		d->discoverRelevantMallocs(thr, ms, stores, out);
+		e->discoverRelevantMallocs(thr, ms, stores, out);
 		return 0;
 	}
 	void build_relevant_address_list(Thread *thr,
@@ -1367,6 +1490,17 @@ public:
 		   this, we're pretty much boned. */
 		return 0;
 	}
+	unsigned long discoverRelevantMallocs(Thread *thr,
+					      MachineState *ms,
+					      const concreteStoresT &stores,
+					      std::set<unsigned long> &out)
+	{
+		a->discoverRelevantMallocs(thr, ms, stores, out);
+		b->discoverRelevantMallocs(thr, ms, stores, out);
+		c->discoverRelevantMallocs(thr, ms, stores, out);
+		d->discoverRelevantMallocs(thr, ms, stores, out);
+		return 0;
+	}
 	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
 					 gc_map<unsigned long, bool> *addresses,
@@ -1446,6 +1580,15 @@ public:
 			return zero->eval(thr, ms, stores);
 		else
 			return nzero->eval(thr, ms, stores);
+	}
+	unsigned long discoverRelevantMallocs(Thread *thr, MachineState *ms,
+					      const concreteStoresT &stores,
+					      std::set<unsigned long> &out)
+	{
+		if (cond->discoverRelevantMallocs(thr, ms, stores, out) == 0)
+			return zero->discoverRelevantMallocs(thr, ms, stores, out);
+		else
+			return nzero->discoverRelevantMallocs(thr, ms, stores, out);
 	}
 	void build_relevant_address_list(Thread *thr,
 					 MachineState *ms,
@@ -1685,6 +1828,9 @@ protected:
 	}
 
 public:
+	std::set<unsigned long> relevantMallocs;
+	unsigned long validRangeStart;
+	unsigned long validRangeEnd;
 
 	static CrashMachineNode *leaf(unsigned long _origin_rip,
 				      CrashExpression *e,
@@ -1892,6 +2038,10 @@ public:
 					 gc_map<unsigned long, bool> *addresses,
 					 concreteStoresT &stores);
 
+	void discoverRelevantMallocs(Thread *thr, MachineState *ms, concreteStoresT &cs,
+				     std::set<unsigned long> &out);
+	void resolveValidRange(MachineState *ms);
+
 	mutable bool have_hash;
 	mutable unsigned long _hash;
 
@@ -1997,6 +2147,7 @@ class CrashMachine : public GarbageCollected<CrashMachine> {
 	void calc_relevant_addresses_snapshot(Thread *ts,
 					      MachineState *ms);
 public:
+	void resolveValidRanges(MachineState *ms);
 	typedef gc_map<CrashTimestamp,
 		       std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> *>,
 		       __default_hash_function<CrashTimestamp>,
@@ -2080,12 +2231,77 @@ public:
 			CrashMachineNode *cmn = cm->get(ts, 0);
 			assert(cmn != NULL);
 			concreteStoresT stores;
-			new_cm->set(ts, cmn->foldInRegisters(thr, ms, stores), true);
+			cmn = cmn->foldInRegisters(thr, ms, stores);
+			cmn->discoverRelevantMallocs(thr, ms, stores, cmn->relevantMallocs);
+			new_cm->set(ts, cmn, true);
 		}
 	}
 	void visit(HeapVisitor &hv) { hv(cm); hv(new_cm); }
 };
 
+/* Evaluate the machine, recording all of the loads and stores from or
+   to memory allocated with malloc(). */
+void
+CrashMachineNode::discoverRelevantMallocs(Thread *thr, MachineState *ms, concreteStoresT &cs, std::set<unsigned long> &out)
+{
+	unsigned sz = cs.size();
+	for (abstractStoresT::iterator it = stores.begin();
+	     it != stores.end();
+	     it++) {
+		unsigned long d = it->data->discoverRelevantMallocs(thr, ms, cs, out);
+		unsigned long a = it->addr->discoverRelevantMallocs(thr, ms, cs, out);
+		out.insert(ms->addressSpace->vamap->findMallocForAddr(a));
+		cs.push_back(concrete_store(a, d));
+	}
+	switch (type) {
+	case CM_NODE_LEAF:
+		leafCond->discoverRelevantMallocs(thr, ms, cs, out);
+		break;
+	case CM_NODE_BRANCH:
+		if (branchCond->discoverRelevantMallocs(thr, ms, cs, out))
+			trueTarget->discoverRelevantMallocs(thr, ms, cs, out);
+		else
+			falseTarget->discoverRelevantMallocs(thr, ms, cs, out);
+		break;
+	case CM_NODE_STUB:
+		break;
+	}
+	cs.resize(sz);
+}
+
+void
+CrashMachineNode::resolveValidRange(MachineState *ms)
+{
+	unsigned long key;
+	unsigned long death;
+
+	validRangeStart = 0;
+	validRangeEnd = ms->addressSpace->vamap->malloc_cntr + 1;
+	for (std::set<unsigned long>::iterator it = relevantMallocs.begin();
+	     it != relevantMallocs.end();
+	     it++) {
+		key = *it;
+		if (key > validRangeStart)
+			validRangeStart = key;
+		death = ms->addressSpace->vamap->mallocKeyToDeathTime(key);
+		if (death < validRangeEnd)
+			validRangeEnd = death;
+		printf("Key %ld has death %ld\n", key, death);
+	}
+}
+
+void
+CrashMachine::resolveValidRanges(MachineState *ms)
+{
+	for (contentT::iterator it = content->begin();
+	     it != content->end();
+	     it++) {
+		for (std::vector<CrashMachineNode *>::iterator it2 = it.value().first.begin();
+		     it2 != it.value().first.end();
+		     it2++)
+			(*it2)->resolveValidRange(ms);
+	}
+}
 
 CrashMachine *
 CrashMachine::foldRegisters(VexPtr<MachineState > &ms,
@@ -2101,6 +2317,7 @@ CrashMachine::foldRegisters(VexPtr<MachineState > &ms,
 	start_replay();
 	i.replayLogfile(lr, ptr, tok, NULL, dummy, er);
 	stop_replay();
+	resolveValidRanges(i.currentState);
 	return frer->new_cm;
 }
 
@@ -2864,10 +3081,12 @@ public:
 		CrashTimestamp rip;
 		unsigned long addr;
 		unsigned long val;
+		unsigned long malloc_clock;
 		address_log_entry(const CrashTimestamp &_rip,
 				  unsigned long _addr,
-				  unsigned long _val)
-			: addr(_addr), val(_val)
+				  unsigned long _val,
+				  unsigned long _malloc_clock)
+			: addr(_addr), val(_val), malloc_clock(_malloc_clock)
 		{
 			rip = _rip;
 		}
@@ -2923,7 +3142,8 @@ CIALEventRecorder::store(Thread *thr, unsigned long addr, unsigned long val, Mac
 		Oracle::address_log_entry(
 			CrashTimestamp(thr->tid, thr->regs.rip(), thr->currentCallStack),
 			addr,
-			val));
+			val,
+			ms->addressSpace->vamap->malloc_cntr));
 }
 void
 Oracle::collect_interesting_access_log(
@@ -4291,9 +4511,13 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 		for (std::vector<CrashMachineNode *>::reverse_iterator it = cmns.rbegin();
 		     !crashes && it != cmns.rend();
 		     it++) {
-			CrashMachineNode *new_cmn = simplify_cmn((*it)->resolveLoads(memory, ms, cs, addrsRead));
-			if (new_cmn->willDefinitelyCrash())
-				crashes = true;
+			CrashMachineNode *cmn = *it;
+			if (1 || (cmn->validRangeStart <= m_it->malloc_clock &&
+				  cmn->validRangeEnd > m_it->malloc_clock) ) {
+				CrashMachineNode *new_cmn = simplify_cmn(cmn->resolveLoads(memory, ms, cs, addrsRead));
+				if (new_cmn->willDefinitelyCrash())
+					crashes = true;
+			}
 		}
 		if (crashes) {
 			if (have_first_remote_good) {

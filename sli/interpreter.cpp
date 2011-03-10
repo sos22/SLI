@@ -1628,6 +1628,7 @@ interpretStatement(IRStmt *stmt,
 			er->instruction(thr,
 					thr->regs.get_reg(REGISTER_IDX(RIP)),
 					ms);
+		HandleMallocFree(thr, ms->addressSpace);
 		return DUMMY_EVENT;
 
 	case Ist_AbiHint:

@@ -213,6 +213,8 @@ public:
 	unsigned long set_child_tid;
 	bool exitted;
 	bool crashed;
+	unsigned long malloc_return;
+	unsigned long malloc_size;
 
 	VexPtr<IRSB, &ir_heap> currentIRSB;
 	unsigned long currentIRSBRip;
@@ -363,6 +365,34 @@ public:
 		     unsigned long size,
 		     Protection prot);
 	void unmap(unsigned long start, unsigned long size);
+
+	void malloced_block(unsigned long start, unsigned long size);
+	void freed_block(unsigned long start);
+	unsigned long malloc_cntr;
+	unsigned long findMallocForAddr(unsigned long addr);
+	struct malloc_list_entry : public GarbageCollected<malloc_list_entry> {
+		bool isFree;
+		unsigned long start;
+		unsigned long size;
+		unsigned long name;
+		malloc_list_entry *prev;
+	malloc_list_entry(unsigned long _start, unsigned long _size, unsigned long _name,
+			  malloc_list_entry *_prev)
+		: isFree(false), start(_start), size(_size), name(_name),
+		  prev(_prev)
+		{
+		}
+	malloc_list_entry(unsigned long _start, unsigned long _name,
+			  malloc_list_entry *_prev)
+		: isFree(true), start(_start), size(0), name(_name),
+		  prev(_prev)
+		{
+		}
+		void visit(HeapVisitor &hv) { hv(prev); }
+		NAMED_CLASS
+	};
+	struct malloc_list_entry *last_malloc_list_entry;
+	unsigned long mallocKeyToDeathTime(unsigned long key);
 
 	static VAMap *empty();
 	VAMap *dupeSelf();
@@ -1254,6 +1284,8 @@ ThreadEvent *interpretStatement(IRStmt *stmt,
 				EventRecorder *er,
 				MachineState *ms,
 				IRSB *irsb);
+
+void HandleMallocFree(Thread *thr, AddressSpace *as);
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */
