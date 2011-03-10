@@ -4244,7 +4244,7 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 			   std::set<SuggestedFix> &out)
 {
 	std::map<unsigned long, unsigned long> memory;
-	unsigned nr_good, nr_bad, nr_unknown;
+	unsigned nr_good, nr_bad;
 	bool definitelyCrash = true;
 	bool definitelyNotCrash = true;
 
@@ -4276,7 +4276,6 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 
 	nr_good = 0;
 	nr_bad = 0;
-	nr_unknown = 0;
 	bool in_remote_csect = false;
 	bool have_first_remote_good = false;
 	AtomicBlock currentRemoteBlock;
@@ -4288,25 +4287,22 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 		memory[m_it->addr] = m_it->val;
 		concreteStoresT cs;
 
-		definitelyCrash = true;
-		definitelyNotCrash = true;
+		bool crashes = false;
 		for (std::vector<CrashMachineNode *>::reverse_iterator it = cmns.rbegin();
-		     it != cmns.rend();
+		     !crashes && it != cmns.rend();
 		     it++) {
 			CrashMachineNode *new_cmn = simplify_cmn((*it)->resolveLoads(memory, ms, cs, addrsRead));
-			if (!new_cmn->willDefinitelyCrash())
-				definitelyCrash = false;
-			if (!new_cmn->willDefinitelyNotCrash())
-				definitelyNotCrash = false;
+			if (new_cmn->willDefinitelyCrash())
+				crashes = true;
 		}
-		if (definitelyCrash && !definitelyNotCrash) {
+		if (crashes) {
 			if (have_first_remote_good) {
 				if (!in_remote_csect)
 					currentRemoteBlock.events.push_back(m_it->rip);
 				in_remote_csect = true;
 			}
 			nr_bad++;
-		} else if (definitelyNotCrash && !definitelyCrash) {
+		} else {
 			if (in_remote_csect) {
 				currentRemoteBlock.events.push_back(m_it->rip);
 				sab.remote.insert(currentRemoteBlock);
@@ -4315,15 +4311,12 @@ findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
 			in_remote_csect = false;
 			have_first_remote_good = true;
 			nr_good++;
-		} else {
-			nr_unknown++;
 		}
 	}
 	if (in_remote_csect)
 		sab.remote.insert(currentRemoteBlock);
 	if (nr_good != 0) {
 		sab.bad = nr_bad;
-		sab.unknown = nr_unknown;
 		sab.good = nr_good;
 		CollectLoadsMapper clm(sab.local.events);
 		for (std::vector<CrashMachineNode *>::iterator cmn = cmns.begin();
