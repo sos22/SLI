@@ -2026,6 +2026,8 @@ public:
 		if (extend && content->hasKey(ts)) {
 			std::pair<std::vector<CrashMachineNode *>,
 				gc_map<unsigned long, bool> *> &slot(content->get(ts));
+			if (slot.first.size() >= 50)
+				return;
 			for (std::vector<CrashMachineNode *>::iterator it=
 				     slot.first.begin();
 			     it != slot.first.end();
@@ -2210,15 +2212,7 @@ CrashMachine::deduplicate()
 					newContent->set(origin, std::pair<std::vector<CrashMachineNode *>, gc_map<unsigned long, bool> *>(v, s));
 				}
 				kept++;
-				printf("Keep %s (%s) at %p\n",
-				       it.key().name(),
-				       (*it2)->name(),
-				       *it2);
 			} else {
-				printf("Drop %s (%s); duplicates %p\n",
-				       it.key().name(),
-				       (*it2)->name(),
-				       cursor);
 				dropped++;
 			}
 		}
@@ -2550,6 +2544,10 @@ CrashExpression::get(IRExpr *e)
 		case Iop_Sar16:
 		case Iop_Sar32:
 		case Iop_Sar64:
+		case Iop_Shr8:
+		case Iop_Shr16:
+		case Iop_Shr32:
+		case Iop_Shr64:
 			return CrashExpressionShl::get(
 				CrashExpression::get(e->Iex.Binop.arg1),
 				CrashExpressionNeg::get(
@@ -4761,8 +4759,6 @@ main(int argc, char *argv[])
 						    cm,
 						    oracle);
 			cmn = simplify_cmn(cmn);
-			printf("Before dropping late stores %s\n",
-			       cmn->name());
 			cmn = drop_late_stores(cmn);
 			cmn = simplify_cmn(cmn);
 			cm->set(*it, cmn, false);
@@ -4858,6 +4854,7 @@ main(int argc, char *argv[])
 	cm->deduplicate();
 	timing("Done CMN de-duplicate 2\n");
 
+#if 0
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
@@ -4865,8 +4862,11 @@ main(int argc, char *argv[])
 		       cmn_it.key().name(),
 		       cmn_it.value().first[0]->name());
 	}
+#endif
+
 	snapshotMs = sle.ms->dupeSelf();
 	cm = cm->foldRegisters(snapshotMs, lf, sle.ptr, ALLOW_GC);
+#if 0
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
@@ -4878,6 +4878,7 @@ main(int argc, char *argv[])
 			       cmn_it.key().name(),
 			       (*it2)->name());
 	}
+#endif
 
 	timing("Done fold registers.\n");
 	cm->deduplicate();
@@ -4891,6 +4892,7 @@ main(int argc, char *argv[])
 	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
 	     cmn_it != cm->content->end();
 	     cmn_it++) {
+		LibVEX_maybe_gc(ALLOW_GC);
 		timing("calculating critical sections for %s",
 		       cmn_it.key().name());
 		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms,
