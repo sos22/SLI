@@ -32,6 +32,14 @@ static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__prin
 char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 char *vex_vasprintf(const char *fmt, va_list args);
 
+class ReplayEngineTimer {
+public:
+	ReplayEngineTimer();
+	~ReplayEngineTimer();
+	void suspend() {}
+	void unsuspend() {}
+};
+
 class Named {
 	mutable char *_name;
 protected:
@@ -191,7 +199,8 @@ class Thread : public GarbageCollected<Thread> {
 			     unsigned long addr,
 			     unsigned size,
 			     MachineState *ms,
-			     EventRecorder *er);
+			     EventRecorder *er,
+			     ReplayEngineTimer &ret);
 
 	void amd64g_dirtyhelper_loadF80le(MachineState *, IRTemp tmp, unsigned long addr);
 	void amd64g_dirtyhelper_storeF80le(MachineState *, unsigned long addr, unsigned long _f64);
@@ -199,7 +208,8 @@ class Thread : public GarbageCollected<Thread> {
 	void redirectGuest(unsigned long rip);
 
 public:
-	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er);
+	ThreadEvent *do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er,
+				   ReplayEngineTimer &ret);
 
 	std::vector<unsigned long> currentCallStack;
 	bool inInfrastructure;
@@ -261,7 +271,8 @@ public:
 				       VexPtr<MachineState > &ms,
 				       const LogReaderPtr &ptr,
 				       GarbageCollectionToken t,
-				       VexPtr<EventRecorder> &er);
+				       VexPtr<EventRecorder> &er,
+				       ReplayEngineTimer &ret);
 
 	static Thread *initialThread(const LogRecordInitialRegisters &initRegs);
 	Thread *fork(unsigned newPid);
@@ -1227,7 +1238,8 @@ void process_memory_records(VexPtr<AddressSpace > &addrSpace,
 			    LogReaderPtr startOffset,
 			    LogReaderPtr *endOffset,
 			    VexPtr<LogWriter> &lw,
-			    GarbageCollectionToken tok);
+			    GarbageCollectionToken tok,
+			    ReplayEngineTimer &ret);
 
 void debugger_attach(void);
 
@@ -1283,7 +1295,8 @@ ThreadEvent *interpretStatement(IRStmt *stmt,
 				Thread *thr,
 				EventRecorder *er,
 				MachineState *ms,
-				IRSB *irsb);
+				IRSB *irsb,
+				ReplayEngineTimer &ret);
 
 void HandleMallocFree(Thread *thr, AddressSpace *as);
 

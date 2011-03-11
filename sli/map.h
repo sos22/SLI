@@ -69,7 +69,7 @@ class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, vis
 				return NULL;
 			nr_heads = 128;
 			static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-			heads = (hash_entry **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(heads[0]) * nr_heads, &__las);
+			heads = (hash_entry **)__LibVEX_Alloc_Bytes(heap, sizeof(heads[0]) * nr_heads, &__las);
 		}
 
 		unsigned long h = hashfn(k);

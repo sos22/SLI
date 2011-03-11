@@ -1,5 +1,6 @@
 #include <string.h>
 #include <asm/unistd.h>
+#include <sys/time.h>
 
 #include "libvex.h"
 #include "libvex_ir.h"
@@ -177,18 +178,21 @@ Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsi
 
 ThreadEvent *
 Thread::do_load(IRTemp tmp, unsigned long addr, unsigned size, MachineState *ms,
-		EventRecorder *er)
+		EventRecorder *er, ReplayEngineTimer &ret)
 {
 	if (ms->addressSpace->isReadable(addr, size, this)) {
-		if (er)
+		if (er) {
+			ret.suspend();
 			er->load(this, addr);
+			ret.unsuspend();
+		}
 		return LoadEvent::get(tid, tmp, addr, size);
 	} else
 		return SignalEvent::get(tid, 11, addr);
 }
 
 ThreadEvent *
-Thread::do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er)
+Thread::do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er, ReplayEngineTimer &ret)
 {
 	struct expression_result args[6];
 	unsigned x;
@@ -207,15 +211,15 @@ Thread::do_dirty_call(IRDirty *details, MachineState *ms, EventRecorder *er)
 	if (!strcmp(details->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 		return RdtscEvent::get(tid, details->tmp);
 	} else if (!strcmp(details->cee->name, "helper_load_8")) {
-		return do_load(details->tmp, args[0].lo, 1, ms, er);
+		return do_load(details->tmp, args[0].lo, 1, ms, er, ret);
 	} else if (!strcmp(details->cee->name, "helper_load_16")) {
-		return do_load(details->tmp, args[0].lo, 2, ms, er);
+		return do_load(details->tmp, args[0].lo, 2, ms, er, ret);
 	} else if (!strcmp(details->cee->name, "helper_load_32")) {
-		return do_load(details->tmp, args[0].lo, 4, ms, er);
+		return do_load(details->tmp, args[0].lo, 4, ms, er, ret);
 	} else if (!strcmp(details->cee->name, "helper_load_64")) {
-		return do_load(details->tmp, args[0].lo, 8, ms, er);
+		return do_load(details->tmp, args[0].lo, 8, ms, er, ret);
 	} else if (!strcmp(details->cee->name, "helper_load_128")) {
-		return do_load(details->tmp, args[0].lo, 16, ms, er);
+		return do_load(details->tmp, args[0].lo, 16, ms, er, ret);
 	} else if (!strcmp(details->cee->name, "amd64g_dirtyhelper_CPUID_sse3_and_cx16")) {
 		amd64g_dirtyhelper_CPUID_sse3_and_cx16(&regs);
 		return NULL;
@@ -1615,7 +1619,8 @@ interpretStatement(IRStmt *stmt,
 		   Thread *thr,
 		   EventRecorder *er,
 		   MachineState *ms,
-		   IRSB *irsb)
+		   IRSB *irsb,
+		   ReplayEngineTimer &ret)
 {
 	switch (stmt->tag) {
 	case Ist_NoOp:
@@ -1624,10 +1629,13 @@ interpretStatement(IRStmt *stmt,
 	case Ist_IMark:
 		thr->regs.set_reg(REGISTER_IDX(RIP),
 				  (stmt->Ist.IMark.addr));
-		if (er)
+		if (er) {
+			ret.suspend();
 			er->instruction(thr,
 					thr->regs.get_reg(REGISTER_IDX(RIP)),
 					ms);
+			ret.unsuspend();
+		}
 		HandleMallocFree(thr, ms->addressSpace);
 		return DUMMY_EVENT;
 
@@ -1652,8 +1660,11 @@ interpretStatement(IRStmt *stmt,
 		unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
 							  stmt->Ist.Store.data));
 		if (ms->addressSpace->isWritable(addr.lo, size, thr)) {
-			if (er)
+			if (er) {
+				ret.suspend();
 				er->store(thr, addr.lo, data.lo, ms);
+				ret.unsuspend();
+			}
 			return StoreEvent::get(thr->tid, addr.lo, size, data);
 		}
 		return SignalEvent::get(thr->tid, 11, addr.lo);
@@ -1700,7 +1711,7 @@ interpretStatement(IRStmt *stmt,
 	}
 
 	case Ist_Dirty:
-		return thr->do_dirty_call(stmt->Ist.Dirty.details, ms, er);
+		return thr->do_dirty_call(stmt->Ist.Dirty.details, ms, er, ret);
 
 	case Ist_Exit: {
 		if (stmt->Ist.Exit.guard) {
@@ -1733,7 +1744,8 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 		   VexPtr<MachineState > &ms,
 		   const LogReaderPtr &ptr,
 		   GarbageCollectionToken t,
-		   VexPtr<EventRecorder> &er)
+		   VexPtr<EventRecorder> &er,
+		   ReplayEngineTimer &ret)
 {
 	while (1) {
 		if (!ths->currentIRSB) {
@@ -1751,7 +1763,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			IRStmt *stmt = ths->currentIRSB->stmts[ths->currentIRSBOffset];
 			ths->currentIRSBOffset++;
 
-			ThreadEvent *evt = interpretStatement(stmt, ths, er, ms, ths->currentIRSB);
+			ThreadEvent *evt = interpretStatement(stmt, ths, er, ms, ths->currentIRSB, ret);
 			if (evt == DUMMY_EVENT)
 				return NULL;
 			else if (evt == FINISHED_BLOCK)
@@ -1831,6 +1843,8 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 				VexPtr<LogWriter> &lw,
 				VexPtr<EventRecorder> &er)
 {
+	ReplayEngineTimer ret;
+
 	unsigned long event_counter = 0;
 	VexPtr<LogRecord, &ir_heap> lr;
 	bool appendedRecord = false;
@@ -1841,7 +1855,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 	   processed eagerly. */
 	{
 		VexPtr<AddressSpace > as(currentState->addressSpace);
-		process_memory_records(as, lf, ptr, &ptr, lw, t);
+		process_memory_records(as, lf, ptr, &ptr, lw, t, ret);
 		if (eof)
 			*eof = ptr;
 		ptr2 = ptr;
@@ -1865,7 +1879,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 		VexPtr<Thread > thr(currentState->findThread(lr->thread()));
 		assert(thr);
 		assert(!thr->exitted);
-		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t, er);
+		ThreadEvent *evt = thr->runToEvent(thr, currentState, ptr2, t, er, ret);
 
 		while (evt && lr) {
 			if (loud_mode)
@@ -1878,7 +1892,9 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 			evt = oldEvent->replay(lr, &currentState.get(), consumed, ptr);
 			if (consumed) {
 				if (lw && !appendedRecord) {
+					ret.suspend();
 					lw->append(lr);
+					ret.unsuspend();
 					appendedRecord = true;
 				}
 				if (!lw) {
@@ -1906,7 +1922,7 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 			/* Memory records are special and should always be
 			   processed eagerly. */
 			VexPtr<AddressSpace > as(currentState->addressSpace);
-	                process_memory_records(as, lf, ptr, &ptr, lw, t);
+	                process_memory_records(as, lf, ptr, &ptr, lw, t, ret);
 			if (eof)
 				*eof = ptr;
 			ptr2 = ptr;
@@ -1915,4 +1931,29 @@ void Interpreter::replayLogfile(VexPtr<LogReader> &lf,
 	printf("Done replay, counter %ld\n", event_counter);
 }
 
-#define MK_INTERPRETER(t)
+static double
+now(void)
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec + tv.tv_usec * 1e-6;
+}
+
+static double replayTime;
+class __foo {
+public:
+	~__foo() {
+		printf("Replay time: %f\n", replayTime);
+	}
+};
+static __foo ___foo;
+
+ReplayEngineTimer::ReplayEngineTimer(void)
+{
+	replayTime -= now();
+}
+
+ReplayEngineTimer::~ReplayEngineTimer(void)
+{
+	replayTime += now();
+}

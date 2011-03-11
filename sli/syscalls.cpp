@@ -22,7 +22,8 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		       LogReaderPtr startOffset,
 		       LogReaderPtr *endOffset,
 		       VexPtr<LogWriter> &lw,
-		       GarbageCollectionToken tok)
+		       GarbageCollectionToken tok,
+		       ReplayEngineTimer &ret)
 {
 	while (1) {
 		LogReaderPtr nextOffset;
@@ -32,8 +33,11 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 		LogRecordMemory *lrm = dynamic_cast<LogRecordMemory*>(lr);
 		if (!lrm)
 			break;
-		if (lw)
+		if (lw) {
+			ret.suspend();
 			lw->append(lr);
+			ret.unsuspend();
+		}
 		try {
 			addrSpace->writeMemory(lrm->start, lrm->size, lrm->contents,
 					       true, NULL);

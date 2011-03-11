@@ -814,11 +814,16 @@ getProximalCause(MachineState *ms, Thread *thr)
 	     x < irsb->stmts_used;
 	     x++) {
 		IRStmt *stmt = irsb->stmts[x];
-		ThreadEvent *evt = interpretStatement(stmt,
-						      thr,
-						      NULL,
-						      ms,
-						      irsb);
+		ThreadEvent *evt;
+		{
+			ReplayEngineTimer ret;
+			evt = interpretStatement(stmt,
+						 thr,
+						 NULL,
+						 ms,
+						 irsb,
+						 ret);
+		}
 		if (evt == NULL)
 			continue;
 		if (evt == DUMMY_EVENT || evt == FINISHED_BLOCK) {
