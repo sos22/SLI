@@ -1955,22 +1955,5 @@ ReplayEngineTimer::ReplayEngineTimer(void)
 
 ReplayEngineTimer::~ReplayEngineTimer(void)
 {
-	assert(!suspended);
 	replayTime += now();
-}
-
-void
-ReplayEngineTimer::suspend(void)
-{
-	assert(!suspended);
-	suspended = true;
-	replayTime += now();
-}
-
-void
-ReplayEngineTimer::unsuspend(void)
-{
-	assert(suspended);
-	suspended = false;
-	replayTime -= now();
 }

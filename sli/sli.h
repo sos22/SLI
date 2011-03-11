@@ -34,11 +34,10 @@ char *vex_vasprintf(const char *fmt, va_list args);
 
 class ReplayEngineTimer {
 public:
-	bool suspended;
 	ReplayEngineTimer();
 	~ReplayEngineTimer();
-	void suspend();
-	void unsuspend();
+	void suspend() {}
+	void unsuspend() {}
 };
 
 class Named {
