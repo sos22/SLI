@@ -4719,6 +4719,34 @@ timing(const char *fmt, ...)
 	free(r);
 }
 
+static void
+enumerate_states(CrashMachineNode *cmn, std::set<CrashMachineNode *> &res)
+{
+	if (res.count(cmn))
+		return;
+	res.insert(cmn);
+	switch (cmn->type) {
+	case CrashMachineNode::CM_NODE_LEAF:
+		return;
+	case CrashMachineNode::CM_NODE_BRANCH:
+		if (cmn->trueTarget)
+			enumerate_states(cmn->trueTarget, res);
+		if (cmn->falseTarget)
+			enumerate_states(cmn->falseTarget, res);
+		return;
+	case CrashMachineNode::CM_NODE_STUB:
+		return;
+	}
+}
+
+static unsigned
+count_states(CrashMachineNode *cmn)
+{
+	std::set<CrashMachineNode *> allStates;
+	enumerate_states(cmn, allStates);
+	return allStates.size();
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -5147,5 +5175,22 @@ main(int argc, char *argv[])
 	timing(NULL);
 	dbg_break("finished");
 
+	/* Count how many states there are in each CMN. */
+	printf("CMN summary:\n");
+	int nr_cmns = 0;
+	int nr_states = 0;
+	for (CrashMachine::contentT::iterator cmn_it = cm->content->begin();
+	     cmn_it != cm->content->end();
+	     cmn_it++) {
+		for (std::vector<CrashMachineNode *>::iterator it = cmn_it.value().first.begin();
+		     it != cmn_it.value().first.end();
+		     it++) {
+			int n = count_states(*it);
+			printf("%p: nr_states = %d\n", *it, n);
+			nr_cmns++;
+			nr_states += n;
+		}
+	}
+	printf("%d cmns total, %d states\n", nr_cmns, nr_states);
 	return 0;
 }
