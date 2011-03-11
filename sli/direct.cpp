@@ -605,7 +605,11 @@ public:
 			if (it->addr == concrete_addr)
 				return it->value;
 		}
-		return fetch(concrete_addr, ms, thr);
+		try {
+			return fetch(concrete_addr, ms, thr);
+		} catch (BadMemoryException &e) {
+			return 0;
+		}
 
 	}
 };
