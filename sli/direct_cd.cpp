@@ -5230,6 +5230,13 @@ static void
 buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			std::set<CallGraphEntry *> &roots)
 {
+	if (rips.size() == 1) {
+		CallGraphEntry *cge = new CallGraphEntry(*rips.begin());
+		cge->isRealHead = true;
+		cge->instructions->set(*rips.begin(), *rips.begin() + 1);
+		roots.insert(cge);
+		return;
+	}
 	std::set<unsigned long> unexploredRips(rips);
 	RangeTree<CallGraphEntry> *instrsToCGEntries = new RangeTree<CallGraphEntry>();
 	std::set<unsigned long> realFunctionHeads;
@@ -5577,8 +5584,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	needed.push(StackRip(root->headRip));
 	while (!needed.empty()) {
 		StackRip &r(needed.front());
-		assert(ripToCFGNode->get(r.rip) != NULL);
-		if (builtSoFar.count(r)) {
+		if (builtSoFar.count(r) || ripToCFGNode->get(r.rip) == NULL) {
 			needed.pop();
 			continue;
 		}
@@ -5633,14 +5639,11 @@ buildCFGForCallGraph(AddressSpace *as,
 	for (std::map<StackRip, CFGNode<StackRip> *>::iterator it = builtSoFar.begin();
 	     it != builtSoFar.end();
 	     it++) {
-		if (it->second->fallThroughRip.valid) {
+		assert(it->second);
+		if (it->second->fallThroughRip.valid && builtSoFar.count(it->second->fallThroughRip))
 			it->second->fallThrough = builtSoFar[it->second->fallThroughRip];
-			assert(it->second->fallThrough);
-		}
-		if (it->second->branchRip.valid) {
+		if (it->second->branchRip.valid && builtSoFar.count(it->second->branchRip))
 			it->second->branch = builtSoFar[it->second->branchRip];
-			assert(it->second->branch);
-		}
 	}
 
 	/* All done */
@@ -5709,6 +5712,7 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		printf("Chose a bad write machine...\n");
 		return;
 	}
+	dbg_break("Have remote critical sections");
 	for (std::set<std::pair<StateMachineSideEffectStore *,
 		     StateMachineSideEffectStore *> >::iterator it =
 		     remoteMacroSections.begin();
