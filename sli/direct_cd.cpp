@@ -4040,7 +4040,8 @@ void
 Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 		    std::set<InstructionSet> &outputClusters)
 {
-	union_find<unsigned long> output;
+	union_find<unsigned long> results;
+#if 0
 	std::set<unsigned long> explored;
 
 	for (std::set<unsigned long>::const_iterator it = inputRips.begin();
@@ -4048,10 +4049,10 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 	     it++) {
 		unsigned long r = *it;
 		assert(r);
-		if (output.present(r))
+		if (results.present(r))
 			continue;
 
-		output.insert(r);
+		results.insert(r);
 		std::vector<unsigned long> discoveredInstructions;
 		discoveredInstructions.push_back(r);
 		while (!discoveredInstructions.empty()) {
@@ -4059,10 +4060,58 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 			discoveredInstructions.pop_back();
 			if (!explored.count(r2))
 				findSuccessors(ms->addressSpace, r2, discoveredInstructions);
-			output.insert(r, r2);
+			results.insert(r, r2);
 			explored.insert(r2);
 		}
 	}
+#else
+	for (std::set<unsigned long>::const_iterator it = inputRips.begin();
+	     it != inputRips.end();
+	     it++) {
+		unsigned long item = *it;
+		
+		results.insert(item);
+
+		std::set<unsigned long> visited;
+		std::vector<unsigned long> pending;
+		pending.push_back(item);
+		while (!pending.empty()) {
+			unsigned long next = pending.back();
+			pending.pop_back();
+			if (visited.count(next)) {
+				/* Okay, we've already been to this
+				   instruction starting from this
+				   root, so don't need to do anything
+				   more. */
+				continue;
+			}
+			visited.insert(next);
+			if (inputRips.count(next)) {
+				/* This root can reach another one of
+				   the input instructions.  That means
+				   that they need to be clustered.  Do
+				   so. */
+				results.insert(item, next);
+
+				/* That's all we need to do: the bits
+				   which are reachable from the
+				   successor of this instruction will
+				   be handled naturally when we take
+				   it out of unprocessedRips.  That
+				   might have already happened, in
+				   which case we'll have already
+				   handled everything.  Either way, we
+				   don't need to do any more now. */
+				continue;
+			}
+
+			/* Not already visited from this root, not
+			 * another root -> have to do it the hard
+			 * way. */
+			findSuccessors(ms->addressSpace, next, pending);
+		}
+	}
+#endif
 
 	/* Now explode the union-find structure into a set of sets. */
 	std::set<unsigned long> unprocessedInput(inputRips);
@@ -4070,11 +4119,11 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 		unsigned long r = *unprocessedInput.begin();
 
 		InstructionSet thisSet;
-		unsigned long representative = output.representative(r);
+		unsigned long representative = results.representative(r);
 		for (std::set<unsigned long>::iterator it = unprocessedInput.begin();
 		     it != unprocessedInput.end();
 			) {
-			if (output.representative(*it) == representative) {
+			if (results.representative(*it) == representative) {
 				thisSet.rips.insert(*it);
 				unprocessedInput.erase(it++);
 			} else {
