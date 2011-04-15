@@ -103,7 +103,14 @@ static void assertUnoptimisable(IRExpr *e, const AllowableOptimisations &);
 static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap>, public PrettyPrintable {
+protected:
+	StateMachine(unsigned long _origin) : origin(_origin) {}
 public:
+	unsigned long origin; /* RIP we were looking at when we
+			       * constructed the thing.  Not very
+			       * meaningful, but occasionally provides
+			       * useful hints for debugging.*/
+
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
@@ -193,10 +200,12 @@ class StateMachineSideEffectLoad : public StateMachineSideEffect {
 		IRExpr *old = smsel_addr;
 		bool ign;
 		smsel_addr = optimiseIRExprFP(smsel_addr, AllowableOptimisations::defaultOptimisations, &ign);
+#if 0
 		if (smsel_addr->tag == Iex_Const &&
 		    (long)smsel_addr->Iex.Const.con->Ico.U64 < 4096)
 			dbg_break("constructing funny (StateMachineSideEffectLoad *)%p\n",
 				  this);
+#endif
 		(void)old;
 	}
 public:
@@ -332,7 +341,7 @@ public:
 };
 
 class StateMachineUnreached : public StateMachine {
-	StateMachineUnreached() {}
+	StateMachineUnreached() : StateMachine(0) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 public:
 	static StateMachineUnreached *get() {
@@ -348,7 +357,7 @@ public:
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 
 class StateMachineCrash : public StateMachine {
-	StateMachineCrash() {}
+	StateMachineCrash() : StateMachine(0) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
 public:
 	static StateMachineCrash *get() {
@@ -364,7 +373,7 @@ public:
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 
 class StateMachineNoCrash : public StateMachine {
-	StateMachineNoCrash() {}
+	StateMachineNoCrash() : StateMachine(0) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
 public:
 	static StateMachineNoCrash *get() {
@@ -386,17 +395,21 @@ class StateMachineProxy : public StateMachine {
 public:
 	StateMachineEdge *target;
 
-	StateMachineProxy(StateMachine *t)
-		: target(new StateMachineEdge(t))
+	StateMachineProxy(unsigned long origin, StateMachine *t)
+		: StateMachine(origin),
+		  target(new StateMachineEdge(t))		  
 	{
 	}
-	StateMachineProxy(StateMachineEdge *t)
-		: target(t)
+	StateMachineProxy(unsigned long origin, StateMachineEdge *t)
+		: StateMachine(origin),
+		  target(t)
 	{
 	}
 	void prettyPrint(FILE *f) const
 	{
+		fprintf(f, "{%lx:", origin);
 		target->prettyPrint(f);
+		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
 	{
@@ -425,18 +438,22 @@ public:
 
 class StateMachineBifurcate : public StateMachine {
 public:
-	StateMachineBifurcate(IRExpr *_condition,
+	StateMachineBifurcate(unsigned long origin,
+			      IRExpr *_condition,
 			      StateMachineEdge *t,
 			      StateMachineEdge *f)
-		: condition(_condition),
+		: StateMachine(origin),
+		  condition(_condition),
 		  trueTarget(t),
 		  falseTarget(f)
 	{
 	}	
-	StateMachineBifurcate(IRExpr *_condition,
+	StateMachineBifurcate(unsigned long origin,
+			      IRExpr *_condition,
 			      StateMachine *t,
 			      StateMachine *f)
-		: condition(_condition),
+		: StateMachine(origin),
+		  condition(_condition),
 		  trueTarget(new StateMachineEdge(t)),
 		  falseTarget(new StateMachineEdge(f))
 	{
@@ -449,7 +466,7 @@ public:
 	StateMachineEdge *falseTarget;
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "if (");
+		fprintf(f, "%lx: if (", origin);
 		ppIRExpr(condition, f);
 		fprintf(f, ") then {");
 		trueTarget->prettyPrint(f);
@@ -470,19 +487,19 @@ public:
 			if (falseTarget->target == StateMachineUnreached::get())
 				return StateMachineUnreached::get();
 			else
-				return new StateMachineProxy(falseTarget->optimise(opt, oracle, done_something));
+				return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something));
 		}
 		if (falseTarget->target == StateMachineUnreached::get()) {
 			*done_something = true;
-			return new StateMachineProxy(trueTarget->optimise(opt, oracle, done_something));
+			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something));
 		}
 		condition = optimiseIRExprFP(condition, opt, done_something);
 		if (condition->tag == Iex_Const) {
 			*done_something = true;
 			if (condition->Iex.Const.con->Ico.U1)
-				return new StateMachineProxy(trueTarget->optimise(opt, oracle, done_something));
+				return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something));
 			else
-				return new StateMachineProxy(falseTarget->optimise(opt, oracle, done_something));
+				return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something));
 		}
 		trueTarget = trueTarget->optimise(opt, oracle, done_something);
 		falseTarget = falseTarget->optimise(opt, oracle, done_something);
@@ -525,11 +542,11 @@ class StateMachineStub : public StateMachine {
 public:
 	IRExpr *target;
 
-	StateMachineStub(IRExpr *t) : target(t) {}
+	StateMachineStub(unsigned long origin, IRExpr *t) : StateMachine(origin), target(t) {}
 
 	void prettyPrint(FILE *f) const
 	{
-		fprintf(f, "<jmp ");
+		fprintf(f, "<%lx: jmp ", origin);
 		ppIRExpr(target, f);
 		fprintf(f, ">");
 	}
@@ -796,6 +813,7 @@ getProximalCause(MachineState *ms, Thread *thr)
 		   pointer called turned out to be NULL. */
 		return new CrashReason(VexRip(rip, irsb->stmts_used),
 				       new StateMachineBifurcate(
+					       rip,
 					       IRExpr_Binop(
 						       Iop_CmpEQ64,
 						       irsb->next,
@@ -863,6 +881,7 @@ getProximalCause(MachineState *ms, Thread *thr)
 			assert(addr != NULL);
 			return new CrashReason(VexRip(rip, x),
 					       new StateMachineBifurcate(
+						       rip,
 						       IRExpr_Binop(
 							       Iop_CmpEQ64,
 							       addr,
@@ -1021,21 +1040,21 @@ StateMachineTransformer::doit(StateMachine *inp)
 		if (t == smb->trueTarget && f == smb->falseTarget && cond == smb->condition)
 			out = inp;
 		else
-			out = new StateMachineBifurcate(cond, t, f);
+			out = new StateMachineBifurcate(inp->origin, cond, t, f);
 	} else if (StateMachineProxy *smp =
 		   dynamic_cast<StateMachineProxy *>(inp)) {
 		StateMachineEdge *t = doit(smp->target);
 		if (t == smp->target)
 			out = inp;
 		else
-			out = new StateMachineProxy(t);
+			out = new StateMachineProxy(inp->origin, t);
 	} else if (StateMachineStub *sms =
 		   dynamic_cast<StateMachineStub *>(inp)) {
 		IRExpr *target = transformIRExpr(sms->target);
 		if (target == sms->target)
 			out = inp;
 		else
-			out = new StateMachineStub(target);
+			out = new StateMachineStub(inp->origin, target);
 	} else {
 		abort();
 	}
@@ -1259,7 +1278,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 				      stmt->Ist.WrTmp.data);
 		break;
 	case Ist_Store: {
-		StateMachineProxy *smp = new StateMachineProxy(sm);
+		StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm);
 		smp->target->prependSideEffect(
 			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
@@ -1284,7 +1303,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 				sm,
 				stmt->Ist.Dirty.details->tmp,
 				IRExpr_Binder(smsel->key));
-			StateMachineProxy *smp = new StateMachineProxy(sm);
+			StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm);
 			smp->target->prependSideEffect(smsel);
 			sm = smp;
 		}  else {
@@ -1302,8 +1321,10 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 		break;
 	case Ist_Exit:
 		sm = new StateMachineBifurcate(
+			rip,
 			stmt->Ist.Exit.guard,
 			new StateMachineStub(
+				rip,
 				IRExpr_Const(stmt->Ist.Exit.dst)),
 			sm);
 		break;
@@ -1576,6 +1597,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 							ft = new CrashReason(
 								newRip,
 								new StateMachineBifurcate(
+									ft->rip.rip,
 									stmt->Ist.Exit.guard,
 									CFGtoCrashReason(tid, cfg->branch)->sm,
 									ft->sm));
@@ -1694,7 +1716,6 @@ void
 Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 			      std::set<unsigned long> &out)
 {
-	out.clear();
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
@@ -2041,37 +2062,75 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 
 static IRExpr *
 optimise_condition_calculation(
-	IRExpr *cond,
+	IRExpr *_cond,
 	IRExpr *cc_op,
 	IRExpr *dep1,
 	IRExpr *dep2,
 	IRExpr *ndep,
 	const AllowableOptimisations &opt)
 {
+	unsigned long cond;
+	IRExpr *res;
+	bool invert;
+
 	/* We only handle a few very special cases here. */
-	if (cond->tag != Iex_Const || cc_op->tag != Iex_Const)
+	if (_cond->tag != Iex_Const || cc_op->tag != Iex_Const)
 		return NULL;
-	if (cond->Iex.Const.con->Ico.U64 != AMD64CondZ)
-		return NULL;
-	switch (cc_op->Iex.Const.con->Ico.U64) {
-	case AMD64G_CC_OP_SUBL:
-		return IRExpr_Binop(
-			Iop_CmpEQ32,
-			dep1,
-			dep2);
-	case AMD64G_CC_OP_SUBQ:
-		return IRExpr_Binop(
-			Iop_CmpEQ64,
-			dep1,
-			dep2);
-	case AMD64G_CC_OP_LOGICL:
-		return IRExpr_Binop(
-			Iop_CmpEQ64,
-			dep1,
-			IRExpr_Const(IRConst_U64(0)));
-	default:
-		return NULL;
+	cond = _cond->Iex.Const.con->Ico.U64;
+	invert = cond & 1;
+	cond &= ~1ul;
+	res = NULL;
+	switch (cond) {
+	case AMD64CondZ:
+		switch (cc_op->Iex.Const.con->Ico.U64) {
+		case AMD64G_CC_OP_SUBL:
+			res = IRExpr_Binop(
+				Iop_CmpEQ32,
+				dep1,
+				dep2);
+			break;
+		case AMD64G_CC_OP_SUBQ:
+			res = IRExpr_Binop(
+				Iop_CmpEQ64,
+				dep1,
+				dep2);
+			break;
+		case AMD64G_CC_OP_LOGICL:
+		case AMD64G_CC_OP_LOGICQ:
+			res = IRExpr_Binop(
+				Iop_CmpEQ64,
+				dep1,
+				IRExpr_Const(IRConst_U64(0)));
+			break;
+		}
+		break;
+	case AMD64CondB:
+		switch (cc_op->Iex.Const.con->Ico.U64) {
+		case AMD64G_CC_OP_SUBQ:
+			res = IRExpr_Binop(
+				Iop_CmpLT64U,
+				dep1,
+				dep2);
+			break;
+		}
+		break;
+	case AMD64CondS:
+		switch (cc_op->Iex.Const.con->Ico.U64) {
+		case AMD64G_CC_OP_ADDW:
+			res = IRExpr_Binop(
+				Iop_CmpLT32S,
+				IRExpr_Binop(
+					Iop_Add16,
+					dep1,
+					dep2),
+				IRExpr_Const(IRConst_U16(0)));
+			break;
+		}
+		break;
 	}
+	if (res && invert)
+		res = IRExpr_Unop(Iop_Not1, res);
+	return res;
 }
 
 /* Wherever we have a choice as to the ordering of an expression's
@@ -3231,7 +3290,7 @@ buildNewStateMachineWithLoadsEliminated(
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		StateMachineBifurcate *res;
-		res = new StateMachineBifurcate(smb->condition, (StateMachineEdge *)NULL, NULL);
+		res = new StateMachineBifurcate(sm->origin, smb->condition, (StateMachineEdge *)NULL, NULL);
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
 			smb->trueTarget, availMap[sm], availMap, memo, opt, oracle);
@@ -3241,7 +3300,7 @@ buildNewStateMachineWithLoadsEliminated(
 	} if (StateMachineProxy *smp =
 	      dynamic_cast<StateMachineProxy *>(sm)) {
 		StateMachineProxy *res;
-		res = new StateMachineProxy((StateMachineEdge *)NULL);
+		res = new StateMachineProxy(sm->origin, (StateMachineEdge *)NULL);
 		memo[sm] = res;
 		res->target = buildNewStateMachineWithLoadsEliminated(
 			smp->target, availMap[sm], availMap, memo, opt, oracle);
@@ -3854,7 +3913,7 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	     it++) {
 		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(*it);
 		if (smb && bisimilarEdges.count(st_edge_pair_t(smb->trueTarget, smb->falseTarget)))
-			canonMap[*it] = new StateMachineProxy(smb->trueTarget);
+			canonMap[*it] = new StateMachineProxy((*it)->origin, smb->trueTarget);
 	}
 
 	/* Now build a mapping from states to canonical states, using
@@ -4161,6 +4220,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 			if (stmt->tag == Ist_Exit) {
 				if (cfg->branch) {
 					res = new StateMachineBifurcate(
+						wrappedRipToRip(cfg->my_rip),
 						stmt->Ist.Exit.guard,
 						CFGtoStoreMachine(tid, as, cfg->branch, memo),
 						res);
@@ -6528,13 +6588,17 @@ main(int argc, char *argv[])
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
 			.enableignoreSideEffects();
+		if (cr->rip.rip == 0x6e4d35)
+			dbg_break("Here we are");
+
 		bool done_something;
 		do {
 			done_something = false;
 			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
+			cr->sm = availExpressionAnalysis(cr->sm, opt, oracle);
+			cr->sm = bisimilarityReduction(cr->sm, opt);
+			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
 		} while (done_something);
-		cr->sm = availExpressionAnalysis(cr->sm, opt, oracle);
-		cr->sm = bisimilarityReduction(cr->sm, opt);
 		printf("Crash reason %s:\n", cr->rip.name());
 		printStateMachine(cr->sm, stdout);
 
@@ -6583,10 +6647,20 @@ main(int argc, char *argv[])
 		std::set<unsigned long> potentiallyConflictingStores;
 		for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 		     it != allLoads.end();
-		     it++)
+		     it++) {
+			printf("Load at %lx\n", (*it)->rip);
 			oracle->findConflictingStores(*it, potentiallyConflictingStores);
+		}
+		printf("Conflicting stores:\n");
+		for (std::set<unsigned long>::iterator it = potentiallyConflictingStores.begin();
+		     it != potentiallyConflictingStores.end();
+		     it++)
+			printf("\t%lx\n", *it);
+		printf("\n");
 		std::set<InstructionSet> conflictClusters;
 		oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
+		if (conflictClusters.size() == 0)
+			assert(potentiallyConflictingStores.size() == 0);
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
 		     it++) {
