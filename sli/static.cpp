@@ -11,8 +11,13 @@
 #include "sli.h"
 #include "map.h"
 
+#include <map>
+
 class Function;
 class Oracle;
+
+/* Liveness and aliasing only consder the first @NR_REGS registers. */
+#define NR_REGS 16
 
 class LivenessSet : public Named {
 public:
@@ -36,7 +41,7 @@ private:
 		char *acc2;
 		bool first = true;
 		acc = strdup("<");
-		for (i = 0; i < 16; i++) {
+		for (i = 0; i < NR_REGS; i++) {
 			if (!(mask & (1ul << i)))
 				continue;
 			if (!first) {
@@ -98,7 +103,7 @@ LivenessSet LivenessSet::argRegisters(
 LivenessSet
 LivenessSet::use(Int offset)
 {
-	if (offset >= 8 * 16)
+	if (offset >= 8 * NR_REGS)
 		return *this;
 	else
 		return LivenessSet(mask | (1ul << (offset / 8)));
@@ -107,14 +112,119 @@ LivenessSet::use(Int offset)
 LivenessSet
 LivenessSet::define(Int offset)
 {
-	if (offset >= 8 * 16)
+	if (offset >= 8 * NR_REGS)
 		return *this;
 	else
 		return LivenessSet(mask & ~(1ul << (offset / 8)));
 }
 
+/* Pointer aliasing stuff.  Note that ``stack'' in this context means
+   the *current* stack frame: a pointer without the stack bit set
+   could still point into a *calling* functions' stack frame, and that
+   wouldn't be a bug. */
+class PointerAliasingSet : public Named {
+	int v;
+	char *mkName() const {
+		const char *r;
+		switch (v) {
+		case 0:
+			r = "()";
+			break;
+		case 1:
+			r = "not-a-pointer";
+			break;
+		case 2:
+			r = "stack-pointer";
+			break;
+		case 3:
+			r = "not-a-pointer|stack-pointer";
+			break;
+		case 4:
+			r = "non-stack-pointer";
+			break;
+		case 5:
+			r = "not-a-pointer|non-stack-pointer";
+			break;
+		case 6:
+			r = "stack-pointer|non-stack-pointer";
+			break;
+		case 7:
+			r = "*";
+			break;
+		default:
+			abort();
+		}
+		return strdup(r);
+	}
+	PointerAliasingSet(int _v) : v(_v) {}
+public:
+
+	PointerAliasingSet() : v(0) {}
+	static const PointerAliasingSet notAPointer;
+	static const PointerAliasingSet stackPointer;
+	static const PointerAliasingSet nonStackPointer;
+	static const PointerAliasingSet anything;
+
+	PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
+	PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
+	bool operator !=(PointerAliasingSet o) const { return v != o.v; }
+	operator bool() const { return v != 0; }
+};
+
+const PointerAliasingSet PointerAliasingSet::notAPointer(1);
+const PointerAliasingSet PointerAliasingSet::stackPointer(2);
+const PointerAliasingSet PointerAliasingSet::nonStackPointer(4);
+const PointerAliasingSet PointerAliasingSet::anything(7);
+
+class RegisterAliasingConfiguration {
+	RegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
+public:
+	RegisterAliasingConfiguration() : stackHasLeaked(false) {}
+	PointerAliasingSet v[NR_REGS];
+	bool stackHasLeaked;
+
+	void operator|=(const RegisterAliasingConfiguration &src) {
+		stackHasLeaked |= src.stackHasLeaked;
+		for (int i = 0; i < NR_REGS; i++)
+			v[i] = v[i] | src.v[i];
+	}
+	bool operator != (const RegisterAliasingConfiguration &x) const {
+		if (stackHasLeaked != x.stackHasLeaked)
+			return true;
+		for (int i = 0; i < NR_REGS; i++)
+			if (v[i] != x.v[i])
+				return true;
+		return false;
+	}
+	/* This should be const, but C++ can't quite manage the
+	 * initialisation in that case, poor thing. */
+	static RegisterAliasingConfiguration functionEntryConfiguration;
+
+	void prettyPrint(FILE *) const;
+};
+RegisterAliasingConfiguration RegisterAliasingConfiguration::functionEntryConfiguration(5.3f);
+RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
+{
+	stackHasLeaked = false;
+	v[1] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rcx */
+	v[2] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rdx */
+	v[4] = PointerAliasingSet::stackPointer; /* rsp */
+	v[6] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rsi */
+	v[7] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rdi */
+	v[8] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* r8 */
+	v[9] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* r9 */
+}
+
+void
+RegisterAliasingConfiguration::prettyPrint(FILE *f) const
+{
+	for (int i = 0; i < NR_REGS; i++)
+		fprintf(f, "\t%8d: %s\n", i, v[i].name());
+}
+
 class Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
 	IRStmt **statements;
+	IRTypeEnv *tyenv;
 	int nr_statements;
 public:
 	unsigned long rip;
@@ -126,17 +236,20 @@ public:
 	Function *callee;
 
 	LivenessSet liveOnEntry;
+	RegisterAliasingConfiguration aliasOnEntry;
 
 protected:
 	char *mkName() const { return my_asprintf("%lx", rip); }
 public:
-	Instruction(unsigned long rip, IRStmt **content, int nr_statements);
+	Instruction(unsigned long rip, IRStmt **content, int nr_statements,
+		    IRTypeEnv *_tyenv);
 	void resolveSuccessors(Function *f);
 	void resolveCallGraph(Oracle *oracle);
 
 	void updateLiveOnEntry(bool *changed);
+	void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
 
-	void visit(HeapVisitor &hv) { hv(statements); hv(branch); hv(fallThrough); hv(callee); }
+	void visit(HeapVisitor &hv) { hv(statements); hv(branch); hv(fallThrough); hv(callee); hv(tyenv); }
 	NAMED_CLASS
 };
 
@@ -160,6 +273,7 @@ public:
 	void addInstruction(Instruction *i) { instructions->set(i->rip, i); }
 	Instruction *ripToInstruction(unsigned long rip) { return instructions->get(rip); }
 	void calculateRegisterLiveness(bool *done_something);
+	void calculateAliasing(bool *done_something);
 
 	void visit(HeapVisitor &hv) { }
 	NAMED_CLASS
@@ -172,6 +286,7 @@ class Oracle : public GarbageCollected<Oracle> {
 
 	void processRoot(unsigned long x);
 	void calculateRegisterLiveness(void);
+	void calculateAliasing(void);
 public:
 	MachineState *ms;
 
@@ -214,6 +329,7 @@ Oracle::calculate(void)
 	     it++)
 		it.value()->resolveCallGraph(this);
 	calculateRegisterLiveness();
+	calculateAliasing();
 }
 
 void
@@ -248,7 +364,7 @@ Oracle::processRoot(unsigned long x)
 		     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
 		     end_of_instruction++)
 			;
-		Instruction *i = new Instruction(rip, irsb->stmts + 1, end_of_instruction - 1);
+		Instruction *i = new Instruction(rip, irsb->stmts + 1, end_of_instruction - 1, irsb->tyenv);
 		if (end_of_instruction == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
 				i->_fallThroughRip = extract_call_follower(irsb);
@@ -295,6 +411,21 @@ Oracle::calculateRegisterLiveness(void)
 }
 
 void
+Oracle::calculateAliasing(void)
+{
+	bool done_something;
+
+	for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunctions->begin();
+	     it != addrToFunctions->end();
+	     it++) {
+		do {
+			done_something = false;
+			it.value()->calculateAliasing(&done_something);
+		} while (done_something);
+	}
+}
+
+void
 Function::resolveCallGraph(Oracle *oracle)
 {
 	for (instr_map_t::iterator it = instructions->begin();
@@ -312,8 +443,33 @@ Function::calculateRegisterLiveness(bool *done_something)
 		it.value()->updateLiveOnEntry(done_something);
 }
 
-Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts)
+void
+Function::calculateAliasing(bool *done_something)
+{
+	Instruction *head = instructions->get(rip);
+	RegisterAliasingConfiguration a(head->aliasOnEntry);
+	a |= RegisterAliasingConfiguration::functionEntryConfiguration;
+	if (head->aliasOnEntry != a) {
+		*done_something = true;
+		head->aliasOnEntry = a;
+	}
+
+	std::vector<Instruction *> needsUpdating;
+	for (instr_map_t::iterator it = instructions->begin();
+	     it != instructions->end();
+	     it++)
+		it.value()->updateSuccessorInstructionsAliasing(&needsUpdating);
+	while (!needsUpdating.empty()) {
+		*done_something = true;
+		Instruction *i = needsUpdating.back();
+		needsUpdating.pop_back();
+		i->updateSuccessorInstructionsAliasing(&needsUpdating);
+	}
+}
+
+Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv)
 	: statements((IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_stmts)),
+	  tyenv(_tyenv),
 	  nr_statements(nr_stmts),
 	  rip(_rip)
 {
@@ -452,6 +608,262 @@ Instruction::updateLiveOnEntry(bool *changed)
 	liveOnEntry = res;
 }
 
+static PointerAliasingSet
+irexprAliasingClass(IRExpr *expr,
+		    IRTypeEnv *tyenv,
+		    const RegisterAliasingConfiguration &config,
+		    std::map<IRTemp, PointerAliasingSet> &temps)
+{
+	if (typeOfIRExpr(tyenv, expr) != Ity_I64)
+		/* Not a 64 bit value -> not a pointer */
+		return PointerAliasingSet::notAPointer;
+
+	switch (expr->tag) {
+	case Iex_Get:
+		if (expr->Iex.Get.offset < NR_REGS * 8)
+			return config.v[expr->Iex.Get.offset / 8];
+		else {
+			/* Assume that those are the only pointer registers */
+			return PointerAliasingSet::notAPointer;
+		}
+	case Iex_RdTmp:
+		return temps[expr->Iex.RdTmp.tmp];
+	case Iex_Const:
+		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
+	case Iex_Unop:
+		switch (expr->Iex.Unop.op) {
+		case Iop_8Uto64:
+		case Iop_8Sto64:
+		case Iop_16Uto64:
+		case Iop_16Sto64:
+		case Iop_32Uto64:
+		case Iop_32Sto64:
+		case Iop_128to64:
+		case Iop_128HIto64:
+		case Iop_V128to64:
+		case Iop_V128HIto64:
+		case Iop_Not64:
+			return PointerAliasingSet::notAPointer;
+		default:
+			break;
+		}
+		break;
+	case Iex_Binop: {
+		PointerAliasingSet a1 = irexprAliasingClass(expr->Iex.Binop.arg1,
+							    tyenv,
+							    config,
+							    temps);
+		PointerAliasingSet a2 = irexprAliasingClass(expr->Iex.Binop.arg2,
+							    tyenv,
+							    config,
+							    temps);
+		switch (expr->Iex.Binop.op) {
+		case Iop_Sub64:
+			/* x - y is a pointer to zone A if x is a
+			 * pointer to zone A and y is not a pointer of
+			 * any sort.  Otherwise, it's just not a
+			 * pointer. */ {
+			PointerAliasingSet res;
+			if (a2 & PointerAliasingSet::notAPointer) {
+				res = a1;
+				if (a2 & (PointerAliasingSet::stackPointer |
+					  PointerAliasingSet::nonStackPointer))
+					res = res | PointerAliasingSet::notAPointer;
+			} else {
+				res = PointerAliasingSet::notAPointer;
+			}
+			return res;
+		}
+		case Iop_Add64:
+		case Iop_And64:
+		case Iop_Xor64:
+		case Iop_Or64:
+			return a1 | a2;
+		case Iop_Shl64:
+		case Iop_Shr64:
+		case Iop_Sar64:
+		case Iop_Mul64:
+		case Iop_MullU32:
+		case Iop_MullS32:
+		case Iop_F64toI64:
+		case Iop_32HLto64:
+		case Iop_DivModU64to32:
+			return PointerAliasingSet::notAPointer;
+		default:
+			break;
+		}
+		break;
+	}
+	case Iex_Mux0X:
+		return irexprAliasingClass(expr->Iex.Mux0X.expr0,
+					   tyenv,
+					   config,
+					   temps) |
+			irexprAliasingClass(expr->Iex.Mux0X.exprX,
+					    tyenv,
+					    config,
+					    temps);
+	case Iex_Associative:
+		switch (expr->Iex.Associative.op) {
+		case Iop_Add64: {
+			PointerAliasingSet res;
+			for (int i = 0; i < expr->Iex.Associative.nr_arguments; i++) {
+				if (expr->Iex.Associative.contents[i]->tag != Iex_Const)
+					res = res | irexprAliasingClass(expr->Iex.Associative.contents[i],
+									tyenv,
+									config,
+									temps);
+			}
+			if (!(res & PointerAliasingSet::anything))
+				res = PointerAliasingSet::notAPointer;
+			return res;
+		}
+		default:
+			break;
+		}
+		break;
+
+	case Iex_CCall:
+		if (!strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_rflags_c") ||
+		    !strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_rflags_all"))
+			return PointerAliasingSet::notAPointer;
+		break;
+
+	default:
+		break;
+	}
+	printf("Don't know how to compute aliasing sets for ");
+	ppIRExpr(expr, stdout);
+	printf("\n");
+	return PointerAliasingSet::anything;
+}
+
+void
+Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed)
+{
+	RegisterAliasingConfiguration config(aliasOnEntry);
+	std::map<IRTemp, PointerAliasingSet> temporaryAliases;
+	IRStmt *st;
+
+	for (int i = 0; i < nr_statements; i++) {
+		st = statements[i];
+		switch (st->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			abort();
+		case Ist_AbiHint:
+			break;
+		case Ist_Put:
+			if (st->Ist.Put.offset < NR_REGS * 8 &&
+			    st->Ist.Put.offset != OFFSET_amd64_RSP) {
+				config.v[st->Ist.Put.offset / 8] =
+					irexprAliasingClass(st->Ist.Put.data,
+							    tyenv,
+							    config, temporaryAliases);
+			}
+			break;
+		case Ist_PutI:
+			/* Assume that PutIs never target the NR_REGS registers */
+			break;
+		case Ist_WrTmp:
+			temporaryAliases[st->Ist.WrTmp.tmp] =
+				irexprAliasingClass(st->Ist.WrTmp.data,
+						    tyenv,
+						    config,
+						    temporaryAliases);
+			break;
+		case Ist_Store:
+			if (!config.stackHasLeaked) {
+				PointerAliasingSet addr, data;
+				addr = irexprAliasingClass(st->Ist.Store.data,
+							   tyenv,
+							   config,
+							   temporaryAliases);
+				data = irexprAliasingClass(st->Ist.Store.data,
+							   tyenv,
+							   config,
+							   temporaryAliases);
+				if ((addr & PointerAliasingSet::nonStackPointer) &&
+				    (data & PointerAliasingSet::stackPointer))
+					config.stackHasLeaked = true;
+			}
+			break;
+		case Ist_CAS:
+			temporaryAliases[st->Ist.CAS.details->oldLo] =
+				PointerAliasingSet::anything;
+			break;
+		case Ist_Dirty: {
+			PointerAliasingSet res;
+			if (tyenv->types[st->Ist.Dirty.details->tmp] == Ity_I64) {
+				if (!strcmp(st->Ist.Dirty.details->cee->name,
+					    "helper_load_64")) {
+					if (config.stackHasLeaked)
+						res = PointerAliasingSet::anything;
+					else
+						res = PointerAliasingSet::notAPointer |
+							PointerAliasingSet::nonStackPointer;
+				} else {
+					res = PointerAliasingSet::anything;
+				}
+			} else {
+				res = PointerAliasingSet::notAPointer;
+			}
+			temporaryAliases[st->Ist.Dirty.details->tmp] = res;
+			break;
+		}
+		case Ist_MBE:
+			abort();
+		case Ist_Exit: {
+			if (branch) {
+				RegisterAliasingConfiguration newExitConfig(branch->aliasOnEntry);
+				newExitConfig |= config;
+				if (newExitConfig != branch->aliasOnEntry) {
+					changed->push_back(branch);
+					branch->aliasOnEntry = newExitConfig;
+				}
+			}
+			break;
+		}
+		default:
+			abort();
+		}
+	}
+	if (fallThrough) {
+		if (callee) {
+			LivenessSet ls = callee->instructions->get(callee->rip)->liveOnEntry;
+			/* If any of the argument registers contain
+			   stack pointers on entry, the return value
+			   can potentially also contain stack
+			   pointers. */
+			/* This isn't perfectly accurate, but it's a
+			   pretty close approximation. */
+			bool stackEscapes = false;
+			/* rcx = 2, rdx = 4, rsi = 0x40, rdi = 0x80,
+			 * r8 = 0x100, r9 = 0x200 */
+#define ARG_REGISTERS 0x3c6
+			for (int i = 0; !stackEscapes && i < NR_REGS; i++) {
+				if (!(ARG_REGISTERS & (1 << i)))
+					continue;
+				if (!(ls.mask & (1 << i)))
+					continue;
+				if (config.v[i] & PointerAliasingSet::stackPointer)
+					stackEscapes = true;
+			}
+#undef ARG_REGISTERS
+			config.v[0] = PointerAliasingSet::notAPointer;
+			if (stackEscapes)
+				config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
+			config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
+		}
+		config |= fallThrough->aliasOnEntry;
+		if (config != fallThrough->aliasOnEntry) {
+			changed->push_back(fallThrough);
+			fallThrough->aliasOnEntry = config;
+		}
+	}
+}
+
 /* Read a whole line into the GC heap */
 static char *
 read_line(FILE *f)
@@ -500,6 +912,10 @@ public:
 		return strcmp(content, p) == 0;
 	}
 	operator unsigned long() const {
+		if (!this) {
+			printf("Not enough arguments\n");
+			throw BadParseException();
+		}
 		errno = 0;
 		char *end;
 		unsigned long r = strtol(content, &end, 0);
@@ -592,6 +1008,16 @@ run_command(Oracle *oracle)
 			printf("No function at %s\n", words[1]->name());
 		} else {
 			printf("%s\n", f->instructions->get(f->rip)->liveOnEntry.name());
+		}
+	} else if (*words[0] == "alias") {
+		Function *f = oracle->get_function(*words[1]);
+		if (!f) {
+			printf("No function at %s\n", words[1]->name());
+		} else {
+			Instruction *i = f->instructions->get(*words[2]);
+			printf("Alias table for %lx:%lx:\n", (unsigned long)*words[1],
+			       (unsigned long)*words[2]);
+			i->aliasOnEntry.prettyPrint(stdout);
 		}
 	} else {
 		printf("Unknown command %s\n", words[0]->content);
