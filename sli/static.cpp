@@ -6,10 +6,112 @@
 #include <stdlib.h>
 
 #include "libvex_alloc.h"
+#include "libvex_ir.h"
+#include "libvex_guest_offsets.h"
 #include "sli.h"
 #include "map.h"
 
 class Function;
+class Oracle;
+
+class LivenessSet : public Named {
+public:
+	unsigned long mask;
+
+	LivenessSet() : mask(0) {}
+
+	LivenessSet use(Int offset);
+	LivenessSet define(Int offset);
+
+	void operator |=(const LivenessSet x) { mask |= x.mask; }
+	bool operator !=(const LivenessSet x) { return mask != x.mask; }
+	LivenessSet operator &(const LivenessSet x) { return LivenessSet(mask & x.mask); }
+	static LivenessSet everything;
+	static LivenessSet argRegisters;
+private:
+	LivenessSet(unsigned long _m) : mask(_m) {}
+	char *mkName() const {
+		int i;
+		char *acc;
+		char *acc2;
+		bool first = true;
+		acc = strdup("<");
+		for (i = 0; i < 16; i++) {
+			if (!(mask & (1ul << i)))
+				continue;
+			if (!first) {
+				acc2 = my_asprintf("%s|", acc);
+				free(acc);
+				acc = acc2;
+			}
+			first = false;
+			switch (i * 8) {
+#define do_reg(name) case OFFSET_amd64_ ## name : acc2 = my_asprintf("%s" #name , acc); break
+				do_reg(RAX);
+				do_reg(RDX);
+				do_reg(RCX);
+				do_reg(RBX);
+				do_reg(RSP);
+				do_reg(RBP);
+				do_reg(RSI);
+				do_reg(RDI);
+				do_reg(R8);
+				do_reg(R9);
+				do_reg(R10);
+				do_reg(R11);
+				do_reg(R12);
+				do_reg(R13);
+				do_reg(R14);
+				do_reg(R15);
+			default:
+				abort();
+			}
+			free(acc);
+			acc = acc2;
+		}
+		acc2 = my_asprintf("%s>", acc);
+		free(acc);
+		return acc2;
+	}
+};
+
+LivenessSet LivenessSet::everything(~0ul);
+LivenessSet LivenessSet::argRegisters(
+	0x01 | /* rax -- not strictly an arg register, but treated
+	       as one for variadic functions. */
+	0x02 | /* rcx */
+	0x04 | /* rdx */
+     /* 0x08 |    rbx */
+	0x10 | /* rsp -- not an argument register, but almost certainly
+		truly live on function entry */
+     /* 0x20 |    rbp */
+	0x40 | /* rsi */
+	0x80 | /* rdi */
+       0x100 | /* r8 */
+       0x200 | /* r9 */
+       0x400   /* r10 -- technically static chain rather than a true
+		  argument, but they're the same thing for our
+		  purposes. */
+    /* 0x800 |   r11 */
+	);
+
+LivenessSet
+LivenessSet::use(Int offset)
+{
+	if (offset >= 8 * 16)
+		return *this;
+	else
+		return LivenessSet(mask | (1ul << (offset / 8)));
+}
+
+LivenessSet
+LivenessSet::define(Int offset)
+{
+	if (offset >= 8 * 16)
+		return *this;
+	else
+		return LivenessSet(mask & ~(1ul << (offset / 8)));
+}
 
 class Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
 	IRStmt **statements;
@@ -18,16 +120,23 @@ public:
 	unsigned long rip;
 	unsigned long _fallThroughRip;
 	unsigned long _branchRip;
+	unsigned long _calleeRip;
 	Instruction *branch;
 	Instruction *fallThrough;
+	Function *callee;
+
+	LivenessSet liveOnEntry;
 
 protected:
 	char *mkName() const { return my_asprintf("%lx", rip); }
 public:
 	Instruction(unsigned long rip, IRStmt **content, int nr_statements);
 	void resolveSuccessors(Function *f);
+	void resolveCallGraph(Oracle *oracle);
 
-	void visit(HeapVisitor &hv) { hv(statements); hv(branch); hv(fallThrough); }
+	void updateLiveOnEntry(bool *changed);
+
+	void visit(HeapVisitor &hv) { hv(statements); hv(branch); hv(fallThrough); hv(callee); }
 	NAMED_CLASS
 };
 
@@ -46,9 +155,11 @@ public:
 		instructions(new instr_map_t())
 	{}
 
+	void resolveCallGraph(Oracle *oracle);
 	bool hasInstruction(unsigned long rip) const { return instructions->hasKey(rip); }
 	void addInstruction(Instruction *i) { instructions->set(i->rip, i); }
 	Instruction *ripToInstruction(unsigned long rip) { return instructions->get(rip); }
+	void calculateRegisterLiveness(bool *done_something);
 
 	void visit(HeapVisitor &hv) { }
 	NAMED_CLASS
@@ -60,6 +171,7 @@ class Oracle : public GarbageCollected<Oracle> {
 	gc_heap_map<unsigned long, Function>::type *addrToFunctions;
 
 	void processRoot(unsigned long x);
+	void calculateRegisterLiveness(void);
 public:
 	MachineState *ms;
 
@@ -69,6 +181,7 @@ public:
 	{
 	}
 
+	Function *get_function(unsigned long rip) { return addrToFunctions->get(rip); }
 	void add_root(unsigned long root);
 	void calculate(void);
 	void list_functions(std::vector<Function *> *heads) {
@@ -96,6 +209,11 @@ Oracle::calculate(void)
 		unprocessedRoots.pop_back();
 		processRoot(x);
 	}
+	for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunctions->begin();
+	     it != addrToFunctions->end();
+	     it++)
+		it.value()->resolveCallGraph(this);
+	calculateRegisterLiveness();
 }
 
 void
@@ -135,7 +253,7 @@ Oracle::processRoot(unsigned long x)
 			if (irsb->jumpkind == Ijk_Call) {
 				i->_fallThroughRip = extract_call_follower(irsb);
 				if (irsb->next->tag == Iex_Const)
-					unprocessedRoots.push_back(irsb->next->Iex.Const.con->Ico.U64);
+					i->_calleeRip = irsb->next->Iex.Const.con->Ico.U64;
 			} else {
 				if (irsb->next->tag == Iex_Const)
 					i->_fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
@@ -148,6 +266,8 @@ Oracle::processRoot(unsigned long x)
 			unexplored.push_back(i->_fallThroughRip);
 		if (i->_branchRip)
 			unexplored.push_back(i->_branchRip);
+		if (i->_calleeRip)
+			unprocessedRoots.push_back(i->_calleeRip);
 	}
 
 	/* Now go through and set successor pointers etc. */
@@ -158,6 +278,38 @@ Oracle::processRoot(unsigned long x)
 		i->resolveSuccessors(work);
 	}
 	addrToFunctions->set(work->rip, work);
+}
+
+void
+Oracle::calculateRegisterLiveness(void)
+{
+	bool done_something;
+
+	do {
+		done_something = false;
+		for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunctions->begin();
+		     it != addrToFunctions->end();
+		     it++)
+			it.value()->calculateRegisterLiveness(&done_something);
+	} while (done_something);
+}
+
+void
+Function::resolveCallGraph(Oracle *oracle)
+{
+	for (instr_map_t::iterator it = instructions->begin();
+	     it != instructions->end();
+	     it++)
+		it.value()->resolveCallGraph(oracle);
+}
+
+void
+Function::calculateRegisterLiveness(bool *done_something)
+{
+	for (instr_map_t::iterator it = instructions->begin();
+	     it != instructions->end();
+	     it++)
+		it.value()->updateLiveOnEntry(done_something);
 }
 
 Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts)
@@ -183,6 +335,121 @@ Instruction::resolveSuccessors(Function *f)
 		branch = f->ripToInstruction(_branchRip);
 		assert(branch);
 	}
+}
+
+void
+Instruction::resolveCallGraph(Oracle *oracle)
+{
+	if (_calleeRip) {
+		callee = oracle->get_function(_calleeRip);
+		assert(callee);
+	}
+}
+
+static LivenessSet
+irexprUsedValues(LivenessSet old, IRExpr *w)
+{
+	if (!w)
+		return old;
+	switch (w->tag) {
+	case Iex_Binder:
+		return old;
+	case Iex_Get:
+		return old.use(w->Iex.Get.offset);
+	case Iex_GetI:
+		return LivenessSet::everything;
+	case Iex_RdTmp:
+		return old;
+	case Iex_Qop:
+		old = irexprUsedValues(old, w->Iex.Qop.arg4);
+	case Iex_Triop:
+		old = irexprUsedValues(old, w->Iex.Qop.arg3);
+	case Iex_Binop:
+		old = irexprUsedValues(old, w->Iex.Qop.arg2);
+	case Iex_Unop:
+		return irexprUsedValues(old, w->Iex.Qop.arg1);
+	case Iex_Load:
+		return irexprUsedValues(old, w->Iex.Load.addr);
+	case Iex_Const:
+		return old;
+	case Iex_CCall:
+		for (int i = 0; w->Iex.CCall.args[i]; i++)
+			old = irexprUsedValues(old, w->Iex.CCall.args[i]);
+		return old;
+	case Iex_Mux0X:
+		old = irexprUsedValues(old, w->Iex.Mux0X.cond);
+		old = irexprUsedValues(old, w->Iex.Mux0X.expr0);
+		old = irexprUsedValues(old, w->Iex.Mux0X.exprX);
+		return old;
+	case Iex_Associative:
+		for (int i = 0; i < w->Iex.Associative.nr_arguments; i++)
+			old = irexprUsedValues(old, w->Iex.Associative.contents[i]);
+		return old;
+	}
+	abort();
+}
+
+void
+Instruction::updateLiveOnEntry(bool *changed)
+{
+	LivenessSet res;
+
+	if (callee) {
+		res = callee->instructions->get(callee->rip)->liveOnEntry & LivenessSet::argRegisters;
+		if (fallThrough)
+			res |= fallThrough->liveOnEntry;
+	} else if (fallThrough)
+		res = fallThrough->liveOnEntry;
+	for (int i = nr_statements - 1; i >= 0; i--) {
+		switch (statements[i]->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			abort();
+		case Ist_AbiHint:
+			break;
+		case Ist_Put:
+			res = res.define(statements[i]->Ist.Put.offset);
+			res = irexprUsedValues(res, statements[i]->Ist.Put.data);
+			break;
+		case Ist_PutI:
+			res = irexprUsedValues(res, statements[i]->Ist.PutI.data);
+			res = irexprUsedValues(res, statements[i]->Ist.PutI.ix);
+			break;
+		case Ist_WrTmp:
+			res = irexprUsedValues(res, statements[i]->Ist.WrTmp.data);
+			break;
+		case Ist_Store:
+			res = irexprUsedValues(res, statements[i]->Ist.Store.data);
+			res = irexprUsedValues(res, statements[i]->Ist.Store.addr);
+			break;
+		case Ist_CAS:
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->addr);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdHi);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdLo);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataHi);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataLo);
+			break;
+		case Ist_Dirty:
+			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->guard);
+			for (int j = 0; statements[i]->Ist.Dirty.details->args[j]; j++)
+				res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->args[j]);
+			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->mAddr);
+			break;
+		case Ist_MBE:
+			abort();
+		case Ist_Exit:
+			if (branch)
+				res |= branch->liveOnEntry;
+			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
+			break;
+		default:
+			abort();
+		}
+	}
+	if (res != liveOnEntry)
+		*changed = true;
+	liveOnEntry = res;
 }
 
 /* Read a whole line into the GC heap */
@@ -319,6 +586,13 @@ run_command(Oracle *oracle)
 		oracle->calculate();
 	} else if (*words[0] == "list_heads") {
 		list_heads(oracle);
+	} else if (*words[0] == "liveness") {
+		Function *f = oracle->get_function(*words[1]);
+		if (!f) {
+			printf("No function at %s\n", words[1]->name());
+		} else {
+			printf("%s\n", f->instructions->get(f->rip)->liveOnEntry.name());
+		}
 	} else {
 		printf("Unknown command %s\n", words[0]->content);
 	}
