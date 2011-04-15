@@ -49,6 +49,8 @@
 #include "libvex_ir.h"
 #include "libvex.h"
 
+#include "libvex_guest_offsets.h"
+
 #include "main_util.h"
 
 Heap ir_heap;
@@ -689,14 +691,60 @@ void ppIROp ( IROp op, FILE* f )
    }
 }
 
+static const char *irOpSimpleChar(IROp op)
+{
+  switch (op) {
+  case Iop_Add8 ... Iop_Add64:
+    return "+";
+  case Iop_And8 ... Iop_And64:
+    return "&";
+  case Iop_Or8 ... Iop_Or64:
+    return "|";
+  case Iop_And1:
+    return "&&";
+  case Iop_Or1:
+    return "||";
+  case Iop_CmpEQ8 ... Iop_CmpEQ64:
+    return "==";
+  case Iop_Not1:
+    return "!";
+  default:
+    return 0;
+  }
+}
+
 void ppIRExpr ( IRExpr* e, FILE *f )
 {
   Int i;
   switch (e->tag) {
     case Iex_Binder:
-      fprintf(f, "BIND-%d", e->Iex.Binder.binder);
+      fprintf(f, "B%d", e->Iex.Binder.binder);
       return;
     case Iex_Get:
+      /* Better pretty print for some known registers. */
+      if (e->Iex.Get.ty == Ity_I64) {
+	switch (e->Iex.Get.offset) {
+#define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d", e->Iex.Get.tid); return;
+	  do_reg(RAX);
+	  do_reg(RBX);
+	  do_reg(RCX);
+	  do_reg(RDX);
+	  do_reg(RSP);
+	  do_reg(RBP);
+	  do_reg(RSI);
+	  do_reg(RDI);
+	  do_reg(R8);
+	  do_reg(R9);
+	  do_reg(R10);
+	  do_reg(R11);
+	  do_reg(R12);
+	  do_reg(R13);
+	  do_reg(R14);
+	  do_reg(R15);
+	  do_reg(RIP);
+#undef do_reg
+	}
+      }
       fprintf(f,  "GET:" );
       ppIRType(e->Iex.Get.ty, f);
       fprintf(f, "(%d, %d)", e->Iex.Get.offset,
@@ -737,18 +785,35 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f,  ")" );
       return;
     case Iex_Binop:
-      ppIROp(e->Iex.Binop.op, f);
-      fprintf(f,  "(" );
-      ppIRExpr(e->Iex.Binop.arg1, f);
-      fprintf(f,  "," );
-      ppIRExpr(e->Iex.Binop.arg2, f);
-      fprintf(f,  ")" );
+      if (irOpSimpleChar(e->Iex.Binop.op)) {
+	fprintf(f, "(");
+	ppIRExpr(e->Iex.Binop.arg1, f);
+	fprintf(f,  " %s ", irOpSimpleChar(e->Iex.Binop.op) );
+	ppIRExpr(e->Iex.Binop.arg2, f);
+	fprintf(f,  ")" );
+      } else {
+	ppIROp(e->Iex.Binop.op, f);
+	fprintf(f,  "(" );
+	ppIRExpr(e->Iex.Binop.arg1, f);
+	fprintf(f,  "," );
+	ppIRExpr(e->Iex.Binop.arg2, f);
+	fprintf(f,  ")" );
+      }
       return;
     case Iex_Unop:
-      ppIROp(e->Iex.Unop.op, f);
-      fprintf(f,  "(" );
-      ppIRExpr(e->Iex.Unop.arg, f);
-      fprintf(f,  ")" );
+      if (irOpSimpleChar(e->Iex.Unop.op))
+      {
+	fprintf(f, "%s(", irOpSimpleChar(e->Iex.Unop.op));
+	ppIRExpr(e->Iex.Unop.arg, f);
+	fprintf(f, ")");
+      }
+      else
+      {
+	ppIROp(e->Iex.Unop.op, f);
+	fprintf(f,  "(" );
+	ppIRExpr(e->Iex.Unop.arg, f);
+	fprintf(f,  ")" );
+      }
       return;
     case Iex_Load:
       fprintf(f,  "LD%s%s:", e->Iex.Load.end==Iend_LE ? "le" : "be",
@@ -782,15 +847,28 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f, ")");
       return;
     case Iex_Associative:
-      fprintf(f, "Assoc(");
-      ppIROp(e->Iex.Associative.op, f);
-      fprintf(f, ":");
-      for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
-	 if (x != 0)
-	   fprintf(f, ", ");
-	 ppIRExpr(e->Iex.Associative.contents[x], f);
+      if (irOpSimpleChar(e->Iex.Associative.op))
+      {
+	fprintf(f, "(");
+	for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
+	  if (x != 0)
+	    fprintf(f, " %s ", irOpSimpleChar(e->Iex.Associative.op));
+	  ppIRExpr(e->Iex.Associative.contents[x], f);
+	}
+	fprintf(f, ")");
       }
-      fprintf(f, ")");
+      else
+      {
+	fprintf(f, "Assoc(");
+	ppIROp(e->Iex.Associative.op, f);
+	fprintf(f, ":");
+	for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
+	  if (x != 0)
+	    fprintf(f, ", ");
+	  ppIRExpr(e->Iex.Associative.contents[x], f);
+	}
+	fprintf(f, ")");
+      }
       return;
   }
   vpanic("ppIRExpr");

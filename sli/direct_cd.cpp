@@ -298,8 +298,7 @@ public:
 		sideEffects = n;
 	}
 
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "%p", this);
+	void prettyPrint(FILE *f, const char *seperator) const {
 		if (sideEffects.size() != 0) {
 			fprintf(f, "{");
 			bool b = true;
@@ -307,7 +306,7 @@ public:
 			     it != sideEffects.end();
 			     it++) {
 				if (!b)
-					fprintf(f, "; ");
+					fprintf(f, "%s", seperator);
 				b = false;
 				(*it)->prettyPrint(f);
 			}
@@ -315,6 +314,7 @@ public:
 		}
 		fprintf(f, "%p", target);
 	}
+	void prettyPrint(FILE *f) const { prettyPrint(f, "; "); }
 	void visit(HeapVisitor &hv) {
 		hv(target);
 		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
@@ -408,7 +408,7 @@ public:
 	void prettyPrint(FILE *f) const
 	{
 		fprintf(f, "{%lx:", origin);
-		target->prettyPrint(f);
+		target->prettyPrint(f, "\n  ");
 		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
@@ -468,10 +468,10 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%lx: if (", origin);
 		ppIRExpr(condition, f);
-		fprintf(f, ") then {");
-		trueTarget->prettyPrint(f);
-		fprintf(f, "} else {");
-		falseTarget->prettyPrint(f);
+		fprintf(f, ")\n  then {\n\t");
+		trueTarget->prettyPrint(f, "\n\t");
+		fprintf(f, "}\n  else {\n\t");
+		falseTarget->prettyPrint(f, "\n\t");
 		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
