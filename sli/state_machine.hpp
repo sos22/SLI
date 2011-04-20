@@ -1,6 +1,8 @@
 #ifndef STATEMACHINE_HPP__
 #define STATEMACHINE_HPP__
 
+#include <set>
+
 class StateMachine;
 class StateMachineSideEffect;
 class Oracle;
@@ -364,8 +366,8 @@ public:
 };
 
 class StateMachineSideEffectLoad : public StateMachineSideEffect {
-	static Int next_key;
 	void constructed();
+	static Int next_key;
 public:
 	StateMachineSideEffectLoad(IRExpr *_addr, unsigned long _rip)
 		: smsel_addr(_addr), rip(_rip)
@@ -417,6 +419,15 @@ public:
 };
 
 
-
+bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
+bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
+IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt);
+IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something);
+bool sortIRExprs(IRExpr *a, IRExpr *b);
+void addArgumentToAssoc(IRExpr *e, IRExpr *arg);
+bool physicallyEqual(const IRExpr *a, const IRExpr *b);
+IRExpr *internIRExpr(IRExpr *x);
+IRExpr *simplifyIRExprAsBoolean(IRExpr *inp);
+void printStateMachine(const StateMachine *sm, FILE *f);
 
 #endif /* !STATEMACHINE_HPP__ */

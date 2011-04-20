@@ -3,6 +3,7 @@
 #include <map>
 #include "libvex_alloc.h"
 #include "pickle.hpp"
+#include "state_machine.hpp"
 
 typedef unsigned long memoSlotT;
 class Pickler {
@@ -14,7 +15,7 @@ class Pickler {
 
 	FILE *output;
 public:
-	Pickler(FILE *f) : lastMemoSlot(0), output(f) {}
+	Pickler(FILE *f) : lastMemoSlot(0), output(f) {memoTable[NULL] = 0;}
 	bool startObject(void *ptr);
 	void finishObject();
 
@@ -30,7 +31,7 @@ class Unpickler {
 
 	FILE *input;
 public:
-	Unpickler(FILE *f) : input(f) {}
+	Unpickler(FILE *f) : input(f) {memoTable[0] = NULL;}
 	void finishObject();
 	void raw(void *start, void *end);
 	template <typename t>
@@ -78,6 +79,7 @@ pickle_null(IRExpr **&e, Pickler &p)
 			break;
 		i++;
 	}
+	p.finishObject();
 }
 static void
 pickle_counted(IRExpr **&e, Pickler &p, int nr)
@@ -87,6 +89,7 @@ pickle_counted(IRExpr **&e, Pickler &p, int nr)
 		return;
 	for (i = 0; i < nr; i++)
 		pickle(e[i], p);
+	p.finishObject();
 }
 
 static void
@@ -133,6 +136,7 @@ unpickle_null(IRExpr **&e, Unpickler &p)
 			break;
 		i++;
 	}
+	p.finishObject();
 }
 static void
 unpickle_counted(IRExpr **&e, Unpickler &p, int nr)
@@ -148,6 +152,7 @@ unpickle_counted(IRExpr **&e, Unpickler &p, int nr)
 	p.discover(e, id);
 	for (i = 0; i < nr; i++)
 		unpickle(e[i], p);
+	p.finishObject();
 }
 
 
@@ -278,7 +283,9 @@ Pickler::startObject(void *ptr)
 	return false;
 }
 
+#define MAGIC (unsigned long)0xaabbccddeefful
 struct backreference {
+	unsigned long magic;
 	unsigned char code;
 	memoSlotT id;
 } __attribute__((packed));
@@ -287,12 +294,14 @@ void
 Pickler::emitMemoReference(memoSlotT s)
 {
 	struct backreference br;
+	br.magic = MAGIC;
 	br.code = 1;
 	br.id = s;
 	fwrite(&br, sizeof(br), 1, output);
 }
 
 struct object_header {
+	unsigned long magic;
 	unsigned char code;
 	memoSlotT id;
 	size_t size;
@@ -302,6 +311,7 @@ void
 Pickler::emitObjectHeader(memoSlotT id, void *start)
 {
 	struct object_header oh;
+	oh.magic = MAGIC;
 	oh.code = 2;
 	oh.id = id;
 	oh.size = __LibVEX_Alloc_Size(start);
@@ -309,6 +319,7 @@ Pickler::emitObjectHeader(memoSlotT id, void *start)
 }
 
 struct raw_block {
+	unsigned long magic;
 	unsigned char code;
 	unsigned size;
 	unsigned char content[0];
@@ -320,6 +331,7 @@ Pickler::raw(const void *start, const void *end)
 	struct raw_block *rb;
 	size_t s = (unsigned long)end - (unsigned long)start;
 	rb = (struct raw_block *)malloc(s + sizeof(*rb));
+	rb->magic = MAGIC;
 	rb->code = 3;
 	rb->size = s;
 	memcpy(rb->content, start, s);
@@ -328,13 +340,15 @@ Pickler::raw(const void *start, const void *end)
 }
 
 struct end_object {
+	unsigned long magic;
 	unsigned char code;
-};
+} __attribute__((packed));
 
 void
 Pickler::finishObject()
 {
 	struct end_object eo;
+	eo.magic = MAGIC;
 	eo.code = 4;
 	fwrite(&eo, sizeof(eo), 1, output);
 }
@@ -345,6 +359,7 @@ Pickler::emitString(const char *start)
 	struct raw_block *rb;
 	size_t s = strlen(start);
 	rb = (struct raw_block *)malloc(s + sizeof(*rb));
+	rb->magic = MAGIC;
 	rb->code = 5;
 	rb->size = s;
 	memcpy(rb->content, start, s);
@@ -363,6 +378,9 @@ pickleIRExpr(IRExpr *e, FILE *f)
 bool
 Unpickler::_retrieveObject(void *&ptr, memoSlotT &id, size_t &sz)
 {
+	unsigned long m;
+	fread(&m, sizeof(m), 1, input);
+	assert(m == MAGIC);
 	int c = fgetc(input);
 	fread(&id, sizeof(id), 1, input);
 	if (c == 1) {
@@ -382,6 +400,9 @@ Unpickler::_retrieveObject(void *&ptr, memoSlotT &id, size_t &sz)
 void
 Unpickler::raw(void *start, void *end)
 {
+	unsigned long m;
+	fread(&m, sizeof(m), 1, input);
+	assert(m == MAGIC);
 	int c = fgetc(input);
 	assert(c == 3);
 	unsigned sz;
@@ -400,6 +421,9 @@ Unpickler::discover(void *ptr, memoSlotT id)
 void
 Unpickler::finishObject()
 {
+	unsigned long m;
+	fread(&m, sizeof(m), 1, input);
+	assert(m == MAGIC);
 	int c = fgetc(input);
 	assert(c == 4);
 }
@@ -407,6 +431,9 @@ Unpickler::finishObject()
 char *
 Unpickler::restoreString()
 {
+	unsigned long m;
+	fread(&m, sizeof(m), 1, input);
+	assert(m == MAGIC);
 	int c = fgetc(input);
 	assert(c == 4);
 	unsigned size;
@@ -426,4 +453,236 @@ unpickleIRExpr(FILE *f)
 	unpickle(res, p);
 
 	return res;
+}
+
+static void pickle(StateMachine *sm, Pickler &p);
+
+enum smse_tag { SMSE_unreached, SMSE_store, SMSE_load, SMSE_copy };
+static void
+pickle(StateMachineSideEffect *smse, Pickler &p)
+{
+	smse_tag t;
+	if (p.startObject(smse))
+		return;
+	if (dynamic_cast<StateMachineSideEffectUnreached *>(smse)) {
+		t = SMSE_unreached;
+		pickle(t, p);
+	} else if (StateMachineSideEffectStore *smses =
+		   dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+		t = SMSE_store;
+		pickle(t, p);
+		pickle(smses->addr, p);
+		pickle(smses->data, p);
+		pickle(smses->rip, p);
+	} else if (StateMachineSideEffectLoad *smsel =
+		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+		t = SMSE_load;
+		pickle(t, p);
+		pickle(smsel->key, p);
+		pickle(smsel->smsel_addr, p);
+		pickle(smsel->rip, p);
+	} else if (StateMachineSideEffectCopy *smsec =
+		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
+		t = SMSE_copy;
+		pickle(t, p);
+		pickle(smsec->key, p);
+		pickle(smsec->value, p);
+	} else {
+		abort();
+	}
+	p.finishObject();
+}
+
+static void
+pickle(StateMachineEdge *sme, Pickler &p)
+{
+	unsigned i;
+
+	if (p.startObject(sme))
+		return;
+	pickle(sme->target, p);
+	i = sme->sideEffects.size();
+	pickle(i, p);
+	for (i = 0; i < sme->sideEffects.size(); i++)
+		pickle(sme->sideEffects[i], p);
+	p.finishObject();
+}
+
+enum sm_tag { SM_unreachable, SM_crash, SM_survive, SM_proxy, SM_bifurcate, SM_stub };
+static void
+pickle(StateMachine *sm, Pickler &p)
+{
+	sm_tag t;
+
+	if (p.startObject(sm))
+		return;
+	pickle(sm->origin, p);
+	if (dynamic_cast<StateMachineUnreached *>(sm)) {
+		t = SM_unreachable;
+		pickle(t, p);
+	} else if (dynamic_cast<StateMachineCrash *>(sm)) {
+		t = SM_crash;
+		pickle(t, p);
+	} else if (dynamic_cast<StateMachineNoCrash *>(sm)) {
+		t = SM_survive;
+		pickle(t, p);
+	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+		t = SM_proxy;
+		pickle(t, p);
+		pickle(smp->target, p);
+	} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
+		t = SM_bifurcate;
+		pickle(t, p);
+		pickle(smb->condition, p);
+		pickle(smb->trueTarget, p);
+		pickle(smb->falseTarget, p);
+	} else if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(sm)) {
+		t = SM_stub;
+		pickle(t, p);
+		pickle(sms->target, p);
+	} else {
+		abort();
+	}
+	p.finishObject();
+}
+
+void
+pickleStateMachine(StateMachine *sm, FILE *f)
+{
+	Pickler p(f);
+	pickle(sm, p);
+}
+
+static void unpickle(StateMachine *&sm, Unpickler &p);
+
+static void
+unpickle(StateMachineSideEffect *&out, Unpickler &p)
+{
+	smse_tag t;
+	memoSlotT id;
+	if (p.retrieveObject(out, id))
+		return;
+	unpickle(t, p);
+	switch (t) {
+	case SMSE_unreached:
+		out = StateMachineSideEffectUnreached::get();
+		break;
+	case SMSE_store: {
+		IRExpr *addr;
+		IRExpr *data;
+		unsigned long rip;
+		unpickle(addr, p);
+		unpickle(data, p);
+		unpickle(rip, p);
+		out = new StateMachineSideEffectStore(addr, data, rip);
+		break;
+	}
+	case SMSE_load: {
+		Int key;
+		IRExpr *addr;
+		unsigned long rip;
+		unpickle(key, p);
+		unpickle(addr, p);
+		unpickle(rip, p);
+		out = new StateMachineSideEffectLoad(key, addr, rip);
+		break;
+	}
+	case SMSE_copy: {
+		Int key;
+		IRExpr *value;
+		unpickle(key, p);
+		unpickle(value, p);
+		out = new StateMachineSideEffectCopy(key, value);
+		break;
+	}
+	}
+	p.discover(out, id);
+	p.finishObject();
+}
+
+static void
+unpickle(StateMachineEdge *&sme, Unpickler &p)
+{
+	unsigned i;
+	unsigned j;
+	StateMachineEdge *work;
+	memoSlotT id;
+
+	if (p.retrieveObject(sme, id))
+		return;
+	work = new StateMachineEdge(NULL);
+	p.discover(work, id);
+
+	unpickle(work->target, p);
+	unpickle(i, p);
+
+	work->sideEffects.resize(i);
+	for (j = 0; j < i; j++)
+		unpickle(work->sideEffects[j], p);
+	sme = work;
+	p.finishObject();
+}
+
+static void
+unpickle(StateMachine *&sm, Unpickler &p)
+{
+	memoSlotT id;
+	unsigned long origin;
+	sm_tag t;
+
+	if (p.retrieveObject(sm, id))
+		return;
+	unpickle(origin, p);
+	unpickle(t, p);
+	switch (t) {
+	case SM_unreachable:
+		sm = StateMachineUnreached::get();
+		break;
+	case SM_crash:
+		sm = StateMachineCrash::get();
+		break;
+	case SM_survive:
+		sm = StateMachineNoCrash::get();
+		break;
+	case SM_proxy: {
+		StateMachineProxy *sme = new StateMachineProxy(origin, (StateMachineEdge *)NULL);
+		p.discover(sme, id);
+		unpickle(sme->target, p);
+		sm = sme;
+		p.finishObject();
+		return;
+	}
+	case SM_bifurcate: {
+		StateMachineBifurcate *res = new StateMachineBifurcate(origin, NULL,
+								       (StateMachineEdge *)NULL,
+								       (StateMachineEdge *)NULL);
+		p.discover(res, id);
+		unpickle(res->condition, p);
+		unpickle(res->trueTarget, p);
+		unpickle(res->falseTarget, p);
+		sm = res;
+		p.finishObject();
+		return;
+	}
+	case SM_stub: {
+		IRExpr *targ;
+		unpickle(targ, p);
+		sm = new StateMachineStub(origin, targ);
+		break;
+	}
+	}
+	p.discover(sm, id);
+	p.finishObject();
+	return;
+}
+
+StateMachine *
+unpickleStateMachine(FILE *f)
+{
+	Unpickler p(f);
+	StateMachine *res;
+
+	unpickle(res, p);
+
+	return res;	
 }
