@@ -93,6 +93,7 @@ extern void *__LibVEX_Alloc_Bytes(Heap *h,
 						       __LINE__};	\
 		__LibVEX_Alloc_Bytes(&main_heap, (_n), &__las);		\
 	})
+extern size_t __LibVEX_Alloc_Size(const void *ptr);
 
 extern void *LibVEX_Alloc_Sized(Heap *h, VexAllocType *t, unsigned long size);
 extern void *LibVEX_realloc(Heap *h, void *base, unsigned long new_size);
@@ -163,18 +164,19 @@ const char *get_name(const void *_ctxt)
 
 #define NAMED_CLASS static const char *cls_name() { return __PRETTY_FUNCTION__ + 19; }
 
-template <typename t, Heap *heap = &main_heap>
+template <typename t, Heap *_heap = &main_heap>
 class GarbageCollected {
-	static VexAllocType type;
 protected:
 	static void release(const t *x) {
-		_LibVEX_free(&heap, x);
+		_LibVEX_free(&_heap, x);
 	}
 	virtual ~GarbageCollected() {}
 public:
+	static VexAllocType type;
+	static Heap *const heap;
 	static void *operator new(size_t s)
 	{
-		void *res = LibVEX_Alloc_Sized(heap, &type, s);
+		void *res = LibVEX_Alloc_Sized(_heap, &type, s);
 		memset(res, 0, s);
 		return res;
 	}
@@ -187,6 +189,7 @@ public:
 	virtual void relocate(t *target, size_t sz) { }
 };
 template <typename t, Heap *heap> VexAllocType GarbageCollected<t,heap>::type = {-1, relocate_object<t>, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
+template <typename t, Heap *_heap> Heap *const GarbageCollected<t,_heap>::heap = _heap;
 
 template <typename p, Heap *heap = &main_heap>
 class VexPtr {

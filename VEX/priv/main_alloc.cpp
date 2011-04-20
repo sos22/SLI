@@ -670,3 +670,11 @@ dump_malloc_info(void)
 	field(keepcost);
 #undef field
 }
+
+size_t
+__LibVEX_Alloc_Size(const void *ptr)
+{
+	struct allocation_header *h = alloc_to_header(ptr);
+	assert(h->magic == ALLOCATION_HEADER_MAGIC);
+	return h->size() - sizeof(*h);
+}

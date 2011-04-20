@@ -17,6 +17,8 @@
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
 
+#include "pickle.hpp"
+
 class Oracle;
 
 class AllowableOptimisations {

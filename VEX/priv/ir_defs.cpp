@@ -1348,7 +1348,7 @@ IRExpr* IRExpr_Associative(IRExpr *src)
 
 /* Constructors for NULL-terminated IRExpr expression vectors,
    suitable for use as arg lists in clean/dirty helper calls. */
-static IRExpr **alloc_irexpr_array(unsigned nr)
+IRExpr **alloc_irexpr_array(unsigned nr)
 {
    return (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr);
 }
