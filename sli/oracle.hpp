@@ -228,6 +228,8 @@ private:
 
 	void discoverFunctionHeads(std::vector<unsigned long> &heads);
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
+	void calculateRegisterLiveness(void);
+	void calculateAliasing(void);
 	void loadTagTable(const char *path);
 public:
 	MachineState *ms;

@@ -36,6 +36,63 @@ operator |=(std::set<t> &x, const std::set<t> &y)
 		x.insert(*it);
 }
 
+Oracle::LivenessSet Oracle::LivenessSet::everything(~0ul);
+Oracle::LivenessSet Oracle::LivenessSet::argRegisters(
+	0x01 | /* rax -- not strictly an arg register, but treated
+	       as one for variadic functions. */
+	0x02 | /* rcx */
+	0x04 | /* rdx */
+     /* 0x08 |    rbx */
+	0x10 | /* rsp -- not an argument register, but almost certainly
+		truly live on function entry */
+     /* 0x20 |    rbp */
+	0x40 | /* rsi */
+	0x80 | /* rdi */
+       0x100 | /* r8 */
+       0x200 | /* r9 */
+       0x400   /* r10 -- technically static chain rather than a true
+		  argument, but they're the same thing for our
+		  purposes. */
+    /* 0x800 |   r11 */
+	);
+
+Oracle::LivenessSet
+Oracle::LivenessSet::use(Int offset)
+{
+	if (offset >= 8 * NR_REGS)
+		return *this;
+	else
+		return LivenessSet(mask | (1ul << (offset / 8)));
+}
+
+Oracle::LivenessSet
+Oracle::LivenessSet::define(Int offset)
+{
+	if (offset >= 8 * NR_REGS)
+		return *this;
+	else
+		return LivenessSet(mask & ~(1ul << (offset / 8)));
+}
+
+const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::notAPointer(1);
+const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::stackPointer(2);
+const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::nonStackPointer(4);
+const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::anything(7);
+
+Oracle::RegisterAliasingConfiguration Oracle::RegisterAliasingConfiguration::functionEntryConfiguration(5.3f);
+Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
+{
+	stackHasLeaked = false;
+	v[1] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rcx */
+	v[2] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rdx */
+	v[4] = Oracle::PointerAliasingSet::stackPointer; /* rsp */
+	v[6] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rsi */
+	v[7] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rdi */
+	v[8] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* r8 */
+	v[9] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* r9 */
+}
+
+
 void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
 {
@@ -377,6 +434,13 @@ Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
 		heads.pop_back();
 		discoverFunctionHead(head, heads);
 	}
+
+	for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunction->begin();
+	     it != addrToFunction->end();
+	     it++)
+		it.value()->resolveCallGraph(this);
+	calculateRegisterLiveness();
+	calculateAliasing();
 }
 
 void
@@ -456,6 +520,14 @@ Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmt
 	}
 }
 
+void
+Oracle::Instruction::resolveCallGraph(Oracle *oracle)
+{
+	if (_calleeRip) {
+		callee = oracle->addrToFunction->get(_calleeRip);
+		assert(callee);
+	}
+}
 
 void
 Oracle::Instruction::resolveSuccessors(Function *f)
@@ -467,5 +539,440 @@ Oracle::Instruction::resolveSuccessors(Function *f)
 	if (_branchRip) {
 		branch = f->ripToInstruction(_branchRip);
 		assert(branch);
+	}
+}
+
+void
+Oracle::calculateRegisterLiveness(void)
+{
+	bool done_something;
+
+	do {
+		done_something = false;
+		for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunction->begin();
+		     it != addrToFunction->end();
+		     it++)
+			it.value()->calculateRegisterLiveness(&done_something);
+	} while (done_something);
+}
+
+void
+Oracle::calculateAliasing(void)
+{
+	bool done_something;
+
+	for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunction->begin();
+	     it != addrToFunction->end();
+	     it++) {
+		do {
+			done_something = false;
+			it.value()->calculateAliasing(&done_something);
+		} while (done_something);
+	}
+}
+
+void
+Oracle::Function::resolveCallGraph(Oracle *oracle)
+{
+	for (instr_map_t::iterator it = instructions->begin();
+	     it != instructions->end();
+	     it++)
+		it.value()->resolveCallGraph(oracle);
+}
+
+void
+Oracle::Function::calculateRegisterLiveness(bool *done_something)
+{
+	for (instr_map_t::iterator it = instructions->begin();
+	     it != instructions->end();
+	     it++)
+		it.value()->updateLiveOnEntry(done_something);
+}
+
+void
+Oracle::Function::calculateAliasing(bool *done_something)
+{
+	Instruction *head = instructions->get(rip);
+	RegisterAliasingConfiguration a(head->aliasOnEntry);
+	a |= RegisterAliasingConfiguration::functionEntryConfiguration;
+	if (head->aliasOnEntry != a) {
+		*done_something = true;
+		head->aliasOnEntry = a;
+	}
+
+	std::vector<Instruction *> needsUpdating;
+	for (instr_map_t::iterator it = instructions->begin();
+	     it != instructions->end();
+	     it++)
+		it.value()->updateSuccessorInstructionsAliasing(&needsUpdating);
+	while (!needsUpdating.empty()) {
+		*done_something = true;
+		Instruction *i = needsUpdating.back();
+		needsUpdating.pop_back();
+		i->updateSuccessorInstructionsAliasing(&needsUpdating);
+	}
+}
+
+static Oracle::LivenessSet
+irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
+{
+	if (!w)
+		return old;
+	switch (w->tag) {
+	case Iex_Binder:
+		return old;
+	case Iex_Get:
+		return old.use(w->Iex.Get.offset);
+	case Iex_GetI:
+		return Oracle::LivenessSet::everything;
+	case Iex_RdTmp:
+		return old;
+	case Iex_Qop:
+		old = irexprUsedValues(old, w->Iex.Qop.arg4);
+	case Iex_Triop:
+		old = irexprUsedValues(old, w->Iex.Qop.arg3);
+	case Iex_Binop:
+		old = irexprUsedValues(old, w->Iex.Qop.arg2);
+	case Iex_Unop:
+		return irexprUsedValues(old, w->Iex.Qop.arg1);
+	case Iex_Load:
+		return irexprUsedValues(old, w->Iex.Load.addr);
+	case Iex_Const:
+		return old;
+	case Iex_CCall:
+		for (int i = 0; w->Iex.CCall.args[i]; i++)
+			old = irexprUsedValues(old, w->Iex.CCall.args[i]);
+		return old;
+	case Iex_Mux0X:
+		old = irexprUsedValues(old, w->Iex.Mux0X.cond);
+		old = irexprUsedValues(old, w->Iex.Mux0X.expr0);
+		old = irexprUsedValues(old, w->Iex.Mux0X.exprX);
+		return old;
+	case Iex_Associative:
+		for (int i = 0; i < w->Iex.Associative.nr_arguments; i++)
+			old = irexprUsedValues(old, w->Iex.Associative.contents[i]);
+		return old;
+	}
+	abort();
+}
+
+void
+Oracle::Instruction::updateLiveOnEntry(bool *changed)
+{
+	LivenessSet res;
+
+	if (callee) {
+		res = callee->instructions->get(callee->rip)->liveOnEntry & LivenessSet::argRegisters;
+		if (fallThrough)
+			res |= fallThrough->liveOnEntry;
+	} else if (fallThrough)
+		res = fallThrough->liveOnEntry;
+	for (int i = nr_statements - 1; i >= 0; i--) {
+		switch (statements[i]->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			abort();
+		case Ist_AbiHint:
+			break;
+		case Ist_Put:
+			res = res.define(statements[i]->Ist.Put.offset);
+			res = irexprUsedValues(res, statements[i]->Ist.Put.data);
+			break;
+		case Ist_PutI:
+			res = irexprUsedValues(res, statements[i]->Ist.PutI.data);
+			res = irexprUsedValues(res, statements[i]->Ist.PutI.ix);
+			break;
+		case Ist_WrTmp:
+			res = irexprUsedValues(res, statements[i]->Ist.WrTmp.data);
+			break;
+		case Ist_Store:
+			res = irexprUsedValues(res, statements[i]->Ist.Store.data);
+			res = irexprUsedValues(res, statements[i]->Ist.Store.addr);
+			break;
+		case Ist_CAS:
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->addr);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdHi);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdLo);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataHi);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataLo);
+			break;
+		case Ist_Dirty:
+			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->guard);
+			for (int j = 0; statements[i]->Ist.Dirty.details->args[j]; j++)
+				res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->args[j]);
+			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->mAddr);
+			break;
+		case Ist_MBE:
+			abort();
+		case Ist_Exit:
+			if (branch)
+				res |= branch->liveOnEntry;
+			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
+			break;
+		default:
+			abort();
+		}
+	}
+	if (res != liveOnEntry)
+		*changed = true;
+	liveOnEntry = res;
+}
+
+static Oracle::PointerAliasingSet
+irexprAliasingClass(IRExpr *expr,
+		    IRTypeEnv *tyenv,
+		    const Oracle::RegisterAliasingConfiguration &config,
+		    std::map<IRTemp, Oracle::PointerAliasingSet> &temps)
+{
+	if (typeOfIRExpr(tyenv, expr) != Ity_I64)
+		/* Not a 64 bit value -> not a pointer */
+		return Oracle::PointerAliasingSet::notAPointer;
+
+	switch (expr->tag) {
+	case Iex_Get:
+		if (expr->Iex.Get.offset < Oracle::NR_REGS * 8)
+			return config.v[expr->Iex.Get.offset / 8];
+		else {
+			/* Assume that those are the only pointer registers */
+			return Oracle::PointerAliasingSet::notAPointer;
+		}
+	case Iex_RdTmp:
+		return temps[expr->Iex.RdTmp.tmp];
+	case Iex_Const:
+		return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
+	case Iex_Unop:
+		switch (expr->Iex.Unop.op) {
+		case Iop_8Uto64:
+		case Iop_8Sto64:
+		case Iop_16Uto64:
+		case Iop_16Sto64:
+		case Iop_32Uto64:
+		case Iop_32Sto64:
+		case Iop_128to64:
+		case Iop_128HIto64:
+		case Iop_V128to64:
+		case Iop_V128HIto64:
+		case Iop_Not64:
+			return Oracle::PointerAliasingSet::notAPointer;
+		default:
+			break;
+		}
+		break;
+	case Iex_Binop: {
+		Oracle::PointerAliasingSet a1 = irexprAliasingClass(
+			expr->Iex.Binop.arg1,
+			tyenv,
+			config,
+			temps);
+		Oracle::PointerAliasingSet a2 = irexprAliasingClass(
+			expr->Iex.Binop.arg2,
+			tyenv,
+			config,
+			temps);
+		switch (expr->Iex.Binop.op) {
+		case Iop_Sub64:
+			/* x - y is a pointer to zone A if x is a
+			 * pointer to zone A and y is not a pointer of
+			 * any sort.  Otherwise, it's just not a
+			 * pointer. */ {
+			Oracle::PointerAliasingSet res;
+			if (a2 & Oracle::PointerAliasingSet::notAPointer) {
+				res = a1;
+				if (a2 & (Oracle::PointerAliasingSet::stackPointer |
+					  Oracle::PointerAliasingSet::nonStackPointer))
+					res = res | Oracle::PointerAliasingSet::notAPointer;
+			} else {
+				res = Oracle::PointerAliasingSet::notAPointer;
+			}
+			return res;
+		}
+		case Iop_Add64:
+		case Iop_And64:
+		case Iop_Xor64:
+		case Iop_Or64:
+			return a1 | a2;
+		case Iop_Shl64:
+		case Iop_Shr64:
+		case Iop_Sar64:
+		case Iop_Mul64:
+		case Iop_MullU32:
+		case Iop_MullS32:
+		case Iop_F64toI64:
+		case Iop_32HLto64:
+		case Iop_DivModU64to32:
+			return Oracle::PointerAliasingSet::notAPointer;
+		default:
+			break;
+		}
+		break;
+	}
+	case Iex_Mux0X:
+		return irexprAliasingClass(expr->Iex.Mux0X.expr0,
+					   tyenv,
+					   config,
+					   temps) |
+			irexprAliasingClass(expr->Iex.Mux0X.exprX,
+					    tyenv,
+					    config,
+					    temps);
+	case Iex_Associative:
+		switch (expr->Iex.Associative.op) {
+		case Iop_Add64: {
+			Oracle::PointerAliasingSet res;
+			for (int i = 0; i < expr->Iex.Associative.nr_arguments; i++) {
+				if (expr->Iex.Associative.contents[i]->tag != Iex_Const)
+					res = res | irexprAliasingClass(expr->Iex.Associative.contents[i],
+									tyenv,
+									config,
+									temps);
+			}
+			if (!(res & Oracle::PointerAliasingSet::anything))
+				res = Oracle::PointerAliasingSet::notAPointer;
+			return res;
+		}
+		default:
+			break;
+		}
+		break;
+
+	case Iex_CCall:
+		if (!strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_rflags_c") ||
+		    !strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_rflags_all"))
+			return Oracle::PointerAliasingSet::notAPointer;
+		break;
+
+	default:
+		break;
+	}
+	printf("Don't know how to compute aliasing sets for ");
+	ppIRExpr(expr, stdout);
+	printf("\n");
+	return Oracle::PointerAliasingSet::anything;
+}
+
+void
+Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed)
+{
+	RegisterAliasingConfiguration config(aliasOnEntry);
+	std::map<IRTemp, PointerAliasingSet> temporaryAliases;
+	IRStmt *st;
+
+	for (int i = 0; i < nr_statements; i++) {
+		st = statements[i];
+		switch (st->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			abort();
+		case Ist_AbiHint:
+			break;
+		case Ist_Put:
+			if (st->Ist.Put.offset < NR_REGS * 8 &&
+			    st->Ist.Put.offset != OFFSET_amd64_RSP) {
+				config.v[st->Ist.Put.offset / 8] =
+					irexprAliasingClass(st->Ist.Put.data,
+							    tyenv,
+							    config, temporaryAliases);
+			}
+			break;
+		case Ist_PutI:
+			/* Assume that PutIs never target the NR_REGS registers */
+			break;
+		case Ist_WrTmp:
+			temporaryAliases[st->Ist.WrTmp.tmp] =
+				irexprAliasingClass(st->Ist.WrTmp.data,
+						    tyenv,
+						    config,
+						    temporaryAliases);
+			break;
+		case Ist_Store:
+			if (!config.stackHasLeaked) {
+				PointerAliasingSet addr, data;
+				addr = irexprAliasingClass(st->Ist.Store.data,
+							   tyenv,
+							   config,
+							   temporaryAliases);
+				data = irexprAliasingClass(st->Ist.Store.data,
+							   tyenv,
+							   config,
+							   temporaryAliases);
+				if ((addr & PointerAliasingSet::nonStackPointer) &&
+				    (data & PointerAliasingSet::stackPointer))
+					config.stackHasLeaked = true;
+			}
+			break;
+		case Ist_CAS:
+			temporaryAliases[st->Ist.CAS.details->oldLo] =
+				PointerAliasingSet::anything;
+			break;
+		case Ist_Dirty: {
+			PointerAliasingSet res;
+			if (tyenv->types[st->Ist.Dirty.details->tmp] == Ity_I64) {
+				if (!strcmp(st->Ist.Dirty.details->cee->name,
+					    "helper_load_64")) {
+					if (config.stackHasLeaked)
+						res = PointerAliasingSet::anything;
+					else
+						res = PointerAliasingSet::notAPointer |
+							PointerAliasingSet::nonStackPointer;
+				} else {
+					res = PointerAliasingSet::anything;
+				}
+			} else {
+				res = PointerAliasingSet::notAPointer;
+			}
+			temporaryAliases[st->Ist.Dirty.details->tmp] = res;
+			break;
+		}
+		case Ist_MBE:
+			abort();
+		case Ist_Exit: {
+			if (branch) {
+				RegisterAliasingConfiguration newExitConfig(branch->aliasOnEntry);
+				newExitConfig |= config;
+				if (newExitConfig != branch->aliasOnEntry) {
+					changed->push_back(branch);
+					branch->aliasOnEntry = newExitConfig;
+				}
+			}
+			break;
+		}
+		default:
+			abort();
+		}
+	}
+	if (fallThrough) {
+		if (callee) {
+			LivenessSet ls = callee->instructions->get(callee->rip)->liveOnEntry;
+			/* If any of the argument registers contain
+			   stack pointers on entry, the return value
+			   can potentially also contain stack
+			   pointers. */
+			/* This isn't perfectly accurate, but it's a
+			   pretty close approximation. */
+			bool stackEscapes = false;
+			/* rcx = 2, rdx = 4, rsi = 0x40, rdi = 0x80,
+			 * r8 = 0x100, r9 = 0x200 */
+#define ARG_REGISTERS 0x3c6
+			for (int i = 0; !stackEscapes && i < NR_REGS; i++) {
+				if (!(ARG_REGISTERS & (1 << i)))
+					continue;
+				if (!(ls.mask & (1 << i)))
+					continue;
+				if (config.v[i] & PointerAliasingSet::stackPointer)
+					stackEscapes = true;
+			}
+#undef ARG_REGISTERS
+			config.v[0] = PointerAliasingSet::notAPointer;
+			if (stackEscapes)
+				config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
+			config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
+		}
+		config |= fallThrough->aliasOnEntry;
+		if (config != fallThrough->aliasOnEntry) {
+			changed->push_back(fallThrough);
+			fallThrough->aliasOnEntry = config;
+		}
 	}
 }
