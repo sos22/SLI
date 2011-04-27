@@ -92,6 +92,12 @@ Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
 	v[9] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* r9 */
 }
 
+void
+Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
+{
+       for (int i = 0; i < NR_REGS; i++)
+               fprintf(f, "\t%8d: %s\n", i, v[i].name());
+}
 
 void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &out)

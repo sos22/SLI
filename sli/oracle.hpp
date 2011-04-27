@@ -195,10 +195,12 @@ public:
 
 	class Function : public GarbageCollected<Function>, public Named {
 		friend class Oracle;
-		typedef gc_heap_map<unsigned long, Instruction, &ir_heap>::type instr_map_t;
 
+	public:
+		typedef gc_heap_map<unsigned long, Instruction, &ir_heap>::type instr_map_t;
 		unsigned long rip;
 		VexPtr<instr_map_t, &ir_heap> instructions;
+	private:
 
 		char *mkName() const { return my_asprintf("function_%lx", rip); }
 	public:
@@ -226,7 +228,6 @@ private:
 	std::vector<Function *> functions;
 	gc_heap_map<unsigned long, Function>::type *addrToFunction;
 
-	void discoverFunctionHeads(std::vector<unsigned long> &heads);
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
 	void calculateRegisterLiveness(void);
 	void calculateAliasing(void);
@@ -246,10 +247,21 @@ public:
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool functionCanReturn(unsigned long rip);
 
+	void discoverFunctionHeads(std::vector<unsigned long> &heads);
+	Function *get_function(unsigned long rip) { return addrToFunction->get(rip); }
+	void list_functions(std::vector<Function *> *heads) {
+		heads->clear();
+		for (gc_heap_map<unsigned long, Function>::type::iterator i = addrToFunction->begin();
+		     i != addrToFunction->end();
+		     i++)
+			heads->push_back(i.value());
+	}
+
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: addrToFunction(new gc_heap_map<unsigned long, Function>::type()), ms(_ms), crashedThread(_thr)
 	{
-		loadTagTable(tags);
+		if (tags)
+			loadTagTable(tags);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(ms);
