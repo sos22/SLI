@@ -8,7 +8,8 @@ main(int argc, char *argv[])
 	Thread *thr = ms->findThread(ThreadId(1));
 
 	std::vector<unsigned long> dominators;
-	getDominators(thr, ms, dominators);
+	std::vector<unsigned long> fheads;
+	getDominators(thr, ms, dominators, fheads);
 
 	for (std::vector<unsigned long>::iterator it = dominators.begin();
 	     it != dominators.end();

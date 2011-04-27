@@ -428,14 +428,16 @@ findDominators(unsigned long functionHead,
 }
 
 void
-getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators)
+getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators, std::vector<unsigned long> &fheads)
 {
 	unsigned long head = findFunctionHead(&thr->regs, ms->addressSpace);
+	fheads.push_back(head);
 	compensateForBadVCall(thr, ms->addressSpace);
 	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
 
 	RegisterSet rs = thr->regs;
 	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
 	head = findFunctionHead(&rs, ms->addressSpace);
+	fheads.push_back(head);
 	findDominators(head, rs.rip(), ms->addressSpace, dominators);
 }

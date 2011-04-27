@@ -39,7 +39,9 @@ operator |=(std::set<t> &x, const std::set<t> &y)
 void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
 {
-	getDominators(crashedThread, ms, out);
+	std::vector<unsigned long> fheads;
+	getDominators(crashedThread, ms, out, fheads);
+	discoverFunctionHeads(fheads);
 }
 
 bool
@@ -366,3 +368,104 @@ Oracle::loadTagTable(const char *path)
 	}
 }
 
+void
+Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
+{
+	while (!heads.empty()) {
+		unsigned long head;
+		head = heads.back();
+		heads.pop_back();
+		discoverFunctionHead(head, heads);
+	}
+}
+
+void
+Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
+{
+	if (addrToFunction->hasKey(x)) {
+		/* Already done */
+		return;
+	}
+
+	printf("Discovered function head at %lx\n", x);
+
+	Function *work = new Function(x);
+
+	/* Start by building a CFG of the function's instructions. */
+	std::vector<unsigned long> unexplored;
+	unexplored.push_back(x);
+	while (!unexplored.empty()) {
+		unsigned long rip = unexplored.back();
+		unexplored.pop_back();
+
+		if (work->hasInstruction(rip))
+			continue;
+		IRSB *irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip);
+		if (!irsb) {
+			printf("WARNING: No IRSB for %lx!\n", rip);
+			continue;
+		}
+		assert(irsb->stmts[0]->tag == Ist_IMark);
+		int end_of_instruction;
+		for (end_of_instruction = 1;
+		     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
+		     end_of_instruction++)
+			;
+		Instruction *i = new Instruction(rip, irsb->stmts + 1, end_of_instruction - 1, irsb->tyenv);
+		if (end_of_instruction == irsb->stmts_used) {
+			if (irsb->jumpkind == Ijk_Call) {
+				i->_fallThroughRip = extract_call_follower(irsb);
+				if (irsb->next->tag == Iex_Const)
+					i->_calleeRip = irsb->next->Iex.Const.con->Ico.U64;
+			} else {
+				if (irsb->next->tag == Iex_Const)
+					i->_fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
+			}
+		} else {
+			i->_fallThroughRip = irsb->stmts[end_of_instruction]->Ist.IMark.addr;
+		}
+		work->addInstruction(i);
+		if (i->_fallThroughRip)
+			unexplored.push_back(i->_fallThroughRip);
+		if (i->_branchRip)
+			unexplored.push_back(i->_branchRip);
+		if (i->_calleeRip)
+			heads.push_back(i->_calleeRip);
+	}
+
+	/* Now go through and set successor pointers etc. */
+	for (Function::instr_map_t::iterator it = work->instructions->begin();
+	     it != work->instructions->end();
+	     it++) {
+		Instruction *i = it.value();
+		i->resolveSuccessors(work);
+	}
+	addrToFunction->set(work->rip, work);
+}
+
+Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv)
+	: statements((IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_stmts)),
+	  tyenv(_tyenv),
+	  nr_statements(nr_stmts),
+	  rip(_rip)
+{
+	for (int i = 0; i < nr_statements; i++) {
+		statements[i] = stmts[i];
+		if (statements[i]->tag == Ist_Exit)
+			_branchRip = statements[i]->Ist.Exit.dst->Ico.U64;
+	}
+}
+
+
+void
+Oracle::Instruction::resolveSuccessors(Function *f)
+{
+	if (_fallThroughRip) {
+		fallThrough = f->ripToInstruction(_fallThroughRip);
+		assert(fallThrough);
+	}
+	if (_branchRip) {
+		branch = f->ripToInstruction(_branchRip);
+		assert(branch);
+	}
+}
