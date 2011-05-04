@@ -3572,7 +3572,7 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		StateMachineSideEffectStore *> >
 		remoteMacroSections;
 	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections)) {
-		printf("Chose a bad write machine...\n");
+		printf("\t\tChose a bad write machine...\n");
 		return;
 	}
 	dbg_break("Have remote critical sections");
