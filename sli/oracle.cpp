@@ -475,32 +475,38 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			printf("WARNING: No IRSB for %lx!\n", rip);
 			continue;
 		}
-		assert(irsb->stmts[0]->tag == Ist_IMark);
 		int end_of_instruction;
-		for (end_of_instruction = 1;
-		     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
-		     end_of_instruction++)
-			;
-		Instruction *i = new Instruction(rip, irsb->stmts + 1, end_of_instruction - 1, irsb->tyenv, work);
-		if (end_of_instruction == irsb->stmts_used) {
-			if (irsb->jumpkind == Ijk_Call) {
-				i->_fallThroughRip = extract_call_follower(irsb);
-				if (irsb->next->tag == Iex_Const)
-					i->_calleeRip = irsb->next->Iex.Const.con->Ico.U64;
+		int start_of_instruction = 0;
+		while (start_of_instruction < irsb->stmts_used) {
+			assert(irsb->stmts[start_of_instruction]->tag == Ist_IMark);
+			for (end_of_instruction = start_of_instruction + 1;
+			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
+			     end_of_instruction++)
+				;
+			Instruction *i = new Instruction(rip, irsb->stmts + start_of_instruction + 1,
+							 end_of_instruction - start_of_instruction - 1,
+							 irsb->tyenv, work);
+			if (end_of_instruction == irsb->stmts_used) {
+				if (irsb->jumpkind == Ijk_Call) {
+					i->_fallThroughRip = extract_call_follower(irsb);
+					if (irsb->next->tag == Iex_Const) {
+						i->_calleeRip = irsb->next->Iex.Const.con->Ico.U64;
+						heads.push_back(irsb->next->Iex.Const.con->Ico.U64);
+					}
+				} else {
+					if (irsb->next->tag == Iex_Const)
+						i->_fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
+				}
 			} else {
-				if (irsb->next->tag == Iex_Const)
-					i->_fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
+				i->_fallThroughRip = irsb->stmts[end_of_instruction]->Ist.IMark.addr;
 			}
-		} else {
-			i->_fallThroughRip = irsb->stmts[end_of_instruction]->Ist.IMark.addr;
+			work->addInstruction(i);
+			if (i->_branchRip)
+				unexplored.push_back(i->_branchRip);
+			if (i->_fallThroughRip)
+				unexplored.push_back(i->_fallThroughRip);
+			start_of_instruction = end_of_instruction;
 		}
-		work->addInstruction(i);
-		if (i->_fallThroughRip)
-			unexplored.push_back(i->_fallThroughRip);
-		if (i->_branchRip)
-			unexplored.push_back(i->_branchRip);
-		if (i->_calleeRip)
-			heads.push_back(i->_calleeRip);
 	}
 
 	/* Now go through and set successor pointers etc. */
