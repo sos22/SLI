@@ -2807,7 +2807,68 @@ findRemoteMacroSections(StateMachine *readMachine,
 			std::set<std::pair<StateMachineSideEffectStore *,
 			                   StateMachineSideEffectStore *> > &output)
 {
+	/* Step one: try evaluating the write machine to completion,
+	   and then the read machine.  If that can crash then this is
+	   a poor choice of machine. */
+	printf("\t\tChecking write machine suitability...\n");
+	{
+		NdChooser chooser;
+		StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
+		do {
+			std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
+			std::map<Int, IRExpr *> writerBinders;
+			StateMachineEdge *writerEdge;
+			IRExpr *pathConstraint;
+
+			pathConstraint = assumption;
+			writerEdge = writeStartEdge;
+			while (1) {
+				for (unsigned i = 0; i < writerEdge->sideEffects.size(); i++) {
+					evalStateMachineSideEffect(writerEdge->sideEffects[i],
+								   chooser,
+								   oracle,
+								   writerBinders,
+								   storesIssuedByWriter,
+								   &pathConstraint);
+				}
+
+				StateMachine *s = writerEdge->target;
+				if (dynamic_cast<StateMachineCrash *>(s) ||
+				    dynamic_cast<StateMachineNoCrash *>(s) ||
+				    dynamic_cast<StateMachineStub *>(s)) {
+					/* Hit end of writer */
+					break;
+				} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
+					writerEdge = smp->target;
+				} else {
+					StateMachineBifurcate *smb =
+						dynamic_cast<StateMachineBifurcate *>(s);
+					assert(smb);
+					if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint))
+						writerEdge = smb->trueTarget;
+					else
+						writerEdge = smb->falseTarget;
+				}
+			}
+
+			StateMachineEvalContext readEvalCtxt;
+			readEvalCtxt.pathConstraint = pathConstraint;
+			readEvalCtxt.stores = storesIssuedByWriter;
+			bool crashes;
+			evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
+			if (crashes) {
+				/* We get a crash if we evaluate the read
+				   machine after running the store machine to
+				   completion -> this is a poor choice of
+				   store machines. */
+				return false;
+			}
+		} while (chooser.advance());
+	}
+	printf("\t\tDone check.\n");
+
 	NdChooser chooser;
+
 
 	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
 	do {
@@ -2904,13 +2965,10 @@ findRemoteMacroSections(StateMachine *readMachine,
 				}
 			}
 		}
-		if (sectionStart) {
-			/* We get a crash if we evaluate the read
-			   machine after running the store machine to
-			   completion -> this is a poor choice of
-			   store machines. */
-			return false;
-		}
+
+		/* This is enforced by the suitability check at the
+		 * top of this function. */
+		assert(sectionStart == NULL);
 	} while (chooser.advance());
 	return true;
 }
