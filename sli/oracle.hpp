@@ -180,6 +180,9 @@ public:
 		Instruction *branch;
 		Instruction *fallThrough;
 		Function *callee;
+		Function *thisFunction;
+
+		std::vector<Instruction *> predecessors;
 
 		LivenessSet liveOnEntry;
 		RegisterAliasingConfiguration aliasOnEntry;
@@ -188,14 +191,14 @@ public:
 		char *mkName() const { return my_asprintf("instr_%lx", rip); }
 	public:
 		Instruction(unsigned long rip, IRStmt **content, int nr_statements,
-			    IRTypeEnv *_tyenv);
+			    IRTypeEnv *_tyenv, Function *thisFunction);
 		void resolveSuccessors(Function *f);
 		void resolveCallGraph(Oracle *oracle);
 		
 		void updateLiveOnEntry(bool *changed);
 		void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
 		
-		void visit(HeapVisitor &hv) { hv(statements); hv(branch); hv(fallThrough); hv(callee); hv(tyenv); }
+		void visit(HeapVisitor &hv) { hv(statements); hv(branch); hv(fallThrough); hv(callee); hv(tyenv); hv(thisFunction); visit_container(predecessors, hv); }
 		NAMED_CLASS
 	};
 
@@ -206,13 +209,16 @@ public:
 		typedef gc_heap_map<unsigned long, Instruction, &ir_heap>::type instr_map_t;
 		unsigned long rip;
 		VexPtr<instr_map_t, &ir_heap> instructions;
+		std::vector<Function *> callers;
+		bool registerLivenessCorrect;
 	private:
 
 		char *mkName() const { return my_asprintf("function_%lx", rip); }
 	public:
 		Function(unsigned long _rip)
 			: rip(_rip),
-			  instructions(new instr_map_t())
+			  instructions(new instr_map_t()),
+			  registerLivenessCorrect(false)
 		{}
 
 		void resolveCallGraph(Oracle *oracle);
@@ -222,7 +228,7 @@ public:
 		void calculateRegisterLiveness(bool *done_something);
 		void calculateAliasing(bool *done_something);
 
-		void visit(HeapVisitor &hv) {}
+		void visit(HeapVisitor &hv) {visit_container(callers, hv);}
 		NAMED_CLASS
 	};
 private:

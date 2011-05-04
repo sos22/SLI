@@ -481,7 +481,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
 		     end_of_instruction++)
 			;
-		Instruction *i = new Instruction(rip, irsb->stmts + 1, end_of_instruction - 1, irsb->tyenv);
+		Instruction *i = new Instruction(rip, irsb->stmts + 1, end_of_instruction - 1, irsb->tyenv, work);
 		if (end_of_instruction == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
 				i->_fallThroughRip = extract_call_follower(irsb);
@@ -513,11 +513,13 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 	addrToFunction->set(work->rip, work);
 }
 
-Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv)
+Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv,
+				 Function *_thisFunction)
 	: statements((IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_stmts)),
 	  tyenv(_tyenv),
 	  nr_statements(nr_stmts),
-	  rip(_rip)
+	  rip(_rip),
+	  thisFunction(_thisFunction)
 {
 	for (int i = 0; i < nr_statements; i++) {
 		statements[i] = stmts[i];
@@ -526,11 +528,25 @@ Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmt
 	}
 }
 
+template <typename t>
+bool
+vector_contains(const std::vector<t> &v, const t &val)
+{
+	for (typename std::vector<t>::const_iterator it = v.begin();
+	     it != v.end();
+	     it++)
+		if (*it == val)
+			return true;
+	return false;
+}
+
 void
 Oracle::Instruction::resolveCallGraph(Oracle *oracle)
 {
 	if (_calleeRip) {
 		callee = oracle->addrToFunction->get(_calleeRip);
+		if (!vector_contains(callee->callers, thisFunction))
+			callee->callers.push_back(thisFunction);
 		assert(callee);
 	}
 }
@@ -541,10 +557,14 @@ Oracle::Instruction::resolveSuccessors(Function *f)
 	if (_fallThroughRip) {
 		fallThrough = f->ripToInstruction(_fallThroughRip);
 		assert(fallThrough);
+		if (!vector_contains(fallThrough->predecessors, this))
+			fallThrough->predecessors.push_back(this);
 	}
 	if (_branchRip) {
 		branch = f->ripToInstruction(_branchRip);
 		assert(branch);
+		if (!vector_contains(fallThrough->predecessors, this))
+			fallThrough->predecessors.push_back(this);
 	}
 }
 
@@ -552,14 +572,27 @@ void
 Oracle::calculateRegisterLiveness(void)
 {
 	bool done_something;
+	unsigned long changed;
+	unsigned long unchanged;
 
+	changed = 0;
+	unchanged = 0;
 	do {
 		done_something = false;
 		for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunction->begin();
 		     it != addrToFunction->end();
-		     it++)
-			it.value()->calculateRegisterLiveness(&done_something);
+		     it++) {
+			bool this_did_something = false;
+			it.value()->calculateRegisterLiveness(&this_did_something);
+			if (this_did_something)
+				changed++;
+			else
+				unchanged++;
+			done_something |= this_did_something;
+		}
 	} while (done_something);
+	printf("%ld function register calculations, of which %ld made progress.\n",
+	       unchanged+changed, changed);
 }
 
 void
@@ -586,13 +619,70 @@ Oracle::Function::resolveCallGraph(Oracle *oracle)
 		it.value()->resolveCallGraph(oracle);
 }
 
+template <typename t>
+void
+appendVector(std::vector<t> &dest, const std::vector<t> &src)
+{
+	dest.insert(dest.end(), src.begin(), src.end());
+}
+
 void
 Oracle::Function::calculateRegisterLiveness(bool *done_something)
 {
+	bool changed;
+
+	if (registerLivenessCorrect)
+		return;
+
+	std::vector<Instruction *> instrsToRecalculate1;
+	std::vector<Instruction *> instrsToRecalculate2;
+
 	for (instr_map_t::iterator it = instructions->begin();
 	     it != instructions->end();
 	     it++)
-		it.value()->updateLiveOnEntry(done_something);
+		instrsToRecalculate1.push_back(it.value());
+
+	std::reverse(instrsToRecalculate1.begin(),
+		     instrsToRecalculate1.end());
+
+	changed = false;
+	while (1) {
+		for (std::vector<Instruction *>::iterator it = instrsToRecalculate1.begin();
+		     it != instrsToRecalculate1.end();
+		     it++) {
+			bool t = false;
+			(*it)->updateLiveOnEntry(&t);
+			if (t)
+				appendVector(instrsToRecalculate2, (*it)->predecessors);
+		}
+		instrsToRecalculate1.clear();
+		if (instrsToRecalculate2.empty())
+			break;
+		changed = true;
+
+		for (std::vector<Instruction *>::iterator it = instrsToRecalculate2.begin();
+		     it != instrsToRecalculate2.end();
+		     it++) {
+			bool t = false;
+			(*it)->updateLiveOnEntry(&t);
+			if (t)
+				appendVector(instrsToRecalculate1, (*it)->predecessors);
+		}
+
+		instrsToRecalculate2.clear();
+		if (instrsToRecalculate1.empty())
+			break;
+	}
+
+	registerLivenessCorrect = true;
+
+	if (changed) {
+		*done_something = true;
+		for (std::vector<Function *>::iterator it = callers.begin();
+		     it != callers.end();
+		     it++)
+			(*it)->registerLivenessCorrect = false;
+	}
 }
 
 void
@@ -728,7 +818,6 @@ Oracle::Instruction::updateLiveOnEntry(bool *changed)
 	}
 	if (res != liveOnEntry) {
 		assert(res > liveOnEntry);
-		printf("%lx -> %lx\n", liveOnEntry.mask, res.mask);
 		*changed = true;
 	}
 	liveOnEntry = res;
