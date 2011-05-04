@@ -849,6 +849,10 @@ irexprAliasingClass(IRExpr *expr,
 			/* Assume that those are the only pointer registers */
 			return Oracle::PointerAliasingSet::notAPointer;
 		}
+	case Iex_Binder:
+		/* Binders are loaded from memory, and we only track
+		 * registers. */
+		return Oracle::PointerAliasingSet::anything;
 	case Iex_RdTmp:
 		assert(temps);
 		return (*temps)[expr->Iex.RdTmp.tmp];
@@ -931,7 +935,9 @@ irexprAliasingClass(IRExpr *expr,
 					    temps);
 	case Iex_Associative:
 		switch (expr->Iex.Associative.op) {
-		case Iop_Add64: {
+		case Iop_Add64:
+		case Iop_And64:
+		{
 			Oracle::PointerAliasingSet res;
 			for (int i = 0; i < expr->Iex.Associative.nr_arguments; i++) {
 				if (expr->Iex.Associative.contents[i]->tag != Iex_Const)

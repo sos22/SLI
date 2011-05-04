@@ -2769,16 +2769,20 @@ evalCrossProductMachine(StateMachine *sm1,
 		while (!s1.finished)
 			ctxt.advanceMachine(0, chooser, oracle);
 		if (s1.crashed) {
+#if 0
 			if (!*mightCrash) {
 				printf("First crashing history:\n");
 				ctxt.dumpHistory();
 			}
+#endif
 			*mightCrash = true;
 		} else {
+#if 0
 			if (!*mightSurvive) {
 				printf("First surviving history:\n");
 				ctxt.dumpHistory();
 			}
+#endif
 			*mightSurvive = true;
 		}
 		if (!chooser.advance())
@@ -3537,12 +3541,9 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		done_something = false;
 		sm = sm->optimise(opt2, oracle, &done_something);
 	} while (done_something);
-	printf("Turns into state machine:\n");
-	printStateMachine(sm, stdout);
 	
 	/* Now try running that in parallel with the probe machine,
 	   and see if it might lead to a crash. */
-	printf("Running cross-product machine...\n");
 	bool mightSurvive;
 	bool mightCrash;
 	evalCrossProductMachine(probeMachine,
@@ -3551,7 +3552,7 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 				assumption,
 				&mightSurvive,
 				&mightCrash);
-	printf("Run in parallel with the probe machine, might survive %d, might crash %d\n",
+	printf("\t\tRun in parallel with the probe machine, might survive %d, might crash %d\n",
 	       mightSurvive, mightCrash);
 	
 	/* We know that mightSurvive is true when the load machine is
@@ -3580,7 +3581,7 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		     remoteMacroSections.begin();
 	     it != remoteMacroSections.end();
 	     it++) {
-		printf("Remote macro section ");
+		printf("\t\tRemote macro section ");
 		it->first->prettyPrint(stdout);
 		printf(" -> ");
 		it->second->prettyPrint(stdout);
