@@ -434,6 +434,7 @@ Oracle::loadTagTable(const char *path)
 void
 Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
 {
+	printf("Doing static analysis...\n");
 	while (!heads.empty()) {
 		unsigned long head;
 		head = heads.back();
@@ -441,12 +442,13 @@ Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
 		discoverFunctionHead(head, heads);
 	}
 
-	for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunction->begin();
-	     it != addrToFunction->end();
+	for (std::vector<Function *>::iterator it = functions.begin();
+	     it != functions.end();
 	     it++)
-		it.value()->resolveCallGraph(this);
+		(*it)->resolveCallGraph(this);
 	calculateRegisterLiveness();
 	calculateAliasing();
+	printf("Done static analysis.\n");
 }
 
 void
@@ -456,8 +458,6 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		/* Already done */
 		return;
 	}
-
-	printf("Discovered function head at %lx\n", x);
 
 	Function *work = new Function(x);
 
@@ -470,6 +470,9 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 
 		if (work->hasInstruction(rip))
 			continue;
+
+		addrToFunction->set(rip, work);
+
 		IRSB *irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip);
 		if (!irsb) {
 			printf("WARNING: No IRSB for %lx!\n", rip);
@@ -516,7 +519,6 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		Instruction *i = it.value();
 		i->resolveSuccessors(work);
 	}
-	addrToFunction->set(work->rip, work);
 }
 
 Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv,
@@ -585,11 +587,11 @@ Oracle::calculateRegisterLiveness(void)
 	unchanged = 0;
 	do {
 		done_something = false;
-		for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunction->begin();
-		     it != addrToFunction->end();
+		for (std::vector<Function *>::iterator it = functions.begin();
+		     it != functions.end();
 		     it++) {
 			bool this_did_something = false;
-			it.value()->calculateRegisterLiveness(&this_did_something);
+			(*it)->calculateRegisterLiveness(&this_did_something);
 			if (this_did_something)
 				changed++;
 			else
@@ -606,12 +608,12 @@ Oracle::calculateAliasing(void)
 {
 	bool done_something;
 
-	for (gc_heap_map<unsigned long, Function>::type::iterator it = addrToFunction->begin();
-	     it != addrToFunction->end();
+	for (std::vector<Function *>::iterator it = functions.begin();
+	     it != functions.end();
 	     it++) {
 		do {
 			done_something = false;
-			it.value()->calculateAliasing(&done_something);
+			(*it)->calculateAliasing(&done_something);
 		} while (done_something);
 	}
 }
