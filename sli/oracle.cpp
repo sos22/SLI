@@ -662,6 +662,12 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 	abort();
 }
 
+static bool
+operator >(const Oracle::LivenessSet &a, const Oracle::LivenessSet &b)
+{
+	return a.mask != b.mask && (b.mask & ~a.mask) == 0;
+}
+
 void
 Oracle::Instruction::updateLiveOnEntry(bool *changed)
 {
@@ -720,8 +726,11 @@ Oracle::Instruction::updateLiveOnEntry(bool *changed)
 			abort();
 		}
 	}
-	if (res != liveOnEntry)
+	if (res != liveOnEntry) {
+		assert(res > liveOnEntry);
+		printf("%lx -> %lx\n", liveOnEntry.mask, res.mask);
 		*changed = true;
+	}
 	liveOnEntry = res;
 }
 
@@ -729,9 +738,9 @@ static Oracle::PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    IRTypeEnv *tyenv,
 		    const Oracle::RegisterAliasingConfiguration &config,
-		    std::map<IRTemp, Oracle::PointerAliasingSet> &temps)
+		    std::map<IRTemp, Oracle::PointerAliasingSet> *temps)
 {
-	if (typeOfIRExpr(tyenv, expr) != Ity_I64)
+	if (tyenv && typeOfIRExpr(tyenv, expr) != Ity_I64)
 		/* Not a 64 bit value -> not a pointer */
 		return Oracle::PointerAliasingSet::notAPointer;
 
@@ -744,7 +753,8 @@ irexprAliasingClass(IRExpr *expr,
 			return Oracle::PointerAliasingSet::notAPointer;
 		}
 	case Iex_RdTmp:
-		return temps[expr->Iex.RdTmp.tmp];
+		assert(temps);
+		return (*temps)[expr->Iex.RdTmp.tmp];
 	case Iex_Const:
 		return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
 	case Iex_Unop:
@@ -879,7 +889,8 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 				config.v[st->Ist.Put.offset / 8] =
 					irexprAliasingClass(st->Ist.Put.data,
 							    tyenv,
-							    config, temporaryAliases);
+							    config,
+							    &temporaryAliases);
 			}
 			break;
 		case Ist_PutI:
@@ -890,7 +901,7 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 				irexprAliasingClass(st->Ist.WrTmp.data,
 						    tyenv,
 						    config,
-						    temporaryAliases);
+						    &temporaryAliases);
 			break;
 		case Ist_Store:
 			if (!config.stackHasLeaked) {
@@ -898,11 +909,11 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 				addr = irexprAliasingClass(st->Ist.Store.data,
 							   tyenv,
 							   config,
-							   temporaryAliases);
+							   &temporaryAliases);
 				data = irexprAliasingClass(st->Ist.Store.data,
 							   tyenv,
 							   config,
-							   temporaryAliases);
+							   &temporaryAliases);
 				if ((addr & PointerAliasingSet::nonStackPointer) &&
 				    (data & PointerAliasingSet::stackPointer))
 					config.stackHasLeaked = true;
@@ -982,3 +993,19 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 		}
 	}
 }
+
+bool
+Oracle::RegisterAliasingConfiguration::mightAlias(IRExpr *a, IRExpr *b) const
+{
+	return irexprAliasingClass(a, NULL, *this, NULL) &
+		irexprAliasingClass(b, NULL, *this, NULL);
+}
+
+Oracle::RegisterAliasingConfiguration &
+Oracle::getAliasingConfigurationForRip(unsigned long rip)
+{
+	Function *f = get_function(rip);
+	assert(f);
+	return f->instructions->get(rip)->aliasOnEntry;
+}
+

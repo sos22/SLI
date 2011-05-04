@@ -159,6 +159,12 @@ public:
 		 * initialisation in that case, poor thing. */
 		static RegisterAliasingConfiguration functionEntryConfiguration;
 		
+		/* Check whether a and b mght point at the same bit of
+		   memory (i.e. have intersecting pointer aliasing
+		   sets) given @this's register aliasing
+		   configuration. */
+		bool mightAlias(IRExpr *a, IRExpr *b) const;
+
 		void prettyPrint(FILE *) const;
 	};
 
@@ -256,6 +262,8 @@ public:
 		     i++)
 			heads->push_back(i.value());
 	}
+
+	RegisterAliasingConfiguration &getAliasingConfigurationForRip(unsigned long rip);
 
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: addrToFunction(new gc_heap_map<unsigned long, Function>::type()), ms(_ms), crashedThread(_thr)

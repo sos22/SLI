@@ -1220,6 +1220,7 @@ static StateMachine *buildNewStateMachineWithLoadsEliminated(
 	               std::set<StateMachineSideEffectStore *> > &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
+	const Oracle::RegisterAliasingConfiguration &aliasing,
 	Oracle *oracle);
 
 static StateMachineEdge *
@@ -1230,10 +1231,11 @@ buildNewStateMachineWithLoadsEliminated(
 	               std::set<StateMachineSideEffectStore *> > &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
+	const Oracle::RegisterAliasingConfiguration &aliasing,
 	Oracle *oracle)
 {
 	StateMachineEdge *res =
-		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, oracle));
+		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle));
 
 	std::set<StateMachineSideEffectStore *> currentlyAvailable(initialAvail);
 
@@ -1247,7 +1249,8 @@ buildNewStateMachineWithLoadsEliminated(
 				     currentlyAvailable.begin();
 			     it2 != currentlyAvailable.end();
 				) {
-				if ( !definitelyNotEqual((*it2)->addr, smses->addr, opt) ) {
+				if ( aliasing.mightAlias((*it2)->addr, smses->addr) &&
+				     !definitelyNotEqual((*it2)->addr, smses->addr, opt) ) {
 					currentlyAvailable.erase(it2++);
 				} else {
 					it2++;
@@ -1263,7 +1266,8 @@ buildNewStateMachineWithLoadsEliminated(
 				     currentlyAvailable.begin();
 			     !done && it2 != currentlyAvailable.end();
 			     it2++) {
-				if ( definitelyEqual((*it2)->addr, smsel->smsel_addr, opt) ) {
+				if ( aliasing.mightAlias((*it2)->addr, smsel->smsel_addr) &&
+				     definitelyEqual((*it2)->addr, smsel->smsel_addr, opt) ) {
 					res->sideEffects.push_back(
 						new StateMachineSideEffectCopy(
 							smsel->key,
@@ -1289,6 +1293,7 @@ buildNewStateMachineWithLoadsEliminated(
 	               std::set<StateMachineSideEffectStore *> > &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
+	const Oracle::RegisterAliasingConfiguration &alias,
 	Oracle *oracle)
 {
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
@@ -1304,9 +1309,9 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineBifurcate(sm->origin, smb->condition, (StateMachineEdge *)NULL, NULL);
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->trueTarget, availMap[sm], availMap, memo, opt, oracle);
+			smb->trueTarget, availMap[sm], availMap, memo, opt, alias, oracle);
 		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->falseTarget, availMap[sm], availMap, memo, opt, oracle);
+			smb->falseTarget, availMap[sm], availMap, memo, opt, alias, oracle);
 		return res;
 	} if (StateMachineProxy *smp =
 	      dynamic_cast<StateMachineProxy *>(sm)) {
@@ -1314,7 +1319,7 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineProxy(sm->origin, (StateMachineEdge *)NULL);
 		memo[sm] = res;
 		res->target = buildNewStateMachineWithLoadsEliminated(
-			smp->target, availMap[sm], availMap, memo, opt, oracle);
+			smp->target, availMap[sm], availMap, memo, opt, alias, oracle);
 		return res;
 	} else {
 		abort();
@@ -1327,10 +1332,11 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *,
 	         std::set<StateMachineSideEffectStore *> > &availMap,
 	const AllowableOptimisations &opt,
+	const Oracle::RegisterAliasingConfiguration &alias,
 	Oracle *oracle)
 {
 	std::map<StateMachine *, StateMachine *> memo;
-	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt, oracle);
+	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt, alias, oracle);
 }
 
 /* Available expression analysis on memory locations.  This isn't
@@ -1338,7 +1344,8 @@ buildNewStateMachineWithLoadsEliminated(
    context-sensitive, and therefore isn't allowed to mutate nodes
    in-place. */
 static StateMachine *
-availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracle *oracle)
+availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
+			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle)
 {
 	/* Fairly standard available expression analysis.  Each edge
 	   in the state machine has two sets of
@@ -1466,9 +1473,11 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 					for (avail_t::iterator it3 = outputAvail.begin();
 					     it3 != outputAvail.end();
 						) {
-						if (!definitelyNotEqual( (*it3)->addr,
-									 smses->addr,
-									 opt) )
+						if ( alias.mightAlias((*it3)->addr,
+								      smses->addr) &&
+						     !definitelyNotEqual( (*it3)->addr,
+									  smses->addr,
+									  opt) )
 							outputAvail.erase(it3++);
 						else
 							it3++;
@@ -1500,6 +1509,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Ora
 		sm,
 		availOnEntry,
 		opt,
+		alias,
 		oracle);
 }
 
@@ -3520,7 +3530,8 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		done_something = false;
 		sm = sm->optimise(opt2, oracle, &done_something);
 	} while (done_something);
-	sm = availExpressionAnalysis(sm, opt2, oracle);
+	Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
+	sm = availExpressionAnalysis(sm, opt2, alias, oracle);
 	sm = bisimilarityReduction(sm, opt2);
 	do {
 		done_something = false;
@@ -3577,6 +3588,22 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 	}
 }
 
+static FILE *
+fopenf(const char *mode, const char *fmt, ...)
+{
+	va_list args;
+	char *path;
+	FILE *res;
+
+	va_start(args, fmt);
+	asprintf(&path, fmt, args);
+	va_end(args);
+
+	res = fopen(path, mode);
+	free(path);
+	return res;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -3611,6 +3638,7 @@ main(int argc, char *argv[])
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     it != previousInstructions.end();
 	     it++) {
+		printf("Investigating %lx...\n", *it);
 		LibVEX_maybe_gc(ALLOW_GC);
 
 		std::set<unsigned long> terminalFunctions;
@@ -3632,25 +3660,22 @@ main(int argc, char *argv[])
 			dbg_break("Here we are");
 
 		bool done_something;
+		Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(*it));
 		do {
 			done_something = false;
 			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
-			cr->sm = availExpressionAnalysis(cr->sm, opt, oracle);
+			cr->sm = availExpressionAnalysis(cr->sm, opt, alias, oracle);
 			cr->sm = bisimilarityReduction(cr->sm, opt);
 			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
 		} while (done_something);
-		printf("Crash reason %s:\n", cr->rip.name());
-		printStateMachine(cr->sm, stdout);
 
+		printf("\tComputed state machine.\n");
 		{
-			char buf[4096];
-			sprintf(buf, "machines/%s", cr->rip.name());
-			FILE *f = fopen(buf, "w");
+			FILE *f = fopenf("w", "machines/%s", cr->rip.name());
 			pickleStateMachine(cr->sm, f);
 			fclose(f);
 		}
 
-		printf("Survival constraint: \n");
 		VexPtr<IRExpr, &ir_heap> survive;
 		{
 			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
@@ -3659,15 +3684,17 @@ main(int argc, char *argv[])
 					survivalConstraintIfExecutedAtomically(crSm, oracle, ALLOW_GC),
 					opt);
 		}
-		ppIRExpr(survive, stdout);
-		printf("\n");
 
 		survive = internIRExpr(survive);
 		survive = simplifyIRExprAsBoolean(survive);
 		survive = optimiseIRExpr(survive, opt);
-		printf("After boolean reduction: ");
-		ppIRExpr(survive, stdout);
-		printf("\n");
+
+		printf("\tComputed survival constraint\n");
+		{
+			FILE *f = fopenf("w", "machines/%s.survival_constraint", cr->rip.name());
+			pickleIRExpr(survive, f);
+			fclose(f);
+		}
 
 		/* Quick check that that vaguely worked.  If this
 		   reports mightCrash == true then that probably means
@@ -3680,11 +3707,11 @@ main(int argc, char *argv[])
 			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
 			evalMachineUnderAssumption(crSm, oracle, survive, &mightSurvive, &mightCrash, ALLOW_GC);
 		}
-		printf("Might survive: %d, might crash: %d\n", mightSurvive,
-		       mightCrash);
 
-		if (!mightSurvive)
+		if (!mightSurvive) {
+			printf("\tCan never survive...\n");
 			continue;
+		}
 		if (mightCrash) {
 			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
 			dbg_break("whoops");
@@ -3696,15 +3723,15 @@ main(int argc, char *argv[])
 		for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 		     it != allLoads.end();
 		     it++) {
-			printf("Load at %lx\n", (*it)->rip);
 			oracle->findConflictingStores(*it, potentiallyConflictingStores);
 		}
-		printf("Conflicting stores:\n");
+		printf("\tConflicting stores: ");
 		for (std::set<unsigned long>::iterator it = potentiallyConflictingStores.begin();
 		     it != potentiallyConflictingStores.end();
 		     it++)
-			printf("\t%lx\n", *it);
+			printf("%lx ", *it);
 		printf("\n");
+
 		std::set<InstructionSet> conflictClusters;
 		oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
 		if (conflictClusters.size() == 0)
@@ -3712,7 +3739,7 @@ main(int argc, char *argv[])
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
 		     it++) {
-			printf("Cluster:");
+			printf("\t\tCluster:");
 			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
 			     it2 != it->rips.end();
 			     it2++)
@@ -3724,9 +3751,6 @@ main(int argc, char *argv[])
 			for (std::set<CallGraphEntry *>::iterator it2 = cgRoots.begin();
 			     it2 != cgRoots.end();
 			     it2++) {
-				printf("Possible call graph:\n");
-				printCallGraph(*it2, stdout);
-
 				CFGNode<StackRip> *storeCFG;
 				storeCFG = buildCFGForCallGraph(ms->addressSpace, *it2);
 				trimCFG(storeCFG, *it);

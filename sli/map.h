@@ -63,6 +63,12 @@ class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, vis
 	mutable unsigned nr_heads;
 	mutable unsigned nr_items;
 
+	unsigned long __hash(const keyt &k) const {
+		unsigned long h = hashfn(k);
+		while (h >= nr_heads)
+			h = (h % nr_heads) + (h / nr_heads);
+		return h;
+	}
 	hash_entry *lookup(const keyt &k, bool create) const {
 		if (!heads) {
 			if (!create)
@@ -72,8 +78,7 @@ class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, vis
 			heads = (hash_entry **)__LibVEX_Alloc_Bytes(heap, sizeof(heads[0]) * nr_heads, &__las);
 		}
 
-		unsigned long h = hashfn(k);
-		h %= nr_heads;
+		unsigned long h = __hash(k);
 		hash_entry *head;
 		for (head = heads[h];
 		     head && !equalfn(k, head->key);
