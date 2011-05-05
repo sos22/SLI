@@ -17,8 +17,9 @@ class NdChooser {
 
 	std::vector<struct choicepoint> stack;
 	unsigned current_stack_index;
+	unsigned nr_branches;
 public:
-	NdChooser() : stack(), current_stack_index(0) {}
+	NdChooser() : stack(), current_stack_index(0), nr_branches(0) {}
 	int nd_choice(int nr_options, bool *isNew = NULL);
 	bool advance(void);
 };

@@ -74,14 +74,14 @@ NdChooser::advance(void)
 		/* Advance the last choice */
 		cp.current_value++;
 		if (cp.current_value < cp.nr_options) {
-#if 0
-			printf("ND stack: ");
+			printf("%8d ", nr_branches);
 			for (std::vector<choicepoint>::iterator it = stack.begin();
 			     it != stack.end();
 			     it++)
-				printf("%d/%d\t", it->current_value, it->nr_options);
-			printf("\n");
-#endif
+				printf("%d", it->nr_options - it->current_value - 1);
+			printf("               \r");
+			fflush(stdout);
+			nr_branches++;
 			return true;
 		}
 		/* This choicepoint is exhausted, try another one. */
