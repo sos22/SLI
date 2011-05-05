@@ -174,6 +174,19 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 	return false;
 }
 
+bool
+Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
+				 StateMachineSideEffectStore *smses2)
+{
+	for (std::vector<tag_entry>::iterator it = tag_table.begin();
+	     it != tag_table.end();
+	     it++)
+		if (it->loads.count(smses1->rip) &&
+		    it->stores.count(smses2->rip))
+			return true;
+	return false;
+}
+
 template <typename t>
 class union_find {
 public:

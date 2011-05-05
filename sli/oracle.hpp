@@ -257,6 +257,7 @@ public:
 			 std::set<InstructionSet> &outputClusters);
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
+	bool memoryAccessesMightAlias(StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool functionCanReturn(unsigned long rip);
 
 	void discoverFunctionHeads(std::vector<unsigned long> &heads);

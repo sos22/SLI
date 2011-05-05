@@ -2665,6 +2665,7 @@ public:
 	CrossEvalState *states[2];
 	std::vector<StateMachineSideEffect *> history;
 	void advanceMachine(unsigned tid, NdChooser &chooser, Oracle *oracle);
+	void advanceToSideEffect(unsigned tid, NdChooser &chooser, Oracle *oracle);
 	void dumpHistory(void) const;
 };
 
@@ -2681,16 +2682,15 @@ CrossMachineEvalContext::dumpHistory(void) const
 }
 
 void
-CrossMachineEvalContext::advanceMachine(unsigned tid,
-					NdChooser &chooser,
-					Oracle *oracle)
+CrossMachineEvalContext::advanceToSideEffect(unsigned tid,
+					     NdChooser &chooser,
+					     Oracle *oracle)
 {
 	CrossEvalState *machine = states[tid];
 	StateMachine *s;
+
 top:
-	if (machine->finished)
-		return;
-	if (machine->nextEdgeSideEffectIdx == machine->currentEdge->sideEffects.size()) {
+	while (machine->nextEdgeSideEffectIdx == machine->currentEdge->sideEffects.size()) {
 		/* We've hit the end of the edge.  Move to the next
 		 * state. */
 		s = machine->currentEdge->target;
@@ -2709,7 +2709,7 @@ top:
 		    dynamic_cast<StateMachineProxy *>(s)) {
 			machine->currentEdge = smp->target;
 			machine->nextEdgeSideEffectIdx = 0;
-			goto top;
+			continue;
 		}
 		if (StateMachineBifurcate *smb =
 		    dynamic_cast<StateMachineBifurcate *>(s)) {
@@ -2718,20 +2718,92 @@ top:
 			else
 				machine->currentEdge = smb->falseTarget;
 			machine->nextEdgeSideEffectIdx = 0;
-			goto top;
+			continue;
 		}
+		abort();
 	}
 
+	/* You don't need to context switch after a copy, because
+	   they're purely local. */
 	StateMachineSideEffect *se;
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];
+	if (dynamic_cast<StateMachineSideEffectCopy *>(se)) {
+		evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint);
+		history.push_back(se);
+		machine->nextEdgeSideEffectIdx++;
+		goto top;
+	}
+}
+
+void
+CrossMachineEvalContext::advanceMachine(unsigned tid,
+					NdChooser &chooser,
+					Oracle *oracle)
+{
+	CrossEvalState *machine = states[tid];
+
+top:
+	advanceToSideEffect(tid, chooser, oracle);
+	if (machine->finished || machine->crashed)
+		return;
+
+	StateMachineSideEffect *se;
+	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];	
+	assert(!dynamic_cast<StateMachineSideEffectCopy *>(se));
+	assert(!dynamic_cast<StateMachineSideEffectUnreached *>(se));
 	evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint);
 	history.push_back(se);
 	machine->nextEdgeSideEffectIdx++;
 
-	/* You don't need to context switch after a copy, because
-	   they're purely local. */
-	if (dynamic_cast<StateMachineSideEffectCopy *>(se))
+	advanceToSideEffect(tid, chooser, oracle);
+
+	/* Now look at what the other machine is doing, and decide
+	   whether the side effect we just issued might conceivably
+	   race with the other machine's current side effect. */
+	CrossEvalState *other = states[1-tid];
+	if (other->finished) {
+		/* If the other machine has finished then there really
+		   is no point in continuing to explore alternative
+		   interleavings. */
 		goto top;
+	}
+
+	assert(other->nextEdgeSideEffectIdx < other->currentEdge->sideEffects.size());
+	StateMachineSideEffect *otherSe = other->currentEdge->sideEffects[other->nextEdgeSideEffectIdx];
+	if (StateMachineSideEffectLoad *otherLoad =
+	    dynamic_cast<StateMachineSideEffectLoad *>(otherSe)) {
+		if (StateMachineSideEffectStore *localStore =
+		    dynamic_cast<StateMachineSideEffectStore *>(se)) {
+			if (!oracle->memoryAccessesMightAlias(otherLoad, localStore) ||
+			    definitelyNotEqual(otherLoad->smsel_addr, localStore->addr, 
+					       AllowableOptimisations::defaultOptimisations)) {
+				goto top;
+			}
+		} else {
+			assert(dynamic_cast<StateMachineSideEffectLoad *>(se));
+			/* Two loads can never alias */
+			goto top;
+		}
+	} else {
+		StateMachineSideEffectStore *otherStore =
+			dynamic_cast<StateMachineSideEffectStore *>(otherSe);
+		assert(otherStore);
+
+		if (StateMachineSideEffectStore *localStore =
+		    dynamic_cast<StateMachineSideEffectStore *>(se)) {
+			if (!oracle->memoryAccessesMightAlias(otherStore, localStore) ||
+			    definitelyNotEqual(otherStore->addr, localStore->addr, 
+					       AllowableOptimisations::defaultOptimisations))
+				goto top;
+		} else {
+			StateMachineSideEffectLoad *localLoad =
+				dynamic_cast<StateMachineSideEffectLoad *>(se);
+			if (!oracle->memoryAccessesMightAlias(localLoad, otherStore) ||
+			    definitelyNotEqual(otherStore->addr, localLoad->smsel_addr, 
+					       AllowableOptimisations::defaultOptimisations))
+				goto top;
+		}
+	}			
 }
 
 /* Run sm1 and sm2 in parallel, ***stopping as soon as sm1
@@ -2762,6 +2834,8 @@ evalCrossProductMachine(StateMachine *sm1,
 		CrossEvalState s2(sme2, 0);
 		ctxt.states[0] = &s1;
 		ctxt.states[1] = &s2;
+		ctxt.advanceToSideEffect(0, chooser, oracle);
+		ctxt.advanceToSideEffect(1, chooser, oracle);
 		while (!s1.finished && !s2.finished)
 			ctxt.advanceMachine(chooser.nd_choice(2),
 					    chooser,
