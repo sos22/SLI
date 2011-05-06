@@ -3820,7 +3820,7 @@ fopenf(const char *mode, const char *fmt, ...)
 	FILE *res;
 
 	va_start(args, fmt);
-	asprintf(&path, fmt, args);
+	vasprintf(&path, fmt, args);
 	va_end(args);
 
 	res = fopen(path, mode);
