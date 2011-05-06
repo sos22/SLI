@@ -295,7 +295,7 @@ typedef gc_map<std::pair<unsigned long, unsigned long>,
 	       bool,
 	       hash_ulong_pair,
 	       __default_eq_function<std::pair<unsigned long, unsigned long> >,
-	       __default_visit_function<bool>,
+	       __default_visit_function<std::pair<unsigned long, unsigned long>, bool>,
 	       &ir_heap> gc_pair_ulong_set_t;
 void mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src);
 

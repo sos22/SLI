@@ -69,8 +69,11 @@ public:
 };
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap>, public PrettyPrintable {
+	mutable unsigned long __hashval;
+	mutable bool have_hash;
 protected:
-	StateMachine(unsigned long _origin) : origin(_origin) {}
+	StateMachine(unsigned long _origin) : have_hash(false), origin(_origin) {}
+	virtual unsigned long _hashval() const = 0;
 public:
 	unsigned long origin; /* RIP we were looking at when we
 			       * constructed the thing.  Not very
@@ -83,20 +86,29 @@ public:
 	virtual StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
+	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	NAMED_CLASS
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
+	mutable unsigned long __hashval;
+	mutable bool have_hash;
+protected:
+	virtual unsigned long _hashval() const = 0;
 public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
+	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	NAMED_CLASS
 };
 
 class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap>, public PrettyPrintable {
+	mutable bool have_hash;
+	mutable unsigned long _hashval;
 public:
-	StateMachineEdge(StateMachine *t) : target(t) {}
+	unsigned long hashval() const;
+	StateMachineEdge(StateMachine *t) : have_hash(false), target(t) {}
 	StateMachine *target;
 	std::vector<StateMachineSideEffect *> sideEffects;
 
@@ -156,6 +168,7 @@ public:
 class StateMachineUnreached : public StateMachine {
 	StateMachineUnreached() : StateMachine(0) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
+	unsigned long _hashval() const { return 0x72; }
 public:
 	static StateMachineUnreached *get() {
 		if (!_this) _this = new StateMachineUnreached();
@@ -171,6 +184,7 @@ public:
 class StateMachineCrash : public StateMachine {
 	StateMachineCrash() : StateMachine(0) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
+	unsigned long _hashval() const { return 0x73; }
 public:
 	static StateMachineCrash *get() {
 		if (!_this) _this = new StateMachineCrash();
@@ -186,6 +200,7 @@ public:
 class StateMachineNoCrash : public StateMachine {
 	StateMachineNoCrash() : StateMachine(0) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
+	unsigned long _hashval() const { return 0x74; }
 public:
 	static StateMachineNoCrash *get() {
 		if (!_this) _this = new StateMachineNoCrash();
@@ -202,6 +217,7 @@ public:
    can be safely eliminated, but they're sometimes kind of handy when
    you're building the machine. */
 class StateMachineProxy : public StateMachine {
+	unsigned long _hashval() const { return target->hashval(); }
 public:
 	StateMachineEdge *target;
 
@@ -247,6 +263,11 @@ public:
 };
 
 class StateMachineBifurcate : public StateMachine {
+	unsigned long _hashval() const {
+		return trueTarget->hashval() * 7 + 
+			falseTarget->hashval() * 11 +
+			condition->hashval() * 3;
+	}
 public:
 	StateMachineBifurcate(unsigned long origin,
 			      IRExpr *_condition,
@@ -308,6 +329,7 @@ public:
 /* A node in the state machine representing a bit of code which we
    haven't explored yet. */
 class StateMachineStub : public StateMachine {
+	unsigned long _hashval() const { return target->hashval(); }
 public:
 	IRExpr *target;
 
@@ -329,6 +351,7 @@ public:
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
 	StateMachineSideEffectUnreached() {}
+	unsigned long _hashval() const { return 0x91; }
 public:
 	static StateMachineSideEffectUnreached *get() {
 		if (!_this) _this = new StateMachineSideEffectUnreached();
@@ -341,6 +364,7 @@ public:
 	void visit(HeapVisitor &hv) {}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffect {
+	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, unsigned long _rip)
 		: addr(_addr), data(_data), rip(_rip)
@@ -368,6 +392,7 @@ public:
 class StateMachineSideEffectLoad : public StateMachineSideEffect {
 	void constructed();
 	static Int next_key;
+	unsigned long _hashval() const { return smsel_addr->hashval() * 757 + key; }
 public:
 	StateMachineSideEffectLoad(IRExpr *_addr, unsigned long _rip)
 		: smsel_addr(_addr), rip(_rip)
@@ -398,6 +423,7 @@ public:
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
+	unsigned long _hashval() const { return value->hashval(); }
 public:
 	StateMachineSideEffectCopy(Int k, IRExpr *_value)
 		: key(k), value(_value)

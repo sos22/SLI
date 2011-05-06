@@ -108,6 +108,61 @@ IRExpr::visit(HeapVisitor &visit)
    }
 }
 
+unsigned long
+IRExpr::hashval(void) const
+{
+  switch (tag) {
+  case Iex_Binder:
+    return Iex.Binder.binder;
+  case Iex_Get:
+    return Iex.Get.offset + Iex.Get.ty * 3 + Iex.Get.tid * 7;
+  case Iex_GetI:
+    return Iex.GetI.descr->hashval() +
+      Iex.GetI.ix->hashval() * 3 +
+      Iex.GetI.bias * 5 +
+      Iex.GetI.tid * 7;
+  case Iex_RdTmp:
+    return Iex.RdTmp.tmp + Iex.RdTmp.tid * 3;
+  case Iex_Qop:
+    return Iex.Qop.op +
+      Iex.Qop.arg1->hashval() * 3 +
+      Iex.Qop.arg2->hashval() * 5 +
+      Iex.Qop.arg3->hashval() * 7 +
+      Iex.Qop.arg4->hashval() * 11;
+  case Iex_Triop:
+    return Iex.Qop.op +
+      Iex.Qop.arg1->hashval() * 3 +
+      Iex.Qop.arg2->hashval() * 5 +
+      Iex.Qop.arg3->hashval() * 7;
+  case Iex_Binop:
+    return Iex.Qop.op +
+      Iex.Qop.arg1->hashval() * 3 +
+      Iex.Qop.arg2->hashval() * 5;
+  case Iex_Unop:
+    return Iex.Unop.op + Iex.Unop.arg->hashval() * 3;
+  case Iex_Load:
+    return Iex.Load.ty + Iex.Load.addr->hashval() * 97;
+  case Iex_Const:
+    return Iex.Const.con->hashval();
+  case Iex_CCall: {
+    unsigned long h = Iex.CCall.cee->hashval() + Iex.CCall.retty * 3;
+    for (unsigned x = 0; Iex.CCall.args[x]; x++)
+      h = h * 7 + Iex.CCall.args[x]->hashval();
+    return h;
+  }
+  case Iex_Mux0X:
+    return Iex.Mux0X.cond->hashval() + Iex.Mux0X.expr0->hashval() * 3 +
+      Iex.Mux0X.exprX->hashval() * 7;
+  case Iex_Associative: {
+    unsigned long h = Iex.Associative.op + Iex.Associative.nr_arguments;
+    for (int x = 0; x < Iex.Associative.nr_arguments; x++)
+      h = h * 11 + Iex.Associative.contents[x]->hashval();
+    return h;
+  }
+  }
+  abort();
+}
+
 void
 _IRStmt::visit(HeapVisitor &visit)
 {

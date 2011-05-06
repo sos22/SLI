@@ -19,20 +19,20 @@ __default_eq_function(const k &k1, const k &k2)
 	return k1 == k2;
 }
 
-template <typename v> void
-__default_visit_function(v &, HeapVisitor &)
+template <typename k, typename v> void
+__default_visit_function(k &, v &, HeapVisitor &)
 {
 }
 
-template <typename v> void
-__visit_function_heap(v &h, HeapVisitor &hv)
+template <typename k, typename v> void
+__visit_function_heap(k &, v &h, HeapVisitor &hv)
 {
 	hv(h);
 }
 
 template <typename keyt, typename valuet, unsigned long hashfn(const keyt &k) = __default_hash_function<keyt>,
 	  bool equalfn(const keyt &k1, const keyt &k2) = __default_eq_function<keyt>,
-	  void visitvalue(valuet &, HeapVisitor &hv) = __default_visit_function<valuet>,
+	  void visitvalue(keyt &, valuet &, HeapVisitor &hv) = __default_visit_function<keyt, valuet>,
 	  Heap *heap = &main_heap>
 class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, visitvalue, heap>, heap > {
 	typedef gc_map<keyt, valuet, hashfn, equalfn, visitvalue, heap> self_t;
@@ -48,7 +48,7 @@ class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, vis
 		{
 		}
 		void visit(HeapVisitor &hv) {
-			visitvalue(value, hv);
+			visitvalue(key, value, hv);
 			hv(next); /* Hope it tail calls correctly... */
 		}
 		void destruct() {
@@ -209,7 +209,7 @@ template <typename k, typename v, Heap *heap = &main_heap>
 class gc_heap_map {
 public:
 	typedef gc_map<k, v *, __default_hash_function<k>,
-		       __default_eq_function<k>, __visit_function_heap<v *>, heap > type;
+		       __default_eq_function<k>, __visit_function_heap<k, v *>, heap > type;
 };
 
 #endif /* !MAP_H__ */

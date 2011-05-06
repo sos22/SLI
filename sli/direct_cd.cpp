@@ -1855,11 +1855,11 @@ rewriteStateMachine(StateMachine *sm, std::map<StateMachine *, StateMachine *> &
 	return rewriteStateMachine(sm, rules, edgeRules, memo, edgeMemo);
 }
 
-/* Try to identify states which are bisimilar, and then go and merge
- * them.  This is in-place, so should really be part of ::optimise();
- * nevermind. */
-static StateMachine *
-bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
+static void
+buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimilarStates,
+				 std::set<st_edge_pair_t> &bisimilarEdges,
+				 const std::set<StateMachine *> *allStates,
+				 const AllowableOptimisations &opt)
 {
 	/* We start by assuming that all states are bisimilar to each
 	   other, and then use Tarski iteration to eliminate the
@@ -1868,21 +1868,21 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	   each other.  Once we've got that, we pick one of the states
 	   as being representative of the set, and then use it in
 	   place of the other states. */
+	std::set<StateMachine *> _allStates;
+	if (!allStates) {
+		allStates = &_allStates;
+		findAllStates(sm, _allStates);
+	}
 
-	std::set<StateMachine *> allStates;
-	findAllStates(sm, allStates);
 	std::set<StateMachineEdge *> allEdges;
-	findAllEdges(sm, allEdges);
-
-	std::set<st_pair_t> bisimilarStates;
-	std::set<st_edge_pair_t> bisimilarEdges;
+	findAllEdges(sm, allEdges);	
 
 	/* Initially, everything is bisimilar to everything else. */
-	for (std::set<StateMachine *>::iterator it = allStates.begin();
-	     it != allStates.end();
+	for (std::set<StateMachine *>::const_iterator it = allStates->begin();
+	     it != allStates->end();
 	     it++)
-		for (std::set<StateMachine *>::iterator it2 = allStates.begin();
-		     it2 != allStates.end();
+		for (std::set<StateMachine *>::const_iterator it2 = allStates->begin();
+		     it2 != allStates->end();
 		     it2++)
 			bisimilarStates.insert(st_pair_t(*it, *it2));
 	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
@@ -1923,6 +1923,21 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 			}
 		}
 	} while (progress);
+
+}
+
+/* Try to identify states which are bisimilar, and then go and merge
+ * them.  This is in-place, so should really be part of ::optimise();
+ * nevermind. */
+static StateMachine *
+bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
+{
+	std::set<st_edge_pair_t> bisimilarEdges;
+	std::set<st_pair_t> bisimilarStates;
+	std::set<StateMachine *> allStates;
+
+	findAllStates(sm, allStates);
+	buildStateMachineBisimilarityMap(sm, bisimilarStates, bisimilarEdges, &allStates, opt);
 
 	std::map<StateMachine *, StateMachine *> canonMap;
 	/* While we're here, iterate over every bifurcation node, and
@@ -1992,6 +2007,82 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	/* Perform the rewrite.  We do this in-place, because it's not
 	   context-dependent. */
 	return rewriteStateMachine(sm, canonMap, canonEdgeMap);
+}
+
+/* Note that this assumes that bisimilarity reduction, and all the
+   other usual optimisations, have already been run! */
+static bool stateMachinesBisimilar(StateMachine *a, StateMachine *b,
+				   std::set<st_edge_pair_t> &bisimilarEdges,
+				   std::set<st_pair_t> &bisimilarStates,
+				   const AllowableOptimisations &opt);
+static bool
+stateMachineEdgesBisimilar(StateMachineEdge *a,
+			   StateMachineEdge *b,
+			   std::set<st_edge_pair_t> &bisimilarEdges,
+			   std::set<st_pair_t> &bisimilarStates,
+			   const AllowableOptimisations &opt)
+{
+	if (bisimilarEdges.count(st_edge_pair_t(a, b)))
+		return true;
+	bisimilarEdges.insert(st_edge_pair_t(a, b));
+	if (a->sideEffects.size() != b->sideEffects.size())
+		return false;
+	for (unsigned x = 0; x < a->sideEffects.size(); x++) {
+		if (!sideEffectsBisimilar(a->sideEffects[x],
+					  b->sideEffects[x],
+					  opt))
+			return false;
+	}
+	return stateMachinesBisimilar(a->target, b->target, bisimilarEdges,
+				      bisimilarStates, opt);
+}
+static bool
+stateMachinesBisimilar(StateMachine *a, StateMachine *b,
+		       std::set<st_edge_pair_t> &bisimilarEdges,
+		       std::set<st_pair_t> &bisimilarStates,
+		       const AllowableOptimisations &opt)
+{
+	if (bisimilarStates.count(st_pair_t(a, b)))
+		return true;
+	/* We advance on the assumption that the states *are*
+	 * bisimilar, and rely on the fact that bisimilarity has the
+	 * right kind of monotonicity for that to actually work. */
+	bisimilarStates.insert(st_pair_t(a, b));
+	if (dynamic_cast<StateMachineUnreached *>(a))
+		return !!dynamic_cast<StateMachineUnreached *>(b);
+	if (dynamic_cast<StateMachineCrash *>(a))
+		return !!dynamic_cast<StateMachineCrash *>(b);
+	if (dynamic_cast<StateMachineNoCrash *>(a))
+		return !!dynamic_cast<StateMachineNoCrash *>(b);
+	if (StateMachineProxy *smpA = dynamic_cast<StateMachineProxy *>(a)) {
+		StateMachineProxy *smpB = dynamic_cast<StateMachineProxy *>(b);
+		if (!smpB)
+			return false;
+		return stateMachineEdgesBisimilar(smpA->target, smpB->target,
+						  bisimilarEdges, bisimilarStates,
+						  opt);
+	}
+	if (StateMachineBifurcate *smbA = dynamic_cast<StateMachineBifurcate *>(a)) {
+		StateMachineBifurcate *smbB = dynamic_cast<StateMachineBifurcate *>(b);
+		if (!smbB)
+			return false;
+		if (!definitelyEqual(smbA->condition, smbB->condition, opt))
+			return false;
+		return stateMachineEdgesBisimilar(smbA->trueTarget, smbB->trueTarget,
+						  bisimilarEdges, bisimilarStates, opt) &&
+		       stateMachineEdgesBisimilar(smbA->falseTarget, smbB->falseTarget,
+						  bisimilarEdges, bisimilarStates, opt);
+	}
+	abort();
+}
+static bool
+stateMachinesBisimilar(StateMachine *a, StateMachine *b)
+{
+	std::set<st_edge_pair_t> bisimilarEdges;
+	std::set<st_pair_t> bisimilarStates;
+
+	return stateMachinesBisimilar(a, b, bisimilarEdges, bisimilarStates,
+				      AllowableOptimisations::defaultOptimisations);
 }
 
 static unsigned long
@@ -3737,6 +3828,27 @@ fopenf(const char *mode, const char *fmt, ...)
 	return res;
 }
 
+unsigned long
+__hash_state_machine(StateMachine *const &s)
+{
+	return s->hashval();
+}
+
+bool
+__eq_state_machine(StateMachine *const &a, StateMachine *const &b)
+{
+	return stateMachinesBisimilar((StateMachine *)a, (StateMachine *)b);
+}
+
+void
+__visit_state_machine_set_entry(StateMachine *&a, bool &b, HeapVisitor &hv)
+{
+	hv(a);
+}
+
+typedef class gc_map<StateMachine *, bool, __hash_state_machine,
+		     __eq_state_machine, __visit_state_machine_set_entry> StateMachineSet;
+
 int
 main(int argc, char *argv[])
 {
@@ -3765,6 +3877,8 @@ main(int argc, char *argv[])
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
 	ii->addCrashReason(proximal);
+
+	VexPtr<StateMachineSet> readMachinesChecked(new StateMachineSet());
 
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
@@ -3803,6 +3917,13 @@ main(int argc, char *argv[])
 		} while (done_something);
 
 		printf("\tComputed state machine.\n");
+
+		if (readMachinesChecked->hasKey(cr->sm)) {
+			printf("\tAlready investigated that one...\n");
+			continue;
+		}
+		readMachinesChecked->set(cr->sm, true);
+
 		{
 			FILE *f = fopenf("w", "machines/%s", cr->rip.name());
 			pickleStateMachine(cr->sm, f);

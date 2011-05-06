@@ -302,6 +302,7 @@ struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
          ULong  F64i;
          UShort V128;   /* 16-bit value; see Ico_V128 comment above */
       } Ico;
+      unsigned long hashval() const { return tag * 103 + Ico.U64 * 607; }
       void visit(HeapVisitor &hv) {}
       NAMED_CLASS
    }
@@ -350,6 +351,7 @@ typedef
       void*  addr;
       UInt   mcx_mask;
       void visit(HeapVisitor &hv) {}
+      unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
       NAMED_CLASS
    }
    IRCallee;
@@ -375,6 +377,7 @@ struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
       IRType elemTy; /* type of each element in the indexed area */
       Int    nElems; /* number of elements in the indexed area */
       void visit(HeapVisitor &hv) {}
+      unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
       NAMED_CLASS
    }
    IRRegArray;
@@ -955,6 +958,7 @@ typedef
 struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
    IRExprTag tag;
    unsigned optimisationsApplied;
+   unsigned long hashval() const;
    union {
       /* Used only in pattern matching within Vex.  Should not be seen
          outside of Vex. */

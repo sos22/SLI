@@ -2140,8 +2140,9 @@ static bool cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2);
 class CrashMachine : public GarbageCollected<CrashMachine> {
 	friend class CRAEventRecorder;
 
-	static void visit_content_fn(std::pair<std::vector<CrashMachineNode *>,
-				     gc_map<unsigned long, bool> *> &v,
+	static void visit_content_fn(CrashTimestamp &ts,
+				     std::pair<std::vector<CrashMachineNode *>,
+				               gc_map<unsigned long, bool> *> &v,
 				     HeapVisitor &hv)
 	{
 		visit_container(v.first, hv);
@@ -3392,7 +3393,7 @@ class CrashCFG : public GarbageCollected<CrashCFG> {
 	typedef gc_map<CrashTimestamp, CrashCFGNode *,
 		       __default_hash_function<CrashTimestamp>,
 		       __default_eq_function<CrashTimestamp>,
-		       __visit_function_heap<CrashCFGNode *> > nodeMapT;
+		       __visit_function_heap<CrashTimestamp, CrashCFGNode *> > nodeMapT;
 	nodeMapT *_nodeMap;
 
 	/* Things which we need to visit, but haven't reached yet. */
