@@ -1248,11 +1248,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								   l->Iex.Associative.contents[it]));
 				IRExpr *cnst = l->Iex.Associative.contents[0];
 				if (cnst->tag != Iex_Const) {
-					cnst = IRExpr_Const(IRConst_U64(0));
 					addArgumentToAssoc(newR,
 							   IRExpr_Unop(
 								   Iop_Neg64,
 								   cnst));
+					cnst = IRExpr_Const(IRConst_U64(0));
 				}
 				l = src->Iex.Binop.arg1 = cnst;
 				r = src->Iex.Binop.arg2 = optimiseIRExprFP(newR, opt, done_something);
