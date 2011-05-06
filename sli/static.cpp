@@ -136,6 +136,26 @@ list_heads(Oracle *oracle)
 		printf("%s\n", (*it)->name());
 }
 
+static void
+dumpTagTable(Oracle *oracle)
+{
+	for (std::vector<Oracle::tag_entry>::iterator it = oracle->tag_table.begin();
+	     it != oracle->tag_table.end();
+	     it++) {
+		printf("Loads: ");
+		for (std::set<unsigned long>::iterator it2 = it->loads.begin();
+		     it2 != it->loads.end();
+		     it2++)
+			printf("%lx ", *it2);
+		printf("\nStores: ");
+		for (std::set<unsigned long>::iterator it2 = it->stores.begin();
+		     it2 != it->stores.end();
+		     it2++)
+			printf("%lx ", *it2);
+		printf("\n\n");
+	}
+}
+
 static std::vector<unsigned long> newHeads;
 
 static void
@@ -171,6 +191,8 @@ run_command(Oracle *oracle)
 			       (unsigned long)*words[2]);
 			i->aliasOnEntry.prettyPrint(stdout);
 		}
+	} else if (*words[0] == "dumptags") {
+		dumpTagTable(oracle);
 	} else {
 		printf("Unknown command %s\n", words[0]->content);
 	}
@@ -182,7 +204,7 @@ main(int argc, char *argv[])
 	init_sli();
 
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
-	VexPtr<Oracle> oracle(new Oracle(ms, NULL, NULL));
+	VexPtr<Oracle> oracle(new Oracle(ms, NULL, argv[2]));
 
 	while (1) {
 		LibVEX_maybe_gc(ALLOW_GC);

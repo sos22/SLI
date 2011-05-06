@@ -235,12 +235,12 @@ public:
 		void visit(HeapVisitor &hv) {visit_container(callers, hv);}
 		NAMED_CLASS
 	};
-private:
 	struct tag_entry {
 		std::set<unsigned long> loads;
 		std::set<unsigned long> stores;
 	};
 	std::vector<tag_entry> tag_table;
+private:
 	std::vector<Function *> functions;
 	gc_heap_map<unsigned long, Function>::type *addrToFunction;
 
