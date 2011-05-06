@@ -92,6 +92,14 @@ Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
 	v[9] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* r9 */
 }
 
+Oracle::RegisterAliasingConfiguration Oracle::RegisterAliasingConfiguration::unknown(5.3f, 12);
+Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float, int)
+{
+	stackHasLeaked = true;
+	for (int i = 0; i < NR_REGS; i++)
+		v[i] = Oracle::PointerAliasingSet::anything;
+}
+
 void
 Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
 {
@@ -1121,7 +1129,8 @@ const Oracle::RegisterAliasingConfiguration &
 Oracle::getAliasingConfigurationForRip(unsigned long rip)
 {
 	Function *f = get_function(rip);
-	assert(f);
+	if (!f)
+		return RegisterAliasingConfiguration::unknown;
 	return f->instructions->get(rip)->aliasOnEntry;
 }
 

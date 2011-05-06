@@ -137,6 +137,7 @@ public:
 	};
 	class RegisterAliasingConfiguration {
 		RegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
+		RegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
 	public:
 		RegisterAliasingConfiguration() : stackHasLeaked(false) {}
 		PointerAliasingSet v[NR_REGS];
@@ -158,7 +159,10 @@ public:
 		/* This should be const, but C++ can't quite manage the
 		 * initialisation in that case, poor thing. */
 		static RegisterAliasingConfiguration functionEntryConfiguration;
-		
+
+		/* Any aliasing pattern possible. */
+		static RegisterAliasingConfiguration unknown;
+
 		/* Check whether a and b mght point at the same bit of
 		   memory (i.e. have intersecting pointer aliasing
 		   sets) given @this's register aliasing
