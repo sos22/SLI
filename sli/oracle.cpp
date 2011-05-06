@@ -1117,7 +1117,7 @@ Oracle::RegisterAliasingConfiguration::mightAlias(IRExpr *a, IRExpr *b) const
 		irexprAliasingClass(b, NULL, *this, NULL);
 }
 
-Oracle::RegisterAliasingConfiguration &
+const Oracle::RegisterAliasingConfiguration &
 Oracle::getAliasingConfigurationForRip(unsigned long rip)
 {
 	Function *f = get_function(rip);

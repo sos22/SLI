@@ -3757,7 +3757,7 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 		done_something = false;
 		sm = sm->optimise(opt2, oracle, &done_something);
 	} while (done_something);
-	Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
+	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
 	sm = availExpressionAnalysis(sm, opt2, alias, oracle);
 	sm = bisimilarityReduction(sm, opt2);
 	do {
@@ -3907,7 +3907,7 @@ main(int argc, char *argv[])
 			dbg_break("Here we are");
 
 		bool done_something;
-		Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(*it));
+		const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(*it));
 		do {
 			done_something = false;
 			cr->sm = cr->sm->optimise(opt, oracle, &done_something);

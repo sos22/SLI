@@ -270,7 +270,7 @@ public:
 			heads->push_back(i.value());
 	}
 
-	RegisterAliasingConfiguration &getAliasingConfigurationForRip(unsigned long rip);
+	const RegisterAliasingConfiguration &getAliasingConfigurationForRip(unsigned long rip);
 
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: addrToFunction(new gc_heap_map<unsigned long, Function>::type()), ms(_ms), crashedThread(_thr)
