@@ -3849,6 +3849,94 @@ __visit_state_machine_set_entry(StateMachine *&a, bool &b, HeapVisitor &hv)
 typedef class gc_map<StateMachine *, bool, __hash_state_machine,
 		     __eq_state_machine, __visit_state_machine_set_entry> StateMachineSet;
 
+static bool storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, Oracle *oracle);
+static bool
+storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, Oracle *oracle)
+{
+	for (unsigned y = 0; y < sme->sideEffects.size(); y++) {
+		if (StateMachineSideEffectLoad *smsel =
+		    dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y])) {
+			if (oracle->memoryAccessesMightAlias(smsel, smses))
+				return true;
+		}
+	}
+	return storeMightBeLoadedByState(sme->target, smses, oracle);
+}
+static bool
+storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, Oracle *oracle)
+{
+	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
+		return storeMightBeLoadedByStateEdge(smp->target, smses, oracle);
+	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm))
+		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, oracle) ||
+			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, oracle);
+	return false;
+}
+static bool
+storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
+				      StateMachineSideEffectStore *smses,
+				      Oracle *oracle)
+{
+	for (unsigned y = idx + 1; y < sme->sideEffects.size(); y++) {
+		if (StateMachineSideEffectLoad *smsel =
+		    dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y])) {
+			if (oracle->memoryAccessesMightAlias(smsel, smses))
+				return true;
+		}
+	}
+	return storeMightBeLoadedByState(sme->target, smses, oracle);
+}
+
+/* Look at the state machine, compare it to the tags table, and remove
+   any stores which are definitely never loaded (assuming that the
+   tags table is correct). */
+static void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+				  std::set<StateMachine *> &visited);
+static void
+removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_something,
+		      std::set<StateMachine *> &visited)
+{
+	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
+			if (!storeMightBeLoadedFollowingSideEffect(sme, x, smses, oracle)) {
+				sme->sideEffects.erase(
+					sme->sideEffects.begin() + x);
+				x--;
+				*done_something = true;
+			}
+		}
+	}
+}
+static void
+removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+		      std::set<StateMachine *> &visited)
+{
+	if (visited.count(sm))
+		return;
+	visited.insert(sm);
+	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+		removeRedundantStores(smp->target, oracle, done_something, visited);
+		return;
+	}
+	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
+		removeRedundantStores(smb->trueTarget, oracle, done_something, visited);
+		removeRedundantStores(smb->falseTarget, oracle, done_something, visited);
+		return;
+	}
+	assert(dynamic_cast<StateMachineUnreached *>(sm) ||
+	       dynamic_cast<StateMachineCrash *>(sm) ||
+	       dynamic_cast<StateMachineNoCrash *>(sm) ||
+	       dynamic_cast<StateMachineStub *>(sm));
+}
+static void
+removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something)
+{
+	std::set<StateMachine *> visited;
+
+	removeRedundantStores(sm, oracle, done_something, visited);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -3911,6 +3999,7 @@ main(int argc, char *argv[])
 		do {
 			done_something = false;
 			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
+			removeRedundantStores(cr->sm, oracle, &done_something);
 			cr->sm = availExpressionAnalysis(cr->sm, opt, alias, oracle);
 			cr->sm = bisimilarityReduction(cr->sm, opt);
 			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
