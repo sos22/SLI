@@ -55,7 +55,15 @@ public:
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true);
 	}
 	unsigned asUnsigned() const {
-		unsigned x = 0;
+		unsigned x = 8; /* turning off all of the optional
+				   optimisations doesn't turn off the
+				   ones which are always available, so
+				   have an implicit bit for them.
+				   i.e. 0 means no optimisations at
+				   all, and 8 means only the most
+				   basic ones which are always
+				   safe. */
+
 		if (xPlusMinusX)
 			x |= 1;
 		if (assumePrivateStack)
