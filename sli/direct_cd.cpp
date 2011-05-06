@@ -1533,45 +1533,6 @@ hasDisallowedSideEffects(StateMachineEdge *sme,
 }
 
 static bool
-sideEffectsBisimilar(StateMachineSideEffect *smse1,
-		     StateMachineSideEffect *smse2,
-		     const AllowableOptimisations &opt)
-{
-	if (StateMachineSideEffectStore *smses1 =
-	    dynamic_cast<StateMachineSideEffectStore *>(smse1)) {
-		StateMachineSideEffectStore *smses2 =
-			dynamic_cast<StateMachineSideEffectStore *>(smse2);
-		if (!smses2)
-			return false;
-		return definitelyEqual(smses1->addr, smses2->addr, opt) &&
-			definitelyEqual(smses1->data, smses2->data, opt);
-	} else if (StateMachineSideEffectLoad *smsel1 =
-		   dynamic_cast<StateMachineSideEffectLoad *>(smse1)) {
-		StateMachineSideEffectLoad *smsel2 =
-			dynamic_cast<StateMachineSideEffectLoad *>(smse2);
-		if (!smsel2)
-			return false;
-		return smsel1->key == smsel2->key &&
-			definitelyEqual(smsel1->smsel_addr, smsel2->smsel_addr, opt);
-	} else if (StateMachineSideEffectCopy *smsec1 =
-		   dynamic_cast<StateMachineSideEffectCopy *>(smse1)) {
-		StateMachineSideEffectCopy *smsec2 =
-			dynamic_cast<StateMachineSideEffectCopy *>(smse2);
-		if (!smsec2)
-			return false;
-		return smsec1->key == smsec2->key &&
-			definitelyEqual(smsec1->value, smsec2->value, opt);
-	} else if (dynamic_cast<StateMachineSideEffectUnreached *>(smse1)) {
-		if (dynamic_cast<StateMachineSideEffectUnreached *>(smse2))
-			return true;
-		else
-			return false;
-	} else {
-		abort();
-	}
-}
-
-static bool
 edgesLocallyBisimilar(StateMachineEdge *sme1,
 		      StateMachineEdge *sme2,
 		      const std::set<st_pair_t> &states,
@@ -2007,82 +1968,6 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	/* Perform the rewrite.  We do this in-place, because it's not
 	   context-dependent. */
 	return rewriteStateMachine(sm, canonMap, canonEdgeMap);
-}
-
-/* Note that this assumes that bisimilarity reduction, and all the
-   other usual optimisations, have already been run! */
-static bool stateMachinesBisimilar(StateMachine *a, StateMachine *b,
-				   std::set<st_edge_pair_t> &bisimilarEdges,
-				   std::set<st_pair_t> &bisimilarStates,
-				   const AllowableOptimisations &opt);
-static bool
-stateMachineEdgesBisimilar(StateMachineEdge *a,
-			   StateMachineEdge *b,
-			   std::set<st_edge_pair_t> &bisimilarEdges,
-			   std::set<st_pair_t> &bisimilarStates,
-			   const AllowableOptimisations &opt)
-{
-	if (bisimilarEdges.count(st_edge_pair_t(a, b)))
-		return true;
-	bisimilarEdges.insert(st_edge_pair_t(a, b));
-	if (a->sideEffects.size() != b->sideEffects.size())
-		return false;
-	for (unsigned x = 0; x < a->sideEffects.size(); x++) {
-		if (!sideEffectsBisimilar(a->sideEffects[x],
-					  b->sideEffects[x],
-					  opt))
-			return false;
-	}
-	return stateMachinesBisimilar(a->target, b->target, bisimilarEdges,
-				      bisimilarStates, opt);
-}
-static bool
-stateMachinesBisimilar(StateMachine *a, StateMachine *b,
-		       std::set<st_edge_pair_t> &bisimilarEdges,
-		       std::set<st_pair_t> &bisimilarStates,
-		       const AllowableOptimisations &opt)
-{
-	if (bisimilarStates.count(st_pair_t(a, b)))
-		return true;
-	/* We advance on the assumption that the states *are*
-	 * bisimilar, and rely on the fact that bisimilarity has the
-	 * right kind of monotonicity for that to actually work. */
-	bisimilarStates.insert(st_pair_t(a, b));
-	if (dynamic_cast<StateMachineUnreached *>(a))
-		return !!dynamic_cast<StateMachineUnreached *>(b);
-	if (dynamic_cast<StateMachineCrash *>(a))
-		return !!dynamic_cast<StateMachineCrash *>(b);
-	if (dynamic_cast<StateMachineNoCrash *>(a))
-		return !!dynamic_cast<StateMachineNoCrash *>(b);
-	if (StateMachineProxy *smpA = dynamic_cast<StateMachineProxy *>(a)) {
-		StateMachineProxy *smpB = dynamic_cast<StateMachineProxy *>(b);
-		if (!smpB)
-			return false;
-		return stateMachineEdgesBisimilar(smpA->target, smpB->target,
-						  bisimilarEdges, bisimilarStates,
-						  opt);
-	}
-	if (StateMachineBifurcate *smbA = dynamic_cast<StateMachineBifurcate *>(a)) {
-		StateMachineBifurcate *smbB = dynamic_cast<StateMachineBifurcate *>(b);
-		if (!smbB)
-			return false;
-		if (!definitelyEqual(smbA->condition, smbB->condition, opt))
-			return false;
-		return stateMachineEdgesBisimilar(smbA->trueTarget, smbB->trueTarget,
-						  bisimilarEdges, bisimilarStates, opt) &&
-		       stateMachineEdgesBisimilar(smbA->falseTarget, smbB->falseTarget,
-						  bisimilarEdges, bisimilarStates, opt);
-	}
-	abort();
-}
-static bool
-stateMachinesBisimilar(StateMachine *a, StateMachine *b)
-{
-	std::set<st_edge_pair_t> bisimilarEdges;
-	std::set<st_pair_t> bisimilarStates;
-
-	return stateMachinesBisimilar(a, b, bisimilarEdges, bisimilarStates,
-				      AllowableOptimisations::defaultOptimisations);
 }
 
 static unsigned long

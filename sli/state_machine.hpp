@@ -455,5 +455,9 @@ bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 IRExpr *internIRExpr(IRExpr *x);
 IRExpr *simplifyIRExprAsBoolean(IRExpr *inp);
 void printStateMachine(const StateMachine *sm, FILE *f);
+bool stateMachinesBisimilar(StateMachine *a, StateMachine *b);
+bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
+			  StateMachineSideEffect *smse2,
+			  const AllowableOptimisations &opt);
 
 #endif /* !STATEMACHINE_HPP__ */
