@@ -3892,17 +3892,20 @@ main(int argc, char *argv[])
 
 		printf("\tComputed state machine.\n");
 
+		{
+			FILE *f = fopenf("w", "machines/%s", cr->rip.name());
+			pickleStateMachine(cr->sm, f);
+			fclose(f);
+		}
+
 		if (readMachinesChecked->hasKey(cr->sm)) {
 			printf("\tAlready investigated that one...\n");
 			continue;
 		}
 		readMachinesChecked->set(cr->sm, true);
 
-		{
-			FILE *f = fopenf("w", "machines/%s", cr->rip.name());
-			pickleStateMachine(cr->sm, f);
-			fclose(f);
-		}
+		if (cr->rip.rip != 0x6e4c43)
+			continue;
 
 		VexPtr<IRExpr, &ir_heap> survive;
 		{
