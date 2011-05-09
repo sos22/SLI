@@ -3061,11 +3061,12 @@ findRemoteMacroSections(StateMachine *readMachine,
  */
 class CallGraphEntry : public GarbageCollected<CallGraphEntry, &ir_heap> {
 public:
-	CallGraphEntry(unsigned long r)
+	CallGraphEntry(unsigned long r, int _depth)
 		: headRip(r),
 		  callees(new gc_pair_ulong_set_t()),
 		  instructions(new RangeSet()),
-		  calls(new gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type())
+		  calls(new gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type()),
+		  depth(_depth)
 	{}
 	unsigned long headRip;
 	bool isRealHead; /* Head is derived from a call instruction,
@@ -3080,6 +3081,8 @@ public:
 	   format. */
 	typedef gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type calls_t;
 	calls_t *calls;
+
+	int depth;
 
 	void visit(HeapVisitor &hv) {
 		hv(instructions);
@@ -3103,14 +3106,16 @@ getInstrLength(AddressSpace *as, unsigned long a)
 	return irsb->stmts[0]->Ist.IMark.len;
 }
 static CallGraphEntry *
-exploreOneFunctionForCallGraph(unsigned long head, bool isRealHead,
+exploreOneFunctionForCallGraph(unsigned long head,
+			       int depth,
+			       bool isRealHead,
 			       RangeTree<CallGraphEntry> *instrsToCGEntries,
 			       AddressSpace *as,
 			       std::set<unsigned long> &realFunctionHeads)
 {
 	CallGraphEntry *cge;
 
-	cge = new CallGraphEntry(head);
+	cge = new CallGraphEntry(head, depth);
 	cge->isRealHead = isRealHead;
 
 	std::vector<unsigned long> unexploredInstrsThisFunction;
@@ -3204,20 +3209,29 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			std::set<CallGraphEntry *> &roots)
 {
 	if (rips.size() == 1) {
-		CallGraphEntry *cge = new CallGraphEntry(*rips.begin());
+		CallGraphEntry *cge = new CallGraphEntry(*rips.begin(), 0);
 		cge->isRealHead = true;
 		cge->instructions->set(*rips.begin(), *rips.begin() + 1);
 		roots.insert(cge);
 		return;
 	}
-	std::set<unsigned long> unexploredRips(rips);
+	std::set<std::pair<unsigned long, int> > unexploredRips;
+	for (std::set<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++) {
+		unexploredRips.insert(std::pair<unsigned long, int>(*it, 0));
+	}
 	RangeTree<CallGraphEntry> *instrsToCGEntries = new RangeTree<CallGraphEntry>();
 	std::set<unsigned long> realFunctionHeads;
 
 	while (!unexploredRips.empty()) {
-		std::set<unsigned long>::iterator it = unexploredRips.begin();
-		unsigned long head = *it;
+		std::set<std::pair<unsigned long, int> >::iterator it = unexploredRips.begin();
+		unsigned long head = it->first;
+		int depth = it->second;
 		unexploredRips.erase(it);
+
+		if (depth >= 10)
+			continue;
 
 		CallGraphEntry *cge;
 		cge = instrsToCGEntries->get(head);
@@ -3229,19 +3243,26 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 
 		/* Explore the current function, starting from this
 		 * instruction. */
-		cge = exploreOneFunctionForCallGraph(head, false, instrsToCGEntries, as, realFunctionHeads);
+		cge = exploreOneFunctionForCallGraph(head, depth, false, instrsToCGEntries, as, realFunctionHeads);
 		assert(instrsToCGEntries->get(head) == cge);
 
 		/* Now explore the functions which were called by that
 		 * root. */
-		/* Only really need the second half of the pair, but,
-		   frankly, I can't be bothered to write all the
-		   boiler plate for a C++ map operation. */
-		gc_pair_ulong_set_t *unexploredRealHeads = new gc_pair_ulong_set_t(*cge->callees);
-		while (!unexploredRealHeads->empty()) {
-			gc_pair_ulong_set_t::iterator it = unexploredRealHeads->begin();
-			unsigned long h = it.key().second;
-			unexploredRealHeads->erase(it);
+		std::set<std::pair<unsigned long, int> > unexploredRealHeads;
+		for (gc_pair_ulong_set_t::iterator it = cge->callees->begin();
+		     it != cge->callees->end();
+		     it++) {
+			unexploredRealHeads.insert(std::pair<unsigned long, int>(it.key().second,
+										 depth + 1));
+		}
+		while (!unexploredRealHeads.empty()) {
+			std::set<std::pair<unsigned long, int> >::const_iterator it = unexploredRealHeads.begin();
+			unsigned long h = it->first;
+			int depth_h = it->second;
+			unexploredRealHeads.erase(it);
+
+			if (depth_h >= 10)
+				continue;
 
 			realFunctionHeads.insert(h);
 
@@ -3255,7 +3276,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					   need to get rid of it. */
 					printf("%lx was a pseudo-root; purge.\n", h);
 					instrsToCGEntries->purgeByValue(old);
-				} else if (old->headRip == h) {
+				} else if (old->headRip == h && old->depth <= depth_h) {
 					/* It's the head of an
 					   existing function ->
 					   everything is fine and we
@@ -3274,16 +3295,21 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					/* Need to re-explore whatever
 					   it was that tail-called
 					   into this function. */
-					unexploredRealHeads->set(std::pair<unsigned long, unsigned long>(0xf001dead, old->headRip), true);
+					unexploredRealHeads.insert(std::pair<unsigned long, int>(h, depth_h + 1));
 				}
 			}
 
 			/* Now explore that function */
-			cge = exploreOneFunctionForCallGraph(h, true,
+			cge = exploreOneFunctionForCallGraph(h,
+							     depth_h,
+							     true,
 							     instrsToCGEntries,
 							     as,
 							     realFunctionHeads);
-			mergeUlongSets(unexploredRealHeads, cge->callees);
+			for (gc_pair_ulong_set_t::iterator it = cge->callees->begin();
+			     it != cge->callees->end();
+			     it++)
+				unexploredRealHeads.insert(std::pair<unsigned long, int>(it.key().second, depth_h + 1));
 			assert(instrsToCGEntries->get(h) == cge);
 		}
 	}
@@ -3876,8 +3902,6 @@ main(int argc, char *argv[])
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
 			.enableignoreSideEffects();
-		if (cr->rip.rip == 0x6e4d35)
-			dbg_break("Here we are");
 
 		bool done_something;
 		const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(*it));
@@ -3976,7 +4000,17 @@ main(int argc, char *argv[])
 			     it2++)
 				printf(" %lx", *it2);
 			printf("\n");
+		}
 
+		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
+		     it != conflictClusters.end();
+		     it++) {
+			printf("\t\tCluster:");
+			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
+			     it2 != it->rips.end();
+			     it2++)
+				printf(" %lx", *it2);
+			printf("\n");
 			std::set<CallGraphEntry *> cgRoots;
 			buildCallGraphForRipSet(ms->addressSpace, it->rips, cgRoots);
 			for (std::set<CallGraphEntry *>::iterator it2 = cgRoots.begin();

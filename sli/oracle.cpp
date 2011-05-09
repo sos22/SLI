@@ -353,13 +353,17 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 		
 		results.insert(item);
 
-		std::set<unsigned long> visited;
-		std::vector<unsigned long> pending;
-		pending.push_back(item);
+		/* Map from rips to the ``best'' depth we've visited
+		 * with so far. */
+		std::map<unsigned long, int> visited;
+		std::vector<std::pair<unsigned long, int> > pending;
+		pending.push_back(std::pair<unsigned long, int>(item, 20));
 		while (!pending.empty()) {
-			unsigned long next = pending.back();
+			std::pair<unsigned long, int> next = pending.back();
 			pending.pop_back();
-			if (visited.count(next)) {
+			if (next.second == 0)
+				continue;
+			if (visited[next.first] >= next.second) {
 				/* Okay, we've already been to this
 				   instruction starting from this
 				   root, so don't need to do anything
@@ -367,12 +371,12 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 				continue;
 			}
 			visited.insert(next);
-			if (inputRips.count(next)) {
+			if (inputRips.count(next.first) && next.first != item) {
 				/* This root can reach another one of
 				   the input instructions.  That means
 				   that they need to be clustered.  Do
 				   so. */
-				results.insert(item, next);
+				results.insert(item, next.first);
 
 				/* That's all we need to do: the bits
 				   which are reachable from the
@@ -389,7 +393,12 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 			/* Not already visited from this root, not
 			 * another root -> have to do it the hard
 			 * way. */
-			findSuccessors(ms->addressSpace, next, pending);
+			std::vector<unsigned long> s;
+			findSuccessors(ms->addressSpace, next.first, s);
+			for (std::vector<unsigned long>::iterator it2 = s.begin();
+			     it2 != s.end();
+			     it2++)
+				pending.push_back(std::pair<unsigned long, int>(*it2, next.second - 1));
 		}
 	}
 #endif
