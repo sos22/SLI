@@ -173,12 +173,32 @@ bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 				 StateMachineSideEffectStore *smses)
 {
+	static unsigned nr_queries;
+	static unsigned nr_bloom_hits;
+	static unsigned nr_bloom_hits2;
+	static unsigned nr_trues;
+	static unsigned nr_falses;
+	unsigned long h = hashRipPair(smses->rip, smsel->rip);
+
+	nr_queries++;
+	if (!(memoryAliasingFilter[h/64] & (1ul << (h % 64)))) {
+		nr_bloom_hits++;
+		return false;
+	}
+	h = hashRipPair(smses->rip * 23, smsel->rip * 17);
+	if (!(memoryAliasingFilter2[h/64] & (1ul << (h % 64)))) {
+		nr_bloom_hits2++;
+		return false;
+	}
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++)
 		if (it->loads.count(smsel->rip) &&
-		    it->stores.count(smses->rip))
+		    it->stores.count(smses->rip)) {
+			nr_trues++;
 			return true;
+		}
+	nr_falses++;
 	return false;
 }
 
@@ -456,6 +476,18 @@ Oracle::loadTagTable(const char *path)
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
 			t.stores.insert(buf);
+		}
+		for (std::set<unsigned long>::iterator it1 = t.stores.begin();
+		     it1 != t.stores.end();
+		     it1++) {
+			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
+			     it2 != t.loads.end();
+			     it2++) {
+				unsigned long h = hashRipPair(*it1, *it2);
+				memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
+				h = hashRipPair(*it1 * 23, *it2 * 17);
+				memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
+			}
 		}
 		tag_table.push_back(t);
 	}

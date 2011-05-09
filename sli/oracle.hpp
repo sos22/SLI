@@ -241,6 +241,17 @@ public:
 	};
 	std::vector<tag_entry> tag_table;
 private:
+	static const unsigned nr_memory_filter_words = 10267;
+	static unsigned long hashRipPair(unsigned long a, unsigned long b) {
+		unsigned long h = a + b * 202693;
+		while (h >= (nr_memory_filter_words * 64))
+			h = (h % (nr_memory_filter_words * 64)) ^ (h / (nr_memory_filter_words * 64));
+		assert(h / 64 < nr_memory_filter_words);
+		return h;
+	}
+	unsigned long memoryAliasingFilter[nr_memory_filter_words];
+	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
+
 	std::vector<Function *> functions;
 	gc_heap_map<unsigned long, Function>::type *addrToFunction;
 
