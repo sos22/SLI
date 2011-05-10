@@ -1480,9 +1480,12 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 								      smses->addr) &&
 						     !definitelyNotEqual( (*it3)->addr,
 									  smses->addr,
-									  opt) )
+									  opt) &&
+						     /* XXX HACK HACK HACK */
+						     smses->rip != 0x6e4dac &&
+						     smses->rip != 0x6e5af9 ) {
 							outputAvail.erase(it3++);
-						else
+						} else
 							it3++;
 					}
 					/* Introduce the store which was generated. */
@@ -2188,6 +2191,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 	bool isNewChoice;
 	res = chooser.nd_choice(2, &isNewChoice);
 
+#if 0
 	if (isNewChoice) {
 		printf("Having to use state split to check whether ");
 		ppIRExpr(exp, stdout);
@@ -2195,6 +2199,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 		ppIRExpr(*assumption, stdout);
 		printf("\n");
 	}
+#endif
 
 	if (res == 0) {
 		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
