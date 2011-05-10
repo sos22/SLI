@@ -180,6 +180,16 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 	static unsigned nr_falses;
 	unsigned long h = hashRipPair(smses->rip, smsel->rip);
 
+	/* The tag database doesn't include anything which doesn't
+	 * cross threads, so for those we have to use a slightly more
+	 * stupid approach. */
+	if (storeIsThreadLocal(smses)) {
+		if (!definitelyNotEqual(smsel->smsel_addr, smses->addr, AllowableOptimisations::defaultOptimisations))
+			return true;
+		else
+			return false;
+	}
+
 	nr_queries++;
 	if (!(memoryAliasingFilter[h/64] & (1ul << (h % 64)))) {
 		nr_bloom_hits++;
@@ -206,6 +216,12 @@ bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 				 StateMachineSideEffectStore *smses2)
 {
+	if (storeIsThreadLocal(smses1) && storeIsThreadLocal(smses2)) {
+		if (!definitelyNotEqual(smses2->addr, smses1->addr, AllowableOptimisations::defaultOptimisations))
+			return true;
+		else
+			return false;
+	}
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++)
