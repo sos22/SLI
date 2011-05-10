@@ -1549,7 +1549,7 @@ CnfOr::CNF()
 			continue;
 		if (CnfOr *cor = dynamic_cast<CnfOr *>(args[x])) {
 			/* Flatten nested ORs. */
-			for (unsigned y = 0; y < args.size(); y++) {
+			for (unsigned y = 0; y < cor->args.size(); y++) {
 				args.push_back(cor->args[y]);
 			}
 			args.erase(args.begin() + x);
@@ -1584,7 +1584,7 @@ CnfOr::CNF()
 			CnfGrouping *cg = new CnfOr();
 			cg->args = newArgs;
 			cg->addChild(cad->args[y]);
-			newRoot->args[x] = cg;
+			newRoot->args[y] = cg;
 		}
 		return newRoot->CNF();
 	}
@@ -1607,7 +1607,7 @@ CnfAnd::CNF()
 			continue;
 		}
 		if (CnfAnd *car = dynamic_cast<CnfAnd *>(args[x])) {
-			for (unsigned y = 0; y < args.size(); y++) {
+			for (unsigned y = 0; y < car->args.size(); y++) {
 				args.push_back(car->args[y]);
 			}
 			args.erase(args.begin() + x);
