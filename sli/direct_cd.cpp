@@ -2018,6 +2018,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		while (idx != 0) {
 			IRStmt *stmt = irsb->stmts[idx-1];
 			res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
+			idx--;
 		}
 	}
 	memo[cfg] = res;
@@ -2788,21 +2789,24 @@ top:
  * to true if any run caused sm1 to reach a NoCrash state, otherwise
  * set it to false; likewise *mightCrash for Crash states. */
 static void
-evalCrossProductMachine(StateMachine *sm1,
-			StateMachine *sm2,
-			Oracle *oracle,
-			IRExpr *initialStateCondition,
+evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
+			VexPtr<StateMachine, &ir_heap> &sm2,
+			VexPtr<Oracle> &oracle,
+			VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 			bool *mightSurvive,
-			bool *mightCrash)
+			bool *mightCrash,
+			GarbageCollectionToken token)
 {
 	NdChooser chooser;
 
 	*mightSurvive = false;
 	*mightCrash = false;
 
-	StateMachineEdge *sme1 = new StateMachineEdge(sm1);
-	StateMachineEdge *sme2 = new StateMachineEdge(sm2);
+	VexPtr<StateMachineEdge, &ir_heap> sme1(new StateMachineEdge(sm1));
+	VexPtr<StateMachineEdge, &ir_heap> sme2(new StateMachineEdge(sm2));
 	while (!*mightCrash || !*mightSurvive) {
+		LibVEX_maybe_gc(token);
+
 		CrossMachineEvalContext ctxt;
 		assert(ctxt.stores.size() == 0);
 		ctxt.pathConstraint = initialStateCondition;
@@ -3204,16 +3208,19 @@ purgeCGFromCGESet(std::set<CallGraphEntry *> &s, CallGraphEntry *root)
 	     it++)
 		purgeCGFromCGESet(s, it.value());
 }
-static void
+static CallGraphEntry **
 buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
-			std::set<CallGraphEntry *> &roots)
+			int *nr_roots)
 {
 	if (rips.size() == 1) {
 		CallGraphEntry *cge = new CallGraphEntry(*rips.begin(), 0);
 		cge->isRealHead = true;
 		cge->instructions->set(*rips.begin(), *rips.begin() + 1);
-		roots.insert(cge);
-		return;
+
+		*nr_roots = 1;
+		CallGraphEntry **res = (CallGraphEntry **)__LibVEX_Alloc_Ptr_Array(&ir_heap, 1);
+		res[0] = cge;
+		return res;
 	}
 	std::set<std::pair<unsigned long, int> > unexploredRips;
 	for (std::set<unsigned long>::iterator it = rips.begin();
@@ -3407,6 +3414,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		}
 	}
 
+	std::vector<CallGraphEntry *> roots;
 	/* Build the root set. */
 	while (!allCGEs.empty()) {
 		/* Pick a new root.  If there's anything with no
@@ -3449,10 +3457,17 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			res = best;
 		}
 
-		roots.insert(res);
+		roots.push_back(res);
 
 		purgeCGFromCGESet(allCGEs, res);
 	}
+
+	CallGraphEntry **res;
+	*nr_roots = roots.size();
+	res = (CallGraphEntry **)__LibVEX_Alloc_Ptr_Array(&ir_heap, roots.size());
+	for (unsigned i = 0; i < roots.size(); i++)
+		res[i] = roots[i];
+	return res;
 }
 
 static void
@@ -3510,6 +3525,8 @@ public:
 		return w;
 	}
 };
+
+template <> void printCFG(const CFGNode<StackRip> *cfg);
 
 static unsigned long
 wrappedRipToRip(const StackRip &r)
@@ -3655,10 +3672,14 @@ buildCFGForCallGraph(AddressSpace *as,
 #define STORING_THREAD 97
 
 static void
-considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
-		 IRExpr *assumption, StateMachine *probeMachine)
+considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
+		 VexPtr<AddressSpace> &as,
+		 VexPtr<Oracle> &oracle,
+		 VexPtr<IRExpr, &ir_heap> &assumption,
+		 VexPtr<StateMachine, &ir_heap> &probeMachine,
+		 GarbageCollectionToken token)
 {
-	StateMachine *sm = CFGtoStoreMachine(STORING_THREAD, as, cfg);
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
 
 	AllowableOptimisations opt2 =
 		AllowableOptimisations::defaultOptimisations
@@ -3685,7 +3706,8 @@ considerStoreCFG(CFGNode<StackRip> *cfg, AddressSpace *as, Oracle *oracle,
 				oracle,
 				assumption,
 				&mightSurvive,
-				&mightCrash);
+				&mightCrash,
+				token);
 	printf("\t\tRun in parallel with the probe machine, might survive %d, might crash %d\n",
 	       mightSurvive, mightCrash);
 	
@@ -3972,13 +3994,15 @@ main(int argc, char *argv[])
 			dbg_break("whoops");
 		}
 
-		std::set<StateMachineSideEffectLoad *> allLoads;
-		findAllLoads(cr->sm, allLoads);
 		std::set<unsigned long> potentiallyConflictingStores;
-		for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
-		     it != allLoads.end();
-		     it++) {
-			oracle->findConflictingStores(*it, potentiallyConflictingStores);
+		{
+			std::set<StateMachineSideEffectLoad *> allLoads;
+			findAllLoads(cr->sm, allLoads);
+			for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
+			     it != allLoads.end();
+			     it++) {
+				oracle->findConflictingStores(*it, potentiallyConflictingStores);
+			}
 		}
 		printf("\tConflicting stores: ");
 		for (std::set<unsigned long>::iterator it = potentiallyConflictingStores.begin();
@@ -4005,24 +4029,28 @@ main(int argc, char *argv[])
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
 		     it++) {
+			if (it->rips.size() != 2)
+				continue;
 			printf("\t\tCluster:");
 			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
 			     it2 != it->rips.end();
 			     it2++)
 				printf(" %lx", *it2);
 			printf("\n");
-			std::set<CallGraphEntry *> cgRoots;
-			buildCallGraphForRipSet(ms->addressSpace, it->rips, cgRoots);
-			for (std::set<CallGraphEntry *>::iterator it2 = cgRoots.begin();
-			     it2 != cgRoots.end();
-			     it2++) {
-				CFGNode<StackRip> *storeCFG;
-				storeCFG = buildCFGForCallGraph(ms->addressSpace, *it2);
-				trimCFG(storeCFG, *it);
-				breakCycles(storeCFG);
+			LibVEX_maybe_gc(ALLOW_GC);
+			VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
+			int nr_roots;
+			cgRoots = buildCallGraphForRipSet(ms->addressSpace, it->rips, &nr_roots);
+			for (int i = 0; i < nr_roots; i++) {
+				VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
+				storeCFG = buildCFGForCallGraph(ms->addressSpace, cgRoots[i]);
+				trimCFG(storeCFG.get(), *it);
+				breakCycles(storeCFG.get());
 
-				considerStoreCFG(storeCFG, ms->addressSpace, oracle,
-						 survive, cr->sm);
+				VexPtr<AddressSpace> as(ms->addressSpace);
+				VexPtr<StateMachine, &ir_heap> sm(cr->sm);
+				considerStoreCFG(storeCFG, as, oracle,
+						 survive, sm, ALLOW_GC);
 			}
 		}
 	}
