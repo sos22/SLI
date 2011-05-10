@@ -1,6 +1,7 @@
 /* Re-implementation of direct which tries to work off of just a core
    dump, rather than needing the full trace. */
 #include <err.h>
+#include <limits.h>
 #include <time.h>
 
 #include <algorithm>
@@ -938,10 +939,10 @@ instructionIsInteresting(const InstructionSet &i, unsigned long r)
    is uninteresting if it is not in the initial interesting set and
    there are no paths from it to an interesting node. */
 template <typename t> void
-trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses)
+trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_path_length)
 {
 	std::map<t, CFGNode<t> *> uninteresting;
-	std::map<t, CFGNode<t> *> interesting;
+	std::map<t, std::pair<CFGNode<t> *, int> > interesting;
 	/* Start on the assumption that everything is uninteresting. */
 	enumerateCFG<t>(root, uninteresting);
 	/* addresses which are explicitly flagged as interesting are
@@ -951,7 +952,7 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses)
 		) {
 		if (it->second->accepting ||
 		    instructionIsInteresting(interestingAddresses, it->first)) {
-			interesting[it->first] = it->second;
+			interesting[it->first] = std::pair<CFGNode<t> *, int>(it->second, max_path_length);
 			uninteresting.erase(it++);
 		} else {
 			it++;
@@ -966,18 +967,20 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses)
 		     it != uninteresting.end();
 			) {
 			CFGNode<t> *n = it->second;
-			bool shouldBeUninteresting = true;
+			int path_length = -1;
 			if (n->branch &&
-			    !uninteresting.count(n->branch->my_rip))
-				shouldBeUninteresting = false;
+			    interesting.count(n->branch->my_rip))
+				path_length = interesting[n->branch->my_rip].second - 1;
 			if (n->fallThrough &&
-			    !uninteresting.count(n->fallThrough->my_rip))
-				shouldBeUninteresting = false;
-			if (shouldBeUninteresting) {
+			    interesting.count(n->fallThrough->my_rip) &&
+			    interesting[n->fallThrough->my_rip].second > path_length)
+				path_length = interesting[n->fallThrough->my_rip].second - 1;
+			if (path_length < 0) {
 				it++;
 			} else {
 				progress = true;
-				interesting[it->first] = it->second;
+				interesting[it->first] = std::pair<CFGNode<t> *, int>(
+					it->second, path_length);
 				uninteresting.erase(it++);
 			}
 		}
@@ -985,10 +988,10 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses)
 
 	/* The uninteresting set should now be correct.  Eliminate any
 	   edges which go to an uninteresting target. */
-	for (typename std::map<t, CFGNode<t> *>::iterator it = interesting.begin();
+	for (typename std::map<t, std::pair<CFGNode<t> *, int> >::iterator it = interesting.begin();
 	     it != interesting.end();
 	     it++) {
-		CFGNode<t> *n = it->second;
+		CFGNode<t> *n = it->second.first;
 		assert(n);
 		if (n->branch && uninteresting.count(n->branch->my_rip))
 			n->branch = NULL;
@@ -3915,7 +3918,7 @@ main(int argc, char *argv[])
 			ii->CFGFromRip(*it, terminalFunctions));
 		InstructionSet interesting;
 		interesting.rips.insert(proximal->rip.rip);
-		trimCFG(cfg.get(), interesting);
+		trimCFG(cfg.get(), interesting, INT_MAX);
 		breakCycles(cfg.get());
 
 		VexPtr<CrashReason, &ir_heap> cr(
@@ -4044,7 +4047,7 @@ main(int argc, char *argv[])
 			for (int i = 0; i < nr_roots; i++) {
 				VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
 				storeCFG = buildCFGForCallGraph(ms->addressSpace, cgRoots[i]);
-				trimCFG(storeCFG.get(), *it);
+				trimCFG(storeCFG.get(), *it, 20);
 				breakCycles(storeCFG.get());
 
 				VexPtr<AddressSpace> as(ms->addressSpace);
