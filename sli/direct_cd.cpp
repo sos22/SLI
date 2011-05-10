@@ -2187,7 +2187,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 	int res;
 	bool isNewChoice;
 	res = chooser.nd_choice(2, &isNewChoice);
-#if 0
+
 	if (isNewChoice) {
 		printf("Having to use state split to check whether ");
 		ppIRExpr(exp, stdout);
@@ -2195,7 +2195,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 		ppIRExpr(*assumption, stdout);
 		printf("\n");
 	}
-#endif
+
 	if (res == 0) {
 		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 		*assumption = e;
@@ -3914,6 +3914,8 @@ main(int argc, char *argv[])
 
 		std::set<unsigned long> terminalFunctions;
 		terminalFunctions.insert(0x757bf0);
+		if (*it == 0x6e4c4b)
+			dbg_break("hello\n");
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 			ii->CFGFromRip(*it, terminalFunctions));
 		InstructionSet interesting;
@@ -4032,7 +4034,8 @@ main(int argc, char *argv[])
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
 		     it++) {
-			if (it->rips.size() != 2)
+			if (it->rips.size() != 2 ||
+			    *it->rips.begin() != 0x6e542b)
 				continue;
 			printf("\t\tCluster:");
 			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
