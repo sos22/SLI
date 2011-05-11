@@ -45,11 +45,58 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 	}
 	trueTarget = trueTarget->optimise(opt, oracle, done_something);
 	falseTarget = falseTarget->optimise(opt, oracle, done_something);
-	if (trueTarget->target == falseTarget->target &&
-	    trueTarget->sideEffects.size() == 0 &&
-	    falseTarget->sideEffects.size() == 0) {
-		*done_something = true;
-		return trueTarget->target;
+
+	if (falseTarget->sideEffects.size() == 0 &&
+	    trueTarget->sideEffects.size() == 0) {
+		if (trueTarget->target == falseTarget->target) {
+			*done_something = true;
+			return trueTarget->target;
+		}
+
+		if (StateMachineBifurcate *falseBifur = dynamic_cast<StateMachineBifurcate *>(falseTarget->target)) {
+			if (trueTarget == falseBifur->trueTarget) {
+				falseTarget = falseBifur->falseTarget;
+				condition = IRExpr_Binop(
+					Iop_And1,
+					condition,
+					falseBifur->condition);
+				*done_something = true;
+				return this;
+			}
+			if (trueTarget == falseBifur->falseTarget) {
+				falseTarget = falseBifur->trueTarget;
+				condition = IRExpr_Binop(
+					Iop_Or1,
+					condition,
+					IRExpr_Unop(
+						Iop_Not1,
+						falseBifur->condition));
+				*done_something = true;
+				return this;
+			}
+		}
+		if (StateMachineBifurcate *trueBifur = dynamic_cast<StateMachineBifurcate *>(trueTarget->target)) {
+			if (falseTarget == trueBifur->falseTarget) {
+				trueTarget = trueBifur->trueTarget;
+				condition = IRExpr_Binop(
+					Iop_Or1,
+					condition,
+					trueBifur->condition);
+				*done_something = true;
+				return this;
+			}
+			if (falseTarget == trueBifur->trueTarget) {
+				trueTarget = trueBifur->falseTarget;
+				condition = IRExpr_Binop(
+					Iop_And1,
+					condition,
+					IRExpr_Unop(
+						Iop_Not1,
+						trueBifur->condition));
+				*done_something = true;
+				return this;
+			}
+		}
 	}
 	return this;
 }

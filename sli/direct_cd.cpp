@@ -2040,9 +2040,14 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg)
 
 class StateMachineEvalContext {
 public:
+	StateMachineEvalContext() : justPathConstraint(NULL) {}
 	std::vector<StateMachineSideEffectStore *> stores;
 	std::map<Int, IRExpr *> binders;
+	/* justPathConstraint contains all of the assumptions we've
+	   made using the ND chooser.  pathConstraint is that plus the
+	   initial assumption. */
 	IRExpr *pathConstraint;
+	IRExpr *justPathConstraint;
 };
 
 static IRExpr *
@@ -2125,7 +2130,8 @@ specialiseIRExpr(IRExpr *iex, std::map<Int,IRExpr *> &binders)
 }
 
 static bool
-expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binders, IRExpr **assumption)
+expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binders, IRExpr **assumption,
+		 IRExpr **accumulatedAssumptions)
 {
 	exp = optimiseIRExpr(
 		specialiseIRExpr(exp, binders),
@@ -2204,17 +2210,35 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 	if (res == 0) {
 		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 		*assumption = e;
+		if (accumulatedAssumptions && *accumulatedAssumptions)
+			*accumulatedAssumptions =
+				optimiseIRExpr(
+					IRExpr_Binop(
+						Iop_And1,
+						*accumulatedAssumptions,
+						exp),
+					AllowableOptimisations::defaultOptimisations);
 		return true;
 	} else {
 		assertUnoptimisable(e2, AllowableOptimisations::defaultOptimisations);
 		*assumption = e2;
+		if (accumulatedAssumptions && *accumulatedAssumptions)
+			*accumulatedAssumptions =
+				optimiseIRExpr(
+					IRExpr_Binop(
+						Iop_And1,
+						*accumulatedAssumptions,
+						IRExpr_Unop(
+							Iop_Not1,
+							exp)),
+					AllowableOptimisations::defaultOptimisations);
 		return false;
 	}
 }
 
 static bool
 evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, std::map<Int, IRExpr *> &binders,
-		     IRExpr **assumption)
+		     IRExpr **assumption, IRExpr **accAssumptions)
 {
 	return expressionIsTrue(IRExpr_Binop(
 					Iop_CmpEQ64,
@@ -2222,7 +2246,8 @@ evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, std::map<In
 					exp2),
 				chooser,
 				binders,
-				assumption);
+				assumption,
+				accAssumptions);
 }
 
 static void evalStateMachine(StateMachine *sm,
@@ -2237,7 +2262,8 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			   Oracle *oracle,
 			   std::map<Int, IRExpr *> &binders,
 			   std::vector<StateMachineSideEffectStore *> &stores,
-			   IRExpr **assumption)
+			   IRExpr **assumption,
+			   IRExpr **accumulatedAssumptions)
 {
 	if (StateMachineSideEffectStore *smses =
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
@@ -2258,7 +2284,7 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			StateMachineSideEffectStore *smses = *it;
 			if (!oracle->memoryAccessesMightAlias(smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, smsel->smsel_addr, chooser, binders, assumption))
+			if (evalExpressionsEqual(smses->addr, smsel->smsel_addr, chooser, binders, assumption, accumulatedAssumptions))
 				val = smses->data;
 		}
 		if (!val)
@@ -2284,7 +2310,8 @@ evalStateMachineEdge(StateMachineEdge *sme,
 	     it != sme->sideEffects.end();
 	     it++)
 		evalStateMachineSideEffect(*it, chooser, oracle, ctxt.binders,
-					   ctxt.stores, &ctxt.pathConstraint);
+					   ctxt.stores, &ctxt.pathConstraint,
+					   &ctxt.justPathConstraint);
 	evalStateMachine(sme->target, crashes, chooser, oracle, ctxt);
 }
 
@@ -2316,7 +2343,7 @@ evalStateMachine(StateMachine *sm,
 	}
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		if (expressionIsTrue(smb->condition, chooser, ctxt.binders, &ctxt.pathConstraint)) {
+		if (expressionIsTrue(smb->condition, chooser, ctxt.binders, &ctxt.pathConstraint, &ctxt.justPathConstraint)) {
 			evalStateMachineEdge(smb->trueTarget, crashes, chooser, oracle, ctxt);
 		} else {
 			evalStateMachineEdge(smb->falseTarget, crashes, chooser, oracle, ctxt);
@@ -2353,14 +2380,12 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					IRExpr_Unop(
 						Iop_Not1,
 						ctxt.pathConstraint));
-#if 1
 			ctxt.pathConstraint =
 				optimiseIRExpr(
 					IRExpr_Unop(Iop_Not1, ctxt.pathConstraint),
 					AllowableOptimisations::defaultOptimisations);
 			newConstraint = optimiseIRExpr(newConstraint,
 						       AllowableOptimisations::defaultOptimisations);
-#endif
 			currentConstraint = newConstraint;
 		}
 	} while (chooser.advance());
@@ -2573,6 +2598,7 @@ sanity_check_irexpr_sorter(void)
 	for (x = 0; x < NR_EXPRS; x++)
 		for (y = x + 1; y < NR_EXPRS; y++)
 			assert(!sortIRExprs(exprs2[y], exprs2[x]));
+#undef NR_EXPRS
 }
 
 static void
@@ -2698,7 +2724,7 @@ top:
 		}
 		if (StateMachineBifurcate *smb =
 		    dynamic_cast<StateMachineBifurcate *>(s)) {
-			if (expressionIsTrue(smb->condition, chooser, machine->binders, &pathConstraint))
+			if (expressionIsTrue(smb->condition, chooser, machine->binders, &pathConstraint, NULL))
 				machine->currentEdge = smb->trueTarget;
 			else
 				machine->currentEdge = smb->falseTarget;
@@ -2713,7 +2739,7 @@ top:
 	StateMachineSideEffect *se;
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];
 	if (dynamic_cast<StateMachineSideEffectCopy *>(se)) {
-		evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint);
+		evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint, NULL);
 		history.push_back(se);
 		machine->nextEdgeSideEffectIdx++;
 		goto top;
@@ -2736,7 +2762,7 @@ top:
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];	
 	assert(!dynamic_cast<StateMachineSideEffectCopy *>(se));
 	assert(!dynamic_cast<StateMachineSideEffectUnreached *>(se));
-	evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint);
+	evalStateMachineSideEffect(se, chooser, oracle, machine->binders, stores, &pathConstraint, NULL);
 	history.push_back(se);
 	machine->nextEdgeSideEffectIdx++;
 
@@ -2874,6 +2900,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 	   a poor choice of machine. */
 	printf("\t\tChecking write machine suitability...\n");
 	{
+		IRExpr *rewrittenAssumption = assumption;
 		NdChooser chooser;
 		StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
 		do {
@@ -2881,9 +2908,11 @@ findRemoteMacroSections(StateMachine *readMachine,
 			std::map<Int, IRExpr *> writerBinders;
 			StateMachineEdge *writerEdge;
 			IRExpr *pathConstraint;
+			IRExpr *thisTimeConstraint;
 
 			pathConstraint = assumption;
 			writerEdge = writeStartEdge;
+			thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
 			while (1) {
 				for (unsigned i = 0; i < writerEdge->sideEffects.size(); i++) {
 					evalStateMachineSideEffect(writerEdge->sideEffects[i],
@@ -2891,7 +2920,8 @@ findRemoteMacroSections(StateMachine *readMachine,
 								   oracle,
 								   writerBinders,
 								   storesIssuedByWriter,
-								   &pathConstraint);
+								   &pathConstraint,
+								   &thisTimeConstraint);
 				}
 
 				StateMachine *s = writerEdge->target;
@@ -2906,7 +2936,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 					StateMachineBifurcate *smb =
 						dynamic_cast<StateMachineBifurcate *>(s);
 					assert(smb);
-					if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint))
+					if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint, &thisTimeConstraint))
 						writerEdge = smb->trueTarget;
 					else
 						writerEdge = smb->falseTarget;
@@ -2916,6 +2946,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 			StateMachineEvalContext readEvalCtxt;
 			readEvalCtxt.pathConstraint = pathConstraint;
 			readEvalCtxt.stores = storesIssuedByWriter;
+			readEvalCtxt.justPathConstraint = thisTimeConstraint;
 			bool crashes;
 			evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
@@ -2923,11 +2954,44 @@ findRemoteMacroSections(StateMachine *readMachine,
 				   machine after running the store machine to
 				   completion -> this is a poor choice of
 				   store machines. */
-				return false;
+				printf("Bad assumptions:\n");
+				ppIRExpr(readEvalCtxt.justPathConstraint, stdout);
+				printf("\n");
+
+				/* If we evaluate the read machine to
+				   completion after running the write
+				   machine to completion under these
+				   assumptions then we get a crash ->
+				   these assumptions must be false. */
+				/* Note that we can't change the
+				   assumption in the ND choice loop,
+				   as then the ND chooser wouldn't
+				   match up properly, so we instead
+				   accumulate the results and switch
+				   at the end. */
+				rewrittenAssumption = optimiseIRExpr(
+					IRExpr_Binop(
+						Iop_And1,
+						rewrittenAssumption,
+						IRExpr_Unop(
+							Iop_Not1,
+							readEvalCtxt.justPathConstraint)),
+					AllowableOptimisations::defaultOptimisations);
 			}
 		} while (chooser.advance());
+		assumption = rewrittenAssumption;
 	}
 	printf("\t\tDone check.\n");
+
+	if (assumption->tag == Iex_Const &&
+	    assumption->Iex.Const.con->Ico.U64 == 0) {
+		printf("\t\tBad choice of machines\n");
+		return false;
+	}
+
+	printf("Relevant assumption:\n");
+	ppIRExpr(assumption, stdout);
+	printf("\n");
 
 	NdChooser chooser;
 
@@ -2967,7 +3031,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 				StateMachineBifurcate *smb =
 					dynamic_cast<StateMachineBifurcate *>(s);
 				assert(smb);
-				if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint))
+				if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint, NULL))
 					writerEdge = smb->trueTarget;
 				else
 					writerEdge = smb->falseTarget;
@@ -2982,7 +3046,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			evalStateMachineSideEffect(se, chooser, oracle, writerBinders, storesIssuedByWriter, &pathConstraint);
+			evalStateMachineSideEffect(se, chooser, oracle, writerBinders, storesIssuedByWriter, &pathConstraint, NULL);
 			writeEdgeIdx++;
 
 			/* Advance to a store */
