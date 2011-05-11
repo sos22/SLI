@@ -3740,6 +3740,118 @@ buildCFGForCallGraph(AddressSpace *as,
 	return res;
 }
 
+typedef std::set<std::pair<StateMachineSideEffectStore *,
+			   StateMachineSideEffectStore *> > remoteMacroSectionsT;
+
+static bool
+fixSufficient(StateMachine *writeMachine,
+	      StateMachine *probeMachine,
+	      IRExpr *assumption,
+	      Oracle *oracle,
+	      const remoteMacroSectionsT &sections)
+{
+	NdChooser chooser;
+	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
+
+	do {
+		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
+		std::map<Int, IRExpr *> writerBinders;
+		StateMachineEdge *writerEdge;
+		unsigned writeEdgeIdx;
+		IRExpr *pathConstraint;
+		std::set<StateMachineSideEffectStore *> incompleteSections;
+
+		writeEdgeIdx = 0;
+		pathConstraint = assumption;
+		writerEdge = writeStartEdge;
+		while (1) {
+			/* Have we hit the end of the current writer edge? */
+			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
+				/* Yes, move to the next state. */
+				StateMachine *s = writerEdge->target;
+				assert(!dynamic_cast<StateMachineUnreached *>(s));
+				if (dynamic_cast<StateMachineCrash *>(s) ||
+				    dynamic_cast<StateMachineNoCrash *>(s) ||
+				    dynamic_cast<StateMachineStub *>(s)) {
+					/* Hit the end of the writer
+					 * -> we're done. */
+					break;
+				}
+				if (StateMachineProxy *smp =
+				    dynamic_cast<StateMachineProxy *>(s)) {
+					writerEdge = smp->target;
+					writeEdgeIdx = 0;
+					continue;
+				}
+				StateMachineBifurcate *smb =
+					dynamic_cast<StateMachineBifurcate *>(s);
+				assert(smb);
+				if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint, NULL))
+					writerEdge = smb->trueTarget;
+				else
+					writerEdge = smb->falseTarget;
+				writeEdgeIdx = 0;
+				continue;				
+			}
+
+			/* Advance the writer by one state.  Note that
+			   we *don't* consider running the read before
+			   any write states, as that's already been
+			   handled and is known to lead to
+			   no-crash. */
+			StateMachineSideEffect *se;
+			se = writerEdge->sideEffects[writeEdgeIdx];
+			evalStateMachineSideEffect(se, chooser, oracle, writerBinders, storesIssuedByWriter, &pathConstraint, NULL);
+			writeEdgeIdx++;
+
+			/* Only consider running the probe machine if
+			 * we just executed a store. */
+			StateMachineSideEffectStore *smses =
+				dynamic_cast<StateMachineSideEffectStore *>(se);
+			if (!smses)
+				continue;
+
+			/* Did we just leave a critical section? */
+			if (incompleteSections.count(smses))
+				incompleteSections.erase(smses);
+			/* Did we just enter a critical section? */
+			for (remoteMacroSectionsT::const_iterator it = sections.begin();
+			     it != sections.end();
+			     it++) {
+				if (it->first == smses)
+					incompleteSections.insert(it->second);
+			}
+			/* If we have incomplete critical sections, we
+			 * can't run the probe machine. */
+			if (incompleteSections.size() != 0)
+				continue;
+
+			/* The writer just issued a store and is not
+			   in a critical section, so we should now try
+			   running the reader atomically.  */
+			StateMachineEvalContext readEvalCtxt;
+			readEvalCtxt.pathConstraint = pathConstraint;
+			readEvalCtxt.stores = storesIssuedByWriter;
+			bool crashes;
+			evalStateMachine(probeMachine, &crashes, chooser, oracle, readEvalCtxt);
+			if (crashes) {
+				printf("Fix is insufficient, witness: ");
+				ppIRExpr(readEvalCtxt.pathConstraint, stdout);
+				printf("\n");
+				dbg_break("Failed...\n");
+				return false; 
+			}
+		}
+	} while (chooser.advance());
+
+	/* If we get here then there's no way of crashing the probe
+	   machine by running it in parallel with the store machine,
+	   provided the proposed fix is applied.  That means that the
+	   proposed fix is good. */
+
+	return true;
+}
+
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
@@ -3796,11 +3908,14 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		return;
 	}
 
-	std::set<std::pair<StateMachineSideEffectStore *,
-		StateMachineSideEffectStore *> >
-		remoteMacroSections;
+	remoteMacroSectionsT remoteMacroSections;
 	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections)) {
 		printf("\t\tChose a bad write machine...\n");
+		return;
+	}
+	if (!fixSufficient(probeMachine, sm, assumption, oracle, remoteMacroSections)) {
+		printf("\t\tHave a fix, but it was insufficient...\n");
+		dbg_break("Failed!\n");
 		return;
 	}
 	dbg_break("Have remote critical sections");
