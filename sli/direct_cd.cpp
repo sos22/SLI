@@ -1480,12 +1480,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 								      smses->addr) &&
 						     !definitelyNotEqual( (*it3)->addr,
 									  smses->addr,
-									  opt) &&
-						     /* XXX HACK HACK HACK */
-						     smses->rip != 0x6e4dac &&
-						     smses->rip != 0x6e5af9 ) {
+									  opt) )
 							outputAvail.erase(it3++);
-						} else
+						else
 							it3++;
 					}
 					/* Introduce the store which was generated. */
@@ -4145,9 +4142,6 @@ main(int argc, char *argv[])
 		}
 		readMachinesChecked->set(cr->sm, true);
 
-		if (cr->rip.rip != 0x6e4c43)
-			continue;
-
 		cr->sm = cr->sm->selectSingleCrashingPath();
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
@@ -4230,9 +4224,6 @@ main(int argc, char *argv[])
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
 		     it++) {
-			if (it->rips.size() != 2 ||
-			    *it->rips.begin() != 0x6e542b)
-				continue;
 			printf("\t\tCluster:");
 			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
 			     it2 != it->rips.end();
