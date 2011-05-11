@@ -2878,6 +2878,100 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 	}
 }
 
+/* Running the store machine atomically and then runing the probe
+   machine atomically shouldn't ever crash.  Tweak the initial
+   assumption so that it doesn't.  Returns NULL if that's not
+   possible. */
+static IRExpr *
+writeMachineSuitabilityConstraint(
+	StateMachine *readMachine,
+	StateMachine *writeMachine,
+	IRExpr *assumption,
+	Oracle *oracle)
+{
+	printf("\t\tBuilding write machine suitability constraint.\n");
+	IRExpr *rewrittenAssumption = assumption;
+	NdChooser chooser;
+	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
+	do {
+		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
+		std::map<Int, IRExpr *> writerBinders;
+		StateMachineEdge *writerEdge;
+		IRExpr *pathConstraint;
+		IRExpr *thisTimeConstraint;
+
+		pathConstraint = assumption;
+		writerEdge = writeStartEdge;
+		thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
+		while (1) {
+			for (unsigned i = 0; i < writerEdge->sideEffects.size(); i++) {
+				evalStateMachineSideEffect(writerEdge->sideEffects[i],
+							   chooser,
+							   oracle,
+							   writerBinders,
+							   storesIssuedByWriter,
+							   &pathConstraint,
+							   &thisTimeConstraint);
+			}
+
+			StateMachine *s = writerEdge->target;
+			if (dynamic_cast<StateMachineCrash *>(s) ||
+			    dynamic_cast<StateMachineNoCrash *>(s) ||
+			    dynamic_cast<StateMachineStub *>(s)) {
+				/* Hit end of writer */
+				break;
+			} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
+				writerEdge = smp->target;
+			} else {
+				StateMachineBifurcate *smb =
+					dynamic_cast<StateMachineBifurcate *>(s);
+				assert(smb);
+				if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint, &thisTimeConstraint))
+					writerEdge = smb->trueTarget;
+				else
+					writerEdge = smb->falseTarget;
+			}
+		}
+
+		StateMachineEvalContext readEvalCtxt;
+		readEvalCtxt.pathConstraint = pathConstraint;
+		readEvalCtxt.stores = storesIssuedByWriter;
+		readEvalCtxt.justPathConstraint = thisTimeConstraint;
+		bool crashes;
+		evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
+		if (crashes) {
+			/* We get a crash if we evaluate the read
+			   machine after running the store machine to
+			   completion -> this is a poor choice of
+			   store machines. */
+			printf("Bad assumptions:\n");
+			ppIRExpr(readEvalCtxt.justPathConstraint, stdout);
+			printf("\n");
+
+			/* If we evaluate the read machine to
+			   completion after running the write
+			   machine to completion under these
+			   assumptions then we get a crash ->
+			   these assumptions must be false. */
+			rewrittenAssumption = optimiseIRExpr(
+				IRExpr_Binop(
+					Iop_And1,
+					rewrittenAssumption,
+					IRExpr_Unop(
+						Iop_Not1,
+						readEvalCtxt.justPathConstraint)),
+				AllowableOptimisations::defaultOptimisations);
+		}
+	} while (chooser.advance());
+	
+	if (rewrittenAssumption->tag == Iex_Const &&
+	    rewrittenAssumption->Iex.Const.con->Ico.U64 == 0) {
+		printf("\t\tBad choice of machines\n");
+		return NULL;
+	}
+	return rewrittenAssumption;
+}
+
 /* Run the write machine, covering every possible schedule and
  * aliasing pattern.  After every store, run the read machine
  * atomically.  Find ranges of the store machine where the read
@@ -2895,106 +2989,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 			std::set<std::pair<StateMachineSideEffectStore *,
 			                   StateMachineSideEffectStore *> > &output)
 {
-	/* Step one: try evaluating the write machine to completion,
-	   and then the read machine.  If that can crash then this is
-	   a poor choice of machine. */
-	printf("\t\tChecking write machine suitability...\n");
-	{
-		IRExpr *rewrittenAssumption = assumption;
-		NdChooser chooser;
-		StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
-		do {
-			std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
-			std::map<Int, IRExpr *> writerBinders;
-			StateMachineEdge *writerEdge;
-			IRExpr *pathConstraint;
-			IRExpr *thisTimeConstraint;
-
-			pathConstraint = assumption;
-			writerEdge = writeStartEdge;
-			thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
-			while (1) {
-				for (unsigned i = 0; i < writerEdge->sideEffects.size(); i++) {
-					evalStateMachineSideEffect(writerEdge->sideEffects[i],
-								   chooser,
-								   oracle,
-								   writerBinders,
-								   storesIssuedByWriter,
-								   &pathConstraint,
-								   &thisTimeConstraint);
-				}
-
-				StateMachine *s = writerEdge->target;
-				if (dynamic_cast<StateMachineCrash *>(s) ||
-				    dynamic_cast<StateMachineNoCrash *>(s) ||
-				    dynamic_cast<StateMachineStub *>(s)) {
-					/* Hit end of writer */
-					break;
-				} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
-					writerEdge = smp->target;
-				} else {
-					StateMachineBifurcate *smb =
-						dynamic_cast<StateMachineBifurcate *>(s);
-					assert(smb);
-					if (expressionIsTrue(smb->condition, chooser, writerBinders, &pathConstraint, &thisTimeConstraint))
-						writerEdge = smb->trueTarget;
-					else
-						writerEdge = smb->falseTarget;
-				}
-			}
-
-			StateMachineEvalContext readEvalCtxt;
-			readEvalCtxt.pathConstraint = pathConstraint;
-			readEvalCtxt.stores = storesIssuedByWriter;
-			readEvalCtxt.justPathConstraint = thisTimeConstraint;
-			bool crashes;
-			evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
-			if (crashes) {
-				/* We get a crash if we evaluate the read
-				   machine after running the store machine to
-				   completion -> this is a poor choice of
-				   store machines. */
-				printf("Bad assumptions:\n");
-				ppIRExpr(readEvalCtxt.justPathConstraint, stdout);
-				printf("\n");
-
-				/* If we evaluate the read machine to
-				   completion after running the write
-				   machine to completion under these
-				   assumptions then we get a crash ->
-				   these assumptions must be false. */
-				/* Note that we can't change the
-				   assumption in the ND choice loop,
-				   as then the ND chooser wouldn't
-				   match up properly, so we instead
-				   accumulate the results and switch
-				   at the end. */
-				rewrittenAssumption = optimiseIRExpr(
-					IRExpr_Binop(
-						Iop_And1,
-						rewrittenAssumption,
-						IRExpr_Unop(
-							Iop_Not1,
-							readEvalCtxt.justPathConstraint)),
-					AllowableOptimisations::defaultOptimisations);
-			}
-		} while (chooser.advance());
-		assumption = rewrittenAssumption;
-	}
-	printf("\t\tDone check.\n");
-
-	if (assumption->tag == Iex_Const &&
-	    assumption->Iex.Const.con->Ico.U64 == 0) {
-		printf("\t\tBad choice of machines\n");
-		return false;
-	}
-
-	printf("Relevant assumption:\n");
-	ppIRExpr(assumption, stdout);
-	printf("\n");
-
 	NdChooser chooser;
-
 
 	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
 	do {
@@ -3880,7 +3875,9 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		done_something = false;
 		sm = sm->optimise(opt2, oracle, &done_something);
 	} while (done_something);
-	
+
+	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle);
+
 	/* Now try running that in parallel with the probe machine,
 	   and see if it might lead to a crash. */
 	bool mightSurvive;
