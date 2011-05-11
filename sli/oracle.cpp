@@ -168,6 +168,25 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	threadLocal.insert(s->rip);
 	return true;
 }
+bool
+Oracle::loadIsThreadLocal(StateMachineSideEffectLoad *s)
+{
+	static std::set<unsigned long> threadLocal;
+	static std::set<unsigned long> notThreadLocal;
+	if (threadLocal.count(s->rip))
+		return true;
+	if (notThreadLocal.count(s->rip))
+		return false;
+	for (std::vector<tag_entry>::iterator it = tag_table.begin();
+	     it != tag_table.end();
+	     it++)
+		if (it->loads.count(s->rip)) {
+			notThreadLocal.insert(s->rip);
+			return false;
+		}
+	threadLocal.insert(s->rip);
+	return true;
+}
 
 bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
@@ -178,18 +197,20 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 	static unsigned nr_bloom_hits2;
 	static unsigned nr_trues;
 	static unsigned nr_falses;
-	unsigned long h = hashRipPair(smses->rip, smsel->rip);
 
 	/* The tag database doesn't include anything which doesn't
 	 * cross threads, so for those we have to use a slightly more
 	 * stupid approach. */
 	if (storeIsThreadLocal(smses)) {
+		if (!loadIsThreadLocal(smsel))
+			return false;
 		if (!definitelyNotEqual(smsel->smsel_addr, smses->addr, AllowableOptimisations::defaultOptimisations))
 			return true;
 		else
 			return false;
 	}
 
+	unsigned long h = hashRipPair(smses->rip, smsel->rip);
 	nr_queries++;
 	if (!(memoryAliasingFilter[h/64] & (1ul << (h % 64)))) {
 		nr_bloom_hits++;
@@ -930,6 +951,7 @@ irexprAliasingClass(IRExpr *expr,
 	case Iex_Binder:
 		/* Binders are loaded from memory, and we only track
 		 * registers. */
+		/* Hackety hackety hack */
 		return Oracle::PointerAliasingSet::anything;
 	case Iex_RdTmp:
 		assert(temps);

@@ -3848,6 +3848,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 			}
 		}
 	}
+	removeRedundantStores(sme->target, oracle, done_something, visited);
 }
 static void
 removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
@@ -3876,6 +3877,22 @@ removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something)
 	std::set<StateMachine *> visited;
 
 	removeRedundantStores(sm, oracle, done_something, visited);
+}
+
+static StateMachine *
+optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfiguration &alias,
+		     const AllowableOptimisations &opt, Oracle *oracle)
+{
+	bool done_something;
+	do {
+		done_something = false;
+		sm = sm->optimise(opt, oracle, &done_something);
+		removeRedundantStores(sm, oracle, &done_something);
+		sm = availExpressionAnalysis(sm, opt, alias, oracle);
+		sm = bisimilarityReduction(sm, opt);
+		sm = sm->optimise(opt, oracle, &done_something);
+	} while (done_something);
+	return sm;
 }
 
 int
@@ -3919,8 +3936,6 @@ main(int argc, char *argv[])
 
 		std::set<unsigned long> terminalFunctions;
 		terminalFunctions.insert(0x757bf0);
-		if (*it == 0x6e4c4b)
-			dbg_break("hello\n");
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 			ii->CFGFromRip(*it, terminalFunctions));
 		InstructionSet interesting;
@@ -3935,16 +3950,10 @@ main(int argc, char *argv[])
 			.enableassumePrivateStack()
 			.enableignoreSideEffects();
 
-		bool done_something;
-		const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(*it));
-		do {
-			done_something = false;
-			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
-			removeRedundantStores(cr->sm, oracle, &done_something);
-			cr->sm = availExpressionAnalysis(cr->sm, opt, alias, oracle);
-			cr->sm = bisimilarityReduction(cr->sm, opt);
-			cr->sm = cr->sm->optimise(opt, oracle, &done_something);
-		} while (done_something);
+		cr->sm = optimiseStateMachine(cr->sm,
+					      oracle->getAliasingConfigurationForRip(*it),
+					      opt,
+					      oracle);
 
 		printf("\tComputed state machine.\n");
 
@@ -3962,6 +3971,12 @@ main(int argc, char *argv[])
 
 		if (cr->rip.rip != 0x6e4c43)
 			continue;
+
+		cr->sm = cr->sm->selectSingleCrashingPath();
+		cr->sm = optimiseStateMachine(cr->sm,
+					      oracle->getAliasingConfigurationForRip(*it),
+					      opt,
+					      oracle);
 
 		VexPtr<IRExpr, &ir_heap> survive;
 		{

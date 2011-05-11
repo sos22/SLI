@@ -7,6 +7,8 @@ class StateMachine;
 class StateMachineSideEffect;
 class Oracle;
 
+int exprComplexity(const IRExpr *e);
+
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
@@ -94,6 +96,9 @@ public:
 	virtual StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
+	virtual StateMachine *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
+	virtual bool canCrash() = 0;
+	virtual int complexity() = 0;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	NAMED_CLASS
 };
@@ -107,6 +112,7 @@ public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
+	virtual int complexity() = 0;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	NAMED_CLASS
 };
@@ -170,11 +176,34 @@ public:
 		     it++)
 			(*it)->findUsedBinders(s, opt);
 	}
+	StateMachineEdge *selectSingleCrashingPath() __attribute__((warn_unused_result)) {
+		target = target->selectSingleCrashingPath();
+		return this;
+	}
+	bool canCrash() { return target->canCrash(); }
+	int complexity() {
+		int r = target->complexity();
+		for (unsigned i = 0; i < sideEffects.size(); i++)
+			r += sideEffects[i]->complexity();
+		return r;
+	}
 	NAMED_CLASS
 };
 
-class StateMachineUnreached : public StateMachine {
-	StateMachineUnreached() : StateMachine(0) {}
+class StateMachineTerminal : public StateMachine {
+protected:
+	StateMachineTerminal(unsigned long rip) : StateMachine(rip) {}
+public:
+	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
+	virtual void visit(HeapVisitor &hv) {}
+	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+	StateMachine *selectSingleCrashingPath() { return this; }
+	int complexity() { return 1; }
+};
+
+class StateMachineUnreached : public StateMachineTerminal {
+	StateMachineUnreached() : StateMachineTerminal(0) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x72; }
 public:
@@ -183,14 +212,11 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
-	void visit(HeapVisitor &hv) {}
-	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+	bool canCrash() { return false; }
 };
 
-class StateMachineCrash : public StateMachine {
-	StateMachineCrash() : StateMachine(0) {}
+class StateMachineCrash : public StateMachineTerminal {
+	StateMachineCrash() : StateMachineTerminal(0) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x73; }
 public:
@@ -199,14 +225,11 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
-	void visit(HeapVisitor &hv) {}
-	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+	bool canCrash() { return true; }
 };
 
-class StateMachineNoCrash : public StateMachine {
-	StateMachineNoCrash() : StateMachine(0) {}
+class StateMachineNoCrash : public StateMachineTerminal {
+	StateMachineNoCrash() : StateMachineTerminal(0) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x74; }
 public:
@@ -215,10 +238,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
-	void visit(HeapVisitor &hv) {}
-	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+	bool canCrash() { return false; }
 };
 
 /* A state machine node which always advances to another one.  These
@@ -268,6 +288,12 @@ public:
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
 		target->findUsedBinders(s, opt);
 	}
+	StateMachine *selectSingleCrashingPath() {
+		target = target->selectSingleCrashingPath();
+		return this;
+	}
+	bool canCrash() { return target->canCrash(); }
+	int complexity() { return target->complexity(); }
 };
 
 class StateMachineBifurcate : public StateMachine {
@@ -332,16 +358,29 @@ public:
 			s.insert(*it);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	StateMachine *selectSingleCrashingPath() {
+		trueTarget = trueTarget->selectSingleCrashingPath();
+		falseTarget = falseTarget->selectSingleCrashingPath();
+		if (trueTarget->canCrash() && falseTarget->canCrash()) {
+			if (trueTarget->complexity() > falseTarget->complexity())
+				return new StateMachineProxy(origin, falseTarget);
+			else
+				return new StateMachineProxy(origin, trueTarget);
+		}
+		return this;
+	}
+	bool canCrash() { return trueTarget->canCrash() || falseTarget->canCrash(); }
+	int complexity() { return trueTarget->complexity() + falseTarget->complexity() + exprComplexity(condition) + 50; }
 };
 
 /* A node in the state machine representing a bit of code which we
    haven't explored yet. */
-class StateMachineStub : public StateMachine {
+class StateMachineStub : public StateMachineTerminal {
 	unsigned long _hashval() const { return target->hashval(); }
 public:
 	IRExpr *target;
 
-	StateMachineStub(unsigned long origin, IRExpr *t) : StateMachine(origin), target(t) {}
+	StateMachineStub(unsigned long origin, IRExpr *t) : StateMachineTerminal(origin), target(t) {}
 
 	void prettyPrint(FILE *f) const
 	{
@@ -350,9 +389,7 @@ public:
 		fprintf(f, ">");
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
-	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) { }
+	bool canCrash() { return false; }
 };
 
 
@@ -370,6 +407,7 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
+	int complexity() { return 0; }
 };
 class StateMachineSideEffectStore : public StateMachineSideEffect {
 	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
@@ -395,6 +433,7 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
 };
 
 class StateMachineSideEffectLoad : public StateMachineSideEffect {
@@ -429,6 +468,7 @@ public:
 		l.insert(smsel_addr);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	int complexity() { return exprComplexity(smsel_addr) + 20; }
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
 	unsigned long _hashval() const { return value->hashval(); }
@@ -450,6 +490,7 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	int complexity() { return exprComplexity(value); }
 };
 
 

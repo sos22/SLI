@@ -484,7 +484,7 @@ optimise_condition_calculation(
    before -x. */
 /* If two expressions have the same complexity, we use a lexicographic
    ordering to distinguish them. */
-static int
+int
 exprComplexity(const IRExpr *e)
 {
 	switch (e->tag) {

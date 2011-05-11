@@ -271,6 +271,7 @@ public:
 	void clusterRips(const std::set<unsigned long> &inputRips,
 			 std::set<InstructionSet> &outputClusters);
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
+	bool loadIsThreadLocal(StateMachineSideEffectLoad *s);
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool functionCanReturn(unsigned long rip);
