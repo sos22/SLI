@@ -1800,11 +1800,20 @@ CnfAnd::optimise()
 					CnfAtom *argjA = argj->getArg(k);
 					if (argjA->getId() != argiA->getId())
 						continue;
-					/* Otherwise, the second rule
-					   should have already
-					   eliminated argj. */
-					assert(!!dynamic_cast<CnfNot *>(argjA) !=
-					       !!dynamic_cast<CnfNot *>(argiA));
+					/* Normally, the second rule
+					   would have already
+					   eliminated argj if this
+					   were true, but that isn't
+					   always the case if we've
+					   modified the structure so
+					   that rule 2 now fires where
+					   it wouldn't before.  Just
+					   leave it until the next
+					   iteration. */
+					if (!!dynamic_cast<CnfNot *>(argjA) ==
+					    !!dynamic_cast<CnfNot *>(argiA)) {
+						continue;
+					}
 					progress = true;
 					argj->args.erase(argj->args.begin() + k);
 					argj->clearName();
