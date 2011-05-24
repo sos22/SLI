@@ -435,7 +435,7 @@ Unpickler::restoreString()
 	fread(&m, sizeof(m), 1, input);
 	assert(m == MAGIC);
 	int c = fgetc(input);
-	assert(c == 4);
+	assert(c == 5);
 	unsigned size;
 	fread(&size, sizeof(size), 1, input);
 	char *res = (char *)LibVEX_Alloc_Bytes(size + 1);
