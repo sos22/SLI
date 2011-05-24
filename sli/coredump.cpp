@@ -187,6 +187,10 @@ MachineState::readCoredump(const char *path)
 #undef do_reg
 
 					work->registerThread(thr);
+
+					printf("Thread %d has rip %lx\n",
+					       thr->tid._tid(),
+					       thr->regs.rip());
 				}
 				off += sizeof(*note) +
 					((note->n_namesz + 3) & ~3) +

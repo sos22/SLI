@@ -97,6 +97,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 		unexplored_instructions.pop_back();
 		if (visited.count(s.regs.rip()))
 			continue;
+		printf("Visiting %lx\n", s.regs.rip());
 		IRSB *irsb;
 		try {
 			irsb = as->getIRSBForAddress(1, s.regs.rip());
@@ -437,7 +438,12 @@ getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominat
 
 	RegisterSet rs = thr->regs;
 	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
-	head = findFunctionHead(&rs, ms->addressSpace);
-	fheads.push_back(head);
-	findDominators(head, rs.rip(), ms->addressSpace, dominators);
+	try {
+		head = findFunctionHead(&rs, ms->addressSpace);
+		fheads.push_back(head);
+		findDominators(head, rs.rip(), ms->addressSpace, dominators);
+	} catch (BadMemoryException &e) {
+		/* Just give up: if we can't find the caller's caller,
+		 * we just won't bother backtracking that far. */
+	}
 }
