@@ -3874,6 +3874,8 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	} while (done_something);
 
 	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle);
+	if (!assumption)
+		return;
 
 	/* Now try running that in parallel with the probe machine,
 	   and see if it might lead to a crash. */
