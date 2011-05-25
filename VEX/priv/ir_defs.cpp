@@ -43,7 +43,11 @@
    used to endorse or promote products derived from this software
    without prior written permission.
 */
+#include <ctype.h>
+#include <errno.h>
 #include <stdarg.h>
+
+#include <vector>
 
 #include "libvex_basictypes.h"
 #include "libvex_ir.h"
@@ -208,6 +212,45 @@ _IRStmt::visit(HeapVisitor &visit)
 /*--- Printing the IR                                         ---*/
 /*---------------------------------------------------------------*/
 
+static bool parseThisChar(char c, const char *str, const char **suffix)
+{
+  if (str[0] == c) {
+    *suffix = str + 1;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+static bool parseThisString(const char *pattern,
+			    const char *str,
+			    const char **suffix)
+{
+  size_t l = strlen(pattern);
+  if (strlen(str) < l || memcmp(str, pattern, l))
+    return false;
+  *suffix = str + l;
+  return true;
+}
+
+static bool parseDecimalInt(int *out, const char *str, const char **suffix)
+{
+  long res;
+  errno = 0;
+  res = strtol(str, (char **)suffix, 10);
+  *out = res;
+  if (errno != 0 || *out != res || *suffix == str)
+    return false;
+  return true;
+}
+
+static bool parseHexUlong(unsigned long *out, const char *str, const char **suffix)
+{
+  errno = 0;
+  *out = strtoul(str, (char **)suffix, 16);
+  return errno == 0 && *suffix != str;
+}
+
 void ppIRType ( IRType ty, FILE *f )
 {
    switch (ty) {
@@ -224,6 +267,27 @@ void ppIRType ( IRType ty, FILE *f )
       default: fprintf(f, "ty = 0x%x\n", (Int)ty);
                vpanic("ppIRType");
    }
+}
+
+static bool parseIRType(IRType *out, const char *str, const char **suffix)
+{
+#define do_type(n)				\
+  if (parseThisString( #n , str, suffix)) {	\
+    *out = Ity_ ## n;				\
+    return true;				\
+  }
+  do_type(INVALID);
+  do_type(I1);
+  do_type(I8);
+  do_type(I16);
+  do_type(I32);
+  do_type(I64);
+  do_type(I128);
+  do_type(F32);
+  do_type(F64);
+  do_type(V128);
+#undef do_type
+  return false;
 }
 
 void ppIRConst ( IRConst* con, FILE* f )
@@ -245,6 +309,54 @@ void ppIRConst ( IRConst* con, FILE* f )
    }
 }
 
+static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
+{
+  int val1;
+  unsigned long val2;
+  const char *str2;
+
+  if (parseDecimalInt(&val1, str, &str2) &&
+      parseThisString(":I1", str2, suffix)) {
+    *out = IRConst_U1(val1);
+    return true;
+  }
+  if (parseThisString("0x", str, &str2) &&
+      parseHexUlong(&val2, str2, &str)) {
+    *out = NULL;
+    if (parseThisString(":I8", str, suffix))
+      *out = IRConst_U8(val2);
+    else if (parseThisString(":I16", str, suffix))
+      *out = IRConst_U16(val2);
+    else if (parseThisString(":I32", str, suffix))
+      *out = IRConst_U32(val2);
+    else if (parseThisString(":I64", str, suffix))
+      *out = IRConst_U64(val2);
+    if (*out)
+      return true;
+  }
+  if (parseThisString("F64{0x", str, &str) &&
+      parseHexUlong(&val2, str, &str) &&
+      parseThisChar('}', str, suffix)) {
+    union { ULong x; Double y; } u;
+    u.x = val2;
+    *out = IRConst_F64(u.y);
+    return true;
+  }
+  if (parseThisString("F64i{0x", str, &str) &&
+      parseHexUlong(&val2, str, &str) &&
+      parseThisChar('}', str, suffix)) {
+    *out = IRConst_F64i(val2);
+    return true;
+  }
+  if (parseThisString("V128{0x", str, &str) &&
+      parseHexUlong(&val2, str, &str) &&
+      parseThisChar('}', str, suffix)) {
+    *out = IRConst_V128(val2);
+    return true;
+  }
+  return false;
+}
+
 void ppIRCallee ( IRCallee* ce, FILE* f )
 {
    fprintf(f, "%s", ce->name);
@@ -255,11 +367,74 @@ void ppIRCallee ( IRCallee* ce, FILE* f )
    fprintf(f, "{%p}", (void*)ce->addr);
 }
 
+static bool parseFuncName(char **res, const char *str, const char **suffix)
+{
+  const char *cursor;
+  for (cursor = str;
+       isalnum(cursor[0]) || cursor[0] == '_';
+       cursor++)
+    ;
+  if (cursor == str)
+    return false;
+  /* XXX this gets leaked! */
+  *res = (char *)malloc(cursor - str + 1);
+  memcpy(*res, str, cursor - str);
+  (*res)[cursor - str] = 0;
+  *suffix = cursor;
+  return true;
+}
+
+static bool parseIRCallee(IRCallee **out, const char *str, const char **suffix)
+{
+  char *name;
+  int regparms;
+  unsigned long mcx_mask;
+  unsigned long addr;
+  if (!parseFuncName(&name, str, &str))
+    return false;
+  regparms = 0;
+  parseThisString("[rp=", str, &str) &&
+    parseDecimalInt(&regparms, str, &str) &&
+    parseThisChar(']', str, &str);
+  mcx_mask = 0;
+  parseThisString("[mcx=0x", str, &str) &&
+    parseHexUlong(&mcx_mask, str, &str) &&
+    parseThisChar(']', str, &str);
+  if (!parseThisChar('{', str, &str))
+    return false;
+  if (parseThisString("(nil)", str, &str)) {
+    addr = 0;
+  } else if (!parseThisString("0x", str, &str) ||
+	     !parseHexUlong(&addr, str, &str))
+    return false;
+  if (!parseThisChar('}', str, suffix))
+    return false;
+  *out = mkIRCallee(regparms, name, (void *)addr);
+  (*out)->mcx_mask = mcx_mask;
+  return true;      
+}
+
 void ppIRRegArray ( IRRegArray* arr, FILE* f )
 {
    fprintf(f, "(%d:%dx", arr->base, arr->nElems);
    ppIRType(arr->elemTy, f);
    fprintf(f, ")");
+}
+
+static bool parseIRRegArray(IRRegArray **res, const char *str, const char **suffix)
+{
+  int base, nElems;
+  IRType ty;
+  if (!parseThisChar('(', str, &str) ||
+      !parseDecimalInt(&base, str, &str) ||
+      !parseThisChar(':', str, &str) ||
+      !parseDecimalInt(&nElems, str, &str) ||
+      !parseThisChar('x', str, &str) ||
+      !parseIRType(&ty, str, &str) ||
+      !parseThisChar(')', str, suffix))
+    return false;
+  *res = mkIRRegArray(base, ty, nElems);
+  return true;
 }
 
 void ppIRTemp ( IRTemp tmp, FILE* f )
@@ -270,468 +445,484 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
       fprintf(f,  "t%d", (Int)tmp);
 }
 
+static bool parseIRTemp(IRTemp *res, const char *str, const char **suffix)
+{
+  int r;
+
+  if (parseThisString("IRTemp_INVALID", str, suffix)) {
+    *res = IRTemp_INVALID;
+    return true;
+  } else if (parseThisChar('t', str, &str) &&
+	     parseDecimalInt(&r, str, suffix)) {
+    *res = (IRTemp)r;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+#define foreach_op_sized(iter)			\
+  iter(Add)					\
+  iter(Sub)					\
+  iter(Mul)					\
+  iter(Or)					\
+  iter(And)					\
+  iter(Xor)					\
+  iter(Shl)					\
+  iter(Shr)					\
+  iter(Sar)					\
+  iter(CmpEQ)					\
+  iter(CmpNE)					\
+  iter(CasCmpEQ)				\
+  iter(CasCmpNE)				\
+  iter(Not)					\
+  iter(Neg)
+
+#define foreach_op_unsized(iter)		\
+	   iter(8Uto16)				\
+	     iter(8Uto32)			\
+	     iter(16Uto32)			\
+	     iter(8Sto16)			\
+	     iter(8Sto32)			\
+	     iter(16Sto32)			\
+	     iter(32Sto64)			\
+	     iter(32Uto64)			\
+	     iter(32to8)			\
+	     iter(16Uto64)			\
+	     iter(16Sto64)			\
+	     iter(8Uto64)			\
+	     iter(8Sto64)			\
+	     iter(64to16)			\
+	     iter(64to8)			\
+						\
+	     iter(Not1)				\
+	     iter(32to1)			\
+	     iter(64to1)			\
+	     iter(1Uto8)			\
+	     iter(1Uto32)			\
+	     iter(1Uto64)			\
+	     iter(1Sto8)			\
+	     iter(1Sto16)			\
+	     iter(1Sto32)			\
+	     iter(1Sto64)			\
+	     iter(And1)				\
+	     iter(Or1)				\
+						\
+	     iter(MullS8)			\
+	     iter(MullS16)			\
+	     iter(MullS32)			\
+	     iter(MullS64)			\
+	     iter(MullU8)			\
+	     iter(MullU16)			\
+	     iter(MullU32)			\
+	     iter(MullU64)			\
+						\
+	     iter(Clz64)			\
+	     iter(Clz32)			\
+	     iter(Ctz64)			\
+	     iter(Ctz32)			\
+						\
+	     iter(CmpLT32S)			\
+	     iter(CmpLE32S)			\
+	     iter(CmpLT32U)			\
+	     iter(CmpLE32U)			\
+						\
+	     iter(CmpLT64S)			\
+	     iter(CmpLE64S)			\
+	     iter(CmpLT64U)			\
+	     iter(CmpLE64U)			\
+						\
+	     iter(CmpNEZ8)			\
+	     iter(CmpNEZ16)			\
+	     iter(CmpNEZ32)			\
+	     iter(CmpNEZ64)			\
+						\
+	     iter(CmpwNEZ32)			\
+	     iter(CmpwNEZ64)			\
+						\
+	     iter(Left8)			\
+	     iter(Left16)			\
+	     iter(Left32)			\
+	     iter(Left64)			\
+	     iter(Max32U)			\
+						\
+	     iter(CmpORD32U)			\
+	     iter(CmpORD32S)			\
+						\
+	     iter(CmpORD64U)			\
+	     iter(CmpORD64S)			\
+						\
+	     iter(DivU32)			\
+	     iter(DivS32)			\
+	     iter(DivU64)			\
+	     iter(DivS64)			\
+						\
+	     iter(DivModU64to32)		\
+	     iter(DivModS64to32)		\
+						\
+	     iter(DivModU128to64)		\
+	     iter(DivModS128to64)		\
+						\
+	     iter(16HIto8)			\
+	     iter(16to8)			\
+	     iter(8HLto16)			\
+						\
+	     iter(32HIto16)			\
+	     iter(32to16)			\
+	     iter(16HLto32)			\
+						\
+	     iter(64HIto32)			\
+	     iter(64to32)			\
+	     iter(32HLto64)			\
+						\
+	     iter(128HIto64)			\
+	     iter(128to64)			\
+	     iter(64HLto128)			\
+						\
+	     iter(AddF64)			\
+	     iter(SubF64)			\
+	     iter(MulF64)			\
+	     iter(DivF64)			\
+	     iter(AddF64r32)			\
+	     iter(SubF64r32)			\
+	     iter(MulF64r32)			\
+	     iter(DivF64r32)			\
+						\
+	     iter(ScaleF64)			\
+	     iter(AtanF64)			\
+	     iter(Yl2xF64)			\
+	     iter(Yl2xp1F64)			\
+	     iter(PRemF64)			\
+	     iter(PRemC3210F64)			\
+	     iter(PRem1F64)			\
+	     iter(PRem1C3210F64)		\
+	     iter(NegF64)			\
+	     iter(SqrtF64)			\
+						\
+	     iter(AbsF64)			\
+	     iter(SinF64)			\
+	     iter(CosF64)			\
+	     iter(TanF64)			\
+	     iter(2xm1F64)			\
+						\
+	     iter(MAddF64)			\
+	     iter(MSubF64)			\
+	     iter(MAddF64r32)			\
+	     iter(MSubF64r32)			\
+						\
+	     iter(Est5FRSqrt)			\
+	     iter(RoundF64toF64_NEAREST)	\
+	     iter(RoundF64toF64_NegINF)		\
+	     iter(RoundF64toF64_PosINF)		\
+	     iter(RoundF64toF64_ZERO)		\
+						\
+	     iter(TruncF64asF32)		\
+	     iter(CalcFPRF)			\
+						\
+	     iter(CmpF64)			\
+						\
+	     iter(F64toI16)			\
+	     iter(F64toI32)			\
+	     iter(F64toI64)			\
+						\
+	     iter(I16toF64)			\
+	     iter(I32toF64)			\
+	     iter(I64toF64)			\
+						\
+	     iter(F32toF64)			\
+	     iter(F64toF32)			\
+						\
+	     iter(RoundF64toInt)		\
+	     iter(RoundF64toF32)		\
+						\
+	     iter(ReinterpF64asI64)		\
+	     iter(ReinterpI64asF64)		\
+	     iter(ReinterpF32asI32)		\
+	     iter(ReinterpI32asF32)		\
+						\
+	     iter(I32UtoFx4)			\
+	     iter(I32StoFx4)			\
+						\
+	     iter(QFtoI32Ux4_RZ)		\
+	     iter(QFtoI32Sx4_RZ)		\
+						\
+	     iter(RoundF32x4_RM)		\
+	     iter(RoundF32x4_RP)		\
+	     iter(RoundF32x4_RN)		\
+	     iter(RoundF32x4_RZ)		\
+						\
+	     iter(Add8x8)			\
+	     iter(Add16x4)			\
+	     iter(Add32x2)			\
+	     iter(QAdd8Ux8)			\
+	     iter(QAdd16Ux4)			\
+	     iter(QAdd8Sx8)			\
+	     iter(QAdd16Sx4)			\
+	     iter(Sub8x8)			\
+	     iter(Sub16x4)			\
+	     iter(Sub32x2)			\
+	     iter(QSub8Ux8)			\
+	     iter(QSub16Ux4)			\
+	     iter(QSub8Sx8)			\
+	     iter(QSub16Sx4)			\
+	     iter(Mul16x4)			\
+	     iter(Mul32x2)			\
+	     iter(MulHi16Ux4)			\
+	     iter(MulHi16Sx4)			\
+	     iter(Avg8Ux8)			\
+	     iter(Avg16Ux4)			\
+	     iter(Max16Sx4)			\
+	     iter(Max8Ux8)			\
+	     iter(Min16Sx4)			\
+	     iter(Min8Ux8)			\
+	     iter(CmpEQ8x8)			\
+	     iter(CmpEQ16x4)			\
+	     iter(CmpEQ32x2)			\
+	     iter(CmpGT8Sx8)			\
+	     iter(CmpGT16Sx4)			\
+	     iter(CmpGT32Sx2)			\
+	     iter(ShlN8x8)			\
+	     iter(ShlN16x4)			\
+	     iter(ShlN32x2)			\
+	     iter(ShrN16x4)			\
+	     iter(ShrN32x2)			\
+	     iter(SarN8x8)			\
+	     iter(SarN16x4)			\
+	     iter(SarN32x2)			\
+	     iter(QNarrow16Ux4)			\
+	     iter(QNarrow16Sx4)			\
+	     iter(QNarrow32Sx2)			\
+	     iter(InterleaveHI8x8)		\
+	     iter(InterleaveHI16x4)		\
+	     iter(InterleaveHI32x2)		\
+	     iter(InterleaveLO8x8)		\
+	     iter(InterleaveLO16x4)		\
+	     iter(InterleaveLO32x2)		\
+	     iter(CatOddLanes16x4)		\
+	     iter(CatEvenLanes16x4)		\
+	     iter(Perm8x8)			\
+						\
+	     iter(CmpNEZ32x2)			\
+	     iter(CmpNEZ16x4)			\
+	     iter(CmpNEZ8x8)			\
+						\
+	     iter(Add32Fx4)			\
+	     iter(Add32F0x4)			\
+	     iter(Add64Fx2)			\
+	     iter(Add64F0x2)			\
+						\
+	     iter(Div32Fx4)			\
+	     iter(Div32F0x4)			\
+	     iter(Div64Fx2)			\
+	     iter(Div64F0x2)			\
+						\
+	     iter(Max32Fx4)			\
+	     iter(Max32F0x4)			\
+	     iter(Max64Fx2)			\
+	     iter(Max64F0x2)			\
+						\
+	     iter(Min32Fx4)			\
+	     iter(Min32F0x4)			\
+	     iter(Min64Fx2)			\
+	     iter(Min64F0x2)			\
+						\
+	     iter(Mul32Fx4)			\
+	     iter(Mul32F0x4)			\
+	     iter(Mul64Fx2)			\
+	     iter(Mul64F0x2)			\
+						\
+	     iter(Recip32Fx4)			\
+	     iter(Recip32F0x4)			\
+	     iter(Recip64Fx2)			\
+	     iter(Recip64F0x2)			\
+						\
+	     iter(RSqrt32Fx4)			\
+	     iter(RSqrt32F0x4)			\
+	     iter(RSqrt64Fx2)			\
+	     iter(RSqrt64F0x2)			\
+						\
+	     iter(Sqrt32Fx4)			\
+	     iter(Sqrt32F0x4)			\
+	     iter(Sqrt64Fx2)			\
+	     iter(Sqrt64F0x2)			\
+						\
+	     iter(Sub32Fx4)			\
+	     iter(Sub32F0x4)			\
+	     iter(Sub64Fx2)			\
+	     iter(Sub64F0x2)			\
+						\
+	     iter(CmpEQ32Fx4)			\
+	     iter(CmpLT32Fx4)			\
+	     iter(CmpLE32Fx4)			\
+	     iter(CmpGT32Fx4)			\
+	     iter(CmpGE32Fx4)			\
+	     iter(CmpUN32Fx4)			\
+	     iter(CmpEQ64Fx2)			\
+	     iter(CmpLT64Fx2)			\
+	     iter(CmpLE64Fx2)			\
+	     iter(CmpUN64Fx2)			\
+						\
+	     iter(CmpEQ32F0x4)			\
+	     iter(CmpLT32F0x4)			\
+	     iter(CmpLE32F0x4)			\
+	     iter(CmpUN32F0x4)			\
+	     iter(CmpEQ64F0x2)			\
+	     iter(CmpLT64F0x2)			\
+	     iter(CmpLE64F0x2)			\
+	     iter(CmpUN64F0x2)			\
+						\
+	     iter(V128to64)			\
+	     iter(V128HIto64)			\
+	     iter(64HLtoV128)			\
+						\
+	     iter(64UtoV128)			\
+	     iter(SetV128lo64)			\
+						\
+	     iter(32UtoV128)			\
+	     iter(V128to32)			\
+	     iter(SetV128lo32)			\
+						\
+	     iter(Dup8x16)			\
+	     iter(Dup16x8)			\
+	     iter(Dup32x4)			\
+						\
+	     iter(NotV128)			\
+	     iter(AndV128)			\
+	     iter(OrV128)			\
+	     iter(XorV128)			\
+						\
+	     iter(CmpNEZ8x16)			\
+	     iter(CmpNEZ16x8)			\
+	     iter(CmpNEZ32x4)			\
+	     iter(CmpNEZ64x2)			\
+						\
+	     iter(Add8x16)			\
+	     iter(Add16x8)			\
+	     iter(Add32x4)			\
+	     iter(Add64x2)			\
+	     iter(QAdd8Ux16)			\
+	     iter(QAdd16Ux8)			\
+	     iter(QAdd32Ux4)			\
+	     iter(QAdd8Sx16)			\
+	     iter(QAdd16Sx8)			\
+	     iter(QAdd32Sx4)			\
+						\
+	     iter(Sub8x16)			\
+	     iter(Sub16x8)			\
+	     iter(Sub32x4)			\
+	     iter(Sub64x2)			\
+	     iter(QSub8Ux16)			\
+	     iter(QSub16Ux8)			\
+	     iter(QSub32Ux4)			\
+	     iter(QSub8Sx16)			\
+	     iter(QSub16Sx8)			\
+	     iter(QSub32Sx4)			\
+						\
+	     iter(Mul16x8)			\
+	     iter(MulHi16Ux8)			\
+	     iter(MulHi32Ux4)			\
+	     iter(MulHi16Sx8)			\
+	     iter(MulHi32Sx4)			\
+						\
+	     iter(MullEven8Ux16)		\
+	     iter(MullEven16Ux8)		\
+	     iter(MullEven8Sx16)		\
+	     iter(MullEven16Sx8)		\
+						\
+	     iter(Avg8Ux16)			\
+	     iter(Avg16Ux8)			\
+	     iter(Avg32Ux4)			\
+	     iter(Avg8Sx16)			\
+	     iter(Avg16Sx8)			\
+	     iter(Avg32Sx4)			\
+						\
+	     iter(Max8Sx16)			\
+	     iter(Max16Sx8)			\
+	     iter(Max32Sx4)			\
+	     iter(Max8Ux16)			\
+	     iter(Max16Ux8)			\
+	     iter(Max32Ux4)			\
+						\
+	     iter(Min8Sx16)			\
+	     iter(Min16Sx8)			\
+	     iter(Min32Sx4)			\
+	     iter(Min8Ux16)			\
+	     iter(Min16Ux8)			\
+	     iter(Min32Ux4)			\
+						\
+	     iter(CmpEQ8x16)			\
+	     iter(CmpEQ16x8)			\
+	     iter(CmpEQ32x4)			\
+	     iter(CmpGT8Sx16)			\
+	     iter(CmpGT16Sx8)			\
+	     iter(CmpGT32Sx4)			\
+	     iter(CmpGT8Ux16)			\
+	     iter(CmpGT16Ux8)			\
+	     iter(CmpGT32Ux4)			\
+						\
+	     iter(ShlV128)			\
+	     iter(ShrV128)			\
+						\
+	     iter(ShlN8x16)			\
+	     iter(ShlN16x8)			\
+	     iter(ShlN32x4)			\
+	     iter(ShlN64x2)			\
+	     iter(ShrN8x16)			\
+	     iter(ShrN16x8)			\
+	     iter(ShrN32x4)			\
+	     iter(ShrN64x2)			\
+	     iter(SarN8x16)			\
+	     iter(SarN16x8)			\
+	     iter(SarN32x4)			\
+						\
+	     iter(Shl8x16)			\
+	     iter(Shl16x8)			\
+	     iter(Shl32x4)			\
+	     iter(Shr8x16)			\
+	     iter(Shr16x8)			\
+	     iter(Shr32x4)			\
+	     iter(Sar8x16)			\
+	     iter(Sar16x8)			\
+	     iter(Sar32x4)			\
+	     iter(Rol8x16)			\
+	     iter(Rol16x8)			\
+	     iter(Rol32x4)			\
+						\
+	     iter(Narrow16x8)			\
+	     iter(Narrow32x4)			\
+	     iter(QNarrow16Ux8)			\
+	     iter(QNarrow32Ux4)			\
+	     iter(QNarrow16Sx8)			\
+	     iter(QNarrow32Sx4)			\
+						\
+	     iter(InterleaveHI8x16)		\
+	     iter(InterleaveHI16x8)		\
+	     iter(InterleaveHI32x4)		\
+	     iter(InterleaveHI64x2)		\
+	     iter(InterleaveLO8x16)		\
+	     iter(InterleaveLO16x8)		\
+	     iter(InterleaveLO32x4)		\
+	     iter(InterleaveLO64x2)		\
+						\
+	     iter(Perm8x16)
+
 void ppIROp ( IROp op, FILE* f )
 {
    const char* str = NULL; 
    IROp   base;
    switch (op) {
-      case Iop_Add8 ... Iop_Add64:
-         str = "Add"; base = Iop_Add8; break;
-      case Iop_Sub8 ... Iop_Sub64:
-         str = "Sub"; base = Iop_Sub8; break;
-      case Iop_Mul8 ... Iop_Mul64:
-         str = "Mul"; base = Iop_Mul8; break;
-      case Iop_Or8 ... Iop_Or64:
-         str = "Or"; base = Iop_Or8; break;
-      case Iop_And8 ... Iop_And64:
-         str = "And"; base = Iop_And8; break;
-      case Iop_Xor8 ... Iop_Xor64:
-         str = "Xor"; base = Iop_Xor8; break;
-      case Iop_Shl8 ... Iop_Shl64:
-         str = "Shl"; base = Iop_Shl8; break;
-      case Iop_Shr8 ... Iop_Shr64:
-         str = "Shr"; base = Iop_Shr8; break;
-      case Iop_Sar8 ... Iop_Sar64:
-         str = "Sar"; base = Iop_Sar8; break;
-      case Iop_CmpEQ8 ... Iop_CmpEQ64:
-         str = "CmpEQ"; base = Iop_CmpEQ8; break;
-      case Iop_CmpNE8 ... Iop_CmpNE64:
-         str = "CmpNE"; base = Iop_CmpNE8; break;
-      case Iop_CasCmpEQ8 ... Iop_CasCmpEQ64:
-         str = "CasCmpEQ"; base = Iop_CasCmpEQ8; break;
-      case Iop_CasCmpNE8 ... Iop_CasCmpNE64:
-         str = "CasCmpNE"; base = Iop_CasCmpNE8; break;
-      case Iop_Not8 ... Iop_Not64:
-         str = "Not"; base = Iop_Not8; break;
-      case Iop_Neg8 ... Iop_Neg64:
-         str = "Neg"; base = Iop_Neg8; break;
+#define do_op(name)					\
+     case Iop_ ## name ## 8 ... Iop_ ## name ## 64 :	\
+       str = #name;					\
+     base = Iop_ ## name ## 8;				\
+     break;
+     foreach_op_sized(do_op);
+#undef do_op
+
       /* other cases must explicitly "return;" */
-      case Iop_8Uto16:   fprintf(f, "8Uto16");  return;
-      case Iop_8Uto32:   fprintf(f, "8Uto32");  return;
-      case Iop_16Uto32:  fprintf(f, "16Uto32"); return;
-      case Iop_8Sto16:   fprintf(f, "8Sto16");  return;
-      case Iop_8Sto32:   fprintf(f, "8Sto32");  return;
-      case Iop_16Sto32:  fprintf(f, "16Sto32"); return;
-      case Iop_32Sto64:  fprintf(f, "32Sto64"); return;
-      case Iop_32Uto64:  fprintf(f, "32Uto64"); return;
-      case Iop_32to8:    fprintf(f, "32to8");   return;
-      case Iop_16Uto64:  fprintf(f, "16Uto64"); return;
-      case Iop_16Sto64:  fprintf(f, "16Sto64"); return;
-      case Iop_8Uto64:   fprintf(f, "8Uto64"); return;
-      case Iop_8Sto64:   fprintf(f, "8Sto64"); return;
-      case Iop_64to16:   fprintf(f, "64to16"); return;
-      case Iop_64to8:    fprintf(f, "64to8");  return;
-
-      case Iop_Not1:     fprintf(f, "Not1");    return;
-      case Iop_32to1:    fprintf(f, "32to1");   return;
-      case Iop_64to1:    fprintf(f, "64to1");   return;
-      case Iop_1Uto8:    fprintf(f, "1Uto8");   return;
-      case Iop_1Uto32:   fprintf(f, "1Uto32");  return;
-      case Iop_1Uto64:   fprintf(f, "1Uto64");  return;
-      case Iop_1Sto8:    fprintf(f, "1Sto8");  return;
-      case Iop_1Sto16:   fprintf(f, "1Sto16");  return;
-      case Iop_1Sto32:   fprintf(f, "1Sto32");  return;
-      case Iop_1Sto64:   fprintf(f, "1Sto64");  return;
-      case Iop_And1:     fprintf(f, "And1");    return;
-      case Iop_Or1:     fprintf(f, "Or1");    return;
-
-      case Iop_MullS8:   fprintf(f, "MullS8");  return;
-      case Iop_MullS16:  fprintf(f, "MullS16"); return;
-      case Iop_MullS32:  fprintf(f, "MullS32"); return;
-      case Iop_MullS64:  fprintf(f, "MullS64"); return;
-      case Iop_MullU8:   fprintf(f, "MullU8");  return;
-      case Iop_MullU16:  fprintf(f, "MullU16"); return;
-      case Iop_MullU32:  fprintf(f, "MullU32"); return;
-      case Iop_MullU64:  fprintf(f, "MullU64"); return;
-
-      case Iop_Clz64:    fprintf(f, "Clz64"); return;
-      case Iop_Clz32:    fprintf(f, "Clz32"); return;
-      case Iop_Ctz64:    fprintf(f, "Ctz64"); return;
-      case Iop_Ctz32:    fprintf(f, "Ctz32"); return;
-
-      case Iop_CmpLT32S: fprintf(f, "CmpLT32S"); return;
-      case Iop_CmpLE32S: fprintf(f, "CmpLE32S"); return;
-      case Iop_CmpLT32U: fprintf(f, "CmpLT32U"); return;
-      case Iop_CmpLE32U: fprintf(f, "CmpLE32U"); return;
-
-      case Iop_CmpLT64S: fprintf(f, "CmpLT64S"); return;
-      case Iop_CmpLE64S: fprintf(f, "CmpLE64S"); return;
-      case Iop_CmpLT64U: fprintf(f, "CmpLT64U"); return;
-      case Iop_CmpLE64U: fprintf(f, "CmpLE64U"); return;
-
-      case Iop_CmpNEZ8:  fprintf(f, "CmpNEZ8"); return;
-      case Iop_CmpNEZ16: fprintf(f, "CmpNEZ16"); return;
-      case Iop_CmpNEZ32: fprintf(f, "CmpNEZ32"); return;
-      case Iop_CmpNEZ64: fprintf(f, "CmpNEZ64"); return;
-
-      case Iop_CmpwNEZ32: fprintf(f, "CmpwNEZ32"); return;
-      case Iop_CmpwNEZ64: fprintf(f, "CmpwNEZ64"); return;
-
-      case Iop_Left8:  fprintf(f, "Left8"); return;
-      case Iop_Left16: fprintf(f, "Left16"); return;
-      case Iop_Left32: fprintf(f, "Left32"); return;
-      case Iop_Left64: fprintf(f, "Left64"); return;
-      case Iop_Max32U: fprintf(f, "Max32U"); return;
-
-      case Iop_CmpORD32U: fprintf(f, "CmpORD32U"); return;
-      case Iop_CmpORD32S: fprintf(f, "CmpORD32S"); return;
-
-      case Iop_CmpORD64U: fprintf(f, "CmpORD64U"); return;
-      case Iop_CmpORD64S: fprintf(f, "CmpORD64S"); return;
-
-      case Iop_DivU32: fprintf(f, "DivU32"); return;
-      case Iop_DivS32: fprintf(f, "DivS32"); return;
-      case Iop_DivU64: fprintf(f, "DivU64"); return;
-      case Iop_DivS64: fprintf(f, "DivS64"); return;
-
-      case Iop_DivModU64to32: fprintf(f, "DivModU64to32"); return;
-      case Iop_DivModS64to32: fprintf(f, "DivModS64to32"); return;
-
-      case Iop_DivModU128to64: fprintf(f, "DivModU128to64"); return;
-      case Iop_DivModS128to64: fprintf(f, "DivModS128to64"); return;
-
-      case Iop_16HIto8:  fprintf(f, "16HIto8"); return;
-      case Iop_16to8:    fprintf(f, "16to8");   return;
-      case Iop_8HLto16:  fprintf(f, "8HLto16"); return;
-
-      case Iop_32HIto16: fprintf(f, "32HIto16"); return;
-      case Iop_32to16:   fprintf(f, "32to16");   return;
-      case Iop_16HLto32: fprintf(f, "16HLto32"); return;
-
-      case Iop_64HIto32: fprintf(f, "64HIto32"); return;
-      case Iop_64to32:   fprintf(f, "64to32");   return;
-      case Iop_32HLto64: fprintf(f, "32HLto64"); return;
-
-      case Iop_128HIto64: fprintf(f, "128HIto64"); return;
-      case Iop_128to64:   fprintf(f, "128to64");   return;
-      case Iop_64HLto128: fprintf(f, "64HLto128"); return;
-
-      case Iop_AddF64:    fprintf(f, "AddF64"); return;
-      case Iop_SubF64:    fprintf(f, "SubF64"); return;
-      case Iop_MulF64:    fprintf(f, "MulF64"); return;
-      case Iop_DivF64:    fprintf(f, "DivF64"); return;
-      case Iop_AddF64r32: fprintf(f, "AddF64r32"); return;
-      case Iop_SubF64r32: fprintf(f, "SubF64r32"); return;
-      case Iop_MulF64r32: fprintf(f, "MulF64r32"); return;
-      case Iop_DivF64r32: fprintf(f, "DivF64r32"); return;
-
-      case Iop_ScaleF64:      fprintf(f, "ScaleF64"); return;
-      case Iop_AtanF64:       fprintf(f, "AtanF64"); return;
-      case Iop_Yl2xF64:       fprintf(f, "Yl2xF64"); return;
-      case Iop_Yl2xp1F64:     fprintf(f, "Yl2xp1F64"); return;
-      case Iop_PRemF64:       fprintf(f, "PRemF64"); return;
-      case Iop_PRemC3210F64:  fprintf(f, "PRemC3210F64"); return;
-      case Iop_PRem1F64:      fprintf(f, "PRem1F64"); return;
-      case Iop_PRem1C3210F64: fprintf(f, "PRem1C3210F64"); return;
-      case Iop_NegF64:        fprintf(f, "NegF64"); return;
-      case Iop_SqrtF64:       fprintf(f, "SqrtF64"); return;
-
-      case Iop_AbsF64:    fprintf(f, "AbsF64"); return;
-      case Iop_SinF64:    fprintf(f, "SinF64"); return;
-      case Iop_CosF64:    fprintf(f, "CosF64"); return;
-      case Iop_TanF64:    fprintf(f, "TanF64"); return;
-      case Iop_2xm1F64:   fprintf(f, "2xm1F64"); return;
-
-      case Iop_MAddF64:    fprintf(f, "MAddF64"); return;
-      case Iop_MSubF64:    fprintf(f, "MSubF64"); return;
-      case Iop_MAddF64r32: fprintf(f, "MAddF64r32"); return;
-      case Iop_MSubF64r32: fprintf(f, "MSubF64r32"); return;
-
-      case Iop_Est5FRSqrt:    fprintf(f, "Est5FRSqrt"); return;
-      case Iop_RoundF64toF64_NEAREST: fprintf(f, "RoundF64toF64_NEAREST"); return;
-      case Iop_RoundF64toF64_NegINF: fprintf(f, "RoundF64toF64_NegINF"); return;
-      case Iop_RoundF64toF64_PosINF: fprintf(f, "RoundF64toF64_PosINF"); return;
-      case Iop_RoundF64toF64_ZERO: fprintf(f, "RoundF64toF64_ZERO"); return;
-
-      case Iop_TruncF64asF32: fprintf(f, "TruncF64asF32"); return;
-      case Iop_CalcFPRF:      fprintf(f, "CalcFPRF"); return;
-
-      case Iop_CmpF64:    fprintf(f, "CmpF64"); return;
-
-      case Iop_F64toI16: fprintf(f, "F64toI16"); return;
-      case Iop_F64toI32: fprintf(f, "F64toI32"); return;
-      case Iop_F64toI64: fprintf(f, "F64toI64"); return;
-
-      case Iop_I16toF64: fprintf(f, "I16toF64"); return;
-      case Iop_I32toF64: fprintf(f, "I32toF64"); return;
-      case Iop_I64toF64: fprintf(f, "I64toF64"); return;
-
-      case Iop_F32toF64: fprintf(f, "F32toF64"); return;
-      case Iop_F64toF32: fprintf(f, "F64toF32"); return;
-
-      case Iop_RoundF64toInt: fprintf(f, "RoundF64toInt"); return;
-      case Iop_RoundF64toF32: fprintf(f, "RoundF64toF32"); return;
-
-      case Iop_ReinterpF64asI64: fprintf(f, "ReinterpF64asI64"); return;
-      case Iop_ReinterpI64asF64: fprintf(f, "ReinterpI64asF64"); return;
-      case Iop_ReinterpF32asI32: fprintf(f, "ReinterpF32asI32"); return;
-      case Iop_ReinterpI32asF32: fprintf(f, "ReinterpI32asF32"); return;
-
-      case Iop_I32UtoFx4: fprintf(f, "I32UtoFx4"); return;
-      case Iop_I32StoFx4: fprintf(f, "I32StoFx4"); return;
-
-      case Iop_QFtoI32Ux4_RZ: fprintf(f, "QFtoI32Ux4_RZ"); return;
-      case Iop_QFtoI32Sx4_RZ: fprintf(f, "QFtoI32Sx4_RZ"); return;
-
-      case Iop_RoundF32x4_RM: fprintf(f, "RoundF32x4_RM"); return;
-      case Iop_RoundF32x4_RP: fprintf(f, "RoundF32x4_RP"); return;
-      case Iop_RoundF32x4_RN: fprintf(f, "RoundF32x4_RN"); return;
-      case Iop_RoundF32x4_RZ: fprintf(f, "RoundF32x4_RZ"); return;
-
-      case Iop_Add8x8: fprintf(f, "Add8x8"); return;
-      case Iop_Add16x4: fprintf(f, "Add16x4"); return;
-      case Iop_Add32x2: fprintf(f, "Add32x2"); return;
-      case Iop_QAdd8Ux8: fprintf(f, "QAdd8Ux8"); return;
-      case Iop_QAdd16Ux4: fprintf(f, "QAdd16Ux4"); return;
-      case Iop_QAdd8Sx8: fprintf(f, "QAdd8Sx8"); return;
-      case Iop_QAdd16Sx4: fprintf(f, "QAdd16Sx4"); return;
-      case Iop_Sub8x8: fprintf(f, "Sub8x8"); return;
-      case Iop_Sub16x4: fprintf(f, "Sub16x4"); return;
-      case Iop_Sub32x2: fprintf(f, "Sub32x2"); return;
-      case Iop_QSub8Ux8: fprintf(f, "QSub8Ux8"); return;
-      case Iop_QSub16Ux4: fprintf(f, "QSub16Ux4"); return;
-      case Iop_QSub8Sx8: fprintf(f, "QSub8Sx8"); return;
-      case Iop_QSub16Sx4: fprintf(f, "QSub16Sx4"); return;
-      case Iop_Mul16x4: fprintf(f, "Mul16x4"); return;
-      case Iop_Mul32x2: fprintf(f, "Mul32x2"); return;
-      case Iop_MulHi16Ux4: fprintf(f, "MulHi16Ux4"); return;
-      case Iop_MulHi16Sx4: fprintf(f, "MulHi16Sx4"); return;
-      case Iop_Avg8Ux8: fprintf(f, "Avg8Ux8"); return;
-      case Iop_Avg16Ux4: fprintf(f, "Avg16Ux4"); return;
-      case Iop_Max16Sx4: fprintf(f, "Max16Sx4"); return;
-      case Iop_Max8Ux8: fprintf(f, "Max8Ux8"); return;
-      case Iop_Min16Sx4: fprintf(f, "Min16Sx4"); return;
-      case Iop_Min8Ux8: fprintf(f, "Min8Ux8"); return;
-      case Iop_CmpEQ8x8: fprintf(f, "CmpEQ8x8"); return;
-      case Iop_CmpEQ16x4: fprintf(f, "CmpEQ16x4"); return;
-      case Iop_CmpEQ32x2: fprintf(f, "CmpEQ32x2"); return;
-      case Iop_CmpGT8Sx8: fprintf(f, "CmpGT8Sx8"); return;
-      case Iop_CmpGT16Sx4: fprintf(f, "CmpGT16Sx4"); return;
-      case Iop_CmpGT32Sx2: fprintf(f, "CmpGT32Sx2"); return;
-      case Iop_ShlN8x8: fprintf(f, "ShlN8x8"); return;
-      case Iop_ShlN16x4: fprintf(f, "ShlN16x4"); return;
-      case Iop_ShlN32x2: fprintf(f, "ShlN32x2"); return;
-      case Iop_ShrN16x4: fprintf(f, "ShrN16x4"); return;
-      case Iop_ShrN32x2: fprintf(f, "ShrN32x2"); return;
-      case Iop_SarN8x8: fprintf(f, "SarN8x8"); return;
-      case Iop_SarN16x4: fprintf(f, "SarN16x4"); return;
-      case Iop_SarN32x2: fprintf(f, "SarN32x2"); return;
-      case Iop_QNarrow16Ux4: fprintf(f, "QNarrow16Ux4"); return;
-      case Iop_QNarrow16Sx4: fprintf(f, "QNarrow16Sx4"); return;
-      case Iop_QNarrow32Sx2: fprintf(f, "QNarrow32Sx2"); return;
-      case Iop_InterleaveHI8x8: fprintf(f, "InterleaveHI8x8"); return;
-      case Iop_InterleaveHI16x4: fprintf(f, "InterleaveHI16x4"); return;
-      case Iop_InterleaveHI32x2: fprintf(f, "InterleaveHI32x2"); return;
-      case Iop_InterleaveLO8x8: fprintf(f, "InterleaveLO8x8"); return;
-      case Iop_InterleaveLO16x4: fprintf(f, "InterleaveLO16x4"); return;
-      case Iop_InterleaveLO32x2: fprintf(f, "InterleaveLO32x2"); return;
-      case Iop_CatOddLanes16x4: fprintf(f, "CatOddLanes16x4"); return;
-      case Iop_CatEvenLanes16x4: fprintf(f, "CatEvenLanes16x4"); return;
-      case Iop_Perm8x8: fprintf(f, "Perm8x8"); return;
-
-      case Iop_CmpNEZ32x2: fprintf(f, "CmpNEZ32x2"); return;
-      case Iop_CmpNEZ16x4: fprintf(f, "CmpNEZ16x4"); return;
-      case Iop_CmpNEZ8x8:  fprintf(f, "CmpNEZ8x8"); return;
-
-      case Iop_Add32Fx4:  fprintf(f, "Add32Fx4"); return;
-      case Iop_Add32F0x4: fprintf(f, "Add32F0x4"); return;
-      case Iop_Add64Fx2:  fprintf(f, "Add64Fx2"); return;
-      case Iop_Add64F0x2: fprintf(f, "Add64F0x2"); return;
-
-      case Iop_Div32Fx4:  fprintf(f, "Div32Fx4"); return;
-      case Iop_Div32F0x4: fprintf(f, "Div32F0x4"); return;
-      case Iop_Div64Fx2:  fprintf(f, "Div64Fx2"); return;
-      case Iop_Div64F0x2: fprintf(f, "Div64F0x2"); return;
-
-      case Iop_Max32Fx4:  fprintf(f, "Max32Fx4"); return;
-      case Iop_Max32F0x4: fprintf(f, "Max32F0x4"); return;
-      case Iop_Max64Fx2:  fprintf(f, "Max64Fx2"); return;
-      case Iop_Max64F0x2: fprintf(f, "Max64F0x2"); return;
-
-      case Iop_Min32Fx4:  fprintf(f, "Min32Fx4"); return;
-      case Iop_Min32F0x4: fprintf(f, "Min32F0x4"); return;
-      case Iop_Min64Fx2:  fprintf(f, "Min64Fx2"); return;
-      case Iop_Min64F0x2: fprintf(f, "Min64F0x2"); return;
-
-      case Iop_Mul32Fx4:  fprintf(f, "Mul32Fx4"); return;
-      case Iop_Mul32F0x4: fprintf(f, "Mul32F0x4"); return;
-      case Iop_Mul64Fx2:  fprintf(f, "Mul64Fx2"); return;
-      case Iop_Mul64F0x2: fprintf(f, "Mul64F0x2"); return;
-
-      case Iop_Recip32Fx4:  fprintf(f, "Recip32Fx4"); return;
-      case Iop_Recip32F0x4: fprintf(f, "Recip32F0x4"); return;
-      case Iop_Recip64Fx2:  fprintf(f, "Recip64Fx2"); return;
-      case Iop_Recip64F0x2: fprintf(f, "Recip64F0x2"); return;
-
-      case Iop_RSqrt32Fx4:  fprintf(f, "RSqrt32Fx4"); return;
-      case Iop_RSqrt32F0x4: fprintf(f, "RSqrt32F0x4"); return;
-      case Iop_RSqrt64Fx2:  fprintf(f, "RSqrt64Fx2"); return;
-      case Iop_RSqrt64F0x2: fprintf(f, "RSqrt64F0x2"); return;
-
-      case Iop_Sqrt32Fx4:  fprintf(f, "Sqrt32Fx4"); return;
-      case Iop_Sqrt32F0x4: fprintf(f, "Sqrt32F0x4"); return;
-      case Iop_Sqrt64Fx2:  fprintf(f, "Sqrt64Fx2"); return;
-      case Iop_Sqrt64F0x2: fprintf(f, "Sqrt64F0x2"); return;
-
-      case Iop_Sub32Fx4:  fprintf(f, "Sub32Fx4"); return;
-      case Iop_Sub32F0x4: fprintf(f, "Sub32F0x4"); return;
-      case Iop_Sub64Fx2:  fprintf(f, "Sub64Fx2"); return;
-      case Iop_Sub64F0x2: fprintf(f, "Sub64F0x2"); return;
-
-      case Iop_CmpEQ32Fx4: fprintf(f, "CmpEQ32Fx4"); return;
-      case Iop_CmpLT32Fx4: fprintf(f, "CmpLT32Fx4"); return;
-      case Iop_CmpLE32Fx4: fprintf(f, "CmpLE32Fx4"); return;
-      case Iop_CmpGT32Fx4: fprintf(f, "CmpGT32Fx4"); return;
-      case Iop_CmpGE32Fx4: fprintf(f, "CmpGE32Fx4"); return;
-      case Iop_CmpUN32Fx4: fprintf(f, "CmpUN32Fx4"); return;
-      case Iop_CmpEQ64Fx2: fprintf(f, "CmpEQ64Fx2"); return;
-      case Iop_CmpLT64Fx2: fprintf(f, "CmpLT64Fx2"); return;
-      case Iop_CmpLE64Fx2: fprintf(f, "CmpLE64Fx2"); return;
-      case Iop_CmpUN64Fx2: fprintf(f, "CmpUN64Fx2"); return;
-
-      case Iop_CmpEQ32F0x4: fprintf(f, "CmpEQ32F0x4"); return;
-      case Iop_CmpLT32F0x4: fprintf(f, "CmpLT32F0x4"); return;
-      case Iop_CmpLE32F0x4: fprintf(f, "CmpLE32F0x4"); return;
-      case Iop_CmpUN32F0x4: fprintf(f, "CmpUN32F0x4"); return;
-      case Iop_CmpEQ64F0x2: fprintf(f, "CmpEQ64F0x2"); return;
-      case Iop_CmpLT64F0x2: fprintf(f, "CmpLT64F0x2"); return;
-      case Iop_CmpLE64F0x2: fprintf(f, "CmpLE64F0x2"); return;
-      case Iop_CmpUN64F0x2: fprintf(f, "CmpUN64F0x2"); return;
-
-      case Iop_V128to64:   fprintf(f, "V128to64");   return;
-      case Iop_V128HIto64: fprintf(f, "V128HIto64"); return;
-      case Iop_64HLtoV128: fprintf(f, "64HLtoV128"); return;
-
-      case Iop_64UtoV128:   fprintf(f, "64UtoV128"); return;
-      case Iop_SetV128lo64: fprintf(f, "SetV128lo64"); return;
-
-      case Iop_32UtoV128:   fprintf(f, "32UtoV128"); return;
-      case Iop_V128to32:    fprintf(f, "V128to32"); return;
-      case Iop_SetV128lo32: fprintf(f, "SetV128lo32"); return;
-
-      case Iop_Dup8x16: fprintf(f, "Dup8x16"); return;
-      case Iop_Dup16x8: fprintf(f, "Dup16x8"); return;
-      case Iop_Dup32x4: fprintf(f, "Dup32x4"); return;
-
-      case Iop_NotV128:    fprintf(f, "NotV128"); return;
-      case Iop_AndV128:    fprintf(f, "AndV128"); return;
-      case Iop_OrV128:     fprintf(f, "OrV128");  return;
-      case Iop_XorV128:    fprintf(f, "XorV128"); return;
-
-      case Iop_CmpNEZ8x16: fprintf(f, "CmpNEZ8x16"); return;
-      case Iop_CmpNEZ16x8: fprintf(f, "CmpNEZ16x8"); return;
-      case Iop_CmpNEZ32x4: fprintf(f, "CmpNEZ32x4"); return;
-      case Iop_CmpNEZ64x2: fprintf(f, "CmpNEZ64x2"); return;
-
-      case Iop_Add8x16:   fprintf(f, "Add8x16"); return;
-      case Iop_Add16x8:   fprintf(f, "Add16x8"); return;
-      case Iop_Add32x4:   fprintf(f, "Add32x4"); return;
-      case Iop_Add64x2:   fprintf(f, "Add64x2"); return;
-      case Iop_QAdd8Ux16: fprintf(f, "QAdd8Ux16"); return;
-      case Iop_QAdd16Ux8: fprintf(f, "QAdd16Ux8"); return;
-      case Iop_QAdd32Ux4: fprintf(f, "QAdd32Ux4"); return;
-      case Iop_QAdd8Sx16: fprintf(f, "QAdd8Sx16"); return;
-      case Iop_QAdd16Sx8: fprintf(f, "QAdd16Sx8"); return;
-      case Iop_QAdd32Sx4: fprintf(f, "QAdd32Sx4"); return;
-
-      case Iop_Sub8x16:   fprintf(f, "Sub8x16"); return;
-      case Iop_Sub16x8:   fprintf(f, "Sub16x8"); return;
-      case Iop_Sub32x4:   fprintf(f, "Sub32x4"); return;
-      case Iop_Sub64x2:   fprintf(f, "Sub64x2"); return;
-      case Iop_QSub8Ux16: fprintf(f, "QSub8Ux16"); return;
-      case Iop_QSub16Ux8: fprintf(f, "QSub16Ux8"); return;
-      case Iop_QSub32Ux4: fprintf(f, "QSub32Ux4"); return;
-      case Iop_QSub8Sx16: fprintf(f, "QSub8Sx16"); return;
-      case Iop_QSub16Sx8: fprintf(f, "QSub16Sx8"); return;
-      case Iop_QSub32Sx4: fprintf(f, "QSub32Sx4"); return;
-
-      case Iop_Mul16x8:    fprintf(f, "Mul16x8"); return;
-      case Iop_MulHi16Ux8: fprintf(f, "MulHi16Ux8"); return;
-      case Iop_MulHi32Ux4: fprintf(f, "MulHi32Ux4"); return;
-      case Iop_MulHi16Sx8: fprintf(f, "MulHi16Sx8"); return;
-      case Iop_MulHi32Sx4: fprintf(f, "MulHi32Sx4"); return;
-
-      case Iop_MullEven8Ux16: fprintf(f, "MullEven8Ux16"); return;
-      case Iop_MullEven16Ux8: fprintf(f, "MullEven16Ux8"); return;
-      case Iop_MullEven8Sx16: fprintf(f, "MullEven8Sx16"); return;
-      case Iop_MullEven16Sx8: fprintf(f, "MullEven16Sx8"); return;
-
-      case Iop_Avg8Ux16: fprintf(f, "Avg8Ux16"); return;
-      case Iop_Avg16Ux8: fprintf(f, "Avg16Ux8"); return;
-      case Iop_Avg32Ux4: fprintf(f, "Avg32Ux4"); return;
-      case Iop_Avg8Sx16: fprintf(f, "Avg8Sx16"); return;
-      case Iop_Avg16Sx8: fprintf(f, "Avg16Sx8"); return;
-      case Iop_Avg32Sx4: fprintf(f, "Avg32Sx4"); return;
-
-      case Iop_Max8Sx16: fprintf(f, "Max8Sx16"); return;
-      case Iop_Max16Sx8: fprintf(f, "Max16Sx8"); return;
-      case Iop_Max32Sx4: fprintf(f, "Max32Sx4"); return;
-      case Iop_Max8Ux16: fprintf(f, "Max8Ux16"); return;
-      case Iop_Max16Ux8: fprintf(f, "Max16Ux8"); return;
-      case Iop_Max32Ux4: fprintf(f, "Max32Ux4"); return;
-
-      case Iop_Min8Sx16: fprintf(f, "Min8Sx16"); return;
-      case Iop_Min16Sx8: fprintf(f, "Min16Sx8"); return;
-      case Iop_Min32Sx4: fprintf(f, "Min32Sx4"); return;
-      case Iop_Min8Ux16: fprintf(f, "Min8Ux16"); return;
-      case Iop_Min16Ux8: fprintf(f, "Min16Ux8"); return;
-      case Iop_Min32Ux4: fprintf(f, "Min32Ux4"); return;
-
-      case Iop_CmpEQ8x16:  fprintf(f, "CmpEQ8x16"); return;
-      case Iop_CmpEQ16x8:  fprintf(f, "CmpEQ16x8"); return;
-      case Iop_CmpEQ32x4:  fprintf(f, "CmpEQ32x4"); return;
-      case Iop_CmpGT8Sx16: fprintf(f, "CmpGT8Sx16"); return;
-      case Iop_CmpGT16Sx8: fprintf(f, "CmpGT16Sx8"); return;
-      case Iop_CmpGT32Sx4: fprintf(f, "CmpGT32Sx4"); return;
-      case Iop_CmpGT8Ux16: fprintf(f, "CmpGT8Ux16"); return;
-      case Iop_CmpGT16Ux8: fprintf(f, "CmpGT16Ux8"); return;
-      case Iop_CmpGT32Ux4: fprintf(f, "CmpGT32Ux4"); return;
-
-      case Iop_ShlV128: fprintf(f, "ShlV128"); return;
-      case Iop_ShrV128: fprintf(f, "ShrV128"); return;
-
-      case Iop_ShlN8x16: fprintf(f, "ShlN8x16"); return;
-      case Iop_ShlN16x8: fprintf(f, "ShlN16x8"); return;
-      case Iop_ShlN32x4: fprintf(f, "ShlN32x4"); return;
-      case Iop_ShlN64x2: fprintf(f, "ShlN64x2"); return;
-      case Iop_ShrN8x16: fprintf(f, "ShrN8x16"); return;
-      case Iop_ShrN16x8: fprintf(f, "ShrN16x8"); return;
-      case Iop_ShrN32x4: fprintf(f, "ShrN32x4"); return;
-      case Iop_ShrN64x2: fprintf(f, "ShrN64x2"); return;
-      case Iop_SarN8x16: fprintf(f, "SarN8x16"); return;
-      case Iop_SarN16x8: fprintf(f, "SarN16x8"); return;
-      case Iop_SarN32x4: fprintf(f, "SarN32x4"); return;
-
-      case Iop_Shl8x16: fprintf(f, "Shl8x16"); return;
-      case Iop_Shl16x8: fprintf(f, "Shl16x8"); return;
-      case Iop_Shl32x4: fprintf(f, "Shl32x4"); return;
-      case Iop_Shr8x16: fprintf(f, "Shr8x16"); return;
-      case Iop_Shr16x8: fprintf(f, "Shr16x8"); return;
-      case Iop_Shr32x4: fprintf(f, "Shr32x4"); return;
-      case Iop_Sar8x16: fprintf(f, "Sar8x16"); return;
-      case Iop_Sar16x8: fprintf(f, "Sar16x8"); return;
-      case Iop_Sar32x4: fprintf(f, "Sar32x4"); return;
-      case Iop_Rol8x16: fprintf(f, "Rol8x16"); return;
-      case Iop_Rol16x8: fprintf(f, "Rol16x8"); return;
-      case Iop_Rol32x4: fprintf(f, "Rol32x4"); return;
-
-      case Iop_Narrow16x8:   fprintf(f, "Narrow16x8"); return;
-      case Iop_Narrow32x4:   fprintf(f, "Narrow32x4"); return;
-      case Iop_QNarrow16Ux8: fprintf(f, "QNarrow16Ux8"); return;
-      case Iop_QNarrow32Ux4: fprintf(f, "QNarrow32Ux4"); return;
-      case Iop_QNarrow16Sx8: fprintf(f, "QNarrow16Sx8"); return;
-      case Iop_QNarrow32Sx4: fprintf(f, "QNarrow32Sx4"); return;
-
-      case Iop_InterleaveHI8x16: fprintf(f, "InterleaveHI8x16"); return;
-      case Iop_InterleaveHI16x8: fprintf(f, "InterleaveHI16x8"); return;
-      case Iop_InterleaveHI32x4: fprintf(f, "InterleaveHI32x4"); return;
-      case Iop_InterleaveHI64x2: fprintf(f, "InterleaveHI64x2"); return;
-      case Iop_InterleaveLO8x16: fprintf(f, "InterleaveLO8x16"); return;
-      case Iop_InterleaveLO16x8: fprintf(f, "InterleaveLO16x8"); return;
-      case Iop_InterleaveLO32x4: fprintf(f, "InterleaveLO32x4"); return;
-      case Iop_InterleaveLO64x2: fprintf(f, "InterleaveLO64x2"); return;
-
-      case Iop_Perm8x16: fprintf(f, "Perm8x16"); return;
+#define do_op(name) case Iop_ ## name: fprintf(f, #name); return;
+	 foreach_op_unsized(do_op)
+#undef do_op
 
       default: vpanic("ppIROp(1)");
    }
@@ -744,6 +935,35 @@ void ppIROp ( IROp op, FILE* f )
       case 3: fprintf(f, "%s",str); fprintf(f, "64"); break;
       default: vpanic("ppIROp(2)");
    }
+}
+
+static bool parseIROp(IROp *out, const char *str, const char **suffix)
+{
+#define __do_op2(name, sz)			\
+  if (parseThisString( # sz , str, suffix)) {	\
+    *out = Iop_ ## name ## sz ;			\
+    return true;				\
+  }
+#define do_op(name)				\
+  if (parseThisString( #name, str, &str)) {	\
+    __do_op2(name, 8);				\
+    __do_op2(name, 16);				\
+    __do_op2(name, 32);				\
+    __do_op2(name, 64);				\
+  }
+  foreach_op_sized(do_op)
+#undef do_op
+#undef __do_op2
+
+#define do_op(name)					\
+    if (parseThisString( #name, str, suffix ) ) {	\
+      *out = Iop_ ## name ;				\
+      return true;					\
+    }
+    foreach_op_unsized(do_op)
+#undef do_op
+
+  return false;
 }
 
 static const char *irOpSimpleChar(IROp op)
@@ -768,6 +988,354 @@ static const char *irOpSimpleChar(IROp op)
   }
 }
 
+static bool parseIROpSimple(IROp *out, const char *str, const char **suffix)
+{
+  if (parseThisChar('+', str, suffix)) {
+    *out = Iop_Add64;
+    return true;
+  }
+  if (parseThisString("&&", str, suffix)) {
+    *out = Iop_And1;
+    return true;
+  }
+  if (parseThisString("||", str, suffix)) {
+    *out = Iop_Or1;
+    return true;
+  }
+  if (parseThisChar('&', str, suffix)) {
+    *out = Iop_And64;
+    return true;
+  }
+  if (parseThisChar('|', str, suffix)) {
+    *out = Iop_Or64;
+    return true;
+  }
+  if (parseThisString("==", str, suffix)) {
+    *out = Iop_CmpEQ64;
+    return true;
+  }
+  if (parseThisChar('!', str, suffix)) {
+    *out = Iop_Not1;
+    return true;
+  }
+  return false;
+}
+
+static bool parseIRExprBinder(IRExpr **res, const char *str, const char **suffix)
+{
+  int key;
+  if (!parseThisChar('B', str, &str) ||
+      !parseDecimalInt(&key, str, suffix))
+    return false;
+  *res = IRExpr_Binder(key);
+  return true;
+}
+
+#define foreach_reg(iter)			\
+  iter(RAX)					\
+  iter(RBX)					\
+  iter(RCX)					\
+  iter(RDX)					\
+  iter(RSP)					\
+  iter(RBP)					\
+  iter(RSI)					\
+  iter(RDI)					\
+  iter(R8)					\
+  iter(R9)					\
+  iter(R10)					\
+  iter(R11)					\
+  iter(R12)					\
+  iter(R13)					\
+  iter(R14)					\
+  iter(R15)					\
+  iter(RIP)
+
+static bool parseIRExprGet(IRExpr **res, const char *str, const char **suffix)
+{
+  int offset;
+  int tid;
+  IRType ty;
+
+#define do_reg(name)				\
+  if (parseThisString( #name ":", str, &str)) {	\
+    offset = OFFSET_amd64_ ## name;		\
+    goto canned_register;			\
+  }
+  foreach_reg(do_reg);
+#undef do_reg
+  if (!parseThisString("GET:", str, &str) ||
+      !parseIRType(&ty, str, &str) ||
+      !parseThisChar('(', str, &str) ||
+      !parseDecimalInt(&offset, str, &str) ||
+      !parseThisString(", ", str, &str) ||
+      !parseDecimalInt(&tid, str, &str) ||
+      !parseThisChar(')', str, suffix))
+    return false;
+  *res = IRExpr_Get(offset, ty, tid);
+  return true;
+
+ canned_register:
+  if (!parseDecimalInt(&tid, str, suffix))
+    return false;
+  *res = IRExpr_Get(offset, Ity_I64, tid);
+  return true;
+}
+
+static bool parseIRExprGetI(IRExpr **res, const char *str, const char **suffix)
+{
+  IRRegArray *arr;
+  IRExpr *ix;
+  int bias;
+  int tid;
+
+  if (!parseThisString("GETI", str, &str) ||
+      !parseIRRegArray(&arr, str, &str) ||
+      !parseThisChar('[', str, &str) ||
+      !parseIRExpr(&ix, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseDecimalInt(&bias, str, &str) ||
+      !parseThisString("](", str, &str) ||
+      !parseDecimalInt(&tid, str, &str) ||
+      !parseThisChar(')', str, suffix))
+    return false;
+  *res = IRExpr_GetI(arr, ix, bias, tid);
+  return true;
+}
+
+static bool parseIRExprRdTmp(IRExpr **res, const char *str, const char **suffix)
+{
+  IRTemp tmp;
+  int tid;
+  if (!parseIRTemp(&tmp, str, &str) ||
+      !parseThisChar(':', str, &str) ||
+      !parseDecimalInt(&tid, str, suffix))
+    return false;
+  *res = IRExpr_RdTmp(tmp, tid);
+  return true;
+}
+
+static bool parseIRExprQop(IRExpr **res, const char *str, const char **suffix)
+{
+  IROp op;
+  IRExpr *arg1, *arg2, *arg3, *arg4;
+  if (!parseIROp(&op, str, &str) ||
+      !parseThisChar('(', str, &str) ||
+      !parseIRExpr(&arg1, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseIRExpr(&arg2, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseIRExpr(&arg3, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseIRExpr(&arg4, str, &str) ||
+      !parseThisChar(')', str, &str))
+    return false;
+  *res = IRExpr_Qop(op, arg1, arg2, arg3, arg4);
+  return true;
+}
+
+static bool parseIRExprTriop(IRExpr **res, const char *str, const char **suffix)
+{
+  IROp op;
+  IRExpr *arg1, *arg2, *arg3;
+  if (!parseIROp(&op, str, &str) ||
+      !parseThisChar('(', str, &str) ||
+      !parseIRExpr(&arg1, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseIRExpr(&arg2, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseIRExpr(&arg3, str, &str) ||
+      !parseThisChar(')', str, &str))
+    return false;
+  *res = IRExpr_Triop(op, arg1, arg2, arg3);
+  return true;
+}
+
+static bool parseIRExprBinop(IRExpr **res, const char *str, const char **suffix)
+{
+  IRExpr *arg1, *arg2;
+  IROp op;
+
+  if (parseThisChar('(', str, &str)) {
+    if (!parseIRExpr(&arg1, str, &str) ||
+	!parseThisChar(' ', str, &str) ||
+	!parseIROpSimple(&op, str, &str) ||
+	!parseThisChar(' ', str, &str) ||
+	!parseIRExpr(&arg2, str, &str) ||
+	!parseThisChar(')', str, suffix))
+      return false;
+  } else {
+    if (!parseIROp(&op, str, &str) ||
+	!parseThisChar('(', str, &str) ||
+	!parseIRExpr(&arg1, str, &str) ||
+	!parseThisChar(',', str, &str) ||
+	!parseIRExpr(&arg2, str, &str) ||
+	!parseThisChar(')', str, suffix))
+      return false;
+  }
+  *res = IRExpr_Binop(op, arg1, arg2);
+  return true;
+}
+
+static bool parseIRExprUnop(IRExpr **res, const char *str, const char **suffix)
+{
+  IROp op;
+  IRExpr *arg;
+
+  if (!parseIROpSimple(&op, str, &str) &&
+      !parseIROp(&op, str, &str))
+    return false;
+  if (!parseThisChar('(', str, &str) ||
+      !parseIRExpr(&arg, str, &str) ||
+      !parseThisChar(')', str, suffix))
+    return false;
+  *res = IRExpr_Unop(op, arg);
+  return true;
+}
+
+static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix)
+{
+  IRType ty;
+  IRExpr *addr;
+  if (!parseThisString("LDle:", str, &str) ||
+      !parseIRType(&ty, str, &str) ||
+      !parseThisChar('(', str, &str) ||
+      !parseIRExpr(&addr, str, &str) ||
+      !parseThisChar(')', str, suffix))
+    return false;
+  *res = IRExpr_Load(False, Iend_LE, ty, addr);
+  return true;
+}
+
+static bool parseIRExprConst(IRExpr **res, const char *str, const char **suffix)
+{
+  IRConst *c;
+  if (!parseIRConst(&c, str, suffix))
+    return false;
+  *res = IRExpr_Const(c);
+  return true;
+}
+
+IRExpr **alloc_irexpr_array(unsigned nr);
+static bool parseIRExprCCall(IRExpr **res, const char *str, const char **suffix)
+{
+  IRCallee *cee;
+  std::vector<IRExpr *> args;
+  IRExpr *arg;
+  IRType ty;
+  IRExpr **argsA;
+
+  if (!parseIRCallee(&cee, str, &str) ||
+      !parseThisChar('(', str, &str))
+    return false;
+  while (1) {
+    if (!parseIRExpr(&arg, str, &str))
+      return false;
+    args.push_back(arg);
+    if (parseThisString("):", str, &str))
+      break;
+    if (!parseThisChar(',', str, &str))
+      return false;
+  }
+  if (!parseIRType(&ty, str, suffix))
+    return false;
+  argsA = alloc_irexpr_array(args.size() + 1);
+  for (unsigned i = 0; i < args.size(); i++)
+    argsA[i] = args[i];
+  argsA[args.size()] = NULL;
+  *res = IRExpr_CCall(cee, ty, argsA);
+  return true;
+}
+
+static bool parseIRExprMux0X(IRExpr **res, const char *str, const char **suffix)
+{
+  IRExpr *cond, *expr0, *exprX;
+  if (!parseThisString("Mux0X:", str, &str) ||
+      !parseIRExpr(&cond, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseIRExpr(&expr0, str, &str) ||
+      !parseThisChar(',', str, &str) ||
+      !parseIRExpr(&exprX, str, &str) ||
+      !parseThisChar(')', str, suffix))
+    return false;
+  *res = IRExpr_Mux0X(cond, expr0, exprX);
+  return true;
+}
+
+static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **suffix)
+{
+  IROp op = (IROp)-1;
+  IROp op2;
+  std::vector<IRExpr *> args;
+  IRExpr *arg;
+
+  if (parseThisChar('(', str, &str)) {
+    while (1) {
+      if (!parseIRExpr(&arg, str, &str))
+	return false;
+      args.push_back(arg);
+      if (parseThisChar(')', str, &str))
+	break;
+      if (!parseThisChar(' ', str, &str))
+	return false;
+      if (!parseIROpSimple(&op2, str, &str))
+	return false;
+      if (op != (IROp)-1 && op != op2)
+	return false;
+      op = op2;
+      if (!parseThisChar(' ', str, &str))
+	return false;
+    }
+  } else {
+    if (!parseThisString("Assoc(", str, &str) ||
+	!parseIROp(&op, str, &str) ||
+	!parseThisChar(':', str, &str))
+      return false;
+    while (1) {
+      if (!parseIRExpr(&arg, str, &str))
+	return false;
+      args.push_back(arg);
+      if (parseThisChar(')', str, &str))
+	break;
+      if (!parseThisString(", ", str, &str))
+	return false;
+    }
+  }
+  IRExpr* e          = new IRExpr();
+  e->tag             = Iex_Associative;
+  e->Iex.Associative.op = op;
+  e->Iex.Associative.nr_arguments_allocated = args.size();
+  e->Iex.Associative.nr_arguments = args.size();
+  static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+  e->Iex.Associative.contents =
+    (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->Iex.Associative.contents[0]) * args.size(), &__las);
+  for (unsigned i = 0; i < args.size(); i++)
+    e->Iex.Associative.contents[i] = args[i];
+  *res = e;
+  return true;
+}
+
+bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
+{
+#define do_form(name)				\
+  if (parseIRExpr ## name (out, str, suffix))	\
+    return true;
+  do_form(Binder);
+  do_form(Get);
+  do_form(GetI);
+  do_form(RdTmp);
+  do_form(Qop);
+  do_form(Triop);
+  do_form(Binop);
+  do_form(Unop);
+  do_form(Load);
+  do_form(Const);
+  do_form(CCall);
+  do_form(Mux0X);
+  do_form(Associative);
+#undef do_form
+  return false;
+}
+
 void ppIRExpr ( IRExpr* e, FILE *f )
 {
   Int i;
@@ -780,23 +1348,7 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       if (e->Iex.Get.ty == Ity_I64) {
 	switch (e->Iex.Get.offset) {
 #define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d", e->Iex.Get.tid); return;
-	  do_reg(RAX);
-	  do_reg(RBX);
-	  do_reg(RCX);
-	  do_reg(RDX);
-	  do_reg(RSP);
-	  do_reg(RBP);
-	  do_reg(RSI);
-	  do_reg(RDI);
-	  do_reg(R8);
-	  do_reg(R9);
-	  do_reg(R10);
-	  do_reg(R11);
-	  do_reg(R12);
-	  do_reg(R13);
-	  do_reg(R14);
-	  do_reg(R15);
-	  do_reg(RIP);
+	  foreach_reg(do_reg)
 #undef do_reg
 	}
       }
@@ -1222,7 +1774,6 @@ IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr )
    ce->mcx_mask = 0;
    vassert(regparms >= 0 && regparms <= 3);
    vassert(name != NULL);
-   vassert(addr != 0);
    return ce;
 }
 
