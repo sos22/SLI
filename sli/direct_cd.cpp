@@ -40,8 +40,7 @@ public:
 	}
 };
 
-class CrashReason : public GarbageCollected<CrashReason, &ir_heap>,
-		    public PrettyPrintable {
+class CrashReason : public GarbageCollected<CrashReason, &ir_heap> {
 public:
 	/* A crash reason represents a summary of information which is
 	   believed to be relevant in explaining a crash.  It consists
@@ -56,11 +55,6 @@ public:
 	{}
 
 	void visit(HeapVisitor &hv) { hv(sm); }
-	void prettyPrint(FILE *f) const
-	{
-		fprintf(f, "%s: ", rip.name());
-		sm->prettyPrint(f);
-	}
 
 	NAMED_CLASS
 };

@@ -2180,30 +2180,40 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *or
 	abort();
 }
 
-void
-printStateMachine(const StateMachine *sm, FILE *f)
+static void
+buildStateLabelTable(const StateMachine *sm, std::map<const StateMachine *, int> &table)
 {
-	std::set<const StateMachine *> emitted;
 	std::vector<const StateMachine *> toEmit;
+	int next_label;
 
 	toEmit.push_back(sm);
+	next_label = 1;
 	while (!toEmit.empty()) {
 		sm = toEmit.back();
 		toEmit.pop_back();
-		if (emitted.count(sm))
+		if (!sm || table.count(sm))
 			continue;
-		emitted.insert(sm);
-		fprintf(f, "%p: ", sm);
-		sm->prettyPrint(f);
+		table[sm] = next_label;
+		next_label++;
+		if (sm->target0())
+			toEmit.push_back(sm->target0()->target);
+		if (sm->target1())
+			toEmit.push_back(sm->target1()->target);
+	}
+}
+
+void
+printStateMachine(const StateMachine *sm, FILE *f)
+{
+	std::map<const StateMachine *, int> labels;
+
+	buildStateLabelTable(sm, labels);
+	for (std::map<const StateMachine *, int>::iterator it = labels.begin();
+	     it != labels.end();
+	     it++) {
+		fprintf(f, "l%d: ", it->second);
+		it->first->prettyPrint(f, labels);
 		fprintf(f, "\n");
-		if (const StateMachineBifurcate *smb =
-		    dynamic_cast<const StateMachineBifurcate *>(sm)) {
-			toEmit.push_back(smb->trueTarget->target);
-			toEmit.push_back(smb->falseTarget->target);
-		} else if (const StateMachineProxy *smp =
-			   dynamic_cast<const StateMachineProxy *>(sm)) {
-			toEmit.push_back(smp->target->target);
-		}
 	}
 }
 

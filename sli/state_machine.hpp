@@ -1,9 +1,11 @@
 #ifndef STATEMACHINE_HPP__
 #define STATEMACHINE_HPP__
 
+#include <map>
 #include <set>
 
 class StateMachine;
+class StateMachineEdge;
 class StateMachineSideEffect;
 class Oracle;
 
@@ -78,7 +80,7 @@ public:
 	}
 };
 
-class StateMachine : public GarbageCollected<StateMachine, &ir_heap>, public PrettyPrintable {
+class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 	mutable unsigned long __hashval;
 	mutable bool have_hash;
 protected:
@@ -99,7 +101,12 @@ public:
 	virtual StateMachine *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
 	virtual bool canCrash() = 0;
 	virtual int complexity() = 0;
+	virtual StateMachineEdge *target0() = 0;
+	virtual const StateMachineEdge *target0() const = 0;
+	virtual StateMachineEdge *target1() = 0;
+	virtual const StateMachineEdge *target1() const = 0;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
+	virtual void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const = 0;
 	NAMED_CLASS
 };
 
@@ -117,7 +124,7 @@ public:
 	NAMED_CLASS
 };
 
-class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap>, public PrettyPrintable {
+class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 	mutable bool have_hash;
 	mutable unsigned long _hashval;
 public:
@@ -137,7 +144,7 @@ public:
 		sideEffects = n;
 	}
 
-	void prettyPrint(FILE *f, const char *seperator) const {
+	void prettyPrint(FILE *f, const char *seperator, std::map<const StateMachine *, int> &labels) const {
 		if (sideEffects.size() != 0) {
 			fprintf(f, "{");
 			bool b = true;
@@ -151,9 +158,8 @@ public:
 			}
 			fprintf(f, "} ");
 		}
-		fprintf(f, "%p", target);
+		fprintf(f, "l%d", labels[target]);
 	}
-	void prettyPrint(FILE *f) const { prettyPrint(f, "; "); }
 	void visit(HeapVisitor &hv) {
 		hv(target);
 		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
@@ -192,6 +198,7 @@ public:
 
 class StateMachineTerminal : public StateMachine {
 protected:
+	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(unsigned long rip) : StateMachine(rip) {}
 public:
 	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
@@ -200,18 +207,23 @@ public:
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 	StateMachine *selectSingleCrashingPath() { return this; }
 	int complexity() { return 1; }
+	StateMachineEdge *target0() { return NULL; }
+	const StateMachineEdge *target0() const { return NULL; }
+	StateMachineEdge *target1() { return NULL; }
+	const StateMachineEdge *target1() const { return NULL; }
+	void prettyPrint(FILE *f, std::map<const StateMachine *, int> &) const { prettyPrint(f); }
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
 	StateMachineUnreached() : StateMachineTerminal(0) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x72; }
+	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
 public:
 	static StateMachineUnreached *get() {
 		if (!_this) _this = new StateMachineUnreached();
 		return _this;
 	}
-	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
 	bool canCrash() { return false; }
 };
 
@@ -259,10 +271,10 @@ public:
 		  target(t)
 	{
 	}
-	void prettyPrint(FILE *f) const
+	void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const
 	{
 		fprintf(f, "{%lx:", origin);
-		target->prettyPrint(f, "\n  ");
+		target->prettyPrint(f, "\n  ", labels);
 		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
@@ -294,6 +306,10 @@ public:
 	}
 	bool canCrash() { return target->canCrash(); }
 	int complexity() { return target->complexity(); }
+	StateMachineEdge *target0() { return target; }
+	const StateMachineEdge *target0() const { return target; }
+	StateMachineEdge *target1() { return NULL; }
+	const StateMachineEdge *target1() const { return NULL; }
 };
 
 class StateMachineBifurcate : public StateMachine {
@@ -330,13 +346,13 @@ public:
 	StateMachineEdge *trueTarget;
 	StateMachineEdge *falseTarget;
 
-	void prettyPrint(FILE *f) const {
+	void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const {
 		fprintf(f, "%lx: if (", origin);
 		ppIRExpr(condition, f);
 		fprintf(f, ")\n  then {\n\t");
-		trueTarget->prettyPrint(f, "\n\t");
+		trueTarget->prettyPrint(f, "\n\t", labels);
 		fprintf(f, "}\n  else {\n\t");
-		falseTarget->prettyPrint(f, "\n\t");
+		falseTarget->prettyPrint(f, "\n\t", labels);
 		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
@@ -371,6 +387,10 @@ public:
 	}
 	bool canCrash() { return trueTarget->canCrash() || falseTarget->canCrash(); }
 	int complexity() { return trueTarget->complexity() + falseTarget->complexity() + exprComplexity(condition) + 50; }
+	StateMachineEdge *target0() { return falseTarget; }
+	const StateMachineEdge *target0() const { return falseTarget; }
+	StateMachineEdge *target1() { return trueTarget; }
+	const StateMachineEdge *target1() const { return trueTarget; }
 };
 
 /* A node in the state machine representing a bit of code which we
