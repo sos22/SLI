@@ -1939,6 +1939,7 @@ now(void)
 	return tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
+#if 0
 static double replayTime;
 class __foo {
 public:
@@ -1947,13 +1948,14 @@ public:
 	}
 };
 static __foo ___foo;
+#endif
 
 ReplayEngineTimer::ReplayEngineTimer(void)
 {
-	replayTime -= now();
+	//	replayTime -= now();
 }
 
 ReplayEngineTimer::~ReplayEngineTimer(void)
 {
-	replayTime += now();
+	//	replayTime += now();
 }
