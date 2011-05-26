@@ -44,13 +44,13 @@
    without prior written permission.
 */
 #include <ctype.h>
-#include <errno.h>
 #include <stdarg.h>
 
 #include <vector>
 
 #include "libvex_basictypes.h"
 #include "libvex_ir.h"
+#include "libvex_parse.h"
 #include "libvex.h"
 
 #include "libvex_guest_offsets.h"
@@ -211,45 +211,6 @@ _IRStmt::visit(HeapVisitor &visit)
 /*---------------------------------------------------------------*/
 /*--- Printing the IR                                         ---*/
 /*---------------------------------------------------------------*/
-
-static bool parseThisChar(char c, const char *str, const char **suffix)
-{
-  if (str[0] == c) {
-    *suffix = str + 1;
-    return true;
-  } else {
-    return false;
-  }
-}
-
-static bool parseThisString(const char *pattern,
-			    const char *str,
-			    const char **suffix)
-{
-  size_t l = strlen(pattern);
-  if (strlen(str) < l || memcmp(str, pattern, l))
-    return false;
-  *suffix = str + l;
-  return true;
-}
-
-static bool parseDecimalInt(int *out, const char *str, const char **suffix)
-{
-  long res;
-  errno = 0;
-  res = strtol(str, (char **)suffix, 10);
-  *out = res;
-  if (errno != 0 || *out != res || *suffix == str)
-    return false;
-  return true;
-}
-
-static bool parseHexUlong(unsigned long *out, const char *str, const char **suffix)
-{
-  errno = 0;
-  *out = strtoul(str, (char **)suffix, 16);
-  return errno == 0 && *suffix != str;
-}
 
 void ppIRType ( IRType ty, FILE *f )
 {

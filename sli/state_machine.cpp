@@ -5,6 +5,7 @@
 #include "oracle.hpp"
 
 #include "libvex_guest_offsets.h"
+#include "libvex_parse.h"
 
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
@@ -2181,7 +2182,8 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *or
 }
 
 static void
-buildStateLabelTable(const StateMachine *sm, std::map<const StateMachine *, int> &table)
+buildStateLabelTable(const StateMachine *sm, std::map<const StateMachine *, int> &table,
+		     std::vector<const StateMachine *> &states)
 {
 	std::vector<const StateMachine *> toEmit;
 	int next_label;
@@ -2193,6 +2195,7 @@ buildStateLabelTable(const StateMachine *sm, std::map<const StateMachine *, int>
 		toEmit.pop_back();
 		if (!sm || table.count(sm))
 			continue;
+		states.push_back(sm);
 		table[sm] = next_label;
 		next_label++;
 		if (sm->target0())
@@ -2206,13 +2209,14 @@ void
 printStateMachine(const StateMachine *sm, FILE *f)
 {
 	std::map<const StateMachine *, int> labels;
+	std::vector<const StateMachine *> states;
 
-	buildStateLabelTable(sm, labels);
-	for (std::map<const StateMachine *, int>::iterator it = labels.begin();
-	     it != labels.end();
+	buildStateLabelTable(sm, labels, states);
+	for (std::vector<const StateMachine *>::iterator it = states.begin();
+	     it != states.end();
 	     it++) {
-		fprintf(f, "l%d: ", it->second);
-		it->first->prettyPrint(f, labels);
+		fprintf(f, "l%d: ", labels[*it]);
+		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
 	}
 }
@@ -2348,3 +2352,183 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 	}
 }
 
+static bool
+parseStateMachineSideEffect(StateMachineSideEffect **out,
+			    const char *str,
+			    const char **suffix)
+{
+	const char *str2;
+	if (parseThisString("<unreached>", str, suffix)) {
+		*out = StateMachineSideEffectUnreached::get();
+		return true;
+	}
+	IRExpr *addr;
+	IRExpr *data;
+	unsigned long rip;
+	if (parseThisString("*(", str, &str2) &&
+	    parseIRExpr(&addr, str2, &str2) &&
+	    parseThisString(") <- ", str2, &str2) &&
+	    parseIRExpr(&data, str2, &str2) &&
+	    parseThisString(" @ ", str2, &str2) &&
+	    parseHexUlong(&rip, str2, suffix)) {
+		*out = new StateMachineSideEffectStore(addr, data, rip);
+		return true;
+	}
+	int key;
+	if (parseThisChar('B', str, &str2) &&
+	    parseDecimalInt(&key, str2, &str2) &&
+	    parseThisString(" <- *(", str2, &str2) &&
+	    parseIRExpr(&addr, str2, &str2) &&
+	    parseThisString(")@", str2, &str2) &&
+	    parseHexUlong(&rip, str2, suffix)) {
+		*out = new StateMachineSideEffectLoad(key, addr, rip);
+		return true;
+	}
+	if (parseThisChar('B', str, &str2) &&
+	    parseDecimalInt(&key, str2, &str2) &&
+	    parseThisString(" = (", str2, &str2) &&
+	    parseIRExpr(&data, str2, &str2) &&
+	    parseThisChar(')', str2, suffix)) {
+		*out = new StateMachineSideEffectCopy(key, data);
+		return true;
+	}
+	return false;
+}
+
+/* State machine parser.  We cheat a little bit and stash the state
+ * labels in the target field of state machine edges until we have
+ * find the state we're actually supposed to point at. */
+static bool
+parseStateMachineEdge(StateMachineEdge **out,
+		      const char *sep,
+		      const char *str,
+		      const char **suffix)
+{
+	int targetLabel;
+	std::vector<StateMachineSideEffect *> sideEffects;
+	if (parseThisChar('{', str, &str)) {
+		while (1) {
+			StateMachineSideEffect *se;
+			if (!parseStateMachineSideEffect(&se, str, &str))
+				return false;
+			sideEffects.push_back(se);
+			if (parseThisString(sep, str, &str))
+				continue;
+			if (!parseThisString("} ", str, &str))
+				return false;
+			break;
+		}
+	}
+	if (!parseThisChar('l', str, &str) ||
+	    !parseDecimalInt(&targetLabel, str, suffix))
+		return false;
+	*out = new StateMachineEdge((StateMachine *)targetLabel);
+	(*out)->sideEffects = sideEffects;
+	return true;
+}
+
+static bool
+parseStateMachineState(StateMachine **out,
+		       const char *str,
+		       const char **suffix)
+{
+	if (parseThisString("<unreached>", str, suffix)) {
+		*out = StateMachineUnreached::get();
+		return true;
+	}
+	if (parseThisString("<crash>", str, suffix)) {
+		*out = StateMachineCrash::get();
+		return true;
+	}
+	if (parseThisString("<survive>", str, suffix)) {
+		*out = StateMachineNoCrash::get();
+		return true;
+	}
+	unsigned long origin;
+	IRExpr *target;
+	const char *str2;
+	if (parseThisChar('<', str, &str2) &&
+	    parseHexUlong(&origin, str2, &str2) &&
+	    parseIRExpr(&target, str2, &str2) &&
+	    parseThisChar('>', str2, suffix)) {
+		*out = new StateMachineStub(origin, target);
+		return true;
+	}
+	StateMachineEdge *target1;
+	if (parseThisChar('{', str, &str2) &&
+	    parseHexUlong(&origin, str2, &str2) &&
+	    parseThisChar(':', str2, &str2) &&
+	    parseStateMachineEdge(&target1, "\n  ", str2, &str2) &&
+	    parseThisChar('}', str2, suffix)) {
+		*out = new StateMachineProxy(origin, target1);
+		return true;
+	}
+	IRExpr *condition;
+	StateMachineEdge *target2;
+	if (parseHexUlong(&origin, str, &str2) &&
+	    parseThisString(": if (", str2, &str2) &&
+	    parseIRExpr(&condition, str2, &str2) &&
+	    parseThisString(")\n  then {\n\t", str2, &str2) &&
+	    parseStateMachineEdge(&target1, "\n\t", str2, &str2) &&
+	    parseThisString("}\n  else {\n\t", str2, &str2) &&
+	    parseStateMachineEdge(&target2, "\n\t", str2, &str2) &&
+	    parseThisChar('}', str2, suffix)) {
+		*out = new StateMachineBifurcate(origin, condition, target1, target2);
+		return true;
+	}
+	return false;
+}
+
+static bool
+parseOneState(std::map<int, StateMachine *> &out,
+	      const char *str,
+	      const char **suffix)
+{
+	int label;
+	StateMachine *res;
+
+	if (!parseThisChar('l', str, &str) ||
+	    !parseDecimalInt(&label, str, &str) ||
+	    out.count(label) ||
+	    !parseThisString(": ", str, &str) ||
+	    !parseStateMachineState(&res, str, &str) ||
+	    !parseThisChar('\n', str, &str))
+		return false;
+	out[label] = res;
+	*suffix = str;
+	return true;
+}
+
+bool
+parseStateMachine(StateMachine **out, const char *str, const char **suffix)
+{
+	std::map<int, StateMachine *> labelToState;
+
+	while (*str) {
+		if (!parseOneState(labelToState, str, &str))
+			return false;
+	}
+	if (!labelToState.count(1))
+		return false;
+	for (std::map<int, StateMachine *>::iterator it = labelToState.begin();
+	     it != labelToState.end();
+	     it++) {
+		if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(it->second)) {
+			smp->target->target =
+				labelToState[(int)(unsigned long)smp->target->target];
+			assert(smp->target->target);
+		} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(it->second)) {
+			smb->trueTarget->target =
+				labelToState[(int)(unsigned long)smb->trueTarget->target];
+			smb->falseTarget->target =
+				labelToState[(int)(unsigned long)smb->falseTarget->target];
+			assert(smb->trueTarget->target);
+			assert(smb->falseTarget->target);
+		} else {
+			assert(dynamic_cast<StateMachineTerminal *>(it->second));
+		}
+	}
+	*suffix = str;
+	*out = labelToState[1];
+	return true;
+}

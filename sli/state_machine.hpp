@@ -528,5 +528,6 @@ bool stateMachinesBisimilar(StateMachine *a, StateMachine *b);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
+bool parseStateMachine(StateMachine **out, const char *str, const char **suffix);
 
 #endif /* !STATEMACHINE_HPP__ */
