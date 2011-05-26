@@ -103,3 +103,15 @@ readfile(int fd)
 	buf[buf_used] = 0;
 	return buf;
 }
+
+IRExpr *
+readIRExpr(int fd)
+{
+	char *buf = readfile(fd);
+	IRExpr *r;
+	const char *succ;
+	if (!parseIRExpr(&r, buf, &succ) || *succ)
+		errx(1, "cannot parse %s as IRExpr", buf);
+	free(buf);
+	return r;
+}
