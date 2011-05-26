@@ -2,7 +2,6 @@
    dump, rather than needing the full trace. */
 #include <err.h>
 #include <limits.h>
-#include <time.h>
 
 #include <algorithm>
 #include <queue>
@@ -15,8 +14,7 @@
 #include "pickle.hpp"
 #include "state_machine.hpp"
 #include "oracle.hpp"
-
-static void assertUnoptimisable(IRExpr *e, const AllowableOptimisations &);
+#include "simplify_irexpr.hpp"
 
 /* A VEX RIP combines an ordinary machine code RIP with an offset into
    a VEX IRSB.  An idx of 0 corresponds to just before the start of
@@ -1076,13 +1074,6 @@ breakCycles(CFGNode<t> *cfg)
 		clean.clear();
 	}
 }
-static void
-assertUnoptimisable(IRExpr *e, const AllowableOptimisations &opt)
-{
-	bool progress = false;
-	optimiseIRExpr(e, opt, &progress);
-	assert(!progress);
-}
 
 class StateMachineWalker {
 	void doit(StateMachine *s, std::set<StateMachine *> &visited);
@@ -2124,7 +2115,7 @@ static bool
 expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binders, IRExpr **assumption,
 		 IRExpr **accumulatedAssumptions)
 {
-	exp = optimiseIRExpr(
+	exp = simplifyIRExpr(
 		specialiseIRExpr(exp, binders),
 		AllowableOptimisations::defaultOptimisations);
 
@@ -2132,7 +2123,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 	   if that produces a contradiction.  If it does then we know
 	   for sure that the new expression is false. */
 	IRExpr *e =
-		optimiseIRExpr(
+		simplifyIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
 				*assumption,
@@ -2147,7 +2138,6 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 		   earlier.  Consider that a lucky break and simplify
 		   it now. */
 		if (e->Iex.Const.con->Ico.U1) {
-			assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 			*assumption = e;
 			return true;
 		} else {
@@ -2160,7 +2150,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 	   this would be redundant with the previous version, but we
 	   don't, so it isn't. */
 	IRExpr *e2 =
-		optimiseIRExpr(
+		simplifyIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
 				*assumption,
@@ -2199,11 +2189,10 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 #endif
 
 	if (res == 0) {
-		assertUnoptimisable(e, AllowableOptimisations::defaultOptimisations);
 		*assumption = e;
 		if (accumulatedAssumptions && *accumulatedAssumptions)
 			*accumulatedAssumptions =
-				optimiseIRExpr(
+				simplifyIRExpr(
 					IRExpr_Binop(
 						Iop_And1,
 						*accumulatedAssumptions,
@@ -2211,11 +2200,10 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 					AllowableOptimisations::defaultOptimisations);
 		return true;
 	} else {
-		assertUnoptimisable(e2, AllowableOptimisations::defaultOptimisations);
 		*assumption = e2;
 		if (accumulatedAssumptions && *accumulatedAssumptions)
 			*accumulatedAssumptions =
-				optimiseIRExpr(
+				simplifyIRExpr(
 					IRExpr_Binop(
 						Iop_And1,
 						*accumulatedAssumptions,
@@ -2372,251 +2360,16 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 						Iop_Not1,
 						ctxt.pathConstraint));
 			ctxt.pathConstraint =
-				optimiseIRExpr(
+				simplifyIRExpr(
 					IRExpr_Unop(Iop_Not1, ctxt.pathConstraint),
 					AllowableOptimisations::defaultOptimisations);
-			newConstraint = optimiseIRExpr(newConstraint,
+			newConstraint = simplifyIRExpr(newConstraint,
 						       AllowableOptimisations::defaultOptimisations);
 			currentConstraint = newConstraint;
 		}
 	} while (chooser.advance());
 
 	return currentConstraint;
-}
-
-static IROp
-random_irop(void)
-{
-	return (IROp)((unsigned long)Iop_Add8 + random() % (Iop_Perm8x16 - Iop_Add8 + 1));
-}
-
-static IRType
-random_irtype(void)
-{
-	return (IRType)((unsigned long)Ity_I8 + random() % 7);
-}
-
-static IRConst *
-random_irconst(void)
-{
-	switch (random_irtype()) {
-	case Ity_I8:
-		return IRConst_U8(random() % 256);
-	case Ity_I16:
-		return IRConst_U16(random() % 65536);
-	case Ity_I32:
-		return IRConst_U32(random());
-	case Ity_I64:
-		return IRConst_U64(random());
-	case Ity_F32:
-	case Ity_I128:
-		return random_irconst();
-	case Ity_F64:
-		return IRConst_F64(random() / (double)random());
-	case Ity_V128:
-		return IRConst_V128(random());
-	default:
-		abort();
-	}
-}
-
-static IRRegArray *
-random_irregarray(void)
-{
-	return mkIRRegArray( (random() % 10) * 8,
-			     random_irtype(),
-			     random() % 16 );
-}
-
-static IRExpr *
-random_irexpr(unsigned depth)
-{
-	if (!depth)
-		return IRExpr_Const(random_irconst());
-	switch (random() % 8) {
-	case 0:
-		return IRExpr_Binder(random() % 30);
-	case 1:
-		return IRExpr_Get((random() % 40) * 8,
-				  random_irtype(),
-				  73);
-	case 2:
-		return IRExpr_RdTmp(random() % 5, 73);
-	case 3:
-		switch (random() % 5) {
-		case 0:
-			return IRExpr_Unop(random_irop(), random_irexpr(depth - 1));
-		case 1:
-			return IRExpr_Binop(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1));
-		case 2:
-			return IRExpr_Triop(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1));
-		case 3:
-			return IRExpr_Qop(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1));
-		case 4: {
-			IRExpr *e = IRExpr_Associative(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				NULL);
-			while (random() % 2)
-				addArgumentToAssoc(e, random_irexpr(depth - 1));
-			return e;
-		}
-		default:
-			abort();
-		}
-	case 4:
-		return IRExpr_Load(
-			False,
-			Iend_LE,
-			random_irtype(),
-			random_irexpr(depth - 1));
-	case 5:
-		return IRExpr_Const(random_irconst());
-	case 6: {
-		IRExpr **args;
-		switch (random() % 4) {
-		case 0:
-			args = mkIRExprVec_0();
-			break;
-		case 1:
-			args = mkIRExprVec_1(random_irexpr(depth - 1));
-			break;
-		case 2:
-			args = mkIRExprVec_2(random_irexpr(depth - 1), random_irexpr(depth - 1));
-			break;
-		case 3:
-			args = mkIRExprVec_3(random_irexpr(depth - 1), random_irexpr(depth - 1), random_irexpr(depth - 1));
-			break;
-		default:
-			abort();
-		}
-		return IRExpr_CCall(mkIRCallee(0, "random_ccall", (void *)0x52),
-				    random_irtype(),
-				    args);
-	}
-	case 7:
-		return IRExpr_Mux0X(random_irexpr(depth - 1), random_irexpr(depth - 1), random_irexpr(depth - 1));
-	case 8:
-		return IRExpr_GetI(random_irregarray(), random_irexpr(depth - 1), (random() % 20) * 8, 98);
-	default:
-		abort();
-	}		
-}
-
-/* Check that sortIRExprs() produces vaguely sane results. */
-static void
-sanity_check_irexpr_sorter(void)
-{
-	srandom(time(NULL));
-#define NR_EXPRS 10000
-	IRExpr *exprs[NR_EXPRS];
-	int x;
-	int y;
-
-	printf("Generating %d random expressions\n", NR_EXPRS);
-	for (x = 0; x < NR_EXPRS; x++)
-		exprs[x] = random_irexpr(3);
-
-	printf("Ordering should be anti-reflexive.\n");
-	for (x = 0; x < NR_EXPRS; x++)
-		assert(!sortIRExprs(exprs[x], exprs[x]));
-
-	printf("Ordering should be anti-symmetric.\n");
-	for (x = 0; x < NR_EXPRS; x++) {
-		for (y = x + 1; y < NR_EXPRS; y++) {
-			if (sortIRExprs(exprs[x], exprs[y]))
-				assert(!sortIRExprs(exprs[y], exprs[x]));
-		}
-	}
-
-	/* Ordering must be transitive and total.  We check this by
-	 * performing a naive topological sort on the expressions and
-	 * then checking that whenever x < y exprs[x] < exprs[y]. */
-	IRExpr *exprs2[NR_EXPRS];
-
-	int nr_exprs2 = 0;
-	int candidate;
-	int probe;
-	bool progress = true;
-	printf("Toposorting...\n");
-	while (nr_exprs2 < NR_EXPRS) {
-		/* Try to find an ordering-minimal entry in the
-		 * array.  */
-		assert(progress);
-		progress = false;
-		for (candidate = 0; candidate < NR_EXPRS; candidate++) {
-			if (!exprs[candidate])
-				continue;
-			for (probe = 0; probe < NR_EXPRS; probe++) {
-				if (!exprs[probe])
-					continue;
-				if (sortIRExprs(exprs[probe], exprs[candidate])) {
-					/* probe is less than
-					   candidate, so candidate
-					   fails. */
-					break;
-				}
-			}
-			if (probe == NR_EXPRS) {
-				/* This candidate passes.  Add it to
-				   the list. */
-				exprs2[nr_exprs2] = exprs[candidate];
-				exprs[candidate] = NULL;
-				nr_exprs2++;
-				progress = true;
-			}
-		}
-	}
-
-	/* Okay, have a topo sort.  The ordering is supposed to be
-	   total, so that should have just been an O(n^3) selection
-	   sort, and the array should now be totally sorted.  check
-	   it. */
-	printf("Check toposort is total...\n");
-	for (x = 0; x < NR_EXPRS; x++)
-		for (y = x + 1; y < NR_EXPRS; y++)
-			assert(!sortIRExprs(exprs2[y], exprs2[x]));
-#undef NR_EXPRS
-}
-
-static void
-sanity_check_optimiser(void)
-{
-	/* x + -x -> 0 */
-	IRExpr *start =
-		IRExpr_Associative(
-			Iop_Add64,
-			IRExpr_Get(0, Ity_I64, 0),
-			IRExpr_Unop(
-				Iop_Neg64,
-				IRExpr_Get(0, Ity_I64, 0)),
-			NULL);
-	IRExpr *end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
-	/* x & ~x -> 0 */
-	start = IRExpr_Associative(
-		Iop_And1,
-		IRExpr_Unop(
-			Iop_Not1,
-			IRExpr_Get(0, Ity_I64, 0)),
-		IRExpr_Get(0, Ity_I64, 0),
-		NULL);
-	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	assert(physicallyEqual(end, IRExpr_Const(IRConst_U1(0))));
 }
 
 static void
@@ -2628,16 +2381,13 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 	NdChooser chooser;
 	bool crashes;
 
-	assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 	*mightSurvive = false;
 	*mightCrash = false;
 	while (!*mightCrash || !*mightSurvive) {
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
-		assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 		ctxt.pathConstraint = assumption;
 		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
-		assertUnoptimisable(assumption, AllowableOptimisations::defaultOptimisations);
 		if (crashes)
 			*mightCrash = true;
 		else
@@ -2944,7 +2694,7 @@ writeMachineSuitabilityConstraint(
 			   machine to completion under these
 			   assumptions then we get a crash ->
 			   these assumptions must be false. */
-			rewrittenAssumption = optimiseIRExpr(
+			rewrittenAssumption = simplifyIRExpr(
 				IRExpr_Binop(
 					Iop_And1,
 					rewrittenAssumption,
@@ -4148,14 +3898,10 @@ main(int argc, char *argv[])
 		{
 			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
 			survive =
-				optimiseIRExpr(
-					survivalConstraintIfExecutedAtomically(crSm, oracle, ALLOW_GC),
-					opt);
+				survivalConstraintIfExecutedAtomically(crSm, oracle, ALLOW_GC);
 		}
 
-		survive = internIRExpr(survive);
-		survive = simplifyIRExprAsBoolean(survive);
-		survive = optimiseIRExpr(survive, opt);
+		survive = simplifyIRExpr(survive, opt);
 
 		printf("\tComputed survival constraint\n");
 		{

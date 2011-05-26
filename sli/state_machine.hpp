@@ -4,12 +4,12 @@
 #include <map>
 #include <set>
 
+#include "simplify_irexpr.hpp"
+
 class StateMachine;
 class StateMachineEdge;
 class StateMachineSideEffect;
 class Oracle;
-
-int exprComplexity(const IRExpr *e);
 
 class AllowableOptimisations {
 public:
@@ -514,15 +514,6 @@ public:
 };
 
 
-bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
-bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
-IRExpr *optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt);
-IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something);
-bool sortIRExprs(IRExpr *a, IRExpr *b);
-void addArgumentToAssoc(IRExpr *e, IRExpr *arg);
-bool physicallyEqual(const IRExpr *a, const IRExpr *b);
-IRExpr *internIRExpr(IRExpr *x);
-IRExpr *simplifyIRExprAsBoolean(IRExpr *inp);
 void printStateMachine(const StateMachine *sm, FILE *f);
 bool stateMachinesBisimilar(StateMachine *a, StateMachine *b);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,

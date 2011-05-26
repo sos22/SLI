@@ -4,6 +4,7 @@
 
 #include "sli.h"
 #include "oracle.hpp"
+#include "simplify_irexpr.hpp"
 
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)

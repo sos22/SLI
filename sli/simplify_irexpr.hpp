@@ -1,0 +1,18 @@
+#ifndef SIMPLIFY_IREXPR_HPP__
+#define SIMPLIFY_IREXPR_HPP__
+
+class AllowableOptimisations;
+class Oracle;
+
+IRExpr *optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_something);
+bool isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle);
+bool definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle);
+bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
+bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
+IRExpr *simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt);
+int exprComplexity(const IRExpr *e);
+
+void sanity_check_irexpr_sorter(void);
+void sanity_check_optimiser(void);
+
+#endif /* !SIMPLIFY_IREXPR_HPP__ */
