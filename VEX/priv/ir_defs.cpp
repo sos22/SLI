@@ -1271,6 +1271,7 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
     (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->Iex.Associative.contents[0]) * args.size(), &__las);
   for (unsigned i = 0; i < args.size(); i++)
     e->Iex.Associative.contents[i] = args[i];
+  *suffix = str;
   *res = e;
   return true;
 }
