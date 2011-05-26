@@ -2888,6 +2888,47 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 	return sm;
 }
 
+static void
+getConflictingStoreClusters(StateMachine *sm, Oracle *oracle, std::set<InstructionSet> &conflictClusters)
+{
+	std::set<unsigned long> potentiallyConflictingStores;
+	std::set<StateMachineSideEffectLoad *> allLoads;
+	findAllLoads(sm, allLoads);
+	for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
+	     it != allLoads.end();
+	     it++) {
+		oracle->findConflictingStores(*it, potentiallyConflictingStores);
+	}
+
+	oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
+	if (conflictClusters.size() == 0)
+		assert(potentiallyConflictingStores.size() == 0);
+}
+
+static void
+processConflictCluster(VexPtr<AddressSpace> &as,
+		       VexPtr<StateMachine, &ir_heap> &sm,
+		       VexPtr<Oracle> &oracle,
+		       VexPtr<IRExpr, &ir_heap> &survive,
+		       const InstructionSet &is,
+		       GarbageCollectionToken token)
+{
+	LibVEX_maybe_gc(token);
+
+	VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
+	int nr_roots;
+	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);
+	for (int i = 0; i < nr_roots; i++) {
+		VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
+		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
+		trimCFG(storeCFG.get(), is, 20);
+		breakCycles(storeCFG.get());
+		
+		considerStoreCFG(storeCFG, as, oracle,
+				 survive, sm, token);
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -3005,37 +3046,8 @@ main(int argc, char *argv[])
 			dbg_break("whoops");
 		}
 
-		std::set<unsigned long> potentiallyConflictingStores;
-		{
-			std::set<StateMachineSideEffectLoad *> allLoads;
-			findAllLoads(cr->sm, allLoads);
-			for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
-			     it != allLoads.end();
-			     it++) {
-				oracle->findConflictingStores(*it, potentiallyConflictingStores);
-			}
-		}
-		printf("\tConflicting stores: ");
-		for (std::set<unsigned long>::iterator it = potentiallyConflictingStores.begin();
-		     it != potentiallyConflictingStores.end();
-		     it++)
-			printf("%lx ", *it);
-		printf("\n");
-
 		std::set<InstructionSet> conflictClusters;
-		oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
-		if (conflictClusters.size() == 0)
-			assert(potentiallyConflictingStores.size() == 0);
-		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
-		     it != conflictClusters.end();
-		     it++) {
-			printf("\t\tCluster:");
-			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
-			     it2 != it->rips.end();
-			     it2++)
-				printf(" %lx", *it2);
-			printf("\n");
-		}
+		getConflictingStoreClusters(cr->sm, oracle, conflictClusters);
 
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
@@ -3046,21 +3058,9 @@ main(int argc, char *argv[])
 			     it2++)
 				printf(" %lx", *it2);
 			printf("\n");
-			LibVEX_maybe_gc(ALLOW_GC);
-			VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
-			int nr_roots;
-			cgRoots = buildCallGraphForRipSet(ms->addressSpace, it->rips, &nr_roots);
-			for (int i = 0; i < nr_roots; i++) {
-				VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
-				storeCFG = buildCFGForCallGraph(ms->addressSpace, cgRoots[i]);
-				trimCFG(storeCFG.get(), *it, 20);
-				breakCycles(storeCFG.get());
-
-				VexPtr<AddressSpace> as(ms->addressSpace);
-				VexPtr<StateMachine, &ir_heap> sm(cr->sm);
-				considerStoreCFG(storeCFG, as, oracle,
-						 survive, sm, ALLOW_GC);
-			}
+			VexPtr<AddressSpace> as(ms->addressSpace);
+			VexPtr<StateMachine, &ir_heap> sm(cr->sm);
+			processConflictCluster(as, sm, oracle, survive, *it, ALLOW_GC);
 		}
 	}
 
