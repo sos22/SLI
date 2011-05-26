@@ -15,6 +15,12 @@ dbg
 direct
 dbg_core
 get_dominator
+check_bisimilarity
+dump_irexpr
+dump_state_machine
 extra_config.h
 direct_cd
 timing.txt
+static
+machines/
+patches/

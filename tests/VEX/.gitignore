@@ -1,2 +1,3 @@
 check_compile
 dump_irsb
+parse_irexpr
