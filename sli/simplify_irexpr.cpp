@@ -26,7 +26,9 @@ static bool
 operationAssociates(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
-		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64);
+		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64) ||
+		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1)
+		;
 }
 
 static bool
@@ -1167,11 +1169,13 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 	}
 	a->sort();
 	a->optimise();
-	if (nr_terms > a->complexity()) {
+	if (nr_terms > a->complexity())
 		return a->asIRExpr(varsToExprs);
-	} else {
+	IRExpr *r = root->asIRExpr(varsToExprs);
+	if (exprComplexity(r) < exprComplexity(inp))
+		return r;
+	else
 		return inp;
-	}
 }
 
 static IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something);
@@ -1774,6 +1778,8 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 		done_something = false;
 		a = optimiseIRExpr(a, opt, &done_something);
 		a = internIRExpr(a);
+		a = simplifyIRExprAsBoolean(a);
+		a = optimiseIRExpr(a, opt, &done_something);
 	} while (done_something);
 
 	return a;
