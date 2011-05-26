@@ -4,3 +4,4 @@ nd_chooser
 parse_state_machine
 survival_constraint
 wm_suitability
+eval_cross_product
