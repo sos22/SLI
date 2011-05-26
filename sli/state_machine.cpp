@@ -720,7 +720,7 @@ readStateMachine(int fd)
 	const char *end;
 	StateMachine *res;
 	if (!parseStateMachine(&res, content, &end) || *end)
-		errx(1, "parsing state machine:\n%s", content);
+		errx(1, "error parsing state machine:\n%s", content);
 	free(content);
 	return res;
 }
