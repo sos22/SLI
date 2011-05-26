@@ -31,6 +31,7 @@ static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__prin
 
 char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 char *vex_vasprintf(const char *fmt, va_list args);
+char *readfile(int fd);
 
 class ReplayEngineTimer {
 public:

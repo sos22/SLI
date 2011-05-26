@@ -1,3 +1,5 @@
+#include <err.h>
+
 #include <map>
 
 #include "sli.h"
@@ -709,4 +711,16 @@ parseStateMachine(StateMachine **out, const char *str, const char **suffix)
 	*suffix = str;
 	*out = labelToState[1];
 	return true;
+}
+
+StateMachine *
+readStateMachine(int fd)
+{
+	char *content = readfile(fd);
+	const char *end;
+	StateMachine *res;
+	if (!parseStateMachine(&res, content, &end) || *end)
+		errx(1, "parsing state machine:\n%s", content);
+	free(content);
+	return res;
 }

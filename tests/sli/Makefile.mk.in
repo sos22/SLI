@@ -1,5 +1,5 @@
 targets=''
-sli_tests="pmap vamap nd_chooser parse_state_machine"
+sli_tests="pmap vamap nd_chooser parse_state_machine survival_constraint"
 
 defvars() {
     echo "SLI_TESTS=\$(patsubst %,${input_base}/%,${sli_tests})"
