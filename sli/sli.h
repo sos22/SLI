@@ -593,6 +593,7 @@ public:
 						 LogReaderPtr *endPtr,
 						 GarbageCollectionToken t);
 	static MachineState *readCoredump(const char *fname);
+	static MachineState *readELFExec(const char *fname);
 
 	void registerThread(Thread *t) {
 		ThreadId tid;

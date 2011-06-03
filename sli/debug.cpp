@@ -110,6 +110,8 @@ class SetThreadCommand : public GdbCommand {
 public:
 	void doIt(VexPtr<MachineState > &, GarbageCollectionToken)
 	{
+		if (tid._tid() == 0)
+			tid = ThreadId(1);
 		if (query)
 			this->chan->currentTidQuery = tid;
 		else if (tid._tid() != 0 && (int)tid._tid() != -1)

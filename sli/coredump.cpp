@@ -1,67 +1,14 @@
-#include <sys/fcntl.h>
-#include <sys/mman.h>
 #include <elf.h>
 #include <errno.h>
-#include <unistd.h>
 
 /* This is the obvious place to put elf_prstatus... */
 #include <sys/procfs.h>
 
 #include "sli.h"
+#include "mapping.hpp"
 
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
-
-class Mapping {
-	const void *content;
-	off_t size;
-public:
-	Mapping() : content(NULL) {}
-	int init(const char *path);
-	~Mapping() { if (content) munmap((void *)content, size); }
-	template <typename t> const t *get(off_t offset, int nr = 1);
-	const void *window(off_t offset, size_t size);
-};
-
-int
-Mapping::init(const char *path)
-{
-	int fd = open(path, O_RDONLY);
-	if (fd < 0)
-		return -1;
-	size = lseek(fd, 0, SEEK_END);
-	if (size < 0) {
-		close(fd);
-		return -1;
-	}
-	size = (size + 4095) & ~4095ul;
-	content = mmap(NULL, size, PROT_READ, MAP_SHARED,
-		       fd, 0);
-	close(fd);
-	if (content == MAP_FAILED) {
-		content = NULL;
-		return -1;
-	}
-	return 0;
-}
-
-template <typename t> const t *
-Mapping::get(off_t offset, int nr)
-{
-	if (offset < 0 || (off_t)(offset + sizeof(t) * nr) > size)
-		return NULL;
-	else
-		return (const t *)((unsigned long)content + offset);
-}
-
-const void *
-Mapping::window(off_t offset, size_t sz)
-{
-	if (offset < 0 || (off_t)(offset + sz) > size)
-		return NULL;
-	else
-		return (const void *)((unsigned long)content + offset);
-}
 
 MachineState *
 MachineState::readCoredump(const char *path)
