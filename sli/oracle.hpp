@@ -209,6 +209,7 @@ public:
 		}
 		void calculateRegisterLiveness(bool *done_something);
 		void calculateAliasing(bool *done_something);
+		void getInstrSuccessors(unsigned long r, std::vector<unsigned long> &out);
 
 		void visit(HeapVisitor &hv) {visit_container(callers, hv);}
 		NAMED_CLASS

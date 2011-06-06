@@ -880,6 +880,60 @@ Oracle::Function::addInstruction(unsigned long rip, Instruction *i)
 	instructions_xxx->set(rip, i);
 }
 
+void
+Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
+				 unsigned long root,
+				 unsigned long rip)
+{
+	std::vector<unsigned long> h;
+	Function *f;
+
+	h.push_back(root);
+	discoverFunctionHeads(h);
+	f = get_function(rip);
+	if (!f) {
+		printf("No function for %lx!\n", rip);
+		return;
+	}
+
+	/* Build the shortest path from the start of the function to
+	   the desired rip using Dijkstra's algorithm.  */
+	/* Distance from start of function to key.  Non-present keys
+	 * should be assumed to have an infinite length. */
+	std::map<unsigned long, unsigned> pathLengths;
+	/* Predecessor on best path from start to key. */
+	std::map<unsigned long, unsigned long> predecessors; 
+	/* We push stuff in here when we discover a new shortest path
+	   to that node. */
+	std::priority_queue<std::pair<unsigned, unsigned long> > grey;
+
+	pathLengths[f->rip] = 0;
+	grey.push(std::pair<unsigned, unsigned long>(0, f->rip));
+	while (!grey.empty()) {
+		std::pair<unsigned, unsigned long> e(grey.top());
+		grey.pop();
+
+		assert(pathLengths.count(e.second));
+		unsigned p = pathLengths[e.second] + 1;
+		std::vector<unsigned long> successors;
+		f->getInstrSuccessors(e.second, successors);
+		for (std::vector<unsigned long>::iterator it = successors.begin();
+		     it != successors.end();
+		     it++) {
+			unsigned long ft = *it;
+			if (!pathLengths.count(ft) || pathLengths[ft] >= p) {
+				pathLengths[ft] = p;
+				predecessors[ft] = e.second;
+				grey.push(std::pair<unsigned, unsigned long>(p, ft));
+			}
+		}
+	}
+
+	assert(predecessors.count(rip));
+	for (unsigned long i = predecessors[rip]; i; i = predecessors[i])
+		output.push_back(i);
+}
+
 class Oracle::Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
 	IRStmt **statements;
 	IRTypeEnv *tyenv;
@@ -916,7 +970,7 @@ public:
 		
 	void updateLiveOnEntry(bool *changed);
 	void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
-	void getSuccessors(std::vector<Instruction *> &out);
+	void getSuccessors(std::vector<unsigned long> &out);
 	void addPredecessors(std::vector<Instruction *> &out);
 
 	void visit(HeapVisitor &hv) {
@@ -1381,71 +1435,21 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 }
 
 void
-Oracle::Instruction::getSuccessors(std::vector<Instruction *> &succ)
+Oracle::Instruction::getSuccessors(std::vector<unsigned long> &succ)
 {
-	succ = fallThroughs;
-	if (branch)
-		succ.push_back(branch);
-}
-
-void
-Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
-				 unsigned long root,
-				 unsigned long rip)
-{
-	std::vector<unsigned long> h;
-	Function *f;
-
-	h.push_back(root);
-	discoverFunctionHeads(h);
-	f = get_function(rip);
-	if (!f) {
-		printf("No function for %lx!\n", rip);
-		return;
-	}
-
-	/* Build the shortest path from the start of the function to
-	   the desired rip using Dijkstra's algorithm.  */
-	/* Distance from start of function to key.  Non-present keys
-	 * should be assumed to have an infinite length. */
-	std::map<Instruction *, unsigned> pathLengths;
-	/* Predecessor on best path from start to key. */
-	std::map<Instruction *, Instruction *> predecessors; 
-	/* We push stuff in here when we discover a new shortest path
-	   to that node. */
-	std::priority_queue<std::pair<unsigned, Instruction *> > grey;
-
-	pathLengths[f->ripToInstruction(f->rip)] = 0;
-	grey.push(std::pair<unsigned, Instruction *>(0, f->ripToInstruction(f->rip)));
-	while (!grey.empty()) {
-		std::pair<unsigned, Instruction *> e(grey.top());
-		grey.pop();
-
-		assert(pathLengths.count(e.second));
-		unsigned p = pathLengths[e.second] + 1;
-		std::vector<Instruction *> successors;
-		e.second->getSuccessors(successors);
-		for (std::vector<Instruction *>::iterator it = successors.begin();
-		     it != successors.end();
-		     it++) {
-			Instruction *ft = *it;
-			if (!pathLengths.count(ft) || pathLengths[ft] >= p) {
-				pathLengths[ft] = p;
-				predecessors[ft] = e.second;
-				grey.push(std::pair<unsigned, Instruction *>(p, ft));
-			}
-		}
-	}
-
-	assert(predecessors.count(f->ripToInstruction(rip)));
-	for (Instruction *i = predecessors[f->ripToInstruction(rip)];
-	     i != NULL;
-	     i = predecessors[i])
-		output.push_back(i->rip);
+	succ = _fallThroughRips;
+	if (_branchRip)
+		succ.push_back(_branchRip);
 }
 
 void
 Oracle::Instruction::addPredecessors(std::vector<Instruction *> &out)
 {
 	out.insert(out.end(), predecessors.begin(), predecessors.end());
+}
+
+void
+Oracle::Function::getInstrSuccessors(unsigned long r, std::vector<unsigned long> &out)
+{
+	ripToInstruction(r)->getSuccessors(out);
 }
