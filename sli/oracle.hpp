@@ -202,7 +202,10 @@ public:
 		void setAliasConfigOnEntryToInstruction(unsigned long rip, const RegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
 		bool hasInstruction(unsigned long rip) const { return instructions_xxx->hasKey(rip); }
-		void addInstruction(unsigned long rip, Instruction *i);
+		void addInstruction(unsigned long rip,
+				    const std::vector<unsigned long> &callees,
+				    const std::vector<unsigned long> &fallThrough,
+				    const std::vector<unsigned long> &branch);
 		Instruction *ripToInstruction(unsigned long rip) {
 			if (instructions_xxx->hasKey(rip))
 				return instructions_xxx->get(rip);

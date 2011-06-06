@@ -874,13 +874,6 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 }
 
 void
-Oracle::Function::addInstruction(unsigned long rip, Instruction *i)
-{
-	assert(i);
-	instructions_xxx->set(rip, i);
-}
-
-void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 				 unsigned long root,
 				 unsigned long rip)
@@ -1038,7 +1031,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 				if (irsb->stmts[end_of_instruction]->tag == Ist_Exit)
 					branch.push_back(irsb->stmts[end_of_instruction]->Ist.Exit.dst->Ico.U64);
 			}
-			Instruction *i = new Instruction(rip, work);
+
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
 					fallThrough.push_back(extract_call_follower(irsb));
@@ -1056,26 +1049,11 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 				fallThrough.push_back(irsb->stmts[end_of_instruction]->Ist.IMark.addr);
 			}
 
-			for (std::vector<unsigned long>::iterator it = callees.begin();
-			     it != callees.end();
-			     it++) {
-				i->addCallee(*it);
-				heads.push_back(*it);
-			}
-			for (std::vector<unsigned long>::iterator it = fallThrough.begin();
-			     it != fallThrough.end();
-			     it++) {
-				i->addFallThrough(*it);
-				unexplored.push_back(*it);
-			}
-			for (std::vector<unsigned long>::iterator it = branch.begin();
-			     it != branch.end();
-			     it++) {
-				i->addBranch(*it);
-				unexplored.push_back(*it);
-			}
+			heads.insert(heads.end(), callees.begin(), callees.end());
+			unexplored.insert(unexplored.end(), unexplored.begin(), unexplored.end());
+			unexplored.insert(unexplored.end(), branch.begin(), branch.end());
 
-			work->addInstruction(i->rip, i);
+			work->addInstruction(rip, callees, fallThrough, branch);
 
 			start_of_instruction = end_of_instruction;
 		}
@@ -1467,3 +1445,29 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
 {
 	ripToInstruction(r)->aliasOnEntry = config;
 }
+
+void
+Oracle::Function::addInstruction(unsigned long rip,
+				 const std::vector<unsigned long> &callees,
+				 const std::vector<unsigned long> &fallThrough,
+				 const std::vector<unsigned long> &branch)
+{
+	Instruction *i = new Instruction(rip, this);
+
+	for (std::vector<unsigned long>::const_iterator it = callees.begin();
+	     it != callees.end();
+	     it++)
+		i->addCallee(*it);
+	for (std::vector<unsigned long>::const_iterator it = fallThrough.begin();
+	     it != fallThrough.end();
+	     it++)
+		i->addFallThrough(*it);
+	for (std::vector<unsigned long>::const_iterator it = branch.begin();
+	     it != branch.end();
+	     it++)
+		i->addBranch(*it);
+
+	assert(i);
+	instructions_xxx->set(rip, i);
+}
+
