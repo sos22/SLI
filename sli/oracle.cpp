@@ -633,13 +633,6 @@ Oracle::calculateAliasing(void)
 	}
 }
 
-template <typename t>
-void
-appendVector(std::vector<t> &dest, const std::vector<t> &src)
-{
-	dest.insert(dest.end(), src.begin(), src.end());
-}
-
 static Oracle::LivenessSet
 irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 {
@@ -894,6 +887,7 @@ class Oracle::Instruction : public GarbageCollected<Instruction, &ir_heap>, publ
 public:
 	unsigned long rip;
 
+private:
 	std::vector<unsigned long> _fallThroughRips;
 	unsigned long _branchRip;
 	std::vector<unsigned long> _calleeRips;
@@ -903,6 +897,7 @@ public:
 	Function *thisFunction;
 
 	std::vector<Instruction *> predecessors;
+public:
 
 	LivenessSet liveOnEntry;
 	RegisterAliasingConfiguration aliasOnEntry;
@@ -910,6 +905,10 @@ public:
 private:
 	char *mkName() const { return my_asprintf("instr_%lx", rip); }
 public:
+	void addFallThrough(unsigned long r) { _fallThroughRips.push_back(r); }
+	void addBranch(unsigned long r) { _branchRip = r; }
+	void addCallee(unsigned long r) { _calleeRips.push_back(r); }
+
 	Instruction(unsigned long rip, IRStmt **content, int nr_statements,
 		    IRTypeEnv *_tyenv, Function *thisFunction);
 	void resolveSuccessors(Function *f);
@@ -917,7 +916,9 @@ public:
 		
 	void updateLiveOnEntry(bool *changed);
 	void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
-		
+	void getSuccessors(std::vector<Instruction *> &out);
+	void addPredecessors(std::vector<Instruction *> &out);
+
 	void visit(HeapVisitor &hv) {
 		hv(statements);
 		hv(branch);
@@ -978,39 +979,56 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		int start_of_instruction = 0;
 		while (start_of_instruction < irsb->stmts_used) {
 			assert(irsb->stmts[start_of_instruction]->tag == Ist_IMark);
+			std::vector<unsigned long> branch;
+			std::vector<unsigned long> fallThrough;
+			std::vector<unsigned long> callees;
 			for (end_of_instruction = start_of_instruction + 1;
 			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
-			     end_of_instruction++)
-				;
+			     end_of_instruction++) {
+				if (irsb->stmts[end_of_instruction]->tag == Ist_Exit)
+					branch.push_back(irsb->stmts[end_of_instruction]->Ist.Exit.dst->Ico.U64);
+			}
 			Instruction *i = new Instruction(rip, irsb->stmts + start_of_instruction + 1,
 							 end_of_instruction - start_of_instruction - 1,
 							 irsb->tyenv, work);
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
-					i->_fallThroughRips.push_back(extract_call_follower(irsb));
-					if (irsb->next->tag == Iex_Const) {
-						i->_calleeRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
-						heads.push_back(irsb->next->Iex.Const.con->Ico.U64);
-					} else {
-						findPossibleJumpTargets(rip, i->_calleeRips);
-						findPossibleJumpTargets(rip, heads);
-					}
+					fallThrough.push_back(extract_call_follower(irsb));
+					if (irsb->next->tag == Iex_Const)
+						callees.push_back(irsb->next->Iex.Const.con->Ico.U64);
+					else
+						findPossibleJumpTargets(rip, callees);
 				} else {
 					if (irsb->next->tag == Iex_Const)
-						i->_fallThroughRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
+						fallThrough.push_back(irsb->next->Iex.Const.con->Ico.U64);
 					else
-						findPossibleJumpTargets(rip, i->_fallThroughRips);
+						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
-				i->_fallThroughRips.push_back(irsb->stmts[end_of_instruction]->Ist.IMark.addr);
+				fallThrough.push_back(irsb->stmts[end_of_instruction]->Ist.IMark.addr);
 			}
-			work->addInstruction(i->rip, i);
-			if (i->_branchRip)
-				unexplored.push_back(i->_branchRip);
-			for (std::vector<unsigned long>::iterator it = i->_fallThroughRips.begin();
-			     it != i->_fallThroughRips.end();
-			     it++)
+
+			for (std::vector<unsigned long>::iterator it = callees.begin();
+			     it != callees.end();
+			     it++) {
+				i->addCallee(*it);
+				heads.push_back(*it);
+			}
+			for (std::vector<unsigned long>::iterator it = fallThrough.begin();
+			     it != fallThrough.end();
+			     it++) {
+				i->addFallThrough(*it);
 				unexplored.push_back(*it);
+			}
+			for (std::vector<unsigned long>::iterator it = branch.begin();
+			     it != branch.end();
+			     it++) {
+				i->addBranch(*it);
+				unexplored.push_back(*it);
+			}
+
+			work->addInstruction(i->rip, i);
+
 			start_of_instruction = end_of_instruction;
 		}
 	}
@@ -1033,11 +1051,6 @@ Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmt
 	  rip(_rip),
 	  thisFunction(_thisFunction)
 {
-	for (int i = 0; i < nr_statements; i++) {
-		statements[i] = stmts[i];
-		if (statements[i]->tag == Ist_Exit)
-			_branchRip = statements[i]->Ist.Exit.dst->Ico.U64;
-	}
 }
 
 void
@@ -1109,7 +1122,7 @@ Oracle::Function::calculateRegisterLiveness(bool *done_something)
 			bool t = false;
 			(*it)->updateLiveOnEntry(&t);
 			if (t)
-				appendVector(instrsToRecalculate2, (*it)->predecessors);
+				(*it)->addPredecessors(instrsToRecalculate2);
 		}
 		instrsToRecalculate1.clear();
 		if (instrsToRecalculate2.empty())
@@ -1122,7 +1135,7 @@ Oracle::Function::calculateRegisterLiveness(bool *done_something)
 			bool t = false;
 			(*it)->updateLiveOnEntry(&t);
 			if (t)
-				appendVector(instrsToRecalculate1, (*it)->predecessors);
+				(*it)->addPredecessors(instrsToRecalculate1);
 		}
 
 		instrsToRecalculate2.clear();
@@ -1368,6 +1381,14 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 }
 
 void
+Oracle::Instruction::getSuccessors(std::vector<Instruction *> &succ)
+{
+	succ = fallThroughs;
+	if (branch)
+		succ.push_back(branch);
+}
+
+void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 				 unsigned long root,
 				 unsigned long rip)
@@ -1402,17 +1423,10 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 
 		assert(pathLengths.count(e.second));
 		unsigned p = pathLengths[e.second] + 1;
-		if (e.second->branch) {
-			if (!pathLengths.count(e.second->branch) ||
-			    pathLengths[e.second->branch] >= p) {
-				pathLengths[e.second->branch] = p;
-				predecessors[e.second->branch] = e.second;
-				grey.push(std::pair<unsigned, Instruction *>(p, e.second->branch));
-			}
-		}
-		for (std::vector<Instruction *>::iterator it =
-			     e.second->fallThroughs.begin();
-		     it != e.second->fallThroughs.end();
+		std::vector<Instruction *> successors;
+		e.second->getSuccessors(successors);
+		for (std::vector<Instruction *>::iterator it = successors.begin();
+		     it != successors.end();
 		     it++) {
 			Instruction *ft = *it;
 			if (!pathLengths.count(ft) || pathLengths[ft] >= p) {
@@ -1428,4 +1442,10 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 	     i != NULL;
 	     i = predecessors[i])
 		output.push_back(i->rip);
+}
+
+void
+Oracle::Instruction::addPredecessors(std::vector<Instruction *> &out)
+{
+	out.insert(out.end(), predecessors.begin(), predecessors.end());
 }
