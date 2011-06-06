@@ -15,6 +15,7 @@ public:
 	~Mapping() { if (content) munmap((void *)content, size); }
 	template <typename t> const t *get(off_t offset, int nr = 1);
 	const void *window(off_t offset, size_t size);
+	bool live() const { return content != NULL; }
 };
 
 template <typename t> const t *

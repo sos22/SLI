@@ -1681,7 +1681,7 @@ interpretStatement(IRStmt *stmt,
 			eval_expression(&thr->regs, stmt->Ist.CAS.details->addr, thr->temporaries.content);
 		struct expression_result expected =
 			eval_expression(&thr->regs, stmt->Ist.CAS.details->expdLo, thr->temporaries.content);
-		unsigned size = sizeofIRType(typeOfIRExpr(thr->currentIRSB->tyenv,
+		unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
 							  stmt->Ist.CAS.details->dataLo));
 		return CasEvent::get(thr->tid, stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 	}
@@ -1690,7 +1690,7 @@ interpretStatement(IRStmt *stmt,
 		put_stmt(&thr->regs,
 			 stmt->Ist.Put.offset,
 			 eval_expression(&thr->regs, stmt->Ist.Put.data, thr->temporaries.content),
-			 typeOfIRExpr(thr->currentIRSB->tyenv, stmt->Ist.Put.data));
+			 typeOfIRExpr(irsb->tyenv, stmt->Ist.Put.data));
 		return NULL;
 
 	case Ist_PutI: {

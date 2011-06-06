@@ -3,6 +3,7 @@
 
 #include <set>
 #include "state_machine.hpp"
+#include "mapping.hpp"
 
 #include "libvex_guest_offsets.h"
 
@@ -178,12 +179,12 @@ public:
 		int nr_statements;
 	public:
 		unsigned long rip;
-		unsigned long _fallThroughRip;
+		std::vector<unsigned long> _fallThroughRips;
 		unsigned long _branchRip;
-		unsigned long _calleeRip;
+		std::vector<unsigned long> _calleeRips;
 		Instruction *branch;
-		Instruction *fallThrough;
-		Function *callee;
+		std::vector<Instruction *> fallThroughs;
+		std::vector<Function *> callees;
 		Function *thisFunction;
 
 		std::vector<Instruction *> predecessors;
@@ -202,7 +203,15 @@ public:
 		void updateLiveOnEntry(bool *changed);
 		void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
 		
-		void visit(HeapVisitor &hv) { hv(statements); hv(branch); hv(fallThrough); hv(callee); hv(tyenv); hv(thisFunction); visit_container(predecessors, hv); }
+		void visit(HeapVisitor &hv) {
+			hv(statements);
+			hv(branch);
+			visit_container(fallThroughs,hv);
+			visit_container(callees, hv);
+			hv(tyenv);
+			hv(thisFunction);
+			visit_container(predecessors, hv);
+		}
 		NAMED_CLASS
 	};
 
@@ -212,7 +221,7 @@ public:
 	public:
 		typedef gc_heap_map<unsigned long, Instruction, &ir_heap>::type instr_map_t;
 		unsigned long rip;
-		VexPtr<instr_map_t, &ir_heap> instructions;
+		VexPtr<instr_map_t, &ir_heap> instructions_xxx;
 		std::vector<Function *> callers;
 		bool registerLivenessCorrect;
 	private:
@@ -221,14 +230,19 @@ public:
 	public:
 		Function(unsigned long _rip)
 			: rip(_rip),
-			  instructions(new instr_map_t()),
+			  instructions_xxx(new instr_map_t()),
 			  registerLivenessCorrect(false)
 		{}
 
 		void resolveCallGraph(Oracle *oracle);
-		bool hasInstruction(unsigned long rip) const { return instructions->hasKey(rip); }
-		void addInstruction(Instruction *i) { instructions->set(i->rip, i); }
-		Instruction *ripToInstruction(unsigned long rip) { return instructions->get(rip); }
+		bool hasInstruction(unsigned long rip) const { return instructions_xxx->hasKey(rip); }
+		void addInstruction(Instruction *i) { assert(i); instructions_xxx->set(i->rip, i); }
+		Instruction *ripToInstruction(unsigned long rip) {
+			if (instructions_xxx->hasKey(rip))
+				return instructions_xxx->get(rip);
+			else
+				return NULL;
+		}
 		void calculateRegisterLiveness(bool *done_something);
 		void calculateAliasing(bool *done_something);
 
@@ -259,6 +273,9 @@ private:
 	void calculateRegisterLiveness(void);
 	void calculateAliasing(void);
 	void loadTagTable(const char *path);
+	Mapping callGraphMapping;
+	void loadCallGraph(const char *path);
+	void findPossibleJumpTargets(unsigned long from, std::vector<unsigned long> &targets);
 public:
 	MachineState *ms;
 	Thread *crashedThread;
@@ -266,6 +283,7 @@ public:
 	static const unsigned STATIC_THREAD = 99;
 
 	void findPreviousInstructions(std::vector<unsigned long> &output);
+	void findPreviousInstructions(std::vector<unsigned long> &output, unsigned long root, unsigned long rip);
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
 				   std::set<unsigned long> &out);
 	void clusterRips(const std::set<unsigned long> &inputRips,
@@ -286,13 +304,17 @@ public:
 			heads->push_back(i.value());
 	}
 
+	unsigned long selectRandomLoad() const;
+
 	const RegisterAliasingConfiguration &getAliasingConfigurationForRip(unsigned long rip);
 
-	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
+	Oracle(MachineState *_ms, Thread *_thr, const char *tags, const char *callgraph = NULL)
 		: addrToFunction(new gc_heap_map<unsigned long, Function>::type()), ms(_ms), crashedThread(_thr)
 	{
 		if (tags)
 			loadTagTable(tags);
+		if (callgraph)
+			loadCallGraph(callgraph);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(ms);
