@@ -34,7 +34,6 @@ public:
 		void operator |=(const LivenessSet x) { mask |= x.mask; }
 		bool operator !=(const LivenessSet x) { return mask != x.mask; }
 		LivenessSet operator &(const LivenessSet x) { return LivenessSet(mask & x.mask); }
-		LivenessSet operator ~() const { return LivenessSet(~mask); }
 		static LivenessSet everything;
 		static LivenessSet argRegisters;
 	private:
