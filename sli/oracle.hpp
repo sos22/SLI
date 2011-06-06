@@ -199,6 +199,7 @@ public:
 		LivenessSet liveOnEntry();
 		LivenessSet liveOnEntry(unsigned long);
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);
+		void setAliasConfigOnEntryToInstruction(unsigned long rip, const RegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
 		bool hasInstruction(unsigned long rip) const { return instructions_xxx->hasKey(rip); }
 		void addInstruction(unsigned long rip, Instruction *i);
@@ -208,8 +209,8 @@ public:
 			else
 				return NULL;
 		}
-		void calculateRegisterLiveness(bool *done_something);
-		void calculateAliasing(bool *done_something);
+		void calculateRegisterLiveness(AddressSpace *as, bool *done_something);
+		void calculateAliasing(AddressSpace *as, bool *done_something);
 		void getInstrSuccessors(unsigned long r, std::vector<unsigned long> &out);
 
 		void visit(HeapVisitor &hv) {visit_container(callers, hv);}

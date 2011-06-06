@@ -606,7 +606,7 @@ Oracle::calculateRegisterLiveness(void)
 		     it != functions.end();
 		     it++) {
 			bool this_did_something = false;
-			(*it)->calculateRegisterLiveness(&this_did_something);
+			(*it)->calculateRegisterLiveness(ms->addressSpace, &this_did_something);
 			if (this_did_something)
 				changed++;
 			else
@@ -619,7 +619,7 @@ Oracle::calculateRegisterLiveness(void)
 }
 
 void
-Oracle::calculateAliasing(void)
+Oracle::calculateAliasing()
 {
 	bool done_something;
 
@@ -628,7 +628,7 @@ Oracle::calculateAliasing(void)
 	     it++) {
 		do {
 			done_something = false;
-			(*it)->calculateAliasing(&done_something);
+			(*it)->calculateAliasing(ms->addressSpace, &done_something);
 		} while (done_something);
 	}
 }
@@ -935,9 +935,6 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 }
 
 class Oracle::Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
-	IRStmt **statements;
-	IRTypeEnv *tyenv;
-	int nr_statements;
 public:
 	unsigned long rip;
 
@@ -945,7 +942,6 @@ private:
 	std::vector<unsigned long> _fallThroughRips;
 	unsigned long _branchRip;
 	std::vector<unsigned long> _calleeRips;
-	std::vector<Instruction *> fallThroughs;
 	std::vector<Function *> callees;
 	Function *thisFunction;
 
@@ -962,21 +958,17 @@ public:
 	void addBranch(unsigned long r) { _branchRip = r; }
 	void addCallee(unsigned long r) { _calleeRips.push_back(r); }
 
-	Instruction(unsigned long rip, IRStmt **content, int nr_statements,
-		    IRTypeEnv *_tyenv, Function *thisFunction);
+	Instruction(unsigned long rip, Function *thisFunction);
 	void resolveSuccessors(Function *f);
 	void resolveCallGraph(Oracle *oracle);
 		
-	void updateLiveOnEntry(bool *changed);
-	void updateSuccessorInstructionsAliasing(std::vector<unsigned long> *changed);
+	void updateLiveOnEntry(AddressSpace *as, bool *changed);
+	void updateSuccessorInstructionsAliasing(AddressSpace *as, std::vector<unsigned long> *changed);
 	void getSuccessors(std::vector<unsigned long> &out);
 	void addPredecessors(std::vector<Instruction *> &out);
 
 	void visit(HeapVisitor &hv) {
-		hv(statements);
-		visit_container(fallThroughs,hv);
 		visit_container(callees, hv);
-		hv(tyenv);
 		hv(thisFunction);
 		visit_container(predecessors, hv);
 	}
@@ -1046,9 +1038,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 				if (irsb->stmts[end_of_instruction]->tag == Ist_Exit)
 					branch.push_back(irsb->stmts[end_of_instruction]->Ist.Exit.dst->Ico.U64);
 			}
-			Instruction *i = new Instruction(rip, irsb->stmts + start_of_instruction + 1,
-							 end_of_instruction - start_of_instruction - 1,
-							 irsb->tyenv, work);
+			Instruction *i = new Instruction(rip, work);
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
 					fallThrough.push_back(extract_call_follower(irsb));
@@ -1101,12 +1091,8 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 	}
 }
 
-Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv,
-				 Function *_thisFunction)
-	: statements((IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_stmts)),
-	  tyenv(_tyenv),
-	  nr_statements(nr_stmts),
-	  rip(_rip),
+Oracle::Instruction::Instruction(unsigned long _rip, Function *_thisFunction)
+	: rip(_rip),
 	  thisFunction(_thisFunction)
 {
 }
@@ -1132,7 +1118,6 @@ Oracle::Instruction::resolveSuccessors(Function *f)
 		Instruction *fallThrough = f->ripToInstruction(_fallThroughRips[i]);
 		if (!fallThrough)
 			continue;
-		fallThroughs.push_back(fallThrough);
 		if (!vector_contains(fallThrough->predecessors, this))
 			fallThrough->predecessors.push_back(this);
 	}
@@ -1154,7 +1139,7 @@ Oracle::Function::resolveCallGraph(Oracle *oracle)
 }
 
 void
-Oracle::Function::calculateRegisterLiveness(bool *done_something)
+Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_something)
 {
 	bool changed;
 
@@ -1178,7 +1163,7 @@ Oracle::Function::calculateRegisterLiveness(bool *done_something)
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
-			(*it)->updateLiveOnEntry(&t);
+			(*it)->updateLiveOnEntry(as, &t);
 			if (t)
 				(*it)->addPredecessors(instrsToRecalculate2);
 		}
@@ -1191,7 +1176,7 @@ Oracle::Function::calculateRegisterLiveness(bool *done_something)
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
-			(*it)->updateLiveOnEntry(&t);
+			(*it)->updateLiveOnEntry(as, &t);
 			if (t)
 				(*it)->addPredecessors(instrsToRecalculate1);
 		}
@@ -1213,7 +1198,7 @@ Oracle::Function::calculateRegisterLiveness(bool *done_something)
 }
 
 void
-Oracle::Function::calculateAliasing(bool *done_something)
+Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 {
 	Instruction *head = ripToInstruction(rip);
 	RegisterAliasingConfiguration a(head->aliasOnEntry);
@@ -1227,31 +1212,39 @@ Oracle::Function::calculateAliasing(bool *done_something)
 	for (instr_map_t::iterator it = instructions_xxx->begin();
 	     it != instructions_xxx->end();
 	     it++)
-		it.value()->updateSuccessorInstructionsAliasing(&needsUpdating);
+		it.value()->updateSuccessorInstructionsAliasing(as, &needsUpdating);
 	while (!needsUpdating.empty()) {
 		*done_something = true;
 		unsigned long rip = needsUpdating.back();
 		needsUpdating.pop_back();
 		Instruction *i = ripToInstruction(rip);
-		i->updateSuccessorInstructionsAliasing(&needsUpdating);
+		i->updateSuccessorInstructionsAliasing(as, &needsUpdating);
 	}
 }
 
 void
-Oracle::Instruction::updateLiveOnEntry(bool *changed)
+Oracle::Instruction::updateLiveOnEntry(AddressSpace *as, bool *changed)
 {
 	LivenessSet res;
 
-	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
-	     it != fallThroughs.end();
+	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	     it != _fallThroughRips.end();
 	     it++)
-		res |= (*it)->liveOnEntry;
+		res |= thisFunction->liveOnEntry(*it);
 	for (std::vector<Function *>::iterator it = callees.begin();
 	     it != callees.end();
 	     it++)
 		res |= (*it)->ripToInstruction((*it)->rip)->liveOnEntry & LivenessSet::argRegisters;
 
-	for (int i = nr_statements - 1; i >= 0; i--) {
+	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRStmt **statements = irsb->stmts;
+	int nr_statements;
+	for (nr_statements = 1;
+	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
+	     nr_statements++)
+		;
+
+	for (int i = nr_statements - 1; i >= 1; i--) {
 		switch (statements[i]->tag) {
 		case Ist_NoOp:
 			break;
@@ -1306,13 +1299,21 @@ Oracle::Instruction::updateLiveOnEntry(bool *changed)
 }
 
 void
-Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<unsigned long> *changed)
+Oracle::Instruction::updateSuccessorInstructionsAliasing(AddressSpace *as, std::vector<unsigned long> *changed)
 {
 	RegisterAliasingConfiguration config(aliasOnEntry);
 	std::map<IRTemp, PointerAliasingSet> temporaryAliases;
 	IRStmt *st;
 
-	for (int i = 0; i < nr_statements; i++) {
+	int nr_statements;
+	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRStmt **statements = irsb->stmts;
+	for (nr_statements = 1;
+	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
+	     nr_statements++)
+		;
+	IRTypeEnv *tyenv = irsb->tyenv;
+	for (int i = 1; i < nr_statements; i++) {
 		st = statements[i];
 		switch (st->tag) {
 		case Ist_NoOp:
@@ -1426,16 +1427,16 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<unsigned lo
 			config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
 		config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
 	}
-	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
-	     it != fallThroughs.end();
+	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	     it != _fallThroughRips.end();
 	     it++)
-		config |= (*it)->aliasOnEntry;
-	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
-	     it != fallThroughs.end();
+		config |= thisFunction->aliasConfigOnEntryToInstruction(*it);
+	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	     it != _fallThroughRips.end();
 	     it++) {
-		if (config != (*it)->aliasOnEntry) {
-			changed->push_back((*it)->rip);
-			(*it)->aliasOnEntry = config;
+		if (config != thisFunction->aliasConfigOnEntryToInstruction(*it)) {
+			changed->push_back(*it);
+			thisFunction->setAliasConfigOnEntryToInstruction(*it, config);
 		}
 	}
 }
@@ -1458,4 +1459,11 @@ void
 Oracle::Function::getInstrSuccessors(unsigned long r, std::vector<unsigned long> &out)
 {
 	ripToInstruction(r)->getSuccessors(out);
+}
+
+void
+Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
+						     const RegisterAliasingConfiguration &config)
+{
+	ripToInstruction(r)->aliasOnEntry = config;
 }

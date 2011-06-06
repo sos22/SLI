@@ -187,7 +187,6 @@ run_command(Oracle *oracle)
 			printf("No function at %s\n", words[1]->name());
 		} else {
 			Oracle::RegisterAliasingConfiguration alias = f->aliasConfigOnEntryToInstruction(*words[2]);
-			Oracle::Instruction *i = f->ripToInstruction(*words[2]);
 			printf("Alias table for %lx:%lx:\n", (unsigned long)*words[1],
 			       (unsigned long)*words[2]);
 			alias.prettyPrint(stdout);
