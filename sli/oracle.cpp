@@ -8,6 +8,67 @@
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
 
+class Oracle::Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
+	IRStmt **statements;
+	IRTypeEnv *tyenv;
+	int nr_statements;
+public:
+	unsigned long rip;
+	std::vector<unsigned long> _fallThroughRips;
+	unsigned long _branchRip;
+	std::vector<unsigned long> _calleeRips;
+	Instruction *branch;
+	std::vector<Instruction *> fallThroughs;
+	std::vector<Function *> callees;
+	Function *thisFunction;
+
+	std::vector<Instruction *> predecessors;
+
+	LivenessSet liveOnEntry;
+	RegisterAliasingConfiguration aliasOnEntry;
+
+private:
+	char *mkName() const { return my_asprintf("instr_%lx", rip); }
+public:
+	Instruction(unsigned long rip, IRStmt **content, int nr_statements,
+		    IRTypeEnv *_tyenv, Function *thisFunction);
+	void resolveSuccessors(Function *f);
+	void resolveCallGraph(Oracle *oracle);
+		
+	void updateLiveOnEntry(bool *changed);
+	void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
+		
+	void visit(HeapVisitor &hv) {
+		hv(statements);
+		hv(branch);
+		visit_container(fallThroughs,hv);
+		visit_container(callees, hv);
+		hv(tyenv);
+		hv(thisFunction);
+		visit_container(predecessors, hv);
+	}
+	NAMED_CLASS
+};
+
+void
+Oracle::Function::addInstruction(Instruction *i)
+{
+	assert(i);
+	instructions_xxx->set(i->rip, i);
+}
+
+Oracle::LivenessSet
+Oracle::Function::liveOnEntry(void)
+{
+	return ripToInstruction(rip)->liveOnEntry;
+}
+
+Oracle::RegisterAliasingConfiguration
+Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
+{
+	return ripToInstruction(rip)->aliasOnEntry;
+}
+
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)
 {

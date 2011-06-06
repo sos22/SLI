@@ -173,55 +173,17 @@ public:
 		void prettyPrint(FILE *) const;
 	};
 
-	class Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
-		IRStmt **statements;
-		IRTypeEnv *tyenv;
-		int nr_statements;
-	public:
-		unsigned long rip;
-		std::vector<unsigned long> _fallThroughRips;
-		unsigned long _branchRip;
-		std::vector<unsigned long> _calleeRips;
-		Instruction *branch;
-		std::vector<Instruction *> fallThroughs;
-		std::vector<Function *> callees;
-		Function *thisFunction;
-
-		std::vector<Instruction *> predecessors;
-
-		LivenessSet liveOnEntry;
-		RegisterAliasingConfiguration aliasOnEntry;
-
-	private:
-		char *mkName() const { return my_asprintf("instr_%lx", rip); }
-	public:
-		Instruction(unsigned long rip, IRStmt **content, int nr_statements,
-			    IRTypeEnv *_tyenv, Function *thisFunction);
-		void resolveSuccessors(Function *f);
-		void resolveCallGraph(Oracle *oracle);
-		
-		void updateLiveOnEntry(bool *changed);
-		void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
-		
-		void visit(HeapVisitor &hv) {
-			hv(statements);
-			hv(branch);
-			visit_container(fallThroughs,hv);
-			visit_container(callees, hv);
-			hv(tyenv);
-			hv(thisFunction);
-			visit_container(predecessors, hv);
-		}
-		NAMED_CLASS
-	};
+	class Instruction;
 
 	class Function : public GarbageCollected<Function>, public Named {
 		friend class Oracle;
 
 	public:
-		typedef gc_heap_map<unsigned long, Instruction, &ir_heap>::type instr_map_t;
 		unsigned long rip;
+	private:
+		typedef gc_heap_map<unsigned long, Instruction, &ir_heap>::type instr_map_t;
 		VexPtr<instr_map_t, &ir_heap> instructions_xxx;
+	public:
 		std::vector<Function *> callers;
 		bool registerLivenessCorrect;
 	private:
@@ -234,9 +196,11 @@ public:
 			  registerLivenessCorrect(false)
 		{}
 
+		LivenessSet liveOnEntry();
+		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);
 		void resolveCallGraph(Oracle *oracle);
 		bool hasInstruction(unsigned long rip) const { return instructions_xxx->hasKey(rip); }
-		void addInstruction(Instruction *i) { assert(i); instructions_xxx->set(i->rip, i); }
+		void addInstruction(Instruction *i);
 		Instruction *ripToInstruction(unsigned long rip) {
 			if (instructions_xxx->hasKey(rip))
 				return instructions_xxx->get(rip);
