@@ -945,7 +945,6 @@ private:
 	std::vector<unsigned long> _fallThroughRips;
 	unsigned long _branchRip;
 	std::vector<unsigned long> _calleeRips;
-	std::vector<Instruction *> fallThroughs;
 	std::vector<Function *> callees;
 	Function *thisFunction;
 
@@ -957,6 +956,10 @@ public:
 
 private:
 	char *mkName() const { return my_asprintf("instr_%lx", rip); }
+
+	LivenessSet defined;
+	LivenessSet used;
+
 public:
 	void addFallThrough(unsigned long r) { _fallThroughRips.push_back(r); }
 	void addBranch(unsigned long r) { _branchRip = r; }
@@ -974,7 +977,6 @@ public:
 
 	void visit(HeapVisitor &hv) {
 		hv(statements);
-		visit_container(fallThroughs,hv);
 		visit_container(callees, hv);
 		hv(tyenv);
 		hv(thisFunction);
@@ -1109,6 +1111,60 @@ Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmt
 	  rip(_rip),
 	  thisFunction(_thisFunction)
 {
+	memcpy(statements, stmts, sizeof(stmts[0]) * nr_stmts);
+
+	for (int i = nr_statements - 1; i >= 0; i--) {
+		switch (statements[i]->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			abort();
+		case Ist_AbiHint:
+			break;
+		case Ist_Put:
+		{
+			LivenessSet t;
+			t.define(statements[i]->Ist.Put.offset);
+			defined |= t;
+			used = used & ~t;
+			used = irexprUsedValues(used, statements[i]->Ist.Put.data);
+			break;
+		}
+		case Ist_PutI:
+			used = irexprUsedValues(used, statements[i]->Ist.PutI.data);
+			used = irexprUsedValues(used, statements[i]->Ist.PutI.ix);
+			break;
+		case Ist_WrTmp:
+			used = irexprUsedValues(used, statements[i]->Ist.WrTmp.data);
+			break;
+		case Ist_Store:
+			used = irexprUsedValues(used, statements[i]->Ist.Store.data);
+			used = irexprUsedValues(used, statements[i]->Ist.Store.addr);
+			break;
+		case Ist_CAS:
+			used = irexprUsedValues(used, statements[i]->Ist.CAS.details->addr);
+			used = irexprUsedValues(used, statements[i]->Ist.CAS.details->expdHi);
+			used = irexprUsedValues(used, statements[i]->Ist.CAS.details->expdLo);
+			used = irexprUsedValues(used, statements[i]->Ist.CAS.details->dataHi);
+			used = irexprUsedValues(used, statements[i]->Ist.CAS.details->dataLo);
+			break;
+		case Ist_Dirty:
+			used = irexprUsedValues(used, statements[i]->Ist.Dirty.details->guard);
+			for (int j = 0; statements[i]->Ist.Dirty.details->args[j]; j++)
+				used = irexprUsedValues(used, statements[i]->Ist.Dirty.details->args[j]);
+			used = irexprUsedValues(used, statements[i]->Ist.Dirty.details->mAddr);
+			break;
+		case Ist_MBE:
+			abort();
+		case Ist_Exit:
+			if (_branchRip)
+				used |= thisFunction->liveOnEntry(_branchRip);
+			used = irexprUsedValues(used, statements[i]->Ist.Exit.guard);
+			break;
+		default:
+			abort();
+		}
+	}
 }
 
 void
@@ -1132,7 +1188,6 @@ Oracle::Instruction::resolveSuccessors(Function *f)
 		Instruction *fallThrough = f->ripToInstruction(_fallThroughRips[i]);
 		if (!fallThrough)
 			continue;
-		fallThroughs.push_back(fallThrough);
 		if (!vector_contains(fallThrough->predecessors, this))
 			fallThrough->predecessors.push_back(this);
 	}
@@ -1242,62 +1297,18 @@ Oracle::Instruction::updateLiveOnEntry(bool *changed)
 {
 	LivenessSet res;
 
-	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
-	     it != fallThroughs.end();
+	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	     it != _fallThroughRips.end();
 	     it++)
-		res |= (*it)->liveOnEntry;
+		res |= thisFunction->liveOnEntry(*it);
 	for (std::vector<Function *>::iterator it = callees.begin();
 	     it != callees.end();
 	     it++)
 		res |= (*it)->ripToInstruction((*it)->rip)->liveOnEntry & LivenessSet::argRegisters;
 
-	for (int i = nr_statements - 1; i >= 0; i--) {
-		switch (statements[i]->tag) {
-		case Ist_NoOp:
-			break;
-		case Ist_IMark:
-			abort();
-		case Ist_AbiHint:
-			break;
-		case Ist_Put:
-			res = res.define(statements[i]->Ist.Put.offset);
-			res = irexprUsedValues(res, statements[i]->Ist.Put.data);
-			break;
-		case Ist_PutI:
-			res = irexprUsedValues(res, statements[i]->Ist.PutI.data);
-			res = irexprUsedValues(res, statements[i]->Ist.PutI.ix);
-			break;
-		case Ist_WrTmp:
-			res = irexprUsedValues(res, statements[i]->Ist.WrTmp.data);
-			break;
-		case Ist_Store:
-			res = irexprUsedValues(res, statements[i]->Ist.Store.data);
-			res = irexprUsedValues(res, statements[i]->Ist.Store.addr);
-			break;
-		case Ist_CAS:
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->addr);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdHi);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdLo);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataHi);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataLo);
-			break;
-		case Ist_Dirty:
-			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->guard);
-			for (int j = 0; statements[i]->Ist.Dirty.details->args[j]; j++)
-				res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->args[j]);
-			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->mAddr);
-			break;
-		case Ist_MBE:
-			abort();
-		case Ist_Exit:
-			if (_branchRip)
-				res |= thisFunction->liveOnEntry(_branchRip);
-			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
-			break;
-		default:
-			abort();
-		}
-	}
+	res = res & ~defined;
+	res |= used;
+
 	if (res != liveOnEntry) {
 		assert(res > liveOnEntry);
 		*changed = true;
@@ -1426,16 +1437,17 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<unsigned lo
 			config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
 		config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
 	}
-	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
-	     it != fallThroughs.end();
+	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	     it != _fallThroughRips.end();
 	     it++)
-		config |= (*it)->aliasOnEntry;
-	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
-	     it != fallThroughs.end();
+		config |= thisFunction->aliasConfigOnEntryToInstruction(*it);
+	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	     it != _fallThroughRips.end();
 	     it++) {
-		if (config != (*it)->aliasOnEntry) {
-			changed->push_back((*it)->rip);
-			(*it)->aliasOnEntry = config;
+		Instruction *i = thisFunction->ripToInstruction(*it);
+		if (config != i->aliasOnEntry) {
+			changed->push_back(*it);
+			i->aliasOnEntry = config;
 		}
 	}
 }
