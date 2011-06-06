@@ -197,6 +197,7 @@ public:
 		{}
 
 		LivenessSet liveOnEntry();
+		LivenessSet liveOnEntry(unsigned long);
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);
 		void resolveCallGraph(Oracle *oracle);
 		bool hasInstruction(unsigned long rip) const { return instructions_xxx->hasKey(rip); }

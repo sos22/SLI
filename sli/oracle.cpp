@@ -945,7 +945,6 @@ private:
 	std::vector<unsigned long> _fallThroughRips;
 	unsigned long _branchRip;
 	std::vector<unsigned long> _calleeRips;
-	Instruction *branch;
 	std::vector<Instruction *> fallThroughs;
 	std::vector<Function *> callees;
 	Function *thisFunction;
@@ -975,7 +974,6 @@ public:
 
 	void visit(HeapVisitor &hv) {
 		hv(statements);
-		hv(branch);
 		visit_container(fallThroughs,hv);
 		visit_container(callees, hv);
 		hv(tyenv);
@@ -987,6 +985,12 @@ public:
 
 Oracle::LivenessSet
 Oracle::Function::liveOnEntry(void)
+{
+	return ripToInstruction(rip)->liveOnEntry;
+}
+
+Oracle::LivenessSet
+Oracle::Function::liveOnEntry(unsigned long rip)
 {
 	return ripToInstruction(rip)->liveOnEntry;
 }
@@ -1133,7 +1137,7 @@ Oracle::Instruction::resolveSuccessors(Function *f)
 			fallThrough->predecessors.push_back(this);
 	}
 	if (_branchRip) {
-		branch = f->ripToInstruction(_branchRip);
+		Instruction *branch = f->ripToInstruction(_branchRip);
 		assert(branch);
 		if (!vector_contains(branch->predecessors, this))
 			branch->predecessors.push_back(this);
@@ -1286,8 +1290,8 @@ Oracle::Instruction::updateLiveOnEntry(bool *changed)
 		case Ist_MBE:
 			abort();
 		case Ist_Exit:
-			if (branch)
-				res |= branch->liveOnEntry;
+			if (_branchRip)
+				res |= thisFunction->liveOnEntry(_branchRip);
 			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
 			break;
 		default:
@@ -1379,12 +1383,13 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<unsigned lo
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			if (branch) {
-				RegisterAliasingConfiguration newExitConfig(branch->aliasOnEntry);
+			if (_branchRip) {
+				RegisterAliasingConfiguration bConfig(thisFunction->aliasConfigOnEntryToInstruction(_branchRip));
+				RegisterAliasingConfiguration newExitConfig(bConfig);
 				newExitConfig |= config;
-				if (newExitConfig != branch->aliasOnEntry) {
+				if (newExitConfig != bConfig) {
 					changed->push_back(_branchRip);
-					branch->aliasOnEntry = newExitConfig;
+					thisFunction->ripToInstruction(_branchRip)->aliasOnEntry = newExitConfig;
 				}
 			}
 			break;
