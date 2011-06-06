@@ -8,67 +8,6 @@
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
 
-class Oracle::Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
-	IRStmt **statements;
-	IRTypeEnv *tyenv;
-	int nr_statements;
-public:
-	unsigned long rip;
-	std::vector<unsigned long> _fallThroughRips;
-	unsigned long _branchRip;
-	std::vector<unsigned long> _calleeRips;
-	Instruction *branch;
-	std::vector<Instruction *> fallThroughs;
-	std::vector<Function *> callees;
-	Function *thisFunction;
-
-	std::vector<Instruction *> predecessors;
-
-	LivenessSet liveOnEntry;
-	RegisterAliasingConfiguration aliasOnEntry;
-
-private:
-	char *mkName() const { return my_asprintf("instr_%lx", rip); }
-public:
-	Instruction(unsigned long rip, IRStmt **content, int nr_statements,
-		    IRTypeEnv *_tyenv, Function *thisFunction);
-	void resolveSuccessors(Function *f);
-	void resolveCallGraph(Oracle *oracle);
-		
-	void updateLiveOnEntry(bool *changed);
-	void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
-		
-	void visit(HeapVisitor &hv) {
-		hv(statements);
-		hv(branch);
-		visit_container(fallThroughs,hv);
-		visit_container(callees, hv);
-		hv(tyenv);
-		hv(thisFunction);
-		visit_container(predecessors, hv);
-	}
-	NAMED_CLASS
-};
-
-void
-Oracle::Function::addInstruction(Instruction *i)
-{
-	assert(i);
-	instructions_xxx->set(i->rip, i);
-}
-
-Oracle::LivenessSet
-Oracle::Function::liveOnEntry(void)
-{
-	return ripToInstruction(rip)->liveOnEntry;
-}
-
-Oracle::RegisterAliasingConfiguration
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
-{
-	return ripToInstruction(rip)->aliasOnEntry;
-}
-
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)
 {
@@ -640,104 +579,6 @@ Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
 	printf("Done static analysis.\n");
 }
 
-void
-Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
-{
-	if (addrToFunction->hasKey(x)) {
-		/* Already done */
-		return;
-	}
-
-	Function *work = new Function(x);
-
-	/* Start by building a CFG of the function's instructions. */
-	std::vector<unsigned long> unexplored;
-	unexplored.push_back(x);
-	while (!unexplored.empty()) {
-		unsigned long rip = unexplored.back();
-		unexplored.pop_back();
-
-		if (work->hasInstruction(rip))
-			continue;
-
-		addrToFunction->set(rip, work);
-
-		IRSB *irsb;
-		try {
-			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip);
-		} catch (BadMemoryException &e) {
-			irsb = NULL;
-		}
-		if (!irsb) {
-			printf("WARNING: No IRSB for %lx!\n", rip);
-			continue;
-		}
-		int end_of_instruction;
-		int start_of_instruction = 0;
-		while (start_of_instruction < irsb->stmts_used) {
-			assert(irsb->stmts[start_of_instruction]->tag == Ist_IMark);
-			for (end_of_instruction = start_of_instruction + 1;
-			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
-			     end_of_instruction++)
-				;
-			Instruction *i = new Instruction(rip, irsb->stmts + start_of_instruction + 1,
-							 end_of_instruction - start_of_instruction - 1,
-							 irsb->tyenv, work);
-			if (end_of_instruction == irsb->stmts_used) {
-				if (irsb->jumpkind == Ijk_Call) {
-					i->_fallThroughRips.push_back(extract_call_follower(irsb));
-					if (irsb->next->tag == Iex_Const) {
-						i->_calleeRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
-						heads.push_back(irsb->next->Iex.Const.con->Ico.U64);
-					} else {
-						findPossibleJumpTargets(rip, i->_calleeRips);
-						findPossibleJumpTargets(rip, heads);
-					}
-				} else {
-					if (irsb->next->tag == Iex_Const)
-						i->_fallThroughRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
-					else
-						findPossibleJumpTargets(rip, i->_fallThroughRips);
-				}
-			} else {
-				i->_fallThroughRips.push_back(irsb->stmts[end_of_instruction]->Ist.IMark.addr);
-			}
-			work->addInstruction(i);
-			if (i->_branchRip)
-				unexplored.push_back(i->_branchRip);
-			for (std::vector<unsigned long>::iterator it = i->_fallThroughRips.begin();
-			     it != i->_fallThroughRips.end();
-			     it++)
-				unexplored.push_back(*it);
-			start_of_instruction = end_of_instruction;
-		}
-	}
-
-	/* Now go through and set successor pointers etc. */
-	for (Function::instr_map_t::iterator it = work->instructions_xxx->begin();
-	     it != work->instructions_xxx->end();
-	     it++) {
-		Instruction *i = it.value();
-		assert(i);
-		i->resolveSuccessors(work);
-	}
-}
-
-Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv,
-				 Function *_thisFunction)
-	: statements((IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_stmts)),
-	  tyenv(_tyenv),
-	  nr_statements(nr_stmts),
-	  rip(_rip),
-	  thisFunction(_thisFunction)
-{
-	for (int i = 0; i < nr_statements; i++) {
-		statements[i] = stmts[i];
-		if (statements[i]->tag == Ist_Exit)
-			_branchRip = statements[i]->Ist.Exit.dst->Ico.U64;
-	}
-}
-
 template <typename t>
 bool
 vector_contains(const std::vector<t> &v, const t &val)
@@ -748,39 +589,6 @@ vector_contains(const std::vector<t> &v, const t &val)
 		if (*it == val)
 			return true;
 	return false;
-}
-
-void
-Oracle::Instruction::resolveCallGraph(Oracle *oracle)
-{
-	for (std::vector<unsigned long>::iterator it = _calleeRips.begin();
-	     it != _calleeRips.end();
-	     it++) {
-		Function *callee = oracle->addrToFunction->get(*it);
-		callees.push_back(callee);
-		if (!vector_contains(callee->callers, thisFunction))
-			callee->callers.push_back(thisFunction);
-		assert(callee);
-	}
-}
-
-void
-Oracle::Instruction::resolveSuccessors(Function *f)
-{
-	for (unsigned i = 0; i < _fallThroughRips.size(); i++) {
-		Instruction *fallThrough = f->ripToInstruction(_fallThroughRips[i]);
-		if (!fallThrough)
-			continue;
-		fallThroughs.push_back(fallThrough);
-		if (!vector_contains(fallThrough->predecessors, this))
-			fallThrough->predecessors.push_back(this);
-	}
-	if (_branchRip) {
-		branch = f->ripToInstruction(_branchRip);
-		assert(branch);
-		if (!vector_contains(branch->predecessors, this))
-			branch->predecessors.push_back(this);
-	}
 }
 
 void
@@ -825,103 +633,11 @@ Oracle::calculateAliasing(void)
 	}
 }
 
-void
-Oracle::Function::resolveCallGraph(Oracle *oracle)
-{
-	for (instr_map_t::iterator it = instructions_xxx->begin();
-	     it != instructions_xxx->end();
-	     it++)
-		it.value()->resolveCallGraph(oracle);
-}
-
 template <typename t>
 void
 appendVector(std::vector<t> &dest, const std::vector<t> &src)
 {
 	dest.insert(dest.end(), src.begin(), src.end());
-}
-
-void
-Oracle::Function::calculateRegisterLiveness(bool *done_something)
-{
-	bool changed;
-
-	if (registerLivenessCorrect)
-		return;
-
-	std::vector<Instruction *> instrsToRecalculate1;
-	std::vector<Instruction *> instrsToRecalculate2;
-
-	for (instr_map_t::iterator it = instructions_xxx->begin();
-	     it != instructions_xxx->end();
-	     it++)
-		instrsToRecalculate1.push_back(it.value());
-
-	std::reverse(instrsToRecalculate1.begin(),
-		     instrsToRecalculate1.end());
-
-	changed = false;
-	while (1) {
-		for (std::vector<Instruction *>::iterator it = instrsToRecalculate1.begin();
-		     it != instrsToRecalculate1.end();
-		     it++) {
-			bool t = false;
-			(*it)->updateLiveOnEntry(&t);
-			if (t)
-				appendVector(instrsToRecalculate2, (*it)->predecessors);
-		}
-		instrsToRecalculate1.clear();
-		if (instrsToRecalculate2.empty())
-			break;
-		changed = true;
-
-		for (std::vector<Instruction *>::iterator it = instrsToRecalculate2.begin();
-		     it != instrsToRecalculate2.end();
-		     it++) {
-			bool t = false;
-			(*it)->updateLiveOnEntry(&t);
-			if (t)
-				appendVector(instrsToRecalculate1, (*it)->predecessors);
-		}
-
-		instrsToRecalculate2.clear();
-		if (instrsToRecalculate1.empty())
-			break;
-	}
-
-	registerLivenessCorrect = true;
-
-	if (changed) {
-		*done_something = true;
-		for (std::vector<Function *>::iterator it = callers.begin();
-		     it != callers.end();
-		     it++)
-			(*it)->registerLivenessCorrect = false;
-	}
-}
-
-void
-Oracle::Function::calculateAliasing(bool *done_something)
-{
-	Instruction *head = ripToInstruction(rip);
-	RegisterAliasingConfiguration a(head->aliasOnEntry);
-	a |= RegisterAliasingConfiguration::functionEntryConfiguration;
-	if (head->aliasOnEntry != a) {
-		*done_something = true;
-		head->aliasOnEntry = a;
-	}
-
-	std::vector<Instruction *> needsUpdating;
-	for (instr_map_t::iterator it = instructions_xxx->begin();
-	     it != instructions_xxx->end();
-	     it++)
-		it.value()->updateSuccessorInstructionsAliasing(&needsUpdating);
-	while (!needsUpdating.empty()) {
-		*done_something = true;
-		Instruction *i = needsUpdating.back();
-		needsUpdating.pop_back();
-		i->updateSuccessorInstructionsAliasing(&needsUpdating);
-	}
 }
 
 static Oracle::LivenessSet
@@ -971,74 +687,6 @@ static bool
 operator >(const Oracle::LivenessSet &a, const Oracle::LivenessSet &b)
 {
 	return a.mask != b.mask && (b.mask & ~a.mask) == 0;
-}
-
-void
-Oracle::Instruction::updateLiveOnEntry(bool *changed)
-{
-	LivenessSet res;
-
-	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
-	     it != fallThroughs.end();
-	     it++)
-		res |= (*it)->liveOnEntry;
-	for (std::vector<Function *>::iterator it = callees.begin();
-	     it != callees.end();
-	     it++)
-		res |= (*it)->ripToInstruction((*it)->rip)->liveOnEntry & LivenessSet::argRegisters;
-
-	for (int i = nr_statements - 1; i >= 0; i--) {
-		switch (statements[i]->tag) {
-		case Ist_NoOp:
-			break;
-		case Ist_IMark:
-			abort();
-		case Ist_AbiHint:
-			break;
-		case Ist_Put:
-			res = res.define(statements[i]->Ist.Put.offset);
-			res = irexprUsedValues(res, statements[i]->Ist.Put.data);
-			break;
-		case Ist_PutI:
-			res = irexprUsedValues(res, statements[i]->Ist.PutI.data);
-			res = irexprUsedValues(res, statements[i]->Ist.PutI.ix);
-			break;
-		case Ist_WrTmp:
-			res = irexprUsedValues(res, statements[i]->Ist.WrTmp.data);
-			break;
-		case Ist_Store:
-			res = irexprUsedValues(res, statements[i]->Ist.Store.data);
-			res = irexprUsedValues(res, statements[i]->Ist.Store.addr);
-			break;
-		case Ist_CAS:
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->addr);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdHi);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdLo);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataHi);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataLo);
-			break;
-		case Ist_Dirty:
-			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->guard);
-			for (int j = 0; statements[i]->Ist.Dirty.details->args[j]; j++)
-				res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->args[j]);
-			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->mAddr);
-			break;
-		case Ist_MBE:
-			abort();
-		case Ist_Exit:
-			if (branch)
-				res |= branch->liveOnEntry;
-			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
-			break;
-		default:
-			abort();
-		}
-	}
-	if (res != liveOnEntry) {
-		assert(res > liveOnEntry);
-		*changed = true;
-	}
-	liveOnEntry = res;
 }
 
 static Oracle::PointerAliasingSet
@@ -1181,6 +829,410 @@ irexprAliasingClass(IRExpr *expr,
 	return Oracle::PointerAliasingSet::anything;
 }
 
+bool
+Oracle::RegisterAliasingConfiguration::mightAlias(IRExpr *a, IRExpr *b) const
+{
+	return irexprAliasingClass(a, NULL, *this, NULL) &
+		irexprAliasingClass(b, NULL, *this, NULL);
+}
+
+Oracle::RegisterAliasingConfiguration
+Oracle::getAliasingConfigurationForRip(unsigned long rip)
+{
+	Function *f = get_function(rip);
+	if (!f)
+		return RegisterAliasingConfiguration::unknown;
+	return f->aliasConfigOnEntryToInstruction(rip);
+}
+
+void
+Oracle::loadCallGraph(const char *path)
+{
+	if (callGraphMapping.init(path) < 0)
+		err(1, "opening %s", path);
+}
+
+struct cg_header {
+	unsigned long rip;
+	unsigned long nr;
+};
+
+void
+Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &output)
+{
+	if (!callGraphMapping.live())
+		return;
+	unsigned offset = 0;
+	while (1) {
+		const struct cg_header *h;
+		h = callGraphMapping.get<struct cg_header>(offset);
+		if (!h)
+			return;
+		offset += sizeof(*h);
+		if (h->rip == rip) {
+			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
+			assert(c);
+			for (unsigned i = 0; i < h->nr; i++)
+				output.push_back(c[i]);
+			return;
+		}
+		offset += sizeof(unsigned long) * h->nr;
+	}
+}
+
+void
+Oracle::Function::addInstruction(unsigned long rip, Instruction *i)
+{
+	assert(i);
+	instructions_xxx->set(rip, i);
+}
+
+class Oracle::Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
+	IRStmt **statements;
+	IRTypeEnv *tyenv;
+	int nr_statements;
+public:
+	unsigned long rip;
+
+	std::vector<unsigned long> _fallThroughRips;
+	unsigned long _branchRip;
+	std::vector<unsigned long> _calleeRips;
+	Instruction *branch;
+	std::vector<Instruction *> fallThroughs;
+	std::vector<Function *> callees;
+	Function *thisFunction;
+
+	std::vector<Instruction *> predecessors;
+
+	LivenessSet liveOnEntry;
+	RegisterAliasingConfiguration aliasOnEntry;
+
+private:
+	char *mkName() const { return my_asprintf("instr_%lx", rip); }
+public:
+	Instruction(unsigned long rip, IRStmt **content, int nr_statements,
+		    IRTypeEnv *_tyenv, Function *thisFunction);
+	void resolveSuccessors(Function *f);
+	void resolveCallGraph(Oracle *oracle);
+		
+	void updateLiveOnEntry(bool *changed);
+	void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
+		
+	void visit(HeapVisitor &hv) {
+		hv(statements);
+		hv(branch);
+		visit_container(fallThroughs,hv);
+		visit_container(callees, hv);
+		hv(tyenv);
+		hv(thisFunction);
+		visit_container(predecessors, hv);
+	}
+	NAMED_CLASS
+};
+
+Oracle::LivenessSet
+Oracle::Function::liveOnEntry(void)
+{
+	return ripToInstruction(rip)->liveOnEntry;
+}
+
+Oracle::RegisterAliasingConfiguration
+Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
+{
+	return ripToInstruction(rip)->aliasOnEntry;
+}
+
+void
+Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
+{
+	if (addrToFunction->hasKey(x)) {
+		/* Already done */
+		return;
+	}
+
+	Function *work = new Function(x);
+
+	/* Start by building a CFG of the function's instructions. */
+	std::vector<unsigned long> unexplored;
+	unexplored.push_back(x);
+	while (!unexplored.empty()) {
+		unsigned long rip = unexplored.back();
+		unexplored.pop_back();
+
+		if (work->hasInstruction(rip))
+			continue;
+
+		addrToFunction->set(rip, work);
+
+		IRSB *irsb;
+		try {
+			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip);
+		} catch (BadMemoryException &e) {
+			irsb = NULL;
+		}
+		if (!irsb) {
+			printf("WARNING: No IRSB for %lx!\n", rip);
+			continue;
+		}
+		int end_of_instruction;
+		int start_of_instruction = 0;
+		while (start_of_instruction < irsb->stmts_used) {
+			assert(irsb->stmts[start_of_instruction]->tag == Ist_IMark);
+			for (end_of_instruction = start_of_instruction + 1;
+			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
+			     end_of_instruction++)
+				;
+			Instruction *i = new Instruction(rip, irsb->stmts + start_of_instruction + 1,
+							 end_of_instruction - start_of_instruction - 1,
+							 irsb->tyenv, work);
+			if (end_of_instruction == irsb->stmts_used) {
+				if (irsb->jumpkind == Ijk_Call) {
+					i->_fallThroughRips.push_back(extract_call_follower(irsb));
+					if (irsb->next->tag == Iex_Const) {
+						i->_calleeRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
+						heads.push_back(irsb->next->Iex.Const.con->Ico.U64);
+					} else {
+						findPossibleJumpTargets(rip, i->_calleeRips);
+						findPossibleJumpTargets(rip, heads);
+					}
+				} else {
+					if (irsb->next->tag == Iex_Const)
+						i->_fallThroughRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
+					else
+						findPossibleJumpTargets(rip, i->_fallThroughRips);
+				}
+			} else {
+				i->_fallThroughRips.push_back(irsb->stmts[end_of_instruction]->Ist.IMark.addr);
+			}
+			work->addInstruction(i->rip, i);
+			if (i->_branchRip)
+				unexplored.push_back(i->_branchRip);
+			for (std::vector<unsigned long>::iterator it = i->_fallThroughRips.begin();
+			     it != i->_fallThroughRips.end();
+			     it++)
+				unexplored.push_back(*it);
+			start_of_instruction = end_of_instruction;
+		}
+	}
+
+	/* Now go through and set successor pointers etc. */
+	for (Function::instr_map_t::iterator it = work->instructions_xxx->begin();
+	     it != work->instructions_xxx->end();
+	     it++) {
+		Instruction *i = it.value();
+		assert(i);
+		i->resolveSuccessors(work);
+	}
+}
+
+Oracle::Instruction::Instruction(unsigned long _rip, IRStmt **stmts, int nr_stmts, IRTypeEnv *_tyenv,
+				 Function *_thisFunction)
+	: statements((IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_stmts)),
+	  tyenv(_tyenv),
+	  nr_statements(nr_stmts),
+	  rip(_rip),
+	  thisFunction(_thisFunction)
+{
+	for (int i = 0; i < nr_statements; i++) {
+		statements[i] = stmts[i];
+		if (statements[i]->tag == Ist_Exit)
+			_branchRip = statements[i]->Ist.Exit.dst->Ico.U64;
+	}
+}
+
+void
+Oracle::Instruction::resolveCallGraph(Oracle *oracle)
+{
+	for (std::vector<unsigned long>::iterator it = _calleeRips.begin();
+	     it != _calleeRips.end();
+	     it++) {
+		Function *callee = oracle->addrToFunction->get(*it);
+		callees.push_back(callee);
+		if (!vector_contains(callee->callers, thisFunction))
+			callee->callers.push_back(thisFunction);
+		assert(callee);
+	}
+}
+
+void
+Oracle::Instruction::resolveSuccessors(Function *f)
+{
+	for (unsigned i = 0; i < _fallThroughRips.size(); i++) {
+		Instruction *fallThrough = f->ripToInstruction(_fallThroughRips[i]);
+		if (!fallThrough)
+			continue;
+		fallThroughs.push_back(fallThrough);
+		if (!vector_contains(fallThrough->predecessors, this))
+			fallThrough->predecessors.push_back(this);
+	}
+	if (_branchRip) {
+		branch = f->ripToInstruction(_branchRip);
+		assert(branch);
+		if (!vector_contains(branch->predecessors, this))
+			branch->predecessors.push_back(this);
+	}
+}
+
+void
+Oracle::Function::resolveCallGraph(Oracle *oracle)
+{
+	for (instr_map_t::iterator it = instructions_xxx->begin();
+	     it != instructions_xxx->end();
+	     it++)
+		it.value()->resolveCallGraph(oracle);
+}
+
+void
+Oracle::Function::calculateRegisterLiveness(bool *done_something)
+{
+	bool changed;
+
+	if (registerLivenessCorrect)
+		return;
+
+	std::vector<Instruction *> instrsToRecalculate1;
+	std::vector<Instruction *> instrsToRecalculate2;
+
+	for (instr_map_t::iterator it = instructions_xxx->begin();
+	     it != instructions_xxx->end();
+	     it++)
+		instrsToRecalculate1.push_back(it.value());
+
+	std::reverse(instrsToRecalculate1.begin(),
+		     instrsToRecalculate1.end());
+
+	changed = false;
+	while (1) {
+		for (std::vector<Instruction *>::iterator it = instrsToRecalculate1.begin();
+		     it != instrsToRecalculate1.end();
+		     it++) {
+			bool t = false;
+			(*it)->updateLiveOnEntry(&t);
+			if (t)
+				appendVector(instrsToRecalculate2, (*it)->predecessors);
+		}
+		instrsToRecalculate1.clear();
+		if (instrsToRecalculate2.empty())
+			break;
+		changed = true;
+
+		for (std::vector<Instruction *>::iterator it = instrsToRecalculate2.begin();
+		     it != instrsToRecalculate2.end();
+		     it++) {
+			bool t = false;
+			(*it)->updateLiveOnEntry(&t);
+			if (t)
+				appendVector(instrsToRecalculate1, (*it)->predecessors);
+		}
+
+		instrsToRecalculate2.clear();
+		if (instrsToRecalculate1.empty())
+			break;
+	}
+
+	registerLivenessCorrect = true;
+
+	if (changed) {
+		*done_something = true;
+		for (std::vector<Function *>::iterator it = callers.begin();
+		     it != callers.end();
+		     it++)
+			(*it)->registerLivenessCorrect = false;
+	}
+}
+
+void
+Oracle::Function::calculateAliasing(bool *done_something)
+{
+	Instruction *head = ripToInstruction(rip);
+	RegisterAliasingConfiguration a(head->aliasOnEntry);
+	a |= RegisterAliasingConfiguration::functionEntryConfiguration;
+	if (head->aliasOnEntry != a) {
+		*done_something = true;
+		head->aliasOnEntry = a;
+	}
+
+	std::vector<Instruction *> needsUpdating;
+	for (instr_map_t::iterator it = instructions_xxx->begin();
+	     it != instructions_xxx->end();
+	     it++)
+		it.value()->updateSuccessorInstructionsAliasing(&needsUpdating);
+	while (!needsUpdating.empty()) {
+		*done_something = true;
+		Instruction *i = needsUpdating.back();
+		needsUpdating.pop_back();
+		i->updateSuccessorInstructionsAliasing(&needsUpdating);
+	}
+}
+
+void
+Oracle::Instruction::updateLiveOnEntry(bool *changed)
+{
+	LivenessSet res;
+
+	for (std::vector<Instruction *>::iterator it = fallThroughs.begin();
+	     it != fallThroughs.end();
+	     it++)
+		res |= (*it)->liveOnEntry;
+	for (std::vector<Function *>::iterator it = callees.begin();
+	     it != callees.end();
+	     it++)
+		res |= (*it)->ripToInstruction((*it)->rip)->liveOnEntry & LivenessSet::argRegisters;
+
+	for (int i = nr_statements - 1; i >= 0; i--) {
+		switch (statements[i]->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			abort();
+		case Ist_AbiHint:
+			break;
+		case Ist_Put:
+			res = res.define(statements[i]->Ist.Put.offset);
+			res = irexprUsedValues(res, statements[i]->Ist.Put.data);
+			break;
+		case Ist_PutI:
+			res = irexprUsedValues(res, statements[i]->Ist.PutI.data);
+			res = irexprUsedValues(res, statements[i]->Ist.PutI.ix);
+			break;
+		case Ist_WrTmp:
+			res = irexprUsedValues(res, statements[i]->Ist.WrTmp.data);
+			break;
+		case Ist_Store:
+			res = irexprUsedValues(res, statements[i]->Ist.Store.data);
+			res = irexprUsedValues(res, statements[i]->Ist.Store.addr);
+			break;
+		case Ist_CAS:
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->addr);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdHi);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdLo);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataHi);
+			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataLo);
+			break;
+		case Ist_Dirty:
+			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->guard);
+			for (int j = 0; statements[i]->Ist.Dirty.details->args[j]; j++)
+				res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->args[j]);
+			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->mAddr);
+			break;
+		case Ist_MBE:
+			abort();
+		case Ist_Exit:
+			if (branch)
+				res |= branch->liveOnEntry;
+			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
+			break;
+		default:
+			abort();
+		}
+	}
+	if (res != liveOnEntry) {
+		assert(res > liveOnEntry);
+		*changed = true;
+	}
+	liveOnEntry = res;
+}
+
 void
 Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed)
 {
@@ -1315,29 +1367,6 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 	}
 }
 
-bool
-Oracle::RegisterAliasingConfiguration::mightAlias(IRExpr *a, IRExpr *b) const
-{
-	return irexprAliasingClass(a, NULL, *this, NULL) &
-		irexprAliasingClass(b, NULL, *this, NULL);
-}
-
-const Oracle::RegisterAliasingConfiguration &
-Oracle::getAliasingConfigurationForRip(unsigned long rip)
-{
-	Function *f = get_function(rip);
-	if (!f)
-		return RegisterAliasingConfiguration::unknown;
-	return f->ripToInstruction(rip)->aliasOnEntry;
-}
-
-void
-Oracle::loadCallGraph(const char *path)
-{
-	if (callGraphMapping.init(path) < 0)
-		err(1, "opening %s", path);
-}
-
 void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 				 unsigned long root,
@@ -1399,32 +1428,4 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 	     i != NULL;
 	     i = predecessors[i])
 		output.push_back(i->rip);
-}
-
-struct cg_header {
-	unsigned long rip;
-	unsigned long nr;
-};
-
-void
-Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &output)
-{
-	if (!callGraphMapping.live())
-		return;
-	unsigned offset = 0;
-	while (1) {
-		const struct cg_header *h;
-		h = callGraphMapping.get<struct cg_header>(offset);
-		if (!h)
-			return;
-		offset += sizeof(*h);
-		if (h->rip == rip) {
-			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
-			assert(c);
-			for (unsigned i = 0; i < h->nr; i++)
-				output.push_back(c[i]);
-			return;
-		}
-		offset += sizeof(unsigned long) * h->nr;
-	}
 }

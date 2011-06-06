@@ -200,7 +200,7 @@ public:
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);
 		void resolveCallGraph(Oracle *oracle);
 		bool hasInstruction(unsigned long rip) const { return instructions_xxx->hasKey(rip); }
-		void addInstruction(Instruction *i);
+		void addInstruction(unsigned long rip, Instruction *i);
 		Instruction *ripToInstruction(unsigned long rip) {
 			if (instructions_xxx->hasKey(rip))
 				return instructions_xxx->get(rip);
@@ -270,7 +270,7 @@ public:
 
 	unsigned long selectRandomLoad() const;
 
-	const RegisterAliasingConfiguration &getAliasingConfigurationForRip(unsigned long rip);
+	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);
 
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags, const char *callgraph = NULL)
 		: addrToFunction(new gc_heap_map<unsigned long, Function>::type()), ms(_ms), crashedThread(_thr)
