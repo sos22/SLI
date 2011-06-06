@@ -969,7 +969,7 @@ public:
 	void resolveCallGraph(Oracle *oracle);
 		
 	void updateLiveOnEntry(bool *changed);
-	void updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed);
+	void updateSuccessorInstructionsAliasing(std::vector<unsigned long> *changed);
 	void getSuccessors(std::vector<unsigned long> &out);
 	void addPredecessors(std::vector<Instruction *> &out);
 
@@ -1219,15 +1219,16 @@ Oracle::Function::calculateAliasing(bool *done_something)
 		head->aliasOnEntry = a;
 	}
 
-	std::vector<Instruction *> needsUpdating;
+	std::vector<unsigned long> needsUpdating;
 	for (instr_map_t::iterator it = instructions_xxx->begin();
 	     it != instructions_xxx->end();
 	     it++)
 		it.value()->updateSuccessorInstructionsAliasing(&needsUpdating);
 	while (!needsUpdating.empty()) {
 		*done_something = true;
-		Instruction *i = needsUpdating.back();
+		unsigned long rip = needsUpdating.back();
 		needsUpdating.pop_back();
+		Instruction *i = ripToInstruction(rip);
 		i->updateSuccessorInstructionsAliasing(&needsUpdating);
 	}
 }
@@ -1301,7 +1302,7 @@ Oracle::Instruction::updateLiveOnEntry(bool *changed)
 }
 
 void
-Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction *> *changed)
+Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<unsigned long> *changed)
 {
 	RegisterAliasingConfiguration config(aliasOnEntry);
 	std::map<IRTemp, PointerAliasingSet> temporaryAliases;
@@ -1382,7 +1383,7 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 				RegisterAliasingConfiguration newExitConfig(branch->aliasOnEntry);
 				newExitConfig |= config;
 				if (newExitConfig != branch->aliasOnEntry) {
-					changed->push_back(branch);
+					changed->push_back(_branchRip);
 					branch->aliasOnEntry = newExitConfig;
 				}
 			}
@@ -1428,7 +1429,7 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(std::vector<Instruction
 	     it != fallThroughs.end();
 	     it++) {
 		if (config != (*it)->aliasOnEntry) {
-			changed->push_back(*it);
+			changed->push_back((*it)->rip);
 			(*it)->aliasOnEntry = config;
 		}
 	}
