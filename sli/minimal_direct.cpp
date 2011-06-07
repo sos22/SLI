@@ -26,9 +26,12 @@ main(int argc, char *argv[])
 			my_rip = oracle->selectRandomLoad();
 		examined_loads.insert(my_rip);
 
+		printf("Considering %lx...\n", my_rip);
 		VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
-		if (!proximal)
+		if (!proximal) {
+			printf("No proximal cause -> can't do anything\n");
 			continue;
+		}
 		proximal = backtrackToStartOfInstruction(1, proximal, ms->addressSpace);
 
 		VexPtr<InferredInformation> ii(new InferredInformation(oracle));
@@ -37,6 +40,7 @@ main(int argc, char *argv[])
 		std::vector<unsigned long> previousInstructions;
 		oracle->findPreviousInstructions(previousInstructions, thr->regs.rip(), my_rip);
 
+		printf("%d predecessors.\n", previousInstructions.size());
 		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms);
 	}
 }

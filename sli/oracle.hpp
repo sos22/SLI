@@ -18,8 +18,6 @@ public:
  * analysis is insufficient. */
 class Oracle : public GarbageCollected<Oracle> {
 public:
-	class Function;
-
 	static const int NR_REGS = 16;
 
 	class LivenessSet : public Named {
@@ -173,12 +171,13 @@ public:
 		void prettyPrint(FILE *) const;
 	};
 
-	class Function : public GarbageCollected<Function>, public Named {
+	class Function : public Named {
 		friend class Oracle;
 
 	public:
 		unsigned long rip;
 	private:
+		void *operator new(size_t s); /* DNI */
 		char *mkName() const { return my_asprintf("function_%lx", rip); }
 		void getInstructionsInFunction(std::vector<unsigned long> &out) const;
 		void updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle);
@@ -186,9 +185,9 @@ public:
 		void updateSuccessorInstructionsAliasing(unsigned long rip, AddressSpace *as, std::vector<unsigned long> *changed,
 							 Oracle *oracle);
 		void getInstructionFallThroughs(unsigned long rip, std::vector<unsigned long> &out);
-		void getInstructionCallees(unsigned long rip, std::vector<Function *> &out, Oracle *oracle);
+		void getInstructionCallees(unsigned long rip, std::vector<unsigned long> &out, Oracle *oracle);
 		void getSuccessors(unsigned long rip, std::vector<unsigned long> &succ);
-		void getFunctionCallers(std::vector<Function *> &out, Oracle *oracle);
+		void getFunctionCallers(std::vector<unsigned long> &out, Oracle *oracle);
 		bool registerLivenessCorrect() const;
 		void setRegisterLivenessCorrect(bool v);
 	public:
@@ -228,9 +227,6 @@ private:
 	unsigned long memoryAliasingFilter[nr_memory_filter_words];
 	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
 
-	gc_heap_map<unsigned long, Function>::type *addrToFunction;
-
-	void getFunctions(std::vector<Function *> &out);
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
 	void calculateRegisterLiveness(void);
 	void calculateAliasing(void);
@@ -257,21 +253,15 @@ public:
 	bool functionCanReturn(unsigned long rip);
 
 	void discoverFunctionHeads(std::vector<unsigned long> &heads);
-	Function *get_function(unsigned long rip) { return addrToFunction->get(rip); }
-	void list_functions(std::vector<Function *> *heads) {
-		heads->clear();
-		for (gc_heap_map<unsigned long, Function>::type::iterator i = addrToFunction->begin();
-		     i != addrToFunction->end();
-		     i++)
-			heads->push_back(i.value());
-	}
+
+	void getFunctions(std::vector<unsigned long> &out);
 
 	unsigned long selectRandomLoad() const;
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);
 
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags, const char *callgraph = NULL)
-		: addrToFunction(new gc_heap_map<unsigned long, Function>::type()), ms(_ms), crashedThread(_thr)
+		: ms(_ms), crashedThread(_thr)
 	{
 		if (tags)
 			loadTagTable(tags);
@@ -281,7 +271,6 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(ms);
 		hv(crashedThread);
-		hv(addrToFunction);
 	}
 	NAMED_CLASS
 };

@@ -593,18 +593,19 @@ Oracle::calculateRegisterLiveness(void)
 	bool done_something;
 	unsigned long changed;
 	unsigned long unchanged;
-	std::vector<Function *> functions;
+	std::vector<unsigned long> functions;
 
 	changed = 0;
 	unchanged = 0;
 	do {
 		done_something = false;
 		getFunctions(functions);
-		for (std::vector<Function *>::iterator it = functions.begin();
+		for (std::vector<unsigned long>::iterator it = functions.begin();
 		     it != functions.end();
 		     it++) {
 			bool this_did_something = false;
-			(*it)->calculateRegisterLiveness(ms->addressSpace, &this_did_something, this);
+			Function f(*it);
+			f.calculateRegisterLiveness(ms->addressSpace, &this_did_something, this);
 			if (this_did_something)
 				changed++;
 			else
@@ -618,15 +619,16 @@ void
 Oracle::calculateAliasing()
 {
 	bool done_something;
-	std::vector<Function *> functions;
+	std::vector<unsigned long> functions;
 
 	getFunctions(functions);
-	for (std::vector<Function *>::iterator it = functions.begin();
+	for (std::vector<unsigned long>::iterator it = functions.begin();
 	     it != functions.end();
 	     it++) {
 		do {
 			done_something = false;
-			(*it)->calculateAliasing(ms->addressSpace, &done_something, this);
+			Function f(*it);
+			f.calculateAliasing(ms->addressSpace, &done_something, this);
 		} while (done_something);
 	}
 }
@@ -830,10 +832,8 @@ Oracle::RegisterAliasingConfiguration::mightAlias(IRExpr *a, IRExpr *b) const
 Oracle::RegisterAliasingConfiguration
 Oracle::getAliasingConfigurationForRip(unsigned long rip)
 {
-	Function *f = get_function(rip);
-	if (!f)
-		return RegisterAliasingConfiguration::unknown;
-	return f->aliasConfigOnEntryToInstruction(rip);
+	Function f(rip);
+	return f.aliasConfigOnEntryToInstruction(rip);
 }
 
 void
@@ -877,15 +877,10 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 				 unsigned long rip)
 {
 	std::vector<unsigned long> h;
-	Function *f;
+	Function f(rip);
 
 	h.push_back(root);
 	discoverFunctionHeads(h);
-	f = get_function(rip);
-	if (!f) {
-		printf("No function for %lx!\n", rip);
-		return;
-	}
 
 	/* Build the shortest path from the start of the function to
 	   the desired rip using Dijkstra's algorithm.  */
@@ -898,8 +893,8 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 	   to that node. */
 	std::priority_queue<std::pair<unsigned, unsigned long> > grey;
 
-	pathLengths[f->rip] = 0;
-	grey.push(std::pair<unsigned, unsigned long>(0, f->rip));
+	pathLengths[rip] = 0;
+	grey.push(std::pair<unsigned, unsigned long>(0, rip));
 	while (!grey.empty()) {
 		std::pair<unsigned, unsigned long> e(grey.top());
 		grey.pop();
@@ -907,7 +902,7 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 		assert(pathLengths.count(e.second));
 		unsigned p = pathLengths[e.second] + 1;
 		std::vector<unsigned long> successors;
-		f->getSuccessors(e.second, successors);
+		f.getSuccessors(e.second, successors);
 		for (std::vector<unsigned long>::iterator it = successors.begin();
 		     it != successors.end();
 		     it++) {
@@ -1081,12 +1076,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
 void
 Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 {
-	if (addrToFunction->hasKey(x)) {
-		/* Already done */
-		return;
-	}
-
-	Function *work = new Function(x);
+	Function work(x);
 
 	/* Start by building a CFG of the function's instructions. */
 	std::vector<unsigned long> unexplored;
@@ -1115,8 +1105,6 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			unsigned long r = irsb->stmts[start_of_instruction]->Ist.IMark.addr;
 			if (explored.count(r))
 				break;
-
-			addrToFunction->set(r, work);
 
 			std::vector<unsigned long> branch;
 			std::vector<unsigned long> fallThrough;
@@ -1150,7 +1138,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			unexplored.insert(unexplored.end(), branch.begin(), branch.end());
 
 			explored.insert(r);
-			if (!work->addInstruction(r, callees, fallThrough, branch)) {
+			if (!work.addInstruction(r, callees, fallThrough, branch)) {
 				/* Already explored this instruction
 				 * as part of some other function.
 				 * Meh. */
@@ -1211,12 +1199,12 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 
 	if (changed) {
 		*done_something = true;
-		std::vector<Function *> callers;
+		std::vector<unsigned long> callers;
 		getFunctionCallers(callers, oracle);
-		for (std::vector<Function *>::iterator it = callers.begin();
+		for (std::vector<unsigned long>::iterator it = callers.begin();
 		     it != callers.end();
 		     it++)
-			(*it)->setRegisterLivenessCorrect(false);
+			(Function(*it)).setRegisterLivenessCorrect(false);
 	}
 }
 
@@ -1257,13 +1245,14 @@ Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *c
 	     it != fallThroughRips.end();
 	     it++)
 		res |= liveOnEntry(*it);
-	std::vector<Function *> callees;
+	std::vector<unsigned long> callees;
 	getInstructionCallees(rip, callees, oracle);
-	for (std::vector<Function *>::iterator it = callees.begin();
+	for (std::vector<unsigned long>::iterator it = callees.begin();
 	     it != callees.end();
-	     it++)
-		res |= (*it)->liveOnEntry((*it)->rip) & LivenessSet::argRegisters;
-	
+	     it++) {
+		Function f(*it);
+		res |= f.liveOnEntry(*it) & LivenessSet::argRegisters;
+	}
 	IRSB *irsb = as->getIRSBForAddress(-1, rip);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
@@ -1442,14 +1431,14 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 		}
 	}
 
-	std::vector<Function *> callees;
+	std::vector<unsigned long> callees;
 	getInstructionCallees(rip, callees, oracle);
 	if (!callees.empty())
 		config.v[0] = PointerAliasingSet::notAPointer;
-	for (std::vector<Function *>::iterator it = callees.begin();
+	for (std::vector<unsigned long>::iterator it = callees.begin();
 	     config.v[0] != PointerAliasingSet::anything && it != callees.end();
 	     it++) {
-		LivenessSet ls = (*it)->liveOnEntry((*it)->rip);
+		LivenessSet ls = (Function(*it)).liveOnEntry(*it);
 		/* If any of the argument registers contain stack
 		   pointers on entry, the return value can potentially
 		   also contain stack pointers. */
@@ -1634,56 +1623,35 @@ Oracle::Function::addInstruction(unsigned long rip,
 }
 
 void
-Oracle::Function::getInstructionCallees(unsigned long rip, std::vector<Function *> &out, Oracle *oracle)
+Oracle::Function::getInstructionCallees(unsigned long rip, std::vector<unsigned long> &out, Oracle *oracle)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT dest FROM callRips WHERE rip = ?");
 	bind_int64(stmt, 1, rip);
-	std::vector<unsigned long> rips;
-	extract_int64_column(stmt, 0, rips);
-
-	for (std::vector<unsigned long>::iterator it = rips.begin();
-	     it != rips.end();
-	     it++)
-		out.push_back(oracle->get_function(*it));
+	extract_int64_column(stmt, 0, out);
 }
 
 void
-Oracle::Function::getFunctionCallers(std::vector<Function *> &out, Oracle *oracle)
+Oracle::Function::getFunctionCallers(std::vector<unsigned long> &out, Oracle *oracle)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
 	bind_int64(stmt, 1, rip);
-	std::vector<unsigned long> rips;
-	extract_int64_column(stmt, 0, rips);
-
-	for (std::vector<unsigned long>::iterator it = rips.begin();
-	     it != rips.end();
-	     it++)
-		out.push_back(oracle->get_function(*it));
+	extract_int64_column(stmt, 0, out);
 }
 
 void
-Oracle::getFunctions(std::vector<Function *> &out)
+Oracle::getFunctions(std::vector<unsigned long> &out)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT DISTINCT functionHead FROM instructionAttributes");
-	std::vector<unsigned long> rips;
-	extract_int64_column(stmt, 0, rips);
-
-	for (std::vector<unsigned long>::iterator it = rips.begin();
-	     it != rips.end();
-	     it++) {
-		Function *f = get_function(*it);
-		if (f)
-			out.push_back(f);
-	}
+	extract_int64_column(stmt, 0, out);
 }
 
 bool

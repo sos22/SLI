@@ -127,13 +127,13 @@ find_words(char *command)
 static void
 list_heads(Oracle *oracle)
 {
-	std::vector<Oracle::Function *> f;
+	std::vector<unsigned long> f;
 
-	oracle->list_functions(&f);
-	for (std::vector<Oracle::Function *>::iterator it = f.begin();
+	oracle->getFunctions(f);
+	for (std::vector<unsigned long>::iterator it = f.begin();
 	     it != f.end();
 	     it++)
-		printf("%s\n", (*it)->name());
+		printf("%lx\n", *it);
 }
 
 static void
@@ -175,22 +175,14 @@ run_command(Oracle *oracle)
 	} else if (*words[0] == "list_heads") {
 		list_heads(oracle);
 	} else if (*words[0] == "liveness") {
-		Oracle::Function *f = oracle->get_function(*words[1]);
-		if (!f) {
-			printf("No function at %s\n", words[1]->name());
-		} else {
-			printf("%s\n", f->liveOnEntry().name());
-		}
+		Oracle::Function f(*words[1]);
+		printf("%s\n", f.liveOnEntry().name());
 	} else if (*words[0] == "alias") {
-		Oracle::Function *f = oracle->get_function(*words[1]);
-		if (!f) {
-			printf("No function at %s\n", words[1]->name());
-		} else {
-			Oracle::RegisterAliasingConfiguration alias = f->aliasConfigOnEntryToInstruction(*words[2]);
-			printf("Alias table for %lx:%lx:\n", (unsigned long)*words[1],
-			       (unsigned long)*words[2]);
-			alias.prettyPrint(stdout);
-		}
+		Oracle::Function f(*words[1]);
+		Oracle::RegisterAliasingConfiguration alias = f.aliasConfigOnEntryToInstruction(*words[2]);
+		printf("Alias table for %lx:%lx:\n", (unsigned long)*words[1],
+		       (unsigned long)*words[2]);
+		alias.prettyPrint(stdout);
 	} else if (*words[0] == "dumptags") {
 		dumpTagTable(oracle);
 	} else {
