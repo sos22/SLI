@@ -190,6 +190,7 @@ public:
 		void getFunctionCallers(std::vector<unsigned long> &out, Oracle *oracle);
 		bool registerLivenessCorrect() const;
 		void setRegisterLivenessCorrect(bool v);
+		bool exists() const;
 	public:
 		Function(unsigned long _rip)
 			: rip(_rip)
@@ -234,6 +235,7 @@ private:
 	Mapping callGraphMapping;
 	void loadCallGraph(const char *path);
 	void findPossibleJumpTargets(unsigned long from, std::vector<unsigned long> &targets);
+	unsigned long functionHeadForInstruction(unsigned long rip);
 public:
 	MachineState *ms;
 	Thread *crashedThread;

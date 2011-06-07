@@ -561,20 +561,6 @@ Oracle::loadTagTable(const char *path)
 	}
 }
 
-void
-Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
-{
-	while (!heads.empty()) {
-		unsigned long head;
-		head = heads.back();
-		heads.pop_back();
-		discoverFunctionHead(head, heads);
-	}
-
-	calculateRegisterLiveness();
-	calculateAliasing();
-}
-
 template <typename t>
 bool
 vector_contains(const std::vector<t> &v, const t &val)
@@ -877,10 +863,16 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 				 unsigned long rip)
 {
 	std::vector<unsigned long> h;
-	Function f(rip);
 
 	h.push_back(root);
 	discoverFunctionHeads(h);
+
+	unsigned long r = functionHeadForInstruction(rip);
+	if (!r) {
+		printf("No function for %lx\n", rip);
+		return;
+	}
+	Function f(r);
 
 	/* Build the shortest path from the start of the function to
 	   the desired rip using Dijkstra's algorithm.  */
@@ -893,8 +885,8 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 	   to that node. */
 	std::priority_queue<std::pair<unsigned, unsigned long> > grey;
 
-	pathLengths[rip] = 0;
-	grey.push(std::pair<unsigned, unsigned long>(0, rip));
+	pathLengths[f.rip] = 0;
+	grey.push(std::pair<unsigned, unsigned long>(0, f.rip));
 	while (!grey.empty()) {
 		std::pair<unsigned, unsigned long> e(grey.top());
 		grey.pop();
@@ -930,7 +922,11 @@ database(void)
 	if (_database)
 		return _database;
 	
-	unlink("static.db");
+	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
+	if (rc == SQLITE_OK) {
+		/* Return existing database */
+		return _database;
+	}
 
 	/* Create new database */
 	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
@@ -968,8 +964,10 @@ database(void)
 	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
-	/* Since we blow away and recreate the database every time,
-	   there's not much point in journaling or fsync()ing it. */
+	/* All of the information in the database can be regenerated
+	   by just blowing it away and starting over, so there's not
+	   much point in doing lots of journaling and fsync()
+	   operations. */
 	rc = sqlite3_exec(_database, "PRAGMA journal_mode = OFF", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
@@ -1011,6 +1009,46 @@ bind_int64(sqlite3_stmt *stmt, int idx, unsigned long val)
 	int rc;
 	rc = sqlite3_bind_int64(stmt, idx, val);
 	assert(rc == SQLITE_OK);
+}
+
+static void
+drop_index(const char *name)
+{
+	char *s = my_asprintf("DROP INDEX %s", name);
+	sqlite3_exec(database(), s, NULL, NULL, NULL);
+	free(s);
+}
+
+static void
+create_index(const char *name, const char *table, const char *field)
+{
+	char *s = my_asprintf("CREATE INDEX %s ON %s (%s)", name, table, field);
+	sqlite3_exec(database(), s, NULL, NULL, NULL);
+	free(s);
+}
+
+void
+Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
+{
+	drop_index("branchDest");
+	drop_index("callDest");
+	drop_index("fallThroughDest");
+	drop_index("instructionAttributesFunctionHead");
+
+	while (!heads.empty()) {
+		unsigned long head;
+		head = heads.back();
+		heads.pop_back();
+		discoverFunctionHead(head, heads);
+		printf("%zd heads left to process...\n", heads.size());
+	}
+
+	create_index("branchDest", "branchRips", "dest");
+	create_index("callDest", "callRips", "dest");
+	create_index("fallThroughDest", "fallThroughRips", "dest");
+	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
+	calculateRegisterLiveness();
+	calculateAliasing();
 }
 
 Oracle::LivenessSet
@@ -1077,6 +1115,9 @@ void
 Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 {
 	Function work(x);
+
+	if (work.exists())
+		return;
 
 	/* Start by building a CFG of the function's instructions. */
 	std::vector<unsigned long> unexplored;
@@ -1573,12 +1614,11 @@ Oracle::Function::addInstruction(unsigned long rip,
 	bind_int64(stmt, 1, rip);
 	bind_int64(stmt, 2, this->rip);
 	rc = sqlite3_step(stmt);
+	sqlite3_finalize(stmt);
 	if (rc == SQLITE_CONSTRAINT) {
 		return false;
 	}
 	assert(rc == SQLITE_DONE);
-	rc = sqlite3_reset(stmt);
-	assert(rc == SQLITE_OK);
 
 	stmt = prepare_statement("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
 	for (std::vector<unsigned long>::const_iterator it = fallThrough.begin();
@@ -1683,4 +1723,32 @@ Oracle::Function::setRegisterLivenessCorrect(bool x)
 	assert(rc == SQLITE_DONE);
 	rc = sqlite3_reset(stmt);
 	assert(rc == SQLITE_OK);
+}
+
+bool
+Oracle::Function::exists() const
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT COUNT(*) FROM instructionAttributes WHERE functionHead = ?");
+	bind_int64(stmt, 1, rip);
+	std::vector<unsigned long> x;
+	extract_int64_column(stmt, 0, x);
+	assert(x.size() == 1);
+	return x[0] != 0;
+}
+
+unsigned long
+Oracle::functionHeadForInstruction(unsigned long rip)
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT functionHead FROM instructionAttributes WHERE rip = ?");
+	bind_int64(stmt, 1, rip);
+	std::vector<unsigned long> x;
+	extract_int64_column(stmt, 0, x);
+	if (x.size() == 0)
+		return 0;
+	assert(x.size() == 1);
+	return x[0];
 }

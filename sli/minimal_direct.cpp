@@ -38,7 +38,9 @@ main(int argc, char *argv[])
 		ii->addCrashReason(proximal);
 
 		std::vector<unsigned long> previousInstructions;
-		oracle->findPreviousInstructions(previousInstructions, thr->regs.rip(), my_rip);
+		oracle->findPreviousInstructions(previousInstructions,
+						 /*thr->regs.rip()*/ 0x5fd088,  /* we know where main() is */
+						 my_rip);
 
 		printf("%d predecessors.\n", previousInstructions.size());
 		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms);
