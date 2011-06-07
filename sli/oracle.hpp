@@ -178,7 +178,6 @@ public:
 
 	public:
 		unsigned long rip;
-		bool registerLivenessCorrect;
 	private:
 		char *mkName() const { return my_asprintf("function_%lx", rip); }
 		void getInstructionsInFunction(std::vector<unsigned long> &out) const;
@@ -190,10 +189,11 @@ public:
 		void getInstructionCallees(unsigned long rip, std::vector<Function *> &out, Oracle *oracle);
 		void getSuccessors(unsigned long rip, std::vector<unsigned long> &succ);
 		void getFunctionCallers(std::vector<Function *> &out, Oracle *oracle);
+		bool registerLivenessCorrect() const;
+		void setRegisterLivenessCorrect(bool v);
 	public:
 		Function(unsigned long _rip)
-			: rip(_rip),
-			  registerLivenessCorrect(false)
+			: rip(_rip)
 		{}
 
 		LivenessSet liveOnEntry();

@@ -970,6 +970,8 @@ database(void)
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip INTEGER, dest INTEGER, UNIQUE (rip, dest))", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
 
 	/* Since we blow away and recreate the database every time,
 	   there's not much point in journaling or fsync()ing it. */
@@ -1165,7 +1167,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 {
 	bool changed;
 
-	if (registerLivenessCorrect)
+	if (registerLivenessCorrect())
 		return;
 
 	std::vector<unsigned long> instrsToRecalculate1;
@@ -1205,7 +1207,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 			break;
 	}
 
-	registerLivenessCorrect = true;
+	setRegisterLivenessCorrect(true);
 
 	if (changed) {
 		*done_something = true;
@@ -1214,7 +1216,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 		for (std::vector<Function *>::iterator it = callers.begin();
 		     it != callers.end();
 		     it++)
-			(*it)->registerLivenessCorrect = false;
+			(*it)->setRegisterLivenessCorrect(false);
 	}
 }
 
@@ -1682,4 +1684,35 @@ Oracle::getFunctions(std::vector<Function *> &out)
 		if (f)
 			out.push_back(f);
 	}
+}
+
+bool
+Oracle::Function::registerLivenessCorrect() const
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT registerLivenessCorrect FROM functionAttribs WHERE functionHead = ?");
+	bind_int64(stmt, 1, rip);
+	std::vector<unsigned long> a;
+	extract_int64_column(stmt, 0, a);
+	if (a.size() == 0)
+		return false;
+	assert(a.size() == 1);
+	return !!a[0];
+}
+
+void
+Oracle::Function::setRegisterLivenessCorrect(bool x)
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect) VALUES (?, ?)");
+	bind_int64(stmt, 1, rip);
+	bind_int64(stmt, 2, x);
+
+	int rc;
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+	rc = sqlite3_reset(stmt);
+	assert(rc == SQLITE_OK);
 }
