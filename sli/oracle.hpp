@@ -36,8 +36,8 @@ public:
 		LivenessSet operator &(const LivenessSet x) { return LivenessSet(mask & x.mask); }
 		static LivenessSet everything;
 		static LivenessSet argRegisters;
-	private:
 		LivenessSet(unsigned long _m) : mask(_m) {}
+	private:
 		char *mkName() const {
 			int i;
 			char *acc;
@@ -122,8 +122,8 @@ public:
 			}
 			return strdup(r);
 		}
-		PointerAliasingSet(int _v) : v(_v) {}
 	public:
+		PointerAliasingSet(int _v) : v(_v) {}
 
 		PointerAliasingSet() : v(0) {}
 		static const PointerAliasingSet notAPointer;
@@ -173,26 +173,26 @@ public:
 		void prettyPrint(FILE *) const;
 	};
 
-	class Instruction;
-
 	class Function : public GarbageCollected<Function>, public Named {
 		friend class Oracle;
 
 	public:
 		unsigned long rip;
-	private:
-		typedef gc_heap_map<unsigned long, Instruction, &ir_heap>::type instr_map_t;
-		VexPtr<instr_map_t, &ir_heap> instructions_xxx;
-	public:
-		std::vector<Function *> callers;
 		bool registerLivenessCorrect;
 	private:
-
 		char *mkName() const { return my_asprintf("function_%lx", rip); }
+		void getInstructionsInFunction(std::vector<unsigned long> &out) const;
+		void updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle);
+		void addPredecessors(unsigned long rip, std::vector<unsigned long> &out);
+		void updateSuccessorInstructionsAliasing(unsigned long rip, AddressSpace *as, std::vector<unsigned long> *changed,
+							 Oracle *oracle);
+		void getInstructionFallThroughs(unsigned long rip, std::vector<unsigned long> &out);
+		void getInstructionCallees(unsigned long rip, std::vector<Function *> &out, Oracle *oracle);
+		void getSuccessors(unsigned long rip, std::vector<unsigned long> &succ);
+		void getFunctionCallers(std::vector<Function *> &out, Oracle *oracle);
 	public:
 		Function(unsigned long _rip)
 			: rip(_rip),
-			  instructions_xxx(new instr_map_t()),
 			  registerLivenessCorrect(false)
 		{}
 
@@ -201,22 +201,14 @@ public:
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);
 		void setAliasConfigOnEntryToInstruction(unsigned long rip, const RegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
-		bool hasInstruction(unsigned long rip) const { return instructions_xxx->hasKey(rip); }
-		void addInstruction(unsigned long rip,
+		bool addInstruction(unsigned long rip,
 				    const std::vector<unsigned long> &callees,
 				    const std::vector<unsigned long> &fallThrough,
 				    const std::vector<unsigned long> &branch);
-		Instruction *ripToInstruction(unsigned long rip) {
-			if (instructions_xxx->hasKey(rip))
-				return instructions_xxx->get(rip);
-			else
-				return NULL;
-		}
-		void calculateRegisterLiveness(AddressSpace *as, bool *done_something);
-		void calculateAliasing(AddressSpace *as, bool *done_something);
-		void getInstrSuccessors(unsigned long r, std::vector<unsigned long> &out);
+		void calculateRegisterLiveness(AddressSpace *as, bool *done_something, Oracle *oracle);
+		void calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle);
 
-		void visit(HeapVisitor &hv) {visit_container(callers, hv);}
+		void visit(HeapVisitor &hv) { }
 		NAMED_CLASS
 	};
 	struct tag_entry {
@@ -236,9 +228,9 @@ private:
 	unsigned long memoryAliasingFilter[nr_memory_filter_words];
 	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
 
-	std::vector<Function *> functions;
 	gc_heap_map<unsigned long, Function>::type *addrToFunction;
 
+	void getFunctions(std::vector<Function *> &out);
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
 	void calculateRegisterLiveness(void);
 	void calculateAliasing(void);
@@ -290,10 +282,6 @@ public:
 		hv(ms);
 		hv(crashedThread);
 		hv(addrToFunction);
-		for (std::vector<Function *>::iterator it = functions.begin();
-		     it != functions.end();
-		     it++)
-			hv(*it);
 	}
 	NAMED_CLASS
 };

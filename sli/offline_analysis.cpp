@@ -80,7 +80,12 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 	   Grab the crashing instruction and try emulating it.  If it
 	   results in a crash, we can be pretty confident that we've
 	   found the problem. */
-	irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
+	try {
+		irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
+	} catch (BadMemoryException &e) {
+		return NULL;
+	}
+
 	thr->temporaries.setSize(irsb->tyenv->types_used);
 	for (int x = 1 /* Skip the initial IMark */;
 	     x < irsb->stmts_used;

@@ -4,6 +4,8 @@
 #include <map>
 #include <queue>
 
+#include <sqlite3.h>
+
 #include "sli.h"
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
@@ -562,7 +564,6 @@ Oracle::loadTagTable(const char *path)
 void
 Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
 {
-	printf("Doing static analysis...\n");
 	while (!heads.empty()) {
 		unsigned long head;
 		head = heads.back();
@@ -570,13 +571,8 @@ Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
 		discoverFunctionHead(head, heads);
 	}
 
-	for (std::vector<Function *>::iterator it = functions.begin();
-	     it != functions.end();
-	     it++)
-		(*it)->resolveCallGraph(this);
 	calculateRegisterLiveness();
 	calculateAliasing();
-	printf("Done static analysis.\n");
 }
 
 template <typename t>
@@ -597,16 +593,18 @@ Oracle::calculateRegisterLiveness(void)
 	bool done_something;
 	unsigned long changed;
 	unsigned long unchanged;
+	std::vector<Function *> functions;
 
 	changed = 0;
 	unchanged = 0;
 	do {
 		done_something = false;
+		getFunctions(functions);
 		for (std::vector<Function *>::iterator it = functions.begin();
 		     it != functions.end();
 		     it++) {
 			bool this_did_something = false;
-			(*it)->calculateRegisterLiveness(ms->addressSpace, &this_did_something);
+			(*it)->calculateRegisterLiveness(ms->addressSpace, &this_did_something, this);
 			if (this_did_something)
 				changed++;
 			else
@@ -614,21 +612,21 @@ Oracle::calculateRegisterLiveness(void)
 			done_something |= this_did_something;
 		}
 	} while (done_something);
-	printf("%ld function register calculations, of which %ld made progress.\n",
-	       unchanged+changed, changed);
 }
 
 void
 Oracle::calculateAliasing()
 {
 	bool done_something;
+	std::vector<Function *> functions;
 
+	getFunctions(functions);
 	for (std::vector<Function *>::iterator it = functions.begin();
 	     it != functions.end();
 	     it++) {
 		do {
 			done_something = false;
-			(*it)->calculateAliasing(ms->addressSpace, &done_something);
+			(*it)->calculateAliasing(ms->addressSpace, &done_something, this);
 		} while (done_something);
 	}
 }
@@ -909,7 +907,7 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 		assert(pathLengths.count(e.second));
 		unsigned p = pathLengths[e.second] + 1;
 		std::vector<unsigned long> successors;
-		f->getInstrSuccessors(e.second, successors);
+		f->getSuccessors(e.second, successors);
 		for (std::vector<unsigned long>::iterator it = successors.begin();
 		     it != successors.end();
 		     it++) {
@@ -927,63 +925,155 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 		output.push_back(i);
 }
 
-class Oracle::Instruction : public GarbageCollected<Instruction, &ir_heap>, public Named {
-public:
-	unsigned long rip;
+static sqlite3 *_database;
 
-private:
-	std::vector<unsigned long> _fallThroughRips;
-	unsigned long _branchRip;
-	std::vector<unsigned long> _calleeRips;
-	std::vector<Function *> callees;
-	Function *thisFunction;
-
-	std::vector<Instruction *> predecessors;
-public:
-
-	LivenessSet liveOnEntry;
-	RegisterAliasingConfiguration aliasOnEntry;
-
-private:
-	char *mkName() const { return my_asprintf("instr_%lx", rip); }
-public:
-	void addFallThrough(unsigned long r) { _fallThroughRips.push_back(r); }
-	void addBranch(unsigned long r) { _branchRip = r; }
-	void addCallee(unsigned long r) { _calleeRips.push_back(r); }
-
-	Instruction(unsigned long rip, Function *thisFunction);
-	void resolveSuccessors(Function *f);
-	void resolveCallGraph(Oracle *oracle);
-		
-	void updateLiveOnEntry(AddressSpace *as, bool *changed);
-	void updateSuccessorInstructionsAliasing(AddressSpace *as, std::vector<unsigned long> *changed);
-	void getSuccessors(std::vector<unsigned long> &out);
-	void addPredecessors(std::vector<Instruction *> &out);
-
-	void visit(HeapVisitor &hv) {
-		visit_container(callees, hv);
-		hv(thisFunction);
-		visit_container(predecessors, hv);
-	}
-	NAMED_CLASS
-};
-
-Oracle::LivenessSet
-Oracle::Function::liveOnEntry(void)
+static sqlite3 *
+database(void)
 {
-	return ripToInstruction(rip)->liveOnEntry;
+	int rc;
+
+	if (_database)
+		return _database;
+	
+	unlink("static.db");
+
+	/* Create new database */
+	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
+	assert(rc == SQLITE_OK);
+
+	rc = sqlite3_exec(_database,
+			  "CREATE TABLE instructionAttributes (rip INTEGER PRIMARY KEY, liveOnEntry INTEGER,"
+			  "alias0 INTEGER,"
+			  "alias1 INTEGER,"
+			  "alias2 INTEGER,"
+			  "alias3 INTEGER,"
+			  "alias4 INTEGER,"
+			  "alias5 INTEGER,"
+			  "alias6 INTEGER,"
+			  "alias7 INTEGER,"
+			  "alias8 INTEGER,"
+			  "alias9 INTEGER,"
+			  "alias10 INTEGER,"
+			  "alias11 INTEGER,"
+			  "alias12 INTEGER,"
+			  "alias13 INTEGER,"
+			  "alias14 INTEGER,"
+			  "alias15 INTEGER,"
+			  "functionHead INTEGER NOT NULL)",
+			  NULL,
+			  NULL,
+			  NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip INTEGER, dest INTEGER, UNIQUE (rip, dest))", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip INTEGER, dest INTEGER, UNIQUE (rip, dest))", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip INTEGER, dest INTEGER, UNIQUE (rip, dest))", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+
+	/* Since we blow away and recreate the database every time,
+	   there's not much point in journaling or fsync()ing it. */
+	rc = sqlite3_exec(_database, "PRAGMA journal_mode = OFF", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+
+	return _database;
+}
+
+static sqlite3_stmt *
+prepare_statement(const char *stmt)
+{
+	int rc;
+	sqlite3_stmt *res;
+	rc = sqlite3_prepare_v2(
+		database(),
+		stmt,
+		-1,
+		&res,
+		NULL);
+	assert(rc == SQLITE_OK);
+	return res;
+}
+
+static void
+extract_int64_column(sqlite3_stmt *stmt, int column, std::vector<unsigned long> &out)
+{
+	int rc;
+	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+		assert(sqlite3_column_type(stmt, column) == SQLITE_INTEGER);
+		out.push_back(sqlite3_column_int64(stmt, column));
+	}
+	assert(rc == SQLITE_DONE);
+	sqlite3_reset(stmt);
+}
+
+static void
+bind_int64(sqlite3_stmt *stmt, int idx, unsigned long val)
+{
+	int rc;
+	rc = sqlite3_bind_int64(stmt, idx, val);
+	assert(rc == SQLITE_OK);
 }
 
 Oracle::LivenessSet
 Oracle::Function::liveOnEntry(unsigned long rip)
 {
-	return ripToInstruction(rip)->liveOnEntry;
+	static sqlite3_stmt *stmt;
+	int rc;
+
+	if (!stmt)
+		stmt = prepare_statement("SELECT liveOnEntry FROM instructionAttributes WHERE rip = ?");
+	bind_int64(stmt, 1, rip);
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
+	if (rc == SQLITE_DONE || sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
+		/* Still using default live set for this isntruction. */
+		sqlite3_reset(stmt);
+		return Oracle::LivenessSet();
+	}
+	unsigned long r;
+	r = sqlite3_column_int64(stmt, 0);
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+	sqlite3_reset(stmt);
+	return LivenessSet(r);
+}
+
+Oracle::LivenessSet
+Oracle::Function::liveOnEntry()
+{
+	return liveOnEntry(rip);
 }
 
 Oracle::RegisterAliasingConfiguration
 Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
 {
-	return ripToInstruction(rip)->aliasOnEntry;
+	static sqlite3_stmt *stmt;
+	int rc;
+
+	if (!stmt)
+		stmt = prepare_statement(
+			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15 FROM instructionAttributes WHERE rip = ?");
+	bind_int64(stmt, 1, rip);
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
+	if (rc == SQLITE_DONE || sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
+		sqlite3_reset(stmt);
+		return RegisterAliasingConfiguration::unknown;
+	}
+	RegisterAliasingConfiguration rac;
+	int i;
+	for (i = 0; i < NR_REGS; i++) {
+		unsigned long r;
+		assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
+		r = sqlite3_column_int64(stmt, i);
+		rac.v[r] = PointerAliasingSet(r);
+	}
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+	sqlite3_reset(stmt);
+	return rac;
 }
 
 void
@@ -998,15 +1088,14 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 
 	/* Start by building a CFG of the function's instructions. */
 	std::vector<unsigned long> unexplored;
+	std::set<unsigned long> explored;
 	unexplored.push_back(x);
 	while (!unexplored.empty()) {
 		unsigned long rip = unexplored.back();
 		unexplored.pop_back();
 
-		if (work->hasInstruction(rip))
+		if (explored.count(rip))
 			continue;
-
-		addrToFunction->set(rip, work);
 
 		IRSB *irsb;
 		try {
@@ -1014,14 +1103,19 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		} catch (BadMemoryException &e) {
 			irsb = NULL;
 		}
-		if (!irsb) {
-			printf("WARNING: No IRSB for %lx!\n", rip);
+		if (!irsb)
 			continue;
-		}
+
 		int end_of_instruction;
 		int start_of_instruction = 0;
 		while (start_of_instruction < irsb->stmts_used) {
 			assert(irsb->stmts[start_of_instruction]->tag == Ist_IMark);
+			unsigned long r = irsb->stmts[start_of_instruction]->Ist.IMark.addr;
+			if (explored.count(r))
+				break;
+
+			addrToFunction->set(r, work);
+
 			std::vector<unsigned long> branch;
 			std::vector<unsigned long> fallThrough;
 			std::vector<unsigned long> callees;
@@ -1042,7 +1136,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 				} else {
 					if (irsb->next->tag == Iex_Const)
 						fallThrough.push_back(irsb->next->Iex.Const.con->Ico.U64);
-					else
+					else if (irsb->jumpkind != Ijk_Ret)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
@@ -1050,113 +1144,60 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			}
 
 			heads.insert(heads.end(), callees.begin(), callees.end());
-			unexplored.insert(unexplored.end(), unexplored.begin(), unexplored.end());
+			unexplored.insert(unexplored.end(), fallThrough.begin(), fallThrough.end());
 			unexplored.insert(unexplored.end(), branch.begin(), branch.end());
 
-			work->addInstruction(rip, callees, fallThrough, branch);
+			explored.insert(r);
+			if (!work->addInstruction(r, callees, fallThrough, branch)) {
+				/* Already explored this instruction
+				 * as part of some other function.
+				 * Meh. */
+				break;
+			}
 
 			start_of_instruction = end_of_instruction;
 		}
 	}
-
-	/* Now go through and set successor pointers etc. */
-	for (Function::instr_map_t::iterator it = work->instructions_xxx->begin();
-	     it != work->instructions_xxx->end();
-	     it++) {
-		Instruction *i = it.value();
-		assert(i);
-		i->resolveSuccessors(work);
-	}
-}
-
-Oracle::Instruction::Instruction(unsigned long _rip, Function *_thisFunction)
-	: rip(_rip),
-	  thisFunction(_thisFunction)
-{
 }
 
 void
-Oracle::Instruction::resolveCallGraph(Oracle *oracle)
-{
-	for (std::vector<unsigned long>::iterator it = _calleeRips.begin();
-	     it != _calleeRips.end();
-	     it++) {
-		Function *callee = oracle->addrToFunction->get(*it);
-		callees.push_back(callee);
-		if (!vector_contains(callee->callers, thisFunction))
-			callee->callers.push_back(thisFunction);
-		assert(callee);
-	}
-}
-
-void
-Oracle::Instruction::resolveSuccessors(Function *f)
-{
-	for (unsigned i = 0; i < _fallThroughRips.size(); i++) {
-		Instruction *fallThrough = f->ripToInstruction(_fallThroughRips[i]);
-		if (!fallThrough)
-			continue;
-		if (!vector_contains(fallThrough->predecessors, this))
-			fallThrough->predecessors.push_back(this);
-	}
-	if (_branchRip) {
-		Instruction *branch = f->ripToInstruction(_branchRip);
-		assert(branch);
-		if (!vector_contains(branch->predecessors, this))
-			branch->predecessors.push_back(this);
-	}
-}
-
-void
-Oracle::Function::resolveCallGraph(Oracle *oracle)
-{
-	for (instr_map_t::iterator it = instructions_xxx->begin();
-	     it != instructions_xxx->end();
-	     it++)
-		it.value()->resolveCallGraph(oracle);
-}
-
-void
-Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_something)
+Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_something, Oracle *oracle)
 {
 	bool changed;
 
 	if (registerLivenessCorrect)
 		return;
 
-	std::vector<Instruction *> instrsToRecalculate1;
-	std::vector<Instruction *> instrsToRecalculate2;
+	std::vector<unsigned long> instrsToRecalculate1;
+	std::vector<unsigned long> instrsToRecalculate2;
 
-	for (instr_map_t::iterator it = instructions_xxx->begin();
-	     it != instructions_xxx->end();
-	     it++)
-		instrsToRecalculate1.push_back(it.value());
+	getInstructionsInFunction(instrsToRecalculate1);
 
 	std::reverse(instrsToRecalculate1.begin(),
 		     instrsToRecalculate1.end());
 
 	changed = false;
 	while (1) {
-		for (std::vector<Instruction *>::iterator it = instrsToRecalculate1.begin();
+		for (std::vector<unsigned long>::iterator it = instrsToRecalculate1.begin();
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
-			(*it)->updateLiveOnEntry(as, &t);
+			updateLiveOnEntry(*it, as, &t, oracle);
 			if (t)
-				(*it)->addPredecessors(instrsToRecalculate2);
+				addPredecessors(*it, instrsToRecalculate2);
 		}
 		instrsToRecalculate1.clear();
 		if (instrsToRecalculate2.empty())
 			break;
 		changed = true;
 
-		for (std::vector<Instruction *>::iterator it = instrsToRecalculate2.begin();
+		for (std::vector<unsigned long>::iterator it = instrsToRecalculate2.begin();
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
-			(*it)->updateLiveOnEntry(as, &t);
+			updateLiveOnEntry(*it, as, &t, oracle);
 			if (t)
-				(*it)->addPredecessors(instrsToRecalculate1);
+				addPredecessors(*it, instrsToRecalculate1);
 		}
 
 		instrsToRecalculate2.clear();
@@ -1168,6 +1209,8 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 
 	if (changed) {
 		*done_something = true;
+		std::vector<Function *> callers;
+		getFunctionCallers(callers, oracle);
 		for (std::vector<Function *>::iterator it = callers.begin();
 		     it != callers.end();
 		     it++)
@@ -1176,44 +1219,49 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 }
 
 void
-Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
+Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle)
 {
-	Instruction *head = ripToInstruction(rip);
-	RegisterAliasingConfiguration a(head->aliasOnEntry);
-	a |= RegisterAliasingConfiguration::functionEntryConfiguration;
-	if (head->aliasOnEntry != a) {
+	RegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip));
+	RegisterAliasingConfiguration b(a);
+	b |= RegisterAliasingConfiguration::functionEntryConfiguration;
+	if (a != b) {
 		*done_something = true;
-		head->aliasOnEntry = a;
+		setAliasConfigOnEntryToInstruction(rip, b);
 	}
 
 	std::vector<unsigned long> needsUpdating;
-	for (instr_map_t::iterator it = instructions_xxx->begin();
-	     it != instructions_xxx->end();
+	std::vector<unsigned long> allInstrs;
+	getInstructionsInFunction(allInstrs);
+	for (std::vector<unsigned long>::iterator it = allInstrs.begin();
+	     it != allInstrs.end();
 	     it++)
-		it.value()->updateSuccessorInstructionsAliasing(as, &needsUpdating);
+		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, oracle);
 	while (!needsUpdating.empty()) {
 		*done_something = true;
 		unsigned long rip = needsUpdating.back();
 		needsUpdating.pop_back();
-		Instruction *i = ripToInstruction(rip);
-		i->updateSuccessorInstructionsAliasing(as, &needsUpdating);
+		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, oracle);
 	}
 }
 
 void
-Oracle::Instruction::updateLiveOnEntry(AddressSpace *as, bool *changed)
+Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
 {
 	LivenessSet res;
 
-	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
-	     it != _fallThroughRips.end();
+	std::vector<unsigned long> fallThroughRips;
+	getInstructionFallThroughs(rip, fallThroughRips);
+	for (std::vector<unsigned long>::iterator it = fallThroughRips.begin();
+	     it != fallThroughRips.end();
 	     it++)
-		res |= thisFunction->liveOnEntry(*it);
+		res |= liveOnEntry(*it);
+	std::vector<Function *> callees;
+	getInstructionCallees(rip, callees, oracle);
 	for (std::vector<Function *>::iterator it = callees.begin();
 	     it != callees.end();
 	     it++)
-		res |= (*it)->ripToInstruction((*it)->rip)->liveOnEntry & LivenessSet::argRegisters;
-
+		res |= (*it)->liveOnEntry((*it)->rip) & LivenessSet::argRegisters;
+	
 	IRSB *irsb = as->getIRSBForAddress(-1, rip);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
@@ -1260,26 +1308,39 @@ Oracle::Instruction::updateLiveOnEntry(AddressSpace *as, bool *changed)
 			break;
 		case Ist_MBE:
 			abort();
-		case Ist_Exit:
+		case Ist_Exit: {
+			unsigned long _branchRip = statements[i]->Ist.Exit.dst->Ico.U64;
 			if (_branchRip)
-				res |= thisFunction->liveOnEntry(_branchRip);
+				res |= liveOnEntry(_branchRip);
 			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
 			break;
+		}
 		default:
 			abort();
 		}
 	}
-	if (res != liveOnEntry) {
-		assert(res > liveOnEntry);
+
+	if (res != liveOnEntry(rip)) {
+		assert(res > liveOnEntry(rip));
 		*changed = true;
+		static sqlite3_stmt *stmt;
+		int rc;
+		if (!stmt)
+			stmt = prepare_statement(
+				"UPDATE instructionAttributes SET liveOnEntry = ? WHERE rip = ?");
+		bind_int64(stmt, 1, res.mask);
+		bind_int64(stmt, 2, rip);
+		rc = sqlite3_step(stmt);
+		assert(rc == SQLITE_DONE);
+		sqlite3_reset(stmt);
 	}
-	liveOnEntry = res;
 }
 
 void
-Oracle::Instruction::updateSuccessorInstructionsAliasing(AddressSpace *as, std::vector<unsigned long> *changed)
+Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, AddressSpace *as, std::vector<unsigned long> *changed,
+						      Oracle *oracle)
 {
-	RegisterAliasingConfiguration config(aliasOnEntry);
+	RegisterAliasingConfiguration config(aliasConfigOnEntryToInstruction(rip));
 	std::map<IRTemp, PointerAliasingSet> temporaryAliases;
 	IRStmt *st;
 
@@ -1362,13 +1423,14 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(AddressSpace *as, std::
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
+			unsigned long _branchRip = st->Ist.Exit.dst->Ico.U64;
 			if (_branchRip) {
-				RegisterAliasingConfiguration bConfig(thisFunction->aliasConfigOnEntryToInstruction(_branchRip));
+				RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
 				RegisterAliasingConfiguration newExitConfig(bConfig);
 				newExitConfig |= config;
 				if (newExitConfig != bConfig) {
 					changed->push_back(_branchRip);
-					thisFunction->ripToInstruction(_branchRip)->aliasOnEntry = newExitConfig;
+					setAliasConfigOnEntryToInstruction(_branchRip, newExitConfig);
 				}
 			}
 			break;
@@ -1377,12 +1439,15 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(AddressSpace *as, std::
 			abort();
 		}
 	}
+
+	std::vector<Function *> callees;
+	getInstructionCallees(rip, callees, oracle);
 	if (!callees.empty())
 		config.v[0] = PointerAliasingSet::notAPointer;
 	for (std::vector<Function *>::iterator it = callees.begin();
 	     config.v[0] != PointerAliasingSet::anything && it != callees.end();
 	     it++) {
-		LivenessSet ls = (*it)->ripToInstruction((*it)->rip)->liveOnEntry;
+		LivenessSet ls = (*it)->liveOnEntry((*it)->rip);
 		/* If any of the argument registers contain stack
 		   pointers on entry, the return value can potentially
 		   also contain stack pointers. */
@@ -1405,69 +1470,216 @@ Oracle::Instruction::updateSuccessorInstructionsAliasing(AddressSpace *as, std::
 			config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
 		config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
 	}
+	std::vector<unsigned long> _fallThroughRips;
+	getInstructionFallThroughs(rip, _fallThroughRips);
 	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
 	     it != _fallThroughRips.end();
 	     it++)
-		config |= thisFunction->aliasConfigOnEntryToInstruction(*it);
+		config |= aliasConfigOnEntryToInstruction(*it);
 	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
 	     it != _fallThroughRips.end();
 	     it++) {
-		if (config != thisFunction->aliasConfigOnEntryToInstruction(*it)) {
+		if (config != aliasConfigOnEntryToInstruction(*it)) {
 			changed->push_back(*it);
-			thisFunction->setAliasConfigOnEntryToInstruction(*it, config);
+			setAliasConfigOnEntryToInstruction(*it, config);
 		}
 	}
 }
 
 void
-Oracle::Instruction::getSuccessors(std::vector<unsigned long> &succ)
+Oracle::Function::addPredecessors(unsigned long rip, std::vector<unsigned long> &out)
 {
-	succ = _fallThroughRips;
-	if (_branchRip)
-		succ.push_back(_branchRip);
+	static sqlite3_stmt *stmt1, *stmt2, *stmt3;
+
+	if (!stmt1 || !stmt2 || !stmt3) {
+		assert(!stmt1 && !stmt2 && !stmt3);
+		stmt1 = prepare_statement("SELECT rip FROM fallThroughRips WHERE dest = ?");
+		stmt2 = prepare_statement("SELECT rip FROM branchRips WHERE dest = ?");
+		stmt3 = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
+	}
+	bind_int64(stmt1, 1, rip);
+	bind_int64(stmt2, 1, rip);
+	bind_int64(stmt3, 1, rip);
+	extract_int64_column(stmt1, 0, out);
+	extract_int64_column(stmt2, 0, out);
+	extract_int64_column(stmt3, 0, out);
 }
 
 void
-Oracle::Instruction::addPredecessors(std::vector<Instruction *> &out)
+Oracle::Function::getInstructionFallThroughs(unsigned long rip, std::vector<unsigned long> &succ)
 {
-	out.insert(out.end(), predecessors.begin(), predecessors.end());
+	static sqlite3_stmt *stmt1;
+
+	if (!stmt1)
+		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
+	bind_int64(stmt1, 1, rip);
+
+	succ.clear();
+	extract_int64_column(stmt1, 0, succ);
 }
 
 void
-Oracle::Function::getInstrSuccessors(unsigned long r, std::vector<unsigned long> &out)
+Oracle::Function::getInstructionsInFunction(std::vector<unsigned long> &succ) const
 {
-	ripToInstruction(r)->getSuccessors(out);
+	static sqlite3_stmt *stmt1;
+
+	if (!stmt1)
+		stmt1 = prepare_statement("SELECT rip FROM instructionAttributes WHERE functionHead = ?");
+	bind_int64(stmt1, 1, rip);
+
+	succ.clear();
+	extract_int64_column(stmt1, 0, succ);	
+}
+
+void
+Oracle::Function::getSuccessors(unsigned long rip, std::vector<unsigned long> &succ)
+{
+	static sqlite3_stmt *stmt1, *stmt2;
+
+	if (!stmt1 || !stmt2) {
+		assert(!stmt1 && !stmt2);
+		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
+		stmt2 = prepare_statement("SELECT dest FROM branchRips WHERE rip = ?");
+	}
+	bind_int64(stmt1, 1, rip);
+	bind_int64(stmt2, 1, rip);
+
+	succ.clear();
+	extract_int64_column(stmt1, 0, succ);
+	extract_int64_column(stmt2, 0, succ);
 }
 
 void
 Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
 						     const RegisterAliasingConfiguration &config)
 {
-	ripToInstruction(r)->aliasOnEntry = config;
+	static sqlite3_stmt *stmt;
+	int i;
+	int rc;
+
+	if (!stmt)
+		stmt = prepare_statement(
+			"UPDATE instructionAttributes SET alias0 = ?, alias1 = ?, alias2 = ?, alias3 = ?, alias4 = ?, alias5 = ?, alias6 = ?, alias7 = ?, alias8 = ?, alias9 = ?, alias10 = ?, alias11 = ?, alias12 = ?, alias13 = ?, alias14 = ?, alias15 = ? WHERE rip = ?"
+			);
+	for (i = 0; i < NR_REGS; i++)
+		sqlite3_bind_int64(stmt, i, config.v[i]);
+	sqlite3_bind_int64(stmt, NR_REGS, r);
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+	sqlite3_reset(stmt);
 }
 
-void
+bool
 Oracle::Function::addInstruction(unsigned long rip,
 				 const std::vector<unsigned long> &callees,
 				 const std::vector<unsigned long> &fallThrough,
 				 const std::vector<unsigned long> &branch)
 {
-	Instruction *i = new Instruction(rip, this);
+	sqlite3_stmt *stmt;
+	int rc;
 
-	for (std::vector<unsigned long>::const_iterator it = callees.begin();
-	     it != callees.end();
-	     it++)
-		i->addCallee(*it);
+	stmt = prepare_statement("INSERT INTO instructionAttributes (rip, functionHead) VALUES (?, ?)");
+	bind_int64(stmt, 1, rip);
+	bind_int64(stmt, 2, this->rip);
+	rc = sqlite3_step(stmt);
+	if (rc == SQLITE_CONSTRAINT) {
+		return false;
+	}
+	assert(rc == SQLITE_DONE);
+	rc = sqlite3_reset(stmt);
+	assert(rc == SQLITE_OK);
+
+	stmt = prepare_statement("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
 	for (std::vector<unsigned long>::const_iterator it = fallThrough.begin();
 	     it != fallThrough.end();
-	     it++)
-		i->addFallThrough(*it);
+	     it++) {
+		bind_int64(stmt, 1, rip);
+		bind_int64(stmt, 2, *it);
+		rc = sqlite3_step(stmt);
+		assert(rc == SQLITE_DONE);
+		rc = sqlite3_reset(stmt);
+		assert(rc == SQLITE_OK);
+	}
+	sqlite3_finalize(stmt);
+
+	stmt = prepare_statement("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
 	for (std::vector<unsigned long>::const_iterator it = branch.begin();
 	     it != branch.end();
-	     it++)
-		i->addBranch(*it);
+	     it++) {
+		bind_int64(stmt, 1, rip);
+		bind_int64(stmt, 2, *it);
+		rc = sqlite3_step(stmt);
+		assert(rc == SQLITE_DONE);
+		rc = sqlite3_reset(stmt);
+		assert(rc == SQLITE_OK);
+	}
+	sqlite3_finalize(stmt);
 
-	assert(i);
-	instructions_xxx->set(rip, i);
+	stmt = prepare_statement("INSERT INTO callRips (rip, dest) VALUES (?, ?)");
+	for (std::vector<unsigned long>::const_iterator it = callees.begin();
+	     it != callees.end();
+	     it++) {
+		bind_int64(stmt, 1, rip);
+		bind_int64(stmt, 2, *it);
+		rc = sqlite3_step(stmt);
+		assert(rc == SQLITE_DONE);
+		rc = sqlite3_reset(stmt);
+		assert(rc == SQLITE_OK);
+	}
+	sqlite3_finalize(stmt);
+
+	return true;
 }
 
+void
+Oracle::Function::getInstructionCallees(unsigned long rip, std::vector<Function *> &out, Oracle *oracle)
+{
+	static sqlite3_stmt *stmt;
+
+	if (!stmt)
+		stmt = prepare_statement("SELECT dest FROM callRips WHERE rip = ?");
+	bind_int64(stmt, 1, rip);
+	std::vector<unsigned long> rips;
+	extract_int64_column(stmt, 0, rips);
+
+	for (std::vector<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++)
+		out.push_back(oracle->get_function(*it));
+}
+
+void
+Oracle::Function::getFunctionCallers(std::vector<Function *> &out, Oracle *oracle)
+{
+	static sqlite3_stmt *stmt;
+
+	if (!stmt)
+		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
+	bind_int64(stmt, 1, rip);
+	std::vector<unsigned long> rips;
+	extract_int64_column(stmt, 0, rips);
+
+	for (std::vector<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++)
+		out.push_back(oracle->get_function(*it));
+}
+
+void
+Oracle::getFunctions(std::vector<Function *> &out)
+{
+	static sqlite3_stmt *stmt;
+
+	if (!stmt)
+		stmt = prepare_statement("SELECT DISTINCT functionHead FROM instructionAttributes");
+	std::vector<unsigned long> rips;
+	extract_int64_column(stmt, 0, rips);
+
+	for (std::vector<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++) {
+		Function *f = get_function(*it);
+		if (f)
+			out.push_back(f);
+	}
+}
