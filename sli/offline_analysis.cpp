@@ -2355,7 +2355,15 @@ buildCFGForCallGraph(AddressSpace *as,
 		}
 		CFGNode<StackRip> *work = new CFGNode<StackRip>(r);
 		builtSoFar[r] = work;
-		IRSB *irsb = as->getIRSBForAddress(-1, r.rip);
+		IRSB *irsb;
+		try {
+			irsb = as->getIRSBForAddress(-1, r.rip);
+		} catch (BadMemoryException &e) {
+			irsb = NULL;
+		}
+		if (!irsb)
+			continue; /* Just give up on this bit */
+
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
@@ -2425,7 +2433,12 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
-	IRSB *irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
+	IRSB *irsb;
+	try {
+		irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
+	} catch (BadMemoryException &e) {
+		return StateMachineUnreached::get();
+	}
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
 		if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
@@ -2498,6 +2511,13 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		done_something = false;
 		sm = sm->optimise(opt2, oracle, &done_something);
 	} while (done_something);
+
+	if (dynamic_cast<StateMachineUnreached *>(sm.get())) {
+		/* This store machine is unusable, probably because we
+		 * don't have the machine code for the relevant
+		 * library */
+		return;
+	}
 
 	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle);
 	if (!assumption)

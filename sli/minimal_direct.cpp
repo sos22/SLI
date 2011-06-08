@@ -42,7 +42,7 @@ main(int argc, char *argv[])
 						 /*thr->regs.rip()*/ 0x5fd088,  /* we know where main() is */
 						 my_rip);
 
-		printf("%d predecessors.\n", previousInstructions.size());
+		printf("%zd predecessors.\n", previousInstructions.size());
 		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms);
 	}
 }
