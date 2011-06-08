@@ -551,6 +551,8 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 		if (!strcmp(stmt->Ist.Dirty.details->cee->name,
 			    "helper_load_8") ||
 		    !strcmp(stmt->Ist.Dirty.details->cee->name,
+			    "helper_load_16") ||
+		    !strcmp(stmt->Ist.Dirty.details->cee->name,
 			    "helper_load_64") ||
 		    !strcmp(stmt->Ist.Dirty.details->cee->name,
 			    "helper_load_32")) {
