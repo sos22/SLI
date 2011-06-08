@@ -724,3 +724,46 @@ readStateMachine(int fd)
 	free(content);
 	return res;
 }
+
+void
+StateMachine::assertAcyclic(std::vector<const StateMachine *> &stack,
+			    std::set<const StateMachine *> &clean) const
+{
+#if 0
+	if (clean.count(this))
+		return;
+#endif
+	if (std::find(stack.begin(), stack.end(), this) != stack.end())
+		goto found_cycle;
+	stack.push_back(this);
+	if (target0())
+		target0()->target->assertAcyclic(stack, clean);
+	if (target1())
+		target1()->target->assertAcyclic(stack, clean);
+	assert(stack.back() == this);
+	stack.pop_back();
+	//assert(!clean.count(this));
+	clean.insert(this);
+	return;
+
+found_cycle:
+	printf("Unexpected cycle in state machine!\n");
+	printf("Found at %p\n", this);
+	std::map<const StateMachine *, int> labels;
+	prettyPrint(stdout, labels);
+	printf("Path: \n");
+	for (std::vector<const StateMachine *>::const_iterator it = stack.begin();
+	     it != stack.end();
+	     it++)
+		printf("\t%d\n", labels[*it]);
+	printf("End\n");
+	assert(0);
+}
+
+void
+StateMachine::assertAcyclic() const
+{
+	std::vector<const StateMachine *> stack;
+	std::set<const StateMachine *> clean;
+	assertAcyclic(stack, clean);
+}

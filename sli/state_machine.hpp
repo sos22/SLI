@@ -83,6 +83,8 @@ public:
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 	mutable unsigned long __hashval;
 	mutable bool have_hash;
+	void assertAcyclic(std::vector<const StateMachine *> &,
+			   std::set<const StateMachine *> &) const;
 protected:
 	StateMachine(unsigned long _origin) : have_hash(false), origin(_origin) {}
 	virtual unsigned long _hashval() const = 0;
@@ -105,6 +107,7 @@ public:
 	virtual const StateMachineEdge *target0() const = 0;
 	virtual StateMachineEdge *target1() = 0;
 	virtual const StateMachineEdge *target1() const = 0;
+	void assertAcyclic() const;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	virtual void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const = 0;
 	NAMED_CLASS

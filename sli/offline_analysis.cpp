@@ -1306,15 +1306,18 @@ rewriteStateMachineEdge(StateMachineEdge *sme,
 			std::set<StateMachineEdge *> &edgeMemo)
 {
 	if (edgeRules.count(sme)) {
+		edgeRules[sme]->target->assertAcyclic();
 		edgeMemo.insert(edgeRules[sme]);
 		return rewriteStateMachineEdge(edgeRules[sme], rules, edgeRules, memo, edgeMemo);
 	}
 	edgeMemo.insert(sme);
+	sme->target->assertAcyclic();
 	sme->target = rewriteStateMachine(sme->target,
 					  rules,
 					  edgeRules,
 					  memo,
 					  edgeMemo);
+	sme->target->assertAcyclic();
 	return sme;
 }
 
@@ -1325,7 +1328,9 @@ rewriteStateMachine(StateMachine *sm,
 		    std::set<StateMachine *> &memo,
 		    std::set<StateMachineEdge *> &edgeMemo)
 {
+	sm->assertAcyclic();
 	if (rules.count(sm) && rules[sm] != sm) {
+		rules[sm]->assertAcyclic();
 		memo.insert(rules[sm]);
 		return rewriteStateMachine(rules[sm], rules, edgeRules, memo, edgeMemo);
 	}
@@ -1349,17 +1354,64 @@ rewriteStateMachine(StateMachine *sm,
 			edgeRules,
 			memo,
 			edgeMemo);
+		sm->assertAcyclic();
 		return sm;
 	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+		smp->target->target->assertAcyclic();
 		smp->target = rewriteStateMachineEdge(
 			smp->target,
 			rules,
 			edgeRules,
 			memo,
 			edgeMemo);
+		sm->assertAcyclic();
 		return sm;
 	} else {
 		abort();
+	}
+}
+
+template <typename t> void
+assert_mapping_acyclic(std::map<t, t> &m)
+{
+	std::set<t> clean;
+
+	for (typename std::map<t, t>::const_iterator it = m.begin();
+	     it != m.end();
+	     it++) {
+		if (clean.count(it->first))
+			continue;
+		t fastIterator;
+		t slowIterator;
+		bool cycle;
+		slowIterator = fastIterator = it->first;
+		while (1) {
+			clean.insert(fastIterator);
+			fastIterator = m[fastIterator];
+			if (fastIterator == slowIterator) {
+				cycle = true;
+				break;
+			}
+			if (!m.count(fastIterator)) {
+				cycle = false;
+				break;
+			}
+
+			clean.insert(fastIterator);
+			fastIterator = m[fastIterator];
+			if (fastIterator == slowIterator) {
+				cycle = true;
+				break;
+			}
+			if (!m.count(fastIterator)) {
+				cycle = false;
+				break;
+			}
+
+			assert(m.count(slowIterator));
+			slowIterator = m[slowIterator];
+		}
+		assert(!cycle);
 	}
 }
 
@@ -1367,8 +1419,14 @@ static StateMachine *
 rewriteStateMachine(StateMachine *sm, std::map<StateMachine *, StateMachine *> &rules,
 		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules)
 {
+	/* Cyclies make this work badly. */
+	sm->assertAcyclic();
+	assert_mapping_acyclic(rules);
+	assert_mapping_acyclic(edgeRules);
+
 	std::set<StateMachine *> memo;
 	std::set<StateMachineEdge *> edgeMemo;
+
 	return rewriteStateMachine(sm, rules, edgeRules, memo, edgeMemo);
 }
 
@@ -1755,6 +1813,7 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		sm = sm->optimise(opt, oracle, &done_something);
 		removeRedundantStores(sm, oracle, &done_something);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle);
+		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
