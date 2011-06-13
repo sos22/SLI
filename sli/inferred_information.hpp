@@ -57,10 +57,19 @@ public:
 	NAMED_CLASS
 };
 
+class FixConsumer {
+public:
+	virtual void operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
+				std::set<std::pair<StateMachineSideEffectStore *,
+				                   StateMachineSideEffectStore *> > &remoteMacroSections,
+				GarbageCollectionToken token) = 0;
+};
 void considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 				 VexPtr<InferredInformation> &ii,
 				 VexPtr<Oracle> &oracle,
 				 unsigned long interestingRip,
-				 VexPtr<MachineState> &ms);
+				 VexPtr<MachineState> &ms,
+				 FixConsumer &haveAFix,
+				 GarbageCollectionToken token);
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

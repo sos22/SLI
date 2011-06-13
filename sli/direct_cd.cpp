@@ -19,18 +19,6 @@
 #include "inferred_information.hpp"
 #include "offline_analysis.hpp"
 
-static bool
-instructionIsInteresting(const InstructionSet &i, unsigned long r)
-{
-	return i.rips.count(r) != 0;
-}
-
-static unsigned long
-wrappedRipToRip(unsigned long r)
-{
-	return r;
-}
-
 static FILE *
 fopenf(const char *mode, const char *fmt, ...)
 {
@@ -46,6 +34,27 @@ fopenf(const char *mode, const char *fmt, ...)
 	free(path);
 	return res;
 }
+
+class DumpFix : public FixConsumer {
+public:
+	void operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
+			std::set<std::pair<StateMachineSideEffectStore *,
+			                   StateMachineSideEffectStore *> > &remoteMacroSections,
+			GarbageCollectionToken token) {
+		dbg_break("Have remote critical sections");
+		for (std::set<std::pair<StateMachineSideEffectStore *,
+			                StateMachineSideEffectStore *> >::iterator it =
+			     remoteMacroSections.begin();
+		     it != remoteMacroSections.end();
+		     it++) {
+			printf("\t\tRemote macro section ");
+			it->first->prettyPrint(stdout);
+			printf(" -> ");
+			it->second->prettyPrint(stdout);
+			printf("\n");
+		}
+	};
+};
 
 int
 main(int argc, char *argv[])
@@ -79,11 +88,14 @@ main(int argc, char *argv[])
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
 
+	DumpFix df;
 	considerInstructionSequence(previousInstructions,
 				    ii,
 				    oracle,
 				    proximal->rip.rip,
-				    ms);
+				    ms,
+				    df,
+				    ALLOW_GC);
 
 	return 0;
 }

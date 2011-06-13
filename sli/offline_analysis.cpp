@@ -2553,6 +2553,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 VexPtr<Oracle> &oracle,
 		 VexPtr<IRExpr, &ir_heap> &assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
+		 FixConsumer &haveAFix,
 		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
@@ -2621,18 +2622,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		dbg_break("Failed!\n");
 		return;
 	}
-	dbg_break("Have remote critical sections");
-	for (std::set<std::pair<StateMachineSideEffectStore *,
-		     StateMachineSideEffectStore *> >::iterator it =
-		     remoteMacroSections.begin();
-	     it != remoteMacroSections.end();
-	     it++) {
-		printf("\t\tRemote macro section ");
-		it->first->prettyPrint(stdout);
-		printf(" -> ");
-		it->second->prettyPrint(stdout);
-		printf("\n");
-	}
+	haveAFix(probeMachine, remoteMacroSections, token);
 }
 
 static void
@@ -2641,6 +2631,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		       VexPtr<Oracle> &oracle,
 		       VexPtr<IRExpr, &ir_heap> &survive,
 		       const InstructionSet &is,
+		       FixConsumer &haveAFix,
 		       GarbageCollectionToken token)
 {
 	LibVEX_maybe_gc(token);
@@ -2655,7 +2646,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		breakCycles(storeCFG.get());
 		
 		considerStoreCFG(storeCFG, as, oracle,
-				 survive, sm, token);
+				 survive, sm, haveAFix, token);
 	}
 }
 
@@ -2664,7 +2655,9 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			    VexPtr<InferredInformation> &ii,
 			    VexPtr<Oracle> &oracle,
 			    unsigned long interestingRip,
-			    VexPtr<MachineState> &ms)
+			    VexPtr<MachineState> &ms,
+			    FixConsumer &haveAFix,
+			    GarbageCollectionToken token)
 {
 	VexPtr<StateMachineSet> readMachinesChecked(new StateMachineSet());
 
@@ -2672,7 +2665,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 	     it != previousInstructions.end();
 	     it++) {
 		printf("Investigating %lx...\n", *it);
-		LibVEX_maybe_gc(ALLOW_GC);
+		LibVEX_maybe_gc(token);
 
 		std::set<unsigned long> terminalFunctions;
 		terminalFunctions.insert(0x757bf0);
@@ -2713,7 +2706,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		{
 			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
 			survive =
-				survivalConstraintIfExecutedAtomically(crSm, oracle, ALLOW_GC);
+				survivalConstraintIfExecutedAtomically(crSm, oracle, token);
 		}
 
 		survive = simplifyIRExpr(survive, opt);
@@ -2729,7 +2722,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		bool mightSurvive, mightCrash;
 		{
 			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
-			evalMachineUnderAssumption(crSm, oracle, survive, &mightSurvive, &mightCrash, ALLOW_GC);
+			evalMachineUnderAssumption(crSm, oracle, survive, &mightSurvive, &mightCrash, token);
 		}
 
 		if (!mightSurvive) {
@@ -2755,7 +2748,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			printf("\n");
 			VexPtr<AddressSpace> as(ms->addressSpace);
 			VexPtr<StateMachine, &ir_heap> sm(cr->sm);
-			processConflictCluster(as, sm, oracle, survive, *it, ALLOW_GC);
+			processConflictCluster(as, sm, oracle, survive, *it, haveAFix, token);
 		}
 	}
 }

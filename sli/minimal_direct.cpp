@@ -6,6 +6,28 @@
 #include "crash_reason.hpp"
 #include "inferred_information.hpp"
 
+class DumpFix : public FixConsumer {
+public:
+	unsigned long rip;
+	DumpFix(unsigned long r) : rip(r) {}
+	void operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
+			std::set<std::pair<StateMachineSideEffectStore *,
+			                   StateMachineSideEffectStore *> > &remoteMacroSections,
+			GarbageCollectionToken token) {
+		printf("Generated a potential fix from rip %lx\n", rip);
+		for (std::set<std::pair<StateMachineSideEffectStore *,
+			                StateMachineSideEffectStore *> >::iterator it =
+			     remoteMacroSections.begin();
+		     it != remoteMacroSections.end();
+		     it++) {
+			printf("\t\tRemote macro section ");
+			it->first->prettyPrint(stdout);
+			printf(" -> ");
+			it->second->prettyPrint(stdout);
+			printf("\n");
+		}
+	};
+};
 int
 main(int argc, char *argv[])
 {
@@ -42,7 +64,7 @@ main(int argc, char *argv[])
 						 /*thr->regs.rip()*/ 0x5fd088,  /* we know where main() is */
 						 my_rip);
 
-		printf("%zd predecessors.\n", previousInstructions.size());
-		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms);
+		DumpFix df(my_rip);
+		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, ALLOW_GC);
 	}
 }
