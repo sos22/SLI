@@ -9,25 +9,36 @@
 class DumpFix : public FixConsumer {
 public:
 	unsigned long rip;
-	DumpFix(unsigned long r) : rip(r) {}
+	VexPtr<MachineState> &ms;
+	DumpFix(unsigned long r, VexPtr<MachineState> &_ms)
+		: rip(r), ms(_ms)
+	{}
 	void operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			std::set<std::pair<StateMachineSideEffectStore *,
 			                   StateMachineSideEffectStore *> > &remoteMacroSections,
-			GarbageCollectionToken token) {
-		printf("Generated a potential fix from rip %lx\n", rip);
-		for (std::set<std::pair<StateMachineSideEffectStore *,
-			                StateMachineSideEffectStore *> >::iterator it =
-			     remoteMacroSections.begin();
-		     it != remoteMacroSections.end();
-		     it++) {
-			printf("\t\tRemote macro section ");
-			it->first->prettyPrint(stdout);
-			printf(" -> ");
-			it->second->prettyPrint(stdout);
-			printf("\n");
-		}
-	};
+			GarbageCollectionToken token);
 };
+
+void
+DumpFix::operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
+		    std::set<std::pair<StateMachineSideEffectStore *,
+			               StateMachineSideEffectStore *> > &remoteMacroSections,
+		    GarbageCollectionToken token)
+{
+	printf("Generated a potential fix from rip %lx\n", rip);
+	for (std::set<std::pair<StateMachineSideEffectStore *,
+		                StateMachineSideEffectStore *> >::iterator it =
+		     remoteMacroSections.begin();
+	     it != remoteMacroSections.end();
+	     it++) {
+		printf("\t\tRemote macro section ");
+		it->first->prettyPrint(stdout);
+		printf(" -> ");
+		it->second->prettyPrint(stdout);
+		printf("\n");
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -40,6 +51,8 @@ main(int argc, char *argv[])
 	std::set<unsigned long> examined_loads;
 
 	while (1) {
+		oracle = NULL;
+
 		LibVEX_maybe_gc(ALLOW_GC);
 		
 		oracle = new Oracle(ms, thr, argv[2], argv[3]);
@@ -64,7 +77,7 @@ main(int argc, char *argv[])
 						 /*thr->regs.rip()*/ 0x5fd088,  /* we know where main() is */
 						 my_rip);
 
-		DumpFix df(my_rip);
+		DumpFix df(my_rip, ms);
 		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, ALLOW_GC);
 	}
 }
