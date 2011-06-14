@@ -1752,21 +1752,32 @@ Oracle::functionHeadForInstruction(unsigned long rip)
 	return x[0];
 }
 
+static unsigned
+getInstructionSize(AddressSpace *as, unsigned long rip)
+{
+	IRSB *irsb;
+	try {
+		irsb = as->getIRSBForAddress(-1, rip);
+	} catch (BadMemoryException &e) {
+		return 0;
+	}
+	assert(irsb->stmts[0]->tag == Ist_IMark);
+	return irsb->stmts[0]->Ist.IMark.len;
+}
+
 /* Find an instruction which is guaranteed to be executed before any
    in @instrs.  Where multiple such instructions exist, we pick the
    latest one (in the sense that there should be no instruction I such
    that I dominates @instrs and also dominates @instrs plus the chosen
-   dominator). */
+   dominator).  If minimum_size is non-zero we further restrict things
+   so that we only consider dominating instructions whose size is at
+   least minimum_size bytes, or the head instruction in a function. */
 unsigned long
 Oracle::dominator(const std::set<unsigned long> &instrs,
-		  AddressSpace *as)
+		  AddressSpace *as,
+		  unsigned minimum_size)
 {
 	assert(!instrs.empty());
-
-	/* Single instruction case is easy: just use the instruction
-	 * itself. */
-	if (instrs.size() == 1)
-		return *instrs.begin();
 
 	/* For now, only handle the case where everything is in the
 	 * same function. */
@@ -1806,5 +1817,11 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	/* The dominator list should at least contain the head of the
 	 * function. */
 	assert(!dominators.empty());
-	return dominators[dominators.size()-1];
+
+	/* Eliminate excessively small instructions. */
+	unsigned x;
+	for (x = dominators.size() - 1; minimum_size != 0 && x > 0; x--)
+		if (getInstructionSize(as, dominators[x]) >= minimum_size)
+			break;
+	return dominators[x];
 }

@@ -46,7 +46,8 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary)
 	/* What instructions do we need to cover? */
 	std::set<unsigned long> neededInstructions;
 	summary->loadMachine->enumerateMentionedMemoryAccesses(neededInstructions);
-	unsigned long root = oracle->dominator(neededInstructions, as);
+	/* 5 bytes is the size of a 32-bit relative jump. */
+	unsigned long root = oracle->dominator(neededInstructions, as, 5);
 	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
 	     it != summary->storeMachines.end();
 	     it++)
@@ -63,7 +64,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary)
 	     it++) {
 		std::set<unsigned long> instrs;
 		(*it)->machine->enumerateMentionedMemoryAccesses(instrs);
-		unsigned long r = oracle->dominator(instrs, as);
+		unsigned long r = oracle->dominator(instrs, as, 5);
 		cfg->add_root(r, 100);
 		roots.push_back(r);
 	}

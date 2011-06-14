@@ -259,7 +259,8 @@ public:
 	void getFunctions(std::vector<unsigned long> &out);
 
 	unsigned long dominator(const std::set<unsigned long> &instrs,
-				AddressSpace *as);
+				AddressSpace *as,
+				unsigned minimum_size);
 
 	unsigned long selectRandomLoad() const;
 
