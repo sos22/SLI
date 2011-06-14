@@ -57,13 +57,47 @@ public:
 	NAMED_CLASS
 };
 
+class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
+public:
+	class StoreMachineData : public GarbageCollected<StoreMachineData, &ir_heap> {
+	public:
+		StoreMachineData(StateMachine *_machine)
+			: machine(_machine)
+		{}
+		StateMachine *machine;
+		typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
+		std::vector<macroSectionT> macroSections;
+		void visit(HeapVisitor &hv) {
+			hv(machine);
+			for (std::vector<macroSectionT>::iterator it = macroSections.begin();
+			     it != macroSections.end();
+			     it++) {
+				hv(it->first);
+				hv(it->second);
+			}
+		}
+		NAMED_CLASS
+	};
+
+	CrashSummary(StateMachine *_loadMachine)
+		: loadMachine(_loadMachine)
+	{}
+
+	StateMachine *loadMachine;
+	std::vector<StoreMachineData *> storeMachines;
+	void visit(HeapVisitor &hv) {
+		hv(loadMachine);
+		visit_container(storeMachines, hv);
+	}
+	NAMED_CLASS
+};
+
 class FixConsumer {
 public:
-	virtual void operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
-				std::set<std::pair<StateMachineSideEffectStore *,
-				                   StateMachineSideEffectStore *> > &remoteMacroSections,
+	virtual void operator()(VexPtr<CrashSummary, &ir_heap> &loadMachine,
 				GarbageCollectionToken token) = 0;
 };
+
 void considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 				 VexPtr<InferredInformation> &ii,
 				 VexPtr<Oracle> &oracle,

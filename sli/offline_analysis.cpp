@@ -2553,7 +2553,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 VexPtr<Oracle> &oracle,
 		 VexPtr<IRExpr, &ir_heap> &assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
-		 FixConsumer &haveAFix,
+		 VexPtr<CrashSummary, &ir_heap> &summary,
 		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
@@ -2622,7 +2622,12 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		dbg_break("Failed!\n");
 		return;
 	}
-	haveAFix(probeMachine, remoteMacroSections, token);
+	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm);
+	for (remoteMacroSectionsT::iterator it = remoteMacroSections.begin();
+	     it != remoteMacroSections.end();
+	     it++)
+		smd->macroSections.push_back(CrashSummary::StoreMachineData::macroSectionT(it->first, it->second));
+	summary->storeMachines.push_back(smd);
 }
 
 static void
@@ -2631,7 +2636,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		       VexPtr<Oracle> &oracle,
 		       VexPtr<IRExpr, &ir_heap> &survive,
 		       const InstructionSet &is,
-		       FixConsumer &haveAFix,
+		       VexPtr<CrashSummary, &ir_heap> &summary,
 		       GarbageCollectionToken token)
 {
 	LibVEX_maybe_gc(token);
@@ -2646,7 +2651,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		breakCycles(storeCFG.get());
 		
 		considerStoreCFG(storeCFG, as, oracle,
-				 survive, sm, haveAFix, token);
+				 survive, sm, summary, token);
 	}
 }
 
@@ -2734,6 +2739,8 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			dbg_break("whoops");
 		}
 
+		VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(cr->sm));
+
 		std::set<InstructionSet> conflictClusters;
 		getConflictingStoreClusters(cr->sm, oracle, conflictClusters);
 
@@ -2748,8 +2755,11 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			printf("\n");
 			VexPtr<AddressSpace> as(ms->addressSpace);
 			VexPtr<StateMachine, &ir_heap> sm(cr->sm);
-			processConflictCluster(as, sm, oracle, survive, *it, haveAFix, token);
+			processConflictCluster(as, sm, oracle, survive, *it, summary, token);
 		}
+
+		if (summary->storeMachines.size() != 0)
+			haveAFix(summary, token);
 	}
 }
 			    

@@ -13,30 +13,15 @@ public:
 	DumpFix(unsigned long r, VexPtr<MachineState> &_ms)
 		: rip(r), ms(_ms)
 	{}
-	void operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
-			std::set<std::pair<StateMachineSideEffectStore *,
-			                   StateMachineSideEffectStore *> > &remoteMacroSections,
+	void operator()(VexPtr<CrashSummary, &ir_heap> &probeMachine,
 			GarbageCollectionToken token);
 };
 
 void
-DumpFix::operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
-		    std::set<std::pair<StateMachineSideEffectStore *,
-			               StateMachineSideEffectStore *> > &remoteMacroSections,
+DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 		    GarbageCollectionToken token)
 {
 	printf("Generated a potential fix from rip %lx\n", rip);
-	for (std::set<std::pair<StateMachineSideEffectStore *,
-		                StateMachineSideEffectStore *> >::iterator it =
-		     remoteMacroSections.begin();
-	     it != remoteMacroSections.end();
-	     it++) {
-		printf("\t\tRemote macro section ");
-		it->first->prettyPrint(stdout);
-		printf(" -> ");
-		it->second->prettyPrint(stdout);
-		printf("\n");
-	}
 }
 
 int

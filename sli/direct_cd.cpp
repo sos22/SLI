@@ -37,24 +37,35 @@ fopenf(const char *mode, const char *fmt, ...)
 
 class DumpFix : public FixConsumer {
 public:
-	void operator()(VexPtr<StateMachine, &ir_heap> &probeMachine,
-			std::set<std::pair<StateMachineSideEffectStore *,
-			                   StateMachineSideEffectStore *> > &remoteMacroSections,
-			GarbageCollectionToken token) {
-		dbg_break("Have remote critical sections");
-		for (std::set<std::pair<StateMachineSideEffectStore *,
-			                StateMachineSideEffectStore *> >::iterator it =
-			     remoteMacroSections.begin();
-		     it != remoteMacroSections.end();
-		     it++) {
-			printf("\t\tRemote macro section ");
-			it->first->prettyPrint(stdout);
+	void operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionToken token);
+};
+
+void
+DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionToken token)
+{
+	printf("Load machine:\n");
+	printStateMachine(summary->loadMachine, stdout);
+
+	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
+	     it != summary->storeMachines.end();
+	     it++) {
+		CrashSummary::StoreMachineData *smd = *it;
+		printf("Store machine:\n");
+		printStateMachine(smd->machine, stdout);
+		printf("Remote macro sections:\n");
+		for (std::vector<CrashSummary::StoreMachineData::macroSectionT>::iterator it2 = 
+			     smd->macroSections.begin();
+		     it2 != smd->macroSections.end();
+		     it2++) {
+			printf("\t");
+			it2->first->prettyPrint(stdout);
 			printf(" -> ");
-			it->second->prettyPrint(stdout);
+			it2->second->prettyPrint(stdout);
 			printf("\n");
 		}
-	};
-};
+	}
+	dbg_break("Have remote critical sections");
+}
 
 int
 main(int argc, char *argv[])
