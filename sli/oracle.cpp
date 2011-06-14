@@ -1751,3 +1751,60 @@ Oracle::functionHeadForInstruction(unsigned long rip)
 	assert(x.size() == 1);
 	return x[0];
 }
+
+/* Find an instruction which is guaranteed to be executed before any
+   in @instrs.  Where multiple such instructions exist, we pick the
+   latest one (in the sense that there should be no instruction I such
+   that I dominates @instrs and also dominates @instrs plus the chosen
+   dominator). */
+unsigned long
+Oracle::dominator(const std::set<unsigned long> &instrs,
+		  AddressSpace *as)
+{
+	assert(!instrs.empty());
+
+	/* Single instruction case is easy: just use the instruction
+	 * itself. */
+	if (instrs.size() == 1)
+		return *instrs.begin();
+
+	/* For now, only handle the case where everything is in the
+	 * same function. */
+	unsigned long f = 0;
+	for (std::set<unsigned long>::iterator it = instrs.begin();
+	     it != instrs.end();
+	     it++) {
+		if (!f)
+			f = functionHeadForInstruction(*it);
+		else
+			assert(f == functionHeadForInstruction(*it));
+	}
+
+	/* Find the dominator chains for each individual instruction,
+	   intersect them, and then take the last one. This is perhaps
+	   not the most efficient algorithm imaginable. */
+	std::vector<unsigned long> dominators;
+	std::set<unsigned long>::iterator it = instrs.begin();
+	findDominators(f, *it, as, dominators);
+	std::reverse(dominators.begin(), dominators.end());
+	dominators.push_back(*it);
+	it++;
+	while (it != instrs.end()) {
+		std::vector<unsigned long> newDominators;
+		findDominators(f, *it, as, newDominators);
+		std::reverse(newDominators.begin(), newDominators.end());
+		newDominators.push_back(*it);
+		for (unsigned x = 0;
+		     x < dominators.size() && x < newDominators.size();
+		     x++) {
+			if (dominators[x] != newDominators[x])
+				dominators.resize(x);
+		}
+		it++;
+	}
+
+	/* The dominator list should at least contain the head of the
+	 * function. */
+	assert(!dominators.empty());
+	return dominators[dominators.size()-1];
+}

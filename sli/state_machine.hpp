@@ -109,6 +109,7 @@ public:
 	virtual const StateMachineEdge *target1() const = 0;
 	void assertAcyclic() const;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
+	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const = 0;
 	NAMED_CLASS
 };
@@ -189,6 +190,7 @@ public:
 		target = target->selectSingleCrashingPath();
 		return this;
 	}
+	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs);
 	bool canCrash() { return target->canCrash(); }
 	int complexity() {
 		int r = target->complexity();

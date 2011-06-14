@@ -164,7 +164,7 @@ public:
 	 * you want to do anything with non-constant branches then
 	 * you'll need to override emitInstruction() as well.
 	 */
-	virtual bool generateEpilogue(unsigned long exitRip) { return false; }
+	virtual void generateEpilogue(unsigned long exitRip);
 
 protected:
 

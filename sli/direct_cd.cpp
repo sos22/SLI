@@ -20,25 +20,22 @@
 #include "offline_analysis.hpp"
 #include "genfix.hpp"
 
-static FILE *
-fopenf(const char *mode, const char *fmt, ...)
-{
-	va_list args;
-	char *path;
-	FILE *res;
-
-	va_start(args, fmt);
-	vasprintf(&path, fmt, args);
-	va_end(args);
-
-	res = fopen(path, mode);
-	free(path);
-	return res;
-}
+class DcdCFG : public CFG {
+	std::set<unsigned long> &neededInstructions;
+public:
+	bool instructionUseful(Instruction *i) { return neededInstructions.count(i->rip) != 0; }
+	DcdCFG(AddressSpace *as, std::set<unsigned long> &ni)
+		: CFG(as), neededInstructions(ni)
+	{}
+};
 
 class DumpFix : public FixConsumer {
 public:
+	VexPtr<Oracle> &oracle;
 	void operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionToken token);
+	DumpFix(VexPtr<Oracle> &_oracle)
+		: oracle(_oracle)
+	{}
 };
 
 void
@@ -66,6 +63,35 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionTo
 		}
 	}
 	dbg_break("Have a crash summary");
+
+	VexPtr<AddressSpace> as(oracle->ms->addressSpace);
+
+	/* What instructions do we need to cover? */
+	std::set<unsigned long> neededInstructions;
+	summary->loadMachine->enumerateMentionedMemoryAccesses(neededInstructions);
+	unsigned long root = oracle->dominator(neededInstructions, as);
+	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
+	     it != summary->storeMachines.end();
+	     it++)
+		(*it)->machine->enumerateMentionedMemoryAccesses(neededInstructions);
+
+	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
+
+	/* What are the entry points of the patch? */
+	cfg->add_root(root, 100);
+	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
+	     it != summary->storeMachines.end();
+	     it++) {
+		std::set<unsigned long> instrs;
+		(*it)->machine->enumerateMentionedMemoryAccesses(instrs);
+		cfg->add_root(oracle->dominator(instrs, as), 100);
+	}
+	cfg->doit();
+
+	PatchFragment *pf = new PatchFragment();
+	pf->fromCFG(cfg);
+
+	printf("Patch fragment: %s\n", pf->asC());
 }
 
 int
@@ -100,7 +126,7 @@ main(int argc, char *argv[])
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
 
-	DumpFix df;
+	DumpFix df(oracle);
 	considerInstructionSequence(previousInstructions,
 				    ii,
 				    oracle,

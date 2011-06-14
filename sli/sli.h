@@ -1287,6 +1287,10 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 
 void getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators,
 		   std::vector<unsigned long> &fheads);
+void findDominators(unsigned long functionHead,
+		    unsigned long rip,
+		    AddressSpace *as,
+		    std::vector<unsigned long> &out);
 IRExpr *readIRExpr(int fd);
 
 IRSB *instrument_func(unsigned tid,

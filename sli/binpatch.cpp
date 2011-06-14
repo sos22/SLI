@@ -30,12 +30,12 @@ public:
 
 class AddExitCallPatch : public PatchFragment {
 protected:
-	bool generateEpilogue(unsigned long exitRip);
+	void generateEpilogue(unsigned long exitRip);
 	/* XXX should really override emitInstruction here to catch
 	   indirect jmp and ret instructions; oh well. */
 };
 
-bool
+void
 AddExitCallPatch::generateEpilogue(unsigned long exitRip)
 {
 	Instruction *i = Instruction::pseudo(exitRip);
@@ -45,8 +45,6 @@ AddExitCallPatch::generateEpilogue(unsigned long exitRip)
 
 	emitCallSequence("(unsigned long)release_lock", true);
 	emitJmpToRipHost(exitRip);
-
-	return true;
 }
 
 struct CriticalSection {

@@ -153,7 +153,41 @@ Instruction::decode(AddressSpace *as,
 	bool fallsThrough = true;
 	char delta;
 
+top:
 	switch (b) {
+	case 0x00 ... 0x3f:
+		if (b != 0x0f) {
+			switch (b & 7) {
+			case 0 ... 3:
+				i->modrm(0);
+				break;
+			case 4:
+				i->immediate(1);
+				break;
+			case 5:
+				i->immediate(4);
+			case 6:
+				b = i->byte();
+				goto top;
+			case 7:
+				/* Not allowed in 64-bit mode */
+				abort();
+			}
+			break;
+		}
+		/* Two-byte instructions */
+		b = i->byte();
+		switch (b) {
+		case 0xb6: /* movzx Gv, Eb */
+		case 0x90 ... 0x9f: /* setcc Eb */
+			i->modrm(0);
+			break;
+		default:
+			throw NotImplementedException("cannot decode instruction starting 0x0f 0x%02x at %lx\n",
+						      b, i->rip);
+		}
+		break;
+
 	case 0x70 ... 0x7f:
 		/* 8 bit conditional jumps are handled specially, by
 		   turning them into 32 conditional jumps, because
@@ -170,15 +204,34 @@ Instruction::decode(AddressSpace *as,
 		i->emit(b + 0x10);
 		i->relocs.push_back(new RipRelativeBranchRelocation(i->len, 4, i->branchNext));
 		i->len += 4;
+
 		/* Don't let the tail update defaultNext */
-/**/		return i;
+		fallsThrough = false;
+		break;
+
+	case 0xeb: /* jmp rel8 */
+		delta = i->byte();
+		i->defaultNext = i->rip + i->len + delta;
+
+		/* Don't emit this instruction at all; if it's useful,
+		 * we'll synthesise an appropriate jump later on.
+		 * Otherwise, we'll eliminate it with jump
+		 * threading. */
+		i->len = 0;
+
+		/* Don't let the tail update defaultNext */
+		fallsThrough = false;
+		break;
+
 	case 0x83:
 		i->modrm(1);
 		i->immediate(1);
 		break;
+	case 0x84:
 	case 0x85:
 	case 0x89:
 	case 0x8b:
+	case 0x8d:
 		i->modrm(0);
 		break;
 	case 0xb0 ... 0xb7:
@@ -194,9 +247,18 @@ Instruction::decode(AddressSpace *as,
 	case 0xc3:
 		fallsThrough = false;
 		break;
+	case 0xc6:
+		i->modrm(1);
+		i->immediate(1);
+		break;
 	case 0xc7:
 		i->modrm(4);
 		i->immediate(4);
+		break;
+	case 0xcc:
+		/* Really int3, but we treat it as a no-op because
+		   it's used in our infrastructure for triggering
+		   bugs. */
 		break;
 	case 0xc9:
 		break;
@@ -643,3 +705,11 @@ PatchFragment::asC() const
 	return vex_asprintf("%s};\n", content);
 }
 
+void
+PatchFragment::generateEpilogue(unsigned long exitRip)
+{
+	Instruction *i = Instruction::pseudo(exitRip);
+	cfg->registerInstruction(i);
+	registerInstruction(i, content.size());
+	emitJmpToRipHost(exitRip);
+}

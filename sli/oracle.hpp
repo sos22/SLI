@@ -258,6 +258,9 @@ public:
 
 	void getFunctions(std::vector<unsigned long> &out);
 
+	unsigned long dominator(const std::set<unsigned long> &instrs,
+				AddressSpace *as);
+
 	unsigned long selectRandomLoad() const;
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);

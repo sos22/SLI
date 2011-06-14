@@ -767,3 +767,31 @@ StateMachine::assertAcyclic() const
 	std::set<const StateMachine *> clean;
 	assertAcyclic(stack, clean);
 }
+
+void
+StateMachine::enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs)
+{
+	if (target1())
+		target1()->enumerateMentionedMemoryAccesses(instrs);
+	if (target0())
+		target0()->enumerateMentionedMemoryAccesses(instrs);
+}
+
+void
+StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs)
+{
+	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
+	     it != sideEffects.end();
+	     it++) {
+		StateMachineSideEffect *smse = *it;
+		if (StateMachineSideEffectLoad *smsel =
+		    dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+			instrs.insert(smsel->rip);
+		} else if (StateMachineSideEffectStore *smses =
+			   dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+			instrs.insert(smses->rip);
+		}
+	}
+	target->enumerateMentionedMemoryAccesses(instrs);
+}
+

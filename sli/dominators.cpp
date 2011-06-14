@@ -268,7 +268,7 @@ struct fd_cfg_node : public GarbageCollected<fd_cfg_node> {
 
 	NAMED_CLASS
 };
-static void
+void
 findDominators(unsigned long functionHead,
 	       unsigned long rip,
 	       AddressSpace *as,
