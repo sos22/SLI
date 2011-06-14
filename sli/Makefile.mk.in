@@ -6,7 +6,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{debug,dbgbreak,addressspace,replay,range_tree}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump,dominators,pickle}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{state_machine,oracle,simplify_irexpr,eval_state_machine}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis,genfix}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))

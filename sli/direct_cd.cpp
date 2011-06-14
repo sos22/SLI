@@ -18,6 +18,7 @@
 #include "crash_reason.hpp"
 #include "inferred_information.hpp"
 #include "offline_analysis.hpp"
+#include "genfix.hpp"
 
 static FILE *
 fopenf(const char *mode, const char *fmt, ...)
@@ -64,7 +65,7 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionTo
 			printf("\n");
 		}
 	}
-	dbg_break("Have remote critical sections");
+	dbg_break("Have a crash summary");
 }
 
 int

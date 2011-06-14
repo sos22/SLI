@@ -1576,7 +1576,6 @@ Oracle::Function::getSuccessors(unsigned long rip, std::vector<unsigned long> &s
 	bind_int64(stmt1, 1, rip);
 	bind_int64(stmt2, 1, rip);
 
-	succ.clear();
 	extract_int64_column(stmt1, 0, succ);
 	extract_int64_column(stmt2, 0, succ);
 }
