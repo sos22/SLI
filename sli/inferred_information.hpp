@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <vector>
 
+#include "crash_reason.hpp"
+
 template <typename t>
 class CFGNode : public GarbageCollected<CFGNode<t>, &ir_heap>, public PrettyPrintable {
 public:
@@ -91,6 +93,9 @@ public:
 	}
 	NAMED_CLASS
 };
+
+void printCrashSummary(CrashSummary *cs, FILE *f);
+char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary);
 
 class FixConsumer {
 public:

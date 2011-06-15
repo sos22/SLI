@@ -1,7 +1,11 @@
 #include <map>
+#include <set>
 
 #include "sli.h"
 #include "genfix.hpp"
+#include "oracle.hpp"
+#include "inferred_information.hpp"
+#include "crash_reason.hpp"
 
 typedef unsigned char Byte;
 
@@ -712,4 +716,70 @@ PatchFragment::generateEpilogue(unsigned long exitRip)
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
 	emitJmpToRipHost(exitRip);
+}
+
+class DcdCFG : public CFG {
+	std::set<unsigned long> &neededInstructions;
+public:
+	bool instructionUseful(Instruction *i) { return neededInstructions.count(i->rip) != 0; }
+	DcdCFG(AddressSpace *as, std::set<unsigned long> &ni)
+		: CFG(as), neededInstructions(ni)
+	{}
+};
+
+char *
+buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary)
+{
+	VexPtr<AddressSpace> as(oracle->ms->addressSpace);
+
+	/* What instructions do we need to cover? */
+	std::set<unsigned long> neededInstructions;
+	summary->loadMachine->enumerateMentionedMemoryAccesses(neededInstructions);
+	/* 5 bytes is the size of a 32-bit relative jump. */
+	unsigned long root = oracle->dominator(neededInstructions, as, 5);
+	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
+	     it != summary->storeMachines.end();
+	     it++)
+		(*it)->machine->enumerateMentionedMemoryAccesses(neededInstructions);
+
+	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
+
+	std::vector<unsigned long> roots;
+	/* What are the entry points of the patch? */
+	cfg->add_root(root, 100);
+	roots.push_back(root);
+	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
+	     it != summary->storeMachines.end();
+	     it++) {
+		std::set<unsigned long> instrs;
+		(*it)->machine->enumerateMentionedMemoryAccesses(instrs);
+		unsigned long r = oracle->dominator(instrs, as, 5);
+		cfg->add_root(r, 100);
+		roots.push_back(r);
+	}
+	cfg->doit();
+
+	PatchFragment *pf = new PatchFragment();
+	pf->fromCFG(cfg);
+
+	std::vector<const char *> fragments;
+	fragments.push_back("#include \"patch_head.h\"\n\n");
+	fragments.push_back(pf->asC());
+	fragments.push_back("static unsigned long entry_points[] = {\n");
+	for (unsigned x = 0; x < roots.size(); x++)
+		fragments.push_back(vex_asprintf("\t0x%lx,\n", roots[x]));
+	fragments.push_back("};\n\n#include \"patch_skeleton.c\"\n");
+
+	size_t sz = 1;
+	for (unsigned x = 0; x < fragments.size(); x++)
+		sz += strlen(fragments[x]);
+	char *res = (char *)LibVEX_Alloc_Bytes(sz);
+	char *cursor = res;
+	for (unsigned x = 0; x < fragments.size(); x++) {
+		memcpy(cursor, fragments[x], strlen(fragments[x]));
+		cursor += strlen(fragments[x]);
+	}
+	*cursor = 0;
+	assert(cursor == res + sz-1);
+	return res;
 }
