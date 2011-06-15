@@ -65,7 +65,8 @@ mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 	PatchFragment *pf = new AddExitCallPatch();
 	pf->fromCFG(cfg);
 
-	char *res = pf->asC();
+	char *ign;
+	char *res = pf->asC("patch", &ign, &ign, &ign);
 	res = vex_asprintf("#include \"patch_head.h\"\n\n%s\nstatic unsigned long entry_points[] = {\n",
 			   res);
 	for (unsigned x = 0; x < nr_csects; x++)

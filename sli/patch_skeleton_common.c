@@ -49,14 +49,14 @@ malloc_executable(size_t s)
 }
 
 static char *
-build_patch(void)
+build_patch(struct patch *patch)
 {
-	char *res = malloc_executable(sizeof(patch_content));
+	char *res = malloc_executable(sizeof(patch->content));
 	unsigned x;
 
-	memcpy(res, patch_content, sizeof(patch_content));
-	for (x = 0; x < sizeof(reloc) / sizeof(reloc[0]); x++) {
-		const struct relocation *r = &reloc[x];
+	memcpy(res, patch->content, patch->content_size);
+	for (x = 0; x < patch->nr_relocations; x++) {
+		const struct relocation *r = &patch->relocations[x];
 		unsigned long val;
 		val = r->target + r->addend;
 		if (r->relative)

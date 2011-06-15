@@ -76,15 +76,15 @@ sigtrap_sigaction(int sig, siginfo_t *info, void *_ctxt)
 	pthread_mutex_lock(&mux);
 
 	ctxt->__fpregs_mem.mxcsr &= 0xffff;
-	for (x = 0; x < sizeof(entry_points) / sizeof(entry_points[0]); x++) {
-		if (rip == entry_points[x]) {
+	for (x = 0; x < patch.nr_entry_points; x++) {
+		if (rip == patch.entry_points[x]) {
 			/* This is one of ours, so we are allowed to
 			 * redirect. */
-			for (x = 0; x < sizeof(trans_table) / sizeof(trans_table[0]); x++) {
-				if (trans_table[x].rip == rip) {
+			for (x = 0; x < patch.nr_translations; x++) {
+			  if (patch.trans_table[x].rip == rip) {
 					ctxt->uc_mcontext.gregs[REG_RIP] =
 						(unsigned long)actual_patch +
-						trans_table[x].offset;
+						patch.trans_table[x].offset;
 					my_setcontext(ctxt);
 					abort();
 				}
@@ -106,7 +106,7 @@ activate(void)
 
 	pthread_mutex_init(&mux, NULL);
 
-	actual_patch = build_patch();
+	actual_patch = build_patch(&patch);
 
 	/* Install the signal handler */
 	/* XXX should really trap SIGSEGV and SIGBUS as well, so that
@@ -133,12 +133,12 @@ activate(void)
 		if (waitpid(parent, &status, 0) < 0)
 			err(1, "waiting for parent to stop");
 
-		for (x = 0; x < sizeof(entry_points) / sizeof(entry_points[0]); x++) {
-			printf("Add fixup %d %lx\n", x, entry_points[x]);
+		for (x = 0; x < patch.nr_entry_points; x++) {
+			printf("Add fixup %d %lx\n", x, patch.entry_points[x]);
 			if (ptrace(PTRACE_POKEUSER,
 				   parent,
 				   offsetof(struct user, u_debugreg[x]),
-				   entry_points[x]) < 0)
+				   patch.entry_points[x]) < 0)
 				err(1, "ptrace %d", x);
 
 			/* Enable the register.  They're in

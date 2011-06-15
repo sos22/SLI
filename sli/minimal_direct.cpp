@@ -21,8 +21,8 @@ void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 		    GarbageCollectionToken token)
 {
-	printf("Generated a potential fix from rip %lx\n", rip);
 	dbg_break("Hello\n");
+	printCrashSummary(summary, stdout);
 }
 
 int

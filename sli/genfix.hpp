@@ -146,7 +146,7 @@ protected:
 	void emitCallReg(unsigned);
 public:
 	void fromCFG(CFG *cfg);
-	char *asC() const;
+	char *asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const;
 
 	bool ripToOffset(unsigned long rip, unsigned *res);
 	void writeBytes(const void *bytes, unsigned size, unsigned offset);

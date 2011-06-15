@@ -55,7 +55,7 @@ acquire_lock_ll:\n\
 static void
 activate(void)
 {
-	char *patch;
+	char *body;
 	char *trampolines;
 	unsigned x;
 	long delta;
@@ -72,7 +72,7 @@ activate(void)
 
 	pthread_mutex_init(&mux, NULL);
 
-	patch = build_patch();
+	body = build_patch(&patch);
 
 	trampolines = malloc_executable(PAGE_SIZE);
 	/* We need to patch each entry point so that it turns into a
@@ -89,7 +89,7 @@ activate(void)
 	   1: acquire_lock_ll
 
 	   Do so. */
-	for (x = 0; x < sizeof(entry_points) / sizeof(entry_points[0]); x++) {
+	for (x = 0; x < patch.nr_entry_points; x++) {
 		memcpy(trampolines,
 		       "\x48\x8d\x64\x24\x80" /* lea -128(%rsp), %rsp */
 		       "\x56" /* pushq %rsi */
@@ -106,9 +106,9 @@ activate(void)
 		*(unsigned long *)(trampolines+8) = (unsigned long)&acquire_lock_ll;
 
 		/* Patch in jump address */
-		for (y = 0; y < sizeof(trans_table) / sizeof(trans_table[0]); y++) {
-			if (trans_table[y].rip == entry_points[x]) {
-				delta = (unsigned long)patch + trans_table[y].offset -
+		for (y = 0; y < patch.nr_translations; y++) {
+			if (patch.trans_table[y].rip == patch.entry_points[x]) {
+				delta = (unsigned long)body + patch.trans_table[y].offset -
 					((unsigned long)trampolines + 32);
 				assert(delta == (int)delta);
 				assert(*(int *)(trampolines+28) == 0);
@@ -116,18 +116,18 @@ activate(void)
 				break;
 			}
 		}
-		assert(y != sizeof(trans_table) / sizeof(trans_table[0]));
+		assert(y != patch.nr_translations);
 
 		/* Trampoline is now correctly established.  Patch in
 		 * a jump to it. */
-		mprotect((void *)(entry_points[x] & PAGE_MASK),
+		mprotect((void *)(patch.entry_points[x] & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_WRITE|PROT_EXEC);
-		*(unsigned char *)entry_points[x] = 0xe9;
-		delta = (unsigned long)trampolines - (entry_points[x] + 5);
+		*(unsigned char *)patch.entry_points[x] = 0xe9;
+		delta = (unsigned long)trampolines - (patch.entry_points[x] + 5);
 		assert(delta == (int)delta);
-		*(int *)(entry_points[x] + 1) = delta;
-		mprotect((void *)(entry_points[x] & PAGE_MASK),
+		*(int *)(patch.entry_points[x] + 1) = delta;
+		mprotect((void *)(patch.entry_points[x] & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_EXEC);
 

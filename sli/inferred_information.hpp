@@ -95,7 +95,7 @@ public:
 };
 
 void printCrashSummary(CrashSummary *cs, FILE *f);
-char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary);
+char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
 
 class FixConsumer {
 public:

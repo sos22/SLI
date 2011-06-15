@@ -683,22 +683,27 @@ PatchFragment::emitStraightLine(Instruction *i)
 }
 
 char *
-PatchFragment::asC() const
+PatchFragment::asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const
 {
 	char *content_buf = (char *)LibVEX_Alloc_Bytes(content.size() * 4 + 1);
 	for (unsigned x = 0; x < content.size(); x++)
 		sprintf(content_buf + x * 4, "\\x%02x", content[x]);
-	char *content = vex_asprintf("static const unsigned char patch_content[] = \"%s\";\n\n"
-				     "static const struct relocation reloc[] = {\n",
-				     content_buf);
+	*relocs_name = vex_asprintf("__%s_reloc", ident);
+	*content_name = vex_asprintf("__%s_patch_content", ident);
+	char *content = vex_asprintf("static const unsigned char %s[] = \"%s\";\n\n"
+				     "static const struct relocation %s[] = {\n",
+				     *content_name,
+				     content_buf,
+				     *relocs_name);
 	for (std::vector<LateRelocation>::const_iterator it = lateRelocs.begin();
 	     it != lateRelocs.end();
 	     it++)
 		content = vex_asprintf("%s\t%s,\n",
 				       content, *it);
 
-	content = vex_asprintf("%s};\n\nstatic const struct trans_table_entry trans_table[] = {\n",
-			       content);
+	*trans_name = vex_asprintf("__%s__trans_table", ident);
+	content = vex_asprintf("%s};\n\nstatic const struct trans_table_entry %s[] = {\n",
+			       content, *trans_name);
 	for (std::vector<Instruction *>::const_iterator it = registeredInstrs.begin();
 	     it != registeredInstrs.end();
 	     it++)
@@ -727,8 +732,24 @@ public:
 	{}
 };
 
+static void
+add_array_summary(std::vector<const char *> &out,
+		  const char *t_ptr,
+		  const char *nr_entries,
+		  const char *table)
+{
+	out.push_back(
+		vex_asprintf(
+			"\t.%s = %s, .%s = sizeof(%s)/sizeof(%s[0]),\n",
+			t_ptr,
+			table,
+			nr_entries,
+			table,
+			table));
+}
+
 char *
-buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary)
+buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident)
 {
 	VexPtr<AddressSpace> as(oracle->ms->addressSpace);
 
@@ -763,11 +784,27 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary)
 	pf->fromCFG(cfg);
 
 	std::vector<const char *> fragments;
+	char *relocs_name;
+	char *trans_name;
+	char *content_name;
+	char *entry_table_name;
 	fragments.push_back("#include \"patch_head.h\"\n\n");
-	fragments.push_back(pf->asC());
-	fragments.push_back("static unsigned long entry_points[] = {\n");
+	fragments.push_back(pf->asC(ident, &relocs_name, &trans_name, &content_name));
+	entry_table_name = vex_asprintf("__%s_entry_points", ident);
+	fragments.push_back("static unsigned long ");
+	fragments.push_back(entry_table_name);
+	fragments.push_back("[] = {\n");
 	for (unsigned x = 0; x < roots.size(); x++)
 		fragments.push_back(vex_asprintf("\t0x%lx,\n", roots[x]));
+	fragments.push_back("};\n\nstatic struct patch ");
+	fragments.push_back(ident);
+	fragments.push_back(" = {\n");
+
+	add_array_summary(fragments, "relocations", "nr_relocations", relocs_name);
+	add_array_summary(fragments, "trans_table", "nr_translations", trans_name);
+	add_array_summary(fragments, "entry_points", "nr_entry_points", entry_table_name);
+	add_array_summary(fragments, "content", "content_size", content_name);
+
 	fragments.push_back("};\n\n#include \"patch_skeleton.c\"\n");
 
 	size_t sz = 1;
