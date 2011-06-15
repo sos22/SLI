@@ -33,7 +33,8 @@ void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionToken token)
 {
 	printCrashSummary(summary, stdout);
-	printf("Generates patch:\n%s\n", buildPatchForCrashSummary(oracle, summary, "patch"));
+	printf("Generates patch:\n#include \"patch_head.h\"\n\n%s\n\n#include \"patch_skeleton.c\"\n",
+	       buildPatchForCrashSummary(oracle, summary, "patch"));
 }
 
 int

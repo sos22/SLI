@@ -788,7 +788,6 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	char *trans_name;
 	char *content_name;
 	char *entry_table_name;
-	fragments.push_back("#include \"patch_head.h\"\n\n");
 	fragments.push_back(pf->asC(ident, &relocs_name, &trans_name, &content_name));
 	entry_table_name = vex_asprintf("__%s_entry_points", ident);
 	fragments.push_back("static unsigned long ");
@@ -804,8 +803,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	add_array_summary(fragments, "trans_table", "nr_translations", trans_name);
 	add_array_summary(fragments, "entry_points", "nr_entry_points", entry_table_name);
 	add_array_summary(fragments, "content", "content_size", content_name);
-
-	fragments.push_back("};\n\n#include \"patch_skeleton.c\"\n");
+	fragments.push_back("};\n");
 
 	size_t sz = 1;
 	for (unsigned x = 0; x < fragments.size(); x++)
