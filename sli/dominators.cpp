@@ -243,187 +243,252 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 	abort();
 }
 
+#define DBG_DOMINATORS(...) do {} while (0)
+//#define DBG_DOMINATORS printf
+
 /* Given the starting point of a function and the address of an
    instruction in that function, find all of the instructions which
    are guaranteed to be executed at least once on any path from the
-   starting point to the target instruction.  We try to order them so
-   that the dominators nearest to the target are reported first. */
-struct fd_cfg_node : public GarbageCollected<fd_cfg_node> {
-	unsigned long rip;
-	union ptr_or_ulong {
-		fd_cfg_node *ptr;
-		unsigned long ulong;
-		bool operator<(const ptr_or_ulong &x) const {
-			return ulong < x.ulong;
-		}
-	};
-	std::set<ptr_or_ulong> predecessors;
-	std::set<ptr_or_ulong> successors;
-	bool already_output;
-
-	std::set<fd_cfg_node *> dominators;
-
-	/* These should never be live across a GC pass */
-	void visit(HeapVisitor &hv) { abort(); }
-
-	NAMED_CLASS
-};
+   starting point to the target instruction.  We order them so that
+   the dominators nearest to the target are reported first. */
 void
 findDominators(unsigned long functionHead,
-	       unsigned long rip,
+	       const unsigned long rip,
 	       AddressSpace *as,
 	       std::vector<unsigned long> &out)
 {
 	std::vector<unsigned long> remainingToExplore;
-	std::map<unsigned long, fd_cfg_node *> cfg;
+	std::map<unsigned long, std::set<unsigned long> > successors;
+	std::map<unsigned long, std::set<unsigned long> > predecessors;
+	std::set<unsigned long> instrs;
 
+	DBG_DOMINATORS("Exploring from %lx to find dominators of %lx\n", functionHead, rip);
 	/* First: build the CFG, representing all of the successor
 	   pointers as straight ulongs and not bothing about
 	   predecessors. */
 	remainingToExplore.push_back(functionHead);
 	while (!remainingToExplore.empty()) {
 		unsigned long rip = remainingToExplore.back();
+		unsigned long r;
 		remainingToExplore.pop_back();
-		if (cfg.count(rip))
+		if (instrs.count(rip))
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(1, rip);
-		fd_cfg_node *work = NULL;
 		assert(irsb->stmts[0]->tag == Ist_IMark);
 		assert(irsb->stmts[0]->Ist.IMark.addr == rip);
-		for (int idx = 0; idx < irsb->stmts_used; idx++) {
+		for (int idx = 1; idx < irsb->stmts_used; idx++) {
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
+				successors[rip].insert(stmt->Ist.IMark.addr);
+				predecessors[stmt->Ist.IMark.addr].insert(rip);
+				instrs.insert(rip);
 				rip = stmt->Ist.IMark.addr;
-				if (work) {
-					fd_cfg_node::ptr_or_ulong p;
-					p.ulong = rip;
-					work->successors.insert(p);
-				}
-				if (cfg.count(rip))
+				if (instrs.count(rip))
 					goto done_this_entry;
-				work = new fd_cfg_node();
-				work->rip = rip;
-				cfg[rip] = work;
 				break;
-			case Ist_Exit: {
-				fd_cfg_node::ptr_or_ulong p;
-				p.ulong = stmt->Ist.Exit.dst->Ico.U64;
-				work->successors.insert(p);
-				remainingToExplore.push_back(p.ulong);
+			case Ist_Exit:
+				successors[rip].insert(stmt->Ist.Exit.dst->Ico.U64);
+				predecessors[stmt->Ist.Exit.dst->Ico.U64].insert(rip);
+				remainingToExplore.push_back(stmt->Ist.Exit.dst->Ico.U64);
 				break;
-			}
 			default:
 				break;
 			}
 		}
 
+		instrs.insert(rip);
+
+		r = 0;
 		if (irsb->jumpkind == Ijk_Call) {
-			fd_cfg_node::ptr_or_ulong p;
-			p.ulong = extract_call_follower(irsb);
-			work->successors.insert(p);
-			remainingToExplore.push_back(p.ulong);
+			r = extract_call_follower(irsb);
 		} else if (irsb->next->tag == Iex_Const) {
-			fd_cfg_node::ptr_or_ulong p;
-			p.ulong = irsb->next->Iex.Const.con->Ico.U64;
-			work->successors.insert(p);
-			remainingToExplore.push_back(p.ulong);
+			r = irsb->next->Iex.Const.con->Ico.U64;
+		}
+		if (r) {
+			successors[rip].insert(r);
+			predecessors[r].insert(rip);
+			remainingToExplore.push_back(r);
 		}
 	done_this_entry:
 		;
 	}
 
-	/* Resolve successor pointers. */
-	for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
-	     it != cfg.end();
-	     it++) {
-		for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it2 =
-			     it->second->successors.begin();
-		     it2 != it->second->successors.end();
-		     it2++) {
-			fd_cfg_node *ptr = cfg[it2->ulong];
-			assert(ptr != NULL);
-			assert(ptr->rip == it2->ulong);
-			((fd_cfg_node::ptr_or_ulong *)&*it2)->ptr = ptr;
-		}
-	}
-	/* And now do predecessor ones */
-	for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
-	     it != cfg.end();
-	     it++) {
-		for (std::set<fd_cfg_node::ptr_or_ulong>::iterator it2 =
-			     it->second->successors.begin();
-		     it2 != it->second->successors.end();
-		     it2++) {
-			fd_cfg_node *ptr = it2->ptr;
-			fd_cfg_node::ptr_or_ulong p;
-			p.ptr = it->second;
-			ptr->predecessors.insert(p);
-		}
-	}
+	/* Now iterate to build a dominator map.  We start by assuming
+	   that every instruction dominates every other instruction
+	   (except for the head, which only dominates itself), and
+	   then iterate to eliminate any bad dominations.  The rule,
+	   at this stage, is that node A dominates node B if either
+	   A == B or every predecessor of B is itself dominated by A.
+	   Later on we'll trim this down to include only direct dominators.
+	*/
 
-	/* Now iterate to build a dominator map. */
-	for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
-	     it != cfg.end();
-	     it++) {
-		assert(it->first == it->second->rip);
-		it->second->dominators.clear();
-		if (it->first == functionHead) {
-			it->second->dominators.insert(it->second);
-		} else {
-			for (std::map<unsigned long, fd_cfg_node *>::iterator it2 = cfg.begin();
-			     it2 != cfg.end();
-			     it2++) {
-				it->second->dominators.insert(it2->second);
-			}
-		}
-	}
+	/* Build initial optimistic map. */
+	std::map<unsigned long, std::set<unsigned long> > dominators;
+	for (std::set<unsigned long>::iterator it = instrs.begin();
+	     it != instrs.end();
+	     it++)
+		dominators[*it] = instrs;
+	dominators[functionHead].clear();
+	dominators[functionHead].insert(functionHead);
+	/* Iterate to fixed point */
 	bool progress;
-	do {
+	progress = true;
+	while (progress) {
 		progress = false;
-		for (std::map<unsigned long, fd_cfg_node *>::iterator it = cfg.begin();
-		     it != cfg.end();
+		for (std::set<unsigned long>::iterator it = instrs.begin();
+		     it != instrs.end();
 		     it++) {
-			fd_cfg_node *node = it->second;
-			/* A node N is dominated by a node X if all of
-			   its predecessors are dominated by X, or if
-			   it is X itself.  The iteration is monotone,
-			   and so we only need to consider the things
-			   which are currently flagged as dominators
-			   and consider unflagging them. */
-			for (std::set<fd_cfg_node *>::iterator it2 = node->dominators.begin();
-			     it2 != node->dominators.end();
+			unsigned long rip = *it;
+			/* Check that all of our current dominators
+			 * are valid. */
+			std::set<unsigned long> &dom(dominators[rip]);
+			for (std::set<unsigned long>::iterator domit = dom.begin();
+			     domit != dom.end();
 				) {
-				if (*it2 == node) {
-					it2++;
+				if (*domit == rip) {
+					/* Instructions always
+					 * dominate themselves. */
+					domit++;
 					continue;
 				}
+				/* Otherwise, must dominate all
+				 * predecessors of rip. */
 				bool should_be_dominator = true;
-				for (std::set<fd_cfg_node::ptr_or_ulong>::const_iterator pred =
-					     node->predecessors.begin();
-				     should_be_dominator && pred != node->predecessors.end();
-				     pred++) {
-					if (!pred->ptr->dominators.count(*it2))
+				for (std::set<unsigned long>::iterator pred_it =
+					     predecessors[rip].begin();
+				     should_be_dominator && pred_it != predecessors[rip].end();
+				     pred_it++) {
+					if (!dominators[*pred_it].count(*domit))
 						should_be_dominator = false;
 				}
 				if (!should_be_dominator) {
-					node->dominators.erase(it2++);
 					progress = true;
+					dom.erase(domit++);
 				} else {
-					it2++;
+					domit++;
 				}
 			}
-
 		}
-	} while (progress);
+	}
 
-	/* Now we just need to output the dominator set for the target
-	 * instruction's node. */
-	fd_cfg_node *target = cfg[rip];
-	for (std::set<fd_cfg_node *>::reverse_iterator it = target->dominators.rbegin();
-	     it != target->dominators.rend();
-	     it++)
-		out.push_back((*it)->rip);
+	/* Dump the dominator map. */
+	for (std::set<unsigned long>::iterator it = instrs.begin();
+	     it != instrs.end();
+	     it++) {
+		DBG_DOMINATORS("Dominators of %lx:", *it);
+		for (std::set<unsigned long>::iterator it2 = dominators[*it].begin();
+		     it2 != dominators[*it].end();
+		     it2++)
+			DBG_DOMINATORS(" %lx", *it2);
+		DBG_DOMINATORS("\n");
+	}
+
+	/* Now restrict ourselves to immediate dominators.  X is an
+	   immediate dominator of Y if:
+
+	   -- X is a dominator of Y, and
+	   -- there exists no Z such that Z dominates Y and X dominates Z, and
+	   -- X != Y.
+
+	   In other words, if A dominates B and C, and B dominates
+	   just C, then A immediately dominates just B and B
+	   immediately dominates C.  The immediate dominator of the
+	   function head is not defined.
+
+	   The immediate dominator of a node is unique.  Suppose that
+	   A had two immediate dominators, B and C.  B and C must both
+	   dominate A, and so every path from the root to A must pass
+	   through both of them.  What's more, they must pass through
+	   in the same order i.e. either every path visits B and then
+	   C, or every path visits C and then B (i.e. one dominates
+	   the other).  Otherwise, we'd have a cycle, and could skip
+	   one of B and C on our way to A by skipping the cycle, and
+	   so that would contradict the assumption that B and C are
+	   both dominators of A.
+
+	   (The path which visits B and then C must go E=>B=>C=>A, and
+	   the path which visits C then B must go E=>C=>B=>A, and so
+	   there must be paths E=>B=>A and E=>C=>A.  E is the function
+	   head and => is supposed to be the transitive closure of the
+	   successor relationship.)
+	*/
+	/* This is effectively undoing the implicit transitive closure
+	 * in the definition of dominators.  There's probably a
+	 * version of the dominator algorithm whcih does it directly,
+	 * but I couldn't think of one. */
+	std::map<unsigned long, unsigned long> immediateDominators;
+	for (std::set<unsigned long>::iterator it = instrs.begin();
+	     it != instrs.end();
+	     it++) {
+		unsigned long rip = *it;
+		if (rip == functionHead) /* immediate dominator of
+					  * function head undefined */
+			continue;
+		std::set<unsigned long> &doms(dominators[rip]);
+		bool found_one = false;
+		DBG_DOMINATORS("Find immediate dominator of %lx...\n", rip);
+		for (std::set<unsigned long>::iterator it2 = doms.begin();
+		     it2 != doms.end();
+		     it2++) {
+			unsigned long dom = *it2;
+			/* Is dom the immediate dominator of rip? */
+			if (dom == rip)
+				continue; /* can't be immediate dominator of yourself */
+			bool over_dominated = false;
+			/* We know that dom dominates rip; we need to
+			   check if there's some other dom' which
+			   dominates rip such that dom dominates dom'.
+			   If so, dom cannot be the immediate
+			   dominator. */
+			for (std::set<unsigned long>::iterator it3 = doms.begin();
+			     !over_dominated && it3 != doms.end();
+			     it3++) {
+				unsigned long dom_prime = *it3;
+				if (dom_prime == dom || dom_prime == rip)
+					continue;
+				/* If dom_prime dominates dom then dom
+				   must be eliminated from
+				   consideration. */
+				if (dominators[dom_prime].count(dom)) {
+					DBG_DOMINATORS("Not %lx: dominates %lx\n", dom, dom_prime);
+					over_dominated = true;
+				}
+			}
+			if (!over_dominated) {
+				/* This is the immediate dominator. */
+				assert(!found_one);
+				found_one = true;
+				immediateDominators[rip] = dom;
+				DBG_DOMINATORS("%lx is immediate dominator of %lx\n", dom, rip);
+				/* Could break here, but I'd rather
+				   keep going so that we can assert
+				   that the immediate dominator is
+				   unique. */
+			}
+		}
+		/* immediate dominator is always defined, except for
+		   the function head */
+		assert(found_one);
+	}
+
+	/* Dump out the immediate dominators table. */
+	for (std::set<unsigned long>::iterator it = instrs.begin();
+	     it != instrs.end();
+	     it++) {
+		if (*it != functionHead)
+			DBG_DOMINATORS("Immediate dominator of %lx = %lx\n", *it, immediateDominators[*it]);
+	}
+
+	/* Finally, walk the immediate dominator map to build the
+	 * ordered dominator chain for the target instruction. */
+	unsigned long r = rip;
+	while (1) {
+		out.push_back(r);
+		if (!immediateDominators.count(r))
+			break;
+		r = immediateDominators[r];
+	}
 
 	/* And we're done. */
 }
