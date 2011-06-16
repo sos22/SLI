@@ -56,11 +56,31 @@ Instruction::byte()
 	return b;
 }
 
+int
+Instruction::int32()
+{
+	unsigned long t[4];
+	as->readMemory(rip + len, 4, t, false, NULL);
+	emit(t[0]);
+	emit(t[1]);
+	emit(t[2]);
+	emit(t[3]);
+	return t[0] | (t[1] << 8) | (t[2] << 16) | (t[3] << 24);
+}
+
 void
 Instruction::immediate(unsigned size)
 {
 	for (unsigned x = 0; x < size; x++)
 		byte();
+}
+
+int
+Instruction::modrmExtension(void)
+{
+	Byte b = byte();
+	len--;
+	return (b >> 3) & 7;
 }
 
 class RipRelativeRelocation : public EarlyRelocation {
@@ -156,6 +176,7 @@ Instruction::decode(AddressSpace *as,
 	}
 	bool fallsThrough = true;
 	char delta;
+	int delta32;
 
 top:
 	switch (b) {
@@ -182,14 +203,29 @@ top:
 		/* Two-byte instructions */
 		b = i->byte();
 		switch (b) {
-		case 0xb6: /* movzx Gv, Eb */
+		case 0x80 ... 0x8f: /* 32 bit conditional jumps. */
+			delta32 = i->int32();
+			i->branchNext = i->rip + i->len + delta;
+			i->relocs.push_back(new RipRelativeBranchRelocation(i->len - 4, 4, i->branchNext));
+			/* Unlike 8 bit jumps, we don't need to set
+			   fallsThrough here, because the normal
+			   defaultNext calculation will do the right
+			   thing, because the output instruction is
+			   the same size as the input one. */
+			break;
+
 		case 0x90 ... 0x9f: /* setcc Eb */
+		case 0xaf: /* imul Gv, Ev */
+		case 0xb6: /* movzx Gv, Eb */
 			i->modrm(0);
 			break;
 		default:
 			throw NotImplementedException("cannot decode instruction starting 0x0f 0x%02x at %lx\n",
 						      b, i->rip);
 		}
+		break;
+
+	case 0x40 ... 0x5f:
 		break;
 
 	case 0x70 ... 0x7f:
@@ -213,31 +249,24 @@ top:
 		fallsThrough = false;
 		break;
 
-	case 0xeb: /* jmp rel8 */
-		delta = i->byte();
-		i->defaultNext = i->rip + i->len + delta;
-
-		/* Don't emit this instruction at all; if it's useful,
-		 * we'll synthesise an appropriate jump later on.
-		 * Otherwise, we'll eliminate it with jump
-		 * threading. */
-		i->len = 0;
-
-		/* Don't let the tail update defaultNext */
-		fallsThrough = false;
-		break;
-
+	case 0x80:
+	case 0x82:
 	case 0x83:
 		i->modrm(1);
 		i->immediate(1);
 		break;
-	case 0x84:
-	case 0x85:
-	case 0x89:
-	case 0x8b:
-	case 0x8d:
+	case 0x81:
+		i->modrm(4);
+		i->immediate(4);
+		break;
+
+	case 0x84 ... 0x8e:
 		i->modrm(0);
 		break;
+
+	case 0x90 ... 0x9f:
+		break;
+
 	case 0xb0 ... 0xb7:
 		i->immediate(1);
 		break;
@@ -248,6 +277,12 @@ top:
 			i->immediate(4);
 		}
 		break;
+	case 0xc0:
+	case 0xc1: /* Shift group 2 with an Ib */
+		i->modrm(1);
+		i->immediate(1);
+		break;
+
 	case 0xc3:
 		fallsThrough = false;
 		break;
@@ -265,6 +300,9 @@ top:
 		   bugs. */
 		break;
 	case 0xc9:
+		break;
+	case 0xd0 ... 0xd3: /* Shift group 2*/
+		i->modrm(0);
 		break;
 	case 0xe8: { /* Call instruction. */
 		i->immediate(4);
@@ -284,6 +322,36 @@ top:
 			i->branchNext = target;
 		break;
 	}
+	case 0xeb: /* jmp rel8 */
+		delta = i->byte();
+		i->defaultNext = i->rip + i->len + delta;
+
+		/* Don't emit this instruction at all; if it's useful,
+		 * we'll synthesise an appropriate jump later on.
+		 * Otherwise, we'll eliminate it with jump
+		 * threading. */
+		i->len = 0;
+
+		/* Don't let the tail update defaultNext */
+		fallsThrough = false;
+		break;
+
+	case 0xe9: /* jmp rel32 */
+		delta32 = i->int32();
+		i->defaultNext = i->rip + i->len + delta;
+		i->len = 0;
+		fallsThrough = false;
+		break;
+
+	case 0xf7: /* Unary group 3 Ev */
+		if (i->modrmExtension() == 0) {
+			i->modrm(4);
+			i->immediate(4);
+		} else {
+			i->modrm(0);
+		}
+		break;
+
 	case 0xff:
 		i->modrm(0);
 		break;

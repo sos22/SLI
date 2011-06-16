@@ -28,9 +28,11 @@ class EarlyRelocation;
 
 class Instruction : public GarbageCollected<Instruction > {
 	unsigned char byte();
+	int int32();
 	void emit(unsigned char);
 	void modrm(unsigned nrImmediates);
 	void immediate(unsigned size);
+	int modrmExtension(void);
 public:
 	unsigned long rip;
 
