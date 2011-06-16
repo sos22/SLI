@@ -8,11 +8,15 @@
 
 class DumpFix : public FixConsumer {
 public:
-	unsigned long rip;
-	VexPtr<MachineState> &ms;
-	DumpFix(unsigned long r, VexPtr<MachineState> &_ms)
-		: rip(r), ms(_ms)
-	{}
+	VexPtr<Oracle> &oracle;
+	int cntr;
+	FILE *output;
+	DumpFix(VexPtr<Oracle> &_oracle, FILE *_output)
+		: oracle(_oracle), cntr(0), output(_output)
+	{
+		fputs("#include \"patch_head.h\"\n", output);
+	}
+	void finish(void);
 	void operator()(VexPtr<CrashSummary, &ir_heap> &probeMachine,
 			GarbageCollectionToken token);
 };
@@ -21,8 +25,19 @@ void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 		    GarbageCollectionToken token)
 {
-	dbg_break("Hello\n");
 	printCrashSummary(summary, stdout);
+	char *fragment = buildPatchForCrashSummary(oracle, summary,
+						   vex_asprintf("patch%d", cntr++));
+	fputs(fragment, output);
+}
+
+void
+DumpFix::finish(void)
+{
+	fprintf(output, "static const struct patch *const patches[] = {\n");
+	for (int x = 0; x < cntr; x++)
+		fprintf(output, "\t&patch%d,\n", x);
+	fprintf(output, "};\n\n#include \"patch_skeleton_jump.c\"\n");
 }
 
 int
@@ -36,7 +51,9 @@ main(int argc, char *argv[])
 
 	std::set<unsigned long> examined_loads;
 
-	while (1) {
+	FILE *output = fopen("generated_patch.c", "w");
+	DumpFix df(oracle, output);
+	for (int cntr = 0; cntr < 100; cntr++) {
 		oracle = NULL;
 
 		LibVEX_maybe_gc(ALLOW_GC);
@@ -63,7 +80,11 @@ main(int argc, char *argv[])
 						 /*thr->regs.rip()*/ 0x5fd088,  /* we know where main() is */
 						 my_rip);
 
-		DumpFix df(my_rip, ms);
 		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, ALLOW_GC);
 	}
+
+	df.finish();
+	fclose(output);
+
+	return 0;
 }
