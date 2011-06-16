@@ -17,19 +17,19 @@ main(int argc, char *argv[])
 	VexPtr<StateMachine, &ir_heap> writeMachine(readStateMachine(open(argv[2], O_RDONLY)));
 	VexPtr<IRExpr, &ir_heap> assumption(readIRExpr(open(argv[3], O_RDONLY)));
 	
-	remoteMacroSectionsT remoteMacroSections;
+	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT());
 
-	if (!findRemoteMacroSections(readMachine, writeMachine, assumption, oracle, remoteMacroSections)) {
+	if (!findRemoteMacroSections(readMachine, writeMachine, assumption, oracle, remoteMacroSections, ALLOW_GC)) {
 		printf("Cannot find remote macro sections...\n");
 		return 1;
 	}
-	for (remoteMacroSectionsT::iterator it = remoteMacroSections.begin();
-	     it != remoteMacroSections.end();
+	for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
+	     it != remoteMacroSections->end();
 	     it++) {
 		printf("\t\tRemote macro section ");
-		it->first->prettyPrint(stdout);
+		it->start->prettyPrint(stdout);
 		printf(" -> ");
-		it->second->prettyPrint(stdout);
+		it->end->prettyPrint(stdout);
 		printf("\n");		
 	}
 	if (!fixSufficient(readMachine, writeMachine, assumption, oracle, remoteMacroSections)) {

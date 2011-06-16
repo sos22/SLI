@@ -2551,7 +2551,7 @@ static void
 considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 VexPtr<AddressSpace> &as,
 		 VexPtr<Oracle> &oracle,
-		 VexPtr<IRExpr, &ir_heap> &assumption,
+		 VexPtr<IRExpr, &ir_heap> assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
 		 VexPtr<CrashSummary, &ir_heap> &summary,
 		 GarbageCollectionToken token)
@@ -2612,8 +2612,8 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		return;
 	}
 
-	remoteMacroSectionsT remoteMacroSections;
-	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections)) {
+	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
+	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections, token)) {
 		printf("\t\tChose a bad write machine...\n");
 		return;
 	}
@@ -2623,10 +2623,10 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		return;
 	}
 	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm);
-	for (remoteMacroSectionsT::iterator it = remoteMacroSections.begin();
-	     it != remoteMacroSections.end();
+	for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
+	     it != remoteMacroSections->end();
 	     it++)
-		smd->macroSections.push_back(CrashSummary::StoreMachineData::macroSectionT(it->first, it->second));
+		smd->macroSections.push_back(CrashSummary::StoreMachineData::macroSectionT(it->start, it->end));
 	summary->storeMachines.push_back(smd);
 }
 
@@ -3006,5 +3006,67 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 			it2->second->prettyPrint(f);
 			fprintf(f, "\n");
 		}
+	}
+}
+
+remoteMacroSectionsT::iterator::iterator(const remoteMacroSectionsT *_owner, unsigned _idx)
+	: idx(_idx), owner(_owner)
+{}
+
+bool
+remoteMacroSectionsT::iterator::operator!=(const iterator &other) const
+{
+	assert(other.owner == this->owner);
+	return other.idx != this->idx;
+}
+
+void
+remoteMacroSectionsT::iterator::operator++(int ign)
+{
+	this->idx++;
+}
+
+const remoteMacroSectionsT::iterator::__content *
+remoteMacroSectionsT::iterator::operator->() const
+{
+	this->content.start = this->owner->content[this->idx].first;
+	this->content.end = this->owner->content[this->idx].second;
+	return &this->content;
+}
+
+remoteMacroSectionsT::iterator
+remoteMacroSectionsT::begin() const
+{
+	return iterator(this, 0);
+}
+
+remoteMacroSectionsT::iterator
+remoteMacroSectionsT::end() const
+{
+	return iterator(this, content.size());
+}
+
+void
+remoteMacroSectionsT::insert(StateMachineSideEffectStore *start,
+			     StateMachineSideEffectStore *end)
+{
+	for (contentT::iterator it = content.begin();
+	     it != content.end();
+	     it++) {
+		if (it->first == start && it->second == end)
+			return;
+	}
+	content.push_back(std::pair<StateMachineSideEffectStore *,
+			            StateMachineSideEffectStore *>(start, end));
+}
+
+void
+remoteMacroSectionsT::visit(HeapVisitor &hv)
+{
+	for (contentT::iterator it = content.begin();
+	     it != content.end();
+	     it++) {
+		hv(it->first);
+		hv(it->second);
 	}
 }

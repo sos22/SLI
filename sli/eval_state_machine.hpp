@@ -1,8 +1,42 @@
 #ifndef EVAL_STATE_MACHINE_HPP__
 #define EVAL_STATE_MACHINE_HPP__
 
-typedef std::set<std::pair<StateMachineSideEffectStore *,
-			   StateMachineSideEffectStore *> > remoteMacroSectionsT;
+class remoteMacroSectionsT : public GarbageCollected<remoteMacroSectionsT, &ir_heap> {
+	typedef std::vector<std::pair<StateMachineSideEffectStore *,
+				      StateMachineSideEffectStore *> > contentT;
+	contentT content;
+
+public:
+	class iterator {
+		friend class remoteMacroSectionsT;
+		unsigned idx;
+		const remoteMacroSectionsT *owner;
+		iterator(const remoteMacroSectionsT *, unsigned);
+	public:
+		class __content {
+		public:
+			StateMachineSideEffectStore *start;
+			StateMachineSideEffectStore *end;
+		};
+	private:
+		mutable __content content;
+	public:
+		bool operator!=(const iterator &other) const;
+		void operator++(int);
+		const __content *operator->() const;
+	};
+
+	iterator begin() const;
+	iterator end() const;
+
+	void insert(StateMachineSideEffectStore *start,
+		    StateMachineSideEffectStore *end);
+
+	void visit(HeapVisitor &hv);
+	NAMED_CLASS
+
+	friend class iterator;
+};
 
 IRExpr *survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					       VexPtr<Oracle> &oracle,
@@ -22,15 +56,16 @@ void evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 			     bool *mightSurvive,
 			     bool *mightCrash,
 			     GarbageCollectionToken token);
-bool findRemoteMacroSections(StateMachine *readMachine,
-			     StateMachine *writeMachine,
-			     IRExpr *assumption,
-			     Oracle *oracle,
-			     remoteMacroSectionsT &output);
+bool findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
+			     VexPtr<StateMachine, &ir_heap> &writeMachine,
+			     VexPtr<IRExpr, &ir_heap> &assumption,
+			     VexPtr<Oracle> &oracle,
+			     VexPtr<remoteMacroSectionsT, &ir_heap> &output,
+			     GarbageCollectionToken token);
 bool fixSufficient(StateMachine *writeMachine,
 		   StateMachine *probeMachine,
 		   IRExpr *assumption,
 		   Oracle *oracle,
-		   const remoteMacroSectionsT &sections);
+		   remoteMacroSectionsT *sections);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

@@ -707,17 +707,19 @@ writeMachineSuitabilityConstraint(
 /* Returns false if we discover something which suggests that this is
  * a bad choice of write machine, or true otherwise. */
 bool
-findRemoteMacroSections(StateMachine *readMachine,
-			StateMachine *writeMachine,
-			IRExpr *assumption,
-			Oracle *oracle,
-			std::set<std::pair<StateMachineSideEffectStore *,
-			                   StateMachineSideEffectStore *> > &output)
+findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
+			VexPtr<StateMachine, &ir_heap> &writeMachine,
+			VexPtr<IRExpr, &ir_heap> &assumption,
+			VexPtr<Oracle> &oracle,
+			VexPtr<remoteMacroSectionsT, &ir_heap> &output,
+			GarbageCollectionToken token)
 {
 	NdChooser chooser;
 
-	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
+	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
 	do {
+		LibVEX_maybe_gc(token);
+
 		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;
 		StateMachineEdge *writerEdge;
@@ -805,8 +807,7 @@ findRemoteMacroSections(StateMachine *readMachine,
 					/* Previous attempt did crash
 					   -> this is the end of the
 					   section. */
-					output.insert(std::pair<StateMachineSideEffectStore *,
-						                StateMachineSideEffectStore *>(sectionStart, smses));
+					output->insert(sectionStart, smses);
 					sectionStart = NULL;
 				}
 			}
@@ -824,7 +825,7 @@ fixSufficient(StateMachine *writeMachine,
 	      StateMachine *probeMachine,
 	      IRExpr *assumption,
 	      Oracle *oracle,
-	      const remoteMacroSectionsT &sections)
+	      remoteMacroSectionsT *sections)
 {
 	NdChooser chooser;
 	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
@@ -891,11 +892,11 @@ fixSufficient(StateMachine *writeMachine,
 			if (incompleteSections.count(smses))
 				incompleteSections.erase(smses);
 			/* Did we just enter a critical section? */
-			for (remoteMacroSectionsT::const_iterator it = sections.begin();
-			     it != sections.end();
+			for (remoteMacroSectionsT::iterator it = sections->begin();
+			     it != sections->end();
 			     it++) {
-				if (it->first == smses)
-					incompleteSections.insert(it->second);
+				if (it->start == smses)
+					incompleteSections.insert(it->end);
 			}
 			/* If we have incomplete critical sections, we
 			 * can't run the probe machine. */
