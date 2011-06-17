@@ -228,6 +228,10 @@ top:
 	case 0x40 ... 0x5f:
 		break;
 
+	case 0x64: /* FS prefix.  Pass it through verbatim. */
+		b = i->byte();
+		goto top;
+
 	case 0x70 ... 0x7f:
 		/* 8 bit conditional jumps are handled specially, by
 		   turning them into 32 conditional jumps, because
