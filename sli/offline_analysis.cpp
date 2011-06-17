@@ -30,7 +30,7 @@ __visit_state_machine_set_entry(StateMachine *&a, bool &b, HeapVisitor &hv)
 	hv(a);
 }
 typedef class gc_map<StateMachine *, bool, __hash_state_machine,
-		     __eq_state_machine, __visit_state_machine_set_entry> StateMachineSet;
+		     __eq_state_machine, __visit_state_machine_set_entry, &ir_heap> StateMachineSet;
 
 /* A bunch of heuristics for figuring out why we crashed.  Returns
  * NULL on failure.  Pretty stupid. */
@@ -2664,7 +2664,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			    FixConsumer &haveAFix,
 			    GarbageCollectionToken token)
 {
-	VexPtr<StateMachineSet> readMachinesChecked(new StateMachineSet());
+	VexPtr<StateMachineSet, &ir_heap> readMachinesChecked(new StateMachineSet());
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     it != previousInstructions.end();

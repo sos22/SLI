@@ -135,9 +135,7 @@ bool VAMap::translate(unsigned long va,
 				VAMapEntry *rps = rp->succ;
 				root = rpp;
 				rpp->succ = r;
-				r->prev = rp;
 				rp->prev = rpps;
-				rp->succ = rps;
 			} else if (va < root->prev->end) {
 				VAMapEntry *r = root;
 				VAMapEntry *rp = r->prev;
