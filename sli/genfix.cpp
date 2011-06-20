@@ -205,7 +205,7 @@ top:
 		switch (b) {
 		case 0x80 ... 0x8f: /* 32 bit conditional jumps. */
 			delta32 = i->int32();
-			i->branchNext = i->rip + i->len + delta;
+			i->branchNext = i->rip + i->len + delta32;
 			i->relocs.push_back(new RipRelativeBranchRelocation(i->len - 4, 4, i->branchNext));
 			/* Unlike 8 bit jumps, we don't need to set
 			   fallsThrough here, because the normal
