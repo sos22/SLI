@@ -929,6 +929,14 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 
 static sqlite3 *_database;
 
+static void
+create_index(const char *name, const char *table, const char *field)
+{
+	char *s = my_asprintf("CREATE INDEX %s ON %s (%s)", name, table, field);
+	sqlite3_exec(_database, s, NULL, NULL, NULL);
+	free(s);
+}
+
 static sqlite3 *
 database(void)
 {
@@ -1036,14 +1044,6 @@ drop_index(const char *name)
 	free(s);
 }
 
-static void
-create_index(const char *name, const char *table, const char *field)
-{
-	char *s = my_asprintf("CREATE INDEX %s ON %s (%s)", name, table, field);
-	sqlite3_exec(database(), s, NULL, NULL, NULL);
-	free(s);
-}
-
 void
 Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &heads, GarbageCollectionToken token)
 {
@@ -1068,6 +1068,7 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 	create_index("callDest", "callRips", "dest");
 	create_index("fallThroughDest", "fallThroughRips", "dest");
 	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
+
 	calculateRegisterLiveness(ths, token);
 	ths->calculateAliasing();
 }
@@ -1136,6 +1137,9 @@ void
 Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 {
 	Function work(x);
+
+	if (work.exists())
+		return;
 
 	/* Start by building a CFG of the function's instructions. */
 	std::vector<unsigned long> unexplored;
