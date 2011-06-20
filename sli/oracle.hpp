@@ -190,6 +190,8 @@ public:
 		void getFunctionCallers(std::vector<unsigned long> &out, Oracle *oracle);
 		bool registerLivenessCorrect() const;
 		void setRegisterLivenessCorrect(bool v);
+		bool aliasingConfigCorrect() const;
+		void setAliasingConfigCorrect(bool v);
 		bool exists() const;
 	public:
 		Function(unsigned long _rip)

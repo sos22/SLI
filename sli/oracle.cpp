@@ -945,13 +945,11 @@ database(void)
 	if (_database)
 		return _database;
 	
-#if 0
-	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
+	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE, NULL);
 	if (rc == SQLITE_OK) {
 		/* Return existing database */
 		return _database;
 	}
-#endif
 
 	/* Create new database */
 	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
@@ -986,7 +984,8 @@ database(void)
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip INTEGER, dest INTEGER, UNIQUE (rip, dest))", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER)", NULL, NULL, NULL);
+	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
+			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
 	/* All of the information in the database can be regenerated
@@ -997,6 +996,8 @@ database(void)
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
+
+	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
 
 	return _database;
 }
@@ -1050,7 +1051,6 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 	drop_index("branchDest");
 	drop_index("callDest");
 	drop_index("fallThroughDest");
-	drop_index("instructionAttributesFunctionHead");
 
 	std::set<unsigned long> visited;
 	while (!heads.empty()) {
@@ -1067,7 +1067,6 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 	create_index("branchDest", "branchRips", "dest");
 	create_index("callDest", "callRips", "dest");
 	create_index("fallThroughDest", "fallThroughRips", "dest");
-	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
 
 	calculateRegisterLiveness(ths, token);
 	ths->calculateAliasing();
@@ -1274,6 +1273,9 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 void
 Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle)
 {
+	if (aliasingConfigCorrect())
+		return;
+
 	RegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip));
 	RegisterAliasingConfiguration b(a);
 	b |= RegisterAliasingConfiguration::functionEntryConfiguration;
@@ -1295,6 +1297,8 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 		needsUpdating.pop_back();
 		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, oracle);
 	}
+
+	setAliasingConfigCorrect(true);
 }
 
 void
@@ -1730,14 +1734,45 @@ Oracle::Function::registerLivenessCorrect() const
 	return !!a[0];
 }
 
+bool
+Oracle::Function::aliasingConfigCorrect() const
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT aliasingCorrect FROM functionAttribs WHERE functionHead = ?");
+	bind_int64(stmt, 1, rip);
+	std::vector<unsigned long> a;
+	extract_int64_column(stmt, 0, a);
+	if (a.size() == 0)
+		return false;
+	assert(a.size() == 1);
+	return !!a[0];
+}
+
 void
 Oracle::Function::setRegisterLivenessCorrect(bool x)
 {
 	static sqlite3_stmt *stmt;
 	if (!stmt)
-		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect) VALUES (?, ?)");
+		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect, aliasingCorrect) VALUES (?, ?, 0)");
 	bind_int64(stmt, 1, rip);
 	bind_int64(stmt, 2, x);
+
+	int rc;
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+	rc = sqlite3_reset(stmt);
+	assert(rc == SQLITE_OK);
+}
+
+void
+Oracle::Function::setAliasingConfigCorrect(bool x)
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("UPDATE functionAttribs SET aliasingCorrect = ? WHERE functionHead = ?");
+	bind_int64(stmt, 2, rip);
+	bind_int64(stmt, 1, x);
 
 	int rc;
 	rc = sqlite3_step(stmt);
