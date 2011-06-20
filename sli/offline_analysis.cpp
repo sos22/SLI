@@ -11,6 +11,8 @@
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
 
+template <typename t> void printCFG(const CFGNode<t> *cfg);
+
 typedef std::pair<StateMachine *, StateMachine *> st_pair_t;
 typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
 
@@ -725,14 +727,18 @@ breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
 		CFGNode<t> **p = lastBackEdge;
 		if (numbering[cfg->branch] < numbering[cfg])
 			p = &cfg->branch;
-		if (!breakCycles(cfg->branch, numbering, p, onPath, clean))
+		if (cfg->branch == cfg)
+			cfg->branch = NULL;
+		else if (!breakCycles(cfg->branch, numbering, p, onPath, clean))
 			return false;
 	}
 	if (cfg->fallThrough) {
 		CFGNode<t> **p = lastBackEdge;
 		if (numbering[cfg->fallThrough] < numbering[cfg])
 			p = &cfg->fallThrough;
-		if (!breakCycles(cfg->fallThrough, numbering, p, onPath, clean))
+		if (cfg->fallThrough == cfg)
+			cfg->fallThrough = NULL;
+		else if (!breakCycles(cfg->fallThrough, numbering, p, onPath, clean))
 			return false;
 	}
 
@@ -2649,7 +2655,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
 		trimCFG(storeCFG.get(), is, 20);
 		breakCycles(storeCFG.get());
-		
+
 		considerStoreCFG(storeCFG, as, oracle,
 				 survive, sm, summary, token);
 	}
@@ -2785,7 +2791,8 @@ printCFG(const CFGNode<t> *cfg)
 		done.insert(cfg);
 	}
 }
-template <> void printCFG(const CFGNode<StackRip> *cfg);
+/* Make it visible to the debugger. */
+void __printCFG(const CFGNode<StackRip> *cfg) { printCFG(cfg); }
 
 static void
 enumerateReachableStates(CFGNode<unsigned long> *from, std::set<CFGNode<unsigned long> *> &out)
