@@ -117,7 +117,6 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
 {
 	std::vector<unsigned long> fheads;
 	getDominators(crashedThread, ms, out, fheads);
-	discoverFunctionHeads(fheads);
 }
 
 bool
@@ -574,30 +573,32 @@ vector_contains(const std::vector<t> &v, const t &val)
 }
 
 void
-Oracle::calculateRegisterLiveness(void)
+Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
 	bool done_something;
 	unsigned long changed;
 	unsigned long unchanged;
 	std::vector<unsigned long> functions;
 
-	changed = 0;
-	unchanged = 0;
 	do {
+		LibVEX_maybe_gc(token);
+		changed = 0;
+		unchanged = 0;
 		done_something = false;
-		getFunctions(functions);
+		ths->getFunctions(functions);
 		for (std::vector<unsigned long>::iterator it = functions.begin();
 		     it != functions.end();
 		     it++) {
 			bool this_did_something = false;
 			Function f(*it);
-			f.calculateRegisterLiveness(ms->addressSpace, &this_did_something, this);
+			f.calculateRegisterLiveness(ths->ms->addressSpace, &this_did_something, ths);
 			if (this_did_something)
 				changed++;
 			else
 				unchanged++;
 			done_something |= this_did_something;
 		}
+		printf("Register liveness progress: %ld/%ld\n", changed, changed+unchanged);
 	} while (done_something);
 }
 
@@ -822,17 +823,37 @@ Oracle::getAliasingConfigurationForRip(unsigned long rip)
 	return f.aliasConfigOnEntryToInstruction(rip);
 }
 
-void
-Oracle::loadCallGraph(const char *path)
-{
-	if (callGraphMapping.init(path) < 0)
-		err(1, "opening %s", path);
-}
-
 struct cg_header {
 	unsigned long rip;
 	unsigned long nr;
 };
+
+void
+Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token)
+{
+	if (ths->callGraphMapping.init(path) < 0)
+		err(1, "opening %s", path);
+	std::vector<unsigned long> roots;
+	unsigned offset = 0;
+	while (1) {
+		const struct cg_header *h;
+		h = ths->callGraphMapping.get<struct cg_header>(offset);
+		if (!h)
+			break;
+		offset += sizeof(*h);
+		const unsigned long *c = ths->callGraphMapping.get<unsigned long>(offset, h->nr);
+		assert(c);
+		for (unsigned i = 0; i < h->nr; i++) {
+			if (c[i] & (1ul << 63))
+				roots.push_back(c[i] & ~(1ul << 63));
+		}
+		offset += sizeof(unsigned long) * h->nr;
+	}
+
+	std::sort(roots.begin(), roots.end());
+	std::unique(roots.begin(), roots.end());
+	discoverFunctionHeads(ths, roots, token);
+}
 
 void
 Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &output)
@@ -850,7 +871,7 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
 			assert(c);
 			for (unsigned i = 0; i < h->nr; i++)
-				output.push_back(c[i]);
+				output.push_back(c[i] & ~(1ul << 63));
 			return;
 		}
 		offset += sizeof(unsigned long) * h->nr;
@@ -859,14 +880,8 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 
 void
 Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
-				 unsigned long root,
 				 unsigned long rip)
 {
-	std::vector<unsigned long> h;
-
-	h.push_back(root);
-	discoverFunctionHeads(h);
-
 	unsigned long r = functionHeadForInstruction(rip);
 	if (!r) {
 		printf("No function for %lx\n", rip);
@@ -922,11 +937,13 @@ database(void)
 	if (_database)
 		return _database;
 	
+#if 0
 	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
 	if (rc == SQLITE_OK) {
 		/* Return existing database */
 		return _database;
 	}
+#endif
 
 	/* Create new database */
 	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
@@ -1028,18 +1045,22 @@ create_index(const char *name, const char *table, const char *field)
 }
 
 void
-Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
+Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &heads, GarbageCollectionToken token)
 {
 	drop_index("branchDest");
 	drop_index("callDest");
 	drop_index("fallThroughDest");
 	drop_index("instructionAttributesFunctionHead");
 
+	std::set<unsigned long> visited;
 	while (!heads.empty()) {
 		unsigned long head;
 		head = heads.back();
 		heads.pop_back();
-		discoverFunctionHead(head, heads);
+		if (visited.count(head))
+			continue;
+		visited.insert(head);
+		ths->discoverFunctionHead(head, heads);
 		printf("%zd heads left to process...\n", heads.size());
 	}
 
@@ -1047,8 +1068,8 @@ Oracle::discoverFunctionHeads(std::vector<unsigned long> &heads)
 	create_index("callDest", "callRips", "dest");
 	create_index("fallThroughDest", "fallThroughRips", "dest");
 	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
-	calculateRegisterLiveness();
-	calculateAliasing();
+	calculateRegisterLiveness(ths, token);
+	ths->calculateAliasing();
 }
 
 Oracle::LivenessSet
@@ -1115,9 +1136,6 @@ void
 Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 {
 	Function work(x);
-
-	if (work.exists())
-		return;
 
 	/* Start by building a CFG of the function's instructions. */
 	std::vector<unsigned long> unexplored;

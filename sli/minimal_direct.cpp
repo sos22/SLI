@@ -58,7 +58,9 @@ main(int argc, char *argv[])
 
 		LibVEX_maybe_gc(ALLOW_GC);
 		
-		oracle = new Oracle(ms, thr, argv[2], argv[3]);
+		oracle = new Oracle(ms, thr, argv[2]);
+		oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+
 		unsigned long my_rip = oracle->selectRandomLoad();
 		while (examined_loads.count(my_rip))
 			my_rip = oracle->selectRandomLoad();
@@ -76,9 +78,7 @@ main(int argc, char *argv[])
 		ii->addCrashReason(proximal);
 
 		std::vector<unsigned long> previousInstructions;
-		oracle->findPreviousInstructions(previousInstructions,
-						 /*thr->regs.rip()*/ 0x5fd088,  /* we know where main() is */
-						 my_rip);
+		oracle->findPreviousInstructions(previousInstructions, my_rip);
 
 		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, ALLOW_GC);
 	}

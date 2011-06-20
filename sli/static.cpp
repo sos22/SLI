@@ -159,8 +159,10 @@ dumpTagTable(Oracle *oracle)
 static std::vector<unsigned long> newHeads;
 
 static void
-run_command(Oracle *oracle)
+run_command(VexPtr<Oracle> &oracle, GarbageCollectionToken token)
 {
+	LibVEX_maybe_gc(ALLOW_GC);
+
 	printf("\n> ");
 	fflush(stdout);
 	char *command = read_line(stdin);
@@ -171,7 +173,7 @@ run_command(Oracle *oracle)
 	if (*words[0] == "add_root") {
 		newHeads.push_back(*words[1]);
 	} else if (*words[0] == "doit") {
-		oracle->discoverFunctionHeads(newHeads);
+		oracle->discoverFunctionHeads(oracle, newHeads, token);
 	} else if (*words[0] == "list_heads") {
 		list_heads(oracle);
 	} else if (*words[0] == "liveness") {
@@ -199,9 +201,8 @@ main(int argc, char *argv[])
 	VexPtr<Oracle> oracle(new Oracle(ms, NULL, argv[2]));
 
 	while (1) {
-		LibVEX_maybe_gc(ALLOW_GC);
 		try {
-			run_command(oracle);
+			run_command(oracle, ALLOW_GC);
 		} catch (BadParseException e) {
 		}
 	}

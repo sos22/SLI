@@ -229,21 +229,21 @@ private:
 	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
 
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
-	void calculateRegisterLiveness(void);
+	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	void calculateAliasing(void);
 	void loadTagTable(const char *path);
 	Mapping callGraphMapping;
-	void loadCallGraph(const char *path);
 	void findPossibleJumpTargets(unsigned long from, std::vector<unsigned long> &targets);
 	unsigned long functionHeadForInstruction(unsigned long rip);
 public:
+	static void loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token);
 	MachineState *ms;
 	Thread *crashedThread;
 
 	static const unsigned STATIC_THREAD = 99;
 
 	void findPreviousInstructions(std::vector<unsigned long> &output);
-	void findPreviousInstructions(std::vector<unsigned long> &output, unsigned long root, unsigned long rip);
+	void findPreviousInstructions(std::vector<unsigned long> &output, unsigned long rip);
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
 				   std::set<unsigned long> &out);
 	void clusterRips(const std::set<unsigned long> &inputRips,
@@ -254,7 +254,7 @@ public:
 	bool memoryAccessesMightAlias(StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool functionCanReturn(unsigned long rip);
 
-	void discoverFunctionHeads(std::vector<unsigned long> &heads);
+	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &heads, GarbageCollectionToken token);
 
 	void getFunctions(std::vector<unsigned long> &out);
 
@@ -266,13 +266,11 @@ public:
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);
 
-	Oracle(MachineState *_ms, Thread *_thr, const char *tags, const char *callgraph = NULL)
+	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)
 	{
 		if (tags)
 			loadTagTable(tags);
-		if (callgraph)
-			loadCallGraph(callgraph);
 	}
 	void visit(HeapVisitor &hv) {
 		hv(ms);
