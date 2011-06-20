@@ -49,18 +49,16 @@ main(int argc, char *argv[])
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle;
 
+	oracle = new Oracle(ms, thr, argv[2]);
+	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+
 	std::set<unsigned long> examined_loads;
 
 	FILE *output = fopen("generated_patch.c", "w");
 	DumpFix df(oracle, output);
 	for (int cntr = 0; cntr < 100; cntr++) {
-		oracle = NULL;
-
 		LibVEX_maybe_gc(ALLOW_GC);
 		
-		oracle = new Oracle(ms, thr, argv[2]);
-		oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
-
 		unsigned long my_rip = oracle->selectRandomLoad();
 		while (examined_loads.count(my_rip))
 			my_rip = oracle->selectRandomLoad();
