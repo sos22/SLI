@@ -322,14 +322,23 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	     it++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
-			smses->addr = rewriteBinderExpressions(smses->addr, copies, done_something);
-			smses->data = rewriteBinderExpressions(smses->data, copies, done_something);
+			*it = new StateMachineSideEffectStore(
+				rewriteBinderExpressions(smses->addr, copies, done_something),
+				rewriteBinderExpressions(smses->data, copies, done_something),
+				smses->rip);
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			smsel->smsel_addr = rewriteBinderExpressions(smsel->smsel_addr, copies, done_something);
+			*it = new StateMachineSideEffectLoad(
+				smsel->key,
+				rewriteBinderExpressions(smsel->smsel_addr, copies, done_something),
+				smsel->rip);
 		} else if (StateMachineSideEffectCopy *smsec =
 			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			smsec = new StateMachineSideEffectCopy(
+				smsec->key,
+				rewriteBinderExpressions(smsec->value, copies, done_something));
 			copies[smsec->key] = smsec->value;
+			*it = smsec;
 		} else if (dynamic_cast<StateMachineSideEffectUnreached *>(*it)) {
 		} else {
 			abort();
