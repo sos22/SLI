@@ -21,8 +21,10 @@ specialiseIRExpr(IRExpr *iex, std::map<Int,IRExpr *> &binders)
 {
 	switch (iex->tag) {
 	case Iex_Binder:
-		assert(binders[iex->Iex.Binder.binder]);
-		return binders[iex->Iex.Binder.binder];
+		if (binders.count(iex->Iex.Binder.binder))
+			return binders[iex->Iex.Binder.binder];
+		else
+			return iex;
 	case Iex_Get:
 		return iex;
 	case Iex_GetI:

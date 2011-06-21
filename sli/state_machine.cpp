@@ -185,6 +185,22 @@ StateMachineSideEffectCopy::findUsedBinders(std::set<Int> &s, const AllowableOpt
 	::findUsedBinders(value, s, opt);
 }
 
+struct availEntry {
+	IRExpr *addr;
+	IRExpr *value;
+	bool local;
+	availEntry(IRExpr *a, IRExpr *v, bool l)
+		: addr(a), value(v), local(l)
+	{}
+	bool operator<(const availEntry &o) const {
+		if (addr < o.addr) return true;
+		if (addr > o.addr) return false;
+		if (value < o.value) return true;
+		if (value > o.value) return false;
+		if (local < o.local) return true;
+		return false;
+	}
+};
 StateMachineEdge *
 StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			   Oracle *oracle,
@@ -213,48 +229,61 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
 	   that's moderately tricky. */
-	std::set<std::pair<IRExpr *, IRExpr *> > availExpressions;
+	std::set<availEntry> availExpressions;
 	for (it = sideEffects.begin(); it != sideEffects.end(); it++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			/* If the store isn't thread local, and we're
 			   not in execute-atomically mode, we can't do
 			   any forwarding at all. */
-			if (!opt.assumeExecutesAtomically &&
-			    !oracle->storeIsThreadLocal(smses))
+			bool local = oracle->storeIsThreadLocal(smses);
+			if (!opt.assumeExecutesAtomically && !local)
 				continue;
 
 			/* Kill anything which might be clobbered by
 			   this store. */
-			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
+			for (std::set<availEntry>::iterator it2 =
 				     availExpressions.begin();
 			     it2 != availExpressions.end();
 				) {
-				IRExpr *addr = it2->first;
-				if (!definitelyNotEqual(addr, smses->addr, opt))
+				IRExpr *addr = it2->addr;
+				if (local == it2->local &&
+				    !definitelyNotEqual(addr, smses->addr, opt))
 					availExpressions.erase(it2++);
 				else
 					it2++;
 			}
 			/* And add this one to the set */
-			availExpressions.insert( std::pair<IRExpr *, IRExpr *>(
-							 smses->addr,
-							 smses->data) );
+			availExpressions.insert(availEntry(smses->addr,
+							   smses->data,
+							   local));
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
 			/* If the load was definitely satisfied by a
 			   known store, eliminate it. */
-			for (std::set<std::pair<IRExpr *, IRExpr *> >::iterator it2 =
-				     availExpressions.begin();
+			bool local = oracle->loadIsThreadLocal(smsel);
+			bool killed = false;
+			for (std::set<availEntry>::iterator it2 = availExpressions.begin();
 			     it2 != availExpressions.end();
 			     it2++) {
-				if (definitelyEqual(it2->first, smsel->smsel_addr, opt)) {
+				if (local == it2->local &&
+				    definitelyEqual(it2->addr, smsel->smsel_addr, opt)) {
 					*it = new StateMachineSideEffectCopy(smsel->key,
-									     it2->second);
+									     it2->value);
 					*done_something = true;
+					killed = true;
 					break;
 				}
-			}			
+			}
+
+			/* This load can also be used to eliminate
+			   some future loads, possibly. */
+			if (!killed &&
+			    (opt.assumeExecutesAtomically || oracle->loadIsThreadLocal(smsel)))
+				availExpressions.insert(availEntry(
+								smsel->smsel_addr,
+								IRExpr_Binder(smsel->key),
+								local));
 		} else if (dynamic_cast<StateMachineSideEffectUnreached *>(*it)) {
 			/* Okay, we know we can't go down this edge.
 			 * Turn it into an unreached one. */
@@ -729,10 +758,8 @@ void
 StateMachine::assertAcyclic(std::vector<const StateMachine *> &stack,
 			    std::set<const StateMachine *> &clean) const
 {
-#if 0
 	if (clean.count(this))
 		return;
-#endif
 	if (std::find(stack.begin(), stack.end(), this) != stack.end())
 		goto found_cycle;
 	stack.push_back(this);
