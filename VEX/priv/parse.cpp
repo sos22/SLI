@@ -1,5 +1,6 @@
 /* Various bits of parsing gubbins */
 #include <sys/types.h>
+#include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -9,6 +10,14 @@
 
 bool parseThisChar(char c, const char *str, const char **suffix)
 {
+  if (isspace(c)) {
+    if (!isspace(str[0]))
+      return false;
+    while (isspace(str[0]))
+      str++;
+    *suffix = str;
+    return true;
+  }
   if (str[0] == c) {
     *suffix = str + 1;
     return true;
@@ -21,10 +30,22 @@ bool parseThisString(const char *pattern,
 		     const char *str,
 		     const char **suffix)
 {
-  size_t l = strlen(pattern);
-  if (strlen(str) < l || memcmp(str, pattern, l))
-    return false;
-  *suffix = str + l;
+  while (*pattern) {
+    if (isspace(*pattern)) {
+      while (isspace(*pattern))
+	pattern++;
+      if (!isspace(*str))
+	return false;
+      while (isspace(*str))
+	str++;
+      continue;
+    }
+    if (*pattern != *str)
+      return false;
+    pattern++;
+    str++;
+  }
+  *suffix = str;
   return true;
 }
 
