@@ -238,7 +238,6 @@ static bool parseIRType(IRType *out, const char *str, const char **suffix)
     return true;				\
   }
   do_type(INVALID);
-  do_type(I1);
   do_type(I8);
   do_type(I16);
   do_type(I32);
@@ -247,6 +246,7 @@ static bool parseIRType(IRType *out, const char *str, const char **suffix)
   do_type(F32);
   do_type(F64);
   do_type(V128);
+  do_type(I1);
 #undef do_type
   return false;
 }
