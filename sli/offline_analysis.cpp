@@ -939,13 +939,14 @@ buildNewStateMachineWithLoadsEliminated(
 			     it2 != currentlyAvailable.end();
 				) {
 				if ( aliasing.mightAlias((*it2)->addr, smses->addr) &&
+				     oracle->memoryAccessesMightAlias(*it2, smses) &&
 				     !definitelyNotEqual((*it2)->addr, smses->addr, opt) ) {
 					currentlyAvailable.erase(it2++);
 				} else {
 					it2++;
 				}
 			}
-			if (opt.assumeExecutesAtomically || oracle->storeIsThreadLocal(smses))
+			if (opt.assumeNoInterferingStores || oracle->storeIsThreadLocal(smses))
 				currentlyAvailable.insert(smses);
 			res->sideEffects.push_back(*it);
 		} else if (StateMachineSideEffectLoad *smsel =
@@ -1057,7 +1058,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	/* If we're not executing atomically, stores to
 	   non-thread-local memory locations are never considered to
 	   be available. */
-	if (!opt.assumeExecutesAtomically) {
+	if (!opt.assumeNoInterferingStores) {
 		for (avail_t::iterator it = potentiallyAvailable.begin();
 		     it != potentiallyAvailable.end();
 			) {
@@ -1164,6 +1165,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 						) {
 						if ( alias.mightAlias((*it3)->addr,
 								      smses->addr) &&
+						     oracle->memoryAccessesMightAlias(*it3, smses) &&
 						     !definitelyNotEqual( (*it3)->addr,
 									  smses->addr,
 									  opt) )
@@ -1172,7 +1174,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 							it3++;
 					}
 					/* Introduce the store which was generated. */
-					if (opt.assumeExecutesAtomically ||
+					if (opt.assumeNoInterferingStores ||
 					    oracle->storeIsThreadLocal(smses))
 						outputAvail.insert(smses);
 				}
@@ -1373,8 +1375,11 @@ hasDisallowedSideEffects(StateMachineEdge *sme,
 		     sme->sideEffects.begin();
 	     sideEffect != sme->sideEffects.end();
 	     sideEffect++) {
-		if (dynamic_cast<StateMachineSideEffectStore *>(*sideEffect))
-			return true;
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*sideEffect)) {
+			if (!opt.ignoreStore(smses->rip))
+				return true;
+		}
 	}
 	return false;
 }
@@ -2463,6 +2468,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 VexPtr<IRExpr, &ir_heap> assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
 		 VexPtr<CrashSummary, &ir_heap> &summary,
+		 const InstructionSet &is,
 		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
@@ -2471,6 +2477,8 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableassumeNoInterferingStores();
+	opt2.interestingStores = is.rips;
+	opt2.haveInterestingStoresSet = true;
 	bool done_something;
 	do {
 		done_something = false;
@@ -2568,7 +2576,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		breakCycles(storeCFG.get());
 
 		considerStoreCFG(storeCFG, as, oracle,
-				 survive, sm, summary, token);
+				 survive, sm, summary, is, token);
 	}
 }
 

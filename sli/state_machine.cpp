@@ -301,7 +301,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			/* This load can also be used to eliminate
 			   some future loads, possibly. */
 			if (!killed &&
-			    (opt.assumeExecutesAtomically || oracle->loadIsThreadLocal(smsel)))
+			    (opt.assumeNoInterferingStores || oracle->loadIsThreadLocal(smsel)))
 				availExpressions.insert(availEntry(
 								smsel->smsel_addr,
 								IRExpr_Binder(smsel->key),
@@ -360,7 +360,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		(*it)->optimise(opt, oracle, done_something);
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
-			if (opt.ignoreSideEffects ||
+			if (opt.ignoreStore(smses->rip) ||
 			    oracle->storeIsThreadLocal(smses))
 				isDead = true;
 			else

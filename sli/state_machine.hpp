@@ -47,6 +47,14 @@ public:
 	   examining. */
 	bool assumeNoInterferingStores;
 
+	/* Bit of a hack: sometimes, only some side effects are
+	   interesting, so allow them to be listed here.  If
+	   haveInterestingStoresSet is false then we don't look at
+	   interestingStores at all, and instead rely on
+	   ignoreSideEffects. */
+	bool haveInterestingStoresSet;
+	std::set<unsigned long> interestingStores;
+
 	AllowableOptimisations disablexPlusMinusX() const
 	{
 		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
@@ -95,6 +103,17 @@ public:
 		if (assumeNoInterferingStores)
 			x |= 8;
 		return x;
+	}
+
+	bool ignoreStore(unsigned long rip) const {
+		if (ignoreSideEffects)
+			return true;
+		if (!haveInterestingStoresSet)
+			return false;
+		if (interestingStores.count(rip))
+			return false;
+		else
+			return true;
 	}
 };
 
