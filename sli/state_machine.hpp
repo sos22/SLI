@@ -80,6 +80,8 @@ public:
 	}
 };
 
+void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);
+
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 	mutable unsigned long __hashval;
 	mutable bool have_hash;
@@ -88,6 +90,7 @@ class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 protected:
 	StateMachine(unsigned long _origin) : have_hash(false), origin(_origin) {}
 	virtual unsigned long _hashval() const = 0;
+	virtual void _sanity_check(const std::set<Int> &binders) const = 0;
 public:
 	unsigned long origin; /* RIP we were looking at when we
 			       * constructed the thing.  Not very
@@ -111,6 +114,11 @@ public:
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const = 0;
+	void sanity_check(std::set<Int> &binders) const;
+	void sanity_check() const {
+		std::set<Int> binders;
+		sanity_check(binders);
+	}
 	NAMED_CLASS
 };
 
@@ -124,6 +132,7 @@ public:
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	virtual int complexity() = 0;
+	virtual void sanity_check(const std::set<Int> &) const = 0;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	NAMED_CLASS
 };
@@ -198,6 +207,7 @@ public:
 			r += sideEffects[i]->complexity();
 		return r;
 	}
+	void sanity_check(std::set<Int> &binders) const;
 	NAMED_CLASS
 };
 
@@ -230,6 +240,7 @@ public:
 		return _this;
 	}
 	bool canCrash() { return false; }
+	void _sanity_check(const std::set<Int> &) const {}
 };
 
 class StateMachineCrash : public StateMachineTerminal {
@@ -243,6 +254,7 @@ public:
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
 	bool canCrash() { return true; }
+	void _sanity_check(const std::set<Int> &) const {}
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
@@ -256,6 +268,7 @@ public:
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
 	bool canCrash() { return false; }
+	void _sanity_check(const std::set<Int> &) const {}
 };
 
 /* A state machine node which always advances to another one.  These
@@ -315,6 +328,7 @@ public:
 	const StateMachineEdge *target0() const { return target; }
 	StateMachineEdge *target1() { return NULL; }
 	const StateMachineEdge *target1() const { return NULL; }
+	void _sanity_check(const std::set<Int> &) const {}
 };
 
 class StateMachineBifurcate : public StateMachine {
@@ -396,6 +410,7 @@ public:
 	const StateMachineEdge *target0() const { return falseTarget; }
 	StateMachineEdge *target1() { return trueTarget; }
 	const StateMachineEdge *target1() const { return trueTarget; }
+	void _sanity_check(const std::set<Int> &binders) const {checkIRExprBindersInScope(condition, binders);}
 };
 
 /* A node in the state machine representing a bit of code which we
@@ -415,6 +430,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
 	bool canCrash() { return false; }
+	void _sanity_check(const std::set<Int> &binders) const {checkIRExprBindersInScope(target, binders);}
 };
 
 
@@ -433,6 +449,7 @@ public:
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
 	int complexity() { return 0; }
+	void sanity_check(const std::set<Int> &binders) const {}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffect {
 	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
@@ -459,6 +476,10 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
 	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
+	void sanity_check(const std::set<Int> &binders) const {
+		checkIRExprBindersInScope(addr, binders);
+		checkIRExprBindersInScope(data, binders);
+	}
 };
 
 class StateMachineSideEffectLoad : public StateMachineSideEffect {
@@ -494,6 +515,9 @@ public:
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
 	int complexity() { return exprComplexity(smsel_addr) + 20; }
+	void sanity_check(const std::set<Int> &binders) const {
+		checkIRExprBindersInScope(smsel_addr, binders);
+	}
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
 	unsigned long _hashval() const { return value->hashval(); }
@@ -516,6 +540,9 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
 	int complexity() { return exprComplexity(value); }
+	void sanity_check(const std::set<Int> &binders) const {
+		checkIRExprBindersInScope(value, binders);
+	}
 };
 
 

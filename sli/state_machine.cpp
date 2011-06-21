@@ -872,3 +872,62 @@ StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<unsigned long> &inst
 	target->enumerateMentionedMemoryAccesses(instrs);
 }
 
+void
+StateMachine::sanity_check(std::set<Int> &binders) const
+{
+	if (target0()) target0()->sanity_check(binders);
+	if (target1()) target1()->sanity_check(binders);
+	_sanity_check(binders);
+}
+
+void
+StateMachineEdge::sanity_check(std::set<Int> &binders) const
+{
+	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
+	     it != sideEffects.end();
+	     it++) {
+		(*it)->sanity_check(binders);
+		if (StateMachineSideEffectLoad *smsel =
+		    dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			assert(!binders.count(smsel->key));
+			binders.insert(smsel->key);
+		} else if (StateMachineSideEffectCopy *smsec =
+			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			assert(!binders.count(smsec->key));
+			binders.insert(smsec->key);
+		}
+	}
+	target->sanity_check(binders);
+	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
+	     it != sideEffects.end();
+	     it++) {
+		if (StateMachineSideEffectLoad *smsel =
+		    dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			binders.erase(smsel->key);
+		} else if (StateMachineSideEffectCopy *smsec =
+			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			binders.erase(smsec->key);
+		}
+	}	
+}
+
+/* Not really a transformer, but this is the easiest way of expressing
+   an expression walk. */
+class checkBinders : public IRExprTransformer {
+public:
+	const std::set<Int> &binders;
+	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
+		assert(binders.count(e->Iex.Binder.binder));
+		return e;
+	}
+	checkBinders(const std::set<Int> &_binders)
+		: binders(_binders)
+	{}
+};
+void
+checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders)
+{
+	checkBinders cb(binders);
+	bool ign;
+	cb.transformIRExpr((IRExpr *)iex, &ign);
+}
