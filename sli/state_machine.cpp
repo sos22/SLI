@@ -232,16 +232,12 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
-		StateMachineEdge *sme =
-			new StateMachineEdge(smp->target->target);
-		sme->sideEffects = sideEffects;
-		for (std::vector<StateMachineSideEffect *>::iterator it =
-			     smp->target->sideEffects.begin();
-		     it != smp->target->sideEffects.end();
-		     it++)
-			sme->sideEffects.push_back(*it);
+		sideEffects.insert(sideEffects.end(),
+				   smp->target->sideEffects.begin(),
+				   smp->target->sideEffects.end());
+		target = smp->target->target;
 		*done_something = true;
-		return sme->optimise(opt, oracle, done_something);
+		return optimise(opt, oracle, done_something);
 	}
 	target = target->optimise(opt, oracle, done_something);
 
