@@ -1,5 +1,5 @@
 targets=''
-sli_tests="pmap vamap nd_chooser parse_state_machine survival_constraint wm_suitability eval_cross_product simplify_irexpr find_remote_sections"
+sli_tests="pmap vamap nd_chooser parse_state_machine survival_constraint wm_suitability eval_cross_product simplify_irexpr find_remote_sections simplify_state_machine"
 
 defvars() {
     echo "SLI_TESTS=\$(patsubst %,${input_base}/%,${sli_tests})"
