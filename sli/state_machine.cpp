@@ -18,7 +18,7 @@ Int StateMachineSideEffectLoad::next_key;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
-AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false);
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false);
 
 StateMachine *
 StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
@@ -254,10 +254,12 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			/* If the store isn't thread local, and we're
-			   not in execute-atomically mode, we can't do
-			   any forwarding at all. */
+			   not in no-interferes mode, we can't do any
+			   forwarding at all, because some other
+			   thread might clober the location we're
+			   looking at. */
 			bool local = oracle->storeIsThreadLocal(smses);
-			if (!opt.assumeExecutesAtomically && !local)
+			if (!opt.assumeNoInterferingStores && !local)
 				continue;
 
 			/* Kill anything which might be clobbered by

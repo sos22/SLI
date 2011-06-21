@@ -14,9 +14,9 @@ class Oracle;
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool x, bool s, bool a, bool i)
+	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as)
 		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
-		  ignoreSideEffects(i)
+		  ignoreSideEffects(i), assumeNoInterferingStores(as)
 	{
 	}
 
@@ -42,24 +42,40 @@ public:
 	   by this machine are necessarily redundant. */
 	bool ignoreSideEffects;
 
+	/* Assume that there will be no stores from other threads
+	   which interfere with the machine we're currently
+	   examining. */
+	bool assumeNoInterferingStores;
+
 	AllowableOptimisations disablexPlusMinusX() const
 	{
-		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects);
+		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+					      assumeNoInterferingStores);
 	}
 	AllowableOptimisations enableassumePrivateStack() const
 	{
-		return AllowableOptimisations(xPlusMinusX, true, assumeExecutesAtomically, ignoreSideEffects);
+		return AllowableOptimisations(xPlusMinusX, true, assumeExecutesAtomically, ignoreSideEffects,
+					      assumeNoInterferingStores);
 	}
 	AllowableOptimisations enableassumeExecutesAtomically() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, true, ignoreSideEffects);
+		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, true, ignoreSideEffects,
+					      true /* If we're running atomically then there are definitely
+						      no interfering stores */
+			);
 	}
 	AllowableOptimisations enableignoreSideEffects() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true);
+		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true,
+					      assumeNoInterferingStores);
+	}
+	AllowableOptimisations enableassumeNoInterferingStores() const
+	{
+		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+					      true);
 	}
 	unsigned asUnsigned() const {
-		unsigned x = 8; /* turning off all of the optional
+		unsigned x = 16; /* turning off all of the optional
 				   optimisations doesn't turn off the
 				   ones which are always available, so
 				   have an implicit bit for them.
@@ -76,6 +92,8 @@ public:
 			x |= 3;
 		if (ignoreSideEffects)
 			x |= 4;
+		if (assumeNoInterferingStores)
+			x |= 8;
 		return x;
 	}
 };

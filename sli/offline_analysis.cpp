@@ -2466,15 +2466,19 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
-
+	sm->sanity_check();
 	AllowableOptimisations opt2 =
 		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack();
+		.enableassumePrivateStack()
+		.enableassumeNoInterferingStores();
 	bool done_something;
 	do {
 		done_something = false;
-		sm = sm->optimise(opt2, oracle, &done_something);
+		StateMachine *sm2 = sm->optimise(opt2, oracle, &done_something);
+		sm2->sanity_check();
+		sm = sm2;
 	} while (done_something);
+	sm->sanity_check();
 	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
 	sm = availExpressionAnalysis(sm, opt2, alias, oracle);
 	sm = bisimilarityReduction(sm, opt2);
@@ -2482,6 +2486,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		done_something = false;
 		sm = sm->optimise(opt2, oracle, &done_something);
 	} while (done_something);
+	sm->sanity_check();
 
 	if (dynamic_cast<StateMachineUnreached *>(sm.get())) {
 		/* This store machine is unusable, probably because we
@@ -2550,7 +2555,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 {
 	LibVEX_maybe_gc(token);
 
-	if (is.rips.size() > 4)
+	if (is.rips.size() != 3)
 		return;
 
 	VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
