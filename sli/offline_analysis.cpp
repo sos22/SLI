@@ -539,7 +539,7 @@ enumerateCFG(CFGNode<t> *root, std::map<t, CFGNode<t> *> &rips)
    is uninteresting if it is not in the initial interesting set and
    there are no paths from it to an interesting node. */
 template <typename t> void
-trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_path_length)
+trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_path_length, bool acceptingAreInteresting)
 {
 	std::map<t, CFGNode<t> *> uninteresting;
 	std::map<t, std::pair<CFGNode<t> *, int> > interesting;
@@ -550,7 +550,7 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_pa
 	for (typename std::map<t, CFGNode<t> *>::iterator it = uninteresting.begin();
 	     it != uninteresting.end();
 		) {
-		if (it->second->accepting ||
+		if ((acceptingAreInteresting && it->second->accepting) ||
 		    instructionIsInteresting(interestingAddresses, it->first)) {
 			interesting[it->first] = std::pair<CFGNode<t> *, int>(it->second, max_path_length);
 			uninteresting.erase(it++);
@@ -2559,7 +2559,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 	for (int i = 0; i < nr_roots; i++) {
 		VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
 		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
-		trimCFG(storeCFG.get(), is, 20);
+		trimCFG(storeCFG.get(), is, 20, false);
 		breakCycles(storeCFG.get());
 
 		considerStoreCFG(storeCFG, as, oracle,
@@ -2590,7 +2590,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			ii->CFGFromRip(*it, terminalFunctions));
 		InstructionSet interesting;
 		interesting.rips.insert(interestingRip);
-		trimCFG(cfg.get(), interesting, INT_MAX);
+		trimCFG(cfg.get(), interesting, INT_MAX, true);
 		breakCycles(cfg.get());
 
 		VexPtr<CrashReason, &ir_heap> cr(
