@@ -157,7 +157,7 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 	return NULL;
 }
 
-class StateMachineTransformer {
+class StateMachineTransformer : public IRExprTransformer {
 private:
 	/* Transformations are memoised.  This is important, because
 	   it means that we preserve the state machine structure
@@ -179,104 +179,6 @@ protected:
 	{
 		return StateMachineUnreached::get();
 	}
-	virtual IRExpr *transformIRExpr(IRExpr *e);
-
-	virtual IRExpr *transformIexGet(IRExpr *e) { return e; }
-	virtual IRExpr *transformIexGetI(IRExpr *e)
-	{
-		IRExpr *e2 = transformIRExpr(e->Iex.GetI.ix);
-		if (e2 == e)
-			return e;
-		else
-			return IRExpr_GetI(e->Iex.GetI.descr,
-					   e2,
-					   e->Iex.GetI.bias,
-					   e->Iex.GetI.tid);
-	}
-	virtual IRExpr *transformIexRdTmp(IRExpr *e) { return e; }
-	virtual IRExpr *transformIexQop(IRExpr *e)
-	{
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
-		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2);
-		IRExpr *a3 = transformIRExpr(e->Iex.Qop.arg3);
-		IRExpr *a4 = transformIRExpr(e->Iex.Qop.arg4);
-		if (a1 == e->Iex.Qop.arg1 &&
-		    a2 == e->Iex.Qop.arg2 &&
-		    a3 == e->Iex.Qop.arg3 &&
-		    a4 == e->Iex.Qop.arg4)
-			return e;
-		else
-			return IRExpr_Qop(e->Iex.Qop.op,
-					  a1,
-					  a2,
-					  a3,
-					  a4);
-	}
-	virtual IRExpr *transformIexTriop(IRExpr *e)
-	{
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
-		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2);
-		IRExpr *a3 = transformIRExpr(e->Iex.Qop.arg3);
-		if (a1 == e->Iex.Qop.arg1 &&
-		    a2 == e->Iex.Qop.arg2 &&
-		    a3 == e->Iex.Qop.arg3)
-			return e;
-		else
-			return IRExpr_Triop(e->Iex.Qop.op,
-					    a1,
-					    a2,
-					    a3);
-	}
-	virtual IRExpr *transformIexBinop(IRExpr *e)
-	{
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
-		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2);
-		if (a1 == e->Iex.Qop.arg1 &&
-		    a2 == e->Iex.Qop.arg2)
-			return e;
-		else
-			return IRExpr_Binop(e->Iex.Qop.op,
-					    a1,
-					    a2);
-	}
-	virtual IRExpr *transformIexUnop(IRExpr *e)
-	{
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1);
-		if (a1 == e->Iex.Qop.arg1)
-			return e;
-		else
-			return IRExpr_Unop(e->Iex.Qop.op,
-					    a1);
-	}
-	virtual IRExpr *transformIexLoad(IRExpr *e)
-	{
-		IRExpr *addr = transformIRExpr(e->Iex.Load.addr);
-		if (addr == e->Iex.Load.addr)
-			return e;
-		else
-			return IRExpr_Load(e->Iex.Load.isLL,
-					   e->Iex.Load.end,
-					   e->Iex.Load.ty,
-					   addr);
-	}
-	virtual IRExpr *transformIexConst(IRExpr *e)
-	{
-		return e;
-	}
-	virtual IRExpr *transformIexMux0X(IRExpr *e)
-	{
-		IRExpr *c = transformIRExpr(e->Iex.Mux0X.cond);
-		IRExpr *z = transformIRExpr(e->Iex.Mux0X.expr0);
-		IRExpr *x = transformIRExpr(e->Iex.Mux0X.exprX);
-		if (c == e->Iex.Mux0X.cond &&
-		    z == e->Iex.Mux0X.expr0 &&
-		    x == e->Iex.Mux0X.exprX)
-			return e;
-		else
-			return IRExpr_Mux0X(c, z, x);
-	}
-	virtual IRExpr *transformIexCCall(IRExpr *);
-	virtual IRExpr *transformIexAssociative(IRExpr *);
 public:
 	StateMachine *transform(StateMachine *start);
 };
@@ -297,7 +199,8 @@ StateMachineTransformer::doit(StateMachine *inp)
 		   dynamic_cast<StateMachineBifurcate *>(inp)) {
 		StateMachineEdge *t = doit(smb->trueTarget);
 		StateMachineEdge *f = doit(smb->falseTarget);
-		IRExpr *cond = transformIRExpr(smb->condition);
+		bool ign;
+		IRExpr *cond = transformIRExpr(smb->condition, &ign);
 		if (t == smb->trueTarget && f == smb->falseTarget && cond == smb->condition)
 			out = inp;
 		else
@@ -311,7 +214,8 @@ StateMachineTransformer::doit(StateMachine *inp)
 			out = new StateMachineProxy(inp->origin, t);
 	} else if (StateMachineStub *sms =
 		   dynamic_cast<StateMachineStub *>(inp)) {
-		IRExpr *target = transformIRExpr(sms->target);
+		bool ign;
+		IRExpr *target = transformIRExpr(sms->target, &ign);
 		if (target == sms->target)
 			out = inp;
 		else
@@ -335,8 +239,9 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			IRExpr *a, *d;
-			a = transformIRExpr(smses->addr);
-			d = transformIRExpr(smses->data);
+			bool ign;
+			a = transformIRExpr(smses->addr, &ign);
+			d = transformIRExpr(smses->data, &ign);
 			if (a != smses->addr || d != smses->data)
 				changedSideEffect = true;
 			res->sideEffects.push_back(
@@ -346,7 +251,8 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 					smses->rip));
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			IRExpr *a = transformIRExpr(smsel->smsel_addr);
+			bool ign;
+			IRExpr *a = transformIRExpr(smsel->smsel_addr, &ign);
 			if (a != smsel->smsel_addr)
 				changedSideEffect = true;
 			res->sideEffects.push_back(
@@ -356,7 +262,8 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 					smsel->rip));
 		} else if (StateMachineSideEffectCopy *smsec =
 			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
-			IRExpr *v = transformIRExpr(smsec->value);
+			bool ign;
+			IRExpr *v = transformIRExpr(smsec->value, &ign);
 			if (v != smsec->value)
 				changedSideEffect = true;
 			res->sideEffects.push_back(
@@ -382,58 +289,55 @@ StateMachineTransformer::transform(StateMachine *inp)
 }
 
 IRExpr *
-StateMachineTransformer::transformIRExpr(IRExpr *e)
+IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 {
 	switch (e->tag) {
 	case Iex_Binder:
-		return e;
+		return transformIexBinder(e, done_something);
 	case Iex_Get:
-		return transformIexGet(e);
+		return transformIexGet(e, done_something);
 	case Iex_GetI:
-		return transformIexGetI(e);
+		return transformIexGetI(e, done_something);
 	case Iex_RdTmp:
-		return transformIexRdTmp(e);
+		return transformIexRdTmp(e, done_something);
 	case Iex_Qop:
-		return transformIexQop(e);
+		return transformIexQop(e, done_something);
 	case Iex_Triop:
-		return transformIexTriop(e);
+		return transformIexTriop(e, done_something);
 	case Iex_Binop:
-		return transformIexBinop(e);
+		return transformIexBinop(e, done_something);
 	case Iex_Unop:
-		return transformIexUnop(e);
+		return transformIexUnop(e, done_something);
 	case Iex_Load:
-		return transformIexLoad(e);
+		return transformIexLoad(e, done_something);
 	case Iex_Const:
-		return transformIexConst(e);
+		return transformIexConst(e, done_something);
 	case Iex_CCall:
-		return transformIexCCall(e);
+		return transformIexCCall(e, done_something);
 	case Iex_Mux0X:
-		return transformIexMux0X(e);
+		return transformIexMux0X(e, done_something);
 	case Iex_Associative:
-		return transformIexAssociative(e);
+		return transformIexAssociative(e, done_something);
 	}
 	abort();
 }
 
 IRExpr *
-StateMachineTransformer::transformIexCCall(IRExpr *e)
+IRExprTransformer::transformIexCCall(IRExpr *e, bool *done_something)
 {
 	IRExpr **newArgs;
 	int nr_args;
 	int x;
-	bool changedSomething;
+	bool t = false;
 
 	for (nr_args = 0; e->Iex.CCall.args[nr_args]; nr_args++)
 		;
 	newArgs = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_args + 1);
-	changedSomething = false;
-	for (x = 0; x < nr_args; x++) {
-		newArgs[x] = transformIRExpr(e->Iex.CCall.args[x]);
-		if (newArgs[x] != e->Iex.CCall.args[x])
-			changedSomething = true;
-	}
+	for (x = 0; x < nr_args; x++)
+		newArgs[x] = transformIRExpr(e->Iex.CCall.args[x], &t);
 	newArgs[nr_args] = NULL;
-	if (!changedSomething)
+	*done_something |= t;
+	if (!t)
 		return e;
 	else
 		return IRExpr_CCall(e->Iex.CCall.cee,
@@ -442,18 +346,15 @@ StateMachineTransformer::transformIexCCall(IRExpr *e)
 }
 
 IRExpr *
-StateMachineTransformer::transformIexAssociative(IRExpr *e)
+IRExprTransformer::transformIexAssociative(IRExpr *e, bool *done_something)
 {
+	bool t = false;
 	IRExpr *r = IRExpr_Associative(e);
-	bool changedSomething = false;
-	for (int x = 0; x < r->Iex.Associative.nr_arguments; x++) {
+	for (int x = 0; x < r->Iex.Associative.nr_arguments; x++)
 		r->Iex.Associative.contents[x] =
-			transformIRExpr(r->Iex.Associative.contents[x]);
-		if (e->Iex.Associative.contents[x] !=
-		    r->Iex.Associative.contents[x])
-			changedSomething = true;
-	}
-	if (!changedSomething)
+			transformIRExpr(r->Iex.Associative.contents[x], &t);
+	*done_something |= t;
+	if (!t)
 		return e;
 	else
 		return r;
@@ -463,7 +364,7 @@ class RewriteRegister : public StateMachineTransformer {
 	unsigned idx;
 	IRExpr *to;
 protected:
-	IRExpr *transformIexGet(IRExpr *what);
+	IRExpr *transformIexGet(IRExpr *what, bool *done_something);
 public:
 	RewriteRegister(unsigned _idx, IRExpr *_to)
 		: idx(_idx), to(_to)
@@ -472,11 +373,12 @@ public:
 };
 
 IRExpr *
-RewriteRegister::transformIexGet(IRExpr *what)
+RewriteRegister::transformIexGet(IRExpr *what, bool *done_something)
 {
-	if (what->Iex.Get.offset == (int)idx)
+	if (what->Iex.Get.offset == (int)idx) {
+		*done_something = true;
 		return to;
-	else
+	} else
 		return what;
 }
 
@@ -493,11 +395,12 @@ class RewriteTemporary : public StateMachineTransformer {
 	IRTemp tmp;
 	IRExpr *to;
 protected:
-	IRExpr *transformIexRdTmp(IRExpr *what)
+	IRExpr *transformIexRdTmp(IRExpr *what, bool *done_something)
 	{
-		if (what->Iex.RdTmp.tmp == tmp)
+		if (what->Iex.RdTmp.tmp == tmp) {
+			*done_something = true;
 			return to;
-		else
+		} else
 			return what;
 	}
 public:

@@ -6,6 +6,7 @@
 #include "state_machine.hpp"
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
+#include "offline_analysis.hpp"
 
 #include "libvex_parse.h"
 
@@ -185,6 +186,29 @@ StateMachineSideEffectCopy::findUsedBinders(std::set<Int> &s, const AllowableOpt
 	::findUsedBinders(value, s, opt);
 }
 
+class rewriteBinderTransformer : public IRExprTransformer {
+public:
+	const std::map<Int, IRExpr *> &binders;
+	rewriteBinderTransformer(const std::map<Int, IRExpr *> &_binders)
+		: binders(_binders)
+	{}
+	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
+		if (binders.count(e->Iex.Binder.binder)) {
+			*done_something = true;
+			return binders.find(e->Iex.Binder.binder)->second;
+		} else {
+			return e;
+		}
+	}
+};
+
+static IRExpr *
+rewriteBinderExpressions(IRExpr *ex, const std::map<Int, IRExpr *> &binders, bool *done_something)
+{
+	rewriteBinderTransformer trans(binders);
+	return trans.transformIRExpr(ex, done_something);
+}
+
 struct availEntry {
 	IRExpr *addr;
 	IRExpr *value;
@@ -292,6 +316,27 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 /**/			break;
 		} else {
 			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it));
+		}
+	}
+
+	/* Propagate any copy operations. */
+	std::map<Int, IRExpr *> copies;
+	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
+	     it != sideEffects.end();
+	     it++) {
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+			smses->addr = rewriteBinderExpressions(smses->addr, copies, done_something);
+			smses->data = rewriteBinderExpressions(smses->data, copies, done_something);
+		} else if (StateMachineSideEffectLoad *smsel =
+			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			smsel->smsel_addr = rewriteBinderExpressions(smsel->smsel_addr, copies, done_something);
+		} else if (StateMachineSideEffectCopy *smsec =
+			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			copies[smsec->key] = smsec->value;
+		} else if (dynamic_cast<StateMachineSideEffectUnreached *>(*it)) {
+		} else {
+			abort();
 		}
 	}
 
