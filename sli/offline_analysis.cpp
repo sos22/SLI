@@ -1001,7 +1001,7 @@ static StateMachine *buildNewStateMachineWithLoadsEliminated(
 static StateMachineEdge *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachineEdge *sme,
-	avail_t &initialAvail,
+	const avail_t &initialAvail,
 	std::map<StateMachine *, avail_t> &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
@@ -1105,13 +1105,19 @@ buildNewStateMachineWithLoadsEliminated(
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		StateMachineBifurcate *res;
-		res = new StateMachineBifurcate(sm->origin, smb->condition, (StateMachineEdge *)NULL, NULL);
+		const avail_t avail(availMap[sm]);
+		bool doit = false;
+		res = new StateMachineBifurcate(
+			sm->origin,
+			applyAvailSet(avail, smb->condition, &doit),
+			(StateMachineEdge *)NULL, NULL);
+		*done_something |= doit;
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->trueTarget, availMap[sm], availMap, memo, opt, alias, oracle,
+			smb->trueTarget, avail, availMap, memo, opt, alias, oracle,
 			done_something);
 		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->falseTarget, availMap[sm], availMap, memo, opt, alias, oracle,
+			smb->falseTarget, avail, availMap, memo, opt, alias, oracle,
 			done_something);
 		return res;
 	} if (StateMachineProxy *smp =

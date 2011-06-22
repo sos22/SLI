@@ -671,9 +671,6 @@ writeMachineSuitabilityConstraint(
 			   machine after running the store machine to
 			   completion -> this is a poor choice of
 			   store machines. */
-			printf("Bad assumptions:\n");
-			ppIRExpr(readEvalCtxt.justPathConstraint, stdout);
-			printf("\n");
 
 			/* If we evaluate the read machine to
 			   completion after running the write
