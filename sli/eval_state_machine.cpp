@@ -725,13 +725,18 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 		unsigned writeEdgeIdx;
 		IRExpr *pathConstraint;
 		StateMachineSideEffectStore *sectionStart;
+		bool finished;
+		StateMachineSideEffectStore *smses;
 
 		writeEdgeIdx = 0;
 		pathConstraint = assumption;
 		writerEdge = writeStartEdge;
 		sectionStart = NULL;
-		while (1) {
+		finished = false;
+		smses = NULL;
+		while (!finished) {
 			/* Have we hit the end of the current writer edge? */
+
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
 				/* Yes, move to the next state. */
 				StateMachine *s = writerEdge->target;
@@ -741,7 +746,40 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 				    dynamic_cast<StateMachineStub *>(s)) {
 					/* Hit the end of the writer
 					 * -> we're done. */
-					break;
+					/* Note that we need to
+					   evaluate the read machine
+					   one last time, so that we
+					   can take account of any
+					   assumptions made due to any
+					   branches after the last
+					   side-effect. */
+					/* i.e. a store machine branch
+					   will change the path
+					   constraint, which could
+					   cause the read machien to
+					   go from crash to non-crash,
+					   and we need to make sure
+					   that we pick that up as the
+					   end of a critical
+					   section. */
+					/* Example of code where this is
+					   important:
+
+					   acquire_lock();
+					   x = foo->flag;
+					   foo->bar = 5;
+					   if (x) {
+					       release_lock();
+					       return;
+					   }
+					   foo->flag = 0;
+					   release_lock();
+
+					   but with the locking taken
+					   out.
+					*/
+					finished = true;
+					goto eval_read_machine;
 				}
 				if (StateMachineProxy *smp =
 				    dynamic_cast<StateMachineProxy *>(s)) {
@@ -771,11 +809,11 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			writeEdgeIdx++;
 
 			/* Advance to a store */
-			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(se);
+			smses = dynamic_cast<StateMachineSideEffectStore *>(se);
 			if (!smses)
 				continue;
 
+		eval_read_machine:
 			/* The writer just issued a store, so we
 			   should now try running the reader
 			   atomically.  We discard any stores issued
@@ -787,19 +825,9 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			StateMachineEvalContext readEvalCtxt;
 			readEvalCtxt.pathConstraint = pathConstraint;
 			readEvalCtxt.stores = storesIssuedByWriter;
-			readEvalCtxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
 			bool crashes;
-			printf("Evaluating read machine...\n");
 			evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
-				printf("Crashes.  path constraint now ");
-				ppIRExpr(readEvalCtxt.pathConstraint, stdout);
-				printf("\n");
-				if (readEvalCtxt.justPathConstraint) {
-					printf("Just path constraint: ");
-					ppIRExpr(readEvalCtxt.justPathConstraint, stdout);
-					printf("\n");
-				}
 				if (!sectionStart) {
 					/* The previous attempt at
 					   evaluating the read machine
