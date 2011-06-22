@@ -4,6 +4,7 @@
 #include "state_machine.hpp"
 
 #include "simplify_irexpr.hpp"
+#include "offline_analysis.hpp"
 
 #include "libvex_guest_offsets.h"
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
@@ -520,7 +521,8 @@ class CnfExpression : public GarbageCollected<CnfExpression>, public Named {
 public:
 	virtual CnfExpression *CNF(void) = 0;
 	virtual CnfExpression *invert() = 0;
-	virtual IRExpr *asIRExpr(std::map<int, IRExpr *> &) = 0;
+	virtual IRExpr *asIRExpr(std::map<int, IRExpr *> &,
+				 IRExprTransformer &) = 0;
 	virtual int complexity() = 0;
 	NAMED_CLASS
 };
@@ -540,7 +542,12 @@ public:
 	void visit(HeapVisitor &hv) {}
 	CnfExpression *invert();
 	int getId() { return id; }
-	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) { return m[id]; }
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m,
+			 IRExprTransformer &t)
+	{
+		bool ign;
+		return t.transformIRExpr(m[id], &ign);
+	}
 	int complexity() { return 0; }
 	int id;
 };
@@ -559,7 +566,11 @@ public:
 		assert(a);
 		return a->getId();
 	}
-	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) { return IRExpr_Unop(Iop_Not1, arg->asIRExpr(m)); }
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m,
+			 IRExprTransformer &t)
+	{
+		return IRExpr_Unop(Iop_Not1, arg->asIRExpr(m, t));
+	}
 	int complexity() { return arg->complexity() + 1; }
 	CnfExpression *arg;
 };
@@ -567,7 +578,6 @@ public:
 class CnfGrouping : public CnfExpression {
 protected:
 	virtual char op() const = 0;
-	virtual IROp irexpr_op() const = 0;
 	char *mkName() const {
 		char *acc = NULL;
 		char *acc2;
@@ -591,20 +601,6 @@ public:
 			hv(args[x]);
 	}
 	void addChild(CnfExpression *e) { args.push_back(e); }
-	IRExpr *asIRExpr(std::map<int, IRExpr *> &m) {
-		if (args.size() == 0) {
-			if (irexpr_op() == Iop_Or1)
-				return IRExpr_Const(IRConst_U1(0));
-			else
-				return IRExpr_Const(IRConst_U1(1));
-		} else {
-			IRExpr *work = IRExpr_Associative(irexpr_op(), NULL);
-			for (unsigned x = 0; x < args.size(); x++) {
-				addArgumentToAssoc(work, args[x]->asIRExpr(m));
-			}
-			return work;
-		}
-	}
 	int complexity() {
 		if (args.size() == 0)
 			return 0;
@@ -619,7 +615,6 @@ public:
 class CnfOr : public CnfGrouping {
 protected:
 	char op() const { return '|'; }
-	IROp irexpr_op() const { return Iop_Or1; }
 public:
 	CnfExpression *CNF();
 	CnfExpression *invert();
@@ -630,12 +625,40 @@ public:
 		assert(r);
 		return r;
 	}
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m, IRExprTransformer &t) {
+		if (args.size() == 0) {
+			return IRExpr_Const(IRConst_U1(0));
+		} else if (args.size() == 1) {
+			return args[0]->asIRExpr(m, t);
+		} else {
+			IRExpr *work = IRExpr_Associative(Iop_Or1, NULL);
+			for (unsigned x = 0; x < args.size(); x++)
+				addArgumentToAssoc(work, args[x]->asIRExpr(m, t));
+			return work;
+		}
+	}
 };
 
 class CnfAnd : public CnfGrouping {
+	class myTransformer : public IRExprTransformer {
+	public:
+		std::map<IRExpr *, IRExpr *> cnstTable;
+		IRExprTransformer &underlying;
+		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+			if (cnstTable.count(e)) {
+				*done_something = true;
+				e = cnstTable[e];
+			}
+			e = IRExprTransformer::transformIRExpr(e, done_something);
+			e = underlying.transformIRExpr(e, done_something);
+			return e;
+		}
+		myTransformer(IRExprTransformer &_underlying)
+			: underlying(_underlying)
+		{}
+	};
 protected:
 	char op() const { return '&'; }
-	IROp irexpr_op() const { return Iop_And1; }
 public:
 	CnfExpression *CNF();
 	CnfExpression *invert();
@@ -647,6 +670,23 @@ public:
 		return r;
 	}
 	void optimise();
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m, IRExprTransformer &t) {
+		if (args.size() == 0) {
+			return IRExpr_Const(IRConst_U1(1));
+		} else {
+			IRExpr *work = IRExpr_Associative(Iop_And1, NULL);
+			myTransformer trans(t);
+			for (unsigned x = 0; x < args.size(); x++) {
+				IRExpr *exp = args[x]->asIRExpr(m, trans);
+				addArgumentToAssoc(work, exp);
+				if (exp->tag == Iex_Binop &&
+				    exp->Iex.Binop.op == Iop_CmpEQ64 &&
+				    exp->Iex.Binop.arg1->tag == Iex_Const)
+					trans.cnstTable[exp->Iex.Binop.arg2] = exp->Iex.Binop.arg1;
+			}
+			return work;
+		}
+	}
 };
 
 CnfExpression *
@@ -946,7 +986,6 @@ CnfAnd::optimise()
 				}
 			}
 		}
-
 	} while (progress);
 }
 
@@ -1170,9 +1209,8 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 	}
 	a->sort();
 	a->optimise();
-	if (nr_terms > a->complexity())
-		return a->asIRExpr(varsToExprs);
-	IRExpr *r = root->asIRExpr(varsToExprs);
+	IRExprTransformer t;
+	IRExpr *r = root->asIRExpr(varsToExprs, t);
 	if (exprComplexity(r) < exprComplexity(inp))
 		return r;
 	else

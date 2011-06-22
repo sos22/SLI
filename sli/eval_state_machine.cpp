@@ -787,9 +787,19 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			StateMachineEvalContext readEvalCtxt;
 			readEvalCtxt.pathConstraint = pathConstraint;
 			readEvalCtxt.stores = storesIssuedByWriter;
+			readEvalCtxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
 			bool crashes;
+			printf("Evaluating read machine...\n");
 			evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
+				printf("Crashes.  path constraint now ");
+				ppIRExpr(readEvalCtxt.pathConstraint, stdout);
+				printf("\n");
+				if (readEvalCtxt.justPathConstraint) {
+					printf("Just path constraint: ");
+					ppIRExpr(readEvalCtxt.justPathConstraint, stdout);
+					printf("\n");
+				}
 				if (!sectionStart) {
 					/* The previous attempt at
 					   evaluating the read machine

@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include "sli.h"
+#include "libvex_parse.h"
 
 void
 debugger_attach(void)
@@ -110,8 +111,11 @@ readIRExpr(int fd)
 	char *buf = readfile(fd);
 	IRExpr *r;
 	const char *succ;
-	if (!parseIRExpr(&r, buf, &succ) || *succ)
+	if (!parseIRExpr(&r, buf, &succ))
 		errx(1, "cannot parse %s as IRExpr", buf);
+	parseThisChar(' ', succ, &succ);
+	if (*succ)
+		errx(1, "garbage after irexpr: %s", succ);
 	free(buf);
 	return r;
 }
