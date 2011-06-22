@@ -11,11 +11,11 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	VexPtr<Oracle> oracle(new Oracle(NULL, NULL, NULL));
+	VexPtr<Oracle> oracle(new Oracle(NULL, NULL, argv[1]));
 
-	VexPtr<StateMachine, &ir_heap> readMachine(readStateMachine(open(argv[1], O_RDONLY)));
-	VexPtr<StateMachine, &ir_heap> writeMachine(readStateMachine(open(argv[2], O_RDONLY)));
-	VexPtr<IRExpr, &ir_heap> survive(readIRExpr(open(argv[3], O_RDONLY)));
+	VexPtr<StateMachine, &ir_heap> readMachine(readStateMachine(open(argv[2], O_RDONLY)));
+	VexPtr<StateMachine, &ir_heap> writeMachine(readStateMachine(open(argv[3], O_RDONLY)));
+	VexPtr<IRExpr, &ir_heap> survive(readIRExpr(open(argv[4], O_RDONLY)));
 	
 	IRExpr *assumption = writeMachineSuitabilityConstraint(readMachine, writeMachine, survive, oracle);
 	if (!assumption) {
