@@ -729,15 +729,18 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
    any stores which are definitely never loaded (assuming that the
    tags table is correct). */
 static void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
-				  std::set<StateMachine *> &visited);
+				  std::set<StateMachine *> &visited,
+				  const AllowableOptimisations &opt);
 static void
 removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_something,
-		      std::set<StateMachine *> &visited)
+		      std::set<StateMachine *> &visited,
+		      const AllowableOptimisations &opt)
 {
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
-			if (!storeMightBeLoadedFollowingSideEffect(sme, x, smses, oracle)) {
+			if (opt.ignoreStore(smses->rip) &&
+			    !storeMightBeLoadedFollowingSideEffect(sme, x, smses, oracle)) {
 				sme->sideEffects.erase(
 					sme->sideEffects.begin() + x);
 				x--;
@@ -745,22 +748,23 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 			}
 		}
 	}
-	removeRedundantStores(sme->target, oracle, done_something, visited);
+	removeRedundantStores(sme->target, oracle, done_something, visited, opt);
 }
 static void
 removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
-		      std::set<StateMachine *> &visited)
+		      std::set<StateMachine *> &visited,
+		      const AllowableOptimisations &opt)
 {
 	if (visited.count(sm))
 		return;
 	visited.insert(sm);
 	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
-		removeRedundantStores(smp->target, oracle, done_something, visited);
+		removeRedundantStores(smp->target, oracle, done_something, visited, opt);
 		return;
 	}
 	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
-		removeRedundantStores(smb->trueTarget, oracle, done_something, visited);
-		removeRedundantStores(smb->falseTarget, oracle, done_something, visited);
+		removeRedundantStores(smb->trueTarget, oracle, done_something, visited, opt);
+		removeRedundantStores(smb->falseTarget, oracle, done_something, visited, opt);
 		return;
 	}
 	assert(dynamic_cast<StateMachineUnreached *>(sm) ||
@@ -769,11 +773,12 @@ removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 	       dynamic_cast<StateMachineStub *>(sm));
 }
 static void
-removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something)
+removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+		      const AllowableOptimisations &opt)
 {
 	std::set<StateMachine *> visited;
 
-	removeRedundantStores(sm, oracle, done_something, visited);
+	removeRedundantStores(sm, oracle, done_something, visited, opt);
 }
 
 class StateMachineWalker {
@@ -827,23 +832,21 @@ StateMachineWalker::doit(StateMachine *s)
 	doit(s, visited);
 }
 
-class findAllStoresVisitor : public StateMachineWalker {
+class findAllSideEffectsVisitor : public StateMachineWalker {
 public:
-	std::set<StateMachineSideEffectStore *> &out;
-	findAllStoresVisitor(std::set<StateMachineSideEffectStore *> &o)
+	std::set<StateMachineSideEffect *> &out;
+	findAllSideEffectsVisitor(std::set<StateMachineSideEffect *> &o)
 		: out(o)
 	{}
 	void visitSideEffect(StateMachineSideEffect *smse)
 	{
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(smse))
-			out.insert(smses);
+			out.insert(smse);
 	}
 };
 static void
-findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
+findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 {
-	findAllStoresVisitor v(out);
+	findAllSideEffectsVisitor v(out);
 	v.doit(sm);
 }
 
@@ -903,105 +906,213 @@ findAllStates(StateMachine *sm, std::set<StateMachine *> &out)
 	v.doit(sm);
 }
 
+typedef std::set<StateMachineSideEffect *> avail_t;
+
+static void
+updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
+			    const AllowableOptimisations &opt,
+			    const Oracle::RegisterAliasingConfiguration &alias,
+			    Oracle *oracle)
+{
+	if (StateMachineSideEffectStore *smses =
+	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+		/* Eliminate anything which is killed */
+		for (avail_t::iterator it = outputAvail.begin();
+		     it != outputAvail.end();
+			) {
+			StateMachineSideEffectStore *smses2 =
+				dynamic_cast<StateMachineSideEffectStore *>(*it);
+			StateMachineSideEffectLoad *smsel2 =
+				dynamic_cast<StateMachineSideEffectLoad *>(*it);
+			IRExpr *addr;
+			if (smses2)
+				addr = smses2->addr;
+			else if (smsel2)
+				addr = smsel2->smsel_addr;
+			else
+				addr = NULL;
+
+			if ( addr &&
+			     alias.mightAlias(addr, smses->addr) &&
+			     ((smses2 && oracle->memoryAccessesMightAlias(smses2, smses)) ||
+			      (smsel2 && oracle->memoryAccessesMightAlias(smsel2, smses))) &&
+			     !definitelyNotEqual( addr,
+						  smses->addr,
+						  opt) )
+				outputAvail.erase(it++);
+			else
+				it++;
+		}
+		/* Introduce the store which was generated. */
+		if (opt.assumeNoInterferingStores ||
+		    oracle->storeIsThreadLocal(smses))
+			outputAvail.insert(smses);
+	} else if (StateMachineSideEffectCopy *smsec =
+		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
+		/* Copies are easy
+		   because they don't
+		   interfere with each
+		   other. */
+		outputAvail.insert(smsec);
+	} else if (StateMachineSideEffectLoad *smsel =
+		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+		/* Similarly loads */
+		outputAvail.insert(smsel);		
+	}
+}
+
+class applyAvailTransformer : public IRExprTransformer {
+public:
+	const avail_t &avail;
+	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
+		for (avail_t::const_iterator it = avail.begin();
+		     it != avail.end();
+		     it++) {
+			StateMachineSideEffectCopy *smsec = dynamic_cast<StateMachineSideEffectCopy *>(*it);
+			if (!smsec)
+				continue;
+			if (smsec->key == e->Iex.Binder.binder) {
+				*done_something = true;
+				return smsec->value;
+			}
+		}
+		return e;
+	}
+	applyAvailTransformer(const avail_t &_avail)
+		: avail(_avail)
+	{}
+};
+static IRExpr *
+applyAvailSet(const avail_t &avail, IRExpr *expr, bool *done_something)
+{
+	applyAvailTransformer aat(avail);
+	return aat.transformIRExpr(expr, done_something);
+}
+
+/* Slightly misnamed: this also propagates copy operations. */
 static StateMachine *buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
-	std::map<StateMachine *,
-	               std::set<StateMachineSideEffectStore *> > &availMap,
+	std::map<StateMachine *, avail_t> &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	Oracle *oracle);
-
+	Oracle *oracle,
+	bool *done_something);
 static StateMachineEdge *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachineEdge *sme,
-	std::set<StateMachineSideEffectStore *> &initialAvail,
-	std::map<StateMachine *,
-	               std::set<StateMachineSideEffectStore *> > &availMap,
+	avail_t &initialAvail,
+	std::map<StateMachine *, avail_t> &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	Oracle *oracle)
+	Oracle *oracle,
+	bool *done_something)
 {
 	StateMachineEdge *res =
-		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle));
+		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
+									     done_something));
 
-	std::set<StateMachineSideEffectStore *> currentlyAvailable(initialAvail);
+	std::set<StateMachineSideEffect *> currentlyAvailable(initialAvail);
 
 	for (std::vector<StateMachineSideEffect *>::const_iterator it =
 		     sme->sideEffects.begin();
 	     it != sme->sideEffects.end();
 	     it++) {
+		StateMachineSideEffect *newEffect;
+
+		newEffect = NULL;
+
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
-			for (std::set<StateMachineSideEffectStore *>::iterator it2 =
-				     currentlyAvailable.begin();
-			     it2 != currentlyAvailable.end();
-				) {
-				if ( aliasing.mightAlias((*it2)->addr, smses->addr) &&
-				     oracle->memoryAccessesMightAlias(*it2, smses) &&
-				     !definitelyNotEqual((*it2)->addr, smses->addr, opt) ) {
-					currentlyAvailable.erase(it2++);
-				} else {
-					it2++;
-				}
+			IRExpr *newAddr, *newData;
+			bool doit = false;
+			newAddr = applyAvailSet(currentlyAvailable, smses->addr, &doit);
+			newData = applyAvailSet(currentlyAvailable, smses->data, &doit);
+			if (doit) {
+				newEffect = new StateMachineSideEffectStore(
+					newAddr, newData, smses->rip);
+				*done_something = true;
+			} else {
+				newEffect = smses;
 			}
-			if (opt.assumeNoInterferingStores || oracle->storeIsThreadLocal(smses))
-				currentlyAvailable.insert(smses);
-			res->sideEffects.push_back(*it);
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			bool done = false;
-			for (std::set<StateMachineSideEffectStore *>::iterator it2 =
-				     currentlyAvailable.begin();
-			     !done && it2 != currentlyAvailable.end();
+			IRExpr *newAddr;
+			bool doit = false;
+			newAddr = applyAvailSet(currentlyAvailable, smsel->smsel_addr, &doit);
+			for (avail_t::iterator it2 = currentlyAvailable.begin();
+			     !newEffect && it2 != currentlyAvailable.end();
 			     it2++) {
-				if ( aliasing.mightAlias((*it2)->addr, smsel->smsel_addr) &&
-				     definitelyEqual((*it2)->addr, smsel->smsel_addr, opt) ) {
-					res->sideEffects.push_back(
+				StateMachineSideEffectStore *smses2 =
+					dynamic_cast<StateMachineSideEffectStore *>(*it2);
+				StateMachineSideEffectLoad *smsel2 =
+					dynamic_cast<StateMachineSideEffectLoad *>(*it2);
+				if ( smses2 &&
+				     aliasing.mightAlias(smses2->addr, newAddr) &&
+				     definitelyEqual(smses2->addr, newAddr, opt) ) {
+					newEffect =
 						new StateMachineSideEffectCopy(
 							smsel->key,
-							(*it2)->data));
-					done = true;
+							smses2->data);
+				} else if ( smsel2 &&
+					    aliasing.mightAlias(smsel2->smsel_addr, newAddr) &&
+					    definitelyEqual(smsel2->smsel_addr, newAddr, opt) ) {
+					newEffect =
+						new StateMachineSideEffectCopy(
+							smsel->key,
+							IRExpr_Binder(smsel2->key));
 				}
 			}
-			if (!done)
-				res->sideEffects.push_back(*it);
+			if (!newEffect && doit)
+				newEffect = new StateMachineSideEffectLoad(
+					smsel->key, newAddr, smsel->rip);
+			if (!newEffect)
+				newEffect = *it;
+			if (newEffect != *it)
+				*done_something = true;
 		} else {
 			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it) ||
 			       dynamic_cast<StateMachineSideEffectUnreached *>(*it));
-			res->sideEffects.push_back(*it);
+			newEffect = *it;
 		}
+		assert(newEffect);
+		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
+		res->sideEffects.push_back(newEffect);
 	}
 	return res;
 }
-
 static StateMachine *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
-	std::map<StateMachine *,
-	               std::set<StateMachineSideEffectStore *> > &availMap,
+	std::map<StateMachine *, avail_t> &availMap,
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	Oracle *oracle)
+	Oracle *oracle,
+	bool *done_something)
 {
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
 	    dynamic_cast<StateMachineStub *>(sm) ||
 	    dynamic_cast<StateMachineUnreached *>(sm))
 		return sm;
-	if (memo.count(sm))
+	if (memo.count(sm)) {
+		/* We rely on whoever it was that set memo[sm] having
+		 * also set *done_something if appropriate. */
 		return memo[sm];
+	}
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		StateMachineBifurcate *res;
 		res = new StateMachineBifurcate(sm->origin, smb->condition, (StateMachineEdge *)NULL, NULL);
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->trueTarget, availMap[sm], availMap, memo, opt, alias, oracle);
+			smb->trueTarget, availMap[sm], availMap, memo, opt, alias, oracle,
+			done_something);
 		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->falseTarget, availMap[sm], availMap, memo, opt, alias, oracle);
+			smb->falseTarget, availMap[sm], availMap, memo, opt, alias, oracle,
+			done_something);
 		return res;
 	} if (StateMachineProxy *smp =
 	      dynamic_cast<StateMachineProxy *>(sm)) {
@@ -1009,7 +1120,8 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineProxy(sm->origin, (StateMachineEdge *)NULL);
 		memo[sm] = res;
 		res->target = buildNewStateMachineWithLoadsEliminated(
-			smp->target, availMap[sm], availMap, memo, opt, alias, oracle);
+			smp->target, availMap[sm], availMap, memo, opt, alias, oracle,
+			done_something);
 		return res;
 	} else {
 		abort();
@@ -1019,14 +1131,14 @@ buildNewStateMachineWithLoadsEliminated(
 static StateMachine *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
-	std::map<StateMachine *,
-	         std::set<StateMachineSideEffectStore *> > &availMap,
+	std::map<StateMachine *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	Oracle *oracle)
+	Oracle *oracle,
+	bool *done_something)
 {
 	std::map<StateMachine *, StateMachine *> memo;
-	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt, alias, oracle);
+	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt, alias, oracle, done_something);
 }
 
 /* Available expression analysis on memory locations.  This isn't
@@ -1035,7 +1147,8 @@ buildNewStateMachineWithLoadsEliminated(
    in-place. */
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle)
+			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
+			bool *done_something)
 {
 	/* Fairly standard available expression analysis.  Each edge
 	   in the state machine has two sets of
@@ -1049,11 +1162,10 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	/* Minor tweak: the onEntry map is keyed on states rather than
 	   edges, since every edge starting at a given state will have
 	   the same entry map. */
-	typedef std::set<StateMachineSideEffectStore *> avail_t;
 
 	/* build the set of potentially-available expressions. */
 	avail_t potentiallyAvailable;
-	findAllStores(sm, potentiallyAvailable);
+	findAllSideEffects(sm, potentiallyAvailable);
 
 	/* If we're not executing atomically, stores to
 	   non-thread-local memory locations are never considered to
@@ -1062,15 +1174,24 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		for (avail_t::iterator it = potentiallyAvailable.begin();
 		     it != potentiallyAvailable.end();
 			) {
-			if (oracle->storeIsThreadLocal(*it)) {
-				it++;
-			} else {
+			StateMachineSideEffectStore *smses =
+				dynamic_cast<StateMachineSideEffectStore *>(*it);
+			StateMachineSideEffectLoad *smsel =
+				dynamic_cast<StateMachineSideEffectLoad *>(*it);
+			if ( (smses && !oracle->storeIsThreadLocal(smses)) ||
+			     (smsel && !oracle->loadIsThreadLocal(smsel)) ) {
 				potentiallyAvailable.erase(it++);
+			} else {
+				it++;
 			}
 		}
 	}
 
-	/* build the initial availability map. */
+	/* build the initial availability map.  We start by assuming
+	 * that everything is available everywhere, except that at the
+	 * start of the very first state nothing is available, and
+	 * then use a Tarski iteration to make everything
+	 * consistent. */
 	std::set<StateMachineEdge *> allEdges;
 	std::set<StateMachine *> allStates;
 	findAllEdges(sm, allEdges);
@@ -1154,34 +1275,13 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
 					     edge->sideEffects.begin();
 				     it2 != edge->sideEffects.end();
-				     it2++) {
-					StateMachineSideEffectStore *smses =
-						dynamic_cast<StateMachineSideEffectStore *>(*it2);
-					if (!smses)
-						continue;
-					/* Eliminate anything which is killed */
-					for (avail_t::iterator it3 = outputAvail.begin();
-					     it3 != outputAvail.end();
-						) {
-						if ( alias.mightAlias((*it3)->addr,
-								      smses->addr) &&
-						     oracle->memoryAccessesMightAlias(*it3, smses) &&
-						     !definitelyNotEqual( (*it3)->addr,
-									  smses->addr,
-									  opt) )
-							outputAvail.erase(it3++);
-						else
-							it3++;
-					}
-					/* Introduce the store which was generated. */
-					if (opt.assumeNoInterferingStores ||
-					    oracle->storeIsThreadLocal(smses))
-						outputAvail.insert(smses);
-				}
+				     it2++)
+					updateAvailSetForSideEffect(outputAvail, *it2,
+								    opt, alias, oracle);
 				/* Now check whether we actually did anything. */
 				avail_t &currentAvail(availOnExit[edge]);
 				for (avail_t::iterator it2 = currentAvail.begin();
-				     it2 != currentAvail.end();
+				     !progress && it2 != currentAvail.end();
 				     it2++) {
 					if (!outputAvail.count(*it2))
 						progress = true;
@@ -1201,7 +1301,8 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		availOnEntry,
 		opt,
 		alias,
-		oracle);
+		oracle,
+		done_something);
 }
 
 static StateMachine *
@@ -1727,8 +1828,8 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 	do {
 		done_something = false;
 		sm = sm->optimise(opt, oracle, &done_something);
-		removeRedundantStores(sm, oracle, &done_something);
-		sm = availExpressionAnalysis(sm, opt, alias, oracle);
+		removeRedundantStores(sm, oracle, &done_something, opt);
+		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		sm = sm->optimise(opt, oracle, &done_something);
@@ -2472,28 +2573,15 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
-	sm->sanity_check();
 	AllowableOptimisations opt2 =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableassumeNoInterferingStores();
 	opt2.interestingStores = is.rips;
 	opt2.haveInterestingStoresSet = true;
-	bool done_something;
-	do {
-		done_something = false;
-		StateMachine *sm2 = sm->optimise(opt2, oracle, &done_something);
-		sm2->sanity_check();
-		sm = sm2;
-	} while (done_something);
-	sm->sanity_check();
 	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
-	sm = availExpressionAnalysis(sm, opt2, alias, oracle);
-	sm = bisimilarityReduction(sm, opt2);
-	do {
-		done_something = false;
-		sm = sm->optimise(opt2, oracle, &done_something);
-	} while (done_something);
+	sm->sanity_check();
+	sm = optimiseStateMachine(sm, alias, opt2, oracle);
 	sm->sanity_check();
 
 	if (dynamic_cast<StateMachineUnreached *>(sm.get())) {
