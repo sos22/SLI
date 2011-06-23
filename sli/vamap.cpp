@@ -132,7 +132,6 @@ bool VAMap::translate(unsigned long va,
 				VAMapEntry *rp = r->prev;
 				VAMapEntry *rpp = rp->prev;
 				VAMapEntry *rpps = rpp->succ;
-				VAMapEntry *rps = rp->succ;
 				root = rpp;
 				rpp->succ = r;
 				rp->prev = rpps;

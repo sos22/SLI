@@ -264,6 +264,29 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 }
 
 bool
+Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel1,
+				 StateMachineSideEffectLoad *smsel2)
+{
+	if (loadIsThreadLocal(smsel1)) {
+		if (!loadIsThreadLocal(smsel2))
+			return false;
+		if (!definitelyNotEqual(smsel1->smsel_addr, smsel2->smsel_addr, AllowableOptimisations::defaultOptimisations))
+			return true;
+		else
+			return false;
+	} else if (loadIsThreadLocal(smsel2))
+		return false;
+
+	for (std::vector<tag_entry>::iterator it = tag_table.begin();
+	     it != tag_table.end();
+	     it++)
+		if (it->loads.count(smsel1->rip) &&
+		    it->loads.count(smsel2->rip))
+			return true;
+	return false;
+}
+
+bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 				 StateMachineSideEffectStore *smses2)
 {
@@ -659,6 +682,8 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 		for (int i = 0; i < w->Iex.Associative.nr_arguments; i++)
 			old = irexprUsedValues(old, w->Iex.Associative.contents[i]);
 		return old;
+	case Iex_FreeVariable:
+		return old;
 	}
 	abort();
 }
@@ -799,6 +824,9 @@ irexprAliasingClass(IRExpr *expr,
 		    !strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_rflags_all"))
 			return Oracle::PointerAliasingSet::notAPointer;
 		break;
+
+	case Iex_FreeVariable:
+		return Oracle::PointerAliasingSet::anything;
 
 	default:
 		break;

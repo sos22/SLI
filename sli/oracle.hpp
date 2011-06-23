@@ -252,6 +252,7 @@ public:
 			 std::set<InstructionSet> &outputClusters);
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
 	bool loadIsThreadLocal(StateMachineSideEffectLoad *s);
+	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool functionCanReturn(unsigned long rip);
@@ -295,5 +296,10 @@ void findInstrSuccessorsAndCallees(AddressSpace *as,
 				   std::vector<unsigned long> &directExits,
 				   gc_pair_ulong_set_t *callees);
 
+StateMachine *introduceFreeVariables(StateMachine *sm,
+				     const Oracle::RegisterAliasingConfiguration &alias,
+				     const AllowableOptimisations &opt,
+				     Oracle *oracle,
+				     bool *done_something);
 
 #endif /* !ORACLE_H__ */

@@ -45,6 +45,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	case Iex_Get:
 	case Iex_Binder:
 	case Iex_RdTmp:
+	case Iex_FreeVariable:
 		return exp;
 	case Iex_GetI:
 		return IRExpr_GetI(exp->Iex.GetI.descr,

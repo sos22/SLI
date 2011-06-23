@@ -66,50 +66,52 @@ IRExpr::visit(HeapVisitor &visit)
    case Iex_Binder:
    case Iex_Get:
    case Iex_RdTmp:
-     break;
+   case Iex_FreeVariable:
+     return;
    case Iex_GetI:
      visit(Iex.GetI.descr);
      visit(Iex.GetI.ix);
-     break;
+     return;
    case Iex_Qop:
      visit(Iex.Qop.arg1);
      visit(Iex.Qop.arg2);
      visit(Iex.Qop.arg3);
      visit(Iex.Qop.arg4);
-     break;
+     return;
    case Iex_Triop:
      visit(Iex.Triop.arg1);
      visit(Iex.Triop.arg2);
      visit(Iex.Triop.arg3);
-     break;
+     return;
    case Iex_Binop:
      visit(Iex.Binop.arg1);
      visit(Iex.Binop.arg2);
-     break;
+     return;
    case Iex_Unop:
      visit(Iex.Unop.arg);
-     break;
+     return;
    case Iex_Load:
      visit(Iex.Load.addr);
-     break;
+     return;
    case Iex_Const:
      visit(Iex.Const.con);
-     break;
+     return;
    case Iex_CCall:
      visit(Iex.CCall.cee);
      visit(Iex.CCall.args);
-     break;
+     return;
    case Iex_Mux0X:
      visit(Iex.Mux0X.cond);
      visit(Iex.Mux0X.expr0);
      visit(Iex.Mux0X.exprX);
-     break;
+     return;
    case Iex_Associative: 
      visit(Iex.Associative.contents);
      for (int x = 0; x < Iex.Associative.nr_arguments; x++)
        visit(Iex.Associative.contents[x]);
-     break;
+     return;
    }
+   abort();
 }
 
 unsigned long
@@ -163,6 +165,8 @@ IRExpr::hashval(void) const
       h = h * 11 + Iex.Associative.contents[x]->hashval();
     return h;
   }
+  case Iex_FreeVariable:
+    return Iex.FreeVariable.key * 12357743;
   }
   abort();
 }
@@ -1439,6 +1443,9 @@ void ppIRExpr ( IRExpr* e, FILE *f )
 	fprintf(f, ")");
       }
       return;
+    case Iex_FreeVariable:
+      fprintf(f, "free%d", e->Iex.FreeVariable.key);
+      return;
   }
   vpanic("ppIRExpr");
 }
@@ -1913,6 +1920,18 @@ IRExpr* IRExpr_Associative(IRExpr *src)
 	  e->Iex.Associative.nr_arguments_allocated);
    return e;
 }
+IRExpr* IRExpr_FreeVariable ( int key )
+{
+   IRExpr *e = new IRExpr();
+   e->tag = Iex_FreeVariable;
+   e->Iex.FreeVariable.key = key;
+   return e;
+}
+IRExpr* IRExpr_FreeVariable ( )
+{
+   static int next_key;
+   return IRExpr_FreeVariable(++next_key);
+}
 
 /* Constructors for NULL-terminated IRExpr expression vectors,
    suitable for use as arg lists in clean/dirty helper calls. */
@@ -2261,6 +2280,8 @@ IRExpr* deepCopyIRExpr ( IRExpr* e )
                              deepCopyIRExpr(e->Iex.Mux0X.exprX));
       case Iex_Associative:
 	 return IRExpr_Associative(e);
+      case Iex_FreeVariable:
+	 return IRExpr_FreeVariable(e->Iex.FreeVariable.key);
    }
    vpanic("deepCopyIRExpr");
 }
@@ -2857,6 +2878,8 @@ IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
       case Iex_Binder:
          vpanic("typeOfIRExpr: Binder is not a valid expression");
 	 break;
+      case Iex_FreeVariable:
+	 return Ity_I64; /* Hack hack hack */
    }
    ppIRExpr(e, stderr);
    vpanic("typeOfIRExpr");
@@ -2943,6 +2966,7 @@ Bool isFlatIRStmt ( IRStmt* st )
                                     && isIRAtom(e->Iex.Mux0X.expr0) 
                                     && isIRAtom(e->Iex.Mux0X.exprX));
 	    case Iex_Associative: return False;
+	    case Iex_FreeVariable: return True;
          }
          vpanic("isFlatIRStmt(e)");
          vassert(0);
@@ -3111,6 +3135,8 @@ void useBeforeDef_Expr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, Int* def_counts )
 	      x++)
 	    useBeforeDef_Expr(bb,stmt,expr->Iex.Associative.contents[x],def_counts);
          return;
+      case Iex_FreeVariable:
+	 return;
    }
    vpanic("useBeforeDef_Expr");
 }
@@ -3180,6 +3206,7 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
       case Iex_Get:
       case Iex_RdTmp:
       case Iex_Binder:
+      case Iex_FreeVariable:
          return;
       case Iex_GetI:
          tcExpr(bb,stmt, expr->Iex.GetI.ix, gWordTy );

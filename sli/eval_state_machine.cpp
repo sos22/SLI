@@ -93,6 +93,8 @@ specialiseIRExpr(IRExpr *iex, std::map<Int,IRExpr *> &binders)
 						 binders);
 		return res;
 	}
+	case Iex_FreeVariable:
+		return iex;
 	}
 	abort();
 }

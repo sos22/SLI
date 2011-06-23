@@ -263,6 +263,9 @@ unpickle_counted(IRExpr **&e, Unpickler &p, int nr)
 					   p,				\
 					   expr->Iex.Associative.nr_arguments); \
 			break;						\
+		case Iex_FreeVariable:					\
+			pickle(expr->Iex.FreeVariable.key, p);		\
+			break;						\
 		}							\
 		p.finishObject();					\
 	}

@@ -144,6 +144,8 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 					     b->Iex.Associative.contents[x]))
 				return false;
 		return true;
+	case Iex_FreeVariable:
+		return a->Iex.FreeVariable.key == b->Iex.FreeVariable.key;
 	}
 	abort();
 }
@@ -278,6 +280,8 @@ exprComplexity(const IRExpr *e)
 			acc += exprComplexity(e->Iex.Associative.contents[x]);
 		return acc;
 	}
+	case Iex_FreeVariable:
+		return 100;
 	}
 	abort();
 }
@@ -302,6 +306,10 @@ IexTagLessThan(IRExprTag a, IRExprTag b)
 	if (a == Iex_RdTmp)
 		return true;
 	if (b == Iex_RdTmp)
+		return false;
+	if (a == Iex_FreeVariable)
+		return true;
+	if (b == Iex_FreeVariable)
 		return false;
 	if (b == Iex_Qop || b == Iex_Triop || b == Iex_Binop || b == Iex_Unop || b == Iex_Associative)
 		return false;
@@ -486,6 +494,8 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 			x++;
 		}
 	}
+	case Iex_FreeVariable:
+		return a->Iex.FreeVariable.key < b->Iex.FreeVariable.key;
 	}
 
 	abort();
@@ -1047,6 +1057,7 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 	case Iex_Get:
 	case Iex_RdTmp:
 	case Iex_Const:
+	case Iex_FreeVariable:
 		break;
 	case Iex_GetI:
 		e->Iex.GetI.ix = internIRExpr(e->Iex.GetI.ix, lookupTable);
@@ -1105,6 +1116,7 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 			do_case(Unop);
 			do_case(Load);
 			do_case(Mux0X);
+			do_case(FreeVariable);
 #undef do_case
 			/* Others are harder. */
 		case Iex_CCall: {
@@ -1852,6 +1864,7 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *or
 	case Iex_Get:
 	case Iex_RdTmp:
 	case Iex_Const:
+	case Iex_FreeVariable:
 		return false;
 	case Iex_GetI:
 		return definitelyUnevaluatable(e->Iex.GetI.ix, opt, oracle);

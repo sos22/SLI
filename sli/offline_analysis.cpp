@@ -318,6 +318,8 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 		return transformIexMux0X(e, done_something);
 	case Iex_Associative:
 		return transformIexAssociative(e, done_something);
+	case Iex_FreeVariable:
+		return transformIexFreeVariable(e, done_something);
 	}
 	abort();
 }
@@ -1828,7 +1830,7 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 
 static StateMachine *
 optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfiguration &alias,
-		     const AllowableOptimisations &opt, Oracle *oracle)
+		     const AllowableOptimisations &opt, Oracle *oracle, bool noExtendContext)
 {
 	bool done_something;
 	do {
@@ -1838,6 +1840,8 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
+		if (noExtendContext)
+			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
 	return sm;
@@ -2587,7 +2591,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	opt2.haveInterestingStoresSet = true;
 	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
 	sm->sanity_check();
-	sm = optimiseStateMachine(sm, alias, opt2, oracle);
+	sm = optimiseStateMachine(sm, alias, opt2, oracle, true);
 	sm->sanity_check();
 
 	if (dynamic_cast<StateMachineUnreached *>(sm.get())) {
@@ -2710,7 +2714,8 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
 					      opt,
-					      oracle);
+					      oracle,
+					      false);
 
 		printf("\tComputed state machine.\n");
 
@@ -2724,14 +2729,18 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
 					      opt,
-					      oracle);
+					      oracle,
+					      false);
 
-		VexPtr<IRExpr, &ir_heap> survive;
-		{
-			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
-			survive =
-				survivalConstraintIfExecutedAtomically(crSm, oracle, token);
-		}
+		VexPtr<StateMachine, &ir_heap> sm(cr->sm);
+		sm = optimiseStateMachine(cr->sm,
+					  oracle->getAliasingConfigurationForRip(*it),
+					  opt,
+					  oracle,
+					  true);
+
+		VexPtr<IRExpr, &ir_heap> survive(
+			survivalConstraintIfExecutedAtomically(sm, oracle, token));
 
 		survive = simplifyIRExpr(survive, opt);
 
@@ -2744,10 +2753,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		   doomed and it's not possible to fix it from this
 		   point. */
 		bool mightSurvive, mightCrash;
-		{
-			VexPtr<StateMachine, &ir_heap> crSm(cr->sm);
-			evalMachineUnderAssumption(crSm, oracle, survive, &mightSurvive, &mightCrash, token);
-		}
+		evalMachineUnderAssumption(sm, oracle, survive, &mightSurvive, &mightCrash, token);
 
 		if (!mightSurvive) {
 			printf("\tCan never survive...\n");
@@ -2758,10 +2764,10 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			dbg_break("whoops");
 		}
 
-		VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(cr->sm));
+		VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(sm));
 
 		std::set<InstructionSet> conflictClusters;
-		getConflictingStoreClusters(cr->sm, oracle, conflictClusters);
+		getConflictingStoreClusters(sm, oracle, conflictClusters);
 
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     it != conflictClusters.end();
@@ -2773,7 +2779,6 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 				printf(" %lx", *it2);
 			printf("\n");
 			VexPtr<AddressSpace> as(ms->addressSpace);
-			VexPtr<StateMachine, &ir_heap> sm(cr->sm);
 			processConflictCluster(as, sm, oracle, survive, *it, summary, token);
 		}
 

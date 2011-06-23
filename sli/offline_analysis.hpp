@@ -113,6 +113,10 @@ protected:
 	}
 	virtual IRExpr *transformIexCCall(IRExpr *, bool *done_something);
 	virtual IRExpr *transformIexAssociative(IRExpr *, bool *done_something);
+	virtual IRExpr *transformIexFreeVariable(IRExpr *e, bool *done_something)
+	{
+		return e;
+	}
 public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 };

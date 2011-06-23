@@ -938,7 +938,8 @@ typedef
       Iex_Const,
       Iex_Mux0X,
       Iex_CCall,
-      Iex_Associative /* n-ary associative operator */
+      Iex_Associative, /* n-ary associative operator */
+      Iex_FreeVariable
    }
    IRExprTag;
 
@@ -1159,6 +1160,10 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
 	 int nr_arguments_allocated;
 	 IRExpr **contents;
       } Associative;
+
+      struct {
+	 int key;
+      } FreeVariable;
    } Iex;
    void visit(HeapVisitor &hv);
    NAMED_CLASS
@@ -1183,6 +1188,8 @@ extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExpr *);
+extern IRExpr* IRExpr_FreeVariable ( int key );
+extern IRExpr* IRExpr_FreeVariable ( );
 
 /* Deep-copy an IRExpr. */
 extern IRExpr* deepCopyIRExpr ( IRExpr* );

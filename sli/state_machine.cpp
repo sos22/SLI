@@ -438,6 +438,8 @@ findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt
 		     it++)
 			findUsedBinders(e->Iex.Associative.contents[it], out, opt);
 		return;
+	case Iex_FreeVariable:
+		return;
 	}
 	abort();
 }
@@ -932,4 +934,196 @@ checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders)
 	checkBinders cb(binders);
 	bool ign;
 	cb.transformIRExpr((IRExpr *)iex, &ign);
+}
+
+static bool
+definitelyNoAliasingStores(StateMachine *sm,
+			   StateMachineSideEffectLoad *smsel,
+			   const Oracle::RegisterAliasingConfiguration &alias,
+			   const AllowableOptimisations &opt,
+			   int *nr_aliasing_loads,
+			   std::set<StateMachine *> &visited,
+			   Oracle *oracle);
+static bool
+definitelyNoAliasingStores(StateMachineEdge *sme,
+			   StateMachineSideEffectLoad *smsel,
+			   const Oracle::RegisterAliasingConfiguration &alias,
+			   const AllowableOptimisations &opt,
+			   int *nr_aliasing_loads,
+			   std::set<StateMachine *> &visited,
+			   Oracle *oracle)
+{
+	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
+		StateMachineSideEffectStore *smses =
+			dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x]);
+		if (smses &&
+		    alias.mightAlias(smsel->smsel_addr, smses->addr) &&
+		    oracle->memoryAccessesMightAlias(smsel, smses) &&
+		    !definitelyNotEqual( smsel->smsel_addr,
+					 smses->addr,
+					 opt))
+			return false;
+		StateMachineSideEffectLoad *smsel =
+			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
+		if (smsel &&
+		    alias.mightAlias(smsel->smsel_addr, smsel->smsel_addr) &&
+		    oracle->memoryAccessesMightAlias(smsel, smsel) &&
+		    !definitelyNotEqual( smsel->smsel_addr,
+					 smsel->smsel_addr,
+					 opt))
+			(*nr_aliasing_loads)++;
+	}
+	return definitelyNoAliasingStores(sme->target, smsel, alias, opt, nr_aliasing_loads, visited, oracle);
+}
+static bool
+definitelyNoAliasingStores(StateMachine *sm,
+			   StateMachineSideEffectLoad *smsel,
+			   const Oracle::RegisterAliasingConfiguration &alias,
+			   const AllowableOptimisations &opt,
+			   int *nr_aliasing_loads,
+			   std::set<StateMachine *> &visited,
+			   Oracle *oracle)
+{
+	if (visited.count(sm))
+		return true;
+	visited.insert(sm);
+	if (sm->target0() && !definitelyNoAliasingStores(sm->target0(),
+							 smsel,
+							 alias,
+							 opt,
+							 nr_aliasing_loads,
+							 visited,
+							 oracle))
+		return false;
+	if (sm->target1() && !definitelyNoAliasingStores(sm->target1(),
+							 smsel,
+							 alias,
+							 opt,
+							 nr_aliasing_loads,
+							 visited,
+							 oracle))
+		return false;
+	return true;
+}
+static bool
+definitelyNoAliasingStores(StateMachine *sm,
+			   StateMachineSideEffectLoad *smsel,
+			   const Oracle::RegisterAliasingConfiguration &alias,
+			   const AllowableOptimisations &opt,
+			   int *nr_aliasing_loads,
+			   Oracle *oracle)
+{
+	std::set<StateMachine *> visited;
+	*nr_aliasing_loads = 0;
+	return definitelyNoAliasingStores(sm, smsel, alias, opt, nr_aliasing_loads,
+					  visited, oracle);
+}
+			   
+/* There are some memory locations which are effectively completely
+ * unconstrained by anything which the machine does.  Replace those
+ * with freshly allocated free variables.  The idea here is that we
+ * can then propagate that through a bit and potentially simplify lots
+ * of other bits of the machine by allocating yet more free
+ * variables. */
+static StateMachine *introduceFreeVariables(StateMachine *sm,
+					    StateMachine *root_sm,
+					    const Oracle::RegisterAliasingConfiguration &alias,
+					    const AllowableOptimisations &opt,
+					    Oracle *oracle,
+					    bool *done_something);
+static StateMachineEdge *
+introduceFreeVariables(StateMachineEdge *sme,
+		       StateMachine *root_sm,
+		       const Oracle::RegisterAliasingConfiguration &alias,
+		       const AllowableOptimisations &opt,
+		       Oracle *oracle,
+		       bool *done_something)
+{
+	StateMachineEdge *out = new StateMachineEdge(NULL);
+	bool doit = false;
+	/* A load results in a free variable if it's local and no
+	   stores could potentially alias with it and no other loads
+	   could alias with it. */
+	for (unsigned idx = 0; idx < sme->sideEffects.size(); idx++) {
+		StateMachineSideEffect *smse = sme->sideEffects[idx];
+		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
+		int n;
+		if (!smsel ||
+		    !oracle->loadIsThreadLocal(smsel) ||
+		    !definitelyNoAliasingStores(root_sm, smsel, alias, opt, &n, oracle) ||
+		    n != 1) {
+			out->sideEffects.push_back(smse);
+			continue;
+		}
+		/* This is a local load from a location which is never
+		 * stored.  Remove it. */
+		out->sideEffects.push_back(new StateMachineSideEffectCopy(smsel->key, IRExpr_FreeVariable()));
+		doit = true;
+	}
+	out->target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit);
+
+	if (doit) {
+		*done_something = true;
+		return out;
+	} else {
+		return sme;
+	}
+}
+static StateMachine *
+introduceFreeVariables(StateMachine *sm,
+		       StateMachine *root_sm,
+		       const Oracle::RegisterAliasingConfiguration &alias,
+		       const AllowableOptimisations &opt,
+		       Oracle *oracle,
+		       bool *done_something)
+{
+	bool doit = false;
+	if (dynamic_cast<StateMachineTerminal *>(sm))
+		return sm;
+	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+		StateMachineEdge *e = introduceFreeVariables(smp->target,
+							     root_sm,
+							     alias,
+							     opt,
+							     oracle,
+							     &doit);
+		if (doit) {
+			*done_something = true;
+			return new StateMachineProxy(smp->origin, e);
+		} else {
+			return sm;
+		}
+	}
+	StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm);
+	assert(smb);
+	StateMachineEdge *t = introduceFreeVariables(smb->trueTarget,
+						     root_sm,
+						     alias,
+						     opt,
+						     oracle,
+						     &doit);
+	StateMachineEdge *f = introduceFreeVariables(smb->falseTarget,
+						     root_sm,
+						     alias,
+						     opt,
+						     oracle,
+						     &doit);
+	if (doit) {
+		*done_something = true;
+		return new StateMachineBifurcate(smb->origin,
+						 smb->condition,
+						 t,
+						 f);
+	} else {
+		return sm;
+	}
+}
+StateMachine *
+introduceFreeVariables(StateMachine *sm,
+		       const Oracle::RegisterAliasingConfiguration &alias,
+		       const AllowableOptimisations &opt,
+		       Oracle *oracle,
+		       bool *done_something)
+{
+	return introduceFreeVariables(sm, sm, alias, opt, oracle, done_something);
 }
