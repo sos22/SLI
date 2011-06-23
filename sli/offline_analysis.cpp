@@ -157,69 +157,53 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 	return NULL;
 }
 
-class StateMachineTransformer : public IRExprTransformer {
-private:
-	/* Transformations are memoised.  This is important, because
-	   it means that we preserve the state machine structure
-	   rather than unrolling it. */
-	std::map<const StateMachine *, StateMachine *> memoTable;
-	StateMachine *doit(StateMachine *inp);
-	StateMachineEdge *doit(StateMachineEdge *inp);
-
-protected:
-	virtual StateMachine *transformedCrash()
-	{
-		return StateMachineCrash::get();
-	}
-	virtual StateMachine *transformedNoCrash()
-	{
-		return StateMachineNoCrash::get();
-	}
-	virtual StateMachine *transformedUnreached()
-	{
-		return StateMachineUnreached::get();
-	}
-public:
-	StateMachine *transform(StateMachine *start);
-};
-
 StateMachine *
-StateMachineTransformer::doit(StateMachine *inp)
+StateMachineTransformer::doit(StateMachine *inp, bool *done_something)
 {
-	if (memoTable.count(inp))
+	if (memoTable.count(inp)) {
+		/* We rely on whoever set memoTable having also set
+		   *done_something if necessary. */
 		return memoTable[inp];
+	}
 	StateMachine *out;
 	if (inp == StateMachineCrash::get()) {
-		out = transformedCrash();
+		out = transformedCrash(done_something);
 	} else if (inp == StateMachineNoCrash::get()) {
-		out = transformedNoCrash();
+		out = transformedNoCrash(done_something);
 	} else if (inp == StateMachineUnreached::get()) {
-		out = transformedUnreached();
+		out = transformedUnreached(done_something);
 	} else if (StateMachineBifurcate *smb =
 		   dynamic_cast<StateMachineBifurcate *>(inp)) {
-		StateMachineEdge *t = doit(smb->trueTarget);
-		StateMachineEdge *f = doit(smb->falseTarget);
-		bool ign;
-		IRExpr *cond = transformIRExpr(smb->condition, &ign);
-		if (t == smb->trueTarget && f == smb->falseTarget && cond == smb->condition)
-			out = inp;
-		else
+		bool done = false;
+		StateMachineEdge *t = doit(smb->trueTarget, &done);
+		StateMachineEdge *f = doit(smb->falseTarget, &done);
+		IRExpr *cond = transformIRExpr(smb->condition, &done);
+		if (done) {
+			*done_something = true;
 			out = new StateMachineBifurcate(inp->origin, cond, t, f);
+		} else {
+			out = inp;
+		}
 	} else if (StateMachineProxy *smp =
 		   dynamic_cast<StateMachineProxy *>(inp)) {
-		StateMachineEdge *t = doit(smp->target);
-		if (t == smp->target)
-			out = inp;
-		else
+		bool d = false;
+		StateMachineEdge *t = doit(smp->target, &d);
+		if (d) {
+			*done_something = true;
 			out = new StateMachineProxy(inp->origin, t);
+		} else {
+			out = inp;
+		}
 	} else if (StateMachineStub *sms =
 		   dynamic_cast<StateMachineStub *>(inp)) {
-		bool ign;
-		IRExpr *target = transformIRExpr(sms->target, &ign);
-		if (target == sms->target)
-			out = inp;
-		else
+		bool d = false;
+		IRExpr *target = transformIRExpr(sms->target, &d);
+		if (d) {
+			*done_something = true;
 			out = new StateMachineStub(inp->origin, target);
+		} else {
+			out = inp;
+		}
 	} else {
 		abort();
 	}
@@ -228,22 +212,19 @@ StateMachineTransformer::doit(StateMachine *inp)
 }
 
 StateMachineEdge *
-StateMachineTransformer::doit(StateMachineEdge *inp)
+StateMachineTransformer::doit(StateMachineEdge *inp, bool *done_something)
 {
-	StateMachine *t = doit(inp->target);
+	bool done = false;
+	StateMachine *t = doit(inp->target, &done);
 	StateMachineEdge *res = new StateMachineEdge(t);
-	bool changedSideEffect = false;
 	for (std::vector<StateMachineSideEffect *>::iterator it = inp->sideEffects.begin();
 	     it != inp->sideEffects.end();
 	     it++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			IRExpr *a, *d;
-			bool ign;
-			a = transformIRExpr(smses->addr, &ign);
-			d = transformIRExpr(smses->data, &ign);
-			if (a != smses->addr || d != smses->data)
-				changedSideEffect = true;
+			a = transformIRExpr(smses->addr, &done);
+			d = transformIRExpr(smses->data, &done);
 			res->sideEffects.push_back(
 				new StateMachineSideEffectStore(
 					a,
@@ -251,10 +232,7 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 					smses->rip));
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			bool ign;
-			IRExpr *a = transformIRExpr(smsel->smsel_addr, &ign);
-			if (a != smsel->smsel_addr)
-				changedSideEffect = true;
+			IRExpr *a = transformIRExpr(smsel->smsel_addr, &done);
 			res->sideEffects.push_back(
 				new StateMachineSideEffectLoad(
 					smsel->key,
@@ -262,10 +240,7 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 					smsel->rip));
 		} else if (StateMachineSideEffectCopy *smsec =
 			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
-			bool ign;
-			IRExpr *v = transformIRExpr(smsec->value, &ign);
-			if (v != smsec->value)
-				changedSideEffect = true;
+			IRExpr *v = transformIRExpr(smsec->value, &done);
 			res->sideEffects.push_back(
 				new StateMachineSideEffectCopy(
 					smsec->key,
@@ -276,16 +251,18 @@ StateMachineTransformer::doit(StateMachineEdge *inp)
 			abort();
 		}
 	}
-	if (!changedSideEffect && t == inp->target)
-		return inp;
-	else
+	if (done) {
+		*done_something = true;
 		return res;
+	} else {
+		return inp;
+	}
 }
 
 StateMachine *
-StateMachineTransformer::transform(StateMachine *inp)
+StateMachineTransformer::transform(StateMachine *inp, bool *done_something)
 {
-	return doit(inp);
+	return doit(inp, done_something);
 }
 
 IRExpr *
@@ -1840,8 +1817,10 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
-		if (noExtendContext)
+		if (noExtendContext) {
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
+			sm = optimiseFreeVariables(sm, &done_something);
+		}
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
 	return sm;

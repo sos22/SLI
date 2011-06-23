@@ -301,5 +301,6 @@ StateMachine *introduceFreeVariables(StateMachine *sm,
 				     const AllowableOptimisations &opt,
 				     Oracle *oracle,
 				     bool *done_something);
+StateMachine *optimiseFreeVariables(StateMachine *sm, bool *done_something);
 
 #endif /* !ORACLE_H__ */

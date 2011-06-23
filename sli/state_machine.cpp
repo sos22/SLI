@@ -963,13 +963,13 @@ definitelyNoAliasingStores(StateMachineEdge *sme,
 					 smses->addr,
 					 opt))
 			return false;
-		StateMachineSideEffectLoad *smsel =
+		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
-		if (smsel &&
-		    alias.mightAlias(smsel->smsel_addr, smsel->smsel_addr) &&
-		    oracle->memoryAccessesMightAlias(smsel, smsel) &&
+		if (smsel2 &&
+		    alias.mightAlias(smsel->smsel_addr, smsel2->smsel_addr) &&
+		    oracle->memoryAccessesMightAlias(smsel, smsel2) &&
 		    !definitelyNotEqual( smsel->smsel_addr,
-					 smsel->smsel_addr,
+					 smsel2->smsel_addr,
 					 opt))
 			(*nr_aliasing_loads)++;
 	}
@@ -1126,4 +1126,80 @@ introduceFreeVariables(StateMachine *sm,
 		       bool *done_something)
 {
 	return introduceFreeVariables(sm, sm, alias, opt, oracle, done_something);
+}
+
+class countFreeVariablesVisitor : public StateMachineTransformer {
+	IRExpr *transformIexFreeVariable(IRExpr *e, bool *done_something) {
+		counts[e->Iex.FreeVariable.key]++;
+		return e;
+	}
+public:
+	std::map<int, int> counts;
+};
+class simplifyFreeVariablesTransformer : public StateMachineTransformer {
+public:
+	std::map<int, int> &counts;
+	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		switch (e->tag) {
+		case Iex_Const:
+		case Iex_Binder:
+		case Iex_Get:
+		case Iex_GetI:
+		case Iex_RdTmp:
+		case Iex_Load:
+		case Iex_Mux0X:
+		case Iex_CCall:
+		case Iex_FreeVariable:
+			break;
+		case Iex_Qop:
+			if (e->Iex.Qop.arg4->tag == Iex_FreeVariable &&
+			    counts[e->Iex.Qop.arg4->Iex.FreeVariable.key] == 1) {
+				*done_something = true;
+				return e->Iex.Qop.arg4;
+			}
+		case Iex_Triop:
+			if (e->Iex.Triop.arg3->tag == Iex_FreeVariable &&
+			    counts[e->Iex.Triop.arg3->Iex.FreeVariable.key] == 1) {
+				*done_something = true;
+				return e->Iex.Triop.arg3;
+			}
+		case Iex_Binop:
+			if (e->Iex.Binop.arg2->tag == Iex_FreeVariable &&
+			    counts[e->Iex.Binop.arg2->Iex.FreeVariable.key] == 1) {
+				*done_something = true;
+				return e->Iex.Binop.arg2;
+			}
+		case Iex_Unop:
+			if (e->Iex.Unop.arg->tag == Iex_FreeVariable &&
+			    counts[e->Iex.Unop.arg->Iex.FreeVariable.key] == 1) {
+				*done_something = true;
+				return e->Iex.Unop.arg;
+			}
+			break;
+		case Iex_Associative:
+			for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
+				IRExpr *a = e->Iex.Associative.contents[x];
+				if (a->tag == Iex_FreeVariable &&
+				    counts[a->Iex.FreeVariable.key] == 1) {
+					*done_something = true;
+					return a;
+				}
+			}
+			break;
+		}
+		return StateMachineTransformer::transformIRExpr(e, done_something);
+	}
+	simplifyFreeVariablesTransformer(std::map<int, int> &_counts)
+		: counts(_counts)
+	{}
+};
+
+StateMachine *
+optimiseFreeVariables(StateMachine *sm, bool *done_something)
+{
+	countFreeVariablesVisitor cfvv;
+	bool ign;
+	cfvv.transform(sm, &ign);
+	simplifyFreeVariablesTransformer sfvt(cfvv.counts);
+	return sfvt.transform(sm, done_something);
 }

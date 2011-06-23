@@ -121,4 +121,35 @@ public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 };
 
+class StateMachineTransformer : public IRExprTransformer {
+private:
+	/* Transformations are memoised.  This is important, because
+	   it means that we preserve the state machine structure
+	   rather than unrolling it. */
+	std::map<const StateMachine *, StateMachine *> memoTable;
+	StateMachine *doit(StateMachine *inp, bool *);
+	StateMachineEdge *doit(StateMachineEdge *inp, bool *);
+
+protected:
+	virtual StateMachine *transformedCrash(bool *done_something)
+	{
+		return StateMachineCrash::get();
+	}
+	virtual StateMachine *transformedNoCrash(bool *done_something)
+	{
+		return StateMachineNoCrash::get();
+	}
+	virtual StateMachine *transformedUnreached(bool *done_something)
+	{
+		return StateMachineUnreached::get();
+	}
+public:
+	StateMachine *transform(StateMachine *start, bool *done_something);
+	StateMachine *transform(StateMachine *start)
+	{
+		bool b;
+		return transform(start, &b);
+	}
+};
+
 #endif /* !OFFLINE_ANALYSIS_HPP__ */
