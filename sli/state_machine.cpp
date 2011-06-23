@@ -936,33 +936,24 @@ checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders)
 	cb.transformIRExpr((IRExpr *)iex, &ign);
 }
 
-static bool
-definitelyNoAliasingStores(StateMachine *sm,
-			   StateMachineSideEffectLoad *smsel,
-			   const Oracle::RegisterAliasingConfiguration &alias,
-			   const AllowableOptimisations &opt,
-			   int *nr_aliasing_loads,
-			   std::set<StateMachine *> &visited,
-			   Oracle *oracle);
-static bool
-definitelyNoAliasingStores(StateMachineEdge *sme,
-			   StateMachineSideEffectLoad *smsel,
-			   const Oracle::RegisterAliasingConfiguration &alias,
-			   const AllowableOptimisations &opt,
-			   int *nr_aliasing_loads,
-			   std::set<StateMachine *> &visited,
-			   Oracle *oracle)
+static void
+nrAliasingLoads(StateMachine *sm,
+		StateMachineSideEffectLoad *smsel,
+		const Oracle::RegisterAliasingConfiguration &alias,
+		const AllowableOptimisations &opt,
+		int *out,
+		std::set<StateMachine *> &visited,
+		Oracle *oracle);
+static void
+nrAliasingLoads(StateMachineEdge *sme,
+		StateMachineSideEffectLoad *smsel,
+		const Oracle::RegisterAliasingConfiguration &alias,
+		const AllowableOptimisations &opt,
+		int *out,
+		std::set<StateMachine *> &visited,
+		Oracle *oracle)
 {
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
-		StateMachineSideEffectStore *smses =
-			dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x]);
-		if (smses &&
-		    alias.mightAlias(smsel->smsel_addr, smses->addr) &&
-		    oracle->memoryAccessesMightAlias(smsel, smses) &&
-		    !definitelyNotEqual( smsel->smsel_addr,
-					 smses->addr,
-					 opt))
-			return false;
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
 		if (smsel2 &&
@@ -971,54 +962,127 @@ definitelyNoAliasingStores(StateMachineEdge *sme,
 		    definitelyEqual( smsel->smsel_addr,
 				     smsel2->smsel_addr,
 				     opt))
-			(*nr_aliasing_loads)++;
+			(*out)++;
 	}
-	return definitelyNoAliasingStores(sme->target, smsel, alias, opt, nr_aliasing_loads, visited, oracle);
+	nrAliasingLoads(sme->target, smsel, alias, opt, out, visited, oracle);
 }
-static bool
-definitelyNoAliasingStores(StateMachine *sm,
-			   StateMachineSideEffectLoad *smsel,
-			   const Oracle::RegisterAliasingConfiguration &alias,
-			   const AllowableOptimisations &opt,
-			   int *nr_aliasing_loads,
-			   std::set<StateMachine *> &visited,
-			   Oracle *oracle)
+static void
+nrAliasingLoads(StateMachine *sm,
+		StateMachineSideEffectLoad *smsel,
+		const Oracle::RegisterAliasingConfiguration &alias,
+		const AllowableOptimisations &opt,
+		int *out,
+		std::set<StateMachine *> &visited,
+		Oracle *oracle)
 {
 	if (visited.count(sm))
-		return true;
+		return;
 	visited.insert(sm);
-	if (sm->target0() && !definitelyNoAliasingStores(sm->target0(),
-							 smsel,
-							 alias,
-							 opt,
-							 nr_aliasing_loads,
-							 visited,
-							 oracle))
+	if (sm->target0())
+		nrAliasingLoads(sm->target0(),
+				smsel,
+				alias,
+				opt,
+				out,
+				visited,
+				oracle);
+	if (sm->target1())
+		nrAliasingLoads(sm->target1(),
+				smsel,
+				alias,
+				opt,
+				out,
+				visited,
+				oracle);
+}
+static int
+nrAliasingLoads(StateMachine *sm,
+		StateMachineSideEffectLoad *smsel,
+		const Oracle::RegisterAliasingConfiguration &alias,
+		const AllowableOptimisations &opt,
+		Oracle *oracle)
+{
+	std::set<StateMachine *> visited;
+	int res = 0;
+	nrAliasingLoads(sm, smsel, alias, opt, &res, visited, oracle);
+	return res;
+}
+			   
+static bool definitelyNoSatisfyingStores(StateMachine *sm,
+					 StateMachineSideEffectLoad *smsel,
+					 const Oracle::RegisterAliasingConfiguration &alias,
+					 const AllowableOptimisations &opt,
+					 bool haveAliasingStore,
+					 Oracle *oracle);
+static bool
+definitelyNoSatisfyingStores(StateMachineEdge *sme,
+			     StateMachineSideEffectLoad *smsel,
+			     const Oracle::RegisterAliasingConfiguration &alias,
+			     const AllowableOptimisations &opt,
+			     bool haveAliasingStore,
+			     Oracle *oracle)
+{
+	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
+		StateMachineSideEffect *smse = sme->sideEffects[x];
+		if (smse == smsel) {
+			if (haveAliasingStore) {
+				return false;
+			} else {
+				/* The load can't appear twice in one
+				   path, and we've not seen a
+				   satisfying store yet, so we're
+				   fine. */
+				return true;
+			}
+		}
+		if (haveAliasingStore)
+			continue;
+		StateMachineSideEffectStore *smses =
+			dynamic_cast<StateMachineSideEffectStore *>(smse);
+		if (smses &&
+		    alias.mightAlias(smsel->smsel_addr, smses->addr) &&
+		    oracle->memoryAccessesMightAlias(smsel, smses) &&
+		    !definitelyNotEqual( smsel->smsel_addr,
+					 smses->addr,
+					 opt)) {
+			/* This store might alias with the load.  If
+			   we encounter the load after this, then it
+			   might be satisfied. */
+			haveAliasingStore = true;
+		}
+	}
+	return definitelyNoSatisfyingStores(sme->target,
+					    smsel,
+					    alias,
+					    opt,
+					    haveAliasingStore,
+					    oracle);
+}
+static bool
+definitelyNoSatisfyingStores(StateMachine *sm,
+			     StateMachineSideEffectLoad *smsel,
+			     const Oracle::RegisterAliasingConfiguration &alias,
+			     const AllowableOptimisations &opt,
+			     bool haveAliasingStore,
+			     Oracle *oracle)
+{
+	if (sm->target0() && !definitelyNoSatisfyingStores(sm->target0(),
+							   smsel,
+							   alias,
+							   opt,
+							   haveAliasingStore,
+							   oracle))
 		return false;
-	if (sm->target1() && !definitelyNoAliasingStores(sm->target1(),
-							 smsel,
-							 alias,
-							 opt,
-							 nr_aliasing_loads,
-							 visited,
-							 oracle))
+	if (sm->target1() && !definitelyNoSatisfyingStores(sm->target1(),
+							   smsel,
+							   alias,
+							   opt,
+							   haveAliasingStore,
+							   oracle))
 		return false;
 	return true;
 }
-static bool
-definitelyNoAliasingStores(StateMachine *sm,
-			   StateMachineSideEffectLoad *smsel,
-			   const Oracle::RegisterAliasingConfiguration &alias,
-			   const AllowableOptimisations &opt,
-			   int *nr_aliasing_loads,
-			   Oracle *oracle)
-{
-	std::set<StateMachine *> visited;
-	*nr_aliasing_loads = 0;
-	return definitelyNoAliasingStores(sm, smsel, alias, opt, nr_aliasing_loads,
-					  visited, oracle);
-}
-			   
+
 /* There are some memory locations which are effectively completely
  * unconstrained by anything which the machine does.  Replace those
  * with freshly allocated free variables.  The idea here is that we
@@ -1047,11 +1111,10 @@ introduceFreeVariables(StateMachineEdge *sme,
 	for (unsigned idx = 0; idx < sme->sideEffects.size(); idx++) {
 		StateMachineSideEffect *smse = sme->sideEffects[idx];
 		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		int n;
 		if (!smsel ||
 		    !oracle->loadIsThreadLocal(smsel) ||
-		    !definitelyNoAliasingStores(root_sm, smsel, alias, opt, &n, oracle) ||
-		    n != 1) {
+		    !definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) ||
+		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) != 1) {
 			out->sideEffects.push_back(smse);
 			continue;
 		}
