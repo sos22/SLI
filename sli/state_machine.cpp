@@ -968,9 +968,9 @@ definitelyNoAliasingStores(StateMachineEdge *sme,
 		if (smsel2 &&
 		    alias.mightAlias(smsel->smsel_addr, smsel2->smsel_addr) &&
 		    oracle->memoryAccessesMightAlias(smsel, smsel2) &&
-		    !definitelyNotEqual( smsel->smsel_addr,
-					 smsel2->smsel_addr,
-					 opt))
+		    definitelyEqual( smsel->smsel_addr,
+				     smsel2->smsel_addr,
+				     opt))
 			(*nr_aliasing_loads)++;
 	}
 	return definitelyNoAliasingStores(sme->target, smsel, alias, opt, nr_aliasing_loads, visited, oracle);
