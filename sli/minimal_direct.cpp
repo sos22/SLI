@@ -64,8 +64,6 @@ main(int argc, char *argv[])
 			my_rip = oracle->selectRandomLoad();
 		examined_loads.insert(my_rip);
 
-		my_rip = 0x9ad264;
-
 		printf("Considering %lx...\n", my_rip);
 		VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
 		if (!proximal) {
