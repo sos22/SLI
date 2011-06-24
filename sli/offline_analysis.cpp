@@ -2412,18 +2412,21 @@ buildCFGForCallGraph(AddressSpace *as,
 	 * instructions by a combination of the RIP and call stack,
 	 * encapsulated as a StackRip; this effectively allows us to
 	 * inline chosen functions. */
-	std::map<StackRip, CFGNode<StackRip> *> builtSoFar;
-	std::queue<StackRip> needed;
+	std::map<StackRip, std::pair<CFGNode<StackRip> *, int> > builtSoFar;
+	std::queue<std::pair<StackRip, int> > needed;
 
-	needed.push(StackRip(root->headRip));
+	needed.push(std::pair<StackRip, int>(StackRip(root->headRip), 100));
 	while (!needed.empty()) {
-		StackRip &r(needed.front());
-		if (builtSoFar.count(r) || ripToCFGNode->get(r.rip) == NULL) {
+		StackRip &r(needed.front().first);
+		int depth = needed.front().second;
+		if (depth == 0 ||
+		    (builtSoFar.count(r) && builtSoFar[r].second >= depth) ||
+		    ripToCFGNode->get(r.rip) == NULL) {
 			needed.pop();
 			continue;
 		}
 		CFGNode<StackRip> *work = new CFGNode<StackRip>(r);
-		builtSoFar[r] = work;
+		builtSoFar[r] = std::pair<CFGNode<StackRip> *, int>(work, depth);
 		IRSB *irsb;
 		try {
 			irsb = as->getIRSBForAddress(-1, r.rip);
@@ -2443,7 +2446,7 @@ buildCFGForCallGraph(AddressSpace *as,
 				assert(!work->branchRip.valid);
 				work->branchRip = r.jump(irsb->stmts[x]->Ist.Exit.dst->Ico.U64);
 				assert(work->branchRip.valid);
-				needed.push(work->branchRip);
+				needed.push(std::pair<StackRip, int>(work->branchRip, depth - 1));
 			}
 		}
 		if (x == irsb->stmts_used) {
@@ -2475,23 +2478,23 @@ buildCFGForCallGraph(AddressSpace *as,
 		}
 		needed.pop();
 		if (work->fallThroughRip.valid)
-			needed.push(work->fallThroughRip);
+			needed.push(std::pair<StackRip, int>(work->fallThroughRip, depth - 1));
 	}
 
 	/* We have now built all of the needed CFG nodes.  Resolve
 	 * references. */
-	for (std::map<StackRip, CFGNode<StackRip> *>::iterator it = builtSoFar.begin();
+	for (std::map<StackRip, std::pair<CFGNode<StackRip> *, int> >::iterator it = builtSoFar.begin();
 	     it != builtSoFar.end();
 	     it++) {
-		assert(it->second);
-		if (it->second->fallThroughRip.valid && builtSoFar.count(it->second->fallThroughRip))
-			it->second->fallThrough = builtSoFar[it->second->fallThroughRip];
-		if (it->second->branchRip.valid && builtSoFar.count(it->second->branchRip))
-			it->second->branch = builtSoFar[it->second->branchRip];
+		assert(it->second.first);
+		if (it->second.first->fallThroughRip.valid && builtSoFar.count(it->second.first->fallThroughRip))
+			it->second.first->fallThrough = builtSoFar[it->second.first->fallThroughRip].first;
+		if (it->second.first->branchRip.valid && builtSoFar.count(it->second.first->branchRip))
+			it->second.first->branch = builtSoFar[it->second.first->branchRip].first;
 	}
 
 	/* All done */
-	CFGNode<StackRip> *res = builtSoFar[StackRip(root->headRip)];
+	CFGNode<StackRip> *res = builtSoFar[StackRip(root->headRip)].first;
 	assert(res != NULL);
 	return res;
 }
