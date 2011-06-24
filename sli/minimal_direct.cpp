@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include <vector>
 #include <set>
 
@@ -40,9 +41,17 @@ DumpFix::finish(void)
 	fprintf(output, "};\n\n#include \"patch_skeleton_jump.c\"\n");
 }
 
+static void
+timer_handler(int ignore)
+{
+	timed_out = true;
+}
+
 int
 main(int argc, char *argv[])
 {
+	signal(SIGVTALRM, timer_handler);
+
 	init_sli();
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
@@ -55,8 +64,9 @@ main(int argc, char *argv[])
 	std::set<unsigned long> examined_loads;
 
 	FILE *output = fopen("generated_patch.c", "w");
+	FILE *timings = fopen("timings.txt", "w");
 	DumpFix df(oracle, output);
-	for (int cntr = 0; cntr < 100; cntr++) {
+	for (int cntr = 0; 1; cntr++) {
 		LibVEX_maybe_gc(ALLOW_GC);
 		
 		unsigned long my_rip = oracle->selectRandomLoad();
@@ -78,7 +88,35 @@ main(int argc, char *argv[])
 		std::vector<unsigned long> previousInstructions;
 		oracle->findPreviousInstructions(previousInstructions, my_rip);
 
+		struct itimerval itv;
+		struct timeval start;
+
+		memset(&itv, 0, sizeof(itv));
+		itv.it_value.tv_sec = 120;
+		setitimer(ITIMER_VIRTUAL, &itv, NULL);
+
+		gettimeofday(&start, NULL);
+
 		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, false, ALLOW_GC);
+
+		struct timeval end;
+		gettimeofday(&end, NULL);
+
+		memset(&itv, 0, sizeof(itv));
+		setitimer(ITIMER_VIRTUAL, &itv, NULL);
+
+		double time_taken = end.tv_sec - start.tv_sec;
+		time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
+		if (timed_out) {
+			fprintf(timings, "%lx timed out after %f\n", my_rip, time_taken);
+			printf("%lx timed out after %f\n", my_rip, time_taken);
+		} else {
+			fprintf(timings, "%lx took %f\n", my_rip, time_taken);
+			printf("%lx took %f\n", my_rip, time_taken);
+		}
+		timed_out = false;
+
+		fflush(NULL);
 	}
 
 	df.finish();

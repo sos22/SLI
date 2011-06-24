@@ -2551,7 +2551,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 	VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
 	int nr_roots;
 	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);
-	for (int i = 0; i < nr_roots; i++) {
+	for (int i = 0; !timed_out && i < nr_roots; i++) {
 		VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
 		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
 		trimCFG(storeCFG.get(), is, 20, false);
@@ -2576,7 +2576,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 	int cntr = 0;
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
-	     it != previousInstructions.end();
+	     !timed_out && it != previousInstructions.end();
 	     it++) {
 		printf("Investigating %lx...\n", *it);
 		LibVEX_maybe_gc(token);
@@ -2668,7 +2668,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		getConflictingStoreClusters(sm, oracle, conflictClusters);
 
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
-		     it != conflictClusters.end();
+		     !timed_out && it != conflictClusters.end();
 		     it++) {
 			printf("\t\tCluster:");
 			for (std::set<unsigned long>::iterator it2 = it->rips.begin();

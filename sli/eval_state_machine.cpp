@@ -749,6 +749,9 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
 	do {
+		if (timed_out)
+			return false;
+
 		LibVEX_maybe_gc(token);
 
 		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;

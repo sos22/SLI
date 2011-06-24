@@ -1316,4 +1316,8 @@ void HandleMallocFree(Thread *thr, AddressSpace *as);
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
 #define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
 
+/* Set by the SIGALRM (or whatever) signal handler when it wants us to
+   finish what we're doing and get out quickly. */
+extern volatile bool timed_out;
+
 #endif /* !SLI_H__ */
