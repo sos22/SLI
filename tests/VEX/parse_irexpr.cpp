@@ -29,9 +29,10 @@ main(int argc, char *argv[])
 	LibVEX_Init(failure_exit, log_bytes, 0, 0, &vcon);
 
 	const char *s;
+	char *err;
 
-	if (!parseIRExpr(&ir, argv[1], &s))
-		errx(1, "parsing %s as IR expression", argv[1]);
+	if (!parseIRExpr(&ir, argv[1], &s, &err))
+		errx(1, "parsing %s as IR expression: %s", argv[1], err);
 	printf("Suffix: %s\n", s);
 	ppIRExpr(ir, stdout);
 	printf("\n");

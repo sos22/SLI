@@ -1198,7 +1198,7 @@ extern IRExpr* deepCopyIRExpr ( IRExpr* );
 
 /* Pretty-print an IRExpr. */
 extern void ppIRExpr ( IRExpr*, FILE *f );
-extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix);
+extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err);
 
 /* NULL-terminated IRExpr vector constructors, suitable for
    use as arg lists in clean/dirty helper calls. */

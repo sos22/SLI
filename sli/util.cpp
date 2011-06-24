@@ -52,29 +52,6 @@ init_sli(void)
 	signal(SIGUSR1, handle_sigusr1);
 }
 
-/* Like my_asprintf, but allocate from the VEX GC-able heap. */
-char *
-vex_vasprintf(const char *fmt, va_list args)
-{
-	char *r;
-	int x = vasprintf(&r, fmt, args);
-
-	char *r2 = (char *)LibVEX_Alloc_Bytes(x + 1);
-	memcpy(r2, r, x + 1);
-	free(r);
-	return r2;
-}
-char *
-vex_asprintf(const char *fmt, ...)
-{
-	va_list args;
-	char *r;
-	va_start(args, fmt);
-	r = vex_vasprintf(fmt, args);
-	va_end(args);
-	return r;
-}
-
 template <> unsigned long
 __default_hash_function(const unsigned long &key)
 {
@@ -111,11 +88,12 @@ readIRExpr(int fd)
 	char *buf = readfile(fd);
 	IRExpr *r;
 	const char *succ;
-	if (!parseIRExpr(&r, buf, &succ))
-		errx(1, "cannot parse %s as IRExpr", buf);
-	parseThisChar(' ', succ, &succ);
+	char *err;
+	if (!parseIRExpr(&r, buf, &succ, &err))
+		errx(1, "cannot parse %s as IRExpr: %s", buf, err);
+	parseThisChar(' ', succ, &succ, &err);
 	if (*succ)
-		errx(1, "garbage after irexpr: %s", succ);
+		errx(1, "garbage after irexpr: %s (%s)", succ, err);
 	free(buf);
 	return r;
 }

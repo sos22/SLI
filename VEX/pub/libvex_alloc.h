@@ -244,5 +244,7 @@ public:
 };
 
 void LibVEX_alloc_sanity_check(Heap *h);
+char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
+char *vex_vasprintf(const char *fmt, va_list args);
 
 #endif /* !__LIBVEX_ALLOC_H */

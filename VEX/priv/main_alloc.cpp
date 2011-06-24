@@ -25,6 +25,7 @@
 
 #include <sys/mman.h>
 #include <err.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
@@ -678,3 +679,27 @@ __LibVEX_Alloc_Size(const void *ptr)
 	assert(h->magic == ALLOCATION_HEADER_MAGIC);
 	return h->size() - sizeof(*h);
 }
+
+/* Like my_asprintf, but allocate from the VEX GC-able heap. */
+char *
+vex_vasprintf(const char *fmt, va_list args)
+{
+	char *r;
+	int x = vasprintf(&r, fmt, args);
+
+	char *r2 = (char *)LibVEX_Alloc_Bytes(x + 1);
+	memcpy(r2, r, x + 1);
+	free(r);
+	return r2;
+}
+char *
+vex_asprintf(const char *fmt, ...)
+{
+	va_list args;
+	char *r;
+	va_start(args, fmt);
+	r = vex_vasprintf(fmt, args);
+	va_end(args);
+	return r;
+}
+
