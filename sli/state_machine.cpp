@@ -56,7 +56,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 			if (trueTarget == falseBifur->trueTarget) {
 				falseTarget = falseBifur->falseTarget;
 				condition = IRExpr_Binop(
-					Iop_And1,
+					Iop_Or1,
 					condition,
 					falseBifur->condition);
 				*done_something = true;
@@ -78,7 +78,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 			if (falseTarget == trueBifur->falseTarget) {
 				trueTarget = trueBifur->trueTarget;
 				condition = IRExpr_Binop(
-					Iop_Or1,
+					Iop_And1,
 					condition,
 					trueBifur->condition);
 				*done_something = true;
