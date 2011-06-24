@@ -656,20 +656,23 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
    possible. */
 IRExpr *
 writeMachineSuitabilityConstraint(
-	StateMachine *readMachine,
-	StateMachine *writeMachine,
-	IRExpr *assumption,
-	Oracle *oracle)
+	VexPtr<StateMachine, &ir_heap> &readMachine,
+	VexPtr<StateMachine, &ir_heap> &writeMachine,
+	VexPtr<IRExpr, &ir_heap> &assumption,
+	VexPtr<Oracle> &oracle,
+	GarbageCollectionToken token)
 {
 	printf("\t\tBuilding write machine suitability constraint.\n");
-	IRExpr *rewrittenAssumption = assumption;
+	VexPtr<IRExpr, &ir_heap> rewrittenAssumption(assumption);
 	NdChooser chooser;
-	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
+	VexPtr<StateMachineEdge> writeStartEdge(new StateMachineEdge(writeMachine));
 	do {
 		if (timed_out) {
 			printf("%s timed out\n", __func__);
 			return NULL;
 		}
+
+		LibVEX_maybe_gc(token);
 
 		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;

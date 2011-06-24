@@ -2494,7 +2494,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		return;
 	}
 
-	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle);
+	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle, token);
 	if (!assumption)
 		return;
 

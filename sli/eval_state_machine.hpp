@@ -45,10 +45,12 @@ bool evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracl
 				VexPtr<IRExpr, &ir_heap> assumption,
 				bool *mightSurvive, bool *mightCrash,
 				GarbageCollectionToken token);
-IRExpr *writeMachineSuitabilityConstraint(StateMachine *readMachine,
-					  StateMachine *writeMachine,
-					  IRExpr *assumption,
-					  Oracle *oracle);
+IRExpr *writeMachineSuitabilityConstraint(
+	VexPtr<StateMachine, &ir_heap> &readMachine,
+	VexPtr<StateMachine, &ir_heap> &writeMachine,
+	VexPtr<IRExpr, &ir_heap> &assumption,
+	VexPtr<Oracle> &oracle,
+	GarbageCollectionToken token);
 bool evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 			     VexPtr<StateMachine, &ir_heap> &sm2,
 			     VexPtr<Oracle> &oracle,
