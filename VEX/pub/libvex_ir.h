@@ -448,6 +448,8 @@ typedef
 
       /* -- Ordering not important after here. -- */
 
+      Iop_CC_OverflowSub,
+
       /* Widening multiplies */
       Iop_MullS8, Iop_MullS16, Iop_MullS32, Iop_MullS64,
       Iop_MullU8, Iop_MullU16, Iop_MullU32, Iop_MullU64,

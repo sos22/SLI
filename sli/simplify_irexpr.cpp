@@ -190,40 +190,10 @@ optimise_condition_calculation(
 			Iop_CmpLT64S,
 			dep1,
 			dep2);
-		{
-			IRExpr *c = IRExpr_Const(IRConst_U64(0));
-			IRExpr *c1, *c2, *c3, *t;
-			t = IRExpr_Binop(
-				Iop_Sub64,
-				dep1,
-				dep2);
-			c1 = IRExpr_Binop(
-				Iop_CmpLT64S,
-				dep1,
-				c);
-			c2 = IRExpr_Binop(
-				Iop_CmpLT64S,
-				dep2,
-				c);
-			c3 = IRExpr_Binop(
-				Iop_CmpLT64S,
-				t,
-				c);
-			of = IRExpr_Binop(
-				Iop_Or1,
-				IRExpr_Associative(
-					Iop_And1,
-					IRExpr_Unop(Iop_Not1, c1),
-					c2,
-					c3,
-					NULL),
-				IRExpr_Associative(
-					Iop_And1,
-					c1,
-					IRExpr_Unop(Iop_Not1, c2),
-					IRExpr_Unop(Iop_Not1, c3),
-					NULL));
-		}
+		of = IRExpr_Binop(
+			Iop_CC_OverflowSub,
+			dep1,
+			dep2);
 		break;
 	case AMD64G_CC_OP_LOGICB:
 	case AMD64G_CC_OP_LOGICL:

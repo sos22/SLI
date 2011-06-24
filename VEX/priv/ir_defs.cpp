@@ -474,6 +474,7 @@ static bool parseIRTemp(IRTemp *res, const char *str, const char **suffix)
 	     iter(Or1)				\
 	     iter(Xor1)				\
 	     iter(BadPtr)			\
+	     iter(CC_OverflowSub)		\
 						\
 	     iter(MullS8)			\
 	     iter(MullS16)			\
