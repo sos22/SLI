@@ -219,6 +219,7 @@ top:
 		case 0x90 ... 0x9f: /* setcc Eb */
 		case 0xaf: /* imul Gv, Ev */
 		case 0xb6: /* movzx Gv, Eb */
+		case 0xb7: /* movzw Gv, Ew */
 			i->modrm(0);
 			break;
 		default:
