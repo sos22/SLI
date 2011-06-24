@@ -1198,6 +1198,12 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	do {
 		progress = false;
 
+		if (timed_out) {
+			/* Give up */
+			printf("%s timed out\n", __func__);
+			return sm;
+		}
+
 		/* Update the set of things which are available on
 		   entry.  This means walking the set of edges and
 		   looking at the targets.  If there's something which

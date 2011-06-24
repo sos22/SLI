@@ -107,7 +107,7 @@ main(int argc, char *argv[])
 		struct timeval start;
 
 		memset(&itv, 0, sizeof(itv));
-		itv.it_value.tv_sec = 5;
+		itv.it_value.tv_sec = 120;
 		setitimer(ITIMER_VIRTUAL, &itv, NULL);
 
 		gettimeofday(&start, NULL);
