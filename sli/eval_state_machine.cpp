@@ -587,7 +587,7 @@ top:
  * machines, and every possible aliasing pattern.  Set *mightSurvive
  * to true if any run caused sm1 to reach a NoCrash state, otherwise
  * set it to false; likewise *mightCrash for Crash states. */
-void
+bool
 evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 			VexPtr<StateMachine, &ir_heap> &sm2,
 			VexPtr<Oracle> &oracle,
@@ -604,6 +604,11 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 	VexPtr<StateMachineEdge, &ir_heap> sme1(new StateMachineEdge(sm1));
 	VexPtr<StateMachineEdge, &ir_heap> sme2(new StateMachineEdge(sm2));
 	while (!*mightCrash || !*mightSurvive) {
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return false;
+		}
+
 		LibVEX_maybe_gc(token);
 
 		CrossMachineEvalContext ctxt;
@@ -641,6 +646,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 		if (!chooser.advance())
 			break;
 	}
+
+	return true;
 }
 
 /* Running the store machine atomically and then runing the probe
@@ -659,6 +666,11 @@ writeMachineSuitabilityConstraint(
 	NdChooser chooser;
 	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
 	do {
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return NULL;
+		}
+
 		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;
 		StateMachineEdge *writerEdge;
@@ -909,6 +921,11 @@ fixSufficient(StateMachine *writeMachine,
 	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
 
 	do {
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return false;
+		}
+
 		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;
 		StateMachineEdge *writerEdge;

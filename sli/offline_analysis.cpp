@@ -2496,13 +2496,16 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	   and see if it might lead to a crash. */
 	bool mightSurvive;
 	bool mightCrash;
-	evalCrossProductMachine(probeMachine,
-				sm,
-				oracle,
-				assumption,
-				&mightSurvive,
-				&mightCrash,
-				token);
+	if (!evalCrossProductMachine(probeMachine,
+				     sm,
+				     oracle,
+				     assumption,
+				     &mightSurvive,
+				     &mightCrash,
+				     token)) {
+		printf("Failed to run cross product machine\n");
+		return;
+	}
 	printf("\t\tRun in parallel with the probe machine, might survive %d, might crash %d\n",
 	       mightSurvive, mightCrash);
 	

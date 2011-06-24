@@ -49,7 +49,7 @@ IRExpr *writeMachineSuitabilityConstraint(StateMachine *readMachine,
 					  StateMachine *writeMachine,
 					  IRExpr *assumption,
 					  Oracle *oracle);
-void evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
+bool evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 			     VexPtr<StateMachine, &ir_heap> &sm2,
 			     VexPtr<Oracle> &oracle,
 			     VexPtr<IRExpr, &ir_heap> &initialStateCondition,
