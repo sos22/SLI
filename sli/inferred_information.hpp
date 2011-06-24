@@ -109,6 +109,7 @@ void considerInstructionSequence(std::vector<unsigned long> &previousInstruction
 				 unsigned long interestingRip,
 				 VexPtr<MachineState> &ms,
 				 FixConsumer &haveAFix,
+				 bool considerEverything,
 				 GarbageCollectionToken token);
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

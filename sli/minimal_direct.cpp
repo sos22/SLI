@@ -80,7 +80,7 @@ main(int argc, char *argv[])
 		std::vector<unsigned long> previousInstructions;
 		oracle->findPreviousInstructions(previousInstructions, my_rip);
 
-		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, ALLOW_GC);
+		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, false, ALLOW_GC);
 	}
 
 	df.finish();

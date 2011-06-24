@@ -2659,9 +2659,11 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			    unsigned long interestingRip,
 			    VexPtr<MachineState> &ms,
 			    FixConsumer &haveAFix,
+			    bool considerEverything,
 			    GarbageCollectionToken token)
 {
 	VexPtr<StateMachineSet, &ir_heap> readMachinesChecked(new StateMachineSet());
+	int cntr = 0;
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     it != previousInstructions.end();
@@ -2699,6 +2701,18 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					      opt,
 					      oracle,
 					      false);
+
+		/* Most instructions produce basically the same
+		   machine as their neighbours, so it's a bit of a
+		   waste of time to consider all of them.  Instead, we
+		   only consider one in fifty.  We always include the
+		   machine for the earliest instruction we have,
+		   because that's most likely to produce interesting
+		   machines. */
+		cntr++;
+		if (cntr < 50 && !considerEverything && it != previousInstructions.end() - 1)
+			continue;
+		cntr = 0;
 
 		if (readMachinesChecked->hasKey(cr->sm)) {
 			printf("\tAlready investigated that one...\n");

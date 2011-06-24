@@ -77,6 +77,7 @@ main(int argc, char *argv[])
 				    proximal->rip.rip,
 				    ms,
 				    df,
+				    true,
 				    ALLOW_GC);
 
 	return 0;
