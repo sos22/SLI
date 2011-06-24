@@ -1620,9 +1620,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 	/* Now use some special rules to simplify a few classes of binops and unops. */
 	if (src->tag == Iex_Unop) {
 		if (src->Iex.Unop.op == Iop_64to1 &&
-		    src->Iex.Unop.arg->tag == Iex_Binop &&
-		    (src->Iex.Unop.arg->Iex.Binop.op == Iop_CmpEQ64 ||
-		     src->Iex.Unop.arg->Iex.Binop.op == Iop_CmpEQ32)) {
+		    ((src->Iex.Unop.arg->tag == Iex_Associative &&
+		      (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
+		       src->Iex.Unop.arg->Iex.Associative.op == Iop_Or1)) ||
+		     (src->Iex.Unop.arg->tag == Iex_Binop &&
+		      ((src->Iex.Unop.arg->Iex.Binop.op >= Iop_CmpEQ8 &&
+			src->Iex.Unop.arg->Iex.Binop.op <= Iop_CmpNE64) ||
+		       (src->Iex.Unop.arg->Iex.Binop.op >= Iop_CmpLT32S &&
+			src->Iex.Unop.arg->Iex.Binop.op <= Iop_CmpLE64U))))) {
 			/* This can happen sometimes because of the
 			   way we simplify condition codes.  Very easy
 			   fix: strip off the outer 64to1. */
@@ -1670,6 +1675,22 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			*done_something = true;
 			return a;
 		}
+		if (src->Iex.Unop.op == Iop_BadPtr &&
+		    src->Iex.Unop.arg->tag == Iex_Associative &&
+		    src->Iex.Unop.arg->Iex.Associative.op == Iop_Add64 &&
+		    src->Iex.Unop.arg->Iex.Associative.nr_arguments == 2 &&
+		    src->Iex.Unop.arg->Iex.Associative.contents[0]->tag == Iex_Const) {
+			/* BadPtr(k + x) -> BadPtr(x) if k is a
+			 * constant.  That's not strictly speaking
+			 * true, because it's always possible that k
+			 * is enough to push you over the boundary
+			 * between valid and invalid memory, but
+			 * that's so rare that I'm willing to ignore
+			 * it. */
+			*done_something = true;
+			src->Iex.Unop.arg = src->Iex.Unop.arg->Iex.Associative.contents[0];
+			return src;
+		}
 		if (src->Iex.Unop.arg->tag == Iex_Const) {
 			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;
 			switch (src->Iex.Unop.op) {
@@ -1703,6 +1724,20 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			case Iop_64to32:
 				*done_something = true;
 				return IRExpr_Const(IRConst_U32(c->Ico.U64));
+			case Iop_BadPtr:
+				if (c->Ico.U64 < 4096) {
+					*done_something = true;
+					return IRExpr_Const(IRConst_U1(1));
+				}
+				/* Could sensibly just check that the
+				 * target address isn't mapped here,
+				 * on the assumption that anything not
+				 * in the binary won't have a fixed
+				 * address, but that then depends on
+				 * the machine state, and I don't want
+				 * to make optimiseIRExpr depend on
+				 * machine state just for that. */
+				break;
 			default:
 				break;
 			}
