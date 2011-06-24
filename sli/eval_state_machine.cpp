@@ -234,6 +234,16 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 {
 	if (StateMachineSideEffectStore *smses =
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+		IRExpr *v = IRExpr_Unop(Iop_Not1,
+					IRExpr_Unop(Iop_BadPtr, smses->addr));
+		*assumption = simplifyIRExpr(
+			IRExpr_Binop(Iop_And1, *assumption, v),
+			AllowableOptimisations::defaultOptimisations);
+		if (accumulatedAssumptions && *accumulatedAssumptions)
+			*accumulatedAssumptions =
+				simplifyIRExpr(
+					IRExpr_Binop(Iop_And1, *accumulatedAssumptions, v),
+					AllowableOptimisations::defaultOptimisations);
 		stores.push_back(
 			new StateMachineSideEffectStore(
 				specialiseIRExpr(smses->addr, binders),
@@ -243,6 +253,16 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 				);
 	} else if (StateMachineSideEffectLoad *smsel =
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+		IRExpr *v = IRExpr_Unop(Iop_Not1,
+					IRExpr_Unop(Iop_BadPtr, smsel->smsel_addr));
+		*assumption = simplifyIRExpr(
+			IRExpr_Binop(Iop_And1, *assumption, v),
+			AllowableOptimisations::defaultOptimisations);
+		if (accumulatedAssumptions && *accumulatedAssumptions)
+			*accumulatedAssumptions =
+				simplifyIRExpr(
+					IRExpr_Binop(Iop_And1, *accumulatedAssumptions, v),
+					AllowableOptimisations::defaultOptimisations);
 		IRExpr *val;
 		val = NULL;
 		for (std::vector<StateMachineSideEffectStore *>::reverse_iterator it = stores.rbegin();
