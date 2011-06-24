@@ -1876,6 +1876,11 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 			assert(f == functionHeadForInstruction(*it));
 	}
 
+	if (!f) {
+		printf("Eh? can't find function which contains instructions which need to be dominated.\n");
+		return 0;
+	}
+
 	/* Find the dominator chains for each individual instruction,
 	   intersect them, and then take the last one. This is perhaps
 	   not the most efficient algorithm imaginable. */

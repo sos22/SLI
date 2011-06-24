@@ -831,6 +831,10 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	summary->loadMachine->enumerateMentionedMemoryAccesses(neededInstructions);
 	/* 5 bytes is the size of a 32-bit relative jump. */
 	unsigned long root = oracle->dominator(neededInstructions, as, 5);
+	if (!root) {
+		printf("Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
+		return NULL;
+	}
 	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
 	     it != summary->storeMachines.end();
 	     it++)
@@ -848,6 +852,10 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 		std::set<unsigned long> instrs;
 		(*it)->machine->enumerateMentionedMemoryAccesses(instrs);
 		unsigned long r = oracle->dominator(instrs, as, 5);
+		if (!r) {
+			printf("Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
+			return NULL;
+		}
 		cfg->add_root(r, 100);
 		roots.push_back(r);
 	}

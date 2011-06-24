@@ -29,7 +29,10 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 	printCrashSummary(summary, stdout);
 	char *fragment = buildPatchForCrashSummary(oracle, summary,
 						   vex_asprintf("patch%d", cntr++));
-	fputs(fragment, output);
+	if (fragment)
+		fputs(fragment, output);
+	else
+		printf("No patch generated!\n");
 }
 
 void
@@ -92,7 +95,7 @@ main(int argc, char *argv[])
 		struct timeval start;
 
 		memset(&itv, 0, sizeof(itv));
-		itv.it_value.tv_sec = 120;
+		itv.it_value.tv_sec = 5;
 		setitimer(ITIMER_VIRTUAL, &itv, NULL);
 
 		gettimeofday(&start, NULL);
