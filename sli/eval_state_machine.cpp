@@ -299,6 +299,16 @@ evalStateMachineEdge(StateMachineEdge *sme,
 		evalStateMachineSideEffect(*it, chooser, oracle, ctxt.binders,
 					   ctxt.stores, &ctxt.pathConstraint,
 					   &ctxt.justPathConstraint);
+	if (ctxt.pathConstraint->tag == Iex_Const &&
+	    ctxt.pathConstraint->Iex.Const.con->Ico.U1 == 0) {
+		/* We've found a contradiction.  That means that the
+		   original program would have crashed, *but* in a way
+		   other than the one which we're investigating.  We
+		   therefore treat that as no-crash and abort the
+		   run. */
+		*crashes = false;
+		return;
+	}
 	evalStateMachine(sme->target, crashes, chooser, oracle, ctxt);
 }
 
