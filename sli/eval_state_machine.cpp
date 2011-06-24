@@ -665,7 +665,7 @@ writeMachineSuitabilityConstraint(
 	printf("\t\tBuilding write machine suitability constraint.\n");
 	VexPtr<IRExpr, &ir_heap> rewrittenAssumption(assumption);
 	NdChooser chooser;
-	VexPtr<StateMachineEdge> writeStartEdge(new StateMachineEdge(writeMachine));
+	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
 	do {
 		if (timed_out) {
 			printf("%s timed out\n", __func__);
