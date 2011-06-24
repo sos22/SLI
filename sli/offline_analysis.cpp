@@ -70,10 +70,9 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 		return new CrashReason(VexRip(rip, irsb->stmts_used),
 				       new StateMachineBifurcate(
 					       rip,
-					       IRExpr_Binop(
-						       Iop_CmpEQ64,
-						       irsb->next,
-						       IRExpr_Const(IRConst_U64(0))),
+					       IRExpr_Unop(
+						       Iop_BadPtr,
+						       irsb->next),
 					       StateMachineCrash::get(),
 					       StateMachineNoCrash::get()));
 	}
@@ -143,10 +142,9 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 			return new CrashReason(VexRip(rip, x),
 					       new StateMachineBifurcate(
 						       rip,
-						       IRExpr_Binop(
-							       Iop_CmpEQ64,
-							       addr,
-							       IRExpr_Const(IRConst_U64(se->virtaddr))),
+						       IRExpr_Unop(
+							       Iop_BadPtr,
+							       addr),
 						       StateMachineCrash::get(),
 						       StateMachineNoCrash::get()));
 		}
@@ -2698,18 +2696,18 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 
 		printf("\tComputed state machine.\n");
 
-		if (readMachinesChecked->hasKey(cr->sm)) {
-			printf("\tAlready investigated that one...\n");
-			continue;
-		}
-		readMachinesChecked->set(cr->sm, true);
-
 		cr->sm = cr->sm->selectSingleCrashingPath();
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
 					      opt,
 					      oracle,
 					      false);
+
+		if (readMachinesChecked->hasKey(cr->sm)) {
+			printf("\tAlready investigated that one...\n");
+			continue;
+		}
+		readMachinesChecked->set(cr->sm, true);
 
 		VexPtr<StateMachine, &ir_heap> sm(cr->sm);
 		sm = optimiseStateMachine(cr->sm,

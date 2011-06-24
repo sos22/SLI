@@ -473,6 +473,7 @@ static bool parseIRTemp(IRTemp *res, const char *str, const char **suffix)
 	     iter(And1)				\
 	     iter(Or1)				\
 	     iter(Xor1)				\
+	     iter(BadPtr)			\
 						\
 	     iter(MullS8)			\
 	     iter(MullS16)			\
@@ -887,7 +888,7 @@ void ppIROp ( IROp op, FILE* f )
 
       /* other cases must explicitly "return;" */
 #define do_op(name) case Iop_ ## name: fprintf(f, #name); return;
-	 foreach_op_unsized(do_op)
+     foreach_op_unsized(do_op)
 #undef do_op
 
       default: vpanic("ppIROp(1)");
@@ -2582,6 +2583,8 @@ void typeOfPrimop ( IROp op,
       case Iop_1Sto64: case Iop_1Uto64: UNARY(Ity_I1, Ity_I64);
       case Iop_32to1:  UNARY(Ity_I32, Ity_I1);
       case Iop_64to1:  UNARY(Ity_I64, Ity_I1);
+      case Iop_And1: case Iop_Or1: case Iop_Xor1: BINARY(Ity_I1, Ity_I1, Ity_I1);
+      case Iop_BadPtr: UNARY(Ity_I1, Ity_I64);
 
       case Iop_8Uto32: case Iop_8Sto32:
          UNARY(Ity_I8, Ity_I32);
