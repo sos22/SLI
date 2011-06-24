@@ -2638,9 +2638,6 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 {
 	LibVEX_maybe_gc(token);
 
-	if (is.rips.size() != 3)
-		return;
-
 	VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
 	int nr_roots;
 	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);
