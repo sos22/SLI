@@ -41,7 +41,7 @@ public:
 IRExpr *survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					       VexPtr<Oracle> &oracle,
 					       GarbageCollectionToken token);
-void evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &oracle,
+bool evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &oracle,
 				VexPtr<IRExpr, &ir_heap> assumption,
 				bool *mightSurvive, bool *mightCrash,
 				GarbageCollectionToken token);

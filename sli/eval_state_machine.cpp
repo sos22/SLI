@@ -362,6 +362,9 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	bool crashes;
 
 	do {
+		if (timed_out)
+			return NULL;
+
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
@@ -390,7 +393,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	return currentConstraint;
 }
 
-void
+bool
 evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &oracle,
 			   VexPtr<IRExpr, &ir_heap> assumption,
 			   bool *mightSurvive, bool *mightCrash,
@@ -402,6 +405,8 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 	*mightSurvive = false;
 	*mightCrash = false;
 	while (!*mightCrash || !*mightSurvive) {
+		if (timed_out)
+			return false;
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = assumption;
@@ -413,6 +418,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 		if (!chooser.advance())
 			break;
 	}
+	return true;
 }
 
 class CrossEvalState {

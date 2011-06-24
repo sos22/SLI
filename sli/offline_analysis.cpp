@@ -2640,6 +2640,10 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		VexPtr<IRExpr, &ir_heap> survive(
 			survivalConstraintIfExecutedAtomically(sm, oracle, token));
 
+		if (!survive) {
+			printf("\tTimed out computing survival constraint\n");
+			continue;
+		}
 		survive = simplifyIRExpr(survive, opt);
 
 		printf("\tComputed survival constraint\n");
@@ -2651,7 +2655,10 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		   doomed and it's not possible to fix it from this
 		   point. */
 		bool mightSurvive, mightCrash;
-		evalMachineUnderAssumption(sm, oracle, survive, &mightSurvive, &mightCrash, token);
+		if (!evalMachineUnderAssumption(sm, oracle, survive, &mightSurvive, &mightCrash, token)) {
+			printf("Timed out sanity checking machine survival constraint\n");
+			continue;
+		}
 
 		if (!mightSurvive) {
 			printf("\tCan never survive...\n");
