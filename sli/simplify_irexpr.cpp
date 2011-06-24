@@ -1415,6 +1415,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				case Iop_And32:
 					res = IRExpr_Const(IRConst_U32(l->Ico.U32 & r->Ico.U32));
 					break;
+				case Iop_Or32:
+					res = IRExpr_Const(IRConst_U32(l->Ico.U32 | r->Ico.U32));
+					break;
 				case Iop_And64:
 					res = IRExpr_Const(IRConst_U64(l->Ico.U64 & r->Ico.U64));
 					break;
