@@ -861,8 +861,15 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 		cfg->add_root(r, 100);
 		roots.push_back(r);
 	}
-	cfg->doit();
-
+	try {
+		cfg->doit();
+	} catch (NotImplementedException &e) {
+		/* This means that there's some instruction we can't
+		   decode.  Dump a diagnostic and just continue on. */
+		printf("Cannot build patch for crash summary.  Instruction decoder said %s\n",
+		       e.what());
+		return NULL;
+	}
 	PatchFragment *pf = new PatchFragment();
 	pf->fromCFG(cfg);
 
