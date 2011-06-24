@@ -214,6 +214,7 @@ top:
 			   the same size as the input one. */
 			break;
 
+		case 0x40 ... 0x4f: /* CMOVcc Gv,Ev */
 		case 0x90 ... 0x9f: /* setcc Eb */
 		case 0xaf: /* imul Gv, Ev */
 		case 0xb6: /* movzx Gv, Eb */
