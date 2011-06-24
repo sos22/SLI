@@ -1431,11 +1431,12 @@ static bool
 edgesLocallyBisimilar(StateMachineEdge *sme1,
 		      StateMachineEdge *sme2,
 		      const std::set<st_pair_t> &states,
-		      const std::set<st_edge_pair_t> &edges,
 		      const AllowableOptimisations &opt)
 {
 	if (sme1->sideEffects.size() !=
 	    sme2->sideEffects.size())
+		return false;
+	if (!states.count(st_pair_t(sme1->target, sme2->target)))
 		return false;
 	for (unsigned x = 0; x < sme1->sideEffects.size(); x++) {
 		if (!sideEffectsBisimilar(sme1->sideEffects[x],
@@ -1443,36 +1444,13 @@ edgesLocallyBisimilar(StateMachineEdge *sme1,
 					  opt))
 			return false;
 	}
-	if (states.count(st_pair_t(sme1->target, sme2->target)))
-		return true;
-	else
-		return false;
-}
-
-static bool
-hasDisallowedSideEffects(StateMachineEdge *sme,
-			 const AllowableOptimisations &opt)
-{
-	if (opt.ignoreSideEffects)
-		return false;
-	for (std::vector<StateMachineSideEffect *>::iterator sideEffect =
-		     sme->sideEffects.begin();
-	     sideEffect != sme->sideEffects.end();
-	     sideEffect++) {
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(*sideEffect)) {
-			if (!opt.ignoreStore(smses->rip))
-				return true;
-		}
-	}
-	return false;
+	return true;
 }
 
 static bool
 statesLocallyBisimilar(StateMachine *sm1,
 		       StateMachine *sm2,
 		       const std::set<st_edge_pair_t> &edges,
-		       const std::set<st_pair_t> &others,
 		       const AllowableOptimisations &opt)
 {
 	/* Sort our arguments by type.  Ordering is:
@@ -1508,39 +1486,12 @@ statesLocallyBisimilar(StateMachine *sm1,
 		}
 	}
 	if (swapArgs)
-		return statesLocallyBisimilar(sm2, sm1, edges, others, opt);
+		return statesLocallyBisimilar(sm2, sm1, edges, opt);
 
 	if (dynamic_cast<StateMachineCrash *>(sm1)) {
 		if (dynamic_cast<StateMachineCrash *>(sm2)) {
 			return true;
-		} else if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
-			return false;
-		} else if (dynamic_cast<StateMachineUnreached *>(sm2)) {
-			return false;
-		} else if (StateMachineProxy *smp =
-			   dynamic_cast<StateMachineProxy *>(sm2)) {
-			/* We're locally bisimilar to a proxy if the
-			   proxy's target is bisimilar to us and the
-			   proxy has no disallowed side effects. */
-			if (!hasDisallowedSideEffects(smp->target, opt) &&
-			    others.count(st_pair_t(sm1, smp->target->target)))
-				return true;
-			else
-				return false;
-		} else if (StateMachineBifurcate *smb =
-			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
-			/* Likewise, we're similar to a proxy if it
-			   has no disallowed side-effects and both
-			   targets are crash nodes. */
-			if (!hasDisallowedSideEffects(smb->trueTarget, opt) &&
-			    others.count(st_pair_t(sm1, smb->trueTarget->target)) &&
-			    !hasDisallowedSideEffects(smb->falseTarget, opt) &&
-			    others.count(st_pair_t(sm1, smb->falseTarget->target)))
-				return true;
-			else
-				return false;
 		} else {
-			assert(dynamic_cast<StateMachineStub *>(sm2));
 			return false;
 		}
 	}
@@ -1548,51 +1499,15 @@ statesLocallyBisimilar(StateMachine *sm1,
 	if (dynamic_cast<StateMachineNoCrash *>(sm1)) {
 		if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
 			return true;
-		} else if (dynamic_cast<StateMachineUnreached *>(sm2)) {
-			return false;
-		} else if (StateMachineProxy *smp =
-			   dynamic_cast<StateMachineProxy *>(sm2)) {
-			if (!hasDisallowedSideEffects(smp->target, opt) &&
-			    others.count(st_pair_t(sm1, smp->target->target)))
-				return true;
-			else
-				return false;
-		} else if (StateMachineBifurcate *smb =
-			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
-			if (!hasDisallowedSideEffects(smb->trueTarget, opt) &&
-			    others.count(st_pair_t(sm1, smb->trueTarget->target)) &&
-			    !hasDisallowedSideEffects(smb->falseTarget, opt) &&
-			    others.count(st_pair_t(sm1, smb->falseTarget->target)))
-				return true;
-			else
-				return false;
 		} else {
-			assert(dynamic_cast<StateMachineStub *>(sm2));
 			return false;
 		}
 	}
 
 	if (dynamic_cast<StateMachineUnreached *>(sm1)) {
-		/* We ignore side effects for unreached states: since
-		   we never go down here, any side effects are
-		   completely irrelevant. */
 		if (dynamic_cast<StateMachineUnreached *>(sm2)) {
 			return true;
-		} else if (StateMachineProxy *smp =
-			   dynamic_cast<StateMachineProxy *>(sm2)) {
-			if (others.count(st_pair_t(sm1, smp->target->target)))
-				return true;
-			else
-				return false;
-		} else if (StateMachineBifurcate *smb =
-			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
-			if (others.count(st_pair_t(sm1, smb->trueTarget->target)) &&
-			    others.count(st_pair_t(sm1, smb->falseTarget->target)))
-				return true;
-			else
-				return false;
 		} else {
-			assert(dynamic_cast<StateMachineStub *>(sm2));
 			return false;
 		}
 	}
@@ -1608,30 +1523,9 @@ statesLocallyBisimilar(StateMachine *sm1,
 	    dynamic_cast<StateMachineProxy *>(sm1)) {
 		if (StateMachineProxy *smp2 =
 		    dynamic_cast<StateMachineProxy *>(sm2)) {
-			return edges.count(st_edge_pair_t(smp1->target, smp2->target)) ||
-				edgesLocallyBisimilar(smp1->target,
-						      smp2->target,
-						      others,
-						      edges,
-						      opt);
-		} else if (StateMachineBifurcate *smb2 =
-			   dynamic_cast<StateMachineBifurcate *>(sm2)) {
-			return (edges.count(st_edge_pair_t(smp1->target,
-							   smb2->trueTarget)) ||
-				edgesLocallyBisimilar(smp1->target,
-						      smb2->trueTarget,
-						      others,
-						      edges,
-						      opt)) &&
-				(edges.count(st_edge_pair_t(smp1->target,
-							    smb2->falseTarget)) ||
-				 edgesLocallyBisimilar(smp1->target,
-						       smb2->falseTarget,
-						       others,
-						       edges,
-						       opt));
+			return edges.count(st_edge_pair_t(smp1->target, smp2->target));
 		} else {
-			abort();
+			return false;
 		}
 	}
 
@@ -1641,11 +1535,8 @@ statesLocallyBisimilar(StateMachine *sm1,
 		dynamic_cast<StateMachineBifurcate *>(sm2);
 	assert(smb1);
 	assert(smb2);
-	return
-		(edges.count(st_edge_pair_t(smb1->trueTarget, smb2->trueTarget)) ||
-		 edgesLocallyBisimilar(smb1->trueTarget, smb2->trueTarget, others, edges, opt)) &&
-		(edges.count(st_edge_pair_t(smb1->falseTarget, smb2->falseTarget)) ||
-		 edgesLocallyBisimilar(smb1->falseTarget, smb2->falseTarget, others, edges, opt)) &&
+	return edges.count(st_edge_pair_t(smb1->trueTarget, smb2->trueTarget)) &&
+		edges.count(st_edge_pair_t(smb1->falseTarget, smb2->falseTarget)) &&
 		definitelyEqual(smb1->condition, smb2->condition, opt);
 }
 
@@ -1699,7 +1590,7 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 		for (std::set<st_pair_t>::iterator it = bisimilarStates.begin();
 		     it != bisimilarStates.end();
 			) {
-			if (statesLocallyBisimilar(it->first, it->second, bisimilarEdges, bisimilarStates, opt)) {
+			if (statesLocallyBisimilar(it->first, it->second, bisimilarEdges, opt)) {
 				it++;
 			} else {
 				bisimilarStates.erase(it++);
@@ -1709,7 +1600,7 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 		for (std::set<st_edge_pair_t>::iterator it = bisimilarEdges.begin();
 		     it != bisimilarEdges.end();
 			) {
-			if (edgesLocallyBisimilar(it->first, it->second, bisimilarStates, bisimilarEdges, opt)) {
+			if (edgesLocallyBisimilar(it->first, it->second, bisimilarStates, opt)) {
 				it++;
 			} else {
 				bisimilarEdges.erase(it++);
