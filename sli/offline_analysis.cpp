@@ -2517,7 +2517,15 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
 		if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
 			break;
-	if (cfg->fallThrough || !cfg->branch) {
+	if (irsb->jumpkind == Ijk_Call && endOfInstr == irsb->stmts_used) {
+		/* Hackety hackety hack: we assume call instructions
+		   are no-ops.  That means we need to avoid adjusting
+		   the stack or pushing a return address if this is
+		   the last instruction before the end of the IRSB. */
+		/* Yep, we need to discard this instruction. */
+		assert(cfg->fallThrough);
+		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo);
+	} else if (cfg->fallThrough || !cfg->branch) {
 		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo);
 		int idx = endOfInstr;
 		while (idx != 0) {
