@@ -1658,7 +1658,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			 * that's so rare that I'm willing to ignore
 			 * it. */
 			*done_something = true;
-			src->Iex.Unop.arg = src->Iex.Unop.arg->Iex.Associative.contents[0];
+			src->Iex.Unop.arg = src->Iex.Unop.arg->Iex.Associative.contents[1];
 			return src;
 		}
 		if (src->Iex.Unop.arg->tag == Iex_Const) {
