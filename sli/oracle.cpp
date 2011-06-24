@@ -192,11 +192,10 @@ Oracle::loadIsThreadLocal(StateMachineSideEffectLoad *s)
 	return true;
 }
 
-unsigned long
-Oracle::selectRandomLoad() const
+void
+Oracle::getAllPossiblyRacingLoads(std::vector<unsigned long> &out) const
 {
 	std::set<unsigned long> allRelevantLoads;
-	unsigned idx;
 	
 	for (std::vector<tag_entry>::const_iterator it = tag_table.begin();
 	     it != tag_table.end();
@@ -208,14 +207,10 @@ Oracle::selectRandomLoad() const
 			     it2++)
 				allRelevantLoads.insert(*it2);
 		}
-	idx = random() % allRelevantLoads.size();
-	std::set<unsigned long>::iterator it = allRelevantLoads.begin();
-	while (idx) {
-		assert(it != allRelevantLoads.end());
-		it++;
-		idx--;
-	}
-	return *it;
+	for (std::set<unsigned long>::iterator it = allRelevantLoads.begin();
+	     it != allRelevantLoads.end();
+	     it++)
+		out.push_back(*it);
 }
 
 bool

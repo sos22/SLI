@@ -50,6 +50,17 @@ timer_handler(int ignore)
 	timed_out = true;
 }
 
+static void
+shuffle(std::vector<unsigned long> &vect)
+{
+	for (unsigned x = 0; x < vect.size(); x++) {
+		unsigned idx = (random() % (vect.size() - x)) + x;
+		unsigned long t = vect[x];
+		vect[x] = vect[idx];
+		vect[idx] = t;
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -64,19 +75,20 @@ main(int argc, char *argv[])
 	oracle = new Oracle(ms, thr, argv[2]);
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
-	std::set<unsigned long> examined_loads;
-
 	FILE *output = fopen("generated_patch.c", "w");
 	FILE *timings = fopen("timings.txt", "w");
 	DumpFix df(oracle, output);
-	for (int cntr = 0; 1; cntr++) {
+	std::vector<unsigned long> possiblyRacingLoads;
+
+	oracle->getAllPossiblyRacingLoads(possiblyRacingLoads);
+	shuffle(possiblyRacingLoads);
+	for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin();
+	     it != possiblyRacingLoads.end();
+	     it++) {
+		unsigned long my_rip = *it;
+
 		LibVEX_maybe_gc(ALLOW_GC);
 		
-		unsigned long my_rip = oracle->selectRandomLoad();
-		while (examined_loads.count(my_rip))
-			my_rip = oracle->selectRandomLoad();
-		examined_loads.insert(my_rip);
-
 		printf("Considering %lx...\n", my_rip);
 		VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
 		if (!proximal) {

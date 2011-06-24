@@ -265,7 +265,7 @@ public:
 				AddressSpace *as,
 				unsigned minimum_size);
 
-	unsigned long selectRandomLoad() const;
+	void getAllPossiblyRacingLoads(std::vector<unsigned long> &out) const;
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);
 
