@@ -136,16 +136,17 @@ Instruction::modrm(unsigned nrImmediates)
 							   nrImmediates));
 		return;
 	}
+	unsigned dispBytes;
+	dispBytes = 0;
 	if (rm == 4) {
 		/* SIB byte */
-		byte();
+		Byte sib = byte();
+		if ((sib & 7) == 5)
+			dispBytes = 4;
 	}
-	unsigned dispBytes;
-	if (mod == 0)
-		dispBytes = 0;
-	else if (mod == 1)
+	if (mod == 1)
 		dispBytes = 1;
-	else
+	else if (mod == 2)
 		dispBytes = 4;
 	immediate(dispBytes);
 }
