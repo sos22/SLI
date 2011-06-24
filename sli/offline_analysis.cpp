@@ -2338,6 +2338,12 @@ public:
 		w.callStack.pop_back();
 		return w;
 	}
+	bool on_stack(unsigned long rtrn) {
+		for (unsigned x = 0; x < callStack.size(); x++)
+			if (rtrn == callStack[x])
+				return true;
+		return false;
+	}
 };
 
 static unsigned long
@@ -2442,14 +2448,16 @@ buildCFGForCallGraph(AddressSpace *as,
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
-				if (ripToCFGNode->get(r.rip)->calls->hasKey(r.rip)) {
+				unsigned long follower = extract_call_follower(irsb);
+				if (ripToCFGNode->get(r.rip)->calls->hasKey(r.rip) &&
+				    !r.on_stack(follower)) {
 					/* We should inline this call. */
 					work->fallThroughRip = r.call(
 						ripToCFGNode->get(r.rip)->calls->get(r.rip)->headRip,
-						extract_call_follower(irsb));
+						follower);
 				} else {
 					/* Skip over this call. */
-					work->fallThroughRip = r.jump(extract_call_follower(irsb));
+					work->fallThroughRip = r.jump(follower);
 				}
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				if (r.callStack.size() == 0) {
