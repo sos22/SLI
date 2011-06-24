@@ -335,6 +335,11 @@ findDominators(unsigned long functionHead,
 	bool progress;
 	progress = true;
 	while (progress) {
+		if (timed_out) {
+			printf("%s timed out on line %d\n", __func__, __LINE__);
+			return;
+		}
+
 		progress = false;
 		for (std::set<unsigned long>::iterator it = instrs.begin();
 		     it != instrs.end();

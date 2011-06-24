@@ -1886,6 +1886,10 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	dominators.push_back(*it);
 	it++;
 	while (it != instrs.end()) {
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			break;
+		}
 		std::vector<unsigned long> newDominators;
 		findDominators(f, *it, as, newDominators);
 		std::reverse(newDominators.begin(), newDominators.end());
