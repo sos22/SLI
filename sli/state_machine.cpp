@@ -877,15 +877,20 @@ StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<unsigned long> &inst
 }
 
 void
-StateMachine::sanity_check(std::set<Int> &binders) const
+StateMachine::sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const
 {
-	if (target0()) target0()->sanity_check(binders);
-	if (target1()) target1()->sanity_check(binders);
+	for (unsigned x = 0; x < path.size(); x++)
+		assert(path[x] != this);
+	path.push_back(this);
+	if (target0()) target0()->sanity_check(binders, path);
+	if (target1()) target1()->sanity_check(binders, path);
 	_sanity_check(binders);
+	assert(path.back() == this);
+	path.pop_back();
 }
 
 void
-StateMachineEdge::sanity_check(std::set<Int> &binders) const
+StateMachineEdge::sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const
 {
 	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
 	     it != sideEffects.end();
@@ -901,7 +906,7 @@ StateMachineEdge::sanity_check(std::set<Int> &binders) const
 			binders.insert(smsec->key);
 		}
 	}
-	target->sanity_check(binders);
+	target->sanity_check(binders, path);
 	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
 	     it != sideEffects.end();
 	     it++) {
@@ -912,7 +917,7 @@ StateMachineEdge::sanity_check(std::set<Int> &binders) const
 			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
 			binders.erase(smsec->key);
 		}
-	}	
+	}
 }
 
 /* Not really a transformer, but this is the easiest way of expressing

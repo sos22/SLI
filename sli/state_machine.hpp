@@ -151,10 +151,11 @@ public:
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const = 0;
-	void sanity_check(std::set<Int> &binders) const;
+	void sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const;
 	void sanity_check() const {
 		std::set<Int> binders;
-		sanity_check(binders);
+		std::vector<const StateMachine *> path;
+		sanity_check(binders, path);
 	}
 	NAMED_CLASS
 };
@@ -244,7 +245,7 @@ public:
 			r += sideEffects[i]->complexity();
 		return r;
 	}
-	void sanity_check(std::set<Int> &binders) const;
+	void sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const;
 	NAMED_CLASS
 };
 
