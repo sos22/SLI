@@ -1862,9 +1862,11 @@ IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr ) {
    e->Iex.Load.ty   = ty;
    e->Iex.Load.addr = addr;
    vassert(end == Iend_LE || end == Iend_BE);
+#if 0
    if (addr->tag == Iex_Const &&
        (long)addr->Iex.Const.con->Ico.U64 < 4096)
      dbg_break("loading from a funny constant address (IRExpr *)%p\n", addr);
+#endif
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {

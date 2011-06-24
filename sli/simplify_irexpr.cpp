@@ -1300,10 +1300,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		break;
 	case Iex_Load:
 		src->Iex.Load.addr = optimiseIRExprFP(src->Iex.Load.addr, opt, done_something);
+#if 0
 		if (src->Iex.Load.addr->tag == Iex_Const &&
 		    (long)src->Iex.Load.addr->Iex.Const.con->Ico.U64 < 4096)
 			dbg_break("optimising load to load of strange constant address (IRExpr *)%p\n",
 				  src);
+#endif
 		break;
 	case Iex_CCall: {
 		for (int x = 0; src->Iex.CCall.args[x]; x++) {
