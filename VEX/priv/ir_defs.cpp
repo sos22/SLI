@@ -1289,6 +1289,16 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
   return true;
 }
 
+static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **suffix)
+{
+  int key;
+  if (!parseThisString("free", str, &str) ||
+      !parseDecimalInt(&key, str, suffix))
+    return false;
+  *res = IRExpr_FreeVariable(key);
+  return true;
+}
+
 bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 {
 #define do_form(name)				\
@@ -1307,6 +1317,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
   do_form(CCall);
   do_form(Mux0X);
   do_form(Associative);
+  do_form(FreeVariable);
 #undef do_form
   return false;
 }
