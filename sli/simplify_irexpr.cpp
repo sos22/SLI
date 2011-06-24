@@ -228,6 +228,12 @@ optimise_condition_calculation(
 	case AMD64CondB:
 		res = cf;
 		break;
+	case AMD64CondBE:
+		res = IRExpr_Binop(
+			Iop_Or1,
+			cf,
+			zf);
+		break;
 	case AMD64CondS:
 		res = sf;
 		break;
@@ -241,9 +247,12 @@ optimise_condition_calculation(
 			printf("CondL needs both sf and of; op %llx\n", cc_op->Iex.Const.con->Ico.U64);
 		break;
 	default:
-		printf("Unknown CC condition %lx (op %llx)\n",
+		printf("Unknown CC condition %ld (op %lld)\n",
 		       cond, cc_op->Iex.Const.con->Ico.U64);
 	}
+	if (!res)
+		printf("Cannot handle CC condition %ld, op %lld\n",
+		       cond, cc_op->Iex.Const.con->Ico.U64);
 	if (res && invert)
 		res = IRExpr_Unop(Iop_Not1, res);
 	return res;
@@ -1573,6 +1582,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(IRConst_U32(0xffffffff));
 				case Iop_And64:
 					return IRExpr_Const(IRConst_U64(0xfffffffffffffffful));
+
+				case Iop_Or1:
+					return IRExpr_Const(IRConst_U1(0));
 
 				default:
 					abort();
