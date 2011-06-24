@@ -472,6 +472,7 @@ static bool parseIRTemp(IRTemp *res, const char *str, const char **suffix)
 	     iter(1Sto64)			\
 	     iter(And1)				\
 	     iter(Or1)				\
+	     iter(Xor1)				\
 						\
 	     iter(MullS8)			\
 	     iter(MullS16)			\
@@ -944,6 +945,8 @@ static const char *irOpSimpleChar(IROp op)
     return "&&";
   case Iop_Or1:
     return "||";
+  case Iop_Xor1:
+    return "^^";
   case Iop_CmpEQ8 ... Iop_CmpEQ64:
     return "==";
   case Iop_Not1:
@@ -965,6 +968,10 @@ static bool parseIROpSimple(IROp *out, const char *str, const char **suffix)
   }
   if (parseThisString("||", str, suffix)) {
     *out = Iop_Or1;
+    return true;
+  }
+  if (parseThisString("^^", str, suffix)) {
+    *out = Iop_Xor1;
     return true;
   }
   if (parseThisChar('&', str, suffix)) {

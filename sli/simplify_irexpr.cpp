@@ -18,7 +18,8 @@ operationCommutes(IROp op)
 	return (op >= Iop_Add8 && op <= Iop_Add64) ||
 		(op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64) ||
 		(op == Iop_And1) ||
-		(op == Iop_Or1);
+		(op == Iop_Or1) ||
+		(op == Iop_Xor1);
 }
 
 /* Returns true if the operation definitely associates in the sense
@@ -28,7 +29,8 @@ operationAssociates(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
 		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64) ||
-		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1)
+		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1) ||
+		(op == Iop_Xor1)
 		;
 }
 
@@ -162,6 +164,7 @@ optimise_condition_calculation(
 	unsigned long cond;
 	IRExpr *res;
 	bool invert;
+	IRExpr *sf, *cf, *zf, *of;
 
 	/* We only handle a few very special cases here. */
 	if (_cond->tag != Iex_Const || cc_op->tag != Iex_Const)
@@ -170,54 +173,106 @@ optimise_condition_calculation(
 	invert = cond & 1;
 	cond &= ~1ul;
 	res = NULL;
+	sf = cf = zf = of = NULL;
+
+	switch (cc_op->Iex.Const.con->Ico.U64) {
+	case AMD64G_CC_OP_SUBL:
+	case AMD64G_CC_OP_SUBQ:
+		zf = IRExpr_Binop(
+			Iop_CmpEQ64,
+			dep1,
+			dep2);
+		cf = IRExpr_Binop(
+			Iop_CmpLT64U,
+			dep1,
+			dep2);
+		sf = IRExpr_Binop(
+			Iop_CmpLT64S,
+			dep1,
+			dep2);
+		{
+			IRExpr *c = IRExpr_Const(IRConst_U64(0));
+			IRExpr *c1, *c2, *c3, *t;
+			t = IRExpr_Binop(
+				Iop_Sub64,
+				dep1,
+				dep2);
+			c1 = IRExpr_Binop(
+				Iop_CmpLT64S,
+				dep1,
+				c);
+			c2 = IRExpr_Binop(
+				Iop_CmpLT64S,
+				dep2,
+				c);
+			c3 = IRExpr_Binop(
+				Iop_CmpLT64S,
+				t,
+				c);
+			of = IRExpr_Binop(
+				Iop_Or1,
+				IRExpr_Associative(
+					Iop_And1,
+					IRExpr_Unop(Iop_Not1, c1),
+					c2,
+					c3,
+					NULL),
+				IRExpr_Associative(
+					Iop_And1,
+					c1,
+					IRExpr_Unop(Iop_Not1, c2),
+					IRExpr_Unop(Iop_Not1, c3),
+					NULL));
+		}
+		break;
+	case AMD64G_CC_OP_LOGICB:
+	case AMD64G_CC_OP_LOGICL:
+	case AMD64G_CC_OP_LOGICQ:
+		zf = IRExpr_Binop(
+			Iop_CmpEQ64,
+			dep1,
+			IRExpr_Const(IRConst_U64(0)));
+		sf = IRExpr_Binop(
+			Iop_CmpLT64S,
+			dep1,
+			IRExpr_Const(IRConst_U32(0)));
+		break;
+	case AMD64G_CC_OP_ADDW:
+		sf = IRExpr_Binop(
+			Iop_CmpLT32S,
+			IRExpr_Binop(
+				Iop_Add16,
+				dep1,
+				dep2),
+			IRExpr_Const(IRConst_U16(0)));
+		break;
+	default:
+		printf("Unknown CC op %llx\n", cc_op->Iex.Const.con->Ico.U64);
+		break;
+	}
+
 	switch (cond) {
 	case AMD64CondZ:
-		switch (cc_op->Iex.Const.con->Ico.U64) {
-		case AMD64G_CC_OP_SUBL:
-			res = IRExpr_Binop(
-				Iop_CmpEQ32,
-				dep1,
-				dep2);
-			break;
-		case AMD64G_CC_OP_SUBQ:
-			res = IRExpr_Binop(
-				Iop_CmpEQ64,
-				dep1,
-				dep2);
-			break;
-		case AMD64G_CC_OP_LOGICB:
-		case AMD64G_CC_OP_LOGICL:
-		case AMD64G_CC_OP_LOGICQ:
-			res = IRExpr_Binop(
-				Iop_CmpEQ64,
-				dep1,
-				IRExpr_Const(IRConst_U64(0)));
-			break;
-		}
+		res = zf;
 		break;
 	case AMD64CondB:
-		switch (cc_op->Iex.Const.con->Ico.U64) {
-		case AMD64G_CC_OP_SUBQ:
-			res = IRExpr_Binop(
-				Iop_CmpLT64U,
-				dep1,
-				dep2);
-			break;
-		}
+		res = cf;
 		break;
 	case AMD64CondS:
-		switch (cc_op->Iex.Const.con->Ico.U64) {
-		case AMD64G_CC_OP_ADDW:
-			res = IRExpr_Binop(
-				Iop_CmpLT32S,
-				IRExpr_Binop(
-					Iop_Add16,
-					dep1,
-					dep2),
-				IRExpr_Const(IRConst_U16(0)));
-			break;
-		}
+		res = sf;
 		break;
+	case AMD64CondL:
+		if (sf && of)
+			res = IRExpr_Binop(
+				Iop_Xor1,
+				sf,
+				of);
+		else
+			printf("CondL needs both sf and of; op %llx\n", cc_op->Iex.Const.con->Ico.U64);
+		break;
+	default:
+		printf("Unknown CC condition %lx (op %llx)\n",
+		       cond, cc_op->Iex.Const.con->Ico.U64);
 	}
 	if (res && invert)
 		res = IRExpr_Unop(Iop_Not1, res);
@@ -1636,6 +1691,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			case Iop_32Uto64:
 				*done_something = true;
 				return IRExpr_Const(IRConst_U64(c->Ico.U32));
+			case Iop_32Sto64:
+				*done_something = true;
+				return IRExpr_Const(IRConst_U64((int)c->Ico.U32));
+			case Iop_1Uto8:
+				*done_something = true;
+				return IRExpr_Const(IRConst_U8(c->Ico.U1));
+			case Iop_64to1:
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(!!c->Ico.U64));
+			case Iop_64to32:
+				*done_something = true;
+				return IRExpr_Const(IRConst_U32(c->Ico.U64));
 			default:
 				break;
 			}
@@ -1643,6 +1710,28 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 	} else if (src->tag == Iex_Binop) {
 		IRExpr *l = src->Iex.Binop.arg1;
 		IRExpr *r = src->Iex.Binop.arg2;
+		if (src->Iex.Binop.op == Iop_Xor1) {
+			/* Convert A ^ B to (A & ~B) | (~A & B).  It's
+			   bigger, but it's worth it just normalise
+			   things. */
+			*done_something = true;
+			return optimiseIRExpr(
+				IRExpr_Associative(
+					Iop_Or1,
+					IRExpr_Associative(
+						Iop_And1,
+						src->Iex.Binop.arg1,
+						IRExpr_Unop(Iop_Not1, src->Iex.Binop.arg2),
+						NULL),
+					IRExpr_Associative(
+						Iop_And1,
+						src->Iex.Binop.arg2,
+						IRExpr_Unop(Iop_Not1, src->Iex.Binop.arg1),
+						NULL),
+					NULL),
+				opt,
+				done_something);
+		}
 		if (operationAssociates(src->Iex.Binop.op)) {
 			/* Convert to an associative operation. */
 			*done_something = true;
@@ -1792,18 +1881,43 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					IRConst_U1(
 						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 ==
 						src->Iex.Binop.arg2->Iex.Const.con->Ico.U32));
+			case Iop_CmpLT64S:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U1(
+						(long)src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 <
+						(long)src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
 			case Iop_CmpEQ64:
 				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U1(
 						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 ==
 						src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+			case Iop_Sar32:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U32(
+						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 <<
+						src->Iex.Binop.arg2->Iex.Const.con->Ico.U8));
+			case Iop_Sar64:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U64(
+						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 <<
+						src->Iex.Binop.arg2->Iex.Const.con->Ico.U8));
 			default:
 				break;
 			}
 		}
 
-
+	} else if (src->tag == Iex_Mux0X) {
+		if (src->Iex.Mux0X.cond->tag == Iex_Const) {
+			*done_something = true;
+			if (src->Iex.Mux0X.cond->Iex.Const.con->Ico.U1)
+				return src->Iex.Mux0X.exprX;
+			else
+				return src->Iex.Mux0X.expr0;
+		}
 	}
 
 	return src;
