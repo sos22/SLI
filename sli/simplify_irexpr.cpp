@@ -2293,5 +2293,5 @@ sanity_check_optimiser(void)
 		NULL);
 	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
 	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	assert(physicallyEqual(end, IRExpr_Const(IRConst_U1(0))));
+	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
 }
