@@ -43,6 +43,8 @@
 
 #include <stdio.h>
 
+#include "sli.h"
+
 int
 NdChooser::nd_choice(int nr_options, bool *isNew)
 {
@@ -67,6 +69,10 @@ NdChooser::nd_choice(int nr_options, bool *isNew)
 bool
 NdChooser::advance(void)
 {
+	if (timed_out) {
+		printf("NdChooser::advance(): not advancing because we timed out.\n");
+		return false;
+	}
 	assert(current_stack_index == stack.size());
 	current_stack_index = 0;
 	while (!stack.empty()) {

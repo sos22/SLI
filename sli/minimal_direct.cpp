@@ -64,7 +64,7 @@ shuffle(std::vector<unsigned long> &vect)
 int
 main(int argc, char *argv[])
 {
-	signal(SIGVTALRM, timer_handler);
+	signal(SIGPROF, timer_handler);
 
 	init_sli();
 
@@ -82,7 +82,7 @@ main(int argc, char *argv[])
 
 	oracle->getAllPossiblyRacingLoads(possiblyRacingLoads);
 	shuffle(possiblyRacingLoads);
-	for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin();
+	for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin() + 1890 + 620 + 630 + 140 + 480;
 	     it != possiblyRacingLoads.end();
 	     it++) {
 		unsigned long my_rip = *it;
@@ -96,6 +96,10 @@ main(int argc, char *argv[])
 			continue;
 		}
 		proximal = backtrackToStartOfInstruction(1, proximal, ms->addressSpace);
+		if (!proximal) {
+			printf("Can't backtrack proximal cause\n");
+			continue;
+		}
 
 		VexPtr<InferredInformation> ii(new InferredInformation(oracle));
 		ii->addCrashReason(proximal);
@@ -108,7 +112,7 @@ main(int argc, char *argv[])
 
 		memset(&itv, 0, sizeof(itv));
 		itv.it_value.tv_sec = 120;
-		setitimer(ITIMER_VIRTUAL, &itv, NULL);
+		setitimer(ITIMER_PROF, &itv, NULL);
 
 		gettimeofday(&start, NULL);
 
@@ -118,7 +122,7 @@ main(int argc, char *argv[])
 		gettimeofday(&end, NULL);
 
 		memset(&itv, 0, sizeof(itv));
-		setitimer(ITIMER_VIRTUAL, &itv, NULL);
+		setitimer(ITIMER_PROF, &itv, NULL);
 
 		double time_taken = end.tv_sec - start.tv_sec;
 		time_taken += (end.tv_usec - start.tv_usec) * 1e-6;

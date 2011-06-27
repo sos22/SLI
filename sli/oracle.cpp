@@ -1867,8 +1867,14 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	     it++) {
 		if (!f)
 			f = functionHeadForInstruction(*it);
-		else
-			assert(f == functionHeadForInstruction(*it));
+		else if (f != functionHeadForInstruction(*it)) {
+			printf("Can't find dominator for instruction set which crosses functions\n");
+			for (it = instrs.begin();
+			     it != instrs.end();
+			     it++)
+				printf("%lx in function %lx\n", f, functionHeadForInstruction(*it));
+			return 0;
+		}
 	}
 
 	if (!f) {

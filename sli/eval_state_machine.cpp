@@ -324,6 +324,12 @@ evalStateMachine(StateMachine *sm,
 		 Oracle *oracle,
 		 StateMachineEvalContext &ctxt)
 {
+	if (timed_out) {
+		printf("%s timed out\n", __func__);
+		*crashes = false; /* Lacking any better ideas */
+		return;
+	}
+
 	if (dynamic_cast<StateMachineCrash *>(sm)) {
 		*crashes = true;
 		return;
@@ -347,6 +353,13 @@ evalStateMachine(StateMachine *sm,
 		}
 		return;
 	}
+	if (dynamic_cast<StateMachineUnreached *>(sm)) {
+		/* Whoops... */
+		printf("Evaluating an unreachable state machine?\n");
+		*crashes = false;
+		return;
+	}
+
 	abort();
 }
 
@@ -908,7 +921,11 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		/* This is enforced by the suitability check at the
 		 * top of this function. */
-		assert(sectionStart == NULL);
+		if (sectionStart) {
+			printf("Whoops... running store machine and then running load machine doesn't lead to goodness.\n");
+			/* Give up, shouldn't ever happen. */
+			return false;
+		}
 	} while (chooser.advance());
 	return true;
 }

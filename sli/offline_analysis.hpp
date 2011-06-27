@@ -6,8 +6,6 @@
 
 class CrashReason;
 
-CrashReason *backtrackOneStatement(CrashReason *cr, IRStmt *stmt);
-
 class IRExprTransformer {
 protected:
 	virtual IRExpr *transformIexBinder(IRExpr *e, bool *done_something) { return e; }

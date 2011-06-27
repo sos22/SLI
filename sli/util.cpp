@@ -5,8 +5,6 @@
 #include "sli.h"
 #include "libvex_parse.h"
 
-volatile bool timed_out;
-
 void
 debugger_attach(void)
 {

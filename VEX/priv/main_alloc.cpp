@@ -37,6 +37,8 @@
 #include "main_globals.h"
 #include "main_util.h"
 
+volatile bool timed_out;
+
 #define DBG(...) do {} while (0)
 //#define DBG printf
 
@@ -109,6 +111,17 @@ new_arena(Heap *h, size_t content_size)
 	h->head_arena = r;
 
 	h->heap_used += content_size;
+
+	/* If we're getting big enough to risk angering the OOM
+	   killer, set timed_out, as that encourages the higher-level
+	   analysis to get out as quickly as possible, which usually
+	   frees up large amounts of memory. */
+	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE * 3) {
+		if (!timed_out)
+			printf("Forcing timeout due to excessive memory usage (main heap %ld, ir_heap %ld)\n",
+			       main_heap.heap_used, ir_heap.heap_used);
+		timed_out = true;
+	}
 
 	return r;
 }

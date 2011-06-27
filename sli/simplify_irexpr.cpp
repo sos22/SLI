@@ -899,6 +899,12 @@ CnfAnd::optimise()
 	bool progress;
 	do {
 		progress = false;
+
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return;
+		}
+
 		/* First rule: (A | b) & (A | ~b) -> just A. */
 		for (unsigned i = 0; i < args.size(); i++) {
 			for (unsigned j = i + 1; j < args.size(); j++) {
@@ -1274,6 +1280,10 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 	if (progress) {
 		*done_something = true;
 		while (progress) {
+			if (timed_out) {
+				printf("%s timed out\n", __func__);
+				return e;
+			}
 			progress = false;
 			e = optimiseIRExpr(e, opt, &progress);
 		}
@@ -1285,6 +1295,11 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
+	if (timed_out) {
+		printf("%s timed out\n", __func__);
+		return src;
+	}
+
 	if (!(opt.asUnsigned() & ~src->optimisationsApplied))
 		return src;
 	/* First, recursively optimise our arguments. */
@@ -1963,6 +1978,10 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 
 	do {
 		done_something = false;
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return a;
+		}
 		a = optimiseIRExpr(a, opt, &done_something);
 		a = internIRExpr(a);
 		a = simplifyIRExprAsBoolean(a);
@@ -1995,6 +2014,10 @@ isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
 bool
 definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
 {
+	if (timed_out) {
+		printf("%s timed out\n", __func__);
+		return false;
+	}
 	switch (e->tag) {
 	case Iex_Binder:
 	case Iex_Get:

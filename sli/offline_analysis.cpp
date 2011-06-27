@@ -456,7 +456,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 
 	case Ist_CAS:
 		/* Can't backtrack across these */
-		abort();
+		printf("Don't know how to backtrack across CAS statements?\n");
 		sm = NULL;
 		break;
 
@@ -477,7 +477,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 	return sm;
 }
 
-CrashReason *
+static CrashReason *
 backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 {
 	StateMachine *sm = cr->sm;
@@ -487,6 +487,8 @@ backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
 	newRip.idx--;
 	newRip.changedIdx();
 	sm = backtrackStateMachineOneStatement(sm, stmt, cr->rip.rip);
+	if (!sm)
+		return NULL;
 	return new CrashReason(newRip, sm);
 }
 
@@ -495,8 +497,11 @@ backtrackToStartOfInstruction(unsigned tid, CrashReason *cr, AddressSpace *as)
 {
 	IRSB *irsb = as->getIRSBForAddress(tid, cr->rip.rip);
 	assert((int)cr->rip.idx <= irsb->stmts_used);
-	while (cr->rip.idx != 0)
+	while (cr->rip.idx != 0) {
 		cr = backtrackOneStatement(cr, irsb->stmts[cr->rip.idx-1]);
+		if (!cr)
+			return NULL;
+	}
 	return cr;
 }
 
@@ -668,6 +673,10 @@ static bool storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectSt
 static bool
 storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, Oracle *oracle)
 {
+	if (timed_out) {
+		printf("%s timed out\n", __func__);
+		return true;
+	}
 	for (unsigned y = 0; y < sme->sideEffects.size(); y++) {
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y])) {
@@ -713,6 +722,10 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 		      std::set<StateMachine *> &visited,
 		      const AllowableOptimisations &opt)
 {
+	if (timed_out) {
+		printf("%s timed out\n", __func__);
+		return;
+	}
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
@@ -986,6 +999,10 @@ buildNewStateMachineWithLoadsEliminated(
 	Oracle *oracle,
 	bool *done_something)
 {
+	if (timed_out) {
+		printf("%s timed out\n", __func__);
+		return sme;
+	}
 	StateMachineEdge *res =
 		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
 									     done_something));
@@ -1313,6 +1330,10 @@ rewriteStateMachineEdge(StateMachineEdge *sme,
 		edgeMemo.insert(edgeRules[sme]);
 		return rewriteStateMachineEdge(edgeRules[sme], rules, edgeRules, memo, edgeMemo);
 	}
+	if (timed_out) {
+		printf("%s timed out\n", __func__);
+		return sme;
+	}
 	edgeMemo.insert(sme);
 	sme->target->assertAcyclic();
 	sme->target = rewriteStateMachine(sme->target,
@@ -1588,6 +1609,10 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 	do {
 		progress = false;
 
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return;
+		}
 		/* Iterate over every suspected bisimilarity pair and
 		   check for ``local bisimilarity''.  Once we're
 		   consistent with the local bisimilarity
@@ -1629,6 +1654,9 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 
 	findAllStates(sm, allStates);
 	buildStateMachineBisimilarityMap(sm, bisimilarStates, bisimilarEdges, &allStates, opt);
+
+	if (timed_out)
+		return sm;
 
 	std::map<StateMachine *, StateMachine *> canonMap;
 	/* While we're here, iterate over every bifurcation node, and
@@ -1706,6 +1734,10 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 {
 	bool done_something;
 	do {
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return sm;
+		}
 		done_something = false;
 		sm = sm->optimise(opt, oracle, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
@@ -1840,6 +1872,11 @@ exploreOneFunctionForCallGraph(unsigned long head,
 		unsigned long i = unexploredInstrsThisFunction.back();
 		unexploredInstrsThisFunction.pop_back();
 
+		if (timed_out) {
+			printf("%s timed out\n", __func__);
+			return NULL;
+		}
+
 		if (cge->instructions->test(i)) {
 			/* Done this instruction already -> move
 			 * on. */
@@ -1962,6 +1999,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		/* Explore the current function, starting from this
 		 * instruction. */
 		cge = exploreOneFunctionForCallGraph(head, depth, false, instrsToCGEntries, as, realFunctionHeads);
+		if (!cge) {
+			printf("%s failed\n", __func__);
+			return NULL;
+		}
 		assert(instrsToCGEntries->get(head) == cge);
 
 		/* Now explore the functions which were called by that
@@ -2024,6 +2065,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 							     instrsToCGEntries,
 							     as,
 							     realFunctionHeads);
+			if (!cge) {
+				printf("%s failed on line %d\n", __func__, __LINE__);
+				return NULL;
+			}
 			for (gc_pair_ulong_set_t::iterator it = cge->callees->begin();
 			     it != cge->callees->end();
 			     it++)
@@ -2059,6 +2104,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	bool done_something;
 	do {
 		done_something = false;
+		if (timed_out) {
+			printf("%s timed out on line %d\n", __func__, __LINE__);
+			return NULL;
+		}
 		for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
 		     it != allCGEs.end();
 		     it++) {
@@ -2420,29 +2469,40 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		   the stack or pushing a return address if this is
 		   the last instruction before the end of the IRSB. */
 		/* Yep, we need to discard this instruction. */
-		assert(cfg->fallThrough);
 		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo);
+		if (!res)
+			return NULL;
 	} else if (cfg->fallThrough || !cfg->branch) {
 		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo);
+		if (!res)
+			return NULL;
 		int idx = endOfInstr;
 		while (idx != 0) {
 			IRStmt *stmt = irsb->stmts[idx-1];
 			if (stmt->tag == Ist_Exit) {
 				if (cfg->branch) {
+					StateMachine *tmpsm =
+						CFGtoStoreMachine(tid, as, cfg->branch, memo);
+					if (!tmpsm)
+						return NULL;
 					res = new StateMachineBifurcate(
 						wrappedRipToRip(cfg->my_rip),
 						stmt->Ist.Exit.guard,
-						CFGtoStoreMachine(tid, as, cfg->branch, memo),
+						tmpsm,
 						res);
 				}
 			} else {
 				res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
+				if (!res)
+					return NULL;
 			}
 			idx--;
 		}
 	} else {
 		assert(cfg->branch);
 		res = CFGtoStoreMachine(tid, as, cfg->branch, memo);
+		if (!res)
+			return NULL;
 		int idx;
 		for (idx = endOfInstr - 1; idx >= 0; idx--)
 			if (irsb->stmts[idx]->tag == Ist_Exit)
@@ -2451,9 +2511,12 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		while (idx != 0) {
 			IRStmt *stmt = irsb->stmts[idx-1];
 			res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
+			if (!res)
+				return NULL;
 			idx--;
 		}
 	}
+	assert(res);
 	memo[cfg] = res;
 	return res;		
 }
@@ -2476,6 +2539,10 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
+	if (!sm) {
+		printf("Cannot build store machine!\n");
+		return;
+	}
 	AllowableOptimisations opt2 =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
@@ -2560,6 +2627,10 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 	VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
 	int nr_roots;
 	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);
+	if (!cgRoots) {
+		printf("%s timed out\n", __func__);
+		return;
+	}
 	for (int i = 0; !timed_out && i < nr_roots; i++) {
 		VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
 		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
@@ -2942,7 +3013,10 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 			fprintf(f, "\t");
 			it2->first->prettyPrint(f);
 			fprintf(f, " -> ");
-			it2->second->prettyPrint(f);
+			if (it2->second)
+				it2->second->prettyPrint(f);
+			else
+				fprintf(f, "<null>");
 			fprintf(f, "\n");
 		}
 	}
