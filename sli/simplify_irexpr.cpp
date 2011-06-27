@@ -2340,6 +2340,8 @@ randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
 		case Iop_Or1:
 		case Iop_Or64:
 			return l | r;
+		case Iop_Sar64:
+			return l >> r;
 		case Iop_CmpEQ64:
 			return l == r;
 		case Iop_CmpLT64U:
@@ -2366,7 +2368,7 @@ randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
 				acc &= args[i];
 			return acc;
 		case Iop_And64:
-			acc = 64;
+			acc = ~0ul;
 			for (unsigned i = 0; i < args.size(); i++)
 				acc &= args[i];
 			return acc;
@@ -2381,6 +2383,11 @@ randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
 			acc = 0;
 			for (unsigned i = 0; i < args.size(); i++)
 				acc |= args[i];
+			return acc;
+		case Iop_Add64:
+			acc = 0;
+			for (unsigned i = 0; i < args.size(); i++)
+				acc += args[i];
 			return acc;
 		default:
 			abort();
