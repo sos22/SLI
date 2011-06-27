@@ -192,6 +192,7 @@ top:
 				break;
 			case 5:
 				i->immediate(4);
+				break;
 			case 6:
 				b = i->byte();
 				goto top;
