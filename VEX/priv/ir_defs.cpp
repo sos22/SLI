@@ -1226,7 +1226,7 @@ static bool parseIRExprCCall(IRExpr **res, const char *str, const char **suffix,
 static bool parseIRExprMux0X(IRExpr **res, const char *str, const char **suffix, char **err)
 {
   IRExpr *cond, *expr0, *exprX;
-  if (!parseThisString("Mux0X:", str, &str, err) ||
+  if (!parseThisString("Mux0X(", str, &str, err) ||
       !parseIRExpr(&cond, str, &str, err) ||
       !parseThisChar(',', str, &str, err) ||
       !parseIRExpr(&expr0, str, &str, err) ||
