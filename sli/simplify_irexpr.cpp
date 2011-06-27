@@ -229,10 +229,11 @@ optimise_condition_calculation(
 		res = cf;
 		break;
 	case AMD64CondBE:
-		res = IRExpr_Binop(
-			Iop_Or1,
-			cf,
-			zf);
+		if (cf && zf)
+			res = IRExpr_Binop(
+				Iop_Or1,
+				cf,
+				zf);
 		break;
 	case AMD64CondS:
 		res = sf;
