@@ -82,7 +82,7 @@ main(int argc, char *argv[])
 
 	oracle->getAllPossiblyRacingLoads(possiblyRacingLoads);
 	shuffle(possiblyRacingLoads);
-	for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin() + 1890 + 620 + 630 + 140 + 480;
+	for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin() + 1890 + 620 + 630 + 140 + 480 + 500;
 	     it != possiblyRacingLoads.end();
 	     it++) {
 		unsigned long my_rip = *it;

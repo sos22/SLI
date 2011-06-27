@@ -2096,7 +2096,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	     it != rips.end();
 	     it++) {
 		CallGraphEntry *i = instrsToCGEntries->get(*it);
-		assert(i != NULL);
+		if (!i) {
+			printf("Failed to build CG entries for every instruction in %s\n", __func__);
+			return NULL;
+		}
 		interesting.insert(i);
 	}
 	/* Tarski iteration: anything which calls an interesting
