@@ -2059,18 +2059,10 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *or
 	abort();
 }
 
-
-
-static IROp
-random_irop(void)
-{
-	return (IROp)((unsigned long)Iop_Add8 + random() % (Iop_Perm8x16 - Iop_Add8 + 1));
-}
-
 static IRType
 random_irtype(void)
 {
-	return (IRType)((unsigned long)Ity_I8 + random() % 7);
+       return (IRType)((unsigned long)Ity_I8 + random() % 7);
 }
 
 static IRConst *
@@ -2097,100 +2089,134 @@ random_irconst(void)
 	}
 }
 
-static IRRegArray *
-random_irregarray(void)
-{
-	return mkIRRegArray( (random() % 10) * 8,
-			     random_irtype(),
-			     random() % 16 );
-}
+/* The random IRexprs consist of a possible-empty layer of And1, Or1,
+ * Xor1, and Not1 operations, followed by a layer of comparisons and
+ * boolean functions, and then other stuff underneath. */
 
+static IRExpr *random_irexpr1(unsigned depth);
+
+/* Build arithmetic layer */
 static IRExpr *
-random_irexpr(unsigned depth)
+random_irexpr3(unsigned depth)
 {
 	if (!depth)
-		return IRExpr_Const(random_irconst());
-	switch (random() % 8) {
+		return IRExpr_Const(IRConst_U64(random()));
+	switch (random() % 10) {
 	case 0:
-		return IRExpr_Binder(random() % 30);
+		return IRExpr_Const(IRConst_U64(random()));
 	case 1:
-		return IRExpr_Get((random() % 40) * 8,
-				  random_irtype(),
-				  73);
+		return IRExpr_Mux0X(
+			random_irexpr1(depth - 1),
+			random_irexpr3(depth - 1),
+			random_irexpr3(depth - 1));
 	case 2:
-		return IRExpr_RdTmp(random() % 5, 73);
+		return IRExpr_Binop(
+			Iop_Add64,
+			random_irexpr3(depth - 1),
+			random_irexpr3(depth - 1));
 	case 3:
-		switch (random() % 5) {
-		case 0:
-			return IRExpr_Unop(random_irop(), random_irexpr(depth - 1));
-		case 1:
-			return IRExpr_Binop(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1));
-		case 2:
-			return IRExpr_Triop(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1));
-		case 3:
-			return IRExpr_Qop(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1));
-		case 4: {
-			IRExpr *e = IRExpr_Associative(
-				random_irop(),
-				random_irexpr(depth - 1),
-				random_irexpr(depth - 1),
-				NULL);
-			while (random() % 2)
-				addArgumentToAssoc(e, random_irexpr(depth - 1));
-			return e;
-		}
-		default:
-			abort();
-		}
+		return IRExpr_Binop(
+			Iop_And64,
+			random_irexpr3(depth - 1),
+			random_irexpr3(depth - 1));
 	case 4:
-		return IRExpr_Load(
-			False,
-			Iend_LE,
-			random_irtype(),
-			random_irexpr(depth - 1));
+		return IRExpr_Binop(
+			Iop_Or64,
+			random_irexpr3(depth - 1),
+			random_irexpr3(depth - 1));
 	case 5:
-		return IRExpr_Const(random_irconst());
-	case 6: {
-		IRExpr **args;
-		switch (random() % 4) {
-		case 0:
-			args = mkIRExprVec_0();
-			break;
-		case 1:
-			args = mkIRExprVec_1(random_irexpr(depth - 1));
-			break;
-		case 2:
-			args = mkIRExprVec_2(random_irexpr(depth - 1), random_irexpr(depth - 1));
-			break;
-		case 3:
-			args = mkIRExprVec_3(random_irexpr(depth - 1), random_irexpr(depth - 1), random_irexpr(depth - 1));
-			break;
-		default:
-			abort();
-		}
-		return IRExpr_CCall(mkIRCallee(0, "random_ccall", (void *)0x52),
-				    random_irtype(),
-				    args);
-	}
+		return IRExpr_Binop(
+			Iop_Xor64,
+			random_irexpr3(depth - 1),
+			random_irexpr3(depth - 1));
+	case 6:
+		return IRExpr_Unop(
+			Iop_Neg64,
+			random_irexpr3(depth - 1));
 	case 7:
-		return IRExpr_Mux0X(random_irexpr(depth - 1), random_irexpr(depth - 1), random_irexpr(depth - 1));
+		return IRExpr_Unop(
+			Iop_Not64,
+			random_irexpr3(depth - 1));
 	case 8:
-		return IRExpr_GetI(random_irregarray(), random_irexpr(depth - 1), (random() % 20) * 8, 98);
-	default:
-		abort();
-	}		
+		return IRExpr_Binop(
+			Iop_Sub64,
+			random_irexpr3(depth - 1),
+			random_irexpr3(depth - 1));
+	case 9:
+		return IRExpr_Binop(
+			Iop_Sar64,
+			random_irexpr3(depth - 1),
+			random_irexpr3(depth - 1));
+	}
+	abort();
+}
+
+/* Build comparator layer */
+static IRExpr *
+random_irexpr2(unsigned depth)
+{
+	if (!depth)
+		return IRExpr_Const(IRConst_U1(random() % 2));
+	switch (random() % 6) {
+	case 0:
+		return IRExpr_Unop(Iop_BadPtr, random_irexpr3(depth - 1));
+	case 1:
+		return IRExpr_Binop(Iop_CmpEQ64,
+				    random_irexpr3(depth - 1),
+				    random_irexpr3(depth - 1));
+	case 2:
+		return IRExpr_Binop(Iop_CmpLT64U,
+				    random_irexpr3(depth - 1),
+				    random_irexpr3(depth - 1));
+	case 3:
+		return IRExpr_Binop(Iop_CmpLT64S,
+				    random_irexpr3(depth - 1),
+				    random_irexpr3(depth - 1));
+	case 4:
+		return IRExpr_Binop(Iop_CC_OverflowSub,
+				    random_irexpr3(depth - 1),
+				    random_irexpr3(depth - 1));
+	case 5:
+		return mkIRExprCCall(
+			Ity_I64,
+			0,
+			"amd64g_calculate_condition",
+			(void *)amd64g_calculate_condition,
+			mkIRExprVec_5(IRExpr_Const(IRConst_U64(random() % 16)),
+				      IRExpr_Const(IRConst_U64(random() % 16)),
+				      random_irexpr3(depth - 1),
+				      random_irexpr3(depth - 1),
+				      random_irexpr3(depth - 1)));
+	}
+	abort();
+}
+
+/* Build boolean layer */
+static IRExpr *
+random_irexpr1(unsigned depth)
+{
+	if (!depth)
+		return IRExpr_Const(IRConst_U1(random() % 2));
+	switch (random() % 5) {
+	case 0:
+		return IRExpr_Binop(Iop_And1,
+				    random_irexpr1(depth - 1),
+				    random_irexpr1(depth - 1));
+	case 1:
+		return IRExpr_Binop(Iop_Xor1,
+				    random_irexpr1(depth - 1),
+				    random_irexpr1(depth - 1));
+	case 2:
+		return IRExpr_Binop(Iop_Or1,
+				    random_irexpr1(depth - 1),
+				    random_irexpr1(depth - 1));
+	case 3:
+		return IRExpr_Unop(Iop_Not1,
+				   random_irexpr1(depth - 1));
+	case 4:
+		return random_irexpr2(depth);
+	}
+	abort();
 }
 
 /* Check that sortIRExprs() produces vaguely sane results. */
@@ -2205,7 +2231,7 @@ sanity_check_irexpr_sorter(void)
 
 	printf("Generating %d random expressions\n", NR_EXPRS);
 	for (x = 0; x < NR_EXPRS; x++)
-		exprs[x] = random_irexpr(3);
+		exprs[x] = random_irexpr1(3);
 
 	printf("Ordering should be anti-reflexive.\n");
 	for (x = 0; x < NR_EXPRS; x++)
@@ -2269,6 +2295,126 @@ sanity_check_irexpr_sorter(void)
 #undef NR_EXPRS
 }
 
+class RandomExpressionEvalCtxt {
+public:
+	std::map<std::pair<IRTemp, unsigned>, unsigned long> temporaries;
+	std::map<std::pair<unsigned, unsigned>, unsigned long> registers;
+	std::map<unsigned long, int> badAddress;
+};
+
+static unsigned long
+randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
+{
+	switch (expr->tag) {
+	case Iex_Const:
+		return expr->Iex.Const.con->Ico.U64;
+	case Iex_RdTmp: {
+		std::pair<IRTemp, unsigned> k(expr->Iex.RdTmp.tmp, expr->Iex.RdTmp.tid);
+		if (!ctxt.temporaries.count(k))
+			ctxt.temporaries[k] = random();
+		return ctxt.temporaries[k];
+	}
+	case Iex_Get: {
+		std::pair<unsigned, unsigned> k(expr->Iex.Get.offset, expr->Iex.Get.tid);
+		if (!ctxt.temporaries.count(k))
+			ctxt.registers[k] = random();
+		return ctxt.registers[k];
+		
+	}
+	case Iex_Mux0X:
+		if (randomEvalExpression(ctxt, expr->Iex.Mux0X.cond))
+			return randomEvalExpression(ctxt, expr->Iex.Mux0X.exprX);
+		else
+			return randomEvalExpression(ctxt, expr->Iex.Mux0X.expr0);
+	case Iex_Binop: {
+		unsigned long l = randomEvalExpression(ctxt, expr->Iex.Binop.arg1);
+		unsigned long r = randomEvalExpression(ctxt, expr->Iex.Binop.arg2);
+		switch (expr->Iex.Binop.op) {
+		case Iop_And1:
+		case Iop_And64:
+			return l & r;
+		case Iop_Xor1:
+		case Iop_Xor64:
+			return l ^ r;
+		case Iop_Or1:
+		case Iop_Or64:
+			return l | r;
+		case Iop_CmpEQ64:
+			return l == r;
+		case Iop_CmpLT64U:
+			return l < r;
+		case Iop_CmpLT64S:
+			return (long)l < (long)r;
+		case Iop_CC_OverflowSub:
+			return ((l ^ r) & (l ^ (l - r))) >> 63;
+		default:
+			abort();
+			return 0;
+		}
+	}
+	case Iex_Associative: {
+		std::vector<unsigned long> args;
+		args.resize(expr->Iex.Associative.nr_arguments);
+		for (int i = 0; i < expr->Iex.Associative.nr_arguments; i++)
+			args[i] = randomEvalExpression(ctxt, expr->Iex.Associative.contents[i]);
+		unsigned long acc;
+		switch (expr->Iex.Associative.op) {
+		case Iop_And1:
+			acc = 1;
+			for (unsigned i = 0; i < args.size(); i++)
+				acc &= args[i];
+			return acc;
+		case Iop_And64:
+			acc = 64;
+			for (unsigned i = 0; i < args.size(); i++)
+				acc &= args[i];
+			return acc;
+		case Iop_Xor1:
+		case Iop_Xor64:
+			acc = 0;
+			for (unsigned i = 0; i < args.size(); i++)
+				acc ^= args[i];
+			return acc;
+		case Iop_Or1:
+		case Iop_Or64:
+			acc = 0;
+			for (unsigned i = 0; i < args.size(); i++)
+				acc |= args[i];
+			return acc;
+		default:
+			abort();
+		}
+	}
+	case Iex_Unop: {
+		unsigned long a = randomEvalExpression(ctxt, expr->Iex.Unop.arg);
+		switch (expr->Iex.Unop.op) {
+		case Iop_Not1:
+			return !a;
+		case Iop_Neg64:
+			return -a;
+		case Iop_Not64:
+			return ~a;
+		case Iop_BadPtr:
+			if (!ctxt.badAddress.count(a / 4096))
+				ctxt.badAddress[a/4096] = random() % 2;
+			return ctxt.badAddress[a/4096];
+		default:
+			abort();
+		}
+	}
+	case Iex_CCall:
+		assert(!strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_condition"));
+		return amd64g_calculate_condition(
+			randomEvalExpression(ctxt, expr->Iex.CCall.args[0]),
+			randomEvalExpression(ctxt, expr->Iex.CCall.args[1]),
+			randomEvalExpression(ctxt, expr->Iex.CCall.args[2]),
+			randomEvalExpression(ctxt, expr->Iex.CCall.args[3]),
+			randomEvalExpression(ctxt, expr->Iex.CCall.args[4]));
+	}
+	abort();
+	return 0;
+}
+
 void
 sanity_check_optimiser(void)
 {
@@ -2294,4 +2440,19 @@ sanity_check_optimiser(void)
 	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
 	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
 	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
+
+	for (unsigned cntr1 = 0; cntr1 < 100; cntr1++) {
+		IRExpr *orig;
+		IRExpr *optimised;
+		do {
+			orig = random_irexpr1(4);
+			optimised = simplifyIRExpr(orig, AllowableOptimisations::defaultOptimisations);
+		} while (physicallyEqual(orig, optimised));
+
+		for (unsigned cntr2 = 0; cntr2 < 100; cntr2++) {
+			RandomExpressionEvalCtxt ctxt;
+			assert(ctxt.temporaries.size() == 0);
+			assert(randomEvalExpression(ctxt, orig) == randomEvalExpression(ctxt, optimised));
+		}
+	}
 }
