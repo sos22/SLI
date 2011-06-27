@@ -21,7 +21,7 @@ VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false);
 
 StateMachine *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	if (trueTarget->target == StateMachineUnreached::get()) {
 		*done_something = true;
@@ -115,7 +115,7 @@ StateMachineBifurcate::findUsedBinders(std::set<Int> &s, const AllowableOptimisa
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	data = optimiseIRExprFP(data, opt, done_something);
@@ -152,7 +152,7 @@ StateMachineSideEffectLoad::constructed()
 	smsel_addr = optimiseIRExprFP(smsel_addr, AllowableOptimisations::defaultOptimisations, &ign);
 }
 StateMachineSideEffect *
-StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	smsel_addr = optimiseIRExprFP(smsel_addr, opt, done_something);
 	if (isBadAddress(smsel_addr, opt, oracle)) {
@@ -170,7 +170,7 @@ StateMachineSideEffectLoad::findUsedBinders(std::set<Int> &s, const AllowableOpt
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
 	if (definitelyUnevaluatable(value, opt, oracle)) {
@@ -227,7 +227,7 @@ struct availEntry {
 };
 StateMachineEdge *
 StateMachineEdge::optimise(const AllowableOptimisations &opt,
-			   Oracle *oracle,
+			   OracleInterface *oracle,
 			   bool *done_something)
 {
 	if (StateMachineProxy *smp =
@@ -966,7 +966,7 @@ nrAliasingLoads(StateMachine *sm,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachine *> &visited,
-		Oracle *oracle);
+		OracleInterface *oracle);
 static void
 nrAliasingLoads(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel,
@@ -974,7 +974,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachine *> &visited,
-		Oracle *oracle)
+		OracleInterface *oracle)
 {
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		StateMachineSideEffectLoad *smsel2 =
@@ -996,7 +996,7 @@ nrAliasingLoads(StateMachine *sm,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachine *> &visited,
-		Oracle *oracle)
+		OracleInterface *oracle)
 {
 	if (visited.count(sm))
 		return;
@@ -1023,7 +1023,7 @@ nrAliasingLoads(StateMachine *sm,
 		StateMachineSideEffectLoad *smsel,
 		const Oracle::RegisterAliasingConfiguration &alias,
 		const AllowableOptimisations &opt,
-		Oracle *oracle)
+		OracleInterface *oracle)
 {
 	std::set<StateMachine *> visited;
 	int res = 0;
@@ -1036,14 +1036,14 @@ static bool definitelyNoSatisfyingStores(StateMachine *sm,
 					 const Oracle::RegisterAliasingConfiguration &alias,
 					 const AllowableOptimisations &opt,
 					 bool haveAliasingStore,
-					 Oracle *oracle);
+					 OracleInterface *oracle);
 static bool
 definitelyNoSatisfyingStores(StateMachineEdge *sme,
 			     StateMachineSideEffectLoad *smsel,
 			     const Oracle::RegisterAliasingConfiguration &alias,
 			     const AllowableOptimisations &opt,
 			     bool haveAliasingStore,
-			     Oracle *oracle)
+			     OracleInterface *oracle)
 {
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		StateMachineSideEffect *smse = sme->sideEffects[x];
@@ -1087,7 +1087,7 @@ definitelyNoSatisfyingStores(StateMachine *sm,
 			     const Oracle::RegisterAliasingConfiguration &alias,
 			     const AllowableOptimisations &opt,
 			     bool haveAliasingStore,
-			     Oracle *oracle)
+			     OracleInterface *oracle)
 {
 	if (sm->target0() && !definitelyNoSatisfyingStores(sm->target0(),
 							   smsel,
@@ -1116,14 +1116,14 @@ static StateMachine *introduceFreeVariables(StateMachine *sm,
 					    StateMachine *root_sm,
 					    const Oracle::RegisterAliasingConfiguration &alias,
 					    const AllowableOptimisations &opt,
-					    Oracle *oracle,
+					    OracleInterface *oracle,
 					    bool *done_something);
 static StateMachineEdge *
 introduceFreeVariables(StateMachineEdge *sme,
 		       StateMachine *root_sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
-		       Oracle *oracle,
+		       OracleInterface *oracle,
 		       bool *done_something)
 {
 	StateMachineEdge *out = new StateMachineEdge(NULL);
@@ -1160,7 +1160,7 @@ introduceFreeVariables(StateMachine *sm,
 		       StateMachine *root_sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
-		       Oracle *oracle,
+		       OracleInterface *oracle,
 		       bool *done_something)
 {
 	bool doit = false;
@@ -1208,7 +1208,7 @@ StateMachine *
 introduceFreeVariables(StateMachine *sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
-		       Oracle *oracle,
+		       OracleInterface *oracle,
 		       bool *done_something)
 {
 	return introduceFreeVariables(sm, sm, alias, opt, oracle, done_something);

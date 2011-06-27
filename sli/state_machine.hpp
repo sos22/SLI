@@ -9,7 +9,7 @@
 class StateMachine;
 class StateMachineEdge;
 class StateMachineSideEffect;
-class Oracle;
+class OracleInterface;
 
 class AllowableOptimisations {
 public:
@@ -137,7 +137,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
+	virtual StateMachine *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	virtual StateMachine *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
@@ -166,7 +166,7 @@ class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &
 protected:
 	virtual unsigned long _hashval() const = 0;
 public:
-	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
+	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	virtual int complexity() = 0;
@@ -218,7 +218,7 @@ public:
 		     it++)
 			hv(*it);
 	}
-	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *, bool *done_something);
+	StateMachineEdge *optimise(const AllowableOptimisations &, OracleInterface *, bool *done_something);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		if (timed_out) {
 			printf("%s timed out at %d\n", __func__, __LINE__);
@@ -262,7 +262,7 @@ protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(unsigned long rip) : StateMachine(rip) {}
 public:
-	StateMachine *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
+	StateMachine *optimise(const AllowableOptimisations &, OracleInterface *, bool *) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
@@ -345,7 +345,7 @@ public:
 	{
 		hv(target);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+	StateMachine *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 	{
 		if (target->target == StateMachineUnreached::get()) {
 			*done_something = true;
@@ -426,7 +426,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachine *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
 	{
 		std::set<IRExpr *> t;
@@ -490,7 +490,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, OracleInterface *, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
@@ -518,7 +518,7 @@ public:
 		hv(addr);
 		hv(data);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
 	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
@@ -555,7 +555,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(smsel_addr);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(smsel_addr);
 	}
@@ -582,7 +582,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
 	int complexity() { return exprComplexity(value); }

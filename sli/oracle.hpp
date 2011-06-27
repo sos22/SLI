@@ -12,11 +12,28 @@ public:
 	std::set<unsigned long> rips;
 };
 
+class OracleInterface : public GarbageCollected<OracleInterface> {
+protected:
+	virtual void _visit(HeapVisitor &hv) = 0;
+public:
+	virtual bool storeIsThreadLocal(StateMachineSideEffectStore *) = 0;
+	virtual bool loadIsThreadLocal(StateMachineSideEffectLoad *) = 0;
+	virtual bool memoryAccessesMightAlias(StateMachineSideEffectLoad *,
+					      StateMachineSideEffectStore *) = 0;
+	virtual bool memoryAccessesMightAlias(StateMachineSideEffectLoad *,
+					      StateMachineSideEffectLoad *) = 0;
+	virtual bool memoryAccessesMightAlias(StateMachineSideEffectStore *,
+					      StateMachineSideEffectStore *) = 0;
+
+	void visit(HeapVisitor &hv) { _visit(hv); }
+	NAMED_CLASS
+};
+
 /* All of the information from sources other than the main crash dump.
  * Information from the oracle will be true of some executions but not
  * necessarily all of them, so should only really be used where static
  * analysis is insufficient. */
-class Oracle : public GarbageCollected<Oracle> {
+class Oracle : public OracleInterface {
 public:
 	static const int NR_REGS = 16;
 
@@ -237,6 +254,12 @@ private:
 	Mapping callGraphMapping;
 	void findPossibleJumpTargets(unsigned long from, std::vector<unsigned long> &targets);
 	unsigned long functionHeadForInstruction(unsigned long rip);
+
+	void _visit(HeapVisitor &hv) {
+		hv(ms);
+		hv(crashedThread);
+	}
+
 public:
 	static void loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token);
 	MachineState *ms;
@@ -275,11 +298,6 @@ public:
 		if (tags)
 			loadTagTable(tags);
 	}
-	void visit(HeapVisitor &hv) {
-		hv(ms);
-		hv(crashedThread);
-	}
-	NAMED_CLASS
 };
 
 extern unsigned long hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p);
@@ -299,7 +317,7 @@ void findInstrSuccessorsAndCallees(AddressSpace *as,
 StateMachine *introduceFreeVariables(StateMachine *sm,
 				     const Oracle::RegisterAliasingConfiguration &alias,
 				     const AllowableOptimisations &opt,
-				     Oracle *oracle,
+				     OracleInterface *oracle,
 				     bool *done_something);
 StateMachine *optimiseFreeVariables(StateMachine *sm, bool *done_something);
 

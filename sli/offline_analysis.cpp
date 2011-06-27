@@ -669,9 +669,9 @@ breakCycles(CFGNode<t> *cfg)
 	}
 }
 
-static bool storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, Oracle *oracle);
+static bool storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle);
 static bool
-storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, Oracle *oracle)
+storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, OracleInterface *oracle)
 {
 	if (timed_out) {
 		printf("%s timed out\n", __func__);
@@ -687,7 +687,7 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 	return storeMightBeLoadedByState(sme->target, smses, oracle);
 }
 static bool
-storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, Oracle *oracle)
+storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle)
 {
 	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
 		return storeMightBeLoadedByStateEdge(smp->target, smses, oracle);
@@ -699,7 +699,7 @@ storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, 
 static bool
 storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 				      StateMachineSideEffectStore *smses,
-				      Oracle *oracle)
+				      OracleInterface *oracle)
 {
 	for (unsigned y = idx + 1; y < sme->sideEffects.size(); y++) {
 		if (StateMachineSideEffectLoad *smsel =
@@ -714,11 +714,11 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 /* Look at the state machine, compare it to the tags table, and remove
    any stores which are definitely never loaded (assuming that the
    tags table is correct). */
-static void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+static void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 				  std::set<StateMachine *> &visited,
 				  const AllowableOptimisations &opt);
 static void
-removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_something,
+removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done_something,
 		      std::set<StateMachine *> &visited,
 		      const AllowableOptimisations &opt)
 {
@@ -741,7 +741,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 	removeRedundantStores(sme->target, oracle, done_something, visited, opt);
 }
 static void
-removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 		      std::set<StateMachine *> &visited,
 		      const AllowableOptimisations &opt)
 {
@@ -763,7 +763,7 @@ removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 	       dynamic_cast<StateMachineStub *>(sm));
 }
 static void
-removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 		      const AllowableOptimisations &opt)
 {
 	std::set<StateMachine *> visited;
@@ -902,7 +902,7 @@ static void
 updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt,
 			    const Oracle::RegisterAliasingConfiguration &alias,
-			    Oracle *oracle)
+			    OracleInterface *oracle)
 {
 	if (StateMachineSideEffectStore *smses =
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
@@ -986,7 +986,7 @@ static StateMachine *buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	Oracle *oracle,
+	OracleInterface *oracle,
 	bool *done_something);
 static StateMachineEdge *
 buildNewStateMachineWithLoadsEliminated(
@@ -996,7 +996,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	Oracle *oracle,
+	OracleInterface *oracle,
 	bool *done_something)
 {
 	if (timed_out) {
@@ -1083,7 +1083,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *, StateMachine *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	Oracle *oracle,
+	OracleInterface *oracle,
 	bool *done_something)
 {
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
@@ -1134,7 +1134,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachine *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	Oracle *oracle,
+	OracleInterface *oracle,
 	bool *done_something)
 {
 	std::map<StateMachine *, StateMachine *> memo;
@@ -1147,7 +1147,7 @@ buildNewStateMachineWithLoadsEliminated(
    in-place. */
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
+			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
 			bool *done_something)
 {
 	/* Fairly standard available expression analysis.  Each edge
@@ -1730,7 +1730,7 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 
 static StateMachine *
 optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfiguration &alias,
-		     const AllowableOptimisations &opt, Oracle *oracle, bool noExtendContext)
+		     const AllowableOptimisations &opt, OracleInterface *oracle, bool noExtendContext)
 {
 	bool done_something;
 	do {

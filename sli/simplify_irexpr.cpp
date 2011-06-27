@@ -2006,14 +2006,14 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 }
 
 bool
-isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+isBadAddress(IRExpr *e, const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	return e->tag == Iex_Const &&
 		(long)e->Iex.Const.con->Ico.U64 < 4096;
 }
 
 bool
-definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	if (timed_out) {
 		printf("%s timed out\n", __func__);

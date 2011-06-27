@@ -3,10 +3,11 @@
 
 class AllowableOptimisations;
 class Oracle;
+class OracleInterface;
 
 IRExpr *optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_something);
-bool isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle);
-bool definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle);
+bool isBadAddress(IRExpr *e, const AllowableOptimisations &opt, OracleInterface *oracle);
+bool definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInterface *oracle);
 bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 IRExpr *simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt);
