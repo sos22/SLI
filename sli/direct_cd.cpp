@@ -49,10 +49,6 @@ main(int argc, char *argv[])
 
 	init_sli();
 
-	if (!strcmp(argv[1], "--check-sorter")) {
-		sanity_check_irexpr_sorter();
-		return 0;
-	}
 	if (!strcmp(argv[1], "--check-optimiser")) {
 		sanity_check_optimiser();
 		return 0;

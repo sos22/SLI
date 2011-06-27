@@ -8,3 +8,4 @@ eval_cross_product
 simplify_irexpr
 find_remote_sections
 simplify_state_machine
+expr_sorter
