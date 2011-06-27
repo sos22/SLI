@@ -2102,7 +2102,7 @@ random_irexpr3(unsigned depth)
 {
 	if (!depth)
 		return IRExpr_Const(IRConst_U64(random()));
-	switch (random() % 10) {
+	switch (random() % 12) {
 	case 0:
 		return IRExpr_Const(IRConst_U64(random()));
 	case 1:
@@ -2148,6 +2148,13 @@ random_irexpr3(unsigned depth)
 			Iop_Sar64,
 			random_irexpr3(depth - 1),
 			random_irexpr3(depth - 1));
+	case 10:
+		return IRExpr_Get(
+			(random() % 40) * 8,
+			Ity_I64,
+			73);
+	case 11:
+		return IRExpr_RdTmp(random() % 16, 73);
 	}
 	abort();
 }
@@ -2336,7 +2343,7 @@ randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
 	}
 	case Iex_Get: {
 		std::pair<unsigned, unsigned> k(expr->Iex.Get.offset, expr->Iex.Get.tid);
-		if (!ctxt.temporaries.count(k))
+		if (!ctxt.registers.count(k))
 			ctxt.registers[k] = random();
 		return ctxt.registers[k];
 		
@@ -2422,6 +2429,8 @@ randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
 		case Iop_Not64:
 			return ~a;
 		case Iop_BadPtr:
+			if (a < 4096)
+				return 1;
 			if (!ctxt.badAddress.count(a / 4096))
 				ctxt.badAddress[a/4096] = random() % 2;
 			return ctxt.badAddress[a/4096];
@@ -2468,7 +2477,7 @@ sanity_check_optimiser(void)
 	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
 	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
 
-	for (unsigned cntr1 = 0; cntr1 < 100; cntr1++) {
+	for (unsigned cntr1 = 0; cntr1 < 10000; cntr1++) {
 		IRExpr *orig;
 		IRExpr *optimised;
 		do {
