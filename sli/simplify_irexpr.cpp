@@ -2177,17 +2177,36 @@ random_irexpr2(unsigned depth)
 		return IRExpr_Binop(Iop_CC_OverflowSub,
 				    random_irexpr3(depth - 1),
 				    random_irexpr3(depth - 1));
-	case 5:
+	case 5: {
+		unsigned op;
+		switch (random() % 4) {
+		case 0:
+			op = AMD64G_CC_OP_COPY;
+			break;
+		case 1:
+			op = AMD64G_CC_OP_ADDQ;
+			break;
+		case 2:
+			op = AMD64G_CC_OP_SUBQ;
+			break;
+		case 3:
+			op = AMD64G_CC_OP_LOGICQ;
+			break;
+		default:
+			abort();
+		}
+		
 		return mkIRExprCCall(
 			Ity_I64,
 			0,
 			"amd64g_calculate_condition",
 			(void *)amd64g_calculate_condition,
 			mkIRExprVec_5(IRExpr_Const(IRConst_U64(random() % 16)),
-				      IRExpr_Const(IRConst_U64(random() % 16)),
+				      IRExpr_Const(IRConst_U64(op)),
 				      random_irexpr3(depth - 1),
 				      random_irexpr3(depth - 1),
 				      random_irexpr3(depth - 1)));
+	}
 	}
 	abort();
 }
