@@ -49,11 +49,6 @@ main(int argc, char *argv[])
 
 	init_sli();
 
-	if (!strcmp(argv[1], "--check-optimiser")) {
-		sanity_check_optimiser();
-		return 0;
-	}
-
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
