@@ -321,48 +321,37 @@ exprComplexity(const IRExpr *e)
 	abort();
 }
 
+static int
+ordering_iex_tag(IRExprTag a)
+{
+	switch (a) {
+	case Iex_Const: return 0;
+	case Iex_Binder: return 1;
+	case Iex_Get: return 2;
+	case Iex_GetI: return 3;
+	case Iex_RdTmp: return 4;
+	case Iex_FreeVariable: return 5;
+	case Iex_Unop: return 6;
+	case Iex_Binop: return 7;
+	case Iex_Triop: return 8;
+	case Iex_Qop: return 9;
+	case Iex_Associative: return 10;
+	case Iex_Mux0X: return 11;
+	case Iex_Load: return 12;
+	case Iex_CCall: return 13;
+	}
+	abort();
+}
+
 static bool
 IexTagLessThan(IRExprTag a, IRExprTag b)
 {
 	if (a == b)
 		return false;
-	if (a == Iex_Const)
-		return true;
-	if (b == Iex_Const)
-		return false;
-	if (a == Iex_Get)
-		return true;
-	if (b == Iex_Get)
-		return false;
-	if (a == Iex_GetI)
-		return true;
-	if (b == Iex_GetI)
-		return false;
-	if (a == Iex_RdTmp)
-		return true;
-	if (b == Iex_RdTmp)
-		return false;
-	if (a == Iex_FreeVariable)
-		return true;
-	if (b == Iex_FreeVariable)
-		return false;
-	if (b == Iex_Qop || b == Iex_Triop || b == Iex_Binop || b == Iex_Unop || b == Iex_Associative)
-		return false;
-	if (a == Iex_Qop || a == Iex_Triop || a == Iex_Binop || a == Iex_Unop || a == Iex_Associative)
-		return true;
-	if (a == Iex_Mux0X)
-		return true;
-	if (b == Iex_Mux0X)
-		return false;
-	if (a == Iex_Load)
-		return true;
-	if (b == Iex_Load)
-		return false;
-	if (a == Iex_CCall)
-		return true;
-	if (b == Iex_CCall)
-		return false;
-	abort();
+
+	int _a = ordering_iex_tag(a);
+	int _b = ordering_iex_tag(b);
+	return _a < _b;
 }
 
 static bool
@@ -2446,6 +2435,8 @@ randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
 			randomEvalExpression(ctxt, expr->Iex.CCall.args[2]),
 			randomEvalExpression(ctxt, expr->Iex.CCall.args[3]),
 			randomEvalExpression(ctxt, expr->Iex.CCall.args[4]));
+	default:
+		abort();
 	}
 	abort();
 	return 0;
