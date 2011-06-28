@@ -1759,6 +1759,8 @@ getConflictingStoreClusters(StateMachine *sm, Oracle *oracle, std::set<Instructi
 	std::set<unsigned long> potentiallyConflictingStores;
 	std::set<StateMachineSideEffectLoad *> allLoads;
 	findAllLoads(sm, allLoads);
+	if (allLoads.size() == 0)
+		printf("\t\tNo loads left in store machine?\n");
 	for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 	     it != allLoads.end();
 	     it++) {
@@ -2531,7 +2533,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg)
 	return CFGtoStoreMachine(tid, as, cfg, memo);
 }
 
-static void
+static bool
 considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 VexPtr<AddressSpace> &as,
 		 VexPtr<Oracle> &oracle,
@@ -2544,7 +2546,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
 	if (!sm) {
 		printf("Cannot build store machine!\n");
-		return;
+		return true;
 	}
 	AllowableOptimisations opt2 =
 		AllowableOptimisations::defaultOptimisations
@@ -2561,12 +2563,12 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		/* This store machine is unusable, probably because we
 		 * don't have the machine code for the relevant
 		 * library */
-		return;
+		return false;
 	}
 
 	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle, token);
 	if (!assumption)
-		return;
+		return false;
 
 	/* Now try running that in parallel with the probe machine,
 	   and see if it might lead to a crash. */
@@ -2580,7 +2582,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 				     &mightCrash,
 				     token)) {
 		printf("Failed to run cross product machine\n");
-		return;
+		return false;
 	}
 	printf("\t\tRun in parallel with the probe machine, might survive %d, might crash %d\n",
 	       mightSurvive, mightCrash);
@@ -2591,25 +2593,25 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	 * case, which is a bug. */
 	if (!mightSurvive) {
 		assert(timed_out);
-		return;
+		return false;
 	}
 
 	if (!mightCrash) {
 		/* Executing in parallel with this machine cannot lead
 		 * to a crash, so there's no point in doing any more
 		 * work with it. */
-		return;
+		return false;
 	}
 
 	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
 	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections, token)) {
 		printf("\t\tChose a bad write machine...\n");
-		return;
+		return true;
 	}
 	if (!fixSufficient(probeMachine, sm, assumption, oracle, remoteMacroSections)) {
 		printf("\t\tHave a fix, but it was insufficient...\n");
 		dbg_break("Failed!\n");
-		return;
+		return true;
 	}
 	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm);
 	for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
@@ -2617,9 +2619,10 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	     it++)
 		smd->macroSections.push_back(CrashSummary::StoreMachineData::macroSectionT(it->start, it->end));
 	summary->storeMachines.push_back(smd);
+	return true;
 }
 
-static void
+static bool
 processConflictCluster(VexPtr<AddressSpace> &as,
 		       VexPtr<StateMachine, &ir_heap> &sm,
 		       VexPtr<Oracle> &oracle,
@@ -2635,17 +2638,19 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);
 	if (!cgRoots) {
 		printf("%s timed out\n", __func__);
-		return;
+		return false;
 	}
+	bool result = false;
 	for (int i = 0; !timed_out && i < nr_roots; i++) {
 		VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
 		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
 		trimCFG(storeCFG.get(), is, 20, false);
 		breakCycles(storeCFG.get());
 
-		considerStoreCFG(storeCFG, as, oracle,
-				 survive, sm, summary, is, token);
+		result |= considerStoreCFG(storeCFG, as, oracle,
+					   survive, sm, summary, is, token);
 	}
+	return result;
 }
 
 void
@@ -2760,6 +2765,10 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		std::set<InstructionSet> conflictClusters;
 		getConflictingStoreClusters(sm, oracle, conflictClusters);
 
+		if (conflictClusters.size() == 0)
+			printf("\t\tNo available conflicting stores?\n");
+
+		bool foundRace = false;
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 		     !timed_out && it != conflictClusters.end();
 		     it++) {
@@ -2770,8 +2779,13 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 				printf(" %lx", *it2);
 			printf("\n");
 			VexPtr<AddressSpace> as(ms->addressSpace);
-			processConflictCluster(as, sm, oracle, survive, *it, summary, token);
+			foundRace |= processConflictCluster(as, sm, oracle, survive, *it, summary, token);
 		}
+
+		if (!foundRace)
+			printf("\t\tCouldn't find any relevant-looking races\n");
+		else
+			printf("\t\tFound relevant-looking races\n");
 
 		if (summary->storeMachines.size() != 0)
 			haveAFix(summary, token);
