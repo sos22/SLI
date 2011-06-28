@@ -1910,8 +1910,11 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	}
 
 	/* The dominator list should at least contain the head of the
-	 * function. */
-	assert(!dominators.empty());
+	 * function, unless we timed out. */
+	if (dominators.empty()) {
+		printf("Dominator set empty!\n");
+		return 0;
+	}
 
 	/* Eliminate excessively small instructions. */
 	unsigned x;

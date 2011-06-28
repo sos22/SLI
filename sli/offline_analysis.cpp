@@ -2589,7 +2589,10 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	 * run atomically, so if mightSurvive is now false then that
 	 * means that evalCrossProductMachine didn't consider that
 	 * case, which is a bug. */
-	assert(mightSurvive);
+	if (!mightSurvive) {
+		assert(timed_out);
+		return;
+	}
 
 	if (!mightCrash) {
 		/* Executing in parallel with this machine cannot lead
