@@ -123,7 +123,7 @@ class RangeSet : public GarbageCollected<RangeSet<heap>, heap> {
 		void visit(HeapVisitor &hv) {}
 		NAMED_CLASS
 	};
-	static pe *const presentEntry;
+	static VexPtr<pe, heap> presentEntry;
 public:
 	class iterator {
 		void updateInner() {
@@ -158,7 +158,7 @@ public:
 	NAMED_CLASS
 };
 
-template <Heap *heap> class RangeSet<heap>::pe *const
+template <Heap *heap> VexPtr<class RangeSet<heap>::pe, heap>
 RangeSet<heap>::presentEntry(new RangeSet<heap>::pe);
 
 template <Heap *heap> bool
