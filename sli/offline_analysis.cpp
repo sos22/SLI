@@ -2683,6 +2683,10 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 
 		VexPtr<CrashReason, &ir_heap> cr(
 			ii->CFGtoCrashReason(CRASHING_THREAD, cfg));
+		if (!cr) {
+			printf("\tCannot build crash reason from CFG\n");
+			return;
+		}
 		AllowableOptimisations opt =
 			AllowableOptimisations::defaultOptimisations
 			.enableassumePrivateStack()
@@ -2958,6 +2962,8 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 		if (cfg->fallThrough) {
 			CrashReason *ft;
 			ft = CFGtoCrashReason(tid, cfg->fallThrough);
+			if (!ft)
+				return NULL;
 			if (x == irsb->stmts_used &&
 			    irsb->jumpkind == Ijk_Call &&
 			    cfg->fallThroughRip == extract_call_follower(irsb)) {
@@ -2974,12 +2980,16 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 						newRip.idx--;
 						newRip.changedIdx();
 						if (cfg->branch) {
+							CrashReason *other =
+								CFGtoCrashReason(tid, cfg->branch);
+							if (!other)
+								return NULL;
 							ft = new CrashReason(
 								newRip,
 								new StateMachineBifurcate(
 									ft->rip.rip,
 									stmt->Ist.Exit.guard,
-									CFGtoCrashReason(tid, cfg->branch)->sm,
+									other->sm,
 									ft->sm));
 						} else {
 							ft = new CrashReason(
@@ -2988,6 +2998,8 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 						}
 					} else {
 						ft = backtrackOneStatement(ft, stmt);
+						if (!ft)
+							return NULL;
 					}
 				}
 			}
@@ -2995,6 +3007,8 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 		} else {
 			assert(cfg->branch);
 			CrashReason *b = CFGtoCrashReason(tid, cfg->branch);
+			if (!b)
+				return NULL;
 			for (x--; x >= 0; x--)
 				if (irsb->stmts[x]->tag == Ist_Exit)
 					break;
@@ -3003,6 +3017,8 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 			while (b->rip.idx != 0) {
 				IRStmt *stmt = irsb->stmts[b->rip.idx-1];
 				b = backtrackOneStatement(b, stmt);
+				if (!b)
+					return NULL;
 			}
 			res = b;
 		}
