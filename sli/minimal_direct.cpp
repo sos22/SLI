@@ -61,6 +61,69 @@ shuffle(std::vector<unsigned long> &vect)
 	}
 }
 
+static void
+consider_rip(unsigned long my_rip,
+	     VexPtr<MachineState> &ms,
+	     VexPtr<Thread> &thr,
+	     VexPtr<Oracle> &oracle,
+	     DumpFix &df,
+	     FILE *timings,
+	     GarbageCollectionToken token)
+{
+	LibVEX_maybe_gc(token);
+
+	printf("Considering %lx...\n", my_rip);
+	VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
+	if (!proximal) {
+		printf("No proximal cause -> can't do anything\n");
+		return;
+	}
+	proximal = backtrackToStartOfInstruction(1, proximal, ms->addressSpace);
+	if (!proximal) {
+		printf("Can't backtrack proximal cause\n");
+		return;
+	}
+
+	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
+	ii->addCrashReason(proximal);
+
+	std::vector<unsigned long> previousInstructions;
+	oracle->findPreviousInstructions(previousInstructions, my_rip);
+
+	struct itimerval itv;
+	struct timeval start;
+
+	memset(&itv, 0, sizeof(itv));
+	itv.it_value.tv_sec = 120;
+	setitimer(ITIMER_PROF, &itv, NULL);
+
+	gettimeofday(&start, NULL);
+
+	considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, false, token);
+
+	struct timeval end;
+	gettimeofday(&end, NULL);
+
+	memset(&itv, 0, sizeof(itv));
+	setitimer(ITIMER_PROF, &itv, NULL);
+
+	double time_taken = end.tv_sec - start.tv_sec;
+	time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
+	if (timed_out) {
+		if (timings)
+			fprintf(timings, "%lx timed out after %f\n", my_rip, time_taken);
+		printf("%lx timed out after %f\n", my_rip, time_taken);
+	} else {
+		if (timings)
+			fprintf(timings, "%lx took %f\n", my_rip, time_taken);
+		printf("%lx took %f\n", my_rip, time_taken);
+	}
+	timed_out = false;
+
+	fflush(NULL);
+		
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -76,66 +139,19 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	FILE *output = fopen("generated_patch.c", "w");
-	FILE *timings = fopen("timings.txt", "w");
 	DumpFix df(oracle, output);
-	std::vector<unsigned long> possiblyRacingLoads;
 
-	oracle->getAllPossiblyRacingLoads(possiblyRacingLoads);
-	shuffle(possiblyRacingLoads);
-	for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin();
-	     it != possiblyRacingLoads.end();
-	     it++) {
-		unsigned long my_rip = *it;
-
-		LibVEX_maybe_gc(ALLOW_GC);
-		
-		printf("Considering %lx...\n", my_rip);
-		VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
-		if (!proximal) {
-			printf("No proximal cause -> can't do anything\n");
-			continue;
-		}
-		proximal = backtrackToStartOfInstruction(1, proximal, ms->addressSpace);
-		if (!proximal) {
-			printf("Can't backtrack proximal cause\n");
-			continue;
-		}
-
-		VexPtr<InferredInformation> ii(new InferredInformation(oracle));
-		ii->addCrashReason(proximal);
-
-		std::vector<unsigned long> previousInstructions;
-		oracle->findPreviousInstructions(previousInstructions, my_rip);
-
-		struct itimerval itv;
-		struct timeval start;
-
-		memset(&itv, 0, sizeof(itv));
-		itv.it_value.tv_sec = 120;
-		setitimer(ITIMER_PROF, &itv, NULL);
-
-		gettimeofday(&start, NULL);
-
-		considerInstructionSequence(previousInstructions, ii, oracle, my_rip, ms, df, false, ALLOW_GC);
-
-		struct timeval end;
-		gettimeofday(&end, NULL);
-
-		memset(&itv, 0, sizeof(itv));
-		setitimer(ITIMER_PROF, &itv, NULL);
-
-		double time_taken = end.tv_sec - start.tv_sec;
-		time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
-		if (timed_out) {
-			fprintf(timings, "%lx timed out after %f\n", my_rip, time_taken);
-			printf("%lx timed out after %f\n", my_rip, time_taken);
-		} else {
-			fprintf(timings, "%lx took %f\n", my_rip, time_taken);
-			printf("%lx took %f\n", my_rip, time_taken);
-		}
-		timed_out = false;
-
-		fflush(NULL);
+	if (argc == 5) {
+		consider_rip(strtoul(argv[4], NULL, 16), ms, thr, oracle, df, NULL, ALLOW_GC);
+	} else {
+		FILE *timings = fopen("timings.txt", "w");
+		std::vector<unsigned long> possiblyRacingLoads;
+		oracle->getAllPossiblyRacingLoads(possiblyRacingLoads);
+		shuffle(possiblyRacingLoads);
+		for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin();
+		     it != possiblyRacingLoads.end();
+		     it++)
+			consider_rip(*it, ms, thr, oracle, df, timings, ALLOW_GC);
 	}
 
 	df.finish();
