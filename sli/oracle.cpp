@@ -833,10 +833,11 @@ irexprAliasingClass(IRExpr *expr,
 }
 
 bool
-Oracle::RegisterAliasingConfiguration::mightAlias(IRExpr *a, IRExpr *b) const
+Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b) const
 {
 	return irexprAliasingClass(a, NULL, *this, NULL) &
-		irexprAliasingClass(b, NULL, *this, NULL);
+		irexprAliasingClass(b, NULL, *this, NULL) &
+		~PointerAliasingSet::notAPointer;
 }
 
 Oracle::RegisterAliasingConfiguration

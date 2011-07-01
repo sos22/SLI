@@ -923,7 +923,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				addr = NULL;
 
 			if ( addr &&
-			     alias.mightAlias(addr, smses->addr) &&
+			     alias.ptrsMightAlias(addr, smses->addr) &&
 			     ((smses2 && oracle->memoryAccessesMightAlias(smses2, smses)) ||
 			      (smsel2 && oracle->memoryAccessesMightAlias(smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
@@ -1043,14 +1043,14 @@ buildNewStateMachineWithLoadsEliminated(
 				StateMachineSideEffectLoad *smsel2 =
 					dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 				if ( smses2 &&
-				     aliasing.mightAlias(smses2->addr, newAddr) &&
+				     aliasing.ptrsMightAlias(smses2->addr, newAddr) &&
 				     definitelyEqual(smses2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
 							smsel->key,
 							smses2->data);
 				} else if ( smsel2 &&
-					    aliasing.mightAlias(smsel2->smsel_addr, newAddr) &&
+					    aliasing.ptrsMightAlias(smsel2->smsel_addr, newAddr) &&
 					    definitelyEqual(smsel2->smsel_addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(

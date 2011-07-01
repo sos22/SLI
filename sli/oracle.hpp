@@ -148,6 +148,7 @@ public:
 
 		PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
 		PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
+		PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
 		bool operator !=(PointerAliasingSet o) const { return v != o.v; }
 		operator bool() const { return v != 0; }
 	};
@@ -182,8 +183,10 @@ public:
 		/* Check whether a and b mght point at the same bit of
 		   memory (i.e. have intersecting pointer aliasing
 		   sets) given @this's register aliasing
-		   configuration. */
-		bool mightAlias(IRExpr *a, IRExpr *b) const;
+		   configuration.  Note that this assumes that both @a
+		   and @b are pointers i.e. it's not just asking
+		   whether @a and @b might be equal. */
+		bool ptrsMightAlias(IRExpr *a, IRExpr *b) const;
 
 		void prettyPrint(FILE *) const;
 	};
