@@ -127,8 +127,6 @@ consider_rip(unsigned long my_rip,
 int
 main(int argc, char *argv[])
 {
-	signal(SIGPROF, timer_handler);
-
 	init_sli();
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
@@ -137,6 +135,8 @@ main(int argc, char *argv[])
 
 	oracle = new Oracle(ms, thr, argv[2]);
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+
+	signal(SIGPROF, timer_handler);
 
 	FILE *output = fopen("generated_patch.c", "w");
 	DumpFix df(oracle, output);

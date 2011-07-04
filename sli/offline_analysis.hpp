@@ -117,6 +117,7 @@ protected:
 	}
 public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
+	IRExpr *transformIRExpr(IRExpr *e) { bool t; return transformIRExpr(e, &t); }
 };
 
 class StateMachineTransformer : public IRExprTransformer {

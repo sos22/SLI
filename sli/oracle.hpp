@@ -201,6 +201,7 @@ public:
 		char *mkName() const { return my_asprintf("function_%lx", rip); }
 		void getInstructionsInFunction(std::vector<unsigned long> &out) const;
 		void updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle);
+		void updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle);
 		void addPredecessors(unsigned long rip, std::vector<unsigned long> &out);
 		void updateSuccessorInstructionsAliasing(unsigned long rip, AddressSpace *as, std::vector<unsigned long> *changed,
 							 Oracle *oracle);
@@ -210,6 +211,8 @@ public:
 		void getFunctionCallers(std::vector<unsigned long> &out, Oracle *oracle);
 		bool registerLivenessCorrect() const;
 		void setRegisterLivenessCorrect(bool v);
+		bool rbpToRspOffsetsCorrect() const;
+		void setRbpToRspOffsetsCorrect(bool v);
 		bool aliasingConfigCorrect() const;
 		void setAliasingConfigCorrect(bool v);
 		bool exists() const;
@@ -228,11 +231,13 @@ public:
 				    const std::vector<unsigned long> &fallThrough,
 				    const std::vector<unsigned long> &branch);
 		void calculateRegisterLiveness(AddressSpace *as, bool *done_something, Oracle *oracle);
+		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
 		void calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle);
 
 		void visit(HeapVisitor &hv) { }
 		NAMED_CLASS
 	};
+
 	struct tag_entry {
 		std::set<unsigned long> loads;
 		std::set<unsigned long> stores;
@@ -252,11 +257,20 @@ private:
 
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
-	void calculateAliasing(void);
+	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
+	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	void loadTagTable(const char *path);
 	Mapping callGraphMapping;
 	void findPossibleJumpTargets(unsigned long from, std::vector<unsigned long> &targets);
 	unsigned long functionHeadForInstruction(unsigned long rip);
+
+	enum RbpToRspOffsetState {
+		RbpToRspOffsetStateImpossible,
+		RbpToRspOffsetStateValid,
+		RbpToRspOffsetStateUnknown
+	};
+	void getRbpToRspOffset(unsigned long rip, RbpToRspOffsetState *state, unsigned long *offset);
+	void setRbpToRspOffset(unsigned long rip, RbpToRspOffsetState state, unsigned long offset);
 
 	void _visit(HeapVisitor &hv) {
 		hv(ms);

@@ -9,6 +9,7 @@
 #include "sli.h"
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
+#include "offline_analysis.hpp"
 
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)
@@ -591,7 +592,8 @@ vector_contains(const std::vector<t> &v, const t &val)
 }
 
 void
-Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token)
+Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
+				  GarbageCollectionToken token)
 {
 	bool done_something;
 	unsigned long changed;
@@ -599,7 +601,6 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken to
 	std::vector<unsigned long> functions;
 
 	do {
-		LibVEX_maybe_gc(token);
 		changed = 0;
 		unchanged = 0;
 		done_something = false;
@@ -607,6 +608,7 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken to
 		for (std::vector<unsigned long>::iterator it = functions.begin();
 		     it != functions.end();
 		     it++) {
+			LibVEX_maybe_gc(token);
 			bool this_did_something = false;
 			Function f(*it);
 			f.calculateRegisterLiveness(ths->ms->addressSpace, &this_did_something, ths);
@@ -621,19 +623,34 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken to
 }
 
 void
-Oracle::calculateAliasing()
+Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token)
+{
+	std::vector<unsigned long> functions;
+	ths->getFunctions(functions);
+	for (std::vector<unsigned long>::iterator it = functions.begin();
+	     it != functions.end();
+	     it++) {
+		LibVEX_maybe_gc(token);
+		Function f(*it);
+		f.calculateRbpToRspOffsets(ths->ms->addressSpace, ths);
+	}
+}
+
+void
+Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
 	bool done_something;
 	std::vector<unsigned long> functions;
 
-	getFunctions(functions);
+	ths->getFunctions(functions);
 	for (std::vector<unsigned long>::iterator it = functions.begin();
 	     it != functions.end();
 	     it++) {
+		LibVEX_maybe_gc(token);
 		do {
 			done_something = false;
 			Function f(*it);
-			f.calculateAliasing(ms->addressSpace, &done_something, this);
+			f.calculateAliasing(ths->ms->addressSpace, &done_something, ths);
 		} while (done_something);
 	}
 }
@@ -896,6 +913,8 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 			assert(c);
 			for (unsigned i = 0; i < h->nr; i++)
 				output.push_back(c[i] & ~(1ul << 63));
+			std::sort(output.begin(), output.end());
+			std::unique(output.begin(), output.end());
 			return;
 		}
 		offset += sizeof(unsigned long) * h->nr;
@@ -997,6 +1016,8 @@ database(void)
 			  "alias13 INTEGER,"
 			  "alias14 INTEGER,"
 			  "alias15 INTEGER,"
+			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
+			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
 			  "functionHead INTEGER NOT NULL)",
 			  NULL,
 			  NULL,
@@ -1008,7 +1029,7 @@ database(void)
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip INTEGER, dest INTEGER, UNIQUE (rip, dest))", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
+	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
@@ -1093,7 +1114,8 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 	create_index("fallThroughDest", "fallThroughRips", "dest");
 
 	calculateRegisterLiveness(ths, token);
-	ths->calculateAliasing();
+	calculateAliasing(ths, token);
+	calculateRbpToRspOffsets(ths, token);
 }
 
 Oracle::LivenessSet
@@ -1234,6 +1256,47 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			start_of_instruction = end_of_instruction;
 		}
 	}
+}
+
+void
+Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
+{
+	if (rbpToRspOffsetsCorrect())
+		return;
+
+	std::vector<unsigned long> instrsToRecalculate1;
+	std::vector<unsigned long> instrsToRecalculate2;
+
+	getInstructionsInFunction(instrsToRecalculate1);
+
+	while (1) {
+		for (std::vector<unsigned long>::iterator it = instrsToRecalculate1.begin();
+		     it != instrsToRecalculate1.end();
+		     it++) {
+			bool t = false;
+			updateRbpToRspOffset(*it, as, &t, oracle);
+			if (t)
+				getSuccessors(*it, instrsToRecalculate2);
+		}
+		instrsToRecalculate1.clear();
+		if (instrsToRecalculate2.empty())
+			break;
+
+		for (std::vector<unsigned long>::iterator it = instrsToRecalculate2.begin();
+		     it != instrsToRecalculate2.end();
+		     it++) {
+			bool t = false;
+			updateRbpToRspOffset(*it, as, &t, oracle);
+			if (t)
+				getSuccessors(*it, instrsToRecalculate1);
+		}
+
+		instrsToRecalculate2.clear();
+		if (instrsToRecalculate1.empty())
+			break;
+	}
+
+	setRbpToRspOffsetsCorrect(true);
 }
 
 void
@@ -1416,6 +1479,295 @@ Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *c
 		assert(rc == SQLITE_DONE);
 		sqlite3_reset(stmt);
 	}
+}
+
+class RewriteRegisterExpr : public IRExprTransformer {
+	unsigned idx;
+	IRExpr *to;
+protected:
+	IRExpr *transformIexGet(IRExpr *what, bool *done_something) {
+		if (what->Iex.Get.offset == (int)idx) {
+			*done_something = true;
+			return to;
+		} else
+			return what;
+	}
+public:
+	RewriteRegisterExpr(unsigned _idx, IRExpr *_to)
+		: idx(_idx), to(_to)
+	{
+	}
+};
+static IRExpr *
+rewriteRegister(IRExpr *expr, int offset, IRExpr *to)
+{
+	RewriteRegisterExpr rre(offset, to);
+	bool ign;
+	return rre.transformIRExpr(expr, &ign);
+}
+
+class RewriteTemporaryExpr : public IRExprTransformer {
+	IRTemp tmp;
+	IRExpr *to;
+protected:
+	IRExpr *transformIexRdTmp(IRExpr *what, bool *done_something)
+	{
+		if (what->Iex.RdTmp.tmp == tmp) {
+			*done_something = true;
+			return to;
+		} else
+			return what;
+	}
+public:
+	RewriteTemporaryExpr(IRTemp _tmp, IRExpr *_to)
+		: tmp(_tmp), to(_to)
+	{
+	}
+};
+static IRExpr *
+rewriteTemporary(IRExpr *expr,
+		 IRTemp tmp,
+		 IRExpr *newval)
+{
+	RewriteTemporaryExpr rt(tmp, newval);
+	return rt.transformIRExpr(expr);
+}
+
+void
+Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
+{
+	RbpToRspOffsetState current_state;
+	unsigned long current_offset;
+	RbpToRspOffsetState state;
+	unsigned long offset;
+
+	oracle->getRbpToRspOffset(rip, &current_state, &current_offset);
+	if (current_state == RbpToRspOffsetStateImpossible) {
+		/* By monotonicity, the result will be
+		   RbpToRspOffsetStateImpossible, so bypass and get
+		   out early. */
+		return;
+	}
+
+	/* Try to figure out what this instruction actually does. */
+	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRStmt **statements = irsb->stmts;
+	int nr_statements;
+	for (nr_statements = 1;
+	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
+	     nr_statements++)
+		;
+
+	long delta_offset = 0;
+	IRExpr *rbp = NULL;
+	IRExpr *rsp = NULL;
+	int j;
+
+	/* We assume called functions never change rsp or rbp, so
+	 * treat calls as nops. */
+	if (nr_statements == irsb->stmts_used &&
+	    irsb->jumpkind == Ijk_Call)
+		goto join_predecessors;
+	/* Scan backwards through the instruction for any writes to
+	   either of the registers of interest. */
+	for (j = nr_statements - 1; j >= 0; j--) {
+		IRStmt *stmt = statements[j];
+		if (stmt->tag == Ist_Put) {
+			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP && !rsp)
+				rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
+			if (stmt->Ist.Put.offset == OFFSET_amd64_RBP && !rbp)
+				rbp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
+			if (rsp)
+				rsp = rewriteRegister(rsp,
+						      stmt->Ist.Put.offset,
+						      stmt->Ist.Put.data);
+			if (rbp)
+				rbp = rewriteRegister(rbp,
+						      stmt->Ist.Put.offset,
+						      stmt->Ist.Put.data);
+		} else if (stmt->tag == Ist_WrTmp) {
+			if (rsp)
+				rsp = rewriteTemporary(rsp,
+						       stmt->Ist.WrTmp.tmp,
+						       stmt->Ist.WrTmp.data);
+			if (rbp)
+				rbp = rewriteTemporary(rbp,
+						       stmt->Ist.WrTmp.tmp,
+						       stmt->Ist.WrTmp.data);
+		} else if (stmt->tag == Ist_CAS) {
+			if (stmt->Ist.CAS.details->oldLo == OFFSET_amd64_RSP ||
+			    stmt->Ist.CAS.details->oldLo == OFFSET_amd64_RBP)
+				goto impossible;
+		} else if (stmt->tag == Ist_Dirty) {
+			IRTemp tmp = stmt->Ist.Dirty.details->tmp;
+			IRType t = Ity_I1;
+			if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+				    "helper_load_64"))
+				t = Ity_I64;
+			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+					 "helper_load_32"))
+				t = Ity_I32;
+			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+					 "helper_load_16"))
+				t = Ity_I16;
+			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+					 "helper_load_8"))
+				t = Ity_I8;
+			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+					 "amd64g_dirtyhelper_RDTSC"))
+				goto impossible_clean;
+			else
+				goto impossible;
+			IRExpr *v = IRExpr_Load(False, Iend_LE,
+						t,
+						stmt->Ist.Dirty.details->args[0]);
+			if (rsp)
+				rsp = rewriteTemporary(rsp, tmp, v);
+			if (rbp)
+				rbp = rewriteTemporary(rbp, tmp, v);
+		}
+	}
+
+	if (rsp)
+		rsp = simplifyIRExpr(rsp, AllowableOptimisations::defaultOptimisations);
+	if (rbp)
+		rbp = simplifyIRExpr(rbp, AllowableOptimisations::defaultOptimisations);
+	if (rsp && rsp->tag == Iex_Get && rsp->Iex.Get.offset == OFFSET_amd64_RSP)
+		rsp = NULL;
+	if (rbp && rbp->tag == Iex_Get && rbp->Iex.Get.offset == OFFSET_amd64_RBP)
+		rbp = NULL;
+	if (!rsp && !rbp)
+		goto join_predecessors;
+	if (rsp && rbp)
+		goto impossible;
+
+	if (rsp) {
+		if (rsp->tag == Iex_Get) {
+			if (rsp->Iex.Get.offset == OFFSET_amd64_RSP) {
+				abort();
+			} else if (rsp->Iex.Get.offset == OFFSET_amd64_RBP) {
+				offset = 0;
+				state = RbpToRspOffsetStateValid;
+				goto done;
+			}
+		} else if (rsp->tag == Iex_Associative &&
+			   rsp->Iex.Associative.op == Iop_Add64 &&
+			   rsp->Iex.Associative.nr_arguments >= 2 &&
+			   rsp->Iex.Associative.contents[0]->tag == Iex_Const) {
+			IRExpr *base = rsp->Iex.Associative.contents[1];
+			if (base->tag == Iex_Get) {
+				if (base->Iex.Get.offset == OFFSET_amd64_RSP) {
+					delta_offset = rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+					goto join_predecessors;
+				} else if (base->Iex.Get.offset == OFFSET_amd64_RBP) {
+					offset = rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+					state = RbpToRspOffsetStateValid;
+					goto done;
+				}
+			}
+		}
+
+		if (rsp->tag == Iex_Associative &&
+		    rsp->Iex.Associative.nr_arguments == 2 &&
+		    rsp->Iex.Associative.op == Iop_Add64 &&
+		    rsp->Iex.Associative.contents[0]->tag == Iex_Get &&
+		    rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
+		    rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RSP) {
+			/* Adding a register to RSP -> alloca() */
+			goto impossible_clean;
+		}
+		printf("Can't handle rewrite of RSP to ");
+		ppIRExpr(rsp, stdout);
+		printf("\n");
+		goto impossible;
+	} else {
+		assert(rbp);
+
+		rbp = simplifyIRExpr(rbp, AllowableOptimisations::defaultOptimisations);
+		if (rbp->tag == Iex_Get) {
+			if (rbp->Iex.Get.offset == OFFSET_amd64_RBP) {
+				abort();
+			} else if (rbp->Iex.Get.offset == OFFSET_amd64_RSP) {
+				offset = 0;
+				state = RbpToRspOffsetStateValid;
+				goto done;
+			}
+		} else if (rbp->tag == Iex_Associative &&
+			   rbp->Iex.Associative.op == Iop_Add64 &&
+			   rbp->Iex.Associative.nr_arguments >= 2 &&
+			   rbp->Iex.Associative.contents[0]->tag == Iex_Const) {
+			IRExpr *base = rbp->Iex.Associative.contents[1];
+			if (base->tag == Iex_Get) {
+				if (base->Iex.Get.offset == OFFSET_amd64_RBP) {
+					delta_offset = -rbp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+					goto join_predecessors;
+				} else if (base->Iex.Get.offset == OFFSET_amd64_RSP) {
+					offset = -rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+					state = RbpToRspOffsetStateValid;
+					goto done;
+				}
+			}
+		}
+
+		printf("Can't handle rewrite of RBP to ");
+		ppIRExpr(rbp, stdout);
+		printf("\n");
+		goto impossible;
+	}
+
+join_predecessors:
+	state = RbpToRspOffsetStateUnknown;
+	{
+		std::vector<unsigned long> predecessors;
+		addPredecessors(rip, predecessors);
+
+		for (std::vector<unsigned long>::iterator it = predecessors.begin();
+		     it != predecessors.end();
+		     it++) {
+			enum RbpToRspOffsetState pred_state;
+			unsigned long pred_offset;
+			oracle->getRbpToRspOffset(*it, &pred_state, &pred_offset);
+			if (pred_state == RbpToRspOffsetStateImpossible)
+				goto impossible;
+			if (pred_state == RbpToRspOffsetStateUnknown)
+				continue;
+			assert(pred_state == RbpToRspOffsetStateValid);
+			if (state == RbpToRspOffsetStateUnknown) {
+				state = RbpToRspOffsetStateValid;
+				offset = pred_offset;
+				continue;
+			}
+			assert(state == RbpToRspOffsetStateValid);
+			if (offset != pred_offset)
+				goto impossible;
+		}
+	}
+	if (state == RbpToRspOffsetStateUnknown) {
+		/* Predecessor state is still unknown, nothing
+		 * we can do. */
+		return;
+	}
+
+	offset += delta_offset;
+
+done:
+	if (current_state == state && current_offset == offset) {
+		/* Already correct, nothing to do */
+		return;
+	}
+
+	*changed = true;
+	oracle->setRbpToRspOffset(rip, state, offset);
+	return;
+
+impossible:
+	printf("Cannot do stack offset calculations in first instruction of: ");
+	ppIRSB(irsb, stdout);
+
+impossible_clean:
+	state = RbpToRspOffsetStateImpossible;
+	offset = 0;
+	goto done;
 }
 
 void
@@ -1759,6 +2111,21 @@ Oracle::Function::registerLivenessCorrect() const
 }
 
 bool
+Oracle::Function::rbpToRspOffsetsCorrect() const
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT rbpOffsetCorrect FROM functionAttribs WHERE functionHead = ?");
+	bind_int64(stmt, 1, rip);
+	std::vector<unsigned long> a;
+	extract_int64_column(stmt, 0, a);
+	if (a.size() == 0)
+		return false;
+	assert(a.size() == 1);
+	return !!a[0];
+}
+
+bool
 Oracle::Function::aliasingConfigCorrect() const
 {
 	static sqlite3_stmt *stmt;
@@ -1778,7 +2145,7 @@ Oracle::Function::setRegisterLivenessCorrect(bool x)
 {
 	static sqlite3_stmt *stmt;
 	if (!stmt)
-		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect, aliasingCorrect) VALUES (?, ?, 0)");
+		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect, rbpOffsetCorrect, aliasingCorrect) VALUES (?, ?, 0, 0)");
 	bind_int64(stmt, 1, rip);
 	bind_int64(stmt, 2, x);
 
@@ -1788,6 +2155,89 @@ Oracle::Function::setRegisterLivenessCorrect(bool x)
 	rc = sqlite3_reset(stmt);
 	assert(rc == SQLITE_OK);
 }
+
+void
+Oracle::Function::setRbpToRspOffsetsCorrect(bool x)
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("UPDATE functionAttribs SET rbpOffsetCorrect = ? WHERE functionHead = ?");
+	bind_int64(stmt, 2, rip);
+	bind_int64(stmt, 1, x);
+
+	int rc;
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+	rc = sqlite3_reset(stmt);
+	assert(rc == SQLITE_OK);
+}
+
+void
+Oracle::getRbpToRspOffset(unsigned long rip, enum RbpToRspOffsetState *state, unsigned long *offset)
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT rbpToRspDeltaState,rbpToRspDelta FROM instructionAttributes WHERE rip = ?");
+	bind_int64(stmt, 1, rip);
+	int rc = sqlite3_step(stmt);
+	if (rc == SQLITE_DONE) {
+		/* Not entered in database yet */
+		*state = RbpToRspOffsetStateUnknown;
+		*offset = 0;
+	} else {
+		assert(rc == SQLITE_ROW);
+		assert(sqlite3_column_type(stmt, 0) == SQLITE_INTEGER);
+		assert(sqlite3_column_type(stmt, 1) == SQLITE_INTEGER);
+		switch (sqlite3_column_int64(stmt, 0)) {
+		case 0:
+			*state = RbpToRspOffsetStateUnknown;
+			break;
+		case 1:
+			*state = RbpToRspOffsetStateValid;
+			break;
+		case 2:
+			*state = RbpToRspOffsetStateImpossible;
+			break;
+		default:
+			abort();
+		}
+		*offset = sqlite3_column_int64(stmt, 1);
+		rc = sqlite3_step(stmt);
+		assert(rc == SQLITE_DONE);
+	}
+	sqlite3_reset(stmt);
+}
+
+void
+Oracle::setRbpToRspOffset(unsigned long r,
+			  RbpToRspOffsetState state,
+			  unsigned long offset)
+{
+	static sqlite3_stmt *stmt;
+	int rc;
+
+	if (!stmt)
+		stmt = prepare_statement(
+			"UPDATE instructionAttributes SET rbpToRspDeltaState = ?, rbpToRspDelta = ? WHERE rip = ?");
+	switch (state) {
+	case RbpToRspOffsetStateUnknown:
+		bind_int64(stmt, 1, 0);
+		break;
+	case RbpToRspOffsetStateValid:
+		bind_int64(stmt, 1, 1);
+		break;
+	case RbpToRspOffsetStateImpossible:
+		bind_int64(stmt, 1, 2);
+		break;
+	default:
+		abort();
+	}
+	bind_int64(stmt, 2, offset);
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+	sqlite3_reset(stmt);
+}
+
 
 void
 Oracle::Function::setAliasingConfigCorrect(bool x)
