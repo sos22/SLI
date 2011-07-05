@@ -2779,6 +2779,14 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					  true,
 					  *it);
 
+		std::set<InstructionSet> conflictClusters;
+		getConflictingStoreClusters(sm, oracle, conflictClusters);
+
+		if (conflictClusters.size() == 0) {
+			printf("\t\tNo available conflicting stores?\n");
+			continue;
+		}
+
 		VexPtr<IRExpr, &ir_heap> survive(
 			survivalConstraintIfExecutedAtomically(sm, oracle, token));
 
@@ -2812,12 +2820,6 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		}
 
 		VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(sm));
-
-		std::set<InstructionSet> conflictClusters;
-		getConflictingStoreClusters(sm, oracle, conflictClusters);
-
-		if (conflictClusters.size() == 0)
-			printf("\t\tNo available conflicting stores?\n");
 
 		bool foundRace = false;
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
