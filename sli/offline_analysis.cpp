@@ -2810,6 +2810,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		if (mightCrash) {
 			fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
 			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+			continue;
 		}
 
 		VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(sm));
