@@ -2733,6 +2733,13 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					      false,
 					      *it);
 
+		if (dynamic_cast<StateMachineNoCrash *>(cr->sm)) {
+			/* Once you've reduced the machine to
+			   definitely-doesn't-crash there's not much
+			   point in looking any further, so stop. */
+			fprintf(_logfile, "Machine definitely survives -> stop now\n");
+			return;
+		}
 		/* Most instructions produce basically the same
 		   machine as their neighbours, so it's a bit of a
 		   waste of time to consider all of them.  Instead, we
