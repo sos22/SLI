@@ -212,6 +212,7 @@ optimise_condition_calculation(
 			Iop_CmpLT64S,
 			dep1,
 			IRExpr_Const(IRConst_U32(0)));
+		of = IRExpr_Const(IRConst_U1(0));
 		break;
 	case AMD64G_CC_OP_ADDW:
 		sf = IRExpr_Binop(
