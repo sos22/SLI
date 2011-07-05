@@ -744,6 +744,7 @@ irexprAliasingClass(IRExpr *expr,
 		return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
 	case Iex_Unop:
 		switch (expr->Iex.Unop.op) {
+		case Iop_1Uto8:
 		case Iop_8Uto64:
 		case Iop_8Sto64:
 		case Iop_16Uto64:

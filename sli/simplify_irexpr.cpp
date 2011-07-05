@@ -1679,21 +1679,30 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			*done_something = true;
 			return a;
 		}
-		if (src->Iex.Unop.op == Iop_BadPtr &&
-		    src->Iex.Unop.arg->tag == Iex_Associative &&
-		    src->Iex.Unop.arg->Iex.Associative.op == Iop_Add64 &&
-		    src->Iex.Unop.arg->Iex.Associative.nr_arguments == 2 &&
-		    src->Iex.Unop.arg->Iex.Associative.contents[0]->tag == Iex_Const) {
-			/* BadPtr(k + x) -> BadPtr(x) if k is a
-			 * constant.  That's not strictly speaking
-			 * true, because it's always possible that k
-			 * is enough to push you over the boundary
-			 * between valid and invalid memory, but
-			 * that's so rare that I'm willing to ignore
-			 * it. */
-			*done_something = true;
-			src->Iex.Unop.arg = src->Iex.Unop.arg->Iex.Associative.contents[1];
-			return src;
+		if (src->Iex.Unop.op == Iop_BadPtr) {
+			if (src->Iex.Unop.arg->tag == Iex_Associative &&
+			    src->Iex.Unop.arg->Iex.Associative.op == Iop_Add64 &&
+			    src->Iex.Unop.arg->Iex.Associative.nr_arguments == 2 &&
+			    src->Iex.Unop.arg->Iex.Associative.contents[0]->tag == Iex_Const) {
+				/* BadPtr(k + x) -> BadPtr(x) if k is
+				 * a constant.  That's not strictly
+				 * speaking true, because it's always
+				 * possible that k is enough to push
+				 * you over the boundary between valid
+				 * and invalid memory, but that's so
+				 * rare that I'm willing to ignore
+				 * it. */
+				*done_something = true;
+				src->Iex.Unop.arg = src->Iex.Unop.arg->Iex.Associative.contents[1];
+				return src;
+			}
+			if (src->Iex.Unop.arg->tag == Iex_Get &&
+			    src->Iex.Unop.arg->Iex.Get.offset == offsetof(VexGuestAMD64State, guest_FS_ZERO)) {
+				/* The FS register is assumed to
+				   always point at valid memory. */
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(0));
+			}
 		}
 		if (src->Iex.Unop.arg->tag == Iex_Const) {
 			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;

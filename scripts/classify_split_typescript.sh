@@ -51,6 +51,16 @@ then
     result "generated_summary"
 fi
 
+if matches "WARNING: Cannot determine any condition"
+then
+    result "no_survivors"
+fi
+
+if matches "Machine definitely survives"
+then
+    result "crash_impossible"
+fi
+
 if ! matches "Cluster:"
 then
     result "no_store_machines"
