@@ -179,6 +179,9 @@ optimise_condition_calculation(
 	case AMD64G_CC_OP_SUBB:
 		zf = IRExpr_Binop(Iop_CmpEQ8, dep1, dep2);
 		break;
+	case AMD64G_CC_OP_SUBW:
+		zf = IRExpr_Binop(Iop_CmpEQ16, dep1, dep2);
+		break;
 	case AMD64G_CC_OP_SUBL:
 	case AMD64G_CC_OP_SUBQ:
 		zf = IRExpr_Binop(
@@ -250,9 +253,20 @@ optimise_condition_calculation(
 		else
 			printf("CondL needs both sf and of; op %llx\n", cc_op->Iex.Const.con->Ico.U64);
 		break;
+	case AMD64CondLE:
+		if (sf && of && zf)
+			res = IRExpr_Binop(
+				Iop_Or1,
+				IRExpr_Binop(
+					Iop_Xor1,
+					sf,
+					of),
+				zf);
+		else
+			printf("CondLE needs sf, of, and zf; op %llx\n", cc_op->Iex.Const.con->Ico.U64);
+		break;
 	default:
-		printf("Unknown CC condition %ld (op %lld)\n",
-		       cond, cc_op->Iex.Const.con->Ico.U64);
+		break;
 	}
 	if (!res)
 		printf("Cannot handle CC condition %ld, op %lld\n",
