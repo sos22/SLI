@@ -43,7 +43,7 @@ FILE *_logfile = stdout;
 #define DBG(...) do {} while (0)
 //#define DBG printf
 
-void dump_heap_usage(void);
+void dump_heap_usage(Heap *h, FILE *f);
 
 struct arena;
 
@@ -79,6 +79,7 @@ struct arena {
 #define ARENA_CONTENT_SIZE ((2ul << 20) - sizeof(struct arena))
 
 static struct allocation_header *raw_alloc(Heap *h, VexAllocType *t, unsigned long size);
+static bool gc_in_progress;
 
 Heap main_heap;
 extern Heap ir_heap;
@@ -117,11 +118,17 @@ new_arena(Heap *h, size_t content_size)
 	   killer, set timed_out, as that encourages the higher-level
 	   analysis to get out as quickly as possible, which usually
 	   frees up large amounts of memory. */
-	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE * 3) {
-		if (!_timed_out)
+	if (!gc_in_progress &&
+	    main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE * 3) {
+		if (!_timed_out) {
 			fprintf(_logfile,
 				"Forcing timeout due to excessive memory usage (main heap %ld, ir_heap %ld)\n",
 				main_heap.heap_used, ir_heap.heap_used);
+			fprintf(_logfile, "main heap usage:\n");
+			dump_heap_usage(&main_heap, _logfile);
+			fprintf(_logfile, "IR heap usage:\n");
+			dump_heap_usage(&ir_heap, _logfile);
+		}
 		_timed_out = true;
 	}
 
@@ -221,6 +228,9 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 
 	printf("Major GC starts\n");
 
+	assert(!gc_in_progress);
+	gc_in_progress = true;
+
 	gc.depth = 0;
 	gc.h = h;
 
@@ -308,6 +318,7 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 	LibVEX_alloc_sanity_check(h);
 
 	printf("Major GC finished; %ld bytes in heap\n", h->heap_used);
+	gc_in_progress = false;
 }
 
 void
@@ -504,7 +515,7 @@ void HeapUsageVisitor::visit(void *&ptr)
 }
 
 void
-dump_heap_usage(Heap *h)
+dump_heap_usage(Heap *h, FILE *f)
 {
 	VexAllocType *cursor;
 	for (cursor = h->headType; cursor; cursor = cursor->next) {
@@ -530,10 +541,10 @@ dump_heap_usage(Heap *h)
 	for (unsigned x = 0; x < h->nr_gc_roots; x++)
 		visitor.visit(*h->gc_roots[x]);
 
-	printf("Live:\n");
+	fprintf(f, "Live:\n");
 	for (cursor = h->headType; cursor; cursor = cursor->next)
-		printf("%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
-	printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
+		fprintf(f, "%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
+	fprintf(f, "%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
 	visitor.heap_used = 0;
 	visitor.nr_allocations = 0;
 
@@ -553,10 +564,10 @@ dump_heap_usage(Heap *h)
 		}
 	}
 
-	printf("\nDragging:\n");
+	fprintf(f, "\nDragging:\n");
 	for (cursor = h->headType; cursor; cursor = cursor->next)
-		printf("%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
-	printf("%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
+		fprintf(f, "%8ld\t%8d\t%s\n", cursor->total_allocated, cursor->nr_allocated, cursor->name);
+	fprintf(f, "%8ld\t%8d\ttotal\n", visitor.heap_used, visitor.nr_allocations);
 
 	for (struct arena *a = h->head_arena; a; a = a->next) {
 		unsigned offset;
