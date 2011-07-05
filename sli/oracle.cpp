@@ -1638,8 +1638,10 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 		rbp = NULL;
 	if (!rsp && !rbp)
 		goto join_predecessors;
-	if (rsp && rbp)
+	if (rsp && rbp) {
+		printf("RSP and RBP updated together?\n");
 		goto impossible;
+	}
 
 	if (rsp) {
 		if (rsp->tag == Iex_Get) {
@@ -1671,8 +1673,12 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 		    rsp->Iex.Associative.nr_arguments == 2 &&
 		    rsp->Iex.Associative.op == Iop_Add64 &&
 		    rsp->Iex.Associative.contents[0]->tag == Iex_Get &&
-		    rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
-		    rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RSP) {
+		    ((rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
+		      rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RSP) ||
+		     (rsp->Iex.Associative.contents[1]->tag == Iex_Unop &&
+		      rsp->Iex.Associative.contents[1]->Iex.Unop.op == Iop_Neg64 &&
+		      rsp->Iex.Associative.contents[1]->Iex.Unop.arg->tag == Iex_Get &&
+		      rsp->Iex.Associative.contents[1]->Iex.Unop.arg->Iex.Get.offset == OFFSET_amd64_RSP)) ) {
 			/* Adding a register to RSP -> alloca() */
 			goto impossible_clean;
 		}
@@ -1683,7 +1689,6 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	} else {
 		assert(rbp);
 
-		rbp = simplifyIRExpr(rbp, AllowableOptimisations::defaultOptimisations);
 		if (rbp->tag == Iex_Get) {
 			if (rbp->Iex.Get.offset == OFFSET_amd64_RBP) {
 				abort();
@@ -1719,7 +1724,7 @@ join_predecessors:
 	state = RbpToRspOffsetStateUnknown;
 	{
 		std::vector<unsigned long> predecessors;
-		addPredecessors(rip, predecessors);
+		addPredecessorsNonCall(rip, predecessors);
 
 		for (std::vector<unsigned long>::iterator it = predecessors.begin();
 		     it != predecessors.end();
@@ -1727,8 +1732,10 @@ join_predecessors:
 			enum RbpToRspOffsetState pred_state;
 			unsigned long pred_offset;
 			oracle->getRbpToRspOffset(*it, &pred_state, &pred_offset);
-			if (pred_state == RbpToRspOffsetStateImpossible)
-				goto impossible;
+			if (pred_state == RbpToRspOffsetStateImpossible) {
+				printf("Predecessor rbp->rsp is impossible\n");
+				goto impossible_clean;
+			}
 			if (pred_state == RbpToRspOffsetStateUnknown)
 				continue;
 			assert(pred_state == RbpToRspOffsetStateValid);
@@ -1738,8 +1745,11 @@ join_predecessors:
 				continue;
 			}
 			assert(state == RbpToRspOffsetStateValid);
-			if (offset != pred_offset)
+			if (offset != pred_offset) {
+				printf("Predecessor RBP->RSP inconsistent: %ld vs %ld\n",
+				       offset, pred_offset);
 				goto impossible;
+			}
 		}
 	}
 	if (state == RbpToRspOffsetStateUnknown) {
@@ -1921,22 +1931,31 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 }
 
 void
-Oracle::Function::addPredecessors(unsigned long rip, std::vector<unsigned long> &out)
+Oracle::Function::addPredecessorsNonCall(unsigned long rip, std::vector<unsigned long> &out)
 {
-	static sqlite3_stmt *stmt1, *stmt2, *stmt3;
+	static sqlite3_stmt *stmt1, *stmt2;
 
-	if (!stmt1 || !stmt2 || !stmt3) {
-		assert(!stmt1 && !stmt2 && !stmt3);
+	if (!stmt1 || !stmt2) {
+		assert(!stmt1 && !stmt2);
 		stmt1 = prepare_statement("SELECT rip FROM fallThroughRips WHERE dest = ?");
 		stmt2 = prepare_statement("SELECT rip FROM branchRips WHERE dest = ?");
-		stmt3 = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
 	}
 	bind_int64(stmt1, 1, rip);
 	bind_int64(stmt2, 1, rip);
-	bind_int64(stmt3, 1, rip);
 	extract_int64_column(stmt1, 0, out);
 	extract_int64_column(stmt2, 0, out);
-	extract_int64_column(stmt3, 0, out);
+}
+
+void
+Oracle::Function::addPredecessors(unsigned long rip, std::vector<unsigned long> &out)
+{
+	static sqlite3_stmt *stmt;
+
+	addPredecessorsNonCall(rip, out);
+	if (!stmt)
+		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
+	bind_int64(stmt, 1, rip);
+	extract_int64_column(stmt, 0, out);
 }
 
 void
@@ -2233,6 +2252,7 @@ Oracle::setRbpToRspOffset(unsigned long r,
 		abort();
 	}
 	bind_int64(stmt, 2, offset);
+	bind_int64(stmt, 3, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
@@ -2373,4 +2393,18 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 		if (getInstructionSize(as, dominators[x]) >= minimum_size)
 			break;
 	return dominators[x];
+}
+
+bool
+Oracle::getRbpToRspDelta(unsigned long rip, long *out)
+{
+	RbpToRspOffsetState state;
+	unsigned long o;
+	getRbpToRspOffset(rip, &state, &o);
+	if (state == RbpToRspOffsetStateValid) {
+		*out = o;
+		return true;
+	} else {
+		return false;
+	}
 }

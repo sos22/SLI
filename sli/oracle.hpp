@@ -13,8 +13,6 @@ public:
 };
 
 class OracleInterface : public GarbageCollected<OracleInterface> {
-protected:
-	virtual void _visit(HeapVisitor &hv) = 0;
 public:
 	virtual bool storeIsThreadLocal(StateMachineSideEffectStore *) = 0;
 	virtual bool loadIsThreadLocal(StateMachineSideEffectLoad *) = 0;
@@ -24,8 +22,7 @@ public:
 					      StateMachineSideEffectLoad *) = 0;
 	virtual bool memoryAccessesMightAlias(StateMachineSideEffectStore *,
 					      StateMachineSideEffectStore *) = 0;
-
-	void visit(HeapVisitor &hv) { _visit(hv); }
+	virtual bool getRbpToRspDelta(unsigned long rip, long *out) = 0;
 	NAMED_CLASS
 };
 
@@ -202,6 +199,7 @@ public:
 		void getInstructionsInFunction(std::vector<unsigned long> &out) const;
 		void updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle);
 		void updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle);
+		void addPredecessorsNonCall(unsigned long rip, std::vector<unsigned long> &out);
 		void addPredecessors(unsigned long rip, std::vector<unsigned long> &out);
 		void updateSuccessorInstructionsAliasing(unsigned long rip, AddressSpace *as, std::vector<unsigned long> *changed,
 							 Oracle *oracle);
@@ -272,7 +270,7 @@ private:
 	void getRbpToRspOffset(unsigned long rip, RbpToRspOffsetState *state, unsigned long *offset);
 	void setRbpToRspOffset(unsigned long rip, RbpToRspOffsetState state, unsigned long offset);
 
-	void _visit(HeapVisitor &hv) {
+	void visit(HeapVisitor &hv) {
 		hv(ms);
 		hv(crashedThread);
 	}
@@ -308,6 +306,8 @@ public:
 	void getAllPossiblyRacingLoads(std::vector<unsigned long> &out) const;
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);
+
+	bool getRbpToRspDelta(unsigned long rip, long *out);
 
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)
