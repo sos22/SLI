@@ -2020,8 +2020,8 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
 			"UPDATE instructionAttributes SET alias0 = ?, alias1 = ?, alias2 = ?, alias3 = ?, alias4 = ?, alias5 = ?, alias6 = ?, alias7 = ?, alias8 = ?, alias9 = ?, alias10 = ?, alias11 = ?, alias12 = ?, alias13 = ?, alias14 = ?, alias15 = ? WHERE rip = ?"
 			);
 	for (i = 0; i < NR_REGS; i++)
-		sqlite3_bind_int64(stmt, i, config.v[i]);
-	sqlite3_bind_int64(stmt, NR_REGS, r);
+		bind_int64(stmt, i + 1, config.v[i]);
+	bind_int64(stmt, NR_REGS + 1, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
