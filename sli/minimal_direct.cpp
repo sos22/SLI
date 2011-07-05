@@ -30,13 +30,15 @@ void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 		    GarbageCollectionToken token)
 {
-	printCrashSummary(summary, stdout);
+	printCrashSummary(summary, _logfile);
 	char *fragment = buildPatchForCrashSummary(oracle, summary,
 						   vex_asprintf("patch%d", cntr++));
-	if (fragment)
+	if (fragment) {
+		fprintf(_logfile, "Patch fragment:\n");
+		fputs(fragment, _logfile);
 		fputs(fragment, output);
-	else
-		printf("No patch generated!\n");
+	} else
+		fprintf(_logfile, "No patch generated!\n");
 }
 
 void
