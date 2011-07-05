@@ -146,8 +146,14 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->loads.count(smsel->rip))
-			out |= it->stores;
+		if (it->loads.count(smsel->rip)) {
+			for (std::set<unsigned long>::iterator it2 = it->stores.begin();
+			     it2 != it->stores.end();
+			     it2++) {
+				if (!(*it2 & ~(1ul << 63)))
+					out.insert(*it2);
+			}
+		}
 	}
 }
 
@@ -194,22 +200,24 @@ Oracle::loadIsThreadLocal(StateMachineSideEffectLoad *s)
 }
 
 void
-Oracle::getAllPossiblyRacingLoads(std::vector<unsigned long> &out) const
+Oracle::getAllMemoryAccessingInstructions(std::vector<unsigned long> &out) const
 {
-	std::set<unsigned long> allRelevantLoads;
+	std::set<unsigned long> allInstructions;
 	
 	for (std::vector<tag_entry>::const_iterator it = tag_table.begin();
 	     it != tag_table.end();
-	     it++)
-		if (it->stores.size() != 0) {
-			for (std::set<unsigned long>::iterator it2 =
-				     it->loads.begin();
-			     it2 != it->loads.end();
-			     it2++)
-				allRelevantLoads.insert(*it2);
-		}
-	for (std::set<unsigned long>::iterator it = allRelevantLoads.begin();
-	     it != allRelevantLoads.end();
+	     it++) {
+		for (std::set<unsigned long>::iterator it2 = it->stores.begin();
+		     it2 != it->stores.end();
+		     it2++)
+			allInstructions.insert(*it2 & ~(1ul << 63));
+		for (std::set<unsigned long>::iterator it2 = it->loads.begin();
+		     it2 != it->loads.end();
+		     it2++)
+			allInstructions.insert(*it2 & ~(1ul << 63));
+	}
+	for (std::set<unsigned long>::iterator it = allInstructions.begin();
+	     it != allInstructions.end();
 	     it++)
 		out.push_back(*it);
 }

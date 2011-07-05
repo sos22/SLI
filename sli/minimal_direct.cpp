@@ -145,11 +145,12 @@ main(int argc, char *argv[])
 		consider_rip(strtoul(argv[4], NULL, 16), ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
 		FILE *timings = fopen("timings.txt", "w");
-		std::vector<unsigned long> possiblyRacingLoads;
-		oracle->getAllPossiblyRacingLoads(possiblyRacingLoads);
-		shuffle(possiblyRacingLoads);
-		for (std::vector<unsigned long>::iterator it = possiblyRacingLoads.begin();
-		     it != possiblyRacingLoads.end();
+		std::vector<unsigned long> targets;
+		oracle->getAllMemoryAccessingInstructions(targets);
+		shuffle(targets);
+		printf("%zd instructions to protect\n", targets.size());
+		for (std::vector<unsigned long>::iterator it = targets.begin();
+		     it != targets.end();
 		     it++)
 			consider_rip(*it, ms, thr, oracle, df, timings, ALLOW_GC);
 	}

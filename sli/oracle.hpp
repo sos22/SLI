@@ -303,7 +303,7 @@ public:
 				AddressSpace *as,
 				unsigned minimum_size);
 
-	void getAllPossiblyRacingLoads(std::vector<unsigned long> &out) const;
+	void getAllMemoryAccessingInstructions(std::vector<unsigned long> &out) const;
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);
 
