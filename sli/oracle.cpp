@@ -150,7 +150,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 			for (std::set<unsigned long>::iterator it2 = it->stores.begin();
 			     it2 != it->stores.end();
 			     it2++) {
-				if (!(*it2 & ~(1ul << 63)))
+				if (!(*it2 & (1ul << 63)))
 					out.insert(*it2);
 			}
 		}
