@@ -1777,7 +1777,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			   eliminate binary -. */
 			*done_something = true;
 			src->Iex.Binop.op = (IROp)(src->Iex.Binop.op - Iop_Sub8 + Iop_Add8);
-			src->Iex.Binop.arg2 =
+			r = src->Iex.Binop.arg2 =
 				optimiseIRExprFP(
 					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
 						     r ),
