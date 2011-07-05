@@ -96,97 +96,7 @@ public:
 		}
 	};
 
-	/* Pointer aliasing stuff.  Note that ``stack'' in this
-	   context means the *current* stack frame: a pointer without
-	   the stack bit set could still point into a *calling*
-	   functions' stack frame, and that wouldn't be a bug. */
-	class PointerAliasingSet : public Named {
-		int v;
-		char *mkName() const {
-			const char *r;
-			switch (v) {
-			case 0:
-				r = "()";
-				break;
-			case 1:
-				r = "not-a-pointer";
-				break;
-			case 2:
-				r = "stack-pointer";
-				break;
-			case 3:
-				r = "not-a-pointer|stack-pointer";
-				break;
-			case 4:
-				r = "non-stack-pointer";
-				break;
-			case 5:
-				r = "not-a-pointer|non-stack-pointer";
-				break;
-			case 6:
-				r = "stack-pointer|non-stack-pointer";
-				break;
-			case 7:
-				r = "*";
-				break;
-			default:
-				abort();
-			}
-			return strdup(r);
-		}
-	public:
-		PointerAliasingSet(int _v) : v(_v) {}
-
-		PointerAliasingSet() : v(0) {}
-		static const PointerAliasingSet notAPointer;
-		static const PointerAliasingSet stackPointer;
-		static const PointerAliasingSet nonStackPointer;
-		static const PointerAliasingSet anything;
-
-		PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
-		PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
-		PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
-		bool operator !=(PointerAliasingSet o) const { return v != o.v; }
-		operator bool() const { return v != 0; }
-	};
-	class RegisterAliasingConfiguration {
-		RegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
-		RegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
-	public:
-		RegisterAliasingConfiguration() : stackHasLeaked(false) {}
-		PointerAliasingSet v[NR_REGS];
-		bool stackHasLeaked;
-		
-		void operator|=(const RegisterAliasingConfiguration &src) {
-			stackHasLeaked |= src.stackHasLeaked;
-			for (int i = 0; i < NR_REGS; i++)
-				v[i] = v[i] | src.v[i];
-		}
-		bool operator != (const RegisterAliasingConfiguration &x) const {
-			if (stackHasLeaked != x.stackHasLeaked)
-				return true;
-			for (int i = 0; i < NR_REGS; i++)
-				if (v[i] != x.v[i])
-					return true;
-			return false;
-		}
-		/* This should be const, but C++ can't quite manage the
-		 * initialisation in that case, poor thing. */
-		static RegisterAliasingConfiguration functionEntryConfiguration;
-
-		/* Any aliasing pattern possible. */
-		static RegisterAliasingConfiguration unknown;
-
-		/* Check whether a and b mght point at the same bit of
-		   memory (i.e. have intersecting pointer aliasing
-		   sets) given @this's register aliasing
-		   configuration.  Note that this assumes that both @a
-		   and @b are pointers i.e. it's not just asking
-		   whether @a and @b might be equal. */
-		bool ptrsMightAlias(IRExpr *a, IRExpr *b) const;
-
-		void prettyPrint(FILE *) const;
-	};
+	class RegisterAliasingConfiguration;
 
 	class Function : public Named {
 		friend class Oracle;
@@ -221,7 +131,9 @@ public:
 
 		LivenessSet liveOnEntry();
 		LivenessSet liveOnEntry(unsigned long);
+		bool aliasConfigOnEntryToInstruction(unsigned long rip, RegisterAliasingConfiguration *out);
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);
+		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip, bool *b);
 		void setAliasConfigOnEntryToInstruction(unsigned long rip, const RegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
 		bool addInstruction(unsigned long rip,
@@ -234,6 +146,103 @@ public:
 
 		void visit(HeapVisitor &hv) { }
 		NAMED_CLASS
+	};
+
+	/* Pointer aliasing stuff.  Note that ``stack'' in this
+	   context means the *current* stack frame: a pointer without
+	   the stack bit set could still point into a *calling*
+	   functions' stack frame, and that wouldn't be a bug. */
+	class PointerAliasingSet : public Named {
+		friend class RegisterAliasingConfiguration;
+		             
+		int v;
+		char *mkName() const {
+			const char *r;
+			switch (v) {
+			case 0:
+				r = "()";
+				break;
+			case 1:
+				r = "not-a-pointer";
+				break;
+			case 2:
+				r = "stack-pointer";
+				break;
+			case 3:
+				r = "not-a-pointer|stack-pointer";
+				break;
+			case 4:
+				r = "non-stack-pointer";
+				break;
+			case 5:
+				r = "not-a-pointer|non-stack-pointer";
+				break;
+			case 6:
+				r = "stack-pointer|non-stack-pointer";
+				break;
+			case 7:
+				r = "*";
+				break;
+			default:
+				abort();
+			}
+			return strdup(r);
+		}
+		PointerAliasingSet() : v(0xf001dead) {}
+	public:
+		PointerAliasingSet(int _v) : v(_v) {}
+
+		static const PointerAliasingSet notAPointer;
+		static const PointerAliasingSet stackPointer;
+		static const PointerAliasingSet nonStackPointer;
+		static const PointerAliasingSet anything;
+
+		PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
+		PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
+		PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
+		bool operator !=(PointerAliasingSet o) const { return v != o.v; }
+		operator bool() const { return v != 0; }
+		operator unsigned long() const { return v; }
+	};
+	class RegisterAliasingConfiguration {
+		friend RegisterAliasingConfiguration Function::aliasConfigOnEntryToInstruction(unsigned long rip,
+											       bool *b);
+		RegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
+		RegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
+		RegisterAliasingConfiguration() : stackHasLeaked(false) {}
+	public:
+		bool stackHasLeaked;
+		PointerAliasingSet v[NR_REGS];
+		
+		void operator|=(const RegisterAliasingConfiguration &src) {
+			stackHasLeaked |= src.stackHasLeaked;
+			for (int i = 0; i < NR_REGS; i++)
+				v[i] = v[i] | src.v[i];
+		}
+		bool operator != (const RegisterAliasingConfiguration &x) const {
+			if (stackHasLeaked != x.stackHasLeaked)
+				return true;
+			for (int i = 0; i < NR_REGS; i++)
+				if (v[i] != x.v[i])
+					return true;
+			return false;
+		}
+		/* This should be const, but C++ can't quite manage the
+		 * initialisation in that case, poor thing. */
+		static RegisterAliasingConfiguration functionEntryConfiguration;
+
+		/* Any aliasing pattern possible. */
+		static RegisterAliasingConfiguration unknown;
+
+		/* Check whether a and b mght point at the same bit of
+		   memory (i.e. have intersecting pointer aliasing
+		   sets) given @this's register aliasing
+		   configuration.  Note that this assumes that both @a
+		   and @b are pointers i.e. it's not just asking
+		   whether @a and @b might be equal. */
+		bool ptrsMightAlias(IRExpr *a, IRExpr *b) const;
+
+		void prettyPrint(FILE *) const;
 	};
 
 	struct tag_entry {

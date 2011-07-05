@@ -89,6 +89,8 @@ Oracle::RegisterAliasingConfiguration Oracle::RegisterAliasingConfiguration::fun
 Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
 {
 	stackHasLeaked = false;
+	for (int i = 0; i < NR_REGS; i++)
+		v[i] = Oracle::PointerAliasingSet::anything;
 	v[1] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rcx */
 	v[2] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rdx */
 	v[4] = Oracle::PointerAliasingSet::stackPointer; /* rsp */
@@ -737,9 +739,13 @@ irexprAliasingClass(IRExpr *expr,
 		 * registers. */
 		/* Hackety hackety hack */
 		return Oracle::PointerAliasingSet::anything;
-	case Iex_RdTmp:
+	case Iex_RdTmp: {
 		assert(temps);
-		return (*temps)[expr->Iex.RdTmp.tmp];
+		std::map<IRTemp, Oracle::PointerAliasingSet>::iterator it;
+		it = temps->find(expr->Iex.RdTmp.tmp);
+		assert(it != temps->end());
+		return it->second;
+	}
 	case Iex_Const:
 		return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
 	case Iex_Unop:
@@ -778,16 +784,15 @@ irexprAliasingClass(IRExpr *expr,
 			 * pointer to zone A and y is not a pointer of
 			 * any sort.  Otherwise, it's just not a
 			 * pointer. */ {
-			Oracle::PointerAliasingSet res;
 			if (a2 & Oracle::PointerAliasingSet::notAPointer) {
-				res = a1;
+				Oracle::PointerAliasingSet res = a1;
 				if (a2 & (Oracle::PointerAliasingSet::stackPointer |
 					  Oracle::PointerAliasingSet::nonStackPointer))
 					res = res | Oracle::PointerAliasingSet::notAPointer;
+				return res;
 			} else {
-				res = Oracle::PointerAliasingSet::notAPointer;
+				return Oracle::PointerAliasingSet::notAPointer;
 			}
-			return res;
 		}
 		case Iop_Add64:
 		case Iop_And64:
@@ -823,17 +828,26 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_Add64:
 		case Iop_And64:
 		{
-			Oracle::PointerAliasingSet res;
 			for (int i = 0; i < expr->Iex.Associative.nr_arguments; i++) {
-				if (expr->Iex.Associative.contents[i]->tag != Iex_Const)
-					res = res | irexprAliasingClass(expr->Iex.Associative.contents[i],
-									tyenv,
-									config,
-									temps);
+				if (expr->Iex.Associative.contents[i]->tag != Iex_Const) {
+					Oracle::PointerAliasingSet res = 
+						irexprAliasingClass(expr->Iex.Associative.contents[i],
+								    tyenv,
+								    config,
+								    temps);
+					for (int j = i + 1; j < expr->Iex.Associative.nr_arguments; j++) {
+						if (expr->Iex.Associative.contents[j]->tag != Iex_Const)
+							res = res | 
+								irexprAliasingClass(expr->Iex.Associative.contents[j],
+										    tyenv,
+										    config,
+										    temps);
+					}
+					if (!(res & Oracle::PointerAliasingSet::anything))
+						return Oracle::PointerAliasingSet::notAPointer;
+				}
 			}
-			if (!(res & Oracle::PointerAliasingSet::anything))
-				res = Oracle::PointerAliasingSet::notAPointer;
-			return res;
+			return Oracle::PointerAliasingSet::notAPointer;
 		}
 		default:
 			break;
@@ -1158,7 +1172,7 @@ Oracle::Function::liveOnEntry()
 }
 
 Oracle::RegisterAliasingConfiguration
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
+Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 {
 	static sqlite3_stmt *stmt;
 	int rc;
@@ -1171,20 +1185,37 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
 	if (rc == SQLITE_DONE || sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
 		sqlite3_reset(stmt);
+		*b = false;
 		return RegisterAliasingConfiguration::unknown;
 	}
-	RegisterAliasingConfiguration rac;
 	int i;
+	RegisterAliasingConfiguration res;
 	for (i = 0; i < NR_REGS; i++) {
 		unsigned long r;
 		assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
 		r = sqlite3_column_int64(stmt, i);
-		rac.v[r] = PointerAliasingSet(r);
+		res.v[i] = PointerAliasingSet(r);
 	}
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
-	return rac;
+	*b = true;
+	return res;
+}
+
+bool
+Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, Oracle::RegisterAliasingConfiguration *out)
+{
+	bool res;
+	*out = aliasConfigOnEntryToInstruction(rip, &res);
+	return res;
+}
+
+Oracle::RegisterAliasingConfiguration
+Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
+{
+	bool ign;
+	return aliasConfigOnEntryToInstruction(rip, &ign);
 }
 
 void
@@ -1372,12 +1403,18 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 	if (aliasingConfigCorrect())
 		return;
 
-	RegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip));
+	bool aValid;
+	RegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip, &aValid));
+	if (aValid) {
 	RegisterAliasingConfiguration b(a);
-	b |= RegisterAliasingConfiguration::functionEntryConfiguration;
-	if (a != b) {
+		b |= RegisterAliasingConfiguration::functionEntryConfiguration;
+		if (a != b) {
+			*done_something = true;
+			setAliasConfigOnEntryToInstruction(rip, b);
+		}
+	} else {
 		*done_something = true;
-		setAliasConfigOnEntryToInstruction(rip, b);
+		setAliasConfigOnEntryToInstruction(rip, RegisterAliasingConfiguration::functionEntryConfiguration);
 	}
 
 	std::vector<unsigned long> needsUpdating;
@@ -1795,7 +1832,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 	IRStmt *st;
 
 	int nr_statements;
-	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRSB *irsb;
+	try {
+		irsb = as->getIRSBForAddress(-1, rip);
+	} catch (BadMemoryException &e) {
+		return;
+	}
 	IRStmt **statements = irsb->stmts;
 	for (nr_statements = 1;
 	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
@@ -1825,20 +1867,20 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			/* Assume that PutIs never target the NR_REGS registers */
 			break;
 		case Ist_WrTmp:
-			temporaryAliases[st->Ist.WrTmp.tmp] =
-				irexprAliasingClass(st->Ist.WrTmp.data,
-						    tyenv,
-						    config,
-						    &temporaryAliases);
+			temporaryAliases.insert(
+				std::pair<IRTemp, PointerAliasingSet>(st->Ist.WrTmp.tmp,
+								      irexprAliasingClass(st->Ist.WrTmp.data,
+											  tyenv,
+											  config,
+											  &temporaryAliases)));
 			break;
 		case Ist_Store:
 			if (!config.stackHasLeaked) {
-				PointerAliasingSet addr, data;
-				addr = irexprAliasingClass(st->Ist.Store.data,
+				PointerAliasingSet addr = irexprAliasingClass(st->Ist.Store.data,
 							   tyenv,
 							   config,
 							   &temporaryAliases);
-				data = irexprAliasingClass(st->Ist.Store.data,
+				PointerAliasingSet data = irexprAliasingClass(st->Ist.Store.data,
 							   tyenv,
 							   config,
 							   &temporaryAliases);
@@ -1848,26 +1890,23 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			}
 			break;
 		case Ist_CAS:
-			temporaryAliases[st->Ist.CAS.details->oldLo] =
-				PointerAliasingSet::anything;
+			temporaryAliases.insert(
+				std::pair<IRTemp, PointerAliasingSet>(
+					st->Ist.CAS.details->oldLo,
+					PointerAliasingSet::anything));
 			break;
 		case Ist_Dirty: {
-			PointerAliasingSet res;
-			if (tyenv->types[st->Ist.Dirty.details->tmp] == Ity_I64) {
-				if (!strcmp(st->Ist.Dirty.details->cee->name,
-					    "helper_load_64")) {
-					if (config.stackHasLeaked)
-						res = PointerAliasingSet::anything;
-					else
-						res = PointerAliasingSet::notAPointer |
-							PointerAliasingSet::nonStackPointer;
-				} else {
-					res = PointerAliasingSet::anything;
-				}
-			} else {
-				res = PointerAliasingSet::notAPointer;
-			}
-			temporaryAliases[st->Ist.Dirty.details->tmp] = res;
+			PointerAliasingSet res =
+				(tyenv->types[st->Ist.Dirty.details->tmp] == Ity_I64) ?
+				((strcmp(st->Ist.Dirty.details->cee->name, "helper_load_64") ||
+				  config.stackHasLeaked) ?
+				 PointerAliasingSet::anything :
+				 PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer) :
+				PointerAliasingSet::notAPointer;
+			temporaryAliases.insert(
+				std::pair<IRTemp, PointerAliasingSet>(
+					st->Ist.Dirty.details->tmp,
+					res));
 			break;
 		}
 		case Ist_MBE:
@@ -1924,12 +1963,18 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 	getInstructionFallThroughs(rip, _fallThroughRips);
 	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
 	     it != _fallThroughRips.end();
-	     it++)
-		config |= aliasConfigOnEntryToInstruction(*it);
-	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
-	     it != _fallThroughRips.end();
 	     it++) {
-		if (config != aliasConfigOnEntryToInstruction(*it)) {
+		bool b;
+		RegisterAliasingConfiguration succ_config =
+			aliasConfigOnEntryToInstruction(*it, &b);
+		if (b) {
+			RegisterAliasingConfiguration new_config = succ_config;
+			new_config |= config;
+			if (new_config != succ_config) {
+				changed->push_back(*it);
+				setAliasConfigOnEntryToInstruction(*it, succ_config);
+			}
+		} else {
 			changed->push_back(*it);
 			setAliasConfigOnEntryToInstruction(*it, config);
 		}
