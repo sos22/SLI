@@ -1,5 +1,6 @@
 #include <sys/time.h>
 #include <err.h>
+#include <math.h>
 #include <time.h>
 
 #include <vector>
@@ -161,6 +162,9 @@ main(int argc, char *argv[])
 		shuffle(targets);
 		printf("%zd instructions to protect\n", targets.size());
 		double start = now();
+		double low_end_time;
+		double high_end_time;
+		bool first = true;
 		for (std::vector<unsigned long>::iterator it = targets.begin();
 		     it != targets.end();
 		     it++) {
@@ -173,15 +177,47 @@ main(int argc, char *argv[])
 			double completion = (it - targets.begin()) / double(targets.size());
 			double elapsed = now() - start;
 			double total_estimated = elapsed / completion;
-			time_t end = total_estimated + start;
-			printf("Done %zd/%zd(%f%%) in %f seconds (%f each); %f left; finish at %s",
+			double endd = total_estimated + start;
+			if (isinf(endd))
+				continue;
+
+			time_t end = endd;
+			char *times;
+			if (first) {
+				low_end_time = endd;
+				high_end_time = endd;
+				first = false;
+				times = my_asprintf("finish at %s", ctime(&end));
+			} else {
+				low_end_time = low_end_time * .99 + endd * 0.01;
+				high_end_time = high_end_time * .99 + endd * 0.01;
+				if (low_end_time > endd)
+					low_end_time = endd;
+				if (high_end_time < endd)
+					high_end_time = endd;
+				char *t = strdup(ctime(&end));
+				t[strlen(t)-1] = 0;
+				end = low_end_time;
+				char *t2 = strdup(ctime(&end));
+				t2[strlen(t2)-1] = 0;
+				end = high_end_time;
+				char *t3 = strdup(ctime(&end));
+				t3[strlen(t3)-1] = 0;
+				times = my_asprintf("finish at %s [%s,%s]\n",
+						    t, t2, t3);
+				free(t);
+				free(t2);
+				free(t3);
+			}
+			printf("Done %zd/%zd(%f%%) in %f seconds (%f each); %f left; %s",
 			       it - targets.begin(),
 			       targets.size(),
 			       completion * 100,
 			       elapsed,
 			       elapsed / (it - targets.begin()),
 			       total_estimated - elapsed,
-			       ctime(&end));
+			       times);
+			free(times);
 		}
 	}
 
