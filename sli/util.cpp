@@ -97,3 +97,17 @@ readIRExpr(int fd)
 	free(buf);
 	return r;
 }
+
+FILE *
+fopenf(const char *mode, const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	char *path;
+	vasprintf(&path, fmt, args);
+	va_end(args);
+
+	FILE *res = fopen(path, mode);
+	free(path);
+	return res;
+}

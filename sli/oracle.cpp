@@ -851,9 +851,9 @@ irexprAliasingClass(IRExpr *expr,
 	default:
 		break;
 	}
-	printf("Don't know how to compute aliasing sets for ");
-	ppIRExpr(expr, stdout);
-	printf("\n");
+	fprintf(_logfile, "Don't know how to compute aliasing sets for ");
+	ppIRExpr(expr, _logfile);
+	fprintf(_logfile, "\n");
 	return Oracle::PointerAliasingSet::anything;
 }
 
@@ -2368,10 +2368,8 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	dominators.push_back(*it);
 	it++;
 	while (it != instrs.end()) {
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			break;
-		}
 		std::vector<unsigned long> newDominators;
 		findDominators(f, *it, as, newDominators);
 		std::reverse(newDominators.begin(), newDominators.end());

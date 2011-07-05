@@ -324,8 +324,7 @@ evalStateMachine(StateMachine *sm,
 		 Oracle *oracle,
 		 StateMachineEvalContext &ctxt)
 {
-	if (timed_out) {
-		printf("%s timed out\n", __func__);
+	if (TIMEOUT) {
 		*crashes = false; /* Lacking any better ideas */
 		return;
 	}
@@ -355,7 +354,7 @@ evalStateMachine(StateMachine *sm,
 	}
 	if (dynamic_cast<StateMachineUnreached *>(sm)) {
 		/* Whoops... */
-		printf("Evaluating an unreachable state machine?\n");
+		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
 		*crashes = false;
 		return;
 	}
@@ -375,7 +374,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	bool crashes;
 
 	do {
-		if (timed_out)
+		if (TIMEOUT)
 			return NULL;
 
 		LibVEX_maybe_gc(token);
@@ -418,7 +417,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 	*mightSurvive = false;
 	*mightCrash = false;
 	while (!*mightCrash || !*mightSurvive) {
-		if (timed_out)
+		if (TIMEOUT)
 			return false;
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
@@ -455,18 +454,18 @@ public:
 	std::vector<StateMachineSideEffect *> history;
 	void advanceMachine(unsigned tid, NdChooser &chooser, Oracle *oracle);
 	void advanceToSideEffect(unsigned tid, NdChooser &chooser, Oracle *oracle);
-	void dumpHistory(void) const;
+	void dumpHistory(FILE *f) const;
 };
 
 void
-CrossMachineEvalContext::dumpHistory(void) const
+CrossMachineEvalContext::dumpHistory(FILE *f) const
 {
 	for (std::vector<StateMachineSideEffect *>::const_iterator it = history.begin();
 	     it != history.end();
 	     it++) {
-		printf("\t");
-		(*it)->prettyPrint(stdout);
-		printf("\n");
+		fprintf(f, "\t");
+		(*it)->prettyPrint(f);
+		fprintf(f, "\n");
 	}
 }
 
@@ -617,10 +616,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
 	VexPtr<StateMachineEdge, &ir_heap> sme1(new StateMachineEdge(sm1));
 	VexPtr<StateMachineEdge, &ir_heap> sme2(new StateMachineEdge(sm2));
 	while (!*mightCrash || !*mightSurvive) {
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return false;
-		}
 
 		LibVEX_maybe_gc(token);
 
@@ -675,15 +672,13 @@ writeMachineSuitabilityConstraint(
 	VexPtr<Oracle> &oracle,
 	GarbageCollectionToken token)
 {
-	printf("\t\tBuilding write machine suitability constraint.\n");
+	fprintf(_logfile, "\t\tBuilding write machine suitability constraint.\n");
 	VexPtr<IRExpr, &ir_heap> rewrittenAssumption(assumption);
 	NdChooser chooser;
 	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
 	do {
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return NULL;
-		}
 
 		LibVEX_maybe_gc(token);
 
@@ -756,7 +751,7 @@ writeMachineSuitabilityConstraint(
 	
 	if (rewrittenAssumption->tag == Iex_Const &&
 	    rewrittenAssumption->Iex.Const.con->Ico.U64 == 0) {
-		printf("\t\tBad choice of machines\n");
+		fprintf(_logfile, "\t\tBad choice of machines\n");
 		return NULL;
 	}
 	return rewrittenAssumption;
@@ -783,7 +778,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
 	do {
-		if (timed_out)
+		if (TIMEOUT)
 			return false;
 
 		LibVEX_maybe_gc(token);
@@ -922,7 +917,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 		/* This is enforced by the suitability check at the
 		 * top of this function. */
 		if (sectionStart) {
-			printf("Whoops... running store machine and then running load machine doesn't lead to goodness.\n");
+			fprintf(_logfile, "Whoops... running store machine and then running load machine doesn't lead to goodness.\n");
 			/* Give up, shouldn't ever happen. */
 			return false;
 		}
@@ -941,10 +936,8 @@ fixSufficient(StateMachine *writeMachine,
 	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
 
 	do {
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return false;
-		}
 
 		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;
@@ -1027,10 +1020,9 @@ fixSufficient(StateMachine *writeMachine,
 			bool crashes;
 			evalStateMachine(probeMachine, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
-				printf("Fix is insufficient, witness: ");
-				ppIRExpr(readEvalCtxt.pathConstraint, stdout);
-				printf("\n");
-				dbg_break("Failed...\n");
+				fprintf(_logfile, "Fix is insufficient, witness: ");
+				ppIRExpr(readEvalCtxt.pathConstraint, _logfile);
+				fprintf(_logfile, "\n");
 				return false; 
 			}
 		}

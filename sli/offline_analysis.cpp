@@ -148,10 +148,10 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 						       StateMachineCrash::get(),
 						       StateMachineNoCrash::get()));
 		}
-		printf("Generated event %s\n", evt->name());
+		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
 
-	printf("Hit end of block without any events -> no idea why we crashed.\n");
+	fprintf(_logfile, "Hit end of block without any events -> no idea why we crashed.\n");
 	return NULL;
 }
 
@@ -456,7 +456,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 
 	case Ist_CAS:
 		/* Can't backtrack across these */
-		printf("Don't know how to backtrack across CAS statements?\n");
+		fprintf(_logfile, "Don't know how to backtrack across CAS statements?\n");
 		sm = NULL;
 		break;
 
@@ -673,10 +673,8 @@ static bool storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectSt
 static bool
 storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, OracleInterface *oracle)
 {
-	if (timed_out) {
-		printf("%s timed out\n", __func__);
+	if (TIMEOUT)
 		return true;
-	}
 	for (unsigned y = 0; y < sme->sideEffects.size(); y++) {
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y])) {
@@ -722,10 +720,8 @@ removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done
 		      std::set<StateMachine *> &visited,
 		      const AllowableOptimisations &opt)
 {
-	if (timed_out) {
-		printf("%s timed out\n", __func__);
+	if (TIMEOUT)
 		return;
-	}
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
@@ -999,10 +995,8 @@ buildNewStateMachineWithLoadsEliminated(
 	OracleInterface *oracle,
 	bool *done_something)
 {
-	if (timed_out) {
-		printf("%s timed out\n", __func__);
+	if (TIMEOUT)
 		return sme;
-	}
 	StateMachineEdge *res =
 		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
 									     done_something));
@@ -1215,11 +1209,8 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	do {
 		progress = false;
 
-		if (timed_out) {
-			/* Give up */
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return sm;
-		}
 
 		/* Update the set of things which are available on
 		   entry.  This means walking the set of edges and
@@ -1330,10 +1321,8 @@ rewriteStateMachineEdge(StateMachineEdge *sme,
 		edgeMemo.insert(edgeRules[sme]);
 		return rewriteStateMachineEdge(edgeRules[sme], rules, edgeRules, memo, edgeMemo);
 	}
-	if (timed_out) {
-		printf("%s timed out\n", __func__);
+	if (TIMEOUT)
 		return sme;
-	}
 	edgeMemo.insert(sme);
 	sme->target->assertAcyclic();
 	sme->target = rewriteStateMachine(sme->target,
@@ -1609,10 +1598,8 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 	do {
 		progress = false;
 
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return;
-		}
 		/* Iterate over every suspected bisimilarity pair and
 		   check for ``local bisimilarity''.  Once we're
 		   consistent with the local bisimilarity
@@ -1655,7 +1642,7 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	findAllStates(sm, allStates);
 	buildStateMachineBisimilarityMap(sm, bisimilarStates, bisimilarEdges, &allStates, opt);
 
-	if (timed_out)
+	if (TIMEOUT)
 		return sm;
 
 	std::map<StateMachine *, StateMachine *> canonMap;
@@ -1777,10 +1764,8 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 {
 	bool done_something;
 	do {
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return sm;
-		}
 		done_something = false;
 		sm = sm->optimise(opt, oracle, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
@@ -1803,8 +1788,10 @@ getConflictingStoreClusters(StateMachine *sm, Oracle *oracle, std::set<Instructi
 	std::set<unsigned long> potentiallyConflictingStores;
 	std::set<StateMachineSideEffectLoad *> allLoads;
 	findAllLoads(sm, allLoads);
-	if (allLoads.size() == 0)
-		printf("\t\tNo loads left in store machine?\n");
+	if (allLoads.size() == 0) {
+		fprintf(_logfile, "\t\tNo loads left in store machine?\n");
+		return;
+	}
 	for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 	     it != allLoads.end();
 	     it++) {
@@ -1918,10 +1905,8 @@ exploreOneFunctionForCallGraph(unsigned long head,
 		unsigned long i = unexploredInstrsThisFunction.back();
 		unexploredInstrsThisFunction.pop_back();
 
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return NULL;
-		}
 
 		if (cge->instructions->test(i)) {
 			/* Done this instruction already -> move
@@ -1949,7 +1934,6 @@ exploreOneFunctionForCallGraph(unsigned long head,
 				   actually a function head at all.
 				   Kill it. */
 				instrsToCGEntries->purgeByValue(old);
-				printf("Purge %lx for %lx\n", old->headRip, i);
 			}
 		}
 
@@ -2046,7 +2030,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		 * instruction. */
 		cge = exploreOneFunctionForCallGraph(head, depth, false, instrsToCGEntries, as, realFunctionHeads);
 		if (!cge) {
-			printf("%s failed\n", __func__);
+			fprintf(_logfile, "%s failed\n", __func__);
 			return NULL;
 		}
 		assert(instrsToCGEntries->get(head) == cge);
@@ -2079,7 +2063,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					/* It was an inferred head
 					   from an earlier pass, so we
 					   need to get rid of it. */
-					printf("%lx was a pseudo-root; purge.\n", h);
+					fprintf(_logfile, "%lx was a pseudo-root; purge.\n", h);
 					instrsToCGEntries->purgeByValue(old);
 				} else if (old->headRip == h && old->depth <= depth_h) {
 					/* It's the head of an
@@ -2112,7 +2096,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 							     as,
 							     realFunctionHeads);
 			if (!cge) {
-				printf("%s failed on line %d\n", __func__, __LINE__);
+				fprintf(_logfile, "%s failed on line %d\n", __func__, __LINE__);
 				return NULL;
 			}
 			for (gc_pair_ulong_set_t::iterator it = cge->callees->begin();
@@ -2143,7 +2127,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	     it++) {
 		CallGraphEntry *i = instrsToCGEntries->get(*it);
 		if (!i) {
-			printf("Failed to build CG entries for every instruction in %s\n", __func__);
+			fprintf(_logfile, "Failed to build CG entries for every instruction in %s\n", __func__);
 			return NULL;
 		}
 		interesting.insert(i);
@@ -2153,10 +2137,8 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	bool done_something;
 	do {
 		done_something = false;
-		if (timed_out) {
-			printf("%s timed out on line %d\n", __func__, __LINE__);
+		if (TIMEOUT)
 			return NULL;
-		}
 		for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
 		     it != allCGEs.end();
 		     it++) {
@@ -2589,7 +2571,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
 	if (!sm) {
-		printf("Cannot build store machine!\n");
+		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
 	}
 	AllowableOptimisations opt2 =
@@ -2625,18 +2607,19 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 				     &mightSurvive,
 				     &mightCrash,
 				     token)) {
-		printf("Failed to run cross product machine\n");
+		fprintf(_logfile, "Failed to run cross product machine\n");
 		return false;
 	}
-	printf("\t\tRun in parallel with the probe machine, might survive %d, might crash %d\n",
-	       mightSurvive, mightCrash);
+	fprintf(_logfile,
+		"\t\tRun in parallel with the probe machine, might survive %d, might crash %d\n",
+		mightSurvive, mightCrash);
 	
 	/* We know that mightSurvive is true when the load machine is
 	 * run atomically, so if mightSurvive is now false then that
 	 * means that evalCrossProductMachine didn't consider that
 	 * case, which is a bug. */
 	if (!mightSurvive) {
-		assert(timed_out);
+		assert(_timed_out);
 		return false;
 	}
 
@@ -2649,12 +2632,11 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 
 	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
 	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections, token)) {
-		printf("\t\tChose a bad write machine...\n");
+		fprintf(_logfile, "\t\tChose a bad write machine...\n");
 		return true;
 	}
 	if (!fixSufficient(probeMachine, sm, assumption, oracle, remoteMacroSections)) {
-		printf("\t\tHave a fix, but it was insufficient...\n");
-		dbg_break("Failed!\n");
+		fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
 		return true;
 	}
 	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm);
@@ -2681,11 +2663,11 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 	int nr_roots;
 	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);
 	if (!cgRoots) {
-		printf("%s timed out\n", __func__);
+		fprintf(_logfile, "%s failed\n", __func__);
 		return false;
 	}
 	bool result = false;
-	for (int i = 0; !timed_out && i < nr_roots; i++) {
+	for (int i = 0; !TIMEOUT && i < nr_roots; i++) {
 		VexPtr<CFGNode<StackRip>, &ir_heap> storeCFG;
 		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
 		trimCFG(storeCFG.get(), is, 20, false);
@@ -2711,9 +2693,9 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 	int cntr = 0;
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
-	     !timed_out && it != previousInstructions.end();
+	     !TIMEOUT && it != previousInstructions.end();
 	     it++) {
-		printf("Investigating %lx...\n", *it);
+		fprintf(_logfile, "Investigating %lx...\n", *it);
 		LibVEX_maybe_gc(token);
 
 		std::set<unsigned long> terminalFunctions;
@@ -2728,7 +2710,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		VexPtr<CrashReason, &ir_heap> cr(
 			ii->CFGtoCrashReason(CRASHING_THREAD, cfg));
 		if (!cr) {
-			printf("\tCannot build crash reason from CFG\n");
+			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return;
 		}
 		AllowableOptimisations opt =
@@ -2742,8 +2724,6 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					      oracle,
 					      false,
 					      *it);
-
-		printf("\tComputed state machine.\n");
 
 		cr->sm = cr->sm->selectSingleCrashingPath();
 		cr->sm = optimiseStateMachine(cr->sm,
@@ -2766,7 +2746,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		cntr = 0;
 
 		if (readMachinesChecked->hasKey(cr->sm)) {
-			printf("\tAlready investigated that one...\n");
+			fprintf(_logfile, "\tAlready investigated that one...\n");
 			continue;
 		}
 		readMachinesChecked->set(cr->sm, true);
@@ -2779,11 +2759,15 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					  true,
 					  *it);
 
+		fprintf(_logfile, "Investigate %lx:\n", *it);
+		printStateMachine(sm, _logfile);
+		fprintf(_logfile, "\n");
+
 		std::set<InstructionSet> conflictClusters;
 		getConflictingStoreClusters(sm, oracle, conflictClusters);
 
 		if (conflictClusters.size() == 0) {
-			printf("\t\tNo available conflicting stores?\n");
+			fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 			continue;
 		}
 
@@ -2791,12 +2775,14 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			survivalConstraintIfExecutedAtomically(sm, oracle, token));
 
 		if (!survive) {
-			printf("\tTimed out computing survival constraint\n");
+			fprintf(_logfile, "\tTimed out computing survival constraint\n");
 			continue;
 		}
 		survive = simplifyIRExpr(survive, opt);
 
-		printf("\tComputed survival constraint\n");
+		fprintf(_logfile, "\tComputed survival constraint ");
+		ppIRExpr(survive, _logfile);
+		fprintf(_logfile, "\n");
 
 		/* Quick check that that vaguely worked.  If this
 		   reports mightCrash == true then that probably means
@@ -2806,39 +2792,39 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		   point. */
 		bool mightSurvive, mightCrash;
 		if (!evalMachineUnderAssumption(sm, oracle, survive, &mightSurvive, &mightCrash, token)) {
-			printf("Timed out sanity checking machine survival constraint\n");
+			fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
 			continue;
 		}
 
 		if (!mightSurvive) {
-			printf("\tCan never survive...\n");
+			fprintf(_logfile, "\tCan never survive...\n");
 			continue;
 		}
 		if (mightCrash) {
+			fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
 			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-			dbg_break("whoops");
 		}
 
 		VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(sm));
 
 		bool foundRace = false;
 		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
-		     !timed_out && it != conflictClusters.end();
+		     !TIMEOUT && it != conflictClusters.end();
 		     it++) {
-			printf("\t\tCluster:");
+			fprintf(_logfile, "\t\tCluster:");
 			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
 			     it2 != it->rips.end();
 			     it2++)
-				printf(" %lx", *it2);
-			printf("\n");
+				fprintf(_logfile, " %lx", *it2);
+			fprintf(_logfile, "\n");
 			VexPtr<AddressSpace> as(ms->addressSpace);
 			foundRace |= processConflictCluster(as, sm, oracle, survive, *it, summary, token);
 		}
 
 		if (!foundRace)
-			printf("\t\tCouldn't find any relevant-looking races\n");
+			fprintf(_logfile, "\t\tCouldn't find any relevant-looking races\n");
 		else
-			printf("\t\tFound relevant-looking races\n");
+			fprintf(_logfile, "\t\tFound relevant-looking races\n");
 
 		if (summary->storeMachines.size() != 0)
 			haveAFix(summary, token);
@@ -2846,7 +2832,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 }
 			    
 template <typename t> void
-printCFG(const CFGNode<t> *cfg)
+printCFG(const CFGNode<t> *cfg, FILE *f)
 {
 	std::vector<const CFGNode<t> *> pending;
 	std::set<const CFGNode<t> *> done;
@@ -2857,9 +2843,9 @@ printCFG(const CFGNode<t> *cfg)
 		pending.pop_back();
 		if (done.count(cfg))
 			continue;
-		printf("%p: ", cfg);
-		cfg->prettyPrint(stdout);
-		printf("\n");
+		fprintf(f, "%p: ", cfg);
+		cfg->prettyPrint(f);
+		fprintf(f, "\n");
 		if (cfg->fallThrough)
 			pending.push_back(cfg->fallThrough);
 		if (cfg->branch)
@@ -2868,7 +2854,7 @@ printCFG(const CFGNode<t> *cfg)
 	}
 }
 /* Make it visible to the debugger. */
-void __printCFG(const CFGNode<StackRip> *cfg) { printCFG(cfg); }
+void __printCFG(const CFGNode<StackRip> *cfg) { printCFG(cfg, stdout); }
 
 static void
 enumerateReachableStates(CFGNode<unsigned long> *from, std::set<CFGNode<unsigned long> *> &out)

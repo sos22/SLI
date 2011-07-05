@@ -835,7 +835,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	/* 5 bytes is the size of a 32-bit relative jump. */
 	unsigned long root = oracle->dominator(neededInstructions, as, 5);
 	if (!root) {
-		printf("Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
+		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
 		return NULL;
 	}
 	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
@@ -856,7 +856,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 		(*it)->machine->enumerateMentionedMemoryAccesses(instrs);
 		unsigned long r = oracle->dominator(instrs, as, 5);
 		if (!r) {
-			printf("Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
+			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
 			return NULL;
 		}
 		cfg->add_root(r, 100);
@@ -867,8 +867,9 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	} catch (NotImplementedException &e) {
 		/* This means that there's some instruction we can't
 		   decode.  Dump a diagnostic and just continue on. */
-		printf("Cannot build patch for crash summary.  Instruction decoder said %s\n",
-		       e.what());
+		fprintf(_logfile,
+			"Cannot build patch for crash summary.  Instruction decoder said %s\n",
+			e.what());
 		return NULL;
 	}
 	PatchFragment *pf = new PatchFragment();

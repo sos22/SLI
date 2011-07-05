@@ -1,4 +1,7 @@
 #include <sys/time.h>
+#include <err.h>
+#include <time.h>
+
 #include <vector>
 #include <set>
 
@@ -47,7 +50,7 @@ DumpFix::finish(void)
 static void
 timer_handler(int ignore)
 {
-	timed_out = true;
+	_timed_out = true;
 }
 
 static void
@@ -72,15 +75,15 @@ consider_rip(unsigned long my_rip,
 {
 	LibVEX_maybe_gc(token);
 
-	printf("Considering %lx...\n", my_rip);
+	fprintf(_logfile, "Considering %lx...\n", my_rip);
 	VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
 	if (!proximal) {
-		printf("No proximal cause -> can't do anything\n");
+		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
 	}
 	proximal = backtrackToStartOfInstruction(1, proximal, ms->addressSpace);
 	if (!proximal) {
-		printf("Can't backtrack proximal cause\n");
+		fprintf(_logfile, "Can't backtrack proximal cause\n");
 		return;
 	}
 
@@ -109,7 +112,7 @@ consider_rip(unsigned long my_rip,
 
 	double time_taken = end.tv_sec - start.tv_sec;
 	time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
-	if (timed_out) {
+	if (_timed_out) {
 		if (timings)
 			fprintf(timings, "%lx timed out after %f\n", my_rip, time_taken);
 		printf("%lx timed out after %f\n", my_rip, time_taken);
@@ -118,10 +121,18 @@ consider_rip(unsigned long my_rip,
 			fprintf(timings, "%lx took %f\n", my_rip, time_taken);
 		printf("%lx took %f\n", my_rip, time_taken);
 	}
-	timed_out = false;
+	_timed_out = false;
 
 	fflush(NULL);
 		
+}
+
+static double
+now(void)
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
 int
@@ -149,10 +160,29 @@ main(int argc, char *argv[])
 		oracle->getAllMemoryAccessingInstructions(targets);
 		shuffle(targets);
 		printf("%zd instructions to protect\n", targets.size());
+		double start = now();
 		for (std::vector<unsigned long>::iterator it = targets.begin();
 		     it != targets.end();
-		     it++)
+		     it++) {
+			_logfile = fopenf("w", "logs/%lx", *it);
+			if (!_logfile) err(1, "opening logs/%lx", *it);
 			consider_rip(*it, ms, thr, oracle, df, timings, ALLOW_GC);
+			fclose(_logfile);
+			_logfile = stdout;
+
+			double completion = (it - targets.begin()) / double(targets.size());
+			double elapsed = now() - start;
+			double total_estimated = elapsed / completion;
+			time_t end = total_estimated + start;
+			printf("Done %zd/%zd(%f%%) in %f seconds (%f each); %f left; finish at %s",
+			       it - targets.begin(),
+			       targets.size(),
+			       completion * 100,
+			       elapsed,
+			       elapsed / (it - targets.begin()),
+			       total_estimated - elapsed,
+			       ctime(&end));
+		}
 	}
 
 	df.finish();

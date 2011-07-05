@@ -239,22 +239,20 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		*done_something = true;
 		return optimise(opt, oracle, done_something);
 	}
-	if (timed_out) {
-		printf("%s timed out at line %d\n", __func__, __LINE__);
+	if (TIMEOUT)
 		return this;
-	}
 	target = target->optimise(opt, oracle, done_something);
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 
-	for (it = sideEffects.begin(); !timed_out && it != sideEffects.end(); it++)
+	for (it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++)
 		*it = (*it)->optimise(opt, oracle, done_something);
 
 	/* Try to forward stuff from stores to loads wherever
 	   possible.  We don't currently do this inter-state, because
 	   that's moderately tricky. */
 	std::set<availEntry> availExpressions;
-	for (it = sideEffects.begin(); !timed_out && it != sideEffects.end(); it++) {
+	for (it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			/* If the store isn't thread local, and we're
@@ -290,7 +288,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			bool local = oracle->loadIsThreadLocal(smsel);
 			bool killed = false;
 			for (std::set<availEntry>::iterator it2 = availExpressions.begin();
-			     !timed_out && it2 != availExpressions.end();
+			     !TIMEOUT && it2 != availExpressions.end();
 			     it2++) {
 				if (local == it2->local &&
 				    definitelyEqual(it2->addr, smsel->smsel_addr, opt)) {
@@ -324,7 +322,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	/* Propagate any copy operations. */
 	std::map<Int, IRExpr *> copies;
 	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-	     !timed_out && it != sideEffects.end();
+	     !TIMEOUT && it != sideEffects.end();
 	     it++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
@@ -358,7 +356,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	target->findUsedBinders(usedBinders, opt);
 
 	it = sideEffects.end();
-	while (!timed_out && it != sideEffects.begin()) {
+	while (!TIMEOUT && it != sideEffects.begin()) {
 		bool isDead = false;
 		it--;
 		(*it)->optimise(opt, oracle, done_something);
@@ -395,10 +393,8 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		}
 	}
 
-	if (timed_out) {
-		printf("%s timed out at line %d\n", __func__, __LINE__);
+	if (TIMEOUT)
 		return this;
-	}
 	return this;
 }
 

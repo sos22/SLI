@@ -220,10 +220,8 @@ public:
 	}
 	StateMachineEdge *optimise(const AllowableOptimisations &, OracleInterface *, bool *done_something);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
-		if (timed_out) {
-			printf("%s timed out at %d\n", __func__, __LINE__);
+		if (TIMEOUT)
 			return;
-		}
 		target->findLoadedAddresses(s, opt);
 		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
 		     it != sideEffects.rend();
@@ -231,10 +229,8 @@ public:
 			(*it)->updateLoadedAddresses(s, opt);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return;
-		}
 		target->findUsedBinders(s, opt);
 		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
 		     it != sideEffects.rend();

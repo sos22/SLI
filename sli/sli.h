@@ -29,6 +29,8 @@ static inline char *my_asprintf(const char *fmt, ...)
 }
 static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
+FILE *fopenf(const char *mode, const char *fmt, ...) __attribute__((__format__ (__printf__, 2, 3)));
+
 char *readfile(int fd);
 
 class ReplayEngineTimer {
@@ -1318,6 +1320,14 @@ void HandleMallocFree(Thread *thr, AddressSpace *as);
 
 /* Set by the SIGALRM (or whatever) signal handler when it wants us to
    finish what we're doing and get out quickly. */
-extern volatile bool timed_out;
+extern volatile bool _timed_out;
+extern FILE *_logfile;
+#define TIMEOUT								\
+	({								\
+	if (_timed_out)							\
+		fprintf(_logfile, "%s timed out at %d\n",		\
+			__func__, __LINE__);				\
+	_timed_out;							\
+	})
 
 #endif /* !SLI_H__ */

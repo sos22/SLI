@@ -335,10 +335,8 @@ findDominators(unsigned long functionHead,
 	bool progress;
 	progress = true;
 	while (progress) {
-		if (timed_out) {
-			printf("%s timed out on line %d\n", __func__, __LINE__);
+		if (TIMEOUT)
 			return;
-		}
 
 		progress = false;
 		for (std::set<unsigned long>::iterator it = instrs.begin();
@@ -426,10 +424,9 @@ findDominators(unsigned long functionHead,
 	for (std::set<unsigned long>::iterator it = instrs.begin();
 	     it != instrs.end();
 	     it++) {
-		if (timed_out) {
-			printf("%s timed out\n", __func__);
+		if (TIMEOUT)
 			return;
-		}
+
 		unsigned long rip = *it;
 		if (rip == functionHead) /* immediate dominator of
 					  * function head undefined */
