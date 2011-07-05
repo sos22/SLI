@@ -1728,9 +1728,52 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	return rewriteStateMachine(sm, canonMap, canonEdgeMap);
 }
 
+/* Turn references to RBP into RSP+k, if we know that RBP=RSP+k. */
+class CanonicaliseRbp : public StateMachineTransformer {
+	IRExpr *delta;
+	IRExpr *transformIexGet(IRExpr *orig, bool *done_something) {
+		assert(orig->tag == Iex_Get);
+		if (orig->Iex.Get.offset == OFFSET_amd64_RBP &&
+		    orig->Iex.Get.ty == Ity_I64) {
+			*done_something = true;
+			return IRExpr_Associative(
+				Iop_Add64,
+				delta,
+				IRExpr_Get(
+					OFFSET_amd64_RSP,
+					Ity_I64,
+					orig->Iex.Get.tid),
+				NULL);
+		}
+		return orig;
+	}
+public:
+	CanonicaliseRbp(long _delta)
+		: delta(IRExpr_Const(IRConst_U64(_delta)))
+	{
+	}
+};
+static StateMachine *
+canonicaliseRbp(StateMachine *sm, unsigned long origin, OracleInterface *oracle,
+		bool *done_something)
+{
+	long delta;
+
+	if (!oracle->getRbpToRspDelta(origin, &delta)) {
+		/* Can't do anything if we don't know the delta */
+		return sm;
+	}
+	/* Got RBP->RSP delta, want RSP->RBP */
+	delta = -delta;
+
+	CanonicaliseRbp canon(delta);
+	return canon.transform(sm, done_something);
+}
+
 static StateMachine *
 optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfiguration &alias,
-		     const AllowableOptimisations &opt, OracleInterface *oracle, bool noExtendContext)
+		     const AllowableOptimisations &opt, OracleInterface *oracle, bool noExtendContext,
+		     unsigned long originRip)
 {
 	bool done_something;
 	do {
@@ -1747,6 +1790,7 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		if (noExtendContext) {
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
+			sm = canonicaliseRbp(sm, originRip, oracle, &done_something);
 		}
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
@@ -2556,7 +2600,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	opt2.haveInterestingStoresSet = true;
 	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
 	sm->sanity_check();
-	sm = optimiseStateMachine(sm, alias, opt2, oracle, true);
+	sm = optimiseStateMachine(sm, alias, opt2, oracle, true, cfg->my_rip.rip);
 	sm->sanity_check();
 
 	if (dynamic_cast<StateMachineUnreached *>(sm.get())) {
@@ -2696,7 +2740,8 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					      oracle->getAliasingConfigurationForRip(*it),
 					      opt,
 					      oracle,
-					      false);
+					      false,
+					      *it);
 
 		printf("\tComputed state machine.\n");
 
@@ -2705,7 +2750,8 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					      oracle->getAliasingConfigurationForRip(*it),
 					      opt,
 					      oracle,
-					      false);
+					      false,
+					      *it);
 
 		/* Most instructions produce basically the same
 		   machine as their neighbours, so it's a bit of a
@@ -2730,7 +2776,8 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					  oracle->getAliasingConfigurationForRip(*it),
 					  opt,
 					  oracle,
-					  true);
+					  true,
+					  *it);
 
 		VexPtr<IRExpr, &ir_heap> survive(
 			survivalConstraintIfExecutedAtomically(sm, oracle, token));
