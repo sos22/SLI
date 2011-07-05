@@ -935,7 +935,7 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 {
 	unsigned long r = functionHeadForInstruction(rip);
 	if (!r) {
-		printf("No function for %lx\n", rip);
+		fprintf(_logfile, "No function for %lx\n", rip);
 		return;
 	}
 	Function f(r);
