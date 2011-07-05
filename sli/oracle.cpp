@@ -1673,12 +1673,11 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 		    rsp->Iex.Associative.nr_arguments == 2 &&
 		    rsp->Iex.Associative.op == Iop_Add64 &&
 		    rsp->Iex.Associative.contents[0]->tag == Iex_Get &&
-		    ((rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
-		      rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RSP) ||
+		    rsp->Iex.Associative.contents[0]->Iex.Get.offset == OFFSET_amd64_RSP &&
+		    (rsp->Iex.Associative.contents[1]->tag == Iex_Get ||
 		     (rsp->Iex.Associative.contents[1]->tag == Iex_Unop &&
 		      rsp->Iex.Associative.contents[1]->Iex.Unop.op == Iop_Neg64 &&
-		      rsp->Iex.Associative.contents[1]->Iex.Unop.arg->tag == Iex_Get &&
-		      rsp->Iex.Associative.contents[1]->Iex.Unop.arg->Iex.Get.offset == OFFSET_amd64_RSP)) ) {
+		      rsp->Iex.Associative.contents[1]->Iex.Unop.arg->tag == Iex_Get))) {
 			/* Adding a register to RSP -> alloca() */
 			goto impossible_clean;
 		}
@@ -1732,10 +1731,8 @@ join_predecessors:
 			enum RbpToRspOffsetState pred_state;
 			unsigned long pred_offset;
 			oracle->getRbpToRspOffset(*it, &pred_state, &pred_offset);
-			if (pred_state == RbpToRspOffsetStateImpossible) {
-				printf("Predecessor rbp->rsp is impossible\n");
+			if (pred_state == RbpToRspOffsetStateImpossible)
 				goto impossible_clean;
-			}
 			if (pred_state == RbpToRspOffsetStateUnknown)
 				continue;
 			assert(pred_state == RbpToRspOffsetStateValid);
