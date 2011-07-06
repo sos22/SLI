@@ -17,11 +17,19 @@ then
     then
 	result "proximal_load_static"
     fi
+    if matches "Generated event store"
+    then
+	result "proximal_store_static"
+    fi
     if matches "Generated event cas"
     then
 	result "proximal_cas"
     fi
-    if grep -q "$f:.*rep" ../../disassembly
+    if ! grep -q "^ *$f:" ../disassembly
+    then
+	result "proximal_library"
+    fi
+    if grep -q "$f:.*rep" ../disassembly
     then
 	result "proximal_string"
     fi
