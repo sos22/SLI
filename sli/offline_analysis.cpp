@@ -892,10 +892,67 @@ findAllStates(StateMachine *sm, std::set<StateMachine *> &out)
 	v.doit(sm);
 }
 
-typedef struct {
+struct avail_t {
 	std::set<StateMachineSideEffect *> sideEffects;
-	void clear() { sideEffects.clear(); }
-} avail_t;
+	std::set<IRExpr *> goodPointers;
+	void clear() { sideEffects.clear(); goodPointers.clear(); }
+	void dereference(IRExpr *ptr);
+	/* Go through and remove anything which isn't also present in
+	   other.  Returns true if we did anything, and false
+	   otherwise. */
+	bool intersect(const avail_t &other);
+
+	bool operator !=(const avail_t &other) const;
+};
+
+void
+avail_t::dereference(IRExpr *addr)
+{
+	IRExpr *badPtr = IRExpr_Unop(Iop_BadPtr, addr);
+	badPtr = simplifyIRExpr(badPtr, AllowableOptimisations::defaultOptimisations);
+	if (badPtr->tag != Iex_Unop || badPtr->Iex.Unop.op != Iop_BadPtr)
+		return;
+	addr = badPtr->Iex.Unop.arg;
+	for (std::set<IRExpr *>::iterator it = goodPointers.begin();
+	     it != goodPointers.end();
+	     it++)
+		if (definitelyEqual(*it, addr, AllowableOptimisations::defaultOptimisations))
+			return;
+	goodPointers.insert(addr);
+}
+
+bool
+avail_t::intersect(const avail_t &other)
+{
+	bool res = false;
+	for (std::set<StateMachineSideEffect *>::iterator it = sideEffects.begin();
+	     it != sideEffects.end();
+		) {
+		if (other.sideEffects.count(*it) == 0) {
+			res = true;
+			sideEffects.erase(it++); 
+		} else {
+			it++;
+		}
+	}
+	for (std::set<IRExpr *>::iterator it = goodPointers.begin();
+	     it != goodPointers.end();
+		) {
+		if (other.goodPointers.count(*it) == 0) {
+			res = true;
+			goodPointers.erase(it++);
+		} else {
+			it++;
+		}
+	}
+	return res;
+}
+
+bool
+avail_t::operator!=(const avail_t &other) const
+{
+	return sideEffects != other.sideEffects || goodPointers != other.goodPointers;
+}
 
 static void
 updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
@@ -936,6 +993,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		if (opt.assumeNoInterferingStores ||
 		    oracle->storeIsThreadLocal(smses))
 			outputAvail.sideEffects.insert(smses);
+		outputAvail.dereference(smses->addr);
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
 		/* Copies are easy
@@ -946,13 +1004,15 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 	} else if (StateMachineSideEffectLoad *smsel =
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 		/* Similarly loads */
-		outputAvail.sideEffects.insert(smsel);		
+		outputAvail.sideEffects.insert(smsel);
+		outputAvail.dereference(smsel->smsel_addr);
 	}
 }
 
 class applyAvailTransformer : public IRExprTransformer {
 public:
 	const avail_t &avail;
+	const bool use_bad_ptr;
 	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
 		for (std::set<StateMachineSideEffect *>::const_iterator it = avail.sideEffects.begin();
 		     it != avail.sideEffects.end();
@@ -967,14 +1027,28 @@ public:
 		}
 		return e;
 	}
-	applyAvailTransformer(const avail_t &_avail)
-		: avail(_avail)
+	IRExpr *transformIexUnop(IRExpr *e, bool *done_something) {
+		if (use_bad_ptr && e->Iex.Unop.op == Iop_BadPtr) {
+			for (std::set<IRExpr *>::iterator it = avail.goodPointers.begin();
+			     it != avail.goodPointers.end();
+			     it++) {
+				if (definitelyEqual(*it, e->Iex.Unop.arg,
+						    AllowableOptimisations::defaultOptimisations)) {
+					*done_something = true;
+					return IRExpr_Const(IRConst_U1(0));
+				}
+			}
+		}
+		return IRExprTransformer::transformIexUnop(e, done_something);
+	}
+	applyAvailTransformer(const avail_t &_avail, bool _use_bad_ptr)
+		: avail(_avail), use_bad_ptr(_use_bad_ptr)
 	{}
 };
 static IRExpr *
-applyAvailSet(const avail_t &avail, IRExpr *expr, bool *done_something)
+applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_bad_ptr, bool *done_something)
 {
-	applyAvailTransformer aat(avail);
+	applyAvailTransformer aat(avail, use_bad_ptr);
 	return aat.transformIRExpr(expr, done_something);
 }
 
@@ -1018,8 +1092,8 @@ buildNewStateMachineWithLoadsEliminated(
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			IRExpr *newAddr, *newData;
 			bool doit = false;
-			newAddr = applyAvailSet(currentlyAvailable, smses->addr, &doit);
-			newData = applyAvailSet(currentlyAvailable, smses->data, &doit);
+			newAddr = applyAvailSet(currentlyAvailable, smses->addr, false, &doit);
+			newData = applyAvailSet(currentlyAvailable, smses->data, false, &doit);
 			if (doit) {
 				newEffect = new StateMachineSideEffectStore(
 					newAddr, newData, smses->rip);
@@ -1031,7 +1105,7 @@ buildNewStateMachineWithLoadsEliminated(
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
 			IRExpr *newAddr;
 			bool doit = false;
-			newAddr = applyAvailSet(currentlyAvailable, smsel->smsel_addr, &doit);
+			newAddr = applyAvailSet(currentlyAvailable, smsel->smsel_addr, false, &doit);
 			for (std::set<StateMachineSideEffect *>::iterator it2 = currentlyAvailable.sideEffects.begin();
 			     !newEffect && it2 != currentlyAvailable.sideEffects.end();
 			     it2++) {
@@ -1100,7 +1174,7 @@ buildNewStateMachineWithLoadsEliminated(
 		bool doit = false;
 		res = new StateMachineBifurcate(
 			sm->origin,
-			applyAvailSet(avail, smb->condition, &doit),
+			applyAvailSet(avail, smb->condition, true, &doit),
 			(StateMachineEdge *)NULL, NULL);
 		*done_something |= doit;
 		memo[sm] = res;
@@ -1163,6 +1237,18 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	/* build the set of potentially-available expressions. */
 	avail_t potentiallyAvailable;
 	findAllSideEffects(sm, potentiallyAvailable.sideEffects);
+	for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
+	     it != potentiallyAvailable.sideEffects.end();
+	     it++) {
+		StateMachineSideEffect *smse = *it;
+		if (StateMachineSideEffectStore *smses =
+		    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+			potentiallyAvailable.dereference(smses->addr);
+		} else if (StateMachineSideEffectLoad *smsel =
+			   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+			potentiallyAvailable.dereference(smsel->smsel_addr);
+		}
+	}
 
 	/* If we're not executing atomically, stores to
 	   non-thread-local memory locations are never considered to
@@ -1227,16 +1313,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			StateMachine *target = edge->target;
 			avail_t &avail_at_end_of_edge(availOnExit[edge]);
 			avail_t &avail_at_start_of_target(availOnEntry[target]);
-			for (std::set<StateMachineSideEffect *>::iterator it2 = avail_at_start_of_target.sideEffects.begin();
-			     it2 != avail_at_start_of_target.sideEffects.end();
-				) {
-				if (avail_at_end_of_edge.sideEffects.count(*it2) == 0) {
-					statesNeedingRefresh.insert(target);
-					avail_at_start_of_target.sideEffects.erase(it2++); 
-					progress = true;
-				} else {
-					it2++;
-				}
+			if (avail_at_start_of_target.intersect(avail_at_end_of_edge)) {
+				progress = true;
+				statesNeedingRefresh.insert(target);
 			}
 		}
 
@@ -1278,14 +1357,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				     it2++)
 					updateAvailSetForSideEffect(outputAvail, *it2,
 								    opt, alias, oracle);
-				/* Now check whether we actually did anything. */
 				avail_t &currentAvail(availOnExit[edge]);
-				for (std::set<StateMachineSideEffect *>::iterator it2 = currentAvail.sideEffects.begin();
-				     !progress && it2 != currentAvail.sideEffects.end();
-				     it2++) {
-					if (!outputAvail.sideEffects.count(*it2))
-						progress = true;
-				}
+				if (!progress && currentAvail != outputAvail)
+					progress = true;
 				currentAvail = outputAvail;
 			}
 		}
