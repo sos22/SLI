@@ -892,7 +892,10 @@ findAllStates(StateMachine *sm, std::set<StateMachine *> &out)
 	v.doit(sm);
 }
 
-typedef std::set<StateMachineSideEffect *> avail_t;
+typedef struct {
+	std::set<StateMachineSideEffect *> sideEffects;
+	void clear() { sideEffects.clear(); }
+} avail_t;
 
 static void
 updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
@@ -903,8 +906,8 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 	if (StateMachineSideEffectStore *smses =
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
 		/* Eliminate anything which is killed */
-		for (avail_t::iterator it = outputAvail.begin();
-		     it != outputAvail.end();
+		for (std::set<StateMachineSideEffect *>::iterator it = outputAvail.sideEffects.begin();
+		     it != outputAvail.sideEffects.end();
 			) {
 			StateMachineSideEffectStore *smses2 =
 				dynamic_cast<StateMachineSideEffectStore *>(*it);
@@ -925,25 +928,25 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			     !definitelyNotEqual( addr,
 						  smses->addr,
 						  opt) )
-				outputAvail.erase(it++);
+				outputAvail.sideEffects.erase(it++);
 			else
 				it++;
 		}
 		/* Introduce the store which was generated. */
 		if (opt.assumeNoInterferingStores ||
 		    oracle->storeIsThreadLocal(smses))
-			outputAvail.insert(smses);
+			outputAvail.sideEffects.insert(smses);
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
 		/* Copies are easy
 		   because they don't
 		   interfere with each
 		   other. */
-		outputAvail.insert(smsec);
+		outputAvail.sideEffects.insert(smsec);
 	} else if (StateMachineSideEffectLoad *smsel =
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 		/* Similarly loads */
-		outputAvail.insert(smsel);		
+		outputAvail.sideEffects.insert(smsel);		
 	}
 }
 
@@ -951,8 +954,8 @@ class applyAvailTransformer : public IRExprTransformer {
 public:
 	const avail_t &avail;
 	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
-		for (avail_t::const_iterator it = avail.begin();
-		     it != avail.end();
+		for (std::set<StateMachineSideEffect *>::const_iterator it = avail.sideEffects.begin();
+		     it != avail.sideEffects.end();
 		     it++) {
 			StateMachineSideEffectCopy *smsec = dynamic_cast<StateMachineSideEffectCopy *>(*it);
 			if (!smsec)
@@ -1001,7 +1004,7 @@ buildNewStateMachineWithLoadsEliminated(
 		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
 									     done_something));
 
-	std::set<StateMachineSideEffect *> currentlyAvailable(initialAvail);
+	avail_t currentlyAvailable(initialAvail);
 
 	for (std::vector<StateMachineSideEffect *>::const_iterator it =
 		     sme->sideEffects.begin();
@@ -1029,8 +1032,8 @@ buildNewStateMachineWithLoadsEliminated(
 			IRExpr *newAddr;
 			bool doit = false;
 			newAddr = applyAvailSet(currentlyAvailable, smsel->smsel_addr, &doit);
-			for (avail_t::iterator it2 = currentlyAvailable.begin();
-			     !newEffect && it2 != currentlyAvailable.end();
+			for (std::set<StateMachineSideEffect *>::iterator it2 = currentlyAvailable.sideEffects.begin();
+			     !newEffect && it2 != currentlyAvailable.sideEffects.end();
 			     it2++) {
 				StateMachineSideEffectStore *smses2 =
 					dynamic_cast<StateMachineSideEffectStore *>(*it2);
@@ -1159,14 +1162,14 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 
 	/* build the set of potentially-available expressions. */
 	avail_t potentiallyAvailable;
-	findAllSideEffects(sm, potentiallyAvailable);
+	findAllSideEffects(sm, potentiallyAvailable.sideEffects);
 
 	/* If we're not executing atomically, stores to
 	   non-thread-local memory locations are never considered to
 	   be available. */
 	if (!opt.assumeNoInterferingStores) {
-		for (avail_t::iterator it = potentiallyAvailable.begin();
-		     it != potentiallyAvailable.end();
+		for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
+		     it != potentiallyAvailable.sideEffects.end();
 			) {
 			StateMachineSideEffectStore *smses =
 				dynamic_cast<StateMachineSideEffectStore *>(*it);
@@ -1174,7 +1177,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				dynamic_cast<StateMachineSideEffectLoad *>(*it);
 			if ( (smses && !oracle->storeIsThreadLocal(smses)) ||
 			     (smsel && !oracle->loadIsThreadLocal(smsel)) ) {
-				potentiallyAvailable.erase(it++);
+				potentiallyAvailable.sideEffects.erase(it++);
 			} else {
 				it++;
 			}
@@ -1224,12 +1227,12 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			StateMachine *target = edge->target;
 			avail_t &avail_at_end_of_edge(availOnExit[edge]);
 			avail_t &avail_at_start_of_target(availOnEntry[target]);
-			for (avail_t::iterator it2 = avail_at_start_of_target.begin();
-			     it2 != avail_at_start_of_target.end();
+			for (std::set<StateMachineSideEffect *>::iterator it2 = avail_at_start_of_target.sideEffects.begin();
+			     it2 != avail_at_start_of_target.sideEffects.end();
 				) {
-				if (avail_at_end_of_edge.count(*it2) == 0) {
+				if (avail_at_end_of_edge.sideEffects.count(*it2) == 0) {
 					statesNeedingRefresh.insert(target);
-					avail_at_start_of_target.erase(it2++); 
+					avail_at_start_of_target.sideEffects.erase(it2++); 
 					progress = true;
 				} else {
 					it2++;
@@ -1277,10 +1280,10 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 								    opt, alias, oracle);
 				/* Now check whether we actually did anything. */
 				avail_t &currentAvail(availOnExit[edge]);
-				for (avail_t::iterator it2 = currentAvail.begin();
-				     !progress && it2 != currentAvail.end();
+				for (std::set<StateMachineSideEffect *>::iterator it2 = currentAvail.sideEffects.begin();
+				     !progress && it2 != currentAvail.sideEffects.end();
 				     it2++) {
-					if (!outputAvail.count(*it2))
+					if (!outputAvail.sideEffects.count(*it2))
 						progress = true;
 				}
 				currentAvail = outputAvail;
