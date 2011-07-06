@@ -2589,12 +2589,21 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		/* This store machine is unusable, probably because we
 		 * don't have the machine code for the relevant
 		 * library */
+		fprintf(_logfile, "\t\tStore machine is unusable\n");
 		return false;
 	}
 
+	fprintf(_logfile, "\t\tStore machine:\n");
+	printStateMachine(sm, _logfile);
+
 	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle, token);
-	if (!assumption)
+	if (!assumption) {
+		fprintf(_logfile, "\t\tCannot derive suitability constraint\n");
 		return false;
+	}
+	fprintf(_logfile, "\t\tSuitability constraint: ");
+	ppIRExpr(assumption, _logfile);
+	fprintf(_logfile, "\n");
 
 	/* Now try running that in parallel with the probe machine,
 	   and see if it might lead to a crash. */
