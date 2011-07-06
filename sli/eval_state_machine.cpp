@@ -6,7 +6,10 @@
 
 class StateMachineEvalContext {
 public:
-	StateMachineEvalContext() : justPathConstraint(NULL) {}
+	StateMachineEvalContext()
+		: justPathConstraint(NULL),
+		  divergenceIsCrash(false)
+	{}
 	std::vector<StateMachineSideEffectStore *> stores;
 	std::map<Int, IRExpr *> binders;
 	/* justPathConstraint contains all of the assumptions we've
@@ -14,6 +17,17 @@ public:
 	   initial assumption. */
 	IRExpr *pathConstraint;
 	IRExpr *justPathConstraint;
+
+	/* Normally, we're only interested in one possible bug at a
+	   time, and the state machine is constructed such that it
+	   evaluates to <crash> if you hit that bug and <no-crash> if
+	   you don't.  Divergence indicates that you've hit a crash
+	   which is not the bug whcih is being investigated, and so we
+	   treat it as <no-crash>.  Sometimes, though, you're
+	   interested in any possible crash, and in that case you
+	   should set divergenceIsCrash to make divergent behaviour be
+	   treated as <crash> */
+	bool divergenceIsCrash;
 };
 
 static IRExpr *
@@ -301,12 +315,9 @@ evalStateMachineEdge(StateMachineEdge *sme,
 					   &ctxt.justPathConstraint);
 	if (ctxt.pathConstraint->tag == Iex_Const &&
 	    ctxt.pathConstraint->Iex.Const.con->Ico.U1 == 0) {
-		/* We've found a contradiction.  That means that the
-		   original program would have crashed, *but* in a way
-		   other than the one which we're investigating.  We
-		   therefore treat that as no-crash and abort the
-		   run. */
-		*crashes = false;
+		/* The path constraint is impossible, which indicates
+		   that the machine has diverged.  Give up. */
+		*crashes = ctxt.divergenceIsCrash;
 		return;
 	}
 	evalStateMachine(sme->target, crashes, chooser, oracle, ctxt);
@@ -355,7 +366,7 @@ evalStateMachine(StateMachine *sm,
 	if (dynamic_cast<StateMachineUnreached *>(sm)) {
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
-		*crashes = false;
+		*crashes = ctxt.divergenceIsCrash;
 		return;
 	}
 
@@ -403,6 +414,87 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	} while (chooser.advance());
 
 	return currentConstraint;
+}
+
+/* Augment @assumption so that it's sufficient to prove that @sm will
+ * survive and will not diverge. */
+IRExpr *
+writeMachineSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &sm,
+			       VexPtr<IRExpr, &ir_heap> &assumption,
+			       VexPtr<Oracle> &oracle,
+			       GarbageCollectionToken token)
+{
+	NdChooser chooser;
+	VexPtr<IRExpr, &ir_heap> conjunctConstraint(assumption);
+	VexPtr<IRExpr, &ir_heap> disjunctConstraint(IRExpr_Const(IRConst_U1(0)));
+	bool crashes;
+
+	do {
+		if (TIMEOUT)
+			return NULL;
+
+		LibVEX_maybe_gc(token);
+		StateMachineEvalContext ctxt;
+
+		/* You might think that we should use the
+		   currentConstraint here, rather than the assumption.
+		   Not so: changing the path constraint would mean
+		   that evalStateMachine will make a different pattern
+		   of ND choices on each iteration, which would
+		   confuse the ND chooser. */
+		ctxt.pathConstraint = assumption;
+		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
+		ctxt.divergenceIsCrash = true;
+		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
+
+		if (crashes) {
+			/* Crashes should be pretty rare here, and
+			   pretty much only happen if the constraints
+			   on the machine contradict themselves
+			   (i.e. X must be simultaneously BadPtr and
+			   !BadPtr).  It doesn't really matter much
+			   what we do in that case (the rest of the
+			   machinery will discard those paths later
+			   on), but as an optimisation extend the
+			   assumption so that we don't even have to
+			   think abou them again. */
+			fprintf(_logfile, "\t\tStore machine crashed during writeMachineSurvivalConstraint?\n");
+			conjunctConstraint =
+				IRExpr_Binop(
+					Iop_And1,
+					conjunctConstraint,
+					IRExpr_Unop(
+						Iop_Not1,
+						ctxt.justPathConstraint));
+			conjunctConstraint =
+				simplifyIRExpr(conjunctConstraint,
+					       AllowableOptimisations::defaultOptimisations);
+		} else {
+			/* The machine didn't crash this time, and
+			 * justPathConstraint is the assumption which
+			 * we had to make to make it go down this
+			 * path.  Collect together every such set of
+			 * assumptions, across every possible path,
+			 * and require that we will always go down one
+			 * of them.  Most of the time, there is only
+			 * one such path, and so this is very easy. */
+			disjunctConstraint =
+				IRExpr_Binop(
+					Iop_Or1,
+					disjunctConstraint,
+					ctxt.justPathConstraint);
+			disjunctConstraint =
+				simplifyIRExpr(disjunctConstraint,
+					       AllowableOptimisations::defaultOptimisations);
+		}
+	} while (chooser.advance());
+
+	IRExpr *finalConstraint = IRExpr_Binop(Iop_And1,
+					       conjunctConstraint,
+					       disjunctConstraint);
+	finalConstraint = simplifyIRExpr(finalConstraint,
+					 AllowableOptimisations::defaultOptimisations);
+	return finalConstraint;
 }
 
 bool

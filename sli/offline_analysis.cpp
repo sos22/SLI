@@ -2673,6 +2673,15 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
+	assumption = writeMachineSurvivalConstraint(sm, assumption, oracle, token);
+	if (!assumption) {
+		fprintf(_logfile, "\t\tCannot derive write machine survival constraint\n");
+		return false;
+	}
+	fprintf(_logfile, "\t\tWrite machine survival constraint: ");
+	ppIRExpr(assumption, _logfile);
+	fprintf(_logfile, "\n");
+
 	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle, token);
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive suitability constraint\n");

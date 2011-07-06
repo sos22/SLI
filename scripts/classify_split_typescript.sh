@@ -46,6 +46,11 @@ then
     result "timeout"
 fi
 
+if matches "Store machine crashed during writeMachineSurvivalConstraint"
+then
+    result "writeMachineSurvivalConstraint"
+fi
+
 if matches "Load machine:"
 then
     if matches "decoder said not implemented"
