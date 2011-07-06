@@ -845,6 +845,8 @@ irexprAliasingClass(IRExpr *expr,
 					}
 					if (!(res & Oracle::PointerAliasingSet::anything))
 						return Oracle::PointerAliasingSet::notAPointer;
+					else
+						return res;
 				}
 			}
 			return Oracle::PointerAliasingSet::notAPointer;
