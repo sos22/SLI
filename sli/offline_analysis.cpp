@@ -2903,7 +2903,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		fprintf(_logfile, "\t\tChose a bad write machine...\n");
 		return true;
 	}
-	if (!fixSufficient(sm, probeMachine, newAssumption, oracle, remoteMacroSections)) {
+	if (!fixSufficient(sm, probeMachine, newAssumption, oracle, remoteMacroSections, token)) {
 		fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
 		return true;
 	}

@@ -946,18 +946,21 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 }
 
 bool
-fixSufficient(StateMachine *writeMachine,
-	      StateMachine *probeMachine,
-	      IRExpr *assumption,
-	      Oracle *oracle,
-	      remoteMacroSectionsT *sections)
+fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
+	      VexPtr<StateMachine, &ir_heap> &probeMachine,
+	      VexPtr<IRExpr, &ir_heap> &assumption,
+	      VexPtr<Oracle> &oracle,
+	      VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
+	      GarbageCollectionToken token)
 {
 	NdChooser chooser;
-	StateMachineEdge *writeStartEdge = new StateMachineEdge(writeMachine);
+	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
 
 	do {
 		if (TIMEOUT)
 			return false;
+
+		LibVEX_maybe_gc(token);
 
 		std::vector<StateMachineSideEffectStore *> storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;

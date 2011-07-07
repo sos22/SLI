@@ -64,11 +64,12 @@ bool findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			     VexPtr<Oracle> &oracle,
 			     VexPtr<remoteMacroSectionsT, &ir_heap> &output,
 			     GarbageCollectionToken token);
-bool fixSufficient(StateMachine *writeMachine,
-		   StateMachine *probeMachine,
-		   IRExpr *assumption,
-		   Oracle *oracle,
-		   remoteMacroSectionsT *sections);
+bool fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
+		   VexPtr<StateMachine, &ir_heap> &probeMachine,
+		   VexPtr<IRExpr, &ir_heap> &assumption,
+		   VexPtr<Oracle> &oracle,
+		   VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
+		   GarbageCollectionToken token);
 IRExpr *writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 				    VexPtr<IRExpr, &ir_heap> &assumption,
 				    VexPtr<Oracle> &oracle,

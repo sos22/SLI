@@ -32,7 +32,7 @@ main(int argc, char *argv[])
 		it->end->prettyPrint(stdout);
 		printf("\n");		
 	}
-	if (!fixSufficient(readMachine, writeMachine, assumption, oracle, remoteMacroSections)) {
+	if (!fixSufficient(readMachine, writeMachine, assumption, oracle, remoteMacroSections, ALLOW_GC)) {
 		printf("Fix insufficient\n");
 		return 1;
 	} else {
