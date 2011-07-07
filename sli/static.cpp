@@ -178,7 +178,7 @@ run_command(VexPtr<Oracle> &oracle, GarbageCollectionToken token)
 		list_heads(oracle);
 	} else if (*words[0] == "liveness") {
 		Oracle::Function f(*words[1]);
-		printf("%s\n", f.liveOnEntry().name());
+		printf("%s\n", f.liveOnEntry(false).name());
 	} else if (*words[0] == "alias") {
 		Oracle::Function f(*words[1]);
 		Oracle::RegisterAliasingConfiguration alias = f.aliasConfigOnEntryToInstruction(*words[2]);

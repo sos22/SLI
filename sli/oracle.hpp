@@ -37,7 +37,7 @@ public:
 	class LivenessSet : public Named {
 	public:
 		unsigned long mask;
-		
+
 		LivenessSet() : mask(0) {}
 
 		LivenessSet use(Int offset);
@@ -130,8 +130,8 @@ public:
 			: rip(_rip)
 		{}
 
-		LivenessSet liveOnEntry();
-		LivenessSet liveOnEntry(unsigned long);
+		LivenessSet liveOnEntry(bool isHead);
+		LivenessSet liveOnEntry(unsigned long, bool);
 		bool aliasConfigOnEntryToInstruction(unsigned long rip, RegisterAliasingConfiguration *out);
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip, bool *b);

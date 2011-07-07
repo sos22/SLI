@@ -1160,7 +1160,7 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 }
 
 Oracle::LivenessSet
-Oracle::Function::liveOnEntry(unsigned long rip)
+Oracle::Function::liveOnEntry(unsigned long rip, bool isHead)
 {
 	static sqlite3_stmt *stmt;
 	int rc;
@@ -1173,7 +1173,10 @@ Oracle::Function::liveOnEntry(unsigned long rip)
 	if (rc == SQLITE_DONE || sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
 		/* Still using default live set for this isntruction. */
 		sqlite3_reset(stmt);
-		return Oracle::LivenessSet();
+		if (isHead)
+			return Oracle::LivenessSet::argRegisters;
+		else
+			return Oracle::LivenessSet();
 	}
 	unsigned long r;
 	r = sqlite3_column_int64(stmt, 0);
@@ -1184,9 +1187,9 @@ Oracle::Function::liveOnEntry(unsigned long rip)
 }
 
 Oracle::LivenessSet
-Oracle::Function::liveOnEntry()
+Oracle::Function::liveOnEntry(bool isHead)
 {
-	return liveOnEntry(rip);
+	return liveOnEntry(rip, isHead);
 }
 
 Oracle::RegisterAliasingConfiguration
@@ -1469,7 +1472,7 @@ Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *c
 	     it != callees.end();
 	     it++) {
 		Function f(*it);
-		res |= f.liveOnEntry(*it) & LivenessSet::argRegisters;
+		res |= f.liveOnEntry(*it, true) & LivenessSet::argRegisters;
 	}
 	IRSB *irsb = as->getIRSBForAddress(-1, rip);
 	IRStmt **statements = irsb->stmts;
@@ -1530,7 +1533,6 @@ Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *c
 	}
 
 	if (res != liveOnEntry(rip)) {
-		assert(res > liveOnEntry(rip));
 		*changed = true;
 		static sqlite3_stmt *stmt;
 		int rc;
