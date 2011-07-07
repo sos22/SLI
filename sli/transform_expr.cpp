@@ -146,6 +146,9 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 		return IRExpr_Mux0X(log_reads_expr(tid, sb, exp->Iex.Mux0X.cond),
 				    log_reads_expr(tid, sb, exp->Iex.Mux0X.expr0),
 				    log_reads_expr(tid, sb, exp->Iex.Mux0X.exprX));
+	case Iex_ClientCall: /* There shouldn't be any of these at this stage */
+	case Iex_ClientCallFailed:
+		abort();
 	}
 	throw NotImplementedException("Something bad");
 }

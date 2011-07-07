@@ -941,7 +941,9 @@ typedef
       Iex_Mux0X,
       Iex_CCall,
       Iex_Associative, /* n-ary associative operator */
-      Iex_FreeVariable
+      Iex_FreeVariable,
+      Iex_ClientCall,
+      Iex_ClientCallFailed,
    }
    IRExprTag;
 
@@ -1166,6 +1168,15 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       struct {
 	 int key;
       } FreeVariable;
+
+      struct {
+	 unsigned long calledRip;
+	 IRExpr **args;
+      } ClientCall;
+
+      struct {
+	 IRExpr *target;
+      } ClientCallFailed;
    } Iex;
    void visit(HeapVisitor &hv);
    NAMED_CLASS
@@ -1192,6 +1203,8 @@ extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExpr *);
 extern IRExpr* IRExpr_FreeVariable ( int key );
 extern IRExpr* IRExpr_FreeVariable ( );
+extern IRExpr* IRExpr_ClientCall (unsigned long r, IRExpr **args);
+extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 
 /* Deep-copy an IRExpr. */
 extern IRExpr* deepCopyIRExpr ( IRExpr* );
@@ -1242,6 +1255,7 @@ static inline Bool isIRAtom ( IRExpr* e ) {
    failure if they are passed non-atoms. */
 extern Bool eqIRAtom ( IRExpr*, IRExpr* );
 
+IRExpr **alloc_irexpr_array(unsigned nr);
 
 /* ------------------ Jump kinds ------------------ */
 

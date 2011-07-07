@@ -3,6 +3,7 @@
 #include "oracle.hpp"
 #include "nd_chooser.h"
 #include "eval_state_machine.hpp"
+#include "offline_analysis.hpp"
 
 class StateMachineEvalContext {
 public:
@@ -30,87 +31,26 @@ public:
 	bool divergenceIsCrash;
 };
 
+class SpecialiseIRExpr : public IRExprTransformer {
+	std::map<Int,IRExpr *> &binders;
+	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
+		if (binders.count(e->Iex.Binder.binder)) {
+			*done_something = true;
+			return binders[e->Iex.Binder.binder];
+		}
+		return IRExprTransformer::transformIexBinder(e, done_something);
+	}
+public:
+	SpecialiseIRExpr(std::map<Int, IRExpr *> &_binders)
+		: binders(_binders)
+	{}
+};
+
 static IRExpr *
 specialiseIRExpr(IRExpr *iex, std::map<Int,IRExpr *> &binders)
 {
-	switch (iex->tag) {
-	case Iex_Binder:
-		if (binders.count(iex->Iex.Binder.binder))
-			return binders[iex->Iex.Binder.binder];
-		else
-			return iex;
-	case Iex_Get:
-		return iex;
-	case Iex_GetI:
-		return IRExpr_GetI(
-			iex->Iex.GetI.descr,
-			specialiseIRExpr(iex->Iex.GetI.ix, binders),
-			iex->Iex.GetI.bias,
-			iex->Iex.GetI.tid);
-	case Iex_RdTmp:
-		return iex;
-	case Iex_Qop:
-		return IRExpr_Qop(
-			iex->Iex.Qop.op,
-			specialiseIRExpr(iex->Iex.Qop.arg1, binders),
-			specialiseIRExpr(iex->Iex.Qop.arg2, binders),
-			specialiseIRExpr(iex->Iex.Qop.arg3, binders),
-			specialiseIRExpr(iex->Iex.Qop.arg4, binders));
-	case Iex_Triop:
-		return IRExpr_Triop(
-			iex->Iex.Triop.op,
-			specialiseIRExpr(iex->Iex.Triop.arg1, binders),
-			specialiseIRExpr(iex->Iex.Triop.arg2, binders),
-			specialiseIRExpr(iex->Iex.Triop.arg3, binders));
-	case Iex_Binop:
-		return IRExpr_Binop(
-			iex->Iex.Binop.op,
-			specialiseIRExpr(iex->Iex.Binop.arg1, binders),
-			specialiseIRExpr(iex->Iex.Binop.arg2, binders));
-	case Iex_Unop:
-		return IRExpr_Unop(
-			iex->Iex.Unop.op,
-			specialiseIRExpr(iex->Iex.Unop.arg, binders));
-	case Iex_Load:
-		return IRExpr_Load(
-			iex->Iex.Load.isLL,
-			iex->Iex.Load.end,
-			iex->Iex.Load.ty,
-			specialiseIRExpr(iex->Iex.Load.addr, binders));
-	case Iex_Const:
-		return iex;
-	case Iex_CCall: {
-		IRExpr **args;
-		int n;
-		for (n = 0; iex->Iex.CCall.args[n]; n++)
-			;
-		args = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, n + 1);
-		for (n = 0; iex->Iex.CCall.args[n]; n++)
-			args[n] = specialiseIRExpr(iex->Iex.CCall.args[n], binders);
-		return IRExpr_CCall(
-			iex->Iex.CCall.cee,
-			iex->Iex.CCall.retty,
-			args);
-	}
-	case Iex_Mux0X:
-		return IRExpr_Mux0X(
-			specialiseIRExpr(iex->Iex.Mux0X.cond, binders),
-			specialiseIRExpr(iex->Iex.Mux0X.expr0, binders),
-			specialiseIRExpr(iex->Iex.Mux0X.exprX, binders));
-	case Iex_Associative: {
-		IRExpr *res = IRExpr_Associative(iex);
-		for (int it = 0;
-		     it < res->Iex.Associative.nr_arguments;
-		     it++)
-			res->Iex.Associative.contents[it] =
-				specialiseIRExpr(res->Iex.Associative.contents[it],
-						 binders);
-		return res;
-	}
-	case Iex_FreeVariable:
-		return iex;
-	}
-	abort();
+	SpecialiseIRExpr s(binders);
+	return s.transformIRExpr(iex);
 }
 
 static bool

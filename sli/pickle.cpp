@@ -5,6 +5,9 @@
 #include "pickle.hpp"
 #include "state_machine.hpp"
 
+enum sm_tag { SM_unreachable, SM_crash, SM_survive, SM_proxy, SM_bifurcate, SM_stub };
+enum smse_tag { SMSE_unreached, SMSE_store, SMSE_load, SMSE_copy };
+
 typedef unsigned long memoSlotT;
 class Pickler {
 	std::map<void *, memoSlotT> memoTable;
@@ -92,29 +95,34 @@ pickle_counted(IRExpr **&e, Pickler &p, int nr)
 	p.finishObject();
 }
 
-static void
-pickle(int o, Pickler &p)
-{
-	p.raw(&o, &o + 1);
-}
-
-static void
-unpickle(int &o, Unpickler &p)
-{
-	p.raw(&o, &o + 1);
-}
-
-/* This should only really be used for enums, but I can't see any way
-   of telling C++ about that. */
-template <typename foo>
-void
-unpickle(foo &o, Unpickler &p)
-{
-	int x;
-	unpickle(x, p);
-	o = (foo)x;
-}
-
+/* The first argument to pickle() should arguably be either by-value
+   or by-const-reference, since it's never changed, but doing it this
+   way inhibits certain type conversions which tend to cause
+   problems. */
+#define simple_pickle(type)			\
+	static void				\
+	pickle(type &o, Pickler &p)		\
+	{					\
+		p.raw(&o, &o + 1);		\
+	}					\
+	static void				\
+	unpickle(type &o, Unpickler &p)		\
+	{					\
+		p.raw(&o, &o + 1);		\
+	}
+simple_pickle(unsigned long)
+simple_pickle(ULong)
+simple_pickle(UInt)
+simple_pickle(Bool)
+simple_pickle(int)
+simple_pickle(IRType)
+simple_pickle(IRConstTag)
+simple_pickle(IROp)
+simple_pickle(IREndness)
+simple_pickle(IRExprTag)
+simple_pickle(sm_tag)
+simple_pickle(smse_tag)
+#undef simple_pickle
 
 static void unpickle(IRExpr *&e, Unpickler &p);
 IRExpr **alloc_irexpr_array(unsigned nr);
@@ -265,6 +273,13 @@ unpickle_counted(IRExpr **&e, Unpickler &p, int nr)
 			break;						\
 		case Iex_FreeVariable:					\
 			pickle(expr->Iex.FreeVariable.key, p);		\
+			break;						\
+		case Iex_ClientCall:					\
+			pickle(expr->Iex.ClientCall.calledRip, p);	\
+			pickle ## _null (expr->Iex.ClientCall.args, p);	\
+			break;						\
+		case Iex_ClientCallFailed:				\
+			pickle(expr->Iex.ClientCallFailed.target, p);	\
 			break;						\
 		}							\
 		p.finishObject();					\
@@ -460,7 +475,6 @@ unpickleIRExpr(FILE *f)
 
 static void pickle(StateMachine *sm, Pickler &p);
 
-enum smse_tag { SMSE_unreached, SMSE_store, SMSE_load, SMSE_copy };
 static void
 pickle(StateMachineSideEffect *smse, Pickler &p)
 {
@@ -511,7 +525,6 @@ pickle(StateMachineEdge *sme, Pickler &p)
 	p.finishObject();
 }
 
-enum sm_tag { SM_unreachable, SM_crash, SM_survive, SM_proxy, SM_bifurcate, SM_stub };
 static void
 pickle(StateMachine *sm, Pickler &p)
 {

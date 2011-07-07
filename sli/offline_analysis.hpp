@@ -115,6 +115,17 @@ protected:
 	{
 		return e;
 	}
+	virtual IRExpr *transformIexClientCall(IRExpr *, bool *done_something);
+	virtual IRExpr *transformIexClientCallFailed(IRExpr *e, bool *done_something)
+	{
+		bool t = false;
+		IRExpr *a1 = transformIRExpr(e->Iex.ClientCallFailed.target, &t);
+		*done_something |= t;
+		if (!t)
+			return e;
+		else
+			return IRExpr_ClientCallFailed(a1);
+	}
 public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 	IRExpr *transformIRExpr(IRExpr *e) { bool t; return transformIRExpr(e, &t); }

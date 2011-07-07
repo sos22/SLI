@@ -80,6 +80,15 @@ Oracle::LivenessSet::define(Int offset)
 		return LivenessSet(mask & ~(1ul << (offset / 8)));
 }
 
+bool
+Oracle::LivenessSet::isLive(Int offset) const
+{
+	if (offset >= 8 * NR_REGS)
+		return true;
+	else
+		return !!(mask & (1ul << (offset / 8)));
+}
+
 const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::notAPointer(1);
 const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::stackPointer(2);
 const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::nonStackPointer(4);
@@ -706,6 +715,12 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 		return old;
 	case Iex_FreeVariable:
 		return old;
+	case Iex_ClientCall:
+		for (int i = 0; w->Iex.ClientCall.args[i]; i++)
+			old = irexprUsedValues(old, w->Iex.ClientCall.args[i]);
+		return old;
+	case Iex_ClientCallFailed:
+		return irexprUsedValues(old, w->Iex.ClientCallFailed.target);
 	}
 	abort();
 }
@@ -2458,4 +2473,11 @@ Oracle::getRbpToRspDelta(unsigned long rip, long *out)
 	} else {
 		return false;
 	}
+}
+
+Oracle::LivenessSet
+Oracle::liveOnEntryToFunction(unsigned long rip)
+{
+	Function f(rip);
+	return f.liveOnEntry(rip, true);
 }

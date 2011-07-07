@@ -148,6 +148,25 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 		return true;
 	case Iex_FreeVariable:
 		return a->Iex.FreeVariable.key == b->Iex.FreeVariable.key;
+	case Iex_ClientCall:
+		if (a->Iex.ClientCall.calledRip != b->Iex.ClientCall.calledRip)
+			return false;
+		for (int i = 0; ; i++) {
+			if (!a->Iex.ClientCall.args[i]) {
+				if (!b->Iex.ClientCall.args[i])
+					return true;
+				else
+					return false;
+			} else if (!b->Iex.ClientCall.args[i])
+				return false;
+			if (!physicallyEqual(a->Iex.ClientCall.args[i],
+					     b->Iex.ClientCall.args[i]))
+				return false;
+		}
+		abort();
+	case Iex_ClientCallFailed:
+		return physicallyEqual(a->Iex.ClientCallFailed.target,
+				       b->Iex.ClientCallFailed.target);
 	}
 	abort();
 }
@@ -335,6 +354,14 @@ exprComplexity(const IRExpr *e)
 	}
 	case Iex_FreeVariable:
 		return 100;
+	case Iex_ClientCall: {
+		int acc = 100;
+		for (int x = 0; e->Iex.ClientCall.args[x]; x++)
+			acc += exprComplexity(e->Iex.ClientCall.args[x]);
+		return acc;
+	}
+	case Iex_ClientCallFailed:
+		return 1000 + exprComplexity(e->Iex.ClientCallFailed.target);
 	}
 	abort();
 }
@@ -357,6 +384,8 @@ ordering_iex_tag(IRExprTag a)
 	case Iex_Mux0X: return 11;
 	case Iex_Load: return 12;
 	case Iex_CCall: return 13;
+	case Iex_ClientCall: return 14;
+	case Iex_ClientCallFailed: return 15;
 	}
 	abort();
 }
@@ -494,7 +523,7 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 			    !b->Iex.CCall.args[x])
 				return false;
 			if (!a->Iex.CCall.args[x])
-				return false;
+				return true;
 			if (!b->Iex.CCall.args[x])
 				return false;
 			if (!physicallyEqual(a->Iex.CCall.args[x],
@@ -538,6 +567,22 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 	}
 	case Iex_FreeVariable:
 		return a->Iex.FreeVariable.key < b->Iex.FreeVariable.key;
+	case Iex_ClientCall:
+		for (int x = 0; 1; x++) {
+			if (!a->Iex.ClientCall.args[x] && !b->Iex.ClientCall.args[x])
+				return false;
+			if (!a->Iex.ClientCall.args[x])
+				return true;
+			if (!b->Iex.ClientCall.args[x])
+				return false;
+			if (!physicallyEqual(a->Iex.ClientCall.args[x],
+					     b->Iex.ClientCall.args[x]))
+				return sortIRExprs(a->Iex.ClientCall.args[x],
+						   b->Iex.ClientCall.args[x]);
+		}
+	case Iex_ClientCallFailed:
+		return sortIRExprs(a->Iex.ClientCallFailed.target,
+				   b->Iex.ClientCallFailed.target);
 	}
 
 	abort();
@@ -1135,6 +1180,15 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 			e->Iex.Associative.contents[x] =
 				internIRExpr(e->Iex.Associative.contents[x], lookupTable);
 		break;
+	case Iex_ClientCall:
+		for (int x = 0; e->Iex.ClientCall.args[x]; x++)
+			e->Iex.ClientCall.args[x] =
+				internIRExpr(e->Iex.ClientCall.args[x], lookupTable);
+		break;
+	case Iex_ClientCallFailed:
+		e->Iex.ClientCallFailed.target =
+			internIRExpr(e->Iex.ClientCallFailed.target, lookupTable);
+		break;
 	}
 	for (std::map<IRExpr *, IRExpr *>::iterator it = lookupTable.begin();
 	     it != lookupTable.end();
@@ -1163,6 +1217,7 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 			do_case(Load);
 			do_case(Mux0X);
 			do_case(FreeVariable);
+			do_case(ClientCallFailed);
 #undef do_case
 			/* Others are harder. */
 		case Iex_CCall: {
@@ -1199,6 +1254,22 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 					     other->Iex.Const.con))
 				continue;
 			break;
+
+		case Iex_ClientCall: {
+			bool bad;
+			if (other->Iex.ClientCall.calledRip != e->Iex.ClientCall.calledRip)
+				continue;
+			bad = false;
+			for (int x = 0; !bad; x++) {
+				if (e->Iex.ClientCall.args[x] != other->Iex.ClientCall.args[x])
+					bad = true;
+				if (e->Iex.ClientCall.args[x] == NULL)
+					break;
+			}
+			if (bad)
+				continue;
+			break;
+		}
 		}
 
 		/* If we get here, they match and we're done. */
@@ -2074,6 +2145,13 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInte
 	case Iex_Load:
 		return isBadAddress(e->Iex.Load.addr, opt, oracle) ||
 			definitelyUnevaluatable(e->Iex.Load.addr, opt, oracle);
+	case Iex_ClientCall:
+		for (int x = 0; e->Iex.ClientCall.args[x]; x++)
+			if (definitelyUnevaluatable(e->Iex.ClientCall.args[x], opt, oracle))
+				return true;
+		return false;
+	case Iex_ClientCallFailed:
+		return definitelyUnevaluatable(e->Iex.ClientCallFailed.target, opt, oracle);
 	}
 	abort();
 }

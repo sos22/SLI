@@ -110,6 +110,12 @@ IRExpr::visit(HeapVisitor &visit)
      for (int x = 0; x < Iex.Associative.nr_arguments; x++)
        visit(Iex.Associative.contents[x]);
      return;
+   case Iex_ClientCall:
+     visit(Iex.ClientCall.args);
+     return;
+   case Iex_ClientCallFailed:
+     visit(Iex.ClientCallFailed.target);
+     return;
    }
    abort();
 }
@@ -167,6 +173,14 @@ IRExpr::hashval(void) const
   }
   case Iex_FreeVariable:
     return Iex.FreeVariable.key * 12357743;
+  case Iex_ClientCall: {
+    unsigned long h = Iex.ClientCall.calledRip * 3940631;
+    for (unsigned x = 0; Iex.ClientCall.args[x]; x++)
+      h = h * 7940641 + Iex.ClientCall.args[x]->hashval();
+    return h;
+  }
+  case Iex_ClientCallFailed:
+    return Iex.ClientCallFailed.target->hashval() * 65537;
   }
   abort();
 }
@@ -1192,7 +1206,6 @@ static bool parseIRExprConst(IRExpr **res, const char *str, const char **suffix,
   return true;
 }
 
-IRExpr **alloc_irexpr_array(unsigned nr);
 static bool parseIRExprCCall(IRExpr **res, const char *str, const char **suffix, char **err)
 {
   IRCallee *cee;
@@ -1468,6 +1481,20 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       return;
     case Iex_FreeVariable:
       fprintf(f, "free%d", e->Iex.FreeVariable.key);
+      return;
+    case Iex_ClientCall:
+      fprintf(f, "call0x%lx(", e->Iex.ClientCall.calledRip);
+      for (int x = 0; e->Iex.ClientCall.args[x]; x++) {
+	if (x != 0)
+	  fprintf(f, ", ");
+	ppIRExpr(e->Iex.ClientCall.args[x], f);
+      }
+      fprintf(f, ")");
+      return;
+    case Iex_ClientCallFailed:
+      fprintf(f, "failedCall(");
+      ppIRExpr(e->Iex.ClientCallFailed.target, f);
+      fprintf(f, ")");
       return;
   }
   vpanic("ppIRExpr");
@@ -1957,6 +1984,21 @@ IRExpr* IRExpr_FreeVariable ( )
    static int next_key;
    return IRExpr_FreeVariable(++next_key);
 }
+IRExpr* IRExpr_ClientCall ( unsigned long r, IRExpr **args )
+{
+   IRExpr *e = new IRExpr();
+   e->tag = Iex_ClientCall;
+   e->Iex.ClientCall.calledRip = r;
+   e->Iex.ClientCall.args = args;
+   return e;
+}
+IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
+{
+   IRExpr *e = new IRExpr();
+   e->tag = Iex_ClientCallFailed;
+   e->Iex.ClientCallFailed.target = t;
+   return e;
+}
 
 /* Constructors for NULL-terminated IRExpr expression vectors,
    suitable for use as arg lists in clean/dirty helper calls. */
@@ -2307,6 +2349,10 @@ IRExpr* deepCopyIRExpr ( IRExpr* e )
 	 return IRExpr_Associative(e);
       case Iex_FreeVariable:
 	 return IRExpr_FreeVariable(e->Iex.FreeVariable.key);
+      case Iex_ClientCall:
+	 return IRExpr_ClientCall(e->Iex.ClientCall.calledRip, e->Iex.ClientCall.args);
+      case Iex_ClientCallFailed:
+	 return IRExpr_ClientCallFailed(e->Iex.ClientCallFailed.target);
    }
    vpanic("deepCopyIRExpr");
 }
@@ -2906,6 +2952,8 @@ IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
          vpanic("typeOfIRExpr: Binder is not a valid expression");
 	 break;
       case Iex_FreeVariable:
+      case Iex_ClientCall:
+      case Iex_ClientCallFailed:
 	 return Ity_I64; /* Hack hack hack */
    }
    ppIRExpr(e, stderr);
@@ -2994,6 +3042,8 @@ Bool isFlatIRStmt ( IRStmt* st )
                                     && isIRAtom(e->Iex.Mux0X.exprX));
 	    case Iex_Associative: return False;
 	    case Iex_FreeVariable: return True;
+	    case Iex_ClientCall: return false;
+	    case Iex_ClientCallFailed: return false;
          }
          vpanic("isFlatIRStmt(e)");
          vassert(0);
@@ -3164,6 +3214,13 @@ void useBeforeDef_Expr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, Int* def_counts )
          return;
       case Iex_FreeVariable:
 	 return;
+      case Iex_ClientCall:
+         for (i = 0; expr->Iex.ClientCall.args[i]; i++)
+            useBeforeDef_Expr(bb,stmt,expr->Iex.ClientCall.args[i],def_counts);
+         return;
+      case Iex_ClientCallFailed:
+	 useBeforeDef_Expr(bb,stmt,expr->Iex.ClientCallFailed.target,def_counts);
+         return;
    }
    vpanic("useBeforeDef_Expr");
 }
@@ -3234,6 +3291,8 @@ void tcExpr ( IRSB* bb, IRStmt* stmt, IRExpr* expr, IRType gWordTy )
       case Iex_RdTmp:
       case Iex_Binder:
       case Iex_FreeVariable:
+      case Iex_ClientCall:
+      case Iex_ClientCallFailed:
          return;
       case Iex_GetI:
          tcExpr(bb,stmt, expr->Iex.GetI.ix, gWordTy );

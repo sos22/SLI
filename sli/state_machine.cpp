@@ -444,6 +444,13 @@ findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt
 		return;
 	case Iex_FreeVariable:
 		return;
+	case Iex_ClientCall:
+		for (int i = 0; e->Iex.ClientCall.args[i]; i++)
+			findUsedBinders(e->Iex.ClientCall.args[i], out, opt);
+		return;
+	case Iex_ClientCallFailed:
+		findUsedBinders(e->Iex.ClientCallFailed.target, out, opt);
+		return;
 	}
 	abort();
 }
@@ -1232,6 +1239,8 @@ public:
 		case Iex_Mux0X:
 		case Iex_CCall:
 		case Iex_FreeVariable:
+		case Iex_ClientCall:
+		case Iex_ClientCallFailed:
 			break;
 		case Iex_Qop:
 			if (e->Iex.Qop.arg4->tag == Iex_FreeVariable &&

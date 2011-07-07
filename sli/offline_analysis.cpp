@@ -295,6 +295,10 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 		return transformIexAssociative(e, done_something);
 	case Iex_FreeVariable:
 		return transformIexFreeVariable(e, done_something);
+	case Iex_ClientCall:
+		return transformIexClientCall(e, done_something);
+	case Iex_ClientCallFailed:
+		return transformIexClientCallFailed(e, done_something);
 	}
 	abort();
 }
@@ -320,6 +324,28 @@ IRExprTransformer::transformIexCCall(IRExpr *e, bool *done_something)
 		return IRExpr_CCall(e->Iex.CCall.cee,
 				    e->Iex.CCall.retty,
 				    newArgs);
+}
+
+IRExpr *
+IRExprTransformer::transformIexClientCall(IRExpr *e, bool *done_something)
+{
+	IRExpr **newArgs;
+	int nr_args;
+	int x;
+	bool t = false;
+
+	for (nr_args = 0; e->Iex.ClientCall.args[nr_args]; nr_args++)
+		;
+	newArgs = alloc_irexpr_array(nr_args + 1);
+	for (x = 0; x < nr_args; x++)
+		newArgs[x] = transformIRExpr(e->Iex.ClientCall.args[x], &t);
+	newArgs[nr_args] = NULL;
+	*done_something |= t;
+	if (!t)
+		return e;
+	else
+		return IRExpr_ClientCall(e->Iex.ClientCall.calledRip,
+					 newArgs);
 }
 
 IRExpr *
@@ -2553,8 +2579,53 @@ buildCFGForCallGraph(AddressSpace *as,
 	return res;
 }
 
+/* Try to backtrack across a call instruction.  We determine how many
+   arguments the called function is supposed to have by asking the
+   oracle, and assume that it is a pure function of those arguments
+   which returns a single value in RAX */
+static StateMachine *
+updateStateMachineForCallInstruction(unsigned tid, StateMachine *orig, IRSB *irsb, Oracle *oracle)
+{
+	IRExpr *r;
+
+	unsigned long called_rip;
+	assert(irsb->jumpkind == Ijk_Call);
+	if (irsb->next->tag == Iex_Const) {
+		called_rip = irsb->next->Iex.Const.con->Ico.U64;
+		Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
+
+		/* We only consider arguments in registers.  This is
+		   probably a bug; nevermind. */
+		static const int argument_registers[6] = {
+			OFFSET_amd64_RDI,
+			OFFSET_amd64_RSI,
+			OFFSET_amd64_RDX,
+			OFFSET_amd64_RCX,
+			OFFSET_amd64_R8,
+			OFFSET_amd64_R9};
+
+		int nr_args;
+		nr_args = 0;
+		for (int i = 0; i < 6; i++)
+			if (live.isLive(argument_registers[i]))
+				nr_args++;
+		IRExpr **args = alloc_irexpr_array(nr_args + 1);
+		nr_args = 0;
+		for (int i = 0; i < 6; i++)
+			if (live.isLive(argument_registers[i]))
+				args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, tid);
+		args[nr_args] = NULL;
+		r = IRExpr_ClientCall(called_rip, args);
+	} else {
+		r = IRExpr_ClientCallFailed(irsb->next);
+	}
+
+	return rewriteRegister(orig, OFFSET_amd64_RAX, r);
+}
+
 template <typename t> StateMachine *
-CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGNode<t> *, StateMachine *> &memo)
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGNode<t> *, StateMachine *> &memo,
+		  Oracle *oracle)
 {
 	if (!cfg)
 		return StateMachineNoCrash::get();
@@ -2572,16 +2643,13 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		if (irsb->stmts[endOfInstr]->tag == Ist_IMark)
 			break;
 	if (irsb->jumpkind == Ijk_Call && endOfInstr == irsb->stmts_used) {
-		/* Hackety hackety hack: we assume call instructions
-		   are no-ops.  That means we need to avoid adjusting
-		   the stack or pushing a return address if this is
-		   the last instruction before the end of the IRSB. */
-		/* Yep, we need to discard this instruction. */
-		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo);
+		/* Call instructions need special handling */
+		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo, oracle);
 		if (!res)
 			return NULL;
+		res = updateStateMachineForCallInstruction(tid, res, irsb, oracle);
 	} else if (cfg->fallThrough || !cfg->branch) {
-		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo);
+		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo, oracle);
 		if (!res)
 			return NULL;
 		int idx = endOfInstr;
@@ -2590,7 +2658,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 			if (stmt->tag == Ist_Exit) {
 				if (cfg->branch) {
 					StateMachine *tmpsm =
-						CFGtoStoreMachine(tid, as, cfg->branch, memo);
+						CFGtoStoreMachine(tid, as, cfg->branch, memo, oracle);
 					if (!tmpsm)
 						return NULL;
 					res = new StateMachineBifurcate(
@@ -2608,7 +2676,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		}
 	} else {
 		assert(cfg->branch);
-		res = CFGtoStoreMachine(tid, as, cfg->branch, memo);
+		res = CFGtoStoreMachine(tid, as, cfg->branch, memo, oracle);
 		if (!res)
 			return NULL;
 		int idx;
@@ -2630,10 +2698,10 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 }
 
 template <typename t> StateMachine *
-CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg)
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, Oracle *oracle)
 {
 	std::map<CFGNode<t> *, StateMachine *> memo;
-	return CFGtoStoreMachine(tid, as, cfg, memo);
+	return CFGtoStoreMachine(tid, as, cfg, memo, oracle);
 }
 
 static bool
@@ -2646,7 +2714,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 const InstructionSet &is,
 		 GarbageCollectionToken token)
 {
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get()));
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get(), oracle));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
@@ -3105,10 +3173,9 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 			if (x == irsb->stmts_used &&
 			    irsb->jumpkind == Ijk_Call &&
 			    cfg->fallThroughRip == extract_call_follower(irsb)) {
-				/* This call is suppressed -> ignore
-				   it, rather than doing the
-				   backtracking thing. */
-				ft = new CrashReason(finalRip, ft->sm);
+				/* Calls need special handling */
+				ft = new CrashReason(finalRip,
+						     updateStateMachineForCallInstruction(tid, ft->sm, irsb, oracle));
 			} else {
 				ft = new CrashReason(VexRip(finalRip.rip, x), ft->sm);
 				while (ft->rip.idx != 0) {

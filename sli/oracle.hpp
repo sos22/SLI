@@ -46,6 +46,7 @@ public:
 		void operator |=(const LivenessSet x) { mask |= x.mask; }
 		bool operator !=(const LivenessSet x) { return mask != x.mask; }
 		LivenessSet operator &(const LivenessSet x) { return LivenessSet(mask & x.mask); }
+		bool isLive(Int offset) const;
 		static LivenessSet everything;
 		static LivenessSet argRegisters;
 		LivenessSet(unsigned long _m) : mask(_m) {}
@@ -315,6 +316,7 @@ public:
 	void getAllMemoryAccessingInstructions(std::vector<unsigned long> &out) const;
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(unsigned long rip);
+	LivenessSet liveOnEntryToFunction(unsigned long rip);
 
 	bool getRbpToRspDelta(unsigned long rip, long *out);
 
