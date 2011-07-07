@@ -1031,7 +1031,7 @@ database(void)
 	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE, NULL);
 	if (rc == SQLITE_OK) {
 		/* Return existing database */
-		return _database;
+		goto disable_journalling;
 	}
 
 	/* Create new database */
@@ -1073,6 +1073,9 @@ database(void)
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
+	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
+
+disable_journalling:
 	/* All of the information in the database can be regenerated
 	   by just blowing it away and starting over, so there's not
 	   much point in doing lots of journaling and fsync()
@@ -1081,8 +1084,6 @@ database(void)
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-
-	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
 
 	return _database;
 }
