@@ -725,12 +725,6 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 	abort();
 }
 
-static bool
-operator >(const Oracle::LivenessSet &a, const Oracle::LivenessSet &b)
-{
-	return a.mask != b.mask && (b.mask & ~a.mask) == 0;
-}
-
 static Oracle::PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    IRTypeEnv *tyenv,

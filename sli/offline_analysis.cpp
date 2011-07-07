@@ -2705,30 +2705,29 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, Oracle *oracl
 }
 
 static bool
-considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
-		 VexPtr<AddressSpace> &as,
-		 VexPtr<Oracle> &oracle,
-		 VexPtr<IRExpr, &ir_heap> assumption,
-		 VexPtr<StateMachine, &ir_heap> &probeMachine,
-		 VexPtr<CrashSummary, &ir_heap> &summary,
-		 const InstructionSet &is,
-		 GarbageCollectionToken token)
+determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachine,
+				     VexPtr<StateMachine, &ir_heap> &probeMachine,
+				     VexPtr<Oracle> &oracle,
+				     VexPtr<IRExpr, &ir_heap> assumption,
+				     const InstructionSet &is,
+				     unsigned long rip,
+				     GarbageCollectionToken token,
+				     IRExpr **assumptionOut)
 {
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get(), oracle));
-	if (!sm) {
-		fprintf(_logfile, "Cannot build store machine!\n");
-		return true;
-	}
+	/* Specialise the state machine down so that we only consider
+	   the interesting stores, and introduce free variables as
+	   appropriate. */
 	AllowableOptimisations opt2 =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableassumeNoInterferingStores();
 	opt2.interestingStores = is.rips;
 	opt2.haveInterestingStoresSet = true;
-	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(cfg->my_rip.rip));
-	sm->sanity_check();
-	sm = optimiseStateMachine(sm, alias, opt2, oracle, true, cfg->my_rip.rip);
-	sm->sanity_check();
+	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(rip));
+
+	VexPtr<StateMachine, &ir_heap> sm;
+	sm = optimiseStateMachine(storeMachine, alias, opt2,
+				  oracle, true, rip);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm.get())) {
 		/* This store machine is unusable, probably because we
@@ -2787,18 +2786,124 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	}
 
 	if (!mightCrash) {
-		/* Executing in parallel with this machine cannot lead
-		 * to a crash, so there's no point in doing any more
-		 * work with it. */
+		fprintf(_logfile,
+			"\t\tDefinitely cannot crash\n");
 		return false;
 	}
 
+	if (assumptionOut)
+		*assumptionOut = assumption;
+	return true;
+}
+
+static StateMachine *
+expandStateMachineToFunctionHead(StateMachine *sm,
+				 unsigned long rip,
+				 Oracle *oracle,
+				 AllowableOptimisations &opt,
+				 unsigned long *new_rip)
+{
+	std::vector<unsigned long> previousInstructions;
+	oracle->findPreviousInstructions(previousInstructions, rip);
+
+	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
+	ii->addCrashReason(new CrashReason(VexRip(rip,0), sm));
+
+	InstructionSet interesting;
+	interesting.rips.insert(rip);
+
+	std::set<unsigned long> terminalFunctions;
+
+	VexPtr<CrashReason, &ir_heap> cr;
+
+	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
+	     !TIMEOUT && it != previousInstructions.end();
+	     it++) {
+		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
+			ii->CFGFromRip(*it, terminalFunctions));
+		trimCFG(cfg.get(), interesting, INT_MAX, true);
+		breakCycles(cfg.get());
+
+		cr = ii->CFGtoCrashReason(CRASHING_THREAD, cfg);
+		if (!cr) {
+			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
+			return NULL;
+		}
+
+		cr->sm = optimiseStateMachine(cr->sm,
+					      oracle->getAliasingConfigurationForRip(*it),
+					      opt,
+					      oracle,
+					      false,
+					      *it);
+		cr->sm = cr->sm->selectSingleCrashingPath();
+		cr->sm = optimiseStateMachine(cr->sm,
+					      oracle->getAliasingConfigurationForRip(*it),
+					      opt,
+					      oracle,
+					      false,
+					      *it);
+	}
+	if (TIMEOUT)
+		return NULL;
+	*new_rip = cr->rip.rip;
+	return cr->sm;
+}
+
+static bool
+considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
+		 VexPtr<AddressSpace> &as,
+		 VexPtr<Oracle> &oracle,
+		 VexPtr<IRExpr, &ir_heap> assumption,
+		 VexPtr<StateMachine, &ir_heap> &probeMachine,
+		 VexPtr<CrashSummary, &ir_heap> &summary,
+		 const InstructionSet &is,
+		 GarbageCollectionToken token)
+{
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get(), oracle));
+	if (!sm) {
+		fprintf(_logfile, "Cannot build store machine!\n");
+		return true;
+	}
+
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, is, cfg->my_rip.rip, token, NULL))
+		return false;
+
+	/* If it might crash with that machine, try expanding it to
+	   include a bit more context and see if it still goes. */
+	AllowableOptimisations opt =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack()
+		.enableassumeNoInterferingStores();
+	unsigned long new_rip;
+	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, oracle, opt, &new_rip);
+	if (!sm) {
+		fprintf(_logfile, "\t\tCannot expand store machine!\n");
+		return true;
+	}
+
+	fprintf(_logfile, "\t\tExpanded store machine:\n");
+	printStateMachine(sm, _logfile);
+
+	IRExpr *_newAssumption;
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, is, new_rip, token, &_newAssumption)) {
+		fprintf(_logfile, "\t\tExpanded store machine cannot crash\n");
+		return false;
+	}
+	VexPtr<IRExpr, &ir_heap> newAssumption(_newAssumption);
+
+	fprintf(_logfile, "\t\tExpanded assumption: ");
+	ppIRExpr(newAssumption, _logfile);
+	fprintf(_logfile, "\n");
+
+	/* Okay, the expanded machine crashes.  That means we have to
+	 * generate a fix. */
 	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-	if (!findRemoteMacroSections(probeMachine, sm, assumption, oracle, remoteMacroSections, token)) {
+	if (!findRemoteMacroSections(probeMachine, sm, newAssumption, oracle, remoteMacroSections, token)) {
 		fprintf(_logfile, "\t\tChose a bad write machine...\n");
 		return true;
 	}
-	if (!fixSufficient(sm, probeMachine, assumption, oracle, remoteMacroSections)) {
+	if (!fixSufficient(sm, probeMachine, newAssumption, oracle, remoteMacroSections)) {
 		fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
 		return true;
 	}
