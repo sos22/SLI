@@ -1752,6 +1752,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				 * machine state just for that. */
 				break;
 			default:
+				printf("Cannot constant fold ");
+				ppIRExpr(src, stdout);
+				printf("\n");
 				break;
 			}
 		}
@@ -1935,6 +1938,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					IRConst_U1(
 						(long)src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 <
 						(long)src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+			case Iop_CmpLT64U:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U1(
+						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 <
+						src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
 			case Iop_CmpEQ64:
 				*done_something = true;
 				return IRExpr_Const(
@@ -1954,6 +1963,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 <<
 						src->Iex.Binop.arg2->Iex.Const.con->Ico.U8));
 			default:
+				printf("Cannot constant fold ");
+				ppIRExpr(src, stdout);
+				printf("\n");
 				break;
 			}
 		}
