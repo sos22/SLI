@@ -2628,7 +2628,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		  Oracle *oracle)
 {
 	if (!cfg)
-		return StateMachineNoCrash::get();
+		return StateMachineCrash::get();
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
@@ -2741,7 +2741,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
-	assumption = writeMachineSurvivalConstraint(sm, assumption, oracle, token);
+	assumption = writeMachineCrashConstraint(sm, assumption, oracle, token);
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine survival constraint\n");
 		return false;

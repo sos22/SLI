@@ -69,9 +69,9 @@ bool fixSufficient(StateMachine *writeMachine,
 		   IRExpr *assumption,
 		   Oracle *oracle,
 		   remoteMacroSectionsT *sections);
-IRExpr *writeMachineSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &sm,
-				       VexPtr<IRExpr, &ir_heap> &assumption,
-				       VexPtr<Oracle> &oracle,
-				       GarbageCollectionToken token);
+IRExpr *writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
+				    VexPtr<IRExpr, &ir_heap> &assumption,
+				    VexPtr<Oracle> &oracle,
+				    GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

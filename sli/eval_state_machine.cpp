@@ -8,8 +8,7 @@
 class StateMachineEvalContext {
 public:
 	StateMachineEvalContext()
-		: justPathConstraint(NULL),
-		  divergenceIsCrash(false)
+		: justPathConstraint(NULL)
 	{}
 	std::vector<StateMachineSideEffectStore *> stores;
 	std::map<Int, IRExpr *> binders;
@@ -18,17 +17,6 @@ public:
 	   initial assumption. */
 	IRExpr *pathConstraint;
 	IRExpr *justPathConstraint;
-
-	/* Normally, we're only interested in one possible bug at a
-	   time, and the state machine is constructed such that it
-	   evaluates to <crash> if you hit that bug and <no-crash> if
-	   you don't.  Divergence indicates that you've hit a crash
-	   which is not the bug whcih is being investigated, and so we
-	   treat it as <no-crash>.  Sometimes, though, you're
-	   interested in any possible crash, and in that case you
-	   should set divergenceIsCrash to make divergent behaviour be
-	   treated as <crash> */
-	bool divergenceIsCrash;
 };
 
 class SpecialiseIRExpr : public IRExprTransformer {
@@ -255,9 +243,12 @@ evalStateMachineEdge(StateMachineEdge *sme,
 					   &ctxt.justPathConstraint);
 	if (ctxt.pathConstraint->tag == Iex_Const &&
 	    ctxt.pathConstraint->Iex.Const.con->Ico.U1 == 0) {
-		/* The path constraint is impossible, which indicates
-		   that the machine has diverged.  Give up. */
-		*crashes = ctxt.divergenceIsCrash;
+		/* We've found a contradiction.  That means that the
+		   original program would have crashed, *but* in a way
+		   other than the one which we're investigating.  We
+		   therefore treat that as no-crash and abort the
+		   run. */
+		*crashes = false;
 		return;
 	}
 	evalStateMachine(sme->target, crashes, chooser, oracle, ctxt);
@@ -306,7 +297,7 @@ evalStateMachine(StateMachine *sm,
 	if (dynamic_cast<StateMachineUnreached *>(sm)) {
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
-		*crashes = ctxt.divergenceIsCrash;
+		*crashes = false;
 		return;
 	}
 
@@ -357,9 +348,9 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 }
 
 /* Augment @assumption so that it's sufficient to prove that @sm will
- * survive and will not diverge. */
+ * definitely crash. */
 IRExpr *
-writeMachineSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &sm,
+writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 			       VexPtr<IRExpr, &ir_heap> &assumption,
 			       VexPtr<Oracle> &oracle,
 			       GarbageCollectionToken token)
@@ -384,11 +375,10 @@ writeMachineSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 		   confuse the ND chooser. */
 		ctxt.pathConstraint = assumption;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		ctxt.divergenceIsCrash = true;
 		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
 
-		if (crashes) {
-			/* Crashes should be pretty rare here, and
+		if (!crashes) {
+			/* Survival should be pretty rare here, and
 			   pretty much only happen if the constraints
 			   on the machine contradict themselves
 			   (i.e. X must be simultaneously BadPtr and
@@ -398,7 +388,7 @@ writeMachineSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 			   on), but as an optimisation extend the
 			   assumption so that we don't even have to
 			   think abou them again. */
-			fprintf(_logfile, "\t\tStore machine crashed during writeMachineSurvivalConstraint?\n");
+			fprintf(_logfile, "\t\tStore machine survived during writeMachineSurvivalConstraint?\n");
 			conjunctConstraint =
 				IRExpr_Binop(
 					Iop_And1,
@@ -410,7 +400,7 @@ writeMachineSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 				simplifyIRExpr(conjunctConstraint,
 					       AllowableOptimisations::defaultOptimisations);
 		} else {
-			/* The machine didn't crash this time, and
+			/* The machine crashed this time, and
 			 * justPathConstraint is the assumption which
 			 * we had to make to make it go down this
 			 * path.  Collect together every such set of
@@ -837,9 +827,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 				/* Yes, move to the next state. */
 				StateMachine *s = writerEdge->target;
 				assert(!dynamic_cast<StateMachineUnreached *>(s));
-				if (dynamic_cast<StateMachineCrash *>(s) ||
-				    dynamic_cast<StateMachineNoCrash *>(s) ||
-				    dynamic_cast<StateMachineStub *>(s)) {
+				if (dynamic_cast<StateMachineTerminal *>(s)) {
 					/* Hit the end of the writer
 					 * -> we're done. */
 					/* Note that we need to
