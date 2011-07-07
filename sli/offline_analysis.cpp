@@ -2797,11 +2797,12 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 }
 
 static StateMachine *
-expandStateMachineToFunctionHead(StateMachine *sm,
+expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				 unsigned long rip,
-				 Oracle *oracle,
+				 VexPtr<Oracle> &oracle,
 				 AllowableOptimisations &opt,
-				 unsigned long *new_rip)
+				 unsigned long *new_rip,
+				 GarbageCollectionToken token)
 {
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, rip);
@@ -2819,6 +2820,8 @@ expandStateMachineToFunctionHead(StateMachine *sm,
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     !TIMEOUT && it != previousInstructions.end();
 	     it++) {
+		LibVEX_maybe_gc(token);
+
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 			ii->CFGFromRip(*it, terminalFunctions));
 		trimCFG(cfg.get(), interesting, INT_MAX, true);
@@ -2876,7 +2879,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		.enableassumePrivateStack()
 		.enableassumeNoInterferingStores();
 	unsigned long new_rip;
-	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, oracle, opt, &new_rip);
+	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, oracle, opt, &new_rip, token);
 	if (!sm) {
 		fprintf(_logfile, "\t\tCannot expand store machine!\n");
 		return true;
