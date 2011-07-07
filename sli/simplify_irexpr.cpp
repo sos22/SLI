@@ -716,6 +716,7 @@ public:
 	CnfExpression *CNF();
 	CnfExpression *invert();
 	void sort();
+	bool optimise(void);
 	CnfAtom *getArg(unsigned x) {
 		assert(x < args.size());
 		CnfAtom *r = dynamic_cast<CnfAtom *>(args[x]);
@@ -936,6 +937,26 @@ CnfOr::invert()
 	return a;
 }
 
+bool
+CnfOr::optimise()
+{
+	for (unsigned i = 0; i < args.size(); i++) {
+		for (unsigned j = i + 1; j < args.size(); ) {
+			if (getArg(i)->getId() == getArg(j)->getId()) {
+				if (!!dynamic_cast<CnfNot *>(getArg(i)) ==
+				    !!dynamic_cast<CnfNot *>(getArg(j))) {
+					args.erase(args.begin() + j);
+				} else {
+					return true;
+				}
+			} else {
+				j++;
+			}
+		}
+	}
+	return false;
+}
+
 CnfExpression *
 CnfAnd::invert()
 {
@@ -955,6 +976,14 @@ CnfAnd::optimise()
 
 		if (TIMEOUT)
 			return;
+
+		for (unsigned i = 0; i < args.size(); ) {
+			if (getArg(i)->optimise()) {
+				args.erase(args.begin() + i);
+			} else {
+				i++;
+			}
+		}
 
 		/* First rule: (A | b) & (A | ~b) -> just A. */
 		for (unsigned i = 0; i < args.size(); i++) {
