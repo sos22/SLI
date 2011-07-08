@@ -1457,7 +1457,24 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			src->Iex.Associative.contents[x] =
 				optimiseIRExprFP(src->Iex.Associative.contents[x], opt, done_something);
 		break;
-	default:
+	case Iex_ClientCall:
+		for (int x = 0; src->Iex.ClientCall.args[x]; x++)
+			src->Iex.ClientCall.args[x] =
+				optimiseIRExprFP(src->Iex.ClientCall.args[x], opt, done_something);
+		break;
+	case Iex_ClientCallFailed:
+		src->Iex.ClientCallFailed.target =
+			optimiseIRExprFP(src->Iex.ClientCallFailed.target, opt, done_something);
+		break;
+	case Iex_GetI:
+		src->Iex.GetI.ix =
+			optimiseIRExprFP(src->Iex.GetI.ix, opt, done_something);
+		break;
+	case Iex_Binder:
+	case Iex_Get:
+	case Iex_RdTmp:
+	case Iex_Const:
+	case Iex_FreeVariable:
 		break;
 	}
 
@@ -1528,6 +1545,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					break;
 				case Iop_And8:
 					res = IRExpr_Const(IRConst_U8(l->Ico.U8 & r->Ico.U8));
+					break;
+				case Iop_And16:
+					res = IRExpr_Const(IRConst_U16(l->Ico.U16 & r->Ico.U16));
 					break;
 				case Iop_And32:
 					res = IRExpr_Const(IRConst_U32(l->Ico.U32 & r->Ico.U32));
@@ -2044,6 +2064,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					IRConst_U1(
 						l->Iex.Const.con->Ico.U64 <
 						r->Iex.Const.con->Ico.U64));
+			case Iop_CmpEQ8:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U1(
+						l->Iex.Const.con->Ico.U8 ==
+						r->Iex.Const.con->Ico.U8));
+			case Iop_CmpEQ16:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U1(
+						l->Iex.Const.con->Ico.U16 ==
+						r->Iex.Const.con->Ico.U16));
 			case Iop_CmpEQ64:
 				*done_something = true;
 				return IRExpr_Const(
