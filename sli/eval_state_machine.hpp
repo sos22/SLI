@@ -51,8 +51,8 @@ IRExpr *writeMachineSuitabilityConstraint(
 	VexPtr<IRExpr, &ir_heap> &assumption,
 	VexPtr<Oracle> &oracle,
 	GarbageCollectionToken token);
-bool evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &sm1,
-			     VexPtr<StateMachine, &ir_heap> &sm2,
+bool evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
+			     VexPtr<StateMachine, &ir_heap> &storeMachine,
 			     VexPtr<Oracle> &oracle,
 			     VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 			     bool *mightSurvive,
