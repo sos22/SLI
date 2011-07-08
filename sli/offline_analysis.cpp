@@ -2824,7 +2824,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 			ii->CFGFromRip(*it, terminalFunctions));
-		trimCFG(cfg.get(), interesting, INT_MAX, true);
+		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
 		cr = ii->CFGtoCrashReason(CRASHING_THREAD, cfg);
