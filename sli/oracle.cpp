@@ -998,8 +998,14 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 			}
 		}
 	}
+	
+	if (!predecessors.count(rip)) {
+		/* This can happen if the information from the oracle
+		   is inconsistent. */
+		fprintf(_logfile, "Dijkstra failed in %s\n", __func__);
+		return;
+	}
 
-	assert(predecessors.count(rip));
 	for (unsigned long i = predecessors[rip]; i; i = predecessors[i])
 		output.push_back(i);
 }
