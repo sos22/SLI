@@ -2800,6 +2800,11 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 {
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, rip);
+	if (previousInstructions.size() == 0) {
+		/* Lacking any better ideas... */
+		fprintf(_logfile, "cannot expand store machine...\n");
+		return sm;
+	}
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
 	ii->addCrashReason(new CrashReason(VexRip(rip,0), sm));
