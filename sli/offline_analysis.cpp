@@ -158,6 +158,8 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 StateMachine *
 StateMachineTransformer::doit(StateMachine *inp, bool *done_something)
 {
+	if (TIMEOUT)
+		return inp;
 	if (memoTable.count(inp)) {
 		/* We rely on whoever set memoTable having also set
 		   *done_something if necessary. */
@@ -266,6 +268,8 @@ StateMachineTransformer::transform(StateMachine *inp, bool *done_something)
 IRExpr *
 IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 {
+	if (TIMEOUT)
+		return e;
 	switch (e->tag) {
 	case Iex_Binder:
 		return transformIexBinder(e, done_something);
@@ -3265,6 +3269,8 @@ InferredInformation::CFGFromRip(unsigned long start, const std::set<unsigned lon
 CrashReason *
 InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install)
 {
+	if (TIMEOUT)
+		return NULL;
 	VexRip finalRip(cfg->my_rip, 0);
 	if (crashReasons->hasKey(finalRip)) {
 		assert(crashReasons->get(finalRip));
