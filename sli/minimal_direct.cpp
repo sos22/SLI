@@ -172,6 +172,7 @@ main(int argc, char *argv[])
 		     it++) {
 			_logfile = fopenf("w", "logs/%lx", *it);
 			if (!_logfile) err(1, "opening logs/%lx", *it);
+			printf("Considering %lx\n", *it);
 			consider_rip(*it, ms, thr, oracle, df, timings, ALLOW_GC);
 			fclose(_logfile);
 			_logfile = stdout;

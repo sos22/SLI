@@ -3158,25 +3158,29 @@ buildCFGForRipSet(AddressSpace *as,
 		  const std::set<unsigned long> &rips,
 		  const std::set<unsigned long> &terminalFunctions,
 		  std::set<CFGNode<unsigned long> *> &output,
-		  Oracle *oracle)
+		  Oracle *oracle,
+		  unsigned max_depth)
 {
-	std::map<unsigned long, CFGNode<unsigned long> *> builtSoFar;
-	std::vector<unsigned long> needed;
+	std::map<unsigned long, std::pair<CFGNode<unsigned long> *, unsigned> > builtSoFar;
+	std::vector<std::pair<unsigned long, unsigned> > needed;
 	unsigned long rip;
+	unsigned depth;
 
 	/* Mild hack to make some corned cases easier. */
-	builtSoFar[0] = NULL;
+	builtSoFar[0] = std::pair<CFGNode<unsigned long> *, unsigned>(NULL, max_depth);
 
 	/* Step one: discover all of the instructions which we're
 	 * going to need. */
 	for (std::set<unsigned long>::const_iterator it = rips.begin();
 	     it != rips.end();
 	     it++)
-		needed.push_back(*it);
+		needed.push_back(std::pair<unsigned long, unsigned>(*it, max_depth));
 	while (!needed.empty()) {
-		rip = needed.back();
+		rip = needed.back().first;
+		depth = needed.back().second;
 		needed.pop_back();
-		if (builtSoFar.count(rip))
+		if (!depth ||
+		    (builtSoFar.count(rip) && builtSoFar[rip].second >= depth))
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(-1, rip);
 		CFGNode<unsigned long> *work = new CFGNode<unsigned long>(rip);
@@ -3184,13 +3188,13 @@ buildCFGForRipSet(AddressSpace *as,
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
 				work->fallThroughRip = irsb->stmts[x]->Ist.IMark.addr;
-				needed.push_back(work->fallThroughRip);
+				needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
 				assert(work->branch == 0);
 				work->branchRip = irsb->stmts[x]->Ist.Exit.dst->Ico.U64;
-				needed.push_back(work->branchRip);
+				needed.push_back(std::pair<unsigned long, unsigned>(work->branchRip, depth - 1));
 			}
 		}
 		if (x == irsb->stmts_used) {
@@ -3203,28 +3207,28 @@ buildCFGForRipSet(AddressSpace *as,
 						work->fallThroughRip = 0;
 				}
 				if (work->fallThroughRip)
-					needed.push_back(work->fallThroughRip);
+					needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				work->accepting = true;
 			} else {
 				/* Don't currently try to trace across indirect branches. */
 				if (irsb->next->tag == Iex_Const) {
 					work->fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
-					needed.push_back(work->fallThroughRip);
+					needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 				}
 			}
 		}
-		builtSoFar[rip] = work;
+		builtSoFar[rip] = std::pair<CFGNode<unsigned long> *, unsigned>(work, depth);
 	}
 
 	/* Now we have a CFG node for every needed instruction.  Go
 	   through and resolve exit branches. */
-	for (std::map<unsigned long, CFGNode<unsigned long> *>::iterator it = builtSoFar.begin();
+	for (std::map<unsigned long, std::pair<CFGNode<unsigned long> *, unsigned> >::iterator it = builtSoFar.begin();
 	     it != builtSoFar.end();
 	     it++) {
-		if (it->second) {
-			it->second->fallThrough = builtSoFar[it->second->fallThroughRip];
-			it->second->branch = builtSoFar[it->second->branchRip];
+		if (it->second.first) {
+			it->second.first->fallThrough = builtSoFar[it->second.first->fallThroughRip].first;
+			it->second.first->branch = builtSoFar[it->second.first->branchRip].first;
 		}
 	}
 
@@ -3234,7 +3238,7 @@ buildCFGForRipSet(AddressSpace *as,
 	for (std::set<unsigned long>::const_iterator it = rips.begin();
 	     it != rips.end();
 	     it++) {
-		CFGNode<unsigned long> *startnode = builtSoFar[*it];
+		CFGNode<unsigned long> *startnode = builtSoFar[*it].first;
 		if (outputSoFar.count(startnode))
 			continue;
 		output.insert(startnode);
@@ -3251,7 +3255,7 @@ InferredInformation::CFGFromRip(unsigned long start, const std::set<unsigned lon
 	std::set<unsigned long> rips;
 	std::set<CFGNode<unsigned long> *> out;
 	rips.insert(start);
-	buildCFGForRipSet(oracle->ms->addressSpace, rips, terminalFunctions, out, oracle);
+	buildCFGForRipSet(oracle->ms->addressSpace, rips, terminalFunctions, out, oracle, 100);
 	if (out.size() == 0)
 		return NULL;
 	assert(out.size() == 1);
