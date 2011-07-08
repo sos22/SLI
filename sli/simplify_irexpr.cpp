@@ -1871,13 +1871,13 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					Iop_Or1,
 					IRExpr_Associative(
 						Iop_And1,
-						src->Iex.Binop.arg1,
-						IRExpr_Unop(Iop_Not1, src->Iex.Binop.arg2),
+						l,
+						IRExpr_Unop(Iop_Not1, r),
 						NULL),
 					IRExpr_Associative(
 						Iop_And1,
-						src->Iex.Binop.arg2,
-						IRExpr_Unop(Iop_Not1, src->Iex.Binop.arg1),
+						r,
+						IRExpr_Unop(Iop_Not1, l),
 						NULL),
 					NULL),
 				opt,
@@ -1920,10 +1920,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 		/* x << 0 -> x */
 		if (src->Iex.Binop.op >= Iop_Shl8 && src->Iex.Binop.op <= Iop_Shl64 &&
-		    src->Iex.Binop.arg2->tag == Iex_Const &&
-		    src->Iex.Binop.arg2->Iex.Const.con->Ico.U8 == 0) {
+		    r->tag == Iex_Const &&
+		    r->Iex.Const.con->Ico.U8 == 0) {
 			*done_something = true;
-			return src->Iex.Binop.arg1;
+			return l;
 		}
 
 		/* We simplify == expressions with sums on the left
@@ -1998,12 +1998,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 		/* And another one: -x == c -> x == -c if c is a constant. */
 		if (src->Iex.Binop.op == Iop_CmpEQ64 &&
-		    src->Iex.Binop.arg1->tag == Iex_Unop &&
-		    src->Iex.Binop.arg1->Iex.Unop.op == Iop_Neg64 &&
-		    src->Iex.Binop.arg2->tag == Iex_Const) {
-			src->Iex.Binop.arg1 = src->Iex.Binop.arg1->Iex.Unop.arg;
+		    l->tag == Iex_Unop &&
+		    l->Iex.Unop.op == Iop_Neg64 &&
+		    r->tag == Iex_Const) {
+			src->Iex.Binop.arg1 = l->Iex.Unop.arg;
 			src->Iex.Binop.arg2 = IRExpr_Const(
-				IRConst_U64(-src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+				IRConst_U64(-r->Iex.Const.con->Ico.U64));
 			*done_something = true;
 			return optimiseIRExpr(src, opt, done_something);
 		}
@@ -2014,54 +2014,72 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		   constants which are present in the machine code. */
 		if (opt.assumePrivateStack &&
 		    src->Iex.Binop.op == Iop_CmpEQ64 &&
-		    src->Iex.Binop.arg2->tag == Iex_Get &&
-		    src->Iex.Binop.arg2->Iex.Get.offset == OFFSET_amd64_RSP &&
-		    src->Iex.Binop.arg1->tag == Iex_Const) {
+		    r->tag == Iex_Get &&
+		    r->Iex.Get.offset == OFFSET_amd64_RSP &&
+		    l->tag == Iex_Const) {
 			*done_something = true;
 			return IRExpr_Const(IRConst_U1(0));
 		}
 
 		/* If both arguments are constant, try to constant
 		 * fold everything away. */
-		if (src->Iex.Binop.arg1->tag == Iex_Const &&
-		    src->Iex.Binop.arg2->tag == Iex_Const) {
+		if (l->tag == Iex_Const &&
+		    r->tag == Iex_Const) {
 			switch (src->Iex.Binop.op) {
 			case Iop_CmpEQ32:
 				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U1(
-						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 ==
-						src->Iex.Binop.arg2->Iex.Const.con->Ico.U32));
+						l->Iex.Const.con->Ico.U32 ==
+						r->Iex.Const.con->Ico.U32));
 			case Iop_CmpLT64S:
 				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U1(
-						(long)src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 <
-						(long)src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+						(long)l->Iex.Const.con->Ico.U64 <
+						(long)r->Iex.Const.con->Ico.U64));
 			case Iop_CmpLT64U:
 				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U1(
-						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 <
-						src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+						l->Iex.Const.con->Ico.U64 <
+						r->Iex.Const.con->Ico.U64));
 			case Iop_CmpEQ64:
 				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U1(
-						src->Iex.Binop.arg1->Iex.Const.con->Ico.U64 ==
-						src->Iex.Binop.arg2->Iex.Const.con->Ico.U64));
+						l->Iex.Const.con->Ico.U64 ==
+						r->Iex.Const.con->Ico.U64));
 			case Iop_Sar32:
 				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U32(
-						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 <<
-						src->Iex.Binop.arg2->Iex.Const.con->Ico.U8));
+						    (int)l->Iex.Const.con->Ico.U32 >>
+						    r->Iex.Const.con->Ico.U8));
 			case Iop_Sar64:
 				*done_something = true;
 				return IRExpr_Const(
 					IRConst_U64(
-						src->Iex.Binop.arg1->Iex.Const.con->Ico.U32 <<
-						src->Iex.Binop.arg2->Iex.Const.con->Ico.U8));
+						    (long)l->Iex.Const.con->Ico.U64 >>
+						    r->Iex.Const.con->Ico.U8));
+			case Iop_Shl64:
+				*done_something = true;
+				return IRExpr_Const(
+					IRConst_U64(
+						    l->Iex.Const.con->Ico.U64 <<
+						    r->Iex.Const.con->Ico.U8));
+			case Iop_CC_OverflowSub: {
+				unsigned long a = l->Iex.Const.con->Ico.U64;
+				unsigned long b = r->Iex.Const.con->Ico.U64;
+				return IRExpr_Const(
+					IRConst_U1(
+						((a ^ b) & (a ^ (a - b))) >> 63));
+			}
+			case Iop_32HLto64:
+				return IRExpr_Const(
+					IRConst_U64(
+						((unsigned long)l->Iex.Const.con->Ico.U32 << 32) |
+						r->Iex.Const.con->Ico.U32));
 			default:
 				printf("Cannot constant fold ");
 				ppIRExpr(src, stdout);
