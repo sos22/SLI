@@ -48,7 +48,7 @@ public:
 	{}
 	void addCrashReason(CrashReason *cr) { crashReasons->set(cr->rip, cr); }
 	CFGNode<unsigned long> *CFGFromRip(unsigned long rip, const std::set<unsigned long> &terminalFunctions);
-	CrashReason *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg);
+	CrashReason *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install);
 
 	void visit(HeapVisitor &hv) {
 		hv(oracle);

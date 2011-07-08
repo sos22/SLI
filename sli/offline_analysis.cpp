@@ -2821,7 +2821,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		cr = ii->CFGtoCrashReason(CRASHING_THREAD, cfg);
+		cr = ii->CFGtoCrashReason(CRASHING_THREAD, cfg, true);
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -2976,7 +2976,7 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 		breakCycles(cfg.get());
 
 		VexPtr<CrashReason, &ir_heap> cr(
-			ii->CFGtoCrashReason(CRASHING_THREAD, cfg));
+			ii->CFGtoCrashReason(CRASHING_THREAD, cfg, true));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return;
@@ -3254,7 +3254,7 @@ InferredInformation::CFGFromRip(unsigned long start, const std::set<unsigned lon
 }
 
 CrashReason *
-InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
+InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install)
 {
 	VexRip finalRip(cfg->my_rip, 0);
 	if (crashReasons->hasKey(finalRip)) {
@@ -3272,7 +3272,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 				break;
 		if (cfg->fallThrough) {
 			CrashReason *ft;
-			ft = CFGtoCrashReason(tid, cfg->fallThrough);
+			ft = CFGtoCrashReason(tid, cfg->fallThrough, false);
 			if (!ft)
 				return NULL;
 			if (x == irsb->stmts_used &&
@@ -3291,7 +3291,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 						newRip.changedIdx();
 						if (cfg->branch) {
 							CrashReason *other =
-								CFGtoCrashReason(tid, cfg->branch);
+								CFGtoCrashReason(tid, cfg->branch, false);
 							if (!other)
 								return NULL;
 							ft = new CrashReason(
@@ -3316,7 +3316,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 			res = ft;
 		} else {
 			assert(cfg->branch);
-			CrashReason *b = CFGtoCrashReason(tid, cfg->branch);
+			CrashReason *b = CFGtoCrashReason(tid, cfg->branch, false);
 			if (!b)
 				return NULL;
 			for (x--; x >= 0; x--)
@@ -3335,7 +3335,8 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 	}
 	assert(finalRip == res->rip);
 	assert(res);
-	crashReasons->set(finalRip, res);
+	if (install)
+		crashReasons->set(finalRip, res);
 	return res;
 }
 
