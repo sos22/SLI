@@ -2709,7 +2709,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     VexPtr<StateMachine, &ir_heap> &probeMachine,
 				     VexPtr<Oracle> &oracle,
 				     VexPtr<IRExpr, &ir_heap> assumption,
-				     const InstructionSet &is,
+				     const AllowableOptimisations &opt2,
 				     unsigned long rip,
 				     GarbageCollectionToken token,
 				     IRExpr **assumptionOut)
@@ -2717,12 +2717,6 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	/* Specialise the state machine down so that we only consider
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
-	AllowableOptimisations opt2 =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack()
-		.enableassumeNoInterferingStores();
-	opt2.interestingStores = is.rips;
-	opt2.haveInterestingStoresSet = true;
 	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(rip));
 
 	VexPtr<StateMachine, &ir_heap> sm;
@@ -2869,15 +2863,18 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		return true;
 	}
 
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, is, cfg->my_rip.rip, token, NULL))
-		return false;
-
-	/* If it might crash with that machine, try expanding it to
-	   include a bit more context and see if it still goes. */
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableassumeNoInterferingStores();
+	opt.interestingStores = is.rips;
+	opt.haveInterestingStoresSet = true;
+
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, cfg->my_rip.rip, token, NULL))
+		return false;
+
+	/* If it might crash with that machine, try expanding it to
+	   include a bit more context and see if it still goes. */
 	unsigned long new_rip;
 	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, oracle, opt, &new_rip, token);
 	if (!sm) {
@@ -2889,7 +2886,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	printStateMachine(sm, _logfile);
 
 	IRExpr *_newAssumption;
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, is, new_rip, token, &_newAssumption)) {
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, new_rip, token, &_newAssumption)) {
 		fprintf(_logfile, "\t\tExpanded store machine cannot crash\n");
 		return false;
 	}
