@@ -18,7 +18,7 @@ Int StateMachineSideEffectLoad::next_key;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
-AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false);
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false, true);
 
 StateMachine *
 StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
@@ -983,7 +983,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
 		if (smsel2 &&
-		    alias.ptrsMightAlias(smsel->smsel_addr, smsel2->smsel_addr) &&
+		    alias.ptrsMightAlias(smsel->smsel_addr, smsel2->smsel_addr, opt.freeVariablesMightAccessStack) &&
 		    oracle->memoryAccessesMightAlias(smsel, smsel2) &&
 		    definitelyEqual( smsel->smsel_addr,
 				     smsel2->smsel_addr,
@@ -1066,7 +1066,7 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 		StateMachineSideEffectStore *smses =
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
 		if (smses &&
-		    alias.ptrsMightAlias(smsel->smsel_addr, smses->addr) &&
+		    alias.ptrsMightAlias(smsel->smsel_addr, smses->addr, opt.freeVariablesMightAccessStack) &&
 		    oracle->memoryAccessesMightAlias(smsel, smses) &&
 		    !definitelyNotEqual( smsel->smsel_addr,
 					 smses->addr,

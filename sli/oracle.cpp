@@ -732,6 +732,7 @@ static Oracle::PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    IRTypeEnv *tyenv,
 		    const Oracle::RegisterAliasingConfiguration &config,
+		    bool freeVariablesCannotAccessStack,
 		    std::map<IRTemp, Oracle::PointerAliasingSet> *temps)
 {
 	if (tyenv && typeOfIRExpr(tyenv, expr) != Ity_I64)
@@ -784,11 +785,13 @@ irexprAliasingClass(IRExpr *expr,
 			expr->Iex.Binop.arg1,
 			tyenv,
 			config,
+			freeVariablesCannotAccessStack,
 			temps);
 		Oracle::PointerAliasingSet a2 = irexprAliasingClass(
 			expr->Iex.Binop.arg2,
 			tyenv,
 			config,
+			freeVariablesCannotAccessStack,
 			temps);
 		switch (expr->Iex.Binop.op) {
 		case Iop_Sub64:
@@ -830,10 +833,12 @@ irexprAliasingClass(IRExpr *expr,
 		return irexprAliasingClass(expr->Iex.Mux0X.expr0,
 					   tyenv,
 					   config,
+					   freeVariablesCannotAccessStack,
 					   temps) |
 			irexprAliasingClass(expr->Iex.Mux0X.exprX,
 					    tyenv,
 					    config,
+					    freeVariablesCannotAccessStack,
 					    temps);
 	case Iex_Associative:
 		switch (expr->Iex.Associative.op) {
@@ -846,6 +851,7 @@ irexprAliasingClass(IRExpr *expr,
 						irexprAliasingClass(expr->Iex.Associative.contents[i],
 								    tyenv,
 								    config,
+								    freeVariablesCannotAccessStack,
 								    temps);
 					for (int j = i + 1; j < expr->Iex.Associative.nr_arguments; j++) {
 						if (expr->Iex.Associative.contents[j]->tag != Iex_Const)
@@ -853,6 +859,7 @@ irexprAliasingClass(IRExpr *expr,
 								irexprAliasingClass(expr->Iex.Associative.contents[j],
 										    tyenv,
 										    config,
+										    freeVariablesCannotAccessStack,
 										    temps);
 					}
 					if (!(res & Oracle::PointerAliasingSet::anything))
@@ -875,7 +882,11 @@ irexprAliasingClass(IRExpr *expr,
 		break;
 
 	case Iex_FreeVariable:
-		return Oracle::PointerAliasingSet::anything;
+		if (freeVariablesCannotAccessStack)
+			return Oracle::PointerAliasingSet::notAPointer |
+				Oracle::PointerAliasingSet::nonStackPointer;
+		else
+			return Oracle::PointerAliasingSet::anything;
 
 	default:
 		break;
@@ -887,10 +898,10 @@ irexprAliasingClass(IRExpr *expr,
 }
 
 bool
-Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b) const
+Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, bool fvcas) const
 {
-	return irexprAliasingClass(a, NULL, *this, NULL) &
-		irexprAliasingClass(b, NULL, *this, NULL) &
+	return irexprAliasingClass(a, NULL, *this, fvcas, NULL) &
+		irexprAliasingClass(b, NULL, *this, fvcas, NULL) &
 		~PointerAliasingSet::notAPointer;
 }
 
@@ -1883,6 +1894,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 					irexprAliasingClass(st->Ist.Put.data,
 							    tyenv,
 							    config,
+							    false,
 							    &temporaryAliases);
 			}
 			break;
@@ -1895,18 +1907,21 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 								      irexprAliasingClass(st->Ist.WrTmp.data,
 											  tyenv,
 											  config,
+											  false,
 											  &temporaryAliases)));
 			break;
 		case Ist_Store:
 			if (!config.stackHasLeaked) {
 				PointerAliasingSet addr = irexprAliasingClass(st->Ist.Store.data,
-							   tyenv,
-							   config,
-							   &temporaryAliases);
+									      tyenv,
+									      config,
+									      false,
+									      &temporaryAliases);
 				PointerAliasingSet data = irexprAliasingClass(st->Ist.Store.data,
-							   tyenv,
-							   config,
-							   &temporaryAliases);
+									      tyenv,
+									      config,
+									      false,
+									      &temporaryAliases);
 				if ((addr & PointerAliasingSet::nonStackPointer) &&
 				    (data & PointerAliasingSet::stackPointer))
 					config.stackHasLeaked = true;

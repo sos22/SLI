@@ -1013,7 +1013,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				addr = NULL;
 
 			if ( addr &&
-			     alias.ptrsMightAlias(addr, smses->addr) &&
+			     alias.ptrsMightAlias(addr, smses->addr, opt.freeVariablesMightAccessStack) &&
 			     ((smses2 && oracle->memoryAccessesMightAlias(smses2, smses)) ||
 			      (smsel2 && oracle->memoryAccessesMightAlias(smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
@@ -1148,14 +1148,14 @@ buildNewStateMachineWithLoadsEliminated(
 				StateMachineSideEffectLoad *smsel2 =
 					dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 				if ( smses2 &&
-				     aliasing.ptrsMightAlias(smses2->addr, newAddr) &&
+				     aliasing.ptrsMightAlias(smses2->addr, newAddr, opt.freeVariablesMightAccessStack) &&
 				     definitelyEqual(smses2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
 							smsel->key,
 							smses2->data);
 				} else if ( smsel2 &&
-					    aliasing.ptrsMightAlias(smsel2->smsel_addr, newAddr) &&
+					    aliasing.ptrsMightAlias(smsel2->smsel_addr, newAddr, opt.freeVariablesMightAccessStack) &&
 					    definitelyEqual(smsel2->smsel_addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
@@ -2895,6 +2895,8 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		return true;
 	}
 
+	opt = opt.disablefreeVariablesMightAccessStack();
+
 	fprintf(_logfile, "\t\tExpanded store machine:\n");
 	printStateMachine(sm, _logfile);
 
@@ -3043,6 +3045,9 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			continue;
 		}
 		readMachinesChecked->set(cr->sm, true);
+
+		if (it == previousInstructions.end() - 1)
+			opt = opt.disablefreeVariablesMightAccessStack();
 
 		VexPtr<StateMachine, &ir_heap> sm(cr->sm);
 		sm = optimiseStateMachine(cr->sm,

@@ -241,7 +241,7 @@ public:
 		   configuration.  Note that this assumes that both @a
 		   and @b are pointers i.e. it's not just asking
 		   whether @a and @b might be equal. */
-		bool ptrsMightAlias(IRExpr *a, IRExpr *b) const;
+		bool ptrsMightAlias(IRExpr *a, IRExpr *b, bool) const;
 
 		void prettyPrint(FILE *) const;
 	};

@@ -14,9 +14,10 @@ class OracleInterface;
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as)
+	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as, bool fvmas)
 		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
-		  ignoreSideEffects(i), assumeNoInterferingStores(as)
+		  ignoreSideEffects(i), assumeNoInterferingStores(as),
+		  freeVariablesMightAccessStack(fvmas)
 	{
 	}
 
@@ -47,6 +48,11 @@ public:
 	   examining. */
 	bool assumeNoInterferingStores;
 
+	/* If false, assume that free variables can never point at the
+	   current stack frame.  This is appropriate for state
+	   machines generated at function heads, for instance. */
+	bool freeVariablesMightAccessStack;
+
 	/* Bit of a hack: sometimes, only some side effects are
 	   interesting, so allow them to be listed here.  If
 	   haveInterestingStoresSet is false then we don't look at
@@ -58,39 +64,45 @@ public:
 	AllowableOptimisations disablexPlusMinusX() const
 	{
 		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores);
+					      assumeNoInterferingStores, freeVariablesMightAccessStack);
 	}
 	AllowableOptimisations enableassumePrivateStack() const
 	{
 		return AllowableOptimisations(xPlusMinusX, true, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores);
+					      assumeNoInterferingStores, freeVariablesMightAccessStack);
 	}
 	AllowableOptimisations enableassumeExecutesAtomically() const
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, true, ignoreSideEffects,
 					      true /* If we're running atomically then there are definitely
-						      no interfering stores */
+						      no interfering stores */,
+					      freeVariablesMightAccessStack
 			);
 	}
 	AllowableOptimisations enableignoreSideEffects() const
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true,
-					      assumeNoInterferingStores);
+					      assumeNoInterferingStores, freeVariablesMightAccessStack);
 	}
 	AllowableOptimisations enableassumeNoInterferingStores() const
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      true);
+					      true, freeVariablesMightAccessStack);
+	}
+	AllowableOptimisations disablefreeVariablesMightAccessStack() const
+	{
+		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+					      assumeNoInterferingStores, false);
 	}
 	unsigned asUnsigned() const {
-		unsigned x = 16; /* turning off all of the optional
-				   optimisations doesn't turn off the
-				   ones which are always available, so
-				   have an implicit bit for them.
-				   i.e. 0 means no optimisations at
-				   all, and 8 means only the most
-				   basic ones which are always
-				   safe. */
+		unsigned x = 32; /* turning off all of the optional
+				    optimisations doesn't turn off the
+				    ones which are always available, so
+				    have an implicit bit for them.
+				    i.e. 0 means no optimisations at
+				    all, and 8 means only the most
+				    basic ones which are always
+				    safe. */
 
 		if (xPlusMinusX)
 			x |= 1;
@@ -102,6 +114,8 @@ public:
 			x |= 4;
 		if (assumeNoInterferingStores)
 			x |= 8;
+		if (freeVariablesMightAccessStack)
+			x |= 16;
 		return x;
 	}
 
