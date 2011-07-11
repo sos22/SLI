@@ -574,10 +574,11 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 		advanceToLoad(chooser, oracle);
 	else
 		advanceToStore(chooser, oracle);
-	if (machine->finished || machine->crashed)
+	if (machine->finished || machine->crashed || TIMEOUT)
 		return;
 
 	StateMachineSideEffect *se;
+	assert(machine->nextEdgeSideEffectIdx < machine->currentEdge->sideEffects.size());
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];	
 	assert(!dynamic_cast<StateMachineSideEffectCopy *>(se));
 	assert(!dynamic_cast<StateMachineSideEffectUnreached *>(se));
