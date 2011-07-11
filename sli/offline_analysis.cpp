@@ -1868,6 +1868,45 @@ canonicaliseRbp(StateMachine *sm, unsigned long origin, OracleInterface *oracle,
 	return canon.transform(sm, done_something);
 }
 
+class BuildFreeVariableMapTransformer : public StateMachineTransformer {
+public:
+	std::map<std::pair<unsigned, unsigned>, IRExpr *> map;
+	IRExpr *transformIexGet(IRExpr *what, bool *done_something) {
+		std::pair<unsigned, unsigned> k;
+		k.first = what->Iex.Get.offset;
+		k.second = what->Iex.Get.tid;
+		if (!map.count(k))
+			map[k] = IRExpr_FreeVariable();
+		return StateMachineTransformer::transformIexGet(what, done_something);
+	}
+};
+
+class IntroduceFreeVariablesRegisterTransformer : public StateMachineTransformer {
+public:
+	std::map<std::pair<unsigned, unsigned>, IRExpr *> &map;
+	IntroduceFreeVariablesRegisterTransformer(
+		std::map<std::pair<unsigned, unsigned>, IRExpr *> &_map)
+		: map(_map)
+	{}
+	IRExpr *transformIRExprGet(IRExpr *what, bool *done_something) {
+		std::pair<unsigned, unsigned> k;
+		k.first = what->Iex.Get.offset;
+		k.second = what->Iex.Get.tid;
+		assert(map.count(k));
+		*done_something = true;
+		return map[k];
+	}
+};
+
+static StateMachine *
+introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
+{
+	BuildFreeVariableMapTransformer t;
+	t.transform(sm);
+	IntroduceFreeVariablesRegisterTransformer s(t.map);
+	return s.transform(sm, done_something);
+}
+
 static StateMachine *
 optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfiguration &alias,
 		     const AllowableOptimisations &opt, OracleInterface *oracle, bool noExtendContext,
@@ -1885,6 +1924,7 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
+			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
 			sm = canonicaliseRbp(sm, originRip, oracle, &done_something);
 		}
