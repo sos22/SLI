@@ -252,7 +252,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 	if (storeIsThreadLocal(smses)) {
 		if (!loadIsThreadLocal(smsel))
 			return false;
-		if (!definitelyNotEqual(smsel->smsel_addr, smses->addr, AllowableOptimisations::defaultOptimisations))
+		if (!definitelyNotEqual(smsel->addr, smses->addr, AllowableOptimisations::defaultOptimisations))
 			return true;
 		else
 			return false;
@@ -288,7 +288,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel1,
 	if (loadIsThreadLocal(smsel1)) {
 		if (!loadIsThreadLocal(smsel2))
 			return false;
-		if (!definitelyNotEqual(smsel1->smsel_addr, smsel2->smsel_addr, AllowableOptimisations::defaultOptimisations))
+		if (!definitelyNotEqual(smsel1->addr, smsel2->addr, AllowableOptimisations::defaultOptimisations))
 			return true;
 		else
 			return false;

@@ -199,7 +199,7 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 	} else if (StateMachineSideEffectLoad *smsel =
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 		IRExpr *v = IRExpr_Unop(Iop_Not1,
-					IRExpr_Unop(Iop_BadPtr, smsel->smsel_addr));
+					IRExpr_Unop(Iop_BadPtr, smsel->addr));
 		*assumption = simplifyIRExpr(
 			IRExpr_Binop(Iop_And1, *assumption, v),
 			AllowableOptimisations::defaultOptimisations);
@@ -216,11 +216,11 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			StateMachineSideEffectStore *smses = *it;
 			if (!oracle->memoryAccessesMightAlias(smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, smsel->smsel_addr, chooser, binders, assumption, accumulatedAssumptions))
+			if (evalExpressionsEqual(smses->addr, smsel->addr, chooser, binders, assumption, accumulatedAssumptions))
 				val = smses->data;
 		}
 		if (!val)
-			val = IRExpr_Load(False, Iend_LE, Ity_I64, smsel->smsel_addr);
+			val = IRExpr_Load(False, Iend_LE, Ity_I64, smsel->addr);
 		binders[smsel->key] = val;
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {

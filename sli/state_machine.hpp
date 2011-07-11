@@ -516,16 +516,26 @@ public:
 	int complexity() { return 0; }
 	void sanity_check(const std::set<Int> &binders) const {}
 };
-class StateMachineSideEffectStore : public StateMachineSideEffect {
+class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
+public:
+	IRExpr *addr;
+	unsigned long rip;
+	StateMachineSideEffectMemoryAccess(IRExpr *_addr, unsigned long _rip)
+		: addr(_addr), rip(_rip)
+	{}
+	virtual void visit(HeapVisitor &hv) {
+		hv(addr);
+	}
+};
+class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, unsigned long _rip)
-		: addr(_addr), data(_data), rip(_rip)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip),
+		  data(_data)
 	{
 	}
-	IRExpr *addr;
 	IRExpr *data;
-	unsigned long rip;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "*(");
 		ppIRExpr(addr, f);
@@ -534,7 +544,7 @@ public:
 		fprintf(f, " @ %lx", rip);
 	}
 	void visit(HeapVisitor &hv) {
-		hv(addr);
+		StateMachineSideEffectMemoryAccess::visit(hv);
 		hv(data);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
@@ -547,41 +557,36 @@ public:
 	}
 };
 
-class StateMachineSideEffectLoad : public StateMachineSideEffect {
+class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void constructed();
 	static Int next_key;
-	unsigned long _hashval() const { return smsel_addr->hashval() * 757 + key; }
+	unsigned long _hashval() const { return addr->hashval() * 757 + key; }
 public:
 	StateMachineSideEffectLoad(IRExpr *_addr, unsigned long _rip)
-		: smsel_addr(_addr), rip(_rip)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip)
 	{
 		key = next_key++;
 		constructed();
 	}
 	StateMachineSideEffectLoad(Int k, IRExpr *_addr, unsigned long _rip)
-		: key(k), smsel_addr(_addr), rip(_rip)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip), key(k)
 	{
 		constructed();
 	}
 	Int key;
-	IRExpr *smsel_addr;
-	unsigned long rip;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "B%d <- *(", key);
-		ppIRExpr(smsel_addr, f);
+		ppIRExpr(addr, f);
 		fprintf(f, ")@%lx", rip);
-	}
-	void visit(HeapVisitor &hv) {
-		hv(smsel_addr);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
-		l.insert(smsel_addr);
+		l.insert(addr);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
-	int complexity() { return exprComplexity(smsel_addr) + 20; }
+	int complexity() { return exprComplexity(addr) + 20; }
 	void sanity_check(const std::set<Int> &binders) const {
-		checkIRExprBindersInScope(smsel_addr, binders);
+		checkIRExprBindersInScope(addr, binders);
 	}
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {

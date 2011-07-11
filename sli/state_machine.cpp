@@ -149,13 +149,13 @@ void
 StateMachineSideEffectLoad::constructed()
 {
 	bool ign;
-	smsel_addr = optimiseIRExprFP(smsel_addr, AllowableOptimisations::defaultOptimisations, &ign);
+	addr = optimiseIRExprFP(addr, AllowableOptimisations::defaultOptimisations, &ign);
 }
 StateMachineSideEffect *
 StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
-	smsel_addr = optimiseIRExprFP(smsel_addr, opt, done_something);
-	if (isBadAddress(smsel_addr, opt, oracle)) {
+	addr = optimiseIRExprFP(addr, opt, done_something);
+	if (isBadAddress(addr, opt, oracle)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
@@ -166,7 +166,7 @@ void
 StateMachineSideEffectLoad::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
 {
 	s.erase(key);
-	::findUsedBinders(smsel_addr, s, opt);
+	::findUsedBinders(addr, s, opt);
 }
 
 StateMachineSideEffect *
@@ -291,7 +291,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			     !TIMEOUT && it2 != availExpressions.end();
 			     it2++) {
 				if (local == it2->local &&
-				    definitelyEqual(it2->addr, smsel->smsel_addr, opt)) {
+				    definitelyEqual(it2->addr, smsel->addr, opt)) {
 					*it = new StateMachineSideEffectCopy(smsel->key,
 									     it2->value);
 					*done_something = true;
@@ -305,7 +305,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			if (!killed &&
 			    (opt.assumeNoInterferingStores || oracle->loadIsThreadLocal(smsel)))
 				availExpressions.insert(availEntry(
-								smsel->smsel_addr,
+								smsel->addr,
 								IRExpr_Binder(smsel->key),
 								local));
 		} else if (dynamic_cast<StateMachineSideEffectUnreached *>(*it)) {
@@ -334,7 +334,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
 			*it = new StateMachineSideEffectLoad(
 				smsel->key,
-				rewriteBinderExpressions(smsel->smsel_addr, copies, done_something),
+				rewriteBinderExpressions(smsel->addr, copies, done_something),
 				smsel->rip);
 		} else if (StateMachineSideEffectCopy *smsec =
 			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
@@ -607,7 +607,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		if (!smsel2)
 			return false;
 		return smsel1->key == smsel2->key &&
-			definitelyEqual(smsel1->smsel_addr, smsel2->smsel_addr, opt);
+			definitelyEqual(smsel1->addr, smsel2->addr, opt);
 	} else if (StateMachineSideEffectCopy *smsec1 =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse1)) {
 		StateMachineSideEffectCopy *smsec2 =
@@ -983,10 +983,10 @@ nrAliasingLoads(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
 		if (smsel2 &&
-		    alias.ptrsMightAlias(smsel->smsel_addr, smsel2->smsel_addr, opt.freeVariablesMightAccessStack) &&
+		    alias.ptrsMightAlias(smsel->addr, smsel2->addr, opt.freeVariablesMightAccessStack) &&
 		    oracle->memoryAccessesMightAlias(smsel, smsel2) &&
-		    definitelyEqual( smsel->smsel_addr,
-				     smsel2->smsel_addr,
+		    definitelyEqual( smsel->addr,
+				     smsel2->addr,
 				     opt))
 			(*out)++;
 	}
@@ -1066,9 +1066,9 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 		StateMachineSideEffectStore *smses =
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
 		if (smses &&
-		    alias.ptrsMightAlias(smsel->smsel_addr, smses->addr, opt.freeVariablesMightAccessStack) &&
+		    alias.ptrsMightAlias(smsel->addr, smses->addr, opt.freeVariablesMightAccessStack) &&
 		    oracle->memoryAccessesMightAlias(smsel, smses) &&
-		    !definitelyNotEqual( smsel->smsel_addr,
+		    !definitelyNotEqual( smsel->addr,
 					 smses->addr,
 					 opt)) {
 			/* This store might alias with the load.  If

@@ -496,7 +496,7 @@ pickle(StateMachineSideEffect *smse, Pickler &p)
 		t = SMSE_load;
 		pickle(t, p);
 		pickle(smsel->key, p);
-		pickle(smsel->smsel_addr, p);
+		pickle(smsel->addr, p);
 		pickle(smsel->rip, p);
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {

@@ -232,7 +232,7 @@ StateMachineTransformer::doit(StateMachineEdge *inp, bool *done_something)
 					smses->rip));
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			IRExpr *a = transformIRExpr(smsel->smsel_addr, &done);
+			IRExpr *a = transformIRExpr(smsel->addr, &done);
 			res->sideEffects.push_back(
 				new StateMachineSideEffectLoad(
 					smsel->key,
@@ -1034,7 +1034,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			if (smses2)
 				addr = smses2->addr;
 			else if (smsel2)
-				addr = smsel2->smsel_addr;
+				addr = smsel2->addr;
 			else
 				addr = NULL;
 
@@ -1065,7 +1065,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 		/* Similarly loads */
 		outputAvail.sideEffects.insert(smsel);
-		outputAvail.dereference(smsel->smsel_addr);
+		outputAvail.dereference(smsel->addr);
 	}
 }
 
@@ -1165,7 +1165,7 @@ buildNewStateMachineWithLoadsEliminated(
 			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
 			IRExpr *newAddr;
 			bool doit = false;
-			newAddr = applyAvailSet(currentlyAvailable, smsel->smsel_addr, false, &doit);
+			newAddr = applyAvailSet(currentlyAvailable, smsel->addr, false, &doit);
 			for (std::set<StateMachineSideEffect *>::iterator it2 = currentlyAvailable.sideEffects.begin();
 			     !newEffect && it2 != currentlyAvailable.sideEffects.end();
 			     it2++) {
@@ -1181,8 +1181,8 @@ buildNewStateMachineWithLoadsEliminated(
 							smsel->key,
 							smses2->data);
 				} else if ( smsel2 &&
-					    aliasing.ptrsMightAlias(smsel2->smsel_addr, newAddr, opt.freeVariablesMightAccessStack) &&
-					    definitelyEqual(smsel2->smsel_addr, newAddr, opt) ) {
+					    aliasing.ptrsMightAlias(smsel2->addr, newAddr, opt.freeVariablesMightAccessStack) &&
+					    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
 							smsel->key,
@@ -1306,7 +1306,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			potentiallyAvailable.dereference(smses->addr);
 		} else if (StateMachineSideEffectLoad *smsel =
 			   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
-			potentiallyAvailable.dereference(smsel->smsel_addr);
+			potentiallyAvailable.dereference(smsel->addr);
 		}
 	}
 
