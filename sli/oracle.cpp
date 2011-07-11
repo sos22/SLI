@@ -182,11 +182,13 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 		return false;
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
-	     it++)
-		if (it->stores.count(s->rip)) {
+	     it++) {
+		if (it->stores.count(s->rip) ||
+		    it->stores.count(s->rip | (1ul << 63))) {
 			notThreadLocal.insert(s->rip);
 			return false;
 		}
+	}
 	threadLocal.insert(s->rip);
 	return true;
 }
@@ -202,7 +204,8 @@ Oracle::loadIsThreadLocal(StateMachineSideEffectLoad *s)
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++)
-		if (it->loads.count(s->rip)) {
+		if (it->loads.count(s->rip) ||
+		    it->loads.count(s->rip | (1ul << 63))) {
 			notThreadLocal.insert(s->rip);
 			return false;
 		}
