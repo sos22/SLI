@@ -1294,3 +1294,23 @@ optimiseFreeVariables(StateMachine *sm, bool *done_something)
 	simplifyFreeVariablesTransformer sfvt(cfvv.counts);
 	return sfvt.transform(sm, done_something);
 }
+
+StateMachine::RoughLoadCount
+StateMachineEdge::roughLoadCount(StateMachine::RoughLoadCount acc) const
+{
+	if (acc == StateMachine::multipleLoads)
+		return StateMachine::multipleLoads;
+
+	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
+	     it != sideEffects.end();
+	     it++) {
+		if (dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			if (acc == StateMachine::noLoads)
+				acc = StateMachine::singleLoad;
+			else
+				return StateMachine::multipleLoads;
+		}
+	}
+	return target->roughLoadCount(acc);
+}
+

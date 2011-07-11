@@ -2940,6 +2940,11 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 {
 	LibVEX_maybe_gc(token);
 
+	if (is.rips.size() == 1 && sm->roughLoadCount() == StateMachine::singleLoad) {
+		fprintf(_logfile, "Single store versus single load -> no race possible\n");
+		return false;
+	}
+
 	VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
 	int nr_roots;
 	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);

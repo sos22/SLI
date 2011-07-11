@@ -147,6 +147,8 @@ public:
 	virtual const StateMachineEdge *target0() const = 0;
 	virtual StateMachineEdge *target1() = 0;
 	virtual const StateMachineEdge *target1() const = 0;
+	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
+	virtual RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const = 0;
 	void assertAcyclic() const;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &out);
@@ -250,6 +252,7 @@ public:
 		return r;
 	}
 	void sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const;
+	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const;
 	NAMED_CLASS
 };
 
@@ -269,6 +272,7 @@ public:
 	StateMachineEdge *target1() { return NULL; }
 	const StateMachineEdge *target1() const { return NULL; }
 	void prettyPrint(FILE *f, std::map<const StateMachine *, int> &) const { prettyPrint(f); }
+	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const { return acc; }
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
@@ -371,6 +375,7 @@ public:
 	StateMachineEdge *target1() { return NULL; }
 	const StateMachineEdge *target1() const { return NULL; }
 	void _sanity_check(const std::set<Int> &) const {}
+	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
 };
 
 class StateMachineBifurcate : public StateMachine {
@@ -453,6 +458,10 @@ public:
 	StateMachineEdge *target1() { return trueTarget; }
 	const StateMachineEdge *target1() const { return trueTarget; }
 	void _sanity_check(const std::set<Int> &binders) const {checkIRExprBindersInScope(condition, binders);}
+	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const {
+		return trueTarget->roughLoadCount(
+			falseTarget->roughLoadCount(acc));
+	}
 };
 
 /* A node in the state machine representing a bit of code which we
