@@ -938,6 +938,8 @@ struct avail_t {
 void
 avail_t::dereference(IRExpr *addr)
 {
+	if (TIMEOUT)
+		return;
 	IRExpr *badPtr = IRExpr_Unop(Iop_BadPtr, addr);
 	badPtr = simplifyIRExpr(badPtr, AllowableOptimisations::defaultOptimisations);
 	if (badPtr->tag != Iex_Unop || badPtr->Iex.Unop.op != Iop_BadPtr)
@@ -990,6 +992,8 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			    const Oracle::RegisterAliasingConfiguration &alias,
 			    OracleInterface *oracle)
 {
+	if (TIMEOUT)
+		return;
 	if (StateMachineSideEffectStore *smses =
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
 		/* Eliminate anything which is killed */
@@ -1109,10 +1113,10 @@ buildNewStateMachineWithLoadsEliminated(
 									     done_something));
 
 	avail_t currentlyAvailable(initialAvail);
-
+	
 	for (std::vector<StateMachineSideEffect *>::const_iterator it =
 		     sme->sideEffects.begin();
-	     it != sme->sideEffects.end();
+	     !TIMEOUT && it != sme->sideEffects.end();
 	     it++) {
 		StateMachineSideEffect *newEffect;
 
@@ -1383,7 +1387,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				/* Build the output set. */
 				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
 					     edge->sideEffects.begin();
-				     it2 != edge->sideEffects.end();
+				     !TIMEOUT && it2 != edge->sideEffects.end();
 				     it2++)
 					updateAvailSetForSideEffect(outputAvail, *it2,
 								    opt, alias, oracle);

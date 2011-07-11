@@ -45,6 +45,9 @@ static bool
 expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binders, IRExpr **assumption,
 		 IRExpr **accumulatedAssumptions)
 {
+	if (TIMEOUT)
+		return true;
+
 	exp = simplifyIRExpr(
 		specialiseIRExpr(exp, binders),
 		AllowableOptimisations::defaultOptimisations);
@@ -236,7 +239,7 @@ evalStateMachineEdge(StateMachineEdge *sme,
 		     StateMachineEvalContext &ctxt)
 {
 	for (std::vector<StateMachineSideEffect *>::iterator it = sme->sideEffects.begin();
-	     it != sme->sideEffects.end();
+	     !TIMEOUT && it != sme->sideEffects.end();
 	     it++)
 		evalStateMachineSideEffect(*it, chooser, oracle, ctxt.binders,
 					   ctxt.stores, &ctxt.pathConstraint,
@@ -507,6 +510,9 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 	StateMachine *s;
 
 top:
+	if (TIMEOUT)
+		return;
+
 	while (machine->nextEdgeSideEffectIdx == machine->currentEdge->sideEffects.size()) {
 		/* We've hit the end of the edge.  Move to the next
 		 * state. */
@@ -609,11 +615,11 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		CrossEvalState s2(storeEdge, 0);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
-		while (!s1.finished && !s2.finished)
+		while (!TIMEOUT && !s1.finished && !s2.finished)
 			ctxt.advanceMachine(chooser,
 					    oracle,
 					    chooser.nd_choice(2));
-		while (!s1.finished)
+		while (!TIMEOUT && !s1.finished)
 			ctxt.advanceMachine(chooser, oracle, true);
 		if (s1.crashed) {
 #if 0
@@ -671,7 +677,7 @@ writeMachineSuitabilityConstraint(
 		writerEdge = writeStartEdge;
 		thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
 		while (1) {
-			for (unsigned i = 0; i < writerEdge->sideEffects.size(); i++) {
+			for (unsigned i = 0; !TIMEOUT && i < writerEdge->sideEffects.size(); i++) {
 				evalStateMachineSideEffect(writerEdge->sideEffects[i],
 							   chooser,
 							   oracle,
@@ -777,7 +783,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 		sectionStart = NULL;
 		finished = false;
 		smses = NULL;
-		while (!finished) {
+		while (!TIMEOUT && !finished) {
 			/* Have we hit the end of the current writer edge? */
 
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
@@ -929,7 +935,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		writeEdgeIdx = 0;
 		pathConstraint = assumption;
 		writerEdge = writeStartEdge;
-		while (1) {
+		while (!TIMEOUT) {
 			/* Have we hit the end of the current writer edge? */
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
 				/* Yes, move to the next state. */
