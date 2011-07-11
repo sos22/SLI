@@ -416,7 +416,6 @@ public:
 	{
 	}
 };
-
 static StateMachine *
 rewriteTemporary(StateMachine *sm,
 		 IRTemp tmp,
@@ -424,6 +423,33 @@ rewriteTemporary(StateMachine *sm,
 {
 	RewriteTemporary rt(tmp, newval);
 	return rt.transform(sm);
+}
+
+class RewriteTemporary2 : public IRExprTransformer {
+	IRTemp tmp;
+	IRExpr *to;
+protected:
+	IRExpr *transformIexRdTmp(IRExpr *what, bool *done_something)
+	{
+		if (what->Iex.RdTmp.tmp == tmp) {
+			*done_something = true;
+			return to;
+		} else
+			return what;
+	}
+public:
+	RewriteTemporary2(IRTemp _tmp, IRExpr *_to)
+		: tmp(_tmp), to(_to)
+	{
+	}
+};
+static IRExpr *
+rewriteTemporary(IRExpr *sm,
+		 IRTemp tmp,
+		 IRExpr *newval)
+{
+	RewriteTemporary2 rt(tmp, newval);
+	return rt.transformIRExpr(sm);
 }
 
 static StateMachine *
@@ -1888,7 +1914,7 @@ public:
 		std::map<std::pair<unsigned, unsigned>, IRExpr *> &_map)
 		: map(_map)
 	{}
-	IRExpr *transformIRExprGet(IRExpr *what, bool *done_something) {
+	IRExpr *transformIexGet(IRExpr *what, bool *done_something) {
 		std::pair<unsigned, unsigned> k;
 		k.first = what->Iex.Get.offset;
 		k.second = what->Iex.Get.tid;
@@ -2668,6 +2694,15 @@ updateStateMachineForCallInstruction(unsigned tid, StateMachine *orig, IRSB *irs
 		r = IRExpr_ClientCallFailed(irsb->next);
 	}
 
+	/* Pick up any temporaries calculated during the call
+	 * instruction. */
+	for (int i = irsb->stmts_used - 1; i >= 0; i--) {
+		IRStmt *stmt = irsb->stmts[i];
+		/* We ignore statements other than WrTmp if they
+		   happen in a call instruction. */
+		if (stmt->tag == Ist_WrTmp)
+			r = rewriteTemporary(r, stmt->Ist.WrTmp.tmp, stmt->Ist.WrTmp.data);
+	}
 	return rewriteRegister(orig, OFFSET_amd64_RAX, r);
 }
 
