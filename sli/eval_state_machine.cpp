@@ -177,10 +177,10 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			   IRExpr **assumption,
 			   IRExpr **accumulatedAssumptions)
 {
-	if (StateMachineSideEffectStore *smses =
-	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+	if (StateMachineSideEffectMemoryAccess *smsema =
+	    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
 		IRExpr *v = IRExpr_Unop(Iop_Not1,
-					IRExpr_Unop(Iop_BadPtr, smses->addr));
+					IRExpr_Unop(Iop_BadPtr, smsema->addr));
 		*assumption = simplifyIRExpr(
 			IRExpr_Binop(Iop_And1, *assumption, v),
 			AllowableOptimisations::defaultOptimisations);
@@ -189,6 +189,10 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 				simplifyIRExpr(
 					IRExpr_Binop(Iop_And1, *accumulatedAssumptions, v),
 					AllowableOptimisations::defaultOptimisations);
+	}
+
+	if (StateMachineSideEffectStore *smses =
+	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
 		stores.push_back(
 			new StateMachineSideEffectStore(
 				specialiseIRExpr(smses->addr, binders),
@@ -198,16 +202,6 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 				);
 	} else if (StateMachineSideEffectLoad *smsel =
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
-		IRExpr *v = IRExpr_Unop(Iop_Not1,
-					IRExpr_Unop(Iop_BadPtr, smsel->addr));
-		*assumption = simplifyIRExpr(
-			IRExpr_Binop(Iop_And1, *assumption, v),
-			AllowableOptimisations::defaultOptimisations);
-		if (accumulatedAssumptions && *accumulatedAssumptions)
-			*accumulatedAssumptions =
-				simplifyIRExpr(
-					IRExpr_Binop(Iop_And1, *accumulatedAssumptions, v),
-					AllowableOptimisations::defaultOptimisations);
 		IRExpr *val;
 		val = NULL;
 		for (std::vector<StateMachineSideEffectStore *>::reverse_iterator it = stores.rbegin();

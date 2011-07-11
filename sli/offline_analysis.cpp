@@ -1301,12 +1301,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	     it != potentiallyAvailable.sideEffects.end();
 	     it++) {
 		StateMachineSideEffect *smse = *it;
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
-			potentiallyAvailable.dereference(smses->addr);
-		} else if (StateMachineSideEffectLoad *smsel =
-			   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
-			potentiallyAvailable.dereference(smsel->addr);
+		if (StateMachineSideEffectMemoryAccess *smsema =
+		    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
+			potentiallyAvailable.dereference(smsema->addr);
 		}
 	}
 
