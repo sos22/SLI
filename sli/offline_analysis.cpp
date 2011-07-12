@@ -3045,23 +3045,20 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 	return result;
 }
 
-void
-considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
-			    VexPtr<InferredInformation> &ii,
-			    VexPtr<Oracle> &oracle,
-			    unsigned long interestingRip,
-			    VexPtr<MachineState> &ms,
-			    FixConsumer &haveAFix,
-			    bool considerEverything,
-			    GarbageCollectionToken token)
+static StateMachine *
+buildProbeMachine(std::vector<unsigned long> &previousInstructions,
+		  AllowableOptimisations &opt,
+		  VexPtr<InferredInformation> &ii,
+		  VexPtr<Oracle> &oracle,
+		  unsigned long interestingRip,
+		  GarbageCollectionToken token)
 {
-	VexPtr<StateMachineSet, &ir_heap> readMachinesChecked(new StateMachineSet());
-	int cntr = 0;
+	StateMachine *sm;
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     !TIMEOUT && it != previousInstructions.end();
 	     it++) {
-		fprintf(_logfile, "Investigating %lx...\n", *it);
+		fprintf(_logfile, "Backtrack to %lx...\n", *it);
 		LibVEX_maybe_gc(token);
 
 		std::set<unsigned long> terminalFunctions;
@@ -3077,12 +3074,8 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			ii->CFGtoCrashReason(CRASHING_THREAD, cfg, true));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
-			return;
+			return NULL;
 		}
-		AllowableOptimisations opt =
-			AllowableOptimisations::defaultOptimisations
-			.enableassumePrivateStack()
-			.enableignoreSideEffects();
 
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
@@ -3090,7 +3083,6 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 					      oracle,
 					      false,
 					      *it);
-
 		cr->sm = cr->sm->selectSingleCrashingPath();
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
@@ -3104,108 +3096,119 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 			   definitely-doesn't-crash there's not much
 			   point in looking any further, so stop. */
 			fprintf(_logfile, "Machine definitely survives -> stop now\n");
-			return;
+			return NULL;
 		}
-		/* Most instructions produce basically the same
-		   machine as their neighbours, so it's a bit of a
-		   waste of time to consider all of them.  Instead, we
-		   only consider one in a thousand.  We always include
-		   the machine for the earliest instruction we have,
-		   because that's most likely to produce interesting
-		   machines. */
-		cntr++;
-		if (cntr < 1000 && !considerEverything && it != previousInstructions.end() - 1)
-			continue;
-		cntr = 0;
-
-		if (readMachinesChecked->hasKey(cr->sm)) {
-			fprintf(_logfile, "\tAlready investigated that one...\n");
-			continue;
-		}
-		readMachinesChecked->set(cr->sm, true);
-
-		if (it == previousInstructions.end() - 1)
-			opt = opt.disablefreeVariablesMightAccessStack();
-
-		VexPtr<StateMachine, &ir_heap> sm(cr->sm);
-		sm = optimiseStateMachine(cr->sm,
-					  oracle->getAliasingConfigurationForRip(*it),
-					  opt,
-					  oracle,
-					  true,
-					  *it);
-
-		fprintf(_logfile, "Investigate %lx:\n", *it);
-		printStateMachine(sm, _logfile);
-		fprintf(_logfile, "\n");
-
-		std::set<InstructionSet> conflictClusters;
-		getConflictingStoreClusters(sm, oracle, conflictClusters);
-
-		if (conflictClusters.size() == 0) {
-			fprintf(_logfile, "\t\tNo available conflicting stores?\n");
-			continue;
-		}
-
-		VexPtr<IRExpr, &ir_heap> survive(
-			survivalConstraintIfExecutedAtomically(sm, oracle, token));
-
-		if (!survive) {
-			fprintf(_logfile, "\tTimed out computing survival constraint\n");
-			continue;
-		}
-		survive = simplifyIRExpr(survive, opt);
-
-		fprintf(_logfile, "\tComputed survival constraint ");
-		ppIRExpr(survive, _logfile);
-		fprintf(_logfile, "\n");
-
-		/* Quick check that that vaguely worked.  If this
-		   reports mightCrash == true then that probably means
-		   that the theorem prover bits need more work.  If it
-		   reports mightSurvive == false then the program is
-		   doomed and it's not possible to fix it from this
-		   point. */
-		bool mightSurvive, mightCrash;
-		if (!evalMachineUnderAssumption(sm, oracle, survive, &mightSurvive, &mightCrash, token)) {
-			fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
-			continue;
-		}
-
-		if (!mightSurvive) {
-			fprintf(_logfile, "\tCan never survive...\n");
-			continue;
-		}
-		if (mightCrash) {
-			fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-			continue;
-		}
-
-		VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(sm));
-
-		bool foundRace = false;
-		for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
-		     !TIMEOUT && it != conflictClusters.end();
-		     it++) {
-			fprintf(_logfile, "\t\tCluster:");
-			for (std::set<unsigned long>::iterator it2 = it->rips.begin();
-			     it2 != it->rips.end();
-			     it2++)
-				fprintf(_logfile, " %lx", *it2);
-			fprintf(_logfile, "\n");
-			VexPtr<AddressSpace> as(ms->addressSpace);
-			foundRace |= processConflictCluster(as, sm, oracle, survive, *it, summary, token);
-		}
-
-		if (!foundRace)
-			fprintf(_logfile, "\t\tCouldn't find any relevant-looking races\n");
-		else
-			fprintf(_logfile, "\t\tFound relevant-looking races\n");
-
-		if (summary->storeMachines.size() != 0)
-			haveAFix(summary, token);
+		sm = cr->sm;
 	}
+	if (TIMEOUT)
+		return NULL;
+	return sm;
+}
+
+void
+considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
+			    VexPtr<InferredInformation> &ii,
+			    VexPtr<Oracle> &oracle,
+			    unsigned long interestingRip,
+			    VexPtr<MachineState> &ms,
+			    FixConsumer &haveAFix,
+			    bool considerEverything,
+			    GarbageCollectionToken token)
+{
+	AllowableOptimisations opt =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack()
+		.enableignoreSideEffects();
+	VexPtr<StateMachine, &ir_heap> probeMachine(
+		buildProbeMachine(
+			previousInstructions,
+			opt,
+			ii,
+			oracle,
+			interestingRip,
+			token));
+
+	opt = opt.disablefreeVariablesMightAccessStack();
+	probeMachine = optimiseStateMachine(probeMachine,
+					    oracle->getAliasingConfigurationForRip(previousInstructions.back()),
+					    opt,
+					    oracle,
+					    true,
+					    previousInstructions.back());
+
+	fprintf(_logfile, "Investigate %lx:\n", previousInstructions.back());
+	printStateMachine(probeMachine, _logfile);
+	fprintf(_logfile, "\n");
+
+	std::set<InstructionSet> conflictClusters;
+	getConflictingStoreClusters(probeMachine, oracle, conflictClusters);
+
+	if (conflictClusters.size() == 0) {
+		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
+		return;
+	}
+
+	VexPtr<IRExpr, &ir_heap> survive(
+		survivalConstraintIfExecutedAtomically(probeMachine, oracle, token));
+	if (!survive) {
+		fprintf(_logfile, "\tTimed out computing survival constraint\n");
+		return;
+	}
+	survive = simplifyIRExpr(survive, opt);
+
+	fprintf(_logfile, "\tComputed survival constraint ");
+	ppIRExpr(survive, _logfile);
+	fprintf(_logfile, "\n");
+
+	/* Quick check that that vaguely worked.  If this reports
+	   mightCrash == true then that probably means that the
+	   theorem prover bits need more work.  If it reports
+	   mightSurvive == false then the program is doomed and it's
+	   not possible to fix it from this point. */
+	bool mightSurvive, mightCrash;
+	if (!evalMachineUnderAssumption(probeMachine, oracle, survive, &mightSurvive, &mightCrash, token)) {
+		fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
+		return;
+	}
+	if (TIMEOUT)
+		return;
+	if (!mightSurvive) {
+		fprintf(_logfile, "\tCan never survive...\n");
+		return;
+	}
+	if (mightCrash) {
+		fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+		printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+		return;
+	}
+
+	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
+
+	bool foundRace = false;
+	for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
+	     !TIMEOUT && it != conflictClusters.end();
+	     it++) {
+		fprintf(_logfile, "\t\tCluster:");
+		for (std::set<unsigned long>::iterator it2 = it->rips.begin();
+		     it2 != it->rips.end();
+		     it2++)
+			fprintf(_logfile, " %lx", *it2);
+		fprintf(_logfile, "\n");
+		VexPtr<AddressSpace> as(ms->addressSpace);
+		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, token);
+	}
+	if (TIMEOUT)
+		return;
+
+	if (!foundRace) {
+		fprintf(_logfile, "\t\tCouldn't find any relevant-looking races\n");
+		return;
+	}
+
+	fprintf(_logfile, "\t\tFound relevant-looking races\n");
+
+	if (summary->storeMachines.size() != 0)
+		haveAFix(summary, token);
 }
 			    
 template <typename t> void
