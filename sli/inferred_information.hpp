@@ -103,10 +103,13 @@ public:
 				GarbageCollectionToken token) = 0;
 };
 
-void considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
-				 VexPtr<InferredInformation> &ii,
+StateMachine *buildProbeMachine(std::vector<unsigned long> &previousInstructions,
+				VexPtr<InferredInformation> &ii,
+				VexPtr<Oracle> &oracle,
+				unsigned long interestingRip,
+				GarbageCollectionToken token);
+void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,
-				 unsigned long interestingRip,
 				 VexPtr<MachineState> &ms,
 				 FixConsumer &haveAFix,
 				 bool considerEverything,

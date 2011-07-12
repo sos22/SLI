@@ -65,10 +65,15 @@ main(int argc, char *argv[])
 	oracle->findPreviousInstructions(previousInstructions);
 
 	DumpFix df(oracle);
-	considerInstructionSequence(previousInstructions,
-				    ii,
+	VexPtr<StateMachine, &ir_heap> probeMachine;
+
+	probeMachine = buildProbeMachine(previousInstructions,
+					 ii,
+					 oracle,
+					 proximal->rip.rip,
+					 ALLOW_GC);
+	considerInstructionSequence(probeMachine,
 				    oracle,
-				    proximal->rip.rip,
 				    ms,
 				    df,
 				    true,

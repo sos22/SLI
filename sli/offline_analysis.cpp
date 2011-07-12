@@ -3045,14 +3045,18 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 	return result;
 }
 
-static StateMachine *
+StateMachine *
 buildProbeMachine(std::vector<unsigned long> &previousInstructions,
-		  AllowableOptimisations &opt,
 		  VexPtr<InferredInformation> &ii,
 		  VexPtr<Oracle> &oracle,
 		  unsigned long interestingRip,
 		  GarbageCollectionToken token)
 {
+	AllowableOptimisations opt =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack()
+		.enableignoreSideEffects();
+
 	StateMachine *sm;
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
@@ -3102,14 +3106,20 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 	}
 	if (TIMEOUT)
 		return NULL;
+
+	sm = optimiseStateMachine(sm,
+				  oracle->getAliasingConfigurationForRip(previousInstructions.back()),
+				  opt.disablefreeVariablesMightAccessStack(),
+				  oracle,
+				  true,
+				  previousInstructions.back());
+
 	return sm;
 }
 
 void
-considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
-			    VexPtr<InferredInformation> &ii,
+considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    VexPtr<Oracle> &oracle,
-			    unsigned long interestingRip,
 			    VexPtr<MachineState> &ms,
 			    FixConsumer &haveAFix,
 			    bool considerEverything,
@@ -3118,25 +3128,10 @@ considerInstructionSequence(std::vector<unsigned long> &previousInstructions,
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
-		.enableignoreSideEffects();
-	VexPtr<StateMachine, &ir_heap> probeMachine(
-		buildProbeMachine(
-			previousInstructions,
-			opt,
-			ii,
-			oracle,
-			interestingRip,
-			token));
+		.enableignoreSideEffects()
+		.disablefreeVariablesMightAccessStack();
 
-	opt = opt.disablefreeVariablesMightAccessStack();
-	probeMachine = optimiseStateMachine(probeMachine,
-					    oracle->getAliasingConfigurationForRip(previousInstructions.back()),
-					    opt,
-					    oracle,
-					    true,
-					    previousInstructions.back());
-
-	fprintf(_logfile, "Investigate %lx:\n", previousInstructions.back());
+	fprintf(_logfile, "Probe machine:\n");
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");
 
