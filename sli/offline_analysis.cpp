@@ -22,24 +22,6 @@ static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
 						 Oracle *oracle,
 						 unsigned max_depth);
 
-unsigned long
-__hash_state_machine(StateMachine *const &s)
-{
-	return s->hashval();
-}
-bool
-__eq_state_machine(StateMachine *const &a, StateMachine *const &b)
-{
-	return stateMachinesBisimilar((StateMachine *)a, (StateMachine *)b);
-}
-void
-__visit_state_machine_set_entry(StateMachine *&a, bool &b, HeapVisitor &hv)
-{
-	hv(a);
-}
-typedef class gc_map<StateMachine *, bool, __hash_state_machine,
-		     __eq_state_machine, __visit_state_machine_set_entry, &ir_heap> StateMachineSet;
-
 /* A bunch of heuristics for figuring out why we crashed.  Returns
  * NULL on failure.  Pretty stupid. */
 CrashReason *

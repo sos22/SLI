@@ -3794,13 +3794,6 @@ Bool eqIRConst ( IRConst* c1, IRConst* c2 )
    }
 }
 
-Bool eqIRRegArray ( IRRegArray* descr1, IRRegArray* descr2 )
-{
-   return toBool( descr1->base == descr2->base 
-                  && descr1->elemTy == descr2->elemTy
-                  && descr1->nElems == descr2->nElems );
-}
-
 Int sizeofIRType ( IRType ty )
 {
    switch (ty) {
