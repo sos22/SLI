@@ -2792,7 +2792,8 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     const AllowableOptimisations &opt2,
 				     unsigned long rip,
 				     GarbageCollectionToken token,
-				     IRExpr **assumptionOut)
+				     IRExpr **assumptionOut,
+				     StateMachine **newStoreMachine)
 {
 	/* Specialise the state machine down so that we only consider
 	   the interesting stores, and introduce free variables as
@@ -2867,6 +2868,9 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 
 	if (assumptionOut)
 		*assumptionOut = assumption;
+	if (newStoreMachine)
+		*newStoreMachine = sm;
+
 	return true;
 }
 
@@ -2955,7 +2959,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	opt.interestingStores = is.rips;
 	opt.haveInterestingStoresSet = true;
 
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, cfg->my_rip.rip, token, NULL))
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, cfg->my_rip.rip, token, NULL, NULL))
 		return false;
 
 	/* If it might crash with that machine, try expanding it to
@@ -2973,10 +2977,12 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	printStateMachine(sm, _logfile);
 
 	IRExpr *_newAssumption;
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, new_rip, token, &_newAssumption)) {
+	StateMachine *_sm;
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, new_rip, token, &_newAssumption, &_sm)) {
 		fprintf(_logfile, "\t\tExpanded store machine cannot crash\n");
 		return false;
 	}
+	sm = _sm;
 	VexPtr<IRExpr, &ir_heap> newAssumption(_newAssumption);
 
 	fprintf(_logfile, "\t\tExpanded assumption: ");
