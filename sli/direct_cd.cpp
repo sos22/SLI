@@ -72,12 +72,10 @@ main(int argc, char *argv[])
 					 oracle,
 					 proximal->rip.rip,
 					 ALLOW_GC);
-	considerInstructionSequence(probeMachine,
-				    oracle,
-				    ms,
-				    df,
-				    true,
-				    ALLOW_GC);
+	VexPtr<CrashSummary, &ir_heap> summary;
+	summary = diagnoseCrash(probeMachine, oracle, ms, ALLOW_GC);
+	if (summary)
+		df(summary, ALLOW_GC);
 
 	return 0;
 }

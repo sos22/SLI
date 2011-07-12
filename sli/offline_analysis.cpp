@@ -3117,20 +3117,12 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 	return sm;
 }
 
-void
-considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
-			    VexPtr<Oracle> &oracle,
-			    VexPtr<MachineState> &ms,
-			    FixConsumer &haveAFix,
-			    bool considerEverything,
-			    GarbageCollectionToken token)
+CrashSummary *
+diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
+	      VexPtr<Oracle> &oracle,
+	      VexPtr<MachineState> &ms,
+	      GarbageCollectionToken token)
 {
-	AllowableOptimisations opt =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack()
-		.enableignoreSideEffects()
-		.disablefreeVariablesMightAccessStack();
-
 	fprintf(_logfile, "Probe machine:\n");
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");
@@ -3140,15 +3132,20 @@ considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 	if (conflictClusters.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
-		return;
+		return NULL;
 	}
 
 	VexPtr<IRExpr, &ir_heap> survive(
 		survivalConstraintIfExecutedAtomically(probeMachine, oracle, token));
 	if (!survive) {
 		fprintf(_logfile, "\tTimed out computing survival constraint\n");
-		return;
+		return NULL;
 	}
+	AllowableOptimisations opt =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack()
+		.enableignoreSideEffects()
+		.disablefreeVariablesMightAccessStack();
 	survive = simplifyIRExpr(survive, opt);
 
 	fprintf(_logfile, "\tComputed survival constraint ");
@@ -3163,18 +3160,18 @@ considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	bool mightSurvive, mightCrash;
 	if (!evalMachineUnderAssumption(probeMachine, oracle, survive, &mightSurvive, &mightCrash, token)) {
 		fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
-		return;
+		return NULL;
 	}
 	if (TIMEOUT)
-		return;
+		return NULL;
 	if (!mightSurvive) {
 		fprintf(_logfile, "\tCan never survive...\n");
-		return;
+		return NULL;
 	}
 	if (mightCrash) {
 		fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
 		printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-		return;
+		return NULL;
 	}
 
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
@@ -3193,17 +3190,21 @@ considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, token);
 	}
 	if (TIMEOUT)
-		return;
+		return NULL;
 
 	if (!foundRace) {
 		fprintf(_logfile, "\t\tCouldn't find any relevant-looking races\n");
-		return;
+		return NULL;
 	}
 
 	fprintf(_logfile, "\t\tFound relevant-looking races\n");
 
-	if (summary->storeMachines.size() != 0)
-		haveAFix(summary, token);
+	if (summary->storeMachines.size() == 0) {
+		fprintf(_logfile, "\t\t...but no store machines?\n");
+		return NULL;
+	}
+
+	return summary;
 }
 			    
 template <typename t> void

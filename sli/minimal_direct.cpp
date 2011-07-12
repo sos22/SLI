@@ -107,7 +107,10 @@ consider_rip(unsigned long my_rip,
 
 	VexPtr<StateMachine, &ir_heap> probeMachine;
 	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip, token);
-	considerInstructionSequence(probeMachine, oracle, ms, df, false, token);
+	VexPtr<CrashSummary, &ir_heap> summary;
+	summary = diagnoseCrash(probeMachine, oracle, ms, token);
+	if (summary)
+		df(summary, token);
 
 	struct timeval end;
 	gettimeofday(&end, NULL);

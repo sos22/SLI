@@ -108,6 +108,10 @@ StateMachine *buildProbeMachine(std::vector<unsigned long> &previousInstructions
 				VexPtr<Oracle> &oracle,
 				unsigned long interestingRip,
 				GarbageCollectionToken token);
+CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
+			    VexPtr<Oracle> &oracle,
+			    VexPtr<MachineState> &ms,
+			    GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,
 				 VexPtr<MachineState> &ms,
