@@ -16,6 +16,12 @@ template <typename t> void printCFG(const CFGNode<t> *cfg);
 typedef std::pair<StateMachine *, StateMachine *> st_pair_t;
 typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
 
+static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
+						 unsigned long start,
+						 const std::set<unsigned long> &terminalFunctions,
+						 Oracle *oracle,
+						 unsigned max_depth);
+
 unsigned long
 __hash_state_machine(StateMachine *const &s)
 {
@@ -2906,7 +2912,11 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		LibVEX_maybe_gc(token);
 
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
-			ii->CFGFromRip(*it, terminalFunctions));
+			buildCFGForRipSet(oracle->ms->addressSpace,
+					  *it,
+					  terminalFunctions,
+					  oracle,
+					  100));
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
@@ -3068,7 +3078,11 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		std::set<unsigned long> terminalFunctions;
 		terminalFunctions.insert(0x757bf0);
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
-			ii->CFGFromRip(*it, terminalFunctions));
+			buildCFGForRipSet(oracle->ms->addressSpace,
+					  *it,
+					  terminalFunctions,
+					  oracle,
+					  100));
 		InstructionSet interesting;
 		interesting.rips.insert(interestingRip);
 		trimCFG(cfg.get(), interesting, INT_MAX, true);
@@ -3248,28 +3262,24 @@ enumerateReachableStates(CFGNode<unsigned long> *from, std::set<CFGNode<unsigned
  */
 /* This only really makes sense if @rips are similar enough that the
  * CFGs are likely to overlap. */
-static void
+static CFGNode<unsigned long> *
 buildCFGForRipSet(AddressSpace *as,
-		  const std::set<unsigned long> &rips,
+		  unsigned long start,
 		  const std::set<unsigned long> &terminalFunctions,
-		  std::set<CFGNode<unsigned long> *> &output,
 		  Oracle *oracle,
 		  unsigned max_depth)
 {
 	std::map<unsigned long, std::pair<CFGNode<unsigned long> *, unsigned> > builtSoFar;
 	std::vector<std::pair<unsigned long, unsigned> > needed;
-	unsigned long rip;
 	unsigned depth;
+	unsigned long rip;
 
 	/* Mild hack to make some corned cases easier. */
 	builtSoFar[0] = std::pair<CFGNode<unsigned long> *, unsigned>(NULL, max_depth);
 
 	/* Step one: discover all of the instructions which we're
 	 * going to need. */
-	for (std::set<unsigned long>::const_iterator it = rips.begin();
-	     it != rips.end();
-	     it++)
-		needed.push_back(std::pair<unsigned long, unsigned>(*it, max_depth));
+	needed.push_back(std::pair<unsigned long, unsigned>(start, max_depth));
 	while (!needed.empty()) {
 		rip = needed.back().first;
 		depth = needed.back().second;
@@ -3327,34 +3337,7 @@ buildCFGForRipSet(AddressSpace *as,
 		}
 	}
 
-	/* Extract the start states.  These will be some subset of the
-	   input root nodes. */
-	std::set<CFGNode<unsigned long> *> outputSoFar;
-	for (std::set<unsigned long>::const_iterator it = rips.begin();
-	     it != rips.end();
-	     it++) {
-		CFGNode<unsigned long> *startnode = builtSoFar[*it].first;
-		if (outputSoFar.count(startnode))
-			continue;
-		output.insert(startnode);
-
-		enumerateReachableStates(startnode, outputSoFar);
-	}
-}
-
-/* Special case of buildCFGForRipSet() when you only have one entry
- * RIP */
-CFGNode<unsigned long> *
-InferredInformation::CFGFromRip(unsigned long start, const std::set<unsigned long> &terminalFunctions)
-{
-	std::set<unsigned long> rips;
-	std::set<CFGNode<unsigned long> *> out;
-	rips.insert(start);
-	buildCFGForRipSet(oracle->ms->addressSpace, rips, terminalFunctions, out, oracle, 100);
-	if (out.size() == 0)
-		return NULL;
-	assert(out.size() == 1);
-	return *out.begin();
+	return builtSoFar[start].first;
 }
 
 CrashReason *
