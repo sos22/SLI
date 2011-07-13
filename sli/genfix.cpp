@@ -527,7 +527,17 @@ PatchFragment::nextInstr(CFG *cfg)
 		if (it->second)
 			return it->first;
 
-	fail("cannot find next instruction?\n");
+	/* Yurk.  Everything is part of a cycle.  Just pick the
+	 * instruction with the numerically smallest address. */
+	std::set<std::pair<unsigned long, Instruction *> > instrs;
+	for (std::map<Instruction *, bool>::iterator it = pendingInstructions.begin();
+	     it != pendingInstructions.end();
+	     it++)
+		instrs.insert(std::pair<unsigned long, Instruction *>(it->first->rip, it->first));
+	/* The set will sort on the first item in the pair, so this
+	   gives us the first instruction. */
+	assert(instrs.begin() != instrs.end());
+	return instrs.begin()->second;
 }
 
 bool
