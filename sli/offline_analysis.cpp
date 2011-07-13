@@ -1286,7 +1286,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	avail_t potentiallyAvailable;
 	findAllSideEffects(sm, potentiallyAvailable.sideEffects);
 	for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
-	     it != potentiallyAvailable.sideEffects.end();
+	     !TIMEOUT && it != potentiallyAvailable.sideEffects.end();
 	     it++) {
 		StateMachineSideEffect *smse = *it;
 		if (StateMachineSideEffectMemoryAccess *smsema =
@@ -1300,7 +1300,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	   be available. */
 	if (!opt.assumeNoInterferingStores) {
 		for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
-		     it != potentiallyAvailable.sideEffects.end();
+		     !TIMEOUT && it != potentiallyAvailable.sideEffects.end();
 			) {
 			StateMachineSideEffectStore *smses =
 				dynamic_cast<StateMachineSideEffectStore *>(*it);
@@ -1327,11 +1327,11 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	std::map<StateMachine *, avail_t> availOnEntry;
 	std::map<StateMachineEdge *, avail_t> availOnExit;
 	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
-	     it != allEdges.end();
+	     !TIMEOUT && it != allEdges.end();
 	     it++)
 		availOnExit[*it] = potentiallyAvailable;
 	for (std::set<StateMachine *>::iterator it = allStates.begin();
-	     it != allStates.end();
+	     !TIMEOUT && it != allStates.end();
 	     it++)
 		availOnEntry[*it] = potentiallyAvailable;
 	availOnEntry[sm].clear();
@@ -3182,7 +3182,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 	     !TIMEOUT && it != conflictClusters.end();
 	     it++) {
-		fprintf(_logfile, "\t\tCluster:");
+		fprintf(_logfile, "\tCluster:");
 		for (std::set<unsigned long>::iterator it2 = it->rips.begin();
 		     it2 != it->rips.end();
 		     it2++)
