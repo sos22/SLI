@@ -336,10 +336,6 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					IRExpr_Unop(
 						Iop_Not1,
 						ctxt.pathConstraint));
-			ctxt.pathConstraint =
-				simplifyIRExpr(
-					IRExpr_Unop(Iop_Not1, ctxt.pathConstraint),
-					AllowableOptimisations::defaultOptimisations);
 			newConstraint = simplifyIRExpr(newConstraint,
 						       AllowableOptimisations::defaultOptimisations);
 			currentConstraint = newConstraint;
