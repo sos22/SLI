@@ -53,6 +53,11 @@ fi
 
 if matches "Load machine:"
 then
+    if matches 10e8e80
+    then
+	result "PSI_server"
+    fi
+
     if matches "decoder said not implemented"
     then
 	result "generated_summary_decoder_failed"
