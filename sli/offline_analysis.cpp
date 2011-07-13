@@ -2937,6 +2937,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
 		 VexPtr<CrashSummary, &ir_heap> &summary,
 		 const InstructionSet &is,
+		 bool needRemoteMacroSections,
 		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get(), oracle));
@@ -2988,20 +2989,23 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-	if (!findRemoteMacroSections(probeMachine, sm, newAssumption, oracle, remoteMacroSections, token)) {
-		fprintf(_logfile, "\t\tChose a bad write machine...\n");
-		return true;
-	}
-	if (!fixSufficient(sm, probeMachine, newAssumption, oracle, remoteMacroSections, token)) {
-		fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
-		return true;
-	}
 	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm);
-	for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
-	     it != remoteMacroSections->end();
-	     it++)
-		smd->macroSections.push_back(CrashSummary::StoreMachineData::macroSectionT(it->start, it->end));
+	if (needRemoteMacroSections) {
+		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
+		if (!findRemoteMacroSections(probeMachine, sm, newAssumption, oracle, remoteMacroSections, token)) {
+			fprintf(_logfile, "\t\tChose a bad write machine...\n");
+			return true;
+		}
+		if (!fixSufficient(sm, probeMachine, newAssumption, oracle, remoteMacroSections, token)) {
+			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
+			return true;
+		}
+		for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
+		     it != remoteMacroSections->end();
+		     it++)
+			smd->macroSections.push_back(CrashSummary::StoreMachineData::macroSectionT(it->start, it->end));
+	}
+
 	summary->storeMachines.push_back(smd);
 	return true;
 }
@@ -3013,6 +3017,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		       VexPtr<IRExpr, &ir_heap> &survive,
 		       const InstructionSet &is,
 		       VexPtr<CrashSummary, &ir_heap> &summary,
+		       bool needRemoteMacroSections,
 		       GarbageCollectionToken token)
 {
 	LibVEX_maybe_gc(token);
@@ -3037,7 +3042,8 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		breakCycles(storeCFG.get());
 
 		result |= considerStoreCFG(storeCFG, as, oracle,
-					   survive, sm, summary, is, token);
+					   survive, sm, summary, is,
+					   needRemoteMacroSections, token);
 	}
 	return result;
 }
@@ -3123,6 +3129,7 @@ CrashSummary *
 diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<Oracle> &oracle,
 	      VexPtr<MachineState> &ms,
+	      bool needRemoteMacroSections,
 	      GarbageCollectionToken token)
 {
 	fprintf(_logfile, "Probe machine:\n");
@@ -3189,7 +3196,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			fprintf(_logfile, " %lx", *it2);
 		fprintf(_logfile, "\n");
 		VexPtr<AddressSpace> as(ms->addressSpace);
-		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, token);
+		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, needRemoteMacroSections, token);
 	}
 	if (TIMEOUT)
 		return NULL;

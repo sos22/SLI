@@ -73,7 +73,7 @@ main(int argc, char *argv[])
 					 proximal->rip.rip,
 					 ALLOW_GC);
 	VexPtr<CrashSummary, &ir_heap> summary;
-	summary = diagnoseCrash(probeMachine, oracle, ms, ALLOW_GC);
+	summary = diagnoseCrash(probeMachine, oracle, ms, true, ALLOW_GC);
 	if (summary)
 		df(summary, ALLOW_GC);
 

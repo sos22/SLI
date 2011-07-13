@@ -110,6 +110,7 @@ StateMachine *buildProbeMachine(std::vector<unsigned long> &previousInstructions
 CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    VexPtr<Oracle> &oracle,
 			    VexPtr<MachineState> &ms,
+			    bool needRemoteMacroSections,
 			    GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,

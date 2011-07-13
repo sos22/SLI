@@ -109,7 +109,7 @@ consider_rip(unsigned long my_rip,
 	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip, token);
 	if (probeMachine) {
 		VexPtr<CrashSummary, &ir_heap> summary;
-		summary = diagnoseCrash(probeMachine, oracle, ms, token);
+		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);
 		if (summary)
 			df(summary, token);
 	}
