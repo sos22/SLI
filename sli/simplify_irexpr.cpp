@@ -694,7 +694,7 @@ protected:
 	}
 public:
 	void visit(HeapVisitor &hv) {
-		for (unsigned x; x < args.size(); x++)
+		for (unsigned x = 0; x < args.size(); x++)
 			hv(args[x]);
 	}
 	void addChild(CnfExpression *e) { args.push_back(e); }
