@@ -158,7 +158,7 @@ AddressSpace::load(unsigned long start, unsigned size,
 		res.lo = res.lo + b[0];
 		break;
 	default:
-		abort();
+		fail("load of bad size %d\n", size);
 	}
 
 	return res;
@@ -194,7 +194,7 @@ AddressSpace::store(unsigned long start, unsigned size,
 		b[0] = val.lo & 0xfful;
 		break;
 	default:
-		abort();
+		fail("store of bad size %d\n", size);
 	}
 	writeMemory(start, size, b, ignore_protection, thr);
 }

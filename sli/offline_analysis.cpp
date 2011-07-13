@@ -2875,6 +2875,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	if (previousInstructions.size() == 0) {
 		/* Lacking any better ideas... */
 		fprintf(_logfile, "cannot expand store machine...\n");
+		*new_rip = rip;
 		return sm;
 	}
 
@@ -2956,7 +2957,11 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 
 	/* If it might crash with that machine, try expanding it to
 	   include a bit more context and see if it still goes. */
-	unsigned long new_rip;
+	unsigned long new_rip = 0x12; /* Shut the compiler up;
+					 expandStateMachineToFunctionHead
+					 always initialises this if sm
+					 is non-NULL, but the compiler
+					 can't tell that. */
 	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, oracle, opt, &new_rip, token);
 	if (!sm) {
 		fprintf(_logfile, "\t\tCannot expand store machine!\n");
@@ -3049,7 +3054,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		.enableassumePrivateStack()
 		.enableignoreSideEffects();
 
-	StateMachine *sm;
+	StateMachine *sm = NULL;
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     !TIMEOUT && it != previousInstructions.end();
@@ -3103,12 +3108,13 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 	if (TIMEOUT)
 		return NULL;
 
-	sm = optimiseStateMachine(sm,
-				  oracle->getAliasingConfigurationForRip(previousInstructions.back()),
-				  opt.disablefreeVariablesMightAccessStack(),
-				  oracle,
-				  true,
-				  previousInstructions.back());
+	if (sm)
+		sm = optimiseStateMachine(sm,
+					  oracle->getAliasingConfigurationForRip(previousInstructions.back()),
+					  opt.disablefreeVariablesMightAccessStack(),
+					  oracle,
+					  true,
+					  previousInstructions.back());
 
 	return sm;
 }
@@ -3423,19 +3429,23 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 		CrashSummary::StoreMachineData *smd = *it;
 		fprintf(f, "Store machine:\n");
 		printStateMachine(smd->machine, f);
-		fprintf(f, "Remote macro sections:\n");
-		for (std::vector<CrashSummary::StoreMachineData::macroSectionT>::iterator it2 = 
-			     smd->macroSections.begin();
-		     it2 != smd->macroSections.end();
-		     it2++) {
-			fprintf(f, "\t");
-			it2->first->prettyPrint(f);
-			fprintf(f, " -> ");
-			if (it2->second)
-				it2->second->prettyPrint(f);
-			else
-				fprintf(f, "<null>");
-			fprintf(f, "\n");
+		if (smd->macroSections.size() == 0) {
+			fprintf(f, "No remote macro sections\n");
+		} else {
+			fprintf(f, "Remote macro sections:\n");
+			for (std::vector<CrashSummary::StoreMachineData::macroSectionT>::iterator it2 = 
+				     smd->macroSections.begin();
+			     it2 != smd->macroSections.end();
+			     it2++) {
+				fprintf(f, "\t");
+				it2->first->prettyPrint(f);
+				fprintf(f, " to ");
+				if (it2->second)
+					it2->second->prettyPrint(f);
+				else
+					fprintf(f, "<null>");
+				fprintf(f, "\n");
+			}
 		}
 	}
 }

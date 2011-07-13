@@ -1330,4 +1330,9 @@ extern FILE *_logfile;
 	_timed_out;							\
 	})
 
+void __fail(const char *file, unsigned line, const char *fmt, ...)
+	__attribute__((noreturn, __format__(__printf__, 3, 4)));
+#define fail(...) __fail(__FILE__, __LINE__, __VA_ARGS__)
+#define abort() fail("aborted")
+
 #endif /* !SLI_H__ */

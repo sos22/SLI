@@ -5,6 +5,13 @@
 #include "pickle.hpp"
 #include "state_machine.hpp"
 
+/* Silence compiler warnings */
+static size_t __sli_fread(void *ptr, size_t size, size_t nmemb, FILE *f)
+{
+	return fread(ptr, size, nmemb, f);
+}
+#define fread __sli_fread
+
 enum sm_tag { SM_unreachable, SM_crash, SM_survive, SM_proxy, SM_bifurcate, SM_stub };
 enum smse_tag { SMSE_unreached, SMSE_store, SMSE_load, SMSE_copy };
 

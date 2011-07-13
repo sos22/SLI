@@ -143,7 +143,7 @@ spawn(const char *path, ...)
 		return WEXITSTATUS(status);
 	if (WIFSIGNALED(status))
 		return -WTERMSIG(status);
-	abort();
+	fail("unexpected result %d from waitpid in spawn(%s)\n", status, path);
 }
 
 int

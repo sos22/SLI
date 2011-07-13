@@ -104,10 +104,28 @@ fopenf(const char *mode, const char *fmt, ...)
 	va_list args;
 	va_start(args, fmt);
 	char *path;
-	vasprintf(&path, fmt, args);
+	int r = vasprintf(&path, fmt, args);
+	(void)r;
 	va_end(args);
 
 	FILE *res = fopen(path, mode);
 	free(path);
 	return res;
+}
+
+void
+__fail(const char *file, unsigned line, const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	char *msg;
+	int r = vasprintf(&msg, fmt, args);
+	(void)r;
+	va_end(args);
+
+	fprintf(_logfile, "%s:%d: Failed: %s", file, line, msg);
+	fprintf(stderr, "%s:%d: Failed: %s", file, line, msg);
+	fflush(0);
+#undef abort
+	abort();
 }

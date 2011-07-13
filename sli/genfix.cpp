@@ -198,7 +198,8 @@ top:
 				goto top;
 			case 7:
 				/* Not allowed in 64-bit mode */
-				abort();
+				fail("Instruction %02x is not allowed in 64 bit code\n",
+				     b);
 			}
 			break;
 		}
@@ -490,7 +491,7 @@ RipRelativeBranchRelocation::doit(PatchFragment *pf)
 	if (!pf->ripToOffset(target, &targetOffset))
 		pf->generateEpilogue(target);
 	if (!pf->ripToOffset(target, &targetOffset))
-		abort();
+		fail("Failed to generate epilogue for %lx\n", target);
 	int delta = targetOffset - offset - size;
 	pf->writeBytes(&delta, size, offset);
 }
@@ -526,7 +527,7 @@ PatchFragment::nextInstr(CFG *cfg)
 		if (it->second)
 			return it->first;
 
-	abort();
+	fail("cannot find next instruction?\n");
 }
 
 bool

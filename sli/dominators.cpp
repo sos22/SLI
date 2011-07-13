@@ -44,7 +44,7 @@ handle_dirty_call(struct representative_state *rs,
 				else if (!strcmp(details->cee->name, "helper_load_8"))
 					res = as->fetch<unsigned char>(addr, NULL);
 				else
-					abort();
+					fail("handle_dirty_call() of bad function %s", details->cee->name);
 			} catch (BadMemoryException &e) {
 				/* Don't crash when teh guest
 				 * dereferences a bad pointer. */
@@ -54,7 +54,7 @@ handle_dirty_call(struct representative_state *rs,
 
 		temporaries[details->tmp].lo = res;
 	} else {
-		abort();
+		fail("handle_dirty_call() of bad function %s", details->cee->name);
 	}
 }
 
@@ -143,7 +143,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 			}
 
 			case Ist_CAS:
-				abort();
+				fail("Encountered CAS\n");
 
 			case Ist_Put:
 				put_stmt(&s.regs,
@@ -183,9 +183,6 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				break;
 			}
 
-			default:
-				abort();
-					  
 			}
 		}
 
@@ -206,7 +203,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 	}
 
 	/* Failed. */
-	abort();
+	fail("return_address\n");
 }
 
 static void
@@ -240,7 +237,7 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 		return ra + delta;
 	}
 
-	abort();
+	fail("findFunctionHead\n");
 }
 
 #define DBG_DOMINATORS(...) do {} while (0)

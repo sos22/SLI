@@ -1619,7 +1619,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	RbpToRspOffsetState current_state;
 	unsigned long current_offset;
 	RbpToRspOffsetState state;
-	unsigned long offset;
+	unsigned long offset = -99999999; /* Shut the compiler up. */
 
 	oracle->getRbpToRspOffset(rip, &current_state, &current_offset);
 	if (current_state == RbpToRspOffsetStateImpossible) {
