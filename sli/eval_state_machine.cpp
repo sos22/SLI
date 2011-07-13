@@ -177,10 +177,12 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			   IRExpr **assumption,
 			   IRExpr **accumulatedAssumptions)
 {
+	IRExpr *addr = NULL;
 	if (StateMachineSideEffectMemoryAccess *smsema =
 	    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
+		addr = specialiseIRExpr(smsema->addr, binders);
 		IRExpr *v = IRExpr_Unop(Iop_Not1,
-					IRExpr_Unop(Iop_BadPtr, smsema->addr));
+					IRExpr_Unop(Iop_BadPtr, addr));
 		*assumption = simplifyIRExpr(
 			IRExpr_Binop(Iop_And1, *assumption, v),
 			AllowableOptimisations::defaultOptimisations);
@@ -193,15 +195,18 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 
 	if (StateMachineSideEffectStore *smses =
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+		assert(addr);
+		IRExpr *data = specialiseIRExpr(smses->data, binders);
 		stores.push_back(
 			new StateMachineSideEffectStore(
-				specialiseIRExpr(smses->addr, binders),
-				specialiseIRExpr(smses->data, binders),
+				specialiseIRExpr(addr, binders),
+				specialiseIRExpr(data, binders),
 				smses->rip
 				)
 				);
 	} else if (StateMachineSideEffectLoad *smsel =
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+		assert(addr);
 		IRExpr *val;
 		val = NULL;
 		for (std::vector<StateMachineSideEffectStore *>::reverse_iterator it = stores.rbegin();
@@ -210,11 +215,11 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			StateMachineSideEffectStore *smses = *it;
 			if (!oracle->memoryAccessesMightAlias(smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, smsel->addr, chooser, binders, assumption, accumulatedAssumptions))
+			if (evalExpressionsEqual(smses->addr, addr, chooser, binders, assumption, accumulatedAssumptions))
 				val = smses->data;
 		}
 		if (!val)
-			val = IRExpr_Load(False, Iend_LE, Ity_I64, smsel->addr);
+			val = IRExpr_Load(False, Iend_LE, Ity_I64, addr);
 		binders[smsel->key] = val;
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
