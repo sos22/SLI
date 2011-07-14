@@ -62,6 +62,9 @@ public:
 	char *restoreString();
 };
 
+static void pickle(StateMachineSideEffect *smse, Pickler &p);
+static void unpickle(StateMachineSideEffect *&out, Unpickler &p);
+
 static void
 pickle(const char *c, Pickler &p)
 {
@@ -170,6 +173,16 @@ unpickle_counted(IRExpr **&e, Unpickler &p, int nr)
 	p.finishObject();
 }
 
+static void
+unpickle(StateMachineSideEffectMemoryAccess *&out, Unpickler &p)
+{
+	StateMachineSideEffect *se;
+	unpickle(se, p);
+	StateMachineSideEffectMemoryAccess *smsema =
+		dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
+	assert(smsema);
+	out = smsema;
+}
 
 #define __pickle_header(type, n)					\
 	do {								\
@@ -287,6 +300,10 @@ unpickle_counted(IRExpr **&e, Unpickler &p, int nr)
 			break;						\
 		case Iex_ClientCallFailed:				\
 			pickle(expr->Iex.ClientCallFailed.target, p);	\
+			break;						\
+		case Iex_HappensBefore:					\
+			pickle(expr->Iex.HappensBefore.before, p);	\
+			pickle(expr->Iex.HappensBefore.after, p);	\
 			break;						\
 		}							\
 		p.finishObject();					\

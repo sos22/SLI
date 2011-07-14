@@ -7,6 +7,8 @@
 class CrashReason;
 
 class IRExprTransformer {
+	StateMachineSideEffectMemoryAccess *transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *,
+											bool *);
 protected:
 	virtual IRExpr *transformIexBinder(IRExpr *e, bool *done_something) { return e; }
 	virtual IRExpr *transformIexGet(IRExpr *e, bool *done_something) { return e; }
@@ -126,6 +128,7 @@ protected:
 		else
 			return IRExpr_ClientCallFailed(a1);
 	}
+	virtual IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something);
 public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 	IRExpr *transformIRExpr(IRExpr *e) { bool t; return transformIRExpr(e, &t); }

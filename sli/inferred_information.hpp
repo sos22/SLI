@@ -62,14 +62,16 @@ class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 public:
 	class StoreMachineData : public GarbageCollected<StoreMachineData, &ir_heap> {
 	public:
-		StoreMachineData(StateMachine *_machine)
-			: machine(_machine)
+		StoreMachineData(StateMachine *_machine, IRExpr *_assumption)
+			: machine(_machine), assumption(_assumption)
 		{}
 		StateMachine *machine;
 		typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
 		std::vector<macroSectionT> macroSections;
+		IRExpr *assumption;
 		void visit(HeapVisitor &hv) {
 			hv(machine);
+			hv(assumption);
 			for (std::vector<macroSectionT>::iterator it = macroSections.begin();
 			     it != macroSections.end();
 			     it++) {
@@ -118,5 +120,8 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 FixConsumer &haveAFix,
 				 bool considerEverything,
 				 GarbageCollectionToken token);
+void findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
+				VexPtr<Oracle> &oracle,
+				GarbageCollectionToken token);
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

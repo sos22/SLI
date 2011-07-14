@@ -68,6 +68,15 @@ physicallyEqual(const IRCallee *a, const IRCallee *b)
 	return a->addr == b->addr;
 }
 
+static bool physicallyEqual(const IRExpr *a, const IRExpr *b);
+
+static bool
+physicallyEqual(const StateMachineSideEffectMemoryAccess *a,
+		const StateMachineSideEffectMemoryAccess *b)
+{
+	return a->rip == b->rip;
+}
+
 static bool
 physicallyEqual(const IRExpr *a, const IRExpr *b)
 {
@@ -167,6 +176,11 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 	case Iex_ClientCallFailed:
 		return physicallyEqual(a->Iex.ClientCallFailed.target,
 				       b->Iex.ClientCallFailed.target);
+	case Iex_HappensBefore:
+		return physicallyEqual(a->Iex.HappensBefore.before,
+				       b->Iex.HappensBefore.before) &&
+			physicallyEqual(a->Iex.HappensBefore.after,
+					b->Iex.HappensBefore.after);
 	}
 	abort();
 }
@@ -362,6 +376,8 @@ exprComplexity(const IRExpr *e)
 	}
 	case Iex_ClientCallFailed:
 		return 1000 + exprComplexity(e->Iex.ClientCallFailed.target);
+	case Iex_HappensBefore:
+		return 100;
 	}
 	abort();
 }
@@ -386,6 +402,7 @@ ordering_iex_tag(IRExprTag a)
 	case Iex_CCall: return 13;
 	case Iex_ClientCall: return 14;
 	case Iex_ClientCallFailed: return 15;
+	case Iex_HappensBefore: return 16;
 	}
 	abort();
 }
@@ -439,7 +456,7 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 	} else if (a->tag != b->tag) {
 		return false;
 	}
-
+	
 	switch (a->tag) {
 	case Iex_Binder:
 		return a->Iex.Binder.binder < b->Iex.Binder.binder;
@@ -583,6 +600,12 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 	case Iex_ClientCallFailed:
 		return sortIRExprs(a->Iex.ClientCallFailed.target,
 				   b->Iex.ClientCallFailed.target);
+	case Iex_HappensBefore:
+		if (a->Iex.HappensBefore.before->rip < b->Iex.HappensBefore.before->rip)
+			return true;
+		if (a->Iex.HappensBefore.before->rip > b->Iex.HappensBefore.before->rip)
+			return false;
+		return a->Iex.HappensBefore.after->rip < b->Iex.HappensBefore.after->rip;
 	}
 
 	abort();
@@ -1178,6 +1201,7 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 	case Iex_RdTmp:
 	case Iex_Const:
 	case Iex_FreeVariable:
+	case Iex_HappensBefore:
 		break;
 	case Iex_GetI:
 		e->Iex.GetI.ix = internIRExpr(e->Iex.GetI.ix, lookupTable);
@@ -1299,6 +1323,12 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 				continue;
 			break;
 		}
+
+		case Iex_HappensBefore:
+			if (e->Iex.HappensBefore.before->rip != other->Iex.HappensBefore.before->rip ||
+			    e->Iex.HappensBefore.after->rip != other->Iex.HappensBefore.after->rip)
+				continue;
+			break;
 		}
 
 		/* If we get here, they match and we're done. */
@@ -1475,6 +1505,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 	case Iex_RdTmp:
 	case Iex_Const:
 	case Iex_FreeVariable:
+	case Iex_HappensBefore:
 		break;
 	}
 
@@ -2193,6 +2224,7 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInte
 	case Iex_RdTmp:
 	case Iex_Const:
 	case Iex_FreeVariable:
+	case Iex_HappensBefore:
 		return false;
 	case Iex_GetI:
 		return definitelyUnevaluatable(e->Iex.GetI.ix, opt, oracle);

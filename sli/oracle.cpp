@@ -724,6 +724,10 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 		return old;
 	case Iex_ClientCallFailed:
 		return irexprUsedValues(old, w->Iex.ClientCallFailed.target);
+	case Iex_HappensBefore:
+		/* shouldn't happen: we haven't introduced any of
+		 * these yet. */
+		abort();
 	}
 	abort();
 }

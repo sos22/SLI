@@ -931,8 +931,12 @@ typedef
       Iex_FreeVariable,
       Iex_ClientCall,
       Iex_ClientCallFailed,
+      Iex_HappensBefore,
    }
    IRExprTag;
+
+class StateMachineSideEffectMemoryAccess;
+void ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *, FILE *);
 
 /* An expression.  Stored as a tagged union.  'tag' indicates what kind
    of expression this is.  'Iex' is the union that holds the fields.  If
@@ -1164,6 +1168,11 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       struct {
 	 IRExpr *target;
       } ClientCallFailed;
+
+      struct {
+	 StateMachineSideEffectMemoryAccess *before;
+	 StateMachineSideEffectMemoryAccess *after;
+      } HappensBefore;
    } Iex;
    void visit(HeapVisitor &hv);
    NAMED_CLASS
@@ -1192,6 +1201,8 @@ extern IRExpr* IRExpr_FreeVariable ( int key );
 extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (unsigned long r, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
+extern IRExpr* IRExpr_HappensBefore (StateMachineSideEffectMemoryAccess *before,
+				     StateMachineSideEffectMemoryAccess *after);
 
 /* Pretty-print an IRExpr. */
 extern void ppIRExpr ( IRExpr*, FILE *f );

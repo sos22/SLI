@@ -116,6 +116,10 @@ IRExpr::visit(HeapVisitor &visit)
    case Iex_ClientCallFailed:
      visit(Iex.ClientCallFailed.target);
      return;
+   case Iex_HappensBefore:
+     visit(Iex.HappensBefore.before);
+     visit(Iex.HappensBefore.after);
+     return;
    }
    abort();
 }
@@ -181,6 +185,8 @@ IRExpr::hashval(void) const
   }
   case Iex_ClientCallFailed:
     return Iex.ClientCallFailed.target->hashval() * 65537;
+  case Iex_HappensBefore:
+    return 19;
   }
   abort();
 }
@@ -1496,6 +1502,13 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       ppIRExpr(e->Iex.ClientCallFailed.target, f);
       fprintf(f, ")");
       return;
+    case Iex_HappensBefore:
+      fprintf(f, "(");
+      ppStateMachineSideEffectMemoryAccess(e->Iex.HappensBefore.before, f);
+      fprintf(f, " <-< ");
+      ppStateMachineSideEffectMemoryAccess(e->Iex.HappensBefore.after, f);
+      fprintf(f, ")");
+      return;
   }
   vpanic("ppIRExpr");
 }
@@ -1997,6 +2010,15 @@ IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
    IRExpr *e = new IRExpr();
    e->tag = Iex_ClientCallFailed;
    e->Iex.ClientCallFailed.target = t;
+   return e;
+}
+IRExpr* IRExpr_HappensBefore ( StateMachineSideEffectMemoryAccess *before,
+			       StateMachineSideEffectMemoryAccess *after )
+{
+   IRExpr *e = new IRExpr();
+   e->tag = Iex_HappensBefore;
+   e->Iex.HappensBefore.before = before;
+   e->Iex.HappensBefore.after = after;
    return e;
 }
 
@@ -2750,6 +2772,8 @@ IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
       case Iex_ClientCall:
       case Iex_ClientCallFailed:
 	 return Ity_I64; /* Hack hack hack */
+      case Iex_HappensBefore:
+	 return Ity_I1;
    }
    ppIRExpr(e, stderr);
    vpanic("typeOfIRExpr");

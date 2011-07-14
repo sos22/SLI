@@ -451,6 +451,10 @@ findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt
 	case Iex_ClientCallFailed:
 		findUsedBinders(e->Iex.ClientCallFailed.target, out, opt);
 		return;
+	case Iex_HappensBefore:
+		e->Iex.HappensBefore.before->findUsedBinders(out, opt);
+		e->Iex.HappensBefore.after->findUsedBinders(out, opt);
+		return;
 	}
 	abort();
 }
@@ -1241,6 +1245,7 @@ public:
 		case Iex_FreeVariable:
 		case Iex_ClientCall:
 		case Iex_ClientCallFailed:
+		case Iex_HappensBefore:
 			break;
 		case Iex_Qop:
 			if (e->Iex.Qop.arg4->tag == Iex_FreeVariable &&
@@ -1314,3 +1319,8 @@ StateMachineEdge::roughLoadCount(StateMachine::RoughLoadCount acc) const
 	return target->roughLoadCount(acc);
 }
 
+void
+ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema, FILE *f)
+{
+	fprintf(f, "{0x%lx}", smsema->rip);
+}

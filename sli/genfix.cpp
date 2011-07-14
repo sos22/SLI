@@ -347,7 +347,7 @@ top:
 
 	case 0xe9: /* jmp rel32 */
 		delta32 = i->int32();
-		i->defaultNext = i->rip + i->len + delta;
+		i->defaultNext = i->rip + i->len + delta32;
 		i->len = 0;
 		fallsThrough = false;
 		break;
