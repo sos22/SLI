@@ -217,11 +217,6 @@ extern Heap ir_heap;
 
    - eqIRFoo is a structural equality predicate for IRFoos.
 
-   - deepCopyIRFoo is a deep copy constructor for IRFoos. 
-     It recursively traverses the entire argument tree and
-     produces a complete new tree.  All types have a deep copy
-     constructor.
-
    - shallowCopyIRFoo is the shallow copy constructor for IRFoos.
      It creates a new top-level copy of the supplied object,
      but does not copy any sub-objects.  Only some types have a
@@ -318,9 +313,6 @@ extern IRConst* IRConst_F64  ( Double );
 extern IRConst* IRConst_F64i ( ULong );
 extern IRConst* IRConst_V128 ( UShort );
 
-/* Deep-copy an IRConst */
-extern IRConst* deepCopyIRConst ( IRConst* );
-
 /* Pretty-print an IRConst */
 extern void ppIRConst ( IRConst*, FILE* );
 
@@ -359,9 +351,6 @@ typedef
 /* Create an IRCallee. */
 extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr );
 
-/* Deep-copy an IRCallee. */
-extern IRCallee* deepCopyIRCallee ( IRCallee* );
-
 /* Pretty-print an IRCallee. */
 extern void ppIRCallee ( IRCallee*, FILE* );
 
@@ -383,8 +372,6 @@ struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
    IRRegArray;
 
 extern IRRegArray* mkIRRegArray ( Int, IRType, Int );
-
-extern IRRegArray* deepCopyIRRegArray ( IRRegArray* );
 
 extern void ppIRRegArray ( IRRegArray*, FILE * );
 extern Bool eqIRRegArray ( IRRegArray*, IRRegArray* );
@@ -1206,9 +1193,6 @@ extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (unsigned long r, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 
-/* Deep-copy an IRExpr. */
-extern IRExpr* deepCopyIRExpr ( IRExpr* );
-
 /* Pretty-print an IRExpr. */
 extern void ppIRExpr ( IRExpr*, FILE *f );
 extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err);
@@ -1229,10 +1213,8 @@ extern IRExpr** mkIRExprVec_7 ( IRExpr*, IRExpr*, IRExpr*, IRExpr*,
 
 /* IRExpr copiers:
    - shallowCopy: shallow-copy (ie. create a new vector that shares the
-     elements with the original).
-   - deepCopy: deep-copy (ie. create a completely new vector). */
+   elements with the original). */
 extern IRExpr** shallowCopyIRExprVec ( IRExpr** );
-extern IRExpr** deepCopyIRExprVec ( IRExpr** );
 
 /* Make a constant expression from the given host word taking into
    account (of course) the host word size. */
@@ -1410,9 +1392,6 @@ extern void     ppIRDirty ( IRDirty* );
 /* Allocate an uninitialised dirty call */
 extern IRDirty* emptyIRDirty ( void );
 
-/* Deep-copy a dirty call */
-extern IRDirty* deepCopyIRDirty ( IRDirty* );
-
 /* A handy function which takes some of the tedium out of constructing
    dirty helper calls.  The called function impliedly does not return
    any value and has a constant-True guard.  The call is marked as
@@ -1534,8 +1513,6 @@ extern IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
                         IREndness end, IRExpr* addr, 
                         IRExpr* expdHi, IRExpr* expdLo,
                         IRExpr* dataHi, IRExpr* dataLo );
-
-extern IRCAS* deepCopyIRCAS ( IRCAS* );
 
 /* ------------------ Statements ------------------ */
 
@@ -1753,9 +1730,6 @@ extern IRStmt* IRStmt_Dirty   ( IRDirty* details );
 extern IRStmt* IRStmt_MBE     ( IRMBusEvent event );
 extern IRStmt* IRStmt_Exit    ( IRExpr* guard, IRJumpKind jk, IRConst* dst );
 
-/* Deep-copy an IRStmt. */
-extern IRStmt* deepCopyIRStmt ( IRStmt* );
-
 /* Pretty-print an IRStmt. */
 extern void ppIRStmt ( IRStmt*, FILE* );
 
@@ -1780,9 +1754,6 @@ struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
 
 /* Obtain a new IRTemp */
 extern IRTemp newIRTemp ( IRTypeEnv*, IRType );
-
-/* Deep-copy a type environment */
-extern IRTypeEnv* deepCopyIRTypeEnv ( IRTypeEnv* );
 
 /* Pretty-print a type environment */
 extern void ppIRTypeEnv ( IRTypeEnv* );
@@ -1821,13 +1792,6 @@ struct _IRSB : public GarbageCollected<_IRSB, &ir_heap> {
 /* Allocate a new, uninitialised IRSB */
 extern IRSB* emptyIRSB ( void );
 
-/* Deep-copy an IRSB */
-extern IRSB* deepCopyIRSB ( IRSB* );
-
-/* Deep-copy an IRSB, except for the statements list, which set to be
-   a new, empty, list of statements. */
-extern IRSB* deepCopyIRSBExceptStmts ( IRSB* );
-
 /* Pretty-print an IRSB */
 extern void ppIRSB ( IRSB*, FILE* );
 
@@ -1851,13 +1815,6 @@ extern void typeOfPrimop ( IROp op,
 			   IRType* t_dst,
 			   IRType* t_arg1, IRType* t_arg2,
 			   IRType* t_arg3, IRType* t_arg4 );
-
-/* Sanity check a BB of IR */
-extern void sanityCheckIRSB ( IRSB*  bb, 
-                              const char* caller,
-                              Bool   require_flatness, 
-                              IRType guest_word_size );
-extern Bool isFlatIRStmt ( IRStmt* );
 
 /* Is this any value actually in the enumeration 'IRType' ? */
 extern Bool isPlausibleIRType ( IRType ty );

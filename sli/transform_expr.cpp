@@ -162,14 +162,20 @@ instrument_func(unsigned tid,
 		IRType gWordTy,
 		IRType hWordTy)
 {
+	IRStmt **in_stmts = sb_in->stmts;
+	int nr_in_stmts = sb_in->stmts_used;
 	IRSB *sb_out;
 	IRStmt *current_in_stmt;
 	IRStmt *out_stmt;
 	int i;
 
-	sb_out = deepCopyIRSBExceptStmts(sb_in);
-	for (i = 0; i < sb_in->stmts_used; i++) {
-		current_in_stmt = sb_in->stmts[i];
+	sb_in->stmts = NULL;
+	sb_in->stmts_used = 0;
+	sb_in->stmts_size = 0;
+	sb_out = sb_in;
+
+	for (i = 0; i < nr_in_stmts; i++) {
+		current_in_stmt = in_stmts[i];
 		out_stmt = current_in_stmt;
 		switch (current_in_stmt->tag) {
 		case Ist_NoOp:
