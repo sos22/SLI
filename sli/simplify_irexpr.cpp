@@ -1659,6 +1659,25 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			}
 		}
 
+		/* a <-< b || b <-< a is definitely true. */
+		if (src->Iex.Associative.op == Iop_Or1) {
+			for (int i1 = 0; i1 < src->Iex.Associative.nr_arguments; i1++) {
+				IRExpr *a1 = src->Iex.Associative.contents[i1];
+				if (a1->tag != Iex_HappensBefore)
+					continue;
+				for (int i2 = i1 + 1; i2 < src->Iex.Associative.nr_arguments; i2++) {
+					IRExpr *a2 = src->Iex.Associative.contents[i2];
+					if (a2->tag != Iex_HappensBefore)
+						continue;
+					if ( (a1->Iex.HappensBefore.before->rip == a2->Iex.HappensBefore.after->rip &&
+					      a1->Iex.HappensBefore.after->rip == a2->Iex.HappensBefore.before->rip) ) {
+						*done_something = true;
+						return IRExpr_Const(IRConst_U1(1));
+					}
+				}
+			}
+		}
+
 		/* x + -x -> 0, for any plus-like operator, so remove
 		 * both x and -x from the list. */
 		/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
