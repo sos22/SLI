@@ -1077,6 +1077,7 @@ database(void)
 			  "alias13 INTEGER,"
 			  "alias14 INTEGER,"
 			  "alias15 INTEGER,"
+			  "stackHasLeaked INTEGER," /* 0 or NULL -> false, 1 -> true */
 			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
 			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
 			  "functionHead INTEGER NOT NULL)",
@@ -1215,7 +1216,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 
 	if (!stmt)
 		stmt = prepare_statement(
-			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15 FROM instructionAttributes WHERE rip = ?");
+			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE rip = ?");
 	bind_int64(stmt, 1, rip);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
@@ -1228,13 +1229,24 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 	RegisterAliasingConfiguration res;
 	for (i = 0; i < NR_REGS; i++) {
 		unsigned long r;
-		if (sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
+		if (sqlite3_column_type(stmt, i) == SQLITE_NULL) {
 			r = 0;
 		} else {
 			assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
 			r = sqlite3_column_int64(stmt, i);
 		}
 		res.v[i] = PointerAliasingSet(r);
+	}
+	if (sqlite3_column_type(stmt, i) == SQLITE_NULL) {
+		res.stackHasLeaked = false;
+	} else {
+		assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
+		unsigned long r = sqlite3_column_int64(stmt, i);
+		assert(r == 0 || r == 1);
+		if (r)
+			res.stackHasLeaked = true;
+		else
+			res.stackHasLeaked = false;
 	}
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
@@ -2124,11 +2136,12 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
 
 	if (!stmt)
 		stmt = prepare_statement(
-			"UPDATE instructionAttributes SET alias0 = ?, alias1 = ?, alias2 = ?, alias3 = ?, alias4 = ?, alias5 = ?, alias6 = ?, alias7 = ?, alias8 = ?, alias9 = ?, alias10 = ?, alias11 = ?, alias12 = ?, alias13 = ?, alias14 = ?, alias15 = ? WHERE rip = ?"
+			"UPDATE instructionAttributes SET alias0 = ?, alias1 = ?, alias2 = ?, alias3 = ?, alias4 = ?, alias5 = ?, alias6 = ?, alias7 = ?, alias8 = ?, alias9 = ?, alias10 = ?, alias11 = ?, alias12 = ?, alias13 = ?, alias14 = ?, alias15 = ?, stackHasLeaked = ? WHERE rip = ?"
 			);
 	for (i = 0; i < NR_REGS; i++)
 		bind_int64(stmt, i + 1, config.v[i]);
-	bind_int64(stmt, NR_REGS + 1, r);
+	bind_int64(stmt, NR_REGS + 1, config.stackHasLeaked);
+	bind_int64(stmt, NR_REGS + 2, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
