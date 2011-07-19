@@ -97,16 +97,13 @@ const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::anything(7);
 Oracle::RegisterAliasingConfiguration Oracle::RegisterAliasingConfiguration::functionEntryConfiguration(5.3f);
 Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
 {
+	/* On function entry, the only pointer to the current stack
+	   frame should be in RSP.  Anythign else indicates that the
+	   guest program is doing something non-C-like. */
 	stackHasLeaked = false;
 	for (int i = 0; i < NR_REGS; i++)
-		v[i] = Oracle::PointerAliasingSet::anything;
-	v[1] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rcx */
-	v[2] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rdx */
+		v[i] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
 	v[4] = Oracle::PointerAliasingSet::stackPointer; /* rsp */
-	v[6] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rsi */
-	v[7] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* rdi */
-	v[8] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* r8 */
-	v[9] = Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer; /* r9 */
 }
 
 Oracle::RegisterAliasingConfiguration Oracle::RegisterAliasingConfiguration::unknown(5.3f, 12);
