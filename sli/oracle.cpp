@@ -921,6 +921,14 @@ struct cg_header {
 	unsigned long nr;
 };
 
+template <typename t> void
+make_unique(std::vector<t> &v)
+{
+	std::sort(v.begin(), v.end());
+	typename std::vector<t>::iterator it = std::unique(v.begin(), v.end());
+	v.resize(it - v.begin());
+}
+
 void
 Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token)
 {
@@ -943,8 +951,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		offset += sizeof(unsigned long) * h->nr;
 	}
 
-	std::sort(roots.begin(), roots.end());
-	std::unique(roots.begin(), roots.end());
+	make_unique(roots);
 	discoverFunctionHeads(ths, roots, token);
 }
 
@@ -965,8 +972,7 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 			assert(c);
 			for (unsigned i = 0; i < h->nr; i++)
 				output.push_back(c[i] & ~(1ul << 63));
-			std::sort(output.begin(), output.end());
-			std::unique(output.begin(), output.end());
+			make_unique(output);
 			return;
 		}
 		offset += sizeof(unsigned long) * h->nr;
