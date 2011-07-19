@@ -1692,7 +1692,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP && !rsp)
 				rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
 			if (stmt->Ist.Put.offset == OFFSET_amd64_RBP && !rbp)
-				rbp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
+				rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, -1);
 			if (rsp)
 				rsp = rewriteRegister(rsp,
 						      stmt->Ist.Put.offset,
