@@ -1219,7 +1219,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 	bind_int64(stmt, 1, rip);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
-	if (rc == SQLITE_DONE || sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
+	if (rc == SQLITE_DONE) {
 		sqlite3_reset(stmt);
 		*b = false;
 		return RegisterAliasingConfiguration::unknown;
@@ -1228,8 +1228,12 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 	RegisterAliasingConfiguration res;
 	for (i = 0; i < NR_REGS; i++) {
 		unsigned long r;
-		assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
-		r = sqlite3_column_int64(stmt, i);
+		if (sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
+			r = 0;
+		} else {
+			assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
+			r = sqlite3_column_int64(stmt, i);
+		}
 		res.v[i] = PointerAliasingSet(r);
 	}
 	rc = sqlite3_step(stmt);
