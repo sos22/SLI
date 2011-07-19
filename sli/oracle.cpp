@@ -1478,20 +1478,6 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 {
 	LivenessSet res;
 
-	std::vector<unsigned long> fallThroughRips;
-	getInstructionFallThroughs(rip, fallThroughRips);
-	for (std::vector<unsigned long>::iterator it = fallThroughRips.begin();
-	     it != fallThroughRips.end();
-	     it++)
-		res |= liveOnEntry(*it, false);
-	std::vector<unsigned long> callees;
-	getInstructionCallees(rip, callees, oracle);
-	for (std::vector<unsigned long>::iterator it = callees.begin();
-	     it != callees.end();
-	     it++) {
-		Function f(*it);
-		res |= f.liveOnEntry(*it, true) & LivenessSet::argRegisters;
-	}
 	IRSB *irsb = as->getIRSBForAddress(-1, rip);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
@@ -1499,6 +1485,37 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
 	     nr_statements++)
 		;
+
+	std::vector<unsigned long> fallThroughRips;
+	std::vector<unsigned long> callees;
+
+	if (nr_statements == irsb->stmts_used) {
+		if (irsb->jumpkind == Ijk_Call) {
+			fallThroughRips.push_back(extract_call_follower(irsb));
+			if (irsb->next->tag == Iex_Const)
+				callees.push_back(irsb->next->Iex.Const.con->Ico.U64);
+			else
+				getInstructionCallees(rip, callees, oracle);
+		} else {
+			if (irsb->next->tag == Iex_Const)
+				fallThroughRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
+			else
+				getInstructionFallThroughs(rip, fallThroughRips);
+		}
+	} else {
+		fallThroughRips.push_back(statements[nr_statements]->Ist.IMark.addr);
+	}
+
+	for (std::vector<unsigned long>::iterator it = fallThroughRips.begin();
+	     it != fallThroughRips.end();
+	     it++)
+		res |= liveOnEntry(*it, false);
+	for (std::vector<unsigned long>::iterator it = callees.begin();
+	     it != callees.end();
+	     it++) {
+		Function f(*it);
+		res |= f.liveOnEntry(*it, true) & LivenessSet::argRegisters;
+	}
 
 	for (int i = nr_statements - 1; i >= 1; i--) {
 		switch (statements[i]->tag) {
