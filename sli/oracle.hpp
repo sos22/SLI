@@ -130,7 +130,6 @@ public:
 			: rip(_rip)
 		{}
 
-		LivenessSet liveOnEntry(bool isHead);
 		LivenessSet liveOnEntry(unsigned long, bool);
 		bool aliasConfigOnEntryToInstruction(unsigned long rip, RegisterAliasingConfiguration *out);
 		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(unsigned long rip);

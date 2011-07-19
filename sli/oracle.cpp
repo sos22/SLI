@@ -1210,12 +1210,6 @@ Oracle::Function::liveOnEntry(unsigned long rip, bool isHead)
 	return LivenessSet(r);
 }
 
-Oracle::LivenessSet
-Oracle::Function::liveOnEntry(bool isHead)
-{
-	return liveOnEntry(rip, isHead);
-}
-
 Oracle::RegisterAliasingConfiguration
 Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 {
@@ -1480,7 +1474,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 }
 
 void
-Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
+Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
 {
 	LivenessSet res;
 
@@ -1489,7 +1483,7 @@ Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *c
 	for (std::vector<unsigned long>::iterator it = fallThroughRips.begin();
 	     it != fallThroughRips.end();
 	     it++)
-		res |= liveOnEntry(*it);
+		res |= liveOnEntry(*it, false);
 	std::vector<unsigned long> callees;
 	getInstructionCallees(rip, callees, oracle);
 	for (std::vector<unsigned long>::iterator it = callees.begin();
@@ -1547,7 +1541,7 @@ Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *c
 		case Ist_Exit: {
 			unsigned long _branchRip = statements[i]->Ist.Exit.dst->Ico.U64;
 			if (_branchRip)
-				res |= liveOnEntry(_branchRip);
+				res |= liveOnEntry(_branchRip, false);
 			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
 			break;
 		}
@@ -1556,7 +1550,7 @@ Oracle::Function::updateLiveOnEntry(unsigned long rip, AddressSpace *as, bool *c
 		}
 	}
 
-	if (res != liveOnEntry(rip)) {
+	if (res != liveOnEntry(rip, rip == this->rip)) {
 		*changed = true;
 		static sqlite3_stmt *stmt;
 		int rc;
@@ -1984,7 +1978,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 	for (std::vector<unsigned long>::iterator it = callees.begin();
 	     config.v[0] != PointerAliasingSet::anything && it != callees.end();
 	     it++) {
-		LivenessSet ls = (Function(*it)).liveOnEntry(*it);
+		LivenessSet ls = (Function(*it)).liveOnEntry(*it, true);
 		/* If any of the argument registers contain stack
 		   pointers on entry, the return value can potentially
 		   also contain stack pointers. */
