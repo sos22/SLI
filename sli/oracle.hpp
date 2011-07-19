@@ -43,7 +43,7 @@ public:
 		LivenessSet use(Int offset);
 		LivenessSet define(Int offset);
 
-		void operator |=(const LivenessSet x) { mask |= x.mask; }
+		void operator |=(const LivenessSet x) { mask |= x.mask; clearName(); }
 		bool operator !=(const LivenessSet x) { return mask != x.mask; }
 		LivenessSet operator &(const LivenessSet x) { return LivenessSet(mask & x.mask); }
 		bool isLive(Int offset) const;
