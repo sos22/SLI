@@ -6,13 +6,14 @@
 #include "offline_analysis.hpp"
 #include "inferred_information.hpp"
 
+typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
 class StateMachineEvalContext {
 public:
 	StateMachineEvalContext()
 		: collectOrderingConstraints(false),
 		  justPathConstraint(NULL)
 	{}
-	std::vector<StateMachineSideEffectMemoryAccess *> memLog;
+	memLogT memLog;
 	std::map<Int, IRExpr *> binders;
 	bool collectOrderingConstraints;
 	/* justPathConstraint contains all of the assumptions we've
@@ -185,18 +186,20 @@ addOrderingConstraint(StateMachineSideEffectMemoryAccess *before,
 				       AllowableOptimisations::defaultOptimisations);
 }
 
-static void evalStateMachine(StateMachine *sm,
+static void evalStateMachine(StateMachine *rootMachine,
+			     StateMachine *sm,
 			     bool *crashes,
 			     NdChooser &chooser,
 			     Oracle *oracle,
 			     StateMachineEvalContext &ctxt);
 
 static void
-evalStateMachineSideEffect(StateMachineSideEffect *smse,
+evalStateMachineSideEffect(StateMachine *thisMachine,
+			   StateMachineSideEffect *smse,
 			   NdChooser &chooser,
 			   Oracle *oracle,
 			   std::map<Int, IRExpr *> &binders,
-			   std::vector<StateMachineSideEffectMemoryAccess *> &memLog,
+			   memLogT &memLog,
 			   bool collectOrderingConstraints,
 			   IRExpr **assumption,
 			   IRExpr **accumulatedAssumptions)
@@ -221,11 +224,13 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
 		assert(addr);
 		if (collectOrderingConstraints) {
-			for (std::vector<StateMachineSideEffectMemoryAccess *>::reverse_iterator it = memLog.rbegin();
+			for (memLogT::reverse_iterator it = memLog.rbegin();
 			     it != memLog.rend();
 			     it++) {
+				if (it->first == thisMachine)
+					continue;
 				StateMachineSideEffectLoad *smsel =
-					dynamic_cast<StateMachineSideEffectLoad *>(*it);
+					dynamic_cast<StateMachineSideEffectLoad *>(it->second);
 				if (!smsel)
 					continue;
 				if (!oracle->memoryAccessesMightAlias(smsel, smses))
@@ -240,21 +245,23 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 		}
 		IRExpr *data = specialiseIRExpr(smses->data, binders);
 		memLog.push_back(
-			new StateMachineSideEffectStore(
-				specialiseIRExpr(addr, binders),
-				specialiseIRExpr(data, binders),
-				smses->rip
-				)
-				);
+			std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>
+			(thisMachine,
+			 new StateMachineSideEffectStore(
+				 specialiseIRExpr(addr, binders),
+				 specialiseIRExpr(data, binders),
+				 smses->rip
+				 )
+				));
 	} else if (StateMachineSideEffectLoad *smsel =
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 		assert(addr);
 		StateMachineSideEffectStore *satisfier;
 		satisfier = NULL;
-		for (std::vector<StateMachineSideEffectMemoryAccess *>::reverse_iterator it = memLog.rbegin();
+		for (memLogT::reverse_iterator it = memLog.rbegin();
 		     it != memLog.rend();
 		     it++) {
-			StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(*it);
+			StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(it->second);
 			if (!smses || !oracle->memoryAccessesMightAlias(smsel, smses))
 				continue;
 			if (evalExpressionsEqual(smses->addr, addr, chooser, binders, assumption, accumulatedAssumptions)) {
@@ -263,17 +270,19 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 					break;
 				} else {
 					if (satisfier) {
-						addOrderingConstraint(
-							smses,
-							satisfier,
-							assumption,
-							accumulatedAssumptions);
+						if (it->first != thisMachine)
+							addOrderingConstraint(
+								smses,
+								satisfier,
+								assumption,
+								accumulatedAssumptions);
 					} else {
-						addOrderingConstraint(
-							smses,
-							smsel,
-							assumption,
-							accumulatedAssumptions);
+						if (it->first != thisMachine)
+							addOrderingConstraint(
+								smses,
+								smsel,
+								assumption,
+								accumulatedAssumptions);
 						satisfier = smses;
 					}
 				}
@@ -286,10 +295,12 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 			val = IRExpr_Load(False, Iend_LE, Ity_I64, addr);
 		if (collectOrderingConstraints)
 			memLog.push_back(
-				new StateMachineSideEffectLoad(
-					smsel->key,
-					specialiseIRExpr(addr, binders),
-					smsel->rip));
+				std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>(
+					thisMachine,
+					new StateMachineSideEffectLoad(
+						smsel->key,
+						specialiseIRExpr(addr, binders),
+						smsel->rip)));
 		binders[smsel->key] = val;
 	} else if (StateMachineSideEffectCopy *smsec =
 		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
@@ -301,7 +312,8 @@ evalStateMachineSideEffect(StateMachineSideEffect *smse,
 }
 
 static void
-evalStateMachineEdge(StateMachineEdge *sme,
+evalStateMachineEdge(StateMachine *thisMachine,
+		     StateMachineEdge *sme,
 		     bool *crashes,
 		     NdChooser &chooser,
 		     Oracle *oracle,
@@ -310,7 +322,7 @@ evalStateMachineEdge(StateMachineEdge *sme,
 	for (std::vector<StateMachineSideEffect *>::iterator it = sme->sideEffects.begin();
 	     !TIMEOUT && it != sme->sideEffects.end();
 	     it++)
-		evalStateMachineSideEffect(*it, chooser, oracle, ctxt.binders,
+		evalStateMachineSideEffect(thisMachine, *it, chooser, oracle, ctxt.binders,
 					   ctxt.memLog, ctxt.collectOrderingConstraints,
 					   &ctxt.pathConstraint,
 					   &ctxt.justPathConstraint);
@@ -324,7 +336,7 @@ evalStateMachineEdge(StateMachineEdge *sme,
 		*crashes = false;
 		return;
 	}
-	evalStateMachine(sme->target, crashes, chooser, oracle, ctxt);
+	evalStateMachine(thisMachine, sme->target, crashes, chooser, oracle, ctxt);
 }
 
 /* Walk the state machine and figure out whether it's going to crash.
@@ -333,7 +345,8 @@ evalStateMachineEdge(StateMachineEdge *sme,
    path constraint saying which way we went.  Stubs are assumed to
    never crash. */
 static void
-evalStateMachine(StateMachine *sm,
+evalStateMachine(StateMachine *rootMachine,
+		 StateMachine *sm,
 		 bool *crashes,
 		 NdChooser &chooser,
 		 Oracle *oracle,
@@ -355,15 +368,15 @@ evalStateMachine(StateMachine *sm,
 	}
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(sm)) {
-		evalStateMachineEdge(smp->target, crashes, chooser, oracle, ctxt);
+		evalStateMachineEdge(rootMachine, smp->target, crashes, chooser, oracle, ctxt);
 		return;
 	}
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		if (expressionIsTrue(smb->condition, chooser, ctxt.binders, &ctxt.pathConstraint, &ctxt.justPathConstraint)) {
-			evalStateMachineEdge(smb->trueTarget, crashes, chooser, oracle, ctxt);
+			evalStateMachineEdge(rootMachine, smb->trueTarget, crashes, chooser, oracle, ctxt);
 		} else {
-			evalStateMachineEdge(smb->falseTarget, crashes, chooser, oracle, ctxt);
+			evalStateMachineEdge(rootMachine, smb->falseTarget, crashes, chooser, oracle, ctxt);
 		}
 		return;
 	}
@@ -395,7 +408,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
-		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
+		evalStateMachine(sm, sm, &crashes, chooser, oracle, ctxt);
 		if (crashes) {
 			/* This path leads to a crash, so the
 			   constraint should include something to make
@@ -444,7 +457,7 @@ writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 		   confuse the ND chooser. */
 		ctxt.pathConstraint = assumption;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
+		evalStateMachine(sm, sm, &crashes, chooser, oracle, ctxt);
 
 		if (!crashes) {
 			/* Survival should be pretty rare here, and
@@ -513,7 +526,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = assumption;
-		evalStateMachine(sm, &crashes, chooser, oracle, ctxt);
+		evalStateMachine(sm, sm, &crashes, chooser, oracle, ctxt);
 		if (crashes)
 			*mightCrash = true;
 		else
@@ -526,13 +539,17 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 
 class CrossEvalState {
 public:
+	StateMachine *rootMachine;
 	StateMachineEdge *currentEdge;
 	unsigned nextEdgeSideEffectIdx;
 	bool finished;
 	bool crashed;
 	std::map<Int, IRExpr *> binders;
-	CrossEvalState(StateMachineEdge *_e, int _i)
-		: currentEdge(_e), nextEdgeSideEffectIdx(_i), finished(false),
+	CrossEvalState(StateMachine *_rootMachine, StateMachineEdge *_e, int _i)
+		: rootMachine(_rootMachine),
+		  currentEdge(_e),
+		  nextEdgeSideEffectIdx(_i),
+		  finished(false),
 		  crashed(false)
 	{}
 };
@@ -543,7 +560,7 @@ public:
 	bool collectOrderingConstraints;
 	IRExpr *pathConstraint;
 	IRExpr *justPathConstraint;
-	std::vector<StateMachineSideEffectMemoryAccess *> memLog;
+	memLogT memLog;
 	CrossEvalState *loadMachine;
 	CrossEvalState *storeMachine;
 	std::vector<StateMachineSideEffect *> history;
@@ -629,7 +646,7 @@ top:
 	if (wantLoad)
 		acceptable |= !!dynamic_cast<StateMachineSideEffectLoad *>(se);
 	if (!acceptable) {
-		evalStateMachineSideEffect(se, chooser, oracle, machine->binders, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
+		evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->binders, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
 		history.push_back(se);
 		machine->nextEdgeSideEffectIdx++;
 		goto top;
@@ -655,7 +672,7 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];	
 	assert(!dynamic_cast<StateMachineSideEffectCopy *>(se));
 	assert(!dynamic_cast<StateMachineSideEffectUnreached *>(se));
-	evalStateMachineSideEffect(se, chooser, oracle, machine->binders, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
+	evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->binders, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
 	history.push_back(se);
 	machine->nextEdgeSideEffectIdx++;
 }
@@ -684,8 +701,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 		CrossMachineEvalContext ctxt;
 		ctxt.pathConstraint = initialStateCondition;
-		CrossEvalState s1(probeEdge, 0);
-		CrossEvalState s2(storeEdge, 0);
+		CrossEvalState s1(probeMachine, probeEdge, 0);
+		CrossEvalState s2(storeMachine, storeEdge, 0);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
 		while (!TIMEOUT && !s1.finished && !s2.finished)
@@ -740,7 +757,7 @@ writeMachineSuitabilityConstraint(
 
 		LibVEX_maybe_gc(token);
 
-		std::vector<StateMachineSideEffectMemoryAccess *> memLog;
+		memLogT memLog;
 		std::map<Int, IRExpr *> writerBinders;
 		StateMachineEdge *writerEdge;
 		IRExpr *pathConstraint;
@@ -751,7 +768,8 @@ writeMachineSuitabilityConstraint(
 		thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
 		while (1) {
 			for (unsigned i = 0; !TIMEOUT && i < writerEdge->sideEffects.size(); i++) {
-				evalStateMachineSideEffect(writerEdge->sideEffects[i],
+				evalStateMachineSideEffect(writeMachine,
+							   writerEdge->sideEffects[i],
 							   chooser,
 							   oracle,
 							   writerBinders,
@@ -785,7 +803,7 @@ writeMachineSuitabilityConstraint(
 		readEvalCtxt.memLog = memLog;
 		readEvalCtxt.justPathConstraint = thisTimeConstraint;
 		bool crashes;
-		evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
+		evalStateMachine(readMachine, readMachine, &crashes, chooser, oracle, readEvalCtxt);
 		if (crashes) {
 			/* We get a crash if we evaluate the read
 			   machine after running the store machine to
@@ -842,7 +860,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		LibVEX_maybe_gc(token);
 
-		std::vector<StateMachineSideEffectMemoryAccess *> storesIssuedByWriter;
+		memLogT storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;
 		StateMachineEdge *writerEdge;
 		unsigned writeEdgeIdx;
@@ -926,7 +944,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			evalStateMachineSideEffect(se, chooser, oracle, writerBinders, storesIssuedByWriter, false, &pathConstraint, NULL);
+			evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerBinders, storesIssuedByWriter, false, &pathConstraint, NULL);
 			writeEdgeIdx++;
 
 			/* Advance to a store */
@@ -947,7 +965,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			readEvalCtxt.pathConstraint = pathConstraint;
 			readEvalCtxt.memLog = storesIssuedByWriter;
 			bool crashes;
-			evalStateMachine(readMachine, &crashes, chooser, oracle, readEvalCtxt);
+			evalStateMachine(readMachine, readMachine, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
 				if (!sectionStart) {
 					/* The previous attempt at
@@ -999,7 +1017,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 		LibVEX_maybe_gc(token);
 
-		std::vector<StateMachineSideEffectMemoryAccess *> storesIssuedByWriter;
+		memLogT storesIssuedByWriter;
 		std::map<Int, IRExpr *> writerBinders;
 		StateMachineEdge *writerEdge;
 		unsigned writeEdgeIdx;
@@ -1046,7 +1064,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			evalStateMachineSideEffect(se, chooser, oracle, writerBinders, storesIssuedByWriter, false, &pathConstraint, NULL);
+			evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerBinders, storesIssuedByWriter, false, &pathConstraint, NULL);
 			writeEdgeIdx++;
 
 			/* Only consider running the probe machine if
@@ -1078,7 +1096,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			readEvalCtxt.pathConstraint = pathConstraint;
 			readEvalCtxt.memLog = storesIssuedByWriter;
 			bool crashes;
-			evalStateMachine(probeMachine, &crashes, chooser, oracle, readEvalCtxt);
+			evalStateMachine(probeMachine, probeMachine, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
 				fprintf(_logfile, "Fix is insufficient, witness: ");
 				ppIRExpr(readEvalCtxt.pathConstraint, _logfile);
@@ -1119,8 +1137,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		ctxt.collectOrderingConstraints = true;
 		ctxt.pathConstraint = initialStateCondition;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		CrossEvalState s1(probeEdge, 0);
-		CrossEvalState s2(storeEdge, 0);
+		CrossEvalState s1(probeMachine, probeEdge, 0);
+		CrossEvalState s2(storeMachine, storeEdge, 0);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
 		while (!TIMEOUT && !s1.finished && !s2.finished)
