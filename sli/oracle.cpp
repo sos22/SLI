@@ -1550,7 +1550,9 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 		}
 	}
 
-	if (res != liveOnEntry(rip, rip == this->rip)) {
+	LivenessSet current = liveOnEntry(rip, rip == this->rip);
+	res |= current;
+	if (res != current) {
 		*changed = true;
 		static sqlite3_stmt *stmt;
 		int rc;
