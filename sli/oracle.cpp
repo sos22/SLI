@@ -2034,7 +2034,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			new_config |= config;
 			if (new_config != succ_config) {
 				changed->push_back(*it);
-				setAliasConfigOnEntryToInstruction(*it, succ_config);
+				setAliasConfigOnEntryToInstruction(*it, new_config);
 			}
 		} else {
 			changed->push_back(*it);
