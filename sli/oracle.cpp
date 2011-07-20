@@ -405,7 +405,9 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	/* If we get here then there are no other marks in the IRSB,
 	   so we need to look at the fall through addresses. */
 	if (irsb->jumpkind == Ijk_Call) {
-		directExits.push_back(extract_call_follower(irsb));
+		if (irsb->next->tag != Iex_Const ||
+		    irsb->next->Iex.Const.con->Ico.U64 != __STACK_CHK_FAILED)
+			directExits.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
 		if (irsb->next->tag == Iex_Const)
 			callees->set(std::pair<unsigned long, unsigned long>(rip, irsb->next->Iex.Const.con->Ico.U64),
@@ -1318,7 +1320,9 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
-					fallThrough.push_back(extract_call_follower(irsb));
+					if (irsb->next->tag != Iex_Const ||
+					    irsb->next->Iex.Const.con->Ico.U64 != __STACK_CHK_FAILED)
+						fallThrough.push_back(extract_call_follower(irsb));
 					if (irsb->next->tag == Iex_Const)
 						callees.push_back(irsb->next->Iex.Const.con->Ico.U64);
 					else
@@ -1504,7 +1508,9 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 
 	if (nr_statements == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
-			fallThroughRips.push_back(extract_call_follower(irsb));
+			if (irsb->next->tag != Iex_Const ||
+			    irsb->next->Iex.Const.con->Ico.U64 != __STACK_CHK_FAILED)
+				fallThroughRips.push_back(extract_call_follower(irsb));
 			if (irsb->next->tag == Iex_Const)
 				callees.push_back(irsb->next->Iex.Const.con->Ico.U64);
 			else

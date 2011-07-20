@@ -27,3 +27,7 @@
 #ifndef FREE_ADDRESS
 #define FREE_ADDRESS 0
 #endif
+
+#ifndef __STACK_CHK_FAILED
+#define __STACK_CHK_FAILED 0x4ffe80ul
+#endif
