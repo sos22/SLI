@@ -1729,6 +1729,9 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 			IRTemp tmp = stmt->Ist.Dirty.details->tmp;
 			IRType t = Ity_I1;
 			if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+				    "helper_load_128"))
+				t = Ity_I128;
+			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
 				    "helper_load_64"))
 				t = Ity_I64;
 			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
@@ -1766,6 +1769,29 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	if (!rsp && !rbp)
 		goto join_predecessors;
 	if (rsp && rbp) {
+		/* pop rbp is very common and not worth warning about */
+		if (rbp->tag == Iex_Load &&
+		    rbp->Iex.Load.addr->tag == Iex_Get &&
+		    rbp->Iex.Load.addr->Iex.Get.offset == OFFSET_amd64_RSP &&
+		    rsp->tag == Iex_Associative &&
+		    rsp->Iex.Associative.nr_arguments == 2 &&
+		    rsp->Iex.Associative.contents[0]->tag == Iex_Const &&
+		    rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64 == 8 &&
+		    rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
+		    rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RSP)
+			goto impossible_clean;
+		/* Likewise the leave instruction */
+		if (rbp->tag == Iex_Load &&
+		    rbp->Iex.Load.addr->tag == Iex_Get &&
+		    rbp->Iex.Load.addr->Iex.Get.offset == OFFSET_amd64_RBP &&
+		    rsp->tag == Iex_Associative &&
+		    rsp->Iex.Associative.nr_arguments == 2 &&
+		    rsp->Iex.Associative.contents[0]->tag == Iex_Const &&
+		    rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64 == 8 &&
+		    rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
+		    rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RBP)
+			goto impossible_clean;
+
 		printf("RSP and RBP updated together?\n");
 		goto impossible;
 	}
@@ -1833,17 +1859,17 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 					delta_offset = -rbp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
 					goto join_predecessors;
 				} else if (base->Iex.Get.offset == OFFSET_amd64_RSP) {
-					offset = -rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+					offset = -rbp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
 					state = RbpToRspOffsetStateValid;
 					goto done;
 				}
 			}
 		}
 
-		printf("Can't handle rewrite of RBP to ");
-		ppIRExpr(rbp, stdout);
-		printf("\n");
-		goto impossible;
+		/* If the compiler's done base pointer elimination
+		   then RBP can contain almost anything and it's not
+		   worth trying to warn about it. */
+		goto impossible_clean;
 	}
 
 join_predecessors:
@@ -1869,11 +1895,8 @@ join_predecessors:
 				continue;
 			}
 			assert(state == RbpToRspOffsetStateValid);
-			if (offset != pred_offset) {
-				printf("Predecessor RBP->RSP inconsistent: %ld vs %ld\n",
-				       offset, pred_offset);
-				goto impossible;
-			}
+			if (offset != pred_offset)
+				goto impossible_clean;
 		}
 	}
 	if (state == RbpToRspOffsetStateUnknown) {
@@ -1897,6 +1920,8 @@ done:
 impossible:
 	printf("Cannot do stack offset calculations in first instruction of: ");
 	ppIRSB(irsb, stdout);
+
+	dbg_break("badness");
 
 impossible_clean:
 	state = RbpToRspOffsetStateImpossible;
