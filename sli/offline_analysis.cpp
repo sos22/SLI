@@ -1748,17 +1748,17 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 
 	/* Initially, everything is bisimilar to everything else. */
 	for (std::set<StateMachine *>::const_iterator it = allStates->begin();
-	     it != allStates->end();
+	     !TIMEOUT && it != allStates->end();
 	     it++)
 		for (std::set<StateMachine *>::const_iterator it2 = allStates->begin();
-		     it2 != allStates->end();
+		     !TIMEOUT && it2 != allStates->end();
 		     it2++)
 			bisimilarStates.insert(st_pair_t(*it, *it2));
 	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
-	     it != allEdges.end();
+	     !TIMEOUT && it != allEdges.end();
 	     it++)
 		for (std::set<StateMachineEdge *>::iterator it2 = allEdges.begin();
-		     it2 != allEdges.end();
+		     !TIMEOUT && it2 != allEdges.end();
 		     it2++)
 			bisimilarEdges.insert(st_edge_pair_t(*it, *it2));
 
