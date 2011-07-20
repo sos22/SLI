@@ -1,3 +1,7 @@
 defvars() {
     echo libvex_sources+= ${input_base}/*.cpp
 }
+
+rules() {
+    echo ${input_base}/dbgbreak.o: OPTIMIZE_FLAGS=-O0
+}

@@ -1,6 +1,7 @@
 /* Debug break points.  These must be compiled with optimisations
  * off. */
-#include "sli.h"
+#include <stdarg.h>
+#include <stdio.h>
 
 static void
 dbg_brk(const char *msg)

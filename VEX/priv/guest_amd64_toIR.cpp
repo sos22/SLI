@@ -229,6 +229,8 @@ static Addr64 guest_RIP_next_assumed;
 static Bool   guest_RIP_next_mustcheck;
 
 
+void dbg_break(const char *fmt, ...);
+
 /*------------------------------------------------------------*/
 /*--- Helpers for constructing IR.                         ---*/
 /*------------------------------------------------------------*/
@@ -16121,6 +16123,7 @@ DisResult disInstr_AMD64_WRK (
               (Int)getUChar(guest_code, delta_start+5),
 	      delta_start,
 	      guest_code.rip);
+   dbg_break("it's all gone wrong\n");
 
    /* Tell the dispatcher that this insn cannot be decoded, and so has
       not been executed, and (is currently) the next to be executed.

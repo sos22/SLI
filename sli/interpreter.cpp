@@ -1436,6 +1436,9 @@ static VexPtr<WeakRef<DecodeCache, &ir_heap>, &ir_heap> decode_cache;
 IRSB *
 AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
 {
+	if (rip == 0x7c9266)
+		dbg_break("Here we are\n");
+
 	if (rip == ASSERT_FAILED_ADDRESS)
 		throw ForceFailureException(rip);
 
