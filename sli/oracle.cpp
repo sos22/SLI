@@ -1672,7 +1672,12 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	}
 
 	/* Try to figure out what this instruction actually does. */
-	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRSB *irsb;
+	try {
+		irsb = as->getIRSBForAddress(-1, rip);
+	} catch (BadMemoryException e) {
+		return;
+	}
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
