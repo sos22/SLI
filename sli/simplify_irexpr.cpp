@@ -1523,6 +1523,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				src->Iex.Associative.op)
 				haveNestedAssocs = true;
 		if (haveNestedAssocs) {
+			__set_profiling(pull_up_nested_associatives);
 			IRExpr *e = IRExpr_Associative(src->Iex.Associative.op, NULL);
 			for (int x = 0; x < src->Iex.Associative.nr_arguments; x++) {
 				IRExpr *arg = src->Iex.Associative.contents[x];
@@ -1540,14 +1541,17 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 		/* Sort IRExprs so that ``related'' expressions are likely to
 		 * be close together. */
-		if (operationCommutes(src->Iex.Associative.op))
+		if (operationCommutes(src->Iex.Associative.op)) {
+			__set_profiling(sort_associative_arguments);
 			std::sort(src->Iex.Associative.contents,
 				  src->Iex.Associative.contents + src->Iex.Associative.nr_arguments,
 				  sortIRExprs);
+		}
 		/* Fold together constants.  For commutative
 		   operations they'll all be at the beginning, but
 		   don't assume that associativity implies
 		   commutativity. */
+		{ __set_profiling(associative_constant_fold);
 		for (int x = 0; x + 1 < src->Iex.Associative.nr_arguments; x++) {
 			IRExpr *a, *b;
 			a = src->Iex.Associative.contents[x];
@@ -1617,10 +1621,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					x--;
 					*done_something = true;
 				}
+			} else if (!operationCommutes(src->Iex.Associative.op)) {
+				break;
 			}
+		}
 		}
 		/* Some special cases for And1: 1 & x -> x, 0 & x -> 0 */
 		if (src->Iex.Associative.op == Iop_And1) {
+			__set_profiling(optimise_assoc_and1);
 			/* If there are any constants, they'll be at the start. */
 			while (src->Iex.Associative.nr_arguments > 1 &&
 			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
@@ -1635,6 +1643,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		}
 		/* Likewise for Or1 */
 		if (src->Iex.Associative.op == Iop_Or1) {
+			__set_profiling(optimise_assoc_or1);
 			while (src->Iex.Associative.nr_arguments > 1 &&
 			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
 				IRConst *c = src->Iex.Associative.contents[0]->Iex.Const.con;
@@ -1649,6 +1658,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 		/* x & x -> x, for any and-like operator */
 		if (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) {
+			__set_profiling(optimise_assoc_x_and_x);
 			for (int it1 = 0;
 			     it1 < src->Iex.Associative.nr_arguments;
 			     it1++) {
@@ -1669,6 +1679,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 		/* a <-< b || b <-< a is definitely true. */
 		if (src->Iex.Associative.op == Iop_Or1) {
+			__set_profiling(optimise_assoc_happens_before);
 			for (int i1 = 0; i1 < src->Iex.Associative.nr_arguments; i1++) {
 				IRExpr *a1 = src->Iex.Associative.contents[i1];
 				if (a1->tag != Iex_HappensBefore)
@@ -1690,6 +1701,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		 * both x and -x from the list. */
 		/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
 		if (opt.xPlusMinusX) {
+			__set_profiling(optimise_assoc_xplusminusx);
 			bool plus_like;
 			bool and_like;
 			bool xor_like;
@@ -1737,9 +1749,27 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						}
 
 						if (purge) {
+							*done_something = true;
+							if (and_like) {
+								/* x & ~x -> 0 and eliminates the entire expression. */
+								switch (src->Iex.Associative.op) {
+								case Iop_And8:
+									return IRExpr_Const(IRConst_U8(0));
+								case Iop_And16:
+									return IRExpr_Const(IRConst_U16(0));
+								case Iop_And32:
+									return IRExpr_Const(IRConst_U32(0));
+								case Iop_And64:
+									return IRExpr_Const(IRConst_U64(0));
+								case Iop_And1:
+									return IRExpr_Const(IRConst_U1(0));
+								default:
+									abort();
+								}
+							}
+
 							/* Careful: do the largest index first so that the
 							   other index remains valid. */
-							*done_something = true;
 							if (it1 < it2) {
 								purgeAssocArgument(src, it2);
 								src->Iex.Associative.contents[it1] =
