@@ -680,17 +680,16 @@ int CnfVariable::nextId = 450;
 
 class CnfGrouping : public CnfExpression {
 protected:
-	virtual char op() const = 0;
-	char *mkName() const {
+	char *mkName(char op) const {
 		char *acc = NULL;
 		char *acc2;
 		if (args.size() == 0)
-			return my_asprintf("(%c)", op());
+			return my_asprintf("(%c)", op);
 		for (unsigned x = 0; x < args.size(); x++) {
 			if (x == 0)
 				acc2 = my_asprintf("(%s", args[x]->name());
 			else
-				acc2 = my_asprintf("%s %c %s", acc, op(), args[x]->name());
+				acc2 = my_asprintf("%s %c %s", acc, op, args[x]->name());
 			free(acc);
 			acc = acc2;
 		}
@@ -717,7 +716,7 @@ public:
 
 class CnfOr : public CnfGrouping {
 protected:
-	char op() const { return '|'; }
+	char *mkName() const { return CnfGrouping::mkName('|'); }
 public:
 	CnfExpression *CNF();
 	CnfExpression *invert();
@@ -762,7 +761,7 @@ class CnfAnd : public CnfGrouping {
 		{}
 	};
 protected:
-	char op() const { return '&'; }
+	char *mkName() const { return CnfGrouping::mkName('&'); }
 public:
 	CnfExpression *CNF();
 	CnfExpression *invert();
@@ -799,7 +798,12 @@ __comparator1(CnfExpression *_a, CnfExpression *_b)
 	CnfVariable *a = dynamic_cast<CnfVariable *>(_a);
 	CnfVariable *b = dynamic_cast<CnfVariable *>(_b);
 	assert(a && b);
-	return a->getId() < b->getId();
+	if (a->getId() < b->getId())
+		return true;
+	else if (a->getId() == b->getId())
+		return a->inverted < b->inverted;
+	else
+		return false;
 }
 
 void
@@ -1147,6 +1151,7 @@ convertIRExprToCNF(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &m)
 			r2->addChild(convertIRExprToCNF(inp->Iex.Associative.contents[x], m));
 		r = r2;
 	}
+	m[inp] = r;
 	return r;
 }
 
