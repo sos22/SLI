@@ -1155,11 +1155,59 @@ convertIRExprToCNF(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &m)
 	return r;
 }
 
-static IRExpr *
-internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
+struct internIRExprTable {
+	static const int nr_entries = 17;
+	std::map<IRExpr *, IRExpr *> lookups[nr_entries];
+};
+
+static unsigned
+shallow_hash(const IRExpr *e)
 {
-	if (lookupTable.count(e))
-		return lookupTable[e];
+	switch (e->tag) {
+	case Iex_Const:
+		return 100242167;
+	case Iex_Binder:
+		return e->Iex.Binder.binder * 100000393 + 100005469;
+	case Iex_Get:
+		return e->Iex.Get.offset * 100001029 + 100011943;
+	case Iex_GetI:
+		return 100013213;
+	case Iex_RdTmp:
+		return e->Iex.RdTmp.tmp * 100017493 + 100025479;
+	case Iex_Qop:
+		return e->Iex.Qop.op * 100034159 + 100043347;
+	case Iex_Triop:
+		return e->Iex.Triop.op * 100046753 + 100050683;
+	case Iex_Binop:
+		return e->Iex.Binop.op * 100057339 + 100067581;
+	case Iex_Unop:
+		return e->Iex.Unop.op * 100080689 + 100102913;
+	case Iex_Load:
+		return 100110343;
+	case Iex_CCall:
+		return 100125853;
+	case Iex_Mux0X:
+		return 100146091;
+	case Iex_Associative:
+		return e->Iex.Associative.op * 100161727 + e->Iex.Associative.nr_arguments * 100268423 + 100176877;
+	case Iex_FreeVariable:
+		return e->Iex.FreeVariable.key * 100190957;
+	case Iex_ClientCallFailed:
+		return 100213697;
+	case Iex_ClientCall:
+		return 100256371;
+	case Iex_HappensBefore:
+		return 100234427;
+	}
+	abort();
+}
+
+static IRExpr *
+internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
+{
+	unsigned h = shallow_hash(e) % internIRExprTable::nr_entries;
+	if (lookupTable.lookups[h].count(e))
+		return lookupTable.lookups[h][e];
 	switch (e->tag) {
 	case Iex_Binder:
 	case Iex_Get:
@@ -1208,8 +1256,8 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 			internIRExpr(e->Iex.ClientCallFailed.target, lookupTable);
 		break;
 	}
-	for (std::map<IRExpr *, IRExpr *>::iterator it = lookupTable.begin();
-	     it != lookupTable.end();
+	for (std::map<IRExpr *, IRExpr *>::iterator it = lookupTable.lookups[h].begin();
+	     it != lookupTable.lookups[h].end();
 	     it++) {
 		IRExpr *other = it->first;
 		if (other->tag != e->tag)
@@ -1304,11 +1352,11 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 		e->optimisationsApplied |= it->second->optimisationsApplied;
 		it->second->optimisationsApplied |= e->optimisationsApplied;
 
-		lookupTable[e] = it->second;
+		lookupTable.lookups[h][e] = it->second;
 		return it->second;
 	}
 	/* No duplicates of this IRExpr found so far */
-	lookupTable[e] = e;
+	lookupTable.lookups[h][e] = e;
 	return e;
 }
 
@@ -1316,7 +1364,7 @@ static IRExpr *
 internIRExpr(IRExpr *x)
 {
 	__set_profiling(internIRExpr);
-	std::map<IRExpr *, IRExpr *> t;
+	internIRExprTable t;
 	return internIRExpr(x, t);
 }
 
