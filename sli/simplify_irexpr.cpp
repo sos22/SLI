@@ -1328,7 +1328,7 @@ internIRExpr(IRExpr *x)
    back to the standard IRExpr form and return the result.  Otherwise,
    just return @inp. */
 static IRExpr *
-simplifyIRExprAsBoolean(IRExpr *inp)
+simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
 {
 	__set_profiling(simplifyIRExprAsBoolean);
 	std::map<IRExpr *, CnfExpression *> exprsToVars;
@@ -1381,9 +1381,10 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 		__set_profiling(cnf_as_irexpr);
 		r = root->asIRExpr(varsToExprs, t);
 	}
-	if (exprComplexity(r) < exprComplexity(inp))
+	if (exprComplexity(r) < exprComplexity(inp)) {
+		*done_something = true;
 		return r;
-	else
+	} else
 		return inp;
 }
 
@@ -1512,6 +1513,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 	}
 
 	if (src->tag == Iex_Associative) {
+		__set_profiling(optimise_associative);
+
 		/* Drag up nested associatives. */
 		bool haveNestedAssocs = false;
 		for (int x = 0; !haveNestedAssocs && x < src->Iex.Associative.nr_arguments; x++)
@@ -1798,6 +1801,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 	/* Now use some special rules to simplify a few classes of binops and unops. */
 	if (src->tag == Iex_Unop) {
+		__set_profiling(optimise_unop);
 		if (src->Iex.Unop.op == Iop_64to1 &&
 		    ((src->Iex.Unop.arg->tag == Iex_Associative &&
 		      (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
@@ -1934,6 +1938,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			}
 		}
 	} else if (src->tag == Iex_Binop) {
+		__set_profiling(optimise_binop);
 		IRExpr *l = src->Iex.Binop.arg1;
 		IRExpr *r = src->Iex.Binop.arg2;
 		if (src->Iex.Binop.op == Iop_Xor1) {
@@ -2194,7 +2199,7 @@ optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
 	bool ign;
 	ign = false;
 	e = optimiseIRExprFP(e, opt, &ign);
-	e = simplifyIRExprAsBoolean(e);
+	e = simplifyIRExprAsBoolean(e, &ign);
 	e = optimiseIRExprFP(e, opt, &ign);
 	return e;
 }
@@ -2210,8 +2215,7 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 		if (TIMEOUT)
 			return a;
 		a = optimiseIRExpr(a, opt, &done_something);
-		a = simplifyIRExprAsBoolean(a);
-		a = optimiseIRExpr(a, opt, &done_something);
+		a = simplifyIRExprAsBoolean(a, &done_something);
 	} while (done_something);
 
 	return a;

@@ -25,6 +25,7 @@ public:
 	struct _VexAllocType *headType;
 	struct wr_core *headVisitedWeakRef;
 	unsigned long heap_used;
+	bool redirection_tags_set;
 };
 
 extern Heap main_heap;
