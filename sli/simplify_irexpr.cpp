@@ -1730,8 +1730,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								purge = false;
 							}
 							if (purge)
-								purge = definitelyEqual(l, r->Iex.Unop.arg,
-											opt.disablexPlusMinusX());
+								purge = l == r->Iex.Unop.arg;
 						} else if (and_like) {
 							if (r->tag == Iex_Unop)
 								purge = (r->Iex.Unop.op >= Iop_Not8 &&
@@ -1740,12 +1739,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 							else
 								purge = false;
 							if (purge)
-								purge = definitelyEqual(l, r->Iex.Unop.arg,
-											opt.disablexPlusMinusX());
+								purge = l == r->Iex.Unop.arg;
 						} else {
 							assert(xor_like);
-							purge = definitelyEqual(l, r,
-										opt.disablexPlusMinusX());
+							purge = l == r;
 						}
 
 						if (purge) {
