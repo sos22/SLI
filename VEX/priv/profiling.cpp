@@ -31,10 +31,10 @@ void __profiling_dump_class::dump_profile()
 	std::sort(sites.begin(), sites.end());
 	for (unsigned x = 0; x < sites.size(); x++) {
 		cursor = sites[x].second;
-		printf("%s: %ld invocations, each of %f ticks; %f of total runtime\n",
+		printf("%s: %ld invocations, each of %f ticks; %f%% of total runtime\n",
 		       cursor->name, cursor->nr_sites,
 		       cursor->accumulated_ticks / (double)cursor->nr_sites,
-		       (double)cursor->accumulated_ticks / total_time); 
+		       cursor->accumulated_ticks * 100.0 / total_time); 
 	}
 }
 

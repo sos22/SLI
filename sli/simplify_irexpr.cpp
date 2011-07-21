@@ -648,53 +648,35 @@ public:
 	NAMED_CLASS
 };
 
-class CnfAtom : public CnfExpression {
-public:
-	virtual int getId() = 0;
-};
-
-class CnfVariable : public CnfAtom {
+class CnfVariable : public CnfExpression {
 	static int nextId;
 protected:
-	char *mkName() const { return my_asprintf("v%d", id); }
+	char *mkName() const {
+		if (inverted)
+			return my_asprintf("~(v%d)", id);
+		else
+			return my_asprintf("v%d", id);
+	}
 public:
 	CnfExpression *CNF() { return this; }
 	CnfVariable() : id(nextId++) {}
+	CnfVariable(int _id, bool _inverted) : id(_id), inverted(_inverted) {}
 	void visit(HeapVisitor &hv) {}
-	CnfExpression *invert();
+	CnfExpression *invert() { return new CnfVariable(id, !inverted); }
 	int getId() { return id; }
 	IRExpr *asIRExpr(std::map<int, IRExpr *> &m,
 			 IRExprTransformer &t)
 	{
-		bool ign;
-		return t.transformIRExpr(m[id], &ign);
+		IRExpr *e = t.transformIRExpr(m[id]);
+		if (inverted)
+			e = IRExpr_Unop(Iop_Not1, e);
+		return e;
 	}
 	int complexity() { return 0; }
 	int id;
+	bool inverted;
 };
 int CnfVariable::nextId = 450;
-
-class CnfNot : public CnfAtom {
-protected:
-	char *mkName() const { return my_asprintf("(~%s)", arg->name()); }
-public:
-	CnfNot(CnfExpression *a) : arg(a) {}
-	void visit(HeapVisitor &hv) { hv(arg); }
-	CnfExpression *invert() { return arg; }
-	CnfExpression *CNF();
-	int getId() {
-		CnfAtom *a = dynamic_cast<CnfAtom *>(arg);
-		assert(a);
-		return a->getId();
-	}
-	IRExpr *asIRExpr(std::map<int, IRExpr *> &m,
-			 IRExprTransformer &t)
-	{
-		return IRExpr_Unop(Iop_Not1, arg->asIRExpr(m, t));
-	}
-	int complexity() { return arg->complexity() + 1; }
-	CnfExpression *arg;
-};
 
 class CnfGrouping : public CnfExpression {
 protected:
@@ -741,9 +723,9 @@ public:
 	CnfExpression *invert();
 	void sort();
 	bool optimise(void);
-	CnfAtom *getArg(unsigned x) {
+	CnfVariable *getArg(unsigned x) {
 		assert(x < args.size());
-		CnfAtom *r = dynamic_cast<CnfAtom *>(args[x]);
+		CnfVariable *r = dynamic_cast<CnfVariable *>(args[x]);
 		assert(r);
 		return r;
 	}
@@ -811,25 +793,11 @@ public:
 	}
 };
 
-CnfExpression *
-CnfVariable::invert(void)
-{
-	return new CnfNot(this);
-}
-
-CnfExpression *
-CnfNot::CNF()
-{
-	if (dynamic_cast<CnfVariable *>(arg))
-		return this;
-	return arg->invert()->CNF();
-}
-
 static bool
 __comparator1(CnfExpression *_a, CnfExpression *_b)
 {
-	CnfAtom *a = dynamic_cast<CnfAtom *>(_a);
-	CnfAtom *b = dynamic_cast<CnfAtom *>(_b);
+	CnfVariable *a = dynamic_cast<CnfVariable *>(_a);
+	CnfVariable *b = dynamic_cast<CnfVariable *>(_b);
 	assert(a && b);
 	return a->getId() < b->getId();
 }
@@ -878,8 +846,7 @@ CnfOr::CNF()
 	for (unsigned x = 0; x < args.size(); x++)
 		args[x] = args[x]->CNF();
 	for (unsigned x = 0; x < args.size(); x++) {
-		if (dynamic_cast<CnfNot *>(args[x]) ||
-		    dynamic_cast<CnfVariable *>(args[x]))
+		if (dynamic_cast<CnfVariable *>(args[x]))
 			continue;
 		if (CnfOr *cor = dynamic_cast<CnfOr *>(args[x])) {
 			/* Flatten nested ORs. */
@@ -933,18 +900,15 @@ CnfAnd::CNF()
 	for (unsigned x = 0; x < args.size(); x++)
 		args[x] = args[x]->CNF();
 	for (unsigned x = 0; x < args.size(); x++) {
-		if (dynamic_cast<CnfNot *>(args[x]) ||
-		    dynamic_cast<CnfVariable *>(args[x])) {
+		if (dynamic_cast<CnfVariable *>(args[x])) {
 			CnfGrouping *n = new CnfOr();
 			n->addChild(args[x]);
 			args[x] = n;
 			continue;
 		}
 		if (CnfAnd *car = dynamic_cast<CnfAnd *>(args[x])) {
-			for (unsigned y = 0; y < car->args.size(); y++) {
-				args.push_back(car->args[y]);
-			}
 			args.erase(args.begin() + x);
+			args.insert(args.end(), car->args.begin(), car->args.end());
 			x--;
 		}
 	}
@@ -964,17 +928,17 @@ CnfOr::invert()
 bool
 CnfOr::optimise()
 {
-	for (unsigned i = 0; i < args.size(); i++) {
-		for (unsigned j = i + 1; j < args.size(); ) {
-			if (getArg(i)->getId() == getArg(j)->getId()) {
-				if (!!dynamic_cast<CnfNot *>(getArg(i)) ==
-				    !!dynamic_cast<CnfNot *>(getArg(j))) {
-					args.erase(args.begin() + j);
-				} else {
-					return true;
-				}
+	for (unsigned i = 0; i + 1 < args.size(); i++) {
+		/* Eliminate any duplicates, and if we have x | ~x
+		   eliminate the whole clause. */
+		/* This relies on the arguments having been sorted
+		   already so that any duplicates will be next to each
+		   other. */
+		while (i + 1 < args.size() && getArg(i)->getId() == getArg(i+1)->getId()) {
+			if (getArg(i)->inverted == getArg(i + 1)->inverted) {
+				args.erase(args.begin() + i + 1);
 			} else {
-				j++;
+				return true;
 			}
 		}
 	}
@@ -1031,8 +995,7 @@ CnfAnd::optimise()
 					if (argi->getArg(k)->getId() !=
 					    argj->getArg(k)->getId())
 						haveDisallowedDifference = true;
-					if (!!dynamic_cast<CnfNot *>(argi->getArg(k)) !=
-					    !!dynamic_cast<CnfNot *>(argj->getArg(k))) {
+					if (argi->getArg(k)->inverted != argj->getArg(k)->inverted) {
 						if (haveDifference)
 							haveDisallowedDifference = true;
 						else
@@ -1055,8 +1018,7 @@ CnfAnd::optimise()
 						assert(k < argi->args.size());
 						assert(argi->getArg(k)->getId() ==
 						       argj->getArg(k)->getId());
-						if (!!dynamic_cast<CnfNot *>(argi->getArg(k)) !=
-						    !!dynamic_cast<CnfNot *>(argj->getArg(k))) {
+						if (argi->getArg(k)->inverted != argj->getArg(k)->inverted) {
 							/* This is the one */
 							argi->args.erase(argi->args.begin() + k);
 							argi->clearName();
@@ -1082,10 +1044,8 @@ CnfAnd::optimise()
 				for (unsigned k = 0; iSubsetJ && k < argi->args.size(); k++) {
 					bool present = false;
 					for (unsigned m = 0; !present && m < argj->args.size(); m++) {
-						if (argi->getArg(k)->getId() ==
-						    argj->getArg(m)->getId() &&
-						    !!dynamic_cast<CnfNot *>(argi->getArg(k)) ==
-						    !!dynamic_cast<CnfNot *>(argj->getArg(m)))
+						if (argi->getArg(k)->getId() == argj->getArg(m)->getId() &&
+						    argi->getArg(k)->inverted == argj->getArg(m)->inverted)
 							present = true;
 					}
 					if (!present)
@@ -1110,13 +1070,13 @@ CnfAnd::optimise()
 			CnfOr *argi = getArg(i);
 			if (argi->args.size() != 1)
 				continue;
-			CnfAtom *argiA = argi->getArg(0);
+			CnfVariable *argiA = argi->getArg(0);
 			for (unsigned j = 0; j < args.size(); j++) {
 				if (j == i)
 					continue;
 				CnfOr *argj = getArg(j);
 				for (unsigned k = 0; k < argj->args.size(); k++) {
-					CnfAtom *argjA = argj->getArg(k);
+					CnfVariable *argjA = argj->getArg(k);
 					if (argjA->getId() != argiA->getId())
 						continue;
 					/* Normally, the second rule
@@ -1129,8 +1089,7 @@ CnfAnd::optimise()
 					   it wouldn't before.  Just
 					   leave it until the next
 					   iteration. */
-					if (!!dynamic_cast<CnfNot *>(argjA) ==
-					    !!dynamic_cast<CnfNot *>(argiA)) {
+					if (argjA->inverted == argiA->inverted) {
 						continue;
 					}
 					progress = true;
@@ -1174,7 +1133,7 @@ convertIRExprToCNF(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &m)
 		return m[inp];
 	if (inp->tag == Iex_Unop) {
 		assert(inp->Iex.Unop.op == Iop_Not1);
-		r = new CnfNot(convertIRExprToCNF(inp->Iex.Unop.arg, m));
+		r = convertIRExprToCNF(inp->Iex.Unop.arg, m)->invert();
 	} else {
 		CnfGrouping *r2;
 		assert(inp->tag == Iex_Associative);
@@ -1382,7 +1341,10 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 
 	inp = internIRExpr(inp);
 
-	buildVarMap(inp, exprsToVars, varsToExprs);
+	{
+		__set_profiling(buildVarMap);
+		buildVarMap(inp, exprsToVars, varsToExprs);
+	}
 	{
 		__set_profiling(convertIRExprToCNF);
 		root = convertIRExprToCNF(inp, exprsToVars);
@@ -1393,21 +1355,27 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 	if (!a) {
 		CnfOr *o = dynamic_cast<CnfOr *>(root);
 		if (!o) {
-			assert(dynamic_cast<CnfNot *>(root) ||
-			       dynamic_cast<CnfVariable *>(root));
+			assert(dynamic_cast<CnfVariable *>(root));
 			o = new CnfOr();
 			o->addChild(root);
 		}
 		a = new CnfAnd();
 		a->addChild(o);
 	}
-	a->sort();
+	{
+		__set_profiling(sort_cnf);
+		a->sort();
+	}
 	{
 		__set_profiling(optimise_cnf);
 		a->optimise();
 	}
 	IRExprTransformer t;
-	IRExpr *r = root->asIRExpr(varsToExprs, t);
+	IRExpr *r;
+	{
+		__set_profiling(cnf_as_irexpr);
+		r = root->asIRExpr(varsToExprs, t);
+	}
 	if (exprComplexity(r) < exprComplexity(inp))
 		return r;
 	else
