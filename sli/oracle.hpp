@@ -261,6 +261,7 @@ private:
 	}
 	unsigned long memoryAliasingFilter[nr_memory_filter_words];
 	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
+	std::set<std::pair<unsigned long, unsigned long> > aliasingTable;
 
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);

@@ -266,16 +266,14 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 		nr_bloom_hits2++;
 		return false;
 	}
-	for (std::vector<tag_entry>::iterator it = tag_table.begin();
-	     it != tag_table.end();
-	     it++)
-		if (it->loads.count(smsel->rip) &&
-		    it->stores.count(smses->rip)) {
-			nr_trues++;
-			return true;
-		}
-	nr_falses++;
-	return false;
+
+	if (aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel->rip, smses->rip))) {
+		nr_trues++;
+		return true;
+	} else {
+		nr_falses++;
+		return false;
+	}
 }
 
 bool
@@ -292,13 +290,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel1,
 	} else if (loadIsThreadLocal(smsel2))
 		return false;
 
-	for (std::vector<tag_entry>::iterator it = tag_table.begin();
-	     it != tag_table.end();
-	     it++)
-		if (it->loads.count(smsel1->rip) &&
-		    it->loads.count(smsel2->rip))
-			return true;
-	return false;
+	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel1->rip, smsel2->rip));
 }
 
 bool
@@ -311,13 +303,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 		else
 			return false;
 	}
-	for (std::vector<tag_entry>::iterator it = tag_table.begin();
-	     it != tag_table.end();
-	     it++)
-		if (it->loads.count(smses1->rip) &&
-		    it->stores.count(smses2->rip))
-			return true;
-	return false;
+	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smses1->rip, smses2->rip));
 }
 
 template <typename t>
@@ -587,13 +573,42 @@ Oracle::loadTagTable(const char *path)
 		for (std::set<unsigned long>::iterator it1 = t.stores.begin();
 		     it1 != t.stores.end();
 		     it1++) {
+			if (*it1 & (1ul << 63))
+				continue;
+			for (std::set<unsigned long>::iterator it2 = t.stores.begin();
+			     it2 != t.stores.end();
+			     it2++) {
+				if (!(*it2 & (1ul << 63)))
+					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+			}
 			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
 			     it2 != t.loads.end();
 			     it2++) {
-				unsigned long h = hashRipPair(*it1, *it2);
-				memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
-				h = hashRipPair(*it1 * 23, *it2 * 17);
-				memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
+				if (!(*it2 & (1ul << 63))) {
+					unsigned long h = hashRipPair(*it1, *it2);
+					memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
+					h = hashRipPair(*it1 * 23, *it2 * 17);
+					memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
+					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+				}
+			}
+		}
+		for (std::set<unsigned long>::iterator it1 = t.loads.begin();
+		     it1 != t.loads.end();
+		     it1++) {
+			if (*it1 & (1ul << 63))
+				continue;
+			for (std::set<unsigned long>::iterator it2 = t.stores.begin();
+			     it2 != t.stores.end();
+			     it2++) {
+				if (!(*it2 & (1ul << 63)))
+					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+			}
+			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
+			     it2 != t.loads.end();
+			     it2++) {
+				if (!(*it2 & (1ul << 63)))
+					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
 			}
 		}
 		tag_table.push_back(t);
