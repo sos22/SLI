@@ -11,6 +11,8 @@
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
 
+#include "libvex_prof.hpp"
+
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)
 {
@@ -171,6 +173,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 bool
 Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 {
+	__set_profiling(storeIsThreadLocal);
 	static std::set<unsigned long> threadLocal;
 	static std::set<unsigned long> notThreadLocal;
 	if (threadLocal.count(s->rip))
@@ -192,6 +195,7 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 bool
 Oracle::loadIsThreadLocal(StateMachineSideEffectLoad *s)
 {
+	__set_profiling(loadIsThreadLocal);
 	static std::set<unsigned long> threadLocal;
 	static std::set<unsigned long> notThreadLocal;
 	if (threadLocal.count(s->rip))
@@ -237,6 +241,7 @@ bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 				 StateMachineSideEffectStore *smses)
 {
+	__set_profiling(might_alias_load_store);
 	static unsigned nr_queries;
 	static unsigned nr_bloom_hits;
 	static unsigned nr_bloom_hits2;
@@ -280,6 +285,7 @@ bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel1,
 				 StateMachineSideEffectLoad *smsel2)
 {
+	__set_profiling(memory_accesses_might_alias_load_load);
 	if (loadIsThreadLocal(smsel1)) {
 		if (!loadIsThreadLocal(smsel2))
 			return false;
@@ -297,6 +303,7 @@ bool
 Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 				 StateMachineSideEffectStore *smses2)
 {
+	__set_profiling(memory_accesses_might_alias_store_store);
 	if (storeIsThreadLocal(smses1) && storeIsThreadLocal(smses2)) {
 		if (!definitelyNotEqual(smses2->addr, smses1->addr, AllowableOptimisations::defaultOptimisations))
 			return true;
@@ -370,6 +377,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 			      std::vector<unsigned long> &directExits,
 			      gc_pair_ulong_set_t *callees)
 {
+	__set_profiling(findInstrSuccessorsAndCallees);
 	IRSB *irsb;
 	try {
 		irsb = as->getIRSBForAddress(-1, rip);
@@ -434,6 +442,7 @@ void
 Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 		    std::set<InstructionSet> &outputClusters)
 {
+	__set_profiling(clusterRips);
 	union_find<unsigned long> results;
 #if 0
 	std::set<unsigned long> explored;
@@ -545,6 +554,7 @@ struct tag_hdr {
 void
 Oracle::loadTagTable(const char *path)
 {
+	__set_profiling(loadTagTable);
 
 	FILE *f = fopen(path, "r");
 	if (!f)
@@ -946,6 +956,8 @@ make_unique(std::vector<t> &v)
 void
 Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token)
 {
+	__set_profiling(oracle_load_call_graph);
+
 	if (ths->callGraphMapping.init(path) < 0)
 		err(1, "opening %s", path);
 	std::vector<unsigned long> roots;
@@ -2468,6 +2480,7 @@ Oracle::Function::exists() const
 unsigned long
 Oracle::functionHeadForInstruction(unsigned long rip)
 {
+	__set_profiling(functionHeadForInstruction);
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT functionHead FROM instructionAttributes WHERE rip = ?");
@@ -2505,6 +2518,7 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 		  AddressSpace *as,
 		  unsigned minimum_size)
 {
+	__set_profiling(oracle_dominator);
 	assert(!instrs.empty());
 
 	/* For now, only handle the case where everything is in the

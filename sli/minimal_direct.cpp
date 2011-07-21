@@ -10,6 +10,7 @@
 #include "oracle.hpp"
 #include "crash_reason.hpp"
 #include "inferred_information.hpp"
+#include "libvex_prof.hpp"
 
 class DumpFix : public FixConsumer {
 public:
@@ -30,6 +31,8 @@ void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 		    GarbageCollectionToken token)
 {
+	__set_profiling(dumpfix);
+
 	printCrashSummary(summary, _logfile);
 	findHappensBeforeRelations(summary, oracle, token);
 }
@@ -69,6 +72,8 @@ consider_rip(unsigned long my_rip,
 	     FILE *timings,
 	     GarbageCollectionToken token)
 {
+	__set_profiling(consider_rip);
+
 	LibVEX_maybe_gc(token);
 
 	fprintf(_logfile, "Considering %lx...\n", my_rip);
@@ -143,6 +148,8 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
+	__set_profiling(root);
+
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle;
@@ -167,9 +174,11 @@ main(int argc, char *argv[])
 		double low_end_time;
 		double high_end_time;
 		bool first = true;
+		int cntr = 0;
 		for (std::vector<unsigned long>::iterator it = targets.begin();
-		     it != targets.end();
+		     cntr < 50 && it != targets.end();
 		     it++) {
+			cntr++;
 			_logfile = fopenf("w", "logs/%lx", *it);
 			if (!_logfile) err(1, "opening logs/%lx", *it);
 			printf("Considering %lx\n", *it);

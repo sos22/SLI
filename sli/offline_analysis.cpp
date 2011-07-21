@@ -10,6 +10,7 @@
 #include "oracle.hpp"
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
+#include "libvex_prof.hpp"
 
 template <typename t> void printCFG(const CFGNode<t> *cfg);
 
@@ -27,6 +28,7 @@ static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
 CrashReason *
 getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 {
+	__set_profiling(getProximalCause);
 	IRSB *irsb;
 	int x;
 	int nr_marks;
@@ -852,6 +854,7 @@ static void
 removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 		      const AllowableOptimisations &opt)
 {
+	__set_profiling(removeRedundantStores);
 	std::set<StateMachine *> visited;
 
 	removeRedundantStores(sm, oracle, done_something, visited, opt);
@@ -1315,6 +1318,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
 			bool *done_something)
 {
+	__set_profiling(availExpressionAnalysis);
 	/* Fairly standard available expression analysis.  Each edge
 	   in the state machine has two sets of
 	   StateMachineSideEffectStores representing the set of things
@@ -1803,6 +1807,7 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 static StateMachine *
 bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 {
+	__set_profiling(bisimilarityReduction);
 	std::set<st_edge_pair_t> bisimilarEdges;
 	std::set<st_pair_t> bisimilarStates;
 	std::set<StateMachine *> allStates;
@@ -1958,6 +1963,7 @@ public:
 static StateMachine *
 introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 {
+	__set_profiling(introduceFreeVariablesForRegisters);
 	BuildFreeVariableMapTransformer t;
 	t.transform(sm);
 	IntroduceFreeVariablesRegisterTransformer s(t.map);
@@ -1969,6 +1975,7 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		     const AllowableOptimisations &opt, OracleInterface *oracle, bool noExtendContext,
 		     unsigned long originRip)
 {
+	__set_profiling(optimiseStateMachine);
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -2741,6 +2748,7 @@ template <typename t> StateMachine *
 CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGNode<t> *, StateMachine *> &memo,
 		  Oracle *oracle)
 {
+	__set_profiling(CFGtoStoreMachine);
 	if (!cfg)
 		return StateMachineCrash::get();
 	if (memo.count(cfg))
@@ -2829,6 +2837,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     IRExpr **assumptionOut,
 				     StateMachine **newStoreMachine)
 {
+	__set_profiling(determineWhetherStoreMachineCanCrash);
 	/* Specialise the state machine down so that we only consider
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
@@ -2916,6 +2925,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				 unsigned long *new_rip,
 				 GarbageCollectionToken token)
 {
+	__set_profiling(expandStateMachineToFunctionHead);
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, rip);
 	if (previousInstructions.size() == 0) {
@@ -2986,6 +2996,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 bool needRemoteMacroSections,
 		 GarbageCollectionToken token)
 {
+	__set_profiling(considerStoreCFG);
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get(), oracle));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
@@ -3101,6 +3112,8 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		  unsigned long interestingRip,
 		  GarbageCollectionToken token)
 {
+	__set_profiling(buildProbeMachine);
+
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
@@ -3178,6 +3191,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      bool needRemoteMacroSections,
 	      GarbageCollectionToken token)
 {
+	__set_profiling(diagnoseCrash);
 	fprintf(_logfile, "Probe machine:\n");
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");

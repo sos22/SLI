@@ -59,6 +59,8 @@
 
 Heap ir_heap;
 
+#include "libvex_prof.hpp"
+
 void
 IRExpr::visit(HeapVisitor &visit)
 {

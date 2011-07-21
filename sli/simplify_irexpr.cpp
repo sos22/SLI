@@ -7,6 +7,7 @@
 #include "offline_analysis.hpp"
 
 #include "libvex_guest_offsets.h"
+#include "libvex_prof.hpp"
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
 
@@ -1350,6 +1351,7 @@ internIRExpr(IRExpr *e, std::map<IRExpr *, IRExpr *> &lookupTable)
 static IRExpr *
 internIRExpr(IRExpr *x)
 {
+	__set_profiling(internIRExpr);
 	std::map<IRExpr *, IRExpr *> t;
 	return internIRExpr(x, t);
 }
@@ -1364,6 +1366,7 @@ internIRExpr(IRExpr *x)
 static IRExpr *
 simplifyIRExprAsBoolean(IRExpr *inp)
 {
+	__set_profiling(simplifyIRExprAsBoolean);
 	std::map<IRExpr *, CnfExpression *> exprsToVars;
 	std::map<int, IRExpr *> varsToExprs;
 	CnfExpression *root;
@@ -1380,7 +1383,10 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 	inp = internIRExpr(inp);
 
 	buildVarMap(inp, exprsToVars, varsToExprs);
-	root = convertIRExprToCNF(inp, exprsToVars);
+	{
+		__set_profiling(convertIRExprToCNF);
+		root = convertIRExprToCNF(inp, exprsToVars);
+	}
 	nr_terms = root->complexity();
 	root = root->CNF();
 	a = dynamic_cast<CnfAnd *>(root);
@@ -1396,7 +1402,10 @@ simplifyIRExprAsBoolean(IRExpr *inp)
 		a->addChild(o);
 	}
 	a->sort();
-	a->optimise();
+	{
+		__set_profiling(optimise_cnf);
+		a->optimise();
+	}
 	IRExprTransformer t;
 	IRExpr *r = root->asIRExpr(varsToExprs, t);
 	if (exprComplexity(r) < exprComplexity(inp))
@@ -1410,19 +1419,39 @@ static IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bo
 IRExpr *
 optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_something)
 {
+#if MANUAL_PROFILING
+	static ProfilingSite __site("optimiseIRExprFP");
+	static bool live;
+	bool do_profiling;
+	do_profiling = !live;
+	unsigned long s = do_profiling ? SetProfiling::rdtsc() : 0;
+	live = true;
+#endif
+
 	bool progress;
 	progress = false;
 	e = optimiseIRExpr(e, opt, &progress);
 	if (progress) {
 		*done_something = true;
 		while (progress) {
-			if (TIMEOUT)
+			if (TIMEOUT) {
+#if MANUAL_PROFILING
+				live = false;
+#endif
 				return e;
+			}
 			progress = false;
 			e = optimiseIRExpr(e, opt, &progress);
 		}
 	}
 	e->optimisationsApplied |= opt.asUnsigned();
+#if MANUAL_PROFILING
+	if (do_profiling) {
+		__site.accumulated_ticks += SetProfiling::rdtsc() - s;
+		__site.nr_sites++;
+		live = false;
+	}
+#endif
 	return e;
 }
 
@@ -2200,6 +2229,7 @@ optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
 IRExpr *
 simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 {
+	__set_profiling(simplifyIRExpr);
 	bool done_something;
 
 	do {
@@ -2207,7 +2237,6 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 		if (TIMEOUT)
 			return a;
 		a = optimiseIRExpr(a, opt, &done_something);
-		a = internIRExpr(a);
 		a = simplifyIRExprAsBoolean(a);
 		a = optimiseIRExpr(a, opt, &done_something);
 	} while (done_something);

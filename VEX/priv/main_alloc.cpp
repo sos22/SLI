@@ -33,6 +33,7 @@
 #include "libvex_basictypes.h"
 #include "libvex.h"
 #include "libvex_alloc.h"
+#include "libvex_prof.hpp"
 
 #include "main_globals.h"
 #include "main_util.h"
@@ -223,6 +224,8 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 	struct arena *old_arena;
 	struct arena *next_old;
 	GcVisitor gc;
+
+	__set_profiling(libvex_gc);
 
 	LibVEX_alloc_sanity_check(h);
 
@@ -633,6 +636,8 @@ _LibVEX_alloc_sanity_check(Heap *h)
 {
 	struct arena *fast, *slow;
 	bool found_current;
+
+	__set_profiling(libvex_gc_sanity);
 
 	slow = fast = h->head_arena;
 	found_current = false;

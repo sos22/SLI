@@ -47,6 +47,7 @@
 #include "libvex_basictypes.h"
 #include "libvex_ir.h"
 #include "libvex.h"
+#include "libvex_prof.hpp"
 #include "main_util.h"
 #include "main_globals.h"
 #include "guest_generic_bb_to_IR.h"
@@ -118,6 +119,8 @@ IRSB* bb_to_IR ( unsigned tid,
    IRConst*   guest_IP_bbstart_IRConst = NULL;
 
    Bool (*resteerOKfn)(void*,Addr64) = NULL;
+
+   __set_profiling(libvex_decode);
 
    debug_print = toBool(vex_traceflags & VEX_TRACE_FE);
 

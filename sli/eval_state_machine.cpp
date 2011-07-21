@@ -5,6 +5,7 @@
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
 #include "inferred_information.hpp"
+#include "libvex_prof.hpp"
 
 typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
 class StateMachineEvalContext {
@@ -397,6 +398,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 				       VexPtr<Oracle> &oracle,
 				       GarbageCollectionToken token)
 {
+	__set_profiling(survivalConstraintIfExecutedAtomically);
 	NdChooser chooser;
 	VexPtr<IRExpr, &ir_heap> currentConstraint(IRExpr_Const(IRConst_U1(1)));
 	bool crashes;
@@ -437,6 +439,7 @@ writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 			       VexPtr<Oracle> &oracle,
 			       GarbageCollectionToken token)
 {
+	__set_profiling(writeMachineCrashConstraint);
 	NdChooser chooser;
 	VexPtr<IRExpr, &ir_heap> conjunctConstraint(assumption);
 	VexPtr<IRExpr, &ir_heap> disjunctConstraint(IRExpr_Const(IRConst_U1(0)));
@@ -515,6 +518,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 			   bool *mightSurvive, bool *mightCrash,
 			   GarbageCollectionToken token)
 {
+	__set_profiling(evalMachineUnderAssumption);
 	NdChooser chooser;
 	bool crashes;
 
@@ -686,6 +690,7 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			bool *mightCrash,
 			GarbageCollectionToken token)
 {
+	__set_profiling(evalCrossProductMachine);
 	NdChooser chooser;
 
 	*mightSurvive = false;
@@ -747,6 +752,7 @@ writeMachineSuitabilityConstraint(
 	VexPtr<Oracle> &oracle,
 	GarbageCollectionToken token)
 {
+	__set_profiling(writeMachineSuitabilityConstraint);
 	fprintf(_logfile, "\t\tBuilding write machine suitability constraint.\n");
 	VexPtr<IRExpr, &ir_heap> rewrittenAssumption(assumption);
 	NdChooser chooser;
@@ -851,6 +857,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			VexPtr<remoteMacroSectionsT, &ir_heap> &output,
 			GarbageCollectionToken token)
 {
+	__set_profiling(findRemoteMacroSections);
 	NdChooser chooser;
 
 	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
@@ -1008,6 +1015,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 	      VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 	      GarbageCollectionToken token)
 {
+	__set_profiling(fixSufficient);
 	NdChooser chooser;
 	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
 
@@ -1176,6 +1184,7 @@ findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 			   VexPtr<Oracle> &oracle,
 			   GarbageCollectionToken token)
 {
+	__set_profiling(findHappensBeforeRelations);
 	VexPtr<IRExpr, &ir_heap> res(IRExpr_Const(IRConst_U1(0)));
 	VexPtr<StateMachine, &ir_heap> probeMachine(summary->loadMachine);
 	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
