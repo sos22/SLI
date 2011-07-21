@@ -12,7 +12,7 @@
 
 /* The heap sanity checks are expensive enough that we're better off
    leaving them off even during normal debug runs. */
-#define NDEBUG
+#undef NDEBUG
 
 /* If we're given an opportunity to garbage collect and the heap is
    bigger than this then we always take it. */
@@ -52,13 +52,29 @@ struct arena;
 #define ALLOCATION_HEADER_MAGIC 0x11223344aa987654ul
 #endif
 
+static bool redirection_tags_set;
+
 struct allocation_header {
 	VexAllocType *type;
 #ifndef NDEBUG
 	unsigned long magic;
 #endif
 	unsigned long _size;
-	struct allocation_header *redirection;
+	unsigned long _redirection;
+
+	struct allocation_header *redirection() {
+		if ( (redirection_tags_set && !(_redirection & 1)) ||
+		     (!redirection_tags_set && (_redirection & 1)) )
+			return NULL;
+		else
+			return (struct allocation_header *)(_redirection & ~1ul);
+	}
+	void set_redirection(struct allocation_header *h) {
+		if (redirection_tags_set)
+			_redirection = (unsigned long)h | 1ul;
+		else
+			_redirection = (unsigned long)h;
+	}
 
 	unsigned long size() const { return _size & ~1ul; }
 
@@ -156,10 +172,10 @@ GcVisitor::visit(void *&what)
 	what_header = alloc_to_header(what);
 
 	DBG("Visit %p\n", what);
-	if (!what_header->redirection) {
+	if (!what_header->redirection()) {
 		struct allocation_header *redir;
 		redir = raw_alloc(h, what_header->type, what_header->size() - sizeof(struct allocation_header));
-		what_header->redirection = redir;
+		what_header->set_redirection(redir);
 
 		memcpy(redir->content, what_header->content, what_header->size() - sizeof(struct allocation_header));
 		if (what_header->type->relocate)
@@ -187,10 +203,10 @@ GcVisitor::visit(void *&what)
 
 		DBG("Done visit of %p\n", what);
 	} else {
-		assert(!((unsigned long)what_header->redirection & 0x8000000000000000ul));
-		assert((unsigned long)header_to_alloc(what_header->redirection) != 0x93939393939393ab);
-		assert(what_header->redirection->type == what_header->type);
-		what = header_to_alloc(what_header->redirection);
+		assert(!((unsigned long)what_header->redirection() & 0x8000000000000000ul));
+		assert((unsigned long)header_to_alloc(what_header->redirection()) != 0x93939393939393ab);
+		assert(what_header->redirection()->type == what_header->type);
+		what = header_to_alloc(what_header->redirection());
 		assert(what != NULL);
 		assert_gc_allocated(what);
 		DBG("Already visited; redirect to %p\n", what);
@@ -238,14 +254,7 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 	gc.h = h;
 
 	/* Zap the redirection pointers */
-	for (struct arena *a = h->head_arena; a; a = a->next) {
-		unsigned offset;
-		struct allocation_header *ah;
-		for (offset = 0; offset < a->bytes_used; offset += ah->size()) {
-			ah = (struct allocation_header *)(a->content + offset);
-			ah->redirection = NULL;
-		}
-	}
+	redirection_tags_set = !redirection_tags_set;
 
 	/* Swizzle out the old arena */
 	old_arena = h->head_arena;
@@ -285,8 +294,8 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 		   it'll have a redirection.  Otherwise, it's garbage.
 		   Update the content of the reference
 		   appropriately. */
-		if (ah->redirection)
-			weak->content = header_to_alloc(ah->redirection);
+		if (ah->redirection())
+			weak->content = header_to_alloc(ah->redirection());
 		else
 			weak->content = NULL;
 	}
@@ -299,7 +308,7 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 
 		for (offset = 0; offset < old_arena->bytes_used; offset += ah->size()) {
 			ah = (struct allocation_header *)(&old_arena->content[offset]);
-			if (ah->redirection) {
+			if (ah->redirection()) {
 				/* This one is still alive, so don't
 				   run its destructor.  The underlying
 				   memory will be released, though,
@@ -394,7 +403,7 @@ raw_alloc(Heap *h, VexAllocType *t, unsigned long size)
 	   just visit a single pointer twice in a single visit()
 	   method.  It's easy to handle, and the bugs you get if you
 	   don't handle it are annoyingly subtle, so just do it. */
-	res->redirection = res;
+	res->set_redirection(res);
 
 #ifndef NDEBUG
 	res->magic = ALLOCATION_HEADER_MAGIC;
@@ -627,7 +636,7 @@ sanity_check_arena(struct arena *a)
 		assert(ah->magic == ALLOCATION_HEADER_MAGIC);
 		assert(ah->type != NULL);
 		assert(ah->size() <= a->size - offset);
-		assert(ah->redirection == ah || ah->redirection == NULL);
+		assert(ah->redirection() == ah || ah->redirection() == NULL);
 	}
 }
 
