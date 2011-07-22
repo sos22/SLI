@@ -1159,6 +1159,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 					    chooser.nd_choice(2));
 		while (!TIMEOUT && !s1.finished)
 			ctxt.advanceMachine(chooser, oracle, true);
+		while (!TIMEOUT && !s2.finished)
+			ctxt.advanceMachine(chooser, oracle, false);
 		if (s1.crashed) {
 			newCondition =
 				IRExpr_Binop(
