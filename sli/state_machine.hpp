@@ -181,7 +181,7 @@ public:
 	{
 	}
 	StateMachine(StateMachine *parent, StateMachineState *new_root)
-		: root(root), origin(parent->origin), freeVariables(parent->freeVariables)
+		: root(new_root), origin(parent->origin), freeVariables(parent->freeVariables)
 	{}
 	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
 		: root(parent->root),
