@@ -960,6 +960,7 @@ public:
    bool operator ==(FreeVariableKey x) const {
       return val == x.val;
    }
+   unsigned long hash() const { return val * 900000323; }
 };
 
 struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {

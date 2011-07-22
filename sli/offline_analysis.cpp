@@ -66,7 +66,8 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 					irsb->next),
 				StateMachineCrash::get(),
 				StateMachineNoCrash::get()),
-			rip);
+			rip,
+			true);
 	}
 
 	/* Next guess: it's caused by dereferencing a bad pointer.
@@ -140,7 +141,8 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 						addr),
 					StateMachineCrash::get(),
 					StateMachineNoCrash::get()),
-				rip);
+				rip,
+				true);
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
@@ -521,7 +523,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				stmt->Ist.Store.addr,
 				stmt->Ist.Store.data,
 				rip));
-		sm = new StateMachine(smp, rip);
+		sm = new StateMachine(smp, rip, true);
 		break;
 	}
 
@@ -544,7 +546,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				IRExpr_Binder(smsel->key));
 			StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
 			smp->target->prependSideEffect(smsel);
-			sm = new StateMachine(smp, rip);
+			sm = new StateMachine(smp, rip, true);
 		}  else {
 			abort();
 		}
@@ -566,7 +568,8 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 						      rip,
 						      IRExpr_Const(stmt->Ist.Exit.dst)),
 					      sm->root),
-				      rip);
+				      rip,
+				      true);
 		break;
 	default:
 		abort();
@@ -1141,7 +1144,9 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_bad_ptr, bool *done_s
 	return aat.transformIRExpr(expr, done_something);
 }
 
-/* Slightly misnamed: this also propagates copy operations. */
+/* Slightly misnamed: this also propagates copy operations.  Also, it
+   doesn't so much eliminate loads are replace them with copies of
+   already-loaded values. */
 static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	StateMachineState *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
@@ -1303,7 +1308,7 @@ buildNewStateMachineWithLoadsEliminated(
 									      &d);
 	if (d) {
 		*done_something = true;
-		return new StateMachine(new_root, sm->origin);
+		return new StateMachine(sm, new_root);
 	} else {
 		return sm;
 	}
@@ -1942,6 +1947,7 @@ canonicaliseRbp(StateMachine *sm, unsigned long origin, OracleInterface *oracle,
 class BuildFreeVariableMapTransformer : public StateMachineTransformer {
 public:
 	std::map<std::pair<unsigned, unsigned>, IRExpr *> map;
+	FreeVariableMap &freeVariables;
 	IRExpr *transformIexGet(IRExpr *what, bool *done_something) {
 		std::pair<unsigned, unsigned> k;
 		k.first = what->Iex.Get.offset;
@@ -1950,6 +1956,9 @@ public:
 			map[k] = IRExpr_FreeVariable();
 		return StateMachineTransformer::transformIexGet(what, done_something);
 	}
+	BuildFreeVariableMapTransformer(FreeVariableMap &_freeVariables)
+		: freeVariables(_freeVariables)
+	{}
 };
 
 class IntroduceFreeVariablesRegisterTransformer : public StateMachineTransformer {
@@ -1965,7 +1974,9 @@ public:
 		k.second = what->Iex.Get.tid;
 		assert(map.count(k));
 		*done_something = true;
-		return map[k];
+		IRExpr *res = map[k];
+		fvDelta.push_back(std::pair<FreeVariableKey, IRExpr *>(res->Iex.FreeVariable.key, what));
+		return res;
 	}
 };
 
@@ -1973,7 +1984,7 @@ static StateMachine *
 introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 {
 	__set_profiling(introduceFreeVariablesForRegisters);
-	BuildFreeVariableMapTransformer t;
+	BuildFreeVariableMapTransformer t(sm->freeVariables);
 	t.transform(sm);
 	IntroduceFreeVariablesRegisterTransformer s(t.map);
 	return s.transform(sm, done_something);
@@ -1996,8 +2007,11 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
+			printStateMachine(sm, stdout);
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
+			printStateMachine(sm, stdout);			
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
+			printStateMachine(sm, stdout);			
 			sm = optimiseFreeVariables(sm, &done_something);
 			sm = canonicaliseRbp(sm, originRip, oracle, &done_something);
 		}
@@ -2769,7 +2783,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 {
 	__set_profiling(CFGtoStoreMachine);
 	if (!cfg)
-		return new StateMachine(StateMachineCrash::get(), 0);
+		return new StateMachine(StateMachineCrash::get(), 0, true);
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
@@ -2777,7 +2791,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	try {
 		irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
 	} catch (BadMemoryException &e) {
-		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip));
+		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), true);
 	}
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
@@ -2808,7 +2822,8 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 							stmt->Ist.Exit.guard,
 							tmpsm->root,
 							res->root),
-						wrappedRipToRip(cfg->my_rip));
+						wrappedRipToRip(cfg->my_rip),
+						true);
 				}
 			} else {
 			  res = backtrackOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
@@ -3428,7 +3443,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	}
 	StateMachine *res;
 	if (!cfg->branch && !cfg->fallThrough) {
-		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip);
+		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, true);
 	} else {
 		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, cfg->my_rip);
 		int x;
@@ -3461,7 +3476,8 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 									stmt->Ist.Exit.guard,
 									other->root,
 									ft->root),
-								cfg->my_rip);
+								cfg->my_rip,
+								true);
 						}
 					} else {
 						ft = backtrackOneStatement(ft, stmt, cfg->my_rip);

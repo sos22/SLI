@@ -10,6 +10,7 @@ class IRExprTransformer {
 	StateMachineSideEffectMemoryAccess *transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *,
 											bool *);
 protected:
+	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
 	virtual IRExpr *transformIexBinder(IRExpr *e, bool *done_something) { return e; }
 	virtual IRExpr *transformIexGet(IRExpr *e, bool *done_something) { return e; }
 	virtual IRExpr *transformIexGetI(IRExpr *e, bool *done_something)
@@ -170,7 +171,9 @@ public:
 		if (b) {
 			if (done_something)
 				*done_something = true;
-			return new StateMachine(r, s->origin);
+			StateMachine *sm = new StateMachine(s, fvDelta);
+			sm->root = r;
+			return sm;
 		}
 		return s;
 	}

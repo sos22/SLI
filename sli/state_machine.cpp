@@ -24,39 +24,41 @@ StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	bool b = false;
-	StateMachineState *new_root = root->optimise(opt, oracle, &b);
+	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables);
 	if (b) {
 		*done_something = true;
-		return new StateMachine(new_root, origin);
+		StateMachine *sm = new StateMachine(*this);
+		sm->root = new_root;
+		return sm;
 	} else {
 		return this;
 	}
 }
 
 StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv)
 {
 	if (trueTarget->target == StateMachineUnreached::get()) {
 		*done_something = true;
 		if (falseTarget->target == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something));
+			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv));
 	}
 	if (falseTarget->target == StateMachineUnreached::get()) {
 		*done_something = true;
-		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something));
+		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv));
 	}
 	condition = optimiseIRExprFP(condition, opt, done_something);
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
 		if (condition->Iex.Const.con->Ico.U1)
-			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something));
+			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv));
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something));
+			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv));
 	}
-	trueTarget = trueTarget->optimise(opt, oracle, done_something);
-	falseTarget = falseTarget->optimise(opt, oracle, done_something);
+	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv);
+	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv);
 
 	if (falseTarget->sideEffects.size() == 0 &&
 	    trueTarget->sideEffects.size() == 0) {
@@ -222,6 +224,55 @@ rewriteBinderExpressions(IRExpr *ex, const std::map<Int, IRExpr *> &binders, boo
 	return trans.transformIRExpr(ex, done_something);
 }
 
+class RewriteBindersTransformer : public IRExprTransformer {
+public:
+	int key;
+	IRExpr *val;
+	RewriteBindersTransformer(int _key, IRExpr *_val)
+		: key(_key), val(_val)
+	{}
+	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
+		if (e->Iex.Binder.binder == key) {
+			*done_something = true;
+			return val;
+		}
+		return IRExprTransformer::transformIexBinder(e, done_something);
+	}
+};
+static void
+applySideEffectToFreeVariables(StateMachineSideEffectCopy *c,
+			       FreeVariableMap &fv)
+{
+	RewriteBindersTransformer t(c->key, c->value);
+	fv.applyTransformation(t);
+}
+
+class RewriteBinderToLoadTransformer : public IRExprTransformer {
+public:
+	int key;
+	IRExpr *addr;
+	IRExpr *val;
+	RewriteBinderToLoadTransformer(int _key, IRExpr *_addr)
+		: key(_key), addr(_addr), val(NULL)
+	{}
+	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
+		if (e->Iex.Binder.binder == key) {
+			if (!val)
+				val = IRExpr_Load(false, Iend_LE, Ity_I64, addr);
+			*done_something = true;
+			return val;
+		}
+		return IRExprTransformer::transformIexBinder(e, done_something);
+	}
+};
+static void
+applySideEffectToFreeVariables(StateMachineSideEffectLoad *c,
+			       FreeVariableMap &fv)
+{
+	RewriteBinderToLoadTransformer t(c->key, c->addr);
+	fv.applyTransformation(t);
+}
+
 struct availEntry {
 	IRExpr *addr;
 	IRExpr *value;
@@ -241,7 +292,8 @@ struct availEntry {
 StateMachineEdge *
 StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			   OracleInterface *oracle,
-			   bool *done_something)
+			   bool *done_something,
+			   FreeVariableMap &freeVariables)
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
@@ -250,11 +302,11 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				   smp->target->sideEffects.end());
 		target = smp->target->target;
 		*done_something = true;
-		return optimise(opt, oracle, done_something);
+		return optimise(opt, oracle, done_something, freeVariables);
 	}
 	if (TIMEOUT)
 		return this;
-	target = target->optimise(opt, oracle, done_something);
+	target = target->optimise(opt, oracle, done_something, freeVariables);
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 
@@ -389,13 +441,17 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		}
 		if (StateMachineSideEffectCopy *smsec =
 		    dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
-			if (!usedBinders.count(smsec->key))
+			if (!usedBinders.count(smsec->key)) {
+				applySideEffectToFreeVariables(smsec, freeVariables);
 				isDead = true;
+			}
 		}
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			if (!usedBinders.count(smsel->key))
+			if (!usedBinders.count(smsel->key)) {
+				applySideEffectToFreeVariables(smsel, freeVariables);
 				isDead = true;
+			}
 		}
 		if (isDead) {
 			*done_something = true;
@@ -497,6 +553,18 @@ buildStateLabelTable(const StateMachineState *sm, std::map<const StateMachineSta
 }
 
 void
+FreeVariableMap::print(FILE *f) const
+{
+	for (map_t::iterator it = content->begin();
+	     it != content->end();
+	     it++) {
+		fprintf(f, "free%d -> ", it.key().val);
+		ppIRExpr(it.value(), f);
+		fprintf(f, "\n");
+	}
+}
+
+void
 printStateMachine(const StateMachine *sm, FILE *f)
 {
 	std::map<const StateMachineState *, int> labels;
@@ -510,6 +578,7 @@ printStateMachine(const StateMachine *sm, FILE *f)
 		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
 	}
+	sm->freeVariables.print(f);
 }
 
 unsigned long
@@ -760,7 +829,7 @@ parseStateMachine(StateMachine **out, const char *str, const char **suffix, char
 	StateMachineState *root;
 	if (!parseStateMachine(&root, str, suffix, err))
 		return false;
-	*out = new StateMachine(root, 0);
+	*out = new StateMachine(root, 0, true);
 	return true;
 }
 
@@ -1077,14 +1146,16 @@ static StateMachineState *introduceFreeVariables(StateMachineState *sm,
 						 const Oracle::RegisterAliasingConfiguration &alias,
 						 const AllowableOptimisations &opt,
 						 OracleInterface *oracle,
-						 bool *done_something);
+						 bool *done_something,
+						 std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh);
 static StateMachineEdge *
 introduceFreeVariables(StateMachineEdge *sme,
 		       StateMachine *root_sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
 		       OracleInterface *oracle,
-		       bool *done_something)
+		       bool *done_something,
+		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
 {
 	StateMachineEdge *out = new StateMachineEdge(NULL);
 	bool doit = false;
@@ -1103,10 +1174,14 @@ introduceFreeVariables(StateMachineEdge *sme,
 		}
 		/* This is a local load from a location which is never
 		 * stored.  Remove it. */
-		out->sideEffects.push_back(new StateMachineSideEffectCopy(smsel->key, IRExpr_FreeVariable()));
+		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->key, IRExpr_FreeVariable());
+		out->sideEffects.push_back(smsec);
+		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
+				(smsec->value->Iex.FreeVariable.key,
+				 IRExpr_Load(false, Iend_LE, Ity_I64, smsel->addr)));
 		doit = true;
 	}
-	out->target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit);
+	out->target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);
 
 	if (doit) {
 		*done_something = true;
@@ -1121,7 +1196,8 @@ introduceFreeVariables(StateMachineState *sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
 		       OracleInterface *oracle,
-		       bool *done_something)
+		       bool *done_something,
+		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
 {
 	bool doit = false;
 	if (dynamic_cast<StateMachineTerminal *>(sm))
@@ -1132,7 +1208,8 @@ introduceFreeVariables(StateMachineState *sm,
 							     alias,
 							     opt,
 							     oracle,
-							     &doit);
+							     &doit,
+							     fresh);
 		if (doit) {
 			*done_something = true;
 			return new StateMachineProxy(smp->origin, e);
@@ -1147,13 +1224,15 @@ introduceFreeVariables(StateMachineState *sm,
 						     alias,
 						     opt,
 						     oracle,
-						     &doit);
+						     &doit,
+						     fresh);
 	StateMachineEdge *f = introduceFreeVariables(smb->falseTarget,
 						     root_sm,
 						     alias,
 						     opt,
 						     oracle,
-						     &doit);
+						     &doit,
+						     fresh);
 	if (doit) {
 		*done_something = true;
 		return new StateMachineBifurcate(smb->origin,
@@ -1172,10 +1251,13 @@ introduceFreeVariables(StateMachine *sm,
 		       bool *done_something)
 {
 	bool b = false;
-	StateMachineState *new_root = introduceFreeVariables(sm->root, sm, alias, opt, oracle, &b);
+	std::vector<std::pair<FreeVariableKey, IRExpr *> > fresh;
+	StateMachineState *new_root = introduceFreeVariables(sm->root, sm, alias, opt, oracle, &b, fresh);
 	if (b) {
 		*done_something = true;
-		return new StateMachine(new_root, sm->origin);
+		StateMachine *new_sm =  new StateMachine(sm, fresh);
+		new_sm->root = new_root;
+		return new_sm;
 	} else {
 		return sm;
 	}
@@ -1192,6 +1274,7 @@ public:
 class simplifyFreeVariablesTransformer : public StateMachineTransformer {
 public:
 	std::map<FreeVariableKey, int> &counts;
+	FreeVariableMap &freeVariables;
 	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 		switch (e->tag) {
 		case Iex_Const:
@@ -1211,24 +1294,54 @@ public:
 			if (e->Iex.Qop.arg4->tag == Iex_FreeVariable &&
 			    counts[e->Iex.Qop.arg4->Iex.FreeVariable.key] == 1) {
 				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+					e->Iex.Qop.arg4->Iex.FreeVariable.key,
+					IRExpr_Qop(
+						e->Iex.Qop.op,
+						e->Iex.Qop.arg1,
+						e->Iex.Qop.arg2,
+						e->Iex.Qop.arg3,
+						freeVariables.get(e->Iex.Qop.arg4->Iex.FreeVariable.key))));
 				return e->Iex.Qop.arg4;
 			}
 		case Iex_Triop:
 			if (e->Iex.Triop.arg3->tag == Iex_FreeVariable &&
 			    counts[e->Iex.Triop.arg3->Iex.FreeVariable.key] == 1) {
 				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+					e->Iex.Triop.arg3->Iex.FreeVariable.key,
+					IRExpr_Triop(
+						e->Iex.Triop.op,
+						e->Iex.Triop.arg1,
+						e->Iex.Triop.arg2,
+						freeVariables.get(e->Iex.Triop.arg3->Iex.FreeVariable.key))));
 				return e->Iex.Triop.arg3;
 			}
 		case Iex_Binop:
 			if (e->Iex.Binop.arg2->tag == Iex_FreeVariable &&
 			    counts[e->Iex.Binop.arg2->Iex.FreeVariable.key] == 1) {
 				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+					e->Iex.Binop.arg2->Iex.FreeVariable.key,
+					IRExpr_Binop(
+						e->Iex.Binop.op,
+						e->Iex.Binop.arg1,
+						freeVariables.get(e->Iex.Binop.arg2->Iex.FreeVariable.key))));
 				return e->Iex.Binop.arg2;
 			}
 		case Iex_Unop:
 			if (e->Iex.Unop.arg->tag == Iex_FreeVariable &&
 			    counts[e->Iex.Unop.arg->Iex.FreeVariable.key] == 1) {
 				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+					e->Iex.Unop.arg->Iex.FreeVariable.key,
+					IRExpr_Unop(
+						e->Iex.Unop.op,
+						freeVariables.get(e->Iex.Unop.arg->Iex.FreeVariable.key))));
 				return e->Iex.Unop.arg;
 			}
 			break;
@@ -1238,6 +1351,13 @@ public:
 				if (a->tag == Iex_FreeVariable &&
 				    counts[a->Iex.FreeVariable.key] == 1) {
 					*done_something = true;
+					IRExpr *b = IRExpr_Associative(e);
+					assert(freeVariables.get(a->Iex.FreeVariable.key));
+					b->Iex.Associative.contents[x] =
+						freeVariables.get(a->Iex.FreeVariable.key);
+					fvDelta.push_back(
+						std::pair<FreeVariableKey, IRExpr *>(
+							a->Iex.FreeVariable.key, b));
 					return a;
 				}
 			}
@@ -1245,8 +1365,9 @@ public:
 		}
 		return StateMachineTransformer::transformIRExpr(e, done_something);
 	}
-	simplifyFreeVariablesTransformer(std::map<FreeVariableKey, int> &_counts)
-		: counts(_counts)
+	simplifyFreeVariablesTransformer(std::map<FreeVariableKey, int> &_counts,
+					 FreeVariableMap &fv)
+		: counts(_counts), freeVariables(fv)
 	{}
 };
 
@@ -1256,7 +1377,7 @@ optimiseFreeVariables(StateMachine *sm, bool *done_something)
 	countFreeVariablesVisitor cfvv;
 	bool ign;
 	cfvv.transform(sm, &ign);
-	simplifyFreeVariablesTransformer sfvt(cfvv.counts);
+	simplifyFreeVariablesTransformer sfvt(cfvv.counts, sm->freeVariables);
 	return sfvt.transform(sm, done_something);
 }
 
@@ -1289,4 +1410,13 @@ void
 StateMachine::selectSingleCrashingPath(void)
 {
 	root = root->selectSingleCrashingPath();
+}
+
+void
+FreeVariableMap::applyTransformation(IRExprTransformer &x)
+{
+	for (map_t::iterator it = content->begin();
+	     it != content->end();
+	     it++)
+		it.set_value(x.transformIRExpr(it.value()));
 }

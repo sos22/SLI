@@ -741,7 +741,7 @@ unpickle(StateMachine *&sm, Unpickler &p)
 		return;
 	unpickle(root, p);
 	unpickle(origin, p);
-	sm = new StateMachine(root, origin);
+	sm = new StateMachine(root, origin, true);
 	p.discover(sm, id);
 	p.finishObject();
 }

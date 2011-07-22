@@ -146,6 +146,8 @@ public:
 		}
 		const keyt &key() const { assert(cursor); return cursor->key; }
 		valuet &value() const { assert(cursor); return cursor->value; }
+		void set_value(valuet &v) { assert(cursor); cursor->value = v; }
+		void set_value(valuet v) { assert(cursor); cursor->value = v; }
 	};
 
 	iterator begin() const {

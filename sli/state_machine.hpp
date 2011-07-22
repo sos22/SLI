@@ -131,6 +131,33 @@ public:
 	}
 };
 
+class IRExprTransformer;
+
+/* Caution: needs someone external to visit it! */
+class FreeVariableMap {
+	typedef gc_heap_map<FreeVariableKey, IRExpr, &ir_heap>::type map_t;
+	map_t *content;
+public:
+	FreeVariableMap()
+		: content(new map_t())
+	{}
+	FreeVariableMap(const FreeVariableMap &p)
+		: content(new map_t(*p.content))
+	{}
+	FreeVariableMap(const FreeVariableMap &p, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
+		: content(new map_t(*p.content))
+	{
+		for (unsigned x = 0; x < delta.size(); x++) {
+			assert(delta[x].second);
+			content->set(delta[x].first, delta[x].second);
+		}
+	}
+	IRExpr *get(FreeVariableKey k) { IRExpr *res = content->get(k); assert(res); return res; }
+	void visit(HeapVisitor &hv) { hv(content); }
+	void applyTransformation(IRExprTransformer &t);
+	void print(FILE *f) const;
+};
+
 void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);
 
 class StateMachineState;
@@ -139,15 +166,25 @@ class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 public:
 	StateMachineState *root;
 	unsigned long origin;
+	FreeVariableMap freeVariables;
 
-	StateMachine(StateMachineState *_root, unsigned long _origin)
+	StateMachine(StateMachineState *_root, unsigned long _origin, bool ign)
 		: root(_root), origin(_origin)
+	{
+	}
+	StateMachine(StateMachine *parent, StateMachineState *new_root)
+		: root(root), origin(parent->origin), freeVariables(parent->freeVariables)
+	{}
+	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
+		: root(parent->root),
+		  origin(parent->origin),
+		  freeVariables(parent->freeVariables, delta)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       OracleInterface *oracle,
 			       bool *done_something);
 	void selectSingleCrashingPath();
-	void visit(HeapVisitor &hv) { hv(root); }
+	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
 	NAMED_CLASS
 };
 
@@ -169,7 +206,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
+	virtual StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	virtual StateMachineState *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
@@ -252,7 +289,7 @@ public:
 		     it++)
 			hv(*it);
 	}
-	StateMachineEdge *optimise(const AllowableOptimisations &, OracleInterface *, bool *done_something);
+	StateMachineEdge *optimise(const AllowableOptimisations &, OracleInterface *, bool *done_something, FreeVariableMap &);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		if (TIMEOUT)
 			return;
@@ -293,7 +330,7 @@ protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(unsigned long rip) : StateMachineState(rip) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *) { return this; }
+	StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
@@ -377,7 +414,7 @@ public:
 	{
 		hv(target);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv)
 	{
 		if (target->target == StateMachineUnreached::get()) {
 			*done_something = true;
@@ -385,9 +422,9 @@ public:
 		}
 		if (target->sideEffects.size() == 0) {
 			*done_something = true;
-			return target->target->optimise(opt, oracle, done_something);
+			return target->target->optimise(opt, oracle, done_something, fv);
 		}
-		target = target->optimise(opt, oracle, done_something);
+		target = target->optimise(opt, oracle, done_something, fv);
 		return this;
 	}
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
@@ -459,7 +496,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
 	{
 		std::set<IRExpr *> t;
