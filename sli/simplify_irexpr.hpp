@@ -12,6 +12,8 @@ bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 IRExpr *simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt);
 int exprComplexity(const IRExpr *e);
+void addArgumentToAssoc(IRExpr *e, IRExpr *arg);
+bool physicallyEqual(const IRConst *a, const IRConst *b);
 
 void sanity_check_irexpr_sorter(void);
 void sanity_check_optimiser(void);

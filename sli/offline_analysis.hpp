@@ -1,10 +1,12 @@
 #ifndef OFFLINE_ANALYSIS_HPP__
 #define OFFLINE_ANALYSIS_HPP__
 
+#include <map>
+
+#include "state_machine.hpp"
+
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
-
-class CrashReason;
 
 class IRExprTransformer {
 	StateMachineSideEffectMemoryAccess *transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *,
