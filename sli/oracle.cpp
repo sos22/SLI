@@ -853,6 +853,7 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_32HLto64:
 		case Iop_DivModU64to32:
 		case Iop_Add32:
+		case Iop_And32:
 			return Oracle::PointerAliasingSet::notAPointer;
 		default:
 			break;
@@ -901,6 +902,7 @@ irexprAliasingClass(IRExpr *expr,
 			return Oracle::PointerAliasingSet::notAPointer;
 		}
 		case Iop_Add32:
+		case Iop_And32:
 			return Oracle::PointerAliasingSet::notAPointer;
 		default:
 			break;
