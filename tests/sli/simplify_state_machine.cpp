@@ -13,7 +13,7 @@ main(int argc, char *argv[])
 
 	VexPtr<StateMachine> sm(readStateMachine(0));
 
-	sm->sanity_check();
+	sm->root->sanity_check();
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
@@ -27,7 +27,7 @@ main(int argc, char *argv[])
 	sm = sm->optimise(opt, oracle, &ignore);
 	printStateMachine(sm, stdout);
 
-	sm->sanity_check();
+	sm->root->sanity_check();
 
 	return 0;
 }

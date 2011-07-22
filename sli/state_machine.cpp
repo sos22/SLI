@@ -21,6 +21,19 @@ VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false, true);
 
 StateMachine *
+StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+{
+	bool b = false;
+	StateMachineState *new_root = root->optimise(opt, oracle, &b);
+	if (b) {
+		*done_something = true;
+		return new StateMachine(new_root, origin);
+	} else {
+		return this;
+	}
+}
+
+StateMachineState *
 StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	if (trueTarget->target == StateMachineUnreached::get()) {
@@ -460,10 +473,10 @@ findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt
 }
 
 static void
-buildStateLabelTable(const StateMachine *sm, std::map<const StateMachine *, int> &table,
-		     std::vector<const StateMachine *> &states)
+buildStateLabelTable(const StateMachineState *sm, std::map<const StateMachineState *, int> &table,
+		     std::vector<const StateMachineState *> &states)
 {
-	std::vector<const StateMachine *> toEmit;
+	std::vector<const StateMachineState *> toEmit;
 	int next_label;
 
 	toEmit.push_back(sm);
@@ -486,11 +499,11 @@ buildStateLabelTable(const StateMachine *sm, std::map<const StateMachine *, int>
 void
 printStateMachine(const StateMachine *sm, FILE *f)
 {
-	std::map<const StateMachine *, int> labels;
-	std::vector<const StateMachine *> states;
+	std::map<const StateMachineState *, int> labels;
+	std::vector<const StateMachineState *> states;
 
-	buildStateLabelTable(sm, labels, states);
-	for (std::vector<const StateMachine *>::iterator it = states.begin();
+	buildStateLabelTable(sm->root, labels, states);
+	for (std::vector<const StateMachineState *>::iterator it = states.begin();
 	     it != states.end();
 	     it++) {
 		fprintf(f, "l%d: ", labels[*it]);
@@ -510,85 +523,6 @@ StateMachineEdge::hashval() const
 		have_hash = true;
 	}
 	return _hashval;
-}
-
-typedef std::pair<StateMachine *, StateMachine *> st_pair_t;
-typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
-
-/* Note that this assumes that bisimilarity reduction, and all the
-   other usual optimisations, have already been run! */
-static bool stateMachinesBisimilar(StateMachine *a, StateMachine *b,
-				   std::set<st_edge_pair_t> &bisimilarEdges,
-				   std::set<st_pair_t> &bisimilarStates,
-				   const AllowableOptimisations &opt);
-static bool
-stateMachineEdgesBisimilar(StateMachineEdge *a,
-			   StateMachineEdge *b,
-			   std::set<st_edge_pair_t> &bisimilarEdges,
-			   std::set<st_pair_t> &bisimilarStates,
-			   const AllowableOptimisations &opt)
-{
-	if (bisimilarEdges.count(st_edge_pair_t(a, b)))
-		return true;
-	bisimilarEdges.insert(st_edge_pair_t(a, b));
-	if (a->sideEffects.size() != b->sideEffects.size())
-		return false;
-	for (unsigned x = 0; x < a->sideEffects.size(); x++) {
-		if (!sideEffectsBisimilar(a->sideEffects[x],
-					  b->sideEffects[x],
-					  opt))
-			return false;
-	}
-	return stateMachinesBisimilar(a->target, b->target, bisimilarEdges,
-				      bisimilarStates, opt);
-}
-static bool
-stateMachinesBisimilar(StateMachine *a, StateMachine *b,
-		       std::set<st_edge_pair_t> &bisimilarEdges,
-		       std::set<st_pair_t> &bisimilarStates,
-		       const AllowableOptimisations &opt)
-{
-	if (bisimilarStates.count(st_pair_t(a, b)))
-		return true;
-	/* We advance on the assumption that the states *are*
-	 * bisimilar, and rely on the fact that bisimilarity has the
-	 * right kind of monotonicity for that to actually work. */
-	bisimilarStates.insert(st_pair_t(a, b));
-	if (dynamic_cast<StateMachineUnreached *>(a))
-		return !!dynamic_cast<StateMachineUnreached *>(b);
-	if (dynamic_cast<StateMachineCrash *>(a))
-		return !!dynamic_cast<StateMachineCrash *>(b);
-	if (dynamic_cast<StateMachineNoCrash *>(a))
-		return !!dynamic_cast<StateMachineNoCrash *>(b);
-	if (StateMachineProxy *smpA = dynamic_cast<StateMachineProxy *>(a)) {
-		StateMachineProxy *smpB = dynamic_cast<StateMachineProxy *>(b);
-		if (!smpB)
-			return false;
-		return stateMachineEdgesBisimilar(smpA->target, smpB->target,
-						  bisimilarEdges, bisimilarStates,
-						  opt);
-	}
-	if (StateMachineBifurcate *smbA = dynamic_cast<StateMachineBifurcate *>(a)) {
-		StateMachineBifurcate *smbB = dynamic_cast<StateMachineBifurcate *>(b);
-		if (!smbB)
-			return false;
-		if (!definitelyEqual(smbA->condition, smbB->condition, opt))
-			return false;
-		return stateMachineEdgesBisimilar(smbA->trueTarget, smbB->trueTarget,
-						  bisimilarEdges, bisimilarStates, opt) &&
-		       stateMachineEdgesBisimilar(smbA->falseTarget, smbB->falseTarget,
-						  bisimilarEdges, bisimilarStates, opt);
-	}
-	abort();
-}
-bool
-stateMachinesBisimilar(StateMachine *a, StateMachine *b)
-{
-	std::set<st_edge_pair_t> bisimilarEdges;
-	std::set<st_pair_t> bisimilarStates;
-
-	return stateMachinesBisimilar(a, b, bisimilarEdges, bisimilarStates,
-				      AllowableOptimisations::defaultOptimisations);
 }
 
 bool
@@ -702,13 +636,13 @@ parseStateMachineEdge(StateMachineEdge **out,
 	if (!parseThisChar('l', str, &str, err) ||
 	    !parseDecimalInt(&targetLabel, str, suffix, err))
 		return false;
-	*out = new StateMachineEdge((StateMachine *)targetLabel);
+	*out = new StateMachineEdge((StateMachineState *)targetLabel);
 	(*out)->sideEffects = sideEffects;
 	return true;
 }
 
 static bool
-parseStateMachineState(StateMachine **out,
+parseStateMachineState(StateMachineState **out,
 		       const char *str,
 		       const char **suffix,
 		       char **err)
@@ -761,13 +695,13 @@ parseStateMachineState(StateMachine **out,
 }
 
 static bool
-parseOneState(std::map<int, StateMachine *> &out,
+parseOneState(std::map<int, StateMachineState *> &out,
 	      const char *str,
 	      const char **suffix,
 	      char **err)
 {
 	int label;
-	StateMachine *res;
+	StateMachineState *res;
 
 	if (!parseThisChar('l', str, &str, err) ||
 	    !parseDecimalInt(&label, str, &str, err) ||
@@ -784,10 +718,10 @@ parseOneState(std::map<int, StateMachine *> &out,
 	return true;
 }
 
-bool
-parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err)
+static bool
+parseStateMachine(StateMachineState **out, const char *str, const char **suffix, char **err)
 {
-	std::map<int, StateMachine *> labelToState;
+	std::map<int, StateMachineState *> labelToState;
 
 	while (*str) {
 		if (!parseOneState(labelToState, str, &str, err))
@@ -797,7 +731,7 @@ parseStateMachine(StateMachine **out, const char *str, const char **suffix, char
 		*err = (char *)"label 1 must be defined";
 		return false;
 	}
-	for (std::map<int, StateMachine *>::iterator it = labelToState.begin();
+	for (std::map<int, StateMachineState *>::iterator it = labelToState.begin();
 	     it != labelToState.end();
 	     it++) {
 		if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(it->second)) {
@@ -820,6 +754,16 @@ parseStateMachine(StateMachine **out, const char *str, const char **suffix, char
 	return true;
 }
 
+bool
+parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err)
+{
+	StateMachineState *root;
+	if (!parseStateMachine(&root, str, suffix, err))
+		return false;
+	*out = new StateMachine(root, 0);
+	return true;
+}
+
 StateMachine *
 readStateMachine(int fd)
 {
@@ -834,8 +778,8 @@ readStateMachine(int fd)
 }
 
 void
-StateMachine::assertAcyclic(std::vector<const StateMachine *> &stack,
-			    std::set<const StateMachine *> &clean) const
+StateMachineState::assertAcyclic(std::vector<const StateMachineState *> &stack,
+				 std::set<const StateMachineState *> &clean) const
 {
 	if (clean.count(this))
 		return;
@@ -855,10 +799,10 @@ StateMachine::assertAcyclic(std::vector<const StateMachine *> &stack,
 found_cycle:
 	printf("Unexpected cycle in state machine!\n");
 	printf("Found at %p\n", this);
-	std::map<const StateMachine *, int> labels;
+	std::map<const StateMachineState *, int> labels;
 	prettyPrint(stdout, labels);
 	printf("Path: \n");
-	for (std::vector<const StateMachine *>::const_iterator it = stack.begin();
+	for (std::vector<const StateMachineState *>::const_iterator it = stack.begin();
 	     it != stack.end();
 	     it++)
 		printf("\t%d\n", labels[*it]);
@@ -867,15 +811,15 @@ found_cycle:
 }
 
 void
-StateMachine::assertAcyclic() const
+StateMachineState::assertAcyclic() const
 {
-	std::vector<const StateMachine *> stack;
-	std::set<const StateMachine *> clean;
+	std::vector<const StateMachineState *> stack;
+	std::set<const StateMachineState *> clean;
 	assertAcyclic(stack, clean);
 }
 
 void
-StateMachine::enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs)
+StateMachineState::enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs)
 {
 	if (target1())
 		target1()->enumerateMentionedMemoryAccesses(instrs);
@@ -902,7 +846,7 @@ StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<unsigned long> &inst
 }
 
 void
-StateMachine::sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const
+StateMachineState::sanity_check(std::set<Int> &binders, std::vector<const StateMachineState *> &path) const
 {
 	for (unsigned x = 0; x < path.size(); x++)
 		assert(path[x] != this);
@@ -915,7 +859,7 @@ StateMachine::sanity_check(std::set<Int> &binders, std::vector<const StateMachin
 }
 
 void
-StateMachineEdge::sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const
+StateMachineEdge::sanity_check(std::set<Int> &binders, std::vector<const StateMachineState *> &path) const
 {
 	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
 	     it != sideEffects.end();
@@ -967,12 +911,12 @@ checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders)
 }
 
 static void
-nrAliasingLoads(StateMachine *sm,
+nrAliasingLoads(StateMachineState *sm,
 		StateMachineSideEffectLoad *smsel,
 		const Oracle::RegisterAliasingConfiguration &alias,
 		const AllowableOptimisations &opt,
 		int *out,
-		std::set<StateMachine *> &visited,
+		std::set<StateMachineState *> &visited,
 		OracleInterface *oracle);
 static void
 nrAliasingLoads(StateMachineEdge *sme,
@@ -980,7 +924,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 		const Oracle::RegisterAliasingConfiguration &alias,
 		const AllowableOptimisations &opt,
 		int *out,
-		std::set<StateMachine *> &visited,
+		std::set<StateMachineState *> &visited,
 		OracleInterface *oracle)
 {
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
@@ -997,12 +941,12 @@ nrAliasingLoads(StateMachineEdge *sme,
 	nrAliasingLoads(sme->target, smsel, alias, opt, out, visited, oracle);
 }
 static void
-nrAliasingLoads(StateMachine *sm,
+nrAliasingLoads(StateMachineState *sm,
 		StateMachineSideEffectLoad *smsel,
 		const Oracle::RegisterAliasingConfiguration &alias,
 		const AllowableOptimisations &opt,
 		int *out,
-		std::set<StateMachine *> &visited,
+		std::set<StateMachineState *> &visited,
 		OracleInterface *oracle)
 {
 	if (visited.count(sm))
@@ -1032,13 +976,13 @@ nrAliasingLoads(StateMachine *sm,
 		const AllowableOptimisations &opt,
 		OracleInterface *oracle)
 {
-	std::set<StateMachine *> visited;
+	std::set<StateMachineState *> visited;
 	int res = 0;
-	nrAliasingLoads(sm, smsel, alias, opt, &res, visited, oracle);
+	nrAliasingLoads(sm->root, smsel, alias, opt, &res, visited, oracle);
 	return res;
 }
 			   
-static bool definitelyNoSatisfyingStores(StateMachine *sm,
+static bool definitelyNoSatisfyingStores(StateMachineState *sm,
 					 StateMachineSideEffectLoad *smsel,
 					 const Oracle::RegisterAliasingConfiguration &alias,
 					 const AllowableOptimisations &opt,
@@ -1089,7 +1033,7 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 					    oracle);
 }
 static bool
-definitelyNoSatisfyingStores(StateMachine *sm,
+definitelyNoSatisfyingStores(StateMachineState *sm,
 			     StateMachineSideEffectLoad *smsel,
 			     const Oracle::RegisterAliasingConfiguration &alias,
 			     const AllowableOptimisations &opt,
@@ -1112,6 +1056,15 @@ definitelyNoSatisfyingStores(StateMachine *sm,
 		return false;
 	return true;
 }
+static bool definitelyNoSatisfyingStores(StateMachine *sm,
+					 StateMachineSideEffectLoad *smsel,
+					 const Oracle::RegisterAliasingConfiguration &alias,
+					 const AllowableOptimisations &opt,
+					 bool haveAliasingStore,
+					 OracleInterface *oracle)
+{
+	return definitelyNoSatisfyingStores(sm->root, smsel, alias, opt, haveAliasingStore, oracle);
+}
 
 /* There are some memory locations which are effectively completely
  * unconstrained by anything which the machine does.  Replace those
@@ -1119,12 +1072,12 @@ definitelyNoSatisfyingStores(StateMachine *sm,
  * can then propagate that through a bit and potentially simplify lots
  * of other bits of the machine by allocating yet more free
  * variables. */
-static StateMachine *introduceFreeVariables(StateMachine *sm,
-					    StateMachine *root_sm,
-					    const Oracle::RegisterAliasingConfiguration &alias,
-					    const AllowableOptimisations &opt,
-					    OracleInterface *oracle,
-					    bool *done_something);
+static StateMachineState *introduceFreeVariables(StateMachineState *sm,
+						 StateMachine *root_sm,
+						 const Oracle::RegisterAliasingConfiguration &alias,
+						 const AllowableOptimisations &opt,
+						 OracleInterface *oracle,
+						 bool *done_something);
 static StateMachineEdge *
 introduceFreeVariables(StateMachineEdge *sme,
 		       StateMachine *root_sm,
@@ -1162,8 +1115,8 @@ introduceFreeVariables(StateMachineEdge *sme,
 		return sme;
 	}
 }
-static StateMachine *
-introduceFreeVariables(StateMachine *sm,
+static StateMachineState *
+introduceFreeVariables(StateMachineState *sm,
 		       StateMachine *root_sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
@@ -1218,7 +1171,14 @@ introduceFreeVariables(StateMachine *sm,
 		       OracleInterface *oracle,
 		       bool *done_something)
 {
-	return introduceFreeVariables(sm, sm, alias, opt, oracle, done_something);
+	bool b = false;
+	StateMachineState *new_root = introduceFreeVariables(sm->root, sm, alias, opt, oracle, &b);
+	if (b) {
+		*done_something = true;
+		return new StateMachine(new_root, sm->origin);
+	} else {
+		return sm;
+	}
 }
 
 class countFreeVariablesVisitor : public StateMachineTransformer {
@@ -1300,20 +1260,20 @@ optimiseFreeVariables(StateMachine *sm, bool *done_something)
 	return sfvt.transform(sm, done_something);
 }
 
-StateMachine::RoughLoadCount
-StateMachineEdge::roughLoadCount(StateMachine::RoughLoadCount acc) const
+StateMachineState::RoughLoadCount
+StateMachineEdge::roughLoadCount(StateMachineState::RoughLoadCount acc) const
 {
-	if (acc == StateMachine::multipleLoads)
-		return StateMachine::multipleLoads;
+	if (acc == StateMachineState::multipleLoads)
+		return StateMachineState::multipleLoads;
 
 	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
 	     it != sideEffects.end();
 	     it++) {
 		if (dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			if (acc == StateMachine::noLoads)
-				acc = StateMachine::singleLoad;
+			if (acc == StateMachineState::noLoads)
+				acc = StateMachineState::singleLoad;
 			else
-				return StateMachine::multipleLoads;
+				return StateMachineState::multipleLoads;
 		}
 	}
 	return target->roughLoadCount(acc);
@@ -1323,4 +1283,10 @@ void
 ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema, FILE *f)
 {
 	fprintf(f, "{0x%lx}", smsema->rip);
+}
+
+void
+StateMachine::selectSingleCrashingPath(void)
+{
+	root = root->selectSingleCrashingPath();
 }

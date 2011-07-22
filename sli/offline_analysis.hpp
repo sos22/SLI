@@ -139,29 +139,40 @@ private:
 	/* Transformations are memoised.  This is important, because
 	   it means that we preserve the state machine structure
 	   rather than unrolling it. */
-	std::map<const StateMachine *, StateMachine *> memoTable;
-	StateMachine *doit(StateMachine *inp, bool *);
+	std::map<const StateMachineState *, StateMachineState *> memoTable;
+	StateMachineState *doit(StateMachineState *inp, bool *);
 	StateMachineEdge *doit(StateMachineEdge *inp, bool *);
 
+	StateMachineState *transform(StateMachineState *start, bool *done_something);
+	StateMachineState *transform(StateMachineState *start)
+	{
+		bool b;
+		return transform(start, &b);
+	}
 protected:
-	virtual StateMachine *transformedCrash(bool *done_something)
+	virtual StateMachineState *transformedCrash(bool *done_something)
 	{
 		return StateMachineCrash::get();
 	}
-	virtual StateMachine *transformedNoCrash(bool *done_something)
+	virtual StateMachineState *transformedNoCrash(bool *done_something)
 	{
 		return StateMachineNoCrash::get();
 	}
-	virtual StateMachine *transformedUnreached(bool *done_something)
+	virtual StateMachineState *transformedUnreached(bool *done_something)
 	{
 		return StateMachineUnreached::get();
 	}
 public:
-	StateMachine *transform(StateMachine *start, bool *done_something);
-	StateMachine *transform(StateMachine *start)
+	StateMachine *transform(StateMachine *s, bool *done_something = NULL)
 	{
-		bool b;
-		return transform(start, &b);
+		bool b = false;
+		StateMachineState *r = transform(s->root, &b);
+		if (b) {
+			if (done_something)
+				*done_something = true;
+			return new StateMachine(r, s->origin);
+		}
+		return s;
 	}
 };
 

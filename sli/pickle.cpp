@@ -502,7 +502,7 @@ unpickleIRExpr(FILE *f)
 	return res;
 }
 
-static void pickle(StateMachine *sm, Pickler &p);
+static void pickle(StateMachineState *sm, Pickler &p);
 
 static void
 pickle(StateMachineSideEffect *smse, Pickler &p)
@@ -555,7 +555,7 @@ pickle(StateMachineEdge *sme, Pickler &p)
 }
 
 static void
-pickle(StateMachine *sm, Pickler &p)
+pickle(StateMachineState *sm, Pickler &p)
 {
 	sm_tag t;
 
@@ -591,6 +591,16 @@ pickle(StateMachine *sm, Pickler &p)
 	p.finishObject();
 }
 
+static void
+pickle(StateMachine *sm, Pickler &p)
+{
+	if (p.startObject(sm))
+		return;
+	pickle(sm->root, p);
+	pickle(sm->origin, p);
+	p.finishObject();
+}
+
 void
 pickleStateMachine(StateMachine *sm, FILE *f)
 {
@@ -598,7 +608,7 @@ pickleStateMachine(StateMachine *sm, FILE *f)
 	pickle(sm, p);
 }
 
-static void unpickle(StateMachine *&sm, Unpickler &p);
+static void unpickle(StateMachineState *&sm, Unpickler &p);
 
 static void
 unpickle(StateMachineSideEffect *&out, Unpickler &p)
@@ -669,7 +679,7 @@ unpickle(StateMachineEdge *&sme, Unpickler &p)
 }
 
 static void
-unpickle(StateMachine *&sm, Unpickler &p)
+unpickle(StateMachineState *&sm, Unpickler &p)
 {
 	memoSlotT id;
 	unsigned long origin;
@@ -719,6 +729,21 @@ unpickle(StateMachine *&sm, Unpickler &p)
 	p.discover(sm, id);
 	p.finishObject();
 	return;
+}
+
+static void
+unpickle(StateMachine *&sm, Unpickler &p)
+{
+	memoSlotT id;
+	StateMachineState *root;
+	unsigned long origin;
+	if (p.retrieveObject(sm, id))
+		return;
+	unpickle(root, p);
+	unpickle(origin, p);
+	sm = new StateMachine(root, origin);
+	p.discover(sm, id);
+	p.finishObject();
 }
 
 StateMachine *

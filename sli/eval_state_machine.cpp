@@ -188,7 +188,7 @@ addOrderingConstraint(StateMachineSideEffectMemoryAccess *before,
 }
 
 static void evalStateMachine(StateMachine *rootMachine,
-			     StateMachine *sm,
+			     StateMachineState *sm,
 			     bool *crashes,
 			     NdChooser &chooser,
 			     Oracle *oracle,
@@ -351,7 +351,7 @@ evalStateMachineEdge(StateMachine *thisMachine,
    never crash. */
 static void
 evalStateMachine(StateMachine *rootMachine,
-		 StateMachine *sm,
+		 StateMachineState *sm,
 		 bool *crashes,
 		 NdChooser &chooser,
 		 Oracle *oracle,
@@ -414,7 +414,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
-		evalStateMachine(sm, sm, &crashes, chooser, oracle, ctxt);
+		evalStateMachine(sm, sm->root, &crashes, chooser, oracle, ctxt);
 		if (crashes) {
 			/* This path leads to a crash, so the
 			   constraint should include something to make
@@ -464,7 +464,7 @@ writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 		   confuse the ND chooser. */
 		ctxt.pathConstraint = assumption;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		evalStateMachine(sm, sm, &crashes, chooser, oracle, ctxt);
+		evalStateMachine(sm, sm->root, &crashes, chooser, oracle, ctxt);
 
 		if (!crashes) {
 			/* Survival should be pretty rare here, and
@@ -534,7 +534,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = assumption;
-		evalStateMachine(sm, sm, &crashes, chooser, oracle, ctxt);
+		evalStateMachine(sm, sm->root, &crashes, chooser, oracle, ctxt);
 		if (crashes)
 			*mightCrash = true;
 		else
@@ -605,7 +605,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					     Oracle *oracle,
 					     bool wantLoad)
 {
-	StateMachine *s;
+	StateMachineState *s;
 
 top:
 	if (TIMEOUT)
@@ -700,8 +700,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	*mightSurvive = false;
 	*mightCrash = false;
 
-	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine));
-	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine));
+	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine->root));
+	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine->root));
 	while (!*mightCrash || !*mightSurvive) {
 		if (TIMEOUT)
 			return false;
@@ -760,7 +760,7 @@ writeMachineSuitabilityConstraint(
 	fprintf(_logfile, "\t\tBuilding write machine suitability constraint.\n");
 	VexPtr<IRExpr, &ir_heap> rewrittenAssumption(assumption);
 	NdChooser chooser;
-	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
+	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine->root));
 	do {
 		if (TIMEOUT)
 			return NULL;
@@ -789,7 +789,7 @@ writeMachineSuitabilityConstraint(
 							   &thisTimeConstraint);
 			}
 
-			StateMachine *s = writerEdge->target;
+			StateMachineState *s = writerEdge->target;
 			if (dynamic_cast<StateMachineCrash *>(s) ||
 			    dynamic_cast<StateMachineNoCrash *>(s) ||
 			    dynamic_cast<StateMachineStub *>(s)) {
@@ -813,7 +813,7 @@ writeMachineSuitabilityConstraint(
 		readEvalCtxt.memLog = memLog;
 		readEvalCtxt.justPathConstraint = thisTimeConstraint;
 		bool crashes;
-		evalStateMachine(readMachine, readMachine, &crashes, chooser, oracle, readEvalCtxt);
+		evalStateMachine(readMachine, readMachine->root, &crashes, chooser, oracle, readEvalCtxt);
 		if (crashes) {
 			/* We get a crash if we evaluate the read
 			   machine after running the store machine to
@@ -864,7 +864,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 	__set_profiling(findRemoteMacroSections);
 	NdChooser chooser;
 
-	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
+	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine->root));
 	do {
 		if (TIMEOUT)
 			return false;
@@ -891,7 +891,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
 				/* Yes, move to the next state. */
-				StateMachine *s = writerEdge->target;
+				StateMachineState *s = writerEdge->target;
 				assert(!dynamic_cast<StateMachineUnreached *>(s));
 				if (dynamic_cast<StateMachineTerminal *>(s)) {
 					/* Hit the end of the writer
@@ -976,7 +976,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			readEvalCtxt.pathConstraint = pathConstraint;
 			readEvalCtxt.memLog = storesIssuedByWriter;
 			bool crashes;
-			evalStateMachine(readMachine, readMachine, &crashes, chooser, oracle, readEvalCtxt);
+			evalStateMachine(readMachine, readMachine->root, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
 				if (!sectionStart) {
 					/* The previous attempt at
@@ -1021,7 +1021,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 {
 	__set_profiling(fixSufficient);
 	NdChooser chooser;
-	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine));
+	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine->root));
 
 	do {
 		if (TIMEOUT)
@@ -1043,7 +1043,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			/* Have we hit the end of the current writer edge? */
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
 				/* Yes, move to the next state. */
-				StateMachine *s = writerEdge->target;
+				StateMachineState *s = writerEdge->target;
 				assert(!dynamic_cast<StateMachineUnreached *>(s));
 				if (dynamic_cast<StateMachineCrash *>(s) ||
 				    dynamic_cast<StateMachineNoCrash *>(s) ||
@@ -1108,7 +1108,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			readEvalCtxt.pathConstraint = pathConstraint;
 			readEvalCtxt.memLog = storesIssuedByWriter;
 			bool crashes;
-			evalStateMachine(probeMachine, probeMachine, &crashes, chooser, oracle, readEvalCtxt);
+			evalStateMachine(probeMachine, probeMachine->root, &crashes, chooser, oracle, readEvalCtxt);
 			if (crashes) {
 				fprintf(_logfile, "Fix is insufficient, witness: ");
 				ppIRExpr(readEvalCtxt.pathConstraint, _logfile);
@@ -1137,8 +1137,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	NdChooser chooser;
 	VexPtr<IRExpr, &ir_heap> newCondition(IRExpr_Const(IRConst_U1(0)));
 
-	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine));
-	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine));
+	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine->root));
+	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine->root));
 	while (1) {
 		if (TIMEOUT)
 			return;

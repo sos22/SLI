@@ -14,7 +14,7 @@
 
 template <typename t> void printCFG(const CFGNode<t> *cfg);
 
-typedef std::pair<StateMachine *, StateMachine *> st_pair_t;
+typedef std::pair<StateMachineState *, StateMachineState *> st_pair_t;
 typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
 
 static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
@@ -58,13 +58,15 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 		/* We now guess that we crashed because the function
 		   pointer called turned out to be NULL. */
 		return new CrashReason(VexRip(rip, irsb->stmts_used),
-				       new StateMachineBifurcate(
-					       rip,
-					       IRExpr_Unop(
-						       Iop_BadPtr,
-						       irsb->next),
-					       StateMachineCrash::get(),
-					       StateMachineNoCrash::get()));
+				       new StateMachine(
+							new StateMachineBifurcate(
+										  rip,
+										  IRExpr_Unop(
+											      Iop_BadPtr,
+											      irsb->next),
+										  StateMachineCrash::get(),
+										  StateMachineNoCrash::get()),
+							rip));
 	}
 
 	/* Next guess: it's caused by dereferencing a bad pointer.
@@ -130,13 +132,15 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 			}
 			assert(addr != NULL);
 			return new CrashReason(VexRip(rip, x),
-					       new StateMachineBifurcate(
-						       rip,
-						       IRExpr_Unop(
-							       Iop_BadPtr,
-							       addr),
-						       StateMachineCrash::get(),
-						       StateMachineNoCrash::get()));
+					       new StateMachine(
+								new StateMachineBifurcate(
+											  rip,
+											  IRExpr_Unop(
+												      Iop_BadPtr,
+												      addr),
+											  StateMachineCrash::get(),
+											  StateMachineNoCrash::get()),
+								rip));
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
@@ -145,8 +149,8 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 	return NULL;
 }
 
-StateMachine *
-StateMachineTransformer::doit(StateMachine *inp, bool *done_something)
+StateMachineState *
+StateMachineTransformer::doit(StateMachineState *inp, bool *done_something)
 {
 	if (TIMEOUT)
 		return inp;
@@ -155,7 +159,7 @@ StateMachineTransformer::doit(StateMachine *inp, bool *done_something)
 		   *done_something if necessary. */
 		return memoTable[inp];
 	}
-	StateMachine *out;
+	StateMachineState *out;
 	if (inp == StateMachineCrash::get()) {
 		out = transformedCrash(done_something);
 	} else if (inp == StateMachineNoCrash::get()) {
@@ -205,7 +209,7 @@ StateMachineEdge *
 StateMachineTransformer::doit(StateMachineEdge *inp, bool *done_something)
 {
 	bool done = false;
-	StateMachine *t = doit(inp->target, &done);
+	StateMachineState *t = doit(inp->target, &done);
 	StateMachineEdge *res = new StateMachineEdge(t);
 	for (std::vector<StateMachineSideEffect *>::iterator it = inp->sideEffects.begin();
 	     it != inp->sideEffects.end();
@@ -249,8 +253,8 @@ StateMachineTransformer::doit(StateMachineEdge *inp, bool *done_something)
 	}
 }
 
-StateMachine *
-StateMachineTransformer::transform(StateMachine *inp, bool *done_something)
+StateMachineState *
+StateMachineTransformer::transform(StateMachineState *inp, bool *done_something)
 {
 	return doit(inp, done_something);
 }
@@ -511,13 +515,13 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 				      stmt->Ist.WrTmp.data);
 		break;
 	case Ist_Store: {
-		StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm);
+		StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm->root);
 		smp->target->prependSideEffect(
 			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
 				stmt->Ist.Store.data,
 				rip));
-		sm = smp;
+		sm = new StateMachine(smp, rip);
 		break;
 	}
 
@@ -538,9 +542,9 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 				sm,
 				stmt->Ist.Dirty.details->tmp,
 				IRExpr_Binder(smsel->key));
-			StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm);
+			StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm->root);
 			smp->target->prependSideEffect(smsel);
-			sm = smp;
+			sm = new StateMachine(smp, rip);
 		}  else {
 			abort();
 		}
@@ -555,13 +559,14 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 	case Ist_MBE:
 		break;
 	case Ist_Exit:
-		sm = new StateMachineBifurcate(
-			rip,
-			stmt->Ist.Exit.guard,
-			new StateMachineStub(
-				rip,
-				IRExpr_Const(stmt->Ist.Exit.dst)),
-			sm);
+		sm = new StateMachine(new StateMachineBifurcate(
+					      rip,
+					      stmt->Ist.Exit.guard,
+					      new StateMachineStub(
+						      rip,
+						      IRExpr_Const(stmt->Ist.Exit.dst)),
+					      sm->root),
+				      rip);
 		break;
 	default:
 		abort();
@@ -761,7 +766,7 @@ breakCycles(CFGNode<t> *cfg)
 	}
 }
 
-static bool storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle);
+static bool storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle);
 static bool
 storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, OracleInterface *oracle)
 {
@@ -777,7 +782,7 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 	return storeMightBeLoadedByState(sme->target, smses, oracle);
 }
 static bool
-storeMightBeLoadedByState(StateMachine *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle)
+storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle)
 {
 	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
 		return storeMightBeLoadedByStateEdge(smp->target, smses, oracle);
@@ -804,12 +809,12 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 /* Look at the state machine, compare it to the tags table, and remove
    any stores which are definitely never loaded (assuming that the
    tags table is correct). */
-static void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
-				  std::set<StateMachine *> &visited,
+static void removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done_something,
+				  std::set<StateMachineState *> &visited,
 				  const AllowableOptimisations &opt);
 static void
 removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done_something,
-		      std::set<StateMachine *> &visited,
+		      std::set<StateMachineState *> &visited,
 		      const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
@@ -829,8 +834,8 @@ removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done
 	removeRedundantStores(sme->target, oracle, done_something, visited, opt);
 }
 static void
-removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
-		      std::set<StateMachine *> &visited,
+removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done_something,
+		      std::set<StateMachineState *> &visited,
 		      const AllowableOptimisations &opt)
 {
 	if (visited.count(sm))
@@ -855,23 +860,23 @@ removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_some
 		      const AllowableOptimisations &opt)
 {
 	__set_profiling(removeRedundantStores);
-	std::set<StateMachine *> visited;
+	std::set<StateMachineState *> visited;
 
-	removeRedundantStores(sm, oracle, done_something, visited, opt);
+	removeRedundantStores(sm->root, oracle, done_something, visited, opt);
 }
 
 class StateMachineWalker {
-	void doit(StateMachine *s, std::set<StateMachine *> &visited);
-	void doit(StateMachineEdge *s, std::set<StateMachine *> &visited);
+	void doit(StateMachineState *s, std::set<StateMachineState *> &visited);
+	void doit(StateMachineEdge *s, std::set<StateMachineState *> &visited);
 public:
 	virtual void visitEdge(StateMachineEdge *e) {}
-	virtual void visitState(StateMachine *s) {}
+	virtual void visitState(StateMachineState *s) {}
 	virtual void visitSideEffect(StateMachineSideEffect *smse) {}
-	void doit(StateMachine *s);
+	void doit(StateMachineState *s);
 };
 
 void
-StateMachineWalker::doit(StateMachine *sm, std::set<StateMachine *> &visited)
+StateMachineWalker::doit(StateMachineState *sm, std::set<StateMachineState *> &visited)
 {
 	if (visited.count(sm))
 		return;
@@ -895,7 +900,7 @@ StateMachineWalker::doit(StateMachine *sm, std::set<StateMachine *> &visited)
 	}
 }
 void
-StateMachineWalker::doit(StateMachineEdge *se, std::set<StateMachine *> &visited)
+StateMachineWalker::doit(StateMachineEdge *se, std::set<StateMachineState *> &visited)
 {
 	visitEdge(se);
 	for (std::vector<StateMachineSideEffect *>::iterator it = se->sideEffects.begin();
@@ -905,9 +910,9 @@ StateMachineWalker::doit(StateMachineEdge *se, std::set<StateMachine *> &visited
 	doit(se->target, visited);
 }
 void
-StateMachineWalker::doit(StateMachine *s)
+StateMachineWalker::doit(StateMachineState *s)
 {
-	std::set<StateMachine *> visited;
+	std::set<StateMachineState *> visited;
 	doit(s, visited);
 }
 
@@ -926,7 +931,7 @@ static void
 findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 {
 	findAllSideEffectsVisitor v(out);
-	v.doit(sm);
+	v.doit(sm->root);
 }
 
 class findAllLoadsVisitor : public StateMachineWalker {
@@ -946,7 +951,7 @@ static void
 findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
 {
 	findAllLoadsVisitor v(out);
-	v.doit(sm);
+	v.doit(sm->root);
 }
 
 class findAllEdgesVisitor : public StateMachineWalker {
@@ -964,25 +969,25 @@ static void
 findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out)
 {
 	findAllEdgesVisitor v(out);
-	v.doit(sm);
+	v.doit(sm->root);
 }
 
 class findAllStatesVisitor : public StateMachineWalker {
 public:
-	std::set<StateMachine *> &out;
-	findAllStatesVisitor(std::set<StateMachine *> &o)
+	std::set<StateMachineState *> &out;
+	findAllStatesVisitor(std::set<StateMachineState *> &o)
 		: out(o)
 	{}
-	void visitState(StateMachine *sm)
+	void visitState(StateMachineState *sm)
 	{
 		out.insert(sm);
 	}
 };
 static void
-findAllStates(StateMachine *sm, std::set<StateMachine *> &out)
+findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 {
 	findAllStatesVisitor v(out);
-	v.doit(sm);
+	v.doit(sm->root);
 }
 
 struct avail_t {
@@ -1150,10 +1155,10 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_bad_ptr, bool *done_s
 }
 
 /* Slightly misnamed: this also propagates copy operations. */
-static StateMachine *buildNewStateMachineWithLoadsEliminated(
-	StateMachine *sm,
-	std::map<StateMachine *, avail_t> &availMap,
-	std::map<StateMachine *, StateMachine *> &memo,
+static StateMachineState *buildNewStateMachineWithLoadsEliminated(
+	StateMachineState *sm,
+	std::map<StateMachineState *, avail_t> &availMap,
+	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
 	OracleInterface *oracle,
@@ -1162,8 +1167,8 @@ static StateMachineEdge *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachineEdge *sme,
 	const avail_t &initialAvail,
-	std::map<StateMachine *, avail_t> &availMap,
-	std::map<StateMachine *, StateMachine *> &memo,
+	std::map<StateMachineState *, avail_t> &availMap,
+	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
 	OracleInterface *oracle,
@@ -1244,11 +1249,11 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 	return res;
 }
-static StateMachine *
+static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(
-	StateMachine *sm,
-	std::map<StateMachine *, avail_t> &availMap,
-	std::map<StateMachine *, StateMachine *> &memo,
+	StateMachineState *sm,
+	std::map<StateMachineState *, avail_t> &availMap,
+	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
 	OracleInterface *oracle,
@@ -1299,14 +1304,22 @@ buildNewStateMachineWithLoadsEliminated(
 static StateMachine *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
-	std::map<StateMachine *, avail_t> &availMap,
+	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
 	OracleInterface *oracle,
 	bool *done_something)
 {
-	std::map<StateMachine *, StateMachine *> memo;
-	return buildNewStateMachineWithLoadsEliminated(sm, availMap, memo, opt, alias, oracle, done_something);
+	std::map<StateMachineState *, StateMachineState *> memo;
+	bool d = false;
+	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(sm->root, availMap, memo, opt, alias, oracle,
+									      &d);
+	if (d) {
+		*done_something = true;
+		return new StateMachine(new_root, sm->origin);
+	} else {
+		return sm;
+	}
 }
 
 /* Available expression analysis on memory locations.  This isn't
@@ -1371,22 +1384,22 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	 * then use a Tarski iteration to make everything
 	 * consistent. */
 	std::set<StateMachineEdge *> allEdges;
-	std::set<StateMachine *> allStates;
+	std::set<StateMachineState *> allStates;
 	findAllEdges(sm, allEdges);
 	findAllStates(sm, allStates);
-	std::map<StateMachine *, avail_t> availOnEntry;
+	std::map<StateMachineState *, avail_t> availOnEntry;
 	std::map<StateMachineEdge *, avail_t> availOnExit;
 	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
 	     !TIMEOUT && it != allEdges.end();
 	     it++)
 		availOnExit[*it] = potentiallyAvailable;
-	for (std::set<StateMachine *>::iterator it = allStates.begin();
+	for (std::set<StateMachineState *>::iterator it = allStates.begin();
 	     !TIMEOUT && it != allStates.end();
 	     it++)
 		availOnEntry[*it] = potentiallyAvailable;
-	availOnEntry[sm].clear();
+	availOnEntry[sm->root].clear();
 
-	std::set<StateMachine *> statesNeedingRefresh(allStates);
+	std::set<StateMachineState *> statesNeedingRefresh(allStates);
 
 	/* Tarski iteration.  */
 	bool progress;
@@ -1405,7 +1418,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		     it != allEdges.end();
 		     it++) {
 			StateMachineEdge *edge = *it;
-			StateMachine *target = edge->target;
+			StateMachineState *target = edge->target;
 			avail_t &avail_at_end_of_edge(availOnExit[edge]);
 			avail_t &avail_at_start_of_target(availOnEntry[target]);
 			if (avail_at_start_of_target.intersect(avail_at_end_of_edge)) {
@@ -1418,7 +1431,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		   Use a slightly weird-looking iteration over states
 		   instead of over edges because that makes things a
 		   bit easier. */
-		for (std::set<StateMachine *>::iterator it = statesNeedingRefresh.begin();
+		for (std::set<StateMachineState *>::iterator it = statesNeedingRefresh.begin();
 		     it != statesNeedingRefresh.end();
 		     it++) {
 			if (dynamic_cast<StateMachineCrash *>(*it) ||
@@ -1474,18 +1487,18 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		done_something);
 }
 
-static StateMachine *
-rewriteStateMachine(StateMachine *sm,
-		    std::map<StateMachine *, StateMachine *> &rules,
+static StateMachineState *
+rewriteStateMachine(StateMachineState *sm,
+		    std::map<StateMachineState *, StateMachineState *> &rules,
 		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
-		    std::set<StateMachine *> &memo,
+		    std::set<StateMachineState *> &memo,
 		    std::set<StateMachineEdge *> &edgeMemo);
 
 static StateMachineEdge *
 rewriteStateMachineEdge(StateMachineEdge *sme,
-			std::map<StateMachine *, StateMachine *> &rules,
+			std::map<StateMachineState *, StateMachineState *> &rules,
 			std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
-			std::set<StateMachine *> &memo,
+			std::set<StateMachineState *> &memo,
 			std::set<StateMachineEdge *> &edgeMemo)
 {
 	if (edgeRules.count(sme)) {
@@ -1506,11 +1519,11 @@ rewriteStateMachineEdge(StateMachineEdge *sme,
 	return sme;
 }
 
-static StateMachine *
-rewriteStateMachine(StateMachine *sm,
-		    std::map<StateMachine *, StateMachine *> &rules,
+static StateMachineState *
+rewriteStateMachine(StateMachineState *sm,
+		    std::map<StateMachineState *, StateMachineState *> &rules,
 		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
-		    std::set<StateMachine *> &memo,
+		    std::set<StateMachineState *> &memo,
 		    std::set<StateMachineEdge *> &edgeMemo)
 {
 	sm->assertAcyclic();
@@ -1600,8 +1613,8 @@ assert_mapping_acyclic(std::map<t, t> &m)
 	}
 }
 
-static StateMachine *
-rewriteStateMachine(StateMachine *sm, std::map<StateMachine *, StateMachine *> &rules,
+static StateMachineState *
+rewriteStateMachine(StateMachineState *sm, std::map<StateMachineState *, StateMachineState *> &rules,
 		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules)
 {
 	/* Cyclies make this work badly. */
@@ -1609,11 +1622,20 @@ rewriteStateMachine(StateMachine *sm, std::map<StateMachine *, StateMachine *> &
 	assert_mapping_acyclic(rules);
 	assert_mapping_acyclic(edgeRules);
 
-	std::set<StateMachine *> memo;
+	std::set<StateMachineState *> memo;
 	std::set<StateMachineEdge *> edgeMemo;
 
 	return rewriteStateMachine(sm, rules, edgeRules, memo, edgeMemo);
 }
+
+static StateMachine *
+rewriteStateMachine(StateMachine *sm, std::map<StateMachineState *, StateMachineState *> &rules,
+		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules)
+{
+	sm->root = rewriteStateMachine(sm->root, rules, edgeRules);
+	return sm;
+}
+
 
 static bool
 edgesLocallyBisimilar(StateMachineEdge *sme1,
@@ -1636,8 +1658,8 @@ edgesLocallyBisimilar(StateMachineEdge *sme1,
 }
 
 static bool
-statesLocallyBisimilar(StateMachine *sm1,
-		       StateMachine *sm2,
+statesLocallyBisimilar(StateMachineState *sm1,
+		       StateMachineState *sm2,
 		       const std::set<st_edge_pair_t> &edges,
 		       const AllowableOptimisations &opt)
 {
@@ -1731,7 +1753,7 @@ statesLocallyBisimilar(StateMachine *sm1,
 static void
 buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimilarStates,
 				 std::set<st_edge_pair_t> &bisimilarEdges,
-				 const std::set<StateMachine *> *allStates,
+				 const std::set<StateMachineState *> *allStates,
 				 const AllowableOptimisations &opt)
 {
 	/* We start by assuming that all states are bisimilar to each
@@ -1741,7 +1763,7 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 	   each other.  Once we've got that, we pick one of the states
 	   as being representative of the set, and then use it in
 	   place of the other states. */
-	std::set<StateMachine *> _allStates;
+	std::set<StateMachineState *> _allStates;
 	if (!allStates) {
 		allStates = &_allStates;
 		findAllStates(sm, _allStates);
@@ -1751,10 +1773,10 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 	findAllEdges(sm, allEdges);	
 
 	/* Initially, everything is bisimilar to everything else. */
-	for (std::set<StateMachine *>::const_iterator it = allStates->begin();
+	for (std::set<StateMachineState *>::const_iterator it = allStates->begin();
 	     !TIMEOUT && it != allStates->end();
 	     it++)
-		for (std::set<StateMachine *>::const_iterator it2 = allStates->begin();
+		for (std::set<StateMachineState *>::const_iterator it2 = allStates->begin();
 		     !TIMEOUT && it2 != allStates->end();
 		     it2++)
 			bisimilarStates.insert(st_pair_t(*it, *it2));
@@ -1810,7 +1832,7 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	__set_profiling(bisimilarityReduction);
 	std::set<st_edge_pair_t> bisimilarEdges;
 	std::set<st_pair_t> bisimilarStates;
-	std::set<StateMachine *> allStates;
+	std::set<StateMachineState *> allStates;
 
 	findAllStates(sm, allStates);
 	buildStateMachineBisimilarityMap(sm, bisimilarStates, bisimilarEdges, &allStates, opt);
@@ -1818,12 +1840,12 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	if (TIMEOUT)
 		return sm;
 
-	std::map<StateMachine *, StateMachine *> canonMap;
+	std::map<StateMachineState *, StateMachineState *> canonMap;
 	/* While we're here, iterate over every bifurcation node, and
 	   if the branches are bisimilar to each other then replace it
 	   with a proxy. */
 
-	for (std::set<StateMachine *>::iterator it = allStates.begin();
+	for (std::set<StateMachineState *>::iterator it = allStates.begin();
 	     it != allStates.end();
 	     it++) {
 		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(*it);
@@ -1845,8 +1867,8 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	for (std::set<st_pair_t>::iterator it = bisimilarStates.begin();
 	     it != bisimilarStates.end();
 	     it++) {
-		StateMachine *s1 = it->first;
-		StateMachine *s2 = it->second;
+		StateMachineState *s1 = it->first;
+		StateMachineState *s2 = it->second;
 
 		/* Map the two nodes to their canonicalisations, if
 		 * they have them. */
@@ -2760,7 +2782,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 {
 	__set_profiling(CFGtoStoreMachine);
 	if (!cfg)
-		return StateMachineCrash::get();
+		return new StateMachine(StateMachineCrash::get(), 0);
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
@@ -2768,7 +2790,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	try {
 		irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
 	} catch (BadMemoryException &e) {
-		return StateMachineUnreached::get();
+		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip));
 	}
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
@@ -2793,11 +2815,13 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 						CFGtoStoreMachine(tid, as, cfg->branch, memo, oracle);
 					if (!tmpsm)
 						return NULL;
-					res = new StateMachineBifurcate(
-						wrappedRipToRip(cfg->my_rip),
-						stmt->Ist.Exit.guard,
-						tmpsm,
-						res);
+					res = new StateMachine(
+						new StateMachineBifurcate(
+							wrappedRipToRip(cfg->my_rip),
+							stmt->Ist.Exit.guard,
+							tmpsm->root,
+							res->root),
+						wrappedRipToRip(cfg->my_rip));
 				}
 			} else {
 				res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
@@ -2857,7 +2881,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	sm = optimiseStateMachine(storeMachine, alias, opt2,
 				  oracle, true, rip);
 
-	if (dynamic_cast<StateMachineUnreached *>(sm.get())) {
+	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
 		 * don't have the machine code for the relevant
 		 * library */
@@ -2981,7 +3005,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 					      oracle,
 					      false,
 					      *it);
-		cr->sm = cr->sm->selectSingleCrashingPath();
+		cr->sm->selectSingleCrashingPath();
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
 					      opt,
@@ -3089,7 +3113,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 {
 	LibVEX_maybe_gc(token);
 
-	if (is.rips.size() == 1 && sm->roughLoadCount() == StateMachine::singleLoad) {
+	if (is.rips.size() == 1 && sm->root->roughLoadCount() == StateMachineState::singleLoad) {
 		fprintf(_logfile, "Single store versus single load -> no race possible\n");
 		return false;
 	}
@@ -3163,7 +3187,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 					      oracle,
 					      false,
 					      *it);
-		cr->sm = cr->sm->selectSingleCrashingPath();
+		cr->sm->selectSingleCrashingPath();
 		cr->sm = optimiseStateMachine(cr->sm,
 					      oracle->getAliasingConfigurationForRip(*it),
 					      opt,
@@ -3417,7 +3441,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	}
 	CrashReason *res;
 	if (!cfg->branch && !cfg->fallThrough) {
-		res = new CrashReason(finalRip, StateMachineNoCrash::get());
+		res = new CrashReason(finalRip, new StateMachine(StateMachineNoCrash::get(), finalRip.rip));
 	} else {
 		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, finalRip.rip);
 		int x;
@@ -3450,11 +3474,13 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 								return NULL;
 							ft = new CrashReason(
 								newRip,
-								new StateMachineBifurcate(
-									ft->rip.rip,
-									stmt->Ist.Exit.guard,
-									other->sm,
-									ft->sm));
+								new StateMachine(
+									new StateMachineBifurcate(
+										ft->rip.rip,
+										stmt->Ist.Exit.guard,
+										other->sm->root,
+										ft->sm->root),
+									newRip.rip));
 						} else {
 							ft = new CrashReason(
 								newRip,

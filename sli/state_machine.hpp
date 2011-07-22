@@ -133,13 +133,31 @@ public:
 
 void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);
 
+class StateMachineState;
+
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
+public:
+	StateMachineState *root;
+	unsigned long origin;
+
+	StateMachine(StateMachineState *_root, unsigned long _origin)
+		: root(_root), origin(_origin)
+	{}
+	StateMachine *optimise(const AllowableOptimisations &opt,
+			       OracleInterface *oracle,
+			       bool *done_something);
+	void selectSingleCrashingPath();
+	void visit(HeapVisitor &hv) { hv(root); }
+	NAMED_CLASS
+};
+
+class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 	mutable unsigned long __hashval;
 	mutable bool have_hash;
-	void assertAcyclic(std::vector<const StateMachine *> &,
-			   std::set<const StateMachine *> &) const;
+	void assertAcyclic(std::vector<const StateMachineState *> &,
+			   std::set<const StateMachineState *> &) const;
 protected:
-	StateMachine(unsigned long _origin) : have_hash(false), origin(_origin) {}
+	StateMachineState(unsigned long _origin) : have_hash(false), origin(_origin) {}
 	virtual unsigned long _hashval() const = 0;
 	virtual void _sanity_check(const std::set<Int> &binders) const = 0;
 public:
@@ -151,10 +169,10 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachine *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
+	virtual StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
-	virtual StateMachine *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
+	virtual StateMachineState *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
 	virtual bool canCrash() = 0;
 	virtual int complexity() = 0;
 	virtual StateMachineEdge *target0() = 0;
@@ -166,11 +184,11 @@ public:
 	void assertAcyclic() const;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &out);
-	virtual void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const = 0;
-	void sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const;
+	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
+	void sanity_check(std::set<Int> &binders, std::vector<const StateMachineState *> &path) const;
 	void sanity_check() const {
 		std::set<Int> binders;
-		std::vector<const StateMachine *> path;
+		std::vector<const StateMachineState *> path;
 		sanity_check(binders, path);
 	}
 	NAMED_CLASS
@@ -196,8 +214,8 @@ class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 	mutable unsigned long _hashval;
 public:
 	unsigned long hashval() const;
-	StateMachineEdge(StateMachine *t) : have_hash(false), target(t) {}
-	StateMachine *target;
+	StateMachineEdge(StateMachineState *t) : have_hash(false), target(t) {}
+	StateMachineState *target;
 	std::vector<StateMachineSideEffect *> sideEffects;
 
 	void prependSideEffect(StateMachineSideEffect *k) {
@@ -211,7 +229,7 @@ public:
 		sideEffects = n;
 	}
 
-	void prettyPrint(FILE *f, const char *seperator, std::map<const StateMachine *, int> &labels) const {
+	void prettyPrint(FILE *f, const char *seperator, std::map<const StateMachineState *, int> &labels) const {
 		if (sideEffects.size() != 0) {
 			fprintf(f, "{");
 			bool b = true;
@@ -265,28 +283,28 @@ public:
 			r += sideEffects[i]->complexity();
 		return r;
 	}
-	void sanity_check(std::set<Int> &binders, std::vector<const StateMachine *> &path) const;
-	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const;
+	void sanity_check(std::set<Int> &binders, std::vector<const StateMachineState *> &path) const;
+	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
 	NAMED_CLASS
 };
 
-class StateMachineTerminal : public StateMachine {
+class StateMachineTerminal : public StateMachineState {
 protected:
 	virtual void prettyPrint(FILE *f) const = 0;
-	StateMachineTerminal(unsigned long rip) : StateMachine(rip) {}
+	StateMachineTerminal(unsigned long rip) : StateMachineState(rip) {}
 public:
-	StateMachine *optimise(const AllowableOptimisations &, OracleInterface *, bool *) { return this; }
+	StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
-	StateMachine *selectSingleCrashingPath() { return this; }
+	StateMachineState *selectSingleCrashingPath() { return this; }
 	int complexity() { return 1; }
 	StateMachineEdge *target0() { return NULL; }
 	const StateMachineEdge *target0() const { return NULL; }
 	StateMachineEdge *target1() { return NULL; }
 	const StateMachineEdge *target1() const { return NULL; }
-	void prettyPrint(FILE *f, std::map<const StateMachine *, int> &) const { prettyPrint(f); }
-	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const { return acc; }
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
+	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return acc; }
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
@@ -334,22 +352,22 @@ public:
 /* A state machine node which always advances to another one.  These
    can be safely eliminated, but they're sometimes kind of handy when
    you're building the machine. */
-class StateMachineProxy : public StateMachine {
+class StateMachineProxy : public StateMachineState {
 	unsigned long _hashval() const { return target->hashval(); }
 public:
 	StateMachineEdge *target;
 
-	StateMachineProxy(unsigned long origin, StateMachine *t)
-		: StateMachine(origin),
+	StateMachineProxy(unsigned long origin, StateMachineState *t)
+		: StateMachineState(origin),
 		  target(new StateMachineEdge(t))		  
 	{
 	}
 	StateMachineProxy(unsigned long origin, StateMachineEdge *t)
-		: StateMachine(origin),
+		: StateMachineState(origin),
 		  target(t)
 	{
 	}
-	void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
 	{
 		fprintf(f, "{%lx:", origin);
 		target->prettyPrint(f, "\n  ", labels);
@@ -359,7 +377,7 @@ public:
 	{
 		hv(target);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 	{
 		if (target->target == StateMachineUnreached::get()) {
 			*done_something = true;
@@ -378,7 +396,7 @@ public:
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
 		target->findUsedBinders(s, opt);
 	}
-	StateMachine *selectSingleCrashingPath() {
+	StateMachineState *selectSingleCrashingPath() {
 		target = target->selectSingleCrashingPath();
 		return this;
 	}
@@ -389,10 +407,10 @@ public:
 	StateMachineEdge *target1() { return NULL; }
 	const StateMachineEdge *target1() const { return NULL; }
 	void _sanity_check(const std::set<Int> &) const {}
-	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
+	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
 };
 
-class StateMachineBifurcate : public StateMachine {
+class StateMachineBifurcate : public StateMachineState {
 	unsigned long _hashval() const {
 		return trueTarget->hashval() * 7 + 
 			falseTarget->hashval() * 11 +
@@ -403,7 +421,7 @@ public:
 			      IRExpr *_condition,
 			      StateMachineEdge *t,
 			      StateMachineEdge *f)
-		: StateMachine(origin),
+		: StateMachineState(origin),
 		  condition(_condition),
 		  trueTarget(t),
 		  falseTarget(f)
@@ -411,9 +429,9 @@ public:
 	}	
 	StateMachineBifurcate(unsigned long origin,
 			      IRExpr *_condition,
-			      StateMachine *t,
-			      StateMachine *f)
-		: StateMachine(origin),
+			      StateMachineState *t,
+			      StateMachineState *f)
+		: StateMachineState(origin),
 		  condition(_condition),
 		  trueTarget(new StateMachineEdge(t)),
 		  falseTarget(new StateMachineEdge(f))
@@ -426,7 +444,7 @@ public:
 	StateMachineEdge *trueTarget;
 	StateMachineEdge *falseTarget;
 
-	void prettyPrint(FILE *f, std::map<const StateMachine *, int> &labels) const {
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
 		fprintf(f, "%lx: if (", origin);
 		ppIRExpr(condition, f);
 		fprintf(f, ")\n  then {\n\t");
@@ -441,7 +459,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachine *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
 	{
 		std::set<IRExpr *> t;
@@ -454,7 +472,7 @@ public:
 			s.insert(*it);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
-	StateMachine *selectSingleCrashingPath() {
+	StateMachineState *selectSingleCrashingPath() {
 		trueTarget = trueTarget->selectSingleCrashingPath();
 		falseTarget = falseTarget->selectSingleCrashingPath();
 		if (trueTarget->canCrash() && falseTarget->canCrash()) {
@@ -472,7 +490,7 @@ public:
 	StateMachineEdge *target1() { return trueTarget; }
 	const StateMachineEdge *target1() const { return trueTarget; }
 	void _sanity_check(const std::set<Int> &binders) const {checkIRExprBindersInScope(condition, binders);}
-	StateMachine::RoughLoadCount roughLoadCount(StateMachine::RoughLoadCount acc) const {
+	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const {
 		return trueTarget->roughLoadCount(
 			falseTarget->roughLoadCount(acc));
 	}
@@ -617,7 +635,6 @@ public:
 
 
 void printStateMachine(const StateMachine *sm, FILE *f);
-bool stateMachinesBisimilar(StateMachine *a, StateMachine *b);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);

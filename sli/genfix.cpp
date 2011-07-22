@@ -842,7 +842,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 
 	/* What instructions do we need to cover? */
 	std::set<unsigned long> neededInstructions;
-	summary->loadMachine->enumerateMentionedMemoryAccesses(neededInstructions);
+	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
 	/* 5 bytes is the size of a 32-bit relative jump. */
 	unsigned long root = oracle->dominator(neededInstructions, as, 5);
 	if (!root) {
@@ -852,7 +852,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
 	     it != summary->storeMachines.end();
 	     it++)
-		(*it)->machine->enumerateMentionedMemoryAccesses(neededInstructions);
+		(*it)->machine->root->enumerateMentionedMemoryAccesses(neededInstructions);
 
 	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
 
@@ -864,7 +864,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	     it != summary->storeMachines.end();
 	     it++) {
 		std::set<unsigned long> instrs;
-		(*it)->machine->enumerateMentionedMemoryAccesses(instrs);
+		(*it)->machine->root->enumerateMentionedMemoryAccesses(instrs);
 		unsigned long r = oracle->dominator(instrs, as, 5);
 		if (!r) {
 			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
