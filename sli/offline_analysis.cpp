@@ -2956,6 +2956,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 static StateMachine *
 expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				 unsigned long rip,
+				 unsigned tid,
 				 VexPtr<Oracle> &oracle,
 				 AllowableOptimisations &opt,
 				 unsigned long *new_rip,
@@ -2995,7 +2996,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		cr = ii->CFGtoCrashReason(CRASHING_THREAD, cfg, true);
+		cr = ii->CFGtoCrashReason(tid, cfg, true);
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3056,7 +3057,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 					 always initialises this if sm
 					 is non-NULL, but the compiler
 					 can't tell that. */
-	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, oracle, opt, &new_rip, token);
+	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, STORING_THREAD, oracle, opt, &new_rip, token);
 	if (!sm) {
 		fprintf(_logfile, "\t\tCannot expand store machine!\n");
 		return true;
