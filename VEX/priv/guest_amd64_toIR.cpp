@@ -4243,10 +4243,10 @@ void dis_REP_op ( unsigned tid, AMD64Condcode cond,
    if (cond == AMD64CondAlways) {
       jmp_lit(Ijk_Boring,rip);
    } else {
-      stmt( IRStmt_Exit( mk_amd64g_calculate_condition(cond, tid),
+      stmt( IRStmt_Exit( unop(Iop_Not1, mk_amd64g_calculate_condition(cond, tid)),
                          Ijk_Boring,
-                         IRConst_U64(rip) ) );
-      jmp_lit(Ijk_Boring,rip_next);
+                         IRConst_U64(rip_next) ) );
+      jmp_lit(Ijk_Boring,rip);
    }
    DIP("%s%c\n", name, nameISize(sz));
 }

@@ -2536,6 +2536,13 @@ public:
 				return true;
 		return false;
 	}
+	bool operator==(const StackRip &r) const {
+		if (valid) {
+			return r.valid && rip == r.rip && callStack == r.callStack;
+		} else {
+			return !r.valid;
+		}
+	}
 };
 
 static unsigned long
@@ -2635,8 +2642,11 @@ buildCFGForCallGraph(AddressSpace *as,
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
-				assert(!work->branchRip.valid);
-				work->branchRip = r.jump(irsb->stmts[x]->Ist.Exit.dst->Ico.U64);
+				if (work->branchRip.valid) {
+					assert(work->branchRip == r.jump(irsb->stmts[x]->Ist.Exit.dst->Ico.U64));
+				} else {
+					work->branchRip = r.jump(irsb->stmts[x]->Ist.Exit.dst->Ico.U64);
+				}
 				assert(work->branchRip.valid);
 				needed.push(std::pair<StackRip, int>(work->branchRip, depth - 1));
 			}
