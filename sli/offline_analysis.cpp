@@ -33,6 +33,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 	int x;
 	int nr_marks;
 
+	*idx = 9999999;
 	if (rip == 0) {
 		/* Probably caused by calling a bad function pointer.
 		 * Look at the call site. */
