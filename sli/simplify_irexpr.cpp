@@ -978,8 +978,8 @@ CnfAnd::optimise()
 		}
 
 		/* First rule: (A | b) & (A | ~b) -> just A. */
-		for (unsigned i = 0; i < args.size(); i++) {
-			for (unsigned j = i + 1; j < args.size(); j++) {
+		for (unsigned i = 0; !TIMEOUT && i < args.size(); i++) {
+			for (unsigned j = i + 1; !TIMEOUT && j < args.size(); j++) {
 				/* If two terms differ in a single
 				   atom, and that difference is just
 				   whether the atom is negatated, they
@@ -994,7 +994,7 @@ CnfAnd::optimise()
 				haveDifference = false;
 				haveDisallowedDifference = false;
 				for (unsigned k = 0;
-				     k < argi->args.size();
+				     !TIMEOUT && k < argi->args.size();
 				     k++) {
 					if (argi->getArg(k)->getId() !=
 					    argj->getArg(k)->getId())
@@ -1006,7 +1006,7 @@ CnfAnd::optimise()
 							haveDifference = true;
 					}
 				}
-				if (haveDisallowedDifference)
+				if (TIMEOUT || haveDisallowedDifference)
 					continue;
 				if (!haveDifference) {
 					/* i and j are identical ->
@@ -1017,7 +1017,7 @@ CnfAnd::optimise()
 					   from argi, and eliminate
 					   argj completely. */
 					for (unsigned k = 0;
-					     1;
+					     !TIMEOUT;
 					     k++) {
 						assert(k < argi->args.size());
 						assert(argi->getArg(k)->getId() ==
@@ -1038,14 +1038,14 @@ CnfAnd::optimise()
 		}
 
 		/* Second rule: A & (A | B) -> A */
-		for (unsigned i = 0; i < args.size(); i++) {
-			for (unsigned j = 0; j < args.size(); j++) {
+		for (unsigned i = 0; !TIMEOUT && i < args.size(); i++) {
+			for (unsigned j = 0; !TIMEOUT && j < args.size(); j++) {
 				if (i == j)
 					continue;
 				CnfOr *argi = getArg(i);
 				CnfOr *argj = getArg(j);
 				bool iSubsetJ = true;
-				for (unsigned k = 0; iSubsetJ && k < argi->args.size(); k++) {
+				for (unsigned k = 0; !TIMEOUT && iSubsetJ && k < argi->args.size(); k++) {
 					bool present = false;
 					for (unsigned m = 0; !present && m < argj->args.size(); m++) {
 						if (argi->getArg(k)->getId() == argj->getArg(m)->getId() &&
@@ -1070,12 +1070,12 @@ CnfAnd::optimise()
 		}
 
 		/* Third rule: a & (B | ~a) -> a & B. */
-		for (unsigned i = 0; i < args.size(); i++) {
+		for (unsigned i = 0; !TIMEOUT && i < args.size(); i++) {
 			CnfOr *argi = getArg(i);
 			if (argi->args.size() != 1)
 				continue;
 			CnfVariable *argiA = argi->getArg(0);
-			for (unsigned j = 0; j < args.size(); j++) {
+			for (unsigned j = 0; !TIMEOUT && j < args.size(); j++) {
 				if (j == i)
 					continue;
 				CnfOr *argj = getArg(j);
