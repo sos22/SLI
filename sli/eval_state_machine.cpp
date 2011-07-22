@@ -258,7 +258,9 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 		assert(addr);
 		StateMachineSideEffectStore *satisfier;
+		StateMachine *satisfierMachine;
 		satisfier = NULL;
+		satisfierMachine = NULL;
 		for (memLogT::reverse_iterator it = memLog.rbegin();
 		     it != memLog.rend();
 		     it++) {
@@ -268,10 +270,11 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			if (evalExpressionsEqual(smses->addr, addr, chooser, binders, assumption, accumulatedAssumptions)) {
 				if (!collectOrderingConstraints) {
 					satisfier = smses;
+					satisfierMachine = it->first;
 					break;
 				} else {
 					if (satisfier) {
-						if (it->first != thisMachine)
+						if (it->first != satisfierMachine)
 							addOrderingConstraint(
 								smses,
 								satisfier,
@@ -285,6 +288,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 								assumption,
 								accumulatedAssumptions);
 						satisfier = smses;
+						satisfierMachine = it->first;
 					}
 				}
 			}
