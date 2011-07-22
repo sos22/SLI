@@ -1173,9 +1173,6 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		if (!chooser.advance())
 			break;
 	}	
-	fprintf(_logfile, "Crash condition: ");
-	ppIRExpr(newCondition, _logfile);
-	fprintf(_logfile, "\n");
 
 	result = simplifyIRExpr(
 		IRExpr_Binop(
@@ -1185,7 +1182,7 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		AllowableOptimisations::defaultOptimisations);
 }
 
-void
+IRExpr *
 findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 			   VexPtr<Oracle> &oracle,
 			   GarbageCollectionToken token)
@@ -1199,8 +1196,6 @@ findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 		VexPtr<IRExpr, &ir_heap> assumption(summary->storeMachines[x]->assumption);
 		findHappensBeforeRelations(probeMachine, storeMachine, res, oracle, assumption, token);
 	}
-	fprintf(_logfile, "crash requirement:\n");
-	ppIRExpr(res, _logfile);
-	fprintf(_logfile, "\n");
+	return res;
 }
 

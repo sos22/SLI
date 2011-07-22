@@ -120,8 +120,8 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 FixConsumer &haveAFix,
 				 bool considerEverything,
 				 GarbageCollectionToken token);
-void findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
-				VexPtr<Oracle> &oracle,
-				GarbageCollectionToken token);
+IRExpr *findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
+				   VexPtr<Oracle> &oracle,
+				   GarbageCollectionToken token);
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

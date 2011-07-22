@@ -34,7 +34,10 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 	__set_profiling(dumpfix);
 
 	printCrashSummary(summary, _logfile);
-	findHappensBeforeRelations(summary, oracle, token);
+	IRExpr *requirement = findHappensBeforeRelations(summary, oracle, token);
+	fprintf(_logfile, "Crash requirement:\n");
+	ppIRExpr(requirement, _logfile);
+	fprintf(_logfile, "\n");
 }
 
 void
