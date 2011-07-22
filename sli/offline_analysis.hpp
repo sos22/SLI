@@ -9,9 +9,9 @@
 #define STORING_THREAD 97
 
 class IRExprTransformer {
-	StateMachineSideEffectMemoryAccess *transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *,
-											bool *);
 protected:
+	virtual StateMachineSideEffectMemoryAccess *transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *,
+												bool *);
 	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
 	virtual IRExpr *transformIexBinder(IRExpr *e, bool *done_something) { return e; }
 	virtual IRExpr *transformIexGet(IRExpr *e, bool *done_something) { return e; }

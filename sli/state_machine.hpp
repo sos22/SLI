@@ -152,6 +152,14 @@ public:
 			content->set(delta[x].first, delta[x].second);
 		}
 	}
+	void merge(FreeVariableMap &other) {
+		for (map_t::iterator it = other.content->begin();
+		     it != other.content->end();
+		     it++) {
+			assert(!content->get(it.key()));
+			content->set(it.key(), it.value());
+		}
+	}
 	IRExpr *get(FreeVariableKey k) { IRExpr *res = content->get(k); assert(res); return res; }
 	void visit(HeapVisitor &hv) { hv(content); }
 	void applyTransformation(IRExprTransformer &t);
