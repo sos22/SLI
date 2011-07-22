@@ -583,6 +583,8 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 {
 	unsigned idx;
 	StateMachine *sm = _getProximalCause(ms, rip, thr, &idx);
+	if (!sm)
+		return NULL;
 	IRSB *irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
 	while (idx != 0) {
 		idx--;
