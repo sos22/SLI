@@ -98,7 +98,7 @@ consider_rip(unsigned long my_rip,
 	struct timeval start;
 
 	memset(&itv, 0, sizeof(itv));
-	itv.it_value.tv_sec = 120;
+	itv.it_value.tv_sec = 20;
 	setitimer(ITIMER_PROF, &itv, NULL);
 
 	gettimeofday(&start, NULL);
@@ -174,11 +174,9 @@ main(int argc, char *argv[])
 		double low_end_time;
 		double high_end_time;
 		bool first = true;
-		int cntr = 0;
 		for (std::vector<unsigned long>::iterator it = targets.begin();
-		     cntr < 50 && it != targets.end();
+		     it != targets.end();
 		     it++) {
-			cntr++;
 			_logfile = fopenf("w", "logs/%lx", *it);
 			if (!_logfile) err(1, "opening logs/%lx", *it);
 			printf("Considering %lx\n", *it);

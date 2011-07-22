@@ -1,6 +1,6 @@
 all: real_all
 
-OPTIMIZE=y
+OPTIMIZE=n
 PROFILE_FLAGS=-DMANUAL_PROFILING=1
 TARGETS=
 CPPFLAGS=-DSLI -include config.h
