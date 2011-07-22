@@ -53,10 +53,9 @@ main(int argc, char *argv[])
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 
-	VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, thr->regs.rip(), thr));
+	VexPtr<StateMachine, &ir_heap> proximal(getProximalCause(ms, thr->regs.rip(), thr));
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
-	proximal = backtrackToStartOfInstruction(CRASHING_THREAD, proximal, ms->addressSpace);
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
 	ii->addCrashReason(proximal);
@@ -70,7 +69,7 @@ main(int argc, char *argv[])
 	probeMachine = buildProbeMachine(previousInstructions,
 					 ii,
 					 oracle,
-					 proximal->rip.rip,
+					 proximal->origin,
 					 ALLOW_GC);
 	VexPtr<CrashSummary, &ir_heap> summary;
 	summary = diagnoseCrash(probeMachine, oracle, ms, true, ALLOW_GC);

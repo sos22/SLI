@@ -27,26 +27,6 @@ public:
 	}
 };
 
-class CrashReason : public GarbageCollected<CrashReason, &ir_heap> {
-public:
-	/* A crash reason represents a summary of information which is
-	   believed to be relevant in explaining a crash.  It consists
-	   of state machine and a rip, such that the state machine
-	   will evaluate to 0 if we're likely to crash and 1 if we're
-	   not. */	   
-	VexRip rip;
-	StateMachine *sm;
-
-	CrashReason(const VexRip &_rip, StateMachine *_sm)
-		: rip(_rip), sm(_sm)
-	{}
-
-	void visit(HeapVisitor &hv) { hv(sm); }
-
-	NAMED_CLASS
-};
-
-CrashReason *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
-CrashReason *backtrackToStartOfInstruction(unsigned tid, CrashReason *cr, AddressSpace *as);
+StateMachine *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
 
 #endif /* !CRASH_REASON_HPP */

@@ -77,14 +77,9 @@ consider_rip(unsigned long my_rip,
 	LibVEX_maybe_gc(token);
 
 	fprintf(_logfile, "Considering %lx...\n", my_rip);
-	VexPtr<CrashReason, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
+	VexPtr<StateMachine, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
-		return;
-	}
-	proximal = backtrackToStartOfInstruction(1, proximal, ms->addressSpace);
-	if (!proximal) {
-		fprintf(_logfile, "Can't backtrack proximal cause\n");
 		return;
 	}
 

@@ -25,8 +25,8 @@ static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
 
 /* A bunch of heuristics for figuring out why we crashed.  Returns
  * NULL on failure.  Pretty stupid. */
-CrashReason *
-getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
+static StateMachine *
+_getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *idx)
 {
 	__set_profiling(getProximalCause);
 	IRSB *irsb;
@@ -57,16 +57,16 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 
 		/* We now guess that we crashed because the function
 		   pointer called turned out to be NULL. */
-		return new CrashReason(VexRip(rip, irsb->stmts_used),
-				       new StateMachine(
-							new StateMachineBifurcate(
-										  rip,
-										  IRExpr_Unop(
-											      Iop_BadPtr,
-											      irsb->next),
-										  StateMachineCrash::get(),
-										  StateMachineNoCrash::get()),
-							rip));
+		*idx = irsb->stmts_used;
+		return new StateMachine(
+			new StateMachineBifurcate(
+				rip,
+				IRExpr_Unop(
+					Iop_BadPtr,
+					irsb->next),
+				StateMachineCrash::get(),
+				StateMachineNoCrash::get()),
+			rip);
 	}
 
 	/* Next guess: it's caused by dereferencing a bad pointer.
@@ -131,16 +131,16 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 				abort();
 			}
 			assert(addr != NULL);
-			return new CrashReason(VexRip(rip, x),
-					       new StateMachine(
-								new StateMachineBifurcate(
-											  rip,
-											  IRExpr_Unop(
-												      Iop_BadPtr,
-												      addr),
-											  StateMachineCrash::get(),
-											  StateMachineNoCrash::get()),
-								rip));
+			*idx = x;
+			return new StateMachine(
+				new StateMachineBifurcate(
+					rip,
+					IRExpr_Unop(
+						Iop_BadPtr,
+						addr),
+					StateMachineCrash::get(),
+					StateMachineNoCrash::get()),
+				rip);
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
@@ -493,7 +493,7 @@ rewriteTemporary(IRExpr *sm,
 }
 
 static StateMachine *
-backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
+backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 {
 	switch (stmt->tag) {
 	case Ist_NoOp:
@@ -515,7 +515,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 				      stmt->Ist.WrTmp.data);
 		break;
 	case Ist_Store: {
-		StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm->root);
+		StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
 		smp->target->prependSideEffect(
 			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
@@ -542,7 +542,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 				sm,
 				stmt->Ist.Dirty.details->tmp,
 				IRExpr_Binder(smsel->key));
-			StateMachineProxy *smp = new StateMachineProxy(sm->origin, sm->root);
+			StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
 			smp->target->prependSideEffect(smsel);
 			sm = new StateMachine(smp, rip);
 		}  else {
@@ -560,7 +560,7 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 		break;
 	case Ist_Exit:
 		sm = new StateMachine(new StateMachineBifurcate(
-					      rip,
+					      sm->origin,
 					      stmt->Ist.Exit.guard,
 					      new StateMachineStub(
 						      rip,
@@ -574,32 +574,19 @@ backtrackStateMachineOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long 
 	return sm;
 }
 
-static CrashReason *
-backtrackOneStatement(CrashReason *cr, IRStmt *stmt)
+StateMachine *
+getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 {
-	StateMachine *sm = cr->sm;
-
-	VexRip newRip(cr->rip);
-	assert(newRip.idx > 0);
-	newRip.idx--;
-	newRip.changedIdx();
-	sm = backtrackStateMachineOneStatement(sm, stmt, cr->rip.rip);
-	if (!sm)
-		return NULL;
-	return new CrashReason(newRip, sm);
-}
-
-CrashReason *
-backtrackToStartOfInstruction(unsigned tid, CrashReason *cr, AddressSpace *as)
-{
-	IRSB *irsb = as->getIRSBForAddress(tid, cr->rip.rip);
-	assert((int)cr->rip.idx <= irsb->stmts_used);
-	while (cr->rip.idx != 0) {
-		cr = backtrackOneStatement(cr, irsb->stmts[cr->rip.idx-1]);
-		if (!cr)
+	unsigned idx;
+	StateMachine *sm = _getProximalCause(ms, rip, thr, &idx);
+	IRSB *irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
+	while (idx != 0) {
+		idx--;
+		sm = backtrackOneStatement(sm, irsb->stmts[idx], rip);
+		if (!sm)
 			return NULL;
 	}
-	return cr;
+	return sm;
 }
 
 template <typename t> void
@@ -2824,7 +2811,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 						wrappedRipToRip(cfg->my_rip));
 				}
 			} else {
-				res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
+			  res = backtrackOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
 				if (!res)
 					return NULL;
 			}
@@ -2842,7 +2829,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		assert(idx > 0);
 		while (idx != 0) {
 			IRStmt *stmt = irsb->stmts[idx-1];
-			res = backtrackStateMachineOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
+			res = backtrackOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
 			if (!res)
 				return NULL;
 			idx--;
@@ -2970,14 +2957,14 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	}
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
-	ii->addCrashReason(new CrashReason(VexRip(rip,0), sm));
+	ii->addCrashReason(sm);
 
 	InstructionSet interesting;
 	interesting.rips.insert(rip);
 
 	std::set<unsigned long> terminalFunctions;
 
-	VexPtr<CrashReason, &ir_heap> cr;
+	VexPtr<StateMachine, &ir_heap> cr;
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     !TIMEOUT && it != previousInstructions.end();
@@ -2999,24 +2986,24 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 			return NULL;
 		}
 
-		cr->sm = optimiseStateMachine(cr->sm,
-					      oracle->getAliasingConfigurationForRip(*it),
-					      opt,
-					      oracle,
-					      false,
-					      *it);
-		cr->sm->selectSingleCrashingPath();
-		cr->sm = optimiseStateMachine(cr->sm,
-					      oracle->getAliasingConfigurationForRip(*it),
-					      opt,
-					      oracle,
-					      false,
-					      *it);
+		cr = optimiseStateMachine(cr,
+					  oracle->getAliasingConfigurationForRip(*it),
+					  opt,
+					  oracle,
+					  false,
+					  *it);
+		cr->selectSingleCrashingPath();
+		cr = optimiseStateMachine(cr,
+					  oracle->getAliasingConfigurationForRip(*it),
+					  opt,
+					  oracle,
+					  false,
+					  *it);
 	}
 	if (TIMEOUT)
 		return NULL;
-	*new_rip = cr->rip.rip;
-	return cr->sm;
+	*new_rip = cr->origin;
+	return cr;
 }
 
 static bool
@@ -3174,35 +3161,35 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		trimCFG(cfg.get(), interesting, INT_MAX, true);
 		breakCycles(cfg.get());
 
-		VexPtr<CrashReason, &ir_heap> cr(
+		VexPtr<StateMachine, &ir_heap> cr(
 			ii->CFGtoCrashReason(CRASHING_THREAD, cfg, true));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
 		}
 
-		cr->sm = optimiseStateMachine(cr->sm,
-					      oracle->getAliasingConfigurationForRip(*it),
-					      opt,
-					      oracle,
-					      false,
-					      *it);
-		cr->sm->selectSingleCrashingPath();
-		cr->sm = optimiseStateMachine(cr->sm,
-					      oracle->getAliasingConfigurationForRip(*it),
-					      opt,
-					      oracle,
-					      false,
-					      *it);
+		cr = optimiseStateMachine(cr,
+					  oracle->getAliasingConfigurationForRip(*it),
+					  opt,
+					  oracle,
+					  false,
+					  *it);
+		cr->selectSingleCrashingPath();
+		cr = optimiseStateMachine(cr,
+					  oracle->getAliasingConfigurationForRip(*it),
+					  opt,
+					  oracle,
+					  false,
+					  *it);
 
-		if (dynamic_cast<StateMachineNoCrash *>(cr->sm)) {
+		if (dynamic_cast<StateMachineNoCrash *>(cr->root)) {
 			/* Once you've reduced the machine to
 			   definitely-doesn't-crash there's not much
 			   point in looking any further, so stop. */
 			fprintf(_logfile, "Machine definitely survives -> stop now\n");
 			return NULL;
 		}
-		sm = cr->sm;
+		sm = cr;
 	}
 	if (TIMEOUT)
 		return NULL;
@@ -3429,27 +3416,27 @@ buildCFGForRipSet(AddressSpace *as,
 	return builtSoFar[start].first;
 }
 
-CrashReason *
+StateMachine *
 InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install)
 {
 	if (TIMEOUT)
 		return NULL;
 	VexRip finalRip(cfg->my_rip, 0);
-	if (crashReasons->hasKey(finalRip)) {
-		assert(crashReasons->get(finalRip));
-		return crashReasons->get(finalRip);
+	if (crashReasons->hasKey(cfg->my_rip)) {
+		assert(crashReasons->get(cfg->my_rip));
+		return crashReasons->get(cfg->my_rip);
 	}
-	CrashReason *res;
+	StateMachine *res;
 	if (!cfg->branch && !cfg->fallThrough) {
-		res = new CrashReason(finalRip, new StateMachine(StateMachineNoCrash::get(), finalRip.rip));
+		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip);
 	} else {
-		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, finalRip.rip);
+		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, cfg->my_rip);
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++)
 			if (irsb->stmts[x]->tag == Ist_IMark)
 				break;
 		if (cfg->fallThrough) {
-			CrashReason *ft;
+			StateMachine *ft;
 			ft = CFGtoCrashReason(tid, cfg->fallThrough, false);
 			if (!ft)
 				return NULL;
@@ -3457,37 +3444,27 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 			    irsb->jumpkind == Ijk_Call &&
 			    cfg->fallThroughRip == extract_call_follower(irsb)) {
 				/* Calls need special handling */
-				ft = new CrashReason(finalRip,
-						     updateStateMachineForCallInstruction(tid, ft->sm, irsb, oracle));
+				ft = updateStateMachineForCallInstruction(tid, ft, irsb, oracle);
 			} else {
-				ft = new CrashReason(VexRip(finalRip.rip, x), ft->sm);
-				while (ft->rip.idx != 0) {
-					IRStmt *stmt = irsb->stmts[ft->rip.idx-1];
+				while (x != 0) {
+					x--;
+					IRStmt *stmt = irsb->stmts[x];
 					if (stmt->tag == Ist_Exit) {
-						VexRip newRip(ft->rip);
-						newRip.idx--;
-						newRip.changedIdx();
 						if (cfg->branch) {
-							CrashReason *other =
+							StateMachine *other =
 								CFGtoCrashReason(tid, cfg->branch, false);
 							if (!other)
 								return NULL;
-							ft = new CrashReason(
-								newRip,
-								new StateMachine(
-									new StateMachineBifurcate(
-										ft->rip.rip,
-										stmt->Ist.Exit.guard,
-										other->sm->root,
-										ft->sm->root),
-									newRip.rip));
-						} else {
-							ft = new CrashReason(
-								newRip,
-								ft->sm);
+							ft = new StateMachine(
+								new StateMachineBifurcate(
+									cfg->my_rip,
+									stmt->Ist.Exit.guard,
+									other->root,
+									ft->root),
+								cfg->my_rip);
 						}
 					} else {
-						ft = backtrackOneStatement(ft, stmt);
+						ft = backtrackOneStatement(ft, stmt, cfg->my_rip);
 						if (!ft)
 							return NULL;
 					}
@@ -3496,27 +3473,27 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 			res = ft;
 		} else {
 			assert(cfg->branch);
-			CrashReason *b = CFGtoCrashReason(tid, cfg->branch, false);
+			StateMachine *b = CFGtoCrashReason(tid, cfg->branch, false);
 			if (!b)
 				return NULL;
 			for (x--; x >= 0; x--)
 				if (irsb->stmts[x]->tag == Ist_Exit)
 					break;
 			assert(x > 0);
-			b = new CrashReason(VexRip(finalRip.rip, x), b->sm);
-			while (b->rip.idx != 0) {
-				IRStmt *stmt = irsb->stmts[b->rip.idx-1];
-				b = backtrackOneStatement(b, stmt);
+			while (x != 0) {
+				x--;
+				IRStmt *stmt = irsb->stmts[x];
+				b = backtrackOneStatement(b, stmt, cfg->my_rip);
 				if (!b)
 					return NULL;
 			}
 			res = b;
 		}
 	}
-	assert(finalRip == res->rip);
 	assert(res);
+	res->origin = cfg->my_rip;
 	if (install)
-		crashReasons->set(finalRip, res);
+		crashReasons->set(cfg->my_rip, res);
 	return res;
 }
 
