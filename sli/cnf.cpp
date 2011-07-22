@@ -1,11 +1,167 @@
 /* Various bits for manipulating expressions in explicit CNF form. */
+#include <map>
+
 #include "sli.h"
 #include "cnf.hpp"
+#include "offline_analysis.hpp"
 
 #include "libvex_prof.hpp"
 
 static IRExpr *internIRExpr(IRExpr *x);
 
+
+class CnfExpression : public GarbageCollected<CnfExpression>, public Named {
+public:
+	virtual CnfExpression *CNF(void) = 0;
+	virtual CnfExpression *invert() = 0;
+	virtual IRExpr *asIRExpr(std::map<int, IRExpr *> &,
+				 IRExprTransformer &) = 0;
+	virtual int complexity() = 0;
+	NAMED_CLASS
+};
+
+class CnfVariable : public CnfExpression {
+	static int nextId;
+protected:
+	char *mkName() const {
+		if (inverted)
+			return my_asprintf("~(v%d)", id);
+		else
+			return my_asprintf("v%d", id);
+	}
+public:
+	CnfExpression *CNF() { return this; }
+	CnfVariable() : id(nextId++) {}
+	CnfVariable(int _id, bool _inverted) : id(_id), inverted(_inverted) {}
+	void visit(HeapVisitor &hv) {}
+	CnfExpression *invert() { return new CnfVariable(id, !inverted); }
+	int getId() { return id; }
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m,
+			 IRExprTransformer &t)
+	{
+		IRExpr *e = t.transformIRExpr(m[id]);
+		if (inverted)
+			e = IRExpr_Unop(Iop_Not1, e);
+		return e;
+	}
+	int complexity() { return 0; }
+	int id;
+	bool inverted;
+};
+
+class CnfGrouping : public CnfExpression {
+protected:
+	char *mkName(char op) const {
+		char *acc = NULL;
+		char *acc2;
+		if (args.size() == 0)
+			return my_asprintf("(%c)", op);
+		for (unsigned x = 0; x < args.size(); x++) {
+			if (x == 0)
+				acc2 = my_asprintf("(%s", args[x]->name());
+			else
+				acc2 = my_asprintf("%s %c %s", acc, op, args[x]->name());
+			free(acc);
+			acc = acc2;
+		}
+		acc2 = my_asprintf("%s)", acc);
+		free(acc);
+		return acc2;
+	}
+public:
+	void visit(HeapVisitor &hv) {
+		for (unsigned x = 0; x < args.size(); x++)
+			hv(args[x]);
+	}
+	void addChild(CnfExpression *e) { args.push_back(e); }
+	int complexity() {
+		if (args.size() == 0)
+			return 0;
+		int acc = 1;
+		for (unsigned x = 0; x < args.size(); x++)
+			acc += args[x]->complexity();
+		return acc;
+	}
+	std::vector<CnfExpression *> args;
+};
+
+class CnfOr : public CnfGrouping {
+protected:
+	char *mkName() const { return CnfGrouping::mkName('|'); }
+public:
+	CnfExpression *CNF();
+	CnfExpression *invert();
+	void sort();
+	bool optimise(void);
+	CnfVariable *getArg(unsigned x) {
+		assert(x < args.size());
+		CnfVariable *r = dynamic_cast<CnfVariable *>(args[x]);
+		assert(r);
+		return r;
+	}
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m, IRExprTransformer &t) {
+		if (args.size() == 0) {
+			return IRExpr_Const(IRConst_U1(0));
+		} else if (args.size() == 1) {
+			return args[0]->asIRExpr(m, t);
+		} else {
+			IRExpr *work = IRExpr_Associative(Iop_Or1, NULL);
+			for (unsigned x = 0; x < args.size(); x++)
+				addArgumentToAssoc(work, args[x]->asIRExpr(m, t));
+			return work;
+		}
+	}
+};
+
+class CnfAnd : public CnfGrouping {
+	class myTransformer : public IRExprTransformer {
+	public:
+		std::map<IRExpr *, IRExpr *> cnstTable;
+		IRExprTransformer &underlying;
+		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+			if (cnstTable.count(e)) {
+				*done_something = true;
+				e = cnstTable[e];
+			}
+			e = IRExprTransformer::transformIRExpr(e, done_something);
+			e = underlying.transformIRExpr(e, done_something);
+			return e;
+		}
+		myTransformer(IRExprTransformer &_underlying)
+			: underlying(_underlying)
+		{}
+	};
+protected:
+	char *mkName() const { return CnfGrouping::mkName('&'); }
+public:
+	CnfExpression *CNF();
+	CnfExpression *invert();
+	void sort();
+	CnfOr *getArg(unsigned x) {
+		assert(x < args.size());
+		CnfOr *r = dynamic_cast<CnfOr *>(args[x]);
+		assert(r);
+		return r;
+	}
+	void optimise();
+	IRExpr *asIRExpr(std::map<int, IRExpr *> &m, IRExprTransformer &t) {
+		if (args.size() == 0) {
+			return IRExpr_Const(IRConst_U1(1));
+		} else {
+			IRExpr *work = IRExpr_Associative(Iop_And1, NULL);
+			myTransformer trans(t);
+			for (unsigned x = 0; x < args.size(); x++) {
+				IRExpr *exp = args[x]->asIRExpr(m, trans);
+				addArgumentToAssoc(work, exp);
+				if (exp->tag == Iex_Binop &&
+				    exp->Iex.Binop.op == Iop_CmpEQ64 &&
+				    exp->Iex.Binop.arg1->tag == Iex_Const)
+					trans.cnstTable[exp->Iex.Binop.arg2] = exp->Iex.Binop.arg1;
+			}
+			return work;
+		}
+	}
+};
 int CnfVariable::nextId = 450;
 
 static bool
@@ -371,31 +527,13 @@ convertIRExprToCNF(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &m)
 	return r;
 }
 
-/* A different kind of simplification: assume that @inp is a boolean
-   expression, and consists of some tree of And1, Or1, and Not1
-   expressions with other stuff at the leaves.  Treat all of the other
-   stuff as opaque boolean variables, and then convert to CNF.  Try to
-   simplify it there.  If we make any reasonable progress, convert
-   back to the standard IRExpr form and return the result.  Otherwise,
-   just return @inp. */
-IRExpr *
-simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
+static CnfAnd *
+IRExprToCnf(IRExpr *inp, CnfExpression **_root, std::map<int, IRExpr *> &varsToExprs)
 {
-	__set_profiling(simplifyIRExprAsBoolean);
+	__set_profiling(IRExprToCnf);
 	std::map<IRExpr *, CnfExpression *> exprsToVars;
-	std::map<int, IRExpr *> varsToExprs;
 	CnfExpression *root;
 	CnfAnd *a;
-	int nr_terms;
-
-	if (!((inp->tag == Iex_Unop &&
-	       inp->Iex.Unop.op == Iop_Not1) ||
-	      (inp->tag == Iex_Associative &&
-	       (inp->Iex.Associative.op == Iop_Or1 ||
-		inp->Iex.Associative.op == Iop_And1))))
-		return inp;
-
-	inp = internIRExpr(inp);
 
 	{
 		__set_profiling(buildVarMap);
@@ -405,7 +543,6 @@ simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
 		__set_profiling(convertIRExprToCNF);
 		root = convertIRExprToCNF(inp, exprsToVars);
 	}
-	nr_terms = root->complexity();
 	root = root->CNF();
 	a = dynamic_cast<CnfAnd *>(root);
 	if (!a) {
@@ -426,6 +563,36 @@ simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
 		__set_profiling(optimise_cnf);
 		a->optimise();
 	}
+
+	if (_root)
+		*_root = root;
+	return a;
+}
+
+/* A different kind of simplification: assume that @inp is a boolean
+   expression, and consists of some tree of And1, Or1, and Not1
+   expressions with other stuff at the leaves.  Treat all of the other
+   stuff as opaque boolean variables, and then convert to CNF.  Try to
+   simplify it there.  If we make any reasonable progress, convert
+   back to the standard IRExpr form and return the result.  Otherwise,
+   just return @inp. */
+IRExpr *
+simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
+{
+	__set_profiling(simplifyIRExprAsBoolean);
+	
+	if (!((inp->tag == Iex_Unop &&
+	       inp->Iex.Unop.op == Iop_Not1) ||
+	      (inp->tag == Iex_Associative &&
+	       (inp->Iex.Associative.op == Iop_Or1 ||
+		inp->Iex.Associative.op == Iop_And1))))
+		return inp;
+
+	inp = internIRExpr(inp);
+
+	std::map<int, IRExpr *> varsToExprs;
+	CnfExpression *root;
+	IRExprToCnf(inp, &root, varsToExprs);
 	IRExprTransformer t;
 	IRExpr *r;
 	{
