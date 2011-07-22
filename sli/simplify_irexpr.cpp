@@ -1191,7 +1191,7 @@ shallow_hash(const IRExpr *e)
 	case Iex_Associative:
 		return e->Iex.Associative.op * 100161727 + e->Iex.Associative.nr_arguments * 100268423 + 100176877;
 	case Iex_FreeVariable:
-		return e->Iex.FreeVariable.key * 100190957;
+		return e->Iex.FreeVariable.key.val * 100190957;
 	case Iex_ClientCallFailed:
 		return 100213697;
 	case Iex_ClientCall:

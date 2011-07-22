@@ -951,6 +951,17 @@ typedef
    struct _IRExpr
    IRExpr;
 
+class FreeVariableKey {
+public:
+   int val;
+   bool operator < (FreeVariableKey x) const {
+      return val < x.val;
+   }
+   bool operator ==(FreeVariableKey x) const {
+      return val == x.val;
+   }
+};
+
 struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
    IRExprTag tag;
    unsigned optimisationsApplied;
@@ -1157,7 +1168,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       } Associative;
 
       struct {
-	 int key;
+	 FreeVariableKey key;
       } FreeVariable;
 
       struct {
@@ -1197,7 +1208,7 @@ extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExpr *);
-extern IRExpr* IRExpr_FreeVariable ( int key );
+extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (unsigned long r, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);

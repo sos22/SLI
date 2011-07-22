@@ -178,7 +178,7 @@ IRExpr::hashval(void) const
     return h;
   }
   case Iex_FreeVariable:
-    return Iex.FreeVariable.key * 12357743;
+    return Iex.FreeVariable.key.val * 12357743;
   case Iex_ClientCall: {
     unsigned long h = Iex.ClientCall.calledRip * 3940631;
     for (unsigned x = 0; Iex.ClientCall.args[x]; x++)
@@ -1315,9 +1315,9 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
 
 static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **suffix, char **err)
 {
-  int key;
+  FreeVariableKey key;
   if (!parseThisString("free", str, &str, err) ||
-      !parseDecimalInt(&key, str, suffix, err))
+      !parseDecimalInt(&key.val, str, suffix, err))
     return false;
   *res = IRExpr_FreeVariable(key);
   return true;
@@ -1488,7 +1488,7 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       }
       return;
     case Iex_FreeVariable:
-      fprintf(f, "free%d", e->Iex.FreeVariable.key);
+      fprintf(f, "free%d", e->Iex.FreeVariable.key.val);
       return;
     case Iex_ClientCall:
       fprintf(f, "call0x%lx(", e->Iex.ClientCall.calledRip);
@@ -1987,7 +1987,7 @@ IRExpr* IRExpr_Associative(IRExpr *src)
 	  e->Iex.Associative.nr_arguments_allocated);
    return e;
 }
-IRExpr* IRExpr_FreeVariable ( int key )
+IRExpr* IRExpr_FreeVariable ( FreeVariableKey key )
 {
    IRExpr *e = new IRExpr();
    e->tag = Iex_FreeVariable;
@@ -1996,8 +1996,10 @@ IRExpr* IRExpr_FreeVariable ( int key )
 }
 IRExpr* IRExpr_FreeVariable ( )
 {
-   static int next_key;
-   return IRExpr_FreeVariable(++next_key);
+   static FreeVariableKey next_key;
+   IRExpr *res = IRExpr_FreeVariable(next_key);
+   next_key.val++;
+   return res;
 }
 IRExpr* IRExpr_ClientCall ( unsigned long r, IRExpr **args )
 {

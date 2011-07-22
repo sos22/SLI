@@ -202,6 +202,11 @@ unpickle(StateMachineSideEffectMemoryAccess *&out, Unpickler &p)
 
 #define mk_pickle(pickle, state, header)				\
 	static void							\
+	pickle(FreeVariableKey &f, state &p)				\
+	{								\
+		pickle(f.val, p);					\
+	}								\
+	static void							\
 	pickle(IRRegArray *&arr, state &p)				\
 	{								\
 		header(IRRegArray, arr);				\

@@ -1227,11 +1227,11 @@ class countFreeVariablesVisitor : public StateMachineTransformer {
 		return e;
 	}
 public:
-	std::map<int, int> counts;
+	std::map<FreeVariableKey, int> counts;
 };
 class simplifyFreeVariablesTransformer : public StateMachineTransformer {
 public:
-	std::map<int, int> &counts;
+	std::map<FreeVariableKey, int> &counts;
 	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 		switch (e->tag) {
 		case Iex_Const:
@@ -1285,7 +1285,7 @@ public:
 		}
 		return StateMachineTransformer::transformIRExpr(e, done_something);
 	}
-	simplifyFreeVariablesTransformer(std::map<int, int> &_counts)
+	simplifyFreeVariablesTransformer(std::map<FreeVariableKey, int> &_counts)
 		: counts(_counts)
 	{}
 };
