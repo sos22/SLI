@@ -798,6 +798,7 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_16Sto64:
 		case Iop_32Uto64:
 		case Iop_32Sto64:
+		case Iop_64to32:
 		case Iop_128to64:
 		case Iop_128HIto64:
 		case Iop_V128to64:
@@ -851,6 +852,7 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_F64toI64:
 		case Iop_32HLto64:
 		case Iop_DivModU64to32:
+		case Iop_Add32:
 			return Oracle::PointerAliasingSet::notAPointer;
 		default:
 			break;
@@ -898,6 +900,8 @@ irexprAliasingClass(IRExpr *expr,
 			}
 			return Oracle::PointerAliasingSet::notAPointer;
 		}
+		case Iop_Add32:
+			return Oracle::PointerAliasingSet::notAPointer;
 		default:
 			break;
 		}
@@ -916,6 +920,24 @@ irexprAliasingClass(IRExpr *expr,
 		else
 			return Oracle::PointerAliasingSet::anything;
 
+	case Iex_ClientCall: {
+		bool mightReturnStack = false;
+		for (int x = 0; !mightReturnStack && expr->Iex.ClientCall.args[x]; x++) {
+			if (irexprAliasingClass(expr->Iex.ClientCall.args[x],
+						tyenv,
+						config,
+						freeVariablesCannotAccessStack,
+						temps) &
+			    Oracle::PointerAliasingSet::stackPointer)
+				mightReturnStack = true;
+		}
+		if (mightReturnStack)
+			return Oracle::PointerAliasingSet::anything;
+		else
+			return Oracle::PointerAliasingSet::notAPointer |
+				Oracle::PointerAliasingSet::nonStackPointer;
+	}
+						
 	default:
 		break;
 	}
