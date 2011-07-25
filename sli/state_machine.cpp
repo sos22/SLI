@@ -568,12 +568,32 @@ FreeVariableMap::print(FILE *f) const
 	}
 }
 
+bool
+FreeVariableMap::parse(const char *str, const char **succ, char **err)
+{
+	content = new map_t();
+	while (1) {
+		FreeVariableKey k;
+		IRExpr *val;
+		if (!parseThisString("free", str, &str, err) ||
+		    !parseDecimalInt(&k.val, str, &str, err) ||
+		    !parseThisString(" -> ", str, &str, err) ||
+		    !parseIRExpr(&val, str, &str, err) ||
+		    !parseThisChar('\n', str, &str, err))
+			break;
+		content->set(FreeVariableKey(k), val);
+	}
+	*succ = str;
+	return true;
+}
+
 void
 printStateMachine(const StateMachine *sm, FILE *f)
 {
 	std::map<const StateMachineState *, int> labels;
 	std::vector<const StateMachineState *> states;
 
+	fprintf(f, "Machine for %lx\n", sm->origin);
 	buildStateLabelTable(sm->root, labels, states);
 	for (std::vector<const StateMachineState *>::iterator it = states.begin();
 	     it != states.end();
@@ -637,7 +657,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 	}
 }
 
-static bool
+bool
 parseStateMachineSideEffect(StateMachineSideEffect **out,
 			    const char *str,
 			    const char **suffix,
@@ -798,7 +818,7 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix,
 
 	while (*str) {
 		if (!parseOneState(labelToState, str, &str, err))
-			return false;
+			break;
 	}
 	if (!labelToState.count(1)) {
 		*err = (char *)"label 1 must be defined";
@@ -808,16 +828,29 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix,
 	     it != labelToState.end();
 	     it++) {
 		if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(it->second)) {
-			smp->target->target =
-				labelToState[(int)(unsigned long)smp->target->target];
-			assert(smp->target->target);
+			StateMachineState *t = labelToState[(int)(unsigned long)smp->target->target];
+			if (!t) {
+				*err = vex_asprintf("Label %d not defined",
+						    (int)(unsigned long)smp->target->target);
+				return false;
+			}
+			smp->target->target = t;
 		} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(it->second)) {
-			smb->trueTarget->target =
-				labelToState[(int)(unsigned long)smb->trueTarget->target];
-			smb->falseTarget->target =
-				labelToState[(int)(unsigned long)smb->falseTarget->target];
-			assert(smb->trueTarget->target);
-			assert(smb->falseTarget->target);
+			StateMachineState *t = labelToState[(int)(unsigned long)smb->trueTarget->target];
+			StateMachineState *f = labelToState[(int)(unsigned long)smb->falseTarget->target];
+			if (!t) {
+				*err = vex_asprintf("Label %d not defined",
+						    (int)(unsigned long)smb->trueTarget->target);
+				return false;
+			}
+			if (!f) {
+				*err = vex_asprintf("Label %d not defined",
+						    (int)(unsigned long)smb->falseTarget->target);
+				return false;
+			}
+
+			smb->trueTarget->target = t;
+			smb->falseTarget->target = f;
 		} else {
 			assert(dynamic_cast<StateMachineTerminal *>(it->second));
 		}
@@ -830,10 +863,18 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix,
 bool
 parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err)
 {
-	StateMachineState *root;
-	if (!parseStateMachine(&root, str, suffix, err))
+	unsigned long origin;
+
+	if (!parseThisString("Machine for ", str, &str, err) ||
+	    !parseHexUlong(&origin, str, &str, err) ||
+	    !parseThisChar('\n', str, &str, err))
 		return false;
-	*out = new StateMachine(root, 0, true);
+	StateMachineState *root;
+	if (!parseStateMachine(&root, str, &str, err))
+		return false;
+	*out = new StateMachine(root, origin, true);
+	if (!(*out)->freeVariables.parse(str, suffix, err))
+		return false;
 	return true;
 }
 

@@ -164,6 +164,7 @@ public:
 	void visit(HeapVisitor &hv) { hv(content); }
 	void applyTransformation(IRExprTransformer &t, bool *done_something);
 	void print(FILE *f) const;
+	bool parse(const char *str, const char **succ, char **err);
 };
 
 void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);
@@ -178,6 +179,10 @@ public:
 
 	StateMachine(StateMachineState *_root, unsigned long _origin, bool ign)
 		: root(_root), origin(_origin)
+	{
+	}
+	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv)
+		: root(_root), origin(_origin), freeVariables(fv)
 	{
 	}
 	StateMachine(StateMachine *parent, StateMachineState *new_root)
@@ -689,5 +694,10 @@ StateMachine *readStateMachine(int fd);
 void applySideEffectToFreeVariables(StateMachineSideEffectLoad *c,
 				    FreeVariableMap &fv,
 				    bool *done_something);
+
+bool parseStateMachineSideEffect(StateMachineSideEffect **out,
+				 const char *str,
+				 const char **suffix,
+				 char **err);
 
 #endif /* !STATEMACHINE_HPP__ */

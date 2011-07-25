@@ -3512,39 +3512,6 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	return res;
 }
 
-void
-printCrashSummary(CrashSummary *summary, FILE *f)
-{
-	fprintf(f, "Load machine:\n");
-	printStateMachine(summary->loadMachine, f);
-
-	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
-	     it != summary->storeMachines.end();
-	     it++) {
-		CrashSummary::StoreMachineData *smd = *it;
-		fprintf(f, "Store machine:\n");
-		printStateMachine(smd->machine, f);
-		if (smd->macroSections.size() == 0) {
-			fprintf(f, "No remote macro sections\n");
-		} else {
-			fprintf(f, "Remote macro sections:\n");
-			for (std::vector<CrashSummary::StoreMachineData::macroSectionT>::iterator it2 = 
-				     smd->macroSections.begin();
-			     it2 != smd->macroSections.end();
-			     it2++) {
-				fprintf(f, "\t");
-				it2->first->prettyPrint(f);
-				fprintf(f, " to ");
-				if (it2->second)
-					it2->second->prettyPrint(f);
-				else
-					fprintf(f, "<null>");
-				fprintf(f, "\n");
-			}
-		}
-	}
-}
-
 remoteMacroSectionsT::iterator::iterator(const remoteMacroSectionsT *_owner, unsigned _idx)
 	: idx(_idx), owner(_owner)
 {}

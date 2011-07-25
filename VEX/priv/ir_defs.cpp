@@ -977,6 +977,8 @@ static const char *irOpSimpleChar(IROp op)
     return "==";
   case Iop_Not1:
     return "!";
+  case Iop_BadPtr:
+    return "BadPtr";
   default:
     return 0;
   }
@@ -1014,6 +1016,10 @@ static bool parseIROpSimple(IROp *out, const char *str, const char **suffix, cha
   }
   if (parseThisChar('!', str, suffix, err)) {
     *out = Iop_Not1;
+    return true;
+  }
+  if (parseThisString("BadPtr", str, suffix, err)) {
+    *out = Iop_BadPtr;
     return true;
   }
   *err = (char *)"expected simple IR op";
@@ -1200,7 +1206,7 @@ static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix, 
       !parseIRType(&ty, str, &str, err) ||
       !parseThisChar('(', str, &str, err) ||
       !parseIRExpr(&addr, str, &str, err) ||
-      !parseThisString(")@", str, suffix, err) ||
+      !parseThisString(")@", str, &str, err) ||
       !parseHexUlong(&rip, str, suffix, err))
     return false;
   *res = IRExpr_Load(False, Iend_LE, ty, addr, rip);

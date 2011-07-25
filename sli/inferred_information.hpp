@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <vector>
 
+#include "state_machine.hpp"
+
+class Oracle;
+
 template <typename t>
 class CFGNode : public GarbageCollected<CFGNode<t>, &ir_heap>, public PrettyPrintable {
 public:
@@ -60,13 +64,16 @@ class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 public:
 	class StoreMachineData : public GarbageCollected<StoreMachineData, &ir_heap> {
 	public:
-		StoreMachineData(StateMachine *_machine, IRExpr *_assumption)
-			: machine(_machine), assumption(_assumption)
-		{}
 		StateMachine *machine;
 		typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
 		std::vector<macroSectionT> macroSections;
 		IRExpr *assumption;
+		StoreMachineData(StateMachine *_machine, IRExpr *_assumption)
+			: machine(_machine), assumption(_assumption)
+		{}
+		StoreMachineData(StateMachine *_machine, IRExpr *_assumption, std::vector<macroSectionT> &macros)
+			: machine(_machine), macroSections(macros), assumption(_assumption)
+		{}
 		void visit(HeapVisitor &hv) {
 			hv(machine);
 			hv(assumption);
@@ -83,6 +90,9 @@ public:
 	CrashSummary(StateMachine *_loadMachine)
 		: loadMachine(_loadMachine)
 	{}
+	CrashSummary(StateMachine *_loadMachine, std::vector<StoreMachineData *> &_storeMachines)
+		: loadMachine(_loadMachine), storeMachines(_storeMachines)
+	{}
 
 	StateMachine *loadMachine;
 	std::vector<StoreMachineData *> storeMachines;
@@ -94,6 +104,9 @@ public:
 };
 
 void printCrashSummary(CrashSummary *cs, FILE *f);
+CrashSummary *readCrashSummary(int fd);
+bool parseCrashSummary(CrashSummary **out, const char *buf, const char **succ, char **err);
+
 char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
 
 class FixConsumer {
