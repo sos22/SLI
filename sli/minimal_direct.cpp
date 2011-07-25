@@ -18,14 +18,62 @@ typedef std::pair<bool, IRExpr *> DNF_Atom;
 typedef std::vector<DNF_Atom> DNF_Conjunction;
 typedef std::vector<DNF_Conjunction> DNF_Disjunction;
 
-static void dnf(IRExpr *e, DNF_Disjunction &out);
+#define DNF_MAX_DISJUNCTION 10000
+
+static bool dnf(IRExpr *e, DNF_Disjunction &out);
+
+static void
+check_memory_usage(void)
+{
+	FILE *f = fopen("/proc/self/stat", "r");
+	int pid;
+	char *name;
+	char state;
+	int ppid;
+	int pgrp;
+	int session;
+	int tty;
+	int tpgid;
+	int flags;
+	long minflt;
+	long cminflt;
+	long majflt;
+	long cmajflt;
+	long utime;
+	long stime;
+	long cstime;
+	long priority;
+	long nice;
+	long num_threads;
+	long itrealvalue;
+	long long starttime;
+	long vsize;
+
+	vsize = 0;
+	fscanf(f, "%d %as %c %d %d %d %d %d %d %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld %lld %ld",
+	       &pid, &name, &state, &ppid, &pgrp, &session, &tty, &tpgid, &flags,
+	       &minflt, &cminflt, &majflt, &cmajflt, &utime, &stime, &cstime,
+	       &priority, &nice, &num_threads, &itrealvalue, &starttime,
+	       &vsize);
+	fclose(f);
+	/* Get out if we have a vsize bigger than 6GiB */
+	if (vsize >= (6l << 30)) {
+		if (!_timed_out)
+			fprintf(_logfile, "Forcing timeout because vsize 0x%lx\n",
+				vsize);
+		_timed_out = true;
+	}
+}
 
 /* Convert @out to @out & @this_one, maintaining disjunctive normal
  * form. */
-static void
+static bool
 dnf_and(const DNF_Disjunction &this_one, DNF_Disjunction &out)
 {
 	DNF_Disjunction new_out;
+	check_memory_usage();
+	if (TIMEOUT || out.size() * this_one.size() > DNF_MAX_DISJUNCTION)
+		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
 		DNF_Conjunction &existing_conj(out[x]);
@@ -39,29 +87,34 @@ dnf_and(const DNF_Disjunction &this_one, DNF_Disjunction &out)
 		}
 	}
 	out = new_out;
+	return true;
 }
 
 /* conjoin the fragments together, convert to DNF, and then place the
-   results in @out */
-static void
+   results in @out.  Can fail if @out looks ``too big'', in which case
+   we return false; otherwise return true. */
+static bool
 dnf_and(IRExpr **fragments, int nr_fragments, DNF_Disjunction &out)
 {
+	check_memory_usage();
+	if (TIMEOUT)
+		return false;
 	if (nr_fragments == 0)
-		return;
+		return true;
 	if (out.size() == 0) {
 		dnf(fragments[0], out);
-		dnf_and(fragments + 1, nr_fragments - 1, out);
-		return;
+		return dnf_and(fragments + 1, nr_fragments - 1, out);
 	}
 	DNF_Disjunction this_one;
 	dnf(fragments[0], this_one);
-	dnf_and(this_one, out);
+	if (!dnf_and(this_one, out))
+		return false;
 
-	dnf_and(fragments + 1, nr_fragments - 1, out);
+	return dnf_and(fragments + 1, nr_fragments - 1, out);
 }
 
 /* Invert @conf and store it in @out, which must start out empty. */
-static void
+static bool
 dnf_invert(const DNF_Conjunction &conj, DNF_Disjunction &out)
 {
 	assert(out.size() == 0);
@@ -70,16 +123,19 @@ dnf_invert(const DNF_Conjunction &conj, DNF_Disjunction &out)
 		c.push_back(DNF_Atom(!conj[x].first, conj[x].second));
 		out.push_back(c);
 	}
+	return true;
 }
 
-static void
+static bool
 dnf_invert(const DNF_Disjunction &in, DNF_Disjunction &out)
 {
 	assert(out.size() == 0);
 	assert(in.size() != 0);
 
+	check_memory_usage();
 	/* Start by converting the first clause */
-	dnf_invert(in[0], out);
+	if (!dnf_invert(in[0], out))
+		return false;
 
 	/* Now we convert the remaining clauses one at a time, and'ing
 	   them in as we go.  The invariant here is that out = ~(in[0:x]),
@@ -87,10 +143,13 @@ dnf_invert(const DNF_Disjunction &in, DNF_Disjunction &out)
 	   the first x clauses only. */
 	for (unsigned x = 1; x < in.size(); x++) {
 		DNF_Disjunction r;
-		dnf_invert(in[x], r);
+		if (TIMEOUT || !dnf_invert(in[x], r))
+			return false;
 
 		/* out = ~(in[0:x-1]), r = ~in[x]. */
-		dnf_and(r, out);
+		if (!dnf_and(r, out))
+			return false;
+
 		/* out = ~in[x] & ~(in[0:x-1])
 		       = ~(in[x] | in[0:x-1])
 		       = ~(in[0:x])
@@ -98,34 +157,38 @@ dnf_invert(const DNF_Disjunction &in, DNF_Disjunction &out)
 		   so invariant is preserved.
 		*/
 	}
+	return true;
 }
 
 /* Convert @e to disjunctive normal form. */
-static void
+static bool
 dnf(IRExpr *e, DNF_Disjunction &out)
 {
+	check_memory_usage();
 	out.clear();
 	if (e->tag == Iex_Unop &&
 	    e->Iex.Unop.op == Iop_Not1) {
 		DNF_Disjunction r;
-		dnf(e->Iex.Unop.arg, r);
-		dnf_invert(r, out);
-		return;
+		if (!dnf(e->Iex.Unop.arg, r))
+			return false;
+		return dnf_invert(r, out);
 	}
 
 	if (e->tag == Iex_Associative) {
 		if (e->Iex.Associative.op == Iop_Or1) {
 			for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
+				if (TIMEOUT)
+					return false;
 				DNF_Disjunction r;
-				dnf(e->Iex.Associative.contents[x], r);
+				if (!dnf(e->Iex.Associative.contents[x], r))
+					return false;
 				out.insert(out.end(), r.begin(), r.end());
 			}
-			return;
+			return true;
 		} else if (e->Iex.Associative.op == Iop_And1) {
-			dnf_and(e->Iex.Associative.contents,
-				e->Iex.Associative.nr_arguments,
-				out);
-			return;
+			return dnf_and(e->Iex.Associative.contents,
+				       e->Iex.Associative.nr_arguments,
+				       out);
 		}
 	}
 
@@ -134,6 +197,7 @@ dnf(IRExpr *e, DNF_Disjunction &out)
 	DNF_Conjunction c;
 	c.push_back(DNF_Atom(false, e));
 	out.push_back(c);
+	return true;
 }
 
 static void
@@ -217,6 +281,21 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv)
 	}
 }
 
+static void
+zapBinders(FreeVariableMap &m, StateMachine *sm)
+{
+	std::set<StateMachineSideEffectLoad *> loads;
+	findAllLoads(sm, loads);
+	bool done_something;
+	do {
+		done_something = false;
+		for (std::set<StateMachineSideEffectLoad *>::iterator it = loads.begin();
+		     it != loads.end();
+		     it++)
+			applySideEffectToFreeVariables(*it, m, &done_something);
+	} while (done_something);
+}
+
 class DumpFix : public FixConsumer {
 public:
 	VexPtr<Oracle> &oracle;
@@ -245,11 +324,19 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 	fprintf(_logfile, "\n");
 
 	DNF_Disjunction d;
-	dnf(requirement, d);
+	if (TIMEOUT || !dnf(requirement, d)) {
+		fprintf(_logfile, "failed to convert to DNF\n");
+		return;
+	}
 	printDnf(d, _logfile);
 	FreeVariableMap m(summary->loadMachine->freeVariables);
-	for (unsigned x = 0; x < summary->storeMachines.size(); x++)
-		m.merge(summary->storeMachines[x]->machine->freeVariables);
+	zapBinders(m, summary->loadMachine);
+	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
+		FreeVariableMap n(summary->storeMachines[x]->machine->freeVariables);
+		zapBinders(n, summary->storeMachines[x]->machine);
+		m.merge(n);
+	}
+	
 	for (unsigned x = 0; x < d.size(); x++)
 		partitionCrashCondition(d[x], m);
 }
@@ -310,7 +397,7 @@ consider_rip(unsigned long my_rip,
 	struct timeval start;
 
 	memset(&itv, 0, sizeof(itv));
-	itv.it_value.tv_sec = 20;
+	itv.it_value.tv_sec = 45;
 	setitimer(ITIMER_PROF, &itv, NULL);
 
 	gettimeofday(&start, NULL);
