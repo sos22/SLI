@@ -13,7 +13,7 @@ typedef std::pair<bool, IRExpr *> DNF_Atom;
 typedef std::vector<DNF_Atom> DNF_Conjunction;
 typedef std::vector<DNF_Conjunction> DNF_Disjunction;
 
-#define DNF_MAX_DISJUNCTION 10000
+#define DNF_MAX_DISJUNCTION 1000000
 
 static bool dnf(IRExpr *e, DNF_Disjunction &out);
 
@@ -60,6 +60,46 @@ check_memory_usage(void)
 	}
 }
 
+/* Set @out to @src1 & @src2.  Return false if we find a contradiction
+   and true otherwise. */
+static bool
+merge_conjunctions(const DNF_Conjunction &src1,
+		   const DNF_Conjunction &src2,
+		   DNF_Conjunction &out)
+{
+	out.reserve(src1.size() + src2.size());
+	DNF_Conjunction::const_iterator it1 = src1.begin();
+	DNF_Conjunction::const_iterator it2 = src2.begin();
+	while (it1 != src1.end() && it2 != src2.end()) {
+		if (it1->second == it2->second) {
+			if (it1->first != it2->first) {
+				/* x & ~x -> nothing */
+				return false;
+			} else {
+				out.push_back(*it1);
+				it1++;
+				it2++;
+			}
+		} else if (it1->second < it2->second) {
+			out.push_back(*it1);
+			it1++;
+		} else {
+			assert(it1->second > it2->second);
+			out.push_back(*it2);
+			it2++;
+		}
+	}
+	while (it1 != src1.end()) {
+		out.push_back(*it1);
+		it1++;
+	}
+	while (it2 != src2.end()) {
+		out.push_back(*it2);
+		it2++;
+	}
+	return true;
+}
+
 /* Convert @out to @out & @this_one, maintaining disjunctive normal
  * form. */
 static bool
@@ -73,12 +113,13 @@ dnf_and(const DNF_Disjunction &this_one, DNF_Disjunction &out)
 	for (unsigned x = 0; x < out.size(); x++) {
 		DNF_Conjunction &existing_conj(out[x]);
 		for (unsigned z = 0; z < this_one.size(); z++) {
-			const DNF_Conjunction &new_conj(this_one[z]);
-			new_out.push_back(new_conj);
-			DNF_Conjunction &output_conj(new_out.back());
-			output_conj.insert(output_conj.end(),
-					   existing_conj.begin(),
-					   existing_conj.end());
+			new_out.resize(new_out.size() + 1);
+			if (!merge_conjunctions(this_one[z], existing_conj, new_out.back())) {
+				/* The conjunctions contradict each
+				 * other.  That means that it can be
+				 * removed completely. */
+				new_out.resize(new_out.size() - 1);
+			}
 		}
 	}
 	out = new_out;
