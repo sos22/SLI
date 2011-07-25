@@ -241,10 +241,11 @@ public:
 };
 static void
 applySideEffectToFreeVariables(StateMachineSideEffectCopy *c,
-			       FreeVariableMap &fv)
+			       FreeVariableMap &fv,
+			       bool *done_something)
 {
 	RewriteBindersTransformer t(c->key, c->value);
-	fv.applyTransformation(t);
+	fv.applyTransformation(t, done_something);
 }
 
 class RewriteBinderToLoadTransformer : public IRExprTransformer {
@@ -265,12 +266,13 @@ public:
 		return IRExprTransformer::transformIexBinder(e, done_something);
 	}
 };
-static void
+void
 applySideEffectToFreeVariables(StateMachineSideEffectLoad *c,
-			       FreeVariableMap &fv)
+			       FreeVariableMap &fv,
+			       bool *done_something)
 {
 	RewriteBinderToLoadTransformer t(c->key, c->addr);
-	fv.applyTransformation(t);
+	fv.applyTransformation(t, done_something);
 }
 
 struct availEntry {
@@ -442,14 +444,16 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		if (StateMachineSideEffectCopy *smsec =
 		    dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
 			if (!usedBinders.count(smsec->key)) {
-				applySideEffectToFreeVariables(smsec, freeVariables);
+				bool ign;
+				applySideEffectToFreeVariables(smsec, freeVariables, &ign);
 				isDead = true;
 			}
 		}
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
 			if (!usedBinders.count(smsel->key)) {
-				applySideEffectToFreeVariables(smsel, freeVariables);
+				bool ign;
+				applySideEffectToFreeVariables(smsel, freeVariables, &ign);
 				isDead = true;
 			}
 		}
@@ -1413,10 +1417,10 @@ StateMachine::selectSingleCrashingPath(void)
 }
 
 void
-FreeVariableMap::applyTransformation(IRExprTransformer &x)
+FreeVariableMap::applyTransformation(IRExprTransformer &x, bool *done_something)
 {
 	for (map_t::iterator it = content->begin();
 	     it != content->end();
 	     it++)
-		it.set_value(x.transformIRExpr(it.value()));
+		it.set_value(x.transformIRExpr(it.value(), done_something));
 }

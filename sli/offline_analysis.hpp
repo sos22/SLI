@@ -181,4 +181,6 @@ public:
 	}
 };
 
+void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
+
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

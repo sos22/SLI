@@ -940,7 +940,7 @@ public:
 			out.insert(smsel);
 	}
 };
-static void
+void
 findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
 {
 	findAllLoadsVisitor v(out);
@@ -2010,11 +2010,8 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
-			printStateMachine(sm, stdout);
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
-			printStateMachine(sm, stdout);			
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
-			printStateMachine(sm, stdout);			
 			sm = optimiseFreeVariables(sm, &done_something);
 			sm = canonicaliseRbp(sm, originRip, oracle, &done_something);
 		}
@@ -2829,7 +2826,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 						true);
 				}
 			} else {
-			  res = backtrackOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
+				res = backtrackOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
 				if (!res)
 					return NULL;
 			}

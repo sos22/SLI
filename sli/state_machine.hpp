@@ -162,7 +162,7 @@ public:
 	}
 	IRExpr *get(FreeVariableKey k) { IRExpr *res = content->get(k); assert(res); return res; }
 	void visit(HeapVisitor &hv) { hv(content); }
-	void applyTransformation(IRExprTransformer &t);
+	void applyTransformation(IRExprTransformer &t, bool *done_something);
 	void print(FILE *f) const;
 };
 
@@ -685,5 +685,9 @@ bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  const AllowableOptimisations &opt);
 bool parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err);
 StateMachine *readStateMachine(int fd);
+
+void applySideEffectToFreeVariables(StateMachineSideEffectLoad *c,
+				    FreeVariableMap &fv,
+				    bool *done_something);
 
 #endif /* !STATEMACHINE_HPP__ */
