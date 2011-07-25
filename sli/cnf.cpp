@@ -7,7 +7,6 @@
 
 #include "libvex_prof.hpp"
 
-static IRExpr *internIRExpr(IRExpr *x);
 
 
 class CnfExpression : public GarbageCollected<CnfExpression>, public Named {
@@ -815,7 +814,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	return e;
 }
 
-static IRExpr *
+IRExpr *
 internIRExpr(IRExpr *x)
 {
 	__set_profiling(internIRExpr);

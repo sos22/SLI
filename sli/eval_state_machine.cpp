@@ -5,6 +5,7 @@
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
 #include "inferred_information.hpp"
+#include "cnf.hpp"
 #include "libvex_prof.hpp"
 
 typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
@@ -54,7 +55,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 		return true;
 
 	exp = simplifyIRExpr(
-		specialiseIRExpr(exp, binders),
+		internIRExpr(specialiseIRExpr(exp, binders)),
 		AllowableOptimisations::defaultOptimisations);
 
 	/* Combine the path constraint with the new expression and see
@@ -123,6 +124,8 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, std::map<Int, IRExpr *> &binde
 		printf(" is true under assumption ");
 		ppIRExpr(*assumption, stdout);
 		printf("\n");
+	} else {
+		printf("Retread old choice\n");
 	}
 #endif
 
