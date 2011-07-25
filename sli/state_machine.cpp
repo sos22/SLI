@@ -259,7 +259,7 @@ public:
 	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
 		if (e->Iex.Binder.binder == key) {
 			if (!val)
-				val = IRExpr_Load(false, Iend_LE, Ity_I64, addr);
+				val = IRExpr_Load(false, Iend_LE, Ity_I64, addr, e->Iex.Load.rip);
 			*done_something = true;
 			return val;
 		}
@@ -1182,7 +1182,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		out->sideEffects.push_back(smsec);
 		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
 				(smsec->value->Iex.FreeVariable.key,
-				 IRExpr_Load(false, Iend_LE, Ity_I64, smsel->addr)));
+				 IRExpr_Load(false, Iend_LE, Ity_I64, smsel->addr, smsel->rip)));
 		doit = true;
 	}
 	out->target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);

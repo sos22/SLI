@@ -1801,7 +1801,8 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 				goto impossible;
 			IRExpr *v = IRExpr_Load(False, Iend_LE,
 						t,
-						stmt->Ist.Dirty.details->args[0]);
+						stmt->Ist.Dirty.details->args[0],
+						rip);
 			if (rsp)
 				rsp = rewriteTemporary(rsp, tmp, v);
 			if (rbp)

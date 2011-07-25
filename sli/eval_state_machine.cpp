@@ -300,7 +300,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		if (satisfier)
 			val = satisfier->data;
 		else
-			val = IRExpr_Load(False, Iend_LE, Ity_I64, addr);
+			val = IRExpr_Load(False, Iend_LE, Ity_I64, addr, smsel->rip);
 		if (collectOrderingConstraints)
 			memLog.push_back(
 				std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>(

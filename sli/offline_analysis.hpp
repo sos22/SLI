@@ -96,7 +96,8 @@ protected:
 			return IRExpr_Load(e->Iex.Load.isLL,
 					   e->Iex.Load.end,
 					   e->Iex.Load.ty,
-					   addr);
+					   addr,
+					   e->Iex.Load.rip);
 	}
 	virtual IRExpr *transformIexConst(IRExpr *e, bool *done_something)
 	{
