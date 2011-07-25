@@ -7,7 +7,7 @@ matches() {
 
 result() {
     mkdir -p results/$1
-    cp $f results/$1/$f
+    ln -s ../../$f results/$1/$f
     exit 0
 }
 
