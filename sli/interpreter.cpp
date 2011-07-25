@@ -835,7 +835,7 @@ eval_expression(const RegisterSet *rs,
 			   bits and the modulus in its high 64
 			   bits. */
 			unsigned long dlo, dhi;
-			if (arg1.lo == 0) {
+			if (arg1.lo == 0 || 1) {
 				dlo = dhi = 0;
 			} else {
 				asm ("div %4\n"
@@ -850,7 +850,7 @@ eval_expression(const RegisterSet *rs,
 		case Iop_DivModS128to64: {
 			unsigned long dlo;
 			unsigned long dhi;
-			if (arg1.lo == 0) {
+			if (arg1.lo == 0 || 1) {
 				dlo = dhi = 0;
 			} else {
 				asm ("idiv %4\n"
