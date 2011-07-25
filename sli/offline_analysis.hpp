@@ -183,5 +183,6 @@ public:
 };
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
+StateMachine *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

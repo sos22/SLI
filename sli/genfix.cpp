@@ -5,7 +5,6 @@
 #include "genfix.hpp"
 #include "oracle.hpp"
 #include "inferred_information.hpp"
-#include "crash_reason.hpp"
 
 typedef unsigned char Byte;
 

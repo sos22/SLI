@@ -8,7 +8,6 @@
 
 #include "sli.h"
 #include "oracle.hpp"
-#include "crash_reason.hpp"
 #include "inferred_information.hpp"
 #include "libvex_prof.hpp"
 #include "offline_analysis.hpp"

@@ -4,7 +4,6 @@
 
 #include "sli.h"
 #include "range_tree.h"
-#include "crash_reason.hpp"
 #include "state_machine.hpp"
 #include "inferred_information.hpp"
 #include "oracle.hpp"
@@ -3437,7 +3436,6 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 {
 	if (TIMEOUT)
 		return NULL;
-	VexRip finalRip(cfg->my_rip, 0);
 	if (crashReasons->hasKey(cfg->my_rip)) {
 		assert(crashReasons->get(cfg->my_rip));
 		return crashReasons->get(cfg->my_rip);

@@ -15,7 +15,6 @@
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
 #include "eval_state_machine.hpp"
-#include "crash_reason.hpp"
 #include "inferred_information.hpp"
 #include "offline_analysis.hpp"
 #include "genfix.hpp"
