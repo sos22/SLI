@@ -1,5 +1,6 @@
 #include <sys/time.h>
 #include <err.h>
+#include <errno.h>
 #include <math.h>
 #include <time.h>
 
@@ -35,11 +36,22 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 
 	printCrashSummary(summary, _logfile);
 
+	int fd;
 	static int cntr;
-	FILE *f = fopenf("w", "crash_summaries/%d", cntr);
+	char *buf = NULL;
+	do {
+		free(buf);
+		buf = my_asprintf("crash_summaries/%d", cntr);
+		cntr++;
+		fd = open(buf, O_WRONLY|O_EXCL|O_CREAT, 0600);
+	} while (fd == -1 && errno == EEXIST);
+	if (fd == -1)
+		err(1, "opening %s", buf);
+	free(buf);
+	FILE *f = fdopen(fd, "w");
 	if (!f)
-		err(1, "opening crash_summaries/%d", cntr);
-	cntr++;
+		err(1, "fdopen()");
+
 	printCrashSummary(summary, f);
 	fclose(f);
 }
