@@ -7,6 +7,7 @@
 #include "inferred_information.hpp"
 #include "oracle.hpp"
 #include "offline_analysis.hpp"
+#include "cnf.hpp"
 
 /* bool is whether to invert it or not. */
 typedef std::pair<bool, IRExpr *> DNF_Atom;
@@ -553,6 +554,38 @@ getMentionedTids(IRExpr *e, FreeVariableMap &fv, std::set<unsigned> &out)
 	t.transformIRExpr(e);
 }
 
+class ShortCircuitFvTransformer : public IRExprTransformer {
+public:
+	FreeVariableMap &fv;
+	ShortCircuitFvTransformer(FreeVariableMap &_fv)
+		: fv(_fv)
+	{}
+	IRExpr *transformIexFreeVariable(IRExpr *e, bool *done_something)
+	{
+		*done_something = true;
+		return transformIRExpr(fv.get(e->Iex.FreeVariable.key), done_something);
+	}
+};
+
+static void
+zapBindersAndFreeVariables(FreeVariableMap &m, StateMachine *sm)
+{
+	std::set<StateMachineSideEffectLoad *> loads;
+	findAllLoads(sm, loads);
+	bool done_something;
+	do {
+		done_something = false;
+		/* Step one: zap binders */
+		for (std::set<StateMachineSideEffectLoad *>::iterator it = loads.begin();
+		     it != loads.end();
+		     it++)
+			applySideEffectToFreeVariables(*it, m, &done_something);
+		/* Step two: short-circuit free variables */
+		ShortCircuitFvTransformer trans(m);
+		m.applyTransformation(trans, &done_something);
+	} while (done_something);
+}
+
 static void
 partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv)
 {
@@ -573,19 +606,11 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv)
 	}
 }
 
-static void
-zapBinders(FreeVariableMap &m, StateMachine *sm)
+static IRExpr *
+zapFreeVariables(IRExpr *src, FreeVariableMap &fv)
 {
-	std::set<StateMachineSideEffectLoad *> loads;
-	findAllLoads(sm, loads);
-	bool done_something;
-	do {
-		done_something = false;
-		for (std::set<StateMachineSideEffectLoad *>::iterator it = loads.begin();
-		     it != loads.end();
-		     it++)
-			applySideEffectToFreeVariables(*it, m, &done_something);
-	} while (done_something);
+	ShortCircuitFvTransformer trans(fv);
+	return trans.transformIRExpr(src);
 }
 
 int
@@ -612,19 +637,25 @@ main(int argc, char *argv[])
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
 
+	FreeVariableMap m(summary->loadMachine->freeVariables);
+	zapBindersAndFreeVariables(m, summary->loadMachine);
+	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
+		FreeVariableMap n(summary->storeMachines[x]->machine->freeVariables);
+		zapBindersAndFreeVariables(n, summary->storeMachines[x]->machine);
+		m.merge(n);
+	}
+
+	requirement = internIRExpr(zapFreeVariables(requirement, m));
+	fprintf(_logfile, "After free variable removal:\n");
+	ppIRExpr(requirement, _logfile);
+	fprintf(_logfile, "\n");
+
 	DNF_Disjunction d;
 	if (TIMEOUT || !dnf(requirement, d)) {
 		fprintf(_logfile, "failed to convert to DNF\n");
 		return 1;
 	}
 	printDnf(d, _logfile);
-	FreeVariableMap m(summary->loadMachine->freeVariables);
-	zapBinders(m, summary->loadMachine);
-	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
-		FreeVariableMap n(summary->storeMachines[x]->machine->freeVariables);
-		zapBinders(n, summary->storeMachines[x]->machine);
-		m.merge(n);
-	}
        
 	for (unsigned x = 0; x < d.size(); x++)
 		partitionCrashCondition(d[x], m);
