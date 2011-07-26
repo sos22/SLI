@@ -176,7 +176,12 @@ addOrderingConstraint(StateMachineSideEffectMemoryAccess *before,
 		      IRExpr **assumption,
 		      IRExpr **accumulatedAssumptions)
 {
-	IRExpr *edge = IRExpr_HappensBefore(before, after);
+	IRExpr *edge;
+	if (before->rip <= after->rip)
+		edge = IRExpr_HappensBefore(before, after);
+	else
+		edge = IRExpr_Unop(Iop_Not1,
+				   IRExpr_HappensBefore(after, before));
 	*assumption =
 		simplifyIRExpr(IRExpr_Binop(Iop_And1,
 					    edge,
