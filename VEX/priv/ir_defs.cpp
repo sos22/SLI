@@ -1331,6 +1331,33 @@ static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **
   return true;
 }
 
+static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **suffix, char **err)
+{
+  unsigned long addr;
+  if (!parseThisString("call0x", str, &str, err) ||
+      !parseHexUlong(&addr, str, &str, err) ||
+      !parseThisChar('(', str, &str, err))
+    return false;
+  std::vector<IRExpr *> args;
+  while (1) {
+    if (parseThisChar(')', str, suffix, err))
+      break;
+    if (args.size() != 0 &&
+	!parseThisString(", ", str, &str, err))
+      return false;
+    IRExpr *arg;
+    if (!parseIRExpr(&arg, str, &str, err))
+      return false;
+    args.push_back(arg);
+  }
+  IRExpr **a = alloc_irexpr_array(args.size() + 1);
+  for (unsigned x = 0; x < args.size(); x++)
+    a[x] = args[x];
+  a[args.size()] = NULL;
+  *res = IRExpr_ClientCall(addr, a);
+  return true;
+}
+
 bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err)
 {
 #define do_form(name)					\
@@ -1350,6 +1377,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err)
   do_form(Mux0X);
   do_form(Associative);
   do_form(FreeVariable);
+  do_form(ClientCall);
 #undef do_form
   return false;
 }
