@@ -177,6 +177,7 @@ Instruction::decode(AddressSpace *as,
 	bool fallsThrough = true;
 	char delta;
 	int delta32;
+	bool opsize = false;
 
 top:
 	switch (b) {
@@ -190,7 +191,10 @@ top:
 				i->immediate(1);
 				break;
 			case 5:
-				i->immediate(4);
+				if (opsize)
+					i->immediate(2);
+				else
+					i->immediate(4);
 				break;
 			case 6:
 				b = i->byte();
@@ -216,6 +220,7 @@ top:
 			   the same size as the input one. */
 			break;
 
+		case 0x1f: /* nop Ev */
 		case 0x40 ... 0x4f: /* CMOVcc Gv,Ev */
 		case 0x90 ... 0x9f: /* setcc Eb */
 		case 0xaf: /* imul Gv, Ev */
@@ -233,6 +238,11 @@ top:
 		break;
 
 	case 0x64: /* FS prefix.  Pass it through verbatim. */
+		b = i->byte();
+		goto top;
+
+	case 0x66: /* opsize prefix */
+		opsize = !opsize;
 		b = i->byte();
 		goto top;
 
@@ -264,8 +274,13 @@ top:
 		i->immediate(1);
 		break;
 	case 0x81:
-		i->modrm(4);
-		i->immediate(4);
+		if (opsize) {
+			i->modrm(2);
+			i->immediate(2);
+		} else {
+			i->modrm(4);
+			i->immediate(4);
+		}
 		break;
 
 	case 0x84 ... 0x8e:
@@ -281,6 +296,8 @@ top:
 	case 0xb8 ... 0xbf:
 		if (i->pfx.rex_w) {
 			i->immediate(8);
+		} else if (opsize) {
+			i->immediate(2);
 		} else {
 			i->immediate(4);
 		}
@@ -299,8 +316,13 @@ top:
 		i->immediate(1);
 		break;
 	case 0xc7:
-		i->modrm(4);
-		i->immediate(4);
+		if (opsize) {
+			i->modrm(2);
+			i->immediate(2);
+		} else {
+			i->modrm(4);
+			i->immediate(4);
+		}
 		break;
 	case 0xcc:
 		/* Really int3, but we treat it as a no-op because
@@ -353,8 +375,13 @@ top:
 
 	case 0xf7: /* Unary group 3 Ev */
 		if (i->modrmExtension() == 0) {
-			i->modrm(4);
-			i->immediate(4);
+			if (opsize) {
+				i->modrm(2);
+				i->immediate(2);
+			} else {
+				i->modrm(4);
+				i->immediate(4);
+			}
 		} else {
 			i->modrm(0);
 		}
@@ -837,7 +864,7 @@ add_array_summary(std::vector<const char *> &out,
 char *
 buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident)
 {
-	VexPtr<AddressSpace> as(oracle->ms->addressSpace);
+	AddressSpace *as = oracle->ms->addressSpace;
 
 	/* What instructions do we need to cover? */
 	std::set<unsigned long> neededInstructions;
@@ -919,4 +946,20 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	*cursor = 0;
 	assert(cursor == res + sz-1);
 	return res;
+}
+
+void
+CFG::print(FILE *f)
+{
+	for (ripToInstrT::iterator it = ripToInstr->begin();
+	     it != ripToInstr->end();
+	     it++) {
+		fprintf(f, "%lx[%p] -> %lx[%p], %lx[%p]\n",
+			it.key(),
+			it.value(),
+			it.value()->defaultNext,
+			it.value()->defaultNextI,
+			it.value()->branchNext,
+			it.value()->branchNextI);
+	}
 }
