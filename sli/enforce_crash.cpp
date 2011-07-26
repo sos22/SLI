@@ -8,6 +8,7 @@
 #include "oracle.hpp"
 #include "offline_analysis.hpp"
 #include "cnf.hpp"
+#include "genfix.hpp"
 
 /* bool is whether to invert it or not. */
 typedef std::pair<bool, IRExpr *> DNF_Atom;
@@ -586,24 +587,438 @@ zapBindersAndFreeVariables(FreeVariableMap &m, StateMachine *sm)
 	} while (done_something);
 }
 
+class EnumNeededAccessesTransformer : public IRExprTransformer {
+public:
+	std::set<unsigned long> &out;
+	EnumNeededAccessesTransformer(std::set<unsigned long> &_out)
+		: out(_out)
+	{}
+	IRExpr *transformIexRdTmp(IRExpr *e, bool *done_something) {
+		abort(); /* Should all have been eliminated by now */
+	}
+	IRExpr *transformIexLoad(IRExpr *e, bool *done_something) {
+		out.insert(e->Iex.Load.rip);
+		/* Note that we don't recurse into the address
+		   calculation here.  We can always evaluate this
+		   expression after seeing the load itself, regardless
+		   of where the address came from. */
+		return e;
+	}
+	IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something) {
+		out.insert(e->Iex.HappensBefore.before->rip);
+		out.insert(e->Iex.HappensBefore.after->rip);
+		/* Again, we don't recurse into the details of the
+		   happens before expression, because we only need the
+		   two instructions, and not details of their
+		   side-effects. */
+		return e;
+	}
+};
 static void
-partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv)
+enumerateNeededAccesses(IRExpr *e, std::set<unsigned long> &out)
+{
+	EnumNeededAccessesTransformer trans(out);
+	trans.transformIRExpr(e);
+}
+
+class EnforceCrashCFG : public CFG {
+	std::set<unsigned long> &neededInstructions;
+public:
+	bool instructionUseful(Instruction *i) { return neededInstructions.count(i->rip) != 0; }
+	EnforceCrashCFG(AddressSpace *as, std::set<unsigned long> &ni)
+		: CFG(as), neededInstructions(ni)
+	{}
+};
+
+class instrToInstrSetMap : public std::map<Instruction *, std::set<Instruction *> > {
+public:
+	void print(FILE *f);
+};
+void
+instrToInstrSetMap::print(FILE *f)
+{
+	for (iterator it = begin(); it != end(); it++) {
+		fprintf(f, "%lx[%p] -> {", it->first->rip, it->first);
+		for (std::set<Instruction *>::iterator it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			if (it2 != it->second.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%lx[%p]", (*it2)->rip, *it2);
+		}
+		fprintf(f, "}\n");
+	}
+}
+
+/* An encoding of the happens-before edges in a DNF clause into a map
+   over Instructions. */
+class happensAfterMapT {
+public:
+	/* happensBefore[i] -> the set of all instructions ordered before i */
+	instrToInstrSetMap happensBefore;
+	/* happensBefore[i] -> the set of all instructions ordered after i */
+	instrToInstrSetMap happensAfter;
+	happensAfterMapT(DNF_Conjunction &c, CFG *cfg);
+	void print(FILE *f) {
+		fprintf(f, "before:\n");
+		happensBefore.print(f);
+		fprintf(f, "after:\n");
+		happensAfter.print(f);
+	}
+};
+happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG *cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
-		std::set<unsigned> tids;
-		tids.clear();
-		getMentionedTids(c[x].second, fv, tids);
-		ppIRExpr(c[x].second, _logfile);
-		fprintf(_logfile, " needs threads ");
-		for (std::set<unsigned>::iterator it = tids.begin();
-		     it != tids.end();
-		     it++) {
-			if (it != tids.begin())
-				fprintf(_logfile, ", ");
-			fprintf(_logfile, "%d", *it);
+		if (c[x].second->tag == Iex_HappensBefore) {
+			unsigned long beforeRip = c[x].second->Iex.HappensBefore.before->rip;
+			unsigned long afterRip = c[x].second->Iex.HappensBefore.after->rip;
+			Instruction *before = cfg->ripToInstr->get(beforeRip);
+			Instruction *after = cfg->ripToInstr->get(afterRip);
+			assert(before);
+			assert(after);
+			if (c[x].first) {
+				Instruction *t = before;
+				before = after;
+				after = t;
+			}
+			happensAfter[before].insert(after);
+			happensBefore[after].insert(before);
 		}
-		fprintf(_logfile, "\n");
 	}
+}
+
+/* Map from instructions to instructions which happen immediately
+   before them, including those ordered by happens-before
+   relationships. */
+class predecessorMapT : public instrToInstrSetMap {
+public:
+	predecessorMapT(CFG *cfg) {
+		for (CFG::ripToInstrT::iterator it = cfg->ripToInstr->begin();
+		     it != cfg->ripToInstr->end();
+		     it++) {
+			Instruction *v = it.value();
+			if (!count(v))
+				(*this)[v];
+			if (v->defaultNextI)
+				(*this)[v->defaultNextI].insert(v);
+			if (v->branchNextI)
+				(*this)[v->branchNextI].insert(v);
+		}
+	}
+};
+
+class cfgRootSetT : public std::set<Instruction *> {
+public:
+	cfgRootSetT(CFG *cfg, predecessorMapT &pred, happensAfterMapT &happensAfter);
+};
+cfgRootSetT::cfgRootSetT(CFG *cfg, predecessorMapT &pred, happensAfterMapT &happensBefore)
+{
+	std::set<Instruction *> toEmit;
+	for (CFG::ripToInstrT::iterator it = cfg->ripToInstr->begin();
+	     it != cfg->ripToInstr->end();
+	     it++)
+		toEmit.insert(it.value());
+	while (!toEmit.empty()) {
+		/* Find one with no predecessors and emit that */
+		std::set<Instruction *>::iterator it;
+		for (it = toEmit.begin(); it != toEmit.end(); it++) {
+			assert(pred.count(*it));
+			if (pred[*it].size() == 0)
+				break;
+		}
+		if (it == toEmit.end()) {
+			/* Every instruction is part of a cycle.
+			   Arbitrarily declare that the first one is
+			   the root and emit that. */
+			it = toEmit.begin();
+		}
+		/* We're going to use *it as a root.  Purge it and
+		   everything reachable from it from the toEmit
+		   set. */
+		std::vector<Instruction *> toPurge;
+		std::set<Instruction *> donePurge;
+		toPurge.push_back(*it);
+		while (!toPurge.empty()) {
+			Instruction *purge = toPurge.back();
+			toPurge.pop_back();
+			if (donePurge.count(purge))
+				continue;
+			/* The loop breaking heuristic, above, isn't
+			   terribly clever, and can sometimes choose a
+			   bad node in a way which leads to one root
+			   being reachable from another.  Fortunately,
+			   it's easy to fix by just purging the
+			   pseudo-root here. */
+			erase(purge);
+
+			toEmit.erase(purge);
+			if (toEmit.count(purge)) {
+				if (purge->branchNextI)
+					toPurge.push_back(purge->branchNextI);
+				if (purge->defaultNextI)
+					toPurge.push_back(purge->defaultNextI);
+			}
+			donePurge.insert(purge);
+		}
+		/* Emit the new root */
+		insert(*it);
+	}
+}
+
+/* A map from Instruction * to the set of instructions which must
+ * complete before that instruction, based purely on the control flow
+ * graph. */
+class instructionDominatorMapT : public instrToInstrSetMap {
+public:
+	instructionDominatorMapT(CFG *cfg,
+				 predecessorMapT &predecessors,
+				 happensAfterMapT &happensAfter,
+				 const std::set<Instruction *> &neededInstructions);
+	/* Find all of the instructions at which the set of dominators
+	   changes i.e. does not match that of any of its
+	   predecessors. */
+	void getChangePoints(predecessorMapT &predecessors, std::set<Instruction *> &out);
+};
+instructionDominatorMapT::instructionDominatorMapT(CFG *cfg,
+						   predecessorMapT &predecessors,
+						   happensAfterMapT &happensAfter,
+						   const std::set<Instruction *> &neededInstructions)
+{
+	/* Start by assuming that everything dominates everything */
+	cfgRootSetT entryPoints(cfg, predecessors, happensAfter);
+	std::set<Instruction *> needingRecompute;
+	for (CFG::ripToInstrT::iterator it = cfg->ripToInstr->begin();
+	     it != cfg->ripToInstr->end();
+	     it++) {
+		insert(std::pair<Instruction *, std::set<Instruction *> >(
+			       it.value(),
+			       neededInstructions));
+		needingRecompute.insert(it.value());
+	}
+
+	/* Now iterate to a fixed point. */
+	while (!needingRecompute.empty()) {
+		Instruction *i;
+		{
+			std::set<Instruction *>::iterator it = needingRecompute.begin();
+			i = *it;
+			needingRecompute.erase(it);
+		}
+
+		std::set<Instruction *> &slot( (*this)[i] );
+
+		/* new entry domination set is intersection of all of
+		 * the predecessor's exit sets.  If there are no
+		 * predecessor sets then the entry domination set is
+		 * empty. */
+		std::set<Instruction *> newDominators;
+		std::set<Instruction *> &allPreds(predecessors[i]);
+		if (!allPreds.empty()) {
+			newDominators = slot;
+
+			for (std::set<Instruction *>::iterator predIt = allPreds.begin();
+			     predIt != allPreds.end();
+			     predIt++) {
+				Instruction *predecessor = *predIt;
+				assert(count(predecessor));
+				std::set<Instruction *> &pred_dominators((*this)[predecessor]);
+				for (std::set<Instruction *>::iterator it2 = newDominators.begin();
+				     it2 != newDominators.end();
+					) {
+					if (pred_dominators.count(*it2)) {
+						it2++;
+					} else {
+						/* *it2 is dominated
+						   by us, but not by
+						   our predecessor.
+						   That's a
+						   contradiction.
+						   Resolve it by
+						   erasing *it2 from
+						   our dominator
+						   set. */
+						newDominators.erase(it2++);
+					}
+				}
+			}
+		}
+
+		/* Every instruction dominates itself. */
+		if (neededInstructions.count(i))
+			newDominators.insert(i);
+
+		/* Anything dominated by something which is ordered
+		   before us is also dominated by us.  Happens-before
+		   edges are different to ordinary edges, because
+		   happens-before edges are always satisfied, whereas
+		   for ordinary control edges only one per instruction
+		   will be satisfied. */
+		std::set<Instruction *> &orderedBefore(happensAfter.happensBefore[i]);
+		for (std::set<Instruction *>::iterator it = orderedBefore.begin();
+		     it != orderedBefore.end();
+		     it++) {
+			std::set<Instruction *> &predecessor_dominates( (*this)[*it] );
+			for (std::set<Instruction *>::iterator it2 = predecessor_dominates.begin();
+			     it2 != predecessor_dominates.end();
+			     it2++)
+				newDominators.insert(*it2);
+			if (neededInstructions.count(*it))
+				newDominators.insert(*it);
+		}
+
+		if (newDominators != slot) {
+			slot = newDominators;
+			if (i->branchNextI)
+				needingRecompute.insert(i->branchNextI);
+			if (i->defaultNextI)
+				needingRecompute.insert(i->defaultNextI);
+			if (happensAfter.happensAfter.count(i)) {
+				std::set<Instruction *> &orderedAfter(happensAfter.happensAfter[i]);
+				for (std::set<Instruction *>::iterator it = orderedAfter.begin();
+				     it != orderedAfter.end();
+				     it++)
+					needingRecompute.insert(*it);
+			}
+		}
+	}
+}
+void
+instructionDominatorMapT::getChangePoints(predecessorMapT &predecessors, std::set<Instruction *> &out)
+{
+	for (iterator it = begin(); it != end(); it++) {
+		assert(predecessors.count(it->first));
+		std::set<Instruction *> &pred(predecessors[it->first]);
+		bool includeThisOne = true;
+		for (std::set<Instruction *>::iterator it2 = pred.begin();
+		     includeThisOne && it2 != pred.end();
+		     it2++) {
+			if ((*this)[*it2] == it->second)
+				includeThisOne = false;
+		}
+		if (includeThisOne)
+			out.insert(it->first);
+	}
+}
+
+class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *> > {
+	class trans1 : public IRExprTransformer {
+		std::set<Instruction *> &avail;
+		CFG *cfg;
+		bool isAvail(unsigned long rip) {
+			Instruction *i = cfg->ripToInstr->get(rip);
+			assert(i);
+			return avail.count(i) != 0;
+		}
+		IRExpr *transformIexLoad(IRExpr *e, bool *done_something) {
+			if (!isAvail(e->Iex.Load.rip))
+				isGood = false;
+			return e;
+		}
+		IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something) {
+			isGood = false;
+			return e;
+		}
+	public:
+		bool isGood;
+		trans1(std::set<Instruction *> &_avail, CFG *_cfg)
+			: avail(_avail), cfg(_cfg), isGood(true) 
+		{}
+	};
+	static bool evaluatable(IRExpr *e, std::set<Instruction *> &avail, CFG *cfg) {
+		trans1 t(avail, cfg);
+		t.transformIRExpr(e);
+		return t.isGood;
+	}
+public:
+	expressionDominatorMapT(instructionDominatorMapT &, DNF_Conjunction &,
+				predecessorMapT &, CFG *);
+};
+expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
+						 DNF_Conjunction &c,
+						 predecessorMapT &pred,
+						 CFG *cfg)
+{
+	/* First, figure out where the various expressions could in
+	   principle be evaluated. */
+	std::map<Instruction *, std::set<IRExpr *> > evalable;
+	for (instructionDominatorMapT::iterator it = idom.begin();
+	     it != idom.end();
+	     it++) {
+		evalable[it->first].clear();
+		for (unsigned x = 0; x < c.size(); x++) {
+			if (evaluatable(c[x].second, it->second, cfg))
+				evalable[it->first].insert(c[x].second);
+		}
+	}
+
+	/* Just find all of the things which are evaluatable at X but
+	   not at some of X's predecessors, for any instruction X.  I'm
+	   not entirely convinced that that's *precisely* what we're
+	   after, but it's a pretty reasonable approximation. */
+	for (std::map<Instruction *, std::set<IRExpr *> >::iterator it = evalable.begin();
+	     it != evalable.end();
+	     it++) {
+		Instruction *i = it->first;
+		std::set<IRExpr *> &theoreticallyEvaluatable(evalable[i]);
+		std::set<IRExpr *> &actuallyEvalHere((*this)[i]);
+		std::set<Instruction *> &predecessors(pred[i]);
+
+		for (std::set<IRExpr *>::iterator it2 = theoreticallyEvaluatable.begin();
+		     it2 != theoreticallyEvaluatable.end();
+		     it2++) {
+			IRExpr *expr = *it2;
+			bool takeIt = false;
+			for (std::set<Instruction *>::iterator it3 = predecessors.begin();
+			     !takeIt && it3 != predecessors.end();
+			     it3++) {
+				Instruction *predecessor = *it3;
+				if (!evalable[predecessor].count(expr))
+					takeIt = true;
+			}
+			if (takeIt) {
+				printf("Eval ");
+				ppIRExpr(expr, stdout);
+				printf(" at %lx\n", i->rip);
+				actuallyEvalHere.insert(expr);
+			}
+		}
+	}
+}
+
+static void
+partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
+			const std::set<unsigned long> &roots,
+			AddressSpace *as)
+{
+	/* Build the CFG */
+	std::set<unsigned long> neededRips(roots);
+	for (unsigned x = 0; x < c.size(); x++)
+		enumerateNeededAccesses(c[x].second, neededRips);
+	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
+	for (std::set<unsigned long>::const_iterator it = roots.begin();
+	     it != roots.end();
+	     it++)
+		cfg->add_root(*it, 100);
+	cfg->doit();
+	
+	happensAfterMapT happensAfter(c, cfg);
+
+	/* Build an instruction predecessor map */
+	predecessorMapT predecessorMap(cfg);
+
+	std::set<Instruction *> neededInstructions;
+	for (std::set<unsigned long>::iterator it = neededRips.begin();
+	     it != neededRips.end();
+	     it++)
+		neededInstructions.insert(cfg->ripToInstr->get(*it));
+
+	/* Figure out where the various instructions become
+	 * available. */
+	instructionDominatorMapT instrDominatorMap(cfg, predecessorMap, happensAfter, neededInstructions);
+
+	/* Now turn that into a map showing where the actual
+	 * expressions become available. */
+	expressionDominatorMapT exprDominatorMap(instrDominatorMap, c, predecessorMap, cfg);
 }
 
 static IRExpr *
@@ -637,12 +1052,16 @@ main(int argc, char *argv[])
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
 
+	std::set<unsigned long> roots;
+	roots.insert(summary->loadMachine->origin);
+	
 	FreeVariableMap m(summary->loadMachine->freeVariables);
 	zapBindersAndFreeVariables(m, summary->loadMachine);
 	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
 		FreeVariableMap n(summary->storeMachines[x]->machine->freeVariables);
 		zapBindersAndFreeVariables(n, summary->storeMachines[x]->machine);
 		m.merge(n);
+		roots.insert(summary->storeMachines[x]->machine->origin);
 	}
 
 	requirement = internIRExpr(zapFreeVariables(requirement, m));
@@ -658,7 +1077,7 @@ main(int argc, char *argv[])
 	printDnf(d, _logfile);
        
 	for (unsigned x = 0; x < d.size(); x++)
-		partitionCrashCondition(d[x], m);
+		partitionCrashCondition(d[x], m, roots, ms->addressSpace);
 
 	return 0;
 }

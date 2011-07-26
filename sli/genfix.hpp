@@ -93,6 +93,9 @@ public:
 		hv(as);
 	}
 	void registerInstruction(Instruction *i) { (*ripToInstr)[i->rip] = i; }
+
+	void print(FILE *logfile);
+
 	virtual void destruct() { this->~CFG(); }
 	NAMED_CLASS
 
