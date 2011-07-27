@@ -903,11 +903,17 @@ instructionDominatorMapT::getChangePoints(predecessorMapT &predecessors, std::se
 class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *> > {
 	class trans1 : public IRExprTransformer {
 		std::set<Instruction *> &avail;
+		std::set<unsigned> &availThreads;
 		CFG *cfg;
 		bool isAvail(ThreadRip rip) {
 			Instruction *i = cfg->ripToInstr->get(rip);
 			assert(i);
 			return avail.count(i) != 0;
+		}
+		IRExpr *transformIexGet(IRExpr *e, bool *done_something) {
+			if (!availThreads.count(e->Iex.Get.tid))
+				isGood = false;
+			return e;
 		}
 		IRExpr *transformIexLoad(IRExpr *e, bool *done_something) {
 			if (!isAvail(e->Iex.Load.rip))
@@ -920,12 +926,12 @@ class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *
 		}
 	public:
 		bool isGood;
-		trans1(std::set<Instruction *> &_avail, CFG *_cfg)
-			: avail(_avail), cfg(_cfg), isGood(true) 
+		trans1(std::set<Instruction *> &_avail, std::set<unsigned> &_availThreads, CFG *_cfg)
+			: avail(_avail), availThreads(_availThreads), cfg(_cfg), isGood(true) 
 		{}
 	};
-	static bool evaluatable(IRExpr *e, std::set<Instruction *> &avail, CFG *cfg) {
-		trans1 t(avail, cfg);
+	static bool evaluatable(IRExpr *e, std::set<Instruction *> &avail, std::set<unsigned> &availThreads, CFG *cfg) {
+		trans1 t(avail, availThreads, cfg);
 		t.transformIRExpr(e);
 		return t.isGood;
 	}
@@ -946,7 +952,12 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 	     it++) {
 		evalable[it->first].clear();
 		for (unsigned x = 0; x < c.size(); x++) {
-			if (evaluatable(c[x].second, it->second, cfg))
+			std::set<unsigned> availThreads;
+			for (std::set<Instruction *>::iterator it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++)
+				availThreads.insert((*it2)->rip.thread);
+			if (evaluatable(c[x].second, it->second, availThreads, cfg))
 				evalable[it->first].insert(c[x].second);
 		}
 	}
@@ -1077,8 +1088,10 @@ main(int argc, char *argv[])
 	}
 	printDnf(d, _logfile);
        
-	for (unsigned x = 0; x < d.size(); x++)
+	for (unsigned x = 0; x < d.size(); x++) {
+		printf("Examine clause %d\n", x);
 		partitionCrashCondition(d[x], m, roots, ms->addressSpace);
+	}
 
 	return 0;
 }
