@@ -59,11 +59,11 @@
 
 class GuestMemoryFetcher {
 public:
-	GuestMemoryFetcher(unsigned long _rip)
+	GuestMemoryFetcher(ThreadRip _rip)
 		: rip(_rip)
 	{}
 	virtual UChar operator[](unsigned long ptr) const = 0;
-	unsigned long rip;
+	ThreadRip rip;
 };
 
 class TrivMemoryFetcher : public GuestMemoryFetcher {
@@ -71,8 +71,9 @@ class TrivMemoryFetcher : public GuestMemoryFetcher {
 	unsigned size;
 public:
 	TrivMemoryFetcher(const UChar *_content,
+			  unsigned tid,
 			  unsigned _size) :
-		GuestMemoryFetcher((unsigned long)_content),
+		GuestMemoryFetcher(ThreadRip::mk(tid, (unsigned long)_content)),
 		content(_content),
 		size(_size)
 	{

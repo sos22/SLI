@@ -49,7 +49,7 @@ Instruction::byte()
 {
 	unsigned long t;
 	t = 0;
-	as->readMemory(rip + len, 1, &t, false, NULL);
+	as->readMemory(rip.rip + len, 1, &t, false, NULL);
 	Byte b = t;
 	emit(b);
 	return b;
@@ -59,7 +59,7 @@ int
 Instruction::int32()
 {
 	unsigned long t[4];
-	as->readMemory(rip + len, 4, t, false, NULL);
+	as->readMemory(rip.rip + len, 4, t, false, NULL);
 	emit(t[0]);
 	emit(t[1]);
 	emit(t[2]);
@@ -83,14 +83,14 @@ Instruction::modrmExtension(void)
 }
 
 class RipRelativeRelocation : public EarlyRelocation {
-	unsigned long target;
+	ThreadRip target;
 	unsigned nrImmediateBytes;
 public:
 	void doit(PatchFragment *pf);
 
 	RipRelativeRelocation(unsigned _offset,
 			      unsigned _size,
-			      unsigned long _target,
+			      ThreadRip _target,
 			      unsigned _nrImmediateBytes)
 		: EarlyRelocation(_offset, _size),
 		  target(_target),
@@ -100,12 +100,12 @@ public:
 };
 
 class RipRelativeBranchRelocation : public EarlyRelocation {
-	unsigned long target;
+	ThreadRip target;
 public:
 	void doit(PatchFragment *pf);
 	RipRelativeBranchRelocation(unsigned _offset,
 				    unsigned _size,
-				    unsigned long _target)
+				    ThreadRip _target)
 		: EarlyRelocation(_offset, _size),
 		  target(_target)
 	{
@@ -131,7 +131,8 @@ Instruction::modrm(unsigned nrImmediates)
 		int delta = *(int *)(content + len - 4);
 		relocs.push_back(new RipRelativeRelocation(len - 4,
 							   4,
-							   delta + rip + len + nrImmediates,
+							   ThreadRip::mk(rip.thread,
+									 delta + rip.rip + len + nrImmediates),
 							   nrImmediates));
 		return;
 	}
@@ -151,7 +152,7 @@ Instruction::modrm(unsigned nrImmediates)
 }
 
 Instruction *
-Instruction::pseudo(unsigned long rip)
+Instruction::pseudo(ThreadRip rip)
 {
 	Instruction *i = new Instruction();
 	i->rip = rip;
@@ -160,7 +161,7 @@ Instruction::pseudo(unsigned long rip)
 
 Instruction *
 Instruction::decode(AddressSpace *as,
-		    unsigned long start,
+		    ThreadRip start,
 		    CFG *cfg)
 {
 	Instruction *i = new Instruction();
@@ -211,7 +212,7 @@ top:
 		switch (b) {
 		case 0x80 ... 0x8f: /* 32 bit conditional jumps. */
 			delta32 = i->int32();
-			i->branchNext = i->rip + i->len + delta32;
+			i->branchNext = ThreadRip::mk(start.thread, i->rip.rip + i->len + delta32);
 			i->relocs.push_back(new RipRelativeBranchRelocation(i->len - 4, 4, i->branchNext));
 			/* Unlike 8 bit jumps, we don't need to set
 			   fallsThrough here, because the normal
@@ -253,8 +254,8 @@ top:
 		   stuff. */
 		/* Decode the instruction... */
 		delta = i->byte();
-		i->branchNext = i->rip + i->len + delta;
-		i->defaultNext = i->rip + i->len;
+		i->branchNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta);
+		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len);
 
 		/* Now rewind and emit the 32 bit version. */
 		i->len = 0;
@@ -343,7 +344,7 @@ top:
 		   does, so can't just assume that it'll cope without
 		   an epilogue. XXX */
 		int delta = *(int *)(i->content + i->len - 4);
-		unsigned long target = i->rip + i->len + delta;
+		ThreadRip target = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta);
 		i->relocs.push_back(new RipRelativeRelocation(i->len - 4,
 							      4,
 							      target,
@@ -354,7 +355,7 @@ top:
 	}
 	case 0xeb: /* jmp rel8 */
 		delta = i->byte();
-		i->defaultNext = i->rip + i->len + delta;
+		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta);
 
 		/* Don't emit this instruction at all; if it's useful,
 		 * we'll synthesise an appropriate jump later on.
@@ -368,7 +369,7 @@ top:
 
 	case 0xe9: /* jmp rel32 */
 		delta32 = i->int32();
-		i->defaultNext = i->rip + i->len + delta32;
+		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta32);
 		i->len = 0;
 		fallsThrough = false;
 		break;
@@ -396,13 +397,13 @@ top:
 	}
 
 	if (fallsThrough)
-		i->defaultNext = i->rip + i->len;
+		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len);
 
 	return i;
 }
 
 void
-CFG::decodeInstruction(unsigned long rip, unsigned max_depth)
+CFG::decodeInstruction(ThreadRip rip, unsigned max_depth)
 {
 	if (!max_depth)
 		return;
@@ -412,11 +413,11 @@ CFG::decodeInstruction(unsigned long rip, unsigned max_depth)
 	assert(i->rip == rip);
 	registerInstruction(i);
 	if (exploreInstruction(i)) {
-		if (i->branchNext)
-			pendingRips.push_back(std::pair<unsigned long, unsigned>(
+		if (i->branchNext.rip)
+			pendingRips.push_back(std::pair<ThreadRip, unsigned>(
 						      i->branchNext, max_depth - 1));
-		if (i->defaultNext)
-			pendingRips.push_back(std::pair<unsigned long, unsigned>(
+		if (i->defaultNext.rip)
+			pendingRips.push_back(std::pair<ThreadRip, unsigned>(
 						      i->defaultNext, max_depth - 1));
 	}
 }
@@ -425,7 +426,7 @@ void
 CFG::doit()
 {
 	while (!pendingRips.empty()) {
-		std::pair<unsigned long, unsigned> p = pendingRips.back();
+		std::pair<ThreadRip, unsigned> p = pendingRips.back();
 		pendingRips.pop_back();
 		if (!ripToInstr->hasKey(p.first))
 			decodeInstruction(p.first, p.second);
@@ -436,16 +437,16 @@ CFG::doit()
 	     it++) {
 		Instruction *ins = it.value();
 		ins->useful = instructionUseful(ins);
-		if (ins->defaultNext && ripToInstr->hasKey(ins->defaultNext)) {
+		if (ins->defaultNext.rip && ripToInstr->hasKey(ins->defaultNext)) {
 			Instruction *dn = (*ripToInstr)[ins->defaultNext];
-			ins->defaultNext = 0;
+			ins->defaultNext.rip = 0;
 			ins->defaultNextI = dn;
 			if (dn->useful)
 				ins->useful = true;
 		}
-		if (ins->branchNext && ripToInstr->hasKey(ins->branchNext)) {
+		if (ins->branchNext.rip && ripToInstr->hasKey(ins->branchNext)) {
 			Instruction *bn = (*ripToInstr)[ins->branchNext];
-			ins->branchNext = 0;
+			ins->branchNext.rip = 0;
 			ins->branchNextI = bn;
 			if (bn->useful)
 				bn->useful = true;
@@ -505,7 +506,7 @@ RipRelativeRelocation::doit(PatchFragment *pf)
 		pf->writeBytes(&delta, size, offset);
 	} else {
 		pf->addLateReloc(late_relocation(offset, size,
-						 vex_asprintf("0x%lx",target),
+						 vex_asprintf("0x%lx",target.rip),
 						 nrImmediateBytes, true));
 	}
 }
@@ -517,7 +518,7 @@ RipRelativeBranchRelocation::doit(PatchFragment *pf)
 	if (!pf->ripToOffset(target, &targetOffset))
 		pf->generateEpilogue(target);
 	if (!pf->ripToOffset(target, &targetOffset))
-		fail("Failed to generate epilogue for %lx\n", target);
+		fail("Failed to generate epilogue for %lx\n", target.rip);
 	int delta = targetOffset - offset - size;
 	pf->writeBytes(&delta, size, offset);
 }
@@ -555,11 +556,11 @@ PatchFragment::nextInstr(CFG *cfg)
 
 	/* Yurk.  Everything is part of a cycle.  Just pick the
 	 * instruction with the numerically smallest address. */
-	std::set<std::pair<unsigned long, Instruction *> > instrs;
+	std::set<std::pair<ThreadRip, Instruction *> > instrs;
 	for (std::map<Instruction *, bool>::iterator it = pendingInstructions.begin();
 	     it != pendingInstructions.end();
 	     it++)
-		instrs.insert(std::pair<unsigned long, Instruction *>(it->first->rip, it->first));
+		instrs.insert(std::pair<ThreadRip, Instruction *>(it->first->rip, it->first));
 	/* The set will sort on the first item in the pair, so this
 	   gives us the first instruction. */
 	assert(instrs.begin() != instrs.end());
@@ -567,7 +568,7 @@ PatchFragment::nextInstr(CFG *cfg)
 }
 
 bool
-PatchFragment::ripToOffset(unsigned long rip, unsigned *res)
+PatchFragment::ripToOffset(ThreadRip rip, unsigned *res)
 {
 	*res = 0;
 	if (!cfg->ripToInstr->hasKey(rip))
@@ -637,7 +638,7 @@ PatchFragment::emitJmpToOffset(unsigned target_offset)
 }
 
 void
-PatchFragment::emitJmpToRipClient(unsigned long rip)
+PatchFragment::emitJmpToRipClient(ThreadRip rip)
 {
 	emitJmpToOffset(0);
 	relocs.push_back(new RipRelativeBranchRelocation(content.size() - 4, 4, rip));
@@ -780,7 +781,7 @@ PatchFragment::emitStraightLine(Instruction *i)
 		if (!i->defaultNextI) {
 			/* Hit end of block, and don't want to go any
 			 * further.  Return to the original code. */
-			if (i->defaultNext) {
+			if (i->defaultNext.rip) {
 				emitJmpToRipClient(i->defaultNext);
 			} else {
 				/* Last instruction in the block was
@@ -822,24 +823,24 @@ PatchFragment::asC(const char *ident, char **relocs_name, char **trans_name, cha
 	     it++)
 		content = vex_asprintf("%s\t{0x%lx, %d},\n",
 				       content,
-				       (*it)->rip,
+				       (*it)->rip.rip,
 				       (*it)->offsetInPatch);
 	return vex_asprintf("%s};\n", content);
 }
 
 void
-PatchFragment::generateEpilogue(unsigned long exitRip)
+PatchFragment::generateEpilogue(ThreadRip exitRip)
 {
 	Instruction *i = Instruction::pseudo(exitRip);
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
-	emitJmpToRipHost(exitRip);
+	emitJmpToRipHost(exitRip.rip);
 }
 
 class DcdCFG : public CFG {
 	std::set<unsigned long> &neededInstructions;
 public:
-	bool instructionUseful(Instruction *i) { return neededInstructions.count(i->rip) != 0; }
+	bool instructionUseful(Instruction *i) { return neededInstructions.count(i->rip.rip) != 0; }
 	DcdCFG(AddressSpace *as, std::set<unsigned long> &ni)
 		: CFG(as), neededInstructions(ni)
 	{}
@@ -870,8 +871,8 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	std::set<unsigned long> neededInstructions;
 	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
 	/* 5 bytes is the size of a 32-bit relative jump. */
-	unsigned long root = oracle->dominator(neededInstructions, as, 5);
-	if (!root) {
+	ThreadRip root = ThreadRip::mk(summary->loadMachine->tid, oracle->dominator(neededInstructions, as, 5));
+	if (!root.rip) {
 		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
 		return NULL;
 	}
@@ -882,7 +883,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 
 	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
 
-	std::vector<unsigned long> roots;
+	std::vector<ThreadRip> roots;
 	/* What are the entry points of the patch? */
 	cfg->add_root(root, 100);
 	roots.push_back(root);
@@ -891,8 +892,8 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	     it++) {
 		std::set<unsigned long> instrs;
 		(*it)->machine->root->enumerateMentionedMemoryAccesses(instrs);
-		unsigned long r = oracle->dominator(instrs, as, 5);
-		if (!r) {
+		ThreadRip r = ThreadRip::mk((*it)->machine->tid, oracle->dominator(instrs, as, 5));
+		if (!r.rip) {
 			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
 			return NULL;
 		}
@@ -923,7 +924,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	fragments.push_back(entry_table_name);
 	fragments.push_back("[] = {\n");
 	for (unsigned x = 0; x < roots.size(); x++)
-		fragments.push_back(vex_asprintf("\t0x%lx,\n", roots[x]));
+		fragments.push_back(vex_asprintf("\t0x%lx,\n", roots[x].rip));
 	fragments.push_back("};\n\nstatic struct patch ");
 	fragments.push_back(ident);
 	fragments.push_back(" = {\n");
@@ -954,12 +955,15 @@ CFG::print(FILE *f)
 	for (ripToInstrT::iterator it = ripToInstr->begin();
 	     it != ripToInstr->end();
 	     it++) {
-		fprintf(f, "%lx[%p] -> %lx[%p], %lx[%p]\n",
-			it.key(),
+		fprintf(f, "%d:%lx[%p] -> %d:%lx[%p], %d:%lx[%p]\n",
+			it.key().thread,
+			it.key().rip,
 			it.value(),
-			it.value()->defaultNext,
+			it.value()->defaultNext.thread,
+			it.value()->defaultNext.rip,
 			it.value()->defaultNextI,
-			it.value()->branchNext,
+			it.value()->branchNext.thread,
+			it.value()->branchNext.rip,
 			it.value()->branchNextI);
 	}
 }

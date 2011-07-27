@@ -156,7 +156,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->loads.count(smsel->rip)) {
+		if (it->loads.count(smsel->rip.rip)) {
 			for (std::set<unsigned long>::iterator it2 = it->stores.begin();
 			     it2 != it->stores.end();
 			     it2++) {
@@ -176,20 +176,20 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	__set_profiling(storeIsThreadLocal);
 	static std::set<unsigned long> threadLocal;
 	static std::set<unsigned long> notThreadLocal;
-	if (threadLocal.count(s->rip))
+	if (threadLocal.count(s->rip.rip))
 		return true;
-	if (notThreadLocal.count(s->rip))
+	if (notThreadLocal.count(s->rip.rip))
 		return false;
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->stores.count(s->rip) ||
-		    it->stores.count(s->rip | (1ul << 63))) {
-			notThreadLocal.insert(s->rip);
+		if (it->stores.count(s->rip.rip) ||
+		    it->stores.count(s->rip.rip | (1ul << 63))) {
+			notThreadLocal.insert(s->rip.rip);
 			return false;
 		}
 	}
-	threadLocal.insert(s->rip);
+	threadLocal.insert(s->rip.rip);
 	return true;
 }
 bool
@@ -198,19 +198,19 @@ Oracle::loadIsThreadLocal(StateMachineSideEffectLoad *s)
 	__set_profiling(loadIsThreadLocal);
 	static std::set<unsigned long> threadLocal;
 	static std::set<unsigned long> notThreadLocal;
-	if (threadLocal.count(s->rip))
+	if (threadLocal.count(s->rip.rip))
 		return true;
-	if (notThreadLocal.count(s->rip))
+	if (notThreadLocal.count(s->rip.rip))
 		return false;
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++)
-		if (it->loads.count(s->rip) ||
-		    it->loads.count(s->rip | (1ul << 63))) {
-			notThreadLocal.insert(s->rip);
+		if (it->loads.count(s->rip.rip) ||
+		    it->loads.count(s->rip.rip | (1ul << 63))) {
+			notThreadLocal.insert(s->rip.rip);
 			return false;
 		}
-	threadLocal.insert(s->rip);
+	threadLocal.insert(s->rip.rip);
 	return true;
 }
 
@@ -260,19 +260,19 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 			return false;
 	}
 
-	unsigned long h = hashRipPair(smses->rip, smsel->rip);
+	unsigned long h = hashRipPair(smses->rip.rip, smsel->rip.rip);
 	nr_queries++;
 	if (!(memoryAliasingFilter[h/64] & (1ul << (h % 64)))) {
 		nr_bloom_hits++;
 		return false;
 	}
-	h = hashRipPair(smses->rip * 23, smsel->rip * 17);
+	h = hashRipPair(smses->rip.rip * 23, smsel->rip.rip * 17);
 	if (!(memoryAliasingFilter2[h/64] & (1ul << (h % 64)))) {
 		nr_bloom_hits2++;
 		return false;
 	}
 
-	if (aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel->rip, smses->rip))) {
+	if (aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel->rip.rip, smses->rip.rip))) {
 		nr_trues++;
 		return true;
 	} else {
@@ -296,7 +296,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel1,
 	} else if (loadIsThreadLocal(smsel2))
 		return false;
 
-	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel1->rip, smsel2->rip));
+	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel1->rip.rip, smsel2->rip.rip));
 }
 
 bool
@@ -310,7 +310,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 		else
 			return false;
 	}
-	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smses1->rip, smses2->rip));
+	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smses1->rip.rip, smses2->rip.rip));
 }
 
 template <typename t>
@@ -1802,7 +1802,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 			IRExpr *v = IRExpr_Load(False, Iend_LE,
 						t,
 						stmt->Ist.Dirty.details->args[0],
-						rip);
+						ThreadRip::mk(9999, rip));
 			if (rsp)
 				rsp = rewriteTemporary(rsp, tmp, v);
 			if (rbp)

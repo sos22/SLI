@@ -429,7 +429,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		(*it)->optimise(opt, oracle, done_something);
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
-			if (opt.ignoreStore(smses->rip) ||
+			if (opt.ignoreStore(smses->rip.rip) ||
 			    oracle->storeIsThreadLocal(smses))
 				isDead = true;
 			else
@@ -593,7 +593,7 @@ printStateMachine(const StateMachine *sm, FILE *f)
 	std::map<const StateMachineState *, int> labels;
 	std::vector<const StateMachineState *> states;
 
-	fprintf(f, "Machine for %lx\n", sm->origin);
+	fprintf(f, "Machine for %lx:%d\n", sm->origin, sm->tid);
 	buildStateLabelTable(sm->root, labels, states);
 	for (std::vector<const StateMachineState *>::iterator it = states.begin();
 	     it != states.end();
@@ -670,13 +670,13 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	}
 	IRExpr *addr;
 	IRExpr *data;
-	unsigned long rip;
+	ThreadRip rip;
 	if (parseThisString("*(", str, &str2, err) &&
 	    parseIRExpr(&addr, str2, &str2, err) &&
 	    parseThisString(") <- ", str2, &str2, err) &&
 	    parseIRExpr(&data, str2, &str2, err) &&
 	    parseThisString(" @ ", str2, &str2, err) &&
-	    parseHexUlong(&rip, str2, suffix, err)) {
+	    parseThreadRip(&rip, str2, suffix, err)) {
 		*out = new StateMachineSideEffectStore(addr, data, rip);
 		return true;
 	}
@@ -686,7 +686,7 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	    parseThisString(" <- *(", str2, &str2, err) &&
 	    parseIRExpr(&addr, str2, &str2, err) &&
 	    parseThisString(")@", str2, &str2, err) &&
-	    parseHexUlong(&rip, str2, suffix, err)) {
+	    parseThreadRip(&rip, str2, suffix, err)) {
 		*out = new StateMachineSideEffectLoad(key, addr, rip);
 		return true;
 	}
@@ -864,15 +864,17 @@ bool
 parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err)
 {
 	unsigned long origin;
-
+	int tid;
 	if (!parseThisString("Machine for ", str, &str, err) ||
 	    !parseHexUlong(&origin, str, &str, err) ||
+	    !parseThisChar(':', str, &str, err) ||
+	    !parseDecimalInt(&tid, str, &str, err) ||
 	    !parseThisChar('\n', str, &str, err))
 		return false;
 	StateMachineState *root;
 	if (!parseStateMachine(&root, str, &str, err))
 		return false;
-	*out = new StateMachine(root, origin, true);
+	*out = new StateMachine(root, origin, tid, true);
 	if (!(*out)->freeVariables.parse(str, suffix, err))
 		return false;
 	return true;
@@ -950,10 +952,10 @@ StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<unsigned long> &inst
 		StateMachineSideEffect *smse = *it;
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
-			instrs.insert(smsel->rip);
+			instrs.insert(smsel->rip.rip);
 		} else if (StateMachineSideEffectStore *smses =
 			   dynamic_cast<StateMachineSideEffectStore *>(smse)) {
-			instrs.insert(smses->rip);
+			instrs.insert(smses->rip.rip);
 		}
 	}
 	target->enumerateMentionedMemoryAccesses(instrs);
@@ -1448,7 +1450,7 @@ StateMachineEdge::roughLoadCount(StateMachineState::RoughLoadCount acc) const
 void
 ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema, FILE *f)
 {
-	fprintf(f, "{0x%lx}", smsema->rip);
+	fprintf(f, "{%d:0x%lx}", smsema->rip.thread, smsema->rip.rip);
 }
 
 void

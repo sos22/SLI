@@ -1201,13 +1201,13 @@ static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix, 
 {
   IRType ty;
   IRExpr *addr;
-  unsigned long rip;
+  ThreadRip rip;
   if (!parseThisString("LDle:", str, &str, err) ||
       !parseIRType(&ty, str, &str, err) ||
       !parseThisChar('(', str, &str, err) ||
       !parseIRExpr(&addr, str, &str, err) ||
       !parseThisString(")@", str, &str, err) ||
-      !parseHexUlong(&rip, str, suffix, err))
+      !parseThreadRip(&rip, str, suffix, err))
     return false;
   *res = IRExpr_Load(False, Iend_LE, ty, addr, rip);
   return true;
@@ -1474,7 +1474,7 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       ppIRType(e->Iex.Load.ty, f);
       fprintf(f,  "(" );
       ppIRExpr(e->Iex.Load.addr, f);
-      fprintf(f,  ")@%lx", e->Iex.Load.rip );
+      fprintf(f,  ")@%d:%lx", e->Iex.Load.rip.thread, e->Iex.Load.rip.rip );
       return;
     case Iex_Const:
       ppIRConst(e->Iex.Const.con, f);
@@ -1933,7 +1933,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
 }
 void dbg_break(const char *msg, ...);
 IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr,
-		      unsigned long rip ) {
+		      ThreadRip rip ) {
    IRExpr* e        = new IRExpr();
    e->tag           = Iex_Load;
    e->Iex.Load.isLL = isLL;

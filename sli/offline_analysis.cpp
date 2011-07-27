@@ -67,6 +67,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 				StateMachineCrash::get(),
 				StateMachineNoCrash::get()),
 			rip,
+			thr->tid._tid(),
 			true);
 	}
 
@@ -142,6 +143,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 					StateMachineCrash::get(),
 					StateMachineNoCrash::get()),
 				rip,
+				thr->tid._tid(),
 				true);
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
@@ -522,8 +524,8 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
 				stmt->Ist.Store.data,
-				rip));
-		sm = new StateMachine(smp, rip, true);
+				ThreadRip::mk(sm->tid, rip)));
+		sm = new StateMachine(smp, rip, sm->tid, true);
 		break;
 	}
 
@@ -539,14 +541,14 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 			StateMachineSideEffectLoad *smsel =
 				new StateMachineSideEffectLoad(
 					stmt->Ist.Dirty.details->args[0],
-					rip);
+					ThreadRip::mk(sm->tid, rip));
 			sm = rewriteTemporary(
 				sm,
 				stmt->Ist.Dirty.details->tmp,
 				IRExpr_Binder(smsel->key));
 			StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
 			smp->target->prependSideEffect(smsel);
-			sm = new StateMachine(smp, rip, true);
+			sm = new StateMachine(smp, rip, sm->tid, true);
 		}  else {
 			abort();
 		}
@@ -569,6 +571,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 						      IRExpr_Const(stmt->Ist.Exit.dst)),
 					      sm->root),
 				      rip,
+				      sm->tid,
 				      true);
 		break;
 	default:
@@ -814,7 +817,7 @@ removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
-			if (opt.ignoreStore(smses->rip) &&
+			if (opt.ignoreStore(smses->rip.rip) &&
 			    !storeMightBeLoadedFollowingSideEffect(sme, x, smses, oracle)) {
 				sme->sideEffects.erase(
 					sme->sideEffects.begin() + x);
@@ -2782,7 +2785,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 {
 	__set_profiling(CFGtoStoreMachine);
 	if (!cfg)
-		return new StateMachine(StateMachineCrash::get(), 0, true);
+		return new StateMachine(StateMachineCrash::get(), 0, tid, true);
 	if (memo.count(cfg))
 		return memo[cfg];
 	StateMachine *res;
@@ -2790,7 +2793,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	try {
 		irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
 	} catch (BadMemoryException &e) {
-		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), true);
+		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), tid, true);
 	}
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
@@ -2822,6 +2825,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 							tmpsm->root,
 							res->root),
 						wrappedRipToRip(cfg->my_rip),
+						tid,
 						true);
 				}
 			} else {
@@ -3442,7 +3446,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	}
 	StateMachine *res;
 	if (!cfg->branch && !cfg->fallThrough) {
-		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, true);
+		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, tid, true);
 	} else {
 		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, cfg->my_rip);
 		int x;
@@ -3476,6 +3480,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 									other->root,
 									ft->root),
 								cfg->my_rip,
+								tid,
 								true);
 						}
 					} else {

@@ -51,6 +51,7 @@ main()
 	abiinfo_both.guest_stack_redzone_size = 128;
 
 	TrivMemoryFetcher tmf((const UChar *)main,
+			      99,
 			      128);
 	irsb = bb_to_IR(97,
 			&vge,

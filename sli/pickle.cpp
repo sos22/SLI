@@ -207,6 +207,12 @@ unpickle(StateMachineSideEffectMemoryAccess *&out, Unpickler &p)
 		pickle(f.val, p);					\
 	}								\
 	static void							\
+	pickle(ThreadRip &f, state &p)					\
+	{								\
+		pickle(f.thread, p);					\
+		pickle(f.rip, p);					\
+	}								\
+	static void							\
 	pickle(IRRegArray *&arr, state &p)				\
 	{								\
 		header(IRRegArray, arr);				\
@@ -598,6 +604,7 @@ pickle(StateMachine *sm, Pickler &p)
 		return;
 	pickle(sm->root, p);
 	pickle(sm->origin, p);
+	pickle(sm->tid, p);
 	p.finishObject();
 }
 
@@ -625,7 +632,7 @@ unpickle(StateMachineSideEffect *&out, Unpickler &p)
 	case SMSE_store: {
 		IRExpr *addr;
 		IRExpr *data;
-		unsigned long rip;
+		ThreadRip rip;
 		unpickle(addr, p);
 		unpickle(data, p);
 		unpickle(rip, p);
@@ -635,7 +642,7 @@ unpickle(StateMachineSideEffect *&out, Unpickler &p)
 	case SMSE_load: {
 		Int key;
 		IRExpr *addr;
-		unsigned long rip;
+		ThreadRip rip;
 		unpickle(key, p);
 		unpickle(addr, p);
 		unpickle(rip, p);
@@ -737,11 +744,13 @@ unpickle(StateMachine *&sm, Unpickler &p)
 	memoSlotT id;
 	StateMachineState *root;
 	unsigned long origin;
+	unsigned tid;
 	if (p.retrieveObject(sm, id))
 		return;
 	unpickle(root, p);
 	unpickle(origin, p);
-	sm = new StateMachine(root, origin, true);
+	unpickle(tid, p);
+	sm = new StateMachine(root, origin, tid, true);
 	p.discover(sm, id);
 	p.finishObject();
 }

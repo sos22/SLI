@@ -176,22 +176,25 @@ public:
 	StateMachineState *root;
 	unsigned long origin;
 	FreeVariableMap freeVariables;
+	unsigned tid;
 
-	StateMachine(StateMachineState *_root, unsigned long _origin, bool ign)
-		: root(_root), origin(_origin)
+	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid, bool ign)
+		: root(_root), origin(_origin), tid(_tid)
 	{
 	}
-	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv)
-		: root(_root), origin(_origin), freeVariables(fv)
+	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid)
+		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
 	{
 	}
 	StateMachine(StateMachine *parent, StateMachineState *new_root)
-		: root(new_root), origin(parent->origin), freeVariables(parent->freeVariables)
+		: root(new_root), origin(parent->origin), freeVariables(parent->freeVariables),
+		  tid(parent->tid)
 	{}
 	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
 		: root(parent->root),
 		  origin(parent->origin),
-		  freeVariables(parent->freeVariables, delta)
+		  freeVariables(parent->freeVariables, delta),
+		  tid(parent->tid)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       OracleInterface *oracle,
@@ -587,8 +590,8 @@ public:
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
 	IRExpr *addr;
-	unsigned long rip;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, unsigned long _rip)
+	ThreadRip rip;
+	StateMachineSideEffectMemoryAccess(IRExpr *_addr, ThreadRip _rip)
 		: addr(_addr), rip(_rip)
 	{}
 	virtual void visit(HeapVisitor &hv) {
@@ -598,7 +601,7 @@ public:
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, unsigned long _rip)
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, ThreadRip _rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip),
 		  data(_data)
 	{
@@ -609,7 +612,7 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ") <- ");
 		ppIRExpr(data, f);
-		fprintf(f, " @ %lx", rip);
+		fprintf(f, " @ %d:%lx", rip.thread, rip.rip);
 	}
 	void visit(HeapVisitor &hv) {
 		StateMachineSideEffectMemoryAccess::visit(hv);
@@ -630,13 +633,13 @@ class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	static Int next_key;
 	unsigned long _hashval() const { return addr->hashval() * 757 + key; }
 public:
-	StateMachineSideEffectLoad(IRExpr *_addr, unsigned long _rip)
+	StateMachineSideEffectLoad(IRExpr *_addr, ThreadRip _rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip)
 	{
 		key = next_key++;
 		constructed();
 	}
-	StateMachineSideEffectLoad(Int k, IRExpr *_addr, unsigned long _rip)
+	StateMachineSideEffectLoad(Int k, IRExpr *_addr, ThreadRip _rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip), key(k)
 	{
 		constructed();
@@ -645,7 +648,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "B%d <- *(", key);
 		ppIRExpr(addr, f);
-		fprintf(f, ")@%lx", rip);
+		fprintf(f, ")@%d:%lx", rip.thread, rip.rip);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {

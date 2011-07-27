@@ -53,6 +53,40 @@
 #include "libvex_alloc.h"
 
 
+class ThreadRip {
+public:
+	/* Surprise!  Can't use a constructor because we get stashed
+	 * in a union. */
+	static ThreadRip mk(unsigned thread, unsigned long rip) {
+		ThreadRip r;
+		r.thread = thread;
+		r.rip = rip;
+		return r;
+	}
+	bool operator==(const ThreadRip &o) const {
+		return thread == o.thread && rip == o.rip;
+	}
+	bool operator!=(const ThreadRip &o) const {
+		return !(*this == o);
+	}
+	bool operator<(const ThreadRip &o) const {
+		if (rip < o.rip)
+			return true;
+		if (rip > o.rip)
+			return false;
+		return thread < o.thread;
+	}
+	bool operator<=(const ThreadRip &o) const {
+		return *this < o || *this == o;
+	}
+	bool operator>(const ThreadRip &o) const {
+		return !(*this < o) && !(*this == o);
+	}
+	unsigned thread;
+	unsigned long rip;
+};
+extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ, char **err);
+
 extern Heap ir_heap;
 
 /*---------------------------------------------------------------*/
@@ -1091,7 +1125,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          IREndness end;    /* Endian-ness of the load */
          IRType    ty;     /* Type of the loaded value */
          IRExpr*   addr;   /* Address being loaded from */
-	 unsigned long rip; /* Address of load instruction */
+	 ThreadRip rip; /* Address of load instruction */
       } Load;
 
       /* A constant-valued expression.
@@ -1205,7 +1239,7 @@ extern IRExpr* IRExpr_Binop  ( IROp op, IRExpr* arg1, IRExpr* arg2 );
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
 extern IRExpr* IRExpr_Load   ( Bool isLL, IREndness end,
                                IRType ty, IRExpr* addr,
-			       unsigned long rip );
+			       ThreadRip rip );
 extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );

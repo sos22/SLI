@@ -1377,10 +1377,10 @@ public:
 		return cache[0];
 	}
 	AddressSpaceGuestFetcher(AddressSpace *_aspace,
-				 unsigned long _offset) :
+				 ThreadRip _offset) :
 		GuestMemoryFetcher(_offset),
 		aspace(_aspace),
-		offset(_offset),
+		offset(_offset.rip),
 		cache_start(0),
 		have_cache(false)
 	{
@@ -1471,7 +1471,8 @@ AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
 		LibVEX_default_VexAbiInfo(&abiinfo_both);
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-		AddressSpaceGuestFetcher fetcher(this, rip);
+		ThreadRip _rip = ThreadRip::mk(tid, rip);
+		AddressSpaceGuestFetcher fetcher(this, _rip);
 		irsb = bb_to_IR(tid,
 				&vge,
 				NULL, /* Context for chase_into_ok */

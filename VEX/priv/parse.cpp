@@ -9,6 +9,7 @@
 
 #include "libvex_parse.h"
 #include "libvex_alloc.h"
+#include "libvex_ir.h"
 
 bool parseThisChar(char c, const char *str, const char **suffix,
 		   char **err)
@@ -81,6 +82,22 @@ bool parseHexUlong(unsigned long *out, const char *str, const char **suffix, cha
     *err = vex_asprintf("wanted hex ulong, got %.10s", str);
     return false;
   }
+  return true;
+}
+
+bool parseThreadRip(ThreadRip *out, const char *str, const char **suffix, char **err)
+{
+  int tid;
+  unsigned long rip;
+  const char *s = str;
+  if (!parseDecimalInt(&tid, str, &str, err) ||
+      !parseThisChar(':', str, &str, err) ||
+      !parseHexUlong(&rip, str, suffix, err)) {
+    *err = vex_asprintf("wanted thread rip, got %.10s", s);
+    return false;
+  }
+  out->thread = tid;
+  out->rip = rip;
   return true;
 }
 

@@ -589,8 +589,8 @@ zapBindersAndFreeVariables(FreeVariableMap &m, StateMachine *sm)
 
 class EnumNeededAccessesTransformer : public IRExprTransformer {
 public:
-	std::set<unsigned long> &out;
-	EnumNeededAccessesTransformer(std::set<unsigned long> &_out)
+	std::set<ThreadRip> &out;
+	EnumNeededAccessesTransformer(std::set<ThreadRip> &_out)
 		: out(_out)
 	{}
 	IRExpr *transformIexRdTmp(IRExpr *e, bool *done_something) {
@@ -615,17 +615,17 @@ public:
 	}
 };
 static void
-enumerateNeededAccesses(IRExpr *e, std::set<unsigned long> &out)
+enumerateNeededAccesses(IRExpr *e, std::set<ThreadRip> &out)
 {
 	EnumNeededAccessesTransformer trans(out);
 	trans.transformIRExpr(e);
 }
 
 class EnforceCrashCFG : public CFG {
-	std::set<unsigned long> &neededInstructions;
+	std::set<ThreadRip> &neededInstructions;
 public:
 	bool instructionUseful(Instruction *i) { return neededInstructions.count(i->rip) != 0; }
-	EnforceCrashCFG(AddressSpace *as, std::set<unsigned long> &ni)
+	EnforceCrashCFG(AddressSpace *as, std::set<ThreadRip> &ni)
 		: CFG(as), neededInstructions(ni)
 	{}
 };
@@ -638,13 +638,13 @@ void
 instrToInstrSetMap::print(FILE *f)
 {
 	for (iterator it = begin(); it != end(); it++) {
-		fprintf(f, "%lx[%p] -> {", it->first->rip, it->first);
+		fprintf(f, "%d:%lx[%p] -> {", it->first->rip.thread, it->first->rip.rip, it->first);
 		for (std::set<Instruction *>::iterator it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++) {
 			if (it2 != it->second.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%lx[%p]", (*it2)->rip, *it2);
+			fprintf(f, "%d:%lx[%p]", (*it2)->rip.thread, (*it2)->rip.rip, *it2);
 		}
 		fprintf(f, "}\n");
 	}
@@ -670,8 +670,8 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG *cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
-			unsigned long beforeRip = c[x].second->Iex.HappensBefore.before->rip;
-			unsigned long afterRip = c[x].second->Iex.HappensBefore.after->rip;
+			ThreadRip beforeRip = c[x].second->Iex.HappensBefore.before->rip;
+			ThreadRip afterRip = c[x].second->Iex.HappensBefore.after->rip;
 			Instruction *before = cfg->ripToInstr->get(beforeRip);
 			Instruction *after = cfg->ripToInstr->get(afterRip);
 			assert(before);
@@ -904,7 +904,7 @@ class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *
 	class trans1 : public IRExprTransformer {
 		std::set<Instruction *> &avail;
 		CFG *cfg;
-		bool isAvail(unsigned long rip) {
+		bool isAvail(ThreadRip rip) {
 			Instruction *i = cfg->ripToInstr->get(rip);
 			assert(i);
 			return avail.count(i) != 0;
@@ -978,7 +978,7 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 			if (takeIt) {
 				printf("Eval ");
 				ppIRExpr(expr, stdout);
-				printf(" at %lx\n", i->rip);
+				printf(" at %d:%lx\n", i->rip.thread, i->rip.rip);
 				actuallyEvalHere.insert(expr);
 			}
 		}
@@ -987,15 +987,15 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 
 static void
 partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
-			const std::set<unsigned long> &roots,
+			const std::set<ThreadRip> &roots,
 			AddressSpace *as)
 {
 	/* Build the CFG */
-	std::set<unsigned long> neededRips(roots);
+	std::set<ThreadRip> neededRips(roots);
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededAccesses(c[x].second, neededRips);
 	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
-	for (std::set<unsigned long>::const_iterator it = roots.begin();
+	for (std::set<ThreadRip>::const_iterator it = roots.begin();
 	     it != roots.end();
 	     it++)
 		cfg->add_root(*it, 100);
@@ -1007,7 +1007,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	predecessorMapT predecessorMap(cfg);
 
 	std::set<Instruction *> neededInstructions;
-	for (std::set<unsigned long>::iterator it = neededRips.begin();
+	for (std::set<ThreadRip>::iterator it = neededRips.begin();
 	     it != neededRips.end();
 	     it++)
 		neededInstructions.insert(cfg->ripToInstr->get(*it));
@@ -1052,8 +1052,8 @@ main(int argc, char *argv[])
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
 
-	std::set<unsigned long> roots;
-	roots.insert(summary->loadMachine->origin);
+	std::set<ThreadRip> roots;
+	roots.insert(ThreadRip::mk(summary->loadMachine->tid, summary->loadMachine->origin));
 	
 	FreeVariableMap m(summary->loadMachine->freeVariables);
 	zapBindersAndFreeVariables(m, summary->loadMachine);
@@ -1061,7 +1061,8 @@ main(int argc, char *argv[])
 		FreeVariableMap n(summary->storeMachines[x]->machine->freeVariables);
 		zapBindersAndFreeVariables(n, summary->storeMachines[x]->machine);
 		m.merge(n);
-		roots.insert(summary->storeMachines[x]->machine->origin);
+		roots.insert(ThreadRip::mk(summary->storeMachines[x]->machine->tid,
+					   summary->storeMachines[x]->machine->origin));
 	}
 
 	requirement = internIRExpr(zapFreeVariables(requirement, m));

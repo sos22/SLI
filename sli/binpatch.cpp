@@ -14,8 +14,8 @@ public:
 	void add_sink(unsigned long rip) { (*sinkInstructions)[rip] = true; }
 	void destruct() { this->~SourceSinkCFG(); }
 
-	bool exploreInstruction(Instruction *i) { return !(*sinkInstructions)[i->rip]; }
-	bool instructionUseful(Instruction *i) { return (*sinkInstructions)[i->rip]; }
+	bool exploreInstruction(Instruction *i) { return !(*sinkInstructions)[i->rip.rip]; }
+	bool instructionUseful(Instruction *i) { return (*sinkInstructions)[i->rip.rip]; }
 
 	SourceSinkCFG(AddressSpace *as)
 		: CFG(as)
@@ -30,13 +30,13 @@ public:
 
 class AddExitCallPatch : public PatchFragment {
 protected:
-	void generateEpilogue(unsigned long exitRip);
+	void generateEpilogue(ThreadRip exitRip);
 	/* XXX should really override emitInstruction here to catch
 	   indirect jmp and ret instructions; oh well. */
 };
 
 void
-AddExitCallPatch::generateEpilogue(unsigned long exitRip)
+AddExitCallPatch::generateEpilogue(ThreadRip exitRip)
 {
 	Instruction *i = Instruction::pseudo(exitRip);
 
@@ -44,7 +44,7 @@ AddExitCallPatch::generateEpilogue(unsigned long exitRip)
 	registerInstruction(i, content.size());
 
 	emitCallSequence("(unsigned long)release_lock", true);
-	emitJmpToRipHost(exitRip);
+	emitJmpToRipHost(exitRip.rip);
 }
 
 struct CriticalSection {
@@ -57,7 +57,7 @@ mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 {
 	SourceSinkCFG *cfg = new SourceSinkCFG(as);
 	for (unsigned x = 0; x < nr_csects; x++) {
-		cfg->add_root(csects[x].entry, 50);
+		cfg->add_root(ThreadRip::mk(0, csects[x].entry), 50);
 		cfg->add_sink(csects[x].exit);
 	}
 	cfg->doit();

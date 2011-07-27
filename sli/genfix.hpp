@@ -3,6 +3,8 @@
 
 #define MAX_INSTRUCTION_SIZE 15
 
+#include "libvex_ir.h"
+
 class CFG;
 
 class Prefixes {
@@ -34,11 +36,11 @@ class Instruction : public GarbageCollected<Instruction > {
 	void immediate(unsigned size);
 	int modrmExtension(void);
 public:
-	unsigned long rip;
+	ThreadRip rip;
 
-	unsigned long defaultNext;
+	ThreadRip defaultNext;
 	Instruction *defaultNextI;
-	unsigned long branchNext;
+	ThreadRip branchNext;
 	Instruction *branchNextI;
 
 	/* Doesn't really belong here, but it'll do for now. */
@@ -56,9 +58,9 @@ public:
 	bool useful;
 
 	static Instruction *decode(AddressSpace *as,
-				   unsigned long rip,
+				   ThreadRip rip,
 				   CFG *cfg);
-	static Instruction *pseudo(unsigned long rip);
+	static Instruction *pseudo(ThreadRip rip);
 
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
@@ -73,19 +75,19 @@ public:
 class CFG : public GarbageCollected<CFG> {
 	AddressSpace *as;
 public:
-	static unsigned long __trivial_hash_function(const unsigned long &k) { return k; }
-	typedef gc_map<unsigned long, Instruction *, __trivial_hash_function,
+	static unsigned long __trivial_hash_function(const ThreadRip &k) { return k.rip; }
+	typedef gc_map<ThreadRip, Instruction *, __trivial_hash_function,
 		       __default_eq_function, __visit_function_heap> ripToInstrT;
 	ripToInstrT *ripToInstr;
 private:
-	std::vector<std::pair<unsigned long, unsigned> > pendingRips;
-	std::vector<unsigned long> neededRips;
-	void decodeInstruction(unsigned long rip, unsigned max_depth);
+	std::vector<std::pair<ThreadRip, unsigned> > pendingRips;
+	std::vector<ThreadRip> neededRips;
+	void decodeInstruction(ThreadRip rip, unsigned max_depth);
 public:
 	CFG(AddressSpace *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
-	void add_root(unsigned long root, unsigned max_depth)
+	void add_root(ThreadRip root, unsigned max_depth)
 	{
-		pendingRips.push_back(std::pair<unsigned long, unsigned>(root, max_depth));
+		pendingRips.push_back(std::pair<ThreadRip, unsigned>(root, max_depth));
 	}
 	void doit();
 	void visit(HeapVisitor &hv) {
@@ -110,7 +112,7 @@ public:
 	virtual bool exploreInstruction(Instruction *i) { return true; }
 	/* We've discovered a direct-called function.  Should we
 	 * explore the callee?  Indirect calls are never explored. */
-	virtual bool exploreFunction(unsigned long rip) { return false; }
+	virtual bool exploreFunction(ThreadRip rip) { return false; }
 	/* Is this instruction useful?  Once the CFG is built, we do a
 	 * post-pass which walks the list of instructions, and uses
 	 * this to decide whether instructions are useful.  We then
@@ -140,7 +142,7 @@ private:
 protected:
 	/* Emit a jump to an offset in the current fragment. */
 	void emitJmpToOffset(unsigned offset);
-	void emitJmpToRipClient(unsigned long rip);
+	void emitJmpToRipClient(ThreadRip rip);
 	void emitJmpToRipHost(unsigned long rip);
 	void emitCallSequence(const char *target, bool allowRedirection);
 	void skipRedZone();
@@ -153,7 +155,7 @@ public:
 	void fromCFG(CFG *cfg);
 	char *asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const;
 
-	bool ripToOffset(unsigned long rip, unsigned *res);
+	bool ripToOffset(ThreadRip rip, unsigned *res);
 	void writeBytes(const void *bytes, unsigned size, unsigned offset);
 	void addLateReloc(LateRelocation m) { lateRelocs.push_back(m); }
 
@@ -169,7 +171,7 @@ public:
 	 * you want to do anything with non-constant branches then
 	 * you'll need to override emitInstruction() as well.
 	 */
-	virtual void generateEpilogue(unsigned long exitRip);
+	virtual void generateEpilogue(ThreadRip exitRip);
 
 protected:
 
