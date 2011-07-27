@@ -513,48 +513,6 @@ printDnf(DNF_Disjunction &dnf, FILE *f)
 	fprintf(f, "\n");
 }
 
-class getMentionedTidsTransformer : public IRExprTransformer {
-protected:
-	IRExpr *transformIexGet(IRExpr *e, bool *done_something) {
-		out.insert(e->Iex.Get.tid);
-		return IRExprTransformer::transformIexGet(e, done_something);
-	}
-	IRExpr *transformIexGetI(IRExpr *e, bool *done_something) {
-		out.insert(e->Iex.GetI.tid);
-		return IRExprTransformer::transformIexGetI(e, done_something);
-	}
-	IRExpr *transformIexRdTmp(IRExpr *e, bool *done_something) {
-		out.insert(e->Iex.RdTmp.tid);
-		return IRExprTransformer::transformIexGet(e, done_something);
-	}
-	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
-		/* Shouldn't have binders at this stage */
-		abort();
-	}
-	IRExpr *transformIexFreeVariable(IRExpr *e, bool *done_something) {
-		return IRExprTransformer::transformIRExpr(fv.get(e->Iex.FreeVariable.key), done_something);
-	}
-	StateMachineSideEffectMemoryAccess *transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *x,
-											bool *done_soemthing)
-	{
-		return x;
-	}
-public:
-	FreeVariableMap &fv;
-	std::set<unsigned> &out;
-	getMentionedTidsTransformer(FreeVariableMap &_fv,
-				    std::set<unsigned> &_out)
-		: fv(_fv), out(_out)
-	{}
-};
-
-static void
-getMentionedTids(IRExpr *e, FreeVariableMap &fv, std::set<unsigned> &out)
-{
-	getMentionedTidsTransformer t(fv, out);
-	t.transformIRExpr(e);
-}
-
 class ShortCircuitFvTransformer : public IRExprTransformer {
 public:
 	FreeVariableMap &fv;
