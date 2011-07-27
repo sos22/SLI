@@ -1239,18 +1239,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				opt,
 				done_something);
 		}
-		if (operationAssociates(src->Iex.Binop.op)) {
-			/* Convert to an associative operation. */
-			*done_something = true;
-			return optimiseIRExpr(
-				IRExpr_Associative(
-					src->Iex.Binop.op,
-					l,
-					r,
-					NULL),
-				opt,
-				done_something);
-		}
 		if (src->Iex.Binop.op >= Iop_Sub8 &&
 		    src->Iex.Binop.op <= Iop_Sub64) {
 			/* Replace a - b with a + (-b), so as to
@@ -1263,6 +1251,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						     r ),
 					opt,
 					done_something);
+		}
+		if (operationAssociates(src->Iex.Binop.op)) {
+			/* Convert to an associative operation. */
+			*done_something = true;
+			return optimiseIRExpr(
+				IRExpr_Associative(
+					src->Iex.Binop.op,
+					l,
+					r,
+					NULL),
+				opt,
+				done_something);
 		}
 		/* If a op b commutes, sort the arguments. */
 		if (operationCommutes(src->Iex.Binop.op) &&
