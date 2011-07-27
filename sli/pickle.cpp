@@ -307,6 +307,7 @@ unpickle(StateMachineSideEffectMemoryAccess *&out, Unpickler &p)
 			break;						\
 		case Iex_ClientCall:					\
 			pickle(expr->Iex.ClientCall.calledRip, p);	\
+			pickle(expr->Iex.ClientCall.callSite, p);	\
 			pickle ## _null (expr->Iex.ClientCall.args, p);	\
 			break;						\
 		case Iex_ClientCallFailed:				\

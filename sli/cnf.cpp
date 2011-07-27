@@ -649,7 +649,7 @@ shallow_hash(const IRExpr *e)
 	case Iex_ClientCallFailed:
 		return 100213697;
 	case Iex_ClientCall:
-		return 100256371;
+		return 100256371 + e->Iex.ClientCall.callSite.rip * 50013641;
 	case Iex_HappensBefore:
 		return 100234427;
 	}
@@ -777,7 +777,8 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 
 		case Iex_ClientCall: {
 			bool bad;
-			if (other->Iex.ClientCall.calledRip != e->Iex.ClientCall.calledRip)
+			if (other->Iex.ClientCall.calledRip != e->Iex.ClientCall.calledRip ||
+			    other->Iex.ClientCall.callSite != e->Iex.ClientCall.callSite)
 				continue;
 			bad = false;
 			for (int x = 0; !bad; x++) {

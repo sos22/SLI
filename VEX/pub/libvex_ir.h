@@ -1209,6 +1209,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
 
       struct {
 	 unsigned long calledRip;
+	 ThreadRip callSite;
 	 IRExpr **args;
       } ClientCall;
 
@@ -1247,7 +1248,7 @@ extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExpr *);
 extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
-extern IRExpr* IRExpr_ClientCall (unsigned long r, IRExpr **args);
+extern IRExpr* IRExpr_ClientCall (unsigned long r, ThreadRip callSite, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 extern IRExpr* IRExpr_HappensBefore (StateMachineSideEffectMemoryAccess *before,
 				     StateMachineSideEffectMemoryAccess *after);

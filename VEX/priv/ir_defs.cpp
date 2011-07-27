@@ -1334,8 +1334,11 @@ static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **
 static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **suffix, char **err)
 {
   unsigned long addr;
+  ThreadRip site;
   if (!parseThisString("call0x", str, &str, err) ||
       !parseHexUlong(&addr, str, &str, err) ||
+      !parseThisChar('@', str, &str, err) ||
+      !parseThreadRip(&site, str, &str, err) ||
       !parseThisChar('(', str, &str, err))
     return false;
   std::vector<IRExpr *> args;
@@ -1354,7 +1357,7 @@ static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **su
   for (unsigned x = 0; x < args.size(); x++)
     a[x] = args[x];
   a[args.size()] = NULL;
-  *res = IRExpr_ClientCall(addr, a);
+  *res = IRExpr_ClientCall(addr, site, a);
   return true;
 }
 
@@ -1527,7 +1530,9 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f, "free%d", e->Iex.FreeVariable.key.val);
       return;
     case Iex_ClientCall:
-      fprintf(f, "call0x%lx(", e->Iex.ClientCall.calledRip);
+      fprintf(f, "call0x%lx@%d:%lx(", e->Iex.ClientCall.calledRip,
+	      e->Iex.ClientCall.callSite.thread,
+	      e->Iex.ClientCall.callSite.rip);
       for (int x = 0; e->Iex.ClientCall.args[x]; x++) {
 	if (x != 0)
 	  fprintf(f, ", ");
@@ -2039,11 +2044,12 @@ IRExpr* IRExpr_FreeVariable ( )
    next_key.val++;
    return res;
 }
-IRExpr* IRExpr_ClientCall ( unsigned long r, IRExpr **args )
+IRExpr* IRExpr_ClientCall ( unsigned long r, ThreadRip site, IRExpr **args )
 {
    IRExpr *e = new IRExpr();
    e->tag = Iex_ClientCall;
    e->Iex.ClientCall.calledRip = r;
+   e->Iex.ClientCall.callSite = site;
    e->Iex.ClientCall.args = args;
    return e;
 }

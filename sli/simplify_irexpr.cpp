@@ -158,7 +158,8 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 	case Iex_FreeVariable:
 		return a->Iex.FreeVariable.key == b->Iex.FreeVariable.key;
 	case Iex_ClientCall:
-		if (a->Iex.ClientCall.calledRip != b->Iex.ClientCall.calledRip)
+		if (a->Iex.ClientCall.calledRip != b->Iex.ClientCall.calledRip ||
+		    a->Iex.ClientCall.callSite != b->Iex.ClientCall.callSite)
 			return false;
 		for (int i = 0; ; i++) {
 			if (!a->Iex.ClientCall.args[i]) {
@@ -585,6 +586,10 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 	case Iex_FreeVariable:
 		return a->Iex.FreeVariable.key < b->Iex.FreeVariable.key;
 	case Iex_ClientCall:
+		if (a->Iex.ClientCall.callSite < b->Iex.ClientCall.callSite)
+			return true;
+		else if (a->Iex.ClientCall.callSite > b->Iex.ClientCall.callSite)
+			return false;
 		for (int x = 0; 1; x++) {
 			if (!a->Iex.ClientCall.args[x] && !b->Iex.ClientCall.args[x])
 				return false;

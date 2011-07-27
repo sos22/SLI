@@ -393,6 +393,7 @@ IRExprTransformer::transformIexClientCall(IRExpr *e, bool *done_something)
 		return e;
 	else
 		return IRExpr_ClientCall(e->Iex.ClientCall.calledRip,
+					 e->Iex.ClientCall.callSite,
 					 newArgs);
 }
 
@@ -2731,7 +2732,7 @@ buildCFGForCallGraph(AddressSpace *as,
    oracle, and assume that it is a pure function of those arguments
    which returns a single value in RAX */
 static StateMachine *
-updateStateMachineForCallInstruction(unsigned tid, StateMachine *orig, IRSB *irsb, Oracle *oracle)
+updateStateMachineForCallInstruction(ThreadRip site, StateMachine *orig, IRSB *irsb, Oracle *oracle)
 {
 	IRExpr *r;
 
@@ -2760,9 +2761,9 @@ updateStateMachineForCallInstruction(unsigned tid, StateMachine *orig, IRSB *irs
 		nr_args = 0;
 		for (int i = 0; i < 6; i++)
 			if (live.isLive(argument_registers[i]))
-				args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, tid);
+				args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread);
 		args[nr_args] = NULL;
-		r = IRExpr_ClientCall(called_rip, args);
+		r = IRExpr_ClientCall(called_rip, site, args);
 	} else {
 		r = IRExpr_ClientCallFailed(irsb->next);
 	}
@@ -2788,6 +2789,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		return new StateMachine(StateMachineCrash::get(), 0, tid, true);
 	if (memo.count(cfg))
 		return memo[cfg];
+	ThreadRip threadRip = ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip));
 	StateMachine *res;
 	IRSB *irsb;
 	try {
@@ -2804,7 +2806,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo, oracle);
 		if (!res)
 			return NULL;
-		res = updateStateMachineForCallInstruction(tid, res, irsb, oracle);
+		res = updateStateMachineForCallInstruction(threadRip, res, irsb, oracle);
 	} else if (cfg->fallThrough || !cfg->branch) {
 		res = CFGtoStoreMachine(tid, as, cfg->fallThrough, memo, oracle);
 		if (!res)
@@ -3462,7 +3464,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 			    irsb->jumpkind == Ijk_Call &&
 			    cfg->fallThroughRip == extract_call_follower(irsb)) {
 				/* Calls need special handling */
-				ft = updateStateMachineForCallInstruction(tid, ft, irsb, oracle);
+				ft = updateStateMachineForCallInstruction(ThreadRip::mk(tid, cfg->my_rip), ft, irsb, oracle);
 			} else {
 				while (x != 0) {
 					x--;
