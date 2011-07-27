@@ -19,6 +19,14 @@ operator<(const InstructionSet &a, const InstructionSet &b)
 	return a.rips < b.rips;
 }
 
+template <typename t> void
+make_unique(std::vector<t> &v)
+{
+	std::sort(v.begin(), v.end());
+	typename std::vector<t>::iterator it = std::unique(v.begin(), v.end());
+	v.resize(it - v.begin());
+}
+
 
 unsigned long
 hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p)
@@ -969,14 +977,6 @@ struct cg_header {
 	unsigned long nr;
 };
 
-template <typename t> void
-make_unique(std::vector<t> &v)
-{
-	std::sort(v.begin(), v.end());
-	typename std::vector<t>::iterator it = std::unique(v.begin(), v.end());
-	v.resize(it - v.begin());
-}
-
 void
 Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token)
 {
@@ -1391,6 +1391,22 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			heads.insert(heads.end(), callees.begin(), callees.end());
 			unexplored.insert(unexplored.end(), fallThrough.begin(), fallThrough.end());
 			unexplored.insert(unexplored.end(), branch.begin(), branch.end());
+
+			/* This can sometimes contain duplicates if
+			   you're looking at e.g. a rep cmps
+			   instruction, which looks like this:
+
+			   l1:
+			   if (ecx == 0) goto next;
+			   t1 = *rdi
+			   t2 = *rsi;
+			   ecx--;
+			   if (t1 != t2) goto next;
+			   goto l1;
+			   next:
+
+			   i.e. two branches to next. */
+			make_unique(branch);
 
 			explored.insert(r);
 			if (!work.addInstruction(r, callees, fallThrough, branch)) {
