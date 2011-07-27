@@ -1449,7 +1449,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						((unsigned long)l->Iex.Const.con->Ico.U32 << 32) |
 						r->Iex.Const.con->Ico.U32));
 			default:
-				printf("Cannot constant fold ");
+				printf("Cannot constant fold binop %d: ", src->Iex.Binop.op);
 				ppIRExpr(src, stdout);
 				printf("\n");
 				break;

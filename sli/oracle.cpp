@@ -860,6 +860,7 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_F64toI64:
 		case Iop_32HLto64:
 		case Iop_DivModU64to32:
+		case Iop_DivModS64to32:
 		case Iop_Add32:
 		case Iop_And32:
 			return Oracle::PointerAliasingSet::notAPointer;
