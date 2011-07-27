@@ -2629,3 +2629,109 @@ Oracle::liveOnEntryToFunction(unsigned long rip)
 	Function f(rip);
 	return f.liveOnEntry(rip, true);
 }
+
+void
+dbg_database_query(const char *query)
+{
+	if (!_database) {
+		printf("Database not open yet!\n");
+		return;
+	}
+
+	int rc;
+
+	sqlite3_stmt *stmt;
+	const char *tail;
+	rc = sqlite3_prepare_v2(
+		_database,
+		(char *)query,
+		-1,
+		&stmt,
+		&tail);
+	if (rc != SQLITE_OK) {
+		printf("Error compiling %s: %d\n", query, rc);
+		return;
+	}
+	if (tail != NULL && *tail != '\0')
+		printf("WARNING: Ignoring garbage after SQL statement: %s\n", tail);
+	if (!stmt) {
+		printf("No SQL statement\n");
+		return;
+	}
+
+
+	int nr_columns = sqlite3_column_count(stmt);
+	if (nr_columns == 0) {
+		printf("No data returned\n");
+	} else {
+		int cwidth = 225 / nr_columns;
+		int wide_columns = 225 % nr_columns;
+		if (cwidth > 20) {
+			cwidth = 20;
+			wide_columns = 0;
+		}
+		for (int i = 0; i < nr_columns; i++)
+			printf("%*.*s",
+			       cwidth + (i < wide_columns),
+			       cwidth + (i < wide_columns) - 1,
+			       sqlite3_column_origin_name(stmt, i));
+		printf("\n-----------------------------------------------------------\n");
+
+		while (1) {
+			rc = sqlite3_step(stmt);
+			if (rc == SQLITE_DONE) {
+				printf("End of data\n");
+				break;
+			}
+			if (rc != SQLITE_ROW) {
+				printf("Unexpected return code %d from sqlite3_step\n", rc);
+				break;
+			}
+			for (int i = 0; i < nr_columns; i++) {
+				int w = cwidth + (i < wide_columns);
+				switch (sqlite3_column_type(stmt, i)) {
+				case SQLITE_INTEGER:
+					printf("%*llx", w, sqlite3_column_int64(stmt, i));
+					break;
+				case SQLITE_FLOAT:
+					printf("%*f", w, sqlite3_column_double(stmt, i));
+					break;
+				case SQLITE_TEXT: {
+					const unsigned char *s = sqlite3_column_text(stmt, i);
+					if (strlen((const char *)s) >= (size_t)w)
+						printf("%*.*s... ",
+						       w - 4,
+						       w - 4,
+						       s);
+					else
+						printf("%*s", w, s);
+					break;
+				}
+				case SQLITE_BLOB: {
+					const unsigned char *s = (const unsigned char *)sqlite3_column_blob(stmt, i);
+					int sz = sqlite3_column_bytes(stmt, i);
+					bool trunc;
+					if (sz * 2 >= w) {
+						trunc = true;
+						sz = w - 2;
+					} else {
+						trunc = false;
+					}
+					for (int j = 0; j < sz; j++)
+						printf("%02x", s[j]);
+					if (trunc)
+						printf("...");
+					break;
+				}
+				case SQLITE_NULL:
+					printf("%*s", w, "NULL");
+					break;
+				default:
+					abort();
+				}
+			}
+			printf("\n");
+		}
+	}
+	sqlite3_finalize(stmt);
+}
