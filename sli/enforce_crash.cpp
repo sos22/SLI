@@ -937,11 +937,12 @@ class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *
 	}
 public:
 	expressionDominatorMapT(instructionDominatorMapT &, DNF_Conjunction &,
-				predecessorMapT &, CFG *);
+				predecessorMapT &, happensAfterMapT &, CFG *);
 };
 expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 						 DNF_Conjunction &c,
 						 predecessorMapT &pred,
+						 happensAfterMapT &happensBefore,
 						 CFG *cfg)
 {
 	/* First, figure out where the various expressions could in
@@ -962,6 +963,7 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 		}
 	}
 
+
 	/* Just find all of the things which are evaluatable at X but
 	   not at some of X's predecessors, for any instruction X.  I'm
 	   not entirely convinced that that's *precisely* what we're
@@ -973,7 +975,10 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 		std::set<IRExpr *> &theoreticallyEvaluatable(evalable[i]);
 		std::set<IRExpr *> &actuallyEvalHere((*this)[i]);
 		std::set<Instruction *> &predecessors(pred[i]);
+		std::set<Instruction *> *orderingPredecessors;
 
+		if (happensBefore.happensBefore.count(i))
+			orderingPredecessors = &happensBefore.happensBefore[i];
 		for (std::set<IRExpr *>::iterator it2 = theoreticallyEvaluatable.begin();
 		     it2 != theoreticallyEvaluatable.end();
 		     it2++) {
@@ -985,6 +990,19 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 				Instruction *predecessor = *it3;
 				if (!evalable[predecessor].count(expr))
 					takeIt = true;
+			}
+			/* If it's evaluatable at *any* happens-before
+			   predecessor then we don't want to take it,
+			   because happens-before edges are always
+			   satisfied and it's therefore certain that
+			   it will have already been evaluated. */
+			if (takeIt && orderingPredecessors) {
+				for (std::set<Instruction *>::iterator it3 = orderingPredecessors->begin();
+				     takeIt && it3 != orderingPredecessors->end();
+				     it3++) {
+					if (evalable[*it3].count(expr))
+						takeIt = false;
+				}
 			}
 			if (takeIt) {
 				printf("Eval ");
@@ -1029,7 +1047,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 
 	/* Now turn that into a map showing where the actual
 	 * expressions become available. */
-	expressionDominatorMapT exprDominatorMap(instrDominatorMap, c, predecessorMap, cfg);
+	expressionDominatorMapT exprDominatorMap(instrDominatorMap, c, predecessorMap, happensAfter, cfg);
 }
 
 static IRExpr *
