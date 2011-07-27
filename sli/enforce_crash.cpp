@@ -571,6 +571,10 @@ public:
 		   side-effects. */
 		return e;
 	}
+	IRExpr *transformIexClientCall(IRExpr *e, bool *done_something) {
+		out.insert(e->Iex.ClientCall.callSite);
+		return e;
+	}
 };
 static void
 enumerateNeededAccesses(IRExpr *e, std::set<ThreadRip> &out)
@@ -880,6 +884,11 @@ class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *
 		}
 		IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something) {
 			isGood = false;
+			return e;
+		}
+		IRExpr *transformIexClientCall(IRExpr *e, bool *done_something) {
+			if (!isAvail(e->Iex.ClientCall.callSite))
+				isGood = false;
 			return e;
 		}
 	public:
