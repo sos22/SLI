@@ -1934,12 +1934,12 @@ public:
 	}
 };
 static StateMachine *
-canonicaliseRbp(StateMachine *sm, unsigned long origin, OracleInterface *oracle,
+canonicaliseRbp(StateMachine *sm, OracleInterface *oracle,
 		bool *done_something)
 {
 	long delta;
 
-	if (!oracle->getRbpToRspDelta(origin, &delta)) {
+	if (!oracle->getRbpToRspDelta(sm->origin, &delta)) {
 		/* Can't do anything if we don't know the delta */
 		return sm;
 	}
@@ -1997,11 +1997,13 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 }
 
 static StateMachine *
-optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfiguration &alias,
-		     const AllowableOptimisations &opt, OracleInterface *oracle, bool noExtendContext,
-		     unsigned long originRip)
+optimiseStateMachine(StateMachine *sm,
+		     const AllowableOptimisations &opt,
+		     Oracle *oracle,
+		     bool noExtendContext)
 {
 	__set_profiling(optimiseStateMachine);
+	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(sm->origin));
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -2016,7 +2018,7 @@ optimiseStateMachine(StateMachine *sm, const Oracle::RegisterAliasingConfigurati
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
-			sm = canonicaliseRbp(sm, originRip, oracle, &done_something);
+			sm = canonicaliseRbp(sm, oracle, &done_something);
 		}
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
@@ -2873,7 +2875,6 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     VexPtr<Oracle> &oracle,
 				     VexPtr<IRExpr, &ir_heap> assumption,
 				     const AllowableOptimisations &opt2,
-				     unsigned long rip,
 				     GarbageCollectionToken token,
 				     IRExpr **assumptionOut,
 				     StateMachine **newStoreMachine)
@@ -2882,11 +2883,8 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	/* Specialise the state machine down so that we only consider
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
-	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(rip));
-
 	VexPtr<StateMachine, &ir_heap> sm;
-	sm = optimiseStateMachine(storeMachine, alias, opt2,
-				  oracle, true, rip);
+	sm = optimiseStateMachine(storeMachine, opt2, oracle, true);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
@@ -2960,20 +2958,16 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 
 static StateMachine *
 expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
-				 unsigned long rip,
-				 unsigned tid,
 				 VexPtr<Oracle> &oracle,
 				 AllowableOptimisations &opt,
-				 unsigned long *new_rip,
 				 GarbageCollectionToken token)
 {
 	__set_profiling(expandStateMachineToFunctionHead);
 	std::vector<unsigned long> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, rip);
+	oracle->findPreviousInstructions(previousInstructions, sm->origin);
 	if (previousInstructions.size() == 0) {
 		/* Lacking any better ideas... */
 		fprintf(_logfile, "cannot expand store machine...\n");
-		*new_rip = rip;
 		return sm;
 	}
 
@@ -2981,7 +2975,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	ii->addCrashReason(sm);
 
 	InstructionSet interesting;
-	interesting.rips.insert(rip);
+	interesting.rips.insert(sm->origin);
 
 	std::set<unsigned long> terminalFunctions;
 
@@ -3001,29 +2995,24 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		cr = ii->CFGtoCrashReason(tid, cfg, true);
+		cr = ii->CFGtoCrashReason(sm->tid, cfg, true);
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
 		}
 
 		cr = optimiseStateMachine(cr,
-					  oracle->getAliasingConfigurationForRip(*it),
 					  opt,
 					  oracle,
-					  false,
-					  *it);
+					  false);
 		cr->selectSingleCrashingPath();
 		cr = optimiseStateMachine(cr,
-					  oracle->getAliasingConfigurationForRip(*it),
 					  opt,
 					  oracle,
-					  false,
-					  *it);
+					  false);
 	}
 	if (TIMEOUT)
 		return NULL;
-	*new_rip = cr->origin;
 	return cr;
 }
 
@@ -3036,10 +3025,11 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 VexPtr<CrashSummary, &ir_heap> &summary,
 		 const InstructionSet &is,
 		 bool needRemoteMacroSections,
+		 unsigned tid,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(STORING_THREAD, as.get(), cfg.get(), oracle));
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, as.get(), cfg.get(), oracle));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
@@ -3052,17 +3042,12 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	opt.interestingStores = is.rips;
 	opt.haveInterestingStoresSet = true;
 
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, cfg->my_rip.rip, token, NULL, NULL))
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, token, NULL, NULL))
 		return false;
 
 	/* If it might crash with that machine, try expanding it to
 	   include a bit more context and see if it still goes. */
-	unsigned long new_rip = 0x12; /* Shut the compiler up;
-					 expandStateMachineToFunctionHead
-					 always initialises this if sm
-					 is non-NULL, but the compiler
-					 can't tell that. */
-	sm = expandStateMachineToFunctionHead(sm, cfg->my_rip.rip, STORING_THREAD, oracle, opt, &new_rip, token);
+	sm = expandStateMachineToFunctionHead(sm, oracle, opt, token);
 	if (!sm) {
 		fprintf(_logfile, "\t\tCannot expand store machine!\n");
 		return true;
@@ -3075,7 +3060,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 
 	IRExpr *_newAssumption;
 	StateMachine *_sm;
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, new_rip, token, &_newAssumption, &_sm)) {
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, token, &_newAssumption, &_sm)) {
 		fprintf(_logfile, "\t\tExpanded store machine cannot crash\n");
 		return false;
 	}
@@ -3117,6 +3102,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 		       const InstructionSet &is,
 		       VexPtr<CrashSummary, &ir_heap> &summary,
 		       bool needRemoteMacroSections,
+		       unsigned tid,
 		       GarbageCollectionToken token)
 {
 	LibVEX_maybe_gc(token);
@@ -3142,7 +3128,8 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 
 		result |= considerStoreCFG(storeCFG, as, oracle,
 					   survive, sm, summary, is,
-					   needRemoteMacroSections, token);
+					   needRemoteMacroSections,
+					   tid, token);
 	}
 	return result;
 }
@@ -3190,18 +3177,14 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		}
 
 		cr = optimiseStateMachine(cr,
-					  oracle->getAliasingConfigurationForRip(*it),
 					  opt,
 					  oracle,
-					  false,
-					  *it);
+					  false);
 		cr->selectSingleCrashingPath();
 		cr = optimiseStateMachine(cr,
-					  oracle->getAliasingConfigurationForRip(*it),
 					  opt,
 					  oracle,
-					  false,
-					  *it);
+					  false);
 
 		if (dynamic_cast<StateMachineNoCrash *>(cr->root)) {
 			/* Once you've reduced the machine to
@@ -3217,11 +3200,9 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 
 	if (sm)
 		sm = optimiseStateMachine(sm,
-					  oracle->getAliasingConfigurationForRip(previousInstructions.back()),
 					  opt.disablefreeVariablesMightAccessStack(),
 					  oracle,
-					  true,
-					  previousInstructions.back());
+					  true);
 
 	return sm;
 }
@@ -3288,6 +3269,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
 
 	bool foundRace = false;
+	unsigned cntr = 0;
 	for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 	     !TIMEOUT && it != conflictClusters.end();
 	     it++) {
@@ -3298,7 +3280,9 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			fprintf(_logfile, " %lx", *it2);
 		fprintf(_logfile, "\n");
 		VexPtr<AddressSpace> as(ms->addressSpace);
-		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, needRemoteMacroSections, token);
+		cntr++;
+		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, needRemoteMacroSections,
+						    STORING_THREAD + cntr, token);
 	}
 	if (TIMEOUT)
 		return NULL;

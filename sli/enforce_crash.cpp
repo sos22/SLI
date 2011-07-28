@@ -545,17 +545,21 @@ zapBindersAndFreeVariables(FreeVariableMap &m, StateMachine *sm)
 	} while (done_something);
 }
 
-class EnumNeededAccessesTransformer : public IRExprTransformer {
+class EnumNeededExpressionsTransformer : public IRExprTransformer {
 public:
-	std::set<ThreadRip> &out;
-	EnumNeededAccessesTransformer(std::set<ThreadRip> &_out)
+	std::set<IRExpr *> &out;
+	EnumNeededExpressionsTransformer(std::set<IRExpr *> &_out)
 		: out(_out)
 	{}
 	IRExpr *transformIexRdTmp(IRExpr *e, bool *done_something) {
 		abort(); /* Should all have been eliminated by now */
 	}
+	IRExpr *transformIexGet(IRExpr *e, bool *done_something) {
+		out.insert(e);
+		return e;
+	}
 	IRExpr *transformIexLoad(IRExpr *e, bool *done_something) {
-		out.insert(e->Iex.Load.rip);
+		out.insert(e);
 		/* Note that we don't recurse into the address
 		   calculation here.  We can always evaluate this
 		   expression after seeing the load itself, regardless
@@ -563,8 +567,7 @@ public:
 		return e;
 	}
 	IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something) {
-		out.insert(e->Iex.HappensBefore.before->rip);
-		out.insert(e->Iex.HappensBefore.after->rip);
+		out.insert(e);
 		/* Again, we don't recurse into the details of the
 		   happens before expression, because we only need the
 		   two instructions, and not details of their
@@ -572,21 +575,26 @@ public:
 		return e;
 	}
 	IRExpr *transformIexClientCall(IRExpr *e, bool *done_something) {
-		out.insert(e->Iex.ClientCall.callSite);
+		out.insert(e);
 		return e;
 	}
 };
 static void
-enumerateNeededAccesses(IRExpr *e, std::set<ThreadRip> &out)
+enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out)
 {
-	EnumNeededAccessesTransformer trans(out);
+	EnumNeededExpressionsTransformer trans(out);
 	trans.transformIRExpr(e);
 }
 
 class EnforceCrashCFG : public CFG {
 	std::set<ThreadRip> &neededInstructions;
 public:
-	bool instructionUseful(Instruction *i) { return neededInstructions.count(i->rip) != 0; }
+	bool instructionUseful(Instruction *i) {
+		bool r = (neededInstructions.count(i->rip) != 0);
+		printf("%d:%lx %s\n", i->rip.thread, i->rip.rip,
+		       r ? "useful" : "not useful");
+		return r;
+	}
 	EnforceCrashCFG(AddressSpace *as, std::set<ThreadRip> &ni)
 		: CFG(as), neededInstructions(ni)
 	{}
@@ -981,20 +989,158 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 	}
 }
 
+class EnforceCrashPatchFragment : public PatchFragment {
+	struct slot_t {
+		slot_t(int _i) : i(_i) {}
+		int i;
+	};
+	slot_t next_slot;
+	/* Mapping from expressions to the slots in which we've
+	 * stashed them. */
+	std::map<IRExpr *, slot_t> exprsToSlots;
+	/* Mapping from instructions to the expressions which we need
+	   to stash at those instructions. */
+	std::map<Instruction *, std::set<IRExpr *> > &neededExpressions;
+
+	void emitInstruction(Instruction *i);
+	slot_t allocateSlot() {
+		slot_t r = next_slot;
+		next_slot.i++;
+		return r;
+	}
+	void emitMovRegToSlot(unsigned offset, slot_t slot);
+	
+public:
+	EnforceCrashPatchFragment(std::map<Instruction *, std::set<IRExpr *> > &_neededExpressions)
+		: next_slot(0),
+		  exprsToSlots(),
+		  neededExpressions(_neededExpressions)
+	{}
+};
+
+static unsigned
+vexRegOffsetToRegIdx(unsigned offset)
+{
+	switch (offset) {
+	case OFFSET_amd64_RAX: return 0;
+	case OFFSET_amd64_RCX: return 1;
+	case OFFSET_amd64_RDX: return 2;
+	case OFFSET_amd64_RBX: return 3;
+	case OFFSET_amd64_RSP: return 4;
+	case OFFSET_amd64_RBP: return 5;
+	case OFFSET_amd64_RSI: return 6;
+	case OFFSET_amd64_RDI: return 7;
+	case OFFSET_amd64_R8: return 8;
+	case OFFSET_amd64_R9: return 9;
+	case OFFSET_amd64_R10: return 10;
+	case OFFSET_amd64_R11: return 11;
+	case OFFSET_amd64_R12: return 12;
+	case OFFSET_amd64_R13: return 13;
+	case OFFSET_amd64_R14: return 14;
+	case OFFSET_amd64_R15: return 15;
+	default:
+		abort();
+	}
+
+}
+void
+EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
+{
+	/* gs prefix */
+	emitByte(0x65);
+	emitMovRegisterToModrm(vexRegOffsetToRegIdx(offset),
+			       PatchFragment::ModRM::absoluteAddress(slot.i * 8));
+}
+
+void
+EnforceCrashPatchFragment::emitInstruction(Instruction *i)
+{
+	if (neededExpressions.count(i)) {
+		/* Need to emit gunk to store the appropriate
+		   generated expression.  That'll either be a simple
+		   register access or a memory load of some sort. */
+		std::set<IRExpr *> &neededExprs(neededExpressions[i]);
+		for (std::set<IRExpr *>::iterator it = neededExprs.begin();
+		     it != neededExprs.end();
+		     it++) {
+			IRExpr *e = *it;
+			assert(!exprsToSlots.count(e));
+			if (e->tag == Iex_Get) {
+				/* Easy case: just store the register in its slot */
+				slot_t s = allocateSlot();
+				exprsToSlots.insert(
+					std::pair<IRExpr *, slot_t>(e, s));
+				emitMovRegToSlot(e->Iex.Get.offset, s);
+			} else {
+				assert(e->tag == Iex_Load);
+				/* Much more difficult case.  This
+				   depends on the type of instruction
+				   which we're looking at. */
+#warning write me
+			}
+		}
+	}
+
+#if 0
+	if (expressionEvalPoints.count(i->rip)) {
+		std::set<IRExpr *> &expressionsToEval(expressionEvalPoints[i->rip]);
+
+		for (std::set<IRExpr *>::iterator it = expressionsToEval.begin();
+		     it != expresionsToEval.end();
+		     it++)
+			emitCheckExpressionOrEscape(*it, i->rip);
+	}
+#endif
+
+	PatchFragment::emitInstruction(i);
+}
+
 static void
 partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
-			const std::set<ThreadRip> &roots,
+			std::map<unsigned, ThreadRip> &roots,
 			AddressSpace *as)
 {
-	/* Build the CFG */
-	std::set<ThreadRip> neededRips(roots);
+	/* Figure out what we actually need to keep track of */
+	std::set<IRExpr *> neededExpressions;
 	for (unsigned x = 0; x < c.size(); x++)
-		enumerateNeededAccesses(c[x].second, neededRips);
+		enumerateNeededExpressions(c[x].second, neededExpressions);
+
+	/* and where the needed expressions are calculated */
+	std::set<ThreadRip> neededRips;
+	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
+	     it != neededExpressions.end();
+	     it++) {
+		IRExpr *e = *it;
+		if (e->tag == Iex_Get) {
+			neededRips.insert(roots[e->Iex.Get.tid]);
+			printf("Demand rip %d:%lx for register expression\n",
+			       roots[e->Iex.Get.tid].thread,
+			       roots[e->Iex.Get.tid].rip);
+		} else if (e->tag == Iex_ClientCall) {
+			neededRips.insert(e->Iex.ClientCall.callSite);
+		} else if (e->tag == Iex_Load) {
+			neededRips.insert(e->Iex.Load.rip);
+		} else if (e->tag == Iex_HappensBefore) {
+			printf("Demand RIPs %d:%lx, %d:%lx\n",
+			       e->Iex.HappensBefore.before->rip.thread,
+			       e->Iex.HappensBefore.before->rip.rip,
+			       e->Iex.HappensBefore.after->rip.thread,
+			       e->Iex.HappensBefore.after->rip.rip);
+			neededRips.insert(e->Iex.HappensBefore.before->rip);
+			neededRips.insert(e->Iex.HappensBefore.after->rip);
+		} else {
+			abort();
+		}
+	}
+
+	/* Build the CFG */
 	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
-	for (std::set<ThreadRip>::const_iterator it = roots.begin();
+	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
-	     it++)
-		cfg->add_root(*it, 100);
+	     it++) {
+		printf("Root %d:%lx\n", it->second.thread, it->second.rip);
+		cfg->add_root(it->second, 100);
+	}
 	cfg->doit();
 	
 	happensAfterMapT happensAfter(c, cfg);
@@ -1015,6 +1161,36 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	/* Now turn that into a map showing where the actual
 	 * expressions become available. */
 	expressionDominatorMapT exprDominatorMap(instrDominatorMap, c, predecessorMap, happensAfter, cfg);
+
+	/* Figure out where we need to stash the various necessary
+	 * expressions. */
+	std::map<Instruction *, std::set<IRExpr *> > exprStashPoints;
+	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
+	     it != neededExpressions.end();
+	     it++) {
+		IRExpr *e = *it;
+		if (e->tag == Iex_Get) {
+			exprStashPoints[cfg->ripToInstr->get(roots[e->Iex.Get.tid])].insert(e);
+		} else if (e->tag == Iex_ClientCall) {
+			exprStashPoints[cfg->ripToInstr->get(e->Iex.ClientCall.callSite)].insert(e);
+		} else if (e->tag == Iex_Load) {
+			exprStashPoints[cfg->ripToInstr->get(e->Iex.Load.rip)].insert(e);
+		} else if (e->tag == Iex_HappensBefore) {
+			/* These don't really get stashed in any useful sense */
+		} else {
+			abort();
+		}
+	}
+
+	/* Now build the patch */
+	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(exprStashPoints);
+	pf->fromCFG(cfg);
+	std::set<ThreadRip> entryPoints;
+	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
+	     it != roots.end();
+	     it++)
+		entryPoints.insert(it->second);
+	printf("Fragment: %s\n", pf->asC("ident", entryPoints));
 }
 
 static IRExpr *
@@ -1048,8 +1224,8 @@ main(int argc, char *argv[])
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
 
-	std::set<ThreadRip> roots;
-	roots.insert(ThreadRip::mk(summary->loadMachine->tid, summary->loadMachine->origin));
+	std::map<unsigned, ThreadRip> roots;
+	roots[summary->loadMachine->tid] = ThreadRip::mk(summary->loadMachine->tid, summary->loadMachine->origin);
 	
 	FreeVariableMap m(summary->loadMachine->freeVariables);
 	zapBindersAndFreeVariables(m, summary->loadMachine);
@@ -1057,8 +1233,9 @@ main(int argc, char *argv[])
 		FreeVariableMap n(summary->storeMachines[x]->machine->freeVariables);
 		zapBindersAndFreeVariables(n, summary->storeMachines[x]->machine);
 		m.merge(n);
-		roots.insert(ThreadRip::mk(summary->storeMachines[x]->machine->tid,
-					   summary->storeMachines[x]->machine->origin));
+		roots[summary->storeMachines[x]->machine->tid] =
+			ThreadRip::mk(summary->storeMachines[x]->machine->tid,
+				      summary->storeMachines[x]->machine->origin);
 	}
 
 	requirement = internIRExpr(zapFreeVariables(requirement, m));

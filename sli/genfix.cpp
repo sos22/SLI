@@ -8,8 +8,6 @@
 
 typedef unsigned char Byte;
 
-class PatchFragment;
-
 /* There are two types of relocation, early and late.  Early
    relocations are done statically while building the patch.  Late
    relocations are done afterwards, when the patch is loaded. */
@@ -614,7 +612,7 @@ PatchFragment::emitInstruction(Instruction *i)
 {
 	unsigned offset = content.size();
 	for (unsigned x = 0; x < i->len; x++)
-		content.push_back(i->content[x]);
+		emitByte(i->content[x]);
 	for (std::vector<EarlyRelocation *>::iterator it = i->relocs.begin();
 	     it != i->relocs.end();
 	     it++) {
@@ -627,14 +625,14 @@ void
 PatchFragment::emitJmpToOffset(unsigned target_offset)
 {
 	unsigned starting_offset = content.size();
-	content.push_back(0xe9);
+	emitByte(0xe9);
 	union {
 		int delta_word;
 		Byte delta_bytes[4];
 	};
 	delta_word = target_offset - starting_offset - 5;
 	for (unsigned x = 0; x < 4; x++)
-		content.push_back(delta_bytes[x]);
+		emitByte(delta_bytes[x]);
 }
 
 void
@@ -655,81 +653,220 @@ PatchFragment::emitJmpToRipHost(unsigned long rip)
 }
 
 void
+PatchFragment::emitLea(const ModRM &modrm, unsigned reg)
+{
+	if (reg >= 8) {
+		emitByte(0x49);
+		reg -= 8;
+	} else {
+		emitByte(0x48);
+	}
+	emitByte(0x8d);
+	emitModrm(modrm, reg);
+}
+
+void
 PatchFragment::skipRedZone()
 {
-	/* lea -128(%rsp), %rsp */
-	content.push_back(0x48);
-	content.push_back(0x8d);
-	content.push_back(0x64);
-	content.push_back(0x24);
-	content.push_back(0x80);
+	emitLea(ModRM::memAtRegisterPlusOffset(4, -128), 4);
 }
 
 void
 PatchFragment::restoreRedZone()
 {
-	/* lea 128(%rsp), %rsp */
-	content.push_back(0x48);
-	content.push_back(0x8d);
-	content.push_back(0xa4);
-	content.push_back(0x24);
-	content.push_back(0x80);
-	content.push_back(0x00);
-	content.push_back(0x00);
-	content.push_back(0x00);
+	emitLea(ModRM::memAtRegisterPlusOffset(4, 128), 4);
 }
 
 void
 PatchFragment::emitPushQ(unsigned reg)
 {
 	if (reg >= 8) {
-		content.push_back(0x41);
+		emitByte(0x41);
 		reg -= 8;
 	}
 	assert(reg < 8);
-	content.push_back(0x50 + reg);
+	emitByte(0x50 + reg);
 }
 
 void
 PatchFragment::emitPopQ(unsigned reg)
 {
 	if (reg >= 8) {
-		content.push_back(0x41);
+		emitByte(0x41);
 		reg -= 8;
 	}
 	assert(reg < 8);
-	content.push_back(0x58 + reg);
+	emitByte(0x58 + reg);
 }
 
 void
-PatchFragment::emitMovQ(unsigned reg, unsigned long val)
+PatchFragment::emitQword(unsigned long val)
 {
-	if (reg < 8) {
-		content.push_back(0x48);
-	} else {
-		content.push_back(0x49);
-		reg -= 8;
-	}
-	assert(reg < 8);
-	content.push_back(0xb8 + reg);
 	union {
 		unsigned long asLong;
 		Byte asBytes[8];
 	};
 	asLong = val;
 	for (unsigned x = 0; x < 8; x++)
-		content.push_back(asBytes[x]);
+		emitByte(asBytes[x]);
+}
+
+/* Move immediate 64 bit to register. */
+void
+PatchFragment::emitMovQ(unsigned reg, unsigned long val)
+{
+	if (reg < 8) {
+		emitByte(0x48);
+	} else {
+		emitByte(0x49);
+		reg -= 8;
+	}
+	assert(reg < 8);
+	emitByte(0xb8 + reg);
+	emitQword(val);
+}
+
+void
+PatchFragment::emitModrm(const ModRM &rm, unsigned reg)
+{
+	assert(reg < 8);
+	emitByte(rm.content[0] | (reg << 3));
+	for (unsigned x = 1; x < rm.content.size(); x++)
+		emitByte(rm.content[x]);
+}
+
+PatchFragment::ModRM
+PatchFragment::ModRM::absoluteAddress(int address)
+{
+	ModRM res;
+	/* modrm byte: mod = 0, rm = 4 */
+	res.content.push_back(4);
+	/* SIB byte.  base = 5, scale = 0, index = 4 */
+	res.content.push_back(0x25);
+	/* Displacement */
+	union {
+		unsigned char asBytes[4];
+		int r;
+	};
+	r = address;
+	for (unsigned x = 0; x < 4; x++)
+		res.content.push_back(asBytes[x]);
+	return res;
+}
+
+PatchFragment::ModRM
+PatchFragment::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
+{
+	ModRM res;
+	if (reg >= 8) {
+		res.extendRm = true;
+		reg -= 8;
+	} else {
+		res.extendRm = false;
+	}
+
+	if (offset == 0) {
+		switch (reg) {
+		case 0: case 1: case 2: case 3: case 6: case 7:
+			/* mod = 0, rm = register */
+			res.content.push_back(reg);
+			break;
+		case 4: 
+			/* Use a SIB */
+			res.content.push_back(0x04);
+			/* base = 4, scale = 0, index = 4. */
+			res.content.push_back(0x14);
+			break;
+		case 5:
+			goto encode_8bit_offset;
+		default:
+			abort();
+		}
+	} else if (offset >= -0x80 && offset < 0x80) {
+	encode_8bit_offset:
+		switch (reg) {
+		case 0: case 1: case 2: case 3: case 5: case 6: case 7:
+			/* mod = 1, rm = register */
+			res.content.push_back(reg | 0x40);
+			break;
+		case 4:
+			/* mod = 1, rm = 4 */
+			res.content.push_back(0x44);
+			/* SIB byte, base = 4, scale = 0, index = 4 */
+			res.content.push_back(0x14);
+			break;
+		default:
+			abort();
+		}
+		/* 8 bit displacement */
+		res.content.push_back(offset);
+	} else {
+		switch (reg) {
+		case 0: case 1: case 2: case 3: case 5: case 6: case 7:
+			/* mod = 2, rm = register */
+			res.content.push_back(reg | 0x80);
+			break;
+		case 4:
+			/* mod = 2, rm = 4 */
+			res.content.push_back(0x84);
+			/* SIB byte, base = 4, scale = 0, index = 4 */
+			res.content.push_back(0x14);
+			break;
+		default:
+			abort();
+		}
+		union {
+			unsigned char asBytes[4];
+			int r;
+		};
+		r = offset;
+		for (unsigned x = 0; x < 4; x++)
+			res.content.push_back(asBytes[x]);
+	}
+	return res;
+}
+
+PatchFragment::ModRM
+PatchFragment::ModRM::directRegister(unsigned reg)
+{
+	ModRM res;
+	if (reg >= 8) {
+		res.extendRm = true;
+		reg -= 8;
+	} else {
+		res.extendRm = false;
+	}
+	assert(reg < 8);
+	/* mod = 3, rm = register */
+	res.content.push_back(0xd0 | reg);
+	return res;
+}
+
+void
+PatchFragment::emitMovRegisterToModrm(unsigned reg, const ModRM &rm)
+{
+	unsigned char rex = 0x48;
+	if (reg >= 8) {
+		rex |= 4;
+		reg -= 8;
+	}
+	if (rm.extendRm)
+		rex |= 1;
+	emitByte(rex);
+	assert(reg < 8);
+	emitByte(0x89);
+	emitModrm(rm, reg);
 }
 
 void
 PatchFragment::emitCallReg(unsigned reg)
 {
 	if (reg >= 8) {
-		content.push_back(0x41);
+		emitByte(0x41);
 		reg -= 8;
 	}
-	content.push_back(0xff);
-	content.push_back(0xd0 + reg);
+	emitByte(0xff);
+	emitModrm(ModRM::directRegister(reg), 2);
 }
 
 static char *
@@ -863,68 +1000,22 @@ add_array_summary(std::vector<const char *> &out,
 }
 
 char *
-buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident)
+PatchFragment::asC(const char *ident, const std::set<ThreadRip> &entryPoints) const
 {
-	AddressSpace *as = oracle->ms->addressSpace;
-
-	/* What instructions do we need to cover? */
-	std::set<unsigned long> neededInstructions;
-	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
-	/* 5 bytes is the size of a 32-bit relative jump. */
-	ThreadRip root = ThreadRip::mk(summary->loadMachine->tid, oracle->dominator(neededInstructions, as, 5));
-	if (!root.rip) {
-		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
-		return NULL;
-	}
-	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
-	     it != summary->storeMachines.end();
-	     it++)
-		(*it)->machine->root->enumerateMentionedMemoryAccesses(neededInstructions);
-
-	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
-
-	std::vector<ThreadRip> roots;
-	/* What are the entry points of the patch? */
-	cfg->add_root(root, 100);
-	roots.push_back(root);
-	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
-	     it != summary->storeMachines.end();
-	     it++) {
-		std::set<unsigned long> instrs;
-		(*it)->machine->root->enumerateMentionedMemoryAccesses(instrs);
-		ThreadRip r = ThreadRip::mk((*it)->machine->tid, oracle->dominator(instrs, as, 5));
-		if (!r.rip) {
-			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
-			return NULL;
-		}
-		cfg->add_root(r, 100);
-		roots.push_back(r);
-	}
-	try {
-		cfg->doit();
-	} catch (NotImplementedException &e) {
-		/* This means that there's some instruction we can't
-		   decode.  Dump a diagnostic and just continue on. */
-		fprintf(_logfile,
-			"Cannot build patch for crash summary.  Instruction decoder said %s\n",
-			e.what());
-		return NULL;
-	}
-	PatchFragment *pf = new PatchFragment();
-	pf->fromCFG(cfg);
-
 	std::vector<const char *> fragments;
 	char *relocs_name;
 	char *trans_name;
 	char *content_name;
 	char *entry_table_name;
-	fragments.push_back(pf->asC(ident, &relocs_name, &trans_name, &content_name));
+	fragments.push_back(asC(ident, &relocs_name, &trans_name, &content_name));
 	entry_table_name = vex_asprintf("__%s_entry_points", ident);
 	fragments.push_back("static unsigned long ");
 	fragments.push_back(entry_table_name);
 	fragments.push_back("[] = {\n");
-	for (unsigned x = 0; x < roots.size(); x++)
-		fragments.push_back(vex_asprintf("\t0x%lx,\n", roots[x].rip));
+	for (std::set<ThreadRip>::iterator it = entryPoints.begin();
+	     it != entryPoints.end();
+	     it++)
+		fragments.push_back(vex_asprintf("\t0x%lx,\n", it->rip));
 	fragments.push_back("};\n\nstatic struct patch ");
 	fragments.push_back(ident);
 	fragments.push_back(" = {\n");
@@ -947,6 +1038,60 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	*cursor = 0;
 	assert(cursor == res + sz-1);
 	return res;
+}
+
+char *
+buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident)
+{
+	AddressSpace *as = oracle->ms->addressSpace;
+
+	/* What instructions do we need to cover? */
+	std::set<unsigned long> neededInstructions;
+	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
+	/* 5 bytes is the size of a 32-bit relative jump. */
+	ThreadRip root = ThreadRip::mk(summary->loadMachine->tid, oracle->dominator(neededInstructions, as, 5));
+	if (!root.rip) {
+		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
+		return NULL;
+	}
+	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
+	     it != summary->storeMachines.end();
+	     it++)
+		(*it)->machine->root->enumerateMentionedMemoryAccesses(neededInstructions);
+
+	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
+
+	std::set<ThreadRip> roots;
+	/* What are the entry points of the patch? */
+	cfg->add_root(root, 100);
+	roots.insert(root);
+	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
+	     it != summary->storeMachines.end();
+	     it++) {
+		std::set<unsigned long> instrs;
+		(*it)->machine->root->enumerateMentionedMemoryAccesses(instrs);
+		ThreadRip r = ThreadRip::mk((*it)->machine->tid, oracle->dominator(instrs, as, 5));
+		if (!r.rip) {
+			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
+			return NULL;
+		}
+		cfg->add_root(r, 100);
+		roots.insert(r);
+	}
+	try {
+		cfg->doit();
+	} catch (NotImplementedException &e) {
+		/* This means that there's some instruction we can't
+		   decode.  Dump a diagnostic and just continue on. */
+		fprintf(_logfile,
+			"Cannot build patch for crash summary.  Instruction decoder said %s\n",
+			e.what());
+		return NULL;
+	}
+	PatchFragment *pf = new PatchFragment();
+	pf->fromCFG(cfg);
+
+	return pf->asC(ident, roots);
 }
 
 void

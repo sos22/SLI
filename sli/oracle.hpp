@@ -290,7 +290,7 @@ public:
 	MachineState *ms;
 	Thread *crashedThread;
 
-	static const unsigned STATIC_THREAD = 99;
+	static const unsigned STATIC_THREAD = 712;
 
 	void findPreviousInstructions(std::vector<unsigned long> &output);
 	void findPreviousInstructions(std::vector<unsigned long> &output, unsigned long rip);

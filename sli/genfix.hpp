@@ -4,6 +4,7 @@
 #define MAX_INSTRUCTION_SIZE 15
 
 #include "libvex_ir.h"
+#include <set>
 
 class CFG;
 
@@ -140,10 +141,34 @@ private:
 	void emitStraightLine(Instruction *i);
 
 protected:
+	class ModRM {
+		ModRM() : extendRm(false) {}
+	public:
+		std::vector<unsigned char> content;
+		bool extendRm;
+		/* Access memory at address @reg + offset, where reg
+		   is a register index and offset is a constant. */
+		static ModRM memAtRegisterPlusOffset(unsigned reg, int offset);
+		/* Access register @reg directly, not going through
+		 * memory. */
+		static ModRM directRegister(unsigned reg);
+		/* Access memory at a fixed 32 bit signed address */
+		static ModRM absoluteAddress(int address);
+	};
+
+	void emitByte(unsigned char b) { content.push_back(b); }
+	void emitQword(unsigned long val);
+
+	void emitModrm(const ModRM &mrm, unsigned reg);
+
 	/* Emit a jump to an offset in the current fragment. */
 	void emitJmpToOffset(unsigned offset);
 	void emitJmpToRipClient(ThreadRip rip);
 	void emitJmpToRipHost(unsigned long rip);
+	/* Store a register to a modrm. */
+	void emitMovRegisterToModrm(unsigned reg, const ModRM &rm);
+	void emitLea(const ModRM &modrm, unsigned reg);
+
 	void emitCallSequence(const char *target, bool allowRedirection);
 	void skipRedZone();
 	void restoreRedZone();
@@ -153,11 +178,15 @@ protected:
 	void emitCallReg(unsigned);
 public:
 	void fromCFG(CFG *cfg);
-	char *asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const;
 
 	bool ripToOffset(ThreadRip rip, unsigned *res);
 	void writeBytes(const void *bytes, unsigned size, unsigned offset);
 	void addLateReloc(LateRelocation m) { lateRelocs.push_back(m); }
+
+	/* Just the core patch itself, not including the metdata tables. */
+	char *asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const;
+	/* The whole patch, including metadata tables. */
+	char *asC(const char *ident, const std::set<ThreadRip> &entryPoints) const;
 
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
