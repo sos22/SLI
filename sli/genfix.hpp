@@ -857,16 +857,30 @@ PatchFragment<r>::emitInstruction(Instruction<r> *i)
 	}
 }
 
+/* Convert an int to its constituent bytes, in little-endian order. */
+/* For some reason gcc flags a warning if you use this construct from
+ * in a template; meh. */
+static inline void
+toBytes(int i, unsigned char b[4])
+{
+	union {
+		unsigned char asBytes[4];
+		int j;
+	};
+	j = i;
+	b[0] = asBytes[0];
+	b[1] = asBytes[1];
+	b[2] = asBytes[2];
+	b[3] = asBytes[3];
+}
+
 template <typename r> void
 PatchFragment<r>::emitJmpToOffset(unsigned target_offset)
 {
 	unsigned starting_offset = content.size();
 	emitByte(0xe9);
-	union {
-		int delta_word;
-		Byte delta_bytes[4];
-	};
-	delta_word = target_offset - starting_offset - 5;
+	Byte delta_bytes[4];
+	toBytes((int)(target_offset - starting_offset - 5), delta_bytes);
 	for (unsigned x = 0; x < 4; x++)
 		emitByte(delta_bytes[x]);
 }
@@ -935,14 +949,24 @@ PatchFragment<r>::emitPopQ(unsigned reg)
 	emitByte(0x58 + reg);
 }
 
-template <typename r> void
-PatchFragment<r>::emitQword(unsigned long val)
+/* For some reason gcc produces an unused variable warning if you use
+   an anonymous union in a template.  Fix by splitting this into two
+   functions. */
+static inline void
+__emitQword_toBytes(long x, Byte b[8])
 {
 	union {
 		unsigned long asLong;
 		Byte asBytes[8];
 	};
-	asLong = val;
+	asLong = x;
+	memcpy(b, asBytes, 8);
+}
+template <typename r> void
+PatchFragment<r>::emitQword(unsigned long val)
+{
+	Byte asBytes[8];
+	__emitQword_toBytes(val, asBytes);
 	for (unsigned x = 0; x < 8; x++)
 		emitByte(asBytes[x]);
 }
@@ -980,11 +1004,8 @@ PatchFragment<r>::ModRM::absoluteAddress(int address)
 	/* SIB byte.  base = 5, scale = 0, index = 4 */
 	res.content.push_back(0x25);
 	/* Displacement */
-	union {
-		unsigned char asBytes[4];
-		int asInt;
-	};
-	asInt = address;
+	unsigned char asBytes[4];
+	toBytes(address, asBytes);
 	for (unsigned x = 0; x < 4; x++)
 		res.content.push_back(asBytes[x]);
 	return res;
@@ -1051,11 +1072,8 @@ PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
 		default:
 			abort();
 		}
-		union {
-			unsigned char asBytes[4];
-			int asInt;
-		};
-		asInt = offset;
+		unsigned char asBytes[4];
+		toBytes(offset, asBytes);
 		for (unsigned x = 0; x < 4; x++)
 			res.content.push_back(asBytes[x]);
 	}
