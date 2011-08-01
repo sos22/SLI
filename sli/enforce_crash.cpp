@@ -590,10 +590,7 @@ class EnforceCrashCFG : public CFG<ThreadRip> {
 	std::set<ThreadRip> &neededInstructions;
 public:
 	bool instructionUseful(Instruction<ThreadRip> *i) {
-		bool r = (neededInstructions.count(i->rip) != 0);
-		printf("%d:%lx %s\n", i->rip.thread, i->rip.rip,
-		       r ? "useful" : "not useful");
-		return r;
+		return neededInstructions.count(i->rip) != 0;
 	}
 	EnforceCrashCFG(AddressSpace *as, std::set<ThreadRip> &ni)
 		: CFG<ThreadRip>(as), neededInstructions(ni)
@@ -1160,19 +1157,11 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 		IRExpr *e = *it;
 		if (e->tag == Iex_Get) {
 			neededRips.insert(roots[e->Iex.Get.tid]);
-			printf("Demand rip %d:%lx for register expression\n",
-			       roots[e->Iex.Get.tid].thread,
-			       roots[e->Iex.Get.tid].rip);
 		} else if (e->tag == Iex_ClientCall) {
 			neededRips.insert(e->Iex.ClientCall.callSite);
 		} else if (e->tag == Iex_Load) {
 			neededRips.insert(e->Iex.Load.rip);
 		} else if (e->tag == Iex_HappensBefore) {
-			printf("Demand RIPs %d:%lx, %d:%lx\n",
-			       e->Iex.HappensBefore.before->rip.thread,
-			       e->Iex.HappensBefore.before->rip.rip,
-			       e->Iex.HappensBefore.after->rip.thread,
-			       e->Iex.HappensBefore.after->rip.rip);
 			neededRips.insert(e->Iex.HappensBefore.before->rip);
 			neededRips.insert(e->Iex.HappensBefore.after->rip);
 		} else {
