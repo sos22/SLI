@@ -1015,9 +1015,10 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	std::map<Instruction<ClientRip> *, std::set<IRExpr *> > &neededExpressions;
 
 	void emitInstruction(Instruction<ClientRip> *i);
-	slot_t allocateSlot() {
+	slot_t allocateSlot(IRExpr *e) {
 		slot_t r = next_slot;
 		next_slot.i++;
+		exprsToSlots.insert(std::pair<IRExpr *, slot_t>(e, r));
 		return r;
 	}
 	void emitMovRegToSlot(unsigned offset, slot_t slot);
@@ -1056,6 +1057,70 @@ vexRegOffsetToRegIdx(unsigned offset)
 	}
 
 }
+
+/* Is this opcode byte a prefix opcode? */
+static bool
+isPrefix(unsigned char opcode)
+{
+	return ((opcode >= 0x40 && opcode <= 0x4f) ||
+		(opcode == 0x26) ||
+		(opcode == 0x2E) ||
+		(opcode == 0x36) ||
+		(opcode == 0x3D) ||
+		(opcode >= 64 && opcode <= 0x67) ||
+		(opcode == 0xF0) ||
+		(opcode == 0xF2) ||
+		(opcode == 0xF3));
+}
+
+static unsigned
+instrOpcode(Instruction<ClientRip> *i)
+{
+	unsigned j;
+	j = 0;
+	/* Skip prefixes */
+	while (j < i->len && isPrefix(i->content[j]))
+		j++;
+	assert(j < i->len);
+	if (i->content[j] == 0x0F) {
+		/* Two-byte opcode */
+		assert(j+1 < i->len);
+		return 0x0F00 | i->content[j+1];
+	} else {
+		return i->content[j];
+	}
+}
+
+static unsigned
+instrModrmReg(Instruction<ClientRip> *i)
+{
+	unsigned j;
+	bool extend;
+
+	j = 0;
+	extend = false;
+
+	/* Skip prefixes */
+	while (j < i->len && isPrefix(i->content[j])) {
+		if (i->content[j] >= 0x40 && i->content[j] <= 0x4f)
+			if (i->content[j] & 4)
+				extend = true;
+		j++;
+	}
+	assert(j < i->len);
+	/* Skip opcode */
+	if (i->content[j] == 0x0F)
+		j++;
+	j++;
+	assert(j < i->len);
+	/* Next one must be modrm */
+	unsigned char modrm = i->content[j];
+	unsigned res = (modrm >> 3) & 7;
+	if (extend)
+		res |= 8;
+	return res;
+}
+
 void
 EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
 {
@@ -1081,18 +1146,25 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			assert(!exprsToSlots.count(e));
 			if (e->tag == Iex_Get) {
 				/* Easy case: just store the register in its slot */
-				slot_t s = allocateSlot();
-				exprsToSlots.insert(
-					std::pair<IRExpr *, slot_t>(e, s));
+				slot_t s = allocateSlot(e);
 				emitMovRegToSlot(e->Iex.Get.offset, s);
 			} else if (e->tag == Iex_ClientCall) {
 				/* Do this after emitting the instruction */
 			} else {
 				assert(e->tag == Iex_Load);
+				assert(neededExprs->size() == 1);
 				/* Much more difficult case.  This
 				   depends on the type of instruction
 				   which we're looking at. */
-#warning write me
+				switch (instrOpcode(i)) {
+				case 0x8b:
+					/* Simple load from modrm to
+					 * register.  Deal with it
+					 * later. */
+					break;
+				default:
+					abort();
+				}
 			}
 		}
 	}
@@ -1119,12 +1191,21 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 				/* Already handled */
 			} else if (e->tag == Iex_ClientCall) {
 				/* The result of the call should now be in %rax */
-				slot_t s = allocateSlot();
-				exprsToSlots.insert(
-					std::pair<IRExpr *, slot_t>(e, s));
+				slot_t s = allocateSlot(e);
 				emitMovRegToSlot(0, s);
 			} else {
 				assert(e->tag == Iex_Load);
+				switch (instrOpcode(i)) {
+				case 0x8b: {
+					/* Load from memory to modrm.
+					 * Nice and easy. */
+					slot_t s = allocateSlot(e);
+					emitMovRegToSlot(instrModrmReg(i) * 8, s);
+					break;
+				}
+				default:
+					abort();
+				}
 			}
 		}
 	}
