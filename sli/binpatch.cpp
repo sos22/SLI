@@ -7,28 +7,28 @@
 #include "sli.h"
 #include "genfix.hpp"
 
-class SourceSinkCFG : public CFG {
+class SourceSinkCFG : public CFG<ThreadRip> {
 	static unsigned long __trivial_hash_function(const unsigned long &k) { return k; }	
 	gc_map<unsigned long, bool, __trivial_hash_function> *sinkInstructions;
 public:
 	void add_sink(unsigned long rip) { (*sinkInstructions)[rip] = true; }
 	void destruct() { this->~SourceSinkCFG(); }
 
-	bool exploreInstruction(Instruction *i) { return !(*sinkInstructions)[i->rip.rip]; }
-	bool instructionUseful(Instruction *i) { return (*sinkInstructions)[i->rip.rip]; }
+	bool exploreInstruction(Instruction<ThreadRip> *i) { return !(*sinkInstructions)[i->rip.rip]; }
+	bool instructionUseful(Instruction<ThreadRip> *i) { return (*sinkInstructions)[i->rip.rip]; }
 
 	SourceSinkCFG(AddressSpace *as)
-		: CFG(as)
+		: CFG<ThreadRip>(as)
 	{
 		sinkInstructions = new gc_map<unsigned long, bool, __trivial_hash_function>();
 	}
 	void visit(HeapVisitor &hv) {
-		CFG::visit(hv);
+		CFG<ThreadRip>::visit(hv);
 		hv(sinkInstructions);
 	}
 };
 
-class AddExitCallPatch : public PatchFragment {
+class AddExitCallPatch : public PatchFragment<ThreadRip> {
 protected:
 	void generateEpilogue(ThreadRip exitRip);
 	/* XXX should really override emitInstruction here to catch
@@ -38,7 +38,7 @@ protected:
 void
 AddExitCallPatch::generateEpilogue(ThreadRip exitRip)
 {
-	Instruction *i = Instruction::pseudo(exitRip);
+	Instruction<ThreadRip> *i = Instruction<ThreadRip>::pseudo(exitRip);
 
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
@@ -62,7 +62,7 @@ mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 	}
 	cfg->doit();
 
-	PatchFragment *pf = new AddExitCallPatch();
+	PatchFragment<ThreadRip> *pf = new AddExitCallPatch();
 	pf->fromCFG(cfg);
 
 	char *ign;

@@ -586,21 +586,21 @@ enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out)
 	trans.transformIRExpr(e);
 }
 
-class EnforceCrashCFG : public CFG {
+class EnforceCrashCFG : public CFG<ThreadRip> {
 	std::set<ThreadRip> &neededInstructions;
 public:
-	bool instructionUseful(Instruction *i) {
+	bool instructionUseful(Instruction<ThreadRip> *i) {
 		bool r = (neededInstructions.count(i->rip) != 0);
 		printf("%d:%lx %s\n", i->rip.thread, i->rip.rip,
 		       r ? "useful" : "not useful");
 		return r;
 	}
 	EnforceCrashCFG(AddressSpace *as, std::set<ThreadRip> &ni)
-		: CFG(as), neededInstructions(ni)
+		: CFG<ThreadRip>(as), neededInstructions(ni)
 	{}
 };
 
-class instrToInstrSetMap : public std::map<Instruction *, std::set<Instruction *> > {
+class instrToInstrSetMap : public std::map<Instruction<ThreadRip> *, std::set<Instruction<ThreadRip> *> > {
 public:
 	void print(FILE *f);
 };
@@ -609,7 +609,7 @@ instrToInstrSetMap::print(FILE *f)
 {
 	for (iterator it = begin(); it != end(); it++) {
 		fprintf(f, "%d:%lx[%p] -> {", it->first->rip.thread, it->first->rip.rip, it->first);
-		for (std::set<Instruction *>::iterator it2 = it->second.begin();
+		for (std::set<Instruction<ThreadRip> *>::iterator it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++) {
 			if (it2 != it->second.begin())
@@ -628,7 +628,7 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	happensAfterMapT(DNF_Conjunction &c, CFG *cfg);
+	happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg);
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
 		happensBefore.print(f);
@@ -636,18 +636,18 @@ public:
 		happensAfter.print(f);
 	}
 };
-happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG *cfg)
+happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			ThreadRip beforeRip = c[x].second->Iex.HappensBefore.before->rip;
 			ThreadRip afterRip = c[x].second->Iex.HappensBefore.after->rip;
-			Instruction *before = cfg->ripToInstr->get(beforeRip);
-			Instruction *after = cfg->ripToInstr->get(afterRip);
+			Instruction<ThreadRip> *before = cfg->ripToInstr->get(beforeRip);
+			Instruction<ThreadRip> *after = cfg->ripToInstr->get(afterRip);
 			assert(before);
 			assert(after);
 			if (c[x].first) {
-				Instruction *t = before;
+				Instruction<ThreadRip> *t = before;
 				before = after;
 				after = t;
 			}
@@ -662,11 +662,11 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG *cfg)
    relationships. */
 class predecessorMapT : public instrToInstrSetMap {
 public:
-	predecessorMapT(CFG *cfg) {
-		for (CFG::ripToInstrT::iterator it = cfg->ripToInstr->begin();
+	predecessorMapT(CFG<ThreadRip> *cfg) {
+		for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
 		     it != cfg->ripToInstr->end();
 		     it++) {
-			Instruction *v = it.value();
+			Instruction<ThreadRip> *v = it.value();
 			if (!count(v))
 				(*this)[v];
 			if (v->defaultNextI)
@@ -677,20 +677,20 @@ public:
 	}
 };
 
-class cfgRootSetT : public std::set<Instruction *> {
+class cfgRootSetT : public std::set<Instruction<ThreadRip> *> {
 public:
-	cfgRootSetT(CFG *cfg, predecessorMapT &pred, happensAfterMapT &happensAfter);
+	cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfterMapT &happensAfter);
 };
-cfgRootSetT::cfgRootSetT(CFG *cfg, predecessorMapT &pred, happensAfterMapT &happensBefore)
+cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfterMapT &happensBefore)
 {
-	std::set<Instruction *> toEmit;
-	for (CFG::ripToInstrT::iterator it = cfg->ripToInstr->begin();
+	std::set<Instruction<ThreadRip> *> toEmit;
+	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
 	     it != cfg->ripToInstr->end();
 	     it++)
 		toEmit.insert(it.value());
 	while (!toEmit.empty()) {
 		/* Find one with no predecessors and emit that */
-		std::set<Instruction *>::iterator it;
+		std::set<Instruction<ThreadRip> *>::iterator it;
 		for (it = toEmit.begin(); it != toEmit.end(); it++) {
 			assert(pred.count(*it));
 			if (pred[*it].size() == 0)
@@ -705,11 +705,11 @@ cfgRootSetT::cfgRootSetT(CFG *cfg, predecessorMapT &pred, happensAfterMapT &happ
 		/* We're going to use *it as a root.  Purge it and
 		   everything reachable from it from the toEmit
 		   set. */
-		std::vector<Instruction *> toPurge;
-		std::set<Instruction *> donePurge;
+		std::vector<Instruction<ThreadRip> *> toPurge;
+		std::set<Instruction<ThreadRip> *> donePurge;
 		toPurge.push_back(*it);
 		while (!toPurge.empty()) {
-			Instruction *purge = toPurge.back();
+			Instruction<ThreadRip> *purge = toPurge.back();
 			toPurge.pop_back();
 			if (donePurge.count(purge))
 				continue;
@@ -740,27 +740,27 @@ cfgRootSetT::cfgRootSetT(CFG *cfg, predecessorMapT &pred, happensAfterMapT &happ
  * graph. */
 class instructionDominatorMapT : public instrToInstrSetMap {
 public:
-	instructionDominatorMapT(CFG *cfg,
+	instructionDominatorMapT(CFG<ThreadRip> *cfg,
 				 predecessorMapT &predecessors,
 				 happensAfterMapT &happensAfter,
-				 const std::set<Instruction *> &neededInstructions);
+				 const std::set<Instruction<ThreadRip> *> &neededInstructions);
 	/* Find all of the instructions at which the set of dominators
 	   changes i.e. does not match that of any of its
 	   predecessors. */
-	void getChangePoints(predecessorMapT &predecessors, std::set<Instruction *> &out);
+	void getChangePoints(predecessorMapT &predecessors, std::set<Instruction<ThreadRip> *> &out);
 };
-instructionDominatorMapT::instructionDominatorMapT(CFG *cfg,
+instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 						   predecessorMapT &predecessors,
 						   happensAfterMapT &happensAfter,
-						   const std::set<Instruction *> &neededInstructions)
+						   const std::set<Instruction<ThreadRip> *> &neededInstructions)
 {
 	/* Start by assuming that everything dominates everything */
 	cfgRootSetT entryPoints(cfg, predecessors, happensAfter);
-	std::set<Instruction *> needingRecompute;
-	for (CFG::ripToInstrT::iterator it = cfg->ripToInstr->begin();
+	std::set<Instruction<ThreadRip> *> needingRecompute;
+	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
 	     it != cfg->ripToInstr->end();
 	     it++) {
-		insert(std::pair<Instruction *, std::set<Instruction *> >(
+		insert(std::pair<Instruction<ThreadRip> *, std::set<Instruction<ThreadRip> *> >(
 			       it.value(),
 			       neededInstructions));
 		needingRecompute.insert(it.value());
@@ -768,31 +768,31 @@ instructionDominatorMapT::instructionDominatorMapT(CFG *cfg,
 
 	/* Now iterate to a fixed point. */
 	while (!needingRecompute.empty()) {
-		Instruction *i;
+		Instruction<ThreadRip> *i;
 		{
-			std::set<Instruction *>::iterator it = needingRecompute.begin();
+			std::set<Instruction<ThreadRip> *>::iterator it = needingRecompute.begin();
 			i = *it;
 			needingRecompute.erase(it);
 		}
 
-		std::set<Instruction *> &slot( (*this)[i] );
+		std::set<Instruction<ThreadRip> *> &slot( (*this)[i] );
 
 		/* new entry domination set is intersection of all of
 		 * the predecessor's exit sets.  If there are no
 		 * predecessor sets then the entry domination set is
 		 * empty. */
-		std::set<Instruction *> newDominators;
-		std::set<Instruction *> &allPreds(predecessors[i]);
+		std::set<Instruction<ThreadRip> *> newDominators;
+		std::set<Instruction<ThreadRip> *> &allPreds(predecessors[i]);
 		if (!allPreds.empty()) {
 			newDominators = slot;
 
-			for (std::set<Instruction *>::iterator predIt = allPreds.begin();
+			for (std::set<Instruction<ThreadRip> *>::iterator predIt = allPreds.begin();
 			     predIt != allPreds.end();
 			     predIt++) {
-				Instruction *predecessor = *predIt;
+				Instruction<ThreadRip> *predecessor = *predIt;
 				assert(count(predecessor));
-				std::set<Instruction *> &pred_dominators((*this)[predecessor]);
-				for (std::set<Instruction *>::iterator it2 = newDominators.begin();
+				std::set<Instruction<ThreadRip> *> &pred_dominators((*this)[predecessor]);
+				for (std::set<Instruction<ThreadRip> *>::iterator it2 = newDominators.begin();
 				     it2 != newDominators.end();
 					) {
 					if (pred_dominators.count(*it2)) {
@@ -823,12 +823,12 @@ instructionDominatorMapT::instructionDominatorMapT(CFG *cfg,
 		   happens-before edges are always satisfied, whereas
 		   for ordinary control edges only one per instruction
 		   will be satisfied. */
-		std::set<Instruction *> &orderedBefore(happensAfter.happensBefore[i]);
-		for (std::set<Instruction *>::iterator it = orderedBefore.begin();
+		std::set<Instruction<ThreadRip> *> &orderedBefore(happensAfter.happensBefore[i]);
+		for (std::set<Instruction<ThreadRip> *>::iterator it = orderedBefore.begin();
 		     it != orderedBefore.end();
 		     it++) {
-			std::set<Instruction *> &predecessor_dominates( (*this)[*it] );
-			for (std::set<Instruction *>::iterator it2 = predecessor_dominates.begin();
+			std::set<Instruction<ThreadRip> *> &predecessor_dominates( (*this)[*it] );
+			for (std::set<Instruction<ThreadRip> *>::iterator it2 = predecessor_dominates.begin();
 			     it2 != predecessor_dominates.end();
 			     it2++)
 				newDominators.insert(*it2);
@@ -843,8 +843,8 @@ instructionDominatorMapT::instructionDominatorMapT(CFG *cfg,
 			if (i->defaultNextI)
 				needingRecompute.insert(i->defaultNextI);
 			if (happensAfter.happensAfter.count(i)) {
-				std::set<Instruction *> &orderedAfter(happensAfter.happensAfter[i]);
-				for (std::set<Instruction *>::iterator it = orderedAfter.begin();
+				std::set<Instruction<ThreadRip> *> &orderedAfter(happensAfter.happensAfter[i]);
+				for (std::set<Instruction<ThreadRip> *>::iterator it = orderedAfter.begin();
 				     it != orderedAfter.end();
 				     it++)
 					needingRecompute.insert(*it);
@@ -853,13 +853,13 @@ instructionDominatorMapT::instructionDominatorMapT(CFG *cfg,
 	}
 }
 void
-instructionDominatorMapT::getChangePoints(predecessorMapT &predecessors, std::set<Instruction *> &out)
+instructionDominatorMapT::getChangePoints(predecessorMapT &predecessors, std::set<Instruction<ThreadRip> *> &out)
 {
 	for (iterator it = begin(); it != end(); it++) {
 		assert(predecessors.count(it->first));
-		std::set<Instruction *> &pred(predecessors[it->first]);
+		std::set<Instruction<ThreadRip> *> &pred(predecessors[it->first]);
 		bool includeThisOne = true;
-		for (std::set<Instruction *>::iterator it2 = pred.begin();
+		for (std::set<Instruction<ThreadRip> *>::iterator it2 = pred.begin();
 		     includeThisOne && it2 != pred.end();
 		     it2++) {
 			if ((*this)[*it2] == it->second)
@@ -870,13 +870,13 @@ instructionDominatorMapT::getChangePoints(predecessorMapT &predecessors, std::se
 	}
 }
 
-class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *> > {
+class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > {
 	class trans1 : public IRExprTransformer {
-		std::set<Instruction *> &avail;
+		std::set<Instruction<ThreadRip> *> &avail;
 		std::set<unsigned> &availThreads;
-		CFG *cfg;
+		CFG<ThreadRip> *cfg;
 		bool isAvail(ThreadRip rip) {
-			Instruction *i = cfg->ripToInstr->get(rip);
+			Instruction<ThreadRip> *i = cfg->ripToInstr->get(rip);
 			assert(i);
 			return avail.count(i) != 0;
 		}
@@ -901,35 +901,35 @@ class expressionDominatorMapT : public std::map<Instruction *, std::set<IRExpr *
 		}
 	public:
 		bool isGood;
-		trans1(std::set<Instruction *> &_avail, std::set<unsigned> &_availThreads, CFG *_cfg)
+		trans1(std::set<Instruction<ThreadRip> *> &_avail, std::set<unsigned> &_availThreads, CFG<ThreadRip> *_cfg)
 			: avail(_avail), availThreads(_availThreads), cfg(_cfg), isGood(true) 
 		{}
 	};
-	static bool evaluatable(IRExpr *e, std::set<Instruction *> &avail, std::set<unsigned> &availThreads, CFG *cfg) {
+	static bool evaluatable(IRExpr *e, std::set<Instruction<ThreadRip> *> &avail, std::set<unsigned> &availThreads, CFG<ThreadRip> *cfg) {
 		trans1 t(avail, availThreads, cfg);
 		t.transformIRExpr(e);
 		return t.isGood;
 	}
 public:
 	expressionDominatorMapT(instructionDominatorMapT &, DNF_Conjunction &,
-				predecessorMapT &, happensAfterMapT &, CFG *);
+				predecessorMapT &, happensAfterMapT &, CFG<ThreadRip> *);
 };
 expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 						 DNF_Conjunction &c,
 						 predecessorMapT &pred,
 						 happensAfterMapT &happensBefore,
-						 CFG *cfg)
+						 CFG<ThreadRip> *cfg)
 {
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
-	std::map<Instruction *, std::set<IRExpr *> > evalable;
+	std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > evalable;
 	for (instructionDominatorMapT::iterator it = idom.begin();
 	     it != idom.end();
 	     it++) {
 		evalable[it->first].clear();
 		for (unsigned x = 0; x < c.size(); x++) {
 			std::set<unsigned> availThreads;
-			for (std::set<Instruction *>::iterator it2 = it->second.begin();
+			for (std::set<Instruction<ThreadRip> *>::iterator it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++)
 				availThreads.insert((*it2)->rip.thread);
@@ -943,14 +943,14 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 	   not at some of X's predecessors, for any instruction X.  I'm
 	   not entirely convinced that that's *precisely* what we're
 	   after, but it's a pretty reasonable approximation. */
-	for (std::map<Instruction *, std::set<IRExpr *> >::iterator it = evalable.begin();
+	for (std::map<Instruction<ThreadRip> *, std::set<IRExpr *> >::iterator it = evalable.begin();
 	     it != evalable.end();
 	     it++) {
-		Instruction *i = it->first;
+		Instruction<ThreadRip> *i = it->first;
 		std::set<IRExpr *> &theoreticallyEvaluatable(evalable[i]);
 		std::set<IRExpr *> &actuallyEvalHere((*this)[i]);
-		std::set<Instruction *> &predecessors(pred[i]);
-		std::set<Instruction *> *orderingPredecessors;
+		std::set<Instruction<ThreadRip> *> &predecessors(pred[i]);
+		std::set<Instruction<ThreadRip> *> *orderingPredecessors;
 
 		if (happensBefore.happensBefore.count(i))
 			orderingPredecessors = &happensBefore.happensBefore[i];
@@ -959,10 +959,10 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 		     it2++) {
 			IRExpr *expr = *it2;
 			bool takeIt = false;
-			for (std::set<Instruction *>::iterator it3 = predecessors.begin();
+			for (std::set<Instruction<ThreadRip> *>::iterator it3 = predecessors.begin();
 			     !takeIt && it3 != predecessors.end();
 			     it3++) {
-				Instruction *predecessor = *it3;
+				Instruction<ThreadRip> *predecessor = *it3;
 				if (!evalable[predecessor].count(expr))
 					takeIt = true;
 			}
@@ -972,7 +972,7 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 			   satisfied and it's therefore certain that
 			   it will have already been evaluated. */
 			if (takeIt && orderingPredecessors) {
-				for (std::set<Instruction *>::iterator it3 = orderingPredecessors->begin();
+				for (std::set<Instruction<ThreadRip> *>::iterator it3 = orderingPredecessors->begin();
 				     takeIt && it3 != orderingPredecessors->end();
 				     it3++) {
 					if (evalable[*it3].count(expr))
@@ -989,7 +989,7 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 	}
 }
 
-class EnforceCrashPatchFragment : public PatchFragment {
+class EnforceCrashPatchFragment : public PatchFragment<ThreadRip> {
 	struct slot_t {
 		slot_t(int _i) : i(_i) {}
 		int i;
@@ -1000,9 +1000,9 @@ class EnforceCrashPatchFragment : public PatchFragment {
 	std::map<IRExpr *, slot_t> exprsToSlots;
 	/* Mapping from instructions to the expressions which we need
 	   to stash at those instructions. */
-	std::map<Instruction *, std::set<IRExpr *> > &neededExpressions;
+	std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > &neededExpressions;
 
-	void emitInstruction(Instruction *i);
+	void emitInstruction(Instruction<ThreadRip> *i);
 	slot_t allocateSlot() {
 		slot_t r = next_slot;
 		next_slot.i++;
@@ -1011,8 +1011,9 @@ class EnforceCrashPatchFragment : public PatchFragment {
 	void emitMovRegToSlot(unsigned offset, slot_t slot);
 	
 public:
-	EnforceCrashPatchFragment(std::map<Instruction *, std::set<IRExpr *> > &_neededExpressions)
-		: next_slot(0),
+	EnforceCrashPatchFragment(std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > &_neededExpressions)
+		: PatchFragment<ThreadRip>(),
+		  next_slot(0),
 		  exprsToSlots(),
 		  neededExpressions(_neededExpressions)
 	{}
@@ -1049,11 +1050,11 @@ EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
 	/* gs prefix */
 	emitByte(0x65);
 	emitMovRegisterToModrm(vexRegOffsetToRegIdx(offset),
-			       PatchFragment::ModRM::absoluteAddress(slot.i * 8));
+			       PatchFragment<ThreadRip>::ModRM::absoluteAddress(slot.i * 8));
 }
 
 void
-EnforceCrashPatchFragment::emitInstruction(Instruction *i)
+EnforceCrashPatchFragment::emitInstruction(Instruction<ThreadRip> *i)
 {
 	if (neededExpressions.count(i)) {
 		/* Need to emit gunk to store the appropriate
@@ -1092,7 +1093,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction *i)
 	}
 #endif
 
-	PatchFragment::emitInstruction(i);
+	PatchFragment<ThreadRip>::emitInstruction(i);
 }
 
 static void
@@ -1148,7 +1149,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	/* Build an instruction predecessor map */
 	predecessorMapT predecessorMap(cfg);
 
-	std::set<Instruction *> neededInstructions;
+	std::set<Instruction<ThreadRip> *> neededInstructions;
 	for (std::set<ThreadRip>::iterator it = neededRips.begin();
 	     it != neededRips.end();
 	     it++)
@@ -1164,7 +1165,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 
 	/* Figure out where we need to stash the various necessary
 	 * expressions. */
-	std::map<Instruction *, std::set<IRExpr *> > exprStashPoints;
+	std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > exprStashPoints;
 	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
 	     it != neededExpressions.end();
 	     it++) {

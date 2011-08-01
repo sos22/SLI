@@ -82,6 +82,12 @@ public:
 	bool operator>(const ThreadRip &o) const {
 		return !(*this < o) && !(*this == o);
 	}
+
+	ThreadRip operator+(unsigned x) const { return mk(thread, rip + x); }
+	ThreadRip operator+(int x) const { return mk(thread, rip + x); }
+	ThreadRip operator+(unsigned long x) const { return mk(thread, rip + x); }
+	ThreadRip operator+(long x) const { return mk(thread, rip + x); }
+
 	unsigned thread;
 	unsigned long rip;
 };
