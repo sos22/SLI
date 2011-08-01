@@ -1071,13 +1071,14 @@ EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
 void
 EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 {
+	std::set<IRExpr *> *neededExprs = NULL;
 	if (neededExpressions.count(i)) {
+		neededExprs = &neededExpressions[i];
 		/* Need to emit gunk to store the appropriate
 		   generated expression.  That'll either be a simple
 		   register access or a memory load of some sort. */
-		std::set<IRExpr *> &neededExprs(neededExpressions[i]);
-		for (std::set<IRExpr *>::iterator it = neededExprs.begin();
-		     it != neededExprs.end();
+		for (std::set<IRExpr *>::iterator it = neededExprs->begin();
+		     it != neededExprs->end();
 		     it++) {
 			IRExpr *e = *it;
 			assert(!exprsToSlots.count(e));
@@ -1087,6 +1088,8 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 				exprsToSlots.insert(
 					std::pair<IRExpr *, slot_t>(e, s));
 				emitMovRegToSlot(e->Iex.Get.offset, s);
+			} else if (e->tag == Iex_ClientCall) {
+				/* Do this after emitting the instruction */
 			} else {
 				assert(e->tag == Iex_Load);
 				/* Much more difficult case.  This
@@ -1109,6 +1112,25 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 #endif
 
 	PatchFragment<ClientRip>::emitInstruction(i);
+
+	if (neededExprs) {
+		for (std::set<IRExpr *>::iterator it = neededExprs->begin();
+		     it != neededExprs->end();
+		     it++) {
+			IRExpr *e = *it;
+			if (e->tag == Iex_Get) {
+				/* Already handled */
+			} else if (e->tag == Iex_ClientCall) {
+				/* The result of the call should now be in %rax */
+				slot_t s = allocateSlot();
+				exprsToSlots.insert(
+					std::pair<IRExpr *, slot_t>(e, s));
+				emitMovRegToSlot(0, s);
+			} else {
+				assert(e->tag == Iex_Load);
+			}
+		}
+	}
 }
 
 ClientRip threadRipToClientRip(const ThreadRip &k)
