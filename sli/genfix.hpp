@@ -65,6 +65,8 @@ public:
 					    CFG<ripType> *cfg);
 	static Instruction<ripType> *pseudo(ripType rip);
 
+	template <typename targetType, targetType degrader(const ripType &)> Instruction<targetType> *degrade();
+
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
 		hv(as);
@@ -75,8 +77,11 @@ public:
 	NAMED_CLASS
 };
 
+class ClientRip;
+
 unsigned long __trivial_hash_function(const ThreadRip &k);
 unsigned long __trivial_hash_function(const unsigned long &k);
+unsigned long __trivial_hash_function(const ClientRip &k);
 
 template <typename ripType>
 class CFG : public GarbageCollected<CFG<ripType> > {
@@ -106,6 +111,10 @@ public:
 
 	virtual void destruct() { this->~CFG(); }
 	NAMED_CLASS
+
+	/* Switch from one ripType to a less fine-grained one
+	 * e.g. from a ThreadRip to an unsigned long rip */
+	template <typename target, target degrader(const ripType &)> CFG<target> *degrade();
 
 	/* These can be overriden by derived classes to change the
 	 * behaviour a bit. */
@@ -235,6 +244,7 @@ public:
 	EarlyRelocation(unsigned _offset, unsigned _size)
 		: offset(_offset), size(_size) {}
 	virtual void doit(PatchFragment<ripType> *pf) = 0;
+	template <typename targetType, targetType degrader(const ripType &)> EarlyRelocation<targetType> *degrade();
 	void visit(HeapVisitor &hv) {}
 	void destruct() {}
 	NAMED_CLASS
@@ -306,6 +316,14 @@ public:
 		  nrImmediateBytes(_nrImmediateBytes)
 	{
 	}
+	template <typename targetT, targetT degrader(const r &)> RipRelativeRelocation<targetT> *degrade()
+	{
+		return new RipRelativeRelocation<targetT>(
+			this->offset,
+			this->size,
+			degrader(target),
+			nrImmediateBytes);
+	}
 };
 
 template <typename r>
@@ -319,6 +337,13 @@ public:
 		: EarlyRelocation<r>(_offset, _size),
 		  target(_target)
 	{
+	}
+	template <typename targetT, targetT degrader(const r &)> RipRelativeBranchRelocation<targetT> *degrade()
+	{
+		return new RipRelativeBranchRelocation<targetT>(
+			this->offset,
+			this->size,
+			degrader(target));
 	}
 };
 
@@ -1197,7 +1222,7 @@ PatchFragment<r>::asC(const char *ident, const std::set<r> &entryPoints) const
 	fragments.push_back("static unsigned long ");
 	fragments.push_back(entry_table_name);
 	fragments.push_back("[] = {\n");
-	for (std::set<ThreadRip>::iterator it = entryPoints.begin();
+	for (typename std::set<r>::iterator it = entryPoints.begin();
 	     it != entryPoints.end();
 	     it++)
 		fragments.push_back(vex_asprintf("\t0x%lx,\n", it->rip));
@@ -1242,6 +1267,96 @@ CFG<r>::print(FILE *f)
 			it.value()->branchNext.rip,
 			it.value()->branchNextI);
 	}
+}
+
+template <typename ripType> template <typename targetType, targetType degrader(const ripType &)> EarlyRelocation<targetType> *
+EarlyRelocation<ripType>::degrade()
+{
+	if (RipRelativeRelocation<ripType> *rrr =
+	    dynamic_cast<RipRelativeRelocation<ripType> *>(this))
+		return rrr->degrade<targetType, degrader>();
+	else if (RipRelativeBranchRelocation<ripType> *rrbr =
+		 dynamic_cast<RipRelativeBranchRelocation<ripType> *>(this))
+		return rrbr->degrade<targetType, degrader>();
+	else
+		abort();
+}
+
+template <typename ripType> template <typename targetType, targetType degrader(const ripType &)> Instruction<targetType> *
+Instruction<ripType>::degrade()
+{
+	Instruction<targetType> *work = new Instruction<targetType>();
+
+	work->rip = degrader(rip);
+	work->defaultNext = degrader(defaultNext);
+	work->branchNext = degrader(branchNext);
+
+	work->offsetInPatch = offsetInPatch;
+	work->presentInPatch = presentInPatch;
+
+	memcpy(work->content, content, len);
+	work->len = len;
+	work->pfx = pfx;
+	work->nr_prefixes = nr_prefixes;
+
+	work->relocs.resize(relocs.size());
+	for (unsigned x = 0; x < relocs.size(); x++)
+		work->relocs[x] = relocs[x]->degrade<targetType, degrader>();
+
+	work->as = as;
+	work->useful = useful;
+
+	return work;
+}
+
+template <typename ripType> template <typename targetType, targetType degrader(const ripType &)> CFG<targetType> *
+CFG<ripType>::degrade()
+{
+	std::map<Instruction<ripType> *, Instruction<targetType> *> trans;
+	CFG<targetType> *work = new CFG<targetType>(as);
+
+	for (typename ripToInstrT::iterator it = ripToInstr->begin();
+	     it != ripToInstr->end();
+	     it++) {
+		ripType srcRip = it.key();
+		Instruction<ripType> *src = it.value();
+		Instruction<targetType> *dest;
+		targetType destRip = degrader(srcRip);
+		if (work->ripToInstr->hasKey(destRip)) {
+			dest = work->ripToInstr->get(destRip);
+		} else {
+			dest = src->degrade<targetType, degrader>();
+			work->ripToInstr->set(destRip, dest);
+		}
+		trans[src] = dest;
+	}
+	for (typename ripToInstrT::iterator it = ripToInstr->begin();
+	     it != ripToInstr->end();
+	     it++) {
+		ripType srcRip = it.key();
+		Instruction<ripType> *src = it.value();
+		Instruction<targetType> *dest = work->ripToInstr->get(degrader(srcRip));
+		assert(dest);
+
+		Instruction<targetType> *d;
+		if (src->branchNextI) {
+			d = trans[src->branchNextI];
+			assert(d);
+			if (dest->branchNextI)
+				assert(d == dest->branchNextI);
+			else
+				dest->branchNextI = d;
+		}
+		if (src->defaultNextI) {
+			d = trans[src->defaultNextI];
+			assert(d);
+			if (dest->defaultNextI)
+				assert(d == dest->defaultNextI);
+			else
+				dest->defaultNextI = d;
+		}
+	}
+	return work;
 }
 
 #endif /* !GENFIX_H__ */

@@ -989,7 +989,22 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 	}
 }
 
-class EnforceCrashPatchFragment : public PatchFragment<ThreadRip> {
+class ClientRip {
+public:
+	unsigned long rip;
+	ClientRip(unsigned long _rip)
+		: rip(_rip)
+	{}
+
+	ClientRip()
+		: rip(0)
+	{}
+	bool operator<(const ClientRip &k) const { return rip < k.rip; }
+	bool operator!=(const ClientRip &k) const { return *this < k || k < *this; }
+	bool operator==(const ClientRip &k) const { return !(*this != k); }
+};
+
+class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	struct slot_t {
 		slot_t(int _i) : i(_i) {}
 		int i;
@@ -1000,9 +1015,9 @@ class EnforceCrashPatchFragment : public PatchFragment<ThreadRip> {
 	std::map<IRExpr *, slot_t> exprsToSlots;
 	/* Mapping from instructions to the expressions which we need
 	   to stash at those instructions. */
-	std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > &neededExpressions;
+	std::map<Instruction<ClientRip> *, std::set<IRExpr *> > &neededExpressions;
 
-	void emitInstruction(Instruction<ThreadRip> *i);
+	void emitInstruction(Instruction<ClientRip> *i);
 	slot_t allocateSlot() {
 		slot_t r = next_slot;
 		next_slot.i++;
@@ -1011,8 +1026,8 @@ class EnforceCrashPatchFragment : public PatchFragment<ThreadRip> {
 	void emitMovRegToSlot(unsigned offset, slot_t slot);
 	
 public:
-	EnforceCrashPatchFragment(std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > &_neededExpressions)
-		: PatchFragment<ThreadRip>(),
+	EnforceCrashPatchFragment(std::map<Instruction<ClientRip> *, std::set<IRExpr *> > &_neededExpressions)
+		: PatchFragment<ClientRip>(),
 		  next_slot(0),
 		  exprsToSlots(),
 		  neededExpressions(_neededExpressions)
@@ -1050,11 +1065,11 @@ EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
 	/* gs prefix */
 	emitByte(0x65);
 	emitMovRegisterToModrm(vexRegOffsetToRegIdx(offset),
-			       PatchFragment<ThreadRip>::ModRM::absoluteAddress(slot.i * 8));
+			       PatchFragment<ClientRip>::ModRM::absoluteAddress(slot.i * 8));
 }
 
 void
-EnforceCrashPatchFragment::emitInstruction(Instruction<ThreadRip> *i)
+EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 {
 	if (neededExpressions.count(i)) {
 		/* Need to emit gunk to store the appropriate
@@ -1093,7 +1108,16 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ThreadRip> *i)
 	}
 #endif
 
-	PatchFragment<ThreadRip>::emitInstruction(i);
+	PatchFragment<ClientRip>::emitInstruction(i);
+}
+
+ClientRip threadRipToClientRip(const ThreadRip &k)
+{
+	return ClientRip(k.rip);
+}
+unsigned long __trivial_hash_function(const ClientRip &k)
+{
+	return k.rip;
 }
 
 static void
@@ -1163,19 +1187,25 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	 * expressions become available. */
 	expressionDominatorMapT exprDominatorMap(instrDominatorMap, c, predecessorMap, happensAfter, cfg);
 
+	/* The patch needs to be built in direct RIP space, rather
+	 * than in ThreadRip space.  That means we need to degrade the
+	 * CFG. */
+	CFG<ClientRip> *degradedCfg;
+	degradedCfg = cfg->degrade<ClientRip, threadRipToClientRip>();
+
 	/* Figure out where we need to stash the various necessary
 	 * expressions. */
-	std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > exprStashPoints;
+	std::map<Instruction<ClientRip> *, std::set<IRExpr *> > exprStashPoints;
 	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
 	     it != neededExpressions.end();
 	     it++) {
 		IRExpr *e = *it;
 		if (e->tag == Iex_Get) {
-			exprStashPoints[cfg->ripToInstr->get(roots[e->Iex.Get.tid])].insert(e);
+			exprStashPoints[degradedCfg->ripToInstr->get(threadRipToClientRip(roots[e->Iex.Get.tid]))].insert(e);
 		} else if (e->tag == Iex_ClientCall) {
-			exprStashPoints[cfg->ripToInstr->get(e->Iex.ClientCall.callSite)].insert(e);
+			exprStashPoints[degradedCfg->ripToInstr->get(threadRipToClientRip(e->Iex.ClientCall.callSite))].insert(e);
 		} else if (e->tag == Iex_Load) {
-			exprStashPoints[cfg->ripToInstr->get(e->Iex.Load.rip)].insert(e);
+			exprStashPoints[degradedCfg->ripToInstr->get(threadRipToClientRip(e->Iex.Load.rip))].insert(e);
 		} else if (e->tag == Iex_HappensBefore) {
 			/* These don't really get stashed in any useful sense */
 		} else {
@@ -1185,12 +1215,12 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 
 	/* Now build the patch */
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(exprStashPoints);
-	pf->fromCFG(cfg);
-	std::set<ThreadRip> entryPoints;
+	pf->fromCFG(degradedCfg);
+	std::set<ClientRip> entryPoints;
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++)
-		entryPoints.insert(it->second);
+		entryPoints.insert(threadRipToClientRip(it->second));
 	printf("Fragment: %s\n", pf->asC("ident", entryPoints));
 }
 
