@@ -144,10 +144,10 @@ typedef char *LateRelocation;
 template <typename ripType>
 class PatchFragment : public GarbageCollected<PatchFragment<ripType> > {
 	std::vector<EarlyRelocation<ripType> *> relocs;
-	std::vector<LateRelocation> lateRelocs;
 	std::vector<Instruction<ripType> *> registeredInstrs;
 
 protected:
+	std::vector<LateRelocation> lateRelocs;
 	CFG<ripType> *cfg;
 	std::vector<unsigned char> content;
 
@@ -182,6 +182,8 @@ protected:
 	void emitJmpToRipHost(unsigned long rip);
 	/* Store a register to a modrm. */
 	void emitMovRegisterToModrm(unsigned reg, const ModRM &rm);
+	/* Load a register from a modrm */
+	void emitMovModrmToRegister(const ModRM &rm, unsigned reg);
 	void emitLea(const ModRM &modrm, unsigned reg);
 
 	void emitCallSequence(const char *target, bool allowRedirection);
@@ -1109,6 +1111,22 @@ PatchFragment<r>::emitMovRegisterToModrm(unsigned reg, const ModRM &rm)
 	emitByte(rex);
 	assert(reg < 8);
 	emitByte(0x89);
+	emitModrm(rm, reg);
+}
+
+template <typename r> void
+PatchFragment<r>::emitMovModrmToRegister(const ModRM &rm, unsigned reg)
+{
+	unsigned char rex = 0x48;
+	if (reg >= 8) {
+		rex |= 4;
+		reg -= 8;
+	}
+	if (rm.extendRm)
+		rex |= 1;
+	emitByte(rex);
+	assert(reg < 8);
+	emitByte(0x8B);
 	emitModrm(rm, reg);
 }
 

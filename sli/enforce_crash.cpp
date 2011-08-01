@@ -867,7 +867,7 @@ instructionDominatorMapT::getChangePoints(predecessorMapT &predecessors, std::se
 	}
 }
 
-class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > {
+class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > > {
 	class trans1 : public IRExprTransformer {
 		std::set<Instruction<ThreadRip> *> &avail;
 		std::set<unsigned> &availThreads;
@@ -919,7 +919,7 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 {
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
-	std::map<Instruction<ThreadRip> *, std::set<IRExpr *> > evalable;
+	std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > > evalable;
 	for (instructionDominatorMapT::iterator it = idom.begin();
 	     it != idom.end();
 	     it++) {
@@ -931,7 +931,7 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 			     it2++)
 				availThreads.insert((*it2)->rip.thread);
 			if (evaluatable(c[x].second, it->second, availThreads, cfg))
-				evalable[it->first].insert(c[x].second);
+				evalable[it->first].insert(c[x]);
 		}
 	}
 
@@ -940,27 +940,26 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 	   not at some of X's predecessors, for any instruction X.  I'm
 	   not entirely convinced that that's *precisely* what we're
 	   after, but it's a pretty reasonable approximation. */
-	for (std::map<Instruction<ThreadRip> *, std::set<IRExpr *> >::iterator it = evalable.begin();
+	for (std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > >::iterator it = evalable.begin();
 	     it != evalable.end();
 	     it++) {
 		Instruction<ThreadRip> *i = it->first;
-		std::set<IRExpr *> &theoreticallyEvaluatable(evalable[i]);
-		std::set<IRExpr *> &actuallyEvalHere((*this)[i]);
+		std::set<std::pair<bool, IRExpr *> > &theoreticallyEvaluatable(evalable[i]);
+		std::set<std::pair<bool, IRExpr *> > &actuallyEvalHere((*this)[i]);
 		std::set<Instruction<ThreadRip> *> &predecessors(pred[i]);
 		std::set<Instruction<ThreadRip> *> *orderingPredecessors;
 
 		if (happensBefore.happensBefore.count(i))
 			orderingPredecessors = &happensBefore.happensBefore[i];
-		for (std::set<IRExpr *>::iterator it2 = theoreticallyEvaluatable.begin();
+		for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = theoreticallyEvaluatable.begin();
 		     it2 != theoreticallyEvaluatable.end();
 		     it2++) {
-			IRExpr *expr = *it2;
 			bool takeIt = false;
 			for (std::set<Instruction<ThreadRip> *>::iterator it3 = predecessors.begin();
 			     !takeIt && it3 != predecessors.end();
 			     it3++) {
 				Instruction<ThreadRip> *predecessor = *it3;
-				if (!evalable[predecessor].count(expr))
+				if (!evalable[predecessor].count(*it2))
 					takeIt = true;
 			}
 			/* If it's evaluatable at *any* happens-before
@@ -972,15 +971,15 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 				for (std::set<Instruction<ThreadRip> *>::iterator it3 = orderingPredecessors->begin();
 				     takeIt && it3 != orderingPredecessors->end();
 				     it3++) {
-					if (evalable[*it3].count(expr))
+					if (evalable[*it3].count(*it2))
 						takeIt = false;
 				}
 			}
 			if (takeIt) {
 				printf("Eval ");
-				ppIRExpr(expr, stdout);
+				ppIRExpr(it2->second, stdout);
 				printf(" at %d:%lx\n", i->rip.thread, i->rip.rip);
-				actuallyEvalHere.insert(expr);
+				actuallyEvalHere.insert(*it2);
 			}
 		}
 	}
@@ -1013,22 +1012,52 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	/* Mapping from instructions to the expressions which we need
 	   to stash at those instructions. */
 	std::map<Instruction<ClientRip> *, std::set<IRExpr *> > &neededExpressions;
+	/* Mapping from instructions to the expressions which we need
+	   to evaluate at those instructions.  If the expression is
+	   equal to the other element of the pair then we will escape
+	   from the patch. */
+	std::map<Instruction<ClientRip> *, std::set<std::pair<bool, IRExpr *> > > &expressionEvalPoints;
 
 	void emitInstruction(Instruction<ClientRip> *i);
-	slot_t allocateSlot(IRExpr *e) {
+	slot_t allocateSlot() {
 		slot_t r = next_slot;
 		next_slot.i++;
+		return r;
+	}
+	slot_t allocateSlot(IRExpr *e) {
+		slot_t r = allocateSlot();
 		exprsToSlots.insert(std::pair<IRExpr *, slot_t>(e, r));
 		return r;
 	}
 	void emitMovRegToSlot(unsigned offset, slot_t slot);
-	
+	void emitMovSlotToReg(slot_t slot, unsigned offset);
+	/* Emit a sequence to evaluate @e and then exit the patch if
+	 * it's false.  The exit target is taken from @i's
+	 * defaultNext.  The test is inverted if @invert is set.  @i
+	 * must not be a branch instruction (i.e. branchNext must be
+	 * clear). */
+	void emitCheckExpressionOrEscape(bool invert, IRExpr *e, Instruction<ClientRip> *i);
+
+	void emitEvalExpr(IRExpr *e, unsigned reg);
+	void emitCompareExprToZero(IRExpr *e);
+
+	slot_t emitSaveRflags();
+	void emitRestoreRflags(slot_t);
+	void emitPushf() { emitByte(0x9C); }
+	void emitPopf() { emitByte(0x9D); }
+
+	void emitTestRegModrm(unsigned, const ModRM &);
+	void emitBranchNonZero(ClientRip target);
+	void emitBranchZero(ClientRip target);
 public:
-	EnforceCrashPatchFragment(std::map<Instruction<ClientRip> *, std::set<IRExpr *> > &_neededExpressions)
+	EnforceCrashPatchFragment(std::map<Instruction<ClientRip> *,
+				  std::set<IRExpr *> > &_neededExpressions,
+				  std::map<Instruction<ClientRip> *, std::set<std::pair<bool, IRExpr *> > > &_expressionEvalPoints)
 		: PatchFragment<ClientRip>(),
 		  next_slot(0),
 		  exprsToSlots(),
-		  neededExpressions(_neededExpressions)
+		  neededExpressions(_neededExpressions),
+		  expressionEvalPoints(_expressionEvalPoints)
 	{}
 };
 
@@ -1131,6 +1160,131 @@ EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
 }
 
 void
+EnforceCrashPatchFragment::emitMovSlotToReg(slot_t slot, unsigned offset)
+{
+	/* gs prefix */
+	emitByte(0x65);
+	emitMovModrmToRegister(PatchFragment<ClientRip>::ModRM::absoluteAddress(slot.i * 8),
+			       vexRegOffsetToRegIdx(offset));
+}
+
+void
+EnforceCrashPatchFragment::emitTestRegModrm(unsigned reg, const ModRM &modrm)
+{
+	unsigned char rex = 0x48;
+	if (reg >= 8) {
+		rex |= 4;
+		reg -= 8;
+	}
+	if (modrm.extendRm)
+		rex |= 1;
+	emitByte(rex);
+	assert(reg < 8);
+	emitByte(0x85);
+	emitModrm(modrm, reg);
+}
+
+void
+EnforceCrashPatchFragment::emitBranchNonZero(ClientRip target)
+{
+	emitByte(0x0F);
+	emitByte(0x85);
+	emitByte(0); /* Pad */
+	emitByte(0); /* Pad */
+	emitByte(0); /* Pad */
+	emitByte(0); /* Pad */
+	lateRelocs.push_back(late_relocation(content.size() - 4,
+					     4,
+					     vex_asprintf("0x%lx", target.rip),
+					     0,
+					     true));
+}
+void
+EnforceCrashPatchFragment::emitBranchZero(ClientRip target)
+{
+	emitByte(0x0F);
+	emitByte(0x84);
+	emitByte(0); /* Pad */
+	emitByte(0); /* Pad */
+	emitByte(0); /* Pad */
+	emitByte(0); /* Pad */
+	lateRelocs.push_back(late_relocation(content.size() - 4,
+					     4,
+					     vex_asprintf("0x%lx", target.rip),
+					     0,
+					     true));
+}
+
+EnforceCrashPatchFragment::slot_t
+EnforceCrashPatchFragment::emitSaveRflags()
+{
+	slot_t s = allocateSlot();
+	skipRedZone();
+	emitPushf();
+	slot_t t = allocateSlot();
+	emitMovRegToSlot(0, t);
+	emitPopQ(0);
+	emitMovRegToSlot(0, s);
+	emitMovSlotToReg(t, 0);
+	restoreRedZone();
+
+	return s;
+}
+
+void
+EnforceCrashPatchFragment::emitRestoreRflags(slot_t s)
+{
+	skipRedZone();
+	slot_t t = allocateSlot();
+	emitMovRegToSlot(0, t);
+	emitMovSlotToReg(s, 0);
+	emitPushQ(0);
+	emitPopf();
+	emitMovSlotToReg(t, 0);
+	restoreRedZone();
+}
+
+void
+EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
+{
+	std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
+	if (it != exprsToSlots.end()) {
+		emitMovSlotToReg(it->second, reg);
+		return;
+	}
+	fprintf(stderr, "WARNING: Cannot evaluate ");
+	ppIRExpr(e, stderr);
+	fprintf(stderr, "\n");
+}
+
+void
+EnforceCrashPatchFragment::emitCompareExprToZero(IRExpr *e)
+{
+	unsigned reg = 0;
+	slot_t spill = allocateSlot();
+	emitMovRegToSlot(reg, spill);
+	emitEvalExpr(e, reg);
+	emitTestRegModrm(reg, ModRM::directRegister(reg));
+	emitMovSlotToReg(spill, reg);
+}
+
+void
+EnforceCrashPatchFragment::emitCheckExpressionOrEscape(bool invert,
+						       IRExpr *e,
+						       Instruction<ClientRip> *i)
+{
+	assert(!i->branchNext.rip);
+	slot_t rflags = emitSaveRflags();
+	emitCompareExprToZero(e);
+	/* XXX should really restore rflags if we take the branch */
+	if (invert)
+		emitBranchNonZero(i->defaultNext);
+	else
+		emitBranchZero(i->defaultNext);
+	emitRestoreRflags(rflags);
+}
+
+void
 EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 {
 	std::set<IRExpr *> *neededExprs = NULL;
@@ -1169,17 +1323,6 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		}
 	}
 
-#if 0
-	if (expressionEvalPoints.count(i->rip)) {
-		std::set<IRExpr *> &expressionsToEval(expressionEvalPoints[i->rip]);
-
-		for (std::set<IRExpr *>::iterator it = expressionsToEval.begin();
-		     it != expresionsToEval.end();
-		     it++)
-			emitCheckExpressionOrEscape(*it, i->rip);
-	}
-#endif
-
 	PatchFragment<ClientRip>::emitInstruction(i);
 
 	if (neededExprs) {
@@ -1208,6 +1351,15 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 				}
 			}
 		}
+	}
+
+	if (expressionEvalPoints.count(i)) {
+		std::set<std::pair<bool, IRExpr *> > &expressionsToEval(expressionEvalPoints[i]);
+
+		for (std::set<std::pair<bool, IRExpr *> >::iterator it = expressionsToEval.begin();
+		     it != expressionsToEval.end();
+		     it++)
+			emitCheckExpressionOrEscape(it->first, it->second, i);
 	}
 }
 
@@ -1304,9 +1456,22 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 			abort();
 		}
 	}
+	/* And where we need to calculate them. */
+	std::map<Instruction<ClientRip> *, std::set<std::pair<bool, IRExpr *> > > exprEvalPoints;
+	for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
+	     it != exprDominatorMap.end();
+	     it++) {
+		Instruction<ThreadRip> *i1 = it->first;
+		Instruction<ClientRip> *i2 = degradedCfg->ripToInstr->get(threadRipToClientRip(i1->rip));
+		assert(i2);
+		for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++)
+			exprEvalPoints[i2].insert(*it2);
+	}
 
 	/* Now build the patch */
-	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(exprStashPoints);
+	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(exprStashPoints, exprEvalPoints);
 	pf->fromCFG(degradedCfg);
 	std::set<ClientRip> entryPoints;
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
