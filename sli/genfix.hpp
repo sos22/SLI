@@ -1032,7 +1032,7 @@ PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
 			/* Use a SIB */
 			res.content.push_back(0x04);
 			/* base = 4, scale = 0, index = 4. */
-			res.content.push_back(0x14);
+			res.content.push_back(0x24);
 			break;
 		case 5:
 			goto encode_8bit_offset;
@@ -1050,7 +1050,7 @@ PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
 			/* mod = 1, rm = 4 */
 			res.content.push_back(0x44);
 			/* SIB byte, base = 4, scale = 0, index = 4 */
-			res.content.push_back(0x14);
+			res.content.push_back(0x24);
 			break;
 		default:
 			abort();
@@ -1067,7 +1067,7 @@ PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
 			/* mod = 2, rm = 4 */
 			res.content.push_back(0x84);
 			/* SIB byte, base = 4, scale = 0, index = 4 */
-			res.content.push_back(0x14);
+			res.content.push_back(0x24);
 			break;
 		default:
 			abort();
@@ -1092,7 +1092,7 @@ PatchFragment<r>::ModRM::directRegister(unsigned reg)
 	}
 	assert(reg < 8);
 	/* mod = 3, rm = register */
-	res.content.push_back(0xd0 | reg);
+	res.content.push_back(0xc0 | reg);
 	return res;
 }
 
