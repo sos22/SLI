@@ -1062,11 +1062,8 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	}
 	slot_t exprSlot(IRExpr *e) {
 		std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
-		if (it != exprsToSlots.end())
-			return it->second;
-		slot_t r = allocateSlot();
-		exprsToSlots.insert(std::pair<IRExpr *, slot_t>(e, r));
-		return r;
+		assert(it != exprsToSlots.end());
+		return it->second;
 	}
 	void emitGsPrefix() { emitByte(0x65); }
 	ModRM modrmForSlot(slot_t s) { return ModRM::absoluteAddress(s.i * 8); }
@@ -1107,7 +1104,23 @@ public:
 		  exprsToSlots(),
 		  neededExpressions(_neededExpressions),
 		  expressionEvalPoints(_expressionEvalPoints)
-	{}
+	{
+		/* Allocate slots for expressions which we know we're
+		 * going to have to stash at some point. */
+		for (std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > >::iterator it = neededExpressions.begin();
+		     it != neededExpressions.end();
+		     it++) {
+			std::set<std::pair<unsigned, IRExpr *> > &s((*it).second);
+			for (std::set<std::pair<unsigned, IRExpr *> >::iterator it2 = s.begin();
+			     it2 != s.end();
+			     it2++) {
+				if (!exprsToSlots.count(it2->second)) {
+					slot_t s = allocateSlot();
+					exprsToSlots.insert(std::pair<IRExpr *, slot_t>(it2->second, s));
+				}
+			}
+		}
+	}
 };
 
 EnforceCrashPatchFragment::jcc_code EnforceCrashPatchFragment::jcc_code::zero(0x84);
