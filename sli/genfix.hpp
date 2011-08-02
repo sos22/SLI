@@ -143,10 +143,10 @@ typedef char *LateRelocation;
 
 template <typename ripType>
 class PatchFragment : public GarbageCollected<PatchFragment<ripType> > {
-	std::vector<EarlyRelocation<ripType> *> relocs;
 	std::vector<Instruction<ripType> *> registeredInstrs;
 
 protected:
+	std::vector<EarlyRelocation<ripType> *> relocs;
 	std::vector<LateRelocation> lateRelocs;
 	CFG<ripType> *cfg;
 	std::vector<unsigned char> content;
@@ -304,9 +304,10 @@ Instruction<r>::modrmExtension(void)
 
 template <typename r>
 class RipRelativeRelocation : public EarlyRelocation<r> {
+public:
 	r target;
 	unsigned nrImmediateBytes;
-public:
+
 	void doit(PatchFragment<r> *pf);
 
 	RipRelativeRelocation(unsigned _offset,
@@ -330,8 +331,8 @@ public:
 
 template <typename r>
 class RipRelativeBranchRelocation : public EarlyRelocation<r> {
-	r target;
 public:
+	r target;
 	void doit(PatchFragment<r> *pf);
 	RipRelativeBranchRelocation(unsigned _offset,
 				    unsigned _size,

@@ -988,16 +988,52 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 class ClientRip {
 public:
 	unsigned long rip;
+	std::set<unsigned> threads;
+
 	ClientRip(unsigned long _rip)
 		: rip(_rip)
 	{}
-
 	ClientRip()
 		: rip(0)
 	{}
-	bool operator<(const ClientRip &k) const { return rip < k.rip; }
+	ClientRip(unsigned long _rip, const std::set<unsigned> &_threads)
+		: rip(_rip), threads(_threads)
+	{}
+
+	bool operator<(const ClientRip &k) const {
+		if (rip < k.rip)
+			return true;
+		else if (rip > k.rip)
+			return false;
+		else if (threads < k.threads)
+			return true;
+		else
+			return false;
+	}
 	bool operator!=(const ClientRip &k) const { return *this < k || k < *this; }
 	bool operator==(const ClientRip &k) const { return !(*this != k); }
+};
+
+struct exprEvalPoint {
+	bool invert;
+	unsigned thread;
+	IRExpr *e;
+	exprEvalPoint(bool _invert,
+		      unsigned _thread,
+		      IRExpr *_e)
+		: invert(_invert), thread(_thread), e(_e)
+	{}
+	bool operator <(const exprEvalPoint &o) const {
+		if (invert < o.invert)
+			return true;
+		if (o.invert < invert)
+			return false;
+		if (thread < o.thread)
+			return true;
+		if (o.thread < thread)
+			return false;
+		return e < o.e;
+	}
 };
 
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
@@ -1010,13 +1046,13 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	 * stashed them. */
 	std::map<IRExpr *, slot_t> exprsToSlots;
 	/* Mapping from instructions to the expressions which we need
-	   to stash at those instructions. */
-	std::map<Instruction<ClientRip> *, std::set<IRExpr *> > &neededExpressions;
+	   to stash at those instructions for each thread. */
+	std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions;
 	/* Mapping from instructions to the expressions which we need
 	   to evaluate at those instructions.  If the expression is
 	   equal to the other element of the pair then we will escape
 	   from the patch. */
-	std::map<Instruction<ClientRip> *, std::set<std::pair<bool, IRExpr *> > > &expressionEvalPoints;
+	std::map<unsigned long, std::set<exprEvalPoint> > &expressionEvalPoints;
 
 	void emitInstruction(Instruction<ClientRip> *i);
 	slot_t allocateSlot() {
@@ -1024,7 +1060,10 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 		next_slot.i++;
 		return r;
 	}
-	slot_t allocateSlot(IRExpr *e) {
+	slot_t exprSlot(IRExpr *e) {
+		std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
+		if (it != exprsToSlots.end())
+			return it->second;
 		slot_t r = allocateSlot();
 		exprsToSlots.insert(std::pair<IRExpr *, slot_t>(e, r));
 		return r;
@@ -1036,7 +1075,7 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	 * defaultNext.  The test is inverted if @invert is set.  @i
 	 * must not be a branch instruction (i.e. branchNext must be
 	 * clear). */
-	void emitCheckExpressionOrEscape(bool invert, IRExpr *e, Instruction<ClientRip> *i);
+	void emitCheckExpressionOrEscape(const exprEvalPoint &p, Instruction<ClientRip> *i);
 
 	void emitEvalExpr(IRExpr *e, unsigned reg);
 	void emitCompareExprToZero(IRExpr *e);
@@ -1047,12 +1086,18 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	void emitPopf() { emitByte(0x9D); }
 
 	void emitTestRegModrm(unsigned, const ModRM &);
-	void emitBranchNonZero(ClientRip target);
-	void emitBranchZero(ClientRip target);
+
+	class jcc_code {
+		jcc_code(Byte _code) : code(_code) {}
+	public:
+		Byte code;
+		static jcc_code nonzero;
+		static jcc_code zero;
+	};
+	void emitJcc(ClientRip target, jcc_code branchType);
 public:
-	EnforceCrashPatchFragment(std::map<Instruction<ClientRip> *,
-				  std::set<IRExpr *> > &_neededExpressions,
-				  std::map<Instruction<ClientRip> *, std::set<std::pair<bool, IRExpr *> > > &_expressionEvalPoints)
+	EnforceCrashPatchFragment(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &_neededExpressions,
+				  std::map<unsigned long, std::set<exprEvalPoint> > &_expressionEvalPoints)
 		: PatchFragment<ClientRip>(),
 		  next_slot(0),
 		  exprsToSlots(),
@@ -1060,6 +1105,9 @@ public:
 		  expressionEvalPoints(_expressionEvalPoints)
 	{}
 };
+
+EnforceCrashPatchFragment::jcc_code EnforceCrashPatchFragment::jcc_code::zero(0x84);
+EnforceCrashPatchFragment::jcc_code EnforceCrashPatchFragment::jcc_code::nonzero(0x85);
 
 static unsigned
 vexRegOffsetToRegIdx(unsigned offset)
@@ -1185,34 +1233,17 @@ EnforceCrashPatchFragment::emitTestRegModrm(unsigned reg, const ModRM &modrm)
 }
 
 void
-EnforceCrashPatchFragment::emitBranchNonZero(ClientRip target)
+EnforceCrashPatchFragment::emitJcc(ClientRip target, jcc_code branchType)
 {
 	emitByte(0x0F);
-	emitByte(0x85);
+	emitByte(branchType.code);
 	emitByte(0); /* Pad */
 	emitByte(0); /* Pad */
 	emitByte(0); /* Pad */
 	emitByte(0); /* Pad */
-	lateRelocs.push_back(late_relocation(content.size() - 4,
-					     4,
-					     vex_asprintf("0x%lx", target.rip),
-					     0,
-					     true));
-}
-void
-EnforceCrashPatchFragment::emitBranchZero(ClientRip target)
-{
-	emitByte(0x0F);
-	emitByte(0x84);
-	emitByte(0); /* Pad */
-	emitByte(0); /* Pad */
-	emitByte(0); /* Pad */
-	emitByte(0); /* Pad */
-	lateRelocs.push_back(late_relocation(content.size() - 4,
-					     4,
-					     vex_asprintf("0x%lx", target.rip),
-					     0,
-					     true));
+	relocs.push_back(new RipRelativeBranchRelocation<ClientRip>(content.size() - 4,
+								    4,
+								    target));
 }
 
 EnforceCrashPatchFragment::slot_t
@@ -1269,38 +1300,49 @@ EnforceCrashPatchFragment::emitCompareExprToZero(IRExpr *e)
 }
 
 void
-EnforceCrashPatchFragment::emitCheckExpressionOrEscape(bool invert,
-						       IRExpr *e,
+EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 						       Instruction<ClientRip> *i)
 {
+	if (!i->rip.threads.count(e.thread))
+		return;
 	assert(!i->branchNext.rip);
 	slot_t rflags = emitSaveRflags();
-	emitCompareExprToZero(e);
-	/* XXX should really restore rflags if we take the branch */
-	if (invert)
-		emitBranchNonZero(i->defaultNext);
-	else
-		emitBranchZero(i->defaultNext);
+	emitCompareExprToZero(e.e);
+	jcc_code branch_type = e.invert ? jcc_code::nonzero : jcc_code::zero;
+	ClientRip n = i->defaultNext;
+	n.threads.erase(e.thread);
+	/* XXX several things wrong here:
+
+	   -- Don't restore rflags if we branch
+	   -- Don't evaluate expressions from target thread if we branch to an instruction
+	      with additional expressions.
+	*/
+	emitJcc(n, branch_type);
 	emitRestoreRflags(rflags);
 }
 
 void
 EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 {
-	std::set<IRExpr *> *neededExprs = NULL;
-	if (neededExpressions.count(i)) {
-		neededExprs = &neededExpressions[i];
+	if (i->rip.threads.empty()) {
+		emitJmpToRipHost(i->rip.rip);
+		return;
+	}
+	std::set<std::pair<unsigned, IRExpr *> > *neededExprs = NULL;
+	if (neededExpressions.count(i->rip.rip)) {
+		neededExprs = &neededExpressions[i->rip.rip];
 		/* Need to emit gunk to store the appropriate
 		   generated expression.  That'll either be a simple
 		   register access or a memory load of some sort. */
-		for (std::set<IRExpr *>::iterator it = neededExprs->begin();
+		for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 		     it != neededExprs->end();
 		     it++) {
-			IRExpr *e = *it;
-			assert(!exprsToSlots.count(e));
+			if (!i->rip.threads.count(it->first))
+				continue;
+			IRExpr *e = it->second;
 			if (e->tag == Iex_Get) {
 				/* Easy case: just store the register in its slot */
-				slot_t s = allocateSlot(e);
+				slot_t s = exprSlot(e);
 				emitMovRegToSlot(e->Iex.Get.offset, s);
 			} else if (e->tag == Iex_ClientCall) {
 				/* Do this after emitting the instruction */
@@ -1326,15 +1368,17 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 	PatchFragment<ClientRip>::emitInstruction(i);
 
 	if (neededExprs) {
-		for (std::set<IRExpr *>::iterator it = neededExprs->begin();
+		for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 		     it != neededExprs->end();
 		     it++) {
-			IRExpr *e = *it;
+			if (!i->rip.threads.count(it->first))
+				continue;
+			IRExpr *e = it->second;
 			if (e->tag == Iex_Get) {
 				/* Already handled */
 			} else if (e->tag == Iex_ClientCall) {
 				/* The result of the call should now be in %rax */
-				slot_t s = allocateSlot(e);
+				slot_t s = exprSlot(e);
 				emitMovRegToSlot(0, s);
 			} else {
 				assert(e->tag == Iex_Load);
@@ -1342,7 +1386,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 				case 0x8b: {
 					/* Load from memory to modrm.
 					 * Nice and easy. */
-					slot_t s = allocateSlot(e);
+					slot_t s = exprSlot(e);
 					emitMovRegToSlot(instrModrmReg(i) * 8, s);
 					break;
 				}
@@ -1353,13 +1397,13 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		}
 	}
 
-	if (expressionEvalPoints.count(i)) {
-		std::set<std::pair<bool, IRExpr *> > &expressionsToEval(expressionEvalPoints[i]);
+	if (expressionEvalPoints.count(i->rip.rip)) {
+		std::set<exprEvalPoint> &expressionsToEval(expressionEvalPoints[i->rip.rip]);
 
-		for (std::set<std::pair<bool, IRExpr *> >::iterator it = expressionsToEval.begin();
+		for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
 		     it != expressionsToEval.end();
 		     it++)
-			emitCheckExpressionOrEscape(it->first, it->second, i);
+			emitCheckExpressionOrEscape(*it, i);
 	}
 }
 
@@ -1370,6 +1414,117 @@ ClientRip threadRipToClientRip(const ThreadRip &k)
 unsigned long __trivial_hash_function(const ClientRip &k)
 {
 	return k.rip;
+}
+
+static EarlyRelocation<ClientRip> *
+duplicateEarlyRelocAtNewThreadSet(EarlyRelocation<ClientRip> *er, const std::set<unsigned> &threads)
+{
+	if (RipRelativeRelocation<ClientRip> *rrr =
+	    dynamic_cast<RipRelativeRelocation<ClientRip> *>(er)) {
+		return new RipRelativeRelocation<ClientRip>(rrr->offset, rrr->size,
+							    ClientRip(rrr->target.rip, threads),
+							    rrr->nrImmediateBytes);
+	} else if (RipRelativeBranchRelocation<ClientRip> *rrbr =
+		   dynamic_cast<RipRelativeBranchRelocation<ClientRip> *>(er)) {
+		return new RipRelativeBranchRelocation<ClientRip>(rrbr->offset, rrbr->size,
+								  ClientRip(rrbr->target.rip, threads));
+
+	} else {
+		abort();
+	}
+}
+
+template <typename k, typename v> void
+mapKeys(std::set<k> &out, std::map<k, v> &m)
+{
+	for (typename std::map<k, v>::iterator it = m.begin();
+	     it != m.end();
+	     it++)
+		out.insert(it->first);
+}
+
+template <typename t> void
+powerSet(const std::set<t> &_in, std::set<std::set<t> > &out)
+{
+	/* It's useful to be able to refer to the elements of @_in by
+	   index, which means we really want to put them in a
+	   vector. */
+	std::vector<t> in;
+	in.reserve(_in.size());
+	for (typename std::set<t>::iterator it = _in.begin();
+	     it != _in.end();
+	     it++)
+		in.push_back(*it);
+	/* @live tells you which elements of @in you want to include
+	   in the next item.  It's pretty much the binary
+	   representation of the number of items currently in @out,
+	   and counts from 0 to 1111..., with an appropriate number of
+	   ones, and hence covers every possible subvector of @in. */
+	std::vector<bool> live;
+	live.resize(in.size());
+	while (1) {
+		/* Insert new item */
+		std::set<t> item;
+		for (unsigned x = 0; x < live.size(); x++)
+			if (live[x])
+				item.insert(in[x]);
+		out.insert(item);
+
+		/* Advance @live.  This is just the add-one algorithm
+		   in binary.  There might be a more efficient way to
+		   do this. :) */
+		unsigned x;
+		for (x = 0; x < live.size(); x++) {
+			if (live[x]) {
+				live[x] = false;
+			} else {
+				live[x] = true;
+				break;
+			}
+		}
+		if (x == live.size())
+			break;
+	}
+}
+
+static void
+duplicateCFGAtThreadSet(CFG<ClientRip> *cfg, std::set<unsigned long> &rips, const std::set<unsigned> &threads)
+{
+	std::map<Instruction<ClientRip> *, Instruction<ClientRip> *> m;
+
+	for (std::set<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++) {
+		Instruction<ClientRip> *orig = cfg->ripToInstr->get(ClientRip(*it));
+		ClientRip newRip(*it, threads);
+		assert(!cfg->ripToInstr->hasKey(newRip));
+		Instruction<ClientRip> *nr = new Instruction<ClientRip>(*orig);
+		nr->rip = newRip;
+		if (nr->defaultNext.rip)
+			nr->defaultNext.threads = threads;
+		if (nr->branchNext.rip)
+			nr->branchNext.threads = threads;
+		for (unsigned x = 0; x < nr->relocs.size(); x++)
+			nr->relocs[x] = duplicateEarlyRelocAtNewThreadSet(nr->relocs[x], threads);
+		cfg->ripToInstr->set(newRip, nr);
+		m[orig] = nr;
+	}
+
+	for (std::set<unsigned long>::iterator it = rips.begin();
+	     it != rips.end();
+	     it++) {
+		ClientRip newRip(*it, threads);
+		Instruction<ClientRip> *n = cfg->ripToInstr->get(newRip);
+		assert(n);
+		if (n->defaultNextI) {
+			n->defaultNextI = m[n->defaultNextI];
+			assert(n->defaultNextI);
+		}
+		if (n->branchNextI) {
+			n->branchNextI = m[n->branchNextI];
+			assert(n->branchNextI);
+		}
+	}
 }
 
 static void
@@ -1437,37 +1592,63 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	CFG<ClientRip> *degradedCfg;
 	degradedCfg = cfg->degrade<ClientRip, threadRipToClientRip>();
 
+	/* And now expand it again so that we can do the power-set
+	 * construction. */
+	std::set<unsigned> allThreads;
+	mapKeys(allThreads, roots);
+	std::set<std::set<unsigned> > threadPower;
+	powerSet(allThreads, threadPower);
+	std::set<unsigned long> rawRips;
+	for (CFG<ClientRip>::ripToInstrT::iterator it = degradedCfg->ripToInstr->begin();
+	     it != degradedCfg->ripToInstr->end();
+	     it++)
+		rawRips.insert(it.key().rip);
+	for (std::set<std::set<unsigned> >::iterator it = threadPower.begin();
+	     it != threadPower.end();
+	     it++) {
+		if (it->size() != 0)
+			duplicateCFGAtThreadSet(degradedCfg, rawRips, *it);
+	}
+
 	/* Figure out where we need to stash the various necessary
-	 * expressions. */
-	std::map<Instruction<ClientRip> *, std::set<IRExpr *> > exprStashPoints;
+	 * expressions.  This is a map from RIPs to <thread,expr>
+	 * pairs, where we need to stash @expr if we execute
+	 * instruction @RIP in thread @thread. */
+	std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > exprStashPoints;
 	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
 	     it != neededExpressions.end();
 	     it++) {
+		bool doit = true;
 		IRExpr *e = *it;
+		ThreadRip rip;
 		if (e->tag == Iex_Get) {
-			exprStashPoints[degradedCfg->ripToInstr->get(threadRipToClientRip(roots[e->Iex.Get.tid]))].insert(e);
+			rip = roots[e->Iex.Get.tid];
 		} else if (e->tag == Iex_ClientCall) {
-			exprStashPoints[degradedCfg->ripToInstr->get(threadRipToClientRip(e->Iex.ClientCall.callSite))].insert(e);
+			rip = e->Iex.ClientCall.callSite;
 		} else if (e->tag == Iex_Load) {
-			exprStashPoints[degradedCfg->ripToInstr->get(threadRipToClientRip(e->Iex.Load.rip))].insert(e);
+			rip = e->Iex.Load.rip;
 		} else if (e->tag == Iex_HappensBefore) {
 			/* These don't really get stashed in any useful sense */
+			doit = false;
 		} else {
 			abort();
 		}
+		if (doit)
+			exprStashPoints[rip.rip].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
 	}
 	/* And where we need to calculate them. */
-	std::map<Instruction<ClientRip> *, std::set<std::pair<bool, IRExpr *> > > exprEvalPoints;
+	std::map<unsigned long, std::set<exprEvalPoint> > exprEvalPoints;
 	for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
 	     it != exprDominatorMap.end();
 	     it++) {
-		Instruction<ThreadRip> *i1 = it->first;
-		Instruction<ClientRip> *i2 = degradedCfg->ripToInstr->get(threadRipToClientRip(i1->rip));
-		assert(i2);
 		for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++)
-			exprEvalPoints[i2].insert(*it2);
+			exprEvalPoints[it->first->rip.rip].insert(
+				exprEvalPoint(
+					it2->first,
+					it->first->rip.thread,
+					it2->second));
 	}
 
 	/* Now build the patch */
@@ -1477,7 +1658,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++)
-		entryPoints.insert(threadRipToClientRip(it->second));
+		entryPoints.insert(ClientRip(it->second.rip, allThreads));
 	printf("Fragment: %s\n", pf->asC("ident", entryPoints));
 }
 
