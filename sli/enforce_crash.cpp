@@ -1306,7 +1306,6 @@ EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 	if (!i->rip.threads.count(e.thread))
 		return;
 	assert(!i->branchNext.rip);
-	slot_t rflags = emitSaveRflags();
 	emitCompareExprToZero(e.e);
 	jcc_code branch_type = e.invert ? jcc_code::nonzero : jcc_code::zero;
 	assert(i->defaultNextI);
@@ -1319,7 +1318,6 @@ EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 	      with additional expressions.
 	*/
 	emitJcc(n, branch_type);
-	emitRestoreRflags(rflags);
 }
 
 void
@@ -1401,10 +1399,20 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 	if (expressionEvalPoints.count(i->rip.rip)) {
 		std::set<exprEvalPoint> &expressionsToEval(expressionEvalPoints[i->rip.rip]);
 
+		bool doit = false;
 		for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
-		     it != expressionsToEval.end();
+		     !doit && it != expressionsToEval.end();
 		     it++)
-			emitCheckExpressionOrEscape(*it, i);
+			if (i->rip.threads.count(it->thread))
+				doit = true;
+		if (doit) {
+			slot_t rflags = emitSaveRflags();
+			for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
+			     it != expressionsToEval.end();
+			     it++)
+				emitCheckExpressionOrEscape(*it, i);
+			emitRestoreRflags(rflags);
+		}
 	}
 }
 
