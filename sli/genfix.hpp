@@ -192,6 +192,8 @@ protected:
 	void emitMovModrmToRegister(const ModRM &rm, unsigned reg);
 	/* Add a register to a modrm */
 	void emitAddRegToModrm(unsigned reg, const ModRM &rm);
+	/* Add a modrm to a register */
+	void emitAddModrmToReg(const ModRM &rm, unsigned reg);
 	/* Compare a register to a modrm */
 	void emitCmpRegModrm(unsigned reg, const ModRM &rm);
 	/* Negate a modrm */
@@ -1150,6 +1152,12 @@ template <typename r> void
 PatchFragment<r>::emitAddRegToModrm(unsigned reg, const ModRM &rm)
 {
 	emitNoImmediatesModrmOpcode(0x01, reg, rm);
+}
+
+template <typename r> void
+PatchFragment<r>::emitAddModrmToReg(const ModRM &rm, unsigned reg)
+{
+	emitNoImmediatesModrmOpcode(0x03, reg, rm);
 }
 
 template <typename r> void

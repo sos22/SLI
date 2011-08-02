@@ -1070,6 +1070,7 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	void emitMovRegToSlot(unsigned offset, slot_t slot);
 	void emitMovSlotToReg(slot_t slot, unsigned offset);
 	void emitAddRegToSlot(unsigned reg, slot_t slot);
+	void emitAddSlotToReg(unsigned reg, slot_t slot);
 
 	/* Emit a sequence to evaluate @e and then exit the patch if
 	 * it's false.  The exit target is taken from @i's
@@ -1237,6 +1238,13 @@ EnforceCrashPatchFragment::emitAddRegToSlot(unsigned reg, slot_t slot)
 }
 
 void
+EnforceCrashPatchFragment::emitAddSlotToReg(unsigned reg, slot_t slot)
+{
+	emitGsPrefix();
+	emitAddModrmToReg(modrmForSlot(slot), reg);
+}
+
+void
 EnforceCrashPatchFragment::emitTestRegModrm(unsigned reg, const ModRM &modrm)
 {
 	unsigned char rex = 0x48;
@@ -1354,13 +1362,17 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 		switch (e->Iex.Associative.op) {
 		case Iop_Add64: {
 			emitEvalExpr(e->Iex.Associative.contents[0], reg);
+			if (e->Iex.Associative.nr_arguments == 1)
+				return;
 			slot_t acc = allocateSlot();
 			emitMovRegToSlot(reg, acc);
-			for (int x = 1; x < e->Iex.Associative.nr_arguments; x++) {
+			for (int x = 1; x < e->Iex.Associative.nr_arguments - 1; x++) {
 				emitEvalExpr(e->Iex.Associative.contents[x], reg);
 				emitAddRegToSlot(reg, acc);
 			}
-			emitMovSlotToReg(acc, reg);
+			emitEvalExpr(e->Iex.Associative.contents[e->Iex.Associative.nr_arguments - 1],
+				     reg);
+			emitAddSlotToReg(reg, acc);
 			return;
 		}
 		default:
