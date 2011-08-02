@@ -1067,10 +1067,10 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	}
 	void emitGsPrefix() { emitByte(0x65); }
 	ModRM modrmForSlot(slot_t s) { return ModRM::absoluteAddress(s.i * 8); }
-	void emitMovRegToSlot(unsigned offset, slot_t slot);
-	void emitMovSlotToReg(slot_t slot, unsigned offset);
-	void emitAddRegToSlot(unsigned reg, slot_t slot);
-	void emitAddSlotToReg(unsigned reg, slot_t slot);
+	void emitMovRegToSlot(RegisterIdx offset, slot_t slot);
+	void emitMovSlotToReg(slot_t slot, RegisterIdx offset);
+	void emitAddRegToSlot(RegisterIdx reg, slot_t slot);
+	void emitAddSlotToReg(slot_t slot, RegisterIdx reg);
 
 	/* Emit a sequence to evaluate @e and then exit the patch if
 	 * it's false.  The exit target is taken from @i's
@@ -1079,7 +1079,7 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	 * clear). */
 	void emitCheckExpressionOrEscape(const exprEvalPoint &p, Instruction<ClientRip> *i);
 
-	void emitEvalExpr(IRExpr *e, unsigned reg);
+	void emitEvalExpr(IRExpr *e, RegisterIdx reg);
 	void emitCompareExprToZero(IRExpr *e);
 
 	slot_t emitSaveRflags();
@@ -1087,7 +1087,9 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	void emitPushf() { emitByte(0x9C); }
 	void emitPopf() { emitByte(0x9D); }
 
-	void emitTestRegModrm(unsigned, const ModRM &);
+	RegisterIdx instrModrmReg(Instruction<ClientRip> *i);
+
+	void emitTestRegModrm(RegisterIdx, const ModRM &);
 
 	class jcc_code {
 		jcc_code(Byte _code) : code(_code) {}
@@ -1127,32 +1129,6 @@ public:
 EnforceCrashPatchFragment::jcc_code EnforceCrashPatchFragment::jcc_code::zero(0x84);
 EnforceCrashPatchFragment::jcc_code EnforceCrashPatchFragment::jcc_code::nonzero(0x85);
 
-static unsigned
-vexRegOffsetToRegIdx(unsigned offset)
-{
-	switch (offset) {
-	case OFFSET_amd64_RAX: return 0;
-	case OFFSET_amd64_RCX: return 1;
-	case OFFSET_amd64_RDX: return 2;
-	case OFFSET_amd64_RBX: return 3;
-	case OFFSET_amd64_RSP: return 4;
-	case OFFSET_amd64_RBP: return 5;
-	case OFFSET_amd64_RSI: return 6;
-	case OFFSET_amd64_RDI: return 7;
-	case OFFSET_amd64_R8: return 8;
-	case OFFSET_amd64_R9: return 9;
-	case OFFSET_amd64_R10: return 10;
-	case OFFSET_amd64_R11: return 11;
-	case OFFSET_amd64_R12: return 12;
-	case OFFSET_amd64_R13: return 13;
-	case OFFSET_amd64_R14: return 14;
-	case OFFSET_amd64_R15: return 15;
-	default:
-		abort();
-	}
-
-}
-
 /* Is this opcode byte a prefix opcode? */
 static bool
 isPrefix(unsigned char opcode)
@@ -1186,8 +1162,8 @@ instrOpcode(Instruction<ClientRip> *i)
 	}
 }
 
-static unsigned
-instrModrmReg(Instruction<ClientRip> *i)
+EnforceCrashPatchFragment::RegisterIdx
+EnforceCrashPatchFragment::instrModrmReg(Instruction<ClientRip> *i)
 {
 	unsigned j;
 	bool extend;
@@ -1213,49 +1189,51 @@ instrModrmReg(Instruction<ClientRip> *i)
 	unsigned res = (modrm >> 3) & 7;
 	if (extend)
 		res |= 8;
-	return res;
+	RegisterIdx r = RegisterIdx::RAX;
+	r.idx = res;
+	return r;
 }
 
 void
-EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
+EnforceCrashPatchFragment::emitMovRegToSlot(RegisterIdx offset, slot_t slot)
 {
 	emitGsPrefix();
-	emitMovRegisterToModrm(vexRegOffsetToRegIdx(offset), modrmForSlot(slot));
+	emitMovRegisterToModrm(offset, modrmForSlot(slot));
 }
 
 void
-EnforceCrashPatchFragment::emitMovSlotToReg(slot_t slot, unsigned offset)
+EnforceCrashPatchFragment::emitMovSlotToReg(slot_t slot, RegisterIdx offset)
 {
 	emitGsPrefix();
-	emitMovModrmToRegister(modrmForSlot(slot), vexRegOffsetToRegIdx(offset));
+	emitMovModrmToRegister(modrmForSlot(slot), offset);
 }
 
 void
-EnforceCrashPatchFragment::emitAddRegToSlot(unsigned reg, slot_t slot)
+EnforceCrashPatchFragment::emitAddRegToSlot(RegisterIdx reg, slot_t slot)
 {
 	emitGsPrefix();
 	emitAddRegToModrm(reg, modrmForSlot(slot));
 }
 
 void
-EnforceCrashPatchFragment::emitAddSlotToReg(unsigned reg, slot_t slot)
+EnforceCrashPatchFragment::emitAddSlotToReg(slot_t slot, RegisterIdx reg)
 {
 	emitGsPrefix();
 	emitAddModrmToReg(modrmForSlot(slot), reg);
 }
 
 void
-EnforceCrashPatchFragment::emitTestRegModrm(unsigned reg, const ModRM &modrm)
+EnforceCrashPatchFragment::emitTestRegModrm(RegisterIdx reg, const ModRM &modrm)
 {
 	unsigned char rex = 0x48;
-	if (reg >= 8) {
+	if (reg.idx >= 8) {
 		rex |= 4;
-		reg -= 8;
+		reg.idx -= 8;
+		assert(reg.idx < 8);
 	}
 	if (modrm.extendRm)
 		rex |= 1;
 	emitByte(rex);
-	assert(reg < 8);
 	emitByte(0x85);
 	emitModrm(modrm, reg);
 }
@@ -1281,10 +1259,10 @@ EnforceCrashPatchFragment::emitSaveRflags()
 	skipRedZone();
 	emitPushf();
 	slot_t t = allocateSlot();
-	emitMovRegToSlot(0, t);
-	emitPopQ(0);
-	emitMovRegToSlot(0, s);
-	emitMovSlotToReg(t, 0);
+	emitMovRegToSlot(RegisterIdx::RAX, t);
+	emitPopQ(RegisterIdx::RAX);
+	emitMovRegToSlot(RegisterIdx::RAX, s);
+	emitMovSlotToReg(t, RegisterIdx::RAX);
 	restoreRedZone();
 
 	return s;
@@ -1295,16 +1273,16 @@ EnforceCrashPatchFragment::emitRestoreRflags(slot_t s)
 {
 	skipRedZone();
 	slot_t t = allocateSlot();
-	emitMovRegToSlot(0, t);
-	emitMovSlotToReg(s, 0);
-	emitPushQ(0);
+	emitMovRegToSlot(RegisterIdx::RAX, t);
+	emitMovSlotToReg(s, RegisterIdx::RAX);
+	emitPushQ(RegisterIdx::RAX);
 	emitPopf();
-	emitMovSlotToReg(t, 0);
+	emitMovSlotToReg(t, RegisterIdx::RAX);
 	restoreRedZone();
 }
 
 void
-EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
+EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 {
 	{
 		std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
@@ -1334,8 +1312,8 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 		switch (e->Iex.Binop.op) {
 		case Iop_CmpEQ64: {
 			slot_t old_rax = allocateSlot();
-			if (reg != 0)
-				emitMovRegToSlot(0, old_rax);
+			if (reg != RegisterIdx::RAX)
+				emitMovRegToSlot(RegisterIdx::RAX, old_rax);
 			emitEvalExpr(e->Iex.Binop.arg1, reg);
 			slot_t t = allocateSlot();
 			emitMovRegToSlot(reg, t);
@@ -1343,14 +1321,14 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 			emitGsPrefix();
 			emitCmpRegModrm(reg, modrmForSlot(t));
 			/* Clear %rax */
-			emitMovQ(0, 0);
+			emitMovQ(RegisterIdx::RAX, 0);
 			/* seteq al */
 			emitByte(0x0F);
 			emitByte(0x94);
 			emitByte(0xC0); /* mod = 3, reg = 0, rm = 0 */
-			if (reg != 0) {
-				emitMovRegisterToModrm(0, ModRM::directRegister(reg));
-				emitMovSlotToReg(old_rax, 0);
+			if (reg != RegisterIdx::RAX) {
+				emitMovRegisterToModrm(RegisterIdx::RAX, ModRM::directRegister(reg));
+				emitMovSlotToReg(old_rax, RegisterIdx::RAX);
 			}
 			return;
 		}
@@ -1372,7 +1350,7 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 			}
 			emitEvalExpr(e->Iex.Associative.contents[e->Iex.Associative.nr_arguments - 1],
 				     reg);
-			emitAddSlotToReg(reg, acc);
+			emitAddSlotToReg(acc, reg);
 			return;
 		}
 		default:
@@ -1392,7 +1370,7 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 void
 EnforceCrashPatchFragment::emitCompareExprToZero(IRExpr *e)
 {
-	unsigned reg = 0;
+	RegisterIdx reg = RegisterIdx::RAX;
 	slot_t spill = allocateSlot();
 	emitMovRegToSlot(reg, spill);
 	emitEvalExpr(e, reg);
@@ -1458,7 +1436,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			if (e->tag == Iex_Get) {
 				/* Easy case: just store the register in its slot */
 				slot_t s = exprSlot(e);
-				emitMovRegToSlot(e->Iex.Get.offset, s);
+				emitMovRegToSlot(RegisterIdx::fromVexOffset(e->Iex.Get.offset), s);
 			} else if (e->tag == Iex_ClientCall) {
 				/* Do this after emitting the instruction */
 			} else {
@@ -1494,7 +1472,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			} else if (e->tag == Iex_ClientCall) {
 				/* The result of the call should now be in %rax */
 				slot_t s = exprSlot(e);
-				emitMovRegToSlot(0, s);
+				emitMovRegToSlot(RegisterIdx::RAX, s);
 			} else {
 				assert(e->tag == Iex_Load);
 				switch (instrOpcode(i)) {
@@ -1502,7 +1480,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 					/* Load from memory to modrm.
 					 * Nice and easy. */
 					slot_t s = exprSlot(e);
-					emitMovRegToSlot(instrModrmReg(i) * 8, s);
+					emitMovRegToSlot(instrModrmReg(i), s);
 					break;
 				}
 				default:

@@ -4,6 +4,8 @@
 #define MAX_INSTRUCTION_SIZE 15
 
 #include "libvex_ir.h"
+#include "libvex_guest_offsets.h"
+
 #include <set>
 #include <map>
 
@@ -151,6 +153,51 @@ protected:
 	CFG<ripType> *cfg;
 	std::vector<unsigned char> content;
 
+	class RegisterOrOpcodeExtension;
+
+	class RegisterIdx {
+		friend class RegisterOrOpcodeExtension;
+		RegisterIdx() : idx(999) {}
+		RegisterIdx(unsigned i) : idx(i) {}
+	public:
+		unsigned idx;
+		static const RegisterIdx RAX;
+		static const RegisterIdx RCX;
+		static const RegisterIdx RDX;
+		static const RegisterIdx RBX;
+		static const RegisterIdx RSP;
+		static const RegisterIdx RBP;
+		static const RegisterIdx RSI;
+		static const RegisterIdx RDI;
+		static const RegisterIdx R8;
+		static const RegisterIdx R9;
+		static const RegisterIdx R10;
+		static const RegisterIdx R11;
+		static const RegisterIdx R12;
+		static const RegisterIdx R13;
+		static const RegisterIdx R14;
+		static const RegisterIdx R15;
+		static RegisterIdx fromVexOffset(unsigned offset);
+		bool operator !=(const RegisterIdx &k) const { return idx != k.idx; }
+	};
+
+	class RegisterOrOpcodeExtension {
+		RegisterOrOpcodeExtension(unsigned k)
+			: isOpcodeExtension(true), opcodeExtension(k)
+		{}
+	public:
+		RegisterOrOpcodeExtension(RegisterIdx &k)
+			: isOpcodeExtension(false), idx(k)
+		{}
+		bool isOpcodeExtension;
+		RegisterIdx idx;
+		unsigned opcodeExtension;
+
+		static RegisterOrOpcodeExtension opcode(unsigned k)
+		{
+			return RegisterOrOpcodeExtension(k);
+		}
+	};
 private:
 	Instruction<ripType> *nextInstr(CFG<ripType> *cfg);
 	void emitStraightLine(Instruction<ripType> *i);
@@ -163,10 +210,10 @@ protected:
 		bool extendRm;
 		/* Access memory at address @reg + offset, where reg
 		   is a register index and offset is a constant. */
-		static ModRM memAtRegisterPlusOffset(unsigned reg, int offset);
+		static ModRM memAtRegisterPlusOffset(RegisterIdx reg, int offset);
 		/* Access register @reg directly, not going through
 		 * memory. */
-		static ModRM directRegister(unsigned reg);
+		static ModRM directRegister(RegisterIdx reg);
 		/* Access memory at a fixed 32 bit signed address */
 		static ModRM absoluteAddress(int address);
 	};
@@ -174,7 +221,7 @@ protected:
 	void emitByte(unsigned char b) { content.push_back(b); }
 	void emitQword(unsigned long val);
 
-	void emitModrm(const ModRM &mrm, unsigned reg);
+	void emitModrm(const ModRM &mrm, RegisterOrOpcodeExtension reg);
 
 	/* Emit a jump to an offset in the current fragment. */
 	void emitJmpToOffset(unsigned offset);
@@ -184,30 +231,30 @@ protected:
 	/* Emit a simple opcode which uses a modrm but no immediates
 	 * and is 64 bits.  This corresponds to the Ev,Gv and Gv,Ev
 	 * encodings in the architecture manual. */
-	void emitNoImmediatesModrmOpcode(unsigned opcode, unsigned reg, const ModRM &rm);
+	void emitNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm);
 
 	/* Store a register to a modrm. */
-	void emitMovRegisterToModrm(unsigned reg, const ModRM &rm);
+	void emitMovRegisterToModrm(RegisterIdx reg, const ModRM &rm);
 	/* Load a register from a modrm */
-	void emitMovModrmToRegister(const ModRM &rm, unsigned reg);
+	void emitMovModrmToRegister(const ModRM &rm, RegisterIdx reg);
 	/* Add a register to a modrm */
-	void emitAddRegToModrm(unsigned reg, const ModRM &rm);
+	void emitAddRegToModrm(RegisterIdx reg, const ModRM &rm);
 	/* Add a modrm to a register */
-	void emitAddModrmToReg(const ModRM &rm, unsigned reg);
+	void emitAddModrmToReg(const ModRM &rm, RegisterIdx reg);
 	/* Compare a register to a modrm */
-	void emitCmpRegModrm(unsigned reg, const ModRM &rm);
+	void emitCmpRegModrm(RegisterIdx reg, const ModRM &rm);
 	/* Negate a modrm */
 	void emitNegModrm(const ModRM &rm);
 
-	void emitLea(const ModRM &modrm, unsigned reg);
+	void emitLea(const ModRM &modrm, RegisterIdx reg);
 
 	void emitCallSequence(const char *target, bool allowRedirection);
 	void skipRedZone();
 	void restoreRedZone();
-	void emitPushQ(unsigned);
-	void emitPopQ(unsigned);
-	void emitMovQ(unsigned, unsigned long);
-	void emitCallReg(unsigned);
+	void emitPushQ(RegisterIdx);
+	void emitPopQ(RegisterIdx);
+	void emitMovQ(RegisterIdx, unsigned long);
+	void emitCallReg(RegisterIdx);
 public:
 	void fromCFG(CFG<ripType> *cfg);
 
@@ -921,11 +968,11 @@ PatchFragment<r>::emitJmpToRipHost(unsigned long rip)
 }
 
 template <typename r> void
-PatchFragment<r>::emitLea(const ModRM &modrm, unsigned reg)
+PatchFragment<r>::emitLea(const ModRM &modrm, RegisterIdx reg)
 {
-	if (reg >= 8) {
+	if (reg.idx >= 8) {
 		emitByte(0x49);
-		reg -= 8;
+		reg.idx -= 8;
 	} else {
 		emitByte(0x48);
 	}
@@ -936,35 +983,37 @@ PatchFragment<r>::emitLea(const ModRM &modrm, unsigned reg)
 template <typename r> void
 PatchFragment<r>::skipRedZone()
 {
-	emitLea(ModRM::memAtRegisterPlusOffset(4, -128), 4);
+	emitLea(ModRM::memAtRegisterPlusOffset(RegisterIdx::RSP, -128),
+		RegisterIdx::RSP);
 }
 
 template <typename r> void
 PatchFragment<r>::restoreRedZone()
 {
-	emitLea(ModRM::memAtRegisterPlusOffset(4, 128), 4);
+	emitLea(ModRM::memAtRegisterPlusOffset(RegisterIdx::RSP, 128),
+		RegisterIdx::RSP);
 }
 
 template <typename r> void
-PatchFragment<r>::emitPushQ(unsigned reg)
+PatchFragment<r>::emitPushQ(RegisterIdx reg)
 {
-	if (reg >= 8) {
+	if (reg.idx >= 8) {
 		emitByte(0x41);
-		reg -= 8;
+		reg.idx -= 8;
 	}
-	assert(reg < 8);
-	emitByte(0x50 + reg);
+	assert(reg.idx < 8);
+	emitByte(0x50 + reg.idx);
 }
 
 template <typename r> void
-PatchFragment<r>::emitPopQ(unsigned reg)
+PatchFragment<r>::emitPopQ(RegisterIdx reg)
 {
-	if (reg >= 8) {
+	if (reg.idx >= 8) {
 		emitByte(0x41);
-		reg -= 8;
+		reg.idx -= 8;
 	}
-	assert(reg < 8);
-	emitByte(0x58 + reg);
+	assert(reg.idx < 8);
+	emitByte(0x58 + reg.idx);
 }
 
 /* For some reason gcc produces an unused variable warning if you use
@@ -991,24 +1040,29 @@ PatchFragment<r>::emitQword(unsigned long val)
 
 /* Move immediate 64 bit to register. */
 template <typename r> void
-PatchFragment<r>::emitMovQ(unsigned reg, unsigned long val)
+PatchFragment<r>::emitMovQ(RegisterIdx reg, unsigned long val)
 {
-	if (reg < 8) {
+	if (reg.idx < 8) {
 		emitByte(0x48);
 	} else {
 		emitByte(0x49);
-		reg -= 8;
+		reg.idx -= 8;
 	}
-	assert(reg < 8);
-	emitByte(0xb8 + reg);
+	assert(reg.idx < 8);
+	emitByte(0xb8 + reg.idx);
 	emitQword(val);
 }
 
 template <typename r> void
-PatchFragment<r>::emitModrm(const ModRM &rm, unsigned reg)
+PatchFragment<r>::emitModrm(const ModRM &rm, RegisterOrOpcodeExtension reg)
 {
-	assert(reg < 8);
-	emitByte(rm.content[0] | (reg << 3));
+	if (reg.isOpcodeExtension) {
+		assert(reg.opcodeExtension < 8);
+		emitByte(rm.content[0] | (reg.opcodeExtension << 3));
+	} else {
+		assert(reg.idx.idx < 8);
+		emitByte(rm.content[0] | (reg.idx.idx << 3));
+	}
 	for (unsigned x = 1; x < rm.content.size(); x++)
 		emitByte(rm.content[x]);
 }
@@ -1030,21 +1084,21 @@ PatchFragment<r>::ModRM::absoluteAddress(int address)
 }
 
 template <typename r> typename PatchFragment<r>::ModRM
-PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
+PatchFragment<r>::ModRM::memAtRegisterPlusOffset(RegisterIdx reg, int offset)
 {
 	ModRM res;
-	if (reg >= 8) {
+	if (reg.idx >= 8) {
 		res.extendRm = true;
-		reg -= 8;
+		reg.idx -= 8;
 	} else {
 		res.extendRm = false;
 	}
 
 	if (offset == 0) {
-		switch (reg) {
+		switch (reg.idx) {
 		case 0: case 1: case 2: case 3: case 6: case 7:
 			/* mod = 0, rm = register */
-			res.content.push_back(reg);
+			res.content.push_back(reg.idx);
 			break;
 		case 4: 
 			/* Use a SIB */
@@ -1059,10 +1113,10 @@ PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
 		}
 	} else if (offset >= -0x80 && offset < 0x80) {
 	encode_8bit_offset:
-		switch (reg) {
+		switch (reg.idx) {
 		case 0: case 1: case 2: case 3: case 5: case 6: case 7:
 			/* mod = 1, rm = register */
-			res.content.push_back(reg | 0x40);
+			res.content.push_back(reg.idx | 0x40);
 			break;
 		case 4:
 			/* mod = 1, rm = 4 */
@@ -1076,10 +1130,10 @@ PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
 		/* 8 bit displacement */
 		res.content.push_back(offset);
 	} else {
-		switch (reg) {
+		switch (reg.idx) {
 		case 0: case 1: case 2: case 3: case 5: case 6: case 7:
 			/* mod = 2, rm = register */
-			res.content.push_back(reg | 0x80);
+			res.content.push_back(reg.idx | 0x80);
 			break;
 		case 4:
 			/* mod = 2, rm = 4 */
@@ -1099,33 +1153,33 @@ PatchFragment<r>::ModRM::memAtRegisterPlusOffset(unsigned reg, int offset)
 }
 
 template <typename r> typename PatchFragment<r>::ModRM
-PatchFragment<r>::ModRM::directRegister(unsigned reg)
+PatchFragment<r>::ModRM::directRegister(RegisterIdx reg)
 {
 	ModRM res;
-	if (reg >= 8) {
+	if (reg.idx >= 8) {
 		res.extendRm = true;
-		reg -= 8;
+		reg.idx -= 8;
 	} else {
 		res.extendRm = false;
 	}
-	assert(reg < 8);
+	assert(reg.idx < 8);
 	/* mod = 3, rm = register */
-	res.content.push_back(0xc0 | reg);
+	res.content.push_back(0xc0 | reg.idx);
 	return res;
 }
 
 template <typename r> void
-PatchFragment<r>::emitNoImmediatesModrmOpcode(unsigned opcode, unsigned reg, const ModRM &rm)
+PatchFragment<r>::emitNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm)
 {
 	unsigned char rex = 0x48;
-	if (reg >= 8) {
+	if (!reg.isOpcodeExtension && reg.idx.idx >= 8) {
 		rex |= 4;
-		reg -= 8;
+		reg.idx.idx -= 8;
+		assert(reg.idx.idx < 8);
 	}
 	if (rm.extendRm)
 		rex |= 1;
 	emitByte(rex);
-	assert(reg < 8);
 	if (opcode >= 0x100) {
 		assert((opcode & 0xff00) == 0x0f00);
 		emitByte(0x0f);
@@ -1137,31 +1191,31 @@ PatchFragment<r>::emitNoImmediatesModrmOpcode(unsigned opcode, unsigned reg, con
 }
 
 template <typename r> void
-PatchFragment<r>::emitMovRegisterToModrm(unsigned reg, const ModRM &rm)
+PatchFragment<r>::emitMovRegisterToModrm(RegisterIdx reg, const ModRM &rm)
 {
 	emitNoImmediatesModrmOpcode(0x89, reg, rm);
 }
 
 template <typename r> void
-PatchFragment<r>::emitMovModrmToRegister(const ModRM &rm, unsigned reg)
+PatchFragment<r>::emitMovModrmToRegister(const ModRM &rm, RegisterIdx reg)
 {
 	emitNoImmediatesModrmOpcode(0x8B, reg, rm);
 }
 
 template <typename r> void
-PatchFragment<r>::emitAddRegToModrm(unsigned reg, const ModRM &rm)
+PatchFragment<r>::emitAddRegToModrm(RegisterIdx reg, const ModRM &rm)
 {
 	emitNoImmediatesModrmOpcode(0x01, reg, rm);
 }
 
 template <typename r> void
-PatchFragment<r>::emitAddModrmToReg(const ModRM &rm, unsigned reg)
+PatchFragment<r>::emitAddModrmToReg(const ModRM &rm, RegisterIdx reg)
 {
 	emitNoImmediatesModrmOpcode(0x03, reg, rm);
 }
 
 template <typename r> void
-PatchFragment<r>::emitCmpRegModrm(unsigned reg, const ModRM &rm)
+PatchFragment<r>::emitCmpRegModrm(RegisterIdx reg, const ModRM &rm)
 {
 	emitNoImmediatesModrmOpcode(0x3B, reg, rm);
 }
@@ -1169,18 +1223,18 @@ PatchFragment<r>::emitCmpRegModrm(unsigned reg, const ModRM &rm)
 template <typename r> void
 PatchFragment<r>::emitNegModrm(const ModRM &rm)
 {
-	emitNoImmediatesModrmOpcode(0xF7, 3, rm);
+	emitNoImmediatesModrmOpcode(0xF7, RegisterOrOpcodeExtension::opcode(3), rm);
 }
 
 template <typename r> void
-PatchFragment<r>::emitCallReg(unsigned reg)
+PatchFragment<r>::emitCallReg(RegisterIdx reg)
 {
-	if (reg >= 8) {
+	if (reg.idx >= 8) {
 		emitByte(0x41);
-		reg -= 8;
+		reg.idx -= 8;
 	}
 	emitByte(0xff);
-	emitModrm(ModRM::directRegister(reg), 2);
+	emitModrm(ModRM::directRegister(reg), RegisterOrOpcodeExtension::opcode(2));
 }
 
 template <typename r> void
@@ -1188,15 +1242,15 @@ PatchFragment<r>::emitCallSequence(const char *target, bool allowRedirection)
 {
 	skipRedZone();
 
-	emitPushQ(6);
-	emitMovQ(6, 0);
+	emitPushQ(RegisterIdx::RSI);
+	emitMovQ(RegisterIdx::RSI, 0);
 	lateRelocs.push_back(late_relocation(content.size() - 8,
 					     8,
 					     vex_asprintf("%s", target),
 					     0,
 					     false));
-	emitCallReg(6);
-	emitPopQ(6);
+	emitCallReg(RegisterIdx::RSI);
+	emitPopQ(RegisterIdx::RSI);
 	
 	restoreRedZone();
 }
@@ -1435,6 +1489,50 @@ CFG<ripType>::degrade()
 		}
 	}
 	return work;
+}
+
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RAX(0);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RCX(1);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RDX(2);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RBX(3);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RSP(4);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RBP(5);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RSI(6);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RDI(7);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R8(8);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R9(9);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R10(10);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R11(11);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R12(12);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R13(13);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R14(14);
+template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R15(15);
+template <typename t> typename PatchFragment<t>::RegisterIdx
+PatchFragment<t>::RegisterIdx::fromVexOffset(unsigned offset)
+{
+	switch (offset) {
+#define do_case(n)				\
+	case OFFSET_amd64_ ## n: return n
+		do_case(RAX);
+		do_case(RCX);
+		do_case(RDX);
+		do_case(RBX);
+		do_case(RSP);
+		do_case(RBP);
+		do_case(RSI);
+		do_case(RDI);
+		do_case(R8);
+		do_case(R9);
+		do_case(R10);
+		do_case(R11);
+		do_case(R12);
+		do_case(R13);
+		do_case(R14);
+		do_case(R15);
+#undef do_case
+	default:
+		abort();
+	}
 }
 
 #endif /* !GENFIX_H__ */
