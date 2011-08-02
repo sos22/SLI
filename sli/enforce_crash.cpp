@@ -1307,6 +1307,10 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 	}
 
 	switch (e->tag) {
+	case Iex_Const:
+		emitMovQ(reg, e->Iex.Const.con->Ico.U64);
+		return;
+
 	case Iex_Unop:
 		switch (e->Iex.Unop.op) {
 		case Iop_Neg64:
@@ -1318,8 +1322,36 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 		}
 		break;
 
-	case Iex_Associative:
+	case Iex_Binop:
 		switch (e->Iex.Binop.op) {
+		case Iop_CmpEQ64: {
+			slot_t old_rax = allocateSlot();
+			if (reg != 0)
+				emitMovRegToSlot(0, old_rax);
+			emitEvalExpr(e->Iex.Binop.arg1, reg);
+			slot_t t = allocateSlot();
+			emitMovRegToSlot(reg, t);
+			emitEvalExpr(e->Iex.Binop.arg2, reg);
+			emitGsPrefix();
+			emitCmpRegModrm(reg, modrmForSlot(t));
+			/* Clear %rax */
+			emitMovQ(0, 0);
+			/* seteq al */
+			emitByte(0x0F);
+			emitByte(0x94);
+			emitByte(0xC0); /* mod = 3, reg = 0, rm = 0 */
+			if (reg != 0) {
+				emitMovRegisterToModrm(0, ModRM::directRegister(reg));
+				emitMovSlotToReg(old_rax, 0);
+			}
+			return;
+		}
+		default:
+			break;
+		}
+		break;
+	case Iex_Associative:
+		switch (e->Iex.Associative.op) {
 		case Iop_Add64: {
 			emitEvalExpr(e->Iex.Associative.contents[0], reg);
 			slot_t acc = allocateSlot();
