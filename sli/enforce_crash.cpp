@@ -1599,10 +1599,55 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	CFG<ClientRip> *degradedCfg;
 	degradedCfg = cfg->degrade<ClientRip, threadRipToClientRip>();
 
+	/* If there are no expressions evaluated in a particular
+	   thread, that thread can never fail, and it's therefore not
+	   necessary to consider it in the power threads
+	   construction */
+	std::set<unsigned> alwaysThreads;
+	for (std::set<unsigned>::iterator it = neededThreads.begin();
+	     it != neededThreads.end();
+		) {
+		bool keep = false;
+		for (expressionDominatorMapT::iterator it2 = exprDominatorMap.begin();
+		     !keep && it2 != exprDominatorMap.end();
+		     it2++)
+			if (!it2->second.empty() && it2->first->rip.thread == *it)
+				keep = true;
+		if (keep) {
+			it++;
+		} else {
+			alwaysThreads.insert(*it);
+			neededThreads.erase(it++);
+		}
+	}
 	/* And now expand it again so that we can do the power-set
 	 * construction. */
 	std::set<std::set<unsigned> > threadPower;
-	powerSet(neededThreads, threadPower);
+	{
+		std::set<std::set<unsigned> > threadPower1;
+		powerSet(neededThreads, threadPower1);
+		for (std::set<std::set<unsigned> >::iterator it = threadPower1.begin();
+		     it != threadPower1.end();
+		     it++) {
+			std::set<unsigned> u(*it);
+			for (std::set<unsigned>::iterator it2 = alwaysThreads.begin();
+			     it2 != alwaysThreads.end();
+			     it2++)
+				u.insert(*it2);
+			threadPower.insert(u);
+		}
+	}
+	printf("Power threads:\n");
+	for (std::set<std::set<unsigned> >::iterator it = threadPower.begin();
+	     it != threadPower.end();
+	     it++) {
+		printf("\t");
+		for (std::set<unsigned>::const_iterator it2 = it->begin();
+		     it2 != it->end();
+		     it2++)
+			printf("%d ", *it2);
+		printf("\n");
+	}
 	std::set<unsigned long> rawRips;
 	for (CFG<ClientRip>::ripToInstrT::iterator it = degradedCfg->ripToInstr->begin();
 	     it != degradedCfg->ripToInstr->end();
