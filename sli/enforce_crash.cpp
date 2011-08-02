@@ -1309,7 +1309,8 @@ EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 	slot_t rflags = emitSaveRflags();
 	emitCompareExprToZero(e.e);
 	jcc_code branch_type = e.invert ? jcc_code::nonzero : jcc_code::zero;
-	ClientRip n = i->defaultNext;
+	assert(i->defaultNextI);
+	ClientRip n = i->defaultNextI->rip;
 	n.threads.erase(e.thread);
 	/* XXX several things wrong here:
 
