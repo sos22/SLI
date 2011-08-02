@@ -1306,8 +1306,23 @@ EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 	if (!i->rip.threads.count(e.thread))
 		return;
 	assert(!i->branchNext.rip);
-	emitCompareExprToZero(e.e);
-	jcc_code branch_type = e.invert ? jcc_code::nonzero : jcc_code::zero;
+	IRExpr *expr;
+	expr = e.e;
+	bool invert = e.invert;
+
+	/* Special case: if the expression is already in the form x == 0
+	   then we can just flip the invert flag and then evaluate x
+	   directly. */
+	if (expr->tag == Iex_Binop &&
+	    expr->Iex.Binop.op == Iop_CmpEQ64 &&
+	    expr->Iex.Binop.arg1->tag == Iex_Const &&
+	    expr->Iex.Binop.arg1->Iex.Const.con->Ico.U64 == 0) {
+		invert = !invert;
+		expr = expr->Iex.Binop.arg2;
+	}
+
+	emitCompareExprToZero(expr);
+	jcc_code branch_type = invert ? jcc_code::nonzero : jcc_code::zero;
 	assert(i->defaultNextI);
 	ClientRip n = i->defaultNextI->rip;
 	n.threads.erase(e.thread);
