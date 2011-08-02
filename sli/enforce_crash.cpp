@@ -1068,8 +1068,12 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 		exprsToSlots.insert(std::pair<IRExpr *, slot_t>(e, r));
 		return r;
 	}
+	void emitGsPrefix() { emitByte(0x65); }
+	ModRM modrmForSlot(slot_t s) { return ModRM::absoluteAddress(s.i * 8); }
 	void emitMovRegToSlot(unsigned offset, slot_t slot);
 	void emitMovSlotToReg(slot_t slot, unsigned offset);
+	void emitAddRegToSlot(unsigned reg, slot_t slot);
+
 	/* Emit a sequence to evaluate @e and then exit the patch if
 	 * it's false.  The exit target is taken from @i's
 	 * defaultNext.  The test is inverted if @invert is set.  @i
@@ -1201,19 +1205,22 @@ instrModrmReg(Instruction<ClientRip> *i)
 void
 EnforceCrashPatchFragment::emitMovRegToSlot(unsigned offset, slot_t slot)
 {
-	/* gs prefix */
-	emitByte(0x65);
-	emitMovRegisterToModrm(vexRegOffsetToRegIdx(offset),
-			       PatchFragment<ClientRip>::ModRM::absoluteAddress(slot.i * 8));
+	emitGsPrefix();
+	emitMovRegisterToModrm(vexRegOffsetToRegIdx(offset), modrmForSlot(slot));
 }
 
 void
 EnforceCrashPatchFragment::emitMovSlotToReg(slot_t slot, unsigned offset)
 {
-	/* gs prefix */
-	emitByte(0x65);
-	emitMovModrmToRegister(PatchFragment<ClientRip>::ModRM::absoluteAddress(slot.i * 8),
-			       vexRegOffsetToRegIdx(offset));
+	emitGsPrefix();
+	emitMovModrmToRegister(modrmForSlot(slot), vexRegOffsetToRegIdx(offset));
+}
+
+void
+EnforceCrashPatchFragment::emitAddRegToSlot(unsigned reg, slot_t slot)
+{
+	emitGsPrefix();
+	emitAddRegToModrm(reg, modrmForSlot(slot));
 }
 
 void
@@ -1278,14 +1285,51 @@ EnforceCrashPatchFragment::emitRestoreRflags(slot_t s)
 void
 EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, unsigned reg)
 {
-	std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
-	if (it != exprsToSlots.end()) {
-		emitMovSlotToReg(it->second, reg);
-		return;
+	{
+		std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
+		if (it != exprsToSlots.end()) {
+			emitMovSlotToReg(it->second, reg);
+			return;
+		}
 	}
+
+	switch (e->tag) {
+	case Iex_Unop:
+		switch (e->Iex.Unop.op) {
+		case Iop_Neg64:
+			emitEvalExpr(e->Iex.Unop.arg, reg);
+			emitNegModrm(ModRM::directRegister(reg));
+			return;
+		default:
+			break;
+		}
+		break;
+
+	case Iex_Associative:
+		switch (e->Iex.Binop.op) {
+		case Iop_Add64: {
+			emitEvalExpr(e->Iex.Associative.contents[0], reg);
+			slot_t acc = allocateSlot();
+			emitMovRegToSlot(reg, acc);
+			for (int x = 1; x < e->Iex.Associative.nr_arguments; x++) {
+				emitEvalExpr(e->Iex.Associative.contents[x], reg);
+				emitAddRegToSlot(reg, acc);
+			}
+			emitMovSlotToReg(acc, reg);
+			return;
+		}
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+
 	fprintf(stderr, "WARNING: Cannot evaluate ");
 	ppIRExpr(e, stderr);
 	fprintf(stderr, "\n");
+	dbg_break("Hello");
 }
 
 void

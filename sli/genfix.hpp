@@ -180,10 +180,21 @@ protected:
 	void emitJmpToOffset(unsigned offset);
 	void emitJmpToRipClient(ripType rip);
 	void emitJmpToRipHost(unsigned long rip);
+
+	/* Emit a simple opcode which uses a modrm but no immediates
+	 * and is 64 bits.  This corresponds to the Ev,Gv and Gv,Ev
+	 * encodings in the architecture manual. */
+	void emitNoImmediatesModrmOpcode(unsigned opcode, unsigned reg, const ModRM &rm);
+
 	/* Store a register to a modrm. */
 	void emitMovRegisterToModrm(unsigned reg, const ModRM &rm);
 	/* Load a register from a modrm */
 	void emitMovModrmToRegister(const ModRM &rm, unsigned reg);
+	/* Add a register to a modrm */
+	void emitAddRegToModrm(unsigned reg, const ModRM &rm);
+	/* Negate a modrm */
+	void emitNegModrm(const ModRM &rm);
+
 	void emitLea(const ModRM &modrm, unsigned reg);
 
 	void emitCallSequence(const char *target, bool allowRedirection);
@@ -1100,7 +1111,7 @@ PatchFragment<r>::ModRM::directRegister(unsigned reg)
 }
 
 template <typename r> void
-PatchFragment<r>::emitMovRegisterToModrm(unsigned reg, const ModRM &rm)
+PatchFragment<r>::emitNoImmediatesModrmOpcode(unsigned opcode, unsigned reg, const ModRM &rm)
 {
 	unsigned char rex = 0x48;
 	if (reg >= 8) {
@@ -1111,24 +1122,38 @@ PatchFragment<r>::emitMovRegisterToModrm(unsigned reg, const ModRM &rm)
 		rex |= 1;
 	emitByte(rex);
 	assert(reg < 8);
-	emitByte(0x89);
+	if (opcode >= 0x100) {
+		assert((opcode & 0xff00) == 0x0f00);
+		emitByte(0x0f);
+		emitByte(opcode & 0xff);
+	} else {
+		emitByte(opcode);
+	}
 	emitModrm(rm, reg);
+}
+
+template <typename r> void
+PatchFragment<r>::emitMovRegisterToModrm(unsigned reg, const ModRM &rm)
+{
+	emitNoImmediatesModrmOpcode(0x89, reg, rm);
 }
 
 template <typename r> void
 PatchFragment<r>::emitMovModrmToRegister(const ModRM &rm, unsigned reg)
 {
-	unsigned char rex = 0x48;
-	if (reg >= 8) {
-		rex |= 4;
-		reg -= 8;
-	}
-	if (rm.extendRm)
-		rex |= 1;
-	emitByte(rex);
-	assert(reg < 8);
-	emitByte(0x8B);
-	emitModrm(rm, reg);
+	emitNoImmediatesModrmOpcode(0x8B, reg, rm);
+}
+
+template <typename r> void
+PatchFragment<r>::emitAddRegToModrm(unsigned reg, const ModRM &rm)
+{
+	emitNoImmediatesModrmOpcode(0x01, reg, rm);
+}
+
+template <typename r> void
+PatchFragment<r>::emitNegModrm(const ModRM &rm)
+{
+	emitNoImmediatesModrmOpcode(0xF7, 3, rm);
 }
 
 template <typename r> void
