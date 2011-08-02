@@ -1557,6 +1557,13 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 		}
 	}
 
+	/* and which threads are relevant */
+	std::set<unsigned> neededThreads;
+	for (std::set<ThreadRip>::iterator it = neededRips.begin();
+	     it != neededRips.end();
+	     it++)
+		neededThreads.insert(it->thread);
+
 	/* Build the CFG */
 	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
@@ -1594,10 +1601,8 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 
 	/* And now expand it again so that we can do the power-set
 	 * construction. */
-	std::set<unsigned> allThreads;
-	mapKeys(allThreads, roots);
 	std::set<std::set<unsigned> > threadPower;
-	powerSet(allThreads, threadPower);
+	powerSet(neededThreads, threadPower);
 	std::set<unsigned long> rawRips;
 	for (CFG<ClientRip>::ripToInstrT::iterator it = degradedCfg->ripToInstr->begin();
 	     it != degradedCfg->ripToInstr->end();
@@ -1658,7 +1663,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++)
-		entryPoints.insert(ClientRip(it->second.rip, allThreads));
+		entryPoints.insert(ClientRip(it->second.rip, neededThreads));
 	printf("Fragment: %s\n", pf->asC("ident", entryPoints));
 }
 
