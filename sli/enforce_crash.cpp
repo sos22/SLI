@@ -830,8 +830,6 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 			     it2 != predecessor_dominates.end();
 			     it2++)
 				newDominators.insert(*it2);
-			if (neededInstructions.count(*it))
-				newDominators.insert(*it);
 		}
 
 		if (newDominators != slot) {
