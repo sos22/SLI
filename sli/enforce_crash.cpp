@@ -1000,6 +1000,28 @@ public:
 	}
 };
 
+class happensBeforeEdge : public GarbageCollected<happensBeforeEdge> {
+	static unsigned next_msg_id;
+
+public:
+	StateMachineSideEffectMemoryAccess *before;
+	StateMachineSideEffectMemoryAccess *after;
+	unsigned msg_id;
+
+	happensBeforeEdge(bool invert, IRExpr::HappensBefore &hb)
+		: before(invert ? hb.after : hb.before),
+		  after(invert ? hb.before : hb.after),
+		  msg_id(next_msg_id++)
+	{}
+
+	void visit(HeapVisitor &hv) {
+		hv(before);
+		hv(after);
+	}
+	NAMED_CLASS
+};
+unsigned happensBeforeEdge::next_msg_id = 0xaabb;
+
 struct exprEvalPoint {
 	bool invert;
 	unsigned thread;
@@ -1069,17 +1091,6 @@ public:
 	bool operator==(const ClientRip &k) const { return !(*this != k); }
 };
 
-static bool
-operator <(const IRExpr::HappensBefore &a, const IRExpr::HappensBefore &b)
-{
-	if (a.before < b.before)
-		return true;
-	else if (a.before > b.before)
-		return false;
-	else
-		return a.after < b.after;
-}
-
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	struct slot_t {
 		slot_t(int _i) : i(_i) {}
@@ -1101,7 +1112,7 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	   relationships which are relevant at that instruction.
 	   ``Relevant'' here means that the instruction is either the
 	   start or end of the arc. */
-	std::map<unsigned long, std::set<IRExpr::HappensBefore> > &happensBeforePoints;
+	std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints;
 
 	void emitInstruction(Instruction<ClientRip> *i);
 	slot_t allocateSlot() {
@@ -1151,7 +1162,7 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 public:
 	EnforceCrashPatchFragment(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &_neededExpressions,
 				  std::map<unsigned long, std::set<exprEvalPoint> > &_expressionEvalPoints,
-				  std::map<unsigned long, std::set<IRExpr::HappensBefore> > &_happensBeforePoints)
+				  std::map<unsigned long, std::set<happensBeforeEdge *> > &_happensBeforePoints)
 		: PatchFragment<ClientRip>(),
 		  next_slot(0),
 		  exprsToSlots(),
@@ -1525,17 +1536,22 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 	/* If this instruction is supposed to happen after some other
 	 * instruction then we might want to insert a delay before
 	 * running it. */
-	std::set<IRExpr::HappensBefore> *hbEdges = NULL;
+	std::set<happensBeforeEdge *> *hbEdges = NULL;
 	if (happensBeforePoints.count(i->rip.rip)) {
 		hbEdges = &happensBeforePoints[i->rip.rip];
-		for (std::set<IRExpr::HappensBefore>::iterator it = hbEdges->begin();
+		for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 		     it != hbEdges->end();
 		     it++) {
-			const IRExpr::HappensBefore &hb(*it);
-			assert(hb.after);
-			if (hb.after->rip.rip == i->rip.rip &&
-			    i->rip.threads.count(hb.after->rip.thread))
+			const happensBeforeEdge *hb = *it;
+			assert(hb->after);
+			if (hb->after->rip.rip == i->rip.rip &&
+			    i->rip.threads.count(hb->after->rip.thread)) {
+				slot_t rdi = allocateSlot();
+				emitMovRegToSlot(RegisterIdx::RDI, rdi);
+				emitMovQ(RegisterIdx::RDI, hb->msg_id);
 				emitCallSequence("happensBeforeEdge__after", false);
+				emitMovSlotToReg(rdi, RegisterIdx::RDI);
+			}
 		}
 	}
 
@@ -1593,14 +1609,19 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 	/* Now look at the before end of happens before
 	 * relationships. */
 	if (hbEdges) {
-		for (std::set<IRExpr::HappensBefore>::iterator it = hbEdges->begin();
+		for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 		     it != hbEdges->end();
 		     it++) {
-			const IRExpr::HappensBefore &hb(*it);
-			assert(hb.before);
-			if (hb.before->rip.rip == i->rip.rip &&
-			    i->rip.threads.count(hb.before->rip.thread))
+			happensBeforeEdge *hb = *it;
+			assert(hb->before);
+			if (hb->before->rip.rip == i->rip.rip &&
+			    i->rip.threads.count(hb->before->rip.thread)) {
+				slot_t rdi = allocateSlot();
+				emitMovRegToSlot(RegisterIdx::RDI, rdi);
+				emitMovQ(RegisterIdx::RDI, hb->msg_id);
 				emitCallSequence("happensBeforeEdge__before", false);
+				emitMovSlotToReg(rdi, RegisterIdx::RDI);
+			}
 		}
 	}
 }
@@ -1857,24 +1878,17 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	expressionEvalMapT exprEvalPoints(exprDominatorMap);
 
 	/* Find out where the happens-before edges start and end. */
-	std::map<unsigned long, std::set<IRExpr::HappensBefore> > happensBeforePoints;
+	std::map<unsigned long, std::set<happensBeforeEdge *> > happensBeforePoints;
 	for (unsigned x = 0; x < c.size(); x++) {
 		IRExpr *e = c[x].second;
 		bool invert = c[x].first;
 		if (e->tag == Iex_HappensBefore) {
 			IRExpr::HappensBefore *hb = &e->Iex.HappensBefore;
-			IRExpr::HappensBefore hb2;
-			if (invert) {
-				hb2.before = hb->after;
-				hb2.after = hb->before;
-			} else {
-				hb2.before = hb->before;
-				hb2.after = hb->after;
-			}
-			if (hb2.before)
-				happensBeforePoints[hb2.before->rip.rip].insert(hb2);
-			if (hb2.after)
-				happensBeforePoints[hb2.after->rip.rip].insert(hb2);
+			if (!hb->before || !hb->after)
+				continue;
+			happensBeforeEdge *hbe = new happensBeforeEdge(invert, *hb);
+			happensBeforePoints[hbe->before->rip.rip].insert(hbe);
+			happensBeforePoints[hbe->after->rip.rip].insert(hbe);
 		}
 	}
 
