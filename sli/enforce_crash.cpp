@@ -1015,8 +1015,8 @@ public:
 	{}
 
 	void visit(HeapVisitor &hv) {
-		hv(before);
-		hv(after);
+		/* These must not be live at GC time. */
+		abort();
 	}
 	NAMED_CLASS
 };
@@ -1062,6 +1062,12 @@ public:
 	}
 };
 
+class simulationSlotT {
+public:
+	int idx;
+	simulationSlotT(int _idx) : idx(_idx) {}
+};
+
 class ClientRip {
 public:
 	unsigned long rip;
@@ -1092,14 +1098,9 @@ public:
 };
 
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
-	struct slot_t {
-		slot_t(int _i) : i(_i) {}
-		int i;
-	};
-	slot_t next_slot;
 	/* Mapping from expressions to the slots in which we've
 	 * stashed them. */
-	std::map<IRExpr *, slot_t> exprsToSlots;
+	std::map<IRExpr *, simulationSlotT> exprsToSlots;
 	/* Mapping from instructions to the expressions which we need
 	   to stash at those instructions for each thread. */
 	std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions;
@@ -1114,23 +1115,25 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	   start or end of the arc. */
 	std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints;
 
+	simulationSlotT next_slot;
+
 	void emitInstruction(Instruction<ClientRip> *i);
-	slot_t allocateSlot() {
-		slot_t r = next_slot;
-		next_slot.i++;
+	simulationSlotT allocateSlot() {
+		simulationSlotT r = next_slot;
+		next_slot.idx++;
 		return r;
 	}
-	slot_t exprSlot(IRExpr *e) {
-		std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
+	simulationSlotT exprSlot(IRExpr *e) {
+		std::map<IRExpr *, simulationSlotT>::iterator it = exprsToSlots.find(e);
 		assert(it != exprsToSlots.end());
 		return it->second;
 	}
 	void emitGsPrefix() { emitByte(0x65); }
-	ModRM modrmForSlot(slot_t s) { return ModRM::absoluteAddress(s.i * 8); }
-	void emitMovRegToSlot(RegisterIdx offset, slot_t slot);
-	void emitMovSlotToReg(slot_t slot, RegisterIdx offset);
-	void emitAddRegToSlot(RegisterIdx reg, slot_t slot);
-	void emitAddSlotToReg(slot_t slot, RegisterIdx reg);
+	ModRM modrmForSlot(simulationSlotT s) { return ModRM::absoluteAddress(s.idx * 8); }
+	void emitMovRegToSlot(RegisterIdx offset, simulationSlotT slot);
+	void emitMovSlotToReg(simulationSlotT slot, RegisterIdx offset);
+	void emitAddRegToSlot(RegisterIdx reg, simulationSlotT slot);
+	void emitAddSlotToReg(simulationSlotT slot, RegisterIdx reg);
 
 	/* Emit a sequence to evaluate @e and then exit the patch if
 	 * it's false.  The exit target is taken from @i's
@@ -1142,8 +1145,8 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	bool emitEvalExpr(IRExpr *e, RegisterIdx reg) __attribute__((warn_unused_result));
 	bool emitCompareExprToZero(IRExpr *e) __attribute__((warn_unused_result));
 
-	slot_t emitSaveRflags();
-	void emitRestoreRflags(slot_t);
+	simulationSlotT emitSaveRflags();
+	void emitRestoreRflags(simulationSlotT);
 	void emitPushf() { emitByte(0x9C); }
 	void emitPopf() { emitByte(0x9D); }
 
@@ -1164,11 +1167,11 @@ public:
 				  std::map<unsigned long, std::set<exprEvalPoint> > &_expressionEvalPoints,
 				  std::map<unsigned long, std::set<happensBeforeEdge *> > &_happensBeforePoints)
 		: PatchFragment<ClientRip>(),
-		  next_slot(0),
 		  exprsToSlots(),
 		  neededExpressions(_neededExpressions),
 		  expressionEvalPoints(_expressionEvalPoints),
-		  happensBeforePoints(_happensBeforePoints)
+		  happensBeforePoints(_happensBeforePoints),
+		  next_slot(0)
 	{
 		/* Allocate slots for expressions which we know we're
 		 * going to have to stash at some point. */
@@ -1180,8 +1183,8 @@ public:
 			     it2 != s.end();
 			     it2++) {
 				if (!exprsToSlots.count(it2->second)) {
-					slot_t s = allocateSlot();
-					exprsToSlots.insert(std::pair<IRExpr *, slot_t>(it2->second, s));
+					simulationSlotT s = allocateSlot();
+					exprsToSlots.insert(std::pair<IRExpr *, simulationSlotT>(it2->second, s));
 				}
 			}
 		}
@@ -1257,28 +1260,28 @@ EnforceCrashPatchFragment::instrModrmReg(Instruction<ClientRip> *i)
 }
 
 void
-EnforceCrashPatchFragment::emitMovRegToSlot(RegisterIdx offset, slot_t slot)
+EnforceCrashPatchFragment::emitMovRegToSlot(RegisterIdx offset, simulationSlotT slot)
 {
 	emitGsPrefix();
 	emitMovRegisterToModrm(offset, modrmForSlot(slot));
 }
 
 void
-EnforceCrashPatchFragment::emitMovSlotToReg(slot_t slot, RegisterIdx offset)
+EnforceCrashPatchFragment::emitMovSlotToReg(simulationSlotT slot, RegisterIdx offset)
 {
 	emitGsPrefix();
 	emitMovModrmToRegister(modrmForSlot(slot), offset);
 }
 
 void
-EnforceCrashPatchFragment::emitAddRegToSlot(RegisterIdx reg, slot_t slot)
+EnforceCrashPatchFragment::emitAddRegToSlot(RegisterIdx reg, simulationSlotT slot)
 {
 	emitGsPrefix();
 	emitAddRegToModrm(reg, modrmForSlot(slot));
 }
 
 void
-EnforceCrashPatchFragment::emitAddSlotToReg(slot_t slot, RegisterIdx reg)
+EnforceCrashPatchFragment::emitAddSlotToReg(simulationSlotT slot, RegisterIdx reg)
 {
 	emitGsPrefix();
 	emitAddModrmToReg(modrmForSlot(slot), reg);
@@ -1314,13 +1317,13 @@ EnforceCrashPatchFragment::emitJcc(ClientRip target, jcc_code branchType)
 								    target));
 }
 
-EnforceCrashPatchFragment::slot_t
+simulationSlotT
 EnforceCrashPatchFragment::emitSaveRflags()
 {
-	slot_t s = allocateSlot();
+	simulationSlotT s = allocateSlot();
 	skipRedZone();
 	emitPushf();
-	slot_t t = allocateSlot();
+	simulationSlotT t = allocateSlot();
 	emitMovRegToSlot(RegisterIdx::RAX, t);
 	emitPopQ(RegisterIdx::RAX);
 	emitMovRegToSlot(RegisterIdx::RAX, s);
@@ -1331,10 +1334,10 @@ EnforceCrashPatchFragment::emitSaveRflags()
 }
 
 void
-EnforceCrashPatchFragment::emitRestoreRflags(slot_t s)
+EnforceCrashPatchFragment::emitRestoreRflags(simulationSlotT s)
 {
 	skipRedZone();
-	slot_t t = allocateSlot();
+	simulationSlotT t = allocateSlot();
 	emitMovRegToSlot(RegisterIdx::RAX, t);
 	emitMovSlotToReg(s, RegisterIdx::RAX);
 	emitPushQ(RegisterIdx::RAX);
@@ -1347,7 +1350,7 @@ bool
 EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 {
 	{
-		std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
+		std::map<IRExpr *, simulationSlotT>::iterator it = exprsToSlots.find(e);
 		if (it != exprsToSlots.end()) {
 			emitMovSlotToReg(it->second, reg);
 			return true;
@@ -1374,10 +1377,10 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 	case Iex_Binop:
 		switch (e->Iex.Binop.op) {
 		case Iop_CmpEQ64: {
-			slot_t old_rax = allocateSlot();
+			simulationSlotT old_rax = allocateSlot();
 			if (!emitEvalExpr(e->Iex.Binop.arg1, reg))
 				return false;
-			slot_t t = allocateSlot();
+			simulationSlotT t = allocateSlot();
 			emitMovRegToSlot(reg, t);
 			if (!emitEvalExpr(e->Iex.Binop.arg2, reg))
 				return false;
@@ -1409,7 +1412,7 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 				return false;
 			if (e->Iex.Associative.nr_arguments == 1)
 				return true;
-			slot_t acc = allocateSlot();
+			simulationSlotT acc = allocateSlot();
 			emitMovRegToSlot(reg, acc);
 			for (int x = 1; x < e->Iex.Associative.nr_arguments - 1; x++) {
 				if (!emitEvalExpr(e->Iex.Associative.contents[x], reg))
@@ -1442,7 +1445,7 @@ EnforceCrashPatchFragment::emitCompareExprToZero(IRExpr *e)
 {
 	RegisterIdx reg = RegisterIdx::RAX;
 	bool r;
-	slot_t spill = allocateSlot();
+	simulationSlotT spill = allocateSlot();
 	emitMovRegToSlot(reg, spill);
 	r = emitEvalExpr(e, reg);
 	if (r)
@@ -1510,7 +1513,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			IRExpr *e = it->second;
 			if (e->tag == Iex_Get) {
 				/* Easy case: just store the register in its slot */
-				slot_t s = exprSlot(e);
+				simulationSlotT s = exprSlot(e);
 				emitMovRegToSlot(RegisterIdx::fromVexOffset(e->Iex.Get.offset), s);
 			} else if (e->tag == Iex_ClientCall) {
 				/* Do this after emitting the instruction */
@@ -1546,7 +1549,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			assert(hb->after);
 			if (hb->after->rip.rip == i->rip.rip &&
 			    i->rip.threads.count(hb->after->rip.thread)) {
-				slot_t rdi = allocateSlot();
+				simulationSlotT rdi = allocateSlot();
 				emitMovRegToSlot(RegisterIdx::RDI, rdi);
 				emitMovQ(RegisterIdx::RDI, hb->msg_id);
 				emitCallSequence("happensBeforeEdge__after", false);
@@ -1568,7 +1571,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 				/* Already handled */
 			} else if (e->tag == Iex_ClientCall) {
 				/* The result of the call should now be in %rax */
-				slot_t s = exprSlot(e);
+				simulationSlotT s = exprSlot(e);
 				emitMovRegToSlot(RegisterIdx::RAX, s);
 			} else {
 				assert(e->tag == Iex_Load);
@@ -1576,7 +1579,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 				case 0x8b: {
 					/* Load from memory to modrm.
 					 * Nice and easy. */
-					slot_t s = exprSlot(e);
+					simulationSlotT s = exprSlot(e);
 					emitMovRegToSlot(instrModrmReg(i), s);
 					break;
 				}
@@ -1597,7 +1600,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			if (i->rip.threads.count(it->thread))
 				doit = true;
 		if (doit) {
-			slot_t rflags = emitSaveRflags();
+			simulationSlotT rflags = emitSaveRflags();
 			for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
 			     it != expressionsToEval.end();
 			     it++)
@@ -1616,7 +1619,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			assert(hb->before);
 			if (hb->before->rip.rip == i->rip.rip &&
 			    i->rip.threads.count(hb->before->rip.thread)) {
-				slot_t rdi = allocateSlot();
+				simulationSlotT rdi = allocateSlot();
 				emitMovRegToSlot(RegisterIdx::RDI, rdi);
 				emitMovQ(RegisterIdx::RDI, hb->msg_id);
 				emitCallSequence("happensBeforeEdge__before", false);
