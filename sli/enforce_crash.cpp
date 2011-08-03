@@ -1035,12 +1035,8 @@ public:
 			for (std::set<std::pair<unsigned, IRExpr *> >::iterator it2 = exprs.begin();
 			     it2 != exprs.end();
 			     it2++) {
-				if (it2->first == i->rip.thread) {
-					printf("Message slot %zd: ", content.size());
-					ppIRExpr(it2->second, stdout);
-					printf("\n");
+				if (it2->first == i->rip.thread)
 					content.push_back(it2->second);
-				}
 			}
 		}
 	}
@@ -1100,6 +1096,14 @@ public:
 };
 
 class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT> {
+	typedef std::pair<unsigned, IRExpr *> key_t;
+	void mk_slot(unsigned thr, IRExpr *e) {
+		key_t key(thr, e);
+		if (!count(key)) {
+			simulationSlotT s = allocateSlot();
+			insert(std::pair<key_t, simulationSlotT>(key, s));
+		}
+	}
 public:
 	simulationSlotT next_slot;
 
@@ -1115,22 +1119,33 @@ public:
 		return it->second;
 	}
 
-	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions)
+	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
+		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore)
 		: next_slot(0)
 	{
 		/* Allocate slots for expressions which we know we're
 		 * going to have to stash at some point. */
-		for (std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > >::iterator it = neededExpressions.begin();
+		for (std::map<unsigned long, std::set<key_t> >::iterator it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
-			std::set<std::pair<unsigned, IRExpr *> > &s((*it).second);
-			for (std::set<std::pair<unsigned, IRExpr *> >::iterator it2 = s.begin();
+			std::set<key_t> &s((*it).second);
+			for (std::set<key_t>::iterator it2 = s.begin();
+			     it2 != s.end();
+			     it2++)
+				mk_slot(it2->first, it2->second);
+		}
+		/* And the ones which we're going to receive in
+		 * messages */
+		for (std::map<unsigned long, std::set<happensBeforeEdge *> >::iterator it = happensBefore.begin();
+		     it != happensBefore.end();
+		     it++) {
+			std::set<happensBeforeEdge *> &s(it->second);
+			for (std::set<happensBeforeEdge *>::iterator it2 = s.begin();
 			     it2 != s.end();
 			     it2++) {
-				if (!count(*it2)) {
-					simulationSlotT s = allocateSlot();
-					insert(std::pair<std::pair<unsigned, IRExpr *>, simulationSlotT>(*it2, s));
-				}
+				happensBeforeEdge *hb = *it2;
+				for (unsigned x = 0; x < hb->content.size(); x++)
+					mk_slot(hb->after->rip.thread, hb->content[x]);
 			}
 		}
 	}
@@ -1218,6 +1233,14 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 		static jcc_code zero;
 	};
 	void emitJcc(ClientRip target, jcc_code branchType);
+
+	void emitHappensBeforeEdgeBefore(const happensBeforeEdge *);
+	void emitHappensBeforeEdgeAfter(const happensBeforeEdge *, Instruction<ClientRip> *);
+
+	void emitLoadMessageToSlot(unsigned msg_id, unsigned message_slot, simulationSlotT simSlot,
+				   RegisterIdx spill_reg);
+	void emitStoreSlotToMessage(unsigned msg_id, unsigned message_slot, simulationSlotT simSlot,
+				    RegisterIdx spill_reg1, RegisterIdx spill_reg2);
 public:
 	EnforceCrashPatchFragment(slotMapT &_exprsToSlots,
 				  std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &_neededExpressions,
@@ -1534,6 +1557,79 @@ EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 }
 
 void
+EnforceCrashPatchFragment::emitLoadMessageToSlot(unsigned msg_id, unsigned msgslot, simulationSlotT simslot,
+						 RegisterIdx spill)
+{
+	emitMovQ(spill, 0);
+	addLateReloc(late_relocation(content.size() - 8,
+				     8,
+				     vex_asprintf("__msg_%d_slot_%d", msg_id, msgslot),
+				     0,
+				     false));
+	emitMovModrmToRegister(ModRM::memAtRegister(spill), spill);
+	emitMovRegToSlot(spill, simslot);
+}
+
+void
+EnforceCrashPatchFragment::emitStoreSlotToMessage(unsigned msg_id, unsigned msgslot, simulationSlotT simslot,
+						  RegisterIdx spill1, RegisterIdx spill2)
+{
+	emitMovQ(spill1, 0);
+	addLateReloc(late_relocation(content.size() - 8,
+				     8,
+				     vex_asprintf("__msg_%d_slot_%d", msg_id, msgslot),
+				     0,
+				     false));
+	emitMovSlotToReg(simslot, spill2);
+	emitMovRegisterToModrm(spill2, ModRM::memAtRegister(spill1));
+}
+
+void
+EnforceCrashPatchFragment::emitHappensBeforeEdgeAfter(const happensBeforeEdge *hb,
+						      Instruction<ClientRip> *i)
+{
+	assert(!i->branchNextI);
+
+	simulationSlotT rflags = emitSaveRflags();
+	simulationSlotT rdi = exprsToSlots.allocateSlot();
+	emitMovRegToSlot(RegisterIdx::RDI, rdi);
+	emitMovQ(RegisterIdx::RDI, hb->msg_id);
+	emitCallSequence("happensBeforeEdge__after", false);
+	emitMovSlotToReg(rdi, RegisterIdx::RDI);
+
+	emitTestRegModrm(RegisterIdx::RAX, ModRM::directRegister(RegisterIdx::RAX));
+	/* XXX as usual, not quite right */
+	ClientRip destinationIfThisFails = i->defaultNextI ? i->defaultNextI->rip : i->defaultNext;
+	destinationIfThisFails.threads.erase(hb->after->rip.thread);
+	emitJcc(destinationIfThisFails, jcc_code::zero);
+
+	for (unsigned x = 0; x < hb->content.size(); x++) {
+		simulationSlotT s = exprsToSlots(hb->after->rip.thread, hb->content[x]);
+		emitLoadMessageToSlot(hb->msg_id, x, s, RegisterIdx::RDI);
+	}
+	emitMovSlotToReg(rdi, RegisterIdx::RDI);
+	emitRestoreRflags(rflags);
+}
+
+void
+EnforceCrashPatchFragment::emitHappensBeforeEdgeBefore(const happensBeforeEdge *hb)
+{
+	simulationSlotT rdi = exprsToSlots.allocateSlot();
+	emitMovRegToSlot(RegisterIdx::RDI, rdi);
+	simulationSlotT r13 = exprsToSlots.allocateSlot();
+	emitMovRegToSlot(RegisterIdx::R13, r13);
+
+	for (unsigned x = 0; x < hb->content.size(); x++) {
+		simulationSlotT s = exprsToSlots(hb->before->rip.thread, hb->content[x]);
+		emitStoreSlotToMessage(hb->msg_id, x, s, RegisterIdx::RDI, RegisterIdx::R13);
+	}
+	emitMovQ(RegisterIdx::RDI, hb->msg_id);
+	emitCallSequence("happensBeforeEdge__before", false);
+	emitMovSlotToReg(r13, RegisterIdx::R13);
+	emitMovSlotToReg(rdi, RegisterIdx::RDI);
+}
+
+void
 EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 {
 	if (i->rip.threads.empty()) {
@@ -1589,13 +1685,8 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			const happensBeforeEdge *hb = *it;
 			assert(hb->after);
 			if (hb->after->rip.rip == i->rip.rip &&
-			    i->rip.threads.count(hb->after->rip.thread)) {
-				simulationSlotT rdi = exprsToSlots.allocateSlot();
-				emitMovRegToSlot(RegisterIdx::RDI, rdi);
-				emitMovQ(RegisterIdx::RDI, hb->msg_id);
-				emitCallSequence("happensBeforeEdge__after", false);
-				emitMovSlotToReg(rdi, RegisterIdx::RDI);
-			}
+			    i->rip.threads.count(hb->after->rip.thread))
+				emitHappensBeforeEdgeAfter(hb, i);
 		}
 	}
 
@@ -1659,13 +1750,8 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			happensBeforeEdge *hb = *it;
 			assert(hb->before);
 			if (hb->before->rip.rip == i->rip.rip &&
-			    i->rip.threads.count(hb->before->rip.thread)) {
-				simulationSlotT rdi = exprsToSlots.allocateSlot();
-				emitMovRegToSlot(RegisterIdx::RDI, rdi);
-				emitMovQ(RegisterIdx::RDI, hb->msg_id);
-				emitCallSequence("happensBeforeEdge__before", false);
-				emitMovSlotToReg(rdi, RegisterIdx::RDI);
-			}
+			    i->rip.threads.count(hb->before->rip.thread))
+				emitHappensBeforeEdgeBefore(hb);
 		}
 	}
 }
@@ -1944,7 +2030,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 
 	/* Figure out what slots to use for the various
 	 * expressions. */
-	slotMapT slotMap(exprStashPoints);
+	slotMapT slotMap(exprStashPoints, happensBeforePoints);
 
 	/* Now build the patch */
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(slotMap, exprStashPoints, exprEvalPoints, happensBeforePoints);

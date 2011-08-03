@@ -211,6 +211,8 @@ protected:
 		/* Access memory at address @reg + offset, where reg
 		   is a register index and offset is a constant. */
 		static ModRM memAtRegisterPlusOffset(RegisterIdx reg, int offset);
+		/* Access memory at *(@reg) */
+		static ModRM memAtRegister(RegisterIdx reg) { return memAtRegisterPlusOffset(reg, 0); }
 		/* Access register @reg directly, not going through
 		 * memory. */
 		static ModRM directRegister(RegisterIdx reg);
