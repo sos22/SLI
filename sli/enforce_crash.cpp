@@ -1130,8 +1130,8 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	 * clear). */
 	void emitCheckExpressionOrEscape(const exprEvalPoint &p, Instruction<ClientRip> *i);
 
-	void emitEvalExpr(IRExpr *e, RegisterIdx reg);
-	void emitCompareExprToZero(IRExpr *e);
+	bool emitEvalExpr(IRExpr *e, RegisterIdx reg) __attribute__((warn_unused_result));
+	bool emitCompareExprToZero(IRExpr *e) __attribute__((warn_unused_result));
 
 	slot_t emitSaveRflags();
 	void emitRestoreRflags(slot_t);
@@ -1334,28 +1334,29 @@ EnforceCrashPatchFragment::emitRestoreRflags(slot_t s)
 	restoreRedZone();
 }
 
-void
+bool
 EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 {
 	{
 		std::map<IRExpr *, slot_t>::iterator it = exprsToSlots.find(e);
 		if (it != exprsToSlots.end()) {
 			emitMovSlotToReg(it->second, reg);
-			return;
+			return true;
 		}
 	}
 
 	switch (e->tag) {
 	case Iex_Const:
 		emitMovQ(reg, e->Iex.Const.con->Ico.U64);
-		return;
+		return true;
 
 	case Iex_Unop:
 		switch (e->Iex.Unop.op) {
 		case Iop_Neg64:
-			emitEvalExpr(e->Iex.Unop.arg, reg);
+			if (!emitEvalExpr(e->Iex.Unop.arg, reg))
+				return false;
 			emitNegModrm(ModRM::directRegister(reg));
-			return;
+			return true;
 		default:
 			break;
 		}
@@ -1365,14 +1366,17 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 		switch (e->Iex.Binop.op) {
 		case Iop_CmpEQ64: {
 			slot_t old_rax = allocateSlot();
-			if (reg != RegisterIdx::RAX)
-				emitMovRegToSlot(RegisterIdx::RAX, old_rax);
-			emitEvalExpr(e->Iex.Binop.arg1, reg);
+			if (!emitEvalExpr(e->Iex.Binop.arg1, reg))
+				return false;
 			slot_t t = allocateSlot();
 			emitMovRegToSlot(reg, t);
-			emitEvalExpr(e->Iex.Binop.arg2, reg);
+			if (!emitEvalExpr(e->Iex.Binop.arg2, reg))
+				return false;
 			emitGsPrefix();
 			emitCmpRegModrm(reg, modrmForSlot(t));
+
+			if (reg != RegisterIdx::RAX)
+				emitMovRegToSlot(RegisterIdx::RAX, old_rax);
 			/* Clear %rax */
 			emitMovQ(RegisterIdx::RAX, 0);
 			/* seteq al */
@@ -1383,7 +1387,7 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 				emitMovRegisterToModrm(RegisterIdx::RAX, ModRM::directRegister(reg));
 				emitMovSlotToReg(old_rax, RegisterIdx::RAX);
 			}
-			return;
+			return true;
 		}
 		default:
 			break;
@@ -1392,19 +1396,22 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 	case Iex_Associative:
 		switch (e->Iex.Associative.op) {
 		case Iop_Add64: {
-			emitEvalExpr(e->Iex.Associative.contents[0], reg);
+			if (!emitEvalExpr(e->Iex.Associative.contents[0], reg))
+				return false;
 			if (e->Iex.Associative.nr_arguments == 1)
-				return;
+				return true;
 			slot_t acc = allocateSlot();
 			emitMovRegToSlot(reg, acc);
 			for (int x = 1; x < e->Iex.Associative.nr_arguments - 1; x++) {
-				emitEvalExpr(e->Iex.Associative.contents[x], reg);
+				if (!emitEvalExpr(e->Iex.Associative.contents[x], reg))
+					return false;
 				emitAddRegToSlot(reg, acc);
 			}
-			emitEvalExpr(e->Iex.Associative.contents[e->Iex.Associative.nr_arguments - 1],
-				     reg);
+			if (!emitEvalExpr(e->Iex.Associative.contents[e->Iex.Associative.nr_arguments - 1],
+					  reg))
+				return false;
 			emitAddSlotToReg(acc, reg);
-			return;
+			return true;
 		}
 		default:
 			break;
@@ -1418,17 +1425,21 @@ EnforceCrashPatchFragment::emitEvalExpr(IRExpr *e, RegisterIdx reg)
 	ppIRExpr(e, stderr);
 	fprintf(stderr, "\n");
 	dbg_break("Hello");
+	return false;
 }
 
-void
+bool
 EnforceCrashPatchFragment::emitCompareExprToZero(IRExpr *e)
 {
 	RegisterIdx reg = RegisterIdx::RAX;
+	bool r;
 	slot_t spill = allocateSlot();
 	emitMovRegToSlot(reg, spill);
-	emitEvalExpr(e, reg);
-	emitTestRegModrm(reg, ModRM::directRegister(reg));
+	r = emitEvalExpr(e, reg);
+	if (r)
+		emitTestRegModrm(reg, ModRM::directRegister(reg));
 	emitMovSlotToReg(spill, reg);
+	return r;
 }
 
 void
@@ -1453,7 +1464,9 @@ EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 		expr = expr->Iex.Binop.arg2;
 	}
 
-	emitCompareExprToZero(expr);
+	if (!emitCompareExprToZero(expr))
+		return;
+
 	jcc_code branch_type = invert ? jcc_code::nonzero : jcc_code::zero;
 	assert(i->defaultNextI);
 	ClientRip n = i->defaultNextI->rip;
