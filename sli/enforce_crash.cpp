@@ -1035,6 +1035,17 @@ struct exprEvalPoint {
 	}
 };
 
+static bool
+operator <(const IRExpr::HappensBefore &a, const IRExpr::HappensBefore &b)
+{
+	if (a.before < b.before)
+		return true;
+	else if (a.before > b.before)
+		return false;
+	else
+		return a.after < b.after;
+}
+
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	struct slot_t {
 		slot_t(int _i) : i(_i) {}
@@ -1052,6 +1063,11 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	   equal to the other element of the pair then we will escape
 	   from the patch. */
 	std::map<unsigned long, std::set<exprEvalPoint> > &expressionEvalPoints;
+	/* Mapping from instructions to the happens-before
+	   relationships which are relevant at that instruction.
+	   ``Relevant'' here means that the instruction is either the
+	   start or end of the arc. */
+	std::map<unsigned long, std::set<IRExpr::HappensBefore> > &happensBeforePoints;
 
 	void emitInstruction(Instruction<ClientRip> *i);
 	slot_t allocateSlot() {
@@ -1100,12 +1116,14 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	void emitJcc(ClientRip target, jcc_code branchType);
 public:
 	EnforceCrashPatchFragment(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &_neededExpressions,
-				  std::map<unsigned long, std::set<exprEvalPoint> > &_expressionEvalPoints)
+				  std::map<unsigned long, std::set<exprEvalPoint> > &_expressionEvalPoints,
+				  std::map<unsigned long, std::set<IRExpr::HappensBefore> > &_happensBeforePoints)
 		: PatchFragment<ClientRip>(),
 		  next_slot(0),
 		  exprsToSlots(),
 		  neededExpressions(_neededExpressions),
-		  expressionEvalPoints(_expressionEvalPoints)
+		  expressionEvalPoints(_expressionEvalPoints),
+		  happensBeforePoints(_happensBeforePoints)
 	{
 		/* Allocate slots for expressions which we know we're
 		 * going to have to stash at some point. */
@@ -1457,6 +1475,23 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		}
 	}
 
+	/* If this instruction is supposed to happen after some other
+	 * instruction then we might want to insert a delay before
+	 * running it. */
+	std::set<IRExpr::HappensBefore> *hbEdges = NULL;
+	if (happensBeforePoints.count(i->rip.rip)) {
+		hbEdges = &happensBeforePoints[i->rip.rip];
+		for (std::set<IRExpr::HappensBefore>::iterator it = hbEdges->begin();
+		     it != hbEdges->end();
+		     it++) {
+			const IRExpr::HappensBefore &hb(*it);
+			assert(hb.after);
+			if (hb.after->rip.rip == i->rip.rip &&
+			    i->rip.threads.count(hb.after->rip.thread))
+				emitCallSequence("happensBeforeEdge__after", false);
+		}
+	}
+
 	PatchFragment<ClientRip>::emitInstruction(i);
 
 	if (neededExprs) {
@@ -1505,6 +1540,20 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 			     it++)
 				emitCheckExpressionOrEscape(*it, i);
 			emitRestoreRflags(rflags);
+		}
+	}
+
+	/* Now look at the before end of happens before
+	 * relationships. */
+	if (hbEdges) {
+		for (std::set<IRExpr::HappensBefore>::iterator it = hbEdges->begin();
+		     it != hbEdges->end();
+		     it++) {
+			const IRExpr::HappensBefore &hb(*it);
+			assert(hb.before);
+			if (hb.before->rip.rip == i->rip.rip &&
+			    i->rip.threads.count(hb.before->rip.thread))
+				emitCallSequence("happensBeforeEdge__before", false);
 		}
 	}
 }
@@ -1803,8 +1852,30 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 					it2->second));
 	}
 
+	/* Find out where the happens-before edges start and end. */
+	std::map<unsigned long, std::set<IRExpr::HappensBefore> > happensBeforePoints;
+	for (unsigned x = 0; x < c.size(); x++) {
+		IRExpr *e = c[x].second;
+		bool invert = c[x].first;
+		if (e->tag == Iex_HappensBefore) {
+			IRExpr::HappensBefore *hb = &e->Iex.HappensBefore;
+			IRExpr::HappensBefore hb2;
+			if (invert) {
+				hb2.before = hb->after;
+				hb2.after = hb->before;
+			} else {
+				hb2.before = hb->before;
+				hb2.after = hb->after;
+			}
+			if (hb2.before)
+				happensBeforePoints[hb2.before->rip.rip].insert(hb2);
+			if (hb2.after)
+				happensBeforePoints[hb2.after->rip.rip].insert(hb2);
+		}
+	}
+
 	/* Now build the patch */
-	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(exprStashPoints, exprEvalPoints);
+	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(exprStashPoints, exprEvalPoints, happensBeforePoints);
 	pf->fromCFG(degradedCfg);
 	std::set<ClientRip> entryPoints;
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
