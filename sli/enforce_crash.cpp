@@ -1849,11 +1849,6 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	 * evaluated. */
 	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
 
-	/* The patch needs to be built in direct RIP space, rather
-	 * than in ThreadRip space.  That means we need to degrade the
-	 * CFG. */
-	CFG<ClientRip> *degradedCfg = convertCFGFromThreadRipToClientRips(cfg, neededThreads, exprDominatorMap);
-
 	/* Figure out where we need to stash the various necessary
 	 * expressions.  This is a map from RIPs to <thread,expr>
 	 * pairs, where we need to stash @expr if we execute
@@ -1884,6 +1879,11 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 				happensBeforePoints[hb2.after->rip.rip].insert(hb2);
 		}
 	}
+
+	/* The patch needs to be built in direct RIP space, rather
+	 * than in ThreadRip space.  That means we need to degrade the
+	 * CFG. */
+	CFG<ClientRip> *degradedCfg = convertCFGFromThreadRipToClientRips(cfg, neededThreads, exprDominatorMap);
 
 	/* Now build the patch */
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(exprStashPoints, exprEvalPoints, happensBeforePoints);
