@@ -739,17 +739,19 @@ public:
 	instructionDominatorMapT(CFG<ThreadRip> *cfg,
 				 predecessorMapT &predecessors,
 				 happensAfterMapT &happensAfter,
-				 const std::set<Instruction<ThreadRip> *> &neededInstructions);
-	/* Find all of the instructions at which the set of dominators
-	   changes i.e. does not match that of any of its
-	   predecessors. */
-	void getChangePoints(predecessorMapT &predecessors, std::set<Instruction<ThreadRip> *> &out);
+				 const std::set<ThreadRip> &neededInstructions);
 };
 instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 						   predecessorMapT &predecessors,
 						   happensAfterMapT &happensAfter,
-						   const std::set<Instruction<ThreadRip> *> &neededInstructions)
+						   const std::set<ThreadRip> &neededRips)
 {
+	std::set<Instruction<ThreadRip> *> neededInstructions;
+	for (std::set<ThreadRip>::const_iterator it = neededRips.begin();
+	     it != neededRips.end();
+	     it++)
+		neededInstructions.insert(cfg->ripToInstr->get(*it));
+
 	/* Start by assuming that everything dominates everything */
 	cfgRootSetT entryPoints(cfg, predecessors, happensAfter);
 	std::set<Instruction<ThreadRip> *> needingRecompute;
@@ -848,23 +850,6 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 		}
 	}
 }
-void
-instructionDominatorMapT::getChangePoints(predecessorMapT &predecessors, std::set<Instruction<ThreadRip> *> &out)
-{
-	for (iterator it = begin(); it != end(); it++) {
-		assert(predecessors.count(it->first));
-		std::set<Instruction<ThreadRip> *> &pred(predecessors[it->first]);
-		bool includeThisOne = true;
-		for (std::set<Instruction<ThreadRip> *>::iterator it2 = pred.begin();
-		     includeThisOne && it2 != pred.end();
-		     it2++) {
-			if ((*this)[*it2] == it->second)
-				includeThisOne = false;
-		}
-		if (includeThisOne)
-			out.insert(it->first);
-	}
-}
 
 class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > > {
 	class trans1 : public IRExprTransformer {
@@ -907,15 +892,19 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 		return t.isGood;
 	}
 public:
-	expressionDominatorMapT(instructionDominatorMapT &, DNF_Conjunction &,
-				predecessorMapT &, happensAfterMapT &, CFG<ThreadRip> *);
+	expressionDominatorMapT(DNF_Conjunction &, CFG<ThreadRip> *, const std::set<ThreadRip> &neededRips);
 };
-expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
-						 DNF_Conjunction &c,
-						 predecessorMapT &pred,
-						 happensAfterMapT &happensBefore,
-						 CFG<ThreadRip> *cfg)
+expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
+						 CFG<ThreadRip> *cfg,
+						 const std::set<ThreadRip> &neededRips)
 {
+	happensAfterMapT happensBefore(c, cfg);
+	predecessorMapT pred(cfg);
+
+	/* Figure out where the various instructions become
+	 * available. */
+	instructionDominatorMapT idom(cfg, pred, happensBefore, neededRips);
+
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
 	std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > > evalable;
@@ -984,6 +973,75 @@ expressionDominatorMapT::expressionDominatorMapT(instructionDominatorMapT &idom,
 	}
 }
 
+class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > {
+public:
+	expressionStashMapT(std::set<IRExpr *> &neededExpressions,
+			    std::map<unsigned, ThreadRip> &roots)
+	{
+		for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
+		     it != neededExpressions.end();
+		     it++) {
+			bool doit = true;
+			IRExpr *e = *it;
+			ThreadRip rip;
+			if (e->tag == Iex_Get) {
+				rip = roots[e->Iex.Get.tid];
+			} else if (e->tag == Iex_ClientCall) {
+				rip = e->Iex.ClientCall.callSite;
+			} else if (e->tag == Iex_Load) {
+				rip = e->Iex.Load.rip;
+			} else if (e->tag == Iex_HappensBefore) {
+				/* These don't really get stashed in any useful sense */
+				doit = false;
+			} else {
+				abort();
+			}
+			if (doit)
+				(*this)[rip.rip].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
+		}
+	}
+};
+
+struct exprEvalPoint {
+	bool invert;
+	unsigned thread;
+	IRExpr *e;
+	exprEvalPoint(bool _invert,
+		      unsigned _thread,
+		      IRExpr *_e)
+		: invert(_invert), thread(_thread), e(_e)
+	{}
+	bool operator <(const exprEvalPoint &o) const {
+		if (invert < o.invert)
+			return true;
+		if (o.invert < invert)
+			return false;
+		if (thread < o.thread)
+			return true;
+		if (o.thread < thread)
+			return false;
+		return e < o.e;
+	}
+};
+
+class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> > {
+public:
+	expressionEvalMapT(expressionDominatorMapT &exprDominatorMap) {
+		for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
+		     it != exprDominatorMap.end();
+		     it++) {
+			for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++)
+				(*this)[it->first->rip.rip].insert(
+					exprEvalPoint(
+						it2->first,
+						it->first->rip.thread,
+						it2->second));
+		}
+	}
+};
+
 class ClientRip {
 public:
 	unsigned long rip;
@@ -1011,28 +1069,6 @@ public:
 	}
 	bool operator!=(const ClientRip &k) const { return *this < k || k < *this; }
 	bool operator==(const ClientRip &k) const { return !(*this != k); }
-};
-
-struct exprEvalPoint {
-	bool invert;
-	unsigned thread;
-	IRExpr *e;
-	exprEvalPoint(bool _invert,
-		      unsigned _thread,
-		      IRExpr *_e)
-		: invert(_invert), thread(_thread), e(_e)
-	{}
-	bool operator <(const exprEvalPoint &o) const {
-		if (invert < o.invert)
-			return true;
-		if (o.invert < invert)
-			return false;
-		if (thread < o.thread)
-			return true;
-		if (o.thread < thread)
-			return false;
-		return e < o.e;
-	}
 };
 
 static bool
@@ -1678,77 +1714,12 @@ duplicateCFGAtThreadSet(CFG<ClientRip> *cfg, std::set<unsigned long> &rips, cons
 	}
 }
 
-static void
-partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
-			std::map<unsigned, ThreadRip> &roots,
-			AddressSpace *as)
+static CFG<ClientRip> *
+convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
+				    std::set<unsigned> &neededThreads,
+				    expressionDominatorMapT &exprDominatorMap)
 {
-	/* Figure out what we actually need to keep track of */
-	std::set<IRExpr *> neededExpressions;
-	for (unsigned x = 0; x < c.size(); x++)
-		enumerateNeededExpressions(c[x].second, neededExpressions);
-
-	/* and where the needed expressions are calculated */
-	std::set<ThreadRip> neededRips;
-	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
-	     it != neededExpressions.end();
-	     it++) {
-		IRExpr *e = *it;
-		if (e->tag == Iex_Get) {
-			neededRips.insert(roots[e->Iex.Get.tid]);
-		} else if (e->tag == Iex_ClientCall) {
-			neededRips.insert(e->Iex.ClientCall.callSite);
-		} else if (e->tag == Iex_Load) {
-			neededRips.insert(e->Iex.Load.rip);
-		} else if (e->tag == Iex_HappensBefore) {
-			neededRips.insert(e->Iex.HappensBefore.before->rip);
-			neededRips.insert(e->Iex.HappensBefore.after->rip);
-		} else {
-			abort();
-		}
-	}
-
-	/* and which threads are relevant */
-	std::set<unsigned> neededThreads;
-	for (std::set<ThreadRip>::iterator it = neededRips.begin();
-	     it != neededRips.end();
-	     it++)
-		neededThreads.insert(it->thread);
-
-	/* Build the CFG */
-	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
-	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
-	     it != roots.end();
-	     it++) {
-		printf("Root %d:%lx\n", it->second.thread, it->second.rip);
-		cfg->add_root(it->second, 100);
-	}
-	cfg->doit();
-	
-	happensAfterMapT happensAfter(c, cfg);
-
-	/* Build an instruction predecessor map */
-	predecessorMapT predecessorMap(cfg);
-
-	std::set<Instruction<ThreadRip> *> neededInstructions;
-	for (std::set<ThreadRip>::iterator it = neededRips.begin();
-	     it != neededRips.end();
-	     it++)
-		neededInstructions.insert(cfg->ripToInstr->get(*it));
-
-	/* Figure out where the various instructions become
-	 * available. */
-	instructionDominatorMapT instrDominatorMap(cfg, predecessorMap, happensAfter, neededInstructions);
-
-	/* Now turn that into a map showing where the actual
-	 * expressions become available. */
-	expressionDominatorMapT exprDominatorMap(instrDominatorMap, c, predecessorMap, happensAfter, cfg);
-
-	/* The patch needs to be built in direct RIP space, rather
-	 * than in ThreadRip space.  That means we need to degrade the
-	 * CFG. */
-	CFG<ClientRip> *degradedCfg;
-	degradedCfg = cfg->degrade<ClientRip, threadRipToClientRip>();
+	CFG<ClientRip> *degradedCfg = cfg->degrade<ClientRip, threadRipToClientRip>();
 
 	/* If there are no expressions evaluated in a particular
 	   thread, that thread can never fail, and it's therefore not
@@ -1811,46 +1782,73 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 			duplicateCFGAtThreadSet(degradedCfg, rawRips, *it);
 	}
 
+	return degradedCfg;
+}
+
+static void
+partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
+			std::map<unsigned, ThreadRip> &roots,
+			AddressSpace *as)
+{
+	/* Figure out what we actually need to keep track of */
+	std::set<IRExpr *> neededExpressions;
+	for (unsigned x = 0; x < c.size(); x++)
+		enumerateNeededExpressions(c[x].second, neededExpressions);
+
+	/* and where the needed expressions are calculated */
+	std::set<ThreadRip> neededRips;
+	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
+	     it != neededExpressions.end();
+	     it++) {
+		IRExpr *e = *it;
+		if (e->tag == Iex_Get) {
+			neededRips.insert(roots[e->Iex.Get.tid]);
+		} else if (e->tag == Iex_ClientCall) {
+			neededRips.insert(e->Iex.ClientCall.callSite);
+		} else if (e->tag == Iex_Load) {
+			neededRips.insert(e->Iex.Load.rip);
+		} else if (e->tag == Iex_HappensBefore) {
+			neededRips.insert(e->Iex.HappensBefore.before->rip);
+			neededRips.insert(e->Iex.HappensBefore.after->rip);
+		} else {
+			abort();
+		}
+	}
+
+	/* and which threads are relevant */
+	std::set<unsigned> neededThreads;
+	for (std::set<ThreadRip>::iterator it = neededRips.begin();
+	     it != neededRips.end();
+	     it++)
+		neededThreads.insert(it->thread);
+
+	/* Build the CFG */
+	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
+	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
+	     it != roots.end();
+	     it++) {
+		printf("Root %d:%lx\n", it->second.thread, it->second.rip);
+		cfg->add_root(it->second, 100);
+	}
+	cfg->doit();
+	
+	/* Figure out where the various expressions should be
+	 * evaluated. */
+	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
+
+	/* The patch needs to be built in direct RIP space, rather
+	 * than in ThreadRip space.  That means we need to degrade the
+	 * CFG. */
+	CFG<ClientRip> *degradedCfg = convertCFGFromThreadRipToClientRips(cfg, neededThreads, exprDominatorMap);
+
 	/* Figure out where we need to stash the various necessary
 	 * expressions.  This is a map from RIPs to <thread,expr>
 	 * pairs, where we need to stash @expr if we execute
 	 * instruction @RIP in thread @thread. */
-	std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > exprStashPoints;
-	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
-	     it != neededExpressions.end();
-	     it++) {
-		bool doit = true;
-		IRExpr *e = *it;
-		ThreadRip rip;
-		if (e->tag == Iex_Get) {
-			rip = roots[e->Iex.Get.tid];
-		} else if (e->tag == Iex_ClientCall) {
-			rip = e->Iex.ClientCall.callSite;
-		} else if (e->tag == Iex_Load) {
-			rip = e->Iex.Load.rip;
-		} else if (e->tag == Iex_HappensBefore) {
-			/* These don't really get stashed in any useful sense */
-			doit = false;
-		} else {
-			abort();
-		}
-		if (doit)
-			exprStashPoints[rip.rip].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
-	}
+	expressionStashMapT exprStashPoints(neededExpressions, roots);
+
 	/* And where we need to calculate them. */
-	std::map<unsigned long, std::set<exprEvalPoint> > exprEvalPoints;
-	for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
-	     it != exprDominatorMap.end();
-	     it++) {
-		for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
-		     it2 != it->second.end();
-		     it2++)
-			exprEvalPoints[it->first->rip.rip].insert(
-				exprEvalPoint(
-					it2->first,
-					it->first->rip.thread,
-					it2->second));
-	}
+	expressionEvalMapT exprEvalPoints(exprDominatorMap);
 
 	/* Find out where the happens-before edges start and end. */
 	std::map<unsigned long, std::set<IRExpr::HappensBefore> > happensBeforePoints;
