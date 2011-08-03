@@ -268,48 +268,77 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 {
 	if (TIMEOUT)
 		return e;
+	IRExpr *oldCurrent = _currentIRExpr;
+	_currentIRExpr = e;
+	IRExpr *res = NULL;
 	switch (e->tag) {
 	case Iex_Binder:
-		return transformIexBinder(e, done_something);
+		res = transformIex(&e->Iex.Binder);
+		break;
 	case Iex_Get:
-		return transformIexGet(e, done_something);
+		res = transformIex(&e->Iex.Get);
+		break;
 	case Iex_GetI:
-		return transformIexGetI(e, done_something);
+		res = transformIex(&e->Iex.GetI);
+		break;
 	case Iex_RdTmp:
-		return transformIexRdTmp(e, done_something);
+		res = transformIex(&e->Iex.RdTmp);
+		break;
 	case Iex_Qop:
-		return transformIexQop(e, done_something);
+		res = transformIex(&e->Iex.Qop);
+		break;
 	case Iex_Triop:
-		return transformIexTriop(e, done_something);
+		res = transformIex(&e->Iex.Triop);
+		break;
 	case Iex_Binop:
-		return transformIexBinop(e, done_something);
+		res = transformIex(&e->Iex.Binop);
+		break;
 	case Iex_Unop:
-		return transformIexUnop(e, done_something);
+		res = transformIex(&e->Iex.Unop);
+		break;
 	case Iex_Load:
-		return transformIexLoad(e, done_something);
+		res = transformIex(&e->Iex.Load);
+		break;
 	case Iex_Const:
-		return transformIexConst(e, done_something);
+		res = transformIex(&e->Iex.Const);
+		break;
 	case Iex_CCall:
-		return transformIexCCall(e, done_something);
+		res = transformIex(&e->Iex.CCall);
+		break;
 	case Iex_Mux0X:
-		return transformIexMux0X(e, done_something);
+		res = transformIex(&e->Iex.Mux0X);
+		break;
 	case Iex_Associative:
-		return transformIexAssociative(e, done_something);
+		res = transformIex(&e->Iex.Associative);
+		break;
 	case Iex_FreeVariable:
-		return transformIexFreeVariable(e, done_something);
+		res = transformIex(&e->Iex.FreeVariable);
+		break;
 	case Iex_ClientCall:
-		return transformIexClientCall(e, done_something);
+		res = transformIex(&e->Iex.ClientCall);
+		break;
 	case Iex_ClientCallFailed:
-		return transformIexClientCallFailed(e, done_something);
+		res = transformIex(&e->Iex.ClientCallFailed);
+		break;
 	case Iex_HappensBefore:
-		return transformIexHappensBefore(e, done_something);
+		res = transformIex(&e->Iex.HappensBefore);
+		break;
 	}
-	abort();
+	/* res == e shouldn't really happen, but it's just about
+	   possible that expression internment could make it happen in
+	   otherwise correct code, so handle it correctly. */
+	if (res && res != e) {
+		*done_something = true;
+	} else {
+		res = e;
+	}
+	_currentIRExpr = oldCurrent;
+	return res;
 }
 
 StateMachineSideEffectMemoryAccess *
 IRExprTransformer::transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema,
-							       bool *done_something)
+								bool *done_something)
 {
 	bool t = false;
 	IRExpr *addr = transformIRExpr(smsema->addr, &t);
@@ -337,77 +366,70 @@ IRExprTransformer::transformStateMachineSideEffectMemoryAccess(StateMachineSideE
 }
 
 IRExpr *
-IRExprTransformer::transformIexHappensBefore(IRExpr *e, bool *done_something)
+IRExprTransformer::transformIex(IRExpr::HappensBefore *e)
 {
 	bool t = false;
 	StateMachineSideEffectMemoryAccess
-		*before = transformStateMachineSideEffectMemoryAccess(e->Iex.HappensBefore.before, &t),
-		*after = transformStateMachineSideEffectMemoryAccess(e->Iex.HappensBefore.after, &t);
+		*before = transformStateMachineSideEffectMemoryAccess(e->before, &t),
+		*after = transformStateMachineSideEffectMemoryAccess(e->after, &t);
 	if (t) {
-		*done_something = true;
 		return IRExpr_HappensBefore(before, after);
 	} else {
-		return e;
+		return NULL;
 	}
 }
 
 IRExpr *
-IRExprTransformer::transformIexCCall(IRExpr *e, bool *done_something)
+IRExprTransformer::transformIex(IRExpr::CCall *e)
 {
 	IRExpr **newArgs;
 	int nr_args;
 	int x;
 	bool t = false;
 
-	for (nr_args = 0; e->Iex.CCall.args[nr_args]; nr_args++)
+	for (nr_args = 0; e->args[nr_args]; nr_args++)
 		;
 	newArgs = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_args + 1);
 	for (x = 0; x < nr_args; x++)
-		newArgs[x] = transformIRExpr(e->Iex.CCall.args[x], &t);
+		newArgs[x] = transformIRExpr(e->args[x], &t);
 	newArgs[nr_args] = NULL;
-	*done_something |= t;
 	if (!t)
-		return e;
+		return NULL;
 	else
-		return IRExpr_CCall(e->Iex.CCall.cee,
-				    e->Iex.CCall.retty,
+		return IRExpr_CCall(e->cee,
+				    e->retty,
 				    newArgs);
 }
 
 IRExpr *
-IRExprTransformer::transformIexClientCall(IRExpr *e, bool *done_something)
+IRExprTransformer::transformIex(IRExpr::ClientCall *e)
 {
 	IRExpr **newArgs;
 	int nr_args;
 	int x;
 	bool t = false;
 
-	for (nr_args = 0; e->Iex.ClientCall.args[nr_args]; nr_args++)
+	for (nr_args = 0; e->args[nr_args]; nr_args++)
 		;
 	newArgs = alloc_irexpr_array(nr_args + 1);
 	for (x = 0; x < nr_args; x++)
-		newArgs[x] = transformIRExpr(e->Iex.ClientCall.args[x], &t);
+		newArgs[x] = transformIRExpr(e->args[x], &t);
 	newArgs[nr_args] = NULL;
-	*done_something |= t;
 	if (!t)
-		return e;
+		return NULL;
 	else
-		return IRExpr_ClientCall(e->Iex.ClientCall.calledRip,
-					 e->Iex.ClientCall.callSite,
-					 newArgs);
+		return IRExpr_ClientCall(e->calledRip, e->callSite, newArgs);
 }
 
 IRExpr *
-IRExprTransformer::transformIexAssociative(IRExpr *e, bool *done_something)
+IRExprTransformer::transformIex(IRExpr::Associative *e)
 {
 	bool t = false;
 	IRExpr *r = IRExpr_Associative(e);
-	for (int x = 0; x < r->Iex.Associative.nr_arguments; x++)
-		r->Iex.Associative.contents[x] =
-			transformIRExpr(r->Iex.Associative.contents[x], &t);
-	*done_something |= t;
+	for (int x = 0; x < e->nr_arguments; x++)
+		r->Iex.Associative.contents[x] = transformIRExpr(e->contents[x], &t);
 	if (!t)
-		return e;
+		return NULL;
 	else
 		return r;
 }
@@ -416,24 +438,18 @@ class RewriteRegister : public StateMachineTransformer {
 	unsigned idx;
 	IRExpr *to;
 protected:
-	IRExpr *transformIexGet(IRExpr *what, bool *done_something);
+	IRExpr *transformIex(IRExpr::Get *what) {
+		if (what->offset == (int)idx)
+			return to;
+		else
+			return NULL;
+	}
 public:
 	RewriteRegister(unsigned _idx, IRExpr *_to)
 		: idx(_idx), to(_to)
 	{
 	}
 };
-
-IRExpr *
-RewriteRegister::transformIexGet(IRExpr *what, bool *done_something)
-{
-	if (what->Iex.Get.offset == (int)idx) {
-		*done_something = true;
-		return to;
-	} else
-		return what;
-}
-
 static StateMachine *
 rewriteRegister(StateMachine *sm,
 		unsigned reg_idx,
@@ -447,13 +463,12 @@ class RewriteTemporary : public StateMachineTransformer {
 	IRTemp tmp;
 	IRExpr *to;
 protected:
-	IRExpr *transformIexRdTmp(IRExpr *what, bool *done_something)
+	IRExpr *transformIex(IRExpr::RdTmp *what)
 	{
-		if (what->Iex.RdTmp.tmp == tmp) {
-			*done_something = true;
+		if (what->tmp == tmp)
 			return to;
-		} else
-			return what;
+		else
+			return NULL;
 	}
 public:
 	RewriteTemporary(IRTemp _tmp, IRExpr *_to)
@@ -474,13 +489,12 @@ class RewriteTemporary2 : public IRExprTransformer {
 	IRTemp tmp;
 	IRExpr *to;
 protected:
-	IRExpr *transformIexRdTmp(IRExpr *what, bool *done_something)
+	IRExpr *transformIex(IRExpr::RdTmp *what)
 	{
-		if (what->Iex.RdTmp.tmp == tmp) {
-			*done_something = true;
+		if (what->tmp == tmp)
 			return to;
-		} else
-			return what;
+		else
+			return NULL;
 	}
 public:
 	RewriteTemporary2(IRTemp _tmp, IRExpr *_to)
@@ -1111,33 +1125,29 @@ class applyAvailTransformer : public IRExprTransformer {
 public:
 	const avail_t &avail;
 	const bool use_bad_ptr;
-	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
+	IRExpr *transformIex(IRExpr::Binder *e) {
 		for (std::set<StateMachineSideEffect *>::const_iterator it = avail.sideEffects.begin();
 		     it != avail.sideEffects.end();
 		     it++) {
 			StateMachineSideEffectCopy *smsec = dynamic_cast<StateMachineSideEffectCopy *>(*it);
 			if (!smsec)
 				continue;
-			if (smsec->key == e->Iex.Binder.binder) {
-				*done_something = true;
+			if (smsec->key == e->binder)
 				return smsec->value;
-			}
 		}
-		return e;
+		return IRExprTransformer::transformIex(e);
 	}
-	IRExpr *transformIexUnop(IRExpr *e, bool *done_something) {
-		if (use_bad_ptr && e->Iex.Unop.op == Iop_BadPtr) {
+	IRExpr *transformIex(IRExpr::Unop *e) {
+		if (use_bad_ptr && e->op == Iop_BadPtr) {
 			for (std::set<IRExpr *>::iterator it = avail.goodPointers.begin();
 			     it != avail.goodPointers.end();
 			     it++) {
-				if (definitelyEqual(*it, e->Iex.Unop.arg,
-						    AllowableOptimisations::defaultOptimisations)) {
-					*done_something = true;
+				if (definitelyEqual(*it, e->arg,
+						    AllowableOptimisations::defaultOptimisations))
 					return IRExpr_Const(IRConst_U1(0));
-				}
 			}
 		}
-		return IRExprTransformer::transformIexUnop(e, done_something);
+		return IRExprTransformer::transformIex(e);
 	}
 	applyAvailTransformer(const avail_t &_avail, bool _use_bad_ptr)
 		: avail(_avail), use_bad_ptr(_use_bad_ptr)
@@ -1911,21 +1921,18 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 /* Turn references to RBP into RSP+k, if we know that RBP=RSP+k. */
 class CanonicaliseRbp : public StateMachineTransformer {
 	IRExpr *delta;
-	IRExpr *transformIexGet(IRExpr *orig, bool *done_something) {
-		assert(orig->tag == Iex_Get);
-		if (orig->Iex.Get.offset == OFFSET_amd64_RBP &&
-		    orig->Iex.Get.ty == Ity_I64) {
-			*done_something = true;
+	IRExpr *transformIex(IRExpr::Get *orig) {
+		if (orig->offset == OFFSET_amd64_RBP && orig->ty == Ity_I64) {
 			return IRExpr_Associative(
 				Iop_Add64,
 				delta,
 				IRExpr_Get(
 					OFFSET_amd64_RSP,
 					Ity_I64,
-					orig->Iex.Get.tid),
+					orig->tid),
 				NULL);
 		}
-		return orig;
+		return StateMachineTransformer::transformIex(orig);
 	}
 public:
 	CanonicaliseRbp(long _delta)
@@ -1954,13 +1961,13 @@ class BuildFreeVariableMapTransformer : public StateMachineTransformer {
 public:
 	std::map<std::pair<unsigned, unsigned>, IRExpr *> map;
 	FreeVariableMap &freeVariables;
-	IRExpr *transformIexGet(IRExpr *what, bool *done_something) {
+	IRExpr *transformIex(IRExpr::Get *what) {
 		std::pair<unsigned, unsigned> k;
-		k.first = what->Iex.Get.offset;
-		k.second = what->Iex.Get.tid;
+		k.first = what->offset;
+		k.second = what->tid;
 		if (!map.count(k))
 			map[k] = IRExpr_FreeVariable();
-		return StateMachineTransformer::transformIexGet(what, done_something);
+		return StateMachineTransformer::transformIex(what);
 	}
 	BuildFreeVariableMapTransformer(FreeVariableMap &_freeVariables)
 		: freeVariables(_freeVariables)
@@ -1974,14 +1981,13 @@ public:
 		std::map<std::pair<unsigned, unsigned>, IRExpr *> &_map)
 		: map(_map)
 	{}
-	IRExpr *transformIexGet(IRExpr *what, bool *done_something) {
+	IRExpr *transformIex(IRExpr::Get *what) {
 		std::pair<unsigned, unsigned> k;
-		k.first = what->Iex.Get.offset;
-		k.second = what->Iex.Get.tid;
+		k.first = what->offset;
+		k.second = what->tid;
 		assert(map.count(k));
-		*done_something = true;
 		IRExpr *res = map[k];
-		fvDelta.push_back(std::pair<FreeVariableKey, IRExpr *>(res->Iex.FreeVariable.key, what));
+		fvDelta.push_back(std::pair<FreeVariableKey, IRExpr *>(res->Iex.FreeVariable.key, currentIRExpr()));
 		return res;
 	}
 };

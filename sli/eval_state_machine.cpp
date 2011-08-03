@@ -27,12 +27,10 @@ public:
 
 class SpecialiseIRExpr : public IRExprTransformer {
 	std::map<Int,IRExpr *> &binders;
-	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
-		if (binders.count(e->Iex.Binder.binder)) {
-			*done_something = true;
-			return binders[e->Iex.Binder.binder];
-		}
-		return IRExprTransformer::transformIexBinder(e, done_something);
+	IRExpr *transformIex(IRExpr::Binder *e) {
+		if (binders.count(e->binder))
+			return binders[e->binder];
+		return IRExprTransformer::transformIex(e);
 	}
 public:
 	SpecialiseIRExpr(std::map<Int, IRExpr *> &_binders)

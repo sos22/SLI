@@ -1675,12 +1675,11 @@ class RewriteRegisterExpr : public IRExprTransformer {
 	unsigned idx;
 	IRExpr *to;
 protected:
-	IRExpr *transformIexGet(IRExpr *what, bool *done_something) {
-		if (what->Iex.Get.offset == (int)idx) {
-			*done_something = true;
+	IRExpr *transformIex(IRExpr::Get *what) {
+		if (what->offset == (int)idx)
 			return to;
-		} else
-			return what;
+		else
+			return NULL;
 	}
 public:
 	RewriteRegisterExpr(unsigned _idx, IRExpr *_to)
@@ -1700,13 +1699,12 @@ class RewriteTemporaryExpr : public IRExprTransformer {
 	IRTemp tmp;
 	IRExpr *to;
 protected:
-	IRExpr *transformIexRdTmp(IRExpr *what, bool *done_something)
+	IRExpr *transformIex(IRExpr::RdTmp *what)
 	{
-		if (what->Iex.RdTmp.tmp == tmp) {
-			*done_something = true;
+		if (what->tmp == tmp)
 			return to;
-		} else
-			return what;
+		else
+			return NULL;
 	}
 public:
 	RewriteTemporaryExpr(IRTemp _tmp, IRExpr *_to)

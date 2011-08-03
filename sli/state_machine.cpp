@@ -207,12 +207,11 @@ public:
 	rewriteBinderTransformer(const std::map<Int, IRExpr *> &_binders)
 		: binders(_binders)
 	{}
-	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
-		if (binders.count(e->Iex.Binder.binder)) {
-			*done_something = true;
-			return binders.find(e->Iex.Binder.binder)->second;
+	IRExpr *transformIex(IRExpr::Binder *e) {
+		if (binders.count(e->binder)) {
+			return binders.find(e->binder)->second;
 		} else {
-			return e;
+			return NULL;
 		}
 	}
 };
@@ -231,12 +230,10 @@ public:
 	RewriteBindersTransformer(int _key, IRExpr *_val)
 		: key(_key), val(_val)
 	{}
-	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
-		if (e->Iex.Binder.binder == key) {
-			*done_something = true;
+	IRExpr *transformIex(IRExpr::Binder *e) {
+		if (e->binder == key)
 			return val;
-		}
-		return IRExprTransformer::transformIexBinder(e, done_something);
+		return IRExprTransformer::transformIex(e);
 	}
 };
 static void
@@ -251,19 +248,19 @@ applySideEffectToFreeVariables(StateMachineSideEffectCopy *c,
 class RewriteBinderToLoadTransformer : public IRExprTransformer {
 public:
 	int key;
+	ThreadRip rip;
 	IRExpr *addr;
 	IRExpr *val;
-	RewriteBinderToLoadTransformer(int _key, IRExpr *_addr)
-		: key(_key), addr(_addr), val(NULL)
+	RewriteBinderToLoadTransformer(int _key, ThreadRip _rip, IRExpr *_addr)
+		: key(_key), rip(_rip), addr(_addr), val(NULL)
 	{}
-	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
-		if (e->Iex.Binder.binder == key) {
+	IRExpr *transformIex(IRExpr::Binder *e) {
+		if (e->binder == key) {
 			if (!val)
-				val = IRExpr_Load(false, Iend_LE, Ity_I64, addr, e->Iex.Load.rip);
-			*done_something = true;
+				val = IRExpr_Load(false, Iend_LE, Ity_I64, addr, rip);
 			return val;
 		}
-		return IRExprTransformer::transformIexBinder(e, done_something);
+		return IRExprTransformer::transformIex(e);
 	}
 };
 void
@@ -271,7 +268,7 @@ applySideEffectToFreeVariables(StateMachineSideEffectLoad *c,
 			       FreeVariableMap &fv,
 			       bool *done_something)
 {
-	RewriteBinderToLoadTransformer t(c->key, c->addr);
+	RewriteBinderToLoadTransformer t(c->key, c->rip, c->addr);
 	fv.applyTransformation(t, done_something);
 }
 
@@ -1010,9 +1007,9 @@ StateMachineEdge::sanity_check(std::set<Int> &binders, std::vector<const StateMa
 class checkBinders : public IRExprTransformer {
 public:
 	const std::set<Int> &binders;
-	IRExpr *transformIexBinder(IRExpr *e, bool *done_something) {
-		assert(binders.count(e->Iex.Binder.binder));
-		return e;
+	IRExpr *transformIex(IRExpr::Binder *e) {
+		assert(binders.count(e->binder));
+		return IRExprTransformer::transformIex(e);
 	}
 	checkBinders(const std::set<Int> &_binders)
 		: binders(_binders)
@@ -1311,9 +1308,9 @@ introduceFreeVariables(StateMachine *sm,
 }
 
 class countFreeVariablesVisitor : public StateMachineTransformer {
-	IRExpr *transformIexFreeVariable(IRExpr *e, bool *done_something) {
-		counts[e->Iex.FreeVariable.key]++;
-		return e;
+	IRExpr *transformIex(IRExpr::FreeVariable *e) {
+		counts[e->key]++;
+		return StateMachineTransformer::transformIex(e);
 	}
 public:
 	std::map<FreeVariableKey, int> counts;
@@ -1398,7 +1395,7 @@ public:
 				if (a->tag == Iex_FreeVariable &&
 				    counts[a->Iex.FreeVariable.key] == 1) {
 					*done_something = true;
-					IRExpr *b = IRExpr_Associative(e);
+					IRExpr *b = IRExpr_Associative(&e->Iex.Associative);
 					assert(freeVariables.get(a->Iex.FreeVariable.key));
 					b->Iex.Associative.contents[x] =
 						freeVariables.get(a->Iex.FreeVariable.key);

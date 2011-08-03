@@ -5,134 +5,121 @@
 
 #include "state_machine.hpp"
 
+#include "libvex_ir.h"
+
 #define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
 class IRExprTransformer {
+	IRExpr *_currentIRExpr;
 protected:
+	IRExpr *currentIRExpr() { return _currentIRExpr; }
 	virtual StateMachineSideEffectMemoryAccess *transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *,
 												bool *);
 	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
-	virtual IRExpr *transformIexBinder(IRExpr *e, bool *done_something) { return e; }
-	virtual IRExpr *transformIexGet(IRExpr *e, bool *done_something) { return e; }
-	virtual IRExpr *transformIexGetI(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::Binder *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExpr::Get *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExpr::GetI *e)
 	{
 		bool t = false;
-		IRExpr *e2 = transformIRExpr(e->Iex.GetI.ix, &t);
-		*done_something |= t;
+		IRExpr *e2 = transformIRExpr(e->ix, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
-			return IRExpr_GetI(e->Iex.GetI.descr,
-					   e2,
-					   e->Iex.GetI.bias,
-					   e->Iex.GetI.tid);
+			return IRExpr_GetI(e->descr, e2, e->bias, e->tid);
 	}
-	virtual IRExpr *transformIexRdTmp(IRExpr *e, bool *done_something) { return e; }
-	virtual IRExpr *transformIexQop(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::RdTmp *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExpr::Qop *e)
 	{
 		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1, &t);
-		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2, &t);
-		IRExpr *a3 = transformIRExpr(e->Iex.Qop.arg3, &t);
-		IRExpr *a4 = transformIRExpr(e->Iex.Qop.arg4, &t);
-		*done_something |= t;
+		IRExpr *a1 = transformIRExpr(e->arg1, &t);
+		IRExpr *a2 = transformIRExpr(e->arg2, &t);
+		IRExpr *a3 = transformIRExpr(e->arg3, &t);
+		IRExpr *a4 = transformIRExpr(e->arg4, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
-			return IRExpr_Qop(e->Iex.Qop.op,
-					  a1,
-					  a2,
-					  a3,
-					  a4);
+			return IRExpr_Qop(e->op, a1, a2, a3, a4);
 	}
-	virtual IRExpr *transformIexTriop(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::Triop *e)
 	{
 		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1, &t);
-		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2, &t);
-		IRExpr *a3 = transformIRExpr(e->Iex.Qop.arg3, &t);
-		*done_something |= t;
+		IRExpr *a1 = transformIRExpr(e->arg1, &t);
+		IRExpr *a2 = transformIRExpr(e->arg2, &t);
+		IRExpr *a3 = transformIRExpr(e->arg3, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
-			return IRExpr_Triop(e->Iex.Qop.op,
-					    a1,
-					    a2,
-					    a3);
+			return IRExpr_Triop(e->op, a1, a2, a3);
 	}
-	virtual IRExpr *transformIexBinop(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::Binop *e)
 	{
 		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1, &t);
-		IRExpr *a2 = transformIRExpr(e->Iex.Qop.arg2, &t);
-		*done_something |= t;
+		IRExpr *a1 = transformIRExpr(e->arg1, &t);
+		IRExpr *a2 = transformIRExpr(e->arg2, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
-			return IRExpr_Binop(e->Iex.Qop.op,
-					    a1,
-					    a2);
+			return IRExpr_Binop(e->op, a1, a2);
 	}
-	virtual IRExpr *transformIexUnop(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::Unop *e)
 	{
 		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->Iex.Qop.arg1, &t);
-		*done_something |= t;
+		IRExpr *a1 = transformIRExpr(e->arg, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
-			return IRExpr_Unop(e->Iex.Qop.op,
-					    a1);
+			return IRExpr_Unop(e->op, a1);
 	}
-	virtual IRExpr *transformIexLoad(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::Load *e)
 	{
 		bool t = false;
-		IRExpr *addr = transformIRExpr(e->Iex.Load.addr, &t);
-		*done_something |= t;
+		IRExpr *addr = transformIRExpr(e->addr, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
-			return IRExpr_Load(e->Iex.Load.isLL,
-					   e->Iex.Load.end,
-					   e->Iex.Load.ty,
-					   addr,
-					   e->Iex.Load.rip);
+			return IRExpr_Load(e->isLL, e->end, e->ty, addr, e->rip);
 	}
-	virtual IRExpr *transformIexConst(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::Const *e)
 	{
-		return e;
+		return NULL;
 	}
-	virtual IRExpr *transformIexMux0X(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::Mux0X *e)
 	{
 		bool t = false;
-		IRExpr *c = transformIRExpr(e->Iex.Mux0X.cond, &t);
-		IRExpr *z = transformIRExpr(e->Iex.Mux0X.expr0, &t);
-		IRExpr *x = transformIRExpr(e->Iex.Mux0X.exprX, &t);
-		*done_something |= t;
+		IRExpr *c = transformIRExpr(e->cond, &t);
+		IRExpr *z = transformIRExpr(e->expr0, &t);
+		IRExpr *x = transformIRExpr(e->exprX, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
 			return IRExpr_Mux0X(c, z, x);
 	}
-	virtual IRExpr *transformIexCCall(IRExpr *, bool *done_something);
-	virtual IRExpr *transformIexAssociative(IRExpr *, bool *done_something);
-	virtual IRExpr *transformIexFreeVariable(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::CCall *);
+	virtual IRExpr *transformIex(IRExpr::Associative *);
+	virtual IRExpr *transformIex(IRExpr::FreeVariable *e)
 	{
-		return e;
+		return NULL;
 	}
-	virtual IRExpr *transformIexClientCall(IRExpr *, bool *done_something);
-	virtual IRExpr *transformIexClientCallFailed(IRExpr *e, bool *done_something)
+	virtual IRExpr *transformIex(IRExpr::ClientCall *);
+	virtual IRExpr *transformIex(IRExpr::ClientCallFailed *e)
 	{
 		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->Iex.ClientCallFailed.target, &t);
-		*done_something |= t;
+		IRExpr *a1 = transformIRExpr(e->target, &t);
+		
 		if (!t)
-			return e;
+			return NULL;
 		else
 			return IRExpr_ClientCallFailed(a1);
 	}
-	virtual IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something);
+	virtual IRExpr *transformIex(IRExpr::HappensBefore *e);
 public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 	IRExpr *transformIRExpr(IRExpr *e) { bool t; return transformIRExpr(e, &t); }

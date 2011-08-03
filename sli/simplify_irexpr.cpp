@@ -1120,7 +1120,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		    (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
 		     src->Iex.Unop.arg->Iex.Associative.op == Iop_Or1)) {
 			/* Convert ~(x & y) to ~x | ~y */
-			IRExpr *a = IRExpr_Associative(src->Iex.Unop.arg);
+			IRExpr *a = IRExpr_Associative(&src->Iex.Unop.arg->Iex.Associative);
 			for (int i = 0;
 			     i < a->Iex.Associative.nr_arguments;
 			     i++) {
@@ -1298,7 +1298,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				assert(r->Iex.Associative.nr_arguments > 1);
 				/* a == C + b -> -C + a == b */
 				IRExpr *cnst = r->Iex.Associative.contents[0];
-				IRExpr *newRight = IRExpr_Associative(r);
+				IRExpr *newRight = IRExpr_Associative(&r->Iex.Associative);
 				purgeAssocArgument(newRight, 0);
 				IRExpr *newLeft = IRExpr_Associative(
 					Iop_Add64,

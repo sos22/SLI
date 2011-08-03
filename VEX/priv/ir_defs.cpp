@@ -2010,14 +2010,13 @@ IRExpr* IRExpr_Associative(IROp op, ...)
    va_end(args);
    return e;
 }
-IRExpr* IRExpr_Associative(IRExpr *src)
+IRExpr* IRExpr_Associative(IRExpr::Associative *src)
 {
-   assert(src->tag == Iex_Associative);
    IRExpr* e           = new IRExpr();
    e->tag              = Iex_Associative;
-   e->Iex.Associative.op = src->Iex.Associative.op;
-   e->Iex.Associative.nr_arguments = src->Iex.Associative.nr_arguments;
-   e->Iex.Associative.nr_arguments_allocated = src->Iex.Associative.nr_arguments * 2;
+   e->Iex.Associative.op = src->op;
+   e->Iex.Associative.nr_arguments = src->nr_arguments;
+   e->Iex.Associative.nr_arguments_allocated = src->nr_arguments * 2;
    static libvex_allocation_site __las = {0, __FILE__, __LINE__};
    e->Iex.Associative.contents = (IRExpr **)
       __LibVEX_Alloc_Bytes(&ir_heap,
@@ -2025,7 +2024,7 @@ IRExpr* IRExpr_Associative(IRExpr *src)
 			   e->Iex.Associative.nr_arguments_allocated,
 			   &__las);
    memcpy(e->Iex.Associative.contents,
-	  src->Iex.Associative.contents,
+	  src->contents,
 	  sizeof(e->Iex.Associative.contents[0]) *
 	  e->Iex.Associative.nr_arguments_allocated);
    return e;

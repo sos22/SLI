@@ -68,7 +68,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 				    log_reads_expr(tid, sb, exp->Iex.Binop.arg1),
 				    log_reads_expr(tid, sb, exp->Iex.Binop.arg2));
 	case Iex_Associative: {
-		IRExpr *out = IRExpr_Associative(exp);
+		IRExpr *out = IRExpr_Associative(&exp->Iex.Associative);
 		for (int x = 0;
 		     x < exp->Iex.Associative.nr_arguments;
 		     x++)

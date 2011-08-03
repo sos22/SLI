@@ -1007,17 +1007,17 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
    IRExprTag tag;
    unsigned optimisationsApplied;
    unsigned long hashval() const;
-   union {
+   union _u {
       /* Used only in pattern matching within Vex.  Should not be seen
          outside of Vex. */
-      struct {
+      struct _Binder {
          Int binder;
       } Binder;
 
       /* Read a guest register, at a fixed offset in the guest state.
          ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0)
       */
-      struct {
+      struct _Get {
          Int    offset;    /* Offset into the guest state */
          IRType ty;        /* Type of the value being read */
 	 unsigned tid;     /* The thread whose register is to be read */
@@ -1059,7 +1059,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
             ppIRExpr output: GETI<descr>[<ix>,<bias]
                          eg. GETI(128:8xI8)[t1,0]
       */
-      struct {
+      struct _GetI {
          IRRegArray* descr; /* Part of guest state treated as circular */
          IRExpr*     ix;    /* Variable part of index into array */
          Int         bias;  /* Constant offset part of index into array */
@@ -1069,7 +1069,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       /* The value held by a temporary.
          ppIRExpr output: t<tmp>, eg. t1
       */
-      struct {
+      struct _RdTmp {
          IRTemp tmp;       /* The temporary number */
 	 unsigned tid;     /* The thread whose temporary is to be read */
       } RdTmp;
@@ -1078,7 +1078,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          ppIRExpr output: <op>(<arg1>, <arg2>, <arg3>, <arg4>),
                       eg. MAddF64r32(t1, t2, t3, t4)
       */
-      struct {
+      struct _Qop {
          IROp op;          /* op-code   */
          IRExpr* arg1;     /* operand 1 */
          IRExpr* arg2;     /* operand 2 */
@@ -1090,7 +1090,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          ppIRExpr output: <op>(<arg1>, <arg2>, <arg3>),
                       eg. MulF64(1, 2.0, 3.0)
       */
-      struct {
+      struct _Triop {
          IROp op;          /* op-code   */
          IRExpr* arg1;     /* operand 1 */
          IRExpr* arg2;     /* operand 2 */
@@ -1100,7 +1100,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       /* A binary operation.
          ppIRExpr output: <op>(<arg1>, <arg2>), eg. Add32(t1,t2)
       */
-      struct {
+      struct _Binop {
          IROp op;          /* op-code   */
          IRExpr* arg1;     /* operand 1 */
          IRExpr* arg2;     /* operand 2 */
@@ -1109,7 +1109,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       /* A unary operation.
          ppIRExpr output: <op>(<arg>), eg. Neg8(t1)
       */
-      struct {
+      struct _Unop {
          IROp    op;       /* op-code */
          IRExpr* arg;      /* operand */
       } Unop;
@@ -1126,7 +1126,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
 
          ppIRExpr output: LD<end>:<ty>(<addr>), eg. LDle:I32(t1)
       */
-      struct {
+      struct _Load {
          Bool      isLL;   /* True iff load makes a reservation */
          IREndness end;    /* Endian-ness of the load */
          IRType    ty;     /* Type of the loaded value */
@@ -1137,7 +1137,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       /* A constant-valued expression.
          ppIRExpr output: <con>, eg. 0x4:I32
       */
-      struct {
+      struct _Const {
          IRConst* con;     /* The constant itself */
       } Const;
 
@@ -1180,7 +1180,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          ppIRExpr output: <cee>(<args>):<retty>
                       eg. foo{0x80489304}(t1, t2):I32
       */
-      struct {
+      struct _CCall {
          IRCallee* cee;    /* Function to call. */
          IRType    retty;  /* Type of return value. */
          IRExpr**  args;   /* Vector of argument expressions. */
@@ -1193,7 +1193,7 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
          ppIRExpr output: Mux0X(<cond>,<expr0>,<exprX>),
                          eg. Mux0X(t6,t7,t8)
       */
-      struct {
+      struct _Mux0X {
          IRExpr* cond;     /* Condition */
          IRExpr* expr0;    /* True expression */
          IRExpr* exprX;    /* False expression */
@@ -1202,33 +1202,50 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       /* An associative operator with as many arguments as are needed.
 	 Because it's associative, the exact nesting order doesn't
 	 matter. */
-      struct {
+      struct _Associative {
 	 IROp op;
 	 int nr_arguments;
 	 int nr_arguments_allocated;
 	 IRExpr **contents;
       } Associative;
 
-      struct {
+      struct _FreeVariable {
 	 FreeVariableKey key;
       } FreeVariable;
 
-      struct {
+      struct _ClientCall {
 	 unsigned long calledRip;
 	 ThreadRip callSite;
 	 IRExpr **args;
       } ClientCall;
 
-      struct {
+      struct _ClientCallFailed {
 	 IRExpr *target;
       } ClientCallFailed;
 
-      struct {
+      struct _HappensBefore {
 	 StateMachineSideEffectMemoryAccess *before;
-	 StateMachineSideEffectMemoryAccess *after;
+         StateMachineSideEffectMemoryAccess *after;
       } HappensBefore;
    } Iex;
    void visit(HeapVisitor &hv);
+   typedef _u::_Binder Binder;
+   typedef _u::_Get Get;
+   typedef _u::_GetI GetI;
+   typedef _u::_RdTmp RdTmp;
+   typedef _u::_Qop Qop;
+   typedef _u::_Triop Triop;
+   typedef _u::_Binop Binop;
+   typedef _u::_Unop Unop;
+   typedef _u::_Load Load;
+   typedef _u::_Const Const;
+   typedef _u::_Mux0X Mux0X;
+   typedef _u::_CCall CCall;
+   typedef _u::_Associative Associative;
+   typedef _u::_FreeVariable FreeVariable;
+   typedef _u::_ClientCall ClientCall;
+   typedef _u::_ClientCallFailed ClientCallFailed;
+   typedef _u::_HappensBefore HappensBefore;
    NAMED_CLASS
 };
 
@@ -1251,7 +1268,7 @@ extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
-extern IRExpr* IRExpr_Associative (IRExpr *);
+extern IRExpr* IRExpr_Associative (IRExpr::Associative *);
 extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (unsigned long r, ThreadRip callSite, IRExpr **args);

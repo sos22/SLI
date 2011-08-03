@@ -519,10 +519,9 @@ public:
 	ShortCircuitFvTransformer(FreeVariableMap &_fv)
 		: fv(_fv)
 	{}
-	IRExpr *transformIexFreeVariable(IRExpr *e, bool *done_something)
+	IRExpr *transformIex(IRExpr::FreeVariable *e)
 	{
-		*done_something = true;
-		return transformIRExpr(fv.get(e->Iex.FreeVariable.key), done_something);
+		return transformIRExpr(fv.get(e->key));
 	}
 };
 
@@ -551,32 +550,32 @@ public:
 	EnumNeededExpressionsTransformer(std::set<IRExpr *> &_out)
 		: out(_out)
 	{}
-	IRExpr *transformIexRdTmp(IRExpr *e, bool *done_something) {
+	IRExpr *transformIex(IRExpr::RdTmp *e) {
 		abort(); /* Should all have been eliminated by now */
 	}
-	IRExpr *transformIexGet(IRExpr *e, bool *done_something) {
-		out.insert(e);
-		return e;
+	IRExpr *transformIex(IRExpr::Get *e) {
+		out.insert(currentIRExpr());
+		return NULL;
 	}
-	IRExpr *transformIexLoad(IRExpr *e, bool *done_something) {
-		out.insert(e);
+	IRExpr *transformIex(IRExpr::Load *e) {
+		out.insert(currentIRExpr());
 		/* Note that we don't recurse into the address
 		   calculation here.  We can always evaluate this
 		   expression after seeing the load itself, regardless
 		   of where the address came from. */
-		return e;
+		return NULL;
 	}
-	IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something) {
-		out.insert(e);
+	IRExpr *transformIex(IRExpr::HappensBefore *e) {
+		out.insert(currentIRExpr());
 		/* Again, we don't recurse into the details of the
 		   happens before expression, because we only need the
 		   two instructions, and not details of their
 		   side-effects. */
-		return e;
+		return NULL;
 	}
-	IRExpr *transformIexClientCall(IRExpr *e, bool *done_something) {
-		out.insert(e);
-		return e;
+	IRExpr *transformIex(IRExpr::ClientCall *e) {
+		out.insert(currentIRExpr());
+		return NULL;
 	}
 };
 static void
@@ -877,24 +876,24 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 			assert(i);
 			return avail.count(i) != 0;
 		}
-		IRExpr *transformIexGet(IRExpr *e, bool *done_something) {
-			if (!availThreads.count(e->Iex.Get.tid))
+		IRExpr *transformIex(IRExpr::Get *e) {
+			if (!availThreads.count(e->tid))
 				isGood = false;
-			return e;
+			return NULL;
 		}
-		IRExpr *transformIexLoad(IRExpr *e, bool *done_something) {
-			if (!isAvail(e->Iex.Load.rip))
+		IRExpr *transformIex(IRExpr::Load *e) {
+			if (!isAvail(e->rip))
 				isGood = false;
-			return e;
+			return NULL;
 		}
-		IRExpr *transformIexHappensBefore(IRExpr *e, bool *done_something) {
+		IRExpr *transformIex(IRExpr::HappensBefore *e) {
 			isGood = false;
-			return e;
+			return NULL;
 		}
-		IRExpr *transformIexClientCall(IRExpr *e, bool *done_something) {
-			if (!isAvail(e->Iex.ClientCall.callSite))
+		IRExpr *transformIex(IRExpr::ClientCall *e) {
+			if (!isAvail(e->callSite))
 				isGood = false;
-			return e;
+			return NULL;
 		}
 	public:
 		bool isGood;
