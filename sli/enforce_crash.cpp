@@ -735,7 +735,8 @@ cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfte
  * complete before that instruction, based purely on the control flow
  * graph. */
 class instructionDominatorMapT : public instrToInstrSetMap {
-public:
+	friend class expressionDominatorMapT;
+	instructionDominatorMapT() {}
 	instructionDominatorMapT(CFG<ThreadRip> *cfg,
 				 predecessorMapT &predecessors,
 				 happensAfterMapT &happensAfter,
@@ -890,6 +891,7 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 		return t.isGood;
 	}
 public:
+	instructionDominatorMapT idom;
 	expressionDominatorMapT(DNF_Conjunction &, CFG<ThreadRip> *, const std::set<ThreadRip> &neededRips);
 };
 expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
@@ -902,6 +904,7 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	/* Figure out where the various instructions become
 	 * available. */
 	instructionDominatorMapT idom(cfg, pred, happensBefore, neededRips);
+	this->idom = idom;
 
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
@@ -1006,13 +1009,41 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge> {
 public:
 	StateMachineSideEffectMemoryAccess *before;
 	StateMachineSideEffectMemoryAccess *after;
+	std::vector<IRExpr *> content;
 	unsigned msg_id;
 
-	happensBeforeEdge(bool invert, IRExpr::HappensBefore &hb)
+	happensBeforeEdge(bool invert, IRExpr::HappensBefore &hb,
+			  instructionDominatorMapT &idom,
+			  CFG<ThreadRip> *cfg,
+			  expressionStashMapT &stashMap)
 		: before(invert ? hb.after : hb.before),
 		  after(invert ? hb.before : hb.after),
 		  msg_id(next_msg_id++)
-	{}
+	{
+		printf("HBE %d:%lx -> %d:%lx\n",
+		       before->rip.thread,
+		       before->rip.rip,
+		       after->rip.thread,
+		       after->rip.rip);
+		std::set<Instruction<ThreadRip> *> &liveInstructions(
+			idom[cfg->ripToInstr->get(hb.before->rip)]);
+		for (std::set<Instruction<ThreadRip> *>::iterator it = liveInstructions.begin();
+		     it != liveInstructions.end();
+		     it++) {
+			Instruction<ThreadRip> *i = *it;
+			std::set<std::pair<unsigned, IRExpr *> > &exprs(stashMap[i->rip.rip]);
+			for (std::set<std::pair<unsigned, IRExpr *> >::iterator it2 = exprs.begin();
+			     it2 != exprs.end();
+			     it2++) {
+				if (it2->first == i->rip.thread) {
+					printf("Message slot %zd: ", content.size());
+					ppIRExpr(it2->second, stdout);
+					printf("\n");
+					content.push_back(it2->second);
+				}
+			}
+		}
+	}
 
 	void visit(HeapVisitor &hv) {
 		/* These must not be live at GC time. */
@@ -1899,7 +1930,8 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 			IRExpr::HappensBefore *hb = &e->Iex.HappensBefore;
 			if (!hb->before || !hb->after)
 				continue;
-			happensBeforeEdge *hbe = new happensBeforeEdge(invert, *hb);
+			happensBeforeEdge *hbe = new happensBeforeEdge(invert, *hb, exprDominatorMap.idom,
+								       cfg, exprStashPoints);
 			happensBeforePoints[hbe->before->rip.rip].insert(hbe);
 			happensBeforePoints[hbe->after->rip.rip].insert(hbe);
 		}
