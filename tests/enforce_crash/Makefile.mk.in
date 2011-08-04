@@ -1,0 +1,15 @@
+targets=""
+tests="test1"
+
+defvars() {
+	echo "ENFORCE_CRASH_TESTS=\$(patsubst %,${input_base}/%,${tests})"
+	echo 'TARGETS+=$(ENFORCE_CRASH_TESTS)'
+}
+
+rules() {
+    for t in $tests
+    do
+	echo "${input_base}/$t: ${input_base}/${t}.c"
+	echo -e '\tgcc -pthread -g -O -Wall $^ -o $@'
+    done
+}

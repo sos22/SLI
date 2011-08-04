@@ -1,1 +1,1 @@
-subdirs="VEX sli"
+subdirs="VEX sli enforce_crash"
