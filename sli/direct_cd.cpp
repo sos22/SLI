@@ -69,6 +69,7 @@ main(int argc, char *argv[])
 					 ii,
 					 oracle,
 					 proximal->origin,
+					 thr->tid,
 					 ALLOW_GC);
 	VexPtr<CrashSummary, &ir_heap> summary;
 	summary = diagnoseCrash(probeMachine, oracle, ms, true, ALLOW_GC);

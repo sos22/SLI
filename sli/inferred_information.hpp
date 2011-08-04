@@ -119,6 +119,7 @@ StateMachine *buildProbeMachine(std::vector<unsigned long> &previousInstructions
 				VexPtr<InferredInformation> &ii,
 				VexPtr<Oracle> &oracle,
 				unsigned long interestingRip,
+				ThreadId tid,
 				GarbageCollectionToken token);
 CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    VexPtr<Oracle> &oracle,

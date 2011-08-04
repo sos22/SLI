@@ -118,7 +118,7 @@ consider_rip(unsigned long my_rip,
 	gettimeofday(&start, NULL);
 
 	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip, token);
+	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip, thr->tid, token);
 	if (probeMachine) {
 		VexPtr<CrashSummary, &ir_heap> summary;
 		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);

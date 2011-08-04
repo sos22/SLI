@@ -3145,6 +3145,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		  VexPtr<InferredInformation> &ii,
 		  VexPtr<Oracle> &oracle,
 		  unsigned long interestingRip,
+		  ThreadId tid,
 		  GarbageCollectionToken token)
 {
 	__set_profiling(buildProbeMachine);
@@ -3176,7 +3177,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		breakCycles(cfg.get());
 
 		VexPtr<StateMachine, &ir_heap> cr(
-			ii->CFGtoCrashReason(CRASHING_THREAD, cfg, true));
+			ii->CFGtoCrashReason(tid._tid(), cfg, true));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;

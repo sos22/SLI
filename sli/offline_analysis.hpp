@@ -7,7 +7,6 @@
 
 #include "libvex_ir.h"
 
-#define CRASHING_THREAD 73
 #define STORING_THREAD 97
 
 class IRExprTransformer {
