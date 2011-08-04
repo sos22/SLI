@@ -480,6 +480,7 @@ Instruction<r>::decode(AddressSpace *as,
 	char delta;
 	int delta32;
 	bool opsize = false;
+	bool repne = false;
 
 top:
 	switch (b) {
@@ -522,8 +523,17 @@ top:
 			   the same size as the input one. */
 			break;
 
-		case 0x1f: /* nop Ev */
+		case 0x30 ... 0x3f: /* wrmsr, rdmsr, sysenter, etc.
+				     * An opcode with no operands. */
+			break;
+
+		case 0x10 ... 0x17: /* Various flavours of mov */
+		case 0x18: /* prefetch, in its multitudinous forms */
+		case 0x19 ... 0x1f: /* nop Ev */
+		case 0x20 ... 0x27: /* move to and from control and debug registers */
+		case 0x28 ... 0x2f: /* various xmm instructions which take a simple modrm */
 		case 0x40 ... 0x4f: /* CMOVcc Gv,Ev */
+		case 0x50 ... 0x6f: /* Yet more xmm instructions using a simple modrm */
 		case 0x90 ... 0x9f: /* setcc Eb */
 		case 0xaf: /* imul Gv, Ev */
 		case 0xb6: /* movzx Gv, Eb */
@@ -674,6 +684,11 @@ top:
 		i->len = 0;
 		fallsThrough = false;
 		break;
+
+	case 0xf2:
+		repne = true;
+		b = i->byte();
+		goto top;
 
 	case 0xf7: /* Unary group 3 Ev */
 		if (i->modrmExtension() == 0) {
