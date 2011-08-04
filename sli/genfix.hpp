@@ -532,7 +532,7 @@ top:
 			break;
 		default:
 			throw NotImplementedException("cannot decode instruction starting 0x0f 0x%02x at %lx\n",
-						      b, i->rip);
+						      b, i->rip.rip);
 		}
 		break;
 
@@ -694,7 +694,7 @@ top:
 		break;
 	default:
 		throw NotImplementedException("cannot decode instruction starting %x at %lx\n",
-					      b, i->rip);
+					      b, i->rip.rip);
 	}
 
 	if (fallsThrough)

@@ -16,7 +16,7 @@ protected:
 		int r = vasprintf(&msg, fmt, args);
 		(void)r;
 	}
-	void setMessage(const char *fmt, ...)
+	void setMessage(const char *fmt, ...)  __attribute__((__format__ (__printf__,2,3)))
 	{
 		va_list args;
 		va_start(args, fmt);
@@ -28,7 +28,7 @@ public:
 	{
 		msg = strdup(b.msg);
 	}
-	SliException(const char *fmt, ...)
+	SliException(const char *fmt, ...) __attribute__((__format__ (__printf__,2,3)))
 	{
 		va_list args;
 		va_start(args, fmt);
@@ -51,7 +51,7 @@ public:
 
 class ReplayFailedException : public SliException {
 public:
-	ReplayFailedException(const char *fmt, ...)
+	ReplayFailedException(const char *fmt, ...) __attribute__((__format__ (__printf__,2,3)))
 	{
 		va_list args;
 		va_start(args, fmt);
@@ -86,7 +86,7 @@ class InstructionDecodeFailedException : public SliException {
 class NotImplementedException : public SliException {
 public:
 	char *reason;
-	NotImplementedException(const char *fmt, ...)
+	NotImplementedException(const char *fmt, ...) __attribute__((__format__ (__printf__,2,3)))
 	{
 		va_list args;
 		
@@ -155,10 +155,10 @@ public:
 	AssertFailedException(const char *_file,
 			      unsigned _line,
 			      const char *_condition,
-			      ...) :
-		SliException(),
-		file(_file),
-		line(_line)
+			      ...)  __attribute__((__format__ (__printf__,4,5)))
+		: SliException(),
+		  file(_file),
+		  line(_line)
 	{
 		va_list args;
 		va_start(args, _condition);
