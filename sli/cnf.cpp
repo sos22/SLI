@@ -793,8 +793,8 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		}
 
 		case Iex_HappensBefore:
-			if (e->Iex.HappensBefore.before->rip != other->Iex.HappensBefore.before->rip ||
-			    e->Iex.HappensBefore.after->rip != other->Iex.HappensBefore.after->rip)
+			if (e->Iex.HappensBefore.before != other->Iex.HappensBefore.before ||
+			    e->Iex.HappensBefore.after != other->Iex.HappensBefore.after)
 				continue;
 			break;
 		}

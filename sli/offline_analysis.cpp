@@ -336,49 +336,6 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 	return res;
 }
 
-StateMachineSideEffectMemoryAccess *
-IRExprTransformer::transformStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema,
-								bool *done_something)
-{
-	bool t = false;
-	IRExpr *addr = transformIRExpr(smsema->addr, &t);
-	if (StateMachineSideEffectStore *smses =
-	    dynamic_cast<StateMachineSideEffectStore *>(smsema)) {
-		IRExpr *data = transformIRExpr(smses->data, &t);
-		if (t) {
-			*done_something = true;
-			return new StateMachineSideEffectStore(addr, data, smsema->rip);
-		} else {
-			return smsema;
-		}
-	}
-	if (StateMachineSideEffectLoad *smsel =
-	    dynamic_cast<StateMachineSideEffectLoad *>(smsema)) {
-		if (t) {
-			*done_something = true;
-			return new StateMachineSideEffectLoad(smsel->key, addr, smsema->rip);
-		} else {
-			return smsema;
-		}
-	}
-
-	abort();
-}
-
-IRExpr *
-IRExprTransformer::transformIex(IRExpr::HappensBefore *e)
-{
-	bool t = false;
-	StateMachineSideEffectMemoryAccess
-		*before = transformStateMachineSideEffectMemoryAccess(e->before, &t),
-		*after = transformStateMachineSideEffectMemoryAccess(e->after, &t);
-	if (t) {
-		return IRExpr_HappensBefore(before, after);
-	} else {
-		return NULL;
-	}
-}
-
 IRExpr *
 IRExprTransformer::transformIex(IRExpr::CCall *e)
 {

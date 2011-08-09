@@ -522,8 +522,6 @@ findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt
 		findUsedBinders(e->Iex.ClientCallFailed.target, out, opt);
 		return;
 	case Iex_HappensBefore:
-		e->Iex.HappensBefore.before->findUsedBinders(out, opt);
-		e->Iex.HappensBefore.after->findUsedBinders(out, opt);
 		return;
 	}
 	abort();

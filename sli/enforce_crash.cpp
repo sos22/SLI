@@ -134,8 +134,8 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
-			ThreadRip beforeRip = c[x].second->Iex.HappensBefore.before->rip;
-			ThreadRip afterRip = c[x].second->Iex.HappensBefore.after->rip;
+			ThreadRip beforeRip = c[x].second->Iex.HappensBefore.before;
+			ThreadRip afterRip = c[x].second->Iex.HappensBefore.after;
 			Instruction<ThreadRip> *before = cfg->ripToInstr->get(beforeRip);
 			Instruction<ThreadRip> *after = cfg->ripToInstr->get(afterRip);
 			assert(before);
@@ -505,8 +505,8 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge> {
 	static unsigned next_msg_id;
 
 public:
-	StateMachineSideEffectMemoryAccess *before;
-	StateMachineSideEffectMemoryAccess *after;
+	ThreadRip before;
+	ThreadRip after;
 	std::vector<IRExpr *> content;
 	unsigned msg_id;
 
@@ -519,12 +519,12 @@ public:
 		  msg_id(next_msg_id++)
 	{
 		printf("HBE %d:%lx -> %d:%lx\n",
-		       before->rip.thread,
-		       before->rip.rip,
-		       after->rip.thread,
-		       after->rip.rip);
+		       before.thread,
+		       before.rip,
+		       after.thread,
+		       after.rip);
 		std::set<Instruction<ThreadRip> *> &liveInstructions(
-			idom[cfg->ripToInstr->get(hb.before->rip)]);
+			idom[cfg->ripToInstr->get(before)]);
 		for (std::set<Instruction<ThreadRip> *>::iterator it = liveInstructions.begin();
 		     it != liveInstructions.end();
 		     it++) {
@@ -643,7 +643,7 @@ public:
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (unsigned x = 0; x < hb->content.size(); x++)
-					mk_slot(hb->after->rip.thread, hb->content[x]);
+					mk_slot(hb->after.thread, hb->content[x]);
 			}
 		}
 	}
@@ -1098,11 +1098,11 @@ EnforceCrashPatchFragment::emitHappensBeforeEdgeAfter(const happensBeforeEdge *h
 	emitTestRegModrm(RegisterIdx::RAX, ModRM::directRegister(RegisterIdx::RAX));
 	/* XXX as usual, not quite right */
 	ClientRip destinationIfThisFails = i->defaultNextI ? i->defaultNextI->rip : i->defaultNext;
-	destinationIfThisFails.threads.erase(hb->after->rip.thread);
+	destinationIfThisFails.threads.erase(hb->after.thread);
 	emitJcc(destinationIfThisFails, jcc_code::zero);
 
 	for (unsigned x = 0; x < hb->content.size(); x++) {
-		simulationSlotT s = exprsToSlots(hb->after->rip.thread, hb->content[x]);
+		simulationSlotT s = exprsToSlots(hb->after.thread, hb->content[x]);
 		emitLoadMessageToSlot(hb->msg_id, x, s, RegisterIdx::RDI);
 	}
 	emitMovSlotToReg(rdi, RegisterIdx::RDI);
@@ -1118,7 +1118,7 @@ EnforceCrashPatchFragment::emitHappensBeforeEdgeBefore(const happensBeforeEdge *
 	emitMovRegToSlot(RegisterIdx::R13, r13);
 
 	for (unsigned x = 0; x < hb->content.size(); x++) {
-		simulationSlotT s = exprsToSlots(hb->before->rip.thread, hb->content[x]);
+		simulationSlotT s = exprsToSlots(hb->before.thread, hb->content[x]);
 		emitStoreSlotToMessage(hb->msg_id, x, s, RegisterIdx::RDI, RegisterIdx::R13);
 	}
 	emitMovQ(RegisterIdx::RDI, hb->msg_id);
@@ -1181,9 +1181,8 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		     it != hbEdges->end();
 		     it++) {
 			const happensBeforeEdge *hb = *it;
-			assert(hb->after);
-			if (hb->after->rip.rip == i->rip.rip &&
-			    i->rip.threads.count(hb->after->rip.thread))
+			if (hb->after.rip == i->rip.rip &&
+			    i->rip.threads.count(hb->after.thread))
 				emitHappensBeforeEdgeAfter(hb, i);
 		}
 	}
@@ -1246,9 +1245,8 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		     it != hbEdges->end();
 		     it++) {
 			happensBeforeEdge *hb = *it;
-			assert(hb->before);
-			if (hb->before->rip.rip == i->rip.rip &&
-			    i->rip.threads.count(hb->before->rip.thread))
+			if (hb->before.rip == i->rip.rip &&
+			    i->rip.threads.count(hb->before.thread))
 				emitHappensBeforeEdgeBefore(hb);
 		}
 	}
@@ -1441,8 +1439,8 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 		} else if (e->tag == Iex_Load) {
 			neededRips.insert(e->Iex.Load.rip);
 		} else if (e->tag == Iex_HappensBefore) {
-			neededRips.insert(e->Iex.HappensBefore.before->rip);
-			neededRips.insert(e->Iex.HappensBefore.after->rip);
+			neededRips.insert(e->Iex.HappensBefore.before);
+			neededRips.insert(e->Iex.HappensBefore.after);
 		} else {
 			abort();
 		}
@@ -1485,12 +1483,10 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 		bool invert = c[x].first;
 		if (e->tag == Iex_HappensBefore) {
 			IRExpr::HappensBefore *hb = &e->Iex.HappensBefore;
-			if (!hb->before || !hb->after)
-				continue;
 			happensBeforeEdge *hbe = new happensBeforeEdge(invert, *hb, exprDominatorMap.idom,
 								       cfg, exprStashPoints);
-			happensBeforePoints[hbe->before->rip.rip].insert(hbe);
-			happensBeforePoints[hbe->after->rip.rip].insert(hbe);
+			happensBeforePoints[hbe->before.rip].insert(hbe);
+			happensBeforePoints[hbe->after.rip].insert(hbe);
 		}
 	}
 

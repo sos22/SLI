@@ -169,13 +169,13 @@ evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, std::map<In
 }
 
 static void
-addOrderingConstraint(StateMachineSideEffectMemoryAccess *before,
-		      StateMachineSideEffectMemoryAccess *after,
+addOrderingConstraint(ThreadRip before,
+		      ThreadRip after,
 		      IRExpr **assumption,
 		      IRExpr **accumulatedAssumptions)
 {
 	IRExpr *edge;
-	if (before->rip <= after->rip)
+	if (before <= after)
 		edge = IRExpr_HappensBefore(before, after);
 	else
 		edge = IRExpr_Unop(Iop_Not1,
@@ -244,8 +244,8 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 					continue;
 				if (evalExpressionsEqual(addr, smsel->addr, chooser, binders, assumption, accumulatedAssumptions))
 					addOrderingConstraint(
-						smsel,
-						smses,
+						smsel->rip,
+						smses->rip,
 						assumption,
 						accumulatedAssumptions);
 			}
@@ -282,15 +282,15 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 					if (satisfier) {
 						if (it->first != satisfierMachine)
 							addOrderingConstraint(
-								smses,
-								satisfier,
+								smses->rip,
+								satisfier->rip,
 								assumption,
 								accumulatedAssumptions);
 					} else {
 						if (it->first != thisMachine)
 							addOrderingConstraint(
-								smses,
-								smsel,
+								smses->rip,
+								smsel->rip,
 								assumption,
 								accumulatedAssumptions);
 						satisfier = smses;

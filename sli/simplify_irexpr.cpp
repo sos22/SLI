@@ -71,13 +71,6 @@ physicallyEqual(const IRCallee *a, const IRCallee *b)
 }
 
 static bool
-physicallyEqual(const StateMachineSideEffectMemoryAccess *a,
-		const StateMachineSideEffectMemoryAccess *b)
-{
-	return a->rip == b->rip;
-}
-
-static bool
 physicallyEqual(const IRExpr *a, const IRExpr *b)
 {
 	if (a == b)
@@ -178,10 +171,8 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 		return physicallyEqual(a->Iex.ClientCallFailed.target,
 				       b->Iex.ClientCallFailed.target);
 	case Iex_HappensBefore:
-		return physicallyEqual(a->Iex.HappensBefore.before,
-				       b->Iex.HappensBefore.before) &&
-			physicallyEqual(a->Iex.HappensBefore.after,
-					b->Iex.HappensBefore.after);
+		return a->Iex.HappensBefore.before == b->Iex.HappensBefore.before &&
+			a->Iex.HappensBefore.after == b->Iex.HappensBefore.after;
 	}
 	abort();
 }
@@ -606,11 +597,11 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 		return sortIRExprs(a->Iex.ClientCallFailed.target,
 				   b->Iex.ClientCallFailed.target);
 	case Iex_HappensBefore:
-		if (a->Iex.HappensBefore.before->rip < b->Iex.HappensBefore.before->rip)
+		if (a->Iex.HappensBefore.before < b->Iex.HappensBefore.before)
 			return true;
-		if (a->Iex.HappensBefore.before->rip > b->Iex.HappensBefore.before->rip)
+		if (a->Iex.HappensBefore.before > b->Iex.HappensBefore.before)
 			return false;
-		return a->Iex.HappensBefore.after->rip < b->Iex.HappensBefore.after->rip;
+		return a->Iex.HappensBefore.after < b->Iex.HappensBefore.after;
 	}
 
 	abort();
@@ -942,8 +933,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					IRExpr *a2 = src->Iex.Associative.contents[i2];
 					if (a2->tag != Iex_HappensBefore)
 						continue;
-					if ( (a1->Iex.HappensBefore.before->rip == a2->Iex.HappensBefore.after->rip &&
-					      a1->Iex.HappensBefore.after->rip == a2->Iex.HappensBefore.before->rip) ) {
+					if ( a1->Iex.HappensBefore.before == a2->Iex.HappensBefore.after &&
+					     a1->Iex.HappensBefore.after == a2->Iex.HappensBefore.before ) {
 						*done_something = true;
 						return IRExpr_Const(IRConst_U1(1));
 					}

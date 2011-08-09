@@ -119,8 +119,6 @@ IRExpr::visit(HeapVisitor &visit)
      visit(Iex.ClientCallFailed.target);
      return;
    case Iex_HappensBefore:
-     visit(Iex.HappensBefore.before);
-     visit(Iex.HappensBefore.after);
      return;
    }
    abort();
@@ -1546,11 +1544,11 @@ void ppIRExpr ( IRExpr* e, FILE *f )
       fprintf(f, ")");
       return;
     case Iex_HappensBefore:
-      fprintf(f, "(");
-      ppStateMachineSideEffectMemoryAccess(e->Iex.HappensBefore.before, f);
-      fprintf(f, " <-< ");
-      ppStateMachineSideEffectMemoryAccess(e->Iex.HappensBefore.after, f);
-      fprintf(f, ")");
+      fprintf(f, "(%lx:%d <-< %lx:%d)",
+	      e->Iex.HappensBefore.before.rip,
+	      e->Iex.HappensBefore.before.thread,
+	      e->Iex.HappensBefore.after.rip,
+	      e->Iex.HappensBefore.after.thread);
       return;
   }
   vpanic("ppIRExpr");
@@ -2059,8 +2057,7 @@ IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
    e->Iex.ClientCallFailed.target = t;
    return e;
 }
-IRExpr* IRExpr_HappensBefore ( StateMachineSideEffectMemoryAccess *before,
-			       StateMachineSideEffectMemoryAccess *after )
+IRExpr* IRExpr_HappensBefore ( ThreadRip before, ThreadRip after )
 {
    IRExpr *e = new IRExpr();
    e->tag = Iex_HappensBefore;

@@ -975,9 +975,6 @@ typedef
    }
    IRExprTag;
 
-class StateMachineSideEffectMemoryAccess;
-void ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *, FILE *);
-
 /* An expression.  Stored as a tagged union.  'tag' indicates what kind
    of expression this is.  'Iex' is the union that holds the fields.  If
    an IRExpr 'e' has e.tag equal to Iex_Load, then it's a load
@@ -1224,8 +1221,8 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       } ClientCallFailed;
 
       struct _HappensBefore {
-	 StateMachineSideEffectMemoryAccess *before;
-         StateMachineSideEffectMemoryAccess *after;
+	 ThreadRip before;
+         ThreadRip after;
       } HappensBefore;
    } Iex;
    void visit(HeapVisitor &hv);
@@ -1273,8 +1270,7 @@ extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (unsigned long r, ThreadRip callSite, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
-extern IRExpr* IRExpr_HappensBefore (StateMachineSideEffectMemoryAccess *before,
-				     StateMachineSideEffectMemoryAccess *after);
+extern IRExpr* IRExpr_HappensBefore (ThreadRip before, ThreadRip after);
 
 /* Pretty-print an IRExpr. */
 extern void ppIRExpr ( IRExpr*, FILE *f );
