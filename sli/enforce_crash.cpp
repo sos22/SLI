@@ -10,6 +10,7 @@
 #include "cnf.hpp"
 #include "genfix.hpp"
 #include "dnf.hpp"
+#include "simplify_ordering.hpp"
 
 class ShortCircuitFvTransformer : public IRExprTransformer {
 public:
@@ -1517,6 +1518,50 @@ zapFreeVariables(IRExpr *src, FreeVariableMap &fv)
 	return trans.transformIRExpr(src);
 }
 
+static bool
+analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
+{
+	std::set<IRExpr::HappensBefore> hb;
+	std::set<IRExpr::HappensBefore> assumption;
+
+	extractImplicitOrder(summary->loadMachine, assumption);
+	for (unsigned x = 0; x < summary->storeMachines.size(); x++)
+		extractImplicitOrder(summary->storeMachines[x]->machine, assumption);
+	for (unsigned x = 0; x < c.size(); x++) {
+		if (c[x].second->tag == Iex_HappensBefore) {
+			IRExpr::HappensBefore h;
+			if (c[x].first) {
+				h.before = c[x].second->Iex.HappensBefore.after;
+				h.after = c[x].second->Iex.HappensBefore.before;
+			} else {
+				h = c[x].second->Iex.HappensBefore;
+			}
+			hb.insert(h);
+		}
+	}
+
+	if (!simplifyOrdering(hb, assumption)) {
+		/* Contradiction, get out */
+		return false;
+	}
+
+	/* Build the results */
+	DNF_Conjunction out;
+	for (unsigned x = 0; x < c.size(); x++)
+		if (c[x].second->tag != Iex_HappensBefore)
+			out.push_back(c[x]);
+	for (std::set<IRExpr::HappensBefore>::iterator it = hb.begin();
+	     it != hb.end();
+	     it++)
+		out.push_back(std::pair<bool, IRExpr *>(
+				      false,
+				      IRExpr_HappensBefore(it->before, it->after)));
+
+	c = out;
+
+	return true;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1565,6 +1610,14 @@ main(int argc, char *argv[])
 		fprintf(_logfile, "failed to convert to DNF\n");
 		return 1;
 	}
+	for (unsigned x = 0; x < d.size(); ) {
+		if (analyseHbGraph(d[x], summary)) {
+			x++;
+		} else {
+			d.erase(d.begin() + x);
+		}
+	}
+
 	printDnf(d, _logfile);
        
 	for (unsigned x = 0; x < d.size(); x++) {
