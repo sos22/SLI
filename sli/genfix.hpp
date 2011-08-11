@@ -1364,6 +1364,8 @@ void __genfix_add_array_summary(std::vector<const char *> &out,
 				const char *nr_entries,
 				const char *table);
 
+char *flattenStringFragments(std::vector<const char *> fragments);
+
 template <typename r> char *
 PatchFragment<r>::asC(const char *ident, const std::set<r> &entryPoints) const
 {
@@ -1394,18 +1396,7 @@ PatchFragment<r>::asC(const char *ident, const std::set<r> &entryPoints) const
 	__genfix_add_array_summary(fragments, "content", "content_size", content_name);
 	fragments.push_back("};\n");
 
-	size_t sz = 1;
-	for (unsigned x = 0; x < fragments.size(); x++)
-		sz += strlen(fragments[x]);
-	char *res = (char *)LibVEX_Alloc_Bytes(sz);
-	char *cursor = res;
-	for (unsigned x = 0; x < fragments.size(); x++) {
-		memcpy(cursor, fragments[x], strlen(fragments[x]));
-		cursor += strlen(fragments[x]);
-	}
-	*cursor = 0;
-	assert(cursor == res + sz-1);
-	return res;
+	return flattenStringFragments(fragments);
 }
 
 template <typename r> void

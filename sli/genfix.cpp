@@ -104,3 +104,21 @@ unsigned long __trivial_hash_function(const unsigned long &k)
 {
 	return k;
 }
+
+char *
+flattenStringFragments(std::vector<const char *> fragments)
+{
+	size_t sz = 1;
+	for (unsigned x = 0; x < fragments.size(); x++)
+		sz += strlen(fragments[x]);
+	char *res = (char *)LibVEX_Alloc_Bytes(sz);
+	char *cursor = res;
+	for (unsigned x = 0; x < fragments.size(); x++) {
+		memcpy(cursor, fragments[x], strlen(fragments[x]));
+		cursor += strlen(fragments[x]);
+	}
+	*cursor = 0;
+	assert(cursor == res + sz-1);
+	return res;
+}
+

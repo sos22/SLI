@@ -503,9 +503,9 @@ public:
 };
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge> {
+public:
 	static unsigned next_msg_id;
 
-public:
 	ThreadRip before;
 	ThreadRip after;
 	std::vector<IRExpr *> content;
@@ -519,7 +519,8 @@ public:
 		  after(invert ? hb.before : hb.after),
 		  msg_id(next_msg_id++)
 	{
-		printf("HBE %d:%lx -> %d:%lx\n",
+		printf("%x: HBE %d:%lx -> %d:%lx\n",
+		       msg_id,
 		       before.thread,
 		       before.rip,
 		       after.thread,
@@ -546,7 +547,8 @@ public:
 	}
 	NAMED_CLASS
 };
-unsigned happensBeforeEdge::next_msg_id = 0xaabb;
+#define BASE_MESSAGE_ID 0xaabb
+unsigned happensBeforeEdge::next_msg_id = BASE_MESSAGE_ID;
 
 struct exprEvalPoint {
 	bool invert;
@@ -653,7 +655,10 @@ public:
 class ClientRip {
 public:
 	unsigned long rip;
+private:
 	std::set<unsigned> threads;
+public:
+	std::set<unsigned> origThreads;
 
 	ClientRip(unsigned long _rip)
 		: rip(_rip)
@@ -662,7 +667,7 @@ public:
 		: rip(0)
 	{}
 	ClientRip(unsigned long _rip, const std::set<unsigned> &_threads)
-		: rip(_rip), threads(_threads)
+		: rip(_rip), threads(_threads), origThreads(_threads)
 	{}
 
 	bool operator<(const ClientRip &k) const {
@@ -677,6 +682,16 @@ public:
 	}
 	bool operator!=(const ClientRip &k) const { return *this < k || k < *this; }
 	bool operator==(const ClientRip &k) const { return !(*this != k); }
+
+	bool threadLive(unsigned tid) const {
+		return threads.count(tid) != 0;
+	}
+	bool noThreadsLive() const {
+		return threads.empty();
+	}
+	void eraseThread(unsigned tid) {
+		threads.erase(tid);
+	}
 };
 
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
@@ -741,6 +756,8 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	void emitStoreSlotToMessage(unsigned msg_id, unsigned message_slot, simulationSlotT simSlot,
 				    RegisterIdx spill_reg1, RegisterIdx spill_reg2);
 
+	void generateEpilogue(ClientRip rip);
+
 public:
 	EnforceCrashPatchFragment(slotMapT &_exprsToSlots,
 				  std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &_neededExpressions,
@@ -753,6 +770,8 @@ public:
 		  happensBeforePoints(_happensBeforePoints)
 	{
 	}
+
+	char *asC(const char *ident, std::set<ClientRip> &entryPoints);
 };
 
 EnforceCrashPatchFragment::jcc_code EnforceCrashPatchFragment::jcc_code::zero(0x84);
@@ -1022,7 +1041,7 @@ void
 EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 						       Instruction<ClientRip> *i)
 {
-	if (!i->rip.threads.count(e.thread))
+	if (!i->rip.threadLive(e.thread))
 		return;
 	assert(!i->branchNext.rip);
 	IRExpr *expr;
@@ -1046,7 +1065,7 @@ EnforceCrashPatchFragment::emitCheckExpressionOrEscape(const exprEvalPoint &e,
 	jcc_code branch_type = invert ? jcc_code::nonzero : jcc_code::zero;
 	assert(i->defaultNextI);
 	ClientRip n = i->defaultNextI->rip;
-	n.threads.erase(e.thread);
+	n.eraseThread(e.thread);
 	/* XXX several things wrong here:
 
 	   -- Don't restore rflags if we branch
@@ -1063,7 +1082,7 @@ EnforceCrashPatchFragment::emitLoadMessageToSlot(unsigned msg_id, unsigned msgsl
 	emitMovQ(spill, 0);
 	addLateReloc(late_relocation(content.size() - 8,
 				     8,
-				     vex_asprintf("__msg_%d_slot_%d", msg_id, msgslot),
+				     vex_asprintf("(unsigned long)&__msg_%d_slot_%d", msg_id, msgslot),
 				     0,
 				     false));
 	emitMovModrmToRegister(ModRM::memAtRegister(spill), spill);
@@ -1077,7 +1096,7 @@ EnforceCrashPatchFragment::emitStoreSlotToMessage(unsigned msg_id, unsigned msgs
 	emitMovQ(spill1, 0);
 	addLateReloc(late_relocation(content.size() - 8,
 				     8,
-				     vex_asprintf("__msg_%d_slot_%d", msg_id, msgslot),
+				     vex_asprintf("(unsigned long)&__msg_%d_slot_%d", msg_id, msgslot),
 				     0,
 				     false));
 	emitMovSlotToReg(simslot, spill2);
@@ -1092,15 +1111,18 @@ EnforceCrashPatchFragment::emitHappensBeforeEdgeAfter(const happensBeforeEdge *h
 
 	simulationSlotT rflags = emitSaveRflags();
 	simulationSlotT rdi = exprsToSlots.allocateSlot();
+	simulationSlotT rax = exprsToSlots.allocateSlot();
 	emitMovRegToSlot(RegisterIdx::RDI, rdi);
+	emitMovRegToSlot(RegisterIdx::RAX, rax);
 	emitMovQ(RegisterIdx::RDI, hb->msg_id);
 	emitCallSequence("(unsigned long)happensBeforeEdge__after", false);
 	emitMovSlotToReg(rdi, RegisterIdx::RDI);
 
 	emitTestRegModrm(RegisterIdx::RAX, ModRM::directRegister(RegisterIdx::RAX));
+	emitMovSlotToReg(rax, RegisterIdx::RAX);
 	/* XXX as usual, not quite right */
 	ClientRip destinationIfThisFails = i->defaultNextI ? i->defaultNextI->rip : i->defaultNext;
-	destinationIfThisFails.threads.erase(hb->after.thread);
+	destinationIfThisFails.eraseThread(hb->after.thread);
 	emitJcc(destinationIfThisFails, jcc_code::zero);
 
 	for (unsigned x = 0; x < hb->content.size(); x++) {
@@ -1132,7 +1154,7 @@ EnforceCrashPatchFragment::emitHappensBeforeEdgeBefore(const happensBeforeEdge *
 void
 EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 {
-	if (i->rip.threads.empty()) {
+	if (i->rip.noThreadsLive()) {
 		emitJmpToRipHost(i->rip.rip);
 		return;
 	}
@@ -1145,7 +1167,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 		     it != neededExprs->end();
 		     it++) {
-			if (!i->rip.threads.count(it->first))
+			if (!i->rip.threadLive(it->first))
 				continue;
 			IRExpr *e = it->second;
 			if (e->tag == Iex_Get) {
@@ -1184,7 +1206,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		     it++) {
 			const happensBeforeEdge *hb = *it;
 			if (hb->after.rip == i->rip.rip &&
-			    i->rip.threads.count(hb->after.thread))
+			    i->rip.threadLive(hb->after.thread))
 				emitHappensBeforeEdgeAfter(hb, i);
 		}
 	}
@@ -1195,7 +1217,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 		     it != neededExprs->end();
 		     it++) {
-			if (!i->rip.threads.count(it->first))
+			if (!i->rip.threadLive(it->first))
 				continue;
 			IRExpr *e = it->second;
 			if (e->tag == Iex_Get) {
@@ -1228,7 +1250,7 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
 		     !doit && it != expressionsToEval.end();
 		     it++)
-			if (i->rip.threads.count(it->thread))
+			if (i->rip.threadLive(it->thread))
 				doit = true;
 		if (doit) {
 			simulationSlotT rflags = emitSaveRflags();
@@ -1248,10 +1270,84 @@ EnforceCrashPatchFragment::emitInstruction(Instruction<ClientRip> *i)
 		     it++) {
 			happensBeforeEdge *hb = *it;
 			if (hb->before.rip == i->rip.rip &&
-			    i->rip.threads.count(hb->before.thread))
+			    i->rip.threadLive(hb->before.thread))
 				emitHappensBeforeEdgeBefore(hb);
 		}
 	}
+}
+
+void
+EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
+{
+	Instruction<ClientRip> *i = Instruction<ClientRip>::pseudo(exitRip);
+	cfg->registerInstruction(i);
+	registerInstruction(i, content.size());
+
+	std::set<unsigned> msg_ids;
+	for (std::map<unsigned long, std::set<happensBeforeEdge *> >::iterator it = happensBeforePoints.begin();
+	     it != happensBeforePoints.end();
+	     it++) {
+		std::set<happensBeforeEdge *> &hb(it->second);
+		for (std::set<happensBeforeEdge *>::iterator it2 = hb.begin();
+		     it2 != hb.end();
+		     it2++) {
+			const happensBeforeEdge *hb = *it2;
+			if (exitRip.origThreads.count(hb->before.thread))
+				msg_ids.insert(hb->msg_id);
+		}
+	}
+
+	if (msg_ids.size() != 0) {
+		skipRedZone();
+		emitPushQ(RegisterIdx::RBX);
+		emitPushQ(RegisterIdx::RDI);
+		emitMovQ(RegisterIdx::RBX, 0);
+		lateRelocs.push_back(late_relocation(content.size() - 8,
+						     8,
+						     vex_asprintf("(unsigned long)clearMessage"),
+						     0,
+						     false));
+
+		for (std::set<unsigned>::iterator it = msg_ids.begin();
+		     it != msg_ids.end();
+		     it++) {
+			unsigned msg_id = *it;
+			emitMovQ(RegisterIdx::RDI, msg_id);
+			emitCallReg(RegisterIdx::RBX);
+		}
+		emitPopQ(RegisterIdx::RDI);
+		emitPopQ(RegisterIdx::RBX);
+		restoreRedZone();
+	}
+
+	emitJmpToRipHost(exitRip.rip);
+}
+
+char *
+EnforceCrashPatchFragment::asC(const char *ident, std::set<ClientRip> &entryPoints)
+{
+	std::vector<const char *> fragments;
+
+	fragments.push_back(vex_asprintf("#define MESSAGE_ID_BASE %d\n", BASE_MESSAGE_ID));
+	fragments.push_back(vex_asprintf("#define MESSAGE_ID_END %d\n", happensBeforeEdge::next_msg_id));
+	std::set<happensBeforeEdge *> emitted;
+	for (std::map<unsigned long, std::set<happensBeforeEdge *> >::iterator it = happensBeforePoints.begin();
+	     it != happensBeforePoints.end();
+	     it++) {
+		for (std::set<happensBeforeEdge *>::iterator it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			happensBeforeEdge *hb = *it2;
+			if (emitted.count(hb))
+				continue;
+			emitted.insert(hb);
+			for (unsigned x = 0; x < hb->content.size(); x++)
+				fragments.push_back(vex_asprintf("static unsigned long __msg_%d_slot_%d;\n", hb->msg_id, x));
+		}
+	}
+	fragments.push_back(PatchFragment<ClientRip>::asC(ident, entryPoints));
+
+	return flattenStringFragments(fragments);
 }
 
 ClientRip threadRipToClientRip(const ThreadRip &k)
@@ -1348,9 +1444,9 @@ duplicateCFGAtThreadSet(CFG<ClientRip> *cfg, std::set<unsigned long> &rips, cons
 		Instruction<ClientRip> *nr = new Instruction<ClientRip>(*orig);
 		nr->rip = newRip;
 		if (nr->defaultNext.rip)
-			nr->defaultNext.threads = threads;
+			nr->defaultNext = ClientRip(nr->defaultNext.rip, threads);
 		if (nr->branchNext.rip)
-			nr->branchNext.threads = threads;
+			nr->branchNext = ClientRip(nr->branchNext.rip, threads);
 		for (unsigned x = 0; x < nr->relocs.size(); x++)
 			nr->relocs[x] = duplicateEarlyRelocAtNewThreadSet(nr->relocs[x], threads);
 		cfg->ripToInstr->set(newRip, nr);
@@ -1513,16 +1609,11 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++) {
-		printf("Entry point: %lx@(", it->second.rip);
 		std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip]);
-		for (std::set<unsigned>::iterator it2 = threads.begin();
-		     it2 != threads.end();
-		     it2++)
-			printf("%d, ", *it2);
-		printf(")\n");
 		entryPoints.insert(ClientRip(it->second.rip, threads));
 	}
-	printf("Fragment: %s\n", pf->asC("ident", entryPoints));
+	printf("Fragment:\n");
+	printf("%s", pf->asC("ident", entryPoints));
 }
 
 static IRExpr *
