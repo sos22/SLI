@@ -10,7 +10,8 @@
 
 static long max_iterations;
 static volatile long nr_iterations;
-static int *volatile the_ptr;
+static int my_int;
+static int *volatile the_ptr = &my_int;
 
 static void
 segv_handler(int ignore)
@@ -35,22 +36,38 @@ segv_handler(int ignore)
 	_exit(0);
 }
 
+static void read_section() __attribute__((noinline));
+static void
+read_section()
+{
+	if (the_ptr != NULL)
+		(*the_ptr)++;
+}
+
 static void *
 read_thread(void *ignore)
 {
 	while (max_iterations == -1 || nr_iterations < max_iterations) {
-		if (the_ptr != NULL)
-			(*the_ptr)++;
+		read_section();
 		nr_iterations++;
 	}
 	return NULL;
+}
+
+static void write_section(double delay) __attribute__((noinline));
+static void
+write_section(double delay)
+{
+	usleep(delay * 1e6);
+	the_ptr = NULL;
+	usleep(delay * 1e6);
+	the_ptr = &my_int;
 }
 
 int
 main(int argc, char *argv[])
 {
 	pthread_t t;
-	static int my_int;
 	double delay;
 
 	if (argc < 2 || argc > 3) {
@@ -73,17 +90,11 @@ main(int argc, char *argv[])
 	}
 	signal(SIGSEGV, segv_handler);
 
-	my_int = 0;
-	the_ptr = &my_int;
-
 	if (pthread_create(&t, NULL, read_thread, NULL) != 0)
 		errx(1, "spawning read thread");
 
-	while (max_iterations == -1 || nr_iterations < max_iterations) {
-		usleep(delay * 1e6);
-		the_ptr = NULL;
-		usleep(delay * 1e6);
-		the_ptr = &my_int;
-	}
+	while (max_iterations == -1 || nr_iterations < max_iterations)
+		write_section(delay);
+
 	return 0;
 }
