@@ -740,6 +740,7 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 				   RegisterIdx spill_reg);
 	void emitStoreSlotToMessage(unsigned msg_id, unsigned message_slot, simulationSlotT simSlot,
 				    RegisterIdx spill_reg1, RegisterIdx spill_reg2);
+
 public:
 	EnforceCrashPatchFragment(slotMapT &_exprsToSlots,
 				  std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &_neededExpressions,
@@ -1504,10 +1505,23 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(slotMap, exprStashPoints, exprEvalPoints, happensBeforePoints);
 	pf->fromCFG(degradedCfg);
 	std::set<ClientRip> entryPoints;
+	std::map<unsigned long, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++)
-		entryPoints.insert(ClientRip(it->second.rip, neededThreads));
+		threadsRelevantAtEachEntryPoint[it->second.rip].insert(it->first);
+	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
+	     it != roots.end();
+	     it++) {
+		printf("Entry point: %lx@(", it->second.rip);
+		std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip]);
+		for (std::set<unsigned>::iterator it2 = threads.begin();
+		     it2 != threads.end();
+		     it2++)
+			printf("%d, ", *it2);
+		printf(")\n");
+		entryPoints.insert(ClientRip(it->second.rip, threads));
+	}
 	printf("Fragment: %s\n", pf->asC("ident", entryPoints));
 }
 
