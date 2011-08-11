@@ -481,6 +481,7 @@ Instruction<r>::decode(AddressSpace *as,
 	int delta32;
 	bool opsize = false;
 	bool repne = false;
+	bool repe = false;
 
 top:
 	switch (b) {
@@ -687,6 +688,11 @@ top:
 
 	case 0xf2:
 		repne = true;
+		b = i->byte();
+		goto top;
+
+	case 0xf3:
+		repe = true;
 		b = i->byte();
 		goto top;
 
@@ -1368,13 +1374,16 @@ PatchFragment<r>::asC(const char *ident, const std::set<r> &entryPoints) const
 	char *entry_table_name;
 	fragments.push_back(asC(ident, &relocs_name, &trans_name, &content_name));
 	entry_table_name = vex_asprintf("__%s_entry_points", ident);
-	fragments.push_back("static unsigned long ");
+	fragments.push_back("static struct patch_entry_point ");
 	fragments.push_back(entry_table_name);
 	fragments.push_back("[] = {\n");
 	for (typename std::set<r>::iterator it = entryPoints.begin();
 	     it != entryPoints.end();
-	     it++)
-		fragments.push_back(vex_asprintf("\t0x%lx,\n", it->rip));
+	     it++) {
+		Instruction<r> *i = cfg->ripToInstr->get(*it);
+		assert(i);
+		fragments.push_back(vex_asprintf("\t{0x%lx, %d},\n", it->rip, i->offsetInPatch));
+	}
 	fragments.push_back("};\n\nstatic struct patch ");
 	fragments.push_back(ident);
 	fragments.push_back(" = {\n");

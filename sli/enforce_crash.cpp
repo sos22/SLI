@@ -1093,7 +1093,7 @@ EnforceCrashPatchFragment::emitHappensBeforeEdgeAfter(const happensBeforeEdge *h
 	simulationSlotT rdi = exprsToSlots.allocateSlot();
 	emitMovRegToSlot(RegisterIdx::RDI, rdi);
 	emitMovQ(RegisterIdx::RDI, hb->msg_id);
-	emitCallSequence("happensBeforeEdge__after", false);
+	emitCallSequence("(unsigned long)happensBeforeEdge__after", false);
 	emitMovSlotToReg(rdi, RegisterIdx::RDI);
 
 	emitTestRegModrm(RegisterIdx::RAX, ModRM::directRegister(RegisterIdx::RAX));
@@ -1123,7 +1123,7 @@ EnforceCrashPatchFragment::emitHappensBeforeEdgeBefore(const happensBeforeEdge *
 		emitStoreSlotToMessage(hb->msg_id, x, s, RegisterIdx::RDI, RegisterIdx::R13);
 	}
 	emitMovQ(RegisterIdx::RDI, hb->msg_id);
-	emitCallSequence("happensBeforeEdge__before", false);
+	emitCallSequence("(unsigned long)happensBeforeEdge__before", false);
 	emitMovSlotToReg(r13, RegisterIdx::R13);
 	emitMovSlotToReg(rdi, RegisterIdx::RDI);
 }
