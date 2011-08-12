@@ -11,37 +11,7 @@
 #include "genfix.hpp"
 #include "dnf.hpp"
 #include "simplify_ordering.hpp"
-
-class ShortCircuitFvTransformer : public IRExprTransformer {
-public:
-	FreeVariableMap &fv;
-	ShortCircuitFvTransformer(FreeVariableMap &_fv)
-		: fv(_fv)
-	{}
-	IRExpr *transformIex(IRExpr::FreeVariable *e)
-	{
-		return transformIRExpr(fv.get(e->key));
-	}
-};
-
-static void
-zapBindersAndFreeVariables(FreeVariableMap &m, StateMachine *sm)
-{
-	std::set<StateMachineSideEffectLoad *> loads;
-	findAllLoads(sm, loads);
-	bool done_something;
-	do {
-		done_something = false;
-		/* Step one: zap binders */
-		for (std::set<StateMachineSideEffectLoad *>::iterator it = loads.begin();
-		     it != loads.end();
-		     it++)
-			applySideEffectToFreeVariables(*it, m, &done_something);
-		/* Step two: short-circuit free variables */
-		ShortCircuitFvTransformer trans(m);
-		m.applyTransformation(trans, &done_something);
-	} while (done_something);
-}
+#include "zapBindersAndFreeVariables.hpp"
 
 class EnumNeededExpressionsTransformer : public IRExprTransformer {
 public:
@@ -1614,13 +1584,6 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	}
 	printf("Fragment:\n");
 	printf("%s", pf->asC("ident", entryPoints));
-}
-
-static IRExpr *
-zapFreeVariables(IRExpr *src, FreeVariableMap &fv)
-{
-	ShortCircuitFvTransformer trans(fv);
-	return trans.transformIRExpr(src);
 }
 
 static bool

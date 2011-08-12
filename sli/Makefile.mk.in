@@ -8,7 +8,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump,dominators,pickle}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{state_machine,oracle,simplify_irexpr,eval_state_machine}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis,genfix,cnf}.cpp
-	echo SLIR_SOURCES+= ${input_base}/simplify_ordering.cpp
+	echo SLIR_SOURCES+= ${input_base}/{simplify_ordering,zapBindersAndFreeVariables}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
