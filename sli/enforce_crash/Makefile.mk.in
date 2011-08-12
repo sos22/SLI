@@ -1,0 +1,24 @@
+targets="enforce_crash"
+# foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
+# expansion does, though, so use that instead.  Meh.
+sources=$(echo {enforce_crash,zapBindersAndFreeVariables,simplify_ordering,dnf,enumNeededExpressions,expressiondominatormap,instructiondominatormap}.cpp)
+
+defvars() {
+    cat <<EOF
+ECRASH_SOURCES=$(echo " $sources" | sed "s% % ${input_base}/%g")
+ECRASH_OBJECTS=\$(patsubst %.cpp,%.o,\$(ECRASH_SOURCES))
+ECRASH_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(ECRASH_SOURCES))
+all_sources+=\$(ECRASH_SOURCES)
+EOF
+}
+
+rules() {
+    cat <<EOF
+\$(ECRASH_OBJECTS): CPPFLAGS+=-Isli -I\$(libvex)/pub
+\$(ECRASH_DEPS): CPPFLAGS+=-Isli -I\$(libvex)/pub
+$targets: slir.a libVEX.a
+
+enforce_crash: \$(ECRASH_OBJECTS)
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
+EOF
+}
