@@ -310,18 +310,36 @@ public:
 	}
 };
 
+class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> > {
+public:
+	expressionEvalMapT(expressionDominatorMapT &exprDominatorMap) {
+		for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
+		     it != exprDominatorMap.end();
+		     it++) {
+			for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++)
+				(*this)[it->first->rip.rip].insert(
+					exprEvalPoint(
+						it2->first,
+						it->first->rip.thread,
+						it2->second));
+		}
+	}
+};
+
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	/* Mapping from expressions to the slots in which we've
 	 * stashed them. */
 	slotMapT &exprsToSlots;
 	/* Mapping from instructions to the expressions which we need
 	   to stash at those instructions for each thread. */
-	std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions;
+	expressionStashMapT &neededExpressions;
 	/* Mapping from instructions to the expressions which we need
 	   to evaluate at those instructions.  If the expression is
 	   equal to the other element of the pair then we will escape
 	   from the patch. */
-	std::map<unsigned long, std::set<exprEvalPoint> > &expressionEvalPoints;
+	expressionEvalMapT &expressionEvalPoints;
 	/* Mapping from instructions to the happens-before
 	   relationships which are relevant at that instruction.
 	   ``Relevant'' here means that the instruction is either the
@@ -376,8 +394,8 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 
 public:
 	EnforceCrashPatchFragment(slotMapT &_exprsToSlots,
-				  std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &_neededExpressions,
-				  std::map<unsigned long, std::set<exprEvalPoint> > &_expressionEvalPoints,
+				  expressionStashMapT &_neededExpressions,
+				  expressionEvalMapT &_expressionEvalPoints,
 				  std::map<unsigned long, std::set<happensBeforeEdge *> > &_happensBeforePoints)
 		: PatchFragment<ClientRip>(),
 		  exprsToSlots(_exprsToSlots),
