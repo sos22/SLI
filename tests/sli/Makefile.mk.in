@@ -1,16 +1,13 @@
-targets=''
 sli_tests="pmap vamap nd_chooser parse_state_machine survival_constraint wm_suitability eval_cross_product simplify_irexpr find_remote_sections simplify_state_machine"
 sli_tests="$sli_tests expr_sorter expr_optimiser"
+targets=$(echo $sli_tests | sed "s%\<%${input_base}/%g")
 
-defvars() {
-    echo "SLI_TESTS=\$(patsubst %,${input_base}/%,${sli_tests})"
-    echo 'TARGETS+=$(SLI_TESTS)'
-}
 rules() {
-    echo "\$(SLI_TESTS): CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
+    objects=$(echo -n "$sli_tests " | sed "s%\<%${input_base}/%g;s% %.o %g")
+    echo "$objects: CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
     for t in $sli_tests
     do
-	echo "${input_base}/$t: ${input_base}/${t}.cpp slir.a libVEX.a"
+	echo "${input_base}/$t: ${input_base}/${t}.o slir.a libVEX.a"
 	echo -e '\tgcc -lrt -lstdc++ $(CFLAGS) $(CPPFLAGS) -lsqlite3 $^ -o $@'
     done
 }

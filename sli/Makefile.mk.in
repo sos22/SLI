@@ -23,8 +23,8 @@ EOF
 
 rules() {
     cat <<EOF
-\$(SLIR_OBJECTS) \$(SLIR_TARGET_OBJECTS): CPPFLAGS+=-I\$(libvex)/pub
-\$(SLIR_DEPS) \$(SLIR_TARGET_DEPS): CPPFLAGS+=-I\$(libvex)/pub
+\$(SLIR_OBJECTS) \$(SLIR_TARGET_OBJECTS): CPPFLAGS+=-Isli -I\$(libvex)/pub
+\$(SLIR_DEPS) \$(SLIR_TARGET_DEPS): CPPFLAGS+=-Isli -I\$(libvex)/pub
 $targets: slir.a libVEX.a
 ${input_base}/interpreter.o: CPPFLAGS+=-I\$(libvex)/priv
 ${input_base}/interpreter.cpp.d: CPPFLAGS+=-I\$(libvex)/priv
