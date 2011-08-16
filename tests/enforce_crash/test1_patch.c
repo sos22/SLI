@@ -31,7 +31,8 @@ struct patch {
 	unsigned content_size;
 };
 
-#include "patch_core.h"
+#define the_patch "patch_core.h"
+#include the_patch
 
 #include <asm/prctl.h>
 #include <sys/prctl.h>
@@ -44,20 +45,20 @@ struct patch {
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 
 static volatile int
-messages[3];
+messages[MESSAGE_ID_END - MESSAGE_ID_BASE];
 
 static void
 happensBeforeEdge__before_c(int code)
 {
-	messages[code - 0xaabb] = 1;
+	messages[code - MESSAGE_ID_BASE] = 1;
 }
 static long
 happensBeforeEdge__after_c(int code)
 {
 	int cntr;
-	for (cntr = 0; cntr < 100000 && messages[code - 0xaabb] == 0; cntr++)
+	for (cntr = 0; cntr < 10000 && messages[code - MESSAGE_ID_BASE] == 0; cntr++)
 		;
-	if (!messages[code - 0xaabb]) {
+	if (!messages[code - MESSAGE_ID_BASE]) {
 		return 0;
 	} else {
 		return 1;
@@ -66,7 +67,7 @@ happensBeforeEdge__after_c(int code)
 static void
 clearMessage_c(int code)
 {
-	messages[code - 0xaabb] = 0;
+	messages[code - MESSAGE_ID_BASE] = 0;
 }
 
 #define mk_trampoline(name)						\
