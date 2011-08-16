@@ -1,10 +1,21 @@
 #include "test_common.h"
 
 static void
+stall(void)
+{
+	unsigned x;
+	for (x = 0; x < 10000; x++)
+		asm volatile( "" );
+}
+
+static void
 read_section()
 {
-	if (the_ptr != NULL)
+	stall();
+	if (the_ptr != NULL) {
 		(*the_ptr)++;
+		(*the_ptr) *= 3;
+	}
 }
 
 static void

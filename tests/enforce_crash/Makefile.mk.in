@@ -1,5 +1,5 @@
 targets=""
-tests="test1"
+tests="test1 test2"
 
 defvars() {
 	echo "ENFORCE_CRASH_TESTS=\$(patsubst %,${input_base}/%,${tests})"
