@@ -10,6 +10,7 @@ CXXFLAGS=$(CFLAGS)
 clean_files=$(TARGETS) .depends
 all_makefiles=Makefile Makefile.mk
 
+CXXFLAGS+=-std=gnu++0x
 ifeq ($(OPTIMIZE),y)
 OPTIMIZE_FLAGS=-O1 -DNDEBUG
 else

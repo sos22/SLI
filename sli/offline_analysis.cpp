@@ -3320,7 +3320,7 @@ buildCFGForRipSet(AddressSpace *as,
 	unsigned long rip;
 
 	/* Mild hack to make some corned cases easier. */
-	builtSoFar[0] = std::pair<CFGNode<unsigned long> *, unsigned>(NULL, max_depth);
+	builtSoFar[0] = std::pair<CFGNode<unsigned long> *, unsigned>((CFGNode<unsigned long> *)NULL, max_depth);
 
 	/* Step one: discover all of the instructions which we're
 	 * going to need. */
