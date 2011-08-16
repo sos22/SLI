@@ -11,6 +11,7 @@
 
 template <typename ripType> class CFG;
 template <typename ripType> class EarlyRelocation;
+class LateRelocation;
 typedef unsigned char Byte;
 
 class Prefixes {
@@ -32,14 +33,75 @@ public:
 	}
 };
 
+class RegisterIdx {
+	friend class RegisterOrOpcodeExtension;
+	RegisterIdx() : idx(999) {}
+	RegisterIdx(unsigned i) : idx(i) {}
+public:
+	unsigned idx;
+	static const RegisterIdx RAX;
+	static const RegisterIdx RCX;
+	static const RegisterIdx RDX;
+	static const RegisterIdx RBX;
+	static const RegisterIdx RSP;
+	static const RegisterIdx RBP;
+	static const RegisterIdx RSI;
+	static const RegisterIdx RDI;
+	static const RegisterIdx R8;
+	static const RegisterIdx R9;
+	static const RegisterIdx R10;
+	static const RegisterIdx R11;
+	static const RegisterIdx R12;
+	static const RegisterIdx R13;
+	static const RegisterIdx R14;
+	static const RegisterIdx R15;
+	static RegisterIdx fromVexOffset(unsigned offset);
+	static RegisterIdx fromRaw(unsigned offset) { return RegisterIdx(offset); }
+	bool operator !=(const RegisterIdx &k) const { return idx != k.idx; }
+};
+
+class RegisterOrOpcodeExtension {
+	RegisterOrOpcodeExtension(unsigned k)
+		: isOpcodeExtension(true), opcodeExtension(k)
+	{}
+public:
+	RegisterOrOpcodeExtension(RegisterIdx &k)
+		: isOpcodeExtension(false), idx(k)
+	{}
+	bool isOpcodeExtension;
+	RegisterIdx idx;
+	unsigned opcodeExtension;
+	
+	static RegisterOrOpcodeExtension opcode(unsigned k)
+	{
+		return RegisterOrOpcodeExtension(k);
+	}
+};
+
+class ModRM {
+	ModRM() : extendRm(false) {}
+public:
+	std::vector<unsigned char> content;
+	bool extendRm;
+	/* Access memory at address @reg + offset, where reg
+	   is a register index and offset is a constant. */
+	static ModRM memAtRegisterPlusOffset(RegisterIdx reg, int offset);
+	/* Access memory at *(@reg) */
+	static ModRM memAtRegister(RegisterIdx reg) { return memAtRegisterPlusOffset(reg, 0); }
+	/* Access register @reg directly, not going through
+	 * memory. */
+	static ModRM directRegister(RegisterIdx reg);
+	/* Access memory at a fixed 32 bit signed address */
+	static ModRM absoluteAddress(int address);
+};
+
 template <typename ripType>
 class Instruction : public GarbageCollected<Instruction<ripType> > {
-	unsigned char byte();
-	int int32();
-	void emit(unsigned char);
-	void modrm(unsigned nrImmediates);
-	void immediate(unsigned size);
-	int modrmExtension(void);
+	unsigned char byte(AddressSpace *as);
+	int int32(AddressSpace *as);
+	void modrm(unsigned nrImmediates, AddressSpace *as);
+	void immediate(unsigned size, AddressSpace *as);
+	int modrmExtension(AddressSpace *as);
 public:
 	ripType rip;
 
@@ -57,8 +119,7 @@ public:
 	Prefixes pfx;
 	unsigned nr_prefixes;
 	std::vector<EarlyRelocation<ripType> *> relocs;
-
-	AddressSpace *as;
+	std::vector<LateRelocation *> lateRelocs;
 
 	bool useful;
 
@@ -67,11 +128,15 @@ public:
 					    CFG<ripType> *cfg);
 	static Instruction<ripType> *pseudo(ripType rip);
 
+	void emit(unsigned char);
+	void emitQword(unsigned long);
+	void emitModrm(const ModRM &mrm, RegisterOrOpcodeExtension reg);
+
 	template <typename targetType, targetType degrader(const ripType &)> Instruction<targetType> *degrade();
 
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
-		hv(as);
+		visit_container(lateRelocs, hv);
 		hv(defaultNextI);
 		hv(branchNextI);
 	}
@@ -82,13 +147,14 @@ public:
 class ClientRip;
 
 unsigned long __trivial_hash_function(const ThreadRip &k);
-unsigned long __trivial_hash_function(const unsigned long &k);
+struct DirectRip;
+unsigned long __trivial_hash_function(const DirectRip &k);
 unsigned long __trivial_hash_function(const ClientRip &k);
 
 template <typename ripType>
 class CFG : public GarbageCollected<CFG<ripType> > {
-	AddressSpace *as;
 public:
+	AddressSpace *as;
 	typedef gc_map<ripType, Instruction<ripType> *, __trivial_hash_function,
 		       __default_eq_function, __visit_function_heap> ripToInstrT;
 	ripToInstrT *ripToInstr;
@@ -141,84 +207,21 @@ public:
 	virtual bool instructionUseful(Instruction<ripType> *i) { return true; }
 };
 
-typedef char *LateRelocation;
-
 template <typename ripType>
 class PatchFragment : public GarbageCollected<PatchFragment<ripType> > {
 	std::vector<Instruction<ripType> *> registeredInstrs;
 
 protected:
 	std::vector<EarlyRelocation<ripType> *> relocs;
-	std::vector<LateRelocation> lateRelocs;
+	std::vector<LateRelocation *> lateRelocs;
 	CFG<ripType> *cfg;
 	std::vector<unsigned char> content;
 
-	class RegisterOrOpcodeExtension;
-
-	class RegisterIdx {
-		friend class RegisterOrOpcodeExtension;
-		RegisterIdx() : idx(999) {}
-		RegisterIdx(unsigned i) : idx(i) {}
-	public:
-		unsigned idx;
-		static const RegisterIdx RAX;
-		static const RegisterIdx RCX;
-		static const RegisterIdx RDX;
-		static const RegisterIdx RBX;
-		static const RegisterIdx RSP;
-		static const RegisterIdx RBP;
-		static const RegisterIdx RSI;
-		static const RegisterIdx RDI;
-		static const RegisterIdx R8;
-		static const RegisterIdx R9;
-		static const RegisterIdx R10;
-		static const RegisterIdx R11;
-		static const RegisterIdx R12;
-		static const RegisterIdx R13;
-		static const RegisterIdx R14;
-		static const RegisterIdx R15;
-		static RegisterIdx fromVexOffset(unsigned offset);
-		bool operator !=(const RegisterIdx &k) const { return idx != k.idx; }
-	};
-
-	class RegisterOrOpcodeExtension {
-		RegisterOrOpcodeExtension(unsigned k)
-			: isOpcodeExtension(true), opcodeExtension(k)
-		{}
-	public:
-		RegisterOrOpcodeExtension(RegisterIdx &k)
-			: isOpcodeExtension(false), idx(k)
-		{}
-		bool isOpcodeExtension;
-		RegisterIdx idx;
-		unsigned opcodeExtension;
-
-		static RegisterOrOpcodeExtension opcode(unsigned k)
-		{
-			return RegisterOrOpcodeExtension(k);
-		}
-	};
 private:
 	Instruction<ripType> *nextInstr(CFG<ripType> *cfg);
 	void emitStraightLine(Instruction<ripType> *i);
 
 protected:
-	class ModRM {
-		ModRM() : extendRm(false) {}
-	public:
-		std::vector<unsigned char> content;
-		bool extendRm;
-		/* Access memory at address @reg + offset, where reg
-		   is a register index and offset is a constant. */
-		static ModRM memAtRegisterPlusOffset(RegisterIdx reg, int offset);
-		/* Access memory at *(@reg) */
-		static ModRM memAtRegister(RegisterIdx reg) { return memAtRegisterPlusOffset(reg, 0); }
-		/* Access register @reg directly, not going through
-		 * memory. */
-		static ModRM directRegister(RegisterIdx reg);
-		/* Access memory at a fixed 32 bit signed address */
-		static ModRM absoluteAddress(int address);
-	};
 
 	void emitByte(unsigned char b) { content.push_back(b); }
 	void emitQword(unsigned long val);
@@ -262,7 +265,7 @@ public:
 
 	bool ripToOffset(ripType rip, unsigned *res);
 	void writeBytes(const void *bytes, unsigned size, unsigned offset);
-	void addLateReloc(LateRelocation m) { lateRelocs.push_back(m); }
+	void addLateReloc(LateRelocation *m) { lateRelocs.push_back(m); }
 
 	/* Just the core patch itself, not including the metdata tables. */
 	char *asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const;
@@ -271,6 +274,7 @@ public:
 
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
+		visit_container(lateRelocs, hv);
 	}
 	void destruct() { this->~PatchFragment(); }
 	NAMED_CLASS
@@ -316,9 +320,32 @@ public:
 	NAMED_CLASS
 };
 
-LateRelocation late_relocation(unsigned offset, unsigned size,
-			       const char *target, unsigned nrImmediateBytes,
-			       bool relative);
+class LateRelocation : public GarbageCollected<LateRelocation> {
+public:
+	unsigned offset;
+	unsigned size;
+	const char *target;
+	unsigned nrImmediateBytes;
+	bool relative;
+
+	LateRelocation(unsigned _offset, unsigned _size,
+		       const char *_target, unsigned _nrImmediateBytes,
+		       bool _relative)
+		: offset(_offset), size(_size), target(_target),
+		  nrImmediateBytes(_nrImmediateBytes),
+		  relative(_relative)
+	{}
+
+	char *asC() const {
+		return vex_asprintf("{%d, %d, %d, %d, %s}",
+				    offset, size,
+				    relative ? -nrImmediateBytes - size : 0,
+				    relative, target);
+	}
+
+	void visit(HeapVisitor &hv) { hv(target); }
+	NAMED_CLASS
+};
 
 template <typename r> void
 Instruction<r>::emit(Byte b)
@@ -328,8 +355,36 @@ Instruction<r>::emit(Byte b)
 	len++;
 }
 
+template <typename r> void
+Instruction<r>::emitQword(unsigned long v)
+{
+	union {
+		Byte bytes[8];
+		unsigned long v;
+	} u;
+
+	u.v = v;
+	memcpy(content + len, u.bytes, 8);
+	len += 8;
+	assert(len <= MAX_INSTRUCTION_SIZE);
+}
+
+template <typename r> void
+Instruction<r>::emitModrm(const ModRM &rm, RegisterOrOpcodeExtension reg)
+{
+	if (reg.isOpcodeExtension) {
+		assert(reg.opcodeExtension < 8);
+		emit(rm.content[0] | (reg.opcodeExtension << 3));
+	} else {
+		assert(reg.idx.idx < 8);
+		emit(rm.content[0] | (reg.idx.idx << 3));
+	}
+	for (unsigned x = 1; x < rm.content.size(); x++)
+		emit(rm.content[x]);
+}
+
 template <typename r> Byte
-Instruction<r>::byte()
+Instruction<r>::byte(AddressSpace *as)
 {
 	unsigned long t;
 	t = 0;
@@ -340,7 +395,7 @@ Instruction<r>::byte()
 }
 
 template <typename r> int
-Instruction<r>::int32()
+Instruction<r>::int32(AddressSpace *as)
 {
 	unsigned long t[4];
 	as->readMemory(rip.rip + len, 4, t, false, NULL);
@@ -352,16 +407,16 @@ Instruction<r>::int32()
 }
 
 template <typename r> void
-Instruction<r>::immediate(unsigned size)
+Instruction<r>::immediate(unsigned size, AddressSpace *as)
 {
 	for (unsigned x = 0; x < size; x++)
-		byte();
+		byte(as);
 }
 
 template <typename r> int
-Instruction<r>::modrmExtension(void)
+Instruction<r>::modrmExtension(AddressSpace *as)
 {
-	Byte b = byte();
+	Byte b = byte(as);
 	len--;
 	return (b >> 3) & 7;
 }
@@ -415,9 +470,9 @@ public:
 };
 
 template <typename r> void
-Instruction<r>::modrm(unsigned nrImmediates)
+Instruction<r>::modrm(unsigned nrImmediates, AddressSpace *as)
 {
-	Byte modrm = byte();
+	Byte modrm = byte(as);
 	unsigned rm = modrm & 7;
 	unsigned mod = modrm >> 6;
 
@@ -429,7 +484,7 @@ Instruction<r>::modrm(unsigned nrImmediates)
 		/* RIP-relative mode.  The one-byte modrm is followed
 		   by four bytes of signed displacement, plus
 		   immediates if appropriate. */
-		immediate(4);
+		immediate(4, as);
 		int delta = *(int *)(content + len - 4);
 		relocs.push_back(new RipRelativeRelocation<r>(len - 4,
 							      4,
@@ -441,7 +496,7 @@ Instruction<r>::modrm(unsigned nrImmediates)
 	dispBytes = 0;
 	if (rm == 4) {
 		/* SIB byte */
-		Byte sib = byte();
+		Byte sib = byte(as);
 		if ((sib & 7) == 5)
 			dispBytes = 4;
 	}
@@ -449,7 +504,7 @@ Instruction<r>::modrm(unsigned nrImmediates)
 		dispBytes = 1;
 	else if (mod == 2)
 		dispBytes = 4;
-	immediate(dispBytes);
+	immediate(dispBytes, as);
 }
 
 template <typename r> Instruction<r> *
@@ -467,10 +522,9 @@ Instruction<r>::decode(AddressSpace *as,
 {
 	Instruction<r> *i = new Instruction<r>();
 	i->rip = start;
-	i->as = as;
 	Byte b;
 	while (1) {
-		b = i->byte();
+		b = i->byte(as);
 		if (b < 0x40 || b > 0x4f)
 			break;
 		i->pfx.rexByte(b);
@@ -489,19 +543,19 @@ top:
 		if (b != 0x0f) {
 			switch (b & 7) {
 			case 0 ... 3:
-				i->modrm(0);
+				i->modrm(0, as);
 				break;
 			case 4:
-				i->immediate(1);
+				i->immediate(1, as);
 				break;
 			case 5:
 				if (opsize)
-					i->immediate(2);
+					i->immediate(2, as);
 				else
-					i->immediate(4);
+					i->immediate(4, as);
 				break;
 			case 6:
-				b = i->byte();
+				b = i->byte(as);
 				goto top;
 			case 7:
 				/* Not allowed in 64-bit mode */
@@ -511,10 +565,10 @@ top:
 			break;
 		}
 		/* Two-byte instructions */
-		b = i->byte();
+		b = i->byte(as);
 		switch (b) {
 		case 0x80 ... 0x8f: /* 32 bit conditional jumps. */
-			delta32 = i->int32();
+			delta32 = i->int32(as);
 			i->branchNext = i->rip + i->len + delta32;
 			i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len - 4, 4, i->branchNext));
 			/* Unlike 8 bit jumps, we don't need to set
@@ -539,7 +593,7 @@ top:
 		case 0xaf: /* imul Gv, Ev */
 		case 0xb6: /* movzx Gv, Eb */
 		case 0xb7: /* movzw Gv, Ew */
-			i->modrm(0);
+			i->modrm(0, as);
 			break;
 		default:
 			throw NotImplementedException("cannot decode instruction starting 0x0f 0x%02x at %lx\n",
@@ -551,12 +605,12 @@ top:
 		break;
 
 	case 0x64: /* FS prefix.  Pass it through verbatim. */
-		b = i->byte();
+		b = i->byte(as);
 		goto top;
 
 	case 0x66: /* opsize prefix */
 		opsize = !opsize;
-		b = i->byte();
+		b = i->byte(as);
 		goto top;
 
 	case 0x70 ... 0x7f:
@@ -565,7 +619,7 @@ top:
 		   that simplifies a lot of relocation-related
 		   stuff. */
 		/* Decode the instruction... */
-		delta = i->byte();
+		delta = i->byte(as);
 		i->defaultNext = i->rip + i->len;
 		i->branchNext = i->defaultNext + delta;
 
@@ -583,58 +637,58 @@ top:
 	case 0x80:
 	case 0x82:
 	case 0x83:
-		i->modrm(1);
-		i->immediate(1);
+		i->modrm(1, as);
+		i->immediate(1, as);
 		break;
 	case 0x81:
 		if (opsize) {
-			i->modrm(2);
-			i->immediate(2);
+			i->modrm(2, as);
+			i->immediate(2, as);
 		} else {
-			i->modrm(4);
-			i->immediate(4);
+			i->modrm(4, as);
+			i->immediate(4, as);
 		}
 		break;
 
 	case 0x84 ... 0x8e:
-		i->modrm(0);
+		i->modrm(0, as);
 		break;
 
 	case 0x90 ... 0x9f:
 		break;
 
 	case 0xb0 ... 0xb7:
-		i->immediate(1);
+		i->immediate(1, as);
 		break;
 	case 0xb8 ... 0xbf:
 		if (i->pfx.rex_w) {
-			i->immediate(8);
+			i->immediate(8, as);
 		} else if (opsize) {
-			i->immediate(2);
+			i->immediate(2, as);
 		} else {
-			i->immediate(4);
+			i->immediate(4, as);
 		}
 		break;
 	case 0xc0:
 	case 0xc1: /* Shift group 2 with an Ib */
-		i->modrm(1);
-		i->immediate(1);
+		i->modrm(1, as);
+		i->immediate(1, as);
 		break;
 
 	case 0xc3:
 		fallsThrough = false;
 		break;
 	case 0xc6:
-		i->modrm(1);
-		i->immediate(1);
+		i->modrm(1, as);
+		i->immediate(1, as);
 		break;
 	case 0xc7:
 		if (opsize) {
-			i->modrm(2);
-			i->immediate(2);
+			i->modrm(2, as);
+			i->immediate(2, as);
 		} else {
-			i->modrm(4);
-			i->immediate(4);
+			i->modrm(4, as);
+			i->immediate(4, as);
 		}
 		break;
 	case 0xcc:
@@ -645,10 +699,10 @@ top:
 	case 0xc9:
 		break;
 	case 0xd0 ... 0xd3: /* Shift group 2*/
-		i->modrm(0);
+		i->modrm(0, as);
 		break;
 	case 0xe8: { /* Call instruction. */
-		i->immediate(4);
+		i->immediate(4, as);
 		/* We don't emit epilogues for the target of a call
 		   instruction, because we assume that we'll come back
 		   here as soon as the call is done. */
@@ -666,7 +720,7 @@ top:
 		break;
 	}
 	case 0xeb: /* jmp rel8 */
-		delta = i->byte();
+		delta = i->byte(as);
 		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta);
 
 		/* Don't emit this instruction at all; if it's useful,
@@ -680,7 +734,7 @@ top:
 		break;
 
 	case 0xe9: /* jmp rel32 */
-		delta32 = i->int32();
+		delta32 = i->int32(as);
 		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta32);
 		i->len = 0;
 		fallsThrough = false;
@@ -688,30 +742,30 @@ top:
 
 	case 0xf2:
 		repne = true;
-		b = i->byte();
+		b = i->byte(as);
 		goto top;
 
 	case 0xf3:
 		repe = true;
-		b = i->byte();
+		b = i->byte(as);
 		goto top;
 
 	case 0xf7: /* Unary group 3 Ev */
-		if (i->modrmExtension() == 0) {
+		if (i->modrmExtension(as) == 0) {
 			if (opsize) {
-				i->modrm(2);
-				i->immediate(2);
+				i->modrm(2, as);
+				i->immediate(2, as);
 			} else {
-				i->modrm(4);
-				i->immediate(4);
+				i->modrm(4, as);
+				i->immediate(4, as);
 			}
 		} else {
-			i->modrm(0);
+			i->modrm(0, as);
 		}
 		break;
 
 	case 0xff:
-		i->modrm(0);
+		i->modrm(0, as);
 		break;
 	default:
 		throw NotImplementedException("cannot decode instruction starting %x at %lx\n",
@@ -827,9 +881,9 @@ RipRelativeRelocation<r>::doit(PatchFragment<r> *pf)
 		long delta = targetOffset - this->offset - nrImmediateBytes - this->size;
 		pf->writeBytes(&delta, this->size, this->offset);
 	} else {
-		pf->addLateReloc(late_relocation(this->offset, this->size,
-						 vex_asprintf("0x%lx",target.rip),
-						 nrImmediateBytes, true));
+		pf->addLateReloc(new LateRelocation(this->offset, this->size,
+						    vex_asprintf("0x%lx",target.rip),
+						    nrImmediateBytes, true));
 	}
 }
 
@@ -943,6 +997,12 @@ PatchFragment<r>::emitInstruction(Instruction<r> *i)
 		(*it)->offset += offset;
 		relocs.push_back(*it);
 	}
+	for (auto it = i->lateRelocs.begin();
+	     it != i->lateRelocs.end();
+	     it++) {
+		(*it)->offset += offset;
+		lateRelocs.push_back(*it);
+	}
 }
 
 /* Convert an int to its constituent bytes, in little-endian order. */
@@ -984,10 +1044,10 @@ template <typename r> void
 PatchFragment<r>::emitJmpToRipHost(unsigned long rip)
 {
 	emitJmpToOffset(0);
-	lateRelocs.push_back(late_relocation(content.size() - 4, 4,
-					     vex_asprintf("0x%lx", rip),
-					     0,
-					     true));
+	lateRelocs.push_back(new LateRelocation(content.size() - 4, 4,
+						vex_asprintf("0x%lx", rip),
+						0,
+						true));
 }
 
 template <typename r> void
@@ -1090,107 +1150,6 @@ PatchFragment<r>::emitModrm(const ModRM &rm, RegisterOrOpcodeExtension reg)
 		emitByte(rm.content[x]);
 }
 
-template <typename r> typename PatchFragment<r>::ModRM
-PatchFragment<r>::ModRM::absoluteAddress(int address)
-{
-	ModRM res;
-	/* modrm byte: mod = 0, rm = 4 */
-	res.content.push_back(4);
-	/* SIB byte.  base = 5, scale = 0, index = 4 */
-	res.content.push_back(0x25);
-	/* Displacement */
-	unsigned char asBytes[4];
-	toBytes(address, asBytes);
-	for (unsigned x = 0; x < 4; x++)
-		res.content.push_back(asBytes[x]);
-	return res;
-}
-
-template <typename r> typename PatchFragment<r>::ModRM
-PatchFragment<r>::ModRM::memAtRegisterPlusOffset(RegisterIdx reg, int offset)
-{
-	ModRM res;
-	if (reg.idx >= 8) {
-		res.extendRm = true;
-		reg.idx -= 8;
-	} else {
-		res.extendRm = false;
-	}
-
-	if (offset == 0) {
-		switch (reg.idx) {
-		case 0: case 1: case 2: case 3: case 6: case 7:
-			/* mod = 0, rm = register */
-			res.content.push_back(reg.idx);
-			break;
-		case 4: 
-			/* Use a SIB */
-			res.content.push_back(0x04);
-			/* base = 4, scale = 0, index = 4. */
-			res.content.push_back(0x24);
-			break;
-		case 5:
-			goto encode_8bit_offset;
-		default:
-			abort();
-		}
-	} else if (offset >= -0x80 && offset < 0x80) {
-	encode_8bit_offset:
-		switch (reg.idx) {
-		case 0: case 1: case 2: case 3: case 5: case 6: case 7:
-			/* mod = 1, rm = register */
-			res.content.push_back(reg.idx | 0x40);
-			break;
-		case 4:
-			/* mod = 1, rm = 4 */
-			res.content.push_back(0x44);
-			/* SIB byte, base = 4, scale = 0, index = 4 */
-			res.content.push_back(0x24);
-			break;
-		default:
-			abort();
-		}
-		/* 8 bit displacement */
-		res.content.push_back(offset);
-	} else {
-		switch (reg.idx) {
-		case 0: case 1: case 2: case 3: case 5: case 6: case 7:
-			/* mod = 2, rm = register */
-			res.content.push_back(reg.idx | 0x80);
-			break;
-		case 4:
-			/* mod = 2, rm = 4 */
-			res.content.push_back(0x84);
-			/* SIB byte, base = 4, scale = 0, index = 4 */
-			res.content.push_back(0x24);
-			break;
-		default:
-			abort();
-		}
-		unsigned char asBytes[4];
-		toBytes(offset, asBytes);
-		for (unsigned x = 0; x < 4; x++)
-			res.content.push_back(asBytes[x]);
-	}
-	return res;
-}
-
-template <typename r> typename PatchFragment<r>::ModRM
-PatchFragment<r>::ModRM::directRegister(RegisterIdx reg)
-{
-	ModRM res;
-	if (reg.idx >= 8) {
-		res.extendRm = true;
-		reg.idx -= 8;
-	} else {
-		res.extendRm = false;
-	}
-	assert(reg.idx < 8);
-	/* mod = 3, rm = register */
-	res.content.push_back(0xc0 | reg.idx);
-	return res;
-}
-
 template <typename r> void
 PatchFragment<r>::emitNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm)
 {
@@ -1267,11 +1226,11 @@ PatchFragment<r>::emitCallSequence(const char *target, bool allowRedirection)
 
 	emitPushQ(RegisterIdx::RSI);
 	emitMovQ(RegisterIdx::RSI, 0);
-	lateRelocs.push_back(late_relocation(content.size() - 8,
-					     8,
-					     vex_asprintf("%s", target),
-					     0,
-					     false));
+	lateRelocs.push_back(new LateRelocation(content.size() - 8,
+						8,
+						vex_asprintf("%s", target),
+						0,
+						false));
 	emitCallReg(RegisterIdx::RSI);
 	emitPopQ(RegisterIdx::RSI);
 	
@@ -1331,11 +1290,8 @@ PatchFragment<r>::asC(const char *ident, char **relocs_name, char **trans_name, 
 				     *content_name,
 				     content_buf,
 				     *relocs_name);
-	for (std::vector<LateRelocation>::const_iterator it = lateRelocs.begin();
-	     it != lateRelocs.end();
-	     it++)
-		content = vex_asprintf("%s\t%s,\n",
-				       content, *it);
+	for (auto it = lateRelocs.begin(); it != lateRelocs.end(); it++)
+		content = vex_asprintf("%s\t%s,\n", content, (*it)->asC());
 
 	*trans_name = vex_asprintf("__%s__trans_table", ident);
 	content = vex_asprintf("%s};\n\nstatic const struct trans_table_entry %s[] = {\n",
@@ -1452,7 +1408,6 @@ Instruction<ripType>::degrade()
 	for (unsigned x = 0; x < relocs.size(); x++)
 		work->relocs[x] = relocs[x]->degrade<targetType, degrader>();
 
-	work->as = as;
 	work->useful = useful;
 
 	return work;
@@ -1506,50 +1461,6 @@ CFG<ripType>::degrade()
 		}
 	}
 	return work;
-}
-
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RAX(0);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RCX(1);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RDX(2);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RBX(3);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RSP(4);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RBP(5);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RSI(6);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::RDI(7);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R8(8);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R9(9);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R10(10);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R11(11);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R12(12);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R13(13);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R14(14);
-template <typename t> const typename PatchFragment<t>::RegisterIdx PatchFragment<t>::RegisterIdx::R15(15);
-template <typename t> typename PatchFragment<t>::RegisterIdx
-PatchFragment<t>::RegisterIdx::fromVexOffset(unsigned offset)
-{
-	switch (offset) {
-#define do_case(n)				\
-	case OFFSET_amd64_ ## n: return n
-		do_case(RAX);
-		do_case(RCX);
-		do_case(RDX);
-		do_case(RBX);
-		do_case(RSP);
-		do_case(RBP);
-		do_case(RSI);
-		do_case(RDI);
-		do_case(R8);
-		do_case(R9);
-		do_case(R10);
-		do_case(R11);
-		do_case(R12);
-		do_case(R13);
-		do_case(R14);
-		do_case(R15);
-#undef do_case
-	default:
-		abort();
-	}
 }
 
 #endif /* !GENFIX_H__ */

@@ -202,6 +202,9 @@ class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>
 public:
 	simulationSlotT next_slot;
 
+	simulationSlotT rflagsSlot() {
+		return simulationSlotT(0);
+	}
 	simulationSlotT allocateSlot() {
 		simulationSlotT r = next_slot;
 		next_slot.idx++;
@@ -216,7 +219,7 @@ public:
 
 	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
 		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore)
-		: next_slot(0)
+		: next_slot(1)
 	{
 		/* Allocate slots for expressions which we know we're
 		 * going to have to stash at some point. */
@@ -271,22 +274,68 @@ struct exprEvalPoint {
 class ClientRip {
 public:
 	unsigned long rip;
-private:
+	
+	/* Each original instruction expands into a sequence of
+	 * psuedo-instructions:
+	 *
+	 * start_of_instruction:
+	 * <generate anything which is generated at the start of the instruction>
+	 * receive_messages:
+	 * <receive any incoming messages>
+	 * original_instruction:
+	 * <the original instruction>
+	 * <store any newly-generated expressions>
+	 * post_instr_checks:
+	 * <rest of checks>
+	 * generate_messages:
+	 * <generate any necessary messages>
+	 *
+	 * When we degrade from thread rips to client rips, we
+	 * introduce appropriate zero-length instructions for each of
+	 * the new steps.
+	 *
+	 * We also have a special type of alternative instruction,
+	 * restore_flags_and_branch, which just restores rflags and
+	 * then jumps to post_instr_checks with the same RIP.
+	 */
+	enum instruction_type {
+		start_of_instruction,
+		receive_messages,
+		original_instruction,
+		post_instr_generate,
+		post_instr_checks,
+		generate_messages,
+
+		restore_flags_and_branch,
+
+		uninitialised /* Placeholder for a ClientRip whcih
+			       * will be initialised later. */
+	} type;
 	std::set<unsigned> threads;
-public:
 	std::set<unsigned> origThreads;
 
-	ClientRip(unsigned long _rip)
-		: rip(_rip)
+	ClientRip(unsigned long _rip, instruction_type _type)
+		: rip(_rip), type(_type)
 	{}
 	ClientRip()
-		: rip(0)
+		: type(uninitialised)
 	{}
-	ClientRip(unsigned long _rip, const std::set<unsigned> &_threads)
-		: rip(_rip), threads(_threads), origThreads(_threads)
+	ClientRip(unsigned long _rip, const std::set<unsigned> &_threads, instruction_type _type)
+		: rip(_rip), type(_type), threads(_threads), origThreads(_threads)
 	{}
-
+	ClientRip(const ClientRip &orig, instruction_type t)
+		: rip(orig.rip), type(t), threads(orig.threads), origThreads(orig.origThreads)
+	{}
+	ClientRip(const ClientRip &orig, unsigned long _rip, instruction_type t)
+		: rip(_rip), type(t), threads(orig.threads), origThreads(orig.origThreads)
+	{}
+	/* This ordering doesn't mean much, but it means that we can
+	   use ClientRips as keys in std::map. */
 	bool operator<(const ClientRip &k) const {
+		if (type < k.type)
+			return true;
+		if (type > k.type)
+			return false;
 		if (rip < k.rip)
 			return true;
 		else if (rip > k.rip)
@@ -329,80 +378,22 @@ public:
 };
 
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
-	/* Mapping from expressions to the slots in which we've
-	 * stashed them. */
-	slotMapT &exprsToSlots;
-	/* Mapping from instructions to the expressions which we need
-	   to stash at those instructions for each thread. */
-	expressionStashMapT &neededExpressions;
-	/* Mapping from instructions to the expressions which we need
-	   to evaluate at those instructions.  If the expression is
-	   equal to the other element of the pair then we will escape
-	   from the patch. */
-	expressionEvalMapT &expressionEvalPoints;
-	/* Mapping from instructions to the happens-before
-	   relationships which are relevant at that instruction.
-	   ``Relevant'' here means that the instruction is either the
-	   start or end of the arc. */
-	std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints;
-
-	void emitInstruction(Instruction<ClientRip> *i);
-	void emitGsPrefix() { emitByte(0x65); }
-	ModRM modrmForSlot(simulationSlotT s) { return ModRM::absoluteAddress(s.idx * 8); }
-	void emitMovRegToSlot(RegisterIdx offset, simulationSlotT slot);
-	void emitMovSlotToReg(simulationSlotT slot, RegisterIdx offset);
-	void emitAddRegToSlot(RegisterIdx reg, simulationSlotT slot);
-	void emitAddSlotToReg(simulationSlotT slot, RegisterIdx reg);
-
-	/* Emit a sequence to evaluate @e and then exit the patch if
-	 * it's false.  The exit target is taken from @i's
-	 * defaultNext.  The test is inverted if @invert is set.  @i
-	 * must not be a branch instruction (i.e. branchNext must be
-	 * clear). */
-	void emitCheckExpressionOrEscape(const exprEvalPoint &p, Instruction<ClientRip> *i);
-
-	bool emitEvalExpr(unsigned thread, IRExpr *e, RegisterIdx reg) __attribute__((warn_unused_result));
-	bool emitCompareExprToZero(unsigned thread, IRExpr *e) __attribute__((warn_unused_result));
-
-	simulationSlotT emitSaveRflags();
-	void emitRestoreRflags(simulationSlotT);
-	void emitPushf() { emitByte(0x9C); }
-	void emitPopf() { emitByte(0x9D); }
-
-	RegisterIdx instrModrmReg(Instruction<ClientRip> *i);
-
-	void emitTestRegModrm(RegisterIdx, const ModRM &);
-
-	class jcc_code {
-		jcc_code(Byte _code) : code(_code) {}
-	public:
-		Byte code;
-		static jcc_code nonzero;
-		static jcc_code zero;
-	};
-	void emitJcc(ClientRip target, jcc_code branchType);
-
-	void emitHappensBeforeEdgeBefore(const happensBeforeEdge *);
-	void emitHappensBeforeEdgeAfter(const happensBeforeEdge *, Instruction<ClientRip> *);
-
-	void emitLoadMessageToSlot(unsigned msg_id, unsigned message_slot, simulationSlotT simSlot,
-				   RegisterIdx spill_reg);
-	void emitStoreSlotToMessage(unsigned msg_id, unsigned message_slot, simulationSlotT simSlot,
-				    RegisterIdx spill_reg1, RegisterIdx spill_reg2);
+	std::set<happensBeforeEdge *> edges;
 
 	void generateEpilogue(ClientRip rip);
 
 public:
-	EnforceCrashPatchFragment(slotMapT &_exprsToSlots,
-				  expressionStashMapT &_neededExpressions,
-				  expressionEvalMapT &_expressionEvalPoints,
-				  std::map<unsigned long, std::set<happensBeforeEdge *> > &_happensBeforePoints)
-		: PatchFragment<ClientRip>(),
-		  exprsToSlots(_exprsToSlots),
-		  neededExpressions(_neededExpressions),
-		  expressionEvalPoints(_expressionEvalPoints),
-		  happensBeforePoints(_happensBeforePoints)
+	EnforceCrashPatchFragment(std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints)
+		: PatchFragment<ClientRip>()
 	{
+		for (std::map<unsigned long, std::set<happensBeforeEdge *> >::iterator it = happensBeforePoints.begin();
+		     it != happensBeforePoints.end();
+		     it++) {
+			for (std::set<happensBeforeEdge *>::iterator it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++)
+				edges.insert(*it2);
+		}
 	}
 
 	char *asC(const char *ident, std::set<ClientRip> &entryPoints);
