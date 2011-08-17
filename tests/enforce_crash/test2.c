@@ -1,5 +1,7 @@
 #include "test_common.h"
 
+static void stall(void) __attribute__((noinline));
+
 static void
 stall(void)
 {
