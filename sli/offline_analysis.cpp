@@ -28,6 +28,9 @@ static StateMachine *
 _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *idx)
 {
 	__set_profiling(getProximalCause);
+	FreeVariableMap fv;
+	std::vector<IRExpr *> goodPtrs;
+
 	IRSB *irsb;
 	int x;
 	int nr_marks;
@@ -67,8 +70,9 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 				StateMachineCrash::get(),
 				StateMachineNoCrash::get()),
 			rip,
+			fv,
 			thr->tid._tid(),
-			true);
+			goodPtrs);
 	}
 
 	/* Next guess: it's caused by dereferencing a bad pointer.
@@ -143,8 +147,9 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 					StateMachineCrash::get(),
 					StateMachineNoCrash::get()),
 				rip,
+				fv,
 				thr->tid._tid(),
-				true);
+				goodPtrs);
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
@@ -497,7 +502,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				stmt->Ist.Store.addr,
 				stmt->Ist.Store.data,
 				ThreadRip::mk(sm->tid, rip)));
-		sm = new StateMachine(smp, rip, sm->tid, true);
+		sm = new StateMachine(sm, rip, smp);
 		break;
 	}
 
@@ -520,7 +525,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				IRExpr_Binder(smsel->key));
 			StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
 			smp->target->prependSideEffect(smsel);
-			sm = new StateMachine(smp, rip, sm->tid, true);
+			sm = new StateMachine(sm, rip, smp);
 		}  else {
 			abort();
 		}
@@ -535,16 +540,15 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 	case Ist_MBE:
 		break;
 	case Ist_Exit:
-		sm = new StateMachine(new StateMachineBifurcate(
+		sm = new StateMachine(sm,
+				      rip,
+				      new StateMachineBifurcate(
 					      sm->origin,
 					      stmt->Ist.Exit.guard,
 					      new StateMachineStub(
 						      rip,
 						      IRExpr_Const(stmt->Ist.Exit.dst)),
-					      sm->root),
-				      rip,
-				      sm->tid,
-				      true);
+					      sm->root));
 		break;
 	default:
 		abort();
@@ -1281,7 +1285,7 @@ buildNewStateMachineWithLoadsEliminated(
 									      &d);
 	if (d) {
 		*done_something = true;
-		return new StateMachine(sm, new_root);
+		return new StateMachine(sm, sm->origin, new_root);
 	} else {
 		return sm;
 	}
@@ -2750,8 +2754,10 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 		  Oracle *oracle)
 {
 	__set_profiling(CFGtoStoreMachine);
+	FreeVariableMap fv;
+	std::vector<IRExpr *> goodPtrs;
 	if (!cfg)
-		return new StateMachine(StateMachineCrash::get(), 0, tid, true);
+		return new StateMachine(StateMachineCrash::get(), 0, fv, tid, goodPtrs);
 	if (memo.count(cfg))
 		return memo[cfg];
 	ThreadRip threadRip = ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip));
@@ -2760,7 +2766,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	try {
 		irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
 	} catch (BadMemoryException &e) {
-		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), tid, true);
+		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), fv, tid, goodPtrs);
 	}
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
@@ -2786,14 +2792,13 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 					if (!tmpsm)
 						return NULL;
 					res = new StateMachine(
+						res,
+						wrappedRipToRip(cfg->my_rip),
 						new StateMachineBifurcate(
 							wrappedRipToRip(cfg->my_rip),
 							stmt->Ist.Exit.guard,
 							tmpsm->root,
-							res->root),
-						wrappedRipToRip(cfg->my_rip),
-						tid,
-						true);
+							res->root));
 				}
 			} else {
 				res = backtrackOneStatement(res, stmt, wrappedRipToRip(cfg->my_rip));
@@ -3395,8 +3400,10 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 		return crashReasons->get(cfg->my_rip);
 	}
 	StateMachine *res;
+	FreeVariableMap fv;
+	std::vector<IRExpr *> goodPtrs;
 	if (!cfg->branch && !cfg->fallThrough) {
-		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, tid, true);
+		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, fv, tid, goodPtrs);
 	} else {
 		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, cfg->my_rip);
 		int x;
@@ -3424,14 +3431,13 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 							if (!other)
 								return NULL;
 							ft = new StateMachine(
+								ft,
+								cfg->my_rip,
 								new StateMachineBifurcate(
 									cfg->my_rip,
 									stmt->Ist.Exit.guard,
 									other->root,
-									ft->root),
-								cfg->my_rip,
-								tid,
-								true);
+									ft->root));
 						}
 					} else {
 						ft = backtrackOneStatement(ft, stmt, cfg->my_rip);

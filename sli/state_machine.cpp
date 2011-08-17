@@ -582,6 +582,18 @@ FreeVariableMap::parse(const char *str, const char **succ, char **err)
 	return true;
 }
 
+template <typename t, void printer(const t, FILE *)> void
+printVector(const std::vector<t> &v, FILE *f)
+{
+	fprintf(f, "[");
+	for (auto it = v.begin(); it != v.end(); it++) {
+		if (it != v.begin())
+			fprintf(f, ", ");
+		printer(*it, f);
+	}
+	fprintf(f, "]");
+}
+
 void
 printStateMachine(const StateMachine *sm, FILE *f)
 {
@@ -598,6 +610,9 @@ printStateMachine(const StateMachine *sm, FILE *f)
 		fprintf(f, "\n");
 	}
 	sm->freeVariables.print(f);
+	fprintf(f, "Good pointers: ");
+	printVector<IRExpr *, ppIRExpr>(sm->goodPointers, f);
+	fprintf(f, "\n");
 }
 
 unsigned long
@@ -856,7 +871,7 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix,
 }
 
 bool
-parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err)
+StateMachine::parse(StateMachine **out, const char *str, const char **suffix, char **err)
 {
 	unsigned long origin;
 	int tid;
@@ -869,10 +884,20 @@ parseStateMachine(StateMachine **out, const char *str, const char **suffix, char
 	StateMachineState *root;
 	if (!parseStateMachine(&root, str, &str, err))
 		return false;
-	*out = new StateMachine(root, origin, tid, true);
+	std::vector<IRExpr *> ptrs;
+	if (!parseThisString("Good pointers: ", str, &str, err) ||
+	    !parseVector(&ptrs, parseIRExpr, str, &str, err) ||
+	    !parseThisChar('\n', str, &str, err))
+		return false;
+	*out = new StateMachine(root, origin, tid, ptrs);
 	if (!(*out)->freeVariables.parse(str, suffix, err))
 		return false;
 	return true;
+}
+bool
+parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err)
+{
+	return StateMachine::parse(out, str, suffix, err);
 }
 
 StateMachine *

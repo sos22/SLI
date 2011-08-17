@@ -172,35 +172,42 @@ void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
+	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid,
+		     std::vector<IRExpr *> &_goodPointers)
+		: root(_root), origin(_origin), tid(_tid), goodPointers(_goodPointers)
+	{
+	}
 public:
 	StateMachineState *root;
 	unsigned long origin;
 	FreeVariableMap freeVariables;
 	unsigned tid;
 
-	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid, bool ign)
-		: root(_root), origin(_origin), tid(_tid)
+	std::vector<IRExpr *> goodPointers;
+
+	static bool parse(StateMachine **out, const char *str, const char **suffix, char **err);
+
+	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid,
+		     std::vector<IRExpr *> _goodPointers)
+		: root(_root), origin(_origin), freeVariables(fv), tid(_tid), goodPointers(_goodPointers)
 	{
 	}
-	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid)
-		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
-	{
-	}
-	StateMachine(StateMachine *parent, StateMachineState *new_root)
-		: root(new_root), origin(parent->origin), freeVariables(parent->freeVariables),
-		  tid(parent->tid)
+	StateMachine(StateMachine *parent, unsigned long _origin, StateMachineState *new_root)
+		: root(new_root), origin(_origin), freeVariables(parent->freeVariables),
+		  tid(parent->tid), goodPointers(parent->goodPointers)
 	{}
 	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
 		: root(parent->root),
 		  origin(parent->origin),
 		  freeVariables(parent->freeVariables, delta),
-		  tid(parent->tid)
+		  tid(parent->tid),
+		  goodPointers(parent->goodPointers)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       OracleInterface *oracle,
 			       bool *done_something);
 	void selectSingleCrashingPath();
-	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
+	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); visit_container(goodPointers, hv); }
 	NAMED_CLASS
 };
 

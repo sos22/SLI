@@ -160,6 +160,10 @@ public:
 				*done_something = true;
 			StateMachine *sm = new StateMachine(s, fvDelta);
 			sm->root = r;
+			for (auto it = s->goodPointers.begin();
+			     it != s->goodPointers.end();
+			     it++)
+				sm->goodPointers.push_back(transformIRExpr(*it));
 			return sm;
 		}
 		return s;
