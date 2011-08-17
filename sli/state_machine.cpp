@@ -933,13 +933,12 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix, ch
 	StateMachineState *root;
 	if (!parseStateMachine(&root, str, &str, err))
 		return false;
-	ring_buffer<IRExpr *, 5> ptrs;
-	if (!parseThisString("Good pointers: ", str, &str, err) ||
-	    !parseContainer(&ptrs, parseIRExpr, str, &str, err) ||
-	    !parseThisChar('\n', str, &str, err))
+	*out = new StateMachine(root, origin, tid);
+	if (!(*out)->freeVariables.parse(str, &str, err))
 		return false;
-	*out = new StateMachine(root, origin, tid, ptrs);
-	if (!(*out)->freeVariables.parse(str, suffix, err))
+	if (!parseThisString("Good pointers: ", str, &str, err) ||
+	    !parseContainer(&(*out)->goodPointers, parseIRExpr, str, &str, err) ||
+	    !parseThisChar('\n', str, suffix, err))
 		return false;
 	return true;
 }

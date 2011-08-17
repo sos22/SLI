@@ -174,9 +174,8 @@ void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
-	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid,
-		     knownGoodPointersT &_goodPointers)
-		: root(_root), origin(_origin), tid(_tid), goodPointers(_goodPointers)
+	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid)
+		: root(_root), origin(_origin), tid(_tid)
 	{
 	}
 public:
