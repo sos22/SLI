@@ -9,6 +9,7 @@ class ring_buffer {
 	int producer;
 	int consumer;
 public:
+	typedef t value_type;
 	class iterator {
 		int idx;
 		ring_buffer<t, size> &owner;
@@ -20,6 +21,18 @@ public:
 		bool operator==(const iterator &o) { return idx == o.idx; }
 		bool operator!=(const iterator &o) { return idx != o.idx; }
 		t *operator->() { return &owner.content[idx % size]; }
+	};
+	class const_iterator {
+		int idx;
+		const ring_buffer<t, size> &owner;
+	public:
+		const_iterator(int i, const ring_buffer<t, size> &o) : idx(i), owner(o) {}
+		const t & operator*() const { return owner.content[idx%size]; }
+		void operator++() { idx++; }
+		void operator++(int) { idx++; }
+		bool operator==(const const_iterator &o) const { return idx == o.idx; }
+		bool operator!=(const const_iterator &o) const { return idx != o.idx; }
+		const t *operator->() const { return &owner.content[idx % size]; }
 	};
 	class reverse_iterator {
 		int idx;
@@ -34,7 +47,7 @@ public:
 		t *operator->() { return &owner.content[idx%size]; }
 	};
 
-	ring_buffer() { content.resize(size); }
+	ring_buffer() : producer(0), consumer(0) { content.resize(size); }
 
 	void push(t x) {
 		producer++;
@@ -42,6 +55,7 @@ public:
 		if (consumer < producer - size)
 			consumer = producer - size;
 	}
+	void push_back(t x) { push(x); }
 	t pop() {
 		assert(consumer < producer);
 		consumer++;
@@ -61,6 +75,12 @@ public:
 	}
 	iterator end() {
 		return iterator(producer + 1, *this);
+	}
+	const_iterator begin() const {
+		return const_iterator(consumer + 1, *this);
+	}
+	const_iterator end() const {
+		return const_iterator(producer + 1, *this);
 	}
 	reverse_iterator rbegin() {
 		return reverse_iterator(producer, *this);
