@@ -74,7 +74,7 @@ public:
 		producer--;
 		return content[producer % size];
 	}
-	bool is_empty() {
+	bool empty() const {
 		return consumer == producer;
 	}
 

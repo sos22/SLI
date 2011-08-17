@@ -154,16 +154,18 @@ public:
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL)
 	{
 		bool b = false;
+		knownGoodPointersT kgp;
+		for (auto it = s->goodPointers.begin();
+		     it != s->goodPointers.end();
+		     it++)
+			kgp.push(transformIRExpr(*it, &b));
 		StateMachineState *r = transform(s->root, &b);
 		if (b) {
 			if (done_something)
 				*done_something = true;
 			StateMachine *sm = new StateMachine(s, fvDelta);
 			sm->root = r;
-			for (auto it = s->goodPointers.begin();
-			     it != s->goodPointers.end();
-			     it++)
-				sm->goodPointers.push(transformIRExpr(*it));
+			sm->goodPointers = kgp;
 			return sm;
 		}
 		return s;
