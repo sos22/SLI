@@ -764,18 +764,72 @@ instrModrmReg(Instruction<DirectRip> *i)
 	return r;
 }
 
+class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeEdge *> > {
+public:
+	happensBeforeMapT(DNF_Conjunction &c,
+			  expressionDominatorMapT &exprDominatorMap,
+			  EnforceCrashCFG *cfg,
+			  expressionStashMapT &exprStashPoints)
+	{
+		for (unsigned x = 0; x < c.size(); x++) {
+			IRExpr *e = c[x].second;
+			bool invert = c[x].first;
+			if (e->tag == Iex_HappensBefore) {
+				IRExpr::HappensBefore *hb = &e->Iex.HappensBefore;
+				happensBeforeEdge *hbe = new happensBeforeEdge(invert, *hb, exprDominatorMap.idom,
+									       cfg, exprStashPoints);
+				(*this)[hbe->before.rip].insert(hbe);
+				(*this)[hbe->after.rip].insert(hbe);
+			}
+		}
+	}
+};
+
+class crashEnforcementRoots : public std::set<ClientRip> {
+public:
+	crashEnforcementRoots(std::map<unsigned, ThreadRip> &roots) {
+		std::map<unsigned long, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
+		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
+		     it != roots.end();
+		     it++)
+			threadsRelevantAtEachEntryPoint[it->second.rip].insert(it->first);
+		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
+		     it != roots.end();
+		     it++) {
+			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip]);
+			insert(ClientRip(it->second.rip, threads, ClientRip::start_of_instruction));
+		}
+	}
+};
+
+class crashEnforcementData {
+public:
+	crashEnforcementRoots roots;
+	expressionStashMapT exprStashPoints;
+	happensBeforeMapT happensBeforePoints;
+	slotMapT exprsToSlots;
+	expressionEvalMapT expressionEvalPoints;
+
+	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
+			     std::map<unsigned, ThreadRip> &_roots,
+			     expressionDominatorMapT &exprDominatorMap,
+			     DNF_Conjunction &conj,
+			     EnforceCrashCFG *cfg)
+		: roots(_roots),
+		  exprStashPoints(neededExpressions, _roots),
+		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints),
+		  exprsToSlots(exprStashPoints, happensBeforePoints),
+		  expressionEvalPoints(exprDominatorMap)
+	{}
+};
+
 static CFG<ClientRip> *
-convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
-				    std::set<ClientRip> &roots,
-				    expressionStashMapT &neededExpressions,
-				    slotMapT &exprsToSlots,
-				    std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints,
-				    expressionEvalMapT &expressionEvalPoints)
+convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg, crashEnforcementData &data)
 {
 	CFG<DirectRip> *degraded = cfg->degrade<DirectRip, __threadRipToDirectRip>();
 	CFG<ClientRip> *res = new CFG<ClientRip>(cfg->as);
 	std::vector<ClientRip> neededRips;
-	setToVector(roots, neededRips);
+	setToVector(data.roots, neededRips);
 	std::vector<relocEntryT> relocs;
 
 	/* Expand the CFG up by inserting the necessary extra
@@ -815,8 +869,8 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 
 		switch (cr.type) {
 		case ClientRip::start_of_instruction:
-			if (neededExpressions.count(cr.rip)) {
-				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &neededExpressions[cr.rip];
+			if (data.exprStashPoints.count(cr.rip)) {
+				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 				     it != neededExprs->end();
 				     it++) {
@@ -825,7 +879,7 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 					IRExpr *e = it->second;
 					if (e->tag == Iex_Get) {
 						/* Easy case: just store the register in its slot */
-						simulationSlotT s = exprsToSlots(it->first, e);
+						simulationSlotT s = data.exprsToSlots(it->first, e);
 						newInstr->defaultNextI =
 							instrMovRegToSlot(RegisterIdx::fromVexOffset(e->Iex.Get.offset), s);
 						newInstr = newInstr->defaultNextI;
@@ -840,9 +894,9 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::receive_messages:
-			if (happensBeforePoints.count(cr.rip)) {
+			if (data.happensBeforePoints.count(cr.rip)) {
 				printf("%lx has HB after edges\n", cr.rip);
-				std::set<happensBeforeEdge *> *hbEdges = &happensBeforePoints[cr.rip];
+				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
 				     it++) {
@@ -852,7 +906,7 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 						printf("Instantiate %lx:%d <-< %lx:%d\n",
 						       hb->before.rip, hb->before.thread,
 						       hb->after.rip, hb->after.thread);
-						newInstr = instrHappensBeforeEdgeAfter(hb, newInstr, exprsToSlots, cr, relocs);
+						newInstr = instrHappensBeforeEdgeAfter(hb, newInstr, data.exprsToSlots, cr, relocs);
 					} else {
 						printf("Skip %lx:%d <-< %lx:%d\n",
 						       hb->before.rip, hb->before.thread,
@@ -902,8 +956,8 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 			break;
 		}
 		case ClientRip::post_instr_generate:
-			if (neededExpressions.count(cr.rip)) {
-				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &neededExpressions[cr.rip];
+			if (data.exprStashPoints.count(cr.rip)) {
+				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				Instruction<DirectRip> *underlying = degraded->ripToInstr->get(cr.rip);
 				assert(underlying);
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
@@ -916,7 +970,7 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 						/* Already handled */
 					} else if (e->tag == Iex_ClientCall) {
 						/* The result of the call should now be in %rax */
-						simulationSlotT s = exprsToSlots(it->first, e);
+						simulationSlotT s = data.exprsToSlots(it->first, e);
 						newInstr->defaultNextI = instrMovRegToSlot(RegisterIdx::RAX, s);
 						newInstr = newInstr->defaultNextI;
 					} else {
@@ -925,7 +979,7 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 						case 0x8b: {
 							/* Load from memory to modrm.
 							 * Nice and easy. */
-							simulationSlotT s = exprsToSlots(it->first, e);
+							simulationSlotT s = data.exprsToSlots(it->first, e);
 							newInstr->defaultNextI = instrMovRegToSlot(instrModrmReg(underlying), s);
 							newInstr = newInstr->defaultNextI;
 							break;
@@ -940,8 +994,8 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::post_instr_checks:
-			if (expressionEvalPoints.count(cr.rip)) {
-				std::set<exprEvalPoint> &expressionsToEval(expressionEvalPoints[cr.rip]);
+			if (data.expressionEvalPoints.count(cr.rip)) {
+				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
 				Instruction<DirectRip> *underlying = degraded->ripToInstr->get(cr.rip);
 				assert(underlying);
 				DirectRip _fallThrough = underlying->defaultNextI ? underlying->defaultNextI->rip : underlying->defaultNext;
@@ -954,27 +1008,27 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 					if (cr.threadLive(it->thread))
 						doit = true;
 				if (doit) {
-					newInstr = instrSaveRflags(newInstr, exprsToSlots);
+					newInstr = instrSaveRflags(newInstr, data.exprsToSlots);
 					for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
 					     it != expressionsToEval.end();
 					     it++)
-						newInstr = instrCheckExpressionOrEscape(newInstr, *it, fallThrough, exprsToSlots);
-					newInstr = instrRestoreRflags(newInstr, exprsToSlots);
+						newInstr = instrCheckExpressionOrEscape(newInstr, *it, fallThrough, data.exprsToSlots);
+					newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
 				}
 			}
 			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::generate_messages),
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::generate_messages:
-			if (happensBeforePoints.count(cr.rip)) {
-				std::set<happensBeforeEdge *> *hbEdges = &happensBeforePoints[cr.rip];
+			if (data.happensBeforePoints.count(cr.rip)) {
+				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
 				     it++) {
 					happensBeforeEdge *hb = *it;
 					if (hb->before.rip == cr.rip &&
 					    cr.threadLive(hb->before.thread))
-						newInstr = instrHappensBeforeEdgeBefore(newInstr, hb, exprsToSlots);
+						newInstr = instrHappensBeforeEdgeBefore(newInstr, hb, data.exprsToSlots);
 				}
 			}
 
@@ -992,7 +1046,7 @@ convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg,
 			break;
 
 		case ClientRip::restore_flags_and_branch:
-			newInstr = instrRestoreRflags(newInstr, exprsToSlots);
+			newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
 
 			cr.type = ClientRip::post_instr_checks;
 			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
@@ -1057,63 +1111,16 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	 * evaluated. */
 	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
 
-	/* Figure out where we need to stash the various necessary
-	 * expressions.  This is a map from RIPs to <thread,expr>
-	 * pairs, where we need to stash @expr if we execute
-	 * instruction @RIP in thread @thread. */
-	expressionStashMapT exprStashPoints(neededExpressions, roots);
+	crashEnforcementData res(neededExpressions, roots, exprDominatorMap, c, cfg);
 
-	/* And where we need to calculate them. */
-	expressionEvalMapT exprEvalPoints(exprDominatorMap);
-
-	/* Find out where the happens-before edges start and end. */
-	std::map<unsigned long, std::set<happensBeforeEdge *> > happensBeforePoints;
-	for (unsigned x = 0; x < c.size(); x++) {
-		IRExpr *e = c[x].second;
-		bool invert = c[x].first;
-		if (e->tag == Iex_HappensBefore) {
-			IRExpr::HappensBefore *hb = &e->Iex.HappensBefore;
-			happensBeforeEdge *hbe = new happensBeforeEdge(invert, *hb, exprDominatorMap.idom,
-								       cfg, exprStashPoints);
-			happensBeforePoints[hbe->before.rip].insert(hbe);
-			happensBeforePoints[hbe->after.rip].insert(hbe);
-		}
-	}
-
-	/* Figure out what slots to use for the various
-	 * expressions. */
-	slotMapT slotMap(exprStashPoints, happensBeforePoints);
-
-	/* The patch needs to be built in direct RIP space, rather
-	 * than in ThreadRip space.  That means we need to degrade the
-	 * CFG. */
-	std::set<ClientRip> entryPoints;
-	std::map<unsigned long, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
-	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
-	     it != roots.end();
-	     it++)
-		threadsRelevantAtEachEntryPoint[it->second.rip].insert(it->first);
-	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
-	     it != roots.end();
-	     it++) {
-		std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip]);
-		entryPoints.insert(ClientRip(it->second.rip, threads, ClientRip::start_of_instruction));
-	}
-	CFG<ClientRip> *degradedCfg = convertCFGFromThreadRipToClientRips(
-		cfg,
-		entryPoints,
-		exprStashPoints,
-		slotMap,
-		happensBeforePoints,
-		exprEvalPoints
-		);
+	CFG<ClientRip> *degradedCfg = convertCFGFromThreadRipToClientRips(cfg, res);
 
 	/* Now build the patch */
-	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(happensBeforePoints);
+	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(res.happensBeforePoints);
 	pf->fromCFG(degradedCfg);
 
 	printf("Fragment:\n");
-	printf("%s", pf->asC("ident", entryPoints));
+	printf("%s", pf->asC("ident", res.roots));
 }
 
 static bool
