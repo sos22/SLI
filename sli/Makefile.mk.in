@@ -1,11 +1,11 @@
 subdirs="enforce_crash"
-targets="crop binpatch dbg chunk direct dbg_core get_dominator direct_cd static dump_irexpr dump_state_machine check_bisimilarity dbg_exec minimal_direct"
+targets="crop binpatch dbg chunk direct dbg_core get_dominator direct_cd static dbg_exec minimal_direct"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{transform_expr,logwriter,thread,machinestate}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk,logreader,syscalls,nd_chooser}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{debug,addressspace,replay,crash_summary}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump,dominators,pickle}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump,dominators}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{state_machine,oracle,simplify_irexpr,eval_state_machine}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis,genfix,cnf}.cpp
 	echo SLIR_TARGETS=${targets}

@@ -10,7 +10,6 @@
 #include "sli.h"
 #include "nd_chooser.h"
 #include "range_tree.h"
-#include "pickle.hpp"
 #include "state_machine.hpp"
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
