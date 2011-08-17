@@ -14,15 +14,15 @@ bool parseHexUlong(unsigned long *out, const char *str, const char **suffix,
 		   char **err);
 
 template <typename c> bool
-parseVector(std::vector<c *> *out, bool (*parseItem)(c **out, const char *str, const char **suffix, char **err),
-	    const char *str, const char **suffix, char **err)
+parseContainer(c *out, bool (*parseItem)(typename c::value_type *out, const char *str, const char **suffix, char **err),
+	       const char *str, const char **suffix, char **err)
 {
 	if (!parseThisChar('[', str, &str, err))
 		return false;
 
-	std::vector<c *> res;
+	c res;
 	while (1) {
-		c *x;
+		typename c::value_type x;
 		if (!parseItem(&x, str, &str, err)) {
 			if (parseThisChar(']', str, &str, err))
 				break;

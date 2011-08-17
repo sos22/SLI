@@ -29,7 +29,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 {
 	__set_profiling(getProximalCause);
 	FreeVariableMap fv;
-	std::vector<IRExpr *> goodPtrs;
+	ring_buffer<IRExpr *, 5> goodPtrs;
 
 	IRSB *irsb;
 	int x;
@@ -503,6 +503,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				stmt->Ist.Store.data,
 				ThreadRip::mk(sm->tid, rip)));
 		sm = new StateMachine(sm, rip, smp);
+		sm->addGoodPointer(stmt->Ist.Store.addr);
 		break;
 	}
 
@@ -519,6 +520,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				new StateMachineSideEffectLoad(
 					stmt->Ist.Dirty.details->args[0],
 					ThreadRip::mk(sm->tid, rip));
+			sm->addGoodPointer(stmt->Ist.Dirty.details->args[0]);
 			sm = rewriteTemporary(
 				sm,
 				stmt->Ist.Dirty.details->tmp,
@@ -2755,7 +2757,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 {
 	__set_profiling(CFGtoStoreMachine);
 	FreeVariableMap fv;
-	std::vector<IRExpr *> goodPtrs;
+	ring_buffer<IRExpr *, 5> goodPtrs;
 	if (!cfg)
 		return new StateMachine(StateMachineCrash::get(), 0, fv, tid, goodPtrs);
 	if (memo.count(cfg))
@@ -3401,7 +3403,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	}
 	StateMachine *res;
 	FreeVariableMap fv;
-	std::vector<IRExpr *> goodPtrs;
+	ring_buffer<IRExpr *, 5> goodPtrs;
 	if (!cfg->branch && !cfg->fallThrough) {
 		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, fv, tid, goodPtrs);
 	} else {

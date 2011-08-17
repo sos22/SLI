@@ -163,7 +163,7 @@ public:
 			for (auto it = s->goodPointers.begin();
 			     it != s->goodPointers.end();
 			     it++)
-				sm->goodPointers.push_back(transformIRExpr(*it));
+				sm->goodPointers.push(transformIRExpr(*it));
 			return sm;
 		}
 		return s;

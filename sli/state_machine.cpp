@@ -23,6 +23,19 @@ AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false,
 StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
+	for (auto it = goodPointers.begin(); it != goodPointers.end(); it++)
+		*it = simplifyIRExpr(*it, opt);
+	for (auto it = goodPointers.begin(); it != goodPointers.end(); it++) {
+		for (auto it2 = it + 1; it2 != goodPointers.end(); ) {
+			if (definitelyEqual(*it, *it2, opt))
+				it2 = goodPointers.erase(it2);
+			else
+				it2++;
+		}
+		if (it == goodPointers.end())
+			break;
+	}
+
 	bool b = false;
 	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables);
 	if (b) {
@@ -582,8 +595,8 @@ FreeVariableMap::parse(const char *str, const char **succ, char **err)
 	return true;
 }
 
-template <typename t, void printer(const t, FILE *)> void
-printVector(const std::vector<t> &v, FILE *f)
+template <typename cont, void printer(const typename cont::value_type, FILE *)> void
+printContainer(const cont &v, FILE *f)
 {
 	fprintf(f, "[");
 	for (auto it = v.begin(); it != v.end(); it++) {
@@ -611,7 +624,7 @@ printStateMachine(const StateMachine *sm, FILE *f)
 	}
 	sm->freeVariables.print(f);
 	fprintf(f, "Good pointers: ");
-	printVector<IRExpr *, ppIRExpr>(sm->goodPointers, f);
+	printContainer<ring_buffer<IRExpr *, 5>, ppIRExpr>(sm->goodPointers, f);
 	fprintf(f, "\n");
 }
 
@@ -884,9 +897,9 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix, ch
 	StateMachineState *root;
 	if (!parseStateMachine(&root, str, &str, err))
 		return false;
-	std::vector<IRExpr *> ptrs;
+	ring_buffer<IRExpr *, 5> ptrs;
 	if (!parseThisString("Good pointers: ", str, &str, err) ||
-	    !parseVector(&ptrs, parseIRExpr, str, &str, err) ||
+	    !parseContainer(&ptrs, parseIRExpr, str, &str, err) ||
 	    !parseThisChar('\n', str, &str, err))
 		return false;
 	*out = new StateMachine(root, origin, tid, ptrs);
@@ -1486,4 +1499,17 @@ FreeVariableMap::applyTransformation(IRExprTransformer &x, bool *done_something)
 	     it != content->end();
 	     it++)
 		it.set_value(x.transformIRExpr(it.value(), done_something));
+}
+
+void
+StateMachine::addGoodPointer(IRExpr *e)
+{
+	e = simplifyIRExpr(e, AllowableOptimisations::defaultOptimisations);
+	if (e->tag == Iex_Const) /* Not much point in retaining
+				  * constant expressions. */
+		return;
+	for (auto it = goodPointers.begin(); it != goodPointers.end(); it++)
+		if (definitelyEqual(*it, e, AllowableOptimisations::defaultOptimisations))
+			return;
+	goodPointers.push(e);
 }

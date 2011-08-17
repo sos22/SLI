@@ -173,7 +173,7 @@ class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid,
-		     std::vector<IRExpr *> &_goodPointers)
+		     ring_buffer<IRExpr *, 5> &_goodPointers)
 		: root(_root), origin(_origin), tid(_tid), goodPointers(_goodPointers)
 	{
 	}
@@ -183,12 +183,12 @@ public:
 	FreeVariableMap freeVariables;
 	unsigned tid;
 
-	std::vector<IRExpr *> goodPointers;
+	ring_buffer<IRExpr *, 5> goodPointers;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix, char **err);
 
 	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid,
-		     std::vector<IRExpr *> _goodPointers)
+		     ring_buffer<IRExpr *, 5> _goodPointers)
 		: root(_root), origin(_origin), freeVariables(fv), tid(_tid), goodPointers(_goodPointers)
 	{
 	}
@@ -203,6 +203,7 @@ public:
 		  tid(parent->tid),
 		  goodPointers(parent->goodPointers)
 	{}
+	void addGoodPointer(IRExpr *e);
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       OracleInterface *oracle,
 			       bool *done_something);
