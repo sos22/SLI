@@ -824,10 +824,9 @@ public:
 };
 
 static CFG<ClientRip> *
-convertCFGFromThreadRipToClientRips(CFG<ThreadRip> *cfg, crashEnforcementData &data)
+enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace *as)
 {
-	CFG<DirectRip> *degraded = cfg->degrade<DirectRip, __threadRipToDirectRip>();
-	CFG<ClientRip> *res = new CFG<ClientRip>(cfg->as);
+	CFG<ClientRip> *res = new CFG<ClientRip>(as);
 	std::vector<ClientRip> neededRips;
 	setToVector(data.roots, neededRips);
 	std::vector<relocEntryT> relocs;
@@ -1113,7 +1112,8 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 
 	crashEnforcementData res(neededExpressions, roots, exprDominatorMap, c, cfg);
 
-	CFG<ClientRip> *degradedCfg = convertCFGFromThreadRipToClientRips(cfg, res);
+	CFG<DirectRip> *degraded = cfg->degrade<DirectRip, __threadRipToDirectRip>();
+	CFG<ClientRip> *degradedCfg = enforceCrash(degraded, res, cfg->as);
 
 	/* Now build the patch */
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(res.happensBeforePoints);
