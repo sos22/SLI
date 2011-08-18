@@ -1,4 +1,5 @@
 #include <sys/fcntl.h>
+#include <sys/wait.h>
 #include <err.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -1410,10 +1411,82 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	return accumulator;
 }
 
+static void
+my_system(const char *arg1, ...)
+{
+	pid_t pid = fork();
+	if (pid == -1)
+		err(1, "fork(%s)", arg1);
+	if (pid == 0) {
+		va_list va;
+		unsigned nr_args;
+
+		va_start(va, arg1);
+		for (nr_args = 1; va_arg(va, const char *); nr_args++)
+			;
+		va_end(va);
+
+		const char **args = (const char **)calloc(sizeof(args[0]), nr_args + 1);
+		args[0] = arg1;
+		va_start(va, arg1);
+		for (nr_args = 1; ; nr_args++) {
+			args[nr_args] = va_arg(va, const char *);
+			if (!args[nr_args])
+				break;
+		}
+		execvp(arg1, (char *const *)args);
+		err(1, "execvp(%s)", arg1);
+	}
+
+	int status;
+	pid_t opid;
+	opid = waitpid(pid, &status, 0);
+	if (opid < 0) err(1, "waitpid() for %s", arg1);
+	assert(opid == pid);
+	if (WIFEXITED(status)) {
+		if (WEXITSTATUS(status) == 0)
+			return;
+		errx(1, "%s returned %d", arg1, WEXITSTATUS(status));
+	}
+	if (WIFSIGNALED(status))
+		errx(1, "%s died with signal %d", arg1, WTERMSIG(status));
+	errx(1, "unknown wait status %x from %s", status, arg1);
+}
+
+class AtExit {
+	static std::set<AtExit *> allHandlers;
+	static void run_handlers(void) {
+		for (auto it = allHandlers.begin(); it != allHandlers.end(); it++)
+			(*it)->doit();
+	}
+protected:
+	AtExit() { allHandlers.insert(this); }
+	~AtExit() { allHandlers.erase(this); }
+	virtual void doit() = 0;
+public:
+	static void init() {
+		atexit(run_handlers);
+	}
+};
+std::set<AtExit *> AtExit::allHandlers;
+
+class DeleteTmpFile : AtExit {
+	const char *name;
+	void doit() {
+		unlink(name);
+	}
+public:
+	DeleteTmpFile(const char *n)
+		: name(n)
+	{}
+};
+
 int
 main(int argc, char *argv[])
 {
 	init_sli();
+
+	AtExit::init();
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
@@ -1421,7 +1494,7 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	crashEnforcementData accumulator;
-	for (int i = 4; i < argc; i++) {
+	for (int i = 5; i < argc; i++) {
 		int fd = open(argv[i], O_RDONLY);
 		if (fd < 0)
 			err(1, "opening %s", argv[4]);
@@ -1435,9 +1508,31 @@ main(int argc, char *argv[])
 	CFG<ClientRip> *cfg = enforceCrash(accumulator, ms->addressSpace);
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(accumulator.happensBeforePoints);
 	pf->fromCFG(cfg);
+	char *patch = pf->asC("ident", accumulator.roots);
 
-	printf("Fragment:\n");
-	printf("%s", pf->asC("ident", accumulator.roots));
+	/* Dump it to a file and build it. */
+	char *tmpfile = my_asprintf("enforce_crash_XXXXXX");
+	int fd = mkstemp(tmpfile);
+	if (fd < 0) err(1, "mkstemp(%s)", tmpfile);
+	DeleteTmpFile __df(tmpfile);
+	FILE *f = fdopen(fd, "w");
+	if (!f) err(1, "fdopen(%d) (from %s)", fd, tmpfile);
+	if (fputs(patch, f) == EOF)
+		err(1, "writing to %s", tmpfile);
+	if (fclose(f) == EOF)
+		err(1, "closing %s", tmpfile);
+
+	my_system(
+		"gcc",
+		"-Wall",
+		"-fPIC",
+		"-shared",
+		"-I.",
+		vex_asprintf("-Dthe_patch=\"%s\"", tmpfile),
+		"../sli/enforce_crash/patch_core.c",
+		"-o",
+		argv[4],
+		NULL);
 
 	return 0;
 }

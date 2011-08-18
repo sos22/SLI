@@ -31,7 +31,6 @@ struct patch {
 	unsigned content_size;
 };
 
-#define the_patch "patch_core.h"
 #include the_patch
 
 #include <asm/prctl.h>
