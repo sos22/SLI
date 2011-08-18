@@ -29,6 +29,7 @@ struct DirectRip {
 	DirectRip(unsigned long _rip) : rip(_rip) {}
 	DirectRip() : rip(0) {}
 	bool operator==(const DirectRip &d) const { return rip == d.rip; }
+	DirectRip operator+(long offset) const { return DirectRip(rip + offset); }
 };
 
 void
@@ -975,8 +976,18 @@ public:
 };
 
 static CFG<ClientRip> *
-enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace *as)
+enforceCrash(crashEnforcementData &data, AddressSpace *as)
 {
+	class __decoder {
+	public:
+		AddressSpace *as;
+		Instruction<DirectRip> *operator()(unsigned long r) {
+			return Instruction<DirectRip>::decode(as, r, NULL);
+		}
+		__decoder(AddressSpace *_as)
+			: as(_as)
+		{}
+	} decoder(as);
 	CFG<ClientRip> *res = new CFG<ClientRip>(as);
 	std::vector<ClientRip> neededRips;
 	setToVector(data.roots, neededRips);
@@ -1089,19 +1100,11 @@ enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace 
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::original_instruction: {
-			Instruction<DirectRip> *underlying = degraded->ripToInstr->get(cr.rip);
+			Instruction<DirectRip> *underlying = decoder(cr.rip);
 			assert(underlying);
-			if (underlying->defaultNextI) {
+			if (underlying->defaultNextI || underlying->defaultNext.rip) {
 				ClientRip c(cr, ClientRip::post_instr_generate);
 				relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
-			} else if (underlying->defaultNext.rip) {
-				/* If we have a defaultNext but not a
-				   defaultNextI then that means that
-				   the default next has been pruned
-				   from the patch, so we should just
-				   get out rather than trying to
-				   insert additional checks. */
-				newInstr->defaultNext = ClientRip(cr, underlying->defaultNext.rip, ClientRip::start_of_instruction);
 			}
 
 			/* XXX we pretty much assume that branches
@@ -1127,8 +1130,7 @@ enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace 
 		case ClientRip::post_instr_generate:
 			if (data.exprStashPoints.count(cr.rip)) {
 				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
-				Instruction<DirectRip> *underlying = degraded->ripToInstr->get(cr.rip);
-				assert(underlying);
+				Instruction<DirectRip> *underlying = decoder(cr.rip);
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 				     it != neededExprs->end();
 				     it++) {
@@ -1165,8 +1167,7 @@ enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace 
 		case ClientRip::post_instr_checks:
 			if (data.expressionEvalPoints.count(cr.rip)) {
 				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
-				Instruction<DirectRip> *underlying = degraded->ripToInstr->get(cr.rip);
-				assert(underlying);
+				Instruction<DirectRip> *underlying = decoder(cr.rip);
 				DirectRip _fallThrough = underlying->defaultNextI ? underlying->defaultNextI->rip : underlying->defaultNext;
 				ClientRip fallThrough(cr, _fallThrough.rip, ClientRip::start_of_instruction);
 				
@@ -1203,11 +1204,11 @@ enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace 
 
 			/* Where do we go next? */
 			{
-				Instruction<DirectRip> *underlying = degraded->ripToInstr->get(cr.rip);
-				assert(underlying);
-				if (underlying->defaultNext.rip)
-					newInstr->defaultNext = ClientRip(cr, underlying->defaultNext.rip, ClientRip::start_of_instruction);
-				if (underlying->defaultNextI) {
+				Instruction<DirectRip> *underlying = decoder(cr.rip);
+				if (underlying->defaultNext.rip) {
+					ClientRip c(cr, underlying->defaultNext.rip, ClientRip::start_of_instruction);
+					relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
+				} else if (underlying->defaultNextI) {
 					ClientRip c(cr, underlying->defaultNextI->rip.rip, ClientRip::start_of_instruction);
 					relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
 				}
@@ -1282,8 +1283,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 
 	crashEnforcementData res(neededExpressions, roots, exprDominatorMap, c, cfg);
 
-	CFG<DirectRip> *degraded = cfg->degrade<DirectRip, __threadRipToDirectRip>();
-	CFG<ClientRip> *degradedCfg = enforceCrash(degraded, res, cfg->as);
+	CFG<ClientRip> *degradedCfg = enforceCrash(res, cfg->as);
 
 	/* Now build the patch */
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(res.happensBeforePoints);

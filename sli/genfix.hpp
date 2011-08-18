@@ -715,13 +715,13 @@ top:
 								 4,
 								 target,
 								 0));
-		if (cfg->exploreFunction(target))
+		if (cfg && cfg->exploreFunction(target))
 			i->branchNext = target;
 		break;
 	}
 	case 0xeb: /* jmp rel8 */
 		delta = i->byte(as);
-		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta);
+		i->defaultNext = i->rip + i->len + delta;
 
 		/* Don't emit this instruction at all; if it's useful,
 		 * we'll synthesise an appropriate jump later on.
@@ -735,7 +735,7 @@ top:
 
 	case 0xe9: /* jmp rel32 */
 		delta32 = i->int32(as);
-		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len + delta32);
+		i->defaultNext = i->rip + i->len + delta32;
 		i->len = 0;
 		fallsThrough = false;
 		break;
@@ -773,7 +773,7 @@ top:
 	}
 
 	if (fallsThrough)
-		i->defaultNext = ThreadRip::mk(i->rip.thread, i->rip.rip + i->len);
+		i->defaultNext = i->rip + i->len;
 
 	return i;
 }
