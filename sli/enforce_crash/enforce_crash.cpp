@@ -783,6 +783,12 @@ public:
 			}
 		}
 	}
+	void operator|=(const happensBeforeMapT &hbm) {
+		for (auto it = hbm.begin(); it != hbm.end(); it++) {
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				(*this)[it->first].insert(*it2);
+		}
+	}
 };
 
 class crashEnforcementRoots : public std::set<ClientRip> {
@@ -800,12 +806,22 @@ public:
 			insert(ClientRip(it->second.rip, threads, ClientRip::start_of_instruction));
 		}
 	}
+
+	void operator|=(const crashEnforcementRoots &cer) {
+		for (auto it = cer.begin(); it != cer.end(); it++)
+			insert(*it);
+	}
 };
 
 /* Map that tells us where the various threads have to exit. */
 class abstractThreadExitPointsT : public std::map<unsigned long, std::set<unsigned> > {
 public:
 	abstractThreadExitPointsT(EnforceCrashCFG *cfg, happensBeforeMapT &);
+	void operator|=(const abstractThreadExitPointsT &atet) {
+		for (auto it = atet.begin(); it != atet.end(); it++)
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				(*this)[it->first].insert(*it2);
+	}
 };
 abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 						     happensBeforeMapT &happensBeforePoints)
@@ -973,6 +989,15 @@ public:
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints)
 	{}
+
+	void operator|=(const crashEnforcementData &ced) {
+		roots |= ced.roots;
+		exprStashPoints |= ced.exprStashPoints;
+		happensBeforePoints |= ced.happensBeforePoints;
+		exprsToSlots |= ced.exprsToSlots;
+		expressionEvalPoints |= ced.expressionEvalPoints;
+		threadExitPoints |= ced.threadExitPoints;
+	}
 };
 
 static CFG<ClientRip> *
@@ -1230,10 +1255,10 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 	return res;
 }
 
-static void
-partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
-			std::map<unsigned, ThreadRip> &roots,
-			AddressSpace *as)
+static crashEnforcementData
+buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
+	 std::map<unsigned, ThreadRip> &roots,
+	 AddressSpace *as)
 {
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
@@ -1281,16 +1306,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 	 * evaluated. */
 	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
 
-	crashEnforcementData res(neededExpressions, roots, exprDominatorMap, c, cfg);
-
-	CFG<ClientRip> *degradedCfg = enforceCrash(res, cfg->as);
-
-	/* Now build the patch */
-	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(res.happensBeforePoints);
-	pf->fromCFG(degradedCfg);
-
-	printf("Fragment:\n");
-	printf("%s", pf->asC("ident", res.roots));
+	return crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg);
 }
 
 static bool
@@ -1395,10 +1411,22 @@ main(int argc, char *argv[])
 
 	printDnf(d, _logfile);
        
-	for (unsigned x = 0; x < d.size(); x++) {
-		printf("Examine clause %d\n", x);
-		partitionCrashCondition(d[x], m, roots, ms->addressSpace);
+	if (d.size() == 0)
+		return 0;
+
+	crashEnforcementData accumulator(buildCED(d[0], m, roots, ms->addressSpace));
+	for (unsigned x = 1; x < d.size(); x++) {
+		crashEnforcementData n(buildCED(d[x], m, roots, ms->addressSpace));
+		accumulator |= n;
 	}
+
+	/* Now build the patch */
+	CFG<ClientRip> *cfg = enforceCrash(accumulator, ms->addressSpace);
+	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(accumulator.happensBeforePoints);
+	pf->fromCFG(cfg);
+
+	printf("Fragment:\n");
+	printf("%s", pf->asC("ident", accumulator.roots));
 
 	return 0;
 }

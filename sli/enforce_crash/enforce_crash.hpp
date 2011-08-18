@@ -142,6 +142,12 @@ public:
 				(*this)[rip.rip].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
 		}
 	}
+	void operator|=(const expressionStashMapT &esm) {
+		for (auto it = esm.begin(); it != esm.end(); it++) {
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				(*this)[it->first].insert(*it2);
+		}
+	}
 };
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge> {
@@ -246,6 +252,12 @@ public:
 					mk_slot(hb->after.thread, hb->content[x]);
 			}
 		}
+	}
+
+	void operator|=(const slotMapT &sm) {
+		for (auto it = sm.begin(); it != sm.end(); it++)
+			if (!count(it->first))
+				insert(*it);
 	}
 };
 
@@ -374,6 +386,11 @@ public:
 						it->first->rip.thread,
 						it2->second));
 		}
+	}
+	void operator|=(const expressionEvalMapT &eem) {
+		for (auto it = eem.begin(); it != eem.end(); it++)
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				(*this)[it->first].insert(*it2);
 	}
 };
 
