@@ -37,7 +37,4 @@ cd results
 summarise_directory.sh
 
 cd ../../
-for x in crash_summaries/*
-do
-    ../enforce_crash $t types1.dat callgraph1.dat $x
-done
+../enforce_crash $t types1.dat callgraph1.dat new_patch.so crash_summaries/*
