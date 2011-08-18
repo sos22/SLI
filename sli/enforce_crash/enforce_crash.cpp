@@ -766,6 +766,8 @@ instrModrmReg(Instruction<DirectRip> *i)
 
 class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeEdge *> > {
 public:
+#warning GC?
+	happensBeforeMapT() {}
 	happensBeforeMapT(DNF_Conjunction &c,
 			  expressionDominatorMapT &exprDominatorMap,
 			  EnforceCrashCFG *cfg,
@@ -793,6 +795,8 @@ public:
 
 class crashEnforcementRoots : public std::set<ClientRip> {
 public:
+	crashEnforcementRoots() {}
+
 	crashEnforcementRoots(std::map<unsigned, ThreadRip> &roots) {
 		std::map<unsigned long, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
 		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
@@ -816,6 +820,7 @@ public:
 /* Map that tells us where the various threads have to exit. */
 class abstractThreadExitPointsT : public std::map<unsigned long, std::set<unsigned> > {
 public:
+	abstractThreadExitPointsT() {}
 	abstractThreadExitPointsT(EnforceCrashCFG *cfg, happensBeforeMapT &);
 	void operator|=(const abstractThreadExitPointsT &atet) {
 		for (auto it = atet.begin(); it != atet.end(); it++)
@@ -989,6 +994,8 @@ public:
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints)
 	{}
+
+	crashEnforcementData() {}
 
 	void operator|=(const crashEnforcementData &ced) {
 		roots |= ced.roots;
@@ -1353,26 +1360,15 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 	return true;
 }
 
-int
-main(int argc, char *argv[])
+static crashEnforcementData
+enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
+		       VexPtr<Oracle> &oracle,
+		       GarbageCollectionToken token)
 {
-	init_sli();
-
-	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
-	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
-	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
-	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
-
-	int fd = open(argv[4], O_RDONLY);
-	if (fd < 0)
-		err(1, "opening %s", argv[4]);
-	VexPtr<CrashSummary, &ir_heap> summary(readCrashSummary(fd));
-	close(fd);
-
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);
 
-	IRExpr *requirement = findHappensBeforeRelations(summary, oracle, ALLOW_GC);
+	IRExpr *requirement = findHappensBeforeRelations(summary, oracle, token);
 	fprintf(_logfile, "Crash requirement:\n");
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
@@ -1399,7 +1395,7 @@ main(int argc, char *argv[])
 	DNF_Disjunction d;
 	if (TIMEOUT || !dnf(requirement, d)) {
 		fprintf(_logfile, "failed to convert to DNF\n");
-		return 1;
+		exit(1);
 	}
 	for (unsigned x = 0; x < d.size(); ) {
 		if (analyseHbGraph(d[x], summary)) {
@@ -1412,12 +1408,33 @@ main(int argc, char *argv[])
 	printDnf(d, _logfile);
        
 	if (d.size() == 0)
-		return 0;
+		return crashEnforcementData();
 
-	crashEnforcementData accumulator(buildCED(d[0], m, roots, ms->addressSpace));
-	for (unsigned x = 1; x < d.size(); x++) {
-		crashEnforcementData n(buildCED(d[x], m, roots, ms->addressSpace));
-		accumulator |= n;
+	crashEnforcementData accumulator;
+	for (unsigned x = 0; x < d.size(); x++)
+		accumulator |= buildCED(d[x], m, roots, oracle->ms->addressSpace);
+	return accumulator;
+}
+
+int
+main(int argc, char *argv[])
+{
+	init_sli();
+
+	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
+	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
+	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
+	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+
+	crashEnforcementData accumulator;
+	for (int i = 4; i < argc; i++) {
+		int fd = open(argv[i], O_RDONLY);
+		if (fd < 0)
+			err(1, "opening %s", argv[4]);
+		VexPtr<CrashSummary, &ir_heap> summary(readCrashSummary(fd));
+		close(fd);
+
+		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC);
 	}
 
 	/* Now build the patch */

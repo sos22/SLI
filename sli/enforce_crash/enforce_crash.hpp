@@ -113,10 +113,13 @@ class simulationSlotT {
 public:
 	int idx;
 	simulationSlotT(int _idx) : idx(_idx) {}
+	simulationSlotT() : idx(-10000) {}
 };
 
 class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > {
 public:
+#warning GC?
+	expressionStashMapT() {}
 	expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 			    std::map<unsigned, ThreadRip> &roots)
 	{
@@ -206,6 +209,7 @@ class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>
 		}
 	}
 public:
+#warning GC?
 	simulationSlotT next_slot;
 
 	simulationSlotT rflagsSlot() {
@@ -222,6 +226,8 @@ public:
 		assert(it != end());
 		return it->second;
 	}
+
+	slotMapT() {}
 
 	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
 		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore)
@@ -258,6 +264,8 @@ public:
 		for (auto it = sm.begin(); it != sm.end(); it++)
 			if (!count(it->first))
 				insert(*it);
+		if (sm.next_slot.idx > next_slot.idx)
+			next_slot = sm.next_slot;
 	}
 };
 
@@ -265,6 +273,7 @@ struct exprEvalPoint {
 	bool invert;
 	unsigned thread;
 	IRExpr *e;
+#warning GC?
 	exprEvalPoint(bool _invert,
 		      unsigned _thread,
 		      IRExpr *_e)
@@ -373,6 +382,7 @@ public:
 
 class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> > {
 public:
+
 	expressionEvalMapT(expressionDominatorMapT &exprDominatorMap) {
 		for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
 		     it != exprDominatorMap.end();
@@ -387,6 +397,7 @@ public:
 						it2->second));
 		}
 	}
+	expressionEvalMapT() {}
 	void operator|=(const expressionEvalMapT &eem) {
 		for (auto it = eem.begin(); it != eem.end(); it++)
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
