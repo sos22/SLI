@@ -15,13 +15,12 @@
 #include "enforce_crash.hpp"
 
 class EnforceCrashCFG : public CFG<ThreadRip> {
-	std::set<ThreadRip> &neededInstructions;
 public:
 	bool instructionUseful(Instruction<ThreadRip> *i) {
-		return neededInstructions.count(i->rip) != 0;
+		return true;
 	}
-	EnforceCrashCFG(AddressSpace *as, std::set<ThreadRip> &ni)
-		: CFG<ThreadRip>(as), neededInstructions(ni)
+	EnforceCrashCFG(AddressSpace *as)
+		: CFG<ThreadRip>(as)
 	{}
 };
 
@@ -802,6 +801,156 @@ public:
 	}
 };
 
+/* Map that tells us where the various threads have to exit. */
+class abstractThreadExitPointsT : public std::map<unsigned long, std::set<unsigned> > {
+public:
+	abstractThreadExitPointsT(EnforceCrashCFG *cfg, happensBeforeMapT &);
+};
+abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
+						     happensBeforeMapT &happensBeforePoints)
+{
+	/* We need to exit thread X if we reach instruction Y and
+	   there is some message which is needed by thread X such that
+	   Y cannot have already received that message and cannot
+	   subsequently send it.  We also exit if Y can neither send
+	   nor receive any further messages. */
+
+	typedef Instruction<ThreadRip> instrT;
+
+	/* Step one: build control-flow reachability maps */
+
+	/* forwardReachable[x] -> the set of instructions y such that
+	   there's some control flow path from x to y */
+	instrToInstrSetMap forwardReachable;
+	/* backwardReachable[x] -> the set of instructions y such that
+	   there's some control flow path from y to x */
+	instrToInstrSetMap backwardReachable;
+
+	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
+		forwardReachable[it.value()].insert(it.value());
+		backwardReachable[it.value()].insert(it.value());
+	}
+
+	bool progress;
+	do {
+		progress = false;
+		for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
+			instrT *i = it.value();
+
+			instrT *successors[2];
+			int nr_successors;
+			nr_successors = 0;
+			if (i->defaultNextI)
+				successors[nr_successors++] = i->defaultNextI;
+			if (i->branchNextI)
+				successors[nr_successors++] = i->branchNextI;
+			if (nr_successors == 0)
+				continue;
+
+			/* Forward reachability: look at our
+			   successors, and make sure that anything
+			   which they can reach is reachable from us
+			   as well. */
+			std::set<instrT *> &f(forwardReachable[i]);
+			for (int j = 0; j < nr_successors; j++) {
+				instrT *successor = successors[j];
+				std::set<instrT *> &f2(forwardReachable[successor]);
+				for (auto it2 = f2.begin(); it2 != f2.end(); it2++) {
+					if (!f.count(*it2)) {
+						progress = true;
+						f.insert(*it2);
+					}
+				}
+			}
+
+			/* Backward reachability: anything which can
+			   reach us can also reach our successors. */
+			std::set<instrT *> &b(backwardReachable[i]);
+			for (int j = 0; j < nr_successors; j++) {
+				instrT *successor = successors[j];
+				std::set<instrT *> &b2(backwardReachable[successor]);
+				for (auto it2 = b.begin(); it2 != b.end(); it2++) {
+					if (!b2.count(*it2)) {
+						progress = true;
+						b2.insert(*it2);
+					}
+				}
+			}
+			
+		}
+	} while (progress);
+
+	/* Figure out which instructions should be present. */
+	std::set<instrT *> instructionPresence;
+	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
+		instrT *i = it.value();
+		unsigned thread = it.key().thread;
+
+		/* Should @i be present in thread @thread? */
+		bool should_be_present = false;
+		/* Must be able to send or receive some message */
+		for (auto it3 = happensBeforePoints.begin();
+		     !should_be_present && it3 != happensBeforePoints.end();
+		     it3++) {
+			for (auto it4 = it3->second.begin();
+			     it4 != it3->second.end();
+			     it4++) {
+				happensBeforeEdge *hbe = *it4;
+				if (hbe->before.thread == thread) {
+					/* Can we send this message? */
+					instrT *sender = cfg->ripToInstr->get(hbe->before);
+					if (forwardReachable[i].count(sender))
+						should_be_present = true;
+				} else if (hbe->after.thread == thread) {
+					/* Can we receive this message? */
+					instrT *receiver = cfg->ripToInstr->get(hbe->after);
+					if (forwardReachable[i].count(receiver))
+						should_be_present = true;
+				}
+			}
+		}
+
+		/* Not only must some send or receive be
+		   forward-reachable, every receive must be
+		   either forward or backwards reachable. */
+		for (auto it3 = happensBeforePoints.begin();
+		     should_be_present && it3 != happensBeforePoints.end();
+		     it3++) {
+			for (auto it4 = it3->second.begin();
+			     it4 != it3->second.end();
+			     it4++) {
+				happensBeforeEdge *hbe = *it4;
+				if (hbe->after.thread == thread) {
+					instrT *receiver = cfg->ripToInstr->get(hbe->after);
+					if (!forwardReachable[i].count(receiver) &&
+					    !backwardReachable[i].count(receiver)) {
+						/* No path between this instruction and this
+						   receive point -> not in patch */
+						should_be_present = false;
+					}
+				}
+			}
+		}
+
+		if (should_be_present)
+			instructionPresence.insert(i);
+	}
+
+	/* Now figure out the transitions.  We're looking for any
+	   instructions which are present but which have a successor
+	   which is not present.  That successor will then be marked
+	   as an exit instruction for the relevant thread. */
+	for (auto it = instructionPresence.begin(); it != instructionPresence.end(); it++) {
+		instrT *i = *it;
+
+		if (i->defaultNextI && !instructionPresence.count(i->defaultNextI))
+			(*this)[i->defaultNextI->rip.rip].insert(i->rip.thread);
+		if (i->branchNextI && !instructionPresence.count(i->branchNextI))
+			(*this)[i->branchNextI->rip.rip].insert(i->rip.thread);
+	}
+
+}
+
 class crashEnforcementData {
 public:
 	crashEnforcementRoots roots;
@@ -809,6 +958,7 @@ public:
 	happensBeforeMapT happensBeforePoints;
 	slotMapT exprsToSlots;
 	expressionEvalMapT expressionEvalPoints;
+	abstractThreadExitPointsT threadExitPoints;
 
 	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
 			     std::map<unsigned, ThreadRip> &_roots,
@@ -819,7 +969,8 @@ public:
 		  exprStashPoints(neededExpressions, _roots),
 		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints),
 		  exprsToSlots(exprStashPoints, happensBeforePoints),
-		  expressionEvalPoints(exprDominatorMap)
+		  expressionEvalPoints(exprDominatorMap),
+		  threadExitPoints(cfg, happensBeforePoints)
 	{}
 };
 
@@ -868,6 +1019,25 @@ enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace 
 
 		switch (cr.type) {
 		case ClientRip::start_of_instruction:
+			/* If we're supposed to be dropping out of a thread here then do so. */
+			{
+				auto it = data.threadExitPoints.find(cr.rip);
+				if (it != data.threadExitPoints.end()) {
+					auto &threadsToExit(it->second);
+					bool doit = false;
+					for (auto it2 = threadsToExit.begin(); it2 != threadsToExit.end(); it2++) {
+						if (cr.threads.count(*it2)) {
+							doit = true;
+							cr.eraseThread(*it2);
+						}
+					}
+					if (doit) {
+						relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+						break;
+					}
+				}
+			}
+			/* Stash anything which needs to be stashed. */
 			if (data.exprStashPoints.count(cr.rip)) {
 				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
@@ -892,9 +1062,9 @@ enforceCrash(CFG<DirectRip> *degraded, crashEnforcementData &data, AddressSpace 
 			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::receive_messages),
 						     &newInstr->defaultNextI));
 			break;
+
 		case ClientRip::receive_messages:
 			if (data.happensBeforePoints.count(cr.rip)) {
-				printf("%lx has HB after edges\n", cr.rip);
 				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
@@ -1097,7 +1267,7 @@ partitionCrashCondition(DNF_Conjunction &c, FreeVariableMap &fv,
 		neededThreads.insert(it->thread);
 
 	/* Build the CFG */
-	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
+	EnforceCrashCFG *cfg = new EnforceCrashCFG(as);
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++) {
