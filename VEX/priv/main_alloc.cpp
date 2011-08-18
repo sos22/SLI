@@ -277,6 +277,12 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 		ah->type->gc_visit(header_to_alloc(ah), gc);
 	}
 
+	/* Run any GC callbacks */
+	for (__GcCallback *cursor = h->headCallback;
+	     cursor != NULL;
+	     cursor = cursor->next)
+		(*cursor)(gc);
+
 	LibVEX_alloc_sanity_check(h);
 
 	/* Handle weak references.  They're strung together in the

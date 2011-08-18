@@ -15,6 +15,8 @@ public:
 
 #define ALLOW_GC GarbageCollectionToken::GarbageCollectionAllowed()
 
+class __GcCallback;
+
 #define NR_GC_ROOTS (65536*8)
 class Heap {
 public:
@@ -26,6 +28,7 @@ public:
 	struct wr_core *headVisitedWeakRef;
 	unsigned long heap_used;
 	bool redirection_tags_set;
+	__GcCallback *headCallback;
 };
 
 extern Heap main_heap;
@@ -43,6 +46,44 @@ public:
 			assert(p);
 		}
 	}
+};
+
+class __GcCallback {
+	__GcCallback *prev;
+public: /* This should only really be accessed from LibVEX_gc, but
+	   that's state, which makes it a pain to make it our friend,
+	   so just make it public. */
+	__GcCallback *next;
+private:
+	Heap *h;
+protected:
+	__GcCallback(Heap *_h)
+		: h(_h)
+	{
+		prev = NULL;
+		next = h->headCallback;
+		if (h->headCallback)
+			h->headCallback->prev = this;
+		h->headCallback = this;
+	}
+	~__GcCallback()
+	{
+		if (prev)
+			prev->next = next;
+		else
+			h->headCallback = next;
+		if (next)
+			next->prev = prev;
+	}
+	virtual void runGc(HeapVisitor &hv) = 0;
+public:
+	void operator()(HeapVisitor &hv) { runGc(hv); }
+};
+
+template <Heap *heap = &main_heap>
+class GcCallback : public __GcCallback {
+protected:
+	GcCallback() : __GcCallback(heap) {}
 };
 
 /* Allocate in Vex's temporary allocation area.  Be careful with this.

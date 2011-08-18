@@ -71,16 +71,6 @@ convertDirectRelocToClientReloc(EarlyRelocation<DirectRip> *er, const std::set<u
 	}
 }
 
-template <typename src, typename dest> void
-setToVector(const std::set<src> &in, std::vector<dest> &out)
-{
-	out.reserve(in.size());
-	for (typename std::set<src>::iterator it = in.begin();
-	     it != in.end();
-	     it++)
-		out.push_back(*it);
-}
-
 unsigned long
 __trivial_hash_function(const DirectRip &r)
 {
@@ -764,9 +754,13 @@ instrModrmReg(Instruction<DirectRip> *i)
 	return r;
 }
 
-class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeEdge *> > {
+class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeEdge *> >,
+			  private GcCallback<> {
+	void runGc(HeapVisitor &hv) {
+		for (auto it = begin(); it != end(); it++)
+			visit_set(it->second, hv);
+	}
 public:
-#warning GC?
 	happensBeforeMapT() {}
 	happensBeforeMapT(DNF_Conjunction &c,
 			  expressionDominatorMapT &exprDominatorMap,

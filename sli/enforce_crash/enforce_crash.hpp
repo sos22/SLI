@@ -116,9 +116,44 @@ public:
 	simulationSlotT() : idx(-10000) {}
 };
 
-class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > {
+template <typename src, typename dest> void
+setToVector(const std::set<src> &in, std::vector<dest> &out)
+{
+	out.reserve(in.size());
+	for (typename std::set<src>::iterator it = in.begin();
+	     it != in.end();
+	     it++)
+		out.push_back(*it);
+}
+
+template <typename t> void
+visit_set(std::set<t> &s, HeapVisitor &hv)
+{
+	/* Ugg, can't just visit a set of GC'd
+	   pointers because it rearranges them, so
+	   have to do it via a vector. */
+	std::vector<t> n;
+	setToVector(s, n);
+	visit_container(n, hv);
+	s.clear();
+	for (auto it2 = n.begin(); it2 != n.end(); it2++)
+		s.insert(*it2);
+}
+
+class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > >,
+			    private GcCallback<> {
+	void runGc(HeapVisitor &hv) {
+		for (auto it = begin(); it != end(); it++) {
+			std::vector<std::pair<unsigned, IRExpr *> > n;
+			setToVector(it->second, n);
+			it->second.clear();
+			for (auto it2 = n.begin(); it2 != n.end(); it2++) {
+				hv(it2->second);
+				it->second.insert(*it2);
+			}
+		}
+	}
 public:
-#warning GC?
 	expressionStashMapT() {}
 	expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 			    std::map<unsigned, ThreadRip> &roots)
@@ -199,7 +234,8 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT> {
+class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>,
+		 private GcCallback<> {
 	typedef std::pair<unsigned, IRExpr *> key_t;
 	void mk_slot(unsigned thr, IRExpr *e) {
 		key_t key(thr, e);
@@ -208,8 +244,16 @@ class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>
 			insert(std::pair<key_t, simulationSlotT>(key, s));
 		}
 	}
+	void runGc(HeapVisitor &hv) {
+		slotMapT n(*this);
+		clear();
+		for (auto it = n.begin(); it != n.end(); it++) {
+			std::pair<std::pair<unsigned, IRExpr *>, simulationSlotT> a = *it;
+			hv(a.first.second);
+			insert(a);
+		}
+	}
 public:
-#warning GC?
 	simulationSlotT next_slot;
 
 	simulationSlotT rflagsSlot() {
@@ -269,11 +313,17 @@ public:
 	}
 };
 
+/* Note that this needs manual visiting, despite not being GC
+ * allocated itself! */
 struct exprEvalPoint {
 	bool invert;
 	unsigned thread;
 	IRExpr *e;
-#warning GC?
+
+	void visit(HeapVisitor &hv) {
+		hv(e);
+	}
+
 	exprEvalPoint(bool _invert,
 		      unsigned _thread,
 		      IRExpr *_e)
@@ -380,7 +430,19 @@ public:
 	}
 };
 
-class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> > {
+class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> >,
+			   private GcCallback<> {
+	void runGc(HeapVisitor &hv) {
+		for (auto it = begin(); it != end(); it++) {
+			std::vector<exprEvalPoint> n;
+			setToVector(it->second, n);
+			it->second.clear();
+			for (auto it2 = n.begin(); it2 != n.end(); it2++) {
+				it2->visit(hv);
+				it->second.insert(*it2);
+			}
+		}
+	}
 public:
 
 	expressionEvalMapT(expressionDominatorMapT &exprDominatorMap) {
