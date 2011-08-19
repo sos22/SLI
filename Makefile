@@ -14,7 +14,7 @@ CXXFLAGS+=-std=gnu++0x
 ifeq ($(OPTIMIZE),y)
 OPTIMIZE_FLAGS=-O1 -DNDEBUG
 else
-OPTIMIZE_FLAGS=
+OPTIMIZE_FLAGS=-D_GLIBCXX_DEBUG
 endif
 
 include Makefile.mk
