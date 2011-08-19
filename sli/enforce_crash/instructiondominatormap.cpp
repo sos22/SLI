@@ -25,7 +25,11 @@ cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfte
 			   Arbitrarily declare that the first one is
 			   the root and emit that. */
 			it = toEmit.begin();
+			assert(it != toEmit.end());
 		}
+
+		Instruction<ThreadRip> *next = *it;
+
 		/* We're going to use *it as a root.  Purge it and
 		   everything reachable from it from the toEmit
 		   set. */
@@ -54,8 +58,13 @@ cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfte
 			}
 			donePurge.insert(purge);
 		}
-		/* Emit the new root */
-		insert(*it);
+
+		/* Emit the new root.  This has to happen after the
+		   loop above so that it doesn't immediately get
+		   purged again, and we have to stash it in a
+		   temporary because the changes to toEmit in the loop
+		   would invalidate the iterator. */
+		insert(next);
 	}
 }
 
