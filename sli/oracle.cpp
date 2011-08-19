@@ -2072,20 +2072,21 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 					st->Ist.CAS.details->oldLo,
 					PointerAliasingSet::anything));
 			break;
-		case Ist_Dirty: {
-			PointerAliasingSet res =
-				(tyenv->types[st->Ist.Dirty.details->tmp] == Ity_I64) ?
-				((strcmp(st->Ist.Dirty.details->cee->name, "helper_load_64") ||
-				  config.stackHasLeaked) ?
-				 PointerAliasingSet::anything :
-				 PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer) :
-				PointerAliasingSet::notAPointer;
-			temporaryAliases.insert(
-				std::pair<IRTemp, PointerAliasingSet>(
-					st->Ist.Dirty.details->tmp,
-					res));
+		case Ist_Dirty:
+			if (st->Ist.Dirty.details->tmp != IRTemp_INVALID) {
+				PointerAliasingSet res =
+					(tyenv->types[st->Ist.Dirty.details->tmp] == Ity_I64) ?
+					((strcmp(st->Ist.Dirty.details->cee->name, "helper_load_64") ||
+					  config.stackHasLeaked) ?
+					 PointerAliasingSet::anything :
+					 PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer) :
+					PointerAliasingSet::notAPointer;
+				temporaryAliases.insert(
+					std::pair<IRTemp, PointerAliasingSet>(
+						st->Ist.Dirty.details->tmp,
+						res));
+			}
 			break;
-		}
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
