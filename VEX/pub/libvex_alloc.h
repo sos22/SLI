@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <set>
+
 /* A GC token doesn't actually do anything, it's just there to make it
    more obvious which functions can perform GC sweeps. */
 class GarbageCollectionToken {
@@ -28,7 +30,7 @@ public:
 	struct wr_core *headVisitedWeakRef;
 	unsigned long heap_used;
 	bool redirection_tags_set;
-	__GcCallback *headCallback;
+	std::set<__GcCallback *> callbacks;
 };
 
 extern Heap main_heap;
@@ -49,31 +51,16 @@ public:
 };
 
 class __GcCallback {
-	__GcCallback *prev;
-public: /* This should only really be accessed from LibVEX_gc, but
-	   that's state, which makes it a pain to make it our friend,
-	   so just make it public. */
-	__GcCallback *next;
-private:
 	Heap *h;
 protected:
 	__GcCallback(Heap *_h)
 		: h(_h)
 	{
-		prev = NULL;
-		next = h->headCallback;
-		if (h->headCallback)
-			h->headCallback->prev = this;
-		h->headCallback = this;
+		h->callbacks.insert(this);
 	}
 	~__GcCallback()
 	{
-		if (prev)
-			prev->next = next;
-		else
-			h->headCallback = next;
-		if (next)
-			next->prev = prev;
+		h->callbacks.erase(this);
 	}
 	virtual void runGc(HeapVisitor &hv) = 0;
 public:

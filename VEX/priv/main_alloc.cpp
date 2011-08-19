@@ -278,10 +278,8 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 	}
 
 	/* Run any GC callbacks */
-	for (__GcCallback *cursor = h->headCallback;
-	     cursor != NULL;
-	     cursor = cursor->next)
-		(*cursor)(gc);
+	for (auto it = h->callbacks.begin(); it != h->callbacks.end(); it++)
+		(**it)(gc);
 
 	LibVEX_alloc_sanity_check(h);
 
