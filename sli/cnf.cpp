@@ -734,11 +734,22 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			do_case(Triop);
 			do_case(Binop);
 			do_case(Unop);
-			do_case(Load);
 			do_case(Mux0X);
 			do_case(FreeVariable);
 			do_case(ClientCallFailed);
 #undef do_case
+		case Iex_Load:
+#define do_field(n)							\
+			if (other->Iex.Load. n != e->Iex.Load. n)	\
+				continue
+			do_field(isLL);
+			do_field(end);
+			do_field(ty);
+			do_field(addr);
+			do_field(rip);
+#undef do_field
+			break;
+
 			/* Others are harder. */
 		case Iex_CCall: {
 			bool bad;

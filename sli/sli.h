@@ -125,7 +125,7 @@ protected:
 public:
 	unsigned long lo;
 	unsigned long hi;
-	expression_result() : Named() {}
+	expression_result() : Named(), lo(0), hi(0) {}
 };
 
 class RegisterSet {

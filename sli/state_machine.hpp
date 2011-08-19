@@ -19,7 +19,7 @@ public:
 	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as, bool fvmas)
 		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
 		  ignoreSideEffects(i), assumeNoInterferingStores(as),
-		  freeVariablesMightAccessStack(fvmas)
+		  freeVariablesMightAccessStack(fvmas), haveInterestingStoresSet(false)
 	{
 	}
 
