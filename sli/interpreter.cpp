@@ -1334,7 +1334,40 @@ eval_expression(const RegisterSet *rs,
 		res = do_ccall(rs, expr->Iex.CCall.cee, expr->Iex.CCall.args, temporaries);
 		break;
 	}
-
+	  
+	case Iex_Associative: {
+		switch (expr->Iex.Associative.op) {
+#define do_op(name, operator, base)					\
+	        case Iop_ ## name ## 8:	   			        \
+		case Iop_ ## name ## 16:				\
+		case Iop_ ## name ## 32:				\
+		case Iop_ ## name ## 64:				\
+			dest->lo = base;				\
+		        for (int x = 0;					\
+			     x < expr->Iex.Associative.nr_arguments;	\
+			     x++) {					\
+				struct expression_result a =		\
+					eval_expression(		\
+						rs,			\
+						expr->Iex.Associative.contents[x], \
+						temporaries);		\
+				dest->lo = dest->lo operator a.lo;	\
+			}						\
+			break
+			do_op(Add, +, 0);
+		case Iop_Or1:
+			do_op(Or, |, 0);
+		case Iop_Xor1:
+			do_op(Xor, ^, 0);
+		case Iop_And1:
+			do_op(And, &, 0xfffffffffffffffful);
+#undef do_op
+		default:
+			ppIRExpr(expr, stderr);
+			throw NotImplementedException("Associative op %d\n", expr->Iex.Associative.op);
+		}
+		break;
+	}
 	default:
 		ppIRExpr(expr, stderr);
 		throw NotImplementedException("Bad expression tag %x\n", expr->tag);
