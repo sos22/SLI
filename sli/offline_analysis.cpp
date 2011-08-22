@@ -9,6 +9,7 @@
 #include "oracle.hpp"
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
+#include "intern.hpp"
 #include "libvex_prof.hpp"
 
 template <typename t> void printCFG(const CFGNode<t> *cfg);
@@ -1978,6 +1979,7 @@ optimiseStateMachine(StateMachine *sm,
 		if (TIMEOUT)
 			return sm;
 		done_something = false;
+		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);

@@ -3,14 +3,24 @@
 #include "sli.h"
 #include "intern.hpp"
 #include "simplify_irexpr.hpp"
+#include "state_machine.hpp"
 #include "libvex_prof.hpp"
 
-/* internIRExpr doesn't really belong here, but it doesn't really
-   belong anywhere else, either, and since we're the only callers this
-   seemed like as good a place as any to stash it. */
 struct internIRExprTable {
 	static const int nr_entries = 17;
 	std::map<IRExpr *, IRExpr *> lookups[nr_entries];
+};
+
+struct internStateMachineTable : public internIRExprTable {
+	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
+	std::map<StateMachineEdge *, StateMachineEdge *> edges;
+	std::map<StateMachineState *, StateMachineState *> states;
+	std::set<StateMachineSideEffectStore *> stores;
+	std::set<StateMachineSideEffectLoad *> loads;
+	std::set<StateMachineSideEffectCopy *> copies;
+	std::set<StateMachineProxy *> states_proxy;
+	std::set<StateMachineBifurcate *> states_bifurcate;
+	std::set<StateMachineStub *> states_stub;
 };
 
 static unsigned
@@ -233,3 +243,174 @@ internIRExpr(IRExpr *x)
 	return internIRExpr(x, t);
 }
 
+static void
+internFreeVariables(FreeVariableMap &fvm, internIRExprTable &t)
+{
+	for (auto it = fvm.content->begin();
+	     it != fvm.content->end();
+	     it++)
+		it.set_value(internIRExpr(it.value(), t));
+}
+
+static void
+internKnownGoodPointers(knownGoodPointersT &p, internIRExprTable &t)
+{
+	for (auto it = p.begin(); it != p.end(); it++)
+		*it = internIRExpr(*it, t);
+}
+
+static StateMachineSideEffect *
+internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable &t)
+{
+	if (t.sideEffects.count(s))
+		return t.sideEffects[s];
+	if (dynamic_cast<StateMachineSideEffect *>(s)) {
+		t.sideEffects[s] = s;
+		return s;
+	} else if (StateMachineSideEffectMemoryAccess *ma = dynamic_cast<StateMachineSideEffectMemoryAccess *>(s)) {
+		ma->addr = internIRExpr(ma->addr, t);
+		if (StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma)) {
+			store->data = internIRExpr(store->data, t);
+			for (auto it = t.stores.begin();
+			     it != t.stores.end();
+			     it++) {
+				StateMachineSideEffectStore *o = *it;
+				if (o->addr == store->addr &&
+				    o->data == store->data &&
+				    o->rip == store->rip) {
+					t.sideEffects[s] = o;
+					return o;
+				}
+			}
+			t.sideEffects[s] = s;
+			t.stores.insert(store);
+			return s;
+		} else if (StateMachineSideEffectLoad *load = dynamic_cast<StateMachineSideEffectLoad *>(ma)) {
+			for (auto it = t.loads.begin();
+			     it != t.loads.end();
+			     it++) {
+				StateMachineSideEffectLoad *o = *it;
+				if (o->addr == load->addr &&
+				    o->key == load->key &&
+				    o->rip == load->rip) {
+					t.sideEffects[s] = o;
+					return o;
+				}
+			}
+			t.sideEffects[s] = s;
+			t.loads.insert(load);
+			return s;
+		} else {
+			abort();
+		}
+	} else if (StateMachineSideEffectCopy *copy = dynamic_cast<StateMachineSideEffectCopy *>(ma)) {
+		copy->value = internIRExpr(copy->value, t);
+		for (auto it = t.copies.begin(); it != t.copies.end(); it++) {
+			StateMachineSideEffectCopy *o = *it;
+			if (o->key == copy->key &&
+			    o->value == copy->value) {
+				t.sideEffects[s] = o;
+				return o;
+			}
+		}
+		t.sideEffects[s] = s;
+		t.copies.insert(copy);
+		return s;
+	} else {
+		abort();
+	}
+}
+
+static StateMachineState *internStateMachineState(StateMachineState *start, internStateMachineTable &t);
+
+static StateMachineEdge *
+internStateMachineEdge(StateMachineEdge *start, internStateMachineTable &t)
+{
+	if (t.edges.count(start))
+		return t.edges[start];
+	start->target = internStateMachineState(start->target, t);
+	for (auto it = start->sideEffects.begin();
+	     it != start->sideEffects.end();
+	     it++)
+		*it = internStateMachineSideEffect(*it, t);
+	for (auto it = t.edges.begin(); it != t.edges.end(); it++) {
+		StateMachineEdge *o = it->second;
+		if (o->target == start->target && o->sideEffects == start->sideEffects) {
+			t.edges[start] = o;
+			return o;
+		}
+	}
+	t.edges[start] = start;
+	return start;
+}
+
+static StateMachineState *
+internStateMachineState(StateMachineState *start, internStateMachineTable &t)
+{
+	if (t.states.count(start))
+		return t.states[start];
+	t.states[start] = start; /* Cycle breaking */
+	if (dynamic_cast<StateMachineCrash *>(start) ||
+	    dynamic_cast<StateMachineNoCrash *>(start) ||
+	    dynamic_cast<StateMachineUnreached *>(start)) {
+		t.states[start] = start;
+		return start;
+	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(start)) {
+		smp->target = internStateMachineEdge(smp->target, t);
+		for (auto it = t.states_proxy.begin();
+		     it != t.states_proxy.end();
+		     it++) {
+			if ((*it)->target == smp->target) {
+				t.states[start] = *it;
+				return *it;
+			}
+		}
+		t.states[start] = start;
+		t.states_proxy.insert(smp);
+		return start;
+	} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(start)) {
+		smb->condition = internIRExpr(smb->condition, t);
+		smb->trueTarget = internStateMachineEdge(smb->trueTarget, t);
+		smb->falseTarget = internStateMachineEdge(smb->falseTarget, t);
+		for (auto it = t.states_bifurcate.begin();
+		     it != t.states_bifurcate.end();
+		     it++) {
+			StateMachineBifurcate *o = *it;
+			if (o->condition == smb->condition &&
+			    o->trueTarget == smb->trueTarget &&
+			    o->falseTarget == smb->falseTarget) {
+				t.states[start] = o;
+				return o;
+			}
+		}
+		t.states[start] = start;
+		t.states_bifurcate.insert(smb);
+		return start;
+	} else if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(start)) {
+		sms->target = internIRExpr(sms->target);
+		for (auto it = t.states_stub.begin();
+		     it != t.states_stub.end();
+		     it++) {
+			if (sms->target == (*it)->target) {
+				t.states[start] = *it;
+				return *it;
+			}
+		}
+		t.states[start] = start;
+		t.states_stub.insert(sms);
+		return start;
+	} else {
+		abort();
+	}
+}
+
+StateMachine *
+internStateMachine(StateMachine *sm)
+{
+	__set_profiling(internStateMachine);
+	internStateMachineTable t;
+	internFreeVariables(sm->freeVariables, t);
+	internKnownGoodPointers(sm->goodPointers, t);
+	sm->root = internStateMachineState(sm->root, t);
+	return sm;
+}

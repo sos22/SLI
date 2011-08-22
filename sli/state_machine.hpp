@@ -138,8 +138,8 @@ class IRExprTransformer;
 /* Caution: needs someone external to visit it! */
 class FreeVariableMap {
 	typedef gc_heap_map<FreeVariableKey, IRExpr, &ir_heap>::type map_t;
-	map_t *content;
 public:
+	map_t *content;
 	FreeVariableMap()
 		: content(new map_t())
 	{}
