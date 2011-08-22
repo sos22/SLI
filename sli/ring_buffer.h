@@ -105,6 +105,22 @@ public:
 		producer--;
 		return it;
 	}
+
+	/* Check whether the queue contains the required value, and
+	   then pull to front if it does. */
+	bool containsPTF(const t &needle) {
+		for (auto it = begin(); it != end(); it++) {
+			if (*it == needle) {
+				if (it != begin()) {
+					const t tmp = *begin();
+					*begin() = *it;
+					*it = tmp;
+				}
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 #endif /* !RING_BUFFER_H__ */

@@ -150,22 +150,24 @@ protected:
 	{
 		return StateMachineUnreached::get();
 	}
+	virtual void transformAssumptions(assumptionFalseSetT &ass, bool *done_something)
+	{
+		for (auto it = ass.begin(); it != ass.end(); it++)
+			*it = transformIRExpr(*it, done_something);
+	}
 public:
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL)
 	{
 		bool b = false;
-		knownGoodPointersT kgp;
-		for (auto it = s->goodPointers.begin();
-		     it != s->goodPointers.end();
-		     it++)
-			kgp.push(transformIRExpr(*it, &b));
+		assumptionFalseSetT kgp = s->assumptions_false;
+		transformAssumptions(kgp, &b);
 		StateMachineState *r = transform(s->root, &b);
 		if (b) {
 			if (done_something)
 				*done_something = true;
 			StateMachine *sm = new StateMachine(s, fvDelta);
 			sm->root = r;
-			sm->goodPointers = kgp;
+			sm->assumptions_false = kgp;
 			return sm;
 		}
 		return s;

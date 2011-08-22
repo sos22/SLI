@@ -30,7 +30,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 {
 	__set_profiling(getProximalCause);
 	FreeVariableMap fv;
-	ring_buffer<IRExpr *, 5> goodPtrs;
+	assumptionFalseSetT ass;
 
 	IRSB *irsb;
 	int x;
@@ -73,7 +73,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 			rip,
 			fv,
 			thr->tid._tid(),
-			goodPtrs);
+			ass);
 	}
 
 	/* Next guess: it's caused by dereferencing a bad pointer.
@@ -150,7 +150,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 				rip,
 				fv,
 				thr->tid._tid(),
-				goodPtrs);
+				ass);
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
@@ -504,7 +504,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				stmt->Ist.Store.data,
 				ThreadRip::mk(sm->tid, rip)));
 		sm = new StateMachine(sm, rip, smp);
-		sm->addGoodPointer(stmt->Ist.Store.addr);
+		sm->addAssumptionFalse(IRExpr_Unop(Iop_BadPtr, stmt->Ist.Store.addr));
 		break;
 	}
 
@@ -521,7 +521,7 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				new StateMachineSideEffectLoad(
 					stmt->Ist.Dirty.details->args[0],
 					ThreadRip::mk(sm->tid, rip));
-			sm->addGoodPointer(stmt->Ist.Dirty.details->args[0]);
+			sm->addAssumptionFalse(IRExpr_Unop(Iop_BadPtr, stmt->Ist.Dirty.details->args[0]));
 			sm = rewriteTemporary(
 				sm,
 				stmt->Ist.Dirty.details->tmp,
@@ -1966,6 +1966,34 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 	return s.transform(sm, done_something);
 }
 
+class applyAssumptionsTransformer : public StateMachineTransformer {
+public:
+	assumptionFalseSetT &assume;
+	applyAssumptionsTransformer(assumptionFalseSetT &_assume)
+		: assume(_assume)
+	{}
+	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		if (assume.containsPTF(e)) {
+			*done_something = true;
+			return IRExpr_Const(IRConst_U1(0));
+		}
+		return StateMachineTransformer::transformIRExpr(e, done_something);
+	}
+	void transformAssumptions(assumptionFalseSetT &ass, bool *done_something) {
+		/* You can do a certain amount by applying one
+		   assumption in the set to other items in the set,
+		   but it gets really confusing, and it's hardly ever
+		   useful.  Don't bother trying for now. */
+		return;
+	}
+};
+static StateMachine *
+applyAssumptions(StateMachine *sm, bool *done_something)
+{
+	applyAssumptionsTransformer t(sm->assumptions_false);
+	return t.transform(sm, done_something);
+}
+
 static StateMachine *
 optimiseStateMachine(StateMachine *sm,
 		     const AllowableOptimisations &opt,
@@ -1981,6 +2009,7 @@ optimiseStateMachine(StateMachine *sm,
 		done_something = false;
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
+		sm = applyAssumptions(sm, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
@@ -2759,9 +2788,9 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 {
 	__set_profiling(CFGtoStoreMachine);
 	FreeVariableMap fv;
-	ring_buffer<IRExpr *, 5> goodPtrs;
+	assumptionFalseSetT ass;
 	if (!cfg)
-		return new StateMachine(StateMachineCrash::get(), 0, fv, tid, goodPtrs);
+		return new StateMachine(StateMachineCrash::get(), 0, fv, tid, ass);
 	if (memo.count(cfg))
 		return memo[cfg];
 	ThreadRip threadRip = ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip));
@@ -2770,7 +2799,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	try {
 		irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
 	} catch (BadMemoryException &e) {
-		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), fv, tid, goodPtrs);
+		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), fv, tid, ass);
 	}
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
@@ -3405,9 +3434,9 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	}
 	StateMachine *res;
 	FreeVariableMap fv;
-	ring_buffer<IRExpr *, 5> goodPtrs;
 	if (!cfg->branch && !cfg->fallThrough) {
-		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, fv, tid, goodPtrs);
+		assumptionFalseSetT ass;
+		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, fv, tid, ass);
 	} else {
 		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, cfg->my_rip);
 		int x;

@@ -25,26 +25,26 @@ static bool mentionsBinders(IRExpr *e);
 StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
-	for (auto it = goodPointers.begin(); it != goodPointers.end(); it++)
+	for (auto it = assumptions_false.begin(); it != assumptions_false.end(); it++)
 		*it = simplifyIRExpr(*it, opt);
-	for (auto it = goodPointers.begin(); it != goodPointers.end(); ) {
+	for (auto it = assumptions_false.begin(); it != assumptions_false.end(); ) {
 		if (mentionsBinders(*it)) {
-			it = goodPointers.erase(it);
+			it = assumptions_false.erase(it);
 			continue;
 		}
-		for (auto it2 = it + 1; it2 != goodPointers.end(); ) {
+		for (auto it2 = it + 1; it2 != assumptions_false.end(); ) {
 			if (definitelyEqual(*it, *it2, opt))
-				it2 = goodPointers.erase(it2);
+				it2 = assumptions_false.erase(it2);
 			else
 				it2++;
 		}
-		if (it == goodPointers.end())
+		if (it == assumptions_false.end())
 			break;
 		it++;
 	}
 
 	bool b = false;
-	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables, goodPointers);
+	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables);
 	if (b) {
 		*done_something = true;
 		StateMachine *sm = new StateMachine(*this);
@@ -55,58 +55,30 @@ StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracl
 	}
 }
 
-class reduceBadPtrTransformer : public IRExprTransformer {
-public:
-	knownGoodPointersT &kgp;
-	reduceBadPtrTransformer(knownGoodPointersT &_kgp)
-		: kgp(_kgp)
-	{}
-	IRExpr *transformIex(IRExpr::Unop *e)
-	{
-		if (e->op == Iop_BadPtr) {
-			for (auto it = kgp.begin(); it != kgp.end(); it++) {
-				if (definitelyEqual(*it, e->arg, AllowableOptimisations::defaultOptimisations))
-					return IRExpr_Const(IRConst_U1(0));
-			}
-		}
-		return NULL;
-	}
-};
-static IRExpr *
-reduceBadPtrExpressions(IRExpr *orig, knownGoodPointersT &kgp, bool *done_something)
-{
-	if (kgp.empty())
-		return orig;
-	reduceBadPtrTransformer t(kgp);
-	return t.transformIRExpr(orig, done_something);
-}
-
 StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv,
-				knownGoodPointersT &kgp)
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv)
 {
 	if (trueTarget->target == StateMachineUnreached::get()) {
 		*done_something = true;
 		if (falseTarget->target == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv, kgp));
+			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv));
 	}
 	if (falseTarget->target == StateMachineUnreached::get()) {
 		*done_something = true;
-		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, kgp));
+		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv));
 	}
-	condition = reduceBadPtrExpressions(condition, kgp, done_something);
 	condition = optimiseIRExprFP(condition, opt, done_something);
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
 		if (condition->Iex.Const.con->Ico.U1)
-			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, kgp));
+			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv));
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv, kgp));
+			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv));
 	}
-	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv, kgp);
-	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv, kgp);
+	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv);
+	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv);
 
 	if (falseTarget->sideEffects.size() == 0 &&
 	    trueTarget->sideEffects.size() == 0) {
@@ -340,8 +312,7 @@ StateMachineEdge *
 StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			   OracleInterface *oracle,
 			   bool *done_something,
-			   FreeVariableMap &freeVariables,
-			   knownGoodPointersT &kgp)
+			   FreeVariableMap &freeVariables)
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
@@ -350,11 +321,11 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				   smp->target->sideEffects.end());
 		target = smp->target->target;
 		*done_something = true;
-		return optimise(opt, oracle, done_something, freeVariables, kgp);
+		return optimise(opt, oracle, done_something, freeVariables);
 	}
 	if (TIMEOUT)
 		return this;
-	target = target->optimise(opt, oracle, done_something, freeVariables, kgp);
+	target = target->optimise(opt, oracle, done_something, freeVariables);
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 
@@ -659,8 +630,8 @@ printStateMachine(const StateMachine *sm, FILE *f)
 		fprintf(f, "\n");
 	}
 	sm->freeVariables.print(f);
-	fprintf(f, "Good pointers: ");
-	printContainer<ring_buffer<IRExpr *, 5>, ppIRExpr>(sm->goodPointers, f);
+	fprintf(f, "Assumptions (false): ");
+	printContainer<ring_buffer<IRExpr *, 5>, ppIRExpr>(sm->assumptions_false, f);
 	fprintf(f, "\n");
 }
 
@@ -931,13 +902,19 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix, ch
 	    !parseThisChar('\n', str, &str, err))
 		return false;
 	StateMachineState *root;
+
+	/* Shut the compiler up: it can't tell that
+	   parseStateMachine() will always initialise root if it
+	   returns true. */
+	root = (StateMachineState *)0xf001deadbeeful; 
+
 	if (!parseStateMachine(&root, str, &str, err))
 		return false;
 	*out = new StateMachine(root, origin, tid);
 	if (!(*out)->freeVariables.parse(str, &str, err))
 		return false;
-	if (!parseThisString("Good pointers: ", str, &str, err) ||
-	    !parseContainer(&(*out)->goodPointers, parseIRExpr, str, &str, err) ||
+	if (!parseThisString("Assumptions (false): ", str, &str, err) ||
+	    !parseContainer(&(*out)->assumptions_false, parseIRExpr, str, &str, err) ||
 	    !parseThisChar('\n', str, suffix, err))
 		return false;
 	return true;
@@ -1551,19 +1528,19 @@ mentionsBinders(IRExpr *e)
 }
 
 void
-StateMachine::addGoodPointer(IRExpr *e)
+StateMachine::addAssumptionFalse(IRExpr *e)
 {
-	if (mentionsBinders(e)) /* Don't want to mark anything as a
-				   good pointer if it depends on
-				   binders, since they can be changed
-				   by other threads */
+	if (mentionsBinders(e)) /* Don't want to make any assumptions
+				   about things which involve binders,
+				   since they can be changed by other
+				   threads */
 		return;
 	e = simplifyIRExpr(e, AllowableOptimisations::defaultOptimisations);
 	if (e->tag == Iex_Const) /* Not much point in retaining
 				  * constant expressions. */
 		return;
-	for (auto it = goodPointers.begin(); it != goodPointers.end(); it++)
+	for (auto it = assumptions_false.begin(); it != assumptions_false.end(); it++)
 		if (definitelyEqual(*it, e, AllowableOptimisations::defaultOptimisations))
 			return;
-	goodPointers.push(e);
+	assumptions_false.push(e);
 }

@@ -253,7 +253,7 @@ internFreeVariables(FreeVariableMap &fvm, internIRExprTable &t)
 }
 
 static void
-internKnownGoodPointers(knownGoodPointersT &p, internIRExprTable &t)
+internAssumptions(assumptionFalseSetT &p, internIRExprTable &t)
 {
 	for (auto it = p.begin(); it != p.end(); it++)
 		*it = internIRExpr(*it, t);
@@ -410,7 +410,7 @@ internStateMachine(StateMachine *sm)
 	__set_profiling(internStateMachine);
 	internStateMachineTable t;
 	internFreeVariables(sm->freeVariables, t);
-	internKnownGoodPointers(sm->goodPointers, t);
+	internAssumptions(sm->assumptions_false, t);
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }
