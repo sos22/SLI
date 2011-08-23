@@ -260,8 +260,16 @@ public:
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
 	mutable unsigned long __hashval;
 	mutable bool have_hash;
+	StateMachineSideEffect(); /* DNE */
+public:
+	enum sideEffectType {
+		Load, Store, Copy, Unreached
+	} type;
 protected:
 	virtual unsigned long _hashval() const = 0;
+	StateMachineSideEffect(enum sideEffectType _type)
+		: type(_type)
+	{}
 public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
@@ -582,7 +590,7 @@ public:
 
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
-	StateMachineSideEffectUnreached() {}
+	StateMachineSideEffectUnreached() : StateMachineSideEffect(StateMachineSideEffect::Unreached) {}
 	unsigned long _hashval() const { return 0x91; }
 public:
 	static StateMachineSideEffectUnreached *get() {
@@ -601,8 +609,8 @@ class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
 	IRExpr *addr;
 	ThreadRip rip;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, ThreadRip _rip)
-		: addr(_addr), rip(_rip)
+	StateMachineSideEffectMemoryAccess(IRExpr *_addr, ThreadRip _rip, StateMachineSideEffect::sideEffectType _type)
+		: StateMachineSideEffect(_type), addr(_addr), rip(_rip)
 	{}
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
@@ -612,7 +620,7 @@ class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, ThreadRip _rip)
-		: StateMachineSideEffectMemoryAccess(_addr, _rip),
+		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
@@ -644,13 +652,13 @@ class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	unsigned long _hashval() const { return addr->hashval() * 757 + key; }
 public:
 	StateMachineSideEffectLoad(IRExpr *_addr, ThreadRip _rip)
-		: StateMachineSideEffectMemoryAccess(_addr, _rip)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load)
 	{
 		key = next_key++;
 		constructed();
 	}
 	StateMachineSideEffectLoad(Int k, IRExpr *_addr, ThreadRip _rip)
-		: StateMachineSideEffectMemoryAccess(_addr, _rip), key(k)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load), key(k)
 	{
 		constructed();
 	}
@@ -674,7 +682,8 @@ class StateMachineSideEffectCopy : public StateMachineSideEffect {
 	unsigned long _hashval() const { return value->hashval(); }
 public:
 	StateMachineSideEffectCopy(Int k, IRExpr *_value)
-		: key(k), value(_value)
+		: StateMachineSideEffect(StateMachineSideEffect::Copy),
+		  key(k), value(_value)
 	{
 	}
 	Int key;

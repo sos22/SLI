@@ -264,12 +264,18 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 {
 	if (t.sideEffects.count(s))
 		return t.sideEffects[s];
-	if (dynamic_cast<StateMachineSideEffect *>(s)) {
+	switch (s->type) {
+	case StateMachineSideEffect::Unreached:
 		t.sideEffects[s] = s;
 		return s;
-	} else if (StateMachineSideEffectMemoryAccess *ma = dynamic_cast<StateMachineSideEffectMemoryAccess *>(s)) {
+	case StateMachineSideEffect::Load:
+	case StateMachineSideEffect::Store: {
+		StateMachineSideEffectMemoryAccess *ma = dynamic_cast<StateMachineSideEffectMemoryAccess *>(s);
+		assert(ma);
 		ma->addr = internIRExpr(ma->addr, t);
-		if (StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma)) {
+		if (s->type == StateMachineSideEffect::Store) {
+			StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma);
+			assert(store);
 			store->data = internIRExpr(store->data, t);
 			for (auto it = t.stores.begin();
 			     it != t.stores.end();
@@ -282,10 +288,10 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 					return o;
 				}
 			}
-			t.sideEffects[s] = s;
 			t.stores.insert(store);
-			return s;
-		} else if (StateMachineSideEffectLoad *load = dynamic_cast<StateMachineSideEffectLoad *>(ma)) {
+		} else {
+			assert(s->type == StateMachineSideEffect::Load);
+			StateMachineSideEffectLoad *load = dynamic_cast<StateMachineSideEffectLoad *>(ma);
 			for (auto it = t.loads.begin();
 			     it != t.loads.end();
 			     it++) {
@@ -297,13 +303,14 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 					return o;
 				}
 			}
-			t.sideEffects[s] = s;
 			t.loads.insert(load);
-			return s;
-		} else {
-			abort();
 		}
-	} else if (StateMachineSideEffectCopy *copy = dynamic_cast<StateMachineSideEffectCopy *>(ma)) {
+		t.sideEffects[s] = s;
+		return s;
+	}
+	case StateMachineSideEffect::Copy: {
+		StateMachineSideEffectCopy *copy = dynamic_cast<StateMachineSideEffectCopy *>(s);
+		assert(copy);
 		copy->value = internIRExpr(copy->value, t);
 		for (auto it = t.copies.begin(); it != t.copies.end(); it++) {
 			StateMachineSideEffectCopy *o = *it;
@@ -316,9 +323,9 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		t.sideEffects[s] = s;
 		t.copies.insert(copy);
 		return s;
-	} else {
-		abort();
 	}
+	}
+	abort();
 }
 
 static StateMachineState *internStateMachineState(StateMachineState *start, internStateMachineTable &t);

@@ -224,8 +224,11 @@ StateMachineTransformer::doit(StateMachineEdge *inp, bool *done_something)
 	for (std::vector<StateMachineSideEffect *>::iterator it = inp->sideEffects.begin();
 	     it != inp->sideEffects.end();
 	     it++) {
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+		switch ( (*it)->type) {
+		case StateMachineSideEffect::Store: {
+			StateMachineSideEffectStore *smses =
+				dynamic_cast<StateMachineSideEffectStore *>(*it);
+			assert(smses);
 			IRExpr *a, *d;
 			a = transformIRExpr(smses->addr, &done);
 			d = transformIRExpr(smses->data, &done);
@@ -234,25 +237,32 @@ StateMachineTransformer::doit(StateMachineEdge *inp, bool *done_something)
 					a,
 					d,
 					smses->rip));
-		} else if (StateMachineSideEffectLoad *smsel =
-			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			break;
+		}
+		case StateMachineSideEffect::Load: {
+			StateMachineSideEffectLoad *smsel =
+				dynamic_cast<StateMachineSideEffectLoad *>(*it);
 			IRExpr *a = transformIRExpr(smsel->addr, &done);
 			res->sideEffects.push_back(
 				new StateMachineSideEffectLoad(
 					smsel->key,
 					a,
 					smsel->rip));
-		} else if (StateMachineSideEffectCopy *smsec =
-			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
+			break;
+		}
+		case StateMachineSideEffect::Copy: {
+			StateMachineSideEffectCopy *smsec =
+				dynamic_cast<StateMachineSideEffectCopy *>(*it);
 			IRExpr *v = transformIRExpr(smsec->value, &done);
 			res->sideEffects.push_back(
 				new StateMachineSideEffectCopy(
 					smsec->key,
 					v));
-		} else if (dynamic_cast<StateMachineSideEffectUnreached *>(*it)) {
+			break;
+		}
+		case StateMachineSideEffect::Unreached:
 			res->sideEffects.push_back(*it);
-		} else {
-			abort();
+			break;
 		}
 	}
 	if (done) {
@@ -747,8 +757,10 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 	if (TIMEOUT)
 		return true;
 	for (unsigned y = 0; y < sme->sideEffects.size(); y++) {
-		if (StateMachineSideEffectLoad *smsel =
-		    dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y])) {
+		if (sme->sideEffects[y]->type == StateMachineSideEffect::Load) {
+			StateMachineSideEffectLoad *smsel =
+				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
+			assert(smsel);
 			if (oracle->memoryAccessesMightAlias(smsel, smses))
 				return true;
 		}
@@ -771,8 +783,10 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 				      OracleInterface *oracle)
 {
 	for (unsigned y = idx + 1; y < sme->sideEffects.size(); y++) {
-		if (StateMachineSideEffectLoad *smsel =
-		    dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y])) {
+		if (sme->sideEffects[y]->type == StateMachineSideEffect::Load) {
+			StateMachineSideEffectLoad *smsel =
+				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
+			assert(smsel);
 			if (oracle->memoryAccessesMightAlias(smsel, smses))
 				return true;
 		}
@@ -916,9 +930,8 @@ public:
 	{}
 	void visitSideEffect(StateMachineSideEffect *smse)
 	{
-		if (StateMachineSideEffectLoad *smsel =
-		    dynamic_cast<StateMachineSideEffectLoad *>(smse))
-			out.insert(smsel);
+		if (smse->type == StateMachineSideEffect::Load)
+			out.insert(dynamic_cast<StateMachineSideEffectLoad *>(smse));
 	}
 };
 void
@@ -1036,8 +1049,11 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 {
 	if (TIMEOUT)
 		return;
-	if (StateMachineSideEffectStore *smses =
-	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+	switch (smse->type) {
+	case StateMachineSideEffect::Store: {
+		StateMachineSideEffectStore *smses =
+			dynamic_cast<StateMachineSideEffectStore *>(smse);
+		assert(smses);
 		/* Eliminate anything which is killed */
 		for (std::set<StateMachineSideEffect *>::iterator it = outputAvail.sideEffects.begin();
 		     it != outputAvail.sideEffects.end();
@@ -1070,18 +1086,27 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		    oracle->storeIsThreadLocal(smses))
 			outputAvail.sideEffects.insert(smses);
 		outputAvail.dereference(smses->addr);
-	} else if (StateMachineSideEffectCopy *smsec =
-		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
-		/* Copies are easy
-		   because they don't
-		   interfere with each
-		   other. */
+		break;
+	}
+	case StateMachineSideEffect::Copy: {
+		StateMachineSideEffectCopy *smsec =
+			dynamic_cast<StateMachineSideEffectCopy *>(smse);
+		assert(smsec);
+		/* Copies are easy because they don't interfere with
+		   each other. */
 		outputAvail.sideEffects.insert(smsec);
-	} else if (StateMachineSideEffectLoad *smsel =
-		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+		break;
+	}
+	case StateMachineSideEffect::Load: {
+		StateMachineSideEffectLoad *smsel =
+			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		/* Similarly loads */
 		outputAvail.sideEffects.insert(smsel);
 		outputAvail.dereference(smsel->addr);
+		break;
+	}
+	case StateMachineSideEffect::Unreached:
+		abort();
 	}
 }
 
@@ -1093,9 +1118,10 @@ public:
 		for (std::set<StateMachineSideEffect *>::const_iterator it = avail.sideEffects.begin();
 		     it != avail.sideEffects.end();
 		     it++) {
-			StateMachineSideEffectCopy *smsec = dynamic_cast<StateMachineSideEffectCopy *>(*it);
-			if (!smsec)
+			if ( (*it)->type != StateMachineSideEffect::Copy)
 				continue;
+			StateMachineSideEffectCopy *smsec = dynamic_cast<StateMachineSideEffectCopy *>(*it);
+			assert(smsec);
 			if (smsec->key == e->binder)
 				return smsec->value;
 		}
@@ -1162,8 +1188,10 @@ buildNewStateMachineWithLoadsEliminated(
 
 		newEffect = NULL;
 
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+		switch ((*it)->type) {
+		case StateMachineSideEffect::Store: {
+			StateMachineSideEffectStore *smses =
+				dynamic_cast<StateMachineSideEffectStore *>(*it);
 			IRExpr *newAddr, *newData;
 			bool doit = false;
 			newAddr = applyAvailSet(currentlyAvailable, smses->addr, false, &doit);
@@ -1175,8 +1203,11 @@ buildNewStateMachineWithLoadsEliminated(
 			} else {
 				newEffect = smses;
 			}
-		} else if (StateMachineSideEffectLoad *smsel =
-			   dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+			break;
+		}
+		case StateMachineSideEffect::Load: {
+			StateMachineSideEffectLoad *smsel =
+				dynamic_cast<StateMachineSideEffectLoad *>(*it);
 			IRExpr *newAddr;
 			bool doit = false;
 			newAddr = applyAvailSet(currentlyAvailable, smsel->addr, false, &doit);
@@ -1210,10 +1241,12 @@ buildNewStateMachineWithLoadsEliminated(
 				newEffect = *it;
 			if (newEffect != *it)
 				*done_something = true;
-		} else {
-			assert(dynamic_cast<StateMachineSideEffectCopy *>(*it) ||
-			       dynamic_cast<StateMachineSideEffectUnreached *>(*it));
+			break;
+		}
+		case StateMachineSideEffect::Copy:
+		case StateMachineSideEffect::Unreached:
 			newEffect = *it;
+			break;
 		}
 		assert(newEffect);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);

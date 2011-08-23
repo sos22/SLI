@@ -218,8 +218,11 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			   IRExpr **accumulatedAssumptions)
 {
 	IRExpr *addr = NULL;
-	if (StateMachineSideEffectMemoryAccess *smsema =
-	    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
+	if (smse->type == StateMachineSideEffect::Load ||
+	    smse->type == StateMachineSideEffect::Store) {
+		StateMachineSideEffectMemoryAccess *smsema =
+			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
+		assert(smsema);
 		addr = specialiseIRExpr(smsema->addr, state);
 		IRExpr *v = IRExpr_Unop(Iop_Not1,
 					IRExpr_Unop(Iop_BadPtr, addr));
@@ -233,8 +236,11 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 					AllowableOptimisations::defaultOptimisations);
 	}
 
-	if (StateMachineSideEffectStore *smses =
-	    dynamic_cast<StateMachineSideEffectStore *>(smse)) {
+	switch (smse->type) {
+	case StateMachineSideEffect::Store: {
+		StateMachineSideEffectStore *smses =
+			dynamic_cast<StateMachineSideEffectStore *>(smse);
+		assert(smses);
 		assert(addr);
 		if (collectOrderingConstraints) {
 			for (memLogT::reverse_iterator it = memLog.rbegin();
@@ -242,10 +248,11 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			     it++) {
 				if (it->first == thisMachine)
 					continue;
+				if (it->second->type != StateMachineSideEffect::Load)
+					continue;
 				StateMachineSideEffectLoad *smsel =
 					dynamic_cast<StateMachineSideEffectLoad *>(it->second);
-				if (!smsel)
-					continue;
+				assert(smsel);
 				if (!oracle->memoryAccessesMightAlias(smsel, smses))
 					continue;
 				if (evalExpressionsEqual(addr, smsel->addr, chooser, state, assumption, accumulatedAssumptions))
@@ -266,8 +273,12 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 				 smses->rip
 				 )
 				));
-	} else if (StateMachineSideEffectLoad *smsel =
-		   dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
+		break;
+	}
+	case StateMachineSideEffect::Load: {
+		StateMachineSideEffectLoad *smsel =
+			dynamic_cast<StateMachineSideEffectLoad *>(smse);
+		assert(smsel);
 		assert(addr);
 		StateMachineSideEffectStore *satisfier;
 		StateMachine *satisfierMachine;
@@ -319,11 +330,17 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 						specialiseIRExpr(addr, state),
 						smsel->rip)));
 		state.binders[smsel->key] = val;
-	} else if (StateMachineSideEffectCopy *smsec =
-		   dynamic_cast<StateMachineSideEffectCopy *>(smse)) {
+		break;
+	}
+	case StateMachineSideEffect::Copy: {
+		StateMachineSideEffectCopy *smsec =
+			dynamic_cast<StateMachineSideEffectCopy *>(smse);
+		assert(smsec);
 		state.binders[smsec->key] =
 			specialiseIRExpr(smsec->value, state);
-	} else {
+		break;
+	}
+	case StateMachineSideEffect::Unreached:
 		abort();
 	}
 }
@@ -660,11 +677,10 @@ top:
 	bool acceptable;
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];
 
-	acceptable = false;
-	acceptable |= !!dynamic_cast<StateMachineSideEffectCopy *>(se);
-	acceptable |= !!dynamic_cast<StateMachineSideEffectStore *>(se);
+	acceptable = se->type == StateMachineSideEffect::Copy ||
+		se->type == StateMachineSideEffect::Store;
 	if (wantLoad)
-		acceptable |= !!dynamic_cast<StateMachineSideEffectLoad *>(se);
+		acceptable |= se->type == StateMachineSideEffect::Load;
 	if (!acceptable) {
 		evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
 		history.push_back(se);
@@ -690,8 +706,6 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 	StateMachineSideEffect *se;
 	assert(machine->nextEdgeSideEffectIdx < machine->currentEdge->sideEffects.size());
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];	
-	assert(!dynamic_cast<StateMachineSideEffectCopy *>(se));
-	assert(!dynamic_cast<StateMachineSideEffectUnreached *>(se));
 	evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
 	history.push_back(se);
 	machine->nextEdgeSideEffectIdx++;
