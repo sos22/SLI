@@ -12,6 +12,7 @@
 class threadState {
 public:
 	std::map<Int, IRExpr *> binders;
+	std::map<threadAndRegister, IRExpr *> registers;
 };
 
 typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
@@ -36,6 +37,12 @@ class SpecialiseIRExpr : public IRExprTransformer {
 	IRExpr *transformIex(IRExpr::Binder *e) {
 		if (state.binders.count(e->binder))
 			return state.binders[e->binder];
+		return IRExprTransformer::transformIex(e);
+	}
+	IRExpr *transformIex(IRExpr::Get *e) {
+		auto it = state.registers.find(threadAndRegister(*e));
+		if (it != state.registers.end())
+			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
 public:
@@ -338,6 +345,14 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		assert(smsec);
 		state.binders[smsec->key] =
 			specialiseIRExpr(smsec->value, state);
+		break;
+	}
+	case StateMachineSideEffect::Put: {
+		StateMachineSideEffectPut *smsep =
+			dynamic_cast<StateMachineSideEffectPut *>(smse);
+		assert(smsep);
+		state.registers[threadAndRegister(*smsep)] =
+			specialiseIRExpr(smsep->value, state);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:

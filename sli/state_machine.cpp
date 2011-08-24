@@ -10,8 +10,8 @@
 
 #include "libvex_parse.h"
 
-
 static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
+static void findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &, const AllowableOptimisations &);
 
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 Int StateMachineSideEffectLoad::next_key;
@@ -148,6 +148,13 @@ StateMachineBifurcate::findUsedBinders(std::set<Int> &s, const AllowableOptimisa
 		s.insert(*it);
 	::findUsedBinders(condition, s, opt);
 }
+void
+StateMachineBifurcate::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+{
+	trueTarget->findUsedRegisters(s, opt);
+	falseTarget->findUsedRegisters(s, opt);
+	::findUsedRegisters(condition, s, opt);
+}
 
 StateMachineSideEffect *
 StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
@@ -179,6 +186,12 @@ StateMachineSideEffectStore::findUsedBinders(std::set<Int> &s, const AllowableOp
 	::findUsedBinders(addr, s, opt);
 	::findUsedBinders(data, s, opt);
 }
+void
+StateMachineSideEffectStore::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+{
+	::findUsedRegisters(addr, s, opt);
+	::findUsedRegisters(data, s, opt);
+}
 
 void
 StateMachineSideEffectLoad::constructed()
@@ -203,6 +216,11 @@ StateMachineSideEffectLoad::findUsedBinders(std::set<Int> &s, const AllowableOpt
 	s.erase(key);
 	::findUsedBinders(addr, s, opt);
 }
+void
+StateMachineSideEffectLoad::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+{
+	::findUsedRegisters(addr, s, opt);
+}
 
 StateMachineSideEffect *
 StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
@@ -220,12 +238,41 @@ StateMachineSideEffectCopy::findUsedBinders(std::set<Int> &s, const AllowableOpt
 	s.erase(key);
 	::findUsedBinders(value, s, opt);
 }
+void
+StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+{
+	::findUsedRegisters(value, s, opt);
+}
+
+StateMachineSideEffect *
+StateMachineSideEffectPut::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+{
+	value = optimiseIRExprFP(value, opt, done_something);
+	if (definitelyUnevaluatable(value, opt, oracle)) {
+		*done_something = true;
+		return StateMachineSideEffectUnreached::get();
+	}
+	return this;
+}
+void
+StateMachineSideEffectPut::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
+{
+	::findUsedBinders(value, s, opt);
+}
+void
+StateMachineSideEffectPut::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+{
+	s.erase(threadAndRegister(*this));
+	::findUsedRegisters(value, s, opt);
+}
 
 class rewriteBinderTransformer : public IRExprTransformer {
 public:
 	const std::map<Int, IRExpr *> &binders;
-	rewriteBinderTransformer(const std::map<Int, IRExpr *> &_binders)
-		: binders(_binders)
+	const std::map<threadAndRegister, IRExpr *> &regs;
+	rewriteBinderTransformer(const std::map<Int, IRExpr *> &_binders,
+				 const std::map<threadAndRegister, IRExpr *> &_regs)
+		: binders(_binders), regs(_regs)
 	{}
 	IRExpr *transformIex(IRExpr::Binder *e) {
 		if (binders.count(e->binder)) {
@@ -234,12 +281,20 @@ public:
 			return NULL;
 		}
 	}
+	IRExpr *transformIex(IRExpr::Get *e) {
+		auto it = regs.find(threadAndRegister(*e));
+		if (it != regs.end())
+			return it->second;
+		else
+			return NULL;
+	}
 };
-
 static IRExpr *
-rewriteBinderExpressions(IRExpr *ex, const std::map<Int, IRExpr *> &binders, bool *done_something)
+rewriteBinderExpressions(IRExpr *ex, const std::map<Int, IRExpr *> &binders,
+			 const std::map<threadAndRegister, IRExpr *> &regs,
+			 bool *done_something)
 {
-	rewriteBinderTransformer trans(binders);
+	rewriteBinderTransformer trans(binders, regs);
 	return trans.transformIRExpr(ex, done_something);
 }
 
@@ -408,11 +463,14 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			break;
 		case StateMachineSideEffect::Copy:
 			break;
+		case StateMachineSideEffect::Put:
+			break;
 		}
 	}
 
 	/* Propagate any copy operations. */
 	std::map<Int, IRExpr *> copies;
+	std::map<threadAndRegister, IRExpr *> puts;
 	for (std::vector<StateMachineSideEffect *>::iterator it2 = sideEffects.begin();
 	     !TIMEOUT && it2 != sideEffects.end();
 	     it2++) {
@@ -421,8 +479,8 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			StateMachineSideEffectStore *smses =
 				dynamic_cast<StateMachineSideEffectStore *>(*it2);
 			*it2 = new StateMachineSideEffectStore(
-				rewriteBinderExpressions(smses->addr, copies, done_something),
-				rewriteBinderExpressions(smses->data, copies, done_something),
+				rewriteBinderExpressions(smses->addr, copies, puts, done_something),
+				rewriteBinderExpressions(smses->data, copies, puts, done_something),
 				smses->rip);
 			break;
 		}
@@ -431,7 +489,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 			*it2 = new StateMachineSideEffectLoad(
 				smsel->key,
-				rewriteBinderExpressions(smsel->addr, copies, done_something),
+				rewriteBinderExpressions(smsel->addr, copies, puts, done_something),
 				smsel->rip);
 			break;
 		}
@@ -440,13 +498,25 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				dynamic_cast<StateMachineSideEffectCopy *>(*it2);
 			smsec = new StateMachineSideEffectCopy(
 				smsec->key,
-				rewriteBinderExpressions(smsec->value, copies, done_something));
+				rewriteBinderExpressions(smsec->value, copies, puts, done_something));
 			copies[smsec->key] = smsec->value;
 			*it2 = smsec;
 			break;
 		}
 		case StateMachineSideEffect::Unreached:
 			break;
+		case StateMachineSideEffect::Put: {
+			StateMachineSideEffectPut *smsep =
+				dynamic_cast<StateMachineSideEffectPut *>(*it2);
+			assert(smsep);
+			smsep = new StateMachineSideEffectPut(
+				smsep->offset,
+				rewriteBinderExpressions(smsep->value, copies, puts, done_something),
+				smsep->rip);
+			puts[threadAndRegister(*smsep)] = smsep->value;
+			*it2 = smsep;
+			break;
+		}
 		}
 	}
 
@@ -455,6 +525,8 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	target->findLoadedAddresses(loadedAddresses, opt);
 	std::set<Int> usedBinders;
 	target->findUsedBinders(usedBinders, opt);
+	std::set<threadAndRegister> usedRegisters;
+	target->findUsedRegisters(usedRegisters, opt);
 
 	it = sideEffects.end();
 	while (!TIMEOUT && it != sideEffects.begin()) {
@@ -488,6 +560,13 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			}
 			break;
 		}
+		case StateMachineSideEffect::Put: {
+			StateMachineSideEffectPut *smsep =
+				dynamic_cast<StateMachineSideEffectPut *>(*it);
+			if (!usedRegisters.count(threadAndRegister(*smsep)))
+				isDead = true;
+			break;
+		}
 		case StateMachineSideEffect::Load: {
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(*it);
@@ -517,62 +596,37 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 }
 
 static void
+findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &out, const AllowableOptimisations &opt)
+{
+	class _ : public IRExprTransformer {
+	public:
+		std::set<threadAndRegister> &out;
+		_(std::set<threadAndRegister> &_out)
+			: out(_out)
+		{}
+		IRExpr *transformIex(IRExpr::Get *e) {
+			out.insert(threadAndRegister(*e));
+			return IRExprTransformer::transformIex(e);
+		}
+	} t(out);
+	t.transformIRExpr(e);
+}
+
+static void
 findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt)
 {
-	switch (e->tag) {
-	case Iex_Binder:
-		out.insert(e->Iex.Binder.binder);
-		return;
-	case Iex_Get:
-		return;
-	case Iex_GetI:
-		findUsedBinders(e->Iex.GetI.ix, out, opt);
-		return;
-	case Iex_RdTmp:
-		return;
-	case Iex_Qop:
-		findUsedBinders(e->Iex.Qop.arg4, out, opt);
-	case Iex_Triop:
-		findUsedBinders(e->Iex.Qop.arg3, out, opt);
-	case Iex_Binop:
-		findUsedBinders(e->Iex.Qop.arg2, out, opt);
-	case Iex_Unop:
-		findUsedBinders(e->Iex.Qop.arg1, out, opt);
-		return;
-	case Iex_Load:
-		findUsedBinders(e->Iex.Load.addr, out, opt);
-		return;
-	case Iex_Const:
-		return;
-	case Iex_CCall: {
-		for (int x = 0; e->Iex.CCall.args[x]; x++)
-			findUsedBinders(e->Iex.CCall.args[x], out, opt);
-		return;
-	}
-	case Iex_Mux0X:
-		findUsedBinders(e->Iex.Mux0X.cond, out, opt);
-		findUsedBinders(e->Iex.Mux0X.expr0, out, opt);
-		findUsedBinders(e->Iex.Mux0X.exprX, out, opt);
-		return;
-	case Iex_Associative:
-		for (int it = 0;
-		     it < e->Iex.Associative.nr_arguments;
-		     it++)
-			findUsedBinders(e->Iex.Associative.contents[it], out, opt);
-		return;
-	case Iex_FreeVariable:
-		return;
-	case Iex_ClientCall:
-		for (int i = 0; e->Iex.ClientCall.args[i]; i++)
-			findUsedBinders(e->Iex.ClientCall.args[i], out, opt);
-		return;
-	case Iex_ClientCallFailed:
-		findUsedBinders(e->Iex.ClientCallFailed.target, out, opt);
-		return;
-	case Iex_HappensBefore:
-		return;
-	}
-	abort();
+	class _ : public IRExprTransformer {
+	public:
+		std::set<Int> &out;
+		_(std::set<Int> &_out)
+			: out(_out)
+		{}
+		IRExpr *transformIex(IRExpr::Binder *e) {
+			out.insert(e->binder);
+			return IRExprTransformer::transformIex(e);
+		}
+	} t(out);
+	t.transformIRExpr(e);
 }
 
 static void
@@ -710,6 +764,15 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 	}
 	case StateMachineSideEffect::Unreached:
 		return true;
+	case StateMachineSideEffect::Put: {
+		StateMachineSideEffectPut *smsep1 =
+			dynamic_cast<StateMachineSideEffectPut *>(smse1);
+		StateMachineSideEffectPut *smsep2 =
+			dynamic_cast<StateMachineSideEffectPut *>(smse2);
+		return smsep1->offset == smsep2->offset &&
+			smsep1->rip == smsep2->rip &&
+			definitelyEqual(smsep1->value, smsep2->value, opt);
+	}
 	}
 	abort();
 }

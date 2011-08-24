@@ -18,6 +18,7 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineSideEffectStore *> stores;
 	std::set<StateMachineSideEffectLoad *> loads;
 	std::set<StateMachineSideEffectCopy *> copies;
+	std::set<StateMachineSideEffectPut *> puts;
 	std::set<StateMachineProxy *> states_proxy;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
@@ -322,6 +323,23 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		}
 		t.sideEffects[s] = s;
 		t.copies.insert(copy);
+		return s;
+	}
+	case StateMachineSideEffect::Put: {
+		StateMachineSideEffectPut *put = dynamic_cast<StateMachineSideEffectPut *>(s);
+		assert(put);
+		put->value = internIRExpr(put->value, t);
+		for (auto it = t.puts.begin(); it != t.puts.end(); it++) {
+			StateMachineSideEffectPut *o = *it;
+			if (o->offset == put->offset &&
+			    o->value == put->value &&
+			    o->rip == put->rip) {
+				t.sideEffects[s] = o;
+				return o;
+			}
+		}
+		t.sideEffects[s] = s;
+		t.puts.insert(put);
 		return s;
 	}
 	}

@@ -13,6 +13,7 @@ class StateMachine;
 class StateMachineEdge;
 class StateMachineSideEffect;
 class OracleInterface;
+class threadAndRegister;
 
 class AllowableOptimisations {
 public:
@@ -198,6 +199,10 @@ public:
 		: root(new_root), origin(_origin), freeVariables(parent->freeVariables),
 		  tid(parent->tid), assumptions_false(parent->assumptions_false)
 	{}
+	StateMachine(StateMachine *parent)
+		: root(parent->root), origin(parent->origin), freeVariables(parent->freeVariables),
+		  tid(parent->tid), assumptions_false(parent->assumptions_false)
+	{}
 	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
 		: root(parent->root),
 		  origin(parent->origin),
@@ -235,6 +240,7 @@ public:
 	virtual StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
+	virtual void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &) = 0;
 	virtual StateMachineState *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
 	virtual bool canCrash() = 0;
 	virtual int complexity() = 0;
@@ -263,7 +269,7 @@ class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &
 	StateMachineSideEffect(); /* DNE */
 public:
 	enum sideEffectType {
-		Load, Store, Copy, Unreached
+		Load, Store, Copy, Unreached, Put
 	} type;
 protected:
 	virtual unsigned long _hashval() const = 0;
@@ -274,6 +280,7 @@ public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
+	virtual void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &) = 0;
 	virtual int complexity() = 0;
 	virtual void sanity_check(const std::set<Int> &) const = 0;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
@@ -342,6 +349,15 @@ public:
 		     it++)
 			(*it)->findUsedBinders(s, opt);
 	}
+	void findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt) {
+		if (TIMEOUT)
+			return;
+		target->findUsedRegisters(s, opt);
+		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
+		     it != sideEffects.rend();
+		     it++)
+			(*it)->findUsedRegisters(s, opt);
+	}
 	StateMachineEdge *selectSingleCrashingPath() __attribute__((warn_unused_result)) {
 		target = target->selectSingleCrashingPath();
 		return this;
@@ -368,6 +384,7 @@ public:
 	virtual void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &) {}
 	StateMachineState *selectSingleCrashingPath() { return this; }
 	int complexity() { return 1; }
 	StateMachineEdge *target0() { return NULL; }
@@ -467,6 +484,9 @@ public:
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt) {
 		target->findUsedBinders(s, opt);
 	}
+	void findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt) {
+		target->findUsedRegisters(s, opt);
+	}
 	StateMachineState *selectSingleCrashingPath() {
 		target = target->selectSingleCrashingPath();
 		return this;
@@ -543,6 +563,7 @@ public:
 			s.insert(*it);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	void findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt);
 	StateMachineState *selectSingleCrashingPath() {
 		trueTarget = trueTarget->selectSingleCrashingPath();
 		falseTarget = falseTarget->selectSingleCrashingPath();
@@ -601,6 +622,7 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, OracleInterface *, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
+	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
 	int complexity() { return 0; }
 	void sanity_check(const std::set<Int> &binders) const {}
@@ -639,6 +661,7 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
 	void sanity_check(const std::set<Int> &binders) const {
 		checkIRExprBindersInScope(addr, binders);
@@ -673,6 +696,7 @@ public:
 		l.insert(addr);
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(addr) + 20; }
 	void sanity_check(const std::set<Int> &binders) const {
 		checkIRExprBindersInScope(addr, binders);
@@ -699,10 +723,49 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(value); }
 	void sanity_check(const std::set<Int> &binders) const {
 		checkIRExprBindersInScope(value, binders);
 	}
+};
+class StateMachineSideEffectPut : public StateMachineSideEffect {
+	unsigned long _hashval() const { return value->hashval() + offset * 5000000743ul; }
+public:
+	StateMachineSideEffectPut(unsigned _offset, IRExpr *_value, ThreadRip _rip)
+		: StateMachineSideEffect(StateMachineSideEffect::Put),
+		  offset(_offset), value(_value), rip(_rip)
+	{
+	}
+	unsigned offset;
+	IRExpr *value;
+	ThreadRip rip;
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "Put%d <- ", offset);
+		ppIRExpr(value, f);
+		fprintf(f, " @ %d:%lx", rip.thread, rip.rip);
+	}
+	void visit(HeapVisitor &hv) {
+		hv(value);
+	}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &);
+	int complexity() { return exprComplexity(value); }
+	void sanity_check(const std::set<Int> &binders) const {
+		checkIRExprBindersInScope(value, binders);
+	}
+};
+
+class threadAndRegister : public std::pair<unsigned, unsigned> {
+public:
+	threadAndRegister(IRExpr::Get &e)
+		: std::pair<unsigned, unsigned>(e.tid, e.offset)
+	{}
+	threadAndRegister(StateMachineSideEffectPut &s)
+		: std::pair<unsigned, unsigned>(s.rip.thread, s.offset)
+	{}
 };
 
 

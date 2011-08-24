@@ -156,18 +156,38 @@ protected:
 			*it = transformIRExpr(*it, done_something);
 	}
 public:
+	virtual void transform(FreeVariableMap *fvm, bool *done_something)
+	{
+		fvm->applyTransformation(*this, done_something);
+	}
+	void transform(FreeVariableMap *fvm)
+	{
+		bool b;
+		transform(fvm, &b);
+	}
+	virtual StateMachineSideEffect *transform(StateMachineSideEffect *, bool *done_something);
+	StateMachineSideEffect *transform(StateMachineSideEffect *se)
+	{
+		bool b;
+		return transform(se, &b);
+	}
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL)
 	{
 		bool b = false;
 		assumptionFalseSetT kgp = s->assumptions_false;
 		transformAssumptions(kgp, &b);
+		FreeVariableMap fvm = s->freeVariables;
+		transform(&fvm, &b);
 		StateMachineState *r = transform(s->root, &b);
 		if (b) {
 			if (done_something)
 				*done_something = true;
-			StateMachine *sm = new StateMachine(s, fvDelta);
+			StateMachine *sm = new StateMachine(s);
 			sm->root = r;
 			sm->assumptions_false = kgp;
+			sm->freeVariables = fvm;
+			for (auto it = fvDelta.begin(); it != fvDelta.end(); it++)
+				sm->freeVariables.content->set(it->first, it->second);
 			return sm;
 		}
 		return s;
