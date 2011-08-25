@@ -69,6 +69,8 @@ shallow_hash(const IRExpr *e)
 static IRExpr *
 internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 {
+	if (TIMEOUT)
+		return e;
 	unsigned h = shallow_hash(e) % internIRExprTable::nr_entries;
 	if (lookupTable.lookups[h].count(e))
 		return lookupTable.lookups[h][e];
@@ -351,6 +353,8 @@ static StateMachineState *internStateMachineState(StateMachineState *start, inte
 static StateMachineEdge *
 internStateMachineEdge(StateMachineEdge *start, internStateMachineTable &t)
 {
+	if (TIMEOUT)
+		return start;
 	if (t.edges.count(start))
 		return t.edges[start];
 	start->target = internStateMachineState(start->target, t);
