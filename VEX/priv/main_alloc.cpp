@@ -243,7 +243,7 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 
 	LibVEX_alloc_sanity_check(h);
 
-	printf("Major GC starts\n");
+	printf("Major GC starts; %ld bytes in heap, %d roots\n", h->heap_used, h->nr_gc_roots);
 
 	assert(!gc_in_progress);
 	gc_in_progress = true;
@@ -331,7 +331,7 @@ LibVEX_gc(Heap *h, GarbageCollectionToken t)
 
 	LibVEX_alloc_sanity_check(h);
 
-	printf("Major GC finished; %ld bytes in heap\n", h->heap_used);
+	printf("Major GC finished; %ld bytes in heap, %d roots\n", h->heap_used, h->nr_gc_roots);
 	gc_in_progress = false;
 }
 
