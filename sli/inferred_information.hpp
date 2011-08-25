@@ -49,7 +49,8 @@ public:
 		crashReasons(new gc_heap_map<unsigned long, StateMachine, &ir_heap>::type())
 	{}
 	void addCrashReason(StateMachine *cr) { crashReasons->set(cr->origin, cr); }
-	StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install);
+	StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install,
+				       const AllowableOptimisations &opt);
 
 	void visit(HeapVisitor &hv) {
 		hv(oracle);

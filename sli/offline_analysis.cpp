@@ -3195,7 +3195,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		cr = ii->CFGtoCrashReason(sm->tid, cfg, true);
+		cr = ii->CFGtoCrashReason(sm->tid, cfg, true, opt);
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3371,7 +3371,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		breakCycles(cfg.get());
 
 		VexPtr<StateMachine, &ir_heap> cr(
-			ii->CFGtoCrashReason(tid._tid(), cfg, true));
+			ii->CFGtoCrashReason(tid._tid(), cfg, true, opt));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3623,7 +3623,8 @@ buildCFGForRipSet(AddressSpace *as,
 }
 
 StateMachine *
-InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install)
+InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install,
+				      const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
 		return NULL;
@@ -3644,7 +3645,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 				break;
 		if (cfg->fallThrough) {
 			StateMachine *ft;
-			ft = CFGtoCrashReason(tid, cfg->fallThrough, false);
+			ft = CFGtoCrashReason(tid, cfg->fallThrough, false, opt);
 			if (!ft)
 				return NULL;
 			if (x == irsb->stmts_used &&
@@ -3659,7 +3660,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 					if (stmt->tag == Ist_Exit) {
 						if (cfg->branch) {
 							StateMachine *other =
-								CFGtoCrashReason(tid, cfg->branch, false);
+								CFGtoCrashReason(tid, cfg->branch, false, opt);
 							if (!other)
 								return NULL;
 							ft = new StateMachine(
@@ -3681,7 +3682,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 			res = ft;
 		} else {
 			assert(cfg->branch);
-			StateMachine *b = CFGtoCrashReason(tid, cfg->branch, false);
+			StateMachine *b = CFGtoCrashReason(tid, cfg->branch, false, opt);
 			if (!b)
 				return NULL;
 			for (x--; x >= 0; x--)
@@ -3700,7 +3701,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	}
 	assert(res);
 	res->origin = cfg->my_rip;
-	res = optimiseStateMachine(res, AllowableOptimisations::defaultOptimisations, oracle, false);
+	res = optimiseStateMachine(res, opt, oracle, false);
 	if (install)
 		crashReasons->set(cfg->my_rip, res);
 	return res;
