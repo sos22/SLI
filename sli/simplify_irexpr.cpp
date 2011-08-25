@@ -1148,9 +1148,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				return src;
 			}
 			if (src->Iex.Unop.arg->tag == Iex_Get &&
-			    src->Iex.Unop.arg->Iex.Get.offset == offsetof(VexGuestAMD64State, guest_FS_ZERO)) {
-				/* The FS register is assumed to
-				   always point at valid memory. */
+			    (src->Iex.Unop.arg->Iex.Get.offset == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
+			     src->Iex.Unop.arg->Iex.Get.offset == offsetof(VexGuestAMD64State, guest_RSP))) {
+				/* The FS and RSP registers are
+				   assumed to always point at valid
+				   memory. */
 				*done_something = true;
 				return IRExpr_Const(IRConst_U1(0));
 			}
