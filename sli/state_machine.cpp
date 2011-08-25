@@ -1032,6 +1032,7 @@ void
 StateMachineState::assertAcyclic(std::vector<const StateMachineState *> &stack,
 				 std::set<const StateMachineState *> &clean) const
 {
+#ifndef NDEBUG
 	if (clean.count(this))
 		return;
 	if (std::find(stack.begin(), stack.end(), this) != stack.end())
@@ -1059,14 +1060,17 @@ found_cycle:
 		printf("\t%d\n", labels[*it]);
 	printf("End\n");
 	assert(0);
+#endif
 }
 
 void
 StateMachineState::assertAcyclic() const
 {
+#ifndef NDEBUG
 	std::vector<const StateMachineState *> stack;
 	std::set<const StateMachineState *> clean;
 	assertAcyclic(stack, clean);
+#endif
 }
 
 void
