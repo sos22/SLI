@@ -559,7 +559,7 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 	return sm;
 }
 
-StateMachine *
+StateMachineEdge *
 getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 {
 	unsigned idx;
@@ -573,12 +573,7 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 		if (!sm)
 			return NULL;
 	}
-	FreeVariableMap fvm;
-	return new StateMachine(
-		new StateMachineProxy(rip, sm),
-		rip,
-		fvm,
-		thr->tid._tid());
+	return sm;
 }
 
 template <typename t> void

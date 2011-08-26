@@ -96,14 +96,14 @@ consider_rip(unsigned long my_rip,
 	LibVEX_maybe_gc(token);
 
 	fprintf(_logfile, "Considering %lx...\n", my_rip);
-	VexPtr<StateMachine, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
+	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
 	}
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
-	ii->crashReasons->set(my_rip, proximal->root);
+	ii->crashReasons->set(my_rip, new StateMachineProxy(my_rip, proximal));
 
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, my_rip);
