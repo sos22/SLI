@@ -26,10 +26,34 @@
 #define MAX_LIVE_ASSERTIONS 5
 
 template <typename t> void printCFG(const CFGNode<t> *cfg);
+template <typename k, typename v>
+class abstract_map {
+public:
+	virtual bool hasKey(const k &) = 0;
+	virtual v get(const k &) = 0;
+	virtual void set(const k &, const v &) = 0;
+};
+static StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
+				      AddressSpace *as,
+				      abstract_map<unsigned long, StateMachineState *> &crashReasons);
 
 typedef std::pair<StateMachineState *, StateMachineState *> st_pair_t;
 typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
 
+class iiCrashReasons : public abstract_map<unsigned long, StateMachineState *> {
+public:
+	InferredInformation *ii;
+	iiCrashReasons(InferredInformation *_ii)
+		: ii(_ii)
+	{}
+	bool hasKey(const unsigned long &x) { return ii->crashReasons->hasKey(x); }
+	StateMachineState *get(const unsigned long &x) {
+		return ii->crashReasons->get(x);
+	}
+	void set(const unsigned long &x, StateMachineState *const &v) {
+		ii->crashReasons->set(x, v);
+	}
+};
 static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
 						 unsigned long start,
 						 const std::set<unsigned long> &terminalFunctions,
@@ -3268,7 +3292,9 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		cr = ii->CFGtoCrashReason(sm->tid, cfg);
+		iiCrashReasons _(ii);
+		cr = CFGtoCrashReason(sm->tid, cfg, oracle->ms->addressSpace,
+				      _);
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3443,8 +3469,9 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		trimCFG(cfg.get(), interesting, INT_MAX, true);
 		breakCycles(cfg.get());
 
+		iiCrashReasons _(ii);
 		VexPtr<StateMachine, &ir_heap> cr(
-			ii->CFGtoCrashReason(tid._tid(), cfg));
+			CFGtoCrashReason(tid._tid(), cfg, oracle->ms->addressSpace, _));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3695,14 +3722,15 @@ buildCFGForRipSet(AddressSpace *as,
 	return builtSoFar[start].first;
 }
 
-StateMachine *
-InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
+static StateMachine *
+CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, AddressSpace *as,
+		 abstract_map<unsigned long, StateMachineState *> &crashReasons)
 {
-	typedef std::pair<StateMachineState **, CFGNode<unsigned long> *> reloc_t;
 	class State {
-	public:
+		typedef std::pair<StateMachineState **, CFGNode<unsigned long> *> reloc_t;
 		std::vector<CFGNode<unsigned long> *> pending;
 		std::vector<reloc_t> relocs;
+	public:
 		std::map<CFGNode<unsigned long> *, StateMachineState *> cfgToState;
 
 		CFGNode<unsigned long> *nextNode() {
@@ -3736,15 +3764,15 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 
 	class FetchIrsb {
 	public:
-		Oracle *oracle;
+		AddressSpace *as;
 		unsigned tid;
-		FetchIrsb(Oracle *_oracle, unsigned _tid)
-			: oracle(_oracle), tid(_tid)
+		FetchIrsb(AddressSpace *_as, unsigned _tid)
+			: as(_as), tid(_tid)
 		{}
 		IRSB *operator()(unsigned long rip) {
-			return oracle->ms->addressSpace->getIRSBForAddress(tid, rip);
+			return as->getIRSBForAddress(tid, rip);
 		}
-	} fetchIrsb(oracle, tid);
+	} fetchIrsb(as, tid);
 
 	class BuildStateForCfgNode {
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
@@ -3872,8 +3900,8 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 		cfg = state.nextNode();
 		if (!cfg)
 			break;
-		if (crashReasons->hasKey(cfg->my_rip)) {
-			state.cfgToState[cfg] = crashReasons->get(cfg->my_rip);
+		if (crashReasons.hasKey(cfg->my_rip)) {
+			state.cfgToState[cfg] = crashReasons.get(cfg->my_rip);
 		} else {
 			IRSB *irsb = fetchIrsb(cfg->my_rip);
 			StateMachineState *s = buildStateForCfgNode(cfg, irsb);
@@ -3884,7 +3912,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 	}
 
 	FreeVariableMap fv;
-	crashReasons->set(cfg->my_rip, root);
+	crashReasons.set(cfg->my_rip, root);
 	return new StateMachine(root, original_rip, fv, tid);
 }
 
