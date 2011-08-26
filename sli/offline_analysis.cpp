@@ -34,9 +34,9 @@ public:
 	virtual void set(const k &, const v &) = 0;
 };
 template <typename t> StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<t> *cfg,
-						     AddressSpace *as,
 						     abstract_map<t, StateMachineState *> &crashReasons,
-						     StateMachineState *escapeState);
+						     StateMachineState *escapeState,
+						     Oracle *oracle);
 
 typedef std::pair<StateMachineState *, StateMachineState *> st_pair_t;
 typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
@@ -3017,70 +3017,8 @@ buildCFGForCallGraph(AddressSpace *as,
 	return res;
 }
 
-/* Try to backtrack across a call instruction.  We determine how many
-   arguments the called function is supposed to have by asking the
-   oracle, and assume that it is a pure function of those arguments
-   which returns a single value in RAX */
 static StateMachine *
-updateStateMachineForCallInstruction(ThreadRip site, StateMachine *orig, IRSB *irsb, Oracle *oracle)
-{
-	IRExpr *r;
-
-	unsigned long called_rip;
-	assert(irsb->jumpkind == Ijk_Call);
-	if (irsb->next->tag == Iex_Const) {
-		called_rip = irsb->next->Iex.Const.con->Ico.U64;
-		Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
-
-		/* We only consider arguments in registers.  This is
-		   probably a bug; nevermind. */
-		static const int argument_registers[6] = {
-			OFFSET_amd64_RDI,
-			OFFSET_amd64_RSI,
-			OFFSET_amd64_RDX,
-			OFFSET_amd64_RCX,
-			OFFSET_amd64_R8,
-			OFFSET_amd64_R9};
-
-		int nr_args;
-		nr_args = 0;
-		for (int i = 0; i < 6; i++)
-			if (live.isLive(argument_registers[i]))
-				nr_args++;
-		IRExpr **args = alloc_irexpr_array(nr_args + 1);
-		nr_args = 0;
-		for (int i = 0; i < 6; i++)
-			if (live.isLive(argument_registers[i]))
-				args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread);
-		args[nr_args] = NULL;
-		r = IRExpr_ClientCall(called_rip, site, args);
-	} else {
-		r = IRExpr_ClientCallFailed(irsb->next);
-	}
-
-	/* Pick up any temporaries calculated during the call
-	 * instruction. */
-	for (int i = irsb->stmts_used - 1; i >= 0; i--) {
-		IRStmt *stmt = irsb->stmts[i];
-		/* We ignore statements other than WrTmp if they
-		   happen in a call instruction. */
-		if (stmt->tag == Ist_WrTmp)
-			r = rewriteTemporary(r, stmt->Ist.WrTmp.tmp, stmt->Ist.WrTmp.data);
-	}
-
-	StateMachineProxy *smp = new StateMachineProxy(site.rip, orig->root);
-	smp->target->prependSideEffect(
-		new StateMachineSideEffectPut(
-			OFFSET_amd64_RAX,
-			r,
-			site));
-	StateMachine *sm = new StateMachine(orig, site.rip, smp);
-	rewriteRegister(&sm->freeVariables, OFFSET_amd64_RAX, r);
-	return sm;
-}
-
-static StateMachine *
-CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<StackRip> *cfg)
+CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode<StackRip> *cfg)
 {
 	class : public abstract_map<StackRip, StateMachineState *> {
 	public:
@@ -3095,7 +3033,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<StackRip> *cfg)
 			impl[k] = v;
 		}
 	} state;
-	return CFGtoCrashReason<StackRip>(tid, cfg, as, state, StateMachineCrash::get());
+	return CFGtoCrashReason<StackRip>(tid, cfg, state, StateMachineCrash::get(), oracle);
 }
 
 static bool
@@ -3225,8 +3163,11 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		breakCycles(cfg.get());
 
 		iiCrashReasons _(ii);
-		cr = CFGtoCrashReason<unsigned long>(sm->tid, cfg, oracle->ms->addressSpace,
-						     _, StateMachineNoCrash::get());
+		cr = CFGtoCrashReason<unsigned long>(sm->tid,
+						     cfg,
+						     _,
+						     StateMachineNoCrash::get(),
+						     oracle);
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3260,7 +3201,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, as.get(), cfg.get()));
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle.get(), cfg.get()));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
@@ -3403,8 +3344,9 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 
 		iiCrashReasons _(ii);
 		VexPtr<StateMachine, &ir_heap> cr(
-			CFGtoCrashReason<unsigned long>(tid._tid(), cfg, oracle->ms->addressSpace, _,
-							StateMachineNoCrash::get()));
+			CFGtoCrashReason<unsigned long>(tid._tid(), cfg, _,
+							StateMachineNoCrash::get(),
+							oracle));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3656,9 +3598,11 @@ buildCFGForRipSet(AddressSpace *as,
 }
 
 template <typename t> StateMachine *
-CFGtoCrashReason(unsigned tid, CFGNode<t> *cfg, AddressSpace *as,
+CFGtoCrashReason(unsigned tid,
+		 CFGNode<t> *cfg,
 		 abstract_map<t, StateMachineState *> &crashReasons,
-		 StateMachineState *escapeState)
+		 StateMachineState *escapeState,
+		 Oracle *oracle)
 {
 	class State {
 		typedef std::pair<StateMachineState **, CFGNode<t> *> reloc_t;
@@ -3706,7 +3650,7 @@ CFGtoCrashReason(unsigned tid, CFGNode<t> *cfg, AddressSpace *as,
 		IRSB *operator()(t rip) {
 			return as->getIRSBForAddress(tid, wrappedRipToRip(rip));
 		}
-	} fetchIrsb(as, tid);
+	} fetchIrsb(oracle->ms->addressSpace, tid);
 
 	class BuildStateForCfgNode {
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
@@ -3787,20 +3731,84 @@ CFGtoCrashReason(unsigned tid, CFGNode<t> *cfg, AddressSpace *as,
 				edge->prependSideEffect(se);
 			return edge;
 		}
+
+		StateMachineState *buildStateForCallInstruction(CFGNode<t> *cfg,
+								IRSB *irsb,
+								ThreadRip site)
+		{
+			assert(cfg->fallThrough);
+			IRExpr *r;
+			if (irsb->next->tag == Iex_Const) {
+				unsigned long called_rip = irsb->next->Iex.Const.con->Ico.U64;
+				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
+
+				/* We only consider arguments in registers.  This is
+				   probably a bug; nevermind. */
+				static const int argument_registers[6] = {
+					OFFSET_amd64_RDI,
+					OFFSET_amd64_RSI,
+					OFFSET_amd64_RDX,
+					OFFSET_amd64_RCX,
+					OFFSET_amd64_R8,
+					OFFSET_amd64_R9};
+
+				int nr_args;
+				nr_args = 0;
+				for (int i = 0; i < 6; i++)
+					if (live.isLive(argument_registers[i]))
+						nr_args++;
+				IRExpr **args = alloc_irexpr_array(nr_args + 1);
+				nr_args = 0;
+				for (int i = 0; i < 6; i++)
+					if (live.isLive(argument_registers[i]))
+						args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread);
+				args[nr_args] = NULL;
+				r = IRExpr_ClientCall(called_rip, site, args);
+			} else {
+				r = IRExpr_ClientCallFailed(irsb->next);
+			}
+
+			/* Pick up any temporaries calculated during
+			 * the call instruction. */
+			for (int i = irsb->stmts_used - 1; i >= 0; i--) {
+				IRStmt *stmt = irsb->stmts[i];
+				/* We ignore statements other than WrTmp if they
+				   happen in a call instruction. */
+				if (stmt->tag == Ist_WrTmp)
+					r = rewriteTemporary(r, stmt->Ist.WrTmp.tmp, stmt->Ist.WrTmp.data);
+			}
+
+			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
+			state.addReloc(&smp->target->target, cfg->fallThrough);
+			smp->target->prependSideEffect(
+				new StateMachineSideEffectPut(
+					OFFSET_amd64_RAX,
+					r,
+					site));
+			return smp;
+		}
 	public:
 		unsigned tid;
 		State &state;
 		StateMachineState *escapeState;
-		BuildStateForCfgNode(unsigned _tid, State &_state, StateMachineState *_escapeState)
-			: tid(_tid), state(_state), escapeState(_escapeState)
+		Oracle *oracle;
+		BuildStateForCfgNode(unsigned _tid, State &_state, StateMachineState *_escapeState,
+				     Oracle *_oracle)
+			: tid(_tid), state(_state), escapeState(_escapeState), oracle(_oracle)
 		{}
 		StateMachineState *operator()(CFGNode<t> *cfg,
 					      IRSB *irsb) {
+			ThreadRip rip(ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip)));
 			int endOfInstr;
 			for (endOfInstr = 1;
 			     endOfInstr < irsb->stmts_used && irsb->stmts[endOfInstr]->tag != Ist_IMark;
 			     endOfInstr++)
 				;
+			if (endOfInstr == irsb->stmts_used && irsb->jumpkind == Ijk_Call) {
+				/* This is a call node, which requires
+				 * special handling. */
+				return buildStateForCallInstruction(cfg, irsb, rip);
+			}
 			StateMachineEdge *edge = new StateMachineEdge(NULL);
 			if (!cfg->fallThrough) {
 				if (!cfg->branch)
@@ -3819,15 +3827,15 @@ CFGtoCrashReason(unsigned tid, CFGNode<t> *cfg, AddressSpace *as,
 			}
 			for (int i = endOfInstr; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
-							     ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip)),
+							     rip,
 							     cfg->branch,
 							     edge);
 				if (!edge)
 					return NULL;
 			}
-			return new StateMachineProxy(wrappedRipToRip(cfg->my_rip), edge);
+			return new StateMachineProxy(rip.rip, edge);
 		}
-	} buildStateForCfgNode(tid, state, escapeState);
+	} buildStateForCfgNode(tid, state, escapeState, oracle);
 
 	unsigned long original_rip = wrappedRipToRip(cfg->my_rip);
 	StateMachineState *root = NULL;
