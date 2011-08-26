@@ -3267,7 +3267,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		cr = ii->CFGtoCrashReason(sm->tid, cfg, true, opt);
+		cr = ii->CFGtoCrashReason(sm->tid, cfg);
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3443,7 +3443,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		breakCycles(cfg.get());
 
 		VexPtr<StateMachine, &ir_heap> cr(
-			ii->CFGtoCrashReason2(tid._tid(), cfg, true, opt));
+			ii->CFGtoCrashReason(tid._tid(), cfg));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3695,7 +3695,7 @@ buildCFGForRipSet(AddressSpace *as,
 }
 
 StateMachine *
-InferredInformation::CFGtoCrashReason2(unsigned tid, CFGNode<unsigned long> *cfg, bool, const AllowableOptimisations &)
+InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 {
 	typedef std::pair<StateMachineState **, CFGNode<unsigned long> *> reloc_t;
 	class State {
@@ -3884,90 +3884,6 @@ InferredInformation::CFGtoCrashReason2(unsigned tid, CFGNode<unsigned long> *cfg
 
 	FreeVariableMap fv;
 	return new StateMachine(root, original_rip, fv, tid);
-}
-
-StateMachine *
-InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install,
-				      const AllowableOptimisations &opt)
-{
-	if (TIMEOUT)
-		return NULL;
-	if (crashReasons->hasKey(cfg->my_rip)) {
-		assert(crashReasons->get(cfg->my_rip));
-		return crashReasons->get(cfg->my_rip);
-	}
-	StateMachine *res;
-	FreeVariableMap fv;
-	if (!cfg->branch && !cfg->fallThrough) {
-		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, fv, tid);
-	} else {
-		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, cfg->my_rip);
-		int x;
-		for (x = 1; x < irsb->stmts_used; x++)
-			if (irsb->stmts[x]->tag == Ist_IMark)
-				break;
-		if (cfg->fallThrough) {
-			StateMachine *ft;
-			ft = CFGtoCrashReason(tid, cfg->fallThrough, false, opt);
-			if (!ft)
-				return NULL;
-			if (x == irsb->stmts_used &&
-			    irsb->jumpkind == Ijk_Call &&
-			    cfg->fallThroughRip == extract_call_follower(irsb)) {
-				/* Calls need special handling */
-				ft = updateStateMachineForCallInstruction(ThreadRip::mk(tid, cfg->my_rip), ft, irsb, oracle);
-			} else {
-				while (x != 0) {
-					x--;
-					IRStmt *stmt = irsb->stmts[x];
-					if (stmt->tag == Ist_Exit) {
-						if (cfg->branch) {
-							StateMachine *other =
-								CFGtoCrashReason(tid, cfg->branch, false, opt);
-							if (!other)
-								return NULL;
-							ft = new StateMachine(
-								ft,
-								cfg->my_rip,
-								new StateMachineBifurcate(
-									cfg->my_rip,
-									stmt->Ist.Exit.guard,
-									other->root,
-									ft->root));
-						}
-					} else {
-						ft = backtrackOneStatement(ft, stmt, cfg->my_rip);
-						if (!ft)
-							return NULL;
-					}
-				}
-			}
-			res = ft;
-		} else {
-			assert(cfg->branch);
-			StateMachine *b = CFGtoCrashReason(tid, cfg->branch, false, opt);
-			if (!b)
-				return NULL;
-			for (x--; x >= 0; x--)
-				if (irsb->stmts[x]->tag == Ist_Exit)
-					break;
-			assert(x > 0);
-			while (x != 0) {
-				x--;
-				IRStmt *stmt = irsb->stmts[x];
-				b = backtrackOneStatement(b, stmt, cfg->my_rip);
-				if (!b)
-					return NULL;
-			}
-			res = b;
-		}
-	}
-	assert(res);
-	res->origin = cfg->my_rip;
-	res = optimiseStateMachine(res, opt, oracle, false);
-	if (install)
-		crashReasons->set(cfg->my_rip, res);
-	return res;
 }
 
 remoteMacroSectionsT::iterator::iterator(const remoteMacroSectionsT *_owner, unsigned _idx)
