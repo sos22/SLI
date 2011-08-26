@@ -102,8 +102,8 @@ consider_rip(unsigned long my_rip,
 		return;
 	}
 
-	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
-	ii->crashReasons->set(my_rip, new StateMachineProxy(my_rip, proximal));
+	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
+	ii->set(my_rip, new StateMachineProxy(my_rip, proximal));
 
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, my_rip);

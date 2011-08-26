@@ -37,27 +37,6 @@ public:
 	NAMED_CLASS
 };
 
-/* All the various bits and pieces which we've discovered so far, in one
- * convenient place. */
-class InferredInformation : public GarbageCollected<InferredInformation> {
-public:
-	Oracle *oracle;
-	VexPtr<gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type, &ir_heap> crashReasons;
-
-	InferredInformation(Oracle *_oracle) :
-		oracle(_oracle),
-		crashReasons(new gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type())
-	{}
-
-	void visit(HeapVisitor &hv) {
-		hv(oracle);
-	}
-	void relocate(InferredInformation *to, size_t s) {
-		crashReasons.relocate(&to->crashReasons);
-	}
-	NAMED_CLASS
-};
-
 class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 public:
 	class StoreMachineData : public GarbageCollected<StoreMachineData, &ir_heap> {
@@ -113,8 +92,9 @@ public:
 				GarbageCollectionToken token) = 0;
 };
 
+typedef gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type InferredInformation;
 StateMachine *buildProbeMachine(std::vector<unsigned long> &previousInstructions,
-				VexPtr<InferredInformation> &ii,
+				VexPtr<InferredInformation, &ir_heap> &ii,
 				VexPtr<Oracle> &oracle,
 				unsigned long interestingRip,
 				ThreadId tid,

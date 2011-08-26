@@ -166,6 +166,7 @@ public:
 	void applyTransformation(IRExprTransformer &t, bool *done_something);
 	void print(FILE *f) const;
 	bool parse(const char *str, const char **succ, char **err);
+	bool empty() const { return content->empty(); }
 };
 
 void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);

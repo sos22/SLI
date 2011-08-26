@@ -47,12 +47,12 @@ public:
 	iiCrashReasons(InferredInformation *_ii)
 		: ii(_ii)
 	{}
-	bool hasKey(const unsigned long &x) { return ii->crashReasons->hasKey(x); }
+	bool hasKey(const unsigned long &x) { return ii->hasKey(x); }
 	StateMachineState *get(const unsigned long &x) {
-		return ii->crashReasons->get(x);
+		return ii->get(x);
 	}
 	void set(const unsigned long &x, StateMachineState *const &v) {
-		ii->crashReasons->set(x, v);
+		ii->set(x, v);
 	}
 };
 static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
@@ -3062,6 +3062,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				 GarbageCollectionToken token)
 {
 	__set_profiling(expandStateMachineToFunctionHead);
+	assert(sm->freeVariables.empty());
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, sm->origin);
 	if (previousInstructions.size() == 0) {
@@ -3070,8 +3071,8 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		return sm;
 	}
 
-	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
-	ii->crashReasons->set(sm->origin, sm->root);
+	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
+	ii->set(sm->origin, sm->root);
 
 	InstructionSet interesting;
 	interesting.rips.insert(sm->origin);
@@ -3240,7 +3241,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 
 StateMachine *
 buildProbeMachine(std::vector<unsigned long> &previousInstructions,
-		  VexPtr<InferredInformation> &ii,
+		  VexPtr<InferredInformation, &ir_heap> &ii,
 		  VexPtr<Oracle> &oracle,
 		  unsigned long interestingRip,
 		  ThreadId tid,
