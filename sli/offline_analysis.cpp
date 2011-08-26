@@ -3857,7 +3857,7 @@ CFGtoCrashReason(unsigned tid,
 	}
 
 	FreeVariableMap fv;
-	crashReasons.set(cfg->my_rip, root);
+	crashReasons.set(original_rip, root);
 	return new StateMachine(root, original_rip, fv, tid);
 }
 
