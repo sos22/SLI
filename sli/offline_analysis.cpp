@@ -747,6 +747,12 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 	if (TIMEOUT)
 		return true;
 	for (unsigned y = 0; y < sme->sideEffects.size(); y++) {
+		if (sme->sideEffects[y] == smses) {
+			/* We've reached a cycle without hitting a
+			   load of this store, so this path, at least,
+			   is clear. */
+			return false;
+		}
 		if (sme->sideEffects[y]->type == StateMachineSideEffect::Load) {
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
