@@ -63,7 +63,7 @@ static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
 
 /* A bunch of heuristics for figuring out why we crashed.  Returns
  * NULL on failure.  Pretty stupid. */
-static StateMachine *
+static StateMachineEdge *
 _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *idx)
 {
 	__set_profiling(getProximalCause);
@@ -99,17 +99,14 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 		/* We now guess that we crashed because the function
 		   pointer called turned out to be NULL. */
 		*idx = irsb->stmts_used;
-		return new StateMachine(
+		return new StateMachineEdge(
 			new StateMachineBifurcate(
 				rip,
 				IRExpr_Unop(
 					Iop_BadPtr,
 					irsb->next),
 				StateMachineCrash::get(),
-				StateMachineNoCrash::get()),
-			rip,
-			fv,
-			thr->tid._tid());
+				StateMachineNoCrash::get()));
 	}
 
 	/* Next guess: it's caused by dereferencing a bad pointer.
@@ -175,17 +172,14 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 			}
 			assert(addr != NULL);
 			*idx = x;
-			return new StateMachine(
+			return new StateMachineEdge(
 				new StateMachineBifurcate(
 					rip,
 					IRExpr_Unop(
 						Iop_BadPtr,
 						addr),
 					StateMachineCrash::get(),
-					StateMachineNoCrash::get()),
-				rip,
-				fv,
-				thr->tid._tid());
+					StateMachineNoCrash::get()));
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
@@ -459,123 +453,64 @@ IRExprTransformer::transformIex(IRExpr::Associative *e)
 		return r;
 }
 
-class RewriteRegister : public StateMachineTransformer {
-	unsigned idx;
-	IRExpr *to;
-protected:
-	IRExpr *transformIex(IRExpr::Get *what) {
-		if (what->offset == (int)idx)
-			return to;
-		else
-			return NULL;
-	}
-public:
-	RewriteRegister(unsigned _idx, IRExpr *_to)
-		: idx(_idx), to(_to)
-	{
-	}
-};
-static void
-rewriteRegister(FreeVariableMap *fvm,
-		unsigned reg_idx,
-		IRExpr *newval)
-{
-	RewriteRegister rr(reg_idx, newval);
-	return rr.transform(fvm);
-}
-
-class RewriteTemporary : public StateMachineTransformer {
-	IRTemp tmp;
-	IRExpr *to;
-protected:
-	IRExpr *transformIex(IRExpr::RdTmp *what)
-	{
-		if (what->tmp == tmp)
-			return to;
-		else
-			return NULL;
-	}
-public:
-	RewriteTemporary(IRTemp _tmp, IRExpr *_to)
-		: tmp(_tmp), to(_to)
-	{
-	}
-};
-static StateMachine *
-rewriteTemporary(StateMachine *sm,
-		 IRTemp tmp,
-		 IRExpr *newval)
-{
-	RewriteTemporary rt(tmp, newval);
-	return rt.transform(sm);
-}
-
-class RewriteTemporary2 : public IRExprTransformer {
-	IRTemp tmp;
-	IRExpr *to;
-protected:
-	IRExpr *transformIex(IRExpr::RdTmp *what)
-	{
-		if (what->tmp == tmp)
-			return to;
-		else
-			return NULL;
-	}
-public:
-	RewriteTemporary2(IRTemp _tmp, IRExpr *_to)
-		: tmp(_tmp), to(_to)
-	{
-	}
-};
 static IRExpr *
 rewriteTemporary(IRExpr *sm,
 		 IRTemp tmp,
 		 IRExpr *newval)
 {
-	RewriteTemporary2 rt(tmp, newval);
+	class _ : public IRExprTransformer {
+		IRTemp tmp;
+		IRExpr *to;
+	protected:
+		IRExpr *transformIex(IRExpr::RdTmp *what)
+		{
+			if (what->tmp == tmp)
+				return to;
+			else
+				return NULL;
+		}
+	public:
+		_(IRTemp _tmp, IRExpr *_to)
+			: tmp(_tmp), to(_to)
+		{
+		}
+	} rt(tmp, newval);
 	return rt.transformIRExpr(sm);
 }
 
-static StateMachine *
-backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
+static StateMachineEdge *
+backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 {
 	switch (stmt->tag) {
 	case Ist_NoOp:
 	case Ist_IMark:
 	case Ist_AbiHint:
 		break;
-	case Ist_Put: {
-		StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
-		smp->target->prependSideEffect(
+	case Ist_Put:
+		sm->prependSideEffect(
 			new StateMachineSideEffectPut(
 				stmt->Ist.Put.offset,
 				stmt->Ist.Put.data,
-				ThreadRip::mk(sm->tid, rip)));
-		sm = new StateMachine(sm, rip, smp);
-		rewriteRegister(&sm->freeVariables,
-				stmt->Ist.Put.offset,
-				stmt->Ist.Put.data);
+				site));
 		break;
-	}
 	case Ist_PutI:
 		/* We can't handle these correctly. */
 		abort();
 		return NULL;
 	case Ist_WrTmp:
-		sm = rewriteTemporary(sm,
-				      stmt->Ist.WrTmp.tmp,
-				      stmt->Ist.WrTmp.data);
+		sm->prependSideEffect(
+			new StateMachineSideEffectPut(
+				-stmt->Ist.WrTmp.tmp - 1,
+				stmt->Ist.WrTmp.data,
+				site));
 		break;
-	case Ist_Store: {
-		StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
-		smp->target->prependSideEffect(
+	case Ist_Store:
+		sm->prependSideEffect(
 			new StateMachineSideEffectStore(
 				stmt->Ist.Store.addr,
 				stmt->Ist.Store.data,
-				ThreadRip::mk(sm->tid, rip)));
-		sm = new StateMachine(sm, rip, smp);
+				site));
 		break;
-	}
 
 	case Ist_Dirty:
 		if (!strcmp(stmt->Ist.Dirty.details->cee->name,
@@ -589,14 +524,13 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 			StateMachineSideEffectLoad *smsel =
 				new StateMachineSideEffectLoad(
 					stmt->Ist.Dirty.details->args[0],
-					ThreadRip::mk(sm->tid, rip));
-			sm = rewriteTemporary(
-				sm,
-				stmt->Ist.Dirty.details->tmp,
-				IRExpr_Binder(smsel->key));
-			StateMachineProxy *smp = new StateMachineProxy(rip, sm->root);
-			smp->target->prependSideEffect(smsel);
-			sm = new StateMachine(sm, rip, smp);
+					site);
+			sm->prependSideEffect(
+				new StateMachineSideEffectPut(
+					-stmt->Ist.Dirty.details->tmp - 1,
+					IRExpr_Binder(smsel->key),
+					site));
+			sm->prependSideEffect(smsel);
 		}  else {
 			abort();
 		}
@@ -611,18 +545,16 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 	case Ist_MBE:
 		break;
 	case Ist_Exit:
-		sm = new StateMachine(sm,
-				      rip,
-				      new StateMachineBifurcate(
-					      sm->origin,
-					      stmt->Ist.Exit.guard,
-					      new StateMachineStub(
-						      rip,
-						      IRExpr_Const(stmt->Ist.Exit.dst)),
-					      sm->root));
+		sm = new StateMachineEdge(
+			new StateMachineBifurcate(
+				site.rip,
+				stmt->Ist.Exit.guard,
+				new StateMachineEdge(
+					new StateMachineStub(
+						site.rip,
+						IRExpr_Const(stmt->Ist.Exit.dst))),
+				sm));
 		break;
-	default:
-		abort();
 	}
 	return sm;
 }
@@ -631,17 +563,22 @@ StateMachine *
 getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 {
 	unsigned idx;
-	StateMachine *sm = _getProximalCause(ms, rip, thr, &idx);
+	StateMachineEdge *sm = _getProximalCause(ms, rip, thr, &idx);
 	if (!sm)
 		return NULL;
 	IRSB *irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
 	while (idx != 0) {
 		idx--;
-		sm = backtrackOneStatement(sm, irsb->stmts[idx], rip);
+		sm = backtrackOneStatement(sm, irsb->stmts[idx], ThreadRip::mk(thr->tid._tid(), rip));
 		if (!sm)
 			return NULL;
 	}
-	return sm;
+	FreeVariableMap fvm;
+	return new StateMachine(
+		new StateMachineProxy(rip, sm),
+		rip,
+		fvm,
+		thr->tid._tid());
 }
 
 template <typename t> void
