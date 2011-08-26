@@ -42,13 +42,12 @@ public:
 class InferredInformation : public GarbageCollected<InferredInformation> {
 public:
 	Oracle *oracle;
-	VexPtr<gc_heap_map<unsigned long, StateMachine, &ir_heap>::type, &ir_heap> crashReasons;
+	VexPtr<gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type, &ir_heap> crashReasons;
 
 	InferredInformation(Oracle *_oracle) :
 		oracle(_oracle),
-		crashReasons(new gc_heap_map<unsigned long, StateMachine, &ir_heap>::type())
+		crashReasons(new gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type())
 	{}
-	void addCrashReason(StateMachine *cr) { crashReasons->set(cr->origin, cr); }
 	StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg);
 
 	void visit(HeapVisitor &hv) {

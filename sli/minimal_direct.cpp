@@ -103,7 +103,7 @@ consider_rip(unsigned long my_rip,
 	}
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
-	ii->addCrashReason(proximal);
+	ii->crashReasons->set(my_rip, proximal->root);
 
 	std::vector<unsigned long> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, my_rip);

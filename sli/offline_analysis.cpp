@@ -3244,7 +3244,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	}
 
 	VexPtr<InferredInformation> ii(new InferredInformation(oracle));
-	ii->addCrashReason(sm);
+	ii->crashReasons->set(sm->origin, sm->root);
 
 	InstructionSet interesting;
 	interesting.rips.insert(sm->origin);
@@ -3872,7 +3872,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 		if (!cfg)
 			break;
 		if (crashReasons->hasKey(cfg->my_rip)) {
-			state.cfgToState[cfg] = crashReasons->get(cfg->my_rip)->root;
+			state.cfgToState[cfg] = crashReasons->get(cfg->my_rip);
 		} else {
 			IRSB *irsb = fetchIrsb(cfg->my_rip);
 			StateMachineState *s = buildStateForCfgNode(cfg, irsb);
@@ -3883,6 +3883,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg)
 	}
 
 	FreeVariableMap fv;
+	crashReasons->set(cfg->my_rip, root);
 	return new StateMachine(root, original_rip, fv, tid);
 }
 
