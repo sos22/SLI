@@ -3054,8 +3054,9 @@ updateStateMachineForCallInstruction(ThreadRip site, StateMachine *orig, IRSB *i
 	return sm;
 }
 
-template <typename t> StateMachine *
-CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGNode<t> *, StateMachine *> &memo,
+static StateMachine *
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<StackRip> *cfg,
+		  std::map<CFGNode<StackRip> *, StateMachine *> &memo,
 		  Oracle *oracle)
 {
 	__set_profiling(CFGtoStoreMachine);
@@ -3134,10 +3135,10 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	return res;		
 }
 
-template <typename t> StateMachine *
-CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, Oracle *oracle)
+static StateMachine *
+CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<StackRip> *cfg, Oracle *oracle)
 {
-	std::map<CFGNode<t> *, StateMachine *> memo;
+	std::map<CFGNode<StackRip> *, StateMachine *> memo;
 	return CFGtoStoreMachine(tid, as, cfg, memo, oracle);
 }
 
