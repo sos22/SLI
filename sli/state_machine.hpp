@@ -781,6 +781,9 @@ public:
 	threadAndRegister(IRExpr::Get &e)
 		: std::pair<unsigned, unsigned>(e.tid, e.offset)
 	{}
+	threadAndRegister(IRExpr::RdTmp &e)
+		: std::pair<unsigned, unsigned>(e.tid, -e.tmp - 1)
+	{}
 	threadAndRegister(StateMachineSideEffectPut &s)
 		: std::pair<unsigned, unsigned>(s.rip.thread, s.offset)
 	{}

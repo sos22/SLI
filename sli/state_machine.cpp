@@ -290,6 +290,13 @@ public:
 		else
 			return NULL;
 	}
+	IRExpr *transformIex(IRExpr::RdTmp *e) {
+		auto it = regs.find(threadAndRegister(*e));
+		if (it != regs.end())
+			return it->second;
+		else
+			return NULL;
+	}
 };
 static IRExpr *
 rewriteBinderExpressions(IRExpr *ex, const std::map<Int, IRExpr *> &binders,
@@ -646,6 +653,10 @@ findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &out, const AllowableOp
 			out.insert(threadAndRegister(*e));
 			return IRExprTransformer::transformIex(e);
 		}
+		IRExpr *transformIex(IRExpr::RdTmp *e) {
+			out.insert(threadAndRegister(*e));
+			return IRExprTransformer::transformIex(e);
+		}
 	} t(out);
 	t.transformIRExpr(e);
 }
@@ -735,13 +746,12 @@ printContainer(const cont &v, FILE *f)
 }
 
 void
-printStateMachine(const StateMachine *sm, FILE *f)
+printStateMachine(const StateMachineState *sm, FILE *f)
 {
 	std::map<const StateMachineState *, int> labels;
 	std::vector<const StateMachineState *> states;
 
-	fprintf(f, "Machine for %lx:%d\n", sm->origin, sm->tid);
-	buildStateLabelTable(sm->root, labels, states);
+	buildStateLabelTable(sm, labels, states);
 	for (std::vector<const StateMachineState *>::iterator it = states.begin();
 	     it != states.end();
 	     it++) {
@@ -749,6 +759,13 @@ printStateMachine(const StateMachine *sm, FILE *f)
 		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
 	}
+}
+
+void
+printStateMachine(const StateMachine *sm, FILE *f)
+{
+	fprintf(f, "Machine for %lx:%d\n", sm->origin, sm->tid);
+	printStateMachine(sm->root, f);
 	sm->freeVariables.print(f);
 }
 

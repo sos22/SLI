@@ -51,6 +51,8 @@ public:
 	void addCrashReason(StateMachine *cr) { crashReasons->set(cr->origin, cr); }
 	StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, bool install,
 				       const AllowableOptimisations &opt);
+	StateMachine *CFGtoCrashReason2(unsigned tid, CFGNode<unsigned long> *cfg, bool,
+					const AllowableOptimisations &opt);
 
 	void visit(HeapVisitor &hv) {
 		hv(oracle);

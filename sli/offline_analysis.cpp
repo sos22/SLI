@@ -1165,6 +1165,11 @@ avail_t::invalidateRegister(threadAndRegister reg)
 				res = true;
 			return NULL;
 		}
+		IRExpr *transformIex(IRExpr::RdTmp *e) {
+			if (threadAndRegister(*e) == reg)
+				res = true;
+			return NULL;
+		}
 	public:
 		_(threadAndRegister _reg) : reg(_reg) {}
 	} checkIfPresent(reg);
@@ -1308,6 +1313,12 @@ public:
 		return IRExprTransformer::transformIex(e);
 	}
 	IRExpr *transformIex(IRExpr::Get *e) {
+		auto it = avail.registers.find(threadAndRegister(*e));
+		if (it != avail.registers.end())
+			return it->second;
+		return IRExprTransformer::transformIex(e);
+	}
+	IRExpr *transformIex(IRExpr::RdTmp *e) {
 		auto it = avail.registers.find(threadAndRegister(*e));
 		if (it != avail.registers.end())
 			return it->second;
@@ -3432,7 +3443,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		breakCycles(cfg.get());
 
 		VexPtr<StateMachine, &ir_heap> cr(
-			ii->CFGtoCrashReason(tid._tid(), cfg, true, opt));
+			ii->CFGtoCrashReason2(tid._tid(), cfg, true, opt));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3681,6 +3692,198 @@ buildCFGForRipSet(AddressSpace *as,
 	}
 
 	return builtSoFar[start].first;
+}
+
+StateMachine *
+InferredInformation::CFGtoCrashReason2(unsigned tid, CFGNode<unsigned long> *cfg, bool, const AllowableOptimisations &)
+{
+	typedef std::pair<StateMachineState **, CFGNode<unsigned long> *> reloc_t;
+	class State {
+	public:
+		std::vector<CFGNode<unsigned long> *> pending;
+		std::vector<reloc_t> relocs;
+		std::map<CFGNode<unsigned long> *, StateMachineState *> cfgToState;
+
+		CFGNode<unsigned long> *nextNode() {
+			while (1) {
+				if (pending.empty()) {
+					std::vector<reloc_t> newRelocs;
+					for (auto it = relocs.begin(); it != relocs.end(); it++) {
+						if (cfgToState.count(it->second)) {
+							*it->first = cfgToState[it->second];
+						} else {
+							newRelocs.push_back(*it);
+							pending.push_back(it->second);
+						}
+					}
+					relocs = newRelocs;
+					if (pending.empty())
+						return NULL;
+				}
+				CFGNode<unsigned long> *res = pending.back();
+				pending.pop_back();
+				if (cfgToState.count(res))
+					continue;
+				return res;
+			}
+		}
+		void addReloc(StateMachineState **p, CFGNode<unsigned long> *c)
+		{
+			relocs.push_back(reloc_t(p, c));
+		}
+	} state;
+
+	class FetchIrsb {
+	public:
+		Oracle *oracle;
+		unsigned tid;
+		FetchIrsb(Oracle *_oracle, unsigned _tid)
+			: oracle(_oracle), tid(_tid)
+		{}
+		IRSB *operator()(unsigned long rip) {
+			return oracle->ms->addressSpace->getIRSBForAddress(tid, rip);
+		}
+	} fetchIrsb(oracle, tid);
+
+	class BuildStateForCfgNode {
+		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
+							ThreadRip rip,
+							CFGNode<unsigned long> *branchTarget,
+							StateMachineEdge *edge) {
+			StateMachineSideEffect *se = NULL;
+			switch (stmt->tag) {
+			case Ist_NoOp:
+			case Ist_IMark:
+			case Ist_AbiHint:
+				break;
+			case Ist_Put:
+				se = new StateMachineSideEffectPut(
+					stmt->Ist.Put.offset,
+					stmt->Ist.Put.data,
+					rip);
+				break;
+			case Ist_PutI:
+				/* Don't know how to handle these */
+				abort();
+			case Ist_WrTmp:
+				se = new StateMachineSideEffectPut(
+					-stmt->Ist.WrTmp.tmp - 1,
+					stmt->Ist.WrTmp.data,
+					rip);
+				break;
+			case Ist_Store:
+				se = new StateMachineSideEffectStore(
+					stmt->Ist.Store.addr,
+					stmt->Ist.Store.data,
+					rip);
+				break;
+			case Ist_Dirty:
+				if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+					    "helper_load_8") ||
+				    !strcmp(stmt->Ist.Dirty.details->cee->name,
+					    "helper_load_16") ||
+				    !strcmp(stmt->Ist.Dirty.details->cee->name,
+					    "helper_load_64") ||
+				    !strcmp(stmt->Ist.Dirty.details->cee->name,
+					    "helper_load_32")) {
+					StateMachineSideEffectLoad *smsel =
+						new StateMachineSideEffectLoad(
+							stmt->Ist.Dirty.details->args[0],
+							rip);
+					se = new StateMachineSideEffectPut(
+						-stmt->Ist.Dirty.details->tmp - 1,
+						IRExpr_Binder(smsel->key),
+						rip);
+					edge->prependSideEffect(se);
+					se = smsel;
+				}  else {
+					abort();
+				}
+				break;
+			case Ist_CAS:
+				fprintf(_logfile, "Don't know how to backtrack across CAS statements?\n");
+				return NULL;
+			case Ist_MBE:
+				break;
+			case Ist_Exit:
+				if (branchTarget) {
+					StateMachineBifurcate *smb =
+						new StateMachineBifurcate(
+							rip.rip,
+							stmt->Ist.Exit.guard,
+							NULL,
+							edge);
+					state.addReloc(&smb->trueTarget->target, branchTarget);
+					edge = new StateMachineEdge(smb);
+				} else {
+					/* We've decided to ignore this branch */
+				}
+				break;
+			}
+			if (se)
+				edge->prependSideEffect(se);
+			return edge;
+		}
+	public:
+		unsigned tid;
+		State &state;
+		BuildStateForCfgNode(unsigned _tid, State &_state) : tid(_tid), state(_state) {}
+		StateMachineState *operator()(CFGNode<unsigned long> *cfg,
+					      IRSB *irsb) {
+			int endOfInstr;
+			for (endOfInstr = 1;
+			     endOfInstr < irsb->stmts_used && irsb->stmts[endOfInstr]->tag != Ist_IMark;
+			     endOfInstr++)
+				;
+			StateMachineEdge *edge = new StateMachineEdge(NULL);
+			if (!cfg->fallThrough) {
+				if (!cfg->branch)
+					return StateMachineNoCrash::get();
+				/* We've decided to force this one to take the
+				   branch.  Trim the bit of the instruction
+				   after the branch. */
+				assert(cfg->branch);
+				while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
+					endOfInstr--;
+				assert(endOfInstr > 0);
+				endOfInstr--;
+				state.addReloc(&edge->target, cfg->branch);
+			} else {
+				state.addReloc(&edge->target, cfg->fallThrough);
+			}
+			for (int i = endOfInstr; i >= 0; i--) {
+				edge = backtrackOneStatement(irsb->stmts[i],
+							     ThreadRip::mk(tid, cfg->my_rip),
+							     cfg->branch,
+							     edge);
+				if (!edge)
+					return NULL;
+			}
+			return new StateMachineProxy(cfg->my_rip, edge);
+		}
+	} buildStateForCfgNode(tid, state);
+
+	unsigned long original_rip = cfg->my_rip;
+	StateMachineState *root = NULL;
+	state.addReloc(&root, cfg);
+
+	while (1) {
+		cfg = state.nextNode();
+		if (!cfg)
+			break;
+		if (crashReasons->hasKey(cfg->my_rip)) {
+			state.cfgToState[cfg] = crashReasons->get(cfg->my_rip)->root;
+		} else {
+			IRSB *irsb = fetchIrsb(cfg->my_rip);
+			StateMachineState *s = buildStateForCfgNode(cfg, irsb);
+			if (!s)
+				return NULL;
+			state.cfgToState[cfg] = s;
+		}
+	}
+
+	FreeVariableMap fv;
+	return new StateMachine(root, original_rip, fv, tid);
 }
 
 StateMachine *
