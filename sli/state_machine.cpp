@@ -24,7 +24,8 @@ StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	bool b = false;
-	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables);
+	std::set<StateMachineState *> done;
+	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables, done);
 	if (b) {
 		*done_something = true;
 		StateMachine *sm = new StateMachine(*this);
@@ -36,29 +37,33 @@ StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracl
 }
 
 StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv)
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv,
+				std::set<StateMachineState *> &done)
 {
+	if (done.count(this))
+		return this;
+	done.insert(this);
 	if (trueTarget->target == StateMachineUnreached::get()) {
 		*done_something = true;
 		if (falseTarget->target == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv));
+			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv, done));
 	}
 	if (falseTarget->target == StateMachineUnreached::get()) {
 		*done_something = true;
-		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv));
+		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, done));
 	}
 	condition = optimiseIRExprFP(condition, opt, done_something);
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
 		if (condition->Iex.Const.con->Ico.U1)
-			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv));
+			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, done));
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv));
+			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv, done));
 	}
-	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv);
-	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv);
+	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv, done);
+	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv, done);
 
 	if (falseTarget->sideEffects.size() == 0 &&
 	    trueTarget->sideEffects.size() == 0) {
@@ -376,7 +381,8 @@ StateMachineEdge *
 StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			   OracleInterface *oracle,
 			   bool *done_something,
-			   FreeVariableMap &freeVariables)
+			   FreeVariableMap &freeVariables,
+			   std::set<StateMachineState *> &done)
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
@@ -385,11 +391,11 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				   smp->target->sideEffects.end());
 		target = smp->target->target;
 		*done_something = true;
-		return optimise(opt, oracle, done_something, freeVariables);
+		return optimise(opt, oracle, done_something, freeVariables, done);
 	}
 	if (TIMEOUT)
 		return this;
-	target = target->optimise(opt, oracle, done_something, freeVariables);
+	target = target->optimise(opt, oracle, done_something, freeVariables, done);
 
 	std::vector<StateMachineSideEffect *>::iterator it;
 

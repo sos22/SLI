@@ -230,7 +230,8 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &) = 0;
+	virtual StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &,
+					    std::set<StateMachineState *> &done) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &) = 0;
@@ -323,7 +324,8 @@ public:
 		     it++)
 			hv(*it);
 	}
-	StateMachineEdge *optimise(const AllowableOptimisations &, OracleInterface *, bool *done_something, FreeVariableMap &);
+	StateMachineEdge *optimise(const AllowableOptimisations &, OracleInterface *, bool *done_something, FreeVariableMap &,
+				   std::set<StateMachineState *> &);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		if (TIMEOUT)
 			return;
@@ -373,7 +375,8 @@ protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(unsigned long rip) : StateMachineState(rip) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &) { return this; }
+	StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &,
+				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
@@ -458,17 +461,22 @@ public:
 	{
 		hv(target);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv)
+	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv,
+				    std::set<StateMachineState *> &done)
 	{
+		if (done.count(this))
+			return this;
+		done.insert(this);
+
 		if (target->target == StateMachineUnreached::get()) {
 			*done_something = true;
 			return target->target;
 		}
 		if (target->sideEffects.size() == 0) {
 			*done_something = true;
-			return target->target->optimise(opt, oracle, done_something, fv);
+			return target->target->optimise(opt, oracle, done_something, fv, done);
 		}
-		target = target->optimise(opt, oracle, done_something, fv);
+		target = target->optimise(opt, oracle, done_something, fv, done);
 		return this;
 	}
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
@@ -543,7 +551,8 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &);
+	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &,
+				    std::set<StateMachineState *> &);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
 	{
 		std::set<IRExpr *> t;
