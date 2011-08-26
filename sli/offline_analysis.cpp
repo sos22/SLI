@@ -3575,6 +3575,7 @@ CFGtoCrashReason(unsigned tid,
 		}
 		void addReloc(StateMachineState **p, CFGNode<t> *c)
 		{
+			*p = NULL;
 			relocs.push_back(reloc_t(p, c));
 		}
 	} state;
@@ -3587,7 +3588,11 @@ CFGtoCrashReason(unsigned tid,
 			: as(_as), tid(_tid)
 		{}
 		IRSB *operator()(t rip) {
-			return as->getIRSBForAddress(tid, wrappedRipToRip(rip));
+			try {
+				return as->getIRSBForAddress(tid, wrappedRipToRip(rip));
+			} catch (BadMemoryException e) {
+				return NULL;
+			}
 		}
 	} fetchIrsb(oracle->ms->addressSpace, tid);
 
@@ -3657,8 +3662,9 @@ CFGtoCrashReason(unsigned tid,
 						new StateMachineBifurcate(
 							rip.rip,
 							stmt->Ist.Exit.guard,
-							NULL,
+							new StateMachineEdge(NULL),
 							edge);
+					assert(smb->trueTarget);
 					state.addReloc(&smb->trueTarget->target, branchTarget);
 					edge = new StateMachineEdge(smb);
 				} else {
@@ -3718,6 +3724,7 @@ CFGtoCrashReason(unsigned tid,
 			}
 
 			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
+			assert(smp->target);
 			state.addReloc(&smp->target->target, cfg->fallThrough);
 			smp->target->prependSideEffect(
 				new StateMachineSideEffectPut(
@@ -3737,6 +3744,8 @@ CFGtoCrashReason(unsigned tid,
 		{}
 		StateMachineState *operator()(CFGNode<t> *cfg,
 					      IRSB *irsb) {
+			if (!cfg->fallThrough && !cfg->branch)
+				return escapeState;
 			ThreadRip rip(ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip)));
 			int endOfInstr;
 			for (endOfInstr = 1;
@@ -3750,21 +3759,21 @@ CFGtoCrashReason(unsigned tid,
 			}
 			StateMachineEdge *edge = new StateMachineEdge(NULL);
 			if (!cfg->fallThrough) {
-				if (!cfg->branch)
-					return escapeState;
 				/* We've decided to force this one to take the
 				   branch.  Trim the bit of the instruction
 				   after the branch. */
 				assert(cfg->branch);
+				endOfInstr--;
 				while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
 					endOfInstr--;
 				assert(endOfInstr > 0);
-				endOfInstr--;
+				assert(edge);
 				state.addReloc(&edge->target, cfg->branch);
 			} else {
+				assert(edge);
 				state.addReloc(&edge->target, cfg->fallThrough);
 			}
-			for (int i = endOfInstr; i >= 0; i--) {
+			for (int i = endOfInstr - 1; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
 							     rip,
 							     cfg->branch,
@@ -3787,8 +3796,12 @@ CFGtoCrashReason(unsigned tid,
 		if (crashReasons.hasKey(cfg->my_rip)) {
 			state.cfgToState[cfg] = crashReasons.get(cfg->my_rip);
 		} else {
+			StateMachineState *s;
 			IRSB *irsb = fetchIrsb(cfg->my_rip);
-			StateMachineState *s = buildStateForCfgNode(cfg, irsb);
+			if (irsb)
+				s = buildStateForCfgNode(cfg, irsb);
+			else
+				s = StateMachineUnreached::get();
 			if (!s)
 				return NULL;
 			state.cfgToState[cfg] = s;

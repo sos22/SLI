@@ -401,6 +401,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	   that's moderately tricky. */
 	std::set<availEntry> availExpressions;
 	for (it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++) {
+		bool exit = false;
 		switch ((*it)->type) {
 		case StateMachineSideEffect::Store: {
 			StateMachineSideEffectStore *smses =
@@ -468,7 +469,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			 * Turn it into an unreached one. */
 			sideEffects.clear();
 			target = StateMachineUnreached::get();
-/**/			it = sideEffects.end();
+			exit = true;
 			break;
 		case StateMachineSideEffect::Copy:
 			break;
@@ -477,6 +478,8 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		case StateMachineSideEffect::AssertFalse:
 			break;
 		}
+		if (exit)
+			break;
 	}
 
 	/* Propagate any copy operations. */
