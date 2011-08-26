@@ -12,6 +12,19 @@
 #include "intern.hpp"
 #include "libvex_prof.hpp"
 
+/* We allow at most 5 assertions to be available at any given point in
+ * the state machines, so as to reduce the risk of dependency
+ * explosion.  If we go over that then we keep the ones which are
+ * earlier in the machine, for two reasons:
+ *
+ * 1) It's often most useful, as the earlier assumptions are generally
+ * ones which have been recently introduced, while later ones have
+ * been there a while so have probably already been used as we move
+ * backwards through the program.
+ * 2) It's much easier to implement.
+ */
+#define MAX_LIVE_ASSERTIONS 5
+
 template <typename t> void printCFG(const CFGNode<t> *cfg);
 
 typedef std::pair<StateMachineState *, StateMachineState *> st_pair_t;
@@ -1039,6 +1052,13 @@ public:
 	void invalidateBinder(Int key);
 	void invalidateRegister(threadAndRegister reg);
 
+	int nr_asserts() const {
+		int cntr = 0;
+		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++)
+			if ((*it)->type == StateMachineSideEffect::AssertFalse)
+				cntr++;
+		return cntr;
+	}
 	void print(FILE *f) {
 		fprintf(f, "Available side effects:\n");
 		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
@@ -1444,7 +1464,18 @@ buildNewStateMachineWithLoadsEliminated(
 				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it);
 			IRExpr *newVal;
 			bool doit = false;
-			newVal = applyAvailSet(currentlyAvailable, smseaf->value, true, &doit);
+			if (currentlyAvailable.nr_asserts() < MAX_LIVE_ASSERTIONS) {
+				newVal = applyAvailSet(currentlyAvailable, smseaf->value, true, &doit);
+			} else {
+				/* We have too many live assertions.
+				   That can lead to them holding
+				   enormous number of variables live,
+				   which isn't much use, so turn this
+				   one into a no-op.  It'll get
+				   optimised out again later. */
+				newVal = IRExpr_Const(IRConst_U1(0));
+				doit = true;
+			}
 			if (doit)
 				newEffect = new StateMachineSideEffectAssertFalse(newVal);
 			else
