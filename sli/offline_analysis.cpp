@@ -35,7 +35,8 @@ public:
 };
 static StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 				      AddressSpace *as,
-				      abstract_map<unsigned long, StateMachineState *> &crashReasons);
+				      abstract_map<unsigned long, StateMachineState *> &crashReasons,
+				      StateMachineState *escapeState);
 
 typedef std::pair<StateMachineState *, StateMachineState *> st_pair_t;
 typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
@@ -3294,7 +3295,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 		iiCrashReasons _(ii);
 		cr = CFGtoCrashReason(sm->tid, cfg, oracle->ms->addressSpace,
-				      _);
+				      _, StateMachineNoCrash::get());
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3471,7 +3472,8 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 
 		iiCrashReasons _(ii);
 		VexPtr<StateMachine, &ir_heap> cr(
-			CFGtoCrashReason(tid._tid(), cfg, oracle->ms->addressSpace, _));
+			CFGtoCrashReason(tid._tid(), cfg, oracle->ms->addressSpace, _,
+					 StateMachineNoCrash::get()));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -3724,7 +3726,8 @@ buildCFGForRipSet(AddressSpace *as,
 
 static StateMachine *
 CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, AddressSpace *as,
-		 abstract_map<unsigned long, StateMachineState *> &crashReasons)
+		 abstract_map<unsigned long, StateMachineState *> &crashReasons,
+		 StateMachineState *escapeState)
 {
 	class State {
 		typedef std::pair<StateMachineState **, CFGNode<unsigned long> *> reloc_t;
@@ -3856,7 +3859,10 @@ CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, AddressSpace *as,
 	public:
 		unsigned tid;
 		State &state;
-		BuildStateForCfgNode(unsigned _tid, State &_state) : tid(_tid), state(_state) {}
+		StateMachineState *escapeState;
+		BuildStateForCfgNode(unsigned _tid, State &_state, StateMachineState *_escapeState)
+			: tid(_tid), state(_state), escapeState(_escapeState)
+		{}
 		StateMachineState *operator()(CFGNode<unsigned long> *cfg,
 					      IRSB *irsb) {
 			int endOfInstr;
@@ -3867,7 +3873,7 @@ CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, AddressSpace *as,
 			StateMachineEdge *edge = new StateMachineEdge(NULL);
 			if (!cfg->fallThrough) {
 				if (!cfg->branch)
-					return StateMachineNoCrash::get();
+					return escapeState;
 				/* We've decided to force this one to take the
 				   branch.  Trim the bit of the instruction
 				   after the branch. */
@@ -3890,7 +3896,7 @@ CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg, AddressSpace *as,
 			}
 			return new StateMachineProxy(cfg->my_rip, edge);
 		}
-	} buildStateForCfgNode(tid, state);
+	} buildStateForCfgNode(tid, state, escapeState);
 
 	unsigned long original_rip = cfg->my_rip;
 	StateMachineState *root = NULL;
