@@ -213,7 +213,7 @@ static void evalStateMachine(StateMachine *rootMachine,
 			     Oracle *oracle,
 			     StateMachineEvalContext &ctxt);
 
-static void
+static bool
 evalStateMachineSideEffect(StateMachine *thisMachine,
 			   StateMachineSideEffect *smse,
 			   NdChooser &chooser,
@@ -357,7 +357,16 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	}
 	case StateMachineSideEffect::Unreached:
 		abort();
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *smseaf =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
+		if (expressionIsTrue(smseaf->value, chooser, state, assumption,
+				     accumulatedAssumptions))
+			return false;
+		break;
 	}
+	}
+	return true;
 }
 
 static void
@@ -368,15 +377,18 @@ evalStateMachineEdge(StateMachine *thisMachine,
 		     Oracle *oracle,
 		     StateMachineEvalContext &ctxt)
 {
+	bool valid = true;
 	for (std::vector<StateMachineSideEffect *>::iterator it = sme->sideEffects.begin();
-	     !TIMEOUT && it != sme->sideEffects.end();
+	     valid && !TIMEOUT && it != sme->sideEffects.end();
 	     it++)
-		evalStateMachineSideEffect(thisMachine, *it, chooser, oracle, ctxt.state,
-					   ctxt.memLog, ctxt.collectOrderingConstraints,
-					   &ctxt.pathConstraint,
-					   &ctxt.justPathConstraint);
-	if (ctxt.pathConstraint->tag == Iex_Const &&
-	    ctxt.pathConstraint->Iex.Const.con->Ico.U1 == 0) {
+		valid &=
+			evalStateMachineSideEffect(thisMachine, *it, chooser, oracle, ctxt.state,
+						   ctxt.memLog, ctxt.collectOrderingConstraints,
+						   &ctxt.pathConstraint,
+						   &ctxt.justPathConstraint);
+	if (!valid ||
+	    (ctxt.pathConstraint->tag == Iex_Const &&
+	     ctxt.pathConstraint->Iex.Const.con->Ico.U1 == 0)) {
 		/* We've found a contradiction.  That means that the
 		   original program would have crashed, *but* in a way
 		   other than the one which we're investigating.  We
@@ -697,7 +709,12 @@ top:
 	if (wantLoad)
 		acceptable |= se->type == StateMachineSideEffect::Load;
 	if (!acceptable) {
-		evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
+		if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
+						collectOrderingConstraints, &pathConstraint, &justPathConstraint)) {
+			/* Found a contradiction -> get out */
+			machine->finished = true;
+			return;
+		}
 		history.push_back(se);
 		machine->nextEdgeSideEffectIdx++;
 		goto top;
@@ -721,9 +738,13 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 	StateMachineSideEffect *se;
 	assert(machine->nextEdgeSideEffectIdx < machine->currentEdge->sideEffects.size());
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];	
-	evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog, collectOrderingConstraints, &pathConstraint, &justPathConstraint);
-	history.push_back(se);
-	machine->nextEdgeSideEffectIdx++;
+	if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
+					collectOrderingConstraints, &pathConstraint, &justPathConstraint)) {
+		machine->finished = true;
+	} else {
+		history.push_back(se);
+		machine->nextEdgeSideEffectIdx++;
+	}
 }
 
 bool
@@ -813,25 +834,32 @@ writeMachineSuitabilityConstraint(
 		StateMachineEdge *writerEdge;
 		IRExpr *pathConstraint;
 		IRExpr *thisTimeConstraint;
+		bool writer_failed = false;
 
 		pathConstraint = assumption;
 		writerEdge = writeStartEdge;
 		thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
-		while (1) {
-			for (unsigned i = 0; !TIMEOUT && i < writerEdge->sideEffects.size(); i++) {
-				evalStateMachineSideEffect(writeMachine,
-							   writerEdge->sideEffects[i],
-							   chooser,
-							   oracle,
-							   writerState,
-							   memLog,
-							   false,
-							   &pathConstraint,
-							   &thisTimeConstraint);
+		while (!writer_failed) {
+			for (unsigned i = 0; !writer_failed && !TIMEOUT && i < writerEdge->sideEffects.size(); i++) {
+				if (!evalStateMachineSideEffect(writeMachine,
+								writerEdge->sideEffects[i],
+								chooser,
+								oracle,
+								writerState,
+								memLog,
+								false,
+								&pathConstraint,
+								&thisTimeConstraint)) {
+					/* There's no way the writer
+					 * could actually get here.
+					 * Get out */
+					writer_failed = true;
+				}
 			}
 
 			StateMachineState *s = writerEdge->target;
-			if (dynamic_cast<StateMachineCrash *>(s) ||
+			if (writer_failed ||
+			    dynamic_cast<StateMachineCrash *>(s) ||
 			    dynamic_cast<StateMachineNoCrash *>(s) ||
 			    dynamic_cast<StateMachineStub *>(s)) {
 				/* Hit end of writer */
@@ -849,31 +877,34 @@ writeMachineSuitabilityConstraint(
 			}
 		}
 
-		StateMachineEvalContext readEvalCtxt;
-		readEvalCtxt.pathConstraint = pathConstraint;
-		readEvalCtxt.memLog = memLog;
-		readEvalCtxt.justPathConstraint = thisTimeConstraint;
-		bool crashes;
-		evalStateMachine(readMachine, readMachine->root, &crashes, chooser, oracle, readEvalCtxt);
-		if (crashes) {
-			/* We get a crash if we evaluate the read
-			   machine after running the store machine to
-			   completion -> this is a poor choice of
-			   store machines. */
+		if (!writer_failed) {
+			StateMachineEvalContext readEvalCtxt;
+			readEvalCtxt.pathConstraint = pathConstraint;
+			readEvalCtxt.memLog = memLog;
+			readEvalCtxt.justPathConstraint = thisTimeConstraint;
+			bool crashes;
+			evalStateMachine(readMachine, readMachine->root, &crashes, chooser, oracle, readEvalCtxt);
+			if (crashes) {
+				/* We get a crash if we evaluate the
+				   read machine after running the
+				   store machine to completion -> this
+				   is a poor choice of store
+				   machines. */
 
-			/* If we evaluate the read machine to
-			   completion after running the write
-			   machine to completion under these
-			   assumptions then we get a crash ->
-			   these assumptions must be false. */
-			rewrittenAssumption = simplifyIRExpr(
-				IRExpr_Binop(
-					Iop_And1,
-					rewrittenAssumption,
-					IRExpr_Unop(
-						Iop_Not1,
-						readEvalCtxt.justPathConstraint)),
-				AllowableOptimisations::defaultOptimisations);
+				/* If we evaluate the read machine to
+				   completion after running the write
+				   machine to completion under these
+				   assumptions then we get a crash ->
+				   these assumptions must be false. */
+				rewrittenAssumption = simplifyIRExpr(
+					IRExpr_Binop(
+						Iop_And1,
+						rewrittenAssumption,
+						IRExpr_Unop(
+							Iop_Not1,
+							readEvalCtxt.justPathConstraint)),
+					AllowableOptimisations::defaultOptimisations);
+			}
 		}
 	} while (chooser.advance());
 	
@@ -920,6 +951,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 		StateMachineSideEffectStore *sectionStart;
 		bool finished;
 		StateMachineSideEffectStore *smses;
+		bool writer_failed;
 
 		writeEdgeIdx = 0;
 		pathConstraint = assumption;
@@ -927,7 +959,9 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 		sectionStart = NULL;
 		finished = false;
 		smses = NULL;
-		while (!TIMEOUT && !finished) {
+		writer_failed = false;
+
+		while (!writer_failed && !TIMEOUT && !finished) {
 			/* Have we hit the end of the current writer edge? */
 
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
@@ -996,7 +1030,10 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, &pathConstraint, NULL);
+			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, &pathConstraint, NULL)) {
+				writer_failed = true;
+				break;
+			}
 			writeEdgeIdx++;
 
 			/* Advance to a store */
@@ -1043,7 +1080,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		/* This is enforced by the suitability check at the
 		 * top of this function. */
-		if (sectionStart) {
+		if (!writer_failed && sectionStart) {
 			fprintf(_logfile, "Whoops... running store machine and then running load machine doesn't lead to goodness.\n");
 			/* Give up, shouldn't ever happen. */
 			return false;
@@ -1117,7 +1154,11 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, &pathConstraint, NULL);
+			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, &pathConstraint, NULL)) {
+				/* Contradiction in the writer -> give
+				 * up. */
+				break;
+			}
 			writeEdgeIdx++;
 
 			/* Only consider running the probe machine if

@@ -30,7 +30,6 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 {
 	__set_profiling(getProximalCause);
 	FreeVariableMap fv;
-	assumptionFalseSetT ass;
 
 	IRSB *irsb;
 	int x;
@@ -72,8 +71,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 				StateMachineNoCrash::get()),
 			rip,
 			fv,
-			thr->tid._tid(),
-			ass);
+			thr->tid._tid());
 	}
 
 	/* Next guess: it's caused by dereferencing a bad pointer.
@@ -149,8 +147,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 					StateMachineNoCrash::get()),
 				rip,
 				fv,
-				thr->tid._tid(),
-				ass);
+				thr->tid._tid());
 		}
 		fprintf(_logfile, "Generated event %s\n", evt->name());
 	}
@@ -261,6 +258,12 @@ StateMachineTransformer::transform(StateMachineSideEffect *se, bool *done_someth
 			smsep->offset,
 			v,
 			smsep->rip);
+	}
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *smseaf =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(se);
+		IRExpr *v = transformIRExpr(smseaf->value, done_something);
+		return new StateMachineSideEffectAssertFalse(v);
 	}
 	}
 	abort();
@@ -533,7 +536,6 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				stmt->Ist.Store.data,
 				ThreadRip::mk(sm->tid, rip)));
 		sm = new StateMachine(sm, rip, smp);
-		sm->addAssumptionFalse(IRExpr_Unop(Iop_BadPtr, stmt->Ist.Store.addr));
 		break;
 	}
 
@@ -550,7 +552,6 @@ backtrackOneStatement(StateMachine *sm, IRStmt *stmt, unsigned long rip)
 				new StateMachineSideEffectLoad(
 					stmt->Ist.Dirty.details->args[0],
 					ThreadRip::mk(sm->tid, rip));
-			sm->addAssumptionFalse(IRExpr_Unop(Iop_BadPtr, stmt->Ist.Dirty.details->args[0]));
 			sm = rewriteTemporary(
 				sm,
 				stmt->Ist.Dirty.details->tmp,
@@ -831,6 +832,11 @@ removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
 			if (opt.ignoreStore(smses->rip.rip) &&
 			    !storeMightBeLoadedFollowingSideEffect(sme, x, smses, oracle)) {
+				sme->sideEffects[x] =
+					new StateMachineSideEffectAssertFalse(
+						IRExpr_Unop(
+							Iop_BadPtr,
+							smses->addr));
 				sme->sideEffects.erase(
 					sme->sideEffects.begin() + x);
 				x--;
@@ -1015,10 +1021,11 @@ class avail_t {
 	void purge(StateMachineClassifier &);
 public:
 	std::set<StateMachineSideEffect *> sideEffects;
-	std::set<IRExpr *> goodPointers;
+	std::set<IRExpr *> assertFalse;
 	std::map<threadAndRegister, IRExpr *> registers;
 
-	void clear() { sideEffects.clear(); goodPointers.clear(); }
+	void clear() { sideEffects.clear(); assertFalse.clear(); registers.clear(); }
+	void makeFalse(IRExpr *expr);
 	void dereference(IRExpr *ptr);
 	/* Go through and remove anything which isn't also present in
 	   other.  Returns true if we did anything, and false
@@ -1031,7 +1038,35 @@ public:
 
 	void invalidateBinder(Int key);
 	void invalidateRegister(threadAndRegister reg);
+
+	void print(FILE *f) {
+		fprintf(f, "Available side effects:\n");
+		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+			fprintf(f, "\t");
+			(*it)->prettyPrint(f);
+			fprintf(f, "\n");
+		}
+		fprintf(f, "Asserted false:\n");
+		for (auto it = assertFalse.begin(); it != assertFalse.end(); it++) {
+			fprintf(f, "\t");
+			ppIRExpr(*it, f);
+			fprintf(f, "\n");
+		}
+	}
 };
+
+void
+avail_t::makeFalse(IRExpr *expr)
+{
+	if (expr->tag == Iex_Const)
+		return;
+	for (auto it = assertFalse.begin();
+	     it != assertFalse.end();
+	     it++)
+		if (definitelyEqual(*it, expr, AllowableOptimisations::defaultOptimisations))
+			return;
+	assertFalse.insert(expr);
+}
 
 void
 avail_t::dereference(IRExpr *addr)
@@ -1040,15 +1075,7 @@ avail_t::dereference(IRExpr *addr)
 		return;
 	IRExpr *badPtr = IRExpr_Unop(Iop_BadPtr, addr);
 	badPtr = simplifyIRExpr(badPtr, AllowableOptimisations::defaultOptimisations);
-	if (badPtr->tag != Iex_Unop || badPtr->Iex.Unop.op != Iop_BadPtr)
-		return;
-	addr = badPtr->Iex.Unop.arg;
-	for (std::set<IRExpr *>::iterator it = goodPointers.begin();
-	     it != goodPointers.end();
-	     it++)
-		if (definitelyEqual(*it, addr, AllowableOptimisations::defaultOptimisations))
-			return;
-	goodPointers.insert(addr);
+	makeFalse(badPtr);
 }
 
 bool
@@ -1065,12 +1092,19 @@ avail_t::intersect(const avail_t &other)
 			it++;
 		}
 	}
-	for (std::set<IRExpr *>::iterator it = goodPointers.begin();
-	     it != goodPointers.end();
+	for (auto it = assertFalse.begin();
+	     it != assertFalse.end();
 		) {
-		if (other.goodPointers.count(*it) == 0) {
+		bool purge = true;
+		for (auto it2 = other.assertFalse.begin();
+		     purge && it2 != other.assertFalse.end();
+		     it2++) {
+			if (definitelyEqual(*it, *it2, AllowableOptimisations::defaultOptimisations))
+				purge = false;
+		}
+		if (purge) {
 			res = true;
-			goodPointers.erase(it++);
+			assertFalse.erase(it++);
 		} else {
 			it++;
 		}
@@ -1088,9 +1122,9 @@ avail_t::purge(StateMachineClassifier &o)
 			it++;
 		}
 	}
-	for (auto it = goodPointers.begin(); it != goodPointers.end(); ) {
+	for (auto it = assertFalse.begin(); it != assertFalse.end(); ) {
 		if (o(*it))
-			goodPointers.erase(it++);
+			assertFalse.erase(it++);
 		else
 			it++;
 	}
@@ -1135,7 +1169,7 @@ avail_t::invalidateBinder(Int key)
 bool
 avail_t::operator!=(const avail_t &other) const
 {
-	return sideEffects != other.sideEffects || goodPointers != other.goodPointers;
+	return sideEffects != other.sideEffects || assertFalse != other.assertFalse;
 }
 
 void
@@ -1147,6 +1181,9 @@ avail_t::calcRegisterMap()
 		if (se->type == StateMachineSideEffect::Put) {
 			StateMachineSideEffectPut *sep = (StateMachineSideEffectPut *)se;
 			registers[threadAndRegister(*sep)] = sep->value;
+		} else if (se->type == StateMachineSideEffect::AssertFalse) {
+			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
+			makeFalse(seaf->value);
 		}
 	}
 }
@@ -1222,6 +1259,12 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		outputAvail.invalidateBinder(smsel->key);
 		break;
 	}
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *smseaf =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
+		outputAvail.makeFalse(smseaf->value);
+		break;
+	}
 	case StateMachineSideEffect::Unreached:
 		abort();
 	}
@@ -1230,7 +1273,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 class applyAvailTransformer : public IRExprTransformer {
 public:
 	const avail_t &avail;
-	const bool use_bad_ptr;
+	const bool use_assumptions;
 	IRExpr *transformIex(IRExpr::Binder *e) {
 		for (std::set<StateMachineSideEffect *>::const_iterator it = avail.sideEffects.begin();
 		     it != avail.sideEffects.end();
@@ -1250,26 +1293,27 @@ public:
 			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
-	IRExpr *transformIex(IRExpr::Unop *e) {
-		if (use_bad_ptr && e->op == Iop_BadPtr) {
-			for (std::set<IRExpr *>::iterator it = avail.goodPointers.begin();
-			     it != avail.goodPointers.end();
+	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		if (use_assumptions) {
+			for (std::set<IRExpr *>::iterator it = avail.assertFalse.begin();
+			     it != avail.assertFalse.end();
 			     it++) {
-				if (definitelyEqual(*it, e->arg,
-						    AllowableOptimisations::defaultOptimisations))
+				if (definitelyEqual(*it, e,  AllowableOptimisations::defaultOptimisations)) {
+					*done_something = true;
 					return IRExpr_Const(IRConst_U1(0));
+				}
 			}
 		}
-		return IRExprTransformer::transformIex(e);
+		return IRExprTransformer::transformIRExpr(e, done_something);
 	}
-	applyAvailTransformer(const avail_t &_avail, bool _use_bad_ptr)
-		: avail(_avail), use_bad_ptr(_use_bad_ptr)
+	applyAvailTransformer(const avail_t &_avail, bool _use_assumptions)
+		: avail(_avail), use_assumptions(_use_assumptions)
 	{}
 };
 static IRExpr *
-applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_bad_ptr, bool *done_something)
+applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_assumptions, bool *done_something)
 {
-	applyAvailTransformer aat(avail, use_bad_ptr);
+	applyAvailTransformer aat(avail, use_assumptions);
 	return aat.transformIRExpr(expr, done_something);
 }
 
@@ -1395,6 +1439,18 @@ buildNewStateMachineWithLoadsEliminated(
 				newEffect = *it;
 			break;
 		}
+		case StateMachineSideEffect::AssertFalse: {
+			StateMachineSideEffectAssertFalse *smseaf =
+				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it);
+			IRExpr *newVal;
+			bool doit = false;
+			newVal = applyAvailSet(currentlyAvailable, smseaf->value, true, &doit);
+			if (doit)
+				newEffect = new StateMachineSideEffectAssertFalse(newVal);
+			else
+				newEffect = *it;
+			break;
+		}
 		}
 		assert(newEffect);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
@@ -1424,6 +1480,7 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 	avail_t avail(availMap[sm]);
 	avail.calcRegisterMap();
+
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		StateMachineBifurcate *res;
@@ -1509,6 +1566,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		if (StateMachineSideEffectMemoryAccess *smsema =
 		    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
 			potentiallyAvailable.dereference(smsema->addr);
+		} else if (StateMachineSideEffectAssertFalse *smseaf =
+			   dynamic_cast<StateMachineSideEffectAssertFalse *>(smse)) {
+			potentiallyAvailable.makeFalse(smseaf->value);
 		}
 	}
 
@@ -2156,34 +2216,6 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 	return s.transform(sm, done_something);
 }
 
-class applyAssumptionsTransformer : public StateMachineTransformer {
-public:
-	assumptionFalseSetT &assume;
-	applyAssumptionsTransformer(assumptionFalseSetT &_assume)
-		: assume(_assume)
-	{}
-	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-		if (assume.containsPTF(e)) {
-			*done_something = true;
-			return IRExpr_Const(IRConst_U1(0));
-		}
-		return StateMachineTransformer::transformIRExpr(e, done_something);
-	}
-	void transformAssumptions(assumptionFalseSetT &ass, bool *done_something) {
-		/* You can do a certain amount by applying one
-		   assumption in the set to other items in the set,
-		   but it gets really confusing, and it's hardly ever
-		   useful.  Don't bother trying for now. */
-		return;
-	}
-};
-static StateMachine *
-applyAssumptions(StateMachine *sm, bool *done_something)
-{
-	applyAssumptionsTransformer t(sm->assumptions_false);
-	return t.transform(sm, done_something);
-}
-
 static StateMachine *
 optimiseStateMachine(StateMachine *sm,
 		     const AllowableOptimisations &opt,
@@ -2199,7 +2231,6 @@ optimiseStateMachine(StateMachine *sm,
 		done_something = false;
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
-		sm = applyAssumptions(sm, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
@@ -2987,9 +3018,8 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 {
 	__set_profiling(CFGtoStoreMachine);
 	FreeVariableMap fv;
-	assumptionFalseSetT ass;
 	if (!cfg)
-		return new StateMachine(StateMachineCrash::get(), 0, fv, tid, ass);
+		return new StateMachine(StateMachineCrash::get(), 0, fv, tid);
 	if (memo.count(cfg))
 		return memo[cfg];
 	ThreadRip threadRip = ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip));
@@ -2998,7 +3028,7 @@ CFGtoStoreMachine(unsigned tid, AddressSpace *as, CFGNode<t> *cfg, std::map<CFGN
 	try {
 		irsb = as->getIRSBForAddress(tid, wrappedRipToRip(cfg->my_rip));
 	} catch (BadMemoryException &e) {
-		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), fv, tid, ass);
+		return new StateMachine(StateMachineUnreached::get(), wrappedRipToRip(cfg->my_rip), fv, tid);
 	}
 	int endOfInstr;
 	for (endOfInstr = 1; endOfInstr < irsb->stmts_used; endOfInstr++)
@@ -3635,8 +3665,7 @@ InferredInformation::CFGtoCrashReason(unsigned tid, CFGNode<unsigned long> *cfg,
 	StateMachine *res;
 	FreeVariableMap fv;
 	if (!cfg->branch && !cfg->fallThrough) {
-		assumptionFalseSetT ass;
-		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, fv, tid, ass);
+		res = new StateMachine(StateMachineNoCrash::get(), cfg->my_rip, fv, tid);
 	} else {
 		IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(tid, cfg->my_rip);
 		int x;

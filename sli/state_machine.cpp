@@ -20,29 +20,9 @@ VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false, true);
 
-static bool mentionsBinders(IRExpr *e);
-
 StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
-	for (auto it = assumptions_false.begin(); it != assumptions_false.end(); it++)
-		*it = simplifyIRExpr(*it, opt);
-	for (auto it = assumptions_false.begin(); it != assumptions_false.end(); ) {
-		if (mentionsBinders(*it)) {
-			it = assumptions_false.erase(it);
-			continue;
-		}
-		for (auto it2 = it + 1; it2 != assumptions_false.end(); ) {
-			if (definitelyEqual(*it, *it2, opt))
-				it2 = assumptions_false.erase(it2);
-			else
-				it2++;
-		}
-		if (it == assumptions_false.end())
-			break;
-		it++;
-	}
-
 	bool b = false;
 	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables);
 	if (b) {
@@ -266,6 +246,28 @@ StateMachineSideEffectPut::findUsedRegisters(std::set<threadAndRegister> &s, con
 	::findUsedRegisters(value, s, opt);
 }
 
+StateMachineSideEffect *
+StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+{
+	value = optimiseIRExprFP(value, opt, done_something);
+	if ((value->tag == Iex_Const && value->Iex.Const.con->Ico.U1) ||
+	    definitelyUnevaluatable(value, opt, oracle)) {
+		*done_something = true;
+		return StateMachineSideEffectUnreached::get();
+	}
+	return this;
+}
+void
+StateMachineSideEffectAssertFalse::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
+{
+	::findUsedBinders(value, s, opt);
+}
+void
+StateMachineSideEffectAssertFalse::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+{
+	::findUsedRegisters(value, s, opt);
+}
+
 class rewriteBinderTransformer : public IRExprTransformer {
 public:
 	const std::map<Int, IRExpr *> &binders;
@@ -465,6 +467,8 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			break;
 		case StateMachineSideEffect::Put:
 			break;
+		case StateMachineSideEffect::AssertFalse:
+			break;
 		}
 	}
 
@@ -516,6 +520,19 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			puts[threadAndRegister(*smsep)] = smsep->value;
 			*it2 = smsep;
 			break;
+		}	
+		case StateMachineSideEffect::AssertFalse: {
+			StateMachineSideEffectAssertFalse *smseaf =
+				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it2);
+			IRExpr *newValue = rewriteBinderExpressions(smseaf->value, copies, puts, done_something);
+			if (newValue->tag == Iex_Const &&
+			    newValue->Iex.Const.con->Ico.U1) {
+				*it2 = StateMachineSideEffectUnreached::get();
+				*done_something = true;
+			} else {
+				*it2 = new StateMachineSideEffectAssertFalse(newValue);
+			}
+			break;
 		}
 		}
 	}
@@ -533,6 +550,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		bool isDead = false;
 		it--;
 		(*it)->optimise(opt, oracle, done_something);
+		StateMachineSideEffect *newEffect = NULL;
 		switch ((*it)->type) {
 		case StateMachineSideEffect::Store: {
 			StateMachineSideEffectStore *smses =
@@ -548,6 +566,9 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				if (!definitelyNotEqual(*it2, smses->addr, opt))
 					isDead = false;
 			}
+			if (isDead)
+				newEffect = new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(Iop_BadPtr, smses->addr));
 			break;
 		}
 		case StateMachineSideEffect::Copy: {
@@ -575,10 +596,27 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 				applySideEffectToFreeVariables(smsel, freeVariables, &ign);
 				isDead = true;
 			}
+			if (isDead)
+				newEffect = new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(Iop_BadPtr, smsel->addr));
 			break;
 		}
 		case StateMachineSideEffect::Unreached:
 			break;
+		case StateMachineSideEffect::AssertFalse: {
+			StateMachineSideEffectAssertFalse *smseaf =
+				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it);
+			if (dynamic_cast<StateMachineTerminal *>(target) ||
+			    smseaf->value->tag == Iex_Const)
+				isDead = true;
+			break;
+		}
+		}
+
+		if (newEffect) {
+			*it = newEffect;
+			isDead = false;
+			*done_something = true;
 		}
 
 		if (isDead) {
@@ -712,9 +750,6 @@ printStateMachine(const StateMachine *sm, FILE *f)
 		fprintf(f, "\n");
 	}
 	sm->freeVariables.print(f);
-	fprintf(f, "Assumptions (false): ");
-	printContainer<ring_buffer<IRExpr *, 5>, ppIRExpr>(sm->assumptions_false, f);
-	fprintf(f, "\n");
 }
 
 unsigned long
@@ -772,6 +807,13 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		return smsep1->offset == smsep2->offset &&
 			smsep1->rip == smsep2->rip &&
 			definitelyEqual(smsep1->value, smsep2->value, opt);
+	}
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *smseaf1 =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse1);
+		StateMachineSideEffectAssertFalse *smseaf2 =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse2);
+		return definitelyEqual(smseaf1->value, smseaf2->value, opt);
 	}
 	}
 	abort();
@@ -1002,10 +1044,6 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix, ch
 		return false;
 	*out = new StateMachine(root, origin, tid);
 	if (!(*out)->freeVariables.parse(str, &str, err))
-		return false;
-	if (!parseThisString("Assumptions (false): ", str, &str, err) ||
-	    !parseContainer(&(*out)->assumptions_false, parseIRExpr, str, &str, err) ||
-	    !parseThisChar('\n', str, suffix, err))
 		return false;
 	return true;
 }
@@ -1605,36 +1643,4 @@ FreeVariableMap::applyTransformation(IRExprTransformer &x, bool *done_something)
 	     it != content->end();
 	     it++)
 		it.set_value(x.transformIRExpr(it.value(), done_something));
-}
-
-class mentionsBindersTransformer : public IRExprTransformer {
-public:
-	IRExpr *transformIex(IRExpr::Binder *e) { res = true; return NULL; }
-	bool res;
-	mentionsBindersTransformer() : res(false) {}
-};
-static bool
-mentionsBinders(IRExpr *e)
-{
-	mentionsBindersTransformer t;
-	t.transformIRExpr(e);
-	return t.res;
-}
-
-void
-StateMachine::addAssumptionFalse(IRExpr *e)
-{
-	if (mentionsBinders(e)) /* Don't want to make any assumptions
-				   about things which involve binders,
-				   since they can be changed by other
-				   threads */
-		return;
-	e = simplifyIRExpr(e, AllowableOptimisations::defaultOptimisations);
-	if (e->tag == Iex_Const) /* Not much point in retaining
-				  * constant expressions. */
-		return;
-	for (auto it = assumptions_false.begin(); it != assumptions_false.end(); it++)
-		if (definitelyEqual(*it, e, AllowableOptimisations::defaultOptimisations))
-			return;
-	assumptions_false.push(e);
 }

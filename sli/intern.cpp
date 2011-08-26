@@ -19,6 +19,7 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineSideEffectLoad *> loads;
 	std::set<StateMachineSideEffectCopy *> copies;
 	std::set<StateMachineSideEffectPut *> puts;
+	std::set<StateMachineSideEffectAssertFalse *> asserts;
 	std::set<StateMachineProxy *> states_proxy;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
@@ -255,13 +256,6 @@ internFreeVariables(FreeVariableMap &fvm, internIRExprTable &t)
 		it.set_value(internIRExpr(it.value(), t));
 }
 
-static void
-internAssumptions(assumptionFalseSetT &p, internIRExprTable &t)
-{
-	for (auto it = p.begin(); it != p.end(); it++)
-		*it = internIRExpr(*it, t);
-}
-
 static StateMachineSideEffect *
 internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable &t)
 {
@@ -342,6 +336,21 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		}
 		t.sideEffects[s] = s;
 		t.puts.insert(put);
+		return s;
+	}
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *af = dynamic_cast<StateMachineSideEffectAssertFalse *>(s);
+		assert(af);
+		af->value = internIRExpr(af->value, t);
+		for (auto it = t.asserts.begin(); it != t.asserts.end(); it++) {
+			StateMachineSideEffectAssertFalse *o = *it;
+			if (o->value == af->value) {
+				t.sideEffects[s] = o;
+				return o;
+			}
+		}
+		t.sideEffects[s] = s;
+		t.asserts.insert(af);
 		return s;
 	}
 	}
@@ -439,7 +448,6 @@ internStateMachine(StateMachine *sm)
 	__set_profiling(internStateMachine);
 	internStateMachineTable t;
 	internFreeVariables(sm->freeVariables, t);
-	internAssumptions(sm->assumptions_false, t);
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }

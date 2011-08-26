@@ -4,9 +4,6 @@
 #include <map>
 #include <set>
 
-/* A set of expressions which are believed to be false. */
-typedef ring_buffer<IRExpr *, 5> assumptionFalseSetT;
-
 #include "simplify_irexpr.hpp"
 
 class StateMachine;
@@ -186,36 +183,31 @@ public:
 	FreeVariableMap freeVariables;
 	unsigned tid;
 
-	assumptionFalseSetT assumptions_false;
-
 	static bool parse(StateMachine **out, const char *str, const char **suffix, char **err);
 
-	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid,
-		     assumptionFalseSetT _assumptions)
-		: root(_root), origin(_origin), freeVariables(fv), tid(_tid), assumptions_false(_assumptions)
+	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid)
+		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
 	{
 	}
 	StateMachine(StateMachine *parent, unsigned long _origin, StateMachineState *new_root)
 		: root(new_root), origin(_origin), freeVariables(parent->freeVariables),
-		  tid(parent->tid), assumptions_false(parent->assumptions_false)
+		  tid(parent->tid)
 	{}
 	StateMachine(StateMachine *parent)
 		: root(parent->root), origin(parent->origin), freeVariables(parent->freeVariables),
-		  tid(parent->tid), assumptions_false(parent->assumptions_false)
+		  tid(parent->tid)
 	{}
 	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
 		: root(parent->root),
 		  origin(parent->origin),
 		  freeVariables(parent->freeVariables, delta),
-		  tid(parent->tid),
-		  assumptions_false(parent->assumptions_false)
+		  tid(parent->tid)
 	{}
-	void addAssumptionFalse(IRExpr *e);
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       OracleInterface *oracle,
 			       bool *done_something);
 	void selectSingleCrashingPath();
-	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); visit_container(assumptions_false, hv); }
+	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
 	NAMED_CLASS
 };
 
@@ -269,7 +261,7 @@ class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &
 	StateMachineSideEffect(); /* DNE */
 public:
 	enum sideEffectType {
-		Load, Store, Copy, Unreached, Put
+		Load, Store, Copy, Unreached, Put, AssertFalse
 	} type;
 protected:
 	virtual unsigned long _hashval() const = 0;
@@ -744,6 +736,32 @@ public:
 		fprintf(f, "Put%d <- ", offset);
 		ppIRExpr(value, f);
 		fprintf(f, " @ %d:%lx", rip.thread, rip.rip);
+	}
+	void visit(HeapVisitor &hv) {
+		hv(value);
+	}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
+	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
+	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &);
+	int complexity() { return exprComplexity(value); }
+	void sanity_check(const std::set<Int> &binders) const {
+		checkIRExprBindersInScope(value, binders);
+	}
+};
+class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
+	unsigned long _hashval() const { return value->hashval(); }
+public:
+	StateMachineSideEffectAssertFalse(IRExpr *_value)
+		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
+		  value(_value)
+	{
+	}
+	IRExpr *value;
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "Assert !(");
+		ppIRExpr(value, f);
+		fprintf(f, ")");
 	}
 	void visit(HeapVisitor &hv) {
 		hv(value);

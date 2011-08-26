@@ -150,11 +150,6 @@ protected:
 	{
 		return StateMachineUnreached::get();
 	}
-	virtual void transformAssumptions(assumptionFalseSetT &ass, bool *done_something)
-	{
-		for (auto it = ass.begin(); it != ass.end(); it++)
-			*it = transformIRExpr(*it, done_something);
-	}
 public:
 	virtual void transform(FreeVariableMap *fvm, bool *done_something)
 	{
@@ -174,8 +169,6 @@ public:
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL)
 	{
 		bool b = false;
-		assumptionFalseSetT kgp = s->assumptions_false;
-		transformAssumptions(kgp, &b);
 		FreeVariableMap fvm = s->freeVariables;
 		transform(&fvm, &b);
 		StateMachineState *r = transform(s->root, &b);
@@ -184,7 +177,6 @@ public:
 				*done_something = true;
 			StateMachine *sm = new StateMachine(s);
 			sm->root = r;
-			sm->assumptions_false = kgp;
 			sm->freeVariables = fvm;
 			for (auto it = fvDelta.begin(); it != fvDelta.end(); it++)
 				sm->freeVariables.content->set(it->first, it->second);
