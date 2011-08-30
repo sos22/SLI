@@ -1260,6 +1260,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 	case StateMachineSideEffect::Unreached:
 		abort();
 	}
+	outputAvail.calcRegisterMap();
 }
 
 class applyAvailTransformer : public IRExprTransformer {
