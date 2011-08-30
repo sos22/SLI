@@ -2226,6 +2226,311 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 	return s.transform(sm, done_something);
 }
 
+/* For some reason C++ doesn't allow you to instantiate a template at
+   a function-local type.  Work around this language limitation with a
+   silly dummy namespace. */
+namespace __offline_analysis_dead_code {
+	class LivenessEntry : public std::pair<std::set<Int>, std::set<threadAndRegister> > {
+		void killBinder(Int binder)
+		{
+			first.erase(binder);
+		}
+
+		void killRegister(threadAndRegister r)
+		{
+			second.erase(r);
+		}
+	public:
+		void useExpression(IRExpr *e)
+		{
+			class _ : public IRExprTransformer {
+				LivenessEntry &out;
+				IRExpr *transformIex(IRExpr::Get *g) {
+					out.second.insert(threadAndRegister(*g));
+					return IRExprTransformer::transformIex(g);
+				}
+				IRExpr *transformIex(IRExpr::RdTmp *g) {
+					out.second.insert(threadAndRegister(*g));
+					return IRExprTransformer::transformIex(g);
+				}
+				IRExpr *transformIex(IRExpr::Binder *b) {
+					out.first.insert(b->binder);
+					return IRExprTransformer::transformIex(b);
+				}
+			public:
+				_(LivenessEntry &_out) : out(_out) {}
+			} t(*this);
+			t.transformIRExpr(e);
+		}
+
+		void useSideEffect(StateMachineSideEffect *smse)
+		{
+			switch (smse->type) {
+			case StateMachineSideEffect::Load: {
+				StateMachineSideEffectLoad *smsel =
+					(StateMachineSideEffectLoad *)smse;
+				killBinder(smsel->key);
+				useExpression(smsel->addr);
+				return;
+			}
+			case StateMachineSideEffect::Copy: {
+				StateMachineSideEffectCopy *smsec =
+					(StateMachineSideEffectCopy *)smse;
+				killBinder(smsec->key);
+				useExpression(smsec->value);
+				return;
+			}
+			case StateMachineSideEffect::Store: {
+				StateMachineSideEffectStore *smses =
+					(StateMachineSideEffectStore *)smse;
+				useExpression(smses->addr);
+				useExpression(smses->data);
+				return;
+			}
+			case StateMachineSideEffect::Put: {
+				StateMachineSideEffectPut *smsep =
+					(StateMachineSideEffectPut *)smse;
+				killRegister(threadAndRegister(*smsep));
+				useExpression(smsep->value);
+				return;
+			}
+			case StateMachineSideEffect::Unreached:
+				return;
+			case StateMachineSideEffect::AssertFalse: {
+				StateMachineSideEffectAssertFalse *smseaf =
+					(StateMachineSideEffectAssertFalse *)smse;
+				useExpression(smseaf->value);
+				return;
+			}
+			}
+			abort();
+		}
+
+		void merge(const LivenessEntry &other) {
+			for (auto it = other.first.begin();
+			     it != other.first.end();
+			     it++)
+				first.insert(*it);
+			for (auto it = other.second.begin();
+			     it != other.second.end();
+			     it++)
+				second.insert(*it);
+		}
+
+		bool binderLive(Int key) { return first.count(key); }
+		bool registerLive(threadAndRegister reg) { return second.count(reg); }
+	};
+};
+
+class RewriteBindersTransformer : public IRExprTransformer {
+public:
+	int key;
+	IRExpr *val;
+	RewriteBindersTransformer(int _key, IRExpr *_val)
+		: key(_key), val(_val)
+	{}
+	IRExpr *transformIex(IRExpr::Binder *e) {
+		if (e->binder == key)
+			return val;
+		return IRExprTransformer::transformIex(e);
+	}
+};
+class RewriteBinderToLoadTransformer : public IRExprTransformer {
+public:
+	int key;
+	ThreadRip rip;
+	IRExpr *addr;
+	IRExpr *val;
+	RewriteBinderToLoadTransformer(int _key, ThreadRip _rip, IRExpr *_addr)
+		: key(_key), rip(_rip), addr(_addr), val(NULL)
+	{}
+	IRExpr *transformIex(IRExpr::Binder *e) {
+		if (e->binder == key) {
+			if (!val)
+				val = IRExpr_Load(false, Iend_LE, Ity_I64, addr, rip);
+			return val;
+		}
+		return IRExprTransformer::transformIex(e);
+	}
+};
+void
+applySideEffectToFreeVariables(FreeVariableMap &fvm, StateMachineSideEffect *e, bool *done_something)
+{
+	bool b;
+	if (!done_something) done_something = &b;
+	switch (e->type) {
+	case StateMachineSideEffect::Load: {
+		StateMachineSideEffectLoad *c = (StateMachineSideEffectLoad *)e;
+		RewriteBinderToLoadTransformer t(c->key, c->rip, c->addr);
+		fvm.applyTransformation(t, done_something);
+		return;
+	}
+	case StateMachineSideEffect::Copy: {
+		StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)e;
+		RewriteBindersTransformer t(c->key, c->value);
+		fvm.applyTransformation(t, done_something);
+		return;
+	}
+	case StateMachineSideEffect::Store:
+	case StateMachineSideEffect::Unreached:
+	case StateMachineSideEffect::AssertFalse:
+		return;
+	case StateMachineSideEffect::Put:
+		/* It might appear that we should
+		   rewrite the free variables here as
+		   well.  We don't, though, because
+		   there will always be a free
+		   variable for any mentioned
+		   register, with any other free
+		   variable expressed in terms of that
+		   one, and rewriting that one free
+		   variable is just a bad idea. */
+		return;
+	}
+	abort();
+}
+
+/* Simple dead code elimination: find binders and registers which are
+   never accessed after being set and eliminate them. */
+static StateMachine *
+deadCodeElimination(StateMachine *sm, bool *done_something)
+{
+	typedef __offline_analysis_dead_code::LivenessEntry LivenessEntry;
+
+	std::set<StateMachineState *> allStates;
+	findAllStates(sm, allStates);
+
+	class LivenessMap : public std::map<StateMachineState *, LivenessEntry> {
+		void buildResForEdge(LivenessEntry &out, StateMachineEdge *edge)
+		{
+			out = (*this)[edge->target];
+			for (auto it = edge->sideEffects.rbegin();
+			     it != edge->sideEffects.rend();
+			     it++)
+				out.useSideEffect(*it);
+		}
+
+		void updateState(StateMachineState *sm, bool *progress)
+		{
+			LivenessEntry &outputSlot( (*this)[sm] );
+			LivenessEntry res;
+			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+				buildResForEdge(res, smp->target);
+			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
+				buildResForEdge(res, smb->trueTarget);
+				LivenessEntry res_false;
+				buildResForEdge(res_false, smb->falseTarget);
+				res.merge(res_false);
+				res.useExpression(smb->condition);
+			} else if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(sm)) {
+				res.useExpression(sms->target);
+			} else if (dynamic_cast<StateMachineTerminal *>(sm)) {
+				/* Nothing needed */
+			} else {
+				abort();
+			}
+			if (outputSlot != res) {
+				*progress = true;
+				outputSlot = res;
+			}
+		}
+
+	public:
+		LivenessMap(StateMachine *sm, std::set<StateMachineState *> &allStates) {
+			bool progress;
+			do {
+				progress = false;
+				for (auto it = allStates.begin();
+				     it != allStates.end();
+				     it++)
+					updateState(*it, &progress);
+			} while (progress);
+		}
+	} livenessMap(sm, allStates);
+
+	class _ {
+		LivenessMap &livenessMap;
+		bool *done_something;
+		FreeVariableMap &fvm;
+
+		void doit(StateMachineEdge *edge, FreeVariableMap &fvm) {
+			LivenessEntry alive = livenessMap[edge->target];
+			/* Surprise! vector::erase doesn't work with a
+			   reverse_iterator, so use a raw index. */
+			for (int x = edge->sideEffects.size() - 1;
+			     x >= 0;
+			     x--) {
+				StateMachineSideEffect *newEffect = NULL;
+				StateMachineSideEffect *e = edge->sideEffects[x];
+				bool dead = false;
+				switch (e->type) {
+				case StateMachineSideEffect::Load: {
+					StateMachineSideEffectLoad *smsel =
+						(StateMachineSideEffectLoad *)e;
+					if (!alive.binderLive(smsel->key))
+						newEffect = new StateMachineSideEffectAssertFalse(
+							IRExpr_Unop(Iop_BadPtr, smsel->addr));
+					break;
+				}
+				case StateMachineSideEffect::Store:
+				case StateMachineSideEffect::Unreached:
+				case StateMachineSideEffect::AssertFalse:
+					break;
+				case StateMachineSideEffect::Put: {
+					StateMachineSideEffectPut *smsep =
+						(StateMachineSideEffectPut *)e;
+					dead = !alive.registerLive(threadAndRegister(*smsep));
+					break;
+				}
+				case StateMachineSideEffect::Copy: {
+					StateMachineSideEffectCopy *smsec =
+						(StateMachineSideEffectCopy *)e;
+					dead = !alive.binderLive(smsec->key);
+					break;
+				}
+				}
+
+				if (dead) {
+					*done_something = true;
+					applySideEffectToFreeVariables(fvm, e);
+					edge->sideEffects.erase(edge->sideEffects.begin() + x);
+				} else if (newEffect) {
+					*done_something = true;
+					applySideEffectToFreeVariables(fvm, e);
+					edge->sideEffects[x] = newEffect;
+					alive.useSideEffect(newEffect);
+				} else {
+					alive.useSideEffect(e);
+				}
+			}
+		}
+	public:
+		void operator()(StateMachineState *state) {
+			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(state)) {
+				doit(smp->target, fvm);
+			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(state)) {
+				doit(smb->trueTarget, fvm);
+				doit(smb->falseTarget, fvm);
+			} else if (dynamic_cast<StateMachineTerminal *>(state)) {
+				/* Nothing needed */
+			} else {
+				abort();
+			}			
+		}
+
+		_(LivenessMap &_livenessMap, bool *_done_something, FreeVariableMap &_fvm)
+			: livenessMap(_livenessMap), done_something(_done_something), fvm(_fvm)
+		{}
+	} eliminateDeadCode(livenessMap, done_something, sm->freeVariables);
+
+	for (auto it = allStates.begin();
+	     it != allStates.end();
+	     it++)
+		eliminateDeadCode(*it);
+
+	return sm;
+}
+
 static StateMachine *
 optimiseStateMachine(StateMachine *sm,
 		     const AllowableOptimisations &opt,
@@ -2243,6 +2548,7 @@ optimiseStateMachine(StateMachine *sm,
 		sm = sm->optimise(opt, oracle, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
+		sm = deadCodeElimination(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {

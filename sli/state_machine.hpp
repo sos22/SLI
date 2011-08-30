@@ -807,9 +807,9 @@ bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 bool parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err);
 StateMachine *readStateMachine(int fd);
 
-void applySideEffectToFreeVariables(StateMachineSideEffectLoad *c,
-				    FreeVariableMap &fv,
-				    bool *done_something);
+void applySideEffectToFreeVariables(FreeVariableMap &fv,
+				    StateMachineSideEffect *e,
+				    bool *done_something = NULL);
 
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
