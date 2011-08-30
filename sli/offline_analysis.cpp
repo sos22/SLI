@@ -1022,21 +1022,25 @@ public:
 				cntr++;
 		return cntr;
 	}
-	void print(FILE *f) {
-		fprintf(f, "Available side effects:\n");
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
-			fprintf(f, "\t");
-			(*it)->prettyPrint(f);
-			fprintf(f, "\n");
-		}
-		fprintf(f, "Asserted false:\n");
-		for (auto it = assertFalse.begin(); it != assertFalse.end(); it++) {
-			fprintf(f, "\t");
-			ppIRExpr(*it, f);
-			fprintf(f, "\n");
-		}
-	}
+	void print(FILE *f);
 };
+
+void
+avail_t::print(FILE *f)
+{
+	fprintf(f, "Available side effects:\n");
+	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		fprintf(f, "\t");
+		(*it)->prettyPrint(f);
+		fprintf(f, "\n");
+	}
+	fprintf(f, "Asserted false:\n");
+	for (auto it = assertFalse.begin(); it != assertFalse.end(); it++) {
+		fprintf(f, "\t");
+		ppIRExpr(*it, f);
+		fprintf(f, "\n");
+	}
+}
 
 void
 avail_t::makeFalse(IRExpr *expr)
