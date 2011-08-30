@@ -553,9 +553,7 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		}
 	}
 
-	/* Now cull completely redundant stores. */
-	std::set<IRExpr *> loadedAddresses;
-	target->findLoadedAddresses(loadedAddresses, opt);
+	/* Now cull completely redundant loads. */
 	std::set<Int> usedBinders;
 	target->findUsedBinders(usedBinders, opt);
 	std::set<threadAndRegister> usedRegisters;
@@ -568,25 +566,8 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		(*it)->optimise(opt, oracle, done_something);
 		StateMachineSideEffect *newEffect = NULL;
 		switch ((*it)->type) {
-		case StateMachineSideEffect::Store: {
-			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(*it);
-			if (opt.ignoreStore(smses->rip.rip) ||
-			    oracle->storeIsThreadLocal(smses))
-				isDead = true;
-			else
-				isDead = false;
-			for (std::set<IRExpr *>::iterator it2 = loadedAddresses.begin();
-			     isDead && it2 != loadedAddresses.end();
-			     it2++) {
-				if (!definitelyNotEqual(*it2, smses->addr, opt))
-					isDead = false;
-			}
-			if (isDead)
-				newEffect = new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(Iop_BadPtr, smses->addr));
+		case StateMachineSideEffect::Store:
 			break;
-		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *smsec =
 				dynamic_cast<StateMachineSideEffectCopy *>(*it);
@@ -639,7 +620,6 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			*done_something = true;
 			it = sideEffects.erase(it);
 		} else {
-			(*it)->updateLoadedAddresses(loadedAddresses, opt);
 			(*it)->findUsedBinders(usedBinders, opt);
 		}
 	}
