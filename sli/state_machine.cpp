@@ -620,7 +620,15 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			*done_something = true;
 			it = sideEffects.erase(it);
 		} else {
+			if ((*it)->type == StateMachineSideEffect::Load) {
+				StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)*it;
+				usedBinders.erase(smsel->key);
+			} else if ((*it)->type == StateMachineSideEffect::Put) {
+				StateMachineSideEffectPut *smsep = (StateMachineSideEffectPut *)*it;
+				usedRegisters.erase(threadAndRegister(*smsep));
+			}
 			(*it)->findUsedBinders(usedBinders, opt);
+			(*it)->findUsedRegisters(usedRegisters, opt);
 		}
 	}
 
