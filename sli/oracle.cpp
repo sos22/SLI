@@ -789,7 +789,8 @@ irexprAliasingClass(IRExpr *expr,
 		/* Hackety hackety hack */
 		return Oracle::PointerAliasingSet::anything;
 	case Iex_RdTmp: {
-		assert(temps);
+		if (!temps)
+			return Oracle::PointerAliasingSet::anything;
 		std::map<IRTemp, Oracle::PointerAliasingSet>::iterator it;
 		it = temps->find(expr->Iex.RdTmp.tmp);
 		assert(it != temps->end());
