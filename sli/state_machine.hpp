@@ -488,23 +488,7 @@ public:
 		hv(target);
 	}
 	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv,
-				    std::set<StateMachineState *> &done)
-	{
-		if (done.count(this))
-			return this;
-		done.insert(this);
-
-		if (target->target == StateMachineUnreached::get()) {
-			*done_something = true;
-			return target->target;
-		}
-		if (target->sideEffects.size() == 0) {
-			*done_something = true;
-			return target->target->optimise(opt, oracle, done_something, fv, done);
-		}
-		target = target->optimise(opt, oracle, done_something, fv, done);
-		return this;
-	}
+				    std::set<StateMachineState *> &done);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		target->findLoadedAddresses(s, opt);
 	}
