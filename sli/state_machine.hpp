@@ -236,9 +236,9 @@ public:
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &) = 0;
-	virtual StateMachineState *selectSingleCrashingPath() __attribute__((warn_unused_result)) = 0;
-	virtual bool canCrash() = 0;
-	virtual int complexity() = 0;
+	virtual StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) __attribute__((warn_unused_result)) = 0;
+	virtual bool canCrash(std::vector<StateMachineEdge *> &) = 0;
+	virtual int complexity(std::vector<StateMachineEdge *> &) = 0;
 	virtual StateMachineEdge *target0() = 0;
 	virtual const StateMachineEdge *target0() const = 0;
 	virtual StateMachineEdge *target1() = 0;
@@ -354,14 +354,39 @@ public:
 		     it++)
 			(*it)->findUsedRegisters(s, opt);
 	}
-	StateMachineEdge *selectSingleCrashingPath() __attribute__((warn_unused_result)) {
-		target = target->selectSingleCrashingPath();
+	StateMachineEdge *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) __attribute__((warn_unused_result)) {
+		if (!memo.count(this)) {
+			memo.insert(this);
+			target = target->selectSingleCrashingPath(memo);
+		}
 		return this;
 	}
 	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs);
-	bool canCrash() { return target->canCrash(); }
-	int complexity() {
-		int r = target->complexity();
+	bool canCrash(std::vector<StateMachineEdge *> &memo) {
+		for (auto it = memo.begin(); it != memo.end(); it++)
+			if (*it == this)
+				return false;
+		memo.push_back(this);
+		unsigned sz = memo.size();
+		bool res = target->canCrash(memo);
+		assert(sz == memo.size());
+		assert(memo[sz - 1] == this);
+		memo.pop_back();
+		return res;
+	}
+	int complexity(std::vector<StateMachineEdge *> &path) {
+		for (auto it = path.begin(); it != path.end(); it++)
+			if (*it == this)
+				return 1000; /* Assign a high-ish
+					      * fixed cost to every
+					      * cycle. */
+		path.push_back(this);
+		unsigned sz = path.size();
+		int r = target->complexity(path);
+		assert(sz == path.size());
+		assert(path[sz - 1] == this);
+		path.pop_back();
+
 		for (unsigned i = 0; i < sideEffects.size(); i++)
 			r += sideEffects[i]->complexity();
 		return r;
@@ -382,8 +407,8 @@ public:
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedBinders(std::set<Int> &, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister> &, const AllowableOptimisations &) {}
-	StateMachineState *selectSingleCrashingPath() { return this; }
-	int complexity() { return 1; }
+	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) { return this; }
+	int complexity(std::vector<StateMachineEdge *> &) { return 1; }
 	StateMachineEdge *target0() { return NULL; }
 	const StateMachineEdge *target0() const { return NULL; }
 	StateMachineEdge *target1() { return NULL; }
@@ -402,7 +427,7 @@ public:
 		if (!_this) _this = new StateMachineUnreached();
 		return _this;
 	}
-	bool canCrash() { return false; }
+	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
 	void _sanity_check(const std::set<Int> &) const {}
 };
 
@@ -416,7 +441,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-	bool canCrash() { return true; }
+	bool canCrash(std::vector<StateMachineEdge *> &) { return true; }
 	void _sanity_check(const std::set<Int> &) const {}
 };
 
@@ -430,7 +455,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-	bool canCrash() { return false; }
+	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
 	void _sanity_check(const std::set<Int> &) const {}
 };
 
@@ -489,12 +514,12 @@ public:
 	void findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt) {
 		target->findUsedRegisters(s, opt);
 	}
-	StateMachineState *selectSingleCrashingPath() {
-		target = target->selectSingleCrashingPath();
+	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) {
+		target = target->selectSingleCrashingPath(memo);
 		return this;
 	}
-	bool canCrash() { return target->canCrash(); }
-	int complexity() { return target->complexity(); }
+	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
+	int complexity(std::vector<StateMachineEdge *> &path) { return target->complexity(path); }
 	StateMachineEdge *target0() { return target; }
 	const StateMachineEdge *target0() const { return target; }
 	StateMachineEdge *target1() { return NULL; }
@@ -567,19 +592,25 @@ public:
 	}
 	void findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt);
 	void findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt);
-	StateMachineState *selectSingleCrashingPath() {
-		trueTarget = trueTarget->selectSingleCrashingPath();
-		falseTarget = falseTarget->selectSingleCrashingPath();
-		if (trueTarget->canCrash() && falseTarget->canCrash()) {
-			if (trueTarget->complexity() > falseTarget->complexity())
+	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) {
+		trueTarget = trueTarget->selectSingleCrashingPath(memo);
+		falseTarget = falseTarget->selectSingleCrashingPath(memo);
+		std::vector<StateMachineEdge *> edgeMemo;
+		if (trueTarget->canCrash(edgeMemo) && falseTarget->canCrash(edgeMemo)) {
+			std::vector<StateMachineEdge *> path;
+			if (trueTarget->complexity(path) > falseTarget->complexity(path))
 				return new StateMachineProxy(origin, falseTarget);
 			else
 				return new StateMachineProxy(origin, trueTarget);
 		}
 		return this;
 	}
-	bool canCrash() { return trueTarget->canCrash() || falseTarget->canCrash(); }
-	int complexity() { return trueTarget->complexity() + falseTarget->complexity() + exprComplexity(condition) + 50; }
+	bool canCrash(std::vector<StateMachineEdge *> &memo) {
+		return trueTarget->canCrash(memo) || falseTarget->canCrash(memo);
+	}
+	int complexity(std::vector<StateMachineEdge *> &path) {
+		return trueTarget->complexity(path) + falseTarget->complexity(path) + exprComplexity(condition) + 50;
+	}
 	StateMachineEdge *target0() { return falseTarget; }
 	const StateMachineEdge *target0() const { return falseTarget; }
 	StateMachineEdge *target1() { return trueTarget; }
@@ -607,7 +638,7 @@ public:
 		fprintf(f, ">");
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
-	bool canCrash() { return false; }
+	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
 	void _sanity_check(const std::set<Int> &binders) const {checkIRExprBindersInScope(target, binders);}
 };
 

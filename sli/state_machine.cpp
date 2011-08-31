@@ -1478,7 +1478,8 @@ ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema,
 void
 StateMachine::selectSingleCrashingPath(void)
 {
-	root = root->selectSingleCrashingPath();
+	std::set<StateMachineEdge *> memo;
+	root = root->selectSingleCrashingPath(memo);
 }
 
 void
