@@ -24,7 +24,6 @@ main(int argc, char *argv[])
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack();
-	sm = optimiseStateMachine(sm, opt, oracle, false);
 	sm = optimiseStateMachine(sm, opt, oracle, true);
 	printStateMachine(sm, stdout);
 

@@ -2175,14 +2175,20 @@ canonicaliseRbp(StateMachine *sm, OracleInterface *oracle,
 
 class BuildFreeVariableMapTransformer : public StateMachineTransformer {
 public:
-	std::map<std::pair<unsigned, unsigned>, IRExpr *> map;
+	std::set<threadAndRegister> accessedRegisters;
+	std::set<threadAndRegister> puttedRegisters;
 	FreeVariableMap &freeVariables;
+
+	std::map<threadAndRegister, IRExpr *> map;
+
+	StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
+	{
+		if (se->type == StateMachineSideEffect::Put)
+			puttedRegisters.insert(threadAndRegister(*(StateMachineSideEffectPut *)se));
+		return se;
+	}
 	IRExpr *transformIex(IRExpr::Get *what) {
-		std::pair<unsigned, unsigned> k;
-		k.first = what->offset;
-		k.second = what->tid;
-		if (!map.count(k))
-			map[k] = IRExpr_FreeVariable();
+		accessedRegisters.insert(threadAndRegister(*what));
 		return StateMachineTransformer::transformIex(what);
 	}
 	BuildFreeVariableMapTransformer(FreeVariableMap &_freeVariables)
@@ -2193,19 +2199,25 @@ public:
 	   the free variable map. */
 	void transform(FreeVariableMap *fvm, bool *done_something)
 	{}
+	void finalise()
+	{
+		for (auto it = accessedRegisters.begin();
+		     it != accessedRegisters.end();
+		     it++)
+			if (!puttedRegisters.count(*it))
+				map[*it] = IRExpr_FreeVariable();
+	}
 };
 
 class IntroduceFreeVariablesRegisterTransformer : public StateMachineTransformer {
 public:
-	std::map<std::pair<unsigned, unsigned>, IRExpr *> &map;
+	std::map<threadAndRegister, IRExpr *> &map;
 	IntroduceFreeVariablesRegisterTransformer(
-		std::map<std::pair<unsigned, unsigned>, IRExpr *> &_map)
+		std::map<threadAndRegister, IRExpr *> &_map)
 		: map(_map)
 	{}
 	IRExpr *transformIex(IRExpr::Get *what) {
-		std::pair<unsigned, unsigned> k;
-		k.first = what->offset;
-		k.second = what->tid;
+		threadAndRegister k(*what);
 		if (map.count(k)) {
 			IRExpr *res = map[k];
 			fvDelta.push_back(std::pair<FreeVariableKey, IRExpr *>(res->Iex.FreeVariable.key, currentIRExpr()));
@@ -2222,6 +2234,7 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 	__set_profiling(introduceFreeVariablesForRegisters);
 	BuildFreeVariableMapTransformer t(sm->freeVariables);
 	t.StateMachineTransformer::transform(sm);
+	t.finalise();
 	IntroduceFreeVariablesRegisterTransformer s(t.map);
 	return s.transform(sm, done_something);
 }
