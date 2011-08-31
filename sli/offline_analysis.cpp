@@ -740,12 +740,17 @@ breakCycles(CFGNode<t> *cfg)
 	}
 }
 
-static bool storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle);
+static bool storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle,
+				      std::set<StateMachineEdge *> &memo);
 static bool
-storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, OracleInterface *oracle)
+storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, OracleInterface *oracle,
+			      std::set<StateMachineEdge *> &memo)
 {
 	if (TIMEOUT)
 		return true;
+	if (memo.count(sme))
+		return false;
+	memo.insert(sme);
 	for (unsigned y = 0; y < sme->sideEffects.size(); y++) {
 		if (sme->sideEffects[y] == smses) {
 			/* We've reached a cycle without hitting a
@@ -761,16 +766,17 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 				return true;
 		}
 	}
-	return storeMightBeLoadedByState(sme->target, smses, oracle);
+	return storeMightBeLoadedByState(sme->target, smses, oracle, memo);
 }
 static bool
-storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle)
+storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle,
+			  std::set<StateMachineEdge *> &memo)
 {
 	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
-		return storeMightBeLoadedByStateEdge(smp->target, smses, oracle);
+		return storeMightBeLoadedByStateEdge(smp->target, smses, oracle, memo);
 	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm))
-		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, oracle) ||
-			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, oracle);
+		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, oracle, memo) ||
+			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, oracle, memo);
 	return false;
 }
 static bool
@@ -787,7 +793,8 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 				return true;
 		}
 	}
-	return storeMightBeLoadedByState(sme->target, smses, oracle);
+	std::set<StateMachineEdge *> memo;
+	return storeMightBeLoadedByState(sme->target, smses, oracle, memo);
 }
 
 /* Look at the state machine, compare it to the tags table, and remove
