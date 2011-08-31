@@ -3930,6 +3930,7 @@ CFGtoCrashReason(unsigned tid,
 		typedef std::pair<StateMachineState **, CFGNode<t> *> reloc_t;
 		std::vector<CFGNode<t> *> pending;
 		std::vector<reloc_t> relocs;
+		abstract_map<t, StateMachineState *> &crashReasons;
 	public:
 		std::map<CFGNode<t> *, StateMachineState *> cfgToState;
 
@@ -3940,6 +3941,8 @@ CFGtoCrashReason(unsigned tid,
 					for (auto it = relocs.begin(); it != relocs.end(); it++) {
 						if (cfgToState.count(it->second)) {
 							*it->first = cfgToState[it->second];
+						} else if (crashReasons.hasKey(it->second->my_rip)) {
+							*it->first = crashReasons.get(it->second->my_rip);
 						} else {
 							newRelocs.push_back(*it);
 							pending.push_back(it->second);
@@ -3961,7 +3964,11 @@ CFGtoCrashReason(unsigned tid,
 			*p = NULL;
 			relocs.push_back(reloc_t(p, c));
 		}
-	} state;
+
+		State(abstract_map<t, StateMachineState *> &_crashReasons)
+			: crashReasons(_crashReasons)
+		{}
+	} state(crashReasons);
 
 	class FetchIrsb {
 	public:
@@ -4192,8 +4199,10 @@ CFGtoCrashReason(unsigned tid,
 	}
 
 	FreeVariableMap fv;
-	crashReasons.set(original_rip, root);
-	return new StateMachine(root, original_rip, fv, tid);
+	StateMachine *sm = new StateMachine(root, original_rip, fv, tid);
+	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false);
+	crashReasons.set(original_rip, sm->root);
+	return sm;
 }
 
 remoteMacroSectionsT::iterator::iterator(const remoteMacroSectionsT *_owner, unsigned _idx)
