@@ -580,7 +580,15 @@ public:
 		trueTarget = trueTarget->selectSingleCrashingPath(memo);
 		falseTarget = falseTarget->selectSingleCrashingPath(memo);
 		std::vector<StateMachineEdge *> edgeMemo;
-		if (trueTarget->canCrash(edgeMemo) && falseTarget->canCrash(edgeMemo)) {
+		bool tCrash = trueTarget->canCrash(edgeMemo);
+		bool fCrash = falseTarget->canCrash(edgeMemo);
+		if (!tCrash && !fCrash) {
+			/* Bit of a hack: if we're definitely going to
+			   survive, just substitute this state with a
+			   survive state. */
+			return StateMachineNoCrash::get();
+		}
+		if (tCrash && fCrash) {
 			std::vector<StateMachineEdge *> path;
 			if (trueTarget->complexity(path) > falseTarget->complexity(path))
 				return new StateMachineProxy(origin, falseTarget);
