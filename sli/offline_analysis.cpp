@@ -1749,21 +1749,21 @@ rewriteStateMachineEdge(StateMachineEdge *sme,
 			std::set<StateMachineState *> &memo,
 			std::set<StateMachineEdge *> &edgeMemo)
 {
+	if (edgeMemo.count(sme))
+		return sme;
+
 	if (edgeRules.count(sme)) {
-		edgeRules[sme]->target->assertAcyclic();
 		edgeMemo.insert(edgeRules[sme]);
 		return rewriteStateMachineEdge(edgeRules[sme], rules, edgeRules, memo, edgeMemo);
 	}
 	if (TIMEOUT)
 		return sme;
 	edgeMemo.insert(sme);
-	sme->target->assertAcyclic();
 	sme->target = rewriteStateMachine(sme->target,
 					  rules,
 					  edgeRules,
 					  memo,
 					  edgeMemo);
-	sme->target->assertAcyclic();
 	return sme;
 }
 
@@ -1774,9 +1774,10 @@ rewriteStateMachine(StateMachineState *sm,
 		    std::set<StateMachineState *> &memo,
 		    std::set<StateMachineEdge *> &edgeMemo)
 {
-	sm->assertAcyclic();
+	if (memo.count(sm))
+		return sm;
+
 	if (rules.count(sm) && rules[sm] != sm) {
-		rules[sm]->assertAcyclic();
 		memo.insert(rules[sm]);
 		return rewriteStateMachine(rules[sm], rules, edgeRules, memo, edgeMemo);
 	}
@@ -1800,17 +1801,14 @@ rewriteStateMachine(StateMachineState *sm,
 			edgeRules,
 			memo,
 			edgeMemo);
-		sm->assertAcyclic();
 		return sm;
 	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
-		smp->target->target->assertAcyclic();
 		smp->target = rewriteStateMachineEdge(
 			smp->target,
 			rules,
 			edgeRules,
 			memo,
 			edgeMemo);
-		sm->assertAcyclic();
 		return sm;
 	} else {
 		abort();
@@ -1866,7 +1864,6 @@ rewriteStateMachine(StateMachineState *sm, std::map<StateMachineState *, StateMa
 		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules)
 {
 	/* Cyclies make this work badly. */
-	sm->assertAcyclic();
 	assert_mapping_acyclic(rules);
 	assert_mapping_acyclic(edgeRules);
 
