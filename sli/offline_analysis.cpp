@@ -2474,8 +2474,21 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				}
 				case StateMachineSideEffect::Store:
 				case StateMachineSideEffect::Unreached:
-				case StateMachineSideEffect::AssertFalse:
 					break;
+				case StateMachineSideEffect::AssertFalse: {
+					StateMachineSideEffectAssertFalse *a =
+						(StateMachineSideEffectAssertFalse *)e;
+					if (dynamic_cast<StateMachineTerminal *>(edge->target) ||
+					    a->value->tag == Iex_Const) {
+						/* There's not much
+						   point in carrying
+						   assertions which
+						   assert a
+						   constant. */
+						dead = true;
+					}
+					break;
+				}
 				case StateMachineSideEffect::Put: {
 					StateMachineSideEffectPut *smsep =
 						(StateMachineSideEffectPut *)e;
