@@ -347,12 +347,14 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
-		sideEffects.insert(sideEffects.end(),
-				   smp->target->sideEffects.begin(),
-				   smp->target->sideEffects.end());
-		target = smp->target->target;
-		*done_something = true;
-		return optimise(opt, oracle, done_something, freeVariables, done);
+		if (smp->target->target != target) {
+			sideEffects.insert(sideEffects.end(),
+					   smp->target->sideEffects.begin(),
+					   smp->target->sideEffects.end());
+			target = smp->target->target;
+			*done_something = true;
+			return optimise(opt, oracle, done_something, freeVariables, done);
+		}
 	}
 	if (TIMEOUT)
 		return this;
