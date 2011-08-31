@@ -679,6 +679,22 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		*out = new StateMachineSideEffectCopy(key, data);
 		return true;
 	}
+	int offset;
+	if (parseThisString("Put", str, &str2, err) &&
+	    parseDecimalInt(&offset, str2, &str2, err) &&
+	    parseThisString(" <- ", str2, &str2, err) &&
+	    parseIRExpr(&data, str2, &str2, err) &&
+	    parseThisString(" @ ", str2, &str2, err) &&
+	    parseThreadRip(&rip, str2, suffix, err)) {
+		*out = new StateMachineSideEffectPut(offset, data, rip);
+		return true;
+	}
+	if (parseThisString("Assert !(", str, &str2, err) &&
+	    parseIRExpr(&data, str2, &str2, err) &&
+	    parseThisChar(')', str2, suffix, err)) {
+		*out = new StateMachineSideEffectAssertFalse(data);
+		return true;
+	}
 	return false;
 }
 
@@ -862,7 +878,7 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix, ch
 	if (!parseStateMachine(&root, str, &str, err))
 		return false;
 	*out = new StateMachine(root, origin, tid);
-	if (!(*out)->freeVariables.parse(str, &str, err))
+	if (!(*out)->freeVariables.parse(str, suffix, err))
 		return false;
 	return true;
 }

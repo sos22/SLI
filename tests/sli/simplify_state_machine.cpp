@@ -5,6 +5,7 @@
 #include "oracle.hpp"
 #include "state_machine.hpp"
 #include "eval_state_machine.hpp"
+#include "offline_analysis.hpp"
 
 int
 main(int argc, char *argv[])
@@ -23,8 +24,8 @@ main(int argc, char *argv[])
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack();
-	bool ignore;
-	sm = sm->optimise(opt, oracle, &ignore);
+	sm = optimiseStateMachine(sm, opt, oracle, false);
+	sm = optimiseStateMachine(sm, opt, oracle, true);
 	printStateMachine(sm, stdout);
 
 	sm->root->sanity_check();

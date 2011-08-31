@@ -188,5 +188,9 @@ public:
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 StateMachineEdge *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
+StateMachine *optimiseStateMachine(StateMachine *sm,
+				   const AllowableOptimisations &opt,
+				   Oracle *oracle,
+				   bool noExtendContext);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

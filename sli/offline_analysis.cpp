@@ -2544,7 +2544,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 	return sm;
 }
 
-static StateMachine *
+StateMachine *
 optimiseStateMachine(StateMachine *sm,
 		     const AllowableOptimisations &opt,
 		     Oracle *oracle,
