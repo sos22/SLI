@@ -20,16 +20,26 @@ VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false, true);
 
+void
+FreeVariableMap::optimise(const AllowableOptimisations &opt, bool *done_something)
+{
+	for (auto it = content->begin(); it != content->end(); it++)
+		it.set_value(optimiseIRExprFP(it.value(), opt, done_something));
+}
+
 StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	bool b = false;
 	std::set<StateMachineState *> done;
 	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables, done);
+	FreeVariableMap fv(freeVariables);
+	fv.optimise(opt, done_something);
 	if (b) {
 		*done_something = true;
 		StateMachine *sm = new StateMachine(*this);
 		sm->root = new_root;
+		sm->freeVariables = fv;
 		return sm;
 	} else {
 		return this;

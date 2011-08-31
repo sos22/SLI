@@ -167,6 +167,7 @@ public:
 	void print(FILE *f) const;
 	bool parse(const char *str, const char **succ, char **err);
 	bool empty() const { return content->empty(); }
+	void optimise(const AllowableOptimisations &opt, bool *done_something);
 };
 
 void checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders);
