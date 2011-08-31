@@ -2356,6 +2356,34 @@ namespace __offline_analysis_dead_code {
 
 		bool binderLive(Int key) { return first.count(key); }
 		bool registerLive(threadAndRegister reg) { return second.count(reg); }
+		bool assertionLive(IRExpr *assertion) {
+			class _ : public IRExprTransformer {
+				LivenessEntry *_this;
+
+				IRExpr *transformIex(IRExpr::Get *g) {
+					if (_this->registerLive(threadAndRegister(*g)))
+						res = true;
+					return IRExprTransformer::transformIex(g);
+				}
+				IRExpr *transformIex(IRExpr::RdTmp *g) {
+					if (_this->registerLive(threadAndRegister(*g)))
+						res = true;
+					return IRExprTransformer::transformIex(g);
+				}
+				IRExpr *transformIex(IRExpr::Binder *g) {
+					if (_this->binderLive(g->binder))
+						res = true;
+					return IRExprTransformer::transformIex(g);
+				}
+			public:
+				bool res;
+				_(LivenessEntry *__this)
+					: _this(__this), res(false)
+				{}
+			} t(this);
+			t.transformIRExpr(assertion);
+			return t.res;
+		}
 	};
 };
 
@@ -2516,14 +2544,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 					StateMachineSideEffectAssertFalse *a =
 						(StateMachineSideEffectAssertFalse *)e;
 					if (dynamic_cast<StateMachineTerminal *>(edge->target) ||
-					    a->value->tag == Iex_Const) {
-						/* There's not much
-						   point in carrying
-						   assertions which
-						   assert a
-						   constant. */
+					    !alive.assertionLive(a->value))
 						dead = true;
-					}
 					break;
 				}
 				case StateMachineSideEffect::Put: {
