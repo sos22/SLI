@@ -1012,8 +1012,8 @@ public:
 
 	void calcRegisterMap();
 
-	void invalidateBinder(Int key);
-	void invalidateRegister(threadAndRegister reg);
+	void invalidateBinder(Int key, StateMachineSideEffect *preserve);
+	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
 
 	int nr_asserts() const {
 		int cntr = 0;
@@ -1123,10 +1123,11 @@ avail_t::purge(StateMachineClassifier &o)
 	}
 }
 void
-avail_t::invalidateRegister(threadAndRegister reg)
+avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve)
 {
 	class _ : public StateMachineClassifier {
 		threadAndRegister reg;
+		StateMachineSideEffect *preserve;
 		IRExpr *transformIex(IRExpr::Get *e) {
 			if (threadAndRegister(*e) == reg)
 				res = true;
@@ -1137,24 +1138,47 @@ avail_t::invalidateRegister(threadAndRegister reg)
 				res = true;
 			return NULL;
 		}
+		StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
+		{
+			if (se != preserve &&
+			    se->type == StateMachineSideEffect::Put &&
+			    threadAndRegister(*(StateMachineSideEffectPut *)se) == reg)
+				res = true;
+			return StateMachineClassifier::transform(se, done_something);
+		}
 	public:
-		_(threadAndRegister _reg) : reg(_reg) {}
-	} checkIfPresent(reg);
+		_(threadAndRegister _reg, StateMachineSideEffect *_preserve)
+			: reg(_reg), preserve(_preserve)
+		{}
+	} checkIfPresent(reg, preserve);
 	purge(checkIfPresent);
 }
 void
-avail_t::invalidateBinder(Int key)
+avail_t::invalidateBinder(Int key, StateMachineSideEffect *preserve)
 {
 	class _ : public StateMachineClassifier {
 		Int k;
+		StateMachineSideEffect *preserve;
 		IRExpr *transformIex(IRExpr::Binder *e) {
 			if (e->binder == k)
 				res = true;
 			return NULL;
 		}
+		StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
+		{
+			if (se != preserve &&
+			    ( (se->type == StateMachineSideEffect::Load &&
+			       ((StateMachineSideEffectLoad *)se)->key == k) ||
+			      (se->type == StateMachineSideEffect::Copy &&
+			       ((StateMachineSideEffectCopy *)se)->key == k) ))
+				res = true;
+			return StateMachineClassifier::transform(se, done_something);
+		}
 	public:
-		_(unsigned _k) : k(_k) {}
-	} checkIfPresent(key);
+		_(unsigned _k, StateMachineSideEffect *_preserve)
+			: k(_k), preserve(_preserve)
+		{}
+	} checkIfPresent(key, preserve);
 	purge(checkIfPresent);
 }
 
@@ -1232,7 +1256,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
 		outputAvail.sideEffects.insert(smsec);
-		outputAvail.invalidateBinder(smsec->key);
+		outputAvail.invalidateBinder(smsec->key, smsec);
 		break;
 	}
 	case StateMachineSideEffect::Put: {
@@ -1240,7 +1264,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectPut *>(smse);
 		assert(smsep);
 		outputAvail.sideEffects.insert(smsep);
-		outputAvail.invalidateRegister(threadAndRegister(*smsep));
+		outputAvail.invalidateRegister(threadAndRegister(*smsep), smsep);
 		break;
 	}
 	case StateMachineSideEffect::Load: {
@@ -1248,7 +1272,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		outputAvail.sideEffects.insert(smsel);
 		outputAvail.dereference(smsel->addr);
-		outputAvail.invalidateBinder(smsel->key);
+		outputAvail.invalidateBinder(smsel->key, smsel);
 		break;
 	}
 	case StateMachineSideEffect::AssertFalse: {
