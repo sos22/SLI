@@ -2628,10 +2628,12 @@ optimiseStateMachine(StateMachine *sm,
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
+			sm->root->assertAcyclic();
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
 			sm = canonicaliseRbp(sm, oracle, &done_something);
+			sm->root->assertAcyclic();
 		}
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
@@ -3666,7 +3668,6 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		InstructionSet interesting;
 		interesting.rips.insert(interestingRip);
 		trimCFG(cfg.get(), interesting, INT_MAX, true);
-		breakCycles(cfg.get());
 
 		iiCrashReasons _(ii);
 		VexPtr<StateMachine, &ir_heap> cr(
