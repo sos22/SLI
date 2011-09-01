@@ -2555,7 +2555,20 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				case StateMachineSideEffect::Put: {
 					StateMachineSideEffectPut *smsep =
 						(StateMachineSideEffectPut *)e;
-					dead = !alive.registerLive(threadAndRegister(*smsep));
+					threadAndRegister r(*smsep);
+					if ((smsep->value->tag == Iex_Get &&
+					     threadAndRegister(smsep->value->Iex.Get) == r) ||
+					    (smsep->value->tag == Iex_RdTmp &&
+					     threadAndRegister(smsep->value->Iex.RdTmp) == r)) {
+						/* Put r1 <- r1 is
+						   always dead,
+						   regardless of what
+						   liveness analysis
+						   might say. */
+						dead = true;
+					} else {
+						dead = !alive.registerLive(threadAndRegister(*smsep));
+					}
 					break;
 				}
 				case StateMachineSideEffect::Copy: {
