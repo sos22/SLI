@@ -1359,10 +1359,22 @@ static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **su
   return true;
 }
 
-bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err)
+static bool parseIRExprFailedCall(IRExpr **res, const char *str, const char **suffix, char **err)
 {
+  IRExpr *target;
+  if (!parseThisString("failedCall(", str, &str, err) ||
+      !parseIRExpr(&target, str, &str, err) ||
+      !parseThisChar(')', str, suffix, err))
+    return false;
+  *res = IRExpr_ClientCallFailed(target);
+  return true;
+}
+
+bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **_err)
+{
+  char *err;
 #define do_form(name)					\
-  if (parseIRExpr ## name (out, str, suffix, err))	\
+  if (parseIRExpr ## name (out, str, suffix, &err))	\
     return true;
   do_form(Binder);
   do_form(Get);
@@ -1379,7 +1391,9 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err)
   do_form(Associative);
   do_form(FreeVariable);
   do_form(ClientCall);
+  do_form(FailedCall);
 #undef do_form
+  *_err = vex_asprintf("wanted IRExpr, got %.10s...", str);
   return false;
 }
 
