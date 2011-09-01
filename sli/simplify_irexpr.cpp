@@ -1090,9 +1090,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			return src->Iex.Unop.arg;
 		}
 
-		if (src->Iex.Unop.op >= Iop_8Uto16 &&
-		    src->Iex.Unop.op <= Iop_32Uto64) {
-			/* Get rid of signed upcasts; they tend to
+		if ((src->Iex.Unop.op >= Iop_8Uto16 &&
+		     src->Iex.Unop.op <= Iop_32Uto64) ||
+		    src->Iex.Unop.op == Iop_1Uto8) {
+			/* Get rid of unsigned upcasts; they tend to
 			   show up where you don't want them, and they
 			   don't actually do anything useful. */
 			*done_something = true;
@@ -1285,6 +1286,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		   the left and all of the non-constants to the
 		   right. */
 		if (src->Iex.Binop.op == Iop_CmpEQ64) {
+			if (l->tag == Iex_Const &&
+			    l->Iex.Const.con->Ico.U64 == 0) {
+				/* 0 == x is equivalent to just !x */
+				*done_something = true;
+				return IRExpr_Unop(
+					Iop_Not1,
+					r);
+			}
+
 			if (r->tag == Iex_Associative &&
 			    r->Iex.Associative.op == Iop_Add64 &&
 			    r->Iex.Associative.contents[0]->tag == Iex_Const) {
