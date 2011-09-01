@@ -112,6 +112,7 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 GarbageCollectionToken token);
 IRExpr *findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 				   VexPtr<Oracle> &oracle,
+				   const AllowableOptimisations &opt,
 				   GarbageCollectionToken token);
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

@@ -21,6 +21,7 @@ main(int argc, char *argv[])
 	bool mightSurvive;
 
 	evalCrossProductMachine(readMachine, writeMachine, oracle, assumption,
+				AllowableOptimisations::defaultOptimisations,
 				&mightSurvive, &mightCrash, ALLOW_GC);
 	printf("Might survive %d, might crash %d\n",
 	       mightSurvive, mightCrash);

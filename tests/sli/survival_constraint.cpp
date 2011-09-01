@@ -21,7 +21,7 @@ main(int argc, char *argv[])
 		.enableassumePrivateStack()
 		.enableignoreSideEffects();
 
-	survive = survivalConstraintIfExecutedAtomically(sm, oracle, ALLOW_GC);
+	survive = survivalConstraintIfExecutedAtomically(sm, oracle, opt, ALLOW_GC);
 
 	survive = simplifyIRExpr(survive, opt);
 

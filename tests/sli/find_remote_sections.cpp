@@ -19,7 +19,9 @@ main(int argc, char *argv[])
 	
 	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT());
 
-	if (!findRemoteMacroSections(readMachine, writeMachine, assumption, oracle, remoteMacroSections, ALLOW_GC)) {
+	if (!findRemoteMacroSections(readMachine, writeMachine, assumption, oracle,
+				     AllowableOptimisations::defaultOptimisations,
+				     remoteMacroSections, ALLOW_GC)) {
 		printf("Cannot find remote macro sections...\n");
 		return 1;
 	}
@@ -32,7 +34,9 @@ main(int argc, char *argv[])
 		it->end->prettyPrint(stdout);
 		printf("\n");		
 	}
-	if (!fixSufficient(readMachine, writeMachine, assumption, oracle, remoteMacroSections, ALLOW_GC)) {
+	if (!fixSufficient(readMachine, writeMachine, assumption, oracle,
+			   AllowableOptimisations::defaultOptimisations,
+			   remoteMacroSections, ALLOW_GC)) {
 		printf("Fix insufficient\n");
 		return 1;
 	} else {

@@ -3368,7 +3368,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     VexPtr<StateMachine, &ir_heap> &probeMachine,
 				     VexPtr<Oracle> &oracle,
 				     VexPtr<IRExpr, &ir_heap> assumption,
-				     const AllowableOptimisations &opt2,
+				     const AllowableOptimisations &opt,
 				     GarbageCollectionToken token,
 				     IRExpr **assumptionOut,
 				     StateMachine **newStoreMachine)
@@ -3378,7 +3378,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
-	sm = optimiseStateMachine(storeMachine, opt2, oracle, true);
+	sm = optimiseStateMachine(storeMachine, opt, oracle, true);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
@@ -3391,7 +3391,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
-	assumption = writeMachineCrashConstraint(sm, assumption, oracle, token);
+	assumption = writeMachineCrashConstraint(sm, assumption, oracle, opt, token);
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine survival constraint\n");
 		return false;
@@ -3400,7 +3400,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	ppIRExpr(assumption, _logfile);
 	fprintf(_logfile, "\n");
 
-	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle, token);
+	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle, opt, token);
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive suitability constraint\n");
 		return false;
@@ -3417,6 +3417,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     sm,
 				     oracle,
 				     assumption,
+				     opt,
 				     &mightSurvive,
 				     &mightCrash,
 				     token)) {
@@ -3576,11 +3577,11 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm, newAssumption);
 	if (needRemoteMacroSections) {
 		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-		if (!findRemoteMacroSections(probeMachine, sm, newAssumption, oracle, remoteMacroSections, token)) {
+		if (!findRemoteMacroSections(probeMachine, sm, newAssumption, oracle, opt, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tChose a bad write machine...\n");
 			return true;
 		}
-		if (!fixSufficient(sm, probeMachine, newAssumption, oracle, remoteMacroSections, token)) {
+		if (!fixSufficient(sm, probeMachine, newAssumption, oracle, opt, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
 			return true;
 		}
@@ -3730,17 +3731,17 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		return NULL;
 	}
 
-	VexPtr<IRExpr, &ir_heap> survive(
-		survivalConstraintIfExecutedAtomically(probeMachine, oracle, token));
-	if (!survive) {
-		fprintf(_logfile, "\tTimed out computing survival constraint\n");
-		return NULL;
-	}
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableignoreSideEffects()
 		.disablefreeVariablesMightAccessStack();
+	VexPtr<IRExpr, &ir_heap> survive(
+		survivalConstraintIfExecutedAtomically(probeMachine, oracle, opt, token));
+	if (!survive) {
+		fprintf(_logfile, "\tTimed out computing survival constraint\n");
+		return NULL;
+	}
 	survive = simplifyIRExpr(survive, opt);
 
 	fprintf(_logfile, "\tComputed survival constraint ");
@@ -3753,7 +3754,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	   mightSurvive == false then the program is doomed and it's
 	   not possible to fix it from this point. */
 	bool mightSurvive, mightCrash;
-	if (!evalMachineUnderAssumption(probeMachine, oracle, survive, &mightSurvive, &mightCrash, token)) {
+	if (!evalMachineUnderAssumption(probeMachine, oracle, survive, opt, &mightSurvive, &mightCrash, token)) {
 		fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
 		return NULL;
 	}
