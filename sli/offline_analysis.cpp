@@ -3539,7 +3539,8 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
-		.enableassumeNoInterferingStores();
+		.enableassumeNoInterferingStores()
+		.setAddressSpace(as);
 	opt.interestingStores = is.rips;
 	opt.haveInterestingStoresSet = true;
 
@@ -3648,7 +3649,8 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
-		.enableignoreSideEffects();
+		.enableignoreSideEffects()
+		.setAddressSpace(oracle->ms->addressSpace);
 
 	StateMachine *sm = NULL;
 

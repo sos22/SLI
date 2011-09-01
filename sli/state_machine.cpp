@@ -18,7 +18,7 @@ Int StateMachineSideEffectLoad::next_key;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
-AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false, true);
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false, true, NULL);
 
 void
 FreeVariableMap::optimise(const AllowableOptimisations &opt, bool *done_something)

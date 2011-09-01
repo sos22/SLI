@@ -15,12 +15,24 @@ class threadAndRegister;
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as, bool fvmas)
+	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as, bool fvmas,
+			       AddressSpace *_as)
 		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
 		  ignoreSideEffects(i), assumeNoInterferingStores(as),
-		  freeVariablesMightAccessStack(fvmas), haveInterestingStoresSet(false)
+		  freeVariablesMightAccessStack(fvmas), as(_as), haveInterestingStoresSet(false)
 	{
 	}
+	AllowableOptimisations(const AllowableOptimisations &o)
+		: xPlusMinusX(o.xPlusMinusX),
+		  assumePrivateStack(o.assumePrivateStack),
+		  assumeExecutesAtomically(o.assumeExecutesAtomically),
+		  ignoreSideEffects(o.ignoreSideEffects),
+		  assumeNoInterferingStores(o.assumeNoInterferingStores),
+		  freeVariablesMightAccessStack(o.freeVariablesMightAccessStack),
+		  as(o.as),
+		  haveInterestingStoresSet(o.haveInterestingStoresSet),
+		  interestingStores(o.interestingStores)
+	{}
 
 	/* Transform x + (-x) to 0.  This is always safe, in the sense
 	   that x + (-x) is always zero, but actually checking it can
@@ -54,6 +66,10 @@ public:
 	   machines generated at function heads, for instance. */
 	bool freeVariablesMightAccessStack;
 
+	/* If non-NULL, use this to resolve BadPtr expressions where
+	   the address is a constant. */
+	VexPtr<AddressSpace, &ir_heap> as;
+
 	/* Bit of a hack: sometimes, only some side effects are
 	   interesting, so allow them to be listed here.  If
 	   haveInterestingStoresSet is false then we don't look at
@@ -65,43 +81,47 @@ public:
 	AllowableOptimisations disablexPlusMinusX() const
 	{
 		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack);
+					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableassumePrivateStack() const
 	{
 		return AllowableOptimisations(xPlusMinusX, true, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack);
+					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableassumeExecutesAtomically() const
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, true, ignoreSideEffects,
 					      true /* If we're running atomically then there are definitely
 						      no interfering stores */,
-					      freeVariablesMightAccessStack
-			);
+					      freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableignoreSideEffects() const
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack);
+					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableassumeNoInterferingStores() const
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      true, freeVariablesMightAccessStack);
+					      true, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations disablefreeVariablesMightAccessStack() const
 	{
 		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, false);
+					      assumeNoInterferingStores, false, as);
+	}
+	AllowableOptimisations setAddressSpace(AddressSpace *as) const
+	{
+		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	unsigned asUnsigned() const {
-		unsigned x = 32; /* turning off all of the optional
+		unsigned x = 64; /* turning off all of the optional
 				    optimisations doesn't turn off the
 				    ones which are always available, so
 				    have an implicit bit for them.
 				    i.e. 0 means no optimisations at
-				    all, and 8 means only the most
+				    all, and 64 means only the most
 				    basic ones which are always
 				    safe. */
 
@@ -117,6 +137,8 @@ public:
 			x |= 8;
 		if (freeVariablesMightAccessStack)
 			x |= 16;
+		if (as != NULL)
+			x |= 32;
 		return x;
 	}
 
@@ -129,6 +151,17 @@ public:
 			return false;
 		else
 			return true;
+	}
+
+	/* If @addr is definitely accessible, set *@res to true and
+	   return true.  If it's definitely not accessible, set *@res
+	   to false and return true.  If we can't be sure, return
+	   false. */
+	bool addressAccessible(unsigned long addr, bool *res) const {
+		if (!as)
+			return false;
+		*res = as->isReadable(addr, 1);
+		return true;
 	}
 };
 

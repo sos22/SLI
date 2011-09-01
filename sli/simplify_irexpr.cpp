@@ -1196,14 +1196,44 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					*done_something = true;
 					return IRExpr_Const(IRConst_U1(1));
 				}
-				/* Could sensibly just check that the
-				 * target address isn't mapped here,
-				 * on the assumption that anything not
-				 * in the binary won't have a fixed
-				 * address, but that then depends on
-				 * the machine state, and I don't want
-				 * to make optimiseIRExpr depend on
-				 * machine state just for that. */
+				{
+					/* We assume here that
+					   anything which has a fixed
+					   address must come out of
+					   one of the binaries which
+					   we've mapped.  That's not
+					   *completely* sound, but
+					   it's a pretty good
+					   approximation, because
+					   anything which is
+					   dynamically allocated will
+					   have a dynamic base, and
+					   hence will never have a
+					   constant address, and so
+					   won't show up here.  If
+					   it's not dynamically
+					   allocated then it must have
+					   come out of the binary, so
+					   we'll know its address. */
+					/* (This works for libraries,
+					   as well: if it's an
+					   internal reference then we
+					   must have loaded the
+					   library, so we'll be able
+					   to tell whether it provides
+					   a particular address; if
+					   it's inter-module, then you
+					   won't know the address of
+					   the referrent when
+					   compiling the referee, so
+					   it won't show up as a
+					   constant.) */
+					bool t;
+					if (opt.addressAccessible(c->Ico.U64, &t)) {
+						*done_something = true;
+						return IRExpr_Const(IRConst_U1(!t));
+					}
+				}
 				break;
 			default:
 				printf("Cannot constant fold ");
