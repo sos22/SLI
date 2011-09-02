@@ -10,11 +10,9 @@
 
 #include "libvex_parse.h"
 
-static void findUsedBinders(IRExpr *e, std::set<Int> &, const AllowableOptimisations &);
 static void findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &, const AllowableOptimisations &);
 
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
-Int StateMachineSideEffectLoad::next_key;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
@@ -151,19 +149,6 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterfa
 }
 
 void
-StateMachineBifurcate::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
-{
-	assert(s.empty());
-	std::set<Int> t;
-	trueTarget->findUsedBinders(t, opt);
-	falseTarget->findUsedBinders(s, opt);
-	for (std::set<Int>::iterator it = t.begin();
-	     it != t.end();
-	     it++)
-		s.insert(*it);
-	::findUsedBinders(condition, s, opt);
-}
-void
 StateMachineBifurcate::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
 {
 	trueTarget->findUsedRegisters(s, opt);
@@ -196,12 +181,6 @@ StateMachineSideEffectStore::updateLoadedAddresses(std::set<IRExpr *> &l, const 
 	}
 }
 void
-StateMachineSideEffectStore::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
-{
-	::findUsedBinders(addr, s, opt);
-	::findUsedBinders(data, s, opt);
-}
-void
 StateMachineSideEffectStore::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
 {
 	::findUsedRegisters(addr, s, opt);
@@ -226,14 +205,9 @@ StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, OracleIn
 	return this;
 }
 void
-StateMachineSideEffectLoad::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
-{
-	s.erase(key);
-	::findUsedBinders(addr, s, opt);
-}
-void
 StateMachineSideEffectLoad::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
 {
+	s.erase(target);
 	::findUsedRegisters(addr, s, opt);
 }
 
@@ -248,36 +222,9 @@ StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, OracleIn
 	return this;
 }
 void
-StateMachineSideEffectCopy::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
-{
-	s.erase(key);
-	::findUsedBinders(value, s, opt);
-}
-void
 StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
 {
-	::findUsedRegisters(value, s, opt);
-}
-
-StateMachineSideEffect *
-StateMachineSideEffectPut::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
-{
-	value = optimiseIRExprFP(value, opt, done_something);
-	if (definitelyUnevaluatable(value, opt, oracle)) {
-		*done_something = true;
-		return StateMachineSideEffectUnreached::get();
-	}
-	return this;
-}
-void
-StateMachineSideEffectPut::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
-{
-	::findUsedBinders(value, s, opt);
-}
-void
-StateMachineSideEffectPut::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
-{
-	s.erase(threadAndRegister(*this));
+	s.erase(target);
 	::findUsedRegisters(value, s, opt);
 }
 
@@ -293,53 +240,9 @@ StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, O
 	return this;
 }
 void
-StateMachineSideEffectAssertFalse::findUsedBinders(std::set<Int> &s, const AllowableOptimisations &opt)
-{
-	::findUsedBinders(value, s, opt);
-}
-void
 StateMachineSideEffectAssertFalse::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
 {
 	::findUsedRegisters(value, s, opt);
-}
-
-class rewriteBinderTransformer : public IRExprTransformer {
-public:
-	const std::map<Int, IRExpr *> &binders;
-	const std::map<threadAndRegister, IRExpr *> &regs;
-	rewriteBinderTransformer(const std::map<Int, IRExpr *> &_binders,
-				 const std::map<threadAndRegister, IRExpr *> &_regs)
-		: binders(_binders), regs(_regs)
-	{}
-	IRExpr *transformIex(IRExpr::Binder *e) {
-		if (binders.count(e->binder)) {
-			return binders.find(e->binder)->second;
-		} else {
-			return NULL;
-		}
-	}
-	IRExpr *transformIex(IRExpr::Get *e) {
-		auto it = regs.find(threadAndRegister(*e));
-		if (it != regs.end())
-			return it->second;
-		else
-			return NULL;
-	}
-	IRExpr *transformIex(IRExpr::RdTmp *e) {
-		auto it = regs.find(threadAndRegister(*e));
-		if (it != regs.end())
-			return it->second;
-		else
-			return NULL;
-	}
-};
-static IRExpr *
-rewriteBinderExpressions(IRExpr *ex, const std::map<Int, IRExpr *> &binders,
-			 const std::map<threadAndRegister, IRExpr *> &regs,
-			 bool *done_something)
-{
-	rewriteBinderTransformer trans(binders, regs);
-	return trans.transformIRExpr(ex, done_something);
 }
 
 struct availEntry {
@@ -401,23 +304,6 @@ findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &out, const AllowableOp
 		}
 		IRExpr *transformIex(IRExpr::RdTmp *e) {
 			out.insert(threadAndRegister(*e));
-			return IRExprTransformer::transformIex(e);
-		}
-	} t(out);
-	t.transformIRExpr(e);
-}
-
-static void
-findUsedBinders(IRExpr *e, std::set<Int> &out, const AllowableOptimisations &opt)
-{
-	class _ : public IRExprTransformer {
-	public:
-		std::set<Int> &out;
-		_(std::set<Int> &_out)
-			: out(_out)
-		{}
-		IRExpr *transformIex(IRExpr::Binder *e) {
-			out.insert(e->binder);
 			return IRExprTransformer::transformIex(e);
 		}
 	} t(out);
@@ -549,7 +435,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse1);
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse2);
-		return smsel1->key == smsel2->key &&
+		return smsel1->target == smsel2->target &&
 			definitelyEqual(smsel1->addr, smsel2->addr, opt);
 	}
 	case StateMachineSideEffect::Copy: {
@@ -557,20 +443,11 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse1);
 		StateMachineSideEffectCopy *smsec2 =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse2);
-		return smsec1->key == smsec2->key &&
+		return smsec1->target == smsec2->target &&
 			definitelyEqual(smsec1->value, smsec2->value, opt);
 	}
 	case StateMachineSideEffect::Unreached:
 		return true;
-	case StateMachineSideEffect::Put: {
-		StateMachineSideEffectPut *smsep1 =
-			dynamic_cast<StateMachineSideEffectPut *>(smse1);
-		StateMachineSideEffectPut *smsep2 =
-			dynamic_cast<StateMachineSideEffectPut *>(smse2);
-		return smsep1->offset == smsep2->offset &&
-			smsep1->rip == smsep2->rip &&
-			definitelyEqual(smsep1->value, smsep2->value, opt);
-	}
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *smseaf1 =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse1);
@@ -580,6 +457,17 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 	}
 	}
 	abort();
+}
+
+static bool
+parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix, char **err)
+{
+	if (parseDecimalUInt(&out->first, str, &str, err) &&
+	    parseThisChar(':', str, &str, err) &&
+	    parseDecimalInt(&out->second, str, suffix, err))
+		return true;
+	*err = vex_asprintf("Wanted threadAndRegister, got %.10s", str);
+	return false;
 }
 
 bool
@@ -605,9 +493,9 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		*out = new StateMachineSideEffectStore(addr, data, rip);
 		return true;
 	}
-	int key;
-	if (parseThisChar('B', str, &str2, err) &&
-	    parseDecimalInt(&key, str2, &str2, err) &&
+	threadAndRegister key;
+	if (parseThisString("LOAD ", str, &str2, err) &&
+	    parseThreadAndRegister(&key, str2, &str2, err) &&
 	    parseThisString(" <- *(", str2, &str2, err) &&
 	    parseIRExpr(&addr, str2, &str2, err) &&
 	    parseThisString(")@", str2, &str2, err) &&
@@ -615,22 +503,11 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		*out = new StateMachineSideEffectLoad(key, addr, rip);
 		return true;
 	}
-	if (parseThisChar('B', str, &str2, err) &&
-	    parseDecimalInt(&key, str2, &str2, err) &&
-	    parseThisString(" = (", str2, &str2, err) &&
-	    parseIRExpr(&data, str2, &str2, err) &&
-	    parseThisChar(')', str2, suffix, err)) {
+	if (parseThisString("COPY ", str, &str2, err) &&
+	    parseThreadAndRegister(&key, str2, &str2, err) &&
+	    parseThisString(" = ", str2, &str2, err) &&
+	    parseIRExpr(&data, str2, suffix, err)) {
 		*out = new StateMachineSideEffectCopy(key, data);
-		return true;
-	}
-	int offset;
-	if (parseThisString("Put", str, &str2, err) &&
-	    parseDecimalInt(&offset, str2, &str2, err) &&
-	    parseThisString(" <- ", str2, &str2, err) &&
-	    parseIRExpr(&data, str2, &str2, err) &&
-	    parseThisString(" @ ", str2, &str2, err) &&
-	    parseThreadRip(&rip, str2, suffix, err)) {
-		*out = new StateMachineSideEffectPut(offset, data, rip);
 		return true;
 	}
 	if (parseThisString("Assert !(", str, &str2, err) &&
@@ -917,71 +794,6 @@ StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<unsigned long> &inst
 	target->enumerateMentionedMemoryAccesses(instrs);
 }
 
-void
-StateMachineState::sanity_check(std::set<Int> &binders, std::vector<const StateMachineState *> &path) const
-{
-	for (unsigned x = 0; x < path.size(); x++)
-		assert(path[x] != this);
-	path.push_back(this);
-	if (target0()) target0()->sanity_check(binders, path);
-	if (target1()) target1()->sanity_check(binders, path);
-	_sanity_check(binders);
-	assert(path.back() == this);
-	path.pop_back();
-}
-
-void
-StateMachineEdge::sanity_check(std::set<Int> &binders, std::vector<const StateMachineState *> &path) const
-{
-	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++) {
-		(*it)->sanity_check(binders);
-		if (StateMachineSideEffectLoad *smsel =
-		    dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			assert(!binders.count(smsel->key));
-			binders.insert(smsel->key);
-		} else if (StateMachineSideEffectCopy *smsec =
-			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
-			assert(!binders.count(smsec->key));
-			binders.insert(smsec->key);
-		}
-	}
-	target->sanity_check(binders, path);
-	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++) {
-		if (StateMachineSideEffectLoad *smsel =
-		    dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			binders.erase(smsel->key);
-		} else if (StateMachineSideEffectCopy *smsec =
-			   dynamic_cast<StateMachineSideEffectCopy *>(*it)) {
-			binders.erase(smsec->key);
-		}
-	}
-}
-
-/* Not really a transformer, but this is the easiest way of expressing
-   an expression walk. */
-class checkBinders : public IRExprTransformer {
-public:
-	const std::set<Int> &binders;
-	IRExpr *transformIex(IRExpr::Binder *e) {
-		assert(binders.count(e->binder));
-		return IRExprTransformer::transformIex(e);
-	}
-	checkBinders(const std::set<Int> &_binders)
-		: binders(_binders)
-	{}
-};
-void
-checkIRExprBindersInScope(const IRExpr *iex, const std::set<Int> &binders)
-{
-	checkBinders cb(binders);
-	bool ign;
-	cb.transformIRExpr((IRExpr *)iex, &ign);
-}
-
 static void
 nrAliasingLoads(StateMachineState *sm,
 		StateMachineSideEffectLoad *smsel,
@@ -1177,7 +989,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		}
 		/* This is a local load from a location which is never
 		 * stored.  Remove it. */
-		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->key, IRExpr_FreeVariable());
+		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
 		out->sideEffects.push_back(smsec);
 		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
 				(smsec->value->Iex.FreeVariable.key,
@@ -1281,7 +1093,6 @@ public:
 	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 		switch (e->tag) {
 		case Iex_Const:
-		case Iex_Binder:
 		case Iex_Get:
 		case Iex_GetI:
 		case Iex_RdTmp:
@@ -1424,3 +1235,4 @@ FreeVariableMap::applyTransformation(IRExprTransformer &x, bool *done_something)
 	     it++)
 		it.set_value(x.transformIRExpr(it.value(), done_something));
 }
+

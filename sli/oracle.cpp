@@ -715,8 +715,6 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 	if (!w)
 		return old;
 	switch (w->tag) {
-	case Iex_Binder:
-		return old;
 	case Iex_Get:
 		return old.use(w->Iex.Get.offset);
 	case Iex_GetI:
@@ -777,17 +775,12 @@ irexprAliasingClass(IRExpr *expr,
 
 	switch (expr->tag) {
 	case Iex_Get:
-		if (expr->Iex.Get.offset < Oracle::NR_REGS * 8)
+		if (expr->Iex.Get.offset < Oracle::NR_REGS * 8 && expr->Iex.Get.offset >= 0)
 			return config.v[expr->Iex.Get.offset / 8];
 		else {
 			/* Assume that those are the only pointer registers */
 			return Oracle::PointerAliasingSet::notAPointer;
 		}
-	case Iex_Binder:
-		/* Binders are loaded from memory, and we only track
-		 * registers. */
-		/* Hackety hackety hack */
-		return Oracle::PointerAliasingSet::anything;
 	case Iex_RdTmp: {
 		if (!temps)
 			return Oracle::PointerAliasingSet::anything;

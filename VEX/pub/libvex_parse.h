@@ -10,6 +10,7 @@ bool parseThisString(const char *pattern,
 		     const char **suffix,
 		     char **err);
 bool parseDecimalInt(int *out, const char *str, const char **suffix, char **err);
+bool parseDecimalUInt(unsigned int *out, const char *str, const char **suffix, char **err);
 bool parseHexUlong(unsigned long *out, const char *str, const char **suffix,
 		   char **err);
 

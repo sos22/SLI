@@ -65,7 +65,6 @@ void
 IRExpr::visit(HeapVisitor &visit)
 {
    switch (tag) {
-   case Iex_Binder:
    case Iex_Get:
    case Iex_RdTmp:
    case Iex_FreeVariable:
@@ -128,8 +127,6 @@ unsigned long
 IRExpr::hashval(void) const
 {
   switch (tag) {
-  case Iex_Binder:
-    return Iex.Binder.binder;
   case Iex_Get:
     return Iex.Get.offset + Iex.Get.ty * 3 + Iex.Get.tid * 7;
   case Iex_GetI:
@@ -1024,16 +1021,6 @@ static bool parseIROpSimple(IROp *out, const char *str, const char **suffix, cha
   return false;
 }
 
-static bool parseIRExprBinder(IRExpr **res, const char *str, const char **suffix, char **err)
-{
-  int key;
-  if (!parseThisChar('B', str, &str, err) ||
-      !parseDecimalInt(&key, str, suffix, err))
-    return false;
-  *res = IRExpr_Binder(key);
-  return true;
-}
-
 #define foreach_reg(iter)			\
   iter(RAX)					\
   iter(RBX)					\
@@ -1376,7 +1363,6 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **_err
 #define do_form(name)					\
   if (parseIRExpr ## name (out, str, suffix, &err))	\
     return true;
-  do_form(Binder);
   do_form(Get);
   do_form(GetI);
   do_form(RdTmp);
@@ -1401,9 +1387,6 @@ void ppIRExpr ( IRExpr* e, FILE *f )
 {
   Int i;
   switch (e->tag) {
-    case Iex_Binder:
-      fprintf(f, "B%d", e->Iex.Binder.binder);
-      return;
     case Iex_Get:
       /* Better pretty print for some known registers. */
       if (e->Iex.Get.ty == Ity_I64) {
@@ -1882,12 +1865,6 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 
 /* Constructors -- IRExpr */
 
-IRExpr* IRExpr_Binder ( Int binder ) {
-   IRExpr* e            = new IRExpr();
-   e->tag               = Iex_Binder;
-   e->Iex.Binder.binder = binder;
-   return e;
-}
 IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid ) {
    IRExpr* e         = new IRExpr();
    e->tag            = Iex_Get;
@@ -2823,9 +2800,6 @@ IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
          e = e->Iex.Mux0X.expr0;
          goto start;
          /* return typeOfIRExpr(tyenv, e->Iex.Mux0X.expr0); */
-      case Iex_Binder:
-         vpanic("typeOfIRExpr: Binder is not a valid expression");
-	 break;
       case Iex_FreeVariable:
       case Iex_ClientCall:
       case Iex_ClientCallFailed:

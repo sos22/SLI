@@ -43,7 +43,6 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 
 	switch (exp->tag) {
 	case Iex_Get:
-	case Iex_Binder:
 	case Iex_RdTmp:
 	case Iex_FreeVariable:
 		return exp;

@@ -22,12 +22,6 @@ zapBindersAndFreeVariables(FreeVariableMap &m, StateMachine *sm)
 	bool done_something;
 	do {
 		done_something = false;
-		/* Step one: zap binders */
-		for (std::set<StateMachineSideEffectLoad *>::iterator it = loads.begin();
-		     it != loads.end();
-		     it++)
-		  applySideEffectToFreeVariables(m, *it, &done_something);
-		/* Step two: short-circuit free variables */
 		ShortCircuitFvTransformer trans(m);
 		m.applyTransformation(trans, &done_something);
 	} while (done_something);

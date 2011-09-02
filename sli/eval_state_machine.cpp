@@ -11,7 +11,6 @@
 /* All of the state needed to evaluate a single pure IRExpr. */
 class threadState {
 public:
-	std::map<Int, IRExpr *> binders;
 	std::map<threadAndRegister, IRExpr *> registers;
 };
 
@@ -34,12 +33,13 @@ public:
 
 class SpecialiseIRExpr : public IRExprTransformer {
 	threadState &state;
-	IRExpr *transformIex(IRExpr::Binder *e) {
-		if (state.binders.count(e->binder))
-			return state.binders[e->binder];
+	IRExpr *transformIex(IRExpr::Get *e) {
+		auto it = state.registers.find(threadAndRegister(*e));
+		if (it != state.registers.end())
+			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
-	IRExpr *transformIex(IRExpr::Get *e) {
+	IRExpr *transformIex(IRExpr::RdTmp *e) {
 		auto it = state.registers.find(threadAndRegister(*e));
 		if (it != state.registers.end())
 			return it->second;
@@ -338,26 +338,18 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 				std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>(
 					thisMachine,
 					new StateMachineSideEffectLoad(
-						smsel->key,
+						smsel->target,
 						specialiseIRExpr(addr, state),
 						smsel->rip)));
-		state.binders[smsel->key] = val;
+		state.registers[smsel->target] = val;
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *smsec =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
-		state.binders[smsec->key] =
+		state.registers[smsec->target] =
 			specialiseIRExpr(smsec->value, state);
-		break;
-	}
-	case StateMachineSideEffect::Put: {
-		StateMachineSideEffectPut *smsep =
-			dynamic_cast<StateMachineSideEffectPut *>(smse);
-		assert(smsep);
-		state.registers[threadAndRegister(*smsep)] =
-			specialiseIRExpr(smsep->value, state);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:

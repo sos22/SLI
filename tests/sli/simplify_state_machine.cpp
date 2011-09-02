@@ -14,8 +14,6 @@ main(int argc, char *argv[])
 
 	VexPtr<StateMachine> sm(readStateMachine(0));
 
-	sm->root->sanity_check();
-
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
@@ -26,8 +24,6 @@ main(int argc, char *argv[])
 		.enableassumePrivateStack();
 	sm = optimiseStateMachine(sm, opt, oracle, true);
 	printStateMachine(sm, stdout);
-
-	sm->root->sanity_check();
 
 	return 0;
 }

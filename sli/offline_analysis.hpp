@@ -14,7 +14,6 @@ class IRExprTransformer {
 protected:
 	IRExpr *currentIRExpr() { return _currentIRExpr; }
 	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
-	virtual IRExpr *transformIex(IRExpr::Binder *e) { return NULL; }
 	virtual IRExpr *transformIex(IRExpr::Get *e) { return NULL; }
 	virtual IRExpr *transformIex(IRExpr::GetI *e)
 	{

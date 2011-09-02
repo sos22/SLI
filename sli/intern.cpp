@@ -18,7 +18,6 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineSideEffectStore *> stores;
 	std::set<StateMachineSideEffectLoad *> loads;
 	std::set<StateMachineSideEffectCopy *> copies;
-	std::set<StateMachineSideEffectPut *> puts;
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
 	std::set<StateMachineProxy *> states_proxy;
 	std::set<StateMachineBifurcate *> states_bifurcate;
@@ -31,8 +30,6 @@ shallow_hash(const IRExpr *e)
 	switch (e->tag) {
 	case Iex_Const:
 		return 100242167;
-	case Iex_Binder:
-		return e->Iex.Binder.binder * 100000393 + 100005469;
 	case Iex_Get:
 		return e->Iex.Get.offset * 100001029 + 100011943;
 	case Iex_GetI:
@@ -76,7 +73,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	if (lookupTable.lookups[h].count(e))
 		return lookupTable.lookups[h][e];
 	switch (e->tag) {
-	case Iex_Binder:
 	case Iex_Get:
 	case Iex_RdTmp:
 	case Iex_Const:
@@ -139,7 +135,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 					   sizeof(e->Iex. n)))		\
 					continue;			\
 			break
-			do_case(Binder);
 			do_case(Get);
 			do_case(GetI);
 			do_case(RdTmp);
@@ -294,7 +289,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 			     it++) {
 				StateMachineSideEffectLoad *o = *it;
 				if (o->addr == load->addr &&
-				    o->key == load->key &&
+				    o->target == load->target &&
 				    o->rip == load->rip) {
 					t.sideEffects[s] = o;
 					return o;
@@ -311,7 +306,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		copy->value = internIRExpr(copy->value, t);
 		for (auto it = t.copies.begin(); it != t.copies.end(); it++) {
 			StateMachineSideEffectCopy *o = *it;
-			if (o->key == copy->key &&
+			if (o->target == copy->target &&
 			    o->value == copy->value) {
 				t.sideEffects[s] = o;
 				return o;
@@ -319,23 +314,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		}
 		t.sideEffects[s] = s;
 		t.copies.insert(copy);
-		return s;
-	}
-	case StateMachineSideEffect::Put: {
-		StateMachineSideEffectPut *put = dynamic_cast<StateMachineSideEffectPut *>(s);
-		assert(put);
-		put->value = internIRExpr(put->value, t);
-		for (auto it = t.puts.begin(); it != t.puts.end(); it++) {
-			StateMachineSideEffectPut *o = *it;
-			if (o->offset == put->offset &&
-			    o->value == put->value &&
-			    o->rip == put->rip) {
-				t.sideEffects[s] = o;
-				return o;
-			}
-		}
-		t.sideEffects[s] = s;
-		t.puts.insert(put);
 		return s;
 	}
 	case StateMachineSideEffect::AssertFalse: {

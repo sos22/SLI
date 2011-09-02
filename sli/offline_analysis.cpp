@@ -268,7 +268,7 @@ StateMachineTransformer::transform(StateMachineSideEffect *se, bool *done_someth
 			dynamic_cast<StateMachineSideEffectLoad *>(se);
 		IRExpr *a = transformIRExpr(smsel->addr, done_something);
 		return new StateMachineSideEffectLoad(
-			smsel->key,
+			smsel->target,
 			a,
 			smsel->rip);
 	}
@@ -277,20 +277,11 @@ StateMachineTransformer::transform(StateMachineSideEffect *se, bool *done_someth
 			dynamic_cast<StateMachineSideEffectCopy *>(se);
 		IRExpr *v = transformIRExpr(smsec->value, done_something);
 		return new StateMachineSideEffectCopy(
-			smsec->key,
+			smsec->target,
 			v);
 	}
 	case StateMachineSideEffect::Unreached:
 		return se;
-	case StateMachineSideEffect::Put: {
-		StateMachineSideEffectPut *smsep =
-			dynamic_cast<StateMachineSideEffectPut *>(se);
-		IRExpr *v = transformIRExpr(smsep->value, done_something);
-		return new StateMachineSideEffectPut(
-			smsep->offset,
-			v,
-			smsep->rip);
-	}
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *smseaf =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(se);
@@ -334,9 +325,6 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 	_currentIRExpr = e;
 	IRExpr *res = NULL;
 	switch (e->tag) {
-	case Iex_Binder:
-		res = transformIex(&e->Iex.Binder);
-		break;
 	case Iex_Get:
 		res = transformIex(&e->Iex.Get);
 		break;
@@ -488,10 +476,9 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 		break;
 	case Ist_Put:
 		sm->prependSideEffect(
-			new StateMachineSideEffectPut(
-				stmt->Ist.Put.offset,
-				stmt->Ist.Put.data,
-				site));
+			new StateMachineSideEffectCopy(
+				threadAndRegister(site.thread, stmt->Ist.Put),
+				stmt->Ist.Put.data));
 		break;
 	case Ist_PutI:
 		/* We can't handle these correctly. */
@@ -499,10 +486,9 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 		return NULL;
 	case Ist_WrTmp:
 		sm->prependSideEffect(
-			new StateMachineSideEffectPut(
-				-stmt->Ist.WrTmp.tmp - 1,
-				stmt->Ist.WrTmp.data,
-				site));
+			new StateMachineSideEffectCopy(
+				threadAndRegister(site.thread, stmt->Ist.WrTmp),
+				stmt->Ist.WrTmp.data));
 		break;
 	case Ist_Store:
 		sm->prependSideEffect(
@@ -523,13 +509,9 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 			    "helper_load_32")) {
 			StateMachineSideEffectLoad *smsel =
 				new StateMachineSideEffectLoad(
+					threadAndRegister(site.thread, stmt->Ist.Dirty),
 					stmt->Ist.Dirty.details->args[0],
 					site);
-			sm->prependSideEffect(
-				new StateMachineSideEffectPut(
-					-stmt->Ist.Dirty.details->tmp - 1,
-					IRExpr_Binder(smsel->key),
-					site));
 			sm->prependSideEffect(smsel);
 		}  else {
 			abort();
@@ -986,22 +968,6 @@ findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 }
 
 class avail_t {
-	class StateMachineClassifier : public StateMachineTransformer {
-	protected:
-		bool res;
-	public:
-		bool operator()(StateMachineSideEffect *se) {
-			res = false;
-			transform(se);
-			return res;
-		}
-		bool operator()(IRExpr *e) {
-			res = false;
-			transformIRExpr(e);
-			return res;
-		}
-	};
-	void purge(StateMachineClassifier &);
 public:
 	std::set<StateMachineSideEffect *> sideEffects;
 	std::set<IRExpr *> assertFalse;
@@ -1019,7 +985,6 @@ public:
 
 	void calcRegisterMap();
 
-	void invalidateBinder(Int key, StateMachineSideEffect *preserve);
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
 
 	int nr_asserts() const {
@@ -1107,32 +1072,10 @@ avail_t::intersect(const avail_t &other)
 }
 
 void
-avail_t::purge(StateMachineClassifier &o)
-{
-	for (auto it = sideEffects.begin(); it != sideEffects.end(); ) {
-		if (o(*it)) {
-			sideEffects.erase(it++);
-		} else {
-			it++;
-		}
-	}
-	for (auto it = assertFalse.begin(); it != assertFalse.end(); ) {
-		if (o(*it))
-			assertFalse.erase(it++);
-		else
-			it++;
-	}
-	for (auto it = registers.begin(); it != registers.end(); ) {
-		if (o(it->second))
-			registers.erase(it++);
-		else
-			it++;
-	}
-}
-void
 avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve)
 {
-	class _ : public StateMachineClassifier {
+	class _ : public StateMachineTransformer {
+		bool res;
 		threadAndRegister reg;
 		StateMachineSideEffect *preserve;
 		IRExpr *transformIex(IRExpr::Get *e) {
@@ -1148,45 +1091,54 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
 		{
 			if (se != preserve &&
-			    se->type == StateMachineSideEffect::Put &&
-			    threadAndRegister(*(StateMachineSideEffectPut *)se) == reg)
+			    ( (se->type == StateMachineSideEffect::Load &&
+			       ((StateMachineSideEffectLoad *)se)->target == reg) ||
+			      (se->type == StateMachineSideEffect::Copy &&
+			       ((StateMachineSideEffectCopy *)se)->target == reg) )) {
 				res = true;
-			return StateMachineClassifier::transform(se, done_something);
+				return se;
+			}
+			return StateMachineTransformer::transform(se, done_something);
 		}
 	public:
 		_(threadAndRegister _reg, StateMachineSideEffect *_preserve)
 			: reg(_reg), preserve(_preserve)
 		{}
-	} checkIfPresent(reg, preserve);
-	purge(checkIfPresent);
-}
-void
-avail_t::invalidateBinder(Int key, StateMachineSideEffect *preserve)
-{
-	class _ : public StateMachineClassifier {
-		Int k;
-		StateMachineSideEffect *preserve;
-		IRExpr *transformIex(IRExpr::Binder *e) {
-			if (e->binder == k)
-				res = true;
-			return NULL;
-		}
-		StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
+		bool operator()(StateMachineSideEffect *se)
 		{
-			if (se != preserve &&
-			    ( (se->type == StateMachineSideEffect::Load &&
-			       ((StateMachineSideEffectLoad *)se)->key == k) ||
-			      (se->type == StateMachineSideEffect::Copy &&
-			       ((StateMachineSideEffectCopy *)se)->key == k) ))
-				res = true;
-			return StateMachineClassifier::transform(se, done_something);
+			bool ignore;
+			res = false;
+			transform(se, &ignore);
+			return res;
 		}
-	public:
-		_(unsigned _k, StateMachineSideEffect *_preserve)
-			: k(_k), preserve(_preserve)
-		{}
-	} checkIfPresent(key, preserve);
-	purge(checkIfPresent);
+		bool operator()(IRExpr *e)
+		{
+			bool ignore;
+			res = false;
+			transformIRExpr(e, &ignore);
+			return res;
+		}
+	} isPresent(reg, preserve);
+
+	for (auto it = sideEffects.begin(); it != sideEffects.end(); ) {
+		if (isPresent(*it)) {
+			sideEffects.erase(it++);
+		} else {
+			it++;
+		}
+	}
+	for (auto it = assertFalse.begin(); it != assertFalse.end(); ) {
+		if (isPresent(*it))
+			assertFalse.erase(it++);
+		else
+			it++;
+	}
+	for (auto it = registers.begin(); it != registers.end(); ) {
+		if (isPresent(it->second))
+			registers.erase(it++);
+		else
+			it++;
+	}
 }
 
 bool
@@ -1201,9 +1153,9 @@ avail_t::calcRegisterMap()
 	registers.clear();
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
 		StateMachineSideEffect *se = *it;
-		if (se->type == StateMachineSideEffect::Put) {
-			StateMachineSideEffectPut *sep = (StateMachineSideEffectPut *)se;
-			registers[threadAndRegister(*sep)] = sep->value;
+		if (se->type == StateMachineSideEffect::Copy) {
+			StateMachineSideEffectCopy *sep = (StateMachineSideEffectCopy *)se;
+			registers[sep->target] = sep->value;
 		} else if (se->type == StateMachineSideEffect::AssertFalse) {
 			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
 			makeFalse(seaf->value);
@@ -1263,15 +1215,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
 		outputAvail.sideEffects.insert(smsec);
-		outputAvail.invalidateBinder(smsec->key, smsec);
-		break;
-	}
-	case StateMachineSideEffect::Put: {
-		StateMachineSideEffectPut *smsep =
-			dynamic_cast<StateMachineSideEffectPut *>(smse);
-		assert(smsep);
-		outputAvail.sideEffects.insert(smsep);
-		outputAvail.invalidateRegister(threadAndRegister(*smsep), smsep);
+		outputAvail.invalidateRegister(smsec->target, smsec);
 		break;
 	}
 	case StateMachineSideEffect::Load: {
@@ -1279,7 +1223,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		outputAvail.sideEffects.insert(smsel);
 		outputAvail.dereference(smsel->addr);
-		outputAvail.invalidateBinder(smsel->key, smsel);
+		outputAvail.invalidateRegister(smsel->target, smsel);
 		break;
 	}
 	case StateMachineSideEffect::AssertFalse: {
@@ -1298,19 +1242,6 @@ class applyAvailTransformer : public IRExprTransformer {
 public:
 	const avail_t &avail;
 	const bool use_assumptions;
-	IRExpr *transformIex(IRExpr::Binder *e) {
-		for (std::set<StateMachineSideEffect *>::const_iterator it = avail.sideEffects.begin();
-		     it != avail.sideEffects.end();
-		     it++) {
-			if ( (*it)->type != StateMachineSideEffect::Copy)
-				continue;
-			StateMachineSideEffectCopy *smsec = dynamic_cast<StateMachineSideEffectCopy *>(*it);
-			assert(smsec);
-			if (smsec->key == e->binder)
-				return smsec->value;
-		}
-		return IRExprTransformer::transformIex(e);
-	}
 	IRExpr *transformIex(IRExpr::Get *e) {
 		auto it = avail.registers.find(threadAndRegister(*e));
 		if (it != avail.registers.end())
@@ -1420,20 +1351,20 @@ buildNewStateMachineWithLoadsEliminated(
 				     definitelyEqual(smses2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
-							smsel->key,
+							smsel->target,
 							smses2->data);
 				} else if ( smsel2 &&
 					    aliasing.ptrsMightAlias(smsel2->addr, newAddr, opt.freeVariablesMightAccessStack) &&
 					    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
-							smsel->key,
-							IRExpr_Binder(smsel2->key));
+							smsel->target,
+							IRExpr_Get(smsel2->target.second, Ity_I64, smsel2->target.first));
 				}
 			}
 			if (!newEffect && doit)
 				newEffect = new StateMachineSideEffectLoad(
-					smsel->key, newAddr, smsel->rip);
+					smsel->target, newAddr, smsel->rip);
 			if (!newEffect)
 				newEffect = *it;
 			if (newEffect != *it)
@@ -1448,7 +1379,7 @@ buildNewStateMachineWithLoadsEliminated(
 			newValue = applyAvailSet(currentlyAvailable, smsec->value, false, &doit);
 			if (doit)
 				newEffect = new StateMachineSideEffectCopy(
-					smsec->key, newValue);
+					smsec->target, newValue);
 			else
 				newEffect = *it;
 			break;
@@ -1456,19 +1387,6 @@ buildNewStateMachineWithLoadsEliminated(
 		case StateMachineSideEffect::Unreached:
 			newEffect = *it;
 			break;
-		case StateMachineSideEffect::Put: {
-			StateMachineSideEffectPut *smsep =
-				dynamic_cast<StateMachineSideEffectPut *>(*it);
-			IRExpr *newVal;
-			bool doit = false;
-			newVal = applyAvailSet(currentlyAvailable, smsep->value, false, &doit);
-			if (doit)
-				newEffect = new StateMachineSideEffectPut(
-					smsep->offset, newVal, smsep->rip);
-			else
-				newEffect = *it;
-			break;
-		}
 		case StateMachineSideEffect::AssertFalse: {
 			StateMachineSideEffectAssertFalse *smseaf =
 				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it);
@@ -2211,11 +2129,17 @@ public:
 
 	StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
 	{
-		if (se->type == StateMachineSideEffect::Put)
-			puttedRegisters.insert(threadAndRegister(*(StateMachineSideEffectPut *)se));
+		if (se->type == StateMachineSideEffect::Copy)
+			puttedRegisters.insert(((StateMachineSideEffectCopy *)se)->target);
+		if (se->type == StateMachineSideEffect::Load)
+			puttedRegisters.insert(((StateMachineSideEffectLoad *)se)->target);
 		return se;
 	}
 	IRExpr *transformIex(IRExpr::Get *what) {
+		accessedRegisters.insert(threadAndRegister(*what));
+		return StateMachineTransformer::transformIex(what);
+	}
+	IRExpr *transformIex(IRExpr::RdTmp *what) {
 		accessedRegisters.insert(threadAndRegister(*what));
 		return StateMachineTransformer::transformIex(what);
 	}
@@ -2271,15 +2195,10 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
    a function-local type.  Work around this language limitation with a
    silly dummy namespace. */
 namespace __offline_analysis_dead_code {
-	class LivenessEntry : public std::pair<std::set<Int>, std::set<threadAndRegister> > {
-		void killBinder(Int binder)
-		{
-			first.erase(binder);
-		}
-
+	class LivenessEntry : public std::set<threadAndRegister> {
 		void killRegister(threadAndRegister r)
 		{
-			second.erase(r);
+			erase(r);
 		}
 	public:
 		void useExpression(IRExpr *e)
@@ -2287,16 +2206,12 @@ namespace __offline_analysis_dead_code {
 			class _ : public IRExprTransformer {
 				LivenessEntry &out;
 				IRExpr *transformIex(IRExpr::Get *g) {
-					out.second.insert(threadAndRegister(*g));
+					out.insert(threadAndRegister(*g));
 					return IRExprTransformer::transformIex(g);
 				}
 				IRExpr *transformIex(IRExpr::RdTmp *g) {
-					out.second.insert(threadAndRegister(*g));
+					out.insert(threadAndRegister(*g));
 					return IRExprTransformer::transformIex(g);
-				}
-				IRExpr *transformIex(IRExpr::Binder *b) {
-					out.first.insert(b->binder);
-					return IRExprTransformer::transformIex(b);
 				}
 			public:
 				_(LivenessEntry &_out) : out(_out) {}
@@ -2310,14 +2225,14 @@ namespace __offline_analysis_dead_code {
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel =
 					(StateMachineSideEffectLoad *)smse;
-				killBinder(smsel->key);
+				killRegister(smsel->target);
 				useExpression(smsel->addr);
 				return;
 			}
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)smse;
-				killBinder(smsec->key);
+				killRegister(smsec->target);
 				useExpression(smsec->value);
 				return;
 			}
@@ -2326,13 +2241,6 @@ namespace __offline_analysis_dead_code {
 					(StateMachineSideEffectStore *)smse;
 				useExpression(smses->addr);
 				useExpression(smses->data);
-				return;
-			}
-			case StateMachineSideEffect::Put: {
-				StateMachineSideEffectPut *smsep =
-					(StateMachineSideEffectPut *)smse;
-				killRegister(threadAndRegister(*smsep));
-				useExpression(smsep->value);
 				return;
 			}
 			case StateMachineSideEffect::Unreached:
@@ -2348,18 +2256,13 @@ namespace __offline_analysis_dead_code {
 		}
 
 		void merge(const LivenessEntry &other) {
-			for (auto it = other.first.begin();
-			     it != other.first.end();
+			for (auto it = other.begin();
+			     it != other.end();
 			     it++)
-				first.insert(*it);
-			for (auto it = other.second.begin();
-			     it != other.second.end();
-			     it++)
-				second.insert(*it);
+				insert(*it);
 		}
 
-		bool binderLive(Int key) { return first.count(key); }
-		bool registerLive(threadAndRegister reg) { return second.count(reg); }
+		bool registerLive(threadAndRegister reg) { return count(reg); }
 		bool assertionLive(IRExpr *assertion) {
 			class _ : public IRExprTransformer {
 				LivenessEntry *_this;
@@ -2374,11 +2277,6 @@ namespace __offline_analysis_dead_code {
 						res = true;
 					return IRExprTransformer::transformIex(g);
 				}
-				IRExpr *transformIex(IRExpr::Binder *g) {
-					if (_this->binderLive(g->binder))
-						res = true;
-					return IRExprTransformer::transformIex(g);
-				}
 			public:
 				bool res;
 				_(LivenessEntry *__this)
@@ -2390,74 +2288,6 @@ namespace __offline_analysis_dead_code {
 		}
 	};
 };
-
-class RewriteBindersTransformer : public IRExprTransformer {
-public:
-	int key;
-	IRExpr *val;
-	RewriteBindersTransformer(int _key, IRExpr *_val)
-		: key(_key), val(_val)
-	{}
-	IRExpr *transformIex(IRExpr::Binder *e) {
-		if (e->binder == key)
-			return val;
-		return IRExprTransformer::transformIex(e);
-	}
-};
-class RewriteBinderToLoadTransformer : public IRExprTransformer {
-public:
-	int key;
-	ThreadRip rip;
-	IRExpr *addr;
-	IRExpr *val;
-	RewriteBinderToLoadTransformer(int _key, ThreadRip _rip, IRExpr *_addr)
-		: key(_key), rip(_rip), addr(_addr), val(NULL)
-	{}
-	IRExpr *transformIex(IRExpr::Binder *e) {
-		if (e->binder == key) {
-			if (!val)
-				val = IRExpr_Load(false, Iend_LE, Ity_I64, addr, rip);
-			return val;
-		}
-		return IRExprTransformer::transformIex(e);
-	}
-};
-void
-applySideEffectToFreeVariables(FreeVariableMap &fvm, StateMachineSideEffect *e, bool *done_something)
-{
-	bool b;
-	if (!done_something) done_something = &b;
-	switch (e->type) {
-	case StateMachineSideEffect::Load: {
-		StateMachineSideEffectLoad *c = (StateMachineSideEffectLoad *)e;
-		RewriteBinderToLoadTransformer t(c->key, c->rip, c->addr);
-		fvm.applyTransformation(t, done_something);
-		return;
-	}
-	case StateMachineSideEffect::Copy: {
-		StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)e;
-		RewriteBindersTransformer t(c->key, c->value);
-		fvm.applyTransformation(t, done_something);
-		return;
-	}
-	case StateMachineSideEffect::Store:
-	case StateMachineSideEffect::Unreached:
-	case StateMachineSideEffect::AssertFalse:
-		return;
-	case StateMachineSideEffect::Put:
-		/* It might appear that we should
-		   rewrite the free variables here as
-		   well.  We don't, though, because
-		   there will always be a free
-		   variable for any mentioned
-		   register, with any other free
-		   variable expressed in terms of that
-		   one, and rewriting that one free
-		   variable is just a bad idea. */
-		return;
-	}
-	abort();
-}
 
 /* Simple dead code elimination: find binders and registers which are
    never accessed after being set and eliminate them. */
@@ -2536,7 +2366,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				case StateMachineSideEffect::Load: {
 					StateMachineSideEffectLoad *smsel =
 						(StateMachineSideEffectLoad *)e;
-					if (!alive.binderLive(smsel->key))
+					if (!alive.registerLive(smsel->target))
 						newEffect = new StateMachineSideEffectAssertFalse(
 							IRExpr_Unop(Iop_BadPtr, smsel->addr));
 					break;
@@ -2552,40 +2382,33 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 						dead = true;
 					break;
 				}
-				case StateMachineSideEffect::Put: {
-					StateMachineSideEffectPut *smsep =
-						(StateMachineSideEffectPut *)e;
-					threadAndRegister r(*smsep);
-					if ((smsep->value->tag == Iex_Get &&
-					     threadAndRegister(smsep->value->Iex.Get) == r) ||
-					    (smsep->value->tag == Iex_RdTmp &&
-					     threadAndRegister(smsep->value->Iex.RdTmp) == r)) {
-						/* Put r1 <- r1 is
-						   always dead,
-						   regardless of what
-						   liveness analysis
-						   might say. */
-						dead = true;
-					} else {
-						dead = !alive.registerLive(threadAndRegister(*smsep));
-					}
-					break;
-				}
 				case StateMachineSideEffect::Copy: {
 					StateMachineSideEffectCopy *smsec =
 						(StateMachineSideEffectCopy *)e;
-					dead = !alive.binderLive(smsec->key);
+					if ((smsec->value->tag == Iex_Get &&
+					     threadAndRegister(smsec->value->Iex.Get) == smsec->target) ||
+					    (smsec->value->tag == Iex_RdTmp &&
+					     threadAndRegister(smsec->value->Iex.RdTmp) == smsec->target)) {
+						/* Copying a register
+						   or temporary back
+						   to itself is always
+						   dead, regardless of
+						   what liveness
+						   analysis proper
+						   might say. */
+						dead = true;
+					} else {
+						dead = !alive.registerLive(smsec->target);
+					}
 					break;
 				}
 				}
 
 				if (dead) {
 					*done_something = true;
-					applySideEffectToFreeVariables(fvm, e);
 					edge->sideEffects.erase(edge->sideEffects.begin() + x);
 				} else if (newEffect) {
 					*done_something = true;
-					applySideEffectToFreeVariables(fvm, e);
 					edge->sideEffects[x] = newEffect;
 					alive.useSideEffect(newEffect);
 				} else {
@@ -4019,19 +3842,17 @@ CFGtoCrashReason(unsigned tid,
 			case Ist_AbiHint:
 				break;
 			case Ist_Put:
-				se = new StateMachineSideEffectPut(
-					stmt->Ist.Put.offset,
-					stmt->Ist.Put.data,
-					rip);
+				se = new StateMachineSideEffectCopy(
+					threadAndRegister(rip.thread, stmt->Ist.Put),
+					stmt->Ist.Put.data);
 				break;
 			case Ist_PutI:
 				/* Don't know how to handle these */
 				abort();
 			case Ist_WrTmp:
-				se = new StateMachineSideEffectPut(
-					-stmt->Ist.WrTmp.tmp - 1,
-					stmt->Ist.WrTmp.data,
-					rip);
+				se = new StateMachineSideEffectCopy(
+					threadAndRegister(rip.thread, stmt->Ist.WrTmp),
+					stmt->Ist.WrTmp.data);
 				break;
 			case Ist_Store:
 				se = new StateMachineSideEffectStore(
@@ -4048,16 +3869,10 @@ CFGtoCrashReason(unsigned tid,
 					    "helper_load_64") ||
 				    !strcmp(stmt->Ist.Dirty.details->cee->name,
 					    "helper_load_32")) {
-					StateMachineSideEffectLoad *smsel =
-						new StateMachineSideEffectLoad(
-							stmt->Ist.Dirty.details->args[0],
-							rip);
-					se = new StateMachineSideEffectPut(
-						-stmt->Ist.Dirty.details->tmp - 1,
-						IRExpr_Binder(smsel->key),
+					se = new StateMachineSideEffectLoad(
+						threadAndRegister(rip.thread, stmt->Ist.Dirty),
+						stmt->Ist.Dirty.details->args[0],
 						rip);
-					edge->prependSideEffect(se);
-					se = smsel;
 				}  else {
 					abort();
 				}
@@ -4138,10 +3953,9 @@ CFGtoCrashReason(unsigned tid,
 			assert(smp->target);
 			state.addReloc(&smp->target->target, cfg->fallThrough);
 			smp->target->prependSideEffect(
-				new StateMachineSideEffectPut(
-					OFFSET_amd64_RAX,
-					r,
-					site));
+				new StateMachineSideEffectCopy(
+					threadAndRegister(site.thread, OFFSET_amd64_RAX),
+					r));
 			return smp;
 		}
 	public:

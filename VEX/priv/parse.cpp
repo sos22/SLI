@@ -74,6 +74,19 @@ bool parseDecimalInt(int *out, const char *str, const char **suffix, char **err)
   return true;
 }
 
+bool parseDecimalUInt(unsigned *out, const char *str, const char **suffix, char **err)
+{
+  long res;
+  errno = 0;
+  res = strtol(str, (char **)suffix, 10);
+  *out = res;
+  if (errno != 0 || *out != res || *suffix == str) {
+    *err = vex_asprintf("wanted unsigned decimal int, got %.10s", str);
+    return false;
+  }
+  return true;
+}
+
 bool parseHexUlong(unsigned long *out, const char *str, const char **suffix, char **err)
 {
   errno = 0;

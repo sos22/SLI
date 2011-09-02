@@ -955,8 +955,7 @@ typedef
    in the comments for IRExpr. */
 typedef
    enum { 
-      Iex_Binder=0x15000,
-      Iex_Get,
+      Iex_Get = 0x15001,
       Iex_GetI,
       Iex_RdTmp,
       Iex_Qop,
@@ -1005,12 +1004,6 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
    unsigned optimisationsApplied;
    unsigned long hashval() const;
    union _u {
-      /* Used only in pattern matching within Vex.  Should not be seen
-         outside of Vex. */
-      struct _Binder {
-         Int binder;
-      } Binder;
-
       /* Read a guest register, at a fixed offset in the guest state.
          ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0)
       */
@@ -1226,7 +1219,6 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
       } HappensBefore;
    } Iex;
    void visit(HeapVisitor &hv);
-   typedef _u::_Binder Binder;
    typedef _u::_Get Get;
    typedef _u::_GetI GetI;
    typedef _u::_RdTmp RdTmp;
@@ -1247,7 +1239,6 @@ struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
 };
 
 /* Expression constructors. */
-extern IRExpr* IRExpr_Binder ( Int binder );
 extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid );
 extern IRExpr* IRExpr_GetI   ( IRRegArray* descr, IRExpr* ix, Int bias,
 			       unsigned tid );
@@ -1633,7 +1624,7 @@ typedef
 typedef
 struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
       IRStmtTag tag;
-      union {
+      union _Ist {
          /* A no-op (usually resulting from IR optimisation).  Can be
             omitted without any effect.
 
@@ -1679,7 +1670,7 @@ struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
          /* Write a guest register, at a fixed offset in the guest state.
             ppIRStmt output: PUT(<offset>) = <data>, eg. PUT(60) = t1
          */
-         struct {
+         struct _Put {
             Int     offset;   /* Offset into the guest state */
             IRExpr* data;     /* The value to write */
          } Put;
@@ -1705,7 +1696,7 @@ struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
 
             ppIRStmt output: t<tmp> = <data>, eg. t1 = 3
          */
-         struct {
+         struct _WrTmp {
             IRTemp  tmp;   /* Temporary  (LHS of assignment) */
             IRExpr* data;  /* Expression (RHS of assignment) */
          } WrTmp;
@@ -1765,7 +1756,7 @@ struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
                t1 = DIRTY t27 RdFX-gst(16,4) RdFX-gst(60,4)
                      ::: foo{0x380035f4}(t2)
          */       
-         struct {
+         struct _Dirty {
             IRDirty* details;
          } Dirty;
 
@@ -1789,6 +1780,9 @@ struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
             IRConst*   dst;      /* Jump target (constant only) */
          } Exit;
       } Ist;
+      typedef _Ist::_Put Put;
+      typedef _Ist::_WrTmp WrTmp;
+      typedef _Ist::_Dirty Dirty;
       void visit(HeapVisitor &hv);
       NAMED_CLASS
    }

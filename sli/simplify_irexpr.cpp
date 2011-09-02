@@ -78,8 +78,6 @@ physicallyEqual(const IRExpr *a, const IRExpr *b)
 	if (a->tag != b->tag)
 		return false;
 	switch (a->tag) {
-	case Iex_Binder:
-		return a->Iex.Binder.binder == b->Iex.Binder.binder;
 	case Iex_Get:
 		return a->Iex.Get.offset == b->Iex.Get.offset &&
 			a->Iex.Get.ty == b->Iex.Get.ty;
@@ -313,8 +311,6 @@ int
 exprComplexity(const IRExpr *e)
 {
 	switch (e->tag) {
-	case Iex_Binder:
-		return 10;
 	case Iex_Get:
 		return 20;
 	case Iex_GetI:
@@ -379,7 +375,6 @@ ordering_iex_tag(IRExprTag a)
 {
 	switch (a) {
 	case Iex_Const: return 0;
-	case Iex_Binder: return 1;
 	case Iex_Get: return 2;
 	case Iex_GetI: return 3;
 	case Iex_RdTmp: return 4;
@@ -450,8 +445,6 @@ sortIRExprs(IRExpr *a, IRExpr *b)
 	}
 	
 	switch (a->tag) {
-	case Iex_Binder:
-		return a->Iex.Binder.binder < b->Iex.Binder.binder;
 	case Iex_Get:
 		return a->Iex.Get.offset < b->Iex.Get.offset;
 	case Iex_GetI:
@@ -748,7 +741,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		src->Iex.GetI.ix =
 			optimiseIRExprFP(src->Iex.GetI.ix, opt, done_something);
 		break;
-	case Iex_Binder:
 	case Iex_Get:
 	case Iex_RdTmp:
 	case Iex_Const:
@@ -1561,7 +1553,6 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInte
 	if (TIMEOUT)
 		return false;
 	switch (e->tag) {
-	case Iex_Binder:
 	case Iex_Get:
 	case Iex_RdTmp:
 	case Iex_Const:
