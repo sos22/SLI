@@ -408,18 +408,18 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	   so we need to look at the fall through addresses. */
 	if (irsb->jumpkind == Ijk_Call) {
 		if (irsb->next->tag != Iex_Const ||
-		    irsb->next->Iex.Const.con->Ico.U64 != __STACK_CHK_FAILED)
+		    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
 			directExits.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
 		if (irsb->next->tag == Iex_Const)
-			callees->set(std::pair<unsigned long, unsigned long>(rip, irsb->next->Iex.Const.con->Ico.U64),
+			callees->set(std::pair<unsigned long, unsigned long>(rip, ((IRExprConst *)irsb->next)->con->Ico.U64),
 				     true);
 		return;
 	}
 
 	if (irsb->jumpkind != Ijk_NoDecode &&
 	    irsb->next->tag == Iex_Const) {
-		directExits.push_back(irsb->next->Iex.Const.con->Ico.U64);
+		directExits.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
 	} else {
 		/* Should really do something more clever here,
 		   possibly based on dynamic analysis. */
@@ -712,54 +712,19 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 static Oracle::LivenessSet
 irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 {
-	if (!w)
-		return old;
-	switch (w->tag) {
-	case Iex_Get:
-		return old.use(w->Iex.Get.offset);
-	case Iex_GetI:
-		return Oracle::LivenessSet::everything;
-	case Iex_RdTmp:
-		return old;
-	case Iex_Qop:
-		old = irexprUsedValues(old, w->Iex.Qop.arg4);
-	case Iex_Triop:
-		old = irexprUsedValues(old, w->Iex.Qop.arg3);
-	case Iex_Binop:
-		old = irexprUsedValues(old, w->Iex.Qop.arg2);
-	case Iex_Unop:
-		return irexprUsedValues(old, w->Iex.Qop.arg1);
-	case Iex_Load:
-		return irexprUsedValues(old, w->Iex.Load.addr);
-	case Iex_Const:
-		return old;
-	case Iex_CCall:
-		for (int i = 0; w->Iex.CCall.args[i]; i++)
-			old = irexprUsedValues(old, w->Iex.CCall.args[i]);
-		return old;
-	case Iex_Mux0X:
-		old = irexprUsedValues(old, w->Iex.Mux0X.cond);
-		old = irexprUsedValues(old, w->Iex.Mux0X.expr0);
-		old = irexprUsedValues(old, w->Iex.Mux0X.exprX);
-		return old;
-	case Iex_Associative:
-		for (int i = 0; i < w->Iex.Associative.nr_arguments; i++)
-			old = irexprUsedValues(old, w->Iex.Associative.contents[i]);
-		return old;
-	case Iex_FreeVariable:
-		return old;
-	case Iex_ClientCall:
-		for (int i = 0; w->Iex.ClientCall.args[i]; i++)
-			old = irexprUsedValues(old, w->Iex.ClientCall.args[i]);
-		return old;
-	case Iex_ClientCallFailed:
-		return irexprUsedValues(old, w->Iex.ClientCallFailed.target);
-	case Iex_HappensBefore:
-		/* shouldn't happen: we haven't introduced any of
-		 * these yet. */
-		abort();
-	}
-	abort();
+	class _ : public IRExprTransformer {
+	public:
+		Oracle::LivenessSet old;
+		IRExpr *transformIex(IRExprGet *e) {
+			old = old.use(e->offset);
+			return IRExprTransformer::transformIex(e);
+		}
+		_(Oracle::LivenessSet &_old)
+			: old(_old)
+		{}
+	} t(old);
+	t.transformIRExpr(w);
+	return t.old;
 }
 
 static Oracle::PointerAliasingSet
@@ -769,30 +734,33 @@ irexprAliasingClass(IRExpr *expr,
 		    bool freeVariablesCannotAccessStack,
 		    std::map<IRTemp, Oracle::PointerAliasingSet> *temps)
 {
-	if (tyenv && typeOfIRExpr(tyenv, expr) != Ity_I64)
+	if (tyenv && expr->type(tyenv) != Ity_I64)
 		/* Not a 64 bit value -> not a pointer */
 		return Oracle::PointerAliasingSet::notAPointer;
 
 	switch (expr->tag) {
-	case Iex_Get:
-		if (expr->Iex.Get.offset < Oracle::NR_REGS * 8 && expr->Iex.Get.offset >= 0)
-			return config.v[expr->Iex.Get.offset / 8];
+	case Iex_Get: {
+		IRExprGet *e = (IRExprGet *)expr;
+		if (e->offset < Oracle::NR_REGS * 8 && e->offset >= 0)
+			return config.v[e->offset / 8];
 		else {
 			/* Assume that those are the only pointer registers */
 			return Oracle::PointerAliasingSet::notAPointer;
 		}
+	}
 	case Iex_RdTmp: {
+		IRExprRdTmp *e = (IRExprRdTmp *)expr;
 		if (!temps)
 			return Oracle::PointerAliasingSet::anything;
 		std::map<IRTemp, Oracle::PointerAliasingSet>::iterator it;
-		it = temps->find(expr->Iex.RdTmp.tmp);
+		it = temps->find(e->tmp);
 		assert(it != temps->end());
 		return it->second;
 	}
 	case Iex_Const:
 		return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
 	case Iex_Unop:
-		switch (expr->Iex.Unop.op) {
+		switch (((IRExprUnop *)expr)->op) {
 		case Iop_1Uto8:
 		case Iop_8Uto64:
 		case Iop_8Sto64:
@@ -812,19 +780,20 @@ irexprAliasingClass(IRExpr *expr,
 		}
 		break;
 	case Iex_Binop: {
+		IRExprBinop *e = (IRExprBinop *)expr;
 		Oracle::PointerAliasingSet a1 = irexprAliasingClass(
-			expr->Iex.Binop.arg1,
+			e->arg1,
 			tyenv,
 			config,
 			freeVariablesCannotAccessStack,
 			temps);
 		Oracle::PointerAliasingSet a2 = irexprAliasingClass(
-			expr->Iex.Binop.arg2,
+			e->arg2,
 			tyenv,
 			config,
 			freeVariablesCannotAccessStack,
 			temps);
-		switch (expr->Iex.Binop.op) {
+		switch (e->op) {
 		case Iop_Sub64:
 			/* x - y is a pointer to zone A if x is a
 			 * pointer to zone A and y is not a pointer of
@@ -863,34 +832,37 @@ irexprAliasingClass(IRExpr *expr,
 		}
 		break;
 	}
-	case Iex_Mux0X:
-		return irexprAliasingClass(expr->Iex.Mux0X.expr0,
+	case Iex_Mux0X: {
+		IRExprMux0X *e = (IRExprMux0X *)expr;
+		return irexprAliasingClass(e->expr0,
 					   tyenv,
 					   config,
 					   freeVariablesCannotAccessStack,
 					   temps) |
-			irexprAliasingClass(expr->Iex.Mux0X.exprX,
+			irexprAliasingClass(e->exprX,
 					    tyenv,
 					    config,
 					    freeVariablesCannotAccessStack,
 					    temps);
-	case Iex_Associative:
-		switch (expr->Iex.Associative.op) {
+	}
+	case Iex_Associative: {
+		IRExprAssociative *e = (IRExprAssociative *)expr;
+		switch (e->op) {
 		case Iop_Add64:
 		case Iop_And64:
 		{
-			for (int i = 0; i < expr->Iex.Associative.nr_arguments; i++) {
-				if (expr->Iex.Associative.contents[i]->tag != Iex_Const) {
+			for (int i = 0; i < e->nr_arguments; i++) {
+				if (e->contents[i]->tag != Iex_Const) {
 					Oracle::PointerAliasingSet res = 
-						irexprAliasingClass(expr->Iex.Associative.contents[i],
+						irexprAliasingClass(e->contents[i],
 								    tyenv,
 								    config,
 								    freeVariablesCannotAccessStack,
 								    temps);
-					for (int j = i + 1; j < expr->Iex.Associative.nr_arguments; j++) {
-						if (expr->Iex.Associative.contents[j]->tag != Iex_Const)
+					for (int j = i + 1; j < e->nr_arguments; j++) {
+						if (e->contents[j]->tag != Iex_Const)
 							res = res | 
-								irexprAliasingClass(expr->Iex.Associative.contents[j],
+								irexprAliasingClass(e->contents[j],
 										    tyenv,
 										    config,
 										    freeVariablesCannotAccessStack,
@@ -911,12 +883,15 @@ irexprAliasingClass(IRExpr *expr,
 			break;
 		}
 		break;
+	}
 
-	case Iex_CCall:
-		if (!strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_rflags_c") ||
-		    !strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_rflags_all"))
+	case Iex_CCall: {
+		IRExprCCall *e = (IRExprCCall *)expr;
+		if (!strcmp(e->cee->name, "amd64g_calculate_rflags_c") ||
+		    !strcmp(e->cee->name, "amd64g_calculate_rflags_all"))
 			return Oracle::PointerAliasingSet::notAPointer;
 		break;
+	}
 
 	case Iex_FreeVariable:
 		if (freeVariablesCannotAccessStack)
@@ -926,9 +901,10 @@ irexprAliasingClass(IRExpr *expr,
 			return Oracle::PointerAliasingSet::anything;
 
 	case Iex_ClientCall: {
+		IRExprClientCall *e = (IRExprClientCall *)expr;
 		bool mightReturnStack = false;
-		for (int x = 0; !mightReturnStack && expr->Iex.ClientCall.args[x]; x++) {
-			if (irexprAliasingClass(expr->Iex.ClientCall.args[x],
+		for (int x = 0; !mightReturnStack && e->args[x]; x++) {
+			if (irexprAliasingClass(e->args[x],
 						tyenv,
 						config,
 						freeVariablesCannotAccessStack,
@@ -1367,15 +1343,15 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
 					if (irsb->next->tag != Iex_Const ||
-					    irsb->next->Iex.Const.con->Ico.U64 != __STACK_CHK_FAILED)
+					    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
 						fallThrough.push_back(extract_call_follower(irsb));
 					if (irsb->next->tag == Iex_Const)
-						callees.push_back(irsb->next->Iex.Const.con->Ico.U64);
+						callees.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
 					else
 						findPossibleJumpTargets(rip, callees);
 				} else {
 					if (irsb->next->tag == Iex_Const)
-						fallThrough.push_back(irsb->next->Iex.Const.con->Ico.U64);
+						fallThrough.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
 					else if (irsb->jumpkind != Ijk_Ret)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
@@ -1571,15 +1547,15 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 	if (nr_statements == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
 			if (irsb->next->tag != Iex_Const ||
-			    irsb->next->Iex.Const.con->Ico.U64 != __STACK_CHK_FAILED)
+			    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
 				fallThroughRips.push_back(extract_call_follower(irsb));
 			if (irsb->next->tag == Iex_Const)
-				callees.push_back(irsb->next->Iex.Const.con->Ico.U64);
+				callees.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
 			else
 				getInstructionCallees(rip, callees, oracle);
 		} else {
 			if (irsb->next->tag == Iex_Const)
-				fallThroughRips.push_back(irsb->next->Iex.Const.con->Ico.U64);
+				fallThroughRips.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
 			else
 				getInstructionFallThroughs(rip, fallThroughRips);
 		}
@@ -1669,7 +1645,7 @@ class RewriteRegisterExpr : public IRExprTransformer {
 	unsigned idx;
 	IRExpr *to;
 protected:
-	IRExpr *transformIex(IRExpr::Get *what) {
+	IRExpr *transformIex(IRExprGet *what) {
 		if (what->offset == (int)idx)
 			return to;
 		else
@@ -1693,7 +1669,7 @@ class RewriteTemporaryExpr : public IRExprTransformer {
 	IRTemp tmp;
 	IRExpr *to;
 protected:
-	IRExpr *transformIex(IRExpr::RdTmp *what)
+	IRExpr *transformIex(IRExprRdTmp *what)
 	{
 		if (what->tmp == tmp)
 			return to;
@@ -1823,104 +1799,69 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 		rsp = simplifyIRExpr(rsp, AllowableOptimisations::defaultOptimisations);
 	if (rbp)
 		rbp = simplifyIRExpr(rbp, AllowableOptimisations::defaultOptimisations);
-	if (rsp && rsp->tag == Iex_Get && rsp->Iex.Get.offset == OFFSET_amd64_RSP)
+	if (rsp && rsp->tag == Iex_Get && ((IRExprGet *)rsp)->offset == OFFSET_amd64_RSP)
 		rsp = NULL;
-	if (rbp && rbp->tag == Iex_Get && rbp->Iex.Get.offset == OFFSET_amd64_RBP)
+	if (rbp && rbp->tag == Iex_Get && ((IRExprGet *)rbp)->offset == OFFSET_amd64_RBP)
 		rbp = NULL;
 	if (!rsp && !rbp)
 		goto join_predecessors;
-	if (rsp && rbp) {
-		/* pop rbp is very common and not worth warning about */
-		if (rbp->tag == Iex_Load &&
-		    rbp->Iex.Load.addr->tag == Iex_Get &&
-		    rbp->Iex.Load.addr->Iex.Get.offset == OFFSET_amd64_RSP &&
-		    rsp->tag == Iex_Associative &&
-		    rsp->Iex.Associative.nr_arguments == 2 &&
-		    rsp->Iex.Associative.contents[0]->tag == Iex_Const &&
-		    rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64 == 8 &&
-		    rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
-		    rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RSP)
-			goto impossible_clean;
-		/* Likewise the leave instruction */
-		if (rbp->tag == Iex_Load &&
-		    rbp->Iex.Load.addr->tag == Iex_Get &&
-		    rbp->Iex.Load.addr->Iex.Get.offset == OFFSET_amd64_RBP &&
-		    rsp->tag == Iex_Associative &&
-		    rsp->Iex.Associative.nr_arguments == 2 &&
-		    rsp->Iex.Associative.contents[0]->tag == Iex_Const &&
-		    rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64 == 8 &&
-		    rsp->Iex.Associative.contents[1]->tag == Iex_Get &&
-		    rsp->Iex.Associative.contents[1]->Iex.Get.offset == OFFSET_amd64_RBP)
-			goto impossible_clean;
-
-		printf("RSP and RBP updated together?\n");
-		goto impossible;
-	}
+	if (rsp && rbp)
+		goto impossible_clean;
 
 	if (rsp) {
 		if (rsp->tag == Iex_Get) {
-			if (rsp->Iex.Get.offset == OFFSET_amd64_RSP) {
+			IRExprGet *g = (IRExprGet *)rsp;
+			if (g->offset == OFFSET_amd64_RSP) {
 				abort();
-			} else if (rsp->Iex.Get.offset == OFFSET_amd64_RBP) {
+			} else if (g->offset == OFFSET_amd64_RBP) {
 				offset = 0;
 				state = RbpToRspOffsetStateValid;
 				goto done;
 			}
-		} else if (rsp->tag == Iex_Associative &&
-			   rsp->Iex.Associative.op == Iop_Add64 &&
-			   rsp->Iex.Associative.nr_arguments >= 2 &&
-			   rsp->Iex.Associative.contents[0]->tag == Iex_Const) {
-			IRExpr *base = rsp->Iex.Associative.contents[1];
-			if (base->tag == Iex_Get) {
-				if (base->Iex.Get.offset == OFFSET_amd64_RSP) {
-					delta_offset = rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+		} else if (rsp->tag == Iex_Associative) {
+			IRExprAssociative *a = (IRExprAssociative *)rsp;
+			if (a->op == Iop_Add64 &&
+			    a->nr_arguments >= 2 &&
+			    a->contents[0]->tag == Iex_Const &&
+			    a->contents[1]->tag == Iex_Get) {
+				IRExprGet *base = (IRExprGet *)a->contents[1];
+				if (base->offset == OFFSET_amd64_RSP) {
+					delta_offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
 					goto join_predecessors;
-				} else if (base->Iex.Get.offset == OFFSET_amd64_RBP) {
-					offset = rsp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+				} else if (base->offset == OFFSET_amd64_RBP) {
+					offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
 					state = RbpToRspOffsetStateValid;
 					goto done;
 				}
 			}
 		}
 
-		if (rsp->tag == Iex_Associative &&
-		    rsp->Iex.Associative.nr_arguments == 2 &&
-		    rsp->Iex.Associative.op == Iop_Add64 &&
-		    rsp->Iex.Associative.contents[0]->tag == Iex_Get &&
-		    rsp->Iex.Associative.contents[0]->Iex.Get.offset == OFFSET_amd64_RSP &&
-		    (rsp->Iex.Associative.contents[1]->tag == Iex_Get ||
-		     (rsp->Iex.Associative.contents[1]->tag == Iex_Unop &&
-		      rsp->Iex.Associative.contents[1]->Iex.Unop.op == Iop_Neg64 &&
-		      rsp->Iex.Associative.contents[1]->Iex.Unop.arg->tag == Iex_Get))) {
-			/* Adding a register to RSP -> alloca() */
-			goto impossible_clean;
-		}
-		printf("Can't handle rewrite of RSP to ");
-		ppIRExpr(rsp, stdout);
-		printf("\n");
-		goto impossible;
+		goto impossible_clean;
 	} else {
 		assert(rbp);
 
 		if (rbp->tag == Iex_Get) {
-			if (rbp->Iex.Get.offset == OFFSET_amd64_RBP) {
+			IRExprGet *g = (IRExprGet *)rbp;
+			if (g->offset == OFFSET_amd64_RBP) {
 				abort();
-			} else if (rbp->Iex.Get.offset == OFFSET_amd64_RSP) {
+			} else if (g->offset == OFFSET_amd64_RSP) {
 				offset = 0;
 				state = RbpToRspOffsetStateValid;
 				goto done;
 			}
-		} else if (rbp->tag == Iex_Associative &&
-			   rbp->Iex.Associative.op == Iop_Add64 &&
-			   rbp->Iex.Associative.nr_arguments >= 2 &&
-			   rbp->Iex.Associative.contents[0]->tag == Iex_Const) {
-			IRExpr *base = rbp->Iex.Associative.contents[1];
-			if (base->tag == Iex_Get) {
-				if (base->Iex.Get.offset == OFFSET_amd64_RBP) {
-					delta_offset = -rbp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+		} else if (rbp->tag == Iex_Associative) {
+			IRExprAssociative *a = (IRExprAssociative *)rbp;
+			if (a->op == Iop_Add64 &&
+			    a->nr_arguments >= 2 &&
+			    a->contents[0]->tag == Iex_Const &&
+			    a->contents[1]->tag == Iex_Get) {
+				IRExprGet *base = (IRExprGet *)a->contents[1];
+				IRConst *o = ((IRExprConst *)a->contents[0])->con;
+				if (base->offset == OFFSET_amd64_RBP) {
+					delta_offset = -o->Ico.U64;
 					goto join_predecessors;
-				} else if (base->Iex.Get.offset == OFFSET_amd64_RSP) {
-					offset = -rbp->Iex.Associative.contents[0]->Iex.Const.con->Ico.U64;
+				} else if (base->offset == OFFSET_amd64_RSP) {
+					offset = -o->Ico.U64;
 					state = RbpToRspOffsetStateValid;
 					goto done;
 				}

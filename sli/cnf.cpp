@@ -105,7 +105,7 @@ public:
 		} else if (args.size() == 1) {
 			return args[0]->asIRExpr(m, t);
 		} else {
-			IRExpr *work = IRExpr_Associative(Iop_Or1, NULL);
+			IRExprAssociative *work = (IRExprAssociative *)IRExpr_Associative(Iop_Or1, NULL);
 			for (unsigned x = 0; x < args.size(); x++)
 				addArgumentToAssoc(work, args[x]->asIRExpr(m, t));
 			return work;
@@ -148,15 +148,16 @@ public:
 		if (args.size() == 0) {
 			return IRExpr_Const(IRConst_U1(1));
 		} else {
-			IRExpr *work = IRExpr_Associative(Iop_And1, NULL);
+			IRExprAssociative *work =
+				(IRExprAssociative *)IRExpr_Associative(Iop_And1, NULL);
 			myTransformer trans(t);
 			for (unsigned x = 0; x < args.size(); x++) {
 				IRExpr *exp = args[x]->asIRExpr(m, trans);
 				addArgumentToAssoc(work, exp);
 				if (exp->tag == Iex_Binop &&
-				    exp->Iex.Binop.op == Iop_CmpEQ64 &&
-				    exp->Iex.Binop.arg1->tag == Iex_Const)
-					trans.cnstTable[exp->Iex.Binop.arg2] = exp->Iex.Binop.arg1;
+				    ((IRExprBinop *)exp)->op == Iop_CmpEQ64 &&
+				    ((IRExprBinop *)exp)->arg1->tag == Iex_Const)
+					trans.cnstTable[((IRExprBinop *)exp)->arg2] = ((IRExprBinop *)exp)->arg1;
 			}
 			return work;
 		}
@@ -485,15 +486,15 @@ buildVarMap(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &toVars,
 	if (toVars.count(inp))
 		return;
 	if (inp->tag == Iex_Associative &&
-	    (inp->Iex.Associative.op == Iop_And1 ||
-	     inp->Iex.Associative.op == Iop_Or1)) {
-		for (int x = 0; x < inp->Iex.Associative.nr_arguments; x++)
-			buildVarMap(inp->Iex.Associative.contents[x],
+	    (((IRExprAssociative *)inp)->op == Iop_And1 ||
+	     ((IRExprAssociative *)inp)->op == Iop_Or1)) {
+		for (int x = 0; x < ((IRExprAssociative *)inp)->nr_arguments; x++)
+			buildVarMap(((IRExprAssociative *)inp)->contents[x],
 				    toVars,
 				    toExprs);
 	} else if (inp->tag == Iex_Unop &&
-		   inp->Iex.Unop.op == Iop_Not1) {
-		buildVarMap(inp->Iex.Unop.arg, toVars, toExprs);
+		   ((IRExprUnop *)inp)->op == Iop_Not1) {
+		buildVarMap(((IRExprUnop *)inp)->arg, toVars, toExprs);
 	} else {
 		CnfVariable *v = new CnfVariable();
 		toExprs[v->id] = inp;
@@ -508,19 +509,19 @@ convertIRExprToCNF(IRExpr *inp, std::map<IRExpr *, CnfExpression *> &m)
 	if (m.count(inp))
 		return m[inp];
 	if (inp->tag == Iex_Unop) {
-		assert(inp->Iex.Unop.op == Iop_Not1);
-		r = convertIRExprToCNF(inp->Iex.Unop.arg, m)->invert();
+		assert(((IRExprUnop *)inp)->op == Iop_Not1);
+		r = convertIRExprToCNF(((IRExprUnop *)inp)->arg, m)->invert();
 	} else {
 		CnfGrouping *r2;
 		assert(inp->tag == Iex_Associative);
-		if (inp->Iex.Associative.op == Iop_And1) {
+		if (((IRExprAssociative *)inp)->op == Iop_And1) {
 			r2 = new CnfAnd();
 		} else {
-			assert(inp->Iex.Associative.op == Iop_Or1);
+			assert(((IRExprAssociative *)inp)->op == Iop_Or1);
 			r2 = new CnfOr();
 		}
-		for (int x = 0; x < inp->Iex.Associative.nr_arguments; x++)
-			r2->addChild(convertIRExprToCNF(inp->Iex.Associative.contents[x], m));
+		for (int x = 0; x < ((IRExprAssociative *)inp)->nr_arguments; x++)
+			r2->addChild(convertIRExprToCNF(((IRExprAssociative *)inp)->contents[x], m));
 		r = r2;
 	}
 	m[inp] = r;
@@ -582,10 +583,10 @@ simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
 	__set_profiling(simplifyIRExprAsBoolean);
 	
 	if (!((inp->tag == Iex_Unop &&
-	       inp->Iex.Unop.op == Iop_Not1) ||
+	       ((IRExprUnop *)inp)->op == Iop_Not1) ||
 	      (inp->tag == Iex_Associative &&
-	       (inp->Iex.Associative.op == Iop_Or1 ||
-		inp->Iex.Associative.op == Iop_And1))))
+	       (((IRExprAssociative *)inp)->op == Iop_Or1 ||
+		((IRExprAssociative *)inp)->op == Iop_And1))))
 		return inp;
 
 	inp = internIRExpr(inp);

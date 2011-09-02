@@ -46,39 +46,51 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	case Iex_RdTmp:
 	case Iex_FreeVariable:
 		return exp;
-	case Iex_GetI:
-		return IRExpr_GetI(exp->Iex.GetI.descr,
-				   log_reads_expr(tid, sb, exp->Iex.GetI.ix),
-				   exp->Iex.GetI.bias,
-				   exp->Iex.GetI.tid);
-	case Iex_Qop:
-		return IRExpr_Qop(exp->Iex.Qop.op,
-				  log_reads_expr(tid, sb, exp->Iex.Qop.arg1),
-				  log_reads_expr(tid, sb, exp->Iex.Qop.arg2),
-				  log_reads_expr(tid, sb, exp->Iex.Qop.arg3),
-				  log_reads_expr(tid, sb, exp->Iex.Qop.arg4));
-	case Iex_Triop:
-		return IRExpr_Triop(exp->Iex.Triop.op,
-				    log_reads_expr(tid, sb, exp->Iex.Triop.arg1),
-				    log_reads_expr(tid, sb, exp->Iex.Triop.arg2),
-				    log_reads_expr(tid, sb, exp->Iex.Triop.arg3));
-	case Iex_Binop:
-		return IRExpr_Binop(exp->Iex.Binop.op,
-				    log_reads_expr(tid, sb, exp->Iex.Binop.arg1),
-				    log_reads_expr(tid, sb, exp->Iex.Binop.arg2));
+	case Iex_GetI: {
+		IRExprGetI *e = (IRExprGetI *)exp;
+		return IRExpr_GetI(e->descr,
+				   log_reads_expr(tid, sb, e->ix),
+				   e->bias,
+				   e->tid);
+	}
+	case Iex_Qop: {
+		IRExprQop *e = (IRExprQop *)exp;
+		return IRExpr_Qop(e->op,
+				  log_reads_expr(tid, sb, e->arg1),
+				  log_reads_expr(tid, sb, e->arg2),
+				  log_reads_expr(tid, sb, e->arg3),
+				  log_reads_expr(tid, sb, e->arg4));
+	}
+	case Iex_Triop: {
+		IRExprTriop *e = (IRExprTriop *)exp;
+		return IRExpr_Triop(e->op,
+				    log_reads_expr(tid, sb, e->arg1),
+				    log_reads_expr(tid, sb, e->arg2),
+				    log_reads_expr(tid, sb, e->arg3));
+	}
+	case Iex_Binop: {
+		IRExprBinop *e = (IRExprBinop *)exp;
+		return IRExpr_Binop(e->op,
+				    log_reads_expr(tid, sb, e->arg1),
+				    log_reads_expr(tid, sb, e->arg2));
+	}
 	case Iex_Associative: {
-		IRExpr *out = IRExpr_Associative(&exp->Iex.Associative);
+		IRExprAssociative *e = (IRExprAssociative *)exp;
+		IRExprAssociative *out = (IRExprAssociative *)IRExpr_Associative(e);
 		for (int x = 0;
-		     x < exp->Iex.Associative.nr_arguments;
+		     x < e->nr_arguments;
 		     x++)
-			out->Iex.Associative.contents[x] =
-				log_reads_expr(tid, sb, out->Iex.Associative.contents[x]);
+			out->contents[x] =
+				log_reads_expr(tid, sb, out->contents[x]);
 		return out;
 	}
-	case Iex_Unop:
-		return IRExpr_Unop(exp->Iex.Unop.op,
-				   log_reads_expr(tid, sb, exp->Iex.Unop.arg));
+	case Iex_Unop: {
+		IRExprUnop *e = (IRExprUnop *)exp;
+		return IRExpr_Unop(e->op,
+				   log_reads_expr(tid, sb, e->arg));
+	}
 	case Iex_Load: {
+		IRExprLoad *e = (IRExprLoad *)exp;
 		IRExpr **args;
 		void *helper;
 		const char *helper_name;
@@ -86,7 +98,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 		IRDirty *f;
 
 #define HLP(x) helper_name = "helper_load_" #x ; helper = (void *)helper_load_ ## x ;
-		switch (exp->Iex.Load.ty) {
+		switch (e->ty) {
 		case Ity_INVALID:
 			throw NotImplementedException("Bad type 1");
 		case Ity_I1:
@@ -116,10 +128,10 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 		}
 #undef HLP
 
-		args = mkIRExprVec_3(log_reads_expr(tid, sb, exp->Iex.Load.addr),
+		args = mkIRExprVec_3(log_reads_expr(tid, sb, e->addr),
 				     IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, tid),
 				     IRExpr_Get(OFFSET_amd64_RIP, Ity_I64, tid));
-		dest = newIRTemp(sb->tyenv, exp->Iex.Load.ty);
+		dest = newIRTemp(sb->tyenv, e->ty);
 		f = unsafeIRDirty_1_N(dest,
 				      0,
 				      helper_name,
@@ -131,20 +143,23 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	case Iex_Const:
 		return exp;
 	case Iex_CCall: {
+		IRExprCCall *e = (IRExprCCall *)exp;
 		IRExpr **args;
 		unsigned x;
 
-		args = shallowCopyIRExprVec(exp->Iex.CCall.args);
+		args = shallowCopyIRExprVec(e->args);
 		for (x = 0; args[x]; x++)
 			args[x] = log_reads_expr(tid, sb, args[x]);
-		return IRExpr_CCall(exp->Iex.CCall.cee,
-				    exp->Iex.CCall.retty,
+		return IRExpr_CCall(e->cee,
+				    e->retty,
 				    args);
 	}
-	case Iex_Mux0X:
-		return IRExpr_Mux0X(log_reads_expr(tid, sb, exp->Iex.Mux0X.cond),
-				    log_reads_expr(tid, sb, exp->Iex.Mux0X.expr0),
-				    log_reads_expr(tid, sb, exp->Iex.Mux0X.exprX));
+	case Iex_Mux0X: {
+		IRExprMux0X *e = (IRExprMux0X *)exp;
+		return IRExpr_Mux0X(log_reads_expr(tid, sb, e->cond),
+				    log_reads_expr(tid, sb, e->expr0),
+				    log_reads_expr(tid, sb, e->exprX));
+	}
 	case Iex_ClientCall: /* There shouldn't be any of these at this stage */
 	case Iex_ClientCallFailed:
 	case Iex_HappensBefore:

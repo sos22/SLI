@@ -443,28 +443,28 @@ dnf(IRExpr *e, DNF_Disjunction &out)
 	check_memory_usage();
 	out.clear();
 	if (e->tag == Iex_Unop &&
-	    e->Iex.Unop.op == Iop_Not1) {
+	    ((IRExprUnop *)e)->op == Iop_Not1) {
 		DNF_Disjunction r;
-		return dnf(e->Iex.Unop.arg, r) &&
+		return dnf(((IRExprUnop *)e)->arg, r) &&
 			dnf_invert(r, out);
 	}
 
 	if (e->tag == Iex_Associative) {
-		if (e->Iex.Associative.op == Iop_Or1) {
-			for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
+		if (((IRExprAssociative *)e)->op == Iop_Or1) {
+			for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++) {
 				if (TIMEOUT)
 					return false;
 				DNF_Disjunction r;
-				if (!dnf(e->Iex.Associative.contents[x], r))
+				if (!dnf(((IRExprAssociative *)e)->contents[x], r))
 					return false;
 				DNF_Disjunction t(out);
 				merge_disjunctions(r, t, out);
 			}
 			sanity_check(out);
 			return true;
-		} else if (e->Iex.Associative.op == Iop_And1) {
-			return dnf_and(e->Iex.Associative.contents,
-				       e->Iex.Associative.nr_arguments,
+		} else if (((IRExprAssociative *)e)->op == Iop_And1) {
+			return dnf_and(((IRExprAssociative *)e)->contents,
+				       ((IRExprAssociative *)e)->nr_arguments,
 				       out);
 		}
 	}

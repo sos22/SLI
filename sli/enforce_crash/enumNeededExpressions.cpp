@@ -8,14 +8,14 @@ public:
 	EnumNeededExpressionsTransformer(std::set<IRExpr *> &_out)
 		: out(_out)
 	{}
-	IRExpr *transformIex(IRExpr::RdTmp *e) {
+	IRExpr *transformIex(IRExprRdTmp *e) {
 		abort(); /* Should all have been eliminated by now */
 	}
-	IRExpr *transformIex(IRExpr::Get *e) {
+	IRExpr *transformIex(IRExprGet *e) {
 		out.insert(currentIRExpr());
 		return NULL;
 	}
-	IRExpr *transformIex(IRExpr::Load *e) {
+	IRExpr *transformIex(IRExprLoad *e) {
 		out.insert(currentIRExpr());
 		/* Note that we don't recurse into the address
 		   calculation here.  We can always evaluate this
@@ -23,7 +23,7 @@ public:
 		   of where the address came from. */
 		return NULL;
 	}
-	IRExpr *transformIex(IRExpr::HappensBefore *e) {
+	IRExpr *transformIex(IRExprHappensBefore *e) {
 		out.insert(currentIRExpr());
 		/* Again, we don't recurse into the details of the
 		   happens before expression, because we only need the
@@ -31,7 +31,7 @@ public:
 		   side-effects. */
 		return NULL;
 	}
-	IRExpr *transformIex(IRExpr::ClientCall *e) {
+	IRExpr *transformIex(IRExprClientCall *e) {
 		out.insert(currentIRExpr());
 		return NULL;
 	}

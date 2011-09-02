@@ -5,14 +5,15 @@
 #include "simplify_ordering.hpp"
 #include "state_machine.hpp"
 
-bool operator<(const IRExpr::HappensBefore &a, const IRExpr::HappensBefore &b)
+bool
+HBOrdering::operator()(const IRExprHappensBefore *a, const IRExprHappensBefore *b)
 {
-	if (a.before < b.before)
+	if (a->before < b->before)
 		return true;
-	else if (a.before > b.before)
+	else if (a->before > b->before)
 		return false;
 	else
-		return a.after < b.after;
+		return a->after < b->after;
 }
 
 class canonMemAccessT : public std::map<ThreadRip, unsigned> {
@@ -27,14 +28,14 @@ public:
 		if (!count(evt))
 			(*this)[evt] = next_idx++;
 	}
-	void addEdge(IRExpr::HappensBefore hb)
+	void addEdge(IRExprHappensBefore *hb)
 	{
-		addEvent(hb.before);
-		addEvent(hb.after);
+		addEvent(hb->before);
+		addEvent(hb->after);
 	}
-	void addEdges(const std::set<IRExpr::HappensBefore> &e)
+	void addEdges(const std::set<IRExprHappensBefore *, HBOrdering> &e)
 	{
-		for (std::set<IRExpr::HappensBefore>::const_iterator it = e.begin();
+		for (auto it = e.begin();
 		     it != e.end();
 		     it++)
 			addEdge(*it);
@@ -155,8 +156,8 @@ denseRelationshipT::print(FILE *f) const
    happens-before relationships which, when combined with
    @assumptions, is equivalent to the original set. */
 bool
-simplifyOrdering(std::set<IRExpr::HappensBefore> &relations,
-		 const std::set<IRExpr::HappensBefore> &_assumptions)
+simplifyOrdering(std::set<IRExprHappensBefore *, HBOrdering> &relations,
+		 const std::set<IRExprHappensBefore *, HBOrdering> &_assumptions)
 {
 	/* Start by building a mapping from relevant events to
 	 * indexes. */
@@ -166,18 +167,18 @@ simplifyOrdering(std::set<IRExpr::HappensBefore> &relations,
 
 	/* Now build the complete relationship matrix. */
 	denseRelationshipT relationship(canonMap.next_idx);
-	for (std::set<IRExpr::HappensBefore>::const_iterator it = relations.begin();
+	for (auto it = relations.begin();
 	     it != relations.end();
 	     it++) {
-		relationship.set_related(canonMap[it->before],
-					 canonMap[it->after]);
+		relationship.set_related(canonMap[(*it)->before],
+					 canonMap[(*it)->after]);
 	}
 	denseRelationshipT assumptions(canonMap.next_idx);
-	for (std::set<IRExpr::HappensBefore>::const_iterator it = _assumptions.begin();
+	for (auto it = _assumptions.begin();
 	     it != _assumptions.end();
 	     it++) {
-		assumptions.set_related(canonMap[it->before],
-					canonMap[it->after]);
+		assumptions.set_related(canonMap[(*it)->before],
+					canonMap[(*it)->after]);
 	}
 	relationship |= assumptions;
 
@@ -231,13 +232,15 @@ simplifyOrdering(std::set<IRExpr::HappensBefore> &relations,
 	/* @relationship should now be a minimal relationship which
 	   induces the original relationship under the assumptions in
 	   @assumptions.  Translate back. */
-	std::set<IRExpr::HappensBefore> out;
+	std::set<IRExprHappensBefore *, HBOrdering> out;
 	for (unsigned x = 0; x < relationship.size(); x++) {
 		for (unsigned y = 0; y < relationship.size(); y++) {
 			if (relationship.related(x, y)) {
-				IRExpr::HappensBefore hb;
-				hb.before = canonMap.inverse_lookup(x);
-				hb.after = canonMap.inverse_lookup(y);
+				IRExprHappensBefore *hb =
+					(IRExprHappensBefore *)
+					IRExpr_HappensBefore(
+						canonMap.inverse_lookup(x),
+						canonMap.inverse_lookup(y));
 				out.insert(hb);
 			}
 		}
@@ -250,11 +253,11 @@ simplifyOrdering(std::set<IRExpr::HappensBefore> &relations,
 
 static void extractImplicitOrder(StateMachineState *sm,
 				 std::vector<ThreadRip> &eventsSoFar,
-				 std::set<IRExpr::HappensBefore> &out);
+				 std::set<IRExprHappensBefore *, HBOrdering> &out);
 static void
 extractImplicitOrder(StateMachineEdge *sme,
 		     std::vector<ThreadRip> &eventsSoFar,
-		     std::set<IRExpr::HappensBefore> &out)
+		     std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
 	if (sme->sideEffects.size() == 0) {
 		extractImplicitOrder(sme->target, eventsSoFar, out);
@@ -270,9 +273,9 @@ extractImplicitOrder(StateMachineEdge *sme,
 			continue;
 
 		for (unsigned y = 0; y < eventsSoFar.size(); y++) {
-			IRExpr::HappensBefore hb;
-			hb.before = eventsSoFar[y];
-			hb.after = smsema->rip;
+			IRExprHappensBefore *hb =
+				(IRExprHappensBefore *)
+				IRExpr_HappensBefore(eventsSoFar[y], smsema->rip);
 			out.insert(hb);
 		}
 
@@ -285,7 +288,7 @@ extractImplicitOrder(StateMachineEdge *sme,
 static void
 extractImplicitOrder(StateMachineState *sm,
 		     std::vector<ThreadRip> &eventsSoFar,
-		     std::set<IRExpr::HappensBefore> &out)
+		     std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
 	if (dynamic_cast<const StateMachineTerminal *>(sm))
 		return;
@@ -304,7 +307,7 @@ extractImplicitOrder(StateMachineState *sm,
 /* Walk the state machine and extract all of the happens-before
    relationships which are implied by its internal structure. */
 void
-extractImplicitOrder(StateMachine *sm, std::set<IRExpr::HappensBefore> &out)
+extractImplicitOrder(StateMachine *sm, std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
 	std::vector<ThreadRip> eventsSoFar;
 	extractImplicitOrder(sm->root, eventsSoFar, out);

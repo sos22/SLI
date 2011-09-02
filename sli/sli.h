@@ -41,11 +41,6 @@ public:
 	void unsuspend() {}
 };
 
-class PrettyPrintable {
-public:
-	virtual void prettyPrint(FILE *f) const = 0;
-};
-
 class Named {
 	mutable char *_name;
 protected:

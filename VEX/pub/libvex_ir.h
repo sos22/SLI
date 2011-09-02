@@ -51,7 +51,8 @@
 
 #include "libvex_basictypes.h"
 #include "libvex_alloc.h"
-
+#include "libvex_print.hpp"
+#include "libvex_guest_offsets.h"
 
 class ThreadRip {
 public:
@@ -263,32 +264,6 @@ extern Heap ir_heap;
      shallow copy constructor.
 */
 
-/* ------------------ Types ------------------ */
-
-/* A type indicates the size of a value, and whether it's an integer, a
-   float, or a vector (SIMD) value. */
-typedef 
-   enum { 
-      Ity_INVALID=0x11000,
-      Ity_I1, 
-      Ity_I8, 
-      Ity_I16, 
-      Ity_I32, 
-      Ity_I64,
-      Ity_I128,  /* 128-bit scalar */
-      Ity_F32,   /* IEEE 754 float */
-      Ity_F64,   /* IEEE 754 double */
-      Ity_V128   /* 128-bit SIMD */
-   }
-   IRType;
-
-/* Pretty-print an IRType */
-extern void ppIRType ( IRType, FILE *f );
-
-/* Get the size (in bytes) of an IRType */ 
-extern Int sizeofIRType ( IRType );
-
-
 /* ------------------ Endianness ------------------ */
 
 /* IREndness is used in load IRExprs and store IRStmts. */
@@ -358,77 +333,6 @@ extern void ppIRConst ( IRConst*, FILE* );
 
 /* Compare two IRConsts for equality */
 extern Bool eqIRConst ( IRConst*, IRConst* );
-
-
-/* ------------------ Call targets ------------------ */
-
-/* Describes a helper function to call.  The name part is purely for
-   pretty printing and not actually used.  regparms=n tells the back
-   end that the callee has been declared
-   "__attribute__((regparm(n)))".  On some targets (x86) the back end
-   will need to construct a non-standard sequence to call a function
-   declared like this. 
-
-   mcx_mask is a sop to Memcheck.  It indicates which args should be
-   considered 'always defined' when lazily computing definedness of
-   the result.  Bit 0 of mcx_mask corresponds to args[0], bit 1 to
-   args[1], etc.  If a bit is set, the corresponding arg is excluded
-   (hence "x" in "mcx") from definedness checking.  
-*/
-
-typedef
-   struct _IRCallee : public GarbageCollected<_IRCallee, &ir_heap>{
-      Int    regparms;
-      const char* name;
-      void*  addr;
-      UInt   mcx_mask;
-      void visit(HeapVisitor &hv) {}
-      unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
-      NAMED_CLASS
-   }
-   IRCallee;
-
-/* Create an IRCallee. */
-extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr );
-
-/* Pretty-print an IRCallee. */
-extern void ppIRCallee ( IRCallee*, FILE* );
-
-
-/* ------------------ Guest state arrays ------------------ */
-
-/* This describes a section of the guest state that we want to
-   be able to index at run time, so as to be able to describe 
-   indexed or rotating register files on the guest. */
-typedef
-struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
-      Int    base;   /* guest state offset of start of indexed area */
-      IRType elemTy; /* type of each element in the indexed area */
-      Int    nElems; /* number of elements in the indexed area */
-      void visit(HeapVisitor &hv) {}
-      unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
-      NAMED_CLASS
-   }
-   IRRegArray;
-
-extern IRRegArray* mkIRRegArray ( Int, IRType, Int );
-
-extern void ppIRRegArray ( IRRegArray*, FILE * );
-extern Bool eqIRRegArray ( IRRegArray*, IRRegArray* );
-
-
-/* ------------------ Temporaries ------------------ */
-
-/* This represents a temporary, eg. t1.  The IR optimiser relies on the
-   fact that IRTemps are 32-bit ints.  Do not change them to be ints of
-   any other size. */
-typedef UInt IRTemp;
-
-/* Pretty-print an IRTemp. */
-extern void ppIRTemp ( IRTemp, FILE* );
-
-#define IRTemp_INVALID ((IRTemp)0xFFFFFFFF)
-
 
 /* --------------- Primops (arity 1,2,3 and 4) --------------- */
 
@@ -949,6 +853,127 @@ typedef
    IRCmpF64Result;
 
 
+/* ------------------ Temporaries ------------------ */
+
+/* This represents a temporary, eg. t1.  The IR optimiser relies on the
+   fact that IRTemps are 32-bit ints.  Do not change them to be ints of
+   any other size. */
+typedef UInt IRTemp;
+
+/* Pretty-print an IRTemp. */
+extern void ppIRTemp ( IRTemp, FILE* );
+
+#define IRTemp_INVALID ((IRTemp)0xFFFFFFFF)
+
+
+/* ------------------ Types ------------------ */
+
+/* A type indicates the size of a value, and whether it's an integer, a
+   float, or a vector (SIMD) value. */
+typedef 
+   enum { 
+      Ity_INVALID=0x11000,
+      Ity_I1, 
+      Ity_I8, 
+      Ity_I16, 
+      Ity_I32, 
+      Ity_I64,
+      Ity_I128,  /* 128-bit scalar */
+      Ity_F32,   /* IEEE 754 float */
+      Ity_F64,   /* IEEE 754 double */
+      Ity_V128   /* 128-bit SIMD */
+   }
+   IRType;
+
+/* Pretty-print an IRType */
+extern void ppIRType ( IRType, FILE *f );
+
+/* Get the size (in bytes) of an IRType */ 
+extern Int sizeofIRType ( IRType );
+
+
+/* Type environments: a bunch of statements, expressions, etc, are
+   incomplete without an environment indicating the type of each
+   IRTemp.  So this provides one.  IR temporaries are really just
+   unsigned ints and so this provides an array, 0 .. n_types_used-1 of
+   them.
+*/
+typedef
+struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
+      IRType* types;
+      Int     types_size;
+      Int     types_used;
+      void visit(HeapVisitor &hv) { hv(types); }
+      NAMED_CLASS
+   }
+   IRTypeEnv;
+
+extern IRType typeOfIRTemp  ( IRTypeEnv*, IRTemp );
+extern IRType typeOfIRConst ( IRConst* );
+extern void typeOfPrimop ( IROp op,
+			   /*OUTs*/
+			   IRType* t_dst,
+			   IRType* t_arg1, IRType* t_arg2,
+			   IRType* t_arg3, IRType* t_arg4 );
+
+
+/* ------------------ Call targets ------------------ */
+
+/* Describes a helper function to call.  The name part is purely for
+   pretty printing and not actually used.  regparms=n tells the back
+   end that the callee has been declared
+   "__attribute__((regparm(n)))".  On some targets (x86) the back end
+   will need to construct a non-standard sequence to call a function
+   declared like this. 
+
+   mcx_mask is a sop to Memcheck.  It indicates which args should be
+   considered 'always defined' when lazily computing definedness of
+   the result.  Bit 0 of mcx_mask corresponds to args[0], bit 1 to
+   args[1], etc.  If a bit is set, the corresponding arg is excluded
+   (hence "x" in "mcx") from definedness checking.  
+*/
+
+typedef
+   struct _IRCallee : public GarbageCollected<_IRCallee, &ir_heap>{
+      Int    regparms;
+      const char* name;
+      void*  addr;
+      UInt   mcx_mask;
+      void visit(HeapVisitor &hv) {}
+      unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
+      NAMED_CLASS
+   }
+   IRCallee;
+
+/* Create an IRCallee. */
+extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr );
+
+/* Pretty-print an IRCallee. */
+extern void ppIRCallee ( IRCallee*, FILE* );
+
+
+/* ------------------ Guest state arrays ------------------ */
+
+/* This describes a section of the guest state that we want to
+   be able to index at run time, so as to be able to describe 
+   indexed or rotating register files on the guest. */
+typedef
+struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
+      Int    base;   /* guest state offset of start of indexed area */
+      IRType elemTy; /* type of each element in the indexed area */
+      Int    nElems; /* number of elements in the indexed area */
+      void visit(HeapVisitor &hv) {}
+      unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
+      NAMED_CLASS
+   }
+   IRRegArray;
+
+extern IRRegArray* mkIRRegArray ( Int, IRType, Int );
+
+extern void ppIRRegArray ( IRRegArray*, FILE * );
+extern Bool eqIRRegArray ( IRRegArray*, IRRegArray* );
+
+
 /* ------------------ Expressions ------------------ */
 
 /* The different kinds of expressions.  Their meaning is explained below
@@ -974,6 +999,21 @@ typedef
    }
    IRExprTag;
 
+class FreeVariableKey {
+public:
+   int val;
+   bool operator < (FreeVariableKey x) const {
+      return val < x.val;
+   }
+   bool operator !=(FreeVariableKey x) const {
+      return *this < x || x < *this;
+   }
+   bool operator ==(FreeVariableKey x) const {
+      return !(*this != x);
+   }
+   unsigned long hash() const { return val * 900000323; }
+};
+
 /* An expression.  Stored as a tagged union.  'tag' indicates what kind
    of expression this is.  'Iex' is the union that holds the fields.  If
    an IRExpr 'e' has e.tag equal to Iex_Load, then it's a load
@@ -983,259 +1023,460 @@ typedef
    For each kind of expression, we show what it looks like when
    pretty-printed with ppIRExpr().
 */
-typedef
-   struct _IRExpr
-   IRExpr;
-
-class FreeVariableKey {
+class IRExpr : public GarbageCollected<IRExpr, &ir_heap>, public PrettyPrintable {
+protected:
+   IRExpr(IRExprTag _tag)
+       : tag(_tag), optimisationsApplied(0)
+   {}
 public:
-   int val;
-   bool operator < (FreeVariableKey x) const {
-      return val < x.val;
-   }
-   bool operator ==(FreeVariableKey x) const {
-      return val == x.val;
-   }
-   unsigned long hash() const { return val * 900000323; }
+   const IRExprTag tag;
+   unsigned optimisationsApplied;
+
+   virtual unsigned long hashval() const = 0;
+   virtual IRType type(IRTypeEnv *) const = 0;
+   NAMED_CLASS
 };
 
-struct _IRExpr : public GarbageCollected<_IRExpr, &ir_heap> {
-   IRExprTag tag;
-   unsigned optimisationsApplied;
-   unsigned long hashval() const;
-   union _u {
-      /* Read a guest register, at a fixed offset in the guest state.
-         ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0)
-      */
-      struct _Get {
-         Int    offset;    /* Offset into the guest state */
-         IRType ty;        /* Type of the value being read */
-	 unsigned tid;     /* The thread whose register is to be read */
-      } Get;
+#define foreach_reg(iter)			\
+  iter(RAX)					\
+  iter(RBX)					\
+  iter(RCX)					\
+  iter(RDX)					\
+  iter(RSP)					\
+  iter(RBP)					\
+  iter(RSI)					\
+  iter(RDI)					\
+  iter(R8)					\
+  iter(R9)					\
+  iter(R10)					\
+  iter(R11)					\
+  iter(R12)					\
+  iter(R13)					\
+  iter(R14)					\
+  iter(R15)					\
+  iter(RIP)
 
-      /* Read a guest register at a non-fixed offset in the guest
-         state.  This allows circular indexing into parts of the guest
-         state, which is essential for modelling situations where the
-         identity of guest registers is not known until run time.  One
-         example is the x87 FP register stack.
+/* Read a guest register, at a fixed offset in the guest state.
+   ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0) */
+struct IRExprGet : public IRExpr {
+   Int offset;
+   IRType ty;
+   unsigned tid;
 
-         The part of the guest state to be treated as a circular array
-         is described in the IRRegArray 'descr' field.  It holds the
-         offset of the first element in the array, the type of each
-         element, and the number of elements.
+   IRExprGet()
+       : IRExpr(Iex_Get), offset(0), ty(Ity_INVALID), tid(0)
+   {}
+   void visit(HeapVisitor &hv) {}
+   unsigned long hashval() const { return offset + ty * 3 + tid * 7; }
+   void prettyPrint(FILE *f) const {
+       if (ty == Ity_I64) {
+	   switch (offset) {
+#define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d", tid); return;
+	       foreach_reg(do_reg);
+#undef do_reg
+	   }
+	}
+       fprintf(f,  "GET:" );
+       ppIRType(ty, f);
+       fprintf(f, "(%d, %d)", offset, tid);
+   }
+   IRType type(IRTypeEnv *) const { return ty; }
+};
+/* Read a guest register at a non-fixed offset in the guest state.
+   This allows circular indexing into parts of the guest state, which
+   is essential for modelling situations where the identity of guest
+   registers is not known until run time.  One example is the x87 FP
+   register stack.
 
-         The array index is indicated rather indirectly, in a way
-         which makes optimisation easy: as the sum of variable part
-         (the 'ix' field) and a constant offset (the 'bias' field).
+   The part of the guest state to be treated as a circular array is
+   described in the IRRegArray 'descr' field.  It holds the offset of
+   the first element in the array, the type of each element, and the
+   number of elements.
 
-         Since the indexing is circular, the actual array index to use
-         is computed as (ix + bias) % num-of-elems-in-the-array.
+   The array index is indicated rather indirectly, in a way which
+   makes optimisation easy: as the sum of variable part (the 'ix'
+   field) and a constant offset (the 'bias' field).
 
-         Here's an example.  The description
+   Since the indexing is circular, the actual array index to use is
+   computed as (ix + bias) % num-of-elems-in-the-array.
 
-            (96:8xF64)[t39,-7]
+   Here's an example.  The description
 
-         describes an array of 8 F64-typed values, the
-         guest-state-offset of the first being 96.  This array is
-         being indexed at (t39 - 7) % 8.
+   (96:8xF64)[t39,-7]
 
-         It is important to get the array size/type exactly correct
-         since IR optimisation looks closely at such info in order to
-         establish aliasing/non-aliasing between seperate GetI and
-         PutI events, which is used to establish when they can be
-         reordered, etc.  Putting incorrect info in will lead to
-         obscure IR optimisation bugs.
+   describes an array of 8 F64-typed values, the guest-state-offset of
+   the first being 96.  This array is being indexed at (t39 - 7) % 8.
 
-            ppIRExpr output: GETI<descr>[<ix>,<bias]
-                         eg. GETI(128:8xI8)[t1,0]
-      */
-      struct _GetI {
-         IRRegArray* descr; /* Part of guest state treated as circular */
-         IRExpr*     ix;    /* Variable part of index into array */
-         Int         bias;  /* Constant offset part of index into array */
-	 unsigned tid;     /* The thread whose register is to be read */
-      } GetI;
+   It is important to get the array size/type exactly correct since IR
+   optimisation looks closely at such info in order to establish
+   aliasing/non-aliasing between seperate GetI and PutI events, which
+   is used to establish when they can be reordered, etc.  Putting
+   incorrect info in will lead to obscure IR optimisation bugs.
 
-      /* The value held by a temporary.
-         ppIRExpr output: t<tmp>, eg. t1
-      */
-      struct _RdTmp {
-         IRTemp tmp;       /* The temporary number */
-	 unsigned tid;     /* The thread whose temporary is to be read */
-      } RdTmp;
+   ppIRExpr output: GETI<descr>[<ix>,<bias]
+   eg. GETI(128:8xI8)[t1,0]
+*/
+struct IRExprGetI : public IRExpr {
+   IRRegArray* descr; /* Part of guest state treated as circular */
+   IRExpr*     ix;    /* Variable part of index into array */
+   Int         bias;  /* Constant offset part of index into array */
+   unsigned tid;     /* The thread whose register is to be read */
 
-      /* A quaternary operation.
-         ppIRExpr output: <op>(<arg1>, <arg2>, <arg3>, <arg4>),
-                      eg. MAddF64r32(t1, t2, t3, t4)
-      */
-      struct _Qop {
-         IROp op;          /* op-code   */
-         IRExpr* arg1;     /* operand 1 */
-         IRExpr* arg2;     /* operand 2 */
-         IRExpr* arg3;     /* operand 3 */
-         IRExpr* arg4;     /* operand 4 */
-      } Qop;
+   IRExprGetI() : IRExpr(Iex_GetI) {}
+   
+   void visit(HeapVisitor &hv) {
+       hv(descr);
+       hv(ix);
+   }
+   unsigned long hashval() const {
+       return descr->hashval() + ix->hashval() * 3 + bias * 5 + tid * 7;
+   }
 
-      /* A ternary operation.
-         ppIRExpr output: <op>(<arg1>, <arg2>, <arg3>),
-                      eg. MulF64(1, 2.0, 3.0)
-      */
-      struct _Triop {
-         IROp op;          /* op-code   */
-         IRExpr* arg1;     /* operand 1 */
-         IRExpr* arg2;     /* operand 2 */
-         IRExpr* arg3;     /* operand 3 */
-      } Triop;
+   void prettyPrint(FILE *f) const {
+      fprintf(f,  "GETI" );
+      ppIRRegArray(descr, f);
+      fprintf(f, "[");
+      ix->prettyPrint(f);
+      fprintf(f, ",%d](%d)", bias, tid);
+   }
+   IRType type(IRTypeEnv *) const { return descr->elemTy; }
+};
 
-      /* A binary operation.
-         ppIRExpr output: <op>(<arg1>, <arg2>), eg. Add32(t1,t2)
-      */
-      struct _Binop {
-         IROp op;          /* op-code   */
-         IRExpr* arg1;     /* operand 1 */
-         IRExpr* arg2;     /* operand 2 */
-      } Binop;
+/* The value held by a temporary.
+   ppIRExpr output: t<tmp>, eg. t1
+*/
+struct IRExprRdTmp : public IRExpr {
+   IRTemp tmp;       /* The temporary number */
+   unsigned tid;     /* The thread whose temporary is to be read */
 
-      /* A unary operation.
-         ppIRExpr output: <op>(<arg>), eg. Neg8(t1)
-      */
-      struct _Unop {
-         IROp    op;       /* op-code */
-         IRExpr* arg;      /* operand */
-      } Unop;
+   IRExprRdTmp() : IRExpr(Iex_RdTmp) {}
+   void visit(HeapVisitor &hv) {}
+   unsigned long hashval() const { return tmp + tid * 3; }
+   void prettyPrint(FILE *f) const {
+      ppIRTemp(tmp, f);
+      fprintf(f, ":%d", tid);
+   }
+   IRType type(IRTypeEnv *e) const { return typeOfIRTemp(e, tmp); }
+};
 
-      /* A load from memory.  If .isLL is True then this load also
-         lodges a reservation (ppc-style lwarx/ldarx operation).  If
-         .isLL is True, then also, the address must be naturally
-         aligned - any misaligned addresses should be caught by a
-         dominating IR check and side exit.  This alignment
-         restriction exists because on at least some LL/SC platforms
-         (ppc), lwarx etc will trap w/ SIGBUS on misaligned addresses,
-         and we have to actually generate lwarx on the host, and we
-         don't want it trapping on the host.
+/* A quaternary operation.
+   ppIRExpr output: <op>(<arg1>, <arg2>, <arg3>, <arg4>),
+   eg. MAddF64r32(t1, t2, t3, t4)
+*/
+struct IRExprQop : public IRExpr {
+   IROp op;          /* op-code   */
+   IRExpr* arg1;     /* operand 1 */
+   IRExpr* arg2;     /* operand 2 */
+   IRExpr* arg3;     /* operand 3 */
+   IRExpr* arg4;     /* operand 4 */
 
-         ppIRExpr output: LD<end>:<ty>(<addr>), eg. LDle:I32(t1)
-      */
-      struct _Load {
-         Bool      isLL;   /* True iff load makes a reservation */
-         IREndness end;    /* Endian-ness of the load */
-         IRType    ty;     /* Type of the loaded value */
-         IRExpr*   addr;   /* Address being loaded from */
-	 ThreadRip rip; /* Address of load instruction */
-      } Load;
+   IRExprQop() : IRExpr(Iex_Qop) {}
+   void visit(HeapVisitor &hv) {
+       hv(arg1);
+       hv(arg2);
+       hv(arg3);
+       hv(arg4);
+   }
+   unsigned long hashval() const {
+       return op + arg1->hashval() * 3 + arg2->hashval() * 5 +
+	   arg3->hashval() * 7 + arg4->hashval() * 11;
+   }
+   void prettyPrint(FILE *f) const {
+      ppIROp(op, f);
+      fprintf(f,  "(" );
+      arg1->prettyPrint(f);
+      fprintf(f,  "," );
+      arg2->prettyPrint(f);
+      fprintf(f,  "," );
+      arg3->prettyPrint(f);
+      fprintf(f,  "," );
+      arg4->prettyPrint(f);
+      fprintf(f,  ")" );
+   }
+   IRType type(IRTypeEnv *) const {
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      return a;
+   }
+};
 
-      /* A constant-valued expression.
-         ppIRExpr output: <con>, eg. 0x4:I32
-      */
-      struct _Const {
-         IRConst* con;     /* The constant itself */
-      } Const;
+/* A ternary operation.
+   ppIRExpr output: <op>(<arg1>, <arg2>, <arg3>),
+   eg. MulF64(1, 2.0, 3.0)
+*/
+struct IRExprTriop : public IRExpr {
+   IROp op;          /* op-code   */
+   IRExpr* arg1;     /* operand 1 */
+   IRExpr* arg2;     /* operand 2 */
+   IRExpr* arg3;     /* operand 3 */
+   IRExprTriop() : IRExpr(Iex_Triop) {}
+   void visit(HeapVisitor &hv) {
+       hv(arg1);
+       hv(arg2);
+       hv(arg3);
+   }
+   unsigned long hashval() const {
+       return op + arg1->hashval() * 3 + arg2->hashval() * 5 +
+	   arg3->hashval() * 7;
+   }
+   void prettyPrint(FILE *f) const {
+      ppIROp(op, f);
+      fprintf(f,  "(" );
+      arg1->prettyPrint(f);
+      fprintf(f,  "," );
+      arg2->prettyPrint(f);
+      fprintf(f,  "," );
+      arg3->prettyPrint(f);
+      fprintf(f,  ")" );
+   }
+   IRType type(IRTypeEnv *) const {
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      return a;
+   }
+};
 
-      /* A call to a pure (no side-effects) helper C function.
+/* A binary operation.
+   ppIRExpr output: <op>(<arg1>, <arg2>), eg. Add32(t1,t2)
+*/
+struct IRExprBinop : public IRExpr {
+   IROp op;          /* op-code   */
+   IRExpr* arg1;     /* operand 1 */
+   IRExpr* arg2;     /* operand 2 */
 
-         With the 'cee' field, 'name' is the function's name.  It is
-         only used for pretty-printing purposes.  The address to call
-         (host address, of course) is stored in the 'addr' field
-         inside 'cee'.
+   IRExprBinop() : IRExpr(Iex_Binop) {}
+   void visit(HeapVisitor &hv) {
+       hv(arg1);
+       hv(arg2);
+   }
+   unsigned long hashval() const {
+       return op + arg1->hashval() * 3 + arg2->hashval() * 5;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *) const {
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      return a;
+   }
+};
 
-         The 'args' field is a NULL-terminated array of arguments.
-         The stated return IRType, and the implied argument types,
-         must match that of the function being called well enough so
-         that the back end can actually generate correct code for the
-         call.
+/* A unary operation.
+   ppIRExpr output: <op>(<arg>), eg. Neg8(t1)
+*/
+struct IRExprUnop : public IRExpr {
+   IROp    op;       /* op-code */
+   IRExpr* arg;      /* operand */
 
-         The called function **must** satisfy the following:
+   IRExprUnop() : IRExpr(Iex_Unop) {}
+   void visit(HeapVisitor &hv) {
+       hv(arg);
+   }
+   unsigned long hashval() const {
+       return op + arg->hashval() * 3;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *) const {
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      return a;
+   }
+};
 
-         * no side effects -- must be a pure function, the result of
-           which depends only on the passed parameters.
 
-         * it may not look at, nor modify, any of the guest state
-           since that would hide guest state transitions from
-           instrumenters
+/* A load from memory.  If .isLL is True then this load also lodges a
+   reservation (ppc-style lwarx/ldarx operation).  If .isLL is True,
+   then also, the address must be naturally aligned - any misaligned
+   addresses should be caught by a dominating IR check and side exit.
+   This alignment restriction exists because on at least some LL/SC
+   platforms (ppc), lwarx etc will trap w/ SIGBUS on misaligned
+   addresses, and we have to actually generate lwarx on the host, and
+   we don't want it trapping on the host.
 
-         * it may not access guest memory, since that would hide
-           guest memory transactions from the instrumenters
+   ppIRExpr output: LD<end>:<ty>(<addr>), eg. LDle:I32(t1)
+*/
+struct IRExprLoad : public IRExpr {
+   Bool      isLL;   /* True iff load makes a reservation */
+   IREndness end;    /* Endian-ness of the load */
+   IRType    ty;     /* Type of the loaded value */
+   IRExpr*   addr;   /* Address being loaded from */
+   ThreadRip rip; /* Address of load instruction */
 
-         This is restrictive, but makes the semantics clean, and does
-         not interfere with IR optimisation.
+   IRExprLoad() : IRExpr(Iex_Load) {}
+   void visit(HeapVisitor &hv) { hv(addr); }
+   unsigned long hashval() const {
+       return ty + addr->hashval() * 97;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *) const { return ty; }
+};
 
-         If you want to call a helper which can mess with guest state
-         and/or memory, instead use Ist_Dirty.  This is a lot more
-         flexible, but you have to give a bunch of details about what
-         the helper does (and you better be telling the truth,
-         otherwise any derived instrumentation will be wrong).  Also
-         Ist_Dirty inhibits various IR optimisations and so can cause
-         quite poor code to be generated.  Try to avoid it.
+/* A constant-valued expression.
+   ppIRExpr output: <con>, eg. 0x4:I32
+*/
+struct IRExprConst : public IRExpr {
+   IRConst* con;     /* The constant itself */
+   IRExprConst() : IRExpr(Iex_Const) {}
+   void visit(HeapVisitor &hv) { hv(con); }
+   unsigned long hashval() const { return con->hashval(); }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *) const { return typeOfIRConst(con); }
+};
 
-         ppIRExpr output: <cee>(<args>):<retty>
-                      eg. foo{0x80489304}(t1, t2):I32
-      */
-      struct _CCall {
-         IRCallee* cee;    /* Function to call. */
-         IRType    retty;  /* Type of return value. */
-         IRExpr**  args;   /* Vector of argument expressions. */
-      }  CCall;
+/* A call to a pure (no side-effects) helper C function.
 
-      /* A ternary if-then-else operator.  It returns expr0 if cond is
-         zero, exprX otherwise.  Note that it is STRICT, ie. both
-         expr0 and exprX are evaluated in all cases.
+   With the 'cee' field, 'name' is the function's name.  It is only
+   used for pretty-printing purposes.  The address to call (host
+   address, of course) is stored in the 'addr' field inside 'cee'.
 
-         ppIRExpr output: Mux0X(<cond>,<expr0>,<exprX>),
-                         eg. Mux0X(t6,t7,t8)
-      */
-      struct _Mux0X {
-         IRExpr* cond;     /* Condition */
-         IRExpr* expr0;    /* True expression */
-         IRExpr* exprX;    /* False expression */
-      } Mux0X;
+   The 'args' field is a NULL-terminated array of arguments.  The
+   stated return IRType, and the implied argument types, must match
+   that of the function being called well enough so that the back end
+   can actually generate correct code for the call.
 
-      /* An associative operator with as many arguments as are needed.
-	 Because it's associative, the exact nesting order doesn't
-	 matter. */
-      struct _Associative {
-	 IROp op;
-	 int nr_arguments;
-	 int nr_arguments_allocated;
-	 IRExpr **contents;
-      } Associative;
+   The called function **must** satisfy the following:
 
-      struct _FreeVariable {
-	 FreeVariableKey key;
-      } FreeVariable;
+   * no side effects -- must be a pure function, the result of
+     which depends only on the passed parameters.
 
-      struct _ClientCall {
-	 unsigned long calledRip;
-	 ThreadRip callSite;
-	 IRExpr **args;
-      } ClientCall;
+   * it may not look at, nor modify, any of the guest state
+     since that would hide guest state transitions from
+     instrumenters
 
-      struct _ClientCallFailed {
-	 IRExpr *target;
-      } ClientCallFailed;
+   * it may not access guest memory, since that would hide
+     guest memory transactions from the instrumenters
 
-      struct _HappensBefore {
-	 ThreadRip before;
-         ThreadRip after;
-      } HappensBefore;
-   } Iex;
-   void visit(HeapVisitor &hv);
-   typedef _u::_Get Get;
-   typedef _u::_GetI GetI;
-   typedef _u::_RdTmp RdTmp;
-   typedef _u::_Qop Qop;
-   typedef _u::_Triop Triop;
-   typedef _u::_Binop Binop;
-   typedef _u::_Unop Unop;
-   typedef _u::_Load Load;
-   typedef _u::_Const Const;
-   typedef _u::_Mux0X Mux0X;
-   typedef _u::_CCall CCall;
-   typedef _u::_Associative Associative;
-   typedef _u::_FreeVariable FreeVariable;
-   typedef _u::_ClientCall ClientCall;
-   typedef _u::_ClientCallFailed ClientCallFailed;
-   typedef _u::_HappensBefore HappensBefore;
-   NAMED_CLASS
+   This is restrictive, but makes the semantics clean, and does not
+   interfere with IR optimisation.
+
+   If you want to call a helper which can mess with guest state and/or
+   memory, instead use Ist_Dirty.  This is a lot more flexible, but
+   you have to give a bunch of details about what the helper does (and
+   you better be telling the truth, otherwise any derived
+   instrumentation will be wrong).  Also Ist_Dirty inhibits various IR
+   optimisations and so can cause quite poor code to be generated.
+   Try to avoid it.
+
+   ppIRExpr output: <cee>(<args>):<retty>
+   eg. foo{0x80489304}(t1, t2):I32
+*/
+struct IRExprCCall : public IRExpr {
+   IRCallee* cee;    /* Function to call. */
+   IRType    retty;  /* Type of return value. */
+   IRExpr**  args;   /* Vector of argument expressions. */
+   IRExprCCall() : IRExpr(Iex_CCall) {}
+   void visit(HeapVisitor &hv) {
+       hv(cee);
+       hv(args);
+   }
+   unsigned long hashval() const {
+       unsigned long h = cee->hashval() + retty * 3;
+       for (unsigned x = 0; args[x]; x++)
+	   h = h * 7 + args[x]->hashval();
+       return h;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *) const { return retty; }
+};
+
+/* A ternary if-then-else operator.  It returns expr0 if cond is zero,
+   exprX otherwise.  Note that it is STRICT, ie. both expr0 and exprX
+   are evaluated in all cases.
+   
+   ppIRExpr output: Mux0X(<cond>,<expr0>,<exprX>),
+   eg. Mux0X(t6,t7,t8)
+*/
+struct IRExprMux0X : public IRExpr {
+   IRExpr* cond;     /* Condition */
+   IRExpr* expr0;    /* True expression */
+   IRExpr* exprX;    /* False expression */
+   IRExprMux0X() : IRExpr(Iex_Mux0X) {}
+   void visit(HeapVisitor &hv) {
+       hv(cond);
+       hv(expr0);
+       hv(exprX);
+   }
+   unsigned long hashval() const {
+       return cond->hashval() + expr0->hashval() * 3 +
+	   exprX->hashval() * 7;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *e) const { return expr0->type(e); }
+};
+
+/* An associative operator with as many arguments as are needed.
+   Because it's associative, the exact nesting order doesn't
+   matter. */
+struct IRExprAssociative : public IRExpr {
+   IROp op;
+   int nr_arguments;
+   int nr_arguments_allocated;
+   IRExpr **contents;
+   IRExprAssociative() : IRExpr(Iex_Associative) {}
+   void visit(HeapVisitor &hv) {
+       hv(contents);
+       for (int i = 0; i < nr_arguments; i++)
+	   hv(contents[i]);
+   }
+   unsigned long hashval() const {
+       unsigned long h = op + nr_arguments;
+       for (int x = 0; x < nr_arguments; x++)
+	   h = h * 11 + contents[x]->hashval();
+       return h;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *) const {
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      return a;
+   }
+};
+
+struct IRExprFreeVariable : public IRExpr {
+   FreeVariableKey key;
+   IRExprFreeVariable() : IRExpr(Iex_FreeVariable) {}
+   void visit(HeapVisitor &hv) {}
+   unsigned long hashval() const {
+       return key.val * 12357743;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *e) const { return Ity_I64; }
+};
+
+struct IRExprClientCall : public IRExpr {
+   unsigned long calledRip;
+   ThreadRip callSite;
+   IRExpr **args;
+   IRExprClientCall() : IRExpr(Iex_ClientCall) {}
+   void visit(HeapVisitor &hv) { hv(args); }
+   unsigned long hashval() const {
+       unsigned long h = calledRip * 3940631;
+       for (unsigned x = 0; args[x]; x++)
+	   h = h * 7940641 + args[x]->hashval();
+       return h;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *e) const { return Ity_I64; }
+};
+
+struct IRExprClientCallFailed : public IRExpr {
+   IRExpr *target;
+   IRExprClientCallFailed() : IRExpr(Iex_ClientCallFailed) {}
+   void visit(HeapVisitor &hv) { hv(target); }
+   unsigned long hashval() const {
+       return target->hashval() * 65537;
+   }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *e) const { return Ity_I64; }
+};
+
+struct IRExprHappensBefore : public IRExpr {
+   ThreadRip before;
+   ThreadRip after;
+   IRExprHappensBefore() : IRExpr(Iex_HappensBefore) {}
+   void visit(HeapVisitor &hv) {}
+   unsigned long hashval() const { return 19; }
+   void prettyPrint(FILE *f) const;
+   IRType type(IRTypeEnv *e) const { return Ity_I1; }
 };
 
 /* Expression constructors. */
@@ -1256,7 +1497,7 @@ extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
-extern IRExpr* IRExpr_Associative (IRExpr::Associative *);
+extern IRExpr* IRExpr_Associative (IRExprAssociative *);
 extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (unsigned long r, ThreadRip callSite, IRExpr **args);
@@ -1264,7 +1505,7 @@ extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 extern IRExpr* IRExpr_HappensBefore (ThreadRip before, ThreadRip after);
 
 /* Pretty-print an IRExpr. */
-extern void ppIRExpr ( IRExpr*, FILE *f );
+static inline void ppIRExpr ( IRExpr*e, FILE *f ) { e->prettyPrint(f); }
 extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err);
 
 /* NULL-terminated IRExpr vector constructors, suitable for
@@ -1809,22 +2050,6 @@ extern void ppIRStmt ( IRStmt*, FILE* );
 
 /* ------------------ Basic Blocks ------------------ */
 
-/* Type environments: a bunch of statements, expressions, etc, are
-   incomplete without an environment indicating the type of each
-   IRTemp.  So this provides one.  IR temporaries are really just
-   unsigned ints and so this provides an array, 0 .. n_types_used-1 of
-   them.
-*/
-typedef
-struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
-      IRType* types;
-      Int     types_size;
-      Int     types_used;
-      void visit(HeapVisitor &hv) { hv(types); }
-      NAMED_CLASS
-   }
-   IRTypeEnv;
-
 /* Obtain a new IRTemp */
 extern IRTemp newIRTemp ( IRTypeEnv*, IRType );
 
@@ -1878,16 +2103,6 @@ extern void addStmtToIRSB ( IRSB*, IRStmt* );
 
 /* For messing with IR type environments */
 extern IRTypeEnv* emptyIRTypeEnv  ( void );
-
-/* What is the type of this expression? */
-extern IRType typeOfIRConst ( IRConst* );
-extern IRType typeOfIRTemp  ( IRTypeEnv*, IRTemp );
-extern IRType typeOfIRExpr  ( IRTypeEnv*, IRExpr* );
-extern void typeOfPrimop ( IROp op,
-			   /*OUTs*/
-			   IRType* t_dst,
-			   IRType* t_arg1, IRType* t_arg2,
-			   IRType* t_arg3, IRType* t_arg4 );
 
 /* Is this any value actually in the enumeration 'IRType' ? */
 extern Bool isPlausibleIRType ( IRType ty );

@@ -8,7 +8,7 @@ public:
 	ShortCircuitFvTransformer(FreeVariableMap &_fv)
 		: fv(_fv)
 	{}
-	IRExpr *transformIex(IRExpr::FreeVariable *e)
+	IRExpr *transformIex(IRExprFreeVariable *e)
 	{
 		return transformIRExpr(fv.get(e->key));
 	}

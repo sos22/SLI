@@ -872,9 +872,10 @@ LibVEX_GuestAMD64_put_rflag_c ( ULong new_carry_flag,
 
 static Bool isU64 ( IRExpr* e, ULong n )
 {
-   return toBool( e->tag == Iex_Const
-                  && e->Iex.Const.con->tag == Ico_U64
-                  && e->Iex.Const.con->Ico.U64 == n );
+  IRExprConst *c = dynamic_cast<IRExprConst *>(e);
+  return toBool( c
+		 && c->con->tag == Ico_U64
+		 && c->con->Ico.U64 == n );
 }
 
 IRExpr* guest_amd64_spechelper ( const char* function_name,

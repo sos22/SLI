@@ -85,7 +85,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterfa
 	condition = optimiseIRExprFP(condition, opt, done_something);
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
-		if (condition->Iex.Const.con->Ico.U1)
+		if (((IRExprConst *)condition)->con->Ico.U1)
 			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, done));
 		else
 			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv, done));
@@ -232,7 +232,7 @@ StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	if ((value->tag == Iex_Const && value->Iex.Const.con->Ico.U1) ||
+	if ((value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) ||
 	    definitelyUnevaluatable(value, opt, oracle)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
@@ -298,12 +298,12 @@ findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &out, const AllowableOp
 		_(std::set<threadAndRegister> &_out)
 			: out(_out)
 		{}
-		IRExpr *transformIex(IRExpr::Get *e) {
-			out.insert(threadAndRegister(*e));
+		IRExpr *transformIex(IRExprGet *e) {
+			out.insert(threadAndRegister(e));
 			return IRExprTransformer::transformIex(e);
 		}
-		IRExpr *transformIex(IRExpr::RdTmp *e) {
-			out.insert(threadAndRegister(*e));
+		IRExpr *transformIex(IRExprRdTmp *e) {
+			out.insert(threadAndRegister(e));
 			return IRExprTransformer::transformIex(e);
 		}
 	} t(out);
@@ -992,7 +992,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
 		out->sideEffects.push_back(smsec);
 		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
-				(smsec->value->Iex.FreeVariable.key,
+				(((IRExprFreeVariable *)smsec->value)->key,
 				 IRExpr_Load(false, Iend_LE, Ity_I64, smsel->addr, smsel->rip)));
 		doit = true;
 	}
@@ -1079,7 +1079,7 @@ introduceFreeVariables(StateMachine *sm,
 }
 
 class countFreeVariablesVisitor : public StateMachineTransformer {
-	IRExpr *transformIex(IRExpr::FreeVariable *e) {
+	IRExpr *transformIex(IRExprFreeVariable *e) {
 		counts[e->key]++;
 		return StateMachineTransformer::transformIex(e);
 	}
@@ -1104,78 +1104,172 @@ public:
 		case Iex_ClientCallFailed:
 		case Iex_HappensBefore:
 			break;
-		case Iex_Qop:
-			if (e->Iex.Qop.arg4->tag == Iex_FreeVariable &&
-			    counts[e->Iex.Qop.arg4->Iex.FreeVariable.key] == 1) {
+		case Iex_Qop: {
+			IRExprQop *exp = (IRExprQop *)e;
+			if (exp->arg1->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg1)->key] == 1) {
 				*done_something = true;
 				fvDelta.push_back(
 					std::pair<FreeVariableKey, IRExpr *>(
-					e->Iex.Qop.arg4->Iex.FreeVariable.key,
-					IRExpr_Qop(
-						e->Iex.Qop.op,
-						e->Iex.Qop.arg1,
-						e->Iex.Qop.arg2,
-						e->Iex.Qop.arg3,
-						freeVariables.get(e->Iex.Qop.arg4->Iex.FreeVariable.key))));
-				return e->Iex.Qop.arg4;
+						((IRExprFreeVariable *)exp->arg1)->key,
+						IRExpr_Qop(
+							exp->op,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg1)->key),
+							exp->arg2,
+							exp->arg3,
+							exp->arg4)));
+				return exp->arg1;
 			}
-		case Iex_Triop:
-			if (e->Iex.Triop.arg3->tag == Iex_FreeVariable &&
-			    counts[e->Iex.Triop.arg3->Iex.FreeVariable.key] == 1) {
+			if (exp->arg2->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg2)->key] == 1) {
 				*done_something = true;
 				fvDelta.push_back(
 					std::pair<FreeVariableKey, IRExpr *>(
-					e->Iex.Triop.arg3->Iex.FreeVariable.key,
-					IRExpr_Triop(
-						e->Iex.Triop.op,
-						e->Iex.Triop.arg1,
-						e->Iex.Triop.arg2,
-						freeVariables.get(e->Iex.Triop.arg3->Iex.FreeVariable.key))));
-				return e->Iex.Triop.arg3;
+						((IRExprFreeVariable *)exp->arg2)->key,
+						IRExpr_Qop(
+							exp->op,
+							exp->arg1,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg2)->key),
+							exp->arg3,
+							exp->arg4)));
+				return exp->arg2;
 			}
-		case Iex_Binop:
-			if (e->Iex.Binop.arg2->tag == Iex_FreeVariable &&
-			    counts[e->Iex.Binop.arg2->Iex.FreeVariable.key] == 1) {
+			if (exp->arg3->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg3)->key] == 1) {
 				*done_something = true;
 				fvDelta.push_back(
 					std::pair<FreeVariableKey, IRExpr *>(
-					e->Iex.Binop.arg2->Iex.FreeVariable.key,
-					IRExpr_Binop(
-						e->Iex.Binop.op,
-						e->Iex.Binop.arg1,
-						freeVariables.get(e->Iex.Binop.arg2->Iex.FreeVariable.key))));
-				return e->Iex.Binop.arg2;
+						((IRExprFreeVariable *)exp->arg3)->key,
+						IRExpr_Qop(
+							exp->op,
+							exp->arg1,
+							exp->arg2,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg3)->key),
+							exp->arg4)));
+				return exp->arg3;
 			}
-		case Iex_Unop:
-			if (e->Iex.Unop.arg->tag == Iex_FreeVariable &&
-			    counts[e->Iex.Unop.arg->Iex.FreeVariable.key] == 1) {
+			if (exp->arg4->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg4)->key] == 1) {
 				*done_something = true;
 				fvDelta.push_back(
 					std::pair<FreeVariableKey, IRExpr *>(
-					e->Iex.Unop.arg->Iex.FreeVariable.key,
-					IRExpr_Unop(
-						e->Iex.Unop.op,
-						freeVariables.get(e->Iex.Unop.arg->Iex.FreeVariable.key))));
-				return e->Iex.Unop.arg;
+						((IRExprFreeVariable *)exp->arg4)->key,
+						IRExpr_Qop(
+							exp->op,
+							exp->arg1,
+							exp->arg2,
+							exp->arg3,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg4)->key))));
+				return exp->arg4;
 			}
 			break;
-		case Iex_Associative:
-			for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
-				IRExpr *a = e->Iex.Associative.contents[x];
-				if (a->tag == Iex_FreeVariable &&
-				    counts[a->Iex.FreeVariable.key] == 1) {
-					*done_something = true;
-					IRExpr *b = IRExpr_Associative(&e->Iex.Associative);
-					assert(freeVariables.get(a->Iex.FreeVariable.key));
-					b->Iex.Associative.contents[x] =
-						freeVariables.get(a->Iex.FreeVariable.key);
-					fvDelta.push_back(
-						std::pair<FreeVariableKey, IRExpr *>(
-							a->Iex.FreeVariable.key, b));
-					return a;
-				}
+		}
+		case Iex_Triop: {
+			IRExprTriop *exp = (IRExprTriop *)e;
+			if (exp->arg1->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg1)->key] == 1) {
+				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+						((IRExprFreeVariable *)exp->arg1)->key,
+						IRExpr_Triop(
+							exp->op,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg1)->key),
+							exp->arg2,
+							exp->arg3)));
+				return exp->arg1;
+			}
+			if (exp->arg2->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg2)->key] == 1) {
+				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+						((IRExprFreeVariable *)exp->arg2)->key,
+						IRExpr_Triop(
+							exp->op,
+							exp->arg1,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg2)->key),
+							exp->arg3)));
+				return exp->arg2;
+			}
+			if (exp->arg3->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg3)->key] == 1) {
+				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+						((IRExprFreeVariable *)exp->arg3)->key,
+						IRExpr_Triop(
+							exp->op,
+							exp->arg1,
+							exp->arg2,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg3)->key))));
+				return exp->arg3;
 			}
 			break;
+		}
+		case Iex_Binop: {
+			IRExprBinop *exp = (IRExprBinop *)e;
+			if (exp->arg1->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg1)->key] == 1) {
+				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+						((IRExprFreeVariable *)exp->arg1)->key,
+						IRExpr_Binop(
+							exp->op,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg1)->key),
+							exp->arg2)));
+				return exp->arg1;
+			}
+			if (exp->arg2->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg2)->key] == 1) {
+				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+						((IRExprFreeVariable *)exp->arg2)->key,
+						IRExpr_Binop(
+							exp->op,
+							exp->arg1,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg2)->key))));
+				return exp->arg2;
+			}
+			break;
+		}
+		case Iex_Unop: {
+			IRExprUnop *exp = (IRExprUnop *)e;
+			if (exp->arg->tag == Iex_FreeVariable &&
+			    counts[ ((IRExprFreeVariable *)exp->arg)->key] == 1) {
+				*done_something = true;
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+						((IRExprFreeVariable *)exp->arg)->key,
+						IRExpr_Unop(
+							exp->op,
+							freeVariables.get(((IRExprFreeVariable *)exp->arg)->key))));
+				return exp->arg;
+			}
+			break;
+		}
+		case Iex_Associative: {
+			IRExprAssociative *exp = (IRExprAssociative *)e;
+			for (int x = 0; x < exp->nr_arguments; x++) {
+				IRExpr *_a = exp->contents[x];
+				if (_a->tag != Iex_FreeVariable)
+					continue;
+				IRExprFreeVariable *a = (IRExprFreeVariable *)_a;
+				if (counts[a->key] != 1)
+					continue;
+				*done_something = true;
+				IRExprAssociative *b = (IRExprAssociative *)IRExpr_Associative(exp);
+				assert(freeVariables.get(a->key));
+				b->contents[x] = freeVariables.get(a->key);
+				fvDelta.push_back(
+					std::pair<FreeVariableKey, IRExpr *>(
+						a->key, b));
+				return a;
+			}
+			break;
+		}
 		}
 		return StateMachineTransformer::transformIRExpr(e, done_something);
 	}

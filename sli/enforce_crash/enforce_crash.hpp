@@ -74,21 +74,21 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 			assert(i);
 			return avail.count(i) != 0;
 		}
-		IRExpr *transformIex(IRExpr::Get *e) {
+		IRExpr *transformIex(IRExprGet *e) {
 			if (!availThreads.count(e->tid))
 				isGood = false;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExpr::Load *e) {
+		IRExpr *transformIex(IRExprLoad *e) {
 			if (!isAvail(e->rip))
 				isGood = false;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExpr::HappensBefore *e) {
+		IRExpr *transformIex(IRExprHappensBefore *e) {
 			isGood = false;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExpr::ClientCall *e) {
+		IRExpr *transformIex(IRExprClientCall *e) {
 			if (!isAvail(e->callSite))
 				isGood = false;
 			return NULL;
@@ -165,11 +165,11 @@ public:
 			IRExpr *e = *it;
 			ThreadRip rip;
 			if (e->tag == Iex_Get) {
-				rip = roots[e->Iex.Get.tid];
+				rip = roots[((IRExprGet *)e)->tid];
 			} else if (e->tag == Iex_ClientCall) {
-				rip = e->Iex.ClientCall.callSite;
+				rip = ((IRExprClientCall *)e)->callSite;
 			} else if (e->tag == Iex_Load) {
-				rip = e->Iex.Load.rip;
+				rip = ((IRExprLoad *)e)->rip;
 			} else if (e->tag == Iex_HappensBefore) {
 				/* These don't really get stashed in any useful sense */
 				doit = false;
@@ -197,12 +197,12 @@ public:
 	std::vector<IRExpr *> content;
 	unsigned msg_id;
 
-	happensBeforeEdge(bool invert, IRExpr::HappensBefore &hb,
+	happensBeforeEdge(bool invert, IRExprHappensBefore *hb,
 			  instructionDominatorMapT &idom,
 			  CFG<ThreadRip> *cfg,
 			  expressionStashMapT &stashMap)
-		: before(invert ? hb.after : hb.before),
-		  after(invert ? hb.before : hb.after),
+		: before(invert ? hb->after : hb->before),
+		  after(invert ? hb->before : hb->after),
 		  msg_id(next_msg_id++)
 	{
 		printf("%x: HBE %d:%lx -> %d:%lx\n",

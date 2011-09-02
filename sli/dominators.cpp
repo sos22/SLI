@@ -149,7 +149,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				put_stmt(&s.regs,
 					 stmt->Ist.Put.offset,
 					 eval_expression(&s.regs, stmt->Ist.Put.data, temporaries),
-					 typeOfIRExpr(irsb->tyenv, stmt->Ist.Put.data));
+					 stmt->Ist.Put.data->type(irsb->tyenv));
 				break;
 			case Ist_PutI: {
 				struct expression_result idx = eval_expression(&s.regs, stmt->Ist.PutI.ix, temporaries);
@@ -300,7 +300,7 @@ findDominators(unsigned long functionHead,
 		if (irsb->jumpkind == Ijk_Call) {
 			r = extract_call_follower(irsb);
 		} else if (irsb->next->tag == Iex_Const) {
-			r = irsb->next->Iex.Const.con->Ico.U64;
+			r = ((IRExprConst *)irsb->next)->con->Ico.U64;
 		}
 		if (r) {
 			successors[rip].insert(r);

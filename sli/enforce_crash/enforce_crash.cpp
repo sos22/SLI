@@ -546,13 +546,13 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 
 	switch (e->tag) {
 	case Iex_Const:
-		start = start->defaultNextI = instrMovImm64ToReg(e->Iex.Const.con->Ico.U64, reg);
+		start = start->defaultNextI = instrMovImm64ToReg(((IRExprConst *)e)->con->Ico.U64, reg);
 		return start;
 
 	case Iex_Unop:
-		switch (e->Iex.Unop.op) {
+		switch (((IRExprUnop *)e)->op) {
 		case Iop_Neg64:
-			cursor = instrEvalExpr(start, thread, e->Iex.Unop.arg, reg, exprsToSlots);
+			cursor = instrEvalExpr(start, thread, ((IRExprUnop *)e)->arg, reg, exprsToSlots);
 			if (!cursor)
 				return NULL;
 			cursor = cursor->defaultNextI = instrNegModrm(ModRM::directRegister(reg));
@@ -563,18 +563,18 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 		break;
 
 	case Iex_Binop:
-		switch (e->Iex.Binop.op) {
+		switch (((IRExprBinop *)e)->op) {
 		case Iop_CmpEQ64: {
 			simulationSlotT old_rax = exprsToSlots.allocateSlot();
 			Instruction<ClientRip> *head = new Instruction<ClientRip>();
 			Instruction<ClientRip> *cursor;
 
-			cursor = instrEvalExpr(head, thread, e->Iex.Binop.arg1, reg, exprsToSlots);
+			cursor = instrEvalExpr(head, thread, ((IRExprBinop *)e)->arg1, reg, exprsToSlots);
 			if (!cursor)
 				return NULL;
 			simulationSlotT t = exprsToSlots.allocateSlot();
 			cursor = cursor->defaultNextI = instrMovRegToSlot(reg, t);
-			cursor = instrEvalExpr(cursor, thread, e->Iex.Binop.arg2, reg, exprsToSlots);
+			cursor = instrEvalExpr(cursor, thread, ((IRExprBinop *)e)->arg2, reg, exprsToSlots);
 			if (!cursor)
 				return NULL;
 			cursor = cursor->defaultNextI = instrCmpRegToSlot(reg, t);
@@ -595,27 +595,27 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 		}
 		break;
 	case Iex_Associative:
-		switch (e->Iex.Associative.op) {
+		switch (((IRExprAssociative *)e)->op) {
 		case Iop_Add64: {
 			Instruction<ClientRip> *head = new Instruction<ClientRip>();
 			Instruction<ClientRip> *cursor;
-			cursor = instrEvalExpr(head, thread, e->Iex.Associative.contents[0], reg, exprsToSlots);
+			cursor = instrEvalExpr(head, thread, ((IRExprAssociative *)e)->contents[0], reg, exprsToSlots);
 			if (!cursor)
 				return NULL;
-			if (e->Iex.Associative.nr_arguments == 1) {
+			if (((IRExprAssociative *)e)->nr_arguments == 1) {
 				start->defaultNextI = head->defaultNextI;
 				return cursor;
 			}
 
 			simulationSlotT acc = exprsToSlots.allocateSlot();
 			cursor = cursor->defaultNextI = instrMovRegToSlot(reg, acc);
-			for (int x = 1; x < e->Iex.Associative.nr_arguments - 1; x++) {
-				cursor = instrEvalExpr(cursor, thread, e->Iex.Associative.contents[x], reg, exprsToSlots);
+			for (int x = 1; x < ((IRExprAssociative *)e)->nr_arguments - 1; x++) {
+				cursor = instrEvalExpr(cursor, thread, ((IRExprAssociative *)e)->contents[x], reg, exprsToSlots);
 				if (!cursor)
 					return NULL;
 				cursor = cursor->defaultNextI = instrAddRegToSlot(reg, acc);
 			}
-			cursor = instrEvalExpr(cursor, thread, e->Iex.Associative.contents[e->Iex.Associative.nr_arguments - 1],
+			cursor = instrEvalExpr(cursor, thread, ((IRExprAssociative *)e)->contents[((IRExprAssociative *)e)->nr_arguments - 1],
 					       reg, exprsToSlots);
 			if (!cursor)
 				return NULL;
@@ -672,11 +672,11 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 	   then we can just flip the invert flag and then evaluate x
 	   directly. */
 	if (expr->tag == Iex_Binop &&
-	    expr->Iex.Binop.op == Iop_CmpEQ64 &&
-	    expr->Iex.Binop.arg1->tag == Iex_Const &&
-	    expr->Iex.Binop.arg1->Iex.Const.con->Ico.U64 == 0) {
+	    ((IRExprBinop *)expr)->op == Iop_CmpEQ64 &&
+	    ((IRExprBinop *)expr)->arg1->tag == Iex_Const &&
+	    ((IRExprConst *)((IRExprBinop *)expr)->arg1)->con->Ico.U64 == 0) {
 		invert = !invert;
-		expr = expr->Iex.Binop.arg2;
+		expr = ((IRExprBinop *)expr)->arg2;
 	}
 
 	Instruction<ClientRip> *cursor = instrCompareExprToZero(start, e.thread, expr, exprsToSlots);
@@ -772,8 +772,8 @@ public:
 			IRExpr *e = c[x].second;
 			bool invert = c[x].first;
 			if (e->tag == Iex_HappensBefore) {
-				IRExpr::HappensBefore *hb = &e->Iex.HappensBefore;
-				happensBeforeEdge *hbe = new happensBeforeEdge(invert, *hb, exprDominatorMap.idom,
+				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
+				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
 									       cfg, exprStashPoints);
 				(*this)[hbe->before.rip].insert(hbe);
 				(*this)[hbe->after.rip].insert(hbe);
@@ -1088,7 +1088,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						/* Easy case: just store the register in its slot */
 						simulationSlotT s = data.exprsToSlots(it->first, e);
 						newInstr->defaultNextI =
-							instrMovRegToSlot(RegisterIdx::fromVexOffset(e->Iex.Get.offset), s);
+							instrMovRegToSlot(RegisterIdx::fromVexOffset(((IRExprGet *)e)->offset), s);
 						newInstr = newInstr->defaultNextI;
 					} else if (e->tag == Iex_ClientCall || e->tag == Iex_Load) {
 						/* Do this after emitting the instruction */
@@ -1274,14 +1274,14 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	     it++) {
 		IRExpr *e = *it;
 		if (e->tag == Iex_Get) {
-			neededRips.insert(roots[e->Iex.Get.tid]);
+			neededRips.insert(roots[((IRExprGet *)e)->tid]);
 		} else if (e->tag == Iex_ClientCall) {
-			neededRips.insert(e->Iex.ClientCall.callSite);
+			neededRips.insert(((IRExprClientCall *)e)->callSite);
 		} else if (e->tag == Iex_Load) {
-			neededRips.insert(e->Iex.Load.rip);
+			neededRips.insert(((IRExprLoad *)e)->rip);
 		} else if (e->tag == Iex_HappensBefore) {
-			neededRips.insert(e->Iex.HappensBefore.before);
-			neededRips.insert(e->Iex.HappensBefore.after);
+			neededRips.insert(((IRExprHappensBefore *)e)->before);
+			neededRips.insert(((IRExprHappensBefore *)e)->after);
 		} else {
 			abort();
 		}
@@ -1314,20 +1314,20 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 static bool
 analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 {
-	std::set<IRExpr::HappensBefore> hb;
-	std::set<IRExpr::HappensBefore> assumption;
+	std::set<IRExprHappensBefore *, HBOrdering> hb;
+	std::set<IRExprHappensBefore *, HBOrdering> assumption;
 
 	extractImplicitOrder(summary->loadMachine, assumption);
 	for (unsigned x = 0; x < summary->storeMachines.size(); x++)
 		extractImplicitOrder(summary->storeMachines[x]->machine, assumption);
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
-			IRExpr::HappensBefore h;
+			IRExprHappensBefore *g = (IRExprHappensBefore *)c[x].second;
+			IRExprHappensBefore *h;
 			if (c[x].first) {
-				h.before = c[x].second->Iex.HappensBefore.after;
-				h.after = c[x].second->Iex.HappensBefore.before;
+				h = (IRExprHappensBefore *)IRExpr_HappensBefore(g->after, g->before);
 			} else {
-				h = c[x].second->Iex.HappensBefore;
+				h = g;
 			}
 			hb.insert(h);
 		}
@@ -1343,12 +1343,11 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 	for (unsigned x = 0; x < c.size(); x++)
 		if (c[x].second->tag != Iex_HappensBefore)
 			out.push_back(c[x]);
-	for (std::set<IRExpr::HappensBefore>::iterator it = hb.begin();
+	for (auto it = hb.begin();
 	     it != hb.end();
 	     it++)
 		out.push_back(std::pair<bool, IRExpr *>(
-				      false,
-				      IRExpr_HappensBefore(it->before, it->after)));
+				      false, *it));
 
 	c = out;
 

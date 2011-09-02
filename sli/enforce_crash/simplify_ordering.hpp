@@ -4,10 +4,13 @@
 #include <set>
 class StateMachine;
 
-bool simplifyOrdering(std::set<IRExpr::HappensBefore> &relations,
-		      const std::set<IRExpr::HappensBefore> &assumptions);
-void extractImplicitOrder(StateMachine *sm, std::set<IRExpr::HappensBefore> &out);
+class HBOrdering {
+public:
+	bool operator()(const IRExprHappensBefore *, const IRExprHappensBefore *);
+};
 
-bool operator<(const IRExpr::HappensBefore &a, const IRExpr::HappensBefore &b);
+bool simplifyOrdering(std::set<IRExprHappensBefore *, HBOrdering> &relations,
+		      const std::set<IRExprHappensBefore *, HBOrdering> &assumptions);
+void extractImplicitOrder(StateMachine *sm, std::set<IRExprHappensBefore *, HBOrdering> &out);
 
 #endif /* !SIMPLIFY_ORDERING_HPP__ */

@@ -85,8 +85,9 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
-			ThreadRip beforeRip = c[x].second->Iex.HappensBefore.before;
-			ThreadRip afterRip = c[x].second->Iex.HappensBefore.after;
+			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
+			ThreadRip beforeRip = e->before;
+			ThreadRip afterRip = e->after;
 			Instruction<ThreadRip> *before = cfg->ripToInstr->get(beforeRip);
 			Instruction<ThreadRip> *after = cfg->ripToInstr->get(afterRip);
 			assert(before);

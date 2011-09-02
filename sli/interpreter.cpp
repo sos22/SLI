@@ -606,8 +606,11 @@ eval_expression(const RegisterSet *rs,
 	
 	switch (expr->tag) {
 	case Iex_Get: {
-		getOffset = expr->Iex.Get.offset;
-		getType = expr->Iex.Get.ty;
+		{
+			IRExprGet *e = (IRExprGet *)expr;
+			getOffset = e->offset;
+			getType = e->ty;
+		}
 
 		do_get:
 		unsigned long v1;
@@ -644,24 +647,28 @@ eval_expression(const RegisterSet *rs,
 	}
 
 	case Iex_GetI: {
-		getOffset = eval_expression(rs, expr->Iex.GetI.ix, temporaries).lo;
-		getOffset += expr->Iex.GetI.bias;
-		getOffset %= expr->Iex.GetI.descr->nElems;
-		getOffset *= sizeofIRType(expr->Iex.GetI.descr->elemTy);
-		getOffset += expr->Iex.GetI.descr->base;
-		getType = expr->Iex.GetI.descr->elemTy;
+		IRExprGetI *e = (IRExprGetI *)expr;
+		getOffset = eval_expression(rs, e->ix, temporaries).lo;
+		getOffset += e->bias;
+		getOffset %= e->descr->nElems;
+		getOffset *= sizeofIRType(e->descr->elemTy);
+		getOffset += e->descr->base;
+		getType = e->descr->elemTy;
 		goto do_get;
 	}
 
-	case Iex_RdTmp:
-		*dest = temporaries[expr->Iex.RdTmp.tmp];
+	case Iex_RdTmp: {
+		IRExprRdTmp *e = (IRExprRdTmp *)expr;
+		*dest = temporaries[e->tmp];
 		break;
+	}
 
 	case Iex_Load:
 		throw SliException("transform_expr failed to remove all load expressions\n");
 
 	case Iex_Const: {
-		IRConst *cnst = expr->Iex.Const.con;
+		IRExprConst *e = (IRExprConst *)expr;
+		IRConst *cnst = e->con;
 		switch (cnst->tag) {
 		case Ico_U1:
 			dest->lo = (cnst->Ico.U1);
@@ -695,9 +702,10 @@ eval_expression(const RegisterSet *rs,
 	}
 
 	case Iex_Binop: {
-		struct expression_result arg1 = eval_expression(rs, expr->Iex.Binop.arg1, temporaries);
-		struct expression_result arg2 = eval_expression(rs, expr->Iex.Binop.arg2, temporaries);
-		switch (expr->Iex.Binop.op) {
+		IRExprBinop *e = (IRExprBinop *)expr;
+		struct expression_result arg1 = eval_expression(rs, e->arg1, temporaries);
+		struct expression_result arg2 = eval_expression(rs, e->arg2, temporaries);
+		switch (e->op) {
 		case Iop_Sub8:
 		case Iop_Sub16:
 		case Iop_Sub32:
@@ -1096,7 +1104,7 @@ eval_expression(const RegisterSet *rs,
 		}
 
 		IRType t, ign1, ign2, ign3, ign4;
-		typeOfPrimop(expr->Iex.Binop.op, &t, &ign1, &ign2, &ign3, &ign4);
+		typeOfPrimop(e->op, &t, &ign1, &ign2, &ign3, &ign4);
 		switch (t) {
 		case Ity_I1:
 			dest->lo &= 1ul;
@@ -1128,8 +1136,9 @@ eval_expression(const RegisterSet *rs,
 	}
 
 	case Iex_Unop: {
-		struct expression_result arg = eval_expression(rs, expr->Iex.Unop.arg, temporaries);
-		switch (expr->Iex.Unop.op) {
+		IRExprUnop *e = (IRExprUnop *)expr;
+		struct expression_result arg = eval_expression(rs, e->arg, temporaries);
+		switch (e->op) {
 		case Iop_64HIto32:
 			dest->lo = arg.lo >> 32ul;
 			break;
@@ -1279,10 +1288,11 @@ eval_expression(const RegisterSet *rs,
 	}
 
 	case Iex_Triop: {
-		struct expression_result arg1 = eval_expression(rs, expr->Iex.Triop.arg1, temporaries);
-		struct expression_result arg2 = eval_expression(rs, expr->Iex.Triop.arg2, temporaries);
-		struct expression_result arg3 = eval_expression(rs, expr->Iex.Triop.arg3, temporaries);
-		switch (expr->Iex.Triop.op) {
+		IRExprTriop *e = (IRExprTriop *)expr;
+		struct expression_result arg1 = eval_expression(rs, e->arg1, temporaries);
+		struct expression_result arg2 = eval_expression(rs, e->arg2, temporaries);
+		struct expression_result arg3 = eval_expression(rs, e->arg3, temporaries);
+		switch (e->op) {
 		case Iop_PRemF64: {
 			union {
 				double d;
@@ -1319,9 +1329,10 @@ eval_expression(const RegisterSet *rs,
 	}
 
 	case Iex_Mux0X: {
-		struct expression_result cond = eval_expression(rs, expr->Iex.Mux0X.cond, temporaries);
-		struct expression_result res0 = eval_expression(rs, expr->Iex.Mux0X.expr0, temporaries);
-		struct expression_result resX = eval_expression(rs, expr->Iex.Mux0X.exprX, temporaries);
+		IRExprMux0X *e = (IRExprMux0X *)expr;
+		struct expression_result cond = eval_expression(rs, e->cond, temporaries);
+		struct expression_result res0 = eval_expression(rs, e->expr0, temporaries);
+		struct expression_result resX = eval_expression(rs, e->exprX, temporaries);
 		if (cond.lo == 0ul) {
 			*dest = res0;
 		} else {
@@ -1331,12 +1342,14 @@ eval_expression(const RegisterSet *rs,
 	}
 
 	case Iex_CCall: {
-		res = do_ccall(rs, expr->Iex.CCall.cee, expr->Iex.CCall.args, temporaries);
+		IRExprCCall *e = (IRExprCCall *)expr;
+		res = do_ccall(rs, e->cee, e->args, temporaries);
 		break;
 	}
 	  
 	case Iex_Associative: {
-		switch (expr->Iex.Associative.op) {
+		IRExprAssociative *e = (IRExprAssociative *)expr;
+		switch (e->op) {
 #define do_op(name, operator, base)					\
 	        case Iop_ ## name ## 8:	   			        \
 		case Iop_ ## name ## 16:				\
@@ -1344,12 +1357,12 @@ eval_expression(const RegisterSet *rs,
 		case Iop_ ## name ## 64:				\
 			dest->lo = base;				\
 		        for (int x = 0;					\
-			     x < expr->Iex.Associative.nr_arguments;	\
+			     x < e->nr_arguments;	\
 			     x++) {					\
 				struct expression_result a =		\
 					eval_expression(		\
 						rs,			\
-						expr->Iex.Associative.contents[x], \
+						e->contents[x], \
 						temporaries);		\
 				dest->lo = dest->lo operator a.lo;	\
 			}						\
@@ -1364,7 +1377,7 @@ eval_expression(const RegisterSet *rs,
 #undef do_op
 		default:
 			ppIRExpr(expr, stderr);
-			throw NotImplementedException("Associative op %d\n", expr->Iex.Associative.op);
+			throw NotImplementedException("Associative op %d\n", e->op);
 		}
 		break;
 	}
@@ -1611,7 +1624,7 @@ extract_call_follower(IRSB *irsb)
 		abort();
 	if (irsb->stmts[idx]->Ist.Store.data->tag != Iex_Const)
 		abort();
-	return irsb->stmts[idx]->Ist.Store.data->Iex.Const.con->Ico.U64;
+	return ((IRExprConst *)irsb->stmts[idx]->Ist.Store.data)->con->Ico.U64;
 }
 
 void
@@ -1702,8 +1715,7 @@ interpretStatement(IRStmt *stmt,
 			eval_expression(&thr->regs, stmt->Ist.Store.data, thr->temporaries.content);
 		struct expression_result addr =
 			eval_expression(&thr->regs, stmt->Ist.Store.addr, thr->temporaries.content);
-		unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
-							  stmt->Ist.Store.data));
+		unsigned size = sizeofIRType(stmt->Ist.Store.data->type(irsb->tyenv));
 		if (ms->addressSpace->isWritable(addr.lo, size, thr)) {
 			if (er) {
 				ret.suspend();
@@ -1726,8 +1738,7 @@ interpretStatement(IRStmt *stmt,
 			eval_expression(&thr->regs, stmt->Ist.CAS.details->addr, thr->temporaries.content);
 		struct expression_result expected =
 			eval_expression(&thr->regs, stmt->Ist.CAS.details->expdLo, thr->temporaries.content);
-		unsigned size = sizeofIRType(typeOfIRExpr(irsb->tyenv,
-							  stmt->Ist.CAS.details->dataLo));
+		unsigned size = sizeofIRType(stmt->Ist.CAS.details->dataLo->type(irsb->tyenv));
 		return CasEvent::get(thr->tid, stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
 	}
 
@@ -1735,7 +1746,7 @@ interpretStatement(IRStmt *stmt,
 		put_stmt(&thr->regs,
 			 stmt->Ist.Put.offset,
 			 eval_expression(&thr->regs, stmt->Ist.Put.data, thr->temporaries.content),
-			 typeOfIRExpr(irsb->tyenv, stmt->Ist.Put.data));
+			 stmt->Ist.Put.data->type(irsb->tyenv));
 		return NULL;
 
 	case Ist_PutI: {

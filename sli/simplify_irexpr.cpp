@@ -71,106 +71,126 @@ physicallyEqual(const IRCallee *a, const IRCallee *b)
 }
 
 static bool
-physicallyEqual(const IRExpr *a, const IRExpr *b)
+physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 {
-	if (a == b)
+	if (_a == _b)
 		return true;
-	if (a->tag != b->tag)
+	if (_a->tag != _b->tag)
 		return false;
-	switch (a->tag) {
-	case Iex_Get:
-		return a->Iex.Get.offset == b->Iex.Get.offset &&
-			a->Iex.Get.ty == b->Iex.Get.ty;
-	case Iex_GetI:
-		return a->Iex.GetI.bias == b->Iex.GetI.bias &&
-			physicallyEqual(a->Iex.GetI.descr,
-					b->Iex.GetI.descr) &&
-			physicallyEqual(a->Iex.GetI.ix,
-					b->Iex.GetI.ix);
-	case Iex_RdTmp:
-		return a->Iex.RdTmp.tmp == b->Iex.RdTmp.tmp;
-
-	case Iex_Qop:
-		if (!physicallyEqual(a->Iex.Qop.arg4,
-				     b->Iex.Qop.arg4))
-			return false;
-	case Iex_Triop:
-		if (!physicallyEqual(a->Iex.Qop.arg3,
-				     b->Iex.Qop.arg3))
-			return false;
-	case Iex_Binop:
-		if (!physicallyEqual(a->Iex.Qop.arg2,
-				     b->Iex.Qop.arg2))
-			return false;
-	case Iex_Unop:
-		if (!physicallyEqual(a->Iex.Qop.arg1,
-				     b->Iex.Qop.arg1))
-			return false;
-		return a->Iex.Qop.op == b->Iex.Qop.op;
-	case Iex_Load:
-		return a->Iex.Load.isLL == b->Iex.Load.isLL &&
-			a->Iex.Load.end == b->Iex.Load.end &&
-			a->Iex.Load.ty == b->Iex.Load.ty &&
-			physicallyEqual(a->Iex.Load.addr, b->Iex.Load.addr);
-	case Iex_Const:
-		return physicallyEqual(a->Iex.Const.con, b->Iex.Const.con);
-	case Iex_CCall: {
-		if (a->Iex.CCall.retty != b->Iex.CCall.retty ||
-		    !physicallyEqual(a->Iex.CCall.cee, b->Iex.CCall.cee))
+	switch (_a->tag) {
+#define hdr(type)							\
+	case Iex_ ## type : {					        \
+		const IRExpr ## type *a = (const IRExpr ## type *)_a,	\
+			*b = (const IRExpr ## type *)_b;
+#define footer() }
+		hdr(Get)
+		return a->offset == b->offset && a->ty == b->ty;
+	footer()
+	hdr(GetI)
+		return a->bias == b->bias &&
+			physicallyEqual(a->descr,
+					b->descr) &&
+			physicallyEqual(a->ix,
+					b->ix);
+	footer()
+	hdr(RdTmp)
+		return a->tmp == b->tmp;
+	footer()
+	hdr(Qop)
+		return a->op == b->op &&
+		       physicallyEqual(a->arg1, b->arg1) &&
+		       physicallyEqual(a->arg2, b->arg2) &&
+		       physicallyEqual(a->arg3, b->arg3) &&
+		       physicallyEqual(a->arg4, b->arg4);
+	footer()
+	hdr(Triop)
+		return a->op == b->op &&
+		       physicallyEqual(a->arg1, b->arg1) &&
+		       physicallyEqual(a->arg2, b->arg2) &&
+		       physicallyEqual(a->arg3, b->arg3);
+	footer()
+	hdr(Binop)
+		return a->op == b->op &&
+		       physicallyEqual(a->arg1, b->arg1) &&
+		       physicallyEqual(a->arg2, b->arg2);
+	footer()
+	hdr(Unop)
+		return a->op == b->op &&
+		       physicallyEqual(a->arg, b->arg);
+	footer()
+	hdr(Load)
+		return a->isLL == b->isLL &&
+			a->end == b->end &&
+			a->ty == b->ty &&
+			physicallyEqual(a->addr, b->addr);
+	footer();
+	hdr(Const)
+		return physicallyEqual(a->con, b->con);
+	footer()
+	hdr(CCall)
+		if (a->retty != b->retty || !physicallyEqual(a->cee, b->cee))
 			return false;
 		int x;
-		for (x = 0; a->Iex.CCall.args[x]; x++) {
-			if (!b->Iex.CCall.args[x])
+		for (x = 0; a->args[x]; x++) {
+			if (!b->args[x])
 				return false;
-			if (!physicallyEqual(a->Iex.CCall.args[x],
-					     b->Iex.CCall.args[x]))
+			if (!physicallyEqual(a->args[x],
+					     b->args[x]))
 				return false;
 		}
-		if (b->Iex.CCall.args[x])
+		if (b->args[x])
 			return false;
 		return true;
-	}
-	case Iex_Mux0X:
-		return physicallyEqual(a->Iex.Mux0X.cond,
-				       b->Iex.Mux0X.cond) &&
-			physicallyEqual(a->Iex.Mux0X.expr0,
-					b->Iex.Mux0X.expr0) &&
-			physicallyEqual(a->Iex.Mux0X.exprX,
-					b->Iex.Mux0X.exprX);
-	case Iex_Associative:
-		if (a->Iex.Associative.op != b->Iex.Associative.op ||
-		    a->Iex.Associative.nr_arguments != b->Iex.Associative.nr_arguments)
+	footer()
+	hdr(Mux0X)
+		return physicallyEqual(a->cond,
+				       b->cond) &&
+			physicallyEqual(a->expr0,
+					b->expr0) &&
+			physicallyEqual(a->exprX,
+					b->exprX);
+	footer()
+	hdr(Associative)
+		if (a->op != b->op ||
+		    a->nr_arguments != b->nr_arguments)
 			return false;
-		for (int x = 0; x < a->Iex.Associative.nr_arguments; x++)
-			if (!physicallyEqual(a->Iex.Associative.contents[x],
-					     b->Iex.Associative.contents[x]))
+		for (int x = 0; x < a->nr_arguments; x++)
+			if (!physicallyEqual(a->contents[x],
+					     b->contents[x]))
 				return false;
 		return true;
-	case Iex_FreeVariable:
-		return a->Iex.FreeVariable.key == b->Iex.FreeVariable.key;
-	case Iex_ClientCall:
-		if (a->Iex.ClientCall.calledRip != b->Iex.ClientCall.calledRip ||
-		    a->Iex.ClientCall.callSite != b->Iex.ClientCall.callSite)
+	footer()
+	hdr(FreeVariable)
+		return a->key == b->key;
+	footer()
+	hdr(ClientCall)
+		if (a->calledRip != b->calledRip ||
+		    a->callSite != b->callSite)
 			return false;
 		for (int i = 0; ; i++) {
-			if (!a->Iex.ClientCall.args[i]) {
-				if (!b->Iex.ClientCall.args[i])
+			if (!a->args[i]) {
+				if (!b->args[i])
 					return true;
 				else
 					return false;
-			} else if (!b->Iex.ClientCall.args[i])
+			} else if (!b->args[i])
 				return false;
-			if (!physicallyEqual(a->Iex.ClientCall.args[i],
-					     b->Iex.ClientCall.args[i]))
+			if (!physicallyEqual(a->args[i],
+					     b->args[i]))
 				return false;
 		}
 		abort();
-	case Iex_ClientCallFailed:
-		return physicallyEqual(a->Iex.ClientCallFailed.target,
-				       b->Iex.ClientCallFailed.target);
-	case Iex_HappensBefore:
-		return a->Iex.HappensBefore.before == b->Iex.HappensBefore.before &&
-			a->Iex.HappensBefore.after == b->Iex.HappensBefore.after;
+	footer()
+	hdr(ClientCallFailed)
+		return physicallyEqual(a->target,
+				       b->target);
+	footer()
+	hdr(HappensBefore)
+		return a->before == b->before &&
+			a->after == b->after;
+	footer()
+#undef footer
+#undef hdr
 	}
 	abort();
 }
@@ -188,17 +208,19 @@ optimise_condition_calculation(
 	IRExpr *res;
 	bool invert;
 	IRExpr *sf, *cf, *zf, *of;
+	unsigned long op;
 
 	/* We only handle a few very special cases here. */
 	if (_cond->tag != Iex_Const || cc_op->tag != Iex_Const)
 		return NULL;
-	cond = _cond->Iex.Const.con->Ico.U64;
+	cond = ((IRExprConst *)_cond)->con->Ico.U64;
+	op = ((IRExprConst *)cc_op)->con->Ico.U64;
 	invert = cond & 1;
 	cond &= ~1ul;
 	res = NULL;
 	sf = cf = zf = of = NULL;
 
-	switch (cc_op->Iex.Const.con->Ico.U64) {
+	switch (op) {
 	case AMD64G_CC_OP_SUBB:
 		zf = IRExpr_Binop(Iop_CmpEQ8, dep1, dep2);
 		break;
@@ -247,7 +269,7 @@ optimise_condition_calculation(
 			IRExpr_Const(IRConst_U16(0)));
 		break;
 	default:
-		printf("Unknown CC op %llx\n", cc_op->Iex.Const.con->Ico.U64);
+		printf("Unknown CC op %lx\n", op);
 		break;
 	}
 
@@ -275,7 +297,7 @@ optimise_condition_calculation(
 				sf,
 				of);
 		else
-			printf("CondL needs both sf and of; op %llx\n", cc_op->Iex.Const.con->Ico.U64);
+			printf("CondL needs both sf and of; op %lx\n", op);
 		break;
 	case AMD64CondLE:
 		if (sf && of && zf)
@@ -287,14 +309,14 @@ optimise_condition_calculation(
 					of),
 				zf);
 		else
-			printf("CondLE needs sf, of, and zf; op %llx\n", cc_op->Iex.Const.con->Ico.U64);
+			printf("CondLE needs sf, of, and zf; op %lx\n", op);
 		break;
 	default:
 		break;
 	}
 	if (!res)
-		printf("Cannot handle CC condition %ld, op %lld\n",
-		       cond, cc_op->Iex.Const.con->Ico.U64);
+		printf("Cannot handle CC condition %ld, op %lx\n",
+		       cond, op);
 	if (res && invert)
 		res = IRExpr_Unop(Iop_Not1, res);
 	return res;
@@ -310,64 +332,76 @@ optimise_condition_calculation(
 int
 exprComplexity(const IRExpr *e)
 {
-	switch (e->tag) {
-	case Iex_Get:
-		return 20;
-	case Iex_GetI:
-		return 20 + exprComplexity(e->Iex.GetI.ix);
-	case Iex_RdTmp:
-		return 30;
-	case Iex_Qop:
-		return 10 +
-			exprComplexity(e->Iex.Qop.arg1) +
-			exprComplexity(e->Iex.Qop.arg2) +
-			exprComplexity(e->Iex.Qop.arg3) +
-			exprComplexity(e->Iex.Qop.arg4);
-	case Iex_Triop:
-		return 10 +
-			exprComplexity(e->Iex.Qop.arg1) +
-			exprComplexity(e->Iex.Qop.arg2) +
-			exprComplexity(e->Iex.Qop.arg3);
-	case Iex_Binop:
-		return 10 +
-			exprComplexity(e->Iex.Qop.arg1) +
-			exprComplexity(e->Iex.Qop.arg2);
-	case Iex_Unop:
-		return 10 + exprComplexity(e->Iex.Qop.arg1);
-	case Iex_Load:
-		return 10 + exprComplexity(e->Iex.Load.addr);
-	case Iex_Const:
-		return 0;
-	case Iex_Mux0X:
-		return 10 + exprComplexity(e->Iex.Mux0X.cond) +
-			exprComplexity(e->Iex.Mux0X.expr0) +
-			exprComplexity(e->Iex.Mux0X.exprX);
-	case Iex_CCall: {
-		int acc = 50;
-		for (int x = 0; e->Iex.CCall.args[x]; x++)
-			acc += exprComplexity(e->Iex.CCall.args[x]);
-		return acc;
-	}
-	case Iex_Associative: {
-		int acc = 10;
-		for (int x = 0; x < e->Iex.Associative.nr_arguments; x++)
-			acc += exprComplexity(e->Iex.Associative.contents[x]);
-		return acc;
-	}
-	case Iex_FreeVariable:
-		return 100;
-	case Iex_ClientCall: {
-		int acc = 100;
-		for (int x = 0; e->Iex.ClientCall.args[x]; x++)
-			acc += exprComplexity(e->Iex.ClientCall.args[x]);
-		return acc;
-	}
-	case Iex_ClientCallFailed:
-		return 1000 + exprComplexity(e->Iex.ClientCallFailed.target);
-	case Iex_HappensBefore:
-		return 100;
-	}
-	abort();
+	class _ : public IRExprTransformer {
+	public:
+		int res;
+		_() : res(0) {}
+		IRExpr *transformIex(IRExprGet *e) {
+			res += 20;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprGetI *e) {
+			res += 20;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprRdTmp *e) {
+			res += 30;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprQop *e) {
+			res += 10;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprTriop *e) {
+			res += 10;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprBinop *e) {
+			res += 10;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprUnop *e) {
+			res += 10;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprLoad *e) {
+			res += 10;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprConst *e) {
+			return NULL;
+		}
+		IRExpr *transformIex(IRExprMux0X *e) {
+			res += 10;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprCCall *e) {
+			res += 50;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprAssociative *e) {
+			res += 10;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprFreeVariable *e) {
+			res += 100;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprClientCall *e) {
+			res += 100;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprClientCallFailed *e) {
+			res += 1000;
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIex(IRExprHappensBefore *e) {
+			res += 100;
+			return IRExprTransformer::transformIex(e);
+		}
+	} t;
+	t.transformIRExpr((IRExpr *)e);
+	return t.res;
 }
 
 static int
@@ -430,200 +464,204 @@ sortIRConsts(IRConst *a, IRConst *b)
 }
 
 static bool
-sortIRExprs(IRExpr *a, IRExpr *b)
+sortIRExprs(IRExpr *_a, IRExpr *_b)
 {
-	int ac = exprComplexity(a);
-	int bc = exprComplexity(b);
+	int ac = exprComplexity(_a);
+	int bc = exprComplexity(_b);
 	if (ac < bc)
 		return true;
 	if (ac > bc)
 		return false;
-	if (IexTagLessThan(a->tag, b->tag)) {
+	if (IexTagLessThan(_a->tag, _b->tag)) {
 		return true;
-	} else if (a->tag != b->tag) {
+	} else if (_a->tag != _b->tag) {
 		return false;
 	}
 	
-	switch (a->tag) {
-	case Iex_Get:
-		return a->Iex.Get.offset < b->Iex.Get.offset;
-	case Iex_GetI:
-		return sortIRExprs(a->Iex.GetI.ix, b->Iex.GetI.ix);
-	case Iex_RdTmp:
-		return a->Iex.RdTmp.tmp < b->Iex.RdTmp.tmp;
-	case Iex_Qop:
-		if (a->Iex.Qop.op < b->Iex.Qop.op)
+	switch (_a->tag) {
+#define hdr1(t)								\
+		case Iex_ ## t:	{					\
+			IRExpr ## t *a = (IRExpr ## t *)_a,		\
+				*b = (IRExpr ## t *)_b;
+	hdr1(Get)
+#define hdr(t) } hdr1(t)
+		return a->offset < b->offset;
+	hdr(GetI)
+		return sortIRExprs(a->ix, b->ix);
+	hdr(RdTmp)
+		return a->tmp < b->tmp;
+	hdr(Qop)
+		if (a->op < b->op)
 			return true;
-		if (a->Iex.Qop.op > b->Iex.Qop.op)
+		if (a->op > b->op)
 			return false;
-		if (physicallyEqual(a->Iex.Qop.arg1, b->Iex.Qop.arg1)) {
-			if (physicallyEqual(a->Iex.Qop.arg2,
-					    b->Iex.Qop.arg2)) {
-				if (physicallyEqual(a->Iex.Qop.arg3,
-						    b->Iex.Qop.arg3))
-					return sortIRExprs(a->Iex.Qop.arg4,
-							   b->Iex.Qop.arg4);
+		if (physicallyEqual(a->arg1, b->arg1)) {
+			if (physicallyEqual(a->arg2,
+					    b->arg2)) {
+				if (physicallyEqual(a->arg3,
+						    b->arg3))
+					return sortIRExprs(a->arg4,
+							   b->arg4);
 				else
-					return sortIRExprs(a->Iex.Qop.arg3,
-							   b->Iex.Qop.arg3);
+					return sortIRExprs(a->arg3,
+							   b->arg3);
 			} else
-				return sortIRExprs(a->Iex.Qop.arg2,
-						   b->Iex.Qop.arg2);
+				return sortIRExprs(a->arg2,
+						   b->arg2);
 		} else {
-			return sortIRExprs(a->Iex.Qop.arg1,
-					   b->Iex.Qop.arg1);
+			return sortIRExprs(a->arg1,
+					   b->arg1);
 		}
-	case Iex_Triop:
-		if (a->Iex.Qop.op < b->Iex.Qop.op)
+	hdr(Triop)
+		if (a->op < b->op)
 			return true;
-		if (a->Iex.Qop.op > b->Iex.Qop.op)
+		if (a->op > b->op)
 			return false;
-		if (physicallyEqual(a->Iex.Qop.arg1, b->Iex.Qop.arg1)) {
-			if (physicallyEqual(a->Iex.Qop.arg2,
-					    b->Iex.Qop.arg2)) {
-				return sortIRExprs(a->Iex.Qop.arg3,
-						   b->Iex.Qop.arg3);
+		if (physicallyEqual(a->arg1, b->arg1)) {
+			if (physicallyEqual(a->arg2,
+					    b->arg2)) {
+				return sortIRExprs(a->arg3,
+						   b->arg3);
 			} else
-				return sortIRExprs(a->Iex.Qop.arg2,
-						   b->Iex.Qop.arg2);
+				return sortIRExprs(a->arg2,
+						   b->arg2);
 		} else {
-			return sortIRExprs(a->Iex.Qop.arg1,
-					   b->Iex.Qop.arg1);
+			return sortIRExprs(a->arg1,
+					   b->arg1);
 		}
-	case Iex_Binop:
-		if (a->Iex.Qop.op < b->Iex.Qop.op)
+	hdr(Binop)
+		if (a->op < b->op)
 			return true;
-		if (a->Iex.Qop.op > b->Iex.Qop.op)
+		if (a->op > b->op)
 			return false;
-		if (physicallyEqual(a->Iex.Qop.arg1, b->Iex.Qop.arg1)) {
-			return sortIRExprs(a->Iex.Qop.arg2,
-					   b->Iex.Qop.arg2);
+		if (physicallyEqual(a->arg1, b->arg1)) {
+			return sortIRExprs(a->arg2,
+					   b->arg2);
 		} else {
-			return sortIRExprs(a->Iex.Qop.arg1,
-					   b->Iex.Qop.arg1);
+			return sortIRExprs(a->arg1,
+					   b->arg1);
 		}
-	case Iex_Unop:
-		if (a->Iex.Qop.op < b->Iex.Qop.op)
+	hdr(Unop)
+		if (a->op < b->op)
 			return true;
-		if (a->Iex.Qop.op > b->Iex.Qop.op)
+		if (a->op > b->op)
 			return false;
-		return sortIRExprs(a->Iex.Qop.arg1,
-				   b->Iex.Qop.arg1);
-	case Iex_Load:
-		return sortIRExprs(a->Iex.Load.addr, b->Iex.Load.addr);
-	case Iex_Const:
-		return sortIRConsts(a->Iex.Const.con, b->Iex.Const.con);
-	case Iex_CCall: {
-		int r = strcmp(a->Iex.CCall.cee->name,
-			       b->Iex.CCall.cee->name);
+		return sortIRExprs(a->arg, b->arg);
+	hdr(Load)
+		return sortIRExprs(a->addr, b->addr);
+	hdr(Const)
+		return sortIRConsts(a->con, b->con);
+	hdr(CCall) {
+		int r = strcmp(a->cee->name,
+			       b->cee->name);
 		if (r < 0)
 			return true;
 		else if (r > 0)
 			return false;
 		for (int x = 0; 1; x++) {
-			if (!a->Iex.CCall.args[x] &&
-			    !b->Iex.CCall.args[x])
+			if (!a->args[x] &&
+			    !b->args[x])
 				return false;
-			if (!a->Iex.CCall.args[x])
+			if (!a->args[x])
 				return true;
-			if (!b->Iex.CCall.args[x])
+			if (!b->args[x])
 				return false;
-			if (!physicallyEqual(a->Iex.CCall.args[x],
-					     b->Iex.CCall.args[x]))
-				return sortIRExprs(a->Iex.CCall.args[x],
-						   b->Iex.CCall.args[x]);
+			if (!physicallyEqual(a->args[x],
+					     b->args[x]))
+				return sortIRExprs(a->args[x],
+						   b->args[x]);
 		}
 	}
-	case Iex_Mux0X:
-		if (!physicallyEqual(a->Iex.Mux0X.cond,
-				     b->Iex.Mux0X.cond))
-			return sortIRExprs(a->Iex.Mux0X.cond,
-					   b->Iex.Mux0X.cond);
-		if (!physicallyEqual(a->Iex.Mux0X.expr0,
-				     b->Iex.Mux0X.expr0))
-			return sortIRExprs(a->Iex.Mux0X.expr0,
-					   b->Iex.Mux0X.expr0);
-		return sortIRExprs(a->Iex.Mux0X.exprX,
-				   b->Iex.Mux0X.exprX);
-	case Iex_Associative: {
-		if (a->Iex.Associative.op < b->Iex.Associative.op)
+	hdr(Mux0X)
+		if (!physicallyEqual(a->cond,
+				     b->cond))
+			return sortIRExprs(a->cond,
+					   b->cond);
+		if (!physicallyEqual(a->expr0,
+				     b->expr0))
+			return sortIRExprs(a->expr0,
+					   b->expr0);
+		return sortIRExprs(a->exprX,
+				   b->exprX);
+	hdr(Associative) {
+		if (a->op < b->op)
 			return true;
-		if (a->Iex.Associative.op > b->Iex.Associative.op)
+		if (a->op > b->op)
 			return false;
 		int x;
 		x = 0;
 		while (1) {
-			if (x == a->Iex.Associative.nr_arguments &&
-			    x == b->Iex.Associative.nr_arguments)
+			if (x == a->nr_arguments &&
+			    x == b->nr_arguments)
 				return false;
-			if (x == a->Iex.Associative.nr_arguments)
+			if (x == a->nr_arguments)
 				return true;
-			if (x == b->Iex.Associative.nr_arguments)
+			if (x == b->nr_arguments)
 				return false;
-			if (!physicallyEqual( a->Iex.Associative.contents[x],
-					      b->Iex.Associative.contents[x] ))
-				return sortIRExprs( a->Iex.Associative.contents[x],
-						    b->Iex.Associative.contents[x] );
+			if (!physicallyEqual( a->contents[x],
+					      b->contents[x] ))
+				return sortIRExprs( a->contents[x],
+						    b->contents[x] );
 			x++;
 		}
 	}
-	case Iex_FreeVariable:
-		return a->Iex.FreeVariable.key < b->Iex.FreeVariable.key;
-	case Iex_ClientCall:
-		if (a->Iex.ClientCall.callSite < b->Iex.ClientCall.callSite)
+	hdr(FreeVariable)
+		return a->key < b->key;
+	hdr(ClientCall)
+		if (a->callSite < b->callSite)
 			return true;
-		else if (a->Iex.ClientCall.callSite > b->Iex.ClientCall.callSite)
+		else if (a->callSite > b->callSite)
 			return false;
 		for (int x = 0; 1; x++) {
-			if (!a->Iex.ClientCall.args[x] && !b->Iex.ClientCall.args[x])
+			if (!a->args[x] && !b->args[x])
 				return false;
-			if (!a->Iex.ClientCall.args[x])
+			if (!a->args[x])
 				return true;
-			if (!b->Iex.ClientCall.args[x])
+			if (!b->args[x])
 				return false;
-			if (!physicallyEqual(a->Iex.ClientCall.args[x],
-					     b->Iex.ClientCall.args[x]))
-				return sortIRExprs(a->Iex.ClientCall.args[x],
-						   b->Iex.ClientCall.args[x]);
+			if (!physicallyEqual(a->args[x],
+					     b->args[x]))
+				return sortIRExprs(a->args[x],
+						   b->args[x]);
 		}
-	case Iex_ClientCallFailed:
-		return sortIRExprs(a->Iex.ClientCallFailed.target,
-				   b->Iex.ClientCallFailed.target);
-	case Iex_HappensBefore:
-		if (a->Iex.HappensBefore.before < b->Iex.HappensBefore.before)
+	hdr(ClientCallFailed)
+		return sortIRExprs(a->target,
+				   b->target);
+	hdr(HappensBefore)
+		if (a->before < b->before)
 			return true;
-		if (a->Iex.HappensBefore.before > b->Iex.HappensBefore.before)
+		if (a->before > b->before)
 			return false;
-		return a->Iex.HappensBefore.after < b->Iex.HappensBefore.after;
+		return a->after < b->after;
+	}
 	}
 
 	abort();
 }
 
 void
-addArgumentToAssoc(IRExpr *e, IRExpr *arg)
+addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg)
 {
 	assert( (e->optimisationsApplied & ~arg->optimisationsApplied) == 0);
-	if (e->Iex.Associative.nr_arguments == e->Iex.Associative.nr_arguments_allocated) {
-		e->Iex.Associative.nr_arguments_allocated += 8;
-		e->Iex.Associative.contents = (IRExpr **)
+	if (e->nr_arguments == e->nr_arguments_allocated) {
+		e->nr_arguments_allocated += 8;
+		e->contents = (IRExpr **)
 			LibVEX_realloc(&ir_heap,
-				       e->Iex.Associative.contents,
-				       sizeof(IRExpr *) * e->Iex.Associative.nr_arguments_allocated);
+				       e->contents,
+				       sizeof(IRExpr *) * e->nr_arguments_allocated);
 	}
-	e->Iex.Associative.contents[e->Iex.Associative.nr_arguments] = arg;
-	e->Iex.Associative.nr_arguments++;
+	e->contents[e->nr_arguments] = arg;
+	e->nr_arguments++;
 }
 
 static void
-purgeAssocArgument(IRExpr *e, int idx)
+purgeAssocArgument(IRExprAssociative *e, int idx)
 {
-	assert(e->tag == Iex_Associative);
-	assert(idx < e->Iex.Associative.nr_arguments);
-	memmove(e->Iex.Associative.contents + idx,
-		e->Iex.Associative.contents + idx + 1,
-		sizeof(IRExpr *) * (e->Iex.Associative.nr_arguments - idx - 1));
-	e->Iex.Associative.nr_arguments--;
+	assert(idx < e->nr_arguments);
+	memmove(e->contents + idx,
+		e->contents + idx + 1,
+		sizeof(IRExpr *) * (e->nr_arguments - idx - 1));
+	e->nr_arguments--;
 }
 
 static IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something);
@@ -675,828 +713,764 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 	if (!(opt.asUnsigned() & ~src->optimisationsApplied))
 		return src;
-	/* First, recursively optimise our arguments. */
-	switch (src->tag) {
-	case Iex_Qop:
-		src->Iex.Qop.arg4 = optimiseIRExprFP(src->Iex.Qop.arg4, opt, done_something);
-	case Iex_Triop:
-		src->Iex.Triop.arg3 = optimiseIRExprFP(src->Iex.Triop.arg3, opt, done_something);
-	case Iex_Binop:
-		src->Iex.Binop.arg2 = optimiseIRExprFP(src->Iex.Binop.arg2, opt, done_something);
-	case Iex_Unop:
-		src->Iex.Unop.arg = optimiseIRExprFP(src->Iex.Unop.arg, opt, done_something);
-		break;
-	case Iex_Load:
-		src->Iex.Load.addr = optimiseIRExprFP(src->Iex.Load.addr, opt, done_something);
-#if 0
-		if (src->Iex.Load.addr->tag == Iex_Const &&
-		    (long)src->Iex.Load.addr->Iex.Const.con->Ico.U64 < 4096)
-			dbg_break("optimising load to load of strange constant address (IRExpr *)%p\n",
-				  src);
-#endif
-		break;
-	case Iex_CCall: {
-		for (int x = 0; src->Iex.CCall.args[x]; x++) {
-			src->Iex.CCall.args[x] =
-				optimiseIRExprFP(src->Iex.CCall.args[x], opt, done_something);
-		}
-		/* Special cases for amd64g_calculate_condition. */
-		if (!strcmp(src->Iex.CCall.cee->name,
-			    "amd64g_calculate_condition")) {
-			IRExpr *e;
-			e = optimise_condition_calculation(
-				src->Iex.CCall.args[0],
-				src->Iex.CCall.args[1],
-				src->Iex.CCall.args[2],
-				src->Iex.CCall.args[3],
-				src->Iex.CCall.args[4],
-				opt);
-			if (e) {
-				*done_something = true;
-				src = e;
-			}
-		}
-		break;
-	}
-	case Iex_Mux0X:
-		src->Iex.Mux0X.cond = optimiseIRExprFP(src->Iex.Mux0X.cond, opt, done_something);
-		src->Iex.Mux0X.expr0 = optimiseIRExprFP(src->Iex.Mux0X.expr0, opt, done_something);
-		src->Iex.Mux0X.exprX = optimiseIRExprFP(src->Iex.Mux0X.exprX, opt, done_something);
-		break;
-	case Iex_Associative:
-		for (int x = 0; x < src->Iex.Associative.nr_arguments; x++)
-			src->Iex.Associative.contents[x] =
-				optimiseIRExprFP(src->Iex.Associative.contents[x], opt, done_something);
-		break;
-	case Iex_ClientCall:
-		for (int x = 0; src->Iex.ClientCall.args[x]; x++)
-			src->Iex.ClientCall.args[x] =
-				optimiseIRExprFP(src->Iex.ClientCall.args[x], opt, done_something);
-		break;
-	case Iex_ClientCallFailed:
-		src->Iex.ClientCallFailed.target =
-			optimiseIRExprFP(src->Iex.ClientCallFailed.target, opt, done_something);
-		break;
-	case Iex_GetI:
-		src->Iex.GetI.ix =
-			optimiseIRExprFP(src->Iex.GetI.ix, opt, done_something);
-		break;
-	case Iex_Get:
-	case Iex_RdTmp:
-	case Iex_Const:
-	case Iex_FreeVariable:
-	case Iex_HappensBefore:
-		break;
-	}
 
-	if (src->tag == Iex_Associative) {
-		__set_profiling(optimise_associative);
+	class _ : public IRExprTransformer {
+		const AllowableOptimisations &opt;
+		bool *done_something;
 
-		/* Drag up nested associatives. */
-		bool haveNestedAssocs = false;
-		for (int x = 0; !haveNestedAssocs && x < src->Iex.Associative.nr_arguments; x++)
-			if (src->Iex.Associative.contents[x]->tag == Iex_Associative &&
-			    src->Iex.Associative.contents[x]->Iex.Associative.op ==
-				src->Iex.Associative.op)
-				haveNestedAssocs = true;
-		if (haveNestedAssocs) {
-			__set_profiling(pull_up_nested_associatives);
-			IRExpr *e = IRExpr_Associative(src->Iex.Associative.op, NULL);
-			for (int x = 0; x < src->Iex.Associative.nr_arguments; x++) {
-				IRExpr *arg = src->Iex.Associative.contents[x];
-				if (arg->tag == Iex_Associative &&
-				    arg->Iex.Associative.op == src->Iex.Associative.op) {
-					for (int y = 0; y < arg->Iex.Associative.nr_arguments; y++)
-						addArgumentToAssoc(e, arg->Iex.Associative.contents[y]);
-				} else {
-					addArgumentToAssoc(e, arg);
-				}
+		IRExpr *transformIex(IRExprCCall *e) {
+			if (!strcmp(e->cee->name, "amd64g_calculate_condition")) {
+				return optimise_condition_calculation(
+					e->args[0],
+					e->args[1],
+					e->args[2],
+					e->args[3],
+					e->args[4],
+					opt);
 			}
-			src = e;
-			*done_something = true;
+			return IRExprTransformer::transformIex(e);
 		}
+		IRExpr *transformIex(IRExprAssociative *e) {
+			__set_profiling(optimise_associative);
 
-		/* Sort IRExprs so that ``related'' expressions are likely to
-		 * be close together. */
-		if (operationCommutes(src->Iex.Associative.op)) {
-			__set_profiling(sort_associative_arguments);
-			std::sort(src->Iex.Associative.contents,
-				  src->Iex.Associative.contents + src->Iex.Associative.nr_arguments,
-				  sortIRExprs);
-		}
-		/* Fold together constants.  For commutative
-		   operations they'll all be at the beginning, but
-		   don't assume that associativity implies
-		   commutativity. */
-		{ __set_profiling(associative_constant_fold);
-		for (int x = 0; x + 1 < src->Iex.Associative.nr_arguments; x++) {
-			IRExpr *a, *b;
-			a = src->Iex.Associative.contents[x];
-			b = src->Iex.Associative.contents[x+1];
-			if (a->tag == Iex_Const && b->tag == Iex_Const) {
-				IRExpr *res;
-				IRConst *l, *r;
-				l = a->Iex.Const.con;
-				r = b->Iex.Const.con;
-				switch (src->Iex.Associative.op) {
-				case Iop_Add8:
-					res = IRExpr_Const(
-						IRConst_U8((l->Ico.U8 + r->Ico.U8) & 0xff));
-					break;
-				case Iop_Add16:
-					res = IRExpr_Const(
-						IRConst_U16((l->Ico.U16 + r->Ico.U16) & 0xffff));
-					break;
-				case Iop_Add32:
-					res = IRExpr_Const(
-						IRConst_U32((l->Ico.U32 + r->Ico.U32) & 0xffffffff));
-					break;
-				case Iop_Add64:
-					res = IRExpr_Const(IRConst_U64(l->Ico.U64 + r->Ico.U64));
-					break;
-				case Iop_And1:
-					res = IRExpr_Const(IRConst_U1(l->Ico.U1 & r->Ico.U1));
-					break;
-				case Iop_Or1:
-					res = IRExpr_Const(IRConst_U1(l->Ico.U1 | r->Ico.U1));
-					break;
-				case Iop_And8:
-					res = IRExpr_Const(IRConst_U8(l->Ico.U8 & r->Ico.U8));
-					break;
-				case Iop_And16:
-					res = IRExpr_Const(IRConst_U16(l->Ico.U16 & r->Ico.U16));
-					break;
-				case Iop_And32:
-					res = IRExpr_Const(IRConst_U32(l->Ico.U32 & r->Ico.U32));
-					break;
-				case Iop_Or32:
-					res = IRExpr_Const(IRConst_U32(l->Ico.U32 | r->Ico.U32));
-					break;
-				case Iop_And64:
-					res = IRExpr_Const(IRConst_U64(l->Ico.U64 & r->Ico.U64));
-					break;
-				case Iop_Xor8:
-					res = IRExpr_Const(IRConst_U32(l->Ico.U8 ^ r->Ico.U8));
-					break;
-				case Iop_Xor32:
-					res = IRExpr_Const(IRConst_U32(l->Ico.U32 ^ r->Ico.U32));
-					break;
-				default:
-					printf("Warning: can't constant-fold in ");
-					ppIRExpr(src, stdout);
-					printf("\n");
-					res = NULL;
-					break;
-				}
-				if (res) {
-					res = optimiseIRExprFP(res, opt, done_something);
-					memmove(src->Iex.Associative.contents + x + 1,
-						src->Iex.Associative.contents + x + 2,
-						sizeof(IRExpr *) * (src->Iex.Associative.nr_arguments - x - 2));
-					src->Iex.Associative.nr_arguments--;
-					src->Iex.Associative.contents[x] = res;
-					x--;
-					*done_something = true;
-				}
-			} else if (!operationCommutes(src->Iex.Associative.op)) {
-				break;
-			}
-		}
-		}
-		/* Some special cases for And1: 1 & x -> x, 0 & x -> 0 */
-		if (src->Iex.Associative.op == Iop_And1) {
-			__set_profiling(optimise_assoc_and1);
-			/* If there are any constants, they'll be at the start. */
-			while (src->Iex.Associative.nr_arguments > 1 &&
-			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
-				IRConst *c = src->Iex.Associative.contents[0]->Iex.Const.con;
-				*done_something = true;
-				if (c->Ico.U1) {
-					purgeAssocArgument(src, 0);
-				} else {
-					return src->Iex.Associative.contents[0];
-				}
-			}
-		}
-		/* Likewise for Or1 */
-		if (src->Iex.Associative.op == Iop_Or1) {
-			__set_profiling(optimise_assoc_or1);
-			while (src->Iex.Associative.nr_arguments > 1 &&
-			       src->Iex.Associative.contents[0]->tag == Iex_Const) {
-				IRConst *c = src->Iex.Associative.contents[0]->Iex.Const.con;
-				*done_something = true;
-				if (!c->Ico.U1) {
-					purgeAssocArgument(src, 0);
-				} else {
-					return src->Iex.Associative.contents[0];
-				}
-			}
-		}
-
-		/* x & x -> x, for any and-like operator */
-		if (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) {
-			__set_profiling(optimise_assoc_x_and_x);
-			for (int it1 = 0;
-			     it1 < src->Iex.Associative.nr_arguments;
-			     it1++) {
-				for (int it2 = it1 + 1;
-				     it2 < src->Iex.Associative.nr_arguments;
-					) {
-					if (definitelyEqual(src->Iex.Associative.contents[it1],
-							    src->Iex.Associative.contents[it2],
-							    opt)) {
-						*done_something = true;
-						purgeAssocArgument(src, it2);
+			/* Drag up nested associatives. */
+			bool haveNestedAssocs = false;
+			for (int x = 0; !haveNestedAssocs && x < e->nr_arguments; x++)
+				if (e->contents[x]->tag == Iex_Associative &&
+				    ((IRExprAssociative *)e->contents[x])->op == e->op)
+					haveNestedAssocs = true;
+			if (haveNestedAssocs) {
+				__set_profiling(pull_up_nested_associatives);
+				IRExprAssociative *ne = (IRExprAssociative *)IRExpr_Associative(e->op, NULL);
+				for (int x = 0; x < e->nr_arguments; x++) {
+					IRExpr *arg = e->contents[x];
+					if (arg->tag == Iex_Associative &&
+					    ((IRExprAssociative *)arg)->op == e->op) {
+						IRExprAssociative *_arg = (IRExprAssociative *)arg;
+						for (int y = 0; y < _arg->nr_arguments; y++)
+							addArgumentToAssoc(ne, _arg->contents[y]);
 					} else {
-						it2++;
+						addArgumentToAssoc(ne, arg);
 					}
 				}
+				return ne;
 			}
-		}
 
-		/* a <-< b || b <-< a is definitely true. */
-		if (src->Iex.Associative.op == Iop_Or1) {
-			__set_profiling(optimise_assoc_happens_before);
-			for (int i1 = 0; i1 < src->Iex.Associative.nr_arguments; i1++) {
-				IRExpr *a1 = src->Iex.Associative.contents[i1];
-				if (a1->tag != Iex_HappensBefore)
-					continue;
-				for (int i2 = i1 + 1; i2 < src->Iex.Associative.nr_arguments; i2++) {
-					IRExpr *a2 = src->Iex.Associative.contents[i2];
-					if (a2->tag != Iex_HappensBefore)
-						continue;
-					if ( a1->Iex.HappensBefore.before == a2->Iex.HappensBefore.after &&
-					     a1->Iex.HappensBefore.after == a2->Iex.HappensBefore.before ) {
-						*done_something = true;
-						return IRExpr_Const(IRConst_U1(1));
-					}
-				}
+			/* Sort IRExprs so that ``related'' expressions are likely to
+			 * be close together. */
+			if (operationCommutes(e->op)) {
+				__set_profiling(sort_associative_arguments);
+				std::sort(e->contents,
+					  e->contents + e->nr_arguments,
+					  sortIRExprs);
 			}
-		}
-
-		/* x + -x -> 0, for any plus-like operator, so remove
-		 * both x and -x from the list. */
-		/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
-		if (opt.xPlusMinusX) {
-			__set_profiling(optimise_assoc_xplusminusx);
-			bool plus_like;
-			bool and_like;
-			bool xor_like;
-			plus_like = src->Iex.Associative.op >= Iop_Add8 && src->Iex.Associative.op <= Iop_Add64;
-			and_like = (src->Iex.Associative.op >= Iop_And8 && src->Iex.Associative.op <= Iop_And64) ||
-				src->Iex.Associative.op == Iop_And1;
-			xor_like = src->Iex.Associative.op >= Iop_Xor8 && src->Iex.Associative.op <= Iop_Xor64;
-			if (plus_like || and_like || xor_like) {
-				for (int it1 = 0;
-				     it1 < src->Iex.Associative.nr_arguments;
-					) {
-					IRExpr *l = src->Iex.Associative.contents[it1];
-					int it2;
-					for (it2 = 0;
-					     it2 < src->Iex.Associative.nr_arguments;
-					     it2++) {
-						if (it2 == it1)
-							continue;
-						IRExpr *r = src->Iex.Associative.contents[it2];
-						bool purge;
-						if (plus_like) {
-							if (r->tag == Iex_Unop) {
-								purge = r->Iex.Unop.op >= Iop_Neg8 &&
-									r->Iex.Unop.op <= Iop_Neg64;
-							} else {
-								purge = false;
-							}
-							if (purge)
-								purge = l == r->Iex.Unop.arg;
-						} else if (and_like) {
-							if (r->tag == Iex_Unop)
-								purge = (r->Iex.Unop.op >= Iop_Not8 &&
-									 r->Iex.Unop.op <= Iop_Not64) ||
-									r->Iex.Unop.op == Iop_Not1;
-							else
-								purge = false;
-							if (purge)
-								purge = l == r->Iex.Unop.arg;
-						} else {
-							assert(xor_like);
-							purge = l == r;
-						}
-
-						if (purge) {
-							*done_something = true;
-							if (and_like) {
-								/* x & ~x -> 0 and eliminates the entire expression. */
-								switch (src->Iex.Associative.op) {
-								case Iop_And8:
-									return IRExpr_Const(IRConst_U8(0));
-								case Iop_And16:
-									return IRExpr_Const(IRConst_U16(0));
-								case Iop_And32:
-									return IRExpr_Const(IRConst_U32(0));
-								case Iop_And64:
-									return IRExpr_Const(IRConst_U64(0));
-								case Iop_And1:
-									return IRExpr_Const(IRConst_U1(0));
-								default:
-									abort();
-								}
-							}
-
-							/* Careful: do the largest index first so that the
-							   other index remains valid. */
-							if (it1 < it2) {
-								purgeAssocArgument(src, it2);
-								src->Iex.Associative.contents[it1] =
-									IRExpr_Const(IRConst_U64(0));
-							} else {
-								purgeAssocArgument(src, it1);
-								src->Iex.Associative.contents[it2] =
-									IRExpr_Const(IRConst_U64(0));
-							}
+			/* Fold together constants.  For commutative
+			   operations they'll all be at the beginning, but
+			   don't assume that associativity implies
+			   commutativity. */
+			{
+				__set_profiling(associative_constant_fold);
+				for (int x = 0; x + 1 < e->nr_arguments; x++) {
+					IRExpr *a, *b;
+					a = e->contents[x];
+					b = e->contents[x+1];
+					if (a->tag == Iex_Const && b->tag == Iex_Const) {
+						IRExpr *res;
+						IRConst *l, *r;
+						l = ((IRExprConst *)a)->con;
+						r = ((IRExprConst *)b)->con;
+						switch (e->op) {
+						case Iop_Add8:
+							res = IRExpr_Const(
+								IRConst_U8((l->Ico.U8 + r->Ico.U8) & 0xff));
+							break;
+						case Iop_Add16:
+							res = IRExpr_Const(
+								IRConst_U16((l->Ico.U16 + r->Ico.U16) & 0xffff));
+							break;
+						case Iop_Add32:
+							res = IRExpr_Const(
+								IRConst_U32((l->Ico.U32 + r->Ico.U32) & 0xffffffff));
+							break;
+						case Iop_Add64:
+							res = IRExpr_Const(IRConst_U64(l->Ico.U64 + r->Ico.U64));
+							break;
+						case Iop_And1:
+							res = IRExpr_Const(IRConst_U1(l->Ico.U1 & r->Ico.U1));
+							break;
+						case Iop_Or1:
+							res = IRExpr_Const(IRConst_U1(l->Ico.U1 | r->Ico.U1));
+							break;
+						case Iop_And8:
+							res = IRExpr_Const(IRConst_U8(l->Ico.U8 & r->Ico.U8));
+							break;
+						case Iop_And16:
+							res = IRExpr_Const(IRConst_U16(l->Ico.U16 & r->Ico.U16));
+							break;
+						case Iop_And32:
+							res = IRExpr_Const(IRConst_U32(l->Ico.U32 & r->Ico.U32));
+							break;
+						case Iop_Or32:
+							res = IRExpr_Const(IRConst_U32(l->Ico.U32 | r->Ico.U32));
+							break;
+						case Iop_And64:
+							res = IRExpr_Const(IRConst_U64(l->Ico.U64 & r->Ico.U64));
+							break;
+						case Iop_Xor8:
+							res = IRExpr_Const(IRConst_U32(l->Ico.U8 ^ r->Ico.U8));
+							break;
+						case Iop_Xor32:
+							res = IRExpr_Const(IRConst_U32(l->Ico.U32 ^ r->Ico.U32));
+							break;
+						default:
+							printf("Warning: can't constant-fold associative op %d\n", e->op);
+							res = NULL;
 							break;
 						}
+						if (res) {
+							memmove(e->contents + x + 1,
+								e->contents + x + 2,
+								sizeof(IRExpr *) * (e->nr_arguments - x - 2));
+							e->nr_arguments--;
+							e->contents[x] = res;
+							*done_something = true;
+							x--;
+						}
+					} else if (!operationCommutes(e->op)) {
+						break;
 					}
-					if (it2 == src->Iex.Associative.nr_arguments)
-						it1++;
 				}
 			}
-			if (src->Iex.Associative.nr_arguments == 0) {
+			/* Some special cases for And1: 1 & x -> x, 0 & x -> 0 */
+			if (e->op == Iop_And1) {
+				__set_profiling(optimise_assoc_and1);
+				/* If there are any constants, they'll be at the start. */
+				while (e->nr_arguments > 1 &&
+				       e->contents[0]->tag == Iex_Const) {
+					IRConst *c = ((IRExprConst *)e->contents[0])->con;
+					*done_something = true;
+					if (c->Ico.U1) {
+						purgeAssocArgument(e, 0);
+					} else {
+						return e->contents[0];
+					}
+				}
+			}
+			/* Likewise for Or1 */
+			if (e->op == Iop_Or1) {
+				__set_profiling(optimise_assoc_or1);
+				while (e->nr_arguments > 1 &&
+				       e->contents[0]->tag == Iex_Const) {
+					IRConst *c = ((IRExprConst *)e->contents[0])->con;
+					*done_something = true;
+					if (!c->Ico.U1) {
+						purgeAssocArgument(e, 0);
+					} else {
+						return e->contents[0];
+					}
+				}
+			}
+
+			/* x & x -> x, for any and-like operator */
+			if (e->op >= Iop_And8 && e->op <= Iop_And64) {
+				__set_profiling(optimise_assoc_x_and_x);
+				for (int it1 = 0;
+				     it1 < e->nr_arguments;
+				     it1++) {
+					for (int it2 = it1 + 1;
+					     it2 < e->nr_arguments;
+						) {
+						if (definitelyEqual(e->contents[it1],
+								    e->contents[it2],
+								    opt)) {
+							*done_something = true;
+							purgeAssocArgument(e, it2);
+						} else {
+							it2++;
+						}
+					}
+				}
+			}
+
+			/* a <-< b || b <-< a is definitely true. */
+			if (e->op == Iop_Or1) {
+				__set_profiling(optimise_assoc_happens_before);
+				for (int i1 = 0; i1 < e->nr_arguments; i1++) {
+					if (e->contents[i1]->tag != Iex_HappensBefore)
+						continue;
+					IRExprHappensBefore *a1 = (IRExprHappensBefore *)e->contents[i1];
+					for (int i2 = i1 + 1; i2 < e->nr_arguments; i2++) {
+						if (e->contents[i2]->tag != Iex_HappensBefore)
+							continue;
+						IRExprHappensBefore *a2 =
+							(IRExprHappensBefore *)e->contents[i2];
+						if ( a1->before == a2->after &&
+						     a1->after == a2->before )
+							return IRExpr_Const(IRConst_U1(1));
+					}
+				}
+			}
+
+			/* x + -x -> 0, for any plus-like operator, so remove
+			 * both x and -x from the list. */
+			/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
+			if (opt.xPlusMinusX) {
+				__set_profiling(optimise_assoc_xplusminusx);
+				bool plus_like;
+				bool and_like;
+				bool xor_like;
+				plus_like = e->op >= Iop_Add8 && e->op <= Iop_Add64;
+				and_like = (e->op >= Iop_And8 && e->op <= Iop_And64) ||
+					e->op == Iop_And1;
+				xor_like = e->op >= Iop_Xor8 && e->op <= Iop_Xor64;
+				if (plus_like || and_like || xor_like) {
+					for (int it1 = 0;
+					     it1 < e->nr_arguments;
+						) {
+						IRExpr *l = e->contents[it1];
+						int it2;
+						for (it2 = 0;
+						     it2 < e->nr_arguments;
+						     it2++) {
+							if (it2 == it1)
+								continue;
+							IRExpr *r = e->contents[it2];
+							bool purge;
+							if (plus_like) {
+								if (r->tag == Iex_Unop) {
+									IROp op = ((IRExprUnop *)r)->op;
+									purge = op >= Iop_Neg8 &&
+										op <= Iop_Neg64;
+								} else {
+									purge = false;
+								}
+								if (purge)
+									purge = l == ((IRExprUnop *)r)->arg;
+							} else if (and_like) {
+								if (r->tag == Iex_Unop) {
+									IROp op = ((IRExprUnop *)r)->op;
+									purge = (op >= Iop_Not8 &&
+										 op <= Iop_Not64) ||
+										op == Iop_Not1;
+								} else
+									purge = false;
+								if (purge)
+									purge = l == ((IRExprUnop *)r)->arg;
+							} else {
+								assert(xor_like);
+								purge = l == r;
+							}
+
+							if (purge) {
+								*done_something = true;
+								if (and_like) {
+									/* x & ~x -> 0 and eliminates the entire expression. */
+									switch (e->op) {
+									case Iop_And8:
+										return IRExpr_Const(IRConst_U8(0));
+									case Iop_And16:
+										return IRExpr_Const(IRConst_U16(0));
+									case Iop_And32:
+										return IRExpr_Const(IRConst_U32(0));
+									case Iop_And64:
+										return IRExpr_Const(IRConst_U64(0));
+									case Iop_And1:
+										return IRExpr_Const(IRConst_U1(0));
+									default:
+										abort();
+									}
+								}
+
+								/* Careful: do the largest index first so that the
+								   other index remains valid. */
+								if (it1 < it2) {
+									purgeAssocArgument(e, it2);
+									e->contents[it1] =
+										IRExpr_Const(IRConst_U64(0));
+								} else {
+									purgeAssocArgument(e, it1);
+									e->contents[it2] =
+										IRExpr_Const(IRConst_U64(0));
+								}
+								break;
+							}
+						}
+						if (it2 == e->nr_arguments)
+							it1++;
+					}
+				}
+				if (e->nr_arguments == 0) {
+					*done_something = true;
+					switch (e->op) {
+					case Iop_Add8:
+					case Iop_Xor8:
+						return IRExpr_Const(IRConst_U8(0));
+					case Iop_Add16:
+					case Iop_Xor16:
+						return IRExpr_Const(IRConst_U16(0));
+					case Iop_Add32:
+					case Iop_Xor32:
+						return IRExpr_Const(IRConst_U32(0));
+					case Iop_Add64:
+					case Iop_Xor64:
+						return IRExpr_Const(IRConst_U64(0));
+
+					case Iop_And1:
+						return IRExpr_Const(IRConst_U1(1));
+					case Iop_And8:
+						return IRExpr_Const(IRConst_U8(0xff));
+					case Iop_And16:
+						return IRExpr_Const(IRConst_U16(0xffff));
+					case Iop_And32:
+						return IRExpr_Const(IRConst_U32(0xffffffff));
+					case Iop_And64:
+						return IRExpr_Const(IRConst_U64(0xfffffffffffffffful));
+
+					case Iop_Or1:
+						return IRExpr_Const(IRConst_U1(0));
+
+					default:
+						abort();
+					}
+				}
+			}
+
+			/* If the size is reduced to one, eliminate the assoc list */
+			if (e->nr_arguments == 1) {
 				*done_something = true;
-				switch (src->Iex.Associative.op) {
-				case Iop_Add8:
-				case Iop_Xor8:
-					return IRExpr_Const(IRConst_U8(0));
-				case Iop_Add16:
-				case Iop_Xor16:
-					return IRExpr_Const(IRConst_U16(0));
-				case Iop_Add32:
-				case Iop_Xor32:
-					return IRExpr_Const(IRConst_U32(0));
-				case Iop_Add64:
-				case Iop_Xor64:
-					return IRExpr_Const(IRConst_U64(0));
+				return e->contents[0];
+			}
 
-				case Iop_And1:
-					return IRExpr_Const(IRConst_U1(1));
-				case Iop_And8:
-					return IRExpr_Const(IRConst_U8(0xff));
-				case Iop_And16:
-					return IRExpr_Const(IRConst_U16(0xffff));
-				case Iop_And32:
-					return IRExpr_Const(IRConst_U32(0xffffffff));
-				case Iop_And64:
-					return IRExpr_Const(IRConst_U64(0xfffffffffffffffful));
+			return IRExprTransformer::transformIex(e);
+		}
 
-				case Iop_Or1:
+		IRExpr *transformIex(IRExprUnop *e) {
+			__set_profiling(optimise_unop);
+			if (e->op == Iop_64to1 &&
+			    ((e->arg->tag == Iex_Associative &&
+			      (((IRExprAssociative *)e->arg)->op == Iop_And1 ||
+			       ((IRExprAssociative *)e->arg)->op == Iop_Or1)) ||
+			     (e->arg->tag == Iex_Binop &&
+			      ((((IRExprBinop *)e->arg)->op >= Iop_CmpEQ8 &&
+				((IRExprBinop *)e->arg)->op <= Iop_CmpNE64) ||
+			       (((IRExprBinop *)e->arg)->op >= Iop_CmpLT32S &&
+				((IRExprBinop *)e->arg)->op <= Iop_CmpLE64U))))) {
+				/* This can happen sometimes because of the
+				   way we simplify condition codes.  Very easy
+				   fix: strip off the outer 64to1. */
+				*done_something = true;
+				return e->arg;
+			}
+
+			if ((e->op >= Iop_8Uto16 &&
+			     e->op <= Iop_32Uto64) ||
+			    e->op == Iop_1Uto8) {
+				/* Get rid of unsigned upcasts; they tend to
+				   show up where you don't want them, and they
+				   don't actually do anything useful. */
+				*done_something = true;
+				return e->arg;
+			}
+
+			if (e->op == Iop_Not1 &&
+			    e->arg->tag == Iex_Unop &&
+			    ((IRExprUnop *)e->arg)->op == e->op) {
+				return ((IRExprUnop *)e->arg)->arg;
+			}
+
+			if (e->op == Iop_Not1 &&
+			    e->arg->tag == Iex_Associative &&
+			    (((IRExprAssociative *)e->arg)->op == Iop_And1 ||
+			     ((IRExprAssociative *)e->arg)->op == Iop_Or1)) {
+				/* Convert ~(x & y) to ~x | ~y */
+				IRExprAssociative *a =
+					(IRExprAssociative *)IRExpr_Associative((IRExprAssociative *)e->arg);
+				for (int i = 0;
+				     i < a->nr_arguments;
+				     i++) {
+					a->contents[i] =
+						optimiseIRExprFP(
+							IRExpr_Unop(
+								Iop_Not1,
+								a->contents[i]),
+							opt,
+							done_something);
+				}
+				if (a->op == Iop_And1)
+					a->op = Iop_Or1;
+				else
+					a->op = Iop_And1;
+				return a;
+			}
+			if (e->op == Iop_BadPtr) {
+				if (e->arg->tag == Iex_Associative &&
+				    ((IRExprAssociative *)e->arg)->op == Iop_Add64 &&
+				    ((IRExprAssociative *)e->arg)->nr_arguments == 2 &&
+				    ((IRExprAssociative *)e->arg)->contents[0]->tag == Iex_Const) {
+					/* BadPtr(k + x) -> BadPtr(x) if k is
+					 * a constant.  That's not strictly
+					 * speaking true, because it's always
+					 * possible that k is enough to push
+					 * you over the boundary between valid
+					 * and invalid memory, but that's so
+					 * rare that I'm willing to ignore
+					 * it. */
+					*done_something = true;
+					e->arg = ((IRExprAssociative *)e->arg)->contents[1];
+					return IRExprTransformer::transformIex(e);
+				}
+				if (e->arg->tag == Iex_Get &&
+				    (((IRExprGet *)e->arg)->offset == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
+				     ((IRExprGet *)e->arg)->offset == offsetof(VexGuestAMD64State, guest_RSP))) {
+					/* The FS and RSP registers are
+					   assumed to always point at valid
+					   memory. */
 					return IRExpr_Const(IRConst_U1(0));
-
-				default:
-					abort();
 				}
 			}
+			if (e->arg->tag == Iex_Const) {
+				IRConst *c = ((IRExprConst *)e->arg)->con;
+				switch (e->op) {
+				case Iop_Neg8:
+					return IRExpr_Const(IRConst_U8(-c->Ico.U8));
+				case Iop_Neg16:
+					return IRExpr_Const(IRConst_U16(-c->Ico.U16));
+				case Iop_Neg32:
+					return IRExpr_Const(IRConst_U32(-c->Ico.U32));
+				case Iop_Neg64:
+					return IRExpr_Const(IRConst_U64(-c->Ico.U64));
+				case Iop_Not1:
+					return IRExpr_Const(IRConst_U1(!c->Ico.U1));
+				case Iop_32Uto64:
+					return IRExpr_Const(IRConst_U64(c->Ico.U32));
+				case Iop_32Sto64:
+					return IRExpr_Const(IRConst_U64((int)c->Ico.U32));
+				case Iop_1Uto8:
+					return IRExpr_Const(IRConst_U8(c->Ico.U1));
+				case Iop_64to1:
+					return IRExpr_Const(IRConst_U1(!!c->Ico.U64));
+				case Iop_64to32:
+					return IRExpr_Const(IRConst_U32(c->Ico.U64));
+				case Iop_BadPtr:
+					if (c->Ico.U64 < 4096) {
+						return IRExpr_Const(IRConst_U1(1));
+					}
+					{
+						/* We assume here that
+						   anything which has a fixed
+						   address must come out of
+						   one of the binaries which
+						   we've mapped.  That's not
+						   *completely* sound, but
+						   it's a pretty good
+						   approximation, because
+						   anything which is
+						   dynamically allocated will
+						   have a dynamic base, and
+						   hence will never have a
+						   constant address, and so
+						   won't show up here.  If
+						   it's not dynamically
+						   allocated then it must have
+						   come out of the binary, so
+						   we'll know its address. */
+						/* (This works for libraries,
+						   as well: if it's an
+						   internal reference then we
+						   must have loaded the
+						   library, so we'll be able
+						   to tell whether it provides
+						   a particular address; if
+						   it's inter-module, then you
+						   won't know the address of
+						   the referrent when
+						   compiling the referee, so
+						   it won't show up as a
+						   constant.) */
+						bool t;
+						if (opt.addressAccessible(c->Ico.U64, &t)) {
+							return IRExpr_Const(IRConst_U1(!t));
+						}
+					}
+					break;
+				default:
+					printf("Cannot constant fold unop %d\n", e->op);
+					break;
+				}
+			}
+			return IRExprTransformer::transformIex(e);
 		}
 
-		/* If the size is reduced to one, eliminate the assoc list */
-		if (src->Iex.Associative.nr_arguments == 1) {
-			*done_something = true;
-			return src->Iex.Associative.contents[0];
-		}
-	}
-
-	/* Now use some special rules to simplify a few classes of binops and unops. */
-	if (src->tag == Iex_Unop) {
-		__set_profiling(optimise_unop);
-		if (src->Iex.Unop.op == Iop_64to1 &&
-		    ((src->Iex.Unop.arg->tag == Iex_Associative &&
-		      (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
-		       src->Iex.Unop.arg->Iex.Associative.op == Iop_Or1)) ||
-		     (src->Iex.Unop.arg->tag == Iex_Binop &&
-		      ((src->Iex.Unop.arg->Iex.Binop.op >= Iop_CmpEQ8 &&
-			src->Iex.Unop.arg->Iex.Binop.op <= Iop_CmpNE64) ||
-		       (src->Iex.Unop.arg->Iex.Binop.op >= Iop_CmpLT32S &&
-			src->Iex.Unop.arg->Iex.Binop.op <= Iop_CmpLE64U))))) {
-			/* This can happen sometimes because of the
-			   way we simplify condition codes.  Very easy
-			   fix: strip off the outer 64to1. */
-			*done_something = true;
-			return src->Iex.Unop.arg;
-		}
-
-		if ((src->Iex.Unop.op >= Iop_8Uto16 &&
-		     src->Iex.Unop.op <= Iop_32Uto64) ||
-		    src->Iex.Unop.op == Iop_1Uto8) {
-			/* Get rid of unsigned upcasts; they tend to
-			   show up where you don't want them, and they
-			   don't actually do anything useful. */
-			*done_something = true;
-			return src->Iex.Unop.arg;
-		}
-
-		if (src->Iex.Unop.op == Iop_Not1 &&
-		    src->Iex.Unop.arg->tag == Iex_Unop &&
-		    src->Iex.Unop.arg->Iex.Unop.op == src->Iex.Unop.op) {
-			*done_something = true;
-			return src->Iex.Unop.arg->Iex.Unop.arg;
-		}
-
-		if (src->Iex.Unop.op == Iop_Not1 &&
-		    src->Iex.Unop.arg->tag == Iex_Associative &&
-		    (src->Iex.Unop.arg->Iex.Associative.op == Iop_And1 ||
-		     src->Iex.Unop.arg->Iex.Associative.op == Iop_Or1)) {
-			/* Convert ~(x & y) to ~x | ~y */
-			IRExpr *a = IRExpr_Associative(&src->Iex.Unop.arg->Iex.Associative);
-			for (int i = 0;
-			     i < a->Iex.Associative.nr_arguments;
-			     i++) {
-				a->Iex.Associative.contents[i] =
+		IRExpr *transformIex(IRExprBinop *e) {
+			__set_profiling(optimise_binop);
+			IRExpr *l = e->arg1;
+			IRExpr *r = e->arg2;
+			if (e->op == Iop_Xor1) {
+				/* Convert A ^ B to (A & ~B) | (~A & B).  It's
+				   bigger, but it's worth it just normalise
+				   things. */
+				*done_something = true;
+				return optimiseIRExpr(
+					IRExpr_Associative(
+						Iop_Or1,
+						IRExpr_Associative(
+							Iop_And1,
+							l,
+							IRExpr_Unop(Iop_Not1, r),
+							NULL),
+						IRExpr_Associative(
+							Iop_And1,
+							r,
+							IRExpr_Unop(Iop_Not1, l),
+							NULL),
+						NULL),
+					opt,
+					done_something);
+			}
+			if (e->op >= Iop_Sub8 &&
+			    e->op <= Iop_Sub64) {
+				/* Replace a - b with a + (-b), so as to
+				   eliminate binary -. */
+				*done_something = true;
+				e->op = (IROp)(e->op - Iop_Sub8 + Iop_Add8);
+				r = e->arg2 =
 					optimiseIRExprFP(
-						IRExpr_Unop(
-							Iop_Not1,
-							a->Iex.Associative.contents[i]),
+						IRExpr_Unop( (IROp)((e->op - Iop_Add8) + Iop_Neg8),
+							     r ),
 						opt,
 						done_something);
 			}
-			if (a->Iex.Associative.op == Iop_And1)
-				a->Iex.Associative.op = Iop_Or1;
-			else
-				a->Iex.Associative.op = Iop_And1;
-			*done_something = true;
-			return a;
-		}
-		if (src->Iex.Unop.op == Iop_BadPtr) {
-			if (src->Iex.Unop.arg->tag == Iex_Associative &&
-			    src->Iex.Unop.arg->Iex.Associative.op == Iop_Add64 &&
-			    src->Iex.Unop.arg->Iex.Associative.nr_arguments == 2 &&
-			    src->Iex.Unop.arg->Iex.Associative.contents[0]->tag == Iex_Const) {
-				/* BadPtr(k + x) -> BadPtr(x) if k is
-				 * a constant.  That's not strictly
-				 * speaking true, because it's always
-				 * possible that k is enough to push
-				 * you over the boundary between valid
-				 * and invalid memory, but that's so
-				 * rare that I'm willing to ignore
-				 * it. */
+			if (operationAssociates(e->op)) {
+				/* Convert to an associative operation. */
 				*done_something = true;
-				src->Iex.Unop.arg = src->Iex.Unop.arg->Iex.Associative.contents[1];
-				return src;
+				return optimiseIRExpr(
+					IRExpr_Associative(
+						e->op,
+						l,
+						r,
+						NULL),
+					opt,
+					done_something);
 			}
-			if (src->Iex.Unop.arg->tag == Iex_Get &&
-			    (src->Iex.Unop.arg->Iex.Get.offset == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
-			     src->Iex.Unop.arg->Iex.Get.offset == offsetof(VexGuestAMD64State, guest_RSP))) {
-				/* The FS and RSP registers are
-				   assumed to always point at valid
-				   memory. */
+			/* If a op b commutes, sort the arguments. */
+			if (operationCommutes(e->op) &&
+			    sortIRExprs(r, l)) {
+				e->arg1 = r;
+				e->arg2 = l;
+				l = e->arg1;
+				r = e->arg2;
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(0));
 			}
-		}
-		if (src->Iex.Unop.arg->tag == Iex_Const) {
-			IRConst *c = src->Iex.Unop.arg->Iex.Const.con;
-			switch (src->Iex.Unop.op) {
-			case Iop_Neg8:
+
+			/* x << 0 -> x */
+			if (e->op >= Iop_Shl8 && e->op <= Iop_Shl64 &&
+			    r->tag == Iex_Const &&
+			    ((IRExprConst *)r)->con->Ico.U8 == 0) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U8(-c->Ico.U8));
-			case Iop_Neg16:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U16(-c->Ico.U16));
-			case Iop_Neg32:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U32(-c->Ico.U32));
-			case Iop_Neg64:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U64(-c->Ico.U64));
-			case Iop_Not1:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U1(!c->Ico.U1));
-			case Iop_32Uto64:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U64(c->Ico.U32));
-			case Iop_32Sto64:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U64((int)c->Ico.U32));
-			case Iop_1Uto8:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U8(c->Ico.U1));
-			case Iop_64to1:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U1(!!c->Ico.U64));
-			case Iop_64to32:
-				*done_something = true;
-				return IRExpr_Const(IRConst_U32(c->Ico.U64));
-			case Iop_BadPtr:
-				if (c->Ico.U64 < 4096) {
+				return l;
+			}
+
+			/* We simplify == expressions with sums on the left
+			   and right by trying to move all of the constants to
+			   the left and all of the non-constants to the
+			   right. */
+			if (e->op == Iop_CmpEQ64) {
+				if (l->tag == Iex_Const &&
+				    ((IRExprConst *)l)->con->Ico.U64 == 0) {
+					/* 0 == x is equivalent to just !x */
+					*done_something = true;
+					return IRExpr_Unop(
+						Iop_Not1,
+						r);
+				}
+
+				if (r->tag == Iex_Associative &&
+				    ((IRExprAssociative *)r)->op == Iop_Add64 &&
+				    ((IRExprAssociative *)r)->contents[0]->tag == Iex_Const) {
+					assert(((IRExprAssociative *)r)->nr_arguments > 1);
+					/* a == C + b -> -C + a == b */
+					IRExpr *cnst = ((IRExprAssociative *)r)->contents[0];
+					IRExprAssociative *newRight = (IRExprAssociative *)IRExpr_Associative((IRExprAssociative *)r);
+					purgeAssocArgument(newRight, 0);
+					IRExpr *newLeft = IRExpr_Associative(
+						Iop_Add64,
+						IRExpr_Unop(
+							Iop_Neg64,
+							cnst),
+						l,
+						NULL);
+					l = e->arg1 = optimiseIRExprFP(newLeft, opt, done_something);
+					r = e->arg2 = optimiseIRExprFP(newRight, opt, done_something);
+					*done_something = true;
+				}
+				if (l->tag == Iex_Associative &&
+				    ((IRExprAssociative *)l)->op == Iop_Add64) {
+					/* C + a == b -> C == b - a */
+					assert(((IRExprAssociative *)l)->nr_arguments > 1);
+					IRExprAssociative *newR =
+						(IRExprAssociative *)IRExpr_Associative(Iop_Add64, r, NULL);
+					for (int it = 1;
+					     it < ((IRExprAssociative *)l)->nr_arguments;
+					     it++)
+						addArgumentToAssoc(newR,
+								   IRExpr_Unop(
+									   Iop_Neg64,
+									   ((IRExprAssociative *)l)->contents[it]));
+					IRExpr *cnst = ((IRExprAssociative *)l)->contents[0];
+					if (cnst->tag != Iex_Const) {
+						addArgumentToAssoc(newR,
+								   IRExpr_Unop(
+									   Iop_Neg64,
+									   cnst));
+						cnst = IRExpr_Const(IRConst_U64(0));
+					}
+					l = e->arg1 = cnst;
+					r = e->arg2 = optimiseIRExprFP(newR, opt, done_something);
+					*done_something = true;
+				}
+				/* If, in a == b, a and b are physically
+				 * identical, the result is a constant 1. */
+				if (physicallyEqual(l, r)) {
 					*done_something = true;
 					return IRExpr_Const(IRConst_U1(1));
 				}
-				{
-					/* We assume here that
-					   anything which has a fixed
-					   address must come out of
-					   one of the binaries which
-					   we've mapped.  That's not
-					   *completely* sound, but
-					   it's a pretty good
-					   approximation, because
-					   anything which is
-					   dynamically allocated will
-					   have a dynamic base, and
-					   hence will never have a
-					   constant address, and so
-					   won't show up here.  If
-					   it's not dynamically
-					   allocated then it must have
-					   come out of the binary, so
-					   we'll know its address. */
-					/* (This works for libraries,
-					   as well: if it's an
-					   internal reference then we
-					   must have loaded the
-					   library, so we'll be able
-					   to tell whether it provides
-					   a particular address; if
-					   it's inter-module, then you
-					   won't know the address of
-					   the referrent when
-					   compiling the referee, so
-					   it won't show up as a
-					   constant.) */
-					bool t;
-					if (opt.addressAccessible(c->Ico.U64, &t)) {
-						*done_something = true;
-						return IRExpr_Const(IRConst_U1(!t));
-					}
+
+				/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
+				if (l->tag != Iex_Const) {
+					e->arg1 = IRExpr_Const(IRConst_U64(0));
+					e->arg2 =
+						IRExpr_Binop(
+							Iop_Add64,
+							r,
+							IRExpr_Unop(
+								Iop_Neg64,
+								l));
+					*done_something = true;
+					return IRExprTransformer::transformIex(e);
 				}
-				break;
-			default:
-				printf("Cannot constant fold ");
-				ppIRExpr(src, stdout);
-				printf("\n");
-				break;
 			}
-		}
-	} else if (src->tag == Iex_Binop) {
-		__set_profiling(optimise_binop);
-		IRExpr *l = src->Iex.Binop.arg1;
-		IRExpr *r = src->Iex.Binop.arg2;
-		if (src->Iex.Binop.op == Iop_Xor1) {
-			/* Convert A ^ B to (A & ~B) | (~A & B).  It's
-			   bigger, but it's worth it just normalise
-			   things. */
-			*done_something = true;
-			return optimiseIRExpr(
-				IRExpr_Associative(
-					Iop_Or1,
-					IRExpr_Associative(
-						Iop_And1,
-						l,
-						IRExpr_Unop(Iop_Not1, r),
-						NULL),
-					IRExpr_Associative(
-						Iop_And1,
-						r,
-						IRExpr_Unop(Iop_Not1, l),
-						NULL),
-					NULL),
-				opt,
-				done_something);
-		}
-		if (src->Iex.Binop.op >= Iop_Sub8 &&
-		    src->Iex.Binop.op <= Iop_Sub64) {
-			/* Replace a - b with a + (-b), so as to
-			   eliminate binary -. */
-			*done_something = true;
-			src->Iex.Binop.op = (IROp)(src->Iex.Binop.op - Iop_Sub8 + Iop_Add8);
-			r = src->Iex.Binop.arg2 =
-				optimiseIRExprFP(
-					IRExpr_Unop( (IROp)((src->Iex.Binop.op - Iop_Add8) + Iop_Neg8),
-						     r ),
-					opt,
-					done_something);
-		}
-		if (operationAssociates(src->Iex.Binop.op)) {
-			/* Convert to an associative operation. */
-			*done_something = true;
-			return optimiseIRExpr(
-				IRExpr_Associative(
-					src->Iex.Binop.op,
-					l,
-					r,
-					NULL),
-				opt,
-				done_something);
-		}
-		/* If a op b commutes, sort the arguments. */
-		if (operationCommutes(src->Iex.Binop.op) &&
-		    sortIRExprs(r, l)) {
-			src->Iex.Binop.arg1 = r;
-			src->Iex.Binop.arg2 = l;
-			l = src->Iex.Binop.arg1;
-			r = src->Iex.Binop.arg2;
-			*done_something = true;
-		}
 
-		/* x << 0 -> x */
-		if (src->Iex.Binop.op >= Iop_Shl8 && src->Iex.Binop.op <= Iop_Shl64 &&
-		    r->tag == Iex_Const &&
-		    r->Iex.Const.con->Ico.U8 == 0) {
-			*done_something = true;
-			return l;
-		}
+			/* And another one: -x == c -> x == -c if c is a constant. */
+			if (e->op == Iop_CmpEQ64 &&
+			    l->tag == Iex_Unop &&
+			    ((IRExprUnop *)l)->op == Iop_Neg64 &&
+			    r->tag == Iex_Const) {
+				e->arg1 = ((IRExprUnop *)l)->arg;
+				e->arg2 = IRExpr_Const(
+					IRConst_U64(-((IRExprConst *)r)->con->Ico.U64));
+				*done_something = true;
+				return IRExprTransformer::transformIex(e);
+			}
 
-		/* We simplify == expressions with sums on the left
-		   and right by trying to move all of the constants to
-		   the left and all of the non-constants to the
-		   right. */
-		if (src->Iex.Binop.op == Iop_CmpEQ64) {
+			/* If enabled, assume that the stack is ``private'',
+			   in the sense that it doesn't alias with any global
+			   variables, and is therefore never equal to any
+			   constants which are present in the machine code. */
+			if (opt.assumePrivateStack &&
+			    e->op == Iop_CmpEQ64 &&
+			    r->tag == Iex_Get &&
+			    ((IRExprGet *)r)->offset == OFFSET_amd64_RSP &&
+			    l->tag == Iex_Const) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(0));
+			}
+
+			/* If both arguments are constant, try to constant
+			 * fold everything away. */
 			if (l->tag == Iex_Const &&
-			    l->Iex.Const.con->Ico.U64 == 0) {
-				/* 0 == x is equivalent to just !x */
-				*done_something = true;
-				return IRExpr_Unop(
-					Iop_Not1,
-					r);
-			}
-
-			if (r->tag == Iex_Associative &&
-			    r->Iex.Associative.op == Iop_Add64 &&
-			    r->Iex.Associative.contents[0]->tag == Iex_Const) {
-				assert(r->Iex.Associative.nr_arguments > 1);
-				/* a == C + b -> -C + a == b */
-				IRExpr *cnst = r->Iex.Associative.contents[0];
-				IRExpr *newRight = IRExpr_Associative(&r->Iex.Associative);
-				purgeAssocArgument(newRight, 0);
-				IRExpr *newLeft = IRExpr_Associative(
-					Iop_Add64,
-					IRExpr_Unop(
-						Iop_Neg64,
-						cnst),
-					l,
-					NULL);
-				l = src->Iex.Binop.arg1 = optimiseIRExprFP(newLeft, opt, done_something);
-				r = src->Iex.Binop.arg2 = optimiseIRExprFP(newRight, opt, done_something);
-				*done_something = true;
-			}
-			if (l->tag == Iex_Associative &&
-			    l->Iex.Associative.op == Iop_Add64) {
-				/* C + a == b -> C == b - a */
-				assert(l->Iex.Associative.nr_arguments > 1);
-				IRExpr *newR = IRExpr_Associative(Iop_Add64, r, NULL);
-				for (int it = 1;
-				     it < l->Iex.Associative.nr_arguments;
-				     it++)
-					addArgumentToAssoc(newR,
-							   IRExpr_Unop(
-								   Iop_Neg64,
-								   l->Iex.Associative.contents[it]));
-				IRExpr *cnst = l->Iex.Associative.contents[0];
-				if (cnst->tag != Iex_Const) {
-					addArgumentToAssoc(newR,
-							   IRExpr_Unop(
-								   Iop_Neg64,
-								   cnst));
-					cnst = IRExpr_Const(IRConst_U64(0));
+			    r->tag == Iex_Const) {
+				switch (e->op) {
+				case Iop_CmpEQ32:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U1(
+							((IRExprConst *)l)->con->Ico.U32 ==
+							((IRExprConst *)r)->con->Ico.U32));
+				case Iop_CmpLT64S:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U1(
+							(long)((IRExprConst *)l)->con->Ico.U64 <
+							(long)((IRExprConst *)r)->con->Ico.U64));
+				case Iop_CmpLT64U:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U1(
+							((IRExprConst *)l)->con->Ico.U64 <
+							((IRExprConst *)r)->con->Ico.U64));
+				case Iop_CmpEQ8:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U1(
+							((IRExprConst *)l)->con->Ico.U8 ==
+							((IRExprConst *)r)->con->Ico.U8));
+				case Iop_CmpEQ16:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U1(
+							((IRExprConst *)l)->con->Ico.U16 ==
+							((IRExprConst *)r)->con->Ico.U16));
+				case Iop_CmpEQ64:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U1(
+							((IRExprConst *)l)->con->Ico.U64 ==
+							((IRExprConst *)r)->con->Ico.U64));
+				case Iop_Sar32:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U32(
+							(int)((IRExprConst *)l)->con->Ico.U32 >>
+							((IRExprConst *)r)->con->Ico.U8));
+				case Iop_Sar64:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U64(
+							(long)((IRExprConst *)l)->con->Ico.U64 >>
+							((IRExprConst *)r)->con->Ico.U8));
+				case Iop_Shl64:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U64(
+							((IRExprConst *)l)->con->Ico.U64 <<
+							((IRExprConst *)r)->con->Ico.U8));
+				case Iop_CC_OverflowSub: {
+					unsigned long a = ((IRExprConst *)l)->con->Ico.U64;
+					unsigned long b = ((IRExprConst *)r)->con->Ico.U64;
+					return IRExpr_Const(
+						IRConst_U1(
+							((a ^ b) & (a ^ (a - b))) >> 63));
 				}
-				l = src->Iex.Binop.arg1 = cnst;
-				r = src->Iex.Binop.arg2 = optimiseIRExprFP(newR, opt, done_something);
-				*done_something = true;
+				case Iop_32HLto64:
+					return IRExpr_Const(
+						IRConst_U64(
+							((unsigned long)((IRExprConst *)l)->con->Ico.U32 << 32) |
+							((IRExprConst *)r)->con->Ico.U32));
+				default:
+					printf("Cannot constant fold binop %d\n", e->op);
+					break;
+				}
 			}
-			/* If, in a == b, a and b are physically
-			 * identical, the result is a constant 1. */
-			if (physicallyEqual(l, r)) {
-				*done_something = true;
-				return IRExpr_Const(IRConst_U1(1));
-			}
-
-			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
-			if (l->tag != Iex_Const) {
-				src->Iex.Binop.arg1 = IRExpr_Const(IRConst_U64(0));
-				src->Iex.Binop.arg2 =
-					IRExpr_Binop(
-						Iop_Add64,
-						r,
-						IRExpr_Unop(
-							Iop_Neg64,
-							l));
-				*done_something = true;
-				return optimiseIRExpr(src, opt, done_something);
-			}
+			return IRExprTransformer::transformIex(e);
 		}
 
-		/* And another one: -x == c -> x == -c if c is a constant. */
-		if (src->Iex.Binop.op == Iop_CmpEQ64 &&
-		    l->tag == Iex_Unop &&
-		    l->Iex.Unop.op == Iop_Neg64 &&
-		    r->tag == Iex_Const) {
-			src->Iex.Binop.arg1 = l->Iex.Unop.arg;
-			src->Iex.Binop.arg2 = IRExpr_Const(
-				IRConst_U64(-r->Iex.Const.con->Ico.U64));
-			*done_something = true;
-			return optimiseIRExpr(src, opt, done_something);
-		}
-
-		/* If enabled, assume that the stack is ``private'',
-		   in the sense that it doesn't alias with any global
-		   variables, and is therefore never equal to any
-		   constants which are present in the machine code. */
-		if (opt.assumePrivateStack &&
-		    src->Iex.Binop.op == Iop_CmpEQ64 &&
-		    r->tag == Iex_Get &&
-		    r->Iex.Get.offset == OFFSET_amd64_RSP &&
-		    l->tag == Iex_Const) {
-			*done_something = true;
-			return IRExpr_Const(IRConst_U1(0));
-		}
-
-		/* If both arguments are constant, try to constant
-		 * fold everything away. */
-		if (l->tag == Iex_Const &&
-		    r->tag == Iex_Const) {
-			switch (src->Iex.Binop.op) {
-			case Iop_CmpEQ32:
+		IRExpr *transformIex(IRExprMux0X *e) {
+			if (e->cond->tag == Iex_Const) {
 				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U1(
-						l->Iex.Const.con->Ico.U32 ==
-						r->Iex.Const.con->Ico.U32));
-			case Iop_CmpLT64S:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U1(
-						(long)l->Iex.Const.con->Ico.U64 <
-						(long)r->Iex.Const.con->Ico.U64));
-			case Iop_CmpLT64U:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U1(
-						l->Iex.Const.con->Ico.U64 <
-						r->Iex.Const.con->Ico.U64));
-			case Iop_CmpEQ8:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U1(
-						l->Iex.Const.con->Ico.U8 ==
-						r->Iex.Const.con->Ico.U8));
-			case Iop_CmpEQ16:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U1(
-						l->Iex.Const.con->Ico.U16 ==
-						r->Iex.Const.con->Ico.U16));
-			case Iop_CmpEQ64:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U1(
-						l->Iex.Const.con->Ico.U64 ==
-						r->Iex.Const.con->Ico.U64));
-			case Iop_Sar32:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U32(
-						    (int)l->Iex.Const.con->Ico.U32 >>
-						    r->Iex.Const.con->Ico.U8));
-			case Iop_Sar64:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U64(
-						    (long)l->Iex.Const.con->Ico.U64 >>
-						    r->Iex.Const.con->Ico.U8));
-			case Iop_Shl64:
-				*done_something = true;
-				return IRExpr_Const(
-					IRConst_U64(
-						    l->Iex.Const.con->Ico.U64 <<
-						    r->Iex.Const.con->Ico.U8));
-			case Iop_CC_OverflowSub: {
-				unsigned long a = l->Iex.Const.con->Ico.U64;
-				unsigned long b = r->Iex.Const.con->Ico.U64;
-				return IRExpr_Const(
-					IRConst_U1(
-						((a ^ b) & (a ^ (a - b))) >> 63));
+				if (((IRExprConst *)e->cond)->con->Ico.U1)
+					return e->exprX;
+				else
+					return e->expr0;
 			}
-			case Iop_32HLto64:
-				return IRExpr_Const(
-					IRConst_U64(
-						((unsigned long)l->Iex.Const.con->Ico.U32 << 32) |
-						r->Iex.Const.con->Ico.U32));
-			default:
-				printf("Cannot constant fold binop %d: ", src->Iex.Binop.op);
-				ppIRExpr(src, stdout);
-				printf("\n");
-				break;
-			}
+			return IRExprTransformer::transformIex(e);
 		}
-
-	} else if (src->tag == Iex_Mux0X) {
-		if (src->Iex.Mux0X.cond->tag == Iex_Const) {
-			*done_something = true;
-			if (src->Iex.Mux0X.cond->Iex.Const.con->Ico.U1)
-				return src->Iex.Mux0X.exprX;
-			else
-				return src->Iex.Mux0X.expr0;
-		}
-	}
-
-	return src;
+	public:
+		_(const AllowableOptimisations &_opt,
+		  bool *_done_something)
+			: opt(_opt), done_something(_done_something)
+		{}
+	} t(opt, done_something);
+	return t.transformIRExpr(src, done_something);
 }
 
 static IRExpr *
@@ -1531,20 +1505,20 @@ bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
 	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
-	return r->tag == Iex_Const && r->Iex.Const.con->Ico.U1;
+	return r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1;
 }
 bool
 definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
 	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
-	return r->tag == Iex_Const && !r->Iex.Const.con->Ico.U1;
+	return r->tag == Iex_Const && !((IRExprConst *)r)->con->Ico.U1;
 }
 
 bool
 isBadAddress(IRExpr *e, const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	return e->tag == Iex_Const &&
-		(long)e->Iex.Const.con->Ico.U64 < 4096;
+		(long)((IRExprConst *)e)->con->Ico.U64 < 4096;
 }
 
 bool
@@ -1552,485 +1526,23 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInte
 {
 	if (TIMEOUT)
 		return false;
-	switch (e->tag) {
-	case Iex_Get:
-	case Iex_RdTmp:
-	case Iex_Const:
-	case Iex_FreeVariable:
-	case Iex_HappensBefore:
-		return false;
-	case Iex_GetI:
-		return definitelyUnevaluatable(e->Iex.GetI.ix, opt, oracle);
-	case Iex_Qop:
-		if (definitelyUnevaluatable(e->Iex.Qop.arg4, opt, oracle))
-			return true;
-	case Iex_Triop:
-		if (definitelyUnevaluatable(e->Iex.Qop.arg3, opt, oracle))
-			return true;
-	case Iex_Binop:
-		if (definitelyUnevaluatable(e->Iex.Qop.arg2, opt, oracle))
-			return true;
-	case Iex_Unop:
-		if (definitelyUnevaluatable(e->Iex.Qop.arg1, opt, oracle))
-			return true;
-		return false;
-	case Iex_CCall:
-		for (int x = 0; e->Iex.CCall.args[x]; x++)
-			if (definitelyUnevaluatable(e->Iex.CCall.args[x], opt, oracle))
-				return true;
-		return false;
-	case Iex_Mux0X:
-		return definitelyUnevaluatable(e->Iex.Mux0X.cond, opt, oracle);
-	case Iex_Associative:
-		for (int x = 0; x < e->Iex.Associative.nr_arguments; x++)
-			if (definitelyUnevaluatable(e->Iex.Associative.contents[x], opt, oracle))
-				return true;
-		return false;
-	case Iex_Load:
-		return isBadAddress(e->Iex.Load.addr, opt, oracle) ||
-			definitelyUnevaluatable(e->Iex.Load.addr, opt, oracle);
-	case Iex_ClientCall:
-		for (int x = 0; e->Iex.ClientCall.args[x]; x++)
-			if (definitelyUnevaluatable(e->Iex.ClientCall.args[x], opt, oracle))
-				return true;
-		return false;
-	case Iex_ClientCallFailed:
-		return definitelyUnevaluatable(e->Iex.ClientCallFailed.target, opt, oracle);
-	}
-	abort();
-}
+	class _ : public IRExprTransformer {
+	public:
+		bool res;
+		const AllowableOptimisations &opt;
+		OracleInterface *oracle;
 
-static IRType
-random_irtype(void)
-{
-       return (IRType)((unsigned long)Ity_I8 + random() % 7);
-}
-
-static IRConst *
-random_irconst(void)
-{
-	switch (random_irtype()) {
-	case Ity_I8:
-		return IRConst_U8(random() % 256);
-	case Ity_I16:
-		return IRConst_U16(random() % 65536);
-	case Ity_I32:
-		return IRConst_U32(random());
-	case Ity_I64:
-		return IRConst_U64(random());
-	case Ity_F32:
-	case Ity_I128:
-		return random_irconst();
-	case Ity_F64:
-		return IRConst_F64(random() / (double)random());
-	case Ity_V128:
-		return IRConst_V128(random());
-	default:
-		abort();
-	}
-}
-
-/* The random IRexprs consist of a possible-empty layer of And1, Or1,
- * Xor1, and Not1 operations, followed by a layer of comparisons and
- * boolean functions, and then other stuff underneath. */
-
-static IRExpr *random_irexpr1(unsigned depth);
-
-/* Build arithmetic layer */
-static IRExpr *
-random_irexpr3(unsigned depth)
-{
-	if (!depth)
-		return IRExpr_Const(IRConst_U64(random()));
-	switch (random() % 12) {
-	case 0:
-		return IRExpr_Const(IRConst_U64(random()));
-	case 1:
-		return IRExpr_Mux0X(
-			random_irexpr1(depth - 1),
-			random_irexpr3(depth - 1),
-			random_irexpr3(depth - 1));
-	case 2:
-		return IRExpr_Binop(
-			Iop_Add64,
-			random_irexpr3(depth - 1),
-			random_irexpr3(depth - 1));
-	case 3:
-		return IRExpr_Binop(
-			Iop_And64,
-			random_irexpr3(depth - 1),
-			random_irexpr3(depth - 1));
-	case 4:
-		return IRExpr_Binop(
-			Iop_Or64,
-			random_irexpr3(depth - 1),
-			random_irexpr3(depth - 1));
-	case 5:
-		return IRExpr_Binop(
-			Iop_Xor64,
-			random_irexpr3(depth - 1),
-			random_irexpr3(depth - 1));
-	case 6:
-		return IRExpr_Unop(
-			Iop_Neg64,
-			random_irexpr3(depth - 1));
-	case 7:
-		return IRExpr_Unop(
-			Iop_Not64,
-			random_irexpr3(depth - 1));
-	case 8:
-		return IRExpr_Binop(
-			Iop_Sub64,
-			random_irexpr3(depth - 1),
-			random_irexpr3(depth - 1));
-	case 9:
-		return IRExpr_Binop(
-			Iop_Sar64,
-			random_irexpr3(depth - 1),
-			random_irexpr3(depth - 1));
-	case 10:
-		return IRExpr_Get(
-			(random() % 40) * 8,
-			Ity_I64,
-			73);
-	case 11:
-		return IRExpr_RdTmp(random() % 16, 73);
-	}
-	abort();
-}
-
-/* Build comparator layer */
-static IRExpr *
-random_irexpr2(unsigned depth)
-{
-	if (!depth)
-		return IRExpr_Const(IRConst_U1(random() % 2));
-	switch (random() % 6) {
-	case 0:
-		return IRExpr_Unop(Iop_BadPtr, random_irexpr3(depth - 1));
-	case 1:
-		return IRExpr_Binop(Iop_CmpEQ64,
-				    random_irexpr3(depth - 1),
-				    random_irexpr3(depth - 1));
-	case 2:
-		return IRExpr_Binop(Iop_CmpLT64U,
-				    random_irexpr3(depth - 1),
-				    random_irexpr3(depth - 1));
-	case 3:
-		return IRExpr_Binop(Iop_CmpLT64S,
-				    random_irexpr3(depth - 1),
-				    random_irexpr3(depth - 1));
-	case 4:
-		return IRExpr_Binop(Iop_CC_OverflowSub,
-				    random_irexpr3(depth - 1),
-				    random_irexpr3(depth - 1));
-	case 5: {
-		unsigned op;
-		switch (random() % 4) {
-		case 0:
-			op = AMD64G_CC_OP_COPY;
-			break;
-		case 1:
-			op = AMD64G_CC_OP_ADDQ;
-			break;
-		case 2:
-			op = AMD64G_CC_OP_SUBQ;
-			break;
-		case 3:
-			op = AMD64G_CC_OP_LOGICQ;
-			break;
-		default:
-			abort();
+		IRExpr *transformIex(IRExprLoad *e) {
+			if (isBadAddress(e->addr, opt, oracle))
+				res = true;
+			return IRExprTransformer::transformIex(e);
 		}
-		
-		return mkIRExprCCall(
-			Ity_I64,
-			0,
-			"amd64g_calculate_condition",
-			(void *)amd64g_calculate_condition,
-			mkIRExprVec_5(IRExpr_Const(IRConst_U64(random() % 16)),
-				      IRExpr_Const(IRConst_U64(op)),
-				      random_irexpr3(depth - 1),
-				      random_irexpr3(depth - 1),
-				      random_irexpr3(depth - 1)));
-	}
-	}
-	abort();
+		_(const AllowableOptimisations &_opt,
+		  OracleInterface *_oracle)
+			: res(false), opt(_opt), oracle(_oracle)
+		{}
+	} t(opt, oracle);
+	t.transformIRExpr(e);
+	return t.res;
 }
 
-/* Build boolean layer */
-static IRExpr *
-random_irexpr1(unsigned depth)
-{
-	if (!depth)
-		return IRExpr_Const(IRConst_U1(random() % 2));
-	switch (random() % 5) {
-	case 0:
-		return IRExpr_Binop(Iop_And1,
-				    random_irexpr1(depth - 1),
-				    random_irexpr1(depth - 1));
-	case 1:
-		return IRExpr_Binop(Iop_Xor1,
-				    random_irexpr1(depth - 1),
-				    random_irexpr1(depth - 1));
-	case 2:
-		return IRExpr_Binop(Iop_Or1,
-				    random_irexpr1(depth - 1),
-				    random_irexpr1(depth - 1));
-	case 3:
-		return IRExpr_Unop(Iop_Not1,
-				   random_irexpr1(depth - 1));
-	case 4:
-		return random_irexpr2(depth);
-	}
-	abort();
-}
-
-/* Check that sortIRExprs() produces vaguely sane results. */
-void
-sanity_check_irexpr_sorter(void)
-{
-	srandom(time(NULL));
-#define NR_EXPRS 10000
-	IRExpr *exprs[NR_EXPRS];
-	int x;
-	int y;
-
-	printf("Generating %d random expressions\n", NR_EXPRS);
-	for (x = 0; x < NR_EXPRS; x++)
-		exprs[x] = random_irexpr1(3);
-
-	printf("Ordering should be anti-reflexive.\n");
-	for (x = 0; x < NR_EXPRS; x++)
-		assert(!sortIRExprs(exprs[x], exprs[x]));
-
-	printf("Ordering should be anti-symmetric.\n");
-	for (x = 0; x < NR_EXPRS; x++) {
-		for (y = x + 1; y < NR_EXPRS; y++) {
-			if (sortIRExprs(exprs[x], exprs[y]))
-				assert(!sortIRExprs(exprs[y], exprs[x]));
-		}
-	}
-
-	/* Ordering must be transitive and total.  We check this by
-	 * performing a naive topological sort on the expressions and
-	 * then checking that whenever x < y exprs[x] < exprs[y]. */
-	IRExpr *exprs2[NR_EXPRS];
-
-	int nr_exprs2 = 0;
-	int candidate;
-	int probe;
-	bool progress = true;
-	printf("Toposorting...\n");
-	while (nr_exprs2 < NR_EXPRS) {
-		/* Try to find an ordering-minimal entry in the
-		 * array.  */
-		assert(progress);
-		progress = false;
-		for (candidate = 0; candidate < NR_EXPRS; candidate++) {
-			if (!exprs[candidate])
-				continue;
-			for (probe = 0; probe < NR_EXPRS; probe++) {
-				if (!exprs[probe])
-					continue;
-				if (sortIRExprs(exprs[probe], exprs[candidate])) {
-					/* probe is less than
-					   candidate, so candidate
-					   fails. */
-					break;
-				}
-			}
-			if (probe == NR_EXPRS) {
-				/* This candidate passes.  Add it to
-				   the list. */
-				exprs2[nr_exprs2] = exprs[candidate];
-				exprs[candidate] = NULL;
-				nr_exprs2++;
-				progress = true;
-			}
-		}
-	}
-
-	/* Okay, have a topo sort.  The ordering is supposed to be
-	   total, so that should have just been an O(n^3) selection
-	   sort, and the array should now be totally sorted.  check
-	   it. */
-	printf("Check toposort is total...\n");
-	for (x = 0; x < NR_EXPRS; x++)
-		for (y = x + 1; y < NR_EXPRS; y++)
-			assert(!sortIRExprs(exprs2[y], exprs2[x]));
-#undef NR_EXPRS
-}
-
-class RandomExpressionEvalCtxt {
-public:
-	std::map<std::pair<IRTemp, unsigned>, unsigned long> temporaries;
-	std::map<std::pair<unsigned, unsigned>, unsigned long> registers;
-	std::map<unsigned long, int> badAddress;
-};
-
-static unsigned long
-randomEvalExpression(RandomExpressionEvalCtxt &ctxt, IRExpr *expr)
-{
-	switch (expr->tag) {
-	case Iex_Const:
-		return expr->Iex.Const.con->Ico.U64;
-	case Iex_RdTmp: {
-		std::pair<IRTemp, unsigned> k(expr->Iex.RdTmp.tmp, expr->Iex.RdTmp.tid);
-		if (!ctxt.temporaries.count(k))
-			ctxt.temporaries[k] = random();
-		return ctxt.temporaries[k];
-	}
-	case Iex_Get: {
-		std::pair<unsigned, unsigned> k(expr->Iex.Get.offset, expr->Iex.Get.tid);
-		if (!ctxt.registers.count(k))
-			ctxt.registers[k] = random();
-		return ctxt.registers[k];
-		
-	}
-	case Iex_Mux0X:
-		if (randomEvalExpression(ctxt, expr->Iex.Mux0X.cond))
-			return randomEvalExpression(ctxt, expr->Iex.Mux0X.exprX);
-		else
-			return randomEvalExpression(ctxt, expr->Iex.Mux0X.expr0);
-	case Iex_Binop: {
-		unsigned long l = randomEvalExpression(ctxt, expr->Iex.Binop.arg1);
-		unsigned long r = randomEvalExpression(ctxt, expr->Iex.Binop.arg2);
-		switch (expr->Iex.Binop.op) {
-		case Iop_And1:
-		case Iop_And64:
-			return l & r;
-		case Iop_Xor1:
-		case Iop_Xor64:
-			return l ^ r;
-		case Iop_Or1:
-		case Iop_Or64:
-			return l | r;
-		case Iop_Sar64:
-			return l >> r;
-		case Iop_CmpEQ64:
-			return l == r;
-		case Iop_CmpLT64U:
-			return l < r;
-		case Iop_CmpLT64S:
-			return (long)l < (long)r;
-		case Iop_CC_OverflowSub:
-			return ((l ^ r) & (l ^ (l - r))) >> 63;
-		default:
-			abort();
-			return 0;
-		}
-	}
-	case Iex_Associative: {
-		std::vector<unsigned long> args;
-		args.resize(expr->Iex.Associative.nr_arguments);
-		for (int i = 0; i < expr->Iex.Associative.nr_arguments; i++)
-			args[i] = randomEvalExpression(ctxt, expr->Iex.Associative.contents[i]);
-		unsigned long acc;
-		switch (expr->Iex.Associative.op) {
-		case Iop_And1:
-			acc = 1;
-			for (unsigned i = 0; i < args.size(); i++)
-				acc &= args[i];
-			return acc;
-		case Iop_And64:
-			acc = ~0ul;
-			for (unsigned i = 0; i < args.size(); i++)
-				acc &= args[i];
-			return acc;
-		case Iop_Xor1:
-		case Iop_Xor64:
-			acc = 0;
-			for (unsigned i = 0; i < args.size(); i++)
-				acc ^= args[i];
-			return acc;
-		case Iop_Or1:
-		case Iop_Or64:
-			acc = 0;
-			for (unsigned i = 0; i < args.size(); i++)
-				acc |= args[i];
-			return acc;
-		case Iop_Add64:
-			acc = 0;
-			for (unsigned i = 0; i < args.size(); i++)
-				acc += args[i];
-			return acc;
-		default:
-			abort();
-		}
-	}
-	case Iex_Unop: {
-		unsigned long a = randomEvalExpression(ctxt, expr->Iex.Unop.arg);
-		switch (expr->Iex.Unop.op) {
-		case Iop_Not1:
-			return !a;
-		case Iop_Neg64:
-			return -a;
-		case Iop_Not64:
-			return ~a;
-		case Iop_BadPtr:
-			if (a < 4096)
-				return 1;
-			if (!ctxt.badAddress.count(a / 4096))
-				ctxt.badAddress[a/4096] = random() % 2;
-			return ctxt.badAddress[a/4096];
-		default:
-			abort();
-		}
-	}
-	case Iex_CCall:
-		assert(!strcmp(expr->Iex.CCall.cee->name, "amd64g_calculate_condition"));
-		return amd64g_calculate_condition(
-			randomEvalExpression(ctxt, expr->Iex.CCall.args[0]),
-			randomEvalExpression(ctxt, expr->Iex.CCall.args[1]),
-			randomEvalExpression(ctxt, expr->Iex.CCall.args[2]),
-			randomEvalExpression(ctxt, expr->Iex.CCall.args[3]),
-			randomEvalExpression(ctxt, expr->Iex.CCall.args[4]));
-	default:
-		abort();
-	}
-	abort();
-	return 0;
-}
-
-void
-sanity_check_optimiser(void)
-{
-	/* x + -x -> 0 */
-	IRExpr *start =
-		IRExpr_Associative(
-			Iop_Add64,
-			IRExpr_Get(0, Ity_I64, 0),
-			IRExpr_Unop(
-				Iop_Neg64,
-				IRExpr_Get(0, Ity_I64, 0)),
-			NULL);
-	IRExpr *end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
-	/* x & ~x -> 0 */
-	start = IRExpr_Associative(
-		Iop_And1,
-		IRExpr_Unop(
-			Iop_Not1,
-			IRExpr_Get(0, Ity_I64, 0)),
-		IRExpr_Get(0, Ity_I64, 0),
-		NULL);
-	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	end = optimiseIRExpr(start, AllowableOptimisations::defaultOptimisations);
-	assert(physicallyEqual(end, IRExpr_Const(IRConst_U64(0))));
-
-	for (unsigned cntr1 = 0; cntr1 < 10000; cntr1++) {
-		IRExpr *orig;
-		IRExpr *optimised;
-		do {
-			orig = random_irexpr1(4);
-			optimised = simplifyIRExpr(orig, AllowableOptimisations::defaultOptimisations);
-		} while (physicallyEqual(orig, optimised));
-
-		for (unsigned cntr2 = 0; cntr2 < 100; cntr2++) {
-			RandomExpressionEvalCtxt ctxt;
-			assert(ctxt.temporaries.size() == 0);
-			assert(randomEvalExpression(ctxt, orig) == randomEvalExpression(ctxt, optimised));
-		}
-	}
-}

@@ -17,8 +17,8 @@ public:
 	threadAndRegister(unsigned tid, int reg)
 		: std::pair<unsigned, int>(tid, reg)
 	{}
-	threadAndRegister(IRExpr::Get &e)
-		: std::pair<unsigned, int>(e.tid, e.offset)
+	threadAndRegister(IRExprGet *e)
+		: std::pair<unsigned, int>(e->tid, e->offset)
 	{}
 	threadAndRegister(unsigned tid, IRStmt::Put &e)
 		: std::pair<unsigned, int>(tid, e.offset)
@@ -29,8 +29,8 @@ public:
 	threadAndRegister(unsigned tid, IRStmt::Dirty &e)
 		: std::pair<unsigned, int>(tid, -e.details->tmp - 1)
 	{}
-	threadAndRegister(IRExpr::RdTmp &e)
-		: std::pair<unsigned, int>(e.tid, -e.tmp - 1)
+	threadAndRegister(IRExprRdTmp *e)
+		: std::pair<unsigned, int>(e->tid, -e->tmp - 1)
 	{}
 	unsigned long hash() const {
 		return first * 142993 + second * 196279;

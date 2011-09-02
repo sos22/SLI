@@ -325,54 +325,27 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 	_currentIRExpr = e;
 	IRExpr *res = NULL;
 	switch (e->tag) {
-	case Iex_Get:
-		res = transformIex(&e->Iex.Get);
-		break;
-	case Iex_GetI:
-		res = transformIex(&e->Iex.GetI);
-		break;
-	case Iex_RdTmp:
-		res = transformIex(&e->Iex.RdTmp);
-		break;
-	case Iex_Qop:
-		res = transformIex(&e->Iex.Qop);
-		break;
-	case Iex_Triop:
-		res = transformIex(&e->Iex.Triop);
-		break;
-	case Iex_Binop:
-		res = transformIex(&e->Iex.Binop);
-		break;
-	case Iex_Unop:
-		res = transformIex(&e->Iex.Unop);
-		break;
-	case Iex_Load:
-		res = transformIex(&e->Iex.Load);
-		break;
-	case Iex_Const:
-		res = transformIex(&e->Iex.Const);
-		break;
-	case Iex_CCall:
-		res = transformIex(&e->Iex.CCall);
-		break;
-	case Iex_Mux0X:
-		res = transformIex(&e->Iex.Mux0X);
-		break;
-	case Iex_Associative:
-		res = transformIex(&e->Iex.Associative);
-		break;
-	case Iex_FreeVariable:
-		res = transformIex(&e->Iex.FreeVariable);
-		break;
-	case Iex_ClientCall:
-		res = transformIex(&e->Iex.ClientCall);
-		break;
-	case Iex_ClientCallFailed:
-		res = transformIex(&e->Iex.ClientCallFailed);
-		break;
-	case Iex_HappensBefore:
-		res = transformIex(&e->Iex.HappensBefore);
-		break;
+#define do_case(n)						\
+		case Iex_ ## n:					\
+			res = transformIex((IRExpr ## n *)e);	\
+			break
+		do_case(Get);
+		do_case(GetI);
+		do_case(RdTmp);
+		do_case(Qop);
+		do_case(Triop);
+		do_case(Binop);
+		do_case(Unop);
+		do_case(Load);
+		do_case(Const);
+		do_case(CCall);
+		do_case(Mux0X);
+		do_case(Associative);
+		do_case(FreeVariable);
+		do_case(ClientCall);
+		do_case(ClientCallFailed);
+		do_case(HappensBefore);
+#undef do_case
 	}
 	/* res == e shouldn't really happen, but it's just about
 	   possible that expression internment could make it happen in
@@ -387,7 +360,7 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 }
 
 IRExpr *
-IRExprTransformer::transformIex(IRExpr::CCall *e)
+IRExprTransformer::transformIex(IRExprCCall *e)
 {
 	IRExpr **newArgs;
 	int nr_args;
@@ -409,7 +382,7 @@ IRExprTransformer::transformIex(IRExpr::CCall *e)
 }
 
 IRExpr *
-IRExprTransformer::transformIex(IRExpr::ClientCall *e)
+IRExprTransformer::transformIex(IRExprClientCall *e)
 {
 	IRExpr **newArgs;
 	int nr_args;
@@ -429,12 +402,12 @@ IRExprTransformer::transformIex(IRExpr::ClientCall *e)
 }
 
 IRExpr *
-IRExprTransformer::transformIex(IRExpr::Associative *e)
+IRExprTransformer::transformIex(IRExprAssociative *e)
 {
 	bool t = false;
-	IRExpr *r = IRExpr_Associative(e);
+	IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(e);
 	for (int x = 0; x < e->nr_arguments; x++)
-		r->Iex.Associative.contents[x] = transformIRExpr(e->contents[x], &t);
+		r->contents[x] = transformIRExpr(e->contents[x], &t);
 	if (!t)
 		return NULL;
 	else
@@ -450,7 +423,7 @@ rewriteTemporary(IRExpr *sm,
 		IRTemp tmp;
 		IRExpr *to;
 	protected:
-		IRExpr *transformIex(IRExpr::RdTmp *what)
+		IRExpr *transformIex(IRExprRdTmp *what)
 		{
 			if (what->tmp == tmp)
 				return to;
@@ -1078,13 +1051,13 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		bool res;
 		threadAndRegister reg;
 		StateMachineSideEffect *preserve;
-		IRExpr *transformIex(IRExpr::Get *e) {
-			if (threadAndRegister(*e) == reg)
+		IRExpr *transformIex(IRExprGet *e) {
+			if (threadAndRegister(e) == reg)
 				res = true;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExpr::RdTmp *e) {
-			if (threadAndRegister(*e) == reg)
+		IRExpr *transformIex(IRExprRdTmp *e) {
+			if (threadAndRegister(e) == reg)
 				res = true;
 			return NULL;
 		}
@@ -1242,14 +1215,14 @@ class applyAvailTransformer : public IRExprTransformer {
 public:
 	const avail_t &avail;
 	const bool use_assumptions;
-	IRExpr *transformIex(IRExpr::Get *e) {
-		auto it = avail.registers.find(threadAndRegister(*e));
+	IRExpr *transformIex(IRExprGet *e) {
+		auto it = avail.registers.find(threadAndRegister(e));
 		if (it != avail.registers.end())
 			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
-	IRExpr *transformIex(IRExpr::RdTmp *e) {
-		auto it = avail.registers.find(threadAndRegister(*e));
+	IRExpr *transformIex(IRExprRdTmp *e) {
+		auto it = avail.registers.find(threadAndRegister(e));
 		if (it != avail.registers.end())
 			return it->second;
 		return IRExprTransformer::transformIex(e);
@@ -2083,7 +2056,7 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 /* Turn references to RBP into RSP+k, if we know that RBP=RSP+k. */
 class CanonicaliseRbp : public StateMachineTransformer {
 	IRExpr *delta;
-	IRExpr *transformIex(IRExpr::Get *orig) {
+	IRExpr *transformIex(IRExprGet *orig) {
 		if (orig->offset == OFFSET_amd64_RBP && orig->ty == Ity_I64) {
 			return IRExpr_Associative(
 				Iop_Add64,
@@ -2135,12 +2108,12 @@ public:
 			puttedRegisters.insert(((StateMachineSideEffectLoad *)se)->target);
 		return se;
 	}
-	IRExpr *transformIex(IRExpr::Get *what) {
-		accessedRegisters.insert(threadAndRegister(*what));
+	IRExpr *transformIex(IRExprGet *what) {
+		accessedRegisters.insert(threadAndRegister(what));
 		return StateMachineTransformer::transformIex(what);
 	}
-	IRExpr *transformIex(IRExpr::RdTmp *what) {
-		accessedRegisters.insert(threadAndRegister(*what));
+	IRExpr *transformIex(IRExprRdTmp *what) {
+		accessedRegisters.insert(threadAndRegister(what));
 		return StateMachineTransformer::transformIex(what);
 	}
 	BuildFreeVariableMapTransformer(FreeVariableMap &_freeVariables)
@@ -2168,11 +2141,12 @@ public:
 		std::map<threadAndRegister, IRExpr *> &_map)
 		: map(_map)
 	{}
-	IRExpr *transformIex(IRExpr::Get *what) {
-		threadAndRegister k(*what);
+	IRExpr *transformIex(IRExprGet *what) {
+		threadAndRegister k(what);
 		if (map.count(k)) {
-			IRExpr *res = map[k];
-			fvDelta.push_back(std::pair<FreeVariableKey, IRExpr *>(res->Iex.FreeVariable.key, currentIRExpr()));
+			IRExprFreeVariable *res = (IRExprFreeVariable *)map[k];
+			assert(res->tag == Iex_FreeVariable);
+			fvDelta.push_back(std::pair<FreeVariableKey, IRExpr *>(res->key, currentIRExpr()));
 			return res;
 		} else {
 			return NULL;
@@ -2205,12 +2179,12 @@ namespace __offline_analysis_dead_code {
 		{
 			class _ : public IRExprTransformer {
 				LivenessEntry &out;
-				IRExpr *transformIex(IRExpr::Get *g) {
-					out.insert(threadAndRegister(*g));
+				IRExpr *transformIex(IRExprGet *g) {
+					out.insert(threadAndRegister(g));
 					return IRExprTransformer::transformIex(g);
 				}
-				IRExpr *transformIex(IRExpr::RdTmp *g) {
-					out.insert(threadAndRegister(*g));
+				IRExpr *transformIex(IRExprRdTmp *g) {
+					out.insert(threadAndRegister(g));
 					return IRExprTransformer::transformIex(g);
 				}
 			public:
@@ -2267,13 +2241,13 @@ namespace __offline_analysis_dead_code {
 			class _ : public IRExprTransformer {
 				LivenessEntry *_this;
 
-				IRExpr *transformIex(IRExpr::Get *g) {
-					if (_this->registerLive(threadAndRegister(*g)))
+				IRExpr *transformIex(IRExprGet *g) {
+					if (_this->registerLive(threadAndRegister(g)))
 						res = true;
 					return IRExprTransformer::transformIex(g);
 				}
-				IRExpr *transformIex(IRExpr::RdTmp *g) {
-					if (_this->registerLive(threadAndRegister(*g)))
+				IRExpr *transformIex(IRExprRdTmp *g) {
+					if (_this->registerLive(threadAndRegister(g)))
 						res = true;
 					return IRExprTransformer::transformIex(g);
 				}
@@ -2386,9 +2360,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 					StateMachineSideEffectCopy *smsec =
 						(StateMachineSideEffectCopy *)e;
 					if ((smsec->value->tag == Iex_Get &&
-					     threadAndRegister(smsec->value->Iex.Get) == smsec->target) ||
+					     threadAndRegister((IRExprGet *)smsec->value) == smsec->target) ||
 					    (smsec->value->tag == Iex_RdTmp &&
-					     threadAndRegister(smsec->value->Iex.RdTmp) == smsec->target)) {
+					     threadAndRegister((IRExprRdTmp *)smsec->value) == smsec->target)) {
 						/* Copying a register
 						   or temporary back
 						   to itself is always
@@ -3152,7 +3126,7 @@ buildCFGForCallGraph(AddressSpace *as,
 					work->fallThroughRip = r.rtrn();
 				}
 			} else if (irsb->next->tag == Iex_Const) {
-				work->fallThroughRip = r.jump(irsb->next->Iex.Const.con->Ico.U64);
+				work->fallThroughRip = r.jump(((IRExprConst *)irsb->next)->con->Ico.U64);
 			} else {
 				/* Don't currently try to trace across indirect branches. */
 			}
@@ -3729,9 +3703,9 @@ buildCFGForRipSet(AddressSpace *as,
 			if (irsb->jumpkind == Ijk_Call) {
 				work->fallThroughRip = extract_call_follower(irsb);
 				if (irsb->next->tag == Iex_Const) {
-					if (terminalFunctions.count(irsb->next->Iex.Const.con->Ico.U64))
-						work->fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
-					else if (!oracle->functionCanReturn(irsb->next->Iex.Const.con->Ico.U64))
+					if (terminalFunctions.count(((IRExprConst *)irsb->next)->con->Ico.U64))
+						work->fallThroughRip = ((IRExprConst *)irsb->next)->con->Ico.U64;
+					else if (!oracle->functionCanReturn(((IRExprConst *)irsb->next)->con->Ico.U64))
 						work->fallThroughRip = 0;
 				}
 				if (work->fallThroughRip)
@@ -3741,7 +3715,7 @@ buildCFGForRipSet(AddressSpace *as,
 			} else {
 				/* Don't currently try to trace across indirect branches. */
 				if (irsb->next->tag == Iex_Const) {
-					work->fallThroughRip = irsb->next->Iex.Const.con->Ico.U64;
+					work->fallThroughRip = ((IRExprConst *)irsb->next)->con->Ico.U64;
 					needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 				}
 			}
@@ -3910,7 +3884,7 @@ CFGtoCrashReason(unsigned tid,
 			assert(cfg->fallThrough);
 			IRExpr *r;
 			if (irsb->next->tag == Iex_Const) {
-				unsigned long called_rip = irsb->next->Iex.Const.con->Ico.U64;
+				unsigned long called_rip = ((IRExprConst *)irsb->next)->con->Ico.U64;
 				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
 
 				/* We only consider arguments in registers.  This is

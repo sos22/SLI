@@ -31,19 +31,19 @@ shallow_hash(const IRExpr *e)
 	case Iex_Const:
 		return 100242167;
 	case Iex_Get:
-		return e->Iex.Get.offset * 100001029 + 100011943;
+		return ((IRExprGet *)e)->offset * 100001029 + 100011943;
 	case Iex_GetI:
 		return 100013213;
 	case Iex_RdTmp:
-		return e->Iex.RdTmp.tmp * 100017493 + 100025479;
+		return ((IRExprRdTmp *)e)->tmp * 100017493 + 100025479;
 	case Iex_Qop:
-		return e->Iex.Qop.op * 100034159 + 100043347;
+		return ((IRExprQop *)e)->op * 100034159 + 100043347;
 	case Iex_Triop:
-		return e->Iex.Triop.op * 100046753 + 100050683;
+		return ((IRExprTriop *)e)->op * 100046753 + 100050683;
 	case Iex_Binop:
-		return e->Iex.Binop.op * 100057339 + 100067581;
+		return ((IRExprBinop *)e)->op * 100057339 + 100067581;
 	case Iex_Unop:
-		return e->Iex.Unop.op * 100080689 + 100102913;
+		return ((IRExprUnop *)e)->op * 100080689 + 100102913;
 	case Iex_Load:
 		return 100110343;
 	case Iex_CCall:
@@ -51,13 +51,13 @@ shallow_hash(const IRExpr *e)
 	case Iex_Mux0X:
 		return 100146091;
 	case Iex_Associative:
-		return e->Iex.Associative.op * 100161727 + e->Iex.Associative.nr_arguments * 100268423 + 100176877;
+		return ((IRExprAssociative *)e)->op * 100161727 + ((IRExprAssociative *)e)->nr_arguments * 100268423 + 100176877;
 	case Iex_FreeVariable:
-		return e->Iex.FreeVariable.key.val * 100190957;
+		return ((IRExprFreeVariable *)e)->key.val * 100190957;
 	case Iex_ClientCallFailed:
 		return 100213697;
 	case Iex_ClientCall:
-		return 100256371 + e->Iex.ClientCall.callSite.rip * 50013641;
+		return 100256371 + ((IRExprClientCall *)e)->callSite.rip * 50013641;
 	case Iex_HappensBefore:
 		return 100234427;
 	}
@@ -80,43 +80,43 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_HappensBefore:
 		break;
 	case Iex_GetI:
-		e->Iex.GetI.ix = internIRExpr(e->Iex.GetI.ix, lookupTable);
+		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
 		break;
 	case Iex_Qop:
-		e->Iex.Qop.arg4 = internIRExpr(e->Iex.Qop.arg4, lookupTable);
+		((IRExprQop *)e)->arg4 = internIRExpr(((IRExprQop *)e)->arg4, lookupTable);
 	case Iex_Triop:
-		e->Iex.Qop.arg3 = internIRExpr(e->Iex.Qop.arg3, lookupTable);
+		((IRExprQop *)e)->arg3 = internIRExpr(((IRExprQop *)e)->arg3, lookupTable);
 	case Iex_Binop:
-		e->Iex.Qop.arg2 = internIRExpr(e->Iex.Qop.arg2, lookupTable);
+		((IRExprQop *)e)->arg2 = internIRExpr(((IRExprQop *)e)->arg2, lookupTable);
 	case Iex_Unop:
-		e->Iex.Qop.arg1 = internIRExpr(e->Iex.Qop.arg1, lookupTable);
+		((IRExprQop *)e)->arg1 = internIRExpr(((IRExprQop *)e)->arg1, lookupTable);
 		break;
 	case Iex_Load:
-		e->Iex.Load.addr = internIRExpr(e->Iex.Load.addr, lookupTable);
+		((IRExprLoad *)e)->addr = internIRExpr(((IRExprLoad *)e)->addr, lookupTable);
 		break;
 	case Iex_CCall:
-		for (int x = 0; e->Iex.CCall.args[x]; x++)
-			e->Iex.CCall.args[x] =
-				internIRExpr(e->Iex.CCall.args[x], lookupTable);
+		for (int x = 0; ((IRExprCCall *)e)->args[x]; x++)
+			((IRExprCCall *)e)->args[x] =
+				internIRExpr(((IRExprCCall *)e)->args[x], lookupTable);
 		break;
 	case Iex_Mux0X:
-		e->Iex.Mux0X.cond = internIRExpr(e->Iex.Mux0X.cond, lookupTable);
-		e->Iex.Mux0X.expr0 = internIRExpr(e->Iex.Mux0X.expr0, lookupTable);
-		e->Iex.Mux0X.exprX = internIRExpr(e->Iex.Mux0X.exprX, lookupTable);
+		((IRExprMux0X *)e)->cond = internIRExpr(((IRExprMux0X *)e)->cond, lookupTable);
+		((IRExprMux0X *)e)->expr0 = internIRExpr(((IRExprMux0X *)e)->expr0, lookupTable);
+		((IRExprMux0X *)e)->exprX = internIRExpr(((IRExprMux0X *)e)->exprX, lookupTable);
 		break;
 	case Iex_Associative:
-		for (int x = 0; x < e->Iex.Associative.nr_arguments; x++)
-			e->Iex.Associative.contents[x] =
-				internIRExpr(e->Iex.Associative.contents[x], lookupTable);
+		for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++)
+			((IRExprAssociative *)e)->contents[x] =
+				internIRExpr(((IRExprAssociative *)e)->contents[x], lookupTable);
 		break;
 	case Iex_ClientCall:
-		for (int x = 0; e->Iex.ClientCall.args[x]; x++)
-			e->Iex.ClientCall.args[x] =
-				internIRExpr(e->Iex.ClientCall.args[x], lookupTable);
+		for (int x = 0; ((IRExprClientCall *)e)->args[x]; x++)
+			((IRExprClientCall *)e)->args[x] =
+				internIRExpr(((IRExprClientCall *)e)->args[x], lookupTable);
 		break;
 	case Iex_ClientCallFailed:
-		e->Iex.ClientCallFailed.target =
-			internIRExpr(e->Iex.ClientCallFailed.target, lookupTable);
+		((IRExprClientCallFailed *)e)->target =
+			internIRExpr(((IRExprClientCallFailed *)e)->target, lookupTable);
 		break;
 	}
 	for (std::map<IRExpr *, IRExpr *>::iterator it = lookupTable.lookups[h].begin();
@@ -126,47 +126,75 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		if (other->tag != e->tag)
 			continue;
 		switch (e->tag) {
-			/* For some structures, equality can be
-			   checked by bitwise comparison. */
-#define do_case(n)							\
-			case Iex_ ## n:					\
-				if (memcmp(&other->Iex. n,		\
-					   &e->Iex. n,			\
-					   sizeof(e->Iex. n)))		\
-					continue;			\
-			break
-			do_case(Get);
-			do_case(GetI);
-			do_case(RdTmp);
-			do_case(Qop);
-			do_case(Triop);
-			do_case(Binop);
-			do_case(Unop);
-			do_case(Mux0X);
-			do_case(FreeVariable);
-			do_case(ClientCallFailed);
-#undef do_case
-		case Iex_Load:
-#define do_field(n)							\
-			if (other->Iex.Load. n != e->Iex.Load. n)	\
+#define do_field(t, n)							\
+			if (((IRExpr ## t *)other)-> n !=		\
+			    ((IRExpr ## t *)e)->n)			\
 				continue
-			do_field(isLL);
-			do_field(end);
-			do_field(ty);
-			do_field(addr);
-			do_field(rip);
-#undef do_field
+		case Iex_Get:
+			do_field(Get, offset);
+			do_field(Get, ty);
+			do_field(Get, tid);
 			break;
+		case Iex_GetI:
+			do_field(GetI, descr);
+			do_field(GetI, ix);
+			do_field(GetI, bias);
+			do_field(GetI, tid);
+			break;
+		case Iex_RdTmp:
+			do_field(RdTmp, tmp);
+			do_field(RdTmp, tid);
+			break;
+		case Iex_Qop:
+			do_field(Qop, op);
+			do_field(Qop, arg1);
+			do_field(Qop, arg2);
+			do_field(Qop, arg3);
+			do_field(Qop, arg4);
+			break;
+		case Iex_Triop:
+			do_field(Triop, op);
+			do_field(Triop, arg1);
+			do_field(Triop, arg2);
+			do_field(Triop, arg3);
+			break;
+		case Iex_Binop:
+			do_field(Binop, op);
+			do_field(Binop, arg1);
+			do_field(Binop, arg2);
+			break;
+		case Iex_Unop:
+			do_field(Unop, op);
+			do_field(Unop, arg);
+			break;
+		case Iex_Mux0X:
+			do_field(Mux0X, cond);
+			do_field(Mux0X, expr0);
+			do_field(Mux0X, exprX);
+			break;
+		case Iex_FreeVariable:
+			do_field(FreeVariable, key);
+			break;
+		case Iex_ClientCallFailed:
+			do_field(ClientCallFailed, target);
+			break;
+		case Iex_Load:
+			do_field(Load, isLL);
+			do_field(Load, end);
+			do_field(Load, ty);
+			do_field(Load, addr);
+			do_field(Load, rip);
+			break;
+#undef do_field
 
-			/* Others are harder. */
 		case Iex_CCall: {
 			bool bad;
-			if (other->Iex.CCall.retty != e->Iex.CCall.retty)
+			if (((IRExprCCall *)other)->retty != ((IRExprCCall *)e)->retty)
 				continue;
 			bad = false;
-			for (int x = 0; !bad && e->Iex.CCall.args[x]; x++) {
-				if (e->Iex.CCall.args[x] !=
-				    other->Iex.CCall.args[x])
+			for (int x = 0; !bad && ((IRExprCCall *)e)->args[x]; x++) {
+				if (((IRExprCCall *)e)->args[x] !=
+				    ((IRExprCCall *)other)->args[x])
 					bad = true;
 			}
 			if (bad)
@@ -175,13 +203,13 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		}
 
 		case Iex_Associative: {
-			if (other->Iex.Associative.op != e->Iex.Associative.op ||
-			    other->Iex.Associative.nr_arguments != e->Iex.Associative.nr_arguments)
+			if (((IRExprAssociative *)other)->op != ((IRExprAssociative *)e)->op ||
+			    ((IRExprAssociative *)other)->nr_arguments != ((IRExprAssociative *)e)->nr_arguments)
 				continue;
 			bool bad = false;
-			for (int x = 0; !bad && x < e->Iex.Associative.nr_arguments; x++)
-				if (e->Iex.Associative.contents[x] !=
-				    other->Iex.Associative.contents[x])
+			for (int x = 0; !bad && x < ((IRExprAssociative *)e)->nr_arguments; x++)
+				if (((IRExprAssociative *)e)->contents[x] !=
+				    ((IRExprAssociative *)other)->contents[x])
 					bad = true;
 			if (bad)
 				continue;
@@ -189,21 +217,21 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		}
 
 		case Iex_Const:
-			if (!physicallyEqual(e->Iex.Const.con,
-					     other->Iex.Const.con))
+			if (!physicallyEqual(((IRExprConst *)e)->con,
+					     ((IRExprConst *)other)->con))
 				continue;
 			break;
 
 		case Iex_ClientCall: {
 			bool bad;
-			if (other->Iex.ClientCall.calledRip != e->Iex.ClientCall.calledRip ||
-			    other->Iex.ClientCall.callSite != e->Iex.ClientCall.callSite)
+			if (((IRExprClientCall *)other)->calledRip != ((IRExprClientCall *)e)->calledRip ||
+			    ((IRExprClientCall *)other)->callSite != ((IRExprClientCall *)e)->callSite)
 				continue;
 			bad = false;
 			for (int x = 0; !bad; x++) {
-				if (e->Iex.ClientCall.args[x] != other->Iex.ClientCall.args[x])
+				if (((IRExprClientCall *)e)->args[x] != ((IRExprClientCall *)other)->args[x])
 					bad = true;
-				if (e->Iex.ClientCall.args[x] == NULL)
+				if (((IRExprClientCall *)e)->args[x] == NULL)
 					break;
 			}
 			if (bad)
@@ -212,8 +240,8 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		}
 
 		case Iex_HappensBefore:
-			if (e->Iex.HappensBefore.before != other->Iex.HappensBefore.before ||
-			    e->Iex.HappensBefore.after != other->Iex.HappensBefore.after)
+			if (((IRExprHappensBefore *)e)->before != ((IRExprHappensBefore *)other)->before ||
+			    ((IRExprHappensBefore *)e)->after != ((IRExprHappensBefore *)other)->after)
 				continue;
 			break;
 		}

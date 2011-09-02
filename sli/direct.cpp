@@ -2739,28 +2739,28 @@ CrashExpression::get(IRExpr *e)
 {
 	switch (e->tag) {
 	case Iex_RdTmp:
-		return CrashExpressionTemp::get(e->Iex.RdTmp.tmp);
+		return CrashExpressionTemp::get(((IRExprRdTmp *)e)->tmp);
 	case Iex_Get:
-		return CrashExpressionRegister::get(e->Iex.Get.offset);
+		return CrashExpressionRegister::get(((IRExprGet *)e)->offset);
 	case Iex_Const:
-		return CrashExpressionConst::get(e->Iex.Const.con->Ico.U64);
+		return CrashExpressionConst::get(((IRExprConst *)e)->con->Ico.U64);
 	case Iex_Binop:
-		switch (e->Iex.Binop.op) {
+		switch (((IRExprBinop *)e)->op) {
 #define do_binop(x, _1, _2)						\
 			case Iop_ ## x ## 8:				\
 			case Iop_ ## x ## 16:				\
 			case Iop_ ## x ## 32:				\
 			case Iop_ ## x ## 64:				\
 				return CrashExpression ## x ::get(	\
-					CrashExpression::get(e->Iex.Binop.arg1), \
-					CrashExpression::get(e->Iex.Binop.arg2));
+					CrashExpression::get(((IRExprBinop *)e)->arg1), \
+					CrashExpression::get(((IRExprBinop *)e)->arg2));
 			most_binops(do_binop);
 #undef do_binop
 
 		case Iop_CasCmpNE32:
 			return CrashExpressionNotEqual::get(
-				CrashExpression::get(e->Iex.Binop.arg1),
-				CrashExpression::get(e->Iex.Binop.arg2));
+				CrashExpression::get(((IRExprBinop *)e)->arg1),
+				CrashExpression::get(((IRExprBinop *)e)->arg2));
 
 		case Iop_Sar8:
 		case Iop_Sar16:
@@ -2771,32 +2771,32 @@ CrashExpression::get(IRExpr *e)
 		case Iop_Shr32:
 		case Iop_Shr64:
 			return CrashExpressionShl::get(
-				CrashExpression::get(e->Iex.Binop.arg1),
+				CrashExpression::get(((IRExprBinop *)e)->arg1),
 				CrashExpressionNeg::get(
-					CrashExpression::get(e->Iex.Binop.arg2)));
+					CrashExpression::get(((IRExprBinop *)e)->arg2)));
 
 		case Iop_Sub8:
 		case Iop_Sub16:
 		case Iop_Sub32:
 		case Iop_Sub64:
 			return CrashExpressionAdd::get(
-				CrashExpression::get(e->Iex.Binop.arg1),
+				CrashExpression::get(((IRExprBinop *)e)->arg1),
 				CrashExpressionNeg::get(
-					CrashExpression::get(e->Iex.Binop.arg2)));
+					CrashExpression::get(((IRExprBinop *)e)->arg2)));
 
 		case Iop_MullS8:
 		case Iop_MullS16:
 		case Iop_MullS32:
 		case Iop_MullS64:
 			return CrashExpressionMul::get(
-				CrashExpression::get(e->Iex.Binop.arg1),
-				CrashExpression::get(e->Iex.Binop.arg2));
+				CrashExpression::get(((IRExprBinop *)e)->arg1),
+				CrashExpression::get(((IRExprBinop *)e)->arg2));
 
 		default:
 			goto failed;
 		}
 	case Iex_Unop:
-		switch (e->Iex.Unop.op) {
+		switch (((IRExprUnop *)e)->op) {
 		case Iop_64to1:
 		case Iop_64to8:
 		case Iop_64to16:
@@ -2805,15 +2805,15 @@ CrashExpression::get(IRExpr *e)
 		                case Iop_8Uto16: case Iop_8Uto32:  case Iop_8Uto64: 
 		                                 case Iop_16Uto32: case Iop_16Uto64: 
 		                                                   case Iop_32Uto64:
-			return CrashExpression::get(e->Iex.Unop.arg);
+			return CrashExpression::get(((IRExprUnop *)e)->arg);
 		case Iop_32Sto64:
 			return CrashExpressionWiden::get(
-				CrashExpression::get(e->Iex.Unop.arg),
+				CrashExpression::get(((IRExprUnop *)e)->arg),
 				32,
 				64);
 		case Iop_64HIto32:
 			return CrashExpressionShl::get(
-				CrashExpression::get(e->Iex.Unop.arg),
+				CrashExpression::get(((IRExprUnop *)e)->arg),
 				CrashExpressionConst::get(-32));
 
 		case Iop_Not8:
@@ -2821,41 +2821,41 @@ CrashExpression::get(IRExpr *e)
 		case Iop_Not32:
 		case Iop_Not64:
 			return CrashExpressionBitwiseNot::get(
-				CrashExpression::get(e->Iex.Unop.arg));
+				CrashExpression::get(((IRExprUnop *)e)->arg));
 		default:
 			goto failed;
 		}
 	case Iex_CCall:
-		if (!strcmp(e->Iex.CCall.cee->name, "amd64g_calculate_condition"))  {
+		if (!strcmp(((IRExprCCall *)e)->cee->name, "amd64g_calculate_condition"))  {
 			return CrashExpressionCondition::get(
-				CrashExpression::get(e->Iex.CCall.args[0]),
-				CrashExpression::get(e->Iex.CCall.args[1]),
-				CrashExpression::get(e->Iex.CCall.args[2]),
-				CrashExpression::get(e->Iex.CCall.args[3]),
-				CrashExpression::get(e->Iex.CCall.args[4]));
-		} else if (!strcmp(e->Iex.CCall.cee->name,
+				CrashExpression::get(((IRExprCCall *)e)->args[0]),
+				CrashExpression::get(((IRExprCCall *)e)->args[1]),
+				CrashExpression::get(((IRExprCCall *)e)->args[2]),
+				CrashExpression::get(((IRExprCCall *)e)->args[3]),
+				CrashExpression::get(((IRExprCCall *)e)->args[4]));
+		} else if (!strcmp(((IRExprCCall *)e)->cee->name,
 				   "amd64g_calculate_rflags_c")) {
 			return CrashExpressionCondition::get(
 				CrashExpressionConst::get(AMD64CondB),
-				CrashExpression::get(e->Iex.CCall.args[0]),
-				CrashExpression::get(e->Iex.CCall.args[1]),
-				CrashExpression::get(e->Iex.CCall.args[2]),
-				CrashExpression::get(e->Iex.CCall.args[3]));
-		} else if (!strcmp(e->Iex.CCall.cee->name,
+				CrashExpression::get(((IRExprCCall *)e)->args[0]),
+				CrashExpression::get(((IRExprCCall *)e)->args[1]),
+				CrashExpression::get(((IRExprCCall *)e)->args[2]),
+				CrashExpression::get(((IRExprCCall *)e)->args[3]));
+		} else if (!strcmp(((IRExprCCall *)e)->cee->name,
 				   "amd64g_calculate_rflags_all")) {
 			return CrashExpressionRflags::get(
-				CrashExpression::get(e->Iex.CCall.args[0]),
-				CrashExpression::get(e->Iex.CCall.args[1]),
-				CrashExpression::get(e->Iex.CCall.args[2]),
-				CrashExpression::get(e->Iex.CCall.args[3]));
+				CrashExpression::get(((IRExprCCall *)e)->args[0]),
+				CrashExpression::get(((IRExprCCall *)e)->args[1]),
+				CrashExpression::get(((IRExprCCall *)e)->args[2]),
+				CrashExpression::get(((IRExprCCall *)e)->args[3]));
 		} else {
 			goto failed;
 		}
 	case Iex_Mux0X:
 		return CrashExpressionMux::get(
-			CrashExpression::get(e->Iex.Mux0X.cond),
-			CrashExpression::get(e->Iex.Mux0X.expr0),
-			CrashExpression::get(e->Iex.Mux0X.exprX));
+			CrashExpression::get(((IRExprMux0X *)e)->cond),
+			CrashExpression::get(((IRExprMux0X *)e)->expr0),
+			CrashExpression::get(((IRExprMux0X *)e)->exprX));
 	default:
 		goto failed;
 	}
@@ -2866,7 +2866,7 @@ failed:
 	printf("\n");
 	return CrashExpressionFailed::get("expression tag 0x%x op 0x%x",
 					  e->tag,
-					  e->Iex.Unop.op);
+					  ((IRExprUnop *)e)->op);
 }
 
 static CrashMachineNode *
@@ -3482,7 +3482,7 @@ get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
 			if (do_pop)
 				*do_pop = true;
 		} else if (irsb->next->tag == Iex_Const) {
-			*out = irsb->next->Iex.Const.con->Ico.U64;
+		  *out = ((IRExprConst *)irsb->next)->con->Ico.U64;
 		} else {
 			return false;
 		}

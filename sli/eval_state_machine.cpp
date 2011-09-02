@@ -33,14 +33,14 @@ public:
 
 class SpecialiseIRExpr : public IRExprTransformer {
 	threadState &state;
-	IRExpr *transformIex(IRExpr::Get *e) {
-		auto it = state.registers.find(threadAndRegister(*e));
+	IRExpr *transformIex(IRExprGet *e) {
+		auto it = state.registers.find(threadAndRegister(e));
 		if (it != state.registers.end())
 			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
-	IRExpr *transformIex(IRExpr::RdTmp *e) {
-		auto it = state.registers.find(threadAndRegister(*e));
+	IRExpr *transformIex(IRExprRdTmp *e) {
+		auto it = state.registers.find(threadAndRegister(e));
 		if (it != state.registers.end())
 			return it->second;
 		return IRExprTransformer::transformIex(e);
@@ -85,7 +85,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 		   able to simplify the path constraint down to 1
 		   earlier.  Consider that a lucky break and simplify
 		   it now. */
-		if (e->Iex.Const.con->Ico.U1) {
+		if (((IRExprConst *)e)->con->Ico.U1) {
 			*assumption = e;
 			return true;
 		} else {
@@ -109,7 +109,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 	if (e2->tag == Iex_Const) {
 		/* If X & ¬Y is definitely true, Y is definitely
 		 * false and X is definitely true. */
-		if (e2->Iex.Const.con->Ico.U1) {
+		if (((IRExprConst *)e2)->con->Ico.U1) {
 			*assumption = IRExpr_Const(IRConst_U1(1));
 			return false;
 		}
@@ -387,7 +387,7 @@ evalStateMachineEdge(StateMachine *thisMachine,
 						   &ctxt.justPathConstraint);
 	if (!valid ||
 	    (ctxt.pathConstraint->tag == Iex_Const &&
-	     ctxt.pathConstraint->Iex.Const.con->Ico.U1 == 0)) {
+	     ((IRExprConst *)ctxt.pathConstraint)->con->Ico.U1 == 0)) {
 		/* We've found a contradiction.  That means that the
 		   original program would have crashed, *but* in a way
 		   other than the one which we're investigating.  We
@@ -915,7 +915,7 @@ writeMachineSuitabilityConstraint(
 	} while (chooser.advance());
 	
 	if (rewrittenAssumption->tag == Iex_Const &&
-	    rewrittenAssumption->Iex.Const.con->Ico.U64 == 0) {
+	    ((IRExprConst *)rewrittenAssumption.get())->con->Ico.U64 == 0) {
 		fprintf(_logfile, "\t\tBad choice of machines\n");
 		return NULL;
 	}

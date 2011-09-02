@@ -62,133 +62,6 @@ Heap ir_heap;
 #include "libvex_prof.hpp"
 
 void
-IRExpr::visit(HeapVisitor &visit)
-{
-   switch (tag) {
-   case Iex_Get:
-   case Iex_RdTmp:
-   case Iex_FreeVariable:
-     return;
-   case Iex_GetI:
-     visit(Iex.GetI.descr);
-     visit(Iex.GetI.ix);
-     return;
-   case Iex_Qop:
-     visit(Iex.Qop.arg1);
-     visit(Iex.Qop.arg2);
-     visit(Iex.Qop.arg3);
-     visit(Iex.Qop.arg4);
-     return;
-   case Iex_Triop:
-     visit(Iex.Triop.arg1);
-     visit(Iex.Triop.arg2);
-     visit(Iex.Triop.arg3);
-     return;
-   case Iex_Binop:
-     visit(Iex.Binop.arg1);
-     visit(Iex.Binop.arg2);
-     return;
-   case Iex_Unop:
-     visit(Iex.Unop.arg);
-     return;
-   case Iex_Load:
-     visit(Iex.Load.addr);
-     return;
-   case Iex_Const:
-     visit(Iex.Const.con);
-     return;
-   case Iex_CCall:
-     visit(Iex.CCall.cee);
-     visit(Iex.CCall.args);
-     return;
-   case Iex_Mux0X:
-     visit(Iex.Mux0X.cond);
-     visit(Iex.Mux0X.expr0);
-     visit(Iex.Mux0X.exprX);
-     return;
-   case Iex_Associative: 
-     visit(Iex.Associative.contents);
-     for (int x = 0; x < Iex.Associative.nr_arguments; x++)
-       visit(Iex.Associative.contents[x]);
-     return;
-   case Iex_ClientCall:
-     visit(Iex.ClientCall.args);
-     return;
-   case Iex_ClientCallFailed:
-     visit(Iex.ClientCallFailed.target);
-     return;
-   case Iex_HappensBefore:
-     return;
-   }
-   abort();
-}
-
-unsigned long
-IRExpr::hashval(void) const
-{
-  switch (tag) {
-  case Iex_Get:
-    return Iex.Get.offset + Iex.Get.ty * 3 + Iex.Get.tid * 7;
-  case Iex_GetI:
-    return Iex.GetI.descr->hashval() +
-      Iex.GetI.ix->hashval() * 3 +
-      Iex.GetI.bias * 5 +
-      Iex.GetI.tid * 7;
-  case Iex_RdTmp:
-    return Iex.RdTmp.tmp + Iex.RdTmp.tid * 3;
-  case Iex_Qop:
-    return Iex.Qop.op +
-      Iex.Qop.arg1->hashval() * 3 +
-      Iex.Qop.arg2->hashval() * 5 +
-      Iex.Qop.arg3->hashval() * 7 +
-      Iex.Qop.arg4->hashval() * 11;
-  case Iex_Triop:
-    return Iex.Qop.op +
-      Iex.Qop.arg1->hashval() * 3 +
-      Iex.Qop.arg2->hashval() * 5 +
-      Iex.Qop.arg3->hashval() * 7;
-  case Iex_Binop:
-    return Iex.Qop.op +
-      Iex.Qop.arg1->hashval() * 3 +
-      Iex.Qop.arg2->hashval() * 5;
-  case Iex_Unop:
-    return Iex.Unop.op + Iex.Unop.arg->hashval() * 3;
-  case Iex_Load:
-    return Iex.Load.ty + Iex.Load.addr->hashval() * 97;
-  case Iex_Const:
-    return Iex.Const.con->hashval();
-  case Iex_CCall: {
-    unsigned long h = Iex.CCall.cee->hashval() + Iex.CCall.retty * 3;
-    for (unsigned x = 0; Iex.CCall.args[x]; x++)
-      h = h * 7 + Iex.CCall.args[x]->hashval();
-    return h;
-  }
-  case Iex_Mux0X:
-    return Iex.Mux0X.cond->hashval() + Iex.Mux0X.expr0->hashval() * 3 +
-      Iex.Mux0X.exprX->hashval() * 7;
-  case Iex_Associative: {
-    unsigned long h = Iex.Associative.op + Iex.Associative.nr_arguments;
-    for (int x = 0; x < Iex.Associative.nr_arguments; x++)
-      h = h * 11 + Iex.Associative.contents[x]->hashval();
-    return h;
-  }
-  case Iex_FreeVariable:
-    return Iex.FreeVariable.key.val * 12357743;
-  case Iex_ClientCall: {
-    unsigned long h = Iex.ClientCall.calledRip * 3940631;
-    for (unsigned x = 0; Iex.ClientCall.args[x]; x++)
-      h = h * 7940641 + Iex.ClientCall.args[x]->hashval();
-    return h;
-  }
-  case Iex_ClientCallFailed:
-    return Iex.ClientCallFailed.target->hashval() * 65537;
-  case Iex_HappensBefore:
-    return 19;
-  }
-  abort();
-}
-
-void
 _IRStmt::visit(HeapVisitor &visit)
 {
    switch (tag) {
@@ -1021,25 +894,6 @@ static bool parseIROpSimple(IROp *out, const char *str, const char **suffix, cha
   return false;
 }
 
-#define foreach_reg(iter)			\
-  iter(RAX)					\
-  iter(RBX)					\
-  iter(RCX)					\
-  iter(RDX)					\
-  iter(RSP)					\
-  iter(RBP)					\
-  iter(RSI)					\
-  iter(RDI)					\
-  iter(R8)					\
-  iter(R9)					\
-  iter(R10)					\
-  iter(R11)					\
-  iter(R12)					\
-  iter(R13)					\
-  iter(R14)					\
-  iter(R15)					\
-  iter(RIP)
-
 static bool parseIRExprGet(IRExpr **res, const char *str, const char **suffix, char **err)
 {
   int offset;
@@ -1291,16 +1145,15 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
 	return false;
     }
   }
-  IRExpr* e          = new IRExpr();
-  e->tag             = Iex_Associative;
-  e->Iex.Associative.op = op;
-  e->Iex.Associative.nr_arguments_allocated = args.size();
-  e->Iex.Associative.nr_arguments = args.size();
+  IRExprAssociative *e          = new IRExprAssociative();
+  e->op = op;
+  e->nr_arguments_allocated = args.size();
+  e->nr_arguments = args.size();
   static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-  e->Iex.Associative.contents =
-    (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->Iex.Associative.contents[0]) * args.size(), &__las);
+  e->contents =
+    (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->contents[0]) * args.size(), &__las);
   for (unsigned i = 0; i < args.size(); i++)
-    e->Iex.Associative.contents[i] = args[i];
+    e->contents[i] = args[i];
   *suffix = str;
   *res = e;
   return true;
@@ -1383,173 +1236,143 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **_err
   return false;
 }
 
-void ppIRExpr ( IRExpr* e, FILE *f )
+void
+IRExprBinop::prettyPrint(FILE *f) const
 {
-  Int i;
-  switch (e->tag) {
-    case Iex_Get:
-      /* Better pretty print for some known registers. */
-      if (e->Iex.Get.ty == Ity_I64) {
-	switch (e->Iex.Get.offset) {
-#define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d", e->Iex.Get.tid); return;
-	  foreach_reg(do_reg)
-#undef do_reg
-	}
-      }
-      fprintf(f,  "GET:" );
-      ppIRType(e->Iex.Get.ty, f);
-      fprintf(f, "(%d, %d)", e->Iex.Get.offset,
-	      e->Iex.Get.tid);
-      return;
-    case Iex_GetI:
-      fprintf(f,  "GETI" );
-      ppIRRegArray(e->Iex.GetI.descr, f);
-      fprintf(f, "[");
-      ppIRExpr(e->Iex.GetI.ix, f);
-      fprintf(f, ",%d](%d)", e->Iex.GetI.bias,
-	      e->Iex.Get.tid);
-      return;
-    case Iex_RdTmp:
-      ppIRTemp(e->Iex.RdTmp.tmp, f);
-      fprintf(f, ":%d", e->Iex.RdTmp.tid);
-      return;
-    case Iex_Qop:
-      ppIROp(e->Iex.Qop.op, f);
+  if (irOpSimpleChar(op)) {
+    fprintf(f, "(");
+    arg1->prettyPrint(f);
+    fprintf(f,  " %s ", irOpSimpleChar(op) );
+    arg2->prettyPrint(f);
+    fprintf(f,  ")" );
+  } else {
+    ppIROp(op, f);
+    fprintf(f,  "(" );
+    arg1->prettyPrint(f);
+    fprintf(f,  "," );
+    arg2->prettyPrint(f);
+    fprintf(f,  ")" );
+  }
+}
+
+void
+IRExprUnop::prettyPrint(FILE *f) const
+{
+  if (irOpSimpleChar(op))
+    {
+      fprintf(f, "%s(", irOpSimpleChar(op));
+      ppIRExpr(arg, f);
+      fprintf(f, ")");
+    }
+  else
+    {
+      ppIROp(op, f);
       fprintf(f,  "(" );
-      ppIRExpr(e->Iex.Qop.arg1, f);
-      fprintf(f,  "," );
-      ppIRExpr(e->Iex.Qop.arg2, f);
-      fprintf(f,  "," );
-      ppIRExpr(e->Iex.Qop.arg3, f);
-      fprintf(f,  "," );
-      ppIRExpr(e->Iex.Qop.arg4, f);
+      ppIRExpr(arg, f);
       fprintf(f,  ")" );
-      return;
-    case Iex_Triop:
-      ppIROp(e->Iex.Triop.op, f);
+    }
+}
+
+void
+IRExprLoad::prettyPrint(FILE *f) const
+{
+      fprintf(f,  "LD%s%s:", end==Iend_LE ? "le" : "be",
+                             isLL ? "-LL" : "" );
+      ppIRType(ty, f);
       fprintf(f,  "(" );
-      ppIRExpr(e->Iex.Triop.arg1, f);
-      fprintf(f,  "," );
-      ppIRExpr(e->Iex.Triop.arg2, f);
-      fprintf(f,  "," );
-      ppIRExpr(e->Iex.Triop.arg3, f);
-      fprintf(f,  ")" );
-      return;
-    case Iex_Binop:
-      if (irOpSimpleChar(e->Iex.Binop.op)) {
-	fprintf(f, "(");
-	ppIRExpr(e->Iex.Binop.arg1, f);
-	fprintf(f,  " %s ", irOpSimpleChar(e->Iex.Binop.op) );
-	ppIRExpr(e->Iex.Binop.arg2, f);
-	fprintf(f,  ")" );
-      } else {
-	ppIROp(e->Iex.Binop.op, f);
-	fprintf(f,  "(" );
-	ppIRExpr(e->Iex.Binop.arg1, f);
-	fprintf(f,  "," );
-	ppIRExpr(e->Iex.Binop.arg2, f);
-	fprintf(f,  ")" );
-      }
-      return;
-    case Iex_Unop:
-      if (irOpSimpleChar(e->Iex.Unop.op))
-      {
-	fprintf(f, "%s(", irOpSimpleChar(e->Iex.Unop.op));
-	ppIRExpr(e->Iex.Unop.arg, f);
-	fprintf(f, ")");
-      }
-      else
-      {
-	ppIROp(e->Iex.Unop.op, f);
-	fprintf(f,  "(" );
-	ppIRExpr(e->Iex.Unop.arg, f);
-	fprintf(f,  ")" );
-      }
-      return;
-    case Iex_Load:
-      fprintf(f,  "LD%s%s:", e->Iex.Load.end==Iend_LE ? "le" : "be",
-                             e->Iex.Load.isLL ? "-LL" : "" );
-      ppIRType(e->Iex.Load.ty, f);
-      fprintf(f,  "(" );
-      ppIRExpr(e->Iex.Load.addr, f);
-      fprintf(f,  ")@%d:%lx", e->Iex.Load.rip.thread, e->Iex.Load.rip.rip );
-      return;
-    case Iex_Const:
-      ppIRConst(e->Iex.Const.con, f);
-      return;
-    case Iex_CCall:
-      ppIRCallee(e->Iex.CCall.cee, f);
+      ppIRExpr(addr, f);
+      fprintf(f,  ")@%d:%lx", rip.thread, rip.rip );
+}
+void
+IRExprConst::prettyPrint(FILE *f) const
+{
+      ppIRConst(con, f);
+}
+void
+IRExprCCall::prettyPrint(FILE *f) const
+{
+      ppIRCallee(cee, f);
       fprintf(f, "(");
-      for (i = 0; e->Iex.CCall.args[i] != NULL; i++) {
-        ppIRExpr(e->Iex.CCall.args[i], f);
-        if (e->Iex.CCall.args[i+1] != NULL)
+      for (int i = 0; args[i] != NULL; i++) {
+        ppIRExpr(args[i], f);
+        if (args[i+1] != NULL)
           fprintf(f, ",");
       }
       fprintf(f, "):");
-      ppIRType(e->Iex.CCall.retty, f);
-      return;
-    case Iex_Mux0X:
+      ppIRType(retty, f);
+}
+void
+IRExprMux0X::prettyPrint(FILE *f) const
+{
       fprintf(f, "Mux0X(");
-      ppIRExpr(e->Iex.Mux0X.cond, f);
+      ppIRExpr(cond, f);
       fprintf(f, ",");
-      ppIRExpr(e->Iex.Mux0X.expr0, f);
+      ppIRExpr(expr0, f);
       fprintf(f, ",");
-      ppIRExpr(e->Iex.Mux0X.exprX, f);
+      ppIRExpr(exprX, f);
       fprintf(f, ")");
-      return;
-    case Iex_Associative:
-      if (irOpSimpleChar(e->Iex.Associative.op))
+}
+void
+IRExprAssociative::prettyPrint(FILE *f) const
+{
+      if (irOpSimpleChar(op))
       {
 	fprintf(f, "(");
-	for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
+	for (int x = 0; x < nr_arguments; x++) {
 	  if (x != 0)
-	    fprintf(f, " %s ", irOpSimpleChar(e->Iex.Associative.op));
-	  ppIRExpr(e->Iex.Associative.contents[x], f);
+	    fprintf(f, " %s ", irOpSimpleChar(op));
+	  ppIRExpr(contents[x], f);
 	}
 	fprintf(f, ")");
       }
       else
       {
 	fprintf(f, "Assoc(");
-	ppIROp(e->Iex.Associative.op, f);
+	ppIROp(op, f);
 	fprintf(f, ":");
-	for (int x = 0; x < e->Iex.Associative.nr_arguments; x++) {
+	for (int x = 0; x < nr_arguments; x++) {
 	  if (x != 0)
 	    fprintf(f, ", ");
-	  ppIRExpr(e->Iex.Associative.contents[x], f);
+	  ppIRExpr(contents[x], f);
 	}
 	fprintf(f, ")");
       }
-      return;
-    case Iex_FreeVariable:
-      fprintf(f, "free%d", e->Iex.FreeVariable.key.val);
-      return;
-    case Iex_ClientCall:
-      fprintf(f, "call0x%lx@%d:%lx(", e->Iex.ClientCall.calledRip,
-	      e->Iex.ClientCall.callSite.thread,
-	      e->Iex.ClientCall.callSite.rip);
-      for (int x = 0; e->Iex.ClientCall.args[x]; x++) {
+}
+void
+IRExprFreeVariable::prettyPrint(FILE *f) const
+{
+      fprintf(f, "free%d", key.val);
+}
+void
+IRExprClientCall::prettyPrint(FILE *f) const
+{
+      fprintf(f, "call0x%lx@%d:%lx(", calledRip,
+	      callSite.thread,
+	      callSite.rip);
+      for (int x = 0; args[x]; x++) {
 	if (x != 0)
 	  fprintf(f, ", ");
-	ppIRExpr(e->Iex.ClientCall.args[x], f);
+	ppIRExpr(args[x], f);
       }
       fprintf(f, ")");
-      return;
-    case Iex_ClientCallFailed:
-      fprintf(f, "failedCall(");
-      ppIRExpr(e->Iex.ClientCallFailed.target, f);
-      fprintf(f, ")");
-      return;
-    case Iex_HappensBefore:
-      fprintf(f, "(%lx:%d <-< %lx:%d)",
-	      e->Iex.HappensBefore.before.rip,
-	      e->Iex.HappensBefore.before.thread,
-	      e->Iex.HappensBefore.after.rip,
-	      e->Iex.HappensBefore.after.thread);
-      return;
-  }
-  vpanic("ppIRExpr");
 }
+void
+IRExprClientCallFailed::prettyPrint(FILE *f) const
+{
+      fprintf(f, "failedCall(");
+      ppIRExpr(target, f);
+      fprintf(f, ")");
+}
+void
+IRExprHappensBefore::prettyPrint(FILE *f) const
+{
+      fprintf(f, "(%lx:%d <-< %lx:%d)",
+	      before.rip,
+	      before.thread,
+	      after.rip,
+	      after.thread);
+}
+
 
 void ppIREffect ( IREffect fx, FILE* f )
 {
@@ -1866,110 +1689,92 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 /* Constructors -- IRExpr */
 
 IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid ) {
-   IRExpr* e         = new IRExpr();
-   e->tag            = Iex_Get;
-   e->Iex.Get.offset = off;
-   e->Iex.Get.ty     = ty;
-   e->Iex.Get.tid    = tid;
+   IRExprGet* e      = new IRExprGet();
+   e->offset = off;
+   e->ty     = ty;
+   e->tid    = tid;
    return e;
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
-   IRExpr* e         = new IRExpr();
-   e->tag            = Iex_GetI;
-   e->Iex.GetI.descr = descr;
-   e->Iex.GetI.ix    = ix;
-   e->Iex.GetI.bias  = bias;
-   e->Iex.GetI.tid   = tid;
+   IRExprGetI* e         = new IRExprGetI();
+   e->descr = descr;
+   e->ix    = ix;
+   e->bias  = bias;
+   e->tid   = tid;
    return e;
 }
 IRExpr* IRExpr_RdTmp ( IRTemp tmp, unsigned tid ) {
-   IRExpr* e        = new IRExpr();
-   e->tag           = Iex_RdTmp;
-   e->Iex.RdTmp.tmp = tmp;
-   e->Iex.RdTmp.tid = tid;
+   IRExprRdTmp* e        = new IRExprRdTmp();
+   e->tmp = tmp;
+   e->tid = tid;
    return e;
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {
-   IRExpr* e       = new IRExpr();
-   e->tag          = Iex_Qop;
-   e->Iex.Qop.op   = op;
-   e->Iex.Qop.arg1 = arg1;
-   e->Iex.Qop.arg2 = arg2;
-   e->Iex.Qop.arg3 = arg3;
-   e->Iex.Qop.arg4 = arg4;
+   IRExprQop* e       = new IRExprQop();
+   e->op   = op;
+   e->arg1 = arg1;
+   e->arg2 = arg2;
+   e->arg3 = arg3;
+   e->arg4 = arg4;
    return e;
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                  IRExpr* arg2, IRExpr* arg3 ) {
-   IRExpr* e         = new IRExpr();
-   e->tag            = Iex_Triop;
-   e->Iex.Triop.op   = op;
-   e->Iex.Triop.arg1 = arg1;
-   e->Iex.Triop.arg2 = arg2;
-   e->Iex.Triop.arg3 = arg3;
+   IRExprTriop* e         = new IRExprTriop();
+   e->op   = op;
+   e->arg1 = arg1;
+   e->arg2 = arg2;
+   e->arg3 = arg3;
    return e;
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
-   IRExpr* e         = new IRExpr();
-   e->tag            = Iex_Binop;
-   e->Iex.Binop.op   = op;
-   e->Iex.Binop.arg1 = arg1;
-   e->Iex.Binop.arg2 = arg2;
+   IRExprBinop* e         = new IRExprBinop();
+   e->op   = op;
+   e->arg1 = arg1;
+   e->arg2 = arg2;
    return e;
 }
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
-   IRExpr* e       = new IRExpr();
-   e->tag          = Iex_Unop;
-   e->Iex.Unop.op  = op;
-   e->Iex.Unop.arg = arg;
+   IRExprUnop* e       = new IRExprUnop();
+   e->op  = op;
+   e->arg = arg;
    return e;
 }
-void dbg_break(const char *msg, ...);
 IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr,
 		      ThreadRip rip ) {
-   IRExpr* e        = new IRExpr();
-   e->tag           = Iex_Load;
-   e->Iex.Load.isLL = isLL;
-   e->Iex.Load.end  = end;
-   e->Iex.Load.ty   = ty;
-   e->Iex.Load.addr = addr;
-   e->Iex.Load.rip  = rip;
+   IRExprLoad* e        = new IRExprLoad();
+   e->isLL = isLL;
+   e->end  = end;
+   e->ty   = ty;
+   e->addr = addr;
+   e->rip  = rip;
    vassert(end == Iend_LE || end == Iend_BE);
-#if 0
-   if (addr->tag == Iex_Const &&
-       (long)addr->Iex.Const.con->Ico.U64 < 4096)
-     dbg_break("loading from a funny constant address (IRExpr *)%p\n", addr);
-#endif
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {
-   IRExpr* e        = new IRExpr();
-   e->tag           = Iex_Const;
-   e->Iex.Const.con = con;
+   IRExprConst* e        = new IRExprConst();
+   e->con = con;
    return e;
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
-   IRExpr* e          = new IRExpr();
-   e->tag             = Iex_CCall;
-   e->Iex.CCall.cee   = cee;
-   e->Iex.CCall.retty = retty;
-   e->Iex.CCall.args  = args;
+   IRExprCCall* e          = new IRExprCCall();
+   e->cee   = cee;
+   e->retty = retty;
+   e->args  = args;
    return e;
 }
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
-   IRExpr* e          = new IRExpr();
-   e->tag             = Iex_Mux0X;
-   e->Iex.Mux0X.cond  = cond;
-   e->Iex.Mux0X.expr0 = expr0;
-   e->Iex.Mux0X.exprX = exprX;
+   IRExprMux0X* e          = new IRExprMux0X();
+   e->cond  = cond;
+   e->expr0 = expr0;
+   e->exprX = exprX;
    return e;
 }
 IRExpr* IRExpr_Associative(IROp op, ...)
 {
-   IRExpr* e          = new IRExpr();
-   e->tag             = Iex_Associative;
-   e->Iex.Associative.op = op;
+   IRExprAssociative* e          = new IRExprAssociative();
+   e->op = op;
 
    va_list args;
    int nr_args;
@@ -1985,44 +1790,42 @@ IRExpr* IRExpr_Associative(IROp op, ...)
    }
    va_end(args);
 
-   e->Iex.Associative.nr_arguments_allocated = nr_args * 2;
+   e->nr_arguments_allocated = nr_args * 2;
    static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-   e->Iex.Associative.contents =
-      (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->Iex.Associative.contents[0]) * nr_args * 2, &__las);
+   e->contents =
+      (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->contents[0]) * nr_args * 2, &__las);
    va_start(args, op);
-   while (e->Iex.Associative.nr_arguments < nr_args) {
+   while (e->nr_arguments < nr_args) {
       arg = va_arg(args, IRExpr *);
-      e->Iex.Associative.contents[e->Iex.Associative.nr_arguments] =
+      e->contents[e->nr_arguments] =
 	 arg;
-      e->Iex.Associative.nr_arguments++;
+      e->nr_arguments++;
    }
    va_end(args);
    return e;
 }
-IRExpr* IRExpr_Associative(IRExpr::Associative *src)
+IRExpr* IRExpr_Associative(IRExprAssociative *src)
 {
-   IRExpr* e           = new IRExpr();
-   e->tag              = Iex_Associative;
-   e->Iex.Associative.op = src->op;
-   e->Iex.Associative.nr_arguments = src->nr_arguments;
-   e->Iex.Associative.nr_arguments_allocated = src->nr_arguments * 2;
+   IRExprAssociative* e           = new IRExprAssociative();
+   e->op = src->op;
+   e->nr_arguments = src->nr_arguments;
+   e->nr_arguments_allocated = src->nr_arguments * 2;
    static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-   e->Iex.Associative.contents = (IRExpr **)
+   e->contents = (IRExpr **)
       __LibVEX_Alloc_Bytes(&ir_heap,
-			   sizeof(e->Iex.Associative.contents[0]) *
-			   e->Iex.Associative.nr_arguments_allocated,
+			   sizeof(e->contents[0]) *
+			   e->nr_arguments_allocated,
 			   &__las);
-   memcpy(e->Iex.Associative.contents,
+   memcpy(e->contents,
 	  src->contents,
-	  sizeof(e->Iex.Associative.contents[0]) *
-	  e->Iex.Associative.nr_arguments_allocated);
+	  sizeof(e->contents[0]) *
+	  e->nr_arguments_allocated);
    return e;
 }
 IRExpr* IRExpr_FreeVariable ( FreeVariableKey key )
 {
-   IRExpr *e = new IRExpr();
-   e->tag = Iex_FreeVariable;
-   e->Iex.FreeVariable.key = key;
+   IRExprFreeVariable *e = new IRExprFreeVariable();
+   e->key = key;
    return e;
 }
 IRExpr* IRExpr_FreeVariable ( )
@@ -2034,26 +1837,23 @@ IRExpr* IRExpr_FreeVariable ( )
 }
 IRExpr* IRExpr_ClientCall ( unsigned long r, ThreadRip site, IRExpr **args )
 {
-   IRExpr *e = new IRExpr();
-   e->tag = Iex_ClientCall;
-   e->Iex.ClientCall.calledRip = r;
-   e->Iex.ClientCall.callSite = site;
-   e->Iex.ClientCall.args = args;
+   IRExprClientCall *e = new IRExprClientCall();
+   e->calledRip = r;
+   e->callSite = site;
+   e->args = args;
    return e;
 }
 IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
 {
-   IRExpr *e = new IRExpr();
-   e->tag = Iex_ClientCallFailed;
-   e->Iex.ClientCallFailed.target = t;
+   IRExprClientCallFailed *e = new IRExprClientCallFailed();
+   e->target = t;
    return e;
 }
 IRExpr* IRExpr_HappensBefore ( ThreadRip before, ThreadRip after )
 {
-   IRExpr *e = new IRExpr();
-   e->tag = Iex_HappensBefore;
-   e->Iex.HappensBefore.before = before;
-   e->Iex.HappensBefore.after = after;
+   IRExprHappensBefore *e = new IRExprHappensBefore();
+   e->before = before;
+   e->after = after;
    return e;
 }
 
@@ -2771,46 +2571,6 @@ IRType typeOfIRConst ( IRConst* con )
    }
 }
 
-IRType typeOfIRExpr ( IRTypeEnv* tyenv, IRExpr* e )
-{
-   IRType t_dst, t_arg1, t_arg2, t_arg3, t_arg4;
- start:
-   switch (e->tag) {
-      case Iex_Load:
-         return e->Iex.Load.ty;
-      case Iex_Get:
-         return e->Iex.Get.ty;
-      case Iex_GetI:
-         return e->Iex.GetI.descr->elemTy;
-      case Iex_RdTmp:
-         return typeOfIRTemp(tyenv, e->Iex.RdTmp.tmp);
-      case Iex_Const:
-         return typeOfIRConst(e->Iex.Const.con);
-      case Iex_Associative:
-      case Iex_Qop:
-      case Iex_Triop:
-      case Iex_Binop:
-      case Iex_Unop:
-         typeOfPrimop(e->Iex.Qop.op, 
-                      &t_dst, &t_arg1, &t_arg2, &t_arg3, &t_arg4);
-         return t_dst;
-      case Iex_CCall:
-         return e->Iex.CCall.retty;
-      case Iex_Mux0X:
-         e = e->Iex.Mux0X.expr0;
-         goto start;
-         /* return typeOfIRExpr(tyenv, e->Iex.Mux0X.expr0); */
-      case Iex_FreeVariable:
-      case Iex_ClientCall:
-      case Iex_ClientCallFailed:
-	 return Ity_I64; /* Hack hack hack */
-      case Iex_HappensBefore:
-	 return Ity_I1;
-   }
-   ppIRExpr(e, stderr);
-   vpanic("typeOfIRExpr");
-}
-
 /* Is this any value actually in the enumeration 'IRType' ? */
 Bool isPlausibleIRType ( IRType ty )
 {
@@ -2940,17 +2700,6 @@ IRExpr* mkIRExprCCall ( IRType retty,
 {
    return IRExpr_CCall ( mkIRCallee ( regparms, name, addr ), 
                          retty, args );
-}
-
-Bool eqIRAtom ( IRExpr* a1, IRExpr* a2 )
-{
-   vassert(isIRAtom(a1));
-   vassert(isIRAtom(a2));
-   if (a1->tag == Iex_RdTmp && a2->tag == Iex_RdTmp)
-      return toBool(a1->Iex.RdTmp.tmp == a2->Iex.RdTmp.tmp);
-   if (a1->tag == Iex_Const && a2->tag == Iex_Const)
-      return eqIRConst(a1->Iex.Const.con, a2->Iex.Const.con);
-   return False;
 }
 
 /*---------------------------------------------------------------*/

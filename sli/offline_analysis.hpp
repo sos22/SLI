@@ -14,8 +14,8 @@ class IRExprTransformer {
 protected:
 	IRExpr *currentIRExpr() { return _currentIRExpr; }
 	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
-	virtual IRExpr *transformIex(IRExpr::Get *e) { return NULL; }
-	virtual IRExpr *transformIex(IRExpr::GetI *e)
+	virtual IRExpr *transformIex(IRExprGet *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprGetI *e)
 	{
 		bool t = false;
 		IRExpr *e2 = transformIRExpr(e->ix, &t);
@@ -25,8 +25,8 @@ protected:
 		else
 			return IRExpr_GetI(e->descr, e2, e->bias, e->tid);
 	}
-	virtual IRExpr *transformIex(IRExpr::RdTmp *e) { return NULL; }
-	virtual IRExpr *transformIex(IRExpr::Qop *e)
+	virtual IRExpr *transformIex(IRExprRdTmp *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprQop *e)
 	{
 		bool t = false;
 		IRExpr *a1 = transformIRExpr(e->arg1, &t);
@@ -39,7 +39,7 @@ protected:
 		else
 			return IRExpr_Qop(e->op, a1, a2, a3, a4);
 	}
-	virtual IRExpr *transformIex(IRExpr::Triop *e)
+	virtual IRExpr *transformIex(IRExprTriop *e)
 	{
 		bool t = false;
 		IRExpr *a1 = transformIRExpr(e->arg1, &t);
@@ -51,7 +51,7 @@ protected:
 		else
 			return IRExpr_Triop(e->op, a1, a2, a3);
 	}
-	virtual IRExpr *transformIex(IRExpr::Binop *e)
+	virtual IRExpr *transformIex(IRExprBinop *e)
 	{
 		bool t = false;
 		IRExpr *a1 = transformIRExpr(e->arg1, &t);
@@ -62,7 +62,7 @@ protected:
 		else
 			return IRExpr_Binop(e->op, a1, a2);
 	}
-	virtual IRExpr *transformIex(IRExpr::Unop *e)
+	virtual IRExpr *transformIex(IRExprUnop *e)
 	{
 		bool t = false;
 		IRExpr *a1 = transformIRExpr(e->arg, &t);
@@ -72,7 +72,7 @@ protected:
 		else
 			return IRExpr_Unop(e->op, a1);
 	}
-	virtual IRExpr *transformIex(IRExpr::Load *e)
+	virtual IRExpr *transformIex(IRExprLoad *e)
 	{
 		bool t = false;
 		IRExpr *addr = transformIRExpr(e->addr, &t);
@@ -82,11 +82,11 @@ protected:
 		else
 			return IRExpr_Load(e->isLL, e->end, e->ty, addr, e->rip);
 	}
-	virtual IRExpr *transformIex(IRExpr::Const *e)
+	virtual IRExpr *transformIex(IRExprConst *e)
 	{
 		return NULL;
 	}
-	virtual IRExpr *transformIex(IRExpr::Mux0X *e)
+	virtual IRExpr *transformIex(IRExprMux0X *e)
 	{
 		bool t = false;
 		IRExpr *c = transformIRExpr(e->cond, &t);
@@ -98,14 +98,14 @@ protected:
 		else
 			return IRExpr_Mux0X(c, z, x);
 	}
-	virtual IRExpr *transformIex(IRExpr::CCall *);
-	virtual IRExpr *transformIex(IRExpr::Associative *);
-	virtual IRExpr *transformIex(IRExpr::FreeVariable *e)
+	virtual IRExpr *transformIex(IRExprCCall *);
+	virtual IRExpr *transformIex(IRExprAssociative *);
+	virtual IRExpr *transformIex(IRExprFreeVariable *e)
 	{
 		return NULL;
 	}
-	virtual IRExpr *transformIex(IRExpr::ClientCall *);
-	virtual IRExpr *transformIex(IRExpr::ClientCallFailed *e)
+	virtual IRExpr *transformIex(IRExprClientCall *);
+	virtual IRExpr *transformIex(IRExprClientCallFailed *e)
 	{
 		bool t = false;
 		IRExpr *a1 = transformIRExpr(e->target, &t);
@@ -115,7 +115,7 @@ protected:
 		else
 			return IRExpr_ClientCallFailed(a1);
 	}
-	virtual IRExpr *transformIex(IRExpr::HappensBefore *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprHappensBefore *e) { return NULL; }
 public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 	IRExpr *transformIRExpr(IRExpr *e) { bool t; return transformIRExpr(e, &t); }
