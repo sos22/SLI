@@ -43,7 +43,7 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 		std::set<std::pair<bool, IRExpr *> > &theoreticallyEvaluatable(evalable[i]);
 		std::set<std::pair<bool, IRExpr *> > &actuallyEvalHere((*this)[i]);
 		std::set<Instruction<ThreadRip> *> &predecessors(pred[i]);
-		std::set<Instruction<ThreadRip> *> *orderingPredecessors;
+		std::set<Instruction<ThreadRip> *> *orderingPredecessors = NULL;
 
 		if (happensBefore.happensBefore.count(i))
 			orderingPredecessors = &happensBefore.happensBefore[i];
