@@ -68,7 +68,7 @@ public:
 
 	/* If non-NULL, use this to resolve BadPtr expressions where
 	   the address is a constant. */
-	VexPtr<AddressSpace, &ir_heap> as;
+	VexPtr<AddressSpace> as;
 
 	/* Bit of a hack: sometimes, only some side effects are
 	   interesting, so allow them to be listed here.  If
