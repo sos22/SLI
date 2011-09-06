@@ -474,10 +474,11 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 		return false;
 	if (IexTagLessThan(_a->tag, _b->tag)) {
 		return true;
-	} else if (_a->tag != _b->tag) {
+	} else if (IexTagLessThan(_b->tag, _a->tag)) {
 		return false;
 	}
-	
+	assert(_a->tag == _b->tag);
+
 	switch (_a->tag) {
 #define hdr1(t)								\
 		case Iex_ ## t:	{					\
@@ -495,52 +496,46 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 			return true;
 		if (a->op > b->op)
 			return false;
-		if (physicallyEqual(a->arg1, b->arg1)) {
-			if (physicallyEqual(a->arg2,
-					    b->arg2)) {
-				if (physicallyEqual(a->arg3,
-						    b->arg3))
-					return sortIRExprs(a->arg4,
-							   b->arg4);
-				else
-					return sortIRExprs(a->arg3,
-							   b->arg3);
-			} else
-				return sortIRExprs(a->arg2,
-						   b->arg2);
-		} else {
-			return sortIRExprs(a->arg1,
-					   b->arg1);
-		}
+		if (sortIRExprs(a->arg1, b->arg1))
+			return true;
+		else if (sortIRExprs(b->arg1, a->arg1))
+			return false;
+		else if (sortIRExprs(a->arg2, b->arg2))
+			return true;
+		else if (sortIRExprs(b->arg2, a->arg2))
+			return false;
+		else if (sortIRExprs(a->arg3, b->arg3))
+			return true;
+		else if (sortIRExprs(b->arg3, a->arg3))
+			return false;
+		else 
+			return sortIRExprs(a->arg4, b->arg4);
 	hdr(Triop)
 		if (a->op < b->op)
 			return true;
 		if (a->op > b->op)
 			return false;
-		if (physicallyEqual(a->arg1, b->arg1)) {
-			if (physicallyEqual(a->arg2,
-					    b->arg2)) {
-				return sortIRExprs(a->arg3,
-						   b->arg3);
-			} else
-				return sortIRExprs(a->arg2,
-						   b->arg2);
-		} else {
-			return sortIRExprs(a->arg1,
-					   b->arg1);
-		}
+		if (sortIRExprs(a->arg1, b->arg1))
+			return true;
+		else if (sortIRExprs(b->arg1, a->arg1))
+			return false;
+		else if (sortIRExprs(a->arg2, b->arg2))
+			return true;
+		else if (sortIRExprs(b->arg2, a->arg2))
+			return false;
+		else 
+			return sortIRExprs(a->arg3, b->arg3);
 	hdr(Binop)
 		if (a->op < b->op)
 			return true;
 		if (a->op > b->op)
 			return false;
-		if (physicallyEqual(a->arg1, b->arg1)) {
-			return sortIRExprs(a->arg2,
-					   b->arg2);
-		} else {
-			return sortIRExprs(a->arg1,
-					   b->arg1);
-		}
+		if (sortIRExprs(a->arg1, b->arg1))
+			return true;
+		else if (sortIRExprs(b->arg1, a->arg1))
+			return false;
+		else
+			return sortIRExprs(a->arg2, b->arg2);
 	hdr(Unop)
 		if (a->op < b->op)
 			return true;
@@ -559,30 +554,29 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 		else if (r > 0)
 			return false;
 		for (int x = 0; 1; x++) {
-			if (!a->args[x] &&
-			    !b->args[x])
+			if (!a->args[x] && !b->args[x])
 				return false;
 			if (!a->args[x])
 				return true;
 			if (!b->args[x])
 				return false;
-			if (!physicallyEqual(a->args[x],
-					     b->args[x]))
-				return sortIRExprs(a->args[x],
-						   b->args[x]);
+			if (sortIRExprs(a->args[x], b->args[x]))
+				return true;
+			if (sortIRExprs(b->args[x], a->args[x]))
+				return false;
 		}
 	}
 	hdr(Mux0X)
-		if (!physicallyEqual(a->cond,
-				     b->cond))
-			return sortIRExprs(a->cond,
-					   b->cond);
-		if (!physicallyEqual(a->expr0,
-				     b->expr0))
-			return sortIRExprs(a->expr0,
-					   b->expr0);
-		return sortIRExprs(a->exprX,
-				   b->exprX);
+		if (sortIRExprs(a->cond, b->cond))
+			return true;
+		else if (sortIRExprs(b->cond, a->cond))
+			return false;
+		else if (sortIRExprs(a->expr0, b->expr0))
+			return true;
+		else if (sortIRExprs(b->expr0, a->expr0))
+			return false;
+		else
+			return sortIRExprs(a->exprX, b->exprX);
 	hdr(Associative) {
 		if (a->op < b->op)
 			return true;
@@ -598,10 +592,10 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 				return true;
 			if (x == b->nr_arguments)
 				return false;
-			if (!physicallyEqual( a->contents[x],
-					      b->contents[x] ))
-				return sortIRExprs( a->contents[x],
-						    b->contents[x] );
+			if (sortIRExprs(a->contents[x], b->contents[x]))
+				return true;
+			else if (sortIRExprs(b->contents[x], a->contents[x]))
+				return false;
 			x++;
 		}
 	}
@@ -619,10 +613,10 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 				return true;
 			if (!b->args[x])
 				return false;
-			if (!physicallyEqual(a->args[x],
-					     b->args[x]))
-				return sortIRExprs(a->args[x],
-						   b->args[x]);
+			if (sortIRExprs(a->args[x], b->args[x]))
+				return true;
+			else if (sortIRExprs(b->args[x], a->args[x]))
+				return false;
 		}
 	hdr(ClientCallFailed)
 		return sortIRExprs(a->target,
@@ -638,6 +632,99 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 
 	abort();
 }
+
+template <typename t> void
+merge(t &out, const t &inp1, const t&inp2, bool (*lessThan)(typename t::member_t a, typename t::member_t b))
+{
+	assert(out.size() == inp1.size() + inp2.size());
+	unsigned x, y, z;
+	x = 0;
+	y = 0;
+	z = 0;
+	while (x < inp1.size() && y < inp2.size()) {
+		if (lessThan(inp1[x], inp2[y])) {
+			out[z++] = inp1[x++];
+		} else {
+			out[z++] = inp2[y++];
+		}
+	}
+	while (x < inp1.size())
+		out[z++] = inp1[x++];
+	while (y < inp2.size())
+		out[z++] = inp2[y++];
+}
+
+template <typename t> void
+merge_sort(t &out, const t &inp, bool (*lessThan)(typename t::member_t a, typename t::member_t b))
+{
+	assert(out.size() == inp.size());
+	if (inp.size() == 0)
+		return;
+	if (inp.size() == 1) {
+		out = inp;
+		return;
+	}
+	unsigned div = inp.size() / 2;
+
+	t sublist1(div);
+	t sublist2(inp.size() - div);
+	merge_sort(sublist1, inp.slice(0, div), lessThan);
+	merge_sort(sublist2, inp.slice(div, inp.size()), lessThan);
+	merge(out, sublist1, sublist2, lessThan);
+}
+
+template <typename t>
+class vector_slice {
+	std::vector<t> dummy;
+public:
+	typedef t member_t;
+	std::vector<t> &underlying;
+	unsigned start; /* inclusive */
+	unsigned end; /* exclusive */
+	vector_slice(std::vector<t> &_underlying)
+		: underlying(_underlying), start(0), end(_underlying.size())
+	{}
+	vector_slice(std::vector<t> &_underlying, unsigned _start, unsigned _end)
+		: underlying(_underlying), start(_start), end(_end)
+	{
+		assert(start <= underlying.size());
+		assert(end <= underlying.size());
+		assert(start <= end);
+	}
+	vector_slice(unsigned sz)
+		: underlying(dummy), start(0), end(sz)
+	{
+		dummy.resize(sz);
+	}
+	const vector_slice<t> slice(unsigned new_start, unsigned new_end) const
+	{
+		assert(new_end >= new_start);
+		assert(new_end + start <= end);
+		assert(new_start + start <= end);
+		return vector_slice(underlying, new_start + start, new_end + start);
+	}
+	vector_slice<t> slice(unsigned new_start, unsigned new_end)
+	{
+		assert(new_end >= new_start);
+		assert(new_end + start <= end);
+		assert(new_start + start <= end);
+		return vector_slice(underlying, new_start + start, new_end + start);
+	}
+	const t&operator[](unsigned idx) const {
+		assert(idx < size());
+		return underlying[idx + start];
+	}
+	t &operator[](unsigned idx) {
+		assert(idx < size());
+		return underlying[idx + start];
+	}
+	unsigned size() const { return end - start; }
+	void operator = (const vector_slice<t> &other) {
+		assert(size() == other.size());
+		for (unsigned x = 0; x < size(); x++)
+			(*this)[x] = other[x];
+	}
+};
 
 void
 addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg)
@@ -760,9 +847,17 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			 * be close together. */
 			if (operationCommutes(e->op)) {
 				__set_profiling(sort_associative_arguments);
-				std::sort(e->contents,
-					  e->contents + e->nr_arguments,
-					  sortIRExprs);
+				std::vector<IRExpr *> c;
+				c.resize(e->nr_arguments);
+				for (int x = 0; x < e->nr_arguments; x++)
+					c[x] = e->contents[x];
+				std::vector<IRExpr *> out;
+				out.resize(e->nr_arguments);
+				vector_slice<IRExpr *> out_slice(out);
+				vector_slice<IRExpr *> inp_slice(c);
+				merge_sort(out_slice, inp_slice, sortIRExprs);
+				for (int x = 0; x < e->nr_arguments; x++)
+					e->contents[x] = out[x];
 			}
 			/* Fold together constants.  For commutative
 			   operations they'll all be at the beginning, but
