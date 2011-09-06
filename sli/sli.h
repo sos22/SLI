@@ -1317,12 +1317,34 @@ void HandleMallocFree(Thread *thr, AddressSpace *as);
    finish what we're doing and get out quickly. */
 extern volatile bool _timed_out;
 extern FILE *_logfile;
+class __timer_message_filter {
+	static __timer_message_filter *head;
+	__timer_message_filter *next;
+	int cntr;
+public:
+	__timer_message_filter() : cntr(0) {
+		next = head;
+		head = this;
+	}
+	~__timer_message_filter() { abort(); /* shouldn't happen */ }
+	bool operator()() {
+		cntr++;
+		if (cntr == 10)
+			fprintf(_logfile, "suppress further messages: ");
+		return cntr <= 10;
+	}
+	static void reset() {
+		for (auto it = head; it; it = it->next)
+			it->cntr = 0;
+	}
+};
 #define TIMEOUT								\
 	({								\
-	if (_timed_out)							\
-		fprintf(_logfile, "%s timed out at %d\n",		\
-			__func__, __LINE__);				\
-	_timed_out;							\
+		static __timer_message_filter filter;			\
+		if (_timed_out && filter())				\
+			fprintf(_logfile, "%s timed out at %d\n",	\
+				__func__, __LINE__);			\
+		_timed_out;						\
 	})
 
 void __fail(const char *file, unsigned line, const char *fmt, ...)

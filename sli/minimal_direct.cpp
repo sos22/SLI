@@ -144,6 +144,7 @@ consider_rip(unsigned long my_rip,
 		printf("%lx took %f\n", my_rip, time_taken);
 	}
 	_timed_out = false;
+	__timer_message_filter::reset();
 
 	fflush(NULL);
 		

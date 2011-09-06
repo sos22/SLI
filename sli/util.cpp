@@ -5,6 +5,8 @@
 #include "sli.h"
 #include "libvex_parse.h"
 
+__timer_message_filter *__timer_message_filter::head;
+
 void
 debugger_attach(void)
 {
