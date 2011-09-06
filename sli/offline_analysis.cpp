@@ -1206,7 +1206,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
-		abort();
+		break;
 	}
 	outputAvail.calcRegisterMap();
 }
