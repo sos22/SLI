@@ -310,12 +310,12 @@ static IRExpr* mkU ( IRType ty, ULong i )
 
 static void storeLE ( IRExpr* addr, IRExpr* data )
 {
-   stmt( IRStmt_Store(IRTemp_INVALID, addr, data) );
+   stmt( IRStmt_Store(addr, data) );
 }
 
 static IRExpr* loadLE ( IRType ty, IRExpr* data, ThreadRip rip )
 {
-   return IRExpr_Load(False, ty, data, rip);
+   return IRExpr_Load(ty, data, rip);
 }
 
 static IROp mkSizedOp ( IRType ty, IROp op8 )

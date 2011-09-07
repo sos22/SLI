@@ -1707,7 +1707,6 @@ interpretStatement(IRStmt *stmt,
 		return NULL;
 
 	case Ist_Store: {
-		assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
 		struct expression_result data =
 			eval_expression(&thr->regs, stmt->Ist.Store.data, thr->temporaries.content);
 		struct expression_result addr =

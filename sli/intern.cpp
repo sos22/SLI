@@ -172,7 +172,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			do_field(ClientCallFailed, target);
 			break;
 		case Iex_Load:
-			do_field(Load, isLL);
 			do_field(Load, ty);
 			do_field(Load, addr);
 			do_field(Load, rip);

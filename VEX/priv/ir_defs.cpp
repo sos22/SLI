@@ -1041,14 +1041,14 @@ static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix, 
   IRType ty;
   IRExpr *addr;
   ThreadRip rip;
-  if (!parseThisString("LDle:", str, &str, err) ||
+  if (!parseThisString("LD:", str, &str, err) ||
       !parseIRType(&ty, str, &str, err) ||
       !parseThisChar('(', str, &str, err) ||
       !parseIRExpr(&addr, str, &str, err) ||
       !parseThisString(")@", str, &str, err) ||
       !parseThreadRip(&rip, str, suffix, err))
     return false;
-  *res = IRExpr_Load(False, ty, addr, rip);
+  *res = IRExpr_Load(ty, addr, rip);
   return true;
 }
 
@@ -1276,7 +1276,7 @@ IRExprUnop::prettyPrint(FILE *f) const
 void
 IRExprLoad::prettyPrint(FILE *f) const
 {
-      fprintf(f,  "LD%s:", isLL ? "-LL" : "" );
+      fprintf(f,  "LD:");
       ppIRType(ty, f);
       fprintf(f,  "(" );
       ppIRExpr(addr, f);
@@ -1519,16 +1519,10 @@ void ppIRStmt ( IRStmt* s, FILE* f )
          ppIRExpr(s->Ist.WrTmp.data, f);
          break;
       case Ist_Store:
-         if (s->Ist.Store.resSC != IRTemp_INVALID) {
-            ppIRTemp(s->Ist.Store.resSC, f);
-            fprintf(f,  " = SC( " );
-         }
          fprintf(f,  "ST(");
          ppIRExpr(s->Ist.Store.addr, f);
          fprintf(f,  ") = ");
          ppIRExpr(s->Ist.Store.data, f);
-         if (s->Ist.Store.resSC != IRTemp_INVALID)
-            fprintf(f,  " )" );
          break;
       case Ist_CAS:
          ppIRCAS(s->Ist.CAS.details, f);
@@ -1737,10 +1731,8 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    e->arg = arg;
    return e;
 }
-IRExpr* IRExpr_Load ( Bool isLL, IRType ty, IRExpr* addr,
-		      ThreadRip rip ) {
+IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, ThreadRip rip ) {
    IRExprLoad* e        = new IRExprLoad();
-   e->isLL = isLL;
    e->ty   = ty;
    e->addr = addr;
    e->rip  = rip;
@@ -2016,10 +2008,9 @@ IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data ) {
    s->Ist.WrTmp.data = data;
    return s;
 }
-IRStmt* IRStmt_Store ( IRTemp resSC, IRExpr* addr, IRExpr* data ) {
+IRStmt* IRStmt_Store ( IRExpr* addr, IRExpr* data ) {
    IRStmt* s          = new IRStmt();
    s->tag             = Ist_Store;
-   s->Ist.Store.resSC = resSC;
    s->Ist.Store.addr  = addr;
    s->Ist.Store.data  = data;
    return s;

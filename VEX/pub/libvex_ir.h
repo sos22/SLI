@@ -1271,7 +1271,6 @@ struct IRExprUnop : public IRExpr {
    ppIRExpr output: LD<end>:<ty>(<addr>), eg. LDle:I32(t1)
 */
 struct IRExprLoad : public IRExpr {
-   Bool      isLL;   /* True iff load makes a reservation */
    IRType    ty;     /* Type of the loaded value */
    IRExpr*   addr;   /* Address being loaded from */
    ThreadRip rip; /* Address of load instruction */
@@ -1465,8 +1464,7 @@ extern IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
                                         IRExpr* arg2, IRExpr* arg3 );
 extern IRExpr* IRExpr_Binop  ( IROp op, IRExpr* arg1, IRExpr* arg2 );
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
-extern IRExpr* IRExpr_Load   ( Bool isLL, IRType ty, IRExpr* addr,
-			       ThreadRip rip );
+extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr, ThreadRip rip );
 extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
@@ -1925,7 +1923,6 @@ struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
             ppIRStmt output: ST<end>(<addr>) = <data>, eg. STle(t1) = t2
          */
          struct {
-            IRTemp    resSC;  /* result of SC goes here (1 == success) */
             IRExpr*   addr;   /* store address */
             IRExpr*   data;   /* value to write */
          } Store;
@@ -1999,7 +1996,7 @@ extern IRStmt* IRStmt_Put     ( Int off, IRExpr* data );
 extern IRStmt* IRStmt_PutI    ( IRRegArray* descr, IRExpr* ix, Int bias, 
                                 IRExpr* data );
 extern IRStmt* IRStmt_WrTmp   ( IRTemp tmp, IRExpr* data );
-extern IRStmt* IRStmt_Store   ( IRTemp resSC, IRExpr* addr, IRExpr* data );
+extern IRStmt* IRStmt_Store   ( IRExpr* addr, IRExpr* data );
 extern IRStmt* IRStmt_CAS     ( IRCAS* details );
 extern IRStmt* IRStmt_Dirty   ( IRDirty* details );
 extern IRStmt* IRStmt_MBE     ( IRMBusEvent event );

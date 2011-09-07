@@ -130,7 +130,6 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				break;
 
 			case Ist_Store: {
-				assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
 				struct expression_result data =
 					eval_expression(&s.regs, stmt->Ist.Store.data, temporaries);
 				struct expression_result addr =

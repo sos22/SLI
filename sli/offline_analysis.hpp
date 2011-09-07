@@ -79,7 +79,7 @@ protected:
 		if (!t)
 			return NULL;
 		else
-			return IRExpr_Load(e->isLL, e->ty, addr, e->rip);
+			return IRExpr_Load(e->ty, addr, e->rip);
 	}
 	virtual IRExpr *transformIex(IRExprConst *e)
 	{
