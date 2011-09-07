@@ -424,7 +424,7 @@ rewriteTemporary(IRExpr *sm,
 	protected:
 		IRExpr *transformIex(IRExprGet *what)
 		{
-		  if (what->offset == -(Int)tmp - 1)
+			if (what->reg.isTemp() && what->reg.asTemp() == tmp)
 				return to;
 			else
 				return NULL;
@@ -449,7 +449,7 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 	case Ist_Put:
 		sm->prependSideEffect(
 			new StateMachineSideEffectCopy(
-				threadAndRegister(site.thread, stmt->Ist.Put),
+				threadAndRegister::reg(site.thread, stmt->Ist.Put.offset),
 				stmt->Ist.Put.data));
 		break;
 	case Ist_PutI:
@@ -459,7 +459,7 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 	case Ist_WrTmp:
 		sm->prependSideEffect(
 			new StateMachineSideEffectCopy(
-				threadAndRegister(site.thread, stmt->Ist.WrTmp),
+				threadAndRegister::temp(site.thread, stmt->Ist.WrTmp.tmp),
 				stmt->Ist.WrTmp.data));
 		break;
 	case Ist_Store:
@@ -481,7 +481,7 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 			    "helper_load_32")) {
 			StateMachineSideEffectLoad *smsel =
 				new StateMachineSideEffectLoad(
-					threadAndRegister(site.thread, stmt->Ist.Dirty),
+					threadAndRegister::temp(site.thread, stmt->Ist.Dirty.details->tmp),
 					stmt->Ist.Dirty.details->args[0],
 					site);
 			sm->prependSideEffect(smsel);
@@ -1051,7 +1051,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		threadAndRegister reg;
 		StateMachineSideEffect *preserve;
 		IRExpr *transformIex(IRExprGet *e) {
-			if (threadAndRegister(e) == reg)
+			if (e->reg == reg)
 				res = true;
 			return NULL;
 		}
@@ -1210,7 +1210,7 @@ public:
 	const avail_t &avail;
 	const bool use_assumptions;
 	IRExpr *transformIex(IRExprGet *e) {
-		auto it = avail.registers.find(threadAndRegister(e));
+		auto it = avail.registers.find(e->reg);
 		if (it != avail.registers.end())
 			return it->second;
 		return IRExprTransformer::transformIex(e);
@@ -1320,7 +1320,7 @@ buildNewStateMachineWithLoadsEliminated(
 					newEffect =
 						new StateMachineSideEffectCopy(
 							smsel->target,
-							IRExpr_Get(smsel2->target.second, Ity_I64, smsel2->target.first));
+							new IRExprGet(smsel2->target, Ity_I64));
 				}
 			}
 			if (!newEffect && doit)
@@ -2045,14 +2045,16 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 class CanonicaliseRbp : public StateMachineTransformer {
 	IRExpr *delta;
 	IRExpr *transformIex(IRExprGet *orig) {
-		if (orig->offset == OFFSET_amd64_RBP && orig->ty == Ity_I64) {
+		if (orig->ty == Ity_I64 &&
+		    !orig->reg.isTemp() &&
+		    orig->reg.asReg() == OFFSET_amd64_RBP) {
 			return IRExpr_Associative(
 				Iop_Add64,
 				delta,
 				IRExpr_Get(
 					OFFSET_amd64_RSP,
 					Ity_I64,
-					orig->tid),
+					orig->reg.tid()),
 				NULL);
 		}
 		return StateMachineTransformer::transformIex(orig);
@@ -2097,7 +2099,7 @@ public:
 		return se;
 	}
 	IRExpr *transformIex(IRExprGet *what) {
-		accessedRegisters.insert(threadAndRegister(what));
+		accessedRegisters.insert(what->reg);
 		return StateMachineTransformer::transformIex(what);
 	}
 	BuildFreeVariableMapTransformer(FreeVariableMap &_freeVariables)
@@ -2126,9 +2128,8 @@ public:
 		: map(_map)
 	{}
 	IRExpr *transformIex(IRExprGet *what) {
-		threadAndRegister k(what);
-		if (map.count(k)) {
-			IRExprFreeVariable *res = (IRExprFreeVariable *)map[k];
+		if (map.count(what->reg)) {
+			IRExprFreeVariable *res = (IRExprFreeVariable *)map[what->reg];
 			assert(res->tag == Iex_FreeVariable);
 			fvDelta.push_back(std::pair<FreeVariableKey, IRExpr *>(res->key, currentIRExpr()));
 			return res;
@@ -2164,7 +2165,7 @@ namespace __offline_analysis_dead_code {
 			class _ : public IRExprTransformer {
 				LivenessEntry &out;
 				IRExpr *transformIex(IRExprGet *g) {
-					out.insert(threadAndRegister(g));
+					out.insert(g->reg);
 					return IRExprTransformer::transformIex(g);
 				}
 			public:
@@ -2222,7 +2223,7 @@ namespace __offline_analysis_dead_code {
 				LivenessEntry *_this;
 
 				IRExpr *transformIex(IRExprGet *g) {
-					if (_this->registerLive(threadAndRegister(g)))
+					if (_this->registerLive(g->reg))
 						res = true;
 					return IRExprTransformer::transformIex(g);
 				}
@@ -2335,7 +2336,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 					StateMachineSideEffectCopy *smsec =
 						(StateMachineSideEffectCopy *)e;
 					if (smsec->value->tag == Iex_Get &&
-					    threadAndRegister((IRExprGet *)smsec->value) == smsec->target) {
+					    ((IRExprGet *)smsec->value)->reg == smsec->target) {
 						/* Copying a register
 						   or temporary back
 						   to itself is always
@@ -3790,7 +3791,7 @@ CFGtoCrashReason(unsigned tid,
 				break;
 			case Ist_Put:
 				se = new StateMachineSideEffectCopy(
-					threadAndRegister(rip.thread, stmt->Ist.Put),
+					threadAndRegister::reg(rip.thread, stmt->Ist.Put.offset),
 					stmt->Ist.Put.data);
 				break;
 			case Ist_PutI:
@@ -3798,7 +3799,7 @@ CFGtoCrashReason(unsigned tid,
 				abort();
 			case Ist_WrTmp:
 				se = new StateMachineSideEffectCopy(
-					threadAndRegister(rip.thread, stmt->Ist.WrTmp),
+					threadAndRegister::temp(rip.thread, stmt->Ist.WrTmp.tmp),
 					stmt->Ist.WrTmp.data);
 				break;
 			case Ist_Store:
@@ -3817,7 +3818,7 @@ CFGtoCrashReason(unsigned tid,
 				    !strcmp(stmt->Ist.Dirty.details->cee->name,
 					    "helper_load_32")) {
 					se = new StateMachineSideEffectLoad(
-						threadAndRegister(rip.thread, stmt->Ist.Dirty),
+						threadAndRegister::temp(rip.thread, stmt->Ist.Dirty.details->tmp),
 						stmt->Ist.Dirty.details->args[0],
 						rip);
 				}  else {
@@ -3901,7 +3902,7 @@ CFGtoCrashReason(unsigned tid,
 			state.addReloc(&smp->target->target, cfg->fallThrough);
 			smp->target->prependSideEffect(
 				new StateMachineSideEffectCopy(
-					threadAndRegister(site.thread, OFFSET_amd64_RAX),
+					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX),
 					r));
 			return smp;
 		}

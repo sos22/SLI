@@ -2740,10 +2740,10 @@ CrashExpression::get(IRExpr *e)
 	switch (e->tag) {
 	case Iex_Get: {
 		IRExprGet *g = (IRExprGet *)e;
-		if (g->offset >= 0)
-			return CrashExpressionRegister::get(g->offset);
+		if (g->reg.isTemp() >= 0)
+			return CrashExpressionRegister::get(g->reg.asReg());
 		else
-			return CrashExpressionTemp::get(-g->offset - 1);
+			return CrashExpressionTemp::get(g->reg.asTemp());
 	}
 	case Iex_Const:
 		return CrashExpressionConst::get(((IRExprConst *)e)->con->Ico.U64);

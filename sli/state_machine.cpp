@@ -305,7 +305,7 @@ findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &out, const AllowableOp
 			: out(_out)
 		{}
 		IRExpr *transformIex(IRExprGet *e) {
-			out.insert(threadAndRegister(e));
+			out.insert(e->reg);
 			return IRExprTransformer::transformIex(e);
 		}
 	} t(out);
@@ -464,10 +464,25 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 static bool
 parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix, char **err)
 {
-	if (parseDecimalUInt(&out->first, str, &str, err) &&
-	    parseThisChar(':', str, &str, err) &&
-	    parseDecimalInt(&out->second, str, suffix, err))
+	if (parseThisString("invalid", str, suffix, err)) {
+		*out = threadAndRegister::invalid();
 		return true;
+	}
+	unsigned thread;
+	if (!parseDecimalUInt(&thread, str, &str, err) ||
+	    !parseThisChar(':', str, &str, err))
+		return false;
+	int offset;
+	if (parseThisString("tmp", str, &str, err) &&
+	    parseDecimalInt(&offset, str, suffix, err)) {
+		*out = threadAndRegister::temp(thread, offset);
+		return true;
+	}
+	if (parseThisString("reg", str, &str, err) &&
+	    parseDecimalInt(&offset, str, suffix, err)) {
+		*out = threadAndRegister::reg(thread, offset);
+		return true;
+	}
 	*err = vex_asprintf("Wanted threadAndRegister, got %.10s", str);
 	return false;
 }
@@ -495,7 +510,7 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		*out = new StateMachineSideEffectStore(addr, data, rip);
 		return true;
 	}
-	threadAndRegister key;
+	threadAndRegister key(threadAndRegister::invalid());
 	if (parseThisString("LOAD ", str, &str2, err) &&
 	    parseThreadAndRegister(&key, str2, &str2, err) &&
 	    parseThisString(" <- *(", str2, &str2, err) &&

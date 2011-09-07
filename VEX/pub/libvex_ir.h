@@ -54,6 +54,82 @@
 #include "libvex_print.hpp"
 #include "libvex_guest_offsets.h"
 
+class threadAndRegister {
+	std::pair<unsigned, int> content;
+	bool valid;
+	threadAndRegister(unsigned tid, int reg)
+		: content(tid, reg), valid(true)
+	{}
+	threadAndRegister()
+		: content(-10000, -10000), valid(false)
+	{}	
+public:
+	static threadAndRegister reg(unsigned tid, int reg)
+	{
+		return threadAndRegister(tid, reg);
+	}
+	static threadAndRegister temp(unsigned tid, int reg)
+	{
+		return threadAndRegister(tid, -reg - 1);
+	}
+	static threadAndRegister invalid()
+	{
+		return threadAndRegister();
+	}
+	unsigned long hash() const {
+		if (!valid)
+			return 72;
+		else
+			return content.first * 142993 + content.second * 196279;
+	}
+	void prettyPrint(FILE *f) const {
+		if (!valid)
+			fprintf(f, "invalid");
+		else if (content.second < 0)
+			fprintf(f, "%d:tmp%d", content.first, -content.second - 1);
+		else
+			fprintf(f, "%d:reg%d", content.first, content.second);
+	}
+	bool isTemp() const {
+		return !valid || content.second < 0;
+	}
+	Int asReg() const {
+		assert(!isTemp());
+		return content.second;
+	}
+	unsigned asTemp() const {
+	        assert(isTemp());
+		return -content.second - 1;
+	}
+	unsigned tid() const {
+		assert(valid);
+		return content.first;
+	}
+
+	bool operator <(const threadAndRegister &other) const {
+		if (valid < other.valid)
+			return true;
+		if (valid > other.valid)
+			return false;
+		return content < other.content;
+	}
+	bool operator >(const threadAndRegister &other) const {
+		return other < *this;
+	}
+	bool operator !=(const threadAndRegister &other) const {
+		return *this < other || *this > other;
+	}
+	bool operator ==(const threadAndRegister &other) const {
+		return !((*this) != other);
+	}
+	bool operator <=(const threadAndRegister &other) const {
+		return *this < other || *this == other;
+	}
+	bool operator >=(const threadAndRegister &other) const {
+		return *this > other || *this == other;
+	}
+};
+
 class ThreadRip {
 public:
 	/* Surprise!  Can't use a constructor because we get stashed
@@ -1047,32 +1123,33 @@ public:
 /* Read a guest register, at a fixed offset in the guest state.
    ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0) */
 struct IRExprGet : public IRExpr {
-   Int offset;
+   threadAndRegister reg;
    IRType ty;
-   unsigned tid;
 
-   IRExprGet()
-       : IRExpr(Iex_Get), offset(0), ty(Ity_INVALID), tid(0)
+   IRExprGet(threadAndRegister _reg, IRType _ty)
+	   : IRExpr(Iex_Get), reg(_reg), ty(_ty)
    {}
    void visit(HeapVisitor &hv) {}
-   unsigned long hashval() const { return offset + ty * 3 + tid * 7; }
+   unsigned long hashval() const { return reg.hash() + ty * 3; }
    void prettyPrint(FILE *f) const {
-       if (ty == Ity_I64) {
-	   switch (offset) {
-#define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d", tid); return;
-	       foreach_reg(do_reg);
+      if (ty == Ity_I64 && !reg.isTemp()) {
+	 switch (reg.asReg()) {
+#define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d", reg.tid()); return;
+	    foreach_reg(do_reg);
 #undef do_reg
-	   }
-	}
-       fprintf(f,  "GET:" );
-       ppIRType(ty, f);
-       fprintf(f, "(%d, %d)", offset, tid);
+	 }
+      }
+      fprintf(f,  "GET:" );
+      ppIRType(ty, f);
+      fprintf(f, "(");
+      reg.prettyPrint(f);
+      fprintf(f, ")");
    }
    IRType type(IRTypeEnv *e) const {
-      if (offset >= 0)
+      if (!reg.isTemp())
 	 return ty;
       else
-	 return typeOfIRTemp(e, -offset - 1);
+	 return typeOfIRTemp(e, reg.asTemp());
    }
 };
 /* Read a guest register at a non-fixed offset in the guest state.

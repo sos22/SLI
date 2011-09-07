@@ -11,35 +11,6 @@ class StateMachineEdge;
 class StateMachineSideEffect;
 class OracleInterface;
 
-class threadAndRegister : public std::pair<unsigned, int> {
-public:
-	threadAndRegister() : std::pair<unsigned, int>(-10000, -10000) {}
-	threadAndRegister(unsigned tid, int reg)
-		: std::pair<unsigned, int>(tid, reg)
-	{}
-	threadAndRegister(IRExprGet *e)
-		: std::pair<unsigned, int>(e->tid, e->offset)
-	{}
-	threadAndRegister(unsigned tid, IRStmt::Put &e)
-		: std::pair<unsigned, int>(tid, e.offset)
-	{}
-	threadAndRegister(unsigned tid, IRStmt::WrTmp &e)
-		: std::pair<unsigned, int>(tid, -e.tmp - 1)
-	{}
-	threadAndRegister(unsigned tid, IRStmt::Dirty &e)
-		: std::pair<unsigned, int>(tid, -e.details->tmp - 1)
-	{}
-	unsigned long hash() const {
-		return first * 142993 + second * 196279;
-	}
-	void prettyPrint(FILE *f) const {
-		if (second < 0)
-			fprintf(f, "%d:tmp%d", first, -second - 1);
-		else
-			fprintf(f, "%d:reg%d", first, second);
-	}
-};
-
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;

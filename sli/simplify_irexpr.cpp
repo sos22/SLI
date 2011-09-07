@@ -83,8 +83,8 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 		const IRExpr ## type *a = (const IRExpr ## type *)_a,	\
 			*b = (const IRExpr ## type *)_b;
 #define footer() }
-		hdr(Get)
-		return a->offset == b->offset && a->ty == b->ty;
+	hdr(Get)
+		return a->reg == b->reg && a->ty == b->ty;
 	footer()
 	hdr(GetI)
 		return a->bias == b->bias &&
@@ -476,7 +476,7 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 				*b = (IRExpr ## t *)_b;
 	hdr1(Get)
 #define hdr(t) } hdr1(t)
-		return a->offset < b->offset;
+		return a->reg < b->reg;
 	hdr(GetI)
 		return sortIRExprs(a->ix, b->ix);
 	hdr(Qop)
@@ -1223,8 +1223,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExprTransformer::transformIex(e);
 				}
 				if (e->arg->tag == Iex_Get &&
-				    (((IRExprGet *)e->arg)->offset == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
-				     ((IRExprGet *)e->arg)->offset == offsetof(VexGuestAMD64State, guest_RSP))) {
+				    !((IRExprGet *)e->arg)->reg.isTemp() &&
+				    (((IRExprGet *)e->arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
+				     ((IRExprGet *)e->arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_RSP))) {
 					/* The FS and RSP registers are
 					   assumed to always point at valid
 					   memory. */
@@ -1473,7 +1474,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			if (opt.assumePrivateStack &&
 			    e->op == Iop_CmpEQ64 &&
 			    r->tag == Iex_Get &&
-			    ((IRExprGet *)r)->offset == OFFSET_amd64_RSP &&
+			    !((IRExprGet *)r)->reg.isTemp() &&
+			    ((IRExprGet *)r)->reg.asReg() == OFFSET_amd64_RSP &&
 			    l->tag == Iex_Const) {
 				*done_something = true;
 				return IRExpr_Const(IRConst_U1(0));

@@ -716,7 +716,8 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 	public:
 		Oracle::LivenessSet old;
 		IRExpr *transformIex(IRExprGet *e) {
-			old = old.use(e->offset);
+			if (!e->reg.isTemp())
+				old = old.use(e->reg.asReg());
 			return IRExprTransformer::transformIex(e);
 		}
 		_(Oracle::LivenessSet &_old)
@@ -741,15 +742,15 @@ irexprAliasingClass(IRExpr *expr,
 	switch (expr->tag) {
 	case Iex_Get: {
 		IRExprGet *e = (IRExprGet *)expr;
-		if (e->offset < 0) {
+		if (e->reg.isTemp()) {
 			if (!temps)
 				return Oracle::PointerAliasingSet::anything;
 			std::map<IRTemp, Oracle::PointerAliasingSet>::iterator it;
-			it = temps->find(-e->offset - 1);
+			it = temps->find(e->reg.asTemp());
 			assert(it != temps->end());
 			return it->second;
-		} else if (e->offset < Oracle::NR_REGS * 8)
-			return config.v[e->offset / 8];
+		} else if (e->reg.asReg() < Oracle::NR_REGS * 8)
+			return config.v[e->reg.asReg() / 8];
 		else {
 			/* Assume that those are the only pointer registers */
 			return Oracle::PointerAliasingSet::notAPointer;
@@ -1644,7 +1645,7 @@ class RewriteRegisterExpr : public IRExprTransformer {
 	IRExpr *to;
 protected:
 	IRExpr *transformIex(IRExprGet *what) {
-		if (what->offset == (int)idx)
+		if (!what->reg.isTemp() && what->reg.asReg() == (int)idx)
 			return to;
 		else
 			return NULL;
@@ -1669,7 +1670,7 @@ class RewriteTemporaryExpr : public IRExprTransformer {
 protected:
 	IRExpr *transformIex(IRExprGet *what)
 	{
-		if (what->offset == -(Int)tmp - 1)
+		if (what->reg.isTemp() && what->reg.asTemp() == tmp)
 			return to;
 		else
 			return NULL;
@@ -1796,9 +1797,9 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 		rsp = simplifyIRExpr(rsp, AllowableOptimisations::defaultOptimisations);
 	if (rbp)
 		rbp = simplifyIRExpr(rbp, AllowableOptimisations::defaultOptimisations);
-	if (rsp && rsp->tag == Iex_Get && ((IRExprGet *)rsp)->offset == OFFSET_amd64_RSP)
+	if (rsp && rsp->tag == Iex_Get && ((IRExprGet *)rsp)->reg.asReg() == OFFSET_amd64_RSP)
 		rsp = NULL;
-	if (rbp && rbp->tag == Iex_Get && ((IRExprGet *)rbp)->offset == OFFSET_amd64_RBP)
+	if (rbp && rbp->tag == Iex_Get && ((IRExprGet *)rbp)->reg.asReg() == OFFSET_amd64_RBP)
 		rbp = NULL;
 	if (!rsp && !rbp)
 		goto join_predecessors;
@@ -1808,9 +1809,9 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	if (rsp) {
 		if (rsp->tag == Iex_Get) {
 			IRExprGet *g = (IRExprGet *)rsp;
-			if (g->offset == OFFSET_amd64_RSP) {
+			if (g->reg.asReg() == OFFSET_amd64_RSP) {
 				abort();
-			} else if (g->offset == OFFSET_amd64_RBP) {
+			} else if (g->reg.asReg() == OFFSET_amd64_RBP) {
 				offset = 0;
 				state = RbpToRspOffsetStateValid;
 				goto done;
@@ -1822,10 +1823,10 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 			    a->contents[0]->tag == Iex_Const &&
 			    a->contents[1]->tag == Iex_Get) {
 				IRExprGet *base = (IRExprGet *)a->contents[1];
-				if (base->offset == OFFSET_amd64_RSP) {
+				if (base->reg.asReg() == OFFSET_amd64_RSP) {
 					delta_offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
 					goto join_predecessors;
-				} else if (base->offset == OFFSET_amd64_RBP) {
+				} else if (base->reg.asReg() == OFFSET_amd64_RBP) {
 					offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
 					state = RbpToRspOffsetStateValid;
 					goto done;
@@ -1839,9 +1840,9 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 
 		if (rbp->tag == Iex_Get) {
 			IRExprGet *g = (IRExprGet *)rbp;
-			if (g->offset == OFFSET_amd64_RBP) {
+			if (g->reg.asReg() == OFFSET_amd64_RBP) {
 				abort();
-			} else if (g->offset == OFFSET_amd64_RSP) {
+			} else if (g->reg.asReg() == OFFSET_amd64_RSP) {
 				offset = 0;
 				state = RbpToRspOffsetStateValid;
 				goto done;
@@ -1854,10 +1855,10 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 			    a->contents[1]->tag == Iex_Get) {
 				IRExprGet *base = (IRExprGet *)a->contents[1];
 				IRConst *o = ((IRExprConst *)a->contents[0])->con;
-				if (base->offset == OFFSET_amd64_RBP) {
+				if (base->reg.asReg() == OFFSET_amd64_RBP) {
 					delta_offset = -o->Ico.U64;
 					goto join_predecessors;
-				} else if (base->offset == OFFSET_amd64_RSP) {
+				} else if (base->reg.asReg() == OFFSET_amd64_RSP) {
 					offset = -o->Ico.U64;
 					state = RbpToRspOffsetStateValid;
 					goto done;

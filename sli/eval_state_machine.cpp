@@ -34,7 +34,7 @@ public:
 class SpecialiseIRExpr : public IRExprTransformer {
 	threadState &state;
 	IRExpr *transformIex(IRExprGet *e) {
-		auto it = state.registers.find(threadAndRegister(e));
+		auto it = state.registers.find(e->reg);
 		if (it != state.registers.end())
 			return it->second;
 		return IRExprTransformer::transformIex(e);

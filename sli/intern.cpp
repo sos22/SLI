@@ -31,7 +31,7 @@ shallow_hash(const IRExpr *e)
 	case Iex_Const:
 		return 100242167;
 	case Iex_Get:
-		return ((IRExprGet *)e)->offset * 100001029 + 100011943;
+		return ((IRExprGet *)e)->reg.hash() + 100011943;
 	case Iex_GetI:
 		return 100013213;
 	case Iex_Qop:
@@ -128,9 +128,8 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			    ((IRExpr ## t *)e)->n)			\
 				continue
 		case Iex_Get:
-			do_field(Get, offset);
+			do_field(Get, reg);
 			do_field(Get, ty);
-			do_field(Get, tid);
 			break;
 		case Iex_GetI:
 			do_field(GetI, descr);

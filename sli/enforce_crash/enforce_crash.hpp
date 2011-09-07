@@ -75,7 +75,7 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 			return avail.count(i) != 0;
 		}
 		IRExpr *transformIex(IRExprGet *e) {
-			if (!availThreads.count(e->tid))
+			if (!availThreads.count(e->reg.tid()))
 				isGood = false;
 			return NULL;
 		}
@@ -165,7 +165,7 @@ public:
 			IRExpr *e = *it;
 			ThreadRip rip;
 			if (e->tag == Iex_Get) {
-				rip = roots[((IRExprGet *)e)->tid];
+				rip = roots[((IRExprGet *)e)->reg.tid()];
 			} else if (e->tag == Iex_ClientCall) {
 				rip = ((IRExprClientCall *)e)->callSite;
 			} else if (e->tag == Iex_Load) {

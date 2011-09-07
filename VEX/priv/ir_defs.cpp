@@ -1682,11 +1682,7 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 /* Constructors -- IRExpr */
 
 IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid ) {
-   IRExprGet* e      = new IRExprGet();
-   e->offset = off;
-   e->ty     = ty;
-   e->tid    = tid;
-   return e;
+   return new IRExprGet(threadAndRegister::reg(tid, off), ty);
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
    IRExprGetI* e         = new IRExprGetI();

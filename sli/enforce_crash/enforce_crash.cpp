@@ -1087,8 +1087,9 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					if (e->tag == Iex_Get) {
 						/* Easy case: just store the register in its slot */
 						simulationSlotT s = data.exprsToSlots(it->first, e);
+						assert(!((IRExprGet *)e)->reg.isTemp());
 						newInstr->defaultNextI =
-							instrMovRegToSlot(RegisterIdx::fromVexOffset(((IRExprGet *)e)->offset), s);
+							instrMovRegToSlot(RegisterIdx::fromVexOffset(((IRExprGet *)e)->reg.asReg()), s);
 						newInstr = newInstr->defaultNextI;
 					} else if (e->tag == Iex_ClientCall || e->tag == Iex_Load) {
 						/* Do this after emitting the instruction */
@@ -1274,7 +1275,7 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	     it++) {
 		IRExpr *e = *it;
 		if (e->tag == Iex_Get) {
-			neededRips.insert(roots[((IRExprGet *)e)->tid]);
+			neededRips.insert(roots[((IRExprGet *)e)->reg.tid()]);
 		} else if (e->tag == Iex_ClientCall) {
 			neededRips.insert(((IRExprClientCall *)e)->callSite);
 		} else if (e->tag == Iex_Load) {

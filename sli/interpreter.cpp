@@ -608,11 +608,11 @@ eval_expression(const RegisterSet *rs,
 	case Iex_Get: {
 		{
 			IRExprGet *e = (IRExprGet *)expr;
-			if (e->offset < 0) {
-				*dest = temporaries[-e->offset - 1];
+			if (e->reg.isTemp()) {
+				*dest = temporaries[e->reg.asTemp()];
 				break;
 			}
-			getOffset = e->offset;
+			getOffset = e->reg.asReg();
 			getType = e->ty;
 		}
 
