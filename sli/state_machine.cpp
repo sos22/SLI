@@ -283,8 +283,14 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 		return this;
 	target = target->optimise(opt, oracle, done_something, freeVariables, done);
 
-	for (auto it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++)
+	for (auto it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++) {
+		if ((*it)->type == StateMachineSideEffect::Unreached) {
+			*done_something = true;
+			target = StateMachineUnreached::get();
+			return this;
+		}
 		*it = (*it)->optimise(opt, oracle, done_something);
+	}
 
 	return this;
 }
