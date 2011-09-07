@@ -608,6 +608,10 @@ eval_expression(const RegisterSet *rs,
 	case Iex_Get: {
 		{
 			IRExprGet *e = (IRExprGet *)expr;
+			if (e->offset < 0) {
+				*dest = temporaries[-e->offset - 1];
+				break;
+			}
 			getOffset = e->offset;
 			getType = e->ty;
 		}
@@ -655,12 +659,6 @@ eval_expression(const RegisterSet *rs,
 		getOffset += e->descr->base;
 		getType = e->descr->elemTy;
 		goto do_get;
-	}
-
-	case Iex_RdTmp: {
-		IRExprRdTmp *e = (IRExprRdTmp *)expr;
-		*dest = temporaries[e->tmp];
-		break;
 	}
 
 	case Iex_Load:

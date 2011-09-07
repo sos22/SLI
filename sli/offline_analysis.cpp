@@ -331,7 +331,6 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 			break
 		do_case(Get);
 		do_case(GetI);
-		do_case(RdTmp);
 		do_case(Qop);
 		do_case(Triop);
 		do_case(Binop);
@@ -423,9 +422,9 @@ rewriteTemporary(IRExpr *sm,
 		IRTemp tmp;
 		IRExpr *to;
 	protected:
-		IRExpr *transformIex(IRExprRdTmp *what)
+		IRExpr *transformIex(IRExprGet *what)
 		{
-			if (what->tmp == tmp)
+		  if (what->offset == -(Int)tmp - 1)
 				return to;
 			else
 				return NULL;
@@ -1056,11 +1055,6 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 				res = true;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExprRdTmp *e) {
-			if (threadAndRegister(e) == reg)
-				res = true;
-			return NULL;
-		}
 		StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
 		{
 			if (se != preserve &&
@@ -1216,12 +1210,6 @@ public:
 	const avail_t &avail;
 	const bool use_assumptions;
 	IRExpr *transformIex(IRExprGet *e) {
-		auto it = avail.registers.find(threadAndRegister(e));
-		if (it != avail.registers.end())
-			return it->second;
-		return IRExprTransformer::transformIex(e);
-	}
-	IRExpr *transformIex(IRExprRdTmp *e) {
 		auto it = avail.registers.find(threadAndRegister(e));
 		if (it != avail.registers.end())
 			return it->second;
@@ -2112,10 +2100,6 @@ public:
 		accessedRegisters.insert(threadAndRegister(what));
 		return StateMachineTransformer::transformIex(what);
 	}
-	IRExpr *transformIex(IRExprRdTmp *what) {
-		accessedRegisters.insert(threadAndRegister(what));
-		return StateMachineTransformer::transformIex(what);
-	}
 	BuildFreeVariableMapTransformer(FreeVariableMap &_freeVariables)
 		: freeVariables(_freeVariables)
 	{}
@@ -2183,10 +2167,6 @@ namespace __offline_analysis_dead_code {
 					out.insert(threadAndRegister(g));
 					return IRExprTransformer::transformIex(g);
 				}
-				IRExpr *transformIex(IRExprRdTmp *g) {
-					out.insert(threadAndRegister(g));
-					return IRExprTransformer::transformIex(g);
-				}
 			public:
 				_(LivenessEntry &_out) : out(_out) {}
 			} t(*this);
@@ -2242,11 +2222,6 @@ namespace __offline_analysis_dead_code {
 				LivenessEntry *_this;
 
 				IRExpr *transformIex(IRExprGet *g) {
-					if (_this->registerLive(threadAndRegister(g)))
-						res = true;
-					return IRExprTransformer::transformIex(g);
-				}
-				IRExpr *transformIex(IRExprRdTmp *g) {
 					if (_this->registerLive(threadAndRegister(g)))
 						res = true;
 					return IRExprTransformer::transformIex(g);
@@ -2359,10 +2334,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				case StateMachineSideEffect::Copy: {
 					StateMachineSideEffectCopy *smsec =
 						(StateMachineSideEffectCopy *)e;
-					if ((smsec->value->tag == Iex_Get &&
-					     threadAndRegister((IRExprGet *)smsec->value) == smsec->target) ||
-					    (smsec->value->tag == Iex_RdTmp &&
-					     threadAndRegister((IRExprRdTmp *)smsec->value) == smsec->target)) {
+					if (smsec->value->tag == Iex_Get &&
+					    threadAndRegister((IRExprGet *)smsec->value) == smsec->target) {
 						/* Copying a register
 						   or temporary back
 						   to itself is always

@@ -982,7 +982,6 @@ typedef
    enum { 
       Iex_Get = 0x15001,
       Iex_GetI,
-      Iex_RdTmp,
       Iex_Qop,
       Iex_Triop,
       Iex_Binop,
@@ -1080,7 +1079,12 @@ struct IRExprGet : public IRExpr {
        ppIRType(ty, f);
        fprintf(f, "(%d, %d)", offset, tid);
    }
-   IRType type(IRTypeEnv *) const { return ty; }
+   IRType type(IRTypeEnv *e) const {
+      if (offset >= 0)
+	 return ty;
+      else
+	 return typeOfIRTemp(e, -offset - 1);
+   }
 };
 /* Read a guest register at a non-fixed offset in the guest state.
    This allows circular indexing into parts of the guest state, which
@@ -1140,23 +1144,6 @@ struct IRExprGetI : public IRExpr {
       fprintf(f, ",%d](%d)", bias, tid);
    }
    IRType type(IRTypeEnv *) const { return descr->elemTy; }
-};
-
-/* The value held by a temporary.
-   ppIRExpr output: t<tmp>, eg. t1
-*/
-struct IRExprRdTmp : public IRExpr {
-   IRTemp tmp;       /* The temporary number */
-   unsigned tid;     /* The thread whose temporary is to be read */
-
-   IRExprRdTmp() : IRExpr(Iex_RdTmp) {}
-   void visit(HeapVisitor &hv) {}
-   unsigned long hashval() const { return tmp + tid * 3; }
-   void prettyPrint(FILE *f) const {
-      ppIRTemp(tmp, f);
-      fprintf(f, ":%d", tid);
-   }
-   IRType type(IRTypeEnv *e) const { return typeOfIRTemp(e, tmp); }
 };
 
 /* A quaternary operation.
@@ -1537,16 +1524,6 @@ IRExpr* mkIRExprCCall ( IRType retty,
                         Int regparms, const char* name, void* addr, 
                         IRExpr** args );
 
-
-/* Convenience functions for atoms (IRExprs which are either Iex_Tmp or
- * Iex_Const). */
-static inline Bool isIRAtom ( IRExpr* e ) {
-   return toBool(e->tag == Iex_RdTmp || e->tag == Iex_Const);
-}
-
-/* Are these two IR atoms identical?  Causes an assertion
-   failure if they are passed non-atoms. */
-extern Bool eqIRAtom ( IRExpr*, IRExpr* );
 
 IRExpr **alloc_irexpr_array(unsigned nr);
 

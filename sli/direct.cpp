@@ -2738,10 +2738,13 @@ CrashExpression *
 CrashExpression::get(IRExpr *e)
 {
 	switch (e->tag) {
-	case Iex_RdTmp:
-		return CrashExpressionTemp::get(((IRExprRdTmp *)e)->tmp);
-	case Iex_Get:
-		return CrashExpressionRegister::get(((IRExprGet *)e)->offset);
+	case Iex_Get: {
+		IRExprGet *g = (IRExprGet *)e;
+		if (g->offset >= 0)
+			return CrashExpressionRegister::get(g->offset);
+		else
+			return CrashExpressionTemp::get(-g->offset - 1);
+	}
 	case Iex_Const:
 		return CrashExpressionConst::get(((IRExprConst *)e)->con->Ico.U64);
 	case Iex_Binop:

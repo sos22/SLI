@@ -8,9 +8,6 @@ public:
 	EnumNeededExpressionsTransformer(std::set<IRExpr *> &_out)
 		: out(_out)
 	{}
-	IRExpr *transformIex(IRExprRdTmp *e) {
-		abort(); /* Should all have been eliminated by now */
-	}
 	IRExpr *transformIex(IRExprGet *e) {
 		out.insert(currentIRExpr());
 		return NULL;

@@ -34,8 +34,6 @@ shallow_hash(const IRExpr *e)
 		return ((IRExprGet *)e)->offset * 100001029 + 100011943;
 	case Iex_GetI:
 		return 100013213;
-	case Iex_RdTmp:
-		return ((IRExprRdTmp *)e)->tmp * 100017493 + 100025479;
 	case Iex_Qop:
 		return ((IRExprQop *)e)->op * 100034159 + 100043347;
 	case Iex_Triop:
@@ -74,7 +72,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		return lookupTable.lookups[h][e];
 	switch (e->tag) {
 	case Iex_Get:
-	case Iex_RdTmp:
 	case Iex_Const:
 	case Iex_FreeVariable:
 	case Iex_HappensBefore:
@@ -140,10 +137,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			do_field(GetI, ix);
 			do_field(GetI, bias);
 			do_field(GetI, tid);
-			break;
-		case Iex_RdTmp:
-			do_field(RdTmp, tmp);
-			do_field(RdTmp, tid);
 			break;
 		case Iex_Qop:
 			do_field(Qop, op);

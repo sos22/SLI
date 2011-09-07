@@ -93,9 +93,6 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 			physicallyEqual(a->ix,
 					b->ix);
 	footer()
-	hdr(RdTmp)
-		return a->tmp == b->tmp;
-	footer()
 	hdr(Qop)
 		return a->op == b->op &&
 		       physicallyEqual(a->arg1, b->arg1) &&
@@ -344,10 +341,6 @@ exprComplexity(const IRExpr *e)
 			res += 20;
 			return IRExprTransformer::transformIex(e);
 		}
-		IRExpr *transformIex(IRExprRdTmp *e) {
-			res += 30;
-			return IRExprTransformer::transformIex(e);
-		}
 		IRExpr *transformIex(IRExprQop *e) {
 			res += 10;
 			return IRExprTransformer::transformIex(e);
@@ -411,7 +404,6 @@ ordering_iex_tag(IRExprTag a)
 	case Iex_Const: return 0;
 	case Iex_Get: return 2;
 	case Iex_GetI: return 3;
-	case Iex_RdTmp: return 4;
 	case Iex_FreeVariable: return 5;
 	case Iex_Unop: return 6;
 	case Iex_Binop: return 7;
@@ -489,8 +481,6 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 		return a->offset < b->offset;
 	hdr(GetI)
 		return sortIRExprs(a->ix, b->ix);
-	hdr(RdTmp)
-		return a->tmp < b->tmp;
 	hdr(Qop)
 		if (a->op < b->op)
 			return true;

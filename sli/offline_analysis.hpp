@@ -25,7 +25,6 @@ protected:
 		else
 			return IRExpr_GetI(e->descr, e2, e->bias, e->tid);
 	}
-	virtual IRExpr *transformIex(IRExprRdTmp *e) { return NULL; }
 	virtual IRExpr *transformIex(IRExprQop *e)
 	{
 		bool t = false;

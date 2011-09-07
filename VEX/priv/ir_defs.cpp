@@ -1704,10 +1704,7 @@ IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
    return e;
 }
 IRExpr* IRExpr_RdTmp ( IRTemp tmp, unsigned tid ) {
-   IRExprRdTmp* e        = new IRExprRdTmp();
-   e->tmp = tmp;
-   e->tid = tid;
-   return e;
+   return IRExpr_Get(-tmp - 1, Ity_INVALID, tid);
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {

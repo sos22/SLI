@@ -308,10 +308,6 @@ findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &out, const AllowableOp
 			out.insert(threadAndRegister(e));
 			return IRExprTransformer::transformIex(e);
 		}
-		IRExpr *transformIex(IRExprRdTmp *e) {
-			out.insert(threadAndRegister(e));
-			return IRExprTransformer::transformIex(e);
-		}
 	} t(out);
 	t.transformIRExpr(e);
 }
@@ -1101,7 +1097,6 @@ public:
 		case Iex_Const:
 		case Iex_Get:
 		case Iex_GetI:
-		case Iex_RdTmp:
 		case Iex_Load:
 		case Iex_Mux0X:
 		case Iex_CCall:

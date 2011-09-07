@@ -741,21 +741,19 @@ irexprAliasingClass(IRExpr *expr,
 	switch (expr->tag) {
 	case Iex_Get: {
 		IRExprGet *e = (IRExprGet *)expr;
-		if (e->offset < Oracle::NR_REGS * 8 && e->offset >= 0)
+		if (e->offset < 0) {
+			if (!temps)
+				return Oracle::PointerAliasingSet::anything;
+			std::map<IRTemp, Oracle::PointerAliasingSet>::iterator it;
+			it = temps->find(-e->offset - 1);
+			assert(it != temps->end());
+			return it->second;
+		} else if (e->offset < Oracle::NR_REGS * 8)
 			return config.v[e->offset / 8];
 		else {
 			/* Assume that those are the only pointer registers */
 			return Oracle::PointerAliasingSet::notAPointer;
 		}
-	}
-	case Iex_RdTmp: {
-		IRExprRdTmp *e = (IRExprRdTmp *)expr;
-		if (!temps)
-			return Oracle::PointerAliasingSet::anything;
-		std::map<IRTemp, Oracle::PointerAliasingSet>::iterator it;
-		it = temps->find(e->tmp);
-		assert(it != temps->end());
-		return it->second;
 	}
 	case Iex_Const:
 		return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
@@ -1669,9 +1667,9 @@ class RewriteTemporaryExpr : public IRExprTransformer {
 	IRTemp tmp;
 	IRExpr *to;
 protected:
-	IRExpr *transformIex(IRExprRdTmp *what)
+	IRExpr *transformIex(IRExprGet *what)
 	{
-		if (what->tmp == tmp)
+		if (what->offset == -(Int)tmp - 1)
 			return to;
 		else
 			return NULL;

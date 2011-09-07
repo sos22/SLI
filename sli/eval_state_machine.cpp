@@ -39,12 +39,6 @@ class SpecialiseIRExpr : public IRExprTransformer {
 			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
-	IRExpr *transformIex(IRExprRdTmp *e) {
-		auto it = state.registers.find(threadAndRegister(e));
-		if (it != state.registers.end())
-			return it->second;
-		return IRExprTransformer::transformIex(e);
-	}
 public:
 	SpecialiseIRExpr(threadState &_state)
 		: state(_state)
