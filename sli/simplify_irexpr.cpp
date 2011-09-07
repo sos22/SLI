@@ -117,7 +117,6 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 	footer()
 	hdr(Load)
 		return a->isLL == b->isLL &&
-			a->end == b->end &&
 			a->ty == b->ty &&
 			physicallyEqual(a->addr, b->addr);
 	footer();

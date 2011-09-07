@@ -1048,7 +1048,7 @@ static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix, 
       !parseThisString(")@", str, &str, err) ||
       !parseThreadRip(&rip, str, suffix, err))
     return false;
-  *res = IRExpr_Load(False, Iend_LE, ty, addr, rip);
+  *res = IRExpr_Load(False, ty, addr, rip);
   return true;
 }
 
@@ -1276,8 +1276,7 @@ IRExprUnop::prettyPrint(FILE *f) const
 void
 IRExprLoad::prettyPrint(FILE *f) const
 {
-      fprintf(f,  "LD%s%s:", end==Iend_LE ? "le" : "be",
-                             isLL ? "-LL" : "" );
+      fprintf(f,  "LD%s:", isLL ? "-LL" : "" );
       ppIRType(ty, f);
       fprintf(f,  "(" );
       ppIRExpr(addr, f);
@@ -1429,7 +1428,7 @@ void ppIRCAS ( IRCAS* cas, FILE* f )
       fprintf(f, ",");
    }
    ppIRTemp(cas->oldLo, f);
-   fprintf(f, " = CAS%s(", cas->end==Iend_LE ? "le" : "be" );
+   fprintf(f, " = CAS(");
    ppIRExpr(cas->addr, f);
    fprintf(f, "::");
    if (cas->expdHi) {
@@ -1524,7 +1523,7 @@ void ppIRStmt ( IRStmt* s, FILE* f )
             ppIRTemp(s->Ist.Store.resSC, f);
             fprintf(f,  " = SC( " );
          }
-         fprintf(f,  "ST%s(", s->Ist.Store.end==Iend_LE ? "le" : "be" );
+         fprintf(f,  "ST(");
          ppIRExpr(s->Ist.Store.addr, f);
          fprintf(f,  ") = ");
          ppIRExpr(s->Ist.Store.data, f);
@@ -1738,15 +1737,13 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    e->arg = arg;
    return e;
 }
-IRExpr* IRExpr_Load ( Bool isLL, IREndness end, IRType ty, IRExpr* addr,
+IRExpr* IRExpr_Load ( Bool isLL, IRType ty, IRExpr* addr,
 		      ThreadRip rip ) {
    IRExprLoad* e        = new IRExprLoad();
    e->isLL = isLL;
-   e->end  = end;
    e->ty   = ty;
    e->addr = addr;
    e->rip  = rip;
-   vassert(end == Iend_LE || end == Iend_BE);
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {
@@ -1956,13 +1953,12 @@ IRDirty* emptyIRDirty ( void ) {
 /* Constructors -- IRCAS */
 
 IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
-                 IREndness end, IRExpr* addr, 
+                 IRExpr* addr, 
                  IRExpr* expdHi, IRExpr* expdLo,
                  IRExpr* dataHi, IRExpr* dataLo ) {
    IRCAS* cas = new IRCAS();
    cas->oldHi  = oldHi;
    cas->oldLo  = oldLo;
-   cas->end    = end;
    cas->addr   = addr;
    cas->expdHi = expdHi;
    cas->expdLo = expdLo;
@@ -2020,15 +2016,12 @@ IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data ) {
    s->Ist.WrTmp.data = data;
    return s;
 }
-IRStmt* IRStmt_Store ( IREndness end,
-                       IRTemp resSC, IRExpr* addr, IRExpr* data ) {
+IRStmt* IRStmt_Store ( IRTemp resSC, IRExpr* addr, IRExpr* data ) {
    IRStmt* s          = new IRStmt();
    s->tag             = Ist_Store;
-   s->Ist.Store.end   = end;
    s->Ist.Store.resSC = resSC;
    s->Ist.Store.addr  = addr;
    s->Ist.Store.data  = data;
-   vassert(end == Iend_LE || end == Iend_BE);
    return s;
 }
 IRStmt* IRStmt_CAS ( IRCAS* cas ) {

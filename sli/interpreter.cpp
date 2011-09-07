@@ -1707,7 +1707,6 @@ interpretStatement(IRStmt *stmt,
 		return NULL;
 
 	case Ist_Store: {
-		assert(stmt->Ist.Store.end == Iend_LE);
 		assert(stmt->Ist.Store.resSC == IRTemp_INVALID);
 		struct expression_result data =
 			eval_expression(&thr->regs, stmt->Ist.Store.data, thr->temporaries.content);
@@ -1729,7 +1728,6 @@ interpretStatement(IRStmt *stmt,
 		assert(stmt->Ist.CAS.details->oldHi == IRTemp_INVALID);
 		assert(stmt->Ist.CAS.details->expdHi == NULL);
 		assert(stmt->Ist.CAS.details->dataHi == NULL);
-		assert(stmt->Ist.CAS.details->end == Iend_LE);
 		struct expression_result data =
 			eval_expression(&thr->regs, stmt->Ist.CAS.details->dataLo, thr->temporaries.content);
 		struct expression_result addr =

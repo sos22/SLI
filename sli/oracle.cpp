@@ -1782,7 +1782,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 				goto impossible_clean;
 			else
 				goto impossible;
-			IRExpr *v = IRExpr_Load(False, Iend_LE,
+			IRExpr *v = IRExpr_Load(False,
 						t,
 						stmt->Ist.Dirty.details->args[0],
 						ThreadRip::mk(9999, rip));

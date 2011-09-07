@@ -310,12 +310,12 @@ static IRExpr* mkU ( IRType ty, ULong i )
 
 static void storeLE ( IRExpr* addr, IRExpr* data )
 {
-   stmt( IRStmt_Store(Iend_LE, IRTemp_INVALID, addr, data) );
+   stmt( IRStmt_Store(IRTemp_INVALID, addr, data) );
 }
 
 static IRExpr* loadLE ( IRType ty, IRExpr* data, ThreadRip rip )
 {
-   return IRExpr_Load(False, Iend_LE, ty, data, rip);
+   return IRExpr_Load(False, ty, data, rip);
 }
 
 static IROp mkSizedOp ( IRType ty, IROp op8 )
@@ -1443,7 +1443,7 @@ static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
    vassert(tyE == Ity_I64 || tyE == Ity_I32
            || tyE == Ity_I16 || tyE == Ity_I8);
    assign(expTmp, expVal);
-   cas = mkIRCAS( IRTemp_INVALID, oldTmp, Iend_LE, addr, 
+   cas = mkIRCAS( IRTemp_INVALID, oldTmp, addr, 
                   NULL, mkexpr(expTmp, tid), NULL, newVal );
    stmt( IRStmt_CAS(cas) );
    stmt( IRStmt_Exit(
@@ -7650,7 +7650,7 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       assign( src, getIRegG(tid, size, pfx, rm) );
       assign( acc, getIRegRAX(tid, size) );
       stmt( IRStmt_CAS( 
-         mkIRCAS( IRTemp_INVALID, dest, Iend_LE, mkexpr(addr, tid), 
+         mkIRCAS( IRTemp_INVALID, dest, mkexpr(addr, tid), 
                   NULL, mkexpr(acc, tid), NULL, mkexpr(src, tid) )
       ));
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
@@ -15641,7 +15641,7 @@ DisResult disInstr_AMD64_WRK (
          /* Do the DCAS */
          stmt( IRStmt_CAS(
                   mkIRCAS( oldHi, oldLo, 
-                           Iend_LE, mkexpr(addr, tid), 
+                           mkexpr(addr, tid), 
                            mkexpr(expdHi, tid), mkexpr(expdLo, tid),
                            mkexpr(dataHi, tid), mkexpr(dataLo, tid)
                )));

@@ -995,7 +995,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		out->sideEffects.push_back(smsec);
 		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
 				(((IRExprFreeVariable *)smsec->value)->key,
-				 IRExpr_Load(false, Iend_LE, Ity_I64, smsel->addr, smsel->rip)));
+				 IRExpr_Load(false, Ity_I64, smsel->addr, smsel->rip)));
 		doit = true;
 	}
 	out->target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);
