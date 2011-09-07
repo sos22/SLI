@@ -628,6 +628,7 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 			return false;
 		return a->after < b->after;
 	}
+#undef hdr
 	}
 
 	abort();
@@ -806,6 +807,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		bool *done_something;
 
 		IRExpr *transformIex(IRExprCCall *e) {
+#define hdr(type)							\
+			IRExpr *res = IRExprTransformer::transformIex(e); \
+			if (res) {					\
+				if (IRExpr ## type *e2 = dynamic_cast<IRExpr ## type *>(res)) \
+					e = e2;				\
+				else					\
+					return res;			\
+			}
+			hdr(CCall)
 			if (!strcmp(e->cee->name, "amd64g_calculate_condition")) {
 				return optimise_condition_calculation(
 					e->args[0],
@@ -815,9 +825,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					e->args[4],
 					opt);
 			}
-			return IRExprTransformer::transformIex(e);
+			return res;
 		}
 		IRExpr *transformIex(IRExprAssociative *e) {
+			hdr(Associative)
 			__set_profiling(optimise_associative);
 
 			/* Drag up nested associatives. */
@@ -965,7 +976,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					}
 				}
 			}
-
+			/* And for Add */
+			if (e->op == Iop_Add64) {
+				if (e->nr_arguments > 1 &&
+				    e->contents[0]->tag == Iex_Const &&
+				    ((IRExprConst *)e->contents[0])->con->Ico.U64 == 0) {
+					purgeAssocArgument(e, 0);
+					*done_something = true;
+				}
+			}
 			/* x & x -> x, for any and-like operator */
 			if (e->op >= Iop_And8 && e->op <= Iop_And64) {
 				__set_profiling(optimise_assoc_x_and_x);
@@ -1136,10 +1155,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				return e->contents[0];
 			}
 
-			return IRExprTransformer::transformIex(e);
+			return res;
 		}
 
 		IRExpr *transformIex(IRExprUnop *e) {
+			hdr(Unop)
 			__set_profiling(optimise_unop);
 			if (e->op == Iop_64to1 &&
 			    ((e->arg->tag == Iex_Associative &&
@@ -1293,10 +1313,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					break;
 				}
 			}
-			return IRExprTransformer::transformIex(e);
+			return res;
 		}
 
 		IRExpr *transformIex(IRExprBinop *e) {
+			hdr(Binop)
 			__set_profiling(optimise_binop);
 			IRExpr *l = e->arg1;
 			IRExpr *r = e->arg2;
@@ -1546,10 +1567,11 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					break;
 				}
 			}
-			return IRExprTransformer::transformIex(e);
+			return res;
 		}
 
 		IRExpr *transformIex(IRExprMux0X *e) {
+			hdr(Mux0X)
 			if (e->cond->tag == Iex_Const) {
 				*done_something = true;
 				if (((IRExprConst *)e->cond)->con->Ico.U1)
@@ -1557,8 +1579,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				else
 					return e->expr0;
 			}
-			return IRExprTransformer::transformIex(e);
+			return res;
 		}
+#undef hdr
 	public:
 		_(const AllowableOptimisations &_opt,
 		  bool *_done_something)
