@@ -1890,8 +1890,11 @@ extern void ppIRMBusEvent ( IRMBusEvent, FILE * );
 */
 typedef
 struct _IRCAS : public GarbageCollected<_IRCAS, &ir_heap> {
-      IRTemp    oldHi;  /* old value of *addr is written here */
-      IRTemp    oldLo;
+      _IRCAS(threadAndRegister _oldHi, threadAndRegister _oldLo)
+	      : oldHi(_oldHi), oldLo(_oldLo)
+      {}
+      threadAndRegister    oldHi;  /* old value of *addr is written here */
+      threadAndRegister    oldLo;
       IRExpr*   addr;   /* store address */
       IRExpr*   expdHi; /* expected old value at *addr */
       IRExpr*   expdLo;
@@ -1910,7 +1913,8 @@ struct _IRCAS : public GarbageCollected<_IRCAS, &ir_heap> {
 
 extern void ppIRCAS ( IRCAS* cas, FILE *f );
 
-extern IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
+extern IRCAS* mkIRCAS ( threadAndRegister oldHi,
+			threadAndRegister oldLo,
                         IRExpr* addr, 
                         IRExpr* expdHi, IRExpr* expdLo,
                         IRExpr* dataHi, IRExpr* dataLo );

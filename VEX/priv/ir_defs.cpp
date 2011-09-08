@@ -1384,11 +1384,11 @@ void ppIRCAS ( IRCAS* cas, FILE* f )
 {
    /* Print even structurally invalid constructions, as an aid to
       debugging. */
-   if (cas->oldHi != IRTemp_INVALID) {
-      ppIRTemp(cas->oldHi, f);
+   if (cas->oldHi.isValid()) {
+      cas->oldHi.prettyPrint(f);
       fprintf(f, ",");
    }
-   ppIRTemp(cas->oldLo, f);
+   cas->oldLo.prettyPrint(f);
    fprintf(f, " = CAS(");
    ppIRExpr(cas->addr, f);
    fprintf(f, "::");
@@ -1845,13 +1845,12 @@ IRDirty* emptyIRDirty ( void ) {
 
 /* Constructors -- IRCAS */
 
-IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
+IRCAS* mkIRCAS ( threadAndRegister oldHi,
+		 threadAndRegister oldLo,
                  IRExpr* addr, 
                  IRExpr* expdHi, IRExpr* expdLo,
                  IRExpr* dataHi, IRExpr* dataLo ) {
-   IRCAS* cas = new IRCAS();
-   cas->oldHi  = oldHi;
-   cas->oldLo  = oldLo;
+   IRCAS* cas = new IRCAS(oldHi, oldLo);
    cas->addr   = addr;
    cas->expdHi = expdHi;
    cas->expdLo = expdLo;

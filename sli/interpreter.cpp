@@ -1727,7 +1727,7 @@ interpretStatement(IRStmt *stmt,
 
 	case Ist_CAS: {
 		IRStmtCAS *s = (IRStmtCAS *)stmt;
-		assert(s->details->oldHi == IRTemp_INVALID);
+		assert(s->details->oldHi.isInvalid());
 		assert(s->details->expdHi == NULL);
 		assert(s->details->dataHi == NULL);
 		struct expression_result data =

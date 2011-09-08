@@ -1442,8 +1442,9 @@ static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
    vassert(tyE == Ity_I64 || tyE == Ity_I32
            || tyE == Ity_I16 || tyE == Ity_I8);
    assign(expTmp, expVal);
-   cas = mkIRCAS( IRTemp_INVALID, oldTmp, addr, 
-                  NULL, mkexpr(expTmp, tid), NULL, newVal );
+   cas = mkIRCAS( threadAndRegister::invalid(),
+		  threadAndRegister::temp(tid, oldTmp),
+		  addr, NULL, mkexpr(expTmp, tid), NULL, newVal );
    stmt( IRStmt_CAS(cas) );
    stmt( IRStmt_Exit(
             binop( mkSizedOp(tyE,Iop_CasCmpNE8),
@@ -7649,8 +7650,8 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       assign( src, getIRegG(tid, size, pfx, rm) );
       assign( acc, getIRegRAX(tid, size) );
       stmt( IRStmt_CAS( 
-         mkIRCAS( IRTemp_INVALID, dest, mkexpr(addr, tid), 
-                  NULL, mkexpr(acc, tid), NULL, mkexpr(src, tid) )
+	    mkIRCAS( threadAndRegister::invalid(), threadAndRegister::temp(tid, dest),
+		     mkexpr(addr, tid), NULL, mkexpr(acc, tid), NULL, mkexpr(src, tid) )
       ));
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
       assign( cond8, unop(Iop_1Uto8, mk_amd64g_calculate_condition(AMD64CondZ, tid)) );
@@ -15639,7 +15640,8 @@ DisResult disInstr_AMD64_WRK (
 
          /* Do the DCAS */
          stmt( IRStmt_CAS(
-                  mkIRCAS( oldHi, oldLo, 
+	          mkIRCAS( threadAndRegister::temp(tid, oldHi),
+			   threadAndRegister::temp(tid, oldLo), 
                            mkexpr(addr, tid), 
                            mkexpr(expdHi, tid), mkexpr(expdLo, tid),
                            mkexpr(dataHi, tid), mkexpr(dataLo, tid)

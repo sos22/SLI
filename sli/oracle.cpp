@@ -1726,8 +1726,9 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 						      p->target,
 						      p->data);
 		} else if (stmt->tag == Ist_CAS) {
-			if (((IRStmtCAS *)stmt)->details->oldLo == OFFSET_amd64_RSP ||
-			    ((IRStmtCAS *)stmt)->details->oldLo == OFFSET_amd64_RBP)
+			if (((IRStmtCAS *)stmt)->details->oldLo.isReg() &&
+			    (((IRStmtCAS *)stmt)->details->oldLo.asReg() == OFFSET_amd64_RSP ||
+			     ((IRStmtCAS *)stmt)->details->oldLo.asReg() == OFFSET_amd64_RBP))
 				goto impossible;
 		} else if (stmt->tag == Ist_Dirty) {
 			threadAndRegister tmp(((IRStmtDirty *)stmt)->details->tmp);
@@ -1971,12 +1972,18 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 					config.stackHasLeaked = true;
 			}
 			break;
-		case Ist_CAS:
-			temporaryAliases.insert(
-				std::pair<threadAndRegister, PointerAliasingSet>(
-					threadAndRegister::temp(-1, ((IRStmtCAS *)st)->details->oldLo),
-					PointerAliasingSet::anything));
+		case Ist_CAS: {
+			IRStmtCAS *s = (IRStmtCAS *)st;
+			if (s->details->oldLo.isTemp()) {
+				temporaryAliases.insert(
+					std::pair<threadAndRegister, PointerAliasingSet>(
+						s->details->oldLo,
+						PointerAliasingSet::anything));
+			} else if (s->details->oldLo.asReg() < NR_REGS * 8) {
+				config.v[s->details->oldLo.asReg() / 8] = PointerAliasingSet::anything;
+			}
 			break;
+		}
 		case Ist_Dirty:
 			if (((IRStmtDirty *)st)->details->tmp.isValid()) {
 				PointerAliasingSet res =

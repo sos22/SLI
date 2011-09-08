@@ -743,13 +743,13 @@ public:
 };
 
 class CasEvent : public ThreadEvent {
-	IRTemp dest;
+	threadAndRegister dest;
 	expression_result addr;
 	expression_result data;
 	expression_result expected;
 	unsigned size;
 	CasEvent(ThreadId _tid,
-		 IRTemp _dest,
+		 threadAndRegister _dest,
 		 expression_result _addr,
 		 expression_result _data,
 		 expression_result _expected,
@@ -764,16 +764,16 @@ class CasEvent : public ThreadEvent {
 	}
 protected:
 	virtual char *mkName() const {
-		return my_asprintf("cas(%s:%s -> %s; dest %d, size %d)",
+		return my_asprintf("cas(%s:%s -> %s; dest %s, size %d)",
 				   addr.name(), expected.name(), data.name(),
-				   dest, size);
+				   dest.name(), size);
 	}
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
 
 	static ThreadEvent *get(ThreadId _tid,
-				IRTemp _dest,
+				threadAndRegister _dest,
 				expression_result _addr,
 				expression_result _data,
 				expression_result _expected,

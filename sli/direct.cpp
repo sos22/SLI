@@ -3251,7 +3251,7 @@ backtrack_crash_machine_node_for_statements(
 
 		case Ist_CAS:
 			node = node->rewriteTemporary(
-				((IRStmtCAS *)stmt)->details->oldLo,
+				((IRStmtCAS *)stmt)->details->oldLo.asTemp(),
 				CrashExpressionLoad::get(
 					when,
 					CrashExpression::get(

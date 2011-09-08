@@ -119,7 +119,7 @@ ThreadEvent *SyscallEvent::replay(LogRecord *lr, MachineState **ms,
 
 
 ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
-					bool &, LogReaderPtr)
+			      bool &, LogReaderPtr)
 {
 	LogRecordLoad *lrl = dynamic_cast<LogRecordLoad *>(lr);
 	if (!lrl)
@@ -136,7 +136,10 @@ ThreadEvent *CasEvent::replay(LogRecord *lr, MachineState **ms,
         if (seen != lrl->value)
 		throw ReplayFailedException("memory mismatch on CAS load from %lx",
 					    addr.lo);
-	thr->temporaries[dest] = seen;
+	if (dest.isTemp())
+		thr->temporaries[dest.asTemp()] = seen;
+	else
+		thr->regs.set_reg(dest.asReg() / 8, seen.lo);
         if (seen != expected)
 		return NULL;
 
