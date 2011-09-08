@@ -1326,7 +1326,6 @@ public:
 		next = head;
 		head = this;
 	}
-	~__timer_message_filter() { abort(); /* shouldn't happen */ }
 	bool operator()() {
 		cntr++;
 		if (cntr == 10)
