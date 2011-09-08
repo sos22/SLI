@@ -198,44 +198,54 @@ instrument_func(unsigned tid,
 			break;
 		case Ist_AbiHint:
 			break;
-		case Ist_Put:
-			out_stmt->Ist.Put.data = log_reads_expr(tid, sb_out, out_stmt->Ist.Put.data);
-			break;
-		case Ist_PutI:
-			out_stmt->Ist.PutI.ix = log_reads_expr(tid, sb_out, out_stmt->Ist.PutI.ix);
-			out_stmt->Ist.PutI.data = log_reads_expr(tid, sb_out, out_stmt->Ist.PutI.data);
-			break;
-		case Ist_WrTmp:
-			out_stmt->Ist.WrTmp.data = log_reads_expr(tid, sb_out, out_stmt->Ist.WrTmp.data);
-			break;
-		case Ist_Store: {
-			IRExpr *addr = current_in_stmt->Ist.Store.addr;
-			IRExpr *data = current_in_stmt->Ist.Store.data;
-			out_stmt->Ist.Store.addr = log_reads_expr(tid, sb_out, addr);
-			out_stmt->Ist.Store.data = log_reads_expr(tid, sb_out, data);
+		case Ist_Put: {
+			IRStmtPut *o = (IRStmtPut *)out_stmt;
+			o->data = log_reads_expr(tid, sb_out, o->data);
 			break;
 		}
-		case Ist_CAS:
-			out_stmt->Ist.CAS.details->addr =
-				log_reads_expr(tid, sb_out,
-					       out_stmt->Ist.CAS.details->addr);
-			out_stmt->Ist.CAS.details->expdHi =
-				log_reads_expr(tid, sb_out,
-					       out_stmt->Ist.CAS.details->expdHi);
-			out_stmt->Ist.CAS.details->expdLo =
-				log_reads_expr(tid, sb_out,
-					       out_stmt->Ist.CAS.details->expdLo);
-			out_stmt->Ist.CAS.details->dataHi =
-				log_reads_expr(tid, sb_out,
-					       out_stmt->Ist.CAS.details->dataHi);
-			out_stmt->Ist.CAS.details->dataLo =
-				log_reads_expr(tid, sb_out,
-					       out_stmt->Ist.CAS.details->dataLo);
+		case Ist_PutI: {
+			IRStmtPutI *o = (IRStmtPutI *)out_stmt;
+			o->ix = log_reads_expr(tid, sb_out, o->ix);
+			o->data = log_reads_expr(tid, sb_out, o->data);
 			break;
+		}
+		case Ist_WrTmp: {
+			IRStmtWrTmp *o = (IRStmtWrTmp *)out_stmt;
+			o->data = log_reads_expr(tid, sb_out, o->data);
+			break;
+		}
+		case Ist_Store: {
+			IRStmtStore *o = (IRStmtStore *)out_stmt;
+			IRExpr *addr = o->addr;
+			IRExpr *data = o->data;
+			o->addr = log_reads_expr(tid, sb_out, addr);
+			o->data = log_reads_expr(tid, sb_out, data);
+			break;
+		}
+		case Ist_CAS: {
+			IRStmtCAS *o = (IRStmtCAS *)out_stmt;
+			o->details->addr =
+				log_reads_expr(tid, sb_out,
+					       o->details->addr);
+			o->details->expdHi =
+				log_reads_expr(tid, sb_out,
+					       o->details->expdHi);
+			o->details->expdLo =
+				log_reads_expr(tid, sb_out,
+					       o->details->expdLo);
+			o->details->dataHi =
+				log_reads_expr(tid, sb_out,
+					       o->details->dataHi);
+			o->details->dataLo =
+				log_reads_expr(tid, sb_out,
+					       o->details->dataLo);
+			break;
+		}
 		case Ist_Dirty: {
+			IRStmtDirty *o = (IRStmtDirty *)out_stmt;
 			unsigned x;
 			IRDirty *details;
-			details = out_stmt->Ist.Dirty.details;
+			details = o->details;
 			details->guard = log_reads_expr(tid, sb_out, details->guard);
 			for (x = 0; details->args[x]; x++)
 				details->args[x] = log_reads_expr(tid, sb_out, details->args[x]);
@@ -244,10 +254,11 @@ instrument_func(unsigned tid,
 		}
 		case Ist_MBE:
 			break;
-		case Ist_Exit:
-			out_stmt->Ist.Exit.guard =
-				log_reads_expr(tid, sb_out, out_stmt->Ist.Exit.guard);
+		case Ist_Exit: {
+			IRStmtExit *o = (IRStmtExit *)out_stmt;
+			o->guard = log_reads_expr(tid, sb_out, o->guard);
 			break;
+		}
 		}
 		addStmtToIRSB(sb_out, out_stmt);
 	}

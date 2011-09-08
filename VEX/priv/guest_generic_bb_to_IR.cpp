@@ -252,8 +252,8 @@ IRSB* bb_to_IR ( unsigned tid,
       imark = irsb->stmts[first_stmt_idx];
       vassert(imark);
       vassert(imark->tag == Ist_IMark);
-      vassert(imark->Ist.IMark.len == 0);
-      imark->Ist.IMark.len = toUInt(dres.len);
+      vassert(((IRStmtIMark *)imark)->len == 0);
+      ((IRStmtIMark *)imark)->len = toUInt(dres.len);
 
       /* Print the resulting IR, if needed. */
       if (vex_traceflags & VEX_TRACE_FE) {

@@ -397,11 +397,11 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	for (i = 1; i < irsb->stmts_used; i++) {
 		if (irsb->stmts[i]->tag == Ist_IMark) {
 			/* That's the end of this instruction */
-			directExits.push_back(irsb->stmts[i]->Ist.IMark.addr);
+			directExits.push_back(((IRStmtIMark *)irsb->stmts[i])->addr);
 			return;
 		}
 		if (irsb->stmts[i]->tag == Ist_Exit)
-			directExits.push_back(irsb->stmts[i]->Ist.Exit.dst->Ico.U64);
+			directExits.push_back(((IRStmtExit *)irsb->stmts[i])->dst->Ico.U64);
 	}
 
 	/* If we get here then there are no other marks in the IRSB,
@@ -1324,8 +1324,9 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		int end_of_instruction;
 		int start_of_instruction = 0;
 		while (start_of_instruction < irsb->stmts_used) {
-			assert(irsb->stmts[start_of_instruction]->tag == Ist_IMark);
-			unsigned long r = irsb->stmts[start_of_instruction]->Ist.IMark.addr;
+			IRStmt *stmt = irsb->stmts[start_of_instruction];
+			assert(stmt->tag == Ist_IMark);
+			unsigned long r = ((IRStmtIMark *)stmt)->addr;
 			if (explored.count(r))
 				break;
 
@@ -1335,8 +1336,9 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 			for (end_of_instruction = start_of_instruction + 1;
 			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
 			     end_of_instruction++) {
-				if (irsb->stmts[end_of_instruction]->tag == Ist_Exit)
-					branch.push_back(irsb->stmts[end_of_instruction]->Ist.Exit.dst->Ico.U64);
+				stmt = irsb->stmts[end_of_instruction];
+				if (stmt->tag == Ist_Exit)
+					branch.push_back(((IRStmtExit *)stmt)->dst->Ico.U64);
 			}
 
 			if (end_of_instruction == irsb->stmts_used) {
@@ -1355,7 +1357,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
-				fallThrough.push_back(irsb->stmts[end_of_instruction]->Ist.IMark.addr);
+				fallThrough.push_back(((IRStmtIMark *)stmt)->addr);
 			}
 
 			heads.insert(heads.end(), callees.begin(), callees.end());
@@ -1559,7 +1561,7 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 				getInstructionFallThroughs(rip, fallThroughRips);
 		}
 	} else {
-		fallThroughRips.push_back(statements[nr_statements]->Ist.IMark.addr);
+		fallThroughRips.push_back(((IRStmtIMark *)statements[nr_statements])->addr);
 	}
 
 	for (std::vector<unsigned long>::iterator it = fallThroughRips.begin();
@@ -1574,7 +1576,8 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 	}
 
 	for (int i = nr_statements - 1; i >= 1; i--) {
-		switch (statements[i]->tag) {
+		IRStmt *stmt = statements[i];
+		switch (stmt->tag) {
 		case Ist_NoOp:
 			break;
 		case Ist_IMark:
@@ -1582,40 +1585,40 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 		case Ist_AbiHint:
 			break;
 		case Ist_Put:
-			res = res.define(statements[i]->Ist.Put.offset);
-			res = irexprUsedValues(res, statements[i]->Ist.Put.data);
+			res = res.define(((IRStmtPut *)stmt)->offset);
+			res = irexprUsedValues(res, ((IRStmtPut *)stmt)->data);
 			break;
 		case Ist_PutI:
-			res = irexprUsedValues(res, statements[i]->Ist.PutI.data);
-			res = irexprUsedValues(res, statements[i]->Ist.PutI.ix);
+			res = irexprUsedValues(res, ((IRStmtPutI *)stmt)->data);
+			res = irexprUsedValues(res, ((IRStmtPutI *)stmt)->ix);
 			break;
 		case Ist_WrTmp:
-			res = irexprUsedValues(res, statements[i]->Ist.WrTmp.data);
+			res = irexprUsedValues(res, ((IRStmtWrTmp *)stmt)->data);
 			break;
 		case Ist_Store:
-			res = irexprUsedValues(res, statements[i]->Ist.Store.data);
-			res = irexprUsedValues(res, statements[i]->Ist.Store.addr);
+			res = irexprUsedValues(res, ((IRStmtStore *)stmt)->data);
+			res = irexprUsedValues(res, ((IRStmtStore *)stmt)->addr);
 			break;
 		case Ist_CAS:
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->addr);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdHi);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->expdLo);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataHi);
-			res = irexprUsedValues(res, statements[i]->Ist.CAS.details->dataLo);
+			res = irexprUsedValues(res, ((IRStmtCAS *)stmt)->details->addr);
+			res = irexprUsedValues(res, ((IRStmtCAS *)stmt)->details->expdHi);
+			res = irexprUsedValues(res, ((IRStmtCAS *)stmt)->details->expdLo);
+			res = irexprUsedValues(res, ((IRStmtCAS *)stmt)->details->dataHi);
+			res = irexprUsedValues(res, ((IRStmtCAS *)stmt)->details->dataLo);
 			break;
 		case Ist_Dirty:
-			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->guard);
-			for (int j = 0; statements[i]->Ist.Dirty.details->args[j]; j++)
-				res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->args[j]);
-			res = irexprUsedValues(res, statements[i]->Ist.Dirty.details->mAddr);
+			res = irexprUsedValues(res, ((IRStmtDirty *)stmt)->details->guard);
+			for (int j = 0; ((IRStmtDirty *)stmt)->details->args[j]; j++)
+				res = irexprUsedValues(res, ((IRStmtDirty *)stmt)->details->args[j]);
+			res = irexprUsedValues(res, ((IRStmtDirty *)stmt)->details->mAddr);
 			break;
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			unsigned long _branchRip = statements[i]->Ist.Exit.dst->Ico.U64;
+			unsigned long _branchRip = ((IRStmtExit *)stmt)->dst->Ico.U64;
 			if (_branchRip)
 				res |= liveOnEntry(_branchRip, false);
-			res = irexprUsedValues(res, statements[i]->Ist.Exit.guard);
+			res = irexprUsedValues(res, ((IRStmtExit *)stmt)->guard);
 			break;
 		}
 		default:
@@ -1735,56 +1738,56 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	for (j = nr_statements - 1; j >= 0; j--) {
 		IRStmt *stmt = statements[j];
 		if (stmt->tag == Ist_Put) {
-			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP && !rsp)
+			if (((IRStmtPut *)stmt)->offset == OFFSET_amd64_RSP && !rsp)
 				rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
-			if (stmt->Ist.Put.offset == OFFSET_amd64_RBP && !rbp)
+			if (((IRStmtPut *)stmt)->offset == OFFSET_amd64_RBP && !rbp)
 				rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, -1);
 			if (rsp)
 				rsp = rewriteRegister(rsp,
-						      stmt->Ist.Put.offset,
-						      stmt->Ist.Put.data);
+						      ((IRStmtPut *)stmt)->offset,
+						      ((IRStmtPut *)stmt)->data);
 			if (rbp)
 				rbp = rewriteRegister(rbp,
-						      stmt->Ist.Put.offset,
-						      stmt->Ist.Put.data);
+						      ((IRStmtPut *)stmt)->offset,
+						      ((IRStmtPut *)stmt)->data);
 		} else if (stmt->tag == Ist_WrTmp) {
 			if (rsp)
 				rsp = rewriteTemporary(rsp,
-						       stmt->Ist.WrTmp.tmp,
-						       stmt->Ist.WrTmp.data);
+						       ((IRStmtWrTmp *)stmt)->tmp,
+						       ((IRStmtWrTmp *)stmt)->data);
 			if (rbp)
 				rbp = rewriteTemporary(rbp,
-						       stmt->Ist.WrTmp.tmp,
-						       stmt->Ist.WrTmp.data);
+						       ((IRStmtWrTmp *)stmt)->tmp,
+						       ((IRStmtWrTmp *)stmt)->data);
 		} else if (stmt->tag == Ist_CAS) {
-			if (stmt->Ist.CAS.details->oldLo == OFFSET_amd64_RSP ||
-			    stmt->Ist.CAS.details->oldLo == OFFSET_amd64_RBP)
+			if (((IRStmtCAS *)stmt)->details->oldLo == OFFSET_amd64_RSP ||
+			    ((IRStmtCAS *)stmt)->details->oldLo == OFFSET_amd64_RBP)
 				goto impossible;
 		} else if (stmt->tag == Ist_Dirty) {
-			IRTemp tmp = stmt->Ist.Dirty.details->tmp;
+			IRTemp tmp = ((IRStmtDirty *)stmt)->details->tmp;
 			IRType t = Ity_I1;
-			if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				    "helper_load_128"))
 				t = Ity_I128;
-			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				    "helper_load_64"))
 				t = Ity_I64;
-			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					 "helper_load_32"))
 				t = Ity_I32;
-			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					 "helper_load_16"))
 				t = Ity_I16;
-			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					 "helper_load_8"))
 				t = Ity_I8;
-			else if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					 "amd64g_dirtyhelper_RDTSC"))
 				goto impossible_clean;
 			else
 				goto impossible;
 			IRExpr *v = IRExpr_Load(t,
-						stmt->Ist.Dirty.details->args[0],
+						((IRStmtDirty *)stmt)->details->args[0],
 						ThreadRip::mk(9999, rip));
 			if (rsp)
 				rsp = rewriteTemporary(rsp, tmp, v);
@@ -1960,10 +1963,10 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 		case Ist_AbiHint:
 			break;
 		case Ist_Put:
-			if (st->Ist.Put.offset < NR_REGS * 8 &&
-			    st->Ist.Put.offset != OFFSET_amd64_RSP) {
-				config.v[st->Ist.Put.offset / 8] =
-					irexprAliasingClass(st->Ist.Put.data,
+			if (((IRStmtPut *)st)->offset < NR_REGS * 8 &&
+			    ((IRStmtPut *)st)->offset != OFFSET_amd64_RSP) {
+				config.v[((IRStmtPut *)st)->offset / 8] =
+					irexprAliasingClass(((IRStmtPut *)st)->data,
 							    tyenv,
 							    config,
 							    false,
@@ -1975,8 +1978,8 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			break;
 		case Ist_WrTmp:
 			temporaryAliases.insert(
-				std::pair<IRTemp, PointerAliasingSet>(st->Ist.WrTmp.tmp,
-								      irexprAliasingClass(st->Ist.WrTmp.data,
+				std::pair<IRTemp, PointerAliasingSet>(((IRStmtWrTmp *)st)->tmp,
+								      irexprAliasingClass(((IRStmtWrTmp *)st)->data,
 											  tyenv,
 											  config,
 											  false,
@@ -1984,12 +1987,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			break;
 		case Ist_Store:
 			if (!config.stackHasLeaked) {
-				PointerAliasingSet addr = irexprAliasingClass(st->Ist.Store.data,
+				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      tyenv,
 									      config,
 									      false,
 									      &temporaryAliases);
-				PointerAliasingSet data = irexprAliasingClass(st->Ist.Store.data,
+				PointerAliasingSet data = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      tyenv,
 									      config,
 									      false,
@@ -2002,28 +2005,28 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 		case Ist_CAS:
 			temporaryAliases.insert(
 				std::pair<IRTemp, PointerAliasingSet>(
-					st->Ist.CAS.details->oldLo,
+					((IRStmtCAS *)st)->details->oldLo,
 					PointerAliasingSet::anything));
 			break;
 		case Ist_Dirty:
-			if (st->Ist.Dirty.details->tmp != IRTemp_INVALID) {
+			if (((IRStmtDirty *)st)->details->tmp != IRTemp_INVALID) {
 				PointerAliasingSet res =
-					(tyenv->types[st->Ist.Dirty.details->tmp] == Ity_I64) ?
-					((strcmp(st->Ist.Dirty.details->cee->name, "helper_load_64") ||
+					(tyenv->types[((IRStmtDirty *)st)->details->tmp] == Ity_I64) ?
+					((strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64") ||
 					  config.stackHasLeaked) ?
 					 PointerAliasingSet::anything :
 					 PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer) :
 					PointerAliasingSet::notAPointer;
 				temporaryAliases.insert(
 					std::pair<IRTemp, PointerAliasingSet>(
-						st->Ist.Dirty.details->tmp,
+						((IRStmtDirty *)st)->details->tmp,
 						res));
 			}
 			break;
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			unsigned long _branchRip = st->Ist.Exit.dst->Ico.U64;
+			unsigned long _branchRip = ((IRStmtExit *)st)->dst->Ico.U64;
 			if (_branchRip) {
 				RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
 				RegisterAliasingConfiguration newExitConfig(bConfig);
@@ -2467,7 +2470,7 @@ Oracle::functionHeadForInstruction(unsigned long rip)
 	return x[0];
 }
 
-static unsigned
+unsigned
 getInstructionSize(AddressSpace *as, unsigned long rip)
 {
 	IRSB *irsb;
@@ -2477,7 +2480,7 @@ getInstructionSize(AddressSpace *as, unsigned long rip)
 		return 0;
 	}
 	assert(irsb->stmts[0]->tag == Ist_IMark);
-	return irsb->stmts[0]->Ist.IMark.len;
+	return ((IRStmtIMark *)irsb->stmts[0])->len;
 }
 
 /* Find an instruction which is guaranteed to be executed before any

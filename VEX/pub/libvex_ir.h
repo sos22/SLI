@@ -1737,7 +1737,7 @@ struct _IRDirty : public GarbageCollected<_IRDirty, &ir_heap> {
    IRDirty;
 
 /* Pretty-print a dirty call */
-extern void     ppIRDirty ( IRDirty* );
+extern void     ppIRDirty ( IRDirty*, FILE * );
 
 /* Allocate an uninitialised dirty call */
 extern IRDirty* emptyIRDirty ( void );
@@ -1768,7 +1768,7 @@ typedef
    }
    IRMBusEvent;
 
-extern void ppIRMBusEvent ( IRMBusEvent );
+extern void ppIRMBusEvent ( IRMBusEvent, FILE * );
 
 
 /* --------------- Compare and Swap --------------- */
@@ -1856,7 +1856,7 @@ struct _IRCAS : public GarbageCollected<_IRCAS, &ir_heap> {
    }
    IRCAS;
 
-extern void ppIRCAS ( IRCAS* cas );
+extern void ppIRCAS ( IRCAS* cas, FILE *f );
 
 extern IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
                         IRExpr* addr, 
@@ -1900,170 +1900,236 @@ typedef
    For each kind of statement, we show what it looks like when
    pretty-printed with ppIRStmt().
 */
-typedef
-struct _IRStmt : public GarbageCollected<_IRStmt, &ir_heap> {
+class IRStmt : public GarbageCollected<IRStmt, &ir_heap>, public PrettyPrintable {
+protected:
+      IRStmt(IRStmtTag _tag)
+	      : tag(_tag)
+	{}
+public:
       IRStmtTag tag;
-      union _Ist {
-         /* A no-op (usually resulting from IR optimisation).  Can be
-            omitted without any effect.
-
-            ppIRStmt output: IR-NoOp
-         */
-         struct {
-	 } NoOp;
-
-         /* META: instruction mark.  Marks the start of the statements
-            that represent a single machine instruction (the end of
-            those statements is marked by the next IMark or the end of
-            the IRSB).  Contains the address and length of the
-            instruction.
-
-            ppIRStmt output: ------ IMark(<addr>, <len>) ------,
-                         eg. ------ IMark(0x4000792, 5) ------,
-         */
-         struct {
-            Addr64 addr;   /* instruction address */
-            Int    len;    /* instruction length */
-         } IMark;
-
-         /* META: An ABI hint, which says something about this
-            platform's ABI.
-
-            At the moment, the only AbiHint is one which indicates
-            that a given chunk of address space, [base .. base+len-1],
-            has become undefined.  This is used on amd64-linux and
-            some ppc variants to pass stack-redzoning hints to whoever
-            wants to see them.  It also indicates the address of the
-            next (dynamic) instruction that will be executed.  This is
-            to help Memcheck to origin tracking.
-
-            ppIRStmt output: ====== AbiHint(<base>, <len>, <nia>) ======
-                         eg. ====== AbiHint(t1, 16, t2) ======
-         */
-         struct {
-            IRExpr* base;     /* Start  of undefined chunk */
-            Int     len;      /* Length of undefined chunk */
-            IRExpr* nia;      /* Address of next (guest) insn */
-         } AbiHint;
-
-         /* Write a guest register, at a fixed offset in the guest state.
-            ppIRStmt output: PUT(<offset>) = <data>, eg. PUT(60) = t1
-         */
-         struct _Put {
-            Int     offset;   /* Offset into the guest state */
-            IRExpr* data;     /* The value to write */
-         } Put;
-
-         /* Write a guest register, at a non-fixed offset in the guest
-            state.  See the comment for GetI expressions for more
-            information.
-
-            ppIRStmt output: PUTI<descr>[<ix>,<bias>] = <data>,
-                         eg. PUTI(64:8xF64)[t5,0] = t1
-         */
-         struct {
-            IRRegArray* descr; /* Part of guest state treated as circular */
-            IRExpr*     ix;    /* Variable part of index into array */
-            Int         bias;  /* Constant offset part of index into array */
-            IRExpr*     data;  /* The value to write */
-         } PutI;
-
-         /* Assign a value to a temporary.  Note that SSA rules require
-            each tmp is only assigned to once.  IR sanity checking will
-            reject any block containing a temporary which is not assigned
-            to exactly once.
-
-            ppIRStmt output: t<tmp> = <data>, eg. t1 = 3
-         */
-         struct _WrTmp {
-            IRTemp  tmp;   /* Temporary  (LHS of assignment) */
-            IRExpr* data;  /* Expression (RHS of assignment) */
-         } WrTmp;
-
-         /* Write a value to memory.  Normally scRes is
-            IRTemp_INVALID, denoting a normal store.  If scRes is not
-            IRTemp_INVALID, then this is a store-conditional, which
-            may fail or succeed depending on the outcome of a
-            previously lodged reservation on this address.  scRes is
-            written 1 if the store succeeds and 0 if it fails, and
-            must have type Ity_I1.
-
-            If scRes is not IRTemp_INVALID, then also, the address
-            must be naturally aligned - any misaligned addresses
-            should be caught by a dominating IR check and side exit.
-            This alignment restriction exists because on at least some
-            LL/SC platforms (ppc), stwcx. etc will trap w/ SIGBUS on
-            misaligned addresses, and we have to actually generate
-            stwcx. on the host, and we don't want it trapping on the
-            host.
-
-            ppIRStmt output: ST<end>(<addr>) = <data>, eg. STle(t1) = t2
-         */
-         struct {
-            IRExpr*   addr;   /* store address */
-            IRExpr*   data;   /* value to write */
-         } Store;
-
-         /* Do an atomic compare-and-swap operation.  Semantics are
-            described above on a comment at the definition of IRCAS.
-
-            ppIRStmt output:
-               t<tmp> = CAS<end>(<addr> :: <expected> -> <new>)
-            eg
-               t1 = CASle(t2 :: t3->Add32(t3,1))
-               which denotes a 32-bit atomic increment 
-               of a value at address t2
-
-            A double-element CAS may also be denoted, in which case <tmp>,
-            <expected> and <new> are all pairs of items, separated by
-            commas.
-         */
-         struct {
-            IRCAS* details;
-         } CAS;
-
-         /* Call (possibly conditionally) a C function that has side
-            effects (ie. is "dirty").  See the comments above the
-            IRDirty type declaration for more information.
-
-            ppIRStmt output:
-               t<tmp> = DIRTY <guard> <effects> 
-                  ::: <callee>(<args>)
-            eg.
-               t1 = DIRTY t27 RdFX-gst(16,4) RdFX-gst(60,4)
-                     ::: foo{0x380035f4}(t2)
-         */       
-         struct _Dirty {
-            IRDirty* details;
-         } Dirty;
-
-         /* A memory bus event - a fence, or acquisition/release of the
-            hardware bus lock.  IR optimisation treats all these as fences
-            across which no memory references may be moved.
-            ppIRStmt output: MBusEvent-Fence,
-                             MBusEvent-BusLock, MBusEvent-BusUnlock.
-         */
-         struct {
-            IRMBusEvent event;
-         } MBE;
-
-         /* Conditional exit from the middle of an IRSB.
-            ppIRStmt output: if (<guard>) goto {<jk>} <dst>
-                         eg. if (t69) goto {Boring} 0x4000AAA:I32
-         */
-         struct {
-            IRExpr*    guard;    /* Conditional expression */
-            IRJumpKind jk;       /* Jump kind */
-            IRConst*   dst;      /* Jump target (constant only) */
-         } Exit;
-      } Ist;
-      typedef _Ist::_Put Put;
-      typedef _Ist::_WrTmp WrTmp;
-      typedef _Ist::_Dirty Dirty;
-      void visit(HeapVisitor &hv);
       NAMED_CLASS
-   }
-   IRStmt;
+};
+class IRStmtNoOp : public IRStmt {
+      IRStmtNoOp() : IRStmt(Ist_NoOp) {}
+public:
+      static IRStmtNoOp singleton;
+      void visit(HeapVisitor &hv) {}
+      void prettyPrint(FILE *f) const { fprintf(f, "IR-NoOp"); }
+};
+struct IRStmtIMark : public IRStmt {
+      Addr64 addr;
+      Int len;
+      IRStmtIMark(Addr64 _addr, Int _len)
+	      : IRStmt(Ist_IMark), addr(_addr), len(_len)
+      {}
+      void visit(HeapVisitor &hv) {}
+      void prettyPrint(FILE *f) const {
+         fprintf(f,  "------ IMark(0x%llx, %d) ------", 
+                     addr, len);
+      }
+};
+struct IRStmtAbiHint : public IRStmt {
+      IRExpr *base;
+      Int len;
+      IRExpr *nia;
+      IRStmtAbiHint(IRExpr *_base, Int _len, IRExpr *_nia)
+	      : IRStmt(Ist_AbiHint), base(_base), len(_len),
+		nia(_nia)
+      {}
+      void visit(HeapVisitor &hv) {
+	      hv(base);
+	      hv(nia);
+      }
+      void prettyPrint(FILE *f) const {
+         fprintf(f, "====== AbiHint(");
+         ppIRExpr(base, f);
+         fprintf(f, ", %d, ", len);
+         ppIRExpr(nia, f);
+         fprintf(f, ") ======");
+      }
+};
+struct IRStmtPut : public IRStmt {
+      Int     offset;   /* Offset into the guest state */
+      IRExpr* data;     /* The value to write */
+      IRStmtPut(Int _offset, IRExpr *_data)
+	      : IRStmt(Ist_Put), offset(_offset), data(_data)
+      {}
+      void visit(HeapVisitor &hv) { hv(data); }
+      void prettyPrint(FILE *f) const {
+         fprintf(f,  "PUT(%d) = ", offset);
+         ppIRExpr(data, f);
+      }
+};
+/* Write a guest register, at a non-fixed offset in the guest state.
+   See the comment for GetI expressions for more information.
+
+   ppIRStmt output: PUTI<descr>[<ix>,<bias>] = <data>,
+   eg. PUTI(64:8xF64)[t5,0] = t1
+*/
+struct IRStmtPutI : public IRStmt {
+      IRRegArray* descr; /* Part of guest state treated as circular */
+      IRExpr*     ix;    /* Variable part of index into array */
+      Int         bias;  /* Constant offset part of index into array */
+      IRExpr*     data;  /* The value to write */
+      IRStmtPutI(IRRegArray *_descr, IRExpr *_ix, Int _bias, IRExpr *_data)
+	      : IRStmt(Ist_PutI), descr(_descr), ix(_ix), bias(_bias),
+		data(_data)
+      {}
+      void visit(HeapVisitor &hv) {
+	      hv(descr);
+	      hv(data);
+      }
+      void prettyPrint(FILE *f) const {
+         fprintf(f,  "PUTI" );
+         ppIRRegArray(descr, f);
+         fprintf(f, "[");
+         ppIRExpr(ix, f);
+         fprintf(f, ",%d] = ", bias);
+         ppIRExpr(data, f);
+      }
+};
+
+/* Assign a value to a temporary.  Note that SSA rules require each
+   tmp is only assigned to once.  IR sanity checking will reject any
+   block containing a temporary which is not assigned to exactly once.
+
+   ppIRStmt output: t<tmp> = <data>, eg. t1 = 3
+*/
+struct IRStmtWrTmp : public IRStmt {
+      IRTemp  tmp;   /* Temporary  (LHS of assignment) */
+      IRExpr* data;  /* Expression (RHS of assignment) */
+      IRStmtWrTmp(IRTemp _tmp, IRExpr *_data)
+	      : IRStmt(Ist_WrTmp), tmp(_tmp), data(_data)
+      {}
+      void visit(HeapVisitor &hv) { hv(data); }
+      void prettyPrint(FILE *f) const {
+         ppIRTemp(tmp, f);
+         fprintf(f,  " = " );
+         ppIRExpr(data, f);
+      }
+};
+
+/* Write a value to memory.  Normally scRes is IRTemp_INVALID,
+   denoting a normal store.  If scRes is not IRTemp_INVALID, then this
+   is a store-conditional, which may fail or succeed depending on the
+   outcome of a previously lodged reservation on this address.  scRes
+   is written 1 if the store succeeds and 0 if it fails, and must have
+   type Ity_I1.
+
+   If scRes is not IRTemp_INVALID, then also, the address must be
+   naturally aligned - any misaligned addresses should be caught by a
+   dominating IR check and side exit.  This alignment restriction
+   exists because on at least some LL/SC platforms (ppc), stwcx. etc
+   will trap w/ SIGBUS on misaligned addresses, and we have to
+   actually generate stwcx. on the host, and we don't want it trapping
+   on the host.
+
+   ppIRStmt output: ST<end>(<addr>) = <data>, eg. STle(t1) = t2
+*/
+struct IRStmtStore : public IRStmt {
+      IRExpr*   addr;   /* store address */
+      IRExpr*   data;   /* value to write */
+      IRStmtStore(IRExpr *_addr, IRExpr *_data)
+	      : IRStmt(Ist_Store), addr(_addr), data(_data)
+      {}
+      void visit(HeapVisitor &hv) {
+	      hv(addr);
+	      hv(data);
+      }	      
+      void prettyPrint(FILE *f) const {
+         fprintf(f,  "ST(");
+         ppIRExpr(addr, f);
+         fprintf(f,  ") = ");
+         ppIRExpr(data, f);
+      }
+};
+
+/* Do an atomic compare-and-swap operation.  Semantics are described
+   above on a comment at the definition of IRCAS.
+
+   ppIRStmt output:
+   t<tmp> = CAS<end>(<addr> :: <expected> -> <new>)
+   eg
+   t1 = CASle(t2 :: t3->Add32(t3,1))
+   which denotes a 32-bit atomic increment 
+   of a value at address t2
+
+   A double-element CAS may also be denoted, in which case <tmp>,
+   <expected> and <new> are all pairs of items, separated by commas.
+*/
+struct IRStmtCAS : public IRStmt{
+      IRCAS* details;
+      IRStmtCAS(IRCAS *_details)
+	      : IRStmt(Ist_CAS), details(_details)
+      {}
+      void visit(HeapVisitor &hv) { hv(details); }
+      void prettyPrint(FILE *f) const {
+         ppIRCAS(details, f);
+      }
+};
+
+/* Call (possibly conditionally) a C function that has side effects
+   (ie. is "dirty").  See the comments above the IRDirty type
+   declaration for more information.
+
+   ppIRStmt output:
+   t<tmp> = DIRTY <guard> <effects> 
+            ::: <callee>(<args>)
+   eg.
+   t1 = DIRTY t27 RdFX-gst(16,4) RdFX-gst(60,4)
+            ::: foo{0x380035f4}(t2)
+*/       
+struct IRStmtDirty : public IRStmt {
+      IRDirty* details;
+      IRStmtDirty(IRDirty *_details)
+	      : IRStmt(Ist_Dirty), details(_details)
+      {}
+      void visit(HeapVisitor &hv) {hv(details);}
+      void prettyPrint(FILE *f) const {
+         ppIRDirty(details, f);
+      }
+};
+
+/* A memory bus event - a fence, or acquisition/release of the
+   hardware bus lock.  IR optimisation treats all these as fences
+   across which no memory references may be moved.
+   
+   ppIRStmt output: MBusEvent-Fence,
+                             MBusEvent-BusLock, MBusEvent-BusUnlock.
+*/
+struct IRStmtMBE : public IRStmt {
+      IRMBusEvent event;
+      IRStmtMBE(IRMBusEvent _event)
+	      : IRStmt(Ist_MBE), event(_event)
+      {}
+      void visit(HeapVisitor &hv) {}
+      void prettyPrint(FILE *f) const {
+         fprintf(f, "IR-");
+         ppIRMBusEvent(event, f);
+      }
+};
+
+/* Conditional exit from the middle of an IRSB.
+   ppIRStmt output: if (<guard>) goto {<jk>} <dst>
+   eg. if (t69) goto {Boring} 0x4000AAA:I32
+*/
+struct IRStmtExit : public IRStmt {
+      IRExpr*    guard;    /* Conditional expression */
+      IRJumpKind jk;       /* Jump kind */
+      IRConst*   dst;      /* Jump target (constant only) */
+      IRStmtExit(IRExpr *_guard, IRJumpKind _jk, IRConst *_dst)
+	      : IRStmt(Ist_Exit), guard(_guard), jk(_jk), dst(_dst)
+      {}
+      void visit(HeapVisitor &hv) {hv(guard); hv(dst); }
+      void prettyPrint(FILE *f) const {
+         fprintf(f,  "if (" );
+         ppIRExpr(guard, f);
+         fprintf(f,  ") goto {");
+         ppIRJumpKind(jk, f);
+         fprintf(f, "} ");
+         ppIRConst(dst, f);
+      }
+};
 
 /* Statement constructors. */
 extern IRStmt* IRStmt_NoOp    ( void );

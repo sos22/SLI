@@ -115,9 +115,9 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
-				if (visited.count(stmt->Ist.IMark.addr))
+				if (visited.count(((IRStmtIMark *)stmt)->addr))
 					goto escape;
-				s.regs.rip() = stmt->Ist.IMark.addr;
+				s.regs.rip() = ((IRStmtIMark *)stmt)->addr;
 				visited.insert(s.regs.rip());
 				break;
 			case Ist_AbiHint:
@@ -125,15 +125,15 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 			case Ist_MBE:
 				break;
 			case Ist_WrTmp:
-				temporaries[stmt->Ist.WrTmp.tmp] =
-					eval_expression(&s.regs, stmt->Ist.WrTmp.data, temporaries);
+				temporaries[((IRStmtWrTmp *)stmt)->tmp] =
+					eval_expression(&s.regs, ((IRStmtWrTmp *)stmt)->data, temporaries);
 				break;
 
 			case Ist_Store: {
 				struct expression_result data =
-					eval_expression(&s.regs, stmt->Ist.Store.data, temporaries);
+					eval_expression(&s.regs, ((IRStmtStore *)stmt)->data, temporaries);
 				struct expression_result addr =
-					eval_expression(&s.regs, stmt->Ist.Store.addr, temporaries);
+					eval_expression(&s.regs, ((IRStmtStore *)stmt)->addr, temporaries);
 				s.stores.push_back(
 					std::pair<unsigned long, unsigned long>(addr.lo,
 										data.lo));
@@ -145,28 +145,28 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 
 			case Ist_Put:
 				put_stmt(&s.regs,
-					 stmt->Ist.Put.offset,
-					 eval_expression(&s.regs, stmt->Ist.Put.data, temporaries),
-					 stmt->Ist.Put.data->type(irsb->tyenv));
+					 ((IRStmtPut *)stmt)->offset,
+					 eval_expression(&s.regs, ((IRStmtPut *)stmt)->data, temporaries),
+					 ((IRStmtPut *)stmt)->data->type(irsb->tyenv));
 				break;
 			case Ist_PutI: {
-				struct expression_result idx = eval_expression(&s.regs, stmt->Ist.PutI.ix, temporaries);
+				struct expression_result idx = eval_expression(&s.regs, ((IRStmtPutI *)stmt)->ix, temporaries);
 
 				/* Crazy bloody encoding scheme */
 				idx.lo =
-					((idx.lo + stmt->Ist.PutI.bias) %
-					 stmt->Ist.PutI.descr->nElems) *
-					sizeofIRType(stmt->Ist.PutI.descr->elemTy) +
-					stmt->Ist.PutI.descr->base;
+					((idx.lo + ((IRStmtPutI *)stmt)->bias) %
+					 ((IRStmtPutI *)stmt)->descr->nElems) *
+					sizeofIRType(((IRStmtPutI *)stmt)->descr->elemTy) +
+					((IRStmtPutI *)stmt)->descr->base;
 
 				put_stmt(&s.regs,
 					 idx.lo,
-					 eval_expression(&s.regs, stmt->Ist.PutI.data, temporaries),
-					 stmt->Ist.PutI.descr->elemTy);
+					 eval_expression(&s.regs, ((IRStmtPutI *)stmt)->data, temporaries),
+					 ((IRStmtPutI *)stmt)->descr->elemTy);
 				break;
 			}
 			case Ist_Dirty:
-				handle_dirty_call(&s, stmt->Ist.Dirty.details, temporaries, as);
+				handle_dirty_call(&s, ((IRStmtDirty *)stmt)->details, temporaries, as);
 				break;
 
 			case Ist_Exit: {
@@ -175,7 +175,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				   push the taken variant to the stack
 				   to deal with later. */
 				unsigned long i = s.regs.rip();
-				s.regs.rip() = stmt->Ist.Exit.dst->Ico.U64;
+				s.regs.rip() = ((IRStmtExit *)stmt)->dst->Ico.U64;
 				unexplored_instructions.push_back(s);
 				s.regs.rip() = i;
 				break;
@@ -270,22 +270,22 @@ findDominators(unsigned long functionHead,
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(1, rip);
 		assert(irsb->stmts[0]->tag == Ist_IMark);
-		assert(irsb->stmts[0]->Ist.IMark.addr == rip);
+		assert(((IRStmtIMark *)irsb->stmts[0])->addr == rip);
 		for (int idx = 1; idx < irsb->stmts_used; idx++) {
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
-				successors[rip].insert(stmt->Ist.IMark.addr);
-				predecessors[stmt->Ist.IMark.addr].insert(rip);
+				successors[rip].insert(((IRStmtIMark *)stmt)->addr);
+				predecessors[((IRStmtIMark *)stmt)->addr].insert(rip);
 				instrs.insert(rip);
-				rip = stmt->Ist.IMark.addr;
+				rip = ((IRStmtIMark *)stmt)->addr;
 				if (instrs.count(rip))
 					goto done_this_entry;
 				break;
 			case Ist_Exit:
-				successors[rip].insert(stmt->Ist.Exit.dst->Ico.U64);
-				predecessors[stmt->Ist.Exit.dst->Ico.U64].insert(rip);
-				remainingToExplore.push_back(stmt->Ist.Exit.dst->Ico.U64);
+				successors[rip].insert(((IRStmtExit *)stmt)->dst->Ico.U64);
+				predecessors[((IRStmtExit *)stmt)->dst->Ico.U64].insert(rip);
+				remainingToExplore.push_back(((IRStmtExit *)stmt)->dst->Ico.U64);
 				break;
 			default:
 				break;

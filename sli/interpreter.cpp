@@ -1586,7 +1586,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	/* First statement in block should be a mark */
 	assert(ths->currentIRSB->stmts[0]->tag == Ist_IMark);
 	/* Should be a mark for the IRSB rip */
-	assert(ths->currentIRSB->stmts[0]->Ist.IMark.addr ==
+	assert(((IRStmtIMark *)ths->currentIRSB->stmts[0])->addr ==
 	       ths->currentIRSBRip);
 }
 
@@ -1620,9 +1620,10 @@ extract_call_follower(IRSB *irsb)
 		abort();
 	if (irsb->stmts[idx]->tag != Ist_Store)
 		abort();
-	if (irsb->stmts[idx]->Ist.Store.data->tag != Iex_Const)
+	IRStmtStore *s = (IRStmtStore *)irsb->stmts[idx];
+	if (s->data->tag != Iex_Const)
 		abort();
-	return ((IRExprConst *)irsb->stmts[idx]->Ist.Store.data)->con->Ico.U64;
+	return ((IRExprConst *)s->data)->con->Ico.U64;
 }
 
 void
@@ -1682,9 +1683,10 @@ interpretStatement(IRStmt *stmt,
 	case Ist_NoOp:
 		return NULL;
 
-	case Ist_IMark:
+	case Ist_IMark: {
+		IRStmtIMark *s = (IRStmtIMark *)stmt;
 		thr->regs.set_reg(REGISTER_IDX(RIP),
-				  (stmt->Ist.IMark.addr));
+				  (s->addr));
 		if (er) {
 			ret.suspend();
 			er->instruction(thr,
@@ -1694,24 +1696,26 @@ interpretStatement(IRStmt *stmt,
 		}
 		HandleMallocFree(thr, ms->addressSpace);
 		return DUMMY_EVENT;
-
+	}
 	case Ist_AbiHint:
 		return NULL;
 
 	case Ist_MBE:
 		return NULL;
 
-	case Ist_WrTmp:
-		thr->temporaries[stmt->Ist.WrTmp.tmp] =
-			eval_expression(&thr->regs, stmt->Ist.WrTmp.data, thr->temporaries.content);
+	case Ist_WrTmp: {
+		IRStmtWrTmp *s = (IRStmtWrTmp *)stmt;
+		thr->temporaries[s->tmp] =
+			eval_expression(&thr->regs, s->data, thr->temporaries.content);
 		return NULL;
-
+	}
 	case Ist_Store: {
+		IRStmtStore *s = (IRStmtStore *)stmt;
 		struct expression_result data =
-			eval_expression(&thr->regs, stmt->Ist.Store.data, thr->temporaries.content);
+			eval_expression(&thr->regs, s->data, thr->temporaries.content);
 		struct expression_result addr =
-			eval_expression(&thr->regs, stmt->Ist.Store.addr, thr->temporaries.content);
-		unsigned size = sizeofIRType(stmt->Ist.Store.data->type(irsb->tyenv));
+			eval_expression(&thr->regs, s->addr, thr->temporaries.content);
+		unsigned size = sizeofIRType(s->data->type(irsb->tyenv));
 		if (ms->addressSpace->isWritable(addr.lo, size, thr)) {
 			if (er) {
 				ret.suspend();
@@ -1724,61 +1728,66 @@ interpretStatement(IRStmt *stmt,
 	}
 
 	case Ist_CAS: {
-		assert(stmt->Ist.CAS.details->oldHi == IRTemp_INVALID);
-		assert(stmt->Ist.CAS.details->expdHi == NULL);
-		assert(stmt->Ist.CAS.details->dataHi == NULL);
+		IRStmtCAS *s = (IRStmtCAS *)stmt;
+		assert(s->details->oldHi == IRTemp_INVALID);
+		assert(s->details->expdHi == NULL);
+		assert(s->details->dataHi == NULL);
 		struct expression_result data =
-			eval_expression(&thr->regs, stmt->Ist.CAS.details->dataLo, thr->temporaries.content);
+			eval_expression(&thr->regs, s->details->dataLo, thr->temporaries.content);
 		struct expression_result addr =
-			eval_expression(&thr->regs, stmt->Ist.CAS.details->addr, thr->temporaries.content);
+			eval_expression(&thr->regs, s->details->addr, thr->temporaries.content);
 		struct expression_result expected =
-			eval_expression(&thr->regs, stmt->Ist.CAS.details->expdLo, thr->temporaries.content);
-		unsigned size = sizeofIRType(stmt->Ist.CAS.details->dataLo->type(irsb->tyenv));
-		return CasEvent::get(thr->tid, stmt->Ist.CAS.details->oldLo, addr, data, expected, size);
+			eval_expression(&thr->regs, s->details->expdLo, thr->temporaries.content);
+		unsigned size = sizeofIRType(s->details->dataLo->type(irsb->tyenv));
+		return CasEvent::get(thr->tid, s->details->oldLo, addr, data, expected, size);
 	}
 
-	case Ist_Put:
+	case Ist_Put: {
+		IRStmtPut *s = (IRStmtPut *)stmt;
 		put_stmt(&thr->regs,
-			 stmt->Ist.Put.offset,
-			 eval_expression(&thr->regs, stmt->Ist.Put.data, thr->temporaries.content),
-			 stmt->Ist.Put.data->type(irsb->tyenv));
+			 s->offset,
+			 eval_expression(&thr->regs, s->data, thr->temporaries.content),
+			 s->data->type(irsb->tyenv));
 		return NULL;
-
+	}
 	case Ist_PutI: {
-		struct expression_result idx = eval_expression(&thr->regs, stmt->Ist.PutI.ix, thr->temporaries.content);
+		IRStmtPutI *s = (IRStmtPutI *)stmt;
+		struct expression_result idx = eval_expression(&thr->regs, s->ix, thr->temporaries.content);
 
 		/* Crazy bloody encoding scheme */
 		idx.lo =
-			((idx.lo + stmt->Ist.PutI.bias) %
-			 stmt->Ist.PutI.descr->nElems) *
-			sizeofIRType(stmt->Ist.PutI.descr->elemTy) +
-			stmt->Ist.PutI.descr->base;
+			((idx.lo + s->bias) %
+			 s->descr->nElems) *
+			sizeofIRType(s->descr->elemTy) +
+			s->descr->base;
 
 		put_stmt(&thr->regs,
 			 idx.lo,
-			 eval_expression(&thr->regs, stmt->Ist.PutI.data, thr->temporaries.content),
-			 stmt->Ist.PutI.descr->elemTy);
+			 eval_expression(&thr->regs, s->data, thr->temporaries.content),
+			 s->descr->elemTy);
 		return NULL;
 	}
 
-	case Ist_Dirty:
-		return thr->do_dirty_call(stmt->Ist.Dirty.details, ms, er, ret);
-
+	case Ist_Dirty: {
+		IRStmtDirty *s = (IRStmtDirty *)stmt;
+		return thr->do_dirty_call(s->details, ms, er, ret);
+	}
 	case Ist_Exit: {
-		if (stmt->Ist.Exit.guard) {
+		IRStmtExit *s = (IRStmtExit *)stmt;
+		if (s->guard) {
 			struct expression_result guard =
-				eval_expression(&thr->regs, stmt->Ist.Exit.guard, thr->temporaries.content);
+				eval_expression(&thr->regs, s->guard, thr->temporaries.content);
 			if (!guard.lo)
 				return NULL;
 		}
-		if (stmt->Ist.Exit.jk != Ijk_Boring) {
-			assert(stmt->Ist.Exit.jk == Ijk_EmWarn);
+		if (s->jk != Ijk_Boring) {
+			assert(s->jk == Ijk_EmWarn);
 			printf("EMULATION WARNING %lx\n",
 			       thr->regs.get_reg(REGISTER_IDX(EMWARN)));
 		}
-		assert(stmt->Ist.Exit.dst->tag == Ico_U64);
+		assert(s->dst->tag == Ico_U64);
 		thr->regs.set_reg(REGISTER_IDX(RIP),
-				  stmt->Ist.Exit.dst->Ico.U64);
+				  s->dst->Ico.U64);
 		thr->currentIRSB = NULL;
 		return FINISHED_BLOCK;
 	}

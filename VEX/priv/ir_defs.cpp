@@ -61,46 +61,7 @@ Heap ir_heap;
 
 #include "libvex_prof.hpp"
 
-void
-_IRStmt::visit(HeapVisitor &visit)
-{
-   switch (tag) {
-   case Ist_NoOp:
-   case Ist_IMark:
-     break;
-   case Ist_AbiHint:
-     visit(Ist.AbiHint.base);
-     visit(Ist.AbiHint.nia);
-     break;
-   case Ist_Put:
-     visit(Ist.Put.data);
-     break;
-   case Ist_PutI:
-     visit(Ist.PutI.descr);
-     visit(Ist.PutI.ix);
-     visit(Ist.PutI.data);
-     break;
-   case Ist_WrTmp:
-     visit(Ist.WrTmp.data);
-     break;
-   case Ist_Store:
-     visit(Ist.Store.addr);
-     visit(Ist.Store.data);
-     break;
-   case Ist_CAS:
-     visit(Ist.CAS.details);
-     break;
-   case Ist_Dirty:
-     visit(Ist.Dirty.details);
-     break;
-   case Ist_MBE:
-     break;
-   case Ist_Exit:
-     visit(Ist.Exit.guard);
-     visit(Ist.Exit.dst);
-     break;
-   }
-}
+IRStmtNoOp IRStmtNoOp::singleton;
 
 /*---------------------------------------------------------------*/
 /*--- Printing the IR                                         ---*/
@@ -1486,65 +1447,7 @@ void ppIRStmt ( IRStmt* s, FILE* f )
       fprintf(f, "!!! IRStmt* which is NULL !!!");
       return;
    }
-   switch (s->tag) {
-      case Ist_NoOp:
-         fprintf(f, "IR-NoOp");
-         break;
-      case Ist_IMark:
-         fprintf(f,  "------ IMark(0x%llx, %d) ------", 
-                     s->Ist.IMark.addr, s->Ist.IMark.len);
-         break;
-      case Ist_AbiHint:
-         fprintf(f, "====== AbiHint(");
-         ppIRExpr(s->Ist.AbiHint.base, f);
-         fprintf(f, ", %d, ", s->Ist.AbiHint.len);
-         ppIRExpr(s->Ist.AbiHint.nia, f);
-         fprintf(f, ") ======");
-         break;
-      case Ist_Put:
-         fprintf(f,  "PUT(%d) = ", s->Ist.Put.offset);
-         ppIRExpr(s->Ist.Put.data, f);
-         break;
-      case Ist_PutI:
-         fprintf(f,  "PUTI" );
-         ppIRRegArray(s->Ist.PutI.descr, f);
-         fprintf(f, "[");
-         ppIRExpr(s->Ist.PutI.ix, f);
-         fprintf(f, ",%d] = ", s->Ist.PutI.bias);
-         ppIRExpr(s->Ist.PutI.data, f);
-         break;
-      case Ist_WrTmp:
-         ppIRTemp(s->Ist.WrTmp.tmp, f);
-         fprintf(f,  " = " );
-         ppIRExpr(s->Ist.WrTmp.data, f);
-         break;
-      case Ist_Store:
-         fprintf(f,  "ST(");
-         ppIRExpr(s->Ist.Store.addr, f);
-         fprintf(f,  ") = ");
-         ppIRExpr(s->Ist.Store.data, f);
-         break;
-      case Ist_CAS:
-         ppIRCAS(s->Ist.CAS.details, f);
-         break;
-      case Ist_Dirty:
-         ppIRDirty(s->Ist.Dirty.details, f);
-         break;
-      case Ist_MBE:
-         fprintf(f, "IR-");
-         ppIRMBusEvent(s->Ist.MBE.event, f);
-         break;
-      case Ist_Exit:
-         fprintf(f,  "if (" );
-         ppIRExpr(s->Ist.Exit.guard, f);
-         fprintf(f,  ") goto {");
-         ppIRJumpKind(s->Ist.Exit.jk, f);
-         fprintf(f, "} ");
-         ppIRConst(s->Ist.Exit.dst, f);
-         break;
-      default: 
-         vpanic("ppIRStmt");
-   }
+   s->prettyPrint(f);
 }
 
 void ppIRTypeEnv ( IRTypeEnv* env, FILE* f ) {
@@ -1960,84 +1863,45 @@ IRCAS* mkIRCAS ( IRTemp oldHi, IRTemp oldLo,
 
 IRStmt* IRStmt_NoOp ( void )
 {
-   /* Just use a single static closure. */
-   static IRStmt static_closure;
-   static_closure.tag = Ist_NoOp;
-   return &static_closure;
+   return &IRStmtNoOp::singleton;
 }
 IRStmt* IRStmt_IMark ( Addr64 addr, Int len ) {
-   IRStmt* s         = new IRStmt();
-   s->tag            = Ist_IMark;
-   s->Ist.IMark.addr = addr;
-   s->Ist.IMark.len  = len;
-   return s;
+   return new IRStmtIMark(addr, len);
 }
 IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia ) {
-   IRStmt* s           = new IRStmt();
-   s->tag              = Ist_AbiHint;
-   s->Ist.AbiHint.base = base;
-   s->Ist.AbiHint.len  = len;
-   s->Ist.AbiHint.nia  = nia;
-   return s;
+   return new IRStmtAbiHint(base, len, nia);
 }
 IRStmt* IRStmt_Put ( Int off, IRExpr* data ) {
-   IRStmt* s         = new IRStmt();
-   s->tag            = Ist_Put;
-   s->Ist.Put.offset = off;
-   s->Ist.Put.data   = data;
-   return s;
+   return new IRStmtPut(off, data);
 }
 IRStmt* IRStmt_PutI ( IRRegArray* descr, IRExpr* ix,
-                      Int bias, IRExpr* data ) {
-   IRStmt* s         = new IRStmt();
-   s->tag            = Ist_PutI;
-   s->Ist.PutI.descr = descr;
-   s->Ist.PutI.ix    = ix;
-   s->Ist.PutI.bias  = bias;
-   s->Ist.PutI.data  = data;
-   return s;
+                      Int bias, IRExpr* data )
+{
+   return new IRStmtPutI(descr, ix, bias, data);
 }
-IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data ) {
-   IRStmt* s         = new IRStmt();
-   s->tag            = Ist_WrTmp;
-   s->Ist.WrTmp.tmp  = tmp;
-   s->Ist.WrTmp.data = data;
-   return s;
+IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data )
+{
+   return new IRStmtWrTmp(tmp, data);
 }
-IRStmt* IRStmt_Store ( IRExpr* addr, IRExpr* data ) {
-   IRStmt* s          = new IRStmt();
-   s->tag             = Ist_Store;
-   s->Ist.Store.addr  = addr;
-   s->Ist.Store.data  = data;
-   return s;
+IRStmt* IRStmt_Store ( IRExpr* addr, IRExpr* data )
+{
+   return new IRStmtStore(addr, data);
 }
-IRStmt* IRStmt_CAS ( IRCAS* cas ) {
-   IRStmt* s          = new IRStmt();
-   s->tag             = Ist_CAS;
-   s->Ist.CAS.details = cas;
-   return s;
+IRStmt* IRStmt_CAS ( IRCAS* cas )
+{
+   return new IRStmtCAS(cas);
 }
 IRStmt* IRStmt_Dirty ( IRDirty* d )
 {
-   IRStmt* s            = new IRStmt();
-   s->tag               = Ist_Dirty;
-   s->Ist.Dirty.details = d;
-   return s;
+   return new IRStmtDirty(d);
 }
 IRStmt* IRStmt_MBE ( IRMBusEvent event )
 {
-   IRStmt* s        = new IRStmt();
-   s->tag           = Ist_MBE;
-   s->Ist.MBE.event = event;
-   return s;
+   return new IRStmtMBE(event);
 }
-IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst ) {
-   IRStmt* s         = new IRStmt();
-   s->tag            = Ist_Exit;
-   s->Ist.Exit.guard = guard;
-   s->Ist.Exit.jk    = jk;
-   s->Ist.Exit.dst   = dst;
-   return s;
+IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst )
+{
+   return new IRStmtExit(guard, jk, dst);
 }
 
 

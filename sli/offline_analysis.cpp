@@ -151,19 +151,19 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 			   special case the two cases here. */
 			IRExpr *addr = NULL;
 			if (stmt->tag == Ist_Dirty &&
-			    (!strcmp(stmt->Ist.Dirty.details->cee->name,
+			    (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				     "helper_load_8") ||
-			     !strcmp(stmt->Ist.Dirty.details->cee->name,
+			     !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				     "helper_load_16") ||
-			     !strcmp(stmt->Ist.Dirty.details->cee->name,
+			     !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				     "helper_load_32") ||			     
-			     !strcmp(stmt->Ist.Dirty.details->cee->name,
+			     !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				     "helper_load_64"))) {
 				/* It's a load; the address loaded is
 				   in the first argument. */
-				addr = stmt->Ist.Dirty.details->args[0];
+				addr = ((IRStmtDirty *)stmt)->details->args[0];
 			} else if (stmt->tag == Ist_Store) {
-				addr = stmt->Ist.Store.addr;
+				addr = ((IRStmtStore *)stmt)->addr;
 			} else {
 				/* Neither a load nor a store.  That
 				   shouldn't be generating a segfault,
@@ -449,8 +449,8 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 	case Ist_Put:
 		sm->prependSideEffect(
 			new StateMachineSideEffectCopy(
-				threadAndRegister::reg(site.thread, stmt->Ist.Put.offset),
-				stmt->Ist.Put.data));
+				threadAndRegister::reg(site.thread, ((IRStmtPut *)stmt)->offset),
+				((IRStmtPut *)stmt)->data));
 		break;
 	case Ist_PutI:
 		/* We can't handle these correctly. */
@@ -459,30 +459,30 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 	case Ist_WrTmp:
 		sm->prependSideEffect(
 			new StateMachineSideEffectCopy(
-				threadAndRegister::temp(site.thread, stmt->Ist.WrTmp.tmp),
-				stmt->Ist.WrTmp.data));
+				threadAndRegister::temp(site.thread, ((IRStmtWrTmp *)stmt)->tmp),
+				((IRStmtWrTmp *)stmt)->data));
 		break;
 	case Ist_Store:
 		sm->prependSideEffect(
 			new StateMachineSideEffectStore(
-				stmt->Ist.Store.addr,
-				stmt->Ist.Store.data,
+				((IRStmtStore *)stmt)->addr,
+				((IRStmtStore *)stmt)->data,
 				site));
 		break;
 
 	case Ist_Dirty:
-		if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+		if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 			    "helper_load_8") ||
-		    !strcmp(stmt->Ist.Dirty.details->cee->name,
+		    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 			    "helper_load_16") ||
-		    !strcmp(stmt->Ist.Dirty.details->cee->name,
+		    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 			    "helper_load_64") ||
-		    !strcmp(stmt->Ist.Dirty.details->cee->name,
+		    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 			    "helper_load_32")) {
 			StateMachineSideEffectLoad *smsel =
 				new StateMachineSideEffectLoad(
-					threadAndRegister::temp(site.thread, stmt->Ist.Dirty.details->tmp),
-					stmt->Ist.Dirty.details->args[0],
+					threadAndRegister::temp(site.thread, ((IRStmtDirty *)stmt)->details->tmp),
+					((IRStmtDirty *)stmt)->details->args[0],
 					site);
 			sm->prependSideEffect(smsel);
 		}  else {
@@ -502,11 +502,11 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 		sm = new StateMachineEdge(
 			new StateMachineBifurcate(
 				site.rip,
-				stmt->Ist.Exit.guard,
+				((IRStmtExit *)stmt)->guard,
 				new StateMachineEdge(
 					new StateMachineStub(
 						site.rip,
-						IRExpr_Const(stmt->Ist.Exit.dst))),
+						IRExpr_Const(((IRStmtExit *)stmt)->dst))),
 				sm));
 		break;
 	}
@@ -2516,16 +2516,7 @@ public:
 static unsigned long
 getInstrLength(AddressSpace *as, unsigned long a)
 {
-	IRSB *irsb;
-	try {
-		irsb = as->getIRSBForAddress(0xabcde, a);
-	} catch (BadMemoryException &e) {
-		return 0;
-	}
-	assert(irsb != NULL);
-	assert(irsb->stmts_used > 0);
-	assert(irsb->stmts[0]->tag == Ist_IMark);
-	return irsb->stmts[0]->Ist.IMark.len;
+	return getInstructionSize(as, a);
 }
 static CallGraphEntry *
 exploreOneFunctionForCallGraph(unsigned long head,
@@ -3065,14 +3056,14 @@ buildCFGForCallGraph(AddressSpace *as,
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
-				work->fallThroughRip = r.jump(irsb->stmts[x]->Ist.IMark.addr);
+				work->fallThroughRip = r.jump(((IRStmtIMark *)irsb->stmts[x])->addr);
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
 				if (work->branchRip.valid) {
-					assert(work->branchRip == r.jump(irsb->stmts[x]->Ist.Exit.dst->Ico.U64));
+					assert(work->branchRip == r.jump(((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64));
 				} else {
-					work->branchRip = r.jump(irsb->stmts[x]->Ist.Exit.dst->Ico.U64);
+					work->branchRip = r.jump(((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64);
 				}
 				assert(work->branchRip.valid);
 				needed.push(std::pair<StackRip, int>(work->branchRip, depth - 1));
@@ -3663,13 +3654,13 @@ buildCFGForRipSet(AddressSpace *as,
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
-				work->fallThroughRip = irsb->stmts[x]->Ist.IMark.addr;
+				work->fallThroughRip = ((IRStmtIMark *)irsb->stmts[x])->addr;
 				needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
 				assert(work->branch == 0);
-				work->branchRip = irsb->stmts[x]->Ist.Exit.dst->Ico.U64;
+				work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64;
 				needed.push_back(std::pair<unsigned long, unsigned>(work->branchRip, depth - 1));
 			}
 		}
@@ -3791,35 +3782,35 @@ CFGtoCrashReason(unsigned tid,
 				break;
 			case Ist_Put:
 				se = new StateMachineSideEffectCopy(
-					threadAndRegister::reg(rip.thread, stmt->Ist.Put.offset),
-					stmt->Ist.Put.data);
+					threadAndRegister::reg(rip.thread, ((IRStmtPut *)stmt)->offset),
+					((IRStmtPut *)stmt)->data);
 				break;
 			case Ist_PutI:
 				/* Don't know how to handle these */
 				abort();
 			case Ist_WrTmp:
 				se = new StateMachineSideEffectCopy(
-					threadAndRegister::temp(rip.thread, stmt->Ist.WrTmp.tmp),
-					stmt->Ist.WrTmp.data);
+					threadAndRegister::temp(rip.thread, ((IRStmtWrTmp *)stmt)->tmp),
+					((IRStmtWrTmp *)stmt)->data);
 				break;
 			case Ist_Store:
 				se = new StateMachineSideEffectStore(
-					stmt->Ist.Store.addr,
-					stmt->Ist.Store.data,
+					((IRStmtStore *)stmt)->addr,
+					((IRStmtStore *)stmt)->data,
 					rip);
 				break;
 			case Ist_Dirty:
-				if (!strcmp(stmt->Ist.Dirty.details->cee->name,
+				if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					    "helper_load_8") ||
-				    !strcmp(stmt->Ist.Dirty.details->cee->name,
+				    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					    "helper_load_16") ||
-				    !strcmp(stmt->Ist.Dirty.details->cee->name,
+				    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					    "helper_load_64") ||
-				    !strcmp(stmt->Ist.Dirty.details->cee->name,
+				    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					    "helper_load_32")) {
 					se = new StateMachineSideEffectLoad(
-						threadAndRegister::temp(rip.thread, stmt->Ist.Dirty.details->tmp),
-						stmt->Ist.Dirty.details->args[0],
+						threadAndRegister::temp(rip.thread, ((IRStmtDirty *)stmt)->details->tmp),
+						((IRStmtDirty *)stmt)->details->args[0],
 						rip);
 				}  else {
 					abort();
@@ -3835,7 +3826,7 @@ CFGtoCrashReason(unsigned tid,
 					StateMachineBifurcate *smb =
 						new StateMachineBifurcate(
 							rip.rip,
-							stmt->Ist.Exit.guard,
+							((IRStmtExit *)stmt)->guard,
 							new StateMachineEdge(NULL),
 							edge);
 					assert(smb->trueTarget);
@@ -3894,7 +3885,7 @@ CFGtoCrashReason(unsigned tid,
 				/* We ignore statements other than WrTmp if they
 				   happen in a call instruction. */
 				if (stmt->tag == Ist_WrTmp)
-					r = rewriteTemporary(r, stmt->Ist.WrTmp.tmp, stmt->Ist.WrTmp.data);
+					r = rewriteTemporary(r, ((IRStmtWrTmp *)stmt)->tmp, ((IRStmtWrTmp *)stmt)->data);
 			}
 
 			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);

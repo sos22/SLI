@@ -2891,48 +2891,48 @@ statementToCrashReason(const CrashTimestamp &when, IRStmt *irs)
 	case Ist_IMark:
 		return NULL;
 	case Ist_Put:
-		return exprToCrashReason(when, irs->Ist.Put.data);
+		return exprToCrashReason(when, ((IRStmtPut *)irs)->data);
 	case Ist_PutI:
-		r = exprToCrashReason(when, irs->Ist.PutI.data);
+		r = exprToCrashReason(when, ((IRStmtPutI *)irs)->data);
 		if (!r)
-			r = exprToCrashReason(when, irs->Ist.PutI.ix);
+			r = exprToCrashReason(when, ((IRStmtPutI *)irs)->ix);
 		return r;
 	case Ist_WrTmp:
-		return exprToCrashReason(when, irs->Ist.WrTmp.data);
+		return exprToCrashReason(when, ((IRStmtWrTmp *)irs)->data);
 	case Ist_Store:
-		r = exprToCrashReason(when, irs->Ist.Store.addr);
+		r = exprToCrashReason(when, ((IRStmtStore *)irs)->addr);
 		if (!r)
-			r = exprToCrashReason(when, irs->Ist.Store.data);
+			r = exprToCrashReason(when, ((IRStmtStore *)irs)->data);
 		if (!r) {
 			abstractStoresT stores;
 			r = CrashMachineNode::leaf(
 				when.rip,
 				CrashExpressionBadAddr::get(
-					CrashExpression::get(irs->Ist.Store.addr)),
+					CrashExpression::get(((IRStmtStore *)irs)->addr)),
 				stores);
 		}
 		return r;
 	case Ist_Dirty:
-		if (irs->Ist.Dirty.details->guard) {
-			r = exprToCrashReason(when, irs->Ist.Dirty.details->guard);
+		if (((IRStmtDirty *)irs)->details->guard) {
+			r = exprToCrashReason(when, ((IRStmtDirty *)irs)->details->guard);
 			if (r)
 				return r;
 		}
 		for (unsigned x = 0;
-		     irs->Ist.Dirty.details->args[x];
+		     ((IRStmtDirty *)irs)->details->args[x];
 		     x++) {
-			r = exprToCrashReason(when, irs->Ist.Dirty.details->args[x]);
+			r = exprToCrashReason(when, ((IRStmtDirty *)irs)->details->args[x]);
 			if (r)
 				return r;
 		}
-		if (!strncmp(irs->Ist.Dirty.details->cee->name,
+		if (!strncmp(((IRStmtDirty *)irs)->details->cee->name,
 			     "helper_load_",
 			     12)) {
 			abstractStoresT stores;
 			return CrashMachineNode::leaf(
 				when.rip,
 				CrashExpressionBadAddr::get(
-					CrashExpression::get(irs->Ist.Dirty.details->args[0])),
+					CrashExpression::get(((IRStmtDirty *)irs)->details->args[0])),
 				stores);
 		}
 		return NULL;
@@ -3182,7 +3182,7 @@ backtrack_crash_machine_node_for_statements(
 	int i;
 
 	assert(statements[0]->tag == Ist_IMark);
-	assert(when.rip == statements[0]->Ist.IMark.addr);
+	assert(when.rip == ((IRStmtIMark *)statements[0])->addr);
 
 	for (i = nr_statements - 1; i >= 0; i--)  {
 		IRStmt *stmt = statements[i];
@@ -3198,35 +3198,35 @@ backtrack_crash_machine_node_for_statements(
 			break;
 
 		case Ist_Put: {
-			CrashExpression *d = CrashExpression::get(stmt->Ist.Put.data);
-			if (stmt->Ist.Put.offset == OFFSET_amd64_RSP)
+			CrashExpression *d = CrashExpression::get(((IRStmtPut *)stmt)->data);
+			if (((IRStmtPut *)stmt)->offset == OFFSET_amd64_RSP)
 				d = CrashExpressionStackPtr::get(d);
-			node = node->rewriteRegister(stmt->Ist.Put.offset, d);
+			node = node->rewriteRegister(((IRStmtPut *)stmt)->offset, d);
 			break;
 		}
 
 		case Ist_WrTmp:
 			node = node->rewriteTemporary(
-				stmt->Ist.WrTmp.tmp,
-				CrashExpression::get(stmt->Ist.WrTmp.data));
+				((IRStmtWrTmp *)stmt)->tmp,
+				CrashExpression::get(((IRStmtWrTmp *)stmt)->data));
 			break;
 			
 		case Ist_Dirty:
-			if (strncmp(stmt->Ist.Dirty.details->cee->name,
+			if (strncmp(((IRStmtDirty *)stmt)->details->cee->name,
 				    "helper_load_",
 				    12))
 				abort(); /* don't know how to deal with these */
 			node = node->rewriteTemporary(
-				stmt->Ist.Dirty.details->tmp,
+				((IRStmtDirty *)stmt)->details->tmp,
 				CrashExpressionLoad::get(
 					when,
 					CrashExpression::get(
-						stmt->Ist.Dirty.details->args[0])));
+						((IRStmtDirty *)stmt)->details->args[0])));
 			break;
 
 		case Ist_Store: {
-			CrashExpression *data =	CrashExpression::get(stmt->Ist.Store.data);
-			CrashExpression *addr =	CrashExpression::get(stmt->Ist.Store.addr);
+			CrashExpression *data =	CrashExpression::get(((IRStmtStore *)stmt)->data);
+			CrashExpression *addr =	CrashExpression::get(((IRStmtStore *)stmt)->addr);
 			std::set<CrashTimestamp> satisfiedLoads;
 			oracle.findLoadsForStore(when, &satisfiedLoads);
 			if (!satisfiedLoads.empty()) {
@@ -3245,18 +3245,18 @@ backtrack_crash_machine_node_for_statements(
 				/* Only handle two-way branches */
 				assert(!node->trueTarget);
 				abstractStoresT stores;
-				node->trueTarget = CrashMachineNode::stub(stmt->Ist.Exit.dst->Ico.U64, stores);
-				node->branchCond = CrashExpression::get(stmt->Ist.Exit.guard);
+				node->trueTarget = CrashMachineNode::stub(((IRStmtExit *)stmt)->dst->Ico.U64, stores);
+				node->branchCond = CrashExpression::get(((IRStmtExit *)stmt)->guard);
 			}
 			break;
 
 		case Ist_CAS:
 			node = node->rewriteTemporary(
-				stmt->Ist.CAS.details->oldLo,
+				((IRStmtCAS *)stmt)->details->oldLo,
 				CrashExpressionLoad::get(
 					when,
 					CrashExpression::get(
-						stmt->Ist.CAS.details->addr)));
+						((IRStmtCAS *)stmt)->details->addr)));
 			break;
 
 		default:
@@ -3491,7 +3491,7 @@ get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
 		}
 	} else {
 		assert(irsb->stmts[instr_end]->tag == Ist_IMark);
-		*out = irsb->stmts[instr_end]->Ist.IMark.addr;
+		*out = ((IRStmtIMark *)irsb->stmts[instr_end])->addr;
 	}
 	return true;
 }
@@ -3554,7 +3554,7 @@ CrashCFG::build_cfg(MachineState *ms,
 				if (irsb->stmts[instr_end]->tag == Ist_Exit) {
 					assert(!haveNonFallThrough);
 					nonFallThroughTarget.rip =
-						irsb->stmts[instr_end]->Ist.Exit.dst->Ico.U64;
+						((IRStmtExit *)irsb->stmts[instr_end])->dst->Ico.U64;
 					haveNonFallThrough = true;
 					DBG_BUILD_CFG("NFT %s\n", nonFallThroughTarget.name());
 				}
@@ -3993,7 +3993,7 @@ CrashCFG::calculate_cmns(ThreadId tid,
 				/* We have both fall-through and
 				   non-fall-through exits. */
 				assert(irsb->stmts[instr_end-1]->tag == Ist_Exit);
-				branchCond = CrashExpression::get(irsb->stmts[instr_end-1]->Ist.Exit.guard);
+				branchCond = CrashExpression::get(((IRStmtExit *)irsb->stmts[instr_end-1])->guard);
 				trueTarget = node->trueTarget->cmn;
 				falseTarget = node->falseTarget->cmn;
 
@@ -4879,7 +4879,7 @@ main(int argc, char *argv[])
 	     idx--) {
 		if (idx < crashedThread->currentIRSB->stmts_used &&
 		    crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark) {
-			ts.rip = crashedThread->currentIRSB->stmts[idx]->Ist.IMark.addr;
+			ts.rip = ((IRStmtIMark *)crashedThread->currentIRSB->stmts[idx])->addr;
 			oracle.addRipTrace(ts, false);
 			prev_rip = ts.rip;
 		}
@@ -4910,10 +4910,10 @@ main(int argc, char *argv[])
 		     idx >= 0;
 		     idx--) {
 			if (irsb->stmts[idx]->tag == Ist_IMark) {
-				ts.rip = irsb->stmts[idx]->Ist.IMark.addr;
+				ts.rip = ((IRStmtIMark *)irsb->stmts[idx])->addr;
 				oracle.addRipTrace(ts, exited_by_branch);
 				exited_by_branch = false;
-				prev_rip = irsb->stmts[idx]->Ist.IMark.addr;
+				prev_rip = ((IRStmtIMark *)irsb->stmts[idx])->addr;
 			}
 		}
 	}
@@ -4938,7 +4938,7 @@ main(int argc, char *argv[])
 		     instr_start--)
 			;
 		abstractStoresT stores;
-		when.rip = crashedThread->currentIRSB->stmts[instr_start]->Ist.IMark.addr;
+		when.rip = ((IRStmtIMark *)crashedThread->currentIRSB->stmts[instr_start])->addr;
 		when.changed();
 		if (1) {
 			cmn = CrashMachineNode::leaf(
