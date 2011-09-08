@@ -1584,8 +1584,11 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 
 /* Constructors -- IRExpr */
 
+IRExpr* IRExpr_Get ( threadAndRegister reg, IRType ty) {
+   return new IRExprGet(reg, ty);
+}
 IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid ) {
-   return new IRExprGet(threadAndRegister::reg(tid, off), ty);
+   return IRExpr_Get(threadAndRegister::reg(tid, off), ty);
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
    IRExprGetI* e         = new IRExprGetI();
@@ -1871,7 +1874,7 @@ IRStmt* IRStmt_IMark ( Addr64 addr, Int len ) {
 IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia ) {
    return new IRStmtAbiHint(base, len, nia);
 }
-IRStmt* IRStmt_Put ( Int off, IRExpr* data ) {
+IRStmt* IRStmt_Put ( threadAndRegister off, IRExpr* data ) {
    return new IRStmtPut(off, data);
 }
 IRStmt* IRStmt_PutI ( IRRegArray* descr, IRExpr* ix,
@@ -1879,9 +1882,9 @@ IRStmt* IRStmt_PutI ( IRRegArray* descr, IRExpr* ix,
 {
    return new IRStmtPutI(descr, ix, bias, data);
 }
-IRStmt* IRStmt_WrTmp ( IRTemp tmp, IRExpr* data )
+IRStmt* IRStmt_WrTmp ( threadAndRegister tmp, IRExpr* data )
 {
-   return new IRStmtWrTmp(tmp, data);
+   return new IRStmtPut(tmp, data);
 }
 IRStmt* IRStmt_Store ( IRExpr* addr, IRExpr* data )
 {

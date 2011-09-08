@@ -209,11 +209,6 @@ instrument_func(unsigned tid,
 			o->data = log_reads_expr(tid, sb_out, o->data);
 			break;
 		}
-		case Ist_WrTmp: {
-			IRStmtWrTmp *o = (IRStmtWrTmp *)out_stmt;
-			o->data = log_reads_expr(tid, sb_out, o->data);
-			break;
-		}
 		case Ist_Store: {
 			IRStmtStore *o = (IRStmtStore *)out_stmt;
 			IRExpr *addr = o->addr;

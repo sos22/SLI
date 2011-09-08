@@ -82,12 +82,14 @@ Oracle::LivenessSet::use(Int offset)
 }
 
 Oracle::LivenessSet
-Oracle::LivenessSet::define(Int offset)
+Oracle::LivenessSet::define(threadAndRegister r)
 {
-	if (offset >= 8 * NR_REGS)
+	if (r.isTemp())
+		return *this;
+	if (r.asReg() >= 8 * NR_REGS)
 		return *this;
 	else
-		return LivenessSet(mask & ~(1ul << (offset / 8)));
+		return LivenessSet(mask & ~(1ul << (r.asReg() / 8)));
 }
 
 bool
@@ -1585,15 +1587,12 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 		case Ist_AbiHint:
 			break;
 		case Ist_Put:
-			res = res.define(((IRStmtPut *)stmt)->offset);
+			res = res.define(((IRStmtPut *)stmt)->target);
 			res = irexprUsedValues(res, ((IRStmtPut *)stmt)->data);
 			break;
 		case Ist_PutI:
 			res = irexprUsedValues(res, ((IRStmtPutI *)stmt)->data);
 			res = irexprUsedValues(res, ((IRStmtPutI *)stmt)->ix);
-			break;
-		case Ist_WrTmp:
-			res = irexprUsedValues(res, ((IRStmtWrTmp *)stmt)->data);
 			break;
 		case Ist_Store:
 			res = irexprUsedValues(res, ((IRStmtStore *)stmt)->data);
@@ -1644,53 +1643,27 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 }
 
 class RewriteRegisterExpr : public IRExprTransformer {
-	unsigned idx;
+	threadAndRegister idx;
 	IRExpr *to;
 protected:
 	IRExpr *transformIex(IRExprGet *what) {
-		if (!what->reg.isTemp() && what->reg.asReg() == (int)idx)
+		if (what->reg == idx)
 			return to;
 		else
 			return NULL;
 	}
 public:
-	RewriteRegisterExpr(unsigned _idx, IRExpr *_to)
+	RewriteRegisterExpr(threadAndRegister _idx, IRExpr *_to)
 		: idx(_idx), to(_to)
 	{
 	}
 };
 static IRExpr *
-rewriteRegister(IRExpr *expr, int offset, IRExpr *to)
+rewriteRegister(IRExpr *expr, threadAndRegister offset, IRExpr *to)
 {
 	RewriteRegisterExpr rre(offset, to);
 	bool ign;
 	return rre.transformIRExpr(expr, &ign);
-}
-
-class RewriteTemporaryExpr : public IRExprTransformer {
-	IRTemp tmp;
-	IRExpr *to;
-protected:
-	IRExpr *transformIex(IRExprGet *what)
-	{
-		if (what->reg.isTemp() && what->reg.asTemp() == tmp)
-			return to;
-		else
-			return NULL;
-	}
-public:
-	RewriteTemporaryExpr(IRTemp _tmp, IRExpr *_to)
-		: tmp(_tmp), to(_to)
-	{
-	}
-};
-static IRExpr *
-rewriteTemporary(IRExpr *expr,
-		 IRTemp tmp,
-		 IRExpr *newval)
-{
-	RewriteTemporaryExpr rt(tmp, newval);
-	return rt.transformIRExpr(expr);
 }
 
 void
@@ -1738,33 +1711,30 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	for (j = nr_statements - 1; j >= 0; j--) {
 		IRStmt *stmt = statements[j];
 		if (stmt->tag == Ist_Put) {
-			if (((IRStmtPut *)stmt)->offset == OFFSET_amd64_RSP && !rsp)
-				rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
-			if (((IRStmtPut *)stmt)->offset == OFFSET_amd64_RBP && !rbp)
-				rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, -1);
+			IRStmtPut *p = (IRStmtPut *)stmt;
+			if (p->target.isReg()) {
+				if (p->target.asReg() == OFFSET_amd64_RSP && !rsp)
+					rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
+				if (p->target.asReg() == OFFSET_amd64_RBP && !rbp)
+					rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, -1);
+			}
 			if (rsp)
 				rsp = rewriteRegister(rsp,
-						      ((IRStmtPut *)stmt)->offset,
-						      ((IRStmtPut *)stmt)->data);
+						      p->target,
+						      p->data);
 			if (rbp)
 				rbp = rewriteRegister(rbp,
-						      ((IRStmtPut *)stmt)->offset,
-						      ((IRStmtPut *)stmt)->data);
-		} else if (stmt->tag == Ist_WrTmp) {
-			if (rsp)
-				rsp = rewriteTemporary(rsp,
-						       ((IRStmtWrTmp *)stmt)->tmp,
-						       ((IRStmtWrTmp *)stmt)->data);
-			if (rbp)
-				rbp = rewriteTemporary(rbp,
-						       ((IRStmtWrTmp *)stmt)->tmp,
-						       ((IRStmtWrTmp *)stmt)->data);
+						      p->target,
+						      p->data);
 		} else if (stmt->tag == Ist_CAS) {
 			if (((IRStmtCAS *)stmt)->details->oldLo == OFFSET_amd64_RSP ||
 			    ((IRStmtCAS *)stmt)->details->oldLo == OFFSET_amd64_RBP)
 				goto impossible;
 		} else if (stmt->tag == Ist_Dirty) {
-			IRTemp tmp = ((IRStmtDirty *)stmt)->details->tmp;
+			threadAndRegister tmp(
+				threadAndRegister::temp(
+					-1,
+					((IRStmtDirty *)stmt)->details->tmp));
 			IRType t = Ity_I1;
 			if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				    "helper_load_128"))
@@ -1790,9 +1760,9 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 						((IRStmtDirty *)stmt)->details->args[0],
 						ThreadRip::mk(9999, rip));
 			if (rsp)
-				rsp = rewriteTemporary(rsp, tmp, v);
+				rsp = rewriteRegister(rsp, tmp, v);
 			if (rbp)
-				rbp = rewriteTemporary(rbp, tmp, v);
+				rbp = rewriteRegister(rbp, tmp, v);
 		}
 	}
 
@@ -1962,28 +1932,31 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			abort();
 		case Ist_AbiHint:
 			break;
-		case Ist_Put:
-			if (((IRStmtPut *)st)->offset < NR_REGS * 8 &&
-			    ((IRStmtPut *)st)->offset != OFFSET_amd64_RSP) {
-				config.v[((IRStmtPut *)st)->offset / 8] =
-					irexprAliasingClass(((IRStmtPut *)st)->data,
-							    tyenv,
-							    config,
-							    false,
-							    &temporaryAliases);
+		case Ist_Put: {
+			IRStmtPut *p = (IRStmtPut *)st;
+			if (p->target.isReg()) {
+				if (p->target.asReg() < NR_REGS * 8 &&
+				    p->target.asReg() != OFFSET_amd64_RSP) {
+					config.v[p->target.asReg() / 8] =
+						irexprAliasingClass(p->data,
+								    tyenv,
+								    config,
+								    false,
+								    &temporaryAliases);
+				}
+			} else {
+				temporaryAliases.insert(
+					std::pair<IRTemp, PointerAliasingSet>(p->target.asTemp(),
+									      irexprAliasingClass(p->data,
+												  tyenv,
+												  config,
+												  false,
+												  &temporaryAliases)));
 			}
 			break;
+		}
 		case Ist_PutI:
 			/* Assume that PutIs never target the NR_REGS registers */
-			break;
-		case Ist_WrTmp:
-			temporaryAliases.insert(
-				std::pair<IRTemp, PointerAliasingSet>(((IRStmtWrTmp *)st)->tmp,
-								      irexprAliasingClass(((IRStmtWrTmp *)st)->data,
-											  tyenv,
-											  config,
-											  false,
-											  &temporaryAliases)));
 			break;
 		case Ist_Store:
 			if (!config.stackHasLeaked) {

@@ -93,6 +93,9 @@ public:
 	bool isTemp() const {
 		return !valid || content.second < 0;
 	}
+	bool isReg() const {
+		return !isTemp();
+	}
 	Int asReg() const {
 		assert(!isTemp());
 		return content.second;
@@ -1532,6 +1535,7 @@ struct IRExprHappensBefore : public IRExpr {
 
 /* Expression constructors. */
 extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid );
+extern IRExpr* IRExpr_Get    ( threadAndRegister r, IRType ty );
 extern IRExpr* IRExpr_GetI   ( IRRegArray* descr, IRExpr* ix, Int bias,
 			       unsigned tid );
 extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp, unsigned tid );
@@ -1882,7 +1886,6 @@ typedef
       Ist_AbiHint,   /* META */
       Ist_Put,
       Ist_PutI,
-      Ist_WrTmp,
       Ist_Store,
       Ist_CAS,
       Ist_Dirty,
@@ -1949,14 +1952,16 @@ struct IRStmtAbiHint : public IRStmt {
       }
 };
 struct IRStmtPut : public IRStmt {
-      Int     offset;   /* Offset into the guest state */
+      threadAndRegister target;
       IRExpr* data;     /* The value to write */
-      IRStmtPut(Int _offset, IRExpr *_data)
-	      : IRStmt(Ist_Put), offset(_offset), data(_data)
+      IRStmtPut(threadAndRegister _target, IRExpr *_data)
+	      : IRStmt(Ist_Put), target(_target), data(_data)
       {}
       void visit(HeapVisitor &hv) { hv(data); }
       void prettyPrint(FILE *f) const {
-         fprintf(f,  "PUT(%d) = ", offset);
+	 fprintf(f,  "PUT(");
+	 target.prettyPrint(f);
+	 fprintf(f, ") = ");
          ppIRExpr(data, f);
       }
 };
@@ -1985,26 +1990,6 @@ struct IRStmtPutI : public IRStmt {
          fprintf(f, "[");
          ppIRExpr(ix, f);
          fprintf(f, ",%d] = ", bias);
-         ppIRExpr(data, f);
-      }
-};
-
-/* Assign a value to a temporary.  Note that SSA rules require each
-   tmp is only assigned to once.  IR sanity checking will reject any
-   block containing a temporary which is not assigned to exactly once.
-
-   ppIRStmt output: t<tmp> = <data>, eg. t1 = 3
-*/
-struct IRStmtWrTmp : public IRStmt {
-      IRTemp  tmp;   /* Temporary  (LHS of assignment) */
-      IRExpr* data;  /* Expression (RHS of assignment) */
-      IRStmtWrTmp(IRTemp _tmp, IRExpr *_data)
-	      : IRStmt(Ist_WrTmp), tmp(_tmp), data(_data)
-      {}
-      void visit(HeapVisitor &hv) { hv(data); }
-      void prettyPrint(FILE *f) const {
-         ppIRTemp(tmp, f);
-         fprintf(f,  " = " );
          ppIRExpr(data, f);
       }
 };
@@ -2135,10 +2120,10 @@ struct IRStmtExit : public IRStmt {
 extern IRStmt* IRStmt_NoOp    ( void );
 extern IRStmt* IRStmt_IMark   ( Addr64 addr, Int len );
 extern IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia );
-extern IRStmt* IRStmt_Put     ( Int off, IRExpr* data );
+extern IRStmt* IRStmt_Put     ( threadAndRegister off, IRExpr* data );
 extern IRStmt* IRStmt_PutI    ( IRRegArray* descr, IRExpr* ix, Int bias, 
                                 IRExpr* data );
-extern IRStmt* IRStmt_WrTmp   ( IRTemp tmp, IRExpr* data );
+extern IRStmt* IRStmt_WrTmp   ( threadAndRegister reg, IRExpr* data );
 extern IRStmt* IRStmt_Store   ( IRExpr* addr, IRExpr* data );
 extern IRStmt* IRStmt_CAS     ( IRCAS* details );
 extern IRStmt* IRStmt_Dirty   ( IRDirty* details );

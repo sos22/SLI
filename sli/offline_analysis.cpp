@@ -449,19 +449,13 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 	case Ist_Put:
 		sm->prependSideEffect(
 			new StateMachineSideEffectCopy(
-				threadAndRegister::reg(site.thread, ((IRStmtPut *)stmt)->offset),
+				((IRStmtPut *)stmt)->target,
 				((IRStmtPut *)stmt)->data));
 		break;
 	case Ist_PutI:
 		/* We can't handle these correctly. */
 		abort();
 		return NULL;
-	case Ist_WrTmp:
-		sm->prependSideEffect(
-			new StateMachineSideEffectCopy(
-				threadAndRegister::temp(site.thread, ((IRStmtWrTmp *)stmt)->tmp),
-				((IRStmtWrTmp *)stmt)->data));
-		break;
 	case Ist_Store:
 		sm->prependSideEffect(
 			new StateMachineSideEffectStore(
@@ -3782,17 +3776,12 @@ CFGtoCrashReason(unsigned tid,
 				break;
 			case Ist_Put:
 				se = new StateMachineSideEffectCopy(
-					threadAndRegister::reg(rip.thread, ((IRStmtPut *)stmt)->offset),
+					((IRStmtPut *)stmt)->target,
 					((IRStmtPut *)stmt)->data);
 				break;
 			case Ist_PutI:
 				/* Don't know how to handle these */
 				abort();
-			case Ist_WrTmp:
-				se = new StateMachineSideEffectCopy(
-					threadAndRegister::temp(rip.thread, ((IRStmtWrTmp *)stmt)->tmp),
-					((IRStmtWrTmp *)stmt)->data);
-				break;
 			case Ist_Store:
 				se = new StateMachineSideEffectStore(
 					((IRStmtStore *)stmt)->addr,
@@ -3884,8 +3873,12 @@ CFGtoCrashReason(unsigned tid,
 				IRStmt *stmt = irsb->stmts[i];
 				/* We ignore statements other than WrTmp if they
 				   happen in a call instruction. */
-				if (stmt->tag == Ist_WrTmp)
-					r = rewriteTemporary(r, ((IRStmtWrTmp *)stmt)->tmp, ((IRStmtWrTmp *)stmt)->data);
+				if (stmt->tag == Ist_Put) {
+					IRStmtPut *p = (IRStmtPut *)stmt;
+					if (p->target.isTemp())
+						r = rewriteTemporary(r, p->target.asTemp(),
+								     p->data);
+				}
 			}
 
 			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);

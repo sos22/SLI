@@ -124,10 +124,6 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				break;
 			case Ist_MBE:
 				break;
-			case Ist_WrTmp:
-				temporaries[((IRStmtWrTmp *)stmt)->tmp] =
-					eval_expression(&s.regs, ((IRStmtWrTmp *)stmt)->data, temporaries);
-				break;
 
 			case Ist_Store: {
 				struct expression_result data =
@@ -143,12 +139,19 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 			case Ist_CAS:
 				fail("Encountered CAS\n");
 
-			case Ist_Put:
-				put_stmt(&s.regs,
-					 ((IRStmtPut *)stmt)->offset,
-					 eval_expression(&s.regs, ((IRStmtPut *)stmt)->data, temporaries),
-					 ((IRStmtPut *)stmt)->data->type(irsb->tyenv));
+			case Ist_Put: {
+				IRStmtPut *p = (IRStmtPut *)stmt;
+				if (p->target.isTemp()) {
+					temporaries[p->target.asTemp()] =
+						eval_expression(&s.regs, p->data, temporaries);
+				} else {
+					put_stmt(&s.regs,
+						 p->target.asReg(),
+						 eval_expression(&s.regs, p->data, temporaries),
+						 p->data->type(irsb->tyenv));
+				}
 				break;
+			}
 			case Ist_PutI: {
 				struct expression_result idx = eval_expression(&s.regs, ((IRStmtPutI *)stmt)->ix, temporaries);
 

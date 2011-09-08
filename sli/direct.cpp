@@ -2897,8 +2897,6 @@ statementToCrashReason(const CrashTimestamp &when, IRStmt *irs)
 		if (!r)
 			r = exprToCrashReason(when, ((IRStmtPutI *)irs)->ix);
 		return r;
-	case Ist_WrTmp:
-		return exprToCrashReason(when, ((IRStmtWrTmp *)irs)->data);
 	case Ist_Store:
 		r = exprToCrashReason(when, ((IRStmtStore *)irs)->addr);
 		if (!r)
@@ -3198,18 +3196,19 @@ backtrack_crash_machine_node_for_statements(
 			break;
 
 		case Ist_Put: {
-			CrashExpression *d = CrashExpression::get(((IRStmtPut *)stmt)->data);
-			if (((IRStmtPut *)stmt)->offset == OFFSET_amd64_RSP)
-				d = CrashExpressionStackPtr::get(d);
-			node = node->rewriteRegister(((IRStmtPut *)stmt)->offset, d);
+			IRStmtPut *p = (IRStmtPut *)stmt;
+			if (p->target.isTemp()) {
+				node = node->rewriteTemporary(
+					p->target.asTemp(),
+					CrashExpression::get(p->data));
+			} else {
+				CrashExpression *d = CrashExpression::get(p->data);
+				if (p->target.asReg() == OFFSET_amd64_RSP)
+					d = CrashExpressionStackPtr::get(d);
+				node = node->rewriteRegister(p->target.asReg(), d);
+			}
 			break;
 		}
-
-		case Ist_WrTmp:
-			node = node->rewriteTemporary(
-				((IRStmtWrTmp *)stmt)->tmp,
-				CrashExpression::get(((IRStmtWrTmp *)stmt)->data));
-			break;
 			
 		case Ist_Dirty:
 			if (strncmp(((IRStmtDirty *)stmt)->details->cee->name,

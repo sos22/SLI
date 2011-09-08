@@ -1614,7 +1614,7 @@ extract_call_follower(IRSB *irsb)
 	idx--;
 	if (idx < 0)
 		abort();
-	if (irsb->stmts[idx]->tag == Ist_WrTmp)
+	if (irsb->stmts[idx]->tag == Ist_Put)
 		idx--;
 	if (idx < 0)
 		abort();
@@ -1703,12 +1703,6 @@ interpretStatement(IRStmt *stmt,
 	case Ist_MBE:
 		return NULL;
 
-	case Ist_WrTmp: {
-		IRStmtWrTmp *s = (IRStmtWrTmp *)stmt;
-		thr->temporaries[s->tmp] =
-			eval_expression(&thr->regs, s->data, thr->temporaries.content);
-		return NULL;
-	}
 	case Ist_Store: {
 		IRStmtStore *s = (IRStmtStore *)stmt;
 		struct expression_result data =
@@ -1744,10 +1738,15 @@ interpretStatement(IRStmt *stmt,
 
 	case Ist_Put: {
 		IRStmtPut *s = (IRStmtPut *)stmt;
-		put_stmt(&thr->regs,
-			 s->offset,
-			 eval_expression(&thr->regs, s->data, thr->temporaries.content),
-			 s->data->type(irsb->tyenv));
+		if (s->target.isTemp()) {
+			thr->temporaries[s->target.asTemp()] =
+				eval_expression(&thr->regs, s->data, thr->temporaries.content);
+		} else {
+			put_stmt(&thr->regs,
+				 s->target.asReg(),
+				 eval_expression(&thr->regs, s->data, thr->temporaries.content),
+				 s->data->type(irsb->tyenv));
+		}
 		return NULL;
 	}
 	case Ist_PutI: {

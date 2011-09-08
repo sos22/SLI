@@ -251,7 +251,7 @@ static void stmt ( IRStmt* st )
 /* Generate a statement "dst := e". */ 
 static void assign ( IRTemp dst, IRExpr* e )
 {
-   stmt( IRStmt_WrTmp(dst, e) );
+   stmt( IRStmt_WrTmp(threadAndRegister::temp(guest_RIP_curr_instr.thread, dst), e) );
 }
 
 static IRExpr* unop ( IROp op, IRExpr* a )
@@ -832,25 +832,30 @@ static Prefix clearSegBits ( Prefix p )
 /* About the simplest question you can ask: where do the 64-bit
    integer registers live (in the guest state) ? */
 
-static Int integerGuestReg64Offset ( UInt reg )
+static threadAndRegister mk_reg ( unsigned offset )
+{
+   return threadAndRegister::reg(guest_RIP_curr_instr.thread, offset);
+}
+
+static threadAndRegister integerGuestReg64Offset ( UInt reg )
 {
    switch (reg) {
-      case R_RAX: return OFFB_RAX;
-      case R_RCX: return OFFB_RCX;
-      case R_RDX: return OFFB_RDX;
-      case R_RBX: return OFFB_RBX;
-      case R_RSP: return OFFB_RSP;
-      case R_RBP: return OFFB_RBP;
-      case R_RSI: return OFFB_RSI;
-      case R_RDI: return OFFB_RDI;
-      case R_R8:  return OFFB_R8;
-      case R_R9:  return OFFB_R9;
-      case R_R10: return OFFB_R10;
-      case R_R11: return OFFB_R11;
-      case R_R12: return OFFB_R12;
-      case R_R13: return OFFB_R13;
-      case R_R14: return OFFB_R14;
-      case R_R15: return OFFB_R15;
+      case R_RAX: return mk_reg(OFFB_RAX);
+      case R_RCX: return mk_reg(OFFB_RCX);
+      case R_RDX: return mk_reg(OFFB_RDX);
+      case R_RBX: return mk_reg(OFFB_RBX);
+      case R_RSP: return mk_reg(OFFB_RSP);
+      case R_RBP: return mk_reg(OFFB_RBP);
+      case R_RSI: return mk_reg(OFFB_RSI);
+      case R_RDI: return mk_reg(OFFB_RDI);
+      case R_R8:  return mk_reg(OFFB_R8);
+      case R_R9:  return mk_reg(OFFB_R9);
+      case R_R10: return mk_reg(OFFB_R10);
+      case R_R11: return mk_reg(OFFB_R11);
+      case R_R12: return mk_reg(OFFB_R12);
+      case R_R13: return mk_reg(OFFB_R13);
+      case R_R14: return mk_reg(OFFB_R14);
+      case R_R15: return mk_reg(OFFB_R15);
       default: vpanic("integerGuestReg64Offset(amd64)");
    }
 }
@@ -904,7 +909,7 @@ const char* nameIReg ( Int sz, UInt reg, Bool irregular )
    guest state offset of an integer register. */
 
 static 
-Int offsetIReg ( Int sz, UInt reg, Bool irregular )
+threadAndRegister offsetIReg ( Int sz, UInt reg, Bool irregular )
 {
    vassert(reg < 16);
    if (sz == 1) {
@@ -917,10 +922,10 @@ Int offsetIReg ( Int sz, UInt reg, Bool irregular )
    /* Deal with irregular case -- sz==1 and no REX present */
    if (sz == 1 && irregular) {
       switch (reg) {
-         case R_RSP: return 1+ OFFB_RAX;
-         case R_RBP: return 1+ OFFB_RCX;
-         case R_RSI: return 1+ OFFB_RDX;
-         case R_RDI: return 1+ OFFB_RBX;
+	 case R_RSP: return mk_reg(1+ OFFB_RAX);
+         case R_RBP: return mk_reg(1+ OFFB_RCX);
+         case R_RSI: return mk_reg(1+ OFFB_RDX);
+         case R_RDI: return mk_reg(1+ OFFB_RBX);
          default:    break; /* use the normal case */
       }
    }
@@ -945,7 +950,7 @@ static void putIRegAH ( IRExpr* e )
 {
    vassert(!host_is_bigendian);
    vassert(e->type(irsb->tyenv) == Ity_I8);
-   stmt( IRStmt_Put( OFFB_RAX+1, e ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_RAX+1), e ) );
 }
 
 
@@ -981,16 +986,16 @@ static void putIRegRAX ( Int sz, IRExpr* e )
    vassert(!host_is_bigendian);
    switch (sz) {
       case 8: vassert(ty == Ity_I64);
-              stmt( IRStmt_Put( OFFB_RAX, e ));
+	      stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
               break;
       case 4: vassert(ty == Ity_I32);
-              stmt( IRStmt_Put( OFFB_RAX, unop(Iop_32Uto64,e) ));
+              stmt( IRStmt_Put( mk_reg(OFFB_RAX), unop(Iop_32Uto64,e) ));
               break;
       case 2: vassert(ty == Ity_I16);
-              stmt( IRStmt_Put( OFFB_RAX, e ));
+              stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
               break;
       case 1: vassert(ty == Ity_I8);
-              stmt( IRStmt_Put( OFFB_RAX, e ));
+              stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
               break;
       default: vpanic("putIRegRAX(amd64)");
    }
@@ -1028,13 +1033,13 @@ static void putIRegRDX ( Int sz, IRExpr* e )
    vassert(!host_is_bigendian);
    vassert(e->type(irsb->tyenv) == szToITy(sz));
    switch (sz) {
-      case 8: stmt( IRStmt_Put( OFFB_RDX, e ));
+      case 8: stmt( IRStmt_Put( mk_reg(OFFB_RDX), e ));
               break;
-      case 4: stmt( IRStmt_Put( OFFB_RDX, unop(Iop_32Uto64,e) ));
+      case 4: stmt( IRStmt_Put( mk_reg(OFFB_RDX), unop(Iop_32Uto64,e) ));
               break;
-      case 2: stmt( IRStmt_Put( OFFB_RDX, e ));
+      case 2: stmt( IRStmt_Put( mk_reg(OFFB_RDX), e ));
               break;
-      case 1: stmt( IRStmt_Put( OFFB_RDX, e ));
+      case 1: stmt( IRStmt_Put( mk_reg(OFFB_RDX), e ));
               break;
       default: vpanic("putIRegRDX(amd64)");
    }
@@ -1047,8 +1052,7 @@ static void putIRegRDX ( Int sz, IRExpr* e )
 static IRExpr* getIReg64 ( unsigned tid, UInt regno )
 {
    return IRExpr_Get( integerGuestReg64Offset(regno),
-                      Ity_I64,
-		      tid );
+                      Ity_I64 );
 }
 
 static void putIReg64 ( UInt regno, IRExpr* e )
@@ -1070,8 +1074,7 @@ static IRExpr* getIReg32 ( unsigned tid, UInt regno)
 {
    vassert(!host_is_bigendian);
    return IRExpr_Get( integerGuestReg64Offset(regno),
-                      Ity_I32,
-		      tid );
+                      Ity_I32 );
 }
 
 static void putIReg32 ( UInt regno, IRExpr* e )
@@ -1094,8 +1097,7 @@ static IRExpr* getIReg16 ( unsigned tid, UInt regno )
 {
    vassert(!host_is_bigendian);
    return IRExpr_Get( integerGuestReg64Offset(regno),
-                      Ity_I16,
-		      tid );
+                      Ity_I16 );
 }
 
 static const char* nameIReg16 ( UInt regno )
@@ -1139,8 +1141,7 @@ static IRExpr* getIRegRexB ( unsigned tid, Int sz, Prefix pfx, UInt lo3bits )
    return IRExpr_Get(
              offsetIReg( sz, lo3bits | (getRexB(pfx) << 3), 
                              toBool(sz==1 && !haveREX(pfx)) ),
-             szToITy(sz),
-	     tid
+             szToITy(sz)
           );
 }
 
@@ -1194,7 +1195,7 @@ static UInt eregOfRexRM ( Prefix pfx, UChar mod_reg_rm )
    field in a modrm byte, taking into account REX (or its absence),
    and the size of the access.
 */
-static UInt offsetIRegG ( Int sz, Prefix pfx, UChar mod_reg_rm )
+static threadAndRegister offsetIRegG ( Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    UInt reg;
    vassert(!host_is_bigendian);
@@ -1208,8 +1209,7 @@ static
 IRExpr* getIRegG ( unsigned tid, Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    return IRExpr_Get( offsetIRegG( sz, pfx, mod_reg_rm ),
-                      szToITy(sz),
-		      tid );
+                      szToITy(sz) );
 }
 
 static 
@@ -1235,7 +1235,7 @@ const char* nameIRegG ( Int sz, Prefix pfx, UChar mod_reg_rm )
    and the size of the access.  eregOfRexRM will assert if mod_reg_rm
    denotes a memory access rather than a register access.
 */
-static UInt offsetIRegE ( Int sz, Prefix pfx, UChar mod_reg_rm )
+static threadAndRegister offsetIRegE ( Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    UInt reg;
    vassert(!host_is_bigendian);
@@ -1249,8 +1249,7 @@ static
 IRExpr* getIRegE ( unsigned tid, Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    return IRExpr_Get( offsetIRegE( sz, pfx, mod_reg_rm ),
-                      szToITy(sz),
-		      tid );
+                      szToITy(sz) );
 }
 
 static 
@@ -1288,25 +1287,25 @@ const char* nameIRegE ( Int sz, Prefix pfx, UChar mod_reg_rm )
 //..    }
 //.. }
 
-static Int xmmGuestRegOffset ( UInt xmmreg )
+static threadAndRegister xmmGuestRegOffset ( UInt xmmreg )
 {
    switch (xmmreg) {
-      case 0:  return OFFB_XMM0;
-      case 1:  return OFFB_XMM1;
-      case 2:  return OFFB_XMM2;
-      case 3:  return OFFB_XMM3;
-      case 4:  return OFFB_XMM4;
-      case 5:  return OFFB_XMM5;
-      case 6:  return OFFB_XMM6;
-      case 7:  return OFFB_XMM7;
-      case 8:  return OFFB_XMM8;
-      case 9:  return OFFB_XMM9;
-      case 10: return OFFB_XMM10;
-      case 11: return OFFB_XMM11;
-      case 12: return OFFB_XMM12;
-      case 13: return OFFB_XMM13;
-      case 14: return OFFB_XMM14;
-      case 15: return OFFB_XMM15;
+      case 0:  return mk_reg(OFFB_XMM0);
+      case 1:  return mk_reg(OFFB_XMM1);
+      case 2:  return mk_reg(OFFB_XMM2);
+      case 3:  return mk_reg(OFFB_XMM3);
+      case 4:  return mk_reg(OFFB_XMM4);
+      case 5:  return mk_reg(OFFB_XMM5);
+      case 6:  return mk_reg(OFFB_XMM6);
+      case 7:  return mk_reg(OFFB_XMM7);
+      case 8:  return mk_reg(OFFB_XMM8);
+      case 9:  return mk_reg(OFFB_XMM9);
+      case 10: return mk_reg(OFFB_XMM10);
+      case 11: return mk_reg(OFFB_XMM11);
+      case 12: return mk_reg(OFFB_XMM12);
+      case 13: return mk_reg(OFFB_XMM13);
+      case 14: return mk_reg(OFFB_XMM14);
+      case 15: return mk_reg(OFFB_XMM15);
       default: vpanic("xmmGuestRegOffset(amd64)");
    }
 }
@@ -1314,28 +1313,28 @@ static Int xmmGuestRegOffset ( UInt xmmreg )
 /* Lanes of vector registers are always numbered from zero being the
    least significant lane (rightmost in the register).  */
 
-static Int xmmGuestRegLane16offset ( UInt xmmreg, Int laneno )
+static threadAndRegister xmmGuestRegLane16offset ( UInt xmmreg, Int laneno )
 {
    /* Correct for little-endian host only. */
    vassert(!host_is_bigendian);
    vassert(laneno >= 0 && laneno < 8);
-   return xmmGuestRegOffset( xmmreg ) + 2 * laneno;
+   return mk_reg(xmmGuestRegOffset( xmmreg ).asReg() + 2 * laneno);
 }
 
-static Int xmmGuestRegLane32offset ( UInt xmmreg, Int laneno )
+static threadAndRegister xmmGuestRegLane32offset ( UInt xmmreg, Int laneno )
 {
    /* Correct for little-endian host only. */
    vassert(!host_is_bigendian);
    vassert(laneno >= 0 && laneno < 4);
-   return xmmGuestRegOffset( xmmreg ) + 4 * laneno;
+   return mk_reg(xmmGuestRegOffset( xmmreg ).asReg() + 4 * laneno);
 }
 
-static Int xmmGuestRegLane64offset ( UInt xmmreg, Int laneno )
+static threadAndRegister xmmGuestRegLane64offset ( UInt xmmreg, Int laneno )
 {
    /* Correct for little-endian host only. */
    vassert(!host_is_bigendian);
    vassert(laneno >= 0 && laneno < 2);
-   return xmmGuestRegOffset( xmmreg ) + 8 * laneno;
+   return mk_reg(xmmGuestRegOffset( xmmreg ).asReg() + 8 * laneno);
 }
 
 //.. static IRExpr* getSReg ( UInt sreg )
@@ -1351,27 +1350,27 @@ static Int xmmGuestRegLane64offset ( UInt xmmreg, Int laneno )
 
 static IRExpr* getXMMReg ( unsigned tid, UInt xmmreg )
 {
-   return IRExpr_Get( xmmGuestRegOffset(xmmreg), Ity_V128, tid );
+   return IRExpr_Get( xmmGuestRegOffset(xmmreg), Ity_V128 );
 }
 
 static IRExpr* getXMMRegLane64 ( unsigned tid, UInt xmmreg, Int laneno )
 {
-   return IRExpr_Get( xmmGuestRegLane64offset(xmmreg,laneno), Ity_I64, tid );
+   return IRExpr_Get( xmmGuestRegLane64offset(xmmreg,laneno), Ity_I64 );
 }
 
 static IRExpr* getXMMRegLane64F ( unsigned tid, UInt xmmreg, Int laneno )
 {
-   return IRExpr_Get( xmmGuestRegLane64offset(xmmreg,laneno), Ity_F64, tid );
+   return IRExpr_Get( xmmGuestRegLane64offset(xmmreg,laneno), Ity_F64 );
 }
 
 static IRExpr* getXMMRegLane32 ( unsigned tid, UInt xmmreg, Int laneno )
 {
-   return IRExpr_Get( xmmGuestRegLane32offset(xmmreg,laneno), Ity_I32, tid );
+   return IRExpr_Get( xmmGuestRegLane32offset(xmmreg,laneno), Ity_I32 );
 }
 
 static IRExpr* getXMMRegLane32F ( unsigned tid, UInt xmmreg, Int laneno )
 {
-   return IRExpr_Get( xmmGuestRegLane32offset(xmmreg,laneno), Ity_F32, tid );
+   return IRExpr_Get( xmmGuestRegLane32offset(xmmreg,laneno), Ity_F32 );
 }
 
 static void putXMMReg ( UInt xmmreg, IRExpr* e )
@@ -1619,9 +1618,9 @@ void setFlags_DEP1_DEP2 ( unsigned tid, IROp op8, IRTemp dep1, IRTemp dep2, IRTy
       default:       ppIROp(op8, stderr);
                      vpanic("setFlags_DEP1_DEP2(tid, amd64)");
    }
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(ccOp)) );
-   stmt( IRStmt_Put( OFFB_CC_DEP1, widenUto64(mkexpr(dep1, tid))) );
-   stmt( IRStmt_Put( OFFB_CC_DEP2, widenUto64(mkexpr(dep2, tid))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(ccOp)) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(dep1, tid))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(mkexpr(dep2, tid))) );
 }
 
 
@@ -1645,9 +1644,9 @@ void setFlags_DEP1 ( unsigned tid, IROp op8, IRTemp dep1, IRType ty )
       default:       ppIROp(op8, stderr);
                      vpanic("setFlags_DEP1(tid, amd64)");
    }
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(ccOp)) );
-   stmt( IRStmt_Put( OFFB_CC_DEP1, widenUto64(mkexpr(dep1, tid))) );
-   stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0)) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(ccOp)) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(dep1, tid))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0)) );
 }
 
 
@@ -1684,15 +1683,15 @@ static void setFlags_DEP1_DEP2_shift ( unsigned tid,
    }
 
    /* DEP1 contains the result, DEP2 contains the undershifted value. */
-   stmt( IRStmt_Put( OFFB_CC_OP,
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),
                      IRExpr_Mux0X( mkexpr(guard, tid),
                                    IRExpr_Get(OFFB_CC_OP,Ity_I64, tid),
                                    mkU64(ccOp))) );
-   stmt( IRStmt_Put( OFFB_CC_DEP1,
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1),
                      IRExpr_Mux0X( mkexpr(guard, tid),
                                    IRExpr_Get(OFFB_CC_DEP1,Ity_I64, tid),
                                    widenUto64(mkexpr(res, tid)))) );
-   stmt( IRStmt_Put( OFFB_CC_DEP2, 
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), 
                      IRExpr_Mux0X( mkexpr(guard, tid),
                                    IRExpr_Get(OFFB_CC_DEP2,Ity_I64, tid),
                                    widenUto64(mkexpr(resUS, tid)))) );
@@ -1717,10 +1716,10 @@ static void setFlags_INC_DEC ( unsigned tid, Bool inc, IRTemp res, IRType ty )
    
    /* This has to come first, because calculating the C flag 
       may require reading all four thunk fields. */
-   stmt( IRStmt_Put( OFFB_CC_NDEP, mk_amd64g_calculate_rflags_c(tid)) );
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(ccOp)) );
-   stmt( IRStmt_Put( OFFB_CC_DEP1, widenUto64(mkexpr(res, tid))) );
-   stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0)) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mk_amd64g_calculate_rflags_c(tid)) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(ccOp)) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(res, tid))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0)) );
 }
 
 
@@ -1732,22 +1731,22 @@ void setFlags_MUL ( unsigned tid, IRType ty, IRTemp arg1, IRTemp arg2, ULong bas
 {
    switch (ty) {
       case Ity_I8:
-         stmt( IRStmt_Put( OFFB_CC_OP, mkU64(base_op+0) ) );
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_OP), mkU64(base_op+0) ) );
          break;
       case Ity_I16:
-         stmt( IRStmt_Put( OFFB_CC_OP, mkU64(base_op+1) ) );
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_OP), mkU64(base_op+1) ) );
          break;
       case Ity_I32:
-         stmt( IRStmt_Put( OFFB_CC_OP, mkU64(base_op+2) ) );
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_OP), mkU64(base_op+2) ) );
          break;
       case Ity_I64:
-         stmt( IRStmt_Put( OFFB_CC_OP, mkU64(base_op+3) ) );
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_OP), mkU64(base_op+3) ) );
          break;
       default:
          vpanic("setFlags_MUL(amd64)");
    }
-   stmt( IRStmt_Put( OFFB_CC_DEP1, widenUto64(mkexpr(arg1, tid)) ));
-   stmt( IRStmt_Put( OFFB_CC_DEP2, widenUto64(mkexpr(arg2, tid)) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(arg1, tid)) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(mkexpr(arg2, tid)) ));
 }
 
 
@@ -1866,11 +1865,11 @@ static void helper_ADC ( unsigned tid,
       }
    }
 
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(thunkOp) ) );
-   stmt( IRStmt_Put( OFFB_CC_DEP1, widenUto64(mkexpr(ta1, tid))  ));
-   stmt( IRStmt_Put( OFFB_CC_DEP2, widenUto64(binop(xoro, mkexpr(ta2, tid), 
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid))  ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid), 
                                                          mkexpr(oldcn, tid)) )) );
-   stmt( IRStmt_Put( OFFB_CC_NDEP, mkexpr(oldc, tid) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid) ) );
 }
 
 
@@ -1927,11 +1926,11 @@ static void helper_SBB ( unsigned tid,
       }
    }
 
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(thunkOp) ) );
-   stmt( IRStmt_Put( OFFB_CC_DEP1, widenUto64(mkexpr(ta1, tid) )) );
-   stmt( IRStmt_Put( OFFB_CC_DEP2, widenUto64(binop(xoro, mkexpr(ta2, tid), 
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid) )) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid), 
                                                          mkexpr(oldcn, tid)) )) );
-   stmt( IRStmt_Put( OFFB_CC_NDEP, mkexpr(oldc, tid) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid) ) );
 }
 
 
@@ -3328,10 +3327,10 @@ ULong dis_Grp2 ( unsigned tid,
             );
 
       assign( dst1, narrowTo(ty, mkexpr(new_value, tid)) );
-      stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP1, mkexpr(new_rflags, tid) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
-      stmt( IRStmt_Put( OFFB_CC_NDEP, mkU64(0) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(new_rflags, tid) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
    }
 
    else
@@ -3456,19 +3455,19 @@ ULong dis_Grp2 ( unsigned tid,
       assign(oldFlags, mk_amd64g_calculate_rflags_all(tid));
 
       /* CC_DEP1 is the rotated value.  CC_NDEP is flags before. */
-      stmt( IRStmt_Put( OFFB_CC_OP,
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
                                       IRExpr_Get(OFFB_CC_OP,Ity_I64,tid),
                                       mkU64(ccOp))) );
-      stmt( IRStmt_Put( OFFB_CC_DEP1, 
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), 
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
                                       IRExpr_Get(OFFB_CC_DEP1,Ity_I64,tid),
                                       widenUto64(mkexpr(dst1, tid)))) );
-      stmt( IRStmt_Put( OFFB_CC_DEP2, 
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), 
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
                                       IRExpr_Get(OFFB_CC_DEP2,Ity_I64,tid),
                                       mkU64(0))) );
-      stmt( IRStmt_Put( OFFB_CC_NDEP, 
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), 
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
                                       IRExpr_Get(OFFB_CC_NDEP,Ity_I64,tid),
                                       mkexpr(oldFlags, tid))) );
@@ -3604,17 +3603,17 @@ ULong dis_Grp8_Imm ( unsigned tid,
 
    /* Copy relevant bit from t2 into the carry flag. */
    /* Flags: C=selected bit, O,S,Z,A,P undefined, so are set to zero. */
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-   stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( 
-            OFFB_CC_DEP1,
+	    mk_reg(OFFB_CC_DEP1),
             binop(Iop_And64,
                   binop(Iop_Shr64, mkexpr(t2, tid), mkU8(src_val)),
                   mkU64(1))
        ));
    /* Set NDEP even though it isn't used.  This makes redundant-PUT
       elimination of previous stores to this field work better. */
-   stmt( IRStmt_Put( OFFB_CC_NDEP, mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
 
    return delta;
 }
@@ -4364,7 +4363,7 @@ ULong dis_imul_I_E_G ( unsigned tid,
 static void put_emwarn ( IRExpr* e /* :: Ity_I32 */ )
 {
    vassert(e->type(irsb->tyenv) == Ity_I32);
-   stmt( IRStmt_Put( OFFB_EMWARN, e ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_EMWARN), e ) );
 }
 
 /* --- Produce an IRExpr* denoting a 64-bit QNaN. --- */
@@ -4388,7 +4387,7 @@ static IRExpr* get_ftop ( unsigned tid )
 static void put_ftop ( IRExpr* e )
 {
    vassert(e->type(irsb->tyenv) == Ity_I32);
-   stmt( IRStmt_Put( OFFB_FTOP, e ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_FTOP), e ) );
 }
 
 /* --------- Get/put the C3210 bits. --------- */
@@ -4401,7 +4400,7 @@ static IRExpr*  /* :: Ity_I64 */ get_C3210 ( unsigned tid )
 static void put_C3210 ( IRExpr* e  /* :: Ity_I64 */ )
 {
    vassert(e->type(irsb->tyenv) == Ity_I64);
-   stmt( IRStmt_Put( OFFB_FC3210, e ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_FC3210), e ) );
 }
 
 /* --------- Get/put the FPU rounding mode. --------- */
@@ -4413,7 +4412,7 @@ static IRExpr* /* :: Ity_I32 */ get_fpround ( unsigned tid )
 static void put_fpround ( IRExpr* /* :: Ity_I32 */ e )
 {
    vassert(e->type(irsb->tyenv) == Ity_I32);
-   stmt( IRStmt_Put( OFFB_FPROUND, unop(Iop_32Uto64,e) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_FPROUND), unop(Iop_32Uto64,e) ) );
 }
 
 
@@ -4665,10 +4664,10 @@ static void fp_do_ucomi_ST0_STi ( unsigned tid, UInt i, Bool pop_after )
    */
    /* It's also fishy in that it is used both for COMIP and
       UCOMIP, and they aren't the same (although similar). */
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-   stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( 
-            OFFB_CC_DEP1,
+            mk_reg(OFFB_CC_DEP1),
             binop( Iop_And64,
                    unop( Iop_32Uto64,
                          binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, i))),
@@ -6313,7 +6312,7 @@ static void putMMXReg ( UInt archreg, IRExpr* e )
 {
    vassert(archreg < 8);
    vassert(e->type(irsb->tyenv) == Ity_I64);
-   stmt( IRStmt_Put( OFFB_FPREGS + 8 * archreg, e ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_FPREGS + 8 * archreg), e ) );
 }
 
 
@@ -7342,10 +7341,10 @@ ULong dis_bt_G_E ( unsigned tid,
   
    /* Side effect done; now get selected bit into Carry flag */
    /* Flags: C=selected bit, O,S,Z,A,P undefined, so are set to zero. */
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-   stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( 
-            OFFB_CC_DEP1,
+            mk_reg(OFFB_CC_DEP1),
             binop(Iop_And64,
                   binop(Iop_Shr64, 
                         unop(Iop_8Uto64, mkexpr(t_fetched, tid)),
@@ -7354,7 +7353,7 @@ ULong dis_bt_G_E ( unsigned tid,
        );
    /* Set NDEP even though it isn't used.  This makes redundant-PUT
       elimination of previous stores to this field work better. */
-   stmt( IRStmt_Put( OFFB_CC_NDEP, mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
 
    /* Move reg operand from stack back to reg */
    if (epartIsReg(modrm)) {
@@ -7423,20 +7422,20 @@ ULong dis_bs_E_G ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi
 
    /* Flags: Z is 1 iff source value is zero.  All others 
       are undefined -- we force them to zero. */
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-   stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( 
-            OFFB_CC_DEP1,
+            mk_reg(OFFB_CC_DEP1),
             IRExpr_Mux0X( mkexpr(src8, tid),
                           /* src==0 */
                           mkU64(AMD64G_CC_MASK_Z),
                           /* src!=0 */
                           mkU64(0)
                         )
-       ));
+	    ));
    /* Set NDEP even though it isn't used.  This makes redundant-PUT
       elimination of previous stores to this field work better. */
-   stmt( IRStmt_Put( OFFB_CC_NDEP, mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
 
    /* Result: iff source value is zero, we can't use
       Iop_Clz64/Iop_Ctz64 as they have no defined result in that case.
@@ -7532,10 +7531,10 @@ void codegen_SAHF ( unsigned tid )
                        |AMD64G_CC_MASK_C|AMD64G_CC_MASK_P;
    IRTemp oldflags   = newTemp(Ity_I64);
    assign( oldflags, mk_amd64g_calculate_rflags_all(tid) );
-   stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-   stmt( IRStmt_Put( OFFB_CC_NDEP, mkU64(0) ));
-   stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
-   stmt( IRStmt_Put( OFFB_CC_DEP1,
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1),
          binop(Iop_Or64,
                binop(Iop_And64, mkexpr(oldflags, tid), mkU64(AMD64G_CC_MASK_O)),
                binop(Iop_And64, 
@@ -8476,7 +8475,7 @@ static IRExpr* /* :: Ity_I32 */ get_sse_roundingmode ( unsigned tid )
 static void put_sse_roundingmode ( IRExpr* sseround )
 {
    vassert(sseround->type(irsb->tyenv) == Ity_I32);
-   stmt( IRStmt_Put( OFFB_SSEROUND, 
+   stmt( IRStmt_Put( mk_reg(OFFB_SSEROUND), 
                      unop(Iop_32Uto64,sseround) ) );
 }
 
@@ -8928,7 +8927,7 @@ DisResult disInstr_AMD64_WRK (
 
    /* We may be asked to update the guest RIP before going further. */
    if (put_IP)
-      stmt( IRStmt_Put( OFFB_RIP, mkU64(guest_RIP_curr_instr.rip)) );
+      stmt( IRStmt_Put( mk_reg(OFFB_RIP), mkU64(guest_RIP_curr_instr.rip)) );
 
    /* Spot "Special" instructions (see comment at top of file). */
    {
@@ -9223,10 +9222,10 @@ DisResult disInstr_AMD64_WRK (
       assign( argL, getXMMRegLane32F(tid,  gregOfRexRM(pfx,modrm), 
                                       0/*lowest lane*/ ) );
 
-      stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
       stmt( IRStmt_Put( 
-               OFFB_CC_DEP1,
+               mk_reg(OFFB_CC_DEP1),
                binop( Iop_And64,
                       unop( Iop_32Uto64,
                             binop(Iop_CmpF64, 
@@ -10363,10 +10362,10 @@ DisResult disInstr_AMD64_WRK (
       assign( argL, getXMMRegLane64F(tid,  gregOfRexRM(pfx,modrm), 
                                       0/*lowest lane*/ ) );
 
-      stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
       stmt( IRStmt_Put( 
-               OFFB_CC_DEP1,
+               mk_reg(OFFB_CC_DEP1),
                binop( Iop_And64,
                       unop( Iop_32Uto64, 
                             binop(Iop_CmpF64, mkexpr(argL, tid), mkexpr(argR, tid)) ),
@@ -12644,12 +12643,12 @@ DisResult disInstr_AMD64_WRK (
 
       /* Round addr down to the start of the containing block. */
       stmt( IRStmt_Put(
-               OFFB_TISTART,
+               mk_reg(OFFB_TISTART),
                binop( Iop_And64, 
                       mkexpr(addr, tid), 
                       mkU64( ~(lineszB-1) ))) );
 
-      stmt( IRStmt_Put(OFFB_TILEN, mkU64(lineszB) ) );
+      stmt( IRStmt_Put(mk_reg(OFFB_TILEN), mkU64(lineszB) ) );
 
       irsb->jumpkind = Ijk_TInval;
       irsb->next     = mkU64(guest_RIP_bbstart+delta);
@@ -14602,9 +14601,9 @@ DisResult disInstr_AMD64_WRK (
       putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t2, tid), mkU64(sz)));
       /* t1 is the flag word.  Mask out everything except OSZACP and 
          set the flags thunk to AMD64G_CC_OP_COPY. */
-      stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP1, 
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), 
                         binop(Iop_And64,
                               mkexpr(t1, tid), 
                               mkU64( AMD64G_CC_MASK_C | AMD64G_CC_MASK_P 
@@ -14617,7 +14616,7 @@ DisResult disInstr_AMD64_WRK (
       /* Also need to set the D flag, which is held in bit 10 of t1.
          If zero, put 1 in OFFB_DFLAG, else -1 in OFFB_DFLAG. */
       stmt( IRStmt_Put( 
-               OFFB_DFLAG,
+               mk_reg(OFFB_DFLAG),
                IRExpr_Mux0X( 
                   unop(Iop_32to8,
                   unop(Iop_64to32,
@@ -14630,7 +14629,7 @@ DisResult disInstr_AMD64_WRK (
 
       /* And set the ID flag */
       stmt( IRStmt_Put( 
-               OFFB_IDFLAG,
+               mk_reg(OFFB_IDFLAG),
                IRExpr_Mux0X( 
                   unop(Iop_32to8,
                   unop(Iop_64to32,
@@ -14884,13 +14883,13 @@ DisResult disInstr_AMD64_WRK (
 
    case 0xFC: /* CLD */
       if (haveF2orF3(pfx)) goto decode_failure;
-      stmt( IRStmt_Put( OFFB_DFLAG, mkU64(1)) );
+      stmt( IRStmt_Put( mk_reg(OFFB_DFLAG), mkU64(1)) );
       DIP("cld\n");
       break;
 
    case 0xFD: /* STD */
       if (haveF2orF3(pfx)) goto decode_failure;
-      stmt( IRStmt_Put( OFFB_DFLAG, mkU64(-1ULL)) );
+      stmt( IRStmt_Put( mk_reg(OFFB_DFLAG), mkU64(-1ULL)) );
       DIP("std\n");
       break;
 
@@ -14919,12 +14918,12 @@ DisResult disInstr_AMD64_WRK (
          default: 
             vpanic("disInstr(x64)(clc/stc/cmc)");
       }
-      stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
-      stmt( IRStmt_Put( OFFB_CC_DEP1, mkexpr(t1, tid) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(t1, tid) ));
       /* Set NDEP even though it isn't used.  This makes redundant-PUT
          elimination of previous stores to this field work better. */
-      stmt( IRStmt_Put( OFFB_CC_NDEP, mkU64(0) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
       break;
 
 //..    /* REPNE prefix insn */
@@ -15698,13 +15697,13 @@ DisResult disInstr_AMD64_WRK (
                               unop(Iop_1Uto64, mkexpr(success, tid)), mkU64(1)), 
                         mkU8(AMD64G_CC_SHIFT_Z)) ));
 
-         stmt( IRStmt_Put( OFFB_CC_OP,   mkU64(AMD64G_CC_OP_COPY) ));
-         stmt( IRStmt_Put( OFFB_CC_DEP1, mkexpr(flags_new, tid) ));
-         stmt( IRStmt_Put( OFFB_CC_DEP2, mkU64(0) ));
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(flags_new, tid) ));
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
          /* Set NDEP even though it isn't used.  This makes
             redundant-PUT elimination of previous stores to this field
             work better. */
-         stmt( IRStmt_Put( OFFB_CC_NDEP, mkU64(0) ));
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
 
          /* Sheesh.  Aren't you glad it was me and not you that had to
 	    write and validate all this grunge? */
@@ -16133,7 +16132,7 @@ DisResult disInstr_AMD64_WRK (
       RIP should be up-to-date since it made so at the start of each
       insn, but nevertheless be paranoid and update it again right
       now. */
-   stmt( IRStmt_Put( OFFB_RIP, mkU64(guest_RIP_curr_instr.rip) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_RIP), mkU64(guest_RIP_curr_instr.rip) ) );
    jmp_lit(Ijk_NoDecode, guest_RIP_curr_instr.rip);
    dres.whatNext = DisResult::Dis_StopHere;
    dres.len      = 0;

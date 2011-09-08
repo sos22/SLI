@@ -41,7 +41,7 @@ public:
 		LivenessSet() : mask(0) {}
 
 		LivenessSet use(Int offset);
-		LivenessSet define(Int offset);
+		LivenessSet define(threadAndRegister offset);
 
 		void operator |=(const LivenessSet x) { mask |= x.mask; clearName(); }
 		bool operator !=(const LivenessSet x) { return mask != x.mask; }
