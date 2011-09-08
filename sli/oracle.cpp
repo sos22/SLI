@@ -735,7 +735,7 @@ irexprAliasingClass(IRExpr *expr,
 		    IRTypeEnv *tyenv,
 		    const Oracle::RegisterAliasingConfiguration &config,
 		    bool freeVariablesCannotAccessStack,
-		    std::map<IRTemp, Oracle::PointerAliasingSet> *temps)
+		    std::map<threadAndRegister, Oracle::PointerAliasingSet> *temps)
 {
 	if (tyenv && expr->type(tyenv) != Ity_I64)
 		/* Not a 64 bit value -> not a pointer */
@@ -747,8 +747,7 @@ irexprAliasingClass(IRExpr *expr,
 		if (e->reg.isTemp()) {
 			if (!temps)
 				return Oracle::PointerAliasingSet::anything;
-			std::map<IRTemp, Oracle::PointerAliasingSet>::iterator it;
-			it = temps->find(e->reg.asTemp());
+			auto it = temps->find(e->reg);
 			assert(it != temps->end());
 			return it->second;
 		} else if (e->reg.asReg() < Oracle::NR_REGS * 8)
@@ -1731,10 +1730,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 			    ((IRStmtCAS *)stmt)->details->oldLo == OFFSET_amd64_RBP)
 				goto impossible;
 		} else if (stmt->tag == Ist_Dirty) {
-			threadAndRegister tmp(
-				threadAndRegister::temp(
-					-1,
-					((IRStmtDirty *)stmt)->details->tmp));
+			threadAndRegister tmp(((IRStmtDirty *)stmt)->details->tmp);
 			IRType t = Ity_I1;
 			if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 				    "helper_load_128"))
@@ -1907,7 +1903,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 						      Oracle *oracle)
 {
 	RegisterAliasingConfiguration config(aliasConfigOnEntryToInstruction(rip));
-	std::map<IRTemp, PointerAliasingSet> temporaryAliases;
+	std::map<threadAndRegister, PointerAliasingSet> temporaryAliases;
 	IRStmt *st;
 
 	int nr_statements;
@@ -1946,12 +1942,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 				}
 			} else {
 				temporaryAliases.insert(
-					std::pair<IRTemp, PointerAliasingSet>(p->target.asTemp(),
-									      irexprAliasingClass(p->data,
-												  tyenv,
-												  config,
-												  false,
-												  &temporaryAliases)));
+					std::pair<threadAndRegister, PointerAliasingSet>(p->target,
+											 irexprAliasingClass(p->data,
+													     tyenv,
+													     config,
+													     false,
+													     &temporaryAliases)));
 			}
 			break;
 		}
@@ -1977,21 +1973,19 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			break;
 		case Ist_CAS:
 			temporaryAliases.insert(
-				std::pair<IRTemp, PointerAliasingSet>(
-					((IRStmtCAS *)st)->details->oldLo,
+				std::pair<threadAndRegister, PointerAliasingSet>(
+					threadAndRegister::temp(-1, ((IRStmtCAS *)st)->details->oldLo),
 					PointerAliasingSet::anything));
 			break;
 		case Ist_Dirty:
-			if (((IRStmtDirty *)st)->details->tmp != IRTemp_INVALID) {
+			if (((IRStmtDirty *)st)->details->tmp.isValid()) {
 				PointerAliasingSet res =
-					(tyenv->types[((IRStmtDirty *)st)->details->tmp] == Ity_I64) ?
-					((strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64") ||
-					  config.stackHasLeaked) ?
+					(strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64") ||
+					 config.stackHasLeaked) ?
 					 PointerAliasingSet::anything :
-					 PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer) :
-					PointerAliasingSet::notAPointer;
+					PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 				temporaryAliases.insert(
-					std::pair<IRTemp, PointerAliasingSet>(
+					std::pair<threadAndRegister, PointerAliasingSet>(
 						((IRStmtDirty *)st)->details->tmp,
 						res));
 			}

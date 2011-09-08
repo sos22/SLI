@@ -19,7 +19,11 @@ ThreadEvent *RdtscEvent::replay(LogRecord *lr, MachineState **ms,
 	if (!lrr)
 		throw ReplayFailedException("wanted a rdtsc, got %s",
 					    lr->name());
-        (*ms)->findThread(this->tid)->temporaries[tmp].lo = lrr->tsc;
+	Thread *thr = (*ms)->findThread(this->tid);
+	if (tmp.isTemp())
+		thr->temporaries[tmp.asTemp()].lo = lrr->tsc;
+	else
+		thr->regs.set_reg(tmp.asReg() / 8, lrr->tsc);
 
 	return NULL;
 }
@@ -90,7 +94,10 @@ ThreadEvent *LoadEvent::replay(LogRecord *lr, MachineState **ms,
 		    addr < 0xFFFFFFFFFF600000)
 			printf("WARNING: memory mismatch on load from %lx (%s != %s)",
 			       addr, buf.name(), lrl->value.name());
-		thr->temporaries[tmp] = lrl->value;
+		if (tmp.isTemp())
+			thr->temporaries[tmp.asTemp()] = lrl->value;
+		else
+			thr->regs.set_reg(tmp.asReg() / 8, lrl->value.lo);
 	} else {
 		checkSegv(lr, addr);
 	}

@@ -3216,7 +3216,7 @@ backtrack_crash_machine_node_for_statements(
 				    12))
 				abort(); /* don't know how to deal with these */
 			node = node->rewriteTemporary(
-				((IRStmtDirty *)stmt)->details->tmp,
+				((IRStmtDirty *)stmt)->details->tmp.asTemp(),
 				CrashExpressionLoad::get(
 					when,
 					CrashExpression::get(

@@ -54,7 +54,36 @@
 #include "libvex_print.hpp"
 #include "libvex_guest_offsets.h"
 
-class threadAndRegister {
+class Named {
+	mutable char *_name;
+protected:
+	virtual char *mkName(void) const = 0;
+public:
+	void clearName() const { free(_name); _name = NULL; }
+	Named &operator=(const Named &src) {
+		clearName();
+		if (src._name)
+			_name = strdup(src._name);
+		return *this;
+	}
+	Named() : _name(NULL) {}
+	Named(const Named &b) {
+		if (b._name)
+			_name = strdup(b._name);
+		else
+			_name = NULL;
+	}
+	const char *name() const {
+		if (!this)
+			return NULL;
+		if (!_name)
+			_name = mkName();
+		return _name;
+	}
+	~Named() { clearName(); }
+};
+
+class threadAndRegister : public Named {
 	std::pair<unsigned, int> content;
 	bool valid;
 	threadAndRegister(unsigned tid, int reg)
@@ -62,7 +91,17 @@ class threadAndRegister {
 	{}
 	threadAndRegister()
 		: content(-10000, -10000), valid(false)
-	{}	
+	{}
+	char *mkName(void) const {
+		if (!valid)
+			return strdup("<invalid>");
+		char *res;
+		if (isTemp())
+			asprintf(&res, "tmp%d:%d", tid(), asTemp());
+		else
+			asprintf(&res, "reg%d:%d", tid(), asReg());
+		return res;
+	}
 public:
 	static threadAndRegister reg(unsigned tid, int reg)
 	{
@@ -95,6 +134,12 @@ public:
 	}
 	bool isReg() const {
 		return !isTemp();
+	}
+	bool isValid() const {
+		return valid;
+	}
+	bool isInvalid() const {
+		return !isValid();
 	}
 	Int asReg() const {
 		assert(!isTemp());
@@ -1715,7 +1760,7 @@ struct _IRDirty : public GarbageCollected<_IRDirty, &ir_heap> {
       IRCallee* cee;    /* where to call */
       IRExpr*   guard;  /* :: Ity_Bit.  Controls whether call happens */
       IRExpr**  args;   /* arg list, ends in NULL */
-      IRTemp    tmp;    /* to assign result to, or IRTemp_INVALID if none */
+      threadAndRegister    tmp;    /* to assign result to, or IRTemp_INVALID if none */
 
       /* Mem effects; we allow only one R/W/M region to be stated */
       IREffect  mFx;    /* indicates memory effects, if any */
@@ -1730,6 +1775,9 @@ struct _IRDirty : public GarbageCollected<_IRDirty, &ir_heap> {
          Int      offset;
          Int      size;
       } fxState[VEX_N_FXSTATE];
+      _IRDirty(threadAndRegister _tmp)
+	      : tmp(_tmp)
+      {}
       void visit(HeapVisitor &hv) {
 	 hv(cee);
 	 hv(guard);
@@ -1759,7 +1807,7 @@ IRDirty* unsafeIRDirty_0_N ( Int regparms, const char* name, void* addr,
 /* Similarly, make a zero-annotation dirty call which returns a value,
    and assign that to the given temp. */
 extern 
-IRDirty* unsafeIRDirty_1_N ( IRTemp dst, 
+IRDirty* unsafeIRDirty_1_N ( threadAndRegister dst, 
                              Int regparms, const char* name, void* addr, 
                              IRExpr** args );
 

@@ -1348,8 +1348,8 @@ void ppIREffect ( IREffect fx, FILE* f )
 void ppIRDirty ( IRDirty* d, FILE *f )
 {
    Int i;
-   if (d->tmp != IRTemp_INVALID) {
-      ppIRTemp(d->tmp, f);
+   if (d->tmp.isValid()) {
+      d->tmp.prettyPrint(f);
       fprintf(f, " = ");
    }
    fprintf(f, "DIRTY ");
@@ -1830,11 +1830,10 @@ IRExpr** mkIRExprVec_7 ( IRExpr* arg1, IRExpr* arg2, IRExpr* arg3,
 /* Constructors -- IRDirty */
 
 IRDirty* emptyIRDirty ( void ) {
-   IRDirty* d = new IRDirty();
+   IRDirty* d = new IRDirty(threadAndRegister::invalid());
    d->cee      = NULL;
    d->guard    = NULL;
    d->args     = NULL;
-   d->tmp      = IRTemp_INVALID;
    d->mFx      = Ifx_None;
    d->mAddr    = NULL;
    d->mSize    = 0;
@@ -2526,7 +2525,7 @@ IRDirty* unsafeIRDirty_0_N ( Int regparms, const char* name, void* addr,
    return d;
 }
 
-IRDirty* unsafeIRDirty_1_N ( IRTemp dst, 
+IRDirty* unsafeIRDirty_1_N ( threadAndRegister dst,
                              Int regparms, const char* name, void* addr, 
                              IRExpr** args ) 
 {

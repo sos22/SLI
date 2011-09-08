@@ -4892,7 +4892,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                                  mkIRExprVec_1( mkexpr(addr, tid) )
                               );
                d->needsBBP = True;
-               d->tmp      = w64;
+               d->tmp      = threadAndRegister::temp(guest_RIP_curr_instr.thread, w64);
                /* declare we're reading memory */
                d->mFx   = Ifx_Read;
                d->mAddr = mkexpr(addr, tid);
@@ -5524,12 +5524,12 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                IRExpr** args = mkIRExprVec_1 ( mkexpr(addr, tid) );
 
                IRDirty* d = unsafeIRDirty_1_N ( 
-                               val, 
-                               0/*regparms*/, 
-                               "amd64g_dirtyhelper_loadF80le", 
-                               (void *)amd64g_dirtyhelper_loadF80le, 
-                               args 
-                            );
+		       threadAndRegister::temp(guest_RIP_curr_instr.thread, val), 
+		       0/*regparms*/, 
+		       "amd64g_dirtyhelper_loadF80le", 
+		       (void *)amd64g_dirtyhelper_loadF80le, 
+		       args 
+		  );
                /* declare that we're reading memory */
                d->mFx   = Ifx_Read;
                d->mAddr = mkexpr(addr, tid);
@@ -15196,7 +15196,7 @@ DisResult disInstr_AMD64_WRK (
       ty = szToITy(sz);
       t2 = newTemp(Ity_I64);
       d = unsafeIRDirty_1_N( 
-             t2,
+	     threadAndRegister::temp(guest_RIP_curr_instr.thread, t2),
              0/*regparms*/, 
              "amd64g_dirtyhelper_IN", 
              (void *)amd64g_dirtyhelper_IN,
@@ -15877,12 +15877,12 @@ DisResult disInstr_AMD64_WRK (
          IRTemp   val  = newTemp(Ity_I64);
          IRExpr** args = mkIRExprVec_0();
          IRDirty* d    = unsafeIRDirty_1_N ( 
-                            val, 
-                            0/*regparms*/, 
-                            "amd64g_dirtyhelper_RDTSC", 
-                            (void *)amd64g_dirtyhelper_RDTSC, 
-                            args 
-                         );
+		 threadAndRegister::temp(guest_RIP_curr_instr.thread, val), 
+		 0/*regparms*/, 
+		 "amd64g_dirtyhelper_RDTSC", 
+		 (void *)amd64g_dirtyhelper_RDTSC, 
+		 args 
+		 );
          if (have66orF2orF3(pfx)) goto decode_failure;
          /* execute the dirty call, dumping the result in val. */
          stmt( IRStmt_Dirty(d) );

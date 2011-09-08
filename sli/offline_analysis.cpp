@@ -475,7 +475,7 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 			    "helper_load_32")) {
 			StateMachineSideEffectLoad *smsel =
 				new StateMachineSideEffectLoad(
-					threadAndRegister::temp(site.thread, ((IRStmtDirty *)stmt)->details->tmp),
+					((IRStmtDirty *)stmt)->details->tmp,
 					((IRStmtDirty *)stmt)->details->args[0],
 					site);
 			sm->prependSideEffect(smsel);
@@ -3798,7 +3798,7 @@ CFGtoCrashReason(unsigned tid,
 				    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					    "helper_load_32")) {
 					se = new StateMachineSideEffectLoad(
-						threadAndRegister::temp(rip.thread, ((IRStmtDirty *)stmt)->details->tmp),
+						((IRStmtDirty *)stmt)->details->tmp,
 						((IRStmtDirty *)stmt)->details->args[0],
 						rip);
 				}  else {

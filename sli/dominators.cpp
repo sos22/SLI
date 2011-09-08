@@ -52,7 +52,10 @@ handle_dirty_call(struct representative_state *rs,
 			}
 		}
 
-		temporaries[details->tmp].lo = res;
+		if (details->tmp.isTemp())
+			temporaries[details->tmp.asTemp()].lo = res;
+		else
+			rs->regs.set_reg(details->tmp.asReg() / 8, res);
 	} else {
 		fail("handle_dirty_call() of bad function %s", details->cee->name);
 	}

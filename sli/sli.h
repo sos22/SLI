@@ -41,35 +41,6 @@ public:
 	void unsuspend() {}
 };
 
-class Named {
-	mutable char *_name;
-protected:
-	virtual char *mkName(void) const = 0;
-public:
-	void clearName() const { free(_name); _name = NULL; }
-	Named &operator=(const Named &src) {
-		clearName();
-		if (src._name)
-			_name = strdup(src._name);
-		return *this;
-	}
-	Named() : _name(NULL) {}
-	Named(const Named &b) {
-		if (b._name)
-			_name = strdup(b._name);
-		else
-			_name = NULL;
-	}
-	const char *name() const {
-		if (!this)
-			return NULL;
-		if (!_name)
-			_name = mkName();
-		return _name;
-	}
-	~Named() { clearName(); }
-};
-
 class ThreadId {
 	unsigned tid;
 public:
@@ -196,14 +167,14 @@ class Thread : public GarbageCollected<Thread> {
 				       const LogReaderPtr &ptr,
 				       unsigned long rip,
 				       GarbageCollectionToken t);
-	ThreadEvent *do_load(IRTemp tmp,
+	ThreadEvent *do_load(threadAndRegister tmp,
 			     unsigned long addr,
 			     unsigned size,
 			     MachineState *ms,
 			     EventRecorder *er,
 			     ReplayEngineTimer &ret);
 
-	void amd64g_dirtyhelper_loadF80le(MachineState *, IRTemp tmp, unsigned long addr);
+	void amd64g_dirtyhelper_loadF80le(MachineState *, threadAndRegister tmp, unsigned long addr);
 	void amd64g_dirtyhelper_storeF80le(MachineState *, unsigned long addr, unsigned long _f64);
 
 	void redirectGuest(unsigned long rip);
@@ -714,25 +685,25 @@ public:
 };
 
 class RdtscEvent : public ThreadEvent {
-	IRTemp tmp;
-	RdtscEvent(ThreadId tid, IRTemp _tmp) : ThreadEvent(tid), tmp(_tmp) {};
+	threadAndRegister tmp;
+	RdtscEvent(ThreadId tid, threadAndRegister _tmp) : ThreadEvent(tid), tmp(_tmp) {};
 protected:
-	virtual char *mkName() const { return my_asprintf("rdtsc(%d)", tmp); }
+	virtual char *mkName() const { return my_asprintf("rdtsc(%s)", tmp.name()); }
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 				 bool &consumedRecord, LogReaderPtr);
-	static ThreadEvent *get(ThreadId tid, IRTemp temp)
+	static ThreadEvent *get(ThreadId tid, threadAndRegister temp)
 	{ return new RdtscEvent(tid, temp); }
 	NAMED_CLASS
 };
 
 class LoadEvent : public ThreadEvent {
-	IRTemp tmp;
+	threadAndRegister tmp;
 public:
 	unsigned long addr;
 private:
 	unsigned size;
-	LoadEvent(ThreadId _tid, IRTemp _tmp, unsigned long _addr, unsigned _size) :
+	LoadEvent(ThreadId _tid, threadAndRegister _tmp, unsigned long _addr, unsigned _size) :
 		ThreadEvent(_tid),
 		tmp(_tmp),
 		addr(_addr),
@@ -740,11 +711,11 @@ private:
 	{
 	}
 protected:
-	virtual char *mkName() const { return my_asprintf("load(%lx, %d, %d)", addr, tmp, size); }
+	virtual char *mkName() const { return my_asprintf("load(%lx, %s, %d)", addr, tmp.name(), size); }
 public:
 	ThreadEvent *replay(LogRecord *lr, MachineState **ms,
-				 bool &consumedRecord, LogReaderPtr);
-	static ThreadEvent *get(ThreadId _tid, IRTemp _tmp, unsigned long _addr, unsigned _size)
+			    bool &consumedRecord, LogReaderPtr);
+	static ThreadEvent *get(ThreadId _tid, threadAndRegister _tmp, unsigned long _addr, unsigned _size)
 	{
 		return new LoadEvent(_tid, _tmp, _addr, _size);
 	}

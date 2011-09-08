@@ -144,7 +144,7 @@ amd64g_dirtyhelper_CPUID_sse3_and_cx16(RegisterSet *regs)
 }
 
 void
-Thread::amd64g_dirtyhelper_loadF80le(MachineState *ms, IRTemp tmp, unsigned long addr)
+Thread::amd64g_dirtyhelper_loadF80le(MachineState *ms, threadAndRegister tmp, unsigned long addr)
 {
 	unsigned long buf[10];
 	ms->addressSpace->readMemory(addr, 10, buf, false, this, NULL);
@@ -153,8 +153,12 @@ Thread::amd64g_dirtyhelper_loadF80le(MachineState *ms, IRTemp tmp, unsigned long
 		buf2[x] = buf[x];
 	ULong f64;
 	convert_f80le_to_f64le(buf2, (UChar*)&f64);
-	temporaries[tmp].lo = (f64);
-	temporaries[tmp].hi = 0ul;
+	if (tmp.isTemp()) {
+		temporaries[tmp.asTemp()].lo = f64;
+		temporaries[tmp.asTemp()].hi = 0ul;
+	} else {
+		write_reg(&regs, tmp.asReg(), f64);
+	}
 }
 
 void
@@ -177,7 +181,7 @@ Thread::amd64g_dirtyhelper_storeF80le(MachineState *ms, unsigned long addr, unsi
 }
 
 ThreadEvent *
-Thread::do_load(IRTemp tmp, unsigned long addr, unsigned size, MachineState *ms,
+Thread::do_load(threadAndRegister tmp, unsigned long addr, unsigned size, MachineState *ms,
 		EventRecorder *er, ReplayEngineTimer &ret)
 {
 	if (ms->addressSpace->isReadable(addr, size, this)) {

@@ -131,7 +131,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 				     IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, tid),
 				     IRExpr_Get(OFFSET_amd64_RIP, Ity_I64, tid));
 		dest = newIRTemp(sb->tyenv, e->ty);
-		f = unsafeIRDirty_1_N(dest,
+		f = unsafeIRDirty_1_N(threadAndRegister::temp(tid, dest),
 				      0,
 				      helper_name,
 				      helper,
