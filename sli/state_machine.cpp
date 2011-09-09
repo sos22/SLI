@@ -10,7 +10,7 @@
 
 #include "libvex_parse.h"
 
-static void findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &, const AllowableOptimisations &);
+static void findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
@@ -149,7 +149,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterfa
 }
 
 void
-StateMachineBifurcate::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+StateMachineBifurcate::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
 {
 	trueTarget->findUsedRegisters(s, opt);
 	falseTarget->findUsedRegisters(s, opt);
@@ -181,7 +181,7 @@ StateMachineSideEffectStore::updateLoadedAddresses(std::set<IRExpr *> &l, const 
 	}
 }
 void
-StateMachineSideEffectStore::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+StateMachineSideEffectStore::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
 {
 	::findUsedRegisters(addr, s, opt);
 	::findUsedRegisters(data, s, opt);
@@ -205,7 +205,7 @@ StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, OracleIn
 	return this;
 }
 void
-StateMachineSideEffectLoad::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+StateMachineSideEffectLoad::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
 {
 	s.erase(target);
 	::findUsedRegisters(addr, s, opt);
@@ -222,7 +222,7 @@ StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, OracleIn
 	return this;
 }
 void
-StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
 {
 	s.erase(target);
 	::findUsedRegisters(value, s, opt);
@@ -240,7 +240,7 @@ StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, O
 	return this;
 }
 void
-StateMachineSideEffectAssertFalse::findUsedRegisters(std::set<threadAndRegister> &s, const AllowableOptimisations &opt)
+StateMachineSideEffectAssertFalse::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
 {
 	::findUsedRegisters(value, s, opt);
 }
@@ -296,12 +296,12 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 }
 
 static void
-findUsedRegisters(IRExpr *e, std::set<threadAndRegister> &out, const AllowableOptimisations &opt)
+findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::fullCompare> &out, const AllowableOptimisations &opt)
 {
 	class _ : public IRExprTransformer {
 	public:
-		std::set<threadAndRegister> &out;
-		_(std::set<threadAndRegister> &_out)
+		std::set<threadAndRegister, threadAndRegister::fullCompare> &out;
+		_(std::set<threadAndRegister, threadAndRegister::fullCompare> &_out)
 			: out(_out)
 		{}
 		IRExpr *transformIex(IRExprGet *e) {
@@ -437,7 +437,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse1);
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse2);
-		return smsel1->target == smsel2->target &&
+		return threadAndRegister::fullEq(smsel1->target, smsel2->target) &&
 			definitelyEqual(smsel1->addr, smsel2->addr, opt);
 	}
 	case StateMachineSideEffect::Copy: {
@@ -445,7 +445,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse1);
 		StateMachineSideEffectCopy *smsec2 =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse2);
-		return smsec1->target == smsec2->target &&
+		return threadAndRegister::fullEq(smsec1->target, smsec2->target) &&
 			definitelyEqual(smsec1->value, smsec2->value, opt);
 	}
 	case StateMachineSideEffect::Unreached:

@@ -128,7 +128,9 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			    ((IRExpr ## t *)e)->n)			\
 				continue
 		case Iex_Get:
-			do_field(Get, reg);
+			if (!threadAndRegister::fullEq(((IRExprGet *)other)->reg,
+						       ((IRExprGet *)e)->reg))
+				continue;
 			do_field(Get, ty);
 			break;
 		case Iex_GetI:
@@ -307,7 +309,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 			     it++) {
 				StateMachineSideEffectLoad *o = *it;
 				if (o->addr == load->addr &&
-				    o->target == load->target &&
+				    threadAndRegister::fullEq(o->target, load->target) &&
 				    o->rip == load->rip) {
 					t.sideEffects[s] = o;
 					return o;
@@ -324,7 +326,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		copy->value = internIRExpr(copy->value, t);
 		for (auto it = t.copies.begin(); it != t.copies.end(); it++) {
 			StateMachineSideEffectCopy *o = *it;
-			if (o->target == copy->target &&
+			if (threadAndRegister::fullEq(o->target, copy->target) &&
 			    o->value == copy->value) {
 				t.sideEffects[s] = o;
 				return o;

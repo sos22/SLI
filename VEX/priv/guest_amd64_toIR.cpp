@@ -2660,7 +2660,7 @@ ULong dis_op2_E_G ( unsigned tid,
          generates a spurious value check failure due to the bogus
          dependency. */
       if ((op8 == Iop_Xor8 || (op8 == Iop_Sub8 && addSubCarry))
-          && offsetIRegG(size,pfx,rm) == offsetIRegE(size,pfx,rm)) {
+          && threadAndRegister::fullEq(offsetIRegG(size,pfx,rm), offsetIRegE(size,pfx,rm))) {
 	 putIRegG(size,pfx,rm, mkU(ty,0));
       }
 
@@ -2776,7 +2776,7 @@ ULong dis_op2_G_E ( unsigned tid,
          generates a spurious value check failure due to the bogus
          dependency.  Ditto SBB reg,reg. */
       if ((op8 == Iop_Xor8 || (op8 == Iop_Sub8 && addSubCarry))
-          && offsetIRegG(size,pfx,rm) == offsetIRegE(size,pfx,rm)) {
+          && threadAndRegister::fullEq(offsetIRegG(size,pfx,rm), offsetIRegE(size,pfx,rm))) {
          putIRegE(size,pfx,rm, mkU(ty,0));
       }
 

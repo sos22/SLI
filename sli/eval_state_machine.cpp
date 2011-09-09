@@ -11,7 +11,7 @@
 /* All of the state needed to evaluate a single pure IRExpr. */
 class threadState {
 public:
-	std::map<threadAndRegister, IRExpr *> registers;
+	std::map<threadAndRegister, IRExpr *, threadAndRegister::partialCompare> registers;
 };
 
 typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;

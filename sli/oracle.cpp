@@ -735,7 +735,7 @@ irexprAliasingClass(IRExpr *expr,
 		    IRTypeEnv *tyenv,
 		    const Oracle::RegisterAliasingConfiguration &config,
 		    bool freeVariablesCannotAccessStack,
-		    std::map<threadAndRegister, Oracle::PointerAliasingSet> *temps)
+		    std::map<threadAndRegister, Oracle::PointerAliasingSet, threadAndRegister::fullCompare> *temps)
 {
 	if (tyenv && expr->type(tyenv) != Ity_I64)
 		/* Not a 64 bit value -> not a pointer */
@@ -1646,7 +1646,7 @@ class RewriteRegisterExpr : public IRExprTransformer {
 	IRExpr *to;
 protected:
 	IRExpr *transformIex(IRExprGet *what) {
-		if (what->reg == idx)
+		if (threadAndRegister::fullEq(what->reg, idx))
 			return to;
 		else
 			return NULL;
@@ -1904,7 +1904,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 						      Oracle *oracle)
 {
 	RegisterAliasingConfiguration config(aliasConfigOnEntryToInstruction(rip));
-	std::map<threadAndRegister, PointerAliasingSet> temporaryAliases;
+	std::map<threadAndRegister, PointerAliasingSet, threadAndRegister::fullCompare> temporaryAliases;
 	IRStmt *st;
 
 	int nr_statements;

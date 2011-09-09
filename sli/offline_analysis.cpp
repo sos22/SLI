@@ -937,7 +937,7 @@ class avail_t {
 public:
 	std::set<StateMachineSideEffect *> sideEffects;
 	std::set<IRExpr *> assertFalse;
-	std::map<threadAndRegister, IRExpr *> registers;
+	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> registers;
 
 	void clear() { sideEffects.clear(); assertFalse.clear(); registers.clear(); }
 	void makeFalse(IRExpr *expr);
@@ -1045,7 +1045,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		threadAndRegister reg;
 		StateMachineSideEffect *preserve;
 		IRExpr *transformIex(IRExprGet *e) {
-			if (e->reg == reg)
+			if (threadAndRegister::fullEq(e->reg, reg))
 				res = true;
 			return NULL;
 		}
@@ -1053,9 +1053,9 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		{
 			if (se != preserve &&
 			    ( (se->type == StateMachineSideEffect::Load &&
-			       ((StateMachineSideEffectLoad *)se)->target == reg) ||
+			       threadAndRegister::fullEq(((StateMachineSideEffectLoad *)se)->target, reg)) ||
 			      (se->type == StateMachineSideEffect::Copy &&
-			       ((StateMachineSideEffectCopy *)se)->target == reg) )) {
+			       threadAndRegister::fullEq(((StateMachineSideEffectCopy *)se)->target, reg)) )) {
 				res = true;
 				return se;
 			}
@@ -2063,11 +2063,11 @@ canonicaliseRbp(StateMachine *sm, OracleInterface *oracle)
 
 class BuildFreeVariableMapTransformer : public StateMachineTransformer {
 public:
-	std::set<threadAndRegister> accessedRegisters;
-	std::set<threadAndRegister> puttedRegisters;
+	std::set<threadAndRegister, threadAndRegister::fullCompare> accessedRegisters;
+	std::set<threadAndRegister, threadAndRegister::fullCompare> puttedRegisters;
 	FreeVariableMap &freeVariables;
 
-	std::map<threadAndRegister, IRExpr *> map;
+	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> map;
 
 	StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
 	{
@@ -2101,9 +2101,9 @@ public:
 
 class IntroduceFreeVariablesRegisterTransformer : public StateMachineTransformer {
 public:
-	std::map<threadAndRegister, IRExpr *> &map;
+	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &map;
 	IntroduceFreeVariablesRegisterTransformer(
-		std::map<threadAndRegister, IRExpr *> &_map)
+		std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &_map)
 		: map(_map)
 	{}
 	IRExpr *transformIex(IRExprGet *what) {
@@ -2133,7 +2133,7 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
    a function-local type.  Work around this language limitation with a
    silly dummy namespace. */
 namespace __offline_analysis_dead_code {
-	class LivenessEntry : public std::set<threadAndRegister> {
+	class LivenessEntry : public std::set<threadAndRegister, threadAndRegister::fullCompare> {
 		void killRegister(threadAndRegister r)
 		{
 			erase(r);
@@ -2257,7 +2257,22 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 			} else {
 				abort();
 			}
-			if (outputSlot != res) {
+			/* set != set doesn't work if the set uses a
+			 * custom ordering predicate; grr.  Do it by
+			 * hand. */
+			bool eq = true;
+			auto it1 = outputSlot.begin();
+			auto it2 = res.begin();
+			while (eq && it1 != outputSlot.end() && it2 != res.end())
+				if (!threadAndRegister::fullEq(*it1, *it2))
+					eq = false;
+			if (it1 != outputSlot.end())
+				eq = false;
+			if (it2 != res.end())
+				eq = false;
+			if (!eq) {
+				/* If they're not equal, we've not yet
+				 * converged. */
 				*progress = true;
 				outputSlot = res;
 			}
@@ -2315,7 +2330,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 					StateMachineSideEffectCopy *smsec =
 						(StateMachineSideEffectCopy *)e;
 					if (smsec->value->tag == Iex_Get &&
-					    ((IRExprGet *)smsec->value)->reg == smsec->target) {
+					    threadAndRegister::fullEq(((IRExprGet *)smsec->value)->reg, smsec->target)) {
 						/* Copying a register
 						   or temporary back
 						   to itself is always
