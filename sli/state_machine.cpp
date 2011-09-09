@@ -461,32 +461,6 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 	abort();
 }
 
-static bool
-parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix, char **err)
-{
-	if (parseThisString("invalid", str, suffix, err)) {
-		*out = threadAndRegister::invalid();
-		return true;
-	}
-	unsigned thread;
-	if (!parseDecimalUInt(&thread, str, &str, err) ||
-	    !parseThisChar(':', str, &str, err))
-		return false;
-	int offset;
-	if (parseThisString("tmp", str, &str, err) &&
-	    parseDecimalInt(&offset, str, suffix, err)) {
-		*out = threadAndRegister::temp(thread, offset);
-		return true;
-	}
-	if (parseThisString("reg", str, &str, err) &&
-	    parseDecimalInt(&offset, str, suffix, err)) {
-		*out = threadAndRegister::reg(thread, offset);
-		return true;
-	}
-	*err = vex_asprintf("Wanted threadAndRegister, got %.10s", str);
-	return false;
-}
-
 bool
 parseStateMachineSideEffect(StateMachineSideEffect **out,
 			    const char *str,

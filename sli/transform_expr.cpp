@@ -128,16 +128,16 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 #undef HLP
 
 		args = mkIRExprVec_3(log_reads_expr(tid, sb, e->addr),
-				     IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, tid),
-				     IRExpr_Get(OFFSET_amd64_RIP, Ity_I64, tid));
+				     IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, tid, 0),
+				     IRExpr_Get(OFFSET_amd64_RIP, Ity_I64, tid, 0));
 		dest = newIRTemp(sb->tyenv, e->ty);
-		f = unsafeIRDirty_1_N(threadAndRegister::temp(tid, dest),
+		f = unsafeIRDirty_1_N(threadAndRegister::temp(tid, dest, 0),
 				      0,
 				      helper_name,
 				      helper,
 				      args);
 		addStmtToIRSB(sb, IRStmt_Dirty(f));
-		return IRExpr_RdTmp(dest, tid);
+		return IRExpr_RdTmp(dest, tid, 0);
 	}
 	case Iex_Const:
 		return exp;

@@ -1713,9 +1713,9 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 			IRStmtPut *p = (IRStmtPut *)stmt;
 			if (p->target.isReg()) {
 				if (p->target.asReg() == OFFSET_amd64_RSP && !rsp)
-					rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1);
+					rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1, 0);
 				if (p->target.asReg() == OFFSET_amd64_RBP && !rbp)
-					rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, -1);
+					rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, -1, 0);
 			}
 			if (rsp)
 				rsp = rewriteRegister(rsp,

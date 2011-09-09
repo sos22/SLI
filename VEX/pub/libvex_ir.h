@@ -86,30 +86,31 @@ public:
 class threadAndRegister : public Named {
 	std::pair<unsigned, int> content;
 	bool valid;
-	threadAndRegister(unsigned tid, int reg)
-		: content(tid, reg), valid(true)
+	unsigned generation;
+	threadAndRegister(unsigned tid, int reg, unsigned _generation)
+		: content(tid, reg), valid(true), generation(_generation)
 	{}
 	threadAndRegister()
-		: content(-10000, -10000), valid(false)
+		: content(-10000, -10000), valid(false), generation(-1)
 	{}
 	char *mkName(void) const {
 		if (!valid)
 			return strdup("<invalid>");
 		char *res;
 		if (isTemp())
-			asprintf(&res, "tmp%d:%d", tid(), asTemp());
+			asprintf(&res, "tmp%d:%d:%d", tid(), asTemp(), generation);
 		else
-			asprintf(&res, "reg%d:%d", tid(), asReg());
+			asprintf(&res, "reg%d:%d:%d", tid(), asReg(), generation);
 		return res;
 	}
 public:
-	static threadAndRegister reg(unsigned tid, int reg)
+	static threadAndRegister reg(unsigned tid, int reg, unsigned generation)
 	{
-		return threadAndRegister(tid, reg);
+		return threadAndRegister(tid, reg, generation);
 	}
-	static threadAndRegister temp(unsigned tid, int reg)
+	static threadAndRegister temp(unsigned tid, int reg, unsigned generation)
 	{
-		return threadAndRegister(tid, -reg - 1);
+		return threadAndRegister(tid, -reg - 1, generation);
 	}
 	static threadAndRegister invalid()
 	{
@@ -122,12 +123,7 @@ public:
 			return content.first * 142993 + content.second * 196279;
 	}
 	void prettyPrint(FILE *f) const {
-		if (!valid)
-			fprintf(f, "invalid");
-		else if (content.second < 0)
-			fprintf(f, "%d:tmp%d", content.first, -content.second - 1);
-		else
-			fprintf(f, "%d:reg%d", content.first, content.second);
+		fprintf(f, "%s", name());
 	}
 	bool isTemp() const {
 		return !valid || content.second < 0;
@@ -153,13 +149,20 @@ public:
 		assert(valid);
 		return content.first;
 	}
-
+	unsigned gen() const {
+		assert(valid);
+		return generation;
+	}
 	bool operator <(const threadAndRegister &other) const {
 		if (valid < other.valid)
 			return true;
 		if (valid > other.valid)
 			return false;
-		return content < other.content;
+		if (content < other.content)
+			return true;
+		if (content > other.content)
+			return false;
+		return generation < other.generation;
 	}
 	bool operator >(const threadAndRegister &other) const {
 		return other < *this;
@@ -1182,7 +1185,7 @@ struct IRExprGet : public IRExpr {
    void prettyPrint(FILE *f) const {
       if (ty == Ity_I64 && !reg.isTemp()) {
 	 switch (reg.asReg()) {
-#define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d", reg.tid()); return;
+#define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d:%d", reg.tid(), reg.gen()); return;
 	    foreach_reg(do_reg);
 #undef do_reg
 	 }
@@ -1579,11 +1582,11 @@ struct IRExprHappensBefore : public IRExpr {
 };
 
 /* Expression constructors. */
-extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid );
+extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid, unsigned generation );
 extern IRExpr* IRExpr_Get    ( threadAndRegister r, IRType ty );
 extern IRExpr* IRExpr_GetI   ( IRRegArray* descr, IRExpr* ix, Int bias,
 			       unsigned tid );
-extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp, unsigned tid );
+extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp, unsigned tid, unsigned generation );
 extern IRExpr* IRExpr_Qop    ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                                         IRExpr* arg3, IRExpr* arg4 );
 extern IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
@@ -2244,6 +2247,8 @@ extern IRTypeEnv* emptyIRTypeEnv  ( void );
 
 /* Is this any value actually in the enumeration 'IRType' ? */
 extern Bool isPlausibleIRType ( IRType ty );
+
+bool parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix, char **err);
 
 #endif /* ndef __LIBVEX_IR_H */
 

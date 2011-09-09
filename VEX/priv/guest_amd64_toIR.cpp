@@ -251,7 +251,7 @@ static void stmt ( IRStmt* st )
 /* Generate a statement "dst := e". */ 
 static void assign ( IRTemp dst, IRExpr* e )
 {
-   stmt( IRStmt_WrTmp(threadAndRegister::temp(guest_RIP_curr_instr.thread, dst), e) );
+  stmt( IRStmt_WrTmp(threadAndRegister::temp(guest_RIP_curr_instr.thread, dst, 0), e) );
 }
 
 static IRExpr* unop ( IROp op, IRExpr* a )
@@ -271,7 +271,7 @@ static IRExpr* triop ( IROp op, IRExpr* a1, IRExpr* a2, IRExpr* a3 )
 
 static IRExpr* mkexpr ( IRTemp tmp, unsigned tid )
 {
-   return IRExpr_RdTmp(tmp, tid);
+   return IRExpr_RdTmp(tmp, tid, 0);
 }
 
 static IRExpr* mkU8 ( ULong i )
@@ -834,7 +834,7 @@ static Prefix clearSegBits ( Prefix p )
 
 static threadAndRegister mk_reg ( unsigned offset )
 {
-   return threadAndRegister::reg(guest_RIP_curr_instr.thread, offset);
+   return threadAndRegister::reg(guest_RIP_curr_instr.thread, offset, 0);
 }
 
 static threadAndRegister integerGuestReg64Offset ( UInt reg )
@@ -940,7 +940,7 @@ threadAndRegister offsetIReg ( Int sz, UInt reg, Bool irregular )
 static IRExpr* getIRegCL ( unsigned tid )
 {
    vassert(!host_is_bigendian);
-   return IRExpr_Get( OFFB_RCX, Ity_I8, tid );
+   return IRExpr_Get( OFFB_RCX, Ity_I8, tid, 0 );
 }
 
 
@@ -972,10 +972,10 @@ static IRExpr* getIRegRAX ( unsigned tid, Int sz )
 {
    vassert(!host_is_bigendian);
    switch (sz) {
-      case 1: return IRExpr_Get( OFFB_RAX, Ity_I8, tid );
-      case 2: return IRExpr_Get( OFFB_RAX, Ity_I16, tid );
-      case 4: return IRExpr_Get( OFFB_RAX, Ity_I32, tid );
-      case 8: return IRExpr_Get( OFFB_RAX, Ity_I64, tid );
+      case 1: return IRExpr_Get( OFFB_RAX, Ity_I8, tid, 0 );
+      case 2: return IRExpr_Get( OFFB_RAX, Ity_I16, tid, 0 );
+      case 4: return IRExpr_Get( OFFB_RAX, Ity_I32, tid, 0 );
+      case 8: return IRExpr_Get( OFFB_RAX, Ity_I64, tid, 0 );
       default: vpanic("getIRegRAX(amd64)");
    }
 }
@@ -1020,10 +1020,10 @@ static IRExpr* getIRegRDX ( unsigned tid, Int sz )
 {
    vassert(!host_is_bigendian);
    switch (sz) {
-      case 1: return IRExpr_Get( OFFB_RDX, Ity_I8, tid );
-      case 2: return IRExpr_Get( OFFB_RDX, Ity_I16, tid );
-      case 4: return IRExpr_Get( OFFB_RDX, Ity_I32, tid );
-      case 8: return IRExpr_Get( OFFB_RDX, Ity_I64, tid );
+      case 1: return IRExpr_Get( OFFB_RDX, Ity_I8, tid, 0 );
+      case 2: return IRExpr_Get( OFFB_RDX, Ity_I16, tid, 0 );
+      case 4: return IRExpr_Get( OFFB_RDX, Ity_I32, tid, 0 );
+      case 8: return IRExpr_Get( OFFB_RDX, Ity_I64, tid, 0 );
       default: vpanic("getIRegRDX(amd64)");
    }
 }
@@ -1443,7 +1443,7 @@ static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
            || tyE == Ity_I16 || tyE == Ity_I8);
    assign(expTmp, expVal);
    cas = mkIRCAS( threadAndRegister::invalid(),
-		  threadAndRegister::temp(tid, oldTmp),
+		  threadAndRegister::temp(tid, oldTmp, 0),
 		  addr, NULL, mkexpr(expTmp, tid), NULL, newVal );
    stmt( IRStmt_CAS(cas) );
    stmt( IRStmt_Exit(
@@ -1467,10 +1467,10 @@ static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
 static IRExpr* mk_amd64g_calculate_rflags_all ( unsigned tid )
 {
    IRExpr** args
-      = mkIRExprVec_4( IRExpr_Get(OFFB_CC_OP,   Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_DEP1, Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_DEP2, Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_NDEP, Ity_I64, tid) );
+      = mkIRExprVec_4( IRExpr_Get(OFFB_CC_OP,   Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_DEP1, Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_DEP2, Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_NDEP, Ity_I64, tid, 0) );
    IRExprCCall* call
      = (IRExprCCall *)mkIRExprCCall(
            Ity_I64,
@@ -1492,10 +1492,10 @@ static IRExpr* mk_amd64g_calculate_condition ( AMD64Condcode cond, unsigned tid 
 {
    IRExpr** args
       = mkIRExprVec_5( mkU64(cond),
-                       IRExpr_Get(OFFB_CC_OP,   Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_DEP1, Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_DEP2, Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_NDEP, Ity_I64, tid) );
+                       IRExpr_Get(OFFB_CC_OP,   Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_DEP1, Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_DEP2, Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_NDEP, Ity_I64, tid, 0) );
    IRExprCCall* call
      = (IRExprCCall *)mkIRExprCCall(
            Ity_I64,
@@ -1514,10 +1514,10 @@ static IRExpr* mk_amd64g_calculate_condition ( AMD64Condcode cond, unsigned tid 
 static IRExpr* mk_amd64g_calculate_rflags_c ( unsigned tid )
 {
    IRExpr** args
-      = mkIRExprVec_4( IRExpr_Get(OFFB_CC_OP,   Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_DEP1, Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_DEP2, Ity_I64, tid),
-                       IRExpr_Get(OFFB_CC_NDEP, Ity_I64, tid) );
+      = mkIRExprVec_4( IRExpr_Get(OFFB_CC_OP,   Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_DEP1, Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_DEP2, Ity_I64, tid, 0),
+                       IRExpr_Get(OFFB_CC_NDEP, Ity_I64, tid, 0) );
    IRExprCCall* call
      = (IRExprCCall *)mkIRExprCCall(
            Ity_I64,
@@ -1686,15 +1686,15 @@ static void setFlags_DEP1_DEP2_shift ( unsigned tid,
    /* DEP1 contains the result, DEP2 contains the undershifted value. */
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),
                      IRExpr_Mux0X( mkexpr(guard, tid),
-                                   IRExpr_Get(OFFB_CC_OP,Ity_I64, tid),
+                                   IRExpr_Get(OFFB_CC_OP,Ity_I64, tid, 0),
                                    mkU64(ccOp))) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1),
                      IRExpr_Mux0X( mkexpr(guard, tid),
-                                   IRExpr_Get(OFFB_CC_DEP1,Ity_I64, tid),
+                                   IRExpr_Get(OFFB_CC_DEP1,Ity_I64, tid, 0),
                                    widenUto64(mkexpr(res, tid)))) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), 
                      IRExpr_Mux0X( mkexpr(guard, tid),
-                                   IRExpr_Get(OFFB_CC_DEP2,Ity_I64, tid),
+                                   IRExpr_Get(OFFB_CC_DEP2,Ity_I64, tid, 0),
                                    widenUto64(mkexpr(resUS, tid)))) );
 }
 
@@ -2133,7 +2133,7 @@ IRExpr* handleAddrOverrides ( unsigned tid,
             on the assumption that %fs is always zero. */
          /* return virtual + guest_FS_ZERO. */
          virtuale = binop(Iop_Add64, virtuale,
-			  IRExpr_Get(OFFB_FS_ZERO, Ity_I64, tid));
+			  IRExpr_Get(OFFB_FS_ZERO, Ity_I64, tid, 0));
       } else {
          unimplemented("amd64 %fs segment override");
       }
@@ -2145,7 +2145,7 @@ IRExpr* handleAddrOverrides ( unsigned tid,
             on the assumption that %gs is always 0x60. */
          /* return virtual + guest_GS_0x60. */
          virtuale = binop(Iop_Add64, virtuale,
-			  IRExpr_Get(OFFB_GS_0x60, Ity_I64, tid));
+			  IRExpr_Get(OFFB_GS_0x60, Ity_I64, tid, 0));
       } else {
          unimplemented("amd64 %gs segment override");
       }
@@ -3458,19 +3458,19 @@ ULong dis_Grp2 ( unsigned tid,
       /* CC_DEP1 is the rotated value.  CC_NDEP is flags before. */
       stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
-                                      IRExpr_Get(OFFB_CC_OP,Ity_I64,tid),
+                                      IRExpr_Get(OFFB_CC_OP,Ity_I64,tid,0),
                                       mkU64(ccOp))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), 
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
-                                      IRExpr_Get(OFFB_CC_DEP1,Ity_I64,tid),
+                                      IRExpr_Get(OFFB_CC_DEP1,Ity_I64,tid,0),
                                       widenUto64(mkexpr(dst1, tid)))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), 
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
-                                      IRExpr_Get(OFFB_CC_DEP2,Ity_I64,tid),
+                                      IRExpr_Get(OFFB_CC_DEP2,Ity_I64,tid,0),
                                       mkU64(0))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), 
                         IRExpr_Mux0X( mkexpr(rot_amt64, tid),
-                                      IRExpr_Get(OFFB_CC_NDEP,Ity_I64,tid),
+                                      IRExpr_Get(OFFB_CC_NDEP,Ity_I64,tid,0),
                                       mkexpr(oldFlags, tid))) );
    } /* if (isRotate) */
 
@@ -4103,11 +4103,11 @@ void dis_string_op_increment ( unsigned tid, Int sz, IRTemp t_inc )
       if (sz == 4) logSz = 2;
       if (sz == 8) logSz = 3;
       assign( t_inc, 
-              binop(Iop_Shl64, IRExpr_Get( OFFB_DFLAG, Ity_I64 , tid),
+              binop(Iop_Shl64, IRExpr_Get( OFFB_DFLAG, Ity_I64 , tid, 0),
                                mkU8(logSz) ) );
    } else {
       assign( t_inc, 
-              IRExpr_Get( OFFB_DFLAG, Ity_I64 , tid) );
+              IRExpr_Get( OFFB_DFLAG, Ity_I64 , tid, 0) );
    }
 }
 
@@ -4382,7 +4382,7 @@ static IRExpr* mkQNaN64 ( void )
 
 static IRExpr* get_ftop ( unsigned tid )
 {
-   return IRExpr_Get( OFFB_FTOP, Ity_I32 , tid);
+   return IRExpr_Get( OFFB_FTOP, Ity_I32 , tid, 0);
 }
 
 static void put_ftop ( IRExpr* e )
@@ -4395,7 +4395,7 @@ static void put_ftop ( IRExpr* e )
 
 static IRExpr*  /* :: Ity_I64 */ get_C3210 ( unsigned tid )
 {
-   return IRExpr_Get( OFFB_FC3210, Ity_I64 , tid);
+   return IRExpr_Get( OFFB_FC3210, Ity_I64 , tid, 0);
 }
 
 static void put_C3210 ( IRExpr* e  /* :: Ity_I64 */ )
@@ -4407,7 +4407,7 @@ static void put_C3210 ( IRExpr* e  /* :: Ity_I64 */ )
 /* --------- Get/put the FPU rounding mode. --------- */
 static IRExpr* /* :: Ity_I32 */ get_fpround ( unsigned tid )
 {
-   return unop(Iop_64to32, IRExpr_Get( OFFB_FPROUND, Ity_I64 , tid));
+   return unop(Iop_64to32, IRExpr_Get( OFFB_FPROUND, Ity_I64 , tid, 0));
 }
 
 static void put_fpround ( IRExpr* /* :: Ity_I32 */ e )
@@ -4893,7 +4893,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                                  mkIRExprVec_1( mkexpr(addr, tid) )
                               );
                d->needsBBP = True;
-               d->tmp      = threadAndRegister::temp(guest_RIP_curr_instr.thread, w64);
+               d->tmp      = threadAndRegister::temp(guest_RIP_curr_instr.thread, w64, 0);
                /* declare we're reading memory */
                d->mFx   = Ifx_Read;
                d->mAddr = mkexpr(addr, tid);
@@ -5525,7 +5525,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                IRExpr** args = mkIRExprVec_1 ( mkexpr(addr, tid) );
 
                IRDirty* d = unsafeIRDirty_1_N ( 
-		       threadAndRegister::temp(guest_RIP_curr_instr.thread, val), 
+		   threadAndRegister::temp(guest_RIP_curr_instr.thread, val, 0), 
 		       0/*regparms*/, 
 		       "amd64g_dirtyhelper_loadF80le", 
 		       (void *)amd64g_dirtyhelper_loadF80le, 
@@ -6305,7 +6305,7 @@ static void do_EMMS_preamble ( void )
 static IRExpr* getMMXReg ( unsigned tid, UInt archreg )
 {
    vassert(archreg < 8);
-   return IRExpr_Get( OFFB_FPREGS + 8 * archreg, Ity_I64, tid );
+   return IRExpr_Get( OFFB_FPREGS + 8 * archreg, Ity_I64, tid, 0 );
 }
 
 
@@ -7650,7 +7650,7 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       assign( src, getIRegG(tid, size, pfx, rm) );
       assign( acc, getIRegRAX(tid, size) );
       stmt( IRStmt_CAS( 
-	    mkIRCAS( threadAndRegister::invalid(), threadAndRegister::temp(tid, dest),
+	    mkIRCAS( threadAndRegister::invalid(), threadAndRegister::temp(tid, dest, 0),
 		     mkexpr(addr, tid), NULL, mkexpr(acc, tid), NULL, mkexpr(src, tid) )
       ));
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
@@ -8469,7 +8469,7 @@ static IRExpr* /* :: Ity_I32 */ get_sse_roundingmode ( unsigned tid )
    return 
       unop( Iop_64to32, 
             binop( Iop_And64, 
-                   IRExpr_Get( OFFB_SSEROUND, Ity_I64 , tid), 
+                   IRExpr_Get( OFFB_SSEROUND, Ity_I64 , tid, 0), 
                    mkU64(3) ));
 }
 
@@ -8960,7 +8960,7 @@ DisResult disInstr_AMD64_WRK (
             /* %RAX = guest_NRADDR */
             DIP("%%rax = guest_NRADDR\n");
             delta += 19;
-            putIRegRAX(8, IRExpr_Get( OFFB_NRADDR, Ity_I64 , tid));
+            putIRegRAX(8, IRExpr_Get( OFFB_NRADDR, Ity_I64 , tid, 0));
             goto decode_success;
          }
          else
@@ -14791,7 +14791,7 @@ DisResult disInstr_AMD64_WRK (
       assign( t3, binop(Iop_Or64,
                         mkexpr(t2, tid),
                         binop(Iop_And64,
-                              IRExpr_Get(OFFB_DFLAG,Ity_I64,tid),
+                              IRExpr_Get(OFFB_DFLAG,Ity_I64,tid,0),
                               mkU64(1<<10))) 
             );
 
@@ -14800,7 +14800,7 @@ DisResult disInstr_AMD64_WRK (
       assign( t4, binop(Iop_Or64,
                         mkexpr(t3, tid),
                         binop(Iop_And64,
-                              binop(Iop_Shl64, IRExpr_Get(OFFB_IDFLAG,Ity_I64,tid), 
+                              binop(Iop_Shl64, IRExpr_Get(OFFB_IDFLAG,Ity_I64,tid,0), 
                                                mkU8(21)),
                               mkU64(1<<21)))
             );
@@ -15197,7 +15197,7 @@ DisResult disInstr_AMD64_WRK (
       ty = szToITy(sz);
       t2 = newTemp(Ity_I64);
       d = unsafeIRDirty_1_N( 
-	     threadAndRegister::temp(guest_RIP_curr_instr.thread, t2),
+	     threadAndRegister::temp(guest_RIP_curr_instr.thread, t2, 0),
              0/*regparms*/, 
              "amd64g_dirtyhelper_IN", 
              (void *)amd64g_dirtyhelper_IN,
@@ -15640,8 +15640,8 @@ DisResult disInstr_AMD64_WRK (
 
          /* Do the DCAS */
          stmt( IRStmt_CAS(
-	          mkIRCAS( threadAndRegister::temp(tid, oldHi),
-			   threadAndRegister::temp(tid, oldLo), 
+		  mkIRCAS( threadAndRegister::temp(tid, oldHi, 0),
+			   threadAndRegister::temp(tid, oldLo, 0), 
                            mkexpr(addr, tid), 
                            mkexpr(expdHi, tid), mkexpr(expdLo, tid),
                            mkexpr(dataHi, tid), mkexpr(dataLo, tid)
@@ -15879,7 +15879,7 @@ DisResult disInstr_AMD64_WRK (
          IRTemp   val  = newTemp(Ity_I64);
          IRExpr** args = mkIRExprVec_0();
          IRDirty* d    = unsafeIRDirty_1_N ( 
-		 threadAndRegister::temp(guest_RIP_curr_instr.thread, val), 
+	         threadAndRegister::temp(guest_RIP_curr_instr.thread, val, 0), 
 		 0/*regparms*/, 
 		 "amd64g_dirtyhelper_RDTSC", 
 		 (void *)amd64g_dirtyhelper_RDTSC, 

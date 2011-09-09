@@ -263,22 +263,6 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
       fprintf(f,  "t%d", (Int)tmp);
 }
 
-static bool parseIRTemp(IRTemp *res, const char *str, const char **suffix, char **err)
-{
-  int r;
-
-  if (parseThisString("IRTemp_INVALID", str, suffix, err)) {
-    *res = IRTemp_INVALID;
-    return true;
-  } else if (parseThisChar('t', str, &str, err) &&
-	     parseDecimalInt(&r, str, suffix, err)) {
-    *res = (IRTemp)r;
-    return true;
-  } else {
-    return false;
-  }
-}
-
 #define foreach_op_sized(iter)			\
   iter(Add)					\
   iter(Sub)					\
@@ -855,8 +839,40 @@ static bool parseIROpSimple(IROp *out, const char *str, const char **suffix, cha
   return false;
 }
 
+bool
+parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix, char **err)
+{
+	if (parseThisString("invalid", str, suffix, err)) {
+		*out = threadAndRegister::invalid();
+		return true;
+	}
+	unsigned thread;
+	if (!parseDecimalUInt(&thread, str, &str, err) ||
+	    !parseThisChar(':', str, &str, err))
+		return false;
+	int offset;
+	int gen;
+	if (parseThisString("tmp", str, &str, err) &&
+	    parseDecimalInt(&offset, str, &str, err) &&
+	    parseThisChar(':', str, &str, err) &&
+	    parseDecimalInt(&gen, str, suffix, err)) {
+	        *out = threadAndRegister::temp(thread, offset, gen);
+		return true;
+	}
+	if (parseThisString("reg", str, &str, err) &&
+	    parseDecimalInt(&offset, str, &str, err) &&
+	    parseThisChar(':', str, &str, err) &&
+	    parseDecimalInt(&gen, str, suffix, err)) {
+	   *out = threadAndRegister::reg(thread, offset, gen);
+		return true;
+	}
+	*err = vex_asprintf("Wanted threadAndRegister, got %.10s", str);
+	return false;
+}
+
 static bool parseIRExprGet(IRExpr **res, const char *str, const char **suffix, char **err)
 {
+  threadAndRegister reg(threadAndRegister::invalid());
   int offset;
   int tid;
   IRType ty;
@@ -871,18 +887,19 @@ static bool parseIRExprGet(IRExpr **res, const char *str, const char **suffix, c
   if (!parseThisString("GET:", str, &str, err) ||
       !parseIRType(&ty, str, &str, err) ||
       !parseThisChar('(', str, &str, err) ||
-      !parseDecimalInt(&offset, str, &str, err) ||
-      !parseThisString(", ", str, &str, err) ||
-      !parseDecimalInt(&tid, str, &str, err) ||
+      !parseThreadAndRegister(&reg, str, &str, err) ||
       !parseThisChar(')', str, suffix, err))
     return false;
-  *res = IRExpr_Get(offset, ty, tid);
+  *res = IRExpr_Get(reg, ty);
   return true;
 
  canned_register:
-  if (!parseDecimalInt(&tid, str, suffix, err))
+  int generation;
+  if (!parseDecimalInt(&tid, str, &str, err) ||
+      !parseThisChar(':', str, &str, err) ||
+      !parseDecimalInt(&generation, str, suffix, err))
     return false;
-  *res = IRExpr_Get(offset, Ity_I64, tid);
+  *res = IRExpr_Get(offset, Ity_I64, tid, generation);
   return true;
 }
 
@@ -904,18 +921,6 @@ static bool parseIRExprGetI(IRExpr **res, const char *str, const char **suffix, 
       !parseThisChar(')', str, suffix, err))
     return false;
   *res = IRExpr_GetI(arr, ix, bias, tid);
-  return true;
-}
-
-static bool parseIRExprRdTmp(IRExpr **res, const char *str, const char **suffix, char **err)
-{
-  IRTemp tmp;
-  int tid;
-  if (!parseIRTemp(&tmp, str, &str, err) ||
-      !parseThisChar(':', str, &str, err) ||
-      !parseDecimalInt(&tid, str, suffix, err))
-    return false;
-  *res = IRExpr_RdTmp(tmp, tid);
   return true;
 }
 
@@ -1179,7 +1184,6 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **_err
     return true;
   do_form(Get);
   do_form(GetI);
-  do_form(RdTmp);
   do_form(Qop);
   do_form(Triop);
   do_form(Binop);
@@ -1587,8 +1591,8 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 IRExpr* IRExpr_Get ( threadAndRegister reg, IRType ty) {
    return new IRExprGet(reg, ty);
 }
-IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid ) {
-   return IRExpr_Get(threadAndRegister::reg(tid, off), ty);
+IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid, unsigned generation ) {
+   return IRExpr_Get(threadAndRegister::reg(tid, off, generation), ty);
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
    IRExprGetI* e         = new IRExprGetI();
@@ -1598,8 +1602,8 @@ IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
    e->tid   = tid;
    return e;
 }
-IRExpr* IRExpr_RdTmp ( IRTemp tmp, unsigned tid ) {
-   return IRExpr_Get(-tmp - 1, Ity_INVALID, tid);
+IRExpr* IRExpr_RdTmp ( IRTemp tmp, unsigned tid, unsigned generation ) {
+   return IRExpr_Get(-tmp - 1, Ity_INVALID, tid, generation);
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {

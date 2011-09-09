@@ -2049,11 +2049,11 @@ canonicaliseRbp(StateMachine *sm, OracleInterface *oracle)
 	StateMachineEdge *e = new StateMachineEdge(sm->root);
 	e->sideEffects.push_back(
 		new StateMachineSideEffectCopy(
-			threadAndRegister::reg(sm->tid, OFFSET_amd64_RBP),
+			threadAndRegister::reg(sm->tid, OFFSET_amd64_RBP, 0),
 			IRExpr_Associative(
 				Iop_Add64,
 				IRExpr_Get(
-					threadAndRegister::reg(sm->tid, OFFSET_amd64_RSP),
+					threadAndRegister::reg(sm->tid, OFFSET_amd64_RSP, 0),
 					Ity_I64),
 				IRExpr_Const(
 					IRConst_U64(delta)),
@@ -3844,7 +3844,7 @@ CFGtoCrashReason(unsigned tid,
 				nr_args = 0;
 				for (int i = 0; i < 6; i++)
 					if (live.isLive(argument_registers[i]))
-						args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread);
+						args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread, 0);
 				args[nr_args] = NULL;
 				r = IRExpr_ClientCall(called_rip, site, args);
 			} else {
@@ -3870,7 +3870,7 @@ CFGtoCrashReason(unsigned tid,
 			state.addReloc(&smp->target->target, cfg->fallThrough);
 			smp->target->prependSideEffect(
 				new StateMachineSideEffectCopy(
-					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX),
+					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
 					r));
 			return smp;
 		}
