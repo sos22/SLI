@@ -2263,9 +2263,12 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 			bool eq = true;
 			auto it1 = outputSlot.begin();
 			auto it2 = res.begin();
-			while (eq && it1 != outputSlot.end() && it2 != res.end())
+			while (eq && it1 != outputSlot.end() && it2 != res.end()) {
 				if (!threadAndRegister::fullEq(*it1, *it2))
 					eq = false;
+				it1++;
+				it2++;
+			}
 			if (it1 != outputSlot.end())
 				eq = false;
 			if (it2 != res.end())
