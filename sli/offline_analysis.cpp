@@ -2035,45 +2035,30 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	return rewriteStateMachine(sm, canonMap, canonEdgeMap);
 }
 
-/* Turn references to RBP into RSP+k, if we know that RBP=RSP+k. */
-class CanonicaliseRbp : public StateMachineTransformer {
-	IRExpr *delta;
-	IRExpr *transformIex(IRExprGet *orig) {
-		if (orig->ty == Ity_I64 &&
-		    !orig->reg.isTemp() &&
-		    orig->reg.asReg() == OFFSET_amd64_RBP) {
-			return IRExpr_Associative(
-				Iop_Add64,
-				delta,
-				IRExpr_Get(
-					OFFSET_amd64_RSP,
-					Ity_I64,
-					orig->reg.tid()),
-				NULL);
-		}
-		return StateMachineTransformer::transformIex(orig);
-	}
-public:
-	CanonicaliseRbp(long _delta)
-		: delta(IRExpr_Const(IRConst_U64(_delta)))
-	{
-	}
-};
-static StateMachine *
-canonicaliseRbp(StateMachine *sm, OracleInterface *oracle,
-		bool *done_something)
+static void
+canonicaliseRbp(StateMachine *sm, OracleInterface *oracle)
 {
 	long delta;
 
 	if (!oracle->getRbpToRspDelta(sm->origin, &delta)) {
 		/* Can't do anything if we don't know the delta */
-		return sm;
+		return;
 	}
 	/* Got RBP->RSP delta, want RSP->RBP */
 	delta = -delta;
-
-	CanonicaliseRbp canon(delta);
-	return canon.transform(sm, done_something);
+	StateMachineEdge *e = new StateMachineEdge(sm->root);
+	e->sideEffects.push_back(
+		new StateMachineSideEffectCopy(
+			threadAndRegister::reg(sm->tid, OFFSET_amd64_RBP),
+			IRExpr_Associative(
+				Iop_Add64,
+				IRExpr_Get(
+					threadAndRegister::reg(sm->tid, OFFSET_amd64_RSP),
+					Ity_I64),
+				IRExpr_Const(
+					IRConst_U64(delta)),
+				NULL)));
+	sm->root = new StateMachineProxy(sm->origin, e);
 }
 
 class BuildFreeVariableMapTransformer : public StateMachineTransformer {
@@ -2410,7 +2395,6 @@ optimiseStateMachine(StateMachine *sm,
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
-			sm = canonicaliseRbp(sm, oracle, &done_something);
 			sm->root->assertAcyclic();
 		}
 		sm = sm->optimise(opt, oracle, &done_something);
@@ -3967,6 +3951,7 @@ CFGtoCrashReason(unsigned tid,
 
 	FreeVariableMap fv;
 	StateMachine *sm = new StateMachine(root, original_rip, fv, tid);
+	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false);
 	crashReasons.set(original_rip, sm->root);
 	return sm;
