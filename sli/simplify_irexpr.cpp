@@ -890,10 +890,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 							res = IRExpr_Const(IRConst_U64(l->Ico.U64 + r->Ico.U64));
 							break;
 						case Iop_And1:
-							res = IRExpr_Const(IRConst_U1(l->Ico.U1 & r->Ico.U1));
+							res = IRExpr_Const(IRConst_U1(!!(l->Ico.U1 & r->Ico.U1)));
 							break;
 						case Iop_Or1:
-							res = IRExpr_Const(IRConst_U1(l->Ico.U1 | r->Ico.U1));
+							res = IRExpr_Const(IRConst_U1(!!(l->Ico.U1 | r->Ico.U1)));
 							break;
 						case Iop_And8:
 							res = IRExpr_Const(IRConst_U8(l->Ico.U8 & r->Ico.U8));
