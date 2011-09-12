@@ -112,7 +112,7 @@ StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_som
 	StateMachineEdge *res = new StateMachineEdge(NULL);
 	res->sideEffects.resize(edge->sideEffects.size());
 	std::copy(edge->sideEffects.begin(),
-		  edge->sideEffects.end() + firstTransformed,
+		  edge->sideEffects.begin() + firstTransformed,
 		  res->sideEffects.begin());
 	res->sideEffects[firstTransformed] = trans;
 	for (unsigned x = firstTransformed + 1; x < edge->sideEffects.size(); x++) {
