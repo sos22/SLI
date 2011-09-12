@@ -13,7 +13,6 @@ class IRExprTransformer {
 	IRExpr *_currentIRExpr;
 protected:
 	IRExpr *currentIRExpr() { return _currentIRExpr; }
-	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
 	virtual IRExpr *transformIex(IRExprGet *e) { return NULL; }
 	virtual IRExpr *transformIex(IRExprGetI *e)
 	{
@@ -121,67 +120,67 @@ public:
 };
 
 class StateMachineTransformer : public IRExprTransformer {
-private:
-	/* Transformations are memoised.  This is important, because
-	   it means that we preserve the state machine structure
-	   rather than unrolling it. */
-	std::map<const StateMachineState *, StateMachineState *> memoTable;
-	StateMachineState *doit(StateMachineState *inp, bool *);
-	StateMachineEdge *doit(StateMachineEdge *inp, bool *);
-
-	StateMachineState *transform(StateMachineState *start, bool *done_something);
-	StateMachineState *transform(StateMachineState *start)
-	{
-		bool b;
-		return transform(start, &b);
-	}
 protected:
-	virtual StateMachineState *transformedCrash(bool *done_something)
-	{
-		return StateMachineCrash::get();
+	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
+	virtual StateMachineSideEffectLoad *transformOneSideEffect(
+		StateMachineSideEffectLoad *, bool *);
+	virtual StateMachineSideEffectStore *transformOneSideEffect(
+		StateMachineSideEffectStore *, bool *);
+	virtual StateMachineSideEffectAssertFalse *transformOneSideEffect(
+		StateMachineSideEffectAssertFalse *, bool *);
+	virtual StateMachineSideEffectCopy *transformOneSideEffect(
+		StateMachineSideEffectCopy *, bool *);
+	virtual StateMachineSideEffectUnreached *transformOneSideEffect(
+		StateMachineSideEffectUnreached *, bool *) {
+		return NULL;
 	}
-	virtual StateMachineState *transformedNoCrash(bool *done_something)
-	{
-		return StateMachineNoCrash::get();
-	}
-	virtual StateMachineState *transformedUnreached(bool *done_something)
-	{
-		return StateMachineUnreached::get();
-	}
-public:
-	virtual void transform(FreeVariableMap *fvm, bool *done_something)
-	{
-		fvm->applyTransformation(*this, done_something);
-	}
-	void transform(FreeVariableMap *fvm)
-	{
-		bool b;
-		transform(fvm, &b);
-	}
-	virtual StateMachineSideEffect *transform(StateMachineSideEffect *, bool *done_something);
-	StateMachineSideEffect *transform(StateMachineSideEffect *se)
-	{
-		bool b;
-		return transform(se, &b);
-	}
-	StateMachine *transform(StateMachine *s, bool *done_something = NULL)
+	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
+							 bool *)
+	{ return NULL; }
+	virtual StateMachineCrash *transformOneState(StateMachineCrash *,
+						     bool *)
+	{ return NULL; }
+	virtual StateMachineNoCrash *transformOneState(StateMachineNoCrash *,
+						       bool *)
+	{ return NULL; }
+	virtual StateMachineStub *transformOneState(StateMachineStub *s,
+						    bool *done_something)
 	{
 		bool b = false;
-		FreeVariableMap fvm = s->freeVariables;
-		transform(&fvm, &b);
-		StateMachineState *r = transform(s->root, &b);
-		if (b) {
-			if (done_something)
-				*done_something = true;
-			StateMachine *sm = new StateMachine(s);
-			sm->root = r;
-			sm->freeVariables = fvm;
-			for (auto it = fvDelta.begin(); it != fvDelta.end(); it++)
-				sm->freeVariables.content->set(it->first, it->second);
-			return sm;
-		}
-		return s;
+		IRExpr *d = transformIRExpr(s->target, &b);
+		if (!b)
+			return NULL;
+		return new StateMachineStub(s->origin, d);
 	}
+	virtual StateMachineProxy *transformOneState(StateMachineProxy *p,
+						     bool *done_something)
+	{
+		return NULL;
+	}
+	virtual StateMachineBifurcate *transformOneState(StateMachineBifurcate *s,
+							 bool *done_something)
+	{
+		bool b = false;
+		IRExpr *c = transformIRExpr(s->condition, &b);
+		if (b)
+			return new StateMachineBifurcate(s->origin,
+							 c,
+							 (StateMachineEdge *)NULL,
+							 (StateMachineEdge *)NULL);
+		else
+			return NULL;
+	}
+	virtual StateMachineEdge *transformOneEdge(StateMachineEdge *, bool *);
+public:
+	StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
+						    bool *);
+	virtual void transformFreeVariables(FreeVariableMap *fvm, bool *done_something = NULL)
+	{
+		bool b;
+		if (!done_something) done_something = &b;
+		fvm->applyTransformation(*this, done_something);
+	}
+	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
 };
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);

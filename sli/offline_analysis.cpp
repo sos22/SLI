@@ -188,134 +188,6 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 	return NULL;
 }
 
-StateMachineState *
-StateMachineTransformer::doit(StateMachineState *inp, bool *done_something)
-{
-	if (TIMEOUT)
-		return inp;
-	if (memoTable.count(inp)) {
-		/* We rely on whoever set memoTable having also set
-		   *done_something if necessary. */
-		return memoTable[inp];
-	}
-	StateMachineState *out;
-	if (inp == StateMachineCrash::get()) {
-		out = transformedCrash(done_something);
-	} else if (inp == StateMachineNoCrash::get()) {
-		out = transformedNoCrash(done_something);
-	} else if (inp == StateMachineUnreached::get()) {
-		out = transformedUnreached(done_something);
-	} else if (StateMachineBifurcate *smb =
-		   dynamic_cast<StateMachineBifurcate *>(inp)) {
-		bool done = false;
-		StateMachineEdge *t = doit(smb->trueTarget, &done);
-		StateMachineEdge *f = doit(smb->falseTarget, &done);
-		IRExpr *cond = transformIRExpr(smb->condition, &done);
-		if (done) {
-			*done_something = true;
-			out = new StateMachineBifurcate(inp->origin, cond, t, f);
-		} else {
-			out = inp;
-		}
-	} else if (StateMachineProxy *smp =
-		   dynamic_cast<StateMachineProxy *>(inp)) {
-		bool d = false;
-		StateMachineEdge *t = doit(smp->target, &d);
-		if (d) {
-			*done_something = true;
-			out = new StateMachineProxy(inp->origin, t);
-		} else {
-			out = inp;
-		}
-	} else if (StateMachineStub *sms =
-		   dynamic_cast<StateMachineStub *>(inp)) {
-		bool d = false;
-		IRExpr *target = transformIRExpr(sms->target, &d);
-		if (d) {
-			*done_something = true;
-			out = new StateMachineStub(inp->origin, target);
-		} else {
-			out = inp;
-		}
-	} else {
-		abort();
-	}
-	memoTable[inp] = out;
-	return out;
-}
-
-StateMachineSideEffect *
-StateMachineTransformer::transform(StateMachineSideEffect *se, bool *done_something)
-{
-	bool b;
-	if (!done_something)
-		done_something = &b;
-	switch (se->type) {
-	case StateMachineSideEffect::Store: {
-		StateMachineSideEffectStore *smses =
-			dynamic_cast<StateMachineSideEffectStore *>(se);
-		assert(smses);
-		IRExpr *a, *d;
-		a = transformIRExpr(smses->addr, done_something);
-		d = transformIRExpr(smses->data, done_something);
-		return new StateMachineSideEffectStore(
-			a,
-			d,
-			smses->rip);
-	}
-	case StateMachineSideEffect::Load: {
-		StateMachineSideEffectLoad *smsel =
-			dynamic_cast<StateMachineSideEffectLoad *>(se);
-		IRExpr *a = transformIRExpr(smsel->addr, done_something);
-		return new StateMachineSideEffectLoad(
-			smsel->target,
-			a,
-			smsel->rip);
-	}
-	case StateMachineSideEffect::Copy: {
-		StateMachineSideEffectCopy *smsec =
-			dynamic_cast<StateMachineSideEffectCopy *>(se);
-		IRExpr *v = transformIRExpr(smsec->value, done_something);
-		return new StateMachineSideEffectCopy(
-			smsec->target,
-			v);
-	}
-	case StateMachineSideEffect::Unreached:
-		return se;
-	case StateMachineSideEffect::AssertFalse: {
-		StateMachineSideEffectAssertFalse *smseaf =
-			dynamic_cast<StateMachineSideEffectAssertFalse *>(se);
-		IRExpr *v = transformIRExpr(smseaf->value, done_something);
-		return new StateMachineSideEffectAssertFalse(v);
-	}
-	}
-	abort();
-}
-
-StateMachineEdge *
-StateMachineTransformer::doit(StateMachineEdge *inp, bool *done_something)
-{
-	bool done = false;
-	StateMachineState *t = doit(inp->target, &done);
-	StateMachineEdge *res = new StateMachineEdge(t);
-	for (std::vector<StateMachineSideEffect *>::iterator it = inp->sideEffects.begin();
-	     it != inp->sideEffects.end();
-	     it++)
-		res->sideEffects.push_back(transform(*it, &done));
-	if (done) {
-		*done_something = true;
-		return res;
-	} else {
-		return inp;
-	}
-}
-
-StateMachineState *
-StateMachineTransformer::transform(StateMachineState *inp, bool *done_something)
-{
-	return doit(inp, done_something);
-}
-
 IRExpr *
 IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 {
@@ -1049,17 +921,23 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 				res = true;
 			return NULL;
 		}
-		StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
+		StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *l,
+								   bool *done_something)
 		{
-			if (se != preserve &&
-			    ( (se->type == StateMachineSideEffect::Load &&
-			       threadAndRegister::fullEq(((StateMachineSideEffectLoad *)se)->target, reg)) ||
-			      (se->type == StateMachineSideEffect::Copy &&
-			       threadAndRegister::fullEq(((StateMachineSideEffectCopy *)se)->target, reg)) )) {
+			if (l != preserve && threadAndRegister::fullEq(l->target, reg)) {
 				res = true;
-				return se;
+				return NULL;
 			}
-			return StateMachineTransformer::transform(se, done_something);
+			return StateMachineTransformer::transformOneSideEffect(l, done_something);
+		}
+		StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *l,
+								   bool *done_something)
+		{
+			if (l != preserve && threadAndRegister::fullEq(l->target, reg)) {
+				res = true;
+				return NULL;
+			}
+			return StateMachineTransformer::transformOneSideEffect(l, done_something);
 		}
 	public:
 		_(threadAndRegister _reg, StateMachineSideEffect *_preserve)
@@ -1069,7 +947,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		{
 			bool ignore;
 			res = false;
-			transform(se, &ignore);
+			transformSideEffect(se, &ignore);
 			return res;
 		}
 		bool operator()(IRExpr *e)
@@ -2069,13 +1947,15 @@ public:
 
 	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> map;
 
-	StateMachineSideEffect *transform(StateMachineSideEffect *se, bool *done_something)
+	StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *c, bool *done_something)
 	{
-		if (se->type == StateMachineSideEffect::Copy)
-			puttedRegisters.insert(((StateMachineSideEffectCopy *)se)->target);
-		if (se->type == StateMachineSideEffect::Load)
-			puttedRegisters.insert(((StateMachineSideEffectLoad *)se)->target);
-		return se;
+		puttedRegisters.insert(c->target);
+		return StateMachineTransformer::transformOneSideEffect(c, done_something);
+	}
+	StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *l, bool *done_something)
+	{
+		puttedRegisters.insert(l->target);
+		return StateMachineTransformer::transformOneSideEffect(l, done_something);
 	}
 	IRExpr *transformIex(IRExprGet *what) {
 		accessedRegisters.insert(what->reg);
@@ -2087,7 +1967,7 @@ public:
 	/* It's not really a good idea to introduce more free
 	   variables on behalf of an expression which is only used in
 	   the free variable map. */
-	void transform(FreeVariableMap *fvm, bool *done_something)
+	void transformFreeVariables(FreeVariableMap *fvm, bool *done_something)
 	{}
 	void finalise()
 	{
