@@ -174,11 +174,19 @@ public:
 };
 
 #undef assert
+#ifndef NDEBUG
 #define assert(x)							\
 	do {								\
 	if (!(x))							\
 		throw AssertFailedException(__FILE__, __LINE__,		\
 					    "%s", #x );			\
 	} while (0)
+#else
+#define assert(x)				\
+	do {					\
+		int ___ignore = !(x);		\
+		(void)___ignore;		\
+	} while (0)
+#endif
 
 #endif /* !EXCEPTIONS_H__ */
