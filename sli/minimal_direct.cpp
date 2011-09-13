@@ -177,6 +177,8 @@ main(int argc, char *argv[])
 	FILE *output = fopen("generated_patch.c", "w");
 	DumpFix df(oracle, output);
 
+	LibVEX_gc(ALLOW_GC);
+
 	if (argc == 5) {
 		consider_rip(strtoul(argv[4], NULL, 16), ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
