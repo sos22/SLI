@@ -97,10 +97,12 @@ class threadAndRegister : public Named {
 		if (!valid)
 			return strdup("<invalid>");
 		char *res;
+		int r;
 		if (isTemp())
-			asprintf(&res, "tmp%d:%d:%d", tid(), asTemp(), generation);
+			r = asprintf(&res, "tmp%d:%d:%d", tid(), asTemp(), generation);
 		else
-			asprintf(&res, "reg%d:%d:%d", tid(), asReg(), generation);
+			r = asprintf(&res, "reg%d:%d:%d", tid(), asReg(), generation);
+		(void)r;
 		return res;
 	}
 public:
