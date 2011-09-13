@@ -3148,6 +3148,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	}
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
+	sm = deSSA(sm);
 	ii->set(sm->origin, sm->root);
 
 	InstructionSet interesting;

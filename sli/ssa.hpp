@@ -4,5 +4,6 @@
 class StateMachine;
 
 StateMachine *convertToSSA(StateMachine *);
+StateMachine *deSSA(StateMachine *);
 
 #endif /* !SSA_HPP__ */

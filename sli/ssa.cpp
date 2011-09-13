@@ -1197,6 +1197,47 @@ convertToSSA(StateMachine *inp)
 	return inp;
 }
 
+static StateMachine *
+deSSA(StateMachine *inp)
+{
+	class : public StateMachineTransformer {
+		IRExpr *transformIex(IRExprGet *g) {
+			if (g->reg.gen() != 0)
+				return new IRExprGet(g->reg.setGen(0), g->ty);
+			return StateMachineTransformer::transformIex(g);
+		}
+		StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *l, bool *b) {
+			if (l->target.gen() != 0) {
+				l->target = l->target.setGen(0);
+				*b = true;
+			}
+			return StateMachineTransformer::transformOneSideEffect(l, b);
+		}
+		StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *l, bool *b) {
+			if (l->target.gen() != 0) {
+				l->target = l->target.setGen(0);
+				*b = true;
+			}
+			return StateMachineTransformer::transformOneSideEffect(l, b);
+		}
+		StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *, bool *) {
+			abort(); /* Should have been dropped before gettign here */
+		}
+		StateMachineEdge *transformOneEdge(StateMachineEdge *edge, bool *done_something) {
+			for (unsigned x = 0; x < edge->sideEffects.size(); ) {
+				if (edge->sideEffects[x]->type == StateMachineSideEffect::Phi) {
+					edge->sideEffects.erase(edge->sideEffects.begin() + x);
+					*done_something = true;
+				} else {
+					x++;
+				}
+			}
+			return StateMachineTransformer::transformOneEdge(edge, done_something);
+		}
+	} t;
+	return t.transform(inp);
+}
+
 /* End of namespace SSA */
 }
 
@@ -1204,4 +1245,10 @@ StateMachine *
 convertToSSA(StateMachine *inp)
 {
 	return SSA::convertToSSA(inp);
+}
+
+StateMachine *
+deSSA(StateMachine *inp)
+{
+	return SSA::deSSA(inp);
 }
