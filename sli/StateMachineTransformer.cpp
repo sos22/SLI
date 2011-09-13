@@ -90,6 +90,8 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 		do_type(AssertFalse);
 		do_type(Copy);
 		do_type(Unreached);
+		do_type(Phi);
+#undef do_type
 	}
 	abort();
 }
@@ -128,6 +130,8 @@ StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_som
 StateMachine *
 StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 {
+	bool _b;
+	if (!done_something) done_something = &_b;
 	std::set<StateMachineState *> allStates;
 	std::set<StateMachineEdge *> allEdges;
 	enumStatesAndEdges(sm, allStates, allEdges);
@@ -283,8 +287,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 	FreeVariableMap fvm = sm->freeVariables;
 	bool b = false;
 	transformFreeVariables(&fvm, &b);
-	if (done_something)
-		*done_something |= b;
+	*done_something |= b;
 
 	StateMachineState *newRoot;
 	if (stateRewrites.count(sm->root))

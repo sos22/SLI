@@ -116,6 +116,12 @@ public:
 	{
 		return threadAndRegister();
 	}
+	threadAndRegister setGen(unsigned gen) const
+	{
+		if (!valid)
+			return *this;
+		return threadAndRegister(content.first, content.second, gen);
+	}
 	unsigned long hash() const {
 		if (!valid)
 			return 72;
@@ -160,6 +166,14 @@ public:
 		if (!a.valid || !b.valid)
 			return false;
 		return a.content == b.content && a.generation == b.generation;
+	}
+
+	static bool partialEq(const threadAndRegister &a, const threadAndRegister &b) {
+		if (!a.valid && !b.valid)
+			return true;
+		if (!a.valid || !b.valid)
+			return false;
+		return a.content == b.content;
 	}
 
 	class fullCompare {

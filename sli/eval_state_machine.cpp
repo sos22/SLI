@@ -356,6 +356,11 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			return false;
 		break;
 	}
+	case StateMachineSideEffect::Phi:
+		/* These don't do anything at the semantic level.  We
+		   interpret ignoring generation numbers, so assigning
+		   x_n = x_{last n} is a no-op. */
+		break;
 	}
 	return true;
 }

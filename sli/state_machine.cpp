@@ -190,8 +190,10 @@ StateMachineSideEffectStore::findUsedRegisters(std::set<threadAndRegister, threa
 void
 StateMachineSideEffectLoad::constructed()
 {
-	bool ign;
-	addr = optimiseIRExprFP(addr, AllowableOptimisations::defaultOptimisations, &ign);
+	if (addr) {
+		bool ign;
+		addr = optimiseIRExprFP(addr, AllowableOptimisations::defaultOptimisations, &ign);
+	}
 }
 StateMachineSideEffect *
 StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
@@ -270,13 +272,23 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 {
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
-		if (smp->target->target != target) {
-			sideEffects.insert(sideEffects.end(),
-					   smp->target->sideEffects.begin(),
-					   smp->target->sideEffects.end());
-			target = smp->target->target;
-			*done_something = true;
-			return optimise(opt, oracle, done_something, freeVariables, done);
+		StateMachineEdge *other = smp->target;
+		if (other->target != target) {
+			/* Can't duplicate Phi side effects. */
+			bool havePhi = false;
+			for (auto it = other->sideEffects.begin();
+			     !havePhi && it != other->sideEffects.end();
+			     it++)
+				if ((*it)->type == StateMachineSideEffect::Phi)
+					havePhi = true;
+			if (!havePhi) {
+				sideEffects.insert(sideEffects.end(),
+						   smp->target->sideEffects.begin(),
+						   smp->target->sideEffects.end());
+				target = smp->target->target;
+				*done_something = true;
+				return optimise(opt, oracle, done_something, freeVariables, done);
+			}
 		}
 	}
 	if (TIMEOUT)
@@ -456,6 +468,13 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		StateMachineSideEffectAssertFalse *smseaf2 =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse2);
 		return definitelyEqual(smseaf1->value, smseaf2->value, opt);
+	}
+	case StateMachineSideEffect::Phi: {
+		StateMachineSideEffectPhi *smsep1 =
+			(StateMachineSideEffectPhi *)smse1;
+		StateMachineSideEffectPhi *smsep2 =
+			(StateMachineSideEffectPhi *)smse2;
+		return threadAndRegister::fullEq(smsep1->reg, smsep2->reg);
 	}
 	}
 	abort();

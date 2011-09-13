@@ -286,7 +286,7 @@ class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &
 	StateMachineSideEffect(); /* DNE */
 public:
 	enum sideEffectType {
-		Load, Store, Copy, Unreached, AssertFalse
+		Load, Store, Copy, Unreached, AssertFalse, Phi
 	} type;
 protected:
 	virtual unsigned long _hashval() const = 0;
@@ -308,6 +308,10 @@ class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 public:
 	unsigned long hashval() const;
 	StateMachineEdge(StateMachineState *t) : have_hash(false), target(t) {}
+	StateMachineEdge(std::vector<StateMachineSideEffect *> &_sideEffects,
+			 StateMachineState *t)
+		: have_hash(false), target(t), sideEffects(_sideEffects)
+	{}
 	StateMachineState *target;
 	std::vector<StateMachineSideEffect *> sideEffects;
 
@@ -769,6 +773,34 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(value); }
+};
+class StateMachineSideEffectPhi : public StateMachineSideEffect {
+	unsigned long _hashval() const { return reg.hash(); }
+public:
+	StateMachineSideEffectPhi(const threadAndRegister &_reg,
+				  const std::set<unsigned> &_generations)
+		: StateMachineSideEffect(StateMachineSideEffect::Phi),
+		  reg(_reg), generations(_generations)
+	{
+	}
+	threadAndRegister reg;
+	std::set<unsigned> generations;
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "Phi");
+		reg.prettyPrint(f);
+		fprintf(f, "(");
+		for (auto it = generations.begin(); it != generations.end(); it++) {
+			if (it != generations.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%d", *it);
+		}
+		fprintf(f, ")");
+	}
+	void visit(HeapVisitor &hv) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
+	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
+	int complexity() { return 100; }
 };
 
 void printStateMachine(const StateMachine *sm, FILE *f);

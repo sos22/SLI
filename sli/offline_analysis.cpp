@@ -10,6 +10,7 @@
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
 #include "intern.hpp"
+#include "ssa.hpp"
 #include "libvex_prof.hpp"
 
 /* We allow at most 5 assertions to be available at any given point in
@@ -1073,6 +1074,14 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 	}
 	case StateMachineSideEffect::Unreached:
 		break;
+	case StateMachineSideEffect::Phi: {
+		StateMachineSideEffectPhi *p =
+			(StateMachineSideEffectPhi *)smse;
+		outputAvail.sideEffects.insert(p);
+		outputAvail.invalidateRegister(p->reg, smse);
+		break;
+	}
+		
 	}
 	outputAvail.calcRegisterMap();
 }
@@ -1243,6 +1252,9 @@ buildNewStateMachineWithLoadsEliminated(
 				newEffect = *it;
 			break;
 		}
+		case StateMachineSideEffect::Phi:
+			newEffect = *it;
+			break;
 		}
 		assert(newEffect);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
@@ -2065,6 +2077,16 @@ namespace __offline_analysis_dead_code {
 				useExpression(smseaf->value);
 				return;
 			}
+			case StateMachineSideEffect::Phi: {
+				StateMachineSideEffectPhi *smsep =
+					(StateMachineSideEffectPhi *)smse;
+				killRegister(smsep->reg);
+				for (auto it = smsep->generations.begin();
+				     it != smsep->generations.end();
+				     it++)
+					this->insert(smsep->reg.setGen(*it));
+				return;
+			}
 			}
 			abort();
 		}
@@ -2225,6 +2247,13 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 					} else {
 						dead = !alive.registerLive(smsec->target);
 					}
+					break;
+				}
+				case StateMachineSideEffect::Phi: {
+					StateMachineSideEffectPhi *p =
+						(StateMachineSideEffectPhi *)e;
+					if (!alive.registerLive(p->reg))
+						dead = true;
 					break;
 				}
 				}
@@ -3852,6 +3881,7 @@ CFGtoCrashReason(unsigned tid,
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false);
 	crashReasons.set(original_rip, sm->root);
+	sm = convertToSSA(sm);
 	return sm;
 }
 
