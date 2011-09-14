@@ -109,6 +109,14 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 	std::set<StateMachineState *> allStates;
 	findAllStates(sm, allStates);
 
+	/* Stuff referenced by the free variables map is considered to
+	   be live everywhere in the program. */
+	LivenessEntry alwaysLive;
+	for (auto it = sm->freeVariables.content->begin();
+	     it != sm->freeVariables.content->end();
+	     it++)
+		alwaysLive.useExpression(it.value());
+
 	class LivenessMap : public std::map<StateMachineState *, LivenessEntry> {
 		void buildResForEdge(LivenessEntry &out, StateMachineEdge *edge)
 		{
@@ -177,6 +185,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 
 	class _ {
 		LivenessMap &livenessMap;
+		LivenessEntry &alwaysLive;
 		bool *done_something;
 		FreeVariableMap &fvm;
 
@@ -194,7 +203,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				case StateMachineSideEffect::Load: {
 					StateMachineSideEffectLoad *smsel =
 						(StateMachineSideEffectLoad *)e;
-					if (!alive.registerLive(smsel->target))
+					if (!alwaysLive.registerLive(smsel->target) &&
+					    !alive.registerLive(smsel->target))
 						newEffect = new StateMachineSideEffectAssertFalse(
 							IRExpr_Unop(Iop_BadPtr, smsel->addr));
 					break;
@@ -224,14 +234,16 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 						   might say. */
 						dead = true;
 					} else {
-						dead = !alive.registerLive(smsec->target);
+						dead = !alive.registerLive(smsec->target) &&
+							!alwaysLive.registerLive(smsec->target);
 					}
 					break;
 				}
 				case StateMachineSideEffect::Phi: {
 					StateMachineSideEffectPhi *p =
 						(StateMachineSideEffectPhi *)e;
-					if (!alive.registerLive(p->reg))
+					if (!alive.registerLive(p->reg) &&
+					    !alwaysLive.registerLive(p->reg))
 						dead = true;
 					break;
 				}
@@ -263,10 +275,12 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 			}			
 		}
 
-		_(LivenessMap &_livenessMap, bool *_done_something, FreeVariableMap &_fvm)
-			: livenessMap(_livenessMap), done_something(_done_something), fvm(_fvm)
+		_(LivenessMap &_livenessMap, LivenessEntry &_alwaysLive,
+		  bool *_done_something, FreeVariableMap &_fvm)
+			: livenessMap(_livenessMap), alwaysLive(_alwaysLive),
+			  done_something(_done_something), fvm(_fvm)
 		{}
-	} eliminateDeadCode(livenessMap, done_something, sm->freeVariables);
+	} eliminateDeadCode(livenessMap, alwaysLive, done_something, sm->freeVariables);
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();
