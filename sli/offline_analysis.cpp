@@ -420,6 +420,7 @@ optimiseStateMachine(StateMachine *sm,
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
+			sm = optimiseSSA(sm, &done_something);
 			sm->root->assertAcyclic();
 		}
 		sm = sm->optimise(opt, oracle, &done_something);

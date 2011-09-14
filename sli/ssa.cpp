@@ -1238,6 +1238,38 @@ deSSA(StateMachine *inp)
 	return t.transform(inp);
 }
 
+class optimiseSSATransformer : public StateMachineTransformer {
+	PossiblyReaching reaching;
+
+	StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *phi,
+							  bool *done_something)
+	{
+		std::set<unsigned> generations;
+		reaching.findReachingGenerations(phi, phi->reg, generations);
+		if (generations != phi->generations) {
+			*done_something = true;
+			phi->generations = generations;
+		}
+		return phi;
+	}
+	IRExpr *transformIRExpr(IRExpr *e, bool *b) { return NULL; }
+public:
+	optimiseSSATransformer(StateMachine *inp)
+		: reaching(inp)
+	{}
+};
+
+/* Other optimisations can sometimes lead to the set of assignments
+   which might reach a Phi node shrinking.  This pass goes through and
+   fixes things up so that the reaching set in the Phi node
+   accurately reflects this. */
+static StateMachine *
+optimiseSSA(StateMachine *inp, bool *done_something)
+{
+	optimiseSSATransformer t(inp);
+	return t.transform(inp, done_something);
+}
+
 /* End of namespace SSA */
 }
 
@@ -1251,4 +1283,10 @@ StateMachine *
 deSSA(StateMachine *inp)
 {
 	return SSA::deSSA(inp);
+}
+
+StateMachine *
+optimiseSSA(StateMachine *inp, bool *done_something)
+{
+	return SSA::optimiseSSA(inp, done_something);
 }
