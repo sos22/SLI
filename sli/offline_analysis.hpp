@@ -203,6 +203,7 @@ StateMachine *availExpressionAnalysis(StateMachine *sm, const AllowableOptimisat
 				      const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something);
+StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
 
 void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
