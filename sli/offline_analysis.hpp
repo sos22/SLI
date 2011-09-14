@@ -205,6 +205,8 @@ StateMachine *availExpressionAnalysis(StateMachine *sm, const AllowableOptimisat
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
 
+void breakCycles(StateMachine *);
+
 void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
