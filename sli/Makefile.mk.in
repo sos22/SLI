@@ -9,7 +9,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{state_machine,oracle,simplify_irexpr,eval_state_machine}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis,genfix,cnf,intern}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{StateMachineTransformer,IRExprTransformer,proximal_cause}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{removeRedundantStores,availExpressionAnalysis}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{removeRedundantStores,availExpressionAnalysis,deadcode}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))

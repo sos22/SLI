@@ -195,11 +195,15 @@ StateMachine *optimiseStateMachine(StateMachine *sm,
 				   const AllowableOptimisations &opt,
 				   Oracle *oracle,
 				   bool noExtendContext);
+
+/* Individual optimisation passes. */
 void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 			   const AllowableOptimisations &opt);
 StateMachine *availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				      const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
 				      bool *done_something);
+StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something);
+
 void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
