@@ -1113,8 +1113,12 @@ rawDupe(duplication_context &ctxt, const StateMachineEdge *inp)
 {
 	StateMachineEdge *res = new StateMachineEdge(NULL);
 	res->sideEffects.resize(inp->sideEffects.size());
+	/* We deliberately unshare side effects, so that each one
+	   appears in the machine in precisely one place.  This makes
+	   the which-side-effects-reach-here calculation a lot
+	   easier. */
 	for (unsigned x = 0; x < res->sideEffects.size(); x++)
-		ctxt(&res->sideEffects[x], inp->sideEffects[x], rawDupe);
+		res->sideEffects[x] = rawDupe(ctxt, inp->sideEffects[x]);
 	ctxt(&res->target, inp->target, rawDupe);
 	return res;
 }
