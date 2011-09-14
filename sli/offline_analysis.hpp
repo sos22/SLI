@@ -193,5 +193,7 @@ StateMachine *optimiseStateMachine(StateMachine *sm,
 				   const AllowableOptimisations &opt,
 				   Oracle *oracle,
 				   bool noExtendContext);
+void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
+			   const AllowableOptimisations &opt);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */
