@@ -1290,3 +1290,17 @@ optimiseSSA(StateMachine *inp, bool *done_something)
 {
 	return SSA::optimiseSSA(inp, done_something);
 }
+
+StateMachineSideEffect *
+StateMachineSideEffectPhi::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+{
+	if (generations.size() == 1) {
+		*done_something = true;
+		return new StateMachineSideEffectCopy(
+			reg,
+			new IRExprGet(reg.setGen(*generations.begin()),
+				      Ity_INVALID));
+	}
+	return this;
+}
+

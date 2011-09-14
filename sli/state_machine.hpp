@@ -797,7 +797,7 @@ public:
 		fprintf(f, ")");
 	}
 	void visit(HeapVisitor &hv) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something) { return this; }
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
 	int complexity() { return 100; }
