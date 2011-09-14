@@ -92,7 +92,11 @@ static bool parseIRType(IRType *out, const char *str, const char **suffix, char 
     *out = Ity_ ## n;					\
     return true;					\
   }
-  do_type(INVALID);
+  if (parseThisString( "Ity_INVALID" , str, suffix, err)) { 
+    *out = Ity_INVALID;
+    return true;
+  }
+
   do_type(I8);
   do_type(I16);
   do_type(I32);
@@ -846,13 +850,12 @@ parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suf
 		*out = threadAndRegister::invalid();
 		return true;
 	}
-	unsigned thread;
-	if (!parseDecimalUInt(&thread, str, &str, err) ||
-	    !parseThisChar(':', str, &str, err))
-		return false;
+	int thread;
 	int offset;
 	int gen;
 	if (parseThisString("tmp", str, &str, err) &&
+	    parseDecimalInt(&thread, str, &str, err) &&
+	    parseThisChar(':', str, &str, err) &&
 	    parseDecimalInt(&offset, str, &str, err) &&
 	    parseThisChar(':', str, &str, err) &&
 	    parseDecimalInt(&gen, str, suffix, err)) {
@@ -860,10 +863,12 @@ parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suf
 		return true;
 	}
 	if (parseThisString("reg", str, &str, err) &&
+	    parseDecimalInt(&thread, str, &str, err) &&
+	    parseThisChar(':', str, &str, err) &&
 	    parseDecimalInt(&offset, str, &str, err) &&
 	    parseThisChar(':', str, &str, err) &&
 	    parseDecimalInt(&gen, str, suffix, err)) {
-	   *out = threadAndRegister::reg(thread, offset, gen);
+		*out = threadAndRegister::reg(thread, offset, gen);
 		return true;
 	}
 	*err = vex_asprintf("Wanted threadAndRegister, got %.10s", str);
