@@ -127,6 +127,30 @@ StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_som
 	return res;
 }
 
+StateMachineState *
+StateMachineTransformer::transformState(StateMachineState *s, bool *done_something)
+{
+	if (StateMachineTerminal *t = dynamic_cast<StateMachineTerminal *>(s)) {
+		if (StateMachineUnreached *a = dynamic_cast<StateMachineUnreached *>(t)) {
+			return transformOneState(a, done_something);
+		} else if (StateMachineCrash *b = dynamic_cast<StateMachineCrash *>(t)) {
+			return transformOneState(b, done_something);
+		} else if (StateMachineNoCrash *c = dynamic_cast<StateMachineNoCrash *>(t)) {
+			return transformOneState(c, done_something);
+		} else if (StateMachineStub *d = dynamic_cast<StateMachineStub *>(t)) {
+			return transformOneState(d, done_something);
+		} else {
+			abort();
+		}
+	} else if (StateMachineProxy *p = dynamic_cast<StateMachineProxy *>(s)) {
+		return transformOneState(p, done_something);
+	} else if (StateMachineBifurcate *b = dynamic_cast<StateMachineBifurcate *>(s)) {
+		return transformOneState(b, done_something);
+	} else {
+		abort();
+	}
+}
+
 StateMachine *
 StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 {
@@ -144,28 +168,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *s = *it;
-
-		StateMachineState *res;
-		if (StateMachineTerminal *t = dynamic_cast<StateMachineTerminal *>(s)) {
-			if (StateMachineUnreached *a = dynamic_cast<StateMachineUnreached *>(t)) {
-				res = transformOneState(a, done_something);
-			} else if (StateMachineCrash *b = dynamic_cast<StateMachineCrash *>(t)) {
-				res = transformOneState(b, done_something);
-			} else if (StateMachineNoCrash *c = dynamic_cast<StateMachineNoCrash *>(t)) {
-				res = transformOneState(c, done_something);
-			} else if (StateMachineStub *d = dynamic_cast<StateMachineStub *>(t)) {
-				res = transformOneState(d, done_something);
-			} else {
-				abort();
-			}
-		} else if (StateMachineProxy *p = dynamic_cast<StateMachineProxy *>(s)) {
-			res = transformOneState(p, done_something);
-		} else if (StateMachineBifurcate *b = dynamic_cast<StateMachineBifurcate *>(s)) {
-			res = transformOneState(b, done_something);
-		} else {
-			abort();
-		}
-
+		StateMachineState *res = transformState(s, done_something);
 		if (res != NULL && res != s) {
 			/* This one got rewritten */
 			stateRewrites[s] = res;

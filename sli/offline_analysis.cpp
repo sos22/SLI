@@ -226,128 +226,116 @@ breakCycles(CFGNode<t> *cfg)
 	}
 }
 
-class StateMachineWalker {
-	void doit(StateMachineState *s, std::set<StateMachineState *> &visited);
-	void doit(StateMachineEdge *s, std::set<StateMachineState *> &visited);
-public:
-	virtual void visitEdge(StateMachineEdge *e) {}
-	virtual void visitState(StateMachineState *s) {}
-	virtual void visitSideEffect(StateMachineSideEffect *smse) {}
-	void doit(StateMachineState *s);
-};
-
-void
-StateMachineWalker::doit(StateMachineState *sm, std::set<StateMachineState *> &visited)
-{
-	if (visited.count(sm))
-		return;
-	visited.insert(sm);
-
-	visitState(sm);
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm) ||
-	    dynamic_cast<StateMachineUnreached *>(sm))
-		return;
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		doit(smb->trueTarget, visited);
-		doit(smb->falseTarget, visited);
-	} else if (StateMachineProxy *smp =
-		   dynamic_cast<StateMachineProxy *>(sm)) {
-		doit(smp->target, visited);
-	} else {
-		abort();
+class findAllSideEffectsVisitor : public StateMachineTransformer {
+	StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *smse, bool *)
+	{
+		out.insert(smse);
+		return smse;
 	}
-}
-void
-StateMachineWalker::doit(StateMachineEdge *se, std::set<StateMachineState *> &visited)
-{
-	visitEdge(se);
-	for (std::vector<StateMachineSideEffect *>::iterator it = se->sideEffects.begin();
-	     it != se->sideEffects.end();
-	     it++)
-		visitSideEffect(*it);
-	doit(se->target, visited);
-}
-void
-StateMachineWalker::doit(StateMachineState *s)
-{
-	std::set<StateMachineState *> visited;
-	doit(s, visited);
-}
-
-class findAllSideEffectsVisitor : public StateMachineWalker {
+	IRExpr *transformIRExpr(IRExpr *e, bool *)
+	{
+		return e;
+	}
 public:
 	std::set<StateMachineSideEffect *> &out;
 	findAllSideEffectsVisitor(std::set<StateMachineSideEffect *> &o)
 		: out(o)
 	{}
-	void visitSideEffect(StateMachineSideEffect *smse)
-	{
-		out.insert(smse);
-	}
 };
 static void
 findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 {
 	findAllSideEffectsVisitor v(out);
-	v.doit(sm->root);
+	v.transform(sm);
 }
 
-class findAllLoadsVisitor : public StateMachineWalker {
+class findAllLoadsVisitor : public StateMachineTransformer {
+	StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *smse, bool *)
+	{
+		out.insert(smse);
+		return smse;
+	}
+	IRExpr *transformIRExpr(IRExpr *e, bool *)
+	{
+		return e;
+	}
 public:
 	std::set<StateMachineSideEffectLoad *> &out;
 	findAllLoadsVisitor(std::set<StateMachineSideEffectLoad *> &o)
 		: out(o)
 	{}
-	void visitSideEffect(StateMachineSideEffect *smse)
-	{
-		if (smse->type == StateMachineSideEffect::Load)
-			out.insert(dynamic_cast<StateMachineSideEffectLoad *>(smse));
-	}
 };
 void
 findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
 {
 	findAllLoadsVisitor v(out);
-	v.doit(sm->root);
+	v.transform(sm);
 }
 
-class findAllEdgesVisitor : public StateMachineWalker {
+class findAllEdgesVisitor : public StateMachineTransformer {
+	StateMachineEdge *transformOneEdge(StateMachineEdge *x, bool *)
+	{
+		out.insert(x);
+		return NULL;
+	}
+	StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *, bool *)
+	{
+		/* This should never be invoked, because we stop the
+		   traversal in transformOneEdge. */
+		abort();
+	}
+	IRExpr *transformIRExpr(IRExpr *e, bool *)
+	{
+		return e;
+	}
 public:
 	std::set<StateMachineEdge *> &out;
 	findAllEdgesVisitor(std::set<StateMachineEdge *> &o)
 		: out(o)
 	{}
-	void visitEdge(StateMachineEdge *sme)
-	{
-		out.insert(sme);
-	}
 };
 static void
 findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out)
 {
 	findAllEdgesVisitor v(out);
-	v.doit(sm->root);
+	v.transform(sm);
 }
 
-class findAllStatesVisitor : public StateMachineWalker {
+class findAllStatesVisitor : public StateMachineTransformer {
+	StateMachineState *transformState(StateMachineState *s, bool *)
+	{
+		out.insert(s);
+		return NULL;
+	}
+	StateMachineEdge *transformOneEdge(StateMachineEdge *e, bool *)
+	{
+		return NULL;
+	}
+	void transformFreeVariables(FreeVariableMap *fvm, bool *done_something)
+	{
+		return;
+	}
+	IRExpr *transformIRExpr(IRExpr *e, bool *)
+	{
+		/* We shouldn't get here: transformOneState() stops it
+		   looking in state conditions, transformOneEdge()
+		   stops it looking in side-effects, and
+		   transformFreeVariables() stops it looking in the
+		   free variable map, and there shouldn't be anywhere
+		   else for free variables to be hiding. */
+		abort();
+	}
 public:
 	std::set<StateMachineState *> &out;
 	findAllStatesVisitor(std::set<StateMachineState *> &o)
 		: out(o)
 	{}
-	void visitState(StateMachineState *sm)
-	{
-		out.insert(sm);
-	}
 };
 static void
 findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 {
 	findAllStatesVisitor v(out);
-	v.doit(sm->root);
+	v.transform(sm);
 }
 
 class avail_t {

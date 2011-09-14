@@ -175,9 +175,10 @@ protected:
 			return NULL;
 	}
 	virtual StateMachineEdge *transformOneEdge(StateMachineEdge *, bool *);
+	virtual StateMachineState *transformState(StateMachineState *, bool *);
 public:
-	StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
-						    bool *);
+	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
+							    bool *);
 	virtual void transformFreeVariables(FreeVariableMap *fvm, bool *done_something = NULL)
 	{
 		bool b;
