@@ -1195,7 +1195,6 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 			continue;
 		visited.insert(head);
 		ths->discoverFunctionHead(head, heads);
-		printf("%zd heads left to process...\n", heads.size());
 	}
 
 	create_index("branchDest", "branchRips", "dest");
@@ -1360,6 +1359,8 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
+				stmt = irsb->stmts[end_of_instruction];
+				assert(dynamic_cast<IRStmtIMark *>(stmt));
 				fallThrough.push_back(((IRStmtIMark *)stmt)->addr);
 			}
 
@@ -1564,6 +1565,7 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 				getInstructionFallThroughs(rip, fallThroughRips);
 		}
 	} else {
+		assert(dynamic_cast<IRStmtIMark *>(statements[nr_statements]));
 		fallThroughRips.push_back(((IRStmtIMark *)statements[nr_statements])->addr);
 	}
 
