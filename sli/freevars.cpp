@@ -593,17 +593,22 @@ applyCopiesToFreeVariables(FreeVariableMap &fv,
 {
 	class _ : public IRExprTransformer {
 		std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &m;
+		FreeVariableMap &fvm;
 		IRExpr *transformIex(IRExprGet *g) {
 			auto it = m.find(g->reg);
 			if (it != m.end())
 				return it->second;
 			return IRExprTransformer::transformIex(g);
 		}
+		IRExpr *transformIex(IRExprFreeVariable *e) {
+			return fvm.get(e->key);
+		}
 	public:
-		_(std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &_m)
-			: m(_m)
+		_(std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &_m,
+		  FreeVariableMap &_fvm)
+			: m(_m), fvm(_fvm)
 		{}
-	} t(m);
+	} t(m, fv);
 	fv.applyTransformation(t, done_something);
 }
 
