@@ -32,7 +32,7 @@ StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracl
 	std::set<StateMachineState *> done;
 	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables, done);
 	FreeVariableMap fv(freeVariables);
-	fv.optimise(opt, done_something);
+	fv.optimise(opt, &b);
 	if (b) {
 		*done_something = true;
 		StateMachine *sm = new StateMachine(*this);
