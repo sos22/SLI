@@ -6,6 +6,11 @@
 #include "offline_analysis.hpp"
 #include "libvex_prof.hpp"
 
+/* Debug options: */
+#define dump_avail_table 0 /* Dump the available expression table
+			    * after we build it */
+#define debug_build_table 0 /* Debug to do with building the table */
+
 namespace _availExpressionAnalysis {
 /* Unconfuse emacs */
 #if 0
@@ -81,17 +86,21 @@ public:
 void
 avail_t::print(FILE *f)
 {
-	fprintf(f, "Available side effects:\n");
-	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
-		fprintf(f, "\t");
-		(*it)->prettyPrint(f);
-		fprintf(f, "\n");
+	if (!sideEffects.empty()) {
+		fprintf(f, "\tAvailable side effects:\n");
+		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+			fprintf(f, "\t\t");
+			(*it)->prettyPrint(f);
+			fprintf(f, "\n");
+		}
 	}
-	fprintf(f, "Asserted false:\n");
-	for (auto it = assertFalse.begin(); it != assertFalse.end(); it++) {
-		fprintf(f, "\t");
-		ppIRExpr(*it, f);
-		fprintf(f, "\n");
+	if (!assertFalse.empty()) {
+		fprintf(f, "\tAsserted false:\n");
+		for (auto it = assertFalse.begin(); it != assertFalse.end(); it++) {
+			fprintf(f, "\t\t");
+			ppIRExpr(*it, f);
+			fprintf(f, "\n");
+		}
 	}
 }
 
@@ -584,6 +593,12 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
 			bool *done_something)
 {
+#if dump_avail_table || debug_build_table
+	std::map<const StateMachineState *, int> stateLabels;
+	printf("Avail analysis on state machine:\n");
+	printStateMachine(sm, stdout, stateLabels);
+#endif
+
 	__set_profiling(availExpressionAnalysis);
 	/* Fairly standard available expression analysis.  Each edge
 	   in the state machine has two sets of
@@ -655,33 +670,30 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		availOnEntry[*it] = potentiallyAvailable;
 	availOnEntry[sm->root].clear();
 
+#if debug_build_table
+	printf("Initial state entry availability map:\n");
+	for (auto it = availOnEntry.begin();
+	     it != availOnEntry.end();
+	     it++) {
+		printf("State %d:\n", stateLabels[it->first]);
+		it->second.print(stdout);
+	}
+#endif
 	std::set<StateMachineState *> statesNeedingRefresh(allStates);
+	std::set<StateMachineEdge *> edgesNeedingRefresh(allEdges);
 
 	/* Tarski iteration.  */
-	bool progress;
-	do {
-		progress = false;
-
+	statesNeedingRefresh.insert(sm->root);
+	while (1) {
 		if (TIMEOUT)
 			return sm;
 
-		/* Update the set of things which are available on
-		   entry.  This means walking the set of edges and
-		   looking at the targets.  If there's something which
-		   is available at the start of the target, but not at
-		   the end of this edge, remove it from the target. */
-		for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
-		     it != allEdges.end();
-		     it++) {
-			StateMachineEdge *edge = *it;
-			StateMachineState *target = edge->target;
-			avail_t &avail_at_end_of_edge(availOnExit[edge]);
-			avail_t &avail_at_start_of_target(availOnEntry[target]);
-			if (avail_at_start_of_target.intersect(avail_at_end_of_edge)) {
-				progress = true;
-				statesNeedingRefresh.insert(target);
-			}
-		}
+#if debug_build_table
+		printf("Start table building pass\n");
+#endif
+
+		if (statesNeedingRefresh.empty())
+			break;
 
 		/* Now go through and update the avail-on-exit set.
 		   Use a slightly weird-looking iteration over states
@@ -690,6 +702,10 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		for (std::set<StateMachineState *>::iterator it = statesNeedingRefresh.begin();
 		     it != statesNeedingRefresh.end();
 		     it++) {
+#if debug_build_table
+			printf("Refresh state %d\n",
+			       stateLabels[*it]);
+#endif
 			if (dynamic_cast<StateMachineCrash *>(*it) ||
 			    dynamic_cast<StateMachineNoCrash *>(*it) ||
 			    dynamic_cast<StateMachineStub *>(*it) ||
@@ -714,6 +730,11 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				assert(availOnEntry.count(*it));
 				avail_t outputAvail(availOnEntry[*it]);
 
+#if debug_build_table
+				printf("Consider edge %d -> state %d\n", x,
+				       stateLabels[edge->target]);
+#endif
+
 				/* Build the output set. */
 				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
 					     edge->sideEffects.begin();
@@ -721,14 +742,72 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				     it2++)
 					updateAvailSetForSideEffect(outputAvail, *it2,
 								    opt, alias, oracle);
-				avail_t &currentAvail(availOnExit[edge]);
-				if (!progress && currentAvail != outputAvail)
-					progress = true;
-				currentAvail = outputAvail;
+				if (availOnExit[edge].intersect(outputAvail)) {
+#if debug_build_table
+					printf("Made progress\n");
+#endif
+					edgesNeedingRefresh.insert(edge);
+				} else {
+#if debug_build_table
+					printf("State is unchanged\n");
+#endif
+				}
 			}
 		}
 		statesNeedingRefresh.clear();
-	} while (progress);
+
+		if (edgesNeedingRefresh.empty())
+			break;
+
+		/* Update the set of things which are available on
+		   entry.  This means walking the set of edges and
+		   looking at the targets.  If there's something which
+		   is available at the start of the target, but not at
+		   the end of this edge, remove it from the target. */
+		for (std::set<StateMachineEdge *>::iterator it = edgesNeedingRefresh.begin();
+		     it != edgesNeedingRefresh.end();
+		     it++) {
+			StateMachineEdge *edge = *it;
+			StateMachineState *target = edge->target;
+			avail_t &avail_at_end_of_edge(availOnExit[edge]);
+			avail_t &avail_at_start_of_target(availOnEntry[target]);
+			if (avail_at_start_of_target.intersect(avail_at_end_of_edge)) {
+				statesNeedingRefresh.insert(target);
+#if debug_build_table
+				printf("Mark state %d as needing refresh\n",
+				       stateLabels[target]);
+#endif
+			}
+		}
+		edgesNeedingRefresh.clear();
+
+#if debug_build_table
+		printf("state entry availability at end of pass:\n");
+		for (auto it = availOnEntry.begin();
+		     it != availOnEntry.end();
+		     it++) {
+			printf("State %d:\n", stateLabels[it->first]);
+			it->second.print(stdout);
+		}
+		printf("Edge exit availability:\n");
+		for (auto it = availOnExit.begin();
+		     it != availOnExit.end();
+		     it++) {
+			printf("Edge to state %d:\n", stateLabels[it->first->target]);
+			it->second.print(stdout);
+		}
+#endif
+	}
+
+#if dump_avail_table
+	printf("Final (state entry) availability map:\n");
+	for (auto it = availOnEntry.begin();
+	     it != availOnEntry.end();
+	     it++) {
+		printf("State %d:\n", stateLabels[it->first]);
+		it->second.print(stdout);
+	}
+#endif
 
 	/* So after all that we now have a complete map of what's
 	   available where.  Given that, we should be able to
