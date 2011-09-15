@@ -28,6 +28,7 @@ public:
 			s->root = new StateMachineProxy(s->origin, s->root);
 		std::set<StateMachineEdge *> allEdges;
 		findAllEdges(s, allEdges);
+		content.clear();
 		for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
 			StateMachineEdge *e = *it;
 			std::set<StateMachineEdge *> &contentE(content[e]);
@@ -173,7 +174,7 @@ breakCycles(StateMachine *inp)
 
 	reach.initialise(inp);
 	while (1) {
-		auto r = reach.extendPaths();
+		reachabilityMap::extendPathsRes r = reach.extendPaths();
 		if (r.finished)
 			break;
 		if (!r.haveCycle)
