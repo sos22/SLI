@@ -205,6 +205,9 @@ StateMachine *availExpressionAnalysis(StateMachine *sm, const AllowableOptimisat
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
 
+StateMachine *introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something);
+StateMachine *optimiseFreeVariables(StateMachine *sm, bool *done_something);
+
 void breakCycles(StateMachine *);
 
 void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);

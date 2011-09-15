@@ -347,7 +347,6 @@ StateMachine *introduceFreeVariables(StateMachine *sm,
 				     const AllowableOptimisations &opt,
 				     OracleInterface *oracle,
 				     bool *done_something);
-StateMachine *optimiseFreeVariables(StateMachine *sm, bool *done_something);
 unsigned getInstructionSize(AddressSpace *as, unsigned long rip);
 
 #endif /* !ORACLE_H__ */
