@@ -564,6 +564,49 @@ public:
 	{}
 };
 
+static void
+findAllCopies(StateMachine *sm, std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &out)
+{
+	class _ : public StateMachineTransformer {
+		std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &out;
+		StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *c, bool *)
+		{
+			out[c->target] = c->value;
+			return c;
+		}
+		IRExpr *transformIRExpr(IRExpr *e, bool *)
+		{
+			return e;
+		}
+	public:
+		_(std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &_out)
+			: out(_out)
+		{}
+	} t(out);
+	t.transform(sm);
+}
+
+static void
+applyCopiesToFreeVariables(FreeVariableMap &fv,
+			   std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &m,
+			   bool *done_something)
+{
+	class _ : public IRExprTransformer {
+		std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &m;
+		IRExpr *transformIex(IRExprGet *g) {
+			auto it = m.find(g->reg);
+			if (it != m.end())
+				return it->second;
+			return IRExprTransformer::transformIex(g);
+		}
+	public:
+		_(std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> &_m)
+			: m(_m)
+		{}
+	} t(m);
+	fv.applyTransformation(t, done_something);
+}
+
 static StateMachine *
 optimiseFreeVariables(StateMachine *sm, bool *done_something)
 {
@@ -571,7 +614,11 @@ optimiseFreeVariables(StateMachine *sm, bool *done_something)
 	bool ign;
 	cfvv.transform(sm, &ign);
 	simplifyFreeVariablesTransformer sfvt(cfvv.counts, sm->freeVariables);
-	return sfvt.transform(sm, done_something);
+	sm = sfvt.transform(sm, done_something);
+	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> copies;
+	findAllCopies(sm, copies);
+	applyCopiesToFreeVariables(sm->freeVariables, copies, done_something);
+	return sm;
 }
 
 /* End of namespace */
