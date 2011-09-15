@@ -14,32 +14,11 @@
 #include "libvex_prof.hpp"
 
 template <typename t> void printCFG(const CFGNode<t> *cfg);
-template <typename k, typename v>
-class abstract_map {
-public:
-	virtual bool hasKey(const k &) = 0;
-	virtual v get(const k &) = 0;
-	virtual void set(const k &, const v &) = 0;
-};
 template <typename t> StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<t> *cfg,
-						     abstract_map<t, StateMachineState *> &crashReasons,
+						     typename gc_heap_map<t, StateMachineState, &ir_heap>::type *crashReasons,
 						     StateMachineState *escapeState,
 						     Oracle *oracle);
 
-class iiCrashReasons : public abstract_map<unsigned long, StateMachineState *> {
-public:
-	InferredInformation *ii;
-	iiCrashReasons(InferredInformation *_ii)
-		: ii(_ii)
-	{}
-	bool hasKey(const unsigned long &x) { return ii->hasKey(x); }
-	StateMachineState *get(const unsigned long &x) {
-		return ii->get(x);
-	}
-	void set(const unsigned long &x, StateMachineState *const &v) {
-		ii->set(x, v);
-	}
-};
 static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
 						 unsigned long start,
 						 const std::set<unsigned long> &terminalFunctions,
@@ -868,6 +847,7 @@ public:
 	StackRip(unsigned long _rip) : rip(_rip), valid(true) {}
 	StackRip() : valid(false) {}
 
+	unsigned long hash() const { return rip; }
 	StackRip jump(unsigned long r) {
 		StackRip w(*this);
 		w.rip = r;
@@ -1059,20 +1039,7 @@ buildCFGForCallGraph(AddressSpace *as,
 static StateMachine *
 CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode<StackRip> *cfg)
 {
-	class : public abstract_map<StackRip, StateMachineState *> {
-	public:
-		std::map<StackRip, StateMachineState *> impl;
-		bool hasKey(const StackRip &k) {
-			return impl.count(k) != 0;
-		}
-		StateMachineState *get(const StackRip &k) {
-			return impl[k];
-		}
-		void set(const StackRip &k, StateMachineState *const &v) {
-			impl[k] = v;
-		}
-	} state;
-	return CFGtoCrashReason<StackRip>(tid, cfg, state, StateMachineCrash::get(), oracle);
+	return CFGtoCrashReason<StackRip>(tid, cfg, NULL, StateMachineCrash::get(), oracle);
 }
 
 static bool
@@ -1204,10 +1171,9 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		iiCrashReasons _(ii);
 		cr = CFGtoCrashReason<unsigned long>(sm->tid,
 						     cfg,
-						     _,
+						     ii,
 						     StateMachineNoCrash::get(),
 						     oracle);
 		if (!cr) {
@@ -1386,9 +1352,8 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		interesting.rips.insert(interestingRip);
 		trimCFG(cfg.get(), interesting, INT_MAX, true);
 
-		iiCrashReasons _(ii);
 		VexPtr<StateMachine, &ir_heap> cr(
-			CFGtoCrashReason<unsigned long>(tid._tid(), cfg, _,
+			CFGtoCrashReason<unsigned long>(tid._tid(), cfg, ii,
 							StateMachineNoCrash::get(),
 							oracle));
 		if (!cr) {
@@ -1670,15 +1635,17 @@ rewriteTemporary(IRExpr *sm,
 template <typename t> StateMachine *
 CFGtoCrashReason(unsigned tid,
 		 CFGNode<t> *cfg,
-		 abstract_map<t, StateMachineState *> &crashReasons,
+		 typename gc_heap_map<t, StateMachineState, &ir_heap>::type *crashReasons,
 		 StateMachineState *escapeState,
 		 Oracle *oracle)
 {
+	typedef typename gc_heap_map<t, StateMachineState, &ir_heap>::type inferredInformation;
+
 	class State {
 		typedef std::pair<StateMachineState **, CFGNode<t> *> reloc_t;
 		std::vector<CFGNode<t> *> pending;
 		std::vector<reloc_t> relocs;
-		abstract_map<t, StateMachineState *> &crashReasons;
+		inferredInformation *crashReasons;
 	public:
 		std::map<CFGNode<t> *, StateMachineState *> cfgToState;
 
@@ -1689,8 +1656,8 @@ CFGtoCrashReason(unsigned tid,
 					for (auto it = relocs.begin(); it != relocs.end(); it++) {
 						if (cfgToState.count(it->second)) {
 							*it->first = cfgToState[it->second];
-						} else if (crashReasons.hasKey(it->second->my_rip)) {
-							*it->first = crashReasons.get(it->second->my_rip);
+						} else if (crashReasons && crashReasons->hasKey(it->second->my_rip)) {
+							*it->first = crashReasons->get(it->second->my_rip);
 						} else {
 							newRelocs.push_back(*it);
 							pending.push_back(it->second);
@@ -1713,7 +1680,7 @@ CFGtoCrashReason(unsigned tid,
 			relocs.push_back(reloc_t(p, c));
 		}
 
-		State(abstract_map<t, StateMachineState *> &_crashReasons)
+		State(inferredInformation *_crashReasons)
 			: crashReasons(_crashReasons)
 		{}
 	} state(crashReasons);
@@ -1921,8 +1888,8 @@ CFGtoCrashReason(unsigned tid,
 		cfg = state.nextNode();
 		if (!cfg)
 			break;
-		if (crashReasons.hasKey(cfg->my_rip)) {
-			state.cfgToState[cfg] = crashReasons.get(cfg->my_rip);
+		if (crashReasons && crashReasons->hasKey(cfg->my_rip)) {
+			state.cfgToState[cfg] = crashReasons->get(cfg->my_rip);
 		} else {
 			StateMachineState *s;
 			IRSB *irsb = fetchIrsb(cfg->my_rip);
@@ -1941,7 +1908,8 @@ CFGtoCrashReason(unsigned tid,
 	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false);
-	crashReasons.set(original_rip, sm->root);
+	if (crashReasons)
+		crashReasons->set(original_rip, sm->root);
 	sm = convertToSSA(sm);
 	sm->sanityCheck();
 	return sm;
