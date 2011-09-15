@@ -531,7 +531,10 @@ public:
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
 	{
 		fprintf(f, "{%lx:", origin);
-		target->prettyPrint(f, "\n  ", labels);
+		if (target)
+			target->prettyPrint(f, "\n  ", labels);
+		else
+			fprintf(f, "<NULL>");
 		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
@@ -602,9 +605,15 @@ public:
 		fprintf(f, "%lx: if (", origin);
 		ppIRExpr(condition, f);
 		fprintf(f, ")\n  then {\n\t");
-		trueTarget->prettyPrint(f, "\n\t", labels);
+		if (trueTarget)
+			trueTarget->prettyPrint(f, "\n\t", labels);
+		else
+			fprintf(f, "<NULL>\n\t");
 		fprintf(f, "}\n  else {\n\t");
-		falseTarget->prettyPrint(f, "\n\t", labels);
+		if (falseTarget)
+			falseTarget->prettyPrint(f, "\n\t", labels);
+		else
+			fprintf(f, "<NULL>\n\t");
 		fprintf(f, "}");
 	}
 	void visit(HeapVisitor &hv)
