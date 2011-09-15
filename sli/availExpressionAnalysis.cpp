@@ -10,6 +10,8 @@
 #define dump_avail_table 0 /* Dump the available expression table
 			    * after we build it */
 #define debug_build_table 0 /* Debug to do with building the table */
+#define debug_substitutions 0 /* Debug to do with actually using the
+				 table. */
 
 namespace _availExpressionAnalysis {
 /* Unconfuse emacs */
@@ -99,6 +101,15 @@ avail_t::print(FILE *f)
 		for (auto it = assertFalse.begin(); it != assertFalse.end(); it++) {
 			fprintf(f, "\t\t");
 			ppIRExpr(*it, f);
+			fprintf(f, "\n");
+		}
+	}
+	if (!registers.empty()) {
+		fprintf(f, "Register map:\n");
+		for (auto it = registers.begin(); it != registers.end(); it++) {
+			it->first.prettyPrint(f);
+			fprintf(f, " -> ");
+			ppIRExpr(it->second, f);
 			fprintf(f, "\n");
 		}
 	}
@@ -246,6 +257,10 @@ avail_t::calcRegisterMap()
 		StateMachineSideEffect *se = *it;
 		if (se->type == StateMachineSideEffect::Copy) {
 			StateMachineSideEffectCopy *sep = (StateMachineSideEffectCopy *)se;
+			/* It's really bad news if we have two
+			   available expressions which both define the
+			   same register. */
+			assert(!registers.count(sep->target));
 			registers[sep->target] = sep->value;
 		} else if (se->type == StateMachineSideEffect::AssertFalse) {
 			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
@@ -381,7 +396,11 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
 	OracleInterface *oracle,
-	bool *done_something);
+	bool *done_something
+#if debug_substitutions
+	, std::map<const StateMachineState *, int> &stateLabels
+#endif
+	);
 static StateMachineEdge *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachineEdge *sme,
@@ -391,16 +410,31 @@ buildNewStateMachineWithLoadsEliminated(
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
 	OracleInterface *oracle,
-	bool *done_something)
+	bool *done_something
+#if debug_substitutions
+	, std::map<const StateMachineState *, int> &stateLabels
+#endif
+)
 {
 	if (TIMEOUT)
 		return sme;
 	StateMachineEdge *res =
 		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
-									     done_something));
+									     done_something
+#if debug_substitutions
+									     , stateLabels
+#endif
+					     ));
 
 	avail_t currentlyAvailable(initialAvail);
-	
+	currentlyAvailable.calcRegisterMap();
+
+#if debug_substitutions
+	printf("Looking at edge to state %d\n", stateLabels[sme->target]);
+	printf("Available:\n");
+	currentlyAvailable.print(stdout);
+#endif
+
 	for (std::vector<StateMachineSideEffect *>::const_iterator it =
 		     sme->sideEffects.begin();
 	     !TIMEOUT && it != sme->sideEffects.end();
@@ -408,6 +442,12 @@ buildNewStateMachineWithLoadsEliminated(
 		StateMachineSideEffect *newEffect;
 
 		newEffect = NULL;
+
+#if debug_substitutions
+		printf("Side effect ");
+		(*it)->prettyPrint(stdout);
+		printf("\n");
+#endif
 
 		switch ((*it)->type) {
 		case StateMachineSideEffect::Store: {
@@ -470,10 +510,11 @@ buildNewStateMachineWithLoadsEliminated(
 			IRExpr *newValue;
 			bool doit = false;
 			newValue = applyAvailSet(currentlyAvailable, smsec->value, false, &doit);
-			if (doit)
+			if (doit) {
+				*done_something = true;
 				newEffect = new StateMachineSideEffectCopy(
 					smsec->target, newValue);
-			else
+			} else
 				newEffect = *it;
 			break;
 		}
@@ -497,9 +538,10 @@ buildNewStateMachineWithLoadsEliminated(
 				newVal = IRExpr_Const(IRConst_U1(0));
 				doit = true;
 			}
-			if (doit)
+			if (doit) {
 				newEffect = new StateMachineSideEffectAssertFalse(newVal);
-			else
+				*done_something = true;
+			} else
 				newEffect = *it;
 			break;
 		}
@@ -507,9 +549,19 @@ buildNewStateMachineWithLoadsEliminated(
 			newEffect = *it;
 			break;
 		}
+#if debug_substitutions
+		printf("New side effect ");
+		newEffect->prettyPrint(stdout);
+		printf("\n");
+#endif
 		assert(newEffect);
+		if (!*done_something) assert(newEffect == *it);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
 		res->sideEffects.push_back(newEffect);
+#if debug_substitutions
+		printf("New available set:\n");
+		currentlyAvailable.print(stdout);
+#endif
 	}
 	return res;
 }
@@ -521,7 +573,11 @@ buildNewStateMachineWithLoadsEliminated(
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
 	OracleInterface *oracle,
-	bool *done_something)
+	bool *done_something
+#if debug_substitutions
+	, std::map<const StateMachineState *, int> &stateLabels
+#endif
+	)
 {
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
@@ -534,7 +590,6 @@ buildNewStateMachineWithLoadsEliminated(
 		return memo[sm];
 	}
 	avail_t avail(availMap[sm]);
-	avail.calcRegisterMap();
 
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
@@ -548,10 +603,18 @@ buildNewStateMachineWithLoadsEliminated(
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
 			smb->trueTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something);
+			done_something
+#if debug_substitutions
+			, stateLabels
+#endif
+			);
 		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
 			smb->falseTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something);
+			done_something
+#if debug_substitutions
+			, stateLabels
+#endif
+			);
 		return res;
 	} if (StateMachineProxy *smp =
 	      dynamic_cast<StateMachineProxy *>(sm)) {
@@ -560,7 +623,11 @@ buildNewStateMachineWithLoadsEliminated(
 		memo[sm] = res;
 		res->target = buildNewStateMachineWithLoadsEliminated(
 			smp->target, avail, availMap, memo, opt, alias, oracle,
-			done_something);
+			done_something
+#if debug_substitutions
+			, stateLabels
+#endif
+);
 		return res;
 	} else {
 		abort();
@@ -574,12 +641,20 @@ buildNewStateMachineWithLoadsEliminated(
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
 	OracleInterface *oracle,
-	bool *done_something)
+	bool *done_something
+#if debug_substitutions
+	, std::map<const StateMachineState *, int> &stateLabels
+#endif
+	)
 {
 	std::map<StateMachineState *, StateMachineState *> memo;
 	bool d = false;
 	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(sm->root, availMap, memo, opt, alias, oracle,
-									      &d);
+									      &d
+#if debug_substitutions
+									      , stateLabels
+#endif
+		);
 	if (d) {
 		*done_something = true;
 		return new StateMachine(sm, sm->origin, new_root);
@@ -593,7 +668,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
 			bool *done_something)
 {
-#if dump_avail_table || debug_build_table
+#if dump_avail_table || debug_build_table || debug_substitutions
 	std::map<const StateMachineState *, int> stateLabels;
 	printf("Avail analysis on state machine:\n");
 	printStateMachine(sm, stdout, stateLabels);
@@ -819,7 +894,11 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		opt,
 		alias,
 		oracle,
-		done_something);
+		done_something
+#if debug_substitutions
+		, stateLabels
+#endif
+		);
 }
 
 /* End of namespace */
