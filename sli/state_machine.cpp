@@ -392,9 +392,8 @@ printContainer(const cont &v, FILE *f)
 }
 
 void
-printStateMachine(const StateMachineState *sm, FILE *f)
+printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
-	std::map<const StateMachineState *, int> labels;
 	std::vector<const StateMachineState *> states;
 
 	buildStateLabelTable(sm, labels, states);
@@ -408,12 +407,27 @@ printStateMachine(const StateMachineState *sm, FILE *f)
 }
 
 void
-printStateMachine(const StateMachine *sm, FILE *f)
+printStateMachine(const StateMachineState *sm, FILE *f)
+{
+	std::map<const StateMachineState *, int> labels;
+	printStateMachine(sm, f, labels);
+}
+
+void
+printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
 	fprintf(f, "Machine for %lx:%d\n", sm->origin, sm->tid);
-	printStateMachine(sm->root, f);
+	printStateMachine(sm->root, f, labels);
 	sm->freeVariables.print(f);
 }
+
+void
+printStateMachine(const StateMachine *sm, FILE *f)
+{
+	std::map<const StateMachineState *, int> labels;
+	printStateMachine(sm, f, labels);
+}
+
 
 unsigned long
 StateMachineEdge::hashval() const
