@@ -1353,3 +1353,10 @@ FreeVariableMap::applyTransformation(IRExprTransformer &x, bool *done_something)
 		it.set_value(x.transformIRExpr(it.value(), done_something));
 }
 
+void
+StateMachine::sanityCheck() const
+{
+	std::vector<const StateMachineEdge *> path;
+	std::set<threadAndRegister, threadAndRegister::fullCompare> live;
+	root->sanityCheck(live, path);
+}

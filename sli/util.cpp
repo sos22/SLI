@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include "sli.h"
+#include "offline_analysis.hpp"
 #include "libvex_parse.h"
 
 __timer_message_filter *__timer_message_filter::head;
@@ -131,3 +132,21 @@ __fail(const char *file, unsigned line, const char *fmt, ...)
 #undef abort
 	abort();
 }
+
+void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> &live)
+{
+	class _ : public IRExprTransformer {
+		const std::set<threadAndRegister, threadAndRegister::fullCompare> &live;
+		IRExpr *transformIex(IRExprGet *g) {
+			if (g->reg.isTemp())
+				assert(live.count(g->reg));
+			return NULL;
+		}
+	public:
+		_(const std::set<threadAndRegister, threadAndRegister::fullCompare> &_live)
+			: live(_live)
+		{}
+	} t(live);
+	t.transformIRExpr(e);
+}
+
