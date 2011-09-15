@@ -612,6 +612,23 @@ applyCopiesToFreeVariables(FreeVariableMap &fv,
 	fv.applyTransformation(t, done_something);
 }
 
+static void
+findUsedFreeVars(StateMachine *sm, std::set<FreeVariableKey> &out)
+{
+	class _ : public StateMachineTransformer {
+		std::set<FreeVariableKey> &out;
+		IRExpr *transformIex(IRExprFreeVariable *e) {
+			out.insert(e->key);
+			return NULL;
+		}
+	public:
+		_(std::set<FreeVariableKey> &_out)
+			: out(_out)
+		{}
+	} t(out);
+	t.transform(sm);
+}
+
 static StateMachine *
 optimiseFreeVariables(StateMachine *sm, bool *done_something)
 {
@@ -623,6 +640,18 @@ optimiseFreeVariables(StateMachine *sm, bool *done_something)
 	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> copies;
 	findAllCopies(sm, copies);
 	applyCopiesToFreeVariables(sm->freeVariables, copies, done_something);
+	std::set<FreeVariableKey> usedFreeVars;
+	findUsedFreeVars(sm, usedFreeVars);
+	for (auto it = sm->freeVariables.content->begin();
+	     it != sm->freeVariables.content->end();
+		) {
+		if (!usedFreeVars.count(it.key())) {
+			it = sm->freeVariables.content->erase(it);
+			*done_something = true;
+		} else {
+			it++;
+		}
+	}
 	return sm;
 }
 
