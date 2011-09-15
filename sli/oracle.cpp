@@ -714,6 +714,8 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 static Oracle::LivenessSet
 irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 {
+	if (!w)
+		return old;
 	class _ : public IRExprTransformer {
 	public:
 		Oracle::LivenessSet old;
