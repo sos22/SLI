@@ -93,10 +93,10 @@ public:
 	}
 	void findReachingGenerations(StateMachineState *e,
 				     const threadAndRegister &r,
-				     std::set<unsigned> &out);
+				     std::vector<unsigned> &out);
 	void findReachingGenerations(StateMachineSideEffect *e,
 				     const threadAndRegister &r,
-				     std::set<unsigned> &out);
+				     std::vector<unsigned> &out);
 	PossiblyReaching(StateMachine *inp);
 };
 
@@ -206,27 +206,39 @@ PossiblyReaching::updateStateReaching(StateMachineState *state, std::set<StateMa
 static void
 sideEffectSetToGenerationSet(const std::set<StateMachineSideEffect *> &effects,
 			     const threadAndRegister &reg,
-			     std::set<unsigned> &out)
+			     std::vector<unsigned> &out)
 {
+	struct _ {
+		std::vector<unsigned> &out;
+		_(std::vector<unsigned> &_out)
+			: out(_out)
+		{}
+		void operator()(unsigned r) {
+			for (auto it = out.begin(); it != out.end(); it++)
+				if (*it == r)
+					return;
+			out.push_back(r);
+		}
+	} addItem(out);
 	for (auto it = effects.begin(); it != effects.end(); it++) {
 		StateMachineSideEffect *se = *it;
 		switch (se->type) {
 		case StateMachineSideEffect::Load: {
 			StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)se;
 			if (threadAndRegister::partialEq(l->target, reg))
-				out.insert(l->target.gen());
+				addItem(l->target.gen());
 			break;
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *l = (StateMachineSideEffectCopy *)se;
 			if (threadAndRegister::partialEq(l->target, reg))
-				out.insert(l->target.gen());
+				addItem(l->target.gen());
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *l = (StateMachineSideEffectPhi *)se;
 			if (threadAndRegister::partialEq(l->reg, reg))
-				out.insert(l->reg.gen());
+				addItem(l->reg.gen());
 			break;
 		}
 		case StateMachineSideEffect::AssertFalse:
@@ -240,7 +252,7 @@ sideEffectSetToGenerationSet(const std::set<StateMachineSideEffect *> &effects,
 void
 PossiblyReaching::findReachingGenerations(StateMachineState *e,
 					  const threadAndRegister &reg,
-					  std::set<unsigned> &out)
+					  std::vector<unsigned> &out)
 {
 	std::set<StateMachineSideEffect *> &effects(effectsReachingState(e));
 	sideEffectSetToGenerationSet(effects, reg, out);
@@ -249,7 +261,7 @@ PossiblyReaching::findReachingGenerations(StateMachineState *e,
 void
 PossiblyReaching::findReachingGenerations(StateMachineSideEffect *e,
 					  const threadAndRegister &reg,
-					  std::set<unsigned> &out)
+					  std::vector<unsigned> &out)
 {
 	std::set<StateMachineSideEffect *> &effects(effectsReachingSideEffect(e));
 	sideEffectSetToGenerationSet(effects, reg, out);
@@ -363,7 +375,7 @@ public:
 		assert(orig.gen() == 0);
 		return orig.setGen( ++lastGeneration[orig] );
 	}
-	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, const std::set<unsigned> &generations)
+	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, const std::vector<unsigned> &generations)
 	{
 		return new StateMachineSideEffectPhi(
 			r.setGen(++lastGeneration[r]),
@@ -371,13 +383,13 @@ public:
 	}
 	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, StateMachineState *e)
 	{
-		std::set<unsigned> generations;
+		std::vector<unsigned> generations;
 		reaching.findReachingGenerations(e, r, generations);
 		return newPhi(r, generations);
 	}
 	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, StateMachineSideEffect *e)
 	{
-		std::set<unsigned> generations;
+		std::vector<unsigned> generations;
 		reaching.findReachingGenerations(e, r, generations);
 		return newPhi(r, generations);
 	}
@@ -1248,7 +1260,7 @@ class optimiseSSATransformer : public StateMachineTransformer {
 	StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *phi,
 							  bool *done_something)
 	{
-		std::set<unsigned> generations;
+		std::vector<unsigned> generations;
 		reaching.findReachingGenerations(phi, phi->reg, generations);
 		if (generations != phi->generations) {
 			*done_something = true;

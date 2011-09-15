@@ -861,11 +861,20 @@ public:
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::set<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
+		  reg(_reg)
+	{
+		generations.reserve(_generations.size());
+		for (auto it = _generations.begin(); it != _generations.end(); it++)
+			generations.push_back(*it);
+	}
+	StateMachineSideEffectPhi(const threadAndRegister &_reg,
+				  const std::vector<unsigned> &_generations)
+		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg), generations(_generations)
 	{
 	}
 	threadAndRegister reg;
-	std::set<unsigned> generations;
+	std::vector<unsigned> generations;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);
