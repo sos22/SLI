@@ -191,10 +191,11 @@ public:
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 StateMachineEdge *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
-StateMachine *optimiseStateMachine(StateMachine *sm,
+StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
-				   Oracle *oracle,
-				   bool noExtendContext);
+				   VexPtr<Oracle> &oracle,
+				   bool noExtendContext,
+				   GarbageCollectionToken token);
 
 /* Individual optimisation passes. */
 void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,

@@ -14,10 +14,13 @@
 #include "libvex_prof.hpp"
 
 template <typename t> void printCFG(const CFGNode<t> *cfg);
-template <typename t> StateMachine *CFGtoCrashReason(unsigned tid, CFGNode<t> *cfg,
-						     typename gc_heap_map<t, StateMachineState, &ir_heap>::type *crashReasons,
-						     StateMachineState *escapeState,
-						     Oracle *oracle);
+template <typename t> StateMachine *CFGtoCrashReason(unsigned tid,
+						     VexPtr<CFGNode<t>, &ir_heap> &cfg,
+						     VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type,
+						            &ir_heap> &crashReasons,
+						     VexPtr<StateMachineState, &ir_heap> &escapeState,
+						     VexPtr<Oracle> &oracle,
+						     GarbageCollectionToken token);
 
 static CFGNode<unsigned long> *buildCFGForRipSet(AddressSpace *as,
 						 unsigned long start,
@@ -306,14 +309,15 @@ canonicaliseRbp(StateMachine *sm, OracleInterface *oracle)
 
 
 StateMachine *
-optimiseStateMachine(StateMachine *sm,
+optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		     const AllowableOptimisations &opt,
-		     Oracle *oracle,
-		     bool noExtendContext)
+		     VexPtr<Oracle> &oracle,
+		     bool noExtendContext,
+		     GarbageCollectionToken token)
 {
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
-	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(sm->origin));
+	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(sm->origin));
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -322,7 +326,9 @@ optimiseStateMachine(StateMachine *sm,
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
+		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
+		LibVEX_maybe_gc(token);
 		sm = deadCodeElimination(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
@@ -1037,9 +1043,12 @@ buildCFGForCallGraph(AddressSpace *as,
 }
 
 static StateMachine *
-CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode<StackRip> *cfg)
+CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode<StackRip>, &ir_heap> &cfg,
+		  GarbageCollectionToken token)
 {
-	return CFGtoCrashReason<StackRip>(tid, cfg, NULL, StateMachineCrash::get(), oracle);
+	VexPtr<gc_heap_map<StackRip, StateMachineState, &ir_heap>::type, &ir_heap> dummy(NULL);
+	VexPtr<StateMachineState, &ir_heap> escape(StateMachineCrash::get());
+	return CFGtoCrashReason<StackRip>(tid, cfg, dummy, escape, oracle, token);
 }
 
 static bool
@@ -1057,7 +1066,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
-	sm = optimiseStateMachine(storeMachine, opt, oracle, true);
+	sm = optimiseStateMachine(storeMachine, opt, oracle, true, token);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
@@ -1171,11 +1180,15 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		trimCFG(cfg.get(), interesting, INT_MAX, false);
 		breakCycles(cfg.get());
 
-		cr = CFGtoCrashReason<unsigned long>(sm->tid,
-						     cfg,
-						     ii,
-						     StateMachineNoCrash::get(),
-						     oracle);
+		{
+			VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
+			cr = CFGtoCrashReason<unsigned long>(sm->tid,
+							     cfg,
+							     ii,
+							     escape,
+							     oracle,
+							     token);
+		}
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -1184,13 +1197,15 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 		cr = optimiseStateMachine(cr,
 					  opt,
 					  oracle,
-					  false);
+					  false,
+					  token);
 		breakCycles(cr);
 		cr->selectSingleCrashingPath();
 		cr = optimiseStateMachine(cr,
 					  opt,
 					  oracle,
-					  false);
+					  false,
+					  token);
 	}
 	if (TIMEOUT)
 		return NULL;
@@ -1210,7 +1225,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle.get(), cfg.get()));
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, token));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
@@ -1332,7 +1347,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		.enableignoreSideEffects()
 		.setAddressSpace(oracle->ms->addressSpace);
 
-	StateMachine *sm = NULL;
+	VexPtr<StateMachine, &ir_heap> sm(NULL);
 
 	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
 	     !TIMEOUT && it != previousInstructions.end();
@@ -1352,10 +1367,10 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		interesting.rips.insert(interestingRip);
 		trimCFG(cfg.get(), interesting, INT_MAX, true);
 
+		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
 		VexPtr<StateMachine, &ir_heap> cr(
 			CFGtoCrashReason<unsigned long>(tid._tid(), cfg, ii,
-							StateMachineNoCrash::get(),
-							oracle));
+							escape, oracle, token));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -1364,13 +1379,15 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		cr = optimiseStateMachine(cr,
 					  opt,
 					  oracle,
-					  false);
+					  false,
+					  token);
 		breakCycles(cr);
 		cr->selectSingleCrashingPath();
 		cr = optimiseStateMachine(cr,
 					  opt,
 					  oracle,
-					  false);
+					  false,
+					  token);
 
 		if (dynamic_cast<StateMachineNoCrash *>(cr->root)) {
 			/* Once you've reduced the machine to
@@ -1388,7 +1405,8 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		sm = optimiseStateMachine(sm,
 					  opt.disablefreeVariablesMightAccessStack(),
 					  oracle,
-					  true);
+					  true,
+					  token);
 
 	return sm;
 }
@@ -1634,10 +1652,11 @@ rewriteTemporary(IRExpr *sm,
 
 template <typename t> StateMachine *
 CFGtoCrashReason(unsigned tid,
-		 CFGNode<t> *cfg,
-		 typename gc_heap_map<t, StateMachineState, &ir_heap>::type *crashReasons,
-		 StateMachineState *escapeState,
-		 Oracle *oracle)
+		 VexPtr<CFGNode<t>, &ir_heap> &cfg,
+		 VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
+		 VexPtr<StateMachineState, &ir_heap> &escapeState,
+		 VexPtr<Oracle> &oracle,
+		 GarbageCollectionToken token)
 {
 	typedef typename gc_heap_map<t, StateMachineState, &ir_heap>::type inferredInformation;
 
@@ -1904,10 +1923,11 @@ CFGtoCrashReason(unsigned tid,
 	}
 
 	FreeVariableMap fv;
-	StateMachine *sm = new StateMachine(root, original_rip, fv, tid);
+	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip, fv, tid));
 	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
-	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false);
+	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false,
+				  token);
 	if (crashReasons)
 		crashReasons->set(original_rip, sm->root);
 	sm = convertToSSA(sm);

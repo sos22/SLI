@@ -12,7 +12,7 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	VexPtr<StateMachine> sm(readStateMachine(0));
+	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(0));
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
@@ -22,7 +22,7 @@ main(int argc, char *argv[])
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack();
-	sm = optimiseStateMachine(sm, opt, oracle, true);
+	sm = optimiseStateMachine(sm, opt, oracle, true, ALLOW_GC);
 	printStateMachine(sm, stdout);
 
 	return 0;
