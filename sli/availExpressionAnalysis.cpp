@@ -59,9 +59,9 @@ class avail_t {
 public:
 	std::set<StateMachineSideEffect *> sideEffects;
 	std::set<IRExpr *> assertFalse;
-	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> registers;
+	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> _registers;
 
-	void clear() { sideEffects.clear(); assertFalse.clear(); registers.clear(); }
+	void clear() { sideEffects.clear(); assertFalse.clear(); _registers.clear(); }
 	void makeFalse(IRExpr *expr);
 	void dereference(IRExpr *ptr);
 	/* Go through and remove anything which isn't also present in
@@ -104,9 +104,9 @@ avail_t::print(FILE *f)
 			fprintf(f, "\n");
 		}
 	}
-	if (!registers.empty()) {
+	if (!_registers.empty()) {
 		fprintf(f, "Register map:\n");
-		for (auto it = registers.begin(); it != registers.end(); it++) {
+		for (auto it = _registers.begin(); it != _registers.end(); it++) {
 			it->first.prettyPrint(f);
 			fprintf(f, " -> ");
 			ppIRExpr(it->second, f);
@@ -235,12 +235,6 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		else
 			it++;
 	}
-	for (auto it = registers.begin(); it != registers.end(); ) {
-		if (isPresent(it->second))
-			registers.erase(it++);
-		else
-			it++;
-	}
 }
 
 bool
@@ -252,7 +246,7 @@ avail_t::operator!=(const avail_t &other) const
 void
 avail_t::calcRegisterMap()
 {
-	registers.clear();
+	_registers.clear();
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
 		StateMachineSideEffect *se = *it;
 		if (se->type == StateMachineSideEffect::Copy) {
@@ -260,8 +254,8 @@ avail_t::calcRegisterMap()
 			/* It's really bad news if we have two
 			   available expressions which both define the
 			   same register. */
-			assert(!registers.count(sep->target));
-			registers[sep->target] = sep->value;
+			assert(!_registers.count(sep->target));
+			_registers[sep->target] = sep->value;
 		} else if (se->type == StateMachineSideEffect::AssertFalse) {
 			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
 			makeFalse(seaf->value);
@@ -349,7 +343,6 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 	}
 		
 	}
-	outputAvail.calcRegisterMap();
 }
 
 class applyAvailTransformer : public IRExprTransformer {
@@ -357,8 +350,8 @@ public:
 	const avail_t &avail;
 	const bool use_assumptions;
 	IRExpr *transformIex(IRExprGet *e) {
-		auto it = avail.registers.find(e->reg);
-		if (it != avail.registers.end())
+		auto it = avail._registers.find(e->reg);
+		if (it != avail._registers.end())
 			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
@@ -557,6 +550,7 @@ buildNewStateMachineWithLoadsEliminated(
 		assert(newEffect);
 		if (!*done_something) assert(newEffect == *it);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
+		currentlyAvailable.calcRegisterMap();
 		res->sideEffects.push_back(newEffect);
 #if debug_substitutions
 		printf("New available set:\n");
@@ -595,6 +589,7 @@ buildNewStateMachineWithLoadsEliminated(
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		StateMachineBifurcate *res;
 		bool doit = false;
+		avail.calcRegisterMap();
 		res = new StateMachineBifurcate(
 			sm->origin,
 			applyAvailSet(avail, smb->condition, true, &doit),
