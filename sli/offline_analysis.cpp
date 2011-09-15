@@ -333,6 +333,7 @@ optimiseStateMachine(StateMachine *sm,
 		     bool noExtendContext)
 {
 	__set_profiling(optimiseStateMachine);
+	sm->sanityCheck();
 	const Oracle::RegisterAliasingConfiguration &alias(oracle->getAliasingConfigurationForRip(sm->origin));
 	bool done_something;
 	do {
@@ -356,6 +357,7 @@ optimiseStateMachine(StateMachine *sm,
 		}
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
+	sm->sanityCheck();
 	return sm;
 }
 
@@ -1936,10 +1938,12 @@ CFGtoCrashReason(unsigned tid,
 
 	FreeVariableMap fv;
 	StateMachine *sm = new StateMachine(root, original_rip, fv, tid);
+	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false);
 	crashReasons.set(original_rip, sm->root);
 	sm = convertToSSA(sm);
+	sm->sanityCheck();
 	return sm;
 }
 
