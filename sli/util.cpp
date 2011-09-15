@@ -133,7 +133,9 @@ __fail(const char *file, unsigned line, const char *fmt, ...)
 	abort();
 }
 
-void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> &live)
+#ifndef NDEBUG
+void
+sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> &live)
 {
 	class _ : public IRExprTransformer {
 		const std::set<threadAndRegister, threadAndRegister::fullCompare> &live;
@@ -149,4 +151,4 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
 	} t(live);
 	t.transformIRExpr(e);
 }
-
+#endif

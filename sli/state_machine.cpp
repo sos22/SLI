@@ -1353,6 +1353,7 @@ FreeVariableMap::applyTransformation(IRExprTransformer &x, bool *done_something)
 		it.set_value(x.transformIRExpr(it.value(), done_something));
 }
 
+#ifndef NDEBUG
 void
 StateMachine::sanityCheck() const
 {
@@ -1360,3 +1361,4 @@ StateMachine::sanityCheck() const
 	std::set<threadAndRegister, threadAndRegister::fullCompare> live;
 	root->sanityCheck(live, path);
 }
+#endif

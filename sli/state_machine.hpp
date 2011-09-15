@@ -11,7 +11,15 @@ class StateMachineEdge;
 class StateMachineSideEffect;
 class OracleInterface;
 
-void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> &live);
+#ifdef NDEBUG
+static inline
+#endif
+void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> &live)
+#ifdef NDEBUG
+{}
+#else
+;
+#endif
 
 class AllowableOptimisations {
 public:
@@ -242,7 +250,11 @@ public:
 			       bool *done_something);
 	void selectSingleCrashingPath();
 	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
+#ifdef NDEBUG
+	void sanityCheck() const {}
+#else
 	void sanityCheck() const;
+#endif
 	NAMED_CLASS
 };
 
@@ -281,7 +293,11 @@ public:
 	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
 
+#ifdef NDEBUG
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live, std::vector<const StateMachineEdge *> &done) const {}
+#else
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live, std::vector<const StateMachineEdge *> &done) const = 0;
+#endif
 
 	NAMED_CLASS
 };
@@ -414,8 +430,9 @@ public:
 		return r;
 	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
-	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> live,
-				 std::vector<const StateMachineEdge *> &done) const {
+	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> live,
+			 std::vector<const StateMachineEdge *> &done) const {
+#ifndef NDEBUG
 		for (auto it = done.begin(); it != done.end(); it++)
 			if (*it == this)
 				return;
@@ -427,6 +444,7 @@ public:
 		assert(done.back() == this);
 		done.pop_back();
 		assert(done.size() == sz);
+#endif
 	}
 	NAMED_CLASS
 };
@@ -540,7 +558,8 @@ public:
 	const StateMachineEdge *target1() const { return NULL; }
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live,
-			 std::vector<const StateMachineEdge *> &done) const {
+			 std::vector<const StateMachineEdge *> &done) const
+	{
 		target->sanityCheck(live, done);
 	}
 };
