@@ -1057,6 +1057,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     VexPtr<Oracle> &oracle,
 				     VexPtr<IRExpr, &ir_heap> assumption,
 				     const AllowableOptimisations &opt,
+				     bool noExtendContext,
 				     GarbageCollectionToken token,
 				     IRExpr **assumptionOut,
 				     StateMachine **newStoreMachine)
@@ -1066,7 +1067,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
-	sm = optimiseStateMachine(storeMachine, opt, oracle, true, token);
+	sm = optimiseStateMachine(storeMachine, opt, oracle, noExtendContext, token);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
@@ -1239,7 +1240,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 	opt.interestingStores = is.rips;
 	opt.haveInterestingStoresSet = true;
 
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, token, NULL, NULL))
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, false, token, NULL, NULL))
 		return false;
 
 	/* If it might crash with that machine, try expanding it to
@@ -1257,7 +1258,7 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 
 	IRExpr *_newAssumption;
 	StateMachine *_sm;
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, token, &_newAssumption, &_sm)) {
+	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, true, token, &_newAssumption, &_sm)) {
 		fprintf(_logfile, "\t\tExpanded store machine cannot crash\n");
 		return false;
 	}
