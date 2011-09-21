@@ -1716,7 +1716,7 @@ IRExpr* IRExpr_Associative(IRExprAssociative *src)
    memcpy(e->contents,
 	  src->contents,
 	  sizeof(e->contents[0]) *
-	  e->nr_arguments_allocated);
+	  e->nr_arguments);
    return e;
 }
 IRExpr* IRExpr_FreeVariable ( FreeVariableKey key )
