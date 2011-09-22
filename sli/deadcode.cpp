@@ -117,6 +117,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 	     it++)
 		alwaysLive.useExpression(it.value());
 
+	if (TIMEOUT)
+		return sm;
+
 	class LivenessMap : public std::map<StateMachineState *, LivenessEntry> {
 		void buildResForEdge(LivenessEntry &out, StateMachineEdge *edge)
 		{
@@ -129,7 +132,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 
 		void updateState(StateMachineState *sm, bool *progress)
 		{
-			LivenessEntry &outputSlot( (*this)[sm] );
 			LivenessEntry res;
 			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
 				buildResForEdge(res, smp->target);
@@ -146,28 +148,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 			} else {
 				abort();
 			}
-			/* set != set doesn't work if the set uses a
-			 * custom ordering predicate; grr.  Do it by
-			 * hand. */
-			bool eq = true;
-			auto it1 = outputSlot.begin();
-			auto it2 = res.begin();
-			while (eq && it1 != outputSlot.end() && it2 != res.end()) {
-				if (!threadAndRegister::fullEq(*it1, *it2))
-					eq = false;
-				it1++;
-				it2++;
-			}
-			if (it1 != outputSlot.end())
-				eq = false;
-			if (it2 != res.end())
-				eq = false;
-			if (!eq) {
-				/* If they're not equal, we've not yet
-				 * converged. */
+			LivenessEntry &outputSlot( (*this)[sm] );
+			if (expandSet(outputSlot, res))
 				*progress = true;
-				outputSlot = res;
-			}
 		}
 
 	public:
@@ -179,9 +162,12 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				     it != allStates.end();
 				     it++)
 					updateState(*it, &progress);
-			} while (progress);
+			} while (progress && !TIMEOUT);
 		}
 	} livenessMap(sm, allStates);
+
+	if (TIMEOUT)
+		return sm;
 
 	class _ {
 		LivenessMap &livenessMap;
@@ -284,8 +270,11 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();
-	     it++)
+	     it++) {
+		if (TIMEOUT)
+			return sm;
 		eliminateDeadCode(*it);
+	}
 
 	return sm;
 }

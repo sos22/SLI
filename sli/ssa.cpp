@@ -62,18 +62,6 @@ sideEffectDefinesReg(const StateMachineSideEffect *se, const threadAndRegister &
 	return true;
 }
 
-/* Expand @out by adding the contents of @inp to it.  Returns true if
-   we added anything, or false otherwise.  (i.e return false if @out
-   was already a (possibly non-strict) superset of @inp.) */
-template <typename t> bool
-expandSet(std::set<t> &out, const std::set<t> &inp)
-{
-	bool res = false;
-	for (auto it = inp.begin(); it != inp.end(); it++)
-		res |= out.insert(*it).second;
-	return res;
-}
-
 /* Possibly reaching map.  This tells us, for each side effect in a
    state machine, the set of side effects which might conceivably
    reach it. */
