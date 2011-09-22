@@ -62,11 +62,16 @@ sideEffectDefinesReg(const StateMachineSideEffect *se, const threadAndRegister &
 	return true;
 }
 
-template <typename t> void
-operator |=(std::set<t> &out, const std::set<t> &inp)
+/* Expand @out by adding the contents of @inp to it.  Returns true if
+   we added anything, or false otherwise.  (i.e return false if @out
+   was already a (possibly non-strict) superset of @inp.) */
+template <typename t> bool
+expandSet(std::set<t> &out, const std::set<t> &inp)
 {
+	bool res = false;
 	for (auto it = inp.begin(); it != inp.end(); it++)
-		out.insert(*it);
+		res |= out.insert(*it).second;
+	return res;
 }
 
 /* Possibly reaching map.  This tells us, for each side effect in a
@@ -190,10 +195,8 @@ PossiblyReaching::updateStateReaching(StateMachineState *state, std::set<StateMa
 				std::set<StateMachineEdge *> &needsUpdate,
 				PossiblyReaching *_this) {
 			std::set<StateMachineSideEffect *> &reachingThisEdge(_this->effectsReachingEdge(edge));
-			if (reachingThisEdge != inp) {
-				reachingThisEdge |= inp;
+			if (expandSet(reachingThisEdge, inp))
 				needsUpdate.insert(edge);
-			}
 		}
 	} updateEdge;
 	std::set<StateMachineSideEffect *> &reachingThisState(effectsReachingState(state));
@@ -318,7 +321,7 @@ PossiblyReaching::buildSideEffectTable(StateMachineEdge *e)
 {
 	std::set<StateMachineSideEffect *> reaching(effectsReachingEdge(e));
 	for (auto it = e->sideEffects.begin(); it != e->sideEffects.end(); it++) {
-		effectsReachingSideEffect(*it) |= reaching;
+		expandSet(effectsReachingSideEffect(*it), reaching);
 		updateReachingSetForSideEffect(*it, &reaching);
 	}
 }
@@ -333,10 +336,8 @@ PossiblyReaching::updateEdgeReaching(StateMachineEdge *edge,
 	     it++)
 		updateReachingSetForSideEffect(*it, &reachesEnd);
 	std::set<StateMachineSideEffect *> &old(effectsReachingState(edge->target));
-	if (old != reachesEnd) {
-		old |= reachesEnd;
+	if (expandSet(old, reachesEnd))
 		needsUpdate.insert(edge->target);
-	}
 }
 
 /* Assert that the machine does not currently reference and tAR
