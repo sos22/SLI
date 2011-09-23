@@ -802,6 +802,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					e = e2;				\
 				else					\
 					return res;			\
+			} else {					\
+				res = e;				\
 			}
 			hdr(CCall)
 			if (!strcmp(e->cee->name, "amd64g_calculate_condition")) {
@@ -1220,7 +1222,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					 * it. */
 					*done_something = true;
 					e->arg = ((IRExprAssociative *)e->arg)->contents[1];
-					return IRExprTransformer::transformIex(e);
+					return e;
 				}
 				if (e->arg->tag == Iex_Get &&
 				    !((IRExprGet *)e->arg)->reg.isTemp() &&
@@ -1451,7 +1453,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								Iop_Neg64,
 								l));
 					*done_something = true;
-					return IRExprTransformer::transformIex(e);
+					return e;
 				}
 			}
 
@@ -1464,7 +1466,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				e->arg2 = IRExpr_Const(
 					IRConst_U64(-((IRExprConst *)r)->con->Ico.U64));
 				*done_something = true;
-				return IRExprTransformer::transformIex(e);
+				return e;
 			}
 
 			/* If enabled, assume that the stack is ``private'',
