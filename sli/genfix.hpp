@@ -571,6 +571,8 @@ top:
 		case 0xaf: /* imul Gv, Ev */
 		case 0xb6: /* movzx Gv, Eb */
 		case 0xb7: /* movzw Gv, Ew */
+		case 0xbe: /* movsb Gv, Eb */
+		case 0xbf: /* movsb Gv, Ew */
 			i->modrm(0, as);
 			break;
 		default:
@@ -580,6 +582,10 @@ top:
 		break;
 
 	case 0x40 ... 0x5f:
+		break;
+
+	case 0x63: /* Move with sign extend. */
+		i->modrm(0, as);
 		break;
 
 	case 0x64: /* FS prefix.  Pass it through verbatim. */
