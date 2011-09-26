@@ -1175,9 +1175,16 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					} else {
 						assert(e->tag == Iex_Load);
 						switch (instrOpcode(underlying)) {
-						case 0x8b: {
+						case 0x8b:
 							/* Load from memory to modrm.
 							 * Nice and easy. */
+						case 0x0FB6:
+							/* Load with
+							   zero-extend.
+							   Equivalent,
+							   for our
+							   purposes. */
+						{
 							simulationSlotT s = data.exprsToSlots(it->first, e);
 							newInstr->defaultNextI = instrMovRegToSlot(instrModrmReg(underlying), s);
 							newInstr = newInstr->defaultNextI;
