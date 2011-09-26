@@ -17,11 +17,19 @@
 
 class EnforceCrashCFG : public CFG<ThreadRip> {
 public:
+	std::set<ThreadRip> usefulInstrs;
 	bool instructionUseful(Instruction<ThreadRip> *i) {
+		if (usefulInstrs.count(i->rip))
+			return true;
+		else
+			return false;
+	}
+	bool exploreFunction(ThreadRip rip) {
 		return true;
 	}
-	EnforceCrashCFG(AddressSpace *as)
-		: CFG<ThreadRip>(as)
+	EnforceCrashCFG(AddressSpace *as,
+			const std::set<ThreadRip> &_usefulInstrs)
+		: CFG<ThreadRip>(as), usefulInstrs(_usefulInstrs)
 	{}
 };
 
@@ -1303,7 +1311,7 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 		neededThreads.insert(it->thread);
 
 	/* Build the CFG */
-	EnforceCrashCFG *cfg = new EnforceCrashCFG(as);
+	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++) {
