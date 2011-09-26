@@ -748,13 +748,14 @@ void ppIROp ( IROp op, FILE* f )
 
 static bool parseIROp(IROp *out, const char *str, const char **suffix, char **err)
 {
+  const char *str2;
 #define __do_op2(name, sz)			\
-  if (parseThisString( # sz , str, suffix, err)) {	\
+  if (parseThisString( # sz , str2, suffix, err)) {	\
     *out = Iop_ ## name ## sz ;			\
     return true;				\
   }
 #define do_op(name)				\
-  if (parseThisString( #name, str, &str, err)) {	\
+  if (parseThisString( #name, str, &str2, err)) {	\
     __do_op2(name, 8);				\
     __do_op2(name, 16);				\
     __do_op2(name, 32);				\
