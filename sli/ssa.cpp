@@ -15,6 +15,7 @@ template <typename t> t
 pop(std::set<t> &x)
 {
 	auto it = x.begin();
+	if (it == x.end()) abort();
 	t res = *it;
 	x.erase(it);
 	return res;
@@ -823,6 +824,8 @@ useSsaVarsAndIntroducePhis(StateMachine *inp,
 {
 	bool needPhiEdges;
 	bool needPhiStates;
+
+	needPhiEdges = needPhiStates = false;
 
 	useSsaVars(inp, reaching, &needPhiEdges, &needPhiStates);
 	if (needPhiEdges)
