@@ -597,6 +597,13 @@ top:
 		b = i->byte(as);
 		goto top;
 
+	case 0x68: /* push imm32 */
+		if (opsize)
+			i->immediate(2, as);
+		else
+			i->immediate(4, as);
+		break;
+
 	case 0x70 ... 0x7f:
 		/* 8 bit conditional jumps are handled specially, by
 		   turning them into 32 conditional jumps, because
