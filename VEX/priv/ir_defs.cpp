@@ -1117,6 +1117,10 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
 	return false;
     }
   }
+  if (op == (IROp)-1) {
+    assert(args.size() == 1);
+    return false;
+  }
   IRExprAssociative *e          = new IRExprAssociative();
   e->op = op;
   e->nr_arguments_allocated = args.size();
