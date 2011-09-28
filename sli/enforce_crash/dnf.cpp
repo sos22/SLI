@@ -149,15 +149,18 @@ compare_dnf_conjunctions(const DNF_Conjunction &a, const DNF_Conjunction &b)
 static void
 sanity_check(const DNF_Conjunction &a)
 {
+#ifndef NDEBUG
 	assert(a.size() > 0);
 	for (unsigned x = 0; x < a.size() - 1; x++) {
 		assert(a[x].second != a[x+1].second);
 		assert(a[x].second < a[x+1].second);
 	}
+#endif
 }
 static void
 sanity_check(const DNF_Disjunction &a)
 {
+#ifndef NDEBUG
 	if (a.size() == 0)
 		return;
 	unsigned x;
@@ -166,6 +169,7 @@ sanity_check(const DNF_Disjunction &a)
 		assert(compare_dnf_conjunctions(a[x], a[x+1]) < 0);
 	}
 	sanity_check(a[x]);
+#endif
 }
 
 /* Set @out to @src1 & @src2.  Return false if we find a contradiction
