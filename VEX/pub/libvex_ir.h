@@ -210,13 +210,12 @@ public:
 
 class ThreadRip {
 public:
-	/* Surprise!  Can't use a constructor because we get stashed
-	 * in a union. */
+	ThreadRip() : thread(-1), rip(0xf00dead) {}
+	ThreadRip(unsigned _thread, unsigned long _rip)
+		: thread(_thread), rip(_rip)
+	{}
 	static ThreadRip mk(unsigned thread, unsigned long rip) {
-		ThreadRip r;
-		r.thread = thread;
-		r.rip = rip;
-		return r;
+		return ThreadRip(thread, rip);
 	}
 	bool operator==(const ThreadRip &o) const {
 		return thread == o.thread && rip == o.rip;
