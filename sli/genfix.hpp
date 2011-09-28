@@ -582,22 +582,32 @@ top:
 		break;
 
 	case 0x40 ... 0x5f:
-		break;
-
-	case 0x63: /* Move with sign extend. */
-		i->modrm(0, as);
+	case 0xcc:
+	case 0xc9:
+	case 0x90 ... 0x9f:
 		break;
 
 	case 0x64: /* FS prefix.  Pass it through verbatim. */
+	case 0xf0: /* Lock prefix.  Pass it through verbatim.  At this
+		      stage, we're only really interested in
+		      instruction size and control flow, so LOCKs
+		      don't matter. */
 		b = i->byte(as);
 		goto top;
+
+	case 0xd0 ... 0xd3: /* Shift group 2*/
+	case 0x84 ... 0x8e:
+	case 0x63: /* Move with sign extend. */
+	case 0xff:
+		i->modrm(0, as);
+		break;
 
 	case 0x66: /* opsize prefix */
 		opsize = !opsize;
 		b = i->byte(as);
 		goto top;
 
-	case 0x68: /* push imm32 */
+	case 0x68: /* push Iz */
 		if (opsize)
 			i->immediate(2, as);
 		else
@@ -625,54 +635,8 @@ top:
 		fallsThrough = false;
 		break;
 
-	case 0x80:
-	case 0x82:
-	case 0x83:
-		i->modrm(1, as);
-		i->immediate(1, as);
-		break;
+	case 0x69: /* imul gv,ev,iz */
 	case 0x81:
-		if (opsize) {
-			i->modrm(2, as);
-			i->immediate(2, as);
-		} else {
-			i->modrm(4, as);
-			i->immediate(4, as);
-		}
-		break;
-
-	case 0x84 ... 0x8e:
-		i->modrm(0, as);
-		break;
-
-	case 0x90 ... 0x9f:
-		break;
-
-	case 0xb0 ... 0xb7:
-		i->immediate(1, as);
-		break;
-	case 0xb8 ... 0xbf:
-		if (i->pfx.rex_w) {
-			i->immediate(8, as);
-		} else if (opsize) {
-			i->immediate(2, as);
-		} else {
-			i->immediate(4, as);
-		}
-		break;
-	case 0xc0:
-	case 0xc1: /* Shift group 2 with an Ib */
-		i->modrm(1, as);
-		i->immediate(1, as);
-		break;
-
-	case 0xc3:
-		fallsThrough = false;
-		break;
-	case 0xc6:
-		i->modrm(1, as);
-		i->immediate(1, as);
-		break;
 	case 0xc7:
 		if (opsize) {
 			i->modrm(2, as);
@@ -682,16 +646,35 @@ top:
 			i->immediate(4, as);
 		}
 		break;
-	case 0xcc:
-		/* Really int3, but we treat it as a no-op because
-		   it's used in our infrastructure for triggering
-		   bugs. */
+
+	case 0xb0 ... 0xb7:
+		i->immediate(1, as);
 		break;
-	case 0xc9:
+
+	case 0xb8 ... 0xbf:
+		if (i->pfx.rex_w) {
+			i->immediate(8, as);
+		} else if (opsize) {
+			i->immediate(2, as);
+		} else {
+			i->immediate(4, as);
+		}
 		break;
-	case 0xd0 ... 0xd3: /* Shift group 2*/
-		i->modrm(0, as);
+
+	case 0x80:
+	case 0x82:
+	case 0x83:
+	case 0xc0:
+	case 0xc1: /* Shift group 2 with an Ib */
+	case 0xc6:
+		i->modrm(1, as);
+		i->immediate(1, as);
 		break;
+
+	case 0xc3:
+		fallsThrough = false;
+		break;
+
 	case 0xe8: { /* Call instruction. */
 		i->immediate(4, as);
 		/* We don't emit epilogues for the target of a call
@@ -710,6 +693,13 @@ top:
 			i->branchNext = target;
 		break;
 	}
+	case 0xe9: /* jmp rel32 */
+		delta32 = i->int32(as);
+		i->defaultNext = i->rip + i->len + delta32;
+		i->len = 0;
+		fallsThrough = false;
+		break;
+
 	case 0xeb: /* jmp rel8 */
 		delta = i->byte(as);
 		i->defaultNext = i->rip + i->len + delta;
@@ -721,13 +711,6 @@ top:
 		i->len = 0;
 
 		/* Don't let the tail update defaultNext */
-		fallsThrough = false;
-		break;
-
-	case 0xe9: /* jmp rel32 */
-		delta32 = i->int32(as);
-		i->defaultNext = i->rip + i->len + delta32;
-		i->len = 0;
 		fallsThrough = false;
 		break;
 
@@ -755,9 +738,6 @@ top:
 		}
 		break;
 
-	case 0xff:
-		i->modrm(0, as);
-		break;
 	default:
 		throw NotImplementedException("cannot decode instruction starting %x at %lx\n",
 					      b, i->rip.rip);
