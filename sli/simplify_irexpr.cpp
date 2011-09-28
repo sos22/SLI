@@ -975,23 +975,28 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					*done_something = true;
 				}
 			}
-			/* x & x -> x, for any and-like operator */
-			if (e->op >= Iop_And8 && e->op <= Iop_And64) {
+			/* x & x -> x, for any and-like or or-like
+			   operator.  Note that we use pointer
+			   equality here, rather than definitelyEqual,
+			   which is obviously much faster but also
+			   much less accurate, and only deterministic
+			   if we've been interned first.  It also
+			   means that any equal expressions will be
+			   neighbours in the list, which simplifies
+			   the loop structure a bit. */
+			if ((e->op >= Iop_And8 && e->op <= Iop_And64) ||
+			    (e->op >= Iop_Or8 && e->op <= Iop_Or64) ||
+			    e->op == Iop_And1 ||
+			    e->op == Iop_Or1) {
 				__set_profiling(optimise_assoc_x_and_x);
 				for (int it1 = 0;
-				     it1 < e->nr_arguments;
-				     it1++) {
-					for (int it2 = it1 + 1;
-					     it2 < e->nr_arguments;
-						) {
-						if (definitelyEqual(e->contents[it1],
-								    e->contents[it2],
-								    opt)) {
-							*done_something = true;
-							purgeAssocArgument(e, it2);
-						} else {
-							it2++;
-						}
+				     it1 < e->nr_arguments - 1;
+					) {
+					if (e->contents[it1] == e->contents[it1 + 1]) {
+						*done_something = true;
+						purgeAssocArgument(e, it1 + 1);
+					} else {
+						it1++;
 					}
 				}
 			}
