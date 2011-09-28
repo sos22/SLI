@@ -1186,6 +1186,20 @@ static bool parseIRExprFailedCall(IRExpr **res, const char *str, const char **su
   return true;
 }
 
+static bool parseIRExprHappensBefore(IRExpr **res, const char *str, const char **suffix, char **err)
+{
+  ThreadRip before;
+  ThreadRip after;
+  if (!parseThisChar('(', str, &str, err) ||
+      !parseThreadRip(&before, str, &str, err) ||
+      !parseThisString(" <-< ", str, &str, err) ||
+      !parseThreadRip(&after, str, &str, err) ||
+      !parseThisChar(')', str, suffix, err))
+    return false;
+  *res = IRExpr_HappensBefore(before, after);
+  return true;
+}
+
 bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **_err)
 {
   char *err;
@@ -1206,6 +1220,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **_err
   do_form(FreeVariable);
   do_form(ClientCall);
   do_form(FailedCall);
+  do_form(HappensBefore);
 #undef do_form
   *_err = vex_asprintf("wanted IRExpr, got %.10s...", str);
   return false;
