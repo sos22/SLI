@@ -1401,6 +1401,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	}
 
 	requirement = internIRExpr(zapFreeVariables(requirement, m));
+	requirement = simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations);
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
