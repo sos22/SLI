@@ -1158,6 +1158,9 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
 	sm = deSSA(sm);
+	if (TIMEOUT)
+		return sm;
+
 	ii->set(sm->origin, sm->root);
 
 	InstructionSet interesting;
@@ -1932,6 +1935,8 @@ CFGtoCrashReason(unsigned tid,
 	if (crashReasons)
 		crashReasons->set(original_rip, sm->root);
 	sm = convertToSSA(sm);
+	if (TIMEOUT)
+		return NULL;
 	sm->sanityCheck();
 	return sm;
 }

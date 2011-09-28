@@ -504,17 +504,17 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 			{}
 		};
 	public:
-		IRExpr * operator()(const std::set<StateMachineSideEffect *> &reaching,
-				    IRExpr *e) {
+		IRExpr *doExprInState(const std::set<StateMachineSideEffect *> &reaching,
+				      IRExpr *e) {
 			exp_transformer t(needPhiStates, reaching);
 			return t.transformIRExpr(e);
 		}
-		void operator()(std::set<StateMachineSideEffect *> reaching,
-				StateMachineEdge *edge)
+		void doEdge(std::set<StateMachineSideEffect *> reaching,
+			    StateMachineEdge *edge)
 		{
 			exp_transformer t(needPhiEdges, reaching);
 			for (auto it = edge->sideEffects.begin();
-			     it != edge->sideEffects.end();
+			     !TIMEOUT && it != edge->sideEffects.end();
 			     it++) {
 				StateMachineSideEffect *e = *it;
 				switch (e->type) {
@@ -553,9 +553,9 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 		_(bool *_needPhiEdges, bool *_needPhiStates)
 			: needPhiEdges(_needPhiEdges), needPhiStates(_needPhiStates)
 		{}
-	} doit(needPhiEdges, needPhiStates);
+	} worker(needPhiEdges, needPhiStates);
 	toVisit.insert(inp->root);
-	while (!toVisit.empty()) {
+	while (!TIMEOUT && !toVisit.empty()) {
 		auto it = toVisit.begin();
 		StateMachineState *s = *it;
 		toVisit.erase(it);
@@ -564,18 +564,18 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 		visited.insert(s);
 
 		if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(s))
-			sms->target = doit(reaching.effectsReachingState(s), sms->target);
+			sms->target = worker.doExprInState(reaching.effectsReachingState(s), sms->target);
 		else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s))
-			smb->condition = doit(reaching.effectsReachingState(s), smb->condition);
+			smb->condition = worker.doExprInState(reaching.effectsReachingState(s), smb->condition);
 
 		if (s->target0()) {
-			doit(reaching.effectsReachingEdge(s->target0()),
-			     s->target0());
+			worker.doEdge(reaching.effectsReachingEdge(s->target0()),
+				      s->target0());
 			toVisit.insert(s->target0()->target);
 		}
 		if (s->target1()) {
-			doit(reaching.effectsReachingEdge(s->target1()),
-			     s->target1());
+			worker.doEdge(reaching.effectsReachingEdge(s->target1()),
+				      s->target1());
 			toVisit.insert(s->target1()->target);
 		}
 	}
@@ -642,9 +642,10 @@ introducePhiEdges(StateMachine *inp,
 	std::set<StateMachineState *> toVisitStates;
 
 	toVisitStates.insert(inp->root);
-	while (!toVisitStates.empty() ||
-	       !toVisitEdges.empty()) {
-		while (!toVisitStates.empty()) {
+	while (!TIMEOUT &&
+	       (!toVisitStates.empty() ||
+		!toVisitEdges.empty())) {
+		while (!TIMEOUT && !toVisitStates.empty()) {
 			StateMachineState *s = pop(toVisitStates);
 			if (visitedStates.count(s))
 				continue;
@@ -654,13 +655,15 @@ introducePhiEdges(StateMachine *inp,
 			if (s->target1())
 				toVisitEdges.insert(s->target1());
 		}
-		while (!toVisitEdges.empty()) {
+		while (!TIMEOUT && !toVisitEdges.empty()) {
 			StateMachineEdge *e = pop(toVisitEdges);
 			for (unsigned x = 0; x < e->sideEffects.size(); x++) {
 				std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
 				findNeededRegisters(e->sideEffects[x], needed);
 				if (needed.empty())
 					continue;
+				if (TIMEOUT)
+					break;
 				for (auto it2 = needed.begin();
 				     it2 != needed.end();
 				     it2++) {
@@ -741,7 +744,7 @@ introducePhiStates(StateMachine *inp,
 			StateMachineEdge *predecessor = predecessorMap[sm];
 			std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
 			findNeededRegisters(e, needed);
-			for (auto it = needed.begin(); it != needed.end(); it++) {
+			for (auto it = needed.begin(); !TIMEOUT && it != needed.end(); it++) {
 				if (introduced.count(*it))
 					continue;
 				if (!predecessor) {
@@ -770,7 +773,7 @@ introducePhiStates(StateMachine *inp,
 	std::set<StateMachineState *> visited;
 	std::set<StateMachineState *> toVisit;
 	toVisit.insert(inp->root);
-	while (!toVisit.empty()) {
+	while (!TIMEOUT && !toVisit.empty()) {
 		StateMachineState *s = pop(toVisit);
 		if (visited.count(s))
 			continue;
@@ -786,7 +789,7 @@ introducePhiStates(StateMachine *inp,
 			toVisit.insert(s->target1()->target);
 	}
 
-	if (introduced.empty()) {
+	if (!TIMEOUT && introduced.empty()) {
 		/* We didn't manage to introduce any new phis.  That
 		   had better be because we need some more
 		   intermediate states. */
@@ -798,7 +801,7 @@ introducePhiStates(StateMachine *inp,
 		visited.clear();
 		visited.insert(replacement);
 		toVisit.insert(inp->root);
-		while (!toVisit.empty()) {
+		while (!TIMEOUT && !toVisit.empty()) {
 			StateMachineState *s = pop(toVisit);
 			if (visited.count(s))
 				continue;
@@ -828,6 +831,8 @@ useSsaVarsAndIntroducePhis(StateMachine *inp,
 	needPhiEdges = needPhiStates = false;
 
 	useSsaVars(inp, reaching, &needPhiEdges, &needPhiStates);
+	if (TIMEOUT)
+		return false;
 	if (needPhiEdges)
 		introducePhiEdges(inp, reaching, lastGeneration);
 	else if (needPhiStates)
@@ -1192,11 +1197,15 @@ convertToSSA(StateMachine *inp)
 	{
 		PossiblyReaching reaching(inp);
 		inp = introduceSsaVars(inp, reaching, lastGeneration);
+		if (TIMEOUT)
+			return inp;
 	}
 	PossiblyReaching reaching(inp);
 	if (useSsaVarsAndIntroducePhis(inp, reaching, lastGeneration)) {
 		bool progress;
 		do {
+			if (TIMEOUT)
+				return inp;
 			PossiblyReaching r(inp);
 			progress = useSsaVarsAndIntroducePhis(inp, r, lastGeneration);
 		} while (progress);
