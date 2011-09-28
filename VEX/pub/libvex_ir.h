@@ -217,7 +217,7 @@ class ThreadRip : public Named {
 		return res;
 	}
 public:
-	ThreadRip() : thread(-1), rip(0xf00dead) {}
+	ThreadRip() : thread(0), rip(0) {}
 	ThreadRip(unsigned _thread, unsigned long _rip)
 		: thread(_thread), rip(_rip)
 	{}
