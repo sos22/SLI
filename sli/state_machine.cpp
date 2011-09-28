@@ -802,7 +802,7 @@ StateMachineEdge::roughLoadCount(StateMachineState::RoughLoadCount acc) const
 void
 ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema, FILE *f)
 {
-	fprintf(f, "{%d:0x%lx}", smsema->rip.thread, smsema->rip.rip);
+	fprintf(f, "{%s}", smsema->rip.name());
 }
 
 void

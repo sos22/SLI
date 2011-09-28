@@ -74,7 +74,7 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 			if (takeIt) {
 				printf("Eval ");
 				ppIRExpr(it2->second, stdout);
-				printf(" at %d:%lx\n", i->rip.thread, i->rip.rip);
+				printf(" at %s\n", i->rip.name());
 				actuallyEvalHere.insert(*it2);
 			}
 		}

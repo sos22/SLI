@@ -1255,7 +1255,7 @@ IRExprLoad::prettyPrint(FILE *f) const
       ppIRType(ty, f);
       fprintf(f,  "(" );
       ppIRExpr(addr, f);
-      fprintf(f,  ")@%d:%lx", rip.thread, rip.rip );
+      fprintf(f,  ")@%s", rip.name() );
 }
 void
 IRExprConst::prettyPrint(FILE *f) const
@@ -1320,9 +1320,7 @@ IRExprFreeVariable::prettyPrint(FILE *f) const
 void
 IRExprClientCall::prettyPrint(FILE *f) const
 {
-      fprintf(f, "call0x%lx@%d:%lx(", calledRip,
-	      callSite.thread,
-	      callSite.rip);
+      fprintf(f, "call0x%lx@%s(", calledRip, callSite.name());
       for (int x = 0; args[x]; x++) {
 	if (x != 0)
 	  fprintf(f, ", ");
@@ -1340,11 +1338,9 @@ IRExprClientCallFailed::prettyPrint(FILE *f) const
 void
 IRExprHappensBefore::prettyPrint(FILE *f) const
 {
-      fprintf(f, "(%lx:%d <-< %lx:%d)",
-	      before.rip,
-	      before.thread,
-	      after.rip,
-	      after.thread);
+      fprintf(f, "(%s <-< %s)",
+	      before.name(),
+	      after.name());
 }
 
 

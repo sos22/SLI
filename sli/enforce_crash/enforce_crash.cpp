@@ -45,13 +45,13 @@ void
 instrToInstrSetMap::print(FILE *f)
 {
 	for (iterator it = begin(); it != end(); it++) {
-		fprintf(f, "%d:%lx[%p] -> {", it->first->rip.thread, it->first->rip.rip, it->first);
+		fprintf(f, "%s[%p] -> {", it->first->rip.name(), it->first);
 		for (std::set<Instruction<ThreadRip> *>::iterator it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++) {
 			if (it2 != it->second.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%d:%lx[%p]", (*it2)->rip.thread, (*it2)->rip.rip, *it2);
+			fprintf(f, "%s[%p]", (*it2)->rip.name(), *it2);
 		}
 		fprintf(f, "}\n");
 	}
@@ -1119,14 +1119,14 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					const happensBeforeEdge *hb = *it;
 					if (hb->after.rip == cr.rip &&
 					    cr.threadLive(hb->after.thread)) {
-						printf("Instantiate %lx:%d <-< %lx:%d\n",
-						       hb->before.rip, hb->before.thread,
-						       hb->after.rip, hb->after.thread);
+						printf("Instantiate %s <-< %s\n",
+						       hb->before.name(),
+						       hb->after.name());
 						newInstr = instrHappensBeforeEdgeAfter(hb, newInstr, data.exprsToSlots, cr, relocs);
 					} else {
-						printf("Skip %lx:%d <-< %lx:%d\n",
-						       hb->before.rip, hb->before.thread,
-						       hb->after.rip, hb->after.thread);
+						printf("Skip %s <-< %s\n",
+						       hb->before.name(),
+						       hb->after.name());
 					}
 				}
 			} else {
@@ -1315,7 +1315,7 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 	     it != roots.end();
 	     it++) {
-		printf("Root %d:%lx\n", it->second.thread, it->second.rip);
+		printf("Root %s\n", it->second.name());
 		cfg->add_root(it->second, 100);
 	}
 	cfg->doit();

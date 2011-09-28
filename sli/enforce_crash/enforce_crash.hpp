@@ -205,12 +205,10 @@ public:
 		  after(invert ? hb->before : hb->after),
 		  msg_id(next_msg_id++)
 	{
-		printf("%x: HBE %d:%lx -> %d:%lx\n",
+		printf("%x: HBE %s -> %s\n",
 		       msg_id,
-		       before.thread,
-		       before.rip,
-		       after.thread,
-		       after.rip);
+		       before.name(),
+		       after.name());
 		std::set<Instruction<ThreadRip> *> &liveInstructions(
 			idom[cfg->ripToInstr->get(before)]);
 		for (std::set<Instruction<ThreadRip> *>::iterator it = liveInstructions.begin();

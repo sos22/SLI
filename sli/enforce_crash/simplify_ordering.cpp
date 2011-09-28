@@ -54,7 +54,7 @@ public:
 		for (const_iterator it = begin();
 		     it != end();
 		     it++) {
-			fprintf(f, "%d:%lx\t\t%d\n", it->first.thread, it->first.rip, it->second);
+			fprintf(f, "%s\t\t%d\n", it->first.name(), it->second);
 		}
 	}
 };

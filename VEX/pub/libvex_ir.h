@@ -208,7 +208,14 @@ public:
 	};
 };
 
-class ThreadRip {
+class ThreadRip : public Named {
+	char *mkName() const {
+		char *res;
+		int r;
+		r = asprintf(&res, "%d:%lx", thread, rip);
+		(void)r;
+		return res;
+	}
 public:
 	ThreadRip() : thread(-1), rip(0xf00dead) {}
 	ThreadRip(unsigned _thread, unsigned long _rip)

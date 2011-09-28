@@ -745,7 +745,7 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ") <- ");
 		ppIRExpr(data, f);
-		fprintf(f, " @ %d:%lx", rip.thread, rip.rip);
+		fprintf(f, " @ %s", rip.name());
 	}
 	void visit(HeapVisitor &hv) {
 		StateMachineSideEffectMemoryAccess::visit(hv);
@@ -789,7 +789,7 @@ public:
 		target.prettyPrint(f);
 		fprintf(f, " <- *(");
 		ppIRExpr(addr, f);
-		fprintf(f, ")@%d:%lx", rip.thread, rip.rip);
+		fprintf(f, ")@%s", rip.name());
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
