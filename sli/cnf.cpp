@@ -15,6 +15,9 @@
 #define END_NAMESPACE(name) }
 START_NAMESPACE(__cnf)
 
+#include "nf.hpp"
+
+static void check_memory_usage(void) {}
 /* The ordering we use for NF disjunctions works like this:
 
    -- If a is a subset of b (i.e. a implies b) then a is less than b.
@@ -36,19 +39,6 @@ class NF_Disjunction;
 
 static nf_ordering compare_nf_disjunctions(const NF_Disjunction &a, const NF_Disjunction &b);
 
-class NF_Atom : public std::pair<bool, IRExpr *>, public PrettyPrintable {
-public:
-	NF_Atom(bool b, IRExpr *e)
-		: std::pair<bool, IRExpr *>(b, e)
-	{}
-	void prettyPrint(FILE *f) const {
-		if (first)
-			fprintf(f, "!");
-		else
-			fprintf(f, " ");
-		ppIRExpr(second, f);
-	}
-};
 class NF_Disjunction : public std::vector<NF_Atom>, public PrettyPrintable {
 public:
 	void prettyPrint(FILE *f) const {
