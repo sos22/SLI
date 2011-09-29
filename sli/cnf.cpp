@@ -19,32 +19,29 @@ START_NAMESPACE(__cnf)
 
 static void check_memory_usage(void) {}
 
-class NF_Term;
-
 static nf_ordering compare_nf_disjunctions(const NF_Term &a, const NF_Term &b);
 
-class NF_Term : public std::vector<NF_Atom>, public PrettyPrintable {
-public:
-	void prettyPrint(FILE *f) const {
-		for (auto it = begin(); it != end(); it++) {
-			if (it != begin())
-				fprintf(f, "|||||||||||\n");
-			it->prettyPrint(f);
-		}
-		fprintf(f, "\n");
+void
+NF_Term::prettyPrint(FILE *f) const
+{
+	for (auto it = begin(); it != end(); it++) {
+		if (it != begin())
+			fprintf(f, "|||||||||||\n");
+		it->prettyPrint(f);
 	}
-};
-class NF_Expression : public std::vector<NF_Term>, public PrettyPrintable {
-public:
-	void prettyPrint(FILE *f) const {
-		for (auto it = begin(); it != end(); it++) {
-			if (it != begin())
-				fprintf(f, "\n&&&&&&&&&&&&\n");
-			it->prettyPrint(f);
-		}
-		fprintf(f, "\n");
+	fprintf(f, "\n");
+}
+
+void
+NF_Expression::prettyPrint(FILE *f) const
+{
+	for (auto it = begin(); it != end(); it++) {
+		if (it != begin())
+			fprintf(f, "\n&&&&&&&&&&&&\n");
+		it->prettyPrint(f);
 	}
-};
+	fprintf(f, "\n");
+}
 
 static void
 sanity_check(const NF_Term &a)

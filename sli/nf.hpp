@@ -33,4 +33,13 @@ public:
 	}
 };
 
+class NF_Term : public std::vector<NF_Atom>, public PrettyPrintable {
+public:
+	void prettyPrint(FILE *f) const;
+};
+class NF_Expression : public std::vector<NF_Term>, public PrettyPrintable {
+public:
+	void prettyPrint(FILE *f) const;
+};
+
 #endif /* !NF_HPP__ */
