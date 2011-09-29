@@ -3,6 +3,8 @@
 #include "sli.h"
 #include "dnf.hpp"
 
+static bool nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+
 static void
 check_memory_usage(void)
 {
@@ -354,7 +356,8 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
    which case we return false; otherwise return true.  Disjoin for
    CNF, and conjoin for DNF. */
 static bool
-nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out)
+nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
+	       IROp expressionOp, IROp termOp)
 {
 	check_memory_usage();
 	if (TIMEOUT)
@@ -362,16 +365,18 @@ nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out)
 	if (nr_fragments == 0)
 		return true;
 	if (out.size() == 0) {
-		return nf(fragments[0], out) &&
-			nf_counterjoin(fragments + 1, nr_fragments - 1, out);
+		return nf(fragments[0], out, expressionOp, termOp) &&
+			nf_counterjoin(fragments + 1, nr_fragments - 1, out,
+				       expressionOp, termOp);
 	}
 	sanity_check(out);
 	NF_Expression this_one;
-	nf(fragments[0], this_one);
+	nf(fragments[0], this_one, expressionOp, termOp);
 	if (!nf_countermerge(this_one, out))
 		return false;
 
-	return nf_counterjoin(fragments + 1, nr_fragments - 1, out);
+	return nf_counterjoin(fragments + 1, nr_fragments - 1, out,
+			      expressionOp, termOp);
 }
 
 /* Invert @conf and store it in @out, which must start out empty. */
@@ -425,35 +430,38 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 }
 
 /* Convert @e to disjunctive normal form. */
-bool
-nf(IRExpr *e, NF_Expression &out)
+static bool
+nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 {
 	check_memory_usage();
 	out.clear();
 	if (e->tag == Iex_Unop &&
 	    ((IRExprUnop *)e)->op == Iop_Not1) {
 		NF_Expression r;
-		return nf(((IRExprUnop *)e)->arg, r) &&
+		return nf(((IRExprUnop *)e)->arg, r, expressionOp, termOp) &&
 			nf_invert(r, out);
 	}
 
 	if (e->tag == Iex_Associative) {
-		if (((IRExprAssociative *)e)->op == Iop_Or1) {
+		if (((IRExprAssociative *)e)->op == expressionOp) {
 			for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++) {
 				if (TIMEOUT)
 					return false;
 				NF_Expression r;
-				if (!nf(((IRExprAssociative *)e)->contents[x], r))
+				if (!nf(((IRExprAssociative *)e)->contents[x], r,
+					expressionOp, termOp))
 					return false;
 				NF_Expression t(out);
 				merge_expressions(r, t, out);
 			}
 			sanity_check(out);
 			return true;
-		} else if (((IRExprAssociative *)e)->op == Iop_And1) {
+		} else if (((IRExprAssociative *)e)->op == termOp) {
 			return nf_counterjoin(((IRExprAssociative *)e)->contents,
 					      ((IRExprAssociative *)e)->nr_arguments,
-					      out);
+					      out,
+					      expressionOp,
+					      termOp);
 		}
 	}
 
@@ -464,6 +472,12 @@ nf(IRExpr *e, NF_Expression &out)
 	out.push_back(c);
 	sanity_check(out);
 	return true;
+}
+
+bool
+dnf(IRExpr *e, NF_Expression &out)
+{
+	return nf(e, out, Iop_Or1, Iop_And1);
 }
 
 void
