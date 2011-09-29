@@ -61,7 +61,7 @@ compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 }
 
 static nf_ordering
-compare_nf_conjunctions(const NF_Conjunction &a, const NF_Conjunction &b)
+compare_nf_conjunctions(const NF_Term &a, const NF_Term &b)
 {
 	auto it1 = a.begin();
 	auto it2 = b.begin();
@@ -130,7 +130,7 @@ compare_nf_conjunctions(const NF_Conjunction &a, const NF_Conjunction &b)
 }
 
 static void
-sanity_check(const NF_Conjunction &a)
+sanity_check(const NF_Term &a)
 {
 #ifndef NDEBUG
 	assert(a.size() > 0);
@@ -141,7 +141,7 @@ sanity_check(const NF_Conjunction &a)
 #endif
 }
 static void
-sanity_check(const NF_Disjunction &a)
+sanity_check(const NF_Expression &a)
 {
 #ifndef NDEBUG
 	if (a.size() == 0)
@@ -158,9 +158,9 @@ sanity_check(const NF_Disjunction &a)
 /* Set @out to @src1 & @src2.  Return false if we find a contradiction
    and true otherwise. */
 static bool
-merge_conjunctions(const NF_Conjunction &src1,
-		   const NF_Conjunction &src2,
-		   NF_Conjunction &out)
+merge_conjunctions(const NF_Term &src1,
+		   const NF_Term &src2,
+		   NF_Term &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
@@ -200,9 +200,9 @@ merge_conjunctions(const NF_Conjunction &src1,
 
 /* Set @out to @src1 | @src2. */
 static void
-merge_disjunctions(const NF_Disjunction &src1,
-		   const NF_Disjunction &src2,
-		   NF_Disjunction &out)
+merge_disjunctions(const NF_Expression &src1,
+		   const NF_Expression &src2,
+		   NF_Expression &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
@@ -254,7 +254,7 @@ merge_disjunctions(const NF_Disjunction &src1,
 
 /* Set @out to @src | @out */
 static void
-insert_conjunction(const NF_Conjunction &src, NF_Disjunction &out)
+insert_conjunction(const NF_Term &src, NF_Expression &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
@@ -282,7 +282,7 @@ insert_conjunction(const NF_Conjunction &src, NF_Disjunction &out)
 	}
 out1:
 	if (nr_killed > out.size() / 2) {
-		NF_Disjunction new_out;
+		NF_Expression new_out;
 		new_out.reserve(out.size() - nr_killed + 1);
 		for (unsigned y = 0; y < out.size(); y++) {
 			sanity_check(new_out);
@@ -320,19 +320,19 @@ out1:
 /* Convert @out to @out & @this_one, maintaining disjunctive normal
  * form. */
 static bool
-nf_and(const NF_Disjunction &this_one, NF_Disjunction &out)
+nf_and(const NF_Expression &this_one, NF_Expression &out)
 {
-	NF_Disjunction new_out;
+	NF_Expression new_out;
 	check_memory_usage();
 	sanity_check(out);
-	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_DISJUNCTION)
+	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_EXPRESSION)
 		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
-		NF_Conjunction &existing_conj(out[x]);
+		NF_Term &existing_conj(out[x]);
 		for (unsigned z = 0; z < this_one.size(); z++) {
 			sanity_check(new_out);
-			NF_Conjunction new_conj;
+			NF_Term new_conj;
 			if (merge_conjunctions(this_one[z], existing_conj, new_conj)) {
 				sanity_check(new_out);
 				insert_conjunction(new_conj, new_out);
@@ -353,7 +353,7 @@ nf_and(const NF_Disjunction &this_one, NF_Disjunction &out)
    results in @out.  Can fail if @out looks ``too big'', in which case
    we return false; otherwise return true. */
 static bool
-nf_and(IRExpr **fragments, int nr_fragments, NF_Disjunction &out)
+nf_and(IRExpr **fragments, int nr_fragments, NF_Expression &out)
 {
 	check_memory_usage();
 	if (TIMEOUT)
@@ -365,7 +365,7 @@ nf_and(IRExpr **fragments, int nr_fragments, NF_Disjunction &out)
 			nf_and(fragments + 1, nr_fragments - 1, out);
 	}
 	sanity_check(out);
-	NF_Disjunction this_one;
+	NF_Expression this_one;
 	nf(fragments[0], this_one);
 	if (!nf_and(this_one, out))
 		return false;
@@ -375,12 +375,12 @@ nf_and(IRExpr **fragments, int nr_fragments, NF_Disjunction &out)
 
 /* Invert @conf and store it in @out, which must start out empty. */
 static bool
-nf_invert(const NF_Conjunction &conj, NF_Disjunction &out)
+nf_invert(const NF_Term &conj, NF_Expression &out)
 {
 	assert(out.size() == 0);
 	out.reserve(conj.size());
 	for (unsigned x = 0; x < conj.size(); x++) {
-		NF_Conjunction c;
+		NF_Term c;
 		c.push_back(NF_Atom(!conj[x].first, conj[x].second));
 		insert_conjunction(c, out);
 	}
@@ -389,7 +389,7 @@ nf_invert(const NF_Conjunction &conj, NF_Disjunction &out)
 }
 
 static bool
-nf_invert(const NF_Disjunction &in, NF_Disjunction &out)
+nf_invert(const NF_Expression &in, NF_Expression &out)
 {
 	assert(out.size() == 0);
 	assert(in.size() != 0);
@@ -404,7 +404,7 @@ nf_invert(const NF_Disjunction &in, NF_Disjunction &out)
 	   where the slice notation is supposed to mean that we consider
 	   the first x clauses only. */
 	for (unsigned x = 1; x < in.size(); x++) {
-		NF_Disjunction r;
+		NF_Expression r;
 		if (TIMEOUT || !nf_invert(in[x], r))
 			return false;
 
@@ -425,13 +425,13 @@ nf_invert(const NF_Disjunction &in, NF_Disjunction &out)
 
 /* Convert @e to disjunctive normal form. */
 bool
-nf(IRExpr *e, NF_Disjunction &out)
+nf(IRExpr *e, NF_Expression &out)
 {
 	check_memory_usage();
 	out.clear();
 	if (e->tag == Iex_Unop &&
 	    ((IRExprUnop *)e)->op == Iop_Not1) {
-		NF_Disjunction r;
+		NF_Expression r;
 		return nf(((IRExprUnop *)e)->arg, r) &&
 			nf_invert(r, out);
 	}
@@ -441,10 +441,10 @@ nf(IRExpr *e, NF_Disjunction &out)
 			for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++) {
 				if (TIMEOUT)
 					return false;
-				NF_Disjunction r;
+				NF_Expression r;
 				if (!nf(((IRExprAssociative *)e)->contents[x], r))
 					return false;
-				NF_Disjunction t(out);
+				NF_Expression t(out);
 				merge_disjunctions(r, t, out);
 			}
 			sanity_check(out);
@@ -458,7 +458,7 @@ nf(IRExpr *e, NF_Disjunction &out)
 
 	/* Anything else cannot be represented in NF, so gets an
 	 * atom */
-	NF_Conjunction c;
+	NF_Term c;
 	c.push_back(NF_Atom(false, e));
 	out.push_back(c);
 	sanity_check(out);
@@ -466,7 +466,7 @@ nf(IRExpr *e, NF_Disjunction &out)
 }
 
 void
-printNf(NF_Disjunction &nf, FILE *f)
+printNf(NF_Expression &nf, FILE *f)
 {
 	for (unsigned x = 0; x < nf.size(); x++) {
 		for (unsigned y = 0; y < nf[x].size(); y++) {
