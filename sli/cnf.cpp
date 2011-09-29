@@ -157,9 +157,9 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 /* Set @out to @src1 | @src2.  Return false if we find that the result
    is definitely true, and true otherwise. */
 static bool
-merge_disjunctions(const NF_Term &src1,
-		   const NF_Term &src2,
-		   NF_Term &out)
+merge_terms(const NF_Term &src1,
+	    const NF_Term &src2,
+	    NF_Term &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
@@ -199,9 +199,9 @@ merge_disjunctions(const NF_Term &src1,
 
 /* Set @out to @src1 & @src2. */
 static void
-merge_conjunctions(const NF_Expression &src1,
-		   const NF_Expression &src2,
-		   NF_Expression &out)
+merge_expressions(const NF_Expression &src1,
+		  const NF_Expression &src2,
+		  NF_Expression &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
@@ -253,7 +253,7 @@ merge_conjunctions(const NF_Expression &src1,
 
 /* Set @out to @src & @out */
 static void
-insert_disjunction(const NF_Term &src, NF_Expression &out)
+insert_term(const NF_Term &src, NF_Expression &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
@@ -323,19 +323,19 @@ static bool
 nf_or(const NF_Expression &this_one, NF_Expression &out)
 {
 	NF_Expression new_out;
+	check_memory_usage();
 	sanity_check(out);
-	sanity_check(this_one);
-	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_DISJUNCTION)
+	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_EXPRESSION)
 		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
-		NF_Term &existing_disj(out[x]);
+		NF_Term &existing_term(out[x]);
 		for (unsigned z = 0; z < this_one.size(); z++) {
 			sanity_check(new_out);
-			NF_Term new_disj;
-			if (merge_disjunctions(this_one[z], existing_disj, new_disj)) {
+			NF_Term new_term;
+			if (merge_terms(this_one[z], existing_term, new_term)) {
 				sanity_check(new_out);
-				insert_disjunction(new_disj, new_out);
+				insert_term(new_term, new_out);
 				sanity_check(new_out);
 			} else {
 				/* the disjunction includes both x and
@@ -382,7 +382,7 @@ nf_invert(const NF_Term &conj, NF_Expression &out)
 	for (unsigned x = 0; x < conj.size(); x++) {
 		NF_Term c;
 		c.push_back(NF_Atom(!conj[x].first, conj[x].second));
-		insert_disjunction(c, out);
+		insert_term(c, out);
 	}
 	sanity_check(out);
 	return true;
@@ -445,7 +445,7 @@ nf(IRExpr *e, NF_Expression &out)
 				if (!nf(((IRExprAssociative *)e)->contents[x], r))
 					return false;
 				NF_Expression t(out);
-				merge_conjunctions(r, t, out);
+				merge_expressions(r, t, out);
 			}
 			sanity_check(out);
 			return true;

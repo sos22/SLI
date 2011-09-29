@@ -158,9 +158,9 @@ sanity_check(const NF_Expression &a)
 /* Set @out to @src1 & @src2.  Return false if we find a contradiction
    and true otherwise. */
 static bool
-merge_conjunctions(const NF_Term &src1,
-		   const NF_Term &src2,
-		   NF_Term &out)
+merge_terms(const NF_Term &src1,
+	    const NF_Term &src2,
+	    NF_Term &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
@@ -200,9 +200,9 @@ merge_conjunctions(const NF_Term &src1,
 
 /* Set @out to @src1 | @src2. */
 static void
-merge_disjunctions(const NF_Expression &src1,
-		   const NF_Expression &src2,
-		   NF_Expression &out)
+merge_expressions(const NF_Expression &src1,
+		  const NF_Expression &src2,
+		  NF_Expression &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
@@ -254,7 +254,7 @@ merge_disjunctions(const NF_Expression &src1,
 
 /* Set @out to @src | @out */
 static void
-insert_conjunction(const NF_Term &src, NF_Expression &out)
+insert_term(const NF_Term &src, NF_Expression &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
@@ -329,13 +329,13 @@ nf_and(const NF_Expression &this_one, NF_Expression &out)
 		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
-		NF_Term &existing_conj(out[x]);
+		NF_Term &existing_term(out[x]);
 		for (unsigned z = 0; z < this_one.size(); z++) {
 			sanity_check(new_out);
-			NF_Term new_conj;
-			if (merge_conjunctions(this_one[z], existing_conj, new_conj)) {
+			NF_Term new_term;
+			if (merge_terms(this_one[z], existing_term, new_term)) {
 				sanity_check(new_out);
-				insert_conjunction(new_conj, new_out);
+				insert_term(new_term, new_out);
 				sanity_check(new_out);
 			} else {
 				/* the conjunction includes both x and
@@ -382,7 +382,7 @@ nf_invert(const NF_Term &conj, NF_Expression &out)
 	for (unsigned x = 0; x < conj.size(); x++) {
 		NF_Term c;
 		c.push_back(NF_Atom(!conj[x].first, conj[x].second));
-		insert_conjunction(c, out);
+		insert_term(c, out);
 	}
 	sanity_check(out);
 	return true;
@@ -445,7 +445,7 @@ nf(IRExpr *e, NF_Expression &out)
 				if (!nf(((IRExprAssociative *)e)->contents[x], r))
 					return false;
 				NF_Expression t(out);
-				merge_disjunctions(r, t, out);
+				merge_expressions(r, t, out);
 			}
 			sanity_check(out);
 			return true;

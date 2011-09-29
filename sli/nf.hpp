@@ -2,6 +2,8 @@
 #ifndef NF_HPP__
 #define NF_HPP__
 
+#define NF_MAX_EXPRESSION 1000000
+
 /* The ordering we use for NF disjunctions works like this:
 
    -- If a is a subset of b (i.e. a implies b) then a is less than b.
