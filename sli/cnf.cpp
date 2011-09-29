@@ -51,21 +51,6 @@ public:
 };
 class CNF_Disjunction : public std::vector<CNF_Atom>, public PrettyPrintable {
 public:
-	void sanity_check() const {
-#ifndef NDEBUG
-		assert(size() > 0);
-		for (unsigned x = 0; x < size() - 1; x++) {
-			assert((*this)[x].second != (*this)[x+1].second);
-			assert((*this)[x].second < (*this)[x+1].second);
-		}
-#endif
-	}
-
-	enum compare_result {
-	};
-
-	static compare_result compare(const CNF_Disjunction &a,
-				      const CNF_Disjunction &b);
 	void prettyPrint(FILE *f) const {
 		for (auto it = begin(); it != end(); it++) {
 			if (it != begin())
@@ -77,16 +62,6 @@ public:
 };
 class CNF_Conjunction : public std::vector<CNF_Disjunction>, public PrettyPrintable {
 public:
-	void sanity_check() const {
-#ifndef NDEBUG
-		if (size() == 0)
-			return;
-		for (unsigned x = 0; x < size(); x++)
-			(*this)[x].sanity_check();
-		for (unsigned x = 0; x < size() - 1; x++)
-			assert(compare_cnf_disjunctions((*this)[x], (*this)[x+1]) < 0);
-#endif
-	}
 	void prettyPrint(FILE *f) const {
 		for (auto it = begin(); it != end(); it++) {
 			if (it != begin())
@@ -96,6 +71,31 @@ public:
 		fprintf(f, "\n");
 	}
 };
+
+static void
+sanity_check(const CNF_Disjunction &a)
+{
+#ifndef NDEBUG
+	assert(a.size() > 0);
+	for (unsigned x = 0; x < a.size() - 1; x++) {
+		assert(a[x].second != a[x+1].second);
+		assert(a[x].second < a[x+1].second);
+	}
+#endif
+}
+
+static void
+sanity_check(const CNF_Conjunction &a)
+{
+#ifndef NDEBUG
+	if (a.size() == 0)
+		return;
+	for (unsigned x = 0; x < a.size(); x++)
+		sanity_check(a[x]);
+	for (unsigned x = 0; x < a.size() - 1; x++)
+		assert(compare_cnf_disjunctions(a[x], a[x+1]) < 0);
+#endif
+}
 
 static bool cnf(IRExpr *e, CNF_Conjunction &out);
 
@@ -190,8 +190,8 @@ merge_disjunctions(const CNF_Disjunction &src1,
 		   const CNF_Disjunction &src2,
 		   CNF_Disjunction &out)
 {
-	src1.sanity_check();
-	src2.sanity_check();
+	sanity_check(src1);
+	sanity_check(src2);
 	out.reserve(src1.size() + src2.size());
 	auto it1 = src1.begin();
 	auto it2 = src2.begin();
@@ -222,7 +222,7 @@ merge_disjunctions(const CNF_Disjunction &src1,
 		out.push_back(*it2);
 		it2++;
 	}
-	out.sanity_check();
+	sanity_check(out);
 	return true;
 }
 
@@ -232,8 +232,8 @@ merge_conjunctions(const CNF_Conjunction &src1,
 		   const CNF_Conjunction &src2,
 		   CNF_Conjunction &out)
 {
-	src1.sanity_check();
-	src2.sanity_check();
+	sanity_check(src1);
+	sanity_check(src2);
 	out.clear();
 	out.reserve(src1.size() + src2.size());
 	auto it1 = src1.begin();
@@ -242,9 +242,9 @@ merge_conjunctions(const CNF_Conjunction &src1,
 		switch (compare_cnf_disjunctions(*it1, *it2)) {
 		case cnf_subset: /* *it1 subsumes *it2, so drop *it2 */
 		case cnf_eq: /* They're equal, it doesn't matter which one we pick */
-			out.sanity_check();
+			sanity_check(out);
 			out.push_back(*it1);
-			out.sanity_check();
+			sanity_check(out);
 			it1++;
 			it2++;
 			break;
@@ -254,30 +254,30 @@ merge_conjunctions(const CNF_Conjunction &src1,
 			it2++;
 			break;
 		case cnf_less:
-			out.sanity_check();
+			sanity_check(out);
 			out.push_back(*it1);
-			out.sanity_check();
+			sanity_check(out);
 			it1++;
 			break;
 		case cnf_greater:
-			out.sanity_check();
+			sanity_check(out);
 			out.push_back(*it2);
-			out.sanity_check();
+			sanity_check(out);
 			it2++;
 			break;
 		}
 	}
-	out.sanity_check();
+	sanity_check(out);
 	while (it1 != src1.end()) {
 		out.push_back(*it1);
 		it1++;
 	}
-	out.sanity_check();
+	sanity_check(out);
 	while (it2 != src2.end()) {
 		out.push_back(*it2);
 		it2++;
 	}
-	out.sanity_check();
+	sanity_check(out);
 }
 
 /* Set @out to @src & @out */
@@ -286,8 +286,8 @@ insert_disjunction(const CNF_Disjunction &src, CNF_Conjunction &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
-	out.sanity_check();
-	src.sanity_check();
+	sanity_check(out);
+	sanity_check(src);
 	for (x = 0; x < out.size(); x++) {
 		switch (compare_cnf_disjunctions(out[x], src)) {
 		case cnf_subset:
@@ -314,14 +314,14 @@ out1:
 		CNF_Conjunction new_out;
 		new_out.reserve(out.size() - nr_killed + 1);
 		for (unsigned y = 0; y < out.size(); y++) {
-			new_out.sanity_check();
+			sanity_check(new_out);
 			if (y == x) {
 				new_out.push_back(src);
-				new_out.sanity_check();
+				sanity_check(new_out);
 			}
 			if (out[y].size() != 0) {
 				new_out.push_back(out[y]);
-				new_out.sanity_check();
+				sanity_check(new_out);
 			}
 		}
 		if (x == out.size())
@@ -338,10 +338,10 @@ out1:
 				y--;
 			}
 		}
-		out.sanity_check();
+		sanity_check(out);
 		if (x == out.size())
 			out.insert(out.begin() + x, src);
-		out.sanity_check();
+		sanity_check(out);
 	}
 }
 
@@ -352,20 +352,20 @@ static bool
 cnf_or(const CNF_Conjunction &this_one, CNF_Conjunction &out)
 {
 	CNF_Conjunction new_out;
-	out.sanity_check();
-	this_one.sanity_check();
+	sanity_check(out);
+	sanity_check(this_one);
 	if (TIMEOUT || out.size() * this_one.size() > CNF_MAX_DISJUNCTION)
 		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
 		CNF_Disjunction &existing_disj(out[x]);
 		for (unsigned z = 0; z < this_one.size(); z++) {
-			new_out.sanity_check();
+			sanity_check(new_out);
 			CNF_Disjunction new_disj;
 			if (merge_disjunctions(this_one[z], existing_disj, new_disj)) {
-				new_out.sanity_check();
+				sanity_check(new_out);
 				insert_disjunction(new_disj, new_out);
-				new_out.sanity_check();
+				sanity_check(new_out);
 			} else {
 				/* the disjunction includes both x and
 				   !x, for some x, so should be
@@ -374,7 +374,7 @@ cnf_or(const CNF_Conjunction &this_one, CNF_Conjunction &out)
 		}
 	}
 	out = new_out;
-	out.sanity_check();
+	sanity_check(out);
 	return true;
 }
 
@@ -392,7 +392,7 @@ cnf_or(IRExpr **fragments, int nr_fragments, CNF_Conjunction &out)
 		return cnf(fragments[0], out) &&
 			cnf_or(fragments + 1, nr_fragments - 1, out);
 	}
-	out.sanity_check();
+	sanity_check(out);
 	CNF_Conjunction this_one;
 	cnf(fragments[0], this_one);
 	if (!cnf_or(this_one, out))
@@ -412,7 +412,7 @@ cnf_invert(const CNF_Disjunction &conj, CNF_Conjunction &out)
 		c.push_back(CNF_Atom(!conj[x].first, conj[x].second));
 		insert_disjunction(c, out);
 	}
-	out.sanity_check();
+	sanity_check(out);
 	return true;
 }
 
@@ -446,7 +446,7 @@ cnf_invert(const CNF_Conjunction &in, CNF_Conjunction &out)
 		   so invariant is preserved.
 		*/
 	}
-	out.sanity_check();
+	sanity_check(out);
 	return true;
 }
 
@@ -473,7 +473,7 @@ cnf(IRExpr *e, CNF_Conjunction &out)
 				CNF_Conjunction t(out);
 				merge_conjunctions(r, t, out);
 			}
-			out.sanity_check();
+			sanity_check(out);
 			return true;
 		} else if (((IRExprAssociative *)e)->op == Iop_Or1) {
 			return cnf_or(((IRExprAssociative *)e)->contents,
@@ -487,7 +487,7 @@ cnf(IRExpr *e, CNF_Conjunction &out)
 	CNF_Disjunction c;
 	c.push_back(CNF_Atom(false, e));
 	out.push_back(c);
-	out.sanity_check();
+	sanity_check(out);
 	return true;
 }
 
