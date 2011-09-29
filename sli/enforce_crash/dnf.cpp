@@ -61,7 +61,7 @@ compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 }
 
 static nf_ordering
-compare_nf_conjunctions(const NF_Term &a, const NF_Term &b)
+compare_nf_terms(const NF_Term &a, const NF_Term &b)
 {
 	auto it1 = a.begin();
 	auto it2 = b.begin();
@@ -149,7 +149,7 @@ sanity_check(const NF_Expression &a)
 	unsigned x;
 	for (x = 0; x < a.size() - 1; x++) {
 		sanity_check(a[x]);
-		assert(compare_nf_conjunctions(a[x], a[x+1]) < 0);
+		assert(compare_nf_terms(a[x], a[x+1]) < 0);
 	}
 	sanity_check(a[x]);
 #endif
@@ -211,7 +211,7 @@ merge_disjunctions(const NF_Expression &src1,
 	auto it1 = src1.begin();
 	auto it2 = src2.begin();
 	while (it1 != src1.end() && it2 != src2.end()) {
-		switch (compare_nf_conjunctions(*it1, *it2)) {
+		switch (compare_nf_terms(*it1, *it2)) {
 		case nf_subset: /* *it1 subsumes *it2, so drop *it2 */
 		case nf_eq: /* They're equal, it doesn't matter which one we pick */
 			sanity_check(out);
@@ -260,7 +260,7 @@ insert_conjunction(const NF_Term &src, NF_Expression &out)
 	unsigned nr_killed = 0;
 	sanity_check(out);
 	for (x = 0; x < out.size(); x++) {
-		switch (compare_nf_conjunctions(out[x], src)) {
+		switch (compare_nf_terms(out[x], src)) {
 		case nf_subset:
 		case nf_eq:
 			/* This existing output clause subsumes the
@@ -273,10 +273,10 @@ insert_conjunction(const NF_Term &src, NF_Expression &out)
 			nr_killed ++;
 			break;
 		case nf_less:
-			assert(compare_nf_conjunctions(src, out[x]) == nf_greater);
+			assert(compare_nf_terms(src, out[x]) == nf_greater);
 			continue;
 		case nf_greater:
-			assert(compare_nf_conjunctions(src, out[x]) == nf_less);
+			assert(compare_nf_terms(src, out[x]) == nf_less);
 			goto out1;
 		}
 	}
