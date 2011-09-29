@@ -317,10 +317,10 @@ out1:
 }
 
 
-/* Convert @out to @out & @this_one, maintaining disjunctive normal
- * form. */
+/* Convert @out to @out {op} @this_one, maintaining conjunctive normal
+ * form.  {op} is or for CNF, or and for DNF. */
 static bool
-nf_and(const NF_Expression &this_one, NF_Expression &out)
+nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 {
 	NF_Expression new_out;
 	check_memory_usage();
@@ -349,11 +349,12 @@ nf_and(const NF_Expression &this_one, NF_Expression &out)
 	return true;
 }
 
-/* conjoin the fragments together, convert to NF, and then place the
-   results in @out.  Can fail if @out looks ``too big'', in which case
-   we return false; otherwise return true. */
+/* Disjoin or conjoin the fragments together, convert to NF, and then
+   place the results in @out.  Can fail if @out looks ``too big'', in
+   which case we return false; otherwise return true.  Disjoin for
+   CNF, and conjoin for DNF. */
 static bool
-nf_and(IRExpr **fragments, int nr_fragments, NF_Expression &out)
+nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out)
 {
 	check_memory_usage();
 	if (TIMEOUT)
@@ -362,15 +363,15 @@ nf_and(IRExpr **fragments, int nr_fragments, NF_Expression &out)
 		return true;
 	if (out.size() == 0) {
 		return nf(fragments[0], out) &&
-			nf_and(fragments + 1, nr_fragments - 1, out);
+			nf_counterjoin(fragments + 1, nr_fragments - 1, out);
 	}
 	sanity_check(out);
 	NF_Expression this_one;
 	nf(fragments[0], this_one);
-	if (!nf_and(this_one, out))
+	if (!nf_countermerge(this_one, out))
 		return false;
 
-	return nf_and(fragments + 1, nr_fragments - 1, out);
+	return nf_counterjoin(fragments + 1, nr_fragments - 1, out);
 }
 
 /* Invert @conf and store it in @out, which must start out empty. */
@@ -409,7 +410,7 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 			return false;
 
 		/* out = ~(in[0:x-1]), r = ~in[x]. */
-		if (!nf_and(r, out))
+		if (!nf_countermerge(r, out))
 			return false;
 
 		/* out = ~in[x] & ~(in[0:x-1])
@@ -450,9 +451,9 @@ nf(IRExpr *e, NF_Expression &out)
 			sanity_check(out);
 			return true;
 		} else if (((IRExprAssociative *)e)->op == Iop_And1) {
-			return nf_and(((IRExprAssociative *)e)->contents,
-				       ((IRExprAssociative *)e)->nr_arguments,
-				       out);
+			return nf_counterjoin(((IRExprAssociative *)e)->contents,
+					      ((IRExprAssociative *)e)->nr_arguments,
+					      out);
 		}
 	}
 
