@@ -46,23 +46,6 @@ check_memory_usage(void)
 	}
 }
 
-/* The ordering we use for NF conjunctions works like this:
-
-   -- If a is a subset of b then a is less than b.
-   -- If a is a superset of b then a is greather than b.
-   -- Otherwise, if they're unordered by the subset ordering, we
-      using a per-element dictionary ordering.
-
-   This enumeration gives every possible result.
-*/
-enum nf_ordering {
-	nf_subset = -2,
-	nf_less = -1,
-	nf_eq = 0,
-	nf_greater = 1,
-	nf_superset = 2
-};
-
 static int
 compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 {
