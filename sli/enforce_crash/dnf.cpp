@@ -46,7 +46,7 @@ check_memory_usage(void)
 	}
 }
 
-/* The ordering we use for DNF conjunctions works like this:
+/* The ordering we use for NF conjunctions works like this:
 
    -- If a is a subset of b then a is less than b.
    -- If a is a superset of b then a is greather than b.
@@ -55,16 +55,16 @@ check_memory_usage(void)
 
    This enumeration gives every possible result.
 */
-enum dnf_ordering {
-	dnf_subset = -2,
-	dnf_less = -1,
-	dnf_eq = 0,
-	dnf_greater = 1,
-	dnf_superset = 2
+enum nf_ordering {
+	nf_subset = -2,
+	nf_less = -1,
+	nf_eq = 0,
+	nf_greater = 1,
+	nf_superset = 2
 };
 
 static int
-compare_dnf_atom(const DNF_Atom &a, const DNF_Atom &b)
+compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 {
 	if (a.second < b.second)
 		return -1;
@@ -77,21 +77,21 @@ compare_dnf_atom(const DNF_Atom &a, const DNF_Atom &b)
 	return 0;
 }
 
-static dnf_ordering
-compare_dnf_conjunctions(const DNF_Conjunction &a, const DNF_Conjunction &b)
+static nf_ordering
+compare_nf_conjunctions(const NF_Conjunction &a, const NF_Conjunction &b)
 {
-	DNF_Conjunction::const_iterator it1 = a.begin();
-	DNF_Conjunction::const_iterator it2 = b.begin();
+	auto it1 = a.begin();
+	auto it2 = b.begin();
 
 	while (it1 != a.end() && it2 != b.end()) {
-		switch (compare_dnf_atom(*it1, *it2)) {
+		switch (compare_nf_atom(*it1, *it2)) {
 		case -1:
 			/* Here we have an element of a which less
 			   than the matching element of b.  Either a
 			   is a superset of b or a is less than b.
 			   Find out which. */
 			while (it1 != a.end() && it2 != b.end()) {
-				switch (compare_dnf_atom(*it1, *it2)) {
+				switch (compare_nf_atom(*it1, *it2)) {
 				case -1:
 					it1++;
 					break;
@@ -100,13 +100,13 @@ compare_dnf_conjunctions(const DNF_Conjunction &a, const DNF_Conjunction &b)
 					it2++;
 					break;
 				case 1:
-					return dnf_less;
+					return nf_less;
 				}
 			}
 			if (it2 == b.end())
-				return dnf_superset;
+				return nf_superset;
 			else
-				return dnf_less;
+				return nf_less;
 		case 0:
 			it1++;
 			it2++;
@@ -117,9 +117,9 @@ compare_dnf_conjunctions(const DNF_Conjunction &a, const DNF_Conjunction &b)
 			   is either a subset of b or greater than
 			   b. */
 			while (it1 != a.end() && it2 != b.end()) {
-				switch (compare_dnf_atom(*it1, *it2)) {
+				switch (compare_nf_atom(*it1, *it2)) {
 				case -1:
-					return dnf_greater;
+					return nf_greater;
 				case 0:
 					it1++;
 					it2++;
@@ -130,24 +130,24 @@ compare_dnf_conjunctions(const DNF_Conjunction &a, const DNF_Conjunction &b)
 				}
 			}
 			if (it1 == a.end())
-				return dnf_subset;
+				return nf_subset;
 			else
-				return dnf_greater;
+				return nf_greater;
 		default:
 			abort();
 		}
 	}
 	if (it1 == a.end() && it2 == b.end())
-		return dnf_eq;
+		return nf_eq;
 	if (it1 == a.end() && it2 != b.end())
-		return dnf_subset;
+		return nf_subset;
 	if (it1 != a.end() && it2 == b.end())
-		return dnf_superset;
+		return nf_superset;
 	abort();
 }
 
 static void
-sanity_check(const DNF_Conjunction &a)
+sanity_check(const NF_Conjunction &a)
 {
 #ifndef NDEBUG
 	assert(a.size() > 0);
@@ -158,7 +158,7 @@ sanity_check(const DNF_Conjunction &a)
 #endif
 }
 static void
-sanity_check(const DNF_Disjunction &a)
+sanity_check(const NF_Disjunction &a)
 {
 #ifndef NDEBUG
 	if (a.size() == 0)
@@ -166,7 +166,7 @@ sanity_check(const DNF_Disjunction &a)
 	unsigned x;
 	for (x = 0; x < a.size() - 1; x++) {
 		sanity_check(a[x]);
-		assert(compare_dnf_conjunctions(a[x], a[x+1]) < 0);
+		assert(compare_nf_conjunctions(a[x], a[x+1]) < 0);
 	}
 	sanity_check(a[x]);
 #endif
@@ -175,15 +175,15 @@ sanity_check(const DNF_Disjunction &a)
 /* Set @out to @src1 & @src2.  Return false if we find a contradiction
    and true otherwise. */
 static bool
-merge_conjunctions(const DNF_Conjunction &src1,
-		   const DNF_Conjunction &src2,
-		   DNF_Conjunction &out)
+merge_conjunctions(const NF_Conjunction &src1,
+		   const NF_Conjunction &src2,
+		   NF_Conjunction &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
 	out.reserve(src1.size() + src2.size());
-	DNF_Conjunction::const_iterator it1 = src1.begin();
-	DNF_Conjunction::const_iterator it2 = src2.begin();
+	auto it1 = src1.begin();
+	auto it2 = src2.begin();
 	while (it1 != src1.end() && it2 != src2.end()) {
 		if (it1->second == it2->second) {
 			if (it1->first != it2->first) {
@@ -217,38 +217,38 @@ merge_conjunctions(const DNF_Conjunction &src1,
 
 /* Set @out to @src1 | @src2. */
 static void
-merge_disjunctions(const DNF_Disjunction &src1,
-		   const DNF_Disjunction &src2,
-		   DNF_Disjunction &out)
+merge_disjunctions(const NF_Disjunction &src1,
+		   const NF_Disjunction &src2,
+		   NF_Disjunction &out)
 {
 	sanity_check(src1);
 	sanity_check(src2);
 	out.clear();
 	out.reserve(src1.size() + src2.size());
-	DNF_Disjunction::const_iterator it1 = src1.begin();
-	DNF_Disjunction::const_iterator it2 = src2.begin();
+	auto it1 = src1.begin();
+	auto it2 = src2.begin();
 	while (it1 != src1.end() && it2 != src2.end()) {
-		switch (compare_dnf_conjunctions(*it1, *it2)) {
-		case dnf_subset: /* *it1 subsumes *it2, so drop *it2 */
-		case dnf_eq: /* They're equal, it doesn't matter which one we pick */
+		switch (compare_nf_conjunctions(*it1, *it2)) {
+		case nf_subset: /* *it1 subsumes *it2, so drop *it2 */
+		case nf_eq: /* They're equal, it doesn't matter which one we pick */
 			sanity_check(out);
 			out.push_back(*it1);
 			sanity_check(out);
 			it1++;
 			it2++;
 			break;
-		case dnf_superset: /* *it2 subsumes *it1, so drop *it1 */
+		case nf_superset: /* *it2 subsumes *it1, so drop *it1 */
 			out.push_back(*it2);
 			it1++;
 			it2++;
 			break;
-		case dnf_less:
+		case nf_less:
 			sanity_check(out);
 			out.push_back(*it1);
 			sanity_check(out);
 			it1++;
 			break;
-		case dnf_greater:
+		case nf_greater:
 			sanity_check(out);
 			out.push_back(*it2);
 			sanity_check(out);
@@ -271,35 +271,35 @@ merge_disjunctions(const DNF_Disjunction &src1,
 
 /* Set @out to @src | @out */
 static void
-insert_conjunction(const DNF_Conjunction &src, DNF_Disjunction &out)
+insert_conjunction(const NF_Conjunction &src, NF_Disjunction &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
 	sanity_check(out);
 	for (x = 0; x < out.size(); x++) {
-		switch (compare_dnf_conjunctions(out[x], src)) {
-		case dnf_subset:
-		case dnf_eq:
+		switch (compare_nf_conjunctions(out[x], src)) {
+		case nf_subset:
+		case nf_eq:
 			/* This existing output clause subsumes the
 			 * new one we want to insert. */
 			return;
-		case dnf_superset:
+		case nf_superset:
 			/* The new clause subsumes this existing
 			   output clause, so replace it. */
 			out[x].clear();
 			nr_killed ++;
 			break;
-		case dnf_less:
-			assert(compare_dnf_conjunctions(src, out[x]) == dnf_greater);
+		case nf_less:
+			assert(compare_nf_conjunctions(src, out[x]) == nf_greater);
 			continue;
-		case dnf_greater:
-			assert(compare_dnf_conjunctions(src, out[x]) == dnf_less);
+		case nf_greater:
+			assert(compare_nf_conjunctions(src, out[x]) == nf_less);
 			goto out1;
 		}
 	}
 out1:
 	if (nr_killed > out.size() / 2) {
-		DNF_Disjunction new_out;
+		NF_Disjunction new_out;
 		new_out.reserve(out.size() - nr_killed + 1);
 		for (unsigned y = 0; y < out.size(); y++) {
 			sanity_check(new_out);
@@ -337,19 +337,19 @@ out1:
 /* Convert @out to @out & @this_one, maintaining disjunctive normal
  * form. */
 static bool
-dnf_and(const DNF_Disjunction &this_one, DNF_Disjunction &out)
+nf_and(const NF_Disjunction &this_one, NF_Disjunction &out)
 {
-	DNF_Disjunction new_out;
+	NF_Disjunction new_out;
 	check_memory_usage();
 	sanity_check(out);
-	if (TIMEOUT || out.size() * this_one.size() > DNF_MAX_DISJUNCTION)
+	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_DISJUNCTION)
 		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
-		DNF_Conjunction &existing_conj(out[x]);
+		NF_Conjunction &existing_conj(out[x]);
 		for (unsigned z = 0; z < this_one.size(); z++) {
 			sanity_check(new_out);
-			DNF_Conjunction new_conj;
+			NF_Conjunction new_conj;
 			if (merge_conjunctions(this_one[z], existing_conj, new_conj)) {
 				sanity_check(new_out);
 				insert_conjunction(new_conj, new_out);
@@ -366,11 +366,11 @@ dnf_and(const DNF_Disjunction &this_one, DNF_Disjunction &out)
 	return true;
 }
 
-/* conjoin the fragments together, convert to DNF, and then place the
+/* conjoin the fragments together, convert to NF, and then place the
    results in @out.  Can fail if @out looks ``too big'', in which case
    we return false; otherwise return true. */
 static bool
-dnf_and(IRExpr **fragments, int nr_fragments, DNF_Disjunction &out)
+nf_and(IRExpr **fragments, int nr_fragments, NF_Disjunction &out)
 {
 	check_memory_usage();
 	if (TIMEOUT)
@@ -378,27 +378,27 @@ dnf_and(IRExpr **fragments, int nr_fragments, DNF_Disjunction &out)
 	if (nr_fragments == 0)
 		return true;
 	if (out.size() == 0) {
-		return dnf(fragments[0], out) &&
-			dnf_and(fragments + 1, nr_fragments - 1, out);
+		return nf(fragments[0], out) &&
+			nf_and(fragments + 1, nr_fragments - 1, out);
 	}
 	sanity_check(out);
-	DNF_Disjunction this_one;
-	dnf(fragments[0], this_one);
-	if (!dnf_and(this_one, out))
+	NF_Disjunction this_one;
+	nf(fragments[0], this_one);
+	if (!nf_and(this_one, out))
 		return false;
 
-	return dnf_and(fragments + 1, nr_fragments - 1, out);
+	return nf_and(fragments + 1, nr_fragments - 1, out);
 }
 
 /* Invert @conf and store it in @out, which must start out empty. */
 static bool
-dnf_invert(const DNF_Conjunction &conj, DNF_Disjunction &out)
+nf_invert(const NF_Conjunction &conj, NF_Disjunction &out)
 {
 	assert(out.size() == 0);
 	out.reserve(conj.size());
 	for (unsigned x = 0; x < conj.size(); x++) {
-		DNF_Conjunction c;
-		c.push_back(DNF_Atom(!conj[x].first, conj[x].second));
+		NF_Conjunction c;
+		c.push_back(NF_Atom(!conj[x].first, conj[x].second));
 		insert_conjunction(c, out);
 	}
 	sanity_check(out);
@@ -406,14 +406,14 @@ dnf_invert(const DNF_Conjunction &conj, DNF_Disjunction &out)
 }
 
 static bool
-dnf_invert(const DNF_Disjunction &in, DNF_Disjunction &out)
+nf_invert(const NF_Disjunction &in, NF_Disjunction &out)
 {
 	assert(out.size() == 0);
 	assert(in.size() != 0);
 
 	check_memory_usage();
 	/* Start by converting the first clause */
-	if (!dnf_invert(in[0], out))
+	if (!nf_invert(in[0], out))
 		return false;
 
 	/* Now we convert the remaining clauses one at a time, and'ing
@@ -421,12 +421,12 @@ dnf_invert(const DNF_Disjunction &in, DNF_Disjunction &out)
 	   where the slice notation is supposed to mean that we consider
 	   the first x clauses only. */
 	for (unsigned x = 1; x < in.size(); x++) {
-		DNF_Disjunction r;
-		if (TIMEOUT || !dnf_invert(in[x], r))
+		NF_Disjunction r;
+		if (TIMEOUT || !nf_invert(in[x], r))
 			return false;
 
 		/* out = ~(in[0:x-1]), r = ~in[x]. */
-		if (!dnf_and(r, out))
+		if (!nf_and(r, out))
 			return false;
 
 		/* out = ~in[x] & ~(in[0:x-1])
@@ -442,15 +442,15 @@ dnf_invert(const DNF_Disjunction &in, DNF_Disjunction &out)
 
 /* Convert @e to disjunctive normal form. */
 bool
-dnf(IRExpr *e, DNF_Disjunction &out)
+nf(IRExpr *e, NF_Disjunction &out)
 {
 	check_memory_usage();
 	out.clear();
 	if (e->tag == Iex_Unop &&
 	    ((IRExprUnop *)e)->op == Iop_Not1) {
-		DNF_Disjunction r;
-		return dnf(((IRExprUnop *)e)->arg, r) &&
-			dnf_invert(r, out);
+		NF_Disjunction r;
+		return nf(((IRExprUnop *)e)->arg, r) &&
+			nf_invert(r, out);
 	}
 
 	if (e->tag == Iex_Associative) {
@@ -458,44 +458,44 @@ dnf(IRExpr *e, DNF_Disjunction &out)
 			for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++) {
 				if (TIMEOUT)
 					return false;
-				DNF_Disjunction r;
-				if (!dnf(((IRExprAssociative *)e)->contents[x], r))
+				NF_Disjunction r;
+				if (!nf(((IRExprAssociative *)e)->contents[x], r))
 					return false;
-				DNF_Disjunction t(out);
+				NF_Disjunction t(out);
 				merge_disjunctions(r, t, out);
 			}
 			sanity_check(out);
 			return true;
 		} else if (((IRExprAssociative *)e)->op == Iop_And1) {
-			return dnf_and(((IRExprAssociative *)e)->contents,
+			return nf_and(((IRExprAssociative *)e)->contents,
 				       ((IRExprAssociative *)e)->nr_arguments,
 				       out);
 		}
 	}
 
-	/* Anything else cannot be represented in DNF, so gets an
+	/* Anything else cannot be represented in NF, so gets an
 	 * atom */
-	DNF_Conjunction c;
-	c.push_back(DNF_Atom(false, e));
+	NF_Conjunction c;
+	c.push_back(NF_Atom(false, e));
 	out.push_back(c);
 	sanity_check(out);
 	return true;
 }
 
 void
-printDnf(DNF_Disjunction &dnf, FILE *f)
+printNf(NF_Disjunction &nf, FILE *f)
 {
-	for (unsigned x = 0; x < dnf.size(); x++) {
-		for (unsigned y = 0; y < dnf[x].size(); y++) {
-			if (dnf[x][y].first)
+	for (unsigned x = 0; x < nf.size(); x++) {
+		for (unsigned y = 0; y < nf[x].size(); y++) {
+			if (nf[x][y].first)
 				fprintf(f, "-");
 			else
 				fprintf(f, "+");
-			ppIRExpr(dnf[x][y].second, f);
-			if (y != dnf[x].size() - 1)
+			ppIRExpr(nf[x][y].second, f);
+			if (y != nf[x].size() - 1)
 				fprintf(f, "  &&&&&\n");
 		}
-		if (x != dnf.size() - 1)
+		if (x != nf.size() - 1)
 			fprintf(f, "\n|||||||||||||||\n");
 	}
 	fprintf(f, "\n");

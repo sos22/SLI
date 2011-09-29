@@ -2,13 +2,13 @@
 #define DNF_HPP__
 
 /* bool is whether to invert it or not. */
-typedef std::pair<bool, IRExpr *> DNF_Atom;
-typedef std::vector<DNF_Atom> DNF_Conjunction;
-typedef std::vector<DNF_Conjunction> DNF_Disjunction;
+typedef std::pair<bool, IRExpr *> NF_Atom;
+typedef std::vector<NF_Atom> NF_Conjunction;
+typedef std::vector<NF_Conjunction> NF_Disjunction;
 
-#define DNF_MAX_DISJUNCTION 1000000
+#define NF_MAX_DISJUNCTION 1000000
 
-bool dnf(IRExpr *e, DNF_Disjunction &out);
-void printDnf(DNF_Disjunction &dnf, FILE *f);
+bool nf(IRExpr *e, NF_Disjunction &out);
+void printNf(NF_Disjunction &dnf, FILE *f);
 
 #endif /* !DNF_HPP__ */
