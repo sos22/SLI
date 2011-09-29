@@ -2,24 +2,7 @@
 #ifndef NF_HPP__
 #define NF_HPP__
 
-#define NF_MAX_EXPRESSION 1000000
-
-/* The ordering we use for NF disjunctions works like this:
-
-   -- If a is a subset of b (i.e. a implies b) then a is less than b.
-   -- If a is a superset of b (i.e. b implies a) then a is greather than b.
-   -- Otherwise, if they're unordered by the subset ordering, we
-      using a per-element dictionary ordering.
-
-   This enumeration gives every possible result.
-*/
-enum nf_ordering {
-	nf_subset = -2,
-	nf_less = -1,
-	nf_eq = 0,
-	nf_greater = 1,
-	nf_superset = 2
-};
+#include "simplify_irexpr.hpp"
 
 class NF_Atom : public std::pair<bool, IRExpr *>, public PrettyPrintable {
 public:
@@ -33,15 +16,36 @@ public:
 			fprintf(f, " ");
 		ppIRExpr(second, f);
 	}
+	unsigned complexity() const {
+		return exprComplexity(second) + (first ? 10 : 0);
+	}
+};
+class NF_Term : public std::vector<NF_Atom> {
+public:
+	void prettyPrint(FILE *f, const char *) const;
+	int complexity() const {
+		if (size() == 1)
+			return (*this)[0].complexity();
+		int acc = 10;
+		for (auto it = begin(); it != end(); it++)
+			acc += it->complexity();
+		return acc;
+	}
+};
+class NF_Expression : public std::vector<NF_Term> {
+public:
+	void prettyPrint(FILE *f, const char *, const char *) const;
+	int complexity() const {
+		if (size() == 1)
+			return (*this)[0].complexity();
+		int acc = 10;
+		for (auto it = begin(); it != end(); it++)
+			acc += it->complexity();
+		return acc;
+	}
 };
 
-class NF_Term : public std::vector<NF_Atom>, public PrettyPrintable {
-public:
-	void prettyPrint(FILE *f) const;
-};
-class NF_Expression : public std::vector<NF_Term>, public PrettyPrintable {
-public:
-	void prettyPrint(FILE *f) const;
-};
+bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+IRExpr *convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp);
 
 #endif /* !NF_HPP__ */

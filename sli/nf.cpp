@@ -1,9 +1,29 @@
-#include <stdio.h>
-
 #include "sli.h"
-#include "dnf.hpp"
+#include "nf.hpp"
 
-static bool nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+namespace __nf {
+#if 0
+}
+#endif
+
+#define NF_MAX_EXPRESSION 1000000
+
+/* The ordering we use for NF disjunctions works like this:
+
+   -- If a is a subset of b (i.e. a implies b) then a is less than b.
+   -- If a is a superset of b (i.e. b implies a) then a is greather than b.
+   -- Otherwise, if they're unordered by the subset ordering, we
+      using a per-element dictionary ordering.
+
+   This enumeration gives every possible result.
+*/
+enum nf_ordering {
+	nf_subset = -2,
+	nf_less = -1,
+	nf_eq = 0,
+	nf_greater = 1,
+	nf_superset = 2
+};
 
 static void
 check_memory_usage(void)
@@ -51,6 +71,7 @@ check_memory_usage(void)
 static int
 compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 {
+	/* Use an ordering which puts A and ~A together. */
 	if (a.second < b.second)
 		return -1;
 	if (a.second > b.second)
@@ -142,23 +163,22 @@ sanity_check(const NF_Term &a)
 	}
 #endif
 }
+
 static void
 sanity_check(const NF_Expression &a)
 {
 #ifndef NDEBUG
 	if (a.size() == 0)
 		return;
-	unsigned x;
-	for (x = 0; x < a.size() - 1; x++) {
+	for (unsigned x = 0; x < a.size(); x++)
 		sanity_check(a[x]);
+	for (unsigned x = 0; x < a.size() - 1; x++)
 		assert(compare_nf_terms(a[x], a[x+1]) < 0);
-	}
-	sanity_check(a[x]);
 #endif
 }
 
-/* Set @out to @src1 & @src2.  Return false if we find a contradiction
-   and true otherwise. */
+/* Set @out to @src1 | @src2.  Return false if we find that the result
+   is definitely true, and true otherwise. */
 static bool
 merge_terms(const NF_Term &src1,
 	    const NF_Term &src2,
@@ -172,7 +192,7 @@ merge_terms(const NF_Term &src1,
 	while (it1 != src1.end() && it2 != src2.end()) {
 		if (it1->second == it2->second) {
 			if (it1->first != it2->first) {
-				/* x & ~x -> nothing */
+				/* x | ~x -> definitely true */
 				return false;
 			} else {
 				out.push_back(*it1);
@@ -200,7 +220,7 @@ merge_terms(const NF_Term &src1,
 	return true;
 }
 
-/* Set @out to @src1 | @src2. */
+/* Set @out to @src1 & @src2. */
 static void
 merge_expressions(const NF_Expression &src1,
 		  const NF_Expression &src2,
@@ -254,13 +274,14 @@ merge_expressions(const NF_Expression &src1,
 	sanity_check(out);
 }
 
-/* Set @out to @src | @out */
+/* Set @out to @src & @out */
 static void
 insert_term(const NF_Term &src, NF_Expression &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
 	sanity_check(out);
+	sanity_check(src);
 	for (x = 0; x < out.size(); x++) {
 		switch (compare_nf_terms(out[x], src)) {
 		case nf_subset:
@@ -340,7 +361,7 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 				insert_term(new_term, new_out);
 				sanity_check(new_out);
 			} else {
-				/* the conjunction includes both x and
+				/* the disjunction includes both x and
 				   !x, for some x, so should be
 				   dropped */
 			}
@@ -365,13 +386,13 @@ nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 	if (nr_fragments == 0)
 		return true;
 	if (out.size() == 0) {
-		return nf(fragments[0], out, expressionOp, termOp) &&
+		return convert_to_nf(fragments[0], out, expressionOp, termOp) &&
 			nf_counterjoin(fragments + 1, nr_fragments - 1, out,
 				       expressionOp, termOp);
 	}
 	sanity_check(out);
 	NF_Expression this_one;
-	nf(fragments[0], this_one, expressionOp, termOp);
+	convert_to_nf(fragments[0], this_one, expressionOp, termOp);
 	if (!nf_countermerge(this_one, out))
 		return false;
 
@@ -405,7 +426,7 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 	if (!nf_invert(in[0], out))
 		return false;
 
-	/* Now we convert the remaining clauses one at a time, and'ing
+	/* Now we convert the remaining clauses one at a time, or'ing
 	   them in as we go.  The invariant here is that out = ~(in[0:x]),
 	   where the slice notation is supposed to mean that we consider
 	   the first x clauses only. */
@@ -418,8 +439,8 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 		if (!nf_countermerge(r, out))
 			return false;
 
-		/* out = ~in[x] & ~(in[0:x-1])
-		       = ~(in[x] | in[0:x-1])
+		/* out = ~in[x] | ~(in[0:x-1])
+		       = ~(in[x] & in[0:x-1])
 		       = ~(in[0:x])
 
 		   so invariant is preserved.
@@ -429,16 +450,16 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 	return true;
 }
 
-/* Convert @e to disjunctive normal form. */
+/* Convert @e to either CNF or DNF. */
 static bool
-nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
+convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 {
 	check_memory_usage();
 	out.clear();
 	if (e->tag == Iex_Unop &&
 	    ((IRExprUnop *)e)->op == Iop_Not1) {
 		NF_Expression r;
-		return nf(((IRExprUnop *)e)->arg, r, expressionOp, termOp) &&
+		return __nf::convert_to_nf(((IRExprUnop *)e)->arg, r, expressionOp, termOp) &&
 			nf_invert(r, out);
 	}
 
@@ -448,8 +469,10 @@ nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 				if (TIMEOUT)
 					return false;
 				NF_Expression r;
-				if (!nf(((IRExprAssociative *)e)->contents[x], r,
-					expressionOp, termOp))
+				if (!__nf::convert_to_nf(((IRExprAssociative *)e)->contents[x],
+							 r,
+							 expressionOp,
+							 termOp))
 					return false;
 				NF_Expression t(out);
 				merge_expressions(r, t, out);
@@ -465,7 +488,7 @@ nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 		}
 	}
 
-	/* Anything else cannot be represented in NF, so gets an
+	/* Anything else cannot be represented in DNF, so gets an
 	 * atom */
 	NF_Term c;
 	c.push_back(NF_Atom(false, e));
@@ -474,27 +497,83 @@ nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 	return true;
 }
 
-bool
-dnf(IRExpr *e, NF_Expression &out)
+static IRExpr *
+convert_from_nf(NF_Atom &inp)
 {
-	return nf(e, out, Iop_Or1, Iop_And1);
+	if (inp.first)
+		return IRExpr_Unop(Iop_Not1, inp.second);
+	else
+		return inp.second;
+}
+
+static IRExpr *
+convert_from_nf(NF_Term &inp, IROp op)
+{
+	assert(inp.size() > 0);
+	if (inp.size() == 1)
+		return convert_from_nf(inp[0]);
+	IRExprAssociative *acc = new IRExprAssociative();
+	acc->op = op;
+	acc->nr_arguments = inp.size();
+	acc->nr_arguments_allocated = acc->nr_arguments * 2;
+	static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+	acc->contents =
+		(IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(acc->contents[0]) * acc->nr_arguments, &__las);
+	for (unsigned x = 0; x < inp.size(); x++)
+		acc->contents[x] = convert_from_nf(inp[x]);
+	return acc;
+}
+
+static IRExpr *
+convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp)
+{
+	assert(inp.size() > 0);
+	if (inp.size() == 1)
+		return convert_from_nf(inp[0], termOp);
+	IRExprAssociative *acc = new IRExprAssociative();
+	acc->op = expressionOp;
+	acc->nr_arguments = inp.size();
+	acc->nr_arguments_allocated = acc->nr_arguments * 2;
+	static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+	acc->contents =
+		(IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(acc->contents[0]) * acc->nr_arguments, &__las);
+	for (unsigned x = 0; x < inp.size(); x++)
+		acc->contents[x] = convert_from_nf(inp[x], termOp);
+	return acc;
+}
+
+} /* End of namespace __nf */
+
+void
+NF_Term::prettyPrint(FILE *f, const char *sep) const
+{
+	for (auto it = begin(); it != end(); it++) {
+		if (it != begin())
+			fprintf(f, "%s\n", sep);
+		it->prettyPrint(f);
+	}
+	fprintf(f, "\n");
 }
 
 void
-printNf(NF_Expression &nf, FILE *f)
+NF_Expression::prettyPrint(FILE *f, const char *termSep, const char *sep) const
 {
-	for (unsigned x = 0; x < nf.size(); x++) {
-		for (unsigned y = 0; y < nf[x].size(); y++) {
-			if (nf[x][y].first)
-				fprintf(f, "-");
-			else
-				fprintf(f, "+");
-			ppIRExpr(nf[x][y].second, f);
-			if (y != nf[x].size() - 1)
-				fprintf(f, "  &&&&&\n");
-		}
-		if (x != nf.size() - 1)
-			fprintf(f, "\n|||||||||||||||\n");
+	for (auto it = begin(); it != end(); it++) {
+		if (it != begin())
+			fprintf(f, "\n%s\n", sep);
+		it->prettyPrint(f, termSep);
 	}
 	fprintf(f, "\n");
+}
+
+bool
+convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
+{
+	return __nf::convert_to_nf(e, out, expressionOp, termOp);
+}
+
+IRExpr *
+convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp)
+{
+	return __nf::convert_from_nf(inp, expressionOp, termOp);
 }

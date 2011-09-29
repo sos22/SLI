@@ -2,7 +2,7 @@ subdirs=tests
 targets="enforce_crash"
 # foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
 # expansion does, though, so use that instead.  Meh.
-sources=$(echo {enforce_crash,zapBindersAndFreeVariables,simplify_ordering,dnf,enumNeededExpressions,expressiondominatormap,instructiondominatormap,patchfragment}.cpp)
+sources=$(echo {enforce_crash,zapBindersAndFreeVariables,simplify_ordering,enumNeededExpressions,expressiondominatormap,instructiondominatormap,patchfragment}.cpp)
 
 defvars() {
     cat <<EOF

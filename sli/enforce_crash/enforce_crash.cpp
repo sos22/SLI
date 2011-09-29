@@ -1362,8 +1362,7 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 	for (auto it = hb.begin();
 	     it != hb.end();
 	     it++)
-		out.push_back(std::pair<bool, IRExpr *>(
-				      false, *it));
+		out.push_back(NF_Atom(false, *it));
 
 	c = out;
 
