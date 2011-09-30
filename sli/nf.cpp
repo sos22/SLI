@@ -590,6 +590,65 @@ convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 	return true;
 }
 
+/* Walk over the NF expression performing a final optimisation pass.
+   This almost never does anything useful, but it's necessary to make
+   the whole thing deterministic, which is necessary if you're working
+   in an nd_choice pseudo-monad.  The problem occurs in expressions
+   with at least three terms, a, b, and c, where a is a subset of c
+   and no other subsetting relationships hold.  If the fallback
+   relationship orders them as abc then we won't necessarily detect
+   the subset relationship in the main construction pass, which only
+   ever looks at neighbouring pairs of terms.  If they had instead
+   been orderd bac (remember, the fallback relationship relies on the
+   memory address of the expression, which is only semi-deterministic)
+   then we would have detected the relationship and reduced the result
+   to just ba.  The fix is just to do the full O(n^2) thing at the end
+   to find *all* of the subset relationships and purge them. */
+static bool
+optimise_nf(NF_Expression &e)
+{
+	static int nr_useful_invocations;
+
+	for (auto it1 = e.begin(); it1 != e.end(); it1++) {
+		if (TIMEOUT)
+			return false;
+		for (auto it2 = it1 + 1; it2 != e.end(); ) {
+			if (TIMEOUT)
+				return false;
+			switch (compare_nf_terms(*it1, *it2)) {
+			case nf_subset:
+				/* *it1 is a subset of *it2.  If we're
+				   in CNF, that means that *it1
+				   implies *it2, and b&c==b if b=>c,
+				   so we should purge it2.
+				   Conversely, if we're in DNF, *it2
+				   implies *it1, and b|c==b if c=>b,
+				   so we should purge it2.
+
+				   i.e. in either case we purge
+				   it2. */
+				it2 = e.erase(it2);
+				fprintf(_logfile, "Useful invocation of optimise_nf\n");
+				nr_useful_invocations++;
+				printf("%d useful invocations of optimise_nf\n",
+				       nr_useful_invocations);
+				break;
+			case nf_less:
+				it2++;
+				break;
+
+				/* Shouldn't get any of these because
+				   of the normalisation rules. */
+			case nf_eq:
+			case nf_greater:
+			case nf_superset:
+				abort();
+			}
+		}
+	}
+	return true;
+}
+
 static IRExpr *
 convert_from_nf(NF_Atom &inp)
 {
@@ -659,10 +718,16 @@ NF_Expression::prettyPrint(FILE *f, const char *termSep, const char *sep) const
 	fprintf(f, "\n");
 }
 
+/* Caution: this isn't completely deterministic, even with the
+   optimisation pass, because the order of terms within the expression
+   depends on the memory addresses of the underlying atom IRExprs.
+   Converting back to an IRExpr and then running a simplification pass
+   will fix that. */
 bool
 convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 {
-	return __nf::convert_to_nf(e, out, expressionOp, termOp);
+	return __nf::convert_to_nf(e, out, expressionOp, termOp) &&
+		__nf::optimise_nf(out);
 }
 
 IRExpr *
