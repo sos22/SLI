@@ -12,10 +12,34 @@ namespace __nf {
 
    -- If a is a subset of b (i.e. a implies b) then a is less than b.
    -- If a is a superset of b (i.e. b implies a) then a is greather than b.
-   -- Otherwise, if they're unordered by the subset ordering, we
-      using a per-element dictionary ordering.
+   -- Otherwise, if they're unordered by the subset ordering, we compare
+      them using a fallback ordering.  This reports a < b if a is smaller
+      than b, a > b if a is larger than b, and uses a dictionary ordering
+      if they're exactly the same size.
 
-   This enumeration gives every possible result.
+   This produces a total ordering.  The important property for proving
+   this is that a \subset b implies that a is less than b under the
+   fallback ordering.  If that's not true (e.g. if you use a pure
+   dictionary order as your fallback, without the size qualification)
+   then you potentially lose transitivity, which makes everything much
+   harder.
+
+   Proof that this is transitive:
+
+   We need to show that if a < b and b < c then a < c.  If a is a
+   subset of b and b is a subset of c then a must be a subset of c so
+   this is trivial.  Likewise, if neither subsetting relationship
+   holds then a must be less than b and b less than c under the
+   fallback relationship, so a must be less than c under the fallback,
+   and a < c, as desired.
+
+   Assume that a \subset b but !(b \subset c).  We know that b < c, so
+   b must be less than c under the fallback ordering, and we have a is
+   less than b under the fallback ordering by the ``important
+   property'' above, so a is less than c under the fallback property
+   and a < c.  Conversely, if !(a \subset b) but b \subset c then we
+   can establish a < c under the fallback the other way around and
+   everything is still fine.
 */
 enum nf_ordering {
 	nf_subset = -2,
@@ -83,6 +107,8 @@ compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 	return 0;
 }
 
+/* Compare two normal form terms according to the nf_ordering.  This
+   is much more subtle than it looks. */
 static nf_ordering
 compare_nf_terms(const NF_Term &a, const NF_Term &b)
 {
@@ -94,8 +120,10 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 		case -1:
 			/* Here we have an element of a which less
 			   than the matching element of b.  Either a
-			   is a superset of b or a is less than b.
-			   Find out which. */
+			   is a superset of b or we have to use the
+			   fallback ordering.  This is moderately
+			   fiddly, because we try to test both at the
+			   same time. */
 			while (it1 != a.end() && it2 != b.end()) {
 				switch (compare_nf_atom(*it1, *it2)) {
 				case -1:
@@ -106,13 +134,52 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 					it2++;
 					break;
 				case 1:
-					return nf_less;
+					/* This element of b is
+					   greater than the matching
+					   element of a, and because
+					   the elements are ordered we
+					   know it has no match in a.
+					   Therefore, b is not a
+					   subset of a, and we use the
+					   fallback ordering.  That's
+					   trivial if the sizes are
+					   different.  If they're the
+					   same size then a must be
+					   less than b, because we've
+					   already encountered one
+					   element of a which is less
+					   than its matching element
+					   of b (the outer switch). */
+					if (a.size() <= b.size())
+						return nf_less;
+					else
+						return nf_greater;
+				default: abort();
 				}
 			}
+			/* We've hit the end of one of a and b.  If
+			   we've hit the end of b then that indicates
+			   that a is b with at least one more thing
+			   added i.e. a is a superset of b (this still
+			   works if we hit the end of both at the same
+			   time, because we must have found one such
+			   extra element for the outer switch to take
+			   us here). */
 			if (it2 == b.end())
 				return nf_superset;
-			else
+			/* Hit end of a without consuming b, so we
+			   don't have a subset or superset
+			   relationship, and need to use the fallback
+			   relationship.  Again, the different-size
+			   case is obvious, and the same-size one is
+			   easy because the first different element
+			   must have been smaller in a for us to get
+			   here in the outer switch. */
+			assert(it1 == a.end());
+			if (a.size() <= b.size())
 				return nf_less;
+			else
+				return nf_greater;
 		case 0:
 			it1++;
 			it2++;
@@ -120,12 +187,20 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 		case 1:
 			/* Opposite case: an element of a which is
 			   greater than the matching element of b.  a
-			   is either a subset of b or greater than
-			   b. */
+			   is either a subset of b or we must use the
+			   fallback relationship. */
 			while (it1 != a.end() && it2 != b.end()) {
 				switch (compare_nf_atom(*it1, *it2)) {
 				case -1:
-					return nf_greater;
+					/* Note that this one is
+					   less-than rather than
+					   less-than-or-equal, because
+					   the outer switch found
+					   something bigger in b. */
+					if (a.size() < b.size())
+						return nf_less;
+					else
+						return nf_greater;
 				case 0:
 					it1++;
 					it2++;
@@ -133,22 +208,40 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 				case 1:
 					it2++;
 					break;
+				default: abort();
 				}
 			}
 			if (it1 == a.end())
 				return nf_subset;
+			else if (a.size() < b.size())
+				return nf_less;
 			else
 				return nf_greater;
 		default:
 			abort();
 		}
 	}
-	if (it1 == a.end() && it2 == b.end())
+	/* Okay, we've hit the end of one or both of the expressions.
+	   i.e. [a.begin(),it1) == [b.begin(), it2).  That means that
+	   either a == b or a \subset b or b \subset a, depending on
+	   whether it1 == a.end() and it2 == b.end().  Figure out
+	   which. */
+	if (it1 == a.end() && it2 == b.end()) {
+		/* [a.begin(),a.end()) == [b.begin(), b.end()) implies
+		   a == b */
 		return nf_eq;
-	if (it1 == a.end() && it2 != b.end())
+	}
+	if (it1 == a.end() && it2 != b.end()) {
+		/* [a.begin(),a.end()) == [b.begin(), !b.end()) means
+		   that every element in a has a matching element in
+		   b, but some elements in b have no match in a, i.e.
+		   a is a subset of b. */
 		return nf_subset;
-	if (it1 != a.end() && it2 == b.end())
+	}
+	if (it1 != a.end() && it2 == b.end()) {
+		/* Converse case */
 		return nf_superset;
+	}
 	abort();
 }
 
