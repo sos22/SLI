@@ -381,14 +381,12 @@ insert_term(const NF_Term &src, NF_Expression &out)
 			unsigned y;
 			for (y = start_of_e;
 			     y < out.size();
-				) {
+			     y++) {
 				nf_ordering o = compare_nf_terms(out[y], src);
 				assert(o == nf_greater || o == nf_superset);
 				if (o == nf_superset) {
 					nr_killed++;
-					out.erase(out.begin() + y);
-				} else {
-					y++;
+					out[y].clear();
 				}
 			}
 			goto out1;
