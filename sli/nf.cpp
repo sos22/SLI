@@ -8,6 +8,8 @@ namespace __nf {
 
 #define NF_MAX_EXPRESSION 1000000
 
+static bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+
 /* The ordering we use for NF disjunctions works like this:
 
    -- If a is a subset of b (i.e. a implies b) then a is less than b.
@@ -313,60 +315,6 @@ merge_terms(const NF_Term &src1,
 	return true;
 }
 
-/* Set @out to @src1 & @src2. */
-static void
-merge_expressions(const NF_Expression &src1,
-		  const NF_Expression &src2,
-		  NF_Expression &out)
-{
-	sanity_check(src1);
-	sanity_check(src2);
-	out.clear();
-	out.reserve(src1.size() + src2.size());
-	auto it1 = src1.begin();
-	auto it2 = src2.begin();
-	while (it1 != src1.end() && it2 != src2.end()) {
-		switch (compare_nf_terms(*it1, *it2)) {
-		case nf_subset: /* *it1 subsumes *it2, so drop *it2 */
-		case nf_eq: /* They're equal, it doesn't matter which one we pick */
-			sanity_check(out);
-			out.push_back(*it1);
-			sanity_check(out);
-			it1++;
-			it2++;
-			break;
-		case nf_superset: /* *it2 subsumes *it1, so drop *it1 */
-			out.push_back(*it2);
-			it1++;
-			it2++;
-			break;
-		case nf_less:
-			sanity_check(out);
-			out.push_back(*it1);
-			sanity_check(out);
-			it1++;
-			break;
-		case nf_greater:
-			sanity_check(out);
-			out.push_back(*it2);
-			sanity_check(out);
-			it2++;
-			break;
-		}
-	}
-	sanity_check(out);
-	while (it1 != src1.end()) {
-		out.push_back(*it1);
-		it1++;
-	}
-	sanity_check(out);
-	while (it2 != src2.end()) {
-		out.push_back(*it2);
-		it2++;
-	}
-	sanity_check(out);
-}
-
 /* Set @out to @src & @out */
 static void
 insert_term(const NF_Term &src, NF_Expression &out)
@@ -381,21 +329,77 @@ insert_term(const NF_Term &src, NF_Expression &out)
 		case nf_eq:
 			/* This existing output clause subsumes the
 			 * new one we want to insert. */
+
 			return;
-		case nf_superset:
-			/* The new clause subsumes this existing
-			   output clause, so replace it. */
-			out[x].clear();
-			nr_killed ++;
-			break;
 		case nf_less:
 			assert(compare_nf_terms(src, out[x]) == nf_greater);
 			continue;
-		case nf_greater:
+		case nf_greater: 
 			assert(compare_nf_terms(src, out[x]) == nf_less);
+			/* fall through */
+		case nf_superset: {
+			/* Split the initial out into regions
+			   according to its relationship to src.  They
+			   look like this:
+
+			   a: terms with a smaller size than src
+			   b: terms with the same size as src which are
+			      lexicographically less than src
+			   c: terms equal to src
+			   d: terms with the same size as dest which are
+			      lexicographically greater than src
+			   e: terms with a greater size than src
+
+			   Anything which is a subset of src must
+			   necessarily have a smaller size than it, so
+			   will fit entirely in region a, and anything
+			   which is a superset will likewise fit in
+			   region e, so this is necessary given the
+			   ordering relationship.
+
+			   Because we've gotten here, we know from
+			   control flow that c is empty and there are
+			   no subsets of src in the original out.
+
+			   We also know that this is the first x such
+			   that out[x] > src i.e. x points at the
+			   first element of d (or the first element of
+			   e, if d is empty) i.e. it points at where c
+			   would have been if it hadn't been empty.  x
+			   is therefore the right place in which to
+			   insert src.
+
+			   However, we don't know much about the
+			   contents of region e.  In particular, it
+			   might contain some supersets of src, which
+			   will need to be purged.  Do so. */
+			unsigned start_of_e;
+			for (start_of_e = x + 1;
+			     start_of_e < out.size() && out[start_of_e].size() == src.size();
+			     start_of_e++)
+				assert(compare_nf_terms(out[start_of_e], src) == nf_greater);
+			unsigned y;
+			for (y = start_of_e;
+			     y < out.size();
+				) {
+				nf_ordering o = compare_nf_terms(out[y], src);
+				assert(o == nf_greater || o == nf_superset);
+				if (o == nf_superset) {
+					nr_killed++;
+					out.erase(out.begin() + y);
+				} else {
+					y++;
+				}
+			}
 			goto out1;
 		}
+		}
 	}
+	/* If we hit the end of that loop then we know that everything
+	   in @out is less than @src, but nothing is a subset of it or
+	   equal to it.  We must therefore insert @src at the end of
+	   @out, which is precisely what the fall-through does. */
+
 out1:
 	if (nr_killed > out.size() / 2) {
 		NF_Expression new_out;
@@ -432,6 +436,27 @@ out1:
 	}
 }
 
+/* Set @out to @src1 & @src2. */
+static void
+merge_expressions(const NF_Expression &src1,
+		  const NF_Expression &src2,
+		  NF_Expression &out)
+{
+	sanity_check(src1);
+	sanity_check(src2);
+	out.clear();
+	out.reserve(src1.size() + src2.size());
+	if (src1.size() < src2.size()) {
+		out.insert(out.begin(), src2.begin(), src2.end());
+		for (auto it = src1.begin(); it != src1.end(); it++)
+			insert_term(*it, out);
+	} else {
+		out.insert(out.begin(), src1.begin(), src1.end());
+		for (auto it = src2.begin(); it != src2.end(); it++)
+			insert_term(*it, out);
+	}
+	sanity_check(out);
+}
 
 /* Convert @out to @out {op} @this_one, maintaining conjunctive normal
  * form.  {op} is or for CNF, or and for DNF. */
@@ -479,13 +504,13 @@ nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 	if (nr_fragments == 0)
 		return true;
 	if (out.size() == 0) {
-		return convert_to_nf(fragments[0], out, expressionOp, termOp) &&
+		return __nf::convert_to_nf(fragments[0], out, expressionOp, termOp) &&
 			nf_counterjoin(fragments + 1, nr_fragments - 1, out,
 				       expressionOp, termOp);
 	}
 	sanity_check(out);
 	NF_Expression this_one;
-	convert_to_nf(fragments[0], this_one, expressionOp, termOp);
+	__nf::convert_to_nf(fragments[0], this_one, expressionOp, termOp);
 	if (!nf_countermerge(this_one, out))
 		return false;
 
@@ -608,6 +633,9 @@ static bool
 optimise_nf(NF_Expression &e)
 {
 	static int nr_useful_invocations;
+	static int nr_invocations;
+
+	nr_invocations++;
 
 	for (auto it1 = e.begin(); it1 != e.end(); it1++) {
 		if (TIMEOUT)
@@ -627,11 +655,12 @@ optimise_nf(NF_Expression &e)
 
 				   i.e. in either case we purge
 				   it2. */
-				it2 = e.erase(it2);
-				fprintf(_logfile, "Useful invocation of optimise_nf\n");
+				fprintf(_logfile, "Useful invocation of optimise_nf (%d/%d)\n",
+					nr_useful_invocations, nr_invocations);
 				nr_useful_invocations++;
-				printf("%d useful invocations of optimise_nf\n",
-				       nr_useful_invocations);
+				printf("%d/%d useful invocations of optimise_nf\n",
+				       nr_useful_invocations, nr_invocations);
+				it2 = e.erase(it2);
 				break;
 			case nf_less:
 				it2++;
