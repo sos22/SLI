@@ -655,11 +655,10 @@ optimise_nf(NF_Expression &e)
 
 				   i.e. in either case we purge
 				   it2. */
-				fprintf(_logfile, "Useful invocation of optimise_nf (%d/%d)\n",
-					nr_useful_invocations, nr_invocations);
 				nr_useful_invocations++;
-				printf("%d/%d useful invocations of optimise_nf\n",
-				       nr_useful_invocations, nr_invocations);
+				if (nr_useful_invocations % 1000 == 0)
+					printf("%d/%d useful invocations of optimise_nf\n",
+					       nr_useful_invocations, nr_invocations);
 				it2 = e.erase(it2);
 				break;
 			case nf_less:
