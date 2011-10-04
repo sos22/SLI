@@ -1,4 +1,3 @@
-subdirs=tests
 targets="enforce_crash"
 # foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
 # expansion does, though, so use that instead.  Meh.
