@@ -1,6 +1,10 @@
 #include "sli.h"
 #include "nf.hpp"
 
+/* Lots and lots of calls to sanity_check().  This makes things very
+   slow, but can catch some bugs much more quickly. */
+#undef EXTRA_SANITY
+
 namespace __nf {
 #if 0
 }
@@ -272,6 +276,22 @@ sanity_check(const NF_Expression &a)
 #endif
 }
 
+static void
+extra_sanity(const NF_Term &a)
+{
+#ifdef EXTRA_SANITY
+	sanity_check(a);
+#endif
+}
+
+static void
+extra_sanity(const NF_Expression &a)
+{
+#ifdef EXTRA_SANITY
+	sanity_check(a);
+#endif
+}
+
 /* Set @out to @src1 | @src2.  Return false if we find that the result
    is definitely true, and true otherwise. */
 static bool
@@ -279,8 +299,8 @@ merge_terms(const NF_Term &src1,
 	    const NF_Term &src2,
 	    NF_Term &out)
 {
-	sanity_check(src1);
-	sanity_check(src2);
+	extra_sanity(src1);
+	extra_sanity(src2);
 	out.reserve(src1.size() + src2.size());
 	auto it1 = src1.begin();
 	auto it2 = src2.begin();
@@ -311,7 +331,7 @@ merge_terms(const NF_Term &src1,
 		out.push_back(*it2);
 		it2++;
 	}
-	sanity_check(out);
+	extra_sanity(out);
 	return true;
 }
 
@@ -321,8 +341,8 @@ insert_term(const NF_Term &src, NF_Expression &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
-	sanity_check(out);
-	sanity_check(src);
+	extra_sanity(out);
+	extra_sanity(src);
 	for (x = 0; x < out.size(); x++) {
 		switch (compare_nf_terms(out[x], src)) {
 		case nf_subset:
@@ -403,14 +423,14 @@ out1:
 		NF_Expression new_out;
 		new_out.reserve(out.size() - nr_killed + 1);
 		for (unsigned y = 0; y < out.size(); y++) {
-			sanity_check(new_out);
+			extra_sanity(new_out);
 			if (y == x) {
 				new_out.push_back(src);
-				sanity_check(new_out);
+				extra_sanity(new_out);
 			}
 			if (out[y].size() != 0) {
 				new_out.push_back(out[y]);
-				sanity_check(new_out);
+				extra_sanity(new_out);
 			}
 		}
 		if (x == out.size())
@@ -427,11 +447,12 @@ out1:
 				y--;
 			}
 		}
-		sanity_check(out);
+		extra_sanity(out);
 		if (x == out.size())
 			out.insert(out.begin() + x, src);
-		sanity_check(out);
+		extra_sanity(out);
 	}
+	extra_sanity(out);
 }
 
 /* Set @out to @src1 & @src2. */
@@ -440,8 +461,8 @@ merge_expressions(const NF_Expression &src1,
 		  const NF_Expression &src2,
 		  NF_Expression &out)
 {
-	sanity_check(src1);
-	sanity_check(src2);
+	extra_sanity(src1);
+	extra_sanity(src2);
 	out.clear();
 	out.reserve(src1.size() + src2.size());
 	if (src1.size() < src2.size()) {
@@ -453,7 +474,7 @@ merge_expressions(const NF_Expression &src1,
 		for (auto it = src2.begin(); it != src2.end(); it++)
 			insert_term(*it, out);
 	}
-	sanity_check(out);
+	extra_sanity(out);
 }
 
 /* Convert @out to @out {op} @this_one, maintaining conjunctive normal
@@ -463,19 +484,19 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 {
 	NF_Expression new_out;
 	check_memory_usage();
-	sanity_check(out);
+	extra_sanity(out);
 	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_EXPRESSION)
 		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
 		NF_Term &existing_term(out[x]);
 		for (unsigned z = 0; z < this_one.size(); z++) {
-			sanity_check(new_out);
+			extra_sanity(new_out);
 			NF_Term new_term;
 			if (merge_terms(this_one[z], existing_term, new_term)) {
-				sanity_check(new_out);
+				extra_sanity(new_out);
 				insert_term(new_term, new_out);
-				sanity_check(new_out);
+				extra_sanity(new_out);
 			} else {
 				/* the disjunction includes both x and
 				   !x, for some x, so should be
@@ -484,7 +505,7 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 		}
 	}
 	out = new_out;
-	sanity_check(out);
+	extra_sanity(out);
 	return true;
 }
 
@@ -499,14 +520,16 @@ nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 	check_memory_usage();
 	if (TIMEOUT)
 		return false;
-	if (nr_fragments == 0)
+	if (nr_fragments == 0) {
+		sanity_check(out);
 		return true;
+	}
 	if (out.size() == 0) {
 		return __nf::convert_to_nf(fragments[0], out, expressionOp, termOp) &&
 			nf_counterjoin(fragments + 1, nr_fragments - 1, out,
 				       expressionOp, termOp);
 	}
-	sanity_check(out);
+	extra_sanity(out);
 	NF_Expression this_one;
 	__nf::convert_to_nf(fragments[0], this_one, expressionOp, termOp);
 	if (!nf_countermerge(this_one, out))
@@ -527,7 +550,7 @@ nf_invert(const NF_Term &conj, NF_Expression &out)
 		c.push_back(NF_Atom(!conj[x].first, conj[x].second));
 		insert_term(c, out);
 	}
-	sanity_check(out);
+	extra_sanity(out);
 	return true;
 }
 
