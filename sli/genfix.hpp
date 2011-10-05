@@ -661,6 +661,7 @@ top:
 		}
 		break;
 
+	case 0x6b: /* imul gv, ev, ib */
 	case 0x80:
 	case 0x82:
 	case 0x83:
