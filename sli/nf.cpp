@@ -10,7 +10,7 @@ namespace __nf {
 }
 #endif
 
-#define NF_MAX_EXPRESSION 1000000
+#define NF_MAX_EXPRESSION 10000
 
 static bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
 
