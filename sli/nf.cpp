@@ -485,10 +485,12 @@ nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 				       expressionOp, termOp);
 	}
 	extra_sanity(out);
-	NF_Expression this_one;
-	__nf::convert_to_nf(fragments[0], this_one, expressionOp, termOp);
-	if (!nf_countermerge(this_one, out))
-		return false;
+	{
+		NF_Expression this_one;
+		__nf::convert_to_nf(fragments[0], this_one, expressionOp, termOp);
+		if (!nf_countermerge(this_one, out))
+			return false;
+	}
 
 	return nf_counterjoin(fragments + 1, nr_fragments - 1, out,
 			      expressionOp, termOp);
