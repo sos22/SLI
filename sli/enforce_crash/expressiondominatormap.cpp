@@ -83,6 +83,7 @@ expressionDominatorMapT::init(DNF_Conjunction &c,
 			}
 		}
 	}
+	return true;
 }
 
 bool
