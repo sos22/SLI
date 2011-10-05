@@ -473,6 +473,7 @@ static bool
 nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 	       IROp expressionOp, IROp termOp)
 {
+top:
 	if (TIMEOUT)
 		return false;
 	if (nr_fragments == 0) {
@@ -492,8 +493,11 @@ nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 			return false;
 	}
 
-	return nf_counterjoin(fragments + 1, nr_fragments - 1, out,
-			      expressionOp, termOp);
+	/* gcc seems to have problems with tail call elimination in
+	   this function.  Do it manually. */
+	fragments++;
+	nr_fragments--;
+	goto top;
 }
 
 /* Invert @conf and store it in @out, which must start out empty. */
