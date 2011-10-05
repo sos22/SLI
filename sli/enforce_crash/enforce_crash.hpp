@@ -43,7 +43,7 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg);
+	bool init(DNF_Conjunction &c, CFG<ThreadRip> *cfg) __attribute__((warn_unused_result));
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
 		happensBefore.print(f);
@@ -106,7 +106,7 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 	}
 public:
 	instructionDominatorMapT idom;
-	expressionDominatorMapT(DNF_Conjunction &, CFG<ThreadRip> *, const std::set<ThreadRip> &neededRips);
+	bool init(DNF_Conjunction &, CFG<ThreadRip> *, const std::set<ThreadRip> &neededRips) __attribute__((warn_unused_result));
 };
 
 class simulationSlotT {

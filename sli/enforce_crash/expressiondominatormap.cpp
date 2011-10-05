@@ -1,11 +1,15 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 
-expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
-						 CFG<ThreadRip> *cfg,
-						 const std::set<ThreadRip> &neededRips)
+bool
+expressionDominatorMapT::init(DNF_Conjunction &c,
+			      CFG<ThreadRip> *cfg,
+			      const std::set<ThreadRip> &neededRips)
 {
-	happensAfterMapT happensBefore(c, cfg);
+	happensAfterMapT happensBefore;
+	if (!happensBefore.init(c, cfg))
+		return false;
+
 	predecessorMapT pred(cfg);
 
 	/* Figure out where the various instructions become
@@ -81,7 +85,8 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	}
 }
 
-happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
+bool
+happensAfterMapT::init(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
@@ -90,8 +95,10 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 			ThreadRip afterRip = e->after;
 			Instruction<ThreadRip> *before = cfg->ripToInstr->get(beforeRip);
 			Instruction<ThreadRip> *after = cfg->ripToInstr->get(afterRip);
-			assert(before);
-			assert(after);
+			if (!before || !after) {
+				printf("Failed to build happensAfterMapT because CFG is incomplete.\n");
+				return false;
+			}
 			if (c[x].first) {
 				Instruction<ThreadRip> *t = before;
 				before = after;
@@ -101,4 +108,5 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 			happensBefore[after].insert(before);
 		}
 	}
+	return true;
 }

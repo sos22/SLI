@@ -1273,10 +1273,10 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 	return res;
 }
 
-static crashEnforcementData
+static bool
 buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	 std::map<unsigned, ThreadRip> &roots,
-	 AddressSpace *as)
+	 AddressSpace *as, crashEnforcementData *out)
 {
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
@@ -1322,9 +1322,12 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	
 	/* Figure out where the various expressions should be
 	 * evaluated. */
-	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
+	expressionDominatorMapT exprDominatorMap;
+	if (!exprDominatorMap.init(c, cfg, neededRips))
+		return false;
 
-	return crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg);
+	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg);
+	return true;
 }
 
 static bool
@@ -1424,8 +1427,11 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		return crashEnforcementData();
 
 	crashEnforcementData accumulator;
-	for (unsigned x = 0; x < d.size(); x++)
-		accumulator |= buildCED(d[x], m, roots, oracle->ms->addressSpace);
+	for (unsigned x = 0; x < d.size(); x++) {
+		crashEnforcementData tmp;
+		if (buildCED(d[x], m, roots, oracle->ms->addressSpace, &tmp))
+			accumulator |= tmp;
+	}
 	return accumulator;
 }
 
