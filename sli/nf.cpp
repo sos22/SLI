@@ -55,49 +55,6 @@ enum nf_ordering {
 	nf_superset = 2
 };
 
-static void
-check_memory_usage(void)
-{
-	FILE *f = fopen("/proc/self/stat", "r");
-	int pid;
-	char *name;
-	char state;
-	int ppid;
-	int pgrp;
-	int session;
-	int tty;
-	int tpgid;
-	int flags;
-	long minflt;
-	long cminflt;
-	long majflt;
-	long cmajflt;
-	long utime;
-	long stime;
-	long cstime;
-	long priority;
-	long nice;
-	long num_threads;
-	long itrealvalue;
-	long long starttime;
-	long vsize;
-
-	vsize = 0;
-	fscanf(f, "%d %as %c %d %d %d %d %d %d %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld %lld %ld",
-	       &pid, &name, &state, &ppid, &pgrp, &session, &tty, &tpgid, &flags,
-	       &minflt, &cminflt, &majflt, &cmajflt, &utime, &stime, &cstime,
-	       &priority, &nice, &num_threads, &itrealvalue, &starttime,
-	       &vsize);
-	fclose(f);
-	/* Get out if we have a vsize bigger than 6GiB */
-	if (vsize >= (6l << 30)) {
-		if (!_timed_out)
-			fprintf(_logfile, "Forcing timeout because vsize 0x%lx\n",
-				vsize);
-		_timed_out = true;
-	}
-}
-
 static int
 compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 {
@@ -477,13 +434,12 @@ merge_expressions(const NF_Expression &src1,
 	extra_sanity(out);
 }
 
-/* Convert @out to @out {op} @this_one, maintaining conjunctive normal
- * form.  {op} is or for CNF, or and for DNF. */
+/* Convert @out to @out {op} @this_one, maintaining normal form.  {op}
+ * is or for CNF, or and for DNF. */
 static bool
 nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 {
 	NF_Expression new_out;
-	check_memory_usage();
 	extra_sanity(out);
 	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_EXPRESSION)
 		return false;
@@ -517,7 +473,6 @@ static bool
 nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 	       IROp expressionOp, IROp termOp)
 {
-	check_memory_usage();
 	if (TIMEOUT)
 		return false;
 	if (nr_fragments == 0) {
@@ -560,7 +515,6 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 	assert(out.size() == 0);
 	assert(in.size() != 0);
 
-	check_memory_usage();
 	/* Start by converting the first clause */
 	if (!nf_invert(in[0], out))
 		return false;
@@ -593,7 +547,6 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 static bool
 convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 {
-	check_memory_usage();
 	out.clear();
 	if (e->tag == Iex_Unop &&
 	    ((IRExprUnop *)e)->op == Iop_Not1) {
