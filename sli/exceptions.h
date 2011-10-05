@@ -177,15 +177,20 @@ public:
 #ifndef NDEBUG
 #define assert(x)							\
 	do {								\
-	if (!(x))							\
-		throw AssertFailedException(__FILE__, __LINE__,		\
-					    "%s", #x );			\
+		if (!(x))						\
+			throw AssertFailedException(__FILE__, __LINE__,	\
+						    "%s", #x );		\
 	} while (0)
 #else
+/* Moderate trickiness so that we check that @x has the right type and
+   doesn't reference any bad variables, but we don't force any
+   functions in @x to be evaluated in NDEBUG builds. */
 #define assert(x)				\
 	do {					\
-		int ___ignore = !(x);		\
-		(void)___ignore;		\
+		if (0) {			\
+			int ___ignore = !(x);	\
+			(void)___ignore;	\
+		}				\
 	} while (0)
 #endif
 
