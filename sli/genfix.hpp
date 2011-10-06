@@ -569,10 +569,14 @@ top:
 		case 0x50 ... 0x6f: /* Yet more xmm instructions using a simple modrm */
 		case 0x90 ... 0x9f: /* setcc Eb */
 		case 0xaf: /* imul Gv, Ev */
+		case 0xb0: /* cmpxchg Eb, Gb  */
+		case 0xb1: /* cmpxchg Ev, Gv  */
 		case 0xb6: /* movzx Gv, Eb */
 		case 0xb7: /* movzw Gv, Ew */
 		case 0xbe: /* movsb Gv, Eb */
 		case 0xbf: /* movsb Gv, Ew */
+		case 0xc0: /* xadd Eb, Gb */
+		case 0xc1: /* xadd Ev, Gv */
 			i->modrm(0, as);
 			break;
 		default:
