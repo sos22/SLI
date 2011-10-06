@@ -292,9 +292,9 @@ merge_terms(const NF_Term &src1,
 	return true;
 }
 
-/* Set @out to @src & @out */
+/* Set @out to @src & @out, destroying @src as we do so. */
 static void
-insert_term(const NF_Term &src, NF_Expression &out)
+insert_term_destruct(NF_Term &src, NF_Expression &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
@@ -412,11 +412,12 @@ out1:
 	extra_sanity(out);
 }
 
-/* Set @out to @src1 & @src2. */
+/* Set @out to @src1 & @src2, destroying @src1 and @src2 as we do
+   so. */
 static void
-merge_expressions(const NF_Expression &src1,
-		  const NF_Expression &src2,
-		  NF_Expression &out)
+merge_expressions_destruct(NF_Expression &src1,
+			   NF_Expression &src2,
+			   NF_Expression &out)
 {
 	extra_sanity(src1);
 	extra_sanity(src2);
@@ -425,11 +426,11 @@ merge_expressions(const NF_Expression &src1,
 	if (src1.size() < src2.size()) {
 		out.insert(out.begin(), src2.begin(), src2.end());
 		for (auto it = src1.begin(); it != src1.end(); it++)
-			insert_term(*it, out);
+			insert_term_destruct(*it, out);
 	} else {
 		out.insert(out.begin(), src1.begin(), src1.end());
 		for (auto it = src2.begin(); it != src2.end(); it++)
-			insert_term(*it, out);
+			insert_term_destruct(*it, out);
 	}
 	extra_sanity(out);
 }
@@ -451,7 +452,7 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 			NF_Term new_term;
 			if (merge_terms(this_one[z], existing_term, new_term)) {
 				extra_sanity(new_out);
-				insert_term(new_term, new_out);
+				insert_term_destruct(new_term, new_out);
 				extra_sanity(new_out);
 			} else {
 				/* the disjunction includes both x and
@@ -509,7 +510,7 @@ nf_invert(const NF_Term &conj, NF_Expression &out)
 	for (unsigned x = 0; x < conj.size(); x++) {
 		NF_Term c;
 		c.push_back(NF_Atom(!conj[x].first, conj[x].second));
-		insert_term(c, out);
+		insert_term_destruct(c, out);
 	}
 	extra_sanity(out);
 	return true;
@@ -573,7 +574,7 @@ convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 							 termOp))
 					return false;
 				NF_Expression t(out);
-				merge_expressions(r, t, out);
+				merge_expressions_destruct(r, t, out);
 			}
 			sanity_check(out);
 			return true;
