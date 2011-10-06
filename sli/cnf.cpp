@@ -9,7 +9,7 @@
 
 #include "libvex_prof.hpp"
 
-static bool
+static Maybe<bool>
 cnf(IRExpr *e, NF_Expression &out)
 {
 	return convert_to_nf(e, out, Iop_And1, Iop_Or1);
@@ -37,8 +37,11 @@ simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
 	inp = internIRExpr(inp);
 
 	NF_Expression res;
-	if (!cnf(inp, res))
+	Maybe<bool> tmp(cnf(inp, res));
+	if (!tmp.valid)
 		return inp;
+	if (!tmp.content)
+		return IRExpr_Const(IRConst_U1(0));
 	if (res.complexity() < exprComplexity(inp)) {
 		*done_something = true;
 		return convert_from_nf(res, Iop_And1, Iop_Or1);

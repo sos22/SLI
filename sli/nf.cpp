@@ -12,7 +12,7 @@ namespace __nf {
 
 #define NF_MAX_EXPRESSION 10000
 
-static bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+static Maybe<bool> convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
 
 /* The ordering we use for NF disjunctions works like this:
 
@@ -311,22 +311,145 @@ merge_terms(const NF_Term &src1,
 	return true;
 }
 
-/* Set @out to @src & @out, destroying @src as we do so. */
-static void
+static bool insert_term_destruct(NF_Term &src, NF_Expression &out) __attribute__((warn_unused_result));
+
+/* Insert @src, which must contain a single atom, into @out.  Returns
+   false if @out already contains !@src, in which case we have a
+   contradiction, or true otherwise. */
+static bool insert_atomic_term(const NF_Term &src, NF_Expression &out) __attribute__((warn_unused_result));
+static bool
+insert_atomic_term(const NF_Term &src, NF_Expression &out)
+{
+top:
+	assert(src.size() == 1);
+	const NF_Atom &atom(src[0]);
+
+	/* First, check whether @out already has a relevant
+	 * single-atom term. */
+	unsigned x;
+	for (x = 0; x < out.size() && out[x].size() == 1; x++) {
+		if (out[x][0].second == atom.second) {
+			/* Yes.  This is the easy case. */
+			if (out[x][0].first == atom.first) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+	}
+
+	/* No, there isn't currently a matching single-atom term in
+	   @out.  See if we can simplify any of the existing terms in
+	   @out. */
+	std::vector<NF_Term> reinsert;
+	for ( ; x < out.size(); ) {
+		auto it = out[x].findMatchingAtom(atom);
+		if (it != out[x].end()) {
+			assert(it->second == atom.second);
+			if (it->first == atom.first) {
+				/* out[x] contains the atom which
+				   we're trying to insert.  It's now
+				   redundant, so purge it.  We do this
+				   in a slightly awkward way, removing
+				   out[x] from the list completely and
+				   then putting it back, because that
+				   makes it much easier to keep @out
+				   sane.  (removing a term from an
+				   expression never breaks sanity) */
+				out[x].erase(it);
+				assert(out[x].findMatchingAtom(atom) == out[x].end()); 
+				reinsert.push_back(out[x]);
+			} else {
+				/* out[x] contains the inverse of the
+				   atom which we're trying to insert.
+				   That means that out[x] is never
+				   going to fire, and should be
+				   deleted. */
+			}
+			out.erase(out.begin() + x);
+		} else {
+			x++;
+		}
+	}
+
+	if (!reinsert.empty()) {
+		/* This recursion must eventually bottom out, because
+		   @out can only get simpler at each recursive
+		   step. */
+		for (auto it = reinsert.begin(); it != reinsert.end(); it++) {
+			if (!insert_term_destruct(*it, out)) {
+				/* @out has been reduced to a
+				 * contradiction.  Stop. */
+				return false;
+			}
+		}
+				
+		/* We start again from the beginning here, because
+		   that restructuring might mean that there are more
+		   single-atom terms in @out and we have to be certain
+		   we'll consider them properly. */
+		goto top;
+	}
+
+	/* Okay, now we do the actual insert. */
+	for (x = 0; x < out.size() && out[x].size() == 1 && out[x][0].second < atom.second; x++)
+		;
+	out.insert(out.begin() + x, src);
+	return true;
+}
+
+/* Set @out to @src & @out, destroying @src as we do so.  Returns
+   false if that results in a contradiction and true otherwise. */
+static bool insert_term_destruct(NF_Term &src, NF_Expression &out) __attribute__((warn_unused_result));
+static bool
 insert_term_destruct(NF_Term &src, NF_Expression &out)
 {
 	unsigned x;
 	unsigned nr_killed = 0;
 	extra_sanity(out);
 	extra_sanity(src);
-	for (x = 0; x < out.size(); x++) {
+	if (src.size() == 1)
+		return insert_atomic_term(src, out);
+
+	/* Simplify @src using the single-atom terms in @out. */
+	for (x = 0; x < out.size() && out[x].size() == 1; x++) {
+		NF_Atom &outAtom(out[x][0]);
+		auto it = src.findMatchingAtom(outAtom);
+		if (it != src.end()) {
+			assert(it->second == outAtom.second);
+			if (it->first == outAtom.first) {
+				/* Easy case: we already have a && ...
+				   and we're inserting (a || ...).
+				   That's a no-op. */
+				return true;
+			} else {
+				/* We have a && ... and we're insert
+				   (!a || X).  That's equivalent to
+				   inserting just X, so erase this bit
+				   of the thing to insert. */
+				src.erase(it);
+			}
+		}
+	}
+
+	if (src.size() == 0) {
+		/* We have a contradiction.  Given @out, there is no
+		   way that @src can ever be true, so the result is
+		   just false. */
+		return false;
+	}
+
+	if (src.size() == 1)
+		return insert_atomic_term(src, out);
+
+	for ( ; x < out.size(); x++) {
 		switch (compare_nf_terms(out[x], src)) {
 		case nf_subset:
 		case nf_eq:
 			/* This existing output clause subsumes the
 			 * new one we want to insert. */
 
-			return;
+			return true;
 		case nf_less:
 			assert(compare_nf_terms(src, out[x]) == nf_greater);
 			continue;
@@ -429,11 +552,17 @@ out1:
 		extra_sanity(out);
 	}
 	extra_sanity(out);
+
+	return true;
 }
 
-/* Set @out to @src1 & @src2, destroying @src1 and @src2 as we do
-   so. */
-static void
+/* Set @out to @src1 & @src2, destroying @src1 and @src2 as we do so.
+   Returns false if the result is a contradiction, and true
+   otherwise. */
+static bool merge_expressions_destruct(NF_Expression &src1,
+				       NF_Expression &src2,
+				       NF_Expression &out) __attribute__((warn_unused_result));
+static bool
 merge_expressions_destruct(NF_Expression &src1,
 			   NF_Expression &src2,
 			   NF_Expression &out)
@@ -445,24 +574,29 @@ merge_expressions_destruct(NF_Expression &src1,
 	if (src1.size() < src2.size()) {
 		out.insert(out.begin(), src2.begin(), src2.end());
 		for (auto it = src1.begin(); it != src1.end(); it++)
-			insert_term_destruct(*it, out);
+			if (!insert_term_destruct(*it, out))
+				return false;
 	} else {
 		out.insert(out.begin(), src1.begin(), src1.end());
 		for (auto it = src2.begin(); it != src2.end(); it++)
-			insert_term_destruct(*it, out);
+			if (!insert_term_destruct(*it, out))
+				return false;
 	}
 	extra_sanity(out);
+	return true;
 }
 
 /* Convert @out to @out {op} @this_one, maintaining normal form.  {op}
- * is or for CNF, or and for DNF. */
-static bool
+ * is or for CNF, or and for DNF.  Returns nothing if we have a
+ * problem, just(false) if we find a contradiction, or just(true) if
+ * @out is correct. */
+static Maybe<bool>
 nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 {
 	NF_Expression new_out;
 	extra_sanity(out);
 	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_EXPRESSION)
-		return false;
+		return Maybe<bool>::nothing();
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
 		NF_Term &existing_term(out[x]);
@@ -471,7 +605,8 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 			NF_Term new_term;
 			if (merge_terms(this_one[z], existing_term, new_term)) {
 				extra_sanity(new_out);
-				insert_term_destruct(new_term, new_out);
+				if (!insert_term_destruct(new_term, new_out))
+					return Maybe<bool>::just(false);
 				extra_sanity(new_out);
 			} else {
 				/* the disjunction includes both x and
@@ -482,35 +617,40 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 	}
 	out = new_out;
 	extra_sanity(out);
-	return true;
+	return Maybe<bool>::just(true);
 }
 
 /* Disjoin or conjoin the fragments together, convert to NF, and then
    place the results in @out.  Can fail if @out looks ``too big'', in
-   which case we return false; otherwise return true.  Disjoin for
-   CNF, and conjoin for DNF. */
-static bool
+   which case we return nothing.  If that doesn't happen, return
+   just(true) if we produce a valid result, or just(false) if we hit a
+   contradiction; otherwise return true.  Disjoin for CNF, and conjoin
+   for DNF. */
+static Maybe<bool>
 nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 	       IROp expressionOp, IROp termOp)
 {
 top:
 	if (TIMEOUT)
-		return false;
+		return Maybe<bool>::nothing();
 	if (nr_fragments == 0) {
 		sanity_check(out);
-		return true;
+		return Maybe<bool>::just(true);
 	}
 	if (out.size() == 0) {
-		return __nf::convert_to_nf(fragments[0], out, expressionOp, termOp) &&
-			nf_counterjoin(fragments + 1, nr_fragments - 1, out,
-				       expressionOp, termOp);
+		auto res1(__nf::convert_to_nf(fragments[0], out, expressionOp, termOp));
+		if (res1 != Maybe<bool>::just(true))
+			return res1;
+		return nf_counterjoin(fragments + 1, nr_fragments - 1, out,
+				      expressionOp, termOp);
 	}
 	extra_sanity(out);
 	{
 		NF_Expression this_one;
 		__nf::convert_to_nf(fragments[0], this_one, expressionOp, termOp);
-		if (!nf_countermerge(this_one, out))
-			return false;
+		auto r(nf_countermerge(this_one, out));
+		if (!r.valid || !r.content)
+			return r;
 	}
 
 	/* gcc seems to have problems with tail call elimination in
@@ -520,7 +660,9 @@ top:
 	goto top;
 }
 
-/* Invert @conf and store it in @out, which must start out empty. */
+/* Invert @conf and store it in @out, which must start out empty.
+ * Returns true normally, or false if we find a contradiction. */
+static bool nf_invert(const NF_Term &conj, NF_Expression &out) __attribute__((warn_unused_result));
 static bool
 nf_invert(const NF_Term &conj, NF_Expression &out)
 {
@@ -529,13 +671,14 @@ nf_invert(const NF_Term &conj, NF_Expression &out)
 	for (unsigned x = 0; x < conj.size(); x++) {
 		NF_Term c;
 		c.push_back(NF_Atom(!conj[x].first, conj[x].second));
-		insert_term_destruct(c, out);
+		if (!insert_term_destruct(c, out))
+			return false;
 	}
 	extra_sanity(out);
 	return true;
 }
 
-static bool
+static Maybe<bool>
 nf_invert(const NF_Expression &in, NF_Expression &out)
 {
 	assert(out.size() == 0);
@@ -543,7 +686,7 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 
 	/* Start by converting the first clause */
 	if (!nf_invert(in[0], out))
-		return false;
+		return Maybe<bool>::just(false);
 
 	/* Now we convert the remaining clauses one at a time, or'ing
 	   them in as we go.  The invariant here is that out = ~(in[0:x]),
@@ -551,12 +694,15 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 	   the first x clauses only. */
 	for (unsigned x = 1; x < in.size(); x++) {
 		NF_Expression r;
-		if (TIMEOUT || !nf_invert(in[x], r))
-			return false;
+		if (TIMEOUT)
+			return Maybe<bool>::nothing();
+		if (!nf_invert(in[x], r))
+			return Maybe<bool>::just(false);
 
 		/* out = ~(in[0:x-1]), r = ~in[x]. */
-		if (!nf_countermerge(r, out))
-			return false;
+		auto res(nf_countermerge(r, out));
+		if (res != Maybe<bool>::just(true))
+			return res;
 
 		/* out = ~in[x] | ~(in[0:x-1])
 		       = ~(in[x] & in[0:x-1])
@@ -566,37 +712,41 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 		*/
 	}
 	sanity_check(out);
-	return true;
+	return Maybe<bool>::just(true);
 }
 
 /* Convert @e to either CNF or DNF. */
-static bool
+static Maybe<bool>
 convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 {
 	out.clear();
 	if (e->tag == Iex_Unop &&
 	    ((IRExprUnop *)e)->op == Iop_Not1) {
 		NF_Expression r;
-		return __nf::convert_to_nf(((IRExprUnop *)e)->arg, r, expressionOp, termOp) &&
-			nf_invert(r, out);
+		Maybe<bool> res1(__nf::convert_to_nf(((IRExprUnop *)e)->arg, r, expressionOp, termOp));
+		if (res1 != Maybe<bool>::just(true))
+			return res1;
+		return nf_invert(r, out);
 	}
 
 	if (e->tag == Iex_Associative) {
 		if (((IRExprAssociative *)e)->op == expressionOp) {
 			for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++) {
 				if (TIMEOUT)
-					return false;
+					return Maybe<bool>::nothing();
 				NF_Expression r;
-				if (!__nf::convert_to_nf(((IRExprAssociative *)e)->contents[x],
-							 r,
-							 expressionOp,
-							 termOp))
-					return false;
+				auto res(__nf::convert_to_nf(((IRExprAssociative *)e)->contents[x],
+							     r,
+							     expressionOp,
+							     termOp));
+				if (res != Maybe<bool>::just(true))
+					return res;
 				NF_Expression t(out);
-				merge_expressions_destruct(r, t, out);
+				if (!merge_expressions_destruct(r, t, out))
+					return Maybe<bool>::just(false);
 			}
 			sanity_check(out);
-			return true;
+			return Maybe<bool>::just(true);
 		} else if (((IRExprAssociative *)e)->op == termOp) {
 			return nf_counterjoin(((IRExprAssociative *)e)->contents,
 					      ((IRExprAssociative *)e)->nr_arguments,
@@ -612,7 +762,7 @@ convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 	c.push_back(NF_Atom(false, e));
 	out.push_back(c);
 	sanity_check(out);
-	return true;
+	return Maybe<bool>::just(true);
 }
 
 /* Walk over the NF expression performing a final optimisation pass.
@@ -629,7 +779,7 @@ convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
    then we would have detected the relationship and reduced the result
    to just ba.  The fix is just to do the full O(n^2) thing at the end
    to find *all* of the subset relationships and purge them. */
-static bool
+static Maybe<bool>
 optimise_nf(NF_Expression &e)
 {
 	static int nr_useful_invocations;
@@ -638,11 +788,9 @@ optimise_nf(NF_Expression &e)
 	nr_invocations++;
 
 	for (auto it1 = e.begin(); it1 != e.end(); it1++) {
-		if (TIMEOUT)
-			return false;
 		for (auto it2 = it1 + 1; it2 != e.end(); ) {
 			if (TIMEOUT)
-				return false;
+				return Maybe<bool>::nothing();
 			switch (compare_nf_terms(*it1, *it2)) {
 			case nf_subset:
 				/* *it1 is a subset of *it2.  If we're
@@ -674,7 +822,7 @@ optimise_nf(NF_Expression &e)
 			}
 		}
 	}
-	return true;
+	return Maybe<bool>::just(true);
 }
 
 static IRExpr *
@@ -746,16 +894,40 @@ NF_Expression::prettyPrint(FILE *f, const char *termSep, const char *sep) const
 	fprintf(f, "\n");
 }
 
+NF_Term::iterator
+NF_Term::findMatchingAtom(const NF_Atom &a)
+{
+	for (auto it = begin(); it != end(); it++) {
+		if (a.second == it->second)
+			return it;
+		if (a.second > it->second) {
+			/* You might say that, since the atoms are in
+			   order, we should be using a binary chop,
+			   rather than a linear scan, but since there
+			   are rarely more than half a dozen items in
+			   the list it makes basically no difference,
+			   and linear scans are a bit easier.  We do,
+			   however, stop early if we find something
+			   greater than the needle, since that's
+			   obviously correct and helps a bit. */
+			break;
+		}
+	}
+	return end();
+}
+
 /* Caution: this isn't completely deterministic, even with the
    optimisation pass, because the order of terms within the expression
    depends on the memory addresses of the underlying atom IRExprs.
    Converting back to an IRExpr and then running a simplification pass
    will fix that. */
-bool
+Maybe<bool>
 convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 {
-	return __nf::convert_to_nf(e, out, expressionOp, termOp) &&
-		__nf::optimise_nf(out);
+	Maybe<bool> res(__nf::convert_to_nf(e, out, expressionOp, termOp));
+	if (res != Maybe<bool>::just(true))
+		return res;
+	return __nf::optimise_nf(out);
 }
 
 IRExpr *

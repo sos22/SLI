@@ -13,7 +13,7 @@ printDnf(NF_Expression &dnf, FILE *f)
 	dnf.prettyPrint(f, "&&&&&&&&&&", "|||||||||");
 }
 
-static inline bool
+static inline Maybe<bool>
 dnf(IRExpr *e, NF_Expression &out)
 {
 	return convert_to_nf(e, out, Iop_Or1, Iop_And1);

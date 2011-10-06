@@ -3,6 +3,7 @@
 #define NF_HPP__
 
 #include "simplify_irexpr.hpp"
+#include "maybe.hpp"
 
 class NF_Atom : public std::pair<bool, IRExpr *>, public PrettyPrintable {
 public:
@@ -31,6 +32,7 @@ public:
 			acc += it->complexity();
 		return acc;
 	}
+	iterator findMatchingAtom(const NF_Atom &a);
 };
 class NF_Expression : public std::vector<NF_Term> {
 public:
@@ -45,7 +47,7 @@ public:
 	}
 };
 
-bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+Maybe<bool> convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
 IRExpr *convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp);
 
 #endif /* !NF_HPP__ */
