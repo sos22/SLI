@@ -87,6 +87,22 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 			   fallback ordering.  This is moderately
 			   fiddly, because we try to test both at the
 			   same time. */
+
+			if (a.size() < b.size()) {
+				/* a is smaller than b, so there's no
+				   way that a can be greater than b
+				   under the ordering or that a can be
+				   a superset of b.  By control flow,
+				   the only possible return values
+				   from here are nf_greater, nf_less,
+				   and nf_superset; combining the two
+				   bits of knowledge, we know that
+				   we're ultimately going to return
+				   nf_less, so bypass it and just
+				   return here. */
+				return nf_less;
+			}
+
 			while (it1 != a.end() && it2 != b.end()) {
 				switch (compare_nf_atom(*it1, *it2)) {
 				case -1:
@@ -152,6 +168,9 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 			   greater than the matching element of b.  a
 			   is either a subset of b or we must use the
 			   fallback relationship. */
+			if (a.size() >= b.size())
+				return nf_greater;
+
 			while (it1 != a.end() && it2 != b.end()) {
 				switch (compare_nf_atom(*it1, *it2)) {
 				case -1:
