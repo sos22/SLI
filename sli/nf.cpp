@@ -103,7 +103,7 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 			   fiddly, because we try to test both at the
 			   same time. */
 
-			if (a.size() < b.size()) {
+			if (a.size() <= b.size()) {
 				/* a is smaller than b, so there's no
 				   way that a can be greater than b
 				   under the ordering or that a can be
