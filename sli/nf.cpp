@@ -134,20 +134,8 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 					   the elements are ordered we
 					   know it has no match in a.
 					   Therefore, b is not a
-					   subset of a, and we use the
-					   fallback ordering.  That's
-					   trivial if the sizes are
-					   different.  If they're the
-					   same size then a must be
-					   less than b, because we've
-					   already encountered one
-					   element of a which is less
-					   than its matching element
-					   of b (the outer switch). */
-					if (a.size() <= b.size())
-						return nf_less;
-					else
-						return nf_greater;
+					   subset of a. */
+					return nf_greater;
 				default: abort();
 				}
 			}
@@ -163,17 +151,9 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 				return nf_superset;
 			/* Hit end of a without consuming b, so we
 			   don't have a subset or superset
-			   relationship, and need to use the fallback
-			   relationship.  Again, the different-size
-			   case is obvious, and the same-size one is
-			   easy because the first different element
-			   must have been smaller in a for us to get
-			   here in the outer switch. */
+			   relationship. */
 			assert(it1 == a.end());
-			if (a.size() <= b.size())
-				return nf_less;
-			else
-				return nf_greater;
+			return nf_greater;
 		case 0:
 			it1++;
 			it2++;
@@ -194,10 +174,7 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 					   less-than-or-equal, because
 					   the outer switch found
 					   something bigger in b. */
-					if (a.size() < b.size())
-						return nf_less;
-					else
-						return nf_greater;
+					return nf_less;
 				case 0:
 					it1++;
 					it2++;
@@ -210,10 +187,8 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 			}
 			if (it1 == a.end())
 				return nf_subset;
-			else if (a.size() < b.size())
-				return nf_less;
 			else
-				return nf_greater;
+				return nf_less;
 		default:
 			abort();
 		}
