@@ -443,7 +443,27 @@ insert_term_destruct(NF_Term &src, NF_Expression &out)
 		return insert_atomic_term(src, out);
 
 	for ( ; x < out.size(); x++) {
-		switch (compare_nf_terms(out[x], src)) {
+		nf_ordering order;
+
+		if (out[x].size() > src.size()) {
+			order = nf_greater;
+		} else {
+			if (out[x][0].second < src[0].second) {
+				/* Atoms are ordered within terms, so
+				   this means that the smallest
+				   element of out[x] is less than the
+				   smallest element of src i.e. the
+				   smallest element of out[x] is not
+				   present in src, and out[x] is not a
+				   subset of src. */
+				order = nf_less;
+				assert(compare_nf_terms(out[x], src) ==
+				       nf_less);
+			} else {
+				order = compare_nf_terms(out[x], src);
+			}
+		}
+		switch (order) {
 		case nf_subset:
 		case nf_eq:
 			/* This existing output clause subsumes the
@@ -454,8 +474,6 @@ insert_term_destruct(NF_Term &src, NF_Expression &out)
 			assert(compare_nf_terms(src, out[x]) == nf_greater);
 			continue;
 		case nf_greater: 
-			assert(compare_nf_terms(src, out[x]) == nf_less);
-			/* fall through */
 		case nf_superset: {
 			/* Split the initial out into regions
 			   according to its relationship to src.  They
