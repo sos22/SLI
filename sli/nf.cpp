@@ -75,6 +75,21 @@ compare_nf_atom(const NF_Atom &a, const NF_Atom &b)
 static nf_ordering
 compare_nf_terms(const NF_Term &a, const NF_Term &b)
 {
+	if (a.size() < b.size()) {
+		/* a is smaller than b.  Either a is less than b or a
+		   is a subset of b.  Do a quick check to see if the
+		   bloom filter can tell us which it is. */
+		if (a.bloom.definitelyNotSubset(b.bloom)) {
+			/* a is not a subset of b, so it must be less
+			   than b. */
+			return nf_less;
+		}
+	} else if (a.size() > b.size()) {
+		/* Converse case. */
+		if (b.bloom.definitelyNotSubset(a.bloom))
+			return nf_greater;
+	}
+	
 	auto it1 = a.begin();
 	auto it2 = b.begin();
 
@@ -413,7 +428,7 @@ insert_term_destruct(NF_Term &src, NF_Expression &out)
 
 	/* Simplify @src using the single-atom terms in @out. */
 	for (x = 0; x < out.size() && out[x].size() == 1; x++) {
-		NF_Atom &outAtom(out[x][0]);
+		const NF_Atom &outAtom(out[x][0]);
 		auto it = src.findMatchingAtom(outAtom);
 		if (it != src.end()) {
 			assert(it->second == outAtom.second);
@@ -843,8 +858,10 @@ optimise_nf(NF_Expression &e)
 	return Maybe<bool>::just(true);
 }
 
+/* I'm kind of disturbed that g++ allows this (implicit loss of
+   const-ness on inp.second.  Oh well. */
 static IRExpr *
-convert_from_nf(NF_Atom &inp)
+convert_from_nf(const NF_Atom &inp)
 {
 	if (inp.first)
 		return IRExpr_Unop(Iop_Not1, inp.second);
