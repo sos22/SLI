@@ -336,25 +336,35 @@ top:
 		auto it = out[x].findMatchingAtom(atom);
 		if (it != out[x].end()) {
 			assert(it->second == atom.second);
-			if (it->first == atom.first) {
-				/* out[x] contains the atom which
-				   we're trying to insert.  It's now
-				   redundant, so purge it.  We do this
-				   in a slightly awkward way, removing
-				   out[x] from the list completely and
-				   then putting it back, because that
-				   makes it much easier to keep @out
-				   sane.  (removing a term from an
-				   expression never breaks sanity) */
+			if (it->first != atom.first) {
+				/* out[x] contains the inverse of the
+				   atom which we're trying to insert.
+				   If we're in CNF, we know that when
+				   we evaluate out[x] atom is
+				   definitely true, so !atom is
+				   definitely false, and the !atom
+				   atom in out[x] is pointless.
+				   Conversely, in DNF, we know that
+				   !atom is true, so, again, it's
+				   pointless.  We can therefore purge
+				   it.
+
+				   We do this in a slightly awkward
+				   way, removing out[x] from the list
+				   completely and then putting it
+				   back, because that makes it much
+				   easier to keep @out sane.
+				   (removing a term from an expression
+				   never breaks sanity) */
 				out[x].erase(it);
 				assert(out[x].findMatchingAtom(atom) == out[x].end()); 
 				reinsert.push_back(out[x]);
 			} else {
-				/* out[x] contains the inverse of the
-				   atom which we're trying to insert.
-				   That means that out[x] is never
-				   going to fire, and should be
-				   deleted. */
+				/* out[x] already contains an exact
+				   duplicate of the thing we're
+				   inserting, and so out[x] is
+				   completely redundant.  Remove
+				   it. */
 			}
 			out.erase(out.begin() + x);
 		} else {
@@ -910,7 +920,7 @@ NF_Term::findMatchingAtom(const NF_Atom &a)
 	for (auto it = begin(); it != end(); it++) {
 		if (a.second == it->second)
 			return it;
-		if (a.second > it->second) {
+		if (a.second < it->second) {
 			/* You might say that, since the atoms are in
 			   order, we should be using a binary chop,
 			   rather than a linear scan, but since there
