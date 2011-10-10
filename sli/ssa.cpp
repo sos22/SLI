@@ -63,6 +63,39 @@ sideEffectDefinesReg(const StateMachineSideEffect *se, const threadAndRegister &
 	return true;
 }
 
+/* Most machines depend on the initial values of registers i.e. are
+   free in some registers.  That confuses a naive conversion to SSA
+   form, so, for each possible register, we generate a pseudo-Phi node
+   which initialises it from nothing at all, and we pretend that those
+   nodes run before the machine starts.  If at the end we find that
+   we're dependent on one of those nodes then we code that as a
+   dependency on the initial value (i.e. generation -1) */
+class ImportRegTable {
+public:
+	std::set<StateMachineSideEffect *> content;
+	ImportRegTable(StateMachine *inp);
+};
+
+ImportRegTable::ImportRegTable(StateMachine *inp)
+{
+	class _ : public StateMachineTransformer {
+		std::set<threadAndRegister, threadAndRegister::partialCompare> done;
+		std::set<StateMachineSideEffect *> &content;
+		IRExpr *transformIex(IRExprGet *g) {
+			if (!done.count(g->reg)) {
+				std::set<unsigned> gen;
+				content.insert(new StateMachineSideEffectPhi(g->reg.setGen(-1), gen));
+			}
+			return NULL;
+		}
+	public:
+		_(std::set<StateMachineSideEffect *> &_content)
+			: content(_content)
+		{}
+	} doit(content);
+	doit.transform(inp);
+}
+
 /* Possibly reaching map.  This tells us, for each side effect in a
    state machine, the set of side effects which might conceivably
    reach it. */
@@ -91,7 +124,7 @@ public:
 	void findReachingGenerations(StateMachineSideEffect *e,
 				     const threadAndRegister &r,
 				     std::vector<unsigned> &out);
-	PossiblyReaching(StateMachine *inp);
+	PossiblyReaching(StateMachine *inp, const ImportRegTable &imports);
 };
 
 static void
@@ -133,12 +166,19 @@ enumAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out)
 	}
 }
 
-PossiblyReaching::PossiblyReaching(StateMachine *inp)
+PossiblyReaching::PossiblyReaching(StateMachine *inp, const ImportRegTable &r)
 {
 	std::set<StateMachineState *> statesNeedingUpdate;
 	std::set<StateMachineEdge *> edgesNeedingUpdate;
 	enumAllStates(inp, statesNeedingUpdate);
 	enumAllEdges(inp, edgesNeedingUpdate);
+
+	/* Initial state's initial reaching set is just the import
+	 * table.  Other states and edges start off with empty
+	 * reaching set. */
+	stateTable[inp->root] = r.content;
+
+	/* Iterate to fixed point. */
 	while (!statesNeedingUpdate.empty() ||
 	       !edgesNeedingUpdate.empty()) {
 		while (!statesNeedingUpdate.empty()) {
@@ -466,18 +506,13 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 						}
 					}
 				}
-				if (!se) {
-					/* There are no reaching
-					   assignments at all for this
-					   variable.  That means it
-					   doesn't matter what
-					   generation we give it.
-					   Just assign generation -1
-					   and have done with it. */
-					return IRExpr_Get(
-						e->reg.setGen(-1),
-						e->ty);
-				}
+
+				/* Every use of a register should have
+				 * at least one reaching assignment,
+				 * because that's the whole point of
+				 * the import reg table. */
+				assert(se);
+
 				/* This is definitely the right side effect. */
 				threadAndRegister r(threadAndRegister::invalid());
 				if (StateMachineSideEffectCopy *c =
@@ -1194,19 +1229,20 @@ convertToSSA(StateMachine *inp)
 	inp = duplicateStateMachine(inp);
 
 	std::map<threadAndRegister, unsigned, threadAndRegister::partialCompare> lastGeneration;
+	ImportRegTable imports(inp);
 	{
-		PossiblyReaching reaching(inp);
+		PossiblyReaching reaching(inp, imports);
 		inp = introduceSsaVars(inp, reaching, lastGeneration);
 		if (TIMEOUT)
 			return inp;
 	}
-	PossiblyReaching reaching(inp);
+	PossiblyReaching reaching(inp, imports);
 	if (useSsaVarsAndIntroducePhis(inp, reaching, lastGeneration)) {
 		bool progress;
 		do {
 			if (TIMEOUT)
 				return inp;
-			PossiblyReaching r(inp);
+			PossiblyReaching r(inp, imports);
 			progress = useSsaVarsAndIntroducePhis(inp, r, lastGeneration);
 		} while (progress);
 	}
@@ -1272,7 +1308,7 @@ class optimiseSSATransformer : public StateMachineTransformer {
 	IRExpr *transformIRExpr(IRExpr *e, bool *b) { return NULL; }
 public:
 	optimiseSSATransformer(StateMachine *inp)
-		: reaching(inp)
+		: reaching(inp, ImportRegTable(inp))
 	{}
 };
 
