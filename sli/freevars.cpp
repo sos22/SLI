@@ -190,6 +190,18 @@ public:
 		puttedRegisters.insert(l->target);
 		return StateMachineTransformer::transformOneSideEffect(l, done_something);
 	}
+	StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *p, bool *done_something)
+	{
+		/* Suppress free variable transformation for anything
+		   involved in a Phi node, because it gets far too
+		   confusing. */
+		puttedRegisters.insert(p->reg);
+		for (auto it = p->generations.begin();
+		     it != p->generations.end();
+		     it++)
+			puttedRegisters.insert(p->reg.setGen(*it));
+		return StateMachineTransformer::transformOneSideEffect(p, done_something);
+	}
 	IRExpr *transformIex(IRExprGet *what) {
 		accessedRegisters.insert(what->reg);
 		return StateMachineTransformer::transformIex(what);
