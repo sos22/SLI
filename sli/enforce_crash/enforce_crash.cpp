@@ -887,6 +887,22 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 					}
 				}
 			}
+		}
+	} while (progress);
+	do {
+		progress = false;
+		for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
+			instrT *i = it.value();
+
+			instrT *successors[2];
+			int nr_successors;
+			nr_successors = 0;
+			if (i->defaultNextI)
+				successors[nr_successors++] = i->defaultNextI;
+			if (i->branchNextI)
+				successors[nr_successors++] = i->branchNextI;
+			if (nr_successors == 0)
+				continue;
 
 			/* Backward reachability: anything which can
 			   reach us can also reach our successors. */
