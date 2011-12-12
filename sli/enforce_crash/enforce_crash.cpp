@@ -1332,7 +1332,7 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	     it != roots.end();
 	     it++) {
 		printf("Root %s\n", it->second.name());
-		cfg->add_root(it->second, 1000);
+		cfg->add_root(it->second, 100);
 	}
 	cfg->doit();
 	
