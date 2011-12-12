@@ -141,7 +141,7 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 }
 
 class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > >,
-			    private GcCallback<> {
+			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
 			std::vector<std::pair<unsigned, IRExpr *> > n;
@@ -188,7 +188,7 @@ public:
 	}
 };
 
-class happensBeforeEdge : public GarbageCollected<happensBeforeEdge> {
+class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap> {
 public:
 	static unsigned next_msg_id;
 
@@ -226,14 +226,13 @@ public:
 	}
 
 	void visit(HeapVisitor &hv) {
-		/* These must not be live at GC time. */
-		abort();
+		visit_container(content, hv);
 	}
 	NAMED_CLASS
 };
 
 class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>,
-		 private GcCallback<> {
+		 private GcCallback<&ir_heap> {
 	typedef std::pair<unsigned, IRExpr *> key_t;
 	void mk_slot(unsigned thr, IRExpr *e) {
 		key_t key(thr, e);
@@ -311,8 +310,8 @@ public:
 	}
 };
 
-/* Note that this needs manual visiting, despite not being GC
- * allocated itself! */
+/* Note that this needs manual visiting (from the IR heap), despite
+ * not being GC allocated itself! */
 struct exprEvalPoint {
 	bool invert;
 	unsigned thread;
@@ -429,7 +428,7 @@ public:
 };
 
 class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> >,
-			   private GcCallback<> {
+			   private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
 			std::vector<exprEvalPoint> n;

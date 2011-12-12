@@ -764,7 +764,7 @@ instrModrmReg(Instruction<DirectRip> *i)
 }
 
 class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeEdge *> >,
-			  private GcCallback<> {
+			  private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++)
 			visit_set(it->second, hv);
