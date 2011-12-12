@@ -1536,7 +1536,7 @@ main(int argc, char *argv[])
 	for (int i = 5; i < argc; i++) {
 		int fd = open(argv[i], O_RDONLY);
 		if (fd < 0)
-			err(1, "opening %s", argv[4]);
+			err(1, "opening %s", argv[i]);
 		VexPtr<CrashSummary, &ir_heap> summary(readCrashSummary(fd));
 		close(fd);
 
