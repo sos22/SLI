@@ -119,7 +119,7 @@ public:
 static Instruction<ClientRip> *
 instrNoImmediatesNoModrm(unsigned opcode)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>();
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (opcode >= 0x100) {
 		assert((opcode & 0xff00) == 0x0f00);
 		work->emit(0x0f);
@@ -133,7 +133,6 @@ instrNoImmediatesNoModrm(unsigned opcode)
 static Instruction<ClientRip> *
 instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm, RexPrefix rex)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>();
 	assert(!rex.b);
 	if (reg.isOpcodeExtension && reg.opcodeExtension >= 8) {
 		rex.r = true;
@@ -144,6 +143,12 @@ instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, con
 	}
 	if (rm.extendRm)
 		rex.r = true;
+	int opcode_bytes = 1;
+	if (rex.emit())
+		opcode_bytes++;
+	if (opcode >= 0x100)
+		opcode_bytes++;
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(opcode_bytes);
 	if (rex.emit())
 		work->emit(rex.asByte());
 	if (opcode >= 0x100) {
@@ -187,7 +192,7 @@ jcc_code jcc_code::nonzero(0x85);
 static Instruction<ClientRip> *
 instrPushReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>();
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -198,7 +203,7 @@ instrPushReg(RegisterIdx reg)
 static Instruction<ClientRip> *
 instrPopReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>();
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -262,7 +267,7 @@ instrLea(const ModRM &modrm, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrMovImm64ToReg(unsigned long val, RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>();
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (reg.idx < 8) {
 		work->emit(0x48);
 	} else {
@@ -319,7 +324,7 @@ instrNegModrm(const ModRM &mrm)
 static Instruction<ClientRip> *
 instrSetEqAl(void)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>();
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	work->emit(0x0f);
 	work->emit(0x94);
 	work->emit(0xc0);
@@ -403,7 +408,7 @@ instrMovLabelToRegister(const char *label, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrJcc(ClientRip target, jcc_code branchType)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>();
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	work->emit(0x0f);
 	work->emit(branchType.code);
 	work->relocs.push_back(new RipRelativeBranchRelocation<ClientRip>(work->len,
@@ -448,6 +453,21 @@ instrCallSequence(Instruction<ClientRip> *start, const char *name)
 	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RSI);
 	cursor = cursor->defaultNextI = instrRestoreRedZone();
 	return cursor;
+}
+
+static Instruction<ClientRip> *
+instrMovModrmToSlot(Instruction<ClientRip> *start, const ModRM &modrm, simulationSlotT slot, simulationSlotT spill)
+{
+	if (modrm.isRegister()) {
+		return start->defaultNextI = instrMovRegToSlot(modrm.getRegister(), slot);
+	} else {
+		RegisterIdx tmp = modrm.selectNonConflictingRegister();
+		start = start->defaultNextI = instrMovRegToSlot(tmp, spill);
+		start = start->defaultNextI = instrMovModrmToRegister(modrm, tmp);
+		start = start->defaultNextI = instrMovRegToSlot(tmp, slot);
+		start = start->defaultNextI = instrMovSlotToReg(spill, tmp);
+		return start;
+	}
 }
 
 static Instruction<ClientRip> *
@@ -574,7 +594,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 		switch (((IRExprBinop *)e)->op) {
 		case Iop_CmpEQ64: {
 			simulationSlotT old_rax = exprsToSlots.allocateSlot();
-			Instruction<ClientRip> *head = new Instruction<ClientRip>();
+			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
 			Instruction<ClientRip> *cursor;
 
 			cursor = instrEvalExpr(head, thread, ((IRExprBinop *)e)->arg1, reg, exprsToSlots);
@@ -605,7 +625,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 	case Iex_Associative:
 		switch (((IRExprAssociative *)e)->op) {
 		case Iop_Add64: {
-			Instruction<ClientRip> *head = new Instruction<ClientRip>();
+			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
 			Instruction<ClientRip> *cursor;
 			cursor = instrEvalExpr(head, thread, ((IRExprAssociative *)e)->contents[0], reg, exprsToSlots);
 			if (!cursor)
@@ -729,6 +749,15 @@ instrOpcode(Instruction<DirectRip> *i)
 	} else {
 		return i->content[j];
 	}
+}
+
+static ModRM
+instrModrm(const Instruction<DirectRip> *i)
+{
+	assert(i->modrm_start != -1);
+	assert(i->modrm_start < (int)i->len);
+
+	return ModRM::fromBytes(i->content + i->modrm_start);
 }
 
 static RegisterIdx
@@ -1073,7 +1102,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 		if (res->ripToInstr->hasKey(cr))
 			continue;
 
-		Instruction<ClientRip> *newInstr = new Instruction<ClientRip>();
+		Instruction<ClientRip> *newInstr = new Instruction<ClientRip>(-1);
 
 		res->ripToInstr->set(cr, newInstr);
 
@@ -1199,6 +1228,19 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					} else {
 						assert(e->tag == Iex_Load);
 						switch (instrOpcode(underlying)) {
+						case 0x3B: { /* 32 bit compare rm32, r32.  Handle this by converting
+								it into:
+
+								-- load rm32 to the slot
+								-- compare register to r32
+							     */
+							simulationSlotT slot = data.exprsToSlots(it->first, e);
+							simulationSlotT spill = data.exprsToSlots.allocateSlot();
+							newInstr = instrMovModrmToSlot(newInstr, instrModrm(underlying), slot, spill);
+							newInstr = newInstr->defaultNextI = instrCmpRegToSlot(instrModrmReg(underlying), slot);
+							break;
+						}
+							
 						case 0x8b:
 							/* Load from memory to modrm.
 							 * Nice and easy. */

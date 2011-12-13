@@ -257,3 +257,127 @@ ModRM::directRegister(RegisterIdx reg)
 	return res;
 }
 
+bool
+ModRM::isRegister() const
+{
+	unsigned modrm = content[0];
+	unsigned mod = modrm >> 6;
+	return mod == 3;
+}
+
+RegisterIdx
+ModRM::getRegister() const
+{
+	unsigned res;
+	if (extendRm)
+		res = 8;
+	else
+		res = 0;
+	assert((content[0] & 0xc0) == 0xc0);
+	res |= content[0];
+	return RegisterIdx::fromRaw(res);
+}
+
+RegisterIdx
+ModRM::selectNonConflictingRegister() const
+{
+	unsigned conflictingRegisters[4] = {};
+	int nr_conflicting = 1;
+	unsigned modrm = content[0];
+	unsigned mod = modrm >> 6;
+	unsigned rm = modrm & 7;
+	unsigned sib;
+	unsigned index;
+	unsigned base;
+	unsigned res;
+
+	if (extendRm)
+		rm |= 8;
+	switch (mod) {
+	case 0:
+		if (rm == 4 || rm == 12)
+			goto sib;
+		if (rm != 5 && rm != 13)
+			conflictingRegisters[nr_conflicting++] = rm;
+		break;
+	case 1:
+	case 2:
+		if (rm == 4 || rm == 12)
+			goto sib;
+		conflictingRegisters[nr_conflicting++] = rm;
+		break;
+	case 3:
+		conflictingRegisters[nr_conflicting++] = rm;
+		break;
+	default:
+		abort();
+	}
+	goto no_sib;
+	
+sib:
+	sib = content[1];
+	index = (sib >> 3) & 7;
+	base = sib & 7;
+
+	if (extendIndex)
+		index |= 8;
+	if (extendRm)
+		base |= 8;
+	if ((base != 5 && base != 13) || mod != 0)
+		conflictingRegisters[nr_conflicting++] = base;
+	if (index != 4)
+		conflictingRegisters[nr_conflicting++] = index;
+
+no_sib:
+	/* So now we have a list of all of the possibly-conflicting
+	   registers, so it should be pretty easy to pick one which
+	   doesn't conflict. */
+	for (res = 0; res < 16; res++) {
+		bool is_good = true;
+		for (int i = 0; is_good && i < nr_conflicting; i++)
+			if (conflictingRegisters[i] == res)
+				is_good = false;
+		if (is_good)
+			break;
+	}
+	assert(res != 16);
+	return RegisterIdx::fromRaw(res);
+}
+
+ModRM
+ModRM::fromBytes(const unsigned char *content)
+{
+	unsigned modrm = content[0];
+	unsigned mod = modrm >> 6;
+	unsigned rm = modrm & 7;
+	unsigned disp;
+	bool have_sib = false;
+
+	have_sib = (rm == 4);
+	switch (mod) {
+	case 0:
+		if (rm == 5) {
+			disp = 4;
+		} else {
+			disp = 0;
+		}
+		break;
+	case 1:
+		disp = 1;
+		break;
+	case 2:
+		disp = 4;
+		break;
+	case 3:
+		disp = 0;
+		have_sib = false;
+		break;
+	default:
+		abort();
+	}
+	ModRM res;
+	res.content.resize(1 + have_sib + disp);
+	for (unsigned idx = 0; idx < res.content.size(); idx++)
+		res.content[idx] = content[idx];
+	return res;
+}

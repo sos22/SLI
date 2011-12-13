@@ -79,10 +79,11 @@ public:
 };
 
 class ModRM {
-	ModRM() : extendRm(false) {}
+	ModRM() : extendRm(false), extendIndex(false) {}
 public:
 	std::vector<unsigned char> content;
 	bool extendRm;
+	bool extendIndex;
 	/* Access memory at address @reg + offset, where reg
 	   is a register index and offset is a constant. */
 	static ModRM memAtRegisterPlusOffset(RegisterIdx reg, int offset);
@@ -93,16 +94,24 @@ public:
 	static ModRM directRegister(RegisterIdx reg);
 	/* Access memory at a fixed 32 bit signed address */
 	static ModRM absoluteAddress(int address);
+
+	static ModRM fromBytes(const unsigned char *content);
+
+	bool isRegister() const;
+	RegisterIdx getRegister() const;
+	RegisterIdx selectNonConflictingRegister() const;
 };
 
 template <typename ripType>
 class Instruction : public GarbageCollected<Instruction<ripType> > {
 	unsigned char byte(AddressSpace *as);
 	int int32(AddressSpace *as);
-	void modrm(unsigned nrImmediates, AddressSpace *as);
+	void _modrm(unsigned nrImmediates, AddressSpace *as);
 	void immediate(unsigned size, AddressSpace *as);
 	int modrmExtension(AddressSpace *as);
+	Instruction() : modrm_start(-1) {}
 public:
+	Instruction(int _modrm_start) : modrm_start(_modrm_start) {}
 	ripType rip;
 
 	ripType defaultNext;
@@ -118,6 +127,7 @@ public:
 	unsigned len;
 	Prefixes pfx;
 	unsigned nr_prefixes;
+	int modrm_start; /* or -1 if there's no modrm */
 	std::vector<EarlyRelocation<ripType> *> relocs;
 	std::vector<LateRelocation *> lateRelocs;
 
@@ -448,11 +458,13 @@ public:
 };
 
 template <typename r> void
-Instruction<r>::modrm(unsigned nrImmediates, AddressSpace *as)
+Instruction<r>::_modrm(unsigned nrImmediates, AddressSpace *as)
 {
 	Byte modrm = byte(as);
 	unsigned rm = modrm & 7;
 	unsigned mod = modrm >> 6;
+
+	modrm_start = len;
 
 	if (mod == 3) {
 		/* No further data */
@@ -521,7 +533,7 @@ top:
 		if (b != 0x0f) {
 			switch (b & 7) {
 			case 0 ... 3:
-				i->modrm(0, as);
+				i->_modrm(0, as);
 				break;
 			case 4:
 				i->immediate(1, as);
@@ -577,7 +589,7 @@ top:
 		case 0xbf: /* movsb Gv, Ew */
 		case 0xc0: /* xadd Eb, Gb */
 		case 0xc1: /* xadd Ev, Gv */
-			i->modrm(0, as);
+			i->_modrm(0, as);
 			break;
 		default:
 			throw NotImplementedException("cannot decode instruction starting 0x0f 0x%02x at %lx\n",
@@ -604,7 +616,7 @@ top:
 	case 0x84 ... 0x8e:
 	case 0x63: /* Move with sign extend. */
 	case 0xff:
-		i->modrm(0, as);
+		i->_modrm(0, as);
 		break;
 
 	case 0x66: /* opsize prefix */
@@ -644,10 +656,10 @@ top:
 	case 0x81:
 	case 0xc7:
 		if (opsize) {
-			i->modrm(2, as);
+			i->_modrm(2, as);
 			i->immediate(2, as);
 		} else {
-			i->modrm(4, as);
+			i->_modrm(4, as);
 			i->immediate(4, as);
 		}
 		break;
@@ -673,7 +685,7 @@ top:
 	case 0xc0:
 	case 0xc1: /* Shift group 2 with an Ib */
 	case 0xc6:
-		i->modrm(1, as);
+		i->_modrm(1, as);
 		i->immediate(1, as);
 		break;
 
@@ -733,14 +745,14 @@ top:
 	case 0xf7: /* Unary group 3 Ev */
 		if (i->modrmExtension(as) == 0) {
 			if (opsize) {
-				i->modrm(2, as);
+				i->_modrm(2, as);
 				i->immediate(2, as);
 			} else {
-				i->modrm(4, as);
+				i->_modrm(4, as);
 				i->immediate(4, as);
 			}
 		} else {
-			i->modrm(0, as);
+			i->_modrm(0, as);
 		}
 		break;
 
