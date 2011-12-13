@@ -1374,10 +1374,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				*done_something = true;
 			}
 
-			/* x << 0 -> x */
-			if (e->op >= Iop_Shl8 && e->op <= Iop_Shl64 &&
-			    r->tag == Iex_Const &&
-			    ((IRExprConst *)r)->con->Ico.U8 == 0) {
+			/* 0 << x -> 0, and x << 0 -> x */
+			if (((e->op >= Iop_Shl8 && e->op <= Iop_Shl64) ||
+			     (e->op >= Iop_Shr8 && e->op <= Iop_Shr64) ||
+			     (e->op >= Iop_Sar8 && e->op <= Iop_Sar64)) &&
+			    (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U8 == 0) ||
+			    (l->tag == Iex_Const && ((IRExprConst *)l)->con->Ico.U64 == 0)) {
 				*done_something = true;
 				return l;
 			}
@@ -1540,6 +1542,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(
 						IRConst_U64(
 							(long)((IRExprConst *)l)->con->Ico.U64 >>
+							((IRExprConst *)r)->con->Ico.U8));
+				case Iop_Shr32:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U32(
+							((IRExprConst *)l)->con->Ico.U32 >>
+							((IRExprConst *)r)->con->Ico.U8));
+				case Iop_Shr64:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U64(
+							((IRExprConst *)l)->con->Ico.U64 >>
 							((IRExprConst *)r)->con->Ico.U8));
 				case Iop_Shl64:
 					*done_something = true;
