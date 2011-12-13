@@ -11,14 +11,11 @@
 #include "libvex_alloc.h"
 #include "libvex_ir.h"
 
-bool parseThisChar(char c, const char *str, const char **suffix,
-		   char **err)
+bool parseThisChar(char c, const char *str, const char **suffix)
 {
   if (isspace(c)) {
-    if (!isspace(str[0])) {
-      *err = vex_asprintf("wanted whitespace, got %c", str[0]);
+    if (!isspace(str[0]))
       return false;
-    }
     while (isspace(str[0]))
       str++;
     *suffix = str;
@@ -28,32 +25,26 @@ bool parseThisChar(char c, const char *str, const char **suffix,
     *suffix = str + 1;
     return true;
   } else {
-    *err = vex_asprintf("wanted %c, got %c", c, str[0]);
     return false;
   }
 }
 
 bool parseThisString(const char *pattern,
 		     const char *str,
-		     const char **suffix,
-		     char **err)
+		     const char **suffix)
 {
   while (*pattern) {
     if (isspace(*pattern)) {
       while (isspace(*pattern))
 	pattern++;
-      if (!isspace(*str)) {
-	*err = vex_asprintf("wanted space in pattern %s, got %.10s", pattern, str);
+      if (!isspace(*str))
 	return false;
-      }
       while (isspace(*str))
 	str++;
       continue;
     }
-    if (*pattern != *str) {
-      *err = vex_asprintf("wanted %s, got %.10s", pattern, str);
+    if (*pattern != *str)
       return false;
-    }
     pattern++;
     str++;
   }
@@ -61,52 +52,44 @@ bool parseThisString(const char *pattern,
   return true;
 }
 
-bool parseDecimalInt(int *out, const char *str, const char **suffix, char **err)
+bool parseDecimalInt(int *out, const char *str, const char **suffix)
 {
   long res;
   errno = 0;
   res = strtol(str, (char **)suffix, 10);
   *out = res;
-  if (errno != 0 || *out != res || *suffix == str) {
-    *err = vex_asprintf("wanted decimal int, got %.10s", str);
+  if (errno != 0 || *out != res || *suffix == str)
     return false;
-  }
   return true;
 }
 
-bool parseDecimalUInt(unsigned *out, const char *str, const char **suffix, char **err)
+bool parseDecimalUInt(unsigned *out, const char *str, const char **suffix)
 {
   long res;
   errno = 0;
   res = strtol(str, (char **)suffix, 10);
   *out = res;
-  if (errno != 0 || *out != res || *suffix == str) {
-    *err = vex_asprintf("wanted unsigned decimal int, got %.10s", str);
+  if (errno != 0 || *out != res || *suffix == str)
     return false;
-  }
   return true;
 }
 
-bool parseHexUlong(unsigned long *out, const char *str, const char **suffix, char **err)
+bool parseHexUlong(unsigned long *out, const char *str, const char **suffix)
 {
   errno = 0;
   *out = strtoul(str, (char **)suffix, 16);
-  if (errno != 0 || *suffix == str) {
-    *err = vex_asprintf("wanted hex ulong, got %.10s", str);
+  if (errno != 0 || *suffix == str)
     return false;
-  }
   return true;
 }
 
-bool parseThreadRip(ThreadRip *out, const char *str, const char **suffix, char **err)
+bool parseThreadRip(ThreadRip *out, const char *str, const char **suffix)
 {
   int tid;
   unsigned long rip;
-  const char *s = str;
-  if (!parseDecimalInt(&tid, str, &str, err) ||
-      !parseThisChar(':', str, &str, err) ||
-      !parseHexUlong(&rip, str, suffix, err)) {
-    *err = vex_asprintf("wanted thread rip, got %.10s", s);
+  if (!parseDecimalInt(&tid, str, &str) ||
+      !parseThisChar(':', str, &str) ||
+      !parseHexUlong(&rip, str, suffix)) {
     return false;
   }
   out->thread = tid;

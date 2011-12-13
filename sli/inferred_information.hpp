@@ -82,7 +82,7 @@ public:
 
 void printCrashSummary(CrashSummary *cs, FILE *f);
 CrashSummary *readCrashSummary(int fd);
-bool parseCrashSummary(CrashSummary **out, const char *buf, const char **succ, char **err);
+bool parseCrashSummary(CrashSummary **out, const char *buf, const char **succ);
 
 char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
 

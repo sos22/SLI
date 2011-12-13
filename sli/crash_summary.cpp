@@ -46,59 +46,56 @@ readCrashSummary(int fd)
 {
 	char *buf = readfile(fd);
 	const char *succ;
-	char *err;
 	CrashSummary *r;
-	if (!parseCrashSummary(&r, buf, &succ, &err))
-		errx(1, "cannot parse %s as CrashSummary: %s", buf, err);
-	parseThisChar(' ', succ, &succ, &err);
+	if (!parseCrashSummary(&r, buf, &succ))
+		errx(1, "cannot parse %s as CrashSummary", buf);
+	parseThisChar(' ', succ, &succ);
 	if (*succ)
-		errx(1, "garbage after crash summary: %s (%s)", succ, err);
+		errx(1, "garbage after crash summary: %s", succ);
 	free(buf);
 	return r;
 }
 
 bool
 parseCrashSummary(CrashSummary **out, const char *buf,
-		  const char **succ, char **err)
+		  const char **succ)
 {
 	StateMachine *loadMachine;
-	if (!parseThisString("Load machine:\n", buf, &buf, err) ||
-	    !parseStateMachine(&loadMachine, buf, &buf, err))
+	if (!parseThisString("Load machine:\n", buf, &buf) ||
+	    !parseStateMachine(&loadMachine, buf, &buf))
 		return false;
 	std::vector<CrashSummary::StoreMachineData *> storeMachines;
 	while (1) {
 		StateMachine *storeMachine;
 		IRExpr *assumption;
-		if (!parseThisString("Store machine:\n", buf, &buf, err) ||
-		    !parseStateMachine(&storeMachine, buf, &buf, err) ||
-		    !parseThisString("Assumption: ", buf, &buf, err) ||
-		    !parseIRExpr(&assumption, buf, &buf, err) ||
-		    !parseThisChar('\n', buf, &buf, err))
+		if (!parseThisString("Store machine:\n", buf, &buf) ||
+		    !parseStateMachine(&storeMachine, buf, &buf) ||
+		    !parseThisString("Assumption: ", buf, &buf) ||
+		    !parseIRExpr(&assumption, buf, &buf) ||
+		    !parseThisChar('\n', buf, &buf))
 			break;
 		std::vector<CrashSummary::StoreMachineData::macroSectionT> macros;
-		if (parseThisString("No remote macro sections\n", buf, &buf, err)) {
+		if (parseThisString("No remote macro sections\n", buf, &buf)) {
 			/* Nothing */
-		} else if (parseThisString("Remote macro sections:\n", buf, &buf, err)) {
+		} else if (parseThisString("Remote macro sections:\n", buf, &buf)) {
 			while (1) {
 				StateMachineSideEffect *start, *end;
 				const char *m;
-				if (!parseThisChar('\t', buf, &m, err) ||
-				    !parseStateMachineSideEffect(&start, m, &m, err) ||
-				    !parseThisString(" to ", m, &m, err))
+				if (!parseThisChar('\t', buf, &m) ||
+				    !parseStateMachineSideEffect(&start, m, &m) ||
+				    !parseThisString(" to ", m, &m))
 					break;
-				if (parseThisString("<null>", m, &m, err)) {
+				if (parseThisString("<null>", m, &m)) {
 					end = NULL;
-				} else if (!parseStateMachineSideEffect(&end, m, &m, err)) {
+				} else if (!parseStateMachineSideEffect(&end, m, &m)) {
 					break;
 				}
-				if (!parseThisChar('\n', m, &m, err))
+				if (!parseThisChar('\n', m, &m))
 					break;
 				StateMachineSideEffectStore *starts = dynamic_cast<StateMachineSideEffectStore *>(start);
 				StateMachineSideEffectStore *ends = dynamic_cast<StateMachineSideEffectStore *>(end);
-				if (!starts || (end && !ends) ) {
-					*err = vex_asprintf("expected macro section to start and end with store side effects");
+				if (!starts || (end && !ends) )
 					return false;
-				}
 				buf = m;
 				macros.push_back(CrashSummary::StoreMachineData::macroSectionT(starts, ends));
 			}

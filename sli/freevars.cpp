@@ -712,17 +712,17 @@ FreeVariableMap::print(FILE *f) const
 }
 
 bool
-FreeVariableMap::parse(const char *str, const char **succ, char **err)
+FreeVariableMap::parse(const char *str, const char **succ)
 {
 	content = new map_t();
 	while (1) {
 		FreeVariableKey k;
 		IRExpr *val;
-		if (!parseThisString("free", str, &str, err) ||
-		    !parseDecimalInt(&k.val, str, &str, err) ||
-		    !parseThisString(" -> ", str, &str, err) ||
-		    !parseIRExpr(&val, str, &str, err) ||
-		    !parseThisChar('\n', str, &str, err))
+		if (!parseThisString("free", str, &str) ||
+		    !parseDecimalInt(&k.val, str, &str) ||
+		    !parseThisString(" -> ", str, &str) ||
+		    !parseIRExpr(&val, str, &str) ||
+		    !parseThisChar('\n', str, &str))
 			break;
 		content->set(FreeVariableKey(k), val);
 	}

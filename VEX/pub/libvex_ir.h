@@ -252,7 +252,7 @@ public:
 	unsigned thread;
 	unsigned long rip;
 };
-extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ, char **err);
+extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
 extern Heap ir_heap;
 
@@ -1640,7 +1640,7 @@ extern IRExpr* IRExpr_HappensBefore (ThreadRip before, ThreadRip after);
 
 /* Pretty-print an IRExpr. */
 static inline void ppIRExpr ( IRExpr*e, FILE *f ) { e->prettyPrint(f); }
-extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix, char **err);
+extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix);
 
 /* NULL-terminated IRExpr vector constructors, suitable for
    use as arg lists in clean/dirty helper calls. */
@@ -2281,7 +2281,7 @@ extern IRTypeEnv* emptyIRTypeEnv  ( void );
 /* Is this any value actually in the enumeration 'IRType' ? */
 extern Bool isPlausibleIRType ( IRType ty );
 
-bool parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix, char **err);
+bool parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix);
 
 #endif /* ndef __LIBVEX_IR_H */
 

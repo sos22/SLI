@@ -207,7 +207,7 @@ public:
 	void visit(HeapVisitor &hv) { hv(content); }
 	void applyTransformation(IRExprTransformer &t, bool *done_something);
 	void print(FILE *f) const;
-	bool parse(const char *str, const char **succ, char **err);
+	bool parse(const char *str, const char **succ);
 	bool empty() const { return content->empty(); }
 	void optimise(const AllowableOptimisations &opt, bool *done_something);
 };
@@ -225,7 +225,7 @@ public:
 	FreeVariableMap freeVariables;
 	unsigned tid;
 
-	static bool parse(StateMachine **out, const char *str, const char **suffix, char **err);
+	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
 	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid)
 		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
@@ -901,12 +901,11 @@ void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMach
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
-bool parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err);
+bool parseStateMachine(StateMachine **out, const char *str, const char **suffix);
 StateMachine *readStateMachine(int fd);
 
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
-				 const char **suffix,
-				 char **err);
+				 const char **suffix);
 
 #endif /* !STATEMACHINE_HPP__ */

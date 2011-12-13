@@ -459,46 +459,45 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 bool
 parseStateMachineSideEffect(StateMachineSideEffect **out,
 			    const char *str,
-			    const char **suffix,
-			    char **err)
+			    const char **suffix)
 {
 	const char *str2;
-	if (parseThisString("<unreached>", str, suffix, err)) {
+	if (parseThisString("<unreached>", str, suffix)) {
 		*out = StateMachineSideEffectUnreached::get();
 		return true;
 	}
 	IRExpr *addr;
 	IRExpr *data;
 	ThreadRip rip;
-	if (parseThisString("*(", str, &str2, err) &&
-	    parseIRExpr(&addr, str2, &str2, err) &&
-	    parseThisString(") <- ", str2, &str2, err) &&
-	    parseIRExpr(&data, str2, &str2, err) &&
-	    parseThisString(" @ ", str2, &str2, err) &&
-	    parseThreadRip(&rip, str2, suffix, err)) {
+	if (parseThisString("*(", str, &str2) &&
+	    parseIRExpr(&addr, str2, &str2) &&
+	    parseThisString(") <- ", str2, &str2) &&
+	    parseIRExpr(&data, str2, &str2) &&
+	    parseThisString(" @ ", str2, &str2) &&
+	    parseThreadRip(&rip, str2, suffix)) {
 		*out = new StateMachineSideEffectStore(addr, data, rip);
 		return true;
 	}
 	threadAndRegister key(threadAndRegister::invalid());
-	if (parseThisString("LOAD ", str, &str2, err) &&
-	    parseThreadAndRegister(&key, str2, &str2, err) &&
-	    parseThisString(" <- *(", str2, &str2, err) &&
-	    parseIRExpr(&addr, str2, &str2, err) &&
-	    parseThisString(")@", str2, &str2, err) &&
-	    parseThreadRip(&rip, str2, suffix, err)) {
+	if (parseThisString("LOAD ", str, &str2) &&
+	    parseThreadAndRegister(&key, str2, &str2) &&
+	    parseThisString(" <- *(", str2, &str2) &&
+	    parseIRExpr(&addr, str2, &str2) &&
+	    parseThisString(")@", str2, &str2) &&
+	    parseThreadRip(&rip, str2, suffix)) {
 		*out = new StateMachineSideEffectLoad(key, addr, rip);
 		return true;
 	}
-	if (parseThisString("COPY ", str, &str2, err) &&
-	    parseThreadAndRegister(&key, str2, &str2, err) &&
-	    parseThisString(" = ", str2, &str2, err) &&
-	    parseIRExpr(&data, str2, suffix, err)) {
+	if (parseThisString("COPY ", str, &str2) &&
+	    parseThreadAndRegister(&key, str2, &str2) &&
+	    parseThisString(" = ", str2, &str2) &&
+	    parseIRExpr(&data, str2, suffix)) {
 		*out = new StateMachineSideEffectCopy(key, data);
 		return true;
 	}
-	if (parseThisString("Assert !(", str, &str2, err) &&
-	    parseIRExpr(&data, str2, &str2, err) &&
-	    parseThisChar(')', str2, suffix, err)) {
+	if (parseThisString("Assert !(", str, &str2) &&
+	    parseIRExpr(&data, str2, &str2) &&
+	    parseThisChar(')', str2, suffix)) {
 		*out = new StateMachineSideEffectAssertFalse(data);
 		return true;
 	}
@@ -512,26 +511,25 @@ static bool
 parseStateMachineEdge(StateMachineEdge **out,
 		      const char *sep,
 		      const char *str,
-		      const char **suffix,
-		      char **err)
+		      const char **suffix)
 {
 	int targetLabel;
 	std::vector<StateMachineSideEffect *> sideEffects;
-	if (parseThisChar('{', str, &str, err)) {
+	if (parseThisChar('{', str, &str)) {
 		while (1) {
 			StateMachineSideEffect *se;
-			if (!parseStateMachineSideEffect(&se, str, &str, err))
+			if (!parseStateMachineSideEffect(&se, str, &str))
 				return false;
 			sideEffects.push_back(se);
-			if (parseThisString(sep, str, &str, err))
+			if (parseThisString(sep, str, &str))
 				continue;
-			if (!parseThisString("} ", str, &str, err))
+			if (!parseThisString("} ", str, &str))
 				return false;
 			break;
 		}
 	}
-	if (!parseThisChar('l', str, &str, err) ||
-	    !parseDecimalInt(&targetLabel, str, suffix, err))
+	if (!parseThisChar('l', str, &str) ||
+	    !parseDecimalInt(&targetLabel, str, suffix))
 		return false;
 	*out = new StateMachineEdge((StateMachineState *)targetLabel);
 	(*out)->sideEffects = sideEffects;
@@ -541,50 +539,49 @@ parseStateMachineEdge(StateMachineEdge **out,
 static bool
 parseStateMachineState(StateMachineState **out,
 		       const char *str,
-		       const char **suffix,
-		       char **err)
+		       const char **suffix)
 {
-	if (parseThisString("<unreached>", str, suffix, err)) {
+	if (parseThisString("<unreached>", str, suffix)) {
 		*out = StateMachineUnreached::get();
 		return true;
 	}
-	if (parseThisString("<crash>", str, suffix, err)) {
+	if (parseThisString("<crash>", str, suffix)) {
 		*out = StateMachineCrash::get();
 		return true;
 	}
-	if (parseThisString("<survive>", str, suffix, err)) {
+	if (parseThisString("<survive>", str, suffix)) {
 		*out = StateMachineNoCrash::get();
 		return true;
 	}
 	unsigned long origin;
 	IRExpr *target;
 	const char *str2;
-	if (parseThisChar('<', str, &str2, err) &&
-	    parseHexUlong(&origin, str2, &str2, err) &&
-	    parseIRExpr(&target, str2, &str2, err) &&
-	    parseThisChar('>', str2, suffix, err)) {
+	if (parseThisChar('<', str, &str2) &&
+	    parseHexUlong(&origin, str2, &str2) &&
+	    parseIRExpr(&target, str2, &str2) &&
+	    parseThisChar('>', str2, suffix)) {
 		*out = new StateMachineStub(origin, target);
 		return true;
 	}
 	StateMachineEdge *target1;
-	if (parseThisChar('{', str, &str2, err) &&
-	    parseHexUlong(&origin, str2, &str2, err) &&
-	    parseThisChar(':', str2, &str2, err) &&
-	    parseStateMachineEdge(&target1, "\n  ", str2, &str2, err) &&
-	    parseThisChar('}', str2, suffix, err)) {
+	if (parseThisChar('{', str, &str2) &&
+	    parseHexUlong(&origin, str2, &str2) &&
+	    parseThisChar(':', str2, &str2) &&
+	    parseStateMachineEdge(&target1, "\n  ", str2, &str2) &&
+	    parseThisChar('}', str2, suffix)) {
 		*out = new StateMachineProxy(origin, target1);
 		return true;
 	}
 	IRExpr *condition;
 	StateMachineEdge *target2;
-	if (parseHexUlong(&origin, str, &str2, err) &&
-	    parseThisString(": if (", str2, &str2, err) &&
-	    parseIRExpr(&condition, str2, &str2, err) &&
-	    parseThisString(")\n  then {\n\t", str2, &str2, err) &&
-	    parseStateMachineEdge(&target1, "\n\t", str2, &str2, err) &&
-	    parseThisString("}\n  else {\n\t", str2, &str2, err) &&
-	    parseStateMachineEdge(&target2, "\n\t", str2, &str2, err) &&
-	    parseThisChar('}', str2, suffix, err)) {
+	if (parseHexUlong(&origin, str, &str2) &&
+	    parseThisString(": if (", str2, &str2) &&
+	    parseIRExpr(&condition, str2, &str2) &&
+	    parseThisString(")\n  then {\n\t", str2, &str2) &&
+	    parseStateMachineEdge(&target1, "\n\t", str2, &str2) &&
+	    parseThisString("}\n  else {\n\t", str2, &str2) &&
+	    parseStateMachineEdge(&target2, "\n\t", str2, &str2) &&
+	    parseThisChar('}', str2, suffix)) {
 		*out = new StateMachineBifurcate(origin, condition, target1, target2);
 		return true;
 	}
@@ -594,64 +591,50 @@ parseStateMachineState(StateMachineState **out,
 static bool
 parseOneState(std::map<int, StateMachineState *> &out,
 	      const char *str,
-	      const char **suffix,
-	      char **err)
+	      const char **suffix)
 {
 	int label;
 	StateMachineState *res;
 
-	if (!parseThisChar('l', str, &str, err) ||
-	    !parseDecimalInt(&label, str, &str, err) ||
-	    !parseThisString(": ", str, &str, err) ||
-	    !parseStateMachineState(&res, str, &str, err) ||
-	    !parseThisChar('\n', str, &str, err))
+	if (!parseThisChar('l', str, &str) ||
+	    !parseDecimalInt(&label, str, &str) ||
+	    !parseThisString(": ", str, &str) ||
+	    !parseStateMachineState(&res, str, &str) ||
+	    !parseThisChar('\n', str, &str))
 		return false;
-	if (out.count(label)) {
-		*err = vex_asprintf("label %d defined multiple times", label);
+	if (out.count(label))
 		return false;
-	}
 	out[label] = res;
 	*suffix = str;
 	return true;
 }
 
 static bool
-parseStateMachine(StateMachineState **out, const char *str, const char **suffix, char **err)
+parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 {
 	std::map<int, StateMachineState *> labelToState;
 
 	while (*str) {
-		if (!parseOneState(labelToState, str, &str, err))
+		if (!parseOneState(labelToState, str, &str))
 			break;
 	}
-	if (!labelToState.count(1)) {
-		*err = (char *)"label 1 must be defined";
+	if (!labelToState.count(1))
 		return false;
-	}
 	for (std::map<int, StateMachineState *>::iterator it = labelToState.begin();
 	     it != labelToState.end();
 	     it++) {
 		if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(it->second)) {
 			StateMachineState *t = labelToState[(int)(unsigned long)smp->target->target];
-			if (!t) {
-				*err = vex_asprintf("Label %d not defined",
-						    (int)(unsigned long)smp->target->target);
+			if (!t)
 				return false;
-			}
 			smp->target->target = t;
 		} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(it->second)) {
 			StateMachineState *t = labelToState[(int)(unsigned long)smb->trueTarget->target];
 			StateMachineState *f = labelToState[(int)(unsigned long)smb->falseTarget->target];
-			if (!t) {
-				*err = vex_asprintf("Label %d not defined",
-						    (int)(unsigned long)smb->trueTarget->target);
+			if (!t)
 				return false;
-			}
-			if (!f) {
-				*err = vex_asprintf("Label %d not defined",
-						    (int)(unsigned long)smb->falseTarget->target);
+			if (!f)
 				return false;
-			}
 
 			smb->trueTarget->target = t;
 			smb->falseTarget->target = f;
@@ -665,15 +648,15 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix,
 }
 
 bool
-StateMachine::parse(StateMachine **out, const char *str, const char **suffix, char **err)
+StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 {
 	unsigned long origin;
 	int tid;
-	if (!parseThisString("Machine for ", str, &str, err) ||
-	    !parseHexUlong(&origin, str, &str, err) ||
-	    !parseThisChar(':', str, &str, err) ||
-	    !parseDecimalInt(&tid, str, &str, err) ||
-	    !parseThisChar('\n', str, &str, err))
+	if (!parseThisString("Machine for ", str, &str) ||
+	    !parseHexUlong(&origin, str, &str) ||
+	    !parseThisChar(':', str, &str) ||
+	    !parseDecimalInt(&tid, str, &str) ||
+	    !parseThisChar('\n', str, &str))
 		return false;
 	StateMachineState *root;
 
@@ -682,17 +665,17 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix, ch
 	   returns true. */
 	root = (StateMachineState *)0xf001deadbeeful; 
 
-	if (!parseStateMachine(&root, str, &str, err))
+	if (!parseStateMachine(&root, str, &str))
 		return false;
 	*out = new StateMachine(root, origin, tid);
-	if (!(*out)->freeVariables.parse(str, suffix, err))
+	if (!(*out)->freeVariables.parse(str, suffix))
 		return false;
 	return true;
 }
 bool
-parseStateMachine(StateMachine **out, const char *str, const char **suffix, char **err)
+parseStateMachine(StateMachine **out, const char *str, const char **suffix)
 {
-	return StateMachine::parse(out, str, suffix, err);
+	return StateMachine::parse(out, str, suffix);
 }
 
 StateMachine *
@@ -701,9 +684,8 @@ readStateMachine(int fd)
 	char *content = readfile(fd);
 	const char *end;
 	StateMachine *res;
-	char *err;
-	if (!parseStateMachine(&res, content, &end, &err) || *end)
-		errx(1, "error parsing state machine (%s):\n%s", err, content);
+	if (!parseStateMachine(&res, content, &end) || *end)
+		errx(1, "error parsing state machine:\n%s", content);
 	free(content);
 	return res;
 }

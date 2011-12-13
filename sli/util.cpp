@@ -91,12 +91,11 @@ readIRExpr(int fd)
 	char *buf = readfile(fd);
 	IRExpr *r;
 	const char *succ;
-	char *err;
-	if (!parseIRExpr(&r, buf, &succ, &err))
-		errx(1, "cannot parse %s as IRExpr: %s", buf, err);
-	parseThisChar(' ', succ, &succ, &err);
+	if (!parseIRExpr(&r, buf, &succ))
+		errx(1, "cannot parse %s as IRExpr", buf);
+	parseThisChar(' ', succ, &succ);
 	if (*succ)
-		errx(1, "garbage after irexpr: %s (%s)", succ, err);
+		errx(1, "garbage after irexpr: %s", succ);
 	free(buf);
 	return r;
 }
