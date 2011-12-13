@@ -1266,33 +1266,36 @@ PatchFragment<r>::emitStraightLine(Instruction<r> *i)
 	}
 }
 
+char *flattenStringFragments(std::vector<const char *> fragments);
+
 template <typename r> char *
 PatchFragment<r>::asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const
 {
+	std::vector<const char *> fragments;
 	char *content_buf = (char *)LibVEX_Alloc_Bytes(content.size() * 4 + 1);
 	for (unsigned x = 0; x < content.size(); x++)
 		sprintf(content_buf + x * 4, "\\x%02x", content[x]);
 	*relocs_name = vex_asprintf("__%s_reloc", ident);
 	*content_name = vex_asprintf("__%s_patch_content", ident);
-	char *content = vex_asprintf("static const unsigned char %s[] = \"%s\";\n\n"
-				     "static const struct relocation %s[] = {\n",
-				     *content_name,
-				     content_buf,
-				     *relocs_name);
+	fragments.push_back(vex_asprintf("static const unsigned char %s[] = \"%s\";\n\n"
+					 "static const struct relocation %s[] = {\n",
+					 *content_name,
+					 content_buf,
+					 *relocs_name));
 	for (auto it = lateRelocs.begin(); it != lateRelocs.end(); it++)
-		content = vex_asprintf("%s\t%s,\n", content, (*it)->asC());
+		fragments.push_back(vex_asprintf("\t%s,\n", (*it)->asC()));
 
 	*trans_name = vex_asprintf("__%s__trans_table", ident);
-	content = vex_asprintf("%s};\n\nstatic const struct trans_table_entry %s[] = {\n",
-			       content, *trans_name);
+	fragments.push_back(vex_asprintf("};\n\nstatic const struct trans_table_entry %s[] = {\n",
+					 *trans_name));
 	for (typename std::vector<Instruction<r> *>::const_iterator it = registeredInstrs.begin();
 	     it != registeredInstrs.end();
 	     it++)
-		content = vex_asprintf("%s\t{0x%lx, %d},\n",
-				       content,
-				       (*it)->rip.rip,
-				       (*it)->offsetInPatch);
-	return vex_asprintf("%s};\n", content);
+		fragments.push_back(vex_asprintf("\t{0x%lx, %d},\n",
+						 (*it)->rip.rip,
+						 (*it)->offsetInPatch));
+	fragments.push_back("};\n");
+	return flattenStringFragments(fragments);
 }
 
 template <typename r> void
@@ -1308,8 +1311,6 @@ void __genfix_add_array_summary(std::vector<const char *> &out,
 				const char *t_ptr,
 				const char *nr_entries,
 				const char *table);
-
-char *flattenStringFragments(std::vector<const char *> fragments);
 
 template <typename r> char *
 PatchFragment<r>::asC(const char *ident, const std::set<r> &entryPoints) const
