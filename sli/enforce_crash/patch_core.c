@@ -36,7 +36,9 @@ struct patch {
 #include <asm/prctl.h>
 #include <sys/prctl.h>
 #include <sys/mman.h>
+#include <sys/unistd.h>
 #include <assert.h>
+#include <err.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -136,8 +138,11 @@ malloc_executable(size_t s)
 static char *
 build_patch(struct patch *patch)
 {
-	char *res = malloc_executable(sizeof(patch->content));
+	char *res = malloc_executable(patch->content_size);
 	unsigned x;
+
+	if (res == MAP_FAILED)
+		err(1, "cannot allocate %d bytes of executable memory", patch->content_size);
 
 	memcpy(res, patch->content, patch->content_size);
 	for (x = 0; x < patch->nr_relocations; x++) {
