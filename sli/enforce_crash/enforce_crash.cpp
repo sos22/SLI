@@ -1634,6 +1634,7 @@ main(int argc, char *argv[])
 		"-shared",
 		"-I.",
 		vex_asprintf("-Dthe_patch=\"%s\"", tmpfile),
+		"-Dprogram_to_patch=\"/local/scratch/sos22/mysql-5.5.6-rc/sql/mysqld\"",
 		"../sli/enforce_crash/patch_core.c",
 		"-o",
 		argv[4],

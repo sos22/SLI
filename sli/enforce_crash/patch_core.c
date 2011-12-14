@@ -173,6 +173,20 @@ activate(void)
 	unsigned x;
 	long delta;
 	void *state;
+	char buf[4096];
+	ssize_t s;
+
+	s = readlink("/proc/self/exe", buf, sizeof(buf)-1);
+	if (s == -1) {
+		printf("Can't access /proc/self/exe; patch disabled\n");
+		return;
+	}
+	buf[s] = 0;
+	if (strcmp(buf, program_to_patch)) {
+		printf("This is a patch for %s, but we were invoked on %s; disabling.\n",
+		       program_to_patch, buf);
+		return;
+	}
 
 	state = mmap(NULL, PAGE_SIZE, PROT_READ|PROT_WRITE,
 		     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
