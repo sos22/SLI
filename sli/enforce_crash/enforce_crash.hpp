@@ -363,18 +363,25 @@ public:
 	 * the new steps.
 	 *
 	 * We also have a special type of alternative instruction,
-	 * restore_flags_and_branch, which just restores rflags and
-	 * then jumps to post_instr_checks with the same RIP.
+	 * restore_flags_and_branch_{post_instr_checks,receive_messages},
+	 * which just restores rflags and then jumps to either
+	 * post_instr_checks or receive_messages, with the same RIP.
+	 *
+	 * One more special case: receive_messages_skip_orig is like
+	 * receive_messages, except that it advances to
+	 * post_instr_generate.
 	 */
 	enum instruction_type {
 		start_of_instruction,
 		receive_messages,
+		receive_messages_skip_orig,
 		original_instruction,
 		post_instr_generate,
 		post_instr_checks,
 		generate_messages,
 
-		restore_flags_and_branch,
+		restore_flags_and_branch_post_instr_checks,
+		restore_flags_and_branch_receive_messages,
 
 		uninitialised /* Placeholder for a ClientRip whcih
 			       * will be initialised later. */

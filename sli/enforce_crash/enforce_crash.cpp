@@ -524,7 +524,7 @@ instrHappensBeforeEdgeAfter(const happensBeforeEdge *hb, Instruction<ClientRip> 
 
 	ClientRip destinationIfThisFails = nextRip;
 	destinationIfThisFails.eraseThread(hb->after.thread);
-	destinationIfThisFails.type = ClientRip::restore_flags_and_branch;
+	destinationIfThisFails.type = ClientRip::restore_flags_and_branch_receive_messages;
 	cursor = cursor->defaultNextI = instrJcc(destinationIfThisFails, jcc_code::zero);
 
 	relocs.push_back(relocEntryT(destinationIfThisFails, &cursor->branchNextI));
@@ -713,7 +713,7 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 
 	jcc_code branch_type = invert ? jcc_code::nonzero : jcc_code::zero;
 	failTarget.eraseThread(e.thread);
-	failTarget.type = ClientRip::restore_flags_and_branch;
+	failTarget.type = ClientRip::restore_flags_and_branch_post_instr_checks;
 	cursor = cursor->defaultNextI = instrJcc(failTarget, branch_type);
 	return cursor;
 }
@@ -1117,7 +1117,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 		newInstr->rip = cr;
 
 		switch (cr.type) {
-		case ClientRip::start_of_instruction:
+		case ClientRip::start_of_instruction: {
+			Instruction<DirectRip> *underlying = decoder(cr.rip);
 			/* If we're supposed to be dropping out of a thread here then do so. */
 			{
 				auto it = data.threadExitPoints.find(cr.rip);
@@ -1137,6 +1138,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				}
 			}
 			/* Stash anything which needs to be stashed. */
+			ClientRip::instruction_type nextState = ClientRip::receive_messages;
 			if (data.exprStashPoints.count(cr.rip)) {
 				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
@@ -1152,18 +1154,39 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						newInstr->defaultNextI =
 							instrMovRegToSlot(RegisterIdx::fromVexOffset(((IRExprGet *)e)->reg.asReg()), s);
 						newInstr = newInstr->defaultNextI;
-					} else if (e->tag == Iex_ClientCall || e->tag == Iex_Load) {
+					} else if (e->tag == Iex_ClientCall) {
 						/* Do this after emitting the instruction */
+					} else if (e->tag == Iex_Load) {
+						switch (instrOpcode(underlying)) {
+						case 0x3B: { /* 32 bit compare rm32, r32.  Handle this by converting
+								it into:
+								
+								-- load rm32 to the slot
+								-- compare register to r32
+							     */
+							simulationSlotT slot = data.exprsToSlots(it->first, e);
+							simulationSlotT spill = data.exprsToSlots.allocateSlot();
+							newInstr = instrMovModrmToSlot(newInstr, instrModrm(underlying), slot, spill);
+							newInstr = newInstr->defaultNextI = instrCmpRegToSlot(instrModrmReg(underlying), slot);
+							nextState = ClientRip::receive_messages_skip_orig;
+							break;
+						}
+						default:
+							/* Do these after emitting the instruction. */
+							break;
+						}
 					} else {
 						abort();
 					}
 				}
 			}
-			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::receive_messages),
+			relocs.push_back(relocEntryT(ClientRip(cr, nextState),
 						     &newInstr->defaultNextI));
 			break;
+		}
 
 		case ClientRip::receive_messages:
+		case ClientRip::receive_messages_skip_orig:
 			if (data.happensBeforePoints.count(cr.rip)) {
 				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
@@ -1185,7 +1208,10 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			} else {
 				printf("%lx has no HB edges\n", cr.rip);
 			}
-			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::original_instruction),
+			relocs.push_back(relocEntryT(ClientRip(cr,
+							       cr.type == ClientRip::receive_messages ?
+							       ClientRip::original_instruction :
+							       ClientRip::post_instr_generate),
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::original_instruction: {
@@ -1236,19 +1262,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					} else {
 						assert(e->tag == Iex_Load);
 						switch (instrOpcode(underlying)) {
-						case 0x3B: { /* 32 bit compare rm32, r32.  Handle this by converting
-								it into:
-
-								-- load rm32 to the slot
-								-- compare register to r32
-							     */
-							simulationSlotT slot = data.exprsToSlots(it->first, e);
-							simulationSlotT spill = data.exprsToSlots.allocateSlot();
-							newInstr = instrMovModrmToSlot(newInstr, instrModrm(underlying), slot, spill);
-							newInstr = newInstr->defaultNextI = instrCmpRegToSlot(instrModrmReg(underlying), slot);
+						case 0x3b: /* already handled */
 							break;
-						}
-							
 						case 0x8b:
 							/* Load from memory to modrm.
 							 * Nice and easy. */
@@ -1324,10 +1339,15 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			}
 			break;
 
-		case ClientRip::restore_flags_and_branch:
+		case ClientRip::restore_flags_and_branch_post_instr_checks:
 			newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
-
 			cr.type = ClientRip::post_instr_checks;
+			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			break;
+
+		case ClientRip::restore_flags_and_branch_receive_messages:
+			newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
+			cr.type = ClientRip::receive_messages;
 			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
 			break;
 
