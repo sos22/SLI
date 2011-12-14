@@ -11,7 +11,8 @@ cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfte
 	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
 	     it != cfg->ripToInstr->end();
 	     it++)
-		toEmit.insert(it.value());
+		if (it.value())
+			toEmit.insert(it.value());
 	while (!toEmit.empty()) {
 		/* Find one with no predecessors and emit that */
 		std::set<Instruction<ThreadRip> *>::iterator it;
@@ -85,6 +86,8 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
 	     it != cfg->ripToInstr->end();
 	     it++) {
+		if (!it.value())
+			continue;
 		insert(std::pair<Instruction<ThreadRip> *, std::set<Instruction<ThreadRip> *> >(
 			       it.value(),
 			       neededInstructions));
@@ -99,6 +102,8 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 			i = *it;
 			needingRecompute.erase(it);
 		}
+
+		assert(i);
 
 		std::set<Instruction<ThreadRip> *> &slot( (*this)[i] );
 
@@ -169,8 +174,10 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 				std::set<Instruction<ThreadRip> *> &orderedAfter(happensAfter.happensAfter[i]);
 				for (std::set<Instruction<ThreadRip> *>::iterator it = orderedAfter.begin();
 				     it != orderedAfter.end();
-				     it++)
-					needingRecompute.insert(*it);
+				     it++) {
+					if (*it)
+						needingRecompute.insert(*it);
+				}
 			}
 		}
 	}

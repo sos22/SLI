@@ -881,8 +881,10 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 	instrToInstrSetMap backwardReachable;
 
 	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
-		forwardReachable[it.value()].insert(it.value());
-		backwardReachable[it.value()].insert(it.value());
+		if (it.value()) {
+			forwardReachable[it.value()].insert(it.value());
+			backwardReachable[it.value()].insert(it.value());
+		}
 	}
 
 	bool progress;
@@ -890,7 +892,8 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 		progress = false;
 		for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
 			instrT *i = it.value();
-
+			if (!i)
+				continue;
 			instrT *successors[2];
 			int nr_successors;
 			nr_successors = 0;
@@ -922,6 +925,8 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 		progress = false;
 		for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
 			instrT *i = it.value();
+			if (!i)
+				continue;
 
 			instrT *successors[2];
 			int nr_successors;
@@ -954,6 +959,9 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 	std::set<instrT *> instructionPresence;
 	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
 		instrT *i = it.value();
+		if (!i)
+			continue;
+
 		unsigned thread = it.key().thread;
 
 		/* Should @i be present in thread @thread? */
