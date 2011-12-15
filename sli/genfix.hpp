@@ -460,11 +460,11 @@ public:
 template <typename r> void
 Instruction<r>::_modrm(unsigned nrImmediates, AddressSpace *as)
 {
+	modrm_start = len;
+
 	Byte modrm = byte(as);
 	unsigned rm = modrm & 7;
 	unsigned mod = modrm >> 6;
-
-	modrm_start = len;
 
 	if (mod == 3) {
 		/* No further data */
