@@ -15,6 +15,10 @@
 #include "zapBindersAndFreeVariables.hpp"
 #include "enforce_crash.hpp"
 
+/* If this is 1 then all of the enforcement machinery is turned off,
+   which is occasionally useful for testing. */
+#define NO_OP_PATCH 0
+
 class EnforceCrashCFG : public CFG<ThreadRip> {
 public:
 	std::set<ThreadRip> usefulInstrs;
@@ -1139,7 +1143,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			}
 			/* Stash anything which needs to be stashed. */
 			ClientRip::instruction_type nextState = ClientRip::receive_messages;
-			if (data.exprStashPoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && data.exprStashPoints.count(cr.rip)) {
 				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 				     it != neededExprs->end();
@@ -1187,7 +1191,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 
 		case ClientRip::receive_messages:
 		case ClientRip::receive_messages_skip_orig:
-			if (data.happensBeforePoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && data.happensBeforePoints.count(cr.rip)) {
 				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
@@ -1243,7 +1247,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			break;
 		}
 		case ClientRip::post_instr_generate:
-			if (data.exprStashPoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && data.exprStashPoints.count(cr.rip)) {
 				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
@@ -1289,7 +1293,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::post_instr_checks:
-			if (data.expressionEvalPoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && data.expressionEvalPoints.count(cr.rip)) {
 				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
 				DirectRip _fallThrough = underlying->defaultNextI ? underlying->defaultNextI->rip : underlying->defaultNext;
@@ -1314,7 +1318,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::generate_messages:
-			if (data.happensBeforePoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && data.happensBeforePoints.count(cr.rip)) {
 				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
