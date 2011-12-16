@@ -18,6 +18,9 @@
 /* If this is 1 then all of the enforcement machinery is turned off,
    which is occasionally useful for testing. */
 #define NO_OP_PATCH 0
+/* Build a patch which stashes all of the intermediate values, but
+   never sends any messages or introduces any delays. */
+#define STASH_ONLY_PATCH 0
 
 class EnforceCrashCFG : public CFG<ThreadRip> {
 public:
@@ -1191,7 +1194,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 
 		case ClientRip::receive_messages:
 		case ClientRip::receive_messages_skip_orig:
-			if (!NO_OP_PATCH && data.happensBeforePoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.happensBeforePoints.count(cr.rip)) {
 				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
@@ -1293,7 +1296,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::post_instr_checks:
-			if (!NO_OP_PATCH && data.expressionEvalPoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.expressionEvalPoints.count(cr.rip)) {
 				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
 				DirectRip _fallThrough = underlying->defaultNextI ? underlying->defaultNextI->rip : underlying->defaultNext;
@@ -1318,7 +1321,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						     &newInstr->defaultNextI));
 			break;
 		case ClientRip::generate_messages:
-			if (!NO_OP_PATCH && data.happensBeforePoints.count(cr.rip)) {
+			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.happensBeforePoints.count(cr.rip)) {
 				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
