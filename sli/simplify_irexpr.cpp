@@ -1630,11 +1630,102 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 	return a;
 }
 
+/* Simple cache of results from definitelyEqual.  */
+class DefinitelyEqualCache : GcCallback<&ir_heap> {
+public:
+	DefinitelyEqualCache()
+		: nr_queries(0), nr_hits(0), nr_assoc_discards(0)
+	{
+		memset(cache, 0, sizeof(cache));
+	}
+		  
+	~DefinitelyEqualCache()
+	{
+		printf("Definitely equal cache: %d queries, %d hits, rate %e; %d associativity discards\n",
+		       nr_queries, nr_hits, (double)nr_hits / nr_queries, nr_assoc_discards);
+	}
+	unsigned nr_queries;
+	unsigned nr_hits;
+	unsigned nr_assoc_discards;
+
+	void runGc(HeapVisitor &hv) {
+		printf("DE cache: %d queries, %d hits, rate %e\n", nr_queries, nr_hits,
+		       (double)nr_hits / nr_queries);
+		printf("%d associativity discards\n", nr_assoc_discards);
+		memset(cache, 0, sizeof(cache));
+	}
+	static const unsigned NR_ENTRIES = 255;
+	static const unsigned ASSOCIATIVITY = 128;
+	struct p {
+		unsigned long a_and_res;
+		IRExpr *b;
+		p(IRExpr *_a, IRExpr *_b, bool res)
+			: a_and_res((unsigned long)_a | res),
+			  b(_b)
+		{}
+		p()
+			: a_and_res(0), b(NULL)
+		{}
+		IRExpr *a() {
+			return (IRExpr *)(a_and_res & ~1ul);
+		}
+		bool res() {
+			return a_and_res & 1;
+		}
+	};
+	struct cache_entry {
+		unsigned nr_entries;
+		struct p p[ASSOCIATIVITY];
+	};
+	struct cache_entry cache[NR_ENTRIES];
+
+	static int hash(IRExpr *a, IRExpr *b) {
+		unsigned long acc = (unsigned long)a;
+		while (acc > NR_ENTRIES)
+			acc = (acc / NR_ENTRIES) + (acc % NR_ENTRIES);
+		acc += (unsigned long)b;
+		while (acc > NR_ENTRIES)
+			acc = (acc / NR_ENTRIES) + (acc % NR_ENTRIES);
+		return acc;
+	}
+
+	bool query(IRExpr *a, IRExpr *b, int idx, bool *res) {
+		struct cache_entry *e = &cache[idx];
+		nr_queries++;
+		for (unsigned x = 0; x < e->nr_entries; x++) {
+			if (e->p[x].b == b &&
+			    e->p[x].a() == a) {
+				*res = e->p[x].res();
+				nr_hits++;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void set(IRExpr *a, IRExpr *b, int idx, bool res) {
+		struct cache_entry *e = &cache[idx];
+		if (e->nr_entries == ASSOCIATIVITY) {
+			e->nr_entries = 0;
+			nr_assoc_discards++;
+		}
+		e->p[e->nr_entries] = p(a, b, res);
+		e->nr_entries++;
+	}
+};
+
 bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
+	static DefinitelyEqualCache cache;
+	int idx = cache.hash(a, b);
+	bool res;
+	if (cache.query(a, b, idx, &res))
+		return res;
 	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
-	return r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1;
+	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
+	cache.set(a, b, idx, res);
+	return res;
 }
 bool
 definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
