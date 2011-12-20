@@ -163,8 +163,52 @@ template <typename ripType>
 class CFG : public GarbageCollected<CFG<ripType> > {
 public:
 	AddressSpace *as;
+	/* Bad things happen if NULL gets into ripToInstr maps, so in
+	   DEBUG builds assert that that doesn't happen. */
+#ifdef NDEBUG
 	typedef gc_map<ripType, Instruction<ripType> *, __trivial_hash_function,
 		       __default_eq_function, __visit_function_heap> ripToInstrT;
+#else
+	class ripToInstrT : public GarbageCollected<ripToInstrT> {
+		typedef gc_map<ripType, Instruction<ripType> *, __trivial_hash_function,
+			       __default_eq_function, __visit_function_heap> contentT;
+		contentT *content;
+	public:
+		class iterator {
+		public:
+			class contentT::iterator content;
+			iterator(class contentT::iterator _content)
+				: content(_content)
+			{}
+			bool operator!=(const iterator &other) const {
+				return content != other.content;
+			}
+			void operator++(int ign) {
+				content++;
+			}
+			Instruction<ripType> *value() const { return content.value(); }
+			ripType key() const { return content.key(); }
+		};
+		ripToInstrT() : content(new contentT()) {}
+		void visit(HeapVisitor &hv) {
+			hv(content);
+		}
+
+		Instruction<ripType> *get(const ripType &idx) {
+			assert(content->hasKey(idx));
+			return content->get(idx);
+		}
+		void set(const ripType &idx, Instruction<ripType> *const&r) {
+			assert(r != NULL);
+			content->set(idx, r);
+		}
+		bool hasKey(const ripType &k) { return content->hasKey(k); }
+		iterator begin() const { return iterator(content->begin()); }
+		iterator end() const { return iterator(content->end()); }
+		iterator erase(const iterator &i) { return iterator(content->erase(i.content)); }
+		NAMED_CLASS
+	};
+#endif
 	ripToInstrT *ripToInstr;
 private:
 	std::vector<std::pair<ripType, unsigned> > pendingRips;
@@ -181,7 +225,7 @@ public:
 		hv(ripToInstr);
 		hv(as);
 	}
-	void registerInstruction(Instruction<ripType> *i) { (*ripToInstr)[i->rip] = i; }
+	void registerInstruction(Instruction<ripType> *i) { ripToInstr->set(i->rip, i); }
 
 	void print(FILE *logfile);
 
@@ -803,14 +847,14 @@ CFG<r>::doit()
 		Instruction<r> *ins = it.value();
 		ins->useful = instructionUseful(ins);
 		if (ins->defaultNext.rip && ripToInstr->hasKey(ins->defaultNext)) {
-			Instruction<r> *dn = (*ripToInstr)[ins->defaultNext];
+			Instruction<r> *dn = ripToInstr->get(ins->defaultNext);
 			ins->defaultNext.rip = 0;
 			ins->defaultNextI = dn;
 			if (dn->useful)
 				ins->useful = true;
 		}
 		if (ins->branchNext.rip && ripToInstr->hasKey(ins->branchNext)) {
-			Instruction<r> *bn = (*ripToInstr)[ins->branchNext];
+			Instruction<r> *bn = ripToInstr->get(ins->branchNext);
 			ins->branchNext.rip = 0;
 			ins->branchNextI = bn;
 			if (bn->useful)
@@ -938,7 +982,7 @@ PatchFragment<r>::ripToOffset(r rip, unsigned *res)
 	*res = 0;
 	if (!cfg->ripToInstr->hasKey(rip))
 		return false;
-	Instruction<r> *i = (*cfg->ripToInstr)[rip];
+	Instruction<r> *i = cfg->ripToInstr->get(rip);
 	if (!i->presentInPatch)
 		return false;
 	*res = i->offsetInPatch;
