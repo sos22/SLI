@@ -1170,49 +1170,47 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	VexPtr<StateMachine, &ir_heap> cr;
 
-	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
-	     !TIMEOUT && it != previousInstructions.end();
-	     it++) {
-		LibVEX_maybe_gc(token);
+	auto it = previousInstructions.end();
+	it--;
 
-		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
-			buildCFGForRipSet(oracle->ms->addressSpace,
-					  *it,
-					  terminalFunctions,
-					  oracle,
-					  100));
-		trimCFG(cfg.get(), interesting, INT_MAX, false);
-		breakCycles(cfg.get());
+	LibVEX_maybe_gc(token);
 
-		{
-			VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
-			cr = CFGtoCrashReason<unsigned long>(sm->tid,
-							     cfg,
-							     ii,
-							     escape,
-							     oracle,
-							     token);
-		}
-		if (!cr) {
-			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
-			return NULL;
-		}
+	VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
+		buildCFGForRipSet(oracle->ms->addressSpace,
+				  *it,
+				  terminalFunctions,
+				  oracle,
+				  10 * previousInstructions.size()));
+	trimCFG(cfg.get(), interesting, INT_MAX, false);
+	breakCycles(cfg.get());
 
-		cr = optimiseStateMachine(cr,
-					  opt,
-					  oracle,
-					  false,
-					  token);
-		breakCycles(cr);
-		cr->selectSingleCrashingPath();
-		cr = optimiseStateMachine(cr,
-					  opt,
-					  oracle,
-					  false,
-					  token);
+	{
+		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
+		cr = CFGtoCrashReason<unsigned long>(sm->tid,
+						     cfg,
+						     ii,
+						     escape,
+						     oracle,
+						     token);
+	}
+	if (!cr) {
+		fprintf(_logfile, "\tCannot build crash reason from CFG\n");
+		return NULL;
 	}
 	if (TIMEOUT)
 		return NULL;
+	cr = optimiseStateMachine(cr,
+				  opt,
+				  oracle,
+				  false,
+				  token);
+	breakCycles(cr);
+	cr->selectSingleCrashingPath();
+	cr = optimiseStateMachine(cr,
+				  opt,
+				  oracle,
+				  false,
+				  token);
 	return cr;
 }
 
