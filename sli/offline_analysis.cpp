@@ -1862,7 +1862,7 @@ CFGtoCrashReason(unsigned tid,
 		{}
 		StateMachineState *operator()(CFGNode<t> *cfg,
 					      IRSB *irsb) {
-			if (!cfg->fallThrough && !cfg->branch)
+			if (!cfg)
 				return escapeState;
 			ThreadRip rip(ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip)));
 			int endOfInstr;
@@ -1876,7 +1876,7 @@ CFGtoCrashReason(unsigned tid,
 				return buildStateForCallInstruction(cfg, irsb, rip);
 			}
 			StateMachineEdge *edge = new StateMachineEdge(NULL);
-			if (!cfg->fallThrough) {
+			if (!cfg->fallThrough && cfg->branch) {
 				/* We've decided to force this one to take the
 				   branch.  Trim the bit of the instruction
 				   after the branch. */
@@ -1885,11 +1885,11 @@ CFGtoCrashReason(unsigned tid,
 				while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
 					endOfInstr--;
 				assert(endOfInstr > 0);
-				assert(edge);
 				state.addReloc(&edge->target, cfg->branch);
-			} else {
-				assert(edge);
+			} else if (cfg->fallThrough) {
 				state.addReloc(&edge->target, cfg->fallThrough);
+			} else {
+				edge->target = escapeState;
 			}
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
