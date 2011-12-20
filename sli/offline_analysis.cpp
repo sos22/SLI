@@ -1621,13 +1621,13 @@ buildCFGForRipSet(AddressSpace *as,
 	     it != builtSoFar.end();
 	     it++) {
 		CFGNode<unsigned long> *node = it->second.first;
-		assert(node);
+		if (!node) {
+			/* This happens if a node has been killed by
+			 * the depth limit. */
+			continue;
+		}
 		node->fallThrough = builtSoFar[node->fallThroughRip].first;
 		node->branch = builtSoFar[node->branchRip].first;
-		if (node->fallThroughRip)
-			assert(node->fallThrough);
-		if (node->branchRip)
-			assert(node->branch);
 	}
 
 	return builtSoFar[start].first;
