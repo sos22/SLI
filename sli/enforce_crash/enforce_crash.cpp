@@ -1413,6 +1413,13 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	}
 	cfg->doit();
 	
+	for (auto it = neededRips.begin(); it != neededRips.end(); it++) {
+		if (!cfg->ripToInstr->hasKey(*it)) {
+			printf("Failed to build sufficiently complete CFG!\n");
+			return false;
+		}
+	}
+
 	/* Figure out where the various expressions should be
 	 * evaluated. */
 	expressionDominatorMapT exprDominatorMap;
@@ -1668,4 +1675,13 @@ main(int argc, char *argv[])
 		NULL);
 
 	return 0;
+}
+
+
+/* For the compiler to instantiate CFG<ThreadRip>::print, so that it's
+   available in gdb. */
+void
+force_compilation(CFG<ThreadRip> *r)
+{
+	r->print(stdout);
 }
