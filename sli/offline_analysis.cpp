@@ -1795,7 +1795,6 @@ CFGtoCrashReason(unsigned tid,
 								IRSB *irsb,
 								ThreadRip site)
 		{
-			assert(cfg->fallThrough);
 			IRExpr *r;
 			if (irsb->next->tag == Iex_Const) {
 				unsigned long called_rip = ((IRExprConst *)irsb->next)->con->Ico.U64;
@@ -1843,7 +1842,10 @@ CFGtoCrashReason(unsigned tid,
 
 			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
 			assert(smp->target);
-			state.addReloc(&smp->target->target, cfg->fallThrough);
+			if (cfg->fallThrough)
+				state.addReloc(&smp->target->target, cfg->fallThrough);
+			else
+				smp->target->target = escapeState;
 			smp->target->prependSideEffect(
 				new StateMachineSideEffectCopy(
 					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
