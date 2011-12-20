@@ -1559,20 +1559,17 @@ buildCFGForRipSet(AddressSpace *as,
 		  unsigned max_depth)
 {
 	std::map<unsigned long, std::pair<CFGNode<unsigned long> *, unsigned> > builtSoFar;
-	std::vector<std::pair<unsigned long, unsigned> > needed;
+	std::priority_queue<std::pair<unsigned, unsigned long> > needed;
 	unsigned depth;
 	unsigned long rip;
 
-	/* Mild hack to make some corned cases easier. */
-	builtSoFar[0] = std::pair<CFGNode<unsigned long> *, unsigned>((CFGNode<unsigned long> *)NULL, max_depth);
-
 	/* Step one: discover all of the instructions which we're
 	 * going to need. */
-	needed.push_back(std::pair<unsigned long, unsigned>(start, max_depth));
+	needed.push(std::pair<unsigned, unsigned long>(max_depth, start));
 	while (!needed.empty()) {
-		rip = needed.back().first;
-		depth = needed.back().second;
-		needed.pop_back();
+		rip = needed.top().second;
+		depth = needed.top().first;
+		needed.pop();
 		if (!depth ||
 		    (builtSoFar.count(rip) && builtSoFar[rip].second >= depth))
 			continue;
@@ -1582,13 +1579,11 @@ buildCFGForRipSet(AddressSpace *as,
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
 				work->fallThroughRip = ((IRStmtIMark *)irsb->stmts[x])->addr;
-				needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
-				assert(work->branch == 0);
+				assert(work->branchRip == 0);
 				work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64;
-				needed.push_back(std::pair<unsigned long, unsigned>(work->branchRip, depth - 1));
 			}
 		}
 		if (x == irsb->stmts_used) {
@@ -1600,18 +1595,18 @@ buildCFGForRipSet(AddressSpace *as,
 					else if (!oracle->functionCanReturn(((IRExprConst *)irsb->next)->con->Ico.U64))
 						work->fallThroughRip = 0;
 				}
-				if (work->fallThroughRip)
-					needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				work->accepting = true;
 			} else {
 				/* Don't currently try to trace across indirect branches. */
-				if (irsb->next->tag == Iex_Const) {
+				if (irsb->next->tag == Iex_Const)
 					work->fallThroughRip = ((IRExprConst *)irsb->next)->con->Ico.U64;
-					needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
-				}
 			}
 		}
+		if (work->fallThroughRip)
+			needed.push(std::pair<unsigned, unsigned long>(depth - 1, work->fallThroughRip));
+		if (work->branchRip)
+			needed.push(std::pair<unsigned, unsigned long>(depth - 1, work->branchRip));
 		builtSoFar[rip] = std::pair<CFGNode<unsigned long> *, unsigned>(work, depth);
 	}
 
@@ -1620,10 +1615,14 @@ buildCFGForRipSet(AddressSpace *as,
 	for (std::map<unsigned long, std::pair<CFGNode<unsigned long> *, unsigned> >::iterator it = builtSoFar.begin();
 	     it != builtSoFar.end();
 	     it++) {
-		if (it->second.first) {
-			it->second.first->fallThrough = builtSoFar[it->second.first->fallThroughRip].first;
-			it->second.first->branch = builtSoFar[it->second.first->branchRip].first;
-		}
+		CFGNode<unsigned long> *node = it->second.first;
+		assert(node);
+		node->fallThrough = builtSoFar[node->fallThroughRip].first;
+		node->branch = builtSoFar[node->branchRip].first;
+		if (node->fallThroughRip)
+			assert(node->fallThrough);
+		if (node->branchRip)
+			assert(node->branch);
 	}
 
 	return builtSoFar[start].first;
