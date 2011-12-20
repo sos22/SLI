@@ -1378,8 +1378,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			if (((e->op >= Iop_Shl8 && e->op <= Iop_Shl64) ||
 			     (e->op >= Iop_Shr8 && e->op <= Iop_Shr64) ||
 			     (e->op >= Iop_Sar8 && e->op <= Iop_Sar64)) &&
-			    (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U8 == 0) ||
-			    (l->tag == Iex_Const && ((IRExprConst *)l)->con->Ico.U64 == 0)) {
+			    ((r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U8 == 0) ||
+			     (l->tag == Iex_Const && ((IRExprConst *)l)->con->Ico.U64 == 0))) {
 				*done_something = true;
 				return l;
 			}
