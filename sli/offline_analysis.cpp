@@ -329,7 +329,14 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
 		LibVEX_maybe_gc(token);
-		sm = deadCodeElimination(sm, &done_something);
+		{
+			bool d;
+			do {
+				d = false;
+				sm = deadCodeElimination(sm, &d);
+				done_something |= d;
+			} while (d);
+		}
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
