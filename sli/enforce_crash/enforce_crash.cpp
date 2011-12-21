@@ -1165,6 +1165,9 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 		switch (cr.type) {
 		case ClientRip::start_of_instruction: {
 			Instruction<DirectRip> *underlying = decoder(cr.rip);
+			assert(underlying);
+			assert(!underlying->defaultNextI);
+			assert(!underlying->branchNextI);
 			/* If we're supposed to be dropping out of a thread here then do so. */
 			{
 				auto it = data.threadExitPoints.find(cr.rip);
@@ -1261,7 +1264,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 		case ClientRip::original_instruction: {
 			Instruction<DirectRip> *underlying = decoder(cr.rip);
 			assert(underlying);
-			if (underlying->defaultNextI || underlying->defaultNext.rip) {
+			if (underlying->defaultNext.rip) {
 				ClientRip c(cr, ClientRip::post_instr_generate);
 				relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
 			}
@@ -1272,11 +1275,9 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			   originate message), because otherwise we
 			   won't bother generating them when the
 			   branch is taken. */
-			if (underlying->branchNext.rip)
+			if (underlying->branchNext.rip) {
 				newInstr->branchNext = ClientRip(cr, underlying->branchNext.rip, ClientRip::start_of_instruction);
-			if (underlying->branchNextI) {
-				ClientRip c(cr, underlying->branchNextI->rip.rip, ClientRip::start_of_instruction);
-				relocs.push_back(relocEntryT(c, &newInstr->branchNextI));
+				relocs.push_back(relocEntryT(newInstr->branchNext, &newInstr->branchNextI));
 			}
 			memcpy(newInstr->content, underlying->content, underlying->len);
 			newInstr->len = underlying->len;
@@ -1336,8 +1337,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.expressionEvalPoints.count(cr.rip)) {
 				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
-				DirectRip _fallThrough = underlying->defaultNextI ? underlying->defaultNextI->rip : underlying->defaultNext;
-				ClientRip fallThrough(cr, _fallThrough.rip, ClientRip::start_of_instruction);
+				ClientRip fallThrough(cr, underlying->defaultNext.rip, ClientRip::start_of_instruction);
 				
 				bool doit = false;
 				for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
@@ -1375,9 +1375,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
 				if (underlying->defaultNext.rip) {
 					ClientRip c(cr, underlying->defaultNext.rip, ClientRip::start_of_instruction);
-					relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
-				} else if (underlying->defaultNextI) {
-					ClientRip c(cr, underlying->defaultNextI->rip.rip, ClientRip::start_of_instruction);
 					relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
 				}
 			}
