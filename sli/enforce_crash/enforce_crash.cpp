@@ -1031,26 +1031,14 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 	for (auto it = instructionPresence.begin(); it != instructionPresence.end(); it++) {
 		instrT *i = *it;
 
-		printf("Do we want to exit at %s?  successors %s,%s\n",
-		       i->rip.name(),
-		       i->defaultNextI ? i->defaultNextI->rip.name() : NULL,
-		       i->branchNextI ? i->branchNextI->rip.name() : NULL);
-		if (i->defaultNextI && !instructionPresence.count(i->defaultNextI)) {
-			printf("Exit at %s\n", i->defaultNextI->rip.name());
+		if (i->defaultNextI && !instructionPresence.count(i->defaultNextI))
 			(*this)[i->defaultNextI->rip.rip].insert(i->rip.thread);
-		}
-		if (i->defaultNext.rip && !i->defaultNextI) {
-			printf("Exit3 at %s\n", i->defaultNext.name());
+		if (i->defaultNext.rip && !i->defaultNextI)
 			(*this)[i->defaultNext.rip].insert(i->rip.thread);
-		}
-		if (i->branchNextI && !instructionPresence.count(i->branchNextI)) {
-			printf("Exit2 at %s\n", i->branchNextI->rip.name());
+		if (i->branchNextI && !instructionPresence.count(i->branchNextI))
 			(*this)[i->branchNextI->rip.rip].insert(i->rip.thread);
-		}
-		if (!i->isCall && i->branchNext.rip && !i->branchNextI) {
-			printf("Exit4 at %s\n", i->branchNext.name());
+		if (!i->isCall && i->branchNext.rip && !i->branchNextI)
 			(*this)[i->branchNext.rip].insert(i->rip.thread);
-		}
 	}
 
 }
