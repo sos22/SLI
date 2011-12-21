@@ -47,6 +47,8 @@ struct patch {
 
 static volatile int
 messages[MESSAGE_ID_END - MESSAGE_ID_BASE];
+static int
+message_counters[MESSAGE_ID_END - MESSAGE_ID_BASE];
 
 static void
 happensBeforeEdge__before_c(int code)
@@ -57,8 +59,16 @@ static long
 happensBeforeEdge__after_c(int code)
 {
 	int cntr;
-	for (cntr = 0; cntr < 10000 && messages[code - MESSAGE_ID_BASE] == 0; cntr++)
-		;
+	int max;
+
+	if (message_counters[code - MESSAGE_ID_BASE] < 20) {
+		max = 10000 >> message_counters[code - MESSAGE_ID_BASE];
+		message_counters[code - MESSAGE_ID_BASE]++;
+	} else {
+		max = 1;
+	}
+	for (cntr = 0; cntr < max && messages[code - MESSAGE_ID_BASE] == 0; cntr++)
+		usleep(1000);
 	if (!messages[code - MESSAGE_ID_BASE]) {
 		return 0;
 	} else {
