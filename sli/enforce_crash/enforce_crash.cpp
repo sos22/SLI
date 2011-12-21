@@ -830,6 +830,17 @@ public:
 				(*this)[it->first].insert(*it2);
 		}
 	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\tHappens before map:\n");
+		for (auto it = begin(); it != end(); it++) {
+			fprintf(f, "\t\t%lx -> {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				(*it2)->prettyPrint(f);
+				fprintf(f, ", ");
+			}
+			fprintf(f, "}\n");
+		}
+	}
 };
 
 class crashEnforcementRoots : public std::set<ClientRip> {
@@ -854,6 +865,15 @@ public:
 		for (auto it = cer.begin(); it != cer.end(); it++)
 			insert(*it);
 	}
+
+	void prettyPrint(FILE *f) const {
+		printf("\tRoots: ");
+		for (auto it = begin(); it != end(); it++) {
+			it->prettyPrint(f);
+			printf(" ");
+		}
+		printf("\n");
+	}
 };
 
 /* Map that tells us where the various threads have to exit. */
@@ -865,6 +885,15 @@ public:
 		for (auto it = atet.begin(); it != atet.end(); it++)
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
 				(*this)[it->first].insert(*it2);
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\tAbstract thread exit points:\n");
+		for (auto it = begin(); it != end(); it++) {
+			fprintf(f, "\t\t%lx -> {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				fprintf(f, "%d, ", *it2);
+			fprintf(f, "}\n");
+		}
 	}
 };
 abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
@@ -1060,6 +1089,16 @@ public:
 
 	crashEnforcementData() {}
 
+	void prettyPrint(FILE *f) {
+		printf("Crash enforcement data:\n");
+		roots.prettyPrint(f);
+		exprStashPoints.prettyPrint(f);
+		happensBeforePoints.prettyPrint(f);
+		exprsToSlots.prettyPrint(f);
+		expressionEvalPoints.prettyPrint(f);
+		threadExitPoints.prettyPrint(f);
+	}
+
 	void operator|=(const crashEnforcementData &ced) {
 		roots |= ced.roots;
 		exprStashPoints |= ced.exprStashPoints;
@@ -1212,8 +1251,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						       hb->after.name());
 					}
 				}
-			} else {
-				printf("%lx has no HB edges\n", cr.rip);
 			}
 			relocs.push_back(relocEntryT(ClientRip(cr,
 							       cr.type == ClientRip::receive_messages ?
@@ -1409,7 +1446,7 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	     it != roots.end();
 	     it++) {
 		printf("Root %s\n", it->second.name());
-		cfg->add_root(it->second, 100);
+		cfg->add_root(it->second, 1000);
 	}
 	cfg->doit();
 	
@@ -1642,6 +1679,8 @@ main(int argc, char *argv[])
 
 		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC);
 	}
+
+	accumulator.prettyPrint(stdout);
 
 	/* Now build the patch */
 	CFG<ClientRip> *cfg = enforceCrash(accumulator, ms->addressSpace);

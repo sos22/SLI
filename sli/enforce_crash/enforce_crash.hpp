@@ -186,6 +186,18 @@ public:
 				(*this)[it->first].insert(*it2);
 		}
 	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\tStash map:\n");
+		for (auto it = begin(); it != end(); it++) {
+			fprintf(f, "\t\t%lx -> {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				fprintf(f, "%d:", it2->first);
+				it2->second->prettyPrint(f);
+				fprintf(f, ", ");
+			}
+			fprintf(f, "}\n");
+		}
+	}
 };
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap> {
@@ -225,6 +237,9 @@ public:
 		}
 	}
 
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "%d: %s <-< %s", msg_id, before.name(), after.name());
+	}
 	void visit(HeapVisitor &hv) {
 		visit_container(content, hv);
 	}
@@ -308,6 +323,15 @@ public:
 		if (sm.next_slot.idx > next_slot.idx)
 			next_slot = sm.next_slot;
 	}
+
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\tSlot map:\n");
+		for (auto it = begin(); it != end(); it++) {
+			fprintf(f, "\t\t%d:", it->first.first);
+			it->first.second->prettyPrint(f);
+			fprintf(f, " -> %d\n", it->second.idx);
+		}
+	}
 };
 
 /* Note that this needs manual visiting (from the IR heap), despite
@@ -336,6 +360,11 @@ struct exprEvalPoint {
 		if (o.thread < thread)
 			return false;
 		return e < o.e;
+	}
+
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "%s%d:", invert ? "!" : "", thread);
+		e->prettyPrint(f);
 	}
 };
 
@@ -432,6 +461,29 @@ public:
 	void eraseThread(unsigned tid) {
 		threads.erase(tid);
 	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "%lx:", rip);
+		switch (type) {
+#define do_case(n) case n: fprintf(f, #n ); break
+			do_case(start_of_instruction);
+			do_case(receive_messages);
+			do_case(receive_messages_skip_orig);
+			do_case(original_instruction);
+			do_case(post_instr_generate);
+			do_case(post_instr_checks);
+			do_case(generate_messages);
+			do_case(restore_flags_and_branch_post_instr_checks);
+			do_case(restore_flags_and_branch_receive_messages);
+			do_case(uninitialised);
+#undef do_case
+		default:
+			fprintf(f, "<bad%d>", type);
+		}
+		fprintf(f, "{");
+		for (auto it = threads.begin(); it != threads.end(); it++)
+			fprintf(f, "%d,", *it);
+		fprintf(f, "}");
+	}
 };
 
 class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> >,
@@ -468,6 +520,20 @@ public:
 		for (auto it = eem.begin(); it != eem.end(); it++)
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
 				(*this)[it->first].insert(*it2);
+	}
+
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\tEval map:\n");
+		for (auto it = begin(); it != end(); it++) {
+			fprintf(f, "\t\t%lx -> {", it->first);
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				it2->prettyPrint(f);
+				fprintf(f, ", ");
+			}
+			fprintf(f, "}\n");
+		}
 	}
 };
 
