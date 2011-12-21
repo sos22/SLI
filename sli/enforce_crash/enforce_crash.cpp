@@ -916,12 +916,9 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 	   there's some control flow path from y to x */
 	instrToInstrSetMap backwardReachable;
 
-	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
-		if (it.value()) {
+	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++)
+		if (it.value())
 			forwardReachable[it.value()].insert(it.value());
-			backwardReachable[it.value()].insert(it.value());
-		}
-	}
 
 	bool progress;
 	do {
@@ -957,39 +954,10 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 			}
 		}
 	} while (progress);
-	do {
-		progress = false;
-		for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
-			instrT *i = it.value();
-			if (!i)
-				continue;
-
-			instrT *successors[2];
-			int nr_successors;
-			nr_successors = 0;
-			if (i->defaultNextI)
-				successors[nr_successors++] = i->defaultNextI;
-			if (i->branchNextI)
-				successors[nr_successors++] = i->branchNextI;
-			if (nr_successors == 0)
-				continue;
-
-			/* Backward reachability: anything which can
-			   reach us can also reach our successors. */
-			std::set<instrT *> &b(backwardReachable[i]);
-			for (int j = 0; j < nr_successors; j++) {
-				instrT *successor = successors[j];
-				std::set<instrT *> &b2(backwardReachable[successor]);
-				for (auto it2 = b.begin(); it2 != b.end(); it2++) {
-					if (!b2.count(*it2)) {
-						progress = true;
-						b2.insert(*it2);
-					}
-				}
-			}
-			
-		}
-	} while (progress);
+	/* Invert it to build the backwardReachable map */
+	for (auto it = forwardReachable.begin(); it != forwardReachable.end(); it++)
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+			backwardReachable[*it2].insert(it->first);
 
 	/* Figure out which instructions should be present. */
 	std::set<instrT *> instructionPresence;
@@ -1050,6 +1018,12 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 			instructionPresence.insert(i);
 	}
 
+#if 0
+	printf("Desired instructions:\n");
+	for (auto it = instructionPresence.begin(); it != instructionPresence.end(); it++)
+		printf("\t%s\n", (*it)->rip.name());
+#endif
+		       
 	/* Now figure out the transitions.  We're looking for any
 	   instructions which are present but which have a successor
 	   which is not present.  That successor will then be marked
