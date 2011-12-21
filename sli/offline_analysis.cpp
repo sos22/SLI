@@ -329,7 +329,14 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
 		LibVEX_maybe_gc(token);
-		sm = deadCodeElimination(sm, &done_something);
+		{
+			bool d;
+			do {
+				d = false;
+				sm = deadCodeElimination(sm, &d);
+				done_something |= d;
+			} while (d);
+		}
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
@@ -1170,49 +1177,47 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	VexPtr<StateMachine, &ir_heap> cr;
 
-	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
-	     !TIMEOUT && it != previousInstructions.end();
-	     it++) {
-		LibVEX_maybe_gc(token);
+	auto it = previousInstructions.end();
+	it--;
 
-		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
-			buildCFGForRipSet(oracle->ms->addressSpace,
-					  *it,
-					  terminalFunctions,
-					  oracle,
-					  100));
-		trimCFG(cfg.get(), interesting, INT_MAX, false);
-		breakCycles(cfg.get());
+	LibVEX_maybe_gc(token);
 
-		{
-			VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
-			cr = CFGtoCrashReason<unsigned long>(sm->tid,
-							     cfg,
-							     ii,
-							     escape,
-							     oracle,
-							     token);
-		}
-		if (!cr) {
-			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
-			return NULL;
-		}
+	VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
+		buildCFGForRipSet(oracle->ms->addressSpace,
+				  *it,
+				  terminalFunctions,
+				  oracle,
+				  10 * previousInstructions.size()));
+	trimCFG(cfg.get(), interesting, INT_MAX, false);
+	breakCycles(cfg.get());
 
-		cr = optimiseStateMachine(cr,
-					  opt,
-					  oracle,
-					  false,
-					  token);
-		breakCycles(cr);
-		cr->selectSingleCrashingPath();
-		cr = optimiseStateMachine(cr,
-					  opt,
-					  oracle,
-					  false,
-					  token);
+	{
+		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
+		cr = CFGtoCrashReason<unsigned long>(sm->tid,
+						     cfg,
+						     ii,
+						     escape,
+						     oracle,
+						     token);
+	}
+	if (!cr) {
+		fprintf(_logfile, "\tCannot build crash reason from CFG\n");
+		return NULL;
 	}
 	if (TIMEOUT)
 		return NULL;
+	cr = optimiseStateMachine(cr,
+				  opt,
+				  oracle,
+				  false,
+				  token);
+	breakCycles(cr);
+	cr->selectSingleCrashingPath();
+	cr = optimiseStateMachine(cr,
+				  opt,
+				  oracle,
+				  false,
+				  token);
 	return cr;
 }
 
@@ -1559,20 +1564,17 @@ buildCFGForRipSet(AddressSpace *as,
 		  unsigned max_depth)
 {
 	std::map<unsigned long, std::pair<CFGNode<unsigned long> *, unsigned> > builtSoFar;
-	std::vector<std::pair<unsigned long, unsigned> > needed;
+	std::priority_queue<std::pair<unsigned, unsigned long> > needed;
 	unsigned depth;
 	unsigned long rip;
 
-	/* Mild hack to make some corned cases easier. */
-	builtSoFar[0] = std::pair<CFGNode<unsigned long> *, unsigned>((CFGNode<unsigned long> *)NULL, max_depth);
-
 	/* Step one: discover all of the instructions which we're
 	 * going to need. */
-	needed.push_back(std::pair<unsigned long, unsigned>(start, max_depth));
+	needed.push(std::pair<unsigned, unsigned long>(max_depth, start));
 	while (!needed.empty()) {
-		rip = needed.back().first;
-		depth = needed.back().second;
-		needed.pop_back();
+		rip = needed.top().second;
+		depth = needed.top().first;
+		needed.pop();
 		if (!depth ||
 		    (builtSoFar.count(rip) && builtSoFar[rip].second >= depth))
 			continue;
@@ -1582,13 +1584,11 @@ buildCFGForRipSet(AddressSpace *as,
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
 				work->fallThroughRip = ((IRStmtIMark *)irsb->stmts[x])->addr;
-				needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
-				assert(work->branch == 0);
+				assert(work->branchRip == 0);
 				work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64;
-				needed.push_back(std::pair<unsigned long, unsigned>(work->branchRip, depth - 1));
 			}
 		}
 		if (x == irsb->stmts_used) {
@@ -1600,18 +1600,18 @@ buildCFGForRipSet(AddressSpace *as,
 					else if (!oracle->functionCanReturn(((IRExprConst *)irsb->next)->con->Ico.U64))
 						work->fallThroughRip = 0;
 				}
-				if (work->fallThroughRip)
-					needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				work->accepting = true;
 			} else {
 				/* Don't currently try to trace across indirect branches. */
-				if (irsb->next->tag == Iex_Const) {
+				if (irsb->next->tag == Iex_Const)
 					work->fallThroughRip = ((IRExprConst *)irsb->next)->con->Ico.U64;
-					needed.push_back(std::pair<unsigned long, unsigned>(work->fallThroughRip, depth - 1));
-				}
 			}
 		}
+		if (work->fallThroughRip)
+			needed.push(std::pair<unsigned, unsigned long>(depth - 1, work->fallThroughRip));
+		if (work->branchRip)
+			needed.push(std::pair<unsigned, unsigned long>(depth - 1, work->branchRip));
 		builtSoFar[rip] = std::pair<CFGNode<unsigned long> *, unsigned>(work, depth);
 	}
 
@@ -1620,10 +1620,14 @@ buildCFGForRipSet(AddressSpace *as,
 	for (std::map<unsigned long, std::pair<CFGNode<unsigned long> *, unsigned> >::iterator it = builtSoFar.begin();
 	     it != builtSoFar.end();
 	     it++) {
-		if (it->second.first) {
-			it->second.first->fallThrough = builtSoFar[it->second.first->fallThroughRip].first;
-			it->second.first->branch = builtSoFar[it->second.first->branchRip].first;
+		CFGNode<unsigned long> *node = it->second.first;
+		if (!node) {
+			/* This happens if a node has been killed by
+			 * the depth limit. */
+			continue;
 		}
+		node->fallThrough = builtSoFar[node->fallThroughRip].first;
+		node->branch = builtSoFar[node->branchRip].first;
 	}
 
 	return builtSoFar[start].first;
@@ -1796,7 +1800,6 @@ CFGtoCrashReason(unsigned tid,
 								IRSB *irsb,
 								ThreadRip site)
 		{
-			assert(cfg->fallThrough);
 			IRExpr *r;
 			if (irsb->next->tag == Iex_Const) {
 				unsigned long called_rip = ((IRExprConst *)irsb->next)->con->Ico.U64;
@@ -1844,7 +1847,10 @@ CFGtoCrashReason(unsigned tid,
 
 			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
 			assert(smp->target);
-			state.addReloc(&smp->target->target, cfg->fallThrough);
+			if (cfg->fallThrough)
+				state.addReloc(&smp->target->target, cfg->fallThrough);
+			else
+				smp->target->target = escapeState;
 			smp->target->prependSideEffect(
 				new StateMachineSideEffectCopy(
 					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
@@ -1862,7 +1868,7 @@ CFGtoCrashReason(unsigned tid,
 		{}
 		StateMachineState *operator()(CFGNode<t> *cfg,
 					      IRSB *irsb) {
-			if (!cfg->fallThrough && !cfg->branch)
+			if (!cfg)
 				return escapeState;
 			ThreadRip rip(ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip)));
 			int endOfInstr;
@@ -1876,7 +1882,7 @@ CFGtoCrashReason(unsigned tid,
 				return buildStateForCallInstruction(cfg, irsb, rip);
 			}
 			StateMachineEdge *edge = new StateMachineEdge(NULL);
-			if (!cfg->fallThrough) {
+			if (!cfg->fallThrough && cfg->branch) {
 				/* We've decided to force this one to take the
 				   branch.  Trim the bit of the instruction
 				   after the branch. */
@@ -1885,11 +1891,11 @@ CFGtoCrashReason(unsigned tid,
 				while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
 					endOfInstr--;
 				assert(endOfInstr > 0);
-				assert(edge);
 				state.addReloc(&edge->target, cfg->branch);
-			} else {
-				assert(edge);
+			} else if (cfg->fallThrough) {
 				state.addReloc(&edge->target, cfg->fallThrough);
+			} else {
+				edge->target = escapeState;
 			}
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
