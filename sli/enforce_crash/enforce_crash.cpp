@@ -126,7 +126,7 @@ public:
 static Instruction<ClientRip> *
 instrNoImmediatesNoModrm(unsigned opcode)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
 	if (opcode >= 0x100) {
 		assert((opcode & 0xff00) == 0x0f00);
 		work->emit(0x0f);
@@ -138,7 +138,7 @@ instrNoImmediatesNoModrm(unsigned opcode)
 }
 
 static Instruction<ClientRip> *
-instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm, RexPrefix rex)
+instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm, RexPrefix rex, bool isCall = false)
 {
 	assert(!rex.b);
 	if (reg.isOpcodeExtension && reg.opcodeExtension >= 8) {
@@ -155,7 +155,7 @@ instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, con
 		opcode_bytes++;
 	if (opcode >= 0x100)
 		opcode_bytes++;
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(opcode_bytes);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(opcode_bytes, isCall);
 	if (rex.emit())
 		work->emit(rex.asByte());
 	if (opcode >= 0x100) {
@@ -199,7 +199,7 @@ jcc_code jcc_code::nonzero(0x85);
 static Instruction<ClientRip> *
 instrPushReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -210,7 +210,7 @@ instrPushReg(RegisterIdx reg)
 static Instruction<ClientRip> *
 instrPopReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -274,7 +274,7 @@ instrLea(const ModRM &modrm, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrMovImm64ToReg(unsigned long val, RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
 	if (reg.idx < 8) {
 		work->emit(0x48);
 	} else {
@@ -289,7 +289,7 @@ instrMovImm64ToReg(unsigned long val, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrCallModrm(const ModRM &mrm)
 {
-	return instrNoImmediatesModrmOpcode(0xff, RegisterOrOpcodeExtension::opcode(2), mrm, RexPrefix::none());
+	return instrNoImmediatesModrmOpcode(0xff, RegisterOrOpcodeExtension::opcode(2), mrm, RexPrefix::none(), true);
 }
 
 static Instruction<ClientRip> *
@@ -331,7 +331,7 @@ instrNegModrm(const ModRM &mrm)
 static Instruction<ClientRip> *
 instrSetEqAl(void)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
 	work->emit(0x0f);
 	work->emit(0x94);
 	work->emit(0xc0);
@@ -415,7 +415,7 @@ instrMovLabelToRegister(const char *label, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrJcc(ClientRip target, jcc_code branchType)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
 	work->emit(0x0f);
 	work->emit(branchType.code);
 	work->relocs.push_back(new RipRelativeBranchRelocation<ClientRip>(work->len,
@@ -601,7 +601,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 		switch (((IRExprBinop *)e)->op) {
 		case Iop_CmpEQ64: {
 			simulationSlotT old_rax = exprsToSlots.allocateSlot();
-			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
+			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1, false);
 			Instruction<ClientRip> *cursor;
 
 			cursor = instrEvalExpr(head, thread, ((IRExprBinop *)e)->arg1, reg, exprsToSlots);
@@ -632,7 +632,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 	case Iex_Associative:
 		switch (((IRExprAssociative *)e)->op) {
 		case Iop_Add64: {
-			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
+			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1, false);
 			Instruction<ClientRip> *cursor;
 			cursor = instrEvalExpr(head, thread, ((IRExprAssociative *)e)->contents[0], reg, exprsToSlots);
 			if (!cursor)
@@ -1031,10 +1031,26 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 	for (auto it = instructionPresence.begin(); it != instructionPresence.end(); it++) {
 		instrT *i = *it;
 
-		if (i->defaultNextI && !instructionPresence.count(i->defaultNextI))
+		printf("Do we want to exit at %s?  successors %s,%s\n",
+		       i->rip.name(),
+		       i->defaultNextI ? i->defaultNextI->rip.name() : NULL,
+		       i->branchNextI ? i->branchNextI->rip.name() : NULL);
+		if (i->defaultNextI && !instructionPresence.count(i->defaultNextI)) {
+			printf("Exit at %s\n", i->defaultNextI->rip.name());
 			(*this)[i->defaultNextI->rip.rip].insert(i->rip.thread);
-		if (i->branchNextI && !instructionPresence.count(i->branchNextI))
+		}
+		if (i->defaultNext.rip && !i->defaultNextI) {
+			printf("Exit3 at %s\n", i->defaultNext.name());
+			(*this)[i->defaultNext.rip].insert(i->rip.thread);
+		}
+		if (i->branchNextI && !instructionPresence.count(i->branchNextI)) {
+			printf("Exit2 at %s\n", i->branchNextI->rip.name());
 			(*this)[i->branchNextI->rip.rip].insert(i->rip.thread);
+		}
+		if (!i->isCall && i->branchNext.rip && !i->branchNextI) {
+			printf("Exit4 at %s\n", i->branchNext.name());
+			(*this)[i->branchNext.rip].insert(i->rip.thread);
+		}
 	}
 
 }
@@ -1130,7 +1146,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 		if (res->ripToInstr->hasKey(cr))
 			continue;
 
-		Instruction<ClientRip> *newInstr = new Instruction<ClientRip>(-1);
+		Instruction<ClientRip> *newInstr = new Instruction<ClientRip>(-1, false);
 
 		res->ripToInstr->set(cr, newInstr);
 

@@ -111,7 +111,7 @@ class Instruction : public GarbageCollected<Instruction<ripType> > {
 	int modrmExtension(AddressSpace *as);
 	Instruction() : modrm_start(-1) {}
 public:
-	Instruction(int _modrm_start) : modrm_start(_modrm_start) {}
+	Instruction(int _modrm_start, bool _isCall) : modrm_start(_modrm_start), isCall(_isCall) {}
 	ripType rip;
 
 	ripType defaultNext;
@@ -132,6 +132,7 @@ public:
 	std::vector<LateRelocation *> lateRelocs;
 
 	bool useful;
+	bool isCall;
 
 	static Instruction<ripType> *decode(AddressSpace *as,
 					    ripType rip,
@@ -660,7 +661,12 @@ top:
 	case 0xd0 ... 0xd3: /* Shift group 2*/
 	case 0x84 ... 0x8e:
 	case 0x63: /* Move with sign extend. */
-	case 0xff:
+		i->_modrm(0, as);
+		break;
+
+	case 0xff: /* Group 5 */
+		if (i->modrmExtension(as) == 2)
+			i->isCall = true;
 		i->_modrm(0, as);
 		break;
 
@@ -754,6 +760,7 @@ top:
 								 0));
 		if (cfg && cfg->exploreFunction(target))
 			i->branchNext = target;
+		i->isCall = true;
 		break;
 	}
 	case 0xe9: /* jmp rel32 */
