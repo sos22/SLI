@@ -62,13 +62,13 @@ happensBeforeEdge__after_c(int code)
 	int max;
 
 	if (message_counters[code - MESSAGE_ID_BASE] < 20) {
-		max = 10000 >> message_counters[code - MESSAGE_ID_BASE];
+		max = 4000 >> message_counters[code - MESSAGE_ID_BASE];
 		message_counters[code - MESSAGE_ID_BASE]++;
 	} else {
 		max = 1;
 	}
 	for (cntr = 0; cntr < max && messages[code - MESSAGE_ID_BASE] == 0; cntr++)
-		usleep(1000);
+		usleep(100);
 	if (!messages[code - MESSAGE_ID_BASE]) {
 		return 0;
 	} else {
@@ -198,7 +198,7 @@ activate(void)
 		return;
 	}
 
-	state = mmap(NULL, PAGE_SIZE, PROT_READ|PROT_WRITE,
+	state = mmap(NULL, PAGE_SIZE * 1024, PROT_READ|PROT_WRITE,
 		     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 	arch_prctl(ARCH_SET_GS, (unsigned long)state);
 
