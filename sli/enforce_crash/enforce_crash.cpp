@@ -1425,6 +1425,11 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	}
 	cfg->doit();
 	
+	if (cfg->ripToInstr->size() > 1000) {
+		printf("CFG is too big to work with\n");
+		return false;
+	}
+
 	for (auto it = neededRips.begin(); it != neededRips.end(); it++) {
 		if (!cfg->ripToInstr->hasKey(*it)) {
 			printf("Failed to build sufficiently complete CFG!\n");

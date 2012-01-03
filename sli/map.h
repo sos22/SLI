@@ -194,6 +194,7 @@ public:
 		nr_heads = 0;
 		nr_items = 0;
 	}
+	size_t size() const { return nr_items; }
 	void visit(HeapVisitor &hv) {
 		hv(heads);
 		for (unsigned x = 0; x < nr_heads; x++)

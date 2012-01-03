@@ -207,6 +207,7 @@ public:
 		iterator begin() const { return iterator(content->begin()); }
 		iterator end() const { return iterator(content->end()); }
 		iterator erase(const iterator &i) { return iterator(content->erase(i.content)); }
+		size_t size() const { return content->size(); }
 		NAMED_CLASS
 	};
 #endif
