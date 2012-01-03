@@ -75,14 +75,17 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 						   const std::set<ThreadRip> &neededRips)
 {
 	std::set<Instruction<ThreadRip> *> neededInstructions;
-	for (std::set<ThreadRip>::const_iterator it = neededRips.begin();
-	     it != neededRips.end();
-	     it++)
-		neededInstructions.insert(cfg->ripToInstr->get(*it));
+	for (auto it = cfg->ripToInstr->begin();
+	     it != cfg->ripToInstr->end();
+	     it++) {
+		assert(it.value());
+		neededInstructions.insert(it.value());
+	}
 
 	/* Start by assuming that everything dominates everything */
 	cfgRootSetT entryPoints(cfg, predecessors, happensAfter);
 	std::set<Instruction<ThreadRip> *> needingRecompute;
+	std::set<Instruction<ThreadRip> *> empty;
 	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
 	     it != cfg->ripToInstr->end();
 	     it++) {
@@ -90,7 +93,7 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 			continue;
 		insert(std::pair<Instruction<ThreadRip> *, std::set<Instruction<ThreadRip> *> >(
 			       it.value(),
-			       neededInstructions));
+			       empty));
 		needingRecompute.insert(it.value());
 	}
 
@@ -108,17 +111,17 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 		std::set<Instruction<ThreadRip> *> &slot( (*this)[i] );
 
 		/* new entry domination set is intersection of all of
-		 * the predecessor's exit sets.  If there are no
+		 * the predecessors' exit sets.  If there are no
 		 * predecessor sets then the entry domination set is
 		 * empty. */
 		std::set<Instruction<ThreadRip> *> newDominators;
 		std::set<Instruction<ThreadRip> *> &allPreds(predecessors[i]);
 		if (!allPreds.empty()) {
-			newDominators = slot;
 
-			for (std::set<Instruction<ThreadRip> *>::iterator predIt = allPreds.begin();
-			     predIt != allPreds.end();
-			     predIt++) {
+			auto predIt = allPreds.begin();
+			assert(count(*predIt));
+			newDominators = (*this)[*predIt];
+			for (predIt++ ; predIt != allPreds.end(); predIt++) {
 				Instruction<ThreadRip> *predecessor = *predIt;
 				assert(count(predecessor));
 				std::set<Instruction<ThreadRip> *> &pred_dominators((*this)[predecessor]);
@@ -181,4 +184,25 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 			}
 		}
 	}
+
+	/* Now filter things back down to the actually interesting
+	 * instructions. */
+	for (auto it = begin(); it != end(); ) {
+		if (!neededRips.count(it->first->rip)) {
+			erase(it++);
+			continue;
+		}
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
+			if (!neededRips.count((*it2)->rip)) {
+				it->second.erase(it2++);
+			} else {
+				it2++;
+			}
+		}
+		it++;
+	}
+#if 0
+	printf("Instruction dominator map:\n");
+	print(stdout);
+#endif
 }
