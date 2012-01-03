@@ -40,6 +40,7 @@ struct patch {
 #include <assert.h>
 #include <err.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define PAGE_SIZE 4096ul
@@ -49,6 +50,8 @@ static volatile int
 messages[MESSAGE_ID_END - MESSAGE_ID_BASE];
 static int
 message_counters[MESSAGE_ID_END - MESSAGE_ID_BASE];
+static unsigned
+max_stalls;
 
 static void
 happensBeforeEdge__before_c(int code)
@@ -61,8 +64,10 @@ happensBeforeEdge__after_c(int code)
 	int cntr;
 	int max;
 
-	if (message_counters[code - MESSAGE_ID_BASE] < 20) {
-		max = 4000 >> message_counters[code - MESSAGE_ID_BASE];
+	if (max_stalls == 0) {
+		max = 0;
+	} else if (message_counters[code - MESSAGE_ID_BASE] < 20) {
+		max = max_stalls >> message_counters[code - MESSAGE_ID_BASE];
 		message_counters[code - MESSAGE_ID_BASE]++;
 	} else {
 		max = 1;
@@ -197,6 +202,16 @@ activate(void)
 		       program_to_patch, buf);
 		return;
 	}
+
+	body = getenv("SOS22_ENFORCER_MAX_STALLS");
+	if (!body) {
+		printf("SOS22_ENFORCER_MAX_STALLS is not set!\n");
+		abort();
+	}
+	max_stalls = atoi(body);
+	printf("max_stalls = %d\n", max_stalls);
+	if (max_stalls < 0 || max_stalls >= 100000)
+		abort();
 
 	state = mmap(NULL, PAGE_SIZE * 1024, PROT_READ|PROT_WRITE,
 		     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
