@@ -558,8 +558,9 @@ class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	void generateEpilogue(ClientRip rip);
 
 public:
-	EnforceCrashPatchFragment(std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints)
-		: PatchFragment<ClientRip>()
+	EnforceCrashPatchFragment(std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints,
+				  const std::set<ClientRip> &roots)
+		: PatchFragment<ClientRip>(roots)
 	{
 		for (std::map<unsigned long, std::set<happensBeforeEdge *> >::iterator it = happensBeforePoints.begin();
 		     it != happensBeforePoints.end();
@@ -571,7 +572,7 @@ public:
 		}
 	}
 
-	char *asC(const char *ident, std::set<ClientRip> &entryPoints);
+	char *asC(const char *ident);
 };
 
 #endif /* !enforceCrash_hpp__ */

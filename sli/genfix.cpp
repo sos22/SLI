@@ -78,10 +78,10 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 			e.what());
 		return NULL;
 	}
-	PatchFragment<ThreadRip> *pf = new PatchFragment<ThreadRip>();
+	PatchFragment<ThreadRip> *pf = new PatchFragment<ThreadRip>(roots);
 	pf->fromCFG(cfg);
 
-	return pf->asC(ident, roots);
+	return pf->asC(ident);
 }
 
 unsigned long __trivial_hash_function(const ThreadRip &k)

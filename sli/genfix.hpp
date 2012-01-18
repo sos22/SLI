@@ -260,6 +260,7 @@ public:
 template <typename ripType>
 class PatchFragment : public GarbageCollected<PatchFragment<ripType> > {
 	std::vector<Instruction<ripType> *> registeredInstrs;
+	std::set<ripType> entryPoints;
 
 protected:
 	std::vector<EarlyRelocation<ripType> *> relocs;
@@ -311,6 +312,10 @@ protected:
 	void emitMovQ(RegisterIdx, unsigned long);
 	void emitCallReg(RegisterIdx);
 public:
+	PatchFragment(const std::set<ripType> &_entryPoints)
+		: entryPoints(_entryPoints)
+	{}
+
 	void fromCFG(CFG<ripType> *cfg);
 
 	bool ripToOffset(ripType rip, unsigned *res);
@@ -320,7 +325,7 @@ public:
 	/* Just the core patch itself, not including the metdata tables. */
 	char *asC(const char *ident, char **relocs_name, char **trans_name, char **content_name) const;
 	/* The whole patch, including metadata tables. */
-	char *asC(const char *ident, const std::set<ripType> &entryPoints) const;
+	char *asC(const char *ident) const;
 
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
@@ -1367,7 +1372,7 @@ void __genfix_add_array_summary(std::vector<const char *> &out,
 				const char *table);
 
 template <typename r> char *
-PatchFragment<r>::asC(const char *ident, const std::set<r> &entryPoints) const
+PatchFragment<r>::asC(const char *ident) const
 {
 	std::vector<const char *> fragments;
 	char *relocs_name;

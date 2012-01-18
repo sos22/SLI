@@ -425,6 +425,23 @@ instrJcc(ClientRip target, jcc_code branchType)
 	return work;
 }
 
+static Instruction<ClientRip> *
+instrJmpToHost(unsigned long rip)
+{
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	work->emit(0xe9);
+	work->emit(0);
+	work->emit(0);
+	work->emit(0);
+	work->emit(0);
+	work->lateRelocs.push_back(new LateRelocation(1,
+						      4,
+						      vex_asprintf("0x%lx", rip),
+						      0,
+						      true));
+	return work;
+}
+
 /* ``composite'' instructions */
 static Instruction<ClientRip> *
 instrSaveRflags(Instruction<ClientRip> *start, slotMapT &exprsToSlots)
@@ -1105,6 +1122,59 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 	setToVector(data.roots, neededRips);
 	std::vector<relocEntryT> relocs;
 
+	/* Make sure we have instructions which shadow all of the
+	   instructions which are going to get clobbered by our jump
+	   instructions. */
+	for (auto it = data.roots.begin(); it != data.roots.end(); it++) {
+		ClientRip startOfJumpInstruction = *it;
+		Instruction<DirectRip> *i = decoder(startOfJumpInstruction.rip);
+		assert(i);
+		while (1) {
+			std::set<unsigned> empty;
+			Instruction<ClientRip> *i2 = new Instruction<ClientRip>(i->modrm_start, i->isCall);
+			ClientRip cr(i->rip.rip, empty, ClientRip::start_of_instruction);
+			i2->rip = cr;
+
+			if (i->branchNext.rip) {
+				i2->branchNext = ClientRip(cr, i->branchNext.rip, ClientRip::start_of_instruction);
+				relocs.push_back(relocEntryT(i2->branchNext, &i2->branchNextI));
+			}
+			memcpy(i2->content, i->content, i->len);
+			i2->len = i->len;
+			i2->pfx = i->pfx;
+			i2->nr_prefixes = i->nr_prefixes;
+			for (auto it = i->relocs.begin(); it != i->relocs.end(); it++)
+				i2->relocs.push_back(convertDirectRelocToClientReloc(*it, empty));
+
+			res->ripToInstr->set(cr, i2);
+			res->ripToInstr->set(ClientRip(cr, ClientRip::restore_flags_and_branch_post_instr_checks), i2);
+			res->ripToInstr->set(ClientRip(cr, ClientRip::restore_flags_and_branch_receive_messages), i2);
+
+			if (!i->defaultNext.rip)
+				break;
+			if (i->defaultNext.rip - startOfJumpInstruction.rip >= 5) {
+				i2->defaultNextI = instrJmpToHost(i->defaultNext.rip);
+				break;
+			}
+			relocs.push_back(relocEntryT(ClientRip(i->defaultNext.rip,
+							       empty,
+							       ClientRip::start_of_instruction),
+						     &i2->defaultNextI));
+			i = decoder(i->defaultNext.rip);
+			assert(i);
+		}
+	}
+
+	/* Those relocs are special because they don't trigger
+	   additional decoding; process them now. */
+	for (unsigned x = 0; x < relocs.size(); x++) {
+		relocEntryT re = relocs[x];
+		if (res->ripToInstr->hasKey(re.first)) {
+			*re.second = res->ripToInstr->get(re.first);
+		}
+	}
+	relocs.clear();
+
 	/* Expand the CFG up by inserting the necessary extra
 	   instructions to actually perform all of our checking. */
 	while (1) {
@@ -1664,9 +1734,9 @@ main(int argc, char *argv[])
 
 	/* Now build the patch */
 	CFG<ClientRip> *cfg = enforceCrash(accumulator, ms->addressSpace);
-	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(accumulator.happensBeforePoints);
+	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(accumulator.happensBeforePoints, accumulator.roots);
 	pf->fromCFG(cfg);
-	char *patch = pf->asC("ident", accumulator.roots);
+	char *patch = pf->asC("ident");
 
 	/* Dump it to a file and build it. */
 	char *tmpfile = my_asprintf("enforce_crash_XXXXXX");

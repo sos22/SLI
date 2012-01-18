@@ -47,7 +47,7 @@ EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
 }
 
 char *
-EnforceCrashPatchFragment::asC(const char *ident, std::set<ClientRip> &entryPoints)
+EnforceCrashPatchFragment::asC(const char *ident)
 {
 	std::vector<const char *> fragments;
 
@@ -60,7 +60,7 @@ EnforceCrashPatchFragment::asC(const char *ident, std::set<ClientRip> &entryPoin
 		for (unsigned x = 0; x < hb->content.size(); x++)
 			fragments.push_back(vex_asprintf("static unsigned long __msg_%d_slot_%d;\n", hb->msg_id, x));
 	}
-	fragments.push_back(PatchFragment<ClientRip>::asC(ident, entryPoints));
+	fragments.push_back(PatchFragment<ClientRip>::asC(ident));
 
 	return flattenStringFragments(fragments);
 }

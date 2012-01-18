@@ -33,6 +33,10 @@ protected:
 	void generateEpilogue(ThreadRip exitRip);
 	/* XXX should really override emitInstruction here to catch
 	   indirect jmp and ret instructions; oh well. */
+public:
+	AddExitCallPatch(const std::set<ThreadRip> &roots)
+		: PatchFragment<ThreadRip>(roots)
+	{}
 };
 
 void
@@ -56,13 +60,16 @@ static char *
 mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 {
 	SourceSinkCFG *cfg = new SourceSinkCFG(as);
+	std::set<ThreadRip> roots;
 	for (unsigned x = 0; x < nr_csects; x++) {
-		cfg->add_root(ThreadRip::mk(0, csects[x].entry), 50);
+		ThreadRip r = ThreadRip::mk(0, csects[x].entry);
+		roots.insert(r);
+		cfg->add_root(r, 50);
 		cfg->add_sink(csects[x].exit);
 	}
 	cfg->doit();
 
-	PatchFragment<ThreadRip> *pf = new AddExitCallPatch();
+	PatchFragment<ThreadRip> *pf = new AddExitCallPatch(roots);
 	pf->fromCFG(cfg);
 
 	char *ign;
