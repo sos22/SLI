@@ -368,7 +368,42 @@ struct exprEvalPoint {
 	}
 };
 
-class ClientRip {
+class ClientRip : public Named {
+	char *mkName() const {
+		std::vector<const char *> fragments;
+		const char *label;
+		bool free_label = false;
+		switch (type) {
+#define do_case(n) case n: label = #n; break
+			do_case(start_of_instruction);
+			do_case(receive_messages);
+			do_case(receive_messages_skip_orig);
+			do_case(original_instruction);
+			do_case(post_instr_generate);
+			do_case(post_instr_checks);
+			do_case(generate_messages);
+			do_case(restore_flags_and_branch_post_instr_checks);
+			do_case(restore_flags_and_branch_receive_messages);
+			do_case(uninitialised);
+#undef do_case
+		default:
+			label = my_asprintf("<bad%d>", type);
+			free_label = true;
+			break;
+		}
+		fragments.push_back(my_asprintf("%lx:%s{", rip, label));
+		if (free_label)
+			free((void *)label);
+		for (auto it = threads.begin(); it != threads.end(); it++)
+			fragments.push_back(my_asprintf("%d,", *it));
+		fragments.push_back("}");
+		char *res_vex = flattenStringFragments(fragments);
+		char *res_malloc = strdup(res_vex);
+		_LibVEX_free(&main_heap, res_vex);
+		for (unsigned x = 0; x < fragments.size() - 1; x++)
+			free((void *)fragments[x]);
+		return res_malloc;
+	}
 public:
 	unsigned long rip;
 	
@@ -462,27 +497,7 @@ public:
 		threads.erase(tid);
 	}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%lx:", rip);
-		switch (type) {
-#define do_case(n) case n: fprintf(f, #n ); break
-			do_case(start_of_instruction);
-			do_case(receive_messages);
-			do_case(receive_messages_skip_orig);
-			do_case(original_instruction);
-			do_case(post_instr_generate);
-			do_case(post_instr_checks);
-			do_case(generate_messages);
-			do_case(restore_flags_and_branch_post_instr_checks);
-			do_case(restore_flags_and_branch_receive_messages);
-			do_case(uninitialised);
-#undef do_case
-		default:
-			fprintf(f, "<bad%d>", type);
-		}
-		fprintf(f, "{");
-		for (auto it = threads.begin(); it != threads.end(); it++)
-			fprintf(f, "%d,", *it);
-		fprintf(f, "}");
+		fprintf(f, "%s", name());
 	}
 };
 

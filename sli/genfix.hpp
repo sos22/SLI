@@ -386,7 +386,7 @@ public:
 	{}
 
 	char *asC() const {
-		return vex_asprintf("{%d, %d, %d, %d, %s}",
+		return vex_asprintf("{0x%x, 0x%x, %d, %d, %s}",
 				    offset, size,
 				    relative ? -nrImmediateBytes - size : 0,
 				    relative, target);
@@ -1344,9 +1344,10 @@ PatchFragment<r>::asC(const char *ident, char **relocs_name, char **trans_name, 
 	for (typename std::vector<Instruction<r> *>::const_iterator it = registeredInstrs.begin();
 	     it != registeredInstrs.end();
 	     it++)
-		fragments.push_back(vex_asprintf("\t{0x%lx, %d},\n",
+		fragments.push_back(vex_asprintf("\t{0x%lx, 0x%x}, /* %s */\n",
 						 (*it)->rip.rip,
-						 (*it)->offsetInPatch));
+						 (*it)->offsetInPatch,
+						 (*it)->rip.name()));
 	fragments.push_back("};\n");
 	return flattenStringFragments(fragments);
 }
