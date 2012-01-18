@@ -13,15 +13,16 @@ then
 fi
 
 start_pwd=${PWD}
-cd /local/scratch/sos22/mysql-5.5.6-rc/mysql-test
 
 try_stall_setting () {
     echo "Trying summary ${summary}, max stalls $1"
     export SOS22_ENFORCER_MAX_STALLS="$1"
+    cd /local/scratch/sos22/mysql-5.5.6-rc/mysql-test
     ./mtr --testcase-timeout=99999 --max-test-fail=1 rpl_change_master
     echo "Core files:"
     find var -name '*core*'
 
+    echo -n "Results for summary ${summary}, max stalls ${SOS22_ENFORCER_MAX_STALLS}: "
     if [ $(find var -name '*core*' | wc -l) == 0 ]
     then
 	echo "No cores"
