@@ -46,6 +46,8 @@ struct patch {
 #define PAGE_SIZE 4096ul
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 
+static void *
+patch_address;
 static volatile int
 messages[MESSAGE_ID_END - MESSAGE_ID_BASE];
 static int
@@ -209,7 +211,6 @@ activate(void)
 		abort();
 	}
 	max_stalls = atoi(body);
-	printf("max_stalls = %d\n", max_stalls);
 	if (max_stalls < 0 || max_stalls >= 100000)
 		abort();
 
@@ -232,12 +233,9 @@ activate(void)
 		mprotect((void *)(ident.entry_points[x].orig_rip & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_EXEC);
-
-		printf("Entry point: 0x%lx -> %p\n", ident.entry_points[x].orig_rip,
-		       body + ident.entry_points[x].offset_in_patch);
 	}
 
-	printf("Patch at %p\n", body);
+	patch_address = body;
 }
 
 static void (*__init_activate)(void) __attribute__((section(".ctors"), unused, used)) = activate;
