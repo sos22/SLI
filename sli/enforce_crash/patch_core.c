@@ -54,6 +54,8 @@ static int
 message_counters[MESSAGE_ID_END - MESSAGE_ID_BASE];
 static unsigned
 max_stalls;
+static int
+have_cloned;
 
 static void
 happensBeforeEdge__before_c(int code)
@@ -65,6 +67,9 @@ happensBeforeEdge__after_c(int code)
 {
 	int cntr;
 	int max;
+
+	if (!have_cloned)
+		return 0;
 
 	if (max_stalls == 0) {
 		max = 0;
@@ -183,6 +188,85 @@ build_patch(struct patch *patch)
 	return res;
 }
 
+extern void clone(void);
+
+static void (*__GI__exit)(int res);
+
+/* This is hooked into clone() so that we're called instead of the
+   usual child thread function.  The hcild thread function and its
+   sole argument are passed in as @fn and @fn_arg.  Create our
+   per-thread state area and then run the user function.  Note that we
+   have to call __GI__exit ourselves, because of the way we're patched
+   in. */
+static void
+clone_hook_c(int (*fn)(void *), void *fn_arg)
+{
+	void *state;
+	int res;
+
+	state = mmap(NULL, PAGE_SIZE * 1024, PROT_READ|PROT_WRITE,
+		     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+	arch_prctl(ARCH_SET_GS, (unsigned long)state);
+
+	have_cloned = 1;
+
+	res = fn(fn_arg);
+
+	__GI__exit(res);
+}
+
+static void clone_hook_asm();
+
+/* We need to hook the clone() call in glibc to catch creation of new
+ * threads early enough.  This is a hideous, hideous hack.  Meh. */
+static void
+hook_clone(void)
+{
+	unsigned char *clone_addr = (unsigned char *)clone;
+	void *mprotect_start, *mprotect_end;
+	int idx;
+
+	mprotect_start = (void *)((unsigned long)clone_addr & ~(PAGE_SIZE - 1));
+	mprotect_end = (void *)(((unsigned long)clone_addr + 64 + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
+
+	if (mprotect(mprotect_start, mprotect_end - mprotect_start, PROT_READ|PROT_WRITE|PROT_EXEC) == -1)
+		err(1, "mprotect() before hooking clone");
+	__GI__exit =
+		(void (*)(int))
+		(*(int *)(clone_addr + 113) + (unsigned long)clone_addr + 117);
+
+	idx = 105;
+#define byte(x) clone_addr[idx++] = ((x) & 0xff)
+#define word(x) byte(x); byte((x) >> 8)
+#define dword(x) word(x); word((x) >> 16)
+#define qword(x) dword(x); dword((x) >> 32)
+	/* movq $clone_hook_asm, %r10 */
+	byte(0x49); byte(0xba); qword((unsigned long)clone_hook_asm);
+	/* jmp *%r10 */
+	byte(0x41); byte(0xff); byte(0xe2);
+#undef byte
+#undef qword
+	if (mprotect(mprotect_start, mprotect_end - mprotect_start, PROT_READ|PROT_EXEC) == -1)
+		err(1, "mprotect() after hooking clone");
+}
+
+asm(
+/* This hooks in to a bit of glibc's clone function which would normally go:
+
+>    0x00007fc62cce2709 <+105>:   pop    %rax
+>    0x00007fc62cce270a <+106>:   pop    %rdi
+>    0x00007fc62cce270b <+107>:   callq  *%rax
+>    0x00007fc62cce270d <+109>:   mov    %rax,%rdi
+>    0x00007fc62cce2710 <+112>:   callq  0x7fc62cca66f0 <*__GI__exit>
+
+the call is the top of the user-supplied thread function.  We need to
+call into our bits before doing basically the same thing. */
+"clone_hook_asm:\n"
+"pop %rdi\n"
+"pop %rsi\n"
+"call clone_hook_c\n"
+	);
+
 static void
 activate(void)
 {
@@ -236,6 +320,8 @@ activate(void)
 	}
 
 	patch_address = body;
+
+	hook_clone();
 }
 
 static void (*__init_activate)(void) __attribute__((section(".ctors"), unused, used)) = activate;
