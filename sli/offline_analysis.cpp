@@ -1189,7 +1189,6 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  oracle,
 				  10 * previousInstructions.size()));
 	trimCFG(cfg.get(), interesting, INT_MAX, false);
-	breakCycles(cfg.get());
 
 	{
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
@@ -1539,6 +1538,7 @@ printCFG(const CFGNode<t> *cfg, FILE *f)
 }
 /* Make it visible to the debugger. */
 void __printCFG(const CFGNode<StackRip> *cfg) { printCFG(cfg, stdout); }
+void __printCFG(const CFGNode<unsigned long> *cfg) { printCFG(cfg, stdout); }
 
 static void
 enumerateReachableStates(CFGNode<unsigned long> *from, std::set<CFGNode<unsigned long> *> &out)
