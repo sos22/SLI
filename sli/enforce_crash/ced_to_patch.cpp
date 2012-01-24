@@ -17,7 +17,7 @@
 
 typedef std::pair<ClientRip, Instruction<ClientRip> **> relocEntryT;
 
-#define LOUD
+#undef LOUD
 #ifdef LOUD
 #define dbg printf
 #else
