@@ -496,12 +496,10 @@ static Instruction<ClientRip> *
 instrCallSequence(Instruction<ClientRip> *start, const char *name)
 {
 	Instruction<ClientRip> *cursor = start;
-	cursor = cursor->defaultNextI = instrSkipRedZone();
 	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RSI);
 	cursor = cursor->defaultNextI = instrMovLabelToRegister(name, RegisterIdx::RSI);
 	cursor = cursor->defaultNextI = instrCallModrm(ModRM::directRegister(RegisterIdx::RSI));
 	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RSI);
-	cursor = cursor->defaultNextI = instrRestoreRedZone();
 	return cursor;
 }
 
@@ -619,7 +617,9 @@ instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeE
 		start = instrStoreSlotToMessage(start, hb->msg_id, x, s, RegisterIdx::RDI, RegisterIdx::R13);
 	}
 	start = start->defaultNextI = instrMovImm64ToReg(hb->msg_id, RegisterIdx::RDI);
+	start = start->defaultNextI = instrSkipRedZone();
 	start = instrCallSequence(start, "(unsigned long)happensBeforeEdge__before");
+	start = start->defaultNextI = instrRestoreRedZone();
 	start = start->defaultNextI = instrMovSlotToReg(r13, RegisterIdx::R13);
 	start = start->defaultNextI = instrMovSlotToReg(rdi, RegisterIdx::RDI);
 	return start;

@@ -117,12 +117,11 @@ asm(								        \
 mk_trampoline(happensBeforeEdge__before);
 asm(
 "	/* We're called from the patch without saving any registers"
-"          except rdi, rax, and rflags.  We are outside the stack redzone,"
+"          except rdi, rax, rsi, and rflags.  We are outside the stack redzone,"
 "          though.  Go and save all the call-clobbered registers and"
 "          get into C. */"
 "	"
 "happensBeforeEdge__after:\n"
-"       push %rsi\n"
 "       lea 16(%rsp), %rsi\n"
 "	push %rcx\n"
 "	push %rdx\n"
@@ -137,7 +136,6 @@ asm(
 "	pop %r8\n"
 "	pop %rdx\n"
 "	pop %rcx\n"
-"       pop %rsi\n"
 "	ret\n"
 	);
 mk_trampoline(clearMessage);
