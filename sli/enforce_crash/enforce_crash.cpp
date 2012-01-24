@@ -392,7 +392,10 @@ main(int argc, char *argv[])
 		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC);
 	}
 
+	FILE *f = fopen(argv[4], "w");
+	accumulator.prettyPrint(f);
 	accumulator.prettyPrint(stdout);
+	fclose(f);
 
 	return 0;
 }
