@@ -411,7 +411,6 @@ public:
 	simulationSlotT allocateSlot() {
 		simulationSlotT r = next_slot;
 		next_slot.idx++;
-		printf("Allocated slot %d\n", next_slot.idx);
 		return r;
 	}
 
@@ -432,7 +431,7 @@ public:
 			(*this)[it->first] = it->second;
 	}
 
-	slotMapT() { printf("Initial slot in slot table %d\n", next_slot.idx); }
+	slotMapT() { }
 
 	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
 		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore)
@@ -908,12 +907,12 @@ public:
 		return true;
 	}
 	void prettyPrint(FILE *f) const {
-		printf("\tRoots: ");
+		fprintf(f, "\tRoots: ");
 		for (auto it = begin(); it != end(); it++) {
 			it->prettyPrint(f);
-			printf(" ");
+			fprintf(f, " ");
 		}
-		printf("\n");
+		fprintf(f, "\n");
 	}
 };
 
@@ -1102,7 +1101,7 @@ public:
 	crashEnforcementData() {}
 
 	void prettyPrint(FILE *f) {
-		printf("Crash enforcement data:\n");
+		fprintf(f, "Crash enforcement data:\n");
 		roots.prettyPrint(f);
 		exprStashPoints.prettyPrint(f);
 		happensBeforePoints.prettyPrint(f);
