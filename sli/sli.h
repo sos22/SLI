@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <vector>
 #include <algorithm>
+#include <map>
 
 #include "libvex_guest_amd64.h"
 #include "libvex_ir.h"
@@ -1290,6 +1291,12 @@ expandSet(std::set<t, comp> &out, const std::set<t, comp> &inp)
 		res |= out.insert(*it).second;
 	return res;
 }
+
+struct internIRExprTable {
+	static const int nr_entries = 17;
+	std::map<IRExpr *, IRExpr *> lookups[nr_entries];
+};
+IRExpr *internIRExpr(IRExpr *e, internIRExprTable &lookupTable);
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */

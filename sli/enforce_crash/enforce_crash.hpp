@@ -4,11 +4,40 @@
 #include <set>
 #include <map>
 #include "libvex_ir.h"
+#include "libvex_parse.h"
 #include "genfix.hpp"
 #include "dnf.hpp"
 #include "offline_analysis.hpp"
 
 void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
+
+struct exprEvalPoint;
+class happensBeforeEdge;
+
+class internmentState {
+public:
+	std::set<happensBeforeEdge *> hbes;
+	internIRExprTable exprs;
+	IRExpr *intern(IRExpr *e) { return internIRExpr(e, exprs); }
+	unsigned intern(unsigned x) { return x; }
+	exprEvalPoint intern(const exprEvalPoint &);
+	template <typename a, typename b> std::pair<a, b> intern(const std::pair<a, b> &x) {
+		return std::pair<a, b>(intern(x.first), intern(x.second));
+	}
+	template <typename a> std::set<a> intern(const std::set<a> &x) {
+		std::set<a> out;
+		for (auto it = x.begin(); it != x.end(); it++)
+			out.insert(intern(*it));
+		return out;
+	}
+	template <typename a> std::vector<a> intern(const std::vector<a> &in) {
+		std::vector<a> out;
+		out.reserve(in.size());
+		for (auto it = in.begin(); it != in.end(); it++)
+			out.push_back(intern(*it));
+		return out;
+	}
+};
 
 class instrToInstrSetMap : public std::map<Instruction<ThreadRip> *, std::set<Instruction<ThreadRip> *> > {
 public:
@@ -186,6 +215,32 @@ public:
 				(*this)[it->first].insert(*it2);
 		}
 	}
+	bool parse(const char *str, const char **suffix) {
+		if (!parseThisString("Stash map:\n", str, &str))
+			return false;
+		clear();
+		while (1) {
+			unsigned long a;
+			if (!parseHexUlong(&a, str, &str) ||
+			    !parseThisString(" -> {", str, &str))
+				break;
+			std::set<std::pair<unsigned, IRExpr *> > b;
+			while (1) {
+				std::pair<unsigned, IRExpr *> s;
+				if (!parseDecimalUInt(&s.first, str, &str) ||
+				    !parseThisChar(':', str, &str) ||
+				    !parseIRExpr(&s.second, str, &str) ||
+				    !parseThisString(", ", str, &str))
+					break;
+				b.insert(s);
+			}
+			if (!parseThisString("}\n", str, &str))
+				return false;
+			(*this)[a] = b;
+		}
+		*suffix = str;
+		return true;
+	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tStash map:\n");
 		for (auto it = begin(); it != end(); it++) {
@@ -198,9 +253,27 @@ public:
 			fprintf(f, "}\n");
 		}
 	}
+	void internSelf(internmentState &state) {
+		for (auto it = begin(); it != end(); it++) {
+			std::set<std::pair<unsigned, IRExpr *> > out;
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				std::pair<unsigned, IRExpr *> a;
+				a.first = it2->first;
+				a.second = state.intern(it2->second);
+			}
+			it->second = out;
+		}
+	}
 };
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap> {
+	happensBeforeEdge() {}
+	happensBeforeEdge(const ThreadRip &_before,
+			  const ThreadRip &_after,
+			  const std::vector<IRExpr *> &_content,
+			  unsigned _msg_id)
+		: before(_before), after(_after), content(_content), msg_id(_msg_id)
+	{}
 public:
 	static unsigned next_msg_id;
 
@@ -209,6 +282,18 @@ public:
 	std::vector<IRExpr *> content;
 	unsigned msg_id;
 
+	happensBeforeEdge *intern(internmentState &state) {
+		content = state.intern(content);
+		for (auto it = state.hbes.begin(); it != state.hbes.end(); it++) {
+			if ( (*it)->msg_id == msg_id &&
+			     (*it)->before == before &&
+			     (*it)->after == after &&
+			     (*it)->content == content )
+				return (*it);
+		}
+		state.hbes.insert(this);
+		return this;
+	}
 	happensBeforeEdge(bool invert, IRExprHappensBefore *hb,
 			  instructionDominatorMapT &idom,
 			  CFG<ThreadRip> *cfg,
@@ -238,7 +323,35 @@ public:
 	}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%d: %s <-< %s", msg_id, before.name(), after.name());
+		fprintf(f, "%d: %s <-< %s {", msg_id, before.name(), after.name());
+		for (auto it = content.begin(); it != content.end(); it++) {
+			(*it)->prettyPrint(f);
+			fprintf(f, ", ");
+		}
+		fprintf(f, "}");
+	}
+	static happensBeforeEdge *parse(const char *str, const char **suffix)
+	{
+		happensBeforeEdge *work = new happensBeforeEdge();
+		if (!parseDecimalUInt(&work->msg_id, str, &str) ||
+		    !parseThisString(": ", str, &str) ||
+		    !parseThreadRip(&work->before, str, &str) ||
+		    !parseThisString(" <-< ", str, &str) ||
+		    !parseThreadRip(&work->after, str, &str) ||
+		    !parseThisString(" {", str, &str))
+			return NULL;
+		while (1) {
+			IRExpr *a;
+			if (!parseIRExpr(&a, str, &str))
+				break;
+			if (!parseThisString(", ", str, &str))
+				return NULL;
+			work->content.push_back(a);
+		}
+		if (!parseThisChar('}', str, &str))
+			return NULL;
+		*suffix = str;
+		return work;
 	}
 	void visit(HeapVisitor &hv) {
 		visit_container(content, hv);
@@ -283,6 +396,17 @@ public:
 		return it->second;
 	}
 
+	void internSelf(internmentState &state) {
+		std::map<std::pair<unsigned, IRExpr *>, simulationSlotT> work;
+		for (auto it = begin(); it != end(); it++) {
+			std::pair<unsigned, IRExpr *> key;
+			work[state.intern(it->first)] = it->second;
+		}
+		clear();
+		for (auto it = work.begin(); it != work.end(); it++)
+			(*this)[it->first] = it->second;
+	}
+
 	slotMapT() {}
 
 	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
@@ -325,12 +449,33 @@ public:
 	}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "\tSlot map:\n");
+		fprintf(f, "\tSlot map (next index %d):\n", next_slot.idx);
 		for (auto it = begin(); it != end(); it++) {
 			fprintf(f, "\t\t%d:", it->first.first);
 			it->first.second->prettyPrint(f);
 			fprintf(f, " -> %d\n", it->second.idx);
 		}
+	}
+	bool parse(const char *str, const char **suffix) {
+		if (!parseThisString("Slot map (next index ", str, &str) ||
+		    !parseDecimalInt(&next_slot.idx, str, &str) ||
+		    !parseThisString("):\n", str, &str))
+			return false;
+		clear();
+		while (1) {
+			std::pair<unsigned, IRExpr *> key;
+			simulationSlotT value;
+			if (!parseDecimalUInt(&key.first, str, &str) ||
+			    !parseThisChar(':', str, &str) ||
+			    !parseIRExpr(&key.second, str, &str) ||
+			    !parseThisString(" -> ", str, &str) ||
+			    !parseDecimalInt(&value.idx, str, &str) ||
+			    !parseThisChar('\n', str, &str))
+				break;
+			(*this)[key] = value;
+		}
+		*suffix = str;
+		return true;
 	}
 };
 
@@ -366,47 +511,35 @@ struct exprEvalPoint {
 		fprintf(f, "%s%d:", invert ? "!" : "", thread);
 		e->prettyPrint(f);
 	}
+	bool parse(const char *str, const char **suffix) {
+		invert = false;
+		if (parseThisChar('!', str, &str))
+			invert = true;
+		if (!parseDecimalUInt(&thread, str, &str) ||
+		    !parseThisChar(':', str, &str) ||
+		    !parseIRExpr(&e, str, &str))
+			return false;
+		*suffix = str;
+		return true;
+	}
+
+	/* partially instantiating an exprEvalPoint is bad news, but
+	   it's okay if done temporarily before calling parse().
+	   Discourage people from hitting it by accident. */
+	class YesIReallyMeanIt {};
+	exprEvalPoint(const YesIReallyMeanIt &) {}
+};
+
+struct DirectRip {
+	unsigned long rip;
+	DirectRip(unsigned long _rip) : rip(_rip) {}
+	DirectRip() : rip(0) {}
+	bool operator==(const DirectRip &d) const { return rip == d.rip; }
+	DirectRip operator+(long offset) const { return DirectRip(rip + offset); }
 };
 
 class ClientRip : public Named {
-	char *mkName() const {
-		std::vector<const char *> fragments;
-		const char *label;
-		bool free_label = false;
-		switch (type) {
-#define do_case(n) case n: label = #n; break
-			do_case(start_of_instruction);
-			do_case(receive_messages);
-			do_case(receive_messages_skip_orig);
-			do_case(original_instruction);
-			do_case(post_instr_generate);
-			do_case(post_instr_checks);
-			do_case(generate_messages);
-			do_case(restore_flags_and_branch_post_instr_checks);
-			do_case(restore_flags_and_branch_receive_messages);
-			do_case(uninitialised);
-#undef do_case
-		default:
-			label = my_asprintf("<bad%d>", type);
-			free_label = true;
-			break;
-		}
-		fragments.push_back(my_asprintf("%lx:%s{", rip, label));
-		if (free_label)
-			free((void *)label);
-		for (auto it = threads.begin(); it != threads.end(); it++)
-			fragments.push_back(my_asprintf("%d,", *it));
-		fragments.push_back("}");
-		char *res_vex = flattenStringFragments(fragments);
-		char *res_malloc = strdup(res_vex);
-		_LibVEX_free(&main_heap, res_vex);
-		for (unsigned x = 0; x < fragments.size() - 1; x++)
-			free((void *)fragments[x]);
-		return res_malloc;
-	}
 public:
-	unsigned long rip;
-	
 	/* Each original instruction expands into a sequence of
 	 * psuedo-instructions:
 	 *
@@ -449,7 +582,83 @@ public:
 
 		uninitialised /* Placeholder for a ClientRip whcih
 			       * will be initialised later. */
-	} type;
+	};
+private:
+	char *mkName() const {
+		std::vector<const char *> fragments;
+		const char *label;
+		bool free_label = false;
+		switch (type) {
+#define do_case(n) case n: label = #n; break
+			do_case(start_of_instruction);
+			do_case(receive_messages);
+			do_case(receive_messages_skip_orig);
+			do_case(original_instruction);
+			do_case(post_instr_generate);
+			do_case(post_instr_checks);
+			do_case(generate_messages);
+			do_case(restore_flags_and_branch_post_instr_checks);
+			do_case(restore_flags_and_branch_receive_messages);
+			do_case(uninitialised);
+#undef do_case
+		default:
+			label = my_asprintf("<bad%d>", type);
+			free_label = true;
+			break;
+		}
+		fragments.push_back(my_asprintf("%lx:%s{", rip, label));
+		if (free_label)
+			free((void *)label);
+		for (auto it = threads.begin(); it != threads.end(); it++)
+			fragments.push_back(my_asprintf("%d,", *it));
+		fragments.push_back("}");
+		char *res_vex = flattenStringFragments(fragments);
+		char *res_malloc = strdup(res_vex);
+		_LibVEX_free(&main_heap, res_vex);
+		for (unsigned x = 0; x < fragments.size() - 1; x++)
+			free((void *)fragments[x]);
+		return res_malloc;
+	}
+	bool parseType(instruction_type *res, const char *str, const char **suffix) {
+#define do_case(n) if (parseThisString(#n, str, suffix)) { *res = n; return true; }
+		do_case(start_of_instruction);
+		do_case(receive_messages);
+		do_case(receive_messages_skip_orig);
+		do_case(original_instruction);
+		do_case(post_instr_generate);
+		do_case(post_instr_checks);
+		do_case(generate_messages);
+		do_case(restore_flags_and_branch_post_instr_checks);
+		do_case(restore_flags_and_branch_receive_messages);
+		do_case(uninitialised);
+#undef do_case
+		return false;
+	}
+public:
+	bool parse(const char *str, const char **suffix) {
+		if (!parseHexUlong(&rip, str, &str) ||
+		    !parseThisChar(':', str, &str) ||
+		    !parseType(&type, str, &str) ||
+		    !parseThisChar('{', str, &str))
+			return false;
+		int thread;
+		threads.clear();
+		while (1) {
+			if (!parseDecimalInt(&thread, str, &str))
+				break;
+			if (!parseThisChar(',', str, &str))
+				return false;
+			threads.insert(thread);
+		}
+		if (!parseThisChar('}', str, &str))
+			return false;
+		*suffix = str;
+		return true;
+	}
+	unsigned long rip;
+
+	instruction_type type;
+
 	std::set<unsigned> threads;
 	std::set<unsigned> origThreads;
 
@@ -516,6 +725,11 @@ class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint
 	}
 public:
 
+	void internSelf(internmentState &state) {
+		for (auto it = begin(); it != end(); it++)
+			it->second = state.intern(it->second);
+	}
+
 	expressionEvalMapT(expressionDominatorMapT &exprDominatorMap) {
 		for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
 		     it != exprDominatorMap.end();
@@ -550,6 +764,33 @@ public:
 			fprintf(f, "}\n");
 		}
 	}
+	bool parse(const char *str, const char **suffix) {
+		if (!parseThisString("Eval map:\n", str, &str))
+			return false;
+		clear();
+		while (1) {
+			unsigned long key;
+			std::set<exprEvalPoint> value;
+			const char *a;
+			if (!parseHexUlong(&key, str, &a) ||
+			    !parseThisString(" -> {", a, &str))
+				break;
+			while (1) {
+				exprEvalPoint::YesIReallyMeanIt y;
+				exprEvalPoint p(y);
+				if (!p.parse(str, &str))
+					break;
+				if (!parseThisString(", ", str, &str))
+					return false;
+				value.insert(p);
+			}
+			if (!parseThisString("}\n", str, &str))
+				return false;
+			(*this)[key] = value;
+		}
+		*suffix = str;
+		return true;
+	}
 };
 
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
@@ -573,6 +814,258 @@ public:
 	}
 
 	char *asC(const char *ident);
+};
+
+class crashEnforcementRoots : public std::set<ClientRip> {
+public:
+	crashEnforcementRoots() {}
+
+	crashEnforcementRoots(std::map<unsigned, ThreadRip> &roots) {
+		std::map<unsigned long, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
+		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
+		     it != roots.end();
+		     it++)
+			threadsRelevantAtEachEntryPoint[it->second.rip].insert(it->first);
+		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
+		     it != roots.end();
+		     it++) {
+			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip]);
+			insert(ClientRip(it->second.rip, threads, ClientRip::start_of_instruction));
+		}
+	}
+
+	void operator|=(const crashEnforcementRoots &cer) {
+		for (auto it = cer.begin(); it != cer.end(); it++)
+			insert(*it);
+	}
+
+	bool parse(const char *str, const char **suffix) {
+		clear();
+		if (!parseThisString("Roots: ", str, &str))
+			return false;
+		ClientRip r;
+		while (1) {
+			if (!r.parse(str, &str))
+				break;
+			if (!parseThisChar(' ', str, &str))
+				return false;
+			insert(r);
+		}
+		*suffix = str;
+		return true;
+	}
+	void prettyPrint(FILE *f) const {
+		printf("\tRoots: ");
+		for (auto it = begin(); it != end(); it++) {
+			it->prettyPrint(f);
+			printf(" ");
+		}
+		printf("\n");
+	}
+};
+
+class EnforceCrashCFG : public CFG<ThreadRip> {
+public:
+	std::set<ThreadRip> usefulInstrs;
+	bool instructionUseful(Instruction<ThreadRip> *i) {
+		if (usefulInstrs.count(i->rip))
+			return true;
+		else
+			return false;
+	}
+	bool exploreFunction(ThreadRip rip) {
+		return true;
+	}
+	EnforceCrashCFG(AddressSpace *as,
+			const std::set<ThreadRip> &_usefulInstrs)
+		: CFG<ThreadRip>(as), usefulInstrs(_usefulInstrs)
+	{}
+};
+
+class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeEdge *> >,
+			  private GcCallback<&ir_heap> {
+	void runGc(HeapVisitor &hv) {
+		for (auto it = begin(); it != end(); it++)
+			visit_set(it->second, hv);
+	}
+public:
+	happensBeforeMapT() {}
+	happensBeforeMapT(DNF_Conjunction &c,
+			  expressionDominatorMapT &exprDominatorMap,
+			  EnforceCrashCFG *cfg,
+			  expressionStashMapT &exprStashPoints)
+	{
+		for (unsigned x = 0; x < c.size(); x++) {
+			IRExpr *e = c[x].second;
+			bool invert = c[x].first;
+			if (e->tag == Iex_HappensBefore) {
+				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
+				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
+									       cfg, exprStashPoints);
+				(*this)[hbe->before.rip].insert(hbe);
+				(*this)[hbe->after.rip].insert(hbe);
+			}
+		}
+	}
+	void operator|=(const happensBeforeMapT &hbm) {
+		for (auto it = hbm.begin(); it != hbm.end(); it++) {
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				(*this)[it->first].insert(*it2);
+		}
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\tHappens before map:\n");
+		for (auto it = begin(); it != end(); it++) {
+			fprintf(f, "\t\t%lx -> {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				(*it2)->prettyPrint(f);
+				fprintf(f, ", ");
+			}
+			fprintf(f, "}\n");
+		}
+	}
+	bool parse(const char *str, const char **suffix) {
+		if (!parseThisString("Happens before map:\n", str, &str))
+			return false;
+		clear();
+		while (1) {
+			unsigned long addr;
+			std::set<happensBeforeEdge *> edges;
+			if (!parseHexUlong(&addr, str, &str) ||
+			    !parseThisString(" -> {", str, &str))
+				break;
+			while (1) {
+				happensBeforeEdge *edge = happensBeforeEdge::parse(str, &str);
+				if (!edge)
+					break;
+				edges.insert(edge);
+				if (!parseThisString(", ", str, &str))
+					return false;
+			}
+			if (!parseThisString("}\n", str, &str))
+				return false;
+			(*this)[addr] = edges;
+		}
+		*suffix = str;
+		return true;
+	}
+	void internSelf(internmentState &state) {
+		for (auto it = begin(); it != end(); it++) {
+			std::set<happensBeforeEdge *> out;
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				out.insert( (*it2)->intern(state) );
+			it->second = out;
+		}
+	}
+};
+
+/* Map that tells us where the various threads have to exit. */
+class abstractThreadExitPointsT : public std::map<unsigned long, std::set<unsigned> > {
+public:
+	abstractThreadExitPointsT() {}
+	abstractThreadExitPointsT(EnforceCrashCFG *cfg, happensBeforeMapT &);
+	void operator|=(const abstractThreadExitPointsT &atet) {
+		for (auto it = atet.begin(); it != atet.end(); it++)
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				(*this)[it->first].insert(*it2);
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\tAbstract thread exit points:\n");
+		for (auto it = begin(); it != end(); it++) {
+			fprintf(f, "\t\t%lx -> {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				fprintf(f, "%d, ", *it2);
+			fprintf(f, "}\n");
+		}
+	}
+	bool parse(const char *str, const char **suffix) {
+		if (!parseThisString("Abstract thread exit points:\n", str, &str))
+			return false;
+		clear();
+		while (1) {
+			unsigned long key;
+			std::set<unsigned> value;
+			if (!parseHexUlong(&key, str, &str) ||
+			    !parseThisString(" -> {", str, &str))
+				break;
+			while (1) {
+				unsigned v;
+				if (!parseDecimalUInt(&v, str, &str) ||
+				    !parseThisString(", ", str, &str))
+					break;
+				value.insert(v);
+			}
+			if (!parseThisString("}\n", str, &str))
+				return false;
+			(*this)[key] = value;
+		}
+		*suffix = str;
+		return true;
+	}
+};
+
+class crashEnforcementData {
+	void internSelf(internmentState &state) {
+		exprStashPoints.internSelf(state);
+		happensBeforePoints.internSelf(state);
+		exprsToSlots.internSelf(state);
+		expressionEvalPoints.internSelf(state);
+	}
+public:
+	crashEnforcementRoots roots;
+	expressionStashMapT exprStashPoints;
+	happensBeforeMapT happensBeforePoints;
+	slotMapT exprsToSlots;
+	expressionEvalMapT expressionEvalPoints;
+	abstractThreadExitPointsT threadExitPoints;
+
+	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
+			     std::map<unsigned, ThreadRip> &_roots,
+			     expressionDominatorMapT &exprDominatorMap,
+			     DNF_Conjunction &conj,
+			     EnforceCrashCFG *cfg)
+		: roots(_roots),
+		  exprStashPoints(neededExpressions, _roots),
+		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints),
+		  exprsToSlots(exprStashPoints, happensBeforePoints),
+		  expressionEvalPoints(exprDominatorMap),
+		  threadExitPoints(cfg, happensBeforePoints)
+	{}
+
+	bool parse(const char *str, const char **suffix) {
+		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
+		    !roots.parse(str, &str) ||
+		    !exprStashPoints.parse(str, &str) ||
+		    !happensBeforePoints.parse(str, &str) ||
+		    !exprsToSlots.parse(str, &str) ||
+		    !expressionEvalPoints.parse(str, &str) ||
+		    !threadExitPoints.parse(str, &str))
+			return false;
+		internmentState state;
+		internSelf(state);
+		*suffix = str;
+		return true;
+	}
+	crashEnforcementData() {}
+
+	void prettyPrint(FILE *f) {
+		printf("Crash enforcement data:\n");
+		roots.prettyPrint(f);
+		exprStashPoints.prettyPrint(f);
+		happensBeforePoints.prettyPrint(f);
+		exprsToSlots.prettyPrint(f);
+		expressionEvalPoints.prettyPrint(f);
+		threadExitPoints.prettyPrint(f);
+	}
+
+	void operator|=(const crashEnforcementData &ced) {
+		roots |= ced.roots;
+		exprStashPoints |= ced.exprStashPoints;
+		happensBeforePoints |= ced.happensBeforePoints;
+		exprsToSlots |= ced.exprsToSlots;
+		expressionEvalPoints |= ced.expressionEvalPoints;
+		threadExitPoints |= ced.threadExitPoints;
+	}
 };
 
 #endif /* !enforceCrash_hpp__ */

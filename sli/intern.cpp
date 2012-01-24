@@ -6,11 +6,6 @@
 #include "state_machine.hpp"
 #include "libvex_prof.hpp"
 
-struct internIRExprTable {
-	static const int nr_entries = 17;
-	std::map<IRExpr *, IRExpr *> lookups[nr_entries];
-};
-
 struct internStateMachineTable : public internIRExprTable {
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
 	std::map<StateMachineEdge *, StateMachineEdge *> edges;
@@ -63,7 +58,7 @@ shallow_hash(const IRExpr *e)
 	abort();
 }
 
-static IRExpr *
+IRExpr *
 internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 {
 	if (TIMEOUT)

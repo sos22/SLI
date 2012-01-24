@@ -1,11 +1,13 @@
-targets="enforce_crash"
+targets="enforce_crash ced_to_patch"
 # foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
 # expansion does, though, so use that instead.  Meh.
-sources=$(echo {enforce_crash,zapBindersAndFreeVariables,simplify_ordering,enumNeededExpressions,expressiondominatormap,instructiondominatormap,patchfragment}.cpp)
+sources=$(echo {zapBindersAndFreeVariables,simplify_ordering,enumNeededExpressions,expressiondominatormap,instructiondominatormap,patchfragment,intern}.cpp)
 
 defvars() {
     cat <<EOF
-ECRASH_SOURCES=$(echo " $sources" | sed "s% % ${input_base}/%g")
+ECRASH_COMMON_SOURCES=$(echo " $sources" | sed "s% % ${input_base}/%g")
+ECRASH_SOURCES=\$(ECRASH_COMMON_SOURCES) $(echo " $targets" | sed "s% \([a-z_]*\)% ${input_base}/\1.cpp%g")
+ECRASH_COMMON_OBJECTS=\$(patsubst %.cpp,%.o,\$(ECRASH_COMMON_SOURCES))
 ECRASH_OBJECTS=\$(patsubst %.cpp,%.o,\$(ECRASH_SOURCES))
 ECRASH_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(ECRASH_SOURCES))
 all_sources+=\$(ECRASH_SOURCES)
@@ -18,7 +20,9 @@ rules() {
 \$(ECRASH_DEPS): CPPFLAGS+=-Isli -I\$(libvex)/pub
 $targets: slir.a libVEX.a
 
-enforce_crash: \$(ECRASH_OBJECTS)
+enforce_crash: \$(ECRASH_COMMON_OBJECTS) ${input_base}/enforce_crash.o
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
+ced_to_patch: \$(ECRASH_COMMON_OBJECTS) ${input_base}/ced_to_patch.o
 	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 }
