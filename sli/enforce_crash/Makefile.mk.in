@@ -24,7 +24,5 @@ enforce_crash: \$(ECRASH_COMMON_OBJECTS) ${input_base}/enforce_crash.o
 	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 ced_to_patch: \$(ECRASH_COMMON_OBJECTS) ${input_base}/ced_to_patch.o
 	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
-ced_to_patch: 
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 EOF
 }
