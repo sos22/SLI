@@ -798,6 +798,7 @@ StateMachine::selectSingleCrashingPath(void)
 void
 StateMachine::sanityCheck() const
 {
+	return;
 	std::vector<const StateMachineEdge *> path;
 	std::set<threadAndRegister, threadAndRegister::fullCompare> live;
 	root->sanityCheck(live, path);

@@ -15,6 +15,15 @@
    never sends any messages or introduces any delays. */
 #define STASH_ONLY_PATCH 0
 
+typedef std::pair<ClientRip, Instruction<ClientRip> **> relocEntryT;
+
+#define LOUD
+#ifdef LOUD
+#define dbg printf
+#else
+#define dbg(...)
+#endif
+
 unsigned long __trivial_hash_function(const ClientRip &k)
 {
 	return k.rip;
@@ -85,6 +94,21 @@ instrNoImmediatesNoModrm(unsigned opcode)
 	} else {
 		work->emit(opcode);
 	}
+	return work;
+}
+
+static Instruction<ClientRip> *
+instrImm32NoModrm(unsigned opcode, int val)
+{
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	if (opcode >= 0x100) {
+		assert((opcode & 0xff00) == 0x0f00);
+		work->emit(0x0f);
+		work->emit(opcode & 0xff);
+	} else {
+		work->emit(opcode);
+	}
+	work->emitDword(val);
 	return work;
 }
 
@@ -203,6 +227,11 @@ instrPopModrm(const ModRM &mrm)
 	}
 	return instrNoImmediatesModrmOpcode(0x8F, RegisterOrOpcodeExtension::opcode(0), mrm, RexPrefix::none());
 }
+static Instruction<ClientRip> *
+instrPushImm32(int val)
+{
+	return instrImm32NoModrm(0x68, val);
+}
 
 
 static Instruction<ClientRip> *
@@ -238,6 +267,24 @@ instrMovImm64ToReg(unsigned long val, RegisterIdx reg)
 }
 
 static Instruction<ClientRip> *
+instrMovImm32ToModrm64(int val, const ModRM &mrm)
+{
+	Instruction<ClientRip> *work = instrNoImmediatesModrmOpcode(0xc7, RegisterOrOpcodeExtension::opcode(0),
+								    mrm, RexPrefix::wide());
+	work->emitDword(val);
+	return work;
+}
+
+static Instruction<ClientRip> *
+instrMovImmediateToReg(unsigned long imm, RegisterIdx reg)
+{
+	if ((long)imm == (int)imm)
+		return instrMovImm32ToModrm64(imm, ModRM::directRegister(reg));
+	else
+		return instrMovImm64ToReg(imm, reg);
+}
+
+static Instruction<ClientRip> *
 instrCallModrm(const ModRM &mrm)
 {
 	return instrNoImmediatesModrmOpcode(0xff, RegisterOrOpcodeExtension::opcode(2), mrm, RexPrefix::none(), true);
@@ -259,6 +306,13 @@ instrAddModrmToReg(const ModRM &mrm, RegisterIdx reg)
 {
 	return instrNoImmediatesModrmOpcode(0x03, reg, mrm, RexPrefix::wide());
 }
+static Instruction<ClientRip> *
+instrAddImm32ToModrm(int imm32, const ModRM &mrm)
+{
+	Instruction<ClientRip> *work = instrNoImmediatesModrmOpcode(0x81, RegisterOrOpcodeExtension::opcode(0), mrm, RexPrefix::wide());
+	work->emitDword(imm32);
+	return work;
+}
 
 static Instruction<ClientRip> *
 instrCmpModrmToReg(const ModRM &mrm, RegisterIdx reg)
@@ -269,6 +323,13 @@ static Instruction<ClientRip> *
 instrCmpRegToModrm(RegisterIdx reg, const ModRM &mrm)
 {
 	return instrNoImmediatesModrmOpcode(0x3b, reg, mrm, RexPrefix::wide());
+}
+static Instruction<ClientRip> *
+instrCmpImm32ToModrm(int imm32, const ModRM &mrm)
+{
+	Instruction<ClientRip> *work = instrNoImmediatesModrmOpcode(0x81, RegisterOrOpcodeExtension::opcode(7), mrm, RexPrefix::wide());
+	work->emitDword(imm32);
+	return work;
 }
 
 #define mk_slot_instr(name)						\
@@ -364,7 +425,7 @@ instrMovLabelToRegister(const char *label, RegisterIdx reg)
 }
 
 static Instruction<ClientRip> *
-instrJcc(ClientRip target, jcc_code branchType)
+instrJcc(ClientRip target, jcc_code branchType, std::vector<relocEntryT> &relocs)
 {
 	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
 	work->emit(0x0f);
@@ -373,6 +434,20 @@ instrJcc(ClientRip target, jcc_code branchType)
 									  4,
 									  target));
 	work->len += 4;
+	relocs.push_back(relocEntryT(target, &work->branchNextI));
+	return work;
+}
+
+static Instruction<ClientRip> *
+instrJmp(ClientRip target, std::vector<relocEntryT> &relocs)
+{
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	work->emit(0xe9);
+	work->relocs.push_back(new RipRelativeBranchRelocation<ClientRip>(work->len,
+									  4,
+									  target));
+	work->len += 4;
+	relocs.push_back(relocEntryT(target, &work->defaultNextI));
 	return work;
 }
 
@@ -477,40 +552,51 @@ instrStoreSlotToMessage(Instruction<ClientRip> *start,
 	return start;
 }
 
-typedef std::pair<ClientRip, Instruction<ClientRip> **> relocEntryT;
-
-static Instruction<ClientRip> *
-instrHappensBeforeEdgeAfter(const happensBeforeEdge *hb, Instruction<ClientRip> *start,
-			    slotMapT &exprsToSlots, ClientRip nextRip,
+static void
+instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
+			    Instruction<ClientRip> *start,
+			    slotMapT &exprsToSlots,
+			    ClientRip nextRip,
 			    std::vector<relocEntryT> &relocs)
 {
 	Instruction<ClientRip> *cursor;
 
-	cursor = instrSaveRflags(start, exprsToSlots);
-	simulationSlotT rdi = exprsToSlots.allocateSlot();
-	simulationSlotT rax = exprsToSlots.allocateSlot();
-	cursor = cursor->defaultNextI = instrMovRegToSlot(RegisterIdx::RDI, rdi);
-	cursor = cursor->defaultNextI = instrMovRegToSlot(RegisterIdx::RAX, rax);
-	cursor = cursor->defaultNextI = instrMovImm64ToReg(hb->msg_id, RegisterIdx::RDI);
+	cursor = start;
+	cursor = cursor->defaultNextI = instrSkipRedZone();
+	cursor = cursor->defaultNextI = instrPushf();
+
+	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RAX);
+	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RDI);
+
+	for (auto it = hb.begin(); it != hb.end(); it++)
+		cursor = cursor->defaultNextI = instrPushImm32((*it)->msg_id);
+
+	cursor = cursor->defaultNextI = instrMovImmediateToReg(hb.size(), RegisterIdx::RDI);
 	cursor = instrCallSequence(cursor, "(unsigned long)happensBeforeEdge__after");
-	cursor = cursor->defaultNextI = instrMovSlotToReg(rdi, RegisterIdx::RDI);
-	cursor = cursor->defaultNextI = instrTestRegModrm(RegisterIdx::RAX, ModRM::directRegister(RegisterIdx::RAX));
-	cursor = cursor->defaultNextI = instrMovSlotToReg(rax, RegisterIdx::RAX);
+
+	cursor = cursor->defaultNextI = instrAddImm32ToModrm(hb.size() * 8, ModRM::directRegister(RegisterIdx::RSP));
+	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RDI);
+
+	for (auto it = hb.begin(); it != hb.end(); it++) {
+		ClientRip dest = nextRip;
+		for (auto it2 = hb.begin(); it2 != hb.end(); it2++)
+			dest.threads.erase((*it2)->after.thread);
+		dest.threads.insert((*it)->after.thread);
+		dest.type = ClientRip::rx_message;
+		dest.completed_edge = *it;
+		dest.clearName();
+		dbg("\tSuccess destination: %s\n", dest.name());
+		cursor = cursor->defaultNextI = instrCmpImm32ToModrm((*it)->msg_id, ModRM::directRegister(RegisterIdx::RAX));
+		cursor = cursor->defaultNextI = instrJcc(dest, jcc_code::zero, relocs);
+	}
 
 	ClientRip destinationIfThisFails = nextRip;
-	destinationIfThisFails.eraseThread(hb->after.thread);
-	destinationIfThisFails.type = ClientRip::restore_flags_and_branch_receive_messages;
-	cursor = cursor->defaultNextI = instrJcc(destinationIfThisFails, jcc_code::zero);
-
-	relocs.push_back(relocEntryT(destinationIfThisFails, &cursor->branchNextI));
-
-	for (unsigned x = 0; x < hb->content.size(); x++) {
-		simulationSlotT s = exprsToSlots(hb->after.thread, hb->content[x]);
-		cursor = instrLoadMessageToSlot(cursor, hb->msg_id, x, s, RegisterIdx::RDI);
-	}
-	cursor = cursor->defaultNextI = instrMovSlotToReg(rdi, RegisterIdx::RDI);
-	cursor = instrRestoreRflags(cursor, exprsToSlots);
-	return cursor;
+	for (auto it = hb.begin(); it != hb.end(); it++)
+		destinationIfThisFails.threads.erase((*it)->after.thread);
+	destinationIfThisFails.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
+	cursor->defaultNextI = instrJmp(destinationIfThisFails, relocs);
+	destinationIfThisFails.clearName();
+	dbg("\tFailure destination: %s\n", destinationIfThisFails.name());
 }
 
 static Instruction<ClientRip> *
@@ -522,8 +608,14 @@ instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeE
 	simulationSlotT r13 = exprsToSlots.allocateSlot();
 	start = start->defaultNextI = instrMovRegToSlot(RegisterIdx::R13, r13);
 
+	dbg("\tTemporary slot for RDI %d, R13 %d\n", rdi.idx, r13.idx);
 	for (unsigned x = 0; x < hb->content.size(); x++) {
 		simulationSlotT s = exprsToSlots(hb->before.thread, hb->content[x]);
+#ifdef LOUD
+		printf("\tStore slot %d (", s.idx);
+		ppIRExpr(hb->content[x], stdout);
+		printf(") into msg %d slot %d\n", hb->msg_id, x);
+#endif
 		start = instrStoreSlotToMessage(start, hb->msg_id, x, s, RegisterIdx::RDI, RegisterIdx::R13);
 	}
 	start = start->defaultNextI = instrMovImm64ToReg(hb->msg_id, RegisterIdx::RDI);
@@ -662,7 +754,8 @@ static Instruction<ClientRip> *
 instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 			     const exprEvalPoint &e,
 			     ClientRip failTarget,
-			     slotMapT &exprsToSlots)
+			     slotMapT &exprsToSlots,
+			     std::vector<relocEntryT> &relocs)
 {
 	/* Bit of a hack: the fail target's thread set is the set of
 	   threads which are currently live. */
@@ -689,7 +782,7 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 	jcc_code branch_type = invert ? jcc_code::nonzero : jcc_code::zero;
 	failTarget.eraseThread(e.thread);
 	failTarget.type = ClientRip::restore_flags_and_branch_post_instr_checks;
-	cursor = cursor->defaultNextI = instrJcc(failTarget, branch_type);
+	cursor = cursor->defaultNextI = instrJcc(failTarget, branch_type, relocs);
 	return cursor;
 }
 
@@ -811,7 +904,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 
 			res->ripToInstr->set(cr, i2);
 			res->ripToInstr->set(ClientRip(cr, ClientRip::restore_flags_and_branch_post_instr_checks), i2);
-			res->ripToInstr->set(ClientRip(cr, ClientRip::restore_flags_and_branch_receive_messages), i2);
 
 			if (!i->defaultNext.rip)
 				break;
@@ -873,6 +965,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 
 		newInstr->rip = cr;
 
+		cr.clearName();
+		dbg("Considering instruction %s\n", cr.name());
 		switch (cr.type) {
 		case ClientRip::start_of_instruction: {
 			Instruction<DirectRip> *underlying = decoder(cr.rip);
@@ -888,6 +982,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					for (auto it2 = threadsToExit.begin(); it2 != threadsToExit.end(); it2++) {
 						if (cr.threads.count(*it2)) {
 							doit = true;
+							dbg("\tExit thread %d\n", *it2);
 							cr.eraseThread(*it2);
 						}
 					}
@@ -898,7 +993,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				}
 			}
 			/* Stash anything which needs to be stashed. */
-			ClientRip::instruction_type nextState = ClientRip::receive_messages;
 			if (!NO_OP_PATCH && data.exprStashPoints.count(cr.rip)) {
 				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
@@ -906,6 +1000,11 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				     it++) {
 					if (!cr.threadLive(it->first))
 						continue;
+#ifdef LOUD
+					printf("\tStash %d", it->first);
+					ppIRExpr(it->second, stdout);
+					printf("\n");
+#endif
 					IRExpr *e = it->second;
 					if (e->tag == Iex_Get) {
 						/* Easy case: just store the register in its slot */
@@ -928,7 +1027,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 							simulationSlotT spill = data.exprsToSlots.allocateSlot();
 							newInstr = instrMovModrmToSlot(newInstr, instrModrm(underlying), slot, spill);
 							newInstr = newInstr->defaultNextI = instrCmpRegToSlot(instrModrmReg(underlying), slot);
-							nextState = ClientRip::receive_messages_skip_orig;
+							cr.skip_orig = true;
 							break;
 						}
 						default:
@@ -940,37 +1039,32 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					}
 				}
 			}
-			relocs.push_back(relocEntryT(ClientRip(cr, nextState),
+			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::receive_messages),
 						     &newInstr->defaultNextI));
 			break;
 		}
 
 		case ClientRip::receive_messages:
-		case ClientRip::receive_messages_skip_orig:
 			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.happensBeforePoints.count(cr.rip)) {
 				std::set<happensBeforeEdge *> *hbEdges = &data.happensBeforePoints[cr.rip];
+				std::set<const happensBeforeEdge *> relevantEdges;
+
 				for (std::set<happensBeforeEdge *>::iterator it = hbEdges->begin();
 				     it != hbEdges->end();
 				     it++) {
 					const happensBeforeEdge *hb = *it;
 					if (hb->after.rip == cr.rip &&
 					    cr.threadLive(hb->after.thread)) {
-						printf("Instantiate %s <-< %s\n",
-						       hb->before.name(),
-						       hb->after.name());
-						newInstr = instrHappensBeforeEdgeAfter(hb, newInstr, data.exprsToSlots, cr, relocs);
-					} else {
-						printf("Skip %s <-< %s\n",
-						       hb->before.name(),
-						       hb->after.name());
+						dbg("\tReceive message: %s\n", hb->name());
+						relevantEdges.insert(hb);
 					}
 				}
+				instrHappensBeforeEdgeAfter(relevantEdges, newInstr, data.exprsToSlots, cr, relocs);
+			} else {
+				relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::original_instruction),
+							     &newInstr->defaultNextI));
 			}
-			relocs.push_back(relocEntryT(ClientRip(cr,
-							       cr.type == ClientRip::receive_messages ?
-							       ClientRip::original_instruction :
-							       ClientRip::post_instr_generate),
-						     &newInstr->defaultNextI));
+			newInstr = NULL;
 			break;
 		case ClientRip::original_instruction: {
 			Instruction<DirectRip> *underlying = decoder(cr.rip);
@@ -990,12 +1084,14 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				newInstr->branchNext = ClientRip(cr, underlying->branchNext.rip, ClientRip::start_of_instruction);
 				relocs.push_back(relocEntryT(newInstr->branchNext, &newInstr->branchNextI));
 			}
-			memcpy(newInstr->content, underlying->content, underlying->len);
-			newInstr->len = underlying->len;
-			newInstr->pfx = underlying->pfx;
-			newInstr->nr_prefixes = underlying->nr_prefixes;
-			for (auto it = underlying->relocs.begin(); it != underlying->relocs.end(); it++)
-				newInstr->relocs.push_back(convertDirectRelocToClientReloc(*it, cr.threads));
+			if (!cr.skip_orig) {
+				memcpy(newInstr->content, underlying->content, underlying->len);
+				newInstr->len = underlying->len;
+				newInstr->pfx = underlying->pfx;
+				newInstr->nr_prefixes = underlying->nr_prefixes;
+				for (auto it = underlying->relocs.begin(); it != underlying->relocs.end(); it++)
+					newInstr->relocs.push_back(convertDirectRelocToClientReloc(*it, cr.threads));
+			}
 			break;
 		}
 		case ClientRip::post_instr_generate:
@@ -1007,6 +1103,11 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				     it++) {
 					if (!cr.threadLive(it->first))
 						continue;
+#ifdef LOUD
+					printf("\tLate stash %d", it->first);
+					ppIRExpr(it->second, stdout);
+					printf("\n");
+#endif
 					IRExpr *e = it->second;
 					if (e->tag == Iex_Get) {
 						/* Already handled */
@@ -1060,8 +1161,15 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					newInstr = instrSaveRflags(newInstr, data.exprsToSlots);
 					for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
 					     it != expressionsToEval.end();
-					     it++)
-						newInstr = instrCheckExpressionOrEscape(newInstr, *it, fallThrough, data.exprsToSlots);
+					     it++) {
+#ifdef LOUD
+						printf("\tCheck ");
+						it->prettyPrint(stdout);
+						printf("\n");
+#endif
+						newInstr = instrCheckExpressionOrEscape(newInstr, *it, fallThrough, data.exprsToSlots,
+											relocs);
+					}
 					newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
 				}
 			}
@@ -1076,8 +1184,10 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				     it++) {
 					happensBeforeEdge *hb = *it;
 					if (hb->before.rip == cr.rip &&
-					    cr.threadLive(hb->before.thread))
+					    cr.threadLive(hb->before.thread)) {
+						dbg("\tGenerate %s\n", hb->name());
 						newInstr = instrHappensBeforeEdgeBefore(newInstr, hb, data.exprsToSlots);
+					}
 				}
 			}
 
@@ -1095,12 +1205,31 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
 			cr.type = ClientRip::post_instr_checks;
 			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			cr.clearName();
+			dbg("\tRestored flags, going to %s\n", cr.name());
 			break;
 
-		case ClientRip::restore_flags_and_branch_receive_messages:
-			newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
-			cr.type = ClientRip::receive_messages;
+		case ClientRip::rx_message: {
+			auto hb = cr.completed_edge;
+			for (unsigned x = 0; x < hb->content.size(); x++) {
+				simulationSlotT s = data.exprsToSlots(hb->after.thread, hb->content[x]);
+				newInstr = instrLoadMessageToSlot(newInstr, hb->msg_id, x, s, RegisterIdx::RAX);
+			}
+			cr.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
 			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			cr.clearName();
+			dbg("\tAfter receiving message, go to %s\n", cr.name());
+			break;
+		}
+
+		case ClientRip::pop_regs_restore_flags_and_branch_orig_instruction:
+			newInstr = newInstr->defaultNextI = instrPopReg(RegisterIdx::RAX);
+			newInstr = newInstr->defaultNextI = instrPopf();
+			newInstr = newInstr->defaultNextI = instrRestoreRedZone();
+			cr.type = ClientRip::original_instruction;
+			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			cr.clearName();
+			dbg("\tRestore flags etc. then go to %s\n", cr.name());
 			break;
 
 		case ClientRip::uninitialised: /* Shouldn't happen. */
@@ -1199,13 +1328,13 @@ main(int argc, char *argv[])
 	AtExit::init();
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
-	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
-	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
-	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
+	int fd = open(argv[2], O_RDONLY);
+	if (fd < 0)
+		err(1, "open(%s)", argv[2]);
 	crashEnforcementData ced;
-
-	loadCrashEnforcementData(ced, 0);
+	loadCrashEnforcementData(ced, fd);
+	close(fd);
 
 	/* Now build the patch */
 	CFG<ClientRip> *cfg = enforceCrash(ced, ms->addressSpace);
@@ -1215,7 +1344,7 @@ main(int argc, char *argv[])
 
 	/* Dump it to a file and build it. */
 	char *tmpfile = my_asprintf("enforce_crash_XXXXXX");
-	int fd = mkstemp(tmpfile);
+	fd = mkstemp(tmpfile);
 	if (fd < 0) err(1, "mkstemp(%s)", tmpfile);
 	DeleteTmpFile __df(tmpfile);
 	FILE *f = fdopen(fd, "w");
@@ -1236,7 +1365,7 @@ main(int argc, char *argv[])
 		"-Dprogram_to_patch=\"/local/scratch/sos22/mysql-5.5.6-rc/sql/mysqld\"",
 		"../sli/enforce_crash/patch_core.c",
 		"-o",
-		argv[4],
+		argv[3],
 		NULL);
 
 	return 0;

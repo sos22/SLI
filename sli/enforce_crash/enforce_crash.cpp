@@ -14,11 +14,6 @@
 #include "zapBindersAndFreeVariables.hpp"
 #include "enforce_crash.hpp"
 
-unsigned long __trivial_hash_function(const ClientRip &k)
-{
-	return k.rip;
-}
-
 void
 instrToInstrSetMap::print(FILE *f)
 {
@@ -33,6 +28,11 @@ instrToInstrSetMap::print(FILE *f)
 		}
 		fprintf(f, "}\n");
 	}
+}
+
+unsigned long __trivial_hash_function(const ClientRip &k)
+{
+	return k.rip;
 }
 
 abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,

@@ -266,7 +266,8 @@ public:
 	}
 };
 
-class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap> {
+class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>,
+			  public Named {
 	happensBeforeEdge() {}
 	happensBeforeEdge(const ThreadRip &_before,
 			  const ThreadRip &_after,
@@ -274,6 +275,34 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap> {
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
 	{}
+	static char *nameIRExpr(IRExpr *a) {
+		char *ptr;
+		size_t buf_size;
+		FILE *f = open_memstream(&ptr, &buf_size);
+		ppIRExpr(a, f);
+		fclose(f);
+		return ptr;
+	}
+	char *mkName() const {
+		std::vector<const char *> fragments;
+
+		fragments.push_back(my_asprintf(
+					    "%d: %s <-< %s {", msg_id,
+					    before.name(), after.name()));
+		for (auto it = content.begin(); it != content.end(); it++) {
+			fragments.push_back(nameIRExpr(*it));
+			fragments.push_back(", ");
+		}
+		fragments.push_back("}");
+
+		char *res_vex = flattenStringFragments(fragments);
+		char *res_malloc = strdup(res_vex);
+		_LibVEX_free(&main_heap, res_vex);
+		free((void *)fragments[0]);
+		for (unsigned x = 1; x < fragments.size() - 1; x += 2)
+			free((void *)fragments[x]);
+		return res_malloc;		
+	}
 public:
 	static unsigned next_msg_id;
 
@@ -323,12 +352,7 @@ public:
 	}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%d: %s <-< %s {", msg_id, before.name(), after.name());
-		for (auto it = content.begin(); it != content.end(); it++) {
-			(*it)->prettyPrint(f);
-			fprintf(f, ", ");
-		}
-		fprintf(f, "}");
+		fprintf(f, "%s", name());
 	}
 	static happensBeforeEdge *parse(const char *str, const char **suffix)
 	{
@@ -387,6 +411,7 @@ public:
 	simulationSlotT allocateSlot() {
 		simulationSlotT r = next_slot;
 		next_slot.idx++;
+		printf("Allocated slot %d\n", next_slot.idx);
 		return r;
 	}
 
@@ -407,7 +432,7 @@ public:
 			(*this)[it->first] = it->second;
 	}
 
-	slotMapT() {}
+	slotMapT() { printf("Initial slot in slot table %d\n", next_slot.idx); }
 
 	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
 		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore)
@@ -539,7 +564,59 @@ struct DirectRip {
 };
 
 class ClientRip : public Named {
+#define client_rip_types_iter(f)					\
+	f(start_of_instruction)						\
+	f(receive_messages)						\
+	f(original_instruction)						\
+	f(post_instr_generate)						\
+	f(post_instr_checks)						\
+	f(generate_messages)						\
+	f(restore_flags_and_branch_post_instr_checks)			\
+	f(pop_regs_restore_flags_and_branch_orig_instruction)		\
+	f(rx_message)							\
+	f(uninitialised)
+
+	char *mkName() const {
+		std::vector<const char *> fragments;
+		const char *label;
+		bool free_label = false;
+		switch (type) {
+#define do_case(n) case n: label = #n; break;
+			client_rip_types_iter(do_case)
+#undef do_case
+		default:
+			label = my_asprintf("<bad%d>", type);
+			free_label = true;
+			break;
+		}
+		fragments.push_back(my_asprintf("%lx:%s{", rip, label));
+		if (free_label)
+			free((void *)label);
+		for (auto it = threads.begin(); it != threads.end(); it++)
+			fragments.push_back(my_asprintf("%d,", *it));
+		fragments.push_back(strdup("}"));
+		if (type == rx_message)
+			fragments.push_back(my_asprintf("hbe(%s)", completed_edge->name()));
+		if (type == receive_messages ||
+		    type == original_instruction ||
+		    type == rx_message ||
+		    type == pop_regs_restore_flags_and_branch_orig_instruction)
+			fragments.push_back(strdup(skip_orig ? "skip_orig" : "no_skip_orig"));
+		char *res_vex = flattenStringFragments(fragments);
+		char *res_malloc = strdup(res_vex);
+		_LibVEX_free(&main_heap, res_vex);
+		for (unsigned x = 0; x < fragments.size(); x++)
+			free((void *)fragments[x]);
+		return res_malloc;
+	}
 public:
+	unsigned long rip;
+	const happensBeforeEdge *completed_edge; /* Only valid for rx_message */
+	bool skip_orig; /* Only valid for rx_message,
+			   receive_messages,
+			   pop_regs_restore_flags_and_branch_orig_instriction,
+			   and orig_instruction */
+
 	/* Each original instruction expands into a sequence of
 	 * psuedo-instructions:
 	 *
@@ -563,74 +640,16 @@ public:
 	 * restore_flags_and_branch_{post_instr_checks,receive_messages},
 	 * which just restores rflags and then jumps to either
 	 * post_instr_checks or receive_messages, with the same RIP.
-	 *
-	 * One more special case: receive_messages_skip_orig is like
-	 * receive_messages, except that it advances to
-	 * post_instr_generate.
 	 */
 	enum instruction_type {
-		start_of_instruction,
-		receive_messages,
-		receive_messages_skip_orig,
-		original_instruction,
-		post_instr_generate,
-		post_instr_checks,
-		generate_messages,
-
-		restore_flags_and_branch_post_instr_checks,
-		restore_flags_and_branch_receive_messages,
-
-		uninitialised /* Placeholder for a ClientRip whcih
-			       * will be initialised later. */
+#define do_case(x) x,
+		client_rip_types_iter(do_case)
+#undef do_case
 	};
 private:
-	char *mkName() const {
-		std::vector<const char *> fragments;
-		const char *label;
-		bool free_label = false;
-		switch (type) {
-#define do_case(n) case n: label = #n; break
-			do_case(start_of_instruction);
-			do_case(receive_messages);
-			do_case(receive_messages_skip_orig);
-			do_case(original_instruction);
-			do_case(post_instr_generate);
-			do_case(post_instr_checks);
-			do_case(generate_messages);
-			do_case(restore_flags_and_branch_post_instr_checks);
-			do_case(restore_flags_and_branch_receive_messages);
-			do_case(uninitialised);
-#undef do_case
-		default:
-			label = my_asprintf("<bad%d>", type);
-			free_label = true;
-			break;
-		}
-		fragments.push_back(my_asprintf("%lx:%s{", rip, label));
-		if (free_label)
-			free((void *)label);
-		for (auto it = threads.begin(); it != threads.end(); it++)
-			fragments.push_back(my_asprintf("%d,", *it));
-		fragments.push_back("}");
-		char *res_vex = flattenStringFragments(fragments);
-		char *res_malloc = strdup(res_vex);
-		_LibVEX_free(&main_heap, res_vex);
-		for (unsigned x = 0; x < fragments.size() - 1; x++)
-			free((void *)fragments[x]);
-		return res_malloc;
-	}
 	bool parseType(instruction_type *res, const char *str, const char **suffix) {
 #define do_case(n) if (parseThisString(#n, str, suffix)) { *res = n; return true; }
-		do_case(start_of_instruction);
-		do_case(receive_messages);
-		do_case(receive_messages_skip_orig);
-		do_case(original_instruction);
-		do_case(post_instr_generate);
-		do_case(post_instr_checks);
-		do_case(generate_messages);
-		do_case(restore_flags_and_branch_post_instr_checks);
-		do_case(restore_flags_and_branch_receive_messages);
-		do_case(uninitialised);
+		client_rip_types_iter(do_case);
 #undef do_case
 		return false;
 	}
@@ -652,10 +671,29 @@ public:
 		}
 		if (!parseThisChar('}', str, &str))
 			return false;
+		if (type == rx_message) {
+			if (!parseThisString("hbe(", str, &str))
+				return false;
+			completed_edge = happensBeforeEdge::parse(str, &str);
+			if (!completed_edge)
+				return false;
+			if (!parseThisString(")", str, &str))
+				return false;
+		}
+		if (type == receive_messages ||
+		    type == original_instruction ||
+		    type == rx_message ||
+		    type == pop_regs_restore_flags_and_branch_orig_instruction) {
+			if (parseThisString("skip_orig", str, &str))
+				skip_orig = true;
+			else if (parseThisString("no_skip_orig", str, &str))
+				skip_orig = false;
+			else
+				return false;
+		}
 		*suffix = str;
 		return true;
 	}
-	unsigned long rip;
 
 	instruction_type type;
 
@@ -663,19 +701,19 @@ public:
 	std::set<unsigned> origThreads;
 
 	ClientRip(unsigned long _rip, instruction_type _type)
-		: rip(_rip), type(_type)
+		: rip(_rip), completed_edge(NULL), skip_orig(false), type(_type)
 	{}
 	ClientRip()
 		: type(uninitialised)
 	{}
 	ClientRip(unsigned long _rip, const std::set<unsigned> &_threads, instruction_type _type)
-		: rip(_rip), type(_type), threads(_threads), origThreads(_threads)
+		: rip(_rip), completed_edge(NULL), skip_orig(false), type(_type), threads(_threads), origThreads(_threads)
 	{}
 	ClientRip(const ClientRip &orig, instruction_type t)
-		: rip(orig.rip), type(t), threads(orig.threads), origThreads(orig.origThreads)
+		: rip(orig.rip), completed_edge(NULL), skip_orig(false), type(t), threads(orig.threads), origThreads(orig.origThreads)
 	{}
 	ClientRip(const ClientRip &orig, unsigned long _rip, instruction_type t)
-		: rip(_rip), type(t), threads(orig.threads), origThreads(orig.origThreads)
+		: rip(_rip), completed_edge(NULL), skip_orig(false), type(t), threads(orig.threads), origThreads(orig.origThreads)
 	{}
 	/* This ordering doesn't mean much, but it means that we can
 	   use ClientRips as keys in std::map. */
@@ -690,8 +728,23 @@ public:
 			return false;
 		else if (threads < k.threads)
 			return true;
-		else
-			return false;
+
+		if (type == rx_message) {
+			if (completed_edge < k.completed_edge)
+				return true;
+			if (completed_edge > k.completed_edge)
+				return false;
+		}
+		if (type == receive_messages ||
+		    type == original_instruction ||
+		    type == rx_message ||
+		    type == pop_regs_restore_flags_and_branch_orig_instruction) {
+			if (skip_orig > k.skip_orig)
+				return true;
+			if (skip_orig < k.skip_orig)
+				return false;
+		}
+		return false;
 	}
 	bool operator!=(const ClientRip &k) const { return *this < k || k < *this; }
 	bool operator==(const ClientRip &k) const { return !(*this != k); }

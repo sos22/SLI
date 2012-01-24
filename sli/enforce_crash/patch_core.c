@@ -1,5 +1,5 @@
 static void happensBeforeEdge__before(int code);
-static long happensBeforeEdge__after(int code);
+static long happensBeforeEdge__after(int nr_codes, long *codes);
 static void clearMessage(int code);
 
 struct relocation {
@@ -63,29 +63,23 @@ happensBeforeEdge__before_c(int code)
 	messages[code - MESSAGE_ID_BASE] = 1;
 }
 static long
-happensBeforeEdge__after_c(int code)
+happensBeforeEdge__after_c(int nr_codes, long *codes)
 {
 	int cntr;
 	int max;
+	int i;
 
 	if (!have_cloned)
 		return 0;
 
-	if (max_stalls == 0) {
-		max = 0;
-	} else if (message_counters[code - MESSAGE_ID_BASE] < 20) {
-		max = max_stalls >> message_counters[code - MESSAGE_ID_BASE];
-		message_counters[code - MESSAGE_ID_BASE]++;
-	} else {
-		max = 1;
+	max = 10000;
+
+	for (cntr = 0; cntr < max; cntr++) {
+		for (i = 0; i < nr_codes; i++)
+			if (messages[codes[i] - MESSAGE_ID_BASE])
+				return codes[i];
 	}
-	for (cntr = 0; cntr < max && messages[code - MESSAGE_ID_BASE] == 0; cntr++)
-		usleep(100);
-	if (!messages[code - MESSAGE_ID_BASE]) {
-		return 0;
-	} else {
-		return 1;
-	}
+	return 0;
 }
 static void
 clearMessage_c(int code)
@@ -123,12 +117,13 @@ asm(								        \
 mk_trampoline(happensBeforeEdge__before);
 asm(
 "	/* We're called from the patch without saving any registers"
-"          except rdi and rsi.  We are outside the stack redzone,"
+"          except rdi, rax, and rflags.  We are outside the stack redzone,"
 "          though.  Go and save all the call-clobbered registers and"
 "          get into C. */"
 "	"
 "happensBeforeEdge__after:\n"
-"	pushf\n"
+"       push %rsi\n"
+"       lea 16(%rsp), %rsi\n"
 "	push %rcx\n"
 "	push %rdx\n"
 "	push %r8\n"
@@ -142,7 +137,7 @@ asm(
 "	pop %r8\n"
 "	pop %rdx\n"
 "	pop %rcx\n"
-"	popf\n"
+"       pop %rsi\n"
 "	ret\n"
 	);
 mk_trampoline(clearMessage);

@@ -140,6 +140,7 @@ public:
 	static Instruction<ripType> *pseudo(ripType rip);
 
 	void emit(unsigned char);
+	void emitDword(unsigned);
 	void emitQword(unsigned long);
 	void emitModrm(const ModRM &mrm, RegisterOrOpcodeExtension reg);
 
@@ -420,6 +421,20 @@ Instruction<r>::emitQword(unsigned long v)
 	u.v = v;
 	memcpy(content + len, u.bytes, 8);
 	len += 8;
+	assert(len <= MAX_INSTRUCTION_SIZE);
+}
+
+template <typename r> void
+Instruction<r>::emitDword(unsigned v)
+{
+	union {
+		Byte bytes[4];
+		unsigned long v;
+	} u;
+
+	u.v = v;
+	memcpy(content + len, u.bytes, 4);
+	len += 4;
 	assert(len <= MAX_INSTRUCTION_SIZE);
 }
 
