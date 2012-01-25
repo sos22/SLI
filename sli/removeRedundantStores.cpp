@@ -12,10 +12,16 @@ namespace _removeRedundantStores {
 }
 #endif
 
-static bool storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle,
+static bool storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses,
+				      Oracle::RegisterAliasingConfiguration &alias,
+				      bool freeVariablesMightAccessStack,
+				      OracleInterface *oracle,
 				      std::set<StateMachineEdge *> &memo);
 static bool
-storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses, OracleInterface *oracle,
+storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses,
+			      Oracle::RegisterAliasingConfiguration &alias,
+			      bool freeVariablesMightAccessStack,
+			      OracleInterface *oracle,
 			      std::set<StateMachineEdge *> &memo)
 {
 	if (TIMEOUT)
@@ -34,28 +40,34 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
 			assert(smsel);
-			if (oracle->memoryAccessesMightAlias(smsel, smses))
+			if (alias.ptrsMightAlias(smsel->addr, smses->addr, freeVariablesMightAccessStack) &&
+			    oracle->memoryAccessesMightAlias(smsel, smses))
 				return true;
 		}
 	}
-	return storeMightBeLoadedByState(sme->target, smses, oracle, memo);
+	return storeMightBeLoadedByState(sme->target, smses, alias, freeVariablesMightAccessStack, oracle, memo);
 }
 
 static bool
-storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses, OracleInterface *oracle,
+storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses,
+			  Oracle::RegisterAliasingConfiguration &alias,
+			  bool freeVariablesMightAccessStack,
+			  OracleInterface *oracle,
 			  std::set<StateMachineEdge *> &memo)
 {
 	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
-		return storeMightBeLoadedByStateEdge(smp->target, smses, oracle, memo);
+		return storeMightBeLoadedByStateEdge(smp->target, smses, alias, freeVariablesMightAccessStack, oracle, memo);
 	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm))
-		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, oracle, memo) ||
-			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, oracle, memo);
+		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, alias, freeVariablesMightAccessStack, oracle, memo) ||
+			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, alias, freeVariablesMightAccessStack, oracle, memo);
 	return false;
 }
 
 static bool
 storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 				      StateMachineSideEffectStore *smses,
+				      Oracle::RegisterAliasingConfiguration &alias,
+				      bool freeVariablesMightAccessStack,
 				      OracleInterface *oracle)
 {
 	for (unsigned y = idx + 1; y < sme->sideEffects.size(); y++) {
@@ -63,20 +75,24 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
 			assert(smsel);
-			if (oracle->memoryAccessesMightAlias(smsel, smses))
+			if (alias.ptrsMightAlias(smsel->addr, smses->addr,
+						 freeVariablesMightAccessStack) &&
+			    oracle->memoryAccessesMightAlias(smsel, smses))
 				return true;
 		}
 	}
 	std::set<StateMachineEdge *> memo;
-	return storeMightBeLoadedByState(sme->target, smses, oracle, memo);
+	return storeMightBeLoadedByState(sme->target, smses, alias, freeVariablesMightAccessStack, oracle, memo);
 }
 
 static void removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done_something,
+				  Oracle::RegisterAliasingConfiguration &alias,
 				  std::set<StateMachineState *> &visited,
 				  const AllowableOptimisations &opt);
 
 static void
 removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done_something,
+		      Oracle::RegisterAliasingConfiguration &alias,
 		      std::set<StateMachineState *> &visited,
 		      const AllowableOptimisations &opt)
 {
@@ -86,7 +102,7 @@ removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
 			if (opt.ignoreStore(smses->rip.rip) &&
-			    !storeMightBeLoadedFollowingSideEffect(sme, x, smses, oracle)) {
+			    !storeMightBeLoadedFollowingSideEffect(sme, x, smses, alias, opt.freeVariablesMightAccessStack, oracle)) {
 				sme->sideEffects[x] =
 					new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(
@@ -99,11 +115,12 @@ removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done
 			}
 		}
 	}
-	removeRedundantStores(sme->target, oracle, done_something, visited, opt);
+	removeRedundantStores(sme->target, oracle, done_something, alias, visited, opt);
 }
 
 static void
 removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done_something,
+		      Oracle::RegisterAliasingConfiguration &alias,
 		      std::set<StateMachineState *> &visited,
 		      const AllowableOptimisations &opt)
 {
@@ -111,12 +128,12 @@ removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done
 		return;
 	visited.insert(sm);
 	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
-		removeRedundantStores(smp->target, oracle, done_something, visited, opt);
+		removeRedundantStores(smp->target, oracle, done_something, alias, visited, opt);
 		return;
 	}
 	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
-		removeRedundantStores(smb->trueTarget, oracle, done_something, visited, opt);
-		removeRedundantStores(smb->falseTarget, oracle, done_something, visited, opt);
+		removeRedundantStores(smb->trueTarget, oracle, done_something, alias, visited, opt);
+		removeRedundantStores(smb->falseTarget, oracle, done_something, alias, visited, opt);
 		return;
 	}
 	assert(dynamic_cast<StateMachineUnreached *>(sm) ||
@@ -126,20 +143,20 @@ removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done
 }
 
 static void
-removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
+removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 		      const AllowableOptimisations &opt)
 {
 	__set_profiling(removeRedundantStores);
 	std::set<StateMachineState *> visited;
-
-	removeRedundantStores(sm->root, oracle, done_something, visited, opt);
+	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(sm->origin));
+	removeRedundantStores(sm->root, oracle, done_something, alias, visited, opt);
 }
 
 /* End of namespace */
 }
 
 void
-removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
+removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 		      const AllowableOptimisations &opt)
 {
 	_removeRedundantStores::removeRedundantStores(sm, oracle, done_something, opt);
