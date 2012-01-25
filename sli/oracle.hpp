@@ -14,6 +14,7 @@ public:
 
 class OracleInterface : public GarbageCollected<OracleInterface> {
 public:
+	virtual ~OracleInterface() {}
 	virtual bool storeIsThreadLocal(StateMachineSideEffectStore *) = 0;
 	virtual bool loadIsThreadLocal(StateMachineSideEffectLoad *) = 0;
 	virtual bool memoryAccessesMightAlias(StateMachineSideEffectLoad *,
@@ -261,7 +262,7 @@ private:
 	}
 	unsigned long memoryAliasingFilter[nr_memory_filter_words];
 	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
-	std::set<std::pair<unsigned long, unsigned long> > aliasingTable;
+	std::set<std::pair<unsigned long, unsigned long> > *aliasingTable;
 
 	void discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads);
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
@@ -320,9 +321,11 @@ public:
 
 	bool getRbpToRspDelta(unsigned long rip, long *out);
 
+	~Oracle() { delete aliasingTable; }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)
 	{
+		aliasingTable = new std::set<std::pair<unsigned long, unsigned long> >();
 		if (tags)
 			loadTagTable(tags);
 	}
