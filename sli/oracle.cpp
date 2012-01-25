@@ -323,6 +323,40 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smses1->rip.rip, smses2->rip.rip));
 }
 
+void
+Oracle::findRacingRips(StateMachineSideEffectLoad *smsel, std::set<unsigned long> &out)
+{
+	__set_profiling(findRacingRips__load);
+	if (loadIsThreadLocal(smsel))
+		return;
+	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
+		if (it->loads.count(smsel->rip.rip)) {
+			for (auto it2 = it->stores.begin();
+			     it2 != it->stores.end();
+			     it2++)
+				out.insert(*it2);
+		}
+	}
+	return;
+}
+
+void
+Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<unsigned long> &out)
+{
+	__set_profiling(findRacingRips__store);
+	if (storeIsThreadLocal(smses))
+		return;
+	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
+		if (it->stores.count(smses->rip.rip)) {
+			for (auto it2 = it->loads.begin();
+			     it2 != it->loads.end();
+			     it2++)
+				out.insert(*it2);
+		}
+	}
+	return;
+}
+
 template <typename t>
 class union_find {
 public:

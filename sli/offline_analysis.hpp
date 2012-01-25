@@ -190,6 +190,7 @@ public:
 };
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
+void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
 StateMachineEdge *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,

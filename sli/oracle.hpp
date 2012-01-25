@@ -304,6 +304,8 @@ public:
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(StateMachineSideEffectStore *, StateMachineSideEffectStore *);
+	void findRacingRips(StateMachineSideEffectLoad *, std::set<unsigned long> &);
+	void findRacingRips(StateMachineSideEffectStore *, std::set<unsigned long> &);
 	bool functionCanReturn(unsigned long rip);
 
 	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &heads, GarbageCollectionToken token);

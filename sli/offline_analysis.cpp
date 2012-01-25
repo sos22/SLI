@@ -192,27 +192,34 @@ breakCycles(CFGNode<t> *cfg)
 	}
 }
 
-class findAllLoadsVisitor : public StateMachineTransformer {
-	StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *smse, bool *)
-	{
-		out.insert(smse);
-		return smse;
-	}
-	IRExpr *transformIRExpr(IRExpr *e, bool *)
-	{
-		return e;
-	}
-public:
-	std::set<StateMachineSideEffectLoad *> &out;
-	findAllLoadsVisitor(std::set<StateMachineSideEffectLoad *> &o)
-		: out(o)
-	{}
-};
+template <typename t> static void
+findAllTypedSideEffects(StateMachine *sm, std::set<t *> &out)
+{
+	class _ : public StateMachineTransformer {
+		std::set<t *> &out;
+		t *transformOneSideEffect(t *smse, bool *done_something) {
+			out.insert(smse);
+			return NULL;
+		}
+		IRExpr *transformIRExpr(IRExpr *a, bool *done_something) {
+			return a;
+		}
+	public:
+		_(std::set<t *> &_out)
+			: out(_out)
+		{}
+	} doit(out);
+	doit.transform(sm);
+}
 void
 findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
 {
-	findAllLoadsVisitor v(out);
-	v.transform(sm);
+	findAllTypedSideEffects(sm, out);
+}
+void
+findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
+{
+	findAllTypedSideEffects(sm, out);
 }
 
 class findAllEdgesVisitor : public StateMachineTransformer {
