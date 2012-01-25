@@ -914,6 +914,7 @@ irexprAliasingClass(IRExpr *expr,
 		}
 		case Iop_Add32:
 		case Iop_And32:
+		case Iop_And16:
 			return Oracle::PointerAliasingSet::notAPointer;
 		default:
 			break;
