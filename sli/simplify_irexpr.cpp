@@ -242,6 +242,7 @@ optimise_condition_calculation(
 			dep2);
 		break;
 	case AMD64G_CC_OP_LOGICB:
+	case AMD64G_CC_OP_LOGICW:
 	case AMD64G_CC_OP_LOGICL:
 	case AMD64G_CC_OP_LOGICQ:
 		zf = IRExpr_Binop(
