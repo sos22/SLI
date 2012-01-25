@@ -138,20 +138,39 @@ avail_t::dereference(IRExpr *addr)
 	makeFalse(badPtr);
 }
 
+template <typename a> bool
+intersectSets(std::set<a> &x, const std::set<a> &y)
+{
+	bool res = false;
+	auto it1 = x.begin();
+	auto it2 = y.begin();
+
+	while (it1 != x.end() && it2 != y.end()) {
+		if (*it1 == *it2) {
+			it1++;
+			it2++;
+		} else if (*it1 < *it2) {
+			x.erase(it1++);
+			res = true;
+		} else {
+			assert(*it2 < *it1);
+			it2++;
+		}
+	}
+	while (it1 != x.end()) {
+		res = true;
+		x.erase(it1++);
+	}
+	return res;
+}
+
 bool
 avail_t::intersect(const avail_t &other)
 {
-	bool res = false;
-	for (std::set<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-		) {
-		if (other.sideEffects.count(*it) == 0) {
-			res = true;
-			sideEffects.erase(it++); 
-		} else {
-			it++;
-		}
-	}
+	bool res;
+
+	res = intersectSets(sideEffects, other.sideEffects);
+
 	for (auto it = assertFalse.begin();
 	     it != assertFalse.end();
 		) {
