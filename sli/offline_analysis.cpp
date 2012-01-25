@@ -19,6 +19,7 @@ template <typename t> StateMachine *CFGtoCrashReason(unsigned tid,
 						     VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type,
 						            &ir_heap> &crashReasons,
 						     VexPtr<StateMachineState, &ir_heap> &escapeState,
+						     bool simple_calls,
 						     VexPtr<Oracle> &oracle,
 						     GarbageCollectionToken token);
 
@@ -1062,7 +1063,7 @@ CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode<StackRip>
 {
 	VexPtr<gc_heap_map<StackRip, StateMachineState, &ir_heap>::type, &ir_heap> dummy(NULL);
 	VexPtr<StateMachineState, &ir_heap> escape(StateMachineCrash::get());
-	return CFGtoCrashReason<StackRip>(tid, cfg, dummy, escape, oracle, token);
+	return CFGtoCrashReason<StackRip>(tid, cfg, dummy, escape, true, oracle, token);
 }
 
 static bool
@@ -1203,6 +1204,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 						     cfg,
 						     ii,
 						     escape,
+						     true,
 						     oracle,
 						     token);
 	}
@@ -1385,7 +1387,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
 		VexPtr<StateMachine, &ir_heap> cr(
 			CFGtoCrashReason<unsigned long>(tid._tid(), cfg, ii,
-							escape, oracle, token));
+							escape, false, oracle, token));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -1670,6 +1672,7 @@ CFGtoCrashReason(unsigned tid,
 		 VexPtr<CFGNode<t>, &ir_heap> &cfg,
 		 VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
 		 VexPtr<StateMachineState, &ir_heap> &escapeState,
+		 bool simple_calls,
 		 VexPtr<Oracle> &oracle,
 		 GarbageCollectionToken token)
 {
@@ -1808,7 +1811,11 @@ CFGtoCrashReason(unsigned tid,
 								ThreadRip site)
 		{
 			IRExpr *r;
-			if (irsb->next->tag == Iex_Const) {
+			if (simple_calls) {
+				IRExpr **args = alloc_irexpr_array(1);
+				args[0] = NULL;
+				r = IRExpr_ClientCall(0, site, args);
+			} else if (irsb->next->tag == Iex_Const) {
 				unsigned long called_rip = ((IRExprConst *)irsb->next)->con->Ico.U64;
 				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
 
@@ -1865,13 +1872,15 @@ CFGtoCrashReason(unsigned tid,
 			return smp;
 		}
 	public:
+		bool simple_calls;
 		unsigned tid;
 		State &state;
 		StateMachineState *escapeState;
 		Oracle *oracle;
-		BuildStateForCfgNode(unsigned _tid, State &_state, StateMachineState *_escapeState,
-				     Oracle *_oracle)
-			: tid(_tid), state(_state), escapeState(_escapeState), oracle(_oracle)
+		BuildStateForCfgNode(bool _simple_calls, unsigned _tid, State &_state,
+				     StateMachineState *_escapeState, Oracle *_oracle)
+			: simple_calls(_simple_calls), tid(_tid), state(_state),
+			  escapeState(_escapeState), oracle(_oracle)
 		{}
 		StateMachineState *operator()(CFGNode<t> *cfg,
 					      IRSB *irsb) {
@@ -1914,7 +1923,7 @@ CFGtoCrashReason(unsigned tid,
 			}
 			return new StateMachineProxy(rip.rip, edge);
 		}
-	} buildStateForCfgNode(tid, state, escapeState, oracle);
+	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle);
 
 	unsigned long original_rip = wrappedRipToRip(cfg->my_rip);
 	StateMachineState *root = NULL;
