@@ -175,6 +175,8 @@ avail_t::intersect(const avail_t &other)
 	     it != assertFalse.end();
 		) {
 		bool purge = true;
+		if (other.assertFalse.count(*it))
+			purge = false;
 		for (auto it2 = other.assertFalse.begin();
 		     purge && it2 != other.assertFalse.end();
 		     it2++) {
