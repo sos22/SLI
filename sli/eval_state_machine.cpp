@@ -711,8 +711,7 @@ top:
 	bool acceptable;
 	se = machine->currentEdge->sideEffects[machine->nextEdgeSideEffectIdx];
 
-	acceptable = se->type == StateMachineSideEffect::Copy ||
-		se->type == StateMachineSideEffect::Store;
+	acceptable = se->type == StateMachineSideEffect::Store;
 	if (wantLoad)
 		acceptable |= se->type == StateMachineSideEffect::Load;
 	if (acceptable) {
