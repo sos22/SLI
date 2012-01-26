@@ -717,8 +717,8 @@ top:
 		acceptable |= se->type == StateMachineSideEffect::Load;
 	if (acceptable) {
 		StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
-		assert(smea);
-		acceptable &= interestingRips.count(smea->rip.rip);
+		if (smea)
+			acceptable &= interestingRips.count(smea->rip.rip);
 	}
 	if (!acceptable) {
 		if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
