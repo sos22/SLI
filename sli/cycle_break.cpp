@@ -23,7 +23,15 @@ public:
 		 std::set<StateMachineEdge *> > content;
 	std::vector<StateMachineEdge *> edges;
 
-	void initialise(StateMachine *s) {
+	struct extendPathsRes {
+		bool finished;
+		bool haveCycle;
+	};
+
+	extendPathsRes initialise(StateMachine *s) {
+		extendPathsRes res;
+		res.finished = false;
+		res.haveCycle = false;
 		if (!dynamic_cast<StateMachineProxy *>(s->root))
 			s->root = new StateMachineProxy(s->origin, s->root);
 		std::set<StateMachineEdge *> allEdges;
@@ -39,15 +47,14 @@ public:
 				contentE.insert(s->target0());
 			if (s->target1())
 				contentE.insert(s->target1());
+			if (contentE.count(e))
+				res.haveCycle = true;
 		}
 
 		buildEdgeList(s);
-	}
 
-	struct extendPathsRes {
-		bool finished;
-		bool haveCycle;
-	};
+		return res;
+	}
 
 	void buildEdgeList(StateMachine *);
 	extendPathsRes extendPaths();
@@ -172,18 +179,14 @@ breakCycles(StateMachine *inp)
 {
 	reachabilityMap reach;
 
-	reach.initialise(inp);
 	while (1) {
-		reachabilityMap::extendPathsRes r = reach.extendPaths();
+		reachabilityMap::extendPathsRes r = reach.initialise(inp);
+		while (!r.finished && !r.haveCycle)
+			r = reach.extendPaths();
 		if (r.finished)
 			break;
-		if (!r.haveCycle)
-			continue;
 
 		reach.breakCycle();
-
-		/* We've modified the graph; start again. */
-		reach.initialise(inp);
 	}
 }
 

@@ -190,6 +190,7 @@ public:
 };
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
+void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
 StateMachineEdge *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
@@ -198,7 +199,7 @@ StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   GarbageCollectionToken token);
 
 /* Individual optimisation passes. */
-void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
+void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 			   const AllowableOptimisations &opt);
 StateMachine *availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				      const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,

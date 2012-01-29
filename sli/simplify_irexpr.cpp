@@ -242,6 +242,7 @@ optimise_condition_calculation(
 			dep2);
 		break;
 	case AMD64G_CC_OP_LOGICB:
+	case AMD64G_CC_OP_LOGICW:
 	case AMD64G_CC_OP_LOGICL:
 	case AMD64G_CC_OP_LOGICQ:
 		zf = IRExpr_Binop(
@@ -848,17 +849,23 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			 * be close together. */
 			if (operationCommutes(e->op)) {
 				__set_profiling(sort_associative_arguments);
-				std::vector<IRExpr *> c;
-				c.resize(e->nr_arguments);
-				for (int x = 0; x < e->nr_arguments; x++)
-					c[x] = e->contents[x];
-				std::vector<IRExpr *> out;
-				out.resize(e->nr_arguments);
-				vector_slice<IRExpr *> out_slice(out);
-				vector_slice<IRExpr *> inp_slice(c);
-				merge_sort(out_slice, inp_slice, sortIRExprs);
-				for (int x = 0; x < e->nr_arguments; x++)
-					e->contents[x] = out[x];
+				bool unsorted = false;
+				for (int x = 0; x < e->nr_arguments - 1 && !unsorted; x++)
+					if (sortIRExprs(e->contents[x+1], e->contents[x]))
+						unsorted = true;
+				if (unsorted) {
+					std::vector<IRExpr *> c;
+					c.resize(e->nr_arguments);
+					for (int x = 0; x < e->nr_arguments; x++)
+						c[x] = e->contents[x];
+					std::vector<IRExpr *> out;
+					out.resize(e->nr_arguments);
+					vector_slice<IRExpr *> out_slice(out);
+					vector_slice<IRExpr *> inp_slice(c);
+					merge_sort(out_slice, inp_slice, sortIRExprs);
+					for (int x = 0; x < e->nr_arguments; x++)
+						e->contents[x] = out[x];
+				}
 			}
 			/* Fold together constants.  For commutative
 			   operations they'll all be at the beginning, but

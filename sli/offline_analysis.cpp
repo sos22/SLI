@@ -19,6 +19,8 @@ template <typename t> StateMachine *CFGtoCrashReason(unsigned tid,
 						     VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type,
 						            &ir_heap> &crashReasons,
 						     VexPtr<StateMachineState, &ir_heap> &escapeState,
+						     AllowableOptimisations &opt,
+						     bool simple_calls,
 						     VexPtr<Oracle> &oracle,
 						     GarbageCollectionToken token);
 
@@ -192,27 +194,34 @@ breakCycles(CFGNode<t> *cfg)
 	}
 }
 
-class findAllLoadsVisitor : public StateMachineTransformer {
-	StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *smse, bool *)
-	{
-		out.insert(smse);
-		return smse;
-	}
-	IRExpr *transformIRExpr(IRExpr *e, bool *)
-	{
-		return e;
-	}
-public:
-	std::set<StateMachineSideEffectLoad *> &out;
-	findAllLoadsVisitor(std::set<StateMachineSideEffectLoad *> &o)
-		: out(o)
-	{}
-};
+template <typename t> static void
+findAllTypedSideEffects(StateMachine *sm, std::set<t *> &out)
+{
+	class _ : public StateMachineTransformer {
+		std::set<t *> &out;
+		t *transformOneSideEffect(t *smse, bool *done_something) {
+			out.insert(smse);
+			return NULL;
+		}
+		IRExpr *transformIRExpr(IRExpr *a, bool *done_something) {
+			return a;
+		}
+	public:
+		_(std::set<t *> &_out)
+			: out(_out)
+		{}
+	} doit(out);
+	doit.transform(sm);
+}
 void
 findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
 {
-	findAllLoadsVisitor v(out);
-	v.transform(sm);
+	findAllTypedSideEffects(sm, out);
+}
+void
+findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
+{
+	findAllTypedSideEffects(sm, out);
 }
 
 class findAllEdgesVisitor : public StateMachineTransformer {
@@ -307,6 +316,52 @@ canonicaliseRbp(StateMachine *sm, OracleInterface *oracle)
 	sm->root = new StateMachineProxy(sm->origin, e);
 }
 
+/* Find all of the states which definitely reach <survive> rather than
+   <crash> and reduce them to just <survive> */
+static void
+removeSurvivingStates(StateMachine *sm, bool *done_something)
+{
+	std::set<StateMachineState *> survivingStates;
+	std::set<StateMachineState *> allStates;
+	bool progress;
+	findAllStates(sm, survivingStates);
+	allStates = survivingStates;
+	do {
+		progress = false;
+		for (auto it = survivingStates.begin(); it != survivingStates.end(); ) {
+			StateMachineState *s = *it;
+			if (dynamic_cast<StateMachineCrash *>(s) ||
+			    dynamic_cast<StateMachineUnreached *>(s) ||
+			    (s->target0() && !survivingStates.count(s->target0()->target)) ||
+			    (s->target1() && !survivingStates.count(s->target1()->target))) {
+				survivingStates.erase(it++);
+				progress = true;
+			} else {
+				it++;
+			}
+		}
+	} while (progress);
+
+	StateMachineEdge *noCrashEdge = NULL;
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		StateMachineState *s = *it;
+		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s);
+		if (!smb)
+			continue;
+		if (smb->trueTarget->target != StateMachineNoCrash::get() &&
+		    survivingStates.count(smb->trueTarget->target)) {
+			if (!noCrashEdge) noCrashEdge = new StateMachineEdge(StateMachineNoCrash::get());
+			smb->trueTarget = noCrashEdge;
+			*done_something = true;
+		}
+		if (smb->falseTarget->target != StateMachineNoCrash::get() &&
+		    survivingStates.count(smb->falseTarget->target)) {
+			if (!noCrashEdge) noCrashEdge = new StateMachineEdge(StateMachineNoCrash::get());
+			smb->falseTarget = noCrashEdge;
+			*done_something = true;
+		}
+	}
+}
 
 StateMachine *
 optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
@@ -325,6 +380,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		done_something = false;
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
+		if (opt.ignoreSideEffects)
+			removeSurvivingStates(sm, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, opt);
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
@@ -344,9 +401,9 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
-			sm = optimiseSSA(sm, &done_something);
 			sm->root->assertAcyclic();
 		}
+		sm = optimiseSSA(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
 	sm->sanityCheck();
@@ -1051,11 +1108,11 @@ buildCFGForCallGraph(AddressSpace *as,
 
 static StateMachine *
 CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode<StackRip>, &ir_heap> &cfg,
-		  GarbageCollectionToken token)
+		  AllowableOptimisations &opt, GarbageCollectionToken token)
 {
 	VexPtr<gc_heap_map<StackRip, StateMachineState, &ir_heap>::type, &ir_heap> dummy(NULL);
 	VexPtr<StateMachineState, &ir_heap> escape(StateMachineCrash::get());
-	return CFGtoCrashReason<StackRip>(tid, cfg, dummy, escape, oracle, token);
+	return CFGtoCrashReason<StackRip>(tid, cfg, dummy, escape, opt, true, oracle, token);
 }
 
 static bool
@@ -1196,6 +1253,8 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 						     cfg,
 						     ii,
 						     escape,
+						     opt,
+						     true,
 						     oracle,
 						     token);
 	}
@@ -1233,17 +1292,17 @@ considerStoreCFG(VexPtr<CFGNode<StackRip>, &ir_heap> cfg,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, token));
-	if (!sm) {
-		fprintf(_logfile, "Cannot build store machine!\n");
-		return true;
-	}
-
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableassumeNoInterferingStores()
 		.setAddressSpace(as);
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, opt, token));
+	if (!sm) {
+		fprintf(_logfile, "Cannot build store machine!\n");
+		return true;
+	}
+
 	opt.interestingStores = is.rips;
 	opt.haveInterestingStoresSet = true;
 
@@ -1378,7 +1437,7 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
 		VexPtr<StateMachine, &ir_heap> cr(
 			CFGtoCrashReason<unsigned long>(tid._tid(), cfg, ii,
-							escape, oracle, token));
+							escape, opt, false, oracle, token));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -1663,6 +1722,8 @@ CFGtoCrashReason(unsigned tid,
 		 VexPtr<CFGNode<t>, &ir_heap> &cfg,
 		 VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
 		 VexPtr<StateMachineState, &ir_heap> &escapeState,
+		 AllowableOptimisations &opt,
+		 bool simple_calls,
 		 VexPtr<Oracle> &oracle,
 		 GarbageCollectionToken token)
 {
@@ -1801,7 +1862,11 @@ CFGtoCrashReason(unsigned tid,
 								ThreadRip site)
 		{
 			IRExpr *r;
-			if (irsb->next->tag == Iex_Const) {
+			if (simple_calls) {
+				IRExpr **args = alloc_irexpr_array(1);
+				args[0] = NULL;
+				r = IRExpr_ClientCall(0, site, args);
+			} else if (irsb->next->tag == Iex_Const) {
 				unsigned long called_rip = ((IRExprConst *)irsb->next)->con->Ico.U64;
 				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
 
@@ -1858,13 +1923,15 @@ CFGtoCrashReason(unsigned tid,
 			return smp;
 		}
 	public:
+		bool simple_calls;
 		unsigned tid;
 		State &state;
 		StateMachineState *escapeState;
 		Oracle *oracle;
-		BuildStateForCfgNode(unsigned _tid, State &_state, StateMachineState *_escapeState,
-				     Oracle *_oracle)
-			: tid(_tid), state(_state), escapeState(_escapeState), oracle(_oracle)
+		BuildStateForCfgNode(bool _simple_calls, unsigned _tid, State &_state,
+				     StateMachineState *_escapeState, Oracle *_oracle)
+			: simple_calls(_simple_calls), tid(_tid), state(_state),
+			  escapeState(_escapeState), oracle(_oracle)
 		{}
 		StateMachineState *operator()(CFGNode<t> *cfg,
 					      IRSB *irsb) {
@@ -1907,7 +1974,7 @@ CFGtoCrashReason(unsigned tid,
 			}
 			return new StateMachineProxy(rip.rip, edge);
 		}
-	} buildStateForCfgNode(tid, state, escapeState, oracle);
+	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle);
 
 	unsigned long original_rip = wrappedRipToRip(cfg->my_rip);
 	StateMachineState *root = NULL;
@@ -1936,8 +2003,7 @@ CFGtoCrashReason(unsigned tid,
 	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip, fv, tid));
 	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
-	sm = optimiseStateMachine(sm, AllowableOptimisations::defaultOptimisations, oracle, false,
-				  token);
+	sm = optimiseStateMachine(sm, opt, oracle, false, token);
 	if (crashReasons)
 		crashReasons->set(original_rip, sm->root);
 	sm = convertToSSA(sm);

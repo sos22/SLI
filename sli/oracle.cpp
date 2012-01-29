@@ -282,7 +282,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 		return false;
 	}
 
-	if (aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel->rip.rip, smses->rip.rip))) {
+	if (aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel->rip.rip, smses->rip.rip))) {
 		nr_trues++;
 		return true;
 	} else {
@@ -306,7 +306,7 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel1,
 	} else if (loadIsThreadLocal(smsel2))
 		return false;
 
-	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smsel1->rip.rip, smsel2->rip.rip));
+	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel1->rip.rip, smsel2->rip.rip));
 }
 
 bool
@@ -320,7 +320,41 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 		else
 			return false;
 	}
-	return !!aliasingTable.count(std::pair<unsigned long, unsigned long>(smses1->rip.rip, smses2->rip.rip));
+	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smses1->rip.rip, smses2->rip.rip));
+}
+
+void
+Oracle::findRacingRips(StateMachineSideEffectLoad *smsel, std::set<unsigned long> &out)
+{
+	__set_profiling(findRacingRips__load);
+	if (loadIsThreadLocal(smsel))
+		return;
+	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
+		if (it->loads.count(smsel->rip.rip)) {
+			for (auto it2 = it->stores.begin();
+			     it2 != it->stores.end();
+			     it2++)
+				out.insert(*it2);
+		}
+	}
+	return;
+}
+
+void
+Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<unsigned long> &out)
+{
+	__set_profiling(findRacingRips__store);
+	if (storeIsThreadLocal(smses))
+		return;
+	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
+		if (it->stores.count(smses->rip.rip)) {
+			for (auto it2 = it->loads.begin();
+			     it2 != it->loads.end();
+			     it2++)
+				out.insert(*it2);
+		}
+	}
+	return;
 }
 
 template <typename t>
@@ -599,7 +633,7 @@ Oracle::loadTagTable(const char *path)
 			     it2 != t.stores.end();
 			     it2++) {
 				if (!(*it2 & (1ul << 63)))
-					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
 			}
 			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
 			     it2 != t.loads.end();
@@ -609,7 +643,7 @@ Oracle::loadTagTable(const char *path)
 					memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
 					h = hashRipPair(*it1 * 23, *it2 * 17);
 					memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
-					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
 				}
 			}
 		}
@@ -622,13 +656,13 @@ Oracle::loadTagTable(const char *path)
 			     it2 != t.stores.end();
 			     it2++) {
 				if (!(*it2 & (1ul << 63)))
-					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
 			}
 			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
 			     it2 != t.loads.end();
 			     it2++) {
 				if (!(*it2 & (1ul << 63)))
-					aliasingTable.insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
 			}
 		}
 		tag_table.push_back(t);
@@ -880,6 +914,7 @@ irexprAliasingClass(IRExpr *expr,
 		}
 		case Iop_Add32:
 		case Iop_And32:
+		case Iop_And16:
 			return Oracle::PointerAliasingSet::notAPointer;
 		default:
 			break;
