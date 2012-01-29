@@ -653,6 +653,9 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 			cursor = cursor->defaultNextI = instrNegModrm(ModRM::directRegister(reg));
 			return cursor;
 		default:
+			fprintf(stderr, "WARNING: Cannot evaluate unop ");
+			ppIRExpr(e, stderr);
+			fprintf(stderr, " (%x)\n", ((IRExprUnop *)e)->op);
 			break;
 		}
 		break;
@@ -686,6 +689,9 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 			return cursor;
 		}
 		default:
+			fprintf(stderr, "WARNING: Cannot evaluate binop ");
+			ppIRExpr(e, stderr);
+			fprintf(stderr, " (%x)\n", ((IRExprBinop *)e)->op);
 			break;
 		}
 		break;
@@ -719,16 +725,19 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 			return cursor;
 		}
 		default:
+			fprintf(stderr, "WARNING: Cannot evaluate associative ");
+			ppIRExpr(e, stderr);
+			fprintf(stderr, " (%x)\n", ((IRExprAssociative *)e)->op);
 			break;
 		}
 		break;
 	default:
+		fprintf(stderr, "WARNING: Cannot evaluate ");
+		ppIRExpr(e, stderr);
+		fprintf(stderr, " (%x)\n", e->tag);
 		break;
 	}
 
-	fprintf(stderr, "WARNING: Cannot evaluate ");
-	ppIRExpr(e, stderr);
-	fprintf(stderr, "\n");
 	dbg_break("Hello");
 	return NULL;
 }
