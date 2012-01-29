@@ -1257,6 +1257,48 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 	return true;
 }
 
+static IRExpr *
+removeFreeVariable(IRExpr *base, const FreeVariableKey &k, IRExpr *to)
+{
+	class _ : public IRExprTransformer {
+		const FreeVariableKey &k;
+		IRExpr *to;
+	public:
+		IRExpr *transformIex(IRExprFreeVariable *f) {
+			if (f->key == k)
+				return to;
+			else
+				return NULL;
+		}
+		_(const FreeVariableKey &_k,
+		  IRExpr *_to)
+			: k(_k), to(_to)
+		{}
+	} doit(k, to);
+	return doit.transformIRExpr(base);
+}
+
+/* @base was calculated for @newMachine, and will include some free
+   variables specific to that machine.  Rework it so that it only
+   references free variables present in @origMachine. */
+static IRExpr *removeExtraFreeVariables(IRExpr *base,
+					StateMachine *newMachine,
+					StateMachine *origMachine) __attribute__((noinline));
+static IRExpr *
+removeExtraFreeVariables(IRExpr *base,
+			 StateMachine *origMachine,
+			 StateMachine *newMachine)
+{
+	for (auto it = newMachine->freeVariables.content->begin();
+	     it != newMachine->freeVariables.content->end();
+	     it++) {
+		if (origMachine->freeVariables.content->hasKey(it.key()))
+			continue;
+		base = removeFreeVariable(base, it.key(), it.value());
+	}
+	return base;
+}
+
 static void
 findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			   VexPtr<StateMachine, &ir_heap> &storeMachine,
@@ -1278,10 +1320,14 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 	AllowableOptimisations loadMachineOpt = opt;
 	loadMachineOpt.nonLocalLoads = &probeMachineRacingInstructions;
-	probeMachine = optimiseStateMachine(probeMachine, loadMachineOpt, oracle,
-					    true, token);
+	VexPtr<StateMachine, &ir_heap> newProbeMachine(probeMachine->clone());
+	newProbeMachine = optimiseStateMachine(newProbeMachine,
+					       loadMachineOpt,
+					       oracle,
+					       true,
+					       token);
 
-	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine->root));
+	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(newProbeMachine->root));
 	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine->root));
 	while (1) {
 		if (TIMEOUT)
@@ -1294,7 +1340,7 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		ctxt.collectOrderingConstraints = true;
 		ctxt.pathConstraint = initialStateCondition;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		CrossEvalState s1(probeMachine, probeEdge, 0);
+		CrossEvalState s1(newProbeMachine, probeEdge, 0);
 		CrossEvalState s2(storeMachine, storeEdge, 0);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
@@ -1326,6 +1372,10 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			result,
 			newCondition),
 		opt);
+
+	result = removeExtraFreeVariables(result,
+					  probeMachine,
+					  newProbeMachine);
 }
 
 IRExpr *

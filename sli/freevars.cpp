@@ -261,6 +261,23 @@ static StateMachineState *introduceFreeVariables(StateMachineState *sm,
 						 OracleInterface *oracle,
 						 bool *done_something,
 						 std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh);
+static bool
+containsNoTemporaries(IRExpr *e)
+{
+	class _ : public IRExprTransformer {
+	public:
+		bool res;
+		_() : res(true) {}
+		IRExpr *transformIex(IRExprGet *e) {
+			if (e->reg.isTemp())
+				res = false;
+			return NULL;
+		}
+	} doit;
+	doit.transformIRExpr(e);
+	return doit.res;
+}
+
 static StateMachineEdge *
 introduceFreeVariables(StateMachineEdge *sme,
 		       StateMachine *root_sm,
@@ -272,13 +289,21 @@ introduceFreeVariables(StateMachineEdge *sme,
 {
 	StateMachineEdge *out = new StateMachineEdge(NULL);
 	bool doit = false;
-	/* A load results in a free variable if it's local and no
-	   stores could potentially alias with it and no other loads
-	   could alias with it. */
+	/* A load results in a free variable if:
+
+	   a) it's local and,
+	   b) no stores could potentially alias with it, and 
+	   c) no other loads could alias with it, and
+	   d) the loaded address does not contain any temporaries (i.e. the
+	   results of other loads).
+
+	   For (d), free variables and registers are fine, because
+	   they're inherently local. */
 	for (unsigned idx = 0; idx < sme->sideEffects.size(); idx++) {
 		StateMachineSideEffect *smse = sme->sideEffects[idx];
 		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		if (!smsel ||
+		    !containsNoTemporaries(smsel->addr) ||
 		    !oracle->loadIsThreadLocal(opt, smsel) ||
 		    !definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) ||
 		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) != 1) {

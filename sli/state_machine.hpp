@@ -232,7 +232,7 @@ public:
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, unsigned long _origin, FreeVariableMap &fv, unsigned _tid)
+	StateMachine(StateMachineState *_root, unsigned long _origin, const FreeVariableMap &fv, unsigned _tid)
 		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
 	{
 	}
@@ -255,6 +255,7 @@ public:
 			       bool *done_something);
 	void selectSingleCrashingPath();
 	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
+	StateMachine *clone() const;
 #ifdef NDEBUG
 	void sanityCheck() const {}
 #else
@@ -304,6 +305,9 @@ public:
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live, std::vector<const StateMachineEdge *> &done) const = 0;
 #endif
 
+	virtual StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+					 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const = 0;
+
 	NAMED_CLASS
 };
 
@@ -336,7 +340,7 @@ class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 public:
 	unsigned long hashval() const;
 	StateMachineEdge(StateMachineState *t) : have_hash(false), target(t) {}
-	StateMachineEdge(std::vector<StateMachineSideEffect *> &_sideEffects,
+	StateMachineEdge(const std::vector<StateMachineSideEffect *> &_sideEffects,
 			 StateMachineState *t)
 		: have_hash(false), target(t), sideEffects(_sideEffects)
 	{}
@@ -451,6 +455,17 @@ public:
 		assert(done.size() == sz);
 #endif
 	}
+
+	StateMachineEdge *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+				std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const
+	{
+		if (edgeMap.count(this))
+			return edgeMap[this];
+		auto res = new StateMachineEdge(sideEffects, target->clone(stateMap, edgeMap));
+		edgeMap[this] = res;
+		return res;
+	}
+
 	NAMED_CLASS
 };
 
@@ -487,6 +502,10 @@ public:
 		return _this;
 	}
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
+	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
+		return get();
+	}
 };
 
 class StateMachineCrash : public StateMachineTerminal {
@@ -500,6 +519,10 @@ public:
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return true; }
+	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
+		return get();
+	}
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
@@ -513,6 +536,10 @@ public:
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
+	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
+		return get();
+	}
 };
 
 /* A state machine node which always advances to another one.  These
@@ -569,6 +596,14 @@ public:
 			 std::vector<const StateMachineEdge *> &done) const
 	{
 		target->sanityCheck(live, done);
+	}
+	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
+		if (stateMap.count(this))
+			return stateMap[this];
+		auto res = new StateMachineProxy(origin, target->clone(stateMap, edgeMap));
+		stateMap[this] = res;
+		return res;
 	}
 };
 
@@ -683,6 +718,17 @@ public:
 		trueTarget->sanityCheck(live, done);
 		falseTarget->sanityCheck(live, done);
 	}
+
+	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
+		if (stateMap.count(this))
+			return stateMap[this];
+		auto res = new StateMachineBifurcate(origin, condition,
+						     trueTarget->clone(stateMap, edgeMap),
+						     falseTarget->clone(stateMap, edgeMap));
+		stateMap[this] = res;
+		return res;
+	}
 };
 
 /* A node in the state machine representing a bit of code which we
@@ -702,6 +748,15 @@ public:
 	}
 	void visit(HeapVisitor &hv) { hv(target); }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
+
+	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
+				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
+		if (stateMap.count(this))
+			return stateMap[this];
+		auto res = new StateMachineStub(origin, target);
+		stateMap[this] = res;
+		return res;
+	}
 };
 
 

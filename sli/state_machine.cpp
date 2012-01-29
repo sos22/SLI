@@ -804,3 +804,14 @@ StateMachine::sanityCheck() const
 	root->sanityCheck(live, path);
 }
 #endif
+
+StateMachine *
+StateMachine::clone() const
+{
+	std::map<const StateMachineState *, StateMachineState *> stateMap;
+	std::map<const StateMachineEdge *, StateMachineEdge *> edgeMap;
+	return new StateMachine(root->clone(stateMap, edgeMap),
+				origin,
+				freeVariables,
+				tid);
+}
