@@ -37,7 +37,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
 		if (smsel2 &&
 		    alias.ptrsMightAlias(smsel->addr, smsel2->addr, opt.freeVariablesMightAccessStack) &&
-		    oracle->memoryAccessesMightAlias(smsel, smsel2) &&
+		    oracle->memoryAccessesMightAlias(opt, smsel, smsel2) &&
 		    definitelyEqual( smsel->addr,
 				     smsel2->addr,
 				     opt))
@@ -121,7 +121,7 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
 		if (smses &&
 		    alias.ptrsMightAlias(smsel->addr, smses->addr, opt.freeVariablesMightAccessStack) &&
-		    oracle->memoryAccessesMightAlias(smsel, smses) &&
+		    oracle->memoryAccessesMightAlias(opt, smsel, smses) &&
 		    !definitelyNotEqual( smsel->addr,
 					 smses->addr,
 					 opt)) {
@@ -279,7 +279,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		StateMachineSideEffect *smse = sme->sideEffects[idx];
 		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		if (!smsel ||
-		    !oracle->loadIsThreadLocal(smsel) ||
+		    !oracle->loadIsThreadLocal(opt, smsel) ||
 		    !definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) ||
 		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) != 1) {
 			out->sideEffects.push_back(smse);

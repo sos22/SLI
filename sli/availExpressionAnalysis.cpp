@@ -315,8 +315,8 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 
 			if ( addr &&
 			     alias.ptrsMightAlias(addr, smses->addr, opt.freeVariablesMightAccessStack) &&
-			     ((smses2 && oracle->memoryAccessesMightAlias(smses2, smses)) ||
-			      (smsel2 && oracle->memoryAccessesMightAlias(smsel2, smses))) &&
+			     ((smses2 && oracle->memoryAccessesMightAlias(opt, smses2, smses)) ||
+			      (smsel2 && oracle->memoryAccessesMightAlias(opt, smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
 						  smses->addr,
 						  opt) )
@@ -732,7 +732,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(*it);
 			if ( (smses && !oracle->storeIsThreadLocal(smses)) ||
-			     (smsel && !oracle->loadIsThreadLocal(smsel)) ) {
+			     (smsel && !oracle->loadIsThreadLocal(opt, smsel)) ) {
 				potentiallyAvailable.sideEffects.erase(it++);
 			} else {
 				it++;

@@ -87,6 +87,11 @@ public:
 	bool haveInterestingStoresSet;
 	std::set<unsigned long> interestingStores;
 
+	/* If this is non-NULL then rather than using the oracle to
+	   check whether loads might possibly load, we just look in
+	   here. */
+	std::set<unsigned long> *nonLocalLoads;
+
 	AllowableOptimisations disablexPlusMinusX() const
 	{
 		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,

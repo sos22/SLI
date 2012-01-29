@@ -13,12 +13,14 @@ namespace _removeRedundantStores {
 #endif
 
 static bool storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses,
+				      const AllowableOptimisations &opt,
 				      Oracle::RegisterAliasingConfiguration &alias,
 				      bool freeVariablesMightAccessStack,
 				      OracleInterface *oracle,
 				      std::set<StateMachineEdge *> &memo);
 static bool
 storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses,
+			      const AllowableOptimisations &opt,
 			      Oracle::RegisterAliasingConfiguration &alias,
 			      bool freeVariablesMightAccessStack,
 			      OracleInterface *oracle,
@@ -41,30 +43,32 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
 			assert(smsel);
 			if (alias.ptrsMightAlias(smsel->addr, smses->addr, freeVariablesMightAccessStack) &&
-			    oracle->memoryAccessesMightAlias(smsel, smses))
+			    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				return true;
 		}
 	}
-	return storeMightBeLoadedByState(sme->target, smses, alias, freeVariablesMightAccessStack, oracle, memo);
+	return storeMightBeLoadedByState(sme->target, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
 }
 
 static bool
 storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses,
+			  const AllowableOptimisations &opt,
 			  Oracle::RegisterAliasingConfiguration &alias,
 			  bool freeVariablesMightAccessStack,
 			  OracleInterface *oracle,
 			  std::set<StateMachineEdge *> &memo)
 {
 	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
-		return storeMightBeLoadedByStateEdge(smp->target, smses, alias, freeVariablesMightAccessStack, oracle, memo);
+		return storeMightBeLoadedByStateEdge(smp->target, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
 	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm))
-		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, alias, freeVariablesMightAccessStack, oracle, memo) ||
-			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, alias, freeVariablesMightAccessStack, oracle, memo);
+		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo) ||
+			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
 	return false;
 }
 
 static bool
 storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
+				      const AllowableOptimisations &opt,
 				      StateMachineSideEffectStore *smses,
 				      Oracle::RegisterAliasingConfiguration &alias,
 				      bool freeVariablesMightAccessStack,
@@ -77,12 +81,12 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 			assert(smsel);
 			if (alias.ptrsMightAlias(smsel->addr, smses->addr,
 						 freeVariablesMightAccessStack) &&
-			    oracle->memoryAccessesMightAlias(smsel, smses))
+			    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				return true;
 		}
 	}
 	std::set<StateMachineEdge *> memo;
-	return storeMightBeLoadedByState(sme->target, smses, alias, freeVariablesMightAccessStack, oracle, memo);
+	return storeMightBeLoadedByState(sme->target, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
 }
 
 static void removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done_something,
@@ -102,7 +106,7 @@ removeRedundantStores(StateMachineEdge *sme, OracleInterface *oracle, bool *done
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
 			if (opt.ignoreStore(smses->rip.rip) &&
-			    !storeMightBeLoadedFollowingSideEffect(sme, x, smses, alias, opt.freeVariablesMightAccessStack, oracle)) {
+			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, opt.freeVariablesMightAccessStack, oracle)) {
 				sme->sideEffects[x] =
 					new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(

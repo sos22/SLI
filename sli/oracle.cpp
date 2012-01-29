@@ -203,9 +203,15 @@ Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
 	return true;
 }
 bool
-Oracle::loadIsThreadLocal(StateMachineSideEffectLoad *s)
+Oracle::loadIsThreadLocal(const AllowableOptimisations &opt, StateMachineSideEffectLoad *s)
 {
 	__set_profiling(loadIsThreadLocal);
+	if (opt.nonLocalLoads) {
+		if (opt.nonLocalLoads->count(s->rip.rip))
+			return false;
+		else
+			return true;
+	}
 	static std::set<unsigned long> threadLocal;
 	static std::set<unsigned long> notThreadLocal;
 	if (threadLocal.count(s->rip.rip))
@@ -248,7 +254,8 @@ Oracle::getAllMemoryAccessingInstructions(std::vector<unsigned long> &out) const
 }
 
 bool
-Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
+Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
+				 StateMachineSideEffectLoad *smsel,
 				 StateMachineSideEffectStore *smses)
 {
 	__set_profiling(might_alias_load_store);
@@ -262,9 +269,9 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 	 * cross threads, so for those we have to use a slightly more
 	 * stupid approach. */
 	if (storeIsThreadLocal(smses)) {
-		if (!loadIsThreadLocal(smsel))
+		if (!loadIsThreadLocal(opt, smsel))
 			return false;
-		if (!definitelyNotEqual(smsel->addr, smses->addr, AllowableOptimisations::defaultOptimisations))
+		if (!definitelyNotEqual(smsel->addr, smses->addr, opt))
 			return true;
 		else
 			return false;
@@ -292,30 +299,32 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel,
 }
 
 bool
-Oracle::memoryAccessesMightAlias(StateMachineSideEffectLoad *smsel1,
+Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
+				 StateMachineSideEffectLoad *smsel1,
 				 StateMachineSideEffectLoad *smsel2)
 {
 	__set_profiling(memory_accesses_might_alias_load_load);
-	if (loadIsThreadLocal(smsel1)) {
-		if (!loadIsThreadLocal(smsel2))
+	if (loadIsThreadLocal(opt, smsel1)) {
+		if (!loadIsThreadLocal(opt, smsel2))
 			return false;
-		if (!definitelyNotEqual(smsel1->addr, smsel2->addr, AllowableOptimisations::defaultOptimisations))
+		if (!definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
 			return true;
 		else
 			return false;
-	} else if (loadIsThreadLocal(smsel2))
+	} else if (loadIsThreadLocal(opt, smsel2))
 		return false;
 
 	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel1->rip.rip, smsel2->rip.rip));
 }
 
 bool
-Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
+Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
+				 StateMachineSideEffectStore *smses1,
 				 StateMachineSideEffectStore *smses2)
 {
 	__set_profiling(memory_accesses_might_alias_store_store);
 	if (storeIsThreadLocal(smses1) && storeIsThreadLocal(smses2)) {
-		if (!definitelyNotEqual(smses2->addr, smses1->addr, AllowableOptimisations::defaultOptimisations))
+		if (!definitelyNotEqual(smses2->addr, smses1->addr, opt))
 			return true;
 		else
 			return false;
@@ -324,10 +333,10 @@ Oracle::memoryAccessesMightAlias(StateMachineSideEffectStore *smses1,
 }
 
 void
-Oracle::findRacingRips(StateMachineSideEffectLoad *smsel, std::set<unsigned long> &out)
+Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<unsigned long> &out)
 {
 	__set_profiling(findRacingRips__load);
-	if (loadIsThreadLocal(smsel))
+	if (loadIsThreadLocal(opt, smsel))
 		return;
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
 		if (it->loads.count(smsel->rip.rip)) {

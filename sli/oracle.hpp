@@ -12,16 +12,21 @@ public:
 	std::set<unsigned long> rips;
 };
 
+class AllowableOptimisations;
+
 class OracleInterface : public GarbageCollected<OracleInterface> {
 public:
 	virtual ~OracleInterface() {}
 	virtual bool storeIsThreadLocal(StateMachineSideEffectStore *) = 0;
-	virtual bool loadIsThreadLocal(StateMachineSideEffectLoad *) = 0;
-	virtual bool memoryAccessesMightAlias(StateMachineSideEffectLoad *,
+	virtual bool loadIsThreadLocal(const AllowableOptimisations &, StateMachineSideEffectLoad *) = 0;
+	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &,
+					      StateMachineSideEffectLoad *,
 					      StateMachineSideEffectStore *) = 0;
-	virtual bool memoryAccessesMightAlias(StateMachineSideEffectLoad *,
+	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &,
+					      StateMachineSideEffectLoad *,
 					      StateMachineSideEffectLoad *) = 0;
-	virtual bool memoryAccessesMightAlias(StateMachineSideEffectStore *,
+	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &,
+					      StateMachineSideEffectStore *,
 					      StateMachineSideEffectStore *) = 0;
 	virtual bool getRbpToRspDelta(unsigned long rip, long *out) = 0;
 	NAMED_CLASS
@@ -300,11 +305,11 @@ public:
 	void clusterRips(const std::set<unsigned long> &inputRips,
 			 std::set<InstructionSet> &outputClusters);
 	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
-	bool loadIsThreadLocal(StateMachineSideEffectLoad *s);
-	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
-	bool memoryAccessesMightAlias(StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
-	bool memoryAccessesMightAlias(StateMachineSideEffectStore *, StateMachineSideEffectStore *);
-	void findRacingRips(StateMachineSideEffectLoad *, std::set<unsigned long> &);
+	bool loadIsThreadLocal(const AllowableOptimisations &, StateMachineSideEffectLoad *s);
+	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
+	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
+	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
+	void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<unsigned long> &);
 	void findRacingRips(StateMachineSideEffectStore *, std::set<unsigned long> &);
 	bool functionCanReturn(unsigned long rip);
 

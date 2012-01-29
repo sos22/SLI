@@ -256,7 +256,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 				StateMachineSideEffectLoad *smsel =
 					dynamic_cast<StateMachineSideEffectLoad *>(it->second);
 				assert(smsel);
-				if (!oracle->memoryAccessesMightAlias(smsel, smses))
+				if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
 					continue;
 				if (evalExpressionsEqual(addr, smsel->addr, chooser, state, opt, assumption, accumulatedAssumptions))
 					addOrderingConstraint(
@@ -292,7 +292,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		     it != memLog.rend();
 		     it++) {
 			StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(it->second);
-			if (!smses || !oracle->memoryAccessesMightAlias(smsel, smses))
+			if (!smses || !oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				continue;
 			if (evalExpressionsEqual(smses->addr, addr, chooser, state, opt, assumption, accumulatedAssumptions)) {
 				if (!collectOrderingConstraints) {
@@ -763,6 +763,7 @@ static void
 findCrossMachineRacingInstructions(StateMachine *probeMachine,
 				   StateMachine *storeMachine,
 				   Oracle *oracle,
+				   const AllowableOptimisations &opt,
 				   std::set<unsigned long> &probeMachineRacingInstructions,
 				   std::set<unsigned long> &storeMachineRacingInstructions)
 {
@@ -774,7 +775,7 @@ findCrossMachineRacingInstructions(StateMachine *probeMachine,
 	std::set<StateMachineSideEffectLoad *> probeMachineLoads;
 	findAllLoads(probeMachine, probeMachineLoads);
 	for (auto it = probeMachineLoads.begin(); it != probeMachineLoads.end(); it++)
-		oracle->findRacingRips(*it, storeMachineRacingInstructions);
+		oracle->findRacingRips(opt, *it, storeMachineRacingInstructions);
 }
 
 bool
@@ -796,8 +797,14 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	std::set<unsigned long> probeMachineRacingInstructions;
 	std::set<unsigned long> storeMachineRacingInstructions;
 	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
+					   opt,
 					   probeMachineRacingInstructions,
 					   storeMachineRacingInstructions);
+
+	AllowableOptimisations loadMachineOpt = opt;
+	loadMachineOpt.nonLocalLoads = &probeMachineRacingInstructions;
+	probeMachine = optimiseStateMachine(probeMachine, loadMachineOpt, oracle,
+					    true, token);
 
 	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine->root));
 	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine->root));
@@ -1265,8 +1272,14 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	std::set<unsigned long> probeMachineRacingInstructions;
 	std::set<unsigned long> storeMachineRacingInstructions;
 	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
+					   opt,
 					   probeMachineRacingInstructions,
 					   storeMachineRacingInstructions);
+
+	AllowableOptimisations loadMachineOpt = opt;
+	loadMachineOpt.nonLocalLoads = &probeMachineRacingInstructions;
+	probeMachine = optimiseStateMachine(probeMachine, loadMachineOpt, oracle,
+					    true, token);
 
 	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine->root));
 	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine->root));
