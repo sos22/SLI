@@ -185,7 +185,8 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 static bool
 buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	 std::map<unsigned, ThreadRip> &roots,
-	 AddressSpace *as, crashEnforcementData *out)
+	 AddressSpace *as, crashEnforcementData *out,
+	 int &next_hb_id)
 {
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
@@ -247,7 +248,7 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	if (!exprDominatorMap.init(c, cfg, neededRips))
 		return false;
 
-	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg);
+	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg, next_hb_id);
 	return true;
 }
 
@@ -296,7 +297,8 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 static crashEnforcementData
 enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
-		       GarbageCollectionToken token)
+		       GarbageCollectionToken token,
+		       int &next_hb_id)
 {
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);
@@ -365,7 +367,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(d[x], m, roots, oracle->ms->addressSpace, &tmp))
+		if (buildCED(d[x], m, roots, oracle->ms->addressSpace, &tmp, next_hb_id))
 			accumulator |= tmp;
 	}
 	return accumulator;
@@ -381,6 +383,7 @@ main(int argc, char *argv[])
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
+	int next_hb_id = 0xaabb;
 	crashEnforcementData accumulator;
 	for (int i = 5; i < argc; i++) {
 		int fd = open(argv[i], O_RDONLY);
@@ -389,7 +392,7 @@ main(int argc, char *argv[])
 		VexPtr<CrashSummary, &ir_heap> summary(readCrashSummary(fd));
 		close(fd);
 
-		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC);
+		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id);
 	}
 
 	FILE *f = fopen(argv[4], "w");

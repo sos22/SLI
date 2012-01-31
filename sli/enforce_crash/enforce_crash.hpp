@@ -982,16 +982,12 @@ class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeE
 			visit_set(it->second, hv);
 	}
 public:
-	static const unsigned BASE_MESSAGE_ID = 0xaabb;
-
-	unsigned next_hb_id;
-
-	happensBeforeMapT() : next_hb_id(BASE_MESSAGE_ID) {}
+	happensBeforeMapT() {}
 	happensBeforeMapT(DNF_Conjunction &c,
 			  expressionDominatorMapT &exprDominatorMap,
 			  EnforceCrashCFG *cfg,
-			  expressionStashMapT &exprStashPoints)
-		: next_hb_id(BASE_MESSAGE_ID)
+			  expressionStashMapT &exprStashPoints,
+			  int &next_hb_id)
 	{
 		for (unsigned x = 0; x < c.size(); x++) {
 			IRExpr *e = c[x].second;
@@ -1043,14 +1039,6 @@ public:
 			if (!parseThisString("}\n", str, &str))
 				return false;
 			(*this)[addr] = edges;
-		}
-		next_hb_id = BASE_MESSAGE_ID;
-		for (auto it = begin(); it != end(); it++) {
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-				auto hb = *it2;
-				if (hb->msg_id >= next_hb_id)
-					next_hb_id = hb->msg_id + 1;
-			}
 		}
 		*suffix = str;
 		return true;
@@ -1129,10 +1117,11 @@ public:
 			     std::map<unsigned, ThreadRip> &_roots,
 			     expressionDominatorMapT &exprDominatorMap,
 			     DNF_Conjunction &conj,
-			     EnforceCrashCFG *cfg)
+			     EnforceCrashCFG *cfg,
+			     int &next_hb_id)
 		: roots(_roots),
 		  exprStashPoints(neededExpressions, _roots),
-		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints),
+		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints),
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints)
