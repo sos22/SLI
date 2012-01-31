@@ -30,4 +30,6 @@ cat $0
 echo
 echo
 echo "End general information"
-
+echo "Rebuild:"
+make -C..
+echo "Done rebuild"
