@@ -1,9 +1,6 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 
-#define BASE_MESSAGE_ID 0xaabb
-unsigned happensBeforeEdge::next_msg_id = BASE_MESSAGE_ID;
-
 void
 EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
 {
@@ -51,8 +48,26 @@ EnforceCrashPatchFragment::asC(const char *ident)
 {
 	std::vector<const char *> fragments;
 
-	fragments.push_back(vex_asprintf("#define MESSAGE_ID_BASE %d\n", BASE_MESSAGE_ID));
-	fragments.push_back(vex_asprintf("#define MESSAGE_ID_END %d\n", happensBeforeEdge::next_msg_id));
+	unsigned min_message_id, max_message_id;
+
+	if (edges.empty()) {
+		min_message_id = max_message_id = 0;
+	} else {
+		auto it = edges.begin();
+		min_message_id = (*it)->msg_id;
+		max_message_id = (*it)->msg_id;
+		while (it != edges.end()) {
+			unsigned id = (*it)->msg_id;
+			if (id < min_message_id)
+				min_message_id = id;
+			if (id > max_message_id)
+				max_message_id = id;
+			it++;
+		}
+	}
+
+	fragments.push_back(vex_asprintf("#define MESSAGE_ID_BASE %d\n", min_message_id));
+	fragments.push_back(vex_asprintf("#define MESSAGE_ID_END %d\n", max_message_id + 1));
 	for (std::set<happensBeforeEdge *>::iterator it = edges.begin();
 	     it != edges.end();
 	     it++) {

@@ -304,8 +304,6 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>,
 		return res_malloc;		
 	}
 public:
-	static unsigned next_msg_id;
-
 	ThreadRip before;
 	ThreadRip after;
 	std::vector<IRExpr *> content;
@@ -326,10 +324,11 @@ public:
 	happensBeforeEdge(bool invert, IRExprHappensBefore *hb,
 			  instructionDominatorMapT &idom,
 			  CFG<ThreadRip> *cfg,
-			  expressionStashMapT &stashMap)
+			  expressionStashMapT &stashMap,
+			  unsigned _msg_id)
 		: before(invert ? hb->after : hb->before),
 		  after(invert ? hb->before : hb->after),
-		  msg_id(next_msg_id++)
+		  msg_id(_msg_id)
 	{
 		printf("%x: HBE %s -> %s\n",
 		       msg_id,
@@ -941,11 +940,16 @@ class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeE
 			visit_set(it->second, hv);
 	}
 public:
-	happensBeforeMapT() {}
+	static const unsigned BASE_MESSAGE_ID = 0xaabb;
+
+	unsigned next_hb_id;
+
+	happensBeforeMapT() : next_hb_id(BASE_MESSAGE_ID) {}
 	happensBeforeMapT(DNF_Conjunction &c,
 			  expressionDominatorMapT &exprDominatorMap,
 			  EnforceCrashCFG *cfg,
 			  expressionStashMapT &exprStashPoints)
+		: next_hb_id(BASE_MESSAGE_ID)
 	{
 		for (unsigned x = 0; x < c.size(); x++) {
 			IRExpr *e = c[x].second;
@@ -953,7 +957,7 @@ public:
 			if (e->tag == Iex_HappensBefore) {
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
 				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
-									       cfg, exprStashPoints);
+									       cfg, exprStashPoints, next_hb_id++);
 				(*this)[hbe->before.rip].insert(hbe);
 				(*this)[hbe->after.rip].insert(hbe);
 			}
@@ -997,6 +1001,14 @@ public:
 			if (!parseThisString("}\n", str, &str))
 				return false;
 			(*this)[addr] = edges;
+		}
+		next_hb_id = BASE_MESSAGE_ID;
+		for (auto it = begin(); it != end(); it++) {
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				auto hb = *it2;
+				if (hb->msg_id >= next_hb_id)
+					next_hb_id = hb->msg_id + 1;
+			}
 		}
 		*suffix = str;
 		return true;
