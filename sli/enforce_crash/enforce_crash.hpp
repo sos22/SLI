@@ -236,6 +236,7 @@ public:
 			}
 			if (!parseThisString("}\n", str, &str))
 				return false;
+			assert(b.size() > 0);
 			(*this)[a] = b;
 		}
 		*suffix = str;
@@ -260,6 +261,7 @@ public:
 				std::pair<unsigned, IRExpr *> a;
 				a.first = it2->first;
 				a.second = state.intern(it2->second);
+				out.insert(a);
 			}
 			it->second = out;
 		}
