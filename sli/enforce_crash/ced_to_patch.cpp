@@ -1146,24 +1146,32 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			break;
 		}
 		case ClientRip::post_instr_generate:
+			dbg("\tdata.exprStashPoints.count(%lx) = %zd\n",
+			    cr.rip, data.exprStashPoints.count(cr.rip));
 			if (!NO_OP_PATCH && data.exprStashPoints.count(cr.rip)) {
 				std::set<std::pair<unsigned, IRExpr *> > *neededExprs = &data.exprStashPoints[cr.rip];
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
+				if (neededExprs->empty())
+					dbg("\tneededExprs set is empty?\n");
 				for (std::set<std::pair<unsigned, IRExpr *> >::iterator it = neededExprs->begin();
 				     it != neededExprs->end();
 				     it++) {
-					if (!cr.threadLive(it->first))
-						continue;
 #ifdef LOUD
-					printf("\tLate stash %d", it->first);
+					printf("\tLate stash %d:", it->first);
 					ppIRExpr(it->second, stdout);
 					printf("\n");
 #endif
+					if (!cr.threadLive(it->first)) {
+						dbg("\tSkip because thread not live.\n");
+						continue;
+					}
 					IRExpr *e = it->second;
 					if (e->tag == Iex_Get) {
+						dbg("\tGets already handled\n");
 						/* Already handled */
 					} else if (e->tag == Iex_ClientCall) {
 						/* The result of the call should now be in %rax */
+						dbg("\tClient call\n");
 						simulationSlotT s = data.exprsToSlots(it->first, e);
 						newInstr->defaultNextI = instrMovRegToSlot(RegisterIdx::RAX, s);
 						newInstr = newInstr->defaultNextI;
@@ -1171,6 +1179,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						assert(e->tag == Iex_Load);
 						switch (instrOpcode(underlying)) {
 						case 0x3b: /* already handled */
+							dbg("\tAlready handled\n");
 							break;
 						case 0x8b:
 							/* Load from memory to modrm.
@@ -1182,6 +1191,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 							   for our
 							   purposes. */
 						{
+							dbg("\tstash as load\n");
 							simulationSlotT s = data.exprsToSlots(it->first, e);
 							newInstr->defaultNextI = instrMovRegToSlot(instrModrmReg(underlying), s);
 							newInstr = newInstr->defaultNextI;
@@ -1407,6 +1417,8 @@ main(int argc, char *argv[])
 	crashEnforcementData ced;
 	loadCrashEnforcementData(ced, fd);
 	close(fd);
+
+	ced.prettyPrint(stdout);
 
 	/* Now build the patch */
 	CFG<ClientRip> *cfg = enforceCrash(ced, ms->addressSpace);
