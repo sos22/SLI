@@ -576,6 +576,7 @@ class ClientRip : public Named {
 	f(rx_message)							\
 	f(exit_threads_and_rx_message)					\
 	f(exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction) \
+	f(exit_threads_and_restore_flags_and_branch_post_instr_checks)	\
 	f(uninitialised)
 
 	char *mkName() const {
@@ -635,7 +636,8 @@ public:
 
 	bool exit_threads_valid() const {
 		return type == exit_threads_and_rx_message ||
-			type == exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction;
+			type == exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction ||
+			type == exit_threads_and_restore_flags_and_branch_post_instr_checks;
 	}
 
 	/* CAUTION! This comment is badly out of date! CAUTION! */

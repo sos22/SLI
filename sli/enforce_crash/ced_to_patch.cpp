@@ -803,7 +803,9 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 
 	jcc_code branch_type = invert ? jcc_code::nonzero : jcc_code::zero;
 	failTarget.eraseThread(e.thread);
-	failTarget.type = ClientRip::restore_flags_and_branch_post_instr_checks;
+	failTarget.exit_threads.clear();
+	failTarget.exit_threads.insert(e.thread);
+	failTarget.type = ClientRip::exit_threads_and_restore_flags_and_branch_post_instr_checks;
 	cursor = cursor->defaultNextI = instrJcc(failTarget, branch_type, relocs);
 	return cursor;
 }
@@ -1248,6 +1250,14 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 				}
 			}
 			break;
+
+		case ClientRip::exit_threads_and_restore_flags_and_branch_post_instr_checks: {
+			assert(cr.exit_threads_valid());
+			newInstr = exitThreadSequence(newInstr, cr.exit_threads, data);
+			cr.type = ClientRip::restore_flags_and_branch_post_instr_checks;
+			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			break;
+		}
 
 		case ClientRip::restore_flags_and_branch_post_instr_checks:
 			newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
