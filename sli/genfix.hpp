@@ -276,6 +276,7 @@ private:
 protected:
 
 	void emitByte(unsigned char b) { content.push_back(b); }
+	void emitDword(unsigned val);
 	void emitQword(unsigned long val);
 
 	void emitModrm(const ModRM &mrm, RegisterOrOpcodeExtension reg);
@@ -309,6 +310,7 @@ protected:
 	void skipRedZone();
 	void restoreRedZone();
 	void emitPushQ(RegisterIdx);
+	void emitPushImm32(int what);
 	void emitPopQ(RegisterIdx);
 	void emitMovQ(RegisterIdx, unsigned long);
 	void emitCallReg(RegisterIdx);
@@ -1151,6 +1153,13 @@ PatchFragment<r>::emitPushQ(RegisterIdx reg)
 }
 
 template <typename r> void
+PatchFragment<r>::emitPushImm32(int val)
+{
+	emitByte(0x68);
+	emitDword(val);
+}
+
+template <typename r> void
 PatchFragment<r>::emitPopQ(RegisterIdx reg)
 {
 	if (reg.idx >= 8) {
@@ -1180,6 +1189,25 @@ PatchFragment<r>::emitQword(unsigned long val)
 	Byte asBytes[8];
 	__emitQword_toBytes(val, asBytes);
 	for (unsigned x = 0; x < 8; x++)
+		emitByte(asBytes[x]);
+}
+
+static inline void
+__emitDword_toBytes(unsigned x, Byte b[4])
+{
+	union {
+		unsigned asUint;
+		Byte asBytes[4];
+	};
+	asUint = x;
+	memcpy(b, asBytes, 4);
+}
+template <typename r> void
+PatchFragment<r>::emitDword(unsigned val)
+{
+	Byte asBytes[4];
+	__emitDword_toBytes(val, asBytes);
+	for (unsigned x = 0; x < 4; x++)
 		emitByte(asBytes[x]);
 }
 

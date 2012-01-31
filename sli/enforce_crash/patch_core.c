@@ -70,19 +70,27 @@ happensBeforeEdge__after_c(int nr_codes, long *codes)
 	if (!have_cloned)
 		return 0;
 
-	max = max_stalls;
+	max = 10000;
 
 	for (cntr = 0; cntr < max; cntr++) {
-		for (i = 0; i < nr_codes; i++)
+		for (i = 0; i < nr_codes; i++) {
+			if (codes[i] < MESSAGE_ID_BASE || codes[i] >= MESSAGE_ID_END)
+				abort();
 			if (messages[codes[i] - MESSAGE_ID_BASE])
 				return codes[i];
+		}
+		usleep(10000);
 	}
+
 	return 0;
 }
 static void
-clearMessage_c(int code)
+clearMessage_c(int nr_codes, long *codes)
 {
-	messages[code - MESSAGE_ID_BASE] = 0;
+	int i;
+
+	for (i = 0; i < nr_codes; i++)
+		messages[codes[i] - MESSAGE_ID_BASE] = 0;
 }
 
 #define mk_trampoline(name)						\
@@ -136,7 +144,34 @@ asm(
 "	pop %rcx\n"
 "	ret\n"
 	);
-mk_trampoline(clearMessage);
+asm(
+"	/* We're called from the patch without saving any registers"
+"          except rdi and rsi.  We are outside the stack redzone,"
+"          though.  RDI is the number of messages to clear, and RSI"
+"          is scratch.  The messages to clear start 16 bytes above RSP."
+"          Save what needs to be saved and get into C. */"
+"	"
+"clearMessage:\n"
+"       lea 16(%rsp), %rsi\n"
+"       pushf\n"
+"       push %rax\n"
+"	push %rcx\n"
+"	push %rdx\n"
+"	push %r8\n"
+"	push %r9\n"
+"	push %r10\n"
+"	push %r11\n"
+"	call clearMessage_c\n"
+"	pop %r11\n"
+"	pop %r10\n"
+"	pop %r9\n"
+"	pop %r8\n"
+"	pop %rdx\n"
+"	pop %rcx\n"
+"       pop %rax\n"
+"       popf\n"
+"	ret\n"
+	);
 
 static void *
 malloc_executable(size_t s)

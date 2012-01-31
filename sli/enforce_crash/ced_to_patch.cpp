@@ -583,10 +583,14 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 
 	for (auto it = hb.begin(); it != hb.end(); it++) {
 		ClientRip dest = nextRip;
-		for (auto it2 = hb.begin(); it2 != hb.end(); it2++)
+		dest.exit_threads.clear();
+		for (auto it2 = hb.begin(); it2 != hb.end(); it2++) {
 			dest.threads.erase((*it2)->after.thread);
+			dest.exit_threads.insert((*it2)->after.thread);
+		}
 		dest.threads.insert((*it)->after.thread);
-		dest.type = ClientRip::rx_message;
+		dest.exit_threads.erase((*it)->after.thread);
+		dest.type = ClientRip::exit_threads_and_rx_message;
 		dest.completed_edge = *it;
 		dest.clearName();
 		dbg("\tSuccess destination: %s\n", dest.name());
@@ -594,13 +598,16 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 		cursor = cursor->defaultNextI = instrJcc(dest, jcc_code::zero, relocs);
 	}
 
-	ClientRip destinationIfThisFails = nextRip;
-	for (auto it = hb.begin(); it != hb.end(); it++)
-		destinationIfThisFails.threads.erase((*it)->after.thread);
-	destinationIfThisFails.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
-	relocs.push_back(relocEntryT(destinationIfThisFails, &cursor->defaultNextI));
-	destinationIfThisFails.clearName();
-	dbg("\tFailure destination: %s\n", destinationIfThisFails.name());
+	ClientRip dest = nextRip;
+	dest.exit_threads.clear();
+	for (auto it = hb.begin(); it != hb.end(); it++) {
+		dest.threads.erase((*it)->after.thread);
+		dest.exit_threads.insert((*it)->after.thread);
+	}
+	dest.type = ClientRip::exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction;
+	relocs.push_back(relocEntryT(dest, &cursor->defaultNextI));
+	dest.clearName();
+	dbg("\tFailure destination: %s\n", dest.name());
 }
 
 static Instruction<ClientRip> *
@@ -798,6 +805,33 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 	failTarget.eraseThread(e.thread);
 	failTarget.type = ClientRip::restore_flags_and_branch_post_instr_checks;
 	cursor = cursor->defaultNextI = instrJcc(failTarget, branch_type, relocs);
+	return cursor;
+}
+
+static Instruction<ClientRip> *
+exitThreadSequence(Instruction<ClientRip> *cursor, const std::set<int> &threads, const crashEnforcementData &data)
+{
+	if (threads.empty())
+		return cursor;
+	std::set<unsigned> msg_ids;
+	for (auto it = data.happensBeforePoints.begin(); it != data.happensBeforePoints.end(); it++) {
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			auto hb = *it2;
+			if (threads.count(hb->before.thread))
+				msg_ids.insert(hb->msg_id);
+		}
+	}
+
+	cursor = cursor->defaultNextI = instrSkipRedZone();
+	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RDI);
+	for (auto it = msg_ids.begin(); it != msg_ids.end(); it++)
+		cursor = cursor->defaultNextI = instrPushImm32(*it);
+	cursor = cursor->defaultNextI = instrMovImmediateToReg(msg_ids.size(), RegisterIdx::RDI);
+	cursor = instrCallSequence(cursor, "(unsigned long)clearMessage");
+	cursor = cursor->defaultNextI = instrAddImm32ToModrm(msg_ids.size() * 8,
+							     ModRM::directRegister(RegisterIdx::RSP));
+	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RDI);
+	cursor = cursor->defaultNextI = instrRestoreRedZone();
 	return cursor;
 }
 
@@ -1223,6 +1257,13 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			dbg("\tRestored flags, going to %s\n", cr.name());
 			break;
 
+		case ClientRip::exit_threads_and_rx_message: {
+			assert(cr.exit_threads_valid());
+			newInstr = exitThreadSequence(newInstr, cr.exit_threads, data);
+			cr.type = ClientRip::rx_message;
+			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			break;
+		}
 		case ClientRip::rx_message: {
 			auto hb = cr.completed_edge;
 			for (unsigned x = 0; x < hb->content.size(); x++) {
@@ -1236,6 +1277,13 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			break;
 		}
 
+		case ClientRip::exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction: {
+			assert(cr.exit_threads_valid());
+			newInstr = exitThreadSequence(newInstr, cr.exit_threads, data);
+			cr.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
+			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			break;
+		}
 		case ClientRip::pop_regs_restore_flags_and_branch_orig_instruction:
 			newInstr = newInstr->defaultNextI = instrPopReg(RegisterIdx::RAX);
 			newInstr = newInstr->defaultNextI = instrPopf();

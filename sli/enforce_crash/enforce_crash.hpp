@@ -572,6 +572,8 @@ class ClientRip : public Named {
 	f(restore_flags_and_branch_post_instr_checks)			\
 	f(pop_regs_restore_flags_and_branch_orig_instruction)		\
 	f(rx_message)							\
+	f(exit_threads_and_rx_message)					\
+	f(exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction) \
 	f(uninitialised)
 
 	char *mkName() const {
@@ -595,10 +597,15 @@ class ClientRip : public Named {
 		fragments.push_back(strdup("}"));
 		if (type == rx_message)
 			fragments.push_back(my_asprintf("hbe(%s)", completed_edge->name()));
-		if (type == receive_messages ||
-		    type == original_instruction ||
-		    type == rx_message ||
-		    type == pop_regs_restore_flags_and_branch_orig_instruction)
+		if (exit_threads_valid()) {
+			fragments.push_back(strdup("thr{"));
+			for (auto it = exit_threads.begin();
+			     it != exit_threads.end();
+			     it++)
+				fragments.push_back(my_asprintf("%d, ", *it));
+			fragments.push_back(strdup("}"));
+		}
+		if (skip_orig_valid())
 			fragments.push_back(strdup(skip_orig ? "skip_orig" : "no_skip_orig"));
 		char *res_vex = flattenStringFragments(fragments);
 		char *res_malloc = strdup(res_vex);
@@ -610,13 +617,28 @@ class ClientRip : public Named {
 public:
 	unsigned long rip;
 	const happensBeforeEdge *completed_edge; /* Only valid for rx_message */
-	bool skip_orig; /* Only valid for rx_message,
-			   receive_messages,
-			   pop_regs_restore_flags_and_branch_orig_instriction,
-			   and orig_instruction */
+	bool skip_orig; /* Only valid for if skip_orig_valid() is true */
+	std::set<int> exit_threads; /* Only for
+				       exit_threads_and_rx_message and
+				       exit_threads_and_pop_regs_... */
 
-	/* Each original instruction expands into a sequence of
-	 * psuedo-instructions:
+	bool skip_orig_valid() const {
+		return type == receive_messages ||
+			type == original_instruction ||
+			type == rx_message ||
+			type == pop_regs_restore_flags_and_branch_orig_instruction ||
+			type == exit_threads_and_rx_message ||
+			type == exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction;
+	}
+
+	bool exit_threads_valid() const {
+		return type == exit_threads_and_rx_message ||
+			type == exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction;
+	}
+
+	/* CAUTION! This comment is badly out of date! CAUTION! */
+	/* Each original instruction (used to) expand into a sequence
+	 * of psuedo-instructions:
 	 *
 	 * start_of_instruction:
 	 * <generate anything which is generated at the start of the instruction>
@@ -678,10 +700,23 @@ public:
 			if (!parseThisString(")", str, &str))
 				return false;
 		}
-		if (type == receive_messages ||
-		    type == original_instruction ||
-		    type == rx_message ||
-		    type == pop_regs_restore_flags_and_branch_orig_instruction) {
+		if (exit_threads_valid()) {
+			if (!parseThisString("thr{", str, &str))
+				return false;
+			exit_threads.clear();
+			while (1) {
+				int i;
+				if (!parseDecimalInt(&i, str, &str))
+					break;
+				if (!parseThisString(", ", str, &str))
+					return false;
+				exit_threads.insert(i);
+			}
+			if (!parseThisString("}", str, &str))
+				return false;
+				
+		}
+		if (skip_orig_valid()) {
 			if (parseThisString("skip_orig", str, &str))
 				skip_orig = true;
 			else if (parseThisString("no_skip_orig", str, &str))
@@ -733,14 +768,17 @@ public:
 			if (completed_edge > k.completed_edge)
 				return false;
 		}
-		if (type == receive_messages ||
-		    type == original_instruction ||
-		    type == rx_message ||
-		    type == pop_regs_restore_flags_and_branch_orig_instruction) {
+		if (skip_orig_valid()) {
 			if (skip_orig > k.skip_orig)
 				return true;
 			if (skip_orig < k.skip_orig)
 				return false;
+		}
+		if (exit_threads_valid()) {
+			if (exit_threads < k.exit_threads)
+				return true;
+			if (exit_threads > k.exit_threads)
+				return true;
 		}
 		return false;
 	}

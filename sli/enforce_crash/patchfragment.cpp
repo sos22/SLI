@@ -19,9 +19,8 @@ EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
 
 	if (msg_ids.size() != 0) {
 		skipRedZone();
-		emitPushQ(RegisterIdx::RBX);
-		emitPushQ(RegisterIdx::RDI);
-		emitMovQ(RegisterIdx::RBX, 0);
+		emitPushQ(RegisterIdx::RSI);
+		emitMovQ(RegisterIdx::RSI, 0);
 		lateRelocs.push_back(new LateRelocation(content.size() - 8,
 							8,
 							vex_asprintf("(unsigned long)clearMessage"),
@@ -30,13 +29,13 @@ EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
 
 		for (std::set<unsigned>::iterator it = msg_ids.begin();
 		     it != msg_ids.end();
-		     it++) {
-			unsigned msg_id = *it;
-			emitMovQ(RegisterIdx::RDI, msg_id);
-			emitCallReg(RegisterIdx::RBX);
-		}
+		     it++)
+			emitPushImm32(*it);
+		emitPushQ(RegisterIdx::RDI);
+		emitMovQ(RegisterIdx::RDI, msg_ids.size());
+		emitCallReg(RegisterIdx::RSI);
+		emitPopQ(RegisterIdx::RSI);
 		emitPopQ(RegisterIdx::RDI);
-		emitPopQ(RegisterIdx::RBX);
 		restoreRedZone();
 	}
 
