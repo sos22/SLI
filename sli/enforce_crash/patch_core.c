@@ -50,8 +50,6 @@ static void *
 patch_address;
 static volatile int
 messages[MESSAGE_ID_END - MESSAGE_ID_BASE];
-static int
-message_counters[MESSAGE_ID_END - MESSAGE_ID_BASE];
 static unsigned
 max_stalls;
 static int
@@ -72,7 +70,7 @@ happensBeforeEdge__after_c(int nr_codes, long *codes)
 	if (!have_cloned)
 		return 0;
 
-	max = 10000;
+	max = max_stalls;
 
 	for (cntr = 0; cntr < max; cntr++) {
 		for (i = 0; i < nr_codes; i++)
