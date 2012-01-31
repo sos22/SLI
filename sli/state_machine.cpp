@@ -501,6 +501,22 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		*out = new StateMachineSideEffectAssertFalse(data);
 		return true;
 	}
+	if (parseThisString("Phi", str, &str2) &&
+	    parseThreadAndRegister(&key, str2, &str2) &&
+	    parseThisString("(", str2, &str2)) {
+		std::vector<unsigned> generations;
+		while (1) {
+			int x;
+			if (!parseDecimalInt(&x, str2, &str2) ||
+			    !parseThisString(", ", str2, &str2))
+				break;
+			generations.push_back(x);
+		}
+		if (!parseThisString(")", str2, suffix))
+			return false;
+		*out = new StateMachineSideEffectPhi(key, generations);
+		return true;
+	}
 	return false;
 }
 
