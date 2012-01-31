@@ -598,7 +598,7 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 	for (auto it = hb.begin(); it != hb.end(); it++)
 		destinationIfThisFails.threads.erase((*it)->after.thread);
 	destinationIfThisFails.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
-	cursor->defaultNextI = instrJmp(destinationIfThisFails, relocs);
+	relocs.push_back(relocEntryT(destinationIfThisFails, &cursor->defaultNextI));
 	destinationIfThisFails.clearName();
 	dbg("\tFailure destination: %s\n", destinationIfThisFails.name());
 }
