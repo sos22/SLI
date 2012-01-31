@@ -332,6 +332,11 @@ instrCmpImm32ToModrm(int imm32, const ModRM &mrm)
 	return work;
 }
 
+/* Don't really want to break the nice macro, but also don't want
+   compiler warnings because not all of the generated functions are
+   used. */
+static Instruction<ClientRip> *instrCmpSlotToReg(simulationSlotT slot, RegisterIdx reg) __attribute__((unused));
+
 #define mk_slot_instr(name)						\
 	static Instruction<ClientRip> *					\
 	instr ## name ## RegToSlot(RegisterIdx reg, simulationSlotT slot) \
@@ -435,19 +440,6 @@ instrJcc(ClientRip target, jcc_code branchType, std::vector<relocEntryT> &relocs
 									  target));
 	work->len += 4;
 	relocs.push_back(relocEntryT(target, &work->branchNextI));
-	return work;
-}
-
-static Instruction<ClientRip> *
-instrJmp(ClientRip target, std::vector<relocEntryT> &relocs)
-{
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
-	work->emit(0xe9);
-	work->relocs.push_back(new RipRelativeBranchRelocation<ClientRip>(work->len,
-									  4,
-									  target));
-	work->len += 4;
-	relocs.push_back(relocEntryT(target, &work->defaultNextI));
 	return work;
 }
 
@@ -1209,7 +1201,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 		case ClientRip::post_instr_checks:
 			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.expressionEvalPoints.count(cr.rip)) {
 				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
-				Instruction<DirectRip> *underlying = decoder(cr.rip);
 				
 				bool doit = false;
 				for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
