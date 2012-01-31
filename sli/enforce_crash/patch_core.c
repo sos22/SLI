@@ -1,6 +1,6 @@
-static void happensBeforeEdge__before(int code);
-static long happensBeforeEdge__after(int nr_codes, long *codes);
-static void clearMessage(int code);
+void happensBeforeEdge__before(int code);
+long happensBeforeEdge__after(int nr_codes, long *codes);
+void clearMessage(int code);
 
 struct relocation {
 	unsigned offset;
@@ -54,6 +54,12 @@ static unsigned
 max_stalls;
 static int
 have_cloned;
+
+/* These get used from inline assembly only.  Shut the compiler up. */
+static void happensBeforeEdge__before_c(int code) __attribute__((unused));
+static long happensBeforeEdge__after_c(int nr_codes, long *codes) __attribute__((unused));
+static void clearMessage_c(int nr_codes, long *codes) __attribute__((unused));
+static void clone_hook_c(int (*fn)(void *), void *fn_arg) __attribute__((unused));
 
 static void
 happensBeforeEdge__before_c(int code)
@@ -218,6 +224,8 @@ extern void clone(void);
 
 static void (*__GI__exit)(int res);
 
+void arch_prctl(int, unsigned long);
+
 /* This is hooked into clone() so that we're called instead of the
    usual child thread function.  The hcild thread function and its
    sole argument are passed in as @fn and @fn_arg.  Create our
@@ -241,6 +249,10 @@ clone_hook_c(int (*fn)(void *), void *fn_arg)
 	__GI__exit(res);
 }
 
+/* For some reason, if this is non-static, gcc generates a very odd
+   relocation for it, and we fail.  I don't understand why, or why the
+   other things defined in assembly aren't affected, so just accept it
+   for now and ignore the compiler warnings. */
 static void clone_hook_asm();
 
 /* We need to hook the clone() call in glibc to catch creation of new
