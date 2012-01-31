@@ -387,10 +387,10 @@ public:
 class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>,
 		 private GcCallback<&ir_heap> {
 	typedef std::pair<unsigned, IRExpr *> key_t;
-	void mk_slot(unsigned thr, IRExpr *e) {
+	void mk_slot(unsigned thr, IRExpr *e, simulationSlotT &next_slot) {
 		key_t key(thr, e);
 		if (!count(key)) {
-			simulationSlotT s = allocateSlot();
+			simulationSlotT s = allocateSlot(next_slot);
 			insert(std::pair<key_t, simulationSlotT>(key, s));
 		}
 	}
@@ -404,12 +404,10 @@ class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>
 		}
 	}
 public:
-	simulationSlotT next_slot;
-
 	simulationSlotT rflagsSlot() {
 		return simulationSlotT(0);
 	}
-	simulationSlotT allocateSlot() {
+	simulationSlotT allocateSlot(simulationSlotT &next_slot) {
 		simulationSlotT r = next_slot;
 		next_slot.idx++;
 		return r;
@@ -435,8 +433,8 @@ public:
 	slotMapT() { }
 
 	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
-		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore)
-		: next_slot(1)
+		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore,
+		 simulationSlotT &next_slot)
 	{
 		/* Allocate slots for expressions which we know we're
 		 * going to have to stash at some point. */
@@ -447,7 +445,7 @@ public:
 			for (std::set<key_t>::iterator it2 = s.begin();
 			     it2 != s.end();
 			     it2++)
-				mk_slot(it2->first, it2->second);
+				mk_slot(it2->first, it2->second, next_slot);
 		}
 		/* And the ones which we're going to receive in
 		 * messages */
@@ -460,7 +458,7 @@ public:
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (unsigned x = 0; x < hb->content.size(); x++)
-					mk_slot(hb->after.thread, hb->content[x]);
+					mk_slot(hb->after.thread, hb->content[x], next_slot);
 			}
 		}
 	}
@@ -469,12 +467,10 @@ public:
 		for (auto it = sm.begin(); it != sm.end(); it++)
 			if (!count(it->first))
 				insert(*it);
-		if (sm.next_slot.idx > next_slot.idx)
-			next_slot = sm.next_slot;
 	}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "\tSlot map (next index %d):\n", next_slot.idx);
+		fprintf(f, "\tSlot map:\n");
 		for (auto it = begin(); it != end(); it++) {
 			fprintf(f, "\t\t%d:", it->first.first);
 			it->first.second->prettyPrint(f);
@@ -482,9 +478,7 @@ public:
 		}
 	}
 	bool parse(const char *str, const char **suffix) {
-		if (!parseThisString("Slot map (next index ", str, &str) ||
-		    !parseDecimalInt(&next_slot.idx, str, &str) ||
-		    !parseThisString("):\n", str, &str))
+		if (!parseThisString("Slot map:\n", str, &str))
 			return false;
 		clear();
 		while (1) {
@@ -1118,11 +1112,12 @@ public:
 			     expressionDominatorMapT &exprDominatorMap,
 			     DNF_Conjunction &conj,
 			     EnforceCrashCFG *cfg,
-			     int &next_hb_id)
+			     int &next_hb_id,
+			     simulationSlotT &next_slot)
 		: roots(_roots),
 		  exprStashPoints(neededExpressions, _roots),
 		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
-		  exprsToSlots(exprStashPoints, happensBeforePoints),
+		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints)
 	{}

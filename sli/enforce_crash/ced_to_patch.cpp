@@ -604,11 +604,11 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 
 static Instruction<ClientRip> *
 instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeEdge *hb,
-			     slotMapT &exprsToSlots)
+			     slotMapT &exprsToSlots, simulationSlotT &next_slot)
 {
-	simulationSlotT rdi = exprsToSlots.allocateSlot();
+	simulationSlotT rdi = exprsToSlots.allocateSlot(next_slot);
 	start = start->defaultNextI = instrMovRegToSlot(RegisterIdx::RDI, rdi);
-	simulationSlotT r13 = exprsToSlots.allocateSlot();
+	simulationSlotT r13 = exprsToSlots.allocateSlot(next_slot);
 	start = start->defaultNextI = instrMovRegToSlot(RegisterIdx::R13, r13);
 
 	dbg("\tTemporary slot for RDI %d, R13 %d\n", rdi.idx, r13.idx);
@@ -632,7 +632,7 @@ instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeE
 
 static Instruction<ClientRip> *
 instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, RegisterIdx reg,
-	      slotMapT &exprsToSlots)
+	      slotMapT &exprsToSlots, simulationSlotT &next_slot)
 {
 	{
 		slotMapT::iterator it = exprsToSlots.find(std::pair<unsigned, IRExpr *>(thread, e));
@@ -652,7 +652,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 	case Iex_Unop:
 		switch (((IRExprUnop *)e)->op) {
 		case Iop_Neg64:
-			cursor = instrEvalExpr(start, thread, ((IRExprUnop *)e)->arg, reg, exprsToSlots);
+			cursor = instrEvalExpr(start, thread, ((IRExprUnop *)e)->arg, reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
 			cursor = cursor->defaultNextI = instrNegModrm(ModRM::directRegister(reg));
@@ -668,16 +668,16 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 	case Iex_Binop:
 		switch (((IRExprBinop *)e)->op) {
 		case Iop_CmpEQ64: {
-			simulationSlotT old_rax = exprsToSlots.allocateSlot();
+			simulationSlotT old_rax = exprsToSlots.allocateSlot(next_slot);
 			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1, false);
 			Instruction<ClientRip> *cursor;
 
-			cursor = instrEvalExpr(head, thread, ((IRExprBinop *)e)->arg1, reg, exprsToSlots);
+			cursor = instrEvalExpr(head, thread, ((IRExprBinop *)e)->arg1, reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
-			simulationSlotT t = exprsToSlots.allocateSlot();
+			simulationSlotT t = exprsToSlots.allocateSlot(next_slot);
 			cursor = cursor->defaultNextI = instrMovRegToSlot(reg, t);
-			cursor = instrEvalExpr(cursor, thread, ((IRExprBinop *)e)->arg2, reg, exprsToSlots);
+			cursor = instrEvalExpr(cursor, thread, ((IRExprBinop *)e)->arg2, reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
 			cursor = cursor->defaultNextI = instrCmpRegToSlot(reg, t);
@@ -705,7 +705,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 		case Iop_Add64: {
 			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1, false);
 			Instruction<ClientRip> *cursor;
-			cursor = instrEvalExpr(head, thread, ((IRExprAssociative *)e)->contents[0], reg, exprsToSlots);
+			cursor = instrEvalExpr(head, thread, ((IRExprAssociative *)e)->contents[0], reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
 			if (((IRExprAssociative *)e)->nr_arguments == 1) {
@@ -713,16 +713,16 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 				return cursor;
 			}
 
-			simulationSlotT acc = exprsToSlots.allocateSlot();
+			simulationSlotT acc = exprsToSlots.allocateSlot(next_slot);
 			cursor = cursor->defaultNextI = instrMovRegToSlot(reg, acc);
 			for (int x = 1; x < ((IRExprAssociative *)e)->nr_arguments - 1; x++) {
-				cursor = instrEvalExpr(cursor, thread, ((IRExprAssociative *)e)->contents[x], reg, exprsToSlots);
+				cursor = instrEvalExpr(cursor, thread, ((IRExprAssociative *)e)->contents[x], reg, exprsToSlots, next_slot);
 				if (!cursor)
 					return NULL;
 				cursor = cursor->defaultNextI = instrAddRegToSlot(reg, acc);
 			}
 			cursor = instrEvalExpr(cursor, thread, ((IRExprAssociative *)e)->contents[((IRExprAssociative *)e)->nr_arguments - 1],
-					       reg, exprsToSlots);
+					       reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
 			cursor = cursor->defaultNextI = instrAddSlotToReg(acc, reg);
@@ -749,13 +749,13 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 
 static Instruction<ClientRip> *
 instrCompareExprToZero(Instruction<ClientRip> *start, unsigned thread, IRExpr *expr,
-		       slotMapT &exprsToSlots)
+		       slotMapT &exprsToSlots, simulationSlotT &next_slot)
 {
 	RegisterIdx reg = RegisterIdx::RAX;
-	simulationSlotT spill = exprsToSlots.allocateSlot();
+	simulationSlotT spill = exprsToSlots.allocateSlot(next_slot);
 	Instruction<ClientRip> *cursor, *first;
 	cursor = first = instrMovRegToSlot(reg, spill);
-	cursor = instrEvalExpr(cursor, thread, expr, reg, exprsToSlots);
+	cursor = instrEvalExpr(cursor, thread, expr, reg, exprsToSlots, next_slot);
 	if (!cursor)
 		return NULL;
 	cursor = cursor->defaultNextI = instrTestRegModrm(reg, ModRM::directRegister(reg));
@@ -769,7 +769,8 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 			     const exprEvalPoint &e,
 			     ClientRip failTarget,
 			     slotMapT &exprsToSlots,
-			     std::vector<relocEntryT> &relocs)
+			     std::vector<relocEntryT> &relocs,
+			     simulationSlotT &next_slot)
 {
 	/* Bit of a hack: the fail target's thread set is the set of
 	   threads which are currently live. */
@@ -789,7 +790,7 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 		expr = ((IRExprBinop *)expr)->arg2;
 	}
 
-	Instruction<ClientRip> *cursor = instrCompareExprToZero(start, e.thread, expr, exprsToSlots);
+	Instruction<ClientRip> *cursor = instrCompareExprToZero(start, e.thread, expr, exprsToSlots, next_slot);
 	if (!cursor)
 		return start;
 
@@ -904,7 +905,7 @@ instrModrmReg(Instruction<DirectRip> *i)
 }
 
 static CFG<ClientRip> *
-enforceCrash(crashEnforcementData &data, AddressSpace *as)
+enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next_slot)
 {
 	class __decoder {
 	public:
@@ -1067,7 +1068,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 								-- compare register to r32
 							     */
 							simulationSlotT slot = data.exprsToSlots(it->first, e);
-							simulationSlotT spill = data.exprsToSlots.allocateSlot();
+							simulationSlotT spill = data.exprsToSlots.allocateSlot(next_slot);
 							newInstr = instrMovModrmToSlot(newInstr, instrModrm(underlying), slot, spill);
 							newInstr = newInstr->defaultNextI = instrCmpRegToSlot(instrModrmReg(underlying), slot);
 							cr.skip_orig = true;
@@ -1219,7 +1220,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						printf("\n");
 #endif
 						newInstr = instrCheckExpressionOrEscape(newInstr, *it, cr, data.exprsToSlots,
-											relocs);
+											relocs, next_slot);
 					}
 					newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
 				}
@@ -1237,7 +1238,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 					if (hb->before.rip == cr.rip &&
 					    cr.threadLive(hb->before.thread)) {
 						dbg("\tGenerate %s\n", hb->name());
-						newInstr = instrHappensBeforeEdgeBefore(newInstr, hb, data.exprsToSlots);
+						newInstr = instrHappensBeforeEdgeBefore(newInstr, hb, data.exprsToSlots, next_slot);
 					}
 				}
 			}
@@ -1411,8 +1412,13 @@ main(int argc, char *argv[])
 
 	ced.prettyPrint(stdout);
 
+	simulationSlotT next_slot(1);
+	for (auto it = ced.exprsToSlots.begin(); it != ced.exprsToSlots.end(); it++)
+		if (it->second.idx >= next_slot.idx)
+			next_slot.idx = it->second.idx + 1;
+
 	/* Now build the patch */
-	CFG<ClientRip> *cfg = enforceCrash(ced, ms->addressSpace);
+	CFG<ClientRip> *cfg = enforceCrash(ced, ms->addressSpace, next_slot);
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(ced.happensBeforePoints, ced.roots);
 	pf->fromCFG(cfg);
 	char *patch = pf->asC("ident");

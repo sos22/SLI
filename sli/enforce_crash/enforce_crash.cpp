@@ -186,7 +186,8 @@ static bool
 buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	 std::map<unsigned, ThreadRip> &roots,
 	 AddressSpace *as, crashEnforcementData *out,
-	 int &next_hb_id)
+	 int &next_hb_id,
+	 simulationSlotT &next_slot)
 {
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
@@ -248,7 +249,7 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 	if (!exprDominatorMap.init(c, cfg, neededRips))
 		return false;
 
-	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg, next_hb_id);
+	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg, next_hb_id, next_slot);
 	return true;
 }
 
@@ -298,7 +299,8 @@ static crashEnforcementData
 enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
 		       GarbageCollectionToken token,
-		       int &next_hb_id)
+		       int &next_hb_id,
+		       simulationSlotT &next_slot)
 {
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);
@@ -367,7 +369,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(d[x], m, roots, oracle->ms->addressSpace, &tmp, next_hb_id))
+		if (buildCED(d[x], m, roots, oracle->ms->addressSpace, &tmp, next_hb_id, next_slot))
 			accumulator |= tmp;
 	}
 	return accumulator;
@@ -384,6 +386,7 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	int next_hb_id = 0xaabb;
+	simulationSlotT next_slot(1);
 	crashEnforcementData accumulator;
 	for (int i = 5; i < argc; i++) {
 		int fd = open(argv[i], O_RDONLY);
@@ -392,7 +395,7 @@ main(int argc, char *argv[])
 		VexPtr<CrashSummary, &ir_heap> summary(readCrashSummary(fd));
 		close(fd);
 
-		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id);
+		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id, next_slot);
 	}
 
 	FILE *f = fopen(argv[4], "w");
