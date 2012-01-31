@@ -557,6 +557,12 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 			    ClientRip nextRip,
 			    std::vector<relocEntryT> &relocs)
 {
+	if (hb.size() == 0) {
+		relocs.push_back(relocEntryT(ClientRip(nextRip, ClientRip::original_instruction),
+					     &start->defaultNextI));
+		return;
+	}
+
 	Instruction<ClientRip> *cursor;
 
 	cursor = start;
