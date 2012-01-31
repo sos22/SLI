@@ -1164,7 +1164,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.expressionEvalPoints.count(cr.rip)) {
 				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
-				ClientRip fallThrough(cr, underlying->defaultNext.rip, ClientRip::start_of_instruction);
 				
 				bool doit = false;
 				for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
@@ -1182,7 +1181,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as)
 						it->prettyPrint(stdout);
 						printf("\n");
 #endif
-						newInstr = instrCheckExpressionOrEscape(newInstr, *it, fallThrough, data.exprsToSlots,
+						newInstr = instrCheckExpressionOrEscape(newInstr, *it, cr, data.exprsToSlots,
 											relocs);
 					}
 					newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
