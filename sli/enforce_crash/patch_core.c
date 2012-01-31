@@ -85,7 +85,7 @@ happensBeforeEdge__after_c(int nr_codes, long *codes)
 			if (messages[codes[i] - MESSAGE_ID_BASE])
 				return codes[i];
 		}
-		usleep(10000);
+		usleep(100);
 	}
 
 	return 0;
