@@ -36,6 +36,7 @@ struct patch {
 #include <asm/prctl.h>
 #include <sys/prctl.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 #include <sys/unistd.h>
 #include <assert.h>
 #include <err.h>
@@ -46,6 +47,12 @@ struct patch {
 #define PAGE_SIZE 4096ul
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 
+struct rx_site {
+	unsigned cntr;
+	unsigned saturation_cntr;
+	struct timeval last_reset_time;
+};
+
 static void *
 patch_address;
 static volatile int
@@ -54,10 +61,12 @@ static unsigned
 max_stalls;
 static int
 have_cloned;
+static struct rx_site
+rx_sites[MAX_RX_SITE_ID - MIN_RX_SITE_ID];
 
 /* These get used from inline assembly only.  Shut the compiler up. */
 static void happensBeforeEdge__before_c(int code) __attribute__((unused));
-static long happensBeforeEdge__after_c(int nr_codes, long *codes) __attribute__((unused));
+static long happensBeforeEdge__after_c(int nr_codes, long *codes, int site_id) __attribute__((unused));
 static void clearMessage_c(int nr_codes, long *codes) __attribute__((unused));
 static void clone_hook_c(int (*fn)(void *), void *fn_arg) __attribute__((unused));
 
@@ -66,17 +75,83 @@ happensBeforeEdge__before_c(int code)
 {
 	messages[code - MESSAGE_ID_BASE] = 1;
 }
-static long
-happensBeforeEdge__after_c(int nr_codes, long *codes)
+static int
+min(int a, int b)
 {
+	if (a < b)
+		return a;
+	else
+		return b;
+}
+static long
+happensBeforeEdge__after_c(int nr_codes, long *codes, int site_id)
+{
+	static int tot_delay;
+	static struct timeval last_tot_delay_reset;
 	int cntr;
 	int max;
 	int i;
+	struct rx_site *site;
+	struct timeval now;
+	struct timeval delta;
 
 	if (!have_cloned)
 		return 0;
 
-	max = 10000;
+	site = &rx_sites[site_id];
+	if (site->saturation_cntr > 60) {
+		max = 0;
+	} else {
+		gettimeofday(&now, NULL);
+		delta = now;
+		delta.tv_usec -= site->last_reset_time.tv_usec;
+		delta.tv_sec -= site->last_reset_time.tv_sec;
+		if (delta.tv_usec < 0) {
+			delta.tv_usec += 1000000;
+			delta.tv_sec--;
+		}
+		if (delta.tv_sec >= 10) {
+			site->last_reset_time = now;
+			site->cntr = site->saturation_cntr;
+		}
+
+		/* These numbers are chosen to keep delay per-RX site
+		 * below roughly 25% of total time. */
+		if (site->cntr > 60) {
+			max = 1;
+			if (site->cntr == site->saturation_cntr + 61) {
+				site->saturation_cntr++;
+				site->cntr++;
+			}
+			site->cntr++;
+		} else if (site->cntr > 8) {
+			/* 10ms */
+			max = 100;
+			site->cntr++;
+		} else {
+			/* Exponential backoff from 1s down to 10ms. */
+			max = 10000 >> site->cntr;
+			site->cntr++;
+		}
+
+		/* Limit it so that we only do 15s of delays in any 20s
+		 * window */
+		delta = now;
+		delta.tv_sec -= last_tot_delay_reset.tv_sec;
+		delta.tv_usec -= last_tot_delay_reset.tv_usec;
+		if (delta.tv_usec < 0) {
+			delta.tv_usec += 1000000;
+			delta.tv_sec--;
+		}
+		if (delta.tv_sec >= 20) {
+			tot_delay = 0;
+			last_tot_delay_reset = now;
+		}
+
+		if (tot_delay + max > 180000)
+			max = 180000 - tot_delay;
+		tot_delay = min(tot_delay + max + 1, 180000);
+	}
 
 	for (cntr = 0; cntr < max; cntr++) {
 		for (i = 0; i < nr_codes; i++) {
@@ -85,7 +160,8 @@ happensBeforeEdge__after_c(int nr_codes, long *codes)
 			if (messages[codes[i] - MESSAGE_ID_BASE])
 				return codes[i];
 		}
-		usleep(100);
+		if (cntr != max - 1)
+			usleep(100);
 	}
 
 	return 0;
@@ -129,14 +205,13 @@ asm(								        \
 mk_trampoline(happensBeforeEdge__before);
 asm(
 "	/* We're called from the patch without saving any registers"
-"          except rdi, rax, rsi, and rflags.  We are outside the stack redzone,"
+"          except rdi, rax, rsi, rdx, and rflags.  We are outside the stack redzone,"
 "          though.  Go and save all the call-clobbered registers and"
 "          get into C. */"
 "	"
 "happensBeforeEdge__after:\n"
 "       lea 16(%rsp), %rsi\n"
 "	push %rcx\n"
-"	push %rdx\n"
 "	push %r8\n"
 "	push %r9\n"
 "	push %r10\n"
@@ -146,7 +221,6 @@ asm(
 "	pop %r10\n"
 "	pop %r9\n"
 "	pop %r8\n"
-"	pop %rdx\n"
 "	pop %rcx\n"
 "	ret\n"
 	);

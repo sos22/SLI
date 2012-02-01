@@ -547,7 +547,8 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 			    Instruction<ClientRip> *start,
 			    slotMapT &exprsToSlots,
 			    ClientRip nextRip,
-			    std::vector<relocEntryT> &relocs)
+			    std::vector<relocEntryT> &relocs,
+			    int &rx_message_site_id)
 {
 	if (hb.size() == 0) {
 		relocs.push_back(relocEntryT(ClientRip(nextRip, ClientRip::original_instruction),
@@ -563,14 +564,17 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 
 	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RAX);
 	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RDI);
+	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RDX);
 
 	for (auto it = hb.begin(); it != hb.end(); it++)
 		cursor = cursor->defaultNextI = instrPushImm32((*it)->msg_id);
 
 	cursor = cursor->defaultNextI = instrMovImmediateToReg(hb.size(), RegisterIdx::RDI);
+	cursor = cursor->defaultNextI = instrMovImmediateToReg(rx_message_site_id++, RegisterIdx::RDX);
 	cursor = instrCallSequence(cursor, "(unsigned long)happensBeforeEdge__after");
 
 	cursor = cursor->defaultNextI = instrAddImm32ToModrm(hb.size() * 8, ModRM::directRegister(RegisterIdx::RSP));
+	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RDX);
 	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RDI);
 
 	for (auto it = hb.begin(); it != hb.end(); it++) {
@@ -905,7 +909,7 @@ instrModrmReg(Instruction<DirectRip> *i)
 }
 
 static CFG<ClientRip> *
-enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next_slot)
+enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next_slot, int &next_rx_site_id)
 {
 	class __decoder {
 	public:
@@ -1103,7 +1107,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 						relevantEdges.insert(hb);
 					}
 				}
-				instrHappensBeforeEdgeAfter(relevantEdges, newInstr, data.exprsToSlots, cr, relocs);
+				instrHappensBeforeEdgeAfter(relevantEdges, newInstr, data.exprsToSlots, cr, relocs, next_rx_site_id);
 			} else {
 				relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::original_instruction),
 							     &newInstr->defaultNextI));
@@ -1418,10 +1422,11 @@ main(int argc, char *argv[])
 			next_slot.idx = it->second.idx + 1;
 
 	/* Now build the patch */
-	CFG<ClientRip> *cfg = enforceCrash(ced, ms->addressSpace, next_slot);
+	int next_rx_site_id = 0;
+	CFG<ClientRip> *cfg = enforceCrash(ced, ms->addressSpace, next_slot, next_rx_site_id);
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(ced.happensBeforePoints, ced.roots);
 	pf->fromCFG(cfg);
-	char *patch = pf->asC("ident");
+	char *patch = pf->asC("ident", next_rx_site_id);
 
 	/* Dump it to a file and build it. */
 	char *tmpfile = my_asprintf("enforce_crash_XXXXXX");

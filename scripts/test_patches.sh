@@ -22,7 +22,7 @@ mkdir patch_sources
 mkdir cores
 
 rm enforce_crash_*
-for crash_summary in crash_summaries/684 crash_summaries/*
+for crash_summary in crash_summaries/684 crash_summaries/1019 crash_summaries/*
 do
     echo -n "Processing $crash_summary at "
     date +%s
