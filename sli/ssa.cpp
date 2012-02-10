@@ -1345,7 +1345,7 @@ optimiseSSA(StateMachine *inp, bool *done_something)
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectPhi::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+StateMachineSideEffectPhi::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
 	if (generations.size() == 1) {
 		*done_something = true;

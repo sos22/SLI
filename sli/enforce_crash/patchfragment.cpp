@@ -43,7 +43,7 @@ EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
 }
 
 char *
-EnforceCrashPatchFragment::asC(const char *ident)
+EnforceCrashPatchFragment::asC(const char *ident, int max_rx_site_id)
 {
 	std::vector<const char *> fragments;
 
@@ -67,6 +67,8 @@ EnforceCrashPatchFragment::asC(const char *ident)
 
 	fragments.push_back(vex_asprintf("#define MESSAGE_ID_BASE %d\n", min_message_id));
 	fragments.push_back(vex_asprintf("#define MESSAGE_ID_END %d\n", max_message_id + 1));
+	fragments.push_back(vex_asprintf("#define MIN_RX_SITE_ID %d\n", 0));
+	fragments.push_back(vex_asprintf("#define MAX_RX_SITE_ID %d\n", max_rx_site_id));
 	for (std::set<happensBeforeEdge *>::iterator it = edges.begin();
 	     it != edges.end();
 	     it++) {

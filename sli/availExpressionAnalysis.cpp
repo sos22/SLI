@@ -288,7 +288,7 @@ static void
 updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt,
 			    const Oracle::RegisterAliasingConfiguration &alias,
-			    OracleInterface *oracle)
+			    Oracle *oracle)
 {
 	if (TIMEOUT)
 		return;
@@ -325,8 +325,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				it++;
 		}
 		/* Introduce the store which was generated. */
-		if (opt.assumeNoInterferingStores ||
-		    oracle->storeIsThreadLocal(smses))
+		if (opt.assumeNoInterferingStores || !oracle->hasConflictingRemoteStores(smses))
 			outputAvail.sideEffects.insert(smses);
 		outputAvail.dereference(smses->addr);
 		break;
@@ -409,7 +408,7 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -423,7 +422,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -587,7 +586,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -656,7 +655,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -681,7 +680,7 @@ buildNewStateMachineWithLoadsEliminated(
 
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
+			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
 			bool *done_something)
 {
 #if dump_avail_table || debug_build_table || debug_substitutions
@@ -727,12 +726,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
 		     !TIMEOUT && it != potentiallyAvailable.sideEffects.end();
 			) {
-			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(*it);
-			StateMachineSideEffectLoad *smsel =
-				dynamic_cast<StateMachineSideEffectLoad *>(*it);
-			if ( (smses && !oracle->storeIsThreadLocal(smses)) ||
-			     (smsel && !oracle->loadIsThreadLocal(opt, smsel)) ) {
+			StateMachineSideEffectMemoryAccess *smsema =
+				dynamic_cast<StateMachineSideEffectMemoryAccess *>(*it);
+			if ( smsema && oracle->hasConflictingRemoteStores(smsema) ) {
 				potentiallyAvailable.sideEffects.erase(it++);
 			} else {
 				it++;
@@ -825,6 +821,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				printf("Consider edge %d -> state %d\n", x,
 				       stateLabels[edge->target]);
 #endif
+#warning Why not introduce an assertion on the relevant edge?
 
 				/* Build the output set. */
 				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
@@ -922,7 +919,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 
 StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
+			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
 			bool *done_something)
 {
 	return _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, oracle, done_something);

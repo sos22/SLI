@@ -14,29 +14,11 @@ public:
 
 class AllowableOptimisations;
 
-class OracleInterface : public GarbageCollected<OracleInterface> {
-public:
-	virtual ~OracleInterface() {}
-	virtual bool storeIsThreadLocal(StateMachineSideEffectStore *) = 0;
-	virtual bool loadIsThreadLocal(const AllowableOptimisations &, StateMachineSideEffectLoad *) = 0;
-	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &,
-					      StateMachineSideEffectLoad *,
-					      StateMachineSideEffectStore *) = 0;
-	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &,
-					      StateMachineSideEffectLoad *,
-					      StateMachineSideEffectLoad *) = 0;
-	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &,
-					      StateMachineSideEffectStore *,
-					      StateMachineSideEffectStore *) = 0;
-	virtual bool getRbpToRspDelta(unsigned long rip, long *out) = 0;
-	NAMED_CLASS
-};
-
 /* All of the information from sources other than the main crash dump.
  * Information from the oracle will be true of some executions but not
  * necessarily all of them, so should only really be used where static
  * analysis is insufficient. */
-class Oracle : public OracleInterface {
+class Oracle : public GarbageCollected<Oracle> {
 public:
 	static const int NR_REGS = 16;
 
@@ -286,12 +268,12 @@ private:
 	void getRbpToRspOffset(unsigned long rip, RbpToRspOffsetState *state, unsigned long *offset);
 	void setRbpToRspOffset(unsigned long rip, RbpToRspOffsetState state, unsigned long offset);
 
+public:
 	void visit(HeapVisitor &hv) {
 		hv(ms);
 		hv(crashedThread);
 	}
 
-public:
 	static void loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token);
 	MachineState *ms;
 	Thread *crashedThread;
@@ -304,8 +286,18 @@ public:
 				   std::set<unsigned long> &out);
 	void clusterRips(const std::set<unsigned long> &inputRips,
 			 std::set<InstructionSet> &outputClusters);
-	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
-	bool loadIsThreadLocal(const AllowableOptimisations &, StateMachineSideEffectLoad *s);
+
+	/* True if the access doesn't appear anywhere in the tag
+	   table.  This usually indicates that the relevant
+	   instruction is accessing the stack. */
+	bool notInTagTable(StateMachineSideEffectMemoryAccess *access);
+	/* True if any table entry which includes @access as a
+	 * non-private entry also includes a non-private store
+	 * entry. */
+	/* i.e. this is true if there's some possibility that @access
+	 * might alias with a store in a remote thread. */
+	bool hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access);
+
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
@@ -336,6 +328,8 @@ public:
 		if (tags)
 			loadTagTable(tags);
 	}
+
+	NAMED_CLASS
 };
 
 extern unsigned long hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p);
@@ -355,7 +349,7 @@ void findInstrSuccessorsAndCallees(AddressSpace *as,
 StateMachine *introduceFreeVariables(StateMachine *sm,
 				     const Oracle::RegisterAliasingConfiguration &alias,
 				     const AllowableOptimisations &opt,
-				     OracleInterface *oracle,
+				     Oracle *oracle,
 				     bool *done_something);
 unsigned getInstructionSize(AddressSpace *as, unsigned long rip);
 

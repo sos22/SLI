@@ -900,7 +900,7 @@ public:
 		}
 	}
 
-	char *asC(const char *ident);
+	char *asC(const char *ident, int max_rx_site_id);
 };
 
 class crashEnforcementRoots : public std::set<ClientRip> {

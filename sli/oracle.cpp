@@ -177,57 +177,50 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	}
 }
 
-/* Try to guess whether this store might ever be consumed by another
-   thread.  We approximate this by saying that anything not included
-   in our database of dynamic information is thread-local. */
 bool
-Oracle::storeIsThreadLocal(StateMachineSideEffectStore *s)
+Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 {
-	__set_profiling(storeIsThreadLocal);
+	__set_profiling(notInTagTable);
 	static std::set<unsigned long> threadLocal;
 	static std::set<unsigned long> notThreadLocal;
-	if (threadLocal.count(s->rip.rip))
+	if (threadLocal.count(access->rip.rip))
 		return true;
-	if (notThreadLocal.count(s->rip.rip))
+	if (notThreadLocal.count(access->rip.rip))
 		return false;
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->stores.count(s->rip.rip) ||
-		    it->stores.count(s->rip.rip | (1ul << 63))) {
-			notThreadLocal.insert(s->rip.rip);
+		if (it->stores.count(access->rip.rip) ||
+		    it->stores.count(access->rip.rip | (1ul << 63)) ||
+		    it->loads.count(access->rip.rip) ||
+		    it->loads.count(access->rip.rip) | (1ul << 63)) {
+			notThreadLocal.insert(access->rip.rip);
 			return false;
 		}
 	}
-	threadLocal.insert(s->rip.rip);
+	threadLocal.insert(access->rip.rip);
 	return true;
 }
+
 bool
-Oracle::loadIsThreadLocal(const AllowableOptimisations &opt, StateMachineSideEffectLoad *s)
+Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 {
-	__set_profiling(loadIsThreadLocal);
-	if (opt.nonLocalLoads) {
-		if (opt.nonLocalLoads->count(s->rip.rip))
-			return false;
-		else
+	__set_profiling(hasConflictingRemoteStores);
+	for (auto it = tag_table.begin();
+	     it != tag_table.end();
+	     it++) {
+		if (it->loads.count(access->rip.rip)) {
+			for (auto it2 = it->stores.begin();
+			     it2 != it->stores.end();
+			     it2++) {
+				if (!(*it2 & (1ul << 63)))
+					return true;
+			}
+		}
+		if (it->stores.count(access->rip.rip))
 			return true;
 	}
-	static std::set<unsigned long> threadLocal;
-	static std::set<unsigned long> notThreadLocal;
-	if (threadLocal.count(s->rip.rip))
-		return true;
-	if (notThreadLocal.count(s->rip.rip))
-		return false;
-	for (std::vector<tag_entry>::iterator it = tag_table.begin();
-	     it != tag_table.end();
-	     it++)
-		if (it->loads.count(s->rip.rip) ||
-		    it->loads.count(s->rip.rip | (1ul << 63))) {
-			notThreadLocal.insert(s->rip.rip);
-			return false;
-		}
-	threadLocal.insert(s->rip.rip);
-	return true;
+	return false;
 }
 
 void
@@ -265,11 +258,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	static unsigned nr_trues;
 	static unsigned nr_falses;
 
-	/* The tag database doesn't include anything which doesn't
-	 * cross threads, so for those we have to use a slightly more
-	 * stupid approach. */
-	if (storeIsThreadLocal(smses)) {
-		if (!loadIsThreadLocal(opt, smsel))
+	if (notInTagTable(smses)) {
+		if (!notInTagTable(smsel))
 			return false;
 		if (!definitelyNotEqual(smsel->addr, smses->addr, opt))
 			return true;
@@ -304,14 +294,14 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 				 StateMachineSideEffectLoad *smsel2)
 {
 	__set_profiling(memory_accesses_might_alias_load_load);
-	if (loadIsThreadLocal(opt, smsel1)) {
-		if (!loadIsThreadLocal(opt, smsel2))
+	if (notInTagTable(smsel1)) {
+		if (!notInTagTable(smsel2))
 			return false;
 		if (!definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
 			return true;
 		else
 			return false;
-	} else if (loadIsThreadLocal(opt, smsel2))
+	} else if (notInTagTable(smsel2))
 		return false;
 
 	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel1->rip.rip, smsel2->rip.rip));
@@ -323,12 +313,15 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 				 StateMachineSideEffectStore *smses2)
 {
 	__set_profiling(memory_accesses_might_alias_store_store);
-	if (storeIsThreadLocal(smses1) && storeIsThreadLocal(smses2)) {
+	if (notInTagTable(smses1)) {
+		if (!notInTagTable(smses2))
+			return false;
 		if (!definitelyNotEqual(smses2->addr, smses1->addr, opt))
 			return true;
 		else
 			return false;
-	}
+	} else if (notInTagTable(smses2))
+		return false;
 	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smses1->rip.rip, smses2->rip.rip));
 }
 
@@ -336,8 +329,6 @@ void
 Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<unsigned long> &out)
 {
 	__set_profiling(findRacingRips__load);
-	if (loadIsThreadLocal(opt, smsel))
-		return;
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
 		if (it->loads.count(smsel->rip.rip)) {
 			for (auto it2 = it->stores.begin();
@@ -353,8 +344,6 @@ void
 Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<unsigned long> &out)
 {
 	__set_profiling(findRacingRips__store);
-	if (storeIsThreadLocal(smses))
-		return;
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
 		if (it->stores.count(smses->rip.rip)) {
 			for (auto it2 = it->loads.begin();

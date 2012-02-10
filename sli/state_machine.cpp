@@ -19,7 +19,7 @@ VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(true, false, false, false, false, true, NULL);
 
 StateMachine *
-StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+StateMachine::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
 	bool b = false;
 	std::set<StateMachineState *> done;
@@ -38,7 +38,7 @@ StateMachine::optimise(const AllowableOptimisations &opt, OracleInterface *oracl
 }
 
 StateMachineState *
-StateMachineProxy::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv,
+StateMachineProxy::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
 			    std::set<StateMachineState *> &done)
 {
 	if (done.count(this))
@@ -58,7 +58,7 @@ StateMachineProxy::optimise(const AllowableOptimisations &opt, OracleInterface *
 }
 
 StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv,
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
 				std::set<StateMachineState *> &done)
 {
 	if (done.count(this))
@@ -150,7 +150,7 @@ StateMachineBifurcate::findUsedRegisters(std::set<threadAndRegister, threadAndRe
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	data = optimiseIRExprFP(data, opt, done_something);
@@ -189,7 +189,7 @@ StateMachineSideEffectLoad::constructed()
 	}
 }
 StateMachineSideEffect *
-StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	if (isBadAddress(addr, opt, oracle)) {
@@ -207,7 +207,7 @@ StateMachineSideEffectLoad::findUsedRegisters(std::set<threadAndRegister, thread
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
 	if (definitelyUnevaluatable(value, opt, oracle)) {
@@ -224,7 +224,7 @@ StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister, thread
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
 	if ((value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) ||
@@ -258,7 +258,7 @@ struct availEntry {
 };
 StateMachineEdge *
 StateMachineEdge::optimise(const AllowableOptimisations &opt,
-			   OracleInterface *oracle,
+			   Oracle *oracle,
 			   bool *done_something,
 			   FreeVariableMap &freeVariables,
 			   std::set<StateMachineState *> &done)
