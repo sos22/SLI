@@ -304,7 +304,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		if (!smsel ||
 		    !containsNoTemporaries(smsel->addr) ||
-		    !oracle->loadIsThreadLocal(opt, smsel) ||
+		    oracle->hasConflictingRemoteStores(smsel) ||
 		    !definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) ||
 		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) != 1) {
 			out->sideEffects.push_back(smse);

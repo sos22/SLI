@@ -325,8 +325,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				it++;
 		}
 		/* Introduce the store which was generated. */
-		if (opt.assumeNoInterferingStores ||
-		    oracle->storeIsThreadLocal(smses))
+		if (opt.assumeNoInterferingStores || !oracle->hasConflictingRemoteStores(smses))
 			outputAvail.sideEffects.insert(smses);
 		outputAvail.dereference(smses->addr);
 		break;
@@ -727,12 +726,9 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
 		     !TIMEOUT && it != potentiallyAvailable.sideEffects.end();
 			) {
-			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(*it);
-			StateMachineSideEffectLoad *smsel =
-				dynamic_cast<StateMachineSideEffectLoad *>(*it);
-			if ( (smses && !oracle->storeIsThreadLocal(smses)) ||
-			     (smsel && !oracle->loadIsThreadLocal(opt, smsel)) ) {
+			StateMachineSideEffectMemoryAccess *smsema =
+				dynamic_cast<StateMachineSideEffectMemoryAccess *>(*it);
+			if ( smsema && oracle->hasConflictingRemoteStores(smsema) ) {
 				potentiallyAvailable.sideEffects.erase(it++);
 			} else {
 				it++;

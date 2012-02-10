@@ -286,8 +286,18 @@ public:
 				   std::set<unsigned long> &out);
 	void clusterRips(const std::set<unsigned long> &inputRips,
 			 std::set<InstructionSet> &outputClusters);
-	bool storeIsThreadLocal(StateMachineSideEffectStore *s);
-	bool loadIsThreadLocal(const AllowableOptimisations &, StateMachineSideEffectLoad *s);
+
+	/* True if the access doesn't appear anywhere in the tag
+	   table.  This usually indicates that the relevant
+	   instruction is accessing the stack. */
+	bool notInTagTable(StateMachineSideEffectMemoryAccess *access);
+	/* True if any table entry which includes @access as a
+	 * non-private entry also includes a non-private store
+	 * entry. */
+	/* i.e. this is true if there's some possibility that @access
+	 * might alias with a store in a remote thread. */
+	bool hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access);
+
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
