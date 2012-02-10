@@ -291,7 +291,7 @@ findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 }
 
 static void
-canonicaliseRbp(StateMachine *sm, OracleInterface *oracle)
+canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 {
 	long delta;
 

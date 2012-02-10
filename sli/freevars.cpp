@@ -22,7 +22,7 @@ nrAliasingLoads(StateMachineState *sm,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachineState *> &visited,
-		OracleInterface *oracle);
+		Oracle *oracle);
 static void
 nrAliasingLoads(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel,
@@ -30,7 +30,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachineState *> &visited,
-		OracleInterface *oracle)
+		Oracle *oracle)
 {
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		StateMachineSideEffectLoad *smsel2 =
@@ -52,7 +52,7 @@ nrAliasingLoads(StateMachineState *sm,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachineState *> &visited,
-		OracleInterface *oracle)
+		Oracle *oracle)
 {
 	if (visited.count(sm))
 		return;
@@ -79,7 +79,7 @@ nrAliasingLoads(StateMachine *sm,
 		StateMachineSideEffectLoad *smsel,
 		const Oracle::RegisterAliasingConfiguration &alias,
 		const AllowableOptimisations &opt,
-		OracleInterface *oracle)
+		Oracle *oracle)
 {
 	std::set<StateMachineState *> visited;
 	int res = 0;
@@ -93,14 +93,14 @@ static bool definitelyNoSatisfyingStores(StateMachineState *sm,
 					 const Oracle::RegisterAliasingConfiguration &alias,
 					 const AllowableOptimisations &opt,
 					 bool haveAliasingStore,
-					 OracleInterface *oracle);
+					 Oracle *oracle);
 static bool
 definitelyNoSatisfyingStores(StateMachineEdge *sme,
 			     StateMachineSideEffectLoad *smsel,
 			     const Oracle::RegisterAliasingConfiguration &alias,
 			     const AllowableOptimisations &opt,
 			     bool haveAliasingStore,
-			     OracleInterface *oracle)
+			     Oracle *oracle)
 {
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		StateMachineSideEffect *smse = sme->sideEffects[x];
@@ -144,7 +144,7 @@ definitelyNoSatisfyingStores(StateMachineState *sm,
 			     const Oracle::RegisterAliasingConfiguration &alias,
 			     const AllowableOptimisations &opt,
 			     bool haveAliasingStore,
-			     OracleInterface *oracle)
+			     Oracle *oracle)
 {
 	if (sm->target0() && !definitelyNoSatisfyingStores(sm->target0(),
 							   smsel,
@@ -167,7 +167,7 @@ static bool definitelyNoSatisfyingStores(StateMachine *sm,
 					 const Oracle::RegisterAliasingConfiguration &alias,
 					 const AllowableOptimisations &opt,
 					 bool haveAliasingStore,
-					 OracleInterface *oracle)
+					 Oracle *oracle)
 {
 	return definitelyNoSatisfyingStores(sm->root, smsel, alias, opt, haveAliasingStore, oracle);
 }
@@ -258,7 +258,7 @@ static StateMachineState *introduceFreeVariables(StateMachineState *sm,
 						 StateMachine *root_sm,
 						 const Oracle::RegisterAliasingConfiguration &alias,
 						 const AllowableOptimisations &opt,
-						 OracleInterface *oracle,
+						 Oracle *oracle,
 						 bool *done_something,
 						 std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh);
 static bool
@@ -283,7 +283,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		       StateMachine *root_sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
-		       OracleInterface *oracle,
+		       Oracle *oracle,
 		       bool *done_something,
 		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
 {
@@ -333,7 +333,7 @@ introduceFreeVariables(StateMachineState *sm,
 		       StateMachine *root_sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
-		       OracleInterface *oracle,
+		       Oracle *oracle,
 		       bool *done_something,
 		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
 {
@@ -385,7 +385,7 @@ static StateMachine *
 introduceFreeVariables(StateMachine *sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
-		       OracleInterface *oracle,
+		       Oracle *oracle,
 		       bool *done_something)
 {
 	bool b = false;
@@ -705,7 +705,7 @@ StateMachine *
 introduceFreeVariables(StateMachine *sm,
 		       const Oracle::RegisterAliasingConfiguration &alias,
 		       const AllowableOptimisations &opt,
-		       OracleInterface *oracle,
+		       Oracle *oracle,
 		       bool *done_something)
 {
 	return _freevars::introduceFreeVariables(sm, alias, opt, oracle, done_something);

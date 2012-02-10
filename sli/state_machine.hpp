@@ -9,7 +9,6 @@
 class StateMachine;
 class StateMachineEdge;
 class StateMachineSideEffect;
-class OracleInterface;
 
 #ifdef NDEBUG
 static inline
@@ -251,7 +250,7 @@ public:
 		  tid(parent->tid)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
-			       OracleInterface *oracle,
+			       Oracle *oracle,
 			       bool *done_something);
 	void selectSingleCrashingPath();
 	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
@@ -281,7 +280,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &,
+	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 					    std::set<StateMachineState *> &done) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
@@ -325,7 +324,7 @@ protected:
 		: type(_type)
 	{}
 public:
-	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, OracleInterface *, bool *) = 0;
+	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
 	virtual int complexity() = 0;
@@ -381,7 +380,7 @@ public:
 		     it++)
 			hv(*it);
 	}
-	StateMachineEdge *optimise(const AllowableOptimisations &, OracleInterface *, bool *done_something, FreeVariableMap &,
+	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *, bool *done_something, FreeVariableMap &,
 				   std::set<StateMachineState *> &);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		if (TIMEOUT)
@@ -474,7 +473,7 @@ protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(unsigned long rip) : StateMachineState(rip) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, OracleInterface *, bool *, FreeVariableMap &,
+	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
@@ -573,7 +572,7 @@ public:
 	{
 		hv(target);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &fv,
+	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
 				    std::set<StateMachineState *> &done);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
 		target->findLoadedAddresses(s, opt);
@@ -662,7 +661,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something, FreeVariableMap &,
+	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
 				    std::set<StateMachineState *> &);
 	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
 	{
@@ -770,7 +769,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, OracleInterface *, bool *) { return this; }
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
@@ -811,7 +810,7 @@ public:
 		StateMachineSideEffectMemoryAccess::visit(hv);
 		hv(data);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
@@ -851,7 +850,7 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ")@%s", rip.name());
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
 	}
@@ -881,7 +880,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(value); }
@@ -907,7 +906,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(value); }
@@ -947,7 +946,7 @@ public:
 		fprintf(f, ")");
 	}
 	void visit(HeapVisitor &hv) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
 	int complexity() { return 100; }

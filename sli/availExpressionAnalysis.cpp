@@ -288,7 +288,7 @@ static void
 updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt,
 			    const Oracle::RegisterAliasingConfiguration &alias,
-			    OracleInterface *oracle)
+			    Oracle *oracle)
 {
 	if (TIMEOUT)
 		return;
@@ -409,7 +409,7 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -423,7 +423,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &aliasing,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -587,7 +587,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -656,7 +656,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration &alias,
-	OracleInterface *oracle,
+	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
 	, std::map<const StateMachineState *, int> &stateLabels
@@ -681,7 +681,7 @@ buildNewStateMachineWithLoadsEliminated(
 
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
+			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
 			bool *done_something)
 {
 #if dump_avail_table || debug_build_table || debug_substitutions
@@ -825,6 +825,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				printf("Consider edge %d -> state %d\n", x,
 				       stateLabels[edge->target]);
 #endif
+#warning Why not introduce an assertion on the relevant edge?
 
 				/* Build the output set. */
 				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
@@ -922,7 +923,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 
 StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, OracleInterface *oracle,
+			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
 			bool *done_something)
 {
 	return _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, oracle, done_something);

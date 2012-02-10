@@ -1742,14 +1742,14 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 }
 
 bool
-isBadAddress(IRExpr *e, const AllowableOptimisations &opt, OracleInterface *oracle)
+isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
 {
 	return e->tag == Iex_Const &&
 		(long)((IRExprConst *)e)->con->Ico.U64 < 4096;
 }
 
 bool
-definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInterface *oracle)
+definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
 {
 	if (TIMEOUT)
 		return false;
@@ -1757,7 +1757,7 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInte
 	public:
 		bool res;
 		const AllowableOptimisations &opt;
-		OracleInterface *oracle;
+		Oracle *oracle;
 
 		IRExpr *transformIex(IRExprLoad *e) {
 			if (isBadAddress(e->addr, opt, oracle))
@@ -1765,7 +1765,7 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, OracleInte
 			return IRExprTransformer::transformIex(e);
 		}
 		_(const AllowableOptimisations &_opt,
-		  OracleInterface *_oracle)
+		  Oracle *_oracle)
 			: res(false), opt(_opt), oracle(_oracle)
 		{}
 	} t(opt, oracle);
