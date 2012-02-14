@@ -75,8 +75,8 @@ public:
 		}
 		return r;
 	}
-	operator OracleRip() const {
-		return OracleRip((unsigned long)*this);
+	operator VexRip() const {
+		return VexRip((unsigned long)*this);
 	}
 	void visit(HeapVisitor &hv) { hv(content); }
 	NAMED_CLASS
@@ -130,7 +130,7 @@ find_words(char *command)
 static void
 list_heads(Oracle *oracle)
 {
-	std::vector<OracleRip> f;
+	std::vector<VexRip> f;
 
 	oracle->getFunctions(f);
 	for (auto it = f.begin();
@@ -159,7 +159,7 @@ dumpTagTable(Oracle *oracle)
 	}
 }
 
-static std::vector<OracleRip> newHeads;
+static std::vector<VexRip> newHeads;
 
 static void
 run_command(VexPtr<Oracle> &oracle, GarbageCollectionToken token)

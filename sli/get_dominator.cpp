@@ -8,8 +8,8 @@ main(int argc, char *argv[])
 	MachineState *ms = MachineState::readCoredump(argv[1]);
 	Thread *thr = ms->findThread(ThreadId(1));
 
-	std::vector<OracleRip> dominators;
-	std::vector<OracleRip> fheads;
+	std::vector<VexRip> dominators;
+	std::vector<VexRip> fheads;
 	getDominators(thr, ms, dominators, fheads);
 
 	for (auto it = dominators.begin();

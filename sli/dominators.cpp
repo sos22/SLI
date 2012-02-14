@@ -222,7 +222,7 @@ compensateForBadVCall(Thread *thr, AddressSpace *as)
 
 /* Figure out where the first instruction in the current function
  * is. */
-static OracleRip
+static VexRip
 findFunctionHead(RegisterSet *rs, AddressSpace *as)
 {
 	unsigned long ra;
@@ -239,7 +239,7 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 	if (h == 0xe8) {
 		/* That looks like a call. */
 		int delta = as->fetch<int>(ra - 4, NULL);
-		return OracleRip(ra + delta);
+		return VexRip(ra + delta);
 	}
 
 	fail("findFunctionHead\n");
@@ -254,15 +254,15 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
    starting point to the target instruction.  We order them so that
    the dominators nearest to the target are reported first. */
 void
-findDominators(const OracleRip &functionHead,
-	       const OracleRip &rip,
+findDominators(const VexRip &functionHead,
+	       const VexRip &rip,
 	       AddressSpace *as,
-	       std::vector<OracleRip> &out)
+	       std::vector<VexRip> &out)
 {
-	std::vector<OracleRip> remainingToExplore;
-	std::map<OracleRip, std::set<OracleRip> > successors;
-	std::map<OracleRip, std::set<OracleRip> > predecessors;
-	std::set<OracleRip> instrs;
+	std::vector<VexRip> remainingToExplore;
+	std::map<VexRip, std::set<VexRip> > successors;
+	std::map<VexRip, std::set<VexRip> > predecessors;
+	std::set<VexRip> instrs;
 
 	DBG_DOMINATORS("Exploring from %lx to find dominators of %lx\n", functionHead, rip);
 	/* First: build the CFG, representing all of the successor
@@ -270,7 +270,7 @@ findDominators(const OracleRip &functionHead,
 	   predecessors. */
 	remainingToExplore.push_back(functionHead);
 	while (!remainingToExplore.empty()) {
-		OracleRip rip = remainingToExplore.back();
+		VexRip rip = remainingToExplore.back();
 		unsigned long r;
 		remainingToExplore.pop_back();
 		if (instrs.count(rip))
@@ -282,17 +282,17 @@ findDominators(const OracleRip &functionHead,
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
-				successors[rip].insert(OracleRip(((IRStmtIMark *)stmt)->addr));
-				predecessors[OracleRip(((IRStmtIMark *)stmt)->addr)].insert(rip);
+				successors[rip].insert(VexRip(((IRStmtIMark *)stmt)->addr));
+				predecessors[VexRip(((IRStmtIMark *)stmt)->addr)].insert(rip);
 				instrs.insert(rip);
-				rip = OracleRip(((IRStmtIMark *)stmt)->addr);
+				rip = VexRip(((IRStmtIMark *)stmt)->addr);
 				if (instrs.count(rip))
 					goto done_this_entry;
 				break;
 			case Ist_Exit:
-				successors[rip].insert(OracleRip(((IRStmtExit *)stmt)->dst->Ico.U64));
-				predecessors[OracleRip(((IRStmtExit *)stmt)->dst->Ico.U64)].insert(rip);
-				remainingToExplore.push_back(OracleRip(((IRStmtExit *)stmt)->dst->Ico.U64));
+				successors[rip].insert(VexRip(((IRStmtExit *)stmt)->dst->Ico.U64));
+				predecessors[VexRip(((IRStmtExit *)stmt)->dst->Ico.U64)].insert(rip);
+				remainingToExplore.push_back(VexRip(((IRStmtExit *)stmt)->dst->Ico.U64));
 				break;
 			default:
 				break;
@@ -308,9 +308,9 @@ findDominators(const OracleRip &functionHead,
 			r = ((IRExprConst *)irsb->next)->con->Ico.U64;
 		}
 		if (r) {
-			successors[rip].insert(OracleRip(r));
-			predecessors[OracleRip(r)].insert(rip);
-			remainingToExplore.push_back(OracleRip(r));
+			successors[rip].insert(VexRip(r));
+			predecessors[VexRip(r)].insert(rip);
+			remainingToExplore.push_back(VexRip(r));
 		}
 	done_this_entry:
 		;
@@ -326,7 +326,7 @@ findDominators(const OracleRip &functionHead,
 	*/
 
 	/* Build initial optimistic map. */
-	std::map<OracleRip, std::set<OracleRip> > dominators;
+	std::map<VexRip, std::set<VexRip> > dominators;
 	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++)
@@ -344,10 +344,10 @@ findDominators(const OracleRip &functionHead,
 		for (auto it = instrs.begin();
 		     it != instrs.end();
 		     it++) {
-			OracleRip rip = *it;
+			VexRip rip = *it;
 			/* Check that all of our current dominators
 			 * are valid. */
-			std::set<OracleRip> &dom(dominators[rip]);
+			std::set<VexRip> &dom(dominators[rip]);
 			for (auto domit = dom.begin();
 			     domit != dom.end();
 				) {
@@ -419,20 +419,20 @@ findDominators(const OracleRip &functionHead,
 	 * in the definition of dominators.  There's probably a
 	 * version of the dominator algorithm whcih does it directly,
 	 * but I couldn't think of one. */
-	std::map<OracleRip, OracleRip> immediateDominators;
+	std::map<VexRip, VexRip> immediateDominators;
 	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		if (TIMEOUT)
 			return;
 
-		OracleRip rip = *it;
+		VexRip rip = *it;
 		if (rip == functionHead) /* immediate dominator of
 					  * function head undefined */
 			continue;
-		std::set<OracleRip> &doms(dominators[rip]);
+		std::set<VexRip> &doms(dominators[rip]);
 		bool found_one = false;
 		DBG_DOMINATORS("Find immediate dominator of %lx...\n", rip);
 		for (auto it2 = doms.begin(); it2 != doms.end(); it2++) {
-			OracleRip dom = *it2;
+			VexRip dom = *it2;
 			/* Is dom the immediate dominator of rip? */
 			if (dom == rip)
 				continue; /* can't be immediate dominator of yourself */
@@ -445,7 +445,7 @@ findDominators(const OracleRip &functionHead,
 			for (auto it3 = doms.begin();
 			     !over_dominated && it3 != doms.end();
 			     it3++) {
-				OracleRip dom_prime = *it3;
+				VexRip dom_prime = *it3;
 				if (dom_prime == dom || dom_prime == rip)
 					continue;
 				/* If dom_prime dominates dom then dom
@@ -483,7 +483,7 @@ findDominators(const OracleRip &functionHead,
 
 	/* Finally, walk the immediate dominator map to build the
 	 * ordered dominator chain for the target instruction. */
-	OracleRip r = rip;
+	VexRip r = rip;
 	while (1) {
 		out.push_back(r);
 		if (!immediateDominators.count(r))
@@ -495,19 +495,19 @@ findDominators(const OracleRip &functionHead,
 }
 
 void
-getDominators(Thread *thr, MachineState *ms, std::vector<OracleRip> &dominators, std::vector<OracleRip> &fheads)
+getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators, std::vector<VexRip> &fheads)
 {
-	OracleRip head(findFunctionHead(&thr->regs, ms->addressSpace));
+	VexRip head(findFunctionHead(&thr->regs, ms->addressSpace));
 	fheads.push_back(head);
 	compensateForBadVCall(thr, ms->addressSpace);
-	findDominators(head, OracleRip(thr->regs.rip()), ms->addressSpace, dominators);
+	findDominators(head, VexRip(thr->regs.rip()), ms->addressSpace, dominators);
 
 	RegisterSet rs = thr->regs;
 	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
 	try {
 		head = findFunctionHead(&rs, ms->addressSpace);
 		fheads.push_back(head);
-		findDominators(head, OracleRip(rs.rip()), ms->addressSpace, dominators);
+		findDominators(head, VexRip(rs.rip()), ms->addressSpace, dominators);
 	} catch (BadMemoryException &e) {
 		/* Just give up: if we can't find the caller's caller,
 		 * we just won't bother backtracking that far. */

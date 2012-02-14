@@ -85,12 +85,12 @@ public:
 	   interestingStores at all, and instead rely on
 	   ignoreSideEffects. */
 	bool haveInterestingStoresSet;
-	std::set<OracleRip> interestingStores;
+	std::set<VexRip> interestingStores;
 
 	/* If this is non-NULL then rather than using the oracle to
 	   check whether loads might possibly load, we just look in
 	   here. */
-	std::set<OracleRip> *nonLocalLoads;
+	std::set<VexRip> *nonLocalLoads;
 
 	AllowableOptimisations disablexPlusMinusX() const
 	{
@@ -156,7 +156,7 @@ public:
 		return x;
 	}
 
-	bool ignoreStore(const OracleRip &rip) const {
+	bool ignoreStore(const VexRip &rip) const {
 		if (ignoreSideEffects)
 			return true;
 		if (!haveInterestingStoresSet)
@@ -296,7 +296,7 @@ public:
 	virtual RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const = 0;
 	void assertAcyclic() const;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
-	void enumerateMentionedMemoryAccesses(std::set<OracleRip> &out);
+	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
 
 #ifdef NDEBUG
@@ -408,7 +408,7 @@ public:
 		}
 		return this;
 	}
-	void enumerateMentionedMemoryAccesses(std::set<OracleRip> &instrs);
+	void enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs);
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		for (auto it = memo.begin(); it != memo.end(); it++)
 			if (*it == this)
@@ -780,8 +780,8 @@ public:
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
 	IRExpr *addr;
-	ThreadOracleRip rip;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const ThreadOracleRip &_rip,
+	ThreadVexRip rip;
+	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const ThreadVexRip &_rip,
 					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip)
 	{}
@@ -795,7 +795,7 @@ public:
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const ThreadOracleRip &_rip)
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
 		  data(_data)
 	{
@@ -832,13 +832,13 @@ class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void constructed();
 	unsigned long _hashval() const { return addr->hashval() * 757 + target.hash() * 118409; }
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadOracleRip &_rip)
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(alloc())
 	{
 		constructed();
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const ThreadOracleRip &_rip)
+	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(reg)
 	{

@@ -93,10 +93,10 @@ public:
 };
 
 typedef gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type InferredInformation;
-StateMachine *buildProbeMachine(std::vector<OracleRip> &previousInstructions,
+StateMachine *buildProbeMachine(std::vector<VexRip> &previousInstructions,
 				VexPtr<InferredInformation, &ir_heap> &ii,
 				VexPtr<Oracle> &oracle,
-				const OracleRip &interestingRip,
+				const VexRip &interestingRip,
 				ThreadId tid,
 				GarbageCollectionToken token);
 CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,

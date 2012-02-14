@@ -468,13 +468,13 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	}
 	IRExpr *addr;
 	IRExpr *data;
-	ThreadOracleRip rip;
+	ThreadVexRip rip;
 	if (parseThisString("*(", str, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(") <- ", str2, &str2) &&
 	    parseIRExpr(&data, str2, &str2) &&
 	    parseThisString(" @ ", str2, &str2) &&
-	    parseThreadOracleRip(&rip, str2, suffix)) {
+	    parseThreadVexRip(&rip, str2, suffix)) {
 		*out = new StateMachineSideEffectStore(addr, data, rip);
 		return true;
 	}
@@ -484,7 +484,7 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	    parseThisString(" <- *(", str2, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(")@", str2, &str2) &&
-	    parseThreadOracleRip(&rip, str2, suffix)) {
+	    parseThreadVexRip(&rip, str2, suffix)) {
 		*out = new StateMachineSideEffectLoad(key, addr, rip);
 		return true;
 	}
@@ -736,7 +736,7 @@ StateMachineState::assertAcyclic() const
 }
 
 void
-StateMachineState::enumerateMentionedMemoryAccesses(std::set<OracleRip> &instrs)
+StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
 	if (target1())
 		target1()->enumerateMentionedMemoryAccesses(instrs);
@@ -745,7 +745,7 @@ StateMachineState::enumerateMentionedMemoryAccesses(std::set<OracleRip> &instrs)
 }
 
 void
-StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<OracleRip> &instrs)
+StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
 	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
 	     it != sideEffects.end();

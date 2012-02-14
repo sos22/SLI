@@ -175,8 +175,8 @@ evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, threadState
 }
 
 static void
-addOrderingConstraint(ThreadOracleRip before,
-		      ThreadOracleRip after,
+addOrderingConstraint(ThreadVexRip before,
+		      ThreadVexRip after,
 		      const AllowableOptimisations &opt,
 		      IRExpr **assumption,
 		      IRExpr **accumulatedAssumptions)
@@ -619,7 +619,7 @@ public:
 class CrossMachineEvalContext {
 	void advanceToSideEffect(CrossEvalState *machine, NdChooser &chooser, Oracle *oracle,
 				 const AllowableOptimisations &opt,
-				 std::set<OracleRip> &usefulRips, bool wantLoad);
+				 std::set<VexRip> &usefulRips, bool wantLoad);
 public:
 	bool collectOrderingConstraints;
 	IRExpr *pathConstraint;
@@ -628,8 +628,8 @@ public:
 	CrossEvalState *loadMachine;
 	CrossEvalState *storeMachine;
 	std::vector<StateMachineSideEffect *> history;
-	std::set<OracleRip> &probeMachineRacingInstructions;
-	std::set<OracleRip> &storeMachineRacingInstructions;
+	std::set<VexRip> &probeMachineRacingInstructions;
+	std::set<VexRip> &storeMachineRacingInstructions;
 	void advanceMachine(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt, bool doLoad);
 	void dumpHistory(FILE *f) const;
 	void advanceToLoad(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
@@ -638,8 +638,8 @@ public:
 	void advanceToStore(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
 		advanceToSideEffect(storeMachine, chooser, oracle, opt, storeMachineRacingInstructions, false);
 	}
-	CrossMachineEvalContext(std::set<OracleRip> &_probeMachineRacingInstructions,
-				std::set<OracleRip> &_storeMachineRacingInstructions)
+	CrossMachineEvalContext(std::set<VexRip> &_probeMachineRacingInstructions,
+				std::set<VexRip> &_storeMachineRacingInstructions)
 		: collectOrderingConstraints(false),
 		  pathConstraint(NULL),
 		  justPathConstraint(NULL),
@@ -665,7 +665,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					     NdChooser &chooser,
 					     Oracle *oracle,
 					     const AllowableOptimisations &opt,
-					     std::set<OracleRip> &interestingRips,
+					     std::set<VexRip> &interestingRips,
 					     bool wantLoad)
 {
 	StateMachineState *s;
@@ -764,8 +764,8 @@ findCrossMachineRacingInstructions(StateMachine *probeMachine,
 				   StateMachine *storeMachine,
 				   Oracle *oracle,
 				   const AllowableOptimisations &opt,
-				   std::set<OracleRip> &probeMachineRacingInstructions,
-				   std::set<OracleRip> &storeMachineRacingInstructions)
+				   std::set<VexRip> &probeMachineRacingInstructions,
+				   std::set<VexRip> &storeMachineRacingInstructions)
 {
 	std::set<StateMachineSideEffectStore *> storeMachineStores;
 	findAllStores(storeMachine, storeMachineStores);
@@ -794,8 +794,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	*mightSurvive = false;
 	*mightCrash = false;
 
-	std::set<OracleRip> probeMachineRacingInstructions;
-	std::set<OracleRip> storeMachineRacingInstructions;
+	std::set<VexRip> probeMachineRacingInstructions;
+	std::set<VexRip> storeMachineRacingInstructions;
 	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
 					   opt,
 					   probeMachineRacingInstructions,
@@ -1269,8 +1269,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	NdChooser chooser;
 	VexPtr<IRExpr, &ir_heap> newCondition(IRExpr_Const(IRConst_U1(0)));
 
-	std::set<OracleRip> probeMachineRacingInstructions;
-	std::set<OracleRip> storeMachineRacingInstructions;
+	std::set<VexRip> probeMachineRacingInstructions;
+	std::set<VexRip> storeMachineRacingInstructions;
 	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
 					   opt,
 					   probeMachineRacingInstructions,

@@ -11,7 +11,7 @@
 
 class InstructionSet {
 public:
-	std::set<OracleRip> rips;
+	std::set<VexRip> rips;
 };
 
 class AllowableOptimisations;
@@ -93,21 +93,21 @@ public:
 		friend class Oracle;
 
 	public:
-		OracleRip rip;
+		VexRip rip;
 	private:
 		void *operator new(size_t s); /* DNI */
 		char *mkName() const { return my_asprintf("function_%s", rip.name()); }
-		void getInstructionsInFunction(std::vector<OracleRip> &out) const;
-		void updateLiveOnEntry(const OracleRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
-		void updateRbpToRspOffset(const OracleRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
-		void addPredecessorsNonCall(const OracleRip &rip, std::vector<OracleRip> &out);
-		void addPredecessors(const OracleRip &rip, std::vector<OracleRip> &out);
-		void updateSuccessorInstructionsAliasing(const OracleRip &rip, AddressSpace *as, std::vector<OracleRip> *changed,
+		void getInstructionsInFunction(std::vector<VexRip> &out) const;
+		void updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
+		void updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
+		void addPredecessorsNonCall(const VexRip &rip, std::vector<VexRip> &out);
+		void addPredecessors(const VexRip &rip, std::vector<VexRip> &out);
+		void updateSuccessorInstructionsAliasing(const VexRip &rip, AddressSpace *as, std::vector<VexRip> *changed,
 							 Oracle *oracle);
-		void getInstructionFallThroughs(const OracleRip &rip, std::vector<OracleRip> &out);
-		void getInstructionCallees(const OracleRip &rip, std::vector<OracleRip> &out, Oracle *oracle);
-		void getSuccessors(const OracleRip &rip, std::vector<OracleRip> &succ);
-		void getFunctionCallers(std::vector<OracleRip> &out, Oracle *oracle);
+		void getInstructionFallThroughs(const VexRip &rip, std::vector<VexRip> &out);
+		void getInstructionCallees(const VexRip &rip, std::vector<VexRip> &out, Oracle *oracle);
+		void getSuccessors(const VexRip &rip, std::vector<VexRip> &succ);
+		void getFunctionCallers(std::vector<VexRip> &out, Oracle *oracle);
 		bool registerLivenessCorrect() const;
 		void setRegisterLivenessCorrect(bool v);
 		bool rbpToRspOffsetsCorrect() const;
@@ -116,20 +116,20 @@ public:
 		void setAliasingConfigCorrect(bool v);
 		bool exists() const;
 	public:
-		Function(const OracleRip &_rip)
+		Function(const VexRip &_rip)
 			: rip(_rip)
 		{}
 
-		LivenessSet liveOnEntry(const OracleRip &, bool);
-		bool aliasConfigOnEntryToInstruction(const OracleRip &rip, RegisterAliasingConfiguration *out);
-		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const OracleRip &rip);
-		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const OracleRip &rip, bool *b);
-		void setAliasConfigOnEntryToInstruction(const OracleRip &rip, const RegisterAliasingConfiguration &config);
+		LivenessSet liveOnEntry(const VexRip &, bool);
+		bool aliasConfigOnEntryToInstruction(const VexRip &rip, RegisterAliasingConfiguration *out);
+		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const VexRip &rip);
+		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const VexRip &rip, bool *b);
+		void setAliasConfigOnEntryToInstruction(const VexRip &rip, const RegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
-		bool addInstruction(const OracleRip &rip,
-				    const std::vector<OracleRip> &callees,
-				    const std::vector<OracleRip> &fallThrough,
-				    const std::vector<OracleRip> &branch);
+		bool addInstruction(const VexRip &rip,
+				    const std::vector<VexRip> &callees,
+				    const std::vector<VexRip> &fallThrough,
+				    const std::vector<VexRip> &branch);
 		void calculateRegisterLiveness(AddressSpace *as, bool *done_something, Oracle *oracle);
 		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
 		void calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle);
@@ -195,7 +195,7 @@ public:
 		operator unsigned long() const { return v; }
 	};
 	class RegisterAliasingConfiguration {
-		friend RegisterAliasingConfiguration Function::aliasConfigOnEntryToInstruction(const OracleRip &rip,
+		friend RegisterAliasingConfiguration Function::aliasConfigOnEntryToInstruction(const VexRip &rip,
 											       bool *b);
 		RegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
 		RegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
@@ -236,20 +236,20 @@ public:
 	};
 
 	struct tag_entry {
-		std::set<OracleRip> loads;
-		std::set<OracleRip> stores;
+		std::set<VexRip> loads;
+		std::set<VexRip> stores;
 	};
 	std::vector<tag_entry> tag_table;
 private:
 	static const unsigned nr_memory_filter_words = 10267;
-	static unsigned long hashRipPair(OracleRip a, OracleRip b) {
+	static unsigned long hashRipPair(VexRip a, VexRip b) {
 		unsigned long h = a.rip + b.rip * 202693;
 		while (h >= (nr_memory_filter_words * 64))
 			h = (h % (nr_memory_filter_words * 64)) ^ (h / (nr_memory_filter_words * 64));
 		assert(h / 64 < nr_memory_filter_words);
 		return h;
 	}
-	static unsigned long hashRipPair2(OracleRip a, OracleRip b) {
+	static unsigned long hashRipPair2(VexRip a, VexRip b) {
 		unsigned long h = a.rip * 706133 + b.rip * 511669;
 		while (h >= (nr_memory_filter_words * 64))
 			h = (h % (nr_memory_filter_words * 64)) ^ (h / (nr_memory_filter_words * 64));
@@ -258,24 +258,24 @@ private:
 	}
 	unsigned long memoryAliasingFilter[nr_memory_filter_words];
 	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
-	std::set<std::pair<OracleRip, OracleRip> > *aliasingTable;
+	std::set<std::pair<VexRip, VexRip> > *aliasingTable;
 
-	void discoverFunctionHead(const OracleRip &x, std::vector<OracleRip> &heads);
+	void discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads);
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	void loadTagTable(const char *path);
 	Mapping callGraphMapping;
-	void findPossibleJumpTargets(const OracleRip &from, std::vector<OracleRip> &targets);
-	OracleRip functionHeadForInstruction(const OracleRip &rip);
+	void findPossibleJumpTargets(const VexRip &from, std::vector<VexRip> &targets);
+	VexRip functionHeadForInstruction(const VexRip &rip);
 
 	enum RbpToRspOffsetState {
 		RbpToRspOffsetStateImpossible,
 		RbpToRspOffsetStateValid,
 		RbpToRspOffsetStateUnknown
 	};
-	void getRbpToRspOffset(const OracleRip &rip, RbpToRspOffsetState *state, unsigned long *offset);
-	void setRbpToRspOffset(const OracleRip &rip, RbpToRspOffsetState state, unsigned long offset);
+	void getRbpToRspOffset(const VexRip &rip, RbpToRspOffsetState *state, unsigned long *offset);
+	void setRbpToRspOffset(const VexRip &rip, RbpToRspOffsetState state, unsigned long offset);
 
 public:
 	void visit(HeapVisitor &hv) {
@@ -289,11 +289,11 @@ public:
 
 	static const unsigned STATIC_THREAD = 712;
 
-	void findPreviousInstructions(std::vector<OracleRip> &output);
-	void findPreviousInstructions(std::vector<OracleRip> &output, const OracleRip &rip);
+	void findPreviousInstructions(std::vector<VexRip> &output);
+	void findPreviousInstructions(std::vector<VexRip> &output, const VexRip &rip);
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
-				   std::set<OracleRip> &out);
-	void clusterRips(const std::set<OracleRip> &inputRips,
+				   std::set<VexRip> &out);
+	void clusterRips(const std::set<VexRip> &inputRips,
 			 std::set<InstructionSet> &outputClusters);
 
 	/* True if the access doesn't appear anywhere in the tag
@@ -310,30 +310,30 @@ public:
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
-	void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<OracleRip> &);
-	void findRacingRips(StateMachineSideEffectStore *, std::set<OracleRip> &);
-	bool functionCanReturn(const OracleRip &rip);
+	void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<VexRip> &);
+	void findRacingRips(StateMachineSideEffectStore *, std::set<VexRip> &);
+	bool functionCanReturn(const VexRip &rip);
 
-	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<OracleRip> &heads, GarbageCollectionToken token);
+	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, GarbageCollectionToken token);
 
-	void getFunctions(std::vector<OracleRip> &out);
+	void getFunctions(std::vector<VexRip> &out);
 
-	OracleRip dominator(const std::set<OracleRip> &instrs,
+	VexRip dominator(const std::set<VexRip> &instrs,
 			    AddressSpace *as,
 			    unsigned minimum_size);
 
-	void getAllMemoryAccessingInstructions(std::vector<OracleRip> &out) const;
+	void getAllMemoryAccessingInstructions(std::vector<VexRip> &out) const;
 
-	RegisterAliasingConfiguration getAliasingConfigurationForRip(const OracleRip &rip);
-	LivenessSet liveOnEntryToFunction(const OracleRip &rip);
+	RegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
+	LivenessSet liveOnEntryToFunction(const VexRip &rip);
 
-	bool getRbpToRspDelta(const OracleRip &rip, long *out);
+	bool getRbpToRspDelta(const VexRip &rip, long *out);
 
 	~Oracle() { delete aliasingTable; }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)
 	{
-		aliasingTable = new std::set<std::pair<OracleRip, OracleRip> >();
+		aliasingTable = new std::set<std::pair<VexRip, VexRip> >();
 		if (tags)
 			loadTagTable(tags);
 	}
@@ -347,24 +347,24 @@ hash_pair(const std::pair<a, b> &p)
 	return __default_hash_function(p.first) + 11 * __default_hash_function(p.second);
 }
 
-typedef gc_map<std::pair<OracleRip, OracleRip>,
+typedef gc_map<std::pair<VexRip, VexRip>,
 	       bool,
 	       hash_pair,
-	       __default_eq_function<std::pair<OracleRip, OracleRip> >,
-	       __default_visit_function<std::pair<OracleRip, OracleRip>, bool>,
-	       &ir_heap> gc_pair_OracleRip_set_t;
+	       __default_eq_function<std::pair<VexRip, VexRip> >,
+	       __default_visit_function<std::pair<VexRip, VexRip>, bool>,
+	       &ir_heap> gc_pair_VexRip_set_t;
 //void mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src);
 
 void findInstrSuccessorsAndCallees(AddressSpace *as,
-				   const OracleRip &rip,
-				   std::vector<OracleRip> &directExits,
-				   gc_pair_OracleRip_set_t *callees);
+				   const VexRip &rip,
+				   std::vector<VexRip> &directExits,
+				   gc_pair_VexRip_set_t *callees);
 
 StateMachine *introduceFreeVariables(StateMachine *sm,
 				     const Oracle::RegisterAliasingConfiguration &alias,
 				     const AllowableOptimisations &opt,
 				     Oracle *oracle,
 				     bool *done_something);
-unsigned getInstructionSize(AddressSpace *as, const OracleRip &rip);
+unsigned getInstructionSize(AddressSpace *as, const VexRip &rip);
 
 #endif /* !ORACLE_H__ */

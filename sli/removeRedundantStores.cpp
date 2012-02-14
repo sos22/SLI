@@ -152,7 +152,7 @@ removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 {
 	__set_profiling(removeRedundantStores);
 	std::set<StateMachineState *> visited;
-	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(sm->origin));
+	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(VexRip(sm->origin)));
 	removeRedundantStores(sm->root, oracle, done_something, alias, visited, opt);
 }
 

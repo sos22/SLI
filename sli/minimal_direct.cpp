@@ -83,7 +83,7 @@ shuffle(std::vector<typ> &vect)
 }
 
 static void
-consider_rip(const OracleRip &my_rip,
+consider_rip(const VexRip &my_rip,
 	     VexPtr<MachineState> &ms,
 	     VexPtr<Thread> &thr,
 	     VexPtr<Oracle> &oracle,
@@ -105,8 +105,8 @@ consider_rip(const OracleRip &my_rip,
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
 	ii->set(my_rip.rip, new StateMachineProxy(my_rip.rip, proximal));
 
-	std::vector<OracleRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, OracleRip(my_rip));
+	std::vector<VexRip> previousInstructions;
+	oracle->findPreviousInstructions(previousInstructions, VexRip(my_rip));
 
 	struct itimerval itv;
 	struct timeval start;
@@ -180,10 +180,10 @@ main(int argc, char *argv[])
 	LibVEX_gc(ALLOW_GC);
 
 	if (argc == 5) {
-		consider_rip(OracleRip(strtoul(argv[4], NULL, 16)), ms, thr, oracle, df, NULL, ALLOW_GC);
+		consider_rip(VexRip(strtoul(argv[4], NULL, 16)), ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
 		FILE *timings = fopen("timings.txt", "w");
-		std::vector<OracleRip> targets;
+		std::vector<VexRip> targets;
 		oracle->getAllMemoryAccessingInstructions(targets);
 		shuffle(targets);
 		printf("%zd instructions to protect\n", targets.size());

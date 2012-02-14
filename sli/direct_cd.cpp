@@ -58,7 +58,7 @@ main(int argc, char *argv[])
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
 	ii->set(thr->regs.rip(), new StateMachineProxy(thr->regs.rip(), proximal.get()));
 
-	std::vector<OracleRip> previousInstructions;
+	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
 
 	DumpFix df(oracle);
@@ -67,7 +67,7 @@ main(int argc, char *argv[])
 	probeMachine = buildProbeMachine(previousInstructions,
 					 ii,
 					 oracle,
-					 OracleRip(thr->regs.rip()),
+					 VexRip(thr->regs.rip()),
 					 thr->tid,
 					 ALLOW_GC);
 	VexPtr<CrashSummary, &ir_heap> summary;

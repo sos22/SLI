@@ -130,7 +130,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 }
 
 static StateMachineEdge *
-backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadOracleRip site)
+backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadVexRip site)
 {
 	switch (stmt->tag) {
 	case Ist_NoOp:
@@ -208,7 +208,7 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 	IRSB *irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
 	while (idx != 0) {
 		idx--;
-		sm = backtrackOneStatement(sm, irsb->stmts[idx], ThreadOracleRip(thr->tid._tid(), OracleRip(rip)));
+		sm = backtrackOneStatement(sm, irsb->stmts[idx], ThreadVexRip(thr->tid._tid(), VexRip(rip)));
 		if (!sm)
 			return NULL;
 	}
