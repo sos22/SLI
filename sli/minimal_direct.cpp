@@ -118,7 +118,7 @@ consider_rip(const OracleRip &my_rip,
 	gettimeofday(&start, NULL);
 
 	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip.rip, thr->tid, token);
+	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip, thr->tid, token);
 	if (probeMachine) {
 		VexPtr<CrashSummary, &ir_heap> summary;
 		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);
@@ -180,7 +180,7 @@ main(int argc, char *argv[])
 	LibVEX_gc(ALLOW_GC);
 
 	if (argc == 5) {
-		consider_rip(strtoul(argv[4], NULL, 16), ms, thr, oracle, df, NULL, ALLOW_GC);
+		consider_rip(OracleRip(strtoul(argv[4], NULL, 16)), ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
 		FILE *timings = fopen("timings.txt", "w");
 		std::vector<OracleRip> targets;

@@ -34,7 +34,7 @@ public:
 		return rip;
 	}
 
-	OracleRip(unsigned long _rip)
+	explicit OracleRip(unsigned long _rip)
 		: rip(_rip)
 	{}
 	OracleRip() {}

@@ -194,9 +194,9 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 	     it != tag_table.end();
 	     it++) {
 		if (it->stores.count(access->rip.rip) ||
-		    it->stores.count(access->rip.rip.rip | (1ul << 63)) ||
+		    it->stores.count(OracleRip(access->rip.rip.rip | (1ul << 63))) ||
 		    it->loads.count(access->rip.rip) ||
-		    it->loads.count(access->rip.rip.rip | (1ul << 63))) {
+		    it->loads.count(OracleRip(access->rip.rip.rip | (1ul << 63)))) {
 			notThreadLocal.insert(access->rip.rip);
 			return false;
 		}
@@ -237,11 +237,11 @@ Oracle::getAllMemoryAccessingInstructions(std::vector<OracleRip> &out) const
 		for (auto it2 = it->stores.begin();
 		     it2 != it->stores.end();
 		     it2++)
-			allInstructions.insert(it2->rip & ~(1ul << 63));
+			allInstructions.insert(OracleRip(it2->rip & ~(1ul << 63)));
 		for (auto it2 = it->loads.begin();
 		     it2 != it->loads.end();
 		     it2++)
-			allInstructions.insert(it2->rip & ~(1ul << 63));
+			allInstructions.insert(OracleRip(it2->rip & ~(1ul << 63)));
 	}
 	for (auto it = allInstructions.begin();
 	     it != allInstructions.end();
@@ -434,11 +434,11 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	for (i = 1; i < irsb->stmts_used; i++) {
 		if (irsb->stmts[i]->tag == Ist_IMark) {
 			/* That's the end of this instruction */
-			directExits.push_back(((IRStmtIMark *)irsb->stmts[i])->addr);
+			directExits.push_back(OracleRip(((IRStmtIMark *)irsb->stmts[i])->addr));
 			return;
 		}
 		if (irsb->stmts[i]->tag == Ist_Exit)
-			directExits.push_back(((IRStmtExit *)irsb->stmts[i])->dst->Ico.U64);
+			directExits.push_back(OracleRip(((IRStmtExit *)irsb->stmts[i])->dst->Ico.U64));
 	}
 
 	/* If we get here then there are no other marks in the IRSB,
@@ -446,7 +446,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	if (irsb->jumpkind == Ijk_Call) {
 		if (irsb->next->tag != Iex_Const ||
 		    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
-			directExits.push_back(extract_call_follower(irsb));
+			directExits.push_back(OracleRip(extract_call_follower(irsb)));
 		/* Emit the target as well, if possible. */
 		if (irsb->next->tag == Iex_Const)
 			callees->set(std::pair<OracleRip, unsigned long>(rip, ((IRExprConst *)irsb->next)->con->Ico.U64),
@@ -456,7 +456,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 
 	if (irsb->jumpkind != Ijk_NoDecode &&
 	    irsb->next->tag == Iex_Const) {
-		directExits.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+		directExits.push_back(OracleRip(((IRExprConst *)irsb->next)->con->Ico.U64));
 	} else {
 		/* Should really do something more clever here,
 		   possibly based on dynamic analysis. */
@@ -617,13 +617,13 @@ Oracle::loadTagTable(const char *path)
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.loads.insert(buf);
+			t.loads.insert(OracleRip(buf));
 		}
 		for (int x = 0; x < hdr.nr_stores; x++) {
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.stores.insert(buf);
+			t.stores.insert(OracleRip(buf));
 		}
 		for (auto it1 = t.stores.begin();
 		     it1 != t.stores.end();
@@ -1005,7 +1005,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		assert(c);
 		for (unsigned i = 0; i < h->nr; i++) {
 			if (c[i] & (1ul << 63))
-				roots.push_back(c[i] & ~(1ul << 63));
+				roots.push_back(OracleRip(c[i] & ~(1ul << 63)));
 		}
 		offset += sizeof(unsigned long) * h->nr;
 	}
@@ -1030,7 +1030,7 @@ Oracle::findPossibleJumpTargets(const OracleRip &rip, std::vector<OracleRip> &ou
 			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
 			assert(c);
 			for (unsigned i = 0; i < h->nr; i++)
-				output.push_back(c[i] & ~(1ul << 63));
+				output.push_back(OracleRip(c[i] & ~(1ul << 63)));
 			make_unique(output);
 			return;
 		}
@@ -1392,28 +1392,28 @@ Oracle::discoverFunctionHead(const OracleRip &x, std::vector<OracleRip> &heads)
 			     end_of_instruction++) {
 				stmt = irsb->stmts[end_of_instruction];
 				if (stmt->tag == Ist_Exit)
-					branch.push_back(((IRStmtExit *)stmt)->dst->Ico.U64);
+					branch.push_back(OracleRip(((IRStmtExit *)stmt)->dst->Ico.U64));
 			}
 
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
 					if (irsb->next->tag != Iex_Const ||
 					    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
-						fallThrough.push_back(extract_call_follower(irsb));
+						fallThrough.push_back(OracleRip(extract_call_follower(irsb)));
 					if (irsb->next->tag == Iex_Const)
-						callees.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+						callees.push_back(OracleRip(((IRExprConst *)irsb->next)->con->Ico.U64));
 					else
 						findPossibleJumpTargets(rip, callees);
 				} else {
 					if (irsb->next->tag == Iex_Const)
-						fallThrough.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+						fallThrough.push_back(OracleRip(((IRExprConst *)irsb->next)->con->Ico.U64));
 					else if (irsb->jumpkind != Ijk_Ret)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
 				stmt = irsb->stmts[end_of_instruction];
 				assert(dynamic_cast<IRStmtIMark *>(stmt));
-				fallThrough.push_back(((IRStmtIMark *)stmt)->addr);
+				fallThrough.push_back(OracleRip(((IRStmtIMark *)stmt)->addr));
 			}
 
 			heads.insert(heads.end(), callees.begin(), callees.end());
@@ -1605,20 +1605,20 @@ Oracle::Function::updateLiveOnEntry(const OracleRip &rip, AddressSpace *as, bool
 		if (irsb->jumpkind == Ijk_Call) {
 			if (irsb->next->tag != Iex_Const ||
 			    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
-				fallThroughRips.push_back(extract_call_follower(irsb));
+				fallThroughRips.push_back(OracleRip(extract_call_follower(irsb)));
 			if (irsb->next->tag == Iex_Const)
-				callees.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+				callees.push_back(OracleRip(((IRExprConst *)irsb->next)->con->Ico.U64));
 			else
 				getInstructionCallees(rip, callees, oracle);
 		} else {
 			if (irsb->next->tag == Iex_Const)
-				fallThroughRips.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+				fallThroughRips.push_back(OracleRip(((IRExprConst *)irsb->next)->con->Ico.U64));
 			else
 				getInstructionFallThroughs(rip, fallThroughRips);
 		}
 	} else {
 		assert(dynamic_cast<IRStmtIMark *>(statements[nr_statements]));
-		fallThroughRips.push_back(((IRStmtIMark *)statements[nr_statements])->addr);
+		fallThroughRips.push_back(OracleRip(((IRStmtIMark *)statements[nr_statements])->addr));
 	}
 
 	for (auto it = fallThroughRips.begin();
@@ -1669,9 +1669,8 @@ Oracle::Function::updateLiveOnEntry(const OracleRip &rip, AddressSpace *as, bool
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			unsigned long _branchRip = ((IRStmtExit *)stmt)->dst->Ico.U64;
-			if (_branchRip)
-				res |= liveOnEntry(_branchRip, false);
+			OracleRip _branchRip(((IRStmtExit *)stmt)->dst->Ico.U64);
+			res |= liveOnEntry(_branchRip, false);
 			res = irexprUsedValues(res, ((IRStmtExit *)stmt)->guard);
 			break;
 		}
@@ -2056,15 +2055,13 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const OracleRip &rip, Addr
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			unsigned long _branchRip = ((IRStmtExit *)st)->dst->Ico.U64;
-			if (_branchRip) {
-				RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
-				RegisterAliasingConfiguration newExitConfig(bConfig);
-				newExitConfig |= config;
-				if (newExitConfig != bConfig) {
-					changed->push_back(_branchRip);
-					setAliasConfigOnEntryToInstruction(_branchRip, newExitConfig);
-				}
+			OracleRip _branchRip(((IRStmtExit *)st)->dst->Ico.U64);
+			RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
+			RegisterAliasingConfiguration newExitConfig(bConfig);
+			newExitConfig |= config;
+			if (newExitConfig != bConfig) {
+				changed->push_back(_branchRip);
+				setAliasConfigOnEntryToInstruction(_branchRip, newExitConfig);
 			}
 			break;
 		}
@@ -2495,7 +2492,7 @@ Oracle::functionHeadForInstruction(const OracleRip &rip)
 	std::vector<OracleRip> x;
 	extract_oraclerip_column(stmt, 0, x);
 	if (x.size() == 0)
-		return 0;
+		return OracleRip(0);
 	assert(x.size() == 1);
 	return x[0];
 }
@@ -2544,13 +2541,13 @@ Oracle::dominator(const std::set<OracleRip> &instrs,
 			     it != instrs.end();
 			     it++)
 				printf("%s in function %s\n", f.name(), functionHeadForInstruction(*it).name());
-			return 0;
+			return OracleRip(0);
 		}
 	}
 
 	if (!have_f) {
 		printf("Eh? can't find function which contains instructions which need to be dominated.\n");
-		return 0;
+		return OracleRip(0);
 	}
 
 	/* Find the dominator chains for each individual instruction,
@@ -2582,7 +2579,7 @@ Oracle::dominator(const std::set<OracleRip> &instrs,
 	 * function, unless we timed out. */
 	if (dominators.empty()) {
 		printf("Dominator set empty!\n");
-		return 0;
+		return OracleRip(0);
 	}
 
 	/* Eliminate excessively small instructions. */

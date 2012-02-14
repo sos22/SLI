@@ -295,7 +295,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 {
 	long delta;
 
-	if (!oracle->getRbpToRspDelta(sm->origin, &delta)) {
+	if (!oracle->getRbpToRspDelta(OracleRip(sm->origin), &delta)) {
 		/* Can't do anything if we don't know the delta */
 		return;
 	}
@@ -372,7 +372,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 {
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
-	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(sm->origin));
+	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(OracleRip(sm->origin)));
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -953,13 +953,13 @@ public:
 static OracleRip
 wrappedRipToRip(const StackRip &r)
 {
-	return r.rip;
+	return OracleRip(r.rip);
 }
 
 static bool
 instructionIsInteresting(const InstructionSet &i, const StackRip &r)
 {
-	return i.rips.count(r.rip) != 0;
+	return i.rips.count(OracleRip(r.rip)) != 0;
 }
 
 static bool
@@ -1059,11 +1059,11 @@ buildCFGForCallGraph(AddressSpace *as,
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
 				unsigned long follower = extract_call_follower(irsb);
-				if (ripToCFGNode->get(r.rip)->calls->hasKey(r.rip) &&
+				if (ripToCFGNode->get(r.rip)->calls->hasKey(OracleRip(r.rip)) &&
 				    !r.on_stack(follower)) {
 					/* We should inline this call. */
 					work->fallThroughRip = r.call(
-						ripToCFGNode->get(r.rip)->calls->get(r.rip)->headRip.rip,
+						ripToCFGNode->get(r.rip)->calls->get(OracleRip(r.rip))->headRip.rip,
 						follower);
 				} else {
 					/* Skip over this call. */
@@ -1213,7 +1213,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	__set_profiling(expandStateMachineToFunctionHead);
 	assert(sm->freeVariables.empty());
 	std::vector<OracleRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, sm->origin);
+	oracle->findPreviousInstructions(previousInstructions, OracleRip(sm->origin));
 	if (previousInstructions.size() == 0) {
 		/* Lacking any better ideas... */
 		fprintf(_logfile, "cannot expand store machine...\n");
@@ -1228,7 +1228,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	ii->set(sm->origin, sm->root);
 
 	InstructionSet interesting;
-	interesting.rips.insert(sm->origin);
+	interesting.rips.insert(OracleRip(sm->origin));
 
 	std::set<unsigned long> terminalFunctions;
 
@@ -1402,7 +1402,7 @@ StateMachine *
 buildProbeMachine(std::vector<OracleRip> &previousInstructions,
 		  VexPtr<InferredInformation, &ir_heap> &ii,
 		  VexPtr<Oracle> &oracle,
-		  unsigned long interestingRip,
+		  const OracleRip &interestingRip,
 		  ThreadId tid,
 		  GarbageCollectionToken token)
 {
@@ -1656,7 +1656,7 @@ buildCFGForRipSet(AddressSpace *as,
 				if (irsb->next->tag == Iex_Const) {
 					if (terminalFunctions.count(((IRExprConst *)irsb->next)->con->Ico.U64))
 						work->fallThroughRip = ((IRExprConst *)irsb->next)->con->Ico.U64;
-					else if (!oracle->functionCanReturn(((IRExprConst *)irsb->next)->con->Ico.U64))
+					else if (!oracle->functionCanReturn(OracleRip(((IRExprConst *)irsb->next)->con->Ico.U64)))
 						work->fallThroughRip = 0;
 				}
 			} else if (irsb->jumpkind == Ijk_Ret) {
@@ -1867,7 +1867,7 @@ CFGtoCrashReason(unsigned tid,
 				args[0] = NULL;
 				r = IRExpr_ClientCall(0, site, args);
 			} else if (irsb->next->tag == Iex_Const) {
-				unsigned long called_rip = ((IRExprConst *)irsb->next)->con->Ico.U64;
+				OracleRip called_rip(((IRExprConst *)irsb->next)->con->Ico.U64);
 				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
 
 				/* We only consider arguments in registers.  This is
@@ -1891,7 +1891,7 @@ CFGtoCrashReason(unsigned tid,
 					if (live.isLive(argument_registers[i]))
 						args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread, 0);
 				args[nr_args] = NULL;
-				r = IRExpr_ClientCall(called_rip, site, args);
+				r = IRExpr_ClientCall(called_rip.rip, site, args);
 			} else {
 				r = IRExpr_ClientCallFailed(irsb->next);
 			}

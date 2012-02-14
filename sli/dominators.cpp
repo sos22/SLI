@@ -239,7 +239,7 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 	if (h == 0xe8) {
 		/* That looks like a call. */
 		int delta = as->fetch<int>(ra - 4, NULL);
-		return ra + delta;
+		return OracleRip(ra + delta);
 	}
 
 	fail("findFunctionHead\n");
@@ -282,17 +282,17 @@ findDominators(const OracleRip &functionHead,
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
-				successors[rip].insert(((IRStmtIMark *)stmt)->addr);
-				predecessors[((IRStmtIMark *)stmt)->addr].insert(rip);
+				successors[rip].insert(OracleRip(((IRStmtIMark *)stmt)->addr));
+				predecessors[OracleRip(((IRStmtIMark *)stmt)->addr)].insert(rip);
 				instrs.insert(rip);
-				rip = ((IRStmtIMark *)stmt)->addr;
+				rip = OracleRip(((IRStmtIMark *)stmt)->addr);
 				if (instrs.count(rip))
 					goto done_this_entry;
 				break;
 			case Ist_Exit:
-				successors[rip].insert(((IRStmtExit *)stmt)->dst->Ico.U64);
-				predecessors[((IRStmtExit *)stmt)->dst->Ico.U64].insert(rip);
-				remainingToExplore.push_back(((IRStmtExit *)stmt)->dst->Ico.U64);
+				successors[rip].insert(OracleRip(((IRStmtExit *)stmt)->dst->Ico.U64));
+				predecessors[OracleRip(((IRStmtExit *)stmt)->dst->Ico.U64)].insert(rip);
+				remainingToExplore.push_back(OracleRip(((IRStmtExit *)stmt)->dst->Ico.U64));
 				break;
 			default:
 				break;
@@ -308,9 +308,9 @@ findDominators(const OracleRip &functionHead,
 			r = ((IRExprConst *)irsb->next)->con->Ico.U64;
 		}
 		if (r) {
-			successors[rip].insert(r);
-			predecessors[r].insert(rip);
-			remainingToExplore.push_back(r);
+			successors[rip].insert(OracleRip(r));
+			predecessors[OracleRip(r)].insert(rip);
+			remainingToExplore.push_back(OracleRip(r));
 		}
 	done_this_entry:
 		;
@@ -500,14 +500,14 @@ getDominators(Thread *thr, MachineState *ms, std::vector<OracleRip> &dominators,
 	OracleRip head(findFunctionHead(&thr->regs, ms->addressSpace));
 	fheads.push_back(head);
 	compensateForBadVCall(thr, ms->addressSpace);
-	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
+	findDominators(head, OracleRip(thr->regs.rip()), ms->addressSpace, dominators);
 
 	RegisterSet rs = thr->regs;
 	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
 	try {
 		head = findFunctionHead(&rs, ms->addressSpace);
 		fheads.push_back(head);
-		findDominators(head, rs.rip(), ms->addressSpace, dominators);
+		findDominators(head, OracleRip(rs.rip()), ms->addressSpace, dominators);
 	} catch (BadMemoryException &e) {
 		/* Just give up: if we can't find the caller's caller,
 		 * we just won't bother backtracking that far. */

@@ -25,7 +25,7 @@ __genfix_add_array_summary(std::vector<const char *> &out,
 class DcdCFG : public CFG<ThreadRip> {
 	std::set<OracleRip> &neededInstructions;
 public:
-	bool instructionUseful(Instruction<ThreadRip> *i) { return neededInstructions.count(i->rip.rip) != 0; }
+	bool instructionUseful(Instruction<ThreadRip> *i) { return neededInstructions.count(OracleRip(i->rip.rip)) != 0; }
 	DcdCFG(AddressSpace *as, std::set<OracleRip> &ni)
 		: CFG<ThreadRip>(as), neededInstructions(ni)
 	{}

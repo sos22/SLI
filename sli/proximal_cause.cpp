@@ -208,7 +208,7 @@ getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
 	IRSB *irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
 	while (idx != 0) {
 		idx--;
-		sm = backtrackOneStatement(sm, irsb->stmts[idx], ThreadOracleRip(thr->tid._tid(), rip));
+		sm = backtrackOneStatement(sm, irsb->stmts[idx], ThreadOracleRip(thr->tid._tid(), OracleRip(rip)));
 		if (!sm)
 			return NULL;
 	}
