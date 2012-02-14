@@ -193,7 +193,7 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 		if (it->stores.count(access->rip.rip) ||
 		    it->stores.count(access->rip.rip | (1ul << 63)) ||
 		    it->loads.count(access->rip.rip) ||
-		    it->loads.count(access->rip.rip) | (1ul << 63)) {
+		    it->loads.count(access->rip.rip | (1ul << 63))) {
 			notThreadLocal.insert(access->rip.rip);
 			return false;
 		}
