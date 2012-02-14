@@ -413,7 +413,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 static void
 getConflictingStoreClusters(StateMachine *sm, Oracle *oracle, std::set<InstructionSet> &conflictClusters)
 {
-	std::set<unsigned long> potentiallyConflictingStores;
+	std::set<OracleRip> potentiallyConflictingStores;
 	std::set<StateMachineSideEffectLoad *> allLoads;
 	findAllLoads(sm, allLoads);
 	if (allLoads.size() == 0) {
@@ -469,25 +469,25 @@ getConflictingStoreClusters(StateMachine *sm, Oracle *oracle, std::set<Instructi
  */
 class CallGraphEntry : public GarbageCollected<CallGraphEntry, &ir_heap> {
 public:
-	CallGraphEntry(unsigned long r, int _depth)
+	CallGraphEntry(const OracleRip &r, int _depth)
 		: headRip(r),
-		  callees(new gc_pair_ulong_set_t()),
+		  callees(new gc_pair_OracleRip_set_t()),
 		  instructions(new RangeSet<&ir_heap>()),
-		  calls(new gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type()),
+		  calls(new gc_heap_map<OracleRip, CallGraphEntry, &ir_heap>::type()),
 		  depth(_depth)
 	{}
-	unsigned long headRip;
+	OracleRip headRip;
 	bool isRealHead; /* Head is derived from a call instruction,
 			    as opposed to one of the exploration
 			    roots. */
 
 	/* Pair of call instruction and callee address */
-	gc_pair_ulong_set_t *callees;
+	gc_pair_OracleRip_set_t *callees;
 	RangeSet<&ir_heap> *instructions;
 
 	/* The same information as callees in a slightly different
 	   format. */
-	typedef gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type calls_t;
+	typedef gc_heap_map<OracleRip, CallGraphEntry, &ir_heap>::type calls_t;
 	calls_t *calls;
 
 	int depth;
@@ -500,50 +500,50 @@ public:
 	NAMED_CLASS
 };
 static unsigned long
-getInstrLength(AddressSpace *as, unsigned long a)
+getInstrLength(AddressSpace *as, const OracleRip &a)
 {
 	return getInstructionSize(as, a);
 }
 static CallGraphEntry *
-exploreOneFunctionForCallGraph(unsigned long head,
+exploreOneFunctionForCallGraph(const OracleRip &head,
 			       int depth,
 			       bool isRealHead,
 			       RangeTree<CallGraphEntry, &ir_heap> *instrsToCGEntries,
 			       AddressSpace *as,
-			       std::set<unsigned long> &realFunctionHeads)
+			       std::set<OracleRip> &realFunctionHeads)
 {
 	CallGraphEntry *cge;
 
 	cge = new CallGraphEntry(head, depth);
 	cge->isRealHead = isRealHead;
 
-	std::vector<unsigned long> unexploredInstrsThisFunction;
+	std::vector<OracleRip> unexploredInstrsThisFunction;
 	unexploredInstrsThisFunction.push_back(head);
-	unsigned long prev = head;
+	OracleRip prev = head;
 	while (!unexploredInstrsThisFunction.empty()) {
-		unsigned long i = unexploredInstrsThisFunction.back();
+		OracleRip i = unexploredInstrsThisFunction.back();
 		unexploredInstrsThisFunction.pop_back();
 
 		if (TIMEOUT)
 			return NULL;
 
-		if (cge->instructions->test(i)) {
+		if (cge->instructions->test(i.rip)) {
 			/* Done this instruction already -> move
 			 * on. */
 			continue;
 		}
 		if (i != head && realFunctionHeads.count(i)) {
 			/* This is a tail call. */
-			cge->callees->set(std::pair<unsigned long, unsigned long>(prev, i), true);
+			cge->callees->set(std::pair<unsigned long, unsigned long>(prev.rip, i.rip), true);
 			continue;
 		}
-		CallGraphEntry *old = instrsToCGEntries->get(i);
+		CallGraphEntry *old = instrsToCGEntries->get(i.rip);
 		if (old) {
 			assert(old != cge);
 			assert(old->headRip != cge->headRip);
 			if (old->isRealHead) {
 				/* This is a tail call. */
-				cge->callees->set(std::pair<unsigned long, unsigned long>(prev, i), true);
+				cge->callees->set(std::pair<unsigned long, unsigned long>(prev.rip, i.rip), true);
 				continue;
 			} else {
 				/* We have a branch from the current
@@ -556,17 +556,17 @@ exploreOneFunctionForCallGraph(unsigned long head,
 			}
 		}
 
-		unsigned long end = i + getInstrLength(as, i);
-		if (end == i) {
+		unsigned long end = i.rip + getInstrLength(as, i);
+		if (end == i.rip) {
 			/* Valgrind occasionally gets confused and
 			   returns empty instructions.  Treat them as
 			   single-byte ones for these purposes. */
-			end = i + 1;
+			end = i.rip + 1;
 		}
 
 		/* Add this instruction to the current function. */
-		cge->instructions->set(i, end);
-		instrsToCGEntries->set(i, end, cge);
+		cge->instructions->set(i.rip, end);
+		instrsToCGEntries->set(i.rip, end, cge);
 
 		/* Where are we going next? */
 		findInstrSuccessorsAndCallees(as, i, unexploredInstrsThisFunction,
@@ -587,7 +587,7 @@ countReachableCGEs(CallGraphEntry *s)
 		if (reachable.count(s))
 			continue;
 		reachable.insert(s);
-		for (gc_heap_map<unsigned long,CallGraphEntry,&ir_heap>::type::iterator it = s->calls->begin();
+		for (auto it = s->calls->begin();
 		     it != s->calls->end();
 		     it++)
 			toExplore.push(it.value());
@@ -600,37 +600,37 @@ purgeCGFromCGESet(std::set<CallGraphEntry *> &s, CallGraphEntry *root)
 	if (!s.count(root))
 		return;
 	s.erase(root);
-	for (gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type::iterator it = root->calls->begin();
+	for (auto it = root->calls->begin();
 	     it != root->calls->end();
 	     it++)
 		purgeCGFromCGESet(s, it.value());
 }
 static CallGraphEntry **
-buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
+buildCallGraphForRipSet(AddressSpace *as, const std::set<OracleRip> &rips,
 			int *nr_roots)
 {
 	if (rips.size() == 1) {
 		CallGraphEntry *cge = new CallGraphEntry(*rips.begin(), 0);
 		cge->isRealHead = true;
-		cge->instructions->set(*rips.begin(), *rips.begin() + 1);
+		cge->instructions->set(rips.begin()->rip, rips.begin()->rip + 1);
 
 		*nr_roots = 1;
 		CallGraphEntry **res = (CallGraphEntry **)__LibVEX_Alloc_Ptr_Array(&ir_heap, 1);
 		res[0] = cge;
 		return res;
 	}
-	std::set<std::pair<unsigned long, int> > unexploredRips;
-	for (std::set<unsigned long>::iterator it = rips.begin();
+	std::set<std::pair<OracleRip, int> > unexploredRips;
+	for (auto it = rips.begin();
 	     it != rips.end();
 	     it++) {
-		unexploredRips.insert(std::pair<unsigned long, int>(*it, 0));
+		unexploredRips.insert(std::pair<OracleRip, int>(*it, 0));
 	}
 	RangeTree<CallGraphEntry, &ir_heap> *instrsToCGEntries = new RangeTree<CallGraphEntry, &ir_heap>();
-	std::set<unsigned long> realFunctionHeads;
+	std::set<OracleRip> realFunctionHeads;
 
 	while (!unexploredRips.empty()) {
-		std::set<std::pair<unsigned long, int> >::iterator it = unexploredRips.begin();
-		unsigned long head = it->first;
+		auto it = unexploredRips.begin();
+		OracleRip head = it->first;
 		int depth = it->second;
 		unexploredRips.erase(it);
 
@@ -638,7 +638,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			continue;
 
 		CallGraphEntry *cge;
-		cge = instrsToCGEntries->get(head);
+		cge = instrsToCGEntries->get(head.rip);
 		if (cge) {
 			/* We already have a function which contains
 			   this instruction, so we're finished. */
@@ -652,20 +652,20 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 			fprintf(_logfile, "%s failed\n", __func__);
 			return NULL;
 		}
-		assert(instrsToCGEntries->get(head) == cge);
+		assert(instrsToCGEntries->get(head.rip) == cge);
 
 		/* Now explore the functions which were called by that
 		 * root. */
-		std::set<std::pair<unsigned long, int> > unexploredRealHeads;
-		for (gc_pair_ulong_set_t::iterator it = cge->callees->begin();
+		std::set<std::pair<OracleRip, int> > unexploredRealHeads;
+		for (auto it = cge->callees->begin();
 		     it != cge->callees->end();
 		     it++) {
-			unexploredRealHeads.insert(std::pair<unsigned long, int>(it.key().second,
+			unexploredRealHeads.insert(std::pair<OracleRip, int>(it.key().second,
 										 depth + 1));
 		}
 		while (!unexploredRealHeads.empty()) {
-			std::set<std::pair<unsigned long, int> >::const_iterator it = unexploredRealHeads.begin();
-			unsigned long h = it->first;
+			auto it = unexploredRealHeads.begin();
+			OracleRip h = it->first;
 			int depth_h = it->second;
 			unexploredRealHeads.erase(it);
 
@@ -674,7 +674,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 
 			realFunctionHeads.insert(h);
 
-			CallGraphEntry *old = instrsToCGEntries->get(h);
+			CallGraphEntry *old = instrsToCGEntries->get(h.rip);
 			if (old) {
 				/* Already have a CG node for this
 				   instruction.  What kind of node? */
@@ -682,7 +682,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					/* It was an inferred head
 					   from an earlier pass, so we
 					   need to get rid of it. */
-					fprintf(_logfile, "%lx was a pseudo-root; purge.\n", h);
+					fprintf(_logfile, "%s was a pseudo-root; purge.\n", h.name());
 					instrsToCGEntries->purgeByValue(old);
 				} else if (old->headRip == h && old->depth <= depth_h) {
 					/* It's the head of an
@@ -703,7 +703,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 					/* Need to re-explore whatever
 					   it was that tail-called
 					   into this function. */
-					unexploredRealHeads.insert(std::pair<unsigned long, int>(h, depth_h + 1));
+					unexploredRealHeads.insert(std::pair<OracleRip, int>(h, depth_h + 1));
 				}
 			}
 
@@ -718,11 +718,11 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 				fprintf(_logfile, "%s failed on line %d\n", __func__, __LINE__);
 				return NULL;
 			}
-			for (gc_pair_ulong_set_t::iterator it = cge->callees->begin();
+			for (auto it = cge->callees->begin();
 			     it != cge->callees->end();
 			     it++)
-				unexploredRealHeads.insert(std::pair<unsigned long, int>(it.key().second, depth_h + 1));
-			assert(instrsToCGEntries->get(h) == cge);
+				unexploredRealHeads.insert(std::pair<OracleRip, int>(it.key().second, depth_h + 1));
+			assert(instrsToCGEntries->get(h.rip) == cge);
 		}
 	}
 
@@ -741,10 +741,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 
 	/* Anything which contains one of the root RIPs is
 	 * automatically interesting. */
-	for (std::set<unsigned long>::iterator it = rips.begin();
+	for (auto it = rips.begin();
 	     it != rips.end();
 	     it++) {
-		CallGraphEntry *i = instrsToCGEntries->get(*it);
+		CallGraphEntry *i = instrsToCGEntries->get(it->rip);
 		if (!i) {
 			fprintf(_logfile, "Failed to build CG entries for every instruction in %s\n", __func__);
 			return NULL;
@@ -763,10 +763,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		     it++) {
 			if (interesting.count(*it))
 				continue;
-			for (gc_pair_ulong_set_t::iterator it2 = (*it)->callees->begin();
+			for (auto it2 = (*it)->callees->begin();
 			     it2 != (*it)->callees->end();
 			     it2++) {
-				CallGraphEntry *callee = instrsToCGEntries->get(it2.key().second);
+				CallGraphEntry *callee = instrsToCGEntries->get(it2.key().second.rip);
 				if (interesting.count(callee)) {
 					/* Uninteresting function
 					   calling an interesting ->
@@ -789,10 +789,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 		if (!interesting.count(cge)) {
 			allCGEs.erase(it++);
 		} else {
-			for (gc_pair_ulong_set_t::iterator it2 = cge->callees->begin();
+			for (auto it2 = cge->callees->begin();
 			     it2 != cge->callees->end();
 				) {
-				if (!interesting.count(instrsToCGEntries->get(it2.key().second))) {
+				if (!interesting.count(instrsToCGEntries->get(it2.key().second.rip))) {
 					it2 = cge->callees->erase(it2);
 				} else {
 					it2++;
@@ -815,10 +815,10 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<unsigned long> &rips,
 	for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
 	     it != allCGEs.end();
 	     it++) {
-		for (gc_pair_ulong_set_t::iterator it2 = (*it)->callees->begin();
+		for (auto it2 = (*it)->callees->begin();
 		     it2 != (*it)->callees->end();
 		     it2++) {
-			CallGraphEntry *cge = instrsToCGEntries->get(it2.key().second);
+			CallGraphEntry *cge = instrsToCGEntries->get(it2.key().second.rip);
 			assert(cge != NULL);
 			(*it)->calls->set(it2.key().first, cge);
 		}
@@ -886,18 +886,18 @@ printCallGraph(CallGraphEntry *root, FILE *f, std::set<CallGraphEntry *> &memo)
 	if (memo.count(root))
 		return;
 	memo.insert(root);
-	fprintf(f, "%p: %#lx%s {", root, root->headRip, root->isRealHead ? "" : " (fake)");
+	fprintf(f, "%p: %s%s {", root, root->headRip.name(), root->isRealHead ? "" : " (fake)");
 	for (RangeSet<&ir_heap>::iterator it = root->instructions->begin();
 	     it != root->instructions->end();
 	     it++)
 		fprintf(f, "%#lx-%#lx, ", it->start, it->end1);
 	fprintf(f, "} (");
-	for (gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type::iterator it = root->calls->begin();
+	for (auto it = root->calls->begin();
 	     it != root->calls->end();
 	     it++)
-		fprintf(f, "%#lx:%p; ", it.key(), it.value());
+		fprintf(f, "%s:%p; ", it.key().name(), it.value());
 	fprintf(f, ")\n");
-	for (gc_heap_map<unsigned long, CallGraphEntry, &ir_heap>::type::iterator it = root->calls->begin();
+	for (auto it = root->calls->begin();
 	     it != root->calls->end();
 	     it++)
 		printCallGraph(it.value(), f, memo);
@@ -950,7 +950,7 @@ public:
 	}
 };
 
-static unsigned long
+static OracleRip
 wrappedRipToRip(const StackRip &r)
 {
 	return r.rip;
@@ -1019,7 +1019,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	std::map<StackRip, std::pair<CFGNode<StackRip> *, int> > builtSoFar;
 	std::queue<std::pair<StackRip, int> > needed;
 
-	needed.push(std::pair<StackRip, int>(StackRip(root->headRip), 100));
+	needed.push(std::pair<StackRip, int>(StackRip(root->headRip.rip), 100));
 	while (!needed.empty()) {
 		StackRip &r(needed.front().first);
 		int depth = needed.front().second;
@@ -1063,7 +1063,7 @@ buildCFGForCallGraph(AddressSpace *as,
 				    !r.on_stack(follower)) {
 					/* We should inline this call. */
 					work->fallThroughRip = r.call(
-						ripToCFGNode->get(r.rip)->calls->get(r.rip)->headRip,
+						ripToCFGNode->get(r.rip)->calls->get(r.rip)->headRip.rip,
 						follower);
 				} else {
 					/* Skip over this call. */
@@ -1101,7 +1101,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	}
 
 	/* All done */
-	CFGNode<StackRip> *res = builtSoFar[StackRip(root->headRip)].first;
+	CFGNode<StackRip> *res = builtSoFar[StackRip(root->headRip.rip)].first;
 	assert(res != NULL);
 	return res;
 }
@@ -1212,7 +1212,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 {
 	__set_profiling(expandStateMachineToFunctionHead);
 	assert(sm->freeVariables.empty());
-	std::vector<unsigned long> previousInstructions;
+	std::vector<OracleRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, sm->origin);
 	if (previousInstructions.size() == 0) {
 		/* Lacking any better ideas... */
@@ -1241,7 +1241,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 		buildCFGForRipSet(oracle->ms->addressSpace,
-				  *it,
+				  it->rip,
 				  terminalFunctions,
 				  oracle,
 				  10 * previousInstructions.size()));
@@ -1399,7 +1399,7 @@ processConflictCluster(VexPtr<AddressSpace> &as,
 }
 
 StateMachine *
-buildProbeMachine(std::vector<unsigned long> &previousInstructions,
+buildProbeMachine(std::vector<OracleRip> &previousInstructions,
 		  VexPtr<InferredInformation, &ir_heap> &ii,
 		  VexPtr<Oracle> &oracle,
 		  unsigned long interestingRip,
@@ -1416,17 +1416,17 @@ buildProbeMachine(std::vector<unsigned long> &previousInstructions,
 
 	VexPtr<StateMachine, &ir_heap> sm(NULL);
 
-	for (std::vector<unsigned long>::iterator it = previousInstructions.begin();
+	for (auto it = previousInstructions.begin();
 	     !TIMEOUT && it != previousInstructions.end();
 	     it++) {
-		fprintf(_logfile, "Backtrack to %lx...\n", *it);
+		fprintf(_logfile, "Backtrack to %s...\n", it->name());
 		LibVEX_maybe_gc(token);
 
 		std::set<unsigned long> terminalFunctions;
 		terminalFunctions.insert(0x757bf0);
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 			buildCFGForRipSet(oracle->ms->addressSpace,
-					  *it,
+					  it->rip,
 					  terminalFunctions,
 					  oracle,
 					  100));
@@ -1545,10 +1545,10 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	     !TIMEOUT && it != conflictClusters.end();
 	     it++) {
 		fprintf(_logfile, "\tCluster:");
-		for (std::set<unsigned long>::iterator it2 = it->rips.begin();
+		for (auto it2 = it->rips.begin();
 		     it2 != it->rips.end();
 		     it2++)
-			fprintf(_logfile, " %lx", *it2);
+			fprintf(_logfile, " %s", it2->name());
 		fprintf(_logfile, "\n");
 		VexPtr<AddressSpace> as(ms->addressSpace);
 		cntr++;
@@ -1782,7 +1782,7 @@ CFGtoCrashReason(unsigned tid,
 		{}
 		IRSB *operator()(t rip) {
 			try {
-				return as->getIRSBForAddress(tid, wrappedRipToRip(rip));
+				return as->getIRSBForAddress(tid, wrappedRipToRip(rip).rip);
 			} catch (BadMemoryException e) {
 				return NULL;
 			}
@@ -1791,7 +1791,7 @@ CFGtoCrashReason(unsigned tid,
 
 	class BuildStateForCfgNode {
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
-							ThreadRip rip,
+							const ThreadOracleRip rip,
 							CFGNode<t> *branchTarget,
 							StateMachineEdge *edge) {
 			StateMachineSideEffect *se = NULL;
@@ -1840,7 +1840,7 @@ CFGtoCrashReason(unsigned tid,
 				if (branchTarget) {
 					StateMachineBifurcate *smb =
 						new StateMachineBifurcate(
-							rip.rip,
+							rip.rip.rip,
 							((IRStmtExit *)stmt)->guard,
 							new StateMachineEdge(NULL),
 							edge);
@@ -1859,7 +1859,7 @@ CFGtoCrashReason(unsigned tid,
 
 		StateMachineState *buildStateForCallInstruction(CFGNode<t> *cfg,
 								IRSB *irsb,
-								ThreadRip site)
+								const ThreadOracleRip &site)
 		{
 			IRExpr *r;
 			if (simple_calls) {
@@ -1910,7 +1910,7 @@ CFGtoCrashReason(unsigned tid,
 				}
 			}
 
-			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
+			StateMachineProxy *smp = new StateMachineProxy(site.rip.rip, (StateMachineState *)NULL);
 			assert(smp->target);
 			if (cfg->fallThrough)
 				state.addReloc(&smp->target->target, cfg->fallThrough);
@@ -1937,7 +1937,9 @@ CFGtoCrashReason(unsigned tid,
 					      IRSB *irsb) {
 			if (!cfg)
 				return escapeState;
-			ThreadRip rip(ThreadRip::mk(tid, wrappedRipToRip(cfg->my_rip)));
+			ThreadOracleRip rip;
+			rip.thread = tid;
+			rip.rip = wrappedRipToRip(cfg->my_rip);
 			int endOfInstr;
 			for (endOfInstr = 1;
 			     endOfInstr < irsb->stmts_used && irsb->stmts[endOfInstr]->tag != Ist_IMark;
@@ -1972,11 +1974,11 @@ CFGtoCrashReason(unsigned tid,
 				if (!edge)
 					return NULL;
 			}
-			return new StateMachineProxy(rip.rip, edge);
+			return new StateMachineProxy(rip.rip.rip, edge);
 		}
 	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle);
 
-	unsigned long original_rip = wrappedRipToRip(cfg->my_rip);
+	OracleRip original_rip = wrappedRipToRip(cfg->my_rip);
 	StateMachineState *root = NULL;
 	state.addReloc(&root, cfg);
 
@@ -2000,12 +2002,12 @@ CFGtoCrashReason(unsigned tid,
 	}
 
 	FreeVariableMap fv;
-	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip, fv, tid));
+	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip.rip, fv, tid));
 	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, opt, oracle, false, token);
 	if (crashReasons)
-		crashReasons->set(original_rip, sm->root);
+		crashReasons->set(original_rip.rip, sm->root);
 	sm = convertToSSA(sm);
 	if (TIMEOUT)
 		return NULL;

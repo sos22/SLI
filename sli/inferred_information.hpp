@@ -23,11 +23,11 @@ public:
 	CFGNode(t rip) : my_rip(rip), accepting(false) {}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%#lx: %#lx(%p), %#lx(%p)",
-			wrappedRipToRip(my_rip),
-			wrappedRipToRip(fallThroughRip),
+		fprintf(f, "%s: %s(%p), %s(%p)",
+			wrappedRipToRip(my_rip).name(),
+			wrappedRipToRip(fallThroughRip).name(),
 			fallThrough,
-			wrappedRipToRip(branchRip),
+			wrappedRipToRip(branchRip).name(),
 			branch);
 	}
 	void visit(HeapVisitor &hv) {
@@ -93,7 +93,7 @@ public:
 };
 
 typedef gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type InferredInformation;
-StateMachine *buildProbeMachine(std::vector<unsigned long> &previousInstructions,
+StateMachine *buildProbeMachine(std::vector<OracleRip> &previousInstructions,
 				VexPtr<InferredInformation, &ir_heap> &ii,
 				VexPtr<Oracle> &oracle,
 				unsigned long interestingRip,

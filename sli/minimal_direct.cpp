@@ -71,19 +71,19 @@ timer_handler(int ignore)
 	_timed_out = true;
 }
 
-static void
-shuffle(std::vector<unsigned long> &vect)
+template <typename typ> static void
+shuffle(std::vector<typ> &vect)
 {
 	for (unsigned x = 0; x < vect.size(); x++) {
 		unsigned idx = (random() % (vect.size() - x)) + x;
-		unsigned long t = vect[x];
+		typ t = vect[x];
 		vect[x] = vect[idx];
 		vect[idx] = t;
 	}
 }
 
 static void
-consider_rip(unsigned long my_rip,
+consider_rip(const OracleRip &my_rip,
 	     VexPtr<MachineState> &ms,
 	     VexPtr<Thread> &thr,
 	     VexPtr<Oracle> &oracle,
@@ -95,18 +95,18 @@ consider_rip(unsigned long my_rip,
 
 	LibVEX_maybe_gc(token);
 
-	fprintf(_logfile, "Considering %lx...\n", my_rip);
-	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, my_rip, thr));
+	fprintf(_logfile, "Considering %s...\n", my_rip.name());
+	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, my_rip.rip, thr));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
 	}
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(my_rip, new StateMachineProxy(my_rip, proximal));
+	ii->set(my_rip.rip, new StateMachineProxy(my_rip.rip, proximal));
 
-	std::vector<unsigned long> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, my_rip);
+	std::vector<OracleRip> previousInstructions;
+	oracle->findPreviousInstructions(previousInstructions, OracleRip(my_rip));
 
 	struct itimerval itv;
 	struct timeval start;
@@ -118,7 +118,7 @@ consider_rip(unsigned long my_rip,
 	gettimeofday(&start, NULL);
 
 	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip, thr->tid, token);
+	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip.rip, thr->tid, token);
 	if (probeMachine) {
 		VexPtr<CrashSummary, &ir_heap> summary;
 		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);
@@ -136,12 +136,12 @@ consider_rip(unsigned long my_rip,
 	time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
 	if (_timed_out) {
 		if (timings)
-			fprintf(timings, "%lx timed out after %f\n", my_rip, time_taken);
-		printf("%lx timed out after %f\n", my_rip, time_taken);
+			fprintf(timings, "%s timed out after %f\n", my_rip.name(), time_taken);
+		printf("%s timed out after %f\n", my_rip.name(), time_taken);
 	} else {
 		if (timings)
-			fprintf(timings, "%lx took %f\n", my_rip, time_taken);
-		printf("%lx took %f\n", my_rip, time_taken);
+			fprintf(timings, "%s took %f\n", my_rip.name(), time_taken);
+		printf("%s took %f\n", my_rip.name(), time_taken);
 	}
 	_timed_out = false;
 	__timer_message_filter::reset();
@@ -183,7 +183,7 @@ main(int argc, char *argv[])
 		consider_rip(strtoul(argv[4], NULL, 16), ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
 		FILE *timings = fopen("timings.txt", "w");
-		std::vector<unsigned long> targets;
+		std::vector<OracleRip> targets;
 		oracle->getAllMemoryAccessingInstructions(targets);
 		shuffle(targets);
 		printf("%zd instructions to protect\n", targets.size());
@@ -191,12 +191,12 @@ main(int argc, char *argv[])
 		double low_end_time;
 		double high_end_time;
 		bool first = true;
-		for (std::vector<unsigned long>::iterator it = targets.begin();
+		for (auto it = targets.begin();
 		     it != targets.end();
 		     it++) {
-			_logfile = fopenf("w", "logs/%lx", *it);
-			if (!_logfile) err(1, "opening logs/%lx", *it);
-			printf("Considering %lx\n", *it);
+			_logfile = fopenf("w", "logs/%s", it->name());
+			if (!_logfile) err(1, "opening logs/%s", it->name());
+			printf("Considering %s\n", it->name());
 			consider_rip(*it, ms, thr, oracle, df, timings, ALLOW_GC);
 			fclose(_logfile);
 			_logfile = stdout;

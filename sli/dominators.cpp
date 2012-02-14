@@ -7,6 +7,7 @@
 #include <queue>
 
 #include "sli.h"
+#include "oracle_rip.hpp"
 
 struct representative_state {
 	RegisterSet regs;
@@ -221,7 +222,7 @@ compensateForBadVCall(Thread *thr, AddressSpace *as)
 
 /* Figure out where the first instruction in the current function
  * is. */
-static unsigned long
+static OracleRip
 findFunctionHead(RegisterSet *rs, AddressSpace *as)
 {
 	unsigned long ra;
@@ -253,15 +254,15 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
    starting point to the target instruction.  We order them so that
    the dominators nearest to the target are reported first. */
 void
-findDominators(unsigned long functionHead,
-	       const unsigned long rip,
+findDominators(const OracleRip &functionHead,
+	       const OracleRip &rip,
 	       AddressSpace *as,
-	       std::vector<unsigned long> &out)
+	       std::vector<OracleRip> &out)
 {
-	std::vector<unsigned long> remainingToExplore;
-	std::map<unsigned long, std::set<unsigned long> > successors;
-	std::map<unsigned long, std::set<unsigned long> > predecessors;
-	std::set<unsigned long> instrs;
+	std::vector<OracleRip> remainingToExplore;
+	std::map<OracleRip, std::set<OracleRip> > successors;
+	std::map<OracleRip, std::set<OracleRip> > predecessors;
+	std::set<OracleRip> instrs;
 
 	DBG_DOMINATORS("Exploring from %lx to find dominators of %lx\n", functionHead, rip);
 	/* First: build the CFG, representing all of the successor
@@ -269,14 +270,14 @@ findDominators(unsigned long functionHead,
 	   predecessors. */
 	remainingToExplore.push_back(functionHead);
 	while (!remainingToExplore.empty()) {
-		unsigned long rip = remainingToExplore.back();
+		OracleRip rip = remainingToExplore.back();
 		unsigned long r;
 		remainingToExplore.pop_back();
 		if (instrs.count(rip))
 			continue;
-		IRSB *irsb = as->getIRSBForAddress(1, rip);
+		IRSB *irsb = as->getIRSBForAddress(1, rip.rip);
 		assert(irsb->stmts[0]->tag == Ist_IMark);
-		assert(((IRStmtIMark *)irsb->stmts[0])->addr == rip);
+		assert(((IRStmtIMark *)irsb->stmts[0])->addr == rip.rip);
 		for (int idx = 1; idx < irsb->stmts_used; idx++) {
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
@@ -325,8 +326,8 @@ findDominators(unsigned long functionHead,
 	*/
 
 	/* Build initial optimistic map. */
-	std::map<unsigned long, std::set<unsigned long> > dominators;
-	for (std::set<unsigned long>::iterator it = instrs.begin();
+	std::map<OracleRip, std::set<OracleRip> > dominators;
+	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++)
 		dominators[*it] = instrs;
@@ -340,14 +341,14 @@ findDominators(unsigned long functionHead,
 			return;
 
 		progress = false;
-		for (std::set<unsigned long>::iterator it = instrs.begin();
+		for (auto it = instrs.begin();
 		     it != instrs.end();
 		     it++) {
-			unsigned long rip = *it;
+			OracleRip rip = *it;
 			/* Check that all of our current dominators
 			 * are valid. */
-			std::set<unsigned long> &dom(dominators[rip]);
-			for (std::set<unsigned long>::iterator domit = dom.begin();
+			std::set<OracleRip> &dom(dominators[rip]);
+			for (auto domit = dom.begin();
 			     domit != dom.end();
 				) {
 				if (*domit == rip) {
@@ -359,8 +360,7 @@ findDominators(unsigned long functionHead,
 				/* Otherwise, must dominate all
 				 * predecessors of rip. */
 				bool should_be_dominator = true;
-				for (std::set<unsigned long>::iterator pred_it =
-					     predecessors[rip].begin();
+				for (auto pred_it = predecessors[rip].begin();
 				     should_be_dominator && pred_it != predecessors[rip].end();
 				     pred_it++) {
 					if (!dominators[*pred_it].count(*domit))
@@ -377,11 +377,9 @@ findDominators(unsigned long functionHead,
 	}
 
 	/* Dump the dominator map. */
-	for (std::set<unsigned long>::iterator it = instrs.begin();
-	     it != instrs.end();
-	     it++) {
+	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		DBG_DOMINATORS("Dominators of %lx:", *it);
-		for (std::set<unsigned long>::iterator it2 = dominators[*it].begin();
+		for (auto it2 = dominators[*it].begin();
 		     it2 != dominators[*it].end();
 		     it2++)
 			DBG_DOMINATORS(" %lx", *it2);
@@ -421,24 +419,20 @@ findDominators(unsigned long functionHead,
 	 * in the definition of dominators.  There's probably a
 	 * version of the dominator algorithm whcih does it directly,
 	 * but I couldn't think of one. */
-	std::map<unsigned long, unsigned long> immediateDominators;
-	for (std::set<unsigned long>::iterator it = instrs.begin();
-	     it != instrs.end();
-	     it++) {
+	std::map<OracleRip, OracleRip> immediateDominators;
+	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		if (TIMEOUT)
 			return;
 
-		unsigned long rip = *it;
+		OracleRip rip = *it;
 		if (rip == functionHead) /* immediate dominator of
 					  * function head undefined */
 			continue;
-		std::set<unsigned long> &doms(dominators[rip]);
+		std::set<OracleRip> &doms(dominators[rip]);
 		bool found_one = false;
 		DBG_DOMINATORS("Find immediate dominator of %lx...\n", rip);
-		for (std::set<unsigned long>::iterator it2 = doms.begin();
-		     it2 != doms.end();
-		     it2++) {
-			unsigned long dom = *it2;
+		for (auto it2 = doms.begin(); it2 != doms.end(); it2++) {
+			OracleRip dom = *it2;
 			/* Is dom the immediate dominator of rip? */
 			if (dom == rip)
 				continue; /* can't be immediate dominator of yourself */
@@ -448,10 +442,10 @@ findDominators(unsigned long functionHead,
 			   dominates rip such that dom dominates dom'.
 			   If so, dom cannot be the immediate
 			   dominator. */
-			for (std::set<unsigned long>::iterator it3 = doms.begin();
+			for (auto it3 = doms.begin();
 			     !over_dominated && it3 != doms.end();
 			     it3++) {
-				unsigned long dom_prime = *it3;
+				OracleRip dom_prime = *it3;
 				if (dom_prime == dom || dom_prime == rip)
 					continue;
 				/* If dom_prime dominates dom then dom
@@ -480,7 +474,7 @@ findDominators(unsigned long functionHead,
 	}
 
 	/* Dump out the immediate dominators table. */
-	for (std::set<unsigned long>::iterator it = instrs.begin();
+	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++) {
 		if (*it != functionHead)
@@ -489,7 +483,7 @@ findDominators(unsigned long functionHead,
 
 	/* Finally, walk the immediate dominator map to build the
 	 * ordered dominator chain for the target instruction. */
-	unsigned long r = rip;
+	OracleRip r = rip;
 	while (1) {
 		out.push_back(r);
 		if (!immediateDominators.count(r))
@@ -501,9 +495,9 @@ findDominators(unsigned long functionHead,
 }
 
 void
-getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators, std::vector<unsigned long> &fheads)
+getDominators(Thread *thr, MachineState *ms, std::vector<OracleRip> &dominators, std::vector<OracleRip> &fheads)
 {
-	unsigned long head = findFunctionHead(&thr->regs, ms->addressSpace);
+	OracleRip head(findFunctionHead(&thr->regs, ms->addressSpace));
 	fheads.push_back(head);
 	compensateForBadVCall(thr, ms->addressSpace);
 	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);

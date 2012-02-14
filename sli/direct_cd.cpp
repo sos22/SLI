@@ -58,7 +58,7 @@ main(int argc, char *argv[])
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
 	ii->set(thr->regs.rip(), new StateMachineProxy(thr->regs.rip(), proximal.get()));
 
-	std::vector<unsigned long> previousInstructions;
+	std::vector<OracleRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
 
 	DumpFix df(oracle);

@@ -1,4 +1,5 @@
 #include "sli.h"
+#include "oracle_rip.hpp"
 
 int
 main(int argc, char *argv[])
@@ -7,14 +8,14 @@ main(int argc, char *argv[])
 	MachineState *ms = MachineState::readCoredump(argv[1]);
 	Thread *thr = ms->findThread(ThreadId(1));
 
-	std::vector<unsigned long> dominators;
-	std::vector<unsigned long> fheads;
+	std::vector<OracleRip> dominators;
+	std::vector<OracleRip> fheads;
 	getDominators(thr, ms, dominators, fheads);
 
-	for (std::vector<unsigned long>::iterator it = dominators.begin();
+	for (auto it = dominators.begin();
 	     it != dominators.end();
 	     it++) {
-		printf("%lx\n", *it);
+		printf("%s\n", it->name());
 	}
 
 	return 0;

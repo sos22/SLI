@@ -75,6 +75,9 @@ public:
 		}
 		return r;
 	}
+	operator OracleRip() const {
+		return OracleRip((unsigned long)*this);
+	}
 	void visit(HeapVisitor &hv) { hv(content); }
 	NAMED_CLASS
 };
@@ -127,13 +130,13 @@ find_words(char *command)
 static void
 list_heads(Oracle *oracle)
 {
-	std::vector<unsigned long> f;
+	std::vector<OracleRip> f;
 
 	oracle->getFunctions(f);
-	for (std::vector<unsigned long>::iterator it = f.begin();
+	for (auto it = f.begin();
 	     it != f.end();
 	     it++)
-		printf("%lx\n", *it);
+		printf("%s\n", it->name());
 }
 
 static void
@@ -143,20 +146,20 @@ dumpTagTable(Oracle *oracle)
 	     it != oracle->tag_table.end();
 	     it++) {
 		printf("Loads: ");
-		for (std::set<unsigned long>::iterator it2 = it->loads.begin();
+		for (auto it2 = it->loads.begin();
 		     it2 != it->loads.end();
 		     it2++)
-			printf("%lx ", *it2);
+			printf("%s ", it2->name());
 		printf("\nStores: ");
-		for (std::set<unsigned long>::iterator it2 = it->stores.begin();
+		for (auto it2 = it->stores.begin();
 		     it2 != it->stores.end();
 		     it2++)
-			printf("%lx ", *it2);
+			printf("%s ", it2->name());
 		printf("\n\n");
 	}
 }
 
-static std::vector<unsigned long> newHeads;
+static std::vector<OracleRip> newHeads;
 
 static void
 run_command(VexPtr<Oracle> &oracle, GarbageCollectionToken token)

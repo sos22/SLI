@@ -1252,12 +1252,14 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	return tt;
 }
 
-void getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators,
-		   std::vector<unsigned long> &fheads);
-void findDominators(unsigned long functionHead,
-		    unsigned long rip,
+class OracleRip;
+
+void getDominators(Thread *thr, MachineState *ms, std::vector<OracleRip> &dominators,
+		   std::vector<OracleRip> &fheads);
+void findDominators(const OracleRip &functionHead,
+		    const OracleRip &rip,
 		    AddressSpace *as,
-		    std::vector<unsigned long> &out);
+		    std::vector<OracleRip> &out);
 IRExpr *readIRExpr(int fd);
 
 IRSB *instrument_func(unsigned tid,

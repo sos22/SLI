@@ -12,6 +12,7 @@
 #include "offline_analysis.hpp"
 
 #include "libvex_prof.hpp"
+#include "libvex_parse.h"
 
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)
@@ -34,6 +35,7 @@ hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p)
 	return p.first + p.second * 59;
 }
 
+#if 0
 void
 mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src)
 {
@@ -42,6 +44,7 @@ mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src)
 	     it++)
 		dest->set(it.key(), it.value());
 }
+#endif
 
 template<typename t> void
 operator |=(std::set<t> &x, const std::set<t> &y)
@@ -134,18 +137,18 @@ Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
 }
 
 void
-Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
+Oracle::findPreviousInstructions(std::vector<OracleRip> &out)
 {
-	std::vector<unsigned long> fheads;
+	std::vector<OracleRip> fheads;
 	getDominators(crashedThread, ms, out, fheads);
 }
 
 bool
-Oracle::functionCanReturn(unsigned long rip)
+Oracle::functionCanReturn(const OracleRip &rip)
 {
 #warning Horrible, horrible hack
-	if (rip == 0x768440 /* ut_dbg_assertion_failed */ ||
-	    rip == 0x7683e0 /* ut_dbg_stop_thread */)
+	if (rip.rip == 0x768440 /* ut_dbg_assertion_failed */ ||
+	    rip.rip == 0x7683e0 /* ut_dbg_stop_thread */)
 		return false;
 	else
 		return true;
@@ -161,16 +164,16 @@ Oracle::functionCanReturn(unsigned long rip)
    includes the observed address. */
 void
 Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
-			      std::set<unsigned long> &out)
+			      std::set<OracleRip> &out)
 {
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
 		if (it->loads.count(smsel->rip.rip)) {
-			for (std::set<unsigned long>::iterator it2 = it->stores.begin();
+			for (auto it2 = it->stores.begin();
 			     it2 != it->stores.end();
 			     it2++) {
-				if (!(*it2 & (1ul << 63)))
+				if (!(it2->rip & (1ul << 63)))
 					out.insert(*it2);
 			}
 		}
@@ -181,8 +184,8 @@ bool
 Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 {
 	__set_profiling(notInTagTable);
-	static std::set<unsigned long> threadLocal;
-	static std::set<unsigned long> notThreadLocal;
+	static std::set<OracleRip> threadLocal;
+	static std::set<OracleRip> notThreadLocal;
 	if (threadLocal.count(access->rip.rip))
 		return true;
 	if (notThreadLocal.count(access->rip.rip))
@@ -191,9 +194,9 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 	     it != tag_table.end();
 	     it++) {
 		if (it->stores.count(access->rip.rip) ||
-		    it->stores.count(access->rip.rip | (1ul << 63)) ||
+		    it->stores.count(access->rip.rip.rip | (1ul << 63)) ||
 		    it->loads.count(access->rip.rip) ||
-		    it->loads.count(access->rip.rip | (1ul << 63))) {
+		    it->loads.count(access->rip.rip.rip | (1ul << 63))) {
 			notThreadLocal.insert(access->rip.rip);
 			return false;
 		}
@@ -213,7 +216,7 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 			for (auto it2 = it->stores.begin();
 			     it2 != it->stores.end();
 			     it2++) {
-				if (!(*it2 & (1ul << 63)))
+				if (!(it2->rip & (1ul << 63)))
 					return true;
 			}
 		}
@@ -224,23 +227,23 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 }
 
 void
-Oracle::getAllMemoryAccessingInstructions(std::vector<unsigned long> &out) const
+Oracle::getAllMemoryAccessingInstructions(std::vector<OracleRip> &out) const
 {
-	std::set<unsigned long> allInstructions;
+	std::set<OracleRip> allInstructions;
 	
-	for (std::vector<tag_entry>::const_iterator it = tag_table.begin();
+	for (auto it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		for (std::set<unsigned long>::iterator it2 = it->stores.begin();
+		for (auto it2 = it->stores.begin();
 		     it2 != it->stores.end();
 		     it2++)
-			allInstructions.insert(*it2 & ~(1ul << 63));
-		for (std::set<unsigned long>::iterator it2 = it->loads.begin();
+			allInstructions.insert(it2->rip & ~(1ul << 63));
+		for (auto it2 = it->loads.begin();
 		     it2 != it->loads.end();
 		     it2++)
-			allInstructions.insert(*it2 & ~(1ul << 63));
+			allInstructions.insert(it2->rip & ~(1ul << 63));
 	}
-	for (std::set<unsigned long>::iterator it = allInstructions.begin();
+	for (auto it = allInstructions.begin();
 	     it != allInstructions.end();
 	     it++)
 		out.push_back(*it);
@@ -273,13 +276,13 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 		nr_bloom_hits++;
 		return false;
 	}
-	h = hashRipPair(smses->rip.rip * 23, smsel->rip.rip * 17);
+	h = hashRipPair2(smses->rip.rip, smsel->rip.rip);
 	if (!(memoryAliasingFilter2[h/64] & (1ul << (h % 64)))) {
 		nr_bloom_hits2++;
 		return false;
 	}
 
-	if (aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel->rip.rip, smses->rip.rip))) {
+	if (aliasingTable->count(std::pair<OracleRip, OracleRip>(smsel->rip.rip, smses->rip.rip))) {
 		nr_trues++;
 		return true;
 	} else {
@@ -304,7 +307,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	} else if (notInTagTable(smsel2))
 		return false;
 
-	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel1->rip.rip, smsel2->rip.rip));
+	return !!aliasingTable->count(std::pair<OracleRip, OracleRip>(smsel1->rip.rip, smsel2->rip.rip));
 }
 
 bool
@@ -322,11 +325,11 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 			return false;
 	} else if (notInTagTable(smses2))
 		return false;
-	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smses1->rip.rip, smses2->rip.rip));
+	return !!aliasingTable->count(std::pair<OracleRip, OracleRip>(smses1->rip.rip, smses2->rip.rip));
 }
 
 void
-Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<unsigned long> &out)
+Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<OracleRip> &out)
 {
 	__set_profiling(findRacingRips__load);
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
@@ -341,7 +344,7 @@ Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffect
 }
 
 void
-Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<unsigned long> &out)
+Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<OracleRip> &out)
 {
 	__set_profiling(findRacingRips__store);
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
@@ -406,7 +409,7 @@ public:
 				return x;
 			assert(content.count(e->parent) != 0);
 			entry *pe = &content[e->parent];
-			if (pe->parent)
+			if (pe->parent.rip)
 				e->parent = pe->parent;
 			x = e->parent;
 		}
@@ -415,14 +418,14 @@ public:
 
 void
 findInstrSuccessorsAndCallees(AddressSpace *as,
-			      unsigned long rip,
-			      std::vector<unsigned long> &directExits,
-			      gc_pair_ulong_set_t *callees)
+			      const OracleRip &rip,
+			      std::vector<OracleRip> &directExits,
+			      gc_pair_OracleRip_set_t *callees)
 {
 	__set_profiling(findInstrSuccessorsAndCallees);
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(-1, rip.rip);
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -446,7 +449,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 			directExits.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
 		if (irsb->next->tag == Iex_Const)
-			callees->set(std::pair<unsigned long, unsigned long>(rip, ((IRExprConst *)irsb->next)->con->Ico.U64),
+			callees->set(std::pair<OracleRip, unsigned long>(rip, ((IRExprConst *)irsb->next)->con->Ico.U64),
 				     true);
 		return;
 	}
@@ -461,11 +464,11 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 }
 
 static void
-findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
+findSuccessors(AddressSpace *as, OracleRip rip, std::vector<OracleRip> &out)
 {
-	gc_pair_ulong_set_t *callees = new gc_pair_ulong_set_t();
+	gc_pair_OracleRip_set_t *callees = new gc_pair_OracleRip_set_t();
 	findInstrSuccessorsAndCallees(as, rip, out, callees);
-	for (gc_pair_ulong_set_t::iterator it = callees->begin();
+	for (auto it = callees->begin();
 	     it != callees->end();
 	     it++)
 		out.push_back(it.key().second);
@@ -481,11 +484,11 @@ findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &
  * a RIP which has already been assigned an output set then we merge
  * the relevant output sets. */
 void
-Oracle::clusterRips(const std::set<unsigned long> &inputRips,
+Oracle::clusterRips(const std::set<OracleRip> &inputRips,
 		    std::set<InstructionSet> &outputClusters)
 {
 	__set_profiling(clusterRips);
-	union_find<unsigned long> results;
+	union_find<OracleRip> results;
 #if 0
 	std::set<unsigned long> explored;
 
@@ -498,7 +501,7 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 			continue;
 
 		results.insert(r);
-		std::vector<unsigned long> discoveredInstructions;
+		std::vector<OracleRip> discoveredInstructions;
 		discoveredInstructions.push_back(r);
 		while (!discoveredInstructions.empty()) {
 			unsigned long r2 = discoveredInstructions.back();
@@ -510,20 +513,20 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 		}
 	}
 #else
-	for (std::set<unsigned long>::const_iterator it = inputRips.begin();
+	for (auto it = inputRips.begin();
 	     it != inputRips.end();
 	     it++) {
-		unsigned long item = *it;
+		OracleRip item = *it;
 		
 		results.insert(item);
 
 		/* Map from rips to the ``best'' depth we've visited
 		 * with so far. */
-		std::map<unsigned long, int> visited;
-		std::vector<std::pair<unsigned long, int> > pending;
-		pending.push_back(std::pair<unsigned long, int>(item, 20));
+		std::map<OracleRip, int> visited;
+		std::vector<std::pair<OracleRip, int> > pending;
+		pending.push_back(std::pair<OracleRip, int>(item, 20));
 		while (!pending.empty()) {
-			std::pair<unsigned long, int> next = pending.back();
+			std::pair<OracleRip, int> next = pending.back();
 			pending.pop_back();
 			if (next.second == 0)
 				continue;
@@ -557,24 +560,24 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 			/* Not already visited from this root, not
 			 * another root -> have to do it the hard
 			 * way. */
-			std::vector<unsigned long> s;
+			std::vector<OracleRip> s;
 			findSuccessors(ms->addressSpace, next.first, s);
-			for (std::vector<unsigned long>::iterator it2 = s.begin();
+			for (auto it2 = s.begin();
 			     it2 != s.end();
 			     it2++)
-				pending.push_back(std::pair<unsigned long, int>(*it2, next.second - 1));
+				pending.push_back(std::pair<OracleRip, int>(*it2, next.second - 1));
 		}
 	}
 #endif
 
 	/* Now explode the union-find structure into a set of sets. */
-	std::set<unsigned long> unprocessedInput(inputRips);
+	std::set<OracleRip> unprocessedInput(inputRips);
 	while (!unprocessedInput.empty()) {
-		unsigned long r = *unprocessedInput.begin();
+		OracleRip r = *unprocessedInput.begin();
 
 		InstructionSet thisSet;
-		unsigned long representative = results.representative(r);
-		for (std::set<unsigned long>::iterator it = unprocessedInput.begin();
+		OracleRip representative = results.representative(r);
+		for (auto it = unprocessedInput.begin();
 		     it != unprocessedInput.end();
 			) {
 			if (results.representative(*it) == representative) {
@@ -622,45 +625,45 @@ Oracle::loadTagTable(const char *path)
 				err(1, "reading load address from %s", path);
 			t.stores.insert(buf);
 		}
-		for (std::set<unsigned long>::iterator it1 = t.stores.begin();
+		for (auto it1 = t.stores.begin();
 		     it1 != t.stores.end();
 		     it1++) {
-			if (*it1 & (1ul << 63))
+			if (it1->rip & (1ul << 63))
 				continue;
-			for (std::set<unsigned long>::iterator it2 = t.stores.begin();
+			for (auto it2 = t.stores.begin();
 			     it2 != t.stores.end();
 			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+				if (!(it2->rip & (1ul << 63)))
+					aliasingTable->insert(std::pair<OracleRip, OracleRip>(*it1, *it2));
 			}
-			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
+			for (auto it2 = t.loads.begin();
 			     it2 != t.loads.end();
 			     it2++) {
-				if (!(*it2 & (1ul << 63))) {
+				if (!(it2->rip & (1ul << 63))) {
 					unsigned long h = hashRipPair(*it1, *it2);
 					memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
-					h = hashRipPair(*it1 * 23, *it2 * 17);
+					h = hashRipPair2(*it1, *it2);
 					memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+					aliasingTable->insert(std::pair<OracleRip, OracleRip>(*it1, *it2));
 				}
 			}
 		}
-		for (std::set<unsigned long>::iterator it1 = t.loads.begin();
+		for (auto it1 = t.loads.begin();
 		     it1 != t.loads.end();
 		     it1++) {
-			if (*it1 & (1ul << 63))
+			if (it1->rip & (1ul << 63))
 				continue;
-			for (std::set<unsigned long>::iterator it2 = t.stores.begin();
+			for (auto it2 = t.stores.begin();
 			     it2 != t.stores.end();
 			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+				if (!(it2->rip & (1ul << 63)))
+					aliasingTable->insert(std::pair<OracleRip, OracleRip>(*it1, *it2));
 			}
-			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
+			for (auto it2 = t.loads.begin();
 			     it2 != t.loads.end();
 			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
+				if (!(it2->rip & (1ul << 63)))
+					aliasingTable->insert(std::pair<OracleRip, OracleRip>(*it1, *it2));
 			}
 		}
 		tag_table.push_back(t);
@@ -686,14 +689,14 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 	bool done_something;
 	unsigned long changed;
 	unsigned long unchanged;
-	std::vector<unsigned long> functions;
+	std::vector<OracleRip> functions;
 
 	do {
 		changed = 0;
 		unchanged = 0;
 		done_something = false;
 		ths->getFunctions(functions);
-		for (std::vector<unsigned long>::iterator it = functions.begin();
+		for (auto it = functions.begin();
 		     it != functions.end();
 		     it++) {
 			LibVEX_maybe_gc(token);
@@ -713,9 +716,9 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 void
 Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
-	std::vector<unsigned long> functions;
+	std::vector<OracleRip> functions;
 	ths->getFunctions(functions);
-	for (std::vector<unsigned long>::iterator it = functions.begin();
+	for (auto it = functions.begin();
 	     it != functions.end();
 	     it++) {
 		LibVEX_maybe_gc(token);
@@ -728,10 +731,10 @@ void
 Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
 	bool done_something;
-	std::vector<unsigned long> functions;
+	std::vector<OracleRip> functions;
 
 	ths->getFunctions(functions);
-	for (std::vector<unsigned long>::iterator it = functions.begin();
+	for (auto it = functions.begin();
 	     it != functions.end();
 	     it++) {
 		LibVEX_maybe_gc(token);
@@ -972,7 +975,7 @@ Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, bool
 }
 
 Oracle::RegisterAliasingConfiguration
-Oracle::getAliasingConfigurationForRip(unsigned long rip)
+Oracle::getAliasingConfigurationForRip(const OracleRip &rip)
 {
 	Function f(rip);
 	return f.aliasConfigOnEntryToInstruction(rip);
@@ -990,7 +993,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 
 	if (ths->callGraphMapping.init(path) < 0)
 		err(1, "opening %s", path);
-	std::vector<unsigned long> roots;
+	std::vector<OracleRip> roots;
 	unsigned offset = 0;
 	while (1) {
 		const struct cg_header *h;
@@ -1012,7 +1015,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 }
 
 void
-Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &output)
+Oracle::findPossibleJumpTargets(const OracleRip &rip, std::vector<OracleRip> &output)
 {
 	if (!callGraphMapping.live())
 		return;
@@ -1023,7 +1026,7 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 		if (!h)
 			return;
 		offset += sizeof(*h);
-		if (h->rip == rip) {
+		if (h->rip == rip.rip) {
 			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
 			assert(c);
 			for (unsigned i = 0; i < h->nr; i++)
@@ -1036,12 +1039,12 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 }
 
 void
-Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
-				 unsigned long rip)
+Oracle::findPreviousInstructions(std::vector<OracleRip> &output,
+				 const OracleRip &rip)
 {
-	unsigned long r = functionHeadForInstruction(rip);
-	if (!r) {
-		fprintf(_logfile, "No function for %lx\n", rip);
+	OracleRip r = functionHeadForInstruction(rip);
+	if (!r.rip) {
+		fprintf(_logfile, "No function for %s\n", rip.name());
 		return;
 	}
 	Function f(r);
@@ -1050,31 +1053,30 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 	   the desired rip using Dijkstra's algorithm.  */
 	/* Distance from start of function to key.  Non-present keys
 	 * should be assumed to have an infinite length. */
-	std::map<unsigned long, unsigned> pathLengths;
+	std::map<OracleRip, unsigned> pathLengths;
 	/* Predecessor on best path from start to key. */
-	std::map<unsigned long, unsigned long> predecessors; 
+	std::map<OracleRip, OracleRip> predecessors; 
 	/* We push stuff in here when we discover a new shortest path
 	   to that node. */
-	std::priority_queue<std::pair<unsigned, unsigned long> > grey;
+	std::priority_queue<std::pair<unsigned, OracleRip> > grey;
 
 	pathLengths[f.rip] = 0;
-	grey.push(std::pair<unsigned, unsigned long>(0, f.rip));
+	grey.push(std::pair<unsigned, OracleRip>(0, f.rip));
 	while (!grey.empty()) {
-		std::pair<unsigned, unsigned long> e(grey.top());
+		std::pair<unsigned, OracleRip> e(grey.top());
 		grey.pop();
 
 		assert(pathLengths.count(e.second));
 		unsigned p = pathLengths[e.second] + 1;
-		std::vector<unsigned long> successors;
+		std::vector<OracleRip> successors;
 		f.getSuccessors(e.second, successors);
-		for (std::vector<unsigned long>::iterator it = successors.begin();
+		for (auto it = successors.begin();
 		     it != successors.end();
 		     it++) {
-			unsigned long ft = *it;
-			if (!pathLengths.count(ft) || pathLengths[ft] >= p) {
-				pathLengths[ft] = p;
-				predecessors[ft] = e.second;
-				grey.push(std::pair<unsigned, unsigned long>(p, ft));
+			if (!pathLengths.count(*it) || pathLengths[*it] >= p) {
+				pathLengths[*it] = p;
+				predecessors[*it] = e.second;
+				grey.push(std::pair<unsigned, OracleRip>(p, *it));
 			}
 		}
 	}
@@ -1086,7 +1088,7 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 		return;
 	}
 
-	for (unsigned long i = predecessors[rip]; i; i = predecessors[i])
+	for (auto i = predecessors[rip]; i.rip; i = predecessors[i])
 		output.push_back(i);
 }
 
@@ -1197,11 +1199,26 @@ extract_int64_column(sqlite3_stmt *stmt, int column, std::vector<unsigned long> 
 }
 
 static void
+extract_oraclerip_column(sqlite3_stmt *stmt, int column, std::vector<OracleRip> &out)
+{
+	std::vector<unsigned long> out1;
+	extract_int64_column(stmt, column, out1);
+	for (auto it = out1.begin(); it != out1.end(); it++)
+		out.push_back(OracleRip(*it));
+}
+
+static void
 bind_int64(sqlite3_stmt *stmt, int idx, unsigned long val)
 {
 	int rc;
 	rc = sqlite3_bind_int64(stmt, idx, val);
 	assert(rc == SQLITE_OK);
+}
+
+static void
+bind_oraclerip(sqlite3_stmt *stmt, int idx, const OracleRip &rip)
+{
+	bind_int64(stmt, idx, rip.rip);
 }
 
 static void
@@ -1213,15 +1230,15 @@ drop_index(const char *name)
 }
 
 void
-Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &heads, GarbageCollectionToken token)
+Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<OracleRip> &heads, GarbageCollectionToken token)
 {
 	drop_index("branchDest");
 	drop_index("callDest");
 	drop_index("fallThroughDest");
 
-	std::set<unsigned long> visited;
+	std::set<OracleRip> visited;
 	while (!heads.empty()) {
-		unsigned long head;
+		OracleRip head;
 		head = heads.back();
 		heads.pop_back();
 		if (visited.count(head))
@@ -1240,14 +1257,14 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 }
 
 Oracle::LivenessSet
-Oracle::Function::liveOnEntry(unsigned long rip, bool isHead)
+Oracle::Function::liveOnEntry(const OracleRip &rip, bool isHead)
 {
 	static sqlite3_stmt *stmt;
 	int rc;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT liveOnEntry FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
 	if (rc == SQLITE_DONE || sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
@@ -1267,7 +1284,7 @@ Oracle::Function::liveOnEntry(unsigned long rip, bool isHead)
 }
 
 Oracle::RegisterAliasingConfiguration
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
+Oracle::Function::aliasConfigOnEntryToInstruction(const OracleRip &rip, bool *b)
 {
 	static sqlite3_stmt *stmt;
 	int rc;
@@ -1275,7 +1292,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 	if (!stmt)
 		stmt = prepare_statement(
 			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
 	if (rc == SQLITE_DONE) {
@@ -1314,7 +1331,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 }
 
 bool
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, Oracle::RegisterAliasingConfiguration *out)
+Oracle::Function::aliasConfigOnEntryToInstruction(const OracleRip &rip, Oracle::RegisterAliasingConfiguration *out)
 {
 	bool res;
 	*out = aliasConfigOnEntryToInstruction(rip, &res);
@@ -1322,14 +1339,14 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, Oracle::Reg
 }
 
 Oracle::RegisterAliasingConfiguration
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
+Oracle::Function::aliasConfigOnEntryToInstruction(const OracleRip &rip)
 {
 	bool ign;
 	return aliasConfigOnEntryToInstruction(rip, &ign);
 }
 
 void
-Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
+Oracle::discoverFunctionHead(const OracleRip &x, std::vector<OracleRip> &heads)
 {
 	Function work(x);
 
@@ -1337,11 +1354,11 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		return;
 
 	/* Start by building a CFG of the function's instructions. */
-	std::vector<unsigned long> unexplored;
-	std::set<unsigned long> explored;
+	std::vector<OracleRip> unexplored;
+	std::set<OracleRip> explored;
 	unexplored.push_back(x);
 	while (!unexplored.empty()) {
-		unsigned long rip = unexplored.back();
+		OracleRip rip = unexplored.back();
 		unexplored.pop_back();
 
 		if (explored.count(rip))
@@ -1349,7 +1366,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 
 		IRSB *irsb;
 		try {
-			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip);
+			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip.rip);
 		} catch (BadMemoryException &e) {
 			irsb = NULL;
 		}
@@ -1361,13 +1378,15 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		while (start_of_instruction < irsb->stmts_used) {
 			IRStmt *stmt = irsb->stmts[start_of_instruction];
 			assert(stmt->tag == Ist_IMark);
-			unsigned long r = ((IRStmtIMark *)stmt)->addr;
+			unsigned long raw_rip = ((IRStmtIMark *)stmt)->addr;
+			OracleRip r(rip);
+			r.rip = raw_rip;
 			if (explored.count(r))
 				break;
 
-			std::vector<unsigned long> branch;
-			std::vector<unsigned long> fallThrough;
-			std::vector<unsigned long> callees;
+			std::vector<OracleRip> branch;
+			std::vector<OracleRip> fallThrough;
+			std::vector<OracleRip> callees;
 			for (end_of_instruction = start_of_instruction + 1;
 			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
 			     end_of_instruction++) {
@@ -1436,13 +1455,13 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 	if (rbpToRspOffsetsCorrect())
 		return;
 
-	std::vector<unsigned long> instrsToRecalculate1;
-	std::vector<unsigned long> instrsToRecalculate2;
+	std::vector<OracleRip> instrsToRecalculate1;
+	std::vector<OracleRip> instrsToRecalculate2;
 
 	getInstructionsInFunction(instrsToRecalculate1);
 
 	while (1) {
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate1.begin();
+		for (std::vector<OracleRip>::iterator it = instrsToRecalculate1.begin();
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
@@ -1454,7 +1473,7 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 		if (instrsToRecalculate2.empty())
 			break;
 
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate2.begin();
+		for (auto it = instrsToRecalculate2.begin();
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
@@ -1479,8 +1498,8 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 	if (registerLivenessCorrect())
 		return;
 
-	std::vector<unsigned long> instrsToRecalculate1;
-	std::vector<unsigned long> instrsToRecalculate2;
+	std::vector<OracleRip> instrsToRecalculate1;
+	std::vector<OracleRip> instrsToRecalculate2;
 
 	getInstructionsInFunction(instrsToRecalculate1);
 
@@ -1489,7 +1508,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 
 	changed = false;
 	while (1) {
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate1.begin();
+		for (auto it = instrsToRecalculate1.begin();
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
@@ -1502,7 +1521,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 			break;
 		changed = true;
 
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate2.begin();
+		for (auto it = instrsToRecalculate2.begin();
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
@@ -1520,9 +1539,9 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 
 	if (changed) {
 		*done_something = true;
-		std::vector<unsigned long> callers;
+		std::vector<OracleRip> callers;
 		getFunctionCallers(callers, oracle);
-		for (std::vector<unsigned long>::iterator it = callers.begin();
+		for (auto it = callers.begin();
 		     it != callers.end();
 		     it++)
 			(Function(*it)).setRegisterLivenessCorrect(false);
@@ -1549,16 +1568,16 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 		setAliasConfigOnEntryToInstruction(rip, RegisterAliasingConfiguration::functionEntryConfiguration);
 	}
 
-	std::vector<unsigned long> needsUpdating;
-	std::vector<unsigned long> allInstrs;
+	std::vector<OracleRip> needsUpdating;
+	std::vector<OracleRip> allInstrs;
 	getInstructionsInFunction(allInstrs);
-	for (std::vector<unsigned long>::iterator it = allInstrs.begin();
+	for (auto it = allInstrs.begin();
 	     it != allInstrs.end();
 	     it++)
 		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, oracle);
 	while (!needsUpdating.empty()) {
 		*done_something = true;
-		unsigned long rip = needsUpdating.back();
+		OracleRip rip = needsUpdating.back();
 		needsUpdating.pop_back();
 		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, oracle);
 	}
@@ -1567,11 +1586,11 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 }
 
 void
-Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
+Oracle::Function::updateLiveOnEntry(const OracleRip &rip, AddressSpace *as, bool *changed, Oracle *oracle)
 {
 	LivenessSet res;
 
-	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRSB *irsb = as->getIRSBForAddress(-1, rip.rip);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -1579,8 +1598,8 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 	     nr_statements++)
 		;
 
-	std::vector<unsigned long> fallThroughRips;
-	std::vector<unsigned long> callees;
+	std::vector<OracleRip> fallThroughRips;
+	std::vector<OracleRip> callees;
 
 	if (nr_statements == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
@@ -1602,11 +1621,11 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 		fallThroughRips.push_back(((IRStmtIMark *)statements[nr_statements])->addr);
 	}
 
-	for (std::vector<unsigned long>::iterator it = fallThroughRips.begin();
+	for (auto it = fallThroughRips.begin();
 	     it != fallThroughRips.end();
 	     it++)
 		res |= liveOnEntry(*it, false);
-	for (std::vector<unsigned long>::iterator it = callees.begin();
+	for (auto it = callees.begin();
 	     it != callees.end();
 	     it++) {
 		Function f(*it);
@@ -1671,7 +1690,7 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 			stmt = prepare_statement(
 				"UPDATE instructionAttributes SET liveOnEntry = ? WHERE rip = ?");
 		bind_int64(stmt, 1, res.mask);
-		bind_int64(stmt, 2, rip);
+		bind_oraclerip(stmt, 2, rip);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		sqlite3_reset(stmt);
@@ -1703,7 +1722,7 @@ rewriteRegister(IRExpr *expr, threadAndRegister offset, IRExpr *to)
 }
 
 void
-Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
+Oracle::Function::updateRbpToRspOffset(const OracleRip &rip, AddressSpace *as, bool *changed, Oracle *oracle)
 {
 	RbpToRspOffsetState current_state;
 	unsigned long current_offset;
@@ -1721,7 +1740,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	/* Try to figure out what this instruction actually does. */
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(-1, rip.rip);
 	} catch (BadMemoryException e) {
 		return;
 	}
@@ -1792,7 +1811,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 				goto impossible;
 			IRExpr *v = IRExpr_Load(t,
 						((IRStmtDirty *)stmt)->details->args[0],
-						ThreadRip::mk(9999, rip));
+						ThreadRip::mk(9999, rip.rip));
 			if (rsp)
 				rsp = rewriteRegister(rsp, tmp, v);
 			if (rbp)
@@ -1882,10 +1901,10 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 join_predecessors:
 	state = RbpToRspOffsetStateUnknown;
 	{
-		std::vector<unsigned long> predecessors;
+		std::vector<OracleRip> predecessors;
 		addPredecessorsNonCall(rip, predecessors);
 
-		for (std::vector<unsigned long>::iterator it = predecessors.begin();
+		for (auto it = predecessors.begin();
 		     it != predecessors.end();
 		     it++) {
 			enum RbpToRspOffsetState pred_state;
@@ -1937,7 +1956,7 @@ impossible_clean:
 }
 
 void
-Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, AddressSpace *as, std::vector<unsigned long> *changed,
+Oracle::Function::updateSuccessorInstructionsAliasing(const OracleRip &rip, AddressSpace *as, std::vector<OracleRip> *changed,
 						      Oracle *oracle)
 {
 	RegisterAliasingConfiguration config(aliasConfigOnEntryToInstruction(rip));
@@ -1947,7 +1966,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 	int nr_statements;
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(-1, rip.rip);
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -2054,11 +2073,11 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 		}
 	}
 
-	std::vector<unsigned long> callees;
+	std::vector<OracleRip> callees;
 	getInstructionCallees(rip, callees, oracle);
 	if (!callees.empty())
 		config.v[0] = PointerAliasingSet::notAPointer;
-	for (std::vector<unsigned long>::iterator it = callees.begin();
+	for (auto it = callees.begin();
 	     config.v[0] != PointerAliasingSet::anything && it != callees.end();
 	     it++) {
 		LivenessSet ls = (Function(*it)).liveOnEntry(*it, true);
@@ -2084,9 +2103,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
 		config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
 	}
-	std::vector<unsigned long> _fallThroughRips;
+	std::vector<OracleRip> _fallThroughRips;
 	getInstructionFallThroughs(rip, _fallThroughRips);
-	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	for (auto it = _fallThroughRips.begin();
 	     it != _fallThroughRips.end();
 	     it++) {
 		bool b;
@@ -2107,7 +2126,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 }
 
 void
-Oracle::Function::addPredecessorsNonCall(unsigned long rip, std::vector<unsigned long> &out)
+Oracle::Function::addPredecessorsNonCall(const OracleRip &rip, std::vector<OracleRip> &out)
 {
 	static sqlite3_stmt *stmt1, *stmt2;
 
@@ -2116,52 +2135,52 @@ Oracle::Function::addPredecessorsNonCall(unsigned long rip, std::vector<unsigned
 		stmt1 = prepare_statement("SELECT rip FROM fallThroughRips WHERE dest = ?");
 		stmt2 = prepare_statement("SELECT rip FROM branchRips WHERE dest = ?");
 	}
-	bind_int64(stmt1, 1, rip);
-	bind_int64(stmt2, 1, rip);
-	extract_int64_column(stmt1, 0, out);
-	extract_int64_column(stmt2, 0, out);
+	bind_oraclerip(stmt1, 1, rip);
+	bind_oraclerip(stmt2, 1, rip);
+	extract_oraclerip_column(stmt1, 0, out);
+	extract_oraclerip_column(stmt2, 0, out);
 }
 
 void
-Oracle::Function::addPredecessors(unsigned long rip, std::vector<unsigned long> &out)
+Oracle::Function::addPredecessors(const OracleRip &rip, std::vector<OracleRip> &out)
 {
 	static sqlite3_stmt *stmt;
 
 	addPredecessorsNonCall(rip, out);
 	if (!stmt)
 		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
-	bind_int64(stmt, 1, rip);
-	extract_int64_column(stmt, 0, out);
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 void
-Oracle::Function::getInstructionFallThroughs(unsigned long rip, std::vector<unsigned long> &succ)
+Oracle::Function::getInstructionFallThroughs(const OracleRip &rip, std::vector<OracleRip> &succ)
 {
 	static sqlite3_stmt *stmt1;
 
 	if (!stmt1)
 		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
-	bind_int64(stmt1, 1, rip);
+	bind_oraclerip(stmt1, 1, rip);
 
 	succ.clear();
-	extract_int64_column(stmt1, 0, succ);
+	extract_oraclerip_column(stmt1, 0, succ);
 }
 
 void
-Oracle::Function::getInstructionsInFunction(std::vector<unsigned long> &succ) const
+Oracle::Function::getInstructionsInFunction(std::vector<OracleRip> &succ) const
 {
 	static sqlite3_stmt *stmt1;
 
 	if (!stmt1)
 		stmt1 = prepare_statement("SELECT rip FROM instructionAttributes WHERE functionHead = ?");
-	bind_int64(stmt1, 1, rip);
+	bind_oraclerip(stmt1, 1, rip);
 
 	succ.clear();
-	extract_int64_column(stmt1, 0, succ);	
+	extract_oraclerip_column(stmt1, 0, succ);	
 }
 
 void
-Oracle::Function::getSuccessors(unsigned long rip, std::vector<unsigned long> &succ)
+Oracle::Function::getSuccessors(const OracleRip &rip, std::vector<OracleRip> &succ)
 {
 	static sqlite3_stmt *stmt1, *stmt2;
 
@@ -2170,15 +2189,15 @@ Oracle::Function::getSuccessors(unsigned long rip, std::vector<unsigned long> &s
 		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
 		stmt2 = prepare_statement("SELECT dest FROM branchRips WHERE rip = ?");
 	}
-	bind_int64(stmt1, 1, rip);
-	bind_int64(stmt2, 1, rip);
+	bind_oraclerip(stmt1, 1, rip);
+	bind_oraclerip(stmt2, 1, rip);
 
-	extract_int64_column(stmt1, 0, succ);
-	extract_int64_column(stmt2, 0, succ);
+	extract_oraclerip_column(stmt1, 0, succ);
+	extract_oraclerip_column(stmt2, 0, succ);
 }
 
 void
-Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
+Oracle::Function::setAliasConfigOnEntryToInstruction(const OracleRip &r,
 						     const RegisterAliasingConfiguration &config)
 {
 	static sqlite3_stmt *stmt;
@@ -2192,24 +2211,24 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
 	for (i = 0; i < NR_REGS; i++)
 		bind_int64(stmt, i + 1, config.v[i]);
 	bind_int64(stmt, NR_REGS + 1, config.stackHasLeaked);
-	bind_int64(stmt, NR_REGS + 2, r);
+	bind_oraclerip(stmt, NR_REGS + 2, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
 }
 
 bool
-Oracle::Function::addInstruction(unsigned long rip,
-				 const std::vector<unsigned long> &callees,
-				 const std::vector<unsigned long> &fallThrough,
-				 const std::vector<unsigned long> &branch)
+Oracle::Function::addInstruction(const OracleRip &rip,
+				 const std::vector<OracleRip> &callees,
+				 const std::vector<OracleRip> &fallThrough,
+				 const std::vector<OracleRip> &branch)
 {
 	sqlite3_stmt *stmt;
 	int rc;
 
 	stmt = prepare_statement("INSERT INTO instructionAttributes (rip, functionHead) VALUES (?, ?)");
-	bind_int64(stmt, 1, rip);
-	bind_int64(stmt, 2, this->rip);
+	bind_oraclerip(stmt, 1, rip);
+	bind_oraclerip(stmt, 2, this->rip);
 	rc = sqlite3_step(stmt);
 	sqlite3_finalize(stmt);
 	if (rc == SQLITE_CONSTRAINT) {
@@ -2218,11 +2237,11 @@ Oracle::Function::addInstruction(unsigned long rip,
 	assert(rc == SQLITE_DONE);
 
 	stmt = prepare_statement("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
-	for (std::vector<unsigned long>::const_iterator it = fallThrough.begin();
+	for (auto it = fallThrough.begin();
 	     it != fallThrough.end();
 	     it++) {
-		bind_int64(stmt, 1, rip);
-		bind_int64(stmt, 2, *it);
+		bind_oraclerip(stmt, 1, rip);
+		bind_oraclerip(stmt, 2, *it);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		rc = sqlite3_reset(stmt);
@@ -2231,11 +2250,11 @@ Oracle::Function::addInstruction(unsigned long rip,
 	sqlite3_finalize(stmt);
 
 	stmt = prepare_statement("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
-	for (std::vector<unsigned long>::const_iterator it = branch.begin();
+	for (auto it = branch.begin();
 	     it != branch.end();
 	     it++) {
-		bind_int64(stmt, 1, rip);
-		bind_int64(stmt, 2, *it);
+		bind_oraclerip(stmt, 1, rip);
+		bind_oraclerip(stmt, 2, *it);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		rc = sqlite3_reset(stmt);
@@ -2244,11 +2263,11 @@ Oracle::Function::addInstruction(unsigned long rip,
 	sqlite3_finalize(stmt);
 
 	stmt = prepare_statement("INSERT INTO callRips (rip, dest) VALUES (?, ?)");
-	for (std::vector<unsigned long>::const_iterator it = callees.begin();
+	for (auto it = callees.begin();
 	     it != callees.end();
 	     it++) {
-		bind_int64(stmt, 1, rip);
-		bind_int64(stmt, 2, *it);
+		bind_oraclerip(stmt, 1, rip);
+		bind_oraclerip(stmt, 2, *it);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		rc = sqlite3_reset(stmt);
@@ -2260,35 +2279,35 @@ Oracle::Function::addInstruction(unsigned long rip,
 }
 
 void
-Oracle::Function::getInstructionCallees(unsigned long rip, std::vector<unsigned long> &out, Oracle *oracle)
+Oracle::Function::getInstructionCallees(const OracleRip &rip, std::vector<OracleRip> &out, Oracle *oracle)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT dest FROM callRips WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
-	extract_int64_column(stmt, 0, out);
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 void
-Oracle::Function::getFunctionCallers(std::vector<unsigned long> &out, Oracle *oracle)
+Oracle::Function::getFunctionCallers(std::vector<OracleRip> &out, Oracle *oracle)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
-	bind_int64(stmt, 1, rip);
-	extract_int64_column(stmt, 0, out);
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 void
-Oracle::getFunctions(std::vector<unsigned long> &out)
+Oracle::getFunctions(std::vector<OracleRip> &out)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT DISTINCT functionHead FROM instructionAttributes");
-	extract_int64_column(stmt, 0, out);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 bool
@@ -2297,13 +2316,13 @@ Oracle::Function::registerLivenessCorrect() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT registerLivenessCorrect FROM functionAttribs WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
-	std::vector<unsigned long> a;
-	extract_int64_column(stmt, 0, a);
+	bind_oraclerip(stmt, 1, rip);
+	std::vector<OracleRip> a;
+	extract_oraclerip_column(stmt, 0, a);
 	if (a.size() == 0)
 		return false;
 	assert(a.size() == 1);
-	return !!a[0];
+	return !!a[0].rip;
 }
 
 bool
@@ -2312,13 +2331,13 @@ Oracle::Function::rbpToRspOffsetsCorrect() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT rbpOffsetCorrect FROM functionAttribs WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
-	std::vector<unsigned long> a;
-	extract_int64_column(stmt, 0, a);
+	bind_oraclerip(stmt, 1, rip);
+	std::vector<OracleRip> a;
+	extract_oraclerip_column(stmt, 0, a);
 	if (a.size() == 0)
 		return false;
 	assert(a.size() == 1);
-	return !!a[0];
+	return !!a[0].rip;
 }
 
 bool
@@ -2327,13 +2346,13 @@ Oracle::Function::aliasingConfigCorrect() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT aliasingCorrect FROM functionAttribs WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
-	std::vector<unsigned long> a;
-	extract_int64_column(stmt, 0, a);
+	bind_oraclerip(stmt, 1, rip);
+	std::vector<OracleRip> a;
+	extract_oraclerip_column(stmt, 0, a);
 	if (a.size() == 0)
 		return false;
 	assert(a.size() == 1);
-	return !!a[0];
+	return !!a[0].rip;
 }
 
 void
@@ -2342,7 +2361,7 @@ Oracle::Function::setRegisterLivenessCorrect(bool x)
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect, rbpOffsetCorrect, aliasingCorrect) VALUES (?, ?, 0, 0)");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	bind_int64(stmt, 2, x);
 
 	int rc;
@@ -2358,7 +2377,7 @@ Oracle::Function::setRbpToRspOffsetsCorrect(bool x)
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("UPDATE functionAttribs SET rbpOffsetCorrect = ? WHERE functionHead = ?");
-	bind_int64(stmt, 2, rip);
+	bind_oraclerip(stmt, 2, rip);
 	bind_int64(stmt, 1, x);
 
 	int rc;
@@ -2369,12 +2388,12 @@ Oracle::Function::setRbpToRspOffsetsCorrect(bool x)
 }
 
 void
-Oracle::getRbpToRspOffset(unsigned long rip, enum RbpToRspOffsetState *state, unsigned long *offset)
+Oracle::getRbpToRspOffset(const OracleRip &rip, enum RbpToRspOffsetState *state, unsigned long *offset)
 {
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT rbpToRspDeltaState,rbpToRspDelta FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	int rc = sqlite3_step(stmt);
 	if (rc == SQLITE_DONE) {
 		/* Not entered in database yet */
@@ -2405,7 +2424,7 @@ Oracle::getRbpToRspOffset(unsigned long rip, enum RbpToRspOffsetState *state, un
 }
 
 void
-Oracle::setRbpToRspOffset(unsigned long r,
+Oracle::setRbpToRspOffset(const OracleRip &r,
 			  RbpToRspOffsetState state,
 			  unsigned long offset)
 {
@@ -2429,7 +2448,7 @@ Oracle::setRbpToRspOffset(unsigned long r,
 		abort();
 	}
 	bind_int64(stmt, 2, offset);
-	bind_int64(stmt, 3, r);
+	bind_oraclerip(stmt, 3, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
@@ -2442,7 +2461,7 @@ Oracle::Function::setAliasingConfigCorrect(bool x)
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("UPDATE functionAttribs SET aliasingCorrect = ? WHERE functionHead = ?");
-	bind_int64(stmt, 2, rip);
+	bind_oraclerip(stmt, 2, rip);
 	bind_int64(stmt, 1, x);
 
 	int rc;
@@ -2458,23 +2477,23 @@ Oracle::Function::exists() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT COUNT(*) FROM instructionAttributes WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	std::vector<unsigned long> x;
 	extract_int64_column(stmt, 0, x);
 	assert(x.size() == 1);
 	return x[0] != 0;
 }
 
-unsigned long
-Oracle::functionHeadForInstruction(unsigned long rip)
+OracleRip
+Oracle::functionHeadForInstruction(const OracleRip &rip)
 {
 	__set_profiling(functionHeadForInstruction);
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT functionHead FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
-	std::vector<unsigned long> x;
-	extract_int64_column(stmt, 0, x);
+	bind_oraclerip(stmt, 1, rip);
+	std::vector<OracleRip> x;
+	extract_oraclerip_column(stmt, 0, x);
 	if (x.size() == 0)
 		return 0;
 	assert(x.size() == 1);
@@ -2482,11 +2501,11 @@ Oracle::functionHeadForInstruction(unsigned long rip)
 }
 
 unsigned
-getInstructionSize(AddressSpace *as, unsigned long rip)
+getInstructionSize(AddressSpace *as, const OracleRip &rip)
 {
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(-1, rip.rip);
 	} catch (BadMemoryException &e) {
 		return 0;
 	}
@@ -2501,8 +2520,8 @@ getInstructionSize(AddressSpace *as, unsigned long rip)
    dominator).  If minimum_size is non-zero we further restrict things
    so that we only consider dominating instructions whose size is at
    least minimum_size bytes, or the head instruction in a function. */
-unsigned long
-Oracle::dominator(const std::set<unsigned long> &instrs,
+OracleRip
+Oracle::dominator(const std::set<OracleRip> &instrs,
 		  AddressSpace *as,
 		  unsigned minimum_size)
 {
@@ -2511,23 +2530,25 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 
 	/* For now, only handle the case where everything is in the
 	 * same function. */
-	unsigned long f = 0;
-	for (std::set<unsigned long>::iterator it = instrs.begin();
+	OracleRip f;
+	bool have_f = false;
+	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++) {
-		if (!f)
+		if (!have_f) {
 			f = functionHeadForInstruction(*it);
-		else if (f != functionHeadForInstruction(*it)) {
+			have_f = true;
+		} else if (f != functionHeadForInstruction(*it)) {
 			printf("Can't find dominator for instruction set which crosses functions\n");
 			for (it = instrs.begin();
 			     it != instrs.end();
 			     it++)
-				printf("%lx in function %lx\n", f, functionHeadForInstruction(*it));
+				printf("%s in function %s\n", f.name(), functionHeadForInstruction(*it).name());
 			return 0;
 		}
 	}
 
-	if (!f) {
+	if (!have_f) {
 		printf("Eh? can't find function which contains instructions which need to be dominated.\n");
 		return 0;
 	}
@@ -2535,8 +2556,8 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	/* Find the dominator chains for each individual instruction,
 	   intersect them, and then take the last one. This is perhaps
 	   not the most efficient algorithm imaginable. */
-	std::vector<unsigned long> dominators;
-	std::set<unsigned long>::iterator it = instrs.begin();
+	std::vector<OracleRip> dominators;
+	auto it = instrs.begin();
 	findDominators(f, *it, as, dominators);
 	std::reverse(dominators.begin(), dominators.end());
 	dominators.push_back(*it);
@@ -2544,7 +2565,7 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	while (it != instrs.end()) {
 		if (TIMEOUT)
 			break;
-		std::vector<unsigned long> newDominators;
+		std::vector<OracleRip> newDominators;
 		findDominators(f, *it, as, newDominators);
 		std::reverse(newDominators.begin(), newDominators.end());
 		newDominators.push_back(*it);
@@ -2573,7 +2594,7 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 }
 
 bool
-Oracle::getRbpToRspDelta(unsigned long rip, long *out)
+Oracle::getRbpToRspDelta(const OracleRip &rip, long *out)
 {
 	RbpToRspOffsetState state;
 	unsigned long o;
@@ -2587,7 +2608,7 @@ Oracle::getRbpToRspDelta(unsigned long rip, long *out)
 }
 
 Oracle::LivenessSet
-Oracle::liveOnEntryToFunction(unsigned long rip)
+Oracle::liveOnEntryToFunction(const OracleRip &rip)
 {
 	Function f(rip);
 	return f.liveOnEntry(rip, true);
@@ -2697,4 +2718,20 @@ dbg_database_query(const char *query)
 		}
 	}
 	sqlite3_finalize(stmt);
+}
+
+bool
+parseOracleRip(OracleRip *rip, const char *str, const char **suffix)
+{
+	return parseHexUlong(&rip->rip, str, suffix);
+}
+
+bool
+parseThreadOracleRip(ThreadOracleRip *tr, const char *str, const char **suffix)
+{
+	if (!parseDecimalUInt(&tr->thread, str, &str) ||
+	    !parseThisChar(':', str, &str) ||
+	    !parseOracleRip(&tr->rip, str, suffix))
+		return false;
+	return true;
 }
