@@ -147,8 +147,8 @@ bool
 Oracle::functionCanReturn(const VexRip &rip)
 {
 #warning Horrible, horrible hack
-	if (rip.rip == 0x768440 /* ut_dbg_assertion_failed */ ||
-	    rip.rip == 0x7683e0 /* ut_dbg_stop_thread */)
+	if (rip.unwrap_vexrip() == 0x768440 /* ut_dbg_assertion_failed */ ||
+	    rip.unwrap_vexrip() == 0x7683e0 /* ut_dbg_stop_thread */)
 		return false;
 	else
 		return true;
@@ -173,7 +173,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 			for (auto it2 = it->stores.begin();
 			     it2 != it->stores.end();
 			     it2++) {
-				if (!(it2->rip & (1ul << 63)))
+				if (!(it2->unwrap_vexrip() & (1ul << 63)))
 					out.insert(*it2);
 			}
 		}
@@ -194,9 +194,9 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 	     it != tag_table.end();
 	     it++) {
 		if (it->stores.count(access->rip.rip) ||
-		    it->stores.count(VexRip(access->rip.rip.rip | (1ul << 63))) ||
+		    it->stores.count(VexRip::invent_vex_rip(access->rip.rip.unwrap_vexrip() | (1ul << 63))) ||
 		    it->loads.count(access->rip.rip) ||
-		    it->loads.count(VexRip(access->rip.rip.rip | (1ul << 63)))) {
+		    it->loads.count(VexRip::invent_vex_rip(access->rip.rip.unwrap_vexrip() | (1ul << 63)))) {
 			notThreadLocal.insert(access->rip.rip);
 			return false;
 		}
@@ -216,7 +216,7 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 			for (auto it2 = it->stores.begin();
 			     it2 != it->stores.end();
 			     it2++) {
-				if (!(it2->rip & (1ul << 63)))
+				if (!(it2->unwrap_vexrip() & (1ul << 63)))
 					return true;
 			}
 		}
@@ -237,11 +237,11 @@ Oracle::getAllMemoryAccessingInstructions(std::vector<VexRip> &out) const
 		for (auto it2 = it->stores.begin();
 		     it2 != it->stores.end();
 		     it2++)
-			allInstructions.insert(VexRip(it2->rip & ~(1ul << 63)));
+			allInstructions.insert(VexRip::invent_vex_rip(it2->unwrap_vexrip() & ~(1ul << 63)));
 		for (auto it2 = it->loads.begin();
 		     it2 != it->loads.end();
 		     it2++)
-			allInstructions.insert(VexRip(it2->rip & ~(1ul << 63)));
+			allInstructions.insert(VexRip::invent_vex_rip(it2->unwrap_vexrip() & ~(1ul << 63)));
 	}
 	for (auto it = allInstructions.begin();
 	     it != allInstructions.end();
@@ -409,7 +409,7 @@ public:
 				return x;
 			assert(content.count(e->parent) != 0);
 			entry *pe = &content[e->parent];
-			if (pe->parent.rip)
+			if (pe->parent.unwrap_vexrip())
 				e->parent = pe->parent;
 			x = e->parent;
 		}
@@ -425,7 +425,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	__set_profiling(findInstrSuccessorsAndCallees);
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.rip);
+		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -434,11 +434,11 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	for (i = 1; i < irsb->stmts_used; i++) {
 		if (irsb->stmts[i]->tag == Ist_IMark) {
 			/* That's the end of this instruction */
-			directExits.push_back(VexRip(((IRStmtIMark *)irsb->stmts[i])->addr));
+			directExits.push_back(VexRip::invent_vex_rip(((IRStmtIMark *)irsb->stmts[i])->addr));
 			return;
 		}
 		if (irsb->stmts[i]->tag == Ist_Exit)
-			directExits.push_back(VexRip(((IRStmtExit *)irsb->stmts[i])->dst->Ico.U64));
+			directExits.push_back(VexRip::invent_vex_rip(((IRStmtExit *)irsb->stmts[i])->dst->Ico.U64));
 	}
 
 	/* If we get here then there are no other marks in the IRSB,
@@ -446,17 +446,17 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	if (irsb->jumpkind == Ijk_Call) {
 		if (irsb->next->tag != Iex_Const ||
 		    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
-			directExits.push_back(VexRip(extract_call_follower(irsb)));
+			directExits.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
 		/* Emit the target as well, if possible. */
 		if (irsb->next->tag == Iex_Const)
-			callees->set(std::pair<VexRip, unsigned long>(rip, ((IRExprConst *)irsb->next)->con->Ico.U64),
+			callees->set(std::pair<VexRip, VexRip>(rip, VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64)),
 				     true);
 		return;
 	}
 
 	if (irsb->jumpkind != Ijk_NoDecode &&
 	    irsb->next->tag == Iex_Const) {
-		directExits.push_back(VexRip(((IRExprConst *)irsb->next)->con->Ico.U64));
+		directExits.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
 	} else {
 		/* Should really do something more clever here,
 		   possibly based on dynamic analysis. */
@@ -617,29 +617,29 @@ Oracle::loadTagTable(const char *path)
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.loads.insert(VexRip(buf));
+			t.loads.insert(VexRip::invent_vex_rip(buf));
 		}
 		for (int x = 0; x < hdr.nr_stores; x++) {
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.stores.insert(VexRip(buf));
+			t.stores.insert(VexRip::invent_vex_rip(buf));
 		}
 		for (auto it1 = t.stores.begin();
 		     it1 != t.stores.end();
 		     it1++) {
-			if (it1->rip & (1ul << 63))
+			if (it1->unwrap_vexrip() & (1ul << 63))
 				continue;
 			for (auto it2 = t.stores.begin();
 			     it2 != t.stores.end();
 			     it2++) {
-				if (!(it2->rip & (1ul << 63)))
+				if (!(it2->unwrap_vexrip() & (1ul << 63)))
 					aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 			}
 			for (auto it2 = t.loads.begin();
 			     it2 != t.loads.end();
 			     it2++) {
-				if (!(it2->rip & (1ul << 63))) {
+				if (!(it2->unwrap_vexrip() & (1ul << 63))) {
 					unsigned long h = hashRipPair(*it1, *it2);
 					memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
 					h = hashRipPair2(*it1, *it2);
@@ -651,18 +651,18 @@ Oracle::loadTagTable(const char *path)
 		for (auto it1 = t.loads.begin();
 		     it1 != t.loads.end();
 		     it1++) {
-			if (it1->rip & (1ul << 63))
+			if (it1->unwrap_vexrip() & (1ul << 63))
 				continue;
 			for (auto it2 = t.stores.begin();
 			     it2 != t.stores.end();
 			     it2++) {
-				if (!(it2->rip & (1ul << 63)))
+				if (!(it2->unwrap_vexrip() & (1ul << 63)))
 					aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 			}
 			for (auto it2 = t.loads.begin();
 			     it2 != t.loads.end();
 			     it2++) {
-				if (!(it2->rip & (1ul << 63)))
+				if (!(it2->unwrap_vexrip() & (1ul << 63)))
 					aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 			}
 		}
@@ -1005,7 +1005,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		assert(c);
 		for (unsigned i = 0; i < h->nr; i++) {
 			if (c[i] & (1ul << 63))
-				roots.push_back(VexRip(c[i] & ~(1ul << 63)));
+				roots.push_back(VexRip::invent_vex_rip(c[i] & ~(1ul << 63)));
 		}
 		offset += sizeof(unsigned long) * h->nr;
 	}
@@ -1026,11 +1026,11 @@ Oracle::findPossibleJumpTargets(const VexRip &rip, std::vector<VexRip> &output)
 		if (!h)
 			return;
 		offset += sizeof(*h);
-		if (h->rip == rip.rip) {
+		if (h->rip == rip.unwrap_vexrip()) {
 			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
 			assert(c);
 			for (unsigned i = 0; i < h->nr; i++)
-				output.push_back(VexRip(c[i] & ~(1ul << 63)));
+				output.push_back(VexRip::invent_vex_rip(c[i] & ~(1ul << 63)));
 			make_unique(output);
 			return;
 		}
@@ -1043,7 +1043,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &output,
 				 const VexRip &rip)
 {
 	VexRip r = functionHeadForInstruction(rip);
-	if (!r.rip) {
+	if (!r.unwrap_vexrip()) {
 		fprintf(_logfile, "No function for %s\n", rip.name());
 		return;
 	}
@@ -1088,7 +1088,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &output,
 		return;
 	}
 
-	for (auto i = predecessors[rip]; i.rip; i = predecessors[i])
+	for (auto i = predecessors[rip]; i.unwrap_vexrip(); i = predecessors[i])
 		output.push_back(i);
 }
 
@@ -1204,7 +1204,7 @@ extract_oraclerip_column(sqlite3_stmt *stmt, int column, std::vector<VexRip> &ou
 	std::vector<unsigned long> out1;
 	extract_int64_column(stmt, column, out1);
 	for (auto it = out1.begin(); it != out1.end(); it++)
-		out.push_back(VexRip(*it));
+		out.push_back(VexRip::invent_vex_rip(*it));
 }
 
 static void
@@ -1218,7 +1218,7 @@ bind_int64(sqlite3_stmt *stmt, int idx, unsigned long val)
 static void
 bind_oraclerip(sqlite3_stmt *stmt, int idx, const VexRip &rip)
 {
-	bind_int64(stmt, idx, rip.rip);
+	bind_int64(stmt, idx, rip.unwrap_vexrip());
 }
 
 static void
@@ -1366,7 +1366,7 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 
 		IRSB *irsb;
 		try {
-			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip.rip);
+			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip.unwrap_vexrip());
 		} catch (BadMemoryException &e) {
 			irsb = NULL;
 		}
@@ -1379,8 +1379,7 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 			IRStmt *stmt = irsb->stmts[start_of_instruction];
 			assert(stmt->tag == Ist_IMark);
 			unsigned long raw_rip = ((IRStmtIMark *)stmt)->addr;
-			VexRip r(rip);
-			r.rip = raw_rip;
+			VexRip r = VexRip::invent_vex_rip(raw_rip);
 			if (explored.count(r))
 				break;
 
@@ -1392,28 +1391,28 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 			     end_of_instruction++) {
 				stmt = irsb->stmts[end_of_instruction];
 				if (stmt->tag == Ist_Exit)
-					branch.push_back(VexRip(((IRStmtExit *)stmt)->dst->Ico.U64));
+					branch.push_back(VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64));
 			}
 
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
 					if (irsb->next->tag != Iex_Const ||
 					    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
-						fallThrough.push_back(VexRip(extract_call_follower(irsb)));
+						fallThrough.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
 					if (irsb->next->tag == Iex_Const)
-						callees.push_back(VexRip(((IRExprConst *)irsb->next)->con->Ico.U64));
+						callees.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
 					else
 						findPossibleJumpTargets(rip, callees);
 				} else {
 					if (irsb->next->tag == Iex_Const)
-						fallThrough.push_back(VexRip(((IRExprConst *)irsb->next)->con->Ico.U64));
+						fallThrough.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
 					else if (irsb->jumpkind != Ijk_Ret)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
 				stmt = irsb->stmts[end_of_instruction];
 				assert(dynamic_cast<IRStmtIMark *>(stmt));
-				fallThrough.push_back(VexRip(((IRStmtIMark *)stmt)->addr));
+				fallThrough.push_back(VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr));
 			}
 
 			heads.insert(heads.end(), callees.begin(), callees.end());
@@ -1590,7 +1589,7 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 {
 	LivenessSet res;
 
-	IRSB *irsb = as->getIRSBForAddress(-1, rip.rip);
+	IRSB *irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -1605,20 +1604,20 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 		if (irsb->jumpkind == Ijk_Call) {
 			if (irsb->next->tag != Iex_Const ||
 			    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
-				fallThroughRips.push_back(VexRip(extract_call_follower(irsb)));
+				fallThroughRips.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
 			if (irsb->next->tag == Iex_Const)
-				callees.push_back(VexRip(((IRExprConst *)irsb->next)->con->Ico.U64));
+				callees.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
 			else
 				getInstructionCallees(rip, callees, oracle);
 		} else {
 			if (irsb->next->tag == Iex_Const)
-				fallThroughRips.push_back(VexRip(((IRExprConst *)irsb->next)->con->Ico.U64));
+				fallThroughRips.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
 			else
 				getInstructionFallThroughs(rip, fallThroughRips);
 		}
 	} else {
 		assert(dynamic_cast<IRStmtIMark *>(statements[nr_statements]));
-		fallThroughRips.push_back(VexRip(((IRStmtIMark *)statements[nr_statements])->addr));
+		fallThroughRips.push_back(VexRip::invent_vex_rip(((IRStmtIMark *)statements[nr_statements])->addr));
 	}
 
 	for (auto it = fallThroughRips.begin();
@@ -1669,7 +1668,7 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			VexRip _branchRip(((IRStmtExit *)stmt)->dst->Ico.U64);
+			VexRip _branchRip = VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64);
 			res |= liveOnEntry(_branchRip, false);
 			res = irexprUsedValues(res, ((IRStmtExit *)stmt)->guard);
 			break;
@@ -1739,7 +1738,7 @@ Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool
 	/* Try to figure out what this instruction actually does. */
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.rip);
+		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
 	} catch (BadMemoryException e) {
 		return;
 	}
@@ -1810,7 +1809,7 @@ Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool
 				goto impossible;
 			IRExpr *v = IRExpr_Load(t,
 						((IRStmtDirty *)stmt)->details->args[0],
-						ThreadRip::mk(9999, rip.rip));
+						ThreadRip::mk(9999, rip.unwrap_vexrip()));
 			if (rsp)
 				rsp = rewriteRegister(rsp, tmp, v);
 			if (rbp)
@@ -1965,7 +1964,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, Address
 	int nr_statements;
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.rip);
+		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -2055,7 +2054,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, Address
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			VexRip _branchRip(((IRStmtExit *)st)->dst->Ico.U64);
+			VexRip _branchRip = VexRip::invent_vex_rip(((IRStmtExit *)st)->dst->Ico.U64);
 			RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
 			RegisterAliasingConfiguration newExitConfig(bConfig);
 			newExitConfig |= config;
@@ -2314,12 +2313,12 @@ Oracle::Function::registerLivenessCorrect() const
 	if (!stmt)
 		stmt = prepare_statement("SELECT registerLivenessCorrect FROM functionAttribs WHERE functionHead = ?");
 	bind_oraclerip(stmt, 1, rip);
-	std::vector<VexRip> a;
-	extract_oraclerip_column(stmt, 0, a);
+	std::vector<unsigned long> a;
+	extract_int64_column(stmt, 0, a);
 	if (a.size() == 0)
 		return false;
 	assert(a.size() == 1);
-	return !!a[0].rip;
+	return !!a[0];
 }
 
 bool
@@ -2329,12 +2328,12 @@ Oracle::Function::rbpToRspOffsetsCorrect() const
 	if (!stmt)
 		stmt = prepare_statement("SELECT rbpOffsetCorrect FROM functionAttribs WHERE functionHead = ?");
 	bind_oraclerip(stmt, 1, rip);
-	std::vector<VexRip> a;
-	extract_oraclerip_column(stmt, 0, a);
+	std::vector<unsigned long> a;
+	extract_int64_column(stmt, 0, a);
 	if (a.size() == 0)
 		return false;
 	assert(a.size() == 1);
-	return !!a[0].rip;
+	return !!a[0];
 }
 
 bool
@@ -2344,12 +2343,12 @@ Oracle::Function::aliasingConfigCorrect() const
 	if (!stmt)
 		stmt = prepare_statement("SELECT aliasingCorrect FROM functionAttribs WHERE functionHead = ?");
 	bind_oraclerip(stmt, 1, rip);
-	std::vector<VexRip> a;
-	extract_oraclerip_column(stmt, 0, a);
+	std::vector<unsigned long> a;
+	extract_int64_column(stmt, 0, a);
 	if (a.size() == 0)
 		return false;
 	assert(a.size() == 1);
-	return !!a[0].rip;
+	return !!a[0];
 }
 
 void
@@ -2492,7 +2491,7 @@ Oracle::functionHeadForInstruction(const VexRip &rip)
 	std::vector<VexRip> x;
 	extract_oraclerip_column(stmt, 0, x);
 	if (x.size() == 0)
-		return VexRip(0);
+		return VexRip::invent_vex_rip(0);
 	assert(x.size() == 1);
 	return x[0];
 }
@@ -2502,7 +2501,7 @@ getInstructionSize(AddressSpace *as, const VexRip &rip)
 {
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.rip);
+		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
 	} catch (BadMemoryException &e) {
 		return 0;
 	}
@@ -2541,13 +2540,13 @@ Oracle::dominator(const std::set<VexRip> &instrs,
 			     it != instrs.end();
 			     it++)
 				printf("%s in function %s\n", f.name(), functionHeadForInstruction(*it).name());
-			return VexRip(0);
+			return VexRip::invent_vex_rip(0);
 		}
 	}
 
 	if (!have_f) {
 		printf("Eh? can't find function which contains instructions which need to be dominated.\n");
-		return VexRip(0);
+		return VexRip::invent_vex_rip(0);
 	}
 
 	/* Find the dominator chains for each individual instruction,
@@ -2579,7 +2578,7 @@ Oracle::dominator(const std::set<VexRip> &instrs,
 	 * function, unless we timed out. */
 	if (dominators.empty()) {
 		printf("Dominator set empty!\n");
-		return VexRip(0);
+		return VexRip::invent_vex_rip(0);
 	}
 
 	/* Eliminate excessively small instructions. */

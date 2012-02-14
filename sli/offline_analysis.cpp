@@ -295,7 +295,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 {
 	long delta;
 
-	if (!oracle->getRbpToRspDelta(VexRip(sm->origin), &delta)) {
+	if (!oracle->getRbpToRspDelta(VexRip::invent_vex_rip(sm->origin), &delta)) {
 		/* Can't do anything if we don't know the delta */
 		return;
 	}
@@ -372,7 +372,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 {
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
-	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(VexRip(sm->origin)));
+	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(VexRip::invent_vex_rip(sm->origin)));
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -527,23 +527,23 @@ exploreOneFunctionForCallGraph(const VexRip &head,
 		if (TIMEOUT)
 			return NULL;
 
-		if (cge->instructions->test(i.rip)) {
+		if (cge->instructions->test(i.unwrap_vexrip())) {
 			/* Done this instruction already -> move
 			 * on. */
 			continue;
 		}
 		if (i != head && realFunctionHeads.count(i)) {
 			/* This is a tail call. */
-			cge->callees->set(std::pair<unsigned long, unsigned long>(prev.rip, i.rip), true);
+			cge->callees->set(std::pair<VexRip, VexRip>(prev, i), true);
 			continue;
 		}
-		CallGraphEntry *old = instrsToCGEntries->get(i.rip);
+		CallGraphEntry *old = instrsToCGEntries->get(i.unwrap_vexrip());
 		if (old) {
 			assert(old != cge);
 			assert(old->headRip != cge->headRip);
 			if (old->isRealHead) {
 				/* This is a tail call. */
-				cge->callees->set(std::pair<unsigned long, unsigned long>(prev.rip, i.rip), true);
+				cge->callees->set(std::pair<VexRip, VexRip>(prev, i), true);
 				continue;
 			} else {
 				/* We have a branch from the current
@@ -556,17 +556,17 @@ exploreOneFunctionForCallGraph(const VexRip &head,
 			}
 		}
 
-		unsigned long end = i.rip + getInstrLength(as, i);
-		if (end == i.rip) {
+		unsigned long end = i.unwrap_vexrip() + getInstrLength(as, i);
+		if (end == i.unwrap_vexrip()) {
 			/* Valgrind occasionally gets confused and
 			   returns empty instructions.  Treat them as
 			   single-byte ones for these purposes. */
-			end = i.rip + 1;
+			end = i.unwrap_vexrip() + 1;
 		}
 
 		/* Add this instruction to the current function. */
-		cge->instructions->set(i.rip, end);
-		instrsToCGEntries->set(i.rip, end, cge);
+		cge->instructions->set(i.unwrap_vexrip(), end);
+		instrsToCGEntries->set(i.unwrap_vexrip(), end, cge);
 
 		/* Where are we going next? */
 		findInstrSuccessorsAndCallees(as, i, unexploredInstrsThisFunction,
@@ -612,7 +612,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 	if (rips.size() == 1) {
 		CallGraphEntry *cge = new CallGraphEntry(*rips.begin(), 0);
 		cge->isRealHead = true;
-		cge->instructions->set(rips.begin()->rip, rips.begin()->rip + 1);
+		cge->instructions->set(rips.begin()->unwrap_vexrip(), rips.begin()->unwrap_vexrip() + 1);
 
 		*nr_roots = 1;
 		CallGraphEntry **res = (CallGraphEntry **)__LibVEX_Alloc_Ptr_Array(&ir_heap, 1);
@@ -638,7 +638,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 			continue;
 
 		CallGraphEntry *cge;
-		cge = instrsToCGEntries->get(head.rip);
+		cge = instrsToCGEntries->get(head.unwrap_vexrip());
 		if (cge) {
 			/* We already have a function which contains
 			   this instruction, so we're finished. */
@@ -652,7 +652,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 			fprintf(_logfile, "%s failed\n", __func__);
 			return NULL;
 		}
-		assert(instrsToCGEntries->get(head.rip) == cge);
+		assert(instrsToCGEntries->get(head.unwrap_vexrip()) == cge);
 
 		/* Now explore the functions which were called by that
 		 * root. */
@@ -674,7 +674,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 
 			realFunctionHeads.insert(h);
 
-			CallGraphEntry *old = instrsToCGEntries->get(h.rip);
+			CallGraphEntry *old = instrsToCGEntries->get(h.unwrap_vexrip());
 			if (old) {
 				/* Already have a CG node for this
 				   instruction.  What kind of node? */
@@ -722,7 +722,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 			     it != cge->callees->end();
 			     it++)
 				unexploredRealHeads.insert(std::pair<VexRip, int>(it.key().second, depth_h + 1));
-			assert(instrsToCGEntries->get(h.rip) == cge);
+			assert(instrsToCGEntries->get(h.unwrap_vexrip()) == cge);
 		}
 	}
 
@@ -744,7 +744,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 	for (auto it = rips.begin();
 	     it != rips.end();
 	     it++) {
-		CallGraphEntry *i = instrsToCGEntries->get(it->rip);
+		CallGraphEntry *i = instrsToCGEntries->get(it->unwrap_vexrip());
 		if (!i) {
 			fprintf(_logfile, "Failed to build CG entries for every instruction in %s\n", __func__);
 			return NULL;
@@ -766,7 +766,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 			for (auto it2 = (*it)->callees->begin();
 			     it2 != (*it)->callees->end();
 			     it2++) {
-				CallGraphEntry *callee = instrsToCGEntries->get(it2.key().second.rip);
+				CallGraphEntry *callee = instrsToCGEntries->get(it2.key().second.unwrap_vexrip());
 				if (interesting.count(callee)) {
 					/* Uninteresting function
 					   calling an interesting ->
@@ -792,7 +792,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 			for (auto it2 = cge->callees->begin();
 			     it2 != cge->callees->end();
 				) {
-				if (!interesting.count(instrsToCGEntries->get(it2.key().second.rip))) {
+				if (!interesting.count(instrsToCGEntries->get(it2.key().second.unwrap_vexrip()))) {
 					it2 = cge->callees->erase(it2);
 				} else {
 					it2++;
@@ -818,7 +818,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<VexRip> &rips,
 		for (auto it2 = (*it)->callees->begin();
 		     it2 != (*it)->callees->end();
 		     it2++) {
-			CallGraphEntry *cge = instrsToCGEntries->get(it2.key().second.rip);
+			CallGraphEntry *cge = instrsToCGEntries->get(it2.key().second.unwrap_vexrip());
 			assert(cge != NULL);
 			(*it)->calls->set(it2.key().first, cge);
 		}
@@ -953,13 +953,13 @@ public:
 static VexRip
 wrappedRipToRip(const StackRip &r)
 {
-	return VexRip(r.rip);
+	return VexRip::invent_vex_rip(r.rip);
 }
 
 static bool
 instructionIsInteresting(const InstructionSet &i, const StackRip &r)
 {
-	return i.rips.count(VexRip(r.rip)) != 0;
+	return i.rips.count(VexRip::invent_vex_rip(r.rip)) != 0;
 }
 
 static bool
@@ -1019,7 +1019,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	std::map<StackRip, std::pair<CFGNode<StackRip> *, int> > builtSoFar;
 	std::queue<std::pair<StackRip, int> > needed;
 
-	needed.push(std::pair<StackRip, int>(StackRip(root->headRip.rip), 100));
+	needed.push(std::pair<StackRip, int>(StackRip(root->headRip.unwrap_vexrip()), 100));
 	while (!needed.empty()) {
 		StackRip &r(needed.front().first);
 		int depth = needed.front().second;
@@ -1059,11 +1059,11 @@ buildCFGForCallGraph(AddressSpace *as,
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
 				unsigned long follower = extract_call_follower(irsb);
-				if (ripToCFGNode->get(r.rip)->calls->hasKey(VexRip(r.rip)) &&
+				if (ripToCFGNode->get(r.rip)->calls->hasKey(VexRip::invent_vex_rip(r.rip)) &&
 				    !r.on_stack(follower)) {
 					/* We should inline this call. */
 					work->fallThroughRip = r.call(
-						ripToCFGNode->get(r.rip)->calls->get(VexRip(r.rip))->headRip.rip,
+						ripToCFGNode->get(r.rip)->calls->get(VexRip::invent_vex_rip(r.rip))->headRip.unwrap_vexrip(),
 						follower);
 				} else {
 					/* Skip over this call. */
@@ -1101,7 +1101,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	}
 
 	/* All done */
-	CFGNode<StackRip> *res = builtSoFar[StackRip(root->headRip.rip)].first;
+	CFGNode<StackRip> *res = builtSoFar[StackRip(root->headRip.unwrap_vexrip())].first;
 	assert(res != NULL);
 	return res;
 }
@@ -1213,7 +1213,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	__set_profiling(expandStateMachineToFunctionHead);
 	assert(sm->freeVariables.empty());
 	std::vector<VexRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, VexRip(sm->origin));
+	oracle->findPreviousInstructions(previousInstructions, VexRip::invent_vex_rip(sm->origin));
 	if (previousInstructions.size() == 0) {
 		/* Lacking any better ideas... */
 		fprintf(_logfile, "cannot expand store machine...\n");
@@ -1228,7 +1228,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	ii->set(sm->origin, sm->root);
 
 	InstructionSet interesting;
-	interesting.rips.insert(VexRip(sm->origin));
+	interesting.rips.insert(VexRip::invent_vex_rip(sm->origin));
 
 	std::set<unsigned long> terminalFunctions;
 
@@ -1241,7 +1241,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 		buildCFGForRipSet(oracle->ms->addressSpace,
-				  it->rip,
+				  it->unwrap_vexrip(),
 				  terminalFunctions,
 				  oracle,
 				  10 * previousInstructions.size()));
@@ -1426,7 +1426,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 		terminalFunctions.insert(0x757bf0);
 		VexPtr<CFGNode<unsigned long>, &ir_heap> cfg(
 			buildCFGForRipSet(oracle->ms->addressSpace,
-					  it->rip,
+					  it->unwrap_vexrip(),
 					  terminalFunctions,
 					  oracle,
 					  100));
@@ -1656,7 +1656,7 @@ buildCFGForRipSet(AddressSpace *as,
 				if (irsb->next->tag == Iex_Const) {
 					if (terminalFunctions.count(((IRExprConst *)irsb->next)->con->Ico.U64))
 						work->fallThroughRip = ((IRExprConst *)irsb->next)->con->Ico.U64;
-					else if (!oracle->functionCanReturn(VexRip(((IRExprConst *)irsb->next)->con->Ico.U64)))
+					else if (!oracle->functionCanReturn(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64)))
 						work->fallThroughRip = 0;
 				}
 			} else if (irsb->jumpkind == Ijk_Ret) {
@@ -1782,7 +1782,7 @@ CFGtoCrashReason(unsigned tid,
 		{}
 		IRSB *operator()(t rip) {
 			try {
-				return as->getIRSBForAddress(tid, wrappedRipToRip(rip).rip);
+				return as->getIRSBForAddress(tid, wrappedRipToRip(rip).unwrap_vexrip());
 			} catch (BadMemoryException e) {
 				return NULL;
 			}
@@ -1840,7 +1840,7 @@ CFGtoCrashReason(unsigned tid,
 				if (branchTarget) {
 					StateMachineBifurcate *smb =
 						new StateMachineBifurcate(
-							rip.rip.rip,
+							rip.rip.unwrap_vexrip(),
 							((IRStmtExit *)stmt)->guard,
 							new StateMachineEdge(NULL),
 							edge);
@@ -1867,7 +1867,7 @@ CFGtoCrashReason(unsigned tid,
 				args[0] = NULL;
 				r = IRExpr_ClientCall(0, site, args);
 			} else if (irsb->next->tag == Iex_Const) {
-				VexRip called_rip(((IRExprConst *)irsb->next)->con->Ico.U64);
+				VexRip called_rip = VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64);
 				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
 
 				/* We only consider arguments in registers.  This is
@@ -1891,7 +1891,7 @@ CFGtoCrashReason(unsigned tid,
 					if (live.isLive(argument_registers[i]))
 						args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread, 0);
 				args[nr_args] = NULL;
-				r = IRExpr_ClientCall(called_rip.rip, site, args);
+				r = IRExpr_ClientCall(called_rip.unwrap_vexrip(), site, args);
 			} else {
 				r = IRExpr_ClientCallFailed(irsb->next);
 			}
@@ -1910,7 +1910,7 @@ CFGtoCrashReason(unsigned tid,
 				}
 			}
 
-			StateMachineProxy *smp = new StateMachineProxy(site.rip.rip, (StateMachineState *)NULL);
+			StateMachineProxy *smp = new StateMachineProxy(site.rip.unwrap_vexrip(), (StateMachineState *)NULL);
 			assert(smp->target);
 			if (cfg->fallThrough)
 				state.addReloc(&smp->target->target, cfg->fallThrough);
@@ -1974,7 +1974,7 @@ CFGtoCrashReason(unsigned tid,
 				if (!edge)
 					return NULL;
 			}
-			return new StateMachineProxy(rip.rip.rip, edge);
+			return new StateMachineProxy(rip.rip.unwrap_vexrip(), edge);
 		}
 	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle);
 
@@ -2002,12 +2002,12 @@ CFGtoCrashReason(unsigned tid,
 	}
 
 	FreeVariableMap fv;
-	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip.rip, fv, tid));
+	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip.unwrap_vexrip(), fv, tid));
 	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, opt, oracle, false, token);
 	if (crashReasons)
-		crashReasons->set(original_rip.rip, sm->root);
+		crashReasons->set(original_rip.unwrap_vexrip(), sm->root);
 	sm = convertToSSA(sm);
 	if (TIMEOUT)
 		return NULL;

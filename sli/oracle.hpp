@@ -243,14 +243,14 @@ public:
 private:
 	static const unsigned nr_memory_filter_words = 10267;
 	static unsigned long hashRipPair(VexRip a, VexRip b) {
-		unsigned long h = a.rip + b.rip * 202693;
+		unsigned long h = a.unwrap_vexrip() + b.unwrap_vexrip() * 202693;
 		while (h >= (nr_memory_filter_words * 64))
 			h = (h % (nr_memory_filter_words * 64)) ^ (h / (nr_memory_filter_words * 64));
 		assert(h / 64 < nr_memory_filter_words);
 		return h;
 	}
 	static unsigned long hashRipPair2(VexRip a, VexRip b) {
-		unsigned long h = a.rip * 706133 + b.rip * 511669;
+		unsigned long h = a.unwrap_vexrip() * 706133 + b.unwrap_vexrip() * 511669;
 		while (h >= (nr_memory_filter_words * 64))
 			h = (h % (nr_memory_filter_words * 64)) ^ (h / (nr_memory_filter_words * 64));
 		assert(h / 64 < nr_memory_filter_words);

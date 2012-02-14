@@ -239,7 +239,7 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 	if (h == 0xe8) {
 		/* That looks like a call. */
 		int delta = as->fetch<int>(ra - 4, NULL);
-		return VexRip(ra + delta);
+		return VexRip::invent_vex_rip(ra + delta);
 	}
 
 	fail("findFunctionHead\n");
@@ -275,24 +275,24 @@ findDominators(const VexRip &functionHead,
 		remainingToExplore.pop_back();
 		if (instrs.count(rip))
 			continue;
-		IRSB *irsb = as->getIRSBForAddress(1, rip.rip);
+		IRSB *irsb = as->getIRSBForAddress(1, rip.unwrap_vexrip());
 		assert(irsb->stmts[0]->tag == Ist_IMark);
-		assert(((IRStmtIMark *)irsb->stmts[0])->addr == rip.rip);
+		assert(((IRStmtIMark *)irsb->stmts[0])->addr == rip.unwrap_vexrip());
 		for (int idx = 1; idx < irsb->stmts_used; idx++) {
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
-				successors[rip].insert(VexRip(((IRStmtIMark *)stmt)->addr));
-				predecessors[VexRip(((IRStmtIMark *)stmt)->addr)].insert(rip);
+				successors[rip].insert(VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr));
+				predecessors[VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr)].insert(rip);
 				instrs.insert(rip);
-				rip = VexRip(((IRStmtIMark *)stmt)->addr);
+				rip = VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr);
 				if (instrs.count(rip))
 					goto done_this_entry;
 				break;
 			case Ist_Exit:
-				successors[rip].insert(VexRip(((IRStmtExit *)stmt)->dst->Ico.U64));
-				predecessors[VexRip(((IRStmtExit *)stmt)->dst->Ico.U64)].insert(rip);
-				remainingToExplore.push_back(VexRip(((IRStmtExit *)stmt)->dst->Ico.U64));
+				successors[rip].insert(VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64));
+				predecessors[VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64)].insert(rip);
+				remainingToExplore.push_back(VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64));
 				break;
 			default:
 				break;
@@ -308,9 +308,9 @@ findDominators(const VexRip &functionHead,
 			r = ((IRExprConst *)irsb->next)->con->Ico.U64;
 		}
 		if (r) {
-			successors[rip].insert(VexRip(r));
-			predecessors[VexRip(r)].insert(rip);
-			remainingToExplore.push_back(VexRip(r));
+			successors[rip].insert(VexRip::invent_vex_rip(r));
+			predecessors[VexRip::invent_vex_rip(r)].insert(rip);
+			remainingToExplore.push_back(VexRip::invent_vex_rip(r));
 		}
 	done_this_entry:
 		;
@@ -500,14 +500,14 @@ getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators, st
 	VexRip head(findFunctionHead(&thr->regs, ms->addressSpace));
 	fheads.push_back(head);
 	compensateForBadVCall(thr, ms->addressSpace);
-	findDominators(head, VexRip(thr->regs.rip()), ms->addressSpace, dominators);
+	findDominators(head, VexRip::invent_vex_rip(thr->regs.rip()), ms->addressSpace, dominators);
 
 	RegisterSet rs = thr->regs;
 	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
 	try {
 		head = findFunctionHead(&rs, ms->addressSpace);
 		fheads.push_back(head);
-		findDominators(head, VexRip(rs.rip()), ms->addressSpace, dominators);
+		findDominators(head, VexRip::invent_vex_rip(rs.rip()), ms->addressSpace, dominators);
 	} catch (BadMemoryException &e) {
 		/* Just give up: if we can't find the caller's caller,
 		 * we just won't bother backtracking that far. */

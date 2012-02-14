@@ -67,7 +67,7 @@ main(int argc, char *argv[])
 	probeMachine = buildProbeMachine(previousInstructions,
 					 ii,
 					 oracle,
-					 VexRip(thr->regs.rip()),
+					 VexRip::invent_vex_rip(thr->regs.rip()),
 					 thr->tid,
 					 ALLOW_GC);
 	VexPtr<CrashSummary, &ir_heap> summary;

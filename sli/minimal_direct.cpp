@@ -96,17 +96,17 @@ consider_rip(const VexRip &my_rip,
 	LibVEX_maybe_gc(token);
 
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
-	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, my_rip.rip, thr));
+	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, my_rip.unwrap_vexrip(), thr));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
 	}
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(my_rip.rip, new StateMachineProxy(my_rip.rip, proximal));
+	ii->set(my_rip.unwrap_vexrip(), new StateMachineProxy(my_rip.unwrap_vexrip(), proximal));
 
 	std::vector<VexRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, VexRip(my_rip));
+	oracle->findPreviousInstructions(previousInstructions, my_rip);
 
 	struct itimerval itv;
 	struct timeval start;
@@ -180,7 +180,7 @@ main(int argc, char *argv[])
 	LibVEX_gc(ALLOW_GC);
 
 	if (argc == 5) {
-		consider_rip(VexRip(strtoul(argv[4], NULL, 16)), ms, thr, oracle, df, NULL, ALLOW_GC);
+		consider_rip(VexRip::invent_vex_rip(strtoul(argv[4], NULL, 16)), ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
 		FILE *timings = fopen("timings.txt", "w");
 		std::vector<VexRip> targets;

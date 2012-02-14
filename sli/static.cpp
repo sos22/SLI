@@ -76,7 +76,7 @@ public:
 		return r;
 	}
 	operator VexRip() const {
-		return VexRip((unsigned long)*this);
+		return VexRip::invent_vex_rip(*this);
 	}
 	void visit(HeapVisitor &hv) { hv(content); }
 	NAMED_CLASS

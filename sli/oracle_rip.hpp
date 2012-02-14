@@ -25,7 +25,7 @@ public:
 
 	ThreadVexRip() {}
 	operator ThreadRip() const {
-		return ThreadRip::mk(thread, rip.rip);
+		return ThreadRip::mk(thread, rip.unwrap_vexrip());
 	}
 };
 
