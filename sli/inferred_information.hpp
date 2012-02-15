@@ -92,7 +92,7 @@ public:
 				GarbageCollectionToken token) = 0;
 };
 
-typedef gc_heap_map<unsigned long, StateMachineState, &ir_heap>::type InferredInformation;
+typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
 StateMachine *buildProbeMachine(std::vector<VexRip> &previousInstructions,
 				VexPtr<InferredInformation, &ir_heap> &ii,
 				VexPtr<Oracle> &oracle,

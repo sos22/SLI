@@ -294,7 +294,7 @@ public:
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
 				   std::set<VexRip> &out);
 	void clusterRips(const std::set<VexRip> &inputRips,
-			 std::set<InstructionSet> &outputClusters);
+			 std::set<InstructionSet > &outputClusters);
 
 	/* True if the access doesn't appear anywhere in the tag
 	   table.  This usually indicates that the relevant

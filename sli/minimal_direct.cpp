@@ -103,7 +103,7 @@ consider_rip(const VexRip &my_rip,
 	}
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(my_rip.unwrap_vexrip(), new StateMachineProxy(my_rip.unwrap_vexrip(), proximal));
+	ii->set(my_rip, new StateMachineProxy(my_rip.unwrap_vexrip(), proximal));
 
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, my_rip);

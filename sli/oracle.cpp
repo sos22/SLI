@@ -485,7 +485,7 @@ findSuccessors(AddressSpace *as, VexRip rip, std::vector<VexRip> &out)
  * the relevant output sets. */
 void
 Oracle::clusterRips(const std::set<VexRip> &inputRips,
-		    std::set<InstructionSet> &outputClusters)
+		    std::set<InstructionSet > &outputClusters)
 {
 	__set_profiling(clusterRips);
 	union_find<VexRip> results;
