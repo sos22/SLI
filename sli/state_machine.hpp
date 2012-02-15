@@ -220,23 +220,23 @@ public:
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
-	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid)
+	StateMachine(StateMachineState *_root, const VexRip &_origin, unsigned _tid)
 		: root(_root), origin(_origin), tid(_tid)
 	{
 	}
 public:
 	StateMachineState *root;
-	unsigned long origin;
+	VexRip origin;
 	FreeVariableMap freeVariables;
 	unsigned tid;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, unsigned long _origin, const FreeVariableMap &fv, unsigned _tid)
+	StateMachine(StateMachineState *_root, const VexRip &_origin, const FreeVariableMap &fv, unsigned _tid)
 		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
 	{
 	}
-	StateMachine(StateMachine *parent, unsigned long _origin, StateMachineState *new_root)
+	StateMachine(StateMachine *parent, const VexRip &_origin, StateMachineState *new_root)
 		: root(new_root), origin(_origin), freeVariables(parent->freeVariables),
 		  tid(parent->tid)
 	{}
@@ -270,13 +270,13 @@ class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 	void assertAcyclic(std::vector<const StateMachineState *> &,
 			   std::set<const StateMachineState *> &) const;
 protected:
-	StateMachineState(unsigned long _origin) : have_hash(false), origin(_origin) {}
+	StateMachineState(const VexRip &_origin) : have_hash(false), origin(_origin) {}
 	virtual unsigned long _hashval() const = 0;
 public:
-	unsigned long origin; /* RIP we were looking at when we
-			       * constructed the thing.  Not very
-			       * meaningful, but occasionally provides
-			       * useful hints for debugging.*/
+	VexRip origin; /* RIP we were looking at when we constructed
+			* the thing.  Not very meaningful, but
+			* occasionally provides useful hints for
+			* debugging.*/
 
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
@@ -472,7 +472,7 @@ public:
 class StateMachineTerminal : public StateMachineState {
 protected:
 	virtual void prettyPrint(FILE *f) const = 0;
-	StateMachineTerminal(unsigned long rip) : StateMachineState(rip) {}
+	StateMachineTerminal(const VexRip &rip) : StateMachineState(rip) {}
 public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
@@ -492,7 +492,7 @@ public:
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
-	StateMachineUnreached() : StateMachineTerminal(0) {}
+	StateMachineUnreached() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x72; }
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
@@ -509,7 +509,7 @@ public:
 };
 
 class StateMachineCrash : public StateMachineTerminal {
-	StateMachineCrash() : StateMachineTerminal(0) {}
+	StateMachineCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x73; }
 public:
@@ -526,7 +526,7 @@ public:
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
-	StateMachineNoCrash() : StateMachineTerminal(0) {}
+	StateMachineNoCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x74; }
 public:
@@ -550,19 +550,19 @@ class StateMachineProxy : public StateMachineState {
 public:
 	StateMachineEdge *target;
 
-	StateMachineProxy(unsigned long origin, StateMachineState *t)
+	StateMachineProxy(const VexRip &origin, StateMachineState *t)
 		: StateMachineState(origin),
 		  target(new StateMachineEdge(t))		  
 	{
 	}
-	StateMachineProxy(unsigned long origin, StateMachineEdge *t)
+	StateMachineProxy(const VexRip &origin, StateMachineEdge *t)
 		: StateMachineState(origin),
 		  target(t)
 	{
 	}
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
 	{
-		fprintf(f, "{%lx:", origin);
+		fprintf(f, "{%s:", origin.name());
 		if (target)
 			target->prettyPrint(f, "\n  ", labels);
 		else
@@ -614,7 +614,7 @@ class StateMachineBifurcate : public StateMachineState {
 			condition->hashval() * 3;
 	}
 public:
-	StateMachineBifurcate(unsigned long origin,
+	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
 			      StateMachineEdge *t,
 			      StateMachineEdge *f)
@@ -624,7 +624,7 @@ public:
 		  falseTarget(f)
 	{
 	}	
-	StateMachineBifurcate(unsigned long origin,
+	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
 			      StateMachineState *t,
 			      StateMachineState *f)
@@ -642,7 +642,7 @@ public:
 	StateMachineEdge *falseTarget;
 
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
-		fprintf(f, "%lx: if (", origin);
+		fprintf(f, "%s: if (", origin.name());
 		ppIRExpr(condition, f);
 		fprintf(f, ")\n  then {\n\t");
 		if (trueTarget)
@@ -738,11 +738,11 @@ class StateMachineStub : public StateMachineTerminal {
 public:
 	IRExpr *target;
 
-	StateMachineStub(unsigned long origin, IRExpr *t) : StateMachineTerminal(origin), target(t) {}
+	StateMachineStub(const VexRip &origin, IRExpr *t) : StateMachineTerminal(origin), target(t) {}
 
 	void prettyPrint(FILE *f) const
 	{
-		fprintf(f, "<%lx: jmp ", origin);
+		fprintf(f, "<%s: jmp ", origin.name());
 		ppIRExpr(target, f);
 		fprintf(f, ">");
 	}

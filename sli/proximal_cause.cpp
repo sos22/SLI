@@ -42,7 +42,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 		*idx = irsb->stmts_used;
 		return new StateMachineEdge(
 			new StateMachineBifurcate(
-				rip,
+				VexRip::invent_vex_rip(rip),
 				IRExpr_Unop(
 					Iop_BadPtr,
 					irsb->next),
@@ -115,7 +115,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 			*idx = x;
 			return new StateMachineEdge(
 				new StateMachineBifurcate(
-					rip,
+					VexRip::invent_vex_rip(rip),
 					IRExpr_Unop(
 						Iop_BadPtr,
 						addr),
@@ -186,11 +186,11 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadVexRip site)
 	case Ist_Exit:
 		sm = new StateMachineEdge(
 			new StateMachineBifurcate(
-				site.rip.unwrap_vexrip(),
+				site.rip,
 				((IRStmtExit *)stmt)->guard,
 				new StateMachineEdge(
 					new StateMachineStub(
-						site.rip.unwrap_vexrip(),
+						site.rip,
 						IRExpr_Const(((IRStmtExit *)stmt)->dst))),
 				sm));
 		break;

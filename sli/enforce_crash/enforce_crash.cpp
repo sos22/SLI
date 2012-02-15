@@ -314,7 +314,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	fprintf(_logfile, "\n");
 
 	std::map<unsigned, ThreadRip> roots;
-	roots[summary->loadMachine->tid] = ThreadRip::mk(summary->loadMachine->tid, summary->loadMachine->origin);
+	roots[summary->loadMachine->tid] = ThreadRip::mk(summary->loadMachine->tid, summary->loadMachine->origin.unwrap_vexrip());
 	
 	FreeVariableMap m(summary->loadMachine->freeVariables);
 	zapBindersAndFreeVariables(m, summary->loadMachine);
@@ -324,7 +324,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		m.merge(n);
 		roots[summary->storeMachines[x]->machine->tid] =
 			ThreadRip::mk(summary->storeMachines[x]->machine->tid,
-				      summary->storeMachines[x]->machine->origin);
+				      summary->storeMachines[x]->machine->origin.unwrap_vexrip());
 	}
 
 	requirement = internIRExpr(zapFreeVariables(requirement, m));

@@ -378,7 +378,7 @@ printStateMachine(const StateMachineState *sm, FILE *f)
 void
 printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
-	fprintf(f, "Machine for %lx:%d\n", sm->origin, sm->tid);
+	fprintf(f, "Machine for %s:%d\n", sm->origin.name(), sm->tid);
 	printStateMachine(sm->root, f, labels);
 	sm->freeVariables.print(f);
 }
@@ -553,11 +553,11 @@ parseStateMachineState(StateMachineState **out,
 		*out = StateMachineNoCrash::get();
 		return true;
 	}
-	unsigned long origin;
+	VexRip origin;
 	IRExpr *target;
 	const char *str2;
 	if (parseThisChar('<', str, &str2) &&
-	    parseHexUlong(&origin, str2, &str2) &&
+	    parseVexRip(&origin, str2, &str2) &&
 	    parseIRExpr(&target, str2, &str2) &&
 	    parseThisChar('>', str2, suffix)) {
 		*out = new StateMachineStub(origin, target);
@@ -565,7 +565,7 @@ parseStateMachineState(StateMachineState **out,
 	}
 	StateMachineEdge *target1;
 	if (parseThisChar('{', str, &str2) &&
-	    parseHexUlong(&origin, str2, &str2) &&
+	    parseVexRip(&origin, str2, &str2) &&
 	    parseThisChar(':', str2, &str2) &&
 	    parseStateMachineEdge(&target1, "\n  ", str2, &str2) &&
 	    parseThisChar('}', str2, suffix)) {
@@ -574,7 +574,7 @@ parseStateMachineState(StateMachineState **out,
 	}
 	IRExpr *condition;
 	StateMachineEdge *target2;
-	if (parseHexUlong(&origin, str, &str2) &&
+	if (parseVexRip(&origin, str, &str2) &&
 	    parseThisString(": if (", str2, &str2) &&
 	    parseIRExpr(&condition, str2, &str2) &&
 	    parseThisString(")\n  then {\n\t", str2, &str2) &&
@@ -650,10 +650,10 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 bool
 StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 {
-	unsigned long origin;
+	VexRip origin;
 	int tid;
 	if (!parseThisString("Machine for ", str, &str) ||
-	    !parseHexUlong(&origin, str, &str) ||
+	    !parseVexRip(&origin, str, &str) ||
 	    !parseThisChar(':', str, &str) ||
 	    !parseDecimalInt(&tid, str, &str) ||
 	    !parseThisChar('\n', str, &str))

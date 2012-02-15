@@ -56,7 +56,8 @@ main(int argc, char *argv[])
 		errx(1, "cannot get proximal cause of crash");
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(VexRip::invent_vex_rip(thr->regs.rip()), new StateMachineProxy(thr->regs.rip(), proximal.get()));
+	ii->set(VexRip::invent_vex_rip(thr->regs.rip()),
+		new StateMachineProxy(VexRip::invent_vex_rip(thr->regs.rip()), proximal.get()));
 
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);

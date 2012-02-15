@@ -295,7 +295,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 {
 	long delta;
 
-	if (!oracle->getRbpToRspDelta(VexRip::invent_vex_rip(sm->origin), &delta)) {
+	if (!oracle->getRbpToRspDelta(sm->origin, &delta)) {
 		/* Can't do anything if we don't know the delta */
 		return;
 	}
@@ -372,7 +372,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 {
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
-	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(VexRip::invent_vex_rip(sm->origin)));
+	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(sm->origin));
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -1219,7 +1219,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	__set_profiling(expandStateMachineToFunctionHead);
 	assert(sm->freeVariables.empty());
 	std::vector<VexRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, VexRip::invent_vex_rip(sm->origin));
+	oracle->findPreviousInstructions(previousInstructions, sm->origin);
 	if (previousInstructions.size() == 0) {
 		/* Lacking any better ideas... */
 		fprintf(_logfile, "cannot expand store machine...\n");
@@ -1231,10 +1231,10 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	if (TIMEOUT)
 		return sm;
 
-	ii->set(VexRip::invent_vex_rip(sm->origin), sm->root);
+	ii->set(sm->origin, sm->root);
 
 	InstructionSet interesting;
-	interesting.rips.insert(VexRip::invent_vex_rip(sm->origin));
+	interesting.rips.insert(sm->origin);
 
 	std::set<VexRip> terminalFunctions;
 
@@ -1846,7 +1846,7 @@ CFGtoCrashReason(unsigned tid,
 				if (branchTarget) {
 					StateMachineBifurcate *smb =
 						new StateMachineBifurcate(
-							rip.rip.unwrap_vexrip(),
+							rip.rip,
 							((IRStmtExit *)stmt)->guard,
 							new StateMachineEdge(NULL),
 							edge);
@@ -1916,7 +1916,7 @@ CFGtoCrashReason(unsigned tid,
 				}
 			}
 
-			StateMachineProxy *smp = new StateMachineProxy(site.rip.unwrap_vexrip(), (StateMachineState *)NULL);
+			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
 			assert(smp->target);
 			if (cfg->fallThrough)
 				state.addReloc(&smp->target->target, cfg->fallThrough);
@@ -1980,7 +1980,7 @@ CFGtoCrashReason(unsigned tid,
 				if (!edge)
 					return NULL;
 			}
-			return new StateMachineProxy(rip.rip.unwrap_vexrip(), edge);
+			return new StateMachineProxy(rip.rip, edge);
 		}
 	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle);
 
@@ -2008,7 +2008,7 @@ CFGtoCrashReason(unsigned tid,
 	}
 
 	FreeVariableMap fv;
-	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip.unwrap_vexrip(), fv, tid));
+	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip, fv, tid));
 	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, opt, oracle, false, token);
