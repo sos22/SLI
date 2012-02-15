@@ -2491,7 +2491,7 @@ Oracle::functionHeadForInstruction(const VexRip &rip)
 	std::vector<VexRip> x;
 	extract_oraclerip_column(stmt, 0, x);
 	if (x.size() == 0)
-		return VexRip::invent_vex_rip(0);
+		return VexRip();
 	assert(x.size() == 1);
 	return x[0];
 }
@@ -2540,13 +2540,13 @@ Oracle::dominator(const std::set<VexRip> &instrs,
 			     it != instrs.end();
 			     it++)
 				printf("%s in function %s\n", f.name(), functionHeadForInstruction(*it).name());
-			return VexRip::invent_vex_rip(0);
+			return VexRip();
 		}
 	}
 
 	if (!have_f) {
 		printf("Eh? can't find function which contains instructions which need to be dominated.\n");
-		return VexRip::invent_vex_rip(0);
+		return VexRip();
 	}
 
 	/* Find the dominator chains for each individual instruction,
@@ -2578,7 +2578,7 @@ Oracle::dominator(const std::set<VexRip> &instrs,
 	 * function, unless we timed out. */
 	if (dominators.empty()) {
 		printf("Dominator set empty!\n");
-		return VexRip::invent_vex_rip(0);
+		return VexRip();
 	}
 
 	/* Eliminate excessively small instructions. */
