@@ -22,9 +22,10 @@
 class VexRip : public Named {
 	char *mkName() const { return my_asprintf("%lx", rip); }
 	explicit VexRip(unsigned long _rip)
-		: rip(_rip)
+		: rip(_rip), valid(true)
 	{}
 	unsigned long rip;
+	bool valid;
 	friend bool parseVexRip(VexRip *out, const char *str, const char **suffix);
 public:
 
@@ -42,11 +43,15 @@ public:
 		return rip;
 	}
 
+	bool isValid() const {
+		return valid;
+	}
+
 	static VexRip invent_vex_rip(unsigned long rip) {
 		return VexRip(rip);
 	}
 
-	VexRip() {}
+	VexRip() : valid(false) {}
 };
 
 bool parseVexRip(VexRip *out, const char *str, const char **suffix);

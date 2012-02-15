@@ -40,7 +40,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
 	/* 5 bytes is the size of a 32-bit relative jump. */
 	ThreadVexRip root(summary->loadMachine->tid, oracle->dominator(neededInstructions, as, 5));
-	if (!root.rip.unwrap_vexrip()) {
+	if (!root.rip.isValid()) {
 		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
 		return NULL;
 	}
@@ -61,7 +61,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 		std::set<VexRip> instrs;
 		(*it)->machine->root->enumerateMentionedMemoryAccesses(instrs);
 		ThreadVexRip r((*it)->machine->tid, oracle->dominator(instrs, as, 5));
-		if (!r.rip.unwrap_vexrip()) {
+		if (!r.rip.isValid()) {
 			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
 			return NULL;
 		}

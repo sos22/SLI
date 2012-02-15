@@ -409,7 +409,7 @@ public:
 				return x;
 			assert(content.count(e->parent) != 0);
 			entry *pe = &content[e->parent];
-			if (pe->parent.unwrap_vexrip())
+			if (pe->parent.isValid())
 				e->parent = pe->parent;
 			x = e->parent;
 		}
@@ -1043,7 +1043,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &output,
 				 const VexRip &rip)
 {
 	VexRip r = functionHeadForInstruction(rip);
-	if (!r.unwrap_vexrip()) {
+	if (!r.isValid()) {
 		fprintf(_logfile, "No function for %s\n", rip.name());
 		return;
 	}
@@ -1088,7 +1088,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &output,
 		return;
 	}
 
-	for (auto i = predecessors[rip]; i.unwrap_vexrip(); i = predecessors[i])
+	for (auto i = predecessors[rip]; i.isValid(); i = predecessors[i])
 		output.push_back(i);
 }
 

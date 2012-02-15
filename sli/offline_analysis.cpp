@@ -1673,9 +1673,9 @@ buildCFGForRipSet(AddressSpace *as,
 					work->fallThroughRip = VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64);
 			}
 		}
-		if (work->fallThroughRip.unwrap_vexrip())
+		if (work->fallThroughRip.isValid())
 			needed.push(std::pair<unsigned, VexRip>(depth - 1, work->fallThroughRip));
-		if (work->branchRip.unwrap_vexrip())
+		if (work->branchRip.isValid())
 			needed.push(std::pair<unsigned, VexRip>(depth - 1, work->branchRip));
 		builtSoFar[rip] = std::pair<CFGNode<VexRip> *, unsigned>(work, depth);
 	}
