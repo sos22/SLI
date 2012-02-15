@@ -18,18 +18,6 @@
 #include "map.h"
 #include "ring_buffer.h"
 
-static inline char *my_asprintf(const char *fmt, ...)
-{
-	va_list args;
-	char *r;
-	va_start(args, fmt);
-	int x = vasprintf(&r, fmt, args);
-	(void)x;
-	va_end(args);
-	return r;
-}
-static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
-
 FILE *fopenf(const char *mode, const char *fmt, ...) __attribute__((__format__ (__printf__, 2, 3)));
 
 char *readfile(int fd);

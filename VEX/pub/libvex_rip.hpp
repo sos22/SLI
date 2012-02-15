@@ -1,6 +1,8 @@
 #ifndef LIBVEX_RIP_HPP__
 #define LIBVEX_RIP_HPP__
 
+#include "libvex_alloc.h"
+
 #define mk_ordering_operators(type)				\
 	bool operator==(const type &other) const {		\
 		return !(*this < other ||			\
