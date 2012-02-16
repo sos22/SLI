@@ -99,5 +99,16 @@ bool parseThreadRip(ThreadRip *out, const char *str, const char **suffix)
 
 bool parseVexRip(VexRip *out, const char *str, const char **suffix)
 {
-  return parseHexUlong(&out->rip, str, suffix);
+  if (!parseThisChar('{', str, &str))
+    return false;
+  out->stack.clear();
+  while (1) {
+    if (parseThisChar('}', str, suffix))
+      return true;
+    unsigned long v;
+    if (!parseHexUlong(&v, str, &str))
+      return false;
+    out->stack.push_back(v);
+    parseThisString(", ", str, &str);
+  }
 }

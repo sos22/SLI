@@ -13758,10 +13758,12 @@ DisResult disInstr_AMD64_WRK (
       DIP(haveF3(pfx) ? "rep ; ret\n" : "ret\n");
       break;
       
-   case 0xE8: /* CALL J4 */
+   case 0xE8: {/* CALL J4 */
       if (haveF2orF3(pfx)) goto decode_failure;
       d64 = getSDisp32(guest_code, delta); delta += 4;
       d64 += (guest_RIP_bbstart.rip.unwrap_vexrip()+delta); 
+      VexRip target(guest_RIP_bbstart.rip + delta);
+      target.call(d64);
       /* (guest_RIP_bbstart+delta) == return-to addr, d64 == call-to addr */
       t1 = newTemp(Ity_I64); 
       assign(t1, binop(Iop_Sub64, getIReg64(tid, R_RSP), mkU64(8)));
@@ -13770,10 +13772,11 @@ DisResult disInstr_AMD64_WRK (
       t2 = newTemp(Ity_I64);
       assign(t2, mkU64((Addr64)d64));
       make_redzone_AbiHint(vbi, t1, t2/*nia*/, "call-d32", tid);
-      jmp_lit(Ijk_Call,ThreadRip(tid, VexRip::invent_vex_rip(d64)));
+      jmp_lit(Ijk_Call,ThreadRip(tid, target));
       dres.whatNext = DisResult::Dis_StopHere;
       DIP("call 0x%llx\n",d64);
       break;
+    }
 
 //.. //--    case 0xC8: /* ENTER */ 
 //.. //--       d32 = getUDisp16(guest_code, eip); eip += 2;
@@ -13989,37 +13992,43 @@ DisResult disInstr_AMD64_WRK (
 
    /* ------------------------ Jcond, byte offset --------- */
 
-   case 0xEB: /* Jb (jump, byte offset) */
+   case 0xEB: {/* Jb (jump, byte offset) */
       if (haveF2orF3(pfx)) goto decode_failure;
       if (sz != 4) 
          goto decode_failure; /* JRS added 2004 July 11 */
       d64 = (guest_RIP_bbstart.rip.unwrap_vexrip()+delta+1) + getSDisp8(guest_code, delta); 
       delta++;
+      VexRip target(guest_RIP_bbstart.rip + delta);
+      target.jump(d64);
       if (resteerOkFn(callback_opaque,d64)) {
          dres.whatNext   = DisResult::Dis_Resteer;
-         dres.continueAt = ThreadRip(tid, VexRip::invent_vex_rip(d64));
+         dres.continueAt = ThreadRip(tid, target);
       } else {
-	 jmp_lit(Ijk_Boring,ThreadRip(tid, VexRip::invent_vex_rip(d64)));
+	 jmp_lit(Ijk_Boring,ThreadRip(tid, target));
          dres.whatNext = DisResult::Dis_StopHere;
       }
       DIP("jmp-8 0x%llx\n", d64);
       break;
+   }
 
-   case 0xE9: /* Jv (jump, 16/32 offset) */
+   case 0xE9: {/* Jv (jump, 16/32 offset) */
       if (haveF2orF3(pfx)) goto decode_failure;
       if (sz != 4) 
          goto decode_failure; /* JRS added 2004 July 11 */
       d64 = (guest_RIP_bbstart.rip.unwrap_vexrip()+delta+sz) + getSDisp(guest_code, sz,delta); 
       delta += sz;
+      VexRip target(guest_RIP_bbstart.rip + delta);
+      target.jump(d64);
       if (resteerOkFn(callback_opaque,d64)) {
          dres.whatNext   = DisResult::Dis_Resteer;
-         dres.continueAt = ThreadRip(tid, VexRip::invent_vex_rip(d64));
+         dres.continueAt = ThreadRip(tid, target);
       } else {
-         jmp_lit(Ijk_Boring,ThreadRip(tid, VexRip::invent_vex_rip(d64)));
+         jmp_lit(Ijk_Boring,ThreadRip(tid, target));
          dres.whatNext = DisResult::Dis_StopHere;
       }
       DIP("jmp 0x%llx\n", d64);
       break;
+   }
 
    case 0x70:
    case 0x71:
@@ -14036,30 +14045,35 @@ DisResult disInstr_AMD64_WRK (
    case 0x7C: /* JLb/JNGEb (jump less) */
    case 0x7D: /* JGEb/JNLb (jump greater or equal) */
    case 0x7E: /* JLEb/JNGb (jump less or equal) */
-   case 0x7F: /* JGb/JNLEb (jump greater) */
+   case 0x7F: {/* JGb/JNLEb (jump greater) */
       if (haveF2orF3(pfx)) goto decode_failure;
       d64 = (guest_RIP_bbstart.rip.unwrap_vexrip()+delta+1) + getSDisp8(guest_code, delta); 
       delta++;
+      VexRip target(guest_RIP_bbstart.rip + delta);
+      target.jump(d64);
       jcc_01( (AMD64Condcode)(opc - 0x70), 
               guest_RIP_bbstart+delta,
-              ThreadRip(tid, VexRip::invent_vex_rip(d64)),
+              ThreadRip(tid, target),
 	      tid );
       dres.whatNext = DisResult::Dis_StopHere;
       DIP("j%s-8 0x%llx\n", name_AMD64Condcode((AMD64Condcode)(opc - 0x70)), d64);
       break;
+   }
 
-   case 0xE3: 
+   case 0xE3: {
       /* JRCXZ or JECXZ, depending address size override. */
       if (have66orF2orF3(pfx)) goto decode_failure;
       d64 = (guest_RIP_bbstart.rip.unwrap_vexrip()+delta+1) + getSDisp8(guest_code, delta); 
       delta++;
+      VexRip target(guest_RIP_bbstart.rip + delta);
+      target.jump(d64);
       if (haveASO(pfx)) {
          /* 32-bit */
          stmt( IRStmt_Exit( binop(Iop_CmpEQ64, 
                             unop(Iop_32Uto64, getIReg32(tid, R_RCX)), 
                             mkU64(0)),
                Ijk_Boring,
-	       ThreadRip(tid, VexRip::invent_vex_rip(d64))) 
+	       ThreadRip(tid, target)) 
              );
          DIP("jecxz 0x%llx\n", d64);
       } else {
@@ -14068,11 +14082,12 @@ DisResult disInstr_AMD64_WRK (
                                   getIReg64(tid, R_RCX), 
                                   mkU64(0)),
                Ijk_Boring,
-	       ThreadRip(tid, VexRip::invent_vex_rip(d64))) 
+	       ThreadRip(tid, target)) 
              );
          DIP("jrcxz 0x%llx\n", d64);
       }
       break;
+   }
 
    case 0xE0: /* LOOPNE disp8: decrement count, jump if count != 0 && ZF==0 */
    case 0xE1: /* LOOPE  disp8: decrement count, jump if count != 0 && ZF==1 */
@@ -14109,7 +14124,9 @@ DisResult disInstr_AMD64_WRK (
          default:
 	    vassert(0);
       }
-      stmt( IRStmt_Exit(cond, Ijk_Boring, ThreadRip(tid, VexRip::invent_vex_rip(d64))) );
+      VexRip target(guest_RIP_bbstart.rip + delta);
+      target.jump(d64);
+      stmt( IRStmt_Exit(cond, Ijk_Boring, ThreadRip(tid, target)) );
 
       DIP("loop%s 0x%llx\n", xtra, d64);
       break;

@@ -597,6 +597,8 @@ parseOneState(std::map<int, StateMachineState *> &out,
 	int label;
 	StateMachineState *res;
 
+	res = (StateMachineState *)0xf001; /* shut the compiler up */
+
 	if (!parseThisChar('l', str, &str) ||
 	    !parseDecimalInt(&label, str, &str) ||
 	    !parseThisString(": ", str, &str) ||

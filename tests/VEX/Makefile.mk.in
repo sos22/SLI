@@ -11,7 +11,7 @@ rules() {
     for t in $vex_tests
     do
 	echo "${input_base}/$t: ${input_base}/${t}.cpp libVEX.a"
-	echo -e '\tgcc -lstdc++ $(CFLAGS) $(CPPFLAGS) $^ -o $@'
+	echo -e '\tgcc -lstdc++ $(CXXFLAGS) $(CPPFLAGS) $^ -o $@'
     done
     echo "${input_base}/dump_irsb: CPPFLAGS+=-I\$(libvex)/priv"
 }
