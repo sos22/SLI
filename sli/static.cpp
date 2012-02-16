@@ -145,14 +145,24 @@ dumpTagTable(Oracle *oracle)
 	for (std::vector<Oracle::tag_entry>::iterator it = oracle->tag_table.begin();
 	     it != oracle->tag_table.end();
 	     it++) {
-		printf("Loads: ");
-		for (auto it2 = it->loads.begin();
-		     it2 != it->loads.end();
+		printf("Shared loads: ");
+		for (auto it2 = it->shared_loads.begin();
+		     it2 != it->shared_loads.end();
 		     it2++)
 			printf("%s ", it2->name());
-		printf("\nStores: ");
-		for (auto it2 = it->stores.begin();
-		     it2 != it->stores.end();
+		printf("\nShared stores: ");
+		for (auto it2 = it->shared_stores.begin();
+		     it2 != it->shared_stores.end();
+		     it2++)
+			printf("%s ", it2->name());
+		printf("\nPrivate loads: ");
+		for (auto it2 = it->private_loads.begin();
+		     it2 != it->private_loads.end();
+		     it2++)
+			printf("%s ", it2->name());
+		printf("\nPrivate stores: ");
+		for (auto it2 = it->private_stores.begin();
+		     it2 != it->private_stores.end();
 		     it2++)
 			printf("%s ", it2->name());
 		printf("\n\n");

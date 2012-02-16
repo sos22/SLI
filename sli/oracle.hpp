@@ -236,8 +236,10 @@ public:
 	};
 
 	struct tag_entry {
-		std::set<VexRip> loads;
-		std::set<VexRip> stores;
+		std::set<VexRip> shared_loads;
+		std::set<VexRip> shared_stores;
+		std::set<VexRip> private_loads;
+		std::set<VexRip> private_stores;
 	};
 	std::vector<tag_entry> tag_table;
 private:

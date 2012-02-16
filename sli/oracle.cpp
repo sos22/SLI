@@ -169,14 +169,8 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->loads.count(smsel->rip.rip)) {
-			for (auto it2 = it->stores.begin();
-			     it2 != it->stores.end();
-			     it2++) {
-				if (!(it2->unwrap_vexrip() & (1ul << 63)))
-					out.insert(*it2);
-			}
-		}
+		if (it->shared_loads.count(smsel->rip.rip))
+			out |= it->shared_stores;
 	}
 }
 
@@ -193,10 +187,10 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->stores.count(access->rip.rip) ||
-		    it->stores.count(VexRip::invent_vex_rip(access->rip.rip.unwrap_vexrip() | (1ul << 63))) ||
-		    it->loads.count(access->rip.rip) ||
-		    it->loads.count(VexRip::invent_vex_rip(access->rip.rip.unwrap_vexrip() | (1ul << 63)))) {
+		if (it->private_stores.count(access->rip.rip) ||
+		    it->shared_stores.count(access->rip.rip) ||
+		    it->private_loads.count(access->rip.rip) ||
+		    it->shared_loads.count(access->rip.rip)) {
 			notThreadLocal.insert(access->rip.rip);
 			return false;
 		}
@@ -212,15 +206,11 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 	for (auto it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->loads.count(access->rip.rip)) {
-			for (auto it2 = it->stores.begin();
-			     it2 != it->stores.end();
-			     it2++) {
-				if (!(it2->unwrap_vexrip() & (1ul << 63)))
-					return true;
-			}
+		if (it->shared_loads.count(access->rip.rip)) {
+			if (it->shared_stores.size() != 0)
+				return true;
 		}
-		if (it->stores.count(access->rip.rip))
+		if (it->shared_stores.count(access->rip.rip))
 			return true;
 	}
 	return false;
@@ -229,23 +219,17 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 void
 Oracle::getAllMemoryAccessingInstructions(std::vector<VexRip> &out) const
 {
-	std::set<VexRip> allInstructions;
-	
+	std::set<VexRip> out1;
 	for (auto it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		for (auto it2 = it->stores.begin();
-		     it2 != it->stores.end();
-		     it2++)
-			allInstructions.insert(VexRip::invent_vex_rip(it2->unwrap_vexrip() & ~(1ul << 63)));
-		for (auto it2 = it->loads.begin();
-		     it2 != it->loads.end();
-		     it2++)
-			allInstructions.insert(VexRip::invent_vex_rip(it2->unwrap_vexrip() & ~(1ul << 63)));
+		out1 |= it->shared_stores;
+		out1 |= it->shared_loads;
+		out1 |= it->private_stores;
+		out1 |= it->private_loads;
 	}
-	for (auto it = allInstructions.begin();
-	     it != allInstructions.end();
-	     it++)
+	out.reserve(out.size() + out1.size());
+	for (auto it = out1.begin(); it != out1.end(); it++)
 		out.push_back(*it);
 }
 
@@ -333,12 +317,8 @@ Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffect
 {
 	__set_profiling(findRacingRips__load);
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
-		if (it->loads.count(smsel->rip.rip)) {
-			for (auto it2 = it->stores.begin();
-			     it2 != it->stores.end();
-			     it2++)
-				out.insert(*it2);
-		}
+		if (it->shared_loads.count(smsel->rip.rip))
+			out |= it->shared_stores;
 	}
 	return;
 }
@@ -348,12 +328,8 @@ Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<VexRip> &out
 {
 	__set_profiling(findRacingRips__store);
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
-		if (it->stores.count(smses->rip.rip)) {
-			for (auto it2 = it->loads.begin();
-			     it2 != it->loads.end();
-			     it2++)
-				out.insert(*it2);
-		}
+		if (it->shared_stores.count(smses->rip.rip))
+			out |= it->shared_loads;
 	}
 	return;
 }
@@ -617,54 +593,48 @@ Oracle::loadTagTable(const char *path)
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.loads.insert(VexRip::invent_vex_rip(buf));
+			if (buf & (1ul << 63))
+				t.private_loads.insert(VexRip::invent_vex_rip(buf));
+			else
+				t.shared_loads.insert(VexRip::invent_vex_rip(buf));
 		}
 		for (int x = 0; x < hdr.nr_stores; x++) {
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.stores.insert(VexRip::invent_vex_rip(buf));
+			if (buf & (1ul << 63))
+				t.private_stores.insert(VexRip::invent_vex_rip(buf));
+			else
+				t.shared_stores.insert(VexRip::invent_vex_rip(buf));
 		}
-		for (auto it1 = t.stores.begin();
-		     it1 != t.stores.end();
+		for (auto it1 = t.shared_stores.begin();
+		     it1 != t.shared_stores.end();
 		     it1++) {
-			if (it1->unwrap_vexrip() & (1ul << 63))
-				continue;
-			for (auto it2 = t.stores.begin();
-			     it2 != t.stores.end();
+			for (auto it2 = t.shared_stores.begin();
+			     it2 != t.shared_stores.end();
+			     it2++)
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
+			for (auto it2 = t.shared_loads.begin();
+			     it2 != t.shared_loads.end();
 			     it2++) {
-				if (!(it2->unwrap_vexrip() & (1ul << 63)))
-					aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-			}
-			for (auto it2 = t.loads.begin();
-			     it2 != t.loads.end();
-			     it2++) {
-				if (!(it2->unwrap_vexrip() & (1ul << 63))) {
-					unsigned long h = hashRipPair(*it1, *it2);
-					memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
-					h = hashRipPair2(*it1, *it2);
-					memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
-					aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-				}
+				unsigned long h = hashRipPair(*it1, *it2);
+				memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
+				h = hashRipPair2(*it1, *it2);
+				memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 			}
 		}
-		for (auto it1 = t.loads.begin();
-		     it1 != t.loads.end();
+		for (auto it1 = t.shared_loads.begin();
+		     it1 != t.shared_loads.end();
 		     it1++) {
-			if (it1->unwrap_vexrip() & (1ul << 63))
-				continue;
-			for (auto it2 = t.stores.begin();
-			     it2 != t.stores.end();
-			     it2++) {
-				if (!(it2->unwrap_vexrip() & (1ul << 63)))
-					aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-			}
-			for (auto it2 = t.loads.begin();
-			     it2 != t.loads.end();
-			     it2++) {
-				if (!(it2->unwrap_vexrip() & (1ul << 63)))
-					aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-			}
+			for (auto it2 = t.shared_stores.begin();
+			     it2 != t.shared_stores.end();
+			     it2++)
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
+			for (auto it2 = t.shared_loads.begin();
+			     it2 != t.shared_loads.end();
+			     it2++)
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 		}
 		tag_table.push_back(t);
 	}
