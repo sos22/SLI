@@ -141,8 +141,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				buildResForEdge(res_false, smb->falseTarget);
 				res.merge(res_false);
 				res.useExpression(smb->condition);
-			} else if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(sm)) {
-				res.useExpression(sms->target);
 			} else if (dynamic_cast<StateMachineTerminal *>(sm)) {
 				/* Nothing needed */
 			} else {

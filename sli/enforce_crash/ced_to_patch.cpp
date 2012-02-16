@@ -55,7 +55,7 @@ __trivial_hash_function(const DirectRip &r)
 DirectRip
 __threadRipToDirectRip(const ThreadRip &r)
 {
-	return DirectRip(r.rip);
+	return DirectRip(r.rip.unwrap_vexrip());
 }
 
 class RexPrefix {
@@ -1101,7 +1101,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				     it != hbEdges->end();
 				     it++) {
 					const happensBeforeEdge *hb = *it;
-					if (hb->after.rip == cr.rip &&
+					if (hb->after.rip.unwrap_vexrip() == cr.rip &&
 					    cr.threadLive(hb->after.thread)) {
 						dbg("\tReceive message: %s\n", hb->name());
 						relevantEdges.insert(hb);
@@ -1239,7 +1239,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				     it != hbEdges->end();
 				     it++) {
 					happensBeforeEdge *hb = *it;
-					if (hb->before.rip == cr.rip &&
+					if (hb->before.rip.unwrap_vexrip() == cr.rip &&
 					    cr.threadLive(hb->before.thread)) {
 						dbg("\tGenerate %s\n", hb->name());
 						newInstr = instrHappensBeforeEdgeBefore(newInstr, hb, data.exprsToSlots, next_slot);

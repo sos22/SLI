@@ -18,18 +18,6 @@
 #include "map.h"
 #include "ring_buffer.h"
 
-static inline char *my_asprintf(const char *fmt, ...)
-{
-	va_list args;
-	char *r;
-	va_start(args, fmt);
-	int x = vasprintf(&r, fmt, args);
-	(void)x;
-	va_end(args);
-	return r;
-}
-static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
-
 FILE *fopenf(const char *mode, const char *fmt, ...) __attribute__((__format__ (__printf__, 2, 3)));
 
 char *readfile(int fd);
@@ -1146,7 +1134,7 @@ public:
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
 public:
-	IRSB *getIRSBForAddress(unsigned tid, unsigned long rip);
+	IRSB *getIRSBForAddress(const ThreadRip &rip);
 
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
@@ -1232,7 +1220,7 @@ force_linkage()
 	gdb_concrete(NULL);
 }
 
-unsigned long extract_call_follower(IRSB *irsb);
+VexRip extract_call_follower(IRSB *irsb);
 expression_result eval_expression(const RegisterSet *rs,
 				  IRExpr *expr,
 				  const std::vector<expression_result> &temporaries);
@@ -1252,12 +1240,14 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	return tt;
 }
 
-void getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators,
-		   std::vector<unsigned long> &fheads);
-void findDominators(unsigned long functionHead,
-		    unsigned long rip,
+class VexRip;
+
+void getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators,
+		   std::vector<VexRip> &fheads);
+void findDominators(const VexRip &functionHead,
+		    const VexRip &rip,
 		    AddressSpace *as,
-		    std::vector<unsigned long> &out);
+		    std::vector<VexRip> &out);
 IRExpr *readIRExpr(int fd);
 
 IRSB *instrument_func(unsigned tid,

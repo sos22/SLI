@@ -1143,10 +1143,10 @@ static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **
 
 static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **suffix)
 {
-  unsigned long addr;
+  VexRip addr;
   ThreadRip site;
   if (!parseThisString("call0x", str, &str) ||
-      !parseHexUlong(&addr, str, &str) ||
+      !parseVexRip(&addr, str, &str) ||
       !parseThisChar('@', str, &str) ||
       !parseThreadRip(&site, str, &str) ||
       !parseThisChar('(', str, &str))
@@ -1329,7 +1329,7 @@ IRExprFreeVariable::prettyPrint(FILE *f) const
 void
 IRExprClientCall::prettyPrint(FILE *f) const
 {
-      fprintf(f, "call0x%lx@%s(", calledRip, callSite.name());
+      fprintf(f, "call0x%s@%s(", calledRip.name(), callSite.name());
       for (int x = 0; args[x]; x++) {
 	if (x != 0)
 	  fprintf(f, ", ");
@@ -1500,8 +1500,12 @@ void ppIRSB ( IRSB* bb, FILE* f )
    fprintf(f,  "   goto {");
    ppIRJumpKind(bb->jumpkind, f);
    fprintf(f,  "} ");
-   ppIRExpr( bb->next, f );
-   fprintf(f,  "\n}\n");
+   if ( bb->next_is_const ) {
+     fprintf(f, "const %s\n}\n", bb->next_const.name());
+   } else {
+     ppIRExpr( bb->next_nonconst, f );
+     fprintf(f,  "\n}\n");
+   }
 }
 
 
@@ -1742,7 +1746,7 @@ IRExpr* IRExpr_FreeVariable ( )
    next_key.val++;
    return res;
 }
-IRExpr* IRExpr_ClientCall ( unsigned long r, ThreadRip site, IRExpr **args )
+IRExpr* IRExpr_ClientCall ( const VexRip &r, const ThreadRip &site, IRExpr **args )
 {
    IRExprClientCall *e = new IRExprClientCall();
    e->calledRip = r;
@@ -1885,7 +1889,7 @@ IRStmt* IRStmt_NoOp ( void )
 {
    return &IRStmtNoOp::singleton;
 }
-IRStmt* IRStmt_IMark ( Addr64 addr, Int len ) {
+IRStmt* IRStmt_IMark ( const ThreadRip &addr, Int len ) {
    return new IRStmtIMark(addr, len);
 }
 IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia ) {
@@ -1919,7 +1923,7 @@ IRStmt* IRStmt_MBE ( IRMBusEvent event )
 {
    return new IRStmtMBE(event);
 }
-IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, IRConst* dst )
+IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, const ThreadRip &dst )
 {
    return new IRStmtExit(guard, jk, dst);
 }
@@ -1946,7 +1950,6 @@ IRSB* emptyIRSB ( void )
    bb->stmts_used = 0;
    bb->stmts_size = 8;
    bb->stmts      = (IRStmt **)__LibVEX_Alloc_Ptr_Array(&ir_heap, bb->stmts_size);
-   bb->next       = NULL;
    bb->jumpkind   = Ijk_Boring;
    return bb;
 }

@@ -171,13 +171,13 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 		instrT *i = *it;
 
 		if (i->defaultNextI && !instructionPresence.count(i->defaultNextI))
-			(*this)[i->defaultNextI->rip.rip].insert(i->rip.thread);
-		if (i->defaultNext.rip && !i->defaultNextI)
-			(*this)[i->defaultNext.rip].insert(i->rip.thread);
+			(*this)[i->defaultNextI->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
+		if (i->defaultNext.rip.isValid() && !i->defaultNextI)
+			(*this)[i->defaultNext.rip.unwrap_vexrip()].insert(i->rip.thread);
 		if (i->branchNextI && !instructionPresence.count(i->branchNextI))
-			(*this)[i->branchNextI->rip.rip].insert(i->rip.thread);
-		if (!i->isCall && i->branchNext.rip && !i->branchNextI)
-			(*this)[i->branchNext.rip].insert(i->rip.thread);
+			(*this)[i->branchNextI->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
+		if (!i->isCall && i->branchNext.rip.isValid() && !i->branchNextI)
+			(*this)[i->branchNext.rip.unwrap_vexrip()].insert(i->rip.thread);
 	}
 
 }

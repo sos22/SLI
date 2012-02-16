@@ -247,7 +247,7 @@ statesLocallyBisimilar(StateMachineState *sm1,
 	if (StateMachineStub *sms1 =
 	    dynamic_cast<StateMachineStub *>(sm1)) {
 		if (StateMachineStub *sms2 = dynamic_cast<StateMachineStub *>(sm2))
-			return definitelyEqual(sms1->target, sms2->target, opt);
+			return sms1->target == sms2->target;
 		else
 			return false;
 	}

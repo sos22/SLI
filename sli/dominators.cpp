@@ -7,6 +7,7 @@
 #include <queue>
 
 #include "sli.h"
+#include "oracle_rip.hpp"
 
 struct representative_state {
 	RegisterSet regs;
@@ -103,7 +104,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 		printf("Visiting %lx\n", s.regs.rip());
 		IRSB *irsb;
 		try {
-			irsb = as->getIRSBForAddress(1, s.regs.rip());
+			irsb = as->getIRSBForAddress(ThreadRip::mk(1, VexRip::invent_vex_rip(s.regs.rip())));
 		} catch (BadMemoryException &x) {
 			/* Okay, that didn't work.  Guess we don't
 			   want to go down here... */
@@ -118,9 +119,9 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
-				if (visited.count(((IRStmtIMark *)stmt)->addr))
+				if (visited.count(((IRStmtIMark *)stmt)->addr.rip.unwrap_vexrip()))
 					goto escape;
-				s.regs.rip() = ((IRStmtIMark *)stmt)->addr;
+				s.regs.rip() = ((IRStmtIMark *)stmt)->addr.rip.unwrap_vexrip();
 				visited.insert(s.regs.rip());
 				break;
 			case Ist_AbiHint:
@@ -181,7 +182,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				   push the taken variant to the stack
 				   to deal with later. */
 				unsigned long i = s.regs.rip();
-				s.regs.rip() = ((IRStmtExit *)stmt)->dst->Ico.U64;
+				s.regs.rip() = ((IRStmtExit *)stmt)->dst.rip.unwrap_vexrip();
 				unexplored_instructions.push_back(s);
 				s.regs.rip() = i;
 				break;
@@ -193,10 +194,13 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 		if (irsb->jumpkind == Ijk_Call) {
 			/* Calls are special, and we assume that we
 			 * just resume at the next instruction. */
-			s.regs.rip() = extract_call_follower(irsb);
+			s.regs.rip() = extract_call_follower(irsb).unwrap_vexrip();
 			s.regs.rsp() += 8;
 		} else {
-			s.regs.rip() = eval_expression(&s.regs, irsb->next, temporaries).lo;
+			s.regs.rip() =
+				irsb->next_is_const ?
+				irsb->next_const.rip.unwrap_vexrip() :
+				eval_expression(&s.regs, irsb->next_nonconst, temporaries).lo;
 			if (irsb->jumpkind == Ijk_Ret) {
 				/* We're done */
 				return_rsp = s.regs.rsp();
@@ -221,7 +225,7 @@ compensateForBadVCall(Thread *thr, AddressSpace *as)
 
 /* Figure out where the first instruction in the current function
  * is. */
-static unsigned long
+static VexRip
 findFunctionHead(RegisterSet *rs, AddressSpace *as)
 {
 	unsigned long ra;
@@ -238,7 +242,7 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
 	if (h == 0xe8) {
 		/* That looks like a call. */
 		int delta = as->fetch<int>(ra - 4, NULL);
-		return ra + delta;
+		return VexRip::invent_vex_rip(ra + delta);
 	}
 
 	fail("findFunctionHead\n");
@@ -253,15 +257,15 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
    starting point to the target instruction.  We order them so that
    the dominators nearest to the target are reported first. */
 void
-findDominators(unsigned long functionHead,
-	       const unsigned long rip,
+findDominators(const VexRip &functionHead,
+	       const VexRip &rip,
 	       AddressSpace *as,
-	       std::vector<unsigned long> &out)
+	       std::vector<VexRip> &out)
 {
-	std::vector<unsigned long> remainingToExplore;
-	std::map<unsigned long, std::set<unsigned long> > successors;
-	std::map<unsigned long, std::set<unsigned long> > predecessors;
-	std::set<unsigned long> instrs;
+	std::vector<VexRip> remainingToExplore;
+	std::map<VexRip, std::set<VexRip> > successors;
+	std::map<VexRip, std::set<VexRip> > predecessors;
+	std::set<VexRip> instrs;
 
 	DBG_DOMINATORS("Exploring from %lx to find dominators of %lx\n", functionHead, rip);
 	/* First: build the CFG, representing all of the successor
@@ -269,29 +273,29 @@ findDominators(unsigned long functionHead,
 	   predecessors. */
 	remainingToExplore.push_back(functionHead);
 	while (!remainingToExplore.empty()) {
-		unsigned long rip = remainingToExplore.back();
-		unsigned long r;
+		VexRip rip = remainingToExplore.back();
+		VexRip r;
 		remainingToExplore.pop_back();
 		if (instrs.count(rip))
 			continue;
-		IRSB *irsb = as->getIRSBForAddress(1, rip);
+		IRSB *irsb = as->getIRSBForAddress(ThreadRip::mk(1, rip));
 		assert(irsb->stmts[0]->tag == Ist_IMark);
-		assert(((IRStmtIMark *)irsb->stmts[0])->addr == rip);
+		assert(((IRStmtIMark *)irsb->stmts[0])->addr.rip == rip);
 		for (int idx = 1; idx < irsb->stmts_used; idx++) {
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
-				successors[rip].insert(((IRStmtIMark *)stmt)->addr);
-				predecessors[((IRStmtIMark *)stmt)->addr].insert(rip);
+				successors[rip].insert(((IRStmtIMark *)stmt)->addr.rip);
+				predecessors[((IRStmtIMark *)stmt)->addr.rip].insert(rip);
 				instrs.insert(rip);
-				rip = ((IRStmtIMark *)stmt)->addr;
+				rip = ((IRStmtIMark *)stmt)->addr.rip;
 				if (instrs.count(rip))
 					goto done_this_entry;
 				break;
 			case Ist_Exit:
-				successors[rip].insert(((IRStmtExit *)stmt)->dst->Ico.U64);
-				predecessors[((IRStmtExit *)stmt)->dst->Ico.U64].insert(rip);
-				remainingToExplore.push_back(((IRStmtExit *)stmt)->dst->Ico.U64);
+				successors[rip].insert(((IRStmtExit *)stmt)->dst.rip);
+				predecessors[((IRStmtExit *)stmt)->dst.rip].insert(rip);
+				remainingToExplore.push_back(((IRStmtExit *)stmt)->dst.rip);
 				break;
 			default:
 				break;
@@ -300,13 +304,12 @@ findDominators(unsigned long functionHead,
 
 		instrs.insert(rip);
 
-		r = 0;
 		if (irsb->jumpkind == Ijk_Call) {
 			r = extract_call_follower(irsb);
-		} else if (irsb->next->tag == Iex_Const) {
-			r = ((IRExprConst *)irsb->next)->con->Ico.U64;
+		} else if (irsb->next_is_const) {
+			r = irsb->next_const.rip;
 		}
-		if (r) {
+		if (r.isValid()) {
 			successors[rip].insert(r);
 			predecessors[r].insert(rip);
 			remainingToExplore.push_back(r);
@@ -325,8 +328,8 @@ findDominators(unsigned long functionHead,
 	*/
 
 	/* Build initial optimistic map. */
-	std::map<unsigned long, std::set<unsigned long> > dominators;
-	for (std::set<unsigned long>::iterator it = instrs.begin();
+	std::map<VexRip, std::set<VexRip> > dominators;
+	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++)
 		dominators[*it] = instrs;
@@ -340,14 +343,14 @@ findDominators(unsigned long functionHead,
 			return;
 
 		progress = false;
-		for (std::set<unsigned long>::iterator it = instrs.begin();
+		for (auto it = instrs.begin();
 		     it != instrs.end();
 		     it++) {
-			unsigned long rip = *it;
+			VexRip rip = *it;
 			/* Check that all of our current dominators
 			 * are valid. */
-			std::set<unsigned long> &dom(dominators[rip]);
-			for (std::set<unsigned long>::iterator domit = dom.begin();
+			std::set<VexRip> &dom(dominators[rip]);
+			for (auto domit = dom.begin();
 			     domit != dom.end();
 				) {
 				if (*domit == rip) {
@@ -359,8 +362,7 @@ findDominators(unsigned long functionHead,
 				/* Otherwise, must dominate all
 				 * predecessors of rip. */
 				bool should_be_dominator = true;
-				for (std::set<unsigned long>::iterator pred_it =
-					     predecessors[rip].begin();
+				for (auto pred_it = predecessors[rip].begin();
 				     should_be_dominator && pred_it != predecessors[rip].end();
 				     pred_it++) {
 					if (!dominators[*pred_it].count(*domit))
@@ -377,11 +379,9 @@ findDominators(unsigned long functionHead,
 	}
 
 	/* Dump the dominator map. */
-	for (std::set<unsigned long>::iterator it = instrs.begin();
-	     it != instrs.end();
-	     it++) {
+	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		DBG_DOMINATORS("Dominators of %lx:", *it);
-		for (std::set<unsigned long>::iterator it2 = dominators[*it].begin();
+		for (auto it2 = dominators[*it].begin();
 		     it2 != dominators[*it].end();
 		     it2++)
 			DBG_DOMINATORS(" %lx", *it2);
@@ -421,24 +421,20 @@ findDominators(unsigned long functionHead,
 	 * in the definition of dominators.  There's probably a
 	 * version of the dominator algorithm whcih does it directly,
 	 * but I couldn't think of one. */
-	std::map<unsigned long, unsigned long> immediateDominators;
-	for (std::set<unsigned long>::iterator it = instrs.begin();
-	     it != instrs.end();
-	     it++) {
+	std::map<VexRip, VexRip> immediateDominators;
+	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		if (TIMEOUT)
 			return;
 
-		unsigned long rip = *it;
+		VexRip rip = *it;
 		if (rip == functionHead) /* immediate dominator of
 					  * function head undefined */
 			continue;
-		std::set<unsigned long> &doms(dominators[rip]);
+		std::set<VexRip> &doms(dominators[rip]);
 		bool found_one = false;
 		DBG_DOMINATORS("Find immediate dominator of %lx...\n", rip);
-		for (std::set<unsigned long>::iterator it2 = doms.begin();
-		     it2 != doms.end();
-		     it2++) {
-			unsigned long dom = *it2;
+		for (auto it2 = doms.begin(); it2 != doms.end(); it2++) {
+			VexRip dom = *it2;
 			/* Is dom the immediate dominator of rip? */
 			if (dom == rip)
 				continue; /* can't be immediate dominator of yourself */
@@ -448,10 +444,10 @@ findDominators(unsigned long functionHead,
 			   dominates rip such that dom dominates dom'.
 			   If so, dom cannot be the immediate
 			   dominator. */
-			for (std::set<unsigned long>::iterator it3 = doms.begin();
+			for (auto it3 = doms.begin();
 			     !over_dominated && it3 != doms.end();
 			     it3++) {
-				unsigned long dom_prime = *it3;
+				VexRip dom_prime = *it3;
 				if (dom_prime == dom || dom_prime == rip)
 					continue;
 				/* If dom_prime dominates dom then dom
@@ -480,7 +476,7 @@ findDominators(unsigned long functionHead,
 	}
 
 	/* Dump out the immediate dominators table. */
-	for (std::set<unsigned long>::iterator it = instrs.begin();
+	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++) {
 		if (*it != functionHead)
@@ -489,7 +485,7 @@ findDominators(unsigned long functionHead,
 
 	/* Finally, walk the immediate dominator map to build the
 	 * ordered dominator chain for the target instruction. */
-	unsigned long r = rip;
+	VexRip r = rip;
 	while (1) {
 		out.push_back(r);
 		if (!immediateDominators.count(r))
@@ -501,19 +497,19 @@ findDominators(unsigned long functionHead,
 }
 
 void
-getDominators(Thread *thr, MachineState *ms, std::vector<unsigned long> &dominators, std::vector<unsigned long> &fheads)
+getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators, std::vector<VexRip> &fheads)
 {
-	unsigned long head = findFunctionHead(&thr->regs, ms->addressSpace);
+	VexRip head(findFunctionHead(&thr->regs, ms->addressSpace));
 	fheads.push_back(head);
 	compensateForBadVCall(thr, ms->addressSpace);
-	findDominators(head, thr->regs.rip(), ms->addressSpace, dominators);
+	findDominators(head, VexRip::invent_vex_rip(thr->regs.rip()), ms->addressSpace, dominators);
 
 	RegisterSet rs = thr->regs;
 	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
 	try {
 		head = findFunctionHead(&rs, ms->addressSpace);
 		fheads.push_back(head);
-		findDominators(head, rs.rip(), ms->addressSpace, dominators);
+		findDominators(head, VexRip::invent_vex_rip(rs.rip()), ms->addressSpace, dominators);
 	} catch (BadMemoryException &e) {
 		/* Just give up: if we can't find the caller's caller,
 		 * we just won't bother backtracking that far. */

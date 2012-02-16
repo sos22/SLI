@@ -12,6 +12,7 @@
 #include "offline_analysis.hpp"
 
 #include "libvex_prof.hpp"
+#include "libvex_parse.h"
 
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)
@@ -34,6 +35,7 @@ hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p)
 	return p.first + p.second * 59;
 }
 
+#if 0
 void
 mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src)
 {
@@ -42,6 +44,7 @@ mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src)
 	     it++)
 		dest->set(it.key(), it.value());
 }
+#endif
 
 template<typename t> void
 operator |=(std::set<t> &x, const std::set<t> &y)
@@ -134,18 +137,18 @@ Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
 }
 
 void
-Oracle::findPreviousInstructions(std::vector<unsigned long> &out)
+Oracle::findPreviousInstructions(std::vector<VexRip> &out)
 {
-	std::vector<unsigned long> fheads;
+	std::vector<VexRip> fheads;
 	getDominators(crashedThread, ms, out, fheads);
 }
 
 bool
-Oracle::functionCanReturn(unsigned long rip)
+Oracle::functionCanReturn(const VexRip &rip)
 {
 #warning Horrible, horrible hack
-	if (rip == 0x768440 /* ut_dbg_assertion_failed */ ||
-	    rip == 0x7683e0 /* ut_dbg_stop_thread */)
+	if (rip.unwrap_vexrip() == 0x768440 /* ut_dbg_assertion_failed */ ||
+	    rip.unwrap_vexrip() == 0x7683e0 /* ut_dbg_stop_thread */)
 		return false;
 	else
 		return true;
@@ -161,19 +164,13 @@ Oracle::functionCanReturn(unsigned long rip)
    includes the observed address. */
 void
 Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
-			      std::set<unsigned long> &out)
+			      std::set<VexRip> &out)
 {
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->loads.count(smsel->rip.rip)) {
-			for (std::set<unsigned long>::iterator it2 = it->stores.begin();
-			     it2 != it->stores.end();
-			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					out.insert(*it2);
-			}
-		}
+		if (it->shared_loads.count(smsel->rip.rip))
+			out |= it->shared_stores;
 	}
 }
 
@@ -181,8 +178,8 @@ bool
 Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 {
 	__set_profiling(notInTagTable);
-	static std::set<unsigned long> threadLocal;
-	static std::set<unsigned long> notThreadLocal;
+	static std::set<VexRip> threadLocal;
+	static std::set<VexRip> notThreadLocal;
 	if (threadLocal.count(access->rip.rip))
 		return true;
 	if (notThreadLocal.count(access->rip.rip))
@@ -190,10 +187,10 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 	for (std::vector<tag_entry>::iterator it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->stores.count(access->rip.rip) ||
-		    it->stores.count(access->rip.rip | (1ul << 63)) ||
-		    it->loads.count(access->rip.rip) ||
-		    it->loads.count(access->rip.rip) | (1ul << 63)) {
+		if (it->private_stores.count(access->rip.rip) ||
+		    it->shared_stores.count(access->rip.rip) ||
+		    it->private_loads.count(access->rip.rip) ||
+		    it->shared_loads.count(access->rip.rip)) {
 			notThreadLocal.insert(access->rip.rip);
 			return false;
 		}
@@ -209,40 +206,30 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 	for (auto it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		if (it->loads.count(access->rip.rip)) {
-			for (auto it2 = it->stores.begin();
-			     it2 != it->stores.end();
-			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					return true;
-			}
+		if (it->shared_loads.count(access->rip.rip)) {
+			if (it->shared_stores.size() != 0)
+				return true;
 		}
-		if (it->stores.count(access->rip.rip))
+		if (it->shared_stores.count(access->rip.rip))
 			return true;
 	}
 	return false;
 }
 
 void
-Oracle::getAllMemoryAccessingInstructions(std::vector<unsigned long> &out) const
+Oracle::getAllMemoryAccessingInstructions(std::vector<VexRip> &out) const
 {
-	std::set<unsigned long> allInstructions;
-	
-	for (std::vector<tag_entry>::const_iterator it = tag_table.begin();
+	std::set<VexRip> out1;
+	for (auto it = tag_table.begin();
 	     it != tag_table.end();
 	     it++) {
-		for (std::set<unsigned long>::iterator it2 = it->stores.begin();
-		     it2 != it->stores.end();
-		     it2++)
-			allInstructions.insert(*it2 & ~(1ul << 63));
-		for (std::set<unsigned long>::iterator it2 = it->loads.begin();
-		     it2 != it->loads.end();
-		     it2++)
-			allInstructions.insert(*it2 & ~(1ul << 63));
+		out1 |= it->shared_stores;
+		out1 |= it->shared_loads;
+		out1 |= it->private_stores;
+		out1 |= it->private_loads;
 	}
-	for (std::set<unsigned long>::iterator it = allInstructions.begin();
-	     it != allInstructions.end();
-	     it++)
+	out.reserve(out.size() + out1.size());
+	for (auto it = out1.begin(); it != out1.end(); it++)
 		out.push_back(*it);
 }
 
@@ -273,13 +260,13 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 		nr_bloom_hits++;
 		return false;
 	}
-	h = hashRipPair(smses->rip.rip * 23, smsel->rip.rip * 17);
+	h = hashRipPair2(smses->rip.rip, smsel->rip.rip);
 	if (!(memoryAliasingFilter2[h/64] & (1ul << (h % 64)))) {
 		nr_bloom_hits2++;
 		return false;
 	}
 
-	if (aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel->rip.rip, smses->rip.rip))) {
+	if (aliasingTable->count(std::pair<VexRip, VexRip>(smsel->rip.rip, smses->rip.rip))) {
 		nr_trues++;
 		return true;
 	} else {
@@ -304,7 +291,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	} else if (notInTagTable(smsel2))
 		return false;
 
-	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smsel1->rip.rip, smsel2->rip.rip));
+	return !!aliasingTable->count(std::pair<VexRip, VexRip>(smsel1->rip.rip, smsel2->rip.rip));
 }
 
 bool
@@ -322,35 +309,27 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 			return false;
 	} else if (notInTagTable(smses2))
 		return false;
-	return !!aliasingTable->count(std::pair<unsigned long, unsigned long>(smses1->rip.rip, smses2->rip.rip));
+	return !!aliasingTable->count(std::pair<VexRip, VexRip>(smses1->rip.rip, smses2->rip.rip));
 }
 
 void
-Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<unsigned long> &out)
+Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<VexRip> &out)
 {
 	__set_profiling(findRacingRips__load);
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
-		if (it->loads.count(smsel->rip.rip)) {
-			for (auto it2 = it->stores.begin();
-			     it2 != it->stores.end();
-			     it2++)
-				out.insert(*it2);
-		}
+		if (it->shared_loads.count(smsel->rip.rip))
+			out |= it->shared_stores;
 	}
 	return;
 }
 
 void
-Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<unsigned long> &out)
+Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<VexRip> &out)
 {
 	__set_profiling(findRacingRips__store);
 	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
-		if (it->stores.count(smses->rip.rip)) {
-			for (auto it2 = it->loads.begin();
-			     it2 != it->loads.end();
-			     it2++)
-				out.insert(*it2);
-		}
+		if (it->shared_stores.count(smses->rip.rip))
+			out |= it->shared_loads;
 	}
 	return;
 }
@@ -406,7 +385,7 @@ public:
 				return x;
 			assert(content.count(e->parent) != 0);
 			entry *pe = &content[e->parent];
-			if (pe->parent)
+			if (pe->parent.isValid())
 				e->parent = pe->parent;
 			x = e->parent;
 		}
@@ -415,14 +394,14 @@ public:
 
 void
 findInstrSuccessorsAndCallees(AddressSpace *as,
-			      unsigned long rip,
-			      std::vector<unsigned long> &directExits,
-			      gc_pair_ulong_set_t *callees)
+			      const VexRip &rip,
+			      std::vector<VexRip> &directExits,
+			      gc_pair_VexRip_set_t *callees)
 {
 	__set_profiling(findInstrSuccessorsAndCallees);
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -431,29 +410,29 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	for (i = 1; i < irsb->stmts_used; i++) {
 		if (irsb->stmts[i]->tag == Ist_IMark) {
 			/* That's the end of this instruction */
-			directExits.push_back(((IRStmtIMark *)irsb->stmts[i])->addr);
+			directExits.push_back(((IRStmtIMark *)irsb->stmts[i])->addr.rip);
 			return;
 		}
 		if (irsb->stmts[i]->tag == Ist_Exit)
-			directExits.push_back(((IRStmtExit *)irsb->stmts[i])->dst->Ico.U64);
+			directExits.push_back(((IRStmtExit *)irsb->stmts[i])->dst.rip);
 	}
 
 	/* If we get here then there are no other marks in the IRSB,
 	   so we need to look at the fall through addresses. */
 	if (irsb->jumpkind == Ijk_Call) {
-		if (irsb->next->tag != Iex_Const ||
-		    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
+		if (!irsb->next_is_const ||
+		    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
 			directExits.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
-		if (irsb->next->tag == Iex_Const)
-			callees->set(std::pair<unsigned long, unsigned long>(rip, ((IRExprConst *)irsb->next)->con->Ico.U64),
+		if (irsb->next_is_const)
+			callees->set(std::pair<VexRip, VexRip>(rip, irsb->next_const.rip),
 				     true);
 		return;
 	}
 
 	if (irsb->jumpkind != Ijk_NoDecode &&
-	    irsb->next->tag == Iex_Const) {
-		directExits.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+	    irsb->next_is_const) {
+		directExits.push_back(irsb->next_const.rip);
 	} else {
 		/* Should really do something more clever here,
 		   possibly based on dynamic analysis. */
@@ -461,11 +440,11 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 }
 
 static void
-findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &out)
+findSuccessors(AddressSpace *as, VexRip rip, std::vector<VexRip> &out)
 {
-	gc_pair_ulong_set_t *callees = new gc_pair_ulong_set_t();
+	gc_pair_VexRip_set_t *callees = new gc_pair_VexRip_set_t();
 	findInstrSuccessorsAndCallees(as, rip, out, callees);
-	for (gc_pair_ulong_set_t::iterator it = callees->begin();
+	for (auto it = callees->begin();
 	     it != callees->end();
 	     it++)
 		out.push_back(it.key().second);
@@ -481,11 +460,11 @@ findSuccessors(AddressSpace *as, unsigned long rip, std::vector<unsigned long> &
  * a RIP which has already been assigned an output set then we merge
  * the relevant output sets. */
 void
-Oracle::clusterRips(const std::set<unsigned long> &inputRips,
-		    std::set<InstructionSet> &outputClusters)
+Oracle::clusterRips(const std::set<VexRip> &inputRips,
+		    std::set<InstructionSet > &outputClusters)
 {
 	__set_profiling(clusterRips);
-	union_find<unsigned long> results;
+	union_find<VexRip> results;
 #if 0
 	std::set<unsigned long> explored;
 
@@ -498,7 +477,7 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 			continue;
 
 		results.insert(r);
-		std::vector<unsigned long> discoveredInstructions;
+		std::vector<VexRip> discoveredInstructions;
 		discoveredInstructions.push_back(r);
 		while (!discoveredInstructions.empty()) {
 			unsigned long r2 = discoveredInstructions.back();
@@ -510,20 +489,20 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 		}
 	}
 #else
-	for (std::set<unsigned long>::const_iterator it = inputRips.begin();
+	for (auto it = inputRips.begin();
 	     it != inputRips.end();
 	     it++) {
-		unsigned long item = *it;
+		VexRip item = *it;
 		
 		results.insert(item);
 
 		/* Map from rips to the ``best'' depth we've visited
 		 * with so far. */
-		std::map<unsigned long, int> visited;
-		std::vector<std::pair<unsigned long, int> > pending;
-		pending.push_back(std::pair<unsigned long, int>(item, 20));
+		std::map<VexRip, int> visited;
+		std::vector<std::pair<VexRip, int> > pending;
+		pending.push_back(std::pair<VexRip, int>(item, 20));
 		while (!pending.empty()) {
-			std::pair<unsigned long, int> next = pending.back();
+			std::pair<VexRip, int> next = pending.back();
 			pending.pop_back();
 			if (next.second == 0)
 				continue;
@@ -557,24 +536,24 @@ Oracle::clusterRips(const std::set<unsigned long> &inputRips,
 			/* Not already visited from this root, not
 			 * another root -> have to do it the hard
 			 * way. */
-			std::vector<unsigned long> s;
+			std::vector<VexRip> s;
 			findSuccessors(ms->addressSpace, next.first, s);
-			for (std::vector<unsigned long>::iterator it2 = s.begin();
+			for (auto it2 = s.begin();
 			     it2 != s.end();
 			     it2++)
-				pending.push_back(std::pair<unsigned long, int>(*it2, next.second - 1));
+				pending.push_back(std::pair<VexRip, int>(*it2, next.second - 1));
 		}
 	}
 #endif
 
 	/* Now explode the union-find structure into a set of sets. */
-	std::set<unsigned long> unprocessedInput(inputRips);
+	std::set<VexRip> unprocessedInput(inputRips);
 	while (!unprocessedInput.empty()) {
-		unsigned long r = *unprocessedInput.begin();
+		VexRip r = *unprocessedInput.begin();
 
 		InstructionSet thisSet;
-		unsigned long representative = results.representative(r);
-		for (std::set<unsigned long>::iterator it = unprocessedInput.begin();
+		VexRip representative = results.representative(r);
+		for (auto it = unprocessedInput.begin();
 		     it != unprocessedInput.end();
 			) {
 			if (results.representative(*it) == representative) {
@@ -614,54 +593,48 @@ Oracle::loadTagTable(const char *path)
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.loads.insert(buf);
+			if (buf & (1ul << 63))
+				t.private_loads.insert(VexRip::invent_vex_rip(buf));
+			else
+				t.shared_loads.insert(VexRip::invent_vex_rip(buf));
 		}
 		for (int x = 0; x < hdr.nr_stores; x++) {
 			unsigned long buf;
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
-			t.stores.insert(buf);
+			if (buf & (1ul << 63))
+				t.private_stores.insert(VexRip::invent_vex_rip(buf));
+			else
+				t.shared_stores.insert(VexRip::invent_vex_rip(buf));
 		}
-		for (std::set<unsigned long>::iterator it1 = t.stores.begin();
-		     it1 != t.stores.end();
+		for (auto it1 = t.shared_stores.begin();
+		     it1 != t.shared_stores.end();
 		     it1++) {
-			if (*it1 & (1ul << 63))
-				continue;
-			for (std::set<unsigned long>::iterator it2 = t.stores.begin();
-			     it2 != t.stores.end();
+			for (auto it2 = t.shared_stores.begin();
+			     it2 != t.shared_stores.end();
+			     it2++)
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
+			for (auto it2 = t.shared_loads.begin();
+			     it2 != t.shared_loads.end();
 			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
-			}
-			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
-			     it2 != t.loads.end();
-			     it2++) {
-				if (!(*it2 & (1ul << 63))) {
-					unsigned long h = hashRipPair(*it1, *it2);
-					memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
-					h = hashRipPair(*it1 * 23, *it2 * 17);
-					memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
-				}
+				unsigned long h = hashRipPair(*it1, *it2);
+				memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
+				h = hashRipPair2(*it1, *it2);
+				memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 			}
 		}
-		for (std::set<unsigned long>::iterator it1 = t.loads.begin();
-		     it1 != t.loads.end();
+		for (auto it1 = t.shared_loads.begin();
+		     it1 != t.shared_loads.end();
 		     it1++) {
-			if (*it1 & (1ul << 63))
-				continue;
-			for (std::set<unsigned long>::iterator it2 = t.stores.begin();
-			     it2 != t.stores.end();
-			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
-			}
-			for (std::set<unsigned long>::iterator it2 = t.loads.begin();
-			     it2 != t.loads.end();
-			     it2++) {
-				if (!(*it2 & (1ul << 63)))
-					aliasingTable->insert(std::pair<unsigned long, unsigned long>(*it1, *it2));
-			}
+			for (auto it2 = t.shared_stores.begin();
+			     it2 != t.shared_stores.end();
+			     it2++)
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
+			for (auto it2 = t.shared_loads.begin();
+			     it2 != t.shared_loads.end();
+			     it2++)
+				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 		}
 		tag_table.push_back(t);
 	}
@@ -686,14 +659,14 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 	bool done_something;
 	unsigned long changed;
 	unsigned long unchanged;
-	std::vector<unsigned long> functions;
+	std::vector<VexRip> functions;
 
 	do {
 		changed = 0;
 		unchanged = 0;
 		done_something = false;
 		ths->getFunctions(functions);
-		for (std::vector<unsigned long>::iterator it = functions.begin();
+		for (auto it = functions.begin();
 		     it != functions.end();
 		     it++) {
 			LibVEX_maybe_gc(token);
@@ -713,9 +686,9 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 void
 Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
-	std::vector<unsigned long> functions;
+	std::vector<VexRip> functions;
 	ths->getFunctions(functions);
-	for (std::vector<unsigned long>::iterator it = functions.begin();
+	for (auto it = functions.begin();
 	     it != functions.end();
 	     it++) {
 		LibVEX_maybe_gc(token);
@@ -728,10 +701,10 @@ void
 Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
 	bool done_something;
-	std::vector<unsigned long> functions;
+	std::vector<VexRip> functions;
 
 	ths->getFunctions(functions);
-	for (std::vector<unsigned long>::iterator it = functions.begin();
+	for (auto it = functions.begin();
 	     it != functions.end();
 	     it++) {
 		LibVEX_maybe_gc(token);
@@ -972,7 +945,7 @@ Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, bool
 }
 
 Oracle::RegisterAliasingConfiguration
-Oracle::getAliasingConfigurationForRip(unsigned long rip)
+Oracle::getAliasingConfigurationForRip(const VexRip &rip)
 {
 	Function f(rip);
 	return f.aliasConfigOnEntryToInstruction(rip);
@@ -990,7 +963,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 
 	if (ths->callGraphMapping.init(path) < 0)
 		err(1, "opening %s", path);
-	std::vector<unsigned long> roots;
+	std::vector<VexRip> roots;
 	unsigned offset = 0;
 	while (1) {
 		const struct cg_header *h;
@@ -1002,7 +975,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		assert(c);
 		for (unsigned i = 0; i < h->nr; i++) {
 			if (c[i] & (1ul << 63))
-				roots.push_back(c[i] & ~(1ul << 63));
+				roots.push_back(VexRip::invent_vex_rip(c[i] & ~(1ul << 63)));
 		}
 		offset += sizeof(unsigned long) * h->nr;
 	}
@@ -1012,7 +985,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 }
 
 void
-Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &output)
+Oracle::findPossibleJumpTargets(const VexRip &rip, std::vector<VexRip> &output)
 {
 	if (!callGraphMapping.live())
 		return;
@@ -1023,11 +996,11 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 		if (!h)
 			return;
 		offset += sizeof(*h);
-		if (h->rip == rip) {
+		if (h->rip == rip.unwrap_vexrip()) {
 			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
 			assert(c);
 			for (unsigned i = 0; i < h->nr; i++)
-				output.push_back(c[i] & ~(1ul << 63));
+				output.push_back(VexRip::invent_vex_rip(c[i] & ~(1ul << 63)));
 			make_unique(output);
 			return;
 		}
@@ -1036,12 +1009,12 @@ Oracle::findPossibleJumpTargets(unsigned long rip, std::vector<unsigned long> &o
 }
 
 void
-Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
-				 unsigned long rip)
+Oracle::findPreviousInstructions(std::vector<VexRip> &output,
+				 const VexRip &rip)
 {
-	unsigned long r = functionHeadForInstruction(rip);
-	if (!r) {
-		fprintf(_logfile, "No function for %lx\n", rip);
+	VexRip r = functionHeadForInstruction(rip);
+	if (!r.isValid()) {
+		fprintf(_logfile, "No function for %s\n", rip.name());
 		return;
 	}
 	Function f(r);
@@ -1050,31 +1023,30 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 	   the desired rip using Dijkstra's algorithm.  */
 	/* Distance from start of function to key.  Non-present keys
 	 * should be assumed to have an infinite length. */
-	std::map<unsigned long, unsigned> pathLengths;
+	std::map<VexRip, unsigned> pathLengths;
 	/* Predecessor on best path from start to key. */
-	std::map<unsigned long, unsigned long> predecessors; 
+	std::map<VexRip, VexRip> predecessors; 
 	/* We push stuff in here when we discover a new shortest path
 	   to that node. */
-	std::priority_queue<std::pair<unsigned, unsigned long> > grey;
+	std::priority_queue<std::pair<unsigned, VexRip> > grey;
 
 	pathLengths[f.rip] = 0;
-	grey.push(std::pair<unsigned, unsigned long>(0, f.rip));
+	grey.push(std::pair<unsigned, VexRip>(0, f.rip));
 	while (!grey.empty()) {
-		std::pair<unsigned, unsigned long> e(grey.top());
+		std::pair<unsigned, VexRip> e(grey.top());
 		grey.pop();
 
 		assert(pathLengths.count(e.second));
 		unsigned p = pathLengths[e.second] + 1;
-		std::vector<unsigned long> successors;
+		std::vector<VexRip> successors;
 		f.getSuccessors(e.second, successors);
-		for (std::vector<unsigned long>::iterator it = successors.begin();
+		for (auto it = successors.begin();
 		     it != successors.end();
 		     it++) {
-			unsigned long ft = *it;
-			if (!pathLengths.count(ft) || pathLengths[ft] >= p) {
-				pathLengths[ft] = p;
-				predecessors[ft] = e.second;
-				grey.push(std::pair<unsigned, unsigned long>(p, ft));
+			if (!pathLengths.count(*it) || pathLengths[*it] >= p) {
+				pathLengths[*it] = p;
+				predecessors[*it] = e.second;
+				grey.push(std::pair<unsigned, VexRip>(p, *it));
 			}
 		}
 	}
@@ -1086,7 +1058,7 @@ Oracle::findPreviousInstructions(std::vector<unsigned long> &output,
 		return;
 	}
 
-	for (unsigned long i = predecessors[rip]; i; i = predecessors[i])
+	for (auto i = predecessors[rip]; i.isValid(); i = predecessors[i])
 		output.push_back(i);
 }
 
@@ -1197,11 +1169,26 @@ extract_int64_column(sqlite3_stmt *stmt, int column, std::vector<unsigned long> 
 }
 
 static void
+extract_oraclerip_column(sqlite3_stmt *stmt, int column, std::vector<VexRip> &out)
+{
+	std::vector<unsigned long> out1;
+	extract_int64_column(stmt, column, out1);
+	for (auto it = out1.begin(); it != out1.end(); it++)
+		out.push_back(VexRip::invent_vex_rip(*it));
+}
+
+static void
 bind_int64(sqlite3_stmt *stmt, int idx, unsigned long val)
 {
 	int rc;
 	rc = sqlite3_bind_int64(stmt, idx, val);
 	assert(rc == SQLITE_OK);
+}
+
+static void
+bind_oraclerip(sqlite3_stmt *stmt, int idx, const VexRip &rip)
+{
+	bind_int64(stmt, idx, rip.unwrap_vexrip());
 }
 
 static void
@@ -1213,15 +1200,15 @@ drop_index(const char *name)
 }
 
 void
-Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &heads, GarbageCollectionToken token)
+Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, GarbageCollectionToken token)
 {
 	drop_index("branchDest");
 	drop_index("callDest");
 	drop_index("fallThroughDest");
 
-	std::set<unsigned long> visited;
+	std::set<VexRip> visited;
 	while (!heads.empty()) {
-		unsigned long head;
+		VexRip head;
 		head = heads.back();
 		heads.pop_back();
 		if (visited.count(head))
@@ -1240,14 +1227,14 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<unsigned long> &h
 }
 
 Oracle::LivenessSet
-Oracle::Function::liveOnEntry(unsigned long rip, bool isHead)
+Oracle::Function::liveOnEntry(const VexRip &rip, bool isHead)
 {
 	static sqlite3_stmt *stmt;
 	int rc;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT liveOnEntry FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
 	if (rc == SQLITE_DONE || sqlite3_column_type(stmt, 0) == SQLITE_NULL) {
@@ -1267,7 +1254,7 @@ Oracle::Function::liveOnEntry(unsigned long rip, bool isHead)
 }
 
 Oracle::RegisterAliasingConfiguration
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
+Oracle::Function::aliasConfigOnEntryToInstruction(const VexRip &rip, bool *b)
 {
 	static sqlite3_stmt *stmt;
 	int rc;
@@ -1275,7 +1262,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 	if (!stmt)
 		stmt = prepare_statement(
 			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
 	if (rc == SQLITE_DONE) {
@@ -1314,7 +1301,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, bool *b)
 }
 
 bool
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, Oracle::RegisterAliasingConfiguration *out)
+Oracle::Function::aliasConfigOnEntryToInstruction(const VexRip &rip, Oracle::RegisterAliasingConfiguration *out)
 {
 	bool res;
 	*out = aliasConfigOnEntryToInstruction(rip, &res);
@@ -1322,14 +1309,14 @@ Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip, Oracle::Reg
 }
 
 Oracle::RegisterAliasingConfiguration
-Oracle::Function::aliasConfigOnEntryToInstruction(unsigned long rip)
+Oracle::Function::aliasConfigOnEntryToInstruction(const VexRip &rip)
 {
 	bool ign;
 	return aliasConfigOnEntryToInstruction(rip, &ign);
 }
 
 void
-Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
+Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 {
 	Function work(x);
 
@@ -1337,11 +1324,11 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		return;
 
 	/* Start by building a CFG of the function's instructions. */
-	std::vector<unsigned long> unexplored;
-	std::set<unsigned long> explored;
+	std::vector<VexRip> unexplored;
+	std::set<VexRip> explored;
 	unexplored.push_back(x);
 	while (!unexplored.empty()) {
-		unsigned long rip = unexplored.back();
+		VexRip rip = unexplored.back();
 		unexplored.pop_back();
 
 		if (explored.count(rip))
@@ -1349,7 +1336,7 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 
 		IRSB *irsb;
 		try {
-			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip);
+			irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(STATIC_THREAD, rip));
 		} catch (BadMemoryException &e) {
 			irsb = NULL;
 		}
@@ -1361,40 +1348,40 @@ Oracle::discoverFunctionHead(unsigned long x, std::vector<unsigned long> &heads)
 		while (start_of_instruction < irsb->stmts_used) {
 			IRStmt *stmt = irsb->stmts[start_of_instruction];
 			assert(stmt->tag == Ist_IMark);
-			unsigned long r = ((IRStmtIMark *)stmt)->addr;
+			VexRip r = ((IRStmtIMark *)stmt)->addr.rip;
 			if (explored.count(r))
 				break;
 
-			std::vector<unsigned long> branch;
-			std::vector<unsigned long> fallThrough;
-			std::vector<unsigned long> callees;
+			std::vector<VexRip> branch;
+			std::vector<VexRip> fallThrough;
+			std::vector<VexRip> callees;
 			for (end_of_instruction = start_of_instruction + 1;
 			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
 			     end_of_instruction++) {
 				stmt = irsb->stmts[end_of_instruction];
 				if (stmt->tag == Ist_Exit)
-					branch.push_back(((IRStmtExit *)stmt)->dst->Ico.U64);
+					branch.push_back(((IRStmtExit *)stmt)->dst.rip);
 			}
 
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
-					if (irsb->next->tag != Iex_Const ||
-					    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
+					if (!irsb->next_is_const ||
+					    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
 						fallThrough.push_back(extract_call_follower(irsb));
-					if (irsb->next->tag == Iex_Const)
-						callees.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+					if (irsb->next_is_const)
+						callees.push_back(irsb->next_const.rip);
 					else
 						findPossibleJumpTargets(rip, callees);
 				} else {
-					if (irsb->next->tag == Iex_Const)
-						fallThrough.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+					if (irsb->next_is_const)
+						fallThrough.push_back(irsb->next_const.rip);
 					else if (irsb->jumpkind != Ijk_Ret)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
 				stmt = irsb->stmts[end_of_instruction];
 				assert(dynamic_cast<IRStmtIMark *>(stmt));
-				fallThrough.push_back(((IRStmtIMark *)stmt)->addr);
+				fallThrough.push_back( ((IRStmtIMark *)stmt)->addr.rip );
 			}
 
 			heads.insert(heads.end(), callees.begin(), callees.end());
@@ -1436,13 +1423,13 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 	if (rbpToRspOffsetsCorrect())
 		return;
 
-	std::vector<unsigned long> instrsToRecalculate1;
-	std::vector<unsigned long> instrsToRecalculate2;
+	std::vector<VexRip> instrsToRecalculate1;
+	std::vector<VexRip> instrsToRecalculate2;
 
 	getInstructionsInFunction(instrsToRecalculate1);
 
 	while (1) {
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate1.begin();
+		for (std::vector<VexRip>::iterator it = instrsToRecalculate1.begin();
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
@@ -1454,7 +1441,7 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 		if (instrsToRecalculate2.empty())
 			break;
 
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate2.begin();
+		for (auto it = instrsToRecalculate2.begin();
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
@@ -1479,8 +1466,8 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 	if (registerLivenessCorrect())
 		return;
 
-	std::vector<unsigned long> instrsToRecalculate1;
-	std::vector<unsigned long> instrsToRecalculate2;
+	std::vector<VexRip> instrsToRecalculate1;
+	std::vector<VexRip> instrsToRecalculate2;
 
 	getInstructionsInFunction(instrsToRecalculate1);
 
@@ -1489,7 +1476,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 
 	changed = false;
 	while (1) {
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate1.begin();
+		for (auto it = instrsToRecalculate1.begin();
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
@@ -1502,7 +1489,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 			break;
 		changed = true;
 
-		for (std::vector<unsigned long>::iterator it = instrsToRecalculate2.begin();
+		for (auto it = instrsToRecalculate2.begin();
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
@@ -1520,9 +1507,9 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 
 	if (changed) {
 		*done_something = true;
-		std::vector<unsigned long> callers;
+		std::vector<VexRip> callers;
 		getFunctionCallers(callers, oracle);
-		for (std::vector<unsigned long>::iterator it = callers.begin();
+		for (auto it = callers.begin();
 		     it != callers.end();
 		     it++)
 			(Function(*it)).setRegisterLivenessCorrect(false);
@@ -1549,16 +1536,16 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 		setAliasConfigOnEntryToInstruction(rip, RegisterAliasingConfiguration::functionEntryConfiguration);
 	}
 
-	std::vector<unsigned long> needsUpdating;
-	std::vector<unsigned long> allInstrs;
+	std::vector<VexRip> needsUpdating;
+	std::vector<VexRip> allInstrs;
 	getInstructionsInFunction(allInstrs);
-	for (std::vector<unsigned long>::iterator it = allInstrs.begin();
+	for (auto it = allInstrs.begin();
 	     it != allInstrs.end();
 	     it++)
 		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, oracle);
 	while (!needsUpdating.empty()) {
 		*done_something = true;
-		unsigned long rip = needsUpdating.back();
+		VexRip rip = needsUpdating.back();
 		needsUpdating.pop_back();
 		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, oracle);
 	}
@@ -1567,11 +1554,11 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 }
 
 void
-Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
+Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *changed, Oracle *oracle)
 {
 	LivenessSet res;
 
-	IRSB *irsb = as->getIRSBForAddress(-1, rip);
+	IRSB *irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -1579,34 +1566,34 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 	     nr_statements++)
 		;
 
-	std::vector<unsigned long> fallThroughRips;
-	std::vector<unsigned long> callees;
+	std::vector<VexRip> fallThroughRips;
+	std::vector<VexRip> callees;
 
 	if (nr_statements == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
-			if (irsb->next->tag != Iex_Const ||
-			    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
+			if (!irsb->next_is_const ||
+			    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
 				fallThroughRips.push_back(extract_call_follower(irsb));
-			if (irsb->next->tag == Iex_Const)
-				callees.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+			if (irsb->next_is_const)
+				callees.push_back( irsb->next_const.rip);
 			else
 				getInstructionCallees(rip, callees, oracle);
 		} else {
-			if (irsb->next->tag == Iex_Const)
-				fallThroughRips.push_back(((IRExprConst *)irsb->next)->con->Ico.U64);
+			if (irsb->next_is_const == Iex_Const)
+				fallThroughRips.push_back( irsb->next_const.rip);
 			else
 				getInstructionFallThroughs(rip, fallThroughRips);
 		}
 	} else {
 		assert(dynamic_cast<IRStmtIMark *>(statements[nr_statements]));
-		fallThroughRips.push_back(((IRStmtIMark *)statements[nr_statements])->addr);
+		fallThroughRips.push_back( ((IRStmtIMark *)statements[nr_statements])->addr.rip );
 	}
 
-	for (std::vector<unsigned long>::iterator it = fallThroughRips.begin();
+	for (auto it = fallThroughRips.begin();
 	     it != fallThroughRips.end();
 	     it++)
 		res |= liveOnEntry(*it, false);
-	for (std::vector<unsigned long>::iterator it = callees.begin();
+	for (auto it = callees.begin();
 	     it != callees.end();
 	     it++) {
 		Function f(*it);
@@ -1650,9 +1637,8 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			unsigned long _branchRip = ((IRStmtExit *)stmt)->dst->Ico.U64;
-			if (_branchRip)
-				res |= liveOnEntry(_branchRip, false);
+			VexRip _branchRip = ((IRStmtExit *)stmt)->dst.rip;
+			res |= liveOnEntry(_branchRip, false);
 			res = irexprUsedValues(res, ((IRStmtExit *)stmt)->guard);
 			break;
 		}
@@ -1671,7 +1657,7 @@ Oracle::Function::updateLiveOnEntry(const unsigned long rip, AddressSpace *as, b
 			stmt = prepare_statement(
 				"UPDATE instructionAttributes SET liveOnEntry = ? WHERE rip = ?");
 		bind_int64(stmt, 1, res.mask);
-		bind_int64(stmt, 2, rip);
+		bind_oraclerip(stmt, 2, rip);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		sqlite3_reset(stmt);
@@ -1703,7 +1689,7 @@ rewriteRegister(IRExpr *expr, threadAndRegister offset, IRExpr *to)
 }
 
 void
-Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool *changed, Oracle *oracle)
+Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool *changed, Oracle *oracle)
 {
 	RbpToRspOffsetState current_state;
 	unsigned long current_offset;
@@ -1721,7 +1707,7 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 	/* Try to figure out what this instruction actually does. */
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException e) {
 		return;
 	}
@@ -1882,10 +1868,10 @@ Oracle::Function::updateRbpToRspOffset(unsigned long rip, AddressSpace *as, bool
 join_predecessors:
 	state = RbpToRspOffsetStateUnknown;
 	{
-		std::vector<unsigned long> predecessors;
+		std::vector<VexRip> predecessors;
 		addPredecessorsNonCall(rip, predecessors);
 
-		for (std::vector<unsigned long>::iterator it = predecessors.begin();
+		for (auto it = predecessors.begin();
 		     it != predecessors.end();
 		     it++) {
 			enum RbpToRspOffsetState pred_state;
@@ -1937,7 +1923,7 @@ impossible_clean:
 }
 
 void
-Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, AddressSpace *as, std::vector<unsigned long> *changed,
+Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, AddressSpace *as, std::vector<VexRip> *changed,
 						      Oracle *oracle)
 {
 	RegisterAliasingConfiguration config(aliasConfigOnEntryToInstruction(rip));
@@ -1947,7 +1933,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 	int nr_statements;
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -2037,15 +2023,13 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			unsigned long _branchRip = ((IRStmtExit *)st)->dst->Ico.U64;
-			if (_branchRip) {
-				RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
-				RegisterAliasingConfiguration newExitConfig(bConfig);
-				newExitConfig |= config;
-				if (newExitConfig != bConfig) {
-					changed->push_back(_branchRip);
-					setAliasConfigOnEntryToInstruction(_branchRip, newExitConfig);
-				}
+			VexRip _branchRip = ((IRStmtExit *)st)->dst.rip;
+			RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
+			RegisterAliasingConfiguration newExitConfig(bConfig);
+			newExitConfig |= config;
+			if (newExitConfig != bConfig) {
+				changed->push_back(_branchRip);
+				setAliasConfigOnEntryToInstruction(_branchRip, newExitConfig);
 			}
 			break;
 		}
@@ -2054,11 +2038,11 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 		}
 	}
 
-	std::vector<unsigned long> callees;
+	std::vector<VexRip> callees;
 	getInstructionCallees(rip, callees, oracle);
 	if (!callees.empty())
 		config.v[0] = PointerAliasingSet::notAPointer;
-	for (std::vector<unsigned long>::iterator it = callees.begin();
+	for (auto it = callees.begin();
 	     config.v[0] != PointerAliasingSet::anything && it != callees.end();
 	     it++) {
 		LivenessSet ls = (Function(*it)).liveOnEntry(*it, true);
@@ -2084,9 +2068,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 			config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
 		config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
 	}
-	std::vector<unsigned long> _fallThroughRips;
+	std::vector<VexRip> _fallThroughRips;
 	getInstructionFallThroughs(rip, _fallThroughRips);
-	for (std::vector<unsigned long>::iterator it = _fallThroughRips.begin();
+	for (auto it = _fallThroughRips.begin();
 	     it != _fallThroughRips.end();
 	     it++) {
 		bool b;
@@ -2107,7 +2091,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(unsigned long rip, Address
 }
 
 void
-Oracle::Function::addPredecessorsNonCall(unsigned long rip, std::vector<unsigned long> &out)
+Oracle::Function::addPredecessorsNonCall(const VexRip &rip, std::vector<VexRip> &out)
 {
 	static sqlite3_stmt *stmt1, *stmt2;
 
@@ -2116,52 +2100,52 @@ Oracle::Function::addPredecessorsNonCall(unsigned long rip, std::vector<unsigned
 		stmt1 = prepare_statement("SELECT rip FROM fallThroughRips WHERE dest = ?");
 		stmt2 = prepare_statement("SELECT rip FROM branchRips WHERE dest = ?");
 	}
-	bind_int64(stmt1, 1, rip);
-	bind_int64(stmt2, 1, rip);
-	extract_int64_column(stmt1, 0, out);
-	extract_int64_column(stmt2, 0, out);
+	bind_oraclerip(stmt1, 1, rip);
+	bind_oraclerip(stmt2, 1, rip);
+	extract_oraclerip_column(stmt1, 0, out);
+	extract_oraclerip_column(stmt2, 0, out);
 }
 
 void
-Oracle::Function::addPredecessors(unsigned long rip, std::vector<unsigned long> &out)
+Oracle::Function::addPredecessors(const VexRip &rip, std::vector<VexRip> &out)
 {
 	static sqlite3_stmt *stmt;
 
 	addPredecessorsNonCall(rip, out);
 	if (!stmt)
 		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
-	bind_int64(stmt, 1, rip);
-	extract_int64_column(stmt, 0, out);
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 void
-Oracle::Function::getInstructionFallThroughs(unsigned long rip, std::vector<unsigned long> &succ)
+Oracle::Function::getInstructionFallThroughs(const VexRip &rip, std::vector<VexRip> &succ)
 {
 	static sqlite3_stmt *stmt1;
 
 	if (!stmt1)
 		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
-	bind_int64(stmt1, 1, rip);
+	bind_oraclerip(stmt1, 1, rip);
 
 	succ.clear();
-	extract_int64_column(stmt1, 0, succ);
+	extract_oraclerip_column(stmt1, 0, succ);
 }
 
 void
-Oracle::Function::getInstructionsInFunction(std::vector<unsigned long> &succ) const
+Oracle::Function::getInstructionsInFunction(std::vector<VexRip> &succ) const
 {
 	static sqlite3_stmt *stmt1;
 
 	if (!stmt1)
 		stmt1 = prepare_statement("SELECT rip FROM instructionAttributes WHERE functionHead = ?");
-	bind_int64(stmt1, 1, rip);
+	bind_oraclerip(stmt1, 1, rip);
 
 	succ.clear();
-	extract_int64_column(stmt1, 0, succ);	
+	extract_oraclerip_column(stmt1, 0, succ);	
 }
 
 void
-Oracle::Function::getSuccessors(unsigned long rip, std::vector<unsigned long> &succ)
+Oracle::Function::getSuccessors(const VexRip &rip, std::vector<VexRip> &succ)
 {
 	static sqlite3_stmt *stmt1, *stmt2;
 
@@ -2170,15 +2154,15 @@ Oracle::Function::getSuccessors(unsigned long rip, std::vector<unsigned long> &s
 		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
 		stmt2 = prepare_statement("SELECT dest FROM branchRips WHERE rip = ?");
 	}
-	bind_int64(stmt1, 1, rip);
-	bind_int64(stmt2, 1, rip);
+	bind_oraclerip(stmt1, 1, rip);
+	bind_oraclerip(stmt2, 1, rip);
 
-	extract_int64_column(stmt1, 0, succ);
-	extract_int64_column(stmt2, 0, succ);
+	extract_oraclerip_column(stmt1, 0, succ);
+	extract_oraclerip_column(stmt2, 0, succ);
 }
 
 void
-Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
+Oracle::Function::setAliasConfigOnEntryToInstruction(const VexRip &r,
 						     const RegisterAliasingConfiguration &config)
 {
 	static sqlite3_stmt *stmt;
@@ -2192,24 +2176,24 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(unsigned long r,
 	for (i = 0; i < NR_REGS; i++)
 		bind_int64(stmt, i + 1, config.v[i]);
 	bind_int64(stmt, NR_REGS + 1, config.stackHasLeaked);
-	bind_int64(stmt, NR_REGS + 2, r);
+	bind_oraclerip(stmt, NR_REGS + 2, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
 }
 
 bool
-Oracle::Function::addInstruction(unsigned long rip,
-				 const std::vector<unsigned long> &callees,
-				 const std::vector<unsigned long> &fallThrough,
-				 const std::vector<unsigned long> &branch)
+Oracle::Function::addInstruction(const VexRip &rip,
+				 const std::vector<VexRip> &callees,
+				 const std::vector<VexRip> &fallThrough,
+				 const std::vector<VexRip> &branch)
 {
 	sqlite3_stmt *stmt;
 	int rc;
 
 	stmt = prepare_statement("INSERT INTO instructionAttributes (rip, functionHead) VALUES (?, ?)");
-	bind_int64(stmt, 1, rip);
-	bind_int64(stmt, 2, this->rip);
+	bind_oraclerip(stmt, 1, rip);
+	bind_oraclerip(stmt, 2, this->rip);
 	rc = sqlite3_step(stmt);
 	sqlite3_finalize(stmt);
 	if (rc == SQLITE_CONSTRAINT) {
@@ -2218,11 +2202,11 @@ Oracle::Function::addInstruction(unsigned long rip,
 	assert(rc == SQLITE_DONE);
 
 	stmt = prepare_statement("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
-	for (std::vector<unsigned long>::const_iterator it = fallThrough.begin();
+	for (auto it = fallThrough.begin();
 	     it != fallThrough.end();
 	     it++) {
-		bind_int64(stmt, 1, rip);
-		bind_int64(stmt, 2, *it);
+		bind_oraclerip(stmt, 1, rip);
+		bind_oraclerip(stmt, 2, *it);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		rc = sqlite3_reset(stmt);
@@ -2231,11 +2215,11 @@ Oracle::Function::addInstruction(unsigned long rip,
 	sqlite3_finalize(stmt);
 
 	stmt = prepare_statement("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
-	for (std::vector<unsigned long>::const_iterator it = branch.begin();
+	for (auto it = branch.begin();
 	     it != branch.end();
 	     it++) {
-		bind_int64(stmt, 1, rip);
-		bind_int64(stmt, 2, *it);
+		bind_oraclerip(stmt, 1, rip);
+		bind_oraclerip(stmt, 2, *it);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		rc = sqlite3_reset(stmt);
@@ -2244,11 +2228,11 @@ Oracle::Function::addInstruction(unsigned long rip,
 	sqlite3_finalize(stmt);
 
 	stmt = prepare_statement("INSERT INTO callRips (rip, dest) VALUES (?, ?)");
-	for (std::vector<unsigned long>::const_iterator it = callees.begin();
+	for (auto it = callees.begin();
 	     it != callees.end();
 	     it++) {
-		bind_int64(stmt, 1, rip);
-		bind_int64(stmt, 2, *it);
+		bind_oraclerip(stmt, 1, rip);
+		bind_oraclerip(stmt, 2, *it);
 		rc = sqlite3_step(stmt);
 		assert(rc == SQLITE_DONE);
 		rc = sqlite3_reset(stmt);
@@ -2260,35 +2244,35 @@ Oracle::Function::addInstruction(unsigned long rip,
 }
 
 void
-Oracle::Function::getInstructionCallees(unsigned long rip, std::vector<unsigned long> &out, Oracle *oracle)
+Oracle::Function::getInstructionCallees(const VexRip &rip, std::vector<VexRip> &out, Oracle *oracle)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT dest FROM callRips WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
-	extract_int64_column(stmt, 0, out);
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 void
-Oracle::Function::getFunctionCallers(std::vector<unsigned long> &out, Oracle *oracle)
+Oracle::Function::getFunctionCallers(std::vector<VexRip> &out, Oracle *oracle)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
-	bind_int64(stmt, 1, rip);
-	extract_int64_column(stmt, 0, out);
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 void
-Oracle::getFunctions(std::vector<unsigned long> &out)
+Oracle::getFunctions(std::vector<VexRip> &out)
 {
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
 		stmt = prepare_statement("SELECT DISTINCT functionHead FROM instructionAttributes");
-	extract_int64_column(stmt, 0, out);
+	extract_oraclerip_column(stmt, 0, out);
 }
 
 bool
@@ -2297,7 +2281,7 @@ Oracle::Function::registerLivenessCorrect() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT registerLivenessCorrect FROM functionAttribs WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	std::vector<unsigned long> a;
 	extract_int64_column(stmt, 0, a);
 	if (a.size() == 0)
@@ -2312,7 +2296,7 @@ Oracle::Function::rbpToRspOffsetsCorrect() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT rbpOffsetCorrect FROM functionAttribs WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	std::vector<unsigned long> a;
 	extract_int64_column(stmt, 0, a);
 	if (a.size() == 0)
@@ -2327,7 +2311,7 @@ Oracle::Function::aliasingConfigCorrect() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT aliasingCorrect FROM functionAttribs WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	std::vector<unsigned long> a;
 	extract_int64_column(stmt, 0, a);
 	if (a.size() == 0)
@@ -2342,7 +2326,7 @@ Oracle::Function::setRegisterLivenessCorrect(bool x)
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect, rbpOffsetCorrect, aliasingCorrect) VALUES (?, ?, 0, 0)");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	bind_int64(stmt, 2, x);
 
 	int rc;
@@ -2358,7 +2342,7 @@ Oracle::Function::setRbpToRspOffsetsCorrect(bool x)
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("UPDATE functionAttribs SET rbpOffsetCorrect = ? WHERE functionHead = ?");
-	bind_int64(stmt, 2, rip);
+	bind_oraclerip(stmt, 2, rip);
 	bind_int64(stmt, 1, x);
 
 	int rc;
@@ -2369,12 +2353,12 @@ Oracle::Function::setRbpToRspOffsetsCorrect(bool x)
 }
 
 void
-Oracle::getRbpToRspOffset(unsigned long rip, enum RbpToRspOffsetState *state, unsigned long *offset)
+Oracle::getRbpToRspOffset(const VexRip &rip, enum RbpToRspOffsetState *state, unsigned long *offset)
 {
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT rbpToRspDeltaState,rbpToRspDelta FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	int rc = sqlite3_step(stmt);
 	if (rc == SQLITE_DONE) {
 		/* Not entered in database yet */
@@ -2405,7 +2389,7 @@ Oracle::getRbpToRspOffset(unsigned long rip, enum RbpToRspOffsetState *state, un
 }
 
 void
-Oracle::setRbpToRspOffset(unsigned long r,
+Oracle::setRbpToRspOffset(const VexRip &r,
 			  RbpToRspOffsetState state,
 			  unsigned long offset)
 {
@@ -2429,7 +2413,7 @@ Oracle::setRbpToRspOffset(unsigned long r,
 		abort();
 	}
 	bind_int64(stmt, 2, offset);
-	bind_int64(stmt, 3, r);
+	bind_oraclerip(stmt, 3, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
@@ -2442,7 +2426,7 @@ Oracle::Function::setAliasingConfigCorrect(bool x)
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("UPDATE functionAttribs SET aliasingCorrect = ? WHERE functionHead = ?");
-	bind_int64(stmt, 2, rip);
+	bind_oraclerip(stmt, 2, rip);
 	bind_int64(stmt, 1, x);
 
 	int rc;
@@ -2458,35 +2442,35 @@ Oracle::Function::exists() const
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT COUNT(*) FROM instructionAttributes WHERE functionHead = ?");
-	bind_int64(stmt, 1, rip);
+	bind_oraclerip(stmt, 1, rip);
 	std::vector<unsigned long> x;
 	extract_int64_column(stmt, 0, x);
 	assert(x.size() == 1);
 	return x[0] != 0;
 }
 
-unsigned long
-Oracle::functionHeadForInstruction(unsigned long rip)
+VexRip
+Oracle::functionHeadForInstruction(const VexRip &rip)
 {
 	__set_profiling(functionHeadForInstruction);
 	static sqlite3_stmt *stmt;
 	if (!stmt)
 		stmt = prepare_statement("SELECT functionHead FROM instructionAttributes WHERE rip = ?");
-	bind_int64(stmt, 1, rip);
-	std::vector<unsigned long> x;
-	extract_int64_column(stmt, 0, x);
+	bind_oraclerip(stmt, 1, rip);
+	std::vector<VexRip> x;
+	extract_oraclerip_column(stmt, 0, x);
 	if (x.size() == 0)
-		return 0;
+		return VexRip();
 	assert(x.size() == 1);
 	return x[0];
 }
 
 unsigned
-getInstructionSize(AddressSpace *as, unsigned long rip)
+getInstructionSize(AddressSpace *as, const VexRip &rip)
 {
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip);
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException &e) {
 		return 0;
 	}
@@ -2501,8 +2485,8 @@ getInstructionSize(AddressSpace *as, unsigned long rip)
    dominator).  If minimum_size is non-zero we further restrict things
    so that we only consider dominating instructions whose size is at
    least minimum_size bytes, or the head instruction in a function. */
-unsigned long
-Oracle::dominator(const std::set<unsigned long> &instrs,
+VexRip
+Oracle::dominator(const std::set<VexRip> &instrs,
 		  AddressSpace *as,
 		  unsigned minimum_size)
 {
@@ -2511,32 +2495,34 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 
 	/* For now, only handle the case where everything is in the
 	 * same function. */
-	unsigned long f = 0;
-	for (std::set<unsigned long>::iterator it = instrs.begin();
+	VexRip f;
+	bool have_f = false;
+	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++) {
-		if (!f)
+		if (!have_f) {
 			f = functionHeadForInstruction(*it);
-		else if (f != functionHeadForInstruction(*it)) {
+			have_f = true;
+		} else if (f != functionHeadForInstruction(*it)) {
 			printf("Can't find dominator for instruction set which crosses functions\n");
 			for (it = instrs.begin();
 			     it != instrs.end();
 			     it++)
-				printf("%lx in function %lx\n", f, functionHeadForInstruction(*it));
-			return 0;
+				printf("%s in function %s\n", f.name(), functionHeadForInstruction(*it).name());
+			return VexRip();
 		}
 	}
 
-	if (!f) {
+	if (!have_f) {
 		printf("Eh? can't find function which contains instructions which need to be dominated.\n");
-		return 0;
+		return VexRip();
 	}
 
 	/* Find the dominator chains for each individual instruction,
 	   intersect them, and then take the last one. This is perhaps
 	   not the most efficient algorithm imaginable. */
-	std::vector<unsigned long> dominators;
-	std::set<unsigned long>::iterator it = instrs.begin();
+	std::vector<VexRip> dominators;
+	auto it = instrs.begin();
 	findDominators(f, *it, as, dominators);
 	std::reverse(dominators.begin(), dominators.end());
 	dominators.push_back(*it);
@@ -2544,7 +2530,7 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	while (it != instrs.end()) {
 		if (TIMEOUT)
 			break;
-		std::vector<unsigned long> newDominators;
+		std::vector<VexRip> newDominators;
 		findDominators(f, *it, as, newDominators);
 		std::reverse(newDominators.begin(), newDominators.end());
 		newDominators.push_back(*it);
@@ -2561,7 +2547,7 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 	 * function, unless we timed out. */
 	if (dominators.empty()) {
 		printf("Dominator set empty!\n");
-		return 0;
+		return VexRip();
 	}
 
 	/* Eliminate excessively small instructions. */
@@ -2573,7 +2559,7 @@ Oracle::dominator(const std::set<unsigned long> &instrs,
 }
 
 bool
-Oracle::getRbpToRspDelta(unsigned long rip, long *out)
+Oracle::getRbpToRspDelta(const VexRip &rip, long *out)
 {
 	RbpToRspOffsetState state;
 	unsigned long o;
@@ -2587,7 +2573,7 @@ Oracle::getRbpToRspDelta(unsigned long rip, long *out)
 }
 
 Oracle::LivenessSet
-Oracle::liveOnEntryToFunction(unsigned long rip)
+Oracle::liveOnEntryToFunction(const VexRip &rip)
 {
 	Function f(rip);
 	return f.liveOnEntry(rip, true);
@@ -2697,4 +2683,14 @@ dbg_database_query(const char *query)
 		}
 	}
 	sqlite3_finalize(stmt);
+}
+
+bool
+parseThreadVexRip(ThreadVexRip *tr, const char *str, const char **suffix)
+{
+	if (!parseDecimalUInt(&tr->thread, str, &str) ||
+	    !parseThisChar(':', str, &str) ||
+	    !parseVexRip(&tr->rip, str, suffix))
+		return false;
+	return true;
 }

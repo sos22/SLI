@@ -2,8 +2,10 @@
 #define __LIBVEX_ALLOC_H
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <set>
 
@@ -275,5 +277,17 @@ public:
 void LibVEX_alloc_sanity_check(Heap *h);
 char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 char *vex_vasprintf(const char *fmt, va_list args);
+
+static inline char *my_asprintf(const char *fmt, ...)
+{
+	va_list args;
+	char *r;
+	va_start(args, fmt);
+	int x = vasprintf(&r, fmt, args);
+	(void)x;
+	va_end(args);
+	return r;
+}
+static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
 #endif /* !__LIBVEX_ALLOC_H */

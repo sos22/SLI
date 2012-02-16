@@ -3244,7 +3244,7 @@ backtrack_crash_machine_node_for_statements(
 				/* Only handle two-way branches */
 				assert(!node->trueTarget);
 				abstractStoresT stores;
-				node->trueTarget = CrashMachineNode::stub(((IRStmtExit *)stmt)->dst->Ico.U64, stores);
+				node->trueTarget = CrashMachineNode::stub(((IRStmtExit *)stmt)->dst.rip.unwrap_vexrip(), stores);
 				node->branchCond = CrashExpression::get(((IRStmtExit *)stmt)->guard);
 			}
 			break;
@@ -3478,19 +3478,19 @@ get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
 			/* We pretend that functions do nothing at
 			   all.  That's not entirely valid, but it's
 			   kind of convenient. */
-			*out =	extract_call_follower(irsb);
+			*out =	extract_call_follower(irsb).unwrap_vexrip();
 			/* We ignore the call, so we need to pop the
 			   return address which we just pushed. */
 			if (do_pop)
 				*do_pop = true;
-		} else if (irsb->next->tag == Iex_Const) {
-		  *out = ((IRExprConst *)irsb->next)->con->Ico.U64;
+		} else if (irsb->next_is_const == Iex_Const) {
+			*out = irsb->next_const.rip.unwrap_vexrip();
 		} else {
 			return false;
 		}
 	} else {
 		assert(irsb->stmts[instr_end]->tag == Ist_IMark);
-		*out = ((IRStmtIMark *)irsb->stmts[instr_end])->addr;
+		*out = ((IRStmtIMark *)irsb->stmts[instr_end])->addr.rip.unwrap_vexrip();
 	}
 	return true;
 }
@@ -3544,7 +3544,7 @@ CrashCFG::build_cfg(MachineState *ms,
 
 			DBG_BUILD_CFG("Not dynamically available\n");
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(tid._tid(), work.time.rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(work.time.rip)));
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used &&
@@ -3553,7 +3553,7 @@ CrashCFG::build_cfg(MachineState *ms,
 				if (irsb->stmts[instr_end]->tag == Ist_Exit) {
 					assert(!haveNonFallThrough);
 					nonFallThroughTarget.rip =
-						((IRStmtExit *)irsb->stmts[instr_end])->dst->Ico.U64;
+						((IRStmtExit *)irsb->stmts[instr_end])->dst.rip.unwrap_vexrip();
 					haveNonFallThrough = true;
 					DBG_BUILD_CFG("NFT %s\n", nonFallThroughTarget.name());
 				}
@@ -3594,7 +3594,7 @@ CrashCFG::build_cfg(MachineState *ms,
 			    instr_end == irsb->stmts_used &&
 			    irsb->jumpkind == Ijk_Call &&
 			    work.time.rip != 0x82297) {
-				fallThroughTarget.callStack.push_back(extract_call_follower(irsb));
+				fallThroughTarget.callStack.push_back(extract_call_follower(irsb).unwrap_vexrip());
 			}
 			if (irsb->jumpkind == Ijk_NoDecode) {
 				dead = true;
@@ -3977,7 +3977,7 @@ CrashCFG::calculate_cmns(ThreadId tid,
 				continue;
 			}
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(tid._tid(), node->when.rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(node->when.rip)));
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used && irsb->stmts[instr_end]->tag != Ist_IMark;
@@ -4837,8 +4837,9 @@ main(int argc, char *argv[])
 		 * the last thing in the ring buffer. */
 		crashedThread->currentIRSB =
 			ms->addressSpace->getIRSBForAddress(
-				oracle.crashingTid._tid(),
-				crashedThread->controlLog.rbegin()->translated_rip);
+				ThreadRip::mk(
+					oracle.crashingTid._tid(),
+					VexRip::invent_vex_rip(crashedThread->controlLog.rbegin()->translated_rip)));
 		/* We should be at the end of that... */
 		assert(crashedThread->currentIRSBOffset ==
 		       crashedThread->currentIRSB->stmts_used + 1);
@@ -4852,8 +4853,9 @@ main(int argc, char *argv[])
 		printf("Crashed by syscall\n");
 		crashedThread->currentIRSB =
 			ms->addressSpace->getIRSBForAddress(
-				oracle.crashingTid._tid(),
-				crashedThread->currentIRSBRip);
+				ThreadRip::mk(
+					oracle.crashingTid._tid(),
+					VexRip::invent_vex_rip(crashedThread->currentIRSBRip)));
 	}
 
 	/* Build the footstep log.  This has a record for every
@@ -4878,7 +4880,7 @@ main(int argc, char *argv[])
 	     idx--) {
 		if (idx < crashedThread->currentIRSB->stmts_used &&
 		    crashedThread->currentIRSB->stmts[idx]->tag == Ist_IMark) {
-			ts.rip = ((IRStmtIMark *)crashedThread->currentIRSB->stmts[idx])->addr;
+			ts.rip = ((IRStmtIMark *)crashedThread->currentIRSB->stmts[idx])->addr.rip.unwrap_vexrip();
 			oracle.addRipTrace(ts, false);
 			prev_rip = ts.rip;
 		}
@@ -4889,8 +4891,8 @@ main(int argc, char *argv[])
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
 	     it++) {
-	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(oracle.crashingTid._tid(),
-								 it->translated_rip);
+	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(oracle.crashingTid._tid(),
+									       VexRip::invent_vex_rip(it->translated_rip)));
 		bool exited_by_branch;
 		int exit_idx;
 		if (it->exit_idx == irsb->stmts_used + 1) {
@@ -4909,10 +4911,10 @@ main(int argc, char *argv[])
 		     idx >= 0;
 		     idx--) {
 			if (irsb->stmts[idx]->tag == Ist_IMark) {
-				ts.rip = ((IRStmtIMark *)irsb->stmts[idx])->addr;
+				ts.rip = ((IRStmtIMark *)irsb->stmts[idx])->addr.rip.unwrap_vexrip();
 				oracle.addRipTrace(ts, exited_by_branch);
 				exited_by_branch = false;
-				prev_rip = ((IRStmtIMark *)irsb->stmts[idx])->addr;
+				prev_rip = ((IRStmtIMark *)irsb->stmts[idx])->addr.rip.unwrap_vexrip();
 			}
 		}
 	}
@@ -4932,18 +4934,19 @@ main(int argc, char *argv[])
 		/* We made it to the end of the block and then crashed
 		   trying to start the next one -> the next address
 		   must be bad. */
+		assert(!crashedThread->currentIRSB->next_is_const);
 		for (instr_start = crashedThread->currentIRSBOffset-2;
 		     crashedThread->currentIRSB->stmts[instr_start]->tag != Ist_IMark;
 		     instr_start--)
 			;
 		abstractStoresT stores;
-		when.rip = ((IRStmtIMark *)crashedThread->currentIRSB->stmts[instr_start])->addr;
+		when.rip = ((IRStmtIMark *)crashedThread->currentIRSB->stmts[instr_start])->addr.rip.unwrap_vexrip();
 		when.changed();
 		if (1) {
 			cmn = CrashMachineNode::leaf(
 				when.rip,
 				CrashExpressionBadAddr::get(
-					CrashExpression::get(crashedThread->currentIRSB->next)),
+					CrashExpression::get(crashedThread->currentIRSB->next_nonconst)),
 				stores);
 		} else {
 			cmn = CrashMachineNode::leaf(

@@ -23,10 +23,10 @@ __genfix_add_array_summary(std::vector<const char *> &out,
 }
 
 class DcdCFG : public CFG<ThreadRip> {
-	std::set<unsigned long> &neededInstructions;
+	std::set<VexRip> &neededInstructions;
 public:
 	bool instructionUseful(Instruction<ThreadRip> *i) { return neededInstructions.count(i->rip.rip) != 0; }
-	DcdCFG(AddressSpace *as, std::set<unsigned long> &ni)
+	DcdCFG(AddressSpace *as, std::set<VexRip> &ni)
 		: CFG<ThreadRip>(as), neededInstructions(ni)
 	{}
 };
@@ -36,11 +36,11 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	AddressSpace *as = oracle->ms->addressSpace;
 
 	/* What instructions do we need to cover? */
-	std::set<unsigned long> neededInstructions;
+	std::set<VexRip> neededInstructions;
 	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
 	/* 5 bytes is the size of a 32-bit relative jump. */
-	ThreadRip root = ThreadRip::mk(summary->loadMachine->tid, oracle->dominator(neededInstructions, as, 5));
-	if (!root.rip) {
+	ThreadVexRip root(summary->loadMachine->tid, oracle->dominator(neededInstructions, as, 5));
+	if (!root.rip.isValid()) {
 		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
 		return NULL;
 	}
@@ -58,10 +58,10 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
 	     it != summary->storeMachines.end();
 	     it++) {
-		std::set<unsigned long> instrs;
+		std::set<VexRip> instrs;
 		(*it)->machine->root->enumerateMentionedMemoryAccesses(instrs);
-		ThreadRip r = ThreadRip::mk((*it)->machine->tid, oracle->dominator(instrs, as, 5));
-		if (!r.rip) {
+		ThreadVexRip r((*it)->machine->tid, oracle->dominator(instrs, as, 5));
+		if (!r.rip.isValid()) {
 			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
 			return NULL;
 		}
@@ -86,7 +86,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 
 unsigned long __trivial_hash_function(const ThreadRip &k)
 {
-	return k.rip;
+	return k.rip.hash();
 }
 
 unsigned long __trivial_hash_function(const unsigned long &k)

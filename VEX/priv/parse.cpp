@@ -86,10 +86,10 @@ bool parseHexUlong(unsigned long *out, const char *str, const char **suffix)
 bool parseThreadRip(ThreadRip *out, const char *str, const char **suffix)
 {
   int tid;
-  unsigned long rip;
+  VexRip rip;
   if (!parseDecimalInt(&tid, str, &str) ||
       !parseThisChar(':', str, &str) ||
-      !parseHexUlong(&rip, str, suffix)) {
+      !parseVexRip(&rip, str, suffix)) {
     return false;
   }
   out->thread = tid;
@@ -97,3 +97,18 @@ bool parseThreadRip(ThreadRip *out, const char *str, const char **suffix)
   return true;
 }
 
+bool parseVexRip(VexRip *out, const char *str, const char **suffix)
+{
+  if (!parseThisChar('{', str, &str))
+    return false;
+  out->stack.clear();
+  while (1) {
+    if (parseThisChar('}', str, suffix))
+      return true;
+    unsigned long v;
+    if (!parseHexUlong(&v, str, &str))
+      return false;
+    out->stack.push_back(v);
+    parseThisString(", ", str, &str);
+  }
+}

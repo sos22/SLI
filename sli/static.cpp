@@ -75,6 +75,9 @@ public:
 		}
 		return r;
 	}
+	operator VexRip() const {
+		return VexRip::invent_vex_rip(*this);
+	}
 	void visit(HeapVisitor &hv) { hv(content); }
 	NAMED_CLASS
 };
@@ -127,13 +130,13 @@ find_words(char *command)
 static void
 list_heads(Oracle *oracle)
 {
-	std::vector<unsigned long> f;
+	std::vector<VexRip> f;
 
 	oracle->getFunctions(f);
-	for (std::vector<unsigned long>::iterator it = f.begin();
+	for (auto it = f.begin();
 	     it != f.end();
 	     it++)
-		printf("%lx\n", *it);
+		printf("%s\n", it->name());
 }
 
 static void
@@ -142,21 +145,31 @@ dumpTagTable(Oracle *oracle)
 	for (std::vector<Oracle::tag_entry>::iterator it = oracle->tag_table.begin();
 	     it != oracle->tag_table.end();
 	     it++) {
-		printf("Loads: ");
-		for (std::set<unsigned long>::iterator it2 = it->loads.begin();
-		     it2 != it->loads.end();
+		printf("Shared loads: ");
+		for (auto it2 = it->shared_loads.begin();
+		     it2 != it->shared_loads.end();
 		     it2++)
-			printf("%lx ", *it2);
-		printf("\nStores: ");
-		for (std::set<unsigned long>::iterator it2 = it->stores.begin();
-		     it2 != it->stores.end();
+			printf("%s ", it2->name());
+		printf("\nShared stores: ");
+		for (auto it2 = it->shared_stores.begin();
+		     it2 != it->shared_stores.end();
 		     it2++)
-			printf("%lx ", *it2);
+			printf("%s ", it2->name());
+		printf("\nPrivate loads: ");
+		for (auto it2 = it->private_loads.begin();
+		     it2 != it->private_loads.end();
+		     it2++)
+			printf("%s ", it2->name());
+		printf("\nPrivate stores: ");
+		for (auto it2 = it->private_stores.begin();
+		     it2 != it->private_stores.end();
+		     it2++)
+			printf("%s ", it2->name());
 		printf("\n\n");
 	}
 }
 
-static std::vector<unsigned long> newHeads;
+static std::vector<VexRip> newHeads;
 
 static void
 run_command(VexPtr<Oracle> &oracle, GarbageCollectionToken token)

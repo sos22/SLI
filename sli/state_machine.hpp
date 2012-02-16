@@ -5,6 +5,7 @@
 #include <set>
 
 #include "simplify_irexpr.hpp"
+#include "oracle_rip.hpp"
 
 class StateMachine;
 class StateMachineEdge;
@@ -84,12 +85,12 @@ public:
 	   interestingStores at all, and instead rely on
 	   ignoreSideEffects. */
 	bool haveInterestingStoresSet;
-	std::set<unsigned long> interestingStores;
+	std::set<VexRip> interestingStores;
 
 	/* If this is non-NULL then rather than using the oracle to
 	   check whether loads might possibly load, we just look in
 	   here. */
-	std::set<unsigned long> *nonLocalLoads;
+	std::set<VexRip> *nonLocalLoads;
 
 	AllowableOptimisations disablexPlusMinusX() const
 	{
@@ -155,7 +156,7 @@ public:
 		return x;
 	}
 
-	bool ignoreStore(unsigned long rip) const {
+	bool ignoreStore(const VexRip &rip) const {
 		if (ignoreSideEffects)
 			return true;
 		if (!haveInterestingStoresSet)
@@ -219,23 +220,23 @@ public:
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
-	StateMachine(StateMachineState *_root, unsigned long _origin, unsigned _tid)
+	StateMachine(StateMachineState *_root, const VexRip &_origin, unsigned _tid)
 		: root(_root), origin(_origin), tid(_tid)
 	{
 	}
 public:
 	StateMachineState *root;
-	unsigned long origin;
+	VexRip origin;
 	FreeVariableMap freeVariables;
 	unsigned tid;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, unsigned long _origin, const FreeVariableMap &fv, unsigned _tid)
+	StateMachine(StateMachineState *_root, const VexRip &_origin, const FreeVariableMap &fv, unsigned _tid)
 		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
 	{
 	}
-	StateMachine(StateMachine *parent, unsigned long _origin, StateMachineState *new_root)
+	StateMachine(StateMachine *parent, const VexRip &_origin, StateMachineState *new_root)
 		: root(new_root), origin(_origin), freeVariables(parent->freeVariables),
 		  tid(parent->tid)
 	{}
@@ -269,13 +270,13 @@ class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 	void assertAcyclic(std::vector<const StateMachineState *> &,
 			   std::set<const StateMachineState *> &) const;
 protected:
-	StateMachineState(unsigned long _origin) : have_hash(false), origin(_origin) {}
+	StateMachineState(const VexRip &_origin) : have_hash(false), origin(_origin) {}
 	virtual unsigned long _hashval() const = 0;
 public:
-	unsigned long origin; /* RIP we were looking at when we
-			       * constructed the thing.  Not very
-			       * meaningful, but occasionally provides
-			       * useful hints for debugging.*/
+	VexRip origin; /* RIP we were looking at when we constructed
+			* the thing.  Not very meaningful, but
+			* occasionally provides useful hints for
+			* debugging.*/
 
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
@@ -295,7 +296,7 @@ public:
 	virtual RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const = 0;
 	void assertAcyclic() const;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
-	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &out);
+	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
 
 #ifdef NDEBUG
@@ -407,7 +408,7 @@ public:
 		}
 		return this;
 	}
-	void enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs);
+	void enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs);
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		for (auto it = memo.begin(); it != memo.end(); it++)
 			if (*it == this)
@@ -471,7 +472,7 @@ public:
 class StateMachineTerminal : public StateMachineState {
 protected:
 	virtual void prettyPrint(FILE *f) const = 0;
-	StateMachineTerminal(unsigned long rip) : StateMachineState(rip) {}
+	StateMachineTerminal(const VexRip &rip) : StateMachineState(rip) {}
 public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
@@ -491,7 +492,7 @@ public:
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
-	StateMachineUnreached() : StateMachineTerminal(0) {}
+	StateMachineUnreached() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x72; }
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
@@ -508,7 +509,7 @@ public:
 };
 
 class StateMachineCrash : public StateMachineTerminal {
-	StateMachineCrash() : StateMachineTerminal(0) {}
+	StateMachineCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x73; }
 public:
@@ -525,7 +526,7 @@ public:
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
-	StateMachineNoCrash() : StateMachineTerminal(0) {}
+	StateMachineNoCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
 	unsigned long _hashval() const { return 0x74; }
 public:
@@ -549,19 +550,19 @@ class StateMachineProxy : public StateMachineState {
 public:
 	StateMachineEdge *target;
 
-	StateMachineProxy(unsigned long origin, StateMachineState *t)
+	StateMachineProxy(const VexRip &origin, StateMachineState *t)
 		: StateMachineState(origin),
 		  target(new StateMachineEdge(t))		  
 	{
 	}
-	StateMachineProxy(unsigned long origin, StateMachineEdge *t)
+	StateMachineProxy(const VexRip &origin, StateMachineEdge *t)
 		: StateMachineState(origin),
 		  target(t)
 	{
 	}
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
 	{
-		fprintf(f, "{%lx:", origin);
+		fprintf(f, "{%s:", origin.name());
 		if (target)
 			target->prettyPrint(f, "\n  ", labels);
 		else
@@ -613,7 +614,7 @@ class StateMachineBifurcate : public StateMachineState {
 			condition->hashval() * 3;
 	}
 public:
-	StateMachineBifurcate(unsigned long origin,
+	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
 			      StateMachineEdge *t,
 			      StateMachineEdge *f)
@@ -623,7 +624,7 @@ public:
 		  falseTarget(f)
 	{
 	}	
-	StateMachineBifurcate(unsigned long origin,
+	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
 			      StateMachineState *t,
 			      StateMachineState *f)
@@ -641,7 +642,7 @@ public:
 	StateMachineEdge *falseTarget;
 
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
-		fprintf(f, "%lx: if (", origin);
+		fprintf(f, "%s: if (", origin.name());
 		ppIRExpr(condition, f);
 		fprintf(f, ")\n  then {\n\t");
 		if (trueTarget)
@@ -733,19 +734,17 @@ public:
 /* A node in the state machine representing a bit of code which we
    haven't explored yet. */
 class StateMachineStub : public StateMachineTerminal {
-	unsigned long _hashval() const { return target->hashval(); }
+	unsigned long _hashval() const { return target.hash(); }
 public:
-	IRExpr *target;
+	VexRip target;
 
-	StateMachineStub(unsigned long origin, IRExpr *t) : StateMachineTerminal(origin), target(t) {}
+	StateMachineStub(const VexRip &origin, const VexRip &t) : StateMachineTerminal(origin), target(t) {}
 
 	void prettyPrint(FILE *f) const
 	{
-		fprintf(f, "<%lx: jmp ", origin);
-		ppIRExpr(target, f);
-		fprintf(f, ">");
+		fprintf(f, "<%s: jmp %s>", origin.name(), target.name());
 	}
-	void visit(HeapVisitor &hv) { hv(target); }
+	void visit(HeapVisitor &hv) { }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
 
 	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
@@ -779,8 +778,9 @@ public:
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
 	IRExpr *addr;
-	ThreadRip rip;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, ThreadRip _rip, StateMachineSideEffect::sideEffectType _type)
+	ThreadVexRip rip;
+	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const ThreadVexRip &_rip,
+					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip)
 	{}
 	virtual void visit(HeapVisitor &hv) {
@@ -793,7 +793,7 @@ public:
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, ThreadRip _rip)
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
 		  data(_data)
 	{
@@ -830,13 +830,13 @@ class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void constructed();
 	unsigned long _hashval() const { return addr->hashval() * 757 + target.hash() * 118409; }
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, ThreadRip _rip)
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(alloc())
 	{
 		constructed();
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, ThreadRip _rip)
+	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(reg)
 	{

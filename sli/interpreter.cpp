@@ -1425,10 +1425,10 @@ public:
 		return cache[0];
 	}
 	AddressSpaceGuestFetcher(AddressSpace *_aspace,
-				 ThreadRip _offset) :
+				 const ThreadRip &_offset) :
 		GuestMemoryFetcher(_offset),
 		aspace(_aspace),
-		offset(_offset.rip),
+		offset(_offset.rip.unwrap_vexrip()),
 		cache_start(0),
 		have_cache(false)
 	{
@@ -1490,8 +1490,11 @@ DecodeCache::search(unsigned tid, unsigned long rip)
 static VexPtr<WeakRef<DecodeCache, &ir_heap>, &ir_heap> decode_cache;
 
 IRSB *
-AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
+AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 {
+	unsigned tid = tr.thread;
+	unsigned long rip = tr.rip.unwrap_vexrip();
+
 	if (rip == 0x7c9266)
 		dbg_break("Here we are\n");
 
@@ -1511,7 +1514,6 @@ AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
 	if (!irsb) {
 		VexArchInfo archinfo_guest;
 		VexAbiInfo abiinfo_both;
-		VexGuestExtents vge;
 		LibVEX_default_VexArchInfo(&archinfo_guest);
 		archinfo_guest.hwcaps =
 			VEX_HWCAPS_AMD64_SSE3|
@@ -1519,14 +1521,12 @@ AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
 		LibVEX_default_VexAbiInfo(&abiinfo_both);
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-		ThreadRip _rip = ThreadRip::mk(tid, rip);
-		AddressSpaceGuestFetcher fetcher(this, _rip);
+		AddressSpaceGuestFetcher fetcher(this, tr);
 		irsb = bb_to_IR(tid,
-				&vge,
 				NULL, /* Context for chase_into_ok */
 				disInstr_AMD64,
 				fetcher,
-				(Addr64)rip,
+				tr,
 				chase_into_ok,
 				False, /* host bigendian */
 				VexArchAMD64,
@@ -1577,7 +1577,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	unsigned long _rip = rip;
 	LibVEX_maybe_gc(t);
 
-	IRSB *irsb = addrSpace->getIRSBForAddress(ths->tid._tid(), _rip);
+	IRSB *irsb = addrSpace->getIRSBForAddress(ThreadRip(ths->tid._tid(), VexRip::invent_vex_rip(_rip)));
 
 	ths->temporaries.setSize(irsb->tyenv->types_used);
 
@@ -1590,11 +1590,11 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	/* First statement in block should be a mark */
 	assert(ths->currentIRSB->stmts[0]->tag == Ist_IMark);
 	/* Should be a mark for the IRSB rip */
-	assert(((IRStmtIMark *)ths->currentIRSB->stmts[0])->addr ==
+	assert(((IRStmtIMark *)ths->currentIRSB->stmts[0])->addr.rip.unwrap_vexrip() ==
 	       ths->currentIRSBRip);
 }
 
-unsigned long
+VexRip
 extract_call_follower(IRSB *irsb)
 {
 	/* We expect a call to look like this:
@@ -1627,7 +1627,14 @@ extract_call_follower(IRSB *irsb)
 	IRStmtStore *s = (IRStmtStore *)irsb->stmts[idx];
 	if (s->data->tag != Iex_Const)
 		abort();
-	return ((IRExprConst *)s->data)->con->Ico.U64;
+#if 0
+	while (idx >= 0 && irsb->stmts[idx]->tag != Ist_IMark)
+		idx--;
+	assert(idx >= 0);
+	VexRip r( ((IRStmtIMark *)irsb->stmts[idx])->addr );
+	r.jump(((IRExprConst *)s->data)->con->Ico.U64);
+#endif	
+	return VexRip::invent_vex_rip(((IRExprConst *)s->data)->con->Ico.U64);
 }
 
 void
@@ -1690,7 +1697,7 @@ interpretStatement(IRStmt *stmt,
 	case Ist_IMark: {
 		IRStmtIMark *s = (IRStmtIMark *)stmt;
 		thr->regs.set_reg(REGISTER_IDX(RIP),
-				  (s->addr));
+				  (s->addr.rip.unwrap_vexrip()));
 		if (er) {
 			ret.suspend();
 			er->instruction(thr,
@@ -1788,9 +1795,8 @@ interpretStatement(IRStmt *stmt,
 			printf("EMULATION WARNING %lx\n",
 			       thr->regs.get_reg(REGISTER_IDX(EMWARN)));
 		}
-		assert(s->dst->tag == Ico_U64);
 		thr->regs.set_reg(REGISTER_IDX(RIP),
-				  s->dst->Ico.U64);
+				  s->dst.rip.unwrap_vexrip());
 		thr->currentIRSB = NULL;
 		return FINISHED_BLOCK;
 	}
@@ -1854,8 +1860,12 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 		{
 			bool is_syscall = ths->currentIRSB->jumpkind == Ijk_Sys_syscall;
 			{
-				struct expression_result next_addr =
-					eval_expression(&ths->regs, ths->currentIRSB->next, ths->temporaries.content);
+				struct expression_result next_addr;
+				if (ths->currentIRSB->next_is_const) {
+					next_addr.lo = ths->currentIRSB->next_const.rip.unwrap_vexrip();
+				} else {
+					next_addr = eval_expression(&ths->regs, ths->currentIRSB->next_nonconst, ths->temporaries.content);
+				}
 				ths->regs.set_reg(REGISTER_IDX(RIP),
 						  next_addr.lo);
 				if (ths->currentIRSB->jumpkind == Ijk_Ret) {
@@ -1886,7 +1896,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					}
 				} else if (ths->currentIRSB->jumpkind == Ijk_Call) {
 					ths->currentCallStack.push_back(
-						extract_call_follower(ths->currentIRSB));
+						extract_call_follower(ths->currentIRSB).unwrap_vexrip());
 				}
 				ths->currentIRSB = NULL;
 			}

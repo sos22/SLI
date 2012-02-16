@@ -378,7 +378,7 @@ printStateMachine(const StateMachineState *sm, FILE *f)
 void
 printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
-	fprintf(f, "Machine for %lx:%d\n", sm->origin, sm->tid);
+	fprintf(f, "Machine for %s:%d\n", sm->origin.name(), sm->tid);
 	printStateMachine(sm->root, f, labels);
 	sm->freeVariables.print(f);
 }
@@ -468,7 +468,7 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	}
 	IRExpr *addr;
 	IRExpr *data;
-	ThreadRip rip;
+	ThreadVexRip rip;
 	if (parseThisString("*(", str, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(") <- ", str2, &str2) &&
@@ -569,19 +569,20 @@ parseStateMachineState(StateMachineState **out,
 		*out = StateMachineNoCrash::get();
 		return true;
 	}
-	unsigned long origin;
-	IRExpr *target;
+	VexRip origin;
+	VexRip target;
 	const char *str2;
 	if (parseThisChar('<', str, &str2) &&
-	    parseHexUlong(&origin, str2, &str2) &&
-	    parseIRExpr(&target, str2, &str2) &&
+	    parseVexRip(&origin, str2, &str2) &&
+	    parseThisString(": jmp ", str2, &str2) &&
+	    parseVexRip(&target, str2, &str2) &&
 	    parseThisChar('>', str2, suffix)) {
 		*out = new StateMachineStub(origin, target);
 		return true;
 	}
 	StateMachineEdge *target1;
 	if (parseThisChar('{', str, &str2) &&
-	    parseHexUlong(&origin, str2, &str2) &&
+	    parseVexRip(&origin, str2, &str2) &&
 	    parseThisChar(':', str2, &str2) &&
 	    parseStateMachineEdge(&target1, "\n  ", str2, &str2) &&
 	    parseThisChar('}', str2, suffix)) {
@@ -590,7 +591,7 @@ parseStateMachineState(StateMachineState **out,
 	}
 	IRExpr *condition;
 	StateMachineEdge *target2;
-	if (parseHexUlong(&origin, str, &str2) &&
+	if (parseVexRip(&origin, str, &str2) &&
 	    parseThisString(": if (", str2, &str2) &&
 	    parseIRExpr(&condition, str2, &str2) &&
 	    parseThisString(")\n  then {\n\t", str2, &str2) &&
@@ -611,6 +612,8 @@ parseOneState(std::map<int, StateMachineState *> &out,
 {
 	int label;
 	StateMachineState *res;
+
+	res = (StateMachineState *)0xf001; /* shut the compiler up */
 
 	if (!parseThisChar('l', str, &str) ||
 	    !parseDecimalInt(&label, str, &str) ||
@@ -666,10 +669,10 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 bool
 StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 {
-	unsigned long origin;
+	VexRip origin;
 	int tid;
 	if (!parseThisString("Machine for ", str, &str) ||
-	    !parseHexUlong(&origin, str, &str) ||
+	    !parseVexRip(&origin, str, &str) ||
 	    !parseThisChar(':', str, &str) ||
 	    !parseDecimalInt(&tid, str, &str) ||
 	    !parseThisChar('\n', str, &str))
@@ -752,7 +755,7 @@ StateMachineState::assertAcyclic() const
 }
 
 void
-StateMachineState::enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs)
+StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
 	if (target1())
 		target1()->enumerateMentionedMemoryAccesses(instrs);
@@ -761,7 +764,7 @@ StateMachineState::enumerateMentionedMemoryAccesses(std::set<unsigned long> &ins
 }
 
 void
-StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<unsigned long> &instrs)
+StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
 	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
 	     it != sideEffects.end();

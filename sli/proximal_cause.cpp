@@ -5,7 +5,7 @@
 /* A bunch of heuristics for figuring out why we crashed.  Returns
  * NULL on failure.  Pretty stupid. */
 static StateMachineEdge *
-_getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *idx)
+_getProximalCause(MachineState *ms, ThreadRip rip, Thread *thr, unsigned *idx)
 {
 	__set_profiling(getProximalCause);
 	FreeVariableMap fv;
@@ -15,11 +15,11 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 	int nr_marks;
 
 	*idx = 9999999;
-	if (rip == 0) {
+	if (rip.rip.unwrap_vexrip() == 0) {
 		/* Probably caused by calling a bad function pointer.
 		 * Look at the call site. */
-		rip = ms->addressSpace->fetch<unsigned long>(thr->regs.rsp(), NULL) - 2;
-		irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
+		rip.rip = VexRip::invent_vex_rip(ms->addressSpace->fetch<unsigned long>(thr->regs.rsp(), NULL) - 2);
+		irsb = ms->addressSpace->getIRSBForAddress(rip);
 		if (!irsb) {
 			/* I guess that wasn't it.  Give up. */
 			return NULL;
@@ -40,12 +40,13 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 		/* We now guess that we crashed because the function
 		   pointer called turned out to be NULL. */
 		*idx = irsb->stmts_used;
+		assert(!irsb->next_is_const);
 		return new StateMachineEdge(
 			new StateMachineBifurcate(
-				rip,
+				rip.rip,
 				IRExpr_Unop(
 					Iop_BadPtr,
-					irsb->next),
+					irsb->next_nonconst),
 				StateMachineCrash::get(),
 				StateMachineNoCrash::get()));
 	}
@@ -55,7 +56,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 	   results in a crash, we can be pretty confident that we've
 	   found the problem. */
 	try {
-		irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
+		irsb = ms->addressSpace->getIRSBForAddress(rip);
 	} catch (BadMemoryException &e) {
 		return NULL;
 	}
@@ -115,7 +116,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 			*idx = x;
 			return new StateMachineEdge(
 				new StateMachineBifurcate(
-					rip,
+					rip.rip,
 					IRExpr_Unop(
 						Iop_BadPtr,
 						addr),
@@ -130,7 +131,7 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 }
 
 static StateMachineEdge *
-backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
+backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadVexRip site)
 {
 	switch (stmt->tag) {
 	case Ist_NoOp:
@@ -191,7 +192,7 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 				new StateMachineEdge(
 					new StateMachineStub(
 						site.rip,
-						IRExpr_Const(((IRStmtExit *)stmt)->dst))),
+						((IRStmtExit *)stmt)->dst.rip)),
 				sm));
 		break;
 	}
@@ -199,16 +200,16 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadRip site)
 }
 
 StateMachineEdge *
-getProximalCause(MachineState *ms, unsigned long rip, Thread *thr)
+getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 {
 	unsigned idx;
 	StateMachineEdge *sm = _getProximalCause(ms, rip, thr, &idx);
 	if (!sm)
 		return NULL;
-	IRSB *irsb = ms->addressSpace->getIRSBForAddress(thr->tid._tid(), rip);
+	IRSB *irsb = ms->addressSpace->getIRSBForAddress(rip);
 	while (idx != 0) {
 		idx--;
-		sm = backtrackOneStatement(sm, irsb->stmts[idx], ThreadRip::mk(thr->tid._tid(), rip));
+		sm = backtrackOneStatement(sm, irsb->stmts[idx], rip);
 		if (!sm)
 			return NULL;
 	}

@@ -150,13 +150,7 @@ protected:
 	{ return NULL; }
 	virtual StateMachineStub *transformOneState(StateMachineStub *s,
 						    bool *done_something)
-	{
-		bool b = false;
-		IRExpr *d = transformIRExpr(s->target, &b);
-		if (!b)
-			return NULL;
-		return new StateMachineStub(s->origin, d);
-	}
+	{ return NULL; }
 	virtual StateMachineProxy *transformOneState(StateMachineProxy *p,
 						     bool *done_something)
 	{
@@ -191,7 +185,7 @@ public:
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
-StateMachineEdge *getProximalCause(MachineState *ms, unsigned long rip, Thread *thr);
+StateMachineEdge *getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
 				   VexPtr<Oracle> &oracle,

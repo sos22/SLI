@@ -206,7 +206,7 @@ public:
 				abort();
 			}
 			if (doit)
-				(*this)[rip.rip].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
+				(*this)[rip.rip.unwrap_vexrip()].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
 		}
 	}
 	void operator|=(const expressionStashMapT &esm) {
@@ -342,7 +342,7 @@ public:
 		     it != liveInstructions.end();
 		     it++) {
 			Instruction<ThreadRip> *i = *it;
-			std::set<std::pair<unsigned, IRExpr *> > &exprs(stashMap[i->rip.rip]);
+			std::set<std::pair<unsigned, IRExpr *> > &exprs(stashMap[i->rip.rip.unwrap_vexrip()]);
 			for (std::set<std::pair<unsigned, IRExpr *> >::iterator it2 = exprs.begin();
 			     it2 != exprs.end();
 			     it2++) {
@@ -549,8 +549,17 @@ struct exprEvalPoint {
 	exprEvalPoint(const YesIReallyMeanIt &) {}
 };
 
-struct DirectRip {
-	unsigned long rip;
+struct DirectRip : public Named {
+	char *mkName() const { return my_asprintf("0x%lx", rip.rip); }
+
+	struct _ {
+		unsigned long rip;
+		_(unsigned long r) : rip(r) {}
+		_() {}
+		operator unsigned long() const { return rip; }
+		unsigned long unwrap_vexrip() const { return rip; }
+		bool isValid() const { return rip != 0; }
+	} rip;
 	DirectRip(unsigned long _rip) : rip(_rip) {}
 	DirectRip() : rip(0) {}
 	bool operator==(const DirectRip &d) const { return rip == d.rip; }
@@ -586,7 +595,7 @@ class ClientRip : public Named {
 			free_label = true;
 			break;
 		}
-		fragments.push_back(my_asprintf("%lx:%s{", rip, label));
+		fragments.push_back(my_asprintf("%lx:%s{", (unsigned long)rip, label));
 		if (free_label)
 			free((void *)label);
 		for (auto it = threads.begin(); it != threads.end(); it++)
@@ -612,7 +621,18 @@ class ClientRip : public Named {
 		return res_malloc;
 	}
 public:
-	unsigned long rip;
+	struct _{
+		unsigned long rip;
+		unsigned long unwrap_vexrip() const {
+			return rip;
+		}
+		_(unsigned long r) : rip(r) {}
+		_() {}
+		operator unsigned long() const {
+			return rip;
+		}
+		bool isValid() const { return rip != 0; }
+	} rip;
 	const happensBeforeEdge *completed_edge; /* Only valid for rx_message */
 	bool skip_orig; /* Only valid for if skip_orig_valid() is true */
 	std::set<int> exit_threads; /* Only for
@@ -673,7 +693,7 @@ private:
 	}
 public:
 	bool parse(const char *str, const char **suffix) {
-		if (!parseHexUlong(&rip, str, &str) ||
+		if (!parseHexUlong(&rip.rip, str, &str) ||
 		    !parseThisChar(':', str, &str) ||
 		    !parseType(&type, str, &str) ||
 		    !parseThisChar('{', str, &str))
@@ -824,7 +844,7 @@ public:
 			for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++)
-				(*this)[it->first->rip.rip].insert(
+				(*this)[it->first->rip.rip.unwrap_vexrip()].insert(
 					exprEvalPoint(
 						it2->first,
 						it->first->rip.thread,
@@ -912,12 +932,12 @@ public:
 		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 		     it != roots.end();
 		     it++)
-			threadsRelevantAtEachEntryPoint[it->second.rip].insert(it->first);
+			threadsRelevantAtEachEntryPoint[it->second.rip.unwrap_vexrip()].insert(it->first);
 		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
 		     it != roots.end();
 		     it++) {
-			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip]);
-			insert(ClientRip(it->second.rip, threads, ClientRip::start_of_instruction));
+			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip.unwrap_vexrip()]);
+			insert(ClientRip(it->second.rip.unwrap_vexrip(), threads, ClientRip::start_of_instruction));
 		}
 	}
 
@@ -990,8 +1010,8 @@ public:
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
 				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
 									       cfg, exprStashPoints, next_hb_id++);
-				(*this)[hbe->before.rip].insert(hbe);
-				(*this)[hbe->after.rip].insert(hbe);
+				(*this)[hbe->before.rip.unwrap_vexrip()].insert(hbe);
+				(*this)[hbe->after.rip.unwrap_vexrip()].insert(hbe);
 			}
 		}
 	}

@@ -51,7 +51,7 @@ shallow_hash(const IRExpr *e)
 	case Iex_ClientCallFailed:
 		return 100213697;
 	case Iex_ClientCall:
-		return 100256371 + ((IRExprClientCall *)e)->callSite.rip * 50013641;
+		return 100256371 + ((IRExprClientCall *)e)->callSite.rip.hash() * 50013641;
 	case Iex_HappensBefore:
 		return 100234427;
 	}
@@ -433,7 +433,6 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		t.states_bifurcate.insert(smb);
 		return start;
 	} else if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(start)) {
-		sms->target = internIRExpr(sms->target);
 		for (auto it = t.states_stub.begin();
 		     it != t.states_stub.end();
 		     it++) {
