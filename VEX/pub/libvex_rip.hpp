@@ -101,6 +101,15 @@ public:
 	void jump(unsigned long target) {
 		stack.back() = target;
 	}
+	void rtrn() {
+		stack.pop_back();
+	}
+	bool on_stack(unsigned long rip) const {
+		for (auto it = stack.begin(); it != stack.end(); it++)
+			if (*it == rip)
+				return true;
+		return false;
+	}
 };
 
 bool parseVexRip(VexRip *out, const char *str, const char **suffix);
