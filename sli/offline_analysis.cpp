@@ -1039,7 +1039,7 @@ buildCFGForCallGraph(AddressSpace *as,
 		builtSoFar[r] = std::pair<CFGNode<StackRip> *, int>(work, depth);
 		IRSB *irsb;
 		try {
-			irsb = as->getIRSBForAddress(-1, r.rip.unwrap_vexrip());
+			irsb = as->getIRSBForAddress(ThreadRip::mk(-1, r.rip));
 		} catch (BadMemoryException &e) {
 			irsb = NULL;
 		}
@@ -1643,7 +1643,7 @@ buildCFGForRipSet(AddressSpace *as,
 		if (!depth ||
 		    (builtSoFar.count(rip) && builtSoFar[rip].second >= depth))
 			continue;
-		IRSB *irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
+		IRSB *irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 		auto work = new CFGNode<VexRip>(rip);
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
@@ -1652,7 +1652,7 @@ buildCFGForRipSet(AddressSpace *as,
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
-				assert(work->branchRip.unwrap_vexrip() == 0);
+				assert(!work->branchRip.isValid());
 				work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst.rip;
 			}
 		}
@@ -1788,7 +1788,7 @@ CFGtoCrashReason(unsigned tid,
 		{}
 		IRSB *operator()(t rip) {
 			try {
-				return as->getIRSBForAddress(tid, wrappedRipToRip(rip).unwrap_vexrip());
+				return as->getIRSBForAddress(ThreadRip::mk(tid, wrappedRipToRip(rip)));
 			} catch (BadMemoryException e) {
 				return NULL;
 			}

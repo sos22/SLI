@@ -3544,7 +3544,7 @@ CrashCFG::build_cfg(MachineState *ms,
 
 			DBG_BUILD_CFG("Not dynamically available\n");
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(tid._tid(), work.time.rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(work.time.rip)));
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used &&
@@ -3977,7 +3977,7 @@ CrashCFG::calculate_cmns(ThreadId tid,
 				continue;
 			}
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(tid._tid(), node->when.rip);
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(node->when.rip)));
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used && irsb->stmts[instr_end]->tag != Ist_IMark;
@@ -4837,8 +4837,9 @@ main(int argc, char *argv[])
 		 * the last thing in the ring buffer. */
 		crashedThread->currentIRSB =
 			ms->addressSpace->getIRSBForAddress(
-				oracle.crashingTid._tid(),
-				crashedThread->controlLog.rbegin()->translated_rip);
+				ThreadRip::mk(
+					oracle.crashingTid._tid(),
+					VexRip::invent_vex_rip(crashedThread->controlLog.rbegin()->translated_rip)));
 		/* We should be at the end of that... */
 		assert(crashedThread->currentIRSBOffset ==
 		       crashedThread->currentIRSB->stmts_used + 1);
@@ -4852,8 +4853,9 @@ main(int argc, char *argv[])
 		printf("Crashed by syscall\n");
 		crashedThread->currentIRSB =
 			ms->addressSpace->getIRSBForAddress(
-				oracle.crashingTid._tid(),
-				crashedThread->currentIRSBRip);
+				ThreadRip::mk(
+					oracle.crashingTid._tid(),
+					VexRip::invent_vex_rip(crashedThread->currentIRSBRip)));
 	}
 
 	/* Build the footstep log.  This has a record for every
@@ -4889,8 +4891,8 @@ main(int argc, char *argv[])
 		     crashedThread->controlLog.rbegin();
 	     it != crashedThread->controlLog.rend();
 	     it++) {
-	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(oracle.crashingTid._tid(),
-								 it->translated_rip);
+	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(oracle.crashingTid._tid(),
+									       VexRip::invent_vex_rip(it->translated_rip)));
 		bool exited_by_branch;
 		int exit_idx;
 		if (it->exit_idx == irsb->stmts_used + 1) {

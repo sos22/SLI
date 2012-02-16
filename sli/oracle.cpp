@@ -425,7 +425,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	__set_profiling(findInstrSuccessorsAndCallees);
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -1366,7 +1366,7 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 
 		IRSB *irsb;
 		try {
-			irsb = ms->addressSpace->getIRSBForAddress(STATIC_THREAD, rip.unwrap_vexrip());
+			irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(STATIC_THREAD, rip));
 		} catch (BadMemoryException &e) {
 			irsb = NULL;
 		}
@@ -1588,7 +1588,7 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 {
 	LivenessSet res;
 
-	IRSB *irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
+	IRSB *irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -1737,7 +1737,7 @@ Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool
 	/* Try to figure out what this instruction actually does. */
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException e) {
 		return;
 	}
@@ -1963,7 +1963,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, Address
 	int nr_statements;
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException &e) {
 		return;
 	}
@@ -2500,7 +2500,7 @@ getInstructionSize(AddressSpace *as, const VexRip &rip)
 {
 	IRSB *irsb;
 	try {
-		irsb = as->getIRSBForAddress(-1, rip.unwrap_vexrip());
+		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
 	} catch (BadMemoryException &e) {
 		return 0;
 	}

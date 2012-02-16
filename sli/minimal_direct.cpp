@@ -96,7 +96,7 @@ consider_rip(const VexRip &my_rip,
 	LibVEX_maybe_gc(token);
 
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
-	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, my_rip.unwrap_vexrip(), thr));
+	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), my_rip), thr));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;

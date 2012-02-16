@@ -1490,8 +1490,11 @@ DecodeCache::search(unsigned tid, unsigned long rip)
 static VexPtr<WeakRef<DecodeCache, &ir_heap>, &ir_heap> decode_cache;
 
 IRSB *
-AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
+AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 {
+	unsigned tid = tr.thread;
+	unsigned long rip = tr.rip.unwrap_vexrip();
+
 	if (rip == 0x7c9266)
 		dbg_break("Here we are\n");
 
@@ -1518,13 +1521,12 @@ AddressSpace::getIRSBForAddress(unsigned tid, unsigned long rip)
 		LibVEX_default_VexAbiInfo(&abiinfo_both);
 		abiinfo_both.guest_stack_redzone_size = 128;
 		abiinfo_both.guest_amd64_assume_fs_is_zero = 1;
-		ThreadRip _rip = ThreadRip::mk(tid, VexRip::invent_vex_rip(rip));
-		AddressSpaceGuestFetcher fetcher(this, _rip);
+		AddressSpaceGuestFetcher fetcher(this, tr);
 		irsb = bb_to_IR(tid,
 				NULL, /* Context for chase_into_ok */
 				disInstr_AMD64,
 				fetcher,
-				_rip,
+				tr,
 				chase_into_ok,
 				False, /* host bigendian */
 				VexArchAMD64,
@@ -1575,7 +1577,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	unsigned long _rip = rip;
 	LibVEX_maybe_gc(t);
 
-	IRSB *irsb = addrSpace->getIRSBForAddress(ths->tid._tid(), _rip);
+	IRSB *irsb = addrSpace->getIRSBForAddress(ThreadRip(ths->tid._tid(), VexRip::invent_vex_rip(_rip)));
 
 	ths->temporaries.setSize(irsb->tyenv->types_used);
 

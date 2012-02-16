@@ -51,7 +51,7 @@ main(int argc, char *argv[])
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 
-	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, thr->regs.rip(), thr));
+	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(CRASHED_THREAD, VexRip::invent_vex_rip(thr->regs.rip())), thr));
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
 
