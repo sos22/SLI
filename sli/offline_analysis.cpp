@@ -1803,7 +1803,7 @@ CFGtoCrashReason(unsigned tid,
 			if (simple_calls) {
 				IRExpr **args = alloc_irexpr_array(1);
 				args[0] = NULL;
-				r = IRExpr_ClientCall(0, site, args);
+				r = IRExpr_ClientCall(VexRip(), site, args);
 			} else if (irsb->next_is_const) {
 				VexRip called_rip = irsb->next_const.rip;
 				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
@@ -1829,7 +1829,7 @@ CFGtoCrashReason(unsigned tid,
 					if (live.isLive(argument_registers[i]))
 						args[nr_args++] = IRExpr_Get(argument_registers[i], Ity_I64, site.thread, 0);
 				args[nr_args] = NULL;
-				r = IRExpr_ClientCall(called_rip.unwrap_vexrip(), site, args);
+				r = IRExpr_ClientCall(called_rip, site, args);
 			} else {
 				r = IRExpr_ClientCallFailed(irsb->next_nonconst);
 			}

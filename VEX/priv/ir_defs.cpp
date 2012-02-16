@@ -1143,10 +1143,10 @@ static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **
 
 static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **suffix)
 {
-  unsigned long addr;
+  VexRip addr;
   ThreadRip site;
   if (!parseThisString("call0x", str, &str) ||
-      !parseHexUlong(&addr, str, &str) ||
+      !parseVexRip(&addr, str, &str) ||
       !parseThisChar('@', str, &str) ||
       !parseThreadRip(&site, str, &str) ||
       !parseThisChar('(', str, &str))
@@ -1329,7 +1329,7 @@ IRExprFreeVariable::prettyPrint(FILE *f) const
 void
 IRExprClientCall::prettyPrint(FILE *f) const
 {
-      fprintf(f, "call0x%lx@%s(", calledRip, callSite.name());
+      fprintf(f, "call0x%s@%s(", calledRip.name(), callSite.name());
       for (int x = 0; args[x]; x++) {
 	if (x != 0)
 	  fprintf(f, ", ");
@@ -1746,7 +1746,7 @@ IRExpr* IRExpr_FreeVariable ( )
    next_key.val++;
    return res;
 }
-IRExpr* IRExpr_ClientCall ( unsigned long r, ThreadRip site, IRExpr **args )
+IRExpr* IRExpr_ClientCall ( const VexRip &r, const ThreadRip &site, IRExpr **args )
 {
    IRExprClientCall *e = new IRExprClientCall();
    e->calledRip = r;

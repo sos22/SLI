@@ -1580,13 +1580,13 @@ struct IRExprFreeVariable : public IRExpr {
 };
 
 struct IRExprClientCall : public IRExpr {
-   unsigned long calledRip;
+   VexRip calledRip;
    ThreadRip callSite;
    IRExpr **args;
    IRExprClientCall() : IRExpr(Iex_ClientCall) {}
    void visit(HeapVisitor &hv) { hv(args); }
    unsigned long hashval() const {
-       unsigned long h = calledRip * 3940631;
+       unsigned long h = calledRip.hash() * 3940631;
        for (unsigned x = 0; args[x]; x++)
 	   h = h * 7940641 + args[x]->hashval();
        return h;
@@ -1636,7 +1636,7 @@ extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExprAssociative *);
 extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
-extern IRExpr* IRExpr_ClientCall (unsigned long r, ThreadRip callSite, IRExpr **args);
+extern IRExpr* IRExpr_ClientCall (const VexRip &r, const ThreadRip &callSite, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 extern IRExpr* IRExpr_HappensBefore (ThreadRip before, ThreadRip after);
 
