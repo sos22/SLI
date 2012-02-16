@@ -1064,16 +1064,16 @@ buildCFGForCallGraph(AddressSpace *as,
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
-				unsigned long follower = extract_call_follower(irsb);
+				VexRip follower = extract_call_follower(irsb);
 				if (ripToCFGNode->get(r.rip.unwrap_vexrip())->calls->hasKey(r.rip) &&
-				    !r.on_stack(follower)) {
+				    !r.on_stack(follower.unwrap_vexrip())) {
 					/* We should inline this call. */
 					work->fallThroughRip = r.call(
 						ripToCFGNode->get(r.rip.unwrap_vexrip())->calls->get(r.rip)->headRip,
-						VexRip::invent_vex_rip(follower));
+						follower);
 				} else {
 					/* Skip over this call. */
-					work->fallThroughRip = r.jump(VexRip::invent_vex_rip(follower));
+					work->fallThroughRip = r.jump(follower);
 				}
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				if (r.callStack.size() == 0) {
@@ -1658,7 +1658,7 @@ buildCFGForRipSet(AddressSpace *as,
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
-				work->fallThroughRip = VexRip::invent_vex_rip(extract_call_follower(irsb));
+				work->fallThroughRip = extract_call_follower(irsb);
 				if (irsb->next_is_const) {
 					if (terminalFunctions.count(irsb->next_const.rip))
 						work->fallThroughRip = irsb->next_const.rip;

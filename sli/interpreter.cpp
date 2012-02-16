@@ -1592,7 +1592,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	       ths->currentIRSBRip);
 }
 
-unsigned long
+VexRip
 extract_call_follower(IRSB *irsb)
 {
 	/* We expect a call to look like this:
@@ -1625,7 +1625,14 @@ extract_call_follower(IRSB *irsb)
 	IRStmtStore *s = (IRStmtStore *)irsb->stmts[idx];
 	if (s->data->tag != Iex_Const)
 		abort();
-	return ((IRExprConst *)s->data)->con->Ico.U64;
+#if 0
+	while (idx >= 0 && irsb->stmts[idx]->tag != Ist_IMark)
+		idx--;
+	assert(idx >= 0);
+	VexRip r( ((IRStmtIMark *)irsb->stmts[idx])->addr );
+	r.jump(((IRExprConst *)s->data)->con->Ico.U64);
+#endif	
+	return VexRip::invent_vex_rip(((IRExprConst *)s->data)->con->Ico.U64);
 }
 
 void
@@ -1887,7 +1894,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 					}
 				} else if (ths->currentIRSB->jumpkind == Ijk_Call) {
 					ths->currentCallStack.push_back(
-						extract_call_follower(ths->currentIRSB));
+						extract_call_follower(ths->currentIRSB).unwrap_vexrip());
 				}
 				ths->currentIRSB = NULL;
 			}

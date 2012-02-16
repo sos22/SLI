@@ -194,7 +194,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 		if (irsb->jumpkind == Ijk_Call) {
 			/* Calls are special, and we assume that we
 			 * just resume at the next instruction. */
-			s.regs.rip() = extract_call_follower(irsb);
+			s.regs.rip() = extract_call_follower(irsb).unwrap_vexrip();
 			s.regs.rsp() += 8;
 		} else {
 			s.regs.rip() =
@@ -305,7 +305,7 @@ findDominators(const VexRip &functionHead,
 		instrs.insert(rip);
 
 		if (irsb->jumpkind == Ijk_Call) {
-			r = VexRip::invent_vex_rip(extract_call_follower(irsb));
+			r = extract_call_follower(irsb);
 		} else if (irsb->next_is_const) {
 			r = irsb->next_const.rip;
 		}

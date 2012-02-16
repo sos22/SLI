@@ -446,7 +446,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	if (irsb->jumpkind == Ijk_Call) {
 		if (!irsb->next_is_const ||
 		    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
-			directExits.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
+			directExits.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
 		if (irsb->next_is_const)
 			callees->set(std::pair<VexRip, VexRip>(rip, irsb->next_const.rip),
@@ -1397,7 +1397,7 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 				if (irsb->jumpkind == Ijk_Call) {
 					if (!irsb->next_is_const ||
 					    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
-						fallThrough.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
+						fallThrough.push_back(extract_call_follower(irsb));
 					if (irsb->next_is_const)
 						callees.push_back(irsb->next_const.rip);
 					else
@@ -1603,7 +1603,7 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 		if (irsb->jumpkind == Ijk_Call) {
 			if (!irsb->next_is_const ||
 			    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
-				fallThroughRips.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
+				fallThroughRips.push_back(extract_call_follower(irsb));
 			if (irsb->next_is_const)
 				callees.push_back( irsb->next_const.rip);
 			else

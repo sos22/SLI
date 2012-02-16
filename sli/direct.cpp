@@ -3478,7 +3478,7 @@ get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
 			/* We pretend that functions do nothing at
 			   all.  That's not entirely valid, but it's
 			   kind of convenient. */
-			*out =	extract_call_follower(irsb);
+			*out =	extract_call_follower(irsb).unwrap_vexrip();
 			/* We ignore the call, so we need to pop the
 			   return address which we just pushed. */
 			if (do_pop)
@@ -3594,7 +3594,7 @@ CrashCFG::build_cfg(MachineState *ms,
 			    instr_end == irsb->stmts_used &&
 			    irsb->jumpkind == Ijk_Call &&
 			    work.time.rip != 0x82297) {
-				fallThroughTarget.callStack.push_back(extract_call_follower(irsb));
+				fallThroughTarget.callStack.push_back(extract_call_follower(irsb).unwrap_vexrip());
 			}
 			if (irsb->jumpkind == Ijk_NoDecode) {
 				dead = true;

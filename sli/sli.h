@@ -1220,7 +1220,7 @@ force_linkage()
 	gdb_concrete(NULL);
 }
 
-unsigned long extract_call_follower(IRSB *irsb);
+VexRip extract_call_follower(IRSB *irsb);
 expression_result eval_expression(const RegisterSet *rs,
 				  IRExpr *expr,
 				  const std::vector<expression_result> &temporaries);
