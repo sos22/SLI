@@ -508,7 +508,7 @@ static CallGraphEntry *
 exploreOneFunctionForCallGraph(const VexRip &head,
 			       int depth,
 			       bool isRealHead,
-			       RangeTree<unsigned long, CallGraphEntry, &ir_heap> *instrsToCGEntries,
+			       RangeTree<VexRip, CallGraphEntry, &ir_heap> *instrsToCGEntries,
 			       AddressSpace *as,
 			       std::set<VexRip> &realFunctionHeads)
 {
@@ -537,7 +537,7 @@ exploreOneFunctionForCallGraph(const VexRip &head,
 			cge->callees->set(std::pair<VexRip, VexRip>(prev, i), true);
 			continue;
 		}
-		CallGraphEntry *old = instrsToCGEntries->get(i.unwrap_vexrip());
+		CallGraphEntry *old = instrsToCGEntries->get(i);
 		if (old) {
 			assert(old != cge);
 			assert(old->headRip != cge->headRip);
@@ -566,7 +566,7 @@ exploreOneFunctionForCallGraph(const VexRip &head,
 
 		/* Add this instruction to the current function. */
 		cge->instructions->set(i, end);
-		instrsToCGEntries->set(i.unwrap_vexrip(), end.unwrap_vexrip(), cge);
+		instrsToCGEntries->set(i, end, cge);
 
 		/* Where are we going next? */
 		findInstrSuccessorsAndCallees(as, i, unexploredInstrsThisFunction,
@@ -625,7 +625,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 	     it++) {
 		unexploredRips.insert(std::pair<VexRip, int>(*it, 0));
 	}
-	RangeTree<unsigned long, CallGraphEntry, &ir_heap> *instrsToCGEntries = new RangeTree<unsigned long, CallGraphEntry, &ir_heap>();
+	RangeTree<VexRip, CallGraphEntry, &ir_heap> *instrsToCGEntries = new RangeTree<VexRip, CallGraphEntry, &ir_heap>();
 	std::set<VexRip> realFunctionHeads;
 
 	while (!unexploredRips.empty()) {
@@ -638,7 +638,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 			continue;
 
 		CallGraphEntry *cge;
-		cge = instrsToCGEntries->get(head.unwrap_vexrip());
+		cge = instrsToCGEntries->get(head);
 		if (cge) {
 			/* We already have a function which contains
 			   this instruction, so we're finished. */
@@ -652,7 +652,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 			fprintf(_logfile, "%s failed\n", __func__);
 			return NULL;
 		}
-		assert(instrsToCGEntries->get(head.unwrap_vexrip()) == cge);
+		assert(instrsToCGEntries->get(head) == cge);
 
 		/* Now explore the functions which were called by that
 		 * root. */
@@ -674,7 +674,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 
 			realFunctionHeads.insert(h);
 
-			CallGraphEntry *old = instrsToCGEntries->get(h.unwrap_vexrip());
+			CallGraphEntry *old = instrsToCGEntries->get(h);
 			if (old) {
 				/* Already have a CG node for this
 				   instruction.  What kind of node? */
@@ -722,7 +722,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 			     it != cge->callees->end();
 			     it++)
 				unexploredRealHeads.insert(std::pair<VexRip, int>(it.key().second, depth_h + 1));
-			assert(instrsToCGEntries->get(h.unwrap_vexrip()) == cge);
+			assert(instrsToCGEntries->get(h) == cge);
 		}
 	}
 
@@ -744,7 +744,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 	for (auto it = rips.begin();
 	     it != rips.end();
 	     it++) {
-		CallGraphEntry *i = instrsToCGEntries->get(it->unwrap_vexrip());
+		CallGraphEntry *i = instrsToCGEntries->get(*it);
 		if (!i) {
 			fprintf(_logfile, "Failed to build CG entries for every instruction in %s\n", __func__);
 			return NULL;
@@ -766,7 +766,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 			for (auto it2 = (*it)->callees->begin();
 			     it2 != (*it)->callees->end();
 			     it2++) {
-				CallGraphEntry *callee = instrsToCGEntries->get(it2.key().second.unwrap_vexrip());
+				CallGraphEntry *callee = instrsToCGEntries->get(it2.key().second);
 				if (interesting.count(callee)) {
 					/* Uninteresting function
 					   calling an interesting ->
@@ -792,7 +792,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 			for (auto it2 = cge->callees->begin();
 			     it2 != cge->callees->end();
 				) {
-				if (!interesting.count(instrsToCGEntries->get(it2.key().second.unwrap_vexrip()))) {
+				if (!interesting.count(instrsToCGEntries->get(it2.key().second))) {
 					it2 = cge->callees->erase(it2);
 				} else {
 					it2++;
@@ -818,7 +818,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 		for (auto it2 = (*it)->callees->begin();
 		     it2 != (*it)->callees->end();
 		     it2++) {
-			CallGraphEntry *cge = instrsToCGEntries->get(it2.key().second.unwrap_vexrip());
+			CallGraphEntry *cge = instrsToCGEntries->get(it2.key().second);
 			assert(cge != NULL);
 			(*it)->calls->set(it2.key().first, cge);
 		}
