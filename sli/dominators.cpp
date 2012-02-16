@@ -119,9 +119,9 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 			case Ist_NoOp:
 				break;
 			case Ist_IMark:
-				if (visited.count(((IRStmtIMark *)stmt)->addr))
+				if (visited.count(((IRStmtIMark *)stmt)->addr.rip.unwrap_vexrip()))
 					goto escape;
-				s.regs.rip() = ((IRStmtIMark *)stmt)->addr;
+				s.regs.rip() = ((IRStmtIMark *)stmt)->addr.rip.unwrap_vexrip();
 				visited.insert(s.regs.rip());
 				break;
 			case Ist_AbiHint:
@@ -182,7 +182,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				   push the taken variant to the stack
 				   to deal with later. */
 				unsigned long i = s.regs.rip();
-				s.regs.rip() = ((IRStmtExit *)stmt)->dst->Ico.U64;
+				s.regs.rip() = ((IRStmtExit *)stmt)->dst.rip.unwrap_vexrip();
 				unexplored_instructions.push_back(s);
 				s.regs.rip() = i;
 				break;
@@ -197,7 +197,10 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 			s.regs.rip() = extract_call_follower(irsb);
 			s.regs.rsp() += 8;
 		} else {
-			s.regs.rip() = eval_expression(&s.regs, irsb->next, temporaries).lo;
+			s.regs.rip() =
+				irsb->next_is_const ?
+				irsb->next_const.rip.unwrap_vexrip() :
+				eval_expression(&s.regs, irsb->next_nonconst, temporaries).lo;
 			if (irsb->jumpkind == Ijk_Ret) {
 				/* We're done */
 				return_rsp = s.regs.rsp();
@@ -271,28 +274,28 @@ findDominators(const VexRip &functionHead,
 	remainingToExplore.push_back(functionHead);
 	while (!remainingToExplore.empty()) {
 		VexRip rip = remainingToExplore.back();
-		unsigned long r;
+		VexRip r;
 		remainingToExplore.pop_back();
 		if (instrs.count(rip))
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(1, rip.unwrap_vexrip());
 		assert(irsb->stmts[0]->tag == Ist_IMark);
-		assert(((IRStmtIMark *)irsb->stmts[0])->addr == rip.unwrap_vexrip());
+		assert(((IRStmtIMark *)irsb->stmts[0])->addr.rip == rip);
 		for (int idx = 1; idx < irsb->stmts_used; idx++) {
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
-				successors[rip].insert(VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr));
-				predecessors[VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr)].insert(rip);
+				successors[rip].insert(((IRStmtIMark *)stmt)->addr.rip);
+				predecessors[((IRStmtIMark *)stmt)->addr.rip].insert(rip);
 				instrs.insert(rip);
-				rip = VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr);
+				rip = ((IRStmtIMark *)stmt)->addr.rip;
 				if (instrs.count(rip))
 					goto done_this_entry;
 				break;
 			case Ist_Exit:
-				successors[rip].insert(VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64));
-				predecessors[VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64)].insert(rip);
-				remainingToExplore.push_back(VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64));
+				successors[rip].insert(((IRStmtExit *)stmt)->dst.rip);
+				predecessors[((IRStmtExit *)stmt)->dst.rip].insert(rip);
+				remainingToExplore.push_back(((IRStmtExit *)stmt)->dst.rip);
 				break;
 			default:
 				break;
@@ -301,16 +304,15 @@ findDominators(const VexRip &functionHead,
 
 		instrs.insert(rip);
 
-		r = 0;
 		if (irsb->jumpkind == Ijk_Call) {
-			r = extract_call_follower(irsb);
-		} else if (irsb->next->tag == Iex_Const) {
-			r = ((IRExprConst *)irsb->next)->con->Ico.U64;
+			r = VexRip::invent_vex_rip(extract_call_follower(irsb));
+		} else if (irsb->next_is_const) {
+			r = irsb->next_const.rip;
 		}
-		if (r) {
-			successors[rip].insert(VexRip::invent_vex_rip(r));
-			predecessors[VexRip::invent_vex_rip(r)].insert(rip);
-			remainingToExplore.push_back(VexRip::invent_vex_rip(r));
+		if (r.isValid()) {
+			successors[rip].insert(r);
+			predecessors[r].insert(rip);
+			remainingToExplore.push_back(r);
 		}
 	done_this_entry:
 		;

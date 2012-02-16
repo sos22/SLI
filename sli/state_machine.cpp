@@ -474,7 +474,7 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	    parseThisString(") <- ", str2, &str2) &&
 	    parseIRExpr(&data, str2, &str2) &&
 	    parseThisString(" @ ", str2, &str2) &&
-	    parseThreadVexRip(&rip, str2, suffix)) {
+	    parseThreadRip(&rip, str2, suffix)) {
 		*out = new StateMachineSideEffectStore(addr, data, rip);
 		return true;
 	}
@@ -484,7 +484,7 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	    parseThisString(" <- *(", str2, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(")@", str2, &str2) &&
-	    parseThreadVexRip(&rip, str2, suffix)) {
+	    parseThreadRip(&rip, str2, suffix)) {
 		*out = new StateMachineSideEffectLoad(key, addr, rip);
 		return true;
 	}
@@ -554,11 +554,12 @@ parseStateMachineState(StateMachineState **out,
 		return true;
 	}
 	VexRip origin;
-	IRExpr *target;
+	VexRip target;
 	const char *str2;
 	if (parseThisChar('<', str, &str2) &&
 	    parseVexRip(&origin, str2, &str2) &&
-	    parseIRExpr(&target, str2, &str2) &&
+	    parseThisString(": jmp ", str2, &str2) &&
+	    parseVexRip(&target, str2, &str2) &&
 	    parseThisChar('>', str2, suffix)) {
 		*out = new StateMachineStub(origin, target);
 		return true;

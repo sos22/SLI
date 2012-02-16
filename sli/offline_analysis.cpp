@@ -1049,14 +1049,14 @@ buildCFGForCallGraph(AddressSpace *as,
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
-				work->fallThroughRip = r.jump(VexRip::invent_vex_rip(((IRStmtIMark *)irsb->stmts[x])->addr));
+				work->fallThroughRip = r.jump(((IRStmtIMark *)irsb->stmts[x])->addr.rip);
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
 				if (work->branchRip.valid) {
-					assert(work->branchRip == r.jump(VexRip::invent_vex_rip(((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64)));
+					assert(work->branchRip == r.jump(((IRStmtExit *)irsb->stmts[x])->dst.rip));
 				} else {
-					work->branchRip = r.jump(VexRip::invent_vex_rip(((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64));
+					work->branchRip = r.jump(((IRStmtExit *)irsb->stmts[x])->dst.rip);
 				}
 				assert(work->branchRip.valid);
 				needed.push(std::pair<StackRip, int>(work->branchRip, depth - 1));
@@ -1083,8 +1083,8 @@ buildCFGForCallGraph(AddressSpace *as,
 					/* Return to calling function. */
 					work->fallThroughRip = r.rtrn();
 				}
-			} else if (irsb->next->tag == Iex_Const) {
-				work->fallThroughRip = r.jump(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
+			} else if (irsb->next_is_const) {
+				work->fallThroughRip = r.jump(irsb->next_const.rip);
 			} else {
 				/* Don't currently try to trace across indirect branches. */
 			}
@@ -1648,29 +1648,29 @@ buildCFGForRipSet(AddressSpace *as,
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
-				work->fallThroughRip = VexRip::invent_vex_rip(((IRStmtIMark *)irsb->stmts[x])->addr);
+				work->fallThroughRip = ((IRStmtIMark *)irsb->stmts[x])->addr.rip;
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
 				assert(work->branchRip.unwrap_vexrip() == 0);
-				work->branchRip = VexRip::invent_vex_rip(((IRStmtExit *)irsb->stmts[x])->dst->Ico.U64);
+				work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst.rip;
 			}
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
 				work->fallThroughRip = VexRip::invent_vex_rip(extract_call_follower(irsb));
-				if (irsb->next->tag == Iex_Const) {
-					if (terminalFunctions.count(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64)))
-						work->fallThroughRip = VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64);
-					else if (!oracle->functionCanReturn(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64)))
-						work->fallThroughRip = VexRip::invent_vex_rip(0);
+				if (irsb->next_is_const) {
+					if (terminalFunctions.count(irsb->next_const.rip))
+						work->fallThroughRip = irsb->next_const.rip;
+					else if (!oracle->functionCanReturn(irsb->next_const.rip))
+						work->fallThroughRip = VexRip();
 				}
 			} else if (irsb->jumpkind == Ijk_Ret) {
 				work->accepting = true;
 			} else {
 				/* Don't currently try to trace across indirect branches. */
-				if (irsb->next->tag == Iex_Const)
-					work->fallThroughRip = VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64);
+				if (irsb->next_is_const)
+					work->fallThroughRip = irsb->next_const.rip;
 			}
 		}
 		if (work->fallThroughRip.isValid())
@@ -1872,8 +1872,8 @@ CFGtoCrashReason(unsigned tid,
 				IRExpr **args = alloc_irexpr_array(1);
 				args[0] = NULL;
 				r = IRExpr_ClientCall(0, site, args);
-			} else if (irsb->next->tag == Iex_Const) {
-				VexRip called_rip = VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64);
+			} else if (irsb->next_is_const) {
+				VexRip called_rip = irsb->next_const.rip;
 				Oracle::LivenessSet live = oracle->liveOnEntryToFunction(called_rip);
 
 				/* We only consider arguments in registers.  This is
@@ -1899,7 +1899,7 @@ CFGtoCrashReason(unsigned tid,
 				args[nr_args] = NULL;
 				r = IRExpr_ClientCall(called_rip.unwrap_vexrip(), site, args);
 			} else {
-				r = IRExpr_ClientCallFailed(irsb->next);
+				r = IRExpr_ClientCallFailed(irsb->next_nonconst);
 			}
 
 			/* Pick up any temporaries calculated during

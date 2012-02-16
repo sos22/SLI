@@ -25,7 +25,7 @@ __genfix_add_array_summary(std::vector<const char *> &out,
 class DcdCFG : public CFG<ThreadRip> {
 	std::set<VexRip> &neededInstructions;
 public:
-  bool instructionUseful(Instruction<ThreadRip> *i) { return neededInstructions.count(VexRip::invent_vex_rip(i->rip.rip)) != 0; }
+	bool instructionUseful(Instruction<ThreadRip> *i) { return neededInstructions.count(i->rip.rip) != 0; }
 	DcdCFG(AddressSpace *as, std::set<VexRip> &ni)
 		: CFG<ThreadRip>(as), neededInstructions(ni)
 	{}
@@ -86,7 +86,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 
 unsigned long __trivial_hash_function(const ThreadRip &k)
 {
-	return k.rip;
+	return k.rip.hash();
 }
 
 unsigned long __trivial_hash_function(const unsigned long &k)

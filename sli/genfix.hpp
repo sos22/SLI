@@ -459,7 +459,7 @@ Instruction<r>::byte(AddressSpace *as)
 {
 	unsigned long t;
 	t = 0;
-	as->readMemory(rip.rip + len, 1, &t, false, NULL);
+	as->readMemory(rip.rip.unwrap_vexrip() + len, 1, &t, false, NULL);
 	Byte b = t;
 	emit(b);
 	return b;
@@ -469,7 +469,7 @@ template <typename r> int
 Instruction<r>::int32(AddressSpace *as)
 {
 	unsigned long t[4];
-	as->readMemory(rip.rip + len, 4, t, false, NULL);
+	as->readMemory(rip.rip.unwrap_vexrip() + len, 4, t, false, NULL);
 	emit(t[0]);
 	emit(t[1]);
 	emit(t[2]);
@@ -660,8 +660,8 @@ top:
 			i->_modrm(0, as);
 			break;
 		default:
-			throw NotImplementedException("cannot decode instruction starting 0x0f 0x%02x at %lx\n",
-						      b, i->rip.rip);
+			throw NotImplementedException("cannot decode instruction starting 0x0f 0x%02x at %s\n",
+						      b, i->rip.name());
 		}
 		break;
 
@@ -832,8 +832,8 @@ top:
 		break;
 
 	default:
-		throw NotImplementedException("cannot decode instruction starting %x at %lx\n",
-					      b, i->rip.rip);
+		throw NotImplementedException("cannot decode instruction starting %x at %s\n",
+					      b, i->rip.name());
 	}
 
 	if (fallsThrough)
@@ -853,10 +853,10 @@ CFG<r>::decodeInstruction(r rip, unsigned max_depth)
 	assert(i->rip == rip);
 	registerInstruction(i);
 	if (exploreInstruction(i)) {
-		if (i->branchNext.rip)
+		if (i->branchNext.rip.isValid())
 			pendingRips.push_back(std::pair<r, unsigned>(
 						      i->branchNext, max_depth - 1));
-		if (i->defaultNext.rip)
+		if (i->defaultNext.rip.isValid())
 			pendingRips.push_back(std::pair<r, unsigned>(
 						      i->defaultNext, max_depth - 1));
 	}
@@ -877,16 +877,16 @@ CFG<r>::doit()
 	     it++) {
 		Instruction<r> *ins = it.value();
 		ins->useful = instructionUseful(ins);
-		if (ins->defaultNext.rip && ripToInstr->hasKey(ins->defaultNext)) {
+		if (ins->defaultNext.rip.isValid() && ripToInstr->hasKey(ins->defaultNext)) {
 			Instruction<r> *dn = ripToInstr->get(ins->defaultNext);
-			ins->defaultNext.rip = 0;
+			ins->defaultNext = r();
 			ins->defaultNextI = dn;
 			if (dn->useful)
 				ins->useful = true;
 		}
-		if (ins->branchNext.rip && ripToInstr->hasKey(ins->branchNext)) {
+		if (ins->branchNext.rip.isValid() && ripToInstr->hasKey(ins->branchNext)) {
 			Instruction<r> *bn = ripToInstr->get(ins->branchNext);
-			ins->branchNext.rip = 0;
+			ins->branchNext = r();
 			ins->branchNextI = bn;
 			if (bn->useful)
 				bn->useful = true;
@@ -946,7 +946,7 @@ RipRelativeRelocation<r>::doit(PatchFragment<r> *pf)
 		pf->writeBytes(&delta, this->size, this->offset);
 	} else {
 		pf->addLateReloc(new LateRelocation(this->offset, this->size,
-						    vex_asprintf("0x%lx",target.rip),
+						    vex_asprintf("0x%lx",target.rip.unwrap_vexrip()),
 						    nrImmediateBytes, true));
 	}
 }
@@ -958,7 +958,7 @@ RipRelativeBranchRelocation<r>::doit(PatchFragment<r> *pf)
 	if (!pf->ripToOffset(target, &targetOffset))
 		pf->generateEpilogue(target);
 	if (!pf->ripToOffset(target, &targetOffset))
-		fail("Failed to generate epilogue for %lx\n", target.rip);
+		fail("Failed to generate epilogue for 0x%lx\n", target.rip.unwrap_vexrip());
 	int delta = targetOffset - this->offset - this->size;
 	pf->writeBytes(&delta, this->size, this->offset);
 }
@@ -1352,7 +1352,7 @@ PatchFragment<r>::emitStraightLine(Instruction<r> *i)
 		if (!i->defaultNextI) {
 			/* Hit end of block, and don't want to go any
 			 * further.  Return to the original code. */
-			if (i->defaultNext.rip) {
+			if (i->defaultNext.rip.isValid()) {
 				emitJmpToRipClient(i->defaultNext);
 			} else {
 				/* Last instruction in the block was
@@ -1393,7 +1393,7 @@ PatchFragment<r>::asC(const char *ident, char **relocs_name, char **trans_name, 
 	     it != registeredInstrs.end();
 	     it++)
 		fragments.push_back(vex_asprintf("\t{0x%lx, 0x%x}, /* %s */\n",
-						 (*it)->rip.rip,
+						 (*it)->rip.rip.unwrap_vexrip(),
 						 (*it)->offsetInPatch,
 						 (*it)->rip.name()));
 	fragments.push_back("};\n");
@@ -1406,7 +1406,7 @@ PatchFragment<r>::generateEpilogue(r exitRip)
 	Instruction<r> *i = Instruction<r>::pseudo(exitRip);
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
-	emitJmpToRipHost(exitRip.rip);
+	emitJmpToRipHost(exitRip.rip.unwrap_vexrip());
 }
 
 void __genfix_add_array_summary(std::vector<const char *> &out,
@@ -1432,7 +1432,7 @@ PatchFragment<r>::asC(const char *ident) const
 	     it++) {
 		Instruction<r> *i = cfg->ripToInstr->get(*it);
 		assert(i);
-		fragments.push_back(vex_asprintf("\t{0x%lx, %d},\n", it->rip, i->offsetInPatch));
+		fragments.push_back(vex_asprintf("\t{0x%lx, %d},\n", it->rip.unwrap_vexrip(), i->offsetInPatch));
 	}
 	fragments.push_back("};\n\nstatic struct patch ");
 	fragments.push_back(ident);
@@ -1453,15 +1453,12 @@ CFG<r>::print(FILE *f)
 	for (typename ripToInstrT::iterator it = ripToInstr->begin();
 	     it != ripToInstr->end();
 	     it++) {
-		fprintf(f, "%d:%lx[%p] -> %d:%lx[%p], %d:%lx[%p]\n",
-			it.key().thread,
-			it.key().rip,
+		fprintf(f, "%s[%p] -> %s[%p], %s[%p]\n",
+			it.key().name(),
 			it.value(),
-			it.value()->defaultNext.thread,
-			it.value()->defaultNext.rip,
+			it.value()->defaultNext.name(),
 			it.value()->defaultNextI,
-			it.value()->branchNext.thread,
-			it.value()->branchNext.rip,
+			it.value()->branchNext.name(),
 			it.value()->branchNextI);
 	}
 }

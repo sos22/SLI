@@ -434,29 +434,29 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	for (i = 1; i < irsb->stmts_used; i++) {
 		if (irsb->stmts[i]->tag == Ist_IMark) {
 			/* That's the end of this instruction */
-			directExits.push_back(VexRip::invent_vex_rip(((IRStmtIMark *)irsb->stmts[i])->addr));
+			directExits.push_back(((IRStmtIMark *)irsb->stmts[i])->addr.rip);
 			return;
 		}
 		if (irsb->stmts[i]->tag == Ist_Exit)
-			directExits.push_back(VexRip::invent_vex_rip(((IRStmtExit *)irsb->stmts[i])->dst->Ico.U64));
+			directExits.push_back(((IRStmtExit *)irsb->stmts[i])->dst.rip);
 	}
 
 	/* If we get here then there are no other marks in the IRSB,
 	   so we need to look at the fall through addresses. */
 	if (irsb->jumpkind == Ijk_Call) {
-		if (irsb->next->tag != Iex_Const ||
-		    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
+		if (!irsb->next_is_const ||
+		    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
 			directExits.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
 		/* Emit the target as well, if possible. */
-		if (irsb->next->tag == Iex_Const)
-			callees->set(std::pair<VexRip, VexRip>(rip, VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64)),
+		if (irsb->next_is_const)
+			callees->set(std::pair<VexRip, VexRip>(rip, irsb->next_const.rip),
 				     true);
 		return;
 	}
 
 	if (irsb->jumpkind != Ijk_NoDecode &&
-	    irsb->next->tag == Iex_Const) {
-		directExits.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
+	    irsb->next_is_const) {
+		directExits.push_back(irsb->next_const.rip);
 	} else {
 		/* Should really do something more clever here,
 		   possibly based on dynamic analysis. */
@@ -1378,8 +1378,7 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 		while (start_of_instruction < irsb->stmts_used) {
 			IRStmt *stmt = irsb->stmts[start_of_instruction];
 			assert(stmt->tag == Ist_IMark);
-			unsigned long raw_rip = ((IRStmtIMark *)stmt)->addr;
-			VexRip r = VexRip::invent_vex_rip(raw_rip);
+			VexRip r = ((IRStmtIMark *)stmt)->addr.rip;
 			if (explored.count(r))
 				break;
 
@@ -1391,28 +1390,28 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 			     end_of_instruction++) {
 				stmt = irsb->stmts[end_of_instruction];
 				if (stmt->tag == Ist_Exit)
-					branch.push_back(VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64));
+					branch.push_back(((IRStmtExit *)stmt)->dst.rip);
 			}
 
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
-					if (irsb->next->tag != Iex_Const ||
-					    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
+					if (!irsb->next_is_const ||
+					    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
 						fallThrough.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
-					if (irsb->next->tag == Iex_Const)
-						callees.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
+					if (irsb->next_is_const)
+						callees.push_back(irsb->next_const.rip);
 					else
 						findPossibleJumpTargets(rip, callees);
 				} else {
-					if (irsb->next->tag == Iex_Const)
-						fallThrough.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
+					if (irsb->next_is_const)
+						fallThrough.push_back(irsb->next_const.rip);
 					else if (irsb->jumpkind != Ijk_Ret)
 						findPossibleJumpTargets(rip, fallThrough);
 				}
 			} else {
 				stmt = irsb->stmts[end_of_instruction];
 				assert(dynamic_cast<IRStmtIMark *>(stmt));
-				fallThrough.push_back(VexRip::invent_vex_rip(((IRStmtIMark *)stmt)->addr));
+				fallThrough.push_back( ((IRStmtIMark *)stmt)->addr.rip );
 			}
 
 			heads.insert(heads.end(), callees.begin(), callees.end());
@@ -1602,22 +1601,22 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 
 	if (nr_statements == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
-			if (irsb->next->tag != Iex_Const ||
-			    ((IRExprConst *)irsb->next)->con->Ico.U64 != __STACK_CHK_FAILED)
+			if (!irsb->next_is_const ||
+			    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
 				fallThroughRips.push_back(VexRip::invent_vex_rip(extract_call_follower(irsb)));
-			if (irsb->next->tag == Iex_Const)
-				callees.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
+			if (irsb->next_is_const)
+				callees.push_back( irsb->next_const.rip);
 			else
 				getInstructionCallees(rip, callees, oracle);
 		} else {
-			if (irsb->next->tag == Iex_Const)
-				fallThroughRips.push_back(VexRip::invent_vex_rip(((IRExprConst *)irsb->next)->con->Ico.U64));
+			if (irsb->next_is_const == Iex_Const)
+				fallThroughRips.push_back( irsb->next_const.rip);
 			else
 				getInstructionFallThroughs(rip, fallThroughRips);
 		}
 	} else {
 		assert(dynamic_cast<IRStmtIMark *>(statements[nr_statements]));
-		fallThroughRips.push_back(VexRip::invent_vex_rip(((IRStmtIMark *)statements[nr_statements])->addr));
+		fallThroughRips.push_back( ((IRStmtIMark *)statements[nr_statements])->addr.rip );
 	}
 
 	for (auto it = fallThroughRips.begin();
@@ -1668,7 +1667,7 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			VexRip _branchRip = VexRip::invent_vex_rip(((IRStmtExit *)stmt)->dst->Ico.U64);
+			VexRip _branchRip = ((IRStmtExit *)stmt)->dst.rip;
 			res |= liveOnEntry(_branchRip, false);
 			res = irexprUsedValues(res, ((IRStmtExit *)stmt)->guard);
 			break;
@@ -1809,7 +1808,7 @@ Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool
 				goto impossible;
 			IRExpr *v = IRExpr_Load(t,
 						((IRStmtDirty *)stmt)->details->args[0],
-						ThreadRip::mk(9999, rip.unwrap_vexrip()));
+						ThreadRip::mk(9999, rip));
 			if (rsp)
 				rsp = rewriteRegister(rsp, tmp, v);
 			if (rbp)
@@ -2054,7 +2053,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, Address
 		case Ist_MBE:
 			abort();
 		case Ist_Exit: {
-			VexRip _branchRip = VexRip::invent_vex_rip(((IRStmtExit *)st)->dst->Ico.U64);
+			VexRip _branchRip = ((IRStmtExit *)st)->dst.rip;
 			RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
 			RegisterAliasingConfiguration newExitConfig(bConfig);
 			newExitConfig |= config;
@@ -2714,12 +2713,6 @@ dbg_database_query(const char *query)
 		}
 	}
 	sqlite3_finalize(stmt);
-}
-
-bool
-parseVexRip(VexRip *rip, const char *str, const char **suffix)
-{
-	return parseHexUlong(&rip->rip, str, suffix);
 }
 
 bool

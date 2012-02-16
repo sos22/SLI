@@ -14,8 +14,8 @@ public:
 	void add_sink(unsigned long rip) { (*sinkInstructions)[rip] = true; }
 	void destruct() { this->~SourceSinkCFG(); }
 
-	bool exploreInstruction(Instruction<ThreadRip> *i) { return !(*sinkInstructions)[i->rip.rip]; }
-	bool instructionUseful(Instruction<ThreadRip> *i) { return (*sinkInstructions)[i->rip.rip]; }
+	bool exploreInstruction(Instruction<ThreadRip> *i) { return !(*sinkInstructions)[i->rip.rip.unwrap_vexrip()]; }
+	bool instructionUseful(Instruction<ThreadRip> *i) { return (*sinkInstructions)[i->rip.rip.unwrap_vexrip()]; }
 
 	SourceSinkCFG(AddressSpace *as)
 		: CFG<ThreadRip>(as)
@@ -48,7 +48,7 @@ AddExitCallPatch::generateEpilogue(ThreadRip exitRip)
 	registerInstruction(i, content.size());
 
 	emitCallSequence("(unsigned long)release_lock", true);
-	emitJmpToRipHost(exitRip.rip);
+	emitJmpToRipHost(exitRip.rip.unwrap_vexrip());
 }
 
 struct CriticalSection {
@@ -62,7 +62,7 @@ mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 	SourceSinkCFG *cfg = new SourceSinkCFG(as);
 	std::set<ThreadRip> roots;
 	for (unsigned x = 0; x < nr_csects; x++) {
-		ThreadRip r = ThreadRip::mk(0, csects[x].entry);
+		ThreadRip r = ThreadRip::mk(0, VexRip::invent_vex_rip(csects[x].entry));
 		roots.insert(r);
 		cfg->add_root(r, 50);
 		cfg->add_sink(csects[x].exit);

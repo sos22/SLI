@@ -73,7 +73,7 @@ public:
 	TrivMemoryFetcher(const UChar *_content,
 			  unsigned tid,
 			  unsigned _size) :
-		GuestMemoryFetcher(ThreadRip::mk(tid, (unsigned long)_content)),
+		GuestMemoryFetcher(ThreadRip::mk(tid, VexRip::invent_vex_rip((unsigned long)_content))),
 		content(_content),
 		size(_size)
 	{
@@ -113,7 +113,7 @@ typedef
 
       /* For Dis_Resteer, this is the guest address we should continue
          at.  Otherwise ignored (should be zero). */
-      Addr64 continueAt;
+      ThreadRip continueAt;
 
    }
 
@@ -166,7 +166,7 @@ typedef
       /*IN*/  Long         delta,
 
       /* What is the guest IP of the insn? */
-      /*IN*/  Addr64       guest_IP,
+      /*IN*/  const ThreadRip &guest_IP,
 
       /* Info about the guest architecture */
       /*IN*/  VexArch      guest_arch,
@@ -188,11 +188,10 @@ typedef
 /* See detailed comment in bb_to_IR.c. */
 extern
 IRSB* bb_to_IR ( unsigned                tid,
-		 /*OUT*/VexGuestExtents* vge,
                  /*IN*/ void*            closure_opaque,
                  /*IN*/ DisOneInstrFn    dis_instr_fn,
                  /*IN*/ GuestMemoryFetcher &guest_code,
-                 /*IN*/ Addr64           guest_IP_bbstart,
+                 /*IN*/ const ThreadRip &guest_IP_bbstart,
                  /*IN*/ Bool             (*chase_into_ok)(void*,Addr64),
                  /*IN*/ Bool             host_bigendian,
                  /*IN*/ VexArch          arch_guest,

@@ -734,19 +734,17 @@ public:
 /* A node in the state machine representing a bit of code which we
    haven't explored yet. */
 class StateMachineStub : public StateMachineTerminal {
-	unsigned long _hashval() const { return target->hashval(); }
+	unsigned long _hashval() const { return target.hash(); }
 public:
-	IRExpr *target;
+	VexRip target;
 
-	StateMachineStub(const VexRip &origin, IRExpr *t) : StateMachineTerminal(origin), target(t) {}
+	StateMachineStub(const VexRip &origin, const VexRip &t) : StateMachineTerminal(origin), target(t) {}
 
 	void prettyPrint(FILE *f) const
 	{
-		fprintf(f, "<%s: jmp ", origin.name());
-		ppIRExpr(target, f);
-		fprintf(f, ">");
+		fprintf(f, "<%s: jmp %s>", origin.name(), target.name());
 	}
-	void visit(HeapVisitor &hv) { hv(target); }
+	void visit(HeapVisitor &hv) { }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
 
 	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,

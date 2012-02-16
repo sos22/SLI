@@ -38,7 +38,6 @@ main()
 	IRSB *irsb;
 	VexArchInfo archinfo_guest;
 	VexAbiInfo abiinfo_both;
-	VexGuestExtents vge;
 
 	LibVEX_default_VexControl(&vcon);
 	vcon.iropt_level = 0;
@@ -54,11 +53,10 @@ main()
 			      99,
 			      128);
 	irsb = bb_to_IR(97,
-			&vge,
 			NULL, /* Context for chase_into_ok */
 			disInstr_AMD64,
 			tmf,
-			(Addr64)main, /* guest code original rip */
+			ThreadRip(97, VexRip::invent_vex_rip((unsigned long)main)), /* guest code original rip */
 			chase_into_ok,
 			False, /* host bigendian */
 			VexArchAMD64,

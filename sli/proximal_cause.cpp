@@ -40,12 +40,13 @@ _getProximalCause(MachineState *ms, unsigned long rip, Thread *thr, unsigned *id
 		/* We now guess that we crashed because the function
 		   pointer called turned out to be NULL. */
 		*idx = irsb->stmts_used;
+		assert(!irsb->next_is_const);
 		return new StateMachineEdge(
 			new StateMachineBifurcate(
 				VexRip::invent_vex_rip(rip),
 				IRExpr_Unop(
 					Iop_BadPtr,
-					irsb->next),
+					irsb->next_nonconst),
 				StateMachineCrash::get(),
 				StateMachineNoCrash::get()));
 	}
@@ -191,7 +192,7 @@ backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadVexRip site)
 				new StateMachineEdge(
 					new StateMachineStub(
 						site.rip,
-						IRExpr_Const(((IRStmtExit *)stmt)->dst))),
+						((IRStmtExit *)stmt)->dst.rip)),
 				sm));
 		break;
 	}

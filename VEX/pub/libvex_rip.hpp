@@ -54,6 +54,10 @@ public:
 	}
 
 	VexRip() : valid(false) {}
+
+	VexRip operator+(long delta) const {
+		return VexRip(rip + delta);
+	}
 };
 
 bool parseVexRip(VexRip *out, const char *str, const char **suffix);

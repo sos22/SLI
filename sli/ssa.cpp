@@ -598,9 +598,7 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 			continue;
 		visited.insert(s);
 
-		if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(s))
-			sms->target = worker.doExprInState(reaching.effectsReachingState(s), sms->target);
-		else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s))
+		if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s))
 			smb->condition = worker.doExprInState(reaching.effectsReachingState(s), smb->condition);
 
 		if (s->target0()) {
@@ -814,9 +812,7 @@ introducePhiStates(StateMachine *inp,
 			continue;
 		visited.insert(s);
 
-		if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(s))
-			addPhiNodes(sms->target, sms);
-		else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s))
+		if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s))
 			addPhiNodes(smb->condition, smb);
 		if (s->target0())
 			toVisit.insert(s->target0()->target);
@@ -1187,9 +1183,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	} else if (dynamic_cast<const StateMachineNoCrash *>(inp)) {
 		return StateMachineNoCrash::get();
 	} else if (const StateMachineStub *sms = dynamic_cast<const StateMachineStub *>(inp)) {
-		StateMachineStub *res = new StateMachineStub(sms->origin, NULL);
-		ctxt(&res->target, sms->target, rawDupe);
-		return res;
+		return new StateMachineStub(sms->origin, sms->target);
 	} else {
 		abort();
 	}

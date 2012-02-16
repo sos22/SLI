@@ -83,6 +83,8 @@ public:
 	~Named() { clearName(); }
 };
 
+#include "libvex_rip.hpp"
+
 class threadAndRegister : public Named {
 	std::pair<unsigned, int> content;
 	bool valid;
@@ -212,16 +214,16 @@ class ThreadRip : public Named {
 	char *mkName() const {
 		char *res;
 		int r;
-		r = asprintf(&res, "%d:%lx", thread, rip);
+		r = asprintf(&res, "%d:%s", thread, rip.name());
 		(void)r;
 		return res;
 	}
 public:
-	ThreadRip() : thread(0), rip(0) {}
-	ThreadRip(unsigned _thread, unsigned long _rip)
+	ThreadRip() : thread(0), rip(VexRip()) {}
+	ThreadRip(unsigned _thread, const VexRip &_rip)
 		: thread(_thread), rip(_rip)
 	{}
-	static ThreadRip mk(unsigned thread, unsigned long rip) {
+	static ThreadRip mk(unsigned thread, const VexRip &rip) {
 		return ThreadRip(thread, rip);
 	}
 	bool operator==(const ThreadRip &o) const {
@@ -250,7 +252,7 @@ public:
 	ThreadRip operator+(long x) const { return mk(thread, rip + x); }
 
 	unsigned thread;
-	unsigned long rip;
+	VexRip rip;
 };
 extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
@@ -2008,15 +2010,15 @@ public:
       void prettyPrint(FILE *f) const { fprintf(f, "IR-NoOp"); }
 };
 struct IRStmtIMark : public IRStmt {
-      Addr64 addr;
+      ThreadRip addr;
       Int len;
-      IRStmtIMark(Addr64 _addr, Int _len)
+      IRStmtIMark(const ThreadRip &_addr, Int _len)
 	      : IRStmt(Ist_IMark), addr(_addr), len(_len)
       {}
       void visit(HeapVisitor &hv) {}
       void prettyPrint(FILE *f) const {
-         fprintf(f,  "------ IMark(0x%llx, %d) ------", 
-                     addr, len);
+         fprintf(f,  "------ IMark(%s, %d) ------", 
+		 addr.name(), len);
       }
 };
 struct IRStmtAbiHint : public IRStmt {
@@ -2189,24 +2191,23 @@ struct IRStmtMBE : public IRStmt {
 struct IRStmtExit : public IRStmt {
       IRExpr*    guard;    /* Conditional expression */
       IRJumpKind jk;       /* Jump kind */
-      IRConst*   dst;      /* Jump target (constant only) */
-      IRStmtExit(IRExpr *_guard, IRJumpKind _jk, IRConst *_dst)
+      ThreadRip  dst;      /* Jump target (constant only) */
+      IRStmtExit(IRExpr *_guard, IRJumpKind _jk, const ThreadRip &_dst)
 	      : IRStmt(Ist_Exit), guard(_guard), jk(_jk), dst(_dst)
       {}
-      void visit(HeapVisitor &hv) {hv(guard); hv(dst); }
+      void visit(HeapVisitor &hv) {hv(guard); }
       void prettyPrint(FILE *f) const {
          fprintf(f,  "if (" );
          ppIRExpr(guard, f);
          fprintf(f,  ") goto {");
          ppIRJumpKind(jk, f);
-         fprintf(f, "} ");
-         ppIRConst(dst, f);
+         fprintf(f, "} %s", dst.name());
       }
 };
 
 /* Statement constructors. */
 extern IRStmt* IRStmt_NoOp    ( void );
-extern IRStmt* IRStmt_IMark   ( Addr64 addr, Int len );
+extern IRStmt* IRStmt_IMark   ( const ThreadRip &addr, Int len );
 extern IRStmt* IRStmt_AbiHint ( IRExpr* base, Int len, IRExpr* nia );
 extern IRStmt* IRStmt_Put     ( threadAndRegister off, IRExpr* data );
 extern IRStmt* IRStmt_PutI    ( IRRegArray* descr, IRExpr* ix, Int bias, 
@@ -2216,7 +2217,7 @@ extern IRStmt* IRStmt_Store   ( IRExpr* addr, IRExpr* data );
 extern IRStmt* IRStmt_CAS     ( IRCAS* details );
 extern IRStmt* IRStmt_Dirty   ( IRDirty* details );
 extern IRStmt* IRStmt_MBE     ( IRMBusEvent event );
-extern IRStmt* IRStmt_Exit    ( IRExpr* guard, IRJumpKind jk, IRConst* dst );
+extern IRStmt* IRStmt_Exit    ( IRExpr* guard, IRJumpKind jk, const ThreadRip &dst );
 
 /* Pretty-print an IRStmt. */
 extern void ppIRStmt ( IRStmt*, FILE* );
@@ -2250,12 +2251,14 @@ struct _IRSB : public GarbageCollected<_IRSB, &ir_heap> {
       IRStmt**   stmts;
       Int        stmts_size;
       Int        stmts_used;
-      IRExpr*    next;
+      bool       next_is_const;
+      ThreadRip  next_const;
+      IRExpr*    next_nonconst;
       IRJumpKind jumpkind;
       void visit(HeapVisitor &hv) {
 	 hv(tyenv);
 	 hv(stmts);
-	 hv(next);
+	 hv(next_nonconst);
       }
       NAMED_CLASS
    }

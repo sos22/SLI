@@ -150,13 +150,7 @@ protected:
 	{ return NULL; }
 	virtual StateMachineStub *transformOneState(StateMachineStub *s,
 						    bool *done_something)
-	{
-		bool b = false;
-		IRExpr *d = transformIRExpr(s->target, &b);
-		if (!b)
-			return NULL;
-		return new StateMachineStub(s->origin, d);
-	}
+	{ return NULL; }
 	virtual StateMachineProxy *transformOneState(StateMachineProxy *p,
 						     bool *done_something)
 	{

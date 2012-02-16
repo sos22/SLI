@@ -55,7 +55,7 @@ void Thread::dumpSnapshot(LogWriter *lw)
 		/* First statement in block should be a mark */
 		assert(currentIRSB->stmts[0]->tag == Ist_IMark);
 		/* Should be a mark for the IRSB rip */
-		assert(((IRStmtIMark *)currentIRSB->stmts[0])->addr ==
+		assert(((IRStmtIMark *)currentIRSB->stmts[0])->addr.rip.unwrap_vexrip() ==
 		       currentIRSBRip);
 		lw->append(new LogRecordVexThreadState(tid, currentIRSBRip, currentIRSBOffset, temporaries));
 	}

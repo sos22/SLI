@@ -90,11 +90,10 @@ static Bool const_False ( void* callback_opaque, Addr64 a ) {
 */
 
 IRSB* bb_to_IR ( unsigned tid,
-		 /*OUT*/VexGuestExtents* vge,
                  /*IN*/ void*            callback_opaque,
                  /*IN*/ DisOneInstrFn    dis_instr_fn,
                  /*IN*/ GuestMemoryFetcher &guest_code,
-                 /*IN*/ Addr64           guest_IP_bbstart,
+                 /*IN*/ const ThreadRip &guest_IP_bbstart,
                  /*IN*/ Bool             (*chase_into_ok)(void*,Addr64),
                  /*IN*/ Bool             host_bigendian,
                  /*IN*/ VexArch          arch_guest,
@@ -115,8 +114,7 @@ IRSB* bb_to_IR ( unsigned tid,
    Int        d_resteers = 0;
    Int        selfcheck_idx = 0;
    IRSB*      irsb;
-   Addr64     guest_IP_curr_instr;
-   IRConst*   guest_IP_bbstart_IRConst = NULL;
+   ThreadRip  guest_IP_curr_instr;
 
    Bool (*resteerOKfn)(void*,Addr64) = NULL;
 
@@ -137,11 +135,6 @@ IRSB* bb_to_IR ( unsigned tid,
    vassert(vex_control.guest_chase_thresh < vex_control.guest_max_insns);
    vassert(guest_word_type == Ity_I32 || guest_word_type == Ity_I64);
 
-   /* Start a new, empty extent. */
-   vge->n_used  = 1;
-   vge->base[0] = guest_IP_bbstart;
-   vge->len[0]  = 0;
-
    /* And a new IR superblock to dump the result into. */
    irsb = emptyIRSB();
 
@@ -149,15 +142,6 @@ IRSB* bb_to_IR ( unsigned tid,
       so far gone. */
    delta    = 0;
    n_instrs = 0;
-
-   /* Guest addresses as IRConsts.  Used in the two self-checks
-      generated. */
-   if (do_self_check) {
-      guest_IP_bbstart_IRConst
-         = guest_word_type==Ity_I32 
-              ? IRConst_U32(toUInt(guest_IP_bbstart))
-              : IRConst_U64(guest_IP_bbstart);
-   }
 
    /* If asked to make a self-checking translation, leave 5 spaces
       in which to put the check statements.  We'll fill them in later
@@ -199,17 +183,10 @@ IRSB* bb_to_IR ( unsigned tid,
                  to scan just one sequence of bytes in the check, not
                  a whole bunch. */
               && !do_self_check
-              /* we can't afford to have a resteer once we're on the
-                 last extent slot. */
-              && vge->n_used < 3
            );
 
       resteerOKfn
          = resteerOK ? chase_into_ok : const_False;
-
-      /* This is the IP of the instruction we're just about to deal
-         with. */
-      guest_IP_curr_instr = guest_IP_bbstart + delta;
 
       /* This is the irsb statement array index of the first stmt in
          this insn.  That will always be the instruction-mark
@@ -273,19 +250,15 @@ IRSB* bb_to_IR ( unsigned tid,
             printf( "goto {");
             ppIRJumpKind(irsb->jumpkind, stdout);
             printf( "} ");
-            ppIRExpr( irsb->next, stdout );
-            printf( "\n");
+	    if (irsb->next_is_const) {
+	      printf("const %s\n", irsb->next_const.name());
+	    } else {
+	      ppIRExpr( irsb->next_nonconst, stdout );
+	      printf( "\n");
+	    }
          }
       }
 
-      /* Update the VexGuestExtents we are constructing. */
-      /* If vex_control.guest_max_insns is required to be < 100 and
-	 each insn is at max 20 bytes long, this limit of 5000 then
-	 seems reasonable since the max possible extent length will be
-	 100 * 20 == 2000. */
-      vassert(vge->len[vge->n_used-1] < 5000);
-      vge->len[vge->n_used-1] 
-         = toUShort(toUInt( vge->len[vge->n_used-1] + dres.len ));
       n_instrs++;
       if (debug_print) 
 	 printf("\n");
@@ -295,17 +268,17 @@ IRSB* bb_to_IR ( unsigned tid,
 
       switch (dres.whatNext) {
          case DisResult::Dis_Continue:
+	    /* This is the IP of the instruction we're just about to deal
+	       with. */
+	   guest_IP_curr_instr = guest_IP_curr_instr + (long)dres.len;
+
             vassert(irsb->next == NULL);
             if (n_instrs < vex_control.guest_max_insns) {
                /* keep going */
             } else {
                /* We have to stop. */
-               irsb->next 
-                  = IRExpr_Const(
-                       guest_word_type == Ity_I32
-                          ? IRConst_U32(toUInt(guest_IP_bbstart+delta))
-                          : IRConst_U64(guest_IP_bbstart+delta)
-                    );
+	       irsb->next_is_const = true;
+	       irsb->next_const = guest_IP_bbstart + (long)delta;
                goto done;
             }
             break;
@@ -318,14 +291,14 @@ IRSB* bb_to_IR ( unsigned tid,
             vassert(irsb->next == NULL);
             /* figure out a new delta to continue at. */
             vassert(resteerOKfn(callback_opaque,dres.continueAt));
-            delta = dres.continueAt - guest_IP_bbstart;
-            /* we now have to start a new extent slot. */
-            vge->n_used++;
-            vassert(vge->n_used <= 3);
-            vge->base[vge->n_used-1] = dres.continueAt;
-            vge->len[vge->n_used-1] = 0;
+            delta = dres.continueAt.rip.unwrap_vexrip() - guest_IP_bbstart.rip.unwrap_vexrip();
             n_resteers++;
             d_resteers++;
+
+	    /* This is the IP of the instruction we're just about to deal
+	       with. */
+	    guest_IP_curr_instr = dres.continueAt;
+
             break;
          default:
             vpanic("bb_to_IR");
