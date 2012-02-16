@@ -1,5 +1,5 @@
 targets=''
-vex_tests="check_compile dump_irsb parse_irexpr"
+vex_tests="check_compile parse_irexpr"
 
 defvars() {
     echo "VEX_TESTS=\$(patsubst %,${input_base}/%,${vex_tests})"

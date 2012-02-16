@@ -66,24 +66,6 @@ public:
 	ThreadRip rip;
 };
 
-class TrivMemoryFetcher : public GuestMemoryFetcher {
-	const UChar *content;
-	unsigned size;
-public:
-	TrivMemoryFetcher(const UChar *_content,
-			  unsigned tid,
-			  unsigned _size) :
-		GuestMemoryFetcher(ThreadRip::mk(tid, VexRip::invent_vex_rip((unsigned long)_content))),
-		content(_content),
-		size(_size)
-	{
-	}
-	virtual UChar operator[](unsigned long ptr) const {
-		assert(ptr < size);
-		return content[ptr];
-	}
-};
-
 /* ---------------------------------------------------------------
    Result of disassembling an instruction
    --------------------------------------------------------------- */
