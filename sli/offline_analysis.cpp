@@ -472,7 +472,7 @@ public:
 	CallGraphEntry(const VexRip &r, int _depth)
 		: headRip(r),
 		  callees(new gc_pair_VexRip_set_t()),
-		  instructions(new RangeSet<unsigned long, &ir_heap>()),
+		  instructions(new RangeSet<VexRip, &ir_heap>()),
 		  calls(new gc_heap_map<VexRip, CallGraphEntry, &ir_heap>::type()),
 		  depth(_depth)
 	{}
@@ -483,7 +483,7 @@ public:
 
 	/* Pair of call instruction and callee address */
 	gc_pair_VexRip_set_t *callees;
-	RangeSet<unsigned long, &ir_heap> *instructions;
+	RangeSet<VexRip, &ir_heap> *instructions;
 
 	/* The same information as callees in a slightly different
 	   format. */
@@ -527,7 +527,7 @@ exploreOneFunctionForCallGraph(const VexRip &head,
 		if (TIMEOUT)
 			return NULL;
 
-		if (cge->instructions->test(i.unwrap_vexrip())) {
+		if (cge->instructions->test(i)) {
 			/* Done this instruction already -> move
 			 * on. */
 			continue;
@@ -556,17 +556,17 @@ exploreOneFunctionForCallGraph(const VexRip &head,
 			}
 		}
 
-		unsigned long end = i.unwrap_vexrip() + getInstrLength(as, i);
-		if (end == i.unwrap_vexrip()) {
+		VexRip end = i + getInstrLength(as, i);
+		if (end == i) {
 			/* Valgrind occasionally gets confused and
 			   returns empty instructions.  Treat them as
 			   single-byte ones for these purposes. */
-			end = i.unwrap_vexrip() + 1;
+			end = i + 1;
 		}
 
 		/* Add this instruction to the current function. */
-		cge->instructions->set(i.unwrap_vexrip(), end);
-		instrsToCGEntries->set(i.unwrap_vexrip(), end, cge);
+		cge->instructions->set(i, end);
+		instrsToCGEntries->set(i.unwrap_vexrip(), end.unwrap_vexrip(), cge);
 
 		/* Where are we going next? */
 		findInstrSuccessorsAndCallees(as, i, unexploredInstrsThisFunction,
@@ -612,7 +612,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 	if (rips.size() == 1) {
 		CallGraphEntry *cge = new CallGraphEntry(*rips.begin(), 0);
 		cge->isRealHead = true;
-		cge->instructions->set(rips.begin()->unwrap_vexrip(), rips.begin()->unwrap_vexrip() + 1);
+		cge->instructions->set(*rips.begin(), *rips.begin() + 1);
 
 		*nr_roots = 1;
 		CallGraphEntry **res = (CallGraphEntry **)__LibVEX_Alloc_Ptr_Array(&ir_heap, 1);
@@ -890,7 +890,7 @@ printCallGraph(CallGraphEntry *root, FILE *f, std::set<CallGraphEntry *> &memo)
 	for (auto it = root->instructions->begin();
 	     it != root->instructions->end();
 	     it++)
-		fprintf(f, "%#lx-%#lx, ", it->start, it->end1);
+		fprintf(f, "%s-%s, ", it->start.name(), it->end1.name());
 	fprintf(f, "} (");
 	for (auto it = root->calls->begin();
 	     it != root->calls->end();
@@ -998,7 +998,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	/* Build a map from instruction RIPs to CGEs. */
 	std::set<CallGraphEntry *> explored;
 	std::queue<CallGraphEntry *> toExplore;
-	RangeTree<unsigned long, CallGraphEntry, &ir_heap> *ripToCFGNode = new RangeTree<unsigned long, CallGraphEntry, &ir_heap>();
+	RangeTree<VexRip, CallGraphEntry, &ir_heap> *ripToCFGNode = new RangeTree<VexRip, CallGraphEntry, &ir_heap>();
 	toExplore.push(root);
 	while (!toExplore.empty()) {
 		CallGraphEntry *cge = toExplore.front();
@@ -1031,7 +1031,7 @@ buildCFGForCallGraph(AddressSpace *as,
 		int depth = needed.front().second;
 		if (depth == 0 ||
 		    (builtSoFar.count(r) && builtSoFar[r].second >= depth) ||
-		    ripToCFGNode->get(r.rip.unwrap_vexrip()) == NULL) {
+		    ripToCFGNode->get(r.rip) == NULL) {
 			needed.pop();
 			continue;
 		}
@@ -1065,11 +1065,11 @@ buildCFGForCallGraph(AddressSpace *as,
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
 				VexRip follower = extract_call_follower(irsb);
-				if (ripToCFGNode->get(r.rip.unwrap_vexrip())->calls->hasKey(r.rip) &&
+				if (ripToCFGNode->get(r.rip)->calls->hasKey(r.rip) &&
 				    !r.on_stack(follower.unwrap_vexrip())) {
 					/* We should inline this call. */
 					work->fallThroughRip = r.call(
-						ripToCFGNode->get(r.rip.unwrap_vexrip())->calls->get(r.rip)->headRip,
+						ripToCFGNode->get(r.rip)->calls->get(r.rip)->headRip,
 						follower);
 				} else {
 					/* Skip over this call. */
