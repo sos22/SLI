@@ -10,24 +10,24 @@
 
 #include <vector>
 
-template <Heap *heap>
-class RawRangeTree : public GarbageCollected<RawRangeTree<heap>, heap> {
-	bool performSearch(unsigned long, int &, int &);
+template <typename key, Heap *heap>
+class RawRangeTree : public GarbageCollected<RawRangeTree<key, heap>, heap> {
+	bool performSearch(const key &, int &, int &);
 public:
 	struct entry {
-		unsigned long start;
-		unsigned long end1;
+		key start;
+		key end1;
 		void *value;
-		entry(unsigned long s, unsigned long e, void *v)
+		entry(const key &s, const key &e, void *v)
 			: start(s), end1(e), value(v)
 		{
 		}
-		entry() : start(0), end1(0), value(NULL) {}
+		entry() : value(NULL) {}
 	};
 	std::vector<entry> content;
 	class iterator {
 	private:
-		RawRangeTree<heap> *t;
+		RawRangeTree<key, heap> *t;
 		entry inner;
 	public:
 		int idx;
@@ -36,7 +36,7 @@ public:
 		bool operator!=(const iterator &o) const { return idx != o.idx; }
 		void updateInner();
 
-		iterator(RawRangeTree<heap> *_t, int _idx)
+		iterator(RawRangeTree<key, heap> *_t, int _idx)
 			: t(_t), idx(_idx)
 		{
 			updateInner();
@@ -45,10 +45,10 @@ public:
 
 	/* Look up @v in the mapping, and either return the value
 	   associated with it or return NULL. */
-	void *get(unsigned long v);
+	void *get(const key &v);
 	/* Set the mapping for [start,end1) (i.e. including start,
 	   excluding end1) to value. */
-	void set(unsigned long start, unsigned long end1, void *value);
+	void set(const key &start, const key &end1, void *value);
 	/* Purge all of the ranges which map to a particular value. */
 	void purgeByValue(void *v);
 
@@ -65,11 +65,11 @@ public:
 };
 
 /* Simple facade around RawRangeTree to get better type checking. */
-template <typename t, Heap *heap>
-class RangeTree : public GarbageCollected<RangeTree<t,heap>, heap> {
+template <typename key, typename t, Heap *heap>
+class RangeTree : public GarbageCollected<RangeTree<key, t, heap>, heap> {
 	RangeTree(const RangeTree &); /* DNI */
 public:
-	RawRangeTree<heap> *content;
+	RawRangeTree<key, heap> *content;
 
 	class iterator {
 		void updateUnderlying(void) {
@@ -78,7 +78,7 @@ public:
 			content.end1 = underlying->end1;
 		}
 	public:
-		iterator(class RawRangeTree<heap>::iterator u)
+		iterator(class RawRangeTree<key, heap>::iterator u)
 			: underlying(u)
 		{
 			updateUnderlying();
@@ -86,11 +86,11 @@ public:
 		class _inner {
 		public:
 			t *value;
-			unsigned long start;
-			unsigned long end1;
+			key start;
+			key end1;
 		};
 		_inner content;
-		class RawRangeTree<heap>::iterator underlying;
+		class RawRangeTree<key, heap>::iterator underlying;
 		bool operator!=(const iterator &o) { return underlying != o.underlying; }
 		void operator++(int) {
 			underlying++;
@@ -99,9 +99,9 @@ public:
 		_inner *operator->() { return &content; }
 	};
 
-	RangeTree() : content(new RawRangeTree<heap>()) {}
-	t *get(unsigned long k) { return (t *)content->get(k); }
-	void set(unsigned long start, unsigned long end1, t *k) { content->set(start, end1, k); }
+	RangeTree() : content(new RawRangeTree<key, heap>()) {}
+	t *get(const key &k) { return (t *)content->get(k); }
+	void set(const key &start, const key &end1, t *k) { content->set(start, end1, k); }
 
 	void purgeByValue(t *x) { content->purgeByValue(x); }
 
@@ -115,9 +115,9 @@ public:
 
 /* Variant which provides a simple set of ranges, rather than a map
    from ranges to values.  Everything defaults to not present. */
-template <Heap *heap>
-class RangeSet : public GarbageCollected<RangeSet<heap>, heap> {
-	RawRangeTree<heap> *content;
+template <typename key, Heap *heap>
+class RangeSet : public GarbageCollected<RangeSet<key, heap>, heap> {
+	RawRangeTree<key, heap> *content;
 	class pe : public GarbageCollected<pe, heap> {
 	public:
 		void visit(HeapVisitor &hv) {}
@@ -133,22 +133,22 @@ public:
 	public:
 		class _inner {
 		public:
-			unsigned long start;
-			unsigned long end1;
+			key start;
+			key end1;
 		};
 		_inner inner;
-		class RawRangeTree<heap>::iterator it;
+		class RawRangeTree<key, heap>::iterator it;
 		_inner *operator->() { return &inner; }
 		void operator++(int) { it++; updateInner(); }
 		bool operator!=(const iterator &i) { return it != i.it; }
-		iterator(class RawRangeTree<heap>::iterator _it)
+		iterator(class RawRangeTree<key, heap>::iterator _it)
 			: it(_it)
 		{ updateInner(); }
 	};
-	RangeSet() : content(new RawRangeTree<heap>()) {}
+	RangeSet() : content(new RawRangeTree<key, heap>()) {}
 	void visit(HeapVisitor &hv) { hv(content); }
-	bool test(unsigned long x) { return content->get(x) == presentEntry; }
-	void set(unsigned long start, unsigned long end1) {
+	bool test(const key &x) { return content->get(x) == presentEntry; }
+	void set(const key &start, const key &end1) {
 		content->set(start, end1, presentEntry);
 	}
 
@@ -158,11 +158,11 @@ public:
 	NAMED_CLASS
 };
 
-template <Heap *heap> VexPtr<class RangeSet<heap>::pe, heap>
-RangeSet<heap>::presentEntry(new RangeSet<heap>::pe);
+template <typename key, Heap *heap> VexPtr<class RangeSet<key, heap>::pe, heap>
+RangeSet<key, heap>::presentEntry(new RangeSet<key, heap>::pe);
 
-template <Heap *heap> bool
-RawRangeTree<heap>::performSearch(unsigned long v, int &low, int &high)
+template <typename key, Heap *heap> bool
+RawRangeTree<key, heap>::performSearch(const key &v, int &low, int &high)
 {
 	low = 0;
 	high = content.size() - 1;
@@ -184,8 +184,8 @@ RawRangeTree<heap>::performSearch(unsigned long v, int &low, int &high)
 	return true;
 }
 
-template <Heap *heap> void *
-RawRangeTree<heap>::get(unsigned long v)
+template <typename key, Heap *heap> void *
+RawRangeTree<key, heap>::get(const key &v)
 {
 	int low;
 	int high;
@@ -205,8 +205,8 @@ RawRangeTree<heap>::get(unsigned long v)
 	}
 }
 
-template <Heap *heap> void
-RawRangeTree<heap>::set(unsigned long start, unsigned long end1, void *value)
+template <typename key, Heap *heap> void
+RawRangeTree<key, heap>::set(const key &start, const key &end1, void *value)
 {
 	int low, high;
 	assert(end1 >= start);
@@ -295,10 +295,10 @@ RawRangeTree<heap>::set(unsigned long start, unsigned long end1, void *value)
 	}
 }
 
-template <Heap *heap> void
-RawRangeTree<heap>::purgeByValue(void *v)
+template <typename key, Heap *heap> void
+RawRangeTree<key, heap>::purgeByValue(void *v)
 {
-	for (class std::vector<entry>::iterator it = content.begin();
+	for (auto it = content.begin();
 	     it != content.end();
 		) {
 		if (it->value == v)
@@ -308,8 +308,8 @@ RawRangeTree<heap>::purgeByValue(void *v)
 	}
 }
 
-template <Heap *heap> void
-RawRangeTree<heap>::iterator::updateInner()
+template <typename key, Heap *heap> void
+RawRangeTree<key, heap>::iterator::updateInner()
 {
 	if (idx >= (int)t->content.size())
 		return;
@@ -317,10 +317,10 @@ RawRangeTree<heap>::iterator::updateInner()
 		inner = t->content[idx];
 }
 
-template <Heap *heap> void
-RawRangeTree<heap>::visit(HeapVisitor &hv)
+template <typename key, Heap *heap> void
+RawRangeTree<key, heap>::visit(HeapVisitor &hv)
 {
-	for (class std::vector<entry>::iterator it = content.begin();
+	for (auto it = content.begin();
 	     it != content.end();
 	     it++)
 		hv(it->value);

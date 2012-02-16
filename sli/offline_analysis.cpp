@@ -472,7 +472,7 @@ public:
 	CallGraphEntry(const VexRip &r, int _depth)
 		: headRip(r),
 		  callees(new gc_pair_VexRip_set_t()),
-		  instructions(new RangeSet<&ir_heap>()),
+		  instructions(new RangeSet<unsigned long, &ir_heap>()),
 		  calls(new gc_heap_map<VexRip, CallGraphEntry, &ir_heap>::type()),
 		  depth(_depth)
 	{}
@@ -483,7 +483,7 @@ public:
 
 	/* Pair of call instruction and callee address */
 	gc_pair_VexRip_set_t *callees;
-	RangeSet<&ir_heap> *instructions;
+	RangeSet<unsigned long, &ir_heap> *instructions;
 
 	/* The same information as callees in a slightly different
 	   format. */
@@ -508,7 +508,7 @@ static CallGraphEntry *
 exploreOneFunctionForCallGraph(const VexRip &head,
 			       int depth,
 			       bool isRealHead,
-			       RangeTree<CallGraphEntry, &ir_heap> *instrsToCGEntries,
+			       RangeTree<unsigned long, CallGraphEntry, &ir_heap> *instrsToCGEntries,
 			       AddressSpace *as,
 			       std::set<VexRip> &realFunctionHeads)
 {
@@ -625,7 +625,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 	     it++) {
 		unexploredRips.insert(std::pair<VexRip, int>(*it, 0));
 	}
-	RangeTree<CallGraphEntry, &ir_heap> *instrsToCGEntries = new RangeTree<CallGraphEntry, &ir_heap>();
+	RangeTree<unsigned long, CallGraphEntry, &ir_heap> *instrsToCGEntries = new RangeTree<unsigned long, CallGraphEntry, &ir_heap>();
 	std::set<VexRip> realFunctionHeads;
 
 	while (!unexploredRips.empty()) {
@@ -728,7 +728,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 
 	/* Build a set of all of the CGEs which still exist */
 	std::set<CallGraphEntry *> allCGEs;
-	for (RangeTree<CallGraphEntry, &ir_heap>::iterator it = instrsToCGEntries->begin();
+	for (auto it = instrsToCGEntries->begin();
 	     it != instrsToCGEntries->end();
 	     it++) {
 		assert(it->value);
@@ -802,7 +802,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 		}
 	}
 	/* And now drop them from the instructions map */
-	for (RangeTree<CallGraphEntry, &ir_heap>::iterator it = instrsToCGEntries->begin();
+	for (auto it = instrsToCGEntries->begin();
 	     it != instrsToCGEntries->end();
 		) {
 		if (!interesting.count(it->value))
@@ -887,7 +887,7 @@ printCallGraph(CallGraphEntry *root, FILE *f, std::set<CallGraphEntry *> &memo)
 		return;
 	memo.insert(root);
 	fprintf(f, "%p: %s%s {", root, root->headRip.name(), root->isRealHead ? "" : " (fake)");
-	for (RangeSet<&ir_heap>::iterator it = root->instructions->begin();
+	for (auto it = root->instructions->begin();
 	     it != root->instructions->end();
 	     it++)
 		fprintf(f, "%#lx-%#lx, ", it->start, it->end1);
@@ -998,7 +998,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	/* Build a map from instruction RIPs to CGEs. */
 	std::set<CallGraphEntry *> explored;
 	std::queue<CallGraphEntry *> toExplore;
-	RangeTree<CallGraphEntry, &ir_heap> *ripToCFGNode = new RangeTree<CallGraphEntry, &ir_heap>();
+	RangeTree<unsigned long, CallGraphEntry, &ir_heap> *ripToCFGNode = new RangeTree<unsigned long, CallGraphEntry, &ir_heap>();
 	toExplore.push(root);
 	while (!toExplore.empty()) {
 		CallGraphEntry *cge = toExplore.front();
@@ -1006,7 +1006,7 @@ buildCFGForCallGraph(AddressSpace *as,
 		if (explored.count(cge))
 			continue;
 		explored.insert(cge);
-		for (RangeSet<&ir_heap>::iterator it = cge->instructions->begin();
+		for (auto it = cge->instructions->begin();
 		     it != cge->instructions->end();
 		     it++) {
 			ripToCFGNode->set(it->start, it->end1, cge);
