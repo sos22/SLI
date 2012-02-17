@@ -30,8 +30,11 @@ class VexRip : public Named {
 		   first need an additional two bytes for the ", "
 		   separator, so that's n * 20 - 2 bytes for the body.
 		   We also have enclosing {} and a nul terminator, for
-		   n * 20 + 1 bytes in total. */
-		char *buf = (char *)malloc(stack.size() * 20 + 1);
+		   n * 20 + 1 bytes in total.  An exception: if the
+		   stack is empty, we don't get the two bytes for ",
+		   ", so have to add it back on again.  Make things
+		   easy by just always adding it in. */
+		char *buf = (char *)malloc(stack.size() * 20 + 3);
 		char *cursor;
 		unsigned idx;
 		buf[0] = '{';
@@ -43,7 +46,7 @@ class VexRip : public Named {
 					  stack[idx]);
 		cursor[0] = '}';
 		cursor[1] = 0;
-		assert(cursor - buf < (int)stack.size() * 20);
+		assert(cursor - buf < (int)stack.size() * 20 + 2);
 		return buf;
 	}
 	std::vector<unsigned long> stack;
@@ -92,17 +95,21 @@ public:
 	VexRip operator+(long delta) const {
 		VexRip r(*this);
 		r.stack.back() += delta;
+		clearName();
 		return r;
 	}
 
 	void call(unsigned long target) {
 		stack.push_back(target);
+		clearName();
 	}
 	void jump(unsigned long target) {
 		stack.back() = target;
+		clearName();
 	}
 	void rtrn() {
 		stack.pop_back();
+		clearName();
 	}
 	bool on_stack(unsigned long rip) const {
 		for (auto it = stack.begin(); it != stack.end(); it++)
