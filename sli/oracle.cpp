@@ -991,24 +991,43 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 {
 	__set_profiling(oracle_load_call_graph);
 
-	if (ths->callGraphMapping.init(path) < 0)
-		err(1, "opening %s", path);
 	std::vector<VexRip> roots;
-	unsigned offset = 0;
-	while (1) {
-		const struct cg_header *h;
-		h = ths->callGraphMapping.get<struct cg_header>(offset);
-		if (!h)
-			break;
-		offset += sizeof(*h);
-		const unsigned long *c = ths->callGraphMapping.get<unsigned long>(offset, h->nr);
-		assert(c);
-		for (unsigned i = 0; i < h->nr; i++) {
-			if (c[i] & (1ul << 63))
-				roots.push_back(VexRip::invent_vex_rip(c[i] & ~(1ul << 63)));
+	FILE *f = fopen(path, "r");
+	while (!feof(f)) {
+		callgraph_entry ce;
+		bool is_call;
+		if (!read_vexrip(f, &ce.branch_rip, &is_call)) {
+			if (feof(f))
+				break;
+			err(1, "reading rip from %s", path);
 		}
-		offset += sizeof(unsigned long) * h->nr;
+		unsigned nr_callees;
+		if (fread(&nr_callees, sizeof(nr_callees), 1, f) != 1)
+			err(1, "reading number of callees from %s\n", path);
+		bool is_first = true;
+		is_call = false;
+		for (unsigned x = 0; x < nr_callees; x++) {
+			VexRip callee;
+			bool ic;
+			if (!read_vexrip(f, &callee, &ic))
+				err(1, "reading callee rip from %s", path);
+			if (is_first) {
+				is_call = ic;
+				is_first = false;
+			} else {
+				assert(is_call == ic);
+			}
+			ce.targets.insert(callee);
+		}
+		ce.is_call = is_call;
+		ths->callgraph_table.push_back(ce);
+
+		if (ce.is_call)
+			for (auto it = ce.targets.begin(); it != ce.targets.end(); it++)
+				roots.push_back(*it);
 	}
+
+	fclose(f);
 
 	make_unique(roots);
 	discoverFunctionHeads(ths, roots, token);
@@ -1017,24 +1036,13 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 void
 Oracle::findPossibleJumpTargets(const VexRip &rip, std::vector<VexRip> &output)
 {
-	if (!callGraphMapping.live())
-		return;
-	unsigned offset = 0;
-	while (1) {
-		const struct cg_header *h;
-		h = callGraphMapping.get<struct cg_header>(offset);
-		if (!h)
-			return;
-		offset += sizeof(*h);
-		if (h->rip == rip.unwrap_vexrip()) {
-			const unsigned long *c = callGraphMapping.get<unsigned long>(offset, h->nr);
-			assert(c);
-			for (unsigned i = 0; i < h->nr; i++)
-				output.push_back(VexRip::invent_vex_rip(c[i] & ~(1ul << 63)));
-			make_unique(output);
+	for (auto it = callgraph_table.begin(); it != callgraph_table.end(); it++) {
+		if (it->branch_rip == rip) {
+			output.reserve(it->targets.size());
+			for (auto it2 = it->targets.begin(); it2 != it->targets.end(); it2++)
+				output.push_back(*it2);
 			return;
 		}
-		offset += sizeof(unsigned long) * h->nr;
 	}
 }
 

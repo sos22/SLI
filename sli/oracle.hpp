@@ -235,6 +235,13 @@ public:
 		void prettyPrint(FILE *) const;
 	};
 
+	struct callgraph_entry {
+		bool is_call;
+		VexRip branch_rip;
+		std::set<VexRip> targets;
+	};
+	std::vector<callgraph_entry> callgraph_table;
+
 	struct tag_entry {
 		std::set<VexRip> shared_loads;
 		std::set<VexRip> shared_stores;
@@ -267,7 +274,6 @@ private:
 	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	void loadTagTable(const char *path);
-	Mapping callGraphMapping;
 	void findPossibleJumpTargets(const VexRip &from, std::vector<VexRip> &targets);
 	VexRip functionHeadForInstruction(const VexRip &rip);
 
