@@ -208,7 +208,6 @@ static ThreadRip guest_RIP_bbstart;
 
 /* The guest address for the instruction currently being
    translated. */
-static unsigned guest_RIP_curr_thread;
 static ThreadRip guest_RIP_curr_instr;
 
 /* The IRSB* into which we're generating code. */
@@ -252,7 +251,7 @@ static void stmt ( IRStmt* st )
 /* Generate a statement "dst := e". */ 
 static void assign ( IRTemp dst, IRExpr* e )
 {
-  stmt( IRStmt_WrTmp(threadAndRegister::temp(guest_RIP_curr_thread, dst, 0), e) );
+  stmt( IRStmt_WrTmp(threadAndRegister::temp(guest_RIP_curr_instr.thread, dst, 0), e) );
 }
 
 static IRExpr* unop ( IROp op, IRExpr* a )
@@ -831,7 +830,7 @@ static Prefix clearSegBits ( Prefix p )
 
 static threadAndRegister mk_reg ( unsigned offset )
 {
-   return threadAndRegister::reg(guest_RIP_curr_thread, offset, 0);
+   return threadAndRegister::reg(guest_RIP_curr_instr.thread, offset, 0);
 }
 
 static threadAndRegister integerGuestReg64Offset ( UInt reg )
@@ -4878,7 +4877,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                                  mkIRExprVec_1( mkexpr(addr, tid) )
                               );
                d->needsBBP = True;
-               d->tmp      = threadAndRegister::temp(guest_RIP_curr_thread, w64, 0);
+               d->tmp      = threadAndRegister::temp(guest_RIP_curr_instr.thread, w64, 0);
                /* declare we're reading memory */
                d->mFx   = Ifx_Read;
                d->mAddr = mkexpr(addr, tid);
@@ -5510,7 +5509,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                IRExpr** args = mkIRExprVec_1 ( mkexpr(addr, tid) );
 
                IRDirty* d = unsafeIRDirty_1_N ( 
-		   threadAndRegister::temp(guest_RIP_curr_thread, val, 0), 
+		   threadAndRegister::temp(guest_RIP_curr_instr.thread, val, 0), 
 		       0/*regparms*/, 
 		       "amd64g_dirtyhelper_loadF80le", 
 		       (void *)amd64g_dirtyhelper_loadF80le, 
