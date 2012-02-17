@@ -114,7 +114,7 @@ IRSB* bb_to_IR ( unsigned tid,
    Int        d_resteers = 0;
    Int        selfcheck_idx = 0;
    IRSB*      irsb;
-   ThreadRip  guest_IP_curr_instr;
+   ThreadRip  guest_IP_curr_instr(guest_IP_bbstart);
 
    Bool (*resteerOKfn)(void*,Addr64) = NULL;
 

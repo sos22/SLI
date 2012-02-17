@@ -27,6 +27,8 @@ handle_dirty_call(struct representative_state *rs,
 		unsigned long addr = eval_expression(&rs->regs, details->args[0], temporaries).lo;
 		unsigned long res;
 		bool have_res;
+		/* shut the compiler up */
+		res = 99;
 		have_res = false;
 		for (unsigned idx = 0; !have_res && idx < rs->stores.size(); idx++) {
 			if (addr == rs->stores[idx].first) {

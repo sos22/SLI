@@ -68,7 +68,7 @@ public:
 
 	unsigned long hash() const {
 		unsigned long acc = 0;
-		for (auto it = stack.rend(); it != stack.rbegin(); it++)
+		for (auto it = stack.begin(); it != stack.end(); it++)
 			acc = acc * 943231 + *it;
 		return acc;
 	}

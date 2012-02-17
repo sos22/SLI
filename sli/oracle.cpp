@@ -594,7 +594,7 @@ Oracle::loadTagTable(const char *path)
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
 			if (buf & (1ul << 63))
-				t.private_loads.insert(VexRip::invent_vex_rip(buf));
+				t.private_loads.insert(VexRip::invent_vex_rip(buf & ~(1ul << 63)));
 			else
 				t.shared_loads.insert(VexRip::invent_vex_rip(buf));
 		}
@@ -603,7 +603,7 @@ Oracle::loadTagTable(const char *path)
 			if (fread(&buf, sizeof(buf), 1, f) != 1)
 				err(1, "reading load address from %s", path);
 			if (buf & (1ul << 63))
-				t.private_stores.insert(VexRip::invent_vex_rip(buf));
+				t.private_stores.insert(VexRip::invent_vex_rip(buf & ~(1ul << 63)));
 			else
 				t.shared_stores.insert(VexRip::invent_vex_rip(buf));
 		}
