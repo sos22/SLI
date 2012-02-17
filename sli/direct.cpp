@@ -3180,7 +3180,7 @@ backtrack_crash_machine_node_for_statements(
 	int i;
 
 	assert(statements[0]->tag == Ist_IMark);
-	assert(when.rip == ((IRStmtIMark *)statements[0])->addr);
+	assert(when.rip == ((IRStmtIMark *)statements[0])->addr.rip.unwrap_vexrip());
 
 	for (i = nr_statements - 1; i >= 0; i--)  {
 		IRStmt *stmt = statements[i];

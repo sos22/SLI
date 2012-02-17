@@ -43,7 +43,7 @@ class VexRip : public Named {
 					  stack[idx]);
 		cursor[0] = '}';
 		cursor[1] = 0;
-		assert(cursor - buf < stack.size() * 20);
+		assert(cursor - buf < (int)stack.size() * 20);
 		return buf;
 	}
 	std::vector<unsigned long> stack;

@@ -222,7 +222,7 @@ IRSB* bb_to_IR ( unsigned tid,
               || dres.whatNext == DisResult::Dis_Resteer);
       vassert(dres.len >= 0 && dres.len <= 20);
       if (dres.whatNext != DisResult::Dis_Resteer)
-         vassert(dres.continueAt == 0);
+	 vassert(!dres.continueAt.rip.isValid());
 
       /* Fill in the insn-mark length field. */
       vassert(first_stmt_idx >= 0 && first_stmt_idx < irsb->stmts_used);
@@ -244,7 +244,6 @@ IRSB* bb_to_IR ( unsigned tid,
       /* If dis_instr_fn terminated the BB at this point, check it
 	 also filled in the irsb->next field. */
       if (dres.whatNext == DisResult::Dis_StopHere) {
-         vassert(irsb->next != NULL);
          if (debug_print) {
             printf("              ");
             printf( "goto {");
@@ -272,7 +271,6 @@ IRSB* bb_to_IR ( unsigned tid,
 	       with. */
 	   guest_IP_curr_instr = guest_IP_curr_instr + (long)dres.len;
 
-            vassert(irsb->next == NULL);
             if (n_instrs < vex_control.guest_max_insns) {
                /* keep going */
             } else {
@@ -283,14 +281,11 @@ IRSB* bb_to_IR ( unsigned tid,
             }
             break;
          case DisResult::Dis_StopHere:
-            vassert(irsb->next != NULL);
             goto done;
          case DisResult::Dis_Resteer:
             /* Check that we actually allowed a resteer .. */
             vassert(resteerOK);
-            vassert(irsb->next == NULL);
             /* figure out a new delta to continue at. */
-            vassert(resteerOKfn(callback_opaque,dres.continueAt));
             delta = dres.continueAt.rip.unwrap_vexrip() - guest_IP_bbstart.rip.unwrap_vexrip();
             n_resteers++;
             d_resteers++;

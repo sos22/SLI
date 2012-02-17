@@ -981,17 +981,13 @@ static void putIRegRAX ( Int sz, IRExpr* e )
 {
    vassert(!host_is_bigendian);
    switch (sz) {
-      case 8: vassert(ty == Ity_I64);
-	      stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
+      case 8: stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
               break;
-      case 4: vassert(ty == Ity_I32);
-              stmt( IRStmt_Put( mk_reg(OFFB_RAX), unop(Iop_32Uto64,e) ));
+      case 4: stmt( IRStmt_Put( mk_reg(OFFB_RAX), unop(Iop_32Uto64,e) ));
               break;
-      case 2: vassert(ty == Ity_I16);
-              stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
+      case 2: stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
               break;
-      case 1: vassert(ty == Ity_I8);
-              stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
+      case 1: stmt( IRStmt_Put( mk_reg(OFFB_RAX), e ));
               break;
       default: vpanic("putIRegRAX(amd64)");
    }
@@ -1109,21 +1105,18 @@ static const char* nameIReg16 ( UInt regno )
 static IRExpr* getIReg64rexX ( unsigned tid, Prefix pfx, UInt lo3bits )
 {
    vassert(lo3bits < 8);
-   vassert(IS_VALID_PFX(pfx));
    return getIReg64( tid, lo3bits | (getRexX(pfx) << 3) );
 }
 
 static const char* nameIReg64rexX ( Prefix pfx, UInt lo3bits )
 {
    vassert(lo3bits < 8);
-   vassert(IS_VALID_PFX(pfx));
    return nameIReg( 8, lo3bits | (getRexX(pfx) << 3), False );
 }
 
 static const char* nameIRegRexB ( Int sz, Prefix pfx, UInt lo3bits )
 {
    vassert(lo3bits < 8);
-   vassert(IS_VALID_PFX(pfx));
    vassert(sz == 8 || sz == 4 || sz == 2 || sz == 1);
    return nameIReg( sz, lo3bits | (getRexB(pfx) << 3), 
                         toBool(sz==1 && !haveREX(pfx)) );
@@ -1132,7 +1125,6 @@ static const char* nameIRegRexB ( Int sz, Prefix pfx, UInt lo3bits )
 static IRExpr* getIRegRexB ( unsigned tid, Int sz, Prefix pfx, UInt lo3bits )
 {
    vassert(lo3bits < 8);
-   vassert(IS_VALID_PFX(pfx));
    vassert(sz == 8 || sz == 4 || sz == 2 || sz == 1);
    return IRExpr_Get(
              offsetIReg( sz, lo3bits | (getRexB(pfx) << 3), 
@@ -1144,7 +1136,6 @@ static IRExpr* getIRegRexB ( unsigned tid, Int sz, Prefix pfx, UInt lo3bits )
 static void putIRegRexB ( Int sz, Prefix pfx, UInt lo3bits, IRExpr* e )
 {
    vassert(lo3bits < 8);
-   vassert(IS_VALID_PFX(pfx));
    vassert(sz == 8 || sz == 4 || sz == 2 || sz == 1);
    vassert(e->type(irsb->tyenv) == szToITy(sz));
    stmt( IRStmt_Put( 
@@ -1195,7 +1186,6 @@ static threadAndRegister offsetIRegG ( Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    UInt reg;
    vassert(!host_is_bigendian);
-   vassert(IS_VALID_PFX(pfx));
    vassert(sz == 8 || sz == 4 || sz == 2 || sz == 1);
    reg = gregOfRexRM( pfx, mod_reg_rm );
    return offsetIReg( sz, reg, toBool(sz == 1 && !haveREX(pfx)) );
@@ -1235,7 +1225,6 @@ static threadAndRegister offsetIRegE ( Int sz, Prefix pfx, UChar mod_reg_rm )
 {
    UInt reg;
    vassert(!host_is_bigendian);
-   vassert(IS_VALID_PFX(pfx));
    vassert(sz == 8 || sz == 4 || sz == 2 || sz == 1);
    reg = eregOfRexRM( pfx, mod_reg_rm );
    return offsetIReg( sz, reg, toBool(sz == 1 && !haveREX(pfx)) );
@@ -1433,7 +1422,6 @@ static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
    IRType tyE    = expVal->type(irsb->tyenv);
    IRTemp oldTmp = newTemp(tyE);
    IRTemp expTmp = newTemp(tyE);
-   vassert(tyE == tyN);
    vassert(tyE == Ity_I64 || tyE == Ity_I32
            || tyE == Ity_I16 || tyE == Ity_I8);
    assign(expTmp, expVal);
@@ -1851,7 +1839,7 @@ static void helper_ADC ( unsigned tid,
       start of this function. */
    if (taddr != IRTemp_INVALID) {
       if (texpVal == IRTemp_INVALID) {
-         vassert(restart_point == 0);
+	 vassert(!restart_point.rip.isValid());
          storeLE( mkexpr(taddr, tid), mkexpr(tres, tid) );
       } else {
          vassert(typeOfIRTemp(irsb->tyenv, texpVal) == ty);
@@ -1913,7 +1901,7 @@ static void helper_SBB ( unsigned tid,
       start of this function. */
    if (taddr != IRTemp_INVALID) {
       if (texpVal == IRTemp_INVALID) {
-         vassert(restart_point == 0);
+         vassert(!restart_point.rip.isValid());
          storeLE( mkexpr(taddr, tid), mkexpr(tres, tid) );
       } else {
          vassert(typeOfIRTemp(irsb->tyenv, texpVal) == ty);
@@ -8916,7 +8904,6 @@ DisResult disInstr_AMD64_WRK (
 
    *expect_CAS = False;
 
-   vassert(guest_RIP_next_assumed == 0);
    vassert(guest_RIP_next_mustcheck == False);
 
    addr = t0 = t1 = t2 = t3 = t4 = t5 = t6 = IRTemp_INVALID; 
@@ -15860,7 +15847,7 @@ DisResult disInstr_AMD64_WRK (
                  target,
 		 tid );
          dres.whatNext = DisResult::Dis_StopHere;
-         DIP("j%s-32 0x%llx\n", name_AMD64Condcode((AMD64Condcode)(opc - 0x80)), d64);
+         DIP("j%s-32 %s\n", name_AMD64Condcode((AMD64Condcode)(opc - 0x80)), target.name());
          break;
       }
       /* =-=-=-=-=-=-=-=-=- PREFETCH =-=-=-=-=-=-=-=-=-= */
