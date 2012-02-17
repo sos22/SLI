@@ -91,6 +91,9 @@ public:
 	}
 
 	VexRip() {}
+	VexRip(const std::vector<unsigned long> &content)
+		: stack(content)
+	{}
 
 	VexRip operator+(long delta) const {
 		VexRip r(*this);

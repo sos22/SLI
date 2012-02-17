@@ -572,6 +572,34 @@ struct tag_hdr {
 	int nr_stores;
 };
 
+static bool
+read_vexrip(FILE *f, VexRip *out, bool *is_private)
+{
+	unsigned long rip;
+	unsigned nr_entries;
+	std::vector<unsigned long> stack;
+
+	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
+	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
+		return false;
+	stack.reserve(nr_entries);
+	for (unsigned x = 0; x < nr_entries; x++) {
+		unsigned long a;
+		if (fread(&a, sizeof(a), 1, f) != 1)
+			return false;
+		stack.push_back(a);
+	}
+	if (rip & (1ul << 63)) {
+		*is_private = true;
+		rip &= ~(1ul << 63);
+	} else {
+		*is_private = false;
+	}
+	stack.push_back(rip);
+	*out = VexRip(stack);
+	return true;
+}
+
 void
 Oracle::loadTagTable(const char *path)
 {
@@ -590,22 +618,24 @@ Oracle::loadTagTable(const char *path)
 		}
 		tag_entry t;
 		for (int x = 0; x < hdr.nr_loads; x++) {
-			unsigned long buf;
-			if (fread(&buf, sizeof(buf), 1, f) != 1)
+			VexRip buf;
+			bool is_private;
+			if (!read_vexrip(f, &buf, &is_private))
 				err(1, "reading load address from %s", path);
-			if (buf & (1ul << 63))
-				t.private_loads.insert(VexRip::invent_vex_rip(buf & ~(1ul << 63)));
+			if (is_private)
+				t.private_loads.insert(buf);
 			else
-				t.shared_loads.insert(VexRip::invent_vex_rip(buf));
+				t.shared_loads.insert(buf);
 		}
 		for (int x = 0; x < hdr.nr_stores; x++) {
-			unsigned long buf;
-			if (fread(&buf, sizeof(buf), 1, f) != 1)
-				err(1, "reading load address from %s", path);
-			if (buf & (1ul << 63))
-				t.private_stores.insert(VexRip::invent_vex_rip(buf & ~(1ul << 63)));
+			VexRip buf;
+			bool is_private;
+			if (!read_vexrip(f, &buf, &is_private))
+				err(1, "reading store address from %s", path);
+			if (is_private)
+				t.private_stores.insert(buf);
 			else
-				t.shared_stores.insert(VexRip::invent_vex_rip(buf));
+				t.shared_stores.insert(buf);
 		}
 		for (auto it1 = t.shared_stores.begin();
 		     it1 != t.shared_stores.end();
