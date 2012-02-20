@@ -1,5 +1,5 @@
 subdirs="enforce_crash"
-targets="crop binpatch dbg chunk direct dbg_core get_dominator direct_cd static dbg_exec minimal_direct"
+targets="crop binpatch dbg chunk direct dbg_core get_dominator direct_cd static dbg_exec minimal_direct build_types_db dump_types_db"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,logwriter,thread,machinestate}.cpp

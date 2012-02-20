@@ -49,9 +49,8 @@ class VexRip : public Named {
 		assert(cursor - buf < (int)stack.size() * 20 + 2);
 		return buf;
 	}
-	std::vector<unsigned long> stack;
-	friend bool parseVexRip(VexRip *out, const char *str, const char **suffix);
 public:
+	std::vector<unsigned long> stack;
 
 	bool operator< (const VexRip &other) const {
 		for (unsigned idx = 0;
