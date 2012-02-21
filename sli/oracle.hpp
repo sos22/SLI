@@ -240,7 +240,7 @@ public:
 	struct callgraph_entry {
 		bool is_call;
 		VexRip branch_rip;
-		std::set<VexRip> targets;
+		std::set<unsigned long> targets;
 	};
 	std::vector<callgraph_entry> callgraph_table;
 

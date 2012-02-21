@@ -989,10 +989,16 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		bool is_first = true;
 		is_call = false;
 		for (unsigned x = 0; x < nr_callees; x++) {
-			VexRip callee;
+			unsigned long callee;
 			bool ic;
-			if (!read_vexrip(f, &callee, &ic))
+			if (fread(&callee, sizeof(callee), 1, f) != 1)
 				err(1, "reading callee rip from %s", path);
+			if (callee & (1ul << 63)) {
+				ic = true;
+				callee &= ~(1ul << 63);
+			} else {
+				ic = false;
+			}
 			if (is_first) {
 				is_call = ic;
 				is_first = false;
@@ -1004,9 +1010,15 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		ce.is_call = is_call;
 		ths->callgraph_table.push_back(ce);
 
-		if (ce.is_call)
-			for (auto it = ce.targets.begin(); it != ce.targets.end(); it++)
-				roots.push_back(*it);
+		if (ce.is_call) {
+			VexRip newRoot(ce.branch_rip + getInstructionSize(ths->ms->addressSpace, ce.branch_rip));
+			newRoot.call(0);
+			for (auto it = ce.targets.begin(); it != ce.targets.end(); it++) {
+				newRoot.jump(*it);
+				roots.push_back(newRoot);
+				printf("New call chain root %s.\n", newRoot.name());
+			}
+		}
 	}
 
 	fclose(f);
@@ -1021,8 +1033,17 @@ Oracle::findPossibleJumpTargets(const VexRip &rip, std::vector<VexRip> &output)
 	for (auto it = callgraph_table.begin(); it != callgraph_table.end(); it++) {
 		if (it->branch_rip == rip) {
 			output.reserve(it->targets.size());
-			for (auto it2 = it->targets.begin(); it2 != it->targets.end(); it2++)
-				output.push_back(*it2);
+			VexRip target;
+			if (it->is_call) {
+				target = rip + getInstructionSize(ms->addressSpace, rip);
+				target.call(0);
+			} else {
+				target = rip;
+			}
+			for (auto it2 = it->targets.begin(); it2 != it->targets.end(); it2++) {
+				target.jump(*it2);
+				output.push_back(target);
+			}
 			return;
 		}
 	}
