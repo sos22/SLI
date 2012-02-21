@@ -170,9 +170,11 @@ read_vexrip(VexRip *out, const Mapping &mapping, unsigned long offset, bool *is_
 	const struct vexrip_hdr *hdr = mapping.get<vexrip_hdr>(offset);
 	if (!hdr)
 		err(1, "reading vexrip header");
-	const unsigned long *body = mapping.get<unsigned long>(offset + sizeof(*hdr), hdr->nr_entries);
+	/* sizeof(vexrip_hdr) would be 12 if we'd properly packed
+	 * vexrip_hdr. :( */
+	const unsigned long *body = mapping.get<unsigned long>(offset + 12, hdr->nr_entries);
 	std::vector<unsigned long> stack;
-	stack.reserve(hdr->nr_entries);
+	stack.reserve(hdr->nr_entries+1);
 	for (unsigned x = 0; x < hdr->nr_entries; x++)
 		stack.push_back(body[x]);
 	if (hdr->rip & (1ul << 63)) {
@@ -183,7 +185,7 @@ read_vexrip(VexRip *out, const Mapping &mapping, unsigned long offset, bool *is_
 		stack.push_back(hdr->rip);
 	}
 	*out = VexRip(stack);
-	return sizeof(*hdr) + sizeof(body[0] * hdr->nr_entries);
+	return 12 + sizeof(body[0]) * hdr->nr_entries;
 }
 
 static bool
