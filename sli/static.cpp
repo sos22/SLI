@@ -139,36 +139,6 @@ list_heads(Oracle *oracle)
 		printf("%s\n", it->name());
 }
 
-static void
-dumpTagTable(Oracle *oracle)
-{
-	for (std::vector<Oracle::tag_entry>::iterator it = oracle->tag_table.begin();
-	     it != oracle->tag_table.end();
-	     it++) {
-		printf("Shared loads: ");
-		for (auto it2 = it->shared_loads.begin();
-		     it2 != it->shared_loads.end();
-		     it2++)
-			printf("%s ", it2->name());
-		printf("\nShared stores: ");
-		for (auto it2 = it->shared_stores.begin();
-		     it2 != it->shared_stores.end();
-		     it2++)
-			printf("%s ", it2->name());
-		printf("\nPrivate loads: ");
-		for (auto it2 = it->private_loads.begin();
-		     it2 != it->private_loads.end();
-		     it2++)
-			printf("%s ", it2->name());
-		printf("\nPrivate stores: ");
-		for (auto it2 = it->private_stores.begin();
-		     it2 != it->private_stores.end();
-		     it2++)
-			printf("%s ", it2->name());
-		printf("\n\n");
-	}
-}
-
 static std::vector<VexRip> newHeads;
 
 static void
@@ -198,8 +168,6 @@ run_command(VexPtr<Oracle> &oracle, GarbageCollectionToken token)
 		printf("Alias table for %lx:%lx:\n", (unsigned long)*words[1],
 		       (unsigned long)*words[2]);
 		alias.prettyPrint(stdout);
-	} else if (*words[0] == "dumptags") {
-		dumpTagTable(oracle);
 	} else {
 		printf("Unknown command %s\n", words[0]->content);
 	}

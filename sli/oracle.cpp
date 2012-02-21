@@ -10,6 +10,7 @@
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
+#include "typesdb.hpp"
 
 #include "libvex_prof.hpp"
 #include "libvex_parse.h"
@@ -154,6 +155,93 @@ Oracle::functionCanReturn(const VexRip &rip)
 		return true;
 }
 
+struct tag_hdr {
+	int nr_loads;
+	int nr_stores;
+};
+
+struct vexrip_hdr {
+	unsigned long rip;
+	unsigned nr_entries;
+};
+static unsigned long
+read_vexrip(VexRip *out, const Mapping &mapping, unsigned long offset, bool *is_private)
+{
+	const struct vexrip_hdr *hdr = mapping.get<vexrip_hdr>(offset);
+	if (!hdr)
+		err(1, "reading vexrip header");
+	const unsigned long *body = mapping.get<unsigned long>(offset + sizeof(*hdr), hdr->nr_entries);
+	std::vector<unsigned long> stack;
+	stack.reserve(hdr->nr_entries);
+	for (unsigned x = 0; x < hdr->nr_entries; x++)
+		stack.push_back(body[x]);
+	if (hdr->rip & (1ul << 63)) {
+		*is_private = true;
+		stack.push_back(hdr->rip & ~(1ul << 63));
+	} else {
+		*is_private = false;
+		stack.push_back(hdr->rip);
+	}
+	*out = VexRip(stack);
+	return sizeof(*hdr) + sizeof(body[0] * hdr->nr_entries);
+}
+
+static bool
+read_vexrip(FILE *f, VexRip *out, bool *is_private)
+{
+       unsigned long rip;
+       unsigned nr_entries;
+       std::vector<unsigned long> stack;
+
+       if (fread(&rip, sizeof(rip), 1, f) != 1 ||
+           fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
+               return false;
+       stack.reserve(nr_entries);
+       for (unsigned x = 0; x < nr_entries; x++) {
+               unsigned long a;
+               if (fread(&a, sizeof(a), 1, f) != 1)
+                       return false;
+               stack.push_back(a);
+       }
+       if (rip & (1ul << 63)) {
+               *is_private = true;
+               rip &= ~(1ul << 63);
+       } else {
+               *is_private = false;
+       }
+       stack.push_back(rip);
+       *out = VexRip(stack);
+       return true;
+}
+
+unsigned long
+Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offset)
+{
+	const struct tag_hdr *hdr = mapping.get<tag_hdr>(offset);
+	if (!hdr)
+		return 0;
+	unsigned long sz = sizeof(*hdr);
+	for (int x = 0; x < hdr->nr_loads; x++) {
+		VexRip buf;
+		bool is_private;
+		sz += read_vexrip(&buf, mapping, offset + sz, &is_private);
+		if (is_private)
+			te->private_loads.insert(buf);
+		else
+			te->shared_loads.insert(buf);
+	}
+	for (int x = 0; x < hdr->nr_stores; x++) {
+		VexRip buf;
+		bool is_private;
+		sz += read_vexrip(&buf, mapping, offset + sz, &is_private);
+		if (is_private)
+			te->private_stores.insert(buf);
+		else
+			te->shared_stores.insert(buf);
+	}
+	return sz;
+}
+
 /* Try to find the RIPs of some stores which might conceivably have
    interfered with the observed load.  Stack accesses are not tracked
    by this mechanism. */
@@ -166,11 +254,15 @@ void
 Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 			      std::set<VexRip> &out)
 {
-	for (std::vector<tag_entry>::iterator it = tag_table.begin();
-	     it != tag_table.end();
+	std::vector<unsigned long> offsets;
+	type_index->findOffsets(smsel->rip.rip, offsets);
+	for (auto it = offsets.begin();
+	     it != offsets.end();
 	     it++) {
-		if (it->shared_loads.count(smsel->rip.rip))
-			out |= it->shared_stores;
+		tag_entry te;
+		fetchTagEntry(&te, raw_types_database, *it);
+		if (te.shared_loads.count(smsel->rip.rip))
+			out |= te.shared_stores;
 	}
 }
 
@@ -178,59 +270,28 @@ bool
 Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 {
 	__set_profiling(notInTagTable);
-	static std::set<VexRip> threadLocal;
-	static std::set<VexRip> notThreadLocal;
-	if (threadLocal.count(access->rip.rip))
-		return true;
-	if (notThreadLocal.count(access->rip.rip))
-		return false;
-	for (std::vector<tag_entry>::iterator it = tag_table.begin();
-	     it != tag_table.end();
-	     it++) {
-		if (it->private_stores.count(access->rip.rip) ||
-		    it->shared_stores.count(access->rip.rip) ||
-		    it->private_loads.count(access->rip.rip) ||
-		    it->shared_loads.count(access->rip.rip)) {
-			notThreadLocal.insert(access->rip.rip);
-			return false;
-		}
-	}
-	threadLocal.insert(access->rip.rip);
-	return true;
+	std::vector<unsigned long> offsets;
+	type_index->findOffsets(access->rip.rip, offsets);
+	return offsets.size() == 0;
 }
 
 bool
 Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 {
 	__set_profiling(hasConflictingRemoteStores);
-	for (auto it = tag_table.begin();
-	     it != tag_table.end();
-	     it++) {
-		if (it->shared_loads.count(access->rip.rip)) {
-			if (it->shared_stores.size() != 0)
+	std::vector<unsigned long> offsets;
+	type_index->findOffsets(access->rip.rip, offsets);
+	for (auto it = offsets.begin(); it != offsets.end(); it++) {
+		tag_entry te;
+		fetchTagEntry(&te, raw_types_database, *it);
+		if (te.shared_loads.count(access->rip.rip)) {
+			if (te.shared_stores.size() != 0)
 				return true;
 		}
-		if (it->shared_stores.count(access->rip.rip))
+		if (te.shared_stores.count(access->rip.rip))
 			return true;
 	}
 	return false;
-}
-
-void
-Oracle::getAllMemoryAccessingInstructions(std::vector<VexRip> &out) const
-{
-	std::set<VexRip> out1;
-	for (auto it = tag_table.begin();
-	     it != tag_table.end();
-	     it++) {
-		out1 |= it->shared_stores;
-		out1 |= it->shared_loads;
-		out1 |= it->private_stores;
-		out1 |= it->private_loads;
-	}
-	out.reserve(out.size() + out1.size());
-	for (auto it = out1.begin(); it != out1.end(); it++)
-		out.push_back(*it);
 }
 
 bool
@@ -315,21 +376,20 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 void
 Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<VexRip> &out)
 {
-	__set_profiling(findRacingRips__load);
-	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
-		if (it->shared_loads.count(smsel->rip.rip))
-			out |= it->shared_stores;
-	}
-	return;
+	findConflictingStores(smsel, out);
 }
 
 void
 Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<VexRip> &out)
 {
 	__set_profiling(findRacingRips__store);
-	for (auto it = tag_table.begin(); it != tag_table.end(); it++) {
-		if (it->shared_stores.count(smses->rip.rip))
-			out |= it->shared_loads;
+	std::vector<unsigned long> offsets;
+	type_index->findOffsets(smses->rip.rip, offsets);
+	for (auto it = offsets.begin(); it != offsets.end(); it++) {
+		tag_entry te;
+		fetchTagEntry(&te, raw_types_database, *it);
+		if (te.shared_stores.count(smses->rip.rip))
+			out |= te.shared_loads;
 	}
 	return;
 }
@@ -567,76 +627,25 @@ Oracle::clusterRips(const std::set<VexRip> &inputRips,
 	}
 }
 
-struct tag_hdr {
-	int nr_loads;
-	int nr_stores;
-};
-
-static bool
-read_vexrip(FILE *f, VexRip *out, bool *is_private)
-{
-	unsigned long rip;
-	unsigned nr_entries;
-	std::vector<unsigned long> stack;
-
-	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
-	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
-		return false;
-	stack.reserve(nr_entries);
-	for (unsigned x = 0; x < nr_entries; x++) {
-		unsigned long a;
-		if (fread(&a, sizeof(a), 1, f) != 1)
-			return false;
-		stack.push_back(a);
-	}
-	if (rip & (1ul << 63)) {
-		*is_private = true;
-		rip &= ~(1ul << 63);
-	} else {
-		*is_private = false;
-	}
-	stack.push_back(rip);
-	*out = VexRip(stack);
-	return true;
-}
-
 void
 Oracle::loadTagTable(const char *path)
 {
 	__set_profiling(loadTagTable);
 
-	FILE *f = fopen(path, "r");
-	if (!f)
-		err(1, "opening %s", path);
-	while (!feof(f)) {
-		struct tag_hdr hdr;
-		if (fread(&hdr, sizeof(hdr), 1, f) < 1) {
-			if (ferror(f)) 
-				err(1, "reading %s", path);
-			assert(feof(f));
-			continue;
-		}
+	if (raw_types_database.init(path) < 0)
+		err(1, "opening %s as raw types database", path);
+	char *idx_path = my_asprintf("%s.idx", path);
+	type_index = new TypesDb(idx_path);
+	free(idx_path);
+	unsigned long offset;
+	offset = 0;
+	while (1) {
 		tag_entry t;
-		for (int x = 0; x < hdr.nr_loads; x++) {
-			VexRip buf;
-			bool is_private;
-			if (!read_vexrip(f, &buf, &is_private))
-				err(1, "reading load address from %s", path);
-			if (is_private)
-				t.private_loads.insert(buf);
-			else
-				t.shared_loads.insert(buf);
-		}
-		for (int x = 0; x < hdr.nr_stores; x++) {
-			VexRip buf;
-			bool is_private;
-			if (!read_vexrip(f, &buf, &is_private))
-				err(1, "reading store address from %s", path);
-			if (is_private)
-				t.private_stores.insert(buf);
-			else
-				t.shared_stores.insert(buf);
-		}
+		unsigned long o;
+		o = fetchTagEntry(&t, raw_types_database, offset);
+		if (o == 0)
+			break;
+		offset += o;
 		for (auto it1 = t.shared_stores.begin();
 		     it1 != t.shared_stores.end();
 		     it1++) {
@@ -666,7 +675,6 @@ Oracle::loadTagTable(const char *path)
 			     it2++)
 				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
 		}
-		tag_table.push_back(t);
 	}
 }
 

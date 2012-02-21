@@ -12,6 +12,7 @@
 #include "inferred_information.hpp"
 #include "libvex_prof.hpp"
 #include "offline_analysis.hpp"
+#include "typesdb.hpp"
 
 class DumpFix : public FixConsumer {
 public:
@@ -183,25 +184,25 @@ main(int argc, char *argv[])
 		consider_rip(VexRip::invent_vex_rip(strtoul(argv[4], NULL, 16)), ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
 		FILE *timings = fopen("timings.txt", "w");
-		std::vector<VexRip> targets;
-		oracle->getAllMemoryAccessingInstructions(targets);
-		shuffle(targets);
-		printf("%zd instructions to protect\n", targets.size());
+		VexPtr<TypesDb::all_instrs_iterator> instrIterator(oracle->type_index->enumerateAllInstructions());
+		unsigned long total_instructions = oracle->type_index->nrDistinctInstructions();
+		unsigned long instructions_processed = 0;
+		printf("%ld instructions to protect\n", total_instructions);
 		double start = now();
 		double low_end_time;
 		double high_end_time;
 		bool first = true;
-		for (auto it = targets.begin();
-		     it != targets.end();
-		     it++) {
-			_logfile = fopenf("w", "logs/%s", it->name());
-			if (!_logfile) err(1, "opening logs/%s", it->name());
-			printf("Considering %s\n", it->name());
-			consider_rip(*it, ms, thr, oracle, df, timings, ALLOW_GC);
+		while (!instrIterator->finished()) {
+			VexRip rip;
+			instrIterator->fetch(&rip);
+			_logfile = fopenf("w", "logs/%s", rip.name());
+			if (!_logfile) err(1, "opening logs/%s", rip.name());
+			printf("Considering %s\n", rip.name());
+			consider_rip(rip, ms, thr, oracle, df, timings, ALLOW_GC);
 			fclose(_logfile);
 			_logfile = stdout;
 
-			double completion = (it - targets.begin()) / double(targets.size());
+			double completion = instructions_processed / double(total_instructions);
 			double elapsed = now() - start;
 			double total_estimated = elapsed / completion;
 			double endd = total_estimated + start;
@@ -236,12 +237,12 @@ main(int argc, char *argv[])
 				free(t2);
 				free(t3);
 			}
-			printf("Done %zd/%zd(%f%%) in %f seconds (%f each); %f left; %s",
-			       it - targets.begin(),
-			       targets.size(),
+			printf("Done %ld/%ld(%f%%) in %f seconds (%f each); %f left; %s",
+			       instructions_processed,
+			       total_instructions,
 			       completion * 100,
 			       elapsed,
-			       elapsed / (it - targets.begin()),
+			       elapsed / instructions_processed,
 			       total_estimated - elapsed,
 			       times);
 			free(times);

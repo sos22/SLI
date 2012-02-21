@@ -9,6 +9,8 @@
 
 #include "oracle_rip.hpp"
 
+class TypesDb;
+
 class InstructionSet {
 public:
 	std::set<VexRip> rips;
@@ -248,7 +250,12 @@ public:
 		std::set<VexRip> private_loads;
 		std::set<VexRip> private_stores;
 	};
-	std::vector<tag_entry> tag_table;
+	TypesDb *type_index;
+	Mapping raw_types_database;
+	static unsigned long fetchTagEntry(tag_entry *te,
+					   const Mapping &mapping,
+					   unsigned long offset);
+
 private:
 	static const unsigned nr_memory_filter_words = 10267;
 	static unsigned long hashRipPair(VexRip a, VexRip b) {
@@ -289,6 +296,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(ms);
 		hv(crashedThread);
+		hv(type_index);
 	}
 
 	static void loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token);
@@ -329,8 +337,6 @@ public:
 	VexRip dominator(const std::set<VexRip> &instrs,
 			    AddressSpace *as,
 			    unsigned minimum_size);
-
-	void getAllMemoryAccessingInstructions(std::vector<VexRip> &out) const;
 
 	RegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
 	LivenessSet liveOnEntryToFunction(const VexRip &rip);

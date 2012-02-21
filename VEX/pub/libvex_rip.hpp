@@ -51,7 +51,7 @@ class VexRip : public Named {
 	}
 public:
 	std::vector<unsigned long> stack;
-
+	void changed() { clearName(); }
 	bool operator< (const VexRip &other) const {
 		for (unsigned idx = 0;
 		     idx < stack.size() && idx < other.stack.size();
