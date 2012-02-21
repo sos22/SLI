@@ -1627,14 +1627,12 @@ extract_call_follower(IRSB *irsb)
 	IRStmtStore *s = (IRStmtStore *)irsb->stmts[idx];
 	if (s->data->tag != Iex_Const)
 		abort();
-#if 0
 	while (idx >= 0 && irsb->stmts[idx]->tag != Ist_IMark)
 		idx--;
 	assert(idx >= 0);
-	VexRip r( ((IRStmtIMark *)irsb->stmts[idx])->addr );
+	VexRip r( ((IRStmtIMark *)irsb->stmts[idx])->addr.rip );
 	r.jump(((IRExprConst *)s->data)->con->Ico.U64);
-#endif	
-	return VexRip::invent_vex_rip(((IRExprConst *)s->data)->con->Ico.U64);
+	return r;
 }
 
 void
