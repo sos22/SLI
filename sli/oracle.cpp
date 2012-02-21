@@ -690,6 +690,9 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 			else
 				unchanged++;
 			done_something |= this_did_something;
+			printf("Done %zd/%zd functions\n",
+			       it - functions.begin(),
+			       functions.size());
 		}
 		printf("Register liveness progress: %ld/%ld\n", changed, changed+unchanged);
 	} while (done_something);
@@ -1016,7 +1019,6 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 			for (auto it = ce.targets.begin(); it != ce.targets.end(); it++) {
 				newRoot.jump(*it);
 				roots.push_back(newRoot);
-				printf("New call chain root %s.\n", newRoot.name());
 			}
 		}
 	}
@@ -1157,13 +1159,19 @@ database(void)
 			  NULL,
 			  NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip STRING, dest STRING, UNIQUE (rip, dest))", NULL, NULL, NULL);
+	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip STRING, dest STRING)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip STRING, dest STRING, UNIQUE (rip, dest))", NULL, NULL, NULL);
+	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip STRING, dest STRING)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip STRING, dest STRING, UNIQUE (rip, dest))", NULL, NULL, NULL);
+	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip STRING, dest STRING)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead STRING PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
+			  NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+
+	/* Bit of a hack: use this to stash a flag saying whether we
+	   believe we've found all function heads already. */
+	rc = sqlite3_exec(_database, "CREATE TABLE doneFindFunctionHeads (doneit INTEGER)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
@@ -1254,31 +1262,73 @@ drop_index(const char *name)
 	free(s);
 }
 
+static int
+_functionHeadsCorrect(void *_ctxt, int, char **, char **)
+{
+	bool *flag = (bool *)_ctxt;
+	*flag = true;
+	return 0;
+}
+static bool
+functionHeadsCorrect(void)
+{
+	bool flag = false;
+	int rc;
+
+	rc = sqlite3_exec(database(), "SELECT * FROM doneFindFunctionHeads",
+			  _functionHeadsCorrect, &flag, NULL);
+	assert(rc == SQLITE_OK);
+	return flag;
+}
+
+static void
+setFunctionHeadsCorrect(void)
+{
+	int rc;
+	rc = sqlite3_exec(database(), "INSERT INTO doneFindFunctionHeads VALUES (1)",
+			  NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+}
+
 void
 Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, GarbageCollectionToken token)
 {
-	drop_index("branchDest");
-	drop_index("callDest");
-	drop_index("fallThroughDest");
+	if (!functionHeadsCorrect()) {
+		drop_index("branchDest");
+		drop_index("callDest");
+		drop_index("fallThroughDest");
 
-	std::set<VexRip> visited;
-	while (!heads.empty()) {
-		VexRip head;
-		head = heads.back();
-		heads.pop_back();
-		if (visited.count(head))
-			continue;
-		visited.insert(head);
-		ths->discoverFunctionHead(head, heads);
+		std::set<VexRip> visited;
+		int cntr = 0;
+		printf("Discovering function heads...\n");
+		while (!heads.empty()) {
+			VexRip head;
+			head = heads.back();
+			heads.pop_back();
+			if (visited.count(head))
+				continue;
+			visited.insert(head);
+			ths->discoverFunctionHead(head, heads);
+			if (cntr++ % 100 == 0) {
+				printf("%zd heads left.\r", heads.size());
+				fflush(stdout);
+			}
+		}
+		printf("Done discovering function heads\n");
+		setFunctionHeadsCorrect();
+
+		create_index("branchDest", "branchRips", "dest");
+		create_index("callDest", "callRips", "dest");
+		create_index("fallThroughDest", "fallThroughRips", "dest");
 	}
 
-	create_index("branchDest", "branchRips", "dest");
-	create_index("callDest", "callRips", "dest");
-	create_index("fallThroughDest", "fallThroughRips", "dest");
-
+	printf("Calculate register liveness...\n");
 	calculateRegisterLiveness(ths, token);
+	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
+	printf("Calculate RBP map...\n");
 	calculateRbpToRspOffsets(ths, token);
+	printf("Done static analysis phase\n");
 }
 
 Oracle::LivenessSet
