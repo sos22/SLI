@@ -302,40 +302,28 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 				 StateMachineSideEffectStore *smses)
 {
 	__set_profiling(might_alias_load_store);
-	static unsigned nr_queries;
-	static unsigned nr_bloom_hits;
-	static unsigned nr_bloom_hits2;
-	static unsigned nr_trues;
-	static unsigned nr_falses;
-
-	if (notInTagTable(smses)) {
+	std::vector<unsigned long> offsets;
+	type_index->findOffsets(smses->rip.rip, offsets);
+	if (offsets.size() == 0) {
 		if (!notInTagTable(smsel))
 			return false;
 		if (!definitelyNotEqual(smsel->addr, smses->addr, opt))
-			return true;
+                        return true;
 		else
 			return false;
-	}
+	} else if (notInTagTable(smsel))
+		return false;
 
-	unsigned long h = hashRipPair(smses->rip.rip, smsel->rip.rip);
-	nr_queries++;
-	if (!(memoryAliasingFilter[h/64] & (1ul << (h % 64)))) {
-		nr_bloom_hits++;
-		return false;
+	for (auto it = offsets.begin(); it != offsets.end(); it++) {
+		tag_entry te;
+		fetchTagEntry(&te, raw_types_database, *it);
+		if ((te.shared_loads.count(smsel->rip.rip) ||
+		     te.private_loads.count(smsel->rip.rip)) &&
+		    (te.shared_stores.count(smses->rip.rip) ||
+		     te.private_stores.count(smses->rip.rip)))
+			return true;
 	}
-	h = hashRipPair2(smses->rip.rip, smsel->rip.rip);
-	if (!(memoryAliasingFilter2[h/64] & (1ul << (h % 64)))) {
-		nr_bloom_hits2++;
-		return false;
-	}
-
-	if (aliasingTable->count(std::pair<VexRip, VexRip>(smsel->rip.rip, smses->rip.rip))) {
-		nr_trues++;
-		return true;
-	} else {
-		nr_falses++;
-		return false;
-	}
+	return false;
 }
 
 bool
@@ -344,7 +332,9 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 				 StateMachineSideEffectLoad *smsel2)
 {
 	__set_profiling(memory_accesses_might_alias_load_load);
-	if (notInTagTable(smsel1)) {
+	std::vector<unsigned long> offsets;
+	type_index->findOffsets(smsel1->rip.rip, offsets);
+	if (offsets.size() == 0) {
 		if (!notInTagTable(smsel2))
 			return false;
 		if (!definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
@@ -354,7 +344,16 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	} else if (notInTagTable(smsel2))
 		return false;
 
-	return !!aliasingTable->count(std::pair<VexRip, VexRip>(smsel1->rip.rip, smsel2->rip.rip));
+	for (auto it = offsets.begin(); it != offsets.end(); it++) {
+		tag_entry te;
+		fetchTagEntry(&te, raw_types_database, *it);
+		if ((te.shared_loads.count(smsel2->rip.rip) ||
+		     te.private_loads.count(smsel2->rip.rip)) &&
+		    (te.shared_loads.count(smsel1->rip.rip) ||
+		     te.private_loads.count(smsel1->rip.rip)))
+			return true;
+	}
+	return false;
 }
 
 bool
@@ -363,7 +362,9 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 				 StateMachineSideEffectStore *smses2)
 {
 	__set_profiling(memory_accesses_might_alias_store_store);
-	if (notInTagTable(smses1)) {
+	std::vector<unsigned long> offsets;
+	type_index->findOffsets(smses1->rip.rip, offsets);
+	if (offsets.size() == 0) {
 		if (!notInTagTable(smses2))
 			return false;
 		if (!definitelyNotEqual(smses2->addr, smses1->addr, opt))
@@ -372,7 +373,17 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 			return false;
 	} else if (notInTagTable(smses2))
 		return false;
-	return !!aliasingTable->count(std::pair<VexRip, VexRip>(smses1->rip.rip, smses2->rip.rip));
+
+	for (auto it = offsets.begin(); it != offsets.end(); it++) {
+		tag_entry te;
+		fetchTagEntry(&te, raw_types_database, *it);
+		if ((te.shared_stores.count(smses2->rip.rip) ||
+		     te.private_stores.count(smses2->rip.rip)) &&
+		    (te.shared_stores.count(smses1->rip.rip) ||
+		     te.private_stores.count(smses1->rip.rip)))
+			return true;
+	}
+	return false;
 }
 
 void
@@ -639,45 +650,6 @@ Oracle::loadTagTable(const char *path)
 	char *idx_path = my_asprintf("%s.idx", path);
 	type_index = new TypesDb(idx_path);
 	free(idx_path);
-	unsigned long offset;
-	offset = 0;
-	while (1) {
-		tag_entry t;
-		unsigned long o;
-		o = fetchTagEntry(&t, raw_types_database, offset);
-		if (o == 0)
-			break;
-		offset += o;
-		for (auto it1 = t.shared_stores.begin();
-		     it1 != t.shared_stores.end();
-		     it1++) {
-			for (auto it2 = t.shared_stores.begin();
-			     it2 != t.shared_stores.end();
-			     it2++)
-				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-			for (auto it2 = t.shared_loads.begin();
-			     it2 != t.shared_loads.end();
-			     it2++) {
-				unsigned long h = hashRipPair(*it1, *it2);
-				memoryAliasingFilter[h / 64] |= 1ul << (h % 64);
-				h = hashRipPair2(*it1, *it2);
-				memoryAliasingFilter2[h / 64] |= 1ul << (h % 64);
-				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-			}
-		}
-		for (auto it1 = t.shared_loads.begin();
-		     it1 != t.shared_loads.end();
-		     it1++) {
-			for (auto it2 = t.shared_stores.begin();
-			     it2 != t.shared_stores.end();
-			     it2++)
-				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-			for (auto it2 = t.shared_loads.begin();
-			     it2 != t.shared_loads.end();
-			     it2++)
-				aliasingTable->insert(std::pair<VexRip, VexRip>(*it1, *it2));
-		}
-	}
 }
 
 template <typename t>

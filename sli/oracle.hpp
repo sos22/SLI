@@ -257,24 +257,6 @@ public:
 					   unsigned long offset);
 
 private:
-	static const unsigned nr_memory_filter_words = 10267;
-	static unsigned long hashRipPair(VexRip a, VexRip b) {
-		unsigned long h = a.unwrap_vexrip() + b.unwrap_vexrip() * 202693;
-		while (h >= (nr_memory_filter_words * 64))
-			h = (h % (nr_memory_filter_words * 64)) ^ (h / (nr_memory_filter_words * 64));
-		assert(h / 64 < nr_memory_filter_words);
-		return h;
-	}
-	static unsigned long hashRipPair2(VexRip a, VexRip b) {
-		unsigned long h = a.unwrap_vexrip() * 706133 + b.unwrap_vexrip() * 511669;
-		while (h >= (nr_memory_filter_words * 64))
-			h = (h % (nr_memory_filter_words * 64)) ^ (h / (nr_memory_filter_words * 64));
-		assert(h / 64 < nr_memory_filter_words);
-		return h;
-	}
-	unsigned long memoryAliasingFilter[nr_memory_filter_words];
-	unsigned long memoryAliasingFilter2[nr_memory_filter_words];
-	std::set<std::pair<VexRip, VexRip> > *aliasingTable;
 
 	void discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads);
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
@@ -343,11 +325,10 @@ public:
 
 	bool getRbpToRspDelta(const VexRip &rip, long *out);
 
-	~Oracle() { delete aliasingTable; }
+	~Oracle() { }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)
 	{
-		aliasingTable = new std::set<std::pair<VexRip, VexRip> >();
 		if (tags)
 			loadTagTable(tags);
 	}
