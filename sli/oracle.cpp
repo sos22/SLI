@@ -2188,8 +2188,21 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, Address
 			config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
 		config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
 	}
+	
 	std::vector<VexRip> _fallThroughRips;
-	getInstructionFallThroughs(rip, _fallThroughRips);
+	if (nr_statements == irsb->stmts_used) {
+		if (irsb->jumpkind != Ijk_Call) {
+			if (irsb->next_is_const)
+				_fallThroughRips.push_back(irsb->next_const.rip);
+			else
+				getInstructionFallThroughs(rip, _fallThroughRips);
+		}
+	} else {
+		assert(statements[nr_statements]->tag == Ist_IMark);
+		IRStmtIMark *im = (IRStmtIMark *)statements[nr_statements];
+		_fallThroughRips.push_back(im->addr.rip);
+	}
+
 	for (auto it = _fallThroughRips.begin();
 	     it != _fallThroughRips.end();
 	     it++) {
