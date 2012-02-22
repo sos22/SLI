@@ -1495,9 +1495,6 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 	unsigned tid = tr.thread;
 	unsigned long rip = tr.rip.unwrap_vexrip();
 
-	if (rip == 0x7c9266)
-		dbg_break("Here we are\n");
-
 	if (rip == ASSERT_FAILED_ADDRESS)
 		throw ForceFailureException(rip);
 
