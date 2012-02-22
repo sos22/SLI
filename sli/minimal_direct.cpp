@@ -192,15 +192,20 @@ main(int argc, char *argv[])
 		double low_end_time;
 		double high_end_time;
 		bool first = true;
+		int cntr = 0;
 		while (!instrIterator->finished()) {
 			VexRip rip;
 			instrIterator->fetch(&rip);
-			_logfile = fopenf("w", "logs/%s", rip.name());
-			if (!_logfile) err(1, "opening logs/%s", rip.name());
-			printf("Considering %s\n", rip.name());
+			_logfile = fopenf("w", "logs/%d", cntr);
+			if (!_logfile) err(1, "opening logs/%d", cntr);
+			printf("Considering %s, log logs/%d\n", rip.name(), cntr);
+			fprintf(_logfile, "Log for %s:\n", rip.name());
+			cntr++;
 			consider_rip(rip, ms, thr, oracle, df, timings, ALLOW_GC);
 			fclose(_logfile);
 			_logfile = stdout;
+
+			instrIterator->advance();
 
 			double completion = instructions_processed / double(total_instructions);
 			double elapsed = now() - start;
