@@ -181,7 +181,11 @@ main(int argc, char *argv[])
 	LibVEX_gc(ALLOW_GC);
 
 	if (argc == 5) {
-		consider_rip(VexRip::invent_vex_rip(strtoul(argv[4], NULL, 16)), ms, thr, oracle, df, NULL, ALLOW_GC);
+		VexRip vr;
+		const char *succ;
+		if (!parseVexRip(&vr, argv[4], &succ))
+			errx(1, "cannot parse %s as VexRip", argv[4]);
+		consider_rip(vr, ms, thr, oracle, df, NULL, ALLOW_GC);
 	} else {
 		FILE *timings = fopen("timings.txt", "w");
 		VexPtr<TypesDb::all_instrs_iterator> instrIterator(oracle->type_index->enumerateAllInstructions());

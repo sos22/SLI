@@ -12,8 +12,8 @@
 
 #define PAGE_SIZE (4096ul)
 
-static VexRip
-read_rip(FILE *f, bool *is_private)
+static bool
+read_rip(FILE *f, bool *is_private, AddressSpace *as, VexRip *out)
 {
 	unsigned long rip;
 	unsigned nr_entries;
@@ -27,7 +27,8 @@ read_rip(FILE *f, bool *is_private)
 		unsigned long a;
 		if (fread(&a, sizeof(a), 1, f) != 1)
 			err(1, "reading input");
-		stack.push_back(a);
+		if (as->isReadable(a, 1))
+			stack.push_back(a);
 	}
 	if (rip & (1ul << 63)) {
 		*is_private = true;
@@ -35,8 +36,11 @@ read_rip(FILE *f, bool *is_private)
 	} else {
 		*is_private = false;
 	}
+	if (!as->isReadable(rip, 1))
+		return false;
 	stack.push_back(rip);
-	return VexRip(stack);
+	*out = VexRip(stack);
+	return true;
 }
 
 struct tag_hdr {
@@ -98,7 +102,7 @@ struct tag_file_foreach_closure {
 				bool is_private) = 0;
 };
 static void
-tag_file_foreach(const char *fname, tag_file_foreach_closure &consumer)
+tag_file_foreach(const char *fname, AddressSpace *as, tag_file_foreach_closure &consumer)
 {
 	FILE *inp = fopen(fname, "r");
 	if (!inp)
@@ -117,15 +121,16 @@ tag_file_foreach(const char *fname, tag_file_foreach_closure &consumer)
 			FILE *inp;
 			tag_file_foreach_closure *consumer;
 			unsigned long offset;
+			AddressSpace *as;
 			void operator()(int nr_items, bool is_load) {
 				for (int x = 0; x < nr_items; x++) {
 					VexRip rip;
 					bool is_private;
-					rip = read_rip(inp, &is_private);
-					(*consumer)(rip, offset, true, is_private);
+					if (read_rip(inp, &is_private, as, &rip))
+						(*consumer)(rip, offset, true, is_private);
 				}
 			}
-		} doit = {inp, &consumer, offset};
+		} doit = {inp, &consumer, offset, as};
 		doit(hdr.nr_loads, true);
 		doit(hdr.nr_stores, false);
 	}
@@ -215,9 +220,14 @@ insert_rip_into_output(struct mapped_file *output, const VexRip &vr, unsigned lo
 int
 main(int argc, char *argv[])
 {
-	if (argc != 3)
-		errx(1, "need two arguments, the raw type file and the output file");
-	mapped_file output(argv[2], O_RDWR|O_CREAT|O_EXCL, 0666, NR_HASH_HEADS * sizeof(struct hash_head));
+	init_sli();
+
+	if (argc != 4)
+		errx(1, "need three arguments, the binary, the raw type file and the output file");
+
+	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
+
+	mapped_file output(argv[3], O_RDWR|O_CREAT|O_EXCL, 0666, NR_HASH_HEADS * sizeof(struct hash_head));
 
 	struct _ : public tag_file_foreach_closure {
 		mapped_file *output;
@@ -228,7 +238,7 @@ main(int argc, char *argv[])
 			: output(_output)
 		{}
 	} doit = { &output };
-	tag_file_foreach(argv[1], doit);
+	tag_file_foreach(argv[2], ms->addressSpace, doit);
 
 	return 0;
 }

@@ -254,7 +254,8 @@ public:
 	Mapping raw_types_database;
 	static unsigned long fetchTagEntry(tag_entry *te,
 					   const Mapping &mapping,
-					   unsigned long offset);
+					   unsigned long offset,
+					   AddressSpace *as);
 
 private:
 
