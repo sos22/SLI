@@ -1642,7 +1642,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 	bool aValid;
 	RegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip, &aValid));
 	if (aValid) {
-	RegisterAliasingConfiguration b(a);
+		RegisterAliasingConfiguration b(a);
 		b |= RegisterAliasingConfiguration::functionEntryConfiguration;
 		if (a != b) {
 			*done_something = true;
@@ -1696,10 +1696,13 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 			else
 				getInstructionCallees(rip, callees, oracle);
 		} else {
-			if (irsb->next_is_const == Iex_Const)
+			if (irsb->next_is_const)
 				fallThroughRips.push_back( irsb->next_const.rip);
-			else
+			else {
 				getInstructionFallThroughs(rip, fallThroughRips);
+				if (irsb->jumpkind == Ijk_Ret)
+					assert(fallThroughRips.size() == 0);
+			}
 		}
 	} else {
 		assert(dynamic_cast<IRStmtIMark *>(statements[nr_statements]));
