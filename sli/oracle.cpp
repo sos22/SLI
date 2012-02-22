@@ -1303,6 +1303,9 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, G
 		drop_index("branchDest");
 		drop_index("callDest");
 		drop_index("fallThroughDest");
+		drop_index("branchRip");
+		drop_index("callRip");
+		drop_index("fallThroughRip");
 
 		std::set<VexRip> visited;
 		int cntr = 0;
@@ -1326,6 +1329,9 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, G
 		create_index("branchDest", "branchRips", "dest");
 		create_index("callDest", "callRips", "dest");
 		create_index("fallThroughDest", "fallThroughRips", "dest");
+		create_index("branchRip", "branchRips", "rip");
+		create_index("callRip", "callRips", "rip");
+		create_index("fallThroughRip", "fallThroughRips", "rip");
 	}
 
 	printf("Calculate register liveness...\n");
