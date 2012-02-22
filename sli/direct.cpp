@@ -3483,7 +3483,7 @@ get_fallthrough_rip(IRSB *irsb, int instr_end, unsigned long *out, bool *do_pop)
 			   return address which we just pushed. */
 			if (do_pop)
 				*do_pop = true;
-		} else if (irsb->next_is_const == Iex_Const) {
+		} else if (irsb->next_is_const) {
 			*out = irsb->next_const.rip.unwrap_vexrip();
 		} else {
 			return false;
