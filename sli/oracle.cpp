@@ -690,7 +690,7 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 			else
 				unchanged++;
 			done_something |= this_did_something;
-			printf("Done %zd/%zd functions\n",
+			printf("Liveness: Done %zd/%zd functions\n",
 			       it - functions.begin(),
 			       functions.size());
 		}
@@ -709,6 +709,9 @@ Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken tok
 		LibVEX_maybe_gc(token);
 		Function f(*it);
 		f.calculateRbpToRspOffsets(ths->ms->addressSpace, ths);
+		printf("RBP map: Done %zd/%zd functions\n",
+		       it - functions.begin(),
+		       functions.size());
 	}
 }
 
@@ -728,6 +731,9 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 			Function f(*it);
 			f.calculateAliasing(ths->ms->addressSpace, &done_something, ths);
 		} while (done_something);
+		printf("Aliasing: Done %zd/%zd functions\n",
+		       it - functions.begin(),
+		       functions.size());
 	}
 }
 
