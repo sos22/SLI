@@ -238,9 +238,10 @@ public:
 
 	struct callgraph_entry {
 		bool is_call;
-		VexRip branch_rip;
 		std::set<unsigned long> targets;
 	};
+
+	typedef std::map<VexRip, callgraph_entry> callgraph_t;
 
 	struct tag_entry {
 		std::set<VexRip> shared_loads;
@@ -257,12 +258,12 @@ public:
 
 private:
 
-	void discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads, const std::vector<callgraph_entry> &callgraph_table);
+	void discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads, const callgraph_t &callgraph_table);
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	void loadTagTable(const char *path);
-	void findPossibleJumpTargets(const VexRip &from, const std::vector<callgraph_entry> &callgraph_table, std::vector<VexRip> &targets);
+	void findPossibleJumpTargets(const VexRip &from, const callgraph_t &callgraph_table, std::vector<VexRip> &targets);
 	VexRip functionHeadForInstruction(const VexRip &rip);
 
 	enum RbpToRspOffsetState {
@@ -312,7 +313,7 @@ public:
 	bool functionCanReturn(const VexRip &rip);
 
 	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads,
-					  const std::vector<callgraph_entry> &callgraph,
+					  const callgraph_t &callgraph,
 					  GarbageCollectionToken token);
 
 	void getFunctions(std::vector<VexRip> &out);

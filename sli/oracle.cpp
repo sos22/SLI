@@ -1009,13 +1009,14 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 {
 	__set_profiling(oracle_load_call_graph);
 
-	std::vector<callgraph_entry> callgraph; 
+	callgraph_t callgraph; 
 	std::vector<VexRip> roots;
 	FILE *f = fopen(fname, "r");
 	while (!feof(f)) {
 		callgraph_entry ce;
 		bool is_call;
-		auto res = read_vexrip(f, &ce.branch_rip, ths->ms->addressSpace, &is_call);
+		VexRip branch_rip;
+		auto res = read_vexrip(f, &branch_rip, ths->ms->addressSpace, &is_call);
 		if (res == read_vexrip_error) {
 			if (feof(f))
 				break;
@@ -1047,20 +1048,19 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 		}
 
 		ce.is_call = is_call;
-		if (ce.branch_rip.isValid())
-			callgraph.push_back(ce);
+		if (branch_rip.isValid())
+			callgraph[branch_rip] = ce;
 
 		if (ce.is_call) {
 			VexRip newRoot;
 
 			if (res == read_vexrip_take)
-				newRoot = (ce.branch_rip + getInstructionSize(ths->ms->addressSpace, ce.branch_rip));
+				newRoot = (branch_rip + getInstructionSize(ths->ms->addressSpace, branch_rip));
 			else
-				newRoot = ce.branch_rip;
+				newRoot = branch_rip;
 			newRoot.call(0);
 			for (auto it = ce.targets.begin(); it != ce.targets.end(); it++) {
 				newRoot.jump(*it);
-				printf("Establishing a new root %s\n", newRoot.name());
 				roots.push_back(newRoot);
 			}
 		}
@@ -1073,25 +1073,24 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 }
 
 void
-Oracle::findPossibleJumpTargets(const VexRip &rip, const std::vector<callgraph_entry> &callgraph_table,
+Oracle::findPossibleJumpTargets(const VexRip &rip, const callgraph_t &callgraph_table,
 				std::vector<VexRip> &output)
 {
-	for (auto it = callgraph_table.begin(); it != callgraph_table.end(); it++) {
-		if (it->branch_rip == rip) {
-			output.reserve(it->targets.size());
-			VexRip target;
-			if (it->is_call) {
-				target = rip + getInstructionSize(ms->addressSpace, rip);
-				target.call(0);
-			} else {
-				target = rip;
-			}
-			for (auto it2 = it->targets.begin(); it2 != it->targets.end(); it2++) {
-				target.jump(*it2);
-				output.push_back(target);
-			}
-			return;
-		}
+	auto it = callgraph_table.find(rip);
+	if (it == callgraph_table.end())
+		return;
+
+	output.reserve(it->second.targets.size());
+	VexRip target;
+	if (it->second.is_call) {
+		target = rip + getInstructionSize(ms->addressSpace, rip);
+		target.call(0);
+	} else {
+		target = rip;
+	}
+	for (auto it2 = it->second.targets.begin(); it2 != it->second.targets.end(); it2++) {
+		target.jump(*it2);
+		output.push_back(target);
 	}
 }
 
@@ -1333,7 +1332,7 @@ setFunctionHeadsCorrect(void)
 }
 
 void
-Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, const std::vector<callgraph_entry> &callgraph, GarbageCollectionToken token)
+Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, const callgraph_t &callgraph, GarbageCollectionToken token)
 {
 	if (!functionHeadsCorrect()) {
 		drop_index("branchDest");
@@ -1489,7 +1488,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const VexRip &rip)
 }
 
 void
-Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads, const std::vector<callgraph_entry> &callgraph_table)
+Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads, const callgraph_t &callgraph_table)
 {
 	Function work(x);
 
