@@ -1177,7 +1177,7 @@ database(void)
 	assert(rc == SQLITE_OK);
 
 	rc = sqlite3_exec(_database,
-			  "CREATE TABLE instructionAttributes (rip STRING, liveOnEntry INTEGER,"
+			  "CREATE TABLE instructionAttributes (rip BLOB, liveOnEntry INTEGER,"
 			  "alias0 INTEGER,"
 			  "alias1 INTEGER,"
 			  "alias2 INTEGER,"
@@ -1197,18 +1197,18 @@ database(void)
 			  "stackHasLeaked INTEGER," /* 0 or NULL -> false, 1 -> true */
 			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
 			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
-			  "functionHead STRING NOT NULL)",
+			  "functionHead BLOB NOT NULL)",
 			  NULL,
 			  NULL,
 			  NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip STRING, dest STRING)", NULL, NULL, NULL);
+	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip BLOB, dest BLOB)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip STRING, dest STRING)", NULL, NULL, NULL);
+	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip BLOB, dest BLOB)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip STRING, dest STRING)", NULL, NULL, NULL);
+	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip BLOB, dest BLOB)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead STRING PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
+	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead BLOB PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
@@ -1263,17 +1263,10 @@ extract_oraclerip_column(sqlite3_stmt *stmt, int column, std::vector<VexRip> &ou
 {
 	int rc;
 	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-		assert(sqlite3_column_type(stmt, column) == SQLITE_TEXT);
-		const unsigned char *val = sqlite3_column_text(stmt, column);
-		assert(val != NULL);
-		const char *end;
-		VexRip res;
-		if (!parseVexRip(&res, (const char *)val, &end)) {
-			fprintf(stderr, "failed to parse SQL RIP %s as VexRip!\n",
-				val);
-			abort();
-		}
-		out.push_back(res);
+		assert(sqlite3_column_type(stmt, column) == SQLITE_BLOB);
+		const void *val = sqlite3_column_blob(stmt, column);
+		int sz = sqlite3_column_bytes(stmt, column);
+		out.push_back(VexRip::from_binrep(val, sz));
 	}
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
@@ -1291,7 +1284,10 @@ static void
 bind_oraclerip(sqlite3_stmt *stmt, int idx, const VexRip &rip)
 {
 	int rc;
-	rc = sqlite3_bind_text(stmt, idx, rip.name(), -1, SQLITE_TRANSIENT);
+	void *binrep;
+	int binrep_size;
+	rip.get_binrep(&binrep, &binrep_size);
+	rc = sqlite3_bind_blob(stmt, idx, binrep, binrep_size, free);
 	assert(rc == SQLITE_OK);
 }
 

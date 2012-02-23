@@ -84,6 +84,21 @@ public:
 		return acc;
 	}
 
+	void get_binrep(void **out, int *out_size) const {
+		*out_size = sizeof(unsigned long) * stack.size();
+		unsigned long *buf = (unsigned long *)malloc(*out_size);
+		for (unsigned x = 0; x < stack.size(); x++)
+			buf[x] = stack[x];
+		*out = buf;
+	}
+	static VexRip from_binrep(const void *_inp, int inp_size) {
+		const unsigned long *inp = (const unsigned long *)_inp;
+		VexRip res;
+		res.stack.resize(inp_size / sizeof(unsigned long));
+		for (unsigned x = 0; x < res.stack.size(); x++)
+			res.stack[x] = inp[x];
+		return res;
+	}
 	unsigned long unwrap_vexrip() const {
 		return stack.back();
 	}
