@@ -116,7 +116,6 @@ public:
 		void setRbpToRspOffsetsCorrect(bool v);
 		bool aliasingConfigCorrect() const;
 		void setAliasingConfigCorrect(bool v);
-		bool exists() const;
 	public:
 		Function(const VexRip &_rip)
 			: rip(_rip)

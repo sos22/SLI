@@ -1176,7 +1176,7 @@ database(void)
 	assert(rc == SQLITE_OK);
 
 	rc = sqlite3_exec(_database,
-			  "CREATE TABLE instructionAttributes (rip STRING PRIMARY KEY, liveOnEntry INTEGER,"
+			  "CREATE TABLE instructionAttributes (rip STRING, liveOnEntry INTEGER,"
 			  "alias0 INTEGER,"
 			  "alias1 INTEGER,"
 			  "alias2 INTEGER,"
@@ -1216,8 +1216,6 @@ database(void)
 	rc = sqlite3_exec(_database, "CREATE TABLE doneFindFunctionHeads (doneit INTEGER)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-
-	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
 
 disable_journalling:
 	/* All of the information in the database can be regenerated
@@ -1342,6 +1340,8 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, G
 		drop_index("branchRip");
 		drop_index("callRip");
 		drop_index("fallThroughRip");
+		drop_index("instructionAttributesFunctionHead");
+		drop_index("instructionAttributesRip");
 
 		struct timeval start;
 		gettimeofday(&start, NULL);
@@ -1384,6 +1384,8 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, G
 		create_index("branchRip", "branchRips", "rip");
 		create_index("callRip", "callRips", "rip");
 		create_index("fallThroughRip", "fallThroughRips", "rip");
+		create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
+		create_index("instructionAttributesRip", "instructionAttributes", "rip");
 	}
 
 	printf("Calculate register liveness...\n");
@@ -2370,57 +2372,58 @@ Oracle::Function::addInstruction(const VexRip &rip,
 				 const std::vector<VexRip> &fallThrough,
 				 const std::vector<VexRip> &branch)
 {
-	sqlite3_stmt *stmt;
+	static sqlite3_stmt *stmt1;
+	static sqlite3_stmt *stmt2;
+	static sqlite3_stmt *stmt3;
+	static sqlite3_stmt *stmt4;
 	int rc;
 
-	stmt = prepare_statement("INSERT INTO instructionAttributes (rip, functionHead) VALUES (?, ?)");
-	bind_oraclerip(stmt, 1, rip);
-	bind_oraclerip(stmt, 2, this->rip);
-	rc = sqlite3_step(stmt);
-	sqlite3_finalize(stmt);
-	if (rc == SQLITE_CONSTRAINT) {
-		return false;
-	}
+	if (!stmt1)
+		stmt1 = prepare_statement("INSERT INTO instructionAttributes (rip, functionHead) VALUES (?, ?)");
+	bind_oraclerip(stmt1, 1, rip);
+	bind_oraclerip(stmt1, 2, this->rip);
+	rc = sqlite3_step(stmt1);
 	assert(rc == SQLITE_DONE);
+	sqlite3_reset(stmt1);
 
-	stmt = prepare_statement("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
+	if (!stmt2)
+		stmt2 = prepare_statement("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
 	for (auto it = fallThrough.begin();
 	     it != fallThrough.end();
 	     it++) {
-		bind_oraclerip(stmt, 1, rip);
-		bind_oraclerip(stmt, 2, *it);
-		rc = sqlite3_step(stmt);
+		bind_oraclerip(stmt2, 1, rip);
+		bind_oraclerip(stmt2, 2, *it);
+		rc = sqlite3_step(stmt2);
 		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt);
+		rc = sqlite3_reset(stmt2);
 		assert(rc == SQLITE_OK);
 	}
-	sqlite3_finalize(stmt);
 
-	stmt = prepare_statement("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
+	if (!stmt3)
+		stmt3 = prepare_statement("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
 	for (auto it = branch.begin();
 	     it != branch.end();
 	     it++) {
-		bind_oraclerip(stmt, 1, rip);
-		bind_oraclerip(stmt, 2, *it);
-		rc = sqlite3_step(stmt);
+		bind_oraclerip(stmt3, 1, rip);
+		bind_oraclerip(stmt3, 2, *it);
+		rc = sqlite3_step(stmt3);
 		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt);
+		rc = sqlite3_reset(stmt3);
 		assert(rc == SQLITE_OK);
 	}
-	sqlite3_finalize(stmt);
 
-	stmt = prepare_statement("INSERT INTO callRips (rip, dest) VALUES (?, ?)");
+	if (!stmt4)
+		stmt4 = prepare_statement("INSERT INTO callRips (rip, dest) VALUES (?, ?)");
 	for (auto it = callees.begin();
 	     it != callees.end();
 	     it++) {
-		bind_oraclerip(stmt, 1, rip);
-		bind_oraclerip(stmt, 2, *it);
-		rc = sqlite3_step(stmt);
+		bind_oraclerip(stmt4, 1, rip);
+		bind_oraclerip(stmt4, 2, *it);
+		rc = sqlite3_step(stmt4);
 		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt);
+		rc = sqlite3_reset(stmt4);
 		assert(rc == SQLITE_OK);
 	}
-	sqlite3_finalize(stmt);
 
 	return true;
 }
