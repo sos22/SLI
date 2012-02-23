@@ -122,6 +122,22 @@ public:
 	}
 
 	void call(unsigned long target) {
+		/* Remove any cycles from the stack.  This effectively
+		   turns them into higher-level CFG cycles, which
+		   other parts of the analysis machinery can handle
+		   nicely. */
+		if (stack.size() != 0) {
+			unsigned long ra = stack.back();
+			for (unsigned x = 0; x < stack.size() - 1; x++) {
+				if (ra == stack[x]) {
+					printf("Shrink %s to avoid stack cycle calling %lx, new result ", name(), target);
+					stack.resize(x + 1);
+					clearName();
+					printf("%s\n", name());
+					break;
+				}
+			}
+		}
 		stack.push_back(target);
 		clearName();
 	}
