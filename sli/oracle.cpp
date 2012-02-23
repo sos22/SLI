@@ -186,10 +186,10 @@ read_vexrip(VexRip *out, const Mapping &mapping, AddressSpace *as, unsigned long
 		*is_private = false;
 		stack.push_back(hdr->rip);
 	}
+	*sz = 12 + sizeof(body[0]) * hdr->nr_entries;
 	if (!as->isReadable(stack.back(), 1))
 		return false;
 	*out = VexRip(stack);
-	*sz = 12 + sizeof(body[0]) * hdr->nr_entries;
 	return true;
 }
 
@@ -253,7 +253,7 @@ Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offse
 				unsigned long s;
 				bool use_it;
 				use_it = read_vexrip(&buf, mapping, as, offset + *sz, &is_private, &s);
-				sz += s;
+				*sz += s;
 				if (use_it) {
 					if (is_private)
 						private_set.insert(buf);
