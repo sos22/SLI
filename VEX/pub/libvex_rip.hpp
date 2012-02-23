@@ -130,10 +130,7 @@ public:
 			unsigned long ra = stack.back();
 			for (unsigned x = 0; x < stack.size() - 1; x++) {
 				if (ra == stack[x]) {
-					printf("Shrink %s to avoid stack cycle calling %lx, new result ", name(), target);
 					stack.resize(x + 1);
-					clearName();
-					printf("%s\n", name());
 					break;
 				}
 			}

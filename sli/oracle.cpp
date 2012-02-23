@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include <err.h>
 #include <stdlib.h>
 
@@ -1342,9 +1343,12 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, G
 		drop_index("callRip");
 		drop_index("fallThroughRip");
 
+		struct timeval start;
+		gettimeofday(&start, NULL);
 		std::set<VexRip> visited;
 		int cntr = 0;
 		printf("Discovering function heads...\n");
+		sqlite3_exec(database(), "BEGIN TRANSACTION", NULL, NULL, NULL);
 		while (!heads.empty()) {
 			VexRip head;
 			head = heads.back();
@@ -1354,10 +1358,23 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, G
 			visited.insert(head);
 			ths->discoverFunctionHead(head, heads);
 			if (cntr++ % 100 == 0) {
-				printf("%zd heads left.\r", heads.size());
+				struct timeval now;
+				gettimeofday(&now, NULL);
+				now.tv_sec -= start.tv_sec;
+				now.tv_usec -= start.tv_usec;
+				if (now.tv_usec < 0) {
+					now.tv_usec += 1e6;
+					now.tv_sec--;
+				}
+				printf("%zd heads left; %d discovered in %ld.%06ld.\r", heads.size(), cntr,
+				       now.tv_sec, now.tv_usec);
 				fflush(stdout);
+				sqlite3_exec(database(), "END TRANSACTION", NULL, NULL, NULL);
+				sqlite3_exec(database(), "BEGIN TRANSACTION", NULL, NULL, NULL);
 			}
+			LibVEX_maybe_gc(token);
 		}
+		sqlite3_exec(database(), "END TRANSACTION", NULL, NULL, NULL);
 		printf("Done discovering function heads\n");
 		setFunctionHeadsCorrect();
 
