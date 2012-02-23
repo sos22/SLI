@@ -42,7 +42,7 @@ TypesDb::enumerateAllInstructions() const
 	return new all_instrs_iterator(this);
 }
 
-TypesDb::all_instrs_iterator::all_instrs_iterator(const TypesDb *_owner)
+__types_db_instr_iterator::__types_db_instr_iterator(const TypesDb *_owner)
 	: owner(_owner), have_finished(false)
 {
 	const struct hash_head *heads = owner->mapping.get<hash_head>(0, NR_HASH_HEADS);
@@ -57,7 +57,7 @@ TypesDb::all_instrs_iterator::all_instrs_iterator(const TypesDb *_owner)
 }
 
 void
-TypesDb::all_instrs_iterator::advance(void)
+__types_db_instr_iterator::advance(void)
 {
 	const hash_entry *he;
 	he = owner->mapping.get<hash_entry>(offset);
@@ -79,7 +79,7 @@ TypesDb::all_instrs_iterator::advance(void)
 }
 
 void
-TypesDb::all_instrs_iterator::fetch(VexRip *out) const
+__types_db_instr_iterator::fetch(VexRip *out) const
 {
 	const struct hash_entry *he = owner->mapping.get<hash_entry>(offset);
 	out->stack.resize(he->nr_rips);

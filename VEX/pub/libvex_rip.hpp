@@ -30,6 +30,9 @@ class VexRip;
 bool parseVexRip(VexRip *out, const char *str, const char **suffix);
 
 class VexRip : public Named {
+	friend bool parseVexRip(VexRip *out, const char *str, const char **suffix);
+	friend class __types_db_instr_iterator;
+
 	char *mkName() const {
 		/* Each element of the stack needs 16 chars for the
 		   value itself, plus two for the 0x.  All but the
@@ -55,9 +58,9 @@ class VexRip : public Named {
 		assert(cursor - buf < (int)stack.size() * 20 + 2);
 		return buf;
 	}
-public:
 	std::vector<unsigned long> stack;
 	void changed() { clearName(); }
+public:
 	bool operator< (const VexRip &other) const {
 		for (unsigned idx = 0;
 		     idx < stack.size() && idx < other.stack.size();
@@ -89,6 +92,9 @@ public:
 		return stack.size() != 0;
 	}
 
+	const std::vector<unsigned long> &getStack() const {
+		return stack;
+	}
 	static VexRip invent_vex_rip(unsigned long rip) {
 		VexRip res;
 		res.stack.push_back(rip);

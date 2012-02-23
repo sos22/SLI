@@ -1045,7 +1045,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		}
 
 		ce.is_call = is_call;
-		if (ce.branch_rip.stack.size() != 0)
+		if (ce.branch_rip.isValid())
 			ths->callgraph_table.push_back(ce);
 
 		if (ce.is_call) {
