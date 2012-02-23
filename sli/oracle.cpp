@@ -1489,9 +1489,6 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 {
 	Function work(x);
 
-	if (work.exists())
-		return;
-
 	/* Start by building a CFG of the function's instructions. */
 	std::vector<VexRip> unexplored;
 	std::set<VexRip> explored;
@@ -2619,19 +2616,6 @@ Oracle::Function::setAliasingConfigCorrect(bool x)
 	assert(rc == SQLITE_DONE);
 	rc = sqlite3_reset(stmt);
 	assert(rc == SQLITE_OK);
-}
-
-bool
-Oracle::Function::exists() const
-{
-	static sqlite3_stmt *stmt;
-	if (!stmt)
-		stmt = prepare_statement("SELECT COUNT(*) FROM instructionAttributes WHERE functionHead = ?");
-	bind_oraclerip(stmt, 1, rip);
-	std::vector<unsigned long> x;
-	extract_int64_column(stmt, 0, x);
-	assert(x.size() == 1);
-	return x[0] != 0;
 }
 
 VexRip
