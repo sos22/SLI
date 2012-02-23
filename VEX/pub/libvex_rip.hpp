@@ -1,6 +1,8 @@
 #ifndef LIBVEX_RIP_HPP__
 #define LIBVEX_RIP_HPP__
 
+#include <err.h>
+
 #include "libvex_alloc.h"
 
 #include <vector>
@@ -22,6 +24,10 @@
 	bool operator<=(const type &other) const {		\
 		return !(*this > other);			\
 	}
+
+class VexRip;
+
+bool parseVexRip(VexRip *out, const char *str, const char **suffix);
 
 class VexRip : public Named {
 	char *mkName() const {
@@ -89,6 +95,14 @@ public:
 		return res;
 	}
 
+	static VexRip from_string(const char *str) {
+		VexRip res;
+		const char *succ;
+		if (!parseVexRip(&res, str, &succ) ||
+		    *succ)
+			errx(1, "cannot parse %s as vex rip", str);
+		return res;
+	}
 	VexRip() {}
 	VexRip(const std::vector<unsigned long> &content)
 		: stack(content)
@@ -120,7 +134,5 @@ public:
 		return false;
 	}
 };
-
-bool parseVexRip(VexRip *out, const char *str, const char **suffix);
 
 #endif /* !LIBVEX_RIP_HPP__ */
