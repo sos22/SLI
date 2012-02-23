@@ -1005,12 +1005,13 @@ struct cg_header {
 };
 
 void
-Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token)
+Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionToken token)
 {
 	__set_profiling(oracle_load_call_graph);
 
+	std::vector<callgraph_entry> callgraph; 
 	std::vector<VexRip> roots;
-	FILE *f = fopen(path, "r");
+	FILE *f = fopen(fname, "r");
 	while (!feof(f)) {
 		callgraph_entry ce;
 		bool is_call;
@@ -1018,18 +1019,18 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 		if (res == read_vexrip_error) {
 			if (feof(f))
 				break;
-			err(1, "reading rip from %s", path);
+			err(1, "reading rip from %s", fname);
 		}
 		unsigned nr_callees;
 		if (fread(&nr_callees, sizeof(nr_callees), 1, f) != 1)
-			err(1, "reading number of callees from %s\n", path);
+			err(1, "reading number of callees from %s\n", fname);
 		bool is_first = true;
 		is_call = false;
 		for (unsigned x = 0; x < nr_callees; x++) {
 			unsigned long callee;
 			bool ic;
 			if (fread(&callee, sizeof(callee), 1, f) != 1)
-				err(1, "reading callee rip from %s", path);
+				err(1, "reading callee rip from %s", fname);
 			if (callee & (1ul << 63)) {
 				ic = true;
 				callee &= ~(1ul << 63);
@@ -1047,7 +1048,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 
 		ce.is_call = is_call;
 		if (ce.branch_rip.isValid())
-			ths->callgraph_table.push_back(ce);
+			callgraph.push_back(ce);
 
 		if (ce.is_call) {
 			VexRip newRoot;
@@ -1068,11 +1069,12 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionTo
 	fclose(f);
 
 	make_unique(roots);
-	discoverFunctionHeads(ths, roots, token);
+	Oracle::discoverFunctionHeads(ths, roots, callgraph, token);
 }
 
 void
-Oracle::findPossibleJumpTargets(const VexRip &rip, std::vector<VexRip> &output)
+Oracle::findPossibleJumpTargets(const VexRip &rip, const std::vector<callgraph_entry> &callgraph_table,
+				std::vector<VexRip> &output)
 {
 	for (auto it = callgraph_table.begin(); it != callgraph_table.end(); it++) {
 		if (it->branch_rip == rip) {
@@ -1331,7 +1333,7 @@ setFunctionHeadsCorrect(void)
 }
 
 void
-Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, GarbageCollectionToken token)
+Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, const std::vector<callgraph_entry> &callgraph, GarbageCollectionToken token)
 {
 	if (!functionHeadsCorrect()) {
 		drop_index("branchDest");
@@ -1356,7 +1358,7 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<VexRip> &heads, G
 			if (visited.count(head))
 				continue;
 			visited.insert(head);
-			ths->discoverFunctionHead(head, heads);
+			ths->discoverFunctionHead(head, heads, callgraph);
 			if (cntr++ % 100 == 0) {
 				struct timeval now;
 				gettimeofday(&now, NULL);
@@ -1487,7 +1489,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const VexRip &rip)
 }
 
 void
-Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
+Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads, const std::vector<callgraph_entry> &callgraph_table)
 {
 	Function work(x);
 
@@ -1539,12 +1541,12 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads)
 					if (irsb->next_is_const)
 						callees.push_back(irsb->next_const.rip);
 					else
-						findPossibleJumpTargets(rip, callees);
+						findPossibleJumpTargets(rip, callgraph_table, callees);
 				} else {
 					if (irsb->next_is_const)
 						fallThrough.push_back(irsb->next_const.rip);
 					else if (irsb->jumpkind != Ijk_Ret)
-						findPossibleJumpTargets(rip, fallThrough);
+						findPossibleJumpTargets(rip, callgraph_table, fallThrough);
 				}
 			} else {
 				stmt = irsb->stmts[end_of_instruction];
