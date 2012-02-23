@@ -1439,8 +1439,7 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 	class DecodeCacheEntry : public GarbageCollected<DecodeCacheEntry, &ir_heap> {
 	public:
 		DecodeCacheEntry *next;
-		unsigned tid;
-		unsigned long rip;
+		ThreadRip key;
 		IRSB *irsb;
 
 		void visit(HeapVisitor &hv) { abort(); }
@@ -1448,39 +1447,36 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 		NAMED_CLASS
 	};
 
-	static const unsigned nr_slots = 2048;
+	static const unsigned nr_slots = 2053;
 	DecodeCacheEntry *slots[nr_slots];
-	static unsigned long rip_hash(unsigned tid, unsigned long rip)
+	static unsigned long rip_hash(const ThreadRip &tr)
 	{
-		unsigned long hash = tid % nr_slots;
-		while (rip) {
-			hash ^= rip % nr_slots;
-			rip /= nr_slots;
-		}
+		unsigned long hash = tr.hash();
+		while (hash > nr_slots)
+			hash = (hash % nr_slots) ^ (hash / nr_slots);
 		return hash;
 	}
 
 public:
-	IRSB **search(unsigned tid, unsigned long rip);
+	IRSB **search(const ThreadRip &tr);
 
 	void visit(HeapVisitor &hv) { abort(); }
 	NAMED_CLASS
 };
 IRSB **
-DecodeCache::search(unsigned tid, unsigned long rip)
+DecodeCache::search(const ThreadRip &tr)
 {
 	DecodeCacheEntry **pdce, *dce;
-	unsigned hash = rip_hash(tid, rip);
+	unsigned hash = rip_hash(tr);
 	pdce = &slots[hash];
-	while (*pdce && ((*pdce)->rip != rip || (*pdce)->tid != tid))
+	while (*pdce && (*pdce)->key != tr)
 		pdce = &(*pdce)->next;
 	dce = *pdce;
 	if (dce) {
 		*pdce = dce->next;
 	} else {
 		dce = new DecodeCacheEntry();
-		dce->rip = rip;
-		dce->tid = tid;
+		dce->key = tr;
 	}
 	dce->next = slots[hash];
 	slots[hash] = dce;
@@ -1493,10 +1489,9 @@ IRSB *
 AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 {
 	unsigned tid = tr.thread;
-	unsigned long rip = tr.rip.unwrap_vexrip();
 
-	if (rip == ASSERT_FAILED_ADDRESS)
-		throw ForceFailureException(rip);
+	if (tr.rip.unwrap_vexrip() == ASSERT_FAILED_ADDRESS)
+		throw ForceFailureException(ASSERT_FAILED_ADDRESS);
 
 	if (!decode_cache.get())
 		decode_cache.set(new WeakRef<DecodeCache, &ir_heap>());
@@ -1505,7 +1500,7 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 		dc = new DecodeCache();
 		decode_cache.get()->set(dc);
 	}
-	IRSB **cacheSlot = dc->search(tid, rip);
+	IRSB **cacheSlot = dc->search(tr);
 	assert(cacheSlot != NULL);
 	IRSB *irsb = *cacheSlot;
 	if (!irsb) {

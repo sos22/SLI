@@ -253,6 +253,8 @@ public:
 
 	unsigned thread;
 	VexRip rip;
+
+	unsigned long hash() const { return thread * 5379277 + rip.hash(); }
 };
 extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
