@@ -12,7 +12,9 @@
 
 /* The heap sanity checks are expensive enough that we're better off
    leaving them off even during normal debug runs. */
+#ifndef NDEBUG
 #define NDEBUG
+#endif
 
 /* If we're given an opportunity to garbage collect and the heap is
    bigger than this then we always take it. */

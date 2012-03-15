@@ -269,9 +269,9 @@ static IRExpr* triop ( IROp op, IRExpr* a1, IRExpr* a2, IRExpr* a3 )
    return IRExpr_Triop(op, a1, a2, a3);
 }
 
-static IRExpr* mkexpr ( IRTemp tmp, unsigned tid )
+static IRExpr* mkexpr ( IRTemp tmp, unsigned tid, IRType ty )
 {
-   return IRExpr_RdTmp(tmp, tid, 0);
+   return IRExpr_RdTmp(tmp, ty, tid, 0);
 }
 
 static IRExpr* mkU8 ( ULong i )
@@ -1426,11 +1426,11 @@ static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
    assign(expTmp, expVal);
    cas = mkIRCAS( threadAndRegister::invalid(),
 		  threadAndRegister::temp(tid, oldTmp, 0),
-		  addr, NULL, mkexpr(expTmp, tid), NULL, newVal );
+		  addr, NULL, mkexpr(expTmp, tid, tyE), NULL, newVal );
    stmt( IRStmt_CAS(cas) );
    stmt( IRStmt_Exit(
             binop( mkSizedOp(tyE,Iop_CasCmpNE8),
-                   mkexpr(oldTmp, tid), mkexpr(expTmp, tid) ),
+                   mkexpr(oldTmp, tid, tyE), mkexpr(expTmp, tid, tyE) ),
             Ijk_Boring, /*Ijk_NoRedir*/
             restart_point
          ));
@@ -1602,8 +1602,8 @@ void setFlags_DEP1_DEP2 ( unsigned tid, IROp op8, IRTemp dep1, IRTemp dep2, IRTy
                      vpanic("setFlags_DEP1_DEP2(tid, amd64)");
    }
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(ccOp)) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(dep1, tid))) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(mkexpr(dep2, tid))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(dep1, tid, ty))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(mkexpr(dep2, tid, ty))) );
 }
 
 
@@ -1628,7 +1628,7 @@ void setFlags_DEP1 ( unsigned tid, IROp op8, IRTemp dep1, IRType ty )
                      vpanic("setFlags_DEP1(tid, amd64)");
    }
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(ccOp)) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(dep1, tid))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(dep1, tid, ty))) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0)) );
 }
 
@@ -1667,17 +1667,17 @@ static void setFlags_DEP1_DEP2_shift ( unsigned tid,
 
    /* DEP1 contains the result, DEP2 contains the undershifted value. */
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),
-                     IRExpr_Mux0X( mkexpr(guard, tid),
+                     IRExpr_Mux0X( mkexpr(guard, tid, Ity_I1),
                                    IRExpr_Get(OFFB_CC_OP,Ity_I64, tid, 0),
                                    mkU64(ccOp))) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1),
-                     IRExpr_Mux0X( mkexpr(guard, tid),
+                     IRExpr_Mux0X( mkexpr(guard, tid, Ity_I1),
                                    IRExpr_Get(OFFB_CC_DEP1,Ity_I64, tid, 0),
-                                   widenUto64(mkexpr(res, tid)))) );
+                                   widenUto64(mkexpr(res, tid, ty)))) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), 
-                     IRExpr_Mux0X( mkexpr(guard, tid),
+                     IRExpr_Mux0X( mkexpr(guard, tid, Ity_I1),
                                    IRExpr_Get(OFFB_CC_DEP2,Ity_I64, tid, 0),
-                                   widenUto64(mkexpr(resUS, tid)))) );
+                                   widenUto64(mkexpr(resUS, tid, ty)))) );
 }
 
 
@@ -1701,7 +1701,7 @@ static void setFlags_INC_DEC ( unsigned tid, Bool inc, IRTemp res, IRType ty )
       may require reading all four thunk fields. */
    stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mk_amd64g_calculate_rflags_c(tid)) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(ccOp)) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(res, tid))) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(res, tid, ty))) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0)) );
 }
 
@@ -1728,8 +1728,8 @@ void setFlags_MUL ( unsigned tid, IRType ty, IRTemp arg1, IRTemp arg2, ULong bas
       default:
          vpanic("setFlags_MUL(amd64)");
    }
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(arg1, tid)) ));
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(mkexpr(arg2, tid)) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(arg1, tid, ty)) ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(mkexpr(arg2, tid, ty)) ));
 }
 
 
@@ -1828,32 +1828,32 @@ static void helper_ADC ( unsigned tid,
                         mk_amd64g_calculate_rflags_c(tid),
                         mkU64(1)) );
 
-   assign( oldcn, narrowTo(ty, mkexpr(oldc, tid)) );
+   assign( oldcn, narrowTo(ty, mkexpr(oldc, tid, Ity_I64)) );
 
    assign( tres, binop(plus,
-                       binop(plus,mkexpr(ta1, tid),mkexpr(ta2, tid)),
-                       mkexpr(oldcn, tid)) );
+                       binop(plus,mkexpr(ta1, tid, ty),mkexpr(ta2, tid, ty)),
+                       mkexpr(oldcn, tid, Ity_I64)) );
 
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
    if (taddr != IRTemp_INVALID) {
       if (texpVal == IRTemp_INVALID) {
 	 vassert(!restart_point.rip.isValid());
-         storeLE( mkexpr(taddr, tid), mkexpr(tres, tid) );
+         storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
       } else {
          vassert(typeOfIRTemp(irsb->tyenv, texpVal) == ty);
          /* .. and hence 'texpVal' has the same type as 'tres'. */
-         casLE( mkexpr(taddr, tid),
-                mkexpr(texpVal, tid), mkexpr(tres, tid), restart_point,
+         casLE( mkexpr(taddr, tid, Ity_I64),
+                mkexpr(texpVal, tid, ty), mkexpr(tres, tid, ty), restart_point,
 		tid);
       }
    }
 
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid))  ));
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid), 
-                                                         mkexpr(oldcn, tid)) )) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid, ty))  ));
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid, ty), 
+							    mkexpr(oldcn, tid, Ity_I64)) )) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid, Ity_I64) ) );
 }
 
 
@@ -1890,32 +1890,32 @@ static void helper_SBB ( unsigned tid,
                        mk_amd64g_calculate_rflags_c(tid),
                        mkU64(1)) );
 
-   assign( oldcn, narrowTo(ty, mkexpr(oldc, tid)) );
+   assign( oldcn, narrowTo(ty, mkexpr(oldc, tid, Ity_I64)) );
 
    assign( tres, binop(minus,
-                       binop(minus,mkexpr(ta1, tid),mkexpr(ta2, tid)),
-                       mkexpr(oldcn, tid)) );
+                       binop(minus,mkexpr(ta1, tid, ty),mkexpr(ta2, tid, ty)),
+                       mkexpr(oldcn, tid, Ity_I64)) );
 
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
    if (taddr != IRTemp_INVALID) {
       if (texpVal == IRTemp_INVALID) {
          vassert(!restart_point.rip.isValid());
-         storeLE( mkexpr(taddr, tid), mkexpr(tres, tid) );
+         storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
       } else {
          vassert(typeOfIRTemp(irsb->tyenv, texpVal) == ty);
          /* .. and hence 'texpVal' has the same type as 'tres'. */
-         casLE( mkexpr(taddr, tid),
-                mkexpr(texpVal, tid), mkexpr(tres, tid), restart_point,
+         casLE( mkexpr(taddr, tid, Ity_I64),
+                mkexpr(texpVal, tid, ty), mkexpr(tres, tid, ty), restart_point,
 		tid );
       }
    }
 
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid) )) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid), 
-                                                         mkexpr(oldcn, tid)) )) );
-   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid) ) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid, ty) )) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid, ty), 
+							    mkexpr(oldcn, tid, Ity_I64)) )) );
+   stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid, Ity_I64) ) );
 }
 
 
@@ -2030,7 +2030,7 @@ static void jmp_lit( IRJumpKind kind, const ThreadRip &d64 )
 static void jmp_treg( IRJumpKind kind, IRTemp t, unsigned tid )
 {
    irsb->next_is_const = false;
-   irsb->next_nonconst = mkexpr(t, tid);
+   irsb->next_nonconst = mkexpr(t, tid, Ity_I64);
    irsb->jumpkind      = kind;
 }
 
@@ -2076,9 +2076,9 @@ void make_redzone_AbiHint ( VexAbiInfo* vbi,
    vassert(typeOfIRTemp(irsb->tyenv, nia) == Ity_I64);
    if (szB > 0)
       stmt( IRStmt_AbiHint( 
-               binop(Iop_Sub64, mkexpr(new_rsp, tid), mkU64(szB)), 
-               szB,
-               mkexpr(nia, tid)
+		binop(Iop_Sub64, mkexpr(new_rsp, tid, Ity_I64), mkU64(szB)), 
+		szB,
+		mkexpr(nia, tid, Ity_I64)
             ));
 }
 
@@ -2654,20 +2654,20 @@ ULong dis_op2_E_G ( unsigned tid,
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
 		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
-         putIRegG(size, pfx, rm, mkexpr(dst1, tid));
+         putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
 		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
-         putIRegG(size, pfx, rm, mkexpr(dst1, tid));
+         putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
-         assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)) );
+         assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
          if (isAddSub(op8))
             setFlags_DEP1_DEP2(tid, op8, dst0, src, ty);
          else
             setFlags_DEP1(tid, op8, dst1, ty);
          if (keep)
-            putIRegG(size, pfx, rm, mkexpr(dst1, tid));
+            putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       }
 
       DIP("%s%c %s,%s\n", t_amd64opc, nameISize(size), 
@@ -2678,25 +2678,25 @@ ULong dis_op2_E_G ( unsigned tid,
       /* E refers to memory */
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( dst0, getIRegG(tid, size,pfx,rm) );
-      assign( src,  loadLE(szToITy(size), mkexpr(addr, tid), guest_code.rip ));
+      assign( src,  loadLE(szToITy(size), mkexpr(addr, tid, ty), guest_code.rip ));
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
 		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
-         putIRegG(size, pfx, rm, mkexpr(dst1, tid));
+         putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
 		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
-         putIRegG(size, pfx, rm, mkexpr(dst1, tid));
+         putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
-         assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)) );
+         assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
          if (isAddSub(op8))
             setFlags_DEP1_DEP2(tid, op8, dst0, src, ty);
          else
             setFlags_DEP1(tid, op8, dst1, ty);
          if (keep)
-            putIRegG(size, pfx, rm, mkexpr(dst1, tid));
+            putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       }
 
       DIP("%s%c %s,%s\n", t_amd64opc, nameISize(size), 
@@ -2770,20 +2770,20 @@ ULong dis_op2_G_E ( unsigned tid,
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
 		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
-         putIRegE(size, pfx, rm, mkexpr(dst1, tid));
+         putIRegE(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
 		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
-         putIRegE(size, pfx, rm, mkexpr(dst1, tid));
+         putIRegE(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
-         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)));
+         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (isAddSub(op8))
             setFlags_DEP1_DEP2(tid, op8, dst0, src, ty);
          else
             setFlags_DEP1(tid, op8, dst1, ty);
          if (keep)
-            putIRegE(size, pfx, rm, mkexpr(dst1, tid));
+            putIRegE(size, pfx, rm, mkexpr(dst1, tid, ty));
       }
 
       DIP("%s%c %s,%s\n", t_amd64opc, nameISize(size), 
@@ -2795,7 +2795,7 @@ ULong dis_op2_G_E ( unsigned tid,
    /* E refers to memory */    
    {
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      assign(dst0, loadLE(ty,mkexpr(addr, tid), guest_code.rip) );
+      assign(dst0, loadLE(ty,mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       assign(src,  getIRegG(tid, size,pfx,rm));
 
       if (addSubCarry && op8 == Iop_Add8) {
@@ -2820,14 +2820,14 @@ ULong dis_op2_G_E ( unsigned tid,
 		       /*store*/addr, IRTemp_INVALID, ThreadRip() );
          }
       } else {
-         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)));
+         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (keep) {
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid),
-                      mkexpr(dst0, tid)/*expval*/, 
-                      mkexpr(dst1, tid)/*newval*/, guest_RIP_curr_instr, tid );
+               casLE( mkexpr(addr, tid, Ity_I64),
+                      mkexpr(dst0, tid, ty)/*expval*/, 
+                      mkexpr(dst1, tid, ty)/*newval*/, guest_RIP_curr_instr, tid );
             } else {
-               storeLE(mkexpr(addr, tid), mkexpr(dst1, tid));
+               storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
             }
          }
          if (isAddSub(op8))
@@ -2882,7 +2882,7 @@ ULong dis_mov_E_G ( unsigned tid,
    /* E refers to memory */    
    {
       IRTemp addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      putIRegG(size, pfx, rm, loadLE(szToITy(size), mkexpr(addr, tid), guest_code.rip));
+      putIRegG(size, pfx, rm, loadLE(szToITy(size), mkexpr(addr, tid, Ity_I64), guest_code.rip));
       DIP("mov%c %s,%s\n", nameISize(size), 
                            dis_buf,
                            nameIRegG(size,pfx,rm));
@@ -2930,7 +2930,7 @@ ULong dis_mov_G_E ( unsigned tid,
    /* E refers to memory */    
    {
       IRTemp addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      storeLE( mkexpr(addr, tid), getIRegG(tid, size, pfx, rm) );
+      storeLE( mkexpr(addr, tid, Ity_I64), getIRegG(tid, size, pfx, rm) );
       DIP("mov%c %s,%s\n", nameISize(size), 
                            nameIRegG(size,pfx,rm), 
                            dis_buf);
@@ -2960,13 +2960,13 @@ ULong dis_op_imm_A ( unsigned tid,
    assign(src,  mkU(ty,lit & mkSizeMask(size)));
 
    if (isAddSub(op8) && !carrying) {
-      assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)) );
+      assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
       setFlags_DEP1_DEP2(tid, op8, dst0, src, ty);
    }
    else
    if (isLogic(op8)) {
       vassert(!carrying);
-      assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)) );
+      assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
       setFlags_DEP1(tid, op8, dst1, ty);
    }
    else
@@ -2983,7 +2983,7 @@ ULong dis_op_imm_A ( unsigned tid,
       vpanic("dis_op_imm_A(amd64,guest)");
 
    if (keep)
-      putIRegRAX(size, mkexpr(dst1, tid));
+      putIRegRAX(size, mkexpr(dst1, tid, ty));
 
    DIP("%s%c $%lld, %s\n", t_amd64opc, nameISize(size), 
                            lit, nameIRegRAX(size));
@@ -3021,7 +3021,7 @@ ULong dis_movx_E_G ( unsigned tid,
       putIRegG(szd, pfx, rm,
                     doScalarWidening(
                        szs,szd,sign_extend, 
-                       loadLE(szToITy(szs),mkexpr(addr, tid),guest_code.rip)));
+                       loadLE(szToITy(szs),mkexpr(addr, tid, Ity_I64),guest_code.rip)));
       DIP("mov%c%c%c %s,%s\n", sign_extend ? 's' : 'z',
                                nameISize(szs), 
                                nameISize(szd),
@@ -3046,9 +3046,9 @@ void codegen_div ( unsigned tid, Int sz, IRTemp t, Bool signed_divide )
       assign( src128, binop(Iop_64HLto128, 
                             getIReg64(tid, R_RDX), 
                             getIReg64(tid, R_RAX)) );
-      assign( dst128, binop(op, mkexpr(src128, tid), mkexpr(t, tid)) );
-      putIReg64( R_RAX, unop(Iop_128to64,mkexpr(dst128, tid)) );
-      putIReg64( R_RDX, unop(Iop_128HIto64,mkexpr(dst128, tid)) );
+      assign( dst128, binop(op, mkexpr(src128, tid, Ity_I128), mkexpr(t, tid, Ity_I128)) );
+      putIReg64( R_RAX, unop(Iop_128to64,mkexpr(dst128, tid, Ity_I128)) );
+      putIReg64( R_RDX, unop(Iop_128HIto64,mkexpr(dst128, tid, Ity_I128)) );
    } else {
       IROp   op    = signed_divide ? Iop_DivModS64to32 
                                    : Iop_DivModU64to32;
@@ -3059,9 +3059,9 @@ void codegen_div ( unsigned tid, Int sz, IRTemp t, Bool signed_divide )
          assign( src64, 
                  binop(Iop_32HLto64, getIRegRDX(tid, 4), getIRegRAX(tid, 4)) );
          assign( dst64, 
-                 binop(op, mkexpr(src64, tid), mkexpr(t, tid)) );
-         putIRegRAX( 4, unop(Iop_64to32,mkexpr(dst64, tid)) );
-         putIRegRDX( 4, unop(Iop_64HIto32,mkexpr(dst64, tid)) );
+                 binop(op, mkexpr(src64, tid, Ity_I64), mkexpr(t, tid, Ity_I64)) );
+         putIRegRAX( 4, unop(Iop_64to32,mkexpr(dst64, tid, Ity_I64)) );
+         putIRegRDX( 4, unop(Iop_64HIto32,mkexpr(dst64, tid, Ity_I64)) );
          break;
       case 2: {
          IROp widen3264 = signed_divide ? Iop_32Sto64 : Iop_32Uto64;
@@ -3070,9 +3070,9 @@ void codegen_div ( unsigned tid, Int sz, IRTemp t, Bool signed_divide )
                              binop(Iop_16HLto32, 
                                    getIRegRDX(tid, 2), 
                                    getIRegRAX(tid, 2))) );
-         assign( dst64, binop(op, mkexpr(src64, tid), unop(widen1632,mkexpr(t, tid))) );
-         putIRegRAX( 2, unop(Iop_32to16,unop(Iop_64to32,mkexpr(dst64, tid))) );
-         putIRegRDX( 2, unop(Iop_32to16,unop(Iop_64HIto32,mkexpr(dst64, tid))) );
+         assign( dst64, binop(op, mkexpr(src64, tid, Ity_I64), unop(widen1632,mkexpr(t, tid, Ity_I32))) );
+         putIRegRAX( 2, unop(Iop_32to16,unop(Iop_64to32,mkexpr(dst64, tid, Ity_I64))) );
+         putIRegRDX( 2, unop(Iop_32to16,unop(Iop_64HIto32,mkexpr(dst64, tid, Ity_I64))) );
          break;
       }
       case 1: {
@@ -3082,14 +3082,14 @@ void codegen_div ( unsigned tid, Int sz, IRTemp t, Bool signed_divide )
          assign( src64, unop(widen3264, 
                         unop(widen1632, getIRegRAX(tid, 2))) );
          assign( dst64, 
-                 binop(op, mkexpr(src64, tid), 
-                           unop(widen1632, unop(widen816, mkexpr(t, tid)))) );
+                 binop(op, mkexpr(src64, tid, Ity_I64), 
+		       unop(widen1632, unop(widen816, mkexpr(t, tid, Ity_I8)))) );
          putIRegRAX( 1, unop(Iop_16to8, 
                         unop(Iop_32to16,
-                        unop(Iop_64to32,mkexpr(dst64, tid)))) );
+                        unop(Iop_64to32,mkexpr(dst64, tid, Ity_I64)))) );
          putIRegAH( unop(Iop_16to8, 
                     unop(Iop_32to16,
-                    unop(Iop_64HIto32,mkexpr(dst64, tid)))) );
+                    unop(Iop_64HIto32,mkexpr(dst64, tid, Ity_I64)))) );
          break;
       }
       default: 
@@ -3140,7 +3140,7 @@ ULong dis_Grp1 ( unsigned tid,
          helper_SBB(tid,  sz, dst1, dst0, src,
                      /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
       } else {
-         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)));
+         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (isAddSub(op8))
             setFlags_DEP1_DEP2(tid, op8, dst0, src, ty);
          else
@@ -3148,7 +3148,7 @@ ULong dis_Grp1 ( unsigned tid,
       }
 
       if (gregLO3ofRM(modrm) < 7)
-         putIRegE(sz, pfx, modrm, mkexpr(dst1, tid));
+         putIRegE(sz, pfx, modrm, mkexpr(dst1, tid, ty));
 
       delta += (am_sz + d_sz);
       DIP("%s%c $%lld, %s\n", 
@@ -3157,7 +3157,7 @@ ULong dis_Grp1 ( unsigned tid,
    } else {
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta, dis_buf, /*xtra*/d_sz );
 
-      assign(dst0, loadLE(ty,mkexpr(addr, tid), guest_code.rip));
+      assign(dst0, loadLE(ty,mkexpr(addr, tid, Ity_I64), guest_code.rip));
       assign(src, mkU(ty,d64 & mask));
 
       if (gregLO3ofRM(modrm) == 2 /* ADC */) {
@@ -3182,15 +3182,15 @@ ULong dis_Grp1 ( unsigned tid,
                         /*store*/addr, IRTemp_INVALID, ThreadRip() );
          }
       } else {
-         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid), mkexpr(src, tid)));
+         assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (gregLO3ofRM(modrm) < 7) {
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid), mkexpr(dst0, tid)/*expVal*/, 
-                                    mkexpr(dst1, tid)/*newVal*/,
+               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst0, tid, ty)/*expVal*/, 
+                                    mkexpr(dst1, tid, ty)/*newVal*/,
 		      guest_RIP_curr_instr,
 		      tid );
             } else {
-               storeLE(mkexpr(addr, tid), mkexpr(dst1, tid));
+               storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
             }
          }
          if (isAddSub(op8))
@@ -3239,7 +3239,7 @@ ULong dis_Grp2 ( unsigned tid,
       delta += (am_sz + d_sz);
    } else {
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta, dis_buf, /*xtra*/d_sz );
-      assign(dst0, loadLE(ty,mkexpr(addr, tid), guest_code.rip));
+      assign(dst0, loadLE(ty,mkexpr(addr, tid, Ity_I64), guest_code.rip));
       delta += len + d_sz;
    }
 
@@ -3282,9 +3282,9 @@ ULong dis_Grp2 ( unsigned tid,
       assign( old_rflags, widenUto64(mk_amd64g_calculate_rflags_all(tid)) );
 
       argsVALUE
-         = mkIRExprVec_4( widenUto64(mkexpr(dst0, tid)), /* thing to rotate */
+         = mkIRExprVec_4( widenUto64(mkexpr(dst0, tid, ty)), /* thing to rotate */
                           widenUto64(shift_expr),   /* rotate amount */
-                          mkexpr(old_rflags, tid),
+                          mkexpr(old_rflags, tid, Ity_I64),
                           mkU64(sz) );
       assign( new_value, 
                  mkIRExprCCall(
@@ -3297,9 +3297,9 @@ ULong dis_Grp2 ( unsigned tid,
             );
       
       argsRFLAGS
-         = mkIRExprVec_4( widenUto64(mkexpr(dst0, tid)), /* thing to rotate */
+         = mkIRExprVec_4( widenUto64(mkexpr(dst0, tid, ty)), /* thing to rotate */
                           widenUto64(shift_expr),   /* rotate amount */
-                          mkexpr(old_rflags, tid),
+                          mkexpr(old_rflags, tid, Ity_I64),
                           mkU64(-sz) );
       assign( new_rflags, 
                  mkIRExprCCall(
@@ -3311,9 +3311,9 @@ ULong dis_Grp2 ( unsigned tid,
                  )
             );
 
-      assign( dst1, narrowTo(ty, mkexpr(new_value, tid)) );
+      assign( dst1, narrowTo(ty, mkexpr(new_value, tid, Ity_I64)) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
-      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(new_rflags, tid) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(new_rflags, tid, Ity_I64) ));
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
       stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
    }
@@ -3353,26 +3353,26 @@ ULong dis_Grp2 ( unsigned tid,
       assign( shift_amt, binop(Iop_And8, shift_expr, mkU8(mask)) );
 
       /* suitably widen the value to be shifted to 64 bits. */
-      assign( pre64, op64==Iop_Sar64 ? widenSto64(mkexpr(dst0, tid))
-                                     : widenUto64(mkexpr(dst0, tid)) );
+      assign( pre64, op64==Iop_Sar64 ? widenSto64(mkexpr(dst0, tid, ty))
+                                     : widenUto64(mkexpr(dst0, tid, ty)) );
 
       /* res64 = pre64 `shift` shift_amt */
-      assign( res64, binop(op64, mkexpr(pre64, tid), mkexpr(shift_amt, tid)) );
+      assign( res64, binop(op64, mkexpr(pre64, tid, Ity_I64), mkexpr(shift_amt, tid, Ity_I8)) );
 
       /* res64ss = pre64 `shift` ((shift_amt - 1) & MASK) */
       assign( res64ss,
               binop(op64,
-                    mkexpr(pre64, tid), 
+                    mkexpr(pre64, tid, Ity_I64), 
                     binop(Iop_And8,
                           binop(Iop_Sub8,
-                                mkexpr(shift_amt, tid), mkU8(1)),
+                                mkexpr(shift_amt, tid, Ity_I8), mkU8(1)),
                           mkU8(mask))) );
 
       /* Build the flags thunk. */
       setFlags_DEP1_DEP2_shift(tid, op64, res64, res64ss, ty, shift_amt);
 
       /* Narrow the result back down. */
-      assign( dst1, narrowTo(ty, mkexpr(res64, tid)) );
+      assign( dst1, narrowTo(ty, mkexpr(res64, tid, Ity_I64)) );
 
    } /* if (isShift) */
 
@@ -3393,9 +3393,9 @@ ULong dis_Grp2 ( unsigned tid,
       assign(rot_amt64, binop(Iop_And8, shift_expr, mkU8(mask)));
 
       if (ty == Ity_I64)
-         assign(rot_amt, mkexpr(rot_amt64, tid));
+	  assign(rot_amt, mkexpr(rot_amt64, tid, Ity_I8));
       else
-         assign(rot_amt, binop(Iop_And8, mkexpr(rot_amt64, tid), mkU8(8*sz-1)));
+	  assign(rot_amt, binop(Iop_And8, mkexpr(rot_amt64, tid, Ity_I8), mkU8(8*sz-1)));
 
       if (left) {
 
@@ -3403,12 +3403,12 @@ ULong dis_Grp2 ( unsigned tid,
          assign(dst1, 
             binop( mkSizedOp(ty,Iop_Or8),
                    binop( mkSizedOp(ty,Iop_Shl8), 
-                          mkexpr(dst0, tid),
-                          mkexpr(rot_amt, tid)
+                          mkexpr(dst0, tid, ty),
+                          mkexpr(rot_amt, tid, Ity_I8)
                    ),
                    binop( mkSizedOp(ty,Iop_Shr8), 
-                          mkexpr(dst0, tid), 
-                          binop(Iop_Sub8,mkU8(8*sz), mkexpr(rot_amt, tid))
+                          mkexpr(dst0, tid, ty), 
+                          binop(Iop_Sub8,mkU8(8*sz), mkexpr(rot_amt, tid, Ity_I8))
                    )
             )
          );
@@ -3420,12 +3420,12 @@ ULong dis_Grp2 ( unsigned tid,
          assign(dst1, 
             binop( mkSizedOp(ty,Iop_Or8),
                    binop( mkSizedOp(ty,Iop_Shr8), 
-                          mkexpr(dst0, tid),
-                          mkexpr(rot_amt, tid)
+                          mkexpr(dst0, tid, ty),
+                          mkexpr(rot_amt, tid, Ity_I8)
                    ),
                    binop( mkSizedOp(ty,Iop_Shl8), 
-                          mkexpr(dst0, tid), 
-                          binop(Iop_Sub8,mkU8(8*sz), mkexpr(rot_amt, tid))
+                          mkexpr(dst0, tid, ty), 
+                          binop(Iop_Sub8,mkU8(8*sz), mkexpr(rot_amt, tid, Ity_I8))
                    )
             )
          );
@@ -3441,26 +3441,26 @@ ULong dis_Grp2 ( unsigned tid,
 
       /* CC_DEP1 is the rotated value.  CC_NDEP is flags before. */
       stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid),
+                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
                                       IRExpr_Get(OFFB_CC_OP,Ity_I64,tid,0),
                                       mkU64(ccOp))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), 
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid),
+                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
                                       IRExpr_Get(OFFB_CC_DEP1,Ity_I64,tid,0),
-                                      widenUto64(mkexpr(dst1, tid)))) );
+                                      widenUto64(mkexpr(dst1, tid, ty)))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), 
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid),
+                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
                                       IRExpr_Get(OFFB_CC_DEP2,Ity_I64,tid,0),
                                       mkU64(0))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), 
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid),
+                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
                                       IRExpr_Get(OFFB_CC_NDEP,Ity_I64,tid,0),
-                                      mkexpr(oldFlags, tid))) );
+                                      mkexpr(oldFlags, tid, Ity_I64))) );
    } /* if (isRotate) */
 
    /* Save result, and finish up. */
    if (epartIsReg(modrm)) {
-      putIRegE(sz, pfx, modrm, mkexpr(dst1, tid));
+      putIRegE(sz, pfx, modrm, mkexpr(dst1, tid, ty));
       if (vex_traceflags & VEX_TRACE_FE) {
 	 printf("%s%c ",
 		nameGrp2(gregLO3ofRM(modrm)), nameISize(sz) );
@@ -3471,7 +3471,7 @@ ULong dis_Grp2 ( unsigned tid,
          printf(", %s\n", nameIRegE(sz,pfx,modrm));
       }
    } else {
-      storeLE(mkexpr(addr, tid), mkexpr(dst1, tid));
+      storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
       if (vex_traceflags & VEX_TRACE_FE) {
          printf("%s%c ",
                     nameGrp2(gregLO3ofRM(modrm)), nameISize(sz) );
@@ -3545,7 +3545,7 @@ ULong dis_Grp8_Imm ( unsigned tid,
       Int len;
       t_addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta, dis_buf, 1 );
       delta  += (len+1);
-      assign( t2, widenUto64(loadLE(ty, mkexpr(t_addr, tid), guest_code.rip)) );
+      assign( t2, widenUto64(loadLE(ty, mkexpr(t_addr, tid, Ity_I64), guest_code.rip)) );
       DIP("%s%c $0x%llx, %s\n", nameGrp8(gregLO3ofRM(modrm)), 
                                 nameISize(sz),
                                 src_val, dis_buf);
@@ -3556,13 +3556,13 @@ ULong dis_Grp8_Imm ( unsigned tid,
       case 4: /* BT */
          break;
       case 5: /* BTS */
-         assign( t2m, binop(Iop_Or64, mkU64(mask), mkexpr(t2, tid)) );
+	  assign( t2m, binop(Iop_Or64, mkU64(mask), mkexpr(t2, tid, Ity_I64)) );
          break;
       case 6: /* BTR */
-         assign( t2m, binop(Iop_And64, mkU64(mask), mkexpr(t2, tid)) );
+	  assign( t2m, binop(Iop_And64, mkU64(mask), mkexpr(t2, tid, Ity_I64)) );
          break;
       case 7: /* BTC */
-         assign( t2m, binop(Iop_Xor64, mkU64(mask), mkexpr(t2, tid)) );
+	  assign( t2m, binop(Iop_Xor64, mkU64(mask), mkexpr(t2, tid, Ity_I64)) );
          break;
      default: 
          /*NOTREACHED*/ /*the previous switch guards this*/
@@ -3572,16 +3572,16 @@ ULong dis_Grp8_Imm ( unsigned tid,
    /* Write the result back, if non-BT. */
    if (gregLO3ofRM(modrm) != 4 /* BT */) {
       if (epartIsReg(modrm)) {
-	putIRegE(sz, pfx, modrm, narrowTo(ty, mkexpr(t2m, tid)));
+	  putIRegE(sz, pfx, modrm, narrowTo(ty, mkexpr(t2m, tid, Ity_I64)));
       } else {
          if (pfx & PFX_LOCK) {
-            casLE( mkexpr(t_addr, tid),
-                   narrowTo(ty, mkexpr(t2, tid))/*expd*/,
-                   narrowTo(ty, mkexpr(t2m, tid))/*new*/,
+            casLE( mkexpr(t_addr, tid, Ity_I64),
+                   narrowTo(ty, mkexpr(t2, tid, Ity_I64))/*expd*/,
+                   narrowTo(ty, mkexpr(t2m, tid, Ity_I64))/*new*/,
                    guest_RIP_curr_instr,
 		   tid );
          } else {
-            storeLE(mkexpr(t_addr, tid), narrowTo(ty, mkexpr(t2m, tid)));
+	     storeLE(mkexpr(t_addr, tid, Ity_I64), narrowTo(ty, mkexpr(t2m, tid, Ity_I64)));
          }
       }
    }
@@ -3593,7 +3593,7 @@ ULong dis_Grp8_Imm ( unsigned tid,
    stmt( IRStmt_Put( 
 	    mk_reg(OFFB_CC_DEP1),
             binop(Iop_And64,
-                  binop(Iop_Shr64, mkexpr(t2, tid), mkU8(src_val)),
+                  binop(Iop_Shr64, mkexpr(t2, tid, Ity_I64), mkU8(src_val)),
                   mkU64(1))
        ));
    /* Set NDEP even though it isn't used.  This makes redundant-PUT
@@ -3625,11 +3625,11 @@ static void codegen_mulL_A_D ( unsigned tid,
          IROp   mulOp   = syned ? Iop_MullS64 : Iop_MullU64;
          UInt   tBaseOp = syned ? AMD64G_CC_OP_SMULB : AMD64G_CC_OP_UMULB;
          setFlags_MUL ( tid, Ity_I64, t1, tmp, tBaseOp );
-         assign( res128, binop(mulOp, mkexpr(t1, tid), mkexpr(tmp, tid)) );
-         assign( resHi, unop(Iop_128HIto64,mkexpr(res128, tid)));
-         assign( resLo, unop(Iop_128to64,mkexpr(res128, tid)));
-         putIReg64(R_RDX, mkexpr(resHi, tid));
-         putIReg64(R_RAX, mkexpr(resLo, tid));
+         assign( res128, binop(mulOp, mkexpr(t1, tid, ty), mkexpr(tmp, tid, ty)) );
+         assign( resHi, unop(Iop_128HIto64,mkexpr(res128, tid, Ity_I128)));
+         assign( resLo, unop(Iop_128to64,mkexpr(res128, tid, Ity_I128)));
+         putIReg64(R_RDX, mkexpr(resHi, tid, Ity_I64));
+         putIReg64(R_RAX, mkexpr(resLo, tid, Ity_I64));
          break;
       }
       case Ity_I32: {
@@ -3639,11 +3639,11 @@ static void codegen_mulL_A_D ( unsigned tid,
          IROp   mulOp   = syned ? Iop_MullS32 : Iop_MullU32;
          UInt   tBaseOp = syned ? AMD64G_CC_OP_SMULB : AMD64G_CC_OP_UMULB;
          setFlags_MUL ( tid, Ity_I32, t1, tmp, tBaseOp );
-         assign( res64, binop(mulOp, mkexpr(t1, tid), mkexpr(tmp, tid)) );
-         assign( resHi, unop(Iop_64HIto32,mkexpr(res64, tid)));
-         assign( resLo, unop(Iop_64to32,mkexpr(res64, tid)));
-         putIRegRDX(4, mkexpr(resHi, tid));
-         putIRegRAX(4, mkexpr(resLo, tid));
+         assign( res64, binop(mulOp, mkexpr(t1, tid, ty), mkexpr(tmp, tid, ty)) );
+         assign( resHi, unop(Iop_64HIto32,mkexpr(res64, tid, Ity_I64)));
+         assign( resLo, unop(Iop_64to32,mkexpr(res64, tid, Ity_I64)));
+         putIRegRDX(4, mkexpr(resHi, tid, Ity_I32));
+         putIRegRAX(4, mkexpr(resLo, tid, Ity_I32));
          break;
       }
       case Ity_I16: {
@@ -3653,11 +3653,11 @@ static void codegen_mulL_A_D ( unsigned tid,
          IROp   mulOp   = syned ? Iop_MullS16 : Iop_MullU16;
          UInt   tBaseOp = syned ? AMD64G_CC_OP_SMULB : AMD64G_CC_OP_UMULB;
          setFlags_MUL ( tid, Ity_I16, t1, tmp, tBaseOp );
-         assign( res32, binop(mulOp, mkexpr(t1, tid), mkexpr(tmp, tid)) );
-         assign( resHi, unop(Iop_32HIto16,mkexpr(res32, tid)));
-         assign( resLo, unop(Iop_32to16,mkexpr(res32, tid)));
-         putIRegRDX(2, mkexpr(resHi, tid));
-         putIRegRAX(2, mkexpr(resLo, tid));
+         assign( res32, binop(mulOp, mkexpr(t1, tid, ty), mkexpr(tmp, tid, ty)) );
+         assign( resHi, unop(Iop_32HIto16,mkexpr(res32, tid, Ity_I32)));
+         assign( resLo, unop(Iop_32to16,mkexpr(res32, tid, Ity_I32)));
+         putIRegRDX(2, mkexpr(resHi, tid, Ity_I16));
+         putIRegRAX(2, mkexpr(resLo, tid, Ity_I16));
          break;
       }
       case Ity_I8: {
@@ -3667,10 +3667,10 @@ static void codegen_mulL_A_D ( unsigned tid,
          IROp   mulOp   = syned ? Iop_MullS8 : Iop_MullU8;
          UInt   tBaseOp = syned ? AMD64G_CC_OP_SMULB : AMD64G_CC_OP_UMULB;
          setFlags_MUL ( tid, Ity_I8, t1, tmp, tBaseOp );
-         assign( res16, binop(mulOp, mkexpr(t1, tid), mkexpr(tmp, tid)) );
-         assign( resHi, unop(Iop_16HIto8,mkexpr(res16, tid)));
-         assign( resLo, unop(Iop_16to8,mkexpr(res16, tid)));
-         putIRegRAX(2, mkexpr(res16, tid));
+         assign( res16, binop(mulOp, mkexpr(t1, tid, ty), mkexpr(tmp, tid, ty)) );
+         assign( resHi, unop(Iop_16HIto8,mkexpr(res16, tid, Ity_I16)));
+         assign( resLo, unop(Iop_16to8,mkexpr(res16, tid, Ity_I16)));
+         putIRegRAX(2, mkexpr(res16, tid, Ity_I16));
          break;
       }
       default:
@@ -3731,10 +3731,10 @@ ULong dis_Grp3 ( unsigned tid,
             dst1 = newTemp(ty);
             assign(dst0, mkU(ty,0));
             assign(src,  getIRegE(tid, sz, pfx, modrm));
-            assign(dst1, binop(mkSizedOp(ty,Iop_Sub8), mkexpr(dst0, tid),
-                                                       mkexpr(src, tid)));
+            assign(dst1, binop(mkSizedOp(ty,Iop_Sub8), mkexpr(dst0, tid, ty),
+                                                       mkexpr(src, tid, ty)));
             setFlags_DEP1_DEP2(tid, Iop_Sub8, dst0, src, ty);
-            putIRegE(sz, pfx, modrm, mkexpr(dst1, tid));
+            putIRegE(sz, pfx, modrm, mkexpr(dst1, tid, ty));
             DIP("neg%c %s\n", nameISize(sz), nameIRegE(sz, pfx, modrm));
             break;
          case 4: /* MUL (unsigned widening) */
@@ -3780,14 +3780,14 @@ ULong dis_Grp3 ( unsigned tid,
                       );
       t1   = newTemp(ty);
       delta += len;
-      assign(t1, loadLE(ty,mkexpr(addr, tid), guest_code.rip));
+      assign(t1, loadLE(ty,mkexpr(addr, tid, Ity_I64), guest_code.rip));
       switch (gregLO3ofRM(modrm)) {
          case 0: { /* TEST */
             d64 = getSDisp(guest_code, imin(4,sz), delta); 
             delta += imin(4,sz);
             dst1 = newTemp(ty);
             assign(dst1, binop(mkSizedOp(ty,Iop_And8),
-                               mkexpr(t1, tid), 
+                               mkexpr(t1, tid, ty), 
                                mkU(ty, d64 & mkSizeMask(sz))));
             setFlags_DEP1(tid,  Iop_And8, dst1, ty );
             DIP("test%c $%lld, %s\n", nameISize(sz), d64, dis_buf);
@@ -3798,12 +3798,12 @@ ULong dis_Grp3 ( unsigned tid,
             return delta;
          case 2: /* NOT */
             dst1 = newTemp(ty);
-            assign(dst1, unop(mkSizedOp(ty,Iop_Not8), mkexpr(t1, tid)));
+            assign(dst1, unop(mkSizedOp(ty,Iop_Not8), mkexpr(t1, tid, ty)));
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid), mkexpr(t1, tid)/*expd*/, mkexpr(dst1, tid)/*new*/,
+               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(dst1, tid, ty)/*new*/,
 		      guest_RIP_curr_instr, tid );
             } else {
-               storeLE( mkexpr(addr, tid), mkexpr(dst1, tid) );
+               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty) );
             }
             DIP("not%c %s\n", nameISize(sz), dis_buf);
             break;
@@ -3812,14 +3812,14 @@ ULong dis_Grp3 ( unsigned tid,
             src  = newTemp(ty);
             dst1 = newTemp(ty);
             assign(dst0, mkU(ty,0));
-            assign(src,  mkexpr(t1, tid));
-            assign(dst1, binop(mkSizedOp(ty,Iop_Sub8), mkexpr(dst0, tid),
-                                                       mkexpr(src, tid)));
+            assign(src,  mkexpr(t1, tid, ty));
+            assign(dst1, binop(mkSizedOp(ty,Iop_Sub8), mkexpr(dst0, tid, ty),
+                                                       mkexpr(src, tid, ty)));
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid), mkexpr(t1, tid)/*expd*/, mkexpr(dst1, tid)/*new*/,
+               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(dst1, tid, ty)/*new*/,
 		      guest_RIP_curr_instr, tid );
             } else {
-               storeLE( mkexpr(addr, tid), mkexpr(dst1, tid) );
+               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty) );
             }
             setFlags_DEP1_DEP2(tid, Iop_Sub8, dst0, src, ty);
             DIP("neg%c %s\n", nameISize(sz), dis_buf);
@@ -3866,13 +3866,13 @@ ULong dis_Grp4 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
       assign(t1, getIRegE(tid, 1, pfx, modrm));
       switch (gregLO3ofRM(modrm)) {
          case 0: /* INC */
-            assign(t2, binop(Iop_Add8, mkexpr(t1, tid), mkU8(1)));
-            putIRegE(1, pfx, modrm, mkexpr(t2, tid));
+            assign(t2, binop(Iop_Add8, mkexpr(t1, tid, ty), mkU8(1)));
+            putIRegE(1, pfx, modrm, mkexpr(t2, tid, ty));
             setFlags_INC_DEC(tid,  True, t2, ty );
             break;
          case 1: /* DEC */
-            assign(t2, binop(Iop_Sub8, mkexpr(t1, tid), mkU8(1)));
-            putIRegE(1, pfx, modrm, mkexpr(t2, tid));
+            assign(t2, binop(Iop_Sub8, mkexpr(t1, tid, ty), mkU8(1)));
+            putIRegE(1, pfx, modrm, mkexpr(t2, tid, ty));
             setFlags_INC_DEC(tid,  False, t2, ty );
             break;
          default: 
@@ -3884,25 +3884,25 @@ ULong dis_Grp4 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
                       nameIRegE(1, pfx, modrm));
    } else {
       IRTemp addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
-      assign( t1, loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+      assign( t1, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       switch (gregLO3ofRM(modrm)) {
          case 0: /* INC */
-            assign(t2, binop(Iop_Add8, mkexpr(t1, tid), mkU8(1)));
+            assign(t2, binop(Iop_Add8, mkexpr(t1, tid, ty), mkU8(1)));
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid), mkexpr(t1, tid)/*expd*/, mkexpr(t2, tid)/*new*/, 
+               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(t2, tid, ty)/*new*/, 
                       guest_RIP_curr_instr, tid );
             } else {
-               storeLE( mkexpr(addr, tid), mkexpr(t2, tid) );
+               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t2, tid, ty) );
             }
             setFlags_INC_DEC(tid,  True, t2, ty );
             break;
          case 1: /* DEC */
-            assign(t2, binop(Iop_Sub8, mkexpr(t1, tid), mkU8(1)));
+            assign(t2, binop(Iop_Sub8, mkexpr(t1, tid, ty), mkU8(1)));
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid), mkexpr(t1, tid)/*expd*/, mkexpr(t2, tid)/*new*/, 
+               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(t2, tid, ty)/*new*/, 
                       guest_RIP_curr_instr, tid );
             } else {
-               storeLE( mkexpr(addr, tid), mkexpr(t2, tid) );
+               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t2, tid, ty) );
             }
             setFlags_INC_DEC(tid,  False, t2, ty );
             break;
@@ -3942,16 +3942,16 @@ ULong dis_Grp5 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
          case 0: /* INC */
             t2 = newTemp(ty);
             assign(t2, binop(mkSizedOp(ty,Iop_Add8),
-                             mkexpr(t1, tid), mkU(ty,1)));
+                             mkexpr(t1, tid, ty), mkU(ty,1)));
             setFlags_INC_DEC(tid,  True, t2, ty );
-            putIRegE(sz,pfx,modrm, mkexpr(t2, tid));
+            putIRegE(sz,pfx,modrm, mkexpr(t2, tid, ty));
             break;
          case 1: /* DEC */
             t2 = newTemp(ty);
             assign(t2, binop(mkSizedOp(ty,Iop_Sub8),
-                             mkexpr(t1, tid), mkU(ty,1)));
+                             mkexpr(t1, tid, ty), mkU(ty,1)));
             setFlags_INC_DEC(tid,  False, t2, ty );
-            putIRegE(sz,pfx,modrm, mkexpr(t2, tid));
+            putIRegE(sz,pfx,modrm, mkexpr(t2, tid, ty));
             break;
          case 2: /* call Ev */
             /* Ignore any sz value and operate as if sz==8. */
@@ -3961,8 +3961,8 @@ ULong dis_Grp5 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
             assign(t3, getIRegE(tid, sz,pfx,modrm));
             t2 = newTemp(Ity_I64);
             assign(t2, binop(Iop_Sub64, getIReg64(tid, R_RSP), mkU64(8)));
-            putIReg64(R_RSP, mkexpr(t2, tid));
-            storeLE( mkexpr(t2, tid), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta+1));
+            putIReg64(R_RSP, mkexpr(t2, tid, Ity_I64));
+            storeLE( mkexpr(t2, tid, Ity_I64), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta+1));
             make_redzone_AbiHint(vbi, t2, t3/*nia*/, "call-Ev(reg)", tid);
             jmp_treg(Ijk_Call,t3, tid);
             dres->whatNext = DisResult::Dis_StopHere;
@@ -3990,32 +3990,32 @@ ULong dis_Grp5 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta, dis_buf, 0 );
       if (gregLO3ofRM(modrm) != 2 && gregLO3ofRM(modrm) != 4
                                   && gregLO3ofRM(modrm) != 6) {
-         assign(t1, loadLE(ty,mkexpr(addr, tid), guest_code.rip));
+         assign(t1, loadLE(ty,mkexpr(addr, tid, Ity_I64), guest_code.rip));
       }
       switch (gregLO3ofRM(modrm)) {
          case 0: /* INC */ 
             t2 = newTemp(ty);
             assign(t2, binop(mkSizedOp(ty,Iop_Add8),
-                             mkexpr(t1, tid), mkU(ty,1)));
+                             mkexpr(t1, tid, ty), mkU(ty,1)));
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid),
-                      mkexpr(t1, tid), mkexpr(t2, tid), guest_RIP_curr_instr,
+               casLE( mkexpr(addr, tid, Ity_I64),
+                      mkexpr(t1, tid, ty), mkexpr(t2, tid, ty), guest_RIP_curr_instr,
 		      tid );
             } else {
-               storeLE(mkexpr(addr, tid),mkexpr(t2, tid));
+               storeLE(mkexpr(addr, tid, Ity_I64),mkexpr(t2, tid, ty));
             }
             setFlags_INC_DEC(tid,  True, t2, ty );
             break;
          case 1: /* DEC */ 
             t2 = newTemp(ty);
             assign(t2, binop(mkSizedOp(ty,Iop_Sub8),
-                             mkexpr(t1, tid), mkU(ty,1)));
+                             mkexpr(t1, tid, ty), mkU(ty,1)));
             if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid),
-                      mkexpr(t1, tid), mkexpr(t2, tid), guest_RIP_curr_instr,
+               casLE( mkexpr(addr, tid, Ity_I64),
+                      mkexpr(t1, tid, ty), mkexpr(t2, tid, ty), guest_RIP_curr_instr,
 		      tid );
             } else {
-               storeLE(mkexpr(addr, tid),mkexpr(t2, tid));
+               storeLE(mkexpr(addr, tid, Ity_I64),mkexpr(t2, tid, ty));
             }
             setFlags_INC_DEC(tid,  False, t2, ty );
             break;
@@ -4024,11 +4024,11 @@ ULong dis_Grp5 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
             if (!(sz == 4 || sz == 8)) goto unhandled;
             sz = 8;
             t3 = newTemp(Ity_I64);
-            assign(t3, loadLE(Ity_I64,mkexpr(addr, tid), guest_code.rip));
+            assign(t3, loadLE(Ity_I64,mkexpr(addr, tid, Ity_I64), guest_code.rip));
             t2 = newTemp(Ity_I64);
             assign(t2, binop(Iop_Sub64, getIReg64(tid, R_RSP), mkU64(8)));
-            putIReg64(R_RSP, mkexpr(t2, tid));
-            storeLE( mkexpr(t2, tid), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta+len));
+            putIReg64(R_RSP, mkexpr(t2, tid, Ity_I64));
+            storeLE( mkexpr(t2, tid, Ity_I64), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta+len));
             make_redzone_AbiHint(vbi, t2, t3/*nia*/, "call-Ev(mem)", tid);
             jmp_treg(Ijk_Call,t3,tid);
             dres->whatNext = DisResult::Dis_StopHere;
@@ -4039,7 +4039,7 @@ ULong dis_Grp5 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
             if (!(sz == 4 || sz == 8)) goto unhandled;
             sz = 8;
             t3 = newTemp(Ity_I64);
-            assign(t3, loadLE(Ity_I64,mkexpr(addr, tid), guest_code.rip));
+            assign(t3, loadLE(Ity_I64,mkexpr(addr, tid, Ity_I64), guest_code.rip));
             jmp_treg(Ijk_Boring,t3,tid);
             dres->whatNext = DisResult::Dis_StopHere;
             showSz = False;
@@ -4050,11 +4050,11 @@ ULong dis_Grp5 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
             if (!(sz == 8 || sz == 2)) goto unhandled;
             if (sz == 8) {
                t3 = newTemp(Ity_I64);
-               assign(t3, loadLE(Ity_I64,mkexpr(addr, tid), guest_code.rip));
+               assign(t3, loadLE(Ity_I64,mkexpr(addr, tid, Ity_I64), guest_code.rip));
                t2 = newTemp(Ity_I64);
                assign( t2, binop(Iop_Sub64,getIReg64(tid, R_RSP),mkU64(sz)) );
-               putIReg64(R_RSP, mkexpr(t2, tid) );
-               storeLE( mkexpr(t2, tid), mkexpr(t3, tid) );
+               putIReg64(R_RSP, mkexpr(t2, tid, Ity_I64) );
+               storeLE( mkexpr(t2, tid, Ity_I64), mkexpr(t3, tid, Ity_I64) );
                break;
 	    } else {
                goto unhandled; /* awaiting test case */
@@ -4118,10 +4118,10 @@ void dis_MOVS ( unsigned tid, Int sz, IRTemp t_inc, const ThreadRip &rip )
    assign( td, getIReg64(tid, R_RDI) );
    assign( ts, getIReg64(tid, R_RSI) );
 
-   storeLE( mkexpr(td, tid), loadLE(ty,mkexpr(ts, tid), rip) );
+   storeLE( mkexpr(td, tid, Ity_I64), loadLE(ty,mkexpr(ts, tid, Ity_I64), rip) );
 
-   putIReg64( R_RDI, binop(Iop_Add64, mkexpr(td, tid), mkexpr(t_inc, tid)) );
-   putIReg64( R_RSI, binop(Iop_Add64, mkexpr(ts, tid), mkexpr(t_inc, tid)) );
+   putIReg64( R_RDI, binop(Iop_Add64, mkexpr(td, tid, Ity_I64), mkexpr(t_inc, tid, Ity_I64)) );
+   putIReg64( R_RSI, binop(Iop_Add64, mkexpr(ts, tid, Ity_I64), mkexpr(t_inc, tid, Ity_I64)) );
 }
 
 static 
@@ -4132,9 +4132,9 @@ void dis_LODS ( unsigned tid, Int sz, IRTemp t_inc, const ThreadRip &rip )
 
    assign( ts, getIReg64(tid, R_RSI) );
 
-   putIRegRAX ( sz, loadLE(ty, mkexpr(ts, tid), rip) );
+   putIRegRAX ( sz, loadLE(ty, mkexpr(ts, tid, Ity_I64), rip) );
 
-   putIReg64( R_RSI, binop(Iop_Add64, mkexpr(ts, tid), mkexpr(t_inc, tid)) );
+   putIReg64( R_RSI, binop(Iop_Add64, mkexpr(ts, tid, Ity_I64), mkexpr(t_inc, tid, Ity_I64)) );
 }
 
 static 
@@ -4148,9 +4148,9 @@ void dis_STOS ( unsigned tid, Int sz, IRTemp t_inc, const ThreadRip &rip )
 
    assign( td, getIReg64(tid, R_RDI) );
 
-   storeLE( mkexpr(td, tid), mkexpr(ta, tid) );
+   storeLE( mkexpr(td, tid, Ity_I64), mkexpr(ta, tid, ty) );
 
-   putIReg64( R_RDI, binop(Iop_Add64, mkexpr(td, tid), mkexpr(t_inc, tid)) );
+   putIReg64( R_RDI, binop(Iop_Add64, mkexpr(td, tid, Ity_I64), mkexpr(t_inc, tid, Ity_I64)) );
 }
 
 static 
@@ -4166,15 +4166,15 @@ void dis_CMPS ( unsigned tid, Int sz, IRTemp t_inc, const ThreadRip &rip )
 
    assign( ts, getIReg64(tid, R_RSI) );
 
-   assign( tdv, loadLE(ty,mkexpr(td, tid), rip) );
+   assign( tdv, loadLE(ty,mkexpr(td, tid, Ity_I64), rip) );
 
-   assign( tsv, loadLE(ty,mkexpr(ts, tid), rip) );
+   assign( tsv, loadLE(ty,mkexpr(ts, tid, Ity_I64), rip) );
 
    setFlags_DEP1_DEP2 ( tid, Iop_Sub8, tsv, tdv, ty );
 
-   putIReg64(R_RDI, binop(Iop_Add64, mkexpr(td, tid), mkexpr(t_inc, tid)) );
+   putIReg64(R_RDI, binop(Iop_Add64, mkexpr(td, tid, Ity_I64), mkexpr(t_inc, tid, Ity_I64)) );
 
-   putIReg64(R_RSI, binop(Iop_Add64, mkexpr(ts, tid), mkexpr(t_inc, tid)) );
+   putIReg64(R_RSI, binop(Iop_Add64, mkexpr(ts, tid, Ity_I64), mkexpr(t_inc, tid, Ity_I64)) );
 }
 
 static 
@@ -4189,11 +4189,11 @@ void dis_SCAS ( unsigned tid, Int sz, IRTemp t_inc, const ThreadRip &rip )
 
    assign( td, getIReg64(tid, R_RDI) );
 
-   assign( tdv, loadLE(ty,mkexpr(td, tid), rip) );
+   assign( tdv, loadLE(ty,mkexpr(td, tid, Ity_I64), rip) );
 
    setFlags_DEP1_DEP2 ( tid, Iop_Sub8, ta, tdv, ty );
 
-   putIReg64(R_RDI, binop(Iop_Add64, mkexpr(td, tid), mkexpr(t_inc, tid)) );
+   putIReg64(R_RDI, binop(Iop_Add64, mkexpr(td, tid, Ity_I64), mkexpr(t_inc, tid, Ity_I64)) );
 }
 
 
@@ -4215,11 +4215,11 @@ void dis_REP_op ( unsigned tid, AMD64Condcode cond,
 
    assign( tc, getIReg64(tid, R_RCX) );
 
-   stmt( IRStmt_Exit( binop(Iop_CmpEQ64,mkexpr(tc, tid),mkU64(0)),
+   stmt( IRStmt_Exit( binop(Iop_CmpEQ64,mkexpr(tc, tid, Ity_I64),mkU64(0)),
                       Ijk_Boring,
                       rip_next) );
 
-   putIReg64(R_RCX, binop(Iop_Sub64, mkexpr(tc, tid), mkU64(1)) );
+   putIReg64(R_RCX, binop(Iop_Sub64, mkexpr(tc, tid, Ity_I64), mkU64(1)) );
 
    dis_string_op_increment(tid, sz, t_inc);
    dis_OP (tid, sz, t_inc, rip);
@@ -4262,14 +4262,14 @@ ULong dis_mul_E_G ( unsigned tid,
       assign( te, getIRegE(tid, size, pfx, rm) );
    } else {
       IRTemp addr = disAMode( tid, guest_code, &alen, vbi, pfx, delta0, dis_buf, 0 );
-      assign( te, loadLE(ty,mkexpr(addr, tid), guest_code.rip) );
+      assign( te, loadLE(ty,mkexpr(addr, tid, Ity_I64), guest_code.rip) );
    }
 
    setFlags_MUL ( tid, ty, te, tg, AMD64G_CC_OP_SMULB );
 
-   assign( resLo, binop( mkSizedOp(ty, Iop_Mul8), mkexpr(te, tid), mkexpr(tg, tid) ) );
+   assign( resLo, binop( mkSizedOp(ty, Iop_Mul8), mkexpr(te, tid, ty), mkexpr(tg, tid, ty) ) );
 
-   putIRegG(size, pfx, rm, mkexpr(resLo, tid) );
+   putIRegG(size, pfx, rm, mkexpr(resLo, tid, ty) );
 
    if (epartIsReg(rm)) {
       DIP("imul%c %s, %s\n", nameISize(size), 
@@ -4312,7 +4312,7 @@ ULong dis_imul_I_E_G ( unsigned tid,
    } else {
       IRTemp addr = disAMode( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 
                                      imin(4,litsize) );
-      assign(te, loadLE(ty, mkexpr(addr, tid), guest_code.rip));
+      assign(te, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip));
       delta += alen;
    }
    d64 = getSDisp(guest_code, imin(4,litsize),delta);
@@ -4321,11 +4321,11 @@ ULong dis_imul_I_E_G ( unsigned tid,
    d64 &= mkSizeMask(size);
    assign(tl, mkU(ty,d64));
 
-   assign( resLo, binop( mkSizedOp(ty, Iop_Mul8), mkexpr(te, tid), mkexpr(tl, tid) ));
+   assign( resLo, binop( mkSizedOp(ty, Iop_Mul8), mkexpr(te, tid, ty), mkexpr(tl, tid, ty) ));
 
    setFlags_MUL ( tid, ty, te, tl, AMD64G_CC_OP_SMULB );
 
-   putIRegG(size, pfx, rm, mkexpr(resLo, tid));
+   putIRegG(size, pfx, rm, mkexpr(resLo, tid, ty));
 
    DIP("imul%c $%lld, %s, %s\n", 
        nameISize(size), d64, 
@@ -4560,14 +4560,14 @@ void fp_do_op_mem_ST_0 ( unsigned tid,
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                 get_ST(tid, 0), 
-                loadLE(Ity_F64,mkexpr(addr, tid), rip)
+                loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64), rip)
          ));
    } else {
       put_ST_UNCHECKED(tid, 0, 
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                 get_ST(tid, 0), 
-                unop(Iop_F32toF64, loadLE(Ity_F32,mkexpr(addr, tid), rip))
+                unop(Iop_F32toF64, loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64), rip))
          ));
    }
 }
@@ -4586,14 +4586,14 @@ void fp_do_oprev_mem_ST_0 ( unsigned tid,
       put_ST_UNCHECKED(tid,0, 
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                loadLE(Ity_F64,mkexpr(addr, tid), rip),
+                loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64), rip),
                 get_ST(tid, 0)
          ));
    } else {
       put_ST_UNCHECKED(tid,0, 
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                unop(Iop_F32toF64, loadLE(Ity_F32,mkexpr(addr, tid), rip)),
+                unop(Iop_F32toF64, loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64), rip)),
                 get_ST(tid, 0)
          ));
    }
@@ -4675,10 +4675,10 @@ static IRExpr* x87ishly_qnarrow_32_to_16 ( unsigned tid, IRExpr* e32 )
          unop(Iop_1Uto8, 
               binop(Iop_CmpLT64U, 
                     unop(Iop_32Uto64, 
-                         binop(Iop_Add32, mkexpr(t32, tid), mkU32(32768))), 
+                         binop(Iop_Add32, mkexpr(t32, tid, Ity_I32), mkU32(32768))), 
                     mkU64(65536))),
          mkU16( 0x8000 ),
-         unop(Iop_32to16, mkexpr(t32, tid)));
+         unop(Iop_32to16, mkexpr(t32, tid, Ity_I32)));
 }
 
 
@@ -4725,7 +4725,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                                 binop(Iop_CmpF64, 
 //..                                       get_ST(tid, 0),
 //..                                       unop(Iop_F32toF64, 
-//..                                            loadLE(Ity_F32,mkexpr(addr, tid)))),
+//..                                            loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64)))),
 //..                                 mkU8(8)),
 //..                           mkU32(0x4500)
 //..                    ));
@@ -4740,7 +4740,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                                 binop(Iop_CmpF64, 
 //..                                       get_ST(tid, 0),
 //..                                       unop(Iop_F32toF64, 
-//..                                            loadLE(Ity_F32,mkexpr(addr, tid)))),
+//..                                            loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64)))),
 //..                                 mkU8(8)),
 //..                           mkU32(0x4500)
 //..                    ));
@@ -4849,18 +4849,18 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("flds %s\n", dis_buf);
                fp_push(tid);
                put_ST(tid, 0, unop(Iop_F32toF64,
-				   loadLE(Ity_F32, mkexpr(addr, tid), guest_code.rip)));
+				   loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64), guest_code.rip)));
                break;
 
             case 2: /* FST single-real */
                DIP("fsts %s\n", dis_buf);
-               storeLE(mkexpr(addr, tid),
+               storeLE(mkexpr(addr, tid, Ity_I64),
                        binop(Iop_F64toF32, get_roundingmode(tid), get_ST(tid, 0)));
                break;
 
             case 3: /* FSTP single-real */
                DIP("fstps %s\n", dis_buf);
-               storeLE(mkexpr(addr, tid), 
+               storeLE(mkexpr(addr, tid, Ity_I64), 
                        binop(Iop_F64toF32, get_roundingmode(tid), get_ST(tid, 0)));
                fp_pop(tid);
                break;
@@ -4874,13 +4874,13 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                                  0/*regparms*/, 
                                  "amd64g_dirtyhelper_FLDENV", 
                                  (void *)amd64g_dirtyhelper_FLDENV,
-                                 mkIRExprVec_1( mkexpr(addr, tid) )
+                                 mkIRExprVec_1( mkexpr(addr, tid, Ity_I64) )
                               );
                d->needsBBP = True;
                d->tmp      = threadAndRegister::temp(guest_RIP_curr_instr.thread, w64, 0);
                /* declare we're reading memory */
                d->mFx   = Ifx_Read;
-               d->mAddr = mkexpr(addr, tid);
+               d->mAddr = mkexpr(addr, tid, Ity_I64);
                d->mSize = 28;
 
                /* declare we're writing guest state */
@@ -4908,11 +4908,11 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                   issue.  If needed, side-exit to the next insn,
                   reporting the warning, so that Valgrind's dispatcher
                   sees the warning. */
-	       assign(ew, unop(Iop_64to32,mkexpr(w64, tid)) );
-               put_emwarn( mkexpr(ew, tid) );
+	       assign(ew, unop(Iop_64to32,mkexpr(w64, tid, Ity_I64)) );
+               put_emwarn( mkexpr(ew, tid, Ity_I32) );
                stmt( 
                   IRStmt_Exit(
-                     binop(Iop_CmpNE32, mkexpr(ew, tid), mkU32(0)),
+		      binop(Iop_CmpNE32, mkexpr(ew, tid, Ity_I32), mkU32(0)),
                      Ijk_EmWarn,
                      guest_RIP_bbstart+long(delta)
                   )
@@ -4941,20 +4941,20 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                                (void *)amd64g_check_fldcw, 
                                mkIRExprVec_1( 
                                   unop( Iop_16Uto64, 
-                                        loadLE(Ity_I16, mkexpr(addr, tid), guest_code.rip))
+                                        loadLE(Ity_I16, mkexpr(addr, tid, Ity_I64), guest_code.rip))
                                )
                             )
                      );
 
-               put_fpround( unop(Iop_64to32, mkexpr(t64, tid)) );
-               assign( ew, unop(Iop_64HIto32, mkexpr(t64, tid) ) );
-               put_emwarn( mkexpr(ew, tid) );
+               put_fpround( unop(Iop_64to32, mkexpr(t64, tid, Ity_I64)) );
+               assign( ew, unop(Iop_64HIto32, mkexpr(t64, tid, Ity_I64) ) );
+               put_emwarn( mkexpr(ew, tid, Ity_I32) );
                /* Finally, if an emulation warning was reported,
                   side-exit to the next insn, reporting the warning,
                   so that Valgrind's dispatcher sees the warning. */
                stmt( 
                   IRStmt_Exit(
-                     binop(Iop_CmpNE32, mkexpr(ew, tid), mkU32(0)),
+		      binop(Iop_CmpNE32, mkexpr(ew, tid, Ity_I32), mkU32(0)),
                      Ijk_EmWarn,
                      guest_RIP_bbstart+long(delta)
                   )
@@ -4969,12 +4969,12 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                                0/*regparms*/, 
                                "amd64g_dirtyhelper_FSTENV", 
                                (void *)amd64g_dirtyhelper_FSTENV,
-                               mkIRExprVec_1( mkexpr(addr, tid) )
+                               mkIRExprVec_1( mkexpr(addr, tid, Ity_I64) )
                             );
                d->needsBBP = True;
                /* declare we're writing memory */
                d->mFx   = Ifx_Write;
-               d->mAddr = mkexpr(addr, tid);
+               d->mAddr = mkexpr(addr, tid, Ity_I64);
                d->mSize = 28;
 
                /* declare we're reading guest state */
@@ -5009,7 +5009,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* ULong amd64g_create_fpucw ( ULong fpround ) */
                DIP("fnstcw %s\n", dis_buf);
                storeLE(
-                  mkexpr(addr, tid), 
+                  mkexpr(addr, tid, Ity_I64), 
                   unop( Iop_64to16, 
                         mkIRExprCCall(
                            Ity_I64, 0/*regp*/,
@@ -5036,7 +5036,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                t1 = newTemp(Ity_F64);
                assign(t1, get_ST(tid, r_src));
                fp_push(tid);
-               put_ST(tid,0, mkexpr(t1, tid));
+               put_ST(tid,0, mkexpr(t1, tid, Ity_F64));
                break;
 
             case 0xC8 ... 0xCF: /* FXCH %st(?) */
@@ -5046,8 +5046,8 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                t2 = newTemp(Ity_F64);
                assign(t1, get_ST(tid, 0));
                assign(t2, get_ST(tid, r_src));
-               put_ST_UNCHECKED(tid,0, mkexpr(t2, tid));
-               put_ST_UNCHECKED(tid,r_src, mkexpr(t1, tid));
+               put_ST_UNCHECKED(tid,0, mkexpr(t2, tid, Ity_F64));
+               put_ST_UNCHECKED(tid,r_src, mkexpr(t1, tid, Ity_F64));
                break;
 
             case 0xE0: /* FCHS */
@@ -5177,13 +5177,13 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                IRTemp expI = newTemp(Ity_I64);
                DIP("fxtract\n");
                assign( argF, get_ST(tid, 0) );
-               assign( argI, unop(Iop_ReinterpF64asI64, mkexpr(argF, tid)));
+               assign( argI, unop(Iop_ReinterpF64asI64, mkexpr(argF, tid, Ity_F64)));
                assign( sigI, 
                        mkIRExprCCall(
                           Ity_I64, 0/*regparms*/, 
                           "x86amd64g_calculate_FXTRACT", 
                           (void *)x86amd64g_calculate_FXTRACT, 
-                          mkIRExprVec_2( mkexpr(argI, tid), 
+                          mkIRExprVec_2( mkexpr(argI, tid, Ity_I64), 
                                          mkIRExpr_HWord(0)/*sig*/ )) 
                );
                assign( expI, 
@@ -5191,16 +5191,16 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                           Ity_I64, 0/*regparms*/, 
                           "x86amd64g_calculate_FXTRACT", 
                           (void *)x86amd64g_calculate_FXTRACT, 
-                          mkIRExprVec_2( mkexpr(argI, tid), 
+                          mkIRExprVec_2( mkexpr(argI, tid, Ity_I64), 
                                          mkIRExpr_HWord(1)/*exp*/ )) 
                );
-               assign( sigF, unop(Iop_ReinterpI64asF64, mkexpr(sigI, tid)) );
-               assign( expF, unop(Iop_ReinterpI64asF64, mkexpr(expI, tid)) );
+               assign( sigF, unop(Iop_ReinterpI64asF64, mkexpr(sigI, tid, Ity_I64)) );
+               assign( expF, unop(Iop_ReinterpI64asF64, mkexpr(expI, tid, Ity_I64)) );
                /* exponent */
-               put_ST_UNCHECKED(tid,0, mkexpr(expF, tid) );
+               put_ST_UNCHECKED(tid,0, mkexpr(expF, tid, Ity_F64) );
                fp_push(tid);
                /* significand */
-               put_ST(tid,0, mkexpr(sigF, tid) );
+               put_ST(tid,0, mkexpr(sigF, tid, Ity_F64) );
                break;
             }
 
@@ -5215,14 +5215,14 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,0,
                   triop(Iop_PRem1F64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid),
-                        mkexpr(a2, tid)));
+                        mkexpr(a1, tid, Ity_F64),
+                        mkexpr(a2, tid, Ity_F64)));
                put_C3210(
                   unop(Iop_32Uto64,
                   triop(Iop_PRem1C3210F64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid),
-                        mkexpr(a2, tid)) ));
+                        mkexpr(a1, tid, Ity_F64),
+                        mkexpr(a2, tid, Ity_F64)) ));
                break;
             }
 
@@ -5242,14 +5242,14 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,0,
                   triop(Iop_PRemF64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid),
-                        mkexpr(a2, tid)));
+                        mkexpr(a1, tid, Ity_F64),
+                        mkexpr(a2, tid, Ity_F64)));
                put_C3210(
                   unop(Iop_32Uto64,
                   triop(Iop_PRemC3210F64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid),
-                        mkexpr(a2, tid)) ));
+                        mkexpr(a1, tid, Ity_F64),
+                        mkexpr(a2, tid, Ity_F64)) ));
                break;
             }
 
@@ -5278,12 +5278,12 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,0, 
                   binop(Iop_SinF64, 
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid)));
+                        mkexpr(a1, tid, Ity_F64)));
                fp_push(tid);
                put_ST(tid,0, 
                   binop(Iop_CosF64, 
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid)));
+                        mkexpr(a1, tid, Ity_F64)));
                clear_C2(tid); /* HACK */
                break;
             }
@@ -5376,7 +5376,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                         get_ST(tid, 0),
                         unop(Iop_I32toF64,
-                             loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip))));
+                             loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip))));
                break;
 
             do_foprev_m32:
@@ -5384,7 +5384,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                   triop(fop, 
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                         unop(Iop_I32toF64,
-                             loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip)),
+                             loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip)),
                         get_ST(tid, 0)));
                break;
 
@@ -5477,25 +5477,25 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fildl %s\n", dis_buf);
                fp_push(tid);
                put_ST(tid,0, unop(Iop_I32toF64,
-				  loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip)));
+				  loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip)));
                break;
 
             case 1: /* FISTTPL m32 (SSE3) */
                DIP("fisttpl %s\n", dis_buf);
-               storeLE( mkexpr(addr, tid), 
+               storeLE( mkexpr(addr, tid, Ity_I64), 
                         binop(Iop_F64toI32, mkU32(Irrm_ZERO), get_ST(tid, 0)) );
                fp_pop(tid);
                break;
 
             case 2: /* FIST m32 */
                DIP("fistl %s\n", dis_buf);
-               storeLE( mkexpr(addr, tid), 
+               storeLE( mkexpr(addr, tid, Ity_I64), 
                         binop(Iop_F64toI32, get_roundingmode(tid), get_ST(tid, 0)) );
                break;
 
             case 3: /* FISTP m32 */
                DIP("fistpl %s\n", dis_buf);
-               storeLE( mkexpr(addr, tid), 
+               storeLE( mkexpr(addr, tid, Ity_I64), 
                         binop(Iop_F64toI32, get_roundingmode(tid), get_ST(tid, 0)) );
                fp_pop(tid);
                break;
@@ -5506,7 +5506,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                   addr holds the address.  First, do a dirty call to
                   get hold of the data. */
                IRTemp   val  = newTemp(Ity_I64);
-               IRExpr** args = mkIRExprVec_1 ( mkexpr(addr, tid) );
+               IRExpr** args = mkIRExprVec_1 ( mkexpr(addr, tid, Ity_I64) );
 
                IRDirty* d = unsafeIRDirty_1_N ( 
 		   threadAndRegister::temp(guest_RIP_curr_instr.thread, val, 0), 
@@ -5517,13 +5517,13 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 		  );
                /* declare that we're reading memory */
                d->mFx   = Ifx_Read;
-               d->mAddr = mkexpr(addr, tid);
+               d->mAddr = mkexpr(addr, tid, Ity_I64);
                d->mSize = 10;
 
                /* execute the dirty call, dumping the result in val. */
                stmt( IRStmt_Dirty(d) );
                fp_push(tid);
-               put_ST(tid,0, unop(Iop_ReinterpI64asF64, mkexpr(val, tid)));
+               put_ST(tid,0, unop(Iop_ReinterpI64asF64, mkexpr(val, tid, Ity_I64)));
 
                DIP("fldt %s\n", dis_buf);
                break;
@@ -5534,7 +5534,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                      void amd64g_storeF80le ( ULong addr, ULong data ) 
                */
                IRExpr** args 
-                  = mkIRExprVec_2( mkexpr(addr, tid), 
+                  = mkIRExprVec_2( mkexpr(addr, tid, Ity_I64), 
                                    unop(Iop_ReinterpF64asI64, get_ST(tid, 0)) );
 
                IRDirty* d = unsafeIRDirty_0_N ( 
@@ -5545,7 +5545,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                             );
                /* declare we're writing memory */
                d->mFx   = Ifx_Write;
-               d->mAddr = mkexpr(addr, tid);
+               d->mAddr = mkexpr(addr, tid, Ity_I64);
                d->mSize = 10;
 
                /* execute the dirty call. */
@@ -5705,7 +5705,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                           binop(Iop_Shl32, 
 //..                                 binop(Iop_CmpF64, 
 //..                                       get_ST(tid, 0),
-//..                                       loadLE(Ity_F64,mkexpr(addr, tid))),
+//..                                       loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64))),
 //..                                 mkU8(8)),
 //..                           mkU32(0x4500)
 //..                    ));
@@ -5720,7 +5720,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                           binop(Iop_Shl32, 
                                 binop(Iop_CmpF64, 
                                       get_ST(tid, 0),
-                                      loadLE(Ity_F64,mkexpr(addr, tid), guest_code.rip)),
+                                      loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64), guest_code.rip)),
                                 mkU8(8)),
                           mkU32(0x4500)
                    )));
@@ -5801,24 +5801,24 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
             case 0: /* FLD double-real */
                DIP("fldl %s\n", dis_buf);
                fp_push(tid);
-               put_ST(tid,0, loadLE(Ity_F64, mkexpr(addr, tid), guest_code.rip));
+               put_ST(tid,0, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64), guest_code.rip));
                break;
 
             case 1: /* FISTTPQ m64 (SSE3) */
                DIP("fistppll %s\n", dis_buf);
-               storeLE( mkexpr(addr, tid), 
+               storeLE( mkexpr(addr, tid, Ity_I64), 
                         binop(Iop_F64toI64, mkU32(Irrm_ZERO), get_ST(tid, 0)) );
                fp_pop(tid);
                break;
 
             case 2: /* FST double-real */
                DIP("fstl %s\n", dis_buf);
-               storeLE(mkexpr(addr, tid), get_ST(tid, 0));
+               storeLE(mkexpr(addr, tid, Ity_I64), get_ST(tid, 0));
                break;
 
             case 3: /* FSTP double-real */
                DIP("fstpl %s\n", dis_buf);
-               storeLE(mkexpr(addr, tid), get_ST(tid, 0));
+               storeLE(mkexpr(addr, tid, Ity_I64), get_ST(tid, 0));
                fp_pop(tid);
                break;
 
@@ -5830,13 +5830,13 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                                 0/*regparms*/, 
 //..                                 "x86g_dirtyhelper_FRSTOR", 
 //..                                 &x86g_dirtyhelper_FRSTOR,
-//..                                 mkIRExprVec_1( mkexpr(addr, tid) )
+//..                                 mkIRExprVec_1( mkexpr(addr, tid, Ity_I64) )
 //..                              );
 //..                d->needsBBP = True;
 //..                d->tmp      = ew;
 //..                /* declare we're reading memory */
 //..                d->mFx   = Ifx_Read;
-//..                d->mAddr = mkexpr(addr, tid);
+//..                d->mAddr = mkexpr(addr, tid, Ity_I64);
 //..                d->mSize = 108;
 //.. 
 //..                /* declare we're writing guest state */
@@ -5888,12 +5888,12 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                                0/*regparms*/, 
 //..                                "x86g_dirtyhelper_FSAVE", 
 //..                                &x86g_dirtyhelper_FSAVE,
-//..                                mkIRExprVec_1( mkexpr(addr, tid) )
+//..                                mkIRExprVec_1( mkexpr(addr, tid, Ity_I64) )
 //..                             );
 //..                d->needsBBP = True;
 //..                /* declare we're writing memory */
 //..                d->mFx   = Ifx_Write;
-//..                d->mAddr = mkexpr(addr, tid);
+//..                d->mAddr = mkexpr(addr, tid, Ity_I64);
 //..                d->mSize = 108;
 //.. 
 //..                /* declare we're reading guest state */
@@ -5928,7 +5928,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
             case 7: { /* FNSTSW m16 */
                IRExpr* sw = get_FPU_sw(tid);
                vassert(sw->type(irsb->tyenv) == Ity_I16);
-               storeLE( mkexpr(addr, tid), sw );
+               storeLE( mkexpr(addr, tid, Ity_I64), sw );
                DIP("fnstsw %s\n", dis_buf);
                break;
             }
@@ -6053,7 +6053,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                         get_ST(tid, 0),
                         unop(Iop_I32toF64,
                              unop(Iop_16Sto32, 
-                                  loadLE(Ity_I16, mkexpr(addr, tid), guest_code.rip)))));
+                                  loadLE(Ity_I16, mkexpr(addr, tid, Ity_I64), guest_code.rip)))));
                break;
 
             do_foprev_m16:
@@ -6062,7 +6062,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                         unop(Iop_I32toF64,
                              unop(Iop_16Sto32, 
-                                  loadLE(Ity_I16, mkexpr(addr, tid), guest_code.rip))),
+                                  loadLE(Ity_I16, mkexpr(addr, tid, Ity_I64), guest_code.rip))),
                         get_ST(tid, 0)));
                break;
 
@@ -6141,12 +6141,12 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                fp_push(tid);
                put_ST(tid,0, unop(Iop_I32toF64,
                               unop(Iop_16Sto32,
-                                   loadLE(Ity_I16, mkexpr(addr, tid), guest_code.rip))));
+                                   loadLE(Ity_I16, mkexpr(addr, tid, Ity_I64), guest_code.rip))));
                break;
 
             case 1: /* FISTTPS m16 (SSE3) */
                DIP("fisttps %s\n", dis_buf);
-               storeLE( mkexpr(addr, tid), 
+               storeLE( mkexpr(addr, tid, Ity_I64), 
                         x87ishly_qnarrow_32_to_16( tid,
                         binop(Iop_F64toI32, mkU32(Irrm_ZERO), get_ST(tid, 0)) ));
                fp_pop(tid);
@@ -6154,13 +6154,13 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 
 //..             case 2: /* FIST m16 */
 //..                DIP("fistp %s\n", dis_buf);
-//..                storeLE( mkexpr(addr, tid), 
+//..                storeLE( mkexpr(addr, tid, Ity_I64), 
 //..                         binop(Iop_F64toI16, get_roundingmode(tid), get_ST(tid, 0)) );
 //..                break;
 
             case 3: /* FISTP m16 */
                DIP("fistps %s\n", dis_buf);
-               storeLE( mkexpr(addr, tid),
+               storeLE( mkexpr(addr, tid, Ity_I64),
                         x87ishly_qnarrow_32_to_16(tid,  
                         binop(Iop_F64toI32, get_roundingmode(tid), get_ST(tid, 0)) ));
                fp_pop(tid);
@@ -6171,12 +6171,12 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                fp_push(tid);
                put_ST(tid,0, binop(Iop_I64toF64,
                                get_roundingmode(tid),
-                               loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip)));
+                               loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip)));
                break;
 
             case 7: /* FISTP m64 */
                DIP("fistpll %s\n", dis_buf);
-               storeLE( mkexpr(addr, tid), 
+               storeLE( mkexpr(addr, tid, Ity_I64), 
                         binop(Iop_F64toI64, get_roundingmode(tid), get_ST(tid, 0)) );
                fp_pop(tid);
                break;
@@ -6416,7 +6416,7 @@ ULong dis_MMXop_regmem_to_reg ( unsigned tid,
       Int    len;
       IRTemp addr = disAMode(tid, guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
       delta += len;
-      argE = loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip);
+      argE = loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip);
    }
 
    if (eLeft) {
@@ -6443,7 +6443,7 @@ ULong dis_MMXop_regmem_to_reg ( unsigned tid,
             );
    }
 
-   putMMXReg( gregLO3ofRM(modrm), mkexpr(res, tid) );
+   putMMXReg( gregLO3ofRM(modrm), mkexpr(res, tid, Ity_I64) );
 
    DIP("%s%s %s, %s\n", 
        name, show_granularity ? nameMMXGran(opc & 3) : "",
@@ -6481,14 +6481,14 @@ static ULong dis_MMX_shiftG_byE ( unsigned tid,
       delta++;
    } else {
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
-      assign( amt, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+      assign( amt, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameMMXReg(gregLO3ofRM(rm)) );
       delta += alen;
    }
    assign( g0,   getMMXReg(tid, gregLO3ofRM(rm)) );
-   assign( amt8, unop(Iop_64to8, mkexpr(amt, tid)) );
+   assign( amt8, unop(Iop_64to8, mkexpr(amt, tid, Ity_I64)) );
 
    shl = shr = sar = False;
    size = 0;
@@ -6508,9 +6508,9 @@ static ULong dis_MMX_shiftG_byE ( unsigned tid,
      assign( 
         g1,
         IRExpr_Mux0X(
-           unop(Iop_1Uto8,binop(Iop_CmpLT64U,mkexpr(amt, tid),mkU64(size))),
+           unop(Iop_1Uto8,binop(Iop_CmpLT64U,mkexpr(amt, tid, Ity_I64),mkU64(size))),
            mkU64(0),
-           binop(op, mkexpr(g0, tid), mkexpr(amt8, tid))
+           binop(op, mkexpr(g0, tid, Ity_I64), mkexpr(amt8, tid, Ity_I8))
         )
      );
    } else 
@@ -6518,16 +6518,16 @@ static ULong dis_MMX_shiftG_byE ( unsigned tid,
      assign( 
         g1,
         IRExpr_Mux0X(
-           unop(Iop_1Uto8,binop(Iop_CmpLT64U,mkexpr(amt, tid),mkU64(size))),
-           binop(op, mkexpr(g0, tid), mkU8(size-1)),
-           binop(op, mkexpr(g0, tid), mkexpr(amt8, tid))
+           unop(Iop_1Uto8,binop(Iop_CmpLT64U,mkexpr(amt, tid, Ity_I64),mkU64(size))),
+           binop(op, mkexpr(g0, tid, Ity_I64), mkU8(size-1)),
+           binop(op, mkexpr(g0, tid, Ity_I64), mkexpr(amt8, tid, Ity_I8))
         )
      );
    } else {
       vassert(0);
    }
 
-   putMMXReg( gregLO3ofRM(rm), mkexpr(g1, tid) );
+   putMMXReg( gregLO3ofRM(rm), mkexpr(g1, tid, Ity_I64) );
    return delta;
 }
 
@@ -6571,19 +6571,19 @@ ULong dis_MMX_shiftE_imm ( unsigned tid, GuestMemoryFetcher &guest_code, Long de
    if (shl || shr) {
      assign( e1, amt >= size 
                     ? mkU64(0)
-                    : binop(op, mkexpr(e0, tid), mkU8(amt))
+	     : binop(op, mkexpr(e0, tid, Ity_I64), mkU8(amt))
      );
    } else 
    if (sar) {
      assign( e1, amt >= size 
-                    ? binop(op, mkexpr(e0, tid), mkU8(size-1))
-                    : binop(op, mkexpr(e0, tid), mkU8(amt))
+	     ? binop(op, mkexpr(e0, tid, Ity_I64), mkU8(size-1))
+	     : binop(op, mkexpr(e0, tid, Ity_I64), mkU8(amt))
      );
    } else {
       vassert(0);
    }
 
-   putMMXReg( eregLO3ofRM(rm), mkexpr(e1, tid) );
+   putMMXReg( eregLO3ofRM(rm), mkexpr(e1, tid, Ity_I64) );
    return delta;
 }
 
@@ -6627,7 +6627,7 @@ ULong dis_MMX ( unsigned tid,
                   gregLO3ofRM(modrm),
                   binop( Iop_32HLto64,
                          mkU32(0),
-                         loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip) ) );
+                         loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip) ) );
                DIP("movd %s, %s\n", dis_buf, nameMMXReg(gregLO3ofRM(modrm)));
             }
          } 
@@ -6646,7 +6646,7 @@ ULong dis_MMX ( unsigned tid,
                IRTemp addr = disAMode(tid, guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
                delta += len;
                putMMXReg( gregLO3ofRM(modrm),
-                          loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+                          loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
                DIP("movd{64} %s, %s\n", dis_buf, nameMMXReg(gregLO3ofRM(modrm)));
             }
          }
@@ -6669,7 +6669,7 @@ ULong dis_MMX ( unsigned tid,
             } else {
                IRTemp addr = disAMode(tid, guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
                delta += len;
-               storeLE( mkexpr(addr, tid),
+               storeLE( mkexpr(addr, tid, Ity_I64),
                         unop(Iop_64to32, getMMXReg(tid, gregLO3ofRM(modrm)) ) );
                DIP("movd %s, %s\n", nameMMXReg(gregLO3ofRM(modrm)), dis_buf);
             }
@@ -6688,7 +6688,7 @@ ULong dis_MMX ( unsigned tid,
             } else {
                IRTemp addr = disAMode(tid, guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
                delta += len;
-               storeLE( mkexpr(addr, tid),
+               storeLE( mkexpr(addr, tid, Ity_I64),
                        getMMXReg(tid, gregLO3ofRM(modrm)) );
                DIP("movd{64} %s, %s\n", nameMMXReg(gregLO3ofRM(modrm)), dis_buf);
             }
@@ -6712,7 +6712,7 @@ ULong dis_MMX ( unsigned tid,
          } else {
             IRTemp addr = disAMode(tid, guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
             delta += len;
-            putMMXReg( gregLO3ofRM(modrm), loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+            putMMXReg( gregLO3ofRM(modrm), loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
             DIP("movq %s, %s\n", 
                 dis_buf, nameMMXReg(gregLO3ofRM(modrm)));
          }
@@ -6731,7 +6731,7 @@ ULong dis_MMX ( unsigned tid,
          } else {
             IRTemp addr = disAMode(tid, guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
             delta += len;
-            storeLE( mkexpr(addr, tid), getMMXReg(tid, gregLO3ofRM(modrm)) );
+            storeLE( mkexpr(addr, tid, Ity_I64), getMMXReg(tid, gregLO3ofRM(modrm)) );
             DIP("mov(nt)q %s, %s\n", 
                 nameMMXReg(gregLO3ofRM(modrm)), dis_buf);
          }
@@ -6950,17 +6950,17 @@ ULong dis_MMX ( unsigned tid,
          assign( addr, handleAddrOverrides(tid,  vbi, pfx, getIReg64(tid, R_RDI) ));
          assign( regM, getMMXReg(tid,  eregLO3ofRM(modrm) ));
          assign( regD, getMMXReg(tid,  gregLO3ofRM(modrm) ));
-         assign( mask, binop(Iop_SarN8x8, mkexpr(regM, tid), mkU8(7)) );
-         assign( olddata, loadLE( Ity_I64, mkexpr(addr, tid), guest_code.rip ));
+         assign( mask, binop(Iop_SarN8x8, mkexpr(regM, tid, Ity_I64), mkU8(7)) );
+         assign( olddata, loadLE( Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip ));
          assign( newdata, 
                  binop(Iop_Or64, 
                        binop(Iop_And64, 
-                             mkexpr(regD, tid), 
-                             mkexpr(mask, tid) ),
+                             mkexpr(regD, tid, Ity_I64), 
+                             mkexpr(mask, tid, Ity_I64) ),
                        binop(Iop_And64, 
-                             mkexpr(olddata, tid),
-                             unop(Iop_Not64, mkexpr(mask, tid)))) );
-         storeLE( mkexpr(addr, tid), mkexpr(newdata, tid) );
+                             mkexpr(olddata, tid, Ity_I64),
+                             unop(Iop_Not64, mkexpr(mask, tid, Ity_I64)))) );
+         storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(newdata, tid, Ity_I64) );
          DIP("maskmovq %s,%s\n", nameMMXReg( eregLO3ofRM(modrm) ),
                                  nameMMXReg( gregLO3ofRM(modrm) ) );
          break;
@@ -6994,12 +6994,12 @@ IRExpr* shiftL64_with_extras ( unsigned tid, IRTemp base, IRTemp xtra, IRTemp am
    */
    return
       IRExpr_Mux0X( 
-         mkexpr(amt, tid), 
-         mkexpr(base, tid),
+	  mkexpr(amt, tid, Ity_I8), 
+	  mkexpr(base, tid, Ity_I64),
          binop(Iop_Or64, 
-               binop(Iop_Shl64, mkexpr(base, tid), mkexpr(amt, tid)),
-               binop(Iop_Shr64, mkexpr(xtra, tid), 
-                                binop(Iop_Sub8, mkU8(64), mkexpr(amt, tid)))
+               binop(Iop_Shl64, mkexpr(base, tid, Ity_I64), mkexpr(amt, tid, Ity_I8)),
+               binop(Iop_Shr64, mkexpr(xtra, tid, Ity_I64), 
+		     binop(Iop_Sub8, mkU8(64), mkexpr(amt, tid, Ity_I8)))
          )
       );
 }
@@ -7015,12 +7015,12 @@ IRExpr* shiftR64_with_extras ( unsigned tid, IRTemp xtra, IRTemp base, IRTemp am
    */
    return
       IRExpr_Mux0X( 
-         mkexpr(amt, tid), 
-         mkexpr(base, tid),
+         mkexpr(amt, tid, Ity_I8), 
+         mkexpr(base, tid, Ity_I64),
          binop(Iop_Or64, 
-               binop(Iop_Shr64, mkexpr(base, tid), mkexpr(amt, tid)),
-               binop(Iop_Shl64, mkexpr(xtra, tid), 
-                                binop(Iop_Sub8, mkU8(64), mkexpr(amt, tid)))
+               binop(Iop_Shr64, mkexpr(base, tid, Ity_I64), mkexpr(amt, tid, Ity_I8)),
+               binop(Iop_Shl64, mkexpr(xtra, tid, Ity_I64), 
+                                binop(Iop_Sub8, mkU8(64), mkexpr(amt, tid, Ity_I8)))
          )
       );
 }
@@ -7087,7 +7087,7 @@ ULong dis_SHLRD_Gv_Ev ( unsigned tid,
                         /* # bytes following amode */
                         amt_is_literal ? 1 : 0 );
       delta += len;
-      assign( esrc, loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+      assign( esrc, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       DIP("sh%cd%c %s, %s, %s\n", 
           ( left_shift ? 'l' : 'r' ), nameISize(sz), 
           shift_amt_txt,
@@ -7100,7 +7100,7 @@ ULong dis_SHLRD_Gv_Ev ( unsigned tid,
 
    assign( tmpSH, binop(Iop_And8, shift_amt, mkU8(mask)) );
    assign( tmpSS, binop(Iop_And8, 
-                        binop(Iop_Sub8, mkexpr(tmpSH, tid), mkU8(1) ),
+                        binop(Iop_Sub8, mkexpr(tmpSH, tid, Ity_I8), mkU8(1) ),
                         mkU8(mask)));
 
    tmp64 = newTemp(Ity_I64);
@@ -7112,56 +7112,56 @@ ULong dis_SHLRD_Gv_Ev ( unsigned tid,
       /* G is xtra; E is data */
       /* what a freaking nightmare: */
       if (sz == 4 && left_shift) {
-         assign( tmp64, binop(Iop_32HLto64, mkexpr(esrc, tid), mkexpr(gsrc, tid)) );
+         assign( tmp64, binop(Iop_32HLto64, mkexpr(esrc, tid, ty), mkexpr(gsrc, tid, ty)) );
          assign( res64, 
                  binop(Iop_Shr64, 
-                       binop(Iop_Shl64, mkexpr(tmp64, tid), mkexpr(tmpSH, tid)),
+                       binop(Iop_Shl64, mkexpr(tmp64, tid, Ity_I64), mkexpr(tmpSH, tid, Ity_I8)),
                        mkU8(32)) );
          assign( rss64, 
                  binop(Iop_Shr64, 
-                       binop(Iop_Shl64, mkexpr(tmp64, tid), mkexpr(tmpSS, tid)),
+                       binop(Iop_Shl64, mkexpr(tmp64, tid, Ity_I64), mkexpr(tmpSS, tid, Ity_I8)),
                        mkU8(32)) );
       }
       else
       if (sz == 4 && !left_shift) {
-         assign( tmp64, binop(Iop_32HLto64, mkexpr(gsrc, tid), mkexpr(esrc, tid)) );
-         assign( res64, binop(Iop_Shr64, mkexpr(tmp64, tid), mkexpr(tmpSH, tid)) );
-         assign( rss64, binop(Iop_Shr64, mkexpr(tmp64, tid), mkexpr(tmpSS, tid)) );
+         assign( tmp64, binop(Iop_32HLto64, mkexpr(gsrc, tid, ty), mkexpr(esrc, tid, ty)) );
+         assign( res64, binop(Iop_Shr64, mkexpr(tmp64, tid, Ity_I64), mkexpr(tmpSH, tid, Ity_I8)) );
+         assign( rss64, binop(Iop_Shr64, mkexpr(tmp64, tid, Ity_I64), mkexpr(tmpSS, tid, Ity_I8)) );
       }
       else
       if (sz == 2 && left_shift) {
          assign( tmp64,
                  binop(Iop_32HLto64,
-                       binop(Iop_16HLto32, mkexpr(esrc, tid), mkexpr(gsrc, tid)),
-                       binop(Iop_16HLto32, mkexpr(gsrc, tid), mkexpr(gsrc, tid))
+                       binop(Iop_16HLto32, mkexpr(esrc, tid, ty), mkexpr(gsrc, tid, ty)),
+                       binop(Iop_16HLto32, mkexpr(gsrc, tid, ty), mkexpr(gsrc, tid, ty))
          ));
 	 /* result formed by shifting [esrc'gsrc'gsrc'gsrc] */
          assign( res64, 
                  binop(Iop_Shr64, 
-                       binop(Iop_Shl64, mkexpr(tmp64, tid), mkexpr(tmpSH, tid)),
+                       binop(Iop_Shl64, mkexpr(tmp64, tid, Ity_I64), mkexpr(tmpSH, tid, Ity_I8)),
                        mkU8(48)) );
          /* subshift formed by shifting [esrc'0000'0000'0000] */
          assign( rss64, 
                  binop(Iop_Shr64, 
                        binop(Iop_Shl64, 
-                             binop(Iop_Shl64, unop(Iop_16Uto64, mkexpr(esrc, tid)),
+                             binop(Iop_Shl64, unop(Iop_16Uto64, mkexpr(esrc, tid, ty)),
                                               mkU8(48)),
-                             mkexpr(tmpSS, tid)),
+                             mkexpr(tmpSS, tid, Ity_I8)),
                        mkU8(48)) );
       }
       else
       if (sz == 2 && !left_shift) {
          assign( tmp64,
                  binop(Iop_32HLto64,
-                       binop(Iop_16HLto32, mkexpr(gsrc, tid), mkexpr(gsrc, tid)),
-                       binop(Iop_16HLto32, mkexpr(gsrc, tid), mkexpr(esrc, tid))
+                       binop(Iop_16HLto32, mkexpr(gsrc, tid, ty), mkexpr(gsrc, tid, ty)),
+                       binop(Iop_16HLto32, mkexpr(gsrc, tid, ty), mkexpr(esrc, tid, ty))
          ));
          /* result formed by shifting [gsrc'gsrc'gsrc'esrc] */
-         assign( res64, binop(Iop_Shr64, mkexpr(tmp64, tid), mkexpr(tmpSH, tid)) );
+         assign( res64, binop(Iop_Shr64, mkexpr(tmp64, tid, Ity_I64), mkexpr(tmpSH, tid, Ity_I8)) );
          /* subshift formed by shifting [0000'0000'0000'esrc] */
          assign( rss64, binop(Iop_Shr64, 
-                              unop(Iop_16Uto64, mkexpr(esrc, tid)), 
-                              mkexpr(tmpSS, tid)) );
+                              unop(Iop_16Uto64, mkexpr(esrc, tid, ty)), 
+                              mkexpr(tmpSS, tid, Ity_I8)) );
       }
 
    } else {
@@ -7179,8 +7179,8 @@ ULong dis_SHLRD_Gv_Ev ( unsigned tid,
 
    resTy = newTemp(ty);
    rssTy = newTemp(ty);
-   assign( resTy, narrowTo(ty, mkexpr(res64, tid)) );
-   assign( rssTy, narrowTo(ty, mkexpr(rss64, tid)) );
+   assign( resTy, narrowTo(ty, mkexpr(res64, tid, Ity_I64)) );
+   assign( rssTy, narrowTo(ty, mkexpr(rss64, tid, Ity_I64)) );
 
    /* Put result back and write the flags thunk. */
    setFlags_DEP1_DEP2_shift ( tid,
@@ -7188,9 +7188,9 @@ ULong dis_SHLRD_Gv_Ev ( unsigned tid,
                               resTy, rssTy, ty, tmpSH );
 
    if (epartIsReg(modrm)) {
-      putIRegE(sz, pfx, modrm, mkexpr(resTy, tid));
+       putIRegE(sz, pfx, modrm, mkexpr(resTy, tid, ty));
    } else {
-      storeLE( mkexpr(addr, tid), mkexpr(resTy, tid) );
+       storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(resTy, tid, ty) );
    }
 
    if (amt_is_literal) delta++;
@@ -7249,23 +7249,23 @@ ULong dis_bt_G_E ( unsigned tid,
       t_addr0 = newTemp(Ity_I64);
 
       assign( t_rsp, binop(Iop_Sub64, getIReg64(tid, R_RSP), mkU64(sz)) );
-      putIReg64(R_RSP, mkexpr(t_rsp, tid));
+      putIReg64(R_RSP, mkexpr(t_rsp, tid, Ity_I64));
 
-      storeLE( mkexpr(t_rsp, tid), getIRegE(tid, sz, pfx, modrm) );
+      storeLE( mkexpr(t_rsp, tid, Ity_I64), getIRegE(tid, sz, pfx, modrm) );
 
       /* Make t_addr0 point at it. */
-      assign( t_addr0, mkexpr(t_rsp, tid) );
+      assign( t_addr0, mkexpr(t_rsp, tid, Ity_I64) );
 
       /* Mask out upper bits of the shift amount, since we're doing a
          reg. */
       assign( t_bitno1, binop(Iop_And64, 
-                              mkexpr(t_bitno0, tid), 
+                              mkexpr(t_bitno0, tid, Ity_I64), 
                               mkU64(sz == 8 ? 63 : sz == 4 ? 31 : 15)) );
 
    } else {
       t_addr0 = disAMode ( tid, guest_code, &len, vbi, pfx, delta, dis_buf, 0 );
       delta += len;
-      assign( t_bitno1, mkexpr(t_bitno0, tid) );
+      assign( t_bitno1, mkexpr(t_bitno0, tid, Ity_I64) );
    }
   
    /* At this point: t_addr0 is the address being operated on.  If it
@@ -7276,51 +7276,51 @@ ULong dis_bt_G_E ( unsigned tid,
    /* Now the main sequence. */
    assign( t_addr1, 
            binop(Iop_Add64, 
-                 mkexpr(t_addr0, tid), 
-                 binop(Iop_Sar64, mkexpr(t_bitno1, tid), mkU8(3))) );
+                 mkexpr(t_addr0, tid, Ity_I64), 
+                 binop(Iop_Sar64, mkexpr(t_bitno1, tid, Ity_I64), mkU8(3))) );
 
    /* t_addr1 now holds effective address */
 
    assign( t_bitno2, 
            unop(Iop_64to8, 
-                binop(Iop_And64, mkexpr(t_bitno1, tid), mkU64(7))) );
+                binop(Iop_And64, mkexpr(t_bitno1, tid, Ity_I64), mkU64(7))) );
 
    /* t_bitno2 contains offset of bit within byte */
 
    if (op != BtOpNone) {
       t_mask = newTemp(Ity_I8);
-      assign( t_mask, binop(Iop_Shl8, mkU8(1), mkexpr(t_bitno2, tid)) );
+      assign( t_mask, binop(Iop_Shl8, mkU8(1), mkexpr(t_bitno2, tid, Ity_I8)) );
    }
 
    /* t_mask is now a suitable byte mask */
 
-   assign( t_fetched, loadLE(Ity_I8, mkexpr(t_addr1, tid), guest_code.rip) );
+   assign( t_fetched, loadLE(Ity_I8, mkexpr(t_addr1, tid, Ity_I64), guest_code.rip) );
 
    if (op != BtOpNone) {
       switch (op) {
          case BtOpSet:
             assign( t_new,
-                    binop(Iop_Or8, mkexpr(t_fetched, tid), mkexpr(t_mask, tid)) );
+                    binop(Iop_Or8, mkexpr(t_fetched, tid, Ity_I8), mkexpr(t_mask, tid, Ity_I8)) );
             break;
          case BtOpComp:
             assign( t_new,
-                    binop(Iop_Xor8, mkexpr(t_fetched, tid), mkexpr(t_mask, tid)) );
+                    binop(Iop_Xor8, mkexpr(t_fetched, tid, Ity_I8), mkexpr(t_mask, tid, Ity_I8)) );
             break;
          case BtOpReset:
             assign( t_new,
-                    binop(Iop_And8, mkexpr(t_fetched, tid), 
-                                    unop(Iop_Not8, mkexpr(t_mask, tid))) );
+                    binop(Iop_And8, mkexpr(t_fetched, tid, Ity_I8), 
+                                    unop(Iop_Not8, mkexpr(t_mask, tid, Ity_I8))) );
             break;
          default: 
             vpanic("dis_bt_G_E(amd64)");
       }
       if ((pfx & PFX_LOCK) && !epartIsReg(modrm)) {
-         casLE( mkexpr(t_addr1, tid), mkexpr(t_fetched, tid)/*expd*/,
-                                 mkexpr(t_new, tid)/*new*/,
+         casLE( mkexpr(t_addr1, tid, Ity_I64), mkexpr(t_fetched, tid, Ity_I8)/*expd*/,
+                                 mkexpr(t_new, tid, Ity_I8)/*new*/,
 		guest_RIP_curr_instr,
 		tid );
       } else {
-         storeLE( mkexpr(t_addr1, tid), mkexpr(t_new, tid) );
+         storeLE( mkexpr(t_addr1, tid, Ity_I64), mkexpr(t_new, tid, Ity_I8) );
       }
    }
   
@@ -7332,8 +7332,8 @@ ULong dis_bt_G_E ( unsigned tid,
             mk_reg(OFFB_CC_DEP1),
             binop(Iop_And64,
                   binop(Iop_Shr64, 
-                        unop(Iop_8Uto64, mkexpr(t_fetched, tid)),
-                        mkexpr(t_bitno2, tid)),
+                        unop(Iop_8Uto64, mkexpr(t_fetched, tid, Ity_I8)),
+                        mkexpr(t_bitno2, tid, Ity_I8)),
                   mkU64(1)))
        );
    /* Set NDEP even though it isn't used.  This makes redundant-PUT
@@ -7347,8 +7347,8 @@ ULong dis_bt_G_E ( unsigned tid,
          zeroes the top half erroneously when doing btl due to
          standard zero-extend rule */
       if (op != BtOpNone)
-         putIRegE(sz, pfx, modrm, loadLE(szToITy(sz), mkexpr(t_rsp, tid), guest_code.rip) );
-      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t_rsp, tid), mkU64(sz)) );
+         putIRegE(sz, pfx, modrm, loadLE(szToITy(sz), mkexpr(t_rsp, tid, Ity_I64), guest_code.rip) );
+      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t_rsp, tid, Ity_I64), mkU64(sz)) );
    }
 
    DIP("bt%s%c %s, %s\n",
@@ -7387,7 +7387,7 @@ ULong dis_bs_E_G ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi
       Int    len;
       IRTemp addr = disAMode(tid, guest_code,  &len, vbi, pfx, delta, dis_buf, 0 );
       delta += len;
-      assign( src, loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+      assign( src, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
    }
 
    DIP("bs%c%c %s, %s\n",
@@ -7396,14 +7396,14 @@ ULong dis_bs_E_G ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi
        nameIRegG(sz, pfx, modrm));
 
    /* First, widen src to 64 bits if it is not already. */
-   assign( src64, widenUto64(mkexpr(src, tid)) );
+   assign( src64, widenUto64(mkexpr(src, tid, ty)) );
 
    /* Generate an 8-bit expression which is zero iff the 
       original is zero, and nonzero otherwise */
    assign( src8,
            unop(Iop_1Uto8, 
                 binop(Iop_CmpNE64,
-                      mkexpr(src64, tid), mkU64(0))) );
+                      mkexpr(src64, tid, Ity_I64), mkU64(0))) );
 
    /* Flags: Z is 1 iff source value is zero.  All others 
       are undefined -- we force them to zero. */
@@ -7411,7 +7411,7 @@ ULong dis_bs_E_G ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( 
             mk_reg(OFFB_CC_DEP1),
-            IRExpr_Mux0X( mkexpr(src8, tid),
+            IRExpr_Mux0X( mkexpr(src8, tid, Ity_I8),
                           /* src==0 */
                           mkU64(AMD64G_CC_MASK_Z),
                           /* src!=0 */
@@ -7451,27 +7451,27 @@ ULong dis_bs_E_G ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi
    /* The main computation, guarding against zero. */
    assign( dst64,
            IRExpr_Mux0X( 
-              mkexpr(src8, tid),
+              mkexpr(src8, tid, Ity_I8),
               /* src == 0 -- leave dst unchanged */
               widenUto64( getIRegG(tid,  sz, pfx, modrm ) ),
               /* src != 0 */
-              fwds ? unop(Iop_Ctz64, mkexpr(src64, tid))
+              fwds ? unop(Iop_Ctz64, mkexpr(src64, tid, Ity_I64))
                    : binop(Iop_Sub64, 
                            mkU64(63), 
-                           unop(Iop_Clz64, mkexpr(src64, tid)))
+                           unop(Iop_Clz64, mkexpr(src64, tid, Ity_I64)))
            )
          );
 
    if (sz == 2)
-      assign( dst, unop(Iop_64to16, mkexpr(dst64, tid)) );
+      assign( dst, unop(Iop_64to16, mkexpr(dst64, tid, Ity_I64)) );
    else
    if (sz == 4)
-      assign( dst, unop(Iop_64to32, mkexpr(dst64, tid)) );
+      assign( dst, unop(Iop_64to32, mkexpr(dst64, tid, Ity_I64)) );
    else
-      assign( dst, mkexpr(dst64, tid) );
+      assign( dst, mkexpr(dst64, tid, Ity_I64) );
 
    /* dump result back */
-   putIRegG( sz, pfx, modrm, mkexpr(dst, tid) );
+   putIRegG( sz, pfx, modrm, mkexpr(dst, tid, ty) );
 
    return delta;
 }
@@ -7489,13 +7489,13 @@ void codegen_xchg_rAX_Reg ( unsigned tid, Prefix pfx, Int sz, UInt regLo3 )
    if (sz == 8) {
       assign( t1, getIReg64(tid, R_RAX) );
       assign( t2, getIRegRexB(tid,8, pfx, regLo3) );
-      putIReg64( R_RAX, mkexpr(t2, tid) );
-      putIRegRexB(8, pfx, regLo3, mkexpr(t1, tid) );
+      putIReg64( R_RAX, mkexpr(t2, tid, ty) );
+      putIRegRexB(8, pfx, regLo3, mkexpr(t1, tid, ty) );
    } else {
       assign( t1, getIReg32(tid, R_RAX) );
       assign( t2, getIRegRexB(tid,4, pfx, regLo3) );
-      putIReg32( R_RAX, mkexpr(t2, tid) );
-      putIRegRexB(4, pfx, regLo3, mkexpr(t1, tid) );
+      putIReg32( R_RAX, mkexpr(t2, tid, ty) );
+      putIRegRexB(4, pfx, regLo3, mkexpr(t1, tid, ty) );
    }
    DIP("xchg%c %s, %s\n", 
        nameISize(sz), nameIRegRAX(sz), 
@@ -7521,7 +7521,7 @@ void codegen_SAHF ( unsigned tid )
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1),
          binop(Iop_Or64,
-               binop(Iop_And64, mkexpr(oldflags, tid), mkU64(AMD64G_CC_MASK_O)),
+               binop(Iop_And64, mkexpr(oldflags, tid, Ity_I64), mkU64(AMD64G_CC_MASK_O)),
                binop(Iop_And64, 
                      binop(Iop_Shr64, getIReg64(tid, R_RAX), mkU8(8)),
                      mkU64(mask_SZACP))
@@ -7546,7 +7546,7 @@ void codegen_LAHF ( unsigned tid  )
    rax_with_hole 
       = binop(Iop_And64, getIReg64(tid, R_RAX), mkU64(~0xFF00ULL));
    new_byte 
-      = binop(Iop_Or64, binop(Iop_And64, mkexpr(flags, tid), mkU64(mask_SZACP)),
+      = binop(Iop_Or64, binop(Iop_And64, mkexpr(flags, tid, Ity_I64), mkU64(mask_SZACP)),
                         mkU64(1<<1));
    new_rax 
       = binop(Iop_Or64, rax_with_hole,
@@ -7599,10 +7599,10 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       assign( acc, getIRegRAX(tid, size) );
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
       assign( cond8, unop(Iop_1Uto8, mk_amd64g_calculate_condition(AMD64CondZ, tid)) );
-      assign( dest2, IRExpr_Mux0X(mkexpr(cond8, tid), mkexpr(dest, tid), mkexpr(src, tid)) );
-      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid), mkexpr(dest, tid), mkexpr(acc, tid)) );
-      putIRegRAX(size, mkexpr(acc2, tid));
-      putIRegE(size, pfx, rm, mkexpr(dest2, tid));
+      assign( dest2, IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(src, tid, ty)) );
+      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
+      putIRegRAX(size, mkexpr(acc2, tid, ty));
+      putIRegE(size, pfx, rm, mkexpr(dest2, tid, ty));
       DIP("cmpxchg%c %s,%s\n", nameISize(size),
                                nameIRegG(size,pfx,rm),
                                nameIRegE(size,pfx,rm) );
@@ -7610,16 +7610,16 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
    else if (!epartIsReg(rm) && !(pfx & PFX_LOCK)) {
       /* case 2 */
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      assign( dest, loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+      assign( dest, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       delta0 += len;
       assign( src, getIRegG(tid, size, pfx, rm) );
       assign( acc, getIRegRAX(tid, size) );
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
       assign( cond8, unop(Iop_1Uto8, mk_amd64g_calculate_condition(AMD64CondZ, tid)) );
-      assign( dest2, IRExpr_Mux0X(mkexpr(cond8, tid), mkexpr(dest, tid), mkexpr(src, tid)) );
-      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid), mkexpr(dest, tid), mkexpr(acc, tid)) );
-      putIRegRAX(size, mkexpr(acc2, tid));
-      storeLE( mkexpr(addr, tid), mkexpr(dest2, tid) );
+      assign( dest2, IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(src, tid, ty)) );
+      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
+      putIRegRAX(size, mkexpr(acc2, tid, ty));
+      storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dest2, tid, ty) );
       DIP("cmpxchg%c %s,%s\n", nameISize(size), 
                                nameIRegG(size,pfx,rm), dis_buf);
    }
@@ -7635,12 +7635,12 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       assign( acc, getIRegRAX(tid, size) );
       stmt( IRStmt_CAS( 
 	    mkIRCAS( threadAndRegister::invalid(), threadAndRegister::temp(tid, dest, 0),
-		     mkexpr(addr, tid), NULL, mkexpr(acc, tid), NULL, mkexpr(src, tid) )
+		     mkexpr(addr, tid, Ity_I64), NULL, mkexpr(acc, tid, ty), NULL, mkexpr(src, tid, ty) )
       ));
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
       assign( cond8, unop(Iop_1Uto8, mk_amd64g_calculate_condition(AMD64CondZ, tid)) );
-      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid), mkexpr(dest, tid), mkexpr(acc, tid)) );
-      putIRegRAX(size, mkexpr(acc2, tid));
+      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
+      putIRegRAX(size, mkexpr(acc2, tid, ty));
       DIP("cmpxchg%c %s,%s\n", nameISize(size), 
                                nameIRegG(size,pfx,rm), dis_buf);
    }
@@ -7692,8 +7692,8 @@ ULong dis_cmov_E_G ( unsigned tid,
       putIRegG( sz, pfx, rm,
                 IRExpr_Mux0X( unop(Iop_1Uto8,
                                    mk_amd64g_calculate_condition(cond, tid)),
-                              mkexpr(tmpd, tid),
-                              mkexpr(tmps, tid) )
+                              mkexpr(tmpd, tid, ty),
+                              mkexpr(tmps, tid, ty) )
               );
       DIP("cmov%s %s,%s\n", name_AMD64Condcode(cond),
                             nameIRegE(sz,pfx,rm),
@@ -7704,14 +7704,14 @@ ULong dis_cmov_E_G ( unsigned tid,
    /* E refers to memory */    
    {
       IRTemp addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      assign( tmps, loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+      assign( tmps, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       assign( tmpd, getIRegG(tid, sz, pfx, rm) );
 
       putIRegG( sz, pfx, rm,
                 IRExpr_Mux0X( unop(Iop_1Uto8,
                                    mk_amd64g_calculate_condition(cond, tid)),
-                              mkexpr(tmpd, tid),
-                              mkexpr(tmps, tid) )
+                              mkexpr(tmpd, tid, ty),
+                              mkexpr(tmps, tid, ty) )
               );
 
       DIP("cmov%s %s,%s\n", name_AMD64Condcode(cond),
@@ -7757,13 +7757,13 @@ ULong dis_xadd_G_E ( unsigned tid,
    else if (!epartIsReg(rm) && !(pfx & PFX_LOCK)) {
       /* case 2 */
       IRTemp addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      assign( tmpd,  loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+      assign( tmpd,  loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       assign( tmpt0, getIRegG(tid, sz, pfx, rm) );
       assign( tmpt1, binop(mkSizedOp(ty,Iop_Add8),
-                           mkexpr(tmpd, tid), mkexpr(tmpt0, tid)) );
+                           mkexpr(tmpd, tid, ty), mkexpr(tmpt0, tid, ty)) );
       setFlags_DEP1_DEP2(tid,  Iop_Add8, tmpd, tmpt0, ty );
-      storeLE( mkexpr(addr, tid), mkexpr(tmpt1, tid) );
-      putIRegG(sz, pfx, rm, mkexpr(tmpd, tid));
+      storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(tmpt1, tid, ty) );
+      putIRegG(sz, pfx, rm, mkexpr(tmpd, tid, ty));
       DIP("xadd%c %s, %s\n",
           nameISize(sz), nameIRegG(sz,pfx,rm), dis_buf);
       *decode_ok = True;
@@ -7772,15 +7772,15 @@ ULong dis_xadd_G_E ( unsigned tid,
    else if (!epartIsReg(rm) && (pfx & PFX_LOCK)) {
       /* case 3 */
       IRTemp addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      assign( tmpd,  loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+      assign( tmpd,  loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       assign( tmpt0, getIRegG(tid, sz, pfx, rm) );
       assign( tmpt1, binop(mkSizedOp(ty,Iop_Add8), 
-                           mkexpr(tmpd, tid), mkexpr(tmpt0, tid)) );
-      casLE( mkexpr(addr, tid), mkexpr(tmpd, tid)/*expVal*/,
-	     mkexpr(tmpt1, tid)/*newVal*/, guest_RIP_curr_instr,
+                           mkexpr(tmpd, tid, ty), mkexpr(tmpt0, tid, ty)) );
+      casLE( mkexpr(addr, tid, Ity_I64), mkexpr(tmpd, tid, ty)/*expVal*/,
+	     mkexpr(tmpt1, tid, ty)/*newVal*/, guest_RIP_curr_instr,
 	     tid );
       setFlags_DEP1_DEP2(tid,  Iop_Add8, tmpd, tmpt0, ty );
-      putIRegG(sz, pfx, rm, mkexpr(tmpd, tid));
+      putIRegG(sz, pfx, rm, mkexpr(tmpd, tid, ty));
       DIP("xadd%c %s, %s\n",
           nameISize(sz), nameIRegG(sz,pfx,rm), dis_buf);
       *decode_ok = True;
@@ -7807,7 +7807,7 @@ ULong dis_xadd_G_E ( unsigned tid,
 //..       return 1+delta0;
 //..    } else {
 //..       addr = disAMode ( tid, guest_code, &len, sorb, delta0, dis_buf );
-//..       putSReg( gregOfRM(rm), loadLE(Ity_I16, mkexpr(addr, tid)) );
+//..       putSReg( gregOfRM(rm), loadLE(Ity_I16, mkexpr(addr, tid, Ity_I64)) );
 //..       DIP("movw %s,%s\n", dis_buf, nameSReg(gregOfRM(rm)));
 //..       return len+delta0;
 //..    }
@@ -7838,7 +7838,7 @@ ULong dis_xadd_G_E ( unsigned tid,
 //..       return 1+delta0;
 //..    } else {
 //..       addr = disAMode ( tid, guest_code, &len, sorb, delta0, dis_buf );
-//..       storeLE( mkexpr(addr, tid), getSReg(gregOfRM(rm)) );
+//..       storeLE( mkexpr(addr, tid, Ity_I64), getSReg(gregOfRM(rm)) );
 //..       DIP("mov %s,%s\n", nameSReg(gregOfRM(rm)), dis_buf);
 //..       return len+delta0;
 //..    }
@@ -7882,9 +7882,9 @@ void dis_ret ( unsigned tid, VexAbiInfo* vbi, ULong d64, ThreadRip rip )
    IRTemp t2 = newTemp(Ity_I64);
    IRTemp t3 = newTemp(Ity_I64);
    assign(t1, getIReg64(tid, R_RSP));
-   assign(t2, loadLE(Ity_I64,mkexpr(t1, tid), rip));
-   assign(t3, binop(Iop_Add64, mkexpr(t1, tid), mkU64(8+d64)));
-   putIReg64(R_RSP, mkexpr(t3, tid));
+   assign(t2, loadLE(Ity_I64,mkexpr(t1, tid, Ity_I64), rip));
+   assign(t3, binop(Iop_Add64, mkexpr(t1, tid, Ity_I64), mkU64(8+d64)));
+   putIReg64(R_RSP, mkexpr(t3, tid, Ity_I64));
    make_redzone_AbiHint(vbi, t3, t2/*nia*/, "ret", tid);
    jmp_treg(Ijk_Ret,t2,tid);
 }
@@ -7926,7 +7926,7 @@ static ULong dis_SSE_E_to_G_all_wrk (
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       putXMMReg( gregOfRexRM(pfx,rm), 
                  binop(op, gpart,
-		       loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip)) );
+		       loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7982,9 +7982,9 @@ static ULong dis_SSE_E_to_G_lo32 ( unsigned tid, GuestMemoryFetcher &guest_code,
       IRTemp epart = newTemp(Ity_V128);
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( epart, unop( Iop_32UtoV128,
-                           loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip)) );
+                           loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip)) );
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 binop(op, gpart, mkexpr(epart, tid)) );
+                 binop(op, gpart, mkexpr(epart, tid, Ity_V128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8020,9 +8020,9 @@ static ULong dis_SSE_E_to_G_lo64 ( unsigned tid,
       IRTemp epart = newTemp(Ity_V128);
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( epart, unop( Iop_64UtoV128,
-                           loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip)) );
+                           loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip)) );
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 binop(op, gpart, mkexpr(epart, tid)) );
+                 binop(op, gpart, mkexpr(epart, tid, Ity_V128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8055,7 +8055,7 @@ static ULong dis_SSE_E_to_G_unary_all (
    } else {
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 unop(op, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip)) );
+                 unop(op, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8088,9 +8088,9 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
    if (epartIsReg(rm)) {
       assign( oldG1, 
               binop( Iop_SetV128lo32,
-                     mkexpr(oldG0, tid),
+                     mkexpr(oldG0, tid, Ity_V128),
                      getXMMRegLane32(tid, eregOfRexRM(pfx,rm), 0)) );
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid)) );
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
       DIP("%s %s,%s\n", opname,
                         nameXMMReg(eregOfRexRM(pfx,rm)),
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8099,9 +8099,9 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( oldG1, 
               binop( Iop_SetV128lo32,
-                     mkexpr(oldG0, tid),
-                     loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip) ));
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid)) );
+                     mkexpr(oldG0, tid, Ity_V128),
+                     loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip) ));
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8134,9 +8134,9 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
    if (epartIsReg(rm)) {
       assign( oldG1, 
               binop( Iop_SetV128lo64,
-                     mkexpr(oldG0, tid),
+                     mkexpr(oldG0, tid, Ity_V128),
                      getXMMRegLane64(tid, eregOfRexRM(pfx,rm), 0)) );
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid)) );
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
       DIP("%s %s,%s\n", opname,
                         nameXMMReg(eregOfRexRM(pfx,rm)),
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8145,9 +8145,9 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( oldG1, 
               binop( Iop_SetV128lo64,
-                     mkexpr(oldG0, tid),
-                     loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) ));
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid)) );
+                     mkexpr(oldG0, tid, Ity_V128),
+                     loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) ));
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8183,7 +8183,7 @@ static ULong dis_SSEint_E_to_G(
       delta += 1;
    } else {
       addr  = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
-      epart = loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip);
+      epart = loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip);
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8283,9 +8283,9 @@ static ULong dis_SSEcmp_E_to_G ( unsigned tid,
               binop(
                  op,
                  getXMMReg(tid, gregOfRexRM(pfx,rm)), 
-                   all_lanes  ? loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip)
-                 : sz == 8    ? unop( Iop_64UtoV128, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip))
-                 : /*sz==4*/    unop( Iop_32UtoV128, loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip))
+                   all_lanes  ? loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip)
+                 : sz == 8    ? unop( Iop_64UtoV128, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip))
+                 : /*sz==4*/    unop( Iop_32UtoV128, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip))
 	      ) 
       );
       delta += alen+1;
@@ -8297,16 +8297,16 @@ static ULong dis_SSEcmp_E_to_G ( unsigned tid,
 
    if (needNot && all_lanes) {
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 unop(Iop_NotV128, mkexpr(plain, tid)) );
+                 unop(Iop_NotV128, mkexpr(plain, tid, Ity_V128)) );
    }
    else
    if (needNot && !all_lanes) {
       mask = toUShort(sz==4 ? 0x000F : 0x00FF);
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 binop(Iop_XorV128, mkexpr(plain, tid), mkV128(mask)) );
+                 binop(Iop_XorV128, mkexpr(plain, tid, Ity_V128), mkV128(mask)) );
    }
    else {
-      putXMMReg( gregOfRexRM(pfx,rm), mkexpr(plain, tid) );
+      putXMMReg( gregOfRexRM(pfx,rm), mkexpr(plain, tid, Ity_V128) );
    }
 
    return delta;
@@ -8339,14 +8339,14 @@ static ULong dis_SSE_shiftG_byE ( unsigned tid,
       delta++;
    } else {
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
-      assign( amt, loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip) );
+      assign( amt, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
       delta += alen;
    }
    assign( g0,   getXMMReg(tid, gregOfRexRM(pfx,rm)) );
-   assign( amt8, unop(Iop_32to8, mkexpr(amt, tid)) );
+   assign( amt8, unop(Iop_32to8, mkexpr(amt, tid, Ity_I32)) );
 
    shl = shr = sar = False;
    size = 0;
@@ -8367,9 +8367,9 @@ static ULong dis_SSE_shiftG_byE ( unsigned tid,
         g1,
         IRExpr_Mux0X(
            unop(Iop_1Uto8,
-                binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid)), mkU64(size))),
+                binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size))),
            mkV128(0x0000),
-           binop(op, mkexpr(g0, tid), mkexpr(amt8, tid))
+           binop(op, mkexpr(g0, tid, Ity_V128), mkexpr(amt8, tid, Ity_I8))
         )
      );
    } else 
@@ -8378,16 +8378,16 @@ static ULong dis_SSE_shiftG_byE ( unsigned tid,
         g1,
         IRExpr_Mux0X(
            unop(Iop_1Uto8,
-                binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid)), mkU64(size))),
-           binop(op, mkexpr(g0, tid), mkU8(size-1)),
-           binop(op, mkexpr(g0, tid), mkexpr(amt8, tid))
+                binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size))),
+           binop(op, mkexpr(g0, tid, Ity_V128), mkU8(size-1)),
+           binop(op, mkexpr(g0, tid, Ity_V128), mkexpr(amt8, tid, Ity_I8))
         )
      );
    } else {
       vassert(0);
    }
 
-   putXMMReg( gregOfRexRM(pfx,rm), mkexpr(g1, tid) );
+   putXMMReg( gregOfRexRM(pfx,rm), mkexpr(g1, tid, Ity_V128) );
    return delta;
 }
 
@@ -8430,19 +8430,19 @@ ULong dis_SSE_shiftE_imm ( unsigned tid, GuestMemoryFetcher &guest_code, Prefix 
    if (shl || shr) {
      assign( e1, amt >= size 
                     ? mkV128(0x0000)
-                    : binop(op, mkexpr(e0, tid), mkU8(amt))
+                    : binop(op, mkexpr(e0, tid, Ity_V128), mkU8(amt))
      );
    } else 
    if (sar) {
      assign( e1, amt >= size 
-                    ? binop(op, mkexpr(e0, tid), mkU8(size-1))
-                    : binop(op, mkexpr(e0, tid), mkU8(amt))
+                    ? binop(op, mkexpr(e0, tid, Ity_V128), mkU8(size-1))
+                    : binop(op, mkexpr(e0, tid, Ity_V128), mkU8(amt))
      );
    } else {
       vassert(0);
    }
 
-   putXMMReg( eregOfRexRM(pfx,rm), mkexpr(e1, tid) );
+   putXMMReg( eregOfRexRM(pfx,rm), mkexpr(e1, tid, Ity_V128) );
    return delta;
 }
 
@@ -8475,8 +8475,8 @@ static void breakup128to32s ( unsigned tid,
 {
    IRTemp hi64 = newTemp(Ity_I64);
    IRTemp lo64 = newTemp(Ity_I64);
-   assign( hi64, unop(Iop_V128HIto64, mkexpr(t128, tid)) );
-   assign( lo64, unop(Iop_V128to64,   mkexpr(t128, tid)) );
+   assign( hi64, unop(Iop_V128HIto64, mkexpr(t128, tid, Ity_V128)) );
+   assign( lo64, unop(Iop_V128to64,   mkexpr(t128, tid, Ity_V128)) );
 
    vassert(t0 && *t0 == IRTemp_INVALID);
    vassert(t1 && *t1 == IRTemp_INVALID);
@@ -8487,10 +8487,10 @@ static void breakup128to32s ( unsigned tid,
    *t1 = newTemp(Ity_I32);
    *t2 = newTemp(Ity_I32);
    *t3 = newTemp(Ity_I32);
-   assign( *t0, unop(Iop_64to32,   mkexpr(lo64, tid)) );
-   assign( *t1, unop(Iop_64HIto32, mkexpr(lo64, tid)) );
-   assign( *t2, unop(Iop_64to32,   mkexpr(hi64, tid)) );
-   assign( *t3, unop(Iop_64HIto32, mkexpr(hi64, tid)) );
+   assign( *t0, unop(Iop_64to32,   mkexpr(lo64, tid, Ity_I64)) );
+   assign( *t1, unop(Iop_64HIto32, mkexpr(lo64, tid, Ity_I64)) );
+   assign( *t2, unop(Iop_64to32,   mkexpr(hi64, tid, Ity_I64)) );
+   assign( *t3, unop(Iop_64HIto32, mkexpr(hi64, tid, Ity_I64)) );
 }
 
 /* Construct a 128-bit value from four 32-bit ints. */
@@ -8501,8 +8501,8 @@ static IRExpr* mk128from32s ( unsigned tid,
 {
    return
       binop( Iop_64HLtoV128,
-             binop(Iop_32HLto64, mkexpr(t3, tid), mkexpr(t2, tid)),
-             binop(Iop_32HLto64, mkexpr(t1, tid), mkexpr(t0, tid))
+             binop(Iop_32HLto64, mkexpr(t3, tid, Ity_I32), mkexpr(t2, tid, Ity_I32)),
+             binop(Iop_32HLto64, mkexpr(t1, tid, Ity_I32), mkexpr(t0, tid, Ity_I32))
    );
 }
 
@@ -8516,8 +8516,8 @@ static void breakup64to16s ( unsigned tid,
 {
    IRTemp hi32 = newTemp(Ity_I32);
    IRTemp lo32 = newTemp(Ity_I32);
-   assign( hi32, unop(Iop_64HIto32, mkexpr(t64, tid)) );
-   assign( lo32, unop(Iop_64to32,   mkexpr(t64, tid)) );
+   assign( hi32, unop(Iop_64HIto32, mkexpr(t64, tid, Ity_I64)) );
+   assign( lo32, unop(Iop_64to32,   mkexpr(t64, tid, Ity_I64)) );
 
    vassert(t0 && *t0 == IRTemp_INVALID);
    vassert(t1 && *t1 == IRTemp_INVALID);
@@ -8528,10 +8528,10 @@ static void breakup64to16s ( unsigned tid,
    *t1 = newTemp(Ity_I16);
    *t2 = newTemp(Ity_I16);
    *t3 = newTemp(Ity_I16);
-   assign( *t0, unop(Iop_32to16,   mkexpr(lo32, tid)) );
-   assign( *t1, unop(Iop_32HIto16, mkexpr(lo32, tid)) );
-   assign( *t2, unop(Iop_32to16,   mkexpr(hi32, tid)) );
-   assign( *t3, unop(Iop_32HIto16, mkexpr(hi32, tid)) );
+   assign( *t0, unop(Iop_32to16,   mkexpr(lo32, tid, Ity_I32)) );
+   assign( *t1, unop(Iop_32HIto16, mkexpr(lo32, tid, Ity_I32)) );
+   assign( *t2, unop(Iop_32to16,   mkexpr(hi32, tid, Ity_I32)) );
+   assign( *t3, unop(Iop_32HIto16, mkexpr(hi32, tid, Ity_I32)) );
 }
 
 /* Construct a 64-bit value from four 16-bit ints. */
@@ -8541,8 +8541,8 @@ static IRExpr* mk64from16s ( unsigned tid, IRTemp t3, IRTemp t2,
 {
    return
       binop( Iop_32HLto64,
-             binop(Iop_16HLto32, mkexpr(t3, tid), mkexpr(t2, tid)),
-             binop(Iop_16HLto32, mkexpr(t1, tid), mkexpr(t0, tid))
+             binop(Iop_16HLto32, mkexpr(t3, tid, Ity_I16), mkexpr(t2, tid, Ity_I16)),
+             binop(Iop_16HLto32, mkexpr(t1, tid, Ity_I16), mkexpr(t0, tid, Ity_I16))
    );
 }
 
@@ -8567,19 +8567,19 @@ static IRExpr* dis_PMULHRSW_helper ( unsigned tid, IRExpr* aax, IRExpr* bbx )
    assign(bb, bbx);
    assign( aahi32s,
            binop(Iop_SarN32x2,
-                 binop(Iop_InterleaveHI16x4, mkexpr(aa, tid), mkexpr(aa, tid)),
+                 binop(Iop_InterleaveHI16x4, mkexpr(aa, tid, Ity_I64), mkexpr(aa, tid, Ity_I64)),
                  mkU8(16) ));
    assign( aalo32s,
            binop(Iop_SarN32x2,
-                 binop(Iop_InterleaveLO16x4, mkexpr(aa, tid), mkexpr(aa, tid)),
+                 binop(Iop_InterleaveLO16x4, mkexpr(aa, tid, Ity_I64), mkexpr(aa, tid, Ity_I64)),
                  mkU8(16) ));
    assign( bbhi32s,
            binop(Iop_SarN32x2,
-                 binop(Iop_InterleaveHI16x4, mkexpr(bb, tid), mkexpr(bb, tid)),
+                 binop(Iop_InterleaveHI16x4, mkexpr(bb, tid, Ity_I64), mkexpr(bb, tid, Ity_I64)),
                  mkU8(16) ));
    assign( bblo32s,
            binop(Iop_SarN32x2,
-                 binop(Iop_InterleaveLO16x4, mkexpr(bb, tid), mkexpr(bb, tid)),
+                 binop(Iop_InterleaveLO16x4, mkexpr(bb, tid, Ity_I64), mkexpr(bb, tid, Ity_I64)),
                  mkU8(16) ));
    assign(one32x2, mkU64( (1ULL << 32) + 1 ));
    assign(
@@ -8590,10 +8590,10 @@ static IRExpr* dis_PMULHRSW_helper ( unsigned tid, IRExpr* aax, IRExpr* bbx )
             Iop_Add32x2, 
             binop(
                Iop_ShrN32x2,
-               binop(Iop_Mul32x2, mkexpr(aahi32s, tid), mkexpr(bbhi32s, tid)),
+               binop(Iop_Mul32x2, mkexpr(aahi32s, tid, Ity_I32), mkexpr(bbhi32s, tid, Ity_I32)),
                mkU8(14)
             ),
-            mkexpr(one32x2, tid)
+            mkexpr(one32x2, tid, Ity_I64)
          ),
          mkU8(1)
       )
@@ -8606,16 +8606,16 @@ static IRExpr* dis_PMULHRSW_helper ( unsigned tid, IRExpr* aax, IRExpr* bbx )
             Iop_Add32x2, 
             binop(
                Iop_ShrN32x2,
-               binop(Iop_Mul32x2, mkexpr(aalo32s, tid), mkexpr(bblo32s, tid)),
+               binop(Iop_Mul32x2, mkexpr(aalo32s, tid, Ity_I32), mkexpr(bblo32s, tid, Ity_I32)),
                mkU8(14)
             ),
-            mkexpr(one32x2, tid)
+            mkexpr(one32x2, tid, Ity_I64)
          ),
          mkU8(1)
       )
    );
    return
-      binop(Iop_CatEvenLanes16x4, mkexpr(rHi, tid), mkexpr(rLo, tid));
+      binop(Iop_CatEvenLanes16x4, mkexpr(rHi, tid, Ity_I64), mkexpr(rLo, tid, Ity_I64));
 }
 
 /* Helper for the SSSE3 (not SSE3) PSIGN{B,W,D} insns.  Given two 64-bit
@@ -8646,14 +8646,14 @@ static IRExpr* dis_PSIGN_helper ( unsigned tid, IRExpr* aax, IRExpr* bbx, Int la
    assign( aa,      aax );
    assign( bb,      bbx );
    assign( zero,    mkU64(0) );
-   assign( bbNeg,   binop(opSub,    mkexpr(zero, tid), mkexpr(bb, tid)) );
-   assign( negMask, binop(opCmpGTS, mkexpr(zero, tid), mkexpr(aa, tid)) );
-   assign( posMask, binop(opCmpGTS, mkexpr(aa, tid),   mkexpr(zero, tid)) );
+   assign( bbNeg,   binop(opSub,    mkexpr(zero, tid, Ity_I64), mkexpr(bb, tid, Ity_I64)) );
+   assign( negMask, binop(opCmpGTS, mkexpr(zero, tid, Ity_I64), mkexpr(aa, tid, Ity_I64)) );
+   assign( posMask, binop(opCmpGTS, mkexpr(aa, tid, Ity_I64),   mkexpr(zero, tid, Ity_I64)) );
 
    return
       binop(Iop_Or64,
-            binop(Iop_And64, mkexpr(bb, tid),    mkexpr(posMask, tid)),
-            binop(Iop_And64, mkexpr(bbNeg, tid), mkexpr(negMask, tid)) );
+            binop(Iop_And64, mkexpr(bb, tid, Ity_I64),    mkexpr(posMask, tid, Ity_I64)),
+            binop(Iop_And64, mkexpr(bbNeg, tid, Ity_I64), mkexpr(negMask, tid, Ity_I64)) );
 
 }
 
@@ -8684,14 +8684,14 @@ static IRExpr* dis_PABS_helper ( unsigned tid, IRExpr* aax, Int laneszB )
    }
 
    assign( aa,      aax );
-   assign( negMask, binop(opSarN, mkexpr(aa, tid), mkU8(8*laneszB-1)) );
-   assign( posMask, unop(Iop_Not64, mkexpr(negMask, tid)) );
+   assign( negMask, binop(opSarN, mkexpr(aa, tid, Ity_I64), mkU8(8*laneszB-1)) );
+   assign( posMask, unop(Iop_Not64, mkexpr(negMask, tid, Ity_I64)) );
    assign( zero,    mkU64(0) );
-   assign( aaNeg,   binop(opSub, mkexpr(zero, tid), mkexpr(aa, tid)) );
+   assign( aaNeg,   binop(opSub, mkexpr(zero, tid, Ity_I64), mkexpr(aa, tid, Ity_I64)) );
    return
       binop(Iop_Or64,
-            binop(Iop_And64, mkexpr(aa, tid),    mkexpr(posMask, tid)),
-            binop(Iop_And64, mkexpr(aaNeg, tid), mkexpr(negMask, tid)) );
+            binop(Iop_And64, mkexpr(aa, tid, Ity_I64),    mkexpr(posMask, tid, Ity_I64)),
+            binop(Iop_And64, mkexpr(aaNeg, tid, Ity_I64), mkexpr(negMask, tid, Ity_I64)) );
 }
 
 static IRExpr* dis_PALIGNR_XMM_helper ( unsigned tid, IRTemp hi64,
@@ -8700,8 +8700,8 @@ static IRExpr* dis_PALIGNR_XMM_helper ( unsigned tid, IRTemp hi64,
    vassert(byteShift >= 1 && byteShift <= 7);
    return
       binop(Iop_Or64,
-            binop(Iop_Shl64, mkexpr(hi64, tid), mkU8(8*(8-byteShift))),
-            binop(Iop_Shr64, mkexpr(lo64, tid), mkU8(8*byteShift))
+            binop(Iop_Shl64, mkexpr(hi64, tid, Ity_I64), mkU8(8*(8-byteShift))),
+            binop(Iop_Shr64, mkexpr(lo64, tid, Ity_I64), mkU8(8*byteShift))
       );
 }
 
@@ -8714,7 +8714,7 @@ static void gen_SEGV_if_not_16_aligned ( unsigned tid, IRTemp effective_addr )
    stmt(
       IRStmt_Exit(
          binop(Iop_CmpNE64,
-               binop(Iop_And64,mkexpr(effective_addr, tid),mkU64(0xF)),
+               binop(Iop_And64,mkexpr(effective_addr, tid, Ity_I64),mkU64(0xF)),
                mkU64(0)),
          Ijk_SigSEGV,
          guest_RIP_curr_instr
@@ -8956,8 +8956,8 @@ DisResult disInstr_AMD64_WRK (
             assign(t1, getIRegRAX(tid, 8));
             t2 = newTemp(Ity_I64);
             assign(t2, binop(Iop_Sub64, getIReg64(tid, R_RSP), mkU64(8)));
-            putIReg64(R_RSP, mkexpr(t2, tid));
-            storeLE( mkexpr(t2, tid), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta));
+            putIReg64(R_RSP, mkexpr(t2, tid, Ity_I64));
+            storeLE( mkexpr(t2, tid, Ity_I64), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta));
             jmp_treg(Ijk_NoRedir,t1, tid);
             dres.whatNext = DisResult::Dis_StopHere;
             goto decode_success;
@@ -9086,13 +9086,13 @@ DisResult disInstr_AMD64_WRK (
              0/*regparms*/, 
              "amd64g_dirtyhelper_FXSAVE", 
              (void *)amd64g_dirtyhelper_FXSAVE,
-             mkIRExprVec_1( mkexpr(addr, tid) )
+             mkIRExprVec_1( mkexpr(addr, tid, Ity_I64) )
           );
       d->needsBBP = True;
 
       /* declare we're writing memory */
       d->mFx   = Ifx_Write;
-      d->mAddr = mkexpr(addr, tid);
+      d->mAddr = mkexpr(addr, tid, Ity_I64);
       d->mSize = 512;
 
       /* declare we're reading guest state */
@@ -9197,7 +9197,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-	 assign( argR, loadLE(Ity_F32, mkexpr(addr, tid), guest_code.rip) );
+	 assign( argR, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("%scomiss %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  dis_buf,
@@ -9213,8 +9213,8 @@ DisResult disInstr_AMD64_WRK (
                binop( Iop_And64,
                       unop( Iop_32Uto64,
                             binop(Iop_CmpF64, 
-                                  unop(Iop_F32toF64,mkexpr(argL, tid)),
-                                  unop(Iop_F32toF64,mkexpr(argR, tid)))),
+                                  unop(Iop_F32toF64,mkexpr(argL, tid, Ity_F64)),
+                                  unop(Iop_F32toF64,mkexpr(argR, tid, Ity_F64)))),
                       mkU64(0x45)
           )));
 
@@ -9237,7 +9237,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("cvtpi2ps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -9248,16 +9248,16 @@ DisResult disInstr_AMD64_WRK (
       putXMMRegLane32F( 
          gregOfRexRM(pfx,modrm), 0,
          binop(Iop_F64toF32, 
-               mkexpr(rmode, tid),
+               mkexpr(rmode, tid, Ity_I32),
                unop(Iop_I32toF64, 
-                    unop(Iop_64to32, mkexpr(arg64, tid)) )) );
+                    unop(Iop_64to32, mkexpr(arg64, tid, Ity_I64)) )) );
 
       putXMMRegLane32F(
          gregOfRexRM(pfx,modrm), 1, 
          binop(Iop_F64toF32, 
-               mkexpr(rmode, tid),
+               mkexpr(rmode, tid, Ity_I32),
                unop(Iop_I32toF64,
-                    unop(Iop_64HIto32, mkexpr(arg64, tid)) )) );
+                    unop(Iop_64HIto32, mkexpr(arg64, tid, Ity_I64)) )) );
 
       goto decode_success;
    }
@@ -9281,7 +9281,7 @@ DisResult disInstr_AMD64_WRK (
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
             addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-            assign( arg32, loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip) );
+            assign( arg32, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
             delta += 2+alen;
             DIP("cvtsi2ss %s,%s\n", dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -9289,8 +9289,8 @@ DisResult disInstr_AMD64_WRK (
          putXMMRegLane32F( 
             gregOfRexRM(pfx,modrm), 0,
             binop(Iop_F64toF32,
-                  mkexpr(rmode, tid),
-                  unop(Iop_I32toF64, mkexpr(arg32, tid)) ) );
+                  mkexpr(rmode, tid, Ity_I32),
+                  unop(Iop_I32toF64, mkexpr(arg32, tid, Ity_I32)) ) );
       } else {
          /* sz == 8 */
          IRTemp arg64 = newTemp(Ity_I64);
@@ -9301,7 +9301,7 @@ DisResult disInstr_AMD64_WRK (
                                      nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
             addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-            assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+            assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
             delta += 2+alen;
             DIP("cvtsi2ssq %s,%s\n", dis_buf,
                                      nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -9309,8 +9309,8 @@ DisResult disInstr_AMD64_WRK (
          putXMMRegLane32F( 
             gregOfRexRM(pfx,modrm), 0,
             binop(Iop_F64toF32,
-                  mkexpr(rmode, tid),
-                  binop(Iop_I64toF64, mkexpr(rmode, tid), mkexpr(arg64, tid)) ) );
+                  mkexpr(rmode, tid, Ity_I32),
+                  binop(Iop_I64toF64, mkexpr(rmode, tid, Ity_I32), mkexpr(arg64, tid, Ity_I64)) ) );
       }
 
       goto decode_success;
@@ -9340,9 +9340,9 @@ DisResult disInstr_AMD64_WRK (
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid), guest_code.rip));
+         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          assign(f32hi, loadLE(Ity_F32, binop( Iop_Add64, 
-                                              mkexpr(addr, tid), 
+                                              mkexpr(addr, tid, Ity_I64), 
                                               mkU64(4) ), guest_code.rip));
          delta += 2+alen;
          DIP("cvt%sps2pi %s,%s\n", r2zero ? "t" : "",
@@ -9360,15 +9360,15 @@ DisResult disInstr_AMD64_WRK (
          dst64,
          binop( Iop_32HLto64,
                 binop( Iop_F64toI32, 
-                       mkexpr(rmode, tid), 
-                       unop( Iop_F32toF64, mkexpr(f32hi, tid) ) ),
+                       mkexpr(rmode, tid, Ity_I32), 
+                       unop( Iop_F32toF64, mkexpr(f32hi, tid, Ity_F32) ) ),
                 binop( Iop_F64toI32, 
-                       mkexpr(rmode, tid), 
-                       unop( Iop_F32toF64, mkexpr(f32lo, tid) ) )
+                       mkexpr(rmode, tid, Ity_I32), 
+                       unop( Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32) ) )
               )
       );
 
-      putMMXReg(gregLO3ofRM(modrm), mkexpr(dst64, tid));
+      putMMXReg(gregLO3ofRM(modrm), mkexpr(dst64, tid, Ity_I64));
       goto decode_success;
    }
 
@@ -9401,7 +9401,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameIReg(sz, gregOfRexRM(pfx,modrm), False));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid), guest_code.rip));
+         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          delta += 2+alen;
          DIP("cvt%sss2si %s,%s\n", r2zero ? "t" : "",
                                    dis_buf,
@@ -9417,13 +9417,13 @@ DisResult disInstr_AMD64_WRK (
       if (sz == 4) {
          putIReg32( gregOfRexRM(pfx,modrm),
                     binop( Iop_F64toI32, 
-                           mkexpr(rmode, tid), 
-                           unop(Iop_F32toF64, mkexpr(f32lo, tid))) );
+                           mkexpr(rmode, tid, Ity_I32), 
+                           unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32))) );
       } else {
          putIReg64( gregOfRexRM(pfx,modrm),
                     binop( Iop_F64toI64, 
-                           mkexpr(rmode, tid), 
-                           unop(Iop_F32toF64, mkexpr(f32lo, tid))) );
+                           mkexpr(rmode, tid, Ity_I32), 
+                           unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32))) );
       }
 
       goto decode_success;
@@ -9470,21 +9470,21 @@ DisResult disInstr_AMD64_WRK (
                       (void *)amd64g_check_ldmxcsr, 
                       mkIRExprVec_1( 
                          unop(Iop_32Uto64,
-                              loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip)
+                              loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip)
                          )
                       )
                    )
             );
 
-      put_sse_roundingmode( unop(Iop_64to32, mkexpr(t64, tid)) );
-      assign( ew, unop(Iop_64HIto32, mkexpr(t64, tid) ) );
-      put_emwarn( mkexpr(ew, tid) );
+      put_sse_roundingmode( unop(Iop_64to32, mkexpr(t64, tid, Ity_I64)) );
+      assign( ew, unop(Iop_64HIto32, mkexpr(t64, tid, Ity_I64) ) );
+      put_emwarn( mkexpr(ew, tid, Ity_I32) );
       /* Finally, if an emulation warning was reported, side-exit to
          the next insn, reporting the warning, so that Valgrind's
          dispatcher sees the warning. */
       stmt( 
          IRStmt_Exit(
-            binop(Iop_CmpNE64, unop(Iop_32Uto64,mkexpr(ew, tid)), mkU64(0)),
+            binop(Iop_CmpNE64, unop(Iop_32Uto64,mkexpr(ew, tid, Ity_I32)), mkU64(0)),
             Ijk_EmWarn,
             guest_RIP_bbstart+delta
          )
@@ -9546,7 +9546,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("mov[ua]ps %s,%s\n", dis_buf,
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -9564,7 +9564,7 @@ DisResult disInstr_AMD64_WRK (
          /* fall through; awaiting test case */
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
          DIP("mov[ua]ps %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
                                   dis_buf );
          delta += 2+alen;
@@ -9588,7 +9588,7 @@ DisResult disInstr_AMD64_WRK (
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 1/*upper lane*/,
-                          loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+                          loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movhps %s,%s\n", dis_buf, 
                                nameXMMReg( gregOfRexRM(pfx,modrm) ));
       }
@@ -9603,7 +9603,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2;
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
-         storeLE( mkexpr(addr, tid), 
+         storeLE( mkexpr(addr, tid, Ity_I64), 
                   getXMMRegLane64(tid, gregOfRexRM(pfx,guest_code[delta+2]),
                                    1/*upper lane*/ ) );
          DIP("movhps %s,%s\n", nameXMMReg( gregOfRexRM(pfx,guest_code[delta+2]) ),
@@ -9630,7 +9630,7 @@ DisResult disInstr_AMD64_WRK (
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm),  0/*lower lane*/,
-                          loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+                          loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movlps %s, %s\n", 
              dis_buf, nameXMMReg( gregOfRexRM(pfx,modrm) ));
       }
@@ -9645,7 +9645,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2;
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
-         storeLE( mkexpr(addr, tid), 
+         storeLE( mkexpr(addr, tid, Ity_I64), 
                   getXMMRegLane64(tid, gregOfRexRM(pfx,guest_code[delta+2]), 
                                    0/*lower lane*/ ) );
          DIP("movlps %s, %s\n", nameXMMReg( gregOfRexRM(pfx,guest_code[delta+2]) ),
@@ -9700,8 +9700,8 @@ DisResult disInstr_AMD64_WRK (
                             mkU32(8) ));
          putIReg32( gregOfRexRM(pfx,modrm),
                     binop(Iop_Or32,
-                          binop(Iop_Or32, mkexpr(t0, tid), mkexpr(t1, tid)),
-                          binop(Iop_Or32, mkexpr(t2, tid), mkexpr(t3, tid))
+                          binop(Iop_Or32, mkexpr(t0, tid, Ity_I32), mkexpr(t1, tid, Ity_I32)),
+                          binop(Iop_Or32, mkexpr(t2, tid, Ity_I32), mkexpr(t3, tid, Ity_I32))
                          )
                  );
          DIP("movmskps %s,%s\n", nameXMMReg(src), 
@@ -9720,7 +9720,7 @@ DisResult disInstr_AMD64_WRK (
       modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
          DIP("movntp%s %s,%s\n", sz==2 ? "d" : "s",
                                  dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -9742,7 +9742,7 @@ DisResult disInstr_AMD64_WRK (
       if (!epartIsReg(modrm)) {
          /* do_MMX_preamble(); Intel docs don't specify this */
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid), getMMXReg(tid, gregLO3ofRM(modrm)) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getMMXReg(tid, gregLO3ofRM(modrm)) );
          DIP("movntq %s,%s\n", dis_buf,
                                nameMMXReg(gregLO3ofRM(modrm)));
          delta += 2+alen;
@@ -9767,7 +9767,7 @@ DisResult disInstr_AMD64_WRK (
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), mkV128(0) );
          putXMMRegLane32( gregOfRexRM(pfx,modrm), 0,
-                          loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip) );
+                          loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movss %s,%s\n", dis_buf,
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -9784,7 +9784,7 @@ DisResult disInstr_AMD64_WRK (
          /* fall through, we don't yet have a test case */
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid),
+         storeLE( mkexpr(addr, tid, Ity_I64),
                   getXMMRegLane32(tid, gregOfRexRM(pfx,modrm), 0) );
          DIP("movss %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
                               dis_buf);
@@ -9847,16 +9847,16 @@ DisResult disInstr_AMD64_WRK (
          assign(sV, getMMXReg(tid, eregLO3ofRM(modrm)));
          breakup64to16s(tid,  sV, &t3, &t2, &t1, &t0 );
          switch (guest_code[delta+3] & 3) {
-            case 0:  assign(t5, mkexpr(t0, tid)); break;
-            case 1:  assign(t5, mkexpr(t1, tid)); break;
-            case 2:  assign(t5, mkexpr(t2, tid)); break;
-            case 3:  assign(t5, mkexpr(t3, tid)); break;
+	    case 0:  assign(t5, mkexpr(t0, tid, Ity_I16)); break;
+            case 1:  assign(t5, mkexpr(t1, tid, Ity_I16)); break;
+            case 2:  assign(t5, mkexpr(t2, tid, Ity_I16)); break;
+            case 3:  assign(t5, mkexpr(t3, tid, Ity_I16)); break;
             default: vassert(0);
          }
          if (sz == 8)
-            putIReg64(gregOfRexRM(pfx,modrm), unop(Iop_16Uto64, mkexpr(t5, tid)));
+	     putIReg64(gregOfRexRM(pfx,modrm), unop(Iop_16Uto64, mkexpr(t5, tid, Ity_I16)));
          else
-            putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_16Uto32, mkexpr(t5, tid)));
+	     putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_16Uto32, mkexpr(t5, tid, Ity_I16)));
          DIP("pextrw $%d,%s,%s\n",
              (Int)guest_code[delta+3], nameMMXReg(eregLO3ofRM(modrm)),
                            sz==8 ? nameIReg64(gregOfRexRM(pfx,modrm))
@@ -9900,7 +9900,7 @@ DisResult disInstr_AMD64_WRK (
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 1 );
          delta += 3+alen;
          lane = guest_code[delta+3+alen-1];
-         assign(t4, loadLE(Ity_I16, mkexpr(addr, tid), guest_code.rip));
+         assign(t4, loadLE(Ity_I16, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          DIP("pinsrw $%d,%s,%s\n", (Int)lane,
                                    dis_buf,
                                    nameMMXReg(gregLO3ofRM(modrm)));
@@ -9913,7 +9913,7 @@ DisResult disInstr_AMD64_WRK (
          case 3:  assign(t6, mk64from16s(tid,t4,t2,t1,t0)); break;
          default: vassert(0);
       }
-      putMMXReg(gregLO3ofRM(modrm), mkexpr(t6, tid));
+      putMMXReg(gregLO3ofRM(modrm), mkexpr(t6, tid, Ity_I64));
       goto decode_success;
    }
 
@@ -9973,8 +9973,8 @@ DisResult disInstr_AMD64_WRK (
                        Ity_I64, 0/*regparms*/, 
                        "amd64g_calculate_mmx_pmovmskb",
                        (void *)amd64g_calculate_mmx_pmovmskb,
-                       mkIRExprVec_1(mkexpr(t0, tid))));
-         putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_64to32,mkexpr(t1, tid)));
+                       mkIRExprVec_1(mkexpr(t0, tid, Ity_I64))));
+         putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_64to32,mkexpr(t1, tid, Ity_I64)));
          DIP("pmovmskb %s,%s\n", nameMMXReg(eregLO3ofRM(modrm)),
                                  nameIReg32(gregOfRexRM(pfx,modrm)));
          delta += 3;
@@ -10052,7 +10052,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf,
                            1/*extra byte after amode*/ );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          order = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("pshufw $%d,%s,%s\n", order, 
@@ -10066,7 +10066,7 @@ DisResult disInstr_AMD64_WRK (
 	     mk64from16s(tid, SEL((order>>6)&3), SEL((order>>4)&3),
                           SEL((order>>2)&3), SEL((order>>0)&3) )
       );
-      putMMXReg(gregLO3ofRM(modrm), mkexpr(dV, tid));
+      putMMXReg(gregLO3ofRM(modrm), mkexpr(dV, tid, Ity_I64));
 #     undef SEL
       goto decode_success;
    }
@@ -10138,7 +10138,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte at end of insn*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          select = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("shufps $%d,%s,%s\n", select, 
@@ -10195,7 +10195,7 @@ DisResult disInstr_AMD64_WRK (
       /* ULong amd64h_create_mxcsr ( ULong sseround ) */
       DIP("stmxcsr %s\n", dis_buf);
       storeLE( 
-         mkexpr(addr, tid), 
+         mkexpr(addr, tid, Ity_I64), 
          unop(Iop_64to32,      
               mkIRExprCCall(
                  Ity_I64, 0/*regp*/,
@@ -10243,7 +10243,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("unpck%sps %s,%s\n", hi ? "h" : "l",
                                   dis_buf,
@@ -10337,7 +10337,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argR, loadLE(Ity_F64, mkexpr(addr, tid), guest_code.rip) );
+         assign( argR, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("%scomisd %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  dis_buf,
@@ -10352,7 +10352,7 @@ DisResult disInstr_AMD64_WRK (
                mk_reg(OFFB_CC_DEP1),
                binop( Iop_And64,
                       unop( Iop_32Uto64, 
-                            binop(Iop_CmpF64, mkexpr(argL, tid), mkexpr(argR, tid)) ),
+                            binop(Iop_CmpF64, mkexpr(argL, tid, Ity_I32), mkexpr(argR, tid, Ity_I32)) ),
                       mkU64(0x45)
           )));
 
@@ -10373,7 +10373,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("cvtdq2pd %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10381,12 +10381,12 @@ DisResult disInstr_AMD64_WRK (
 
       putXMMRegLane64F( 
          gregOfRexRM(pfx,modrm), 0,
-         unop(Iop_I32toF64, unop(Iop_64to32, mkexpr(arg64, tid)))
+         unop(Iop_I32toF64, unop(Iop_64to32, mkexpr(arg64, tid, Ity_I64)))
       );
 
       putXMMRegLane64F(
          gregOfRexRM(pfx,modrm), 1, 
-         unop(Iop_I32toF64, unop(Iop_64HIto32, mkexpr(arg64, tid)))
+         unop(Iop_I32toF64, unop(Iop_64HIto32, mkexpr(arg64, tid, Ity_I64)))
       );
 
       goto decode_success;
@@ -10407,7 +10407,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip));
+         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          delta += 2+alen;
          DIP("cvtdq2ps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10417,8 +10417,8 @@ DisResult disInstr_AMD64_WRK (
       breakup128to32s(tid,  argV, &t3, &t2, &t1, &t0 );
 
 #     define CVT(_t)  binop( Iop_F64toF32,                    \
-                             mkexpr(rmode, tid),                   \
-                             unop(Iop_I32toF64,mkexpr(_t, tid)))
+                             mkexpr(rmode, tid, Ity_I32),                   \
+                             unop(Iop_I32toF64,mkexpr(_t, tid, Ity_I32)))
       
       putXMMRegLane32F( gregOfRexRM(pfx,modrm), 3, CVT(t3) );
       putXMMRegLane32F( gregOfRexRM(pfx,modrm), 2, CVT(t2) );
@@ -10452,7 +10452,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("cvt%spd2dq %s,%s\n", r2zero ? "t" : "",
                                    dis_buf,
@@ -10468,13 +10468,13 @@ DisResult disInstr_AMD64_WRK (
       t0 = newTemp(Ity_F64);
       t1 = newTemp(Ity_F64);
       assign( t0, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128to64, mkexpr(argV, tid))) );
+                       unop(Iop_V128to64, mkexpr(argV, tid, Ity_V128))) );
       assign( t1, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128HIto64, mkexpr(argV, tid))) );
+                       unop(Iop_V128HIto64, mkexpr(argV, tid, Ity_V128))) );
       
 #     define CVT(_t)  binop( Iop_F64toI32,                    \
-                             mkexpr(rmode, tid),                   \
-                             mkexpr(_t, tid) )
+                             mkexpr(rmode, tid, Ity_I32),                   \
+                             mkexpr(_t, tid, Ity_F32) )
       
       putXMMRegLane32( gregOfRexRM(pfx,modrm), 3, mkU32(0) );
       putXMMRegLane32( gregOfRexRM(pfx,modrm), 2, mkU32(0) );
@@ -10510,9 +10510,9 @@ DisResult disInstr_AMD64_WRK (
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid), guest_code.rip));
+         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          assign(f64hi, loadLE(Ity_F64, binop( Iop_Add64, 
-                                              mkexpr(addr, tid), 
+                                              mkexpr(addr, tid, Ity_I64), 
                                               mkU64(8) ),
 			      guest_code.rip));
          delta += 2+alen;
@@ -10530,12 +10530,12 @@ DisResult disInstr_AMD64_WRK (
       assign( 
          dst64,
          binop( Iop_32HLto64,
-                binop( Iop_F64toI32, mkexpr(rmode, tid), mkexpr(f64hi, tid) ),
-                binop( Iop_F64toI32, mkexpr(rmode, tid), mkexpr(f64lo, tid) )
+                binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64hi, tid, Ity_F64) ),
+                binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64) )
               )
       );
 
-      putMMXReg(gregLO3ofRM(modrm), mkexpr(dst64, tid));
+      putMMXReg(gregLO3ofRM(modrm), mkexpr(dst64, tid, Ity_I64));
       goto decode_success;
    }
 
@@ -10558,7 +10558,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("cvtpd2ps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10568,13 +10568,13 @@ DisResult disInstr_AMD64_WRK (
       t0 = newTemp(Ity_F64);
       t1 = newTemp(Ity_F64);
       assign( t0, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128to64, mkexpr(argV, tid))) );
+                       unop(Iop_V128to64, mkexpr(argV, tid, Ity_V128))) );
       assign( t1, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128HIto64, mkexpr(argV, tid))) );
+                       unop(Iop_V128HIto64, mkexpr(argV, tid, Ity_V128))) );
       
 #     define CVT(_t)  binop( Iop_F64toF32,                    \
-                             mkexpr(rmode, tid),                   \
-                             mkexpr(_t, tid) )
+                             mkexpr(rmode, tid, Ity_I32),                   \
+                             mkexpr(_t, tid, Ity_F64) )
       
       putXMMRegLane32(  gregOfRexRM(pfx,modrm), 3, mkU32(0) );
       putXMMRegLane32(  gregOfRexRM(pfx,modrm), 2, mkU32(0) );
@@ -10601,7 +10601,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("cvtpi2pd %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10609,12 +10609,12 @@ DisResult disInstr_AMD64_WRK (
 
       putXMMRegLane64F( 
          gregOfRexRM(pfx,modrm), 0,
-         unop(Iop_I32toF64, unop(Iop_64to32, mkexpr(arg64, tid)) )
+         unop(Iop_I32toF64, unop(Iop_64to32, mkexpr(arg64, tid, Ity_I64)) )
       );
 
       putXMMRegLane64F( 
          gregOfRexRM(pfx,modrm), 1,
-         unop(Iop_I32toF64, unop(Iop_64HIto32, mkexpr(arg64, tid)) )
+         unop(Iop_I32toF64, unop(Iop_64HIto32, mkexpr(arg64, tid, Ity_I64)) )
       );
 
       goto decode_success;
@@ -10640,7 +10640,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("cvtps2dq %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10658,9 +10658,9 @@ DisResult disInstr_AMD64_WRK (
          bottleneck it can be improved. */
 #     define CVT(_t)                             \
          binop( Iop_F64toI32,                    \
-                mkexpr(rmode, tid),                   \
+                mkexpr(rmode, tid, Ity_I32),                   \
                 unop( Iop_F32toF64,              \
-                      unop( Iop_ReinterpI32asF32, mkexpr(_t, tid))) )
+                      unop( Iop_ReinterpI32asF32, mkexpr(_t, tid, Ity_I32))) )
       
       putXMMRegLane32( gregOfRexRM(pfx,modrm), 3, CVT(t3) );
       putXMMRegLane32( gregOfRexRM(pfx,modrm), 2, CVT(t2) );
@@ -10688,9 +10688,9 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-	 assign( f32lo, loadLE(Ity_F32, mkexpr(addr, tid), guest_code.rip) );
+	 assign( f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
 	 assign( f32hi, loadLE(Ity_F32, 
-                               binop(Iop_Add64,mkexpr(addr, tid),mkU64(4)),
+                               binop(Iop_Add64,mkexpr(addr, tid, Ity_I64),mkU64(4)),
 			       guest_code.rip) );
          delta += 2+alen;
          DIP("cvtps2pd %s,%s\n", dis_buf,
@@ -10698,9 +10698,9 @@ DisResult disInstr_AMD64_WRK (
       }
 
       putXMMRegLane64F( gregOfRexRM(pfx,modrm), 1,
-                        unop(Iop_F32toF64, mkexpr(f32hi, tid)) );
+                        unop(Iop_F32toF64, mkexpr(f32hi, tid, Ity_F32)) );
       putXMMRegLane64F( gregOfRexRM(pfx,modrm), 0,
-                        unop(Iop_F32toF64, mkexpr(f32lo, tid)) );
+                        unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32)) );
 
       goto decode_success;
    }
@@ -10734,7 +10734,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameIReg(sz, gregOfRexRM(pfx,modrm), False));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid), guest_code.rip));
+         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          delta += 2+alen;
          DIP("cvt%ssd2si %s,%s\n", r2zero ? "t" : "",
                                    dis_buf,
@@ -10749,10 +10749,10 @@ DisResult disInstr_AMD64_WRK (
 
       if (sz == 4) {
          putIReg32( gregOfRexRM(pfx,modrm),
-                    binop( Iop_F64toI32, mkexpr(rmode, tid), mkexpr(f64lo, tid)) );
+                    binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64)) );
       } else {
          putIReg64( gregOfRexRM(pfx,modrm),
-                    binop( Iop_F64toI64, mkexpr(rmode, tid), mkexpr(f64lo, tid)) );
+                    binop( Iop_F64toI64, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64)) );
       }
 
       goto decode_success;
@@ -10774,7 +10774,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid), guest_code.rip));
+         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          delta += 2+alen;
          DIP("cvtsd2ss %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -10783,7 +10783,7 @@ DisResult disInstr_AMD64_WRK (
       assign( rmode, get_sse_roundingmode(tid) );
       putXMMRegLane32F( 
          gregOfRexRM(pfx,modrm), 0, 
-         binop( Iop_F64toF32, mkexpr(rmode, tid), mkexpr(f64lo, tid) )
+         binop( Iop_F64toF32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64) )
       );
 
       goto decode_success;
@@ -10806,13 +10806,13 @@ DisResult disInstr_AMD64_WRK (
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
             addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-            assign( arg32, loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip));
+            assign( arg32, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip));
             delta += 2+alen;
             DIP("cvtsi2sd %s,%s\n", dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)) );
          }
          putXMMRegLane64F( gregOfRexRM(pfx,modrm), 0,
-                           unop(Iop_I32toF64, mkexpr(arg32, tid)) 
+                           unop(Iop_I32toF64, mkexpr(arg32, tid, Ity_I32)) 
          );
       } else {
          /* sz == 8 */
@@ -10824,7 +10824,7 @@ DisResult disInstr_AMD64_WRK (
                                      nameXMMReg(gregOfRexRM(pfx,modrm)));
          } else {
             addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-            assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+            assign( arg64, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
             delta += 2+alen;
             DIP("cvtsi2sdq %s,%s\n", dis_buf,
                                      nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10834,7 +10834,7 @@ DisResult disInstr_AMD64_WRK (
             0,
             binop( Iop_I64toF64,
                    get_sse_roundingmode(tid),
-                   mkexpr(arg64, tid)
+                   mkexpr(arg64, tid, Ity_I64)
             ) 
          );
 
@@ -10857,14 +10857,14 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid), guest_code.rip));
+         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          delta += 2+alen;
          DIP("cvtss2sd %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
       putXMMRegLane64F( gregOfRexRM(pfx,modrm), 0, 
-                        unop( Iop_F32toF64, mkexpr(f32lo, tid) ) );
+                        unop( Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32) ) );
 
       goto decode_success;
    }
@@ -10944,7 +10944,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("mov%s %s,%s\n", wot, dis_buf,
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -10961,7 +10961,7 @@ DisResult disInstr_AMD64_WRK (
          /* fall through; awaiting test case */
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
          DIP("mov[ua]pd %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
                                   dis_buf );
          delta += 2+alen;
@@ -10998,8 +10998,8 @@ DisResult disInstr_AMD64_WRK (
          putXMMReg(
             gregOfRexRM(pfx,modrm),
             sz == 4 
-               ?  unop( Iop_32UtoV128,loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip) ) 
-	       :  unop( Iop_64UtoV128,loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) )
+               ?  unop( Iop_32UtoV128,loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip) ) 
+	       :  unop( Iop_64UtoV128,loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) )
          );
          DIP("mov%c %s, %s\n", sz == 4 ? 'd' : 'q', dis_buf, 
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -11029,7 +11029,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode(tid, guest_code,  &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
-         storeLE( mkexpr(addr, tid),
+         storeLE( mkexpr(addr, tid, Ity_I64),
                   sz == 4
                      ? getXMMRegLane32(tid, gregOfRexRM(pfx,modrm),0)
                      : getXMMRegLane64(tid,gregOfRexRM(pfx,modrm),0) );
@@ -11052,7 +11052,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode(tid, guest_code,  &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
-         storeLE( mkexpr(addr, tid), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
          DIP("movdqa %s, %s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), dis_buf);
       }
       goto decode_success;
@@ -11071,7 +11071,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movdqu %s,%s\n", dis_buf,
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -11093,7 +11093,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode(tid, guest_code,  &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
-         storeLE( mkexpr(addr, tid), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
          DIP("movdqu %s, %s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), dis_buf);
       }
       goto decode_success;
@@ -11128,7 +11128,7 @@ DisResult disInstr_AMD64_WRK (
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 1/*upper lane*/,
-                          loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+                          loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movhpd %s,%s\n", dis_buf, 
                                nameXMMReg( gregOfRexRM(pfx,modrm) ));
          goto decode_success;
@@ -11142,7 +11142,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2;
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          delta += alen;
-         storeLE( mkexpr(addr, tid), 
+         storeLE( mkexpr(addr, tid, Ity_I64), 
                   getXMMRegLane64(tid, gregOfRexRM(pfx,guest_code[delta+2]),
                                    1/*upper lane*/ ) );
          DIP("movhpd %s,%s\n", nameXMMReg( gregOfRexRM(pfx,guest_code[delta+2]) ),
@@ -11163,7 +11163,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+alen;
          putXMMRegLane64( gregOfRexRM(pfx,modrm),
                           0/*lower lane*/,
-                          loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+                          loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movlpd %s, %s\n", 
              dis_buf, nameXMMReg( gregOfRexRM(pfx,modrm) ));
          goto decode_success;
@@ -11177,7 +11177,7 @@ DisResult disInstr_AMD64_WRK (
       if (!epartIsReg(modrm)) {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          delta += 2+alen;
-         storeLE( mkexpr(addr, tid), 
+         storeLE( mkexpr(addr, tid, Ity_I64), 
                   getXMMRegLane64(tid, gregOfRexRM(pfx,modrm), 
                                    0/*lower lane*/ ) );
          DIP("movlpd %s, %s\n", nameXMMReg( gregOfRexRM(pfx,modrm) ),
@@ -11210,7 +11210,7 @@ DisResult disInstr_AMD64_WRK (
                             binop(Iop_Shr32, getXMMRegLane32(tid, src,3), mkU8(30)),
                             mkU32(2) ));
          putIReg32( gregOfRexRM(pfx,modrm),
-                    binop(Iop_Or32, mkexpr(t0, tid), mkexpr(t1, tid))
+                    binop(Iop_Or32, mkexpr(t0, tid, Ity_I32), mkexpr(t1, tid, Ity_I32))
                   );
          DIP("movmskpd %s,%s\n", nameXMMReg(src), 
                                  nameIReg32(gregOfRexRM(pfx,modrm)));
@@ -11246,16 +11246,16 @@ DisResult disInstr_AMD64_WRK (
                   binop(Iop_SarN8x8, 
                         getXMMRegLane64(tid, eregOfRexRM(pfx,modrm), 0 ), 
                         mkU8(7) ) ));
-         assign( olddata, loadLE( Ity_V128, mkexpr(addr, tid), guest_code.rip ));
+         assign( olddata, loadLE( Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip ));
          assign( newdata, 
                  binop(Iop_OrV128, 
                        binop(Iop_AndV128, 
-                             mkexpr(regD, tid), 
-                             mkexpr(mask, tid) ),
+                             mkexpr(regD, tid, Ity_V128), 
+                             mkexpr(mask, tid, Ity_V128) ),
                        binop(Iop_AndV128, 
-                             mkexpr(olddata, tid),
-                             unop(Iop_NotV128, mkexpr(mask, tid)))) );
-         storeLE( mkexpr(addr, tid), mkexpr(newdata, tid) );
+                             mkexpr(olddata, tid, Ity_V128),
+                             unop(Iop_NotV128, mkexpr(mask, tid, Ity_V128)))) );
+         storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(newdata, tid, Ity_V128) );
 
          delta += 2+1;
          DIP("maskmovdqu %s,%s\n", nameXMMReg( eregOfRexRM(pfx,modrm) ),
@@ -11271,7 +11271,7 @@ DisResult disInstr_AMD64_WRK (
       modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
          DIP("movntdq %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -11288,7 +11288,7 @@ DisResult disInstr_AMD64_WRK (
       modrm = getUChar(guest_code, delta+2);
       if (!epartIsReg(modrm)) {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid), getIRegG(tid, sz, pfx, modrm) );
+         storeLE( mkexpr(addr, tid, Ity_I64), getIRegG(tid, sz, pfx, modrm) );
          DIP("movnti %s,%s\n", dis_buf,
                                nameIRegG(sz, pfx, modrm));
          delta += 2+alen;
@@ -11308,7 +11308,7 @@ DisResult disInstr_AMD64_WRK (
          /* dst: lo half copied, hi half zeroed */
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid), 
+         storeLE( mkexpr(addr, tid, Ity_I64), 
                   getXMMRegLane64(tid, gregOfRexRM(pfx,modrm), 0 ));
          DIP("movq %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)), dis_buf );
          delta += 2+alen;
@@ -11363,7 +11363,7 @@ DisResult disInstr_AMD64_WRK (
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), mkV128(0) );
          putXMMRegLane64( gregOfRexRM(pfx,modrm), 0,
-                          loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+                          loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movsd %s,%s\n", dis_buf,
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -11385,7 +11385,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         storeLE( mkexpr(addr, tid),
+         storeLE( mkexpr(addr, tid, Ity_I64),
                   getXMMRegLane64(tid,gregOfRexRM(pfx,modrm), 0) );
          DIP("movsd %s,%s\n", nameXMMReg(gregOfRexRM(pfx,modrm)),
                               dis_buf);
@@ -11440,7 +11440,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 1 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          select = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("shufpd $%d,%s,%s\n", select, 
@@ -11448,13 +11448,13 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid)) );
-      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid)) );
-      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
+      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
+      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
-#     define SELD(n) mkexpr((n)==0 ? d0 : d1, tid)
-#     define SELS(n) mkexpr((n)==0 ? s0 : s1, tid)
+#     define SELD(n) mkexpr((n)==0 ? d0 : d1, tid, Ity_I64)
+#     define SELS(n) mkexpr((n)==0 ? s0 : s1, tid, Ity_I64)
 
       putXMMReg(
          gregOfRexRM(pfx,modrm), 
@@ -11523,24 +11523,24 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("unpck%sps %s,%s\n", hi ? "h" : "l",
                                   dis_buf,
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid)) );
-      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid)) );
-      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
+      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
+      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
       if (hi) {
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    binop(Iop_64HLtoV128, mkexpr(s1, tid), mkexpr(d1, tid)) );
+                    binop(Iop_64HLtoV128, mkexpr(s1, tid, Ity_I64), mkexpr(d1, tid, Ity_I64)) );
       } else {
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    binop(Iop_64HLtoV128, mkexpr(s0, tid), mkexpr(d0, tid)) );
+                    binop(Iop_64HLtoV128, mkexpr(s0, tid, Ity_I64), mkexpr(d0, tid, Ity_I64)) );
       }
 
       goto decode_success;
@@ -11741,17 +11741,17 @@ DisResult disInstr_AMD64_WRK (
          assign(t5, getXMMReg(tid, eregOfRexRM(pfx,modrm)));
          breakup128to32s(tid,  t5, &t3, &t2, &t1, &t0 );
          switch (guest_code[delta+3] & 7) {
-            case 0:  assign(t4, unop(Iop_32to16,   mkexpr(t0, tid))); break;
-            case 1:  assign(t4, unop(Iop_32HIto16, mkexpr(t0, tid))); break;
-            case 2:  assign(t4, unop(Iop_32to16,   mkexpr(t1, tid))); break;
-            case 3:  assign(t4, unop(Iop_32HIto16, mkexpr(t1, tid))); break;
-            case 4:  assign(t4, unop(Iop_32to16,   mkexpr(t2, tid))); break;
-            case 5:  assign(t4, unop(Iop_32HIto16, mkexpr(t2, tid))); break;
-            case 6:  assign(t4, unop(Iop_32to16,   mkexpr(t3, tid))); break;
-            case 7:  assign(t4, unop(Iop_32HIto16, mkexpr(t3, tid))); break;
+            case 0:  assign(t4, unop(Iop_32to16,   mkexpr(t0, tid, Ity_I32))); break;
+            case 1:  assign(t4, unop(Iop_32HIto16, mkexpr(t0, tid, Ity_I32))); break;
+            case 2:  assign(t4, unop(Iop_32to16,   mkexpr(t1, tid, Ity_I32))); break;
+            case 3:  assign(t4, unop(Iop_32HIto16, mkexpr(t1, tid, Ity_I32))); break;
+            case 4:  assign(t4, unop(Iop_32to16,   mkexpr(t2, tid, Ity_I32))); break;
+            case 5:  assign(t4, unop(Iop_32HIto16, mkexpr(t2, tid, Ity_I32))); break;
+            case 6:  assign(t4, unop(Iop_32to16,   mkexpr(t3, tid, Ity_I32))); break;
+            case 7:  assign(t4, unop(Iop_32HIto16, mkexpr(t3, tid, Ity_I32))); break;
             default: vassert(0);
          }
-         putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_16Uto32, mkexpr(t4, tid)));
+         putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_16Uto32, mkexpr(t4, tid, Ity_I16)));
          DIP("pextrw $%d,%s,%s\n",
              (Int)guest_code[delta+3], nameXMMReg(eregOfRexRM(pfx,modrm)),
                            nameIReg32(gregOfRexRM(pfx,modrm)));
@@ -11784,13 +11784,13 @@ DisResult disInstr_AMD64_WRK (
                            1/*byte after the amode*/ );
          delta += 3+alen;
          lane = guest_code[delta+3+alen-1];
-         assign(t4, loadLE(Ity_I16, mkexpr(addr, tid), guest_code.rip));
+         assign(t4, loadLE(Ity_I16, mkexpr(addr, tid, Ity_I64), guest_code.rip));
          DIP("pinsrw $%d,%s,%s\n", (Int)lane,
                                    dis_buf,
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
      }
 
-      putXMMRegLane16( gregOfRexRM(pfx,modrm), lane & 7, mkexpr(t4, tid) );
+      putXMMRegLane16( gregOfRexRM(pfx,modrm), lane & 7, mkexpr(t4, tid, Ity_I16) );
       goto decode_success;
    }
 
@@ -11815,30 +11815,30 @@ DisResult disInstr_AMD64_WRK (
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( s1V, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( s1V, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("pmaddwd %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
       assign( s2V, getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
-      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid)) );
-      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid)) );
-      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid)) );
-      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid)) );
+      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid, Ity_V128)) );
+      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid, Ity_V128)) );
+      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid, Ity_V128)) );
+      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid, Ity_V128)) );
       assign( dHi, mkIRExprCCall(
                       Ity_I64, 0/*regparms*/,
                       "amd64g_calculate_mmx_pmaddwd", 
                       (void *)amd64g_calculate_mmx_pmaddwd,
-                      mkIRExprVec_2( mkexpr(s1Hi, tid), mkexpr(s2Hi, tid))
+                      mkIRExprVec_2( mkexpr(s1Hi, tid, Ity_I64), mkexpr(s2Hi, tid, Ity_I64))
                    ));
       assign( dLo, mkIRExprCCall(
                       Ity_I64, 0/*regparms*/,
                       "amd64g_calculate_mmx_pmaddwd", 
                       (void *)amd64g_calculate_mmx_pmaddwd,
-                      mkIRExprVec_2( mkexpr(s1Lo, tid), mkexpr(s2Lo, tid))
+                      mkIRExprVec_2( mkexpr(s1Lo, tid, Ity_I64), mkexpr(s2Lo, tid, Ity_I64))
                    ));
-      assign( dV, binop(Iop_64HLtoV128, mkexpr(dHi, tid), mkexpr(dLo, tid))) ;
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid));
+      assign( dV, binop(Iop_64HLtoV128, mkexpr(dHi, tid, Ity_I64), mkexpr(dLo, tid, Ity_I64))) ;
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
       goto decode_success;
    }
 
@@ -11893,8 +11893,8 @@ DisResult disInstr_AMD64_WRK (
                        Ity_I64, 0/*regparms*/, 
                        "amd64g_calculate_sse_pmovmskb",
                        (void *)amd64g_calculate_sse_pmovmskb,
-                       mkIRExprVec_2( mkexpr(t1, tid), mkexpr(t0, tid) )));
-         putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_64to32,mkexpr(t5, tid)));
+                       mkIRExprVec_2( mkexpr(t1, tid, Ity_I64), mkexpr(t0, tid, Ity_I64) )));
+         putIReg32(gregOfRexRM(pfx,modrm), unop(Iop_64to32,mkexpr(t5, tid, Ity_I64)));
          DIP("pmovmskb %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                  nameIReg32(gregOfRexRM(pfx,modrm)));
          delta += 3;
@@ -11948,16 +11948,16 @@ DisResult disInstr_AMD64_WRK (
                                 nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("pmuludq %s,%s\n", dis_buf,
                                 nameMMXReg(gregLO3ofRM(modrm)));
       }
 
-      assign( t0, unop(Iop_64to32, mkexpr(dV, tid)) );
-      assign( t1, unop(Iop_64to32, mkexpr(sV, tid)) );
+      assign( t0, unop(Iop_64to32, mkexpr(dV, tid, Ity_I64)) );
+      assign( t1, unop(Iop_64to32, mkexpr(sV, tid, Ity_I64)) );
       putMMXReg( gregLO3ofRM(modrm),
-                 binop( Iop_MullU32, mkexpr(t0, tid), mkexpr(t1, tid) ) );
+                 binop( Iop_MullU32, mkexpr(t0, tid, Ity_I32), mkexpr(t1, tid, Ity_I32) ) );
       goto decode_success;
    }
 
@@ -11985,7 +11985,7 @@ DisResult disInstr_AMD64_WRK (
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("pmuludq %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -11994,10 +11994,10 @@ DisResult disInstr_AMD64_WRK (
       breakup128to32s(tid,  dV, &d3, &d2, &d1, &d0 );
       breakup128to32s(tid,  sV, &s3, &s2, &s1, &s0 );
 
-      assign( t0, binop( Iop_MullU32, mkexpr(d0, tid), mkexpr(s0, tid)) );
-      putXMMRegLane64( gregOfRexRM(pfx,modrm), 0, mkexpr(t0, tid) );
-      assign( t1, binop( Iop_MullU32, mkexpr(d2, tid), mkexpr(s2, tid)) );
-      putXMMRegLane64( gregOfRexRM(pfx,modrm), 1, mkexpr(t1, tid) );
+      assign( t0, binop( Iop_MullU32, mkexpr(d0, tid, Ity_I32), mkexpr(s0, tid, Ity_I32)) );
+      putXMMRegLane64( gregOfRexRM(pfx,modrm), 0, mkexpr(t0, tid, Ity_I32) );
+      assign( t1, binop( Iop_MullU32, mkexpr(d2, tid, Ity_I32), mkexpr(s2, tid, Ity_I32)) );
+      putXMMRegLane64( gregOfRexRM(pfx,modrm), 1, mkexpr(t1, tid, Ity_I32) );
       goto decode_success;
    }
 
@@ -12029,30 +12029,30 @@ DisResult disInstr_AMD64_WRK (
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( s1V, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( s1V, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 2+alen;
          DIP("psadbw %s,%s\n", dis_buf,
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
       assign( s2V, getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
-      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid)) );
-      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid)) );
-      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid)) );
-      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid)) );
+      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid, Ity_V128)) );
+      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid, Ity_V128)) );
+      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid, Ity_V128)) );
+      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid, Ity_V128)) );
       assign( dHi, mkIRExprCCall(
                       Ity_I64, 0/*regparms*/,
                       "amd64g_calculate_mmx_psadbw", 
                       (void *)amd64g_calculate_mmx_psadbw,
-                      mkIRExprVec_2( mkexpr(s1Hi, tid), mkexpr(s2Hi, tid))
+                      mkIRExprVec_2( mkexpr(s1Hi, tid, Ity_I64), mkexpr(s2Hi, tid, Ity_I64))
                    ));
       assign( dLo, mkIRExprCCall(
                       Ity_I64, 0/*regparms*/,
                       "amd64g_calculate_mmx_psadbw", 
                       (void *)amd64g_calculate_mmx_psadbw,
-                      mkIRExprVec_2( mkexpr(s1Lo, tid), mkexpr(s2Lo, tid))
+                      mkIRExprVec_2( mkexpr(s1Lo, tid, Ity_I64), mkexpr(s2Lo, tid, Ity_I64))
                    ));
-      assign( dV, binop(Iop_64HLtoV128, mkexpr(dHi, tid), mkexpr(dLo, tid))) ;
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid));
+      assign( dV, binop(Iop_64HLtoV128, mkexpr(dHi, tid, Ity_I64), mkexpr(dLo, tid, Ity_I64))) ;
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
       goto decode_success;
    }
 
@@ -12075,7 +12075,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
 	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshufd $%d,%s,%s\n", order, 
@@ -12090,7 +12090,7 @@ DisResult disInstr_AMD64_WRK (
 	     mk128from32s(tid, SEL((order>>6)&3), SEL((order>>4)&3),
                            SEL((order>>2)&3), SEL((order>>0)&3) )
       );
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid));
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
 #     undef SEL
       goto decode_success;
    }
@@ -12117,14 +12117,14 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
 	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshufhw $%d,%s,%s\n", order, 
                                     dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
-      assign( sVhi, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
+      assign( sVhi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
       breakup64to16s(tid,  sVhi, &s3, &s2, &s1, &s0 );
 
 #     define SEL(n) \
@@ -12134,9 +12134,9 @@ DisResult disInstr_AMD64_WRK (
                           SEL((order>>2)&3), SEL((order>>0)&3) )
       );
       assign(dV, binop( Iop_64HLtoV128, 
-                        mkexpr(dVhi, tid),
-                        unop(Iop_V128to64, mkexpr(sV, tid))) );
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid));
+                        mkexpr(dVhi, tid, Ity_I64),
+                        unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128))) );
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
 #     undef SEL
       goto decode_success;
    }
@@ -12163,14 +12163,14 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
 	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshuflw $%d,%s,%s\n", order, 
                                     dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
-      assign( sVlo, unop(Iop_V128to64, mkexpr(sV, tid)) );
+      assign( sVlo, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
       breakup64to16s(tid,  sVlo, &s3, &s2, &s1, &s0 );
 
 #     define SEL(n) \
@@ -12180,9 +12180,9 @@ DisResult disInstr_AMD64_WRK (
                           SEL((order>>2)&3), SEL((order>>0)&3) )
       );
       assign(dV, binop( Iop_64HLtoV128,
-                        unop(Iop_V128HIto64, mkexpr(sV, tid)),
-                        mkexpr(dVlo, tid) ) );
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid));
+                        unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)),
+                        mkexpr(dVlo, tid, Ity_I64) ) );
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
 #     undef SEL
       goto decode_success;
    }
@@ -12229,39 +12229,39 @@ DisResult disInstr_AMD64_WRK (
       }
 
       assign( sV, getXMMReg(tid, reg) );
-      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid)) );
+      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
 
       if (imm == 0) {
-         assign( lo64r, mkexpr(lo64, tid) );
-         assign( hi64r, mkexpr(hi64, tid) );
+         assign( lo64r, mkexpr(lo64, tid, Ity_I64) );
+         assign( hi64r, mkexpr(hi64, tid, Ity_I64) );
       }
       else
       if (imm == 8) {
          assign( lo64r, mkU64(0) );
-         assign( hi64r, mkexpr(lo64, tid) );
+         assign( hi64r, mkexpr(lo64, tid, Ity_I64) );
       }
       else
       if (imm > 8) {
          assign( lo64r, mkU64(0) );
          assign( hi64r, binop( Iop_Shl64, 
-                               mkexpr(lo64, tid),
+                               mkexpr(lo64, tid, Ity_I64),
                                mkU8( 8*(imm-8) ) ));
       } else {
          assign( lo64r, binop( Iop_Shl64, 
-                               mkexpr(lo64, tid),
+                               mkexpr(lo64, tid, Ity_I64),
                                mkU8(8 * imm) ));
          assign( hi64r, 
                  binop( Iop_Or64,
-                        binop(Iop_Shl64, mkexpr(hi64, tid), 
+                        binop(Iop_Shl64, mkexpr(hi64, tid, Ity_I64), 
                                          mkU8(8 * imm)),
-                        binop(Iop_Shr64, mkexpr(lo64, tid),
+                        binop(Iop_Shr64, mkexpr(lo64, tid, Ity_I64),
                                          mkU8(8 * (8 - imm)) )
                       )
                );
       }
-      assign( dV, binop(Iop_64HLtoV128, mkexpr(hi64r, tid), mkexpr(lo64r, tid)) );
-      putXMMReg(reg, mkexpr(dV, tid));
+      assign( dV, binop(Iop_64HLtoV128, mkexpr(hi64r, tid, Ity_I64), mkexpr(lo64r, tid, Ity_I64)) );
+      putXMMReg(reg, mkexpr(dV, tid, Ity_V128));
       goto decode_success;
    }
 
@@ -12371,40 +12371,40 @@ DisResult disInstr_AMD64_WRK (
       }
 
       assign( sV, getXMMReg(tid, reg) );
-      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid)) );
+      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
 
       if (imm == 0) {
-         assign( lo64r, mkexpr(lo64, tid) );
-         assign( hi64r, mkexpr(hi64, tid) );
+         assign( lo64r, mkexpr(lo64, tid, Ity_I64) );
+         assign( hi64r, mkexpr(hi64, tid, Ity_I64) );
       }
       else
       if (imm == 8) {
          assign( hi64r, mkU64(0) );
-         assign( lo64r, mkexpr(hi64, tid) );
+         assign( lo64r, mkexpr(hi64, tid, Ity_I64) );
       }
       else 
       if (imm > 8) {
          assign( hi64r, mkU64(0) );
          assign( lo64r, binop( Iop_Shr64, 
-                               mkexpr(hi64, tid),
+                               mkexpr(hi64, tid, Ity_I64),
                                mkU8( 8*(imm-8) ) ));
       } else {
          assign( hi64r, binop( Iop_Shr64, 
-                               mkexpr(hi64, tid),
+                               mkexpr(hi64, tid, Ity_I64),
                                mkU8(8 * imm) ));
          assign( lo64r, 
                  binop( Iop_Or64,
-                        binop(Iop_Shr64, mkexpr(lo64, tid), 
+                        binop(Iop_Shr64, mkexpr(lo64, tid, Ity_I64), 
                                          mkU8(8 * imm)),
-                        binop(Iop_Shl64, mkexpr(hi64, tid),
+                        binop(Iop_Shl64, mkexpr(hi64, tid, Ity_I64),
                                          mkU8(8 * (8 - imm)) )
                       )
                );
       }
 
-      assign( dV, binop(Iop_64HLtoV128, mkexpr(hi64r, tid), mkexpr(lo64r, tid)) );
-      putXMMReg(reg, mkexpr(dV, tid));
+      assign( dV, binop(Iop_64HLtoV128, mkexpr(hi64r, tid, Ity_I64), mkexpr(lo64r, tid, Ity_I64)) );
+      putXMMReg(reg, mkexpr(dV, tid, Ity_V128));
       goto decode_success;
    }
 
@@ -12629,7 +12629,7 @@ DisResult disInstr_AMD64_WRK (
       stmt( IRStmt_Put(
                mk_reg(OFFB_TISTART),
                binop( Iop_And64, 
-                      mkexpr(addr, tid), 
+                      mkexpr(addr, tid, Ity_I64), 
                       mkU64( ~(lineszB-1) ))) );
 
       stmt( IRStmt_Put(mk_reg(OFFB_TILEN), mkU64(lineszB) ) );
@@ -12669,7 +12669,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movs%cdup %s,%s\n", isH ? 'h' : 'l',
 	     dis_buf,
              nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12697,17 +12697,17 @@ DisResult disInstr_AMD64_WRK (
          DIP("movddup %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
-         assign ( d0, unop(Iop_V128to64, mkexpr(sV, tid)) );
+         assign ( d0, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( d0, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( d0, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("movddup %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
       }
 
       putXMMReg( gregOfRexRM(pfx,modrm), 
-                 binop(Iop_64HLtoV128,mkexpr(d0, tid),mkexpr(d0, tid)) );
+                 binop(Iop_64HLtoV128,mkexpr(d0, tid, Ity_I64),mkexpr(d0, tid, Ity_I64)) );
       goto decode_success;
    }
 
@@ -12729,7 +12729,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("addsubps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12737,8 +12737,8 @@ DisResult disInstr_AMD64_WRK (
 
       assign( gV, getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
 
-      assign( addV, binop(Iop_Add32Fx4, mkexpr(gV, tid), mkexpr(eV, tid)) );
-      assign( subV, binop(Iop_Sub32Fx4, mkexpr(gV, tid), mkexpr(eV, tid)) );
+      assign( addV, binop(Iop_Add32Fx4, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
+      assign( subV, binop(Iop_Sub32Fx4, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
 
       breakup128to32s(tid,  addV, &a3, &a2, &a1, &a0 );
       breakup128to32s(tid,  subV, &s3, &s2, &s1, &s0 );
@@ -12765,7 +12765,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("addsubpd %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12773,14 +12773,14 @@ DisResult disInstr_AMD64_WRK (
 
       assign( gV, getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
 
-      assign( addV, binop(Iop_Add64Fx2, mkexpr(gV, tid), mkexpr(eV, tid)) );
-      assign( subV, binop(Iop_Sub64Fx2, mkexpr(gV, tid), mkexpr(eV, tid)) );
+      assign( addV, binop(Iop_Add64Fx2, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
+      assign( subV, binop(Iop_Sub64Fx2, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
 
-      assign( a1, unop(Iop_V128HIto64, mkexpr(addV, tid) ));
-      assign( s0, unop(Iop_V128to64,   mkexpr(subV, tid) ));
+      assign( a1, unop(Iop_V128HIto64, mkexpr(addV, tid, Ity_V128) ));
+      assign( s0, unop(Iop_V128to64,   mkexpr(subV, tid, Ity_V128) ));
 
       putXMMReg( gregOfRexRM(pfx,modrm), 
-                 binop(Iop_64HLtoV128, mkexpr(a1, tid), mkexpr(s0, tid)) );
+                 binop(Iop_64HLtoV128, mkexpr(a1, tid, Ity_I64), mkexpr(s0, tid, Ity_I64)) );
       goto decode_success;
    }
 
@@ -12805,7 +12805,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("h%sps %s,%s\n", str, dis_buf,
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12821,7 +12821,7 @@ DisResult disInstr_AMD64_WRK (
 
       putXMMReg( gregOfRexRM(pfx,modrm), 
                  binop(isAdd ? Iop_Add32Fx4 : Iop_Sub32Fx4, 
-                       mkexpr(leftV, tid), mkexpr(rightV, tid) ) );
+                       mkexpr(leftV, tid, Ity_V128), mkexpr(rightV, tid, Ity_V128) ) );
       goto decode_success;
    }
 
@@ -12848,7 +12848,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("h%spd %s,%s\n", str, dis_buf,
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12856,17 +12856,17 @@ DisResult disInstr_AMD64_WRK (
 
       assign( gV, getXMMReg(tid, gregOfRexRM(pfx,modrm)) );
 
-      assign( e1, unop(Iop_V128HIto64, mkexpr(eV, tid) ));
-      assign( e0, unop(Iop_V128to64, mkexpr(eV, tid) ));
-      assign( g1, unop(Iop_V128HIto64, mkexpr(gV, tid) ));
-      assign( g0, unop(Iop_V128to64, mkexpr(gV, tid) ));
+      assign( e1, unop(Iop_V128HIto64, mkexpr(eV, tid, Ity_V128) ));
+      assign( e0, unop(Iop_V128to64, mkexpr(eV, tid, Ity_V128) ));
+      assign( g1, unop(Iop_V128HIto64, mkexpr(gV, tid, Ity_V128) ));
+      assign( g0, unop(Iop_V128to64, mkexpr(gV, tid, Ity_V128) ));
 
-      assign( leftV,  binop(Iop_64HLtoV128, mkexpr(e0, tid),mkexpr(g0, tid)) );
-      assign( rightV, binop(Iop_64HLtoV128, mkexpr(e1, tid),mkexpr(g1, tid)) );
+      assign( leftV,  binop(Iop_64HLtoV128, mkexpr(e0, tid, Ity_I64),mkexpr(g0, tid, Ity_I64)) );
+      assign( rightV, binop(Iop_64HLtoV128, mkexpr(e1, tid, Ity_I64),mkexpr(g1, tid, Ity_I64)) );
 
       putXMMReg( gregOfRexRM(pfx,modrm), 
                  binop(isAdd ? Iop_Add64Fx2 : Iop_Sub64Fx2, 
-                       mkexpr(leftV, tid), mkexpr(rightV, tid) ) );
+                       mkexpr(leftV, tid, Ity_V128), mkexpr(rightV, tid, Ity_V128) ) );
       goto decode_success;
    }
 
@@ -12879,7 +12879,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("lddqu %s,%s\n", dis_buf,
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12918,7 +12918,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pmaddubsw %s,%s\n", dis_buf,
                                   nameMMXReg(gregLO3ofRM(modrm)));
@@ -12926,23 +12926,23 @@ DisResult disInstr_AMD64_WRK (
 
       /* compute dV unsigned x sV signed */
       assign( sVoddsSX,
-              binop(Iop_SarN16x4, mkexpr(sV, tid), mkU8(8)) );
+              binop(Iop_SarN16x4, mkexpr(sV, tid, Ity_I64), mkU8(8)) );
       assign( sVevensSX,
               binop(Iop_SarN16x4, 
-                    binop(Iop_ShlN16x4, mkexpr(sV, tid), mkU8(8)), 
+                    binop(Iop_ShlN16x4, mkexpr(sV, tid, Ity_I64), mkU8(8)), 
                     mkU8(8)) );
       assign( dVoddsZX,
-              binop(Iop_ShrN16x4, mkexpr(dV, tid), mkU8(8)) );
+              binop(Iop_ShrN16x4, mkexpr(dV, tid, Ity_I64), mkU8(8)) );
       assign( dVevensZX,
               binop(Iop_ShrN16x4,
-                    binop(Iop_ShlN16x4, mkexpr(dV, tid), mkU8(8)),
+                    binop(Iop_ShlN16x4, mkexpr(dV, tid, Ity_I64), mkU8(8)),
                     mkU8(8)) );
 
       putMMXReg(
          gregLO3ofRM(modrm),
          binop(Iop_QAdd16Sx4,
-               binop(Iop_Mul16x4, mkexpr(sVoddsSX, tid), mkexpr(dVoddsZX, tid)),
-               binop(Iop_Mul16x4, mkexpr(sVevensSX, tid), mkexpr(dVevensZX, tid))
+               binop(Iop_Mul16x4, mkexpr(sVoddsSX, tid, Ity_I64), mkexpr(dVoddsZX, tid, Ity_I64)),
+               binop(Iop_Mul16x4, mkexpr(sVevensSX, tid, Ity_I64), mkexpr(dVevensZX, tid, Ity_I64))
          )
       );
       goto decode_success;
@@ -12971,7 +12971,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pmaddubsw %s,%s\n", dis_buf,
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12979,23 +12979,23 @@ DisResult disInstr_AMD64_WRK (
 
       /* compute dV unsigned x sV signed */
       assign( sVoddsSX,
-              binop(Iop_SarN16x8, mkexpr(sV, tid), mkU8(8)) );
+              binop(Iop_SarN16x8, mkexpr(sV, tid, Ity_V128), mkU8(8)) );
       assign( sVevensSX,
               binop(Iop_SarN16x8, 
-                    binop(Iop_ShlN16x8, mkexpr(sV, tid), mkU8(8)), 
+                    binop(Iop_ShlN16x8, mkexpr(sV, tid, Ity_V128), mkU8(8)), 
                     mkU8(8)) );
       assign( dVoddsZX,
-              binop(Iop_ShrN16x8, mkexpr(dV, tid), mkU8(8)) );
+              binop(Iop_ShrN16x8, mkexpr(dV, tid, Ity_V128), mkU8(8)) );
       assign( dVevensZX,
               binop(Iop_ShrN16x8,
-                    binop(Iop_ShlN16x8, mkexpr(dV, tid), mkU8(8)),
+                    binop(Iop_ShlN16x8, mkexpr(dV, tid, Ity_V128), mkU8(8)),
                     mkU8(8)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
          binop(Iop_QAdd16Sx8,
-               binop(Iop_Mul16x8, mkexpr(sVoddsSX, tid), mkexpr(dVoddsZX, tid)),
-               binop(Iop_Mul16x8, mkexpr(sVevensSX, tid), mkexpr(dVevensZX, tid))
+               binop(Iop_Mul16x8, mkexpr(sVoddsSX, tid, Ity_V128), mkexpr(dVoddsZX, tid, Ity_V128)),
+               binop(Iop_Mul16x8, mkexpr(sVevensSX, tid, Ity_V128), mkexpr(dVevensZX, tid, Ity_V128))
          )
       );
       goto decode_success;
@@ -13053,7 +13053,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("ph%s %s,%s\n", str, dis_buf,
                                   nameMMXReg(gregLO3ofRM(modrm)));
@@ -13062,8 +13062,8 @@ DisResult disInstr_AMD64_WRK (
       putMMXReg(
          gregLO3ofRM(modrm),
          binop(opV64,
-               binop(opCatE,mkexpr(sV, tid),mkexpr(dV, tid)),
-               binop(opCatO,mkexpr(sV, tid),mkexpr(dV, tid))
+               binop(opCatE,mkexpr(sV, tid, Ity_I64),mkexpr(dV, tid, Ity_I64)),
+               binop(opCatO,mkexpr(sV, tid, Ity_I64),mkexpr(dV, tid, Ity_I64))
          )
       );
       goto decode_success;
@@ -13124,16 +13124,16 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          DIP("ph%s %s,%s\n", str, dis_buf,
                              nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 3+alen;
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
       /* This isn't a particularly efficient way to compute the
          result, but at least it avoids a proliferation of IROps,
@@ -13142,12 +13142,12 @@ DisResult disInstr_AMD64_WRK (
          gregOfRexRM(pfx,modrm), 
          binop(Iop_64HLtoV128,
                binop(opV64,
-                     binop(opCatE,mkexpr(sHi, tid),mkexpr(sLo, tid)),
-                     binop(opCatO,mkexpr(sHi, tid),mkexpr(sLo, tid))
+                     binop(opCatE,mkexpr(sHi, tid, Ity_I64),mkexpr(sLo, tid, Ity_I64)),
+                     binop(opCatO,mkexpr(sHi, tid, Ity_I64),mkexpr(sLo, tid, Ity_I64))
                ),
                binop(opV64,
-                     binop(opCatE,mkexpr(dHi, tid),mkexpr(dLo, tid)),
-                     binop(opCatO,mkexpr(dHi, tid),mkexpr(dLo, tid))
+                     binop(opCatE,mkexpr(dHi, tid, Ity_I64),mkexpr(dLo, tid, Ity_I64)),
+                     binop(opCatO,mkexpr(dHi, tid, Ity_I64),mkexpr(dLo, tid, Ity_I64))
                )
          )
       );
@@ -13173,7 +13173,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pmulhrsw %s,%s\n", dis_buf,
                                  nameMMXReg(gregLO3ofRM(modrm)));
@@ -13181,7 +13181,7 @@ DisResult disInstr_AMD64_WRK (
 
       putMMXReg(
          gregLO3ofRM(modrm),
-         dis_PMULHRSW_helper( tid, mkexpr(sV, tid), mkexpr(dV, tid) )
+         dis_PMULHRSW_helper( tid, mkexpr(sV, tid, Ity_I64), mkexpr(dV, tid, Ity_I64) )
       );
       goto decode_success;
    }
@@ -13209,22 +13209,22 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pmulhrsw %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
          binop(Iop_64HLtoV128,
-               dis_PMULHRSW_helper( tid, mkexpr(sHi, tid), mkexpr(dHi, tid) ),
-               dis_PMULHRSW_helper( tid, mkexpr(sLo, tid), mkexpr(dLo, tid) )
+               dis_PMULHRSW_helper( tid, mkexpr(sHi, tid, Ity_I64), mkexpr(dHi, tid, Ity_I64) ),
+               dis_PMULHRSW_helper( tid, mkexpr(sLo, tid, Ity_I64), mkexpr(dLo, tid, Ity_I64) )
          )
       );
       goto decode_success;
@@ -13260,7 +13260,7 @@ DisResult disInstr_AMD64_WRK (
                                      nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("psign%s %s,%s\n", str, dis_buf,
                                      nameMMXReg(gregLO3ofRM(modrm)));
@@ -13268,7 +13268,7 @@ DisResult disInstr_AMD64_WRK (
 
       putMMXReg(
          gregLO3ofRM(modrm),
-         dis_PSIGN_helper( tid, mkexpr(sV, tid), mkexpr(dV, tid), laneszB )
+         dis_PSIGN_helper( tid, mkexpr(sV, tid, Ity_I64), mkexpr(dV, tid, Ity_I64), laneszB )
       );
       goto decode_success;
    }
@@ -13307,22 +13307,22 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("psign%s %s,%s\n", str, dis_buf,
                                      nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
          binop(Iop_64HLtoV128,
-               dis_PSIGN_helper(tid, mkexpr(sHi, tid), mkexpr(dHi, tid), laneszB ),
-               dis_PSIGN_helper(tid, mkexpr(sLo, tid), mkexpr(dLo, tid), laneszB )
+               dis_PSIGN_helper(tid, mkexpr(sHi, tid, Ity_I64), mkexpr(dHi, tid, Ity_I64), laneszB ),
+               dis_PSIGN_helper(tid, mkexpr(sLo, tid, Ity_I64), mkexpr(dLo, tid, Ity_I64), laneszB )
          )
       );
       goto decode_success;
@@ -13356,7 +13356,7 @@ DisResult disInstr_AMD64_WRK (
                                     nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pabs%s %s,%s\n", str, dis_buf,
                                     nameMMXReg(gregLO3ofRM(modrm)));
@@ -13364,7 +13364,7 @@ DisResult disInstr_AMD64_WRK (
 
       putMMXReg(
          gregLO3ofRM(modrm),
-         dis_PABS_helper(tid,  mkexpr(sV, tid), laneszB )
+         dis_PABS_helper(tid,  mkexpr(sV, tid, Ity_I64), laneszB )
       );
       goto decode_success;
    }
@@ -13399,20 +13399,20 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pabs%s %s,%s\n", str, dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
          binop(Iop_64HLtoV128,
-               dis_PABS_helper(tid,  mkexpr(sHi, tid), laneszB ),
-               dis_PABS_helper(tid,  mkexpr(sLo, tid), laneszB )
+               dis_PABS_helper(tid,  mkexpr(sHi, tid, Ity_I64), laneszB ),
+               dis_PABS_helper(tid,  mkexpr(sLo, tid, Ity_I64), laneszB )
          )
       );
       goto decode_success;
@@ -13438,7 +13438,7 @@ DisResult disInstr_AMD64_WRK (
                                      nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 1 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          d64 = (Long)guest_code[delta+3+alen];
          delta += 3+alen+1;
          DIP("palignr $%d%s,%s\n", (Int)d64,
@@ -13447,20 +13447,20 @@ DisResult disInstr_AMD64_WRK (
       }
 
       if (d64 == 0) {
-         assign( res, mkexpr(sV, tid) );
+         assign( res, mkexpr(sV, tid, Ity_I64) );
       }
       else if (d64 >= 1 && d64 <= 7) {
          assign(res, 
                 binop(Iop_Or64,
-                      binop(Iop_Shr64, mkexpr(sV, tid), mkU8(8*d64)),
-                      binop(Iop_Shl64, mkexpr(dV, tid), mkU8(8*(8-d64))
+                      binop(Iop_Shr64, mkexpr(sV, tid, Ity_I64), mkU8(8*d64)),
+                      binop(Iop_Shl64, mkexpr(dV, tid, Ity_I64), mkU8(8*(8-d64))
                      )));
       }
       else if (d64 == 8) {
-        assign( res, mkexpr(dV, tid) );
+        assign( res, mkexpr(dV, tid, Ity_I64) );
       }
       else if (d64 >= 9 && d64 <= 15) {
-         assign( res, binop(Iop_Shr64, mkexpr(dV, tid), mkU8(8*(d64-8))) );
+         assign( res, binop(Iop_Shr64, mkexpr(dV, tid, Ity_I64), mkU8(8*(d64-8))) );
       }
       else if (d64 >= 16 && d64 <= 255) {
          assign( res, mkU64(0) );
@@ -13468,7 +13468,7 @@ DisResult disInstr_AMD64_WRK (
       else
          vassert(0);
 
-      putMMXReg( gregLO3ofRM(modrm), mkexpr(res, tid) );
+      putMMXReg( gregLO3ofRM(modrm), mkexpr(res, tid, Ity_I64) );
       goto decode_success;
    }
 
@@ -13498,7 +13498,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 1 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          d64 = (Long)guest_code[delta+3+alen];
          delta += 3+alen+1;
          DIP("palignr $%d,%s,%s\n", (Int)d64,
@@ -13506,42 +13506,42 @@ DisResult disInstr_AMD64_WRK (
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
       if (d64 == 0) {
-         assign( rHi, mkexpr(sHi, tid) );
-         assign( rLo, mkexpr(sLo, tid) );
+         assign( rHi, mkexpr(sHi, tid, Ity_I64) );
+         assign( rLo, mkexpr(sLo, tid, Ity_I64) );
       }
       else if (d64 >= 1 && d64 <= 7) {
          assign( rHi, dis_PALIGNR_XMM_helper(tid, dLo, sHi, d64) );
          assign( rLo, dis_PALIGNR_XMM_helper(tid, sHi, sLo, d64) );
       }
       else if (d64 == 8) {
-         assign( rHi, mkexpr(dLo, tid) );
-         assign( rLo, mkexpr(sHi, tid) );
+         assign( rHi, mkexpr(dLo, tid, Ity_I64) );
+         assign( rLo, mkexpr(sHi, tid, Ity_I64) );
       }
       else if (d64 >= 9 && d64 <= 15) {
          assign( rHi, dis_PALIGNR_XMM_helper(tid, dHi, dLo, d64-8) );
          assign( rLo, dis_PALIGNR_XMM_helper(tid, dLo, sHi, d64-8) );
       }
       else if (d64 == 16) {
-         assign( rHi, mkexpr(dHi, tid) );
-         assign( rLo, mkexpr(dLo, tid) );
+         assign( rHi, mkexpr(dHi, tid, Ity_I64) );
+         assign( rLo, mkexpr(dLo, tid, Ity_I64) );
       }
       else if (d64 >= 17 && d64 <= 23) {
-         assign( rHi, binop(Iop_Shr64, mkexpr(dHi, tid), mkU8(8*(d64-16))) );
+         assign( rHi, binop(Iop_Shr64, mkexpr(dHi, tid, Ity_I64), mkU8(8*(d64-16))) );
          assign( rLo, dis_PALIGNR_XMM_helper(tid, dHi, dLo, d64-16) );
       }
       else if (d64 == 24) {
          assign( rHi, mkU64(0) );
-         assign( rLo, mkexpr(dHi, tid) );
+         assign( rLo, mkexpr(dHi, tid, Ity_I64) );
       }
       else if (d64 >= 25 && d64 <= 31) {
          assign( rHi, mkU64(0) );
-         assign( rLo, binop(Iop_Shr64, mkexpr(dHi, tid), mkU8(8*(d64-24))) );
+         assign( rLo, binop(Iop_Shr64, mkexpr(dHi, tid, Ity_I64), mkU8(8*(d64-24))) );
       }
       else if (d64 >= 32 && d64 <= 255) {
          assign( rHi, mkU64(0) );
@@ -13552,7 +13552,7 @@ DisResult disInstr_AMD64_WRK (
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
-         binop(Iop_64HLtoV128, mkexpr(rHi, tid), mkexpr(rLo, tid))
+         binop(Iop_64HLtoV128, mkexpr(rHi, tid, Ity_I64), mkexpr(rLo, tid, Ity_I64))
       );
       goto decode_success;
    }
@@ -13575,7 +13575,7 @@ DisResult disInstr_AMD64_WRK (
                                nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
-         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pshufb %s,%s\n", dis_buf,
                                nameMMXReg(gregLO3ofRM(modrm)));
@@ -13588,11 +13588,11 @@ DisResult disInstr_AMD64_WRK (
             /* permute the lanes */
             binop(
                Iop_Perm8x8,
-               mkexpr(dV, tid),
-               binop(Iop_And64, mkexpr(sV, tid), mkU64(0x0707070707070707ULL))
+               mkexpr(dV, tid, Ity_I64),
+               binop(Iop_And64, mkexpr(sV, tid, Ity_I64), mkU64(0x0707070707070707ULL))
             ),
             /* mask off lanes which have (index & 0x80) == 0x80 */
-            unop(Iop_Not64, binop(Iop_SarN8x8, mkexpr(sV, tid), mkU8(7)))
+            unop(Iop_Not64, binop(Iop_SarN8x8, mkexpr(sV, tid, Ity_I64), mkU8(7)))
          )
       );
       goto decode_success;
@@ -13631,16 +13631,16 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid), guest_code.rip) );
+         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          delta += 3+alen;
          DIP("pshufb %s,%s\n", dis_buf,
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
 
       assign( sevens, mkU64(0x0707070707070707ULL) );
 
@@ -13654,59 +13654,59 @@ DisResult disInstr_AMD64_WRK (
       */
       assign(
          mask0x80hi,
-         unop(Iop_Not64, binop(Iop_SarN8x8,mkexpr(sHi, tid),mkU8(7))));
+         unop(Iop_Not64, binop(Iop_SarN8x8,mkexpr(sHi, tid, Ity_I64),mkU8(7))));
 
       assign(
          maskBit3hi,
          binop(Iop_SarN8x8,
-               binop(Iop_ShlN8x8,mkexpr(sHi, tid),mkU8(4)),
+               binop(Iop_ShlN8x8,mkexpr(sHi, tid, Ity_I64),mkU8(4)),
                mkU8(7)));
 
-      assign(sAnd7hi, binop(Iop_And64,mkexpr(sHi, tid),mkexpr(sevens, tid)));
+      assign(sAnd7hi, binop(Iop_And64,mkexpr(sHi, tid, Ity_I64),mkexpr(sevens, tid, Ity_I64)));
 
       assign(
          permdHi,
          binop(
             Iop_Or64,
             binop(Iop_And64,
-                  binop(Iop_Perm8x8,mkexpr(dHi, tid),mkexpr(sAnd7hi, tid)),
-                  mkexpr(maskBit3hi, tid)),
+                  binop(Iop_Perm8x8,mkexpr(dHi, tid, Ity_I64),mkexpr(sAnd7hi, tid, Ity_I64)),
+                  mkexpr(maskBit3hi, tid, Ity_I64)),
             binop(Iop_And64,
-                  binop(Iop_Perm8x8,mkexpr(dLo, tid),mkexpr(sAnd7hi, tid)),
-                  unop(Iop_Not64,mkexpr(maskBit3hi, tid))) ));
+                  binop(Iop_Perm8x8,mkexpr(dLo, tid, Ity_I64),mkexpr(sAnd7hi, tid, Ity_I64)),
+                  unop(Iop_Not64,mkexpr(maskBit3hi, tid, Ity_I64))) ));
 
-      assign(rHi, binop(Iop_And64,mkexpr(permdHi, tid),mkexpr(mask0x80hi, tid)) );
+      assign(rHi, binop(Iop_And64,mkexpr(permdHi, tid, Ity_I64),mkexpr(mask0x80hi, tid, Ity_I64)) );
 
       /* And the same for the lower half of the result.  What fun. */
 
       assign(
          mask0x80lo,
-         unop(Iop_Not64, binop(Iop_SarN8x8,mkexpr(sLo, tid),mkU8(7))));
+         unop(Iop_Not64, binop(Iop_SarN8x8,mkexpr(sLo, tid, Ity_I64),mkU8(7))));
 
       assign(
          maskBit3lo,
          binop(Iop_SarN8x8,
-               binop(Iop_ShlN8x8,mkexpr(sLo, tid),mkU8(4)),
+               binop(Iop_ShlN8x8,mkexpr(sLo, tid, Ity_I64),mkU8(4)),
                mkU8(7)));
 
-      assign(sAnd7lo, binop(Iop_And64,mkexpr(sLo, tid),mkexpr(sevens, tid)));
+      assign(sAnd7lo, binop(Iop_And64,mkexpr(sLo, tid, Ity_I64),mkexpr(sevens, tid, Ity_I64)));
 
       assign(
          permdLo,
          binop(
             Iop_Or64,
             binop(Iop_And64,
-                  binop(Iop_Perm8x8,mkexpr(dHi, tid),mkexpr(sAnd7lo, tid)),
-                  mkexpr(maskBit3lo, tid)),
+                  binop(Iop_Perm8x8,mkexpr(dHi, tid, Ity_I64),mkexpr(sAnd7lo, tid, Ity_I64)),
+                  mkexpr(maskBit3lo, tid, Ity_I64)),
             binop(Iop_And64,
-                  binop(Iop_Perm8x8,mkexpr(dLo, tid),mkexpr(sAnd7lo, tid)),
-                  unop(Iop_Not64,mkexpr(maskBit3lo, tid))) ));
+                  binop(Iop_Perm8x8,mkexpr(dLo, tid, Ity_I64),mkexpr(sAnd7lo, tid, Ity_I64)),
+                  unop(Iop_Not64,mkexpr(maskBit3lo, tid, Ity_I64))) ));
 
-      assign(rLo, binop(Iop_And64,mkexpr(permdLo, tid),mkexpr(mask0x80lo, tid)) );
+      assign(rLo, binop(Iop_And64,mkexpr(permdLo, tid, Ity_I64),mkexpr(mask0x80lo, tid, Ity_I64)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
-         binop(Iop_64HLtoV128, mkexpr(rHi, tid), mkexpr(rLo, tid))
+         binop(Iop_64HLtoV128, mkexpr(rHi, tid, Ity_I64), mkexpr(rLo, tid, Ity_I64))
       );
       goto decode_success;
    }
@@ -13753,8 +13753,8 @@ DisResult disInstr_AMD64_WRK (
       /* (guest_RIP_bbstart+delta) == return-to addr, d64 == call-to addr */
       t1 = newTemp(Ity_I64); 
       assign(t1, binop(Iop_Sub64, getIReg64(tid, R_RSP), mkU64(8)));
-      putIReg64(R_RSP, mkexpr(t1, tid));
-      storeLE( mkexpr(t1, tid), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta));
+      putIReg64(R_RSP, mkexpr(t1, tid, Ity_I64));
+      storeLE( mkexpr(t1, tid, Ity_I64), mkU64(guest_RIP_bbstart.rip.unwrap_vexrip()+delta));
       t2 = newTemp(Ity_I64);
       assign(t2, mkU64((Addr64)d64));
       make_redzone_AbiHint(vbi, t1, t2/*nia*/, "call-d32", tid);
@@ -13798,10 +13798,10 @@ DisResult disInstr_AMD64_WRK (
       assign(t1, getIReg64(tid, R_RBP));
       /* First PUT RSP looks redundant, but need it because RSP must
          always be up-to-date for Memcheck to work... */
-      putIReg64(R_RSP, mkexpr(t1, tid));
-      assign(t2, loadLE(Ity_I64,mkexpr(t1, tid), guest_code.rip));
-      putIReg64(R_RBP, mkexpr(t2, tid));
-      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t1, tid), mkU64(8)) );
+      putIReg64(R_RSP, mkexpr(t1, tid, Ity_I64));
+      assign(t2, loadLE(Ity_I64,mkexpr(t1, tid, Ity_I64), guest_code.rip));
+      putIReg64(R_RBP, mkexpr(t2, tid, Ity_I64));
+      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t1, tid, Ity_I64), mkU64(8)) );
       DIP("leave\n");
       break;
 
@@ -14167,8 +14167,8 @@ DisResult disInstr_AMD64_WRK (
          do the full 64-bit calculation and then truncate it. */
       putIRegG( sz, pfx, modrm, 
                          sz == 4
-                            ? unop(Iop_64to32, mkexpr(addr, tid))
-                            : mkexpr(addr, tid)
+                            ? unop(Iop_64to32, mkexpr(addr, tid, Ity_I64))
+                            : mkexpr(addr, tid, Ity_I64)
               );
       DIP("lea%c %s, %s\n", nameISize(sz), dis_buf, 
                             nameIRegG(sz,pfx,modrm));
@@ -14194,7 +14194,7 @@ DisResult disInstr_AMD64_WRK (
       ty = szToITy(sz);
       addr = newTemp(Ity_I64);
       assign( addr, handleAddrOverrides(tid, vbi, pfx, mkU64(d64)) );
-      putIRegRAX(sz, loadLE( ty, mkexpr(addr, tid), guest_code.rip ));
+      putIRegRAX(sz, loadLE( ty, mkexpr(addr, tid, Ity_I64), guest_code.rip ));
       DIP("mov%c %s0x%llx, %s\n", nameISize(sz), 
                                   segRegTxt(pfx), d64,
                                   nameIRegRAX(sz));
@@ -14212,7 +14212,7 @@ DisResult disInstr_AMD64_WRK (
       ty = szToITy(sz);
       addr = newTemp(Ity_I64);
       assign( addr, handleAddrOverrides(tid, vbi, pfx, mkU64(d64)) );
-      storeLE( mkexpr(addr, tid), getIRegRAX(tid, sz) );
+      storeLE( mkexpr(addr, tid, Ity_I64), getIRegRAX(tid, sz) );
       DIP("mov%c %s, %s0x%llx\n", nameISize(sz), nameIRegRAX(sz),
                                   segRegTxt(pfx), d64);
       break;
@@ -14285,7 +14285,7 @@ DisResult disInstr_AMD64_WRK (
          delta += alen;
          d64 = getSDisp(guest_code, imin(4,sz),delta);
          delta += imin(4,sz);
-         storeLE(mkexpr(addr, tid), 
+         storeLE(mkexpr(addr, tid, Ity_I64), 
                  mkU(szToITy(sz), d64 & mkSizeMask(sz)));
          DIP("mov%c $%lld, %s\n", nameISize(sz), (Long)d64, dis_buf);
       }
@@ -14313,7 +14313,7 @@ DisResult disInstr_AMD64_WRK (
             delta += alen;
             putIRegG(8, pfx, modrm, 
                              unop(Iop_32Sto64, 
-                                  loadLE(Ity_I32, mkexpr(addr, tid), guest_code.rip)));
+                                  loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64), guest_code.rip)));
             DIP("movslq %s,%s\n", dis_buf, 
                 nameIRegG(8, pfx, modrm));
             break;
@@ -14573,12 +14573,13 @@ DisResult disInstr_AMD64_WRK (
       vassert(sz == 2 || sz == 4 || sz == 8);
       if (sz == 4)
          sz = 8; /* there is no encoding for 32-bit pop in 64-bit mode */
-      t1 = newTemp(szToITy(sz)); 
+      ty = szToITy(sz);
+      t1 = newTemp(ty); 
       t2 = newTemp(Ity_I64);
       assign(t2, getIReg64(tid, R_RSP));
-      assign(t1, loadLE(szToITy(sz),mkexpr(t2, tid), guest_code.rip));
-      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t2, tid), mkU64(sz)));
-      putIRegRexB(sz, pfx, opc-0x58, mkexpr(t1, tid));
+      assign(t1, loadLE(ty,mkexpr(t2, tid, Ity_I64), guest_code.rip));
+      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t2, tid, Ity_I64), mkU64(sz)));
+      putIRegRexB(sz, pfx, opc-0x58, mkexpr(t1, tid, ty));
       DIP("pop%c %s\n", nameISize(sz), nameIRegRexB(sz,pfx,opc-0x58));
       break;
 
@@ -14591,15 +14592,15 @@ DisResult disInstr_AMD64_WRK (
       if (sz != 8) goto decode_failure; // until we know a sz==2 test case exists
       t1 = newTemp(Ity_I64); t2 = newTemp(Ity_I64);
       assign(t2, getIReg64(tid, R_RSP));
-      assign(t1, widenUto64(loadLE(szToITy(sz),mkexpr(t2, tid), guest_code.rip)));
-      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t2, tid), mkU64(sz)));
+      assign(t1, widenUto64(loadLE(szToITy(sz),mkexpr(t2, tid, Ity_I64), guest_code.rip)));
+      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t2, tid, Ity_I64), mkU64(sz)));
       /* t1 is the flag word.  Mask out everything except OSZACP and 
          set the flags thunk to AMD64G_CC_OP_COPY. */
       stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), 
                         binop(Iop_And64,
-                              mkexpr(t1, tid), 
+                              mkexpr(t1, tid, Ity_I64), 
                               mkU64( AMD64G_CC_MASK_C | AMD64G_CC_MASK_P 
                                      | AMD64G_CC_MASK_A | AMD64G_CC_MASK_Z 
                                      | AMD64G_CC_MASK_S| AMD64G_CC_MASK_O )
@@ -14615,7 +14616,7 @@ DisResult disInstr_AMD64_WRK (
                   unop(Iop_32to8,
                   unop(Iop_64to32,
                        binop(Iop_And64, 
-                             binop(Iop_Shr64, mkexpr(t1, tid), mkU8(10)), 
+                             binop(Iop_Shr64, mkexpr(t1, tid, Ity_I64), mkU8(10)), 
                              mkU64(1)))),
                   mkU64(1), 
                   mkU64(0xFFFFFFFFFFFFFFFFULL))) 
@@ -14628,7 +14629,7 @@ DisResult disInstr_AMD64_WRK (
                   unop(Iop_32to8,
                   unop(Iop_64to32,
                        binop(Iop_And64, 
-                             binop(Iop_Shr64, mkexpr(t1, tid), mkU8(21)), 
+                             binop(Iop_Shr64, mkexpr(t1, tid, Ity_I64), mkU8(21)), 
                              mkU64(1)))),
                   mkU64(0), 
                   mkU64(1))) 
@@ -14682,17 +14683,17 @@ DisResult disInstr_AMD64_WRK (
       t1 = newTemp(Ity_I64);
       t3 = newTemp(Ity_I64);
       assign( t1, getIReg64(tid, R_RSP) );
-      assign( t3, loadLE(Ity_I64, mkexpr(t1, tid), guest_code.rip) );
+      assign( t3, loadLE(Ity_I64, mkexpr(t1, tid, Ity_I64), guest_code.rip) );
        
       /* Increase RSP; must be done before the STORE.  Intel manual
          says: If the RSP register is used as a base register for
          addressing a destination operand in memory, the POP
          instruction computes the effective address of the operand
          after it increments the RSP register.  */
-      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t1, tid), mkU64(sz)) );
+      putIReg64(R_RSP, binop(Iop_Add64, mkexpr(t1, tid, Ity_I64), mkU64(sz)) );
 
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta, dis_buf, 0 );
-      storeLE( mkexpr(addr, tid), mkexpr(t3, tid) );
+      storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t3, tid, Ity_I64) );
 
       DIP("popl %s\n", dis_buf);
 
@@ -14729,8 +14730,8 @@ DisResult disInstr_AMD64_WRK (
       t2 = newTemp(Ity_I64);
       assign(t1, getIRegRexB(tid,sz, pfx, opc-0x50));
       assign(t2, binop(Iop_Sub64, getIReg64(tid, R_RSP), mkU64(sz)));
-      putIReg64(R_RSP, mkexpr(t2, tid) );
-      storeLE(mkexpr(t2, tid),mkexpr(t1, tid));
+      putIReg64(R_RSP, mkexpr(t2, tid, Ity_I64) );
+      storeLE(mkexpr(t2, tid, Ity_I64),mkexpr(t1, tid, ty));
       DIP("push%c %s\n", nameISize(sz), nameIRegRexB(sz,pfx,opc-0x50));
       break;
 
@@ -14752,12 +14753,12 @@ DisResult disInstr_AMD64_WRK (
       t1 = newTemp(Ity_I64);
       t2 = newTemp(ty);
       assign( t1, binop(Iop_Sub64,getIReg64(tid, R_RSP),mkU64(sz)) );
-      putIReg64(R_RSP, mkexpr(t1, tid) );
+      putIReg64(R_RSP, mkexpr(t1, tid, Ity_I64) );
       /* stop mkU16 asserting if d32 is a negative 16-bit number
          (bug #132813) */
       if (ty == Ity_I16)
          d64 &= 0xFFFF;
-      storeLE( mkexpr(t1, tid), mkU(ty,d64) );
+      storeLE(mkexpr(t1, tid, Ity_I64), mkU(ty,d64) );
       DIP("push%c $%lld\n", nameISize(sz), (Long)d64);
       break;
 
@@ -14773,7 +14774,7 @@ DisResult disInstr_AMD64_WRK (
 
       t1 = newTemp(Ity_I64);
       assign( t1, binop(Iop_Sub64,getIReg64(tid, R_RSP),mkU64(sz)) );
-      putIReg64(R_RSP, mkexpr(t1, tid) );
+      putIReg64(R_RSP, mkexpr(t1, tid, Ity_I64) );
 
       t2 = newTemp(Ity_I64);
       assign( t2, mk_amd64g_calculate_rflags_all(tid) );
@@ -14782,7 +14783,7 @@ DisResult disInstr_AMD64_WRK (
          baseBlock[OFFB_DFLAG]. */
       t3 = newTemp(Ity_I64);
       assign( t3, binop(Iop_Or64,
-                        mkexpr(t2, tid),
+                        mkexpr(t2, tid, Ity_I64),
                         binop(Iop_And64,
                               IRExpr_Get(OFFB_DFLAG,Ity_I64,tid,0),
                               mkU64(1<<10))) 
@@ -14791,7 +14792,7 @@ DisResult disInstr_AMD64_WRK (
       /* And patch in the ID flag. */
       t4 = newTemp(Ity_I64);
       assign( t4, binop(Iop_Or64,
-                        mkexpr(t3, tid),
+                        mkexpr(t3, tid, Ity_I64),
                         binop(Iop_And64,
                               binop(Iop_Shl64, IRExpr_Get(OFFB_IDFLAG,Ity_I64,tid,0), 
                                                mkU8(21)),
@@ -14800,10 +14801,10 @@ DisResult disInstr_AMD64_WRK (
 
       /* if sz==2, the stored value needs to be narrowed. */
       if (sz == 2)
-        storeLE( mkexpr(t1, tid), unop(Iop_32to16,
-                             unop(Iop_64to32,mkexpr(t4, tid))) );
+        storeLE(mkexpr(t1, tid, Ity_I64), unop(Iop_32to16,
+                             unop(Iop_64to32,mkexpr(t4, tid, Ity_I64))) );
       else 
-        storeLE( mkexpr(t1, tid), mkexpr(t4, tid) );
+        storeLE(mkexpr(t1, tid, Ity_I64), mkexpr(t4, tid, Ity_I64) );
 
       DIP("pushf%c\n", nameISize(sz));
       break;
@@ -14895,17 +14896,17 @@ DisResult disInstr_AMD64_WRK (
       assign( t0, mk_amd64g_calculate_rflags_all(tid) );
       switch (opc) {
          case 0xF8: 
-            assign( t1, binop(Iop_And64, mkexpr(t0, tid), 
+            assign( t1, binop(Iop_And64, mkexpr(t0, tid, Ity_I64), 
                                          mkU64(~AMD64G_CC_MASK_C)));
             DIP("clc\n");
             break;
          case 0xF9: 
-            assign( t1, binop(Iop_Or64, mkexpr(t0, tid), 
+            assign( t1, binop(Iop_Or64, mkexpr(t0, tid, Ity_I64), 
                                         mkU64(AMD64G_CC_MASK_C)));
             DIP("stc\n");
             break;
          case 0xF5: 
-            assign( t1, binop(Iop_Xor64, mkexpr(t0, tid), 
+            assign( t1, binop(Iop_Xor64, mkexpr(t0, tid, Ity_I64), 
                                          mkU64(AMD64G_CC_MASK_C)));
             DIP("cmc\n");
             break;
@@ -14914,7 +14915,7 @@ DisResult disInstr_AMD64_WRK (
       }
       stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
-      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(t1, tid) ));
+      stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(t1, tid, Ity_I64) ));
       /* Set NDEP even though it isn't used.  This makes redundant-PUT
          elimination of previous stores to this field work better. */
       stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkU64(0) ));
@@ -15077,8 +15078,8 @@ DisResult disInstr_AMD64_WRK (
       if (epartIsReg(modrm)) {
          assign(t1, getIRegE(tid, sz, pfx, modrm));
          assign(t2, getIRegG(tid, sz, pfx, modrm));
-         putIRegG(sz, pfx, modrm, mkexpr(t1, tid));
-         putIRegE(sz, pfx, modrm, mkexpr(t2, tid));
+         putIRegG(sz, pfx, modrm, mkexpr(t1, tid, ty));
+         putIRegE(sz, pfx, modrm, mkexpr(t2, tid, ty));
          delta++;
          DIP("xchg%c %s, %s\n", 
              nameISize(sz), nameIRegG(sz, pfx, modrm), 
@@ -15086,12 +15087,12 @@ DisResult disInstr_AMD64_WRK (
       } else {
          *expect_CAS = True;
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
-         assign( t1, loadLE(ty, mkexpr(addr, tid), guest_code.rip) );
+         assign( t1, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          assign( t2, getIRegG(tid, sz, pfx, modrm) );
-         casLE( mkexpr(addr, tid),
-                mkexpr(t1, tid), mkexpr(t2, tid), guest_RIP_curr_instr,
+         casLE( mkexpr(addr, tid, Ity_I64),
+                mkexpr(t1, tid, ty), mkexpr(t2, tid, ty), guest_RIP_curr_instr,
 		tid );
-         putIRegG( sz, pfx, modrm, mkexpr(t1, tid) );
+         putIRegG( sz, pfx, modrm, mkexpr(t1, tid, ty) );
          delta += alen;
          DIP("xchg%c %s, %s\n", nameISize(sz), 
                                 nameIRegG(sz, pfx, modrm), dis_buf);
@@ -15194,11 +15195,11 @@ DisResult disInstr_AMD64_WRK (
              0/*regparms*/, 
              "amd64g_dirtyhelper_IN", 
              (void *)amd64g_dirtyhelper_IN,
-             mkIRExprVec_2( mkexpr(t1, tid), mkU64(sz) )
+             mkIRExprVec_2( mkexpr(t1, tid, Ity_I64), mkU64(sz) )
           );
       /* do the call, dumping the result in t2. */
       stmt( IRStmt_Dirty(d) );
-      putIRegRAX(sz, narrowTo( ty, mkexpr(t2, tid) ) );
+      putIRegRAX(sz, narrowTo( ty, mkexpr(t2, tid, Ity_I64) ) );
       break;
    }
 
@@ -15241,7 +15242,7 @@ DisResult disInstr_AMD64_WRK (
              0/*regparms*/, 
              "amd64g_dirtyhelper_OUT", 
              (void *)amd64g_dirtyhelper_OUT,
-             mkIRExprVec_3( mkexpr(t1, tid),
+             mkIRExprVec_3( mkexpr(t1, tid, Ity_I64),
                             widenUto64( getIRegRAX(tid, sz) ), 
                             mkU64(sz) )
           );
@@ -15443,18 +15444,18 @@ DisResult disInstr_AMD64_WRK (
             assign( t1, getIRegRexB(tid,4, pfx, opc-0xC8) );
             assign( t2,
                binop(Iop_Or32,
-                  binop(Iop_Shl32, mkexpr(t1, tid), mkU8(24)),
+                  binop(Iop_Shl32, mkexpr(t1, tid, Ity_I32), mkU8(24)),
                binop(Iop_Or32,
-                  binop(Iop_And32, binop(Iop_Shl32, mkexpr(t1, tid), mkU8(8)),
+                  binop(Iop_And32, binop(Iop_Shl32, mkexpr(t1, tid, Ity_I32), mkU8(8)),
                                    mkU32(0x00FF0000)),
                binop(Iop_Or32,
-                  binop(Iop_And32, binop(Iop_Shr32, mkexpr(t1, tid), mkU8(8)),
+                  binop(Iop_And32, binop(Iop_Shr32, mkexpr(t1, tid, Ity_I32), mkU8(8)),
                                    mkU32(0x0000FF00)),
-                  binop(Iop_And32, binop(Iop_Shr32, mkexpr(t1, tid), mkU8(24)),
+                  binop(Iop_And32, binop(Iop_Shr32, mkexpr(t1, tid, Ity_I32), mkU8(24)),
                                    mkU32(0x000000FF) )
                )))
             );
-            putIRegRexB(4, pfx, opc-0xC8, mkexpr(t2, tid));
+            putIRegRexB(4, pfx, opc-0xC8, mkexpr(t2, tid, Ity_I32));
             DIP("bswapl %s\n", nameIRegRexB(4, pfx, opc-0xC8));
             break;
          }
@@ -15472,11 +15473,11 @@ DisResult disInstr_AMD64_WRK (
             assign( s8,
                     binop(Iop_Or64,
                           binop(Iop_Shr64,
-                                binop(Iop_And64,mkexpr(t1, tid),mkexpr(m8, tid)),
+                                binop(Iop_And64,mkexpr(t1, tid, Ity_I64),mkexpr(m8, tid, Ity_I64)),
                                 mkU8(8)),
                           binop(Iop_And64,
-                                binop(Iop_Shl64,mkexpr(t1, tid),mkU8(8)),
-                                mkexpr(m8, tid))
+                                binop(Iop_Shl64,mkexpr(t1, tid, Ity_I64),mkU8(8)),
+                                mkexpr(m8, tid, Ity_I64))
                          ) 
                   );
 
@@ -15484,11 +15485,11 @@ DisResult disInstr_AMD64_WRK (
             assign( s16,
                     binop(Iop_Or64,
                           binop(Iop_Shr64,
-                                binop(Iop_And64,mkexpr(s8, tid),mkexpr(m16, tid)),
+                                binop(Iop_And64,mkexpr(s8, tid, Ity_I64),mkexpr(m16, tid, Ity_I64)),
                                 mkU8(16)),
                           binop(Iop_And64,
-                                binop(Iop_Shl64,mkexpr(s8, tid),mkU8(16)),
-                                mkexpr(m16, tid))
+                                binop(Iop_Shl64,mkexpr(s8, tid, Ity_I64),mkU8(16)),
+                                mkexpr(m16, tid, Ity_I64))
                          ) 
                   );
 
@@ -15496,15 +15497,15 @@ DisResult disInstr_AMD64_WRK (
             assign( t2,
                     binop(Iop_Or64,
                           binop(Iop_Shr64,
-                                binop(Iop_And64,mkexpr(s16, tid),mkexpr(m32, tid)),
+                                binop(Iop_And64,mkexpr(s16, tid, Ity_I64),mkexpr(m32, tid, Ity_I64)),
                                 mkU8(32)),
                           binop(Iop_And64,
-                                binop(Iop_Shl64,mkexpr(s16, tid),mkU8(32)),
-                                mkexpr(m32, tid))
+                                binop(Iop_Shl64,mkexpr(s16, tid, Ity_I64),mkU8(32)),
+                                mkexpr(m32, tid, Ity_I64))
                          ) 
                   );
 
-            putIRegRexB(8, pfx, opc-0xC8, mkexpr(t2, tid));
+            putIRegRexB(8, pfx, opc-0xC8, mkexpr(t2, tid, Ity_I64));
             DIP("bswapq %s\n", nameIRegRexB(8, pfx, opc-0xC8));
             break;
          } else {
@@ -15624,10 +15625,10 @@ DisResult disInstr_AMD64_WRK (
             However, we also get expdHi64/expdLo64 above as 64-bits
             regardless, because we will need them later in the 32-bit
             case (paradoxically). */
-         assign( expdHi, sz==4 ? unop(Iop_64to32, mkexpr(expdHi64, tid))
-                               : mkexpr(expdHi64, tid) );
-         assign( expdLo, sz==4 ? unop(Iop_64to32, mkexpr(expdLo64, tid))
-                               : mkexpr(expdLo64, tid) );
+         assign( expdHi, sz==4 ? unop(Iop_64to32, mkexpr(expdHi64, tid, Ity_I64))
+                               : mkexpr(expdHi64, tid, Ity_I64) );
+         assign( expdLo, sz==4 ? unop(Iop_64to32, mkexpr(expdLo64, tid, Ity_I64))
+                               : mkexpr(expdLo64, tid, Ity_I64) );
          assign( dataHi, sz==4 ? getIReg32(tid, R_RCX) : getIReg64(tid, R_RCX) );
          assign( dataLo, sz==4 ? getIReg32(tid, R_RBX) : getIReg64(tid, R_RBX) );
 
@@ -15635,17 +15636,17 @@ DisResult disInstr_AMD64_WRK (
          stmt( IRStmt_CAS(
 		  mkIRCAS( threadAndRegister::temp(tid, oldHi, 0),
 			   threadAndRegister::temp(tid, oldLo, 0), 
-                           mkexpr(addr, tid), 
-                           mkexpr(expdHi, tid), mkexpr(expdLo, tid),
-                           mkexpr(dataHi, tid), mkexpr(dataLo, tid)
+                           mkexpr(addr, tid, Ity_I64), 
+                           mkexpr(expdHi, tid, elemTy), mkexpr(expdLo, tid, elemTy),
+                           mkexpr(dataHi, tid, elemTy), mkexpr(dataLo, tid, elemTy)
                )));
 
          /* success when oldHi:oldLo == expdHi:expdLo */
          assign( success,
                  binop(opCasCmpEQ,
                        binop(opOR,
-                             binop(opXOR, mkexpr(oldHi, tid), mkexpr(expdHi, tid)),
-                             binop(opXOR, mkexpr(oldLo, tid), mkexpr(expdLo, tid))
+                             binop(opXOR, mkexpr(oldHi, tid, elemTy), mkexpr(expdHi, tid, elemTy)),
+                             binop(opXOR, mkexpr(oldLo, tid, elemTy), mkexpr(expdLo, tid, elemTy))
                        ),
                        zero
                  ));
@@ -15667,16 +15668,16 @@ DisResult disInstr_AMD64_WRK (
             expdHi64:expdLo64, even if we're doing a cmpxchg8b. */
          /* It's just _so_ much fun ... */
          putIRegRDX( 8,
-                     IRExpr_Mux0X( unop(Iop_1Uto8, mkexpr(success, tid)),
-                                   sz == 4 ? unop(Iop_32Uto64, mkexpr(oldHi, tid))
-                                           : mkexpr(oldHi, tid),
-                                   mkexpr(expdHi64, tid)
+                     IRExpr_Mux0X( unop(Iop_1Uto8, mkexpr(success, tid, Ity_I1)),
+                                   sz == 4 ? unop(Iop_32Uto64, mkexpr(oldHi, tid, elemTy))
+                                           : mkexpr(oldHi, tid, Ity_I64),
+                                   mkexpr(expdHi64, tid, Ity_I64)
                    ));
          putIRegRAX( 8,
-                     IRExpr_Mux0X( unop(Iop_1Uto8, mkexpr(success, tid)),
-                                   sz == 4 ? unop(Iop_32Uto64, mkexpr(oldLo, tid))
-                                           : mkexpr(oldLo, tid),
-                                   mkexpr(expdLo64, tid)
+                     IRExpr_Mux0X( unop(Iop_1Uto8, mkexpr(success, tid, Ity_I1)),
+                                   sz == 4 ? unop(Iop_32Uto64, mkexpr(oldLo, tid, elemTy))
+                                           : mkexpr(oldLo, tid, Ity_I64),
+                                   mkexpr(expdLo64, tid, Ity_I64)
                    ));
 
          /* Copy the success bit into the Z flag and leave the others
@@ -15685,15 +15686,15 @@ DisResult disInstr_AMD64_WRK (
          assign( 
             flags_new,
             binop(Iop_Or64,
-                  binop(Iop_And64, mkexpr(flags_old, tid), 
+                  binop(Iop_And64, mkexpr(flags_old, tid, Ity_I64), 
                                    mkU64(~AMD64G_CC_MASK_Z)),
                   binop(Iop_Shl64,
                         binop(Iop_And64,
-                              unop(Iop_1Uto64, mkexpr(success, tid)), mkU64(1)), 
+                              unop(Iop_1Uto64, mkexpr(success, tid, Ity_I1)), mkU64(1)), 
                         mkU8(AMD64G_CC_SHIFT_Z)) ));
 
          stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(AMD64G_CC_OP_COPY) ));
-         stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(flags_new, tid) ));
+         stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), mkexpr(flags_new, tid, Ity_I64) ));
          stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
          /* Set NDEP even though it isn't used.  This makes
             redundant-PUT elimination of previous stores to this field
@@ -15882,8 +15883,8 @@ DisResult disInstr_AMD64_WRK (
          if (have66orF2orF3(pfx)) goto decode_failure;
          /* execute the dirty call, dumping the result in val. */
          stmt( IRStmt_Dirty(d) );
-         putIRegRDX(4, unop(Iop_64HIto32, mkexpr(val, tid)));
-         putIRegRAX(4, unop(Iop_64to32, mkexpr(val, tid)));
+         putIRegRDX(4, unop(Iop_64HIto32, mkexpr(val, tid, Ity_I64)));
+         putIRegRAX(4, unop(Iop_64to32, mkexpr(val, tid, Ity_I64)));
          DIP("rdtsc\n");
          break;
       }
@@ -15923,13 +15924,13 @@ DisResult disInstr_AMD64_WRK (
          modrm = getUChar(guest_code, delta);
          if (epartIsReg(modrm)) {
             delta++;
-            putIRegE(1, pfx, modrm, mkexpr(t1, tid));
+            putIRegE(1, pfx, modrm, mkexpr(t1, tid, Ity_I8));
             DIP("set%s %s\n", name_AMD64Condcode(AMD64Condcode(opc-0x90)), 
                               nameIRegE(1,pfx,modrm));
          } else {
             addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
             delta += alen;
-            storeLE( mkexpr(addr, tid), mkexpr(t1, tid) );
+            storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, Ity_I8) );
             DIP("set%s %s\n", name_AMD64Condcode(AMD64Condcode(opc-0x90)), dis_buf);
          }
          break;

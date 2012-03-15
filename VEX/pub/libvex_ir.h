@@ -1623,7 +1623,7 @@ extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid, unsigned genera
 extern IRExpr* IRExpr_Get    ( threadAndRegister r, IRType ty );
 extern IRExpr* IRExpr_GetI   ( IRRegArray* descr, IRExpr* ix, Int bias,
 			       unsigned tid );
-extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp, unsigned tid, unsigned generation );
+extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp, IRType ty, unsigned tid, unsigned generation );
 extern IRExpr* IRExpr_Qop    ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                                         IRExpr* arg3, IRExpr* arg4 );
 extern IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 

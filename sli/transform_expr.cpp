@@ -137,7 +137,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 				      helper,
 				      args);
 		addStmtToIRSB(sb, IRStmt_Dirty(f));
-		return IRExpr_RdTmp(dest, tid, 0);
+		return IRExpr_RdTmp(dest, e->ty, tid, 0);
 	}
 	case Iex_Const:
 		return exp;
