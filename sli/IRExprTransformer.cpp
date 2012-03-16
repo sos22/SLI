@@ -71,19 +71,39 @@ IRExprTransformer::transformIex(IRExprClientCall *e)
 {
 	IRExpr **newArgs;
 	int nr_args;
+	int first_changed;
+	IRExpr *newArg;
 	int x;
 	bool t = false;
 
-	for (nr_args = 0; e->args[nr_args]; nr_args++)
+	/* First, scan through until we get the first argument which
+	   needs to be changed by the transformer. */
+	first_changed = 0;
+	while (e->args[first_changed] && !t) {
+		newArg = transformIRExpr(e->args[first_changed], &t);
+		if (t)
+			break;
+		first_changed++;
+	}
+	if (!t) {
+		/* No arguments changed.  This is the common case, so
+		   it's worth optimising for by not allocating the
+		   argument array every time. */
+		return NULL;
+	}
+
+	/* Going to have to allocate a fresh argument array for this
+	 * one. */
+	for (nr_args = first_changed; e->args[nr_args]; nr_args++)
 		;
 	newArgs = alloc_irexpr_array(nr_args + 1);
-	for (x = 0; x < nr_args; x++)
+	for (x = 0; x < first_changed; x++)
+		newArgs[x] = e->args[x];
+	newArgs[first_changed] = newArg;
+	for (x = first_changed + 1; x < nr_args; x++)
 		newArgs[x] = transformIRExpr(e->args[x], &t);
 	newArgs[nr_args] = NULL;
-	if (!t)
-		return NULL;
-	else
-		return IRExpr_ClientCall(e->calledRip, e->callSite, newArgs);
+	return IRExpr_ClientCall(e->calledRip, e->callSite, newArgs);
 }
 
 IRExpr *
