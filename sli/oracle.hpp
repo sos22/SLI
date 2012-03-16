@@ -105,7 +105,7 @@ public:
 		void addPredecessorsNonCall(const VexRip &rip, std::vector<VexRip> &out);
 		void addPredecessors(const VexRip &rip, std::vector<VexRip> &out);
 		void updateSuccessorInstructionsAliasing(const VexRip &rip, AddressSpace *as, std::vector<VexRip> *changed,
-							 Oracle *oracle);
+							 bool *done_something, Oracle *oracle);
 		void getInstructionFallThroughs(const VexRip &rip, std::vector<VexRip> &out);
 		void getInstructionCallees(const VexRip &rip, std::vector<VexRip> &out, Oracle *oracle);
 		void getSuccessors(const VexRip &rip, std::vector<VexRip> &succ);

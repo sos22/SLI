@@ -760,11 +760,12 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 	     it != functions.end();
 	     it++) {
 		LibVEX_maybe_gc(token);
+		Function f(*it);
 		do {
 			done_something = false;
-			Function f(*it);
 			f.calculateAliasing(ths->ms->addressSpace, &done_something, ths);
 		} while (done_something);
+		f.setAliasingConfigCorrect(true);
 		printf("Aliasing: Done %zd/%zd functions\n",
 		       it - functions.begin(),
 		       functions.size());
@@ -1709,15 +1710,12 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 	for (auto it = allInstrs.begin();
 	     it != allInstrs.end();
 	     it++)
-		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, oracle);
+		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, done_something, oracle);
 	while (!needsUpdating.empty()) {
-		*done_something = true;
-		VexRip rip = needsUpdating.back();
+		VexRip rip(needsUpdating.back());
 		needsUpdating.pop_back();
-		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, oracle);
+		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, done_something, oracle);
 	}
-
-	setAliasingConfigCorrect(true);
 }
 
 void
@@ -2088,7 +2086,10 @@ impossible_clean:
 }
 
 void
-Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, AddressSpace *as, std::vector<VexRip> *changed,
+Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip,
+						      AddressSpace *as,
+						      std::vector<VexRip> *changed,
+						      bool *done_something,
 						      Oracle *oracle)
 {
 	RegisterAliasingConfiguration config(aliasConfigOnEntryToInstruction(rip));
@@ -2255,12 +2256,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, Address
 			RegisterAliasingConfiguration new_config = succ_config;
 			new_config |= config;
 			if (new_config != succ_config) {
+				*done_something = true;
 				changed->push_back(*it);
 				setAliasConfigOnEntryToInstruction(*it, new_config);
 			}
 		} else {
-			changed->push_back(*it);
-			setAliasConfigOnEntryToInstruction(*it, config);
+			printf("No instruction %s?\n", it->name());
 		}
 	}
 }
