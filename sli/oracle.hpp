@@ -256,6 +256,7 @@ public:
 					   unsigned long offset,
 					   AddressSpace *as);
 
+	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr);
 private:
 
 	void discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads, const callgraph_t &callgraph_table);

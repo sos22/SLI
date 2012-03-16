@@ -77,6 +77,16 @@ Oracle::LivenessSet Oracle::LivenessSet::argRegisters(
     /* 0x800 |   r11 */
 	);
 
+IRSB *
+Oracle::getIRSBForRip(AddressSpace *as, const VexRip &sr)
+{
+	try {
+		return as->getIRSBForAddress(ThreadRip::mk(STATIC_THREAD, sr));
+	} catch (BadMemoryException e) {
+		return NULL;
+	}
+}
+
 Oracle::LivenessSet
 Oracle::LivenessSet::use(Int offset)
 {
@@ -499,12 +509,9 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 			      gc_pair_VexRip_set_t *callees)
 {
 	__set_profiling(findInstrSuccessorsAndCallees);
-	IRSB *irsb;
-	try {
-		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
-	} catch (BadMemoryException &e) {
+	IRSB *irsb = Oracle::getIRSBForRip(as, rip);
+	if (!irsb)
 		return;
-	}
 	int i;
 
 	for (i = 1; i < irsb->stmts_used; i++) {
@@ -1499,12 +1506,7 @@ Oracle::discoverFunctionHead(const VexRip &x, std::vector<VexRip> &heads, const 
 		if (explored.count(rip))
 			continue;
 
-		IRSB *irsb;
-		try {
-			irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(STATIC_THREAD, rip));
-		} catch (BadMemoryException &e) {
-			irsb = NULL;
-		}
+		IRSB *irsb = getIRSBForRip(ms->addressSpace, rip);
 		if (!irsb)
 			continue;
 
@@ -1594,7 +1596,7 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 	getInstructionsInFunction(instrsToRecalculate1);
 
 	while (1) {
-		for (std::vector<VexRip>::iterator it = instrsToRecalculate1.begin();
+		for (auto it = instrsToRecalculate1.begin();
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
@@ -1723,7 +1725,7 @@ Oracle::Function::updateLiveOnEntry(const VexRip &rip, AddressSpace *as, bool *c
 {
 	LivenessSet res;
 
-	IRSB *irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
+	IRSB *irsb = getIRSBForRip(as, rip);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -1873,12 +1875,7 @@ Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool
 	}
 
 	/* Try to figure out what this instruction actually does. */
-	IRSB *irsb;
-	try {
-		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
-	} catch (BadMemoryException e) {
-		return;
-	}
+	IRSB *irsb = getIRSBForRip(as, rip);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -1904,9 +1901,9 @@ Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool
 			IRStmtPut *p = (IRStmtPut *)stmt;
 			if (p->target.isReg()) {
 				if (p->target.asReg() == OFFSET_amd64_RSP && !rsp)
-					rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, -1, 0);
+					rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, STATIC_THREAD, 0);
 				if (p->target.asReg() == OFFSET_amd64_RBP && !rbp)
-					rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, -1, 0);
+					rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, STATIC_THREAD, 0);
 			}
 			if (rsp)
 				rsp = rewriteRegister(rsp,
@@ -1946,7 +1943,7 @@ Oracle::Function::updateRbpToRspOffset(const VexRip &rip, AddressSpace *as, bool
 				goto impossible;
 			IRExpr *v = IRExpr_Load(t,
 						((IRStmtDirty *)stmt)->details->args[0],
-						ThreadRip::mk(9999, rip));
+						ThreadRip::mk(STATIC_THREAD, rip));
 			if (rsp)
 				rsp = rewriteRegister(rsp, tmp, v);
 			if (rbp)
@@ -2099,12 +2096,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const VexRip &rip, Address
 	IRStmt *st;
 
 	int nr_statements;
-	IRSB *irsb;
-	try {
-		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
-	} catch (BadMemoryException &e) {
+	IRSB *irsb = getIRSBForRip(as, rip);
+	if (!irsb)
 		return;
-	}
 	IRStmt **statements = irsb->stmts;
 	for (nr_statements = 1;
 	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
@@ -2637,12 +2631,9 @@ Oracle::functionHeadForInstruction(const VexRip &rip)
 unsigned
 getInstructionSize(AddressSpace *as, const VexRip &rip)
 {
-	IRSB *irsb;
-	try {
-		irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
-	} catch (BadMemoryException &e) {
+	IRSB *irsb = Oracle::getIRSBForRip(as, rip);
+	if (!irsb)
 		return 0;
-	}
 	assert(irsb->stmts[0]->tag == Ist_IMark);
 	return ((IRStmtIMark *)irsb->stmts[0])->len;
 }
