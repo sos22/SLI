@@ -76,6 +76,9 @@ IRExprTransformer::transformIex(IRExprClientCall *e)
 	int x;
 	bool t = false;
 
+	/* Shut compiler up */
+	newArg = (IRExpr *)0xf001;
+
 	/* First, scan through until we get the first argument which
 	   needs to be changed by the transformer. */
 	first_changed = 0;
