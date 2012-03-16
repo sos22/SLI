@@ -1558,8 +1558,18 @@ IRConst* IRConst_U32 ( UInt u32 )
    c->Ico.U32 = u32;
    return c;
 }
+static VexPtr<IRConst, &ir_heap> magicConstant0;
 IRConst* IRConst_U64 ( ULong u64 )
 {
+   if (u64 == 0) {
+     if (!magicConstant0) {
+       magicConstant0 = new IRConst();
+       magicConstant0->tag = Ico_U64;
+       magicConstant0->Ico.U64 = 0;
+     }
+     return magicConstant0;
+   }
+
    IRConst* c = new IRConst();
    c->tag     = Ico_U64;
    c->Ico.U64 = u64;
@@ -1659,6 +1669,17 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    if (operationAssociates(op))
      return IRExpr_Associative(op, arg1, arg2, NULL);
 
+   if (op == Iop_CmpEQ64) {
+     if (arg2->tag == Iex_Const && arg1->tag != Iex_Const) {
+       IRExpr *t = arg1;
+       arg1 = arg2;
+       arg2 = t;
+     }
+     /* convert 0 == x to just !x */
+     if (arg1->tag == Iex_Const && ((IRExprConst *)arg1)->con->Ico.U64 == 0)
+       return IRExpr_Unop(Iop_Not1, arg2);
+   }
+
    IRExprBinop* e         = new IRExprBinop();
    e->op   = op;
    e->arg1 = arg1;
@@ -1679,6 +1700,14 @@ IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, ThreadRip rip ) {
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {
+   if (con == magicConstant0) {
+     static VexPtr<IRExprConst, &ir_heap> cached;
+     if (!cached) {
+       cached = new IRExprConst();
+       cached->con = con;
+     }
+     return cached;
+   }
    IRExprConst* e        = new IRExprConst();
    e->con = con;
    return e;
@@ -1716,17 +1745,60 @@ IRExpr* IRExpr_Associative(IROp op, ...)
    }
    va_end(args);
 
+   IRExpr *argsL[nr_args];
+   int i;
+   va_start(args, op);
+   for (i = 0; i < nr_args; i++)
+     argsL[i] = va_arg(args, IRExpr *);
+   va_end(args);
+
+   if (op == Iop_Add64) {
+     /* Go through and find all the constant terms in the addition and
+	reduce them to a single term right at the beginning (assuming
+	that there's more than one) */
+     int src, dest;
+     unsigned long acc;
+     IRExprConst *foundConstant;
+     src = dest = nr_args - 1;
+     acc = 0;
+     foundConstant = NULL;
+     while (src >= 0) {
+       if (argsL[src]->tag == Iex_Const) {
+	 IRExprConst *iec = (IRExprConst *)argsL[src];
+	 foundConstant = iec;
+	 acc += iec->con->Ico.U64;
+       } else {
+	 argsL[dest] = argsL[src];
+	 dest--;
+       }
+       src--;
+     }
+
+     /* dest is now the number of constant terms found */
+     if (dest == 0) {
+       /* Found a single constant, just move it to the front */
+       assert(foundConstant);
+       argsL[0] = foundConstant;
+     } else if (dest > 0) {
+       /* Found multiple constants -> fold them together. */
+       argsL[0] = IRExpr_Const(IRConst_U64(acc));
+       if (nr_args == dest + 1) {
+	 /* Everything was a constant */
+	 return argsL[0];
+       }
+       memmove(argsL + 1, argsL + dest + 1, sizeof(argsL[0]) * (nr_args - dest - 1));
+       nr_args -= dest;
+     } else {
+       assert(dest == -1);
+     }
+   }
+
    e->nr_arguments_allocated = nr_args * 2;
    static libvex_allocation_site __las = {0, __FILE__, __LINE__};
    e->contents =
       (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->contents[0]) * nr_args * 2, &__las);
-   va_start(args, op);
-   while (e->nr_arguments < nr_args) {
-      arg = va_arg(args, IRExpr *);
-      e->contents[e->nr_arguments] =
-	 arg;
-      e->nr_arguments++;
-   }
+   e->nr_arguments = nr_args;
+   memcpy(e->contents, argsL, sizeof(argsL[0]) * e->nr_arguments);
    va_end(args);
    return e;
 }
