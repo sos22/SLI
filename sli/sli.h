@@ -1244,10 +1244,10 @@ class VexRip;
 
 void getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators,
 		   std::vector<VexRip> &fheads);
-void findDominators(const VexRip &functionHead,
-		    const VexRip &rip,
-		    AddressSpace *as,
-		    std::vector<VexRip> &out);
+template <typename ripType> void findDominators(const ripType &functionHead,
+						const ripType &rip,
+						AddressSpace *as,
+						std::vector<ripType> &out);
 IRExpr *readIRExpr(int fd);
 
 IRSB *instrument_func(unsigned tid,

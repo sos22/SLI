@@ -8,6 +8,7 @@
 
 #include "sli.h"
 #include "oracle_rip.hpp"
+#include "oracle.hpp"
 
 struct representative_state {
 	RegisterSet regs;
@@ -258,16 +259,16 @@ findFunctionHead(RegisterSet *rs, AddressSpace *as)
    are guaranteed to be executed at least once on any path from the
    starting point to the target instruction.  We order them so that
    the dominators nearest to the target are reported first. */
-void
-findDominators(const VexRip &functionHead,
-	       const VexRip &rip,
+template <typename ripType> void
+findDominators(const ripType &functionHead,
+	       const ripType &rip,
 	       AddressSpace *as,
-	       std::vector<VexRip> &out)
+	       std::vector<ripType> &out)
 {
-	std::vector<VexRip> remainingToExplore;
-	std::map<VexRip, std::set<VexRip> > successors;
-	std::map<VexRip, std::set<VexRip> > predecessors;
-	std::set<VexRip> instrs;
+	std::vector<ripType> remainingToExplore;
+	std::map<ripType, std::set<ripType> > successors;
+	std::map<ripType, std::set<ripType> > predecessors;
+	std::set<ripType> instrs;
 
 	DBG_DOMINATORS("Exploring from %lx to find dominators of %lx\n", functionHead, rip);
 	/* First: build the CFG, representing all of the successor
@@ -275,29 +276,29 @@ findDominators(const VexRip &functionHead,
 	   predecessors. */
 	remainingToExplore.push_back(functionHead);
 	while (!remainingToExplore.empty()) {
-		VexRip rip = remainingToExplore.back();
-		VexRip r;
+		ripType rip(remainingToExplore.back());
+		ripType r;
 		remainingToExplore.pop_back();
 		if (instrs.count(rip))
 			continue;
-		IRSB *irsb = as->getIRSBForAddress(ThreadRip::mk(1, rip));
+		IRSB *irsb = Oracle::getIRSBForRip(as, rip);
+		assert(irsb);
 		assert(irsb->stmts[0]->tag == Ist_IMark);
-		assert(((IRStmtIMark *)irsb->stmts[0])->addr.rip == rip);
 		for (int idx = 1; idx < irsb->stmts_used; idx++) {
 			IRStmt *stmt = irsb->stmts[idx];
 			switch (stmt->tag) {
 			case Ist_IMark:
-				successors[rip].insert(((IRStmtIMark *)stmt)->addr.rip);
-				predecessors[((IRStmtIMark *)stmt)->addr.rip].insert(rip);
+				successors[rip].insert(ripType(((IRStmtIMark *)stmt)->addr.rip));
+				predecessors[ripType(((IRStmtIMark *)stmt)->addr.rip)].insert(rip);
 				instrs.insert(rip);
-				rip = ((IRStmtIMark *)stmt)->addr.rip;
+				rip = ripType(((IRStmtIMark *)stmt)->addr.rip);
 				if (instrs.count(rip))
 					goto done_this_entry;
 				break;
 			case Ist_Exit:
-				successors[rip].insert(((IRStmtExit *)stmt)->dst.rip);
-				predecessors[((IRStmtExit *)stmt)->dst.rip].insert(rip);
-				remainingToExplore.push_back(((IRStmtExit *)stmt)->dst.rip);
+				successors[rip].insert(ripType(((IRStmtExit *)stmt)->dst.rip));
+				predecessors[ripType(((IRStmtExit *)stmt)->dst.rip)].insert(rip);
+				remainingToExplore.push_back(ripType(((IRStmtExit *)stmt)->dst.rip));
 				break;
 			default:
 				break;
@@ -307,9 +308,9 @@ findDominators(const VexRip &functionHead,
 		instrs.insert(rip);
 
 		if (irsb->jumpkind == Ijk_Call) {
-			r = extract_call_follower(irsb);
+			r = ripType(extract_call_follower(irsb));
 		} else if (irsb->next_is_const) {
-			r = irsb->next_const.rip;
+			r = ripType(irsb->next_const.rip);
 		}
 		if (r.isValid()) {
 			successors[rip].insert(r);
@@ -330,7 +331,7 @@ findDominators(const VexRip &functionHead,
 	*/
 
 	/* Build initial optimistic map. */
-	std::map<VexRip, std::set<VexRip> > dominators;
+	std::map<ripType, std::set<ripType> > dominators;
 	for (auto it = instrs.begin();
 	     it != instrs.end();
 	     it++)
@@ -348,10 +349,10 @@ findDominators(const VexRip &functionHead,
 		for (auto it = instrs.begin();
 		     it != instrs.end();
 		     it++) {
-			VexRip rip = *it;
+			ripType rip = *it;
 			/* Check that all of our current dominators
 			 * are valid. */
-			std::set<VexRip> &dom(dominators[rip]);
+			std::set<ripType> &dom(dominators[rip]);
 			for (auto domit = dom.begin();
 			     domit != dom.end();
 				) {
@@ -423,20 +424,20 @@ findDominators(const VexRip &functionHead,
 	 * in the definition of dominators.  There's probably a
 	 * version of the dominator algorithm whcih does it directly,
 	 * but I couldn't think of one. */
-	std::map<VexRip, VexRip> immediateDominators;
+	std::map<ripType, ripType> immediateDominators;
 	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		if (TIMEOUT)
 			return;
 
-		VexRip rip = *it;
+		ripType rip = *it;
 		if (rip == functionHead) /* immediate dominator of
 					  * function head undefined */
 			continue;
-		std::set<VexRip> &doms(dominators[rip]);
+		std::set<ripType> &doms(dominators[rip]);
 		bool found_one = false;
 		DBG_DOMINATORS("Find immediate dominator of %lx...\n", rip);
 		for (auto it2 = doms.begin(); it2 != doms.end(); it2++) {
-			VexRip dom = *it2;
+			ripType dom = *it2;
 			/* Is dom the immediate dominator of rip? */
 			if (dom == rip)
 				continue; /* can't be immediate dominator of yourself */
@@ -449,7 +450,7 @@ findDominators(const VexRip &functionHead,
 			for (auto it3 = doms.begin();
 			     !over_dominated && it3 != doms.end();
 			     it3++) {
-				VexRip dom_prime = *it3;
+				ripType dom_prime = *it3;
 				if (dom_prime == dom || dom_prime == rip)
 					continue;
 				/* If dom_prime dominates dom then dom
@@ -487,7 +488,7 @@ findDominators(const VexRip &functionHead,
 
 	/* Finally, walk the immediate dominator map to build the
 	 * ordered dominator chain for the target instruction. */
-	VexRip r = rip;
+	ripType r = rip;
 	while (1) {
 		out.push_back(r);
 		if (!immediateDominators.count(r))
@@ -504,7 +505,7 @@ getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators, st
 	VexRip head(findFunctionHead(&thr->regs, ms->addressSpace));
 	fheads.push_back(head);
 	compensateForBadVCall(thr, ms->addressSpace);
-	findDominators(head, VexRip::invent_vex_rip(thr->regs.rip()), ms->addressSpace, dominators);
+	findDominators<VexRip>(head, VexRip::invent_vex_rip(thr->regs.rip()), ms->addressSpace, dominators);
 
 	RegisterSet rs = thr->regs;
 	rs.rip() = return_address(rs, ms->addressSpace, rs.rsp()) - 5;
