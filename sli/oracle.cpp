@@ -2772,6 +2772,9 @@ dbg_database_query(const char *query)
 	int nr_columns = sqlite3_column_count(stmt);
 	if (nr_columns == 0) {
 		printf("No data returned\n");
+		rc = sqlite3_step(stmt);
+		if (rc != SQLITE_DONE)
+			printf("Error return %d from sqlite3_step\n", rc);
 	} else {
 		int cwidth = 225 / nr_columns;
 		int wide_columns = 225 % nr_columns;
