@@ -2288,6 +2288,8 @@ extern Bool isPlausibleIRType ( IRType ty );
 
 bool parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix);
 
+bool operationAssociates(IROp op);
+
 #endif /* ndef __LIBVEX_IR_H */
 
 

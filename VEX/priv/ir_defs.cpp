@@ -63,6 +63,18 @@ Heap ir_heap;
 
 IRStmtNoOp IRStmtNoOp::singleton;
 
+/* Returns true if the operation definitely associates in the sense
+ * that (a op b) op c == a op (b op c), or false if we're not sure. */
+bool
+operationAssociates(IROp op)
+{
+	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
+		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64) ||
+		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1) ||
+		(op == Iop_Xor1)
+		;
+}
+
 /*---------------------------------------------------------------*/
 /*--- Printing the IR                                         ---*/
 /*---------------------------------------------------------------*/
@@ -1644,6 +1656,9 @@ IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
    return e;
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
+   if (operationAssociates(op))
+     return IRExpr_Associative(op, arg1, arg2, NULL);
+
    IRExprBinop* e         = new IRExprBinop();
    e->op   = op;
    e->arg1 = arg1;

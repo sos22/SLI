@@ -24,18 +24,6 @@ operationCommutes(IROp op)
 		(op == Iop_Xor1);
 }
 
-/* Returns true if the operation definitely associates in the sense
- * that (a op b) op c == a op (b op c), or false if we're not sure. */
-static bool
-operationAssociates(IROp op)
-{
-	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
-		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64) ||
-		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1) ||
-		(op == Iop_Xor1)
-		;
-}
-
 bool
 physicallyEqual(const IRConst *a, const IRConst *b)
 {
