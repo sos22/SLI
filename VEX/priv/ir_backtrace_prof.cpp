@@ -7,13 +7,13 @@
 void
 BacktraceProfile::sample(void)
 {
-	void *trace[nr_stack_entries];
+	void *trace[nr_stack_entries+1];
 	int nr_back;
-	nr_back = ::backtrace(trace, nr_stack_entries);
+	nr_back = ::backtrace(trace, nr_stack_entries+1);
 	key_t key;
-	key.resize(nr_back);
-	for (int x = 0; x < nr_back; x++)
-		key[x] = trace[x];
+	key.resize(nr_back-1);
+	for (int x = 0; x < nr_back-1; x++)
+		key[x] = trace[x+1];
 	histogram[key]++;
 	tot_nr_samples++;
 
