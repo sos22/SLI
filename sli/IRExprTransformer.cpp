@@ -90,11 +90,22 @@ IRExpr *
 IRExprTransformer::transformIex(IRExprAssociative *e)
 {
 	bool t = false;
-	IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(e);
-	for (int x = 0; x < e->nr_arguments; x++)
-		r->contents[x] = transformIRExpr(e->contents[x], &t);
+	int x = 0;
+	IRExpr *newE;
+	while (x < e->nr_arguments) {
+		newE = transformIRExpr(e->contents[x], &t);
+		if (t)
+			break;
+		x++;
+	}
 	if (!t)
 		return NULL;
-	else
-		return r;
+	IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(e);
+	r->contents[x] = newE;
+	x++;
+	while (x < e->nr_arguments) {
+		r->contents[x] = transformIRExpr(e->contents[x], &t);
+		x++;
+	}
+	return r;
 }
