@@ -499,6 +499,11 @@ findDominators(const ripType &functionHead,
 	/* And we're done. */
 }
 
+template void findDominators<StaticRip>(const StaticRip &functionHead,
+					const StaticRip &rip,
+					AddressSpace *as,
+					std::vector<StaticRip> &out);
+
 void
 getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators, std::vector<VexRip> &fheads)
 {
