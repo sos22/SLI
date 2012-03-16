@@ -1452,7 +1452,7 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 	static unsigned long rip_hash(const ThreadRip &tr)
 	{
 		unsigned long hash = tr.hash();
-		while (hash > nr_slots)
+		while (hash >= nr_slots)
 			hash = (hash % nr_slots) ^ (hash / nr_slots);
 		return hash;
 	}
