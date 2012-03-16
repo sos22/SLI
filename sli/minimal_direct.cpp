@@ -210,6 +210,7 @@ main(int argc, char *argv[])
 			_logfile = stdout;
 
 			instrIterator->advance();
+			instructions_processed++;
 
 			double completion = instructions_processed / double(total_instructions);
 			double elapsed = now() - start;
