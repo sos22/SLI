@@ -499,11 +499,6 @@ public:
 	}
 	NAMED_CLASS
 };
-static unsigned long
-getInstrLength(AddressSpace *as, const VexRip &a)
-{
-	return getInstructionSize(as, a);
-}
 static CallGraphEntry *
 exploreOneFunctionForCallGraph(const VexRip &head,
 			       int depth,
@@ -556,7 +551,7 @@ exploreOneFunctionForCallGraph(const VexRip &head,
 			}
 		}
 
-		VexRip end = i + getInstrLength(as, i);
+		VexRip end = i + getInstructionSize(as, i);
 		if (end == i) {
 			/* Valgrind occasionally gets confused and
 			   returns empty instructions.  Treat them as
