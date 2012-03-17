@@ -45,6 +45,15 @@
 
 #include "sli.h"
 
+#if ND_CHOOSER_STATS
+int NdChooser::nr_choosers;
+int NdChooser::tot_nr_stacks;
+int NdChooser::tot_nr_choice_points;
+double NdChooser::tot_recovery;
+double NdChooser::tot_forward_progress;
+double NdChooser::start_of_day(now());
+#endif
+
 int
 NdChooser::nd_choice(int nr_options, bool *isNew)
 {
@@ -56,11 +65,18 @@ NdChooser::nd_choice(int nr_options, bool *isNew)
 		r = 0;
 		if (isNew)
 			*isNew = true;
+#if ND_CHOOSER_STATS
+		nr_choice_points++;
+#endif
 	} else {
 		assert(current_stack_index < stack.size());
 		assert(stack[current_stack_index].nr_options == nr_options);
 		assert(stack[current_stack_index].current_value < nr_options);
 		r = stack[current_stack_index].current_value;
+#if ND_CHOOSER_STATS
+		if (current_stack_index + 1 == stack.size())
+			cur_stack_cont_recovery_end = now();
+#endif
 	}
 	current_stack_index++;
 	return r;
@@ -72,6 +88,9 @@ NdChooser::advance(void)
 	if (TIMEOUT)
 		return false;
 	assert(current_stack_index == stack.size());
+
+	finish_stack();
+
 	current_stack_index = 0;
 	while (!stack.empty()) {
 		choicepoint &cp(stack.back());
@@ -94,3 +113,25 @@ NdChooser::advance(void)
 	/* Ran out of nondeterminism. */
 	return false;
 }
+
+#if ND_CHOOSER_STATS
+NdChooser::~NdChooser()
+{
+	nr_choosers++;
+	tot_nr_stacks += nr_stacks;
+	tot_nr_choice_points += nr_choice_points;
+	tot_recovery += exec_tot_recovery;
+	tot_forward_progress += exec_tot_forward_progress;
+
+	printf("%d choosers so far.  Per chooser: %f stacks, %f choice points\n",
+	       nr_choosers, double(tot_nr_stacks)/nr_choosers,
+	       double(tot_nr_choice_points)/nr_choosers);
+	printf("%f in recovery, %f in progress; recovery %f per stack\n",
+	       tot_recovery, tot_forward_progress, tot_recovery/tot_nr_stacks);
+
+	if (tot_recovery + tot_forward_progress >= now() - start_of_day) {
+		printf("... but we've only been running for %f?\n", now() - start_of_day);
+		abort();
+	}
+}
+#endif
