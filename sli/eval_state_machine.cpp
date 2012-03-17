@@ -348,10 +348,12 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	}
 	case StateMachineSideEffect::Unreached:
 		abort();
-	case StateMachineSideEffect::AssertFalse: {
-		StateMachineSideEffectAssertFalse *smseaf =
-			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
-		if (expressionIsTrue(smseaf->value, chooser, state, opt,
+	case StateMachineSideEffect::AssertGoodPtr: {
+		StateMachineSideEffectAssertGoodPtr *smseaf =
+			dynamic_cast<StateMachineSideEffectAssertGoodPtr *>(smse);
+		assert(smseaf);
+		IRExpr *e = IRExpr_Unop(Iop_BadPtr, smseaf->value);
+		if (expressionIsTrue(e, chooser, state, opt,
 				     assumption, accumulatedAssumptions))
 			return false;
 		break;

@@ -54,13 +54,13 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, 
 		return NULL;
 }
 
-StateMachineSideEffectAssertFalse *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFalse *a, bool *)
+StateMachineSideEffectAssertGoodPtr *
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertGoodPtr *a, bool *)
 {
 	bool b = false;
 	IRExpr *v = transformIRExpr(a->value, &b);
 	if (b)
-		return new StateMachineSideEffectAssertFalse(v);
+		return new StateMachineSideEffectAssertGoodPtr(v);
 	else
 		return NULL;
 }
@@ -87,7 +87,7 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 				done_something)
 		do_type(Load);
 		do_type(Store);
-		do_type(AssertFalse);
+		do_type(AssertGoodPtr);
 		do_type(Copy);
 		do_type(Unreached);
 		do_type(Phi);

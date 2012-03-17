@@ -127,8 +127,8 @@ protected:
 		StateMachineSideEffectLoad *, bool *);
 	virtual StateMachineSideEffectStore *transformOneSideEffect(
 		StateMachineSideEffectStore *, bool *);
-	virtual StateMachineSideEffectAssertFalse *transformOneSideEffect(
-		StateMachineSideEffectAssertFalse *, bool *);
+	virtual StateMachineSideEffectAssertGoodPtr *transformOneSideEffect(
+		StateMachineSideEffectAssertGoodPtr *, bool *);
 	virtual StateMachineSideEffectCopy *transformOneSideEffect(
 		StateMachineSideEffectCopy *, bool *);
 	virtual StateMachineSideEffectUnreached *transformOneSideEffect(

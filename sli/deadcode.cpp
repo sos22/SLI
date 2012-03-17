@@ -55,9 +55,9 @@ public:
 		}
 		case StateMachineSideEffect::Unreached:
 			return;
-		case StateMachineSideEffect::AssertFalse: {
-			StateMachineSideEffectAssertFalse *smseaf =
-				(StateMachineSideEffectAssertFalse *)smse;
+		case StateMachineSideEffect::AssertGoodPtr: {
+			StateMachineSideEffectAssertGoodPtr *smseaf =
+				(StateMachineSideEffectAssertGoodPtr *)smse;
 			useExpression(smseaf->value);
 			return;
 		}
@@ -189,16 +189,15 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 						(StateMachineSideEffectLoad *)e;
 					if (!alwaysLive.registerLive(smsel->target) &&
 					    !alive.registerLive(smsel->target))
-						newEffect = new StateMachineSideEffectAssertFalse(
-							IRExpr_Unop(Iop_BadPtr, smsel->addr));
+						newEffect = new StateMachineSideEffectAssertGoodPtr(smsel->addr);
 					break;
 				}
 				case StateMachineSideEffect::Store:
 				case StateMachineSideEffect::Unreached:
 					break;
-				case StateMachineSideEffect::AssertFalse: {
-					StateMachineSideEffectAssertFalse *a =
-						(StateMachineSideEffectAssertFalse *)e;
+				case StateMachineSideEffect::AssertGoodPtr: {
+					StateMachineSideEffectAssertGoodPtr *a =
+						(StateMachineSideEffectAssertGoodPtr *)e;
 					if (dynamic_cast<StateMachineTerminal *>(edge->target) ||
 					    !alive.assertionLive(a->value))
 						dead = true;

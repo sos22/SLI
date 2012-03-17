@@ -108,10 +108,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 			if (opt.ignoreStore(smses->rip.rip) &&
 			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, opt.freeVariablesMightAccessStack, oracle)) {
 				sme->sideEffects[x] =
-					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(
-							Iop_BadPtr,
-							smses->addr));
+					new StateMachineSideEffectAssertGoodPtr(smses->addr);
 				sme->sideEffects.erase(
 					sme->sideEffects.begin() + x);
 				x--;

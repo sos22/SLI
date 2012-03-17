@@ -317,7 +317,7 @@ class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &
 	StateMachineSideEffect(); /* DNE */
 public:
 	enum sideEffectType {
-		Load, Store, Copy, Unreached, AssertFalse, Phi
+		Load, Store, Copy, Unreached, AssertGoodPtr, Phi
 	} type;
 protected:
 	virtual unsigned long _hashval() const = 0;
@@ -889,17 +889,17 @@ public:
 		live.insert(target);
 	}
 };
-class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
+class StateMachineSideEffectAssertGoodPtr : public StateMachineSideEffect {
 	unsigned long _hashval() const { return value->hashval(); }
 public:
-	StateMachineSideEffectAssertFalse(IRExpr *_value)
-		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
+	StateMachineSideEffectAssertGoodPtr(IRExpr *_value)
+		: StateMachineSideEffect(StateMachineSideEffect::AssertGoodPtr),
 		  value(_value)
 	{
 	}
 	IRExpr *value;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "Assert !(");
+		fprintf(f, "AssertGoodPtr (");
 		ppIRExpr(value, f);
 		fprintf(f, ")");
 	}
