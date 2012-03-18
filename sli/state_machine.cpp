@@ -224,28 +224,18 @@ StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister, thread
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectAssertGoodPtr::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	bool unreachable = false;
-	if (value->tag == Iex_Const) {
-		IRExprConst *c = (IRExprConst *)value;
-		if (c->con->Ico.U64 < 4096)
-			unreachable = true;
-		bool t;
-		if (opt.addressAccessible(c->con->Ico.U64, &t) && !t)
-			unreachable = true;
-	}
-	if (!unreachable && definitelyUnevaluatable(value, opt, oracle))
-		unreachable = true;
-	if (unreachable) {
+	if ((value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) ||
+	    definitelyUnevaluatable(value, opt, oracle)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
 	return this;
 }
 void
-StateMachineSideEffectAssertGoodPtr::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
+StateMachineSideEffectAssertFalse::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
 {
 	::findUsedRegisters(value, s, opt);
 }
@@ -448,11 +438,11 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 	}
 	case StateMachineSideEffect::Unreached:
 		return true;
-	case StateMachineSideEffect::AssertGoodPtr: {
-		StateMachineSideEffectAssertGoodPtr *smseaf1 =
-			dynamic_cast<StateMachineSideEffectAssertGoodPtr *>(smse1);
-		StateMachineSideEffectAssertGoodPtr *smseaf2 =
-			dynamic_cast<StateMachineSideEffectAssertGoodPtr *>(smse2);
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *smseaf1 =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse1);
+		StateMachineSideEffectAssertFalse *smseaf2 =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse2);
 		return definitelyEqual(smseaf1->value, smseaf2->value, opt);
 	}
 	case StateMachineSideEffect::Phi: {
@@ -505,10 +495,10 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		*out = new StateMachineSideEffectCopy(key, data);
 		return true;
 	}
-	if (parseThisString("AssertGoodPtr (", str, &str2) &&
+	if (parseThisString("Assert !(", str, &str2) &&
 	    parseIRExpr(&data, str2, &str2) &&
 	    parseThisChar(')', str2, suffix)) {
-		*out = new StateMachineSideEffectAssertGoodPtr(data);
+		*out = new StateMachineSideEffectAssertFalse(data);
 		return true;
 	}
 	if (parseThisString("Phi", str, &str2) &&

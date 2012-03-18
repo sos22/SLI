@@ -58,12 +58,12 @@ findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 class avail_t {
 public:
 	std::set<StateMachineSideEffect *> sideEffects;
-	std::set<IRExpr *> assertGoodPtr;
+	std::set<IRExpr *> assertFalse;
 	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> _registers;
 
-	void clear() { sideEffects.clear(); assertGoodPtr.clear(); _registers.clear(); }
-	void makeGoodPtr(IRExpr *expr);
-	void dereference(const AllowableOptimisations &, IRExpr *ptr);
+	void clear() { sideEffects.clear(); assertFalse.clear(); _registers.clear(); }
+	void makeFalse(IRExpr *expr);
+	void dereference(IRExpr *ptr);
 	/* Go through and remove anything which isn't also present in
 	   other.  Returns true if we did anything, and false
 	   otherwise. */
@@ -71,14 +71,14 @@ public:
 
 	bool operator !=(const avail_t &other) const;
 
-	void calcRegisterMap(const AllowableOptimisations &opt);
+	void calcRegisterMap();
 
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
 
 	int nr_asserts() const {
 		int cntr = 0;
 		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++)
-			if ((*it)->type == StateMachineSideEffect::AssertGoodPtr)
+			if ((*it)->type == StateMachineSideEffect::AssertFalse)
 				cntr++;
 		return cntr;
 	}
@@ -96,9 +96,9 @@ avail_t::print(FILE *f)
 			fprintf(f, "\n");
 		}
 	}
-	if (!assertGoodPtr.empty()) {
-		fprintf(f, "\tAsserted good pointers:\n");
-		for (auto it = assertGoodPtr.begin(); it != assertGoodPtr.end(); it++) {
+	if (!assertFalse.empty()) {
+		fprintf(f, "\tAsserted false:\n");
+		for (auto it = assertFalse.begin(); it != assertFalse.end(); it++) {
 			fprintf(f, "\t\t");
 			ppIRExpr(*it, f);
 			fprintf(f, "\n");
@@ -116,46 +116,26 @@ avail_t::print(FILE *f)
 }
 
 void
-avail_t::makeGoodPtr(IRExpr *expr)
+avail_t::makeFalse(IRExpr *expr)
 {
-	for (auto it = assertGoodPtr.begin();
-	     it != assertGoodPtr.end();
+	if (expr->tag == Iex_Const)
+		return;
+	for (auto it = assertFalse.begin();
+	     it != assertFalse.end();
 	     it++)
 		if (definitelyEqual(*it, expr, AllowableOptimisations::defaultOptimisations))
 			return;
-	assertGoodPtr.insert(expr);
+	assertFalse.insert(expr);
 }
 
 void
-avail_t::dereference(const AllowableOptimisations &opt, IRExpr *addr)
+avail_t::dereference(IRExpr *addr)
 {
 	if (TIMEOUT)
 		return;
-	IRExpr *e = simplifyIRExpr(addr, opt);
-	if (e->tag == Iex_Associative) {
-		IRExprAssociative *ea = (IRExprAssociative *)e;
-		if (ea->op == Iop_Add64 &&
-		    ea->nr_arguments >= 2 &&
-		    ea->contents[0]->tag == Iex_Const) {
-			/* Rewrite BadPtr(k + x) to just BadPtr(x) if
-			   k is a constant. */
-			if (ea->nr_arguments == 2) {
-				e = ea->contents[1];
-			} else {
-				e = IRExpr_Associative(ea);
-				if (e->tag != Iex_Associative)
-					abort();
-				ea = (IRExprAssociative *)e;
-				ea->nr_arguments--;
-				memmove(ea->contents,
-					ea->contents + 1,
-					sizeof(ea->contents[0]) * ea->nr_arguments);
-				e = simplifyIRExpr(ea, opt);
-			}
-		}
-	}
-	if (e->tag != Iex_Const)
-		makeGoodPtr(e);
+	IRExpr *badPtr = IRExpr_Unop(Iop_BadPtr, addr);
+	badPtr = simplifyIRExpr(badPtr, AllowableOptimisations::defaultOptimisations);
+	makeFalse(badPtr);
 }
 
 template <typename a> bool
@@ -191,21 +171,21 @@ avail_t::intersect(const avail_t &other)
 
 	res = intersectSets(sideEffects, other.sideEffects);
 
-	for (auto it = assertGoodPtr.begin();
-	     it != assertGoodPtr.end();
+	for (auto it = assertFalse.begin();
+	     it != assertFalse.end();
 		) {
 		bool purge = true;
-		if (other.assertGoodPtr.count(*it))
+		if (other.assertFalse.count(*it))
 			purge = false;
-		for (auto it2 = other.assertGoodPtr.begin();
-		     purge && it2 != other.assertGoodPtr.end();
+		for (auto it2 = other.assertFalse.begin();
+		     purge && it2 != other.assertFalse.end();
 		     it2++) {
 			if (definitelyEqual(*it, *it2, AllowableOptimisations::defaultOptimisations))
 				purge = false;
 		}
 		if (purge) {
 			res = true;
-			assertGoodPtr.erase(it++);
+			assertFalse.erase(it++);
 		} else {
 			it++;
 		}
@@ -270,9 +250,9 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 			it++;
 		}
 	}
-	for (auto it = assertGoodPtr.begin(); it != assertGoodPtr.end(); ) {
+	for (auto it = assertFalse.begin(); it != assertFalse.end(); ) {
 		if (isPresent(*it))
-			assertGoodPtr.erase(it++);
+			assertFalse.erase(it++);
 		else
 			it++;
 	}
@@ -281,11 +261,11 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 bool
 avail_t::operator!=(const avail_t &other) const
 {
-	return sideEffects != other.sideEffects || assertGoodPtr != other.assertGoodPtr;
+	return sideEffects != other.sideEffects || assertFalse != other.assertFalse;
 }
 
 void
-avail_t::calcRegisterMap(const AllowableOptimisations &opt)
+avail_t::calcRegisterMap()
 {
 	_registers.clear();
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
@@ -297,9 +277,9 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			   same register. */
 			assert(!_registers.count(sep->target));
 			_registers[sep->target] = sep->value;
-		} else if (se->type == StateMachineSideEffect::AssertGoodPtr) {
-			StateMachineSideEffectAssertGoodPtr *seaf = (StateMachineSideEffectAssertGoodPtr *)se;
-			dereference(opt, seaf->value);
+		} else if (se->type == StateMachineSideEffect::AssertFalse) {
+			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
+			makeFalse(seaf->value);
 		}
 	}
 }
@@ -347,7 +327,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		/* Introduce the store which was generated. */
 		if (opt.assumeNoInterferingStores || !oracle->hasConflictingRemoteStores(smses))
 			outputAvail.sideEffects.insert(smses);
-		outputAvail.dereference(opt, smses->addr);
+		outputAvail.dereference(smses->addr);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -362,14 +342,14 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		StateMachineSideEffectLoad *smsel =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		outputAvail.sideEffects.insert(smsel);
-		outputAvail.dereference(opt, smsel->addr);
+		outputAvail.dereference(smsel->addr);
 		outputAvail.invalidateRegister(smsel->target, smsel);
 		break;
 	}
-	case StateMachineSideEffect::AssertGoodPtr: {
-		StateMachineSideEffectAssertGoodPtr *smseaf =
-			dynamic_cast<StateMachineSideEffectAssertGoodPtr *>(smse);
-		outputAvail.dereference(opt, smseaf->value);
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *smseaf =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
+		outputAvail.makeFalse(smseaf->value);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
@@ -395,16 +375,18 @@ public:
 			return it->second;
 		return IRExprTransformer::transformIex(e);
 	}
-	IRExpr *transformIex(IRExprUnop *e) {
-		if (e->op == Iop_BadPtr && use_assumptions) {
-			for (auto it = avail.assertGoodPtr.begin();
-			     it != avail.assertGoodPtr.end();
+	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		if (use_assumptions) {
+			for (std::set<IRExpr *>::iterator it = avail.assertFalse.begin();
+			     it != avail.assertFalse.end();
 			     it++) {
-				if (definitelyEqual(*it, e->arg,  AllowableOptimisations::defaultOptimisations))
+				if (definitelyEqual(*it, e,  AllowableOptimisations::defaultOptimisations)) {
+					*done_something = true;
 					return IRExpr_Const(IRConst_U1(0));
+				}
 			}
 		}
-		return IRExprTransformer::transformIex(e);
+		return IRExprTransformer::transformIRExpr(e, done_something);
 	}
 	applyAvailTransformer(const avail_t &_avail, bool _use_assumptions)
 		: avail(_avail), use_assumptions(_use_assumptions)
@@ -458,7 +440,7 @@ buildNewStateMachineWithLoadsEliminated(
 					     ));
 
 	avail_t currentlyAvailable(initialAvail);
-	currentlyAvailable.calcRegisterMap(opt);
+	currentlyAvailable.calcRegisterMap();
 
 #if debug_substitutions
 	printf("Looking at edge to state %d\n", stateLabels[sme->target]);
@@ -552,9 +534,9 @@ buildNewStateMachineWithLoadsEliminated(
 		case StateMachineSideEffect::Unreached:
 			newEffect = *it;
 			break;
-		case StateMachineSideEffect::AssertGoodPtr: {
-			StateMachineSideEffectAssertGoodPtr *smseaf =
-				dynamic_cast<StateMachineSideEffectAssertGoodPtr *>(*it);
+		case StateMachineSideEffect::AssertFalse: {
+			StateMachineSideEffectAssertFalse *smseaf =
+				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it);
 			IRExpr *newVal;
 			bool doit = false;
 			if (currentlyAvailable.nr_asserts() < MAX_LIVE_ASSERTIONS) {
@@ -570,7 +552,7 @@ buildNewStateMachineWithLoadsEliminated(
 				doit = true;
 			}
 			if (doit) {
-				newEffect = new StateMachineSideEffectAssertGoodPtr(newVal);
+				newEffect = new StateMachineSideEffectAssertFalse(newVal);
 				*done_something = true;
 			} else
 				newEffect = *it;
@@ -588,7 +570,7 @@ buildNewStateMachineWithLoadsEliminated(
 		assert(newEffect);
 		if (!*done_something) assert(newEffect == *it);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
-		currentlyAvailable.calcRegisterMap(opt);
+		currentlyAvailable.calcRegisterMap();
 		res->sideEffects.push_back(newEffect);
 #if debug_substitutions
 		printf("New available set:\n");
@@ -627,7 +609,7 @@ buildNewStateMachineWithLoadsEliminated(
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
 		StateMachineBifurcate *res;
 		bool doit = false;
-		avail.calcRegisterMap(opt);
+		avail.calcRegisterMap();
 		res = new StateMachineBifurcate(
 			sm->origin,
 			applyAvailSet(avail, smb->condition, true, &doit),
@@ -730,10 +712,10 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		StateMachineSideEffect *smse = *it;
 		if (StateMachineSideEffectMemoryAccess *smsema =
 		    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
-			potentiallyAvailable.dereference(opt, smsema->addr);
-		} else if (StateMachineSideEffectAssertGoodPtr *smseaf =
-			   dynamic_cast<StateMachineSideEffectAssertGoodPtr *>(smse)) {
-			potentiallyAvailable.dereference(opt, smseaf->value);
+			potentiallyAvailable.dereference(smsema->addr);
+		} else if (StateMachineSideEffectAssertFalse *smseaf =
+			   dynamic_cast<StateMachineSideEffectAssertFalse *>(smse)) {
+			potentiallyAvailable.makeFalse(smseaf->value);
 		}
 	}
 

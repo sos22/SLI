@@ -55,7 +55,7 @@ sideEffectDefinesReg(const StateMachineSideEffect *se, const threadAndRegister &
 		StateMachineSideEffectPhi *l = (StateMachineSideEffectPhi *)se;
 		return threadAndRegister::partialEq(l->reg, reg);
 	}
-	case StateMachineSideEffect::AssertGoodPtr:
+	case StateMachineSideEffect::AssertFalse:
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::Store:
 		return false;
@@ -273,7 +273,7 @@ sideEffectSetToGenerationSet(const std::set<StateMachineSideEffect *> &effects,
 				addItem(l->reg.gen());
 			break;
 		}
-		case StateMachineSideEffect::AssertGoodPtr:
+		case StateMachineSideEffect::AssertFalse:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::Store:
 			break;
@@ -337,7 +337,7 @@ updateReachingSetForSideEffect(StateMachineSideEffect *smse, std::set<StateMachi
 		out->insert(smse);
 		return;
 	}
-	case StateMachineSideEffect::AssertGoodPtr:
+	case StateMachineSideEffect::AssertFalse:
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::Store:
 		return;
@@ -572,9 +572,9 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 					c->value = t.transformIRExpr(c->value);
 					break;
 				}
-				case StateMachineSideEffect::AssertGoodPtr: {
-					StateMachineSideEffectAssertGoodPtr *a =
-						dynamic_cast<StateMachineSideEffectAssertGoodPtr *>(e);
+				case StateMachineSideEffect::AssertFalse: {
+					StateMachineSideEffectAssertFalse *a =
+						dynamic_cast<StateMachineSideEffectAssertFalse *>(e);
 					a->value = t.transformIRExpr(a->value);
 					break;
 				}
@@ -651,8 +651,8 @@ findNeededRegisters(StateMachineSideEffect *smse, std::set<threadAndRegister, th
 		findNeededRegisters(l->value, out);
 		break;
 	}
-	case StateMachineSideEffect::AssertGoodPtr: {
-		StateMachineSideEffectAssertGoodPtr *l = (StateMachineSideEffectAssertGoodPtr *)smse;
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *l = (StateMachineSideEffectAssertFalse *)smse;
 		findNeededRegisters(l->value, out);
 		break;
 	}
@@ -1105,10 +1105,10 @@ rawDupe(duplication_context &ctxt, const StateMachineSideEffectUnreached *l)
 	return StateMachineSideEffectUnreached::get();
 }
 
-static StateMachineSideEffectAssertGoodPtr *
-rawDupe(duplication_context &ctxt, const StateMachineSideEffectAssertGoodPtr *l)
+static StateMachineSideEffectAssertFalse *
+rawDupe(duplication_context &ctxt, const StateMachineSideEffectAssertFalse *l)
 {
-	StateMachineSideEffectAssertGoodPtr *res = new StateMachineSideEffectAssertGoodPtr(NULL);
+	StateMachineSideEffectAssertFalse *res = new StateMachineSideEffectAssertFalse(NULL);
 	ctxt(&res->value, l->value, rawDupe);
 	return res;
 }
@@ -1139,7 +1139,7 @@ rawDupe(duplication_context &ctxt, const StateMachineSideEffect *smse)
 		do_case(Load);
 		do_case(Store);
 		do_case(Unreached);
-		do_case(AssertGoodPtr);
+		do_case(AssertFalse);
 		do_case(Copy);
 		do_case(Phi);
 	}
