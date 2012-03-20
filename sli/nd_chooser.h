@@ -10,6 +10,8 @@
 #include <sys/time.h>
 #endif
 
+#include "profile.hpp"
+
 class NdChooser {
 	struct choicepoint {
 		int current_value;
@@ -74,7 +76,9 @@ public:
 		  exec_tot_recovery(0), exec_tot_forward_progress(0),
 		  nr_stacks(0), nr_choice_points(0)
 #endif
-	{}
+	{
+		start_profiling();
+	}
 #if ND_CHOOSER_STATS
 	~NdChooser();
 #endif

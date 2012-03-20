@@ -73,10 +73,12 @@ NdChooser::nd_choice(int nr_options, bool *isNew)
 		assert(stack[current_stack_index].nr_options == nr_options);
 		assert(stack[current_stack_index].current_value < nr_options);
 		r = stack[current_stack_index].current_value;
+		if (current_stack_index + 1 == stack.size()) {
 #if ND_CHOOSER_STATS
-		if (current_stack_index + 1 == stack.size())
 			cur_stack_cont_recovery_end = now();
 #endif
+			stop_profiling();
+		}
 	}
 	current_stack_index++;
 	return r;
@@ -105,6 +107,7 @@ NdChooser::advance(void)
 			printf("               \r");
 			fflush(stdout);
 			nr_branches++;
+			start_profiling();
 			return true;
 		}
 		/* This choicepoint is exhausted, try another one. */
@@ -114,9 +117,10 @@ NdChooser::advance(void)
 	return false;
 }
 
-#if ND_CHOOSER_STATS
 NdChooser::~NdChooser()
 {
+	stop_profiling();
+#if ND_CHOOSER_STATS
 	nr_choosers++;
 	tot_nr_stacks += nr_stacks;
 	tot_nr_choice_points += nr_choice_points;
@@ -133,5 +137,5 @@ NdChooser::~NdChooser()
 		printf("... but we've only been running for %f?\n", now() - start_of_day);
 		abort();
 	}
-}
 #endif
+}

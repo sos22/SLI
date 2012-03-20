@@ -114,8 +114,6 @@ consider_rip(const VexRip &my_rip,
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, my_rip);
 
-	start_profiling();
-
 	timeoutTimer.nextDue = now() + 45;
 	timeoutTimer.schedule();
 
@@ -133,8 +131,6 @@ consider_rip(const VexRip &my_rip,
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
-
-	stop_profiling();
 
 	timeoutTimer.cancel();
 
