@@ -1,7 +1,7 @@
 #ifndef TYPES_DB_HPP__
 #define TYPES_DB_HPP__
 
-#define NR_HASH_HEADS 511559
+#define NR_HASH_HEADS 8185501
 
 struct hash_head {
 	unsigned long offset;
