@@ -12,7 +12,7 @@
 #include "timers.hpp"
 
 #define NR_BACKTRACE_ENTRIES 4
-#define BACKTRACE_SKIP 4
+#define BACKTRACE_SKIP 5
 
 #define MAX_NR_PROFILE_ENTRIES 4096
 #define NR_HASH_HEADS 511
