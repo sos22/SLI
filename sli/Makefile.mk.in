@@ -13,6 +13,9 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{bisimilarity,cycle_break,freevars,nf,typesdb,timers}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
+ifeq (\$(SELECTIVE_PROFILING),y)
+SLIR_SOURCES+=${input_base}/profiler.cpp
+endif
 SLIR_OBJECTS=\$(patsubst %.cpp,%.o,\$(SLIR_SOURCES))
 SLIR_DEPS=\$(patsubst %.cpp,%.cpp.d,\$(SLIR_SOURCES))
 SLIR_TARGET_SOURCES=\$(patsubst %,${input_base}/%.cpp,\$(SLIR_TARGETS))
@@ -43,7 +46,7 @@ EOF
 	do
 	    cat <<EOF
 $t: ${input_base}/${t}.o
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ \$^ -o \$@
 EOF
 	done
 }

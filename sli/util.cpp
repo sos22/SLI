@@ -6,6 +6,7 @@
 #include "offline_analysis.hpp"
 #include "libvex_parse.h"
 #include "timers.hpp"
+#include "profile.hpp"
 
 __timer_message_filter *__timer_message_filter::head;
 
@@ -56,6 +57,7 @@ init_sli(void)
 	signal(SIGUSR1, handle_sigusr1);
 
 	initialise_timers();
+	initialise_profiling();
 }
 
 template <> unsigned long

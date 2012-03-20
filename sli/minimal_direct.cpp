@@ -14,6 +14,7 @@
 #include "offline_analysis.hpp"
 #include "typesdb.hpp"
 #include "timers.hpp"
+#include "profile.hpp"
 
 class DumpFix : public FixConsumer {
 public:
@@ -113,6 +114,8 @@ consider_rip(const VexRip &my_rip,
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, my_rip);
 
+	start_profiling();
+
 	timeoutTimer.nextDue = now() + 45;
 	timeoutTimer.schedule();
 
@@ -130,6 +133,8 @@ consider_rip(const VexRip &my_rip,
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
+
+	stop_profiling();
 
 	timeoutTimer.cancel();
 
@@ -150,6 +155,8 @@ consider_rip(const VexRip &my_rip,
 	fflush(NULL);
 		
 }
+
+void startProfiling();
 
 int
 main(int argc, char *argv[])
@@ -208,6 +215,8 @@ main(int argc, char *argv[])
 			double endd = total_estimated + start;
 			if (isinf(endd))
 				continue;
+
+			dump_profiling_data();
 
 			time_t end = endd;
 			char *times;
