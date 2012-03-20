@@ -41,6 +41,7 @@ static struct profile_entry *next_alloc;
 static struct profile_entry *hash_heads[NR_HASH_HEADS];
 static unsigned long total_nr_samples;
 static unsigned long samples_lost;
+static unsigned long samples_discarded;
 
 static bool in_backtrace;
 static jmp_buf backtrace_recovery_jmpbuf;
@@ -68,6 +69,26 @@ profile_entry_doesnt_match(const void *const *trace, int nr_items, const struct 
 		return false;
 }
 
+static struct profile_entry *
+find_profile_entry(const void *const *stack, int stack_size, unsigned long hash,
+		   struct profile_entry ***ppprev)
+{
+	struct profile_entry *pe;
+	struct profile_entry **pprev;
+	pprev = &hash_heads[hash % NR_HASH_HEADS];
+	pe = *pprev;
+	while (pe != NULL &&
+	       (pe->hash != hash || profile_entry_doesnt_match(stack,
+							       stack_size,
+							       pe))) {
+		pprev = &pe->next;
+		pe = *pprev;
+	}
+	if (ppprev)
+		*ppprev = pprev;
+	return pe;
+}
+
 void
 ProfTimer::fired()
 {
@@ -92,12 +113,7 @@ ProfTimer::fired()
 	total_nr_samples++;
 
 	hash = hash_backtrace(trace + BACKTRACE_SKIP, cntr - BACKTRACE_SKIP);
-	pe = hash_heads[hash % NR_HASH_HEADS];
-	while (pe != NULL &&
-	       (pe->hash != hash || profile_entry_doesnt_match(trace + BACKTRACE_SKIP,
-							       cntr - BACKTRACE_SKIP,
-							       pe)))
-		pe = pe->next;
+	pe = find_profile_entry(trace + BACKTRACE_SKIP, cntr - BACKTRACE_SKIP, hash, NULL);
 	if (pe) {
 		pe->cntr++;
 		return;
@@ -167,6 +183,29 @@ stop_profiling()
 	profTimer.cancel();
 }
 
+static void
+zap_profile_entry(const std::vector<void *> &stack)
+{
+	void *content[stack.size()];
+	for (unsigned x = 0; x < stack.size(); x++)
+		content[x] = stack[x];
+	unsigned long hash = hash_backtrace(content, stack.size());
+	struct profile_entry **pprev;
+	struct profile_entry *pe = find_profile_entry(content, stack.size(), hash, &pprev);
+	if (!pe) {
+		/* Because otherwise we won't have been called. */
+		abort();
+	}
+
+	samples_discarded += pe->cntr;
+	pe->cntr = 0;
+
+	assert(*pprev == pe);
+	*pprev = pe->next;
+	pe->next = next_alloc;
+	next_alloc = pe;
+}
+
 void
 dump_profiling_data()
 {
@@ -199,6 +238,19 @@ dump_profiling_data()
 		printf("\n");
 	}
 	printf("\t%f <lost>\n", double(samples_lost) / total_nr_samples);
+	printf("\t%f <discard>\n", double(samples_discarded) / total_nr_samples);
 	printf("\t%f <recovered segv>\n", double(nr_recovered_segvs) / total_nr_samples);
 	printf("\t%ld total samples\n", total_nr_samples);
+
+	/* Zap the least popular entries, so that there's room for
+	 * some more to appear. */
+	int cntr;
+	if (theProfile.size() >= MAX_NR_PROFILE_ENTRIES * 3 / 4)
+		cntr = theProfile.size() - MAX_NR_PROFILE_ENTRIES * 3 / 4;
+	else
+		cntr = 0;
+	for (auto it = theProfile.begin(); it != theProfile.end() && cntr != 0; it++) {
+		zap_profile_entry(it->second);
+		cntr--;
+	}
 }
