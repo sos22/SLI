@@ -13,6 +13,7 @@
 #include "libvex_prof.hpp"
 #include "offline_analysis.hpp"
 #include "typesdb.hpp"
+#include "timers.hpp"
 
 class DumpFix : public FixConsumer {
 public:
@@ -66,11 +67,14 @@ DumpFix::finish(void)
 	fprintf(output, "};\n\n#include \"patch_skeleton_jump.c\"\n");
 }
 
-static void
-timer_handler(int ignore)
-{
-	_timed_out = true;
-}
+class TimeoutTimer : public Timer {
+public:
+	void fired() {
+		_timed_out = true;
+	}
+};
+
+static TimeoutTimer timeoutTimer;
 
 template <typename typ> static void
 shuffle(std::vector<typ> &vect)
@@ -109,13 +113,10 @@ consider_rip(const VexRip &my_rip,
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, my_rip);
 
-	struct itimerval itv;
+	timeoutTimer.nextDue = now() + 45;
+	timeoutTimer.schedule();
+
 	struct timeval start;
-
-	memset(&itv, 0, sizeof(itv));
-	itv.it_value.tv_sec = 45;
-	setitimer(ITIMER_PROF, &itv, NULL);
-
 	gettimeofday(&start, NULL);
 
 	VexPtr<StateMachine, &ir_heap> probeMachine;
@@ -130,8 +131,7 @@ consider_rip(const VexRip &my_rip,
 	struct timeval end;
 	gettimeofday(&end, NULL);
 
-	memset(&itv, 0, sizeof(itv));
-	setitimer(ITIMER_PROF, &itv, NULL);
+	timeoutTimer.cancel();
 
 	double time_taken = end.tv_sec - start.tv_sec;
 	time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
@@ -151,14 +151,6 @@ consider_rip(const VexRip &my_rip,
 		
 }
 
-static double
-now(void)
-{
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return tv.tv_sec + tv.tv_usec * 1e-6;
-}
-
 int
 main(int argc, char *argv[])
 {
@@ -172,8 +164,6 @@ main(int argc, char *argv[])
 
 	oracle = new Oracle(ms, thr, argv[2]);
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
-
-	signal(SIGPROF, timer_handler);
 
 	FILE *output = fopen("generated_patch.c", "w");
 	DumpFix df(oracle, output);

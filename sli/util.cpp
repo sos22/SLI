@@ -5,6 +5,7 @@
 #include "sli.h"
 #include "offline_analysis.hpp"
 #include "libvex_parse.h"
+#include "timers.hpp"
 
 __timer_message_filter *__timer_message_filter::head;
 
@@ -53,6 +54,8 @@ init_sli(void)
 	LibVEX_Init(failure_exit, log_bytes, 0, 0, &vcon);
 
 	signal(SIGUSR1, handle_sigusr1);
+
+	initialise_timers();
 }
 
 template <> unsigned long
