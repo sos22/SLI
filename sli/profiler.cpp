@@ -42,6 +42,7 @@ static struct profile_entry *hash_heads[NR_HASH_HEADS];
 static unsigned long total_nr_samples;
 static unsigned long samples_lost;
 static unsigned long samples_discarded;
+static bool collect_samples;
 
 static bool in_backtrace;
 static jmp_buf backtrace_recovery_jmpbuf;
@@ -92,6 +93,9 @@ find_profile_entry(const void *const *stack, int stack_size, unsigned long hash,
 void
 ProfTimer::fired()
 {
+	if (!collect_samples)
+		return;
+
 	void *trace[NR_BACKTRACE_ENTRIES + BACKTRACE_SKIP];
 	unsigned long hash;
 	struct profile_entry *pe;
@@ -169,18 +173,20 @@ initialise_profiling()
 	profTimer.nextDue = now() + 0.01;
 
 	signal(SIGSEGV, handle_sigsegv);
+
+	profTimer.schedule();
 }
 
 void
 start_profiling()
 {
-	profTimer.schedule();
+	collect_samples = true;
 }
 
 void
 stop_profiling()
 {
-	profTimer.cancel();
+	collect_samples = false;
 }
 
 static void
