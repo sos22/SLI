@@ -28,7 +28,8 @@ public:
 			       AddressSpace *_as)
 		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
 		  ignoreSideEffects(i), assumeNoInterferingStores(as),
-		  freeVariablesMightAccessStack(fvmas), as(_as), haveInterestingStoresSet(false)
+		  freeVariablesMightAccessStack(fvmas), as(_as), haveInterestingStoresSet(false),
+		  nonLocalLoads(NULL)
 	{
 	}
 	AllowableOptimisations(const AllowableOptimisations &o)
@@ -40,7 +41,8 @@ public:
 		  freeVariablesMightAccessStack(o.freeVariablesMightAccessStack),
 		  as(o.as),
 		  haveInterestingStoresSet(o.haveInterestingStoresSet),
-		  interestingStores(o.interestingStores)
+		  interestingStores(o.interestingStores),
+		  nonLocalLoads(o.nonLocalLoads)
 	{}
 
 	/* Transform x + (-x) to 0.  This is always safe, in the sense
