@@ -1619,7 +1619,7 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 		done_something = false;
 		if (TIMEOUT)
 			return a;
-		a = optimiseIRExpr(a, opt, &done_something);
+		a = optimiseIRExprFP(a, opt, &done_something);
 		a = simplifyIRExprAsBoolean(a, &done_something);
 	} while (done_something);
 
@@ -1634,7 +1634,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	bool res;
 	if (cache.query(a, b, idx, &res))
 		return res;
-	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
+	IRExpr *r = simplifyIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
 	cache.set(a, b, idx, res);
 	return res;
@@ -1642,7 +1642,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 bool
 definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
-	IRExpr *r = optimiseIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
+	IRExpr *r = simplifyIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
 	return r->tag == Iex_Const && !((IRExprConst *)r)->con->Ico.U1;
 }
 
