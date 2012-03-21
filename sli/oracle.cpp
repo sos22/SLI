@@ -199,15 +199,14 @@ read_vexrip(VexRip *out, const Mapping &mapping, AddressSpace *as, unsigned long
 	} else {
 		*is_private = false;
 	}
-	if (!as->isReadable(rip, 1))
-		return false;
+	assert(as->isReadable(rip, 1));
 
 	const unsigned long *body = mapping.get<unsigned long>(offset + 12, hdr->nr_entries);
 	std::vector<unsigned long> stack;
 	stack.reserve(hdr->nr_entries+1);
 	for (unsigned x = 0; x < hdr->nr_entries; x++) {
-		if (as->isReadable(body[x], 1))
-			stack.push_back(body[x]);
+		assert(as->isReadable(body[x], 1));
+		stack.push_back(body[x]);
 	}
 	stack.push_back(rip);
 	*out = VexRip(stack);

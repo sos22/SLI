@@ -27,8 +27,8 @@ read_rip(FILE *f, bool *is_private, AddressSpace *as, VexRip *out)
 		unsigned long a;
 		if (fread(&a, sizeof(a), 1, f) != 1)
 			err(1, "reading input");
-		if (as->isReadable(a, 1))
-			stack.push_back(a);
+		assert(as->isReadable(a, 1));
+		stack.push_back(a);
 	}
 	if (rip & (1ul << 63)) {
 		*is_private = true;
@@ -36,8 +36,7 @@ read_rip(FILE *f, bool *is_private, AddressSpace *as, VexRip *out)
 	} else {
 		*is_private = false;
 	}
-	if (!as->isReadable(rip, 1))
-		return false;
+	assert(as->isReadable(rip, 1));
 	stack.push_back(rip);
 	*out = VexRip(stack);
 	return true;
