@@ -1601,11 +1601,13 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 static IRExpr *
 optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
 {
-	bool ign;
-	ign = false;
-	e = optimiseIRExprFP(e, opt, &ign);
-	e = simplifyIRExprAsBoolean(e, &ign);
-	e = optimiseIRExprFP(e, opt, &ign);
+	bool progress;
+	progress = false;
+	e = optimiseIRExprFP(e, opt, &progress);
+	progress = false;
+	e = simplifyIRExprAsBoolean(e, &progress);
+	if (progress)
+		e = optimiseIRExprFP(e, opt, &progress);
 	return e;
 }
 
