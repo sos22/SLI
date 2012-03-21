@@ -612,7 +612,7 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 	abort();
 }
 
-template <typename t> void
+template <typename t> static void
 merge(t &out, const t &inp1, const t&inp2, bool (*lessThan)(typename t::member_t a, typename t::member_t b))
 {
 	assert(out.size() == inp1.size() + inp2.size());
@@ -633,7 +633,7 @@ merge(t &out, const t &inp1, const t&inp2, bool (*lessThan)(typename t::member_t
 		out[z++] = inp2[y++];
 }
 
-template <typename t> void
+template <typename t> static void
 merge_sort(t &out, const t &inp, bool (*lessThan)(typename t::member_t a, typename t::member_t b))
 {
 	assert(out.size() == inp.size());
@@ -1596,19 +1596,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		{}
 	} t(opt, done_something);
 	return t.transformIRExpr(src, done_something);
-}
-
-static IRExpr *
-optimiseIRExpr(IRExpr *e, const AllowableOptimisations &opt)
-{
-	bool progress;
-	progress = false;
-	e = optimiseIRExprFP(e, opt, &progress);
-	progress = false;
-	e = simplifyIRExprAsBoolean(e, &progress);
-	if (progress)
-		e = optimiseIRExprFP(e, opt, &progress);
-	return e;
 }
 
 IRExpr *
