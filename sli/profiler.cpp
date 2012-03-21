@@ -215,7 +215,7 @@ zap_profile_entry(const std::vector<void *> &stack)
 void
 dump_profiling_data()
 {
-	assert(!profTimer.inserted);
+	assert(!collect_samples);
 
 	typedef std::vector<void *> stack_t;
 	typedef std::pair<unsigned long, stack_t> set_entry_t;
