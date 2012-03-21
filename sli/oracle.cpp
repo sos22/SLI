@@ -368,12 +368,34 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 		return res;
 
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
-		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it, ms->addressSpace);
-		if ((te.shared_loads.count(smsel->rip.rip) ||
-		     te.private_loads.count(smsel->rip.rip)) &&
-		    (te.shared_stores.count(smses->rip.rip) ||
-		     te.private_stores.count(smses->rip.rip))) {
+		unsigned long offset = *it;
+		const struct tag_hdr *hdr = raw_types_database.get<tag_hdr>(offset);
+		assert(hdr);
+		unsigned long sz = sizeof(*hdr);
+		struct {
+			bool operator()(int nr_items,
+					const VexRip &desiredRip,
+					const Mapping &mapping,
+					unsigned long offset,
+					unsigned long *sz,
+					AddressSpace *as)
+			{
+				for (int x = 0; x < nr_items; x++) {
+					VexRip buf;
+					bool is_private;
+					unsigned long s;
+					bool use_it;
+					use_it = read_vexrip(&buf, mapping, as, offset + *sz, &is_private, &s);
+					*sz += s;
+					if (use_it && buf == desiredRip)
+						return true;
+				}
+				return false;
+			}
+		} doit;
+
+		if (doit(hdr->nr_loads, smsel->rip.rip, raw_types_database, offset, &sz, ms->addressSpace) ||
+		    doit(hdr->nr_stores, smses->rip.rip, raw_types_database, offset, &sz, ms->addressSpace)) {
 			cache.set(smsel, smses, idx, true);
 			return true;
 		}
