@@ -12,6 +12,7 @@
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
 #include "typesdb.hpp"
+#include "query_cache.hpp"
 
 #include "libvex_prof.hpp"
 #include "libvex_parse.h"
@@ -360,15 +361,24 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	} else if (notInTagTable(smsel))
 		return false;
 
+	static QueryCache<StateMachineSideEffectLoad, StateMachineSideEffectStore> cache(__func__);
+	int idx = cache.hash(smsel, smses);
+	bool res;
+	if (cache.query(smsel, smses, idx, &res))
+		return res;
+
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		tag_entry te;
 		fetchTagEntry(&te, raw_types_database, *it, ms->addressSpace);
 		if ((te.shared_loads.count(smsel->rip.rip) ||
 		     te.private_loads.count(smsel->rip.rip)) &&
 		    (te.shared_stores.count(smses->rip.rip) ||
-		     te.private_stores.count(smses->rip.rip)))
+		     te.private_stores.count(smses->rip.rip))) {
+			cache.set(smsel, smses, idx, true);
 			return true;
+		}
 	}
+	cache.set(smsel, smses, idx, false);
 	return false;
 }
 
