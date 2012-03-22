@@ -15,7 +15,7 @@
 
 /* Returns true if the operation definitely commutes, or false if
  * we're not sure. */
-static bool
+bool
 operationCommutes(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) ||
@@ -443,173 +443,16 @@ sortIRConsts(IRConst *a, IRConst *b)
 	abort();
 }
 
+/* Returns true if _a should be ordered before _b, and false
+ * otherwise. */
 static bool
 sortIRExprs(IRExpr *_a, IRExpr *_b)
 {
-	int ac = exprComplexity(_a);
-	int bc = exprComplexity(_b);
-	if (ac < bc)
-		return true;
-	if (ac > bc)
+	if (_b->tag == Iex_Const && _a->tag != Iex_Const)
 		return false;
-	if (IexTagLessThan(_a->tag, _b->tag)) {
+	if (_a->tag == Iex_Const && _b->tag != Iex_Const)
 		return true;
-	} else if (IexTagLessThan(_b->tag, _a->tag)) {
-		return false;
-	}
-	assert(_a->tag == _b->tag);
-
-	switch (_a->tag) {
-#define hdr1(t)								\
-		case Iex_ ## t:	{					\
-			IRExpr ## t *a = (IRExpr ## t *)_a,		\
-				*b = (IRExpr ## t *)_b;
-	hdr1(Get)
-#define hdr(t) } hdr1(t)
-		return threadAndRegister::fullCompare()(a->reg, b->reg);
-	hdr(GetI)
-		return sortIRExprs(a->ix, b->ix);
-	hdr(Qop)
-		if (a->op < b->op)
-			return true;
-		if (a->op > b->op)
-			return false;
-		if (sortIRExprs(a->arg1, b->arg1))
-			return true;
-		else if (sortIRExprs(b->arg1, a->arg1))
-			return false;
-		else if (sortIRExprs(a->arg2, b->arg2))
-			return true;
-		else if (sortIRExprs(b->arg2, a->arg2))
-			return false;
-		else if (sortIRExprs(a->arg3, b->arg3))
-			return true;
-		else if (sortIRExprs(b->arg3, a->arg3))
-			return false;
-		else 
-			return sortIRExprs(a->arg4, b->arg4);
-	hdr(Triop)
-		if (a->op < b->op)
-			return true;
-		if (a->op > b->op)
-			return false;
-		if (sortIRExprs(a->arg1, b->arg1))
-			return true;
-		else if (sortIRExprs(b->arg1, a->arg1))
-			return false;
-		else if (sortIRExprs(a->arg2, b->arg2))
-			return true;
-		else if (sortIRExprs(b->arg2, a->arg2))
-			return false;
-		else 
-			return sortIRExprs(a->arg3, b->arg3);
-	hdr(Binop)
-		if (a->op < b->op)
-			return true;
-		if (a->op > b->op)
-			return false;
-		if (sortIRExprs(a->arg1, b->arg1))
-			return true;
-		else if (sortIRExprs(b->arg1, a->arg1))
-			return false;
-		else
-			return sortIRExprs(a->arg2, b->arg2);
-	hdr(Unop)
-		if (a->op < b->op)
-			return true;
-		if (a->op > b->op)
-			return false;
-		return sortIRExprs(a->arg, b->arg);
-	hdr(Load)
-		return sortIRExprs(a->addr, b->addr);
-	hdr(Const)
-		return sortIRConsts(a->con, b->con);
-	hdr(CCall) {
-		int r = strcmp(a->cee->name,
-			       b->cee->name);
-		if (r < 0)
-			return true;
-		else if (r > 0)
-			return false;
-		for (int x = 0; 1; x++) {
-			if (!a->args[x] && !b->args[x])
-				return false;
-			if (!a->args[x])
-				return true;
-			if (!b->args[x])
-				return false;
-			if (sortIRExprs(a->args[x], b->args[x]))
-				return true;
-			if (sortIRExprs(b->args[x], a->args[x]))
-				return false;
-		}
-	}
-	hdr(Mux0X)
-		if (sortIRExprs(a->cond, b->cond))
-			return true;
-		else if (sortIRExprs(b->cond, a->cond))
-			return false;
-		else if (sortIRExprs(a->expr0, b->expr0))
-			return true;
-		else if (sortIRExprs(b->expr0, a->expr0))
-			return false;
-		else
-			return sortIRExprs(a->exprX, b->exprX);
-	hdr(Associative) {
-		if (a->op < b->op)
-			return true;
-		if (a->op > b->op)
-			return false;
-		int x;
-		x = 0;
-		while (1) {
-			if (x == a->nr_arguments &&
-			    x == b->nr_arguments)
-				return false;
-			if (x == a->nr_arguments)
-				return true;
-			if (x == b->nr_arguments)
-				return false;
-			if (sortIRExprs(a->contents[x], b->contents[x]))
-				return true;
-			else if (sortIRExprs(b->contents[x], a->contents[x]))
-				return false;
-			x++;
-		}
-	}
-	hdr(FreeVariable)
-		return a->key < b->key;
-	hdr(ClientCall)
-		if (a->callSite < b->callSite)
-			return true;
-		else if (a->callSite > b->callSite)
-			return false;
-		for (int x = 0; 1; x++) {
-			if (!a->args[x] && !b->args[x])
-				return false;
-			if (!a->args[x])
-				return true;
-			if (!b->args[x])
-				return false;
-			if (sortIRExprs(a->args[x], b->args[x]))
-				return true;
-			else if (sortIRExprs(b->args[x], a->args[x]))
-				return false;
-		}
-	hdr(ClientCallFailed)
-		return sortIRExprs(a->target,
-				   b->target);
-	hdr(HappensBefore)
-		if (a->before < b->before)
-			return true;
-		if (a->before > b->before)
-			return false;
-		return a->after < b->after;
-	}
-#undef hdr
-	}
-
-	abort();
+	return _a < _b;
 }
 
 template <typename t> static void
@@ -704,6 +547,59 @@ public:
 			(*this)[x] = other[x];
 	}
 };
+
+static void
+performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
+{
+	/* Linear scan to find the place to insert.  Could use a
+	 * binary chop, but they're a bit more fiddly to get right and
+	 * I don't expect this to be a bottleneck. */
+	int idx;
+	for (idx = 0; idx < nr_items; idx++)
+		if (!sortIRExprs(list[idx], newItem))
+			break;
+	assert(idx != nr_items);
+	/* list[idx] is greater than newItem, so need to insert to the
+	   left of list[idx] */
+	memmove(list + idx + 1, list+idx, sizeof(IRExpr *) * (nr_items - idx));
+	list[idx] = newItem;
+}
+
+void
+sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
+{
+	__set_profiling(sort_associative_arguments);
+
+	/* Use insertion sort here, because:
+
+	   -- the number of arguments is probably small,
+	   -- they're probably nearly sorted already, and
+	   -- we need an easy way of checking whether we've actually made
+	      any changes.
+	*/
+
+	/* All indexes [0, first_unsorted) are definitely already sorted */
+	int first_unsorted;
+
+	first_unsorted = 1;
+	while (first_unsorted < ae->nr_arguments) {
+		if (sortIRExprs(ae->contents[first_unsorted],
+				ae->contents[first_unsorted-1])) {
+			/* Not already in right place -> need to go
+			   and insert it. */
+			*done_something = true;
+			performInsertion(ae->contents,
+					 first_unsorted,
+					 ae->contents[first_unsorted]);
+		} else {
+			/* first_unsorted is greater than
+			   first_unsorted-1, and therefore than
+			   anything before it in the list -> it's
+			   already in the right place. */
+		}
+		first_unsorted++;
+	}
+}
 
 void
 addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg)
@@ -836,26 +732,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 			/* Sort IRExprs so that ``related'' expressions are likely to
 			 * be close together. */
-			if (operationCommutes(e->op)) {
-				__set_profiling(sort_associative_arguments);
-				bool unsorted = false;
-				for (int x = 0; x < e->nr_arguments - 1 && !unsorted; x++)
-					if (sortIRExprs(e->contents[x+1], e->contents[x]))
-						unsorted = true;
-				if (unsorted) {
-					std::vector<IRExpr *> c;
-					c.resize(e->nr_arguments);
-					for (int x = 0; x < e->nr_arguments; x++)
-						c[x] = e->contents[x];
-					std::vector<IRExpr *> out;
-					out.resize(e->nr_arguments);
-					vector_slice<IRExpr *> out_slice(out);
-					vector_slice<IRExpr *> inp_slice(c);
-					merge_sort(out_slice, inp_slice, sortIRExprs);
-					for (int x = 0; x < e->nr_arguments; x++)
-						e->contents[x] = out[x];
-				}
-			}
+			if (operationCommutes(e->op))
+				sortAssociativeArguments(e, done_something);
+
 			/* Fold together constants.  For commutative
 			   operations they'll all be at the beginning, but
 			   don't assume that associativity implies
@@ -1599,7 +1478,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 }
 
 IRExpr *
-simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
+simplifyIRExpr(IRExpr *a, bool *d, const AllowableOptimisations &opt)
 {
 	__set_profiling(simplifyIRExpr);
 	bool done_something;
@@ -1610,9 +1489,17 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 			return a;
 		a = optimiseIRExprFP(a, opt, &done_something);
 		a = simplifyIRExprAsBoolean(a, &done_something);
+		*d |= done_something;
 	} while (done_something);
 
 	return a;
+}
+
+IRExpr *
+simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
+{
+	bool d;
+	return simplifyIRExpr(a, &d, opt);
 }
 
 bool

@@ -52,6 +52,24 @@ specialiseIRExpr(IRExpr *iex, threadState &state)
 	return s.doit(iex);
 }
 
+static IRExpr *
+safeSimplifyIRExpr(IRExpr *inp, const AllowableOptimisations &opt)
+{
+	bool ign;
+	inp = internIRExpr(inp, &ign);
+	bool progress = false;
+	inp = simplifyIRExpr(inp, &progress, opt);
+	while (progress) {
+		progress = false;
+		inp = internIRExpr(inp, &progress);
+		if (!progress)
+			break;
+		progress = false;
+		inp = simplifyIRExpr(inp, &progress, opt);
+	}
+	return inp;
+}
+
 static bool
 expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const AllowableOptimisations &opt, 
 		 IRExpr **assumption, IRExpr **accumulatedAssumptions)
@@ -59,13 +77,13 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 	if (TIMEOUT)
 		return true;
 
-	exp = simplifyIRExpr(internIRExpr(specialiseIRExpr(exp, state)), opt);
+	exp = safeSimplifyIRExpr(specialiseIRExpr(exp, state), opt);
 
 	/* Combine the path constraint with the new expression and see
 	   if that produces a contradiction.  If it does then we know
 	   for sure that the new expression is false. */
 	IRExpr *e =
-		simplifyIRExpr(
+		safeSimplifyIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
 				*assumption,
@@ -92,7 +110,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 	   this would be redundant with the previous version, but we
 	   don't, so it isn't. */
 	IRExpr *e2 =
-		simplifyIRExpr(
+		safeSimplifyIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
 				*assumption,

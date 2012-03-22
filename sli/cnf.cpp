@@ -4,7 +4,6 @@
 #include "sli.h"
 #include "cnf.hpp"
 #include "offline_analysis.hpp"
-#include "intern.hpp"
 #include "nf.hpp"
 
 #include "libvex_prof.hpp"
@@ -34,7 +33,7 @@ simplifyIRExprAsBoolean(IRExpr *inp, bool *done_something)
 		((IRExprAssociative *)inp)->op == Iop_And1))))
 		return inp;
 
-	inp = internIRExpr(inp);
+	inp = internIRExpr(inp, done_something);
 
 	NF_Expression res;
 	Maybe<bool> tmp(cnf(inp, res));
