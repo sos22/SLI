@@ -1636,24 +1636,31 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 	return a;
 }
 
+QueryCache<IRExpr, IRExpr> definitelyEqualCache("Definitely equal");
+QueryCache<IRExpr, IRExpr> definitelyNotEqualCache("Definitely not equal");
 bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
-	static QueryCache<IRExpr, IRExpr> cache("Definitely equal");
-	int idx = cache.hash(a, b);
+	int idx = definitelyEqualCache.hash(a, b);
 	bool res;
-	if (cache.query(a, b, idx, &res))
+	if (definitelyEqualCache.query(a, b, idx, &res))
 		return res;
 	IRExpr *r = simplifyIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
-	cache.set(a, b, idx, res);
+	definitelyEqualCache.set(a, b, idx, res);
 	return res;
 }
 bool
 definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
+	int idx = definitelyNotEqualCache.hash(a, b);
+	bool res;
+	if (definitelyNotEqualCache.query(a, b, idx, &res))
+		return res;
 	IRExpr *r = simplifyIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
-	return r->tag == Iex_Const && !((IRExprConst *)r)->con->Ico.U1;
+	res = (r->tag == Iex_Const && !((IRExprConst *)r)->con->Ico.U1);
+	definitelyNotEqualCache.set(a, b, idx, res);
+	return res;
 }
 
 bool
