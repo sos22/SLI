@@ -443,21 +443,28 @@ sortIRConsts(IRConst *a, IRConst *b)
 	abort();
 }
 
+/* Simple sort function: constants go at the front, and then
+   everything goes afterwards.  We arrange that identical expressions
+   are always sorted together.  Returns true if @a should be before
+   @b. */
 static bool
 sortIRExprs(IRExpr *_a, IRExpr *_b)
 {
-	int ac = exprComplexity(_a);
-	int bc = exprComplexity(_b);
-	if (ac < bc)
-		return true;
-	if (ac > bc)
+	if (_a == _b)
 		return false;
-	if (IexTagLessThan(_a->tag, _b->tag)) {
-		return true;
-	} else if (IexTagLessThan(_b->tag, _a->tag)) {
-		return false;
+	if (_a->tag == Iex_Const && _b->tag == Iex_Const) {
+		IRExprConst *a = (IRExprConst *)_a;
+		IRExprConst *b = (IRExprConst *)_b;
+		return sortIRConsts(a->con, b->con);
 	}
-	assert(_a->tag == _b->tag);
+	if (_a->tag == Iex_Const)
+		return true;
+	if (_b->tag == Iex_Const)
+		return false;
+	if (_a->tag < _b->tag)
+		return true;
+	if (_a->tag > _b->tag)
+		return false;
 
 	switch (_a->tag) {
 #define hdr1(t)								\
