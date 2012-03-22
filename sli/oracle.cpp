@@ -331,14 +331,47 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 	std::vector<unsigned long> offsets;
 	type_index->findOffsets(access->rip.rip, offsets);
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
-		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it, ms->addressSpace);
-		if (te.shared_loads.count(access->rip.rip)) {
-			if (te.shared_stores.size() != 0)
+		unsigned long offset = *it;
+		const struct tag_hdr *hdr = raw_types_database.get<tag_hdr>(offset);
+		if (!hdr)
+			abort();
+		if (hdr->nr_stores == 0)
+			continue;
+
+		/* We want to return true if the entry contains *any*
+		   shared stores at all and the access matches with
+		   either the shared store set or the shared load set.
+		   Ideally, you'd check whether you have shared stores
+		   first and then go and check the load set
+		   afterwards, but the file format means that you have
+		   to parse the load set first.  Meh. */
+		bool relevant_load = false;
+		offset += sizeof(*hdr);
+		for (int x = 0; x < hdr->nr_loads; x++) {
+			VexRip buf;
+			bool is_private;
+			unsigned long s;
+			bool use_it = read_vexrip(&buf, raw_types_database, ms->addressSpace, offset, &is_private, &s);
+			offset += s;
+			if (use_it && !is_private && buf == access->rip.rip) {
+				/* You might think that we should
+				   break out of the loop here.  Not
+				   so: we need to parse all of the
+				   loads to find the start of the
+				   store set. */
+				relevant_load = true;
+			}
+		}
+		for (int x = 0; x < hdr->nr_stores; x++) {
+			VexRip buf;
+			bool is_private;
+			unsigned long s;
+			bool use_it = read_vexrip(&buf, raw_types_database, ms->addressSpace, offset, &is_private, &s);
+			offset += s;
+			if (use_it && !is_private &&
+			    (relevant_load || buf == access->rip.rip))
 				return true;
 		}
-		if (te.shared_stores.count(access->rip.rip))
-			return true;
 	}
 	return false;
 }
