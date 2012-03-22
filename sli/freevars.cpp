@@ -274,7 +274,7 @@ containsNoTemporaries(IRExpr *e)
 			return NULL;
 		}
 	} doit;
-	doit.transformIRExpr(e);
+	doit.doit(e);
 	return doit.res;
 }
 
@@ -761,5 +761,5 @@ FreeVariableMap::applyTransformation(IRExprTransformer &x, bool *done_something)
 	for (map_t::iterator it = content->begin();
 	     it != content->end();
 	     it++)
-		it.set_value(x.transformIRExpr(it.value(), done_something));
+		it.set_value(x.doit(it.value(), done_something));
 }

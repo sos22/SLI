@@ -49,7 +49,7 @@ static IRExpr *
 specialiseIRExpr(IRExpr *iex, threadState &state)
 {
 	SpecialiseIRExpr s(state);
-	return s.transformIRExpr(iex);
+	return s.doit(iex);
 }
 
 static bool

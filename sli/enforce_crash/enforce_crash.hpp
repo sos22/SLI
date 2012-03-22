@@ -130,7 +130,7 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 	};
 	static bool evaluatable(IRExpr *e, std::set<Instruction<ThreadRip> *> &avail, std::set<unsigned> &availThreads, CFG<ThreadRip> *cfg) {
 		trans1 t(avail, availThreads, cfg);
-		t.transformIRExpr(e);
+		t.doit(e);
 		return t.isGood;
 	}
 public:

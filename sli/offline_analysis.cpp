@@ -1647,7 +1647,7 @@ rewriteTemporary(IRExpr *sm,
 		{
 		}
 	} rt(tmp, newval);
-	return rt.transformIRExpr(sm);
+	return rt.doit(sm);
 }
 
 template <typename t> StateMachine *

@@ -542,7 +542,7 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 		IRExpr *doExprInState(const std::set<StateMachineSideEffect *> &reaching,
 				      IRExpr *e) {
 			exp_transformer t(needPhiStates, reaching);
-			return t.transformIRExpr(e);
+			return t.doit(e);
 		}
 		void doEdge(std::set<StateMachineSideEffect *> reaching,
 			    StateMachineEdge *edge)
@@ -556,26 +556,26 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 				case StateMachineSideEffect::Store: {
 					StateMachineSideEffectStore *ss =
 						dynamic_cast<StateMachineSideEffectStore *>(e);
-					ss->addr = t.transformIRExpr(ss->addr);
-					ss->data = t.transformIRExpr(ss->data);
+					ss->addr = t.doit(ss->addr);
+					ss->data = t.doit(ss->data);
 					break;
 				}
 				case StateMachineSideEffect::Load: {
 					StateMachineSideEffectLoad *l =
 						dynamic_cast<StateMachineSideEffectLoad *>(e);
-					l->addr = t.transformIRExpr(l->addr);
+					l->addr = t.doit(l->addr);
 					break;
 				}
 				case StateMachineSideEffect::Copy: {
 					StateMachineSideEffectCopy *c =
 						dynamic_cast<StateMachineSideEffectCopy *>(e);
-					c->value = t.transformIRExpr(c->value);
+					c->value = t.doit(c->value);
 					break;
 				}
 				case StateMachineSideEffect::AssertFalse: {
 					StateMachineSideEffectAssertFalse *a =
 						dynamic_cast<StateMachineSideEffectAssertFalse *>(e);
-					a->value = t.transformIRExpr(a->value);
+					a->value = t.doit(a->value);
 					break;
 				}
 				case StateMachineSideEffect::Unreached:
@@ -629,7 +629,7 @@ findNeededRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::pa
 			: out(_out)
 		{}
 	} trans(out);
-	trans.transformIRExpr(e);
+	trans.doit(e);
 }
 static void 
 findNeededRegisters(StateMachineSideEffect *smse, std::set<threadAndRegister, threadAndRegister::partialCompare> &out)

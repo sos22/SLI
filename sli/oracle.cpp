@@ -863,7 +863,7 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 			: old(_old)
 		{}
 	} t(old);
-	t.transformIRExpr(w);
+	t.doit(w);
 	return t.old;
 }
 
@@ -1906,8 +1906,7 @@ static IRExpr *
 rewriteRegister(IRExpr *expr, threadAndRegister offset, IRExpr *to)
 {
 	RewriteRegisterExpr rre(offset, to);
-	bool ign;
-	return rre.transformIRExpr(expr, &ign);
+	return rre.doit(expr);
 }
 
 void

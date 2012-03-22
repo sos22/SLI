@@ -314,7 +314,7 @@ findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::full
 			return IRExprTransformer::transformIex(e);
 		}
 	} t(out);
-	t.transformIRExpr(e);
+	t.doit(e);
 }
 
 static void

@@ -26,7 +26,7 @@ public:
 		public:
 			_(LivenessEntry &_out) : out(_out) {}
 		} t(*this);
-		t.transformIRExpr(e);
+		t.doit(e);
 	}
 
 	void useSideEffect(StateMachineSideEffect *smse)
@@ -98,7 +98,7 @@ public:
 				: _this(__this), res(false)
 			{}
 		} t(this);
-		t.transformIRExpr(assertion);
+		t.doit(assertion);
 		return t.res;
 	}
 };

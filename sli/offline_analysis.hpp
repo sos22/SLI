@@ -115,9 +115,10 @@ protected:
 			return IRExpr_ClientCallFailed(a1);
 	}
 	virtual IRExpr *transformIex(IRExprHappensBefore *e) { return NULL; }
-public:
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
-	IRExpr *transformIRExpr(IRExpr *e) { bool t; return transformIRExpr(e, &t); }
+public:
+	IRExpr *doit(IRExpr *e, bool *done_something) { return transformIRExpr(e, done_something); }
+	IRExpr *doit(IRExpr *e) { bool t; return doit(e, &t); }
 };
 
 class StateMachineTransformer : public IRExprTransformer {
@@ -160,7 +161,7 @@ protected:
 							 bool *done_something)
 	{
 		bool b = false;
-		IRExpr *c = transformIRExpr(s->condition, &b);
+		IRExpr *c = doit(s->condition, &b);
 		if (b)
 			return new StateMachineBifurcate(s->origin,
 							 c,

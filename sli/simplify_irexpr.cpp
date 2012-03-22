@@ -381,7 +381,7 @@ exprComplexity(const IRExpr *e)
 			return IRExprTransformer::transformIex(e);
 		}
 	} t;
-	t.transformIRExpr((IRExpr *)e);
+	t.doit((IRExpr *)e);
 	return t.res;
 }
 
@@ -1595,7 +1595,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			: opt(_opt), done_something(_done_something)
 		{}
 	} t(opt, done_something);
-	return t.transformIRExpr(src, done_something);
+	return t.doit(src, done_something);
 }
 
 IRExpr *
@@ -1663,7 +1663,7 @@ definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *or
 			: res(false), opt(_opt), oracle(_oracle)
 		{}
 	} t(opt, oracle);
-	t.transformIRExpr(e);
+	t.doit(e);
 	return t.res;
 }
 

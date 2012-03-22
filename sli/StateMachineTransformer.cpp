@@ -36,7 +36,7 @@ StateMachineSideEffectLoad *
 StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, bool *)
 {
 	bool b = false;
-	IRExpr *a = transformIRExpr(l->addr, &b);
+	IRExpr *a = doit(l->addr, &b);
 	if (b)
 		return new StateMachineSideEffectLoad(l->target, a, l->rip);
 	else
@@ -47,7 +47,7 @@ StateMachineSideEffectStore *
 StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, bool *)
 {
 	bool b = false;
-	IRExpr *a = transformIRExpr(s->addr, &b), *d = transformIRExpr(s->data, &b);
+	IRExpr *a = doit(s->addr, &b), *d = doit(s->data, &b);
 	if (b)
 		return new StateMachineSideEffectStore(a, d, s->rip);
 	else
@@ -58,7 +58,7 @@ StateMachineSideEffectAssertFalse *
 StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFalse *a, bool *)
 {
 	bool b = false;
-	IRExpr *v = transformIRExpr(a->value, &b);
+	IRExpr *v = doit(a->value, &b);
 	if (b)
 		return new StateMachineSideEffectAssertFalse(v);
 	else
@@ -69,7 +69,7 @@ StateMachineSideEffectCopy *
 StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, bool *)
 {
 	bool b = false;
-	IRExpr *v = transformIRExpr(c->value, &b);
+	IRExpr *v = doit(c->value, &b);
 	if (b)
 		return new StateMachineSideEffectCopy(c->target, v);
 	else

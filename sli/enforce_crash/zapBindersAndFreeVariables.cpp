@@ -20,7 +20,8 @@ public:
 	}
 	IRExpr *transformIex(IRExprFreeVariable *e)
 	{
-		return transformIRExpr(fv.get(e->key));
+		bool done_something = false;
+		return transformIRExpr(fv.get(e->key), &done_something);
 	}
 	IRExpr *transformIex(IRExprGet *e)
 	{
@@ -54,5 +55,5 @@ IRExpr *
 zapFreeVariables(IRExpr *src, FreeVariableMap &fv)
 {
 	ShortCircuitFvTransformer trans(fv, NULL);
-	return trans.transformIRExpr(src);
+	return trans.doit(src);
 }

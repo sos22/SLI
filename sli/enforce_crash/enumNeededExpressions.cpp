@@ -37,6 +37,6 @@ void
 enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out)
 {
 	EnumNeededExpressionsTransformer trans(out);
-	trans.transformIRExpr(e);
+	trans.doit(e);
 }
 
