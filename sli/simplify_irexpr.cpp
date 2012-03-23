@@ -709,12 +709,49 @@ _sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
         }
 }
 
-/* This is only non-static because it's used as a template argument;
- * sigh. */
+static sort_ordering
+_cnf_disjunction_sort(IRExpr *a, IRExpr *b)
+{
+	/* The disjunction order is essentially the same as the normal
+	   sortIRExprs order, except that we strip off leading
+	   Iop_Not1 operations, so that A and ~A always sort together,
+	   and then do a little bit extra so that ~A is always after
+	   A. */
+	bool inv_a = false;
+	bool inv_b = false;
+	while (a->tag == Iex_Unop) {
+		IRExprUnop *ua = (IRExprUnop *)a;
+		if (ua->op != Iop_Not1)
+			break;
+		inv_a = true;
+		a = ua->arg;
+	}
+	while (b->tag == Iex_Unop) {
+		IRExprUnop *ub = (IRExprUnop *)b;
+		if (ub->op != Iop_Not1)
+			break;
+		inv_b = true;
+		b = ub->arg;
+	}
+	sort_ordering order = _sortIRExprs(a, b);
+	if (order == equal_to) {
+		return _sortIntegers(inv_a, inv_b);
+	} else {
+		return order;
+	}
+}
+
+/* These are only non-static because they're used as template
+ * arguments; sigh. */
 bool
 sortIRExprs(IRExpr *a, IRExpr *b)
 {
 	return _sortIRExprs(a, b) == less_than;
+}
+bool
+cnf_disjunction_sort(IRExpr *a, IRExpr *b)
+{
+	return _cnf_disjunction_sort(a, b) == less_than;
 }
 
 static void
@@ -734,7 +771,10 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 	   the type of thing which we're sorting.  The aim here is to
 	   produce the same ordering as CNF conversion would, since
 	   that makes optimisation much easier. */
-	_sortAssociativeArguments<sortIRExprs>(ae, done_something);
+	if (ae->op == Iop_Or1)
+		_sortAssociativeArguments<cnf_disjunction_sort>(ae, done_something);
+	else
+		_sortAssociativeArguments<sortIRExprs>(ae, done_something);
 }
 
 static IRExpr *
