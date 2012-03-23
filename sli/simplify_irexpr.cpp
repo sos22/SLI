@@ -778,6 +778,54 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 	return e;
 }
 
+static void
+performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
+{
+        /* Linear scan to find the place to insert.  Could use a
+         * binary chop, but they're a bit more fiddly to get right and
+         * I don't expect this to be a bottleneck. */
+        int idx;
+        for (idx = 0; idx < nr_items; idx++)
+                if (!sortIRExprs(list[idx], newItem))
+                        break;
+        assert(idx != nr_items);
+        /* list[idx] is greater than newItem, so need to insert to the
+           left of list[idx] */
+        memmove(list + idx + 1, list+idx, sizeof(IRExpr *) * (nr_items - idx));
+        list[idx] = newItem;
+}
+
+static void
+sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
+{
+        __set_profiling(sort_associative_arguments);
+
+        /* Use insertion sort here, because:
+
+           -- the number of arguments is probably small,
+           -- they're probably nearly sorted already, and
+           -- we need an easy way of checking whether we've actually made
+              any changes.
+        */
+
+        /* All indexes [0, first_unsorted) are definitely already sorted */
+        int first_unsorted;
+
+        first_unsorted = 1;
+        while (first_unsorted < ae->nr_arguments) {
+                if (sortIRExprs(ae->contents[first_unsorted],
+                                ae->contents[first_unsorted-1])) {
+                        /* Not already in right place -> need to go
+                           and insert it. */
+                        *done_something = true;
+                        performInsertion(ae->contents,
+                                         first_unsorted,
+                                         ae->contents[first_unsorted]);
+                }
+		first_unsorted++;
+        }
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
@@ -856,26 +904,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 			/* Sort IRExprs so that ``related'' expressions are likely to
 			 * be close together. */
-			if (operationCommutes(e->op)) {
-				__set_profiling(sort_associative_arguments);
-				bool unsorted = false;
-				for (int x = 0; x < e->nr_arguments - 1 && !unsorted; x++)
-					if (sortIRExprs(e->contents[x+1], e->contents[x]))
-						unsorted = true;
-				if (unsorted) {
-					std::vector<IRExpr *> c;
-					c.resize(e->nr_arguments);
-					for (int x = 0; x < e->nr_arguments; x++)
-						c[x] = e->contents[x];
-					std::vector<IRExpr *> out;
-					out.resize(e->nr_arguments);
-					vector_slice<IRExpr *> out_slice(out);
-					vector_slice<IRExpr *> inp_slice(c);
-					merge_sort(out_slice, inp_slice, sortIRExprs);
-					for (int x = 0; x < e->nr_arguments; x++)
-						e->contents[x] = out[x];
-				}
-			}
+			if (operationCommutes(e->op))
+				sortAssociativeArguments(e, done_something);
+
 			/* Fold together constants.  For commutative
 			   operations they'll all be at the beginning, but
 			   don't assume that associativity implies
