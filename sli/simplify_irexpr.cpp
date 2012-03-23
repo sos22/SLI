@@ -1171,6 +1171,22 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				}
 			}
 
+			/* x | ~x -> 1.  We know by the ordering that
+			   if any such pairs are present then they'll
+			   be adjacent and x will be before ~x, which
+			   is handy.  Note that this is using pointer
+			   equality again. */
+			if (e->op == Iop_Or1) {
+				__set_profiling(optimise_assoc_x_or_not_x);
+				for (int i = 0; i < e->nr_arguments - 1; i++) {
+					if (e->contents[i+1]->tag == Iex_Unop &&
+					    ((IRExprUnop *)e->contents[i+1])->op == Iop_Not1 &&
+					    ((IRExprUnop *)e->contents[i+1])->arg == e->contents[i]) {
+						return IRExpr_Const(IRConst_U1(1));
+					}
+				}
+			}
+
 			/* x + -x -> 0, for any plus-like operator, so remove
 			 * both x and -x from the list. */
 			/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
