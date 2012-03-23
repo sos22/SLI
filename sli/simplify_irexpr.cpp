@@ -741,6 +741,152 @@ _cnf_disjunction_sort(IRExpr *a, IRExpr *b)
 	}
 }
 
+static sort_ordering
+_cnf_conjunction_sort(IRExpr *a, IRExpr *b)
+{
+	/* Conjunction ordering treats every argument as an Iop_Or1
+	   disjunction (if it isn't one already, we treat it as a
+	   single-argument one).  The order is then:
+
+	   -- If a is a subset of b, a is before b.
+	   -- If b is a subset of a, a is after b.
+	   -- If a is smaller than b (i.e. has fewer elements), a is before b.
+	   -- If b is smaller than a, a is after b.
+	   -- Otherwise, use dictionary disjunction ordering.
+
+	   We assume that the arguments are themselves sorted
+	   according to the disjunction ordering.  We also assume that
+	   disjunctions always have at least two arguments.
+
+	   The first two rules are referred to as the subsetting
+	   relation, the second two as the size relation, and the
+	   final one as the dictionary relation.
+	*/
+	IRExprAssociative *ae, *be;
+	ae = NULL;
+	be = NULL;
+	if (a->tag == Iex_Associative) {
+		ae = (IRExprAssociative *)a;
+		if (ae->op != Iop_Or1)
+			ae = NULL;
+	}
+	if (b->tag == Iex_Associative) {
+		be = (IRExprAssociative *)b;
+		if (be->op != Iop_Or1)
+			be = NULL;
+	}
+	if (!ae && !be)
+		return _cnf_disjunction_sort(a, b);
+
+	if (ae && !be) {
+		/* @a is a disjunction but @b isn't.  In this case,
+		   there are only two interesting cases:
+		   
+		   -- @b is a member of @a (i.e. @be is a subset of @ae), or
+		   -- @b is not in @a.
+
+		   In the first case, @a is after @b by the subsetting
+		   rule.  In the second case, @ae is necessarily
+		   larger than @be (as @be is size 1 and @ae is
+		   assumed to be size >1), so @a is still after @b.
+		   In either case, @a goes after @b and the result is
+		   greater_than. */
+		return greater_than;
+	}
+	if (!ae && be) {
+		/* Symmetric case */
+		return less_than;
+	}
+
+	/* Both a and b are non-trivial disjunctions.  Now we need to
+	   move on and check the sub-setting rule. */
+	int idx;
+	idx = 0;
+	while (idx < ae->nr_arguments && idx < be->nr_arguments) {
+		sort_ordering o = _cnf_disjunction_sort(ae->contents[idx],
+							be->contents[idx]);
+		if (o == less_than) {
+			/* This element in @ae is less than the
+			   matching element in @be i.e. this element
+			   of @ae is definitely not present in @be and
+			   there is no way that @ae could be a subset
+			   of @be.  We still need to check whether @be
+			   is a subset of @ae, though. */
+
+			if (ae->nr_arguments < be->nr_arguments) {
+				/* @a is smaller than @b, and so @b is
+				   definitely not a subset of @a.  No
+				   subset relationships hold, and so
+				   we decide based entirely on the
+				   size of the arguments.  @a is
+				   smaller, so it is also less than
+				   @b. */
+				return less_than;
+			}
+			if (ae->nr_arguments == be->nr_arguments) {
+				/* @ae and @be are the same size, and
+				   we know that at least one element
+				   of @ae is not present in @be.
+				   Therefore there is at least one
+				   element of @be not present in @ae,
+				   by the pigeon hole principle.
+				   Therefore, neither the subset nor
+				   size-based rules fire, and we use a
+				   dictionary order.  In this case, we
+				   know that, for the first non-equal
+				   item, @ae is smaller, so @ae is
+				   smaller overall. */
+				return less_than;
+			}
+
+			/* Subsetting-wise, we know that either @be is
+			 * a subset of @ae or they are unordered with
+			 * respect to each other.  In the first case,
+			 * we'll return greater_than.  In the second
+			 * case, we look at their relative sizes.  We
+			 * know that @ae has more arguments than @be,
+			 * because of the tests above, and in that
+			 * case we still return greater_than.  So we
+			 * just need to return greater_than and we're
+			 * done.
+			 */
+			return greater_than;
+		} else if (o == greater_than) {
+			/* Symmetric case.  This item is definitely
+			 * present in @be but not in @ae, so @be
+			 * cannot be a subset of @ae. */
+			if (be->nr_arguments < ae->nr_arguments) {
+				/* @be and @ae are unordered with
+				 * respect to the subset relation, so
+				 * we use the size relation. */
+				return greater_than;
+			}
+			if (be->nr_arguments == ae->nr_arguments) {
+				/* @be and @ae are unordered with
+				 * respect to the subset and size
+				 * relations, so we use the dictionary
+				 * relation. */
+				return greater_than;
+			}
+			return less_than;
+		} else {
+			assert(o == equal_to);
+			idx++;
+		}
+	}
+
+	if (ae->nr_arguments == be->nr_arguments) {
+		assert(idx == ae->nr_arguments);
+		return equal_to;
+	}
+	if (ae->nr_arguments < be->nr_arguments) {
+		/* @a is a subset of @b */
+		return less_than;
+	} else {
+		return greater_than;
+	}
+}
+
 /* These are only non-static because they're used as template
  * arguments; sigh. */
 bool
@@ -752,6 +898,11 @@ bool
 cnf_disjunction_sort(IRExpr *a, IRExpr *b)
 {
 	return _cnf_disjunction_sort(a, b) == less_than;
+}
+bool
+cnf_conjunction_sort(IRExpr *a, IRExpr *b)
+{
+	return _cnf_conjunction_sort(a, b) == less_than;
 }
 
 static void
@@ -773,6 +924,8 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 	   that makes optimisation much easier. */
 	if (ae->op == Iop_Or1)
 		_sortAssociativeArguments<cnf_disjunction_sort>(ae, done_something);
+	else if (ae->op == Iop_And1)
+		_sortAssociativeArguments<cnf_conjunction_sort>(ae, done_something);
 	else
 		_sortAssociativeArguments<sortIRExprs>(ae, done_something);
 }
