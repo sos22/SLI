@@ -7,7 +7,7 @@
 #include "inferred_information.hpp"
 #include "oracle.hpp"
 #include "offline_analysis.hpp"
-#include "cnf.hpp"
+#include "intern.hpp"
 #include "genfix.hpp"
 #include "dnf.hpp"
 #include "simplify_ordering.hpp"

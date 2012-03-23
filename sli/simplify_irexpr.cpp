@@ -5,7 +5,6 @@
 
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
-#include "cnf.hpp"
 #include "query_cache.hpp"
 
 #include "libvex_guest_offsets.h"
@@ -1972,7 +1971,6 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 		if (TIMEOUT)
 			return a;
 		a = optimiseIRExprFP(a, opt, &done_something);
-		a = simplifyIRExprAsBoolean(a, &done_something);
 	} while (done_something);
 
 	return a;
