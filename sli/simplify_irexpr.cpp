@@ -385,51 +385,55 @@ exprComplexity(const IRExpr *e)
 	return t.res;
 }
 
-static int
-ordering_iex_tag(IRExprTag a)
-{
-	switch (a) {
-	case Iex_Const: return 0;
-	case Iex_Get: return 2;
-	case Iex_GetI: return 3;
-	case Iex_FreeVariable: return 5;
-	case Iex_Unop: return 6;
-	case Iex_Binop: return 7;
-	case Iex_Triop: return 8;
-	case Iex_Qop: return 9;
-	case Iex_Associative: return 10;
-	case Iex_Mux0X: return 11;
-	case Iex_Load: return 12;
-	case Iex_CCall: return 13;
-	case Iex_ClientCall: return 14;
-	case Iex_ClientCallFailed: return 15;
-	case Iex_HappensBefore: return 16;
+class sort_ordering {
+public:
+	enum _val {
+		lt,
+		eq,
+		gt,
+		bad
+	} val;
+	explicit sort_ordering(_val __val)
+		: val(__val)
+	{}
+	sort_ordering()
+		: val(bad)
+	{}
+
+	bool operator!=(sort_ordering o) const {
+		return val != o.val;
 	}
-	abort();
-}
 
-static bool
-IexTagLessThan(IRExprTag a, IRExprTag b)
+	bool operator==(sort_ordering o) const {
+		return val == o.val;
+	}
+};
+static const sort_ordering less_than(sort_ordering::lt);
+static const sort_ordering equal_to(sort_ordering::eq);
+static const sort_ordering greater_than(sort_ordering::gt);
+
+template <typename t> static sort_ordering
+_sortIntegers(t a, t b)
 {
-	if (a == b)
-		return false;
-
-	int _a = ordering_iex_tag(a);
-	int _b = ordering_iex_tag(b);
-	return _a < _b;
+	if (a < b)
+		return less_than;
+	else if (a == b)
+		return equal_to;
+	else
+		return greater_than;
 }
 
-static bool
-sortIRConsts(IRConst *a, IRConst *b)
+static sort_ordering
+_sortIRConsts(IRConst *a, IRConst *b)
 {
 	if (a->tag < b->tag)
-		return true;
+		return less_than;
 	if (a->tag > b->tag)
-		return false;
+		return greater_than;
 	switch (a->tag) {
-#define do_type(t)					\
-		case Ico_ ## t :			\
-			return a->Ico. t < b->Ico. t
+#define do_type(t)							\
+		case Ico_ ## t :					\
+			return _sortIntegers(a->Ico. t, b->Ico. t)
 		do_type(U1);
 		do_type(U8);
 		do_type(U16);
@@ -447,24 +451,26 @@ sortIRConsts(IRConst *a, IRConst *b)
    everything goes afterwards.  We arrange that identical expressions
    are always sorted together.  Returns true if @a should be before
    @b. */
-static bool
-sortIRExprs(IRExpr *_a, IRExpr *_b)
+static sort_ordering
+_sortIRExprs(IRExpr *_a, IRExpr *_b)
 {
 	if (_a == _b)
-		return false;
+		return equal_to;
 	if (_a->tag == Iex_Const && _b->tag == Iex_Const) {
 		IRExprConst *a = (IRExprConst *)_a;
 		IRExprConst *b = (IRExprConst *)_b;
-		return sortIRConsts(a->con, b->con);
+		return _sortIRConsts(a->con, b->con);
 	}
 	if (_a->tag == Iex_Const)
-		return true;
+		return less_than;
 	if (_b->tag == Iex_Const)
-		return false;
+		return greater_than;
 	if (_a->tag < _b->tag)
-		return true;
+		return less_than;
 	if (_a->tag > _b->tag)
-		return false;
+		return greater_than;
+
+	sort_ordering s;
 
 	switch (_a->tag) {
 #define hdr1(t)								\
@@ -473,145 +479,126 @@ sortIRExprs(IRExpr *_a, IRExpr *_b)
 				*b = (IRExpr ## t *)_b;
 	hdr1(Get)
 #define hdr(t) } hdr1(t)
-		return threadAndRegister::fullCompare()(a->reg, b->reg);
+		if (threadAndRegister::fullCompare()(a->reg, b->reg))
+			return less_than;
+		else if (threadAndRegister::fullCompare()(b->reg, a->reg))
+			return greater_than;
+		else
+			return equal_to;
 	hdr(GetI)
-		return sortIRExprs(a->ix, b->ix);
+		return _sortIRExprs(a->ix, b->ix);
 	hdr(Qop)
 		if (a->op < b->op)
-			return true;
+			return less_than;
 		if (a->op > b->op)
-			return false;
-		if (sortIRExprs(a->arg1, b->arg1))
-			return true;
-		else if (sortIRExprs(b->arg1, a->arg1))
-			return false;
-		else if (sortIRExprs(a->arg2, b->arg2))
-			return true;
-		else if (sortIRExprs(b->arg2, a->arg2))
-			return false;
-		else if (sortIRExprs(a->arg3, b->arg3))
-			return true;
-		else if (sortIRExprs(b->arg3, a->arg3))
-			return false;
+			return greater_than;
+		if ((s = _sortIRExprs(a->arg1, b->arg1)) != equal_to)
+			return s;
+		else if ((s = _sortIRExprs(a->arg2, b->arg2)) != equal_to)
+			return s;
+		else if ((s = _sortIRExprs(a->arg3, b->arg3)) != equal_to)
+			return s;
 		else 
-			return sortIRExprs(a->arg4, b->arg4);
+			return _sortIRExprs(a->arg4, b->arg4);
 	hdr(Triop)
 		if (a->op < b->op)
-			return true;
+			return less_than;
 		if (a->op > b->op)
-			return false;
-		if (sortIRExprs(a->arg1, b->arg1))
-			return true;
-		else if (sortIRExprs(b->arg1, a->arg1))
-			return false;
-		else if (sortIRExprs(a->arg2, b->arg2))
-			return true;
-		else if (sortIRExprs(b->arg2, a->arg2))
-			return false;
+			return greater_than;
+		if ((s = _sortIRExprs(a->arg1, b->arg1)) != equal_to)
+			return s;
+		else if ((s = _sortIRExprs(a->arg2, b->arg2)) != equal_to)
+			return s;
 		else 
-			return sortIRExprs(a->arg3, b->arg3);
+			return _sortIRExprs(a->arg3, b->arg3);
 	hdr(Binop)
 		if (a->op < b->op)
-			return true;
+			return less_than;
 		if (a->op > b->op)
-			return false;
-		if (sortIRExprs(a->arg1, b->arg1))
-			return true;
-		else if (sortIRExprs(b->arg1, a->arg1))
-			return false;
+			return greater_than;
+		if ((s = _sortIRExprs(a->arg1, b->arg1)) != equal_to)
+			return s;
 		else
-			return sortIRExprs(a->arg2, b->arg2);
+			return _sortIRExprs(a->arg2, b->arg2);
 	hdr(Unop)
 		if (a->op < b->op)
-			return true;
+			return less_than;
 		if (a->op > b->op)
-			return false;
-		return sortIRExprs(a->arg, b->arg);
+			return greater_than;
+		return _sortIRExprs(a->arg, b->arg);
 	hdr(Load)
-		return sortIRExprs(a->addr, b->addr);
+		return _sortIRExprs(a->addr, b->addr);
 	hdr(Const)
-		return sortIRConsts(a->con, b->con);
+		return _sortIRConsts(a->con, b->con);
 	hdr(CCall) {
 		int r = strcmp(a->cee->name,
 			       b->cee->name);
 		if (r < 0)
-			return true;
+			return less_than;
 		else if (r > 0)
-			return false;
+			return greater_than;
 		for (int x = 0; 1; x++) {
 			if (!a->args[x] && !b->args[x])
-				return false;
+				return equal_to;
 			if (!a->args[x])
-				return true;
+				return less_than;
 			if (!b->args[x])
-				return false;
-			if (sortIRExprs(a->args[x], b->args[x]))
-				return true;
-			if (sortIRExprs(b->args[x], a->args[x]))
-				return false;
+				return greater_than;
+			if ((s = _sortIRExprs(a->args[x], b->args[x])) != equal_to)
+				return s;
 		}
 	}
 	hdr(Mux0X)
-		if (sortIRExprs(a->cond, b->cond))
-			return true;
-		else if (sortIRExprs(b->cond, a->cond))
-			return false;
-		else if (sortIRExprs(a->expr0, b->expr0))
-			return true;
-		else if (sortIRExprs(b->expr0, a->expr0))
-			return false;
+		if ((s = _sortIRExprs(a->cond, b->cond)) != equal_to)
+			return s;
+		else if ((s = _sortIRExprs(a->expr0, b->expr0)) != equal_to)
+			return s;
 		else
-			return sortIRExprs(a->exprX, b->exprX);
+			return _sortIRExprs(a->exprX, b->exprX);
 	hdr(Associative) {
 		if (a->op < b->op)
-			return true;
+			return less_than;
 		if (a->op > b->op)
-			return false;
+			return greater_than;
 		int x;
 		x = 0;
 		while (1) {
 			if (x == a->nr_arguments &&
 			    x == b->nr_arguments)
-				return false;
+				return equal_to;
 			if (x == a->nr_arguments)
-				return true;
+				return less_than;
 			if (x == b->nr_arguments)
-				return false;
-			if (sortIRExprs(a->contents[x], b->contents[x]))
-				return true;
-			else if (sortIRExprs(b->contents[x], a->contents[x]))
-				return false;
+				return greater_than;
+			if ((s = _sortIRExprs(a->contents[x], b->contents[x])) != equal_to)
+				return s;
 			x++;
 		}
 	}
 	hdr(FreeVariable)
-		return a->key < b->key;
+		return _sortIntegers(a->key, b->key);
 	hdr(ClientCall)
 		if (a->callSite < b->callSite)
-			return true;
+			return less_than;
 		else if (a->callSite > b->callSite)
-			return false;
+			return greater_than;
 		for (int x = 0; 1; x++) {
 			if (!a->args[x] && !b->args[x])
-				return false;
+				return equal_to;
 			if (!a->args[x])
-				return true;
+				return less_than;
 			if (!b->args[x])
-				return false;
-			if (sortIRExprs(a->args[x], b->args[x]))
-				return true;
-			else if (sortIRExprs(b->args[x], a->args[x]))
-				return false;
+				return greater_than;
+			if ((s = _sortIRExprs(a->args[x], b->args[x])) != equal_to)
+				return s;
 		}
 	hdr(ClientCallFailed)
-		return sortIRExprs(a->target,
+		return _sortIRExprs(a->target,
 				   b->target);
 	hdr(HappensBefore)
-		if (a->before < b->before)
-			return true;
-		if (a->before > b->before)
-			return false;
-		return a->after < b->after;
+		if ((s = _sortIntegers(a->before, b->before)) != equal_to)
+			return s;
+	        return _sortIntegers(a->after, b->after);
 	}
 #undef hdr
 	}
@@ -778,7 +765,7 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 	return e;
 }
 
-static void
+template <bool ordering(IRExpr *, IRExpr *)> static void
 performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
 {
         /* Linear scan to find the place to insert.  Could use a
@@ -786,13 +773,42 @@ performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
          * I don't expect this to be a bottleneck. */
         int idx;
         for (idx = 0; idx < nr_items; idx++)
-                if (!sortIRExprs(list[idx], newItem))
+                if (!ordering(list[idx], newItem))
                         break;
         assert(idx != nr_items);
         /* list[idx] is greater than newItem, so need to insert to the
            left of list[idx] */
         memmove(list + idx + 1, list+idx, sizeof(IRExpr *) * (nr_items - idx));
         list[idx] = newItem;
+}
+
+template <bool ordering(IRExpr *, IRExpr *)> static void
+_sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
+{
+        /* All indexes [0, first_unsorted) are definitely already sorted */
+        int first_unsorted;
+
+        first_unsorted = 1;
+        while (first_unsorted < ae->nr_arguments) {
+                if (ordering(ae->contents[first_unsorted],
+			     ae->contents[first_unsorted-1])) {
+                        /* Not already in right place -> need to go
+                           and insert it. */
+                        *done_something = true;
+                        performInsertion<ordering>(ae->contents,
+						   first_unsorted,
+						   ae->contents[first_unsorted]);
+                }
+		first_unsorted++;
+        }
+}
+
+/* This is only non-static because it's used as a template argument;
+ * sigh. */
+bool
+sortIRExprs(IRExpr *a, IRExpr *b)
+{
+	return _sortIRExprs(a, b) == less_than;
 }
 
 static void
@@ -808,22 +824,11 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
               any changes.
         */
 
-        /* All indexes [0, first_unsorted) are definitely already sorted */
-        int first_unsorted;
-
-        first_unsorted = 1;
-        while (first_unsorted < ae->nr_arguments) {
-                if (sortIRExprs(ae->contents[first_unsorted],
-                                ae->contents[first_unsorted-1])) {
-                        /* Not already in right place -> need to go
-                           and insert it. */
-                        *done_something = true;
-                        performInsertion(ae->contents,
-                                         first_unsorted,
-                                         ae->contents[first_unsorted]);
-                }
-		first_unsorted++;
-        }
+	/* We have three different orderings available, depending on
+	   the type of thing which we're sorting.  The aim here is to
+	   produce the same ordering as CNF conversion would, since
+	   that makes optimisation much easier. */
+	_sortAssociativeArguments<sortIRExprs>(ae, done_something);
 }
 
 static IRExpr *
