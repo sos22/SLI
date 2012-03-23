@@ -937,16 +937,27 @@ static bool
 isCnfSubset(IRExpr *a, IRExpr *b)
 {
 	IRExprAssociative *a_disjunct, *b_disjunct;
-	a_disjunct = b_disjunct = NULL;
+top:
+	a_disjunct = NULL;
 	if (a->tag == Iex_Associative) {
 		a_disjunct = (IRExprAssociative *)a;
 		if (a_disjunct->op != Iop_Or1)
 			a_disjunct = NULL;
+		else if (a_disjunct->nr_arguments == 1) {
+			a = a_disjunct->contents[0];
+			goto top;
+		}
 	}
+top2:
+	b_disjunct = NULL;
 	if (b->tag == Iex_Associative) {
 		b_disjunct = (IRExprAssociative *)b;
 		if (b_disjunct->op != Iop_Or1)
 			b_disjunct = NULL;
+		else if (b_disjunct->nr_arguments == 1) {
+			b = b_disjunct->contents[0];
+			goto top2;
+		}
 	}
 	if (!a_disjunct && !b_disjunct)
 		return _cnf_disjunction_sort(a, b) == equal_to;
