@@ -1976,8 +1976,8 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 	return a;
 }
 
-QueryCache<IRExpr, IRExpr> definitelyEqualCache("Definitely equal");
-QueryCache<IRExpr, IRExpr> definitelyNotEqualCache("Definitely not equal");
+QueryCache<IRExpr, IRExpr, bool> definitelyEqualCache("Definitely equal");
+QueryCache<IRExpr, IRExpr, bool> definitelyNotEqualCache("Definitely not equal");
 bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {

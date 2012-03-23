@@ -3,26 +3,23 @@
 
 template <typename a_type,
 	  typename b_type,
+	  typename result_type,
 	  unsigned NR_ENTRIES = 255,
 	  unsigned ASSOCIATIVITY = 128>
 class QueryCache : GcCallback<&ir_heap> {
 public:
 	struct p {
-		unsigned long a_and_res;
+		a_type *a;
 		b_type *b;
-		p(a_type *_a, b_type *_b, bool res)
-			: a_and_res((unsigned long)_a | res),
-			  b(_b)
+		result_type res;
+		p(a_type *_a, b_type *_b, bool _res)
+			: a(_a),
+			  b(_b),
+			  res(_res)
 		{}
 		p()
-			: a_and_res(0), b(NULL)
+			: a(NULL), b(NULL)
 		{}
-		a_type *a() {
-			return (a_type *)(a_and_res & ~1ul);
-		}
-		bool res() {
-			return a_and_res & 1;
-		}
 	};
 
 	struct cache_entry {
@@ -65,13 +62,13 @@ public:
 		return acc;
 	}
 
-	bool query(a_type *a, b_type *b, int idx, bool *res) {
+	bool query(a_type *a, b_type *b, int idx, result_type *res) {
 		struct cache_entry *e = &cache[idx];
 		nr_queries++;
 		for (unsigned x = 0; x < e->nr_entries; x++) {
 			if (e->p[x].b == b &&
-			    e->p[x].a() == a) {
-				*res = e->p[x].res();
+			    e->p[x].a == a) {
+				*res = e->p[x].res;
 				nr_hits++;
 				return true;
 			}
@@ -79,7 +76,7 @@ public:
 		return false;
 	}
 
-	void set(a_type *a, b_type *b, int idx, bool res) {
+	void set(a_type *a, b_type *b, int idx, result_type res) {
 		struct cache_entry *e = &cache[idx];
 		if (e->nr_entries == ASSOCIATIVITY) {
 			e->nr_entries = 0;

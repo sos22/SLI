@@ -394,7 +394,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	} else if (notInTagTable(smsel))
 		return false;
 
-	static QueryCache<StateMachineSideEffectLoad, StateMachineSideEffectStore> cache(__func__);
+	static QueryCache<StateMachineSideEffectLoad, StateMachineSideEffectStore, bool> cache(__func__);
 	int idx = cache.hash(smsel, smses);
 	bool res;
 	if (cache.query(smsel, smses, idx, &res))
