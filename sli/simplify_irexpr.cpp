@@ -930,6 +930,77 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 		_sortAssociativeArguments<sortIRExprs>(ae, done_something);
 }
 
+/* CNF subsetting relationship.  Essentially, does @a imply @b.  We
+ * only care about the case where @a and @b are CNF disjunctions
+ * here. */
+static bool
+isCnfSubset(IRExpr *a, IRExpr *b)
+{
+	IRExprAssociative *a_disjunct, *b_disjunct;
+	a_disjunct = b_disjunct = NULL;
+	if (a->tag == Iex_Associative) {
+		a_disjunct = (IRExprAssociative *)a;
+		if (a_disjunct->op != Iop_Or1)
+			a_disjunct = NULL;
+	}
+	if (b->tag == Iex_Associative) {
+		b_disjunct = (IRExprAssociative *)b;
+		if (b_disjunct->op != Iop_Or1)
+			b_disjunct = NULL;
+	}
+	if (!a_disjunct && !b_disjunct)
+		return _cnf_disjunction_sort(a, b) == equal_to;
+	if (!b_disjunct) {
+		/* @a has multiple elements but @b only has one -> @a
+		   cannot be a subset of @b. */
+		if (a_disjunct->nr_arguments <= 1)
+			abort();
+		return false;
+	}
+	if (!a_disjunct) {
+		for (int idx = 0; idx < b_disjunct->nr_arguments; idx++) {
+			sort_ordering o = _cnf_disjunction_sort(a, b_disjunct->contents[idx]);
+			if (o == equal_to)
+				return true;
+			if (o == greater_than)
+				return false;
+		}
+		return false;
+	}
+	if (a_disjunct->nr_arguments > b_disjunct->nr_arguments)
+		return false;
+	int a_idx = 0;
+	int b_idx = 0;
+	while (a_idx < a_disjunct->nr_arguments &&
+	       b_idx < b_disjunct->nr_arguments) {
+		sort_ordering o = _cnf_disjunction_sort(a_disjunct->contents[a_idx],
+							b_disjunct->contents[b_idx]);
+		if (o == less_than) {
+			/* This element of @a does not appear in @b ->
+			   @a is not a subset of @b. */
+			return false;
+		} else if (o == equal_to) {
+			a_idx++;
+			b_idx++;
+		} else {
+			assert(o == greater_than);
+			/* This element of @b does not appear in @a,
+			   which is absolutely fine; just skip to the
+			   next one. */
+			b_idx++;
+		}
+	}
+	if (a_idx == a_disjunct->nr_arguments) {
+		/* Every element of @a has a matching element in @b ->
+		   @a is a subset of @b. */
+		return true;
+	} else {
+		/* Otherwise, something in @a has no pair in @b, so @a
+		   can't be a subset of @b. */
+		return false;
+	}
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
@@ -1171,7 +1242,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				}
 			}
 
-			/* x | ~x -> 1.  We know by the ordering that
+			/* x || ~x -> 1.  We know by the ordering that
 			   if any such pairs are present then they'll
 			   be adjacent and x will be before ~x, which
 			   is handy.  Note that this is using pointer
@@ -1183,6 +1254,30 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					    ((IRExprUnop *)e->contents[i+1])->op == Iop_Not1 &&
 					    ((IRExprUnop *)e->contents[i+1])->arg == e->contents[i]) {
 						return IRExpr_Const(IRConst_U1(1));
+					}
+				}
+			}
+
+			if (e->op == Iop_And1) {
+				/* Assume here that the expression is
+				   in conjunctive normal form.  Now
+				   search for arguments X and Y such
+				   that X implies Y.  If we find any,
+				   we can purge Y from the arguments
+				   list.  Since we're assuming that
+				   we're in CNF, X implies Y is
+				   equivalent to saying that X is a
+				   subset of Y, and, by the CNF
+				   conjunction ordering, X occurs
+				   before Y in the list. */
+				for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++) {
+					for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; ) {
+						if (isCnfSubset(e->contents[idx1], e->contents[idx2])) {
+							purgeAssocArgument(e, idx2);
+							*done_something = true;
+						} else {
+							idx2++;
+						}
 					}
 				}
 			}
