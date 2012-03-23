@@ -1198,14 +1198,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				}
 			}
 			/* x & x -> x, for any and-like or or-like
-			   operator.  Note that we use pointer
-			   equality here, rather than definitelyEqual,
-			   which is obviously much faster but also
-			   much less accurate, and only deterministic
-			   if we've been interned first.  It also
-			   means that any equal expressions will be
-			   neighbours in the list, which simplifies
-			   the loop structure a bit. */
+			   operator. */
 			if ((e->op >= Iop_And8 && e->op <= Iop_And64) ||
 			    (e->op >= Iop_Or8 && e->op <= Iop_Or64) ||
 			    e->op == Iop_And1 ||
@@ -1214,7 +1207,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				for (int it1 = 0;
 				     it1 < e->nr_arguments - 1;
 					) {
-					if (e->contents[it1] == e->contents[it1 + 1]) {
+					if (_sortIRExprs(e->contents[it1], e->contents[it1 + 1]) == equal_to) {
 						*done_something = true;
 						purgeAssocArgument(e, it1 + 1);
 					} else {
@@ -1245,16 +1238,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			/* x || ~x -> 1.  We know by the ordering that
 			   if any such pairs are present then they'll
 			   be adjacent and x will be before ~x, which
-			   is handy.  Note that this is using pointer
-			   equality again. */
+			   is handy. */
 			if (e->op == Iop_Or1) {
 				__set_profiling(optimise_assoc_x_or_not_x);
 				for (int i = 0; i < e->nr_arguments - 1; i++) {
 					if (e->contents[i+1]->tag == Iex_Unop &&
 					    ((IRExprUnop *)e->contents[i+1])->op == Iop_Not1 &&
-					    ((IRExprUnop *)e->contents[i+1])->arg == e->contents[i]) {
+					    _sortIRExprs(((IRExprUnop *)e->contents[i+1])->arg,
+							 e->contents[i]) == equal_to)
 						return IRExpr_Const(IRConst_U1(1));
-					}
 				}
 			}
 
