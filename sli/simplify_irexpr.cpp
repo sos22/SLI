@@ -1001,6 +1001,84 @@ isCnfSubset(IRExpr *a, IRExpr *b)
 	}
 }
 
+/* We know from context that @assumption is true when evaluating @iex,
+   and with fairly high probability @iex is a CNF disjunction.
+   Optimise under that assumption. */
+static IRExpr *
+optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
+{
+	bool invertAssumption;
+	invertAssumption = false;
+	if (assumption->tag == Iex_Unop) {
+		IRExprUnop *u = (IRExprUnop *)assumption;
+		if (u->op == Iop_Not1) {
+			assumption = u->arg;
+			invertAssumption = true;
+		}
+	}
+
+	if (_sortIRExprs(iex, assumption) == equal_to) {
+		*done_something = true;
+		return IRExpr_Const(IRConst_U1(invertAssumption ? 0 : 1));
+	}
+	if (iex->tag == Iex_Unop) {
+		IRExprUnop *u = (IRExprUnop *)iex;
+		if (u->op == Iop_Not1 &&
+		    _sortIRExprs(u->arg, assumption) == equal_to) {
+			*done_something = true;
+			return IRExpr_Const(IRConst_U1(invertAssumption ? 1 : 0));
+		}
+		return iex;
+	}
+	if (iex->tag != Iex_Associative)
+		return iex;
+	IRExprAssociative *assoc = (IRExprAssociative *)iex;
+	if (assoc->op != Iop_Or1)
+		return iex;
+
+	for (int i = 0; i < assoc->nr_arguments; ) {
+		if (_sortIRExprs(assoc->contents[i], assumption) == equal_to) {
+			*done_something = true;
+			if (invertAssumption) {
+				/* We're assuming ~X and this
+				   expression is X|Y, so just reduce
+				   to Y. */
+				assoc = dynamic_cast<IRExprAssociative *>(IRExpr_Associative(assoc));
+				purgeAssocArgument(assoc, i);
+			} else {
+				/* We're assuming X, and this
+				   expression is X|Y, so reduce to
+				   constant 1. */
+				return IRExpr_Const(IRConst_U1(1));
+			}
+		} else if (assoc->contents[i]->tag == Iex_Unop) {
+			IRExprUnop *u = (IRExprUnop *)assoc->contents[i];
+			if (u->op == Iop_Not1 &&
+			    _sortIRExprs(u->arg, assumption) == equal_to) {
+				*done_something = true;
+				if (invertAssumption) {
+					/* We're assuming ~x and we
+					   found ~x|y -> result is
+					   constant 1. */
+					return IRExpr_Const(IRConst_U1(1));
+				} else {
+					/* We'are assuming X and found
+					   ~X|Y, so just turn it into
+					   Y. */
+					assoc = dynamic_cast<IRExprAssociative *>(IRExpr_Associative(assoc));
+					purgeAssocArgument(assoc, i);
+				}
+			} else {
+				i++;
+			}
+		} else {
+			i++;
+		}
+	}
+
+	return assoc;
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
@@ -1262,6 +1340,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				   subset of Y, and, by the CNF
 				   conjunction ordering, X occurs
 				   before Y in the list. */
+				/* (i.e. take anything which says
+				   X&(X|Y) and turn it into just X) */
 				for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++) {
 					for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; ) {
 						if (isCnfSubset(e->contents[idx1], e->contents[idx2])) {
@@ -1270,6 +1350,19 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						} else {
 							idx2++;
 						}
+					}
+
+					/* While we're here, we can
+					   also check that we don't
+					   have anything like
+					   X&(~X|Y).  If we do, turn
+					   it into just X&Y. */
+					if (e->contents[idx1]->tag != Iex_Associative ||
+					    ((IRExprAssociative *)e->contents[idx1])->op != Iop_Or1) {
+						for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
+							e->contents[idx2] = optimiseAssuming(e->contents[idx2],
+											     e->contents[idx1],
+											     done_something);
 					}
 				}
 			}
