@@ -947,6 +947,11 @@ top:
 			goto top;
 		}
 	}
+	if (a_disjunct && a_disjunct->nr_arguments == 0) {
+		/* @a is an empty disjunction -> it's effectively just
+		   false, and false implies everything. */
+		return true;
+	}
 top2:
 	b_disjunct = NULL;
 	if (b->tag == Iex_Associative) {
