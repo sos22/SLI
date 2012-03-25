@@ -14,15 +14,14 @@
 #include "libvex_prof.hpp"
 
 template <typename t> void printCFG(const CFGNode<t> *cfg);
-template <typename t> StateMachine *CFGtoCrashReason(unsigned tid,
-						     VexPtr<CFGNode<t>, &ir_heap> &cfg,
-						     VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type,
-						            &ir_heap> &crashReasons,
-						     VexPtr<StateMachineState, &ir_heap> &escapeState,
-						     AllowableOptimisations &opt,
-						     bool simple_calls,
-						     VexPtr<Oracle> &oracle,
-						     GarbageCollectionToken token);
+static StateMachine *CFGtoCrashReason(unsigned tid,
+				      VexPtr<CFGNode<VexRip>, &ir_heap> &cfg,
+				      VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
+				      VexPtr<StateMachineState, &ir_heap> &escapeState,
+				      AllowableOptimisations &opt,
+				      bool simple_calls,
+				      VexPtr<Oracle> &oracle,
+				      GarbageCollectionToken token);
 
 static CFGNode<VexRip> *buildCFGForRipSet(AddressSpace *as,
 					  const VexRip &start,
@@ -1045,7 +1044,7 @@ CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode<VexRip>, 
 {
 	VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> dummy(NULL);
 	VexPtr<StateMachineState, &ir_heap> escape(StateMachineCrash::get());
-	return CFGtoCrashReason<VexRip>(tid, cfg, dummy, escape, opt, true, oracle, token);
+	return CFGtoCrashReason(tid, cfg, dummy, escape, opt, true, oracle, token);
 }
 
 static bool
@@ -1182,14 +1181,14 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	{
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
-		cr = CFGtoCrashReason<VexRip>(sm->tid,
-					      cfg,
-					      ii,
-					      escape,
-					      opt,
-					      true,
-					      oracle,
-					      token);
+		cr = CFGtoCrashReason(sm->tid,
+				      cfg,
+				      ii,
+				      escape,
+				      opt,
+				      true,
+				      oracle,
+				      token);
 	}
 	if (!cr) {
 		fprintf(_logfile, "\tCannot build crash reason from CFG\n");
@@ -1369,8 +1368,8 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
 		VexPtr<StateMachine, &ir_heap> cr(
-			CFGtoCrashReason<VexRip>(tid._tid(), cfg, ii,
-						 escape, opt, false, oracle, token));
+			CFGtoCrashReason(tid._tid(), cfg, ii,
+					 escape, opt, false, oracle, token));
 		if (!cr) {
 			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
 			return NULL;
@@ -1650,27 +1649,27 @@ rewriteTemporary(IRExpr *sm,
 	return rt.doit(sm);
 }
 
-template <typename t> StateMachine *
+static StateMachine *
 CFGtoCrashReason(unsigned tid,
-		 VexPtr<CFGNode<t>, &ir_heap> &cfg,
-		 VexPtr<typename gc_heap_map<t, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
+		 VexPtr<CFGNode<VexRip>, &ir_heap> &cfg,
+		 VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
 		 VexPtr<StateMachineState, &ir_heap> &escapeState,
 		 AllowableOptimisations &opt,
 		 bool simple_calls,
 		 VexPtr<Oracle> &oracle,
 		 GarbageCollectionToken token)
 {
-	typedef typename gc_heap_map<t, StateMachineState, &ir_heap>::type inferredInformation;
+	typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type inferredInformation;
 
 	class State {
-		typedef std::pair<StateMachineState **, CFGNode<t> *> reloc_t;
-		std::vector<CFGNode<t> *> pending;
+		typedef std::pair<StateMachineState **, CFGNode<VexRip> *> reloc_t;
+		std::vector<CFGNode<VexRip> *> pending;
 		std::vector<reloc_t> relocs;
 		inferredInformation *crashReasons;
 	public:
-		std::map<CFGNode<t> *, StateMachineState *> cfgToState;
+		std::map<CFGNode<VexRip> *, StateMachineState *> cfgToState;
 
-		CFGNode<t> *nextNode() {
+		CFGNode<VexRip> *nextNode() {
 			while (1) {
 				if (pending.empty()) {
 					std::vector<reloc_t> newRelocs;
@@ -1688,14 +1687,14 @@ CFGtoCrashReason(unsigned tid,
 					if (pending.empty())
 						return NULL;
 				}
-				CFGNode<t> *res = pending.back();
+				CFGNode<VexRip> *res = pending.back();
 				pending.pop_back();
 				if (cfgToState.count(res))
 					continue;
 				return res;
 			}
 		}
-		void addReloc(StateMachineState **p, CFGNode<t> *c)
+		void addReloc(StateMachineState **p, CFGNode<VexRip> *c)
 		{
 			*p = NULL;
 			relocs.push_back(reloc_t(p, c));
@@ -1713,7 +1712,7 @@ CFGtoCrashReason(unsigned tid,
 		FetchIrsb(AddressSpace *_as, unsigned _tid)
 			: as(_as), tid(_tid)
 		{}
-		IRSB *operator()(t rip) {
+		IRSB *operator()(const VexRip &rip) {
 			try {
 				return as->getIRSBForAddress(ThreadRip::mk(tid, wrappedRipToRip(rip)));
 			} catch (BadMemoryException e) {
@@ -1725,7 +1724,7 @@ CFGtoCrashReason(unsigned tid,
 	class BuildStateForCfgNode {
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
 							const ThreadVexRip rip,
-							CFGNode<t> *branchTarget,
+							CFGNode<VexRip> *branchTarget,
 							StateMachineEdge *edge) {
 			StateMachineSideEffect *se = NULL;
 			switch (stmt->tag) {
@@ -1790,7 +1789,7 @@ CFGtoCrashReason(unsigned tid,
 			return edge;
 		}
 
-		StateMachineState *buildStateForCallInstruction(CFGNode<t> *cfg,
+		StateMachineState *buildStateForCallInstruction(CFGNode<VexRip> *cfg,
 								IRSB *irsb,
 								const ThreadVexRip &site)
 		{
@@ -1866,7 +1865,7 @@ CFGtoCrashReason(unsigned tid,
 			: simple_calls(_simple_calls), tid(_tid), state(_state),
 			  escapeState(_escapeState), oracle(_oracle)
 		{}
-		StateMachineState *operator()(CFGNode<t> *cfg,
+		StateMachineState *operator()(CFGNode<VexRip> *cfg,
 					      IRSB *irsb) {
 			if (!cfg)
 				return escapeState;
