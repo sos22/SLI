@@ -29,6 +29,8 @@ static CFGNode<VexRip> *buildCFGForRipSet(AddressSpace *as,
 					  Oracle *oracle,
 					  unsigned max_depth);
 
+static bool instructionIsInteresting(const InstructionSet &i, const VexRip &r);
+
 template <typename t> void
 enumerateCFG(CFGNode<t> *root, std::map<t, CFGNode<t> *> &rips)
 {
@@ -44,21 +46,21 @@ enumerateCFG(CFGNode<t> *root, std::map<t, CFGNode<t> *> &rips)
 /* Remove all of the nodes which appear to be uninteresting.  A node
    is uninteresting if it is not in the initial interesting set and
    there are no paths from it to an interesting node. */
-template <typename t> void
-trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_path_length, bool acceptingAreInteresting)
+static void
+trimCFG(CFGNode<VexRip> *root, const InstructionSet &interestingAddresses, int max_path_length, bool acceptingAreInteresting)
 {
-	std::map<t, CFGNode<t> *> uninteresting;
-	std::map<t, std::pair<CFGNode<t> *, int> > interesting;
+	std::map<VexRip, CFGNode<VexRip> *> uninteresting;
+	std::map<VexRip, std::pair<CFGNode<VexRip> *, int> > interesting;
 	/* Start on the assumption that everything is uninteresting. */
-	enumerateCFG<t>(root, uninteresting);
+	enumerateCFG<VexRip>(root, uninteresting);
 	/* addresses which are explicitly flagged as interesting are
 	   not uninteresting. */
-	for (typename std::map<t, CFGNode<t> *>::iterator it = uninteresting.begin();
+	for (auto it = uninteresting.begin();
 	     it != uninteresting.end();
 		) {
 		if ((acceptingAreInteresting && it->second->accepting) ||
 		    instructionIsInteresting(interestingAddresses, it->first)) {
-			interesting[it->first] = std::pair<CFGNode<t> *, int>(it->second, max_path_length);
+			interesting[it->first] = std::pair<CFGNode<VexRip> *, int>(it->second, max_path_length);
 			uninteresting.erase(it++);
 		} else {
 			it++;
@@ -69,10 +71,10 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_pa
 	bool progress;
 	do {
 		progress = false;
-		for (typename std::map<t, CFGNode<t> *>::iterator it = uninteresting.begin();
+		for (auto it = uninteresting.begin();
 		     it != uninteresting.end();
 			) {
-			CFGNode<t> *n = it->second;
+			CFGNode<VexRip> *n = it->second;
 			int path_length = -1;
 			if (n->branch &&
 			    interesting.count(n->branch->my_rip))
@@ -85,7 +87,7 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_pa
 				it++;
 			} else {
 				progress = true;
-				interesting[it->first] = std::pair<CFGNode<t> *, int>(
+				interesting[it->first] = std::pair<CFGNode<VexRip> *, int>(
 					it->second, path_length);
 				uninteresting.erase(it++);
 			}
@@ -94,10 +96,10 @@ trimCFG(CFGNode<t> *root, const InstructionSet &interestingAddresses, int max_pa
 
 	/* The uninteresting set should now be correct.  Eliminate any
 	   edges which go to an uninteresting target. */
-	for (typename std::map<t, std::pair<CFGNode<t> *, int> >::iterator it = interesting.begin();
+	for (auto it = interesting.begin();
 	     it != interesting.end();
 	     it++) {
-		CFGNode<t> *n = it->second.first;
+		CFGNode<VexRip> *n = it->second.first;
 		assert(n);
 		if (n->branch && uninteresting.count(n->branch->my_rip))
 			n->branch = NULL;
