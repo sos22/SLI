@@ -153,6 +153,6 @@ sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister
 			: live(_live)
 		{}
 	} t(live);
-	t.transformIRExpr(e);
+	t.doit(e);
 }
 #endif
