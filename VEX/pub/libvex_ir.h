@@ -227,15 +227,15 @@ public:
 		return ThreadRip(thread, rip);
 	}
 	bool operator==(const ThreadRip &o) const {
-		return thread == o.thread && rip == o.rip;
+		return thread == o.thread && rip.fullCompareEq(o.rip);
 	}
 	bool operator!=(const ThreadRip &o) const {
 		return !(*this == o);
 	}
 	bool operator<(const ThreadRip &o) const {
-		if (rip < o.rip)
+		if (rip.fullCompareLt(o.rip))
 			return true;
-		if (rip > o.rip)
+		if (rip.fullCompareGt(o.rip))
 			return false;
 		return thread < o.thread;
 	}

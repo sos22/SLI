@@ -7,24 +7,6 @@
 
 #include <vector>
 
-#define mk_ordering_operators(type)				\
-	bool operator==(const type &other) const {		\
-		return !(*this < other ||			\
-			 other < *this);			\
-	}							\
-	bool operator!=(const type &other) const {		\
-		return !(*this == other);			\
-	}							\
-	bool operator>=(const type &other) const {		\
-		return !(*this < other);			\
-	}							\
-	bool operator> (const type &other) const {		\
-		return (*this) >= other && (*this) != other;	\
-	}							\
-	bool operator<=(const type &other) const {		\
-		return !(*this > other);			\
-	}
-
 class VexRip;
 
 bool parseVexRip(VexRip *out, const char *str, const char **suffix);
@@ -61,7 +43,7 @@ class VexRip : public Named {
 	std::vector<unsigned long> stack;
 	void changed() { clearName(); }
 public:
-	bool operator< (const VexRip &other) const {
+	bool fullCompareLt(const VexRip &other) const {
 		for (unsigned idx = 0;
 		     idx < stack.size() && idx < other.stack.size();
 		     idx++) {
@@ -74,9 +56,58 @@ public:
 		}
 		return stack.size() < other.stack.size();
 	}
+	bool fullCompareGt(const VexRip &other) const {
+		return other.fullCompareLt(*this);
+	}
+	bool fullCompareGe(const VexRip &other) const {
+		return !fullCompareLt(other);
+	}
+	bool fullCompareEq(const VexRip &other) const {
+		return stack == other.stack;
+	}
+	bool fullCompareNe(const VexRip &other) const {
+		return stack != other.stack;
+	}
 
-	mk_ordering_operators(VexRip)
+#define mk_wrapper(suffix)						\
+	static bool FullCompare ## suffix (const VexRip &a,		\
+					   const VexRip &b) {		\
+		return a.fullCompare ## suffix (b);			\
+	}
+	mk_wrapper(Lt);
+	mk_wrapper(Gt);
+	mk_wrapper(Ge);
+	mk_wrapper(Eq);
+	mk_wrapper(Ne);
+#undef mk_wrapper
 
+	class FullCompare {
+	public:
+		bool operator()(const VexRip &a, const VexRip &b) const {
+			return a.fullCompareLt(b);
+		}
+#define mk_wrapper(s1, s2)						\
+		static bool s1(const VexRip &a, const VexRip &b) {	\
+			return a.fullCompare ## s2(b);			\
+		}
+		mk_wrapper(lt, Lt);
+		mk_wrapper(gt, Gt);
+		mk_wrapper(ge, Ge);
+		mk_wrapper(eq, Eq);
+		mk_wrapper(ne, Ne);
+#undef mk_wrapper
+	};
+
+#define mk_wrapper(op, suffix)				\
+	bool operator op(const VexRip &o) const {	\
+		return fullCompare ## suffix (o);	\
+	}
+	mk_wrapper(<, Lt)
+	mk_wrapper(>, Gt)
+	mk_wrapper(>=, Ge)
+	mk_wrapper(==, Eq)
+	mk_wrapper(!=, Ne)
+#undef mk_wrapper
 	unsigned long hash() const {
 		unsigned long acc = 0;
 		for (auto it = stack.begin(); it != stack.end(); it++)
