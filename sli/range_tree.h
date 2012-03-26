@@ -10,9 +10,21 @@
 
 #include <vector>
 
-template <typename key, Heap *heap>
-class RawRangeTree : public GarbageCollected<RawRangeTree<key, heap>, heap> {
+template <typename key, Heap *heap, typename comparator>
+class RawRangeTree : public GarbageCollected<RawRangeTree<key, heap, comparator>, heap> {
 	bool performSearch(const key &, int &, int &);
+	static bool key_lt(const key &a, const key &b) {
+		return comparator::lt(a, b);
+	}
+	static bool key_ge(const key &a, const key &b) {
+		return comparator::ge(a, b);
+	}
+	static bool key_eq(const key &a, const key &b) {
+		return comparator::eq(a, b);
+	}
+	static bool key_gt(const key &a, const key &b) {
+		return comparator::gt(a, b);
+	}
 public:
 	struct entry {
 		key start;
@@ -27,7 +39,7 @@ public:
 	std::vector<entry> content;
 	class iterator {
 	private:
-		RawRangeTree<key, heap> *t;
+		RawRangeTree<key, heap, comparator> *t;
 		entry inner;
 	public:
 		int idx;
@@ -36,7 +48,7 @@ public:
 		bool operator!=(const iterator &o) const { return idx != o.idx; }
 		void updateInner();
 
-		iterator(RawRangeTree<key, heap> *_t, int _idx)
+		iterator(RawRangeTree<key, heap, comparator> *_t, int _idx)
 			: t(_t), idx(_idx)
 		{
 			updateInner();
@@ -65,11 +77,11 @@ public:
 };
 
 /* Simple facade around RawRangeTree to get better type checking. */
-template <typename key, typename t, Heap *heap>
-class RangeTree : public GarbageCollected<RangeTree<key, t, heap>, heap> {
+template <typename key, typename t, Heap *heap, typename comparator>
+class RangeTree : public GarbageCollected<RangeTree<key, t, heap, comparator>, heap> {
 	RangeTree(const RangeTree &); /* DNI */
 public:
-	RawRangeTree<key, heap> *content;
+	RawRangeTree<key, heap, comparator> *content;
 
 	class iterator {
 		void updateUnderlying(void) {
@@ -78,7 +90,7 @@ public:
 			content.end1 = underlying->end1;
 		}
 	public:
-		iterator(class RawRangeTree<key, heap>::iterator u)
+		iterator(class RawRangeTree<key, heap, comparator>::iterator u)
 			: underlying(u)
 		{
 			updateUnderlying();
@@ -90,7 +102,7 @@ public:
 			key end1;
 		};
 		_inner content;
-		class RawRangeTree<key, heap>::iterator underlying;
+		class RawRangeTree<key, heap, comparator>::iterator underlying;
 		bool operator!=(const iterator &o) { return underlying != o.underlying; }
 		void operator++(int) {
 			underlying++;
@@ -99,7 +111,7 @@ public:
 		_inner *operator->() { return &content; }
 	};
 
-	RangeTree() : content(new RawRangeTree<key, heap>()) {}
+	RangeTree() : content(new RawRangeTree<key, heap, comparator>()) {}
 	t *get(const key &k) { return (t *)content->get(k); }
 	void set(const key &start, const key &end1, t *k) { content->set(start, end1, k); }
 
@@ -115,9 +127,9 @@ public:
 
 /* Variant which provides a simple set of ranges, rather than a map
    from ranges to values.  Everything defaults to not present. */
-template <typename key, Heap *heap>
-class RangeSet : public GarbageCollected<RangeSet<key, heap>, heap> {
-	RawRangeTree<key, heap> *content;
+template <typename key, Heap *heap, typename comparator>
+class RangeSet : public GarbageCollected<RangeSet<key, heap, comparator>, heap> {
+	RawRangeTree<key, heap, comparator> *content;
 	class pe : public GarbageCollected<pe, heap> {
 	public:
 		void visit(HeapVisitor &hv) {}
@@ -137,15 +149,15 @@ public:
 			key end1;
 		};
 		_inner inner;
-		class RawRangeTree<key, heap>::iterator it;
+		class RawRangeTree<key, heap, comparator>::iterator it;
 		_inner *operator->() { return &inner; }
 		void operator++(int) { it++; updateInner(); }
 		bool operator!=(const iterator &i) { return it != i.it; }
-		iterator(class RawRangeTree<key, heap>::iterator _it)
+		iterator(class RawRangeTree<key, heap, comparator>::iterator _it)
 			: it(_it)
 		{ updateInner(); }
 	};
-	RangeSet() : content(new RawRangeTree<key, heap>()) {}
+	RangeSet() : content(new RawRangeTree<key, heap, comparator>()) {}
 	void visit(HeapVisitor &hv) { hv(content); }
 	bool test(const key &x) { return content->get(x) == presentEntry; }
 	void set(const key &start, const key &end1) {
@@ -158,80 +170,80 @@ public:
 	NAMED_CLASS
 };
 
-template <typename key, Heap *heap> VexPtr<class RangeSet<key, heap>::pe, heap>
-RangeSet<key, heap>::presentEntry(new RangeSet<key, heap>::pe);
+template <typename key, Heap *heap, typename comparator> VexPtr<class RangeSet<key, heap, comparator>::pe, heap>
+RangeSet<key, heap, comparator>::presentEntry(new RangeSet<key, heap, comparator>::pe);
 
-template <typename key, Heap *heap> bool
-RawRangeTree<key, heap>::performSearch(const key &v, int &low, int &high)
+template <typename key, Heap *heap, typename comparator> bool
+RawRangeTree<key, heap, comparator>::performSearch(const key &v, int &low, int &high)
 {
 	low = 0;
 	high = content.size() - 1;
 	if (content.size() == 0 ||
-	    v < content[low].start ||
-	    v >= content[high].end1)
+	    key_lt(v, content[low].start) ||
+	    key_ge(v, content[high].end1))
 		return false;
 	/* We now maintain the invariant that v >= content[low].start
 	   and v < content[high].end1. */
 	while (high > low + 1) {
 		int probe = (high + low) / 2;
-		if (v >= content[probe].start)
+		if (key_ge(v, content[probe].start))
 			low = probe;
-		if (v < content[probe].end1)
+		if (key_lt(v, content[probe].end1))
 			high = probe;
-		assert(v >= content[low].start && v < content[high].end1);
+		assert(key_ge(v, content[low].start) && key_lt(v, content[high].end1));
 	}
-	assert(v >= content[low].start && v < content[high].end1);
+	assert(key_ge(v, content[low].start) && key_lt(v, content[high].end1));
 	return true;
 }
 
-template <typename key, Heap *heap> void *
-RawRangeTree<key, heap>::get(const key &v)
+template <typename key, Heap *heap, typename comparator> void *
+RawRangeTree<key, heap, comparator>::get(const key &v)
 {
 	int low;
 	int high;
 	if (!performSearch(v, low, high))
 		return NULL;
 	assert(low == high || low + 1 == high);
-	assert(v >= content[low].start && v < content[high].end1);
+	assert(key_ge(v, content[low].start) && key_lt(v, content[high].end1));
 	if (low == high) {
 		return content[low].value;
 	} else {
 		assert(high == low + 1);
-		if (v < content[low].end1)
+		if (key_lt(v, content[low].end1))
 			return content[low].value;
-		if (v >= content[high].start)
+		if (key_ge(v, content[high].start))
 			return content[high].value;
 		return NULL;
 	}
 }
 
-template <typename key, Heap *heap> void
-RawRangeTree<key, heap>::set(const key &start, const key &end1, void *value)
+template <typename key, Heap *heap, typename comparator> void
+RawRangeTree<key, heap, comparator>::set(const key &start, const key &end1, void *value)
 {
 	int low, high;
-	assert(end1 >= start);
-	if (end1 == start)
+	assert(key_ge(end1, start));
+	if (key_eq(end1, start))
 		return;
 	if (content.size() == 0) {
 		content.push_back(entry(start, end1, value));
 		return;
 	}
-	if (end1 < content[0].start ||
-	    (end1 == content[0].start &&
+	if (key_lt(end1, content[0].start) ||
+	    (key_eq(end1, content[0].start) &&
 	     value != content[0].value)) {
 		content.insert(content.begin(),
 			       entry(start, end1, value));
 		return;
 	}
 
-	if (end1 == content[0].start) {
+	if (key_eq(end1, content[0].start)) {
 		assert(value == content[0].value);
 		content[0].start = start;
 		return;
 	}
 
-	if (start >= content[content.size()-1].end1) {
-		if (start == content[content.size()-1].end1 &&
+	if (key_ge(start, content[content.size()-1].end1)) {
+		if (key_eq(start, content[content.size()-1].end1) &&
 		    value == content[content.size()-1].value) {
 			content[content.size()-1].end1 = end1;
 		} else {
@@ -245,9 +257,9 @@ RawRangeTree<key, heap>::set(const key &start, const key &end1, void *value)
 	bool t = performSearch(start, low, high);
 	assert(t);
 	if (high == low + 1) {
-		if (start < content[low].end1)
+		if (key_lt(start, content[low].end1))
 			high = low;
-		if (start >= content[high].start)
+		if (key_ge(start, content[high].start))
 			low = high;
 	}
 	if (high == low) {
@@ -255,7 +267,7 @@ RawRangeTree<key, heap>::set(const key &start, const key &end1, void *value)
 		   compatibility with this range and then considering
 		   splitting. */
 		assert(value == content[low].value);
-		if (end1 > content[low].end1)
+		if (key_gt(end1, content[low].end1))
 			set(content[low].end1, end1, value);
 		return;
 	}
@@ -263,7 +275,7 @@ RawRangeTree<key, heap>::set(const key &start, const key &end1, void *value)
 
 	/* The start of this range is in the gap between two other
 	   ranges. */
-	if (end1 > content[high].start) {
+	if (key_gt(end1, content[high].start)) {
 		/* But the end isn't, so split the range and try
 		 * again. */
 		set(start, content[high].start, value);
@@ -274,10 +286,10 @@ RawRangeTree<key, heap>::set(const key &start, const key &end1, void *value)
 	/* Do we want to merge with an existing range? */
 	bool mergeDown =
 		value == content[low].value &&
-		start == content[low].end1;
+		key_eq(start, content[low].end1);
 	bool mergeUp =
 		value == content[high].value &&
-		end1  == content[high].start;
+		key_eq(end1, content[high].start);
 	if (mergeDown && mergeUp) {
 		/* Merge with both.  Extend low to subsume high, and
 		   then nuke high. */
@@ -295,8 +307,8 @@ RawRangeTree<key, heap>::set(const key &start, const key &end1, void *value)
 	}
 }
 
-template <typename key, Heap *heap> void
-RawRangeTree<key, heap>::purgeByValue(void *v)
+template <typename key, Heap *heap, typename comparator> void
+RawRangeTree<key, heap, comparator>::purgeByValue(void *v)
 {
 	for (auto it = content.begin();
 	     it != content.end();
@@ -308,8 +320,8 @@ RawRangeTree<key, heap>::purgeByValue(void *v)
 	}
 }
 
-template <typename key, Heap *heap> void
-RawRangeTree<key, heap>::iterator::updateInner()
+template <typename key, Heap *heap, typename comparator> void
+RawRangeTree<key, heap, comparator>::iterator::updateInner()
 {
 	if (idx >= (int)t->content.size())
 		return;
@@ -317,8 +329,8 @@ RawRangeTree<key, heap>::iterator::updateInner()
 		inner = t->content[idx];
 }
 
-template <typename key, Heap *heap> void
-RawRangeTree<key, heap>::visit(HeapVisitor &hv)
+template <typename key, Heap *heap, typename comparator> void
+RawRangeTree<key, heap, comparator>::visit(HeapVisitor &hv)
 {
 	for (auto it = content.begin();
 	     it != content.end();

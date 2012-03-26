@@ -473,7 +473,7 @@ public:
 	CallGraphEntry(const VexRip &r, int _depth)
 		: headRip(r),
 		  callees(new gc_pair_VexRip_set_t()),
-		  instructions(new RangeSet<VexRip, &ir_heap>()),
+		  instructions(new RangeSet<VexRip, &ir_heap, VexRip::FullCompare>()),
 		  calls(new gc_heap_map<VexRip, CallGraphEntry, &ir_heap>::type()),
 		  depth(_depth)
 	{}
@@ -484,7 +484,7 @@ public:
 
 	/* Pair of call instruction and callee address */
 	gc_pair_VexRip_set_t *callees;
-	RangeSet<VexRip, &ir_heap> *instructions;
+	RangeSet<VexRip, &ir_heap, VexRip::FullCompare> *instructions;
 
 	/* The same information as callees in a slightly different
 	   format. */
@@ -504,7 +504,7 @@ static CallGraphEntry *
 exploreOneFunctionForCallGraph(const VexRip &head,
 			       int depth,
 			       bool isRealHead,
-			       RangeTree<VexRip, CallGraphEntry, &ir_heap> *instrsToCGEntries,
+			       RangeTree<VexRip, CallGraphEntry, &ir_heap, VexRip::FullCompare> *instrsToCGEntries,
 			       AddressSpace *as,
 			       std::set<VexRip> &realFunctionHeads)
 {
@@ -621,7 +621,7 @@ buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
 	     it++) {
 		unexploredRips.insert(std::pair<VexRip, int>(*it, 0));
 	}
-	RangeTree<VexRip, CallGraphEntry, &ir_heap> *instrsToCGEntries = new RangeTree<VexRip, CallGraphEntry, &ir_heap>();
+	auto instrsToCGEntries = new RangeTree<VexRip, CallGraphEntry, &ir_heap, VexRip::FullCompare>();
 	std::set<VexRip> realFunctionHeads;
 
 	while (!unexploredRips.empty()) {
@@ -930,7 +930,7 @@ buildCFGForCallGraph(AddressSpace *as,
 	/* Build a map from instruction RIPs to CGEs. */
 	std::set<CallGraphEntry *> explored;
 	std::queue<CallGraphEntry *> toExplore;
-	RangeTree<VexRip, CallGraphEntry, &ir_heap> *ripToCFGNode = new RangeTree<VexRip, CallGraphEntry, &ir_heap>();
+	auto ripToCFGNode = new RangeTree<VexRip, CallGraphEntry, &ir_heap, VexRip::FullCompare>();
 	toExplore.push(root);
 	while (!toExplore.empty()) {
 		CallGraphEntry *cge = toExplore.front();
