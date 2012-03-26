@@ -160,7 +160,7 @@ initialise_timers()
 }
 
 Timer::Timer()
-	: inserted(false), nextDue(0), interval(0)
+	: inserted(false), interval(0), nextDue(0)
 {}
 
 Timer::~Timer()
