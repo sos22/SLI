@@ -13,26 +13,25 @@
 #include "ssa.hpp"
 #include "libvex_prof.hpp"
 
-template <typename t>
-class CFGNode : public GarbageCollected<CFGNode<t>, &ir_heap>, public PrettyPrintable {
+class CFGNode : public GarbageCollected<CFGNode, &ir_heap>, public PrettyPrintable {
 public:
-	t fallThroughRip;
-	t branchRip;
-	CFGNode<t> *fallThrough;
-	CFGNode<t> *branch;
+	VexRip fallThroughRip;
+	VexRip branchRip;
+	CFGNode *fallThrough;
+	CFGNode *branch;
 
-	t my_rip;
+	VexRip my_rip;
 
 	bool accepting;
 
-	CFGNode(t rip) : my_rip(rip), accepting(false) {}
+	CFGNode(const VexRip &rip) : my_rip(rip), accepting(false) {}
 
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%s: %s(%p), %s(%p)",
-			wrappedRipToRip(my_rip).name(),
-			wrappedRipToRip(fallThroughRip).name(),
+			my_rip.name(),
+			fallThroughRip.name(),
 			fallThrough,
-			wrappedRipToRip(branchRip).name(),
+			branchRip.name(),
 			branch);
 	}
 	void visit(HeapVisitor &hv) {
@@ -42,9 +41,9 @@ public:
 	NAMED_CLASS
 };
 
-template <typename t> void printCFG(const CFGNode<t> *cfg, const char *prefix, FILE *f);
+static void printCFG(const CFGNode *cfg, const char *prefix, FILE *f);
 static StateMachine *CFGtoCrashReason(unsigned tid,
-				      VexPtr<CFGNode<VexRip>, &ir_heap> &cfg,
+				      VexPtr<CFGNode, &ir_heap> &cfg,
 				      VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
 				      VexPtr<StateMachineState, &ir_heap> &escapeState,
 				      AllowableOptimisations &opt,
@@ -52,7 +51,7 @@ static StateMachine *CFGtoCrashReason(unsigned tid,
 				      VexPtr<Oracle> &oracle,
 				      GarbageCollectionToken token);
 
-static CFGNode<VexRip> *buildCFGForRipSet(AddressSpace *as,
+static CFGNode *buildCFGForRipSet(AddressSpace *as,
 					  const VexRip &start,
 					  const std::set<VexRip> &terminalFunctions,
 					  Oracle *oracle,
@@ -60,8 +59,8 @@ static CFGNode<VexRip> *buildCFGForRipSet(AddressSpace *as,
 
 static bool instructionIsInteresting(const InstructionSet &i, const VexRip &r);
 
-template <typename t> void
-enumerateCFG(CFGNode<t> *root, std::map<t, CFGNode<t> *> &rips)
+static void
+enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
 {
 	if (!root)
 		return;
@@ -76,12 +75,12 @@ enumerateCFG(CFGNode<t> *root, std::map<t, CFGNode<t> *> &rips)
    is uninteresting if it is not in the initial interesting set and
    there are no paths from it to an interesting node. */
 static void
-trimCFG(CFGNode<VexRip> *root, const InstructionSet &interestingAddresses, int max_path_length, bool acceptingAreInteresting)
+trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, int max_path_length, bool acceptingAreInteresting)
 {
-	std::map<VexRip, CFGNode<VexRip> *> uninteresting;
-	std::map<VexRip, std::pair<CFGNode<VexRip> *, int> > interesting;
+	std::map<VexRip, CFGNode *> uninteresting;
+	std::map<VexRip, std::pair<CFGNode *, int> > interesting;
 	/* Start on the assumption that everything is uninteresting. */
-	enumerateCFG<VexRip>(root, uninteresting);
+	enumerateCFG(root, uninteresting);
 	/* addresses which are explicitly flagged as interesting are
 	   not uninteresting. */
 	for (auto it = uninteresting.begin();
@@ -89,7 +88,7 @@ trimCFG(CFGNode<VexRip> *root, const InstructionSet &interestingAddresses, int m
 		) {
 		if ((acceptingAreInteresting && it->second->accepting) ||
 		    instructionIsInteresting(interestingAddresses, it->first)) {
-			interesting[it->first] = std::pair<CFGNode<VexRip> *, int>(it->second, max_path_length);
+			interesting[it->first] = std::pair<CFGNode *, int>(it->second, max_path_length);
 			uninteresting.erase(it++);
 		} else {
 			it++;
@@ -103,7 +102,7 @@ trimCFG(CFGNode<VexRip> *root, const InstructionSet &interestingAddresses, int m
 		for (auto it = uninteresting.begin();
 		     it != uninteresting.end();
 			) {
-			CFGNode<VexRip> *n = it->second;
+			CFGNode *n = it->second;
 			int path_length = -1;
 			if (n->branch &&
 			    interesting.count(n->branch->my_rip))
@@ -116,7 +115,7 @@ trimCFG(CFGNode<VexRip> *root, const InstructionSet &interestingAddresses, int m
 				it++;
 			} else {
 				progress = true;
-				interesting[it->first] = std::pair<CFGNode<VexRip> *, int>(
+				interesting[it->first] = std::pair<CFGNode *, int>(
 					it->second, path_length);
 				uninteresting.erase(it++);
 			}
@@ -128,7 +127,7 @@ trimCFG(CFGNode<VexRip> *root, const InstructionSet &interestingAddresses, int m
 	for (auto it = interesting.begin();
 	     it != interesting.end();
 	     it++) {
-		CFGNode<VexRip> *n = it->second.first;
+		CFGNode *n = it->second.first;
 		assert(n);
 		if (n->branch && uninteresting.count(n->branch->my_rip))
 			n->branch = NULL;
@@ -147,10 +146,10 @@ trimCFG(CFGNode<VexRip> *root, const InstructionSet &interestingAddresses, int m
    pointer which we followed on this path, and it is where we will
    break the cycle.  Returns false if we broke a cycle, in which case
    the whole thing needs to be re-run, or true otherwise. */
-template <typename t> bool
-breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
-	    CFGNode<t> **lastBackEdge, std::set<CFGNode<t> *> &onPath,
-	    std::set<CFGNode<t> *> &clean)
+static bool
+breakCycles(CFGNode *cfg, std::map<CFGNode *, unsigned> &numbering,
+	    CFGNode **lastBackEdge, std::set<CFGNode *> &onPath,
+	    std::set<CFGNode *> &clean)
 {
 	if (clean.count(cfg))
 		return true;
@@ -164,7 +163,7 @@ breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
 
 	onPath.insert(cfg);
 	if (cfg->branch) {
-		CFGNode<t> **p = lastBackEdge;
+		CFGNode **p = lastBackEdge;
 		if (numbering[cfg->branch] < numbering[cfg])
 			p = &cfg->branch;
 		if (cfg->branch == cfg)
@@ -173,7 +172,7 @@ breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
 			return false;
 	}
 	if (cfg->fallThrough) {
-		CFGNode<t> **p = lastBackEdge;
+		CFGNode **p = lastBackEdge;
 		if (numbering[cfg->fallThrough] < numbering[cfg])
 			p = &cfg->fallThrough;
 		if (cfg->fallThrough == cfg)
@@ -192,12 +191,12 @@ breakCycles(CFGNode<t> *cfg, std::map<CFGNode<t> *, unsigned> &numbering,
    variant of Tarjan's algorithm to detect cycles.  When we detect a
    cycle, we use the numbering scheme to identify a back edge and
    eliminate it. */
-template <typename t> void
-breakCycles(CFGNode<t> *cfg)
+static void
+breakCycles(CFGNode *cfg)
 {
-	std::map<CFGNode<t> *, unsigned> numbering;
-	std::queue<CFGNode<t> *> queue;
-	CFGNode<t> *tmp;
+	std::map<CFGNode *, unsigned> numbering;
+	std::queue<CFGNode *> queue;
+	CFGNode *tmp;
 
 	/* Assign numbering */
 	unsigned idx;
@@ -216,9 +215,9 @@ breakCycles(CFGNode<t> *cfg)
 			queue.push(tmp->fallThrough);
 	}
 
-	std::set<CFGNode<t> *> visited;
-	std::set<CFGNode<t> *> clean;
-	while (!breakCycles<t>(cfg, numbering, NULL, visited, clean)) {
+	std::set<CFGNode *> visited;
+	std::set<CFGNode *> clean;
+	while (!breakCycles(cfg, numbering, NULL, visited, clean)) {
 		visited.clear();
 		clean.clear();
 	}
@@ -456,18 +455,6 @@ getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<VexRip> &potenti
 	}
 }
 
-static VexRip
-wrappedRipToRip(const VexRip &r)
-{
-	return r;
-}
-
-static VexRip
-wrappedRipToRip(unsigned long r)
-{
-	return VexRip::invent_vex_rip(r);
-}
-
 static bool
 instructionIsInteresting(const InstructionSet &i, const VexRip &r)
 {
@@ -475,7 +462,7 @@ instructionIsInteresting(const InstructionSet &i, const VexRip &r)
 }
 
 static StateMachine *
-CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode<VexRip>, &ir_heap> &cfg,
+CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode, &ir_heap> &cfg,
 		  AllowableOptimisations &opt, GarbageCollectionToken token)
 {
 	VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> dummy(NULL);
@@ -607,7 +594,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	LibVEX_maybe_gc(token);
 
-	VexPtr<CFGNode<VexRip>, &ir_heap> cfg(
+	VexPtr<CFGNode, &ir_heap> cfg(
 		buildCFGForRipSet(oracle->ms->addressSpace,
 				  *it,
 				  terminalFunctions,
@@ -648,7 +635,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 }
 
 static bool
-considerStoreCFG(VexPtr<CFGNode<VexRip>, &ir_heap> cfg,
+considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		 VexPtr<Oracle> &oracle,
 		 VexPtr<IRExpr, &ir_heap> assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
@@ -751,7 +738,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 
 		std::set<VexRip> terminalFunctions;
 		terminalFunctions.insert(VexRip::invent_vex_rip(0x757bf0));
-		VexPtr<CFGNode<VexRip>, &ir_heap> cfg(
+		VexPtr<CFGNode, &ir_heap> cfg(
 			buildCFGForRipSet(oracle->ms->addressSpace,
 					  *it,
 					  terminalFunctions,
@@ -836,9 +823,9 @@ namespace _getStoreCFGs {
 }
 #endif
 static int
-countReachableNodes(CFGNode<VexRip> *root,
-		    std::map<CFGNode<VexRip> *, int> &nr_available,
-		    const std::set<CFGNode<VexRip> *> &interesting)
+countReachableNodes(CFGNode *root,
+		    std::map<CFGNode *, int> &nr_available,
+		    const std::set<CFGNode *> &interesting)
 {
 	auto it = nr_available.find(root);
 	if (it != nr_available.end())
@@ -846,7 +833,7 @@ countReachableNodes(CFGNode<VexRip> *root,
 	if (!interesting.count(root))
 		return 0;
 	/* Do it early to break cycles. */
-	auto it2 = nr_available.insert(std::pair<CFGNode<VexRip> *, int>(root, 0));
+	auto it2 = nr_available.insert(std::pair<CFGNode *, int>(root, 0));
 	int acc = 1;
 	if (root->fallThrough)
 		acc += countReachableNodes(root->fallThrough, nr_available, interesting);
@@ -857,7 +844,7 @@ countReachableNodes(CFGNode<VexRip> *root,
 }
 
 static void
-purgeEverythingReachableFrom(std::set<CFGNode<VexRip> *> &st, CFGNode<VexRip> *root)
+purgeEverythingReachableFrom(std::set<CFGNode *> &st, CFGNode *root)
 {
 	if (!root)
 		return;
@@ -868,14 +855,14 @@ purgeEverythingReachableFrom(std::set<CFGNode<VexRip> *> &st, CFGNode<VexRip> *r
 	purgeEverythingReachableFrom(st, root->branch);
 }
 
-static CFGNode<VexRip> *
-findBestRoot(const std::set<CFGNode<VexRip> *> avail)
+static CFGNode *
+findBestRoot(const std::set<CFGNode *> avail)
 {
-	std::map<CFGNode<VexRip> *, int> nr_reachable;
+	std::map<CFGNode *, int> nr_reachable;
 	for (auto it = avail.begin(); it != avail.end(); it++)
 		countReachableNodes(*it, nr_reachable, avail);
 	int best_count = -1;
-	CFGNode<VexRip> *bestItem = NULL;
+	CFGNode *bestItem = NULL;
 	for (auto it = nr_reachable.begin(); it != nr_reachable.end(); it++) {
 		if (it->second > best_count) {
 			best_count = it->second;
@@ -888,18 +875,18 @@ findBestRoot(const std::set<CFGNode<VexRip> *> avail)
 }
 
 static void
-buildRewriteTable(std::map<CFGNode<VexRip> *, CFGNode<VexRip> *> &rewriteTable,
-		  std::set<CFGNode<VexRip> *> &avail,
-		  CFGNode<VexRip> *root)
+buildRewriteTable(std::map<CFGNode *, CFGNode *> &rewriteTable,
+		  std::set<CFGNode *> &avail,
+		  CFGNode *root)
 {
 	if (!root || rewriteTable.count(root))
 		return;
-	CFGNode<VexRip> *newRoot;
+	CFGNode *newRoot;
 	if (avail.count(root)) {
 		newRoot = root;
 		avail.erase(root);
 	} else {
-		newRoot = new CFGNode<VexRip>(*root);
+		newRoot = new CFGNode(*root);
 	}
 	rewriteTable[root] = newRoot;
 	buildRewriteTable(rewriteTable, avail, root->fallThrough);
@@ -907,14 +894,14 @@ buildRewriteTable(std::map<CFGNode<VexRip> *, CFGNode<VexRip> *> &rewriteTable,
 }
 
 static void
-rewriteCFG(CFGNode<VexRip> *root,
-	   std::map<CFGNode<VexRip> *, CFGNode<VexRip> *> &rewriteTable)
+rewriteCFG(CFGNode *root,
+	   std::map<CFGNode *, CFGNode *> &rewriteTable)
 {
-	std::vector<CFGNode<VexRip> *> toVisit;
-	std::set<CFGNode<VexRip> *> visited;
+	std::vector<CFGNode *> toVisit;
+	std::set<CFGNode *> visited;
 	toVisit.push_back(root);
 	while (!toVisit.empty()) {
-		CFGNode<VexRip> *vt = toVisit.back();
+		CFGNode *vt = toVisit.back();
 		toVisit.pop_back();
 		if (visited.count(vt))
 			continue;
@@ -936,7 +923,7 @@ rewriteCFG(CFGNode<VexRip> *root,
 }
 
 static void
-findAllReachableNodes(CFGNode<VexRip> *root, std::set<CFGNode<VexRip> *> &out)
+findAllReachableNodes(CFGNode *root, std::set<CFGNode *> &out)
 {
 	if (!root)
 		return;
@@ -953,22 +940,22 @@ findAllReachableNodes(CFGNode<VexRip> *root, std::set<CFGNode<VexRip> *> &out)
    duplicated (e.g. if ones which are only reachable from one
    root). */
 static void
-makeCfgsDisjoint(std::set<CFGNode<VexRip> *> &cfgs)
+makeCfgsDisjoint(std::set<CFGNode *> &cfgs)
 {
 	/* This is the set of nodes which haven't been used so far,
 	   and so don't need to be duplicated. */
-	std::set<CFGNode<VexRip> *> availableNodes;
+	std::set<CFGNode *> availableNodes;
 
 	for (auto it = cfgs.begin(); it != cfgs.end(); it++)
 		findAllReachableNodes(*it, availableNodes);
 
-	std::set<CFGNode<VexRip> *> out;
+	std::set<CFGNode *> out;
 	for (auto it = cfgs.begin(); it != cfgs.end(); it++) {
 		/* Map from nodes in current node pool to the new,
 		 * duplicated, form. */
-		std::map<CFGNode<VexRip> *, CFGNode<VexRip> *> rewriteTable;
+		std::map<CFGNode *, CFGNode *> rewriteTable;
 		buildRewriteTable(rewriteTable, availableNodes, *it);
-		CFGNode<VexRip> *newRoot = rewriteTable[*it];
+		CFGNode *newRoot = rewriteTable[*it];
 		rewriteCFG(newRoot, rewriteTable);
 		out.insert(newRoot);
 	}
@@ -983,9 +970,9 @@ struct pendingItem {
 	{}
 };
 struct mapEntry {
-	CFGNode<VexRip> *node;
+	CFGNode *node;
 	unsigned best_depth;
-	mapEntry(CFGNode<VexRip> *_node, unsigned _best_depth)
+	mapEntry(CFGNode *_node, unsigned _best_depth)
 		: node(_node), best_depth(_best_depth)
 	{}
 };
@@ -993,7 +980,7 @@ static const unsigned MAX_DEPTH = 20;
 static void
 getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	     VexPtr<Oracle> &oracle,
-	     VexPtr<CFGNode<VexRip> *, &ir_heap> &storeCFGs,
+	     VexPtr<CFGNode *, &ir_heap> &storeCFGs,
 	     int *_nrStoreCfgs)
 {
 	fprintf(_logfile, "Potentially conflicting stores:\n");
@@ -1056,7 +1043,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 
 		int startOfInstruction = 0;
 		int endOfInstruction = 0;
-		CFGNode<VexRip> *currentNode = NULL;
+		CFGNode *currentNode = NULL;
 		while (startOfInstruction < irsb->stmts_used && next.depth < MAX_DEPTH) {
 			assert(irsb->stmts[startOfInstruction]->tag == Ist_IMark);
 			IRStmtIMark *startMark = (IRStmtIMark *)irsb->stmts[startOfInstruction];
@@ -1067,7 +1054,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 				goto found_existing_cfg_node;
 			}
 
-			currentNode = new CFGNode<VexRip>(startMark->addr.rip);
+			currentNode = new CFGNode(startMark->addr.rip);
 			for (endOfInstruction = startOfInstruction + 1;
 			     endOfInstruction < irsb->stmts_used && irsb->stmts[endOfInstruction]->tag != Ist_IMark;
 			     endOfInstruction++) {
@@ -1150,7 +1137,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 
 	fprintf(_logfile, "Initial CFG:\n");
 	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
-		CFGNode<VexRip> *n = it->second.node;
+		CFGNode *n = it->second.node;
 		fprintf(_logfile, "\t%s\t-> %p", it->first.name(), n);
 		if (n->fallThroughRip.isValid())
 			fprintf(_logfile, " ft %s", n->fallThroughRip.name());
@@ -1191,7 +1178,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 
 	fprintf(_logfile, "Resolved CFG:\n");
 	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
-		CFGNode<VexRip> *n = it->second.node;
+		CFGNode *n = it->second.node;
 		fprintf(_logfile, "\t%s\t-> %p", it->first.name(), n);
 		if (n->fallThrough)
 			fprintf(_logfile, " ft %p", n->fallThrough);
@@ -1208,7 +1195,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	 * keep.  We keep anything in @potentiallyConflictingStores,
 	 * and anything which can reach something in
 	 * @potentiallyConflictingStores. */
-	std::set<CFGNode<VexRip> *> nodesToKeep;
+	std::set<CFGNode *> nodesToKeep;
 	for (auto it = potentiallyConflictingStores.begin();
 	     it != potentiallyConflictingStores.end();
 	     it++) {
@@ -1223,7 +1210,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		for (auto it = ripsToCfgNodes.begin();
 		     it != ripsToCfgNodes.end();
 		     it++) {
-			CFGNode<VexRip> *node = it->second.node;
+			CFGNode *node = it->second.node;
 			if (nodesToKeep.count(node))
 				continue;
 			if ((node->fallThrough && nodesToKeep.count(node->fallThrough)) ||
@@ -1244,7 +1231,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = ripsToCfgNodes.begin();
 	     it != ripsToCfgNodes.end();
 		) {
-		CFGNode<VexRip> *node = it->second.node;
+		CFGNode *node = it->second.node;
 		if (!nodesToKeep.count(node)) {
 			ripsToCfgNodes.erase(it++);
 		} else {
@@ -1259,24 +1246,24 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	/* ripsToCfgNodes now contains precisely the set of CFG nodes
 	   which we're interested in.  We still need to remove any
 	   cycles and identify the roots. */
-	std::set<CFGNode<VexRip> *> unrootedCFGNodes;
+	std::set<CFGNode *> unrootedCFGNodes;
 	for (auto it = ripsToCfgNodes.begin();
 	     it != ripsToCfgNodes.end();
 	     it++)
 		unrootedCFGNodes.insert(it->second.node);
-	std::set<CFGNode<VexRip> *> roots;
+	std::set<CFGNode *> roots;
 	/* First heuristic: if something has no parents, it's
 	   definitely a root. */
-	std::set<CFGNode<VexRip> *> nodesWithNoParents(unrootedCFGNodes);
+	std::set<CFGNode *> nodesWithNoParents(unrootedCFGNodes);
 	for (auto it = unrootedCFGNodes.begin(); it != unrootedCFGNodes.end(); it++) {
-		CFGNode<VexRip> *n = *it;
+		CFGNode *n = *it;
 		if (n->fallThrough)
 			nodesWithNoParents.erase(n->fallThrough);
 		if (n->branch)
 			nodesWithNoParents.erase(n->branch);
 	}
 	for (auto it = nodesWithNoParents.begin(); it != nodesWithNoParents.end(); it++) {
-		CFGNode<VexRip> *newRoot = *it;
+		CFGNode *newRoot = *it;
 		roots.insert(newRoot);
 		purgeEverythingReachableFrom(unrootedCFGNodes, newRoot);
 	}
@@ -1288,7 +1275,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		   reach the largest number of other nodes, with ties
 		   broken by taking the smallest available address. */
 		while (!unrootedCFGNodes.empty()) {
-			CFGNode<VexRip> *root = findBestRoot(unrootedCFGNodes);
+			CFGNode *root = findBestRoot(unrootedCFGNodes);
 			roots.insert(root);
 			purgeEverythingReachableFrom(unrootedCFGNodes, root);
 		}
@@ -1346,7 +1333,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	}
 
 	/* Reformat results so that caller can use them. */
-	storeCFGs = (CFGNode<VexRip> **)__LibVEX_Alloc_Ptr_Array(&ir_heap, roots.size());
+	storeCFGs = (CFGNode **)__LibVEX_Alloc_Ptr_Array(&ir_heap, roots.size());
 	unsigned cntr = 0;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		storeCFGs[cntr] = *it;
@@ -1360,7 +1347,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 static void
 getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	     VexPtr<Oracle> &oracle,
-	     VexPtr<CFGNode<VexRip> *, &ir_heap> &storeCFGs,
+	     VexPtr<CFGNode *, &ir_heap> &storeCFGs,
 	     int *_nrStoreCfgs)
 {
 	_getStoreCFGs::getStoreCFGs(potentiallyConflictingStores,
@@ -1370,7 +1357,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 }
 
 static bool
-isSingleNodeCfg(CFGNode<VexRip> *root)
+isSingleNodeCfg(CFGNode *root)
 {
 	return root->fallThrough == NULL && root->branch == NULL;
 }
@@ -1386,7 +1373,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 {
 	assert(potentiallyConflictingStores.size() > 0);
 
-	VexPtr<CFGNode<VexRip> *, &ir_heap> storeCFGs;
+	VexPtr<CFGNode *, &ir_heap> storeCFGs;
 	int nrStoreCfgs;
 	getStoreCFGs(potentiallyConflictingStores, oracle, storeCFGs, &nrStoreCfgs);
 	if (TIMEOUT)
@@ -1404,7 +1391,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			continue;
 		}
 
-		VexPtr<CFGNode<VexRip>, &ir_heap> storeCFG(storeCFGs[i]);
+		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		foundRace |= considerStoreCFG(storeCFG,
 					      oracle,
 					      survive,
@@ -1501,11 +1488,11 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	return summary;
 }
 			    
-template <typename t> void
-printCFG(const CFGNode<t> *cfg, const char *prefix, FILE *f)
+static void
+printCFG(const CFGNode *cfg, const char *prefix, FILE *f)
 {
-	std::vector<const CFGNode<t> *> pending;
-	std::set<const CFGNode<t> *> done;
+	std::vector<const CFGNode *> pending;
+	std::set<const CFGNode *> done;
 
 	pending.push_back(cfg);
 	while (!pending.empty()) {
@@ -1523,9 +1510,8 @@ printCFG(const CFGNode<t> *cfg, const char *prefix, FILE *f)
 		done.insert(cfg);
 	}
 }
-/* Make it visible to the debugger. */
-void __printCFG(const CFGNode<VexRip> *cfg) { printCFG(cfg, "", stdout); }
-void __printCFG(const CFGNode<unsigned long> *cfg) { printCFG(cfg, "", stdout); }
+/* Make it more visible to the debugger. */
+void __printCFG(const CFGNode *cfg) { printCFG(cfg, "", stdout); }
 
 /* Build a control flow graph which covers all of the RIPs in @rips.
  * @output is filled in with pointers to all of the possible start
@@ -1533,14 +1519,14 @@ void __printCFG(const CFGNode<unsigned long> *cfg) { printCFG(cfg, "", stdout); 
  */
 /* This only really makes sense if @rips are similar enough that the
  * CFGs are likely to overlap. */
-static CFGNode<VexRip> *
+static CFGNode *
 buildCFGForRipSet(AddressSpace *as,
 		  const VexRip &start,
 		  const std::set<VexRip> &terminalFunctions,
 		  Oracle *oracle,
 		  unsigned max_depth)
 {
-	std::map<VexRip, std::pair<CFGNode<VexRip> *, unsigned> > builtSoFar;
+	std::map<VexRip, std::pair<CFGNode *, unsigned> > builtSoFar;
 	std::priority_queue<std::pair<unsigned, VexRip> > needed;
 	unsigned depth;
 	VexRip rip;
@@ -1556,7 +1542,7 @@ buildCFGForRipSet(AddressSpace *as,
 		    (builtSoFar.count(rip) && builtSoFar[rip].second >= depth))
 			continue;
 		IRSB *irsb = as->getIRSBForAddress(ThreadRip::mk(-1, rip));
-		auto work = new CFGNode<VexRip>(rip);
+		auto work = new CFGNode(rip);
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
@@ -1589,7 +1575,7 @@ buildCFGForRipSet(AddressSpace *as,
 			needed.push(std::pair<unsigned, VexRip>(depth - 1, work->fallThroughRip));
 		if (work->branchRip.isValid())
 			needed.push(std::pair<unsigned, VexRip>(depth - 1, work->branchRip));
-		builtSoFar[rip] = std::pair<CFGNode<VexRip> *, unsigned>(work, depth);
+		builtSoFar[rip] = std::pair<CFGNode *, unsigned>(work, depth);
 	}
 
 	/* Now we have a CFG node for every needed instruction.  Go
@@ -1637,7 +1623,7 @@ rewriteTemporary(IRExpr *sm,
 
 static StateMachine *
 CFGtoCrashReason(unsigned tid,
-		 VexPtr<CFGNode<VexRip>, &ir_heap> &cfg,
+		 VexPtr<CFGNode, &ir_heap> &cfg,
 		 VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
 		 VexPtr<StateMachineState, &ir_heap> &escapeState,
 		 AllowableOptimisations &opt,
@@ -1648,14 +1634,14 @@ CFGtoCrashReason(unsigned tid,
 	typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type inferredInformation;
 
 	class State {
-		typedef std::pair<StateMachineState **, CFGNode<VexRip> *> reloc_t;
-		std::vector<CFGNode<VexRip> *> pending;
+		typedef std::pair<StateMachineState **, CFGNode *> reloc_t;
+		std::vector<CFGNode *> pending;
 		std::vector<reloc_t> relocs;
 		inferredInformation *crashReasons;
 	public:
-		std::map<CFGNode<VexRip> *, StateMachineState *> cfgToState;
+		std::map<CFGNode *, StateMachineState *> cfgToState;
 
-		CFGNode<VexRip> *nextNode() {
+		CFGNode *nextNode() {
 			while (1) {
 				if (pending.empty()) {
 					std::vector<reloc_t> newRelocs;
@@ -1673,14 +1659,14 @@ CFGtoCrashReason(unsigned tid,
 					if (pending.empty())
 						return NULL;
 				}
-				CFGNode<VexRip> *res = pending.back();
+				CFGNode *res = pending.back();
 				pending.pop_back();
 				if (cfgToState.count(res))
 					continue;
 				return res;
 			}
 		}
-		void addReloc(StateMachineState **p, CFGNode<VexRip> *c)
+		void addReloc(StateMachineState **p, CFGNode *c)
 		{
 			*p = NULL;
 			relocs.push_back(reloc_t(p, c));
@@ -1700,7 +1686,7 @@ CFGtoCrashReason(unsigned tid,
 		{}
 		IRSB *operator()(const VexRip &rip) {
 			try {
-				return as->getIRSBForAddress(ThreadRip::mk(tid, wrappedRipToRip(rip)));
+				return as->getIRSBForAddress(ThreadRip::mk(tid, rip));
 			} catch (BadMemoryException e) {
 				return NULL;
 			}
@@ -1710,7 +1696,7 @@ CFGtoCrashReason(unsigned tid,
 	class BuildStateForCfgNode {
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
 							const ThreadVexRip rip,
-							CFGNode<VexRip> *branchTarget,
+							CFGNode *branchTarget,
 							StateMachineEdge *edge) {
 			StateMachineSideEffect *se = NULL;
 			switch (stmt->tag) {
@@ -1775,7 +1761,7 @@ CFGtoCrashReason(unsigned tid,
 			return edge;
 		}
 
-		StateMachineState *buildStateForCallInstruction(CFGNode<VexRip> *cfg,
+		StateMachineState *buildStateForCallInstruction(CFGNode *cfg,
 								IRSB *irsb,
 								const ThreadVexRip &site)
 		{
@@ -1851,13 +1837,13 @@ CFGtoCrashReason(unsigned tid,
 			: simple_calls(_simple_calls), tid(_tid), state(_state),
 			  escapeState(_escapeState), oracle(_oracle)
 		{}
-		StateMachineState *operator()(CFGNode<VexRip> *cfg,
+		StateMachineState *operator()(CFGNode *cfg,
 					      IRSB *irsb) {
 			if (!cfg)
 				return escapeState;
 			ThreadVexRip rip;
 			rip.thread = tid;
-			rip.rip = wrappedRipToRip(cfg->my_rip);
+			rip.rip = cfg->my_rip;
 			int endOfInstr;
 			for (endOfInstr = 1;
 			     endOfInstr < irsb->stmts_used && irsb->stmts[endOfInstr]->tag != Ist_IMark;
@@ -1896,7 +1882,7 @@ CFGtoCrashReason(unsigned tid,
 		}
 	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle);
 
-	VexRip original_rip = wrappedRipToRip(cfg->my_rip);
+	VexRip original_rip = cfg->my_rip;
 	StateMachineState *root = NULL;
 	state.addReloc(&root, cfg);
 
