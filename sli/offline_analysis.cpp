@@ -412,9 +412,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 }
 
 static void
-getConflictingStoreClusters(StateMachine *sm, Oracle *oracle, std::set<InstructionSet > &conflictClusters)
+getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<VexRip> &potentiallyConflictingStores)
 {
-	std::set<VexRip> potentiallyConflictingStores;
 	std::set<StateMachineSideEffectLoad *> allLoads;
 	findAllLoads(sm, allLoads);
 	if (allLoads.size() == 0) {
@@ -426,7 +425,13 @@ getConflictingStoreClusters(StateMachine *sm, Oracle *oracle, std::set<Instructi
 	     it++) {
 		oracle->findConflictingStores(*it, potentiallyConflictingStores);
 	}
+}
 
+static void
+getConflictingStoreClusters(std::set<VexRip> &potentiallyConflictingStores,
+			    Oracle *oracle,
+			    std::set<InstructionSet > &conflictClusters)
+{
 	oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
 	if (conflictClusters.size() == 0)
 		assert(potentiallyConflictingStores.size() == 0);
@@ -1424,10 +1429,9 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");
 
-	std::set<InstructionSet > conflictClusters;
-	getConflictingStoreClusters(probeMachine, oracle, conflictClusters);
-
-	if (conflictClusters.size() == 0) {
+	std::set<VexRip> potentiallyConflictingStores;
+	getConflictingStores(probeMachine, oracle, potentiallyConflictingStores);
+	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		return NULL;
 	}
@@ -1472,6 +1476,9 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	}
 
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
+
+	std::set<InstructionSet> conflictClusters;
+	getConflictingStoreClusters(potentiallyConflictingStores, oracle, conflictClusters);
 
 	bool foundRace = false;
 	unsigned cntr = 0;
