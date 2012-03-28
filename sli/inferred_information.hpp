@@ -8,35 +8,6 @@
 
 class Oracle;
 
-template <typename t>
-class CFGNode : public GarbageCollected<CFGNode<t>, &ir_heap>, public PrettyPrintable {
-public:
-	t fallThroughRip;
-	t branchRip;
-	CFGNode<t> *fallThrough;
-	CFGNode<t> *branch;
-
-	t my_rip;
-
-	bool accepting;
-
-	CFGNode(t rip) : my_rip(rip), accepting(false) {}
-
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s: %s(%p), %s(%p)",
-			wrappedRipToRip(my_rip).name(),
-			wrappedRipToRip(fallThroughRip).name(),
-			fallThrough,
-			wrappedRipToRip(branchRip).name(),
-			branch);
-	}
-	void visit(HeapVisitor &hv) {
-		hv(fallThrough);
-		hv(branch);
-	}
-	NAMED_CLASS
-};
-
 class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 public:
 	class StoreMachineData : public GarbageCollected<StoreMachineData, &ir_heap> {
