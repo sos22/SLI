@@ -13,6 +13,8 @@
 #include "ssa.hpp"
 #include "libvex_prof.hpp"
 
+#define DEBUG_BUILD_STORE_CFGS 0
+
 class CFGNode : public GarbageCollected<CFGNode, &ir_heap>, public PrettyPrintable {
 public:
 	VexRip fallThroughRip;
@@ -962,6 +964,21 @@ makeCfgsDisjoint(std::set<CFGNode *> &cfgs)
 	cfgs = out;
 }
 
+#if DEBUG_BUILD_STORE_CFGS == 0
+/* Debug aid: print out anything reachable from @root which is in
+ * @interesting.  Only works if @root is acyclic. */
+static void
+findTheseCfgNodes(CFGNode *root, const std::set<VexRip> &interesting)
+{
+	if (!root)
+		return;
+	if (interesting.count(root->my_rip))
+		fprintf(_logfile, "\t\t%s\n", root->my_rip.name());
+	findTheseCfgNodes(root->fallThrough, interesting);
+	findTheseCfgNodes(root->branch, interesting);
+}
+#endif
+
 struct pendingItem {
 	VexRip rip;
 	unsigned depth;
@@ -983,11 +1000,13 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	     VexPtr<CFGNode *, &ir_heap> &storeCFGs,
 	     int *_nrStoreCfgs)
 {
+#if DEBUG_BUILD_STORE_CFGS
 	fprintf(_logfile, "Potentially conflicting stores:\n");
 	for (auto it = potentiallyConflictingStores.begin();
 	     it != potentiallyConflictingStores.end();
 	     it++)
 		fprintf(_logfile, "\t%s\n", it->name());
+#endif
 
 	/* Instructions which we still need to visit. */
 	std::vector<pendingItem> pendingInstructions;
@@ -1001,8 +1020,6 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	while (!pendingInstructions.empty()) {
 		pendingItem next(pendingInstructions.back());
 		pendingInstructions.pop_back();
-
-		fprintf(_logfile, "discover %s at depth %d\n", next.rip.name(), next.depth);
 
 		if (next.depth > MAX_DEPTH)
 			continue;
@@ -1135,6 +1152,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 								  next.depth));
 	}
 
+#if DEBUG_BUILD_STORE_CFGS
 	fprintf(_logfile, "Initial CFG:\n");
 	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
 		CFGNode *n = it->second.node;
@@ -1145,6 +1163,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 			fprintf(_logfile, " b %s", n->branchRip.name());
 		fprintf(_logfile, "\n");
 	}
+#endif
 
 	/* When we get here, ripsToCfgNodes contains an entry for
 	 * everything which is going to be in the final graph, but it
@@ -1176,6 +1195,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		}
 	}
 
+#if DEBUG_BUILD_STORE_CFGS
 	fprintf(_logfile, "Resolved CFG:\n");
 	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
 		CFGNode *n = it->second.node;
@@ -1190,6 +1210,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 			assert(n->branch->my_rip == n->branchRip);
 		fprintf(_logfile, "\n");
 	}
+#endif
 
 	/* Now figure out which CFG nodes we're actually going to
 	 * keep.  We keep anything in @potentiallyConflictingStores,
@@ -1221,11 +1242,13 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		}
 	} while (progress);
 
+#if DEBUG_BUILD_STORE_CFGS
 	fprintf(_logfile, "Instructions relevant to store threads:\n");
 	for (auto it = nodesToKeep.begin();
 	     it != nodesToKeep.end();
 	     it++)
 		fprintf(_logfile, "\t%s\n", (*it)->my_rip.name());
+#endif
 
 	/* Which then allows us to remove the nodes we don't want any more. */
 	for (auto it = ripsToCfgNodes.begin();
@@ -1281,10 +1304,6 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		}
 	}
 
-	fprintf(_logfile, "Store roots:\n");
-	for (auto it = roots.begin(); it != roots.end(); it++)
-		fprintf(_logfile, "\t%s\n", (*it)->my_rip.name());
-
 	/* cycle breaking is subtle because you need to avoid losing
 	   nodes, even when you have multiple roots.  The nasty case
 	   is where you have a loop from A to B, a root X whose
@@ -1326,10 +1345,18 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		breakCycles(*it);
 
-	fprintf(_logfile, "Store CFGs:\n");
+	fprintf(_logfile, "Store clustering:\n");
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		fprintf(_logfile, "\tRoot %s:\n", (*it)->my_rip.name());
+#if DEBUG_BUILD_STORE_CFGS
 		printCFG(*it, "\t\t", _logfile);
+#else
+		/* Slightly less verbose bit of debugging: show where
+		   instructions which were in the input set ended up,
+		   but not the ones we discovered on our way
+		   around. */
+		findTheseCfgNodes(*it, potentiallyConflictingStores);
+#endif
 	}
 
 	/* Reformat results so that caller can use them. */
