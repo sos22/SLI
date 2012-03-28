@@ -1556,15 +1556,32 @@ buildCFGForRipSet(AddressSpace *as,
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Call) {
-				work->fallThroughRip = extract_call_follower(irsb);
+				VexRip follower = extract_call_follower(irsb);
 				if (irsb->next_is_const) {
-					if (terminalFunctions.count(irsb->next_const.rip))
-						work->fallThroughRip = irsb->next_const.rip;
-					else if (!oracle->functionCanReturn(irsb->next_const.rip))
-						work->fallThroughRip = VexRip();
+					if (terminalFunctions.count(irsb->next_const.rip)) {
+						/* Inline this function */
+						work->branchRip = irsb->next_const.rip;
+					} else if (oracle->functionCanReturn(irsb->next_const.rip)) {
+						/* Treat this function as pure. */
+						work->fallThroughRip = follower;
+					} else {
+						/* This function can't
+						   return, and wasn't
+						   on the stack when
+						   we crashed -> it
+						   was never called.
+						   We encode that by
+						   leaving both the
+						   branch and
+						   fallThrough fields
+						   empty. */
+					}
+				} else {
+					work->fallThroughRip = follower;
 				}
 			} else if (irsb->jumpkind == Ijk_Ret) {
-				work->accepting = true;
+				work->fallThroughRip = work->my_rip;
+				work->fallThroughRip.rtrn();
 			} else {
 				/* Don't currently try to trace across indirect branches. */
 				if (irsb->next_is_const)
@@ -1849,27 +1866,37 @@ CFGtoCrashReason(unsigned tid,
 			     endOfInstr < irsb->stmts_used && irsb->stmts[endOfInstr]->tag != Ist_IMark;
 			     endOfInstr++)
 				;
+			StateMachineEdge *edge;
 			if (endOfInstr == irsb->stmts_used && irsb->jumpkind == Ijk_Call) {
 				/* This is a call node, which requires
 				 * special handling. */
-				return buildStateForCallInstruction(cfg, irsb, rip);
-			}
-			StateMachineEdge *edge = new StateMachineEdge(NULL);
-			if (!cfg->fallThrough && cfg->branch) {
-				/* We've decided to force this one to take the
-				   branch.  Trim the bit of the instruction
-				   after the branch. */
-				assert(cfg->branch);
-				endOfInstr--;
-				while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
-					endOfInstr--;
-				assert(endOfInstr > 0);
-				state.addReloc(&edge->target, cfg->branch);
-			} else if (cfg->fallThrough) {
-				state.addReloc(&edge->target, cfg->fallThrough);
+				if (cfg->branch) {
+					/* We want to inline this
+					 * call, in effect. */
+					edge = new StateMachineEdge(NULL);
+					state.addReloc(&edge->target, cfg->branch);
+				} else {
+					return buildStateForCallInstruction(cfg, irsb, rip);
+				}
 			} else {
-				edge->target = escapeState;
+				edge = new StateMachineEdge(NULL);
+				if (!cfg->fallThrough && cfg->branch) {
+					/* We've decided to force this one to take the
+					   branch.  Trim the bit of the instruction
+					   after the branch. */
+					assert(cfg->branch);
+					endOfInstr--;
+					while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
+						endOfInstr--;
+					assert(endOfInstr > 0);
+					state.addReloc(&edge->target, cfg->branch);
+				} else if (cfg->fallThrough) {
+					state.addReloc(&edge->target, cfg->fallThrough);
+				} else {
+					edge->target = escapeState;
+				}
 			}
+
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
 							     rip,
