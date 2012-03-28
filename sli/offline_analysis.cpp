@@ -1220,12 +1220,11 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 static bool
 considerStoreCFG(VexPtr<CFGNode<VexRip>, &ir_heap> cfg,
-		 VexPtr<AddressSpace> &as,
 		 VexPtr<Oracle> &oracle,
 		 VexPtr<IRExpr, &ir_heap> assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
 		 VexPtr<CrashSummary, &ir_heap> &summary,
-		 const InstructionSet &is,
+		 const std::set<VexRip> &is,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 GarbageCollectionToken token)
@@ -1235,14 +1234,14 @@ considerStoreCFG(VexPtr<CFGNode<VexRip>, &ir_heap> cfg,
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableassumeNoInterferingStores()
-		.setAddressSpace(as);
+		.setAddressSpace(oracle->ms->addressSpace);
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, opt, token));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
 	}
 
-	opt.interestingStores = is.rips;
+	opt.interestingStores = is;
 	opt.haveInterestingStoresSet = true;
 
 	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, false, token, NULL, NULL))
@@ -1377,22 +1376,20 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 	return sm;
 }
 
-static bool
-probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
-		      VexPtr<Oracle> &oracle,
-		      VexPtr<IRExpr, &ir_heap> &survive,
-		      VexPtr<CrashSummary, &ir_heap> &summary,
-		      bool needRemoteMacroSections,
-		      std::set<VexRip> &potentiallyConflictingStores,
-		      GarbageCollectionToken token)
+static void
+getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
+	     VexPtr<Oracle> &oracle,
+	     VexPtr<CFGNode<VexRip> *, &ir_heap> &storeCFGs,
+	     int *_nrStoreCfgs)
 {
 	std::set<InstructionSet> conflictClusters;
 	getConflictingStoreClusters(potentiallyConflictingStores, oracle, conflictClusters);
 
-	auto roughLoadCount = probeMachine->root->roughLoadCount();
+	int nrStoreCfgs = 0;
+	int nrStoreCfgsAllocated = conflictClusters.size();
 
-	bool foundRace = false;
-	unsigned cntr = 0;
+	storeCFGs = (CFGNode<VexRip> **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nrStoreCfgsAllocated);
+
 	for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 	     !TIMEOUT && it != conflictClusters.end();
 	     it++) {
@@ -1404,15 +1401,8 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		     it2++)
 			fprintf(_logfile, " %s", it2->name());
 		fprintf(_logfile, "\n");
-		LibVEX_maybe_gc(token);
 
-		if (roughLoadCount == StateMachineState::singleLoad &&
-		    is.rips.size() == 1) {
-			fprintf(_logfile, "Single store versus single load -> no race possible\n");
-			continue;
-		}
-
-		VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
+		CallGraphEntry **cgRoots;
 		int nr_roots;
 		cgRoots = buildCallGraphForRipSet(oracle->ms->addressSpace, is.rips, &nr_roots);
 		if (!cgRoots) {
@@ -1420,26 +1410,74 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			continue;
 		}
 			
-		VexPtr<AddressSpace> as(oracle->ms->addressSpace);
 		for (int i = 0; !TIMEOUT && i < nr_roots; i++) {
-			VexPtr<CFGNode<VexRip>, &ir_heap> storeCFG;
-			storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
-			trimCFG(storeCFG.get(), is, 20, false);
-			breakCycles(storeCFG.get());
+			CFGNode<VexRip> *storeCFG;
+			storeCFG = buildCFGForCallGraph(oracle->ms->addressSpace, cgRoots[i]);
+			trimCFG(storeCFG, is, 20, false);
+			breakCycles(storeCFG);
 
-			foundRace |= considerStoreCFG(storeCFG,
-						      as,
-						      oracle,
-						      survive,
-						      probeMachine,
-						      summary,
-						      is,
-						      needRemoteMacroSections,
-						      STORING_THREAD + cntr,
-						      token);
-			cntr++;
+			if (nrStoreCfgs == nrStoreCfgsAllocated) {
+				nrStoreCfgsAllocated *= 2;
+				CFGNode<VexRip> **a =
+					(CFGNode<VexRip> **)__LibVEX_Alloc_Ptr_Array(&ir_heap,
+										     nrStoreCfgsAllocated);
+				memcpy(a, storeCFGs.get(), nrStoreCfgs * sizeof(CFGNode<VexRip> *));
+				storeCFGs = a;
+			}
 
+			storeCFGs[nrStoreCfgs] = storeCFG;
+			nrStoreCfgs++;
 		}
+	}
+
+	*_nrStoreCfgs = nrStoreCfgs;
+}
+
+static bool
+isSingleNodeCfg(CFGNode<VexRip> *root)
+{
+	return root->fallThrough == NULL && root->branch == NULL;
+}
+
+static bool
+probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
+		      VexPtr<Oracle> &oracle,
+		      VexPtr<IRExpr, &ir_heap> &survive,
+		      VexPtr<CrashSummary, &ir_heap> &summary,
+		      bool needRemoteMacroSections,
+		      std::set<VexRip> &potentiallyConflictingStores,
+		      GarbageCollectionToken token)
+{
+	assert(potentiallyConflictingStores.size() > 0);
+
+	VexPtr<CFGNode<VexRip> *, &ir_heap> storeCFGs;
+	int nrStoreCfgs;
+	getStoreCFGs(potentiallyConflictingStores, oracle, storeCFGs, &nrStoreCfgs);
+	if (TIMEOUT)
+		return false;
+	assert(nrStoreCfgs != 0);
+
+	auto roughLoadCount = probeMachine->root->roughLoadCount();
+
+	bool foundRace;
+	foundRace = false;
+	for (int i = 0; i < nrStoreCfgs; i++) {
+		if (roughLoadCount == StateMachineState::singleLoad &&
+		    isSingleNodeCfg(storeCFGs[i])) {
+			fprintf(_logfile, "Single store versus single load -> no race possible\n");
+			continue;
+		}
+
+		VexPtr<CFGNode<VexRip>, &ir_heap> storeCFG(storeCFGs[i]);
+		foundRace |= considerStoreCFG(storeCFG,
+					      oracle,
+					      survive,
+					      probeMachine,
+					      summary,
+					      potentiallyConflictingStores,
+					      needRemoteMacroSections,
+					      STORING_THREAD + i,
+					      token);
 	}
 
 	return foundRace;
