@@ -13,7 +13,7 @@
 #include "ssa.hpp"
 #include "libvex_prof.hpp"
 
-template <typename t> void printCFG(const CFGNode<t> *cfg);
+template <typename t> void printCFG(const CFGNode<t> *cfg, const char *prefix, FILE *f);
 static StateMachine *CFGtoCrashReason(unsigned tid,
 				      VexPtr<CFGNode<VexRip>, &ir_heap> &cfg,
 				      VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
@@ -427,489 +427,6 @@ getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<VexRip> &potenti
 	}
 }
 
-static void
-getConflictingStoreClusters(std::set<VexRip> &potentiallyConflictingStores,
-			    Oracle *oracle,
-			    std::set<InstructionSet > &conflictClusters)
-{
-	oracle->clusterRips(potentiallyConflictingStores, conflictClusters);
-	if (conflictClusters.size() == 0)
-		assert(potentiallyConflictingStores.size() == 0);
-}
-
-/* Build up a static call graph which covers, at a minimum, all of the
- * RIPs included in the input set.  Functions in the graph are
- * represented by a combination of the set of RIPs in the function,
- * plus a set of functions which are statically called from that
- * function. */
-/* Tail calls are a fairly major complication here.  If you see a call
- * to X, and another call to Y where Y tail calls into X, it would
- * naturally look like X and Y overlap, which confuses things.  In
- * that case, we have to split Y so that they no longer overlap.  If X
- * is discovered first then that's actually trivial (you just stop
- * exploring Y when you hit X's head), but if Y is discovered first
- * then it's quite messy.  We give up at that point, removing Y from
- * the known set, exploring X, and then re-exploring Y.
- */
-/* There's also a bit of a bootstrapping problem.  We're given a bunch
- * of RIPs, but function heads to start from.  We start by picking a
- * RIP pretty much at random and assuming that it's a function head.
- * That mostly works reasonably well, even if it isn't, because we
- * effectively just cut off the part of the function before that
- * instruction.  The problem comes if there's another root instruction
- * in the same ``real'' function from which the speculative head is
- * reachable.  In that case, we'll insert a function boundary where
- * there isn't one (due to the tail-call elimination heuristic
- * discussed above), which can in turn lead to the introduction of
- * bogus recursion, which screws with the cycle breaking heuristic.
- * The fix for that is to purge the function which we derived from the
- * assumed head and continue.
- *
- * Note that this is pretty much the opposite to what we do if we
- * suspect a tail call, so we need to track whether a head is real
- * (obtained from following a call instruction) or assumed (obtained
- * directly from a root).  Note also that we *don't* purge the
- * functions which were obtained by tracing from the assumed head, as
- * the new subsuming head is guaranteed to find them again, and
- * this makes things a little bit quicker.
- */
-class CallGraphEntry : public GarbageCollected<CallGraphEntry, &ir_heap> {
-public:
-	CallGraphEntry(const VexRip &r, int _depth)
-		: headRip(r),
-		  callees(new gc_pair_VexRip_set_t()),
-		  instructions(new RangeSet<VexRip, &ir_heap, VexRip::FullCompare>()),
-		  calls(new gc_heap_map<VexRip, CallGraphEntry, &ir_heap>::type()),
-		  depth(_depth)
-	{}
-	VexRip headRip;
-	bool isRealHead; /* Head is derived from a call instruction,
-			    as opposed to one of the exploration
-			    roots. */
-
-	/* Pair of call instruction and callee address */
-	gc_pair_VexRip_set_t *callees;
-	RangeSet<VexRip, &ir_heap, VexRip::FullCompare> *instructions;
-
-	/* The same information as callees in a slightly different
-	   format. */
-	typedef gc_heap_map<VexRip, CallGraphEntry, &ir_heap>::type calls_t;
-	calls_t *calls;
-
-	int depth;
-
-	void visit(HeapVisitor &hv) {
-		hv(instructions);
-		hv(calls);
-		hv(callees);
-	}
-	NAMED_CLASS
-};
-static CallGraphEntry *
-exploreOneFunctionForCallGraph(const VexRip &head,
-			       int depth,
-			       bool isRealHead,
-			       RangeTree<VexRip, CallGraphEntry, &ir_heap, VexRip::FullCompare> *instrsToCGEntries,
-			       AddressSpace *as,
-			       std::set<VexRip> &realFunctionHeads)
-{
-	CallGraphEntry *cge;
-
-	cge = new CallGraphEntry(head, depth);
-	cge->isRealHead = isRealHead;
-
-	std::vector<VexRip> unexploredInstrsThisFunction;
-	unexploredInstrsThisFunction.push_back(head);
-	VexRip prev = head;
-	while (!unexploredInstrsThisFunction.empty()) {
-		VexRip i = unexploredInstrsThisFunction.back();
-		unexploredInstrsThisFunction.pop_back();
-
-		if (TIMEOUT)
-			return NULL;
-
-		if (cge->instructions->test(i)) {
-			/* Done this instruction already -> move
-			 * on. */
-			continue;
-		}
-		if (i != head && realFunctionHeads.count(i)) {
-			/* This is a tail call. */
-			cge->callees->set(std::pair<VexRip, VexRip>(prev, i), true);
-			continue;
-		}
-		CallGraphEntry *old = instrsToCGEntries->get(i);
-		if (old) {
-			assert(old != cge);
-			assert(old->headRip != cge->headRip);
-			if (old->isRealHead) {
-				/* This is a tail call. */
-				cge->callees->set(std::pair<VexRip, VexRip>(prev, i), true);
-				continue;
-			} else {
-				/* We have a branch from the current
-				   function to a previous assumed
-				   function head.  That means that the
-				   assumed function head wasn't
-				   actually a function head at all.
-				   Kill it. */
-				instrsToCGEntries->purgeByValue(old);
-			}
-		}
-
-		VexRip end = i + getInstructionSize(as, i);
-		if (end == i) {
-			/* Valgrind occasionally gets confused and
-			   returns empty instructions.  Treat them as
-			   single-byte ones for these purposes. */
-			end = i + 1;
-		}
-
-		/* Add this instruction to the current function. */
-		cge->instructions->set(i, end);
-		instrsToCGEntries->set(i, end, cge);
-
-		/* Where are we going next? */
-		findInstrSuccessorsAndCallees(as, i, unexploredInstrsThisFunction,
-					      cge->callees);
-		prev = i;
-	}
-	return cge;
-}
-static unsigned
-countReachableCGEs(CallGraphEntry *s)
-{
-	std::set<CallGraphEntry *> reachable;
-	std::queue<CallGraphEntry *> toExplore;
-	toExplore.push(s);
-	while (!toExplore.empty()) {
-		s = toExplore.front();
-		toExplore.pop();
-		if (reachable.count(s))
-			continue;
-		reachable.insert(s);
-		for (auto it = s->calls->begin();
-		     it != s->calls->end();
-		     it++)
-			toExplore.push(it.value());
-	}
-	return reachable.size();
-}
-static void
-purgeCGFromCGESet(std::set<CallGraphEntry *> &s, CallGraphEntry *root)
-{
-	if (!s.count(root))
-		return;
-	s.erase(root);
-	for (auto it = root->calls->begin();
-	     it != root->calls->end();
-	     it++)
-		purgeCGFromCGESet(s, it.value());
-}
-template <typename riptype> static CallGraphEntry **
-buildCallGraphForRipSet(AddressSpace *as, const std::set<riptype> &rips,
-			int *nr_roots)
-{
-	if (rips.size() == 1) {
-		CallGraphEntry *cge = new CallGraphEntry(*rips.begin(), 0);
-		cge->isRealHead = true;
-		cge->instructions->set(*rips.begin(), *rips.begin() + 1);
-
-		*nr_roots = 1;
-		CallGraphEntry **res = (CallGraphEntry **)__LibVEX_Alloc_Ptr_Array(&ir_heap, 1);
-		res[0] = cge;
-		return res;
-	}
-	std::set<std::pair<VexRip, int> > unexploredRips;
-	for (auto it = rips.begin();
-	     it != rips.end();
-	     it++) {
-		unexploredRips.insert(std::pair<VexRip, int>(*it, 0));
-	}
-	auto instrsToCGEntries = new RangeTree<VexRip, CallGraphEntry, &ir_heap, VexRip::FullCompare>();
-	std::set<VexRip> realFunctionHeads;
-
-	while (!unexploredRips.empty()) {
-		auto it = unexploredRips.begin();
-		VexRip head = it->first;
-		int depth = it->second;
-		unexploredRips.erase(it);
-
-		if (depth >= 10)
-			continue;
-
-		CallGraphEntry *cge;
-		cge = instrsToCGEntries->get(head);
-		if (cge) {
-			/* We already have a function which contains
-			   this instruction, so we're finished. */
-			continue;			
-		}
-
-		/* Explore the current function, starting from this
-		 * instruction. */
-		cge = exploreOneFunctionForCallGraph(head, depth, false, instrsToCGEntries, as, realFunctionHeads);
-		if (!cge) {
-			fprintf(_logfile, "%s failed\n", __func__);
-			return NULL;
-		}
-		assert(instrsToCGEntries->get(head) == cge);
-
-		/* Now explore the functions which were called by that
-		 * root. */
-		std::set<std::pair<VexRip, int> > unexploredRealHeads;
-		for (auto it = cge->callees->begin();
-		     it != cge->callees->end();
-		     it++) {
-			unexploredRealHeads.insert(std::pair<VexRip, int>(it.key().second,
-										 depth + 1));
-		}
-		while (!unexploredRealHeads.empty()) {
-			auto it = unexploredRealHeads.begin();
-			VexRip h = it->first;
-			int depth_h = it->second;
-			unexploredRealHeads.erase(it);
-
-			if (depth_h >= 10)
-				continue;
-
-			realFunctionHeads.insert(h);
-
-			CallGraphEntry *old = instrsToCGEntries->get(h);
-			if (old) {
-				/* Already have a CG node for this
-				   instruction.  What kind of node? */
-				if (!old->isRealHead) {
-					/* It was an inferred head
-					   from an earlier pass, so we
-					   need to get rid of it. */
-					fprintf(_logfile, "%s was a pseudo-root; purge.\n", h.name());
-					instrsToCGEntries->purgeByValue(old);
-				} else if (old->headRip == h && old->depth <= depth_h) {
-					/* It's the head of an
-					   existing function ->
-					   everything is fine and we
-					   don't need to do
-					   anything. */
-					continue;
-				} else {
-					/* Urk.  We previously saw a
-					   tail call to this location,
-					   and now we're seeing a real
-					   call.  The result is that
-					   we need to purge the old
-					   call and introduce a new
-					   one. */
-					instrsToCGEntries->purgeByValue(old);
-					/* Need to re-explore whatever
-					   it was that tail-called
-					   into this function. */
-					unexploredRealHeads.insert(std::pair<VexRip, int>(h, depth_h + 1));
-				}
-			}
-
-			/* Now explore that function */
-			cge = exploreOneFunctionForCallGraph(h,
-							     depth_h,
-							     true,
-							     instrsToCGEntries,
-							     as,
-							     realFunctionHeads);
-			if (!cge) {
-				fprintf(_logfile, "%s failed on line %d\n", __func__, __LINE__);
-				return NULL;
-			}
-			for (auto it = cge->callees->begin();
-			     it != cge->callees->end();
-			     it++)
-				unexploredRealHeads.insert(std::pair<VexRip, int>(it.key().second, depth_h + 1));
-			assert(instrsToCGEntries->get(h) == cge);
-		}
-	}
-
-	/* Build a set of all of the CGEs which still exist */
-	std::set<CallGraphEntry *> allCGEs;
-	for (auto it = instrsToCGEntries->begin();
-	     it != instrsToCGEntries->end();
-	     it++) {
-		assert(it->value);
-		allCGEs.insert(it->value);
-	}
-
-	/* Figure out which call graph entries are actually
-	 * interesting. */
-	std::set<CallGraphEntry *> interesting;
-
-	/* Anything which contains one of the root RIPs is
-	 * automatically interesting. */
-	for (auto it = rips.begin();
-	     it != rips.end();
-	     it++) {
-		CallGraphEntry *i = instrsToCGEntries->get(*it);
-		if (!i) {
-			fprintf(_logfile, "Failed to build CG entries for every instruction in %s\n", __func__);
-			return NULL;
-		}
-		interesting.insert(i);
-	}
-	/* Tarski iteration: anything which calls an interesting
-	   function is itself interesting. */
-	bool done_something;
-	do {
-		done_something = false;
-		if (TIMEOUT)
-			return NULL;
-		for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
-		     it != allCGEs.end();
-		     it++) {
-			if (interesting.count(*it))
-				continue;
-			for (auto it2 = (*it)->callees->begin();
-			     it2 != (*it)->callees->end();
-			     it2++) {
-				CallGraphEntry *callee = instrsToCGEntries->get(it2.key().second);
-				if (interesting.count(callee)) {
-					/* Uninteresting function
-					   calling an interesting ->
-					   not allowed.  Fix it. */
-					interesting.insert(*it);
-					done_something = true;
-					break;
-				}
-			}
-		}
-	} while (done_something);
-
-	/* Now strip anything which isn't interesting. */
-	/* Strip the uninteresting entries from the allCGEs set.  At
-	   the same time, remove them from the callee lists. */
-	for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
-	     it != allCGEs.end();
-		) {
-		CallGraphEntry *cge = *it;
-		if (!interesting.count(cge)) {
-			allCGEs.erase(it++);
-		} else {
-			for (auto it2 = cge->callees->begin();
-			     it2 != cge->callees->end();
-				) {
-				if (!interesting.count(instrsToCGEntries->get(it2.key().second))) {
-					it2 = cge->callees->erase(it2);
-				} else {
-					it2++;
-				}
-			}
-			it++;
-		}
-	}
-	/* And now drop them from the instructions map */
-	for (auto it = instrsToCGEntries->begin();
-	     it != instrsToCGEntries->end();
-		) {
-		if (!interesting.count(it->value))
-			it = instrsToCGEntries->erase(it);
-		else
-			it++;
-	}
-
-	/* Resolve any remaining edges into pointers. */
-	for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
-	     it != allCGEs.end();
-	     it++) {
-		for (auto it2 = (*it)->callees->begin();
-		     it2 != (*it)->callees->end();
-		     it2++) {
-			CallGraphEntry *cge = instrsToCGEntries->get(it2.key().second);
-			assert(cge != NULL);
-			(*it)->calls->set(it2.key().first, cge);
-		}
-	}
-
-	std::vector<CallGraphEntry *> roots;
-	/* Build the root set. */
-	while (!allCGEs.empty()) {
-		/* Pick a new root.  If there's anything with no
-		   parents, we make that our root. */
-		CallGraphEntry *res = NULL;
-		for (std::set<CallGraphEntry *>::iterator it = allCGEs.begin();
-		     !res && it != allCGEs.end();
-		     it++) {
-			bool hasParent = false;
-			for (std::set<CallGraphEntry *>::iterator it2 = allCGEs.begin();
-			     !hasParent && it2 != allCGEs.end();
-			     it2++) {
-				if ( (*it2)->calls->hasKey( (*it)->headRip) )
-					hasParent = true;
-			}
-			if (!hasParent)
-				res = *it;
-		}
-		if (!res) {
-			/* Okay, every node we have left has a parent.
-			   That means that they're either in a cycle
-			   or reachable from a cycle.  In that case,
-			   we pick whichever node has the most
-			   reachable nodes. */
-			std::map<CallGraphEntry *, int> nrReachable;
-			std::set<CallGraphEntry *> unexaminedCGEs(allCGEs);
-			while (!unexaminedCGEs.empty()) {
-				CallGraphEntry *t = *unexaminedCGEs.begin();
-				unexaminedCGEs.erase(unexaminedCGEs.begin());
-				nrReachable[t] = countReachableCGEs(t);
-			}
-			CallGraphEntry *best = NULL;
-			for (std::map<CallGraphEntry *, int>::iterator it = nrReachable.begin();
-			     it != nrReachable.end();
-			     it++) {
-				if (!best || it->second > nrReachable[best])
-					best = it->first;
-			}
-			assert(best != NULL);
-			res = best;
-		}
-
-		roots.push_back(res);
-
-		purgeCGFromCGESet(allCGEs, res);
-	}
-
-	CallGraphEntry **res;
-	*nr_roots = roots.size();
-	res = (CallGraphEntry **)__LibVEX_Alloc_Ptr_Array(&ir_heap, roots.size());
-	for (unsigned i = 0; i < roots.size(); i++)
-		res[i] = roots[i];
-	return res;
-}
-
-static void
-printCallGraph(CallGraphEntry *root, FILE *f, std::set<CallGraphEntry *> &memo)
-{
-	if (memo.count(root))
-		return;
-	memo.insert(root);
-	fprintf(f, "%p: %s%s {", root, root->headRip.name(), root->isRealHead ? "" : " (fake)");
-	for (auto it = root->instructions->begin();
-	     it != root->instructions->end();
-	     it++)
-		fprintf(f, "%s-%s, ", it->start.name(), it->end1.name());
-	fprintf(f, "} (");
-	for (auto it = root->calls->begin();
-	     it != root->calls->end();
-	     it++)
-		fprintf(f, "%s:%p; ", it.key().name(), it.value());
-	fprintf(f, ")\n");
-	for (auto it = root->calls->begin();
-	     it != root->calls->end();
-	     it++)
-		printCallGraph(it.value(), f, memo);
-}
-static void
-printCallGraph(CallGraphEntry *root, FILE *f)
-{
-	std::set<CallGraphEntry *> alreadyDone;
-	printCallGraph(root, f, alreadyDone);
-}
-
 static VexRip
 wrappedRipToRip(const VexRip &r)
 {
@@ -926,123 +443,6 @@ static bool
 instructionIsInteresting(const InstructionSet &i, const VexRip &r)
 {
 	return i.rips.count(r) != 0;
-}
-
-static CFGNode<VexRip> *
-buildCFGForCallGraph(AddressSpace *as,
-		     CallGraphEntry *root)
-{
-	/* Build a map from instruction RIPs to CGEs. */
-	std::set<CallGraphEntry *> explored;
-	std::queue<CallGraphEntry *> toExplore;
-	auto ripToCFGNode = new RangeTree<VexRip, CallGraphEntry, &ir_heap, VexRip::FullCompare>();
-	toExplore.push(root);
-	while (!toExplore.empty()) {
-		CallGraphEntry *cge = toExplore.front();
-		toExplore.pop();
-		if (explored.count(cge))
-			continue;
-		explored.insert(cge);
-		for (auto it = cge->instructions->begin();
-		     it != cge->instructions->end();
-		     it++) {
-			ripToCFGNode->set(it->start, it->end1, cge);
-		}
-		for (CallGraphEntry::calls_t::iterator it = cge->calls->begin();
-		     it != cge->calls->end();
-		     it++)
-			toExplore.push(it.value());
-	}
-
-	/* Now, starting from the head of the root node, work our way
-	 * forwards and build up the state machine.  We identify
-	 * instructions by a combination of the RIP and call stack,
-	 * encapsulated as a VexRip; this effectively allows us to
-	 * inline chosen functions. */
-	std::map<VexRip, std::pair<CFGNode<VexRip> *, int> > builtSoFar;
-	std::queue<std::pair<VexRip, int> > needed;
-
-	needed.push(std::pair<VexRip, int>(VexRip(root->headRip), 100));
-	while (!needed.empty()) {
-		VexRip &r(needed.front().first);
-		int depth = needed.front().second;
-		if (depth == 0 ||
-		    (builtSoFar.count(r) && builtSoFar[r].second >= depth) ||
-		    ripToCFGNode->get(r) == NULL) {
-			needed.pop();
-			continue;
-		}
-		CFGNode<VexRip> *work = new CFGNode<VexRip>(r);
-		builtSoFar[r] = std::pair<CFGNode<VexRip> *, int>(work, depth);
-		IRSB *irsb;
-		try {
-			irsb = as->getIRSBForAddress(ThreadRip::mk(-1, r));
-		} catch (BadMemoryException &e) {
-			irsb = NULL;
-		}
-		if (!irsb)
-			continue; /* Just give up on this bit */
-
-		int x;
-		for (x = 1; x < irsb->stmts_used; x++) {
-			if (irsb->stmts[x]->tag == Ist_IMark) {
-				work->fallThroughRip = ((IRStmtIMark *)irsb->stmts[x])->addr.rip;
-				break;
-			}
-			if (irsb->stmts[x]->tag == Ist_Exit) {
-				if (work->branchRip.isValid()) {
-					assert(work->branchRip == ((IRStmtExit *)irsb->stmts[x])->dst.rip);
-				} else {
-					work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst.rip;
-				}
-				assert(work->branchRip.isValid());
-				needed.push(std::pair<VexRip, int>(work->branchRip, depth - 1));
-			}
-		}
-		if (x == irsb->stmts_used) {
-			if (irsb->jumpkind == Ijk_Call) {
-				VexRip follower = extract_call_follower(irsb);
-				work->fallThroughRip = follower;
-				if (ripToCFGNode->get(r)->calls->hasKey(r) &&
-				    !r.on_stack(follower.unwrap_vexrip())) {
-					/* We should inline this call. */
-					work->fallThroughRip.call(ripToCFGNode->get(r)->calls->get(r)->headRip.unwrap_vexrip());
-				} else {
-					/* Skip over this call. */
-				}
-			} else if (irsb->jumpkind == Ijk_Ret) {
-				/* Return to calling function. */
-				work->fallThroughRip = r;
-				work->fallThroughRip.rtrn();
-				if (!work->fallThroughRip.isValid())
-					work->accepting = true;
-			} else if (irsb->next_is_const) {
-				work->fallThroughRip = irsb->next_const.rip;
-			} else {
-				/* Don't currently try to trace across indirect branches. */
-			}
-		}
-		needed.pop();
-		if (work->fallThroughRip.isValid())
-			needed.push(std::pair<VexRip, int>(work->fallThroughRip, depth - 1));
-	}
-
-	/* We have now built all of the needed CFG nodes.  Resolve
-	 * references. */
-	for (std::map<VexRip, std::pair<CFGNode<VexRip> *, int> >::iterator it = builtSoFar.begin();
-	     it != builtSoFar.end();
-	     it++) {
-		assert(it->second.first);
-		if (it->second.first->fallThroughRip.isValid() && builtSoFar.count(it->second.first->fallThroughRip))
-			it->second.first->fallThrough = builtSoFar[it->second.first->fallThroughRip].first;
-		if (it->second.first->branchRip.isValid() && builtSoFar.count(it->second.first->branchRip))
-			it->second.first->branch = builtSoFar[it->second.first->branchRip].first;
-	}
-
-	/* All done */
-	CFGNode<VexRip> *res = builtSoFar[VexRip(root->headRip)].first;
-	assert(res != NULL);
-	return res;
 }
 
 static StateMachine *
@@ -1376,61 +776,568 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 	return sm;
 }
 
+/* We know that only stores in @potentiallyConflictingStores are
+   potentially relevant.  The task is then to find some fragments of
+   the program's control flow graph which cover them.  You need to be
+   a little careful here to group together instructions which are
+   ``close'' together, and avoid grouping any which are a long way
+   apart.  The approach we take works like this:
+
+   1) Grab an arbitrary instruction from @potentiallyConflictingStores
+   which isn't currently covered.
+   2) Explore the control flow forwards from that instruction to some depth.
+   If we encounter another instruction in @potentiallyConflictingStores
+   then our action depends on whether the other instruction is already covered.
+   If it is, we stop.  Otherwise, we reset the current depth to zero and
+   continue.
+   3) Iterate until every instruction in @potentiallyConflictingStores
+   is covered.
+   4) Pick some instructions out of the CFG to use as roots.  Every instruction
+   must be reachable from some root, and no root may be reachable from
+   another root, unless there's a cycle.
+
+   Call and return instructions require special handling.  Basically,
+   we always chase returns, using the return address in the VexRip,
+   and we chase calls if there are any instructions in
+   @potentiallyConflictingStores which might be encountered during the
+   call (regardless of whether they're currently convered).
+*/
+namespace _getStoreCFGs {
+#if 0 /* unconfuse emacs */
+}
+#endif
+static int
+countReachableNodes(CFGNode<VexRip> *root,
+		    std::map<CFGNode<VexRip> *, int> &nr_available,
+		    const std::set<CFGNode<VexRip> *> &interesting)
+{
+	auto it = nr_available.find(root);
+	if (it != nr_available.end())
+		return it->second;
+	if (!interesting.count(root))
+		return 0;
+	/* Do it early to break cycles. */
+	auto it2 = nr_available.insert(std::pair<CFGNode<VexRip> *, int>(root, 0));
+	int acc = 1;
+	if (root->fallThrough)
+		acc += countReachableNodes(root->fallThrough, nr_available, interesting);
+	if (root->branch)
+		acc += countReachableNodes(root->branch, nr_available, interesting);
+	it2.first->second = acc;
+	return acc;
+}
+
+static void
+purgeEverythingReachableFrom(std::set<CFGNode<VexRip> *> &st, CFGNode<VexRip> *root)
+{
+	if (!root)
+		return;
+	if (!st.count(root))
+		return;
+	st.erase(root);
+	purgeEverythingReachableFrom(st, root->fallThrough);
+	purgeEverythingReachableFrom(st, root->branch);
+}
+
+static CFGNode<VexRip> *
+findBestRoot(const std::set<CFGNode<VexRip> *> avail)
+{
+	std::map<CFGNode<VexRip> *, int> nr_reachable;
+	for (auto it = avail.begin(); it != avail.end(); it++)
+		countReachableNodes(*it, nr_reachable, avail);
+	int best_count = -1;
+	CFGNode<VexRip> *bestItem = NULL;
+	for (auto it = nr_reachable.begin(); it != nr_reachable.end(); it++) {
+		if (it->second > best_count) {
+			best_count = it->second;
+			bestItem = it->first;
+		}
+	}
+	assert(bestItem != NULL);
+	assert(best_count > 0);
+	return bestItem;
+}
+
+static void
+buildRewriteTable(std::map<CFGNode<VexRip> *, CFGNode<VexRip> *> &rewriteTable,
+		  std::set<CFGNode<VexRip> *> &avail,
+		  CFGNode<VexRip> *root)
+{
+	if (!root || rewriteTable.count(root))
+		return;
+	CFGNode<VexRip> *newRoot;
+	if (avail.count(root)) {
+		newRoot = root;
+		avail.erase(root);
+	} else {
+		newRoot = new CFGNode<VexRip>(*root);
+	}
+	rewriteTable[root] = newRoot;
+	buildRewriteTable(rewriteTable, avail, root->fallThrough);
+	buildRewriteTable(rewriteTable, avail, root->branch);
+}
+
+static void
+rewriteCFG(CFGNode<VexRip> *root,
+	   std::map<CFGNode<VexRip> *, CFGNode<VexRip> *> &rewriteTable)
+{
+	std::vector<CFGNode<VexRip> *> toVisit;
+	std::set<CFGNode<VexRip> *> visited;
+	toVisit.push_back(root);
+	while (!toVisit.empty()) {
+		CFGNode<VexRip> *vt = toVisit.back();
+		toVisit.pop_back();
+		if (visited.count(vt))
+			continue;
+		visited.insert(vt);
+
+		if (vt->fallThrough) {
+			auto it = rewriteTable.find(vt->fallThrough);
+			if (it != rewriteTable.end())
+				vt->fallThrough = it->second;
+			toVisit.push_back(vt->fallThrough);
+		}
+		if (vt->branch) {
+			auto it = rewriteTable.find(vt->branch);
+			if (it != rewriteTable.end())
+				vt->branch = it->second;
+			toVisit.push_back(vt->branch);
+		}
+	}
+}
+
+static void
+findAllReachableNodes(CFGNode<VexRip> *root, std::set<CFGNode<VexRip> *> &out)
+{
+	if (!root)
+		return;
+
+	auto i = out.insert(root);
+	if (!i.second)
+		return; /* Already discovered -> nothing to do */
+	findAllReachableNodes(root->branch, out);
+	findAllReachableNodes(root->fallThrough, out);
+}
+
+/* Duplicate CFG nodes within @cfgs so as to make them entirely
+   disjoint.  We try to avoid duplicating nodes which don't need to be
+   duplicated (e.g. if ones which are only reachable from one
+   root). */
+static void
+makeCfgsDisjoint(std::set<CFGNode<VexRip> *> &cfgs)
+{
+	/* This is the set of nodes which haven't been used so far,
+	   and so don't need to be duplicated. */
+	std::set<CFGNode<VexRip> *> availableNodes;
+
+	for (auto it = cfgs.begin(); it != cfgs.end(); it++)
+		findAllReachableNodes(*it, availableNodes);
+
+	std::set<CFGNode<VexRip> *> out;
+	for (auto it = cfgs.begin(); it != cfgs.end(); it++) {
+		/* Map from nodes in current node pool to the new,
+		 * duplicated, form. */
+		std::map<CFGNode<VexRip> *, CFGNode<VexRip> *> rewriteTable;
+		buildRewriteTable(rewriteTable, availableNodes, *it);
+		CFGNode<VexRip> *newRoot = rewriteTable[*it];
+		rewriteCFG(newRoot, rewriteTable);
+		out.insert(newRoot);
+	}
+	cfgs = out;
+}
+
+struct pendingItem {
+	VexRip rip;
+	unsigned depth;
+	pendingItem(const VexRip &_rip, unsigned _depth)
+		: rip(_rip), depth(_depth)
+	{}
+};
+struct mapEntry {
+	CFGNode<VexRip> *node;
+	unsigned best_depth;
+	mapEntry(CFGNode<VexRip> *_node, unsigned _best_depth)
+		: node(_node), best_depth(_best_depth)
+	{}
+};
+static const unsigned MAX_DEPTH = 20;
 static void
 getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	     VexPtr<Oracle> &oracle,
 	     VexPtr<CFGNode<VexRip> *, &ir_heap> &storeCFGs,
 	     int *_nrStoreCfgs)
 {
-	std::set<InstructionSet> conflictClusters;
-	getConflictingStoreClusters(potentiallyConflictingStores, oracle, conflictClusters);
+	fprintf(_logfile, "Potentially conflicting stores:\n");
+	for (auto it = potentiallyConflictingStores.begin();
+	     it != potentiallyConflictingStores.end();
+	     it++)
+		fprintf(_logfile, "\t%s\n", it->name());
 
-	int nrStoreCfgs = 0;
-	int nrStoreCfgsAllocated = conflictClusters.size();
+	/* Instructions which we still need to visit. */
+	std::vector<pendingItem> pendingInstructions;
+	pendingInstructions.reserve(potentiallyConflictingStores.size());
+	for (auto it = potentiallyConflictingStores.begin();
+	     it != potentiallyConflictingStores.end();
+	     it++)
+		pendingInstructions.push_back(pendingItem(*it, 0));
 
-	storeCFGs = (CFGNode<VexRip> **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nrStoreCfgsAllocated);
+	std::map<VexRip, mapEntry> ripsToCfgNodes;
+	while (!pendingInstructions.empty()) {
+		pendingItem next(pendingInstructions.back());
+		pendingInstructions.pop_back();
 
-	for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
-	     !TIMEOUT && it != conflictClusters.end();
-	     it++) {
-		const InstructionSet &is(*it);
+		fprintf(_logfile, "discover %s at depth %d\n", next.rip.name(), next.depth);
 
-		fprintf(_logfile, "\tCluster:");
-		for (auto it2 = is.rips.begin();
-		     it2 != is.rips.end();
-		     it2++)
-			fprintf(_logfile, " %s", it2->name());
-		fprintf(_logfile, "\n");
+		if (next.depth > MAX_DEPTH)
+			continue;
 
-		CallGraphEntry **cgRoots;
-		int nr_roots;
-		cgRoots = buildCallGraphForRipSet(oracle->ms->addressSpace, is.rips, &nr_roots);
-		if (!cgRoots) {
-			fprintf(_logfile, "%s failed\n", __func__);
+		if (next.depth != 0 && potentiallyConflictingStores.count(next.rip))
+			next.depth = 0;
+
+		auto it = ripsToCfgNodes.find(next.rip);
+		if (it != ripsToCfgNodes.end()) {
+		found_existing_cfg_node:
+			/* This RIP has already been encountered. */
+			mapEntry &me(it->second);
+			if (me.best_depth < next.depth) {
+				/* And it's been encountered at a
+				   better depth than we're currently
+				   looking at it -> nothing to do. */
+				continue;
+			}
+			/* Encountered at a lower depth.  Re-use
+			   results of previous visit, but with a
+			   better depth. */
+			if (me.node->fallThroughRip.isValid())
+				pendingInstructions.push_back(pendingItem(me.node->fallThroughRip,
+									  next.depth + 1));
+			if (me.node->branchRip.isValid())
+				pendingInstructions.push_back(pendingItem(me.node->branchRip,
+									  next.depth + 1));
 			continue;
 		}
-			
-		for (int i = 0; !TIMEOUT && i < nr_roots; i++) {
-			CFGNode<VexRip> *storeCFG;
-			storeCFG = buildCFGForCallGraph(oracle->ms->addressSpace, cgRoots[i]);
-			trimCFG(storeCFG, is, 20, false);
-			breakCycles(storeCFG);
 
-			if (nrStoreCfgs == nrStoreCfgsAllocated) {
-				nrStoreCfgsAllocated *= 2;
-				CFGNode<VexRip> **a =
-					(CFGNode<VexRip> **)__LibVEX_Alloc_Ptr_Array(&ir_heap,
-										     nrStoreCfgsAllocated);
-				memcpy(a, storeCFGs.get(), nrStoreCfgs * sizeof(CFGNode<VexRip> *));
-				storeCFGs = a;
+		/* First time we've encountered this instruction.
+		 * Have to go and decode it properly. */
+		IRSB *irsb = oracle->getIRSBForRip(next.rip);
+		if (!irsb) {
+			/* Whoops, end of the line. */
+			continue;
+		}
+
+		int startOfInstruction = 0;
+		int endOfInstruction = 0;
+		CFGNode<VexRip> *currentNode = NULL;
+		while (startOfInstruction < irsb->stmts_used && next.depth < MAX_DEPTH) {
+			assert(irsb->stmts[startOfInstruction]->tag == Ist_IMark);
+			IRStmtIMark *startMark = (IRStmtIMark *)irsb->stmts[startOfInstruction];
+			it = ripsToCfgNodes.find(startMark->addr.rip);
+			if (it != ripsToCfgNodes.end()) {
+				/* So we've now run into the back of
+				   an existing chunk of CFG. */
+				goto found_existing_cfg_node;
 			}
 
-			storeCFGs[nrStoreCfgs] = storeCFG;
-			nrStoreCfgs++;
+			currentNode = new CFGNode<VexRip>(startMark->addr.rip);
+			for (endOfInstruction = startOfInstruction + 1;
+			     endOfInstruction < irsb->stmts_used && irsb->stmts[endOfInstruction]->tag != Ist_IMark;
+			     endOfInstruction++) {
+				if (irsb->stmts[endOfInstruction]->tag == Ist_Exit) {
+					assert(!currentNode->branchRip.isValid());
+					currentNode->branchRip = ((IRStmtExit *)irsb->stmts[endOfInstruction])->dst.rip;
+					pendingInstructions.push_back(pendingItem(currentNode->branchRip,
+										  next.depth+1));
+				}
+			}
+
+			if (endOfInstruction < irsb->stmts_used) {
+				assert(irsb->stmts[endOfInstruction]->tag == Ist_IMark);
+				IRStmtIMark *endMark = (IRStmtIMark *)irsb->stmts[endOfInstruction];
+				currentNode->fallThroughRip = endMark->addr.rip;
+			}
+
+			ripsToCfgNodes.insert(std::pair<VexRip, mapEntry>(currentNode->my_rip,
+									  mapEntry(currentNode, next.depth)));
+			next.depth++;
+			startOfInstruction = endOfInstruction;
+		}
+
+		if (next.depth == MAX_DEPTH)
+			continue;
+
+		assert(currentNode != NULL);
+
+		if (irsb->jumpkind == Ijk_Call) {
+			currentNode->fallThroughRip = extract_call_follower(irsb);
+			assert(!currentNode->branchRip.isValid());
+			if (irsb->next_is_const) {
+				/* Should we try to explore the
+				 * contents of this function as well?
+				 * We do so if the fall through is a
+				 * prefix of anything in the
+				 * potentiallyConflictingStores set
+				 * (which corresponds to the thing in
+				 * the potentiallyConflictingStores
+				 * set being called from this
+				 * point). */
+				bool traceIn = false;
+				for (auto it = potentiallyConflictingStores.begin();
+				     !traceIn && it != potentiallyConflictingStores.end();
+				     it++) {
+					if (currentNode->fallThroughRip.isPrefix(*it))
+						traceIn = true;
+				}
+				if (traceIn) {
+					/* Yes. */
+#ifndef NDEBUG
+					currentNode->branchRip = currentNode->fallThroughRip;
+					currentNode->branchRip.call(
+						irsb->next_const.rip.unwrap_vexrip());
+					assert(currentNode->branchRip == irsb->next_const.rip);
+#else
+					currentNode->branchRip = irsb->next_const.rip;
+#endif
+					pendingInstructions.push_back(pendingItem(currentNode->branchRip,
+										  next.depth));
+				}
+			} else {
+				/* Don't consider inlining indirect
+				   function calls; it's too hard. */
+			}
+		} else if (irsb->jumpkind == Ijk_Ret) {
+			currentNode->fallThroughRip = currentNode->my_rip;
+			currentNode->fallThroughRip.rtrn();
+		} else if (irsb->next_is_const) {
+			currentNode->fallThroughRip = irsb->next_const.rip;
+		} else {
+			/* Don't currently try to trace across
+			 * indirect branches. */
+		}
+
+		if (currentNode->fallThroughRip.isValid())
+			pendingInstructions.push_back(pendingItem(currentNode->fallThroughRip,
+								  next.depth));
+	}
+
+	fprintf(_logfile, "Initial CFG:\n");
+	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
+		CFGNode<VexRip> *n = it->second.node;
+		fprintf(_logfile, "\t%s\t-> %p", it->first.name(), n);
+		if (n->fallThroughRip.isValid())
+			fprintf(_logfile, " ft %s", n->fallThroughRip.name());
+		if (n->branchRip.isValid())
+			fprintf(_logfile, " b %s", n->branchRip.name());
+		fprintf(_logfile, "\n");
+	}
+
+	/* When we get here, ripsToCfgNodes contains an entry for
+	 * everything which is going to be in the final graph, but it
+	 * might contain some extra ones, and the pointers have not
+	 * been resolved. */
+
+	/* Resolve pointers. */
+	for (auto it = ripsToCfgNodes.begin();
+	     it != ripsToCfgNodes.end();
+	     it++) {
+		auto node = it->second.node;
+		assert(node);
+		assert(!node->fallThrough);
+		assert(!node->branch);
+
+		/* Careful here.  We don't want to go
+		   ripsToCfgNodes[node->fallThroughRip], because that
+		   might create a new entry in ripsToCfgNodes, which
+		   would invalidate the iterator. */
+		if (node->fallThroughRip.isValid()) {
+			auto it2 = ripsToCfgNodes.find(node->fallThroughRip);
+			if (it2 != ripsToCfgNodes.end())
+				node->fallThrough = it2->second.node;
+		}
+		if (node->branchRip.isValid()) {
+			auto it2 = ripsToCfgNodes.find(node->branchRip);
+			if (it2 != ripsToCfgNodes.end())
+				node->branch = it2->second.node;
 		}
 	}
 
-	*_nrStoreCfgs = nrStoreCfgs;
+	fprintf(_logfile, "Resolved CFG:\n");
+	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
+		CFGNode<VexRip> *n = it->second.node;
+		fprintf(_logfile, "\t%s\t-> %p", it->first.name(), n);
+		if (n->fallThrough)
+			fprintf(_logfile, " ft %p", n->fallThrough);
+		if (n->branch)
+			fprintf(_logfile, " b %p", n->branch);
+		if (n->fallThrough)
+			assert(n->fallThrough->my_rip == n->fallThroughRip);
+		if (n->branch)
+			assert(n->branch->my_rip == n->branchRip);
+		fprintf(_logfile, "\n");
+	}
+
+	/* Now figure out which CFG nodes we're actually going to
+	 * keep.  We keep anything in @potentiallyConflictingStores,
+	 * and anything which can reach something in
+	 * @potentiallyConflictingStores. */
+	std::set<CFGNode<VexRip> *> nodesToKeep;
+	for (auto it = potentiallyConflictingStores.begin();
+	     it != potentiallyConflictingStores.end();
+	     it++) {
+		auto it2 = ripsToCfgNodes.find(*it);
+		if (it2 != ripsToCfgNodes.end())
+			nodesToKeep.insert(it2->second.node);
+	}
+	/* Fixed point iteration to find the nodes to keep. */
+	bool progress;
+	do {
+		progress = false;
+		for (auto it = ripsToCfgNodes.begin();
+		     it != ripsToCfgNodes.end();
+		     it++) {
+			CFGNode<VexRip> *node = it->second.node;
+			if (nodesToKeep.count(node))
+				continue;
+			if ((node->fallThrough && nodesToKeep.count(node->fallThrough)) ||
+			    (node->branch && nodesToKeep.count(node->branch))) {
+				nodesToKeep.insert(node);
+				progress = true;
+			}
+		}
+	} while (progress);
+
+	fprintf(_logfile, "Instructions relevant to store threads:\n");
+	for (auto it = nodesToKeep.begin();
+	     it != nodesToKeep.end();
+	     it++)
+		fprintf(_logfile, "\t%s\n", (*it)->my_rip.name());
+
+	/* Which then allows us to remove the nodes we don't want any more. */
+	for (auto it = ripsToCfgNodes.begin();
+	     it != ripsToCfgNodes.end();
+		) {
+		CFGNode<VexRip> *node = it->second.node;
+		if (!nodesToKeep.count(node)) {
+			ripsToCfgNodes.erase(it++);
+		} else {
+			if (node->fallThrough && !nodesToKeep.count(node->fallThrough))
+				node->fallThrough = NULL;
+			if (node->branch && !nodesToKeep.count(node->branch))
+				node->branch = NULL;
+			it++;
+		}
+	}
+
+	/* ripsToCfgNodes now contains precisely the set of CFG nodes
+	   which we're interested in.  We still need to remove any
+	   cycles and identify the roots. */
+	std::set<CFGNode<VexRip> *> unrootedCFGNodes;
+	for (auto it = ripsToCfgNodes.begin();
+	     it != ripsToCfgNodes.end();
+	     it++)
+		unrootedCFGNodes.insert(it->second.node);
+	std::set<CFGNode<VexRip> *> roots;
+	/* First heuristic: if something has no parents, it's
+	   definitely a root. */
+	std::set<CFGNode<VexRip> *> nodesWithNoParents(unrootedCFGNodes);
+	for (auto it = unrootedCFGNodes.begin(); it != unrootedCFGNodes.end(); it++) {
+		CFGNode<VexRip> *n = *it;
+		if (n->fallThrough)
+			nodesWithNoParents.erase(n->fallThrough);
+		if (n->branch)
+			nodesWithNoParents.erase(n->branch);
+	}
+	for (auto it = nodesWithNoParents.begin(); it != nodesWithNoParents.end(); it++) {
+		CFGNode<VexRip> *newRoot = *it;
+		roots.insert(newRoot);
+		purgeEverythingReachableFrom(unrootedCFGNodes, newRoot);
+	}
+	if (!unrootedCFGNodes.empty()) {
+		/* Trickier case.  Some nodes have no parents.  They
+		   must necessarily be part of a cycle, and there must
+		   be no node which is not part of a cycle which can
+		   reach them.  We now want to pick whichever node can
+		   reach the largest number of other nodes, with ties
+		   broken by taking the smallest available address. */
+		while (!unrootedCFGNodes.empty()) {
+			CFGNode<VexRip> *root = findBestRoot(unrootedCFGNodes);
+			roots.insert(root);
+			purgeEverythingReachableFrom(unrootedCFGNodes, root);
+		}
+	}
+
+	fprintf(_logfile, "Store roots:\n");
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		fprintf(_logfile, "\t%s\n", (*it)->my_rip.name());
+
+	/* cycle breaking is subtle because you need to avoid losing
+	   nodes, even when you have multiple roots.  The nasty case
+	   is where you have a loop from A to B, a root X whose
+	   successor is A, and a root Y whose successor is B:
+
+           X       Y
+	   v       v
+	   v       v
+	   v       v
+	   A------>B
+	   ^       v
+	   ^       v
+	   +-------+
+
+	   If you consider root X first then you might be tempted to
+	   break the B->A edge to produce a graph like this:
+
+	   X--->A--->B
+
+	   The problem is that the Y root then produces just Y----->B
+	   i.e. it's lost A.  Likewise, if you break the A->B edge,
+	   the Y root gets a graph Y---->B---->A but the X root gets
+	   just X--->A.
+
+	   This is moderately unusual (if it happens, the program
+	   wasn't nicely block structured, because it has a
+	   multi-entry loop), but not so unusual that we can just
+	   ignore it (sometimes the compiler takes a nicely structured
+	   program and makes it slightly less structured e.g. if one
+	   path to the head of the loop tells you something about the
+	   loop condition).  The fix is actually really simple: just
+	   duplicate the CFG for every root.  Usually that's a no-op,
+	   and we have a little lookaside thing saying whether it's
+	   safe to just re-use the existing nodes.
+	*/
+	makeCfgsDisjoint(roots);
+
+	/* Finally, break cycles. */
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		breakCycles(*it);
+
+	fprintf(_logfile, "Store CFGs:\n");
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		fprintf(_logfile, "\tRoot %s:\n", (*it)->my_rip.name());
+		printCFG(*it, "\t\t", _logfile);
+	}
+
+	/* Reformat results so that caller can use them. */
+	storeCFGs = (CFGNode<VexRip> **)__LibVEX_Alloc_Ptr_Array(&ir_heap, roots.size());
+	unsigned cntr = 0;
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		storeCFGs[cntr] = *it;
+		cntr++;
+	}
+	*_nrStoreCfgs = roots.size();
+}
+
+} /* End namespace */
+
+static void
+getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
+	     VexPtr<Oracle> &oracle,
+	     VexPtr<CFGNode<VexRip> *, &ir_heap> &storeCFGs,
+	     int *_nrStoreCfgs)
+{
+	_getStoreCFGs::getStoreCFGs(potentiallyConflictingStores,
+				    oracle,
+				    storeCFGs,
+				    _nrStoreCfgs);
 }
 
 static bool
@@ -1566,7 +1473,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 }
 			    
 template <typename t> void
-printCFG(const CFGNode<t> *cfg, FILE *f)
+printCFG(const CFGNode<t> *cfg, const char *prefix, FILE *f)
 {
 	std::vector<const CFGNode<t> *> pending;
 	std::set<const CFGNode<t> *> done;
@@ -1577,7 +1484,7 @@ printCFG(const CFGNode<t> *cfg, FILE *f)
 		pending.pop_back();
 		if (done.count(cfg))
 			continue;
-		fprintf(f, "%p: ", cfg);
+		fprintf(f, "%s%p: ", prefix, cfg);
 		cfg->prettyPrint(f);
 		fprintf(f, "\n");
 		if (cfg->fallThrough)
@@ -1588,18 +1495,8 @@ printCFG(const CFGNode<t> *cfg, FILE *f)
 	}
 }
 /* Make it visible to the debugger. */
-void __printCFG(const CFGNode<VexRip> *cfg) { printCFG(cfg, stdout); }
-void __printCFG(const CFGNode<unsigned long> *cfg) { printCFG(cfg, stdout); }
-
-static void
-enumerateReachableStates(CFGNode<unsigned long> *from, std::set<CFGNode<unsigned long> *> &out)
-{
-	if (!from || out.count(from))
-		return;
-	out.insert(from);
-	enumerateReachableStates(from->fallThrough, out);
-	enumerateReachableStates(from->branch, out);
-}
+void __printCFG(const CFGNode<VexRip> *cfg) { printCFG(cfg, "", stdout); }
+void __printCFG(const CFGNode<unsigned long> *cfg) { printCFG(cfg, "", stdout); }
 
 /* Build a control flow graph which covers all of the RIPs in @rips.
  * @output is filled in with pointers to all of the possible start

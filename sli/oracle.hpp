@@ -284,6 +284,8 @@ public:
 
 	static IRSB *getIRSBForRip(AddressSpace *as, const StaticRip &sr);
 	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr);
+	IRSB *getIRSBForRip(const VexRip &vr);
+
 private:
 
 	void discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, const callgraph_t &callgraph_table);

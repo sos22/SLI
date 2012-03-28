@@ -198,6 +198,15 @@ public:
 				return true;
 		return false;
 	}
+
+	bool isPrefix(const VexRip &vr) const {
+		if (stack.size() >= vr.stack.size())
+			return false;
+		for (unsigned x = 0; x < stack.size(); x++)
+			if (stack[x] != vr.stack[x])
+				return false;
+		return true;
+	}
 };
 
 #endif /* !LIBVEX_RIP_HPP__ */

@@ -94,6 +94,12 @@ Oracle::getIRSBForRip(AddressSpace *as, const VexRip &sr)
 	}
 }
 
+IRSB *
+Oracle::getIRSBForRip(const VexRip &vr)
+{
+	return getIRSBForRip(ms->addressSpace, vr);
+}
+
 Oracle::LivenessSet
 Oracle::LivenessSet::use(Int offset)
 {
