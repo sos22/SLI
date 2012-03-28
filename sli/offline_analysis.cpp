@@ -1417,6 +1417,38 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 	return sm;
 }
 
+static bool
+probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
+		      VexPtr<Oracle> &oracle,
+		      VexPtr<IRExpr, &ir_heap> &survive,
+		      VexPtr<CrashSummary, &ir_heap> &summary,
+		      bool needRemoteMacroSections,
+		      std::set<VexRip> &potentiallyConflictingStores,
+		      GarbageCollectionToken token)
+{
+	std::set<InstructionSet> conflictClusters;
+	getConflictingStoreClusters(potentiallyConflictingStores, oracle, conflictClusters);
+
+	bool foundRace = false;
+	unsigned cntr = 0;
+	for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
+	     !TIMEOUT && it != conflictClusters.end();
+	     it++) {
+		fprintf(_logfile, "\tCluster:");
+		for (auto it2 = it->rips.begin();
+		     it2 != it->rips.end();
+		     it2++)
+			fprintf(_logfile, " %s", it2->name());
+		fprintf(_logfile, "\n");
+		VexPtr<AddressSpace> as(oracle->ms->addressSpace);
+		cntr++;
+		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, needRemoteMacroSections,
+						    STORING_THREAD + cntr, token);
+	}
+
+	return foundRace;
+}
+
 CrashSummary *
 diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<Oracle> &oracle,
@@ -1477,25 +1509,10 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
 
-	std::set<InstructionSet> conflictClusters;
-	getConflictingStoreClusters(potentiallyConflictingStores, oracle, conflictClusters);
-
-	bool foundRace = false;
-	unsigned cntr = 0;
-	for (std::set<InstructionSet >::iterator it = conflictClusters.begin();
-	     !TIMEOUT && it != conflictClusters.end();
-	     it++) {
-		fprintf(_logfile, "\tCluster:");
-		for (auto it2 = it->rips.begin();
-		     it2 != it->rips.end();
-		     it2++)
-			fprintf(_logfile, " %s", it2->name());
-		fprintf(_logfile, "\n");
-		VexPtr<AddressSpace> as(ms->addressSpace);
-		cntr++;
-		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, needRemoteMacroSections,
-						    STORING_THREAD + cntr, token);
-	}
+	bool foundRace = probeMachineToSummary(probeMachine, oracle, survive,
+					       summary, needRemoteMacroSections,
+					       potentiallyConflictingStores,
+					       token);
 	if (TIMEOUT)
 		return NULL;
 
