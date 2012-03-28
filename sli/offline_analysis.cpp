@@ -1297,46 +1297,6 @@ considerStoreCFG(VexPtr<CFGNode<VexRip>, &ir_heap> cfg,
 	return true;
 }
 
-static bool
-processConflictCluster(VexPtr<AddressSpace> &as,
-		       VexPtr<StateMachine, &ir_heap> &sm,
-		       VexPtr<Oracle> &oracle,
-		       VexPtr<IRExpr, &ir_heap> &survive,
-		       const InstructionSet &is,
-		       VexPtr<CrashSummary, &ir_heap> &summary,
-		       bool needRemoteMacroSections,
-		       unsigned tid,
-		       GarbageCollectionToken token)
-{
-	LibVEX_maybe_gc(token);
-
-	if (is.rips.size() == 1 && sm->root->roughLoadCount() == StateMachineState::singleLoad) {
-		fprintf(_logfile, "Single store versus single load -> no race possible\n");
-		return false;
-	}
-
-	VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
-	int nr_roots;
-	cgRoots = buildCallGraphForRipSet(as, is.rips, &nr_roots);
-	if (!cgRoots) {
-		fprintf(_logfile, "%s failed\n", __func__);
-		return false;
-	}
-	bool result = false;
-	for (int i = 0; !TIMEOUT && i < nr_roots; i++) {
-		VexPtr<CFGNode<VexRip>, &ir_heap> storeCFG;
-		storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
-		trimCFG(storeCFG.get(), is, 20, false);
-		breakCycles(storeCFG.get());
-
-		result |= considerStoreCFG(storeCFG, as, oracle,
-					   survive, sm, summary, is,
-					   needRemoteMacroSections,
-					   tid, token);
-	}
-	return result;
-}
-
 StateMachine *
 buildProbeMachine(std::vector<VexRip> &previousInstructions,
 		  VexPtr<InferredInformation, &ir_heap> &ii,
@@ -1429,21 +1389,57 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	std::set<InstructionSet> conflictClusters;
 	getConflictingStoreClusters(potentiallyConflictingStores, oracle, conflictClusters);
 
+	auto roughLoadCount = probeMachine->root->roughLoadCount();
+
 	bool foundRace = false;
 	unsigned cntr = 0;
 	for (std::set<InstructionSet>::iterator it = conflictClusters.begin();
 	     !TIMEOUT && it != conflictClusters.end();
 	     it++) {
+		const InstructionSet &is(*it);
+
 		fprintf(_logfile, "\tCluster:");
-		for (auto it2 = it->rips.begin();
-		     it2 != it->rips.end();
+		for (auto it2 = is.rips.begin();
+		     it2 != is.rips.end();
 		     it2++)
 			fprintf(_logfile, " %s", it2->name());
 		fprintf(_logfile, "\n");
+		LibVEX_maybe_gc(token);
+
+		if (roughLoadCount == StateMachineState::singleLoad &&
+		    is.rips.size() == 1) {
+			fprintf(_logfile, "Single store versus single load -> no race possible\n");
+			continue;
+		}
+
+		VexPtr<CallGraphEntry *, &ir_heap> cgRoots;
+		int nr_roots;
+		cgRoots = buildCallGraphForRipSet(oracle->ms->addressSpace, is.rips, &nr_roots);
+		if (!cgRoots) {
+			fprintf(_logfile, "%s failed\n", __func__);
+			continue;
+		}
+			
 		VexPtr<AddressSpace> as(oracle->ms->addressSpace);
-		cntr++;
-		foundRace |= processConflictCluster(as, probeMachine, oracle, survive, *it, summary, needRemoteMacroSections,
-						    STORING_THREAD + cntr, token);
+		for (int i = 0; !TIMEOUT && i < nr_roots; i++) {
+			VexPtr<CFGNode<VexRip>, &ir_heap> storeCFG;
+			storeCFG = buildCFGForCallGraph(as, cgRoots[i]);
+			trimCFG(storeCFG.get(), is, 20, false);
+			breakCycles(storeCFG.get());
+
+			foundRace |= considerStoreCFG(storeCFG,
+						      as,
+						      oracle,
+						      survive,
+						      probeMachine,
+						      summary,
+						      is,
+						      needRemoteMacroSections,
+						      STORING_THREAD + cntr,
+						      token);
+			cntr++;
+
+		}
 	}
 
 	return foundRace;
