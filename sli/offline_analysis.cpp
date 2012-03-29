@@ -968,14 +968,24 @@ makeCfgsDisjoint(std::set<CFGNode *> &cfgs)
 /* Debug aid: print out anything reachable from @root which is in
  * @interesting.  Only works if @root is acyclic. */
 static void
-findTheseCfgNodes(CFGNode *root, const std::set<VexRip> &interesting)
+findTheseCfgNodes(CFGNode *root,
+		  std::set<CFGNode *> &alreadySeen,
+		  const std::set<VexRip> &interesting)
 {
-	if (!root)
+	if (!root || alreadySeen.count(root))
 		return;
+	alreadySeen.insert(root);
 	if (interesting.count(root->my_rip))
 		fprintf(_logfile, "\t\t%s\n", root->my_rip.name());
-	findTheseCfgNodes(root->fallThrough, interesting);
-	findTheseCfgNodes(root->branch, interesting);
+	findTheseCfgNodes(root->fallThrough, alreadySeen, interesting);
+	findTheseCfgNodes(root->branch, alreadySeen, interesting);
+}
+static void
+findTheseCfgNodes(CFGNode *root,
+		  const std::set<VexRip> &interesting)
+{
+	std::set<CFGNode *> alreadySeen;
+	findTheseCfgNodes(root, alreadySeen, interesting);
 }
 #endif
 
