@@ -1306,20 +1306,6 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		breakCycles(*it);
 
-	fprintf(_logfile, "Store clustering:\n");
-	for (auto it = roots.begin(); it != roots.end(); it++) {
-		fprintf(_logfile, "\tRoot %s:\n", (*it)->my_rip.name());
-#if DEBUG_BUILD_STORE_CFGS
-		printCFG(*it, "\t\t", _logfile);
-#else
-		/* Slightly less verbose bit of debugging: show where
-		   instructions which were in the input set ended up,
-		   but not the ones we discovered on our way
-		   around. */
-		findTheseCfgNodes(*it, potentiallyConflictingStores);
-#endif
-	}
-
 	/* Reformat results so that caller can use them. */
 	storeCFGs = (CFGNode **)__LibVEX_Alloc_Ptr_Array(&ir_heap, roots.size());
 	unsigned cntr = 0;
@@ -1328,6 +1314,46 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		cntr++;
 	}
 	*_nrStoreCfgs = roots.size();
+
+	/* Optimise the results a little bit.  Sometimes, when we
+	   break cycles, we end up with a root which is uninteresting
+	   and has a lot of straight-line code to the first
+	   interesting instruction, so just strip off the prefix. */
+	for (int x = 0; x < *_nrStoreCfgs; x++) {
+		while (1) {
+			CFGNode *n = storeCFGs[x];
+			if ((n->fallThrough && n->branch) ||
+			    (!n->fallThrough && !n->branch))
+				break;
+			if (potentiallyConflictingStores.count(n->my_rip))
+				break;
+			if (n->fallThrough) {
+				assert(!n->branch);
+				storeCFGs[x] = n->fallThrough;
+			}
+			if (n->branch) {
+				assert(!n->fallThrough);
+				storeCFGs[x] = n->branch;
+			}
+		}
+	}
+
+	fprintf(_logfile, "Store clustering:\n");
+	for (int x = 0; x < *_nrStoreCfgs; x++) {
+		CFGNode *n = storeCFGs[x];
+		fprintf(_logfile, "\tRoot %s:\n", n->my_rip.name());
+#if DEBUG_BUILD_STORE_CFGS
+		printCFG(n, "\t\t", _logfile);
+#else
+		/* Slightly less verbose bit of debugging: show where
+		   instructions which were in the input set ended up,
+		   but not the ones we discovered on our way
+		   around. */
+		findTheseCfgNodes(n, potentiallyConflictingStores);
+#endif
+	}
+
+
 }
 
 } /* End namespace */
