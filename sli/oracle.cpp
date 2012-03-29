@@ -189,7 +189,7 @@ struct vexrip_hdr {
 	unsigned nr_entries;
 };
 static bool
-read_vexrip(VexRip *out, const Mapping &mapping, AddressSpace *as, unsigned long offset, bool *is_private, unsigned long *sz)
+read_vexrip(VexRip *out, const Mapping &mapping, unsigned long offset, bool *is_private, unsigned long *sz)
 {
 	const struct vexrip_hdr *hdr = mapping.get<vexrip_hdr>(offset);
 	if (!hdr)
@@ -206,15 +206,12 @@ read_vexrip(VexRip *out, const Mapping &mapping, AddressSpace *as, unsigned long
 	} else {
 		*is_private = false;
 	}
-	assert(as->isReadable(rip, 1));
 
 	const unsigned long *body = mapping.get<unsigned long>(offset + 12, hdr->nr_entries);
 	std::vector<unsigned long> stack;
 	stack.reserve(hdr->nr_entries+1);
-	for (unsigned x = 0; x < hdr->nr_entries; x++) {
-		assert(as->isReadable(body[x], 1));
+	for (unsigned x = 0; x < hdr->nr_entries; x++)
 		stack.push_back(body[x]);
-	}
 	stack.push_back(rip);
 	*out = VexRip(stack);
 	return true;
@@ -262,7 +259,7 @@ read_vexrip(FILE *f, VexRip *out, AddressSpace *as, bool *is_private)
 }
 
 unsigned long
-Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offset, AddressSpace *as)
+Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offset)
 {
 	const struct tag_hdr *hdr = mapping.get<tag_hdr>(offset);
 	if (!hdr)
@@ -271,7 +268,6 @@ Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offse
 	struct {
 		void operator()(int nr_items, const Mapping &mapping,
 				unsigned long offset, unsigned long *sz,
-				AddressSpace *as,
 				std::set<VexRip> &private_set,
 				std::set<VexRip> &shared_set) {
 			for (int x = 0; x < nr_items; x++) {
@@ -279,7 +275,7 @@ Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offse
 				bool is_private;
 				unsigned long s;
 				bool use_it;
-				use_it = read_vexrip(&buf, mapping, as, offset + *sz, &is_private, &s);
+				use_it = read_vexrip(&buf, mapping, offset + *sz, &is_private, &s);
 				*sz += s;
 				if (use_it) {
 					if (is_private)
@@ -291,8 +287,8 @@ Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offse
 		}
 	} doit;
 
-	doit(hdr->nr_loads, mapping, offset, &sz, as, te->private_loads, te->shared_loads);
-	doit(hdr->nr_stores, mapping, offset, &sz, as, te->private_stores, te->shared_stores);
+	doit(hdr->nr_loads, mapping, offset, &sz, te->private_loads, te->shared_loads);
+	doit(hdr->nr_stores, mapping, offset, &sz, te->private_stores, te->shared_stores);
 
 	return sz;
 }
@@ -315,7 +311,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 	     it != offsets.end();
 	     it++) {
 		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it, ms->addressSpace);
+		fetchTagEntry(&te, raw_types_database, *it);
 		if (te.shared_loads.count(smsel->rip.rip))
 			out |= te.shared_stores;
 	}
@@ -357,7 +353,7 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 			VexRip buf;
 			bool is_private;
 			unsigned long s;
-			bool use_it = read_vexrip(&buf, raw_types_database, ms->addressSpace, offset, &is_private, &s);
+			bool use_it = read_vexrip(&buf, raw_types_database, offset, &is_private, &s);
 			offset += s;
 			if (use_it && !is_private && buf == access->rip.rip) {
 				/* You might think that we should
@@ -372,7 +368,7 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 			VexRip buf;
 			bool is_private;
 			unsigned long s;
-			bool use_it = read_vexrip(&buf, raw_types_database, ms->addressSpace, offset, &is_private, &s);
+			bool use_it = read_vexrip(&buf, raw_types_database, offset, &is_private, &s);
 			offset += s;
 			if (use_it && !is_private &&
 			    (relevant_load || buf == access->rip.rip))
@@ -416,15 +412,14 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 					const VexRip &desiredRip,
 					const Mapping &mapping,
 					unsigned long offset,
-					unsigned long *sz,
-					AddressSpace *as)
+					unsigned long *sz)
 			{
 				for (int x = 0; x < nr_items; x++) {
 					VexRip buf;
 					bool is_private;
 					unsigned long s;
 					bool use_it;
-					use_it = read_vexrip(&buf, mapping, as, offset + *sz, &is_private, &s);
+					use_it = read_vexrip(&buf, mapping, offset + *sz, &is_private, &s);
 					*sz += s;
 					if (use_it && buf == desiredRip)
 						return true;
@@ -433,8 +428,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 			}
 		} doit;
 
-		if (doit(hdr->nr_loads, smsel->rip.rip, raw_types_database, offset, &sz, ms->addressSpace) ||
-		    doit(hdr->nr_stores, smses->rip.rip, raw_types_database, offset, &sz, ms->addressSpace)) {
+		if (doit(hdr->nr_loads, smsel->rip.rip, raw_types_database, offset, &sz) ||
+		    doit(hdr->nr_stores, smses->rip.rip, raw_types_database, offset, &sz)) {
 			cache.set(smsel, smses, idx, true);
 			return true;
 		}
@@ -463,7 +458,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it, ms->addressSpace);
+		fetchTagEntry(&te, raw_types_database, *it);
 		if ((te.shared_loads.count(smsel2->rip.rip) ||
 		     te.private_loads.count(smsel2->rip.rip)) &&
 		    (te.shared_loads.count(smsel1->rip.rip) ||
@@ -493,7 +488,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it, ms->addressSpace);
+		fetchTagEntry(&te, raw_types_database, *it);
 		if ((te.shared_stores.count(smses2->rip.rip) ||
 		     te.private_stores.count(smses2->rip.rip)) &&
 		    (te.shared_stores.count(smses1->rip.rip) ||
@@ -517,7 +512,7 @@ Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<VexRip> &out
 	type_index->findOffsets(smses->rip.rip, offsets);
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it, ms->addressSpace);
+		fetchTagEntry(&te, raw_types_database, *it);
 		if (te.shared_stores.count(smses->rip.rip))
 			out |= te.shared_loads;
 	}

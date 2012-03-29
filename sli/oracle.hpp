@@ -279,8 +279,7 @@ public:
 	Mapping raw_types_database;
 	static unsigned long fetchTagEntry(tag_entry *te,
 					   const Mapping &mapping,
-					   unsigned long offset,
-					   AddressSpace *as);
+					   unsigned long offset);
 
 	static IRSB *getIRSBForRip(AddressSpace *as, const StaticRip &sr);
 	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr);
