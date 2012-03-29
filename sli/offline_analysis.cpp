@@ -1004,9 +1004,10 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		pendingInstructions.push(*it);
 
 	std::map<VexRip, CFGNode *> ripsToCfgNodes;
-	while (!pendingInstructions.empty() &&
-	       ripsToCfgNodes.size() <= MAX_INSTRS_IN_CFG_EXPLORATION) {
+	while (ripsToCfgNodes.size() <= MAX_INSTRS_IN_CFG_EXPLORATION) {
 	top_of_loop:
+		if (pendingInstructions.empty())
+			break;
 		VexRip next(pendingInstructions.front());
 		pendingInstructions.pop();
 
