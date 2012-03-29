@@ -34,6 +34,27 @@ public:
 	all_instrs_iterator *enumerateAllInstructions() const;
 	unsigned long nrDistinctInstructions() const;
 	void visit(HeapVisitor &hv) {}
+
+	/* Parse a vexrip which has already been canonicalised. */
+	static void parse_vexrip_canon(VexRip *out, const Mapping &mapping,
+				       unsigned long offset, bool *is_private,
+				       unsigned long *sz);
+	/* Read a vexrip which has already been canonicalised */
+	static void read_vexrip_canon(FILE *f, VexRip *out, bool *is_private);
+
+	enum read_vexrip_res {
+		read_vexrip_take,
+		read_vexrip_skip,
+		read_vexrip_error
+	};
+	/* Read a vexrip which has not been canonicalised,
+	 * canonicalising as we go. */
+	static read_vexrip_res read_vexrip_noncanon(FILE *f,
+						    VexRip *out,
+						    AddressSpace *as,
+						    bool *is_private);
+
+
 	NAMED_CLASS
 };
 

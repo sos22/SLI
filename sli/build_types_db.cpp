@@ -9,36 +9,14 @@
 #include "sli.h"
 
 #include "types_db.hpp"
+#include "typesdb.hpp"
 
 #define PAGE_SIZE (4096ul)
 
 static bool
 read_rip(FILE *f, bool *is_private, AddressSpace *as, VexRip *out)
 {
-	unsigned long rip;
-	unsigned nr_entries;
-	std::vector<unsigned long> stack;
-
-	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
-	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
-		err(1, "reading input");
-	stack.reserve(nr_entries);
-	for (unsigned x = 0; x < nr_entries; x++) {
-		unsigned long a;
-		if (fread(&a, sizeof(a), 1, f) != 1)
-			err(1, "reading input");
-		assert(as->isReadable(a, 1));
-		stack.push_back(a);
-	}
-	if (rip & (1ul << 63)) {
-		*is_private = true;
-		rip &= ~(1ul << 63);
-	} else {
-		*is_private = false;
-	}
-	assert(as->isReadable(rip, 1));
-	stack.push_back(rip);
-	*out = VexRip(stack);
+	TypesDb::read_vexrip_canon(f, out, is_private);
 	return true;
 }
 
