@@ -989,9 +989,113 @@ findTheseCfgNodes(CFGNode *root,
 }
 #endif
 
+/* Remove a prefix of the CFG which is just a series of linear
+   instructions to the first interesting one. */
+static CFGNode *
+removePointlessPrefix(CFGNode *start, const std::set<VexRip> &interesting)
+{
+	while (1) {
+		if ((start->fallThrough && start->branch) ||
+		    (!start->fallThrough && !start->branch))
+			return start;
+		if (interesting.count(start->my_rip))
+			return start;
+		if (start->fallThrough) {
+			assert(!start->branch);
+			start = start->fallThrough;
+		}
+		if (start->branch) {
+			assert(!start->fallThrough);
+			start = start->branch;
+		}
+	}	
+}
+
+static void
+purgeTheseNodes(CFGNode *root, std::set<CFGNode *> &visited,
+		const std::set<CFGNode *> &these)
+{
+	if (!visited.insert(root).second)
+		return;
+	if (root->branch && these.count(root->branch))
+		root->branch = NULL;
+	if (root->fallThrough && these.count(root->fallThrough))
+		root->fallThrough = NULL;
+	if (root->branch) {
+		/* This might look redundant.  Not so: it means that
+		   we tail call if a node has a branch successor but
+		   not a fall-through successor, which makes like a
+		   bit easier for the compiler's optimiser. */
+		if (!root->fallThrough) {
+			purgeTheseNodes(root->branch, visited, these);
+			return;
+		}
+		purgeTheseNodes(root->branch, visited, these);
+	}
+	if (root->fallThrough)
+		purgeTheseNodes(root->fallThrough, visited, these);
+}
+
+static void
+purgeTheseNodes(CFGNode *root, const std::set<CFGNode *> &these)
+{
+	std::set<CFGNode *> visited;
+	purgeTheseNodes(root, visited, these);
+}
+
+static void
+findAllNodes(CFGNode *root, std::set<CFGNode *> &out)
+{
+	if (!root || !out.insert(root).second)
+		return;
+	findAllNodes(root->branch, out);
+	findAllNodes(root->fallThrough, out);
+}
+
+static CFGNode *
+trimAndOptimiseCfg(CFGNode *root, const std::set<VexRip> &interesting)
+{
+	bool progress;
+
+	do {
+		CFGNode *s = removePointlessPrefix(root, interesting);
+		progress = s != root;
+		root = s;
+
+		/* Figure out which nodes might conceivably reach an
+		   interesting instruction. */
+		std::set<CFGNode *> uninterestingNodes;
+		findAllNodes(root, uninterestingNodes);
+		bool uninterestingNodesUnstable;
+		do {
+			uninterestingNodesUnstable = false;
+			for (auto it = uninterestingNodes.begin();
+			     it != uninterestingNodes.end();
+			     ) {
+				CFGNode *o = *it;
+				if (interesting.count(o->my_rip) ||
+				    (o->branch && !uninterestingNodes.count(o->branch)) ||
+				    (o->fallThrough && !uninterestingNodes.count(o->fallThrough))) {
+					uninterestingNodesUnstable = true;
+					uninterestingNodes.erase(it++);
+				} else {
+					it++;
+				}
+			}
+		} while (uninterestingNodesUnstable);
+		/* Now purge anything which is uninteresting. */
+		if (uninterestingNodes.size() != 0) {
+			purgeTheseNodes(root, uninterestingNodes);
+			progress = true;
+		}
+	} while (progress);
+
+	return root;
+}
+
 static const unsigned MAX_INSTRS_IN_CFG_EXPLORATION = 10000;
 static void
-getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
+getStoreCFGs(const std::set<VexRip> &potentiallyConflictingStores,
 	     VexPtr<Oracle> &oracle,
 	     VexPtr<CFGNode *, &ir_heap> &storeCFGs,
 	     int *_nrStoreCfgs)
@@ -1331,22 +1435,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	   and has a lot of straight-line code to the first
 	   interesting instruction, so just strip off the prefix. */
 	for (int x = 0; x < *_nrStoreCfgs; x++) {
-		while (1) {
-			CFGNode *n = storeCFGs[x];
-			if ((n->fallThrough && n->branch) ||
-			    (!n->fallThrough && !n->branch))
-				break;
-			if (potentiallyConflictingStores.count(n->my_rip))
-				break;
-			if (n->fallThrough) {
-				assert(!n->branch);
-				storeCFGs[x] = n->fallThrough;
-			}
-			if (n->branch) {
-				assert(!n->fallThrough);
-				storeCFGs[x] = n->branch;
-			}
-		}
+		storeCFGs[x] = trimAndOptimiseCfg(storeCFGs[x], potentiallyConflictingStores);
 	}
 
 	fprintf(_logfile, "Store clustering:\n");
