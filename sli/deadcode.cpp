@@ -84,22 +84,10 @@ public:
 
 	bool registerLive(threadAndRegister reg) { return count(reg); }
 	bool assertionLive(IRExpr *assertion) {
-		class _ : public IRExprTransformer {
-			LivenessEntry *_this;
-
-			IRExpr *transformIex(IRExprGet *g) {
-				if (_this->registerLive(g->reg))
-					res = true;
-				return IRExprTransformer::transformIex(g);
-			}
-		public:
-			bool res;
-			_(LivenessEntry *__this)
-				: _this(__this), res(false)
-			{}
-		} t(this);
-		t.doit(assertion);
-		return t.res;
+		if (assertion->tag == Iex_Const)
+			return false;
+		else
+			return true;
 	}
 };
 
