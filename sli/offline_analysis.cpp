@@ -979,21 +979,7 @@ findTheseCfgNodes(CFGNode *root, const std::set<VexRip> &interesting)
 }
 #endif
 
-struct pendingItem {
-	VexRip rip;
-	unsigned depth;
-	pendingItem(const VexRip &_rip, unsigned _depth)
-		: rip(_rip), depth(_depth)
-	{}
-};
-struct mapEntry {
-	CFGNode *node;
-	unsigned best_depth;
-	mapEntry(CFGNode *_node, unsigned _best_depth)
-		: node(_node), best_depth(_best_depth)
-	{}
-};
-static const unsigned MAX_DEPTH = 20;
+static const unsigned MAX_INSTRS_IN_CFG_EXPLORATION = 10000;
 static void
 getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	     VexPtr<Oracle> &oracle,
@@ -1008,67 +994,50 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		fprintf(_logfile, "\t%s\n", it->name());
 #endif
 
-	/* Instructions which we still need to visit. */
-	std::vector<pendingItem> pendingInstructions;
-	pendingInstructions.reserve(potentiallyConflictingStores.size());
+	/* Instructions which we still need to visit.  We explore in
+	 * breadth-first order starting from all of the roots until we
+	 * have the desired number of instructions. */
+	std::queue<VexRip> pendingInstructions;
 	for (auto it = potentiallyConflictingStores.begin();
 	     it != potentiallyConflictingStores.end();
 	     it++)
-		pendingInstructions.push_back(pendingItem(*it, 0));
+		pendingInstructions.push(*it);
 
-	std::map<VexRip, mapEntry> ripsToCfgNodes;
-	while (!pendingInstructions.empty()) {
-		pendingItem next(pendingInstructions.back());
-		pendingInstructions.pop_back();
+	std::map<VexRip, CFGNode *> ripsToCfgNodes;
+	while (!pendingInstructions.empty() &&
+	       ripsToCfgNodes.size() <= MAX_INSTRS_IN_CFG_EXPLORATION) {
+	top_of_loop:
+		VexRip next(pendingInstructions.front());
+		pendingInstructions.pop();
 
-		if (next.depth > MAX_DEPTH)
+		if (ripsToCfgNodes.count(next))
 			continue;
-
-		if (next.depth != 0 && potentiallyConflictingStores.count(next.rip))
-			next.depth = 0;
-
-		auto it = ripsToCfgNodes.find(next.rip);
-		if (it != ripsToCfgNodes.end()) {
-		found_existing_cfg_node:
-			/* This RIP has already been encountered. */
-			mapEntry &me(it->second);
-			if (me.best_depth < next.depth) {
-				/* And it's been encountered at a
-				   better depth than we're currently
-				   looking at it -> nothing to do. */
-				continue;
-			}
-			/* Encountered at a lower depth.  Re-use
-			   results of previous visit, but with a
-			   better depth. */
-			if (me.node->fallThroughRip.isValid())
-				pendingInstructions.push_back(pendingItem(me.node->fallThroughRip,
-									  next.depth + 1));
-			if (me.node->branchRip.isValid())
-				pendingInstructions.push_back(pendingItem(me.node->branchRip,
-									  next.depth + 1));
-			continue;
-		}
 
 		/* First time we've encountered this instruction.
 		 * Have to go and decode it properly. */
-		IRSB *irsb = oracle->getIRSBForRip(next.rip);
+		IRSB *irsb = oracle->getIRSBForRip(next);
 		if (!irsb) {
 			/* Whoops, end of the line. */
 			continue;
 		}
 
+		/* Process all of the instructions in this IRSB.  This
+		 * isn't quite breadth-first, but it doesn't make a
+		 * great deal of difference in practice, provided that
+		 * MAX_INSTRS_IN_CFG_EXPLORATION is much greater than
+		 * the normal size of an IRSB. */
 		int startOfInstruction = 0;
 		int endOfInstruction = 0;
 		CFGNode *currentNode = NULL;
-		while (startOfInstruction < irsb->stmts_used && next.depth < MAX_DEPTH) {
+		while (startOfInstruction < irsb->stmts_used) {
 			assert(irsb->stmts[startOfInstruction]->tag == Ist_IMark);
 			IRStmtIMark *startMark = (IRStmtIMark *)irsb->stmts[startOfInstruction];
-			it = ripsToCfgNodes.find(startMark->addr.rip);
-			if (it != ripsToCfgNodes.end()) {
-				/* So we've now run into the back of
-				   an existing chunk of CFG. */
-				goto found_existing_cfg_node;
+			if (ripsToCfgNodes.count(startMark->addr.rip)) {
+				/* We've run into the back of an
+				   existing block.  There's no point
+				   in exploring any further from
+				   here. */
+				goto top_of_loop;
 			}
 
 			currentNode = new CFGNode(startMark->addr.rip);
@@ -1078,8 +1047,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 				if (irsb->stmts[endOfInstruction]->tag == Ist_Exit) {
 					assert(!currentNode->branchRip.isValid());
 					currentNode->branchRip = ((IRStmtExit *)irsb->stmts[endOfInstruction])->dst.rip;
-					pendingInstructions.push_back(pendingItem(currentNode->branchRip,
-										  next.depth+1));
+					pendingInstructions.push(currentNode->branchRip);
 				}
 			}
 
@@ -1089,14 +1057,9 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 				currentNode->fallThroughRip = endMark->addr.rip;
 			}
 
-			ripsToCfgNodes.insert(std::pair<VexRip, mapEntry>(currentNode->my_rip,
-									  mapEntry(currentNode, next.depth)));
-			next.depth++;
+			ripsToCfgNodes.insert(std::pair<VexRip, CFGNode *>(currentNode->my_rip, currentNode));
 			startOfInstruction = endOfInstruction;
 		}
-
-		if (next.depth == MAX_DEPTH)
-			continue;
 
 		assert(currentNode != NULL);
 
@@ -1130,8 +1093,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 #else
 					currentNode->branchRip = irsb->next_const.rip;
 #endif
-					pendingInstructions.push_back(pendingItem(currentNode->branchRip,
-										  next.depth));
+					pendingInstructions.push(currentNode->branchRip);
 				}
 			} else {
 				/* Don't consider inlining indirect
@@ -1148,14 +1110,13 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		}
 
 		if (currentNode->fallThroughRip.isValid())
-			pendingInstructions.push_back(pendingItem(currentNode->fallThroughRip,
-								  next.depth));
+			pendingInstructions.push(currentNode->fallThroughRip);
 	}
 
 #if DEBUG_BUILD_STORE_CFGS
 	fprintf(_logfile, "Initial CFG:\n");
 	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
-		CFGNode *n = it->second.node;
+		CFGNode *n = it->second;
 		fprintf(_logfile, "\t%s\t-> %p", it->first.name(), n);
 		if (n->fallThroughRip.isValid())
 			fprintf(_logfile, " ft %s", n->fallThroughRip.name());
@@ -1174,7 +1135,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = ripsToCfgNodes.begin();
 	     it != ripsToCfgNodes.end();
 	     it++) {
-		auto node = it->second.node;
+		CFGNode *node = it->second;
 		assert(node);
 		assert(!node->fallThrough);
 		assert(!node->branch);
@@ -1186,19 +1147,19 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		if (node->fallThroughRip.isValid()) {
 			auto it2 = ripsToCfgNodes.find(node->fallThroughRip);
 			if (it2 != ripsToCfgNodes.end())
-				node->fallThrough = it2->second.node;
+				node->fallThrough = it2->second;
 		}
 		if (node->branchRip.isValid()) {
 			auto it2 = ripsToCfgNodes.find(node->branchRip);
 			if (it2 != ripsToCfgNodes.end())
-				node->branch = it2->second.node;
+				node->branch = it2->second;
 		}
 	}
 
 #if DEBUG_BUILD_STORE_CFGS
 	fprintf(_logfile, "Resolved CFG:\n");
 	for (auto it = ripsToCfgNodes.begin(); it != ripsToCfgNodes.end(); it++) {
-		CFGNode *n = it->second.node;
+		CFGNode *n = it->second;
 		fprintf(_logfile, "\t%s\t-> %p", it->first.name(), n);
 		if (n->fallThrough)
 			fprintf(_logfile, " ft %p", n->fallThrough);
@@ -1222,7 +1183,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	     it++) {
 		auto it2 = ripsToCfgNodes.find(*it);
 		if (it2 != ripsToCfgNodes.end())
-			nodesToKeep.insert(it2->second.node);
+			nodesToKeep.insert(it2->second);
 	}
 	/* Fixed point iteration to find the nodes to keep. */
 	bool progress;
@@ -1231,7 +1192,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 		for (auto it = ripsToCfgNodes.begin();
 		     it != ripsToCfgNodes.end();
 		     it++) {
-			CFGNode *node = it->second.node;
+			CFGNode *node = it->second;
 			if (nodesToKeep.count(node))
 				continue;
 			if ((node->fallThrough && nodesToKeep.count(node->fallThrough)) ||
@@ -1254,7 +1215,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = ripsToCfgNodes.begin();
 	     it != ripsToCfgNodes.end();
 		) {
-		CFGNode *node = it->second.node;
+		CFGNode *node = it->second;
 		if (!nodesToKeep.count(node)) {
 			ripsToCfgNodes.erase(it++);
 		} else {
@@ -1273,7 +1234,7 @@ getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = ripsToCfgNodes.begin();
 	     it != ripsToCfgNodes.end();
 	     it++)
-		unrootedCFGNodes.insert(it->second.node);
+		unrootedCFGNodes.insert(it->second);
 	std::set<CFGNode *> roots;
 	/* First heuristic: if something has no parents, it's
 	   definitely a root. */
