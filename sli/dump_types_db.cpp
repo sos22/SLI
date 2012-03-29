@@ -11,10 +11,10 @@ main(int argc, char *argv[])
 	init_sli();
 
 	TypesDb *types = new TypesDb(argv[1]);
-	VexRip vr;
+	DynAnalysisRip vr;
 
 	const char *ign;
-	if (!parseVexRip(&vr, argv[2], &ign))
+	if (!parseDynAnalysisRip(&vr, argv[2], &ign))
 		errx(1, "cannot parse %s as vex rip", argv[2]);
 
 	std::vector<unsigned long> o;

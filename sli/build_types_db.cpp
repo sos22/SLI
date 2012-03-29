@@ -8,13 +8,13 @@
 
 #include "sli.h"
 
-#include "types_db.hpp"
 #include "typesdb.hpp"
+#include "types_db.hpp"
 
 #define PAGE_SIZE (4096ul)
 
 static bool
-read_rip(FILE *f, bool *is_private, AddressSpace *as, VexRip *out)
+read_rip(FILE *f, bool *is_private, AddressSpace *as, DynAnalysisRip *out)
 {
 	TypesDb::read_vexrip_canon(f, out, is_private);
 	return true;
@@ -73,7 +73,7 @@ struct mapped_file {
 };
 
 struct tag_file_foreach_closure {
-	virtual void operator()(const VexRip &vr,
+	virtual void operator()(const DynAnalysisRip &vr,
 				unsigned long offset,
 				bool is_load,
 				bool is_private) = 0;
@@ -101,7 +101,7 @@ tag_file_foreach(const char *fname, AddressSpace *as, tag_file_foreach_closure &
 			AddressSpace *as;
 			void operator()(int nr_items, bool is_load) {
 				for (int x = 0; x < nr_items; x++) {
-					VexRip rip;
+					DynAnalysisRip rip;
 					bool is_private;
 					if (read_rip(inp, &is_private, as, &rip))
 						(*consumer)(rip, offset, true, is_private);
@@ -115,7 +115,7 @@ tag_file_foreach(const char *fname, AddressSpace *as, tag_file_foreach_closure &
 }
 
 static void
-insert_rip_into_output(struct mapped_file *output, const VexRip &vr, unsigned long offset)
+insert_rip_into_output(struct mapped_file *output, const DynAnalysisRip &vr, unsigned long offset)
 {
 	unsigned long hash = vr.hash();
 	struct hash_head *heads = (struct hash_head *)output->base;
@@ -208,7 +208,7 @@ main(int argc, char *argv[])
 
 	struct _ : public tag_file_foreach_closure {
 		mapped_file *output;
-		void operator()(const VexRip &vr, unsigned long offset, bool, bool) {
+		void operator()(const DynAnalysisRip &vr, unsigned long offset, bool, bool) {
 			insert_rip_into_output(output, vr, offset);
 		}
 		_(mapped_file *_output)

@@ -10,6 +10,7 @@
 #include "oracle_rip.hpp"
 
 class TypesDb;
+class DynAnalysisRip;
 
 class InstructionSet {
 public:
@@ -27,6 +28,10 @@ class StaticRip : public Named {
 public:
 	explicit StaticRip(unsigned long r) : rip(r) {}
 	explicit StaticRip(const VexRip &r) : rip(r.isValid() ? r.unwrap_vexrip() : 0) {}
+	explicit StaticRip(const DynAnalysisRip &r)
+		: rip(r.rips[r.nr_rips-1])
+	{}
+
 	StaticRip() : rip(0) {}
 
 	bool isValid() const { return rip != 0; }
@@ -270,10 +275,10 @@ public:
 	typedef std::map<StaticRip, callgraph_entry> callgraph_t;
 
 	struct tag_entry {
-		std::set<VexRip> shared_loads;
-		std::set<VexRip> shared_stores;
-		std::set<VexRip> private_loads;
-		std::set<VexRip> private_stores;
+		std::set<DynAnalysisRip> shared_loads;
+		std::set<DynAnalysisRip> shared_stores;
+		std::set<DynAnalysisRip> private_loads;
+		std::set<DynAnalysisRip> private_stores;
 	};
 	TypesDb *type_index;
 	Mapping raw_types_database;
@@ -319,7 +324,7 @@ public:
 	void findPreviousInstructions(std::vector<VexRip> &output);
 	void findPreviousInstructions(std::vector<VexRip> &output, const VexRip &rip);
 	void findConflictingStores(StateMachineSideEffectLoad *smsel,
-				   std::set<VexRip> &out);
+				   std::set<DynAnalysisRip> &out);
 	void clusterRips(const std::set<VexRip> &inputRips,
 			 std::set<InstructionSet > &outputClusters);
 
@@ -337,8 +342,8 @@ public:
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
-	void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<VexRip> &);
-	void findRacingRips(StateMachineSideEffectStore *, std::set<VexRip> &);
+	void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
+	void findRacingRips(StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
 	bool functionCanReturn(const VexRip &rip);
 
 	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,

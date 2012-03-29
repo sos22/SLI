@@ -442,7 +442,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 }
 
 static void
-getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<VexRip> &potentiallyConflictingStores)
+getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores)
 {
 	std::set<StateMachineSideEffectLoad *> allLoads;
 	findAllLoads(sm, allLoads);
@@ -642,7 +642,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		 VexPtr<IRExpr, &ir_heap> assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
 		 VexPtr<CrashSummary, &ir_heap> &summary,
-		 const std::set<VexRip> &is,
+		 const std::set<DynAnalysisRip> &is,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 GarbageCollectionToken token)
@@ -970,19 +970,19 @@ makeCfgsDisjoint(std::set<CFGNode *> &cfgs)
 static void
 findTheseCfgNodes(CFGNode *root,
 		  std::set<CFGNode *> &alreadySeen,
-		  const std::set<VexRip> &interesting)
+		  const std::set<DynAnalysisRip> &interesting)
 {
 	if (!root || alreadySeen.count(root))
 		return;
 	alreadySeen.insert(root);
-	if (interesting.count(root->my_rip))
+	if (interesting.count(DynAnalysisRip(root->my_rip)))
 		fprintf(_logfile, "\t\t%s\n", root->my_rip.name());
 	findTheseCfgNodes(root->fallThrough, alreadySeen, interesting);
 	findTheseCfgNodes(root->branch, alreadySeen, interesting);
 }
 static void
 findTheseCfgNodes(CFGNode *root,
-		  const std::set<VexRip> &interesting)
+		  const std::set<DynAnalysisRip> &interesting)
 {
 	std::set<CFGNode *> alreadySeen;
 	findTheseCfgNodes(root, alreadySeen, interesting);
@@ -992,19 +992,18 @@ findTheseCfgNodes(CFGNode *root,
 /* Remove a prefix of the CFG which is just a series of linear
    instructions to the first interesting one. */
 static CFGNode *
-removePointlessPrefix(CFGNode *start, const std::set<VexRip> &interesting)
+removePointlessPrefix(CFGNode *start, const std::set<DynAnalysisRip> &interesting)
 {
 	while (1) {
 		if ((start->fallThrough && start->branch) ||
 		    (!start->fallThrough && !start->branch))
 			return start;
-		if (interesting.count(start->my_rip))
+		if (interesting.count(DynAnalysisRip(start->my_rip)))
 			return start;
 		if (start->fallThrough) {
 			assert(!start->branch);
 			start = start->fallThrough;
-		}
-		if (start->branch) {
+		} else if (start->branch) {
 			assert(!start->fallThrough);
 			start = start->branch;
 		}
@@ -1053,7 +1052,7 @@ findAllNodes(CFGNode *root, std::set<CFGNode *> &out)
 }
 
 static CFGNode *
-trimAndOptimiseCfg(CFGNode *root, const std::set<VexRip> &interesting)
+trimAndOptimiseCfg(CFGNode *root, const std::set<DynAnalysisRip> &interesting)
 {
 	bool progress;
 
@@ -1073,7 +1072,7 @@ trimAndOptimiseCfg(CFGNode *root, const std::set<VexRip> &interesting)
 			     it != uninterestingNodes.end();
 			     ) {
 				CFGNode *o = *it;
-				if (interesting.count(o->my_rip) ||
+				if (interesting.count(DynAnalysisRip(o->my_rip)) ||
 				    (o->branch && !uninterestingNodes.count(o->branch)) ||
 				    (o->fallThrough && !uninterestingNodes.count(o->fallThrough))) {
 					uninterestingNodesUnstable = true;
@@ -1095,7 +1094,7 @@ trimAndOptimiseCfg(CFGNode *root, const std::set<VexRip> &interesting)
 
 static const unsigned MAX_INSTRS_IN_CFG_EXPLORATION = 10000;
 static void
-getStoreCFGs(const std::set<VexRip> &potentiallyConflictingStores,
+getStoreCFGs(const std::set<DynAnalysisRip> &potentiallyConflictingStores,
 	     VexPtr<Oracle> &oracle,
 	     VexPtr<CFGNode *, &ir_heap> &storeCFGs,
 	     int *_nrStoreCfgs)
@@ -1115,7 +1114,7 @@ getStoreCFGs(const std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = potentiallyConflictingStores.begin();
 	     it != potentiallyConflictingStores.end();
 	     it++)
-		pendingInstructions.push(*it);
+		pendingInstructions.push(it->toVexRip());
 
 	std::map<VexRip, CFGNode *> ripsToCfgNodes;
 	while (ripsToCfgNodes.size() <= MAX_INSTRS_IN_CFG_EXPLORATION) {
@@ -1195,7 +1194,7 @@ getStoreCFGs(const std::set<VexRip> &potentiallyConflictingStores,
 				for (auto it = potentiallyConflictingStores.begin();
 				     !traceIn && it != potentiallyConflictingStores.end();
 				     it++) {
-					if (currentNode->fallThroughRip.isPrefix(*it))
+					if (it->rootedIn(currentNode->fallThroughRip))
 						traceIn = true;
 				}
 				if (traceIn) {
@@ -1296,7 +1295,7 @@ getStoreCFGs(const std::set<VexRip> &potentiallyConflictingStores,
 	for (auto it = potentiallyConflictingStores.begin();
 	     it != potentiallyConflictingStores.end();
 	     it++) {
-		auto it2 = ripsToCfgNodes.find(*it);
+		auto it2 = ripsToCfgNodes.find(it->toVexRip());
 		if (it2 != ripsToCfgNodes.end())
 			nodesToKeep.insert(it2->second);
 	}
@@ -1434,9 +1433,8 @@ getStoreCFGs(const std::set<VexRip> &potentiallyConflictingStores,
 	   break cycles, we end up with a root which is uninteresting
 	   and has a lot of straight-line code to the first
 	   interesting instruction, so just strip off the prefix. */
-	for (int x = 0; x < *_nrStoreCfgs; x++) {
+	for (int x = 0; x < *_nrStoreCfgs; x++)
 		storeCFGs[x] = trimAndOptimiseCfg(storeCFGs[x], potentiallyConflictingStores);
-	}
 
 	fprintf(_logfile, "Store clustering:\n");
 	for (int x = 0; x < *_nrStoreCfgs; x++) {
@@ -1459,7 +1457,7 @@ getStoreCFGs(const std::set<VexRip> &potentiallyConflictingStores,
 } /* End namespace */
 
 static void
-getStoreCFGs(std::set<VexRip> &potentiallyConflictingStores,
+getStoreCFGs(std::set<DynAnalysisRip> &potentiallyConflictingStores,
 	     VexPtr<Oracle> &oracle,
 	     VexPtr<CFGNode *, &ir_heap> &storeCFGs,
 	     int *_nrStoreCfgs)
@@ -1482,7 +1480,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      VexPtr<IRExpr, &ir_heap> &survive,
 		      VexPtr<CrashSummary, &ir_heap> &summary,
 		      bool needRemoteMacroSections,
-		      std::set<VexRip> &potentiallyConflictingStores,
+		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
 		      GarbageCollectionToken token)
 {
 	assert(potentiallyConflictingStores.size() > 0);
@@ -1532,7 +1530,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");
 
-	std::set<VexRip> potentiallyConflictingStores;
+	std::set<DynAnalysisRip> potentiallyConflictingStores;
 	getConflictingStores(probeMachine, oracle, potentiallyConflictingStores);
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");

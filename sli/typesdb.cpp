@@ -1,10 +1,12 @@
 #include "sli.h"
 
+#include "libvex_parse.h"
+
 #include "typesdb.hpp"
 #include "types_db.hpp"
 
 void
-TypesDb::findOffsets(const VexRip &vr, std::vector<unsigned long> &out) const
+TypesDb::findOffsets(const DynAnalysisRip &vr, std::vector<unsigned long> &out) const
 {
 	unsigned long hash = vr.hash();
 	const struct hash_head *heads = mapping.get<hash_head>(0, NR_HASH_HEADS);
@@ -79,12 +81,14 @@ __types_db_instr_iterator::advance(void)
 }
 
 void
-__types_db_instr_iterator::fetch(VexRip *out) const
+__types_db_instr_iterator::fetch(DynAnalysisRip *out) const
 {
 	const struct hash_entry *he = owner->mapping.get<hash_entry>(offset);
-	out->stack.resize(he->nr_rips);
-	for (unsigned x = 0; x < he->nr_rips; x++)
-		out->stack[x] = he->rips[x];
+	out->nr_rips = he->nr_rips;
+	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
+		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
+	for (int x = 0; x < out->nr_rips; x++)
+		out->rips[out->nr_rips - x - 1] = he->rips[he->nr_rips - x - 1];
 	out->changed();
 }
 
@@ -106,7 +110,7 @@ struct vexrip_hdr {
 };
 
 void
-TypesDb::parse_vexrip_canon(VexRip *out, const Mapping &mapping, unsigned long offset, bool *is_private, unsigned long *sz)
+TypesDb::parse_vexrip_canon(DynAnalysisRip *out, const Mapping &mapping, unsigned long offset, bool *is_private, unsigned long *sz)
 {
 	const struct vexrip_hdr *hdr = mapping.get<vexrip_hdr>(offset);
 	if (!hdr)
@@ -125,16 +129,16 @@ TypesDb::parse_vexrip_canon(VexRip *out, const Mapping &mapping, unsigned long o
 	}
 
 	const unsigned long *body = mapping.get<unsigned long>(offset + 12, hdr->nr_entries);
-	std::vector<unsigned long> stack;
-	stack.reserve(hdr->nr_entries+1);
-	for (unsigned x = 0; x < hdr->nr_entries; x++)
-		stack.push_back(body[x]);
-	stack.push_back(rip);
-	*out = VexRip(stack);
+	out->nr_rips = hdr->nr_entries;
+	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH - 1)
+		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
+	for (int x = 0; x < out->nr_rips - 1; x++)
+		out->rips[x] = body[x + hdr->nr_entries - out->nr_rips + 1];
+	out->rips[out->nr_rips - 1] = rip;
 }
 
 void
-TypesDb::read_vexrip_canon(FILE *f, VexRip *out, bool *is_private)
+TypesDb::read_vexrip_canon(FILE *f, DynAnalysisRip *out, bool *is_private)
 {
 	unsigned long rip;
 	unsigned nr_entries;
@@ -157,40 +161,71 @@ TypesDb::read_vexrip_canon(FILE *f, VexRip *out, bool *is_private)
 		*is_private = false;
 	}
 	stack.push_back(rip);
-	*out = VexRip(stack);
+
+	out->nr_rips = stack.size();
+	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
+		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
+	for (int x = 0; x < out->nr_rips; x++)
+		out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
 }
 
 TypesDb::read_vexrip_res
-TypesDb::read_vexrip_noncanon(FILE *f, VexRip *out, AddressSpace *as, bool *is_private)
+TypesDb::read_vexrip_noncanon(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_private)
 {
-       unsigned long rip;
-       unsigned nr_entries;
-       std::vector<unsigned long> stack;
+	unsigned long rip;
+	unsigned nr_entries;
+	std::vector<unsigned long> stack;
 
-       if (fread(&rip, sizeof(rip), 1, f) != 1 ||
-           fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
-               return read_vexrip_error;
-       stack.reserve(nr_entries);
-       for (unsigned x = 0; x < nr_entries; x++) {
-               unsigned long a;
-               if (fread(&a, sizeof(a), 1, f) != 1)
-                       return read_vexrip_error;
-	       if (as->isReadable(a, 1))
-		       stack.push_back(a);
-       }
-       if (rip & (1ul << 63)) {
-               *is_private = true;
-               rip &= ~(1ul << 63);
-       } else {
-               *is_private = false;
-       }
-       read_vexrip_res res;
-       if (as->isReadable(rip, 1)) {
-	       stack.push_back(rip);
-	       res = read_vexrip_take;
-       } else {
-	       res = read_vexrip_skip;
-       }
-       *out = VexRip(stack);
-       return res;
+	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
+	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
+		return read_vexrip_error;
+	stack.reserve(nr_entries);
+	for (unsigned x = 0; x < nr_entries; x++) {
+		unsigned long a;
+		if (fread(&a, sizeof(a), 1, f) != 1)
+			return read_vexrip_error;
+		if (as->isReadable(a, 1))
+			stack.push_back(a);
+	}
+	if (rip & (1ul << 63)) {
+		*is_private = true;
+		rip &= ~(1ul << 63);
+	} else {
+		*is_private = false;
+	}
+	read_vexrip_res res;
+	if (as->isReadable(rip, 1)) {
+		stack.push_back(rip);
+		res = read_vexrip_take;
+	} else {
+		res = read_vexrip_skip;
+	}
+	
+	out->nr_rips = stack.size();
+	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
+		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
+	for (int x = 0; x < out->nr_rips; x++)
+		out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
+	return res;
+}
+
+bool
+parseDynAnalysisRip(DynAnalysisRip *out, const char *inp, const char **suffix)
+{
+	if (!parseThisString("DynRip[", inp, &inp))
+		return false;
+	DynAnalysisRip work;
+
+	while (1) {
+		if (parseThisChar(']', inp, suffix))
+			return true;
+		if (work.nr_rips == DynAnalysisRip::DATABASE_RIP_DEPTH)
+			return false;
+		unsigned long x;
+		if (!parseHexUlong(&x, inp, &inp))
+			return false;
+		work.rips[work.nr_rips] = x;
+		work.nr_rips++;
+		parseThisString(", ", inp, &inp);
+	}
 }

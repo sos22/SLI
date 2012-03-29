@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "libvex_ir.h"
+#include "typesdb.hpp"
 #include "types_db.hpp"
 #include "mapping.hpp"
 

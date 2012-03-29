@@ -6,6 +6,7 @@
 
 #include "simplify_irexpr.hpp"
 #include "oracle_rip.hpp"
+#include "typesdb.hpp"
 
 class StateMachine;
 class StateMachineEdge;
@@ -87,12 +88,12 @@ public:
 	   interestingStores at all, and instead rely on
 	   ignoreSideEffects. */
 	bool haveInterestingStoresSet;
-	std::set<VexRip> interestingStores;
+	std::set<DynAnalysisRip> interestingStores;
 
 	/* If this is non-NULL then rather than using the oracle to
 	   check whether loads might possibly load, we just look in
 	   here. */
-	std::set<VexRip> *nonLocalLoads;
+	std::set<DynAnalysisRip> *nonLocalLoads;
 
 	AllowableOptimisations disablexPlusMinusX() const
 	{
@@ -163,7 +164,7 @@ public:
 			return true;
 		if (!haveInterestingStoresSet)
 			return false;
-		if (interestingStores.count(rip))
+		if (interestingStores.count(DynAnalysisRip(rip)))
 			return false;
 		else
 			return true;

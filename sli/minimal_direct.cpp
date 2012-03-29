@@ -191,10 +191,11 @@ main(int argc, char *argv[])
 		bool first = true;
 		int cntr = 0;
 		while (!instrIterator->finished()) {
-			VexRip rip;
-			instrIterator->fetch(&rip);
+			DynAnalysisRip dar;
+			instrIterator->fetch(&dar);
 			_logfile = fopenf("w", "logs/%d", cntr);
 			if (!_logfile) err(1, "opening logs/%d", cntr);
+			VexRip rip = dar.toVexRip();
 			printf("Considering %s, log logs/%d\n", rip.name(), cntr);
 			fprintf(_logfile, "Log for %s:\n", rip.name());
 			cntr++;

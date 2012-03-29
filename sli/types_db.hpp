@@ -13,23 +13,23 @@ struct hash_entry {
 	unsigned long offsets_start;
 	unsigned long rips[0];
 
-	bool for_rip(const VexRip &vr) const {
-		if (nr_rips != vr.getStack().size())
+	bool for_rip(const DynAnalysisRip &vr) const {
+		if (vr.nr_rips > (int)nr_rips)
 			return false;
-		for (unsigned x = 0; x < nr_rips; x++)
-			if (rips[x] != vr.getStack()[x])
+		for (int x = 0; x < vr.nr_rips; x++)
+			if (vr.rips[x] != rips[x])
 				return false;
 		return true;
 	}
-	void initialise(const VexRip &vr) {
+	void initialise(const DynAnalysisRip &vr) {
 		chain = 0;
-		nr_rips = vr.getStack().size();
+		nr_rips = vr.nr_rips;
 		offsets_start = 0;
 		for (unsigned x = 0; x < nr_rips; x++)
-			rips[x] = vr.getStack()[x];
+			rips[x] = vr.rips[x];
 	}
-	static unsigned long size_for(const VexRip &vr) {
-		return sizeof(hash_entry) + sizeof(unsigned long) * vr.getStack().size();
+	static unsigned long size_for(const DynAnalysisRip &vr) {
+		return sizeof(hash_entry) + sizeof(unsigned long) * vr.nr_rips;
 	}
 };
 

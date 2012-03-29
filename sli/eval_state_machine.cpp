@@ -7,6 +7,7 @@
 #include "inferred_information.hpp"
 #include "intern.hpp"
 #include "libvex_prof.hpp"
+#include "typesdb.hpp"
 
 /* All of the state needed to evaluate a single pure IRExpr. */
 class threadState {
@@ -619,7 +620,7 @@ public:
 class CrossMachineEvalContext {
 	void advanceToSideEffect(CrossEvalState *machine, NdChooser &chooser, Oracle *oracle,
 				 const AllowableOptimisations &opt,
-				 std::set<VexRip> &usefulRips, bool wantLoad);
+				 std::set<DynAnalysisRip> &usefulRips, bool wantLoad);
 public:
 	bool collectOrderingConstraints;
 	IRExpr *pathConstraint;
@@ -628,8 +629,8 @@ public:
 	CrossEvalState *loadMachine;
 	CrossEvalState *storeMachine;
 	std::vector<StateMachineSideEffect *> history;
-	std::set<VexRip> &probeMachineRacingInstructions;
-	std::set<VexRip> &storeMachineRacingInstructions;
+	std::set<DynAnalysisRip> &probeMachineRacingInstructions;
+	std::set<DynAnalysisRip> &storeMachineRacingInstructions;
 	void advanceMachine(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt, bool doLoad);
 	void dumpHistory(FILE *f) const;
 	void advanceToLoad(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
@@ -638,8 +639,8 @@ public:
 	void advanceToStore(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
 		advanceToSideEffect(storeMachine, chooser, oracle, opt, storeMachineRacingInstructions, false);
 	}
-	CrossMachineEvalContext(std::set<VexRip> &_probeMachineRacingInstructions,
-				std::set<VexRip> &_storeMachineRacingInstructions)
+	CrossMachineEvalContext(std::set<DynAnalysisRip> &_probeMachineRacingInstructions,
+				std::set<DynAnalysisRip> &_storeMachineRacingInstructions)
 		: collectOrderingConstraints(false),
 		  pathConstraint(NULL),
 		  justPathConstraint(NULL),
@@ -665,7 +666,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					     NdChooser &chooser,
 					     Oracle *oracle,
 					     const AllowableOptimisations &opt,
-					     std::set<VexRip> &interestingRips,
+					     std::set<DynAnalysisRip> &interestingRips,
 					     bool wantLoad)
 {
 	StateMachineState *s;
@@ -717,7 +718,7 @@ top:
 	if (acceptable) {
 		StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
 		if (smea)
-			acceptable &= interestingRips.count(smea->rip.rip);
+			acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip));
 	}
 	if (!acceptable) {
 		if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
@@ -764,8 +765,8 @@ findCrossMachineRacingInstructions(StateMachine *probeMachine,
 				   StateMachine *storeMachine,
 				   Oracle *oracle,
 				   const AllowableOptimisations &opt,
-				   std::set<VexRip> &probeMachineRacingInstructions,
-				   std::set<VexRip> &storeMachineRacingInstructions)
+				   std::set<DynAnalysisRip> &probeMachineRacingInstructions,
+				   std::set<DynAnalysisRip> &storeMachineRacingInstructions)
 {
 	std::set<StateMachineSideEffectStore *> storeMachineStores;
 	findAllStores(storeMachine, storeMachineStores);
@@ -794,8 +795,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	*mightSurvive = false;
 	*mightCrash = false;
 
-	std::set<VexRip> probeMachineRacingInstructions;
-	std::set<VexRip> storeMachineRacingInstructions;
+	std::set<DynAnalysisRip> probeMachineRacingInstructions;
+	std::set<DynAnalysisRip> storeMachineRacingInstructions;
 	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
 					   opt,
 					   probeMachineRacingInstructions,
@@ -1269,8 +1270,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	NdChooser chooser;
 	VexPtr<IRExpr, &ir_heap> newCondition(IRExpr_Const(IRConst_U1(0)));
 
-	std::set<VexRip> probeMachineRacingInstructions;
-	std::set<VexRip> storeMachineRacingInstructions;
+	std::set<DynAnalysisRip> probeMachineRacingInstructions;
+	std::set<DynAnalysisRip> storeMachineRacingInstructions;
 	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
 					   opt,
 					   probeMachineRacingInstructions,

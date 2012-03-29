@@ -141,6 +141,10 @@ public:
 	const std::vector<unsigned long> &getStack() const {
 		return stack;
 	}
+	std::vector<unsigned long> &getStack() {
+		return stack;
+	}
+
 	static VexRip invent_vex_rip(unsigned long rip) {
 		VexRip res;
 		res.stack.push_back(rip);
