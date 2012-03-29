@@ -112,9 +112,6 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 						IRExpr_Unop(
 							Iop_BadPtr,
 							smses->addr));
-				sme->sideEffects.erase(
-					sme->sideEffects.begin() + x);
-				x--;
 				*done_something = true;
 			}
 		}
