@@ -61,6 +61,14 @@ MachineState::readELFExec(const char *path)
 
 	Thread *thr = new Thread();
 	thr->regs.set_reg(REGISTER_IDX(RIP), eh->e_entry);
+
+	/* Cunning hack: setting the initial value of RCX to one,
+	   rather than zero, means that rep movs instructions take at
+	   least one step, which in turn means that we generate memory
+	   access events for them when trying to find proximal
+	   causes. */
+	thr->regs.set_reg(REGISTER_IDX(RCX), 1);
+
 	work->registerThread(thr);
 	printf("Psuedo thread has id %d\n", thr->tid._tid());
 	return work;
