@@ -1,6 +1,7 @@
 #include <map>
 
 #include "sli.h"
+#include "intern.hpp"
 #include "simplify_irexpr.hpp"
 #include "state_machine.hpp"
 #include "libvex_prof.hpp"
@@ -58,17 +59,13 @@ shallow_hash(const IRExpr *e)
 }
 
 IRExpr *
-internIRExpr(IRExpr *e, bool *done_something, internIRExprTable &lookupTable)
+internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 {
 	if (TIMEOUT)
 		return e;
 	unsigned h = shallow_hash(e) % internIRExprTable::nr_entries;
-	if (lookupTable.lookups[h].count(e)) {
-		auto r = lookupTable.lookups[h][e];
-		if (r != e)
-			*done_something = true;
-		return r;
-	}
+	if (lookupTable.lookups[h].count(e))
+		return lookupTable.lookups[h][e];
 	switch (e->tag) {
 	case Iex_Get:
 	case Iex_Const:
@@ -76,47 +73,43 @@ internIRExpr(IRExpr *e, bool *done_something, internIRExprTable &lookupTable)
 	case Iex_HappensBefore:
 		break;
 	case Iex_GetI:
-		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, done_something, lookupTable);
+		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
 		break;
 	case Iex_Qop:
-		((IRExprQop *)e)->arg4 = internIRExpr(((IRExprQop *)e)->arg4, done_something, lookupTable);
+		((IRExprQop *)e)->arg4 = internIRExpr(((IRExprQop *)e)->arg4, lookupTable);
 	case Iex_Triop:
-		((IRExprQop *)e)->arg3 = internIRExpr(((IRExprQop *)e)->arg3, done_something, lookupTable);
+		((IRExprQop *)e)->arg3 = internIRExpr(((IRExprQop *)e)->arg3, lookupTable);
 	case Iex_Binop:
-		((IRExprQop *)e)->arg2 = internIRExpr(((IRExprQop *)e)->arg2, done_something, lookupTable);
+		((IRExprQop *)e)->arg2 = internIRExpr(((IRExprQop *)e)->arg2, lookupTable);
 	case Iex_Unop:
-		((IRExprQop *)e)->arg1 = internIRExpr(((IRExprQop *)e)->arg1, done_something, lookupTable);
+		((IRExprQop *)e)->arg1 = internIRExpr(((IRExprQop *)e)->arg1, lookupTable);
 		break;
 	case Iex_Load:
-		((IRExprLoad *)e)->addr = internIRExpr(((IRExprLoad *)e)->addr, done_something, lookupTable);
+		((IRExprLoad *)e)->addr = internIRExpr(((IRExprLoad *)e)->addr, lookupTable);
 		break;
 	case Iex_CCall:
 		for (int x = 0; ((IRExprCCall *)e)->args[x]; x++)
 			((IRExprCCall *)e)->args[x] =
-				internIRExpr(((IRExprCCall *)e)->args[x], done_something, lookupTable);
+				internIRExpr(((IRExprCCall *)e)->args[x], lookupTable);
 		break;
 	case Iex_Mux0X:
-		((IRExprMux0X *)e)->cond = internIRExpr(((IRExprMux0X *)e)->cond, done_something, lookupTable);
-		((IRExprMux0X *)e)->expr0 = internIRExpr(((IRExprMux0X *)e)->expr0, done_something, lookupTable);
-		((IRExprMux0X *)e)->exprX = internIRExpr(((IRExprMux0X *)e)->exprX, done_something, lookupTable);
+		((IRExprMux0X *)e)->cond = internIRExpr(((IRExprMux0X *)e)->cond, lookupTable);
+		((IRExprMux0X *)e)->expr0 = internIRExpr(((IRExprMux0X *)e)->expr0, lookupTable);
+		((IRExprMux0X *)e)->exprX = internIRExpr(((IRExprMux0X *)e)->exprX, lookupTable);
 		break;
-	case Iex_Associative: {
-		IRExprAssociative *ae = (IRExprAssociative *)e;
-		for (int x = 0; x < ae->nr_arguments; x++)
-			ae->contents[x] =
-				internIRExpr(ae->contents[x], done_something, lookupTable);
-		if (operationCommutes(ae->op))
-			sortAssociativeArguments(ae, done_something);
+	case Iex_Associative:
+		for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++)
+			((IRExprAssociative *)e)->contents[x] =
+				internIRExpr(((IRExprAssociative *)e)->contents[x], lookupTable);
 		break;
-	}
 	case Iex_ClientCall:
 		for (int x = 0; ((IRExprClientCall *)e)->args[x]; x++)
 			((IRExprClientCall *)e)->args[x] =
-				internIRExpr(((IRExprClientCall *)e)->args[x], done_something, lookupTable);
+				internIRExpr(((IRExprClientCall *)e)->args[x], lookupTable);
 		break;
 	case Iex_ClientCallFailed:
 		((IRExprClientCallFailed *)e)->target =
-			internIRExpr(((IRExprClientCallFailed *)e)->target, done_something, lookupTable);
+			internIRExpr(((IRExprClientCallFailed *)e)->target, lookupTable);
 		break;
 	}
 	for (std::map<IRExpr *, IRExpr *>::iterator it = lookupTable.lookups[h].begin();
@@ -243,9 +236,6 @@ internIRExpr(IRExpr *e, bool *done_something, internIRExprTable &lookupTable)
 
 		/* If we get here, they match and we're done. */
 
-		if (e != it->second)
-			*done_something = true;
-
 		/* If the expressions are equal, then any optimisation
 		   which has been applied to one can be assumed to
 		   have been applied to the other. */
@@ -261,31 +251,27 @@ internIRExpr(IRExpr *e, bool *done_something, internIRExprTable &lookupTable)
 }
 
 IRExpr *
-internIRExpr(IRExpr *x, bool *done_something)
+internIRExpr(IRExpr *x)
 {
 	__set_profiling(internIRExpr);
 	internIRExprTable t;
-	return internIRExpr(x, done_something, t);
+	return internIRExpr(x, t);
 }
 
 static void
-internFreeVariables(FreeVariableMap &fvm, bool *done_something, internIRExprTable &t)
+internFreeVariables(FreeVariableMap &fvm, internIRExprTable &t)
 {
 	for (auto it = fvm.content->begin();
 	     it != fvm.content->end();
 	     it++)
-		it.set_value(internIRExpr(it.value(), done_something, t));
+		it.set_value(internIRExpr(it.value(), t));
 }
 
 static StateMachineSideEffect *
-internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, internStateMachineTable &t)
+internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable &t)
 {
-	if (t.sideEffects.count(s)) {
-		auto r = t.sideEffects[s];
-		if (r != s)
-			*done_something = true;
+	if (t.sideEffects.count(s))
 		return t.sideEffects[s];
-	}
 	switch (s->type) {
 	case StateMachineSideEffect::Unreached:
 		t.sideEffects[s] = s;
@@ -294,11 +280,11 @@ internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, in
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectMemoryAccess *ma = dynamic_cast<StateMachineSideEffectMemoryAccess *>(s);
 		assert(ma);
-		ma->addr = internIRExpr(ma->addr, done_something, t);
+		ma->addr = internIRExpr(ma->addr, t);
 		if (s->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma);
 			assert(store);
-			store->data = internIRExpr(store->data, done_something, t);
+			store->data = internIRExpr(store->data, t);
 			for (auto it = t.stores.begin();
 			     it != t.stores.end();
 			     it++) {
@@ -307,8 +293,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, in
 				    o->data == store->data &&
 				    o->rip == store->rip) {
 					t.sideEffects[s] = o;
-					if (o != s)
-						*done_something = true;
 					return o;
 				}
 			}
@@ -324,8 +308,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, in
 				    threadAndRegister::fullEq(o->target, load->target) &&
 				    o->rip == load->rip) {
 					t.sideEffects[s] = o;
-					if (o != s)
-						*done_something = true;
 					return o;
 				}
 			}
@@ -337,14 +319,12 @@ internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, in
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *copy = dynamic_cast<StateMachineSideEffectCopy *>(s);
 		assert(copy);
-		copy->value = internIRExpr(copy->value, done_something, t);
+		copy->value = internIRExpr(copy->value, t);
 		for (auto it = t.copies.begin(); it != t.copies.end(); it++) {
 			StateMachineSideEffectCopy *o = *it;
 			if (threadAndRegister::fullEq(o->target, copy->target) &&
 			    o->value == copy->value) {
 				t.sideEffects[s] = o;
-				if (o != s)
-					*done_something = true;
 				return o;
 			}
 		}
@@ -359,8 +339,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, in
 			StateMachineSideEffectPhi *o = *it;
 			if (threadAndRegister::fullEq(o->reg, phi->reg)) {
 				t.sideEffects[s] = o;
-				if (o != s)
-					*done_something = true;
 				return o;
 			}
 		}
@@ -371,13 +349,11 @@ internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, in
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *af = dynamic_cast<StateMachineSideEffectAssertFalse *>(s);
 		assert(af);
-		af->value = internIRExpr(af->value, done_something, t);
+		af->value = internIRExpr(af->value, t);
 		for (auto it = t.asserts.begin(); it != t.asserts.end(); it++) {
 			StateMachineSideEffectAssertFalse *o = *it;
 			if (o->value == af->value) {
 				t.sideEffects[s] = o;
-				if (o != s)
-					*done_something = true;
 				return o;
 			}
 		}
@@ -389,30 +365,24 @@ internStateMachineSideEffect(StateMachineSideEffect *s, bool *done_something, in
 	abort();
 }
 
-static StateMachineState *internStateMachineState(StateMachineState *start, bool *done_something, internStateMachineTable &t);
+static StateMachineState *internStateMachineState(StateMachineState *start, internStateMachineTable &t);
 
 static StateMachineEdge *
-internStateMachineEdge(StateMachineEdge *start, bool *done_something, internStateMachineTable &t)
+internStateMachineEdge(StateMachineEdge *start, internStateMachineTable &t)
 {
 	if (TIMEOUT)
 		return start;
-	if (t.edges.count(start)) {
-		auto r = t.edges[start];
-		if (r != start)
-			*done_something = true;
+	if (t.edges.count(start))
 		return t.edges[start];
-	}
-	start->target = internStateMachineState(start->target, done_something, t);
+	start->target = internStateMachineState(start->target, t);
 	for (auto it = start->sideEffects.begin();
 	     it != start->sideEffects.end();
 	     it++)
-		*it = internStateMachineSideEffect(*it, done_something, t);
+		*it = internStateMachineSideEffect(*it, t);
 	for (auto it = t.edges.begin(); it != t.edges.end(); it++) {
 		StateMachineEdge *o = it->second;
 		if (o->target == start->target && o->sideEffects == start->sideEffects) {
 			t.edges[start] = o;
-			if (o != start)
-				*done_something = true;
 			return o;
 		}
 	}
@@ -421,14 +391,10 @@ internStateMachineEdge(StateMachineEdge *start, bool *done_something, internStat
 }
 
 static StateMachineState *
-internStateMachineState(StateMachineState *start, bool *done_something, internStateMachineTable &t)
+internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 {
-	if (t.states.count(start)) {
-		auto r = t.states[start];
-		if (r != start)
-			*done_something = true;
-		return r;
-	}
+	if (t.states.count(start))
+		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
 	if (dynamic_cast<StateMachineCrash *>(start) ||
 	    dynamic_cast<StateMachineNoCrash *>(start) ||
@@ -436,14 +402,12 @@ internStateMachineState(StateMachineState *start, bool *done_something, internSt
 		t.states[start] = start;
 		return start;
 	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(start)) {
-		smp->target = internStateMachineEdge(smp->target, done_something, t);
+		smp->target = internStateMachineEdge(smp->target, t);
 		for (auto it = t.states_proxy.begin();
 		     it != t.states_proxy.end();
 		     it++) {
 			if ((*it)->target == smp->target) {
 				t.states[start] = *it;
-				if (start != *it)
-					*done_something = true;
 				return *it;
 			}
 		}
@@ -451,9 +415,9 @@ internStateMachineState(StateMachineState *start, bool *done_something, internSt
 		t.states_proxy.insert(smp);
 		return start;
 	} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(start)) {
-		smb->condition = internIRExpr(smb->condition, done_something, t);
-		smb->trueTarget = internStateMachineEdge(smb->trueTarget, done_something, t);
-		smb->falseTarget = internStateMachineEdge(smb->falseTarget, done_something, t);
+		smb->condition = internIRExpr(smb->condition, t);
+		smb->trueTarget = internStateMachineEdge(smb->trueTarget, t);
+		smb->falseTarget = internStateMachineEdge(smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();
 		     it != t.states_bifurcate.end();
 		     it++) {
@@ -462,8 +426,6 @@ internStateMachineState(StateMachineState *start, bool *done_something, internSt
 			    o->trueTarget == smb->trueTarget &&
 			    o->falseTarget == smb->falseTarget) {
 				t.states[start] = o;
-				if (start != o)
-					*done_something = true;
 				return o;
 			}
 		}
@@ -476,8 +438,6 @@ internStateMachineState(StateMachineState *start, bool *done_something, internSt
 		     it++) {
 			if (sms->target == (*it)->target) {
 				t.states[start] = *it;
-				if (start != *it)
-					*done_something = true;
 				return *it;
 			}
 		}
@@ -494,8 +454,7 @@ internStateMachine(StateMachine *sm)
 {
 	__set_profiling(internStateMachine);
 	internStateMachineTable t;
-	bool done_something;
-	internFreeVariables(sm->freeVariables, &done_something, t);
-	sm->root = internStateMachineState(sm->root, &done_something, t);
+	internFreeVariables(sm->freeVariables, t);
+	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }

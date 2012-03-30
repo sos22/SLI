@@ -18,7 +18,7 @@ class internmentState {
 public:
 	std::set<happensBeforeEdge *> hbes;
 	internIRExprTable exprs;
-	IRExpr *intern(IRExpr *e) { bool b; return internIRExpr(e, &b, exprs); }
+	IRExpr *intern(IRExpr *e) { return internIRExpr(e, exprs); }
 	unsigned intern(unsigned x) { return x; }
 	exprEvalPoint intern(const exprEvalPoint &);
 	template <typename a, typename b> std::pair<a, b> intern(const std::pair<a, b> &x) {

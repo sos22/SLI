@@ -1286,10 +1286,7 @@ struct internIRExprTable {
 	static const int nr_entries = 17;
 	std::map<IRExpr *, IRExpr *> lookups[nr_entries];
 };
-IRExpr *internIRExpr(IRExpr *e, bool *done_something, internIRExprTable &lookupTable);
-IRExpr *internIRExpr(IRExpr *x, bool *done_something);
-class StateMachine;
-StateMachine *internStateMachine(StateMachine *sm);
+IRExpr *internIRExpr(IRExpr *e, internIRExprTable &lookupTable);
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */
