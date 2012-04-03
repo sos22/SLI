@@ -78,17 +78,6 @@ public:
 
 static TimeoutTimer timeoutTimer;
 
-template <typename typ> static void
-shuffle(std::vector<typ> &vect)
-{
-	for (unsigned x = 0; x < vect.size(); x++) {
-		unsigned idx = (random() % (vect.size() - x)) + x;
-		typ t = vect[x];
-		vect[x] = vect[idx];
-		vect[idx] = t;
-	}
-}
-
 static void
 consider_rip(const VexRip &my_rip,
 	     VexPtr<MachineState> &ms,
