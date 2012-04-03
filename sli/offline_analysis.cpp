@@ -24,9 +24,7 @@ public:
 
 	VexRip my_rip;
 
-	bool accepting;
-
-	CFGNode(const VexRip &rip) : my_rip(rip), accepting(false) {}
+	CFGNode(const VexRip &rip) : my_rip(rip) {}
 
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%s: %s(%p), %s(%p)",
@@ -77,7 +75,7 @@ enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
    is uninteresting if it is not in the initial interesting set and
    there are no paths from it to an interesting node. */
 static void
-trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, bool acceptingAreInteresting)
+trimCFG(CFGNode *root, const InstructionSet &interestingAddresses)
 {
 	std::map<VexRip, CFGNode *> uninteresting;
 	std::map<VexRip, CFGNode *> interesting;
@@ -88,8 +86,7 @@ trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, bool acceptin
 	for (auto it = uninteresting.begin();
 	     it != uninteresting.end();
 		) {
-		if ((acceptingAreInteresting && it->second->accepting) ||
-		    instructionIsInteresting(interestingAddresses, it->first)) {
+		if (instructionIsInteresting(interestingAddresses, it->first)) {
 			interesting[it->first] = it->second;
 			uninteresting.erase(it++);
 		} else {
@@ -588,7 +585,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  terminalFunctions,
 				  oracle,
 				  10 * previousInstructions.size()));
-	trimCFG(cfg.get(), interesting, false);
+	trimCFG(cfg.get(), interesting);
 
 	{
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
@@ -734,7 +731,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 					  100));
 		InstructionSet interesting;
 		interesting.rips.insert(interestingRip);
-		trimCFG(cfg.get(), interesting, true);
+		trimCFG(cfg.get(), interesting);
 
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
 		VexPtr<StateMachine, &ir_heap> cr(
