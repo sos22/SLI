@@ -77,10 +77,10 @@ enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
    is uninteresting if it is not in the initial interesting set and
    there are no paths from it to an interesting node. */
 static void
-trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, int max_path_length, bool acceptingAreInteresting)
+trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, bool acceptingAreInteresting)
 {
 	std::map<VexRip, CFGNode *> uninteresting;
-	std::map<VexRip, std::pair<CFGNode *, int> > interesting;
+	std::map<VexRip, CFGNode *> interesting;
 	/* Start on the assumption that everything is uninteresting. */
 	enumerateCFG(root, uninteresting);
 	/* addresses which are explicitly flagged as interesting are
@@ -90,7 +90,7 @@ trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, int max_path_
 		) {
 		if ((acceptingAreInteresting && it->second->accepting) ||
 		    instructionIsInteresting(interestingAddresses, it->first)) {
-			interesting[it->first] = std::pair<CFGNode *, int>(it->second, max_path_length);
+			interesting[it->first] = it->second;
 			uninteresting.erase(it++);
 		} else {
 			it++;
@@ -104,23 +104,9 @@ trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, int max_path_
 		for (auto it = uninteresting.begin();
 		     it != uninteresting.end();
 			) {
-			CFGNode *n = it->second;
-			int path_length = -1;
-			if (n->branch &&
-			    interesting.count(n->branch->my_rip))
-				path_length = interesting[n->branch->my_rip].second - 1;
-			if (n->fallThrough &&
-			    interesting.count(n->fallThrough->my_rip) &&
-			    interesting[n->fallThrough->my_rip].second > path_length)
-				path_length = interesting[n->fallThrough->my_rip].second - 1;
-			if (path_length < 0) {
-				it++;
-			} else {
-				progress = true;
-				interesting[it->first] = std::pair<CFGNode *, int>(
-					it->second, path_length);
-				uninteresting.erase(it++);
-			}
+			progress = true;
+			interesting[it->first] = it->second;
+			uninteresting.erase(it++);
 		}
 	} while (progress);
 
@@ -129,7 +115,7 @@ trimCFG(CFGNode *root, const InstructionSet &interestingAddresses, int max_path_
 	for (auto it = interesting.begin();
 	     it != interesting.end();
 	     it++) {
-		CFGNode *n = it->second.first;
+		CFGNode *n = it->second;
 		assert(n);
 		if (n->branch && uninteresting.count(n->branch->my_rip))
 			n->branch = NULL;
@@ -602,7 +588,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  terminalFunctions,
 				  oracle,
 				  10 * previousInstructions.size()));
-	trimCFG(cfg.get(), interesting, INT_MAX, false);
+	trimCFG(cfg.get(), interesting, false);
 
 	{
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
@@ -748,7 +734,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 					  100));
 		InstructionSet interesting;
 		interesting.rips.insert(interestingRip);
-		trimCFG(cfg.get(), interesting, INT_MAX, true);
+		trimCFG(cfg.get(), interesting, true);
 
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
 		VexPtr<StateMachine, &ir_heap> cr(
