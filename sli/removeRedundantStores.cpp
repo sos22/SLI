@@ -145,11 +145,11 @@ removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_somethin
 
 static void
 removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+		      Oracle::RegisterAliasingConfiguration &alias,
 		      const AllowableOptimisations &opt)
 {
 	__set_profiling(removeRedundantStores);
 	std::set<StateMachineState *> visited;
-	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(sm->origin));
 	removeRedundantStores(sm->root, oracle, done_something, alias, visited, opt);
 }
 
@@ -158,7 +158,8 @@ removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 
 void
 removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+		      Oracle::RegisterAliasingConfiguration &alias,
 		      const AllowableOptimisations &opt)
 {
-	_removeRedundantStores::removeRedundantStores(sm, oracle, done_something, opt);
+	_removeRedundantStores::removeRedundantStores(sm, oracle, done_something, alias, opt);
 }
