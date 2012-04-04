@@ -284,7 +284,7 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 static void
 updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt,
-			    const Oracle::RegisterAliasingConfiguration &alias,
+			    const Oracle::RegisterAliasingConfiguration *alias,
 			    Oracle *oracle)
 {
 	if (TIMEOUT)
@@ -311,7 +311,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				addr = NULL;
 
 			if ( addr &&
-			     alias.ptrsMightAlias(addr, smses->addr, opt.freeVariablesMightAccessStack) &&
+			     (!alias || alias->ptrsMightAlias(addr, smses->addr, opt.freeVariablesMightAccessStack)) &&
 			     ((smses2 && oracle->memoryAccessesMightAlias(opt, smses2, smses)) ||
 			      (smsel2 && oracle->memoryAccessesMightAlias(opt, smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
@@ -407,7 +407,7 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration &aliasing,
+	const Oracle::RegisterAliasingConfiguration *aliasing,
 	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
@@ -421,7 +421,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration &aliasing,
+	const Oracle::RegisterAliasingConfiguration *aliasing,
 	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
@@ -493,14 +493,14 @@ buildNewStateMachineWithLoadsEliminated(
 				StateMachineSideEffectLoad *smsel2 =
 					dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 				if ( smses2 &&
-				     aliasing.ptrsMightAlias(smses2->addr, newAddr, opt.freeVariablesMightAccessStack) &&
+				     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr, opt.freeVariablesMightAccessStack)) &&
 				     definitelyEqual(smses2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
 							smsel->target,
 							smses2->data);
 				} else if ( smsel2 &&
-					    aliasing.ptrsMightAlias(smsel2->addr, newAddr, opt.freeVariablesMightAccessStack) &&
+					    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr, opt.freeVariablesMightAccessStack)) &&
 					    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
@@ -585,7 +585,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration &alias,
+	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
@@ -654,7 +654,7 @@ buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration &alias,
+	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something
 #if debug_substitutions
@@ -680,7 +680,7 @@ buildNewStateMachineWithLoadsEliminated(
 
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
+			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
 			bool *done_something)
 {
 #if dump_avail_table || debug_build_table || debug_substitutions
@@ -919,7 +919,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 
 StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
+			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
 			bool *done_something)
 {
 	return _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, oracle, done_something);

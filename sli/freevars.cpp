@@ -18,7 +18,7 @@ namespace _freevars {
 static void
 nrAliasingLoads(StateMachineState *sm,
 		StateMachineSideEffectLoad *smsel,
-		const Oracle::RegisterAliasingConfiguration &alias,
+		const Oracle::RegisterAliasingConfiguration *alias,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachineState *> &visited,
@@ -26,7 +26,7 @@ nrAliasingLoads(StateMachineState *sm,
 static void
 nrAliasingLoads(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel,
-		const Oracle::RegisterAliasingConfiguration &alias,
+		const Oracle::RegisterAliasingConfiguration *alias,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachineState *> &visited,
@@ -36,7 +36,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
 		if (smsel2 &&
-		    alias.ptrsMightAlias(smsel->addr, smsel2->addr, opt.freeVariablesMightAccessStack) &&
+		    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, opt.freeVariablesMightAccessStack)) &&
 		    oracle->memoryAccessesMightAlias(opt, smsel, smsel2) &&
 		    definitelyEqual( smsel->addr,
 				     smsel2->addr,
@@ -48,7 +48,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 static void
 nrAliasingLoads(StateMachineState *sm,
 		StateMachineSideEffectLoad *smsel,
-		const Oracle::RegisterAliasingConfiguration &alias,
+		const Oracle::RegisterAliasingConfiguration *alias,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachineState *> &visited,
@@ -77,7 +77,7 @@ nrAliasingLoads(StateMachineState *sm,
 static int
 nrAliasingLoads(StateMachine *sm,
 		StateMachineSideEffectLoad *smsel,
-		const Oracle::RegisterAliasingConfiguration &alias,
+		const Oracle::RegisterAliasingConfiguration *alias,
 		const AllowableOptimisations &opt,
 		Oracle *oracle)
 {
@@ -90,14 +90,14 @@ nrAliasingLoads(StateMachine *sm,
 		   
 static bool definitelyNoSatisfyingStores(StateMachineState *sm,
 					 StateMachineSideEffectLoad *smsel,
-					 const Oracle::RegisterAliasingConfiguration &alias,
+					 const Oracle::RegisterAliasingConfiguration *alias,
 					 const AllowableOptimisations &opt,
 					 bool haveAliasingStore,
 					 Oracle *oracle);
 static bool
 definitelyNoSatisfyingStores(StateMachineEdge *sme,
 			     StateMachineSideEffectLoad *smsel,
-			     const Oracle::RegisterAliasingConfiguration &alias,
+			     const Oracle::RegisterAliasingConfiguration *alias,
 			     const AllowableOptimisations &opt,
 			     bool haveAliasingStore,
 			     Oracle *oracle)
@@ -120,7 +120,7 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 		StateMachineSideEffectStore *smses =
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
 		if (smses &&
-		    alias.ptrsMightAlias(smsel->addr, smses->addr, opt.freeVariablesMightAccessStack) &&
+		    (!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, opt.freeVariablesMightAccessStack)) &&
 		    oracle->memoryAccessesMightAlias(opt, smsel, smses) &&
 		    !definitelyNotEqual( smsel->addr,
 					 smses->addr,
@@ -141,7 +141,7 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 static bool
 definitelyNoSatisfyingStores(StateMachineState *sm,
 			     StateMachineSideEffectLoad *smsel,
-			     const Oracle::RegisterAliasingConfiguration &alias,
+			     const Oracle::RegisterAliasingConfiguration *alias,
 			     const AllowableOptimisations &opt,
 			     bool haveAliasingStore,
 			     Oracle *oracle)
@@ -164,7 +164,7 @@ definitelyNoSatisfyingStores(StateMachineState *sm,
 }
 static bool definitelyNoSatisfyingStores(StateMachine *sm,
 					 StateMachineSideEffectLoad *smsel,
-					 const Oracle::RegisterAliasingConfiguration &alias,
+					 const Oracle::RegisterAliasingConfiguration *alias,
 					 const AllowableOptimisations &opt,
 					 bool haveAliasingStore,
 					 Oracle *oracle)
@@ -256,7 +256,7 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 
 static StateMachineState *introduceFreeVariables(StateMachineState *sm,
 						 StateMachine *root_sm,
-						 const Oracle::RegisterAliasingConfiguration &alias,
+						 const Oracle::RegisterAliasingConfiguration *alias,
 						 const AllowableOptimisations &opt,
 						 Oracle *oracle,
 						 bool *done_something,
@@ -281,7 +281,7 @@ containsNoTemporaries(IRExpr *e)
 static StateMachineEdge *
 introduceFreeVariables(StateMachineEdge *sme,
 		       StateMachine *root_sm,
-		       const Oracle::RegisterAliasingConfiguration &alias,
+		       const Oracle::RegisterAliasingConfiguration *alias,
 		       const AllowableOptimisations &opt,
 		       Oracle *oracle,
 		       bool *done_something,
@@ -331,7 +331,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 static StateMachineState *
 introduceFreeVariables(StateMachineState *sm,
 		       StateMachine *root_sm,
-		       const Oracle::RegisterAliasingConfiguration &alias,
+		       const Oracle::RegisterAliasingConfiguration *alias,
 		       const AllowableOptimisations &opt,
 		       Oracle *oracle,
 		       bool *done_something,
@@ -383,7 +383,7 @@ introduceFreeVariables(StateMachineState *sm,
 }
 static StateMachine *
 introduceFreeVariables(StateMachine *sm,
-		       const Oracle::RegisterAliasingConfiguration &alias,
+		       const Oracle::RegisterAliasingConfiguration *alias,
 		       const AllowableOptimisations &opt,
 		       Oracle *oracle,
 		       bool *done_something)
@@ -703,7 +703,7 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 
 StateMachine *
 introduceFreeVariables(StateMachine *sm,
-		       const Oracle::RegisterAliasingConfiguration &alias,
+		       const Oracle::RegisterAliasingConfiguration *alias,
 		       const AllowableOptimisations &opt,
 		       Oracle *oracle,
 		       bool *done_something)

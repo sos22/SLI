@@ -814,9 +814,12 @@ irexprAliasingClass(IRExpr *expr,
 			auto it = temps->find(e->reg);
 			assert(it != temps->end());
 			return it->second;
-		} else if (e->reg.asReg() < Oracle::NR_REGS * 8)
-			return config.v[e->reg.asReg() / 8];
-		else {
+		} else if (e->reg.asReg() < Oracle::NR_REGS * 8) {
+			if (e->reg.gen() == (unsigned)-1)
+				return config.v[e->reg.asReg() / 8];
+			else
+				return Oracle::PointerAliasingSet::anything;
+		} else {
 			/* Assume that those are the only pointer registers */
 			return Oracle::PointerAliasingSet::notAPointer;
 		}

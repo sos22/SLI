@@ -22,7 +22,7 @@ main(int argc, char *argv[])
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack();
-	sm = optimiseStateMachine(sm, opt, oracle, true, ALLOW_GC);
+	sm = optimiseStateMachine(sm, opt, oracle, true, true, ALLOW_GC);
 	printStateMachine(sm, stdout);
 
 	return 0;

@@ -232,8 +232,8 @@ public:
 											       bool *b);
 		RegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
 		RegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
-		RegisterAliasingConfiguration() : stackHasLeaked(false) {}
 	public:
+		RegisterAliasingConfiguration() : stackHasLeaked(false) {}
 		bool stackHasLeaked;
 		PointerAliasingSet v[NR_REGS];
 		
@@ -396,7 +396,7 @@ void findInstrSuccessorsAndCallees(AddressSpace *as,
 				   gc_pair_VexRip_set_t *callees);
 
 StateMachine *introduceFreeVariables(StateMachine *sm,
-				     const Oracle::RegisterAliasingConfiguration &alias,
+				     const Oracle::RegisterAliasingConfiguration *alias,
 				     const AllowableOptimisations &opt,
 				     Oracle *oracle,
 				     bool *done_something);

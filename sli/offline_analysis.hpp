@@ -191,14 +191,15 @@ StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
 				   VexPtr<Oracle> &oracle,
 				   bool noExtendContext,
+				   bool is_ssa,
 				   GarbageCollectionToken token);
 
 /* Individual optimisation passes. */
 void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
-			   Oracle::RegisterAliasingConfiguration &alias,
+			   const Oracle::RegisterAliasingConfiguration *alias,
 			   const AllowableOptimisations &opt);
 StateMachine *availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-				      const Oracle::RegisterAliasingConfiguration &alias, Oracle *oracle,
+				      const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);

@@ -382,11 +382,24 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		     const AllowableOptimisations &opt,
 		     VexPtr<Oracle> &oracle,
 		     bool noExtendContext,
+		     bool is_ssa,
 		     GarbageCollectionToken token)
 {
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
-	Oracle::RegisterAliasingConfiguration alias(oracle->getAliasingConfigurationForRip(sm->origin));
+	Oracle::RegisterAliasingConfiguration alias, *aliasp;
+
+	/* Careful here.  We can only use the aliasing configuration
+	   if the machine is in SSA form, because that guarantees that
+	   there won't be any writes to gen -1 registers, which in
+	   turn means that a single aliasing configuration is valid
+	   for the entire machine. */
+	if (is_ssa) {
+		alias = oracle->getAliasingConfigurationForRip(sm->origin);
+		aliasp = &alias;
+	} else {
+		aliasp = NULL;
+	}
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -396,9 +409,9 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm = sm->optimise(opt, oracle, &done_something);
 		if (opt.ignoreSideEffects)
 			removeSurvivingStates(sm, &done_something);
-		removeRedundantStores(sm, oracle, &done_something, alias, opt);
+		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
 		LibVEX_maybe_gc(token);
-		sm = availExpressionAnalysis(sm, opt, alias, oracle, &done_something);
+		sm = availExpressionAnalysis(sm, opt, aliasp, oracle, &done_something);
 		LibVEX_maybe_gc(token);
 		{
 			bool d;
@@ -412,7 +425,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
 			sm->root->assertAcyclic();
-			sm = introduceFreeVariables(sm, alias, opt, oracle, &done_something);
+			sm = introduceFreeVariables(sm, aliasp, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
 			sm->root->assertAcyclic();
@@ -471,7 +484,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
-	sm = optimiseStateMachine(storeMachine, opt, oracle, noExtendContext, token);
+	sm = optimiseStateMachine(storeMachine, opt, oracle, noExtendContext, true, token);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
@@ -608,6 +621,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  opt,
 				  oracle,
 				  false,
+				  true,
 				  token);
 	breakCycles(cr);
 	cr->selectSingleCrashingPath();
@@ -615,6 +629,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  opt,
 				  oracle,
 				  false,
+				  true,
 				  token);
 	return cr;
 }
@@ -746,6 +761,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 					  opt,
 					  oracle,
 					  false,
+					  true,
 					  token);
 		breakCycles(cr);
 		cr->selectSingleCrashingPath();
@@ -753,6 +769,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 					  opt,
 					  oracle,
 					  false,
+					  true,
 					  token);
 
 		if (dynamic_cast<StateMachineNoCrash *>(cr->root)) {
@@ -771,6 +788,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 		sm = optimiseStateMachine(sm,
 					  opt.disablefreeVariablesMightAccessStack(),
 					  oracle,
+					  true,
 					  true,
 					  token);
 
@@ -2031,7 +2049,7 @@ CFGtoCrashReason(unsigned tid,
 	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip, fv, tid));
 	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
-	sm = optimiseStateMachine(sm, opt, oracle, false, token);
+	sm = optimiseStateMachine(sm, opt, oracle, false, false, token);
 	if (crashReasons)
 		crashReasons->set(original_rip, sm->root);
 	sm = convertToSSA(sm);

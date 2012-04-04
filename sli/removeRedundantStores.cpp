@@ -14,14 +14,14 @@ namespace _removeRedundantStores {
 
 static bool storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses,
 				      const AllowableOptimisations &opt,
-				      Oracle::RegisterAliasingConfiguration &alias,
+				      const Oracle::RegisterAliasingConfiguration *alias,
 				      bool freeVariablesMightAccessStack,
 				      Oracle *oracle,
 				      std::set<StateMachineEdge *> &memo);
 static bool
 storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore *smses,
 			      const AllowableOptimisations &opt,
-			      Oracle::RegisterAliasingConfiguration &alias,
+			      const Oracle::RegisterAliasingConfiguration *alias,
 			      bool freeVariablesMightAccessStack,
 			      Oracle *oracle,
 			      std::set<StateMachineEdge *> &memo)
@@ -42,7 +42,7 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
 			assert(smsel);
-			if (alias.ptrsMightAlias(smsel->addr, smses->addr, freeVariablesMightAccessStack) &&
+			if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, freeVariablesMightAccessStack)) &&
 			    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				return true;
 		}
@@ -53,7 +53,7 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 static bool
 storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *smses,
 			  const AllowableOptimisations &opt,
-			  Oracle::RegisterAliasingConfiguration &alias,
+			  const Oracle::RegisterAliasingConfiguration *alias,
 			  bool freeVariablesMightAccessStack,
 			  Oracle *oracle,
 			  std::set<StateMachineEdge *> &memo)
@@ -70,7 +70,7 @@ static bool
 storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 				      const AllowableOptimisations &opt,
 				      StateMachineSideEffectStore *smses,
-				      Oracle::RegisterAliasingConfiguration &alias,
+				      const Oracle::RegisterAliasingConfiguration *alias,
 				      bool freeVariablesMightAccessStack,
 				      Oracle *oracle)
 {
@@ -79,8 +79,8 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
 			assert(smsel);
-			if (alias.ptrsMightAlias(smsel->addr, smses->addr,
-						 freeVariablesMightAccessStack) &&
+			if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr,
+							     freeVariablesMightAccessStack)) &&
 			    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				return true;
 		}
@@ -90,13 +90,13 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
 }
 
 static void removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_something,
-				  Oracle::RegisterAliasingConfiguration &alias,
+				  const Oracle::RegisterAliasingConfiguration *alias,
 				  std::set<StateMachineState *> &visited,
 				  const AllowableOptimisations &opt);
 
 static void
 removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_something,
-		      Oracle::RegisterAliasingConfiguration &alias,
+		      const Oracle::RegisterAliasingConfiguration *alias,
 		      std::set<StateMachineState *> &visited,
 		      const AllowableOptimisations &opt)
 {
@@ -121,7 +121,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 
 static void
 removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_something,
-		      Oracle::RegisterAliasingConfiguration &alias,
+		      const Oracle::RegisterAliasingConfiguration *alias,
 		      std::set<StateMachineState *> &visited,
 		      const AllowableOptimisations &opt)
 {
@@ -145,7 +145,7 @@ removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_somethin
 
 static void
 removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
-		      Oracle::RegisterAliasingConfiguration &alias,
+		      const Oracle::RegisterAliasingConfiguration *alias,
 		      const AllowableOptimisations &opt)
 {
 	__set_profiling(removeRedundantStores);
@@ -158,7 +158,7 @@ removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 
 void
 removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
-		      Oracle::RegisterAliasingConfiguration &alias,
+		      const Oracle::RegisterAliasingConfiguration *alias,
 		      const AllowableOptimisations &opt)
 {
 	_removeRedundantStores::removeRedundantStores(sm, oracle, done_something, alias, opt);
