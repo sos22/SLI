@@ -69,8 +69,6 @@ public:
 	   otherwise. */
 	bool intersect(const avail_t &other, const AllowableOptimisations &opt);
 
-	bool operator !=(const avail_t &other) const;
-
 	void calcRegisterMap(const AllowableOptimisations &opt);
 
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
@@ -193,6 +191,11 @@ avail_t::intersect(const avail_t &other, const AllowableOptimisations &opt)
 	return res;
 }
 
+/* Remove any references to register @reg from the available set.
+   Most of the time, that includes side effects which either use or
+   define @reg.  The exception is the side-effect @preserve, which is
+   only purged if it uses @reg (i.e. it'll be left in place if its
+   only reference to @reg is to use it). */
 void
 avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve)
 {
@@ -256,12 +259,6 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		else
 			it++;
 	}
-}
-
-bool
-avail_t::operator!=(const avail_t &other) const
-{
-	return sideEffects != other.sideEffects || assertFalse != other.assertFalse;
 }
 
 void
