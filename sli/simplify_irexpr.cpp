@@ -1107,19 +1107,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		const AllowableOptimisations &opt;
 		bool *done_something;
 
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something)
-		{
-			if (!(opt.asUnsigned() & ~e->optimisationsApplied))
-				return e;
-			bool b;
-			b = false;
-			IRExpr *res = IRExprTransformer::transformIRExpr(e, &b);
-			if (!b)
-				e->optimisationsApplied |= b;
-			*done_something |= b;
-			return res;
-		}
-
 		IRExpr *transformIex(IRExprCCall *e) {
 #define hdr(type)							\
 			IRExpr *res = IRExprTransformer::transformIex(e); \
