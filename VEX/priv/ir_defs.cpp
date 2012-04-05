@@ -2499,14 +2499,6 @@ IRTemp newIRTemp ( IRTypeEnv* env, IRType ty )
 /*--- Helper functions for the IR -- finding types of exprs   ---*/
 /*---------------------------------------------------------------*/
 
-IRType typeOfIRTemp ( IRTypeEnv* env, IRTemp tmp )
-{
-   vassert(tmp >= 0);
-   //   vassert(tmp < env->types_used);
-   return env->types[tmp];
-}
-
-
 IRType typeOfIRConst ( IRConst* con )
 {
    switch (con->tag) {

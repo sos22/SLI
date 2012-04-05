@@ -1061,7 +1061,6 @@ struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
    }
    IRTypeEnv;
 
-extern IRType typeOfIRTemp  ( IRTypeEnv*, IRTemp );
 extern IRType typeOfIRConst ( IRConst* );
 extern void typeOfPrimop ( IROp op,
 			   /*OUTs*/
@@ -1185,7 +1184,7 @@ public:
    unsigned optimisationsApplied;
 
    virtual unsigned long hashval() const = 0;
-   virtual IRType type(IRTypeEnv *) const = 0;
+   virtual IRType type() const = 0;
    NAMED_CLASS
 };
 
@@ -1233,11 +1232,8 @@ struct IRExprGet : public IRExpr {
       reg.prettyPrint(f);
       fprintf(f, ")");
    }
-   IRType type(IRTypeEnv *e) const {
-      if (!reg.isTemp())
-	 return ty;
-      else
-	 return typeOfIRTemp(e, reg.asTemp());
+   IRType type() const {
+      return ty;
    }
 };
 /* Read a guest register at a non-fixed offset in the guest state.
@@ -1297,7 +1293,7 @@ struct IRExprGetI : public IRExpr {
       ix->prettyPrint(f);
       fprintf(f, ",%d](%d)", bias, tid);
    }
-   IRType type(IRTypeEnv *) const { return descr->elemTy; }
+   IRType type() const { return descr->elemTy; }
 };
 
 /* A quaternary operation.
@@ -1334,7 +1330,7 @@ struct IRExprQop : public IRExpr {
       arg4->prettyPrint(f);
       fprintf(f,  ")" );
    }
-   IRType type(IRTypeEnv *) const {
+   IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
@@ -1370,7 +1366,7 @@ struct IRExprTriop : public IRExpr {
       arg3->prettyPrint(f);
       fprintf(f,  ")" );
    }
-   IRType type(IRTypeEnv *) const {
+   IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
@@ -1394,7 +1390,7 @@ struct IRExprBinop : public IRExpr {
        return op + arg1->hashval() * 3 + arg2->hashval() * 5;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *) const {
+   IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
@@ -1416,7 +1412,7 @@ struct IRExprUnop : public IRExpr {
        return op + arg->hashval() * 3;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *) const {
+   IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
@@ -1446,7 +1442,7 @@ struct IRExprLoad : public IRExpr {
        return ty + addr->hashval() * 97;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *) const { return ty; }
+   IRType type() const { return ty; }
 };
 
 /* A constant-valued expression.
@@ -1458,7 +1454,7 @@ struct IRExprConst : public IRExpr {
    void visit(HeapVisitor &hv) { hv(con); }
    unsigned long hashval() const { return con->hashval(); }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *) const { return typeOfIRConst(con); }
+   IRType type() const { return typeOfIRConst(con); }
 };
 
 /* A call to a pure (no side-effects) helper C function.
@@ -1514,7 +1510,7 @@ struct IRExprCCall : public IRExpr {
        return h;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *) const { return retty; }
+   IRType type() const { return retty; }
 };
 
 /* A ternary if-then-else operator.  It returns expr0 if cond is zero,
@@ -1539,7 +1535,7 @@ struct IRExprMux0X : public IRExpr {
 	   exprX->hashval() * 7;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *e) const { return expr0->type(e); }
+   IRType type() const { return expr0->type(); }
 };
 
 /* An associative operator with as many arguments as are needed.
@@ -1563,7 +1559,7 @@ struct IRExprAssociative : public IRExpr {
        return h;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *) const {
+   IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
@@ -1578,7 +1574,7 @@ struct IRExprFreeVariable : public IRExpr {
        return key.val * 12357743;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *e) const { return Ity_I64; }
+   IRType type() const { return Ity_I64; }
 };
 
 struct IRExprClientCall : public IRExpr {
@@ -1594,7 +1590,7 @@ struct IRExprClientCall : public IRExpr {
        return h;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *e) const { return Ity_I64; }
+   IRType type() const { return Ity_I64; }
 };
 
 struct IRExprClientCallFailed : public IRExpr {
@@ -1605,7 +1601,7 @@ struct IRExprClientCallFailed : public IRExpr {
        return target->hashval() * 65537;
    }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *e) const { return Ity_I64; }
+   IRType type() const { return Ity_I64; }
 };
 
 struct IRExprHappensBefore : public IRExpr {
@@ -1615,7 +1611,7 @@ struct IRExprHappensBefore : public IRExpr {
    void visit(HeapVisitor &hv) {}
    unsigned long hashval() const { return 19; }
    void prettyPrint(FILE *f) const;
-   IRType type(IRTypeEnv *e) const { return Ity_I1; }
+   IRType type() const { return Ity_I1; }
 };
 
 /* Expression constructors. */

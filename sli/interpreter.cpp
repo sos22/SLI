@@ -1710,7 +1710,7 @@ interpretStatement(IRStmt *stmt,
 			eval_expression(&thr->regs, s->data, thr->temporaries.content);
 		struct expression_result addr =
 			eval_expression(&thr->regs, s->addr, thr->temporaries.content);
-		unsigned size = sizeofIRType(s->data->type(irsb->tyenv));
+		unsigned size = sizeofIRType(s->data->type());
 		if (ms->addressSpace->isWritable(addr.lo, size, thr)) {
 			if (er) {
 				ret.suspend();
@@ -1733,7 +1733,7 @@ interpretStatement(IRStmt *stmt,
 			eval_expression(&thr->regs, s->details->addr, thr->temporaries.content);
 		struct expression_result expected =
 			eval_expression(&thr->regs, s->details->expdLo, thr->temporaries.content);
-		unsigned size = sizeofIRType(s->details->dataLo->type(irsb->tyenv));
+		unsigned size = sizeofIRType(s->details->dataLo->type());
 		return CasEvent::get(thr->tid, s->details->oldLo, addr, data, expected, size);
 	}
 
@@ -1746,7 +1746,7 @@ interpretStatement(IRStmt *stmt,
 			put_stmt(&thr->regs,
 				 s->target.asReg(),
 				 eval_expression(&thr->regs, s->data, thr->temporaries.content),
-				 s->data->type(irsb->tyenv));
+				 s->data->type());
 		}
 		return NULL;
 	}

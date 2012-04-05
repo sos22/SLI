@@ -155,7 +155,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 					put_stmt(&s.regs,
 						 p->target.asReg(),
 						 eval_expression(&s.regs, p->data, temporaries),
-						 p->data->type(irsb->tyenv));
+						 p->data->type());
 				}
 				break;
 			}

@@ -1418,7 +1418,7 @@ static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
                     const ThreadRip &restart_point, unsigned tid )
 {
    IRCAS* cas;
-   IRType tyE    = expVal->type(irsb->tyenv);
+   IRType tyE    = expVal->type();
    IRTemp oldTmp = newTemp(tyE);
    IRTemp expTmp = newTemp(tyE);
    vassert(tyE == Ity_I64 || tyE == Ity_I32
@@ -1533,7 +1533,7 @@ static Bool isLogic ( IROp op8 )
 /* U-widen 8/16/32/64 bit int expr to 64. */
 static IRExpr* widenUto64 ( IRExpr* e )
 {
-   switch (e->type(irsb->tyenv)) {
+   switch (e->type()) {
       case Ity_I64: return e;
       case Ity_I32: return unop(Iop_32Uto64, e);
       case Ity_I16: return unop(Iop_16Uto64, e);
@@ -1545,7 +1545,7 @@ static IRExpr* widenUto64 ( IRExpr* e )
 /* S-widen 8/16/32/64 bit int expr to 32. */
 static IRExpr* widenSto64 ( IRExpr* e )
 {
-   switch (e->type(irsb->tyenv)) {
+   switch (e->type()) {
       case Ity_I64: return e;
       case Ity_I32: return unop(Iop_32Sto64, e);
       case Ity_I16: return unop(Iop_16Sto64, e);
@@ -1558,7 +1558,7 @@ static IRExpr* widenSto64 ( IRExpr* e )
    of these combinations make sense. */
 static IRExpr* narrowTo ( IRType dst_ty, IRExpr* e )
 {
-   IRType src_ty = e->type(irsb->tyenv);
+   IRType src_ty = e->type();
    if (src_ty == dst_ty)
       return e;
    if (src_ty == Ity_I32 && dst_ty == Ity_I16)
@@ -1812,8 +1812,6 @@ static void helper_ADC ( unsigned tid,
    IROp    plus  = mkSizedOp(ty, Iop_Add8);
    IROp    xoro   = mkSizedOp(ty, Iop_Xor8);
 
-   vassert(typeOfIRTemp(irsb->tyenv, tres) == ty);
-
    switch (sz) {
       case 8:  thunkOp = AMD64G_CC_OP_ADCQ; break;
       case 4:  thunkOp = AMD64G_CC_OP_ADCL; break;
@@ -1841,7 +1839,6 @@ static void helper_ADC ( unsigned tid,
 	 vassert(!restart_point.rip.isValid());
          storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
       } else {
-         vassert(typeOfIRTemp(irsb->tyenv, texpVal) == ty);
          /* .. and hence 'texpVal' has the same type as 'tres'. */
          casLE( mkexpr(taddr, tid, Ity_I64),
                 mkexpr(texpVal, tid, ty), mkexpr(tres, tid, ty), restart_point,
@@ -1874,8 +1871,6 @@ static void helper_SBB ( unsigned tid,
    IROp    minus = mkSizedOp(ty, Iop_Sub8);
    IROp    xoro   = mkSizedOp(ty, Iop_Xor8);
 
-   vassert(typeOfIRTemp(irsb->tyenv, tres) == ty);
-
    switch (sz) {
       case 8:  thunkOp = AMD64G_CC_OP_SBBQ; break;
       case 4:  thunkOp = AMD64G_CC_OP_SBBL; break;
@@ -1903,7 +1898,6 @@ static void helper_SBB ( unsigned tid,
          vassert(!restart_point.rip.isValid());
          storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
       } else {
-         vassert(typeOfIRTemp(irsb->tyenv, texpVal) == ty);
          /* .. and hence 'texpVal' has the same type as 'tres'. */
          casLE( mkexpr(taddr, tid, Ity_I64),
                 mkexpr(texpVal, tid, ty), mkexpr(tres, tid, ty), restart_point,
@@ -2072,8 +2066,6 @@ void make_redzone_AbiHint ( VexAbiInfo* vbi,
       (paranoia). */
    vassert(szB == 128);
 
-   vassert(typeOfIRTemp(irsb->tyenv, new_rsp) == Ity_I64);
-   vassert(typeOfIRTemp(irsb->tyenv, nia) == Ity_I64);
    if (szB > 0)
       stmt( IRStmt_AbiHint( 
 		binop(Iop_Sub64, mkexpr(new_rsp, tid, Ity_I64), mkU64(szB)), 

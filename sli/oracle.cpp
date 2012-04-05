@@ -796,12 +796,11 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 
 static Oracle::PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
-		    IRTypeEnv *tyenv,
 		    const Oracle::RegisterAliasingConfiguration &config,
 		    bool freeVariablesCannotAccessStack,
 		    std::map<threadAndRegister, Oracle::PointerAliasingSet, threadAndRegister::fullCompare> *temps)
 {
-	if (tyenv && expr->type(tyenv) != Ity_I64)
+	if (expr->type() != Ity_I64)
 		/* Not a 64 bit value -> not a pointer */
 		return Oracle::PointerAliasingSet::notAPointer;
 
@@ -850,13 +849,11 @@ irexprAliasingClass(IRExpr *expr,
 		IRExprBinop *e = (IRExprBinop *)expr;
 		Oracle::PointerAliasingSet a1 = irexprAliasingClass(
 			e->arg1,
-			tyenv,
 			config,
 			freeVariablesCannotAccessStack,
 			temps);
 		Oracle::PointerAliasingSet a2 = irexprAliasingClass(
 			e->arg2,
-			tyenv,
 			config,
 			freeVariablesCannotAccessStack,
 			temps);
@@ -902,12 +899,10 @@ irexprAliasingClass(IRExpr *expr,
 	case Iex_Mux0X: {
 		IRExprMux0X *e = (IRExprMux0X *)expr;
 		return irexprAliasingClass(e->expr0,
-					   tyenv,
 					   config,
 					   freeVariablesCannotAccessStack,
 					   temps) |
 			irexprAliasingClass(e->exprX,
-					    tyenv,
 					    config,
 					    freeVariablesCannotAccessStack,
 					    temps);
@@ -922,7 +917,6 @@ irexprAliasingClass(IRExpr *expr,
 				if (e->contents[i]->tag != Iex_Const) {
 					Oracle::PointerAliasingSet res = 
 						irexprAliasingClass(e->contents[i],
-								    tyenv,
 								    config,
 								    freeVariablesCannotAccessStack,
 								    temps);
@@ -930,7 +924,6 @@ irexprAliasingClass(IRExpr *expr,
 						if (e->contents[j]->tag != Iex_Const)
 							res = res | 
 								irexprAliasingClass(e->contents[j],
-										    tyenv,
 										    config,
 										    freeVariablesCannotAccessStack,
 										    temps);
@@ -973,7 +966,6 @@ irexprAliasingClass(IRExpr *expr,
 		bool mightReturnStack = false;
 		for (int x = 0; !mightReturnStack && e->args[x]; x++) {
 			if (irexprAliasingClass(e->args[x],
-						tyenv,
 						config,
 						freeVariablesCannotAccessStack,
 						temps) &
@@ -999,8 +991,8 @@ irexprAliasingClass(IRExpr *expr,
 bool
 Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, bool fvcas) const
 {
-	return irexprAliasingClass(a, NULL, *this, fvcas, NULL) &
-		irexprAliasingClass(b, NULL, *this, fvcas, NULL) &
+	return irexprAliasingClass(a, *this, fvcas, NULL) &
+		irexprAliasingClass(b, *this, fvcas, NULL) &
 		~PointerAliasingSet::notAPointer;
 }
 
@@ -2089,7 +2081,6 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
 	     nr_statements++)
 		;
-	IRTypeEnv *tyenv = irsb->tyenv;
 	for (int i = 1; i < nr_statements; i++) {
 		st = statements[i];
 		switch (st->tag) {
@@ -2106,7 +2097,6 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				    p->target.asReg() != OFFSET_amd64_RSP) {
 					config.v[p->target.asReg() / 8] =
 						irexprAliasingClass(p->data,
-								    tyenv,
 								    config,
 								    false,
 								    &temporaryAliases);
@@ -2115,7 +2105,6 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				temporaryAliases.insert(
 					std::pair<threadAndRegister, PointerAliasingSet>(p->target,
 											 irexprAliasingClass(p->data,
-													     tyenv,
 													     config,
 													     false,
 													     &temporaryAliases)));
@@ -2128,12 +2117,10 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		case Ist_Store:
 			if (!config.stackHasLeaked) {
 				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->data,
-									      tyenv,
 									      config,
 									      false,
 									      &temporaryAliases);
 				PointerAliasingSet data = irexprAliasingClass(((IRStmtStore *)st)->data,
-									      tyenv,
 									      config,
 									      false,
 									      &temporaryAliases);
