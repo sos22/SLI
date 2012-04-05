@@ -1482,20 +1482,7 @@ void ppIRStmt ( IRStmt* s, FILE* f )
 }
 
 void ppIRTypeEnv ( IRTypeEnv* env, FILE* f ) {
-   Int i;
-   for (i = 0; i < env->types_used; i++) {
-      if (i % 8 == 0)
-         fprintf(f,  "   ");
-      ppIRTemp(i, f);
-      fprintf(f,  ":");
-      ppIRType(env->types[i], f);
-      if (i % 8 == 7) 
-         fprintf(f,  "\n"); 
-      else 
-         fprintf(f,  "   ");
-   }
-   if (env->types_used > 0 && env->types_used % 8 != 7) 
-      fprintf(f,  "\n"); 
+   fprintf(f, "    %d temps used\n", env->types_used);
 }
 
 void ppIRSB ( IRSB* bb, FILE* f )
@@ -2021,8 +2008,6 @@ IRStmt* IRStmt_Exit ( IRExpr* guard, IRJumpKind jk, const ThreadRip &dst )
 IRTypeEnv* emptyIRTypeEnv ( void )
 {
    IRTypeEnv* env   = new IRTypeEnv();
-   env->types       = (IRType *)__LibVEX_Alloc_Bytes(&ir_heap, 8 * sizeof(IRType), NULL);
-   env->types_size  = 8;
    env->types_used  = 0;
    return env;
 }
@@ -2472,26 +2457,11 @@ void addStmtToIRSB ( IRSB* bb, IRStmt* st )
 
 /* Allocate a new IRTemp, given its type. */
 
-IRTemp newIRTemp ( IRTypeEnv* env, IRType ty )
+IRTemp newIRTemp ( IRTypeEnv* env )
 {
    vassert(env);
    vassert(env->types_used >= 0);
-   vassert(env->types_size >= 0);
-   vassert(env->types_used <= env->types_size);
-   if (env->types_used < env->types_size) {
-      env->types[env->types_used] = ty;
-      return env->types_used++;
-   } else {
-      Int i;
-      Int new_size = env->types_size==0 ? 8 : 2*env->types_size;
-      IRType* new_types 
-	= (IRType *)__LibVEX_Alloc_Bytes(&ir_heap, new_size * sizeof(IRType), NULL);
-      for (i = 0; i < env->types_used; i++)
-         new_types[i] = env->types[i];
-      env->types      = new_types;
-      env->types_size = new_size;
-      return newIRTemp(env, ty);
-   }
+   return env->types_used++;
 }
 
 

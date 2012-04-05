@@ -1053,10 +1053,8 @@ extern Int sizeofIRType ( IRType );
 */
 typedef
 struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
-      IRType* types;
-      Int     types_size;
       Int     types_used;
-      void visit(HeapVisitor &hv) { hv(types); }
+      void visit(HeapVisitor &hv) { }
       NAMED_CLASS
    }
    IRTypeEnv;
@@ -2224,7 +2222,7 @@ extern void ppIRStmt ( IRStmt*, FILE* );
 /* ------------------ Basic Blocks ------------------ */
 
 /* Obtain a new IRTemp */
-extern IRTemp newIRTemp ( IRTypeEnv*, IRType );
+extern IRTemp newIRTemp ( IRTypeEnv* );
 
 /* Pretty-print a type environment */
 extern void ppIRTypeEnv ( IRTypeEnv* );
