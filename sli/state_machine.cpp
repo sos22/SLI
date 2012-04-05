@@ -263,6 +263,10 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			   FreeVariableMap &freeVariables,
 			   std::set<StateMachineState *> &done)
 {
+	target = target->optimise(opt, oracle, done_something, freeVariables, done);
+ top:
+	if (TIMEOUT)
+		return this;
 	if (StateMachineProxy *smp =
 	    dynamic_cast<StateMachineProxy *>(target)) {
 		StateMachineEdge *other = smp->target;
@@ -276,17 +280,14 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 					havePhi = true;
 			if (!havePhi) {
 				sideEffects.insert(sideEffects.end(),
-						   smp->target->sideEffects.begin(),
-						   smp->target->sideEffects.end());
-				target = smp->target->target;
+						   other->sideEffects.begin(),
+						   other->sideEffects.end());
+				target = other->target;
 				*done_something = true;
-				return optimise(opt, oracle, done_something, freeVariables, done);
+				goto top;
 			}
 		}
 	}
-	if (TIMEOUT)
-		return this;
-	target = target->optimise(opt, oracle, done_something, freeVariables, done);
 
 	for (auto it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++) {
 		if ((*it)->type == StateMachineSideEffect::Unreached) {
