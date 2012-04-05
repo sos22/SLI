@@ -1955,17 +1955,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 IRExpr *
 simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 {
-	__set_profiling(simplifyIRExpr);
-	bool done_something;
-
-	do {
-		done_something = false;
-		if (TIMEOUT)
-			return a;
-		a = optimiseIRExprFP(a, opt, &done_something);
-	} while (done_something);
-
-	return a;
+	bool progress;
+	return optimiseIRExprFP(a, opt, &progress);
 }
 
 QueryCache<IRExpr, IRExpr, bool> definitelyEqualCache("Definitely equal");
