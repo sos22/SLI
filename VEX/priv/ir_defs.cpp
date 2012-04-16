@@ -1742,6 +1742,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, ThreadRip rip ) {
    IRExprLoad* e        = new IRExprLoad();
+   assert(addr->type() == Ity_I64);
    e->ty   = ty;
    e->addr = addr;
    e->rip  = rip;

@@ -96,6 +96,8 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 		IRTemp dest;
 		IRDirty *f;
 
+		assert(e->addr->type() == Ity_I64);
+
 #define HLP(x) helper_name = "helper_load_" #x ; helper = (void *)helper_load_ ## x ;
 		switch (e->ty) {
 		case Ity_INVALID:

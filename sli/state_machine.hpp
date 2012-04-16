@@ -794,12 +794,16 @@ public:
 	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const ThreadVexRip &_rip,
 					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip)
-	{}
+	{
+		if (addr)
+			sanityCheck(NULL);
+	}
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
 	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(addr, live);
+		assert(addr->type() == Ity_I64);
 	}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
