@@ -1540,6 +1540,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								done_something);
 			}
 
+			if (e->arg->tag == Iex_Get) {
+				IRExprGet *argg = (IRExprGet *)e->arg;
+				if (e->op == Iop_64to32)
+					return IRExpr_Get(argg->reg, Ity_I32);
+			}
+
 			if (e->op == Iop_Not1 &&
 			    e->arg->tag == Iex_Associative &&
 			    (((IRExprAssociative *)e->arg)->op == Iop_And1 ||
@@ -1806,7 +1812,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return e;
 				}
 
-				/* Special case: const:a == bTOa(X)
+				/* Special case: const:64 == {b}to64(X)
 				   can be optimised a bit by
 				   converting the constant to type b
 				   and then removing the conversion.
@@ -1818,26 +1824,42 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				    r->tag == Iex_Unop) {
 					IRExprConst *lc = (IRExprConst *)l;
 					IRExprUnop *ru = (IRExprUnop *)r;
-					/* Only actually consider the
-					   1Uto64 case, because that's
-					   by far the most common. */
+					assert(lc->con->tag == Ico_U64);
+					/* Only consider the cases b =
+					 * 1U and b = 32U */
 					if (ru->op == Iop_1Uto64) {
-						assert(lc->con->tag == Ico_U64);
-						if (lc->con->Ico.U64 == 0) {
+						if (lc->con->Ico.U64 & 0xfffffffffffffffeul) {
+							return IRExpr_Const(IRConst_U1(0));
+						} else {
 							e->op = Iop_CmpEQ1;
-							e->arg1 = IRExpr_Const(IRConst_U1(0));
+							e->arg1 = IRExpr_Const(IRConst_U1(lc->con->Ico.U64));
 							e->arg2 = ru->arg;
 							*done_something = true;
 							return e;
 						}
-						if (lc->con->Ico.U64 == 1) {
-							e->op = Iop_CmpEQ1;
-							e->arg1 = IRExpr_Const(IRConst_U1(1));
+					}
+					if (ru->op == Iop_32Uto64) {
+						if (lc->con->Ico.U64 & 0xffffffff00000000ul) {
+							return IRExpr_Const(IRConst_U1(0));
+						} else {
+							e->op = Iop_CmpEQ32;
+							e->arg1 = IRExpr_Const(IRConst_U32(lc->con->Ico.U64));
 							e->arg2 = ru->arg;
 							*done_something = true;
 							return e;
 						}
-						return IRExpr_Const(IRConst_U1(0));
+					}
+
+					/* Another special case: if
+					   you have k = -(foo), where
+					   k is a constant, it's
+					   better to convert that to
+					   -k = foo */
+					if (ru->op == Iop_Neg64) {
+						e->arg1 = IRExpr_Const(IRConst_U64(-lc->con->Ico.U64));
+						e->arg2 = ru->arg;
+						*done_something = true;
+						return e;
 					}
 				}
 
