@@ -342,6 +342,8 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(Ctz64)			\
 	     iter(Ctz32)			\
 						\
+	     iter(CmpLT8S)			\
+						\
 	     iter(CmpLT32S)			\
 	     iter(CmpLE32S)			\
 	     iter(CmpLT32U)			\
@@ -2206,12 +2208,14 @@ void typeOfPrimop ( IROp op,
          BINARY(Ity_I64,Ity_I8, Ity_I64);
 
       case Iop_Not8:
+      case Iop_Neg8:
          UNARY(Ity_I8, Ity_I8);
       case Iop_Not16:
+      case Iop_Neg16:
          UNARY(Ity_I16, Ity_I16);
       case Iop_Not32:
+      case Iop_Neg32:
          UNARY(Ity_I32, Ity_I32);
-
       case Iop_Not64:
       case Iop_Neg64:
       case Iop_CmpNEZ32x2: case Iop_CmpNEZ16x4: case Iop_CmpNEZ8x8:
@@ -2219,9 +2223,11 @@ void typeOfPrimop ( IROp op,
 
       case Iop_CmpEQ8: case Iop_CmpNE8:
       case Iop_CasCmpEQ8: case Iop_CasCmpNE8:
+      case Iop_CmpLT8S:
          COMPARISON(Ity_I8);
       case Iop_CmpEQ16: case Iop_CmpNE16:
       case Iop_CasCmpEQ16: case Iop_CasCmpNE16:
+      case Iop_CmpLT16S:
          COMPARISON(Ity_I16);
       case Iop_CmpEQ32: case Iop_CmpNE32:
       case Iop_CasCmpEQ32: case Iop_CasCmpNE32:

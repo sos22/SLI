@@ -232,11 +232,11 @@ optimise_condition_calculation(
 #define do_logic(type)						\
 		zf = IRExpr_Binop(				\
 			Iop_CmpEQ ## type ,			\
-			dep1,					\
+			IRExpr_Unop(Iop_64to ## type, dep1),	\
 			IRExpr_Const(IRConst_U ## type (0)));	\
 		sf = IRExpr_Binop(				\
 			Iop_CmpLT ## type ## S,			\
-			dep1,					\
+			IRExpr_Unop(Iop_64to ## type, dep1),	\
 			IRExpr_Const(IRConst_U ## type (0)));	\
 		of = IRExpr_Const(IRConst_U1(0));		\
 		break;
@@ -246,9 +246,18 @@ optimise_condition_calculation(
 		do_logic(16);
 	case AMD64G_CC_OP_LOGICL:
 		do_logic(32);
-	case AMD64G_CC_OP_LOGICQ:
-		do_logic(64);
 #undef do_logic
+	case AMD64G_CC_OP_LOGICQ:
+		zf = IRExpr_Binop(				
+			Iop_CmpEQ64,			
+			dep1,					
+			IRExpr_Const(IRConst_U64(0)));	
+		sf = IRExpr_Binop(				
+			Iop_CmpLT64S,			
+			dep1,					
+			IRExpr_Const(IRConst_U64(0)));	
+		of = IRExpr_Const(IRConst_U1(0));		
+		break;
 	case AMD64G_CC_OP_ADDW:
 		sf = IRExpr_Binop(
 			Iop_CmpLT32S,
