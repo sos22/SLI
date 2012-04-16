@@ -1754,6 +1754,8 @@ extern IRExpr* IRExpr_Qop    ( IROp op, IRExpr* arg1, IRExpr* arg2,
 extern IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                         IRExpr* arg2, IRExpr* arg3 );
 extern IRExpr* IRExpr_Binop  ( IROp op, IRExpr* arg1, IRExpr* arg2 );
+extern bool shortCircuitableUnops(IROp a, IROp b, IROp *c);
+extern bool inverseUnops(IROp a, IROp b);
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
 extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr, ThreadRip rip );
 extern IRExpr* IRExpr_Const  ( IRConst* con );

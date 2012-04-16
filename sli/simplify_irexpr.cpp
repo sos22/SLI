@@ -1519,26 +1519,16 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 		IRExpr *transformIex(IRExprUnop *e) {
 			hdr(Unop)
 			__set_profiling(optimise_unop);
-			if (e->op == Iop_64to1 &&
-			    ((e->arg->tag == Iex_Associative &&
-			      (((IRExprAssociative *)e->arg)->op == Iop_And1 ||
-			       ((IRExprAssociative *)e->arg)->op == Iop_Or1)) ||
-			     (e->arg->tag == Iex_Binop &&
-			      ((((IRExprBinop *)e->arg)->op >= Iop_CmpEQ8 &&
-				((IRExprBinop *)e->arg)->op <= Iop_CmpNE64) ||
-			       (((IRExprBinop *)e->arg)->op >= Iop_CmpLT32S &&
-				((IRExprBinop *)e->arg)->op <= Iop_CmpLE64U))))) {
-				/* This can happen sometimes because of the
-				   way we simplify condition codes.  Very easy
-				   fix: strip off the outer 64to1. */
-				*done_something = true;
-				return e->arg;
-			}
 
-			if (e->op == Iop_Not1 &&
-			    e->arg->tag == Iex_Unop &&
-			    ((IRExprUnop *)e->arg)->op == e->op) {
-				return ((IRExprUnop *)e->arg)->arg;
+			if (e->arg->tag == Iex_Unop) {
+				IRExprUnop *argu = (IRExprUnop *)e->arg;
+				if (inverseUnops(e->op, argu->op))
+					return argu->arg;
+				IROp ss;
+				if (shortCircuitableUnops(e->op, argu->op, &ss))
+					return optimiseIRExprFP(IRExpr_Unop(ss, argu->arg),
+								opt,
+								done_something);
 			}
 
 			if (e->op == Iop_Not1 &&

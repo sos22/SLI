@@ -1677,8 +1677,56 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    e->sanity_check();
    return e;
 }
+
+/* Check whether a(b(X)) can be converted to a single operator c(X).
+   If it can, set @c appropriately and return true, otherwise return
+   false. */
+bool shortCircuitableUnops(IROp a, IROp b, IROp *c)
+{
+#define rule(_a, _b, _c)			\
+  if (a == _a && b == _b) {			\
+    *c = _c;					\
+    return true;				\
+  }
+
+  /* For some reason, VEX doesn't have a 1Uto16 operation, although it
+     does have 1Uto8 and 1Uto32.  That makes this a bit less
+     symmetrical than it would otherwise be. */
+  rule(Iop_32Uto64, Iop_16Uto32, Iop_16Uto64);
+  rule(Iop_32Uto64, Iop_8Uto32, Iop_8Uto64);
+  rule(Iop_32Uto64, Iop_1Uto32, Iop_1Uto64);
+  rule(Iop_16Uto64, Iop_8Uto16, Iop_8Uto64);
+  rule(Iop_8Uto64, Iop_1Uto8, Iop_1Uto64);
+
+  rule(Iop_16Uto32, Iop_8Uto16, Iop_8Uto32);
+  rule(Iop_8Uto32, Iop_1Uto8, Iop_1Uto32);
+#undef rule
+
+  return false;
+}
+
+/* Return true if a(b(x)) == x */
+bool inverseUnops(IROp a, IROp b)
+{
+  if (a == Iop_64to1 && b == Iop_1Uto64)
+    return true;
+  if (a == Iop_Not1 && b == Iop_Not1)
+    return true;
+  return false;
+}
+
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    IRExprUnop* e       = new IRExprUnop();
+   /* Short-circuit a bunch of redundant type conversions
+      e.g. 64to1(1to64(x)) */
+   if (arg->tag == Iex_Unop) {
+     IRExprUnop *argu = (IRExprUnop *)arg;
+     if (inverseUnops(op, argu->op))
+       return argu->arg;
+     IROp ss;
+     if (shortCircuitableUnops(op, argu->op, &ss))
+       return IRExpr_Unop(ss, argu->arg);
+   }
    e->op  = op;
    e->arg = arg;
    e->sanity_check();
