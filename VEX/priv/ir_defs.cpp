@@ -325,6 +325,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(Or1)				\
 	     iter(Xor1)				\
 	     iter(BadPtr)			\
+	     iter(CmpEQ1)			\
 	     iter(CC_OverflowSub)		\
 						\
 	     iter(MullS8)			\
@@ -2247,8 +2248,8 @@ void typeOfPrimop ( IROp op,
       case Iop_1Sto64: case Iop_1Uto64: UNARY(Ity_I1, Ity_I64);
       case Iop_32to1:  UNARY(Ity_I32, Ity_I1);
       case Iop_64to1:  UNARY(Ity_I64, Ity_I1);
-      case Iop_And1: case Iop_Or1: case Iop_Xor1: BINARY(Ity_I1, Ity_I1, Ity_I1);
-      case Iop_BadPtr: UNARY(Ity_I1, Ity_I64);
+      case Iop_CmpEQ1: case Iop_And1: case Iop_Or1: case Iop_Xor1: BINARY(Ity_I1, Ity_I1, Ity_I1);
+      case Iop_BadPtr: UNARY(Ity_I64, Ity_I1);
 
       case Iop_8Uto32: case Iop_8Sto32:
          UNARY(Ity_I8, Ity_I32);

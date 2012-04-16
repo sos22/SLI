@@ -229,20 +229,26 @@ optimise_condition_calculation(
 			dep1,
 			dep2);
 		break;
-	case AMD64G_CC_OP_LOGICB:
-	case AMD64G_CC_OP_LOGICW:
-	case AMD64G_CC_OP_LOGICL:
-	case AMD64G_CC_OP_LOGICQ:
-		zf = IRExpr_Binop(
-			Iop_CmpEQ64,
-			dep1,
-			IRExpr_Const(IRConst_U64(0)));
-		sf = IRExpr_Binop(
-			Iop_CmpLT64S,
-			dep1,
-			IRExpr_Const(IRConst_U32(0)));
-		of = IRExpr_Const(IRConst_U1(0));
+#define do_logic(type)						\
+		zf = IRExpr_Binop(				\
+			Iop_CmpEQ ## type ,			\
+			dep1,					\
+			IRExpr_Const(IRConst_U ## type (0)));	\
+		sf = IRExpr_Binop(				\
+			Iop_CmpLT ## type ## S,			\
+			dep1,					\
+			IRExpr_Const(IRConst_U ## type (0)));	\
+		of = IRExpr_Const(IRConst_U1(0));		\
 		break;
+	case AMD64G_CC_OP_LOGICB:
+		do_logic(8);
+	case AMD64G_CC_OP_LOGICW:
+		do_logic(16);
+	case AMD64G_CC_OP_LOGICL:
+		do_logic(32);
+	case AMD64G_CC_OP_LOGICQ:
+		do_logic(64);
+#undef do_logic
 	case AMD64G_CC_OP_ADDW:
 		sf = IRExpr_Binop(
 			Iop_CmpLT32S,
@@ -303,6 +309,8 @@ optimise_condition_calculation(
 		       cond, op);
 	if (res && invert)
 		res = IRExpr_Unop(Iop_Not1, res);
+	if (res)
+		res = IRExpr_Unop(Iop_1Uto64, res);
 	return res;
 }
 
@@ -1744,15 +1752,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			   the left and all of the non-constants to the
 			   right. */
 			if (e->op == Iop_CmpEQ64) {
-				if (l->tag == Iex_Const &&
-				    ((IRExprConst *)l)->con->Ico.U64 == 0) {
-					/* 0 == x is equivalent to just !x */
-					*done_something = true;
-					return IRExpr_Unop(
-						Iop_Not1,
-						r);
-				}
-
 				if (r->tag == Iex_Associative &&
 				    ((IRExprAssociative *)r)->op == Iop_Add64 &&
 				    ((IRExprAssociative *)r)->contents[0]->tag == Iex_Const) {
@@ -1965,6 +1964,32 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 	return optimiseIRExprFP(a, opt, &progress);
 }
 
+static IRExpr *
+expr_eq(IRExpr *a, IRExpr *b)
+{
+	assert(a->type() == b->type());
+	switch (a->type()) {
+	case Ity_I1:
+		return IRExpr_Binop(Iop_CmpEQ1, a, b);
+	case Ity_I8:
+		return IRExpr_Binop(Iop_CmpEQ8, a, b);
+	case Ity_I16:
+		return IRExpr_Binop(Iop_CmpEQ16, a, b);
+	case Ity_I32:
+		return IRExpr_Binop(Iop_CmpEQ32, a, b);
+	case Ity_I64:
+		return IRExpr_Binop(Iop_CmpEQ64, a, b);
+	case Ity_I128:
+		return IRExpr_Binop(Iop_CmpEQI128, a, b);
+	case Ity_F32:
+		return IRExpr_Binop(Iop_CmpEQF32, a, b);
+	case Ity_F64:
+		return IRExpr_Binop(Iop_CmpEQF64, a, b);
+	default:
+		abort();
+	}
+}
+
 QueryCache<IRExpr, IRExpr, bool> definitelyEqualCache("Definitely equal");
 QueryCache<IRExpr, IRExpr, bool> definitelyNotEqualCache("Definitely not equal");
 bool
@@ -1974,7 +1999,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	bool res;
 	if (definitelyEqualCache.query(a, b, idx, &res))
 		return res;
-	IRExpr *r = simplifyIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
+	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
 	definitelyEqualCache.set(a, b, idx, res);
 	return res;
@@ -1986,7 +2011,7 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	bool res;
 	if (definitelyNotEqualCache.query(a, b, idx, &res))
 		return res;
-	IRExpr *r = simplifyIRExpr(IRExpr_Binop(Iop_CmpEQ64, a, b), opt);
+	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && !((IRExprConst *)r)->con->Ico.U1);
 	definitelyNotEqualCache.set(a, b, idx, res);
 	return res;

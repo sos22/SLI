@@ -541,6 +541,9 @@ typedef
 
       /* -- Ordering not important after here. -- */
 
+      Iop_CmpEQ1, Iop_CmpEQI128, Iop_CmpEQV128, Iop_CmpEQF32,
+      Iop_CmpEQF64,
+
       Iop_CC_OverflowSub,
 
       /* Widening multiplies */
@@ -555,7 +558,7 @@ typedef
       */
 
       /* Standard integer comparisons */
-      Iop_CmpLT32S, Iop_CmpLT64S,
+      Iop_CmpLT8S, Iop_CmpLT16S, Iop_CmpLT32S, Iop_CmpLT64S,
       Iop_CmpLE32S, Iop_CmpLE64S,
       Iop_CmpLT32U, Iop_CmpLT64U,
       Iop_CmpLE32U, Iop_CmpLE64U,
