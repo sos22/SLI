@@ -2213,6 +2213,9 @@ void typeOfPrimop ( IROp op,
       case Iop_Shl64: case Iop_Shr64: case Iop_Sar64:
          BINARY(Ity_I64,Ity_I8, Ity_I64);
 
+      case Iop_CC_OverflowSub:
+	BINARY(Ity_I64, Ity_I64, Ity_I1);
+
       case Iop_Not8:
       case Iop_Neg8:
          UNARY(Ity_I8, Ity_I8);
