@@ -2669,7 +2669,7 @@ ULong dis_op2_E_G ( unsigned tid,
       /* E refers to memory */
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( dst0, getIRegG(tid, size,pfx,rm) );
-      assign( src,  loadLE(szToITy(size), mkexpr(addr, tid, ty), guest_code.rip ));
+      assign( src,  loadLE(szToITy(size), mkexpr(addr, tid, Ity_I64), guest_code.rip ));
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
