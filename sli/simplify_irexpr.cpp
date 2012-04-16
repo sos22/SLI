@@ -1796,6 +1796,51 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					*done_something = true;
 					return e;
 				}
+
+				/* Special case: const:a == bTOa(X)
+				   can be optimised a bit by
+				   converting the constant to type b
+				   and then removing the conversion.
+				   In some cases, the conversion will
+				   show that there is now way for it
+				   to be true, which simplifies things
+				   a bit further. */
+				if (l->tag == Iex_Const &&
+				    r->tag == Iex_Unop) {
+					IRExprConst *lc = (IRExprConst *)l;
+					IRExprUnop *ru = (IRExprUnop *)r;
+					/* Only actually consider the
+					   1Uto64 case, because that's
+					   by far the most common. */
+					if (ru->op == Iop_1Uto64) {
+						assert(lc->con->tag == Ico_U64);
+						if (lc->con->Ico.U64 == 0) {
+							e->op = Iop_CmpEQ1;
+							e->arg1 = IRExpr_Const(IRConst_U1(0));
+							e->arg2 = ru->arg;
+							*done_something = true;
+							return e;
+						}
+						if (lc->con->Ico.U64 == 1) {
+							e->op = Iop_CmpEQ1;
+							e->arg1 = IRExpr_Const(IRConst_U1(1));
+							e->arg2 = ru->arg;
+							*done_something = true;
+							return e;
+						}
+						return IRExpr_Const(IRConst_U1(0));
+					}
+				}
+
+			}
+
+			/* 0 == x -> !x if we're at the type U1. 1 == x is just x. */
+			if (e->op == Iop_CmpEQ1 &&
+			    l->tag == Iex_Const) {
+				if ( ((IRExprConst *)l)->con->Ico.U1 )
+					return r;
+				else
+					return IRExpr_Unop(Iop_Not1, r);
 			}
 
 			/* And another one: -x == c -> x == -c if c is a constant. */
