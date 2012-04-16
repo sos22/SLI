@@ -37,7 +37,7 @@ class SpecialiseIRExpr : public IRExprTransformer {
 	IRExpr *transformIex(IRExprGet *e) {
 		auto it = state.registers.find(e->reg);
 		if (it != state.registers.end())
-			return it->second;
+			return coerceTypesForSubstitution(e, it->second);
 		return IRExprTransformer::transformIex(e);
 	}
 public:

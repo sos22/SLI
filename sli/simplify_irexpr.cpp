@@ -1117,6 +1117,35 @@ optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
 	return assoc;
 }
 
+/* We want to replace @from with @to, but the types are wrong.  Insert
+ * coercions as appropriate. */
+IRExpr *
+coerceTypesForSubstitution(IRExpr *from, IRExpr *to)
+{
+	IRType a = to->type();
+	IRType b = from->type();
+	if (a != b) {
+		switch (a) {
+		case Ity_I64:
+			switch (b) {
+			case Ity_I8:
+				return IRExpr_Unop(Iop_64to8, to);
+			case Ity_I16:
+				return IRExpr_Unop(Iop_64to16, to);
+			case Ity_I32:
+				return IRExpr_Unop(Iop_64to32, to);
+			default:
+				break;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+	assert(a == b);
+	return to;
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
