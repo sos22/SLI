@@ -1712,6 +1712,12 @@ bool inverseUnops(IROp a, IROp b)
 {
   if (a == Iop_64to1 && b == Iop_1Uto64)
     return true;
+  if (a == Iop_64to8 && b == Iop_8Uto64)
+    return true;
+  if (a == Iop_64to16 && b == Iop_16Uto64)
+    return true;
+  if (a == Iop_64to32 && b == Iop_32Uto64)
+    return true;
   if (a == Iop_Not1 && b == Iop_Not1)
     return true;
   return false;
