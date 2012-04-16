@@ -394,6 +394,10 @@ public:
 					switch (b) {
 					case Ity_I8:
 						return IRExpr_Unop(Iop_64to8, it->second);
+					case Ity_I16:
+						return IRExpr_Unop(Iop_64to16, it->second);
+					case Ity_I32:
+						return IRExpr_Unop(Iop_64to32, it->second);
 					default:
 						break;
 					}
