@@ -1628,6 +1628,7 @@ IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
    e->ix    = ix;
    e->bias  = bias;
    e->tid   = tid;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_RdTmp ( IRTemp tmp, IRType ty, unsigned tid, unsigned generation ) {
@@ -1641,6 +1642,7 @@ IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2,
    e->arg2 = arg2;
    e->arg3 = arg3;
    e->arg4 = arg4;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
@@ -1650,6 +1652,7 @@ IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
    e->arg1 = arg1;
    e->arg2 = arg2;
    e->arg3 = arg3;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
@@ -1662,21 +1665,20 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
        arg1 = arg2;
        arg2 = t;
      }
-     /* convert 0 == x to just !x */
-     if (arg1->tag == Iex_Const && ((IRExprConst *)arg1)->con->Ico.U64 == 0)
-       return IRExpr_Unop(Iop_Not1, arg2);
    }
 
    IRExprBinop* e         = new IRExprBinop();
    e->op   = op;
    e->arg1 = arg1;
    e->arg2 = arg2;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    IRExprUnop* e       = new IRExprUnop();
    e->op  = op;
    e->arg = arg;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, ThreadRip rip ) {
@@ -1684,6 +1686,7 @@ IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, ThreadRip rip ) {
    e->ty   = ty;
    e->addr = addr;
    e->rip  = rip;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Const ( IRConst* con ) {
@@ -1697,6 +1700,7 @@ IRExpr* IRExpr_Const ( IRConst* con ) {
    }
    IRExprConst* e        = new IRExprConst();
    e->con = con;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
@@ -1704,6 +1708,7 @@ IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
    e->cee   = cee;
    e->retty = retty;
    e->args  = args;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
@@ -1711,6 +1716,7 @@ IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
    e->cond  = cond;
    e->expr0 = expr0;
    e->exprX = exprX;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Associative(IROp op, ...)
@@ -1787,6 +1793,7 @@ IRExpr* IRExpr_Associative(IROp op, ...)
    e->nr_arguments = nr_args;
    memcpy(e->contents, argsL, sizeof(argsL[0]) * e->nr_arguments);
    va_end(args);
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_Associative(IRExprAssociative *src)
@@ -1805,12 +1812,14 @@ IRExpr* IRExpr_Associative(IRExprAssociative *src)
 	  src->contents,
 	  sizeof(e->contents[0]) *
 	  e->nr_arguments);
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_FreeVariable ( FreeVariableKey key )
 {
    IRExprFreeVariable *e = new IRExprFreeVariable();
    e->key = key;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_FreeVariable ( )
@@ -1818,6 +1827,7 @@ IRExpr* IRExpr_FreeVariable ( )
    static FreeVariableKey next_key;
    IRExpr *res = IRExpr_FreeVariable(next_key);
    next_key.val++;
+   res->sanity_check();
    return res;
 }
 IRExpr* IRExpr_ClientCall ( const VexRip &r, const ThreadRip &site, IRExpr **args )
@@ -1826,12 +1836,14 @@ IRExpr* IRExpr_ClientCall ( const VexRip &r, const ThreadRip &site, IRExpr **arg
    e->calledRip = r;
    e->callSite = site;
    e->args = args;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
 {
    IRExprClientCallFailed *e = new IRExprClientCallFailed();
    e->target = t;
+   e->sanity_check();
    return e;
 }
 IRExpr* IRExpr_HappensBefore ( ThreadRip before, ThreadRip after )
@@ -1839,6 +1851,7 @@ IRExpr* IRExpr_HappensBefore ( ThreadRip before, ThreadRip after )
    IRExprHappensBefore *e = new IRExprHappensBefore();
    e->before = before;
    e->after = after;
+   e->sanity_check();
    return e;
 }
 

@@ -211,6 +211,9 @@ public:
 				return false;
 		return true;
 	}
+
+	void sanity_check() const {
+	}
 };
 
 #endif /* !LIBVEX_RIP_HPP__ */

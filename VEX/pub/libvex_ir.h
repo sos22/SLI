@@ -208,6 +208,8 @@ public:
 			return a.content < b.content;
 		}
 	};
+
+	void sanity_check() const {}
 };
 
 class ThreadRip : public Named {
@@ -255,6 +257,10 @@ public:
 	VexRip rip;
 
 	unsigned long hash() const { return thread * 5379277 + rip.hash(); }
+
+	void sanity_check() const {
+		rip.sanity_check();
+	}
 };
 extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
@@ -467,6 +473,9 @@ struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
       } Ico;
       unsigned long hashval() const { return tag * 103 + Ico.U64 * 607; }
       void visit(HeapVisitor &hv) {}
+      void sanity_check() const {
+	 assert(tag >= Ico_U1 && tag <= Ico_V128);
+      }
       NAMED_CLASS
    }
    IRConst;
@@ -977,6 +986,11 @@ typedef
    }
    IROp;
 
+static inline void sanity_check_irop(IROp op)
+{
+   assert(op <= Iop_Perm8x16 && op > Iop_INVALID);
+}
+
 /* Pretty-print an op. */
 extern void ppIROp ( IROp, FILE* );
 
@@ -1038,6 +1052,11 @@ typedef
    }
    IRType;
 
+static inline void sanity_check_irtype(IRType i)
+{
+   assert(i > Ity_INVALID && i <= Ity_V128);
+}
+
 /* Pretty-print an IRType */
 extern void ppIRType ( IRType, FILE *f );
 
@@ -1091,6 +1110,7 @@ typedef
       UInt   mcx_mask;
       void visit(HeapVisitor &hv) {}
       unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
+      void sanity_check() const {}
       NAMED_CLASS
    }
    IRCallee;
@@ -1114,6 +1134,11 @@ struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
       Int    nElems; /* number of elements in the indexed area */
       void visit(HeapVisitor &hv) {}
       unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
+      void sanity_check() const {
+	 assert(base < nElems);
+	 assert(nElems >= 0);
+	 sanity_check_irtype(elemTy);
+      }
       NAMED_CLASS
    }
    IRRegArray;
@@ -1161,6 +1186,9 @@ public:
       return !(*this != x);
    }
    unsigned long hash() const { return val * 900000323; }
+   void sanity_check() const {
+      assert(val >= 0);
+   }
 };
 
 /* An expression.  Stored as a tagged union.  'tag' indicates what kind
@@ -1183,6 +1211,7 @@ public:
 
    virtual unsigned long hashval() const = 0;
    virtual IRType type() const = 0;
+   virtual void sanity_check() const = 0;
    NAMED_CLASS
 };
 
@@ -1232,6 +1261,10 @@ struct IRExprGet : public IRExpr {
    }
    IRType type() const {
       return ty;
+   }
+   void sanity_check() const {
+      reg.sanity_check();
+      sanity_check_irtype(ty);
    }
 };
 /* Read a guest register at a non-fixed offset in the guest state.
@@ -1292,6 +1325,10 @@ struct IRExprGetI : public IRExpr {
       fprintf(f, ",%d](%d)", bias, tid);
    }
    IRType type() const { return descr->elemTy; }
+   void sanity_check() const {
+      descr->sanity_check();
+      ix->sanity_check();
+   }
 };
 
 /* A quaternary operation.
@@ -1333,6 +1370,19 @@ struct IRExprQop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+   void sanity_check() const {
+      sanity_check_irop(op);
+      arg1->sanity_check();
+      arg2->sanity_check();
+      arg3->sanity_check();
+      arg4->sanity_check();
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      assert(b == arg1->type());
+      assert(c == arg2->type());
+      assert(d == arg3->type());
+      assert(e == arg4->type());
+   }
 };
 
 /* A ternary operation.
@@ -1369,6 +1419,17 @@ struct IRExprTriop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+   void sanity_check() const {
+      sanity_check_irop(op);
+      arg1->sanity_check();
+      arg2->sanity_check();
+      arg3->sanity_check();
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      assert(b == arg1->type());
+      assert(c == arg2->type());
+      assert(d == arg3->type());
+   }
 };
 
 /* A binary operation.
@@ -1393,6 +1454,15 @@ struct IRExprBinop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+   void sanity_check() const {
+      sanity_check_irop(op);
+      arg1->sanity_check();
+      arg2->sanity_check();
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      assert(b == arg1->type());
+      assert(c == arg2->type());
+   }
 };
 
 /* A unary operation.
@@ -1414,6 +1484,13 @@ struct IRExprUnop : public IRExpr {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
+   }
+   void sanity_check() const {
+      sanity_check_irop(op);
+      arg->sanity_check();
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      assert(b == arg->type());
    }
 };
 
@@ -1441,6 +1518,11 @@ struct IRExprLoad : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return ty; }
+   void sanity_check() const {
+      sanity_check_irtype(ty);
+      addr->sanity_check();
+      rip.sanity_check();
+   }
 };
 
 /* A constant-valued expression.
@@ -1453,6 +1535,9 @@ struct IRExprConst : public IRExpr {
    unsigned long hashval() const { return con->hashval(); }
    void prettyPrint(FILE *f) const;
    IRType type() const { return typeOfIRConst(con); }
+   void sanity_check() const {
+      con->sanity_check();
+   }
 };
 
 /* A call to a pure (no side-effects) helper C function.
@@ -1509,6 +1594,12 @@ struct IRExprCCall : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return retty; }
+   void sanity_check() const {
+      cee->sanity_check();
+      sanity_check_irtype(retty);
+      for (unsigned x = 0; args[x]; x++)
+	args[x]->sanity_check();
+   }
 };
 
 /* A ternary if-then-else operator.  It returns expr0 if cond is zero,
@@ -1534,6 +1625,13 @@ struct IRExprMux0X : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return expr0->type(); }
+   void sanity_check() const {
+      cond->sanity_check();
+      expr0->sanity_check();
+      exprX->sanity_check();
+      assert(expr0->type() == exprX->type());
+      assert(cond->type() == Ity_I1);
+   }
 };
 
 /* An associative operator with as many arguments as are needed.
@@ -1562,6 +1660,19 @@ struct IRExprAssociative : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+   void sanity_check() const {
+      sanity_check_irop(op);
+      assert(nr_arguments >= 0);
+      assert(nr_arguments_allocated >= 0);
+      assert(nr_arguments <= nr_arguments_allocated);
+      IRType a, b, c, d, e;
+      typeOfPrimop(op, &a, &b, &c, &d, &e);
+      assert(b == c);
+      for (int i = 0; i < nr_arguments; i++)
+	 contents[i]->sanity_check();
+      for (int i = 0; i < nr_arguments; i++)
+	 assert(contents[i]->type() == b);
+   }
 };
 
 struct IRExprFreeVariable : public IRExpr {
@@ -1573,6 +1684,9 @@ struct IRExprFreeVariable : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return Ity_I64; }
+   void sanity_check() const {
+      key.sanity_check();
+   }
 };
 
 struct IRExprClientCall : public IRExpr {
@@ -1589,6 +1703,12 @@ struct IRExprClientCall : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return Ity_I64; }
+   void sanity_check() const {
+      calledRip.sanity_check();
+      callSite.sanity_check();
+      for (unsigned x = 0; args[x]; x++)
+	 args[x]->sanity_check();
+   }
 };
 
 struct IRExprClientCallFailed : public IRExpr {
@@ -1600,6 +1720,10 @@ struct IRExprClientCallFailed : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return Ity_I64; }
+   void sanity_check() const {
+      target->sanity_check();
+      assert(target->type() == Ity_I64);
+   }
 };
 
 struct IRExprHappensBefore : public IRExpr {
@@ -1610,6 +1734,10 @@ struct IRExprHappensBefore : public IRExpr {
    unsigned long hashval() const { return 19; }
    void prettyPrint(FILE *f) const;
    IRType type() const { return Ity_I1; }
+   void sanity_check() const {
+      before.sanity_check();
+      after.sanity_check();
+   }
 };
 
 /* Expression constructors. */

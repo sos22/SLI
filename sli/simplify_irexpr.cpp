@@ -644,6 +644,9 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 #endif
 
 	bool progress;
+#ifndef NDEBUG
+	e->sanity_check();
+#endif
 	progress = false;
 	e = optimiseIRExpr(e, opt, &progress);
 	if (progress) {
@@ -666,6 +669,9 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 		__site.nr_sites++;
 		live = false;
 	}
+#endif
+#ifndef NDEBUG
+	e->sanity_check();
 #endif
 	return e;
 }
