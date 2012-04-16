@@ -405,16 +405,11 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		if (TIMEOUT)
 			return sm;
 		done_something = false;
-		sm->sanityCheck();
 		sm = internStateMachine(sm);
-		sm->sanityCheck();
 		sm = sm->optimise(opt, oracle, &done_something);
-		sm->sanityCheck();
 		if (opt.ignoreSideEffects)
 			removeSurvivingStates(sm, &done_something);
-		sm->sanityCheck();
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
-		sm->sanityCheck();
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, aliasp, oracle, &done_something);
 		LibVEX_maybe_gc(token);
@@ -427,9 +422,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			} while (d);
 		}
 		sm = sm->optimise(opt, oracle, &done_something);
-		sm->sanityCheck();
 		sm = bisimilarityReduction(sm, opt);
-		sm->sanityCheck();
 		if (noExtendContext) {
 			sm->root->assertAcyclic();
 			sm = introduceFreeVariables(sm, aliasp, opt, oracle, &done_something);
@@ -437,11 +430,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			sm = optimiseFreeVariables(sm, &done_something);
 			sm->root->assertAcyclic();
 		}
-		sm->sanityCheck();
 		sm = optimiseSSA(sm, &done_something);
-		sm->sanityCheck();
 		sm = sm->optimise(opt, oracle, &done_something);
-		sm->sanityCheck();
 	} while (done_something);
 	sm->sanityCheck();
 	return sm;
