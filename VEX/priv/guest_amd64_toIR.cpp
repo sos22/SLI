@@ -4663,11 +4663,10 @@ static IRExpr* x87ishly_qnarrow_32_to_16 ( unsigned tid, IRExpr* e32 )
    assign( t32, e32 );
    return
       IRExpr_Mux0X( 
-         unop(Iop_1Uto8, 
-              binop(Iop_CmpLT64U, 
-                    unop(Iop_32Uto64, 
-                         binop(Iop_Add32, mkexpr(t32, tid, Ity_I32), mkU32(32768))), 
-                    mkU64(65536))),
+		   binop(Iop_CmpLT64U, 
+			 unop(Iop_32Uto64, 
+			      binop(Iop_Add32, mkexpr(t32, tid, Ity_I32), mkU32(32768))), 
+			 mkU64(65536)),
          mkU16( 0x8000 ),
          unop(Iop_32to16, mkexpr(t32, tid, Ity_I32)));
 }
@@ -5395,8 +5394,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fcmovb %%st(%u), %%st(0)\n", r_src);
                put_ST_UNCHECKED(tid,0, 
                                 IRExpr_Mux0X( 
-                                    unop(Iop_1Uto8,
-                                         mk_amd64g_calculate_condition(AMD64CondB, tid)), 
+					     mk_amd64g_calculate_condition(AMD64CondB, tid), 
                                     get_ST(tid, 0), get_ST(tid, r_src)) );
                break;
 
@@ -5405,8 +5403,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fcmovz %%st(%u), %%st(0)\n", r_src);
                put_ST_UNCHECKED(tid,0, 
                                 IRExpr_Mux0X( 
-                                    unop(Iop_1Uto8,
-                                         mk_amd64g_calculate_condition(AMD64CondZ, tid)), 
+                                         mk_amd64g_calculate_condition(AMD64CondZ, tid), 
                                     get_ST(tid, 0), get_ST(tid, r_src)) );
                break;
 
@@ -5415,8 +5412,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fcmovbe %%st(%u), %%st(0)\n", r_src);
                put_ST_UNCHECKED(tid,0, 
                                 IRExpr_Mux0X( 
-                                    unop(Iop_1Uto8,
-                                         mk_amd64g_calculate_condition(AMD64CondBE, tid)), 
+				    mk_amd64g_calculate_condition(AMD64CondBE, tid), 
                                     get_ST(tid, 0), get_ST(tid, r_src)) );
                break;
 
@@ -5425,8 +5421,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fcmovu %%st(%u), %%st(0)\n", r_src);
                put_ST_UNCHECKED(tid,0, 
                                 IRExpr_Mux0X( 
-                                    unop(Iop_1Uto8,
-                                         mk_amd64g_calculate_condition(AMD64CondP, tid)), 
+				    mk_amd64g_calculate_condition(AMD64CondP, tid), 
                                     get_ST(tid, 0), get_ST(tid, r_src)) );
                break;
 
@@ -5563,8 +5558,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fcmovnb %%st(%u), %%st(0)\n", r_src);
                put_ST_UNCHECKED(tid,0, 
                                 IRExpr_Mux0X( 
-                                    unop(Iop_1Uto8,
-                                         mk_amd64g_calculate_condition(AMD64CondNB, tid)), 
+				    mk_amd64g_calculate_condition(AMD64CondNB, tid), 
                                     get_ST(tid, 0), get_ST(tid, r_src)) );
                break;
 
@@ -5574,8 +5568,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,
                   0, 
                   IRExpr_Mux0X( 
-                     unop(Iop_1Uto8,
-                          mk_amd64g_calculate_condition(AMD64CondNZ, tid)), 
+		      mk_amd64g_calculate_condition(AMD64CondNZ, tid), 
                      get_ST(tid, 0), 
                      get_ST(tid, r_src)
                   )
@@ -5588,8 +5581,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,
                   0, 
                   IRExpr_Mux0X( 
-                     unop(Iop_1Uto8,
-                          mk_amd64g_calculate_condition(AMD64CondNBE, tid)), 
+		      mk_amd64g_calculate_condition(AMD64CondNBE, tid), 
                      get_ST(tid, 0), 
                      get_ST(tid, r_src)
                   ) 
@@ -5602,8 +5594,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,
                   0, 
                   IRExpr_Mux0X( 
-                     unop(Iop_1Uto8,
-                          mk_amd64g_calculate_condition(AMD64CondNP, tid)), 
+		      mk_amd64g_calculate_condition(AMD64CondNP, tid), 
                      get_ST(tid, 0), 
                      get_ST(tid, r_src)
                   )
@@ -6499,7 +6490,7 @@ static ULong dis_MMX_shiftG_byE ( unsigned tid,
      assign( 
         g1,
         IRExpr_Mux0X(
-           unop(Iop_1Uto8,binop(Iop_CmpLT64U,mkexpr(amt, tid, Ity_I64),mkU64(size))),
+           binop(Iop_CmpLT64U,mkexpr(amt, tid, Ity_I64),mkU64(size)),
            mkU64(0),
            binop(op, mkexpr(g0, tid, Ity_I64), mkexpr(amt8, tid, Ity_I8))
         )
@@ -6509,7 +6500,7 @@ static ULong dis_MMX_shiftG_byE ( unsigned tid,
      assign( 
         g1,
         IRExpr_Mux0X(
-           unop(Iop_1Uto8,binop(Iop_CmpLT64U,mkexpr(amt, tid, Ity_I64),mkU64(size))),
+           binop(Iop_CmpLT64U,mkexpr(amt, tid, Ity_I64),mkU64(size)),
            binop(op, mkexpr(g0, tid, Ity_I64), mkU8(size-1)),
            binop(op, mkexpr(g0, tid, Ity_I64), mkexpr(amt8, tid, Ity_I8))
         )
@@ -7681,8 +7672,7 @@ ULong dis_cmov_E_G ( unsigned tid,
       assign( tmpd, getIRegG(tid, sz, pfx, rm) );
 
       putIRegG( sz, pfx, rm,
-                IRExpr_Mux0X( unop(Iop_1Uto8,
-                                   mk_amd64g_calculate_condition(cond, tid)),
+                IRExpr_Mux0X( mk_amd64g_calculate_condition(cond, tid),
                               mkexpr(tmpd, tid, ty),
                               mkexpr(tmps, tid, ty) )
               );
@@ -7699,8 +7689,7 @@ ULong dis_cmov_E_G ( unsigned tid,
       assign( tmpd, getIRegG(tid, sz, pfx, rm) );
 
       putIRegG( sz, pfx, rm,
-                IRExpr_Mux0X( unop(Iop_1Uto8,
-                                   mk_amd64g_calculate_condition(cond, tid)),
+                IRExpr_Mux0X( mk_amd64g_calculate_condition(cond, tid),
                               mkexpr(tmpd, tid, ty),
                               mkexpr(tmps, tid, ty) )
               );
@@ -8357,8 +8346,7 @@ static ULong dis_SSE_shiftG_byE ( unsigned tid,
      assign( 
         g1,
         IRExpr_Mux0X(
-           unop(Iop_1Uto8,
-                binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size))),
+	    binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size)),
            mkV128(0x0000),
            binop(op, mkexpr(g0, tid, Ity_V128), mkexpr(amt8, tid, Ity_I8))
         )
@@ -8368,8 +8356,7 @@ static ULong dis_SSE_shiftG_byE ( unsigned tid,
      assign( 
         g1,
         IRExpr_Mux0X(
-           unop(Iop_1Uto8,
-                binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size))),
+	    binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size)),
            binop(op, mkexpr(g0, tid, Ity_V128), mkU8(size-1)),
            binop(op, mkexpr(g0, tid, Ity_V128), mkexpr(amt8, tid, Ity_I8))
         )
@@ -15659,13 +15646,13 @@ DisResult disInstr_AMD64_WRK (
             expdHi64:expdLo64, even if we're doing a cmpxchg8b. */
          /* It's just _so_ much fun ... */
          putIRegRDX( 8,
-                     IRExpr_Mux0X( unop(Iop_1Uto8, mkexpr(success, tid, Ity_I1)),
+                     IRExpr_Mux0X( mkexpr(success, tid, Ity_I1),
                                    sz == 4 ? unop(Iop_32Uto64, mkexpr(oldHi, tid, elemTy))
                                            : mkexpr(oldHi, tid, Ity_I64),
                                    mkexpr(expdHi64, tid, Ity_I64)
                    ));
          putIRegRAX( 8,
-                     IRExpr_Mux0X( unop(Iop_1Uto8, mkexpr(success, tid, Ity_I1)),
+                     IRExpr_Mux0X( mkexpr(success, tid, Ity_I1),
                                    sz == 4 ? unop(Iop_32Uto64, mkexpr(oldLo, tid, elemTy))
                                            : mkexpr(oldLo, tid, Ity_I64),
                                    mkexpr(expdLo64, tid, Ity_I64)
