@@ -1535,16 +1535,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				return e->arg;
 			}
 
-			if ((e->op >= Iop_8Uto16 &&
-			     e->op <= Iop_32Uto64) ||
-			    e->op == Iop_1Uto8) {
-				/* Get rid of unsigned upcasts; they tend to
-				   show up where you don't want them, and they
-				   don't actually do anything useful. */
-				*done_something = true;
-				return e->arg;
-			}
-
 			if (e->op == Iop_Not1 &&
 			    e->arg->tag == Iex_Unop &&
 			    ((IRExprUnop *)e->arg)->op == e->op) {
@@ -1995,6 +1985,7 @@ QueryCache<IRExpr, IRExpr, bool> definitelyNotEqualCache("Definitely not equal")
 bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
+	assert(a->type() == b->type());
 	int idx = definitelyEqualCache.hash(a, b);
 	bool res;
 	if (definitelyEqualCache.query(a, b, idx, &res))
@@ -2007,6 +1998,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 bool
 definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
+	assert(a->type() == b->type());
 	int idx = definitelyNotEqualCache.hash(a, b);
 	bool res;
 	if (definitelyNotEqualCache.query(a, b, idx, &res))

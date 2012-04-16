@@ -1618,7 +1618,9 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 /* Constructors -- IRExpr */
 
 IRExpr* IRExpr_Get ( threadAndRegister reg, IRType ty) {
-   return new IRExprGet(reg, ty);
+   IRExpr *e = new IRExprGet(reg, ty);
+   e->sanity_check();
+   return e;
 }
 IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid, unsigned generation ) {
    return IRExpr_Get(threadAndRegister::reg(tid, off, generation), ty);
@@ -2163,6 +2165,7 @@ void typeOfPrimop ( IROp op,
          UNARY(Ity_I32, Ity_I32);
 
       case Iop_Not64:
+      case Iop_Neg64:
       case Iop_CmpNEZ32x2: case Iop_CmpNEZ16x4: case Iop_CmpNEZ8x8:
          UNARY(Ity_I64, Ity_I64);
 

@@ -131,6 +131,7 @@ avail_t::makeFalse(IRExpr *expr, const AllowableOptimisations &opt)
 {
 	if (expr->tag == Iex_Const)
 		return;
+	assert(expr->type() == Ity_I1);
 	for (auto it = assertFalse.begin();
 	     it != assertFalse.end();
 	     it++)
@@ -391,7 +392,7 @@ public:
 		return IRExprTransformer::transformIex(e);
 	}
 	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-		if (use_assumptions) {
+		if (use_assumptions && e->type() == Ity_I1) {
 			for (std::set<IRExpr *>::iterator it = avail.assertFalse.begin();
 			     it != avail.assertFalse.end();
 			     it++) {
@@ -947,5 +948,6 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
 			bool *done_something)
 {
+	sm->sanityCheck();
 	return _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, oracle, done_something);
 }

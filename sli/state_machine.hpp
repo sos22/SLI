@@ -726,6 +726,7 @@ public:
 			 std::vector<const StateMachineEdge *> &done) const
 	{
 		sanityCheckIRExpr(condition, live);
+		assert(condition->type() == Ity_I1);
 		trueTarget->sanityCheck(live, done);
 		falseTarget->sanityCheck(live, done);
 	}

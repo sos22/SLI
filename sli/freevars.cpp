@@ -698,7 +698,8 @@ optimiseFreeVariables(StateMachine *sm, bool *done_something)
 StateMachine *
 introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 {
-	return _freevars::introduceFreeVariablesForRegisters(sm, done_something);
+	//return _freevars::introduceFreeVariablesForRegisters(sm, done_something);
+	return sm;
 }
 
 StateMachine *
@@ -708,13 +709,15 @@ introduceFreeVariables(StateMachine *sm,
 		       Oracle *oracle,
 		       bool *done_something)
 {
-	return _freevars::introduceFreeVariables(sm, alias, opt, oracle, done_something);
+	//return _freevars::introduceFreeVariables(sm, alias, opt, oracle, done_something);
+	return sm;
 }
 
 StateMachine *
 optimiseFreeVariables(StateMachine *sm, bool *done_something)
 {
-	return _freevars::optimiseFreeVariables(sm, done_something);
+	//	return _freevars::optimiseFreeVariables(sm, done_something);
+	return sm;
 }
 
 void
