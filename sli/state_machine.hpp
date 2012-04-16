@@ -15,7 +15,7 @@ class StateMachineSideEffect;
 #ifdef NDEBUG
 static inline
 #endif
-void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> &live)
+void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> *live)
 #ifdef NDEBUG
 {}
 #else
@@ -303,9 +303,9 @@ public:
 	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
 
 #ifdef NDEBUG
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live, std::vector<const StateMachineEdge *> &done) const {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live, std::vector<const StateMachineEdge *> &done) const {}
 #else
-	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live, std::vector<const StateMachineEdge *> &done) const = 0;
+	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live, std::vector<const StateMachineEdge *> &done) const = 0;
 #endif
 
 	virtual StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
@@ -333,7 +333,7 @@ public:
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
 	virtual int complexity() = 0;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
-	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &live) const = 0;
+	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	NAMED_CLASS
 };
 
@@ -442,17 +442,25 @@ public:
 		return r;
 	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> live,
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const {
 #ifndef NDEBUG
 		for (auto it = done.begin(); it != done.end(); it++)
 			if (*it == this)
 				return;
+		std::set<threadAndRegister, threadAndRegister::fullCompare> *live2;
+		std::set<threadAndRegister, threadAndRegister::fullCompare> _live2;
+		if (live) {
+			live2 = &_live2;
+			_live2 = *live;
+		} else {
+			live2 = NULL;
+		}
 		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++)
-			(*it)->sanityCheck(live);
+			(*it)->sanityCheck(live2);
 		unsigned sz = done.size();
 		done.push_back(this);
-		target->sanityCheck(live, done);
+		target->sanityCheck(live2, done);
 		assert(done.back() == this);
 		done.pop_back();
 		assert(done.size() == sz);
@@ -490,7 +498,7 @@ public:
 	const StateMachineEdge *target1() const { return NULL; }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return acc; }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live,
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &) const { return; }
 };
 
@@ -595,7 +603,7 @@ public:
 	StateMachineEdge *target1() { return NULL; }
 	const StateMachineEdge *target1() const { return NULL; }
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live,
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const
 	{
 		target->sanityCheck(live, done);
@@ -714,7 +722,7 @@ public:
 		return trueTarget->roughLoadCount(
 			falseTarget->roughLoadCount(acc));
 	}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> &live,
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const
 	{
 		sanityCheckIRExpr(condition, live);
@@ -776,7 +784,7 @@ public:
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
 	int complexity() { return 0; }
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &) const {}
+	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
 };
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
@@ -789,7 +797,7 @@ public:
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
-	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &live) const {
+	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(addr, live);
 	}
 };
@@ -817,7 +825,7 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &live) const {
+	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		sanityCheckIRExpr(data, live);
 	}
@@ -859,9 +867,10 @@ public:
 	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(addr) + 20; }
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &live) const {
+	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
-		live.insert(target);
+		if (live)
+			live->insert(target);
 	}
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
@@ -887,9 +896,10 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(value); }
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &live) const {
+	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
-		live.insert(target);
+		if (live)
+			live->insert(target);
 	}
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
@@ -913,7 +923,7 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	int complexity() { return exprComplexity(value); }
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &live) const {
+	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 	}
 };
@@ -953,8 +963,9 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
 	int complexity() { return 100; }
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> &live) const {
-		live.insert(reg);
+	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+		if (live)
+			live->insert(reg);
 	}
 };
 

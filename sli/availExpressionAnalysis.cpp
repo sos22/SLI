@@ -56,8 +56,18 @@ findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 }
 
 class avail_t {
-public:
 	std::set<StateMachineSideEffect *> sideEffects;
+public:
+	std::set<StateMachineSideEffect *>::iterator beginSideEffects() { return sideEffects.begin(); }
+	std::set<StateMachineSideEffect *>::iterator endSideEffects() { return sideEffects.end(); }
+	void insertSideEffect(StateMachineSideEffect *smse) {
+		smse->sanityCheck();
+		sideEffects.insert(smse);
+	}
+	void eraseSideEffect(std::set<StateMachineSideEffect *>::iterator it) {
+		sideEffects.erase(it);
+	}
+
 	std::set<IRExpr *> assertFalse;
 	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> _registers;
 
@@ -72,6 +82,8 @@ public:
 	void calcRegisterMap(const AllowableOptimisations &opt);
 
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
+
+	void findAllPotentiallyAvailable(StateMachine *sm, const AllowableOptimisations &opt, Oracle *oracle);
 
 	int nr_asserts() const {
 		int cntr = 0;
@@ -274,6 +286,7 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			   available expressions which both define the
 			   same register. */
 			assert(!_registers.count(sep->target));
+			sep->value->sanity_check();
 			_registers[sep->target] = sep->value;
 		} else if (se->type == StateMachineSideEffect::AssertFalse) {
 			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
@@ -290,14 +303,15 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 {
 	if (TIMEOUT)
 		return;
+	smse->sanityCheck();
 	switch (smse->type) {
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectStore *smses =
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
 		assert(smses);
 		/* Eliminate anything which is killed */
-		for (std::set<StateMachineSideEffect *>::iterator it = outputAvail.sideEffects.begin();
-		     it != outputAvail.sideEffects.end();
+		for (auto it = outputAvail.beginSideEffects();
+		     it != outputAvail.endSideEffects();
 			) {
 			StateMachineSideEffectStore *smses2 =
 				dynamic_cast<StateMachineSideEffectStore *>(*it);
@@ -318,13 +332,13 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			     !definitelyNotEqual( addr,
 						  smses->addr,
 						  opt) )
-				outputAvail.sideEffects.erase(it++);
+				outputAvail.eraseSideEffect(it++);
 			else
 				it++;
 		}
 		/* Introduce the store which was generated. */
 		if (opt.assumeNoInterferingStores || !oracle->hasConflictingRemoteStores(smses))
-			outputAvail.sideEffects.insert(smses);
+			outputAvail.insertSideEffect(smses);
 		outputAvail.dereference(smses->addr, opt);
 		break;
 	}
@@ -332,14 +346,14 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		StateMachineSideEffectCopy *smsec =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
-		outputAvail.sideEffects.insert(smsec);
+		outputAvail.insertSideEffect(smsec);
 		outputAvail.invalidateRegister(smsec->target, smsec);
 		break;
 	}
 	case StateMachineSideEffect::Load: {
 		StateMachineSideEffectLoad *smsel =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		outputAvail.sideEffects.insert(smsel);
+		outputAvail.insertSideEffect(smsel);
 		outputAvail.dereference(smsel->addr, opt);
 		outputAvail.invalidateRegister(smsel->target, smsel);
 		break;
@@ -355,7 +369,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *p =
 			(StateMachineSideEffectPhi *)smse;
-		outputAvail.sideEffects.insert(p);
+		outputAvail.insertSideEffect(p);
 		outputAvail.invalidateRegister(p->reg, smse);
 		break;
 	}
@@ -370,8 +384,10 @@ public:
 	const AllowableOptimisations &opt;
 	IRExpr *transformIex(IRExprGet *e) {
 		auto it = avail._registers.find(e->reg);
-		if (it != avail._registers.end())
+		if (it != avail._registers.end()) {
+			assert(it->second->type() == e->type());
 			return it->second;
+		}
 		return IRExprTransformer::transformIex(e);
 	}
 	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
@@ -486,8 +502,8 @@ buildNewStateMachineWithLoadsEliminated(
 			IRExpr *newAddr;
 			bool doit = false;
 			newAddr = applyAvailSet(currentlyAvailable, smsel->addr, false, &doit, opt);
-			for (std::set<StateMachineSideEffect *>::iterator it2 = currentlyAvailable.sideEffects.begin();
-			     !newEffect && it2 != currentlyAvailable.sideEffects.end();
+			for (auto it2 = currentlyAvailable.beginSideEffects();
+			     !newEffect && it2 != currentlyAvailable.endSideEffects();
 			     it2++) {
 				StateMachineSideEffectStore *smses2 =
 					dynamic_cast<StateMachineSideEffectStore *>(*it2);
@@ -679,6 +695,43 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 }
 
+void
+avail_t::findAllPotentiallyAvailable(StateMachine *sm,
+				     const AllowableOptimisations &opt,
+				     Oracle *oracle)
+{
+	findAllSideEffects(sm, sideEffects);
+	for (auto it = sideEffects.begin();
+	     !TIMEOUT && it != sideEffects.end();
+	     it++) {
+		StateMachineSideEffect *smse = *it;
+		if (StateMachineSideEffectMemoryAccess *smsema =
+		    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
+			dereference(smsema->addr, opt);
+		} else if (StateMachineSideEffectAssertFalse *smseaf =
+			   dynamic_cast<StateMachineSideEffectAssertFalse *>(smse)) {
+			makeFalse(smseaf->value, opt);
+		}
+	}
+
+	/* If we're not executing atomically, stores to
+	   non-thread-local memory locations are never considered to
+	   be available. */
+	if (!opt.assumeNoInterferingStores) {
+		for (auto it = sideEffects.begin();
+		     !TIMEOUT && it != sideEffects.end();
+			) {
+			StateMachineSideEffectMemoryAccess *smsema =
+				dynamic_cast<StateMachineSideEffectMemoryAccess *>(*it);
+			if ( smsema && oracle->hasConflictingRemoteStores(smsema) ) {
+				sideEffects.erase(it++);
+			} else {
+				it++;
+			}
+		}
+	}
+}
+
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
@@ -706,36 +759,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 
 	/* build the set of potentially-available expressions. */
 	avail_t potentiallyAvailable;
-	findAllSideEffects(sm, potentiallyAvailable.sideEffects);
-	for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
-	     !TIMEOUT && it != potentiallyAvailable.sideEffects.end();
-	     it++) {
-		StateMachineSideEffect *smse = *it;
-		if (StateMachineSideEffectMemoryAccess *smsema =
-		    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
-			potentiallyAvailable.dereference(smsema->addr, opt);
-		} else if (StateMachineSideEffectAssertFalse *smseaf =
-			   dynamic_cast<StateMachineSideEffectAssertFalse *>(smse)) {
-			potentiallyAvailable.makeFalse(smseaf->value, opt);
-		}
-	}
-
-	/* If we're not executing atomically, stores to
-	   non-thread-local memory locations are never considered to
-	   be available. */
-	if (!opt.assumeNoInterferingStores) {
-		for (std::set<StateMachineSideEffect *>::iterator it = potentiallyAvailable.sideEffects.begin();
-		     !TIMEOUT && it != potentiallyAvailable.sideEffects.end();
-			) {
-			StateMachineSideEffectMemoryAccess *smsema =
-				dynamic_cast<StateMachineSideEffectMemoryAccess *>(*it);
-			if ( smsema && oracle->hasConflictingRemoteStores(smsema) ) {
-				potentiallyAvailable.sideEffects.erase(it++);
-			} else {
-				it++;
-			}
-		}
-	}
+	potentiallyAvailable.findAllPotentiallyAvailable(sm, opt, oracle);
 
 	/* build the initial availability map.  We start by assuming
 	 * that everything is available everywhere, except that at the
