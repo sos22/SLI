@@ -386,7 +386,23 @@ public:
 	IRExpr *transformIex(IRExprGet *e) {
 		auto it = avail._registers.find(e->reg);
 		if (it != avail._registers.end()) {
-			assert(it->second->type() == e->type());
+			IRType a = it->second->type();
+			IRType b = e->type();
+			if (a != b) {
+				switch (a) {
+				case Ity_I64:
+					switch (b) {
+					case Ity_I8:
+						return IRExpr_Unop(Iop_64to8, it->second);
+					default:
+						break;
+					}
+					break;
+				default:
+					break;
+				}
+			}
+			assert(a == b);
 			return it->second;
 		}
 		return IRExprTransformer::transformIex(e);
