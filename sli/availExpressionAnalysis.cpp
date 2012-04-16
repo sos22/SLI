@@ -103,8 +103,9 @@ avail_t::print(FILE *f)
 		}
 	}
 	if (!_registers.empty()) {
-		fprintf(f, "Register map:\n");
+		fprintf(f, "\tRegister map:\n");
 		for (auto it = _registers.begin(); it != _registers.end(); it++) {
+			fprintf(f, "\t\t");
 			it->first.prettyPrint(f);
 			fprintf(f, " -> ");
 			ppIRExpr(it->second, f);
