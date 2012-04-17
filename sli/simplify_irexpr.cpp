@@ -21,7 +21,8 @@ operationCommutes(IROp op)
 		(op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64) ||
 		(op == Iop_And1) ||
 		(op == Iop_Or1) ||
-		(op == Iop_Xor1);
+		(op == Iop_Xor1) ||
+		(op == Iop_CmpEQ1);
 }
 
 bool
@@ -1770,6 +1771,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				return l;
 			}
 
+			/* If, in a == b, a and b are physically
+			 * identical, the result is a constant 1. */
+			if ( (e->op == Iop_CmpEQ1 ||
+			      (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64)) &&
+			     physicallyEqual(l, r) ) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(1));
+			}
+
 			/* We simplify == expressions with sums on the left
 			   and right by trying to move all of the constants to
 			   the left and all of the non-constants to the
@@ -1818,12 +1828,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					l = e->arg1 = cnst;
 					r = e->arg2 = optimiseIRExprFP(newR, opt, done_something);
 					*done_something = true;
-				}
-				/* If, in a == b, a and b are physically
-				 * identical, the result is a constant 1. */
-				if (physicallyEqual(l, r)) {
-					*done_something = true;
-					return IRExpr_Const(IRConst_U1(1));
 				}
 
 				/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
