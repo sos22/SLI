@@ -1063,6 +1063,7 @@ static inline void sanity_check_irtype(IRType i)
 
 /* Pretty-print an IRType */
 extern void ppIRType ( IRType, FILE *f );
+extern bool parseIRType ( IRType *, const char *, const char ** );
 
 /* Get the size (in bytes) of an IRType */ 
 extern Int sizeofIRType ( IRType );

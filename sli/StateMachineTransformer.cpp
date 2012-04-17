@@ -38,7 +38,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, b
 	bool b = false;
 	IRExpr *a = doit(l->addr, &b);
 	if (b)
-		return new StateMachineSideEffectLoad(l->target, a, l->rip);
+		return new StateMachineSideEffectLoad(l->target, a, l->rip, l->type);
 	else
 		return NULL;
 }

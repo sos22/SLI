@@ -523,7 +523,7 @@ buildNewStateMachineWithLoadsEliminated(
 			}
 			if (!newEffect && doit)
 				newEffect = new StateMachineSideEffectLoad(
-					smsel->target, newAddr, smsel->rip);
+					smsel->target, newAddr, smsel->rip, smsel->type);
 			if (!newEffect)
 				newEffect = *it;
 			if (newEffect != *it)

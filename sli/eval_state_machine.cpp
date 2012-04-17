@@ -335,7 +335,8 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 					new StateMachineSideEffectLoad(
 						smsel->target,
 						specialiseIRExpr(addr, state),
-						smsel->rip)));
+						smsel->rip,
+						smsel->type)));
 		state.registers[smsel->target] = val;
 		break;
 	}

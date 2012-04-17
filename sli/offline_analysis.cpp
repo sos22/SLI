@@ -1850,17 +1850,33 @@ CFGtoCrashReason(unsigned tid,
 				break;
 			case Ist_Dirty:
 				if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					    "helper_load_8") ||
-				    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					    "helper_load_16") ||
-				    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					    "helper_load_64") ||
-				    !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					    "helper_load_32")) {
+					    "helper_load_8")) {
 					se = new StateMachineSideEffectLoad(
 						((IRStmtDirty *)stmt)->details->tmp,
 						((IRStmtDirty *)stmt)->details->args[0],
-						rip);
+						rip,
+						Ity_I8);
+				} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
+						   "helper_load_16")) {
+					se = new StateMachineSideEffectLoad(
+						((IRStmtDirty *)stmt)->details->tmp,
+						((IRStmtDirty *)stmt)->details->args[0],
+						rip,
+						Ity_I16);
+				} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
+						   "helper_load_64")) {
+					se = new StateMachineSideEffectLoad(
+						((IRStmtDirty *)stmt)->details->tmp,
+						((IRStmtDirty *)stmt)->details->args[0],
+						rip,
+						Ity_I64);
+				} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
+						   "helper_load_32")) {
+					se = new StateMachineSideEffectLoad(
+						((IRStmtDirty *)stmt)->details->tmp,
+						((IRStmtDirty *)stmt)->details->args[0],
+						rip,
+						Ity_I32);
 				}  else {
 					abort();
 				}

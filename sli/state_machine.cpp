@@ -427,6 +427,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse2);
 		return threadAndRegister::fullEq(smsel1->target, smsel2->target) &&
+			smsel1->type == smsel2->type &&
 			definitelyEqual(smsel1->addr, smsel2->addr, opt);
 	}
 	case StateMachineSideEffect::Copy: {
@@ -480,13 +481,16 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		return true;
 	}
 	threadAndRegister key(threadAndRegister::invalid());
+	IRType type;
 	if (parseThisString("LOAD ", str, &str2) &&
 	    parseThreadAndRegister(&key, str2, &str2) &&
+	    parseThisString(":", str2, &str2) &&
+	    parseIRType(&type, str2, &str2) &&
 	    parseThisString(" <- *(", str2, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(")@", str2, &str2) &&
 	    parseThreadRip(&rip, str2, suffix)) {
-		*out = new StateMachineSideEffectLoad(key, addr, rip);
+	  *out = new StateMachineSideEffectLoad(key, addr, rip, type);
 		return true;
 	}
 	if (parseThisString("COPY ", str, &str2) &&

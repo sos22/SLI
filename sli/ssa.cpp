@@ -443,7 +443,8 @@ introduceSsaVars(StateMachine *inp,
 			return new StateMachineSideEffectLoad(
 				l->target.setGen(++lastGeneration[l->target]),
 				l->addr,
-				l->rip);
+				l->rip,
+				l->type);
 		}
 		StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *c, bool *) {
 			assert(c->target.gen() == 0);
@@ -1083,7 +1084,8 @@ rawDupe(duplication_context &ctxt, const StateMachineSideEffectLoad *l)
 {
 	StateMachineSideEffectLoad *res = new StateMachineSideEffectLoad(l->target,
 									 NULL,
-									 l->rip);
+									 l->rip,
+									 l->type);
 	ctxt(&res->addr, l->addr, rawDupe);
 	return res;
 }

@@ -97,7 +97,7 @@ void ppIRType ( IRType ty, FILE *f )
    }
 }
 
-static bool parseIRType(IRType *out, const char *str, const char **suffix)
+bool parseIRType(IRType *out, const char *str, const char **suffix)
 {
 #define do_type(n)					\
   if (parseThisString( #n , str, suffix)) {		\

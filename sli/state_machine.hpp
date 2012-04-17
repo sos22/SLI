@@ -848,22 +848,25 @@ class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void constructed();
 	unsigned long _hashval() const { return addr->hashval() * 757 + target.hash() * 118409; }
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip)
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
-		  target(alloc())
+		  target(alloc()), type(_type)
 	{
 		constructed();
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const ThreadVexRip &_rip)
+	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
-		  target(reg)
+		  target(reg), type(_type)
 	{
 		constructed();
 	}
 	threadAndRegister target;
+	IRType type;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "LOAD ");
 		target.prettyPrint(f);
+		fprintf(f, ":");
+		ppIRType(type, f);
 		fprintf(f, " <- *(");
 		ppIRExpr(addr, f);
 		fprintf(f, ")@%s", rip.name());
