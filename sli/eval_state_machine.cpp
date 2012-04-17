@@ -12,7 +12,11 @@
 /* All of the state needed to evaluate a single pure IRExpr. */
 class threadState {
 	/* The values of all of the registers */
-	std::map<threadAndRegister, IRExpr *, threadAndRegister::partialCompare> registers;
+	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> registers;
+	/* The order in which registers have been assigned to.  This
+	   makes implementing Phi nodes much easier.  Each register
+	   appears at most once in here. */
+	std::vector<threadAndRegister> assignmentOrder;
 public:
 	IRExpr *register_value(const threadAndRegister &reg) {
 		auto it = registers.find(reg);
@@ -23,6 +27,48 @@ public:
 	}
 	void set_register(const threadAndRegister &reg, IRExpr *e) {
 		registers[reg] = e;
+		for (auto it = assignmentOrder.begin();
+		     it != assignmentOrder.end();
+		     it++) {
+			if (threadAndRegister::fullEq(*it, reg)) {
+				assignmentOrder.erase(it);
+				break;
+			}
+		}
+		assignmentOrder.push_back(reg);
+	}
+	void eval_phi(StateMachineSideEffectPhi *phi) {
+		for (auto it = assignmentOrder.rbegin();
+		     it != assignmentOrder.rend();
+		     it++) {
+			if (threadAndRegister::partialEq(*it, phi->reg)) {
+				for (auto it2 = phi->generations.begin();
+				     it2 != phi->generations.end();
+				     it2++) {
+					if (*it2 == it->gen()) {
+						IRExpr *e = register_value(*it);
+						set_register(phi->reg, e);
+						return;
+					}
+				}
+			}
+		}
+		/* We haven't yet assigned to any registers in the
+		   input set of the Phi, so we're going to pick up the
+		   initial value of the super-register. */
+		/* The initial value must be an allowable one. */
+#ifndef NDEBUG
+		bool found_it;
+		found_it = false;
+		for (auto it = phi->generations.begin();
+		     !found_it && it != phi->generations.end();
+		     it++)
+			if (*it == (unsigned)-1)
+				found_it = true;
+		assert(found_it);
+#endif
+		/* Pick up initial value */
+		set_register(phi->reg, NULL);
 	}
 };
 
@@ -384,11 +430,12 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			return false;
 		break;
 	}
-	case StateMachineSideEffect::Phi:
-		/* These don't do anything at the semantic level.  We
-		   interpret ignoring generation numbers, so assigning
-		   x_n = x_{last n} is a no-op. */
+	case StateMachineSideEffect::Phi: {
+		StateMachineSideEffectPhi *smsep =
+			(StateMachineSideEffectPhi *)(smse);
+		state.eval_phi(smsep);
 		break;
+	}
 	}
 	return true;
 }
