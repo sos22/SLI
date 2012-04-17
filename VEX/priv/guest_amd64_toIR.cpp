@@ -3050,7 +3050,7 @@ void codegen_div ( unsigned tid, Int sz, IRTemp t, Bool signed_divide )
          assign( src64, 
                  binop(Iop_32HLto64, getIRegRDX(tid, 4), getIRegRAX(tid, 4)) );
          assign( dst64, 
-                 binop(op, mkexpr(src64, tid, Ity_I64), mkexpr(t, tid, Ity_I64)) );
+                 binop(op, mkexpr(src64, tid, Ity_I64), mkexpr(t, tid, Ity_I32)) );
          putIRegRAX( 4, unop(Iop_64to32,mkexpr(dst64, tid, Ity_I64)) );
          putIRegRDX( 4, unop(Iop_64HIto32,mkexpr(dst64, tid, Ity_I64)) );
          break;
@@ -3061,7 +3061,7 @@ void codegen_div ( unsigned tid, Int sz, IRTemp t, Bool signed_divide )
                              binop(Iop_16HLto32, 
                                    getIRegRDX(tid, 2), 
                                    getIRegRAX(tid, 2))) );
-         assign( dst64, binop(op, mkexpr(src64, tid, Ity_I64), unop(widen1632,mkexpr(t, tid, Ity_I32))) );
+         assign( dst64, binop(op, mkexpr(src64, tid, Ity_I64), unop(widen1632,mkexpr(t, tid, Ity_I16))) );
          putIRegRAX( 2, unop(Iop_32to16,unop(Iop_64to32,mkexpr(dst64, tid, Ity_I64))) );
          putIRegRDX( 2, unop(Iop_32to16,unop(Iop_64HIto32,mkexpr(dst64, tid, Ity_I64))) );
          break;
