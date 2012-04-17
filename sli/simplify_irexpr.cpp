@@ -1656,7 +1656,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				case Iop_64to32:
 					return IRExpr_Const(IRConst_U32(c->Ico.U64));
 				case Iop_64to8:
-					return IRExpr_Const(IRConst_U32(c->Ico.U64));
+					return IRExpr_Const(IRConst_U8(c->Ico.U64));
 				case Iop_BadPtr:
 					if (c->Ico.U64 < 4096) {
 						return IRExpr_Const(IRConst_U1(1));
