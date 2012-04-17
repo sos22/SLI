@@ -206,10 +206,8 @@ optimise_condition_calculation(
 
 	switch (op) {
 	case AMD64G_CC_OP_SUBB:
-		zf = IRExpr_Binop(Iop_CmpEQ8, dep1, dep2);
-		break;
 	case AMD64G_CC_OP_SUBW:
-		zf = IRExpr_Binop(Iop_CmpEQ16, dep1, dep2);
+		zf = IRExpr_Binop(Iop_CmpEQ64, dep1, dep2);
 		break;
 	case AMD64G_CC_OP_SUBL:
 	case AMD64G_CC_OP_SUBQ:
