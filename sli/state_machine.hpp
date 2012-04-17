@@ -935,6 +935,7 @@ public:
 	int complexity() { return exprComplexity(value); }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
+		assert(value->type() == Ity_I1);
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {

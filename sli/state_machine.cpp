@@ -418,7 +418,8 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectStore *>(smse1);
 		StateMachineSideEffectStore *smses2 =
 			dynamic_cast<StateMachineSideEffectStore *>(smse2);
-		return definitelyEqual(smses1->addr, smses2->addr, opt) &&
+		return smses1->data->type() == smses2->data->type() &&
+			definitelyEqual(smses1->addr, smses2->addr, opt) &&
 			definitelyEqual(smses1->data, smses2->data, opt);
 	}
 	case StateMachineSideEffect::Load: {
@@ -436,6 +437,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		StateMachineSideEffectCopy *smsec2 =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse2);
 		return threadAndRegister::fullEq(smsec1->target, smsec2->target) &&
+			smsec1->value->type() == smsec2->value->type() &&
 			definitelyEqual(smsec1->value, smsec2->value, opt);
 	}
 	case StateMachineSideEffect::Unreached:
@@ -452,7 +454,8 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			(StateMachineSideEffectPhi *)smse1;
 		StateMachineSideEffectPhi *smsep2 =
 			(StateMachineSideEffectPhi *)smse2;
-		return threadAndRegister::fullEq(smsep1->reg, smsep2->reg);
+		return threadAndRegister::fullEq(smsep1->reg, smsep2->reg) &&
+			smsep1->generations == smsep2->generations;
 	}
 	}
 	abort();
