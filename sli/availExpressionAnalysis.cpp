@@ -390,7 +390,8 @@ public:
 	IRExpr *transformIex(IRExprGet *e) {
 		auto it = avail._registers.find(e->reg);
 		if (it != avail._registers.end()) {
-			return coerceTypesForSubstitution(e, it->second);
+			if (it->second->type() >= e->type())
+				return coerceTypesForSubstitution(e, it->second);
 		}
 		return IRExprTransformer::transformIex(e);
 	}
