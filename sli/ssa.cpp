@@ -181,6 +181,8 @@ PossiblyReaching::PossiblyReaching(StateMachine *inp, const ImportRegTable &r)
 	/* Iterate to fixed point. */
 	while (!statesNeedingUpdate.empty() ||
 	       !edgesNeedingUpdate.empty()) {
+		if (TIMEOUT)
+			return;
 		while (!statesNeedingUpdate.empty()) {
 			auto it = statesNeedingUpdate.begin();
 			auto s = *it;
@@ -200,6 +202,8 @@ PossiblyReaching::PossiblyReaching(StateMachine *inp, const ImportRegTable &r)
 	std::set<StateMachineState *> visited;
 	toVisit.insert(inp->root);
 	while (!toVisit.empty()) {
+		if (TIMEOUT)
+			return;
 		StateMachineState *s = pop(toVisit);
 		if (visited.count(s))
 			continue;
@@ -1228,6 +1232,8 @@ convertToSSA(StateMachine *inp)
 	ImportRegTable imports(inp);
 	{
 		PossiblyReaching reaching(inp, imports);
+		if (TIMEOUT)
+			return inp;
 		inp = introduceSsaVars(inp, reaching, lastGeneration);
 		if (TIMEOUT)
 			return inp;
@@ -1239,6 +1245,8 @@ convertToSSA(StateMachine *inp)
 			if (TIMEOUT)
 				return inp;
 			PossiblyReaching r(inp, imports);
+			if (TIMEOUT)
+				return inp;
 			progress = useSsaVarsAndIntroducePhis(inp, r, lastGeneration);
 		} while (progress);
 	}
@@ -1316,6 +1324,8 @@ static StateMachine *
 optimiseSSA(StateMachine *inp, bool *done_something)
 {
 	optimiseSSATransformer t(inp);
+	if (TIMEOUT)
+		return inp;
 	return t.transform(inp, done_something);
 }
 
