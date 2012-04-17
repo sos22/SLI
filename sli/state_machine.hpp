@@ -458,6 +458,8 @@ public:
 		}
 		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++)
 			(*it)->sanityCheck(live2);
+		if (TIMEOUT)
+			return;
 		unsigned sz = done.size();
 		done.push_back(this);
 		target->sanityCheck(live2, done);
