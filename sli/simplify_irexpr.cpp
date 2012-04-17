@@ -2082,10 +2082,13 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	assert(a->type() == b->type());
 	int idx = definitelyEqualCache.hash(a, b);
 	bool res;
-	if (definitelyEqualCache.query(a, b, idx, &res))
+	if (definitelyEqualCache.query(a, b, idx, &res)) {
+		assert(a != b || res == true);
 		return res;
+	}
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
+	assert(a != b || res == true);
 	definitelyEqualCache.set(a, b, idx, res);
 	return res;
 }
