@@ -2139,8 +2139,10 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	}
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
-	assert(a != b || res == true);
-	definitelyEqualCache.set(a, b, idx, res);
+	if (!TIMEOUT) {
+		assert(a != b || res == true);
+		definitelyEqualCache.set(a, b, idx, res);
+	}
 	return res;
 }
 bool
@@ -2153,7 +2155,8 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 		return res;
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && !((IRExprConst *)r)->con->Ico.U1);
-	definitelyNotEqualCache.set(a, b, idx, res);
+	if (!TIMEOUT)
+		definitelyNotEqualCache.set(a, b, idx, res);
 	return res;
 }
 
