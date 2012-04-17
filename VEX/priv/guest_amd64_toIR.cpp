@@ -9191,8 +9191,8 @@ DisResult disInstr_AMD64_WRK (
                binop( Iop_And64,
                       unop( Iop_32Uto64,
                             binop(Iop_CmpF64, 
-                                  unop(Iop_F32toF64,mkexpr(argL, tid, Ity_F64)),
-                                  unop(Iop_F32toF64,mkexpr(argR, tid, Ity_F64)))),
+                                  unop(Iop_F32toF64,mkexpr(argL, tid, Ity_F32)),
+                                  unop(Iop_F32toF64,mkexpr(argR, tid, Ity_F32)))),
                       mkU64(0x45)
           )));
 
