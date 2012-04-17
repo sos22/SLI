@@ -11,8 +11,19 @@
 
 /* All of the state needed to evaluate a single pure IRExpr. */
 class threadState {
-public:
+	/* The values of all of the registers */
 	std::map<threadAndRegister, IRExpr *, threadAndRegister::partialCompare> registers;
+public:
+	IRExpr *register_value(const threadAndRegister &reg) {
+		auto it = registers.find(reg);
+		if (it == registers.end())
+			return NULL;
+		else
+			return it->second;
+	}
+	void set_register(const threadAndRegister &reg, IRExpr *e) {
+		registers[reg] = e;
+	}
 };
 
 typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
@@ -35,9 +46,9 @@ public:
 class SpecialiseIRExpr : public IRExprTransformer {
 	threadState &state;
 	IRExpr *transformIex(IRExprGet *e) {
-		auto it = state.registers.find(e->reg);
-		if (it != state.registers.end())
-			return coerceTypes(e->type(), it->second);
+		IRExpr *e2 = state.register_value(e->reg);
+		if (e2)
+			return coerceTypes(e->type(), e2);
 		return IRExprTransformer::transformIex(e);
 	}
 public:
@@ -352,15 +363,15 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 						specialiseIRExpr(addr, state),
 						smsel->rip,
 						smsel->type)));
-		state.registers[smsel->target] = val;
+		state.set_register(smsel->target, val);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *smsec =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
-		state.registers[smsec->target] =
-			specialiseIRExpr(smsec->value, state);
+		state.set_register(smsec->target,
+				   specialiseIRExpr(smsec->value, state));
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
