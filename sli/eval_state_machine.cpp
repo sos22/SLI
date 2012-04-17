@@ -395,8 +395,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		}
 		IRExpr *val;
 		if (satisfier) {
-			val = satisfier->data;
-			assert(satisfier->data->type() == smsel->type);
+			val = coerceTypes(smsel->type, satisfier->data);
 		} else {
 			val = IRExpr_Load(smsel->type, addr, smsel->rip);
 		}
