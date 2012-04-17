@@ -293,7 +293,20 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		     it != memLog.rend();
 		     it++) {
 			StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(it->second);
-			if (!smses || !oracle->memoryAccessesMightAlias(opt, smsel, smses))
+			if (!smses)
+				continue;
+			/* We only accept stores which define the
+			 * entire thing which we're looking for.  If
+			 * something's stored as 64 bits then we'll
+			 * take a load of 32 bits, but if it's stored
+			 * as 32 bits then we won't take a load of 64
+			 * bits. */
+			if (smses->data->type() < smsel->type) {
+#warning This is unsound
+				continue;
+			}
+
+			if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				continue;
 			if (evalExpressionsEqual(smses->addr, addr, chooser, state, opt, assumption, accumulatedAssumptions)) {
 				if (!collectOrderingConstraints) {
