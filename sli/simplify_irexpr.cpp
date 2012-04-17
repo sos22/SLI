@@ -1118,6 +1118,8 @@ optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
 
 /* We want to replace @from with @to, but the types are wrong.  Insert
  * coercions as appropriate. */
+/* Note that this only works for down-casts: we won't invent more
+ * information if it's not already there in @to. */
 IRExpr *
 coerceTypesForSubstitution(IRExpr *from, IRExpr *to)
 {
@@ -1133,6 +1135,28 @@ coerceTypesForSubstitution(IRExpr *from, IRExpr *to)
 		case Ity_I32:
 			return IRExpr_Unop(Iop_64to32, to);
 		case Ity_I64:
+			return to;
+		default:
+			break;
+		}
+		break;
+	case Ity_I32:
+		switch (b) {
+		case Ity_I8:
+			return IRExpr_Unop(Iop_32to8, to);
+		case Ity_I16:
+			return IRExpr_Unop(Iop_32to16, to);
+		case Ity_I32:
+			return to;
+		default:
+			break;
+		}
+		break;
+	case Ity_I16:
+		switch (b) {
+		case Ity_I8:
+			return IRExpr_Unop(Iop_16to8, to);
+		case Ity_I16:
 			return to;
 		default:
 			break;
