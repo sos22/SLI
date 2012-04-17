@@ -1124,23 +1124,33 @@ coerceTypesForSubstitution(IRExpr *from, IRExpr *to)
 {
 	IRType a = to->type();
 	IRType b = from->type();
-	if (a != b) {
-		switch (a) {
+	switch (a) {
+	case Ity_I64:
+		switch (b) {
+		case Ity_I8:
+			return IRExpr_Unop(Iop_64to8, to);
+		case Ity_I16:
+			return IRExpr_Unop(Iop_64to16, to);
+		case Ity_I32:
+			return IRExpr_Unop(Iop_64to32, to);
 		case Ity_I64:
-			switch (b) {
-			case Ity_I8:
-				return IRExpr_Unop(Iop_64to8, to);
-			case Ity_I16:
-				return IRExpr_Unop(Iop_64to16, to);
-			case Ity_I32:
-				return IRExpr_Unop(Iop_64to32, to);
-			default:
-				break;
-			}
-			break;
+			return to;
 		default:
 			break;
 		}
+		break;
+	case Ity_I8:
+		switch (b) {
+		case Ity_I1:
+			return IRExpr_Unop(Iop_8to1, to);
+		case Ity_I8:
+			return to;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
 	}
 	assert(a == b);
 	return to;
