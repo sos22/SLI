@@ -3037,7 +3037,7 @@ void codegen_div ( unsigned tid, Int sz, IRTemp t, Bool signed_divide )
       assign( src128, binop(Iop_64HLto128, 
                             getIReg64(tid, R_RDX), 
                             getIReg64(tid, R_RAX)) );
-      assign( dst128, binop(op, mkexpr(src128, tid, Ity_I128), mkexpr(t, tid, Ity_I128)) );
+      assign( dst128, binop(op, mkexpr(src128, tid, Ity_I128), mkexpr(t, tid, Ity_I64)) );
       putIReg64( R_RAX, unop(Iop_128to64,mkexpr(dst128, tid, Ity_I128)) );
       putIReg64( R_RDX, unop(Iop_128HIto64,mkexpr(dst128, tid, Ity_I128)) );
    } else {
@@ -10330,7 +10330,7 @@ DisResult disInstr_AMD64_WRK (
                mk_reg(OFFB_CC_DEP1),
                binop( Iop_And64,
                       unop( Iop_32Uto64, 
-                            binop(Iop_CmpF64, mkexpr(argL, tid, Ity_I32), mkexpr(argR, tid, Ity_I32)) ),
+                            binop(Iop_CmpF64, mkexpr(argL, tid, Ity_F64), mkexpr(argR, tid, Ity_F64)) ),
                       mkU64(0x45)
           )));
 
