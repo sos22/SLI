@@ -391,7 +391,7 @@ public:
 		auto it = avail._registers.find(e->reg);
 		if (it != avail._registers.end()) {
 			if (it->second->type() >= e->type())
-				return coerceTypesForSubstitution(e, it->second);
+				return coerceTypes(e->type(), it->second);
 		}
 		return IRExprTransformer::transformIex(e);
 	}

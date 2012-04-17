@@ -14,7 +14,7 @@ IRExpr *simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt);
 int exprComplexity(const IRExpr *e);
 void addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg);
 bool physicallyEqual(const IRConst *a, const IRConst *b);
-IRExpr *coerceTypesForSubstitution(IRExpr *from, IRExpr *to);
+IRExpr *coerceTypes(IRType, IRExpr *);
 
 void sanity_check_irexpr_sorter(void);
 void sanity_check_optimiser(void);

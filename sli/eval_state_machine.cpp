@@ -37,7 +37,7 @@ class SpecialiseIRExpr : public IRExprTransformer {
 	IRExpr *transformIex(IRExprGet *e) {
 		auto it = state.registers.find(e->reg);
 		if (it != state.registers.end())
-			return coerceTypesForSubstitution(e, it->second);
+			return coerceTypes(e->type(), it->second);
 		return IRExprTransformer::transformIex(e);
 	}
 public:
@@ -337,10 +337,12 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			}
 		}
 		IRExpr *val;
-		if (satisfier)
+		if (satisfier) {
 			val = satisfier->data;
-		else
-			val = IRExpr_Load(Ity_I64, addr, smsel->rip);
+			assert(satisfier->data->type() == smsel->type);
+		} else {
+			val = IRExpr_Load(smsel->type, addr, smsel->rip);
+		}
 		if (collectOrderingConstraints)
 			memLog.push_back(
 				std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>(

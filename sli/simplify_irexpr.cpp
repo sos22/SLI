@@ -1116,58 +1116,55 @@ optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
 	return assoc;
 }
 
-/* We want to replace @from with @to, but the types are wrong.  Insert
- * coercions as appropriate. */
-/* Note that this only works for down-casts: we won't invent more
- * information if it's not already there in @to. */
+/* Down-cast @expr so that it is of type @desiredType. */
 IRExpr *
-coerceTypesForSubstitution(IRExpr *from, IRExpr *to)
+coerceTypes(IRType desiredType, IRExpr *expr)
 {
-	IRType a = to->type();
-	IRType b = from->type();
-	switch (a) {
+	IRType origType = expr->type();
+	assert(desiredType <= origType);
+	switch (origType) {
 	case Ity_I64:
-		switch (b) {
+		switch (desiredType) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_64to8, to);
+			return IRExpr_Unop(Iop_64to8, expr);
 		case Ity_I16:
-			return IRExpr_Unop(Iop_64to16, to);
+			return IRExpr_Unop(Iop_64to16, expr);
 		case Ity_I32:
-			return IRExpr_Unop(Iop_64to32, to);
+			return IRExpr_Unop(Iop_64to32, expr);
 		case Ity_I64:
-			return to;
+			return expr;
 		default:
 			break;
 		}
 		break;
 	case Ity_I32:
-		switch (b) {
+		switch (desiredType) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_32to8, to);
+			return IRExpr_Unop(Iop_32to8, expr);
 		case Ity_I16:
-			return IRExpr_Unop(Iop_32to16, to);
+			return IRExpr_Unop(Iop_32to16, expr);
 		case Ity_I32:
-			return to;
+			return expr;
 		default:
 			break;
 		}
 		break;
 	case Ity_I16:
-		switch (b) {
+		switch (desiredType) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_16to8, to);
+			return IRExpr_Unop(Iop_16to8, expr);
 		case Ity_I16:
-			return to;
+			return expr;
 		default:
 			break;
 		}
 		break;
 	case Ity_I8:
-		switch (b) {
+		switch (desiredType) {
 		case Ity_I1:
-			return IRExpr_Unop(Iop_8to1, to);
+			return IRExpr_Unop(Iop_8to1, expr);
 		case Ity_I8:
-			return to;
+			return expr;
 		default:
 			break;
 		}
@@ -1175,8 +1172,9 @@ coerceTypesForSubstitution(IRExpr *from, IRExpr *to)
 	default:
 		break;
 	}
-	assert(a == b);
-	return to;
+	if (desiredType != origType)
+		abort();
+	return expr;
 }
 
 static IRExpr *
