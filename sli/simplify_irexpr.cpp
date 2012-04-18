@@ -2173,6 +2173,8 @@ expr_eq(IRExpr *a, IRExpr *b)
 		return IRExpr_Binop(Iop_CmpEQF32, a, b);
 	case Ity_F64:
 		return IRExpr_Binop(Iop_CmpEQF64, a, b);
+	case Ity_V128:
+		return IRExpr_Binop(Iop_CmpEQV128, a, b);
 	default:
 		abort();
 	}
