@@ -456,8 +456,15 @@ public:
 		} else {
 			live2 = NULL;
 		}
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++)
+		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+			if ((*it)->type == StateMachineSideEffect::Unreached) {
+				/* Don't want to check past these,
+				   because they often lead to bad
+				   areas of the machine. */
+				return;
+			}
 			(*it)->sanityCheck(live2);
+		}
 		if (TIMEOUT)
 			return;
 		unsigned sz = done.size();

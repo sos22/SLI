@@ -84,9 +84,9 @@ public:
 			else if (rv.val16)
 				return IRExpr_Unop(Iop_16to8, rv.val16);
 			else if (rv.val32)
-				return IRExpr_Unop(Iop_32to8, rv.val16);
+				return IRExpr_Unop(Iop_32to8, rv.val32);
 			else if (rv.val64)
-				return IRExpr_Unop(Iop_64to8, rv.val16);
+				return IRExpr_Unop(Iop_64to8, rv.val64);
 			else
 				return NULL;
 		case Ity_I16:
@@ -1232,33 +1232,46 @@ writeMachineSuitabilityConstraint(
 		}
 
 		if (!writer_failed) {
-			StateMachineEvalContext readEvalCtxt;
-			readEvalCtxt.pathConstraint = pathConstraint;
-			readEvalCtxt.memLog = memLog;
-			readEvalCtxt.justPathConstraint = thisTimeConstraint;
-			bool crashes;
-			evalStateMachine(readMachine, readMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
-			if (crashes) {
-				/* We get a crash if we evaluate the
-				   read machine after running the
-				   store machine to completion -> this
-				   is a poor choice of store
-				   machines. */
+			/* Use a nested chooser to evaluate the read
+			 * machine, rather than using the same chooser
+			 * for read and write.  This is a little bit
+			 * faster, because we don't need to re-run the
+			 * write machine over and over again if the
+			 * read machine needs lots of choice
+			 * points. */
+			NdChooser read_chooser;
+			do {
+				StateMachineEvalContext readEvalCtxt;
+				readEvalCtxt.pathConstraint = pathConstraint;
+				readEvalCtxt.memLog = memLog;
+				readEvalCtxt.justPathConstraint = thisTimeConstraint;
+				bool crashes;
+				evalStateMachine(readMachine, readMachine->root, &crashes, read_chooser, oracle, opt, readEvalCtxt);
+				if (crashes) {
+					/* We get a crash if we
+					   evaluate the read machine
+					   after running the store
+					   machine to completion ->
+					   this is a poor choice of
+					   store machines. */
 
-				/* If we evaluate the read machine to
-				   completion after running the write
-				   machine to completion under these
-				   assumptions then we get a crash ->
-				   these assumptions must be false. */
-				rewrittenAssumption = simplifyIRExpr(
-					IRExpr_Binop(
-						Iop_And1,
-						rewrittenAssumption,
-						IRExpr_Unop(
-							Iop_Not1,
-							readEvalCtxt.justPathConstraint)),
-					opt);
-			}
+					/* If we evaluate the read
+					   machine to completion after
+					   running the write machine
+					   to completion under these
+					   assumptions then we get a
+					   crash -> these assumptions
+					   must be false. */
+					rewrittenAssumption = simplifyIRExpr(
+						IRExpr_Binop(
+							Iop_And1,
+							rewrittenAssumption,
+							IRExpr_Unop(
+								Iop_Not1,
+								readEvalCtxt.justPathConstraint)),
+						opt);
+				}
+			} while (read_chooser.advance());
 		}
 	} while (chooser.advance());
 	
