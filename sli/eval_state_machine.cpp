@@ -84,9 +84,9 @@ public:
 			else if (rv.val16)
 				return IRExpr_Unop(Iop_16to8, rv.val16);
 			else if (rv.val32)
-				return IRExpr_Unop(Iop_32to8, rv.val16);
+				return IRExpr_Unop(Iop_32to8, rv.val32);
 			else if (rv.val64)
-				return IRExpr_Unop(Iop_64to8, rv.val16);
+				return IRExpr_Unop(Iop_64to8, rv.val64);
 			else
 				return NULL;
 		case Ity_I16:
