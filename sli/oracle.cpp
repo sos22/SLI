@@ -762,11 +762,13 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 	     it++) {
 		LibVEX_maybe_gc(token);
 		Function f(*it);
-		do {
-			done_something = false;
-			f.calculateAliasing(ths->ms->addressSpace, &done_something, ths);
-		} while (done_something);
-		f.setAliasingConfigCorrect(true);
+		if (!f.aliasingConfigCorrect()) {
+			do {
+				done_something = false;
+				f.calculateAliasing(ths->ms->addressSpace, &done_something, ths);
+			} while (done_something);
+			f.setAliasingConfigCorrect(true);
+		}
 		printf("Aliasing: Done %zd/%zd functions\n",
 		       it - functions.begin(),
 		       functions.size());
@@ -1158,7 +1160,7 @@ database(void)
 	if (_database)
 		return _database;
 	
-	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE, NULL);
+	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READONLY, NULL);
 	if (rc == SQLITE_OK) {
 		/* Return existing database */
 		goto disable_journalling;
@@ -1663,9 +1665,6 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 void
 Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle)
 {
-	if (aliasingConfigCorrect())
-		return;
-
 	bool aValid;
 	RegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip, &aValid));
 	if (aValid) {
