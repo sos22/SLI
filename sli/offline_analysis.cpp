@@ -574,9 +574,6 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	}
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	sm = deSSA(sm);
-	if (TIMEOUT)
-		return sm;
 
 	ii->set(sm->origin, sm->root);
 
@@ -660,7 +657,10 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 	opt.interestingStores = is;
 	opt.haveInterestingStoresSet = true;
 
-	if (!determineWhetherStoreMachineCanCrash(sm, probeMachine, oracle, assumption, opt, false, token, NULL, NULL))
+	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
+	if (!sm_ssa)
+		return false;
+	if (!determineWhetherStoreMachineCanCrash(sm_ssa, probeMachine, oracle, assumption, opt, false, token, NULL, NULL))
 		return false;
 
 	/* If it might crash with that machine, try expanding it to
@@ -672,6 +672,10 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 	}
 
 	opt = opt.disablefreeVariablesMightAccessStack();
+
+	sm = convertToSSA(sm);
+	if (!sm)
+		return false;
 
 	fprintf(_logfile, "\t\tExpanded store machine:\n");
 	printStateMachine(sm, _logfile);
@@ -784,13 +788,18 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 	if (TIMEOUT)
 		return NULL;
 
-	if (sm)
+	if (sm) {
+		sm = convertToSSA(sm);
+		if (TIMEOUT)
+			return NULL;
+		sm->sanityCheck();
 		sm = optimiseStateMachine(sm,
 					  opt.disablefreeVariablesMightAccessStack(),
 					  oracle,
 					  true,
 					  true,
 					  token);
+	}
 
 	return sm;
 }
@@ -2068,9 +2077,6 @@ CFGtoCrashReason(unsigned tid,
 	sm = optimiseStateMachine(sm, opt, oracle, false, false, token);
 	if (crashReasons)
 		crashReasons->set(original_rip, sm->root);
-	sm = convertToSSA(sm);
-	if (TIMEOUT)
-		return NULL;
 	sm->sanityCheck();
 	return sm;
 }
