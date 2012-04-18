@@ -1589,6 +1589,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				IRExprGet *argg = (IRExprGet *)e->arg;
 				if (e->op == Iop_64to32)
 					return IRExpr_Get(argg->reg, Ity_I32);
+				if (e->op == Iop_64to16 || e->op == Iop_32to16)
+					return IRExpr_Get(argg->reg, Ity_I16);
+				if (e->op == Iop_64to8 || e->op == Iop_32to8 || e->op == Iop_16to8)
+					return IRExpr_Get(argg->reg, Ity_I8);
 			}
 
 			if (e->arg->tag == Iex_Load) {
@@ -1597,30 +1601,79 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Load(Ity_I32, argl->addr, argl->rip);
 			}
 
-			if (e->op == Iop_Not1 &&
-			    e->arg->tag == Iex_Associative &&
-			    (((IRExprAssociative *)e->arg)->op == Iop_And1 ||
-			     ((IRExprAssociative *)e->arg)->op == Iop_Or1)) {
-				/* Convert ~(x & y) to ~x | ~y */
-				IRExprAssociative *a =
-					(IRExprAssociative *)IRExpr_Associative((IRExprAssociative *)e->arg);
-				for (int i = 0;
-				     i < a->nr_arguments;
-				     i++) {
-					a->contents[i] =
-						optimiseIRExprFP(
-							IRExpr_Unop(
-								Iop_Not1,
-								a->contents[i]),
-							opt,
-							done_something);
+			if (e->arg->tag == Iex_Associative) {
+				IRExprAssociative *arga = (IRExprAssociative *)e->arg;
+				if (e->op == Iop_Not1 &&
+				    (arga->op == Iop_And1 || arga->op == Iop_Or1)) {
+					/* Convert ~(x & y) to ~x | ~y */
+					IRExprAssociative *a =
+						(IRExprAssociative *)IRExpr_Associative(arga);
+					for (int i = 0;
+					     i < a->nr_arguments;
+					     i++) {
+						a->contents[i] =
+							optimiseIRExprFP(
+								IRExpr_Unop(
+									Iop_Not1,
+									a->contents[i]),
+								opt,
+								done_something);
+					}
+					if (a->op == Iop_And1)
+						a->op = Iop_Or1;
+					else
+						a->op = Iop_And1;
+					return a;
 				}
-				if (a->op == Iop_And1)
-					a->op = Iop_Or1;
-				else
-					a->op = Iop_And1;
-				return a;
+				if ((arga->op == Iop_Or8 || arga->op == Iop_Or16 || arga->op == Iop_Or32 || arga->op == Iop_Or64 ||
+				     arga->op == Iop_And8 || arga->op == Iop_And16 || arga->op == Iop_And32 || arga->op == Iop_And64 ||
+				     arga->op == Iop_Xor8 || arga->op == Iop_Xor16 || arga->op == Iop_Xor32 || arga->op == Iop_Xor64 ||
+				     arga->op == Iop_Add8 || arga->op == Iop_Add16 || arga->op == Iop_Add32 || arga->op == Iop_Add64) &&
+				    (e->op == Iop_64to32 || e->op == Iop_64to16 || e->op == Iop_64to8 ||
+				                            e->op == Iop_32to16 || e->op == Iop_32to8 ||
+				                                                   e->op == Iop_16to8)) {
+					/* Push downcasts through and/or operations. */
+					IRExprAssociative *a =
+						(IRExprAssociative *)IRExpr_Associative(arga);
+					for (int i = 0; i < a->nr_arguments; i++)
+						a->contents[i] =
+							optimiseIRExprFP(
+								IRExpr_Unop(
+									e->op,
+									a->contents[i]),
+								opt,
+								done_something);
+					IROp base_op = Iop_INVALID;
+#define do_op(name)							\
+					if (arga->op >= Iop_ ## name ## 8 \
+					    && arga->op <= Iop_ ## name ## 64) \
+						base_op = Iop_ ## name ## 8
+					do_op(Or);
+					do_op(And);
+					do_op(Xor);
+					do_op(Add);
+#undef do_op
+					assert(base_op != Iop_INVALID);
+					IROp op = Iop_INVALID;
+					switch (a->contents[0]->type()) {
+					case Ity_I8:
+						op = base_op;
+						break;
+					case Ity_I16:
+						op = (IROp)(base_op + 1);
+						break;
+					case Ity_I32:
+						op = (IROp)(base_op + 2);
+						break;
+					default:
+						break;
+					}
+					assert(op != Iop_INVALID);
+					a->op = op;
+					return a;
+				}
 			}
+
 			if (e->op == Iop_BadPtr) {
 				if (e->arg->tag == Iex_Associative &&
 				    ((IRExprAssociative *)e->arg)->op == Iop_Add64 &&
