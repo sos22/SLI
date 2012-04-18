@@ -1703,6 +1703,12 @@ bool shortCircuitableUnops(IROp a, IROp b, IROp *c)
 
   rule(Iop_16Uto32, Iop_8Uto16, Iop_8Uto32);
   rule(Iop_8Uto32, Iop_1Uto8, Iop_1Uto32);
+
+  /* An upcast immediately followed by a stronger downcast can be
+     eliminated. */
+  rule(Iop_64to8, Iop_16Uto64, Iop_16to8);
+  rule(Iop_64to8, Iop_32Uto64, Iop_32to8);
+  rule(Iop_64to16, Iop_32Uto64, Iop_32to16);
 #undef rule
 
   return false;
