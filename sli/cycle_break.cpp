@@ -181,6 +181,8 @@ breakCycles(StateMachine *inp)
 
 	while (1) {
 		reachabilityMap::extendPathsRes r = reach.initialise(inp);
+		if (TIMEOUT)
+			return;
 		while (!r.finished && !r.haveCycle)
 			r = reach.extendPaths();
 		if (r.finished)

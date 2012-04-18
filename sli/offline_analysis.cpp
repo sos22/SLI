@@ -621,6 +621,8 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  true,
 				  token);
 	breakCycles(cr);
+	if (TIMEOUT)
+		return NULL;
 	cr->selectSingleCrashingPath();
 	cr = optimiseStateMachine(cr,
 				  opt,
@@ -768,6 +770,8 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 					  true,
 					  token);
 		breakCycles(cr);
+		if (TIMEOUT)
+			return NULL;
 		cr->selectSingleCrashingPath();
 		cr = optimiseStateMachine(cr,
 					  opt,
