@@ -3199,6 +3199,17 @@ ULong dis_Grp1 ( unsigned tid,
 }
 
 
+/* !!x operator.  Converts an 8 bit value to a boolean, which is true
+   iff x is non-zero. */
+static IRExpr *
+bangBangOperator8(IRExpr *inp)
+{
+    return IRExpr_Unop(Iop_Not1,
+		       IRExpr_Binop(Iop_CmpEQ8,
+				    inp,
+				    IRExpr_Const(IRConst_U8(0))));
+}
+
 /* Group 2 extended opcodes.  shift_expr must be an 8-bit typed
    expression. */
 
@@ -3431,20 +3442,21 @@ ULong dis_Grp2 ( unsigned tid,
       assign(oldFlags, mk_amd64g_calculate_rflags_all(tid));
 
       /* CC_DEP1 is the rotated value.  CC_NDEP is flags before. */
+      IRExpr *cond = bangBangOperator8(mkexpr(rot_amt64, tid, Ity_I8));
       stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
+                        IRExpr_Mux0X( cond,
                                       IRExpr_Get(OFFB_CC_OP,Ity_I64,tid,0),
                                       mkU64(ccOp))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), 
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
+                        IRExpr_Mux0X( cond,
                                       IRExpr_Get(OFFB_CC_DEP1,Ity_I64,tid,0),
                                       widenUto64(mkexpr(dst1, tid, ty)))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), 
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
+                        IRExpr_Mux0X( cond,
                                       IRExpr_Get(OFFB_CC_DEP2,Ity_I64,tid,0),
                                       mkU64(0))) );
       stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), 
-                        IRExpr_Mux0X( mkexpr(rot_amt64, tid, Ity_I8),
+                        IRExpr_Mux0X( cond,
                                       IRExpr_Get(OFFB_CC_NDEP,Ity_I64,tid,0),
                                       mkexpr(oldFlags, tid, Ity_I64))) );
    } /* if (isRotate) */
@@ -4456,7 +4468,7 @@ static void put_ST ( unsigned tid, Int i, IRExpr* value )
 {
    put_ST_UNCHECKED( tid,
 		     i,
-                     IRExpr_Mux0X( get_ST_TAG(tid, i),
+                     IRExpr_Mux0X( bangBangOperator8(get_ST_TAG(tid, i)),
                                    /* 0 means empty */
                                    value,
                                    /* non-0 means full */
@@ -4482,7 +4494,7 @@ static IRExpr* get_ST_UNCHECKED ( Int i, unsigned tid )
 static IRExpr* get_ST ( unsigned tid, Int i )
 {
    return
-      IRExpr_Mux0X( get_ST_TAG(tid, i),
+       IRExpr_Mux0X( bangBangOperator8(get_ST_TAG(tid, i)),
                     /* 0 means empty */
                     mkQNaN64(),
                     /* non-0 means full */
@@ -6976,8 +6988,8 @@ IRExpr* shiftL64_with_extras ( unsigned tid, IRTemp base, IRTemp xtra, IRTemp am
    */
    return
       IRExpr_Mux0X( 
-	  mkexpr(amt, tid, Ity_I8), 
-	  mkexpr(base, tid, Ity_I64),
+	 bangBangOperator8(mkexpr(amt, tid, Ity_I8)), 
+	 mkexpr(base, tid, Ity_I64),
          binop(Iop_Or64, 
                binop(Iop_Shl64, mkexpr(base, tid, Ity_I64), mkexpr(amt, tid, Ity_I8)),
                binop(Iop_Shr64, mkexpr(xtra, tid, Ity_I64), 
@@ -6997,7 +7009,7 @@ IRExpr* shiftR64_with_extras ( unsigned tid, IRTemp xtra, IRTemp base, IRTemp am
    */
    return
       IRExpr_Mux0X( 
-         mkexpr(amt, tid, Ity_I8), 
+	 bangBangOperator8(mkexpr(amt, tid, Ity_I8)), 
          mkexpr(base, tid, Ity_I64),
          binop(Iop_Or64, 
                binop(Iop_Shr64, mkexpr(base, tid, Ity_I64), mkexpr(amt, tid, Ity_I8)),
@@ -7393,7 +7405,7 @@ ULong dis_bs_E_G ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( 
             mk_reg(OFFB_CC_DEP1),
-            IRExpr_Mux0X( mkexpr(src8, tid, Ity_I8),
+            IRExpr_Mux0X( bangBangOperator8(mkexpr(src8, tid, Ity_I8)),
                           /* src==0 */
                           mkU64(AMD64G_CC_MASK_Z),
                           /* src!=0 */
@@ -7433,7 +7445,7 @@ ULong dis_bs_E_G ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi
    /* The main computation, guarding against zero. */
    assign( dst64,
            IRExpr_Mux0X( 
-              mkexpr(src8, tid, Ity_I8),
+	      bangBangOperator8(mkexpr(src8, tid, Ity_I8)),
               /* src == 0 -- leave dst unchanged */
               widenUto64( getIRegG(tid,  sz, pfx, modrm ) ),
               /* src != 0 */
@@ -7555,9 +7567,9 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
    IRTemp dest  = newTemp();
    IRTemp dest2 = newTemp();
    IRTemp acc2  = newTemp();
-   IRTemp cond8 = newTemp();
    IRTemp addr  = IRTemp_INVALID;
    UChar  rm    = getUChar(guest_code, delta0);
+   IRExpr *cond;
 
    /* There are 3 cases to consider:
 
@@ -7570,24 +7582,11 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       reg-mem, locked: use IRCAS
    */
 
+   cond = mk_amd64g_calculate_condition(AMD64CondZ, tid);
    if (epartIsReg(rm)) {
       /* case 1 */
       *ok = False;
       return delta0;
-      /* awaiting test case */
-      assign( dest, getIRegE(tid, size, pfx, rm) );
-      delta0++;
-      assign( src, getIRegG(tid, size, pfx, rm) );
-      assign( acc, getIRegRAX(tid, size) );
-      setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
-      assign( cond8, unop(Iop_1Uto8, mk_amd64g_calculate_condition(AMD64CondZ, tid)) );
-      assign( dest2, IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(src, tid, ty)) );
-      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
-      putIRegRAX(size, mkexpr(acc2, tid, ty));
-      putIRegE(size, pfx, rm, mkexpr(dest2, tid, ty));
-      DIP("cmpxchg%c %s,%s\n", nameISize(size),
-                               nameIRegG(size,pfx,rm),
-                               nameIRegE(size,pfx,rm) );
    } 
    else if (!epartIsReg(rm) && !(pfx & PFX_LOCK)) {
       /* case 2 */
@@ -7597,9 +7596,8 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       assign( src, getIRegG(tid, size, pfx, rm) );
       assign( acc, getIRegRAX(tid, size) );
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
-      assign( cond8, unop(Iop_1Uto8, mk_amd64g_calculate_condition(AMD64CondZ, tid)) );
-      assign( dest2, IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(src, tid, ty)) );
-      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
+      assign( dest2, IRExpr_Mux0X(cond, mkexpr(dest, tid, ty), mkexpr(src, tid, ty)) );
+      assign( acc2,  IRExpr_Mux0X(cond, mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
       putIRegRAX(size, mkexpr(acc2, tid, ty));
       storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dest2, tid, ty) );
       DIP("cmpxchg%c %s,%s\n", nameISize(size), 
@@ -7620,8 +7618,7 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
 		     mkexpr(addr, tid, Ity_I64), NULL, mkexpr(acc, tid, ty), NULL, mkexpr(src, tid, ty) )
       ));
       setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
-      assign( cond8, unop(Iop_1Uto8, mk_amd64g_calculate_condition(AMD64CondZ, tid)) );
-      assign( acc2,  IRExpr_Mux0X(mkexpr(cond8, tid, Ity_I8), mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
+      assign( acc2,  IRExpr_Mux0X(cond, mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
       putIRegRAX(size, mkexpr(acc2, tid, ty));
       DIP("cmpxchg%c %s,%s\n", nameISize(size), 
                                nameIRegG(size,pfx,rm), dis_buf);
@@ -14591,8 +14588,8 @@ DisResult disInstr_AMD64_WRK (
       stmt( IRStmt_Put( 
                mk_reg(OFFB_DFLAG),
                IRExpr_Mux0X( 
-                  unop(Iop_32to8,
-                  unop(Iop_64to32,
+		  bangBangOperator8(
+                  unop(Iop_64to8,
                        binop(Iop_And64, 
                              binop(Iop_Shr64, mkexpr(t1, tid, Ity_I64), mkU8(10)), 
                              mkU64(1)))),
@@ -14604,8 +14601,8 @@ DisResult disInstr_AMD64_WRK (
       stmt( IRStmt_Put( 
                mk_reg(OFFB_IDFLAG),
                IRExpr_Mux0X( 
-                  unop(Iop_32to8,
-                  unop(Iop_64to32,
+		  bangBangOperator8(
+                  unop(Iop_64to8,
                        binop(Iop_And64, 
                              binop(Iop_Shr64, mkexpr(t1, tid, Ity_I64), mkU8(21)), 
                              mkU64(1)))),
