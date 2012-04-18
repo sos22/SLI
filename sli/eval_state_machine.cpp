@@ -11,22 +11,55 @@
 
 /* All of the state needed to evaluate a single pure IRExpr. */
 class threadState {
+	/* This is a little bit tricky, because we need to support
+	   sub-word writes to registers, but in the vast majority of
+	   cases we'll only read back at the written type.  The fix is
+	   just to keep track of writes to each individual type.
+	   When all of the writes are present, the value of the register
+	   is given by:
+
+	   val8 |
+	   (val16 & ~0xff) |
+	   (val32 & ~0xffff) |
+	   (val64 & ~0xffffffff)
+
+	   If val16 were missing (NULL), say, the value would be
+
+	   val8 |
+	   (val32 & ~0xffffff) |
+	   (val64 & ~0xffffffff)
+
+	   As another example, if val8 and val32 were missing, the value
+	   would be
+
+	   val16 |
+	   (val64 & 0xffffffffffff0000)
+
+	   If val64 is missing then it's replaced by the initial value
+	   of the register.
+
+	   Updates are fairly simple: you just assign to the relevant
+	   valX field and then clear all of the smaller ones (so if
+	   you e.g. write to val32 you clear val16 and val8).
+	*/
+	struct register_val {
+		IRExpr *val8;
+		IRExpr *val16;
+		IRExpr *val32;
+		IRExpr *val64;
+		register_val()
+			: val8(NULL), val16(NULL), val32(NULL), val64(NULL)
+		{}
+	};
+
 	/* The values of all of the registers */
-	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> registers;
+	std::map<threadAndRegister, register_val, threadAndRegister::fullCompare> registers;
 	/* The order in which registers have been assigned to.  This
 	   makes implementing Phi nodes much easier.  Each register
 	   appears at most once in here. */
 	std::vector<threadAndRegister> assignmentOrder;
-public:
-	IRExpr *register_value(const threadAndRegister &reg) {
-		auto it = registers.find(reg);
-		if (it == registers.end())
-			return NULL;
-		else
-			return it->second;
-	}
-	void set_register(const threadAndRegister &reg, IRExpr *e) {
-		registers[reg] = e;
+
+	void bump_register_in_assignment_order(const threadAndRegister &reg) {
 		for (auto it = assignmentOrder.begin();
 		     it != assignmentOrder.end();
 		     it++) {
@@ -37,6 +70,201 @@ public:
 		}
 		assignmentOrder.push_back(reg);
 	}
+public:
+	IRExpr *register_value(const threadAndRegister &reg,
+			       IRType type) {
+		auto it = registers.find(reg);
+		if (it == registers.end())
+			return NULL;
+		register_val &rv(it->second);
+		switch (type) {
+		case Ity_I8:
+			if (rv.val8)
+				return rv.val8;
+			else if (rv.val16)
+				return IRExpr_Unop(Iop_16to8, rv.val16);
+			else if (rv.val32)
+				return IRExpr_Unop(Iop_32to8, rv.val16);
+			else if (rv.val64)
+				return IRExpr_Unop(Iop_64to8, rv.val16);
+			else
+				return NULL;
+		case Ity_I16:
+			if (rv.val8) {
+				IRExpr *acc = IRExpr_Unop(Iop_8Uto16, rv.val8);
+				IRExpr *mask = IRExpr_Const(IRConst_U16(0xff00));
+				IRExpr *hi;
+				if (rv.val16) {
+					hi = rv.val16;
+				} else if (rv.val32) {
+					hi = IRExpr_Unop(Iop_32to16, rv.val32);
+				} else if (rv.val64) {
+					hi = IRExpr_Unop(Iop_64to16, rv.val64);
+				} else {
+					hi = IRExpr_Get(reg, type);
+				}
+				acc = IRExpr_Binop(Iop_Or16,
+						   acc,
+						   IRExpr_Binop(
+							   Iop_And16,
+							   hi,
+							   mask));
+				rv.val8 = NULL;
+				rv.val16 = acc;
+				return acc;
+			} else if (rv.val16) {
+				return rv.val16;
+			} else if (rv.val32) {
+				return IRExpr_Unop(Iop_32to16, rv.val32);
+			} else if (rv.val64) {
+				return IRExpr_Unop(Iop_64to16, rv.val64);
+			} else
+				return NULL;
+		case Ity_I32: {
+			IRExpr *res = NULL;
+			unsigned mask = ~0;
+			if (rv.val8) {
+				res = IRExpr_Unop(Iop_8Uto32, rv.val8);
+				mask = ~0xff;
+			}
+			if (rv.val16) {
+				IRExpr *a = IRExpr_Unop(Iop_16Uto32, rv.val16);
+				if (res)
+					res = IRExpr_Binop(
+						Iop_Or32,
+						res,
+						IRExpr_Binop(
+							Iop_And32,
+							a,
+							IRExpr_Const(IRConst_U32(mask))));
+				else
+					res = a;
+				mask = ~0xffff;
+			}
+			IRExpr *parent;
+			if (rv.val32) {
+				parent = rv.val32;
+			} else if (rv.val64) {
+				parent = IRExpr_Unop(Iop_64to32, rv.val64);
+			} else if (res) {
+				parent = IRExpr_Get(reg, Ity_I32);
+			} else {
+				parent = NULL;
+			}
+
+			if (res)
+				res = IRExpr_Binop(
+					Iop_Or32,
+					res,
+					IRExpr_Binop(
+						Iop_And32,
+						parent,
+						IRExpr_Const(IRConst_U32(mask))));
+			else
+				res = parent;
+			rv.val8 = NULL;
+			rv.val16 = NULL;
+			rv.val32 = res;
+			return res;
+		}
+
+		case Ity_I64: {
+			IRExpr *res = NULL;
+			unsigned long mask = ~0ul;
+			if (rv.val8) {
+				res = IRExpr_Unop(Iop_8Uto64, rv.val8);
+				mask = ~0xfful;
+			}
+			if (rv.val16) {
+				IRExpr *a = IRExpr_Unop(Iop_16Uto64, rv.val16);
+				if (res)
+					res = IRExpr_Binop(
+						Iop_Or64,
+						res,
+						IRExpr_Binop(
+							Iop_And64,
+							a,
+							IRExpr_Const(IRConst_U64(mask))));
+				else
+					res = a;
+				mask = ~0xfffful;
+			}
+			if (rv.val32) {
+				IRExpr *a = IRExpr_Unop(Iop_32Uto64, rv.val32);
+				if (res)
+					res = IRExpr_Binop(
+						Iop_Or64,
+						res,
+						IRExpr_Binop(
+							Iop_And64,
+							a,
+							IRExpr_Const(IRConst_U64(mask))));
+				else
+					res = a;
+				mask = ~0xfffffffful;
+			}
+			if (rv.val64) {
+				if (res)
+					res = IRExpr_Binop(
+						Iop_Or64,
+						res,
+						IRExpr_Binop(
+							Iop_And64,
+							rv.val64,
+							IRExpr_Const(IRConst_U64(mask))));
+				else
+					res = rv.val64;
+			} else {
+				if (res)
+					res = IRExpr_Binop(
+						Iop_Or64,
+						res,
+						IRExpr_Binop(
+							Iop_And64,
+							IRExpr_Get(reg, Ity_I64),
+							IRExpr_Const(IRConst_U64(mask))));
+				
+			}
+			/* res might still be NULL.  That's okay; it
+			   just means that we want to pick up the
+			   initial value of the register. */
+			rv.val8 = NULL;
+			rv.val16 = NULL;
+			rv.val32 = NULL;
+			rv.val64 = res;
+			return res;
+		}
+		default:
+			abort();
+		}
+	}
+	void set_register(const threadAndRegister &reg, IRExpr *e) {
+		register_val &rv(registers[reg]);
+		switch (e->type()) {
+		case Ity_I8:
+			rv.val8 = e;
+			break;
+		case Ity_I16:
+			rv.val8 = NULL;
+			rv.val16 = e;
+			break;
+		case Ity_I32:
+			rv.val8 = NULL;
+			rv.val16 = NULL;
+			rv.val32 = e;
+			break;
+		case Ity_I64:
+			rv.val8 = NULL;
+			rv.val16 = NULL;
+			rv.val32 = NULL;
+			rv.val64 = e;
+			break;
+		default:
+			abort();
+		}
+
+		bump_register_in_assignment_order(reg);
+	}
 	void eval_phi(StateMachineSideEffectPhi *phi) {
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
@@ -46,8 +274,8 @@ public:
 				     it2 != phi->generations.end();
 				     it2++) {
 					if (*it2 == it->gen()) {
-						IRExpr *e = register_value(*it);
-						set_register(phi->reg, e);
+						registers[phi->reg] = registers[*it];
+						bump_register_in_assignment_order(phi->reg);
 						return;
 					}
 				}
@@ -68,7 +296,12 @@ public:
 		assert(found_it);
 #endif
 		/* Pick up initial value */
-		set_register(phi->reg, NULL);
+		register_val &rv(registers[phi->reg]);
+		rv.val8 = NULL;
+		rv.val16 = NULL;
+		rv.val32 = NULL;
+		rv.val64 = NULL;
+		bump_register_in_assignment_order(phi->reg);
 	}
 };
 
@@ -92,7 +325,7 @@ public:
 class SpecialiseIRExpr : public IRExprTransformer {
 	threadState &state;
 	IRExpr *transformIex(IRExprGet *e) {
-		IRExpr *e2 = state.register_value(e->reg);
+		IRExpr *e2 = state.register_value(e->reg, e->type());
 		if (e2)
 			return coerceTypes(e->type(), e2);
 		return IRExprTransformer::transformIex(e);
