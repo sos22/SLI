@@ -1,235 +1,213 @@
+/* All the stuff for producing a proximal cause for a crash.
+ * Generally pretty damn stupid. */
 #include "sli.h"
 #include "offline_analysis.hpp"
 #include "libvex_prof.hpp"
 
-/* A bunch of heuristics for figuring out why we crashed.  Returns
- * NULL on failure.  Pretty stupid. */
+namespace ProximalCause {
+
 static StateMachineEdge *
-_getProximalCause(MachineState *ms, ThreadRip rip, Thread *thr, unsigned *idx)
+getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 {
-	__set_profiling(getProximalCause);
-	FreeVariableMap fv;
-
 	IRSB *irsb;
-	int x;
-	int nr_marks;
-
-	*idx = 9999999;
-	if (rip.rip.unwrap_vexrip() == 0) {
-		/* Probably caused by calling a bad function pointer.
-		 * Look at the call site. */
-		rip.rip = VexRip::invent_vex_rip(ms->addressSpace->fetch<unsigned long>(thr->regs.rsp(), NULL) - 2);
-		irsb = ms->addressSpace->getIRSBForAddress(rip);
-		if (!irsb) {
-			/* I guess that wasn't it.  Give up. */
-			return NULL;
-		}
-		/* That should be a call instruction, in which case
-		   we'll have a single mark, a jumpkind of Call, and a
-		   next pointer of some expression. */
-		if (irsb->jumpkind != Ijk_Call)
-			return NULL;
-		nr_marks = 0;
-		for (x = 0; x < irsb->stmts_used; x++) {
-			if (irsb->stmts[x]->tag == Ist_IMark)
-				nr_marks++;
-		}
-		if (nr_marks != 1)
-			return NULL;
-
-		/* We now guess that we crashed because the function
-		   pointer called turned out to be NULL. */
-		*idx = irsb->stmts_used;
-		assert(!irsb->next_is_const);
-		return new StateMachineEdge(
-			new StateMachineBifurcate(
-				rip.rip,
-				IRExpr_Unop(
-					Iop_BadPtr,
-					irsb->next_nonconst),
-				StateMachineCrash::get(),
-				StateMachineNoCrash::get()));
-	}
-
-	/* Next guess: it's caused by dereferencing a bad pointer.
-	   Grab the crashing instruction and try emulating it.  If it
-	   results in a crash, we can be pretty confident that we've
-	   found the problem. */
 	try {
 		irsb = ms->addressSpace->getIRSBForAddress(rip);
 	} catch (BadMemoryException &e) {
-		return NULL;
+		/* If we can't decode the block then we assume the
+		   problem was an instruction fetch fault, and produce
+		   a proximal cause which says ``we always crash if we
+		   get to this RIP''. */
+		return new StateMachineEdge(StateMachineCrash::get());
 	}
 
-	thr->temporaries.setSize(irsb->tyenv->types_used);
-	for (int x = 1 /* Skip the initial IMark */;
-	     x < irsb->stmts_used;
-	     x++) {
-		IRStmt *stmt = irsb->stmts[x];
-		ThreadEvent *evt;
-		{
-			ReplayEngineTimer ret;
-			evt = interpretStatement(stmt,
-						 thr,
-						 NULL,
-						 ms,
-						 irsb,
-						 ret);
+	/* Successfully decoded the block -> build a state machine
+	   which does what we want of it.  This is a lot like a simple
+	   compiler from VEX intercode to our state machine model. */
+	StateMachineEdge *work = new StateMachineEdge(NULL);
+	StateMachineEdge *res = work;
+
+	class _ {
+	public:
+		const ThreadRip &rip;
+		StateMachineEdge *&work;
+		void operator()(IRExpr *condition, StateMachineState *target) {
+			StateMachineEdge *newEdge = new StateMachineEdge(NULL);
+			StateMachineBifurcate *smb = new StateMachineBifurcate(
+				rip.rip,
+				condition,
+				new StateMachineEdge(target),
+				newEdge);
+			work->target = smb;
+			work = newEdge;			
 		}
-		if (evt == NULL)
-			continue;
-		if (evt == DUMMY_EVENT || evt == FINISHED_BLOCK) {
-			/* Okay, so re-interpreting this instruction
-			   didn't give us any clues as to why we're
-			   crashing.  Give up. */
+		_(const ThreadRip &_rip, StateMachineEdge *&_work)
+			: rip(_rip), work(_work)
+		{}
+	} conditionalBranch(rip, work);
+	for (int idx = 1; /* Skip initial IMark */
+	     idx < irsb->stmts_used;
+	     idx++) {
+		IRStmt *stmt = irsb->stmts[idx];
+		switch (stmt->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			/* End of the instruction -> we're done */
+			idx = irsb->stmts_used;
+			break;
+		case Ist_AbiHint:
+			break;
+		case Ist_Put: {
+			IRStmtPut *isp = (IRStmtPut *)stmt;
+			work->sideEffects.push_back(
+				new StateMachineSideEffectCopy(
+					isp->target,
+					isp->data));
 			break;
 		}
+		case Ist_PutI:
+			/* These can't really be represented in the
+			 * state machine model. */
+			abort();
+			break;
+		case Ist_Store: {
+			IRStmtStore *ist = (IRStmtStore *)stmt;
+			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
+					  StateMachineCrash::get());
+			work->sideEffects.push_back(
+				new StateMachineSideEffectStore(
+					ist->addr,
+					ist->data,
+					rip));
+			break;
+		}
+		case Ist_CAS: {
+			IRCAS *cas = ((IRStmtCAS *)stmt)->details;
+			/* This is a bit tricky.  We take a
 
-		SignalEvent *se = dynamic_cast<SignalEvent *>(evt);
-		if (se && se->signr == 11) {
-			/* Program tripped over a segfault -> almost
-			   certainly the cause of the crash.  It'll be
-			   from either a load or a store, and we
-			   special case the two cases here. */
-			IRExpr *addr = NULL;
-			if (stmt->tag == Ist_Dirty &&
-			    (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				     "helper_load_8") ||
-			     !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				     "helper_load_16") ||
-			     !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				     "helper_load_32") ||			     
-			     !strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				     "helper_load_64"))) {
-				/* It's a load; the address loaded is
-				   in the first argument. */
-				addr = ((IRStmtDirty *)stmt)->details->args[0];
-			} else if (stmt->tag == Ist_Store) {
-				addr = ((IRStmtStore *)stmt)->addr;
-			} else {
-				/* Neither a load nor a store.  That
-				   shouldn't be generating a segfault,
-				   then. */
+			   CAS *x : expd -> b
+
+			   and we turn it into
+
+			   if (BadPtr(x)) { crash }
+			   else { t <- *x
+			          if (t == expd) {
+				      *x <- data;
+				      old <- t
+				      r
+				  } else {
+				      old <- t
+				      r
+				  }
+                           }
+
+			   where r is a freshly-allocated proxy state
+			   which goes to a freshly-allocated edge, and
+			   then we set the current work edge to that
+			   freshly-allocated one. */
+#warning This breaks the atomicity of the CAS
+			/* Breaking the atomicity of the CAS like that
+			   means that we'll sometimes report a crash
+			   which can't happen, but we'll never miss a
+			   crash which can. */
+			conditionalBranch(IRExpr_Unop(Iop_BadPtr, cas->addr),
+					  StateMachineCrash::get());
+			IRTemp t = newIRTemp(irsb->tyenv);
+			threadAndRegister tr = threadAndRegister::temp(rip.thread, t, 0);
+			IRType ty = cas->expdLo->type();
+			IRExpr *t_expr = IRExpr_Get(tr, ty);
+			work->sideEffects.push_back(
+				new StateMachineSideEffectLoad(
+					tr,
+					cas->addr,
+					rip,
+					ty));
+			StateMachineEdge *exitEdge = new StateMachineEdge(NULL);
+			StateMachineProxy *r = new StateMachineProxy(rip.rip, exitEdge);
+			exitEdge->sideEffects.push_back(
+				new StateMachineSideEffectCopy(
+					cas->oldLo,
+					t_expr));
+			StateMachineEdge *edgeIfEq = new StateMachineEdge(r);
+			StateMachineEdge *edgeIfNEq = new StateMachineEdge(r);
+			edgeIfEq->sideEffects.push_back(
+				new StateMachineSideEffectStore(
+					cas->addr,
+					cas->dataLo,
+					rip));
+			IROp op;
+			switch (ty) {
+#define do_size(sz)						\
+				case Ity_I ## sz :		\
+					op = Iop_CmpEQ ## sz;	\
+				break
+				do_size(8);
+				do_size(16);
+				do_size(32);
+				do_size(64);
+#undef do_size
+			default:
 				abort();
 			}
-			assert(addr != NULL);
-			*idx = x;
-			return new StateMachineEdge(
-				new StateMachineBifurcate(
-					rip.rip,
-					IRExpr_Unop(
-						Iop_BadPtr,
-						addr),
-					StateMachineCrash::get(),
-					StateMachineNoCrash::get()));
+			StateMachineBifurcate *smb = new StateMachineBifurcate(
+				rip.rip,
+				IRExpr_Binop(op,
+					     t_expr,
+					     cas->expdLo),
+				edgeIfEq,
+				edgeIfNEq);
+			work->target = smb;
+			work = exitEdge;
+			break;
 		}
-		fprintf(_logfile, "Generated event %s\n", evt->name());
+		case Ist_Dirty: {
+			IRDirty *dirty = ((IRStmtDirty *)stmt)->details;
+			IRType ity = Ity_INVALID;
+			if (!strcmp(dirty->cee->name, "helper_load_8"))
+				ity = Ity_I8;
+			else if (!strcmp(dirty->cee->name, "helper_load_16"))
+				ity = Ity_I16;
+			else if (!strcmp(dirty->cee->name, "helper_load_32"))
+				ity = Ity_I32;
+			else if (!strcmp(dirty->cee->name, "helper_load_64"))
+				ity = Ity_I64;
+			else
+				abort();
+			assert(ity != Ity_INVALID);
+			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
+					  StateMachineCrash::get());
+			work->sideEffects.push_back(
+				new StateMachineSideEffectLoad(
+					dirty->tmp,
+					dirty->args[0],
+					rip,
+					ity));
+			break;
+		}
+		case Ist_MBE:
+			break;
+		case Ist_Exit: {
+			/* If we exit the instruction then that's
+			   considered to be a surviving run. */
+			IRStmtExit *ise = (IRStmtExit *)stmt;
+			conditionalBranch(ise->guard, StateMachineNoCrash::get());
+			break;
+		}
+		}
 	}
 
-	fprintf(_logfile, "Hit end of block without any events -> no idea why we crashed.\n");
-	return NULL;
+	/* If we get to the end of the block then we're considered to
+	 * have survived. */
+	work->target = StateMachineNoCrash::get();
+
+	return res;
 }
 
-static StateMachineEdge *
-backtrackOneStatement(StateMachineEdge *sm, IRStmt *stmt, ThreadVexRip site)
-{
-	switch (stmt->tag) {
-	case Ist_NoOp:
-	case Ist_IMark:
-	case Ist_AbiHint:
-		break;
-	case Ist_Put:
-		sm->prependSideEffect(
-			new StateMachineSideEffectCopy(
-				((IRStmtPut *)stmt)->target,
-				((IRStmtPut *)stmt)->data));
-		break;
-	case Ist_PutI:
-		/* We can't handle these correctly. */
-		abort();
-		return NULL;
-	case Ist_Store:
-		sm->prependSideEffect(
-			new StateMachineSideEffectStore(
-				((IRStmtStore *)stmt)->addr,
-				((IRStmtStore *)stmt)->data,
-				site));
-		break;
-
-	case Ist_Dirty: {
-		StateMachineSideEffectLoad *se;
-		if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-			    "helper_load_8")) {
-			se = new StateMachineSideEffectLoad(
-				((IRStmtDirty *)stmt)->details->tmp,
-				((IRStmtDirty *)stmt)->details->args[0],
-				site,
-				Ity_I8);
-		} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				   "helper_load_16")) {
-			se = new StateMachineSideEffectLoad(
-				((IRStmtDirty *)stmt)->details->tmp,
-				((IRStmtDirty *)stmt)->details->args[0],
-				site,
-				Ity_I16);
-		} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				   "helper_load_64")) {
-			se = new StateMachineSideEffectLoad(
-				((IRStmtDirty *)stmt)->details->tmp,
-				((IRStmtDirty *)stmt)->details->args[0],
-				site,
-				Ity_I64);
-		} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				   "helper_load_32")) {
-			se = new StateMachineSideEffectLoad(
-				((IRStmtDirty *)stmt)->details->tmp,
-				((IRStmtDirty *)stmt)->details->args[0],
-				site,
-				Ity_I32);
-		}  else {
-			abort();
-		}
-		sm->prependSideEffect(se);
-		break;
-	}
-
-	case Ist_CAS:
-		/* Can't backtrack across these */
-		fprintf(_logfile, "Don't know how to backtrack across CAS statements?\n");
-		sm = NULL;
-		break;
-
-	case Ist_MBE:
-		break;
-	case Ist_Exit:
-		sm = new StateMachineEdge(
-			new StateMachineBifurcate(
-				site.rip,
-				((IRStmtExit *)stmt)->guard,
-				new StateMachineEdge(
-					new StateMachineStub(
-						site.rip,
-						((IRStmtExit *)stmt)->dst.rip)),
-				sm));
-		break;
-	}
-	return sm;
+/* End of namespace */
 }
 
 StateMachineEdge *
 getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 {
-	unsigned idx;
-	StateMachineEdge *sm = _getProximalCause(ms, rip, thr, &idx);
-	if (!sm)
-		return NULL;
-	IRSB *irsb = ms->addressSpace->getIRSBForAddress(rip);
-	while (idx != 0) {
-		idx--;
-		sm = backtrackOneStatement(sm, irsb->stmts[idx], rip);
-		if (!sm)
-			return NULL;
-	}
-	return sm;
+	return ProximalCause::getProximalCause(ms, rip, thr);
 }
-
