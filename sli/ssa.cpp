@@ -11,7 +11,7 @@ namespace SSA {
 }
 #endif
 
-template <typename t> t
+template <typename t> static t
 pop(std::set<t> &x)
 {
 	auto it = x.begin();
@@ -19,24 +19,6 @@ pop(std::set<t> &x)
 	t res = *it;
 	x.erase(it);
 	return res;
-}
-
-template <class Body> void
-iterate_states(StateMachine *inp, Body &b)
-{
-	std::set<StateMachineState *> toVisit;
-	std::set<StateMachineState *> visited;
-	toVisit.insert(inp->root);
-	while (!toVisit.empty()) {
-		auto it = toVisit.begin();
-		StateMachineState *s = *it;
-		toVisit.erase(it);
-		if (visited.count(s))
-			continue;
-		visited.insert(s);
-		
-		b(s, toVisit);
-	}
 }
 
 static bool
