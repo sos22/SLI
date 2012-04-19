@@ -92,17 +92,6 @@ consider_rip(const VexRip &my_rip,
 	LibVEX_maybe_gc(token);
 
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
-	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), my_rip), thr));
-	if (!proximal) {
-		fprintf(_logfile, "No proximal cause -> can't do anything\n");
-		return;
-	}
-
-	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(my_rip, new StateMachineProxy(my_rip, proximal));
-
-	std::vector<VexRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, my_rip);
 
 	timeoutTimer.nextDue = now() + 45;
 	timeoutTimer.schedule();
@@ -110,14 +99,7 @@ consider_rip(const VexRip &my_rip,
 	struct timeval start;
 	gettimeofday(&start, NULL);
 
-	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, my_rip, thr->tid, token);
-	if (probeMachine) {
-		VexPtr<CrashSummary, &ir_heap> summary;
-		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);
-		if (summary)
-			df(summary, token);
-	}
+	checkWhetherInstructionCanCrash(my_rip, ms, thr, oracle, df, token);
 
 	struct timeval end;
 	gettimeofday(&end, NULL);

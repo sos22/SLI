@@ -2144,3 +2144,34 @@ remoteMacroSectionsT::visit(HeapVisitor &hv)
 		hv(it->second);
 	}
 }
+
+void
+checkWhetherInstructionCanCrash(const VexRip &rip,
+				VexPtr<MachineState> &ms,
+				VexPtr<Thread> &thr,
+				VexPtr<Oracle> &oracle,
+				FixConsumer &df,
+				GarbageCollectionToken token)
+{
+	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), rip), thr));
+	if (!proximal) {
+		fprintf(_logfile, "No proximal cause -> can't do anything\n");
+		return;
+	}
+
+	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
+	ii->set(rip, new StateMachineProxy(rip, proximal));
+
+	std::vector<VexRip> previousInstructions;
+	oracle->findPreviousInstructions(previousInstructions, rip);
+
+	VexPtr<StateMachine, &ir_heap> probeMachine;
+	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, rip, thr->tid, token);
+	if (probeMachine) {
+		VexPtr<CrashSummary, &ir_heap> summary;
+		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);
+		if (summary)
+			df(summary, token);
+	}
+}
+

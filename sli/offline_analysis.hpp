@@ -212,4 +212,12 @@ void breakCycles(StateMachine *);
 void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
+class FixConsumer;
+void checkWhetherInstructionCanCrash(const VexRip &rip,
+				     VexPtr<MachineState> &ms,
+				     VexPtr<Thread> &thr,
+				     VexPtr<Oracle> &oracle,
+				     FixConsumer &df,
+				     GarbageCollectionToken token);
+
 #endif /* !OFFLINE_ANALYSIS_HPP__ */
