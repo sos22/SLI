@@ -1874,6 +1874,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			/* If, in a == b, a and b are physically
 			 * identical, the result is a constant 1. */
 			if ( (e->op == Iop_CmpEQ1 ||
+			      e->op == Iop_CmpEQI128 ||
 			      (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64)) &&
 			     physicallyEqual(l, r) ) {
 				*done_something = true;
@@ -2173,6 +2174,8 @@ expr_eq(IRExpr *a, IRExpr *b)
 		return IRExpr_Binop(Iop_CmpEQF32, a, b);
 	case Ity_F64:
 		return IRExpr_Binop(Iop_CmpEQF64, a, b);
+	case Ity_V128:
+		return IRExpr_Binop(Iop_CmpEQV128, a, b);
 	default:
 		abort();
 	}
@@ -2193,6 +2196,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
 	if (!TIMEOUT) {
+#warning This assertion could turn into a simple optimisation
 		assert(a != b || res == true);
 		definitelyEqualCache.set(a, b, idx, res);
 	}
@@ -2201,6 +2205,8 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 bool
 definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
+	if (a == b)
+		return false;
 	assert(a->type() == b->type());
 	int idx = definitelyNotEqualCache.hash(a, b);
 	bool res;

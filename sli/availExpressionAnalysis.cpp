@@ -73,7 +73,20 @@ public:
 	}
 
 	std::set<IRExpr *> assertFalse;
-	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> _registers;
+	struct registerMapEntry {
+		IRExpr *e;
+		threadAndRegister phiFrom;
+		registerMapEntry()
+			: e(NULL), phiFrom(threadAndRegister::invalid())
+		{}
+		registerMapEntry(IRExpr *_e)
+			: e(_e), phiFrom(threadAndRegister::invalid())
+		{}
+		registerMapEntry(const threadAndRegister &tr)
+			: e(NULL), phiFrom(tr)
+		{}
+	};
+	std::map<threadAndRegister, registerMapEntry, threadAndRegister::fullCompare> _registers;
 
 	void clear() { sideEffects.clear(); assertFalse.clear(); _registers.clear(); }
 	void makeFalse(IRExpr *expr, const AllowableOptimisations &opt);
@@ -124,7 +137,10 @@ avail_t::print(FILE *f)
 			fprintf(f, "\t\t");
 			it->first.prettyPrint(f);
 			fprintf(f, " -> ");
-			ppIRExpr(it->second, f);
+			if (it->second.e)
+				ppIRExpr(it->second.e, f);
+			else
+				fprintf(f, "%s", it->second.phiFrom.name());
 			fprintf(f, "\n");
 		}
 	}
@@ -244,6 +260,15 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 			}
 			return StateMachineTransformer::transformOneSideEffect(l, done_something);
 		}
+		StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *l,
+								  bool *done_something)
+		{
+			if (l != preserve && threadAndRegister::fullEq(l->reg, reg)) {
+				res = true;
+				return NULL;
+			}
+			return StateMachineTransformer::transformOneSideEffect(l, done_something);
+		}
 	public:
 		_(threadAndRegister _reg, StateMachineSideEffect *_preserve)
 			: reg(_reg), preserve(_preserve)
@@ -292,10 +317,17 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			   same register. */
 			assert(!_registers.count(sep->target));
 			sep->value->sanity_check();
-			_registers[sep->target] = sep->value;
+			_registers[sep->target] = avail_t::registerMapEntry(sep->value);
 		} else if (se->type == StateMachineSideEffect::AssertFalse) {
 			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
 			makeFalse(seaf->value, opt);
+		} else if (se->type == StateMachineSideEffect::Phi) {
+			StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)se;
+			if (smsep->generations.size() == 0) {
+				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(-1));
+			} else if (smsep->generations.size() == 1) {
+				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(smsep->generations[0]));
+			}
 		}
 	}
 }
@@ -390,8 +422,12 @@ public:
 	IRExpr *transformIex(IRExprGet *e) {
 		auto it = avail._registers.find(e->reg);
 		if (it != avail._registers.end()) {
-			if (it->second->type() >= e->type())
-				return coerceTypes(e->type(), it->second);
+			if (it->second.e) {
+				if (it->second.e->type() >= e->type())
+					return coerceTypes(e->type(), it->second.e);
+			} else {
+				return IRExpr_Get(it->second.phiFrom, e->type());
+			}
 		}
 		return IRExprTransformer::transformIex(e);
 	}
