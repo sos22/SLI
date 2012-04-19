@@ -256,7 +256,6 @@ public:
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       Oracle *oracle,
 			       bool *done_something);
-	void selectSingleCrashingPath();
 	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
 	StateMachine *clone() const;
 #ifdef NDEBUG
@@ -288,7 +287,6 @@ public:
 					    std::set<StateMachineState *> &done) = 0;
 	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
-	virtual StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) __attribute__((warn_unused_result)) = 0;
 	virtual bool canCrash(std::vector<StateMachineEdge *> &) = 0;
 	virtual int complexity(std::vector<StateMachineEdge *> &) = 0;
 	virtual StateMachineEdge *target0() = 0;
@@ -404,13 +402,6 @@ public:
 		     it++)
 			(*it)->findUsedRegisters(s, opt);
 	}
-	StateMachineEdge *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) __attribute__((warn_unused_result)) {
-		if (!memo.count(this)) {
-			memo.insert(this);
-			target = target->selectSingleCrashingPath(memo);
-		}
-		return this;
-	}
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs);
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		for (auto it = memo.begin(); it != memo.end(); it++)
@@ -499,7 +490,6 @@ public:
 	virtual void visit(HeapVisitor &hv) {}
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
-	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) { return this; }
 	int complexity(std::vector<StateMachineEdge *> &) { return 1; }
 	StateMachineEdge *target0() { return NULL; }
 	const StateMachineEdge *target0() const { return NULL; }
@@ -601,10 +591,6 @@ public:
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt) {
 		target->findUsedRegisters(s, opt);
 	}
-	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) {
-		target = target->selectSingleCrashingPath(memo);
-		return this;
-	}
 	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
 	int complexity(std::vector<StateMachineEdge *> &path) { return target->complexity(path); }
 	StateMachineEdge *target0() { return target; }
@@ -696,27 +682,6 @@ public:
 			s.insert(*it);
 	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt);
-	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) {
-		trueTarget = trueTarget->selectSingleCrashingPath(memo);
-		falseTarget = falseTarget->selectSingleCrashingPath(memo);
-		std::vector<StateMachineEdge *> edgeMemo;
-		bool tCrash = trueTarget->canCrash(edgeMemo);
-		bool fCrash = falseTarget->canCrash(edgeMemo);
-		if (!tCrash && !fCrash) {
-			/* Bit of a hack: if we're definitely going to
-			   survive, just substitute this state with a
-			   survive state. */
-			return StateMachineNoCrash::get();
-		}
-		if (tCrash && fCrash) {
-			std::vector<StateMachineEdge *> path;
-			if (trueTarget->complexity(path) > falseTarget->complexity(path))
-				return new StateMachineProxy(origin, falseTarget);
-			else
-				return new StateMachineProxy(origin, trueTarget);
-		}
-		return this;
-	}
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		return trueTarget->canCrash(memo) || falseTarget->canCrash(memo);
 	}

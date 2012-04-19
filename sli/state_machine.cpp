@@ -814,13 +814,6 @@ ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema,
 	fprintf(f, "{%s}", smsema->rip.name());
 }
 
-void
-StateMachine::selectSingleCrashingPath(void)
-{
-	std::set<StateMachineEdge *> memo;
-	root = root->selectSingleCrashingPath(memo);
-}
-
 #ifndef NDEBUG
 void
 StateMachine::sanityCheck() const
