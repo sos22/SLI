@@ -1,7 +1,7 @@
 #ifndef ND_CHOOSER_H__
 #define ND_CHOOSER_H__
 
-#define ND_CHOOSER_STATS 1
+#define ND_CHOOSER_STATS 0
 
 #include <vector>
 #include <stdlib.h>
@@ -79,9 +79,7 @@ public:
 	{
 		start_profiling();
 	}
-#if ND_CHOOSER_STATS
 	~NdChooser();
-#endif
 
 	int nd_choice(int nr_options, bool *isNew = NULL);
 	bool advance(void);
