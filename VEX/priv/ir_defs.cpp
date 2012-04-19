@@ -328,6 +328,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(BadPtr)			\
 	     iter(CmpEQ1)			\
 	     iter(CmpEQI128)			\
+	     iter(CmpEQV128)			\
 	     iter(CC_OverflowSub)		\
 						\
 	     iter(MullS8)			\
@@ -2511,6 +2512,8 @@ void typeOfPrimop ( IROp op,
 
       case Iop_CmpEQI128:
 	  BINARY(Ity_I128, Ity_I128, Ity_I1);
+      case Iop_CmpEQV128:
+	  BINARY(Ity_V128, Ity_V128, Ity_I1);
 
       default:
 	 ppIROp(op, stderr);

@@ -1875,6 +1875,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			 * identical, the result is a constant 1. */
 			if ( (e->op == Iop_CmpEQ1 ||
 			      e->op == Iop_CmpEQI128 ||
+			      e->op == Iop_CmpEQV128 ||
 			      (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64)) &&
 			     physicallyEqual(l, r) ) {
 				*done_something = true;
