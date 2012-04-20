@@ -991,6 +991,16 @@ irexprAliasingClass(IRExpr *expr,
 }
 
 bool
+Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a) const
+{
+	PointerAliasingSet as = irexprAliasingClass(a, *this, false, NULL);
+	if (as & PointerAliasingSet::nonStackPointer)
+		return true;
+	else
+		return false;
+}
+
+bool
 Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, bool fvcas) const
 {
 	return irexprAliasingClass(a, *this, fvcas, NULL) &

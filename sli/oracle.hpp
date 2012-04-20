@@ -265,6 +265,10 @@ public:
 		   whether @a and @b might be equal. */
 		bool ptrsMightAlias(IRExpr *a, IRExpr *b, bool) const;
 
+		/* Check whether there's any possibility of @a being a
+		   pointer to a non-stack location. */
+		bool mightPointOutsideStack(IRExpr *a) const;
+
 		void prettyPrint(FILE *) const;
 	};
 
