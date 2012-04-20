@@ -286,7 +286,7 @@ public:
 	   semantic value of the machine, and can mutate in-place. */
 	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 					    std::set<StateMachineState *> &done) = 0;
-	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
+	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
 	virtual bool canCrash(std::vector<StateMachineEdge *> &) = 0;
 	virtual int complexity(std::vector<StateMachineEdge *> &) = 0;
@@ -504,7 +504,6 @@ public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
-	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	int complexity(std::vector<StateMachineEdge *> &) { return 1; }
 	void targets(std::vector<StateMachineEdge *> &) { }
@@ -599,9 +598,6 @@ public:
 	}
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
 				    std::set<StateMachineState *> &done);
-	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
-		target->findLoadedAddresses(s, opt);
-	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt) {
 		target->findUsedRegisters(s, opt);
 	}
@@ -682,17 +678,6 @@ public:
 	}
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
 				    std::set<StateMachineState *> &);
-	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
-	{
-		std::set<IRExpr *> t;
-		trueTarget->findLoadedAddresses(t, opt);
-		falseTarget->findLoadedAddresses(s, opt);
-		/* Result is the union of the two branches */
-		for (std::set<IRExpr *>::iterator it = t.begin();
-		     it != t.end();
-		     it++)
-			s.insert(*it);
-	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt);
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		return trueTarget->canCrash(memo) || falseTarget->canCrash(memo);

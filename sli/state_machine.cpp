@@ -880,3 +880,22 @@ StateMachineState::targets(std::queue<StateMachineEdge *> &out)
 	for (auto it = edges.begin(); it != edges.end(); it++)
 		out.push(*it);
 }
+
+void
+StateMachineState::findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt)
+{
+	std::vector<StateMachineEdge *> edges;
+	targets(edges);
+	/* It might look like we can do this by just calling
+	   findLoadedAddresses on the @out set for each edge in turn.
+	   Not so: the edge operations can also remove items from the
+	   loaded set, if we find a store which definitely satisfies
+	   the load.  We need a true union here, so have to go for
+	   this double iteration. */
+	for (auto it = edges.begin(); it != edges.end(); it++) {
+		std::set<IRExpr *> t;
+		(*it)->findLoadedAddresses(t, opt);
+		for (auto it = t.begin(); it != t.end(); it++)
+			out.insert(*it);
+	}
+}
