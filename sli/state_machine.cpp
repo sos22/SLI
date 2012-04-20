@@ -388,20 +388,6 @@ printStateMachine(const StateMachine *sm, FILE *f)
 	printStateMachine(sm, f, labels);
 }
 
-
-unsigned long
-StateMachineEdge::hashval() const
-{
-	if (!have_hash) {
-		unsigned long h = 0xaabb5697;
-		for (unsigned x = 0; x < sideEffects.size(); x++)
-			h = h * 65537 + sideEffects[x]->hashval();
-		_hashval = h;
-		have_hash = true;
-	}
-	return _hashval;
-}
-
 bool
 sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		     StateMachineSideEffect *smse2,

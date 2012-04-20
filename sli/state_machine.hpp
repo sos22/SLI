@@ -267,13 +267,10 @@ public:
 };
 
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
-	mutable unsigned long __hashval;
-	mutable bool have_hash;
 	void assertAcyclic(std::vector<const StateMachineState *> &,
 			   std::set<const StateMachineState *> &) const;
 protected:
-	StateMachineState(const VexRip &_origin) : have_hash(false), origin(_origin) {}
-	virtual unsigned long _hashval() const = 0;
+	StateMachineState(const VexRip &_origin) : origin(_origin) {}
 public:
 	VexRip origin; /* RIP we were looking at when we constructed
 			* the thing.  Not very meaningful, but
@@ -310,7 +307,6 @@ public:
 	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
 	virtual RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const = 0;
 	void assertAcyclic() const;
-	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
 
@@ -324,15 +320,12 @@ public:
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
-	mutable unsigned long __hashval;
-	mutable bool have_hash;
 	StateMachineSideEffect(); /* DNE */
 public:
 	enum sideEffectType {
 		Load, Store, Copy, Unreached, AssertFalse, Phi
 	} type;
 protected:
-	virtual unsigned long _hashval() const = 0;
 	StateMachineSideEffect(enum sideEffectType _type)
 		: type(_type)
 	{}
@@ -340,20 +333,16 @@ public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
-	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	NAMED_CLASS
 };
 
 class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
-	mutable bool have_hash;
-	mutable unsigned long _hashval;
 public:
-	unsigned long hashval() const;
-	StateMachineEdge(StateMachineState *t) : have_hash(false), target(t) {}
+	StateMachineEdge(StateMachineState *t) : target(t) {}
 	StateMachineEdge(const std::vector<StateMachineSideEffect *> &_sideEffects,
 			 StateMachineState *t)
-		: have_hash(false), target(t), sideEffects(_sideEffects)
+		: target(t), sideEffects(_sideEffects)
 	{}
 	StateMachineState *target;
 	std::vector<StateMachineSideEffect *> sideEffects;
@@ -483,7 +472,6 @@ public:
 class StateMachineUnreached : public StateMachineTerminal {
 	StateMachineUnreached() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
-	unsigned long _hashval() const { return 0x72; }
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
 public:
 	static StateMachineUnreached *get() {
@@ -496,7 +484,6 @@ public:
 class StateMachineCrash : public StateMachineTerminal {
 	StateMachineCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
-	unsigned long _hashval() const { return 0x73; }
 public:
 	static StateMachineCrash *get() {
 		if (!_this) _this = new StateMachineCrash();
@@ -509,7 +496,6 @@ public:
 class StateMachineNoCrash : public StateMachineTerminal {
 	StateMachineNoCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
-	unsigned long _hashval() const { return 0x74; }
 public:
 	static StateMachineNoCrash *get() {
 		if (!_this) _this = new StateMachineNoCrash();
@@ -523,7 +509,6 @@ public:
    can be safely eliminated, but they're sometimes kind of handy when
    you're building the machine. */
 class StateMachineProxy : public StateMachineState {
-	unsigned long _hashval() const { return target->hashval(); }
 public:
 	StateMachineEdge *target;
 
@@ -567,11 +552,6 @@ public:
 };
 
 class StateMachineBifurcate : public StateMachineState {
-	unsigned long _hashval() const {
-		return trueTarget->hashval() * 7 + 
-			falseTarget->hashval() * 11 +
-			condition->hashval() * 3;
-	}
 public:
 	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
@@ -652,7 +632,6 @@ public:
 /* A node in the state machine representing a bit of code which we
    haven't explored yet. */
 class StateMachineStub : public StateMachineTerminal {
-	unsigned long _hashval() const { return target.hash(); }
 public:
 	VexRip target;
 
@@ -670,7 +649,6 @@ public:
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
 	StateMachineSideEffectUnreached() : StateMachineSideEffect(StateMachineSideEffect::Unreached) {}
-	unsigned long _hashval() const { return 0x91; }
 public:
 	static StateMachineSideEffectUnreached *get() {
 		if (!_this) _this = new StateMachineSideEffectUnreached();
@@ -703,7 +681,6 @@ public:
 	}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
-	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
@@ -739,7 +716,6 @@ public:
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void constructed();
-	unsigned long _hashval() const { return addr->hashval() * 757 + target.hash() * 118409; }
 public:
 	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
@@ -776,7 +752,6 @@ public:
 	}
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
-	unsigned long _hashval() const { return value->hashval(); }
 public:
 	StateMachineSideEffectCopy(threadAndRegister k, IRExpr *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::Copy),
@@ -804,7 +779,6 @@ public:
 	}
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
-	unsigned long _hashval() const { return value->hashval(); }
 public:
 	StateMachineSideEffectAssertFalse(IRExpr *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
@@ -829,7 +803,6 @@ public:
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
-	unsigned long _hashval() const { return reg.hash(); }
 public:
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::set<unsigned> &_generations)
