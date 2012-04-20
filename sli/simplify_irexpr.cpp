@@ -1057,8 +1057,6 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			return IRExpr_Unop(Iop_64to16, expr);
 		case Ity_I32:
 			return IRExpr_Unop(Iop_64to32, expr);
-		case Ity_I64:
-			return expr;
 		default:
 			break;
 		}
@@ -1069,8 +1067,6 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			return IRExpr_Unop(Iop_32to8, expr);
 		case Ity_I16:
 			return IRExpr_Unop(Iop_32to16, expr);
-		case Ity_I32:
-			return expr;
 		default:
 			break;
 		}
@@ -1079,8 +1075,6 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 		switch (desiredType) {
 		case Ity_I8:
 			return IRExpr_Unop(Iop_16to8, expr);
-		case Ity_I16:
-			return expr;
 		default:
 			break;
 		}
@@ -1089,8 +1083,14 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 		switch (desiredType) {
 		case Ity_I1:
 			return IRExpr_Unop(Iop_8to1, expr);
-		case Ity_I8:
-			return expr;
+		default:
+			break;
+		}
+		break;
+	case Ity_F64:
+		switch (desiredType) {
+		case Ity_I64:
+			return IRExpr_Unop(Iop_ReinterpF64asI64, expr);
 		default:
 			break;
 		}
@@ -1100,8 +1100,6 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 		case Ity_F64:
 			return IRExpr_Unop(Iop_ReinterpI64asF64,
 					   IRExpr_Unop(Iop_V128to64, expr));
-		case Ity_V128:
-			return expr;
 		default:
 			break;
 		}
