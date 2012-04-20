@@ -289,7 +289,6 @@ public:
 	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
 	virtual bool canCrash(std::vector<StateMachineEdge *> &) = 0;
-	virtual int complexity(std::vector<StateMachineEdge *> &) = 0;
 	virtual void targets(std::vector<StateMachineEdge *> &) = 0;
 	virtual void targets(std::vector<const StateMachineEdge *> &) const = 0;
 	void targets(std::set<StateMachineEdge *> &out) {
@@ -345,7 +344,6 @@ public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
-	virtual int complexity() = 0;
 	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	NAMED_CLASS
@@ -431,23 +429,6 @@ public:
 		memo.pop_back();
 		return res;
 	}
-	int complexity(std::vector<StateMachineEdge *> &path) {
-		for (auto it = path.begin(); it != path.end(); it++)
-			if (*it == this)
-				return 1000; /* Assign a high-ish
-					      * fixed cost to every
-					      * cycle. */
-		path.push_back(this);
-		unsigned sz = path.size();
-		int r = target->complexity(path);
-		assert(sz == path.size());
-		assert(path[sz - 1] == this);
-		path.pop_back();
-
-		for (unsigned i = 0; i < sideEffects.size(); i++)
-			r += sideEffects[i]->complexity();
-		return r;
-	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const {
@@ -505,7 +486,6 @@ public:
 				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
-	int complexity(std::vector<StateMachineEdge *> &) { return 1; }
 	void targets(std::vector<StateMachineEdge *> &) { }
 	void targets(std::vector<const StateMachineEdge *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
@@ -602,7 +582,6 @@ public:
 		target->findUsedRegisters(s, opt);
 	}
 	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
-	int complexity(std::vector<StateMachineEdge *> &path) { return target->complexity(path); }
 	void targets(std::vector<StateMachineEdge *> &out) { out.push_back(target); }
 	void targets(std::vector<const StateMachineEdge *> &out) const { out.push_back(target); }
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
@@ -682,9 +661,6 @@ public:
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		return trueTarget->canCrash(memo) || falseTarget->canCrash(memo);
 	}
-	int complexity(std::vector<StateMachineEdge *> &path) {
-		return trueTarget->complexity(path) + falseTarget->complexity(path) + exprComplexity(condition) + 50;
-	}
 	void targets(std::vector<StateMachineEdge *> &out) {
 		out.push_back(falseTarget);
 		out.push_back(trueTarget);
@@ -759,7 +735,6 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
-	int complexity() { return 0; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
 };
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
@@ -804,7 +779,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		sanityCheckIRExpr(data, live);
@@ -849,7 +823,6 @@ public:
 		l.insert(addr);
 	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(addr) + 20; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		if (live)
@@ -878,7 +851,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(value); }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 		if (live)
@@ -905,7 +877,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(value); }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 		assert(value->type() == Ity_I1);
@@ -946,7 +917,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
-	int complexity() { return 100; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		if (live)
 			live->insert(reg);
