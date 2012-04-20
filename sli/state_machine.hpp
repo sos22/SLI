@@ -26,17 +26,16 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as, bool fvmas,
+	AllowableOptimisations(bool s, bool a, bool i, bool as, bool fvmas,
 			       AddressSpace *_as)
-		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
+		: assumePrivateStack(s), assumeExecutesAtomically(a),
 		  ignoreSideEffects(i), assumeNoInterferingStores(as),
 		  freeVariablesMightAccessStack(fvmas), as(_as), haveInterestingStoresSet(false),
 		  nonLocalLoads(NULL)
 	{
 	}
 	AllowableOptimisations(const AllowableOptimisations &o)
-		: xPlusMinusX(o.xPlusMinusX),
-		  assumePrivateStack(o.assumePrivateStack),
+		: assumePrivateStack(o.assumePrivateStack),
 		  assumeExecutesAtomically(o.assumeExecutesAtomically),
 		  ignoreSideEffects(o.ignoreSideEffects),
 		  assumeNoInterferingStores(o.assumeNoInterferingStores),
@@ -46,14 +45,6 @@ public:
 		  interestingStores(o.interestingStores),
 		  nonLocalLoads(o.nonLocalLoads)
 	{}
-
-	/* Transform x + (-x) to 0.  This is always safe, in the sense
-	   that x + (-x) is always zero, but actually checking it can
-	   sometimes lead to an infinite recursion if you're not a bit
-	   careful.  This should pretty much only be turned off from
-	   inside the optimiser. */
-	/* (The same toggle also controls the rule x & ~x -> 0) */
-	bool xPlusMinusX;
 
 	/* Assume that the stack is ``private'', in the sense that no
 	   constant expressions can ever alias with rsp. */
@@ -96,41 +87,36 @@ public:
 	   here. */
 	std::set<DynAnalysisRip> *nonLocalLoads;
 
-	AllowableOptimisations disablexPlusMinusX() const
-	{
-		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
-	}
 	AllowableOptimisations enableassumePrivateStack() const
 	{
-		return AllowableOptimisations(xPlusMinusX, true, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(true, assumeExecutesAtomically, ignoreSideEffects,
 					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableassumeExecutesAtomically() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, true, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, true, ignoreSideEffects,
 					      true /* If we're running atomically then there are definitely
 						      no interfering stores */,
 					      freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableignoreSideEffects() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, true,
 					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableassumeNoInterferingStores() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
 					      true, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations disablefreeVariablesMightAccessStack() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
 					      assumeNoInterferingStores, false, as);
 	}
 	AllowableOptimisations setAddressSpace(AddressSpace *as) const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
 					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	unsigned asUnsigned() const {
@@ -143,8 +129,6 @@ public:
 				    basic ones which are always
 				    safe. */
 
-		if (xPlusMinusX)
-			x |= 1;
 		if (assumePrivateStack)
 			x |= 2;
 		if (assumeExecutesAtomically)

@@ -1362,7 +1362,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			/* x + -x -> 0, for any plus-like operator, so remove
 			 * both x and -x from the list. */
 			/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
-			if (opt.xPlusMinusX) {
+			{
 				__set_profiling(optimise_assoc_xplusminusx);
 				bool plus_like;
 				bool and_like;
