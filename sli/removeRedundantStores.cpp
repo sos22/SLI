@@ -105,7 +105,17 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
-			if (opt.ignoreStore(smses->rip.rip) &&
+			bool canRemove = opt.ignoreStore(smses->rip.rip);
+			if (!canRemove && opt.assumePrivateStack && alias &&
+			    !alias->mightPointOutsideStack(smses->addr)) {
+				/* If we have assumePrivateStack set,
+				   and this is definitely a stack
+				   store, it's worth considering
+				   removing it from the machine. */
+				canRemove = true;
+			}
+
+			if (canRemove &&
 			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, opt.freeVariablesMightAccessStack, oracle)) {
 				sme->sideEffects[x] =
 					new StateMachineSideEffectAssertFalse(
