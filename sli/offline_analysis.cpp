@@ -432,11 +432,11 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
-			sm->root->assertAcyclic();
+			sm->assertAcyclic();
 			sm = introduceFreeVariables(sm, aliasp, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
-			sm->root->assertAcyclic();
+			sm->assertAcyclic();
 		}
 		sm = optimiseSSA(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);

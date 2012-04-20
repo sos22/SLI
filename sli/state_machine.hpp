@@ -260,15 +260,16 @@ public:
 	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
 #ifdef NDEBUG
 	void sanityCheck() const {}
+	void assertAcyclic() const {}
 #else
 	void sanityCheck() const;
+	void assertAcyclic() const;
 #endif
+
 	NAMED_CLASS
 };
 
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
-	void assertAcyclic(std::vector<const StateMachineState *> &,
-			   std::set<const StateMachineState *> &) const;
 protected:
 	StateMachineState(const VexRip &_origin) : origin(_origin) {}
 public:
@@ -306,9 +307,8 @@ public:
 	void targets(std::queue<StateMachineEdge *> &out);
 	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
 	RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const;
-	void assertAcyclic() const;
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
-	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
+	virtual void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const = 0;
 
 #ifdef NDEBUG
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live, std::vector<const StateMachineEdge *> &done) const {}
@@ -338,7 +338,10 @@ public:
 };
 
 class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
+	void assertAcyclic(std::vector<const StateMachineEdge *> &,
+			   std::set<const StateMachineEdge *> &) const;
 public:
+	void assertAcyclic() const;
 	StateMachineEdge(StateMachineState *t) : target(t) {}
 	StateMachineEdge(const std::vector<StateMachineSideEffect *> &_sideEffects,
 			 StateMachineState *t)
@@ -358,21 +361,14 @@ public:
 		sideEffects = n;
 	}
 
-	void prettyPrint(FILE *f, const char *seperator, std::map<const StateMachineState *, int> &labels) const {
-		if (sideEffects.size() != 0) {
-			fprintf(f, "{");
-			bool b = true;
-			for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
-			     it != sideEffects.end();
-			     it++) {
-				if (!b)
-					fprintf(f, "%s", seperator);
-				b = false;
-				(*it)->prettyPrint(f);
-			}
-			fprintf(f, "} ");
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
+		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+			fprintf(f, "\t");
+			(*it)->prettyPrint(f);
+			fprintf(f, "\n");
 		}
-		fprintf(f, "l%d", labels[target]);
+		target->prettyPrint(f, labels);
+		fprintf(f, "\n");
 	}
 	void visit(HeapVisitor &hv) {
 		hv(target);
@@ -463,7 +459,7 @@ public:
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	void targets(std::vector<StateMachineEdge *> &) { }
 	void targets(std::vector<const StateMachineEdge *> &) const { }
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &) const { prettyPrint(f); }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &) const { return; }
 };
@@ -521,14 +517,9 @@ public:
 		  target(t)
 	{
 	}
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const
 	{
-		fprintf(f, "{%s:", origin.name());
-		if (target)
-			target->prettyPrint(f, "\n  ", labels);
-		else
-			fprintf(f, "<NULL>");
-		fprintf(f, "}");
+		fprintf(f, "{%s:l%d}", origin.name(), labels[target]);
 	}
 	void visit(HeapVisitor &hv)
 	{
@@ -578,20 +569,11 @@ public:
 	StateMachineEdge *trueTarget;
 	StateMachineEdge *falseTarget;
 
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
 		fprintf(f, "%s: if (", origin.name());
 		ppIRExpr(condition, f);
-		fprintf(f, ")\n  then {\n\t");
-		if (trueTarget)
-			trueTarget->prettyPrint(f, "\n\t", labels);
-		else
-			fprintf(f, "<NULL>\n\t");
-		fprintf(f, "}\n  else {\n\t");
-		if (falseTarget)
-			falseTarget->prettyPrint(f, "\n\t", labels);
-		else
-			fprintf(f, "<NULL>\n\t");
-		fprintf(f, "}");
+		fprintf(f, ") then l%d else l%d",
+			labels[trueTarget], labels[falseTarget]);
 	}
 	void visit(HeapVisitor &hv)
 	{
@@ -837,7 +819,7 @@ public:
 };
 
 void printStateMachine(const StateMachine *sm, FILE *f);
-void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels);
+void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineEdge *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);

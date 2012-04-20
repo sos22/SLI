@@ -319,27 +319,28 @@ findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::full
 }
 
 static void
-buildStateLabelTable(const StateMachineState *sm, std::map<const StateMachineState *, int> &table,
-		     std::vector<const StateMachineState *> &states)
+buildEdgeLabelTable(const StateMachineState *sm,
+		    std::map<const StateMachineEdge *, int> &table,
+		    std::vector<const StateMachineEdge *> &states)
 {
-	std::vector<const StateMachineState *> toEmit;
+	std::vector<const StateMachineEdge *> toEmit;
 	int next_label;
 
-	toEmit.push_back(sm);
+	sm->targets(toEmit);
 	next_label = 1;
 	while (!toEmit.empty()) {
-		sm = toEmit.back();
+		const StateMachineEdge *sme = toEmit.back();
 		toEmit.pop_back();
-		if (!sm || table.count(sm))
+		if (!sme || table.count(sme))
 			continue;
-		states.push_back(sm);
-		table[sm] = next_label;
+		states.push_back(sme);
+		table[sme] = next_label;
 		next_label++;
-		sm->targets(toEmit);
+		sme->target->targets(toEmit);
 	}
 }
 
-template <typename cont, void printer(const typename cont::value_type, FILE *)> void
+template <typename cont, void printer(const typename cont::value_type, FILE *)> static void
 printContainer(const cont &v, FILE *f)
 {
 	fprintf(f, "[");
@@ -352,14 +353,14 @@ printContainer(const cont &v, FILE *f)
 }
 
 void
-printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
+printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMachineEdge *, int> &labels)
 {
-	std::vector<const StateMachineState *> states;
+	std::vector<const StateMachineEdge *> edges;
 
-	buildStateLabelTable(sm, labels, states);
-	for (std::vector<const StateMachineState *>::iterator it = states.begin();
-	     it != states.end();
-	     it++) {
+	buildEdgeLabelTable(sm, labels, edges);
+	sm->prettyPrint(f, labels);
+	fprintf(f, "\n");
+	for (auto it = edges.begin(); it != edges.end(); it++) {
 		fprintf(f, "l%d: ", labels[*it]);
 		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
@@ -369,12 +370,12 @@ printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMach
 void
 printStateMachine(const StateMachineState *sm, FILE *f)
 {
-	std::map<const StateMachineState *, int> labels;
+	std::map<const StateMachineEdge *, int> labels;
 	printStateMachine(sm, f, labels);
 }
 
 void
-printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
+printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineEdge *, int> &labels)
 {
 	fprintf(f, "Machine for %s:%d\n", sm->origin.name(), sm->tid);
 	printStateMachine(sm->root, f, labels);
@@ -384,7 +385,7 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 void
 printStateMachine(const StateMachine *sm, FILE *f)
 {
-	std::map<const StateMachineState *, int> labels;
+	std::map<const StateMachineEdge *, int> labels;
 	printStateMachine(sm, f, labels);
 }
 
@@ -511,38 +512,9 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	return false;
 }
 
-/* State machine parser.  We cheat a little bit and stash the state
- * labels in the target field of state machine edges until we have
+/* State machine parser.  We cheat a little bit and stash the edge
+ * labels in the target fields of state machine states until we have
  * find the state we're actually supposed to point at. */
-static bool
-parseStateMachineEdge(StateMachineEdge **out,
-		      const char *sep,
-		      const char *str,
-		      const char **suffix)
-{
-	int targetLabel;
-	std::vector<StateMachineSideEffect *> sideEffects;
-	if (parseThisChar('{', str, &str)) {
-		while (1) {
-			StateMachineSideEffect *se;
-			if (!parseStateMachineSideEffect(&se, str, &str))
-				return false;
-			sideEffects.push_back(se);
-			if (parseThisString(sep, str, &str))
-				continue;
-			if (!parseThisString("} ", str, &str))
-				return false;
-			break;
-		}
-	}
-	if (!parseThisChar('l', str, &str) ||
-	    !parseDecimalInt(&targetLabel, str, suffix))
-		return false;
-	*out = new StateMachineEdge((StateMachineState *)targetLabel);
-	(*out)->sideEffects = sideEffects;
-	return true;
-}
-
 static bool
 parseStateMachineState(StateMachineState **out,
 		       const char *str,
@@ -571,45 +543,65 @@ parseStateMachineState(StateMachineState **out,
 		*out = new StateMachineStub(origin, target);
 		return true;
 	}
-	StateMachineEdge *target1;
+	int target1;
 	if (parseThisChar('{', str, &str2) &&
 	    parseVexRip(&origin, str2, &str2) &&
-	    parseThisChar(':', str2, &str2) &&
-	    parseStateMachineEdge(&target1, "\n  ", str2, &str2) &&
+	    parseThisString(":l", str2, &str2) &&
+	    parseDecimalInt(&target1, str2, &str2) &&
 	    parseThisChar('}', str2, suffix)) {
-		*out = new StateMachineProxy(origin, target1);
+		*out = new StateMachineProxy(origin, (StateMachineEdge *)(unsigned long)target1);
 		return true;
 	}
 	IRExpr *condition;
-	StateMachineEdge *target2;
+	int target2;
 	if (parseVexRip(&origin, str, &str2) &&
 	    parseThisString(": if (", str2, &str2) &&
 	    parseIRExpr(&condition, str2, &str2) &&
-	    parseThisString(")\n  then {\n\t", str2, &str2) &&
-	    parseStateMachineEdge(&target1, "\n\t", str2, &str2) &&
-	    parseThisString("}\n  else {\n\t", str2, &str2) &&
-	    parseStateMachineEdge(&target2, "\n\t", str2, &str2) &&
-	    parseThisChar('}', str2, suffix)) {
-		*out = new StateMachineBifurcate(origin, condition, target1, target2);
+	    parseThisString(") then l", str2, &str2) &&
+	    parseDecimalInt(&target1, str2, &str2) &&
+	    parseThisString(" else l", str2, &str2) &&
+	    parseDecimalInt(&target2, str2, suffix)) {
+		*out = new StateMachineBifurcate(origin, condition,
+						 (StateMachineEdge *)(int)target1,
+						 (StateMachineEdge *)(int)target2);
 		return true;
 	}
 	return false;
 }
 
 static bool
-parseOneState(std::map<int, StateMachineState *> &out,
-	      const char *str,
-	      const char **suffix)
+parseStateMachineEdge(StateMachineEdge **out,
+		      const char *str,
+		      const char **suffix)
+{
+	StateMachineEdge *work = new StateMachineEdge(NULL);
+	while (1) {
+		StateMachineSideEffect *se;
+		if (!parseStateMachineSideEffect(&se, str, &str))
+			break;
+		work->sideEffects.push_back(se);
+		parseThisChar('\n', str, &str);
+	}
+	if (!parseStateMachineState(&work->target, str, suffix))
+		return false;
+	*out = work;
+	return true;
+}
+
+static bool
+parseOneEdge(std::map<int, StateMachineEdge *> &out,
+	     const char *str,
+	     const char **suffix)
 {
 	int label;
-	StateMachineState *res;
+	StateMachineEdge *res;
 
-	res = (StateMachineState *)0xf001; /* shut the compiler up */
+	res = (StateMachineEdge *)0xf001; /* shut the compiler up */
 
 	if (!parseThisChar('l', str, &str) ||
 	    !parseDecimalInt(&label, str, &str) ||
 	    !parseThisString(": ", str, &str) ||
-	    !parseStateMachineState(&res, str, &str) ||
+	    !parseStateMachineEdge(&res, str, &str) ||
 	    !parseThisChar('\n', str, &str))
 		return false;
 	if (out.count(label))
@@ -622,38 +614,46 @@ parseOneState(std::map<int, StateMachineState *> &out,
 static bool
 parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 {
-	std::map<int, StateMachineState *> labelToState;
+	StateMachineState *root;
+	if (!parseStateMachineState(&root, str, &str))
+		return false;
+	if (!parseThisChar('\n', str, &str))
+		return false;
 
+	std::map<int, StateMachineEdge *> labelToEdge;
 	while (*str) {
-		if (!parseOneState(labelToState, str, &str))
+		if (!parseOneEdge(labelToEdge, str, &str))
 			break;
 	}
-	if (!labelToState.count(1))
-		return false;
-	for (std::map<int, StateMachineState *>::iterator it = labelToState.begin();
-	     it != labelToState.end();
-	     it++) {
-		if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(it->second)) {
-			StateMachineState *t = labelToState[(int)(unsigned long)smp->target->target];
-			if (!t)
-				return false;
-			smp->target->target = t;
-		} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(it->second)) {
-			StateMachineState *t = labelToState[(int)(unsigned long)smb->trueTarget->target];
-			StateMachineState *f = labelToState[(int)(unsigned long)smb->falseTarget->target];
-			if (!t)
-				return false;
-			if (!f)
-				return false;
-
-			smb->trueTarget->target = t;
-			smb->falseTarget->target = f;
-		} else {
-			assert(dynamic_cast<StateMachineTerminal *>(it->second));
+	class _ {
+	public:
+		std::map<int, StateMachineEdge *> &labelToEdge;
+		_(std::map<int, StateMachineEdge *> &_labelToEdge)
+			: labelToEdge(_labelToEdge)
+		{}
+		bool operator()(StateMachineState *s) {
+			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
+				smp->target = labelToEdge[(int)(unsigned long)smp->target];
+				if (!smp->target)
+					return false;
+			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s)) {
+				smb->trueTarget = labelToEdge[(int)(unsigned long)smb->trueTarget];
+				smb->falseTarget = labelToEdge[(int)(unsigned long)smb->falseTarget];
+				if (!smb->trueTarget || !smb->falseTarget)
+					return false;
+			} else {
+				assert(dynamic_cast<StateMachineTerminal *>(s));
+			}
+			return true;
 		}
-	}
+	} doOneState(labelToEdge);
+	if (!doOneState(root))
+		return false;
+	for (auto it = labelToEdge.begin(); it != labelToEdge.end(); it++)
+		if (!doOneState(it->second->target))
+			return false;
 	*suffix = str;
-	*out = labelToState[1];
+	*out = root;
 	return true;
 }
 
@@ -701,8 +701,8 @@ readStateMachine(int fd)
 }
 
 void
-StateMachineState::assertAcyclic(std::vector<const StateMachineState *> &stack,
-				 std::set<const StateMachineState *> &clean) const
+StateMachineEdge::assertAcyclic(std::vector<const StateMachineEdge *> &stack,
+				std::set<const StateMachineEdge *> &clean) const
 {
 #ifndef NDEBUG
 	if (clean.count(this))
@@ -711,26 +711,23 @@ StateMachineState::assertAcyclic(std::vector<const StateMachineState *> &stack,
 		goto found_cycle;
 	stack.push_back(this);
 	{
-		std::vector<const StateMachineState *> targ;
-		targets(targ);
+		std::vector<const StateMachineEdge *> targ;
+		target->targets(targ);
 		for (auto it = targ.begin(); it != targ.end(); it++)
 			(*it)->assertAcyclic(stack, clean);
 	}
 	assert(stack.back() == this);
 	stack.pop_back();
-	//assert(!clean.count(this));
 	clean.insert(this);
 	return;
 
 found_cycle:
 	printf("Unexpected cycle in state machine!\n");
 	printf("Found at %p\n", this);
-	std::map<const StateMachineState *, int> labels;
+	std::map<const StateMachineEdge *, int> labels;
 	prettyPrint(stdout, labels);
 	printf("Path: \n");
-	for (std::vector<const StateMachineState *>::const_iterator it = stack.begin();
-	     it != stack.end();
-	     it++)
+	for (auto it = stack.begin(); it != stack.end(); it++)
 		printf("\t%d\n", labels[*it]);
 	printf("End\n");
 	assert(0);
@@ -738,11 +735,11 @@ found_cycle:
 }
 
 void
-StateMachineState::assertAcyclic() const
+StateMachineEdge::assertAcyclic() const
 {
 #ifndef NDEBUG
-	std::vector<const StateMachineState *> stack;
-	std::set<const StateMachineState *> clean;
+	std::vector<const StateMachineEdge *> stack;
+	std::set<const StateMachineEdge *> clean;
 	assertAcyclic(stack, clean);
 #endif
 }
@@ -886,3 +883,14 @@ StateMachineState::roughLoadCount(RoughLoadCount acc) const
 		acc = (*it)->roughLoadCount(acc);
 	return acc;
 }
+
+#ifndef NDEBUG
+void
+StateMachine::assertAcyclic() const
+{
+	std::vector<const StateMachineEdge *> roots;
+	root->targets(roots);
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		(*it)->assertAcyclic();
+}
+#endif
