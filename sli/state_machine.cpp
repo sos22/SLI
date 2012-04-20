@@ -823,17 +823,6 @@ StateMachine::sanityCheck() const
 }
 #endif
 
-StateMachine *
-StateMachine::clone() const
-{
-	std::map<const StateMachineState *, StateMachineState *> stateMap;
-	std::map<const StateMachineEdge *, StateMachineEdge *> edgeMap;
-	return new StateMachine(root->clone(stateMap, edgeMap),
-				origin,
-				freeVariables,
-				tid);
-}
-
 void
 StateMachineState::targets(std::set<StateMachineState *> &out)
 {
