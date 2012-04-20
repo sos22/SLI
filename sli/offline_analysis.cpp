@@ -1965,27 +1965,48 @@ CFGtoCrashReason(unsigned tid,
 				r = IRExpr_ClientCallFailed(irsb->next_nonconst);
 			}
 
+			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
+
 			/* Pick up any temporaries calculated during
 			 * the call instruction. */
 			for (int i = irsb->stmts_used - 1; i >= 0; i--) {
 				IRStmt *stmt = irsb->stmts[i];
-				/* We ignore statements other than WrTmp if they
-				   happen in a call instruction. */
+				/* We ignore statements other than
+				   WrTmp and Load if they happen in a
+				   call instruction. */
 				if (stmt->tag == Ist_Put) {
 					IRStmtPut *p = (IRStmtPut *)stmt;
 					if (p->target.isTemp())
 						r = rewriteTemporary(r, p->target.asTemp(),
 								     p->data);
 				}
+				if (stmt->tag == Ist_Dirty) {
+					IRDirty *details = ((IRStmtDirty *)stmt)->details;
+					if (!strcmp(details->cee->name, "helper_load_64")) {
+						smp->target->sideEffects.push_back(
+							new StateMachineSideEffectLoad(
+								details->tmp,
+								details->args[0],
+								site,
+								Ity_I64));
+					} else {
+						/* Other dirty calls
+						   inside a call
+						   instruction
+						   indicate that
+						   something has gone
+						   wrong. */
+						abort();
+					}
+				}
 			}
 
-			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
 			assert(smp->target);
 			if (cfg->fallThrough)
 				state.addReloc(&smp->target->target, cfg->fallThrough);
 			else
 				smp->target->target = escapeState;
-			smp->target->prependSideEffect(
+			smp->target->sideEffects.push_back(
 				new StateMachineSideEffectCopy(
 					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
 					r));
