@@ -1,36 +1,6 @@
 #include "sli.h"
 #include "offline_analysis.hpp"
-
-static void
-enumStatesAndEdges(StateMachine *sm, std::set<StateMachineState *> &outStates,
-		   std::set<StateMachineEdge *> &outEdges)
-{
-	std::vector<StateMachineState *> toVisitStates;
-	std::vector<StateMachineEdge *> toVisitEdges;
-
-	toVisitStates.push_back(sm->root);
-	while (!toVisitStates.empty() || !toVisitEdges.empty()) {
-		while (!toVisitStates.empty()) {
-			StateMachineState *s = toVisitStates.back();
-			toVisitStates.pop_back();
-			if (!s || outStates.count(s))
-				continue;
-			outStates.insert(s);
-			
-			toVisitEdges.push_back(s->target0());
-			toVisitEdges.push_back(s->target1());
-		}
-		while (!toVisitEdges.empty()) {
-			StateMachineEdge *e = toVisitEdges.back();
-			toVisitEdges.pop_back();
-			if (!e || outEdges.count(e))
-				continue;
-			outEdges.insert(e);
-
-			toVisitStates.push_back(e->target);
-		}
-	}
-}
+#include "state_machine.hpp"
 
 StateMachineSideEffectLoad *
 StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, bool *)
@@ -158,7 +128,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 	if (!done_something) done_something = &_b;
 	std::set<StateMachineState *> allStates;
 	std::set<StateMachineEdge *> allEdges;
-	enumStatesAndEdges(sm, allStates, allEdges);
+	enumStatesAndEdges(sm, &allStates, &allEdges);
 
 	/* Step 1: walk over the state machine states and edges, and
 	   figure out which ones need to be changed due to the actual
@@ -196,8 +166,13 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			StateMachineState *s = *it;
 			if (stateRewrites.count(s))
 				continue;
-			if ((s->target0() && edgeRewrites.count(s->target0())) ||
-			    (s->target1() && edgeRewrites.count(s->target1()))) {
+			std::vector<StateMachineEdge *> edges;
+			s->targets(edges);
+			bool do_rewrite = false;
+			for (auto it = edges.begin(); !do_rewrite && it != edges.end(); it++)
+				if (edgeRewrites.count(*it))
+					do_rewrite = true;
+			if (do_rewrite) {
 				/* Need to rewrite this one as well. */
 				progress = true;
 

@@ -3,6 +3,7 @@
 
 #include <map>
 #include <set>
+#include <queue>
 
 #include "simplify_irexpr.hpp"
 #include "oracle_rip.hpp"
@@ -289,10 +290,25 @@ public:
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
 	virtual bool canCrash(std::vector<StateMachineEdge *> &) = 0;
 	virtual int complexity(std::vector<StateMachineEdge *> &) = 0;
-	virtual StateMachineEdge *target0() = 0;
-	virtual const StateMachineEdge *target0() const = 0;
-	virtual StateMachineEdge *target1() = 0;
-	virtual const StateMachineEdge *target1() const = 0;
+	virtual void targets(std::vector<StateMachineEdge *> &) = 0;
+	virtual void targets(std::vector<const StateMachineEdge *> &) const = 0;
+	void targets(std::set<StateMachineEdge *> &out) {
+		std::vector<StateMachineEdge *> r;
+		targets(r);
+		for (auto it = r.begin(); it != r.end(); it++)
+			out.insert(*it);
+	}
+	void targets(std::set<const StateMachineEdge *> &out) const {
+		std::vector<const StateMachineEdge *> r;
+		targets(r);
+		for (auto it = r.begin(); it != r.end(); it++)
+			out.insert(*it);
+	}
+	void targets(std::set<StateMachineState *> &out);
+	void targets(std::set<const StateMachineState *> &out) const;
+	void targets(std::vector<StateMachineState *> &out);
+	void targets(std::vector<const StateMachineState *> &out) const;
+	void targets(std::queue<StateMachineEdge *> &out);
 	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
 	virtual RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const = 0;
 	void assertAcyclic() const;
@@ -491,10 +507,8 @@ public:
 	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	int complexity(std::vector<StateMachineEdge *> &) { return 1; }
-	StateMachineEdge *target0() { return NULL; }
-	const StateMachineEdge *target0() const { return NULL; }
-	StateMachineEdge *target1() { return NULL; }
-	const StateMachineEdge *target1() const { return NULL; }
+	void targets(std::vector<StateMachineEdge *> &) { }
+	void targets(std::vector<const StateMachineEdge *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return acc; }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
@@ -593,10 +607,8 @@ public:
 	}
 	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
 	int complexity(std::vector<StateMachineEdge *> &path) { return target->complexity(path); }
-	StateMachineEdge *target0() { return target; }
-	const StateMachineEdge *target0() const { return target; }
-	StateMachineEdge *target1() { return NULL; }
-	const StateMachineEdge *target1() const { return NULL; }
+	void targets(std::vector<StateMachineEdge *> &out) { out.push_back(target); }
+	void targets(std::vector<const StateMachineEdge *> &out) const { out.push_back(target); }
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const
@@ -688,10 +700,14 @@ public:
 	int complexity(std::vector<StateMachineEdge *> &path) {
 		return trueTarget->complexity(path) + falseTarget->complexity(path) + exprComplexity(condition) + 50;
 	}
-	StateMachineEdge *target0() { return falseTarget; }
-	const StateMachineEdge *target0() const { return falseTarget; }
-	StateMachineEdge *target1() { return trueTarget; }
-	const StateMachineEdge *target1() const { return trueTarget; }
+	void targets(std::vector<StateMachineEdge *> &out) {
+		out.push_back(falseTarget);
+		out.push_back(trueTarget);
+	}
+	void targets(std::vector<const StateMachineEdge *> &out) const {
+		out.push_back(falseTarget);
+		out.push_back(trueTarget);
+	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const {
 		return trueTarget->roughLoadCount(
 			falseTarget->roughLoadCount(acc));
@@ -963,5 +979,46 @@ StateMachine *readStateMachine(int fd);
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
 				 const char **suffix);
+
+template <typename t> t
+pop(std::set<t> &x)
+{
+	auto it = x.begin();
+	if (it == x.end()) abort();
+	t res = *it;
+	x.erase(it);
+	return res;
+}
+
+template <typename stateType> void
+enumStatesAndEdges(StateMachine *sm,
+		   std::set<stateType *> *states,
+		   std::set<StateMachineEdge *> *edges)
+{
+	std::set<StateMachineState *> toVisit;
+	std::set<StateMachineState *> visited;
+
+	toVisit.insert(sm->root);
+	while (!toVisit.empty()) {
+		StateMachineState *s = pop(toVisit);
+		if (!visited.insert(s).second)
+			continue;
+		if (states) {
+			stateType *ss = dynamic_cast<stateType *>(s);
+			if (ss)
+				states->insert(ss);
+		}
+		if (edges) {
+			std::vector<StateMachineEdge *> targets;
+			s->targets(targets);
+			for (auto it = targets.begin(); it != targets.end(); it++) {
+				if (edges->insert(*it).second)
+					toVisit.insert((*it)->target);
+			}
+		} else {
+			s->targets(toVisit);
+		}
+	}
+}
 
 #endif /* !STATEMACHINE_HPP__ */

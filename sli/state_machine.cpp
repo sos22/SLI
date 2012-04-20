@@ -335,10 +335,7 @@ buildStateLabelTable(const StateMachineState *sm, std::map<const StateMachineSta
 		states.push_back(sm);
 		table[sm] = next_label;
 		next_label++;
-		if (sm->target0())
-			toEmit.push_back(sm->target0()->target);
-		if (sm->target1())
-			toEmit.push_back(sm->target1()->target);
+		sm->targets(toEmit);
 	}
 }
 
@@ -727,10 +724,12 @@ StateMachineState::assertAcyclic(std::vector<const StateMachineState *> &stack,
 	if (std::find(stack.begin(), stack.end(), this) != stack.end())
 		goto found_cycle;
 	stack.push_back(this);
-	if (target0())
-		target0()->target->assertAcyclic(stack, clean);
-	if (target1())
-		target1()->target->assertAcyclic(stack, clean);
+	{
+		std::vector<const StateMachineState *> targ;
+		targets(targ);
+		for (auto it = targ.begin(); it != targ.end(); it++)
+			(*it)->assertAcyclic(stack, clean);
+	}
 	assert(stack.back() == this);
 	stack.pop_back();
 	//assert(!clean.count(this));
@@ -765,10 +764,10 @@ StateMachineState::assertAcyclic() const
 void
 StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
-	if (target1())
-		target1()->enumerateMentionedMemoryAccesses(instrs);
-	if (target0())
-		target0()->enumerateMentionedMemoryAccesses(instrs);
+	std::vector<StateMachineEdge *> targ;
+	targets(targ);
+	for (auto it = targ.begin(); it != targ.end(); it++)
+		(*it)->enumerateMentionedMemoryAccesses(instrs);
 }
 
 void
@@ -833,4 +832,51 @@ StateMachine::clone() const
 				origin,
 				freeVariables,
 				tid);
+}
+
+void
+StateMachineState::targets(std::set<StateMachineState *> &out)
+{
+	std::vector<StateMachineEdge *> edges;
+	targets(edges);
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		out.insert((*it)->target);
+}
+
+void
+StateMachineState::targets(std::set<const StateMachineState *> &out) const
+{
+	std::vector<const StateMachineEdge *> edges;
+	targets(edges);
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		out.insert((*it)->target);
+}
+
+void
+StateMachineState::targets(std::vector<StateMachineState *> &out)
+{
+	std::vector<StateMachineEdge *> edges;
+	targets(edges);
+	out.reserve(out.size() + edges.size());
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		out.push_back((*it)->target);
+}
+
+void
+StateMachineState::targets(std::vector<const StateMachineState *> &out) const
+{
+	std::vector<const StateMachineEdge *> edges;
+	targets(edges);
+	out.reserve(out.size() + edges.size());
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		out.push_back((*it)->target);
+}
+
+void
+StateMachineState::targets(std::queue<StateMachineEdge *> &out)
+{
+	std::vector<StateMachineEdge *> edges;
+	targets(edges);
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		out.push(*it);
 }

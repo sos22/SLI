@@ -344,10 +344,18 @@ removeSurvivingStates(StateMachine *sm, bool *done_something)
 		progress = false;
 		for (auto it = survivingStates.begin(); it != survivingStates.end(); ) {
 			StateMachineState *s = *it;
+			bool definitely_survives = true;
 			if (dynamic_cast<StateMachineCrash *>(s) ||
-			    dynamic_cast<StateMachineUnreached *>(s) ||
-			    (s->target0() && !survivingStates.count(s->target0()->target)) ||
-			    (s->target1() && !survivingStates.count(s->target1()->target))) {
+			    dynamic_cast<StateMachineUnreached *>(s))
+				definitely_survives = false;
+			if (definitely_survives) {
+				std::vector<StateMachineState *> targets;
+				s->targets(targets);
+				for (auto it = targets.begin(); definitely_survives && it != targets.end(); it++)
+					if (!survivingStates.count(*it))
+						definitely_survives = false;
+			}
+			if (!definitely_survives) {
 				survivingStates.erase(it++);
 				progress = true;
 			} else {
