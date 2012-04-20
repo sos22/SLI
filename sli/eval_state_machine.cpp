@@ -1309,18 +1309,16 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		LibVEX_maybe_gc(token);
 
-		memLogT storesIssuedByWriter;
-		threadState writerState;
+		StateMachineEvalContext writerContext;
 		StateMachineEdge *writerEdge;
 		unsigned writeEdgeIdx;
-		IRExpr *pathConstraint;
 		StateMachineSideEffectStore *sectionStart;
 		bool finished;
 		StateMachineSideEffectStore *smses;
 		bool writer_failed;
 
+		writerContext.pathConstraint = assumption;
 		writeEdgeIdx = 0;
-		pathConstraint = assumption;
 		writerEdge = writeStartEdge;
 		sectionStart = NULL;
 		finished = false;
@@ -1334,7 +1332,15 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 				/* Yes, move to the next state. */
 				StateMachineState *s = writerEdge->target;
 				assert(!dynamic_cast<StateMachineUnreached *>(s));
-				if (dynamic_cast<StateMachineTerminal *>(s)) {
+				bool c;
+				writerEdge = smallStepEvalStateMachine(writeMachine,
+								       s,
+								       &c,
+								       chooser,
+								       oracle,
+								       opt,
+								       writerContext);
+				if (!writerEdge) {
 					/* Hit the end of the writer
 					 * -> we're done. */
 					/* Note that we need to
@@ -1372,19 +1378,6 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 					finished = true;
 					goto eval_read_machine;
 				}
-				if (StateMachineProxy *smp =
-				    dynamic_cast<StateMachineProxy *>(s)) {
-					writerEdge = smp->target;
-					writeEdgeIdx = 0;
-					continue;
-				}
-				StateMachineBifurcate *smb =
-					dynamic_cast<StateMachineBifurcate *>(s);
-				assert(smb);
-				if (expressionIsTrue(smb->condition, chooser, writerState, opt, &pathConstraint, NULL))
-					writerEdge = smb->trueTarget;
-				else
-					writerEdge = smb->falseTarget;
 				writeEdgeIdx = 0;
 				continue;				
 			}
@@ -1396,7 +1389,12 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, opt, &pathConstraint, NULL)) {
+			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
+							writerContext.state,
+							writerContext.memLog,
+							false, opt,
+							&writerContext.pathConstraint,
+							NULL)) {
 				writer_failed = true;
 				break;
 			}
@@ -1416,11 +1414,10 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   need a fresh eval ctxt and a fresh copy of
 			   the stores list every time around the
 			   loop. */
-			StateMachineEvalContext readEvalCtxt;
-			readEvalCtxt.pathConstraint = pathConstraint;
-			readEvalCtxt.memLog = storesIssuedByWriter;
+			StateMachineEvalContext readEvalCtxt = writerContext;
 			bool crashes;
-			bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
+			bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, chooser,
+						oracle, opt, readEvalCtxt);
 			if (crashes) {
 				if (!sectionStart) {
 					/* The previous attempt at
