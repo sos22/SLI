@@ -874,3 +874,15 @@ StateMachineState::findLoadedAddresses(std::set<IRExpr *> &out, const AllowableO
 			out.insert(*it);
 	}
 }
+
+StateMachineState::RoughLoadCount
+StateMachineState::roughLoadCount(RoughLoadCount acc) const
+{
+	if (acc == multipleLoads)
+		return multipleLoads;
+	std::vector<const StateMachineEdge *> edges;
+	targets(edges);
+	for (auto it = edges.begin(); acc != multipleLoads && it != edges.end(); it++)
+		acc = (*it)->roughLoadCount(acc);
+	return acc;
+}

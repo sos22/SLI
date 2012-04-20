@@ -305,7 +305,7 @@ public:
 	void targets(std::vector<const StateMachineState *> &out) const;
 	void targets(std::queue<StateMachineEdge *> &out);
 	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
-	virtual RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const = 0;
+	RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const;
 	void assertAcyclic() const;
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
 	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
@@ -464,7 +464,6 @@ public:
 	void targets(std::vector<StateMachineEdge *> &) { }
 	void targets(std::vector<const StateMachineEdge *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
-	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return acc; }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &) const { return; }
 };
@@ -543,7 +542,6 @@ public:
 	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
 	void targets(std::vector<StateMachineEdge *> &out) { out.push_back(target); }
 	void targets(std::vector<const StateMachineEdge *> &out) const { out.push_back(target); }
-	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const
 	{
@@ -614,10 +612,6 @@ public:
 	void targets(std::vector<const StateMachineEdge *> &out) const {
 		out.push_back(falseTarget);
 		out.push_back(trueTarget);
-	}
-	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const {
-		return trueTarget->roughLoadCount(
-			falseTarget->roughLoadCount(acc));
 	}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const
