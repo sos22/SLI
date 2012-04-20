@@ -1471,44 +1471,33 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 		LibVEX_maybe_gc(token);
 
-		memLogT storesIssuedByWriter;
-		threadState writerState;
+		StateMachineEvalContext writeContext;
 		StateMachineEdge *writerEdge;
 		unsigned writeEdgeIdx;
-		IRExpr *pathConstraint;
 		std::set<StateMachineSideEffectStore *> incompleteSections;
 
 		writeEdgeIdx = 0;
-		pathConstraint = assumption;
+		writeContext.pathConstraint = assumption;
 		writerEdge = writeStartEdge;
 		while (!TIMEOUT) {
 			/* Have we hit the end of the current writer edge? */
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
 				/* Yes, move to the next state. */
-				StateMachineState *s = writerEdge->target;
-				assert(!dynamic_cast<StateMachineUnreached *>(s));
-				if (dynamic_cast<StateMachineCrash *>(s) ||
-				    dynamic_cast<StateMachineNoCrash *>(s) ||
-				    dynamic_cast<StateMachineStub *>(s)) {
+				bool c;
+				writerEdge = smallStepEvalStateMachine(writeMachine,
+								       writerEdge->target,
+								       &c,
+								       chooser,
+								       oracle,
+								       opt,
+								       writeContext);
+				if (!writerEdge) {
 					/* Hit the end of the writer
 					 * -> we're done. */
 					break;
 				}
-				if (StateMachineProxy *smp =
-				    dynamic_cast<StateMachineProxy *>(s)) {
-					writerEdge = smp->target;
-					writeEdgeIdx = 0;
-					continue;
-				}
-				StateMachineBifurcate *smb =
-					dynamic_cast<StateMachineBifurcate *>(s);
-				assert(smb);
-				if (expressionIsTrue(smb->condition, chooser, writerState, opt, &pathConstraint, NULL))
-					writerEdge = smb->trueTarget;
-				else
-					writerEdge = smb->falseTarget;
 				writeEdgeIdx = 0;
-				continue;				
+				continue;
 			}
 
 			/* Advance the writer by one state.  Note that
@@ -1518,7 +1507,10 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, opt, &pathConstraint, NULL)) {
+			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
+							writeContext.state,
+							writeContext.memLog, false, opt,
+							&writeContext.pathConstraint, NULL)) {
 				/* Contradiction in the writer -> give
 				 * up. */
 				break;
@@ -1550,9 +1542,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			/* The writer just issued a store and is not
 			   in a critical section, so we should now try
 			   running the reader atomically.  */
-			StateMachineEvalContext readEvalCtxt;
-			readEvalCtxt.pathConstraint = pathConstraint;
-			readEvalCtxt.memLog = storesIssuedByWriter;
+			StateMachineEvalContext readEvalCtxt = writeContext;
 			bool crashes;
 			bigStepEvalStateMachine(probeMachine, probeMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
 			if (crashes) {
