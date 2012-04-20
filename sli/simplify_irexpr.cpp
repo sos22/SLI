@@ -1393,7 +1393,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 									purge = false;
 								}
 								if (purge)
-									purge = l == ((IRExprUnop *)r)->arg;
+									purge = physicallyEqual(l, ((IRExprUnop *)r)->arg);
 							} else if (and_like) {
 								if (r->tag == Iex_Unop) {
 									IROp op = ((IRExprUnop *)r)->op;
@@ -1403,10 +1403,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								} else
 									purge = false;
 								if (purge)
-									purge = l == ((IRExprUnop *)r)->arg;
+									purge = physicallyEqual(l, ((IRExprUnop *)r)->arg);
 							} else {
 								assert(xor_like);
-								purge = l == r;
+								purge = physicallyEqual(l, r);
 							}
 
 							if (purge) {
