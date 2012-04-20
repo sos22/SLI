@@ -1095,6 +1095,16 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			break;
 		}
 		break;
+	case Ity_V128:
+		switch (desiredType) {
+		case Ity_F64:
+			return IRExpr_Unop(Iop_ReinterpI64asF64,
+					   IRExpr_Unop(Iop_V128to64, expr));
+		case Ity_V128:
+			return expr;
+		default:
+			break;
+		}
 	default:
 		break;
 	}
