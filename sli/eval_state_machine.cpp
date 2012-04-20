@@ -1200,53 +1200,36 @@ writeMachineSuitabilityConstraint(
 
 		LibVEX_maybe_gc(token);
 
-		memLogT memLog;
-		threadState writerState;
+		StateMachineEvalContext writerCtxt;
+
 		StateMachineEdge *writerEdge;
-		IRExpr *pathConstraint;
-		IRExpr *thisTimeConstraint;
 		bool writer_failed = false;
 
-		pathConstraint = assumption;
+		writerCtxt.pathConstraint = assumption;
+		writerCtxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
 		writerEdge = writeStartEdge;
-		thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
 		while (!writer_failed) {
-			for (unsigned i = 0; !writer_failed && !TIMEOUT && i < writerEdge->sideEffects.size(); i++) {
-				if (!evalStateMachineSideEffect(writeMachine,
-								writerEdge->sideEffects[i],
-								chooser,
-								oracle,
-								writerState,
-								memLog,
-								false,
-								opt,
-								&pathConstraint,
-								&thisTimeConstraint)) {
-					/* There's no way the writer
-					 * could actually get here.
-					 * Get out */
-					writer_failed = true;
-				}
-			}
-
-			StateMachineState *s = writerEdge->target;
-			if (writer_failed ||
-			    dynamic_cast<StateMachineCrash *>(s) ||
-			    dynamic_cast<StateMachineNoCrash *>(s) ||
-			    dynamic_cast<StateMachineStub *>(s)) {
-				/* Hit end of writer */
+			bool c;
+			if (smallStepEvalStateMachineEdge(writeMachine,
+							  writerEdge,
+							  &c,
+							  chooser,
+							  oracle,
+							  opt,
+							  writerCtxt)) {
+				writer_failed = true;
 				break;
-			} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
-				writerEdge = smp->target;
-			} else {
-				StateMachineBifurcate *smb =
-					dynamic_cast<StateMachineBifurcate *>(s);
-				assert(smb);
-				if (expressionIsTrue(smb->condition, chooser, writerState, opt, &pathConstraint, &thisTimeConstraint))
-					writerEdge = smb->trueTarget;
-				else
-					writerEdge = smb->falseTarget;
 			}
+			writerEdge = smallStepEvalStateMachine(
+				writeMachine,
+				writerEdge->target,
+				&c,
+				chooser,
+				oracle,
+				opt,
+				writerCtxt);
+			if (!writerEdge)
+				break;
 		}
 
 		if (!writer_failed) {
@@ -1259,10 +1242,7 @@ writeMachineSuitabilityConstraint(
 			 * points. */
 			NdChooser read_chooser;
 			do {
-				StateMachineEvalContext readEvalCtxt;
-				readEvalCtxt.pathConstraint = pathConstraint;
-				readEvalCtxt.memLog = memLog;
-				readEvalCtxt.justPathConstraint = thisTimeConstraint;
+				StateMachineEvalContext readEvalCtxt = writerCtxt;
 				bool crashes;
 				bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, read_chooser, oracle, opt, readEvalCtxt);
 				if (crashes) {
