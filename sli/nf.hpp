@@ -52,9 +52,6 @@ public:
 			fprintf(f, " ");
 		ppIRExpr(second, f);
 	}
-	unsigned complexity() const {
-		return exprComplexity(second) + (first ? 10 : 0);
-	}
 	unsigned hash() const {
 		unsigned long acc = (unsigned long)second;
 		return (acc ^ (acc >> 32)) * (first ? 1 : 2);
@@ -72,27 +69,11 @@ public:
 		bloom.clear();
 	}
 	void prettyPrint(FILE *f, const char *) const;
-	int complexity() const {
-		if (size() == 1)
-			return (*this)[0].complexity();
-		int acc = 10;
-		for (auto it = begin(); it != end(); it++)
-			acc += it->complexity();
-		return acc;
-	}
 	iterator findMatchingAtom(const NF_Atom &a);
 };
 class NF_Expression : public std::vector<NF_Term> {
 public:
 	void prettyPrint(FILE *f, const char *, const char *) const;
-	int complexity() const {
-		if (size() == 1)
-			return (*this)[0].complexity();
-		int acc = 10;
-		for (auto it = begin(); it != end(); it++)
-			acc += it->complexity();
-		return acc;
-	}
 };
 
 Maybe<bool> convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
