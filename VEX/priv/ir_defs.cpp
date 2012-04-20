@@ -327,6 +327,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(Xor1)				\
 	     iter(BadPtr)			\
 	     iter(CmpEQ1)			\
+	     iter(CmpEQF32)			\
 	     iter(CmpEQF64)			\
 	     iter(CmpEQI128)			\
 	     iter(CmpEQV128)			\
@@ -2511,6 +2512,8 @@ void typeOfPrimop ( IROp op,
       case Iop_SarN8x16: case Iop_SarN16x8: case Iop_SarN32x4:
          BINARY(Ity_V128,Ity_I8, Ity_V128);
 
+      case Iop_CmpEQF32:
+	  BINARY(Ity_F32, Ity_F32, Ity_I1);
       case Iop_CmpEQF64:
 	  BINARY(Ity_F64, Ity_F64, Ity_I1);
       case Iop_CmpEQI128:
