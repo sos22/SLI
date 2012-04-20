@@ -3,6 +3,7 @@
 
 #include <map>
 #include <set>
+#include <queue>
 
 #include "simplify_irexpr.hpp"
 #include "oracle_rip.hpp"
@@ -25,17 +26,16 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
 class AllowableOptimisations {
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool x, bool s, bool a, bool i, bool as, bool fvmas,
+	AllowableOptimisations(bool s, bool a, bool i, bool as, bool fvmas,
 			       AddressSpace *_as)
-		: xPlusMinusX(x), assumePrivateStack(s), assumeExecutesAtomically(a),
+		: assumePrivateStack(s), assumeExecutesAtomically(a),
 		  ignoreSideEffects(i), assumeNoInterferingStores(as),
 		  freeVariablesMightAccessStack(fvmas), as(_as), haveInterestingStoresSet(false),
 		  nonLocalLoads(NULL)
 	{
 	}
 	AllowableOptimisations(const AllowableOptimisations &o)
-		: xPlusMinusX(o.xPlusMinusX),
-		  assumePrivateStack(o.assumePrivateStack),
+		: assumePrivateStack(o.assumePrivateStack),
 		  assumeExecutesAtomically(o.assumeExecutesAtomically),
 		  ignoreSideEffects(o.ignoreSideEffects),
 		  assumeNoInterferingStores(o.assumeNoInterferingStores),
@@ -45,14 +45,6 @@ public:
 		  interestingStores(o.interestingStores),
 		  nonLocalLoads(o.nonLocalLoads)
 	{}
-
-	/* Transform x + (-x) to 0.  This is always safe, in the sense
-	   that x + (-x) is always zero, but actually checking it can
-	   sometimes lead to an infinite recursion if you're not a bit
-	   careful.  This should pretty much only be turned off from
-	   inside the optimiser. */
-	/* (The same toggle also controls the rule x & ~x -> 0) */
-	bool xPlusMinusX;
 
 	/* Assume that the stack is ``private'', in the sense that no
 	   constant expressions can ever alias with rsp. */
@@ -95,41 +87,36 @@ public:
 	   here. */
 	std::set<DynAnalysisRip> *nonLocalLoads;
 
-	AllowableOptimisations disablexPlusMinusX() const
-	{
-		return AllowableOptimisations(false, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
-	}
 	AllowableOptimisations enableassumePrivateStack() const
 	{
-		return AllowableOptimisations(xPlusMinusX, true, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(true, assumeExecutesAtomically, ignoreSideEffects,
 					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableassumeExecutesAtomically() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, true, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, true, ignoreSideEffects,
 					      true /* If we're running atomically then there are definitely
 						      no interfering stores */,
 					      freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableignoreSideEffects() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, true,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, true,
 					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations enableassumeNoInterferingStores() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
 					      true, freeVariablesMightAccessStack, as);
 	}
 	AllowableOptimisations disablefreeVariablesMightAccessStack() const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
 					      assumeNoInterferingStores, false, as);
 	}
 	AllowableOptimisations setAddressSpace(AddressSpace *as) const
 	{
-		return AllowableOptimisations(xPlusMinusX, assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
+		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
 					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
 	}
 	unsigned asUnsigned() const {
@@ -142,8 +129,6 @@ public:
 				    basic ones which are always
 				    safe. */
 
-		if (xPlusMinusX)
-			x |= 1;
 		if (assumePrivateStack)
 			x |= 2;
 		if (assumeExecutesAtomically)
@@ -256,25 +241,21 @@ public:
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       Oracle *oracle,
 			       bool *done_something);
-	void selectSingleCrashingPath();
 	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
-	StateMachine *clone() const;
 #ifdef NDEBUG
 	void sanityCheck() const {}
+	void assertAcyclic() const {}
 #else
 	void sanityCheck() const;
+	void assertAcyclic() const;
 #endif
+
 	NAMED_CLASS
 };
 
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
-	mutable unsigned long __hashval;
-	mutable bool have_hash;
-	void assertAcyclic(std::vector<const StateMachineState *> &,
-			   std::set<const StateMachineState *> &) const;
 protected:
-	StateMachineState(const VexRip &_origin) : have_hash(false), origin(_origin) {}
-	virtual unsigned long _hashval() const = 0;
+	StateMachineState(const VexRip &_origin) : origin(_origin) {}
 public:
 	VexRip origin; /* RIP we were looking at when we constructed
 			* the thing.  Not very meaningful, but
@@ -286,21 +267,32 @@ public:
 	   semantic value of the machine, and can mutate in-place. */
 	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 					    std::set<StateMachineState *> &done) = 0;
-	virtual void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) = 0;
+	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
-	virtual StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) __attribute__((warn_unused_result)) = 0;
 	virtual bool canCrash(std::vector<StateMachineEdge *> &) = 0;
-	virtual int complexity(std::vector<StateMachineEdge *> &) = 0;
-	virtual StateMachineEdge *target0() = 0;
-	virtual const StateMachineEdge *target0() const = 0;
-	virtual StateMachineEdge *target1() = 0;
-	virtual const StateMachineEdge *target1() const = 0;
+	virtual void targets(std::vector<StateMachineEdge *> &) = 0;
+	virtual void targets(std::vector<const StateMachineEdge *> &) const = 0;
+	void targets(std::set<StateMachineEdge *> &out) {
+		std::vector<StateMachineEdge *> r;
+		targets(r);
+		for (auto it = r.begin(); it != r.end(); it++)
+			out.insert(*it);
+	}
+	void targets(std::set<const StateMachineEdge *> &out) const {
+		std::vector<const StateMachineEdge *> r;
+		targets(r);
+		for (auto it = r.begin(); it != r.end(); it++)
+			out.insert(*it);
+	}
+	void targets(std::set<StateMachineState *> &out);
+	void targets(std::set<const StateMachineState *> &out) const;
+	void targets(std::vector<StateMachineState *> &out);
+	void targets(std::vector<const StateMachineState *> &out) const;
+	void targets(std::queue<StateMachineEdge *> &out);
 	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
-	virtual RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const = 0;
-	void assertAcyclic() const;
-	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
+	RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const;
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
-	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
+	virtual void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const = 0;
 
 #ifdef NDEBUG
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live, std::vector<const StateMachineEdge *> &done) const {}
@@ -308,22 +300,16 @@ public:
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live, std::vector<const StateMachineEdge *> &done) const = 0;
 #endif
 
-	virtual StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-					 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const = 0;
-
 	NAMED_CLASS
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
-	mutable unsigned long __hashval;
-	mutable bool have_hash;
 	StateMachineSideEffect(); /* DNE */
 public:
 	enum sideEffectType {
 		Load, Store, Copy, Unreached, AssertFalse, Phi
 	} type;
 protected:
-	virtual unsigned long _hashval() const = 0;
 	StateMachineSideEffect(enum sideEffectType _type)
 		: type(_type)
 	{}
@@ -331,21 +317,19 @@ public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
-	virtual int complexity() = 0;
-	unsigned long hashval() const { if (!have_hash) __hashval = _hashval(); return __hashval; }
 	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	NAMED_CLASS
 };
 
 class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
-	mutable bool have_hash;
-	mutable unsigned long _hashval;
+	void assertAcyclic(std::vector<const StateMachineEdge *> &,
+			   std::set<const StateMachineEdge *> &) const;
 public:
-	unsigned long hashval() const;
-	StateMachineEdge(StateMachineState *t) : have_hash(false), target(t) {}
+	void assertAcyclic() const;
+	StateMachineEdge(StateMachineState *t) : target(t) {}
 	StateMachineEdge(const std::vector<StateMachineSideEffect *> &_sideEffects,
 			 StateMachineState *t)
-		: have_hash(false), target(t), sideEffects(_sideEffects)
+		: target(t), sideEffects(_sideEffects)
 	{}
 	StateMachineState *target;
 	std::vector<StateMachineSideEffect *> sideEffects;
@@ -361,21 +345,14 @@ public:
 		sideEffects = n;
 	}
 
-	void prettyPrint(FILE *f, const char *seperator, std::map<const StateMachineState *, int> &labels) const {
-		if (sideEffects.size() != 0) {
-			fprintf(f, "{");
-			bool b = true;
-			for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
-			     it != sideEffects.end();
-			     it++) {
-				if (!b)
-					fprintf(f, "%s", seperator);
-				b = false;
-				(*it)->prettyPrint(f);
-			}
-			fprintf(f, "} ");
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
+		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+			fprintf(f, "\t");
+			(*it)->prettyPrint(f);
+			fprintf(f, "\n");
 		}
-		fprintf(f, "l%d", labels[target]);
+		target->prettyPrint(f, labels);
+		fprintf(f, "\n");
 	}
 	void visit(HeapVisitor &hv) {
 		hv(target);
@@ -404,13 +381,6 @@ public:
 		     it++)
 			(*it)->findUsedRegisters(s, opt);
 	}
-	StateMachineEdge *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) __attribute__((warn_unused_result)) {
-		if (!memo.count(this)) {
-			memo.insert(this);
-			target = target->selectSingleCrashingPath(memo);
-		}
-		return this;
-	}
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs);
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		for (auto it = memo.begin(); it != memo.end(); it++)
@@ -423,23 +393,6 @@ public:
 		assert(memo[sz - 1] == this);
 		memo.pop_back();
 		return res;
-	}
-	int complexity(std::vector<StateMachineEdge *> &path) {
-		for (auto it = path.begin(); it != path.end(); it++)
-			if (*it == this)
-				return 1000; /* Assign a high-ish
-					      * fixed cost to every
-					      * cycle. */
-		path.push_back(this);
-		unsigned sz = path.size();
-		int r = target->complexity(path);
-		assert(sz == path.size());
-		assert(path[sz - 1] == this);
-		path.pop_back();
-
-		for (unsigned i = 0; i < sideEffects.size(); i++)
-			r += sideEffects[i]->complexity();
-		return r;
 	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
@@ -476,16 +429,6 @@ public:
 #endif
 	}
 
-	StateMachineEdge *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-				std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const
-	{
-		if (edgeMap.count(this))
-			return edgeMap[this];
-		auto res = new StateMachineEdge(sideEffects, target->clone(stateMap, edgeMap));
-		edgeMap[this] = res;
-		return res;
-	}
-
 	NAMED_CLASS
 };
 
@@ -497,16 +440,10 @@ public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
-	void findLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
-	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) { return this; }
-	int complexity(std::vector<StateMachineEdge *> &) { return 1; }
-	StateMachineEdge *target0() { return NULL; }
-	const StateMachineEdge *target0() const { return NULL; }
-	StateMachineEdge *target1() { return NULL; }
-	const StateMachineEdge *target1() const { return NULL; }
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
-	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return acc; }
+	void targets(std::vector<StateMachineEdge *> &) { }
+	void targets(std::vector<const StateMachineEdge *> &) const { }
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &) const { prettyPrint(f); }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &) const { return; }
 };
@@ -514,7 +451,6 @@ public:
 class StateMachineUnreached : public StateMachineTerminal {
 	StateMachineUnreached() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
-	unsigned long _hashval() const { return 0x72; }
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
 public:
 	static StateMachineUnreached *get() {
@@ -522,16 +458,11 @@ public:
 		return _this;
 	}
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
-	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
-		return get();
-	}
 };
 
 class StateMachineCrash : public StateMachineTerminal {
 	StateMachineCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
-	unsigned long _hashval() const { return 0x73; }
 public:
 	static StateMachineCrash *get() {
 		if (!_this) _this = new StateMachineCrash();
@@ -539,16 +470,11 @@ public:
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return true; }
-	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
-		return get();
-	}
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
 	StateMachineNoCrash() : StateMachineTerminal(VexRip()) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
-	unsigned long _hashval() const { return 0x74; }
 public:
 	static StateMachineNoCrash *get() {
 		if (!_this) _this = new StateMachineNoCrash();
@@ -556,17 +482,12 @@ public:
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
-	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
-		return get();
-	}
 };
 
 /* A state machine node which always advances to another one.  These
    can be safely eliminated, but they're sometimes kind of handy when
    you're building the machine. */
 class StateMachineProxy : public StateMachineState {
-	unsigned long _hashval() const { return target->hashval(); }
 public:
 	StateMachineEdge *target;
 
@@ -580,14 +501,9 @@ public:
 		  target(t)
 	{
 	}
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const
 	{
-		fprintf(f, "{%s:", origin.name());
-		if (target)
-			target->prettyPrint(f, "\n  ", labels);
-		else
-			fprintf(f, "<NULL>");
-		fprintf(f, "}");
+		fprintf(f, "{%s:l%d}", origin.name(), labels[target]);
 	}
 	void visit(HeapVisitor &hv)
 	{
@@ -595,44 +511,20 @@ public:
 	}
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
 				    std::set<StateMachineState *> &done);
-	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
-		target->findLoadedAddresses(s, opt);
-	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt) {
 		target->findUsedRegisters(s, opt);
 	}
-	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) {
-		target = target->selectSingleCrashingPath(memo);
-		return this;
-	}
 	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
-	int complexity(std::vector<StateMachineEdge *> &path) { return target->complexity(path); }
-	StateMachineEdge *target0() { return target; }
-	const StateMachineEdge *target0() const { return target; }
-	StateMachineEdge *target1() { return NULL; }
-	const StateMachineEdge *target1() const { return NULL; }
-	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const { return target->roughLoadCount(acc); }
+	void targets(std::vector<StateMachineEdge *> &out) { out.push_back(target); }
+	void targets(std::vector<const StateMachineEdge *> &out) const { out.push_back(target); }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const
 	{
 		target->sanityCheck(live, done);
 	}
-	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
-		if (stateMap.count(this))
-			return stateMap[this];
-		auto res = new StateMachineProxy(origin, target->clone(stateMap, edgeMap));
-		stateMap[this] = res;
-		return res;
-	}
 };
 
 class StateMachineBifurcate : public StateMachineState {
-	unsigned long _hashval() const {
-		return trueTarget->hashval() * 7 + 
-			falseTarget->hashval() * 11 +
-			condition->hashval() * 3;
-	}
 public:
 	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
@@ -661,20 +553,11 @@ public:
 	StateMachineEdge *trueTarget;
 	StateMachineEdge *falseTarget;
 
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
 		fprintf(f, "%s: if (", origin.name());
 		ppIRExpr(condition, f);
-		fprintf(f, ")\n  then {\n\t");
-		if (trueTarget)
-			trueTarget->prettyPrint(f, "\n\t", labels);
-		else
-			fprintf(f, "<NULL>\n\t");
-		fprintf(f, "}\n  else {\n\t");
-		if (falseTarget)
-			falseTarget->prettyPrint(f, "\n\t", labels);
-		else
-			fprintf(f, "<NULL>\n\t");
-		fprintf(f, "}");
+		fprintf(f, ") then l%d else l%d",
+			labels[trueTarget], labels[falseTarget]);
 	}
 	void visit(HeapVisitor &hv)
 	{
@@ -684,52 +567,17 @@ public:
 	}
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
 				    std::set<StateMachineState *> &);
-	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt)
-	{
-		std::set<IRExpr *> t;
-		trueTarget->findLoadedAddresses(t, opt);
-		falseTarget->findLoadedAddresses(s, opt);
-		/* Result is the union of the two branches */
-		for (std::set<IRExpr *>::iterator it = t.begin();
-		     it != t.end();
-		     it++)
-			s.insert(*it);
-	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt);
-	StateMachineState *selectSingleCrashingPath(std::set<StateMachineEdge *> &memo) {
-		trueTarget = trueTarget->selectSingleCrashingPath(memo);
-		falseTarget = falseTarget->selectSingleCrashingPath(memo);
-		std::vector<StateMachineEdge *> edgeMemo;
-		bool tCrash = trueTarget->canCrash(edgeMemo);
-		bool fCrash = falseTarget->canCrash(edgeMemo);
-		if (!tCrash && !fCrash) {
-			/* Bit of a hack: if we're definitely going to
-			   survive, just substitute this state with a
-			   survive state. */
-			return StateMachineNoCrash::get();
-		}
-		if (tCrash && fCrash) {
-			std::vector<StateMachineEdge *> path;
-			if (trueTarget->complexity(path) > falseTarget->complexity(path))
-				return new StateMachineProxy(origin, falseTarget);
-			else
-				return new StateMachineProxy(origin, trueTarget);
-		}
-		return this;
-	}
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
 		return trueTarget->canCrash(memo) || falseTarget->canCrash(memo);
 	}
-	int complexity(std::vector<StateMachineEdge *> &path) {
-		return trueTarget->complexity(path) + falseTarget->complexity(path) + exprComplexity(condition) + 50;
+	void targets(std::vector<StateMachineEdge *> &out) {
+		out.push_back(falseTarget);
+		out.push_back(trueTarget);
 	}
-	StateMachineEdge *target0() { return falseTarget; }
-	const StateMachineEdge *target0() const { return falseTarget; }
-	StateMachineEdge *target1() { return trueTarget; }
-	const StateMachineEdge *target1() const { return trueTarget; }
-	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const {
-		return trueTarget->roughLoadCount(
-			falseTarget->roughLoadCount(acc));
+	void targets(std::vector<const StateMachineEdge *> &out) const {
+		out.push_back(falseTarget);
+		out.push_back(trueTarget);
 	}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const
@@ -739,23 +587,11 @@ public:
 		trueTarget->sanityCheck(live, done);
 		falseTarget->sanityCheck(live, done);
 	}
-
-	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
-		if (stateMap.count(this))
-			return stateMap[this];
-		auto res = new StateMachineBifurcate(origin, condition,
-						     trueTarget->clone(stateMap, edgeMap),
-						     falseTarget->clone(stateMap, edgeMap));
-		stateMap[this] = res;
-		return res;
-	}
 };
 
 /* A node in the state machine representing a bit of code which we
    haven't explored yet. */
 class StateMachineStub : public StateMachineTerminal {
-	unsigned long _hashval() const { return target.hash(); }
 public:
 	VexRip target;
 
@@ -767,22 +603,12 @@ public:
 	}
 	void visit(HeapVisitor &hv) { }
 	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
-
-	StateMachineState *clone(std::map<const StateMachineState *, StateMachineState *> &stateMap,
-				 std::map<const StateMachineEdge *, StateMachineEdge *> &edgeMap) const {
-		if (stateMap.count(this))
-			return stateMap[this];
-		auto res = new StateMachineStub(origin, target);
-		stateMap[this] = res;
-		return res;
-	}
 };
 
 
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
 	StateMachineSideEffectUnreached() : StateMachineSideEffect(StateMachineSideEffect::Unreached) {}
-	unsigned long _hashval() const { return 0x91; }
 public:
 	static StateMachineSideEffectUnreached *get() {
 		if (!_this) _this = new StateMachineSideEffectUnreached();
@@ -793,7 +619,6 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
-	int complexity() { return 0; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
 };
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
@@ -816,7 +641,6 @@ public:
 	}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
-	unsigned long _hashval() const { return addr->hashval() * 223 + data->hashval() * 971; }
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const ThreadVexRip &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
@@ -838,7 +662,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(addr) * 2 + exprComplexity(data) + 20; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		sanityCheckIRExpr(data, live);
@@ -853,7 +676,6 @@ public:
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void constructed();
-	unsigned long _hashval() const { return addr->hashval() * 757 + target.hash() * 118409; }
 public:
 	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
@@ -883,7 +705,6 @@ public:
 		l.insert(addr);
 	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(addr) + 20; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		if (live)
@@ -891,7 +712,6 @@ public:
 	}
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
-	unsigned long _hashval() const { return value->hashval(); }
 public:
 	StateMachineSideEffectCopy(threadAndRegister k, IRExpr *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::Copy),
@@ -912,7 +732,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(value); }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 		if (live)
@@ -920,7 +739,6 @@ public:
 	}
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
-	unsigned long _hashval() const { return value->hashval(); }
 public:
 	StateMachineSideEffectAssertFalse(IRExpr *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
@@ -939,14 +757,12 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	int complexity() { return exprComplexity(value); }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 		assert(value->type() == Ity_I1);
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
-	unsigned long _hashval() const { return reg.hash(); }
 public:
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::set<unsigned> &_generations)
@@ -980,7 +796,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
-	int complexity() { return 100; }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		if (live)
 			live->insert(reg);
@@ -988,7 +803,7 @@ public:
 };
 
 void printStateMachine(const StateMachine *sm, FILE *f);
-void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels);
+void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineEdge *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
@@ -998,5 +813,46 @@ StateMachine *readStateMachine(int fd);
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
 				 const char **suffix);
+
+template <typename t> t
+pop(std::set<t> &x)
+{
+	auto it = x.begin();
+	if (it == x.end()) abort();
+	t res = *it;
+	x.erase(it);
+	return res;
+}
+
+template <typename stateType> void
+enumStatesAndEdges(StateMachine *sm,
+		   std::set<stateType *> *states,
+		   std::set<StateMachineEdge *> *edges)
+{
+	std::set<StateMachineState *> toVisit;
+	std::set<StateMachineState *> visited;
+
+	toVisit.insert(sm->root);
+	while (!toVisit.empty()) {
+		StateMachineState *s = pop(toVisit);
+		if (!visited.insert(s).second)
+			continue;
+		if (states) {
+			stateType *ss = dynamic_cast<stateType *>(s);
+			if (ss)
+				states->insert(ss);
+		}
+		if (edges) {
+			std::vector<StateMachineEdge *> targets;
+			s->targets(targets);
+			for (auto it = targets.begin(); it != targets.end(); it++) {
+				if (edges->insert(*it).second)
+					toVisit.insert((*it)->target);
+			}
+		} else {
+			s->targets(toVisit);
+		}
+	}
+}
 
 #endif /* !STATEMACHINE_HPP__ */

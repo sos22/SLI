@@ -491,14 +491,6 @@ addOrderingConstraint(ThreadVexRip before,
 				       opt);
 }
 
-static void evalStateMachine(StateMachine *rootMachine,
-			     StateMachineState *sm,
-			     bool *crashes,
-			     NdChooser &chooser,
-			     Oracle *oracle,
-			     const AllowableOptimisations &opt,
-			     StateMachineEvalContext &ctxt);
-
 static bool
 evalStateMachineSideEffect(StateMachine *thisMachine,
 			   StateMachineSideEffect *smse,
@@ -672,14 +664,14 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	return true;
 }
 
-static void
-evalStateMachineEdge(StateMachine *thisMachine,
-		     StateMachineEdge *sme,
-		     bool *crashes,
-		     NdChooser &chooser,
-		     Oracle *oracle,
-		     const AllowableOptimisations &opt,
-		     StateMachineEvalContext &ctxt)
+static bool
+smallStepEvalStateMachineEdge(StateMachine *thisMachine,
+			      StateMachineEdge *sme,
+			      bool *crashes,
+			      NdChooser &chooser,
+			      Oracle *oracle,
+			      const AllowableOptimisations &opt,
+			      StateMachineEvalContext &ctxt)
 {
 	bool valid = true;
 	for (std::vector<StateMachineSideEffect *>::iterator it = sme->sideEffects.begin();
@@ -700,9 +692,9 @@ evalStateMachineEdge(StateMachine *thisMachine,
 		   therefore treat that as no-crash and abort the
 		   run. */
 		*crashes = false;
-		return;
+		return true;
 	}
-	evalStateMachine(thisMachine, sme->target, crashes, chooser, oracle, opt, ctxt);
+	return false;
 }
 
 /* Walk the state machine and figure out whether it's going to crash.
@@ -710,51 +702,77 @@ evalStateMachineEdge(StateMachine *thisMachine,
    oracle, ask the chooser which way we should go, and then emit a
    path constraint saying which way we went.  Stubs are assumed to
    never crash. */
-static void
-evalStateMachine(StateMachine *rootMachine,
-		 StateMachineState *sm,
-		 bool *crashes,
-		 NdChooser &chooser,
-		 Oracle *oracle,
-		 const AllowableOptimisations &opt,
-		 StateMachineEvalContext &ctxt)
+static StateMachineEdge *
+smallStepEvalStateMachine(StateMachine *rootMachine,
+			  StateMachineState *sm,
+			  bool *crashes,
+			  NdChooser &chooser,
+			  Oracle *oracle,
+			  const AllowableOptimisations &opt,
+			  StateMachineEvalContext &ctxt)
 {
 	if (TIMEOUT) {
 		*crashes = false; /* Lacking any better ideas */
-		return;
+		return NULL;
 	}
 
 	if (dynamic_cast<StateMachineCrash *>(sm)) {
 		*crashes = true;
-		return;
+		return NULL;
 	}
 	if (dynamic_cast<StateMachineNoCrash *>(sm) ||
 	    dynamic_cast<StateMachineStub *>(sm)) {
 		*crashes = false;
-		return;
+		return NULL;
 	}
-	if (StateMachineProxy *smp =
-	    dynamic_cast<StateMachineProxy *>(sm)) {
-		evalStateMachineEdge(rootMachine, smp->target, crashes, chooser, oracle, opt, ctxt);
-		return;
-	}
+	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
+		return smp->target;
 	if (StateMachineBifurcate *smb =
 	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		if (expressionIsTrue(smb->condition, chooser, ctxt.state, opt, &ctxt.pathConstraint, &ctxt.justPathConstraint)) {
-			evalStateMachineEdge(rootMachine, smb->trueTarget, crashes, chooser, oracle, opt, ctxt);
-		} else {
-			evalStateMachineEdge(rootMachine, smb->falseTarget, crashes, chooser, oracle, opt, ctxt);
-		}
-		return;
+		if (expressionIsTrue(smb->condition, chooser, ctxt.state, opt, &ctxt.pathConstraint, &ctxt.justPathConstraint))
+			return smb->trueTarget;
+		else
+			return smb->falseTarget;
 	}
 	if (dynamic_cast<StateMachineUnreached *>(sm)) {
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
 		*crashes = false;
-		return;
+		return NULL;
 	}
 
 	abort();
+}
+
+static void
+bigStepEvalStateMachine(StateMachine *rootMachine,
+			StateMachineState *sm,
+			bool *crashes,
+			NdChooser &chooser,
+			Oracle *oracle,
+			const AllowableOptimisations &opt,
+			StateMachineEvalContext &ctxt)
+{
+	while (1) {
+		StateMachineEdge *e = smallStepEvalStateMachine(rootMachine,
+								sm,
+								crashes,
+								chooser,
+								oracle,
+								opt,
+								ctxt);
+		if (!e)
+			return;
+		if (smallStepEvalStateMachineEdge(rootMachine,
+						  e,
+						  crashes,
+						  chooser,
+						  oracle,
+						  opt,
+						  ctxt))
+			return;
+		sm = e->target;
+	}
 }
 
 /* Assume that @sm executes atomically.  Figure out a constraint on
@@ -777,7 +795,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
-		evalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
+		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
 		if (crashes) {
 			/* This path leads to a crash, so the
 			   constraint should include something to make
@@ -827,7 +845,7 @@ writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 		   confuse the ND chooser. */
 		ctxt.pathConstraint = assumption;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		evalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
+		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
 
 		if (!crashes) {
 			/* Survival should be pretty rare here, and
@@ -895,7 +913,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = assumption;
-		evalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
+		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
 		if (crashes)
 			*mightCrash = true;
 		else
@@ -1182,53 +1200,36 @@ writeMachineSuitabilityConstraint(
 
 		LibVEX_maybe_gc(token);
 
-		memLogT memLog;
-		threadState writerState;
+		StateMachineEvalContext writerCtxt;
+
 		StateMachineEdge *writerEdge;
-		IRExpr *pathConstraint;
-		IRExpr *thisTimeConstraint;
 		bool writer_failed = false;
 
-		pathConstraint = assumption;
+		writerCtxt.pathConstraint = assumption;
+		writerCtxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
 		writerEdge = writeStartEdge;
-		thisTimeConstraint = IRExpr_Const(IRConst_U1(1));
 		while (!writer_failed) {
-			for (unsigned i = 0; !writer_failed && !TIMEOUT && i < writerEdge->sideEffects.size(); i++) {
-				if (!evalStateMachineSideEffect(writeMachine,
-								writerEdge->sideEffects[i],
-								chooser,
-								oracle,
-								writerState,
-								memLog,
-								false,
-								opt,
-								&pathConstraint,
-								&thisTimeConstraint)) {
-					/* There's no way the writer
-					 * could actually get here.
-					 * Get out */
-					writer_failed = true;
-				}
-			}
-
-			StateMachineState *s = writerEdge->target;
-			if (writer_failed ||
-			    dynamic_cast<StateMachineCrash *>(s) ||
-			    dynamic_cast<StateMachineNoCrash *>(s) ||
-			    dynamic_cast<StateMachineStub *>(s)) {
-				/* Hit end of writer */
+			bool c;
+			if (smallStepEvalStateMachineEdge(writeMachine,
+							  writerEdge,
+							  &c,
+							  chooser,
+							  oracle,
+							  opt,
+							  writerCtxt)) {
+				writer_failed = true;
 				break;
-			} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
-				writerEdge = smp->target;
-			} else {
-				StateMachineBifurcate *smb =
-					dynamic_cast<StateMachineBifurcate *>(s);
-				assert(smb);
-				if (expressionIsTrue(smb->condition, chooser, writerState, opt, &pathConstraint, &thisTimeConstraint))
-					writerEdge = smb->trueTarget;
-				else
-					writerEdge = smb->falseTarget;
 			}
+			writerEdge = smallStepEvalStateMachine(
+				writeMachine,
+				writerEdge->target,
+				&c,
+				chooser,
+				oracle,
+				opt,
+				writerCtxt);
+			if (!writerEdge)
+				break;
 		}
 
 		if (!writer_failed) {
@@ -1241,12 +1242,9 @@ writeMachineSuitabilityConstraint(
 			 * points. */
 			NdChooser read_chooser;
 			do {
-				StateMachineEvalContext readEvalCtxt;
-				readEvalCtxt.pathConstraint = pathConstraint;
-				readEvalCtxt.memLog = memLog;
-				readEvalCtxt.justPathConstraint = thisTimeConstraint;
+				StateMachineEvalContext readEvalCtxt = writerCtxt;
 				bool crashes;
-				evalStateMachine(readMachine, readMachine->root, &crashes, read_chooser, oracle, opt, readEvalCtxt);
+				bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, read_chooser, oracle, opt, readEvalCtxt);
 				if (crashes) {
 					/* We get a crash if we
 					   evaluate the read machine
@@ -1311,18 +1309,16 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		LibVEX_maybe_gc(token);
 
-		memLogT storesIssuedByWriter;
-		threadState writerState;
+		StateMachineEvalContext writerContext;
 		StateMachineEdge *writerEdge;
 		unsigned writeEdgeIdx;
-		IRExpr *pathConstraint;
 		StateMachineSideEffectStore *sectionStart;
 		bool finished;
 		StateMachineSideEffectStore *smses;
 		bool writer_failed;
 
+		writerContext.pathConstraint = assumption;
 		writeEdgeIdx = 0;
-		pathConstraint = assumption;
 		writerEdge = writeStartEdge;
 		sectionStart = NULL;
 		finished = false;
@@ -1336,7 +1332,15 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 				/* Yes, move to the next state. */
 				StateMachineState *s = writerEdge->target;
 				assert(!dynamic_cast<StateMachineUnreached *>(s));
-				if (dynamic_cast<StateMachineTerminal *>(s)) {
+				bool c;
+				writerEdge = smallStepEvalStateMachine(writeMachine,
+								       s,
+								       &c,
+								       chooser,
+								       oracle,
+								       opt,
+								       writerContext);
+				if (!writerEdge) {
 					/* Hit the end of the writer
 					 * -> we're done. */
 					/* Note that we need to
@@ -1374,19 +1378,6 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 					finished = true;
 					goto eval_read_machine;
 				}
-				if (StateMachineProxy *smp =
-				    dynamic_cast<StateMachineProxy *>(s)) {
-					writerEdge = smp->target;
-					writeEdgeIdx = 0;
-					continue;
-				}
-				StateMachineBifurcate *smb =
-					dynamic_cast<StateMachineBifurcate *>(s);
-				assert(smb);
-				if (expressionIsTrue(smb->condition, chooser, writerState, opt, &pathConstraint, NULL))
-					writerEdge = smb->trueTarget;
-				else
-					writerEdge = smb->falseTarget;
 				writeEdgeIdx = 0;
 				continue;				
 			}
@@ -1398,7 +1389,12 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, opt, &pathConstraint, NULL)) {
+			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
+							writerContext.state,
+							writerContext.memLog,
+							false, opt,
+							&writerContext.pathConstraint,
+							NULL)) {
 				writer_failed = true;
 				break;
 			}
@@ -1418,11 +1414,10 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   need a fresh eval ctxt and a fresh copy of
 			   the stores list every time around the
 			   loop. */
-			StateMachineEvalContext readEvalCtxt;
-			readEvalCtxt.pathConstraint = pathConstraint;
-			readEvalCtxt.memLog = storesIssuedByWriter;
+			StateMachineEvalContext readEvalCtxt = writerContext;
 			bool crashes;
-			evalStateMachine(readMachine, readMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
+			bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, chooser,
+						oracle, opt, readEvalCtxt);
 			if (crashes) {
 				if (!sectionStart) {
 					/* The previous attempt at
@@ -1476,44 +1471,33 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 		LibVEX_maybe_gc(token);
 
-		memLogT storesIssuedByWriter;
-		threadState writerState;
+		StateMachineEvalContext writeContext;
 		StateMachineEdge *writerEdge;
 		unsigned writeEdgeIdx;
-		IRExpr *pathConstraint;
 		std::set<StateMachineSideEffectStore *> incompleteSections;
 
 		writeEdgeIdx = 0;
-		pathConstraint = assumption;
+		writeContext.pathConstraint = assumption;
 		writerEdge = writeStartEdge;
 		while (!TIMEOUT) {
 			/* Have we hit the end of the current writer edge? */
 			if (writeEdgeIdx == writerEdge->sideEffects.size()) {
 				/* Yes, move to the next state. */
-				StateMachineState *s = writerEdge->target;
-				assert(!dynamic_cast<StateMachineUnreached *>(s));
-				if (dynamic_cast<StateMachineCrash *>(s) ||
-				    dynamic_cast<StateMachineNoCrash *>(s) ||
-				    dynamic_cast<StateMachineStub *>(s)) {
+				bool c;
+				writerEdge = smallStepEvalStateMachine(writeMachine,
+								       writerEdge->target,
+								       &c,
+								       chooser,
+								       oracle,
+								       opt,
+								       writeContext);
+				if (!writerEdge) {
 					/* Hit the end of the writer
 					 * -> we're done. */
 					break;
 				}
-				if (StateMachineProxy *smp =
-				    dynamic_cast<StateMachineProxy *>(s)) {
-					writerEdge = smp->target;
-					writeEdgeIdx = 0;
-					continue;
-				}
-				StateMachineBifurcate *smb =
-					dynamic_cast<StateMachineBifurcate *>(s);
-				assert(smb);
-				if (expressionIsTrue(smb->condition, chooser, writerState, opt, &pathConstraint, NULL))
-					writerEdge = smb->trueTarget;
-				else
-					writerEdge = smb->falseTarget;
 				writeEdgeIdx = 0;
-				continue;				
+				continue;
 			}
 
 			/* Advance the writer by one state.  Note that
@@ -1523,7 +1507,10 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			   no-crash. */
 			StateMachineSideEffect *se;
 			se = writerEdge->sideEffects[writeEdgeIdx];
-			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerState, storesIssuedByWriter, false, opt, &pathConstraint, NULL)) {
+			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
+							writeContext.state,
+							writeContext.memLog, false, opt,
+							&writeContext.pathConstraint, NULL)) {
 				/* Contradiction in the writer -> give
 				 * up. */
 				break;
@@ -1555,11 +1542,9 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			/* The writer just issued a store and is not
 			   in a critical section, so we should now try
 			   running the reader atomically.  */
-			StateMachineEvalContext readEvalCtxt;
-			readEvalCtxt.pathConstraint = pathConstraint;
-			readEvalCtxt.memLog = storesIssuedByWriter;
+			StateMachineEvalContext readEvalCtxt = writeContext;
 			bool crashes;
-			evalStateMachine(probeMachine, probeMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
+			bigStepEvalStateMachine(probeMachine, probeMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
 			if (crashes) {
 				fprintf(_logfile, "Fix is insufficient, witness: ");
 				ppIRExpr(readEvalCtxt.pathConstraint, _logfile);

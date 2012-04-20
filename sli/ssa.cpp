@@ -11,16 +11,6 @@ namespace SSA {
 }
 #endif
 
-template <typename t> static t
-pop(std::set<t> &x)
-{
-	auto it = x.begin();
-	if (it == x.end()) abort();
-	t res = *it;
-	x.erase(it);
-	return res;
-}
-
 static bool
 sideEffectDefinesReg(const StateMachineSideEffect *se, const threadAndRegister &reg)
 {
@@ -112,40 +102,13 @@ public:
 static void
 enumAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 {
-	std::set<StateMachineState *> toVisit;
-	toVisit.insert(sm->root);
-	while (!toVisit.empty()) {
-		StateMachineState *s = pop(toVisit);
-		if (out.count(s))
-			continue;
-		out.insert(s);
-		if (s->target0())
-			toVisit.insert(s->target0()->target);
-		if (s->target1())
-			toVisit.insert(s->target1()->target);
-	}
+	enumStatesAndEdges(sm, &out, NULL);
 }
 
 static void
 enumAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out)
 {
-	std::set<StateMachineState *> toVisit;
-	toVisit.insert(sm->root);
-	while (!toVisit.empty()) {
-		StateMachineState *s = pop(toVisit);
-		if (s->target0()) {
-			if (!out.count(s->target0())) {
-				toVisit.insert(s->target0()->target);
-				out.insert(s->target0());
-			}
-		}
-		if (s->target1()) {
-			if (!out.count(s->target1())) {
-				toVisit.insert(s->target1()->target);
-				out.insert(s->target1());
-			}
-		}
-	}
+	enumStatesAndEdges(sm, (std::set<StateMachineState *> *)NULL, &out);
 }
 
 PossiblyReaching::PossiblyReaching(StateMachine *inp, const ImportRegTable &r)
@@ -180,25 +143,10 @@ PossiblyReaching::PossiblyReaching(StateMachine *inp, const ImportRegTable &r)
 	}
 
 	/* Now build the reaching-side-effect table */
-	std::set<StateMachineState *> toVisit;
-	std::set<StateMachineState *> visited;
-	toVisit.insert(inp->root);
-	while (!toVisit.empty()) {
-		if (TIMEOUT)
-			return;
-		StateMachineState *s = pop(toVisit);
-		if (visited.count(s))
-			continue;
-		visited.insert(s);
-		if (s->target0()) {
-			buildSideEffectTable(s->target0());
-			toVisit.insert(s->target0()->target);
-		}
-		if (s->target1()) {
-			buildSideEffectTable(s->target1());
-			toVisit.insert(s->target1()->target);
-		}
-	}
+	std::set<StateMachineEdge *> allEdges;
+	enumAllEdges(inp, allEdges);
+	for (auto it = allEdges.begin(); it != allEdges.end(); it++)
+		buildSideEffectTable(*it);
 }
 
 void
@@ -215,10 +163,10 @@ PossiblyReaching::updateStateReaching(StateMachineState *state, std::set<StateMa
 		}
 	} updateEdge;
 	std::set<StateMachineSideEffect *> &reachingThisState(effectsReachingState(state));
-	if (state->target0())
-		updateEdge(state->target0(), reachingThisState, needsUpdate, this);
-	if (state->target1())
-		updateEdge(state->target1(), reachingThisState, needsUpdate, this);
+	std::vector<StateMachineEdge *> targets;
+	state->targets(targets);
+	for (auto it = targets.begin(); it != targets.end(); it++)
+		updateEdge(*it, reachingThisState, needsUpdate, this);
 }
 
 static void
@@ -576,29 +524,15 @@ useSsaVars(StateMachine *inp, PossiblyReaching &reaching, bool *needPhiEdges,
 			: needPhiEdges(_needPhiEdges), needPhiStates(_needPhiStates)
 		{}
 	} worker(needPhiEdges, needPhiStates);
-	toVisit.insert(inp->root);
-	while (!TIMEOUT && !toVisit.empty()) {
-		auto it = toVisit.begin();
-		StateMachineState *s = *it;
-		toVisit.erase(it);
-		if (visited.count(s))
-			continue;
-		visited.insert(s);
 
-		if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s))
-			smb->condition = worker.doExprInState(reaching.effectsReachingState(s), smb->condition);
-
-		if (s->target0()) {
-			worker.doEdge(reaching.effectsReachingEdge(s->target0()),
-				      s->target0());
-			toVisit.insert(s->target0()->target);
-		}
-		if (s->target1()) {
-			worker.doEdge(reaching.effectsReachingEdge(s->target1()),
-				      s->target1());
-			toVisit.insert(s->target1()->target);
-		}
-	}
+	std::set<StateMachineBifurcate *> bifurcations;
+	std::set<StateMachineEdge *> edges;
+	enumStatesAndEdges(inp, &bifurcations, &edges);
+	for (auto it = bifurcations.begin(); it != bifurcations.end(); it++)
+		(*it)->condition = worker.doExprInState(reaching.effectsReachingState(*it),
+							(*it)->condition);
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		worker.doEdge(reaching.effectsReachingEdge(*it), *it);
 }
 
 static void
@@ -661,43 +595,32 @@ introducePhiEdges(StateMachine *inp,
 	std::set<StateMachineState *> visitedStates;
 	std::set<StateMachineState *> toVisitStates;
 
-	toVisitStates.insert(inp->root);
-	while (!TIMEOUT &&
-	       (!toVisitStates.empty() ||
-		!toVisitEdges.empty())) {
-		while (!TIMEOUT && !toVisitStates.empty()) {
-			StateMachineState *s = pop(toVisitStates);
-			if (visitedStates.count(s))
+	/* Careful here: we care quite a lot about the *order* in
+	   which we discover edges (those near the root must be
+	   discovered first), so we can't just use enumAllEdges. */
+	inp->root->targets(toVisitEdges);
+	while (!TIMEOUT && !toVisitEdges.empty()) {
+		StateMachineEdge *e = pop(toVisitEdges);
+		for (unsigned x = 0; x < e->sideEffects.size(); x++) {
+			std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
+			findNeededRegisters(e->sideEffects[x], needed);
+			if (needed.empty())
 				continue;
-			visitedStates.insert(s);
-			if (s->target0())
-				toVisitEdges.insert(s->target0());
-			if (s->target1())
-				toVisitEdges.insert(s->target1());
-		}
-		while (!TIMEOUT && !toVisitEdges.empty()) {
-			StateMachineEdge *e = pop(toVisitEdges);
-			for (unsigned x = 0; x < e->sideEffects.size(); x++) {
-				std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
-				findNeededRegisters(e->sideEffects[x], needed);
-				if (needed.empty())
+			if (TIMEOUT)
+				break;
+			for (auto it2 = needed.begin();
+			     it2 != needed.end();
+			     it2++) {
+				if (introduced.count(*it2))
 					continue;
-				if (TIMEOUT)
-					break;
-				for (auto it2 = needed.begin();
-				     it2 != needed.end();
-				     it2++) {
-					if (introduced.count(*it2))
-						continue;
-					e->sideEffects.insert(
-						e->sideEffects.begin() + x,
-						allocateSsaVariable.newPhi(*it2, e->sideEffects[x]));
-					x++;
-					introduced.insert(*it2);
-				}
+				e->sideEffects.insert(
+					e->sideEffects.begin() + x,
+					allocateSsaVariable.newPhi(*it2, e->sideEffects[x]));
+				x++;
+				introduced.insert(*it2);
 			}
-			toVisitStates.insert(e->target);
 		}
+		e->target->targets(toVisitEdges);
 	}
 }
 
@@ -728,23 +651,10 @@ introducePhiStates(StateMachine *inp,
 		}
 	public:
 		PredecessorMap(StateMachine *inp) {
-			std::set<StateMachineState *> visited;
-			std::set<StateMachineState *> toVisit;
-			toVisit.insert(inp->root);
-			while (!toVisit.empty()) {
-				StateMachineState *s = pop(toVisit);
-				if (visited.count(s))
-					continue;
-				visited.insert(s);
-				if (s->target0()) {
-					discoverEdge(s->target0());
-					toVisit.insert(s->target0()->target);
-				}
-				if (s->target1()) {
-					discoverEdge(s->target1());
-					toVisit.insert(s->target1()->target);
-				}
-			}
+			std::set<StateMachineEdge *> allEdges;
+			enumAllEdges(inp, allEdges);
+			for (auto it = allEdges.begin(); it != allEdges.end(); it++)
+				discoverEdge(*it);
 		}
 	} predecessorMap(inp);
 	
@@ -790,22 +700,10 @@ introducePhiStates(StateMachine *inp,
 	/* Figure out where we need to put our Phi nodes.  If the
 	   state has a well-defined predecessor, insert it; otherwise,
 	   add it to needPredecessors. */
-	std::set<StateMachineState *> visited;
-	std::set<StateMachineState *> toVisit;
-	toVisit.insert(inp->root);
-	while (!TIMEOUT && !toVisit.empty()) {
-		StateMachineState *s = pop(toVisit);
-		if (visited.count(s))
-			continue;
-		visited.insert(s);
-
-		if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s))
-			addPhiNodes(smb->condition, smb);
-		if (s->target0())
-			toVisit.insert(s->target0()->target);
-		if (s->target1())
-			toVisit.insert(s->target1()->target);
-	}
+	std::set<StateMachineBifurcate *> smbs;
+	enumStatesAndEdges(inp, &smbs, NULL);
+	for (auto it = smbs.begin(); it != smbs.end(); it++)
+		addPhiNodes((*it)->condition, *it);
 
 	if (!TIMEOUT && introduced.empty()) {
 		/* We didn't manage to introduce any new phis.  That
@@ -815,26 +713,12 @@ introducePhiStates(StateMachine *inp,
 		StateMachineState *existing = pop(needPredecessors);
 		StateMachineState *replacement =
 			new StateMachineProxy(existing->origin, existing);
-		/* And now iterate to insert that state. */
-		visited.clear();
-		visited.insert(replacement);
-		toVisit.insert(inp->root);
-		while (!TIMEOUT && !toVisit.empty()) {
-			StateMachineState *s = pop(toVisit);
-			if (visited.count(s))
-				continue;
-			visited.insert(s);
-			if (s->target0()) {
-				toVisit.insert(s->target0()->target);
-				if (s->target0()->target == existing)
-					s->target0()->target = replacement;
-			}
-			if (s->target1()) {
-				toVisit.insert(s->target1()->target);
-				if (s->target1()->target == existing)
-					s->target1()->target = replacement;
-			}
-		}
+		/* Perform the replacement. */
+		std::set<StateMachineEdge *> allEdges;
+		enumAllEdges(inp, allEdges);
+		for (auto it = allEdges.begin(); it != allEdges.end(); it++)
+			if ( (*it)->target == existing )
+				(*it)->target = replacement;
 	}
 }
 

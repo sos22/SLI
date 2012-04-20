@@ -326,84 +326,6 @@ optimise_condition_calculation(
 	return res;
 }
 
-/* Wherever we have a choice as to the ordering of an expression's
-   sub-expressions, we sort them into ascending order of complexity,
-   where complexity is defined by this function.  The main requirement
-   is that if both x and -x occur in the argument list, x will occur
-   before -x. */
-/* If two expressions have the same complexity, we use a lexicographic
-   ordering to distinguish them. */
-int
-exprComplexity(const IRExpr *e)
-{
-	class _ : public IRExprTransformer {
-	public:
-		int res;
-		_() : res(0) {}
-		IRExpr *transformIex(IRExprGet *e) {
-			res += 20;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprGetI *e) {
-			res += 20;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprQop *e) {
-			res += 10;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprTriop *e) {
-			res += 10;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprBinop *e) {
-			res += 10;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprUnop *e) {
-			res += 10;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprLoad *e) {
-			res += 10;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprConst *e) {
-			return NULL;
-		}
-		IRExpr *transformIex(IRExprMux0X *e) {
-			res += 10;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprCCall *e) {
-			res += 50;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprAssociative *e) {
-			res += 10;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprFreeVariable *e) {
-			res += 100;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprClientCall *e) {
-			res += 100;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprClientCallFailed *e) {
-			res += 1000;
-			return IRExprTransformer::transformIex(e);
-		}
-		IRExpr *transformIex(IRExprHappensBefore *e) {
-			res += 100;
-			return IRExprTransformer::transformIex(e);
-		}
-	} t;
-	t.doit((IRExpr *)e);
-	return t.res;
-}
-
 class sort_ordering {
 public:
 	enum _val {
@@ -1173,6 +1095,16 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			break;
 		}
 		break;
+	case Ity_V128:
+		switch (desiredType) {
+		case Ity_F64:
+			return IRExpr_Unop(Iop_ReinterpI64asF64,
+					   IRExpr_Unop(Iop_V128to64, expr));
+		case Ity_V128:
+			return expr;
+		default:
+			break;
+		}
 	default:
 		break;
 	}
@@ -1440,7 +1372,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			/* x + -x -> 0, for any plus-like operator, so remove
 			 * both x and -x from the list. */
 			/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
-			if (opt.xPlusMinusX) {
+			{
 				__set_profiling(optimise_assoc_xplusminusx);
 				bool plus_like;
 				bool and_like;
@@ -1471,7 +1403,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 									purge = false;
 								}
 								if (purge)
-									purge = l == ((IRExprUnop *)r)->arg;
+									purge = physicallyEqual(l, ((IRExprUnop *)r)->arg);
 							} else if (and_like) {
 								if (r->tag == Iex_Unop) {
 									IROp op = ((IRExprUnop *)r)->op;
@@ -1481,10 +1413,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 								} else
 									purge = false;
 								if (purge)
-									purge = l == ((IRExprUnop *)r)->arg;
+									purge = physicallyEqual(l, ((IRExprUnop *)r)->arg);
 							} else {
 								assert(xor_like);
-								purge = l == r;
+								purge = physicallyEqual(l, r);
 							}
 
 							if (purge) {
@@ -1874,7 +1806,10 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			/* If, in a == b, a and b are physically
 			 * identical, the result is a constant 1. */
 			if ( (e->op == Iop_CmpEQ1 ||
+			      e->op == Iop_CmpEQF32 ||
+			      e->op == Iop_CmpEQF64 ||
 			      e->op == Iop_CmpEQI128 ||
+			      e->op == Iop_CmpEQV128 ||
 			      (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64)) &&
 			     physicallyEqual(l, r) ) {
 				*done_something = true;

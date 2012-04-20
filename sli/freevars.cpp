@@ -57,16 +57,10 @@ nrAliasingLoads(StateMachineState *sm,
 	if (visited.count(sm))
 		return;
 	visited.insert(sm);
-	if (sm->target0())
-		nrAliasingLoads(sm->target0(),
-				smsel,
-				alias,
-				opt,
-				out,
-				visited,
-				oracle);
-	if (sm->target1())
-		nrAliasingLoads(sm->target1(),
+	std::vector<StateMachineEdge *> edges;
+	sm->targets(edges);
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		nrAliasingLoads(*it,
 				smsel,
 				alias,
 				opt,
@@ -146,20 +140,16 @@ definitelyNoSatisfyingStores(StateMachineState *sm,
 			     bool haveAliasingStore,
 			     Oracle *oracle)
 {
-	if (sm->target0() && !definitelyNoSatisfyingStores(sm->target0(),
-							   smsel,
-							   alias,
-							   opt,
-							   haveAliasingStore,
-							   oracle))
-		return false;
-	if (sm->target1() && !definitelyNoSatisfyingStores(sm->target1(),
-							   smsel,
-							   alias,
-							   opt,
-							   haveAliasingStore,
-							   oracle))
-		return false;
+	std::vector<StateMachineEdge *> edges;
+	sm->targets(edges);
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		if (!definitelyNoSatisfyingStores(*it,
+						  smsel,
+						  alias,
+						  opt,
+						  haveAliasingStore,
+						  oracle))
+			return false;
 	return true;
 }
 static bool definitelyNoSatisfyingStores(StateMachine *sm,

@@ -43,10 +43,7 @@ public:
 			contentE.clear();
 			StateMachineState *s = e->target;
 			assert(s);
-			if (s->target0())
-				contentE.insert(s->target0());
-			if (s->target1())
-				contentE.insert(s->target1());
+			s->targets(contentE);
 			if (contentE.count(e))
 				res.haveCycle = true;
 		}
@@ -88,10 +85,7 @@ reachabilityMap::buildEdgeList(StateMachine *s)
 		StateMachineState *s = e->target;
 		assert(s);
 
-		if (s->target0())
-			q.push(s->target0());
-		if (s->target1())
-			q.push(s->target1());
+		s->targets(q);
 	}
 }
 
@@ -129,11 +123,10 @@ reachabilityMap::extendPaths(void)
 		} doEdge;
 		assert(e->target);
 		StateMachineState *s = e->target;
-		if (s->target0())
-			doEdge(this, reachableByUs, e, s->target0(), haveCycle,
-			       progress);
-		if (s->target1())
-			doEdge(this, reachableByUs, e, s->target1(), haveCycle,
+		std::vector<StateMachineEdge *> edges;
+		s->targets(edges);
+		for (auto it = edges.begin(); it != edges.end(); it++)
+			doEdge(this, reachableByUs, e, *it, haveCycle,
 			       progress);
 	}
 

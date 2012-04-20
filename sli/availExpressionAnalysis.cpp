@@ -468,7 +468,7 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *aliasing,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineState *, int> &stateLabels
+	std::map<const StateMachineEdge *, int> &edgeLabels
 	);
 static StateMachineEdge *
 buildNewStateMachineWithLoadsEliminated(
@@ -480,20 +480,20 @@ buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *aliasing,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineState *, int> &stateLabels
+	std::map<const StateMachineEdge *, int> &edgeLabels
 )
 {
 	if (TIMEOUT)
 		return sme;
 	StateMachineEdge *res =
 		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
-									     done_something, stateLabels));
+									     done_something, edgeLabels));
 
 	avail_t currentlyAvailable(initialAvail);
 	currentlyAvailable.calcRegisterMap(opt);
 
 	if (debug_substitutions) {
-		printf("Looking at edge to state %d\n", stateLabels[sme->target]);
+		printf("Looking at edge %d\n", edgeLabels[sme]);
 		printf("Available:\n");
 		currentlyAvailable.print(stdout);
 	}
@@ -638,7 +638,7 @@ buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineState *, int> &stateLabels)
+	std::map<const StateMachineEdge *, int> &edgeLabels)
 {
 	if (dynamic_cast<StateMachineCrash *>(sm) ||
 	    dynamic_cast<StateMachineNoCrash *>(sm) ||
@@ -665,10 +665,10 @@ buildNewStateMachineWithLoadsEliminated(
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
 			smb->trueTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something, stateLabels);
+			done_something, edgeLabels);
 		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
 			smb->falseTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something, stateLabels);
+			done_something, edgeLabels);
 		return res;
 	} if (StateMachineProxy *smp =
 	      dynamic_cast<StateMachineProxy *>(sm)) {
@@ -677,7 +677,7 @@ buildNewStateMachineWithLoadsEliminated(
 		memo[sm] = res;
 		res->target = buildNewStateMachineWithLoadsEliminated(
 			smp->target, avail, availMap, memo, opt, alias, oracle,
-			done_something, stateLabels);
+			done_something, edgeLabels);
 		return res;
 	} else {
 		abort();
@@ -692,12 +692,12 @@ buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineState *, int> &stateLabels)
+	std::map<const StateMachineEdge *, int> &edgeLabels)
 {
 	std::map<StateMachineState *, StateMachineState *> memo;
 	bool d = false;
 	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(sm->root, availMap, memo, opt, alias, oracle,
-									      &d, stateLabels);
+									      &d, edgeLabels);
 	if (d) {
 		*done_something = true;
 		return new StateMachine(sm, sm->origin, new_root);
@@ -748,10 +748,10 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
 			bool *done_something)
 {
-	std::map<const StateMachineState *, int> stateLabels;
+	std::map<const StateMachineEdge *, int> edgeLabels;
 	if (dump_avail_table || debug_build_table || debug_substitutions) {
 		printf("Avail analysis on state machine:\n");
-		printStateMachine(sm, stdout, stateLabels);
+		printStateMachine(sm, stdout, edgeLabels);
 	}
 
 	__set_profiling(availExpressionAnalysis);
@@ -794,11 +794,11 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	availOnEntry[sm->root].clear();
 
 	if (debug_build_table) {
-		printf("Initial state entry availability map:\n");
-		for (auto it = availOnEntry.begin();
-		     it != availOnEntry.end();
+		printf("Initial state exit availability map:\n");
+		for (auto it = availOnExit.begin();
+		     it != availOnExit.end();
 		     it++) {
-			printf("State %d:\n", stateLabels[it->first]);
+			printf("Edge %d:\n", edgeLabels[it->first]);
 			it->second.print(stdout);
 		}
 	}
@@ -824,9 +824,6 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		for (std::set<StateMachineState *>::iterator it = statesNeedingRefresh.begin();
 		     it != statesNeedingRefresh.end();
 		     it++) {
-			if (debug_build_table)
-				printf("Refresh state %d\n",
-				       stateLabels[*it]);
 			if (dynamic_cast<StateMachineCrash *>(*it) ||
 			    dynamic_cast<StateMachineNoCrash *>(*it) ||
 			    dynamic_cast<StateMachineStub *>(*it) ||
@@ -852,8 +849,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				avail_t outputAvail(availOnEntry[*it]);
 
 				if (debug_build_table)
-					printf("Consider edge %d -> state %d\n", x,
-					       stateLabels[edge->target]);
+					printf("Consider edge %d\n", edgeLabels[edge]);
 #warning Why not introduce an assertion on the relevant edge?
 
 				/* Build the output set. */
@@ -865,7 +861,8 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 								    opt, alias, oracle);
 				if (availOnExit[edge].intersect(outputAvail, opt)) {
 					if (debug_build_table)
-						printf("Made progress\n");
+						printf("Made progress; edge %d needs refresh\n",
+						       edgeLabels[edge]);
 					edgesNeedingRefresh.insert(edge);
 				} else if (debug_build_table) {
 					printf("State is unchanged\n");
@@ -886,42 +883,36 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		     it != edgesNeedingRefresh.end();
 		     it++) {
 			StateMachineEdge *edge = *it;
+			if (debug_build_table)
+				printf("Refresh edge %d\n",
+				       edgeLabels[*it]);
 			StateMachineState *target = edge->target;
 			avail_t &avail_at_end_of_edge(availOnExit[edge]);
 			avail_t &avail_at_start_of_target(availOnEntry[target]);
-			if (avail_at_start_of_target.intersect(avail_at_end_of_edge, opt)) {
+			if (avail_at_start_of_target.intersect(avail_at_end_of_edge, opt))
 				statesNeedingRefresh.insert(target);
-				if (debug_build_table)
-					printf("Mark state %d as needing refresh\n",
-					       stateLabels[target]);
-			}
 		}
 		edgesNeedingRefresh.clear();
 
 		if (debug_build_table) {
-			printf("state entry availability at end of pass:\n");
-			for (auto it = availOnEntry.begin();
-			     it != availOnEntry.end();
-			     it++) {
-				printf("State %d:\n", stateLabels[it->first]);
-				it->second.print(stdout);
-			}
-			printf("Edge exit availability:\n");
+			printf("Availability at end of pass:\n");
 			for (auto it = availOnExit.begin();
 			     it != availOnExit.end();
 			     it++) {
-				printf("Edge to state %d:\n", stateLabels[it->first->target]);
+				printf("Edge %d:\n", edgeLabels[it->first]);
 				it->second.print(stdout);
+				printf("State entry availability:\n");
+				availOnEntry[it->first->target].print(stdout);
 			}
 		}
 	}
 
 	if (dump_avail_table) {
-		printf("Final (state entry) availability map:\n");
-		for (auto it = availOnEntry.begin();
-		     it != availOnEntry.end();
+		printf("Final (edge exit) availability map:\n");
+		for (auto it = availOnExit.begin();
+		     it != availOnExit.end();
 		     it++) {
-			printf("State %d:\n", stateLabels[it->first]);
+			printf("Edge %d:\n", edgeLabels[it->first]);
 			it->second.print(stdout);
 		}
 	}
@@ -937,7 +928,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 		alias,
 		oracle,
 		done_something,
-		stateLabels);
+		edgeLabels);
 }
 
 /* End of namespace */

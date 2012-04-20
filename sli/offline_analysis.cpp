@@ -344,10 +344,18 @@ removeSurvivingStates(StateMachine *sm, bool *done_something)
 		progress = false;
 		for (auto it = survivingStates.begin(); it != survivingStates.end(); ) {
 			StateMachineState *s = *it;
+			bool definitely_survives = true;
 			if (dynamic_cast<StateMachineCrash *>(s) ||
-			    dynamic_cast<StateMachineUnreached *>(s) ||
-			    (s->target0() && !survivingStates.count(s->target0()->target)) ||
-			    (s->target1() && !survivingStates.count(s->target1()->target))) {
+			    dynamic_cast<StateMachineUnreached *>(s))
+				definitely_survives = false;
+			if (definitely_survives) {
+				std::vector<StateMachineState *> targets;
+				s->targets(targets);
+				for (auto it = targets.begin(); definitely_survives && it != targets.end(); it++)
+					if (!survivingStates.count(*it))
+						definitely_survives = false;
+			}
+			if (!definitely_survives) {
 				survivingStates.erase(it++);
 				progress = true;
 			} else {
@@ -424,11 +432,11 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (noExtendContext) {
-			sm->root->assertAcyclic();
+			sm->assertAcyclic();
 			sm = introduceFreeVariables(sm, aliasp, opt, oracle, &done_something);
 			sm = introduceFreeVariablesForRegisters(sm, &done_something);
 			sm = optimiseFreeVariables(sm, &done_something);
-			sm->root->assertAcyclic();
+			sm->assertAcyclic();
 		}
 		sm = optimiseSSA(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
@@ -623,7 +631,6 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	breakCycles(cr);
 	if (TIMEOUT)
 		return NULL;
-	cr->selectSingleCrashingPath();
 	cr = optimiseStateMachine(cr,
 				  opt,
 				  oracle,
@@ -772,7 +779,6 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 		breakCycles(cr);
 		if (TIMEOUT)
 			return NULL;
-		cr->selectSingleCrashingPath();
 		cr = optimiseStateMachine(cr,
 					  opt,
 					  oracle,
@@ -1959,27 +1965,48 @@ CFGtoCrashReason(unsigned tid,
 				r = IRExpr_ClientCallFailed(irsb->next_nonconst);
 			}
 
+			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
+
 			/* Pick up any temporaries calculated during
 			 * the call instruction. */
 			for (int i = irsb->stmts_used - 1; i >= 0; i--) {
 				IRStmt *stmt = irsb->stmts[i];
-				/* We ignore statements other than WrTmp if they
-				   happen in a call instruction. */
+				/* We ignore statements other than
+				   WrTmp and Load if they happen in a
+				   call instruction. */
 				if (stmt->tag == Ist_Put) {
 					IRStmtPut *p = (IRStmtPut *)stmt;
 					if (p->target.isTemp())
 						r = rewriteTemporary(r, p->target.asTemp(),
 								     p->data);
 				}
+				if (stmt->tag == Ist_Dirty) {
+					IRDirty *details = ((IRStmtDirty *)stmt)->details;
+					if (!strcmp(details->cee->name, "helper_load_64")) {
+						smp->target->sideEffects.push_back(
+							new StateMachineSideEffectLoad(
+								details->tmp,
+								details->args[0],
+								site,
+								Ity_I64));
+					} else {
+						/* Other dirty calls
+						   inside a call
+						   instruction
+						   indicate that
+						   something has gone
+						   wrong. */
+						abort();
+					}
+				}
 			}
 
-			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
 			assert(smp->target);
 			if (cfg->fallThrough)
 				state.addReloc(&smp->target->target, cfg->fallThrough);
 			else
 				smp->target->target = escapeState;
-			smp->target->prependSideEffect(
+			smp->target->sideEffects.push_back(
 				new StateMachineSideEffectCopy(
 					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
 					r));
@@ -2146,3 +2173,34 @@ remoteMacroSectionsT::visit(HeapVisitor &hv)
 		hv(it->second);
 	}
 }
+
+void
+checkWhetherInstructionCanCrash(const VexRip &rip,
+				VexPtr<MachineState> &ms,
+				VexPtr<Thread> &thr,
+				VexPtr<Oracle> &oracle,
+				FixConsumer &df,
+				GarbageCollectionToken token)
+{
+	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), rip), thr));
+	if (!proximal) {
+		fprintf(_logfile, "No proximal cause -> can't do anything\n");
+		return;
+	}
+
+	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
+	ii->set(rip, new StateMachineProxy(rip, proximal));
+
+	std::vector<VexRip> previousInstructions;
+	oracle->findPreviousInstructions(previousInstructions, rip);
+
+	VexPtr<StateMachine, &ir_heap> probeMachine;
+	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, rip, thr->tid, token);
+	if (probeMachine) {
+		VexPtr<CrashSummary, &ir_heap> summary;
+		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);
+		if (summary)
+			df(summary, token);
+	}
+}
+
