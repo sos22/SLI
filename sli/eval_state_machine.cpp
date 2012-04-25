@@ -466,8 +466,8 @@ evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, threadState
 }
 
 static void
-addOrderingConstraint(ThreadVexRip before,
-		      ThreadVexRip after,
+addOrderingConstraint(const MemoryAccessIdentifier &before,
+		      const MemoryAccessIdentifier &after,
 		      const AllowableOptimisations &opt,
 		      IRExpr **assumption,
 		      IRExpr **accumulatedAssumptions)
@@ -1042,7 +1042,7 @@ top:
 	if (acceptable) {
 		StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
 		if (smea)
-			acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip));
+			acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip.rip));
 	}
 	if (!acceptable) {
 		if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,

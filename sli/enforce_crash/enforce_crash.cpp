@@ -205,10 +205,10 @@ buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
 		} else if (e->tag == Iex_ClientCall) {
 			neededRips.insert(((IRExprClientCall *)e)->callSite);
 		} else if (e->tag == Iex_Load) {
-			neededRips.insert(((IRExprLoad *)e)->rip);
+			neededRips.insert(((IRExprLoad *)e)->rip.rip);
 		} else if (e->tag == Iex_HappensBefore) {
-			neededRips.insert(((IRExprHappensBefore *)e)->before);
-			neededRips.insert(((IRExprHappensBefore *)e)->after);
+			neededRips.insert(((IRExprHappensBefore *)e)->before.rip);
+			neededRips.insert(((IRExprHappensBefore *)e)->after.rip);
 		} else {
 			abort();
 		}

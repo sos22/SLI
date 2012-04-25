@@ -264,6 +264,36 @@ public:
 };
 extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
+class MemoryAccessIdentifier : public Named {
+	char *mkName() const {
+		return my_asprintf("%s", rip.name());
+	}
+public:
+	ThreadRip rip;
+	void sanity_check() const { rip.sanity_check(); }
+	bool operator==(const MemoryAccessIdentifier &other) const {
+		return rip == other.rip;
+	}
+	bool operator<(const MemoryAccessIdentifier &other) const {
+		return rip < other.rip;
+	}
+	bool operator<=(const MemoryAccessIdentifier &other) const {
+		return rip <= other.rip;
+	}
+	bool operator>(const MemoryAccessIdentifier &other) const {
+		return other < *this;
+	}
+	bool operator!=(const MemoryAccessIdentifier &other) const {
+		return !(*this == other);
+	}
+	explicit MemoryAccessIdentifier(const ThreadRip &r)
+		: rip(r)
+	{}
+	MemoryAccessIdentifier() {}
+
+};
+bool parseMemoryAccessIdentifier(MemoryAccessIdentifier *, const char *, const char **);
+
 extern Heap ir_heap;
 
 /*---------------------------------------------------------------*/
@@ -1514,7 +1544,7 @@ struct IRExprUnop : public IRExpr {
 struct IRExprLoad : public IRExpr {
    IRType    ty;     /* Type of the loaded value */
    IRExpr*   addr;   /* Address being loaded from */
-   ThreadRip rip; /* Address of load instruction */
+   MemoryAccessIdentifier rip; /* Address of load instruction */
 
    IRExprLoad() : IRExpr(Iex_Load) {}
    void visit(HeapVisitor &hv) { hv(addr); }
@@ -1732,8 +1762,8 @@ struct IRExprClientCallFailed : public IRExpr {
 };
 
 struct IRExprHappensBefore : public IRExpr {
-   ThreadRip before;
-   ThreadRip after;
+   MemoryAccessIdentifier before;
+   MemoryAccessIdentifier after;
    IRExprHappensBefore() : IRExpr(Iex_HappensBefore) {}
    void visit(HeapVisitor &hv) {}
    unsigned long hashval() const { return 19; }
@@ -1759,7 +1789,7 @@ extern IRExpr* IRExpr_Binop  ( IROp op, IRExpr* arg1, IRExpr* arg2 );
 extern bool shortCircuitableUnops(IROp a, IROp b, IROp *c);
 extern bool inverseUnops(IROp a, IROp b);
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
-extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr, ThreadRip rip );
+extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr, const MemoryAccessIdentifier &rip );
 extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
@@ -1769,7 +1799,8 @@ extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (const VexRip &r, const ThreadRip &callSite, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
-extern IRExpr* IRExpr_HappensBefore (ThreadRip before, ThreadRip after);
+extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
+				     const MemoryAccessIdentifier &after);
 
 /* Pretty-print an IRExpr. */
 static inline void ppIRExpr ( IRExpr*e, FILE *f ) { e->prettyPrint(f); }

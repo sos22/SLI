@@ -112,3 +112,11 @@ bool parseVexRip(VexRip *out, const char *str, const char **suffix)
     parseThisString(", ", str, &str);
   }
 }
+
+bool
+parseMemoryAccessIdentifier(MemoryAccessIdentifier *out,
+			    const char *str,
+			    const char **suffix)
+{
+	return parseThreadRip(&out->rip, str, suffix);
+}

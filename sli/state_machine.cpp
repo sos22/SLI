@@ -457,14 +457,14 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	}
 	IRExpr *addr;
 	IRExpr *data;
-	ThreadVexRip rip;
+	MemoryAccessIdentifier where;
 	if (parseThisString("*(", str, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(") <- ", str2, &str2) &&
 	    parseIRExpr(&data, str2, &str2) &&
 	    parseThisString(" @ ", str2, &str2) &&
-	    parseThreadRip(&rip, str2, suffix)) {
-		*out = new StateMachineSideEffectStore(addr, data, rip);
+	    parseMemoryAccessIdentifier(&where, str2, suffix)) {
+		*out = new StateMachineSideEffectStore(addr, data, where);
 		return true;
 	}
 	threadAndRegister key(threadAndRegister::invalid());
@@ -476,8 +476,8 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	    parseThisString(" <- *(", str2, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(")@", str2, &str2) &&
-	    parseThreadRip(&rip, str2, suffix)) {
-	  *out = new StateMachineSideEffectLoad(key, addr, rip, type);
+	    parseMemoryAccessIdentifier(&where, str2, suffix)) {
+		*out = new StateMachineSideEffectLoad(key, addr, where, type);
 		return true;
 	}
 	if (parseThisString("COPY ", str, &str2) &&
@@ -762,10 +762,10 @@ StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 		StateMachineSideEffect *smse = *it;
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
-			instrs.insert(smsel->rip.rip);
+			instrs.insert(smsel->rip.rip.rip);
 		} else if (StateMachineSideEffectStore *smses =
 			   dynamic_cast<StateMachineSideEffectStore *>(smse)) {
-			instrs.insert(smses->rip.rip);
+			instrs.insert(smses->rip.rip.rip);
 		}
 	}
 	target->enumerateMentionedMemoryAccesses(instrs);

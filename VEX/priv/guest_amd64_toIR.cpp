@@ -314,7 +314,7 @@ static void storeLE ( IRExpr* addr, IRExpr* data )
 
 static IRExpr* loadLE ( IRType ty, IRExpr* data, ThreadRip rip )
 {
-   return IRExpr_Load(ty, data, rip);
+    return IRExpr_Load(ty, data, MemoryAccessIdentifier(rip));
 }
 
 static IROp mkSizedOp ( IRType ty, IROp op8 )

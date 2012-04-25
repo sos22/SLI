@@ -229,7 +229,7 @@ Oracle::findConflictingStores(StateMachineSideEffectLoad *smsel,
 			      std::set<DynAnalysisRip> &out)
 {
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr(smsel->rip.rip);
+	DynAnalysisRip dr(smsel->rip.rip.rip);
 	type_index->findOffsets(dr, offsets);
 	for (auto it = offsets.begin();
 	     it != offsets.end();
@@ -246,7 +246,7 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 {
 	__set_profiling(notInTagTable);
 	std::vector<unsigned long> offsets;
-	type_index->findOffsets(DynAnalysisRip(access->rip.rip), offsets);
+	type_index->findOffsets(DynAnalysisRip(access->rip.rip.rip), offsets);
 	return offsets.size() == 0;
 }
 
@@ -255,7 +255,7 @@ Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
 {
 	__set_profiling(hasConflictingRemoteStores);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr(access->rip.rip);
+	DynAnalysisRip dr(access->rip.rip.rip);
 	type_index->findOffsets(dr, offsets);
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		unsigned long offset = *it;
@@ -309,8 +309,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 {
 	__set_profiling(might_alias_load_store);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip smses_dr(smses->rip.rip);
-	DynAnalysisRip smsel_dr(smsel->rip.rip);
+	DynAnalysisRip smses_dr(smses->rip.rip.rip);
+	DynAnalysisRip smsel_dr(smsel->rip.rip.rip);
 	type_index->findOffsets(smses_dr, offsets);
 	if (offsets.size() == 0) {
 		if (!notInTagTable(smsel))
@@ -370,8 +370,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 {
 	__set_profiling(memory_accesses_might_alias_load_load);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr1(smsel1->rip.rip);
-	DynAnalysisRip dr2(smsel2->rip.rip);
+	DynAnalysisRip dr1(smsel1->rip.rip.rip);
+	DynAnalysisRip dr2(smsel2->rip.rip.rip);
 	type_index->findOffsets(dr1, offsets);
 	if (offsets.size() == 0) {
 		if (!notInTagTable(smsel2))
@@ -400,8 +400,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 {
 	__set_profiling(memory_accesses_might_alias_store_store);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr1(smses1->rip.rip);
-	DynAnalysisRip dr2(smses2->rip.rip);
+	DynAnalysisRip dr1(smses1->rip.rip.rip);
+	DynAnalysisRip dr2(smses2->rip.rip.rip);
 	type_index->findOffsets(dr1, offsets);
 	if (offsets.size() == 0) {
 		if (!notInTagTable(smses2))
@@ -434,7 +434,7 @@ Oracle::findRacingRips(StateMachineSideEffectStore *smses, std::set<DynAnalysisR
 {
 	__set_profiling(findRacingRips__store);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr(smses->rip.rip);
+	DynAnalysisRip dr(smses->rip.rip.rip);
 	type_index->findOffsets(dr, offsets);
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		tag_entry te;
@@ -1926,8 +1926,9 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 				goto impossible;
 			IRExpr *v = IRExpr_Load(t,
 						((IRStmtDirty *)stmt)->details->args[0],
-						ThreadRip::mk(STATIC_THREAD,
-							      VexRip::invent_vex_rip(rip.rip)));
+						MemoryAccessIdentifier(
+							ThreadRip::mk(STATIC_THREAD,
+								      VexRip::invent_vex_rip(rip.rip))));
 			if (rsp)
 				rsp = rewriteRegister(rsp, tmp, v);
 			if (rbp)

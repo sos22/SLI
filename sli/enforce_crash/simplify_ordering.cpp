@@ -16,14 +16,13 @@ HBOrdering::operator()(const IRExprHappensBefore *a, const IRExprHappensBefore *
 		return a->after < b->after;
 }
 
-class canonMemAccessT : public std::map<ThreadRip, unsigned> {
+class canonMemAccessT : public std::map<MemoryAccessIdentifier, unsigned> {
 public:
 	unsigned next_idx;
 	canonMemAccessT()
-		: std::map<ThreadRip, unsigned>(),
-		  next_idx(0)
+		: next_idx(0)
 	{}
-	void addEvent(ThreadRip evt)
+	void addEvent(const MemoryAccessIdentifier &evt)
 	{
 		if (!count(evt))
 			(*this)[evt] = next_idx++;
@@ -41,7 +40,7 @@ public:
 			addEdge(*it);
 	}
 
-	ThreadRip inverse_lookup(unsigned x) const {
+	const MemoryAccessIdentifier &inverse_lookup(unsigned x) const {
 		for (const_iterator it = begin();
 		     it != end();
 		     it++)
@@ -252,11 +251,11 @@ simplifyOrdering(std::set<IRExprHappensBefore *, HBOrdering> &relations,
 }
 
 static void extractImplicitOrder(StateMachineState *sm,
-				 std::vector<ThreadRip> &eventsSoFar,
+				 std::vector<MemoryAccessIdentifier> &eventsSoFar,
 				 std::set<IRExprHappensBefore *, HBOrdering> &out);
 static void
 extractImplicitOrder(StateMachineEdge *sme,
-		     std::vector<ThreadRip> &eventsSoFar,
+		     std::vector<MemoryAccessIdentifier> &eventsSoFar,
 		     std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
 	if (sme->sideEffects.size() == 0) {
@@ -287,7 +286,7 @@ extractImplicitOrder(StateMachineEdge *sme,
 
 static void
 extractImplicitOrder(StateMachineState *sm,
-		     std::vector<ThreadRip> &eventsSoFar,
+		     std::vector<MemoryAccessIdentifier> &eventsSoFar,
 		     std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
 	if (dynamic_cast<const StateMachineTerminal *>(sm))
@@ -309,6 +308,6 @@ extractImplicitOrder(StateMachineState *sm,
 void
 extractImplicitOrder(StateMachine *sm, std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
-	std::vector<ThreadRip> eventsSoFar;
+	std::vector<MemoryAccessIdentifier> eventsSoFar;
 	extractImplicitOrder(sm->root, eventsSoFar, out);
 }

@@ -621,11 +621,12 @@ public:
 	void visit(HeapVisitor &hv) {}
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
 };
+
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
 	IRExpr *addr;
-	ThreadVexRip rip;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const ThreadVexRip &_rip,
+	MemoryAccessIdentifier rip;
+	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const MemoryAccessIdentifier &_rip,
 					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip)
 	{
@@ -642,7 +643,7 @@ public:
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const ThreadVexRip &_rip)
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
 		  data(_data)
 	{
@@ -677,13 +678,13 @@ typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void constructed();
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(alloc()), type(_type)
 	{
 		constructed();
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
+	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(reg), type(_type)
 	{

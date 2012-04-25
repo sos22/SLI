@@ -1844,7 +1844,7 @@ CFGtoCrashReason(unsigned tid,
 
 	class BuildStateForCfgNode {
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
-							const ThreadVexRip rip,
+							const MemoryAccessIdentifier &rip,
 							CFGNode *branchTarget,
 							StateMachineEdge *edge) {
 			StateMachineSideEffect *se = NULL;
@@ -1909,7 +1909,7 @@ CFGtoCrashReason(unsigned tid,
 				if (branchTarget) {
 					StateMachineBifurcate *smb =
 						new StateMachineBifurcate(
-							rip.rip,
+							rip.rip.rip,
 							((IRStmtExit *)stmt)->guard,
 							new StateMachineEdge(NULL),
 							edge);
@@ -1987,7 +1987,7 @@ CFGtoCrashReason(unsigned tid,
 							new StateMachineSideEffectLoad(
 								details->tmp,
 								details->args[0],
-								site,
+								MemoryAccessIdentifier(site),
 								Ity_I64));
 					} else {
 						/* Other dirty calls
@@ -2068,7 +2068,7 @@ CFGtoCrashReason(unsigned tid,
 
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
-							     rip,
+							     MemoryAccessIdentifier(rip),
 							     cfg->branch,
 							     edge);
 				if (!edge)
