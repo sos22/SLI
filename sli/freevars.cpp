@@ -36,7 +36,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
 		if (smsel2 &&
-		    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, !opt.freeVariablesNeverAccessStack)) &&
+		    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, !opt.freeVariablesNeverAccessStack())) &&
 		    oracle->memoryAccessesMightAlias(opt, smsel, smsel2) &&
 		    definitelyEqual( smsel->addr,
 				     smsel2->addr,
@@ -114,7 +114,7 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 		StateMachineSideEffectStore *smses =
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
 		if (smses &&
-		    (!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, !opt.freeVariablesNeverAccessStack)) &&
+		    (!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, !opt.freeVariablesNeverAccessStack())) &&
 		    oracle->memoryAccessesMightAlias(opt, smsel, smses) &&
 		    !definitelyNotEqual( smsel->addr,
 					 smses->addr,

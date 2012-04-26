@@ -106,7 +106,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 		if (StateMachineSideEffectStore *smses =
 		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
 			bool canRemove = opt.ignoreStore(smses->rip.rip.rip);
-			if (!canRemove && opt.assumePrivateStack && alias &&
+			if (!canRemove && opt.assumePrivateStack() && alias &&
 			    !alias->mightPointOutsideStack(smses->addr)) {
 				/* If we have assumePrivateStack set,
 				   and this is definitely a stack
@@ -116,7 +116,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 			}
 
 			if (canRemove &&
-			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, !opt.freeVariablesNeverAccessStack, oracle)) {
+			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, !opt.freeVariablesNeverAccessStack(), oracle)) {
 				sme->sideEffects[x] =
 					new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(

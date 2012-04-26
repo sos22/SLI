@@ -83,54 +83,61 @@ class AllowableOptimisations {
 	AllowableOptimisations(double d)
 		:
 #define default_flag(name, type)		\
-		name(false),
+		_ ## name(false),
 		_optimisation_flags(default_flag)
 #undef default_flag
-		interestingStores(NULL),
-		nonLocalLoads(NULL),
-		as(NULL)
+		_interestingStores(NULL),
+		_nonLocalLoads(NULL),
+		_as(NULL)
 	{}
 
-public:
-	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(
-#define mk_arg(name, type) type _ ## name,
-		optimisation_flags(mk_arg)
-#undef mk_arg
-		AddressSpace *_as)
-		:
-#define mk_init(name, type) name(_ ## name),
-		optimisation_flags(mk_init)
-#undef mk_init
-		as(_as)
-	{
-	}
-	AllowableOptimisations(const AllowableOptimisations &o)
-		:
-#define mk_init(name, type) name(o.name),
-		optimisation_flags(mk_init)
-#undef mk_init
-		as(o.as)
-	{}
-
-#define mk_field(name, type) type name;
+#define mk_field(name, type) type _ ## name;
 	optimisation_flags(mk_field)
 #undef mk_field
 
 	/* If non-NULL, use this to resolve BadPtr expressions where
 	   the address is a constant. */
-	VexPtr<AddressSpace> as;
+	VexPtr<AddressSpace> _as;
+
+public:
+	static AllowableOptimisations defaultOptimisations;
+	AllowableOptimisations(
+#define mk_arg(name, type) type __ ## name,
+		optimisation_flags(mk_arg)
+#undef mk_arg
+		AddressSpace *__as)
+		:
+#define mk_init(name, type) _ ## name(__ ## name),
+		optimisation_flags(mk_init)
+#undef mk_init
+		_as(__as)
+	{
+	}
+	AllowableOptimisations(const AllowableOptimisations &o)
+		:
+#define mk_init(name, type) _ ## name(o._ ## name),
+		optimisation_flags(mk_init)
+#undef mk_init
+		_as(o._as)
+	{}
 
 #define mk_set_value(name, type)				\
 	AllowableOptimisations set ## name (type value) const	\
 	{							\
 		AllowableOptimisations res(*this);		\
-		res.name = value;				\
+		res._ ## name = value;				\
 		return res;					\
 	}
 	optimisation_flags(mk_set_value);
 #undef mk_set_value
 
+#define mk_get_value(name, type)				\
+	type name() const					\
+	{							\
+		return _ ## name ;				\
+	}
+	optimisation_flags(mk_get_value)
+#undef mk_get_value
 #define mk_set_flags(name, type)				\
 	AllowableOptimisations enable ## name () const		\
 	{							\
@@ -146,8 +153,13 @@ public:
 	AllowableOptimisations setAddressSpace(AddressSpace *as) const
 	{
 		AllowableOptimisations res(*this);
-		res.as = as;
+		res._as = as;
 		return res;
+	}
+
+	AddressSpace *getAddressSpace()
+	{
+		return _as;
 	}
 
 	unsigned asUnsigned() const {
@@ -163,21 +175,21 @@ public:
 		unsigned acc = 2;
 
 #define do_flag(name, type)			\
-		if ( name )			\
+		if ( _ ## name )			\
 			x |= acc;		\
 		acc *= 2;
 		_optimisation_flags(do_flag)
 #undef do_flag
-		if (as != NULL)
+		if (_as != NULL)
 			x |= acc;
 		return x;
 	}
 
 	bool ignoreStore(const VexRip &rip) const {
-		if (ignoreSideEffects)
+		if (_ignoreSideEffects)
 			return true;
-		if (interestingStores &&
-		    !interestingStores->count(DynAnalysisRip(rip)))
+		if (_interestingStores &&
+		    !_interestingStores->count(DynAnalysisRip(rip)))
 			return true;
 		return false;
 	}
@@ -187,9 +199,9 @@ public:
 	   to false and return true.  If we can't be sure, return
 	   false. */
 	bool addressAccessible(unsigned long addr, bool *res) const {
-		if (!as)
+		if (!_as)
 			return false;
-		*res = as->isReadable(addr, 1);
+		*res = _as->isReadable(addr, 1);
 		return true;
 	}
 

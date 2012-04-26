@@ -1126,8 +1126,7 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 					   probeMachineRacingInstructions,
 					   storeMachineRacingInstructions);
 
-	AllowableOptimisations loadMachineOpt = opt;
-	loadMachineOpt.nonLocalLoads = &probeMachineRacingInstructions;
+	AllowableOptimisations loadMachineOpt = opt.setnonLocalLoads(&probeMachineRacingInstructions);
 	probeMachine = optimiseStateMachine(probeMachine, loadMachineOpt, oracle,
 					    true, true, token);
 

@@ -415,7 +415,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		done_something = false;
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
-		if (opt.ignoreSideEffects)
+		if (opt.ignoreSideEffects())
 			removeSurvivingStates(sm, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
 		LibVEX_maybe_gc(token);
@@ -663,7 +663,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		return true;
 	}
 
-	opt.interestingStores = &is;
+	opt = opt.setinterestingStores(&is);
 
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
 	if (!sm_ssa)

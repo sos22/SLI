@@ -1956,7 +1956,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			   in the sense that it doesn't alias with any global
 			   variables, and is therefore never equal to any
 			   constants which are present in the machine code. */
-			if (opt.assumePrivateStack &&
+			if (opt.assumePrivateStack() &&
 			    e->op == Iop_CmpEQ64 &&
 			    r->tag == Iex_Get &&
 			    !((IRExprGet *)r)->reg.isTemp() &&
