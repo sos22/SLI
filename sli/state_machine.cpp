@@ -16,7 +16,7 @@ VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreache
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
-AllowableOptimisations AllowableOptimisations::defaultOptimisations(false, false, false, false, true, NULL);
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(false, false, false, false, true, NULL, NULL, NULL);
 
 StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)

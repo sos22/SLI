@@ -23,122 +23,139 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
 ;
 #endif
 
+/* Flags:
+
+   assumePrivateStack -- Assume that the stack is ``private'', in the
+                         sense that no constant expressions can ever
+                         alias with rsp.
+
+   assumeExecutesAtomically -- Assume that the state machine executes
+                               atomically.  This is useful for the
+                               read-side machine, but not for the
+                               write-side ones.
+
+   ignoreSideEffects -- Effectively assume that the program terminates
+  	                as soon as the machine completes, so that
+  	                stores which aren't loaded by this machine are
+  	                necessarily redundant.
+
+   assumeNoInterferingStores -- Assume that there will be no stores
+                                from other threads which interfere
+                                with the machine we're currently
+
+   freeVariablesMightAccessStack -- If false, assume that free
+ 				    variables can never point at the
+ 				    current stack frame.  This is
+ 				    appropriate for state machines
+ 				    generated at function heads, for
+ 				    instance.
+
+   Other fields:
+
+   interestingStores -- Bit of a hack: sometimes, only some side
+	                effects are interesting, so allow them to be
+	                listed here.  If haveInterestingStoresSet is
+	                false then we don't look at interestingStores
+	                at all, and instead rely on ignoreSideEffects.
+
+   nonLocalLoads -- If this is non-NULL then rather than using the
+                    oracle to check whether loads might possibly load,
+                    we just look in here.
+
+   as -- if non-NULL, used to resolve BadPtr expressions with a
+         constant address.
+
+*/
 class AllowableOptimisations {
+#define _optimisation_flags(f)						\
+	f(assumePrivateStack, bool)					\
+	f(assumeExecutesAtomically, bool)				\
+	f(ignoreSideEffects, bool)					\
+	f(assumeNoInterferingStores, bool)				\
+	f(freeVariablesMightAccessStack,bool)
+#define optimisation_flags(f)						\
+	_optimisation_flags(f)						\
+	f(interestingStores, const std::set<DynAnalysisRip> *)		\
+	f(nonLocalLoads, std::set<DynAnalysisRip> *)
 public:
 	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool s, bool a, bool i, bool as, bool fvmas,
-			       AddressSpace *_as)
-		: assumePrivateStack(s), assumeExecutesAtomically(a),
-		  ignoreSideEffects(i), assumeNoInterferingStores(as),
-		  freeVariablesMightAccessStack(fvmas), as(_as), interestingStores(NULL),
-		  nonLocalLoads(NULL)
+	AllowableOptimisations(
+#define mk_arg(name, type) type _ ## name,
+		optimisation_flags(mk_arg)
+#undef mk_arg
+		AddressSpace *_as)
+		:
+#define mk_init(name, type) name(_ ## name),
+		optimisation_flags(mk_init)
+#undef mk_init
+		as(_as)
 	{
 	}
 	AllowableOptimisations(const AllowableOptimisations &o)
-		: assumePrivateStack(o.assumePrivateStack),
-		  assumeExecutesAtomically(o.assumeExecutesAtomically),
-		  ignoreSideEffects(o.ignoreSideEffects),
-		  assumeNoInterferingStores(o.assumeNoInterferingStores),
-		  freeVariablesMightAccessStack(o.freeVariablesMightAccessStack),
-		  as(o.as),
-		  interestingStores(o.interestingStores),
-		  nonLocalLoads(o.nonLocalLoads)
+		:
+#define mk_init(name, type) name(o.name),
+		optimisation_flags(mk_init)
+#undef mk_init
+		as(o.as)
 	{}
 
-	/* Assume that the stack is ``private'', in the sense that no
-	   constant expressions can ever alias with rsp. */
-	bool assumePrivateStack;
-
-	/* Assume that the state machine executes atomically.  This is
-	   useful for the read-side machine, but not for the
-	   write-side ones. */
-	bool assumeExecutesAtomically;
-
-	/* Effectively assume that the program terminates as soon as
-	   the machine completes, so that stores which aren't loaded
-	   by this machine are necessarily redundant. */
-	bool ignoreSideEffects;
-
-	/* Assume that there will be no stores from other threads
-	   which interfere with the machine we're currently
-	   examining. */
-	bool assumeNoInterferingStores;
-
-	/* If false, assume that free variables can never point at the
-	   current stack frame.  This is appropriate for state
-	   machines generated at function heads, for instance. */
-	bool freeVariablesMightAccessStack;
+#define mk_field(name, type) type name;
+	optimisation_flags(mk_field)
+#undef mk_field
 
 	/* If non-NULL, use this to resolve BadPtr expressions where
 	   the address is a constant. */
 	VexPtr<AddressSpace> as;
 
-	/* Bit of a hack: sometimes, only some side effects are
-	   interesting, so allow them to be listed here.  If
-	   haveInterestingStoresSet is false then we don't look at
-	   interestingStores at all, and instead rely on
-	   ignoreSideEffects. */
-	const std::set<DynAnalysisRip> *interestingStores;
+#define mk_set_value(name, type)				\
+	AllowableOptimisations set ## name (type value) const	\
+	{							\
+		AllowableOptimisations res(*this);		\
+		res.name = value;				\
+		return res;					\
+	}
+	optimisation_flags(mk_set_value);
+#undef mk_set_value
 
-	/* If this is non-NULL then rather than using the oracle to
-	   check whether loads might possibly load, we just look in
-	   here. */
-	std::set<DynAnalysisRip> *nonLocalLoads;
+#define mk_set_flags(name, type)				\
+	AllowableOptimisations enable ## name () const		\
+	{							\
+		return set ## name(true);			\
+	}							\
+	AllowableOptimisations disable ## name () const		\
+	{							\
+		return set ## name(false);			\
+	}
+	_optimisation_flags(mk_set_flags)
+#undef mk_set_flags
 
-	AllowableOptimisations enableassumePrivateStack() const
-	{
-		return AllowableOptimisations(true, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
-	}
-	AllowableOptimisations enableassumeExecutesAtomically() const
-	{
-		return AllowableOptimisations(assumePrivateStack, true, ignoreSideEffects,
-					      true /* If we're running atomically then there are definitely
-						      no interfering stores */,
-					      freeVariablesMightAccessStack, as);
-	}
-	AllowableOptimisations enableignoreSideEffects() const
-	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, true,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
-	}
-	AllowableOptimisations enableassumeNoInterferingStores() const
-	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      true, freeVariablesMightAccessStack, as);
-	}
-	AllowableOptimisations disablefreeVariablesMightAccessStack() const
-	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, false, as);
-	}
 	AllowableOptimisations setAddressSpace(AddressSpace *as) const
 	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
+		AllowableOptimisations res(*this);
+		res.as = as;
+		return res;
 	}
-	unsigned asUnsigned() const {
-		unsigned x = 64; /* turning off all of the optional
-				    optimisations doesn't turn off the
-				    ones which are always available, so
-				    have an implicit bit for them.
-				    i.e. 0 means no optimisations at
-				    all, and 64 means only the most
-				    basic ones which are always
-				    safe. */
 
-		if (assumePrivateStack)
-			x |= 2;
-		if (assumeExecutesAtomically)
-			x |= 3;
-		if (ignoreSideEffects)
-			x |= 4;
-		if (assumeNoInterferingStores)
-			x |= 8;
-		if (freeVariablesMightAccessStack)
-			x |= 16;
+	unsigned asUnsigned() const {
+		unsigned x = 1; /* turning off all of the optional
+				   optimisations doesn't turn off the
+				   ones which are always available, so
+				   have an implicit bit for them.
+				   i.e. 0 means no optimisations at
+				   all, and 1 means only the most
+				   basic ones which are always
+				   safe. */
+
+		unsigned acc = 2;
+
+#define do_flag(name, type)			\
+		if ( name )			\
+			x |= acc;		\
+		acc *= 2;
+		_optimisation_flags(do_flag)
+#undef do_flag
 		if (as != NULL)
-			x |= 32;
+			x |= acc;
 		return x;
 	}
 
@@ -161,6 +178,9 @@ public:
 		*res = as->isReadable(addr, 1);
 		return true;
 	}
+
+#undef _optimisation_flags
+#undef optimisation_flags
 };
 
 class IRExprTransformer;
