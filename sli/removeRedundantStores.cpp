@@ -116,7 +116,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 			}
 
 			if (canRemove &&
-			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, opt.freeVariablesMightAccessStack, oracle)) {
+			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, !opt.freeVariablesNeverAccessStack, oracle)) {
 				sme->sideEffects[x] =
 					new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(

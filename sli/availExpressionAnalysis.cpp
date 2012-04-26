@@ -363,7 +363,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				addr = NULL;
 
 			if ( addr &&
-			     (!alias || alias->ptrsMightAlias(addr, smses->addr, opt.freeVariablesMightAccessStack)) &&
+			     (!alias || alias->ptrsMightAlias(addr, smses->addr, !opt.freeVariablesNeverAccessStack)) &&
 			     ((smses2 && oracle->memoryAccessesMightAlias(opt, smses2, smses)) ||
 			      (smsel2 && oracle->memoryAccessesMightAlias(opt, smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
@@ -543,14 +543,14 @@ buildNewStateMachineWithLoadsEliminated(
 				StateMachineSideEffectLoad *smsel2 =
 					dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 				if ( smses2 &&
-				     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr, opt.freeVariablesMightAccessStack)) &&
+				     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr, !opt.freeVariablesNeverAccessStack)) &&
 				     definitelyEqual(smses2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(
 							smsel->target,
 							smses2->data);
 				} else if ( smsel2 &&
-					    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr, opt.freeVariablesMightAccessStack)) &&
+					    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr, !opt.freeVariablesNeverAccessStack)) &&
 					    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 					newEffect =
 						new StateMachineSideEffectCopy(

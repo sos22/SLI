@@ -43,7 +43,7 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
                                 from other threads which interfere
                                 with the machine we're currently
 
-   freeVariablesMightAccessStack -- If false, assume that free
+   freeVariablesNeverAccessStack -- If true, assume that free
  				    variables can never point at the
  				    current stack frame.  This is
  				    appropriate for state machines
@@ -72,11 +72,25 @@ class AllowableOptimisations {
 	f(assumeExecutesAtomically, bool)				\
 	f(ignoreSideEffects, bool)					\
 	f(assumeNoInterferingStores, bool)				\
-	f(freeVariablesMightAccessStack,bool)
+	f(freeVariablesNeverAccessStack,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\
 	f(nonLocalLoads, std::set<DynAnalysisRip> *)
+
+	/* The value of @d doesn't matter, it's just there so that we
+	   can select this constructor. */
+	AllowableOptimisations(double d)
+		:
+#define default_flag(name, type)		\
+		name(false),
+		_optimisation_flags(default_flag)
+#undef default_flag
+		interestingStores(NULL),
+		nonLocalLoads(NULL),
+		as(NULL)
+	{}
+
 public:
 	static AllowableOptimisations defaultOptimisations;
 	AllowableOptimisations(

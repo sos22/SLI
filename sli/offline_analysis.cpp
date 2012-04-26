@@ -679,7 +679,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		return true;
 	}
 
-	opt = opt.disablefreeVariablesMightAccessStack();
+	opt = opt.enablefreeVariablesNeverAccessStack();
 
 	sm = convertToSSA(sm);
 	if (!sm)
@@ -803,7 +803,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 			return NULL;
 		sm->sanityCheck();
 		sm = optimiseStateMachine(sm,
-					  opt.disablefreeVariablesMightAccessStack(),
+					  opt.enablefreeVariablesNeverAccessStack(),
 					  oracle,
 					  true,
 					  true,
@@ -1560,7 +1560,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableignoreSideEffects()
-		.disablefreeVariablesMightAccessStack();
+		.enablefreeVariablesNeverAccessStack();
 	VexPtr<IRExpr, &ir_heap> survive(
 		survivalConstraintIfExecutedAtomically(probeMachine, oracle, opt, token));
 	if (!survive) {
