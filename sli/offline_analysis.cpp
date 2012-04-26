@@ -663,8 +663,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		return true;
 	}
 
-	opt.interestingStores = is;
-	opt.haveInterestingStoresSet = true;
+	opt.interestingStores = &is;
 
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
 	if (!sm_ssa)

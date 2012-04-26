@@ -30,7 +30,7 @@ public:
 			       AddressSpace *_as)
 		: assumePrivateStack(s), assumeExecutesAtomically(a),
 		  ignoreSideEffects(i), assumeNoInterferingStores(as),
-		  freeVariablesMightAccessStack(fvmas), as(_as), haveInterestingStoresSet(false),
+		  freeVariablesMightAccessStack(fvmas), as(_as), interestingStores(NULL),
 		  nonLocalLoads(NULL)
 	{
 	}
@@ -41,7 +41,6 @@ public:
 		  assumeNoInterferingStores(o.assumeNoInterferingStores),
 		  freeVariablesMightAccessStack(o.freeVariablesMightAccessStack),
 		  as(o.as),
-		  haveInterestingStoresSet(o.haveInterestingStoresSet),
 		  interestingStores(o.interestingStores),
 		  nonLocalLoads(o.nonLocalLoads)
 	{}
@@ -79,8 +78,7 @@ public:
 	   haveInterestingStoresSet is false then we don't look at
 	   interestingStores at all, and instead rely on
 	   ignoreSideEffects. */
-	bool haveInterestingStoresSet;
-	std::set<DynAnalysisRip> interestingStores;
+	const std::set<DynAnalysisRip> *interestingStores;
 
 	/* If this is non-NULL then rather than using the oracle to
 	   check whether loads might possibly load, we just look in
@@ -147,12 +145,10 @@ public:
 	bool ignoreStore(const VexRip &rip) const {
 		if (ignoreSideEffects)
 			return true;
-		if (!haveInterestingStoresSet)
-			return false;
-		if (interestingStores.count(DynAnalysisRip(rip)))
-			return false;
-		else
+		if (interestingStores &&
+		    !interestingStores->count(DynAnalysisRip(rip)))
 			return true;
+		return false;
 	}
 
 	/* If @addr is definitely accessible, set *@res to true and
