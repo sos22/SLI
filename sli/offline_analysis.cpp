@@ -1984,7 +1984,7 @@ CFGtoCrashReason(unsigned tid,
 							new StateMachineSideEffectLoad(
 								details->tmp,
 								details->args[0],
-								MemoryAccessIdentifier(site),
+								MemoryAccessIdentifier(site, MemoryAccessIdentifier::static_generation),
 								Ity_I64));
 					} else {
 						/* Other dirty calls
@@ -2065,7 +2065,7 @@ CFGtoCrashReason(unsigned tid,
 
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
-							     MemoryAccessIdentifier(rip),
+							     MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
 							     cfg->branch,
 							     edge);
 				if (!edge)

@@ -266,20 +266,24 @@ extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
 class MemoryAccessIdentifier : public Named {
 	char *mkName() const {
-		return my_asprintf("%s", rip.name());
+		return my_asprintf("%s:%d", rip.name(), generation);
 	}
-	MemoryAccessIdentifier() {}
+	MemoryAccessIdentifier() : generation(-1) {}
 public:
+	static const unsigned static_generation = 1;
 	ThreadRip rip;
+	unsigned generation;
 	void sanity_check() const { rip.sanity_check(); }
 	bool operator==(const MemoryAccessIdentifier &other) const {
-		return rip == other.rip;
+		return rip == other.rip && generation == other.generation;
 	}
 	bool operator<(const MemoryAccessIdentifier &other) const {
-		return rip < other.rip;
+		return rip < other.rip ||
+			(rip == other.rip && generation < other.generation);
 	}
 	bool operator<=(const MemoryAccessIdentifier &other) const {
-		return rip <= other.rip;
+		return rip < other.rip ||
+			(rip == other.rip && generation <= other.generation);
 	}
 	bool operator>(const MemoryAccessIdentifier &other) const {
 		return other < *this;
@@ -287,8 +291,8 @@ public:
 	bool operator!=(const MemoryAccessIdentifier &other) const {
 		return !(*this == other);
 	}
-	explicit MemoryAccessIdentifier(const ThreadRip &r)
-		: rip(r)
+	explicit MemoryAccessIdentifier(const ThreadRip &r, unsigned _generation)
+		: rip(r), generation(_generation)
 	{}
 
 	static MemoryAccessIdentifier uninitialised(void) {

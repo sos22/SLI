@@ -78,7 +78,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					MemoryAccessIdentifier(rip)));
+					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation)));
 			break;
 		}
 		case Ist_CAS: {
@@ -120,7 +120,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 				new StateMachineSideEffectLoad(
 					tr,
 					cas->addr,
-					MemoryAccessIdentifier(rip),
+					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
 					ty));
 			StateMachineEdge *exitEdge = new StateMachineEdge(NULL);
 			StateMachineProxy *r = new StateMachineProxy(rip.rip, exitEdge);
@@ -134,7 +134,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 				new StateMachineSideEffectStore(
 					cas->addr,
 					cas->dataLo,
-					MemoryAccessIdentifier(rip)));
+					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation)));
 			IROp op;
 			switch (ty) {
 #define do_size(sz)						\
@@ -180,7 +180,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					MemoryAccessIdentifier(rip),
+					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
 					ity));
 			break;
 		}

@@ -1928,7 +1928,8 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 						((IRStmtDirty *)stmt)->details->args[0],
 						MemoryAccessIdentifier(
 							ThreadRip::mk(STATIC_THREAD,
-								      VexRip::invent_vex_rip(rip.rip))));
+								      VexRip::invent_vex_rip(rip.rip)),
+							MemoryAccessIdentifier::static_generation));
 			if (rsp)
 				rsp = rewriteRegister(rsp, tmp, v);
 			if (rbp)
