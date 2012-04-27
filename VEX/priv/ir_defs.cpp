@@ -1028,7 +1028,7 @@ static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix)
 {
   IRType ty;
   IRExpr *addr;
-  MemoryAccessIdentifier rip;
+  MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
   if (!parseThisString("LD:", str, &str) ||
       !parseIRType(&ty, str, &str) ||
       !parseThisChar('(', str, &str) ||
@@ -1204,8 +1204,8 @@ static bool parseIRExprFailedCall(IRExpr **res, const char *str, const char **su
 
 static bool parseIRExprHappensBefore(IRExpr **res, const char *str, const char **suffix)
 {
-  MemoryAccessIdentifier before;
-  MemoryAccessIdentifier after;
+  MemoryAccessIdentifier before(MemoryAccessIdentifier::uninitialised());
+  MemoryAccessIdentifier after(MemoryAccessIdentifier::uninitialised());
   if (!parseThisChar('(', str, &str) ||
       !parseMemoryAccessIdentifier(&before, str, &str) ||
       !parseThisString(" <-< ", str, &str) ||
@@ -1752,11 +1752,10 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    return e;
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, const MemoryAccessIdentifier &rip ) {
-   IRExprLoad* e        = new IRExprLoad();
+   IRExprLoad* e        = new IRExprLoad(rip);
    assert(addr->type() == Ity_I64);
    e->ty   = ty;
    e->addr = addr;
-   e->rip  = rip;
    e->sanity_check();
    return e;
 }
@@ -1920,9 +1919,7 @@ IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
 IRExpr* IRExpr_HappensBefore ( const MemoryAccessIdentifier &before,
 			       const MemoryAccessIdentifier &after )
 {
-   IRExprHappensBefore *e = new IRExprHappensBefore();
-   e->before = before;
-   e->after = after;
+   IRExprHappensBefore *e = new IRExprHappensBefore(before, after);
    e->sanity_check();
    return e;
 }

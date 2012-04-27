@@ -281,7 +281,11 @@ extractImplicitOrder(StateMachineEdge *sme,
 		eventsSoFar.push_back(smsema->rip);
 	}
 	extractImplicitOrder(sme->target, eventsSoFar, out);
-	eventsSoFar.resize(startSize);
+
+	/* This doesn't actually create any new uninitialised slots,
+	   because it can only ever shrink the vector. */
+	assert(eventsSoFar.size() >= startSize);
+	eventsSoFar.resize(startSize, MemoryAccessIdentifier::uninitialised());
 }
 
 static void

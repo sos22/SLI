@@ -457,7 +457,7 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	}
 	IRExpr *addr;
 	IRExpr *data;
-	MemoryAccessIdentifier where;
+	MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
 	if (parseThisString("*(", str, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(") <- ", str2, &str2) &&

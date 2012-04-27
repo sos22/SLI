@@ -268,6 +268,7 @@ class MemoryAccessIdentifier : public Named {
 	char *mkName() const {
 		return my_asprintf("%s", rip.name());
 	}
+	MemoryAccessIdentifier() {}
 public:
 	ThreadRip rip;
 	void sanity_check() const { rip.sanity_check(); }
@@ -289,8 +290,10 @@ public:
 	explicit MemoryAccessIdentifier(const ThreadRip &r)
 		: rip(r)
 	{}
-	MemoryAccessIdentifier() {}
 
+	static MemoryAccessIdentifier uninitialised(void) {
+		return MemoryAccessIdentifier();
+	}
 };
 bool parseMemoryAccessIdentifier(MemoryAccessIdentifier *, const char *, const char **);
 
@@ -1546,7 +1549,10 @@ struct IRExprLoad : public IRExpr {
    IRExpr*   addr;   /* Address being loaded from */
    MemoryAccessIdentifier rip; /* Address of load instruction */
 
-   IRExprLoad() : IRExpr(Iex_Load) {}
+   IRExprLoad(const MemoryAccessIdentifier &_rip)
+       : IRExpr(Iex_Load),
+	 rip(_rip)
+   {}
    void visit(HeapVisitor &hv) { hv(addr); }
    unsigned long hashval() const {
        return ty + addr->hashval() * 97;
@@ -1762,17 +1768,22 @@ struct IRExprClientCallFailed : public IRExpr {
 };
 
 struct IRExprHappensBefore : public IRExpr {
-   MemoryAccessIdentifier before;
-   MemoryAccessIdentifier after;
-   IRExprHappensBefore() : IRExpr(Iex_HappensBefore) {}
-   void visit(HeapVisitor &hv) {}
-   unsigned long hashval() const { return 19; }
-   void prettyPrint(FILE *f) const;
-   IRType type() const { return Ity_I1; }
-   void sanity_check() const {
-      before.sanity_check();
-      after.sanity_check();
-   }
+    MemoryAccessIdentifier before;
+    MemoryAccessIdentifier after;
+    IRExprHappensBefore(const MemoryAccessIdentifier &_before,
+			const MemoryAccessIdentifier &_after)
+	: IRExpr(Iex_HappensBefore),
+	  before(_before),
+	  after(_after)
+    {}
+    void visit(HeapVisitor &hv) {}
+    unsigned long hashval() const { return 19; }
+    void prettyPrint(FILE *f) const;
+    IRType type() const { return Ity_I1; }
+    void sanity_check() const {
+	before.sanity_check();
+	after.sanity_check();
+    }
 };
 
 /* Expression constructors. */

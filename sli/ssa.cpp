@@ -863,10 +863,9 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Load: {
 		const IRExprLoad *i = (const IRExprLoad *)inp;
-		IRExprLoad *res = new IRExprLoad();
+		IRExprLoad *res = new IRExprLoad(i->rip);
 		res->ty = i->ty;
 		ctxt(&res->addr, i->addr, rawDupe);
-		res->rip = i->rip;
 		return res;
 	}
 	case Iex_Const: {
@@ -940,10 +939,7 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_HappensBefore: {
 		const IRExprHappensBefore *i = (const IRExprHappensBefore *)inp;
-		IRExprHappensBefore *res = new IRExprHappensBefore();
-		res->before = i->before;
-		res->after = i->after;
-		return res;
+		return new IRExprHappensBefore(i->before, i->after);
 	}
 	}
 	abort();
