@@ -1772,20 +1772,18 @@ rewriteTemporary(IRExpr *sm,
 static StateMachine *
 CFGtoCrashReason(unsigned tid,
 		 VexPtr<CFGNode, &ir_heap> &cfg,
-		 VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> &crashReasons,
+		 VexPtr<InferredInformation, &ir_heap> &crashReasons,
 		 VexPtr<StateMachineState, &ir_heap> &escapeState,
 		 AllowableOptimisations &opt,
 		 bool simple_calls,
 		 VexPtr<Oracle> &oracle,
 		 GarbageCollectionToken token)
 {
-	typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type inferredInformation;
-
 	class State {
 		typedef std::pair<StateMachineState **, CFGNode *> reloc_t;
 		std::vector<CFGNode *> pending;
 		std::vector<reloc_t> relocs;
-		inferredInformation *crashReasons;
+		InferredInformation *crashReasons;
 	public:
 		std::map<CFGNode *, StateMachineState *> cfgToState;
 
@@ -1820,7 +1818,7 @@ CFGtoCrashReason(unsigned tid,
 			relocs.push_back(reloc_t(p, c));
 		}
 
-		State(inferredInformation *_crashReasons)
+		State(InferredInformation *_crashReasons)
 			: crashReasons(_crashReasons)
 		{}
 	} state(crashReasons);
