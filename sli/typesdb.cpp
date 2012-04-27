@@ -214,11 +214,13 @@ parseDynAnalysisRip(DynAnalysisRip *out, const char *inp, const char **suffix)
 {
 	if (!parseThisString("DynRip[", inp, &inp))
 		return false;
-	DynAnalysisRip work;
 
+	DynAnalysisRip work;
 	while (1) {
-		if (parseThisChar(']', inp, suffix))
+		if (parseThisChar(']', inp, suffix)) {
+			*out = work;
 			return true;
+		}
 		if (work.nr_rips == DynAnalysisRip::DATABASE_RIP_DEPTH)
 			return false;
 		unsigned long x;
