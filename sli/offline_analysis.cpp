@@ -1779,6 +1779,8 @@ CFGtoCrashReason(unsigned tid,
 		 VexPtr<Oracle> &oracle,
 		 GarbageCollectionToken token)
 {
+	std::map<ThreadRip, unsigned> accessGenerationNumbers;
+
 	class State {
 		typedef std::pair<StateMachineState **, CFGNode *> reloc_t;
 		std::vector<CFGNode *> pending;
@@ -1840,8 +1842,16 @@ CFGtoCrashReason(unsigned tid,
 	} fetchIrsb(oracle->ms->addressSpace, tid);
 
 	class BuildStateForCfgNode {
+		MemoryAccessIdentifier getAccessIdentifier(const ThreadRip &rip)
+		{
+			auto it = accessGenerationNumbers.insert(
+				std::pair<ThreadRip, unsigned>(rip,
+							       MemoryAccessIdentifier::first_dynamic_generation)).first;
+			return MemoryAccessIdentifier(rip, it->second++);
+		}
+
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
-							const MemoryAccessIdentifier &rip,
+							const ThreadRip &rip,
 							CFGNode *branchTarget,
 							StateMachineEdge *edge) {
 			StateMachineSideEffect *se = NULL;
@@ -1862,41 +1872,32 @@ CFGtoCrashReason(unsigned tid,
 				se = new StateMachineSideEffectStore(
 					((IRStmtStore *)stmt)->addr,
 					((IRStmtStore *)stmt)->data,
-					rip);
+					getAccessIdentifier(rip));
 				break;
-			case Ist_Dirty:
+			case Ist_Dirty: {
+				IRType ity;
 				if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 					    "helper_load_8")) {
-					se = new StateMachineSideEffectLoad(
-						((IRStmtDirty *)stmt)->details->tmp,
-						((IRStmtDirty *)stmt)->details->args[0],
-						rip,
-						Ity_I8);
+					ity = Ity_I8;
 				} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 						   "helper_load_16")) {
-					se = new StateMachineSideEffectLoad(
-						((IRStmtDirty *)stmt)->details->tmp,
-						((IRStmtDirty *)stmt)->details->args[0],
-						rip,
-						Ity_I16);
+					ity = Ity_I16;
 				} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 						   "helper_load_64")) {
-					se = new StateMachineSideEffectLoad(
-						((IRStmtDirty *)stmt)->details->tmp,
-						((IRStmtDirty *)stmt)->details->args[0],
-						rip,
-						Ity_I64);
+					ity = Ity_I64;
 				} else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
 						   "helper_load_32")) {
-					se = new StateMachineSideEffectLoad(
-						((IRStmtDirty *)stmt)->details->tmp,
-						((IRStmtDirty *)stmt)->details->args[0],
-						rip,
-						Ity_I32);
+					ity = Ity_I32;
 				}  else {
 					abort();
 				}
+				se = new StateMachineSideEffectLoad(
+					((IRStmtDirty *)stmt)->details->tmp,
+					((IRStmtDirty *)stmt)->details->args[0],
+					getAccessIdentifier(rip),
+					ity);
 				break;
+			}
 			case Ist_CAS:
 				fprintf(_logfile, "Don't know how to backtrack across CAS statements?\n");
 				return NULL;
@@ -1906,7 +1907,7 @@ CFGtoCrashReason(unsigned tid,
 				if (branchTarget) {
 					StateMachineBifurcate *smb =
 						new StateMachineBifurcate(
-							rip.rip.rip,
+							rip.rip,
 							((IRStmtExit *)stmt)->guard,
 							new StateMachineEdge(NULL),
 							edge);
@@ -1984,7 +1985,7 @@ CFGtoCrashReason(unsigned tid,
 							new StateMachineSideEffectLoad(
 								details->tmp,
 								details->args[0],
-								MemoryAccessIdentifier(site, MemoryAccessIdentifier::static_generation),
+								getAccessIdentifier(site),
 								Ity_I64));
 					} else {
 						/* Other dirty calls
@@ -2015,10 +2016,13 @@ CFGtoCrashReason(unsigned tid,
 		State &state;
 		StateMachineState *escapeState;
 		Oracle *oracle;
+		std::map<ThreadRip, unsigned> &accessGenerationNumbers;
 		BuildStateForCfgNode(bool _simple_calls, unsigned _tid, State &_state,
-				     StateMachineState *_escapeState, Oracle *_oracle)
+				     StateMachineState *_escapeState, Oracle *_oracle,
+				     std::map<ThreadRip, unsigned> &_accessGenerationNumbers)
 			: simple_calls(_simple_calls), tid(_tid), state(_state),
-			  escapeState(_escapeState), oracle(_oracle)
+			  escapeState(_escapeState), oracle(_oracle),
+			  accessGenerationNumbers(_accessGenerationNumbers)
 		{}
 		StateMachineState *operator()(CFGNode *cfg,
 					      IRSB *irsb) {
@@ -2065,7 +2069,7 @@ CFGtoCrashReason(unsigned tid,
 
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				edge = backtrackOneStatement(irsb->stmts[i],
-							     MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
+							     rip,
 							     cfg->branch,
 							     edge);
 				if (!edge)
@@ -2073,7 +2077,7 @@ CFGtoCrashReason(unsigned tid,
 			}
 			return new StateMachineProxy(rip.rip, edge);
 		}
-	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle);
+	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle, accessGenerationNumbers);
 
 	VexRip original_rip = cfg->my_rip;
 	StateMachineState *root = NULL;

@@ -271,6 +271,7 @@ class MemoryAccessIdentifier : public Named {
 	MemoryAccessIdentifier() : generation(-1) {}
 public:
 	static const unsigned static_generation = 1;
+	static const unsigned first_dynamic_generation = 2;
 	ThreadRip rip;
 	unsigned generation;
 	void sanity_check() const { rip.sanity_check(); }
