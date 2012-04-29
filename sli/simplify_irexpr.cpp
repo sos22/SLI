@@ -2128,7 +2128,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						}
 					}
 					if (nr_dupes != 0) {
-						dbg_break("Here we are\n");
 						*done_something = true;
 						IRExprAssociative *newRoot =
 							IRExpr_Associative(nr_dupes + 1,
@@ -2260,6 +2259,51 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				}
 			}
 
+			if (e->expr0->tag == Iex_Const) {
+				IRExprConst *e0 = (IRExprConst *)e->expr0;
+				if (e0->con->tag == Ico_U1 &&
+				    e0->con->Ico.U1) {
+					/* Mux0X(a, 1, b) -> !a || b */
+					*done_something = true;
+					return IRExpr_Binop(
+						Iop_Or1,
+						IRExpr_Unop(
+							Iop_Not1,
+							e->cond),
+						e->exprX);
+				}
+			}
+
+			if (e->expr0->tag == Iex_Mux0X &&
+			    e->exprX->tag == Iex_Mux0X) {
+				IRExprMux0X *e0 = (IRExprMux0X *)e->expr0;
+				IRExprMux0X *eX = (IRExprMux0X *)e->exprX;
+				if (physicallyEqual(e0->expr0, eX->expr0) &&
+				    physicallyEqual(e0->exprX, eX->exprX)) {
+					/* Rewrite Mux0X(a, Mux0X(b, x, y), Mux0X(c, x, y))
+					   to Mux0X( (!a && !b) || (a && !c), x, y) */
+					*done_something = true;
+					return IRExpr_Mux0X(
+						IRExpr_Binop(
+							Iop_Or1,
+							IRExpr_Binop(
+								Iop_And1,
+								IRExpr_Unop(
+									Iop_Not1,
+									e->cond),
+								IRExpr_Unop(
+									Iop_Not1,
+									e0->cond)),
+							IRExpr_Binop(
+								Iop_And1,
+								e->cond,
+								IRExpr_Unop(
+									Iop_Not1,
+									eX->cond))),
+						e0->expr0,
+						e0->exprX);
+				}
+			}
 			return res;
 		}
 #undef hdr
