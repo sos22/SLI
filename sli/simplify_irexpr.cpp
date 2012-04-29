@@ -2201,6 +2201,65 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					}
 				}
 			}
+
+			if (e->exprX->tag == Iex_Associative) {
+				IRExprAssociative *eX = (IRExprAssociative *)e->exprX;
+				if (eX->op == Iop_And1) {
+					/* Mux0X(cond, a && b, b) -> b && (Mux0X(cond, a, true)) */
+					bool doit = false;
+					int x;
+					for (x = 0; !doit && x < eX->nr_arguments; x++) {
+						if (physicallyEqual(eX->contents[x], e->expr0))
+							doit = true;
+					}
+					if (doit) {
+						*done_something = true;
+						IRExprAssociative *newX =
+							(IRExprAssociative *)IRExpr_Associative(eX);
+						memmove(newX->contents + x,
+							newX->contents + x + 1,
+							sizeof(newX->contents[0]) * (newX->nr_arguments - x - 1));
+						newX->nr_arguments--;
+						return IRExpr_Binop(
+							Iop_And1,
+							e->expr0,
+							IRExpr_Mux0X(
+								e->cond,
+								newX,
+								IRExpr_Const(IRConst_U1(1))));
+					}
+				}
+			}
+
+			if (e->expr0->tag == Iex_Associative) {
+				IRExprAssociative *e0 = (IRExprAssociative *)e->expr0;
+				if (e0->op == Iop_And1) {
+					/* Mux0X(cond, b, a && b) -> b && (Mux0X(cond, true, a)) */
+					bool doit = false;
+					int x;
+					for (x = 0; !doit && x < e0->nr_arguments; x++) {
+						if (physicallyEqual(e0->contents[x], e->exprX))
+							doit = true;
+					}
+					if (doit) {
+						*done_something = true;
+						IRExprAssociative *new0 =
+							(IRExprAssociative *)IRExpr_Associative(e0);
+						memmove(new0->contents + x,
+							new0->contents + x + 1,
+							sizeof(new0->contents[0]) * (new0->nr_arguments - x - 1));
+						new0->nr_arguments--;
+						return IRExpr_Binop(
+							Iop_And1,
+							e->exprX,
+							IRExpr_Mux0X(
+								e->cond,
+								IRExpr_Const(IRConst_U1(1)),
+								new0));
+					}
+				}
+			}
+
 			return res;
 		}
 #undef hdr
