@@ -70,6 +70,8 @@ class threadState {
 		}
 		assignmentOrder.push_back(reg);
 	}
+
+	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp);
 public:
 	IRExpr *register_value(const threadAndRegister &reg,
 			       IRType type) {
@@ -238,7 +240,7 @@ public:
 			abort();
 		}
 	}
-	void set_register(const threadAndRegister &reg, IRExpr *e) {
+	void set_register(const threadAndRegister &reg, IRExpr *e, IRExpr **assumption) {
 		register_val &rv(registers[reg]);
 		switch (e->type()) {
 		case Ity_I8:
@@ -263,9 +265,12 @@ public:
 			abort();
 		}
 
+		if (reg.isTemp())
+			*assumption = setTemporary(reg, *assumption);
+
 		bump_register_in_assignment_order(reg);
 	}
-	void eval_phi(StateMachineSideEffectPhi *phi) {
+	void eval_phi(StateMachineSideEffectPhi *phi, IRExpr **assumption) {
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
 		     it++) {
@@ -275,6 +280,8 @@ public:
 				     it2++) {
 					if (*it2 == it->gen()) {
 						registers[phi->reg] = registers[*it];
+						if (phi->reg.isTemp())
+							*assumption = setTemporary(phi->reg, *assumption);
 						bump_register_in_assignment_order(phi->reg);
 						return;
 					}
@@ -301,9 +308,31 @@ public:
 		rv.val16 = NULL;
 		rv.val32 = NULL;
 		rv.val64 = NULL;
+		if (phi->reg.isTemp())
+			*assumption = setTemporary(phi->reg, *assumption);
 		bump_register_in_assignment_order(phi->reg);
 	}
 };
+
+/* Rewrite @e now that we know the value of @reg */
+IRExpr *
+threadState::setTemporary(const threadAndRegister &reg, IRExpr *e)
+{
+	struct _ : public IRExprTransformer {
+		const threadAndRegister &reg;
+		threadState *_this;
+		_(const threadAndRegister &_reg, threadState *__this)
+			: reg(_reg), _this(__this)
+		{}
+		IRExpr *transformIex(IRExprGet *ieg) {
+			if (threadAndRegister::fullEq(ieg->reg, reg))
+				return _this->register_value(reg, ieg->ty);
+			else
+				return IRExprTransformer::transformIex(ieg);
+		}
+	} doit(reg, this);
+	return doit.doit(e);
+}
 
 typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
 class StateMachineEvalContext {
@@ -633,7 +662,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 						specialiseIRExpr(addr, state),
 						smsel->rip,
 						smsel->type)));
-		state.set_register(smsel->target, val);
+		state.set_register(smsel->target, val, assumption);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -641,7 +670,8 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
 		state.set_register(smsec->target,
-				   specialiseIRExpr(smsec->value, state));
+				   specialiseIRExpr(smsec->value, state),
+				   assumption);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
@@ -657,7 +687,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *smsep =
 			(StateMachineSideEffectPhi *)(smse);
-		state.eval_phi(smsep);
+		state.eval_phi(smsep, assumption);
 		break;
 	}
 	}
@@ -813,85 +843,6 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	} while (chooser.advance());
 
 	return currentConstraint;
-}
-
-/* Augment @assumption so that it's sufficient to prove that @sm will
- * definitely crash. */
-IRExpr *
-writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
-			    VexPtr<IRExpr, &ir_heap> &assumption,
-			    VexPtr<Oracle> &oracle,
-			    const AllowableOptimisations &opt, 
-			    GarbageCollectionToken token)
-{
-	__set_profiling(writeMachineCrashConstraint);
-	NdChooser chooser;
-	VexPtr<IRExpr, &ir_heap> conjunctConstraint(assumption);
-	VexPtr<IRExpr, &ir_heap> disjunctConstraint(IRExpr_Const(IRConst_U1(0)));
-	bool crashes;
-
-	do {
-		if (TIMEOUT)
-			return NULL;
-
-		LibVEX_maybe_gc(token);
-		StateMachineEvalContext ctxt;
-
-		/* You might think that we should use the
-		   currentConstraint here, rather than the assumption.
-		   Not so: changing the path constraint would mean
-		   that evalStateMachine will make a different pattern
-		   of ND choices on each iteration, which would
-		   confuse the ND chooser. */
-		ctxt.pathConstraint = assumption;
-		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
-
-		if (!crashes) {
-			/* Survival should be pretty rare here, and
-			   pretty much only happen if the constraints
-			   on the machine contradict themselves
-			   (i.e. X must be simultaneously BadPtr and
-			   !BadPtr).  It doesn't really matter much
-			   what we do in that case (the rest of the
-			   machinery will discard those paths later
-			   on), but as an optimisation extend the
-			   assumption so that we don't even have to
-			   think abou them again. */
-			fprintf(_logfile, "\t\tStore machine survived during writeMachineSurvivalConstraint?\n");
-			conjunctConstraint =
-				IRExpr_Binop(
-					Iop_And1,
-					conjunctConstraint,
-					IRExpr_Unop(
-						Iop_Not1,
-						ctxt.justPathConstraint));
-			conjunctConstraint =
-				simplifyIRExpr(conjunctConstraint, opt);
-		} else {
-			/* The machine crashed this time, and
-			 * justPathConstraint is the assumption which
-			 * we had to make to make it go down this
-			 * path.  Collect together every such set of
-			 * assumptions, across every possible path,
-			 * and require that we will always go down one
-			 * of them.  Most of the time, there is only
-			 * one such path, and so this is very easy. */
-			disjunctConstraint =
-				IRExpr_Binop(
-					Iop_Or1,
-					disjunctConstraint,
-					ctxt.justPathConstraint);
-			disjunctConstraint =
-				simplifyIRExpr(disjunctConstraint, opt);
-		}
-	} while (chooser.advance());
-
-	IRExpr *finalConstraint = IRExpr_Binop(Iop_And1,
-					       conjunctConstraint,
-					       disjunctConstraint);
-	finalConstraint = simplifyIRExpr(finalConstraint, opt);
-	return finalConstraint;
 }
 
 bool
