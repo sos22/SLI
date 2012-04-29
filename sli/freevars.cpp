@@ -407,6 +407,7 @@ public:
 		switch (e->tag) {
 		case Iex_Const:
 		case Iex_Get:
+		case Iex_Phi:
 		case Iex_GetI:
 		case Iex_Load:
 		case Iex_Mux0X:

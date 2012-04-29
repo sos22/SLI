@@ -173,6 +173,11 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 		return a->before == b->before &&
 			a->after == b->after;
 	footer()
+	hdr(Phi)
+		return threadAndRegister::partialEq(a->reg, b->reg) &&
+		        a->generations == b->generations &&
+		        a->ty == b->ty;
+	footer()
 #undef footer
 #undef hdr
 	}
@@ -540,12 +545,26 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 		if ((s = _sortIntegers(a->before, b->before)) != equal_to)
 			return s;
 	        return _sortIntegers(a->after, b->after);
-	}
+
+	hdr(Phi)
+		if (threadAndRegister::partialCompare()(a->reg, b->reg))
+			return less_than;
+		if (threadAndRegister::partialCompare()(b->reg, a->reg))
+			return greater_than;
+	        if ((s = _sortIntegers(a->ty, b->ty)) != equal_to)
+			return s;
+		for (unsigned x = 0; x < a->generations.size() && x < b->generations.size(); x++) {
+			if ((s = _sortIntegers(a->generations[x], b->generations[x])) != equal_to)
+				return equal_to;
+		}
+		return _sortIntegers(a->generations.size(),
+				     b->generations.size());
 #undef hdr
 	}
-
+        }
 	abort();
 }
+
 void
 addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg)
 {

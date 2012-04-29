@@ -1213,6 +1213,7 @@ typedef
       Iex_ClientCall,
       Iex_ClientCallFailed,
       Iex_HappensBefore,
+      Iex_Phi,
    }
    IRExprTag;
 
@@ -1791,6 +1792,30 @@ struct IRExprHappensBefore : public IRExpr {
     }
 };
 
+struct IRExprPhi : public IRExpr {
+    threadAndRegister reg;
+    std::vector<unsigned> generations;
+    IRType ty;
+    IRExprPhi(const threadAndRegister _reg,
+	      std::vector<unsigned> _generations,
+	      IRType _ty)
+	: IRExpr(Iex_Phi),
+	  reg(_reg),
+	  generations(_generations),
+	  ty(_ty)
+    {}
+    void visit(HeapVisitor &hv) {}
+    unsigned long hashval() const { return 27; }
+    void prettyPrint(FILE *f) const;
+    IRType type() const { return ty; }
+    void sanity_check() const {
+	reg.sanity_check();
+	assert(generations.size() > 1);
+	sanity_check_irtype(ty);
+	assert(reg.gen() == 0);
+    }
+};
+
 /* Expression constructors. */
 extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid, unsigned generation );
 extern IRExpr* IRExpr_Get    ( threadAndRegister r, IRType ty );
@@ -1817,6 +1842,11 @@ extern IRExpr* IRExpr_ClientCall (const VexRip &r, const ThreadRip &callSite, IR
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
 				     const MemoryAccessIdentifier &after);
+static inline IRExpr *IRExpr_Phi (const threadAndRegister &r,
+				  const std::vector<unsigned> &generations,
+				  IRType ty) {
+    return new IRExprPhi(r, generations, ty);
+}
 
 /* Pretty-print an IRExpr. */
 static inline void ppIRExpr ( IRExpr*e, FILE *f ) { e->prettyPrint(f); }

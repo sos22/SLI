@@ -54,6 +54,8 @@ shallow_hash(const IRExpr *e)
 		return 100256371 + ((IRExprClientCall *)e)->callSite.rip.hash() * 50013641;
 	case Iex_HappensBefore:
 		return 100234427;
+	case Iex_Phi:
+		return 100029499 + ((IRExprPhi *)e)->reg.hash() * 1000014181;
 	}
 	abort();
 }
@@ -71,6 +73,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_Const:
 	case Iex_FreeVariable:
 	case Iex_HappensBefore:
+	case Iex_Phi:
 		break;
 	case Iex_GetI:
 		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
@@ -232,6 +235,15 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			    ((IRExprHappensBefore *)e)->after != ((IRExprHappensBefore *)other)->after)
 				continue;
 			break;
+
+		case Iex_Phi: {
+			IRExprPhi *ep = (IRExprPhi *)e;
+			IRExprPhi *op = (IRExprPhi *)other;
+			if (!threadAndRegister::fullEq(ep->reg, op->reg) ||
+			    ep->generations != op->generations || ep->ty != op->ty)
+				continue;
+			break;
+		}
 		}
 
 		/* If we get here, they match and we're done. */

@@ -164,6 +164,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	case Iex_ClientCall: /* There shouldn't be any of these at this stage */
 	case Iex_ClientCallFailed:
 	case Iex_HappensBefore:
+	case Iex_Phi:
 		abort();
 	}
 	throw NotImplementedException("Something bad");

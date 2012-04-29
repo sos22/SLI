@@ -1216,6 +1216,31 @@ static bool parseIRExprHappensBefore(IRExpr **res, const char *str, const char *
   return true;
 }
 
+static bool parseIRExprPhi(IRExpr **res, const char *str, const char **suffix)
+{
+    threadAndRegister reg(threadAndRegister::invalid());
+    if (!parseThisString("(Phi ", str, &str) ||
+	!parseThreadAndRegister(&reg, str, &str) ||
+	!parseThisString(":(", str, &str))
+	return false;
+    std::vector<unsigned> generations;
+    while (1) {
+	if (parseThisChar(')', str, &str))
+	    break;
+	unsigned i;
+	if (!parseDecimalUInt(&i, str, &str))
+	    return false;
+	generations.push_back(i);
+	parseThisString(", ", str, &str);
+    }
+    IRType ty;
+    if (!parseIRType(&ty, str, &str) ||
+	!parseThisChar(')', str, suffix))
+	return false;
+    *res = IRExpr_Phi(reg, generations, ty);
+    return true;
+}
+
 bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 {
 #define do_form(name)					\
@@ -1236,6 +1261,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
   do_form(ClientCall);
   do_form(FailedCall);
   do_form(HappensBefore);
+  do_form(Phi);
 #undef do_form
   return false;
 }
@@ -1370,6 +1396,19 @@ IRExprHappensBefore::prettyPrint(FILE *f) const
       fprintf(f, "(%s <-< %s)",
 	      before.name(),
 	      after.name());
+}
+void
+IRExprPhi::prettyPrint(FILE *f) const
+{
+      fprintf(f, "(Phi %s:(", reg.name());
+      for (auto it = generations.begin(); it != generations.end(); it++) {
+	  if (it != generations.begin())
+	      fprintf(f, ", ");
+	  fprintf(f, "%d", *it);
+      }
+      fprintf(f, ")");
+      ppIRType(ty, f);
+      fprintf(f, ")");
 }
 
 
