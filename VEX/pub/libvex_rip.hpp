@@ -214,6 +214,18 @@ public:
 
 	void sanity_check() const {
 	}
+
+	/* Check whether this is a strict truncation of @vr (i.e.  vr
+	   with some elements removed from the top) */
+	bool isTruncationOf(const VexRip &vr) const {
+		if (stack.size() >= vr.stack.size())
+			return false;
+		for (unsigned x = 0; x < stack.size(); x++)
+			if (stack[stack.size() - x - 1] !=
+			    vr.stack[vr.stack.size() - x - 1])
+				return false;
+		return true;
+	}
 };
 
 #endif /* !LIBVEX_RIP_HPP__ */
