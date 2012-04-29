@@ -1924,6 +1924,21 @@ IRExpr* IRExpr_Associative(IRExprAssociative *src)
    e->sanity_check();
    return e;
 }
+IRExprAssociative* IRExpr_Associative(int nr_arguments, IROp op)
+{
+  IRExprAssociative *e = new IRExprAssociative();
+  e->op = op;
+  e->nr_arguments = 0;
+  e->nr_arguments_allocated = nr_arguments;
+  static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+  e->contents = (IRExpr **)
+    __LibVEX_Alloc_Bytes(&ir_heap,
+			 sizeof(e->contents[0]) *
+			 e->nr_arguments_allocated,
+			 &__las);
+  e->sanity_check();
+  return e;
+}
 IRExpr* IRExpr_FreeVariable ( FreeVariableKey key )
 {
    IRExprFreeVariable *e = new IRExprFreeVariable();

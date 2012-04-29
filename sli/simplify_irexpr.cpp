@@ -2085,6 +2085,122 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				else
 					return e->expr0;
 			}
+			if (_sortIRExprs(e->exprX, e->expr0) == equal_to) {
+				*done_something = true;
+				return e->exprX;
+			}
+
+			if (e->exprX->tag == Iex_Associative &&
+			    e->expr0->tag == Iex_Associative &&
+			    ((IRExprAssociative *)e->exprX)->op ==
+			    ((IRExprAssociative *)e->expr0)->op) {
+				IRExprAssociative *eX = (IRExprAssociative *)e->exprX;
+				IRExprAssociative *e0 = (IRExprAssociative *)e->expr0;
+				IROp op = eX->op;
+				if (op == Iop_Or1 || op == Iop_And1 ||
+				    (op >= Iop_Add8 && op <= Iop_Add64) ||
+				    (op >= Iop_And8 && op <= Iop_And64) ||
+				    (op >= Iop_Or8 && op <= Iop_Or64)) {
+					/* Factorise the expression.  If we
+					   have Mux0X(a, b + c, b + d),
+					   we can turn that into
+					   b + Mux0X(a, c, d). */
+					/* We take advantage of the
+					   fact that the operators are
+					   all commutative and that
+					   they're therefore
+					   sorted. */
+					int idx_x = 0;
+					int idx_0 = 0;
+					int nr_dupes = 0;
+					while (idx_x < eX->nr_arguments &&
+					       idx_0 < e0->nr_arguments) {
+						sort_ordering s = _sortIRExprs(eX->contents[idx_x],
+									       e0->contents[idx_0]);
+						if (s == less_than) {
+							idx_x++;
+						} else if (s == greater_than) {
+							idx_0++;
+						} else {
+							nr_dupes++;
+							idx_x++;
+							idx_0++;
+						}
+					}
+					if (nr_dupes != 0) {
+						dbg_break("Here we are\n");
+						*done_something = true;
+						IRExprAssociative *newRoot =
+							IRExpr_Associative(nr_dupes + 1,
+									   op);
+						IRExprAssociative *newX =
+							IRExpr_Associative(
+								eX->nr_arguments - nr_dupes,
+								eX->op);
+						IRExprAssociative *new0 =
+							IRExpr_Associative(
+								e0->nr_arguments - nr_dupes,
+								e0->op);
+						int idx_out;
+						int idx_x_out;
+						int idx_0_out;
+
+						idx_x = 0;
+						idx_0 = 0;
+						idx_x_out = 0;
+						idx_0_out = 0;
+						idx_out = 0;
+						while (idx_x < eX->nr_arguments &&
+						       idx_0 < e0->nr_arguments) {
+							sort_ordering s = _sortIRExprs(eX->contents[idx_x],
+										       e0->contents[idx_0]);
+							if (s == less_than) {
+								newX->contents[idx_x_out] =
+									eX->contents[idx_x];
+								idx_x++;
+								idx_x_out++;
+							} else if (s == greater_than) {
+								new0->contents[idx_0_out] =
+									e0->contents[idx_0];
+								idx_0++;
+								idx_0_out++;
+							} else {
+								newRoot->contents[idx_out] =
+									e0->contents[idx_0];
+								idx_0++;
+								idx_x++;
+								idx_out++;
+							}
+						}
+						while (idx_x < eX->nr_arguments) {
+							newX->contents[idx_x_out] =
+								eX->contents[idx_x];
+							idx_x++;
+							idx_x_out++;
+						}
+						while (idx_0 < e0->nr_arguments) {
+							new0->contents[idx_0_out] =
+								e0->contents[idx_0];
+							idx_0++;
+							idx_0_out++;
+						}
+						assert(idx_0 == e0->nr_arguments);
+						assert(idx_x == eX->nr_arguments);
+						assert(idx_0_out == e0->nr_arguments - nr_dupes);
+						assert(idx_x_out == eX->nr_arguments - nr_dupes);
+						assert(idx_out == nr_dupes);
+						newRoot->contents[idx_out] =
+							IRExpr_Mux0X(
+								e->cond,
+								new0,
+								newX);
+						newRoot->nr_arguments = idx_out + 1;
+						newX->nr_arguments = idx_x_out;
+						new0->nr_arguments = idx_0_out;
+						return newRoot;
+					}
+				}
+			}
 			return res;
 		}
 #undef hdr

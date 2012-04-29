@@ -1836,6 +1836,7 @@ extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExprAssociative *);
+extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
 extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
 extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (const VexRip &r, const ThreadRip &callSite, IRExpr **args);
