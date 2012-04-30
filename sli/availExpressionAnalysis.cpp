@@ -231,7 +231,36 @@ avail_t::merge(const avail_t &other,
 				res |= sideEffects.insert(*it).second;
 		}
 	}
-	res |= intersectSets(sideEffects, other.sideEffects);
+
+	std::set<StateMachineSideEffect *> newEffectsToIntroduce;
+	auto it1 = sideEffects.begin();
+	auto it2 = other.sideEffects.begin();
+	while (it1 != sideEffects.end() && it2 != other.sideEffects.end()) {
+		if (*it1 == *it2) {
+			it1++;
+			it2++;
+		} else if (*it1 < *it2) {
+			if ( is_ssa && (*it1)->type == StateMachineSideEffect::Copy ) {
+				it1++;
+			} else {
+				sideEffects.erase(it1++);
+			}
+			res = true;
+		} else {
+			assert(*it2 < *it1);
+			if ( is_ssa && (*it2)->type == StateMachineSideEffect::Copy )
+				newEffectsToIntroduce.insert(*it2);
+			it2++;
+		}
+	}
+	while (it1 != sideEffects.end()) {
+		res = true;
+		if ( is_ssa && (*it1)->type == StateMachineSideEffect::Copy )
+			it1++;
+		else
+			sideEffects.erase(it1++);
+	}
+	sideEffects.insert(newEffectsToIntroduce.begin(), newEffectsToIntroduce.end());
 
 	for (auto it = assertFalse.begin();
 	     it != assertFalse.end();
@@ -650,13 +679,34 @@ buildNewStateMachineWithLoadsEliminated(
 				if (threadAndRegister::partialEq(phi->reg, it->first)) {
 					for (unsigned x = 0; x < phi->generations.size(); x++) {
 						if (phi->generations[x].first == it->first.gen()) {
-							if (phi->generations[x].second == it->second.e)
+							if (phi->generations[x].second &&
+							    physicallyEqual(phi->generations[x].second,
+									    it->second.e))
 								break;
 							assert(!phi->generations[x].second);
 							if (!newPhi)
 								newPhi = new StateMachineSideEffectPhi(*phi);
 							newPhi->generations[x].second = it->second.e;
 						}
+					}
+				}
+			}
+			for (unsigned x = 0; x < phi->generations.size(); x++) {
+				IRExpr *e;
+				e = (newPhi ? newPhi : phi)->generations[x].second;
+				if (e) {
+					bool t = false;
+					IRExpr *e2 = applyAvailSet(currentlyAvailable,
+								   e,
+								   false,
+								   &t,
+								   opt);
+					if (t) {
+						assert(e != e2);
+						if (!newPhi)
+							newPhi = new StateMachineSideEffectPhi(*phi);
+						newPhi->generations[x].second = e2;
+						*done_something = true;
 					}
 				}
 			}

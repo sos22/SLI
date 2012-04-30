@@ -59,7 +59,7 @@ physicallyEqual(const IRCallee *a, const IRCallee *b)
 	return a->addr == b->addr;
 }
 
-static bool
+bool
 physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 {
 	if (_a == _b)

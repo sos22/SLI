@@ -1185,6 +1185,15 @@ optimiseSSA(StateMachine *inp, bool *done_something)
 StateMachineSideEffect *
 StateMachineSideEffectPhi::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
-	return this;
+	if (generations.size() == 0 ||
+	    generations[0].second == NULL)
+		return this;
+	IRExpr *v = generations[0].second;
+	for (unsigned x = 1; x < generations.size(); x++) {
+		if (generations[x].second != v)
+			return this;
+	}
+	*done_something = true;
+	return new StateMachineSideEffectCopy(reg, v);
 }
 
