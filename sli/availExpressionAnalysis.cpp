@@ -91,10 +91,10 @@ public:
 	void clear() { sideEffects.clear(); assertFalse.clear(); _registers.clear(); }
 	void makeFalse(IRExpr *expr, const AllowableOptimisations &opt);
 	void dereference(IRExpr *ptr, const AllowableOptimisations &opt);
-	/* Go through and remove anything which isn't also present in
-	   other.  Returns true if we did anything, and false
-	   otherwise. */
-	bool intersect(const avail_t &other, const AllowableOptimisations &opt);
+	/* Merge @other into the current availability set.  Returns
+	   true if we do anything, and false otherwise. */
+	bool merge(const avail_t &other, const AllowableOptimisations &opt,
+		   bool is_ssa);
 
 	void calcRegisterMap(const AllowableOptimisations &opt);
 
@@ -197,11 +197,41 @@ intersectSets(std::set<a> &x, const std::set<a> &y)
 }
 
 bool
-avail_t::intersect(const avail_t &other, const AllowableOptimisations &opt)
+avail_t::merge(const avail_t &other,
+	       const AllowableOptimisations &opt,
+	       bool is_ssa)
 {
 	bool res;
 
-	res = intersectSets(sideEffects, other.sideEffects);
+	/* The merge rules are a little bit tricky.  The obvious
+	   answer is an intersection, but that's a bit more
+	   conservative than we need, at least for registers.  The
+	   observation is that if a parent doesn't define a register
+	   at all then it must be that if we came from that parent
+	   then we will never use that register, because otherwise
+	   we'd have a use-without-initialisation bug.  Therefore, if
+	   one parent defines a register and the other doesn't, we can
+	   just take the value from whichever parent *does* define it.
+
+	   i.e. the output is the *union* of inputs for
+	   register-defining side effects, unless we have conflicting
+	   definitions for the same register.
+
+	   In SSA form, we can't ever have conflicting definitions for
+	   a single register, because that would violate the SSA
+	   property, so this cunningness is safe in SSA form but not
+	   otherwise. */
+	res = false;
+	if (is_ssa) {
+		for (auto it = other.sideEffects.begin(); it != other.sideEffects.end(); it++) {
+			StateMachineSideEffect *smse = *it;
+			/* We only do this for copies, since those are
+			   the only ones for which it's safe. */
+			if (smse->type == StateMachineSideEffect::Copy)
+				res |= sideEffects.insert(*it).second;
+		}
+	}
+	res |= intersectSets(sideEffects, other.sideEffects);
 
 	for (auto it = assertFalse.begin();
 	     it != assertFalse.end();
@@ -608,9 +638,33 @@ buildNewStateMachineWithLoadsEliminated(
 				newEffect = *it;
 			break;
 		}
-		case StateMachineSideEffect::Phi:
-			newEffect = *it;
+		case StateMachineSideEffect::Phi: {
+			StateMachineSideEffectPhi *phi =
+				(StateMachineSideEffectPhi *)*it;
+			StateMachineSideEffectPhi *newPhi = NULL;
+			for (auto it = currentlyAvailable._registers.begin();
+			     it != currentlyAvailable._registers.end();
+			     it++) {
+				if (!it->second.e)
+					continue;
+				if (threadAndRegister::partialEq(phi->reg, it->first)) {
+					for (unsigned x = 0; x < phi->generations.size(); x++) {
+						if (phi->generations[x].first == it->first.gen()) {
+							if (!newPhi)
+								newPhi = new StateMachineSideEffectPhi(*phi);
+							newPhi->generations[x].second = it->second.e;
+						}
+					}
+				}
+			}
+			if (newPhi) {
+				newEffect = newPhi;
+				*done_something = true;
+			} else {
+				newEffect = phi;
+			}
 			break;
+		}
 		}
 		if (debug_substitutions) {
 			printf("New side effect ");
@@ -744,8 +798,11 @@ avail_t::findAllPotentiallyAvailable(StateMachine *sm,
 }
 
 static StateMachine *
-availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
+availExpressionAnalysis(StateMachine *sm,
+			const AllowableOptimisations &opt,
+			const Oracle::RegisterAliasingConfiguration *alias,
+			bool is_ssa,
+			Oracle *oracle,
 			bool *done_something)
 {
 	std::map<const StateMachineEdge *, int> edgeLabels;
@@ -859,7 +916,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 				     it2++)
 					updateAvailSetForSideEffect(outputAvail, *it2,
 								    opt, alias, oracle);
-				if (availOnExit[edge].intersect(outputAvail, opt)) {
+				if (availOnExit[edge].merge(outputAvail, opt, is_ssa)) {
 					if (debug_build_table)
 						printf("Made progress; edge %d needs refresh\n",
 						       edgeLabels[edge]);
@@ -889,7 +946,7 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 			StateMachineState *target = edge->target;
 			avail_t &avail_at_end_of_edge(availOnExit[edge]);
 			avail_t &avail_at_start_of_target(availOnEntry[target]);
-			if (avail_at_start_of_target.intersect(avail_at_end_of_edge, opt))
+			if (avail_at_start_of_target.merge(avail_at_end_of_edge, opt, is_ssa))
 				statesNeedingRefresh.insert(target);
 		}
 		edgesNeedingRefresh.clear();
@@ -935,10 +992,15 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 }
 
 StateMachine *
-availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
+availExpressionAnalysis(StateMachine *sm,
+			const AllowableOptimisations &opt,
+			const Oracle::RegisterAliasingConfiguration *alias,
+			bool is_ssa,
+			Oracle *oracle,
 			bool *done_something)
 {
 	sm->sanityCheck();
-	return _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, oracle, done_something);
+	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, is_ssa, oracle, done_something);
+	res->sanityCheck();
+	return res;
 }

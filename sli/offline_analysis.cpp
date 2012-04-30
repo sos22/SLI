@@ -358,7 +358,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			removeSurvivingStates(sm, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
 		LibVEX_maybe_gc(token);
-		sm = availExpressionAnalysis(sm, opt, aliasp, oracle, &done_something);
+		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &done_something);
 		LibVEX_maybe_gc(token);
 		{
 			bool d;
