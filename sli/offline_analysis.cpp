@@ -719,7 +719,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 					  opt,
 					  oracle,
 					  false,
-					  true,
+					  false,
 					  token);
 		breakCycles(cr);
 		if (TIMEOUT)
@@ -728,7 +728,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 					  opt,
 					  oracle,
 					  false,
-					  true,
+					  false,
 					  token);
 
 		if (dynamic_cast<StateMachineNoCrash *>(cr->root)) {
