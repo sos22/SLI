@@ -2116,6 +2116,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				else
 					return e->expr0;
 			}
+
+			if (_sortIRExprs(e->exprX, e->expr0) == equal_to) {
+				*done_something = true;
+				return e->exprX;
+			}
+
 			if (e->type() == Ity_I1) {
 				/* If we're working at boolean type
 				   then the whole thing turns into a
@@ -2133,11 +2139,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						Iop_And1,
 						e->cond,
 						e->exprX));
-			}
-
-			if (_sortIRExprs(e->exprX, e->expr0) == equal_to) {
-				*done_something = true;
-				return e->exprX;
 			}
 
 			if (e->exprX->tag == Iex_Associative &&
