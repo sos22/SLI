@@ -1395,6 +1395,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 										   done_something);
 			}
 
+			if (e->op == Iop_And1) {
+				for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++)
+					for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
+						e->contents[idx2] = rewriteBoolean(e->contents[idx1],
+										   true,
+										   e->contents[idx2],
+										   done_something);
+			}
+
 			/* x + -x -> 0, for any plus-like operator, so remove
 			 * both x and -x from the list. */
 			/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
@@ -2101,6 +2110,13 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExprTransformer::transformIRExpr(e, done_something);
 				}
 			} doit;
+			if (expr->tag == Iex_Unop) {
+				IRExprUnop *e = (IRExprUnop *)expr;
+				if (e->op == Iop_Not1) {
+					val = !val;
+					expr = e->arg;
+				}
+			}
 			doit.from = expr;
 			doit.to = val;
 			doit._to = NULL;
