@@ -2301,6 +2301,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 			return res;
 		}
+
+		IRExpr *transformIex(IRExprPhi *e) {
+			hdr(Phi);
+			if (e->generations.size() == 1)
+				return IRExpr_Get(e->reg.setGen(e->generations[0]),
+						  e->ty);
+			return res;
+		}
 #undef hdr
 
 	public:
