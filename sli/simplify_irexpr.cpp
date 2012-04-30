@@ -2304,6 +2304,47 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						e0->exprX);
 				}
 			}
+
+			if (e->expr0->tag == Iex_Const) {
+				IRExprConst *e0 = (IRExprConst *)e->expr0;
+				if (e0->con->tag == Ico_U1) {
+					*done_something = true;
+					if (e0->con->Ico.U1 == 0) {
+						return IRExpr_Binop(
+							Iop_And1,
+							e->cond,
+							e->exprX);
+					} else {
+						return IRExpr_Binop(
+							Iop_Or1,
+							IRExpr_Unop(
+								Iop_Not1,
+								e->cond),
+							e->exprX);
+					}
+				}
+			}
+
+			if (e->exprX->tag == Iex_Const) {
+				IRExprConst *eX = (IRExprConst *)e->exprX;
+				if (eX->con->tag == Ico_U1) {
+					*done_something = true;
+					if (eX->con->Ico.U1 == 0) {
+						return IRExpr_Binop(
+							Iop_And1,
+							IRExpr_Unop(
+								Iop_Not1,
+								e->cond),
+							e->expr0);
+					} else {
+						return IRExpr_Binop(
+							Iop_Or1,
+							e->cond,
+							e->expr0);
+					}
+				}
+			}
+
 			return res;
 		}
 #undef hdr
