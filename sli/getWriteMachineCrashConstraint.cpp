@@ -107,6 +107,25 @@ insertPhi(StateMachineSideEffectPhi *phi, IRExpr *e)
 }
 
 static IRExpr *
+setTemporary(const threadAndRegister &reg, IRExpr *value, IRExpr *input)
+{
+	struct _ : public IRExprTransformer {
+		const threadAndRegister &reg;
+		IRExpr *value;
+		_(const threadAndRegister &_reg, IRExpr *_value)
+			: reg(_reg), value(_value)
+		{}
+		IRExpr *transformIex(IRExprGet *ieg) {
+			if (threadAndRegister::fullEq(reg, ieg->reg))
+				return value;
+			else
+				return NULL;
+		}
+	} doit(reg, value);
+	return doit.doit(input);
+}
+
+static IRExpr *
 sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc, crash_constraint_context &ctxt)
 {
 	switch (smse->type) {
@@ -126,6 +145,7 @@ sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc, crash_const
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *smsec = (StateMachineSideEffectCopy *)smse;
 		acc = resolvePhis(smsec->target, acc);
+		acc = setTemporary(smsec->target, smsec->value, acc);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
