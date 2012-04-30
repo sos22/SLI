@@ -6,9 +6,24 @@
 
 namespace _writeMachineCrashConstraint {
 
-static IRExpr *stateCrashConstraint(StateMachineState *s,
-				    std::map<StateMachineState *, IRExpr *> &stateValues,
-				    const AllowableOptimisations &opt);
+struct crash_constraint_context {
+	IRExpr *surviveExpression;
+	IRExpr *crashExpression;
+	IRExpr *escapeExpression;
+	const AllowableOptimisations &opt;
+	std::map<StateMachineState *, IRExpr *> stateValues;
+
+	IRExpr *escapeConstraint(IRExpr *escape_if, IRExpr *non_escape)
+	{
+		return IRExpr_Mux0X(escape_if, non_escape, escapeExpression);
+	}
+
+	crash_constraint_context(const AllowableOptimisations &_opt)
+		: opt(_opt)
+	{}
+};
+
+static IRExpr *stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt);
 
 static IRExpr *
 resolvePhis(const threadAndRegister &reg, IRExpr *e)
@@ -83,34 +98,20 @@ insertPhi(StateMachineSideEffectPhi *phi, IRExpr *e)
 }
 
 static IRExpr *
-sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc)
+sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc, crash_constraint_context &ctxt)
 {
 	switch (smse->type) {
 	case StateMachineSideEffect::Load: {
 		StateMachineSideEffectLoad *smsel =
 			(StateMachineSideEffectLoad *)smse;
 		acc = resolvePhis(smsel->target, acc);
-		acc = IRExpr_Binop(
-			Iop_And1,
-			acc,
-			IRExpr_Unop(
-				Iop_Not1,
-				IRExpr_Unop(
-					Iop_BadPtr,
-					smsel->addr)));
+		acc = ctxt.escapeConstraint(IRExpr_Unop(Iop_BadPtr, smsel->addr), acc);
 		break;
 	}
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectStore *smsema =
 			(StateMachineSideEffectStore *)smse;
-		acc = IRExpr_Binop(
-			Iop_And1,
-			acc,
-			IRExpr_Unop(
-				Iop_Not1,
-				IRExpr_Unop(
-					Iop_BadPtr,
-					smsema->addr)));
+		acc = ctxt.escapeConstraint(IRExpr_Unop(Iop_BadPtr, smsema->addr), acc);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -119,17 +120,12 @@ sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc)
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
-		acc = IRExpr_Const(IRConst_U1(0));
+		acc = ctxt.escapeExpression;
 		break;
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *smseaf =
 			(StateMachineSideEffectAssertFalse *)smse;
-		acc = IRExpr_Binop(
-			Iop_And1,
-			acc,
-			IRExpr_Unop(
-				Iop_Not1,
-				smseaf->value));
+		acc = ctxt.escapeConstraint(smseaf->value, acc);
 		break;
 	}
 	case StateMachineSideEffect::Phi:
@@ -141,56 +137,49 @@ sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc)
 }
 
 static IRExpr *
-edgeCrashConstraint(StateMachineEdge *e,
-		    std::map<StateMachineState *, IRExpr *> &stateValues,
-		    const AllowableOptimisations &opt)
+edgeCrashConstraint(StateMachineEdge *e, crash_constraint_context &ctxt)
 {
-	IRExpr *acc = stateCrashConstraint(e->target,
-					   stateValues,
-					   opt);
+	IRExpr *acc = stateCrashConstraint(e->target, ctxt);
 
 	for (auto it = e->sideEffects.rbegin(); it != e->sideEffects.rend(); it++) {
 		StateMachineSideEffect *smse = *it;
-		acc = sideEffectCrashConstraint(smse, acc);
-		acc = simplifyIRExpr(acc, opt);
+		acc = sideEffectCrashConstraint(smse, acc, ctxt);
+		acc = simplifyIRExpr(acc, ctxt.opt);
 	}
 	return acc;
 }
 
 static IRExpr *
-stateCrashConstraint(StateMachineState *s,
-		     std::map<StateMachineState *, IRExpr *> &stateValues,
-		     const AllowableOptimisations &opt)
+stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt)
 {
-	auto it = stateValues.find(s);
-	if (it != stateValues.end())
+	auto it = ctxt.stateValues.find(s);
+	if (it != ctxt.stateValues.end())
 		return it->second;
 
 	IRExpr *res;
 	if (dynamic_cast<StateMachineTerminal *>(s)) {
 		if (dynamic_cast<StateMachineCrash *>(s))
-			res = IRExpr_Const(IRConst_U1(1));
+			res = ctxt.crashExpression;
+		else if (dynamic_cast<StateMachineNoCrash *>(s))
+			res = ctxt.surviveExpression;
+		else if (dynamic_cast<StateMachineUnreached *>(s) ||
+			 dynamic_cast<StateMachineStub *>(s))
+			res = ctxt.escapeExpression;
 		else
-			res = IRExpr_Const(IRConst_U1(0));
+			abort();
 	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
-		res = edgeCrashConstraint(smp->target,
-					  stateValues,
-					  opt);
+		res = edgeCrashConstraint(smp->target, ctxt);
 	} else {
 		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s);
 		assert(smb);
 		res = IRExpr_Mux0X(
 			smb->condition,
-			edgeCrashConstraint(smb->trueTarget,
-					    stateValues,
-					    opt),
-			edgeCrashConstraint(smb->falseTarget,
-					    stateValues,
-					    opt));
+			edgeCrashConstraint(smb->trueTarget, ctxt),
+			edgeCrashConstraint(smb->falseTarget, ctxt));
 	}
 
-	res = simplifyIRExpr(res, opt);
-	stateValues[s] = res;
+	res = simplifyIRExpr(res, ctxt.opt);
+	ctxt.stateValues[s] = res;
 	return res;
 }
 
@@ -212,27 +201,28 @@ freeFromPhis(IRExpr *e)
 #endif
 
 static IRExpr *
-writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
-			    VexPtr<IRExpr, &ir_heap> &assumption,
-			    const AllowableOptimisations &opt,
-			    GarbageCollectionToken token)
+writeMachineCrashConstraint(StateMachine *sm,
+			    IRExpr *assumption,
+			    IRExpr *surviveExpression,
+			    IRExpr *crashExpression,
+			    IRExpr *escapeExpression,
+			    const AllowableOptimisations &opt)
 {
-	VexPtr<IRExpr, &ir_heap> e;
-	{
-		std::map<StateMachineState *, IRExpr *> stateConstraints;
-		e = stateCrashConstraint(sm->root,
-					 stateConstraints,
-					 opt);
-	}
-	LibVEX_maybe_gc(token);
+	struct crash_constraint_context ctxt(opt);
+	
+	ctxt.surviveExpression = surviveExpression;
+	ctxt.crashExpression = crashExpression;
+	ctxt.escapeExpression = escapeExpression;
+	IRExpr *res = stateCrashConstraint(sm->root, ctxt);
 
-	IRExpr *res = simplifyIRExpr(
+	assert(freeFromPhis(res));
+
+	res = simplifyIRExpr(
 		IRExpr_Binop(
 			Iop_And1,
 			assumption,
-			e),
+			res),
 		opt);
-	assert(freeFromPhis(res));
 	return res;
 }
 
@@ -240,11 +230,17 @@ writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
 };
 
 IRExpr *
-writeMachineCrashConstraint(VexPtr<StateMachine, &ir_heap> &sm,
-			    VexPtr<IRExpr, &ir_heap> &assumption,
-			    VexPtr<Oracle> &oracle,
-			    const AllowableOptimisations &opt,
-			    GarbageCollectionToken token)
+writeMachineCrashConstraint(StateMachine *sm,
+			    IRExpr *assumption,
+			    IRExpr *surviveExpression,
+			    IRExpr *crashExpression,
+			    IRExpr *escapeExpression,
+			    const AllowableOptimisations &opt)
 {
-	return _writeMachineCrashConstraint::writeMachineCrashConstraint(sm, assumption, opt, token);
+	return _writeMachineCrashConstraint::writeMachineCrashConstraint(sm,
+									 assumption,
+									 surviveExpression,
+									 crashExpression,
+									 escapeExpression,
+									 opt);
 }

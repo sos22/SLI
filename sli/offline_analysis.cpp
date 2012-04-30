@@ -443,7 +443,12 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
-	assumption = writeMachineCrashConstraint(sm, assumption, oracle, opt, token);
+	assumption = writeMachineCrashConstraint(sm, assumption,
+						 IRExpr_Const(IRConst_U1(0)),
+						 IRExpr_Const(IRConst_U1(1)),
+						 IRExpr_Const(IRConst_U1(0)),
+						 opt);
+						 
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine survival constraint\n");
 		return false;
