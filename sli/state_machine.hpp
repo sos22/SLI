@@ -287,9 +287,11 @@ public:
 #ifdef NDEBUG
 	void sanityCheck() const {}
 	void assertAcyclic() const {}
+	void assertSSA() const {}
 #else
 	void sanityCheck() const;
 	void assertAcyclic() const;
+	void assertSSA() const;
 #endif
 
 	NAMED_CLASS

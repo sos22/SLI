@@ -894,3 +894,42 @@ StateMachine::assertAcyclic() const
 		(*it)->assertAcyclic();
 }
 #endif
+
+#ifndef NDEBUG
+void
+StateMachine::assertSSA() const
+{
+	std::set<StateMachineEdge *> edges;
+	enumStatesAndEdges<StateMachineState>(const_cast<StateMachine *>(this),
+					      (std::set<StateMachineState *> *)NULL,
+					      &edges);
+	std::set<threadAndRegister, threadAndRegister::fullCompare> discoveredAssignments;
+	for (auto it = edges.begin(); it != edges.end(); it++) {
+		for (auto it2 = (*it)->sideEffects.begin(); it2 != (*it)->sideEffects.end(); it2++) {
+			StateMachineSideEffect *smse = *it2;
+			switch (smse->type) {
+			case StateMachineSideEffect::Load: {
+				StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)smse;
+				if (!discoveredAssignments.insert(smsel->target).second)
+					abort();
+				break;
+			}
+			case StateMachineSideEffect::Copy: {
+				StateMachineSideEffectCopy *smsec = (StateMachineSideEffectCopy *)smse;
+				if (!discoveredAssignments.insert(smsec->target).second)
+					abort();
+				break;
+			}
+			case StateMachineSideEffect::Phi: {
+				StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)smse;
+				if (!discoveredAssignments.insert(smsep->reg).second)
+					abort();
+				break;
+			}
+			default:
+				break;
+			}
+		}
+	}
+}
+#endif

@@ -343,6 +343,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 	if (is_ssa) {
 		alias = oracle->getAliasingConfigurationForRip(sm->origin);
 		aliasp = &alias;
+		sm->assertSSA();
 	} else {
 		aliasp = NULL;
 	}
@@ -380,6 +381,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
 	sm->sanityCheck();
+	if (is_ssa)
+		sm->assertSSA();
 	return sm;
 }
 
