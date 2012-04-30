@@ -1386,6 +1386,15 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				}
 			}
 
+			if (e->op == Iop_Or1) {
+				for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++)
+					for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
+						e->contents[idx2] = rewriteBoolean(e->contents[idx1],
+										   false,
+										   e->contents[idx2],
+										   done_something);
+			}
+
 			/* x + -x -> 0, for any plus-like operator, so remove
 			 * both x and -x from the list. */
 			/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
@@ -2076,6 +2085,28 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			return res;
 		}
 
+		IRExpr *rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something) {
+			struct : public IRExprTransformer {
+				IRExpr *from;
+				bool to;
+				IRExpr *_to;
+				bool *done_something;
+				IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+					if (physicallyEqual(e, from)) {
+						if (!_to)
+							_to = IRExpr_Const(IRConst_U1(to));
+						*done_something = true;
+						return _to;
+					}
+					return IRExprTransformer::transformIRExpr(e, done_something);
+				}
+			} doit;
+			doit.from = expr;
+			doit.to = val;
+			doit._to = NULL;
+			doit.done_something = done_something;
+			return doit.doit(inp);
+		}
 		IRExpr *transformIex(IRExprMux0X *e) {
 			hdr(Mux0X)
 			if (e->cond->tag == Iex_Const) {
