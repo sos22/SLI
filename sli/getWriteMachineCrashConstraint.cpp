@@ -6,12 +6,21 @@
 
 namespace _writeMachineCrashConstraint {
 
+#ifdef NDEBUG
+#define dump_state_constraints 0
+#else
+static int dump_state_constraints = 0;
+#endif
+
 struct crash_constraint_context {
 	IRExpr *surviveExpression;
 	IRExpr *crashExpression;
 	IRExpr *escapeExpression;
 	const AllowableOptimisations &opt;
 	std::map<StateMachineState *, IRExpr *> stateValues;
+	std::map<StateMachineEdge *, IRExpr *> edgeValues;
+
+	std::map<const StateMachineEdge *, int> edgeLabels;
 
 	IRExpr *escapeConstraint(IRExpr *escape_if, IRExpr *non_escape)
 	{
@@ -139,12 +148,26 @@ sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc, crash_const
 static IRExpr *
 edgeCrashConstraint(StateMachineEdge *e, crash_constraint_context &ctxt)
 {
+	auto it = ctxt.edgeValues.find(e);
+	if (it != ctxt.edgeValues.end())
+		return it->second;
+
 	IRExpr *acc = stateCrashConstraint(e->target, ctxt);
 
 	for (auto it = e->sideEffects.rbegin(); it != e->sideEffects.rend(); it++) {
 		StateMachineSideEffect *smse = *it;
 		acc = sideEffectCrashConstraint(smse, acc, ctxt);
 		acc = simplifyIRExpr(acc, ctxt.opt);
+	}
+
+	ctxt.edgeValues[e] = acc;
+
+	if (dump_state_constraints) {
+		printf("Computed constraint at top of edge l%d:\n", ctxt.edgeLabels[e]);
+		e->prettyPrint(stdout, ctxt.edgeLabels);
+		printf("Result ");
+		ppIRExpr(acc, stdout);
+		printf("\n");
 	}
 	return acc;
 }
@@ -213,9 +236,30 @@ writeMachineCrashConstraint(StateMachine *sm,
 	ctxt.surviveExpression = surviveExpression;
 	ctxt.crashExpression = crashExpression;
 	ctxt.escapeExpression = escapeExpression;
+
+	if (dump_state_constraints) {
+		printf("writeMachineCrashConstraint(survive = ");
+		ppIRExpr(surviveExpression, stdout);
+		printf(", crash = ");
+		ppIRExpr(crashExpression, stdout);
+		printf(", escape = ");
+		ppIRExpr(escapeExpression, stdout);
+		printf(") on machine\n");
+		printStateMachine(sm, stdout, ctxt.edgeLabels);
+	}
 	IRExpr *res = stateCrashConstraint(sm->root, ctxt);
 
 	assert(freeFromPhis(res));
+
+	if (dump_state_constraints) {
+		printf("\n\n State labels -> \n\n");
+		for (auto it = ctxt.stateValues.begin(); it != ctxt.stateValues.end(); it++) {
+			it->first->prettyPrint(stdout, ctxt.edgeLabels);
+			printf(" -> ");
+			ppIRExpr(it->second, stdout);
+			printf("\n\n");
+		}
+	}
 
 	res = simplifyIRExpr(
 		IRExpr_Binop(
