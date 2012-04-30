@@ -326,7 +326,7 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			if (smsep->generations.size() == 0) {
 				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(-1));
 			} else if (smsep->generations.size() == 1) {
-				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(smsep->generations[0]));
+				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(smsep->generations[0].first));
 			}
 		}
 	}

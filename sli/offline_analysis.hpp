@@ -138,9 +138,7 @@ protected:
 		return NULL;
 	}
 	virtual StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *, bool *) {
-		return NULL;
-	}
+		StateMachineSideEffectPhi *, bool *);
 	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
 							 bool *)
 	{ return NULL; }

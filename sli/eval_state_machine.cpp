@@ -278,7 +278,7 @@ public:
 				for (auto it2 = phi->generations.begin();
 				     it2 != phi->generations.end();
 				     it2++) {
-					if (*it2 == it->gen()) {
+					if (it2->first == it->gen()) {
 						registers[phi->reg] = registers[*it];
 						if (phi->reg.isTemp())
 							*assumption = setTemporary(phi->reg, *assumption);
@@ -298,7 +298,7 @@ public:
 		for (auto it = phi->generations.begin();
 		     !found_it && it != phi->generations.end();
 		     it++)
-			if (*it == (unsigned)-1)
+			if (it->first == (unsigned)-1)
 				found_it = true;
 		assert(found_it);
 #endif

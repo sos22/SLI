@@ -77,9 +77,11 @@ insertPhi(StateMachineSideEffectPhi *phi, IRExpr *e)
 		IRExpr *transformIex(IRExprPhi *iep) {
 			if (threadAndRegister::partialEq(iep->reg, sideEffect->reg)) {
 				std::vector<unsigned> newGenerations(iep->generations);
-				newGenerations.insert(newGenerations.end(),
-						      sideEffect->generations.begin(),
-						      sideEffect->generations.end());
+				newGenerations.reserve(newGenerations.size() + sideEffect->generations.size());
+				for (auto it = sideEffect->generations.begin();
+				     it != sideEffect->generations.end();
+				     it++)
+					newGenerations.push_back(it->first);
 				std::sort(newGenerations.begin(),
 					  newGenerations.end());
 				removeDupes(newGenerations);
@@ -91,10 +93,15 @@ insertPhi(StateMachineSideEffectPhi *phi, IRExpr *e)
 		}
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (threadAndRegister::fullEq(sideEffect->reg, ieg->reg)) {
-				if (!phi)
+				if (!phi) {
+					std::vector<unsigned> generations;
+					generations.resize(sideEffect->generations.size());
+					for (unsigned x = 0; x < sideEffect->generations.size(); x++)
+						generations[x] = sideEffect->generations[x].first;
 					phi = new IRExprPhi(sideEffect->reg.setGen(0),
-							    sideEffect->generations,
+							    generations,
 							    ieg->type());
+				}
 				assert(phi->ty == ieg->type());
 				return phi;
 			}

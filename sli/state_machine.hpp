@@ -807,23 +807,40 @@ public:
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
 public:
+	threadAndRegister reg;
+	std::vector<std::pair<unsigned, IRExpr *> > generations;
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::set<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg)
 	{
 		generations.reserve(_generations.size());
-		for (auto it = _generations.begin(); it != _generations.end(); it++)
-			generations.push_back(*it);
+		for (auto it = _generations.begin(); it != _generations.end(); it++) {
+			std::pair<unsigned, IRExpr *> item;
+			item.first = *it;
+			item.second = NULL;
+			generations.push_back(item);
+		}
 	}
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::vector<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
+		  reg(_reg)
+	{
+		generations.reserve(_generations.size());
+		for (auto it = _generations.begin(); it != _generations.end(); it++) {
+			std::pair<unsigned, IRExpr *> item;
+			item.first = *it;
+			item.second = NULL;
+			generations.push_back(item);
+		}
+	}
+	StateMachineSideEffectPhi(const threadAndRegister &_reg,
+				  const std::vector<std::pair<unsigned, IRExpr *> > &_generations)
+		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg), generations(_generations)
 	{
 	}
-	threadAndRegister reg;
-	std::vector<unsigned> generations;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);
@@ -831,7 +848,11 @@ public:
 		for (auto it = generations.begin(); it != generations.end(); it++) {
 			if (it != generations.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%d", *it);
+			fprintf(f, "%d", it->first);
+			if (it->second) {
+				fprintf(f, "=");
+				ppIRExpr(it->second, f);
+			}
 		}
 		fprintf(f, ")");
 	}

@@ -283,3 +283,33 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 		fvm.content->set(it->first, it->second);
 	return new StateMachine(newRoot, sm->origin, fvm, sm->tid);
 }
+
+StateMachineSideEffectPhi *
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
+						bool *done_something)
+{
+	bool t = false;
+	unsigned x = 0;
+	IRExpr *newE;
+
+	for (x = 0; x < phi->generations.size(); x++) {
+		if (phi->generations[x].second)
+			newE = transformIRExpr(phi->generations[x].second, &t);
+		if (t)
+			break;
+	}
+	if (x == phi->generations.size())
+		return NULL;
+	StateMachineSideEffectPhi *newPhi = new StateMachineSideEffectPhi(*phi);
+	newPhi->generations[x].second = newE;
+
+	x++;
+	while (x < newPhi->generations.size()) {
+		if (newPhi->generations[x].second)
+			newPhi->generations[x].second =
+				transformIRExpr(newPhi->generations[x].second, &t);
+		x++;
+	}
+	return newPhi;
+}
+

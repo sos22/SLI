@@ -92,10 +92,10 @@ public:
 	}
 	void findReachingGenerations(StateMachineState *e,
 				     const threadAndRegister &r,
-				     std::vector<unsigned> &out);
+				     std::set<unsigned> &out);
 	void findReachingGenerations(StateMachineSideEffect *e,
 				     const threadAndRegister &r,
-				     std::vector<unsigned> &out);
+				     std::set<unsigned> &out);
 	PossiblyReaching(StateMachine *inp, const ImportRegTable &imports);
 };
 
@@ -172,18 +172,15 @@ PossiblyReaching::updateStateReaching(StateMachineState *state, std::set<StateMa
 static void
 sideEffectSetToGenerationSet(const std::set<StateMachineSideEffect *> &effects,
 			     const threadAndRegister &reg,
-			     std::vector<unsigned> &out)
+			     std::set<unsigned> &out)
 {
 	struct _ {
-		std::vector<unsigned> &out;
-		_(std::vector<unsigned> &_out)
+		std::set<unsigned> &out;
+		_(std::set<unsigned> &_out)
 			: out(_out)
 		{}
 		void operator()(unsigned r) {
-			for (auto it = out.begin(); it != out.end(); it++)
-				if (*it == r)
-					return;
-			out.push_back(r);
+			out.insert(r);
 		}
 	} addItem(out);
 	for (auto it = effects.begin(); it != effects.end(); it++) {
@@ -218,7 +215,7 @@ sideEffectSetToGenerationSet(const std::set<StateMachineSideEffect *> &effects,
 void
 PossiblyReaching::findReachingGenerations(StateMachineState *e,
 					  const threadAndRegister &reg,
-					  std::vector<unsigned> &out)
+					  std::set<unsigned> &out)
 {
 	std::set<StateMachineSideEffect *> &effects(effectsReachingState(e));
 	sideEffectSetToGenerationSet(effects, reg, out);
@@ -227,7 +224,7 @@ PossiblyReaching::findReachingGenerations(StateMachineState *e,
 void
 PossiblyReaching::findReachingGenerations(StateMachineSideEffect *e,
 					  const threadAndRegister &reg,
-					  std::vector<unsigned> &out)
+					  std::set<unsigned> &out)
 {
 	std::set<StateMachineSideEffect *> &effects(effectsReachingSideEffect(e));
 	sideEffectSetToGenerationSet(effects, reg, out);
@@ -339,7 +336,7 @@ public:
 		assert(orig.gen() == 0);
 		return orig.setGen( ++lastGeneration[orig] );
 	}
-	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, const std::vector<unsigned> &generations)
+	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, const std::set<unsigned> &generations)
 	{
 		return new StateMachineSideEffectPhi(
 			r.setGen(++lastGeneration[r]),
@@ -347,13 +344,13 @@ public:
 	}
 	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, StateMachineState *e)
 	{
-		std::vector<unsigned> generations;
+		std::set<unsigned> generations;
 		reaching.findReachingGenerations(e, r, generations);
 		return newPhi(r, generations);
 	}
 	StateMachineSideEffectPhi *newPhi(const threadAndRegister &r, StateMachineSideEffect *e)
 	{
-		std::vector<unsigned> generations;
+		std::set<unsigned> generations;
 		reaching.findReachingGenerations(e, r, generations);
 		return newPhi(r, generations);
 	}
@@ -997,7 +994,10 @@ rawDupe(duplication_context &ctxt, const StateMachineSideEffectCopy *l)
 static StateMachineSideEffectPhi *
 rawDupe(duplication_context &ctxt, const StateMachineSideEffectPhi *l)
 {
-	return new StateMachineSideEffectPhi(l->reg, l->generations);
+	StateMachineSideEffectPhi *res = new StateMachineSideEffectPhi(l->reg, l->generations);
+	for (unsigned x = 0; x < l->generations.size(); x++)
+		ctxt(&res->generations[x].second, l->generations[x].second, rawDupe);
+	return res;
 }
 
 static StateMachineSideEffect *
@@ -1126,11 +1126,24 @@ class optimiseSSATransformer : public StateMachineTransformer {
 	StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *phi,
 							  bool *done_something)
 	{
-		std::vector<unsigned> generations;
+		std::set<unsigned> generations;
 		reaching.findReachingGenerations(phi, phi->reg, generations);
-		if (generations != phi->generations) {
-			*done_something = true;
-			phi->generations = generations;
+#ifndef NDEBUG
+		for (auto it = generations.begin(); it != generations.end(); it++) {
+			bool found_it = false;
+			for (unsigned x = 0; !found_it && x < phi->generations.size(); x++)
+				if (phi->generations[x].first == *it)
+					found_it = true;
+			assert(found_it);
+		}
+#endif
+		for (auto it = phi->generations.begin(); it != phi->generations.end(); ) {
+			if (!generations.count(it->first)) {
+				*done_something = true;
+				it = phi->generations.erase(it);
+			} else {
+				it++;
+			}
 		}
 		return phi;
 	}

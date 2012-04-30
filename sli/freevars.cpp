@@ -189,7 +189,7 @@ public:
 		for (auto it = p->generations.begin();
 		     it != p->generations.end();
 		     it++)
-			puttedRegisters.insert(p->reg.setGen(*it));
+			puttedRegisters.insert(p->reg.setGen(it->first));
 		return StateMachineTransformer::transformOneSideEffect(p, done_something);
 	}
 	IRExpr *transformIex(IRExprGet *what) {
