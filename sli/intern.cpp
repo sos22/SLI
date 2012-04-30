@@ -347,6 +347,9 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *phi = dynamic_cast<StateMachineSideEffectPhi *>(s);
 		assert(phi);
+		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
+			if (it->second)
+				it->second = internIRExpr(it->second, t);
 		for (auto it = t.phis.begin(); it != t.phis.end(); it++) {
 			StateMachineSideEffectPhi *o = *it;
 			if (threadAndRegister::fullEq(o->reg, phi->reg)) {
