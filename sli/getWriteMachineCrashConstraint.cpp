@@ -56,55 +56,41 @@ resolvePhis(const threadAndRegister &reg, IRExpr *e)
 	return doit.doit(e);
 }
 
-static void
-removeDupes(std::vector<unsigned> &a)
-{
-	for (unsigned x = 0; x + 1 < a.size(); ) {
-		if (a[x] == a[x+1]) {
-			a.erase(a.begin() + x + 1);
-		} else {
-			x++;
-		}
-	}
-}
-
 static IRExpr *
 insertPhi(StateMachineSideEffectPhi *phi, IRExpr *e)
 {
 	struct _ : public IRExprTransformer {
 		StateMachineSideEffectPhi *sideEffect;
 		IRExprPhi *phi;
+		IRExpr *getPhi(IRType ty) {
+			if (!phi) {
+				std::vector<unsigned> generations;
+				generations.resize(sideEffect->generations.size());
+				for (unsigned x = 0; x < sideEffect->generations.size(); x++)
+					generations[x] = sideEffect->generations[x].first;
+				phi = new IRExprPhi(sideEffect->reg.setGen(0),
+						    generations,
+						    ty);
+			}
+			assert(phi->ty == ty);
+			return phi;
+		}
 		IRExpr *transformIex(IRExprPhi *iep) {
 			if (threadAndRegister::partialEq(iep->reg, sideEffect->reg)) {
-				std::vector<unsigned> newGenerations(iep->generations);
-				newGenerations.reserve(newGenerations.size() + sideEffect->generations.size());
-				for (auto it = sideEffect->generations.begin();
-				     it != sideEffect->generations.end();
-				     it++)
-					newGenerations.push_back(it->first);
-				std::sort(newGenerations.begin(),
-					  newGenerations.end());
-				removeDupes(newGenerations);
-				return IRExpr_Phi(iep->reg,
-						  newGenerations,
-						  iep->ty);
+				for (auto it = iep->generations.begin();
+				     it != iep->generations.end();
+				     it++) {
+					if (*it == sideEffect->reg.gen())
+						return getPhi(iep->ty);
+				}
+
 			}
 			return NULL;
 		}
 		IRExpr *transformIex(IRExprGet *ieg) {
-			if (threadAndRegister::fullEq(sideEffect->reg, ieg->reg)) {
-				if (!phi) {
-					std::vector<unsigned> generations;
-					generations.resize(sideEffect->generations.size());
-					for (unsigned x = 0; x < sideEffect->generations.size(); x++)
-						generations[x] = sideEffect->generations[x].first;
-					phi = new IRExprPhi(sideEffect->reg.setGen(0),
-							    generations,
-							    ieg->type());
-				}
-				assert(phi->ty == ieg->type());
-				return phi;
-			}
+			if (threadAndRegister::fullEq(sideEffect->reg, ieg->reg))
+				return getPhi(ieg->ty);
+			return NULL;
 		}
 		_(StateMachineSideEffectPhi *_phi)
 			: sideEffect(_phi), phi(NULL)

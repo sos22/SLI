@@ -1810,7 +1810,7 @@ struct IRExprPhi : public IRExpr {
     IRType type() const { return ty; }
     void sanity_check() const {
 	reg.sanity_check();
-	assert(generations.size() > 1);
+	assert(generations.size() >= 1);
 	sanity_check_irtype(ty);
 	assert(reg.gen() == 0);
     }
