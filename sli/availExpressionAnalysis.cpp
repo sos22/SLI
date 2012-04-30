@@ -650,6 +650,9 @@ buildNewStateMachineWithLoadsEliminated(
 				if (threadAndRegister::partialEq(phi->reg, it->first)) {
 					for (unsigned x = 0; x < phi->generations.size(); x++) {
 						if (phi->generations[x].first == it->first.gen()) {
+							if (phi->generations[x].second == it->second.e)
+								break;
+							assert(!phi->generations[x].second);
 							if (!newPhi)
 								newPhi = new StateMachineSideEffectPhi(*phi);
 							newPhi->generations[x].second = it->second.e;
