@@ -217,8 +217,8 @@ stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt)
 		assert(smb);
 		res = IRExpr_Mux0X(
 			smb->condition,
-			edgeCrashConstraint(smb->trueTarget, ctxt),
-			edgeCrashConstraint(smb->falseTarget, ctxt));
+			edgeCrashConstraint(smb->falseTarget, ctxt),
+			edgeCrashConstraint(smb->trueTarget, ctxt));
 	}
 
 	res = simplifyIRExpr(res, ctxt.opt);
