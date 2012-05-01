@@ -67,8 +67,11 @@ public:
 			killRegister(smsep->reg);
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
-			     it++)
+			     it++) {
+				if (it->second)
+					useExpression(it->second);
 				this->insert(smsep->reg.setGen(it->first));
+			}
 			return;
 		}
 		}
