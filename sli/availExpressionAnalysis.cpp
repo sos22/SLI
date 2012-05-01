@@ -221,13 +221,19 @@ avail_t::merge(const avail_t &other,
 	   a single register, because that would violate the SSA
 	   property, so this cunningness is safe in SSA form but not
 	   otherwise. */
+	/* We only do this for copies and phis, since those are the
+	   only ones for which it's safe. */
+	struct {
+		bool operator()(StateMachineSideEffect::sideEffectType t) {
+			return t == StateMachineSideEffect::Copy ||
+				t == StateMachineSideEffect::Phi;
+		}
+	} ssa_cunningness_safe;
 	res = false;
 	if (is_ssa) {
 		for (auto it = other.sideEffects.begin(); it != other.sideEffects.end(); it++) {
 			StateMachineSideEffect *smse = *it;
-			/* We only do this for copies, since those are
-			   the only ones for which it's safe. */
-			if (smse->type == StateMachineSideEffect::Copy)
+			if (ssa_cunningness_safe(smse->type))
 				res |= sideEffects.insert(*it).second;
 		}
 	}
@@ -240,7 +246,7 @@ avail_t::merge(const avail_t &other,
 			it1++;
 			it2++;
 		} else if (*it1 < *it2) {
-			if ( is_ssa && (*it1)->type == StateMachineSideEffect::Copy ) {
+			if ( is_ssa && ssa_cunningness_safe((*it1)->type) ) {
 				it1++;
 			} else {
 				sideEffects.erase(it1++);
@@ -248,14 +254,14 @@ avail_t::merge(const avail_t &other,
 			res = true;
 		} else {
 			assert(*it2 < *it1);
-			if ( is_ssa && (*it2)->type == StateMachineSideEffect::Copy )
+			if ( is_ssa && ssa_cunningness_safe( (*it2)->type) )
 				newEffectsToIntroduce.insert(*it2);
 			it2++;
 		}
 	}
 	while (it1 != sideEffects.end()) {
 		res = true;
-		if ( is_ssa && (*it1)->type == StateMachineSideEffect::Copy )
+		if ( is_ssa && ssa_cunningness_safe((*it1)->type) )
 			it1++;
 		else
 			sideEffects.erase(it1++);
@@ -671,22 +677,31 @@ buildNewStateMachineWithLoadsEliminated(
 			StateMachineSideEffectPhi *phi =
 				(StateMachineSideEffectPhi *)*it;
 			StateMachineSideEffectPhi *newPhi = NULL;
+			bool needSort = false;
 			for (auto it = currentlyAvailable._registers.begin();
 			     it != currentlyAvailable._registers.end();
 			     it++) {
-				if (!it->second.e)
-					continue;
 				if (threadAndRegister::partialEq(phi->reg, it->first)) {
 					for (unsigned x = 0; x < phi->generations.size(); x++) {
 						if (phi->generations[x].first == it->first.gen()) {
-							if (phi->generations[x].second &&
-							    physicallyEqual(phi->generations[x].second,
-									    it->second.e))
-								break;
-							assert(!phi->generations[x].second);
-							if (!newPhi)
-								newPhi = new StateMachineSideEffectPhi(*phi);
-							newPhi->generations[x].second = it->second.e;
+							if (it->second.e) {
+								if (phi->generations[x].second &&
+								    physicallyEqual(phi->generations[x].second,
+										    it->second.e))
+									break;
+								assert(!phi->generations[x].second);
+								if (!newPhi)
+									newPhi = new StateMachineSideEffectPhi(*phi);
+								newPhi->generations[x].second = it->second.e;
+							} else {
+								if (!newPhi)
+									newPhi = new StateMachineSideEffectPhi(*phi);
+								assert(threadAndRegister::partialEq(phi->reg,
+												    it->second.phiFrom));
+								newPhi->generations[x].first = it->second.phiFrom.gen();
+								newPhi->generations[x].second = NULL;
+								needSort = true;
+							}
 						}
 					}
 				}
@@ -707,6 +722,26 @@ buildNewStateMachineWithLoadsEliminated(
 							newPhi = new StateMachineSideEffectPhi(*phi);
 						newPhi->generations[x].second = e2;
 						*done_something = true;
+					}
+				}
+			}
+			if (needSort) {
+				assert(newPhi);
+				std::sort(newPhi->generations.begin(), newPhi->generations.end());
+				for (unsigned x = 0; x + 1 < newPhi->generations.size(); ) {
+					if (newPhi->generations[x].first ==
+					    newPhi->generations[x+1].first) {
+						IRExpr *v = newPhi->generations[x].second;
+						if (!v) {
+							v = newPhi->generations[x+1].second;
+						} else {
+							assert(!newPhi->generations[x+1].second ||
+							       v == newPhi->generations[x+1].second);
+						}
+						newPhi->generations[x].second = v;
+						newPhi->generations.erase(newPhi->generations.begin() + x + 1);
+					} else {
+						x++;
 					}
 				}
 			}
