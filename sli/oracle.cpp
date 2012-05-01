@@ -328,6 +328,11 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	if (cache.query(smsel, smses, idx, &res))
 		return res;
 
+	if (definitelyNotEqual(smsel->addr, smses->addr, opt)) {
+		cache.set(smsel, smses, idx, false);
+		return false;
+	}
+
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		unsigned long offset = *it;
 		const struct tag_hdr *hdr = raw_types_database.get<tag_hdr>(offset);
