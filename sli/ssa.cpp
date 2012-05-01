@@ -1116,7 +1116,9 @@ convertToSSA(StateMachine *inp)
 			progress = useSsaVarsAndIntroducePhis(inp, r, lastGeneration);
 		} while (progress);
 	}
-	
+
+	inp->assertSSA();
+
 	return inp;
 }
 

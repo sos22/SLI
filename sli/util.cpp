@@ -146,7 +146,9 @@ sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister
 		class _ : public IRExprTransformer {
 			const std::set<threadAndRegister, threadAndRegister::fullCompare> *live;
 			IRExpr *transformIex(IRExprGet *g) {
-				if (g->reg.isTemp())
+				if (g->reg.isTemp() ||
+				    (g->reg.gen() != (unsigned)-1 &&
+				     g->reg.gen() != 0))
 					assert(live->count(g->reg));
 				return NULL;
 			}

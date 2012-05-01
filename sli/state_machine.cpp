@@ -910,18 +910,24 @@ StateMachine::assertSSA() const
 			switch (smse->type) {
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)smse;
+				assert(smsel->target.gen() != 0);
+				assert(smsel->target.gen() != -1);
 				if (!discoveredAssignments.insert(smsel->target).second)
 					abort();
 				break;
 			}
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec = (StateMachineSideEffectCopy *)smse;
+				assert(smsec->target.gen() != 0);
+				assert(smsec->target.gen() != -1);
 				if (!discoveredAssignments.insert(smsec->target).second)
 					abort();
 				break;
 			}
 			case StateMachineSideEffect::Phi: {
 				StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)smse;
+				assert(smsep->reg.gen() != 0);
+				assert(smsep->reg.gen() != -1);
 				if (!discoveredAssignments.insert(smsep->reg).second)
 					abort();
 				break;
@@ -931,5 +937,18 @@ StateMachine::assertSSA() const
 			}
 		}
 	}
+
+	struct : public StateMachineTransformer {
+		IRExpr *transformIex(IRExprGet *ieg) {
+			assert(ieg->reg.gen() != 0);
+			return NULL;
+		}
+		IRExpr *transformIex(IRExprPhi *phi) {
+			for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
+				assert(*it != 0);
+			return IRExprTransformer::transformIex(phi);
+		}
+	} checkForNonSSAVars;
+	checkForNonSSAVars.transform(const_cast<StateMachine *>(this));
 }
 #endif
