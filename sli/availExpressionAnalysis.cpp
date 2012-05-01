@@ -689,7 +689,6 @@ buildNewStateMachineWithLoadsEliminated(
 								    physicallyEqual(phi->generations[x].second,
 										    it->second.e))
 									break;
-								assert(!phi->generations[x].second);
 								if (!newPhi)
 									newPhi = new StateMachineSideEffectPhi(*phi);
 								newPhi->generations[x].second = it->second.e;

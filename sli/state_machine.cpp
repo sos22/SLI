@@ -911,7 +911,7 @@ StateMachine::assertSSA() const
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)smse;
 				assert(smsel->target.gen() != 0);
-				assert(smsel->target.gen() != -1);
+				assert(smsel->target.gen() != (unsigned)-1);
 				if (!discoveredAssignments.insert(smsel->target).second)
 					abort();
 				break;
@@ -919,7 +919,7 @@ StateMachine::assertSSA() const
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec = (StateMachineSideEffectCopy *)smse;
 				assert(smsec->target.gen() != 0);
-				assert(smsec->target.gen() != -1);
+				assert(smsec->target.gen() != (unsigned)-1);
 				if (!discoveredAssignments.insert(smsec->target).second)
 					abort();
 				break;
@@ -927,7 +927,7 @@ StateMachine::assertSSA() const
 			case StateMachineSideEffect::Phi: {
 				StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)smse;
 				assert(smsep->reg.gen() != 0);
-				assert(smsep->reg.gen() != -1);
+				assert(smsep->reg.gen() != (unsigned)-1);
 				if (!discoveredAssignments.insert(smsep->reg).second)
 					abort();
 				break;
