@@ -609,9 +609,9 @@ introducePhiEdges(StateMachine *inp,
 	inp->root->targets(toVisitEdges);
 	while (!TIMEOUT && !toVisitEdges.empty()) {
 		StateMachineEdge *e = pop(toVisitEdges);
-		for (unsigned x = 0; x < e->sideEffects.size(); x++) {
+		for (auto it = e->sideEffects.begin(); it != e->sideEffects.end(); it++) {
 			std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
-			findNeededRegisters(e->sideEffects[x], needed);
+			findNeededRegisters(*it, needed);
 			if (needed.empty())
 				continue;
 			if (TIMEOUT)
@@ -621,10 +621,10 @@ introducePhiEdges(StateMachine *inp,
 			     it2++) {
 				if (introduced.count(*it2))
 					continue;
-				e->sideEffects.insert(
-					e->sideEffects.begin() + x,
-					allocateSsaVariable.newPhi(*it2, e->sideEffects[x]));
-				x++;
+				it = e->sideEffects.insert(
+					it,
+					allocateSsaVariable.newPhi(*it2, *it));
+				it++;
 				introduced.insert(*it2);
 			}
 		}
@@ -1035,13 +1035,12 @@ static StateMachineEdge *
 rawDupe(duplication_context &ctxt, const StateMachineEdge *inp)
 {
 	StateMachineEdge *res = new StateMachineEdge(NULL);
-	res->sideEffects.resize(inp->sideEffects.size());
 	/* We deliberately unshare side effects, so that each one
 	   appears in the machine in precisely one place.  This makes
 	   the which-side-effects-reach-here calculation a lot
 	   easier. */
-	for (unsigned x = 0; x < res->sideEffects.size(); x++)
-		res->sideEffects[x] = rawDupe(ctxt, inp->sideEffects[x]);
+	for (auto it = inp->sideEffects.begin(); it != inp->sideEffects.end(); it++)
+		res->sideEffects.push_back(rawDupe(ctxt, *it));
 	ctxt(&res->target, inp->target, rawDupe);
 	return res;
 }
