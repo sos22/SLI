@@ -14,7 +14,8 @@ namespace _getStoreCFGs {
 	f(debug_trim_uninteresting)		\
 	f(debug_find_roots)			\
 	f(debug_remove_redundant_roots)		\
-	f(debug_unroll_and_cycle_break)
+	f(debug_unroll_and_cycle_break)		\
+	f(debug_top_level)
 #ifdef NDEBUG
 #define mk_debug_flag(name)			\
 	static const bool name = false;
@@ -92,6 +93,8 @@ initialExploration(const std::set<DynAnalysisRip> &roots,
 		pending.push(std::pair<unsigned, VexRip>(maxPathLength, *it));
 top_exploration_iter:
 	while (!pending.empty()) {
+		if (TIMEOUT)
+			return;
 		std::pair<unsigned, VexRip> item(pending.front());
 		pending.pop();
 
@@ -203,11 +206,11 @@ top_exploration_iter:
 	   trivial, but using DynamicAnalysisRips makes it really
 	   hard. */
 	std::set<VexRip> new_roots;
-	for (auto it = doneSoFar.begin(); it != doneSoFar.end(); it++) {
+	for (auto it = doneSoFar.begin(); !TIMEOUT && it != doneSoFar.end(); it++) {
 		const VexRip &discoveredRip(it->first);
 		if (vr_roots.count(discoveredRip))
 			continue;
-		for (auto it2 = vr_roots.begin(); it2 != vr_roots.end(); it2++) {
+		for (auto it2 = vr_roots.begin(); !TIMEOUT && it2 != vr_roots.end(); it2++) {
 			const VexRip &rootRip(*it2);
 
 			/* We create a new root for @discoveredRip if
@@ -252,6 +255,9 @@ top_exploration_iter:
 static void
 resolveReferences(std::map<VexRip, CFGNode *> &m)
 {
+	if (TIMEOUT)
+		return;
+
 	struct {
 		std::map<VexRip, CFGNode *> *m;
 		CFGNode *operator()(const VexRip &vr) {
@@ -281,9 +287,9 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 	/* First, figure out which nodes are interesting. */
 	std::set<CFGNode *> interesting;
 	/* Anything in @roots is interesting. */
-	for (auto it = m.begin(); it != m.end(); it++) {
+	for (auto it = m.begin(); !TIMEOUT && it != m.end(); it++) {
 		const VexRip &vr(it->first);
-		for (auto it2 = roots.begin(); it2 != roots.end(); it2++) {
+		for (auto it2 = roots.begin(); !TIMEOUT && it2 != roots.end(); it2++) {
 			const DynAnalysisRip &dr(*it2);
 			if (dr == DynAnalysisRip(vr)) {
 				interesting.insert(it->second);
@@ -295,6 +301,8 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 	 * interesting. */
 	bool progress = true;
 	while (progress) {
+		if (TIMEOUT)
+			return;
 		progress = false;
 		for (auto it = m.begin(); it != m.end(); it++) {
 			CFGNode *n = it->second;
@@ -334,6 +342,8 @@ removeReachable(std::set<CFGNode *> &out, const CFGNode *n)
 	while (!pending.empty()) {
 		const CFGNode *n = pending.back();
 		pending.pop_back();
+		if (TIMEOUT)
+			return;
 		if (!out.erase(const_cast<CFGNode *>(n))) {
 			/* Already not-present */
 			continue;
@@ -408,7 +418,7 @@ findRoots(const std::map<VexRip, CFGNode *> &m,
 
 	removeReachable(currentlyUnrooted, newRoots);
 	roots |= newRoots;
-	while (!currentlyUnrooted.empty()) {
+	while (!TIMEOUT && !currentlyUnrooted.empty()) {
 		/* Nasty case: everything in @currentlyUnrooted is
 		   part of a cycle in @currentlyUnrooted.  Grab
 		   whichever node reaches the largest number of
@@ -473,7 +483,7 @@ removeRedundantRoots(const std::map<VexRip, CFGNode *> &m,
 		     std::set<CFGNode *> &roots)
 {
 	bool res = false;
-	for (auto it = roots.begin(); it != roots.end(); ) {
+	for (auto it = roots.begin(); !TIMEOUT && it != roots.end(); ) {
 		const VexRip &rootRip((*it)->my_rip);
 		bool redundant = false;
 		for (auto it2 = m.begin(); !redundant && it2 != m.end(); it2++) {
@@ -504,6 +514,8 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
 		if (n->branch) pending.push_back(n->branch);
 	}
 	while (!pending.empty()) {
+		if (TIMEOUT)
+			return;
 		CFGNode *n = pending.back();
 		pending.pop_back();
 		assert(n);
@@ -699,7 +711,7 @@ performUnrollAndCycleBreak(std::set<CFGNode *> &roots, unsigned maxPathLength)
 	nodeLabellingMap nlm(roots, maxPathLength);
 
 	for (auto it = roots.begin(); it != roots.end(); it++) {
-		while (1) {
+		while (!TIMEOUT) {
 			CFGNode *cycle_edge_start, *cycle_edge_end;
 			if (!selectEdgeForCycleBreak(*it, &cycle_edge_start, &cycle_edge_end)) {
 				/* No cycles left in the graph rooted
@@ -747,10 +759,10 @@ trimUninterestingCFGNodes(std::set<CFGNode *> &roots)
 {
 	std::set<CFGNode *> interesting(roots);
 	std::set<CFGNode *> allCFGNodes;
-	for (auto it = roots.begin(); it != roots.end(); it++)
+	for (auto it = roots.begin(); !TIMEOUT && it != roots.end(); it++)
 		enumerateCFG(*it, allCFGNodes);
 	bool progress = true;
-	while (progress) {
+	while (!TIMEOUT && progress) {
 		progress = false;
 		for (auto it = allCFGNodes.rbegin(); it != allCFGNodes.rend(); it++) {
 			CFGNode *n = *it;
@@ -765,7 +777,7 @@ trimUninterestingCFGNodes(std::set<CFGNode *> &roots)
 			}
 		}
 	}
-	for (auto it = allCFGNodes.begin(); it != allCFGNodes.end(); it++) {
+	for (auto it = allCFGNodes.begin(); !TIMEOUT && it != allCFGNodes.end(); it++) {
 		CFGNode *n = *it;
 		if (n->fallThrough && !interesting.count(n->fallThrough))
 			n->fallThrough = NULL;
@@ -871,16 +883,20 @@ getStoreCFGs(const std::set<DynAnalysisRip> &conflictingStores,
 	     CFGNode ***roots,
 	     int *nr_roots)
 {
-	printf("getStoreCFGs, input ");
-	for (auto it = conflictingStores.begin(); it != conflictingStores.end(); it++)
-		printf("%s, ", it->name());
-	printf("\n");
+	if (_getStoreCFGs::debug_top_level) {
+		printf("getStoreCFGs, input ");
+		for (auto it = conflictingStores.begin(); it != conflictingStores.end(); it++)
+			printf("%s, ", it->name());
+		printf("\n");
+	}
 
 	_getStoreCFGs::getStoreCFGs(conflictingStores, oracle, roots, nr_roots);
 
-	printf("Results:\n");
-	for (int x = 0; x < *nr_roots; x++) {
-		printf("%d/%d:\n", x, *nr_roots);
-		printCFG( (*roots)[x], "\t", stdout);
+	if (!TIMEOUT && _getStoreCFGs::debug_top_level) {
+		printf("Results:\n");
+		for (int x = 0; x < *nr_roots; x++) {
+			printf("%d/%d:\n", x, *nr_roots);
+			printCFG( (*roots)[x], "\t", stdout);
+		}
 	}
 }
