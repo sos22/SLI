@@ -1130,15 +1130,6 @@ class optimiseSSATransformer : public StateMachineTransformer {
 	{
 		std::set<unsigned> generations;
 		reaching.findReachingGenerations(phi, phi->reg, generations);
-#ifndef NDEBUG
-		for (auto it = generations.begin(); it != generations.end(); it++) {
-			bool found_it = false;
-			for (unsigned x = 0; !found_it && x < phi->generations.size(); x++)
-				if (phi->generations[x].first == *it)
-					found_it = true;
-			assert(found_it);
-		}
-#endif
 		for (auto it = phi->generations.begin(); it != phi->generations.end(); ) {
 			if (!generations.count(it->first)) {
 				*done_something = true;
