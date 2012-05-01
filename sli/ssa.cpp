@@ -1110,20 +1110,20 @@ convertToSSA(StateMachine *inp)
 	{
 		PossiblyReaching<true> reaching(inp, imports);
 		if (TIMEOUT)
-			return inp;
+			return NULL;
 		inp = introduceSsaVars(inp, reaching, lastGeneration);
 		if (TIMEOUT)
-			return inp;
+			return NULL;
 	}
 	PossiblyReaching<true> reaching(inp, imports);
 	if (useSsaVarsAndIntroducePhis(inp, reaching, lastGeneration)) {
 		bool progress;
 		do {
 			if (TIMEOUT)
-				return inp;
+				return NULL;
 			PossiblyReaching<true> r(inp, imports);
 			if (TIMEOUT)
-				return inp;
+				return NULL;
 			progress = useSsaVarsAndIntroducePhis(inp, r, lastGeneration);
 		} while (progress);
 	}
