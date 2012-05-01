@@ -863,6 +863,7 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
 	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+		assert(generations.size() != 0);
 		if (live)
 			live->insert(reg);
 	}
