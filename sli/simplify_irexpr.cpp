@@ -1456,34 +1456,47 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 							if (purge) {
 								*done_something = true;
+								IRConst *result;
+								switch (e->op) {
+								case Iop_And8:
+								case Iop_Xor8:
+								case Iop_Add8:
+									result = IRConst_U8(0);
+									break;
+								case Iop_And16:
+								case Iop_Xor16:
+								case Iop_Add16:
+									result = IRConst_U16(0);
+									break;
+								case Iop_And32:
+								case Iop_Xor32:
+								case Iop_Add32:
+									result = IRConst_U32(0);
+									break;
+								case Iop_And64:
+								case Iop_Xor64:
+								case Iop_Add64:
+									result = IRConst_U64(0);
+									break;
+								case Iop_And1:
+									result = IRConst_U1(0);
+									break;
+								default:
+									abort();
+								}
 								if (and_like) {
 									/* x & ~x -> 0 and eliminates the entire expression. */
-									switch (e->op) {
-									case Iop_And8:
-										return IRExpr_Const(IRConst_U8(0));
-									case Iop_And16:
-										return IRExpr_Const(IRConst_U16(0));
-									case Iop_And32:
-										return IRExpr_Const(IRConst_U32(0));
-									case Iop_And64:
-										return IRExpr_Const(IRConst_U64(0));
-									case Iop_And1:
-										return IRExpr_Const(IRConst_U1(0));
-									default:
-										abort();
-									}
+									return IRExpr_Const(result);
 								}
 
 								/* Careful: do the largest index first so that the
 								   other index remains valid. */
 								if (it1 < it2) {
 									purgeAssocArgument(e, it2);
-									e->contents[it1] =
-										IRExpr_Const(IRConst_U64(0));
+									e->contents[it1] = IRExpr_Const(result);
 								} else {
 									purgeAssocArgument(e, it1);
-									e->contents[it2] =
-										IRExpr_Const(IRConst_U64(0));
+									e->contents[it2] = IRExpr_Const(result);
 								}
 								break;
 							}
