@@ -567,7 +567,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  opt,
 				  oracle,
 				  false,
-				  true,
+				  false,
 				  token);
 	breakCycles(cr);
 	if (TIMEOUT)
@@ -576,7 +576,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				  opt,
 				  oracle,
 				  false,
-				  true,
+				  false,
 				  token);
 	return cr;
 }
