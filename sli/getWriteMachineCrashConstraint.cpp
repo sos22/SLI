@@ -236,6 +236,30 @@ freeFromPhis(IRExpr *e)
 }
 #endif
 
+/* We've reached the start of the machine.  Any remaining Phis must be
+   due to use of the initial value of the register. */
+static IRExpr *
+resolveOpenPhis(IRExpr *what)
+{
+	struct : public IRExprTransformer {
+		IRExpr *transformIex(IRExprPhi *phi) {
+#ifndef NDEBUG
+			{
+				bool found_it = false;
+				for (auto it = phi->generations.begin();
+				     !found_it && it != phi->generations.end();
+				     it++)
+					if (*it == (unsigned)-1)
+						found_it = true;
+				assert(found_it);
+			}
+#endif
+			return IRExpr_Get(phi->reg.setGen(-1), phi->ty);
+		}
+	} doit;
+	return doit.doit(what);
+}
+
 static IRExpr *
 writeMachineCrashConstraint(StateMachine *sm,
 			    IRExpr *assumption,
@@ -261,6 +285,8 @@ writeMachineCrashConstraint(StateMachine *sm,
 		printStateMachine(sm, stdout, ctxt.edgeLabels);
 	}
 	IRExpr *res = stateCrashConstraint(sm->root, ctxt);
+
+	res = resolveOpenPhis(res);
 
 	assert(freeFromPhis(res));
 
