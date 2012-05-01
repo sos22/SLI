@@ -262,7 +262,6 @@ resolveOpenPhis(IRExpr *what)
 
 static IRExpr *
 writeMachineCrashConstraint(StateMachine *sm,
-			    IRExpr *assumption,
 			    IRExpr *surviveExpression,
 			    IRExpr *crashExpression,
 			    IRExpr *escapeExpression,
@@ -300,12 +299,6 @@ writeMachineCrashConstraint(StateMachine *sm,
 		}
 	}
 
-	res = simplifyIRExpr(
-		IRExpr_Binop(
-			Iop_And1,
-			assumption,
-			res),
-		opt);
 	return res;
 }
 
@@ -314,14 +307,12 @@ writeMachineCrashConstraint(StateMachine *sm,
 
 IRExpr *
 writeMachineCrashConstraint(StateMachine *sm,
-			    IRExpr *assumption,
 			    IRExpr *surviveExpression,
 			    IRExpr *crashExpression,
 			    IRExpr *escapeExpression,
 			    const AllowableOptimisations &opt)
 {
 	return _writeMachineCrashConstraint::writeMachineCrashConstraint(sm,
-									 assumption,
 									 surviveExpression,
 									 crashExpression,
 									 escapeExpression,

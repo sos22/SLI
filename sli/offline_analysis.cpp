@@ -446,26 +446,21 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
-	assumption = writeMachineCrashConstraint(sm, assumption,
-						 IRExpr_Const(IRConst_U1(0)),
-						 IRExpr_Const(IRConst_U1(1)),
-						 IRExpr_Const(IRConst_U1(0)),
-						 opt);
-						 
-	if (!assumption) {
-		fprintf(_logfile, "\t\tCannot derive write machine survival constraint\n");
+	IRExpr *writeMachineConstraint =
+		writeMachineCrashConstraint(sm,
+					    IRExpr_Const(IRConst_U1(0)),
+					    assumption,
+					    IRExpr_Const(IRConst_U1(0)),
+					    opt);
+	if (!writeMachineConstraint) {
+		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return false;
 	}
-	fprintf(_logfile, "\t\tWrite machine survival constraint: ");
-	ppIRExpr(assumption, _logfile);
-	fprintf(_logfile, "\n");
+	assumption = IRExpr_Binop(Iop_And1, assumption, writeMachineConstraint);
+	writeMachineConstraint = NULL;
+	assumption = simplifyIRExpr(assumption, opt);
 
-	assumption = writeMachineSuitabilityConstraint(probeMachine, sm, assumption, oracle, opt, token);
-	if (!assumption) {
-		fprintf(_logfile, "\t\tCannot derive suitability constraint\n");
-		return false;
-	}
-	fprintf(_logfile, "\t\tSuitability constraint: ");
+	fprintf(_logfile, "\t\tWrite machine suitability constraint: ");
 	ppIRExpr(assumption, _logfile);
 	fprintf(_logfile, "\n");
 

@@ -815,7 +815,6 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 {
 	return writeMachineCrashConstraint(sm,
 					   IRExpr_Const(IRConst_U1(1)),
-					   IRExpr_Const(IRConst_U1(1)),
 					   IRExpr_Const(IRConst_U1(0)),
 					   IRExpr_Const(IRConst_U1(1)),
 					   opt);
@@ -1100,111 +1099,6 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	}
 
 	return true;
-}
-
-/* Running the store machine atomically and then runing the probe
-   machine atomically shouldn't ever crash.  Tweak the initial
-   assumption so that it doesn't.  Returns NULL if that's not
-   possible. */
-IRExpr *
-writeMachineSuitabilityConstraint(
-	VexPtr<StateMachine, &ir_heap> &readMachine,
-	VexPtr<StateMachine, &ir_heap> &writeMachine,
-	VexPtr<IRExpr, &ir_heap> &assumption,
-	VexPtr<Oracle> &oracle,
-	const AllowableOptimisations &opt,
-	GarbageCollectionToken token)
-{
-	__set_profiling(writeMachineSuitabilityConstraint);
-	fprintf(_logfile, "\t\tBuilding write machine suitability constraint.\n");
-	VexPtr<IRExpr, &ir_heap> rewrittenAssumption(assumption);
-	NdChooser chooser;
-	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine->root));
-	do {
-		if (TIMEOUT)
-			return NULL;
-
-		LibVEX_maybe_gc(token);
-
-		StateMachineEvalContext writerCtxt;
-
-		StateMachineEdge *writerEdge;
-		bool writer_failed = false;
-
-		writerCtxt.pathConstraint = assumption;
-		writerCtxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		writerEdge = writeStartEdge;
-		while (!writer_failed) {
-			bool c;
-			if (smallStepEvalStateMachineEdge(writeMachine,
-							  writerEdge,
-							  &c,
-							  chooser,
-							  oracle,
-							  opt,
-							  writerCtxt)) {
-				writer_failed = true;
-				break;
-			}
-			writerEdge = smallStepEvalStateMachine(
-				writeMachine,
-				writerEdge->target,
-				&c,
-				chooser,
-				oracle,
-				opt,
-				writerCtxt);
-			if (!writerEdge)
-				break;
-		}
-
-		if (!writer_failed) {
-			/* Use a nested chooser to evaluate the read
-			 * machine, rather than using the same chooser
-			 * for read and write.  This is a little bit
-			 * faster, because we don't need to re-run the
-			 * write machine over and over again if the
-			 * read machine needs lots of choice
-			 * points. */
-			NdChooser read_chooser;
-			do {
-				StateMachineEvalContext readEvalCtxt = writerCtxt;
-				bool crashes;
-				bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, read_chooser, oracle, opt, readEvalCtxt);
-				if (crashes) {
-					/* We get a crash if we
-					   evaluate the read machine
-					   after running the store
-					   machine to completion ->
-					   this is a poor choice of
-					   store machines. */
-
-					/* If we evaluate the read
-					   machine to completion after
-					   running the write machine
-					   to completion under these
-					   assumptions then we get a
-					   crash -> these assumptions
-					   must be false. */
-					rewrittenAssumption = simplifyIRExpr(
-						IRExpr_Binop(
-							Iop_And1,
-							rewrittenAssumption,
-							IRExpr_Unop(
-								Iop_Not1,
-								readEvalCtxt.justPathConstraint)),
-						opt);
-				}
-			} while (read_chooser.advance());
-		}
-	} while (chooser.advance());
-	
-	if (rewrittenAssumption->tag == Iex_Const &&
-	    ((IRExprConst *)rewrittenAssumption.get())->con->Ico.U64 == 0) {
-		fprintf(_logfile, "\t\tBad choice of machines\n");
-		return NULL;
-	}
-	return rewrittenAssumption;
 }
 
 /* Run the write machine, covering every possible schedule and

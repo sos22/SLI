@@ -49,13 +49,6 @@ bool evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracl
 				const AllowableOptimisations &opt,
 				bool *mightSurvive, bool *mightCrash,
 				GarbageCollectionToken token);
-IRExpr *writeMachineSuitabilityConstraint(
-	VexPtr<StateMachine, &ir_heap> &readMachine,
-	VexPtr<StateMachine, &ir_heap> &writeMachine,
-	VexPtr<IRExpr, &ir_heap> &assumption,
-	VexPtr<Oracle> &oracle,
-	const AllowableOptimisations &opt,
-	GarbageCollectionToken token);
 bool evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			     VexPtr<StateMachine, &ir_heap> &storeMachine,
 			     VexPtr<Oracle> &oracle,
@@ -79,7 +72,6 @@ bool fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		   VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 		   GarbageCollectionToken token);
 IRExpr *writeMachineCrashConstraint(StateMachine *sm,
-				    IRExpr *assumption,
 				    IRExpr *surviveExpression,
 				    IRExpr *crashExpression,
 				    IRExpr *escapeExpression,
