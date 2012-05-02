@@ -80,18 +80,18 @@ StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_som
 	}
 	if (firstTransformed == edge->endSideEffects())
 		return NULL;
-	StateMachineEdge *res = new StateMachineEdge(NULL);
+	std::vector<StateMachineSideEffect *> sideEffects;
 	for (auto it = edge->beginSideEffects(); it != firstTransformed; it++)
-		res->appendSideEffect(*it);
-	res->appendSideEffect(trans);
+		sideEffects.push_back(*it);
+	sideEffects.push_back(trans);
 	for (auto it = firstTransformed + 1; it != edge->endSideEffects(); it++) {
 		StateMachineSideEffect *old = *it;
 		trans = transformSideEffect(old, done_something);
 		if (!trans)
 			trans = old;
-		res->appendSideEffect(trans);
+		sideEffects.push_back(trans);
 	}
-	return res;
+	return new StateMachineEdge(sideEffects, NULL);
 }
 
 StateMachineState *

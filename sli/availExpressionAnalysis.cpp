@@ -550,9 +550,9 @@ buildNewStateMachineWithLoadsEliminated(
 {
 	if (TIMEOUT)
 		return sme;
-	StateMachineEdge *res =
-		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
-									     done_something, edgeLabels));
+	StateMachineState *target =
+		buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
+							done_something, edgeLabels);
 
 	avail_t currentlyAvailable(initialAvail);
 	currentlyAvailable.calcRegisterMap(opt);
@@ -563,6 +563,7 @@ buildNewStateMachineWithLoadsEliminated(
 		currentlyAvailable.print(stdout);
 	}
 
+	std::vector<StateMachineSideEffect *> sideEffects;
 	for (auto it = sme->beginSideEffects();
 	     !TIMEOUT && it != sme->endSideEffects();
 	     it++) {
@@ -761,13 +762,13 @@ buildNewStateMachineWithLoadsEliminated(
 		if (!*done_something) assert(newEffect == *it);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
 		currentlyAvailable.calcRegisterMap(opt);
-		res->appendSideEffect(newEffect);
+		sideEffects.push_back(newEffect);
 		if (debug_substitutions) {
 			printf("New available set:\n");
 			currentlyAvailable.print(stdout);
 		}
 	}
-	return res;
+	return new StateMachineEdge(sideEffects, target);
 }
 static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(

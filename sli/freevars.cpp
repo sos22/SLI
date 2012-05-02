@@ -276,7 +276,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 		       bool *done_something,
 		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
 {
-	StateMachineEdge *out = new StateMachineEdge(NULL);
+	std::vector<StateMachineSideEffect *> sideEffects;
 	bool doit = false;
 	/* A load results in a free variable if:
 
@@ -296,23 +296,23 @@ introduceFreeVariables(StateMachineEdge *sme,
 		    oracle->hasConflictingRemoteStores(smsel) ||
 		    !definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) ||
 		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) != 1) {
-			out->appendSideEffect(smse);
+			sideEffects.push_back(smse);
 			continue;
 		}
 		/* This is a local load from a location which is never
 		 * stored.  Remove it. */
 		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
-		out->appendSideEffect(smsec);
+		sideEffects.push_back(smsec);
 		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
 				(((IRExprFreeVariable *)smsec->value)->key,
 				 IRExpr_Load(Ity_I64, smsel->addr, smsel->rip)));
 		doit = true;
 	}
-	out->target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);
+	StateMachineState *target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);
 
 	if (doit) {
 		*done_something = true;
-		return out;
+		return new StateMachineEdge(sideEffects, target);
 	} else {
 		return sme;
 	}
