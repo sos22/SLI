@@ -746,25 +746,24 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 		return NULL;
 	}
 
-	if (dynamic_cast<StateMachineCrash *>(sm)) {
+	switch (sm->type) {
+	case StateMachineState::Crash:
 		*crashes = true;
 		return NULL;
-	}
-	if (dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm)) {
+	case StateMachineState::NoCrash:
+	case StateMachineState::Stub:
 		*crashes = false;
 		return NULL;
-	}
-	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
-		return smp->target;
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+	case StateMachineState::Proxy:
+		return ((StateMachineProxy *)sm)->target;
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 		if (expressionIsTrue(smb->condition, chooser, ctxt.state, opt, &ctxt.pathConstraint, &ctxt.justPathConstraint))
 			return smb->trueTarget;
 		else
 			return smb->falseTarget;
 	}
-	if (dynamic_cast<StateMachineUnreached *>(sm)) {
+	case StateMachineState::Unreached:
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
 		*crashes = false;
@@ -930,26 +929,26 @@ top:
 		/* We've hit the end of the edge.  Move to the next
 		 * state. */
 		s = machine->currentEdge->target;
-		assert(!dynamic_cast<StateMachineUnreached *>(s));
-		if (dynamic_cast<StateMachineCrash *>(s)) {
+		switch (s->type) {
+		case StateMachineState::Unreached:
+			abort();
+		case StateMachineState::Crash:
 			machine->finished = true;
 			machine->crashed = true;
 			return;
-		}
-		if (dynamic_cast<StateMachineNoCrash *>(s) ||
-		    dynamic_cast<StateMachineStub *>(s)) {
+		case StateMachineState::NoCrash:
+		case StateMachineState::Stub:
 			machine->finished = true;
 			return;
-		}
-		if (StateMachineProxy *smp =
-		    dynamic_cast<StateMachineProxy *>(s)) {
+		case StateMachineState::Proxy: {
+			StateMachineProxy *smp = (StateMachineProxy *)s;
 			machine->currentEdge = smp->target;
 			machine->nextEdgeSideEffectIdx =
 				machine->currentEdge->beginSideEffects();
 			continue;
 		}
-		if (StateMachineBifurcate *smb =
-		    dynamic_cast<StateMachineBifurcate *>(s)) {
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 			if (expressionIsTrue(smb->condition, chooser, machine->state, opt, &pathConstraint, &justPathConstraint))
 				machine->currentEdge = smb->trueTarget;
 			else
@@ -957,6 +956,7 @@ top:
 			machine->nextEdgeSideEffectIdx =
 				machine->currentEdge->beginSideEffects();
 			continue;
+		}
 		}
 		abort();
 	}
@@ -1156,7 +1156,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			if (writeEdgeIdx == writerEdge->endSideEffects()) {
 				/* Yes, move to the next state. */
 				StateMachineState *s = writerEdge->target;
-				assert(!dynamic_cast<StateMachineUnreached *>(s));
+				assert(s->type != StateMachineState::Unreached);
 				bool c;
 				writerEdge = smallStepEvalStateMachine(writeMachine,
 								       s,

@@ -32,7 +32,7 @@ public:
 		extendPathsRes res;
 		res.finished = false;
 		res.haveCycle = false;
-		if (!dynamic_cast<StateMachineProxy *>(s->root))
+		if (s->root->type != StateMachineState::Proxy)
 			s->root = new StateMachineProxy(s->origin, s->root);
 		std::set<StateMachineEdge *> allEdges;
 		findAllEdges(s, allEdges);
@@ -72,7 +72,7 @@ reachabilityMap::buildEdgeList(StateMachine *s)
 	/* Start clean */
 	edges.clear();
 
-	assert(dynamic_cast<StateMachineProxy *>(s->root));
+	assert(s->root->type == StateMachineState::Proxy);
 	q.push(((StateMachineProxy *)s->root)->target);
 	while (!q.empty()) {
 		StateMachineEdge *e = q.front();

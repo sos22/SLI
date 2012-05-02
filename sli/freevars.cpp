@@ -325,9 +325,14 @@ introduceFreeVariables(StateMachineState *sm,
 		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
 {
 	bool doit = false;
-	if (dynamic_cast<StateMachineTerminal *>(sm))
+	switch (sm->type) {
+	case StateMachineState::Crash:
+	case StateMachineState::NoCrash:
+	case StateMachineState::Stub:
+	case StateMachineState::Unreached:
 		return sm;
-	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+	case StateMachineState::Proxy: {
+		StateMachineProxy *smp = (StateMachineProxy *)sm;
 		StateMachineEdge *e = introduceFreeVariables(smp->target,
 							     root_sm,
 							     alias,
@@ -342,31 +347,34 @@ introduceFreeVariables(StateMachineState *sm,
 			return sm;
 		}
 	}
-	StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm);
-	assert(smb);
-	StateMachineEdge *t = introduceFreeVariables(smb->trueTarget,
-						     root_sm,
-						     alias,
-						     opt,
-						     oracle,
-						     &doit,
-						     fresh);
-	StateMachineEdge *f = introduceFreeVariables(smb->falseTarget,
-						     root_sm,
-						     alias,
-						     opt,
-						     oracle,
-						     &doit,
-						     fresh);
-	if (doit) {
-		*done_something = true;
-		return new StateMachineBifurcate(smb->origin,
-						 smb->condition,
-						 t,
-						 f);
-	} else {
-		return sm;
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
+		StateMachineEdge *t = introduceFreeVariables(smb->trueTarget,
+							     root_sm,
+							     alias,
+							     opt,
+							     oracle,
+							     &doit,
+							     fresh);
+		StateMachineEdge *f = introduceFreeVariables(smb->falseTarget,
+							     root_sm,
+							     alias,
+							     opt,
+							     oracle,
+							     &doit,
+							     fresh);
+		if (doit) {
+			*done_something = true;
+			return new StateMachineBifurcate(smb->origin,
+							 smb->condition,
+							 t,
+							 f);
+		} else {
+			return sm;
+		}
 	}
+	}
+	abort();
 }
 static StateMachine *
 introduceFreeVariables(StateMachine *sm,

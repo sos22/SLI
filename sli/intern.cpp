@@ -411,12 +411,14 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 	if (t.states.count(start))
 		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
-	if (dynamic_cast<StateMachineCrash *>(start) ||
-	    dynamic_cast<StateMachineNoCrash *>(start) ||
-	    dynamic_cast<StateMachineUnreached *>(start)) {
+	switch (start->type) {
+	case StateMachineState::Crash:
+	case StateMachineState::NoCrash:
+	case StateMachineState::Unreached:
 		t.states[start] = start;
 		return start;
-	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(start)) {
+	case StateMachineState::Proxy: {
+		StateMachineProxy *smp = (StateMachineProxy *)start;
 		smp->target = internStateMachineEdge(smp->target, t);
 		for (auto it = t.states_proxy.begin();
 		     it != t.states_proxy.end();
@@ -429,7 +431,9 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		t.states[start] = start;
 		t.states_proxy.insert(smp);
 		return start;
-	} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(start)) {
+	}
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
 		smb->condition = internIRExpr(smb->condition, t);
 		smb->trueTarget = internStateMachineEdge(smb->trueTarget, t);
 		smb->falseTarget = internStateMachineEdge(smb->falseTarget, t);
@@ -447,7 +451,9 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		t.states[start] = start;
 		t.states_bifurcate.insert(smb);
 		return start;
-	} else if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(start)) {
+	}
+	case StateMachineState::Stub: {
+		StateMachineStub *sms = (StateMachineStub *)start;
 		for (auto it = t.states_stub.begin();
 		     it != t.states_stub.end();
 		     it++) {
@@ -459,9 +465,9 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		t.states[start] = start;
 		t.states_stub.insert(sms);
 		return start;
-	} else {
-		abort();
 	}
+	}
+	abort();
 }
 
 StateMachine *

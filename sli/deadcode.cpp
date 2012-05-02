@@ -124,18 +124,25 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		void updateState(StateMachineState *sm, bool *progress)
 		{
 			LivenessEntry res;
-			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
-				buildResForEdge(res, smp->target);
-			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
+			switch (sm->type) {
+			case StateMachineState::Proxy:
+				buildResForEdge(res, ((StateMachineProxy *)sm)->target);
+				break;
+			case StateMachineState::Bifurcate: {
+				StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 				buildResForEdge(res, smb->trueTarget);
 				LivenessEntry res_false;
 				buildResForEdge(res_false, smb->falseTarget);
 				res.merge(res_false);
 				res.useExpression(smb->condition);
-			} else if (dynamic_cast<StateMachineTerminal *>(sm)) {
+				break;
+			}
+			case StateMachineState::Unreached:
+			case StateMachineState::Stub:
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
 				/* Nothing needed */
-			} else {
-				abort();
+				break;
 			}
 			LivenessEntry &outputSlot( (*this)[sm] );
 			if (expandSet(outputSlot, res))
@@ -186,7 +193,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				case StateMachineSideEffect::AssertFalse: {
 					StateMachineSideEffectAssertFalse *a =
 						(StateMachineSideEffectAssertFalse *)e;
-					if (dynamic_cast<StateMachineTerminal *>(edge->target) ||
+					if (edge->target->isTerminal() ||
 					    !alive.assertionLive(a->value))
 						dead = true;
 					break;
@@ -234,16 +241,24 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		}
 	public:
 		void operator()(StateMachineState *state) {
-			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(state)) {
-				doit(smp->target, fvm);
-			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(state)) {
+			switch (state->type) {
+			case StateMachineState::Proxy:
+				doit(((StateMachineProxy *)state)->target, fvm);
+				return;
+			case StateMachineState::Bifurcate: {
+				StateMachineBifurcate *smb = (StateMachineBifurcate *)state;
 				doit(smb->trueTarget, fvm);
 				doit(smb->falseTarget, fvm);
-			} else if (dynamic_cast<StateMachineTerminal *>(state)) {
+				return;
+			}
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
+			case StateMachineState::Stub:
+			case StateMachineState::Unreached:
 				/* Nothing needed */
-			} else {
-				abort();
-			}			
+				return;
+			}
+			abort();
 		}
 
 		_(LivenessMap &_livenessMap, LivenessEntry &_alwaysLive,

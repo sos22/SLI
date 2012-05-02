@@ -775,10 +775,7 @@ buildNewStateMachineWithLoadsEliminated(
 	bool *done_something,
 	std::map<const StateMachineEdge *, int> &edgeLabels)
 {
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm) ||
-	    dynamic_cast<StateMachineUnreached *>(sm))
+	if (sm->isTerminal())
 		return sm;
 	if (memo.count(sm)) {
 		/* We rely on whoever it was that set memo[sm] having
@@ -787,8 +784,9 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 	avail_t avail(availMap[sm]);
 
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
+	switch (sm->type) {
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 		StateMachineBifurcate *res;
 		bool doit = false;
 		avail.calcRegisterMap(opt);
@@ -805,8 +803,9 @@ buildNewStateMachineWithLoadsEliminated(
 			smb->falseTarget, avail, availMap, memo, opt, alias, oracle,
 			done_something, edgeLabels);
 		return res;
-	} if (StateMachineProxy *smp =
-	      dynamic_cast<StateMachineProxy *>(sm)) {
+	}
+	case StateMachineState::Proxy: {
+		StateMachineProxy *smp = (StateMachineProxy *)sm;
 		StateMachineProxy *res;
 		res = new StateMachineProxy(sm->origin, (StateMachineEdge *)NULL);
 		memo[sm] = res;
@@ -814,9 +813,14 @@ buildNewStateMachineWithLoadsEliminated(
 			smp->target, avail, availMap, memo, opt, alias, oracle,
 			done_something, edgeLabels);
 		return res;
-	} else {
+	}
+	case StateMachineState::Unreached:
+	case StateMachineState::Crash:
+	case StateMachineState::NoCrash:
+	case StateMachineState::Stub:
 		abort();
 	}
+	abort();
 }
 
 static StateMachine *
@@ -962,27 +966,10 @@ availExpressionAnalysis(StateMachine *sm,
 		for (std::set<StateMachineState *>::iterator it = statesNeedingRefresh.begin();
 		     it != statesNeedingRefresh.end();
 		     it++) {
-			if (dynamic_cast<StateMachineCrash *>(*it) ||
-			    dynamic_cast<StateMachineNoCrash *>(*it) ||
-			    dynamic_cast<StateMachineStub *>(*it) ||
-			    dynamic_cast<StateMachineUnreached *>(*it))
-				continue;
-			StateMachineEdge *edges[2];
-			int nr_edges;
-			if (StateMachineBifurcate *smb =
-			    dynamic_cast<StateMachineBifurcate *>(*it)) {
-				edges[0] = smb->trueTarget;
-				edges[1] = smb->falseTarget;
-				nr_edges = 2;
-			} else if (StateMachineProxy *smp =
-				   dynamic_cast<StateMachineProxy *>(*it)) {
-				edges[0] = smp->target;
-				nr_edges = 1;
-			} else {
-				abort();
-			}
-			for (int x = 0; x < nr_edges; x++) {
-				StateMachineEdge *edge = edges[x];
+			std::vector<StateMachineEdge *> edges;
+			(*it)->targets(edges);
+			for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
+				StateMachineEdge *edge = *it2;
 				assert(availOnEntry.count(*it));
 				avail_t outputAvail(availOnEntry[*it]);
 

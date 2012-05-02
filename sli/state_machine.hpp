@@ -298,13 +298,32 @@ public:
 };
 
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
-protected:
-	StateMachineState(const VexRip &_origin) : origin(_origin) {}
 public:
+#define all_state_types(f)						\
+	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Proxy) f(Bifurcate)
+#define mk_state_type(name) name ,
+	enum stateType {
+		all_state_types(mk_state_type)
+	};
+#undef mk_state_type
+	static bool stateTypeIsTerminal(enum stateType t) {
+		return t == Unreached || t == Crash || t == NoCrash || t == Stub;
+	}
+protected:
+	StateMachineState(const VexRip &_origin,
+			  enum stateType _type)
+		: type(_type), origin(_origin)
+	{}
+public:
+	stateType type;
 	VexRip origin; /* RIP we were looking at when we constructed
 			* the thing.  Not very meaningful, but
 			* occasionally provides useful hints for
 			* debugging.*/
+
+	bool isTerminal() const {
+		return stateTypeIsTerminal(type);
+	}
 
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
@@ -568,7 +587,7 @@ public:
 class StateMachineTerminal : public StateMachineState {
 protected:
 	virtual void prettyPrint(FILE *f) const = 0;
-	StateMachineTerminal(const VexRip &rip) : StateMachineState(rip) {}
+	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
 public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
@@ -582,7 +601,7 @@ public:
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
-	StateMachineUnreached() : StateMachineTerminal(VexRip()) {}
+	StateMachineUnreached() : StateMachineTerminal(VexRip(), StateMachineState::Unreached) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
 public:
@@ -594,7 +613,7 @@ public:
 };
 
 class StateMachineCrash : public StateMachineTerminal {
-	StateMachineCrash() : StateMachineTerminal(VexRip()) {}
+	StateMachineCrash() : StateMachineTerminal(VexRip(), StateMachineState::Crash) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
 public:
 	static StateMachineCrash *get() {
@@ -606,7 +625,7 @@ public:
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
-	StateMachineNoCrash() : StateMachineTerminal(VexRip()) {}
+	StateMachineNoCrash() : StateMachineTerminal(VexRip(), StateMachineState::NoCrash) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
 public:
 	static StateMachineNoCrash *get() {
@@ -625,12 +644,12 @@ public:
 	StateMachineEdge *target;
 
 	StateMachineProxy(const VexRip &origin, StateMachineState *t)
-		: StateMachineState(origin),
+		: StateMachineState(origin, StateMachineState::Proxy),
 		  target(new StateMachineEdge(t))		  
 	{
 	}
 	StateMachineProxy(const VexRip &origin, StateMachineEdge *t)
-		: StateMachineState(origin),
+		: StateMachineState(origin, StateMachineState::Proxy),
 		  target(t)
 	{
 	}
@@ -663,7 +682,7 @@ public:
 			      IRExpr *_condition,
 			      StateMachineEdge *t,
 			      StateMachineEdge *f)
-		: StateMachineState(origin),
+		: StateMachineState(origin, StateMachineState::Bifurcate),
 		  condition(_condition),
 		  trueTarget(t),
 		  falseTarget(f)
@@ -673,7 +692,7 @@ public:
 			      IRExpr *_condition,
 			      StateMachineState *t,
 			      StateMachineState *f)
-		: StateMachineState(origin),
+		: StateMachineState(origin, StateMachineState::Bifurcate),
 		  condition(_condition),
 		  trueTarget(new StateMachineEdge(t)),
 		  falseTarget(new StateMachineEdge(f))
@@ -728,7 +747,7 @@ class StateMachineStub : public StateMachineTerminal {
 public:
 	VexRip target;
 
-	StateMachineStub(const VexRip &origin, const VexRip &t) : StateMachineTerminal(origin), target(t) {}
+	StateMachineStub(const VexRip &origin, const VexRip &t) : StateMachineTerminal(origin, StateMachineState::Stub), target(t) {}
 
 	void prettyPrint(FILE *f) const
 	{

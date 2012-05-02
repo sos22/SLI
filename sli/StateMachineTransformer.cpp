@@ -84,25 +84,14 @@ StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_som
 StateMachineState *
 StateMachineTransformer::transformState(StateMachineState *s, bool *done_something)
 {
-	if (StateMachineTerminal *t = dynamic_cast<StateMachineTerminal *>(s)) {
-		if (StateMachineUnreached *a = dynamic_cast<StateMachineUnreached *>(t)) {
-			return transformOneState(a, done_something);
-		} else if (StateMachineCrash *b = dynamic_cast<StateMachineCrash *>(t)) {
-			return transformOneState(b, done_something);
-		} else if (StateMachineNoCrash *c = dynamic_cast<StateMachineNoCrash *>(t)) {
-			return transformOneState(c, done_something);
-		} else if (StateMachineStub *d = dynamic_cast<StateMachineStub *>(t)) {
-			return transformOneState(d, done_something);
-		} else {
-			abort();
-		}
-	} else if (StateMachineProxy *p = dynamic_cast<StateMachineProxy *>(s)) {
-		return transformOneState(p, done_something);
-	} else if (StateMachineBifurcate *b = dynamic_cast<StateMachineBifurcate *>(s)) {
-		return transformOneState(b, done_something);
-	} else {
-		abort();
+	switch (s->type) {
+#define do_type(name)							\
+		case StateMachineState:: name :				\
+			return transformOneState((StateMachine ## name *)s, done_something);
+		all_state_types(do_type);
+#undef do_type
 	}
+	abort();
 }
 
 StateMachine *
@@ -161,19 +150,29 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 				progress = true;
 
 				/* Because terminals don't have targets. */
-				assert(!dynamic_cast<StateMachineTerminal *>(s));
+				assert(!StateMachineState::stateTypeIsTerminal(s->type));
 
-				if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
+				switch (s->type) {
+				case StateMachineState::Proxy: {
+					StateMachineProxy *smp = (StateMachineProxy *)s;
 					stateRewrites[s] =
 						new StateMachineProxy(smp->origin,
 								      (StateMachineEdge *)NULL);
-				} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s)) {
+					break;
+				}
+				case StateMachineState::Bifurcate: {
+					StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 					stateRewrites[s] =
 						new StateMachineBifurcate(smb->origin,
 									  smb->condition,
 									  (StateMachineEdge *)NULL,
 									  (StateMachineEdge *)NULL);
-				} else {
+					break;
+				}
+				case StateMachineState::Unreached:
+				case StateMachineState::Crash:
+				case StateMachineState::NoCrash:
+				case StateMachineState::Stub:
 					abort();
 				}
 			}
@@ -227,19 +226,28 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			};
 		} doEdge;
 
-		if (dynamic_cast<StateMachineTerminal *>(old)) {
-			/* These have no outgoing edges, so need no rewriting. */
-		} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(old)) {
-			StateMachineProxy *repl = dynamic_cast<StateMachineProxy *>(replacement);
-			assert(repl);
+		switch (old->type) {
+		case StateMachineState::Proxy: {
+			StateMachineProxy *smp = (StateMachineProxy *)old;
+			assert(replacement->type == StateMachineState::Proxy);
+			StateMachineProxy *repl = (StateMachineProxy *)replacement;
 			doEdge(repl->target, smp->target, edgeRewrites);
-		} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(old)) {
-			StateMachineBifurcate *repl = dynamic_cast<StateMachineBifurcate *>(replacement);
-			assert(repl);
+			break;
+		}
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)old;
+			assert(replacement->type == StateMachineState::Bifurcate);
+			StateMachineBifurcate *repl = (StateMachineBifurcate *)replacement;
 			doEdge(repl->trueTarget, smb->trueTarget, edgeRewrites);
 			doEdge(repl->falseTarget, smb->falseTarget, edgeRewrites);
-		} else {
-			abort();
+			break;
+		}
+		case StateMachineState::Crash:
+		case StateMachineState::NoCrash:
+		case StateMachineState::Stub:
+		case StateMachineState::Unreached:
+			/* These have no outgoing edges, so need no rewriting. */
+			break;
 		}
 	}
 

@@ -59,11 +59,11 @@ storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *sm
 			  Oracle *oracle,
 			  std::set<StateMachineEdge *> &memo)
 {
-	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm))
-		return storeMightBeLoadedByStateEdge(smp->target, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
-	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm))
-		return storeMightBeLoadedByStateEdge(smb->trueTarget, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo) ||
-			storeMightBeLoadedByStateEdge(smb->falseTarget, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
+	std::vector<StateMachineEdge *> edges;
+	sm->targets(edges);
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		if (storeMightBeLoadedByStateEdge(*it, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo))
+			return true;
 	return false;
 }
 
@@ -141,19 +141,11 @@ removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_somethin
 	if (visited.count(sm))
 		return;
 	visited.insert(sm);
-	if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
-		removeRedundantStores(smp->target, oracle, done_something, alias, visited, opt);
-		return;
-	}
-	if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
-		removeRedundantStores(smb->trueTarget, oracle, done_something, alias, visited, opt);
-		removeRedundantStores(smb->falseTarget, oracle, done_something, alias, visited, opt);
-		return;
-	}
-	assert(dynamic_cast<StateMachineUnreached *>(sm) ||
-	       dynamic_cast<StateMachineCrash *>(sm) ||
-	       dynamic_cast<StateMachineNoCrash *>(sm) ||
-	       dynamic_cast<StateMachineStub *>(sm));
+	std::vector<StateMachineEdge *> edges;
+	sm->targets(edges);
+#warning why not just use enumStatesAndEdges?
+	for (auto it = edges.begin(); it != edges.end(); it++)
+		removeRedundantStores(*it, oracle, done_something, alias, visited, opt);
 }
 
 static void

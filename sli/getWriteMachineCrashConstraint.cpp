@@ -192,28 +192,33 @@ stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt)
 	if (it != ctxt.stateValues.end())
 		return it->second;
 
-	IRExpr *res;
-	if (dynamic_cast<StateMachineTerminal *>(s)) {
-		if (dynamic_cast<StateMachineCrash *>(s))
-			res = ctxt.crashExpression;
-		else if (dynamic_cast<StateMachineNoCrash *>(s))
-			res = ctxt.surviveExpression;
-		else if (dynamic_cast<StateMachineUnreached *>(s) ||
-			 dynamic_cast<StateMachineStub *>(s))
-			res = ctxt.escapeExpression;
-		else
-			abort();
-	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
+	IRExpr *res = NULL;
+	switch (s->type) {
+	case StateMachineState::Crash:
+		res = ctxt.crashExpression;
+		break;
+	case StateMachineState::NoCrash:
+		res = ctxt.surviveExpression;
+		break;
+	case StateMachineState::Unreached:
+	case StateMachineState::Stub:
+		res = ctxt.escapeExpression;
+		break;
+	case StateMachineState::Proxy: {
+		StateMachineProxy *smp = (StateMachineProxy *)s;
 		res = edgeCrashConstraint(smp->target, ctxt);
-	} else {
-		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s);
-		assert(smb);
+		break;
+	}
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 		res = IRExpr_Mux0X(
 			smb->condition,
 			edgeCrashConstraint(smb->falseTarget, ctxt),
 			edgeCrashConstraint(smb->trueTarget, ctxt));
+		break;
 	}
-
+	}
+	assert(res != NULL);
 	res = simplifyIRExpr(res, ctxt.opt);
 	ctxt.stateValues[s] = res;
 	return res;

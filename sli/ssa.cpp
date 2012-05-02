@@ -641,7 +641,7 @@ introducePhiStates(StateMachine *inp,
 	AllocateSsaVariable allocateSsaVariable(lastGeneration, reaching);
 
 	/* This is a lot easier if the root is a proxy node. */
-	if (!dynamic_cast<StateMachineProxy *>(inp->root))
+	if (inp->root->type != StateMachineState::Proxy)
 		inp->root = new StateMachineProxy(inp->origin, inp->root);
 
 	class PredecessorMap : public std::map<StateMachineState *, StateMachineEdge *> {
@@ -1060,28 +1060,33 @@ rawDupe(duplication_context &ctxt, const StateMachineEdge *inp)
 static StateMachineState *
 rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 {
-	if (const StateMachineProxy *smp = dynamic_cast<const StateMachineProxy *>(inp)) {
+	switch (inp->type) {
+	case StateMachineState::Proxy: {
+		StateMachineProxy *smp = (StateMachineProxy *)inp;
 		StateMachineProxy *res = new StateMachineProxy(smp->origin, (StateMachineEdge *)NULL);
 		ctxt(&res->target, smp->target, rawDupe);
 		return res;
-	} else if (const StateMachineBifurcate *smb = dynamic_cast<const StateMachineBifurcate *>(inp)) {
+	}
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)inp;
 		StateMachineBifurcate *res = new StateMachineBifurcate(smb->origin, NULL, (StateMachineEdge *)NULL, NULL);
 		ctxt(&res->condition, smb->condition, rawDupe);
 		ctxt(&res->trueTarget, smb->trueTarget, rawDupe);
 		ctxt(&res->falseTarget, smb->falseTarget, rawDupe);
 		return res;
-	} else if (dynamic_cast<const StateMachineUnreached *>(inp)) {
-		return StateMachineUnreached::get();
-	} else if (dynamic_cast<const StateMachineCrash *>(inp)) {
-		return StateMachineCrash::get();
-	} else if (dynamic_cast<const StateMachineNoCrash *>(inp)) {
-		return StateMachineNoCrash::get();
-	} else if (const StateMachineStub *sms = dynamic_cast<const StateMachineStub *>(inp)) {
-		return new StateMachineStub(sms->origin, sms->target);
-	} else {
-		abort();
 	}
-
+	case StateMachineState::Unreached:
+		return StateMachineUnreached::get();
+	case StateMachineState::Crash:
+		return StateMachineCrash::get();
+	case StateMachineState::NoCrash:
+		return StateMachineNoCrash::get();
+	case StateMachineState::Stub: {
+		StateMachineStub *sms = (StateMachineStub *)inp;
+		return new StateMachineStub(sms->origin, sms->target);
+	}
+	}
+	abort();
 }
 
 static StateMachine *

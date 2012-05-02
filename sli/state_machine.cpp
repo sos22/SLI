@@ -75,6 +75,10 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 		*done_something = true;
 		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, done));
 	}
+	if (trueTarget == falseTarget) {
+		*done_something = true;
+		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, done));
+	}
 	condition = optimiseIRExprFP(condition, opt, done_something);
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
@@ -86,20 +90,16 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv, done);
 	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv, done);
 
-	if (trueTarget->noSideEffects()) {
-		StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(trueTarget->target);
-		if (smp) {
-			*done_something = true;
-			trueTarget = smp->target;
-		}
+	if (trueTarget->noSideEffects() && trueTarget->target->type == StateMachineState::Proxy) {
+		StateMachineProxy *smp = (StateMachineProxy *)trueTarget->target;
+		*done_something = true;
+		trueTarget = smp->target;
 	}
 
-	if (falseTarget->noSideEffects()) {
-		StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(falseTarget->target);
-		if (smp) {
-			*done_something = true;
-			falseTarget = smp->target;
-		}
+	if (falseTarget->noSideEffects() && falseTarget->target->type == StateMachineState::Proxy) {
+		StateMachineProxy *smp = (StateMachineProxy *)falseTarget->target;
+		*done_something = true;
+		falseTarget = smp->target;
 	}
 
 	if (falseTarget->noSideEffects() && trueTarget->noSideEffects()) {
@@ -108,7 +108,8 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 			return trueTarget->target;
 		}
 
-		if (StateMachineBifurcate *falseBifur = dynamic_cast<StateMachineBifurcate *>(falseTarget->target)) {
+		if (falseTarget->target->type == StateMachineState::Bifurcate) {
+			StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget->target;
 			if (falseTarget != falseBifur->falseTarget &&
 			    trueTarget == falseBifur->trueTarget) {
 				falseTarget = falseBifur->falseTarget;
@@ -132,7 +133,8 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 				return this;
 			}
 		}
-		if (StateMachineBifurcate *trueBifur = dynamic_cast<StateMachineBifurcate *>(trueTarget->target)) {
+		if (trueTarget->target->type == StateMachineState::Bifurcate) {
+			StateMachineBifurcate *trueBifur = (StateMachineBifurcate *)trueTarget->target;
 			if (trueTarget != trueBifur->trueTarget &&
 			    falseTarget == trueBifur->falseTarget) {
 				trueTarget = trueBifur->trueTarget;
@@ -625,19 +627,29 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 			: labelToEdge(_labelToEdge)
 		{}
 		bool operator()(StateMachineState *s) {
-			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
+			switch (s->type) {
+			case StateMachineState::Proxy: {
+				StateMachineProxy *smp = (StateMachineProxy *)s;
 				smp->target = labelToEdge[(int)(unsigned long)smp->target];
 				if (!smp->target)
 					return false;
-			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s)) {
+				return true;
+			}
+			case StateMachineState::Bifurcate: {
+				StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 				smb->trueTarget = labelToEdge[(int)(unsigned long)smb->trueTarget];
 				smb->falseTarget = labelToEdge[(int)(unsigned long)smb->falseTarget];
 				if (!smb->trueTarget || !smb->falseTarget)
 					return false;
-			} else {
-				assert(dynamic_cast<StateMachineTerminal *>(s));
+				return true;
 			}
-			return true;
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
+			case StateMachineState::Stub:
+			case StateMachineState::Unreached:
+				return true;
+			}
+			abort();
 		}
 	} doOneState(labelToEdge);
 	if (!doOneState(root))

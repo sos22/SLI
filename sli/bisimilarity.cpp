@@ -61,13 +61,14 @@ rewriteStateMachine(StateMachineState *sm,
 		return rewriteStateMachine(rules[sm], rules, edgeRules, memo, edgeMemo);
 	}
 	memo.insert(sm);
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm) ||
-	    dynamic_cast<StateMachineUnreached *>(sm)) {
+	switch (sm->type) {
+	case StateMachineState::Crash:
+	case StateMachineState::NoCrash:
+	case StateMachineState::Stub:
+	case StateMachineState::Unreached:
 		return sm;
-	} else if (StateMachineBifurcate *smb =
-		   dynamic_cast<StateMachineBifurcate *>(sm)) {
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 		smb->trueTarget = rewriteStateMachineEdge(
 			smb->trueTarget,
 			rules,
@@ -81,7 +82,9 @@ rewriteStateMachine(StateMachineState *sm,
 			memo,
 			edgeMemo);
 		return sm;
-	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
+	}
+	case StateMachineState::Proxy: {
+		StateMachineProxy *smp = (StateMachineProxy *)sm;
 		smp->target = rewriteStateMachineEdge(
 			smp->target,
 			rules,
@@ -89,9 +92,9 @@ rewriteStateMachine(StateMachineState *sm,
 			memo,
 			edgeMemo);
 		return sm;
-	} else {
-		abort();
 	}
+	}
+	abort();
 }
 
 template <typename t> void
@@ -192,91 +195,40 @@ statesLocallyBisimilar(StateMachineState *sm1,
 		       const std::set<st_edge_pair_t> &edges,
 		       const AllowableOptimisations &opt)
 {
-	/* Sort our arguments by type.  Ordering is:
+	if (sm1 == sm2)
+		return true;
 
-	   Crash
-	   NoCrash
-	   Stub
-	   Unreached
-	   Proxy
-	   Bifurcation
-	*/
-	bool swapArgs = false;
-	if (!dynamic_cast<StateMachineCrash *>(sm1)) {
-		if (dynamic_cast<StateMachineCrash *>(sm2)) {
-			swapArgs = true;
-		} else if (!dynamic_cast<StateMachineNoCrash *>(sm1)) {
-			if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
-				swapArgs = true;
-			} else if (!dynamic_cast<StateMachineStub *>(sm1)) {
-				if (dynamic_cast<StateMachineStub *>(sm2)) {
-					swapArgs = true;
-				} else if (!dynamic_cast<StateMachineUnreached *>(sm1)) {
-					if (dynamic_cast<StateMachineUnreached *>(sm2)) {
-						swapArgs = true;
-					} else if (!dynamic_cast<StateMachineProxy *>(sm1)) {
-						assert(dynamic_cast<StateMachineBifurcate *>(sm1));
-						if (dynamic_cast<StateMachineProxy *>(sm2)) {
-							swapArgs = true;
-						}
-					}
-				}
-			}
-		}
-	}
-	if (swapArgs)
-		return statesLocallyBisimilar(sm2, sm1, edges, opt);
+	if (sm1->type != sm2->type)
+		return false;
 
-	if (dynamic_cast<StateMachineCrash *>(sm1)) {
-		if (dynamic_cast<StateMachineCrash *>(sm2)) {
-			return true;
-		} else {
-			return false;
-		}
+	switch (sm1->type) {
+		/* These have no data, so if they're the same type it's fine */
+	case StateMachineState::Unreached:
+	case StateMachineState::Crash:
+	case StateMachineState::NoCrash:
+		return true;
+
+	case StateMachineState::Stub: {
+		StateMachineStub *sms1 = (StateMachineStub *)sm1;
+		StateMachineStub *sms2 = (StateMachineStub *)sm2;
+		return sms1->target == sms2->target;
 	}
 
-	if (dynamic_cast<StateMachineNoCrash *>(sm1)) {
-		if (dynamic_cast<StateMachineNoCrash *>(sm2)) {
-			return true;
-		} else {
-			return false;
-		}
+	case StateMachineState::Proxy: {
+		StateMachineProxy *smp1 = (StateMachineProxy *)sm1;
+		StateMachineProxy *smp2 = (StateMachineProxy *)sm2;
+		return edges.count(st_edge_pair_t(smp1->target, smp2->target));
 	}
 
-	if (dynamic_cast<StateMachineUnreached *>(sm1)) {
-		if (dynamic_cast<StateMachineUnreached *>(sm2)) {
-			return true;
-		} else {
-			return false;
-		}
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb1 = (StateMachineBifurcate *)sm1;
+		StateMachineBifurcate *smb2 = (StateMachineBifurcate *)sm2;
+		return edges.count(st_edge_pair_t(smb1->trueTarget, smb2->trueTarget)) &&
+			edges.count(st_edge_pair_t(smb1->falseTarget, smb2->falseTarget)) &&
+			definitelyEqual(smb1->condition, smb2->condition, opt);
 	}
-	if (StateMachineStub *sms1 =
-	    dynamic_cast<StateMachineStub *>(sm1)) {
-		if (StateMachineStub *sms2 = dynamic_cast<StateMachineStub *>(sm2))
-			return sms1->target == sms2->target;
-		else
-			return false;
 	}
-
-	if (StateMachineProxy *smp1 =
-	    dynamic_cast<StateMachineProxy *>(sm1)) {
-		if (StateMachineProxy *smp2 =
-		    dynamic_cast<StateMachineProxy *>(sm2)) {
-			return edges.count(st_edge_pair_t(smp1->target, smp2->target));
-		} else {
-			return false;
-		}
-	}
-
-	StateMachineBifurcate *smb1 =
-		dynamic_cast<StateMachineBifurcate *>(sm1);
-	StateMachineBifurcate *smb2 =
-		dynamic_cast<StateMachineBifurcate *>(sm2);
-	assert(smb1);
-	assert(smb2);
-	return edges.count(st_edge_pair_t(smb1->trueTarget, smb2->trueTarget)) &&
-		edges.count(st_edge_pair_t(smb1->falseTarget, smb2->falseTarget)) &&
-		definitelyEqual(smb1->condition, smb2->condition, opt);
+	abort();
 }
 
 static void
@@ -366,17 +318,6 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 		return sm;
 
 	std::map<StateMachineState *, StateMachineState *> canonMap;
-	/* While we're here, iterate over every bifurcation node, and
-	   if the branches are bisimilar to each other then replace it
-	   with a proxy. */
-
-	for (std::set<StateMachineState *>::iterator it = allStates.begin();
-	     it != allStates.end();
-	     it++) {
-		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(*it);
-		if (smb && bisimilarEdges.count(st_edge_pair_t(smb->trueTarget, smb->falseTarget)))
-			canonMap[*it] = new StateMachineProxy((*it)->origin, smb->trueTarget);
-	}
 
 	/* Now build a mapping from states to canonical states, using
 	   the bisimilarity information, such that two states map to
