@@ -86,6 +86,22 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv, done);
 	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv, done);
 
+	if (trueTarget->noSideEffects()) {
+		StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(trueTarget->target);
+		if (smp) {
+			*done_something = true;
+			trueTarget = smp->target;
+		}
+	}
+
+	if (falseTarget->noSideEffects()) {
+		StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(falseTarget->target);
+		if (smp) {
+			*done_something = true;
+			falseTarget = smp->target;
+		}
+	}
+
 	if (falseTarget->noSideEffects() && trueTarget->noSideEffects()) {
 		if (trueTarget->target == falseTarget->target) {
 			*done_something = true;
