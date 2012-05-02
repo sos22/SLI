@@ -1092,7 +1092,7 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 }
 
 struct findRemoteMacroSectionsState {
-	int writeEdgeIdx;
+	bool skipFirstSideEffect;
 	StateMachineEdge *writerEdge;
 	StateMachineEvalContext writerContext;
 	bool finished;
@@ -1110,10 +1110,8 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 						  Oracle *oracle,
 						  const AllowableOptimisations &opt)
 {
-	/* Have we hit the end of the current writer edge? */
 top:
-	if (writeEdgeIdx == 1 || !writerEdge->sideEffect) {
-		/* Yes, move to the next state. */
+	while (!writerEdge->sideEffect) {
 		StateMachineState *s = writerEdge->target;
 		assert(s->type != StateMachineState::Unreached);
 		bool c;
@@ -1152,14 +1150,13 @@ top:
 			finished = true;
 			return NULL;
 		}
-		writeEdgeIdx = 0;
+	}
+
+	if (writerEdge->sideEffect && skipFirstSideEffect) {
+		skipFirstSideEffect = false;
 		goto top;
 	}
 
-	/* Advance the writer by one state.  Note that we *don't*
-	   consider running the read before any write states, as
-	   that's already been handled and is known to lead to
-	   no-crash. */
 	StateMachineSideEffect *se;
 	se = writerEdge->sideEffect;
 	assert(se);
@@ -1172,7 +1169,8 @@ top:
 		writer_failed = true;
 		return NULL;
 	}
-	writeEdgeIdx++;
+
+	skipFirstSideEffect = true;
 
 	/* Advance to a store */
 	StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(se);
@@ -1216,7 +1214,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		state.writerContext.pathConstraint = assumption;
 		state.writerEdge = writeStartEdge;
-		state.writeEdgeIdx = 0;
+		state.skipFirstSideEffect = false;
 		sectionStart = NULL;
 		state.finished = false;
 		state.writer_failed = false;
@@ -1295,7 +1293,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 		state.writerContext.pathConstraint = assumption;
 		state.writerEdge = writeStartEdge;
-		state.writeEdgeIdx = 0;
+		state.skipFirstSideEffect = false;
 		while (!TIMEOUT) {
 			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
 
