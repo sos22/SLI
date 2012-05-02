@@ -986,6 +986,7 @@ top:
 		goto top;
 	}
 
+	machine->nextEdgeSideEffectIdx++;
 	return machine->currentEdge->sideEffect;
 }
 
@@ -1002,7 +1003,7 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 		se = advanceToLoad(chooser, oracle, opt);
 	else
 		se = advanceToStore(chooser, oracle, opt);
-	if (machine->finished || machine->crashed || TIMEOUT)
+	if (!se)
 		return;
 
 	if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
@@ -1010,7 +1011,6 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 		machine->finished = true;
 	} else {
 		history.push_back(se);
-		machine->nextEdgeSideEffectIdx++;
 	}
 }
 
@@ -1105,6 +1105,98 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	return true;
 }
 
+struct findRemoteMacroSectionsState {
+	int writeEdgeIdx;
+	StateMachineEdge *writerEdge;
+	StateMachineEvalContext writerContext;
+	bool finished;
+	bool writer_failed;
+
+	StateMachineSideEffectStore *advanceWriteMachine(StateMachine *writeMachine,
+							 NdChooser &chooser,
+							 Oracle *oracle,
+							 const AllowableOptimisations &opt);
+};
+
+StateMachineSideEffectStore *
+findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
+						  NdChooser &chooser,
+						  Oracle *oracle,
+						  const AllowableOptimisations &opt)
+{
+	/* Have we hit the end of the current writer edge? */
+top:
+	if (writeEdgeIdx == 1 || !writerEdge->sideEffect) {
+		/* Yes, move to the next state. */
+		StateMachineState *s = writerEdge->target;
+		assert(s->type != StateMachineState::Unreached);
+		bool c;
+		writerEdge = smallStepEvalStateMachine(writeMachine,
+						       s,
+						       &c,
+						       chooser,
+						       oracle,
+						       opt,
+						       writerContext);
+		if (!writerEdge) {
+			/* Hit the end of the writer -> we're done. */
+			/* Note that we need to evaluate the read
+			   machine one last time, so that we can take
+			   account of any assumptions made due to any
+			   branches after the last side-effect. */
+			/* i.e. a store machine branch will change the
+			   path constraint, which could cause the read
+			   machien to go from crash to non-crash, and
+			   we need to make sure that we pick that up
+			   as the end of a critical section. */
+			/* Example of code where this is important:
+
+			   acquire_lock();
+			   x = foo->flag;
+			   foo->bar = 5;
+			   if (x) {
+			        release_lock();
+				return;
+			   }
+			   foo->flag = 0;
+			   release_lock();
+
+			   but with the locking taken out.
+			*/
+			finished = true;
+			return NULL;
+		}
+		writeEdgeIdx = 0;
+		goto top;
+	}
+
+	/* Advance the writer by one state.  Note that we *don't*
+	   consider running the read before any write states, as
+	   that's already been handled and is known to lead to
+	   no-crash. */
+	StateMachineSideEffect *se;
+	se = writerEdge->sideEffect;
+	assert(se);
+	if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
+					writerContext.state,
+					writerContext.memLog,
+					false, opt,
+					&writerContext.pathConstraint,
+					NULL)) {
+		writer_failed = true;
+		return NULL;
+	}
+	writeEdgeIdx++;
+
+	/* Advance to a store */
+	StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(se);
+	if (!smses)
+		goto top;
+
+	return smses;
+}
+
+
 /* Run the write machine, covering every possible schedule and
  * aliasing pattern.  After every store, run the read machine
  * atomically.  Find ranges of the store machine where the read
@@ -1133,104 +1225,19 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		LibVEX_maybe_gc(token);
 
-		StateMachineEvalContext writerContext;
-		StateMachineEdge *writerEdge;
-		int writeEdgeIdx;
+		findRemoteMacroSectionsState state;
 		StateMachineSideEffectStore *sectionStart;
-		bool finished;
-		StateMachineSideEffectStore *smses;
-		bool writer_failed;
 
-		writerContext.pathConstraint = assumption;
-		writerEdge = writeStartEdge;
-		writeEdgeIdx = 0;
+		state.writerContext.pathConstraint = assumption;
+		state.writerEdge = writeStartEdge;
+		state.writeEdgeIdx = 0;
 		sectionStart = NULL;
-		finished = false;
-		smses = NULL;
-		writer_failed = false;
+		state.finished = false;
+		state.writer_failed = false;
 
-		while (!writer_failed && !TIMEOUT && !finished) {
-			/* Have we hit the end of the current writer edge? */
+		while (!state.writer_failed && !TIMEOUT && !state.finished) {
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
 
-			if (writeEdgeIdx == 1 || !writerEdge->sideEffect) {
-				/* Yes, move to the next state. */
-				StateMachineState *s = writerEdge->target;
-				assert(s->type != StateMachineState::Unreached);
-				bool c;
-				writerEdge = smallStepEvalStateMachine(writeMachine,
-								       s,
-								       &c,
-								       chooser,
-								       oracle,
-								       opt,
-								       writerContext);
-				if (!writerEdge) {
-					/* Hit the end of the writer
-					 * -> we're done. */
-					/* Note that we need to
-					   evaluate the read machine
-					   one last time, so that we
-					   can take account of any
-					   assumptions made due to any
-					   branches after the last
-					   side-effect. */
-					/* i.e. a store machine branch
-					   will change the path
-					   constraint, which could
-					   cause the read machien to
-					   go from crash to non-crash,
-					   and we need to make sure
-					   that we pick that up as the
-					   end of a critical
-					   section. */
-					/* Example of code where this is
-					   important:
-
-					   acquire_lock();
-					   x = foo->flag;
-					   foo->bar = 5;
-					   if (x) {
-					       release_lock();
-					       return;
-					   }
-					   foo->flag = 0;
-					   release_lock();
-
-					   but with the locking taken
-					   out.
-					*/
-					finished = true;
-					goto eval_read_machine;
-				}
-				writeEdgeIdx = 0;
-				continue;				
-			}
-
-			/* Advance the writer by one state.  Note that
-			   we *don't* consider running the read before
-			   any write states, as that's already been
-			   handled and is known to lead to
-			   no-crash. */
-			StateMachineSideEffect *se;
-			se = writerEdge->sideEffect;
-			assert(se);
-			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
-							writerContext.state,
-							writerContext.memLog,
-							false, opt,
-							&writerContext.pathConstraint,
-							NULL)) {
-				writer_failed = true;
-				break;
-			}
-			writeEdgeIdx++;
-
-			/* Advance to a store */
-			smses = dynamic_cast<StateMachineSideEffectStore *>(se);
-			if (!smses)
-				continue;
-
-		eval_read_machine:
 			/* The writer just issued a store, so we
 			   should now try running the reader
 			   atomically.  We discard any stores issued
@@ -1239,7 +1246,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   need a fresh eval ctxt and a fresh copy of
 			   the stores list every time around the
 			   loop. */
-			StateMachineEvalContext readEvalCtxt = writerContext;
+			StateMachineEvalContext readEvalCtxt = state.writerContext;
 			bool crashes;
 			bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, chooser,
 						oracle, opt, readEvalCtxt);
@@ -1268,7 +1275,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		/* This is enforced by the suitability check at the
 		 * top of this function. */
-		if (!writer_failed && sectionStart) {
+		if (!state.writer_failed && sectionStart) {
 			fprintf(_logfile, "Whoops... running store machine and then running load machine doesn't lead to goodness.\n");
 			/* Give up, shouldn't ever happen. */
 			return false;
@@ -1296,58 +1303,21 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 		LibVEX_maybe_gc(token);
 
-		StateMachineEvalContext writeContext;
-		StateMachineEdge *writerEdge;
-		int writeEdgeIdx;
 		std::set<StateMachineSideEffectStore *> incompleteSections;
 
-		writeContext.pathConstraint = assumption;
-		writerEdge = writeStartEdge;
-		writeEdgeIdx = 0;
-		while (!TIMEOUT) {
-			/* Have we hit the end of the current writer edge? */
-			if (writeEdgeIdx == 1 || !writerEdge->sideEffect) {
-				/* Yes, move to the next state. */
-				bool c;
-				writerEdge = smallStepEvalStateMachine(writeMachine,
-								       writerEdge->target,
-								       &c,
-								       chooser,
-								       oracle,
-								       opt,
-								       writeContext);
-				if (!writerEdge) {
-					/* Hit the end of the writer
-					 * -> we're done. */
-					break;
-				}
-				writeEdgeIdx = 0;
-				continue;
-			}
+		findRemoteMacroSectionsState state;
 
-			/* Advance the writer by one state.  Note that
-			   we *don't* consider running the read before
-			   any write states, as that's already been
-			   handled and is known to lead to
-			   no-crash. */
-			StateMachineSideEffect *se;
-			se = writerEdge->sideEffect;
-			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
-							writeContext.state,
-							writeContext.memLog, false, opt,
-							&writeContext.pathConstraint, NULL)) {
+		state.writerContext.pathConstraint = assumption;
+		state.writerEdge = writeStartEdge;
+		state.writeEdgeIdx = 0;
+		while (!TIMEOUT) {
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
+
+			if (state.writer_failed) {
 				/* Contradiction in the writer -> give
 				 * up. */
 				break;
 			}
-			writeEdgeIdx++;
-
-			/* Only consider running the probe machine if
-			 * we just executed a store. */
-			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(se);
-			if (!smses)
-				continue;
 
 			/* Did we just leave a critical section? */
 			if (incompleteSections.count(smses))
@@ -1367,7 +1337,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			/* The writer just issued a store and is not
 			   in a critical section, so we should now try
 			   running the reader atomically.  */
-			StateMachineEvalContext readEvalCtxt = writeContext;
+			StateMachineEvalContext readEvalCtxt = state.writerContext;
 			bool crashes;
 			bigStepEvalStateMachine(probeMachine, probeMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
 			if (crashes) {
