@@ -267,32 +267,10 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 			   std::set<StateMachineState *> &done)
 {
 	target = target->optimise(opt, oracle, done_something, freeVariables, done);
- top:
 	if (TIMEOUT)
 		return this;
-	if (StateMachineProxy *smp =
-	    dynamic_cast<StateMachineProxy *>(target)) {
-		StateMachineEdge *other = smp->target;
-		if (other->target != target) {
-			/* Can't duplicate Phi side effects. */
-			bool havePhi = false;
-			for (auto it = other->sideEffects.begin();
-			     !havePhi && it != other->sideEffects.end();
-			     it++)
-				if ((*it)->type == StateMachineSideEffect::Phi)
-					havePhi = true;
-			if (!havePhi) {
-				sideEffects.insert(sideEffects.end(),
-						   other->sideEffects.begin(),
-						   other->sideEffects.end());
-				target = other->target;
-				*done_something = true;
-				goto top;
-			}
-		}
-	}
 
-	for (auto it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++) {
+	for (auto it = beginSideEffects(); !TIMEOUT && it != endSideEffects(); it++) {
 		if ((*it)->type == StateMachineSideEffect::Unreached) {
 			*done_something = true;
 			target = StateMachineUnreached::get();
@@ -760,9 +738,7 @@ StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 void
 StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
-	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++) {
+	for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
 		StateMachineSideEffect *smse = *it;
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
@@ -781,9 +757,7 @@ StateMachineEdge::roughLoadCount(StateMachineState::RoughLoadCount acc) const
 	if (acc == StateMachineState::multipleLoads)
 		return StateMachineState::multipleLoads;
 
-	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++) {
+	for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
 		if (dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
 			if (acc == StateMachineState::noLoads)
 				acc = StateMachineState::singleLoad;

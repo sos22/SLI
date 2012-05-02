@@ -368,7 +368,7 @@ public:
 class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 	void assertAcyclic(std::vector<const StateMachineEdge *> &,
 			   std::set<const StateMachineEdge *> &) const;
-	std::vector<StateMachineSideEffect *> sideEffects;
+	std::vector<StateMachineSideEffect *> _sideEffects;
 public:
 	typedef std::vector<StateMachineSideEffect *>::iterator sideEffectIterator;
 	friend class reverseSideEffectIterator;
@@ -393,66 +393,64 @@ public:
 			return idx != o.idx;
 		}
 		StateMachineSideEffect *&operator*() {
-			return edge->sideEffects[idx];
+			return edge->_sideEffects[idx];
 		}
 	};
 	typedef std::vector<StateMachineSideEffect *>::const_iterator constSideEffectIterator;
 	sideEffectIterator beginSideEffects() {
-		return sideEffects.begin();
+		return _sideEffects.begin();
 	}
 	sideEffectIterator endSideEffects() {
-		return sideEffects.end();
+		return _sideEffects.end();
 	}
 	reverseSideEffectIterator rbeginSideEffects() {
-		return reverseSideEffectIterator(this, sideEffects.size() - 1);
+		return reverseSideEffectIterator(this, _sideEffects.size() - 1);
 	}
 	reverseSideEffectIterator rendSideEffects() {
 		return reverseSideEffectIterator(this, -1);
 	}
 	constSideEffectIterator beginSideEffects() const {
-		return sideEffects.begin();
+		return _sideEffects.begin();
 	}
 	constSideEffectIterator endSideEffects() const {
-		return sideEffects.end();
+		return _sideEffects.end();
 	}
 	sideEffectIterator insertSideEffect(sideEffectIterator it, StateMachineSideEffect *smse) {
-		return sideEffects.insert(it, smse);
+		return _sideEffects.insert(it, smse);
 	}
 	reverseSideEffectIterator eraseSideEffect(reverseSideEffectIterator it) {
-		sideEffects.erase(sideEffects.begin() + it.idx);
+		_sideEffects.erase(_sideEffects.begin() + it.idx);
 		return it;
 	}
 	bool noSideEffects() const {
-		return sideEffects.empty();
+		return _sideEffects.empty();
 	}
 
 	void assertAcyclic() const;
 	StateMachineEdge(StateMachineState *t) : target(t) {}
-	StateMachineEdge(const std::vector<StateMachineSideEffect *> &_sideEffects,
+	StateMachineEdge(const std::vector<StateMachineSideEffect *> &__sideEffects,
 			 StateMachineState *t)
-		: sideEffects(_sideEffects), target(t)
+		: _sideEffects(__sideEffects), target(t)
 	{}
 	StateMachineEdge(StateMachineSideEffect *sideEffect,
 			 StateMachineState *t)
 		: target(t)
 	{
-		sideEffects.push_back(sideEffect);
+		_sideEffects.push_back(sideEffect);
 	}
 	StateMachineState *target;
 
 	void prependSideEffect(StateMachineSideEffect *k) {
 		std::vector<StateMachineSideEffect *> n;
-		n.reserve(sideEffects.size() + 1);
+		n.reserve(_sideEffects.size() + 1);
 		n.push_back(k);
-		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-		     it != sideEffects.end();
-		     it++)
+		for (auto it = beginSideEffects(); it != endSideEffects(); it++)
 			n.push_back(*it);
-		sideEffects = n;
+		_sideEffects = n;
 	}
 	
 	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
 			fprintf(f, "\t");
 			(*it)->prettyPrint(f);
 			fprintf(f, "\n");
@@ -462,9 +460,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) {
 		hv(target);
-		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-		     it != sideEffects.end();
-		     it++)
+		for (auto it = beginSideEffects(); it != endSideEffects(); it++)
 			hv(*it);
 	}
 	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *, bool *done_something, FreeVariableMap &,
@@ -473,17 +469,14 @@ public:
 		if (TIMEOUT)
 			return;
 		target->findLoadedAddresses(s, opt);
-		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
-		     it != sideEffects.rend();
-		     it++)
+		for (auto it = rbeginSideEffects(); it != rendSideEffects(); it++)
 			(*it)->updateLoadedAddresses(s, opt);
 	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt) {
 		if (TIMEOUT)
 			return;
 		target->findUsedRegisters(s, opt);
-		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
-		     it != sideEffects.rend();
+		for (auto it = rbeginSideEffects(); it != rendSideEffects();
 		     it++)
 			(*it)->findUsedRegisters(s, opt);
 	}
@@ -502,7 +495,7 @@ public:
 	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
 	bool eq(const StateMachineEdge *other) const {
-		return target == other->target && sideEffects == other->sideEffects;
+		return target == other->target && _sideEffects == other->_sideEffects;
 	}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const {
@@ -518,7 +511,7 @@ public:
 		} else {
 			live2 = NULL;
 		}
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
 			if ((*it)->type == StateMachineSideEffect::Unreached) {
 				/* Don't want to check past these,
 				   because they often lead to bad
