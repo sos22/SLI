@@ -300,7 +300,7 @@ public:
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 public:
 #define all_state_types(f)						\
-	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Proxy) f(Bifurcate)
+	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Proxy) f(Bifurcate) f(SideEffecting)
 #define mk_state_type(name) name ,
 	enum stateType {
 		all_state_types(mk_state_type)
@@ -580,6 +580,47 @@ public:
 			 std::vector<const StateMachineEdge *> &done) const
 	{
 		target->sanityCheck(live, done);
+	}
+};
+
+class StateMachineSideEffecting : public StateMachineState {
+public:
+	StateMachineEdge *target;
+	StateMachineSideEffect *sideEffect;
+
+	StateMachineSideEffecting(const VexRip &origin, StateMachineSideEffect *smse, StateMachineEdge *t)
+		: StateMachineState(origin, StateMachineState::SideEffecting),
+		  target(t),
+		  sideEffect(smse)
+	{
+	}
+	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const
+	{
+		fprintf(f, "{SIDEFFECT:%s:", origin.name());
+		sideEffect->prettyPrint(f);
+		fprintf(f, " then l%d}", labels[target]);
+	}
+	void visit(HeapVisitor &hv)
+	{
+		hv(target);
+		hv(sideEffect);
+	}
+	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
+				    std::set<StateMachineState *> &done);
+	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt);
+	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
+	void targets(std::vector<StateMachineEdge *> &out) { out.push_back(target); }
+	void targets(std::vector<const StateMachineEdge *> &out) const { out.push_back(target); }
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
+			 std::vector<const StateMachineEdge *> &done) const
+	{
+		if (live) {
+			std::set<threadAndRegister, threadAndRegister::fullCompare> live2(*live);
+			sideEffect->sanityCheck(&live2);
+			target->sanityCheck(&live2, done);
+		} else {
+			target->sanityCheck(live, done);
+		}
 	}
 };
 

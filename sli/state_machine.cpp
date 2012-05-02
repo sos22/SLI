@@ -551,6 +551,17 @@ parseStateMachineState(StateMachineState **out,
 		*out = new StateMachineProxy(origin, (StateMachineEdge *)(unsigned long)target1);
 		return true;
 	}
+	StateMachineSideEffect *sme;
+	if (parseThisString("{SIDEEFFECT:", str, &str2) &&
+	    parseVexRip(&origin, str2, &str2) &&
+	    parseThisChar(':', str2, &str2) &&
+	    parseStateMachineSideEffect(&sme, str2, &str2) &&
+	    parseThisString(" then l", str2, &str2) &&
+	    parseDecimalInt(&target1, str2, &str2) &&
+	    parseThisChar('}', str2, &str2)) {
+		*out = new StateMachineSideEffecting(origin, sme, (StateMachineEdge *)(unsigned long)target1);
+		return true;
+	}
 	IRExpr *condition;
 	int target2;
 	if (parseVexRip(&origin, str, &str2) &&
@@ -632,6 +643,13 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 				StateMachineProxy *smp = (StateMachineProxy *)s;
 				smp->target = labelToEdge[(int)(unsigned long)smp->target];
 				if (!smp->target)
+					return false;
+				return true;
+			}
+			case StateMachineState::SideEffecting: {
+				StateMachineSideEffecting *sme = (StateMachineSideEffecting *)s;
+				sme->target = labelToEdge[(int)(unsigned long)sme->target];
+				if (!sme->target)
 					return false;
 				return true;
 			}
@@ -997,4 +1015,35 @@ StateMachineEdge::prependSideEffect(const VexRip &vr, StateMachineSideEffect *sm
 		if (endOfTheLine && *endOfTheLine == &target)
 			*endOfTheLine = &smp->target->target;
 	}
+}
+
+StateMachineState *
+StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
+				    std::set<StateMachineState *> &done)
+{
+	if (done.count(this))
+		return this;
+	done.insert(this);
+
+	if (target->target == StateMachineUnreached::get()) {
+		*done_something = true;
+		return target->target;
+	}
+	if (sideEffect) {
+		if (sideEffect->type == StateMachineSideEffect::Unreached) {
+			*done_something = true;
+			return StateMachineUnreached::get();
+		}
+		sideEffect = sideEffect->optimise(opt, oracle, done_something);
+	}
+	target = target->optimise(opt, oracle, done_something, fv, done);
+	return this;
+}
+
+void
+StateMachineSideEffecting::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
+{
+	target->findUsedRegisters(s, opt);
+	if (sideEffect)
+		sideEffect->findUsedRegisters(s, opt);
 }

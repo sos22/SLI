@@ -758,6 +758,23 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 		return NULL;
 	case StateMachineState::Proxy:
 		return ((StateMachineProxy *)sm)->target;
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
+		if (!evalStateMachineSideEffect(rootMachine,
+						sme->sideEffect,
+						chooser,
+						oracle,
+						ctxt.state,
+						ctxt.memLog,
+						ctxt.collectOrderingConstraints,
+						opt,
+						&ctxt.pathConstraint,
+						&ctxt.justPathConstraint)) {
+			*crashes = false;
+			return NULL;
+		}
+		return sme->target;
+	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 		if (expressionIsTrue(smb->condition, chooser, ctxt.state, opt, &ctxt.pathConstraint, &ctxt.justPathConstraint))
@@ -971,6 +988,32 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 				machine->currentEdge = smb->falseTarget;
 			break;
 		}
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
+			se = smse->sideEffect;
+			if (se) {
+				bool acceptable = se->type == StateMachineSideEffect::Store;
+				if (wantLoad)
+					acceptable |= se->type == StateMachineSideEffect::Load;
+				if (acceptable) {
+					StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
+					if (smea)
+						acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip.rip));
+				}
+				if (acceptable) {
+					machine->currentEdge = smse->target;
+					return se;
+				}
+				if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
+								collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
+					/* Found a contradiction -> get out */
+					machine->finished = true;
+					return NULL;
+				}
+				history.push_back(se);
+				machine->currentEdge = smse->target;
+			}
+		}
 		}
 	}
 	return NULL;
@@ -1097,6 +1140,7 @@ struct findRemoteMacroSectionsState {
 	StateMachineEvalContext writerContext;
 	bool finished;
 	bool writer_failed;
+	StateMachineSideEffect *pendingSideEffect;
 
 	StateMachineSideEffectStore *advanceWriteMachine(StateMachine *writeMachine,
 							 NdChooser &chooser,
@@ -1110,73 +1154,84 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 						  Oracle *oracle,
 						  const AllowableOptimisations &opt)
 {
-top:
-	while (!writerEdge->sideEffect) {
-		StateMachineState *s = writerEdge->target;
-		assert(s->type != StateMachineState::Unreached);
-		bool c;
-		writerEdge = smallStepEvalStateMachine(writeMachine,
-						       s,
-						       &c,
-						       chooser,
-						       oracle,
-						       opt,
-						       writerContext);
-		if (!writerEdge) {
-			/* Hit the end of the writer -> we're done. */
-			/* Note that we need to evaluate the read
-			   machine one last time, so that we can take
-			   account of any assumptions made due to any
-			   branches after the last side-effect. */
-			/* i.e. a store machine branch will change the
-			   path constraint, which could cause the read
-			   machien to go from crash to non-crash, and
-			   we need to make sure that we pick that up
-			   as the end of a critical section. */
-			/* Example of code where this is important:
+	StateMachineSideEffectStore *smses = NULL;
 
-			   acquire_lock();
-			   x = foo->flag;
-			   foo->bar = 5;
-			   if (x) {
-			        release_lock();
-				return;
-			   }
-			   foo->flag = 0;
-			   release_lock();
-
-			   but with the locking taken out.
-			*/
-			finished = true;
+	if (pendingSideEffect) {
+		if (!evalStateMachineSideEffect(writeMachine, pendingSideEffect, chooser, oracle, writerContext.state,
+						writerContext.memLog,
+						writerContext.collectOrderingConstraints,
+						opt, &writerContext.pathConstraint,
+						&writerContext.justPathConstraint)) {
+			writer_failed = true;
 			return NULL;
 		}
+		if (pendingSideEffect->type == StateMachineSideEffect::Store)
+			smses = (StateMachineSideEffectStore *)pendingSideEffect;
+		pendingSideEffect = NULL;
 	}
+	while (!TIMEOUT && !smses) {
+		StateMachineSideEffect *se = writerEdge->sideEffect;
+		if (se) {
+			if (se->type == StateMachineSideEffect::Store)
+				smses = (StateMachineSideEffectStore *)se;
+			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
+							writerContext.memLog,
+							writerContext.collectOrderingConstraints, opt,
+							&writerContext.pathConstraint,
+							&writerContext.justPathConstraint)) {
+				/* Found a contradiction -> get out */
+				writer_failed = true;
+				return NULL;
+			}
+		}
 
-	if (writerEdge->sideEffect && skipFirstSideEffect) {
-		skipFirstSideEffect = false;
-		goto top;
+		StateMachineState *s = writerEdge->target;
+		switch (s->type) {
+		case StateMachineState::Unreached:
+			abort();
+		case StateMachineState::Crash:
+			writer_failed = true;
+			return NULL;
+		case StateMachineState::NoCrash:
+		case StateMachineState::Stub:
+			finished = true;
+			return NULL;
+		case StateMachineState::Proxy: {
+			StateMachineProxy *smp = (StateMachineProxy *)s;
+			writerEdge = smp->target;
+			break;
+		}
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
+			if (expressionIsTrue(smb->condition, chooser, writerContext.state, opt,
+					     &writerContext.pathConstraint, &writerContext.justPathConstraint))
+				writerEdge = smb->trueTarget;
+			else
+				writerEdge = smb->falseTarget;
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
+			se = smse->sideEffect;
+			if (smses) {
+				pendingSideEffect = se;
+			} else {
+				if (se->type == StateMachineSideEffect::Store)
+					smses = (StateMachineSideEffectStore *)se;
+				if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
+								writerContext.memLog,
+								writerContext.collectOrderingConstraints, opt,
+								&writerContext.pathConstraint,
+								&writerContext.justPathConstraint)) {
+					/* Found a contradiction -> get out */
+					writer_failed = true;
+					return NULL;
+				}
+			}
+			writerEdge = smse->target;
+		}
+		}
 	}
-
-	StateMachineSideEffect *se;
-	se = writerEdge->sideEffect;
-	assert(se);
-	if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle,
-					writerContext.state,
-					writerContext.memLog,
-					false, opt,
-					&writerContext.pathConstraint,
-					NULL)) {
-		writer_failed = true;
-		return NULL;
-	}
-
-	skipFirstSideEffect = true;
-
-	/* Advance to a store */
-	StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(se);
-	if (!smses)
-		goto top;
-
 	return smses;
 }
 

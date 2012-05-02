@@ -209,6 +209,12 @@ stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt)
 		res = edgeCrashConstraint(smp->target, ctxt);
 		break;
 	}
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
+		res = edgeCrashConstraint(smse->target, ctxt);
+		res = sideEffectCrashConstraint(smse->sideEffect, res, ctxt);
+		break;
+	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 		res = IRExpr_Mux0X(

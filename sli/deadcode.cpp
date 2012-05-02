@@ -85,8 +85,8 @@ public:
 			insert(*it);
 	}
 
-	bool registerLive(threadAndRegister reg) { return count(reg); }
-	bool assertionLive(IRExpr *assertion) {
+	bool registerLive(threadAndRegister reg) const { return count(reg); }
+	bool assertionLive(IRExpr *assertion) const {
 		if (assertion->tag == Iex_Const)
 			return false;
 		else
@@ -126,6 +126,12 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 			case StateMachineState::Proxy:
 				buildResForEdge(res, ((StateMachineProxy *)sm)->target);
 				break;
+			case StateMachineState::SideEffecting: {
+				StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
+				res.useSideEffect(sme->sideEffect);
+				buildResForEdge(res, sme->target);
+				break;
+			}
 			case StateMachineState::Bifurcate: {
 				StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 				buildResForEdge(res, smb->trueTarget);
@@ -169,73 +175,77 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		bool *done_something;
 		FreeVariableMap &fvm;
 
+		StateMachineSideEffect *doit(StateMachineSideEffect *e,
+					     bool targetIsTerminal,
+					     const LivenessEntry &alive) {
+			StateMachineSideEffect *newEffect = NULL;
+			bool dead = false;
+			switch (e->type) {
+			case StateMachineSideEffect::Load: {
+				StateMachineSideEffectLoad *smsel =
+					(StateMachineSideEffectLoad *)e;
+				if (!alwaysLive.registerLive(smsel->target) &&
+				    !alive.registerLive(smsel->target))
+					newEffect = new StateMachineSideEffectAssertFalse(
+						IRExpr_Unop(Iop_BadPtr, smsel->addr));
+				break;
+			}
+			case StateMachineSideEffect::Store:
+			case StateMachineSideEffect::Unreached:
+				break;
+			case StateMachineSideEffect::AssertFalse: {
+				StateMachineSideEffectAssertFalse *a =
+					(StateMachineSideEffectAssertFalse *)e;
+				if (targetIsTerminal ||
+				    !alive.assertionLive(a->value))
+					dead = true;
+				break;
+			}
+			case StateMachineSideEffect::Copy: {
+				StateMachineSideEffectCopy *smsec =
+					(StateMachineSideEffectCopy *)e;
+				if (smsec->value->tag == Iex_Get &&
+				    threadAndRegister::fullEq(((IRExprGet *)smsec->value)->reg, smsec->target)) {
+					/* Copying a register
+					   or temporary back
+					   to itself is always
+					   dead, regardless of
+					   what liveness
+					   analysis proper
+					   might say. */
+					dead = true;
+				} else {
+					dead = !alive.registerLive(smsec->target) &&
+						!alwaysLive.registerLive(smsec->target);
+				}
+				break;
+			}
+			case StateMachineSideEffect::Phi: {
+				StateMachineSideEffectPhi *p =
+					(StateMachineSideEffectPhi *)e;
+				if (!alive.registerLive(p->reg) &&
+				    !alwaysLive.registerLive(p->reg))
+					dead = true;
+				break;
+			}
+			}
+
+			if (dead) {
+				*done_something = true;
+				return NULL;
+			} else if (newEffect) {
+				*done_something = true;
+				return newEffect;
+			} else {
+				return e;
+			}
+		}
 		void doit(StateMachineEdge *edge, FreeVariableMap &fvm) {
 			LivenessEntry alive = livenessMap[edge->target];
-			if (edge->sideEffect) {
-				StateMachineSideEffect *newEffect = NULL;
-				StateMachineSideEffect *e = edge->sideEffect;
-				bool dead = false;
-				switch (e->type) {
-				case StateMachineSideEffect::Load: {
-					StateMachineSideEffectLoad *smsel =
-						(StateMachineSideEffectLoad *)e;
-					if (!alwaysLive.registerLive(smsel->target) &&
-					    !alive.registerLive(smsel->target))
-						newEffect = new StateMachineSideEffectAssertFalse(
-							IRExpr_Unop(Iop_BadPtr, smsel->addr));
-					break;
-				}
-				case StateMachineSideEffect::Store:
-				case StateMachineSideEffect::Unreached:
-					break;
-				case StateMachineSideEffect::AssertFalse: {
-					StateMachineSideEffectAssertFalse *a =
-						(StateMachineSideEffectAssertFalse *)e;
-					if (edge->target->isTerminal() ||
-					    !alive.assertionLive(a->value))
-						dead = true;
-					break;
-				}
-				case StateMachineSideEffect::Copy: {
-					StateMachineSideEffectCopy *smsec =
-						(StateMachineSideEffectCopy *)e;
-					if (smsec->value->tag == Iex_Get &&
-					    threadAndRegister::fullEq(((IRExprGet *)smsec->value)->reg, smsec->target)) {
-						/* Copying a register
-						   or temporary back
-						   to itself is always
-						   dead, regardless of
-						   what liveness
-						   analysis proper
-						   might say. */
-						dead = true;
-					} else {
-						dead = !alive.registerLive(smsec->target) &&
-							!alwaysLive.registerLive(smsec->target);
-					}
-					break;
-				}
-				case StateMachineSideEffect::Phi: {
-					StateMachineSideEffectPhi *p =
-						(StateMachineSideEffectPhi *)e;
-					if (!alive.registerLive(p->reg) &&
-					    !alwaysLive.registerLive(p->reg))
-						dead = true;
-					break;
-				}
-				}
-
-				if (dead) {
-					*done_something = true;
-					edge->sideEffect = NULL;
-				} else if (newEffect) {
-					*done_something = true;
-					edge->sideEffect = newEffect;
-					alive.useSideEffect(newEffect);
-				} else {
-					alive.useSideEffect(e);
-				}
-			}
+			if (edge->sideEffect)
+				edge->sideEffect = doit(edge->sideEffect,
+							edge->target->isTerminal(),
+							alive);
 		}
 	public:
 		void operator()(StateMachineState *state) {
@@ -243,6 +253,15 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 			case StateMachineState::Proxy:
 				doit(((StateMachineProxy *)state)->target, fvm);
 				return;
+			case StateMachineState::SideEffecting: {
+				StateMachineSideEffecting *smse = (StateMachineSideEffecting *)state;
+				if (smse->sideEffect)
+					smse->sideEffect = doit(smse->sideEffect,
+								false,
+								livenessMap[smse]);
+				doit(smse->target, fvm);
+				return;
+			}
 			case StateMachineState::Bifurcate: {
 				StateMachineBifurcate *smb = (StateMachineBifurcate *)state;
 				doit(smb->trueTarget, fvm);

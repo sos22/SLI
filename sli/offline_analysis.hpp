@@ -156,6 +156,18 @@ protected:
 	{
 		return NULL;
 	}
+	virtual StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
+							     bool *done_something)
+	{
+		bool b = false;
+		StateMachineSideEffect *e = transformSideEffect(smse->sideEffect, &b);
+		if (b)
+			return new StateMachineSideEffecting(smse->origin,
+							     e,
+							     NULL);
+		else
+			return NULL;
+	}
 	virtual StateMachineBifurcate *transformOneState(StateMachineBifurcate *s,
 							 bool *done_something)
 	{

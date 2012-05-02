@@ -93,6 +93,16 @@ rewriteStateMachine(StateMachineState *sm,
 			edgeMemo);
 		return sm;
 	}
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
+		smp->target = rewriteStateMachineEdge(
+			smp->target,
+			rules,
+			edgeRules,
+			memo,
+			edgeMemo);
+		return sm;
+	}
 	}
 	abort();
 }
@@ -207,6 +217,13 @@ statesLocallyBisimilar(StateMachineState *sm1,
 		StateMachineProxy *smp1 = (StateMachineProxy *)sm1;
 		StateMachineProxy *smp2 = (StateMachineProxy *)sm2;
 		return edges.count(st_edge_pair_t(smp1->target, smp2->target));
+	}
+
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *sme1 = (StateMachineSideEffecting *)sm1;
+		StateMachineSideEffecting *sme2 = (StateMachineSideEffecting *)sm2;
+		return edges.count(st_edge_pair_t(sme1->target, sme2->target)) &&
+			sideEffectsBisimilar(sme1->sideEffect, sme2->sideEffect, opt);
 	}
 
 	case StateMachineState::Bifurcate: {

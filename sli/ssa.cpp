@@ -1071,6 +1071,14 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 		ctxt(&res->falseTarget, smb->falseTarget, rawDupe);
 		return res;
 	}
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)inp;
+		StateMachineSideEffecting *res = new StateMachineSideEffecting(sme->origin,
+									       rawDupe(ctxt, sme->sideEffect),
+									       NULL);
+		ctxt(&res->target, sme->target, rawDupe);
+		return res;
+	}
 	case StateMachineState::Unreached:
 		return StateMachineUnreached::get();
 	case StateMachineState::Crash:

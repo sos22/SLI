@@ -267,6 +267,33 @@ containsNoTemporaries(IRExpr *e)
 	return doit.res;
 }
 
+static StateMachineSideEffect *
+introduceFreeVariables(StateMachineSideEffect *smse,
+		       StateMachine *root_sm,
+		       const Oracle::RegisterAliasingConfiguration *alias,
+		       const AllowableOptimisations &opt,
+		       Oracle *oracle,
+		       bool *doit,
+		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
+{
+	StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
+	if (smsel &&
+	    containsNoTemporaries(smsel->addr) &&
+	    !oracle->hasConflictingRemoteStores(smsel) &&
+	    definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) &&
+	    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) == 1) {
+		/* This is a local load from a location which
+		 * is never stored.  Remove it. */
+		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
+		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
+				(((IRExprFreeVariable *)smsec->value)->key,
+				 IRExpr_Load(Ity_I64, smsel->addr, smsel->rip)));
+		smse = smsec;
+		*doit = true;
+	}
+	return smse;
+}
+
 static StateMachineEdge *
 introduceFreeVariables(StateMachineEdge *sme,
 		       StateMachine *root_sm,
@@ -289,23 +316,14 @@ introduceFreeVariables(StateMachineEdge *sme,
 	   For (d), free variables and registers are fine, because
 	   they're inherently local. */
 	StateMachineSideEffect *smse = sme->sideEffect;
-	if (smse) {
-		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		if (smsel &&
-		    containsNoTemporaries(smsel->addr) &&
-		    !oracle->hasConflictingRemoteStores(smsel) &&
-		    definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) &&
-		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) == 1) {
-			/* This is a local load from a location which
-			 * is never stored.  Remove it. */
-			StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
-			fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
-					(((IRExprFreeVariable *)smsec->value)->key,
-					 IRExpr_Load(Ity_I64, smsel->addr, smsel->rip)));
-			smse = smsec;
-			doit = true;
-		}
-	}
+	if (smse)
+		smse = introduceFreeVariables(smse,
+					      root_sm,
+					      alias,
+					      opt,
+					      oracle,
+					      &doit,
+					      fresh);
 	StateMachineState *target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);
 
 	if (doit) {
@@ -343,6 +361,31 @@ introduceFreeVariables(StateMachineState *sm,
 		if (doit) {
 			*done_something = true;
 			return new StateMachineProxy(smp->origin, e);
+		} else {
+			return sm;
+		}
+	}
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
+		StateMachineEdge *e = introduceFreeVariables(sme->target,
+							     root_sm,
+							     alias,
+							     opt,
+							     oracle,
+							     &doit,
+							     fresh);
+		StateMachineSideEffect *smse = sme->sideEffect;
+		if (smse)
+			smse = introduceFreeVariables(smse,
+						      root_sm,
+						      alias,
+						      opt,
+						      oracle,
+						      &doit,
+						      fresh);
+		if (doit) {
+			*done_something = true;
+			return new StateMachineSideEffecting(sme->origin, smse, e);
 		} else {
 			return sm;
 		}

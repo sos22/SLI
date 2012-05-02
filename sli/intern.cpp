@@ -18,6 +18,7 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineProxy *> states_proxy;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
+	std::set<StateMachineSideEffecting *> states_side_effect;
 };
 
 static unsigned
@@ -428,6 +429,23 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		}
 		t.states[start] = start;
 		t.states_proxy.insert(smp);
+		return start;
+	}
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)start;
+		smse->sideEffect = internStateMachineSideEffect(smse->sideEffect, t);
+		smse->target = internStateMachineEdge(smse->target, t);
+		for (auto it = t.states_side_effect.begin();
+		     it != t.states_side_effect.end();
+		     it++) {
+			if ( (*it)->sideEffect == smse->sideEffect &&
+			     (*it)->target == smse->target ) {
+				t.states[start] = *it;
+				return *it;
+			}
+		}
+		t.states[start] = start;
+		t.states_side_effect.insert(smse);
 		return start;
 	}
 	case StateMachineState::Bifurcate: {

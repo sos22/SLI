@@ -160,6 +160,14 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 								      (StateMachineEdge *)NULL);
 					break;
 				}
+				case StateMachineState::SideEffecting: {
+					StateMachineSideEffecting *smp = (StateMachineSideEffecting *)s;
+					stateRewrites[s] =
+						new StateMachineSideEffecting(smp->origin,
+									      smp->sideEffect,
+									      NULL);
+					break;
+				}
 				case StateMachineState::Bifurcate: {
 					StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 					stateRewrites[s] =
@@ -240,6 +248,13 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			StateMachineBifurcate *repl = (StateMachineBifurcate *)replacement;
 			doEdge(repl->trueTarget, smb->trueTarget, edgeRewrites);
 			doEdge(repl->falseTarget, smb->falseTarget, edgeRewrites);
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *smp = (StateMachineSideEffecting *)old;
+			assert(replacement->type == StateMachineState::SideEffecting);
+			StateMachineSideEffecting *repl = (StateMachineSideEffecting *)replacement;
+			doEdge(repl->target, smp->target, edgeRewrites);
 			break;
 		}
 		case StateMachineState::Crash:
