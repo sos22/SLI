@@ -291,9 +291,9 @@ template <bool acceptPartialDefinition> void
 PossiblyReaching<acceptPartialDefinition>::buildSideEffectTable(StateMachineEdge *e)
 {
 	std::set<StateMachineSideEffect *> reaching(effectsReachingEdge(e));
-	for (auto it = e->beginSideEffects(); it != e->endSideEffects(); it++) {
-		expandSet(effectsReachingSideEffect(*it), reaching);
-		updateReachingSetForSideEffect(*it, &reaching, acceptPartialDefinition);
+	if (e->sideEffect) {
+		expandSet(effectsReachingSideEffect(e->sideEffect), reaching);
+		updateReachingSetForSideEffect(e->sideEffect, &reaching, acceptPartialDefinition);
 	}
 }
 
@@ -302,10 +302,8 @@ PossiblyReaching<acceptPartialDefinition>::updateEdgeReaching(StateMachineEdge *
 				std::set<StateMachineState *> &needsUpdate)
 {
 	std::set<StateMachineSideEffect *> reachesEnd(effectsReachingEdge(edge));
-	for (auto it = edge->beginSideEffects();
-	     it != edge->endSideEffects();
-	     it++)
-		updateReachingSetForSideEffect(*it, &reachesEnd, acceptPartialDefinition);
+	if (edge->sideEffect)
+		updateReachingSetForSideEffect(edge->sideEffect, &reachesEnd, acceptPartialDefinition);
 	std::set<StateMachineSideEffect *> &old(effectsReachingState(edge->target));
 	if (expandSet(old, reachesEnd))
 		needsUpdate.insert(edge->target);
@@ -491,10 +489,8 @@ useSsaVars(StateMachine *inp, PossiblyReaching<true> &reaching, bool *needPhiEdg
 			    StateMachineEdge *edge)
 		{
 			exp_transformer t(needPhiEdges, reaching);
-			for (auto it = edge->beginSideEffects();
-			     !TIMEOUT && it != edge->endSideEffects();
-			     it++) {
-				StateMachineSideEffect *e = *it;
+			if (edge->sideEffect) {
+				StateMachineSideEffect *e = edge->sideEffect;
 				switch (e->type) {
 				case StateMachineSideEffect::Store: {
 					StateMachineSideEffectStore *ss =

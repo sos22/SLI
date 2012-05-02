@@ -31,8 +31,8 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 	if (memo.count(sme))
 		return false;
 	memo.insert(sme);
-	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
-		StateMachineSideEffect *se = *it;
+	if (sme->sideEffect) {
+		StateMachineSideEffect *se = sme->sideEffect;
 		if (se == smses) {
 			/* We've reached a cycle without hitting a
 			   load of this store, so this path, at least,
@@ -69,26 +69,12 @@ storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *sm
 
 static bool
 storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme,
-				      StateMachineEdge::sideEffectIterator it,
 				      const AllowableOptimisations &opt,
 				      StateMachineSideEffectStore *smses,
 				      const Oracle::RegisterAliasingConfiguration *alias,
 				      bool freeVariablesMightAccessStack,
 				      Oracle *oracle)
 {
-	it++;
-	while (it != sme->endSideEffects()) {
-		if ((*it)->type == StateMachineSideEffect::Load) {
-			StateMachineSideEffectLoad *smsel =
-				dynamic_cast<StateMachineSideEffectLoad *>(*it);
-			assert(smsel);
-			if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr,
-							     freeVariablesMightAccessStack)) &&
-			    oracle->memoryAccessesMightAlias(opt, smsel, smses))
-				return true;
-		}
-		it++;
-	}
 	std::set<StateMachineEdge *> memo;
 	return storeMightBeLoadedByState(sme->target, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
 }
@@ -106,8 +92,8 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 {
 	if (TIMEOUT)
 		return;
-	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
-		if (StateMachineSideEffectStore *smses =  dynamic_cast<StateMachineSideEffectStore *>(*it)) {
+	if (sme->sideEffect) {
+		if (StateMachineSideEffectStore *smses =  dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffect)) {
 			bool canRemove = opt.ignoreStore(smses->rip.rip.rip);
 			if (!canRemove && opt.assumePrivateStack() && alias &&
 			    !alias->mightPointOutsideStack(smses->addr)) {
@@ -119,8 +105,8 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 			}
 
 			if (canRemove &&
-			    !storeMightBeLoadedFollowingSideEffect(sme, it, opt, smses, alias, !opt.freeVariablesNeverAccessStack(), oracle)) {
-				*it =
+			    !storeMightBeLoadedFollowingSideEffect(sme, opt, smses, alias, !opt.freeVariablesNeverAccessStack(), oracle)) {
+				sme->sideEffect =
 					new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(
 							Iop_BadPtr,

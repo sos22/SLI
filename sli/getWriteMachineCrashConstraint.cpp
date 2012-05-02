@@ -167,8 +167,8 @@ edgeCrashConstraint(StateMachineEdge *e, crash_constraint_context &ctxt)
 
 	IRExpr *acc = stateCrashConstraint(e->target, ctxt);
 
-	for (auto it = e->rbeginSideEffects(); it != e->rendSideEffects(); it++) {
-		StateMachineSideEffect *smse = *it;
+	if (e->sideEffect) {
+		StateMachineSideEffect *smse = e->sideEffect;
 		acc = sideEffectCrashConstraint(smse, acc, ctxt);
 		acc = simplifyIRExpr(acc, ctxt.opt);
 	}

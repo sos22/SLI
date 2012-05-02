@@ -32,8 +32,8 @@ nrAliasingLoads(StateMachineEdge *sme,
 		std::set<StateMachineState *> &visited,
 		Oracle *oracle)
 {
-	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
-		StateMachineSideEffectLoad *smsel2 = dynamic_cast<StateMachineSideEffectLoad *>(*it);
+	if (sme->sideEffect) {
+		StateMachineSideEffectLoad *smsel2 = dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffect);
 		if (smsel2 &&
 		    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, !opt.freeVariablesNeverAccessStack())) &&
 		    oracle->memoryAccessesMightAlias(opt, smsel, smsel2) &&
@@ -95,8 +95,8 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 			     bool haveAliasingStore,
 			     Oracle *oracle)
 {
-	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
-		StateMachineSideEffect *smse = *it;
+	if (sme->sideEffect) {
+		StateMachineSideEffect *smse = sme->sideEffect;
 		if (smse == smsel) {
 			if (haveAliasingStore) {
 				return false;
@@ -108,20 +108,20 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 				return true;
 			}
 		}
-		if (haveAliasingStore)
-			continue;
-		StateMachineSideEffectStore *smses =
-			dynamic_cast<StateMachineSideEffectStore *>(smse);
-		if (smses &&
-		    (!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, !opt.freeVariablesNeverAccessStack())) &&
-		    oracle->memoryAccessesMightAlias(opt, smsel, smses) &&
-		    !definitelyNotEqual( smsel->addr,
-					 smses->addr,
-					 opt)) {
-			/* This store might alias with the load.  If
-			   we encounter the load after this, then it
-			   might be satisfied. */
-			haveAliasingStore = true;
+		if (!haveAliasingStore) {
+			StateMachineSideEffectStore *smses =
+				dynamic_cast<StateMachineSideEffectStore *>(smse);
+			if (smses &&
+			    (!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, !opt.freeVariablesNeverAccessStack())) &&
+			    oracle->memoryAccessesMightAlias(opt, smsel, smses) &&
+			    !definitelyNotEqual( smsel->addr,
+						 smses->addr,
+						 opt)) {
+				/* This store might alias with the load.  If
+				   we encounter the load after this, then it
+				   might be satisfied. */
+				haveAliasingStore = true;
+			}
 		}
 	}
 	return definitelyNoSatisfyingStores(sme->target,

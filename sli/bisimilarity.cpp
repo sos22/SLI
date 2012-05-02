@@ -171,22 +171,11 @@ edgesLocallyBisimilar(StateMachineEdge *sme1,
 {
 	if (!states.count(st_pair_t(sme1->target, sme2->target)))
 		return false;
-	auto it1 = sme1->beginSideEffects();
-	auto it2 = sme2->beginSideEffects();
-	while (1) {
-		if (it1 == sme1->endSideEffects() &&
-		    it2 == sme2->endSideEffects())
-			return true;
-		if (it1 == sme1->endSideEffects() ||
-		    it2 == sme2->endSideEffects())
-			return false;
-		if (!sideEffectsBisimilar(*it1,
-					  *it2,
-					  opt))
-			return false;
-		it1++;
-		it2++;
-	}
+	if (!!sme1->sideEffect != !!sme2->sideEffect)
+		return false;
+	if (!sme1->sideEffect)
+		return true;
+	return sideEffectsBisimilar(sme1->sideEffect, sme2->sideEffect, opt);
 }
 
 static bool

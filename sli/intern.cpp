@@ -390,10 +390,8 @@ internStateMachineEdge(StateMachineEdge *start, internStateMachineTable &t)
 	if (t.edges.count(start))
 		return t.edges[start];
 	start->target = internStateMachineState(start->target, t);
-	for (auto it = start->beginSideEffects();
-	     it != start->endSideEffects();
-	     it++)
-		*it = internStateMachineSideEffect(*it, t);
+	if (start->sideEffect)
+		start->sideEffect = internStateMachineSideEffect(start->sideEffect, t);
 	for (auto it = t.edges.begin(); it != t.edges.end(); it++) {
 		StateMachineEdge *o = it->second;
 		if (o->eq(start)) {

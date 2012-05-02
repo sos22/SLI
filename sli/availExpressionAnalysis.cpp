@@ -978,10 +978,8 @@ availExpressionAnalysis(StateMachine *sm,
 #warning Why not introduce an assertion on the relevant edge?
 
 				/* Build the output set. */
-				for (auto it2 = edge->beginSideEffects();
-				     !TIMEOUT && it2 != edge->endSideEffects();
-				     it2++)
-					updateAvailSetForSideEffect(outputAvail, *it2,
+				if (edge->sideEffect)
+					updateAvailSetForSideEffect(outputAvail, edge->sideEffect,
 								    opt, alias, oracle);
 				if (availOnExit[edge].merge(outputAvail, opt, is_ssa)) {
 					if (debug_build_table)

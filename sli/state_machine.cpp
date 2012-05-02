@@ -288,13 +288,13 @@ StateMachineEdge::optimise(const AllowableOptimisations &opt,
 	if (TIMEOUT)
 		return this;
 
-	for (auto it = beginSideEffects(); !TIMEOUT && it != endSideEffects(); it++) {
-		if ((*it)->type == StateMachineSideEffect::Unreached) {
+	if (sideEffect) {
+		if (sideEffect->type == StateMachineSideEffect::Unreached) {
 			*done_something = true;
 			target = StateMachineUnreached::get();
 			return this;
 		}
-		*it = (*it)->optimise(opt, oracle, done_something);
+		sideEffect = sideEffect->optimise(opt, oracle, done_something);
 	}
 
 	return this;
@@ -761,8 +761,8 @@ StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 void
 StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
-	for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
-		StateMachineSideEffect *smse = *it;
+	if (sideEffect) {
+		StateMachineSideEffect *smse = sideEffect;
 		if (StateMachineSideEffectLoad *smsel =
 		    dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
 			instrs.insert(smsel->rip.rip.rip);
@@ -780,8 +780,8 @@ StateMachineEdge::roughLoadCount(StateMachineState::RoughLoadCount acc) const
 	if (acc == StateMachineState::multipleLoads)
 		return StateMachineState::multipleLoads;
 
-	for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
-		if (dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
+	if (sideEffect) {
+		if (dynamic_cast<StateMachineSideEffectLoad *>(sideEffect)) {
 			if (acc == StateMachineState::noLoads)
 				acc = StateMachineState::singleLoad;
 			else
@@ -906,8 +906,8 @@ StateMachine::assertSSA() const
 					      &edges);
 	std::set<threadAndRegister, threadAndRegister::fullCompare> discoveredAssignments;
 	for (auto it = edges.begin(); it != edges.end(); it++) {
-		for (auto it2 = (*it)->beginSideEffects(); it2 != (*it)->endSideEffects(); it2++) {
-			StateMachineSideEffect *smse = *it2;
+		if ( (*it)->sideEffect ) {
+			StateMachineSideEffect *smse = (*it)->sideEffect;
 			switch (smse->type) {
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)smse;

@@ -115,10 +115,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		void buildResForEdge(LivenessEntry &out, StateMachineEdge *edge)
 		{
 			out = (*this)[edge->target];
-			for (auto it = edge->rbeginSideEffects();
-			     it != edge->rendSideEffects();
-			     it++)
-				out.useSideEffect(*it);
+			if (edge->sideEffect)
+				out.useSideEffect(edge->sideEffect);
 		}
 
 		void updateState(StateMachineState *sm, bool *progress)

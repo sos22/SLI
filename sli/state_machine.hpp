@@ -389,97 +389,6 @@ class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 			   std::set<const StateMachineEdge *> &) const;
 public:
 	StateMachineSideEffect *sideEffect;
-	friend class sideEffectIterator;
-	class sideEffectIterator {
-	public:
-		VexPtr<StateMachineEdge, &ir_heap> edge;
-		bool finished;
-		sideEffectIterator(StateMachineEdge *_edge, bool _finished)
-			: edge(_edge), finished(_finished)
-		{
-			if (!edge->sideEffect)
-				finished = true;
-		}
-		sideEffectIterator(const sideEffectIterator &o)
-			: edge(o.edge), finished(o.finished)
-		{}
-		sideEffectIterator()
-			: edge(NULL), finished(true)
-		{}
-		StateMachineSideEffect *&operator*() {
-			assert(!finished);
-			return edge->sideEffect;
-		}
-		void operator++(int) {
-			assert(!finished);
-			finished = true;
-		}
-		bool operator !=(const sideEffectIterator &other) const {
-			assert(edge == other.edge);
-			return finished != other.finished;
-		}
-		bool operator ==(const sideEffectIterator &other) const {
-			return !(*this != other);
-		}
-		sideEffectIterator operator+(int delta) {
-			if (delta == 0)
-				return *this;
-			assert(delta == 1);
-			assert(!finished);
-			return sideEffectIterator(edge, true);
-		}
-	};
-	friend class constSideEffectIterator;
-	class constSideEffectIterator {
-	public:
-		VexPtr<const StateMachineEdge, &ir_heap> edge;
-		bool finished;
-		constSideEffectIterator(const StateMachineEdge *_edge, bool _finished)
-			: edge(_edge), finished(_finished)
-		{
-			if (!edge->sideEffect)
-				finished = true;
-		}
-		constSideEffectIterator(const constSideEffectIterator &o)
-			: edge(o.edge), finished(o.finished)
-		{}
-		StateMachineSideEffect *operator*() {
-			assert(!finished);
-			return edge->sideEffect;
-		}
-		void operator++(int) {
-			assert(!finished);
-			finished = true;
-		}
-		bool operator !=(const constSideEffectIterator &other) const {
-			assert(edge == other.edge);
-			return finished != other.finished;
-		}
-	};
-
-	sideEffectIterator beginSideEffects() {
-		return sideEffectIterator(this, false);
-	}
-	sideEffectIterator endSideEffects() {
-		return sideEffectIterator(this, true);
-	}
-	sideEffectIterator rbeginSideEffects() {
-		return beginSideEffects();
-	}
-	sideEffectIterator rendSideEffects() {
-		return endSideEffects();
-	}
-	constSideEffectIterator beginSideEffects() const {
-		return constSideEffectIterator(this, false);
-	}
-	constSideEffectIterator endSideEffects() const {
-		return constSideEffectIterator(this, true);
-	}
-	sideEffectIterator eraseSideEffect(sideEffectIterator it) {
-		assert(it.edge == this);
-		sideEffect = NULL;
-		return sideEffectIterator(this, true);
-	}
 	bool noSideEffects() const {
 		return sideEffect == NULL;
 	}
@@ -500,9 +409,9 @@ public:
 			       StateMachineState ***endOfTheLine);
 	
 	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
-		for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
+		if (sideEffect) {
 			fprintf(f, "\t");
-			(*it)->prettyPrint(f);
+			sideEffect->prettyPrint(f);
 			fprintf(f, "\n");
 		}
 		target->prettyPrint(f, labels);
@@ -510,8 +419,7 @@ public:
 	}
 	void visit(HeapVisitor &hv) {
 		hv(target);
-		for (auto it = beginSideEffects(); it != endSideEffects(); it++)
-			hv(*it);
+		hv(sideEffect);
 	}
 	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *, bool *done_something, FreeVariableMap &,
 				   std::set<StateMachineState *> &);
@@ -519,16 +427,15 @@ public:
 		if (TIMEOUT)
 			return;
 		target->findLoadedAddresses(s, opt);
-		for (auto it = rbeginSideEffects(); it != rendSideEffects(); it++)
-			(*it)->updateLoadedAddresses(s, opt);
+		if (sideEffect)
+			sideEffect->updateLoadedAddresses(s, opt);
 	}
 	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt) {
 		if (TIMEOUT)
 			return;
 		target->findUsedRegisters(s, opt);
-		for (auto it = rbeginSideEffects(); it != rendSideEffects();
-		     it++)
-			(*it)->findUsedRegisters(s, opt);
+		if (sideEffect)
+			sideEffect->findUsedRegisters(s, opt);
 	}
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs);
 	bool canCrash(std::vector<StateMachineEdge *> &memo) {
@@ -561,14 +468,14 @@ public:
 		} else {
 			live2 = NULL;
 		}
-		for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
-			if ((*it)->type == StateMachineSideEffect::Unreached) {
+		if (sideEffect) {
+			if (sideEffect->type == StateMachineSideEffect::Unreached) {
 				/* Don't want to check past these,
 				   because they often lead to bad
 				   areas of the machine. */
 				return;
 			}
-			(*it)->sanityCheck(live2);
+			sideEffect->sanityCheck(live2);
 		}
 		if (TIMEOUT)
 			return;
