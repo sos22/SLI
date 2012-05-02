@@ -1087,7 +1087,11 @@ availExpressionAnalysis(StateMachine *sm,
 			bool *done_something)
 {
 	sm->sanityCheck();
+	if (is_ssa)
+		sm->assertSSA();
 	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, is_ssa, oracle, done_something);
 	res->sanityCheck();
+	if (is_ssa)
+		res->assertSSA();
 	return res;
 }
