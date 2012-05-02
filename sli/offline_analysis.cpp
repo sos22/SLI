@@ -254,7 +254,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 	/* Got RBP->RSP delta, want RSP->RBP */
 	delta = -delta;
 	StateMachineEdge *e = new StateMachineEdge(sm->root);
-	e->sideEffects.push_back(
+	e->appendSideEffect(
 		new StateMachineSideEffectCopy(
 			threadAndRegister::reg(sm->tid, OFFSET_amd64_RBP, 0),
 			IRExpr_Associative(
@@ -1274,7 +1274,7 @@ CFGtoCrashReason(unsigned tid,
 				if (stmt->tag == Ist_Dirty) {
 					IRDirty *details = ((IRStmtDirty *)stmt)->details;
 					if (!strcmp(details->cee->name, "helper_load_64")) {
-						smp->target->sideEffects.push_back(
+						smp->target->appendSideEffect(
 							new StateMachineSideEffectLoad(
 								details->tmp,
 								details->args[0],
@@ -1297,7 +1297,7 @@ CFGtoCrashReason(unsigned tid,
 				state.addReloc(&smp->target->target, cfg->fallThrough);
 			else
 				smp->target->target = escapeState;
-			smp->target->sideEffects.push_back(
+			smp->target->appendSideEffect(
 				new StateMachineSideEffectCopy(
 					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
 					r));

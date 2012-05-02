@@ -368,15 +368,71 @@ public:
 class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 	void assertAcyclic(std::vector<const StateMachineEdge *> &,
 			   std::set<const StateMachineEdge *> &) const;
+	std::vector<StateMachineSideEffect *> sideEffects;
 public:
+	typedef std::vector<StateMachineSideEffect *>::iterator sideEffectIterator;
+	friend class reverseSideEffectIterator;
+	class  reverseSideEffectIterator {
+	public:
+		/* Can't use std::vector<StateMachineSideEffect *>::reverse_iterator
+		   because we need an erase() operation. */
+		VexPtr<StateMachineEdge, &ir_heap> edge;
+		int idx;
+		reverseSideEffectIterator(StateMachineEdge *_edge, int _idx)
+			: edge(_edge), idx(_idx)
+		{}
+		reverseSideEffectIterator(const reverseSideEffectIterator &o)
+			: edge(o.edge), idx(o.idx)
+		{}
+		reverseSideEffectIterator operator++(int) {
+			idx--; /* -- rather than ++ because it's a reverse iterator. */
+			return *this;
+		}
+		bool operator!=(const reverseSideEffectIterator &o) const {
+			assert(edge == o.edge);
+			return idx != o.idx;
+		}
+		StateMachineSideEffect *&operator*() {
+			return edge->sideEffects[idx];
+		}
+	};
+	typedef std::vector<StateMachineSideEffect *>::const_iterator constSideEffectIterator;
+	sideEffectIterator beginSideEffects() {
+		return sideEffects.begin();
+	}
+	sideEffectIterator endSideEffects() {
+		return sideEffects.end();
+	}
+	reverseSideEffectIterator rbeginSideEffects() {
+		return reverseSideEffectIterator(this, sideEffects.size() - 1);
+	}
+	reverseSideEffectIterator rendSideEffects() {
+		return reverseSideEffectIterator(this, -1);
+	}
+	constSideEffectIterator beginSideEffects() const {
+		return sideEffects.begin();
+	}
+	constSideEffectIterator endSideEffects() const {
+		return sideEffects.end();
+	}
+	sideEffectIterator insertSideEffect(sideEffectIterator it, StateMachineSideEffect *smse) {
+		return sideEffects.insert(it, smse);
+	}
+	reverseSideEffectIterator eraseSideEffect(reverseSideEffectIterator it) {
+		sideEffects.erase(sideEffects.begin() + it.idx);
+		return it;
+	}
+	bool noSideEffects() const {
+		return sideEffects.empty();
+	}
+
 	void assertAcyclic() const;
 	StateMachineEdge(StateMachineState *t) : target(t) {}
 	StateMachineEdge(const std::vector<StateMachineSideEffect *> &_sideEffects,
 			 StateMachineState *t)
-		: target(t), sideEffects(_sideEffects)
+		: sideEffects(_sideEffects), target(t)
 	{}
 	StateMachineState *target;
-	std::vector<StateMachineSideEffect *> sideEffects;
 
 	void prependSideEffect(StateMachineSideEffect *k) {
 		std::vector<StateMachineSideEffect *> n;
@@ -388,7 +444,10 @@ public:
 			n.push_back(*it);
 		sideEffects = n;
 	}
-
+	void appendSideEffect(StateMachineSideEffect *p) {
+		sideEffects.push_back(p);
+	}
+	
 	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
 		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
 			fprintf(f, "\t");
@@ -439,6 +498,9 @@ public:
 		return res;
 	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
+	bool eq(const StateMachineEdge *other) const {
+		return target == other->target && sideEffects == other->sideEffects;
+	}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const {
 #ifndef NDEBUG

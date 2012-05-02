@@ -32,7 +32,7 @@ nrAliasingLoads(StateMachineEdge *sme,
 		std::set<StateMachineState *> &visited,
 		Oracle *oracle)
 {
-	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
 		StateMachineSideEffectLoad *smsel2 = dynamic_cast<StateMachineSideEffectLoad *>(*it);
 		if (smsel2 &&
 		    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, !opt.freeVariablesNeverAccessStack())) &&
@@ -95,7 +95,7 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 			     bool haveAliasingStore,
 			     Oracle *oracle)
 {
-	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
 		StateMachineSideEffect *smse = *it;
 		if (smse == smsel) {
 			if (haveAliasingStore) {
@@ -288,7 +288,7 @@ introduceFreeVariables(StateMachineEdge *sme,
 
 	   For (d), free variables and registers are fine, because
 	   they're inherently local. */
-	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
 		StateMachineSideEffect *smse = *it;
 		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		if (!smsel ||
@@ -296,13 +296,13 @@ introduceFreeVariables(StateMachineEdge *sme,
 		    oracle->hasConflictingRemoteStores(smsel) ||
 		    !definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) ||
 		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) != 1) {
-			out->sideEffects.push_back(smse);
+			out->appendSideEffect(smse);
 			continue;
 		}
 		/* This is a local load from a location which is never
 		 * stored.  Remove it. */
 		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
-		out->sideEffects.push_back(smsec);
+		out->appendSideEffect(smsec);
 		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
 				(((IRExprFreeVariable *)smsec->value)->key,
 				 IRExpr_Load(Ity_I64, smsel->addr, smsel->rip)));

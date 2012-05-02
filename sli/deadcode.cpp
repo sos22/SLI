@@ -115,8 +115,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		void buildResForEdge(LivenessEntry &out, StateMachineEdge *edge)
 		{
 			out = (*this)[edge->target];
-			for (auto it = edge->sideEffects.rbegin();
-			     it != edge->sideEffects.rend();
+			for (auto it = edge->rbeginSideEffects();
+			     it != edge->rendSideEffects();
 			     it++)
 				out.useSideEffect(*it);
 		}
@@ -166,13 +166,11 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 
 		void doit(StateMachineEdge *edge, FreeVariableMap &fvm) {
 			LivenessEntry alive = livenessMap[edge->target];
-			/* Surprise! vector::erase doesn't work with a
-			   reverse_iterator, so use a raw index. */
-			for (int x = edge->sideEffects.size() - 1;
-			     x >= 0;
-			     x--) {
+			for (auto it = edge->rbeginSideEffects();
+			     it != edge->rendSideEffects();
+			     it++) {
 				StateMachineSideEffect *newEffect = NULL;
-				StateMachineSideEffect *e = edge->sideEffects[x];
+				StateMachineSideEffect *e = *it;
 				bool dead = false;
 				switch (e->type) {
 				case StateMachineSideEffect::Load: {
@@ -226,10 +224,10 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 
 				if (dead) {
 					*done_something = true;
-					edge->sideEffects.erase(edge->sideEffects.begin() + x);
+					it = edge->eraseSideEffect(it);
 				} else if (newEffect) {
 					*done_something = true;
-					edge->sideEffects[x] = newEffect;
+					*it = newEffect;
 					alive.useSideEffect(newEffect);
 				} else {
 					alive.useSideEffect(e);

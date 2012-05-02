@@ -69,30 +69,27 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 StateMachineEdge *
 StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_something)
 {
-	unsigned firstTransformed;
-	firstTransformed = 0;
+	auto firstTransformed = edge->beginSideEffects();
 	StateMachineSideEffect *trans;
-	while (firstTransformed < edge->sideEffects.size()) {
-		StateMachineSideEffect *old = edge->sideEffects[firstTransformed];
+	while (firstTransformed != edge->endSideEffects()) {
+		StateMachineSideEffect *old = *firstTransformed;
 		trans = transformSideEffect(old, done_something);
 		if (trans && trans != old)
 			break;
 		firstTransformed++;
 	}
-	if (firstTransformed == edge->sideEffects.size())
+	if (firstTransformed == edge->endSideEffects())
 		return NULL;
 	StateMachineEdge *res = new StateMachineEdge(NULL);
-	res->sideEffects.resize(edge->sideEffects.size());
-	std::copy(edge->sideEffects.begin(),
-		  edge->sideEffects.begin() + firstTransformed,
-		  res->sideEffects.begin());
-	res->sideEffects[firstTransformed] = trans;
-	for (unsigned x = firstTransformed + 1; x < edge->sideEffects.size(); x++) {
-		StateMachineSideEffect *old = edge->sideEffects[x];
+	for (auto it = edge->beginSideEffects(); it != firstTransformed; it++)
+		res->appendSideEffect(*it);
+	res->appendSideEffect(trans);
+	for (auto it = firstTransformed + 1; it != edge->endSideEffects(); it++) {
+		StateMachineSideEffect *old = *it;
 		trans = transformSideEffect(old, done_something);
 		if (!trans)
 			trans = old;
-		res->sideEffects[x] = trans;
+		res->appendSideEffect(trans);
 	}
 	return res;
 }
@@ -200,8 +197,8 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 				continue;
 			if (stateRewrites.count(e->target)) {
 				progress = true;
-				StateMachineEdge *n = new StateMachineEdge(NULL);
-				n->sideEffects = e->sideEffects;
+				StateMachineEdge *n = new StateMachineEdge(*e);
+				n->target = NULL;
 				edgeRewrites[e] = n;
 			}
 		}

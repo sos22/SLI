@@ -291,7 +291,7 @@ template <bool acceptPartialDefinition> void
 PossiblyReaching<acceptPartialDefinition>::buildSideEffectTable(StateMachineEdge *e)
 {
 	std::set<StateMachineSideEffect *> reaching(effectsReachingEdge(e));
-	for (auto it = e->sideEffects.begin(); it != e->sideEffects.end(); it++) {
+	for (auto it = e->beginSideEffects(); it != e->endSideEffects(); it++) {
 		expandSet(effectsReachingSideEffect(*it), reaching);
 		updateReachingSetForSideEffect(*it, &reaching, acceptPartialDefinition);
 	}
@@ -302,8 +302,8 @@ PossiblyReaching<acceptPartialDefinition>::updateEdgeReaching(StateMachineEdge *
 				std::set<StateMachineState *> &needsUpdate)
 {
 	std::set<StateMachineSideEffect *> reachesEnd(effectsReachingEdge(edge));
-	for (auto it = edge->sideEffects.begin();
-	     it != edge->sideEffects.end();
+	for (auto it = edge->beginSideEffects();
+	     it != edge->endSideEffects();
 	     it++)
 		updateReachingSetForSideEffect(*it, &reachesEnd, acceptPartialDefinition);
 	std::set<StateMachineSideEffect *> &old(effectsReachingState(edge->target));
@@ -491,8 +491,8 @@ useSsaVars(StateMachine *inp, PossiblyReaching<true> &reaching, bool *needPhiEdg
 			    StateMachineEdge *edge)
 		{
 			exp_transformer t(needPhiEdges, reaching);
-			for (auto it = edge->sideEffects.begin();
-			     !TIMEOUT && it != edge->sideEffects.end();
+			for (auto it = edge->beginSideEffects();
+			     !TIMEOUT && it != edge->endSideEffects();
 			     it++) {
 				StateMachineSideEffect *e = *it;
 				switch (e->type) {
@@ -609,7 +609,7 @@ introducePhiEdges(StateMachine *inp,
 	inp->root->targets(toVisitEdges);
 	while (!TIMEOUT && !toVisitEdges.empty()) {
 		StateMachineEdge *e = pop(toVisitEdges);
-		for (auto it = e->sideEffects.begin(); it != e->sideEffects.end(); it++) {
+		for (auto it = e->beginSideEffects(); it != e->endSideEffects(); it++) {
 			std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
 			findNeededRegisters(*it, needed);
 			if (needed.empty())
@@ -621,7 +621,7 @@ introducePhiEdges(StateMachine *inp,
 			     it2++) {
 				if (introduced.count(*it2))
 					continue;
-				it = e->sideEffects.insert(
+				it = e->insertSideEffect(
 					it,
 					allocateSsaVariable.newPhi(*it2, *it));
 				it++;
@@ -689,7 +689,7 @@ introducePhiStates(StateMachine *inp,
 					needPredecessors.insert(sm);
 					break;
 				}
-				predecessor->sideEffects.push_back(
+				predecessor->appendSideEffect(
 					allocateSsaVariable.newPhi(*it, sm));
 				introduced.insert(*it);
 			}
@@ -1039,8 +1039,8 @@ rawDupe(duplication_context &ctxt, const StateMachineEdge *inp)
 	   appears in the machine in precisely one place.  This makes
 	   the which-side-effects-reach-here calculation a lot
 	   easier. */
-	for (auto it = inp->sideEffects.begin(); it != inp->sideEffects.end(); it++)
-		res->sideEffects.push_back(rawDupe(ctxt, *it));
+	for (auto it = inp->beginSideEffects(); it != inp->endSideEffects(); it++)
+		res->appendSideEffect(rawDupe(ctxt, *it));
 	ctxt(&res->target, inp->target, rawDupe);
 	return res;
 }

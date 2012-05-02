@@ -166,18 +166,24 @@ edgesLocallyBisimilar(StateMachineEdge *sme1,
 		      const std::set<st_pair_t> &states,
 		      const AllowableOptimisations &opt)
 {
-	if (sme1->sideEffects.size() !=
-	    sme2->sideEffects.size())
-		return false;
 	if (!states.count(st_pair_t(sme1->target, sme2->target)))
 		return false;
-	for (unsigned x = 0; x < sme1->sideEffects.size(); x++) {
-		if (!sideEffectsBisimilar(sme1->sideEffects[x],
-					  sme2->sideEffects[x],
+	auto it1 = sme1->beginSideEffects();
+	auto it2 = sme2->beginSideEffects();
+	while (1) {
+		if (it1 == sme1->endSideEffects() &&
+		    it2 == sme2->endSideEffects())
+			return true;
+		if (it1 == sme1->endSideEffects() &&
+		    it2 == sme2->endSideEffects())
+			return false;
+		if (!sideEffectsBisimilar(*it1,
+					  *it2,
 					  opt))
 			return false;
+		it1++;
+		it2++;
 	}
-	return true;
 }
 
 static bool

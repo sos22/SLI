@@ -59,7 +59,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			break;
 		case Ist_Put: {
 			IRStmtPut *isp = (IRStmtPut *)stmt;
-			work->sideEffects.push_back(
+			work->appendSideEffect(
 				new StateMachineSideEffectCopy(
 					isp->target,
 					isp->data));
@@ -74,7 +74,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			IRStmtStore *ist = (IRStmtStore *)stmt;
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
 					  StateMachineCrash::get());
-			work->sideEffects.push_back(
+			work->appendSideEffect(
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
@@ -116,7 +116,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			threadAndRegister tr = threadAndRegister::temp(rip.thread, t, 0);
 			IRType ty = cas->expdLo->type();
 			IRExpr *t_expr = IRExpr_Get(tr, ty);
-			work->sideEffects.push_back(
+			work->appendSideEffect(
 				new StateMachineSideEffectLoad(
 					tr,
 					cas->addr,
@@ -124,13 +124,13 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 					ty));
 			StateMachineEdge *exitEdge = new StateMachineEdge(NULL);
 			StateMachineProxy *r = new StateMachineProxy(rip.rip, exitEdge);
-			exitEdge->sideEffects.push_back(
+			exitEdge->appendSideEffect(
 				new StateMachineSideEffectCopy(
 					cas->oldLo,
 					t_expr));
 			StateMachineEdge *edgeIfEq = new StateMachineEdge(r);
 			StateMachineEdge *edgeIfNEq = new StateMachineEdge(r);
-			edgeIfEq->sideEffects.push_back(
+			edgeIfEq->appendSideEffect(
 				new StateMachineSideEffectStore(
 					cas->addr,
 					cas->dataLo,
@@ -176,7 +176,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			assert(ity != Ity_INVALID);
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
 					  StateMachineCrash::get());
-			work->sideEffects.push_back(
+			work->appendSideEffect(
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],

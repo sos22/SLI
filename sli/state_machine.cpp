@@ -49,7 +49,7 @@ StateMachineProxy::optimise(const AllowableOptimisations &opt, Oracle *oracle, b
 		*done_something = true;
 		return target->target;
 	}
-	if (target->sideEffects.size() == 0) {
+	if (target->noSideEffects()) {
 		*done_something = true;
 		return target->target->optimise(opt, oracle, done_something, fv, done);
 	}
@@ -86,8 +86,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv, done);
 	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv, done);
 
-	if (falseTarget->sideEffects.size() == 0 &&
-	    trueTarget->sideEffects.size() == 0) {
+	if (falseTarget->noSideEffects() && trueTarget->noSideEffects()) {
 		if (trueTarget->target == falseTarget->target) {
 			*done_something = true;
 			return trueTarget->target;
@@ -583,7 +582,7 @@ parseStateMachineEdge(StateMachineEdge **out,
 		StateMachineSideEffect *se;
 		if (!parseStateMachineSideEffect(&se, str, &str))
 			break;
-		work->sideEffects.push_back(se);
+		work->appendSideEffect(se);
 		parseThisChar('\n', str, &str);
 	}
 	if (!parseStateMachineState(&work->target, str, suffix))
@@ -909,7 +908,7 @@ StateMachine::assertSSA() const
 					      &edges);
 	std::set<threadAndRegister, threadAndRegister::fullCompare> discoveredAssignments;
 	for (auto it = edges.begin(); it != edges.end(); it++) {
-		for (auto it2 = (*it)->sideEffects.begin(); it2 != (*it)->sideEffects.end(); it2++) {
+		for (auto it2 = (*it)->beginSideEffects(); it2 != (*it)->endSideEffects(); it2++) {
 			StateMachineSideEffect *smse = *it2;
 			switch (smse->type) {
 			case StateMachineSideEffect::Load: {

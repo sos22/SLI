@@ -31,7 +31,7 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 	if (memo.count(sme))
 		return false;
 	memo.insert(sme);
-	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
 		StateMachineSideEffect *se = *it;
 		if (se == smses) {
 			/* We've reached a cycle without hitting a
@@ -77,7 +77,7 @@ storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme,
 				      Oracle *oracle)
 {
 	it++;
-	while (it != sme->sideEffects.end()) {
+	while (it != sme->endSideEffects()) {
 		if ((*it)->type == StateMachineSideEffect::Load) {
 			StateMachineSideEffectLoad *smsel =
 				dynamic_cast<StateMachineSideEffectLoad *>(*it);
@@ -106,7 +106,7 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 {
 	if (TIMEOUT)
 		return;
-	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
 		if (StateMachineSideEffectStore *smses =  dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			bool canRemove = opt.ignoreStore(smses->rip.rip.rip);
 			if (!canRemove && opt.assumePrivateStack() && alias &&

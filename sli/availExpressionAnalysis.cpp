@@ -563,9 +563,8 @@ buildNewStateMachineWithLoadsEliminated(
 		currentlyAvailable.print(stdout);
 	}
 
-	for (std::vector<StateMachineSideEffect *>::const_iterator it =
-		     sme->sideEffects.begin();
-	     !TIMEOUT && it != sme->sideEffects.end();
+	for (auto it = sme->beginSideEffects();
+	     !TIMEOUT && it != sme->endSideEffects();
 	     it++) {
 		StateMachineSideEffect *newEffect;
 
@@ -762,7 +761,7 @@ buildNewStateMachineWithLoadsEliminated(
 		if (!*done_something) assert(newEffect == *it);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
 		currentlyAvailable.calcRegisterMap(opt);
-		res->sideEffects.push_back(newEffect);
+		res->appendSideEffect(newEffect);
 		if (debug_substitutions) {
 			printf("New available set:\n");
 			currentlyAvailable.print(stdout);
@@ -997,9 +996,8 @@ availExpressionAnalysis(StateMachine *sm,
 #warning Why not introduce an assertion on the relevant edge?
 
 				/* Build the output set. */
-				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
-					     edge->sideEffects.begin();
-				     !TIMEOUT && it2 != edge->sideEffects.end();
+				for (auto it2 = edge->beginSideEffects();
+				     !TIMEOUT && it2 != edge->endSideEffects();
 				     it2++)
 					updateAvailSetForSideEffect(outputAvail, *it2,
 								    opt, alias, oracle);
