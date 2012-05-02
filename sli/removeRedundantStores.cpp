@@ -31,16 +31,17 @@ storeMightBeLoadedByStateEdge(StateMachineEdge *sme, StateMachineSideEffectStore
 	if (memo.count(sme))
 		return false;
 	memo.insert(sme);
-	for (unsigned y = 0; y < sme->sideEffects.size(); y++) {
-		if (sme->sideEffects[y] == smses) {
+	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+		StateMachineSideEffect *se = *it;
+		if (se == smses) {
 			/* We've reached a cycle without hitting a
 			   load of this store, so this path, at least,
 			   is clear. */
 			return false;
 		}
-		if (sme->sideEffects[y]->type == StateMachineSideEffect::Load) {
+		if (se->type == StateMachineSideEffect::Load) {
 			StateMachineSideEffectLoad *smsel =
-				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
+				dynamic_cast<StateMachineSideEffectLoad *>(se);
 			assert(smsel);
 			if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, freeVariablesMightAccessStack)) &&
 			    oracle->memoryAccessesMightAlias(opt, smsel, smses))
@@ -67,23 +68,26 @@ storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *sm
 }
 
 static bool
-storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme, unsigned idx,
+storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme,
+				      std::vector<StateMachineSideEffect *>::iterator it,
 				      const AllowableOptimisations &opt,
 				      StateMachineSideEffectStore *smses,
 				      const Oracle::RegisterAliasingConfiguration *alias,
 				      bool freeVariablesMightAccessStack,
 				      Oracle *oracle)
 {
-	for (unsigned y = idx + 1; y < sme->sideEffects.size(); y++) {
-		if (sme->sideEffects[y]->type == StateMachineSideEffect::Load) {
+	it++;
+	while (it != sme->sideEffects.end()) {
+		if ((*it)->type == StateMachineSideEffect::Load) {
 			StateMachineSideEffectLoad *smsel =
-				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[y]);
+				dynamic_cast<StateMachineSideEffectLoad *>(*it);
 			assert(smsel);
 			if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr,
 							     freeVariablesMightAccessStack)) &&
 			    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				return true;
 		}
+		it++;
 	}
 	std::set<StateMachineEdge *> memo;
 	return storeMightBeLoadedByState(sme->target, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo);
@@ -102,9 +106,8 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 {
 	if (TIMEOUT)
 		return;
-	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
-		if (StateMachineSideEffectStore *smses =
-		    dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffects[x])) {
+	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+		if (StateMachineSideEffectStore *smses =  dynamic_cast<StateMachineSideEffectStore *>(*it)) {
 			bool canRemove = opt.ignoreStore(smses->rip.rip.rip);
 			if (!canRemove && opt.assumePrivateStack() && alias &&
 			    !alias->mightPointOutsideStack(smses->addr)) {
@@ -116,8 +119,8 @@ removeRedundantStores(StateMachineEdge *sme, Oracle *oracle, bool *done_somethin
 			}
 
 			if (canRemove &&
-			    !storeMightBeLoadedFollowingSideEffect(sme, x, opt, smses, alias, !opt.freeVariablesNeverAccessStack(), oracle)) {
-				sme->sideEffects[x] =
+			    !storeMightBeLoadedFollowingSideEffect(sme, it, opt, smses, alias, !opt.freeVariablesNeverAccessStack(), oracle)) {
+				*it =
 					new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(
 							Iop_BadPtr,
