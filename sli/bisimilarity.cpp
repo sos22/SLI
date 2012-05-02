@@ -174,7 +174,7 @@ edgesLocallyBisimilar(StateMachineEdge *sme1,
 		if (it1 == sme1->endSideEffects() &&
 		    it2 == sme2->endSideEffects())
 			return true;
-		if (it1 == sme1->endSideEffects() &&
+		if (it1 == sme1->endSideEffects() ||
 		    it2 == sme2->endSideEffects())
 			return false;
 		if (!sideEffectsBisimilar(*it1,
