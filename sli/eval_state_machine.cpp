@@ -870,9 +870,9 @@ public:
 };
 
 class CrossMachineEvalContext {
-	void advanceToSideEffect(CrossEvalState *machine, NdChooser &chooser, Oracle *oracle,
-				 const AllowableOptimisations &opt,
-				 std::set<DynAnalysisRip> &usefulRips, bool wantLoad);
+	StateMachineSideEffect *advanceToSideEffect(CrossEvalState *machine, NdChooser &chooser, Oracle *oracle,
+						    const AllowableOptimisations &opt,
+						    std::set<DynAnalysisRip> &usefulRips, bool wantLoad);
 public:
 	bool collectOrderingConstraints;
 	IRExpr *pathConstraint;
@@ -885,11 +885,11 @@ public:
 	std::set<DynAnalysisRip> &storeMachineRacingInstructions;
 	void advanceMachine(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt, bool doLoad);
 	void dumpHistory(FILE *f) const;
-	void advanceToLoad(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
-		advanceToSideEffect(loadMachine, chooser, oracle, opt, probeMachineRacingInstructions, true);
+	StateMachineSideEffect *advanceToLoad(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
+		return advanceToSideEffect(loadMachine, chooser, oracle, opt, probeMachineRacingInstructions, true);
 	}
-	void advanceToStore(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
-		advanceToSideEffect(storeMachine, chooser, oracle, opt, storeMachineRacingInstructions, false);
+	StateMachineSideEffect *advanceToStore(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
+		return advanceToSideEffect(storeMachine, chooser, oracle, opt, storeMachineRacingInstructions, false);
 	}
 	CrossMachineEvalContext(std::set<DynAnalysisRip> &_probeMachineRacingInstructions,
 				std::set<DynAnalysisRip> &_storeMachineRacingInstructions)
@@ -913,7 +913,7 @@ CrossMachineEvalContext::dumpHistory(FILE *f) const
 	}
 }
 
-void
+StateMachineSideEffect *
 CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					     NdChooser &chooser,
 					     Oracle *oracle,
@@ -925,7 +925,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 
 top:
 	if (TIMEOUT)
-		return;
+		return NULL;
 
 	while (machine->nextEdgeSideEffectIdx != 0 ||
 	       !machine->currentEdge->sideEffect) {
@@ -938,11 +938,11 @@ top:
 		case StateMachineState::Crash:
 			machine->finished = true;
 			machine->crashed = true;
-			return;
+			return NULL;
 		case StateMachineState::NoCrash:
 		case StateMachineState::Stub:
 			machine->finished = true;
-			return;
+			return NULL;
 		case StateMachineState::Proxy: {
 			StateMachineProxy *smp = (StateMachineProxy *)s;
 			machine->currentEdge = smp->target;
@@ -979,12 +979,14 @@ top:
 						collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
 			/* Found a contradiction -> get out */
 			machine->finished = true;
-			return;
+			return NULL;
 		}
 		history.push_back(se);
 		machine->nextEdgeSideEffectIdx++;
 		goto top;
 	}
+
+	return machine->currentEdge->sideEffect;
 }
 
 void
@@ -994,18 +996,15 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 					bool doLoad)
 {
 	CrossEvalState *machine = doLoad ? loadMachine : storeMachine;
+	StateMachineSideEffect *se;
 
 	if (doLoad)
-		advanceToLoad(chooser, oracle, opt);
+		se = advanceToLoad(chooser, oracle, opt);
 	else
-		advanceToStore(chooser, oracle, opt);
+		se = advanceToStore(chooser, oracle, opt);
 	if (machine->finished || machine->crashed || TIMEOUT)
 		return;
 
-	StateMachineSideEffect *se;
-	assert(machine->nextEdgeSideEffectIdx == 0);
-	assert(machine->currentEdge->sideEffect);
-	se = machine->currentEdge->sideEffect;
 	if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
 					collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
 		machine->finished = true;
