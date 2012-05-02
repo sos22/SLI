@@ -855,17 +855,16 @@ class CrossEvalState {
 public:
 	StateMachine *rootMachine;
 	StateMachineEdge *currentEdge;
-	int nextEdgeSideEffectIdx;
 	bool finished;
 	bool crashed;
 	threadState state;
-	CrossEvalState(StateMachine *_rootMachine, StateMachineEdge *_e,
-		       int _i)
+	bool skipThisSideEffect;
+	CrossEvalState(StateMachine *_rootMachine, StateMachineEdge *_e)
 		: rootMachine(_rootMachine),
 		  currentEdge(_e),
-		  nextEdgeSideEffectIdx(_i),
 		  finished(false),
-		  crashed(false)
+		  crashed(false),
+		  skipThisSideEffect(false)
 	{}
 };
 
@@ -921,17 +920,33 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					     std::set<DynAnalysisRip> &interestingRips,
 					     bool wantLoad)
 {
-	StateMachineState *s;
+	while (!TIMEOUT) {
+		StateMachineSideEffect *se = machine->currentEdge->sideEffect;
+		if (se && !machine->skipThisSideEffect) {
+			bool acceptable = se->type == StateMachineSideEffect::Store;
+			if (wantLoad)
+				acceptable |= se->type == StateMachineSideEffect::Load;
+			if (acceptable) {
+				StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
+				if (smea)
+					acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip.rip));
+			}
+			if (acceptable) {
+				machine->skipThisSideEffect = true;
+				return se;
+			}
+			if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
+							collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
+				/* Found a contradiction -> get out */
+				machine->finished = true;
+				return NULL;
+			}
+			history.push_back(se);
+		}
 
-top:
-	if (TIMEOUT)
-		return NULL;
+		machine->skipThisSideEffect = false;
 
-	while (machine->nextEdgeSideEffectIdx != 0 ||
-	       !machine->currentEdge->sideEffect) {
-		/* We've hit the end of the edge.  Move to the next
-		 * state. */
-		s = machine->currentEdge->target;
+		StateMachineState *s = machine->currentEdge->target;
 		switch (s->type) {
 		case StateMachineState::Unreached:
 			abort();
@@ -946,8 +961,7 @@ top:
 		case StateMachineState::Proxy: {
 			StateMachineProxy *smp = (StateMachineProxy *)s;
 			machine->currentEdge = smp->target;
-			machine->nextEdgeSideEffectIdx = 0;
-			continue;
+			break;
 		}
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
@@ -955,39 +969,11 @@ top:
 				machine->currentEdge = smb->trueTarget;
 			else
 				machine->currentEdge = smb->falseTarget;
-			machine->nextEdgeSideEffectIdx = 0;
-			continue;
+			break;
 		}
 		}
-		abort();
 	}
-
-	StateMachineSideEffect *se;
-	bool acceptable;
-	se = machine->currentEdge->sideEffect;
-
-	acceptable = se->type == StateMachineSideEffect::Store;
-	if (wantLoad)
-		acceptable |= se->type == StateMachineSideEffect::Load;
-	if (acceptable) {
-		StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
-		if (smea)
-			acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip.rip));
-	}
-	if (!acceptable) {
-		if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-						collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
-			/* Found a contradiction -> get out */
-			machine->finished = true;
-			return NULL;
-		}
-		history.push_back(se);
-		machine->nextEdgeSideEffectIdx++;
-		goto top;
-	}
-
-	machine->nextEdgeSideEffectIdx++;
-	return machine->currentEdge->sideEffect;
+	return NULL;
 }
 
 void
@@ -1070,8 +1056,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 		CrossMachineEvalContext ctxt(probeMachineRacingInstructions, storeMachineRacingInstructions);
 		ctxt.pathConstraint = initialStateCondition;
-		CrossEvalState s1(probeMachine, probeEdge, 0);
-		CrossEvalState s2(storeMachine, storeEdge, 0);
+		CrossEvalState s1(probeMachine, probeEdge);
+		CrossEvalState s2(storeMachine, storeEdge);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
 		while (!TIMEOUT && !s1.finished && !s2.finished)
@@ -1389,8 +1375,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		ctxt.collectOrderingConstraints = true;
 		ctxt.pathConstraint = initialStateCondition;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		CrossEvalState s1(probeMachine, probeEdge, 0);
-		CrossEvalState s2(storeMachine, storeEdge, 0);
+		CrossEvalState s1(probeMachine, probeEdge);
+		CrossEvalState s2(storeMachine, storeEdge);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
 		while (!TIMEOUT && !s1.finished && !s2.finished)
