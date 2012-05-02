@@ -555,18 +555,13 @@ parseStateMachineEdge(StateMachineEdge **out,
 		      const char *str,
 		      const char **suffix)
 {
-	std::vector<StateMachineSideEffect *> sideEffects;
-	while (1) {
-		StateMachineSideEffect *se;
-		if (!parseStateMachineSideEffect(&se, str, &str))
-			break;
-		sideEffects.push_back(se);
+	StateMachineSideEffect *se;
+	if (parseStateMachineSideEffect(&se, str, &str))
 		parseThisChar('\n', str, &str);
-	}
 	StateMachineState *target;
 	if (!parseStateMachineState(&target, str, suffix))
 		return false;
-	*out = new StateMachineEdge(sideEffects, target);
+	*out = new StateMachineEdge(se, target);
 	return true;
 }
 
@@ -930,3 +925,48 @@ StateMachine::assertSSA() const
 	checkForNonSSAVars.transform(const_cast<StateMachine *>(this));
 }
 #endif
+
+StateMachineEdge::StateMachineEdge(const std::vector<StateMachineSideEffect *> &sideEffects,
+				   const VexRip &vr,
+				   StateMachineState *target)
+{
+	if (sideEffects.size() == 0) {
+		this->target = target;
+		return;
+	}
+	if (sideEffects.size() == 1) {
+		this->sideEffect = sideEffects[0];
+		this->target = target;
+		return;
+	}
+	StateMachineState **cursor;
+	StateMachineState *root;
+	cursor = &root;
+	for (unsigned x = 1; x < sideEffects.size(); x++) {
+		StateMachineEdge *t = new StateMachineEdge(sideEffects[x], NULL);
+		StateMachineProxy *p = new StateMachineProxy(vr, t);
+		*cursor = p;
+		cursor = &t->target;
+	}
+	*cursor = target;
+	this->target = root;
+}
+
+void
+StateMachineEdge::prependSideEffect(const VexRip &vr, StateMachineSideEffect *smse,
+				    StateMachineState ***endOfTheLine)
+{
+	assert(endOfTheLine || target);
+	if (!sideEffect) {
+		if (endOfTheLine)
+			assert(*endOfTheLine == &target);
+		sideEffect = smse;
+	} else {
+		StateMachineProxy *smp = new StateMachineProxy(vr, target);
+		smp->target->sideEffect = sideEffect;
+		target = smp;
+		sideEffect = smse;
+		if (endOfTheLine && *endOfTheLine == &target)
+			*endOfTheLine = &smp->target->target;
+	}
+}

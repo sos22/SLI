@@ -166,11 +166,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 
 		void doit(StateMachineEdge *edge, FreeVariableMap &fvm) {
 			LivenessEntry alive = livenessMap[edge->target];
-			for (auto it = edge->rbeginSideEffects();
-			     it != edge->rendSideEffects();
-			     it++) {
+			if (edge->sideEffect) {
 				StateMachineSideEffect *newEffect = NULL;
-				StateMachineSideEffect *e = *it;
+				StateMachineSideEffect *e = edge->sideEffect;
 				bool dead = false;
 				switch (e->type) {
 				case StateMachineSideEffect::Load: {
@@ -224,10 +222,10 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 
 				if (dead) {
 					*done_something = true;
-					it = edge->eraseSideEffect(it);
+					edge->sideEffect = NULL;
 				} else if (newEffect) {
 					*done_something = true;
-					*it = newEffect;
+					edge->sideEffect = newEffect;
 					alive.useSideEffect(newEffect);
 				} else {
 					alive.useSideEffect(e);

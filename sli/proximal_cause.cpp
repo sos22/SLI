@@ -48,12 +48,14 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 		const ThreadRip &rip;
 		StateMachineEdge *&work;
 		void operator()(StateMachineSideEffect *se) {
-			std::vector<StateMachineSideEffect *> v;
-			v.push_back(se);
-			StateMachineEdge *newEdge =
-				new StateMachineEdge(v, NULL);
-			work->target = new StateMachineProxy(rip.rip, newEdge);
-			work = newEdge;
+			if (!work->sideEffect) {
+				work->sideEffect = se;
+			} else {
+				StateMachineEdge *newEdge =
+					new StateMachineEdge(se, NULL);
+				work->target = new StateMachineProxy(rip.rip, newEdge);
+				work = newEdge;
+			}
 		}
 		_2(const ThreadRip &_rip, StateMachineEdge *&_work)
 			: rip(_rip), work(_work)

@@ -253,8 +253,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 	}
 	/* Got RBP->RSP delta, want RSP->RBP */
 	delta = -delta;
-	std::vector<StateMachineSideEffect *> sideEffects;
-	sideEffects.push_back(
+	StateMachineSideEffect *smse =
 		new StateMachineSideEffectCopy(
 			threadAndRegister::reg(sm->tid, OFFSET_amd64_RBP, 0),
 			IRExpr_Associative(
@@ -264,8 +263,8 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 					Ity_I64),
 				IRExpr_Const(
 					IRConst_U64(delta)),
-				NULL)));
-	StateMachineEdge *e = new StateMachineEdge(sideEffects, sm->root);
+				NULL));
+	StateMachineEdge *e = new StateMachineEdge(smse, sm->root);
 	sm->root = new StateMachineProxy(sm->origin, e);
 }
 
@@ -1078,6 +1077,7 @@ CFGtoCrashReason(unsigned tid,
 				if (pending.empty()) {
 					std::vector<reloc_t> newRelocs;
 					for (auto it = relocs.begin(); it != relocs.end(); it++) {
+						assert(*it->first == NULL);
 						if (cfgToState.count(it->second)) {
 							*it->first = cfgToState[it->second];
 						} else if (crashReasons && crashReasons->hasKey(it->second->my_rip)) {
@@ -1147,7 +1147,8 @@ CFGtoCrashReason(unsigned tid,
 		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
 							const ThreadRip &rip,
 							CFGNode *branchTarget,
-							StateMachineEdge *edge) {
+							StateMachineEdge *edge,
+							StateMachineState ***final) {
 			StateMachineSideEffect *se = NULL;
 			switch (stmt->tag) {
 			case Ist_NoOp:
@@ -1214,7 +1215,7 @@ CFGtoCrashReason(unsigned tid,
 				break;
 			}
 			if (se)
-				edge->prependSideEffect(se);
+				edge->prependSideEffect(rip.rip, se, final);
 			return edge;
 		}
 
@@ -1297,7 +1298,7 @@ CFGtoCrashReason(unsigned tid,
 				new StateMachineSideEffectCopy(
 					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
 					r));
-			StateMachineEdge *edge = new StateMachineEdge(sideEffects, NULL);
+			StateMachineEdge *edge = new StateMachineEdge(sideEffects, site.rip, NULL);
 			if (cfg->fallThrough)
 				state.addReloc(&edge->target, cfg->fallThrough);
 			else
@@ -1332,6 +1333,8 @@ CFGtoCrashReason(unsigned tid,
 			     endOfInstr++)
 				;
 			StateMachineEdge *edge;
+			StateMachineState **finalEdge;
+			CFGNode *relocTo;
 			if (endOfInstr == irsb->stmts_used && irsb->jumpkind == Ijk_Call) {
 				/* This is a call node, which requires
 				 * special handling. */
@@ -1339,12 +1342,14 @@ CFGtoCrashReason(unsigned tid,
 					/* We want to inline this
 					 * call, in effect. */
 					edge = new StateMachineEdge(NULL);
-					state.addReloc(&edge->target, cfg->branch);
+					relocTo = cfg->branch;
+					finalEdge = &edge->target;
 				} else {
 					return buildStateForCallInstruction(cfg, irsb, rip);
 				}
 			} else {
 				edge = new StateMachineEdge(NULL);
+				finalEdge = &edge->target;
 				if (!cfg->fallThrough && cfg->branch) {
 					/* We've decided to force this one to take the
 					   branch.  Trim the bit of the instruction
@@ -1354,11 +1359,11 @@ CFGtoCrashReason(unsigned tid,
 					while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
 						endOfInstr--;
 					assert(endOfInstr > 0);
-					state.addReloc(&edge->target, cfg->branch);
+					relocTo = cfg->branch;
 				} else if (cfg->fallThrough) {
-					state.addReloc(&edge->target, cfg->fallThrough);
+					relocTo = cfg->fallThrough;
 				} else {
-					edge->target = escapeState;
+					relocTo = NULL;
 				}
 			}
 
@@ -1366,10 +1371,15 @@ CFGtoCrashReason(unsigned tid,
 				edge = backtrackOneStatement(irsb->stmts[i],
 							     rip,
 							     cfg->branch,
-							     edge);
+							     edge,
+							     &finalEdge);
 				if (!edge)
 					return NULL;
 			}
+			if (relocTo)
+				state.addReloc(finalEdge, relocTo);
+			else
+				*finalEdge = escapeState;
 			return new StateMachineProxy(rip.rip, edge);
 		}
 	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle, accessGenerationNumbers);

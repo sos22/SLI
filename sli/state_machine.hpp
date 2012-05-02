@@ -368,86 +368,117 @@ public:
 class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
 	void assertAcyclic(std::vector<const StateMachineEdge *> &,
 			   std::set<const StateMachineEdge *> &) const;
-	std::vector<StateMachineSideEffect *> _sideEffects;
 public:
-	typedef std::vector<StateMachineSideEffect *>::iterator sideEffectIterator;
-	friend class reverseSideEffectIterator;
-	class  reverseSideEffectIterator {
+	StateMachineSideEffect *sideEffect;
+	friend class sideEffectIterator;
+	class sideEffectIterator {
 	public:
-		/* Can't use std::vector<StateMachineSideEffect *>::reverse_iterator
-		   because we need an erase() operation. */
 		VexPtr<StateMachineEdge, &ir_heap> edge;
-		int idx;
-		reverseSideEffectIterator(StateMachineEdge *_edge, int _idx)
-			: edge(_edge), idx(_idx)
-		{}
-		reverseSideEffectIterator(const reverseSideEffectIterator &o)
-			: edge(o.edge), idx(o.idx)
-		{}
-		reverseSideEffectIterator operator++(int) {
-			idx--; /* -- rather than ++ because it's a reverse iterator. */
-			return *this;
+		bool finished;
+		sideEffectIterator(StateMachineEdge *_edge, bool _finished)
+			: edge(_edge), finished(_finished)
+		{
+			if (!edge->sideEffect)
+				finished = true;
 		}
-		bool operator!=(const reverseSideEffectIterator &o) const {
-			assert(edge == o.edge);
-			return idx != o.idx;
-		}
+		sideEffectIterator(const sideEffectIterator &o)
+			: edge(o.edge), finished(o.finished)
+		{}
+		sideEffectIterator()
+			: edge(NULL), finished(true)
+		{}
 		StateMachineSideEffect *&operator*() {
-			return edge->_sideEffects[idx];
+			assert(!finished);
+			return edge->sideEffect;
+		}
+		void operator++(int) {
+			assert(!finished);
+			finished = true;
+		}
+		bool operator !=(const sideEffectIterator &other) const {
+			assert(edge == other.edge);
+			return finished != other.finished;
+		}
+		bool operator ==(const sideEffectIterator &other) const {
+			return !(*this != other);
+		}
+		sideEffectIterator operator+(int delta) {
+			if (delta == 0)
+				return *this;
+			assert(delta == 1);
+			assert(!finished);
+			return sideEffectIterator(edge, true);
 		}
 	};
-	typedef std::vector<StateMachineSideEffect *>::const_iterator constSideEffectIterator;
+	friend class constSideEffectIterator;
+	class constSideEffectIterator {
+	public:
+		VexPtr<const StateMachineEdge, &ir_heap> edge;
+		bool finished;
+		constSideEffectIterator(const StateMachineEdge *_edge, bool _finished)
+			: edge(_edge), finished(_finished)
+		{
+			if (!edge->sideEffect)
+				finished = true;
+		}
+		constSideEffectIterator(const constSideEffectIterator &o)
+			: edge(o.edge), finished(o.finished)
+		{}
+		StateMachineSideEffect *operator*() {
+			assert(!finished);
+			return edge->sideEffect;
+		}
+		void operator++(int) {
+			assert(!finished);
+			finished = true;
+		}
+		bool operator !=(const constSideEffectIterator &other) const {
+			assert(edge == other.edge);
+			return finished != other.finished;
+		}
+	};
+
 	sideEffectIterator beginSideEffects() {
-		return _sideEffects.begin();
+		return sideEffectIterator(this, false);
 	}
 	sideEffectIterator endSideEffects() {
-		return _sideEffects.end();
+		return sideEffectIterator(this, true);
 	}
-	reverseSideEffectIterator rbeginSideEffects() {
-		return reverseSideEffectIterator(this, _sideEffects.size() - 1);
+	sideEffectIterator rbeginSideEffects() {
+		return beginSideEffects();
 	}
-	reverseSideEffectIterator rendSideEffects() {
-		return reverseSideEffectIterator(this, -1);
+	sideEffectIterator rendSideEffects() {
+		return endSideEffects();
 	}
 	constSideEffectIterator beginSideEffects() const {
-		return _sideEffects.begin();
+		return constSideEffectIterator(this, false);
 	}
 	constSideEffectIterator endSideEffects() const {
-		return _sideEffects.end();
+		return constSideEffectIterator(this, true);
 	}
-	sideEffectIterator insertSideEffect(sideEffectIterator it, StateMachineSideEffect *smse) {
-		return _sideEffects.insert(it, smse);
-	}
-	reverseSideEffectIterator eraseSideEffect(reverseSideEffectIterator it) {
-		_sideEffects.erase(_sideEffects.begin() + it.idx);
-		return it;
+	sideEffectIterator eraseSideEffect(sideEffectIterator it) {
+		assert(it.edge == this);
+		sideEffect = NULL;
+		return sideEffectIterator(this, true);
 	}
 	bool noSideEffects() const {
-		return _sideEffects.empty();
+		return sideEffect == NULL;
 	}
 
 	void assertAcyclic() const;
 	StateMachineEdge(StateMachineState *t) : target(t) {}
 	StateMachineEdge(const std::vector<StateMachineSideEffect *> &__sideEffects,
+			 const VexRip &vr,
+			 StateMachineState *t);
+	StateMachineEdge(StateMachineSideEffect *_sideEffect,
 			 StateMachineState *t)
-		: _sideEffects(__sideEffects), target(t)
-	{}
-	StateMachineEdge(StateMachineSideEffect *sideEffect,
-			 StateMachineState *t)
-		: target(t)
+		: sideEffect(_sideEffect), target(t)
 	{
-		_sideEffects.push_back(sideEffect);
 	}
 	StateMachineState *target;
 
-	void prependSideEffect(StateMachineSideEffect *k) {
-		std::vector<StateMachineSideEffect *> n;
-		n.reserve(_sideEffects.size() + 1);
-		n.push_back(k);
-		for (auto it = beginSideEffects(); it != endSideEffects(); it++)
-			n.push_back(*it);
-		_sideEffects = n;
-	}
+	void prependSideEffect(const VexRip &vr, StateMachineSideEffect *k,
+			       StateMachineState ***endOfTheLine);
 	
 	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
 		for (auto it = beginSideEffects(); it != endSideEffects(); it++) {
@@ -495,7 +526,7 @@ public:
 	}
 	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
 	bool eq(const StateMachineEdge *other) const {
-		return target == other->target && _sideEffects == other->_sideEffects;
+		return target == other->target && sideEffect == other->sideEffect;
 	}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
 			 std::vector<const StateMachineEdge *> &done) const {

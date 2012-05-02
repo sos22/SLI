@@ -854,12 +854,12 @@ class CrossEvalState {
 public:
 	StateMachine *rootMachine;
 	StateMachineEdge *currentEdge;
-	std::vector<StateMachineSideEffect *>::iterator nextEdgeSideEffectIdx;
+	StateMachineEdge::sideEffectIterator nextEdgeSideEffectIdx;
 	bool finished;
 	bool crashed;
 	threadState state;
 	CrossEvalState(StateMachine *_rootMachine, StateMachineEdge *_e,
-		       std::vector<StateMachineSideEffect *>::iterator _i)
+		       const StateMachineEdge::sideEffectIterator &_i)
 		: rootMachine(_rootMachine),
 		  currentEdge(_e),
 		  nextEdgeSideEffectIdx(_i),
@@ -1136,7 +1136,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 
 		StateMachineEvalContext writerContext;
 		StateMachineEdge *writerEdge;
-		std::vector<StateMachineSideEffect *>::iterator writeEdgeIdx;
+		StateMachineEdge::sideEffectIterator writeEdgeIdx;
 		StateMachineSideEffectStore *sectionStart;
 		bool finished;
 		StateMachineSideEffectStore *smses;
@@ -1298,7 +1298,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 		StateMachineEvalContext writeContext;
 		StateMachineEdge *writerEdge;
-		std::vector<StateMachineSideEffect *>::iterator writeEdgeIdx;
+		StateMachineEdge::sideEffectIterator writeEdgeIdx;
 		std::set<StateMachineSideEffectStore *> incompleteSections;
 
 		writeContext.pathConstraint = assumption;

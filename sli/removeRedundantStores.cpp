@@ -69,7 +69,7 @@ storeMightBeLoadedByState(StateMachineState *sm, StateMachineSideEffectStore *sm
 
 static bool
 storeMightBeLoadedFollowingSideEffect(StateMachineEdge *sme,
-				      std::vector<StateMachineSideEffect *>::iterator it,
+				      StateMachineEdge::sideEffectIterator it,
 				      const AllowableOptimisations &opt,
 				      StateMachineSideEffectStore *smses,
 				      const Oracle::RegisterAliasingConfiguration *alias,

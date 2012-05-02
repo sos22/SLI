@@ -69,29 +69,16 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 StateMachineEdge *
 StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_something)
 {
-	auto firstTransformed = edge->beginSideEffects();
 	StateMachineSideEffect *trans;
-	while (firstTransformed != edge->endSideEffects()) {
-		StateMachineSideEffect *old = *firstTransformed;
-		trans = transformSideEffect(old, done_something);
-		if (trans && trans != old)
-			break;
-		firstTransformed++;
-	}
-	if (firstTransformed == edge->endSideEffects())
+	if (edge->sideEffect) {
+		trans = transformSideEffect(edge->sideEffect, done_something);
+		if (trans == NULL)
+			trans = edge->sideEffect;
+	} else
+		trans = NULL;
+	if (trans == edge->sideEffect)
 		return NULL;
-	std::vector<StateMachineSideEffect *> sideEffects;
-	for (auto it = edge->beginSideEffects(); it != firstTransformed; it++)
-		sideEffects.push_back(*it);
-	sideEffects.push_back(trans);
-	for (auto it = firstTransformed + 1; it != edge->endSideEffects(); it++) {
-		StateMachineSideEffect *old = *it;
-		trans = transformSideEffect(old, done_something);
-		if (!trans)
-			trans = old;
-		sideEffects.push_back(trans);
-	}
-	return new StateMachineEdge(sideEffects, NULL);
+	return new StateMachineEdge(trans, NULL);
 }
 
 StateMachineState *

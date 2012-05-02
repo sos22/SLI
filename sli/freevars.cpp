@@ -288,31 +288,29 @@ introduceFreeVariables(StateMachineEdge *sme,
 
 	   For (d), free variables and registers are fine, because
 	   they're inherently local. */
-	for (auto it = sme->beginSideEffects(); it != sme->endSideEffects(); it++) {
-		StateMachineSideEffect *smse = *it;
+	StateMachineSideEffect *smse = sme->sideEffect;
+	if (smse) {
 		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		if (!smsel ||
-		    !containsNoTemporaries(smsel->addr) ||
-		    oracle->hasConflictingRemoteStores(smsel) ||
-		    !definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) ||
-		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) != 1) {
-			sideEffects.push_back(smse);
-			continue;
+		if (smsel &&
+		    containsNoTemporaries(smsel->addr) &&
+		    !oracle->hasConflictingRemoteStores(smsel) &&
+		    definitelyNoSatisfyingStores(root_sm, smsel, alias, opt, false, oracle) &&
+		    nrAliasingLoads(root_sm, smsel, alias, opt, oracle) == 1) {
+			/* This is a local load from a location which
+			 * is never stored.  Remove it. */
+			StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
+			fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
+					(((IRExprFreeVariable *)smsec->value)->key,
+					 IRExpr_Load(Ity_I64, smsel->addr, smsel->rip)));
+			smse = smsec;
+			doit = true;
 		}
-		/* This is a local load from a location which is never
-		 * stored.  Remove it. */
-		StateMachineSideEffectCopy *smsec = new StateMachineSideEffectCopy(smsel->target, IRExpr_FreeVariable());
-		sideEffects.push_back(smsec);
-		fresh.push_back(std::pair<FreeVariableKey, IRExpr *>
-				(((IRExprFreeVariable *)smsec->value)->key,
-				 IRExpr_Load(Ity_I64, smsel->addr, smsel->rip)));
-		doit = true;
 	}
 	StateMachineState *target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);
 
 	if (doit) {
 		*done_something = true;
-		return new StateMachineEdge(sideEffects, target);
+		return new StateMachineEdge(smse, target);
 	} else {
 		return sme;
 	}

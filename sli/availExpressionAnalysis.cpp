@@ -563,24 +563,19 @@ buildNewStateMachineWithLoadsEliminated(
 		currentlyAvailable.print(stdout);
 	}
 
-	std::vector<StateMachineSideEffect *> sideEffects;
-	for (auto it = sme->beginSideEffects();
-	     !TIMEOUT && it != sme->endSideEffects();
-	     it++) {
-		StateMachineSideEffect *newEffect;
-
-		newEffect = NULL;
-
+	StateMachineSideEffect *newEffect;
+	newEffect = NULL;
+	if (sme->sideEffect) {
 		if (debug_substitutions) {
 			printf("Side effect ");
-			(*it)->prettyPrint(stdout);
+			sme->sideEffect->prettyPrint(stdout);
 			printf("\n");
 		}
 
-		switch ((*it)->type) {
+		switch (sme->sideEffect->type) {
 		case StateMachineSideEffect::Store: {
 			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(*it);
+				dynamic_cast<StateMachineSideEffectStore *>(sme->sideEffect);
 			IRExpr *newAddr, *newData;
 			bool doit = false;
 			newAddr = applyAvailSet(currentlyAvailable, smses->addr, false, &doit, opt);
@@ -596,7 +591,7 @@ buildNewStateMachineWithLoadsEliminated(
 		}
 		case StateMachineSideEffect::Load: {
 			StateMachineSideEffectLoad *smsel =
-				dynamic_cast<StateMachineSideEffectLoad *>(*it);
+				dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffect);
 			IRExpr *newAddr;
 			bool doit = false;
 			newAddr = applyAvailSet(currentlyAvailable, smsel->addr, false, &doit, opt);
@@ -627,14 +622,14 @@ buildNewStateMachineWithLoadsEliminated(
 				newEffect = new StateMachineSideEffectLoad(
 					smsel->target, newAddr, smsel->rip, smsel->type);
 			if (!newEffect)
-				newEffect = *it;
-			if (newEffect != *it)
+				newEffect = sme->sideEffect;
+			if (newEffect != sme->sideEffect)
 				*done_something = true;
 			break;
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *smsec =
-				dynamic_cast<StateMachineSideEffectCopy *>(*it);
+				dynamic_cast<StateMachineSideEffectCopy *>(sme->sideEffect);
 			IRExpr *newValue;
 			bool doit = false;
 			newValue = applyAvailSet(currentlyAvailable, smsec->value, false, &doit, opt);
@@ -643,15 +638,15 @@ buildNewStateMachineWithLoadsEliminated(
 				newEffect = new StateMachineSideEffectCopy(
 					smsec->target, newValue);
 			} else
-				newEffect = *it;
+				newEffect = sme->sideEffect;
 			break;
 		}
 		case StateMachineSideEffect::Unreached:
-			newEffect = *it;
+			newEffect = sme->sideEffect;
 			break;
 		case StateMachineSideEffect::AssertFalse: {
 			StateMachineSideEffectAssertFalse *smseaf =
-				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it);
+				dynamic_cast<StateMachineSideEffectAssertFalse *>(sme->sideEffect);
 			IRExpr *newVal;
 			bool doit = false;
 			if (currentlyAvailable.nr_asserts() < MAX_LIVE_ASSERTIONS) {
@@ -670,12 +665,12 @@ buildNewStateMachineWithLoadsEliminated(
 				newEffect = new StateMachineSideEffectAssertFalse(newVal);
 				*done_something = true;
 			} else
-				newEffect = *it;
+				newEffect = sme->sideEffect;
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *phi =
-				(StateMachineSideEffectPhi *)*it;
+				(StateMachineSideEffectPhi *)sme->sideEffect;
 			StateMachineSideEffectPhi *newPhi = NULL;
 			bool needSort = false;
 			for (auto it = currentlyAvailable._registers.begin();
@@ -759,16 +754,15 @@ buildNewStateMachineWithLoadsEliminated(
 			printf("\n");
 		}
 		assert(newEffect);
-		if (!*done_something) assert(newEffect == *it);
+		if (!*done_something) assert(newEffect == sme->sideEffect);
 		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
 		currentlyAvailable.calcRegisterMap(opt);
-		sideEffects.push_back(newEffect);
 		if (debug_substitutions) {
 			printf("New available set:\n");
 			currentlyAvailable.print(stdout);
 		}
 	}
-	return new StateMachineEdge(sideEffects, target);
+	return new StateMachineEdge(newEffect, target);
 }
 static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(
