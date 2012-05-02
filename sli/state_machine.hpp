@@ -432,6 +432,12 @@ public:
 			 StateMachineState *t)
 		: sideEffects(_sideEffects), target(t)
 	{}
+	StateMachineEdge(StateMachineSideEffect *sideEffect,
+			 StateMachineState *t)
+		: target(t)
+	{
+		sideEffects.push_back(sideEffect);
+	}
 	StateMachineState *target;
 
 	void prependSideEffect(StateMachineSideEffect *k) {
@@ -443,9 +449,6 @@ public:
 		     it++)
 			n.push_back(*it);
 		sideEffects = n;
-	}
-	void appendSideEffect(StateMachineSideEffect *p) {
-		sideEffects.push_back(p);
 	}
 	
 	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {

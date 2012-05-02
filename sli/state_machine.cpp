@@ -577,17 +577,18 @@ parseStateMachineEdge(StateMachineEdge **out,
 		      const char *str,
 		      const char **suffix)
 {
-	StateMachineEdge *work = new StateMachineEdge(NULL);
+	std::vector<StateMachineSideEffect *> sideEffects;
 	while (1) {
 		StateMachineSideEffect *se;
 		if (!parseStateMachineSideEffect(&se, str, &str))
 			break;
-		work->appendSideEffect(se);
+		sideEffects.push_back(se);
 		parseThisChar('\n', str, &str);
 	}
-	if (!parseStateMachineState(&work->target, str, suffix))
+	StateMachineState *target;
+	if (!parseStateMachineState(&target, str, suffix))
 		return false;
-	*out = work;
+	*out = new StateMachineEdge(sideEffects, target);
 	return true;
 }
 

@@ -663,6 +663,12 @@ introducePhiStates(StateMachine *inp,
 			enumAllEdges(inp, allEdges);
 			for (auto it = allEdges.begin(); it != allEdges.end(); it++)
 				discoverEdge(*it);
+			for (auto it = begin(); it != end(); it++) {
+				/* We can only use predecessor edges
+				 * which have no side effects. :( */
+				if (it->second && !it->second->noSideEffects())
+					it->second = NULL;
+			}
 		}
 	} predecessorMap(inp);
 	
@@ -689,7 +695,7 @@ introducePhiStates(StateMachine *inp,
 					needPredecessors.insert(sm);
 					break;
 				}
-				predecessor->appendSideEffect(
+				predecessor->prependSideEffect(
 					allocateSsaVariable.newPhi(*it, sm));
 				introduced.insert(*it);
 			}
@@ -1034,13 +1040,14 @@ static StateMachineState *rawDupe(duplication_context &ctxt, const StateMachineS
 static StateMachineEdge *
 rawDupe(duplication_context &ctxt, const StateMachineEdge *inp)
 {
-	StateMachineEdge *res = new StateMachineEdge(NULL);
 	/* We deliberately unshare side effects, so that each one
 	   appears in the machine in precisely one place.  This makes
 	   the which-side-effects-reach-here calculation a lot
 	   easier. */
+	std::vector<StateMachineSideEffect *> sideEffects;
 	for (auto it = inp->beginSideEffects(); it != inp->endSideEffects(); it++)
-		res->appendSideEffect(rawDupe(ctxt, *it));
+		sideEffects.push_back(rawDupe(ctxt, *it));
+	StateMachineEdge *res = new StateMachineEdge(sideEffects, NULL);
 	ctxt(&res->target, inp->target, rawDupe);
 	return res;
 }

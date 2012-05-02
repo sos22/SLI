@@ -253,8 +253,8 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 	}
 	/* Got RBP->RSP delta, want RSP->RBP */
 	delta = -delta;
-	StateMachineEdge *e = new StateMachineEdge(sm->root);
-	e->appendSideEffect(
+	std::vector<StateMachineSideEffect *> sideEffects;
+	sideEffects.push_back(
 		new StateMachineSideEffectCopy(
 			threadAndRegister::reg(sm->tid, OFFSET_amd64_RBP, 0),
 			IRExpr_Associative(
@@ -265,6 +265,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 				IRExpr_Const(
 					IRConst_U64(delta)),
 				NULL)));
+	StateMachineEdge *e = new StateMachineEdge(sideEffects, sm->root);
 	sm->root = new StateMachineProxy(sm->origin, e);
 }
 
@@ -1256,7 +1257,7 @@ CFGtoCrashReason(unsigned tid,
 				r = IRExpr_ClientCallFailed(irsb->next_nonconst);
 			}
 
-			StateMachineProxy *smp = new StateMachineProxy(site.rip, (StateMachineState *)NULL);
+			std::vector<StateMachineSideEffect *> sideEffects;
 
 			/* Pick up any temporaries calculated during
 			 * the call instruction. */
@@ -1274,7 +1275,7 @@ CFGtoCrashReason(unsigned tid,
 				if (stmt->tag == Ist_Dirty) {
 					IRDirty *details = ((IRStmtDirty *)stmt)->details;
 					if (!strcmp(details->cee->name, "helper_load_64")) {
-						smp->target->appendSideEffect(
+						sideEffects.push_back(
 							new StateMachineSideEffectLoad(
 								details->tmp,
 								details->args[0],
@@ -1292,15 +1293,16 @@ CFGtoCrashReason(unsigned tid,
 				}
 			}
 
-			assert(smp->target);
-			if (cfg->fallThrough)
-				state.addReloc(&smp->target->target, cfg->fallThrough);
-			else
-				smp->target->target = escapeState;
-			smp->target->appendSideEffect(
+			sideEffects.push_back(
 				new StateMachineSideEffectCopy(
 					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
 					r));
+			StateMachineEdge *edge = new StateMachineEdge(sideEffects, NULL);
+			if (cfg->fallThrough)
+				state.addReloc(&edge->target, cfg->fallThrough);
+			else
+				edge->target = escapeState;
+			StateMachineProxy *smp = new StateMachineProxy(site.rip, edge);
 			return smp;
 		}
 	public:
