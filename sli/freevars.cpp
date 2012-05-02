@@ -32,9 +32,8 @@ nrAliasingLoads(StateMachineEdge *sme,
 		std::set<StateMachineState *> &visited,
 		Oracle *oracle)
 {
-	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
-		StateMachineSideEffectLoad *smsel2 =
-			dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffects[x]);
+	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+		StateMachineSideEffectLoad *smsel2 = dynamic_cast<StateMachineSideEffectLoad *>(*it);
 		if (smsel2 &&
 		    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, !opt.freeVariablesNeverAccessStack())) &&
 		    oracle->memoryAccessesMightAlias(opt, smsel, smsel2) &&
@@ -96,8 +95,8 @@ definitelyNoSatisfyingStores(StateMachineEdge *sme,
 			     bool haveAliasingStore,
 			     Oracle *oracle)
 {
-	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
-		StateMachineSideEffect *smse = sme->sideEffects[x];
+	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+		StateMachineSideEffect *smse = *it;
 		if (smse == smsel) {
 			if (haveAliasingStore) {
 				return false;
@@ -289,8 +288,8 @@ introduceFreeVariables(StateMachineEdge *sme,
 
 	   For (d), free variables and registers are fine, because
 	   they're inherently local. */
-	for (unsigned idx = 0; idx < sme->sideEffects.size(); idx++) {
-		StateMachineSideEffect *smse = sme->sideEffects[idx];
+	for (auto it = sme->sideEffects.begin(); it != sme->sideEffects.end(); it++) {
+		StateMachineSideEffect *smse = *it;
 		StateMachineSideEffectLoad *smsel = dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		if (!smsel ||
 		    !containsNoTemporaries(smsel->addr) ||
