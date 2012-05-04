@@ -181,6 +181,9 @@ protected:
 			return NULL;
 		}
 	}
+	virtual StateMachineNdChoice *transformOneState(StateMachineNdChoice *s,
+							bool *done_something);
+
 public:
 	virtual StateMachineState *transformState(StateMachineState *, bool *);
 	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,

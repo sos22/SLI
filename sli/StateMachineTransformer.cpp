@@ -74,6 +74,27 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 	abort();
 }
 
+StateMachineNdChoice *
+StateMachineTransformer::transformOneState(StateMachineNdChoice *s, bool *done_something)
+{
+	bool b = false;
+	StateMachineState *trans;
+	unsigned firstTransformed;
+	for (firstTransformed = 0;
+	     !b && firstTransformed < s->successors.size();
+	     firstTransformed++) {
+		trans = transformState(s->successors[firstTransformed], &b);
+	}
+	if (!b)
+		return NULL;
+	*done_something = true;
+	std::vector<StateMachineState *> newSucc(s->successors);
+	newSucc[firstTransformed] = trans;
+	for (unsigned x = firstTransformed + 1; x < newSucc.size(); x++)
+		newSucc[x] = transformState(newSucc[x], &b);
+	return new StateMachineNdChoice(s->origin, newSucc);
+}
+
 StateMachineState *
 StateMachineTransformer::transformState(StateMachineState *s, bool *done_something)
 {
@@ -153,6 +174,13 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 									  NULL);
 					break;
 				}
+				case StateMachineState::NdChoice: {
+					StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
+					stateRewrites[s] =
+						new StateMachineNdChoice(smnd->origin);
+					break;
+				}
+
 				case StateMachineState::Unreached:
 				case StateMachineState::Crash:
 				case StateMachineState::NoCrash:
@@ -197,6 +225,15 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			assert(replacement->type == StateMachineState::SideEffecting);
 			StateMachineSideEffecting *repl = (StateMachineSideEffecting *)replacement;
 			doEdge(repl->target, smp->target, stateRewrites);
+			break;
+		}
+		case StateMachineState::NdChoice: {
+			StateMachineNdChoice *smnd = (StateMachineNdChoice *)old;
+			assert(replacement->type == StateMachineState::NdChoice);
+			StateMachineNdChoice *repl = (StateMachineNdChoice *)replacement;
+			repl->successors.resize(smnd->successors.size());
+			for (unsigned x = 0; x < smnd->successors.size(); x++)
+				doEdge(repl->successors[x], smnd->successors[x], stateRewrites);
 			break;
 		}
 		case StateMachineState::Crash:

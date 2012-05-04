@@ -299,7 +299,7 @@ public:
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 public:
 #define all_state_types(f)						\
-	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Bifurcate) f(SideEffecting)
+	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Bifurcate) f(SideEffecting) f(NdChoice)
 #define mk_state_type(name) name ,
 	enum stateType {
 		all_state_types(mk_state_type)
@@ -313,7 +313,6 @@ protected:
 			  enum stateType _type)
 		: type(_type), origin(_origin)
 	{}
-	virtual bool _canCrash(std::set<const StateMachineState *> &memo) const = 0;
 public:
 	stateType type;
 	VexRip origin; /* RIP we were looking at when we constructed
@@ -332,10 +331,16 @@ public:
 					    std::set<StateMachineState *> &done) = 0;
 	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	bool canCrash(std::set<const StateMachineState *> &memo) const {
-		if (memo.insert(this).second)
-			return _canCrash(memo);
-		else
+		if (type == Crash)
+			return true;
+		if (!memo.insert(this).second)
 			return false;
+		std::vector<const StateMachineState *> s;
+		targets(s);
+		for (auto it = s.begin(); it != s.end(); it++)
+			if ((*it)->canCrash(memo))
+				return true;
+		return false;
 	}
 	virtual void targets(std::vector<StateMachineState *> &) = 0;
 	virtual void targets(std::vector<const StateMachineState *> &) const = 0;
@@ -394,8 +399,6 @@ class StateMachineTerminal : public StateMachineState {
 protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
-	virtual bool canCrash() const = 0;
-	bool _canCrash(std::set<const StateMachineState *> &) const { return canCrash(); }
 public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
@@ -411,7 +414,6 @@ class StateMachineUnreached : public StateMachineTerminal {
 	StateMachineUnreached() : StateMachineTerminal(VexRip(), StateMachineState::Unreached) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	bool canCrash() const { return false; }
 public:
 	static StateMachineUnreached *get() {
 		if (!_this) _this = new StateMachineUnreached();
@@ -422,7 +424,6 @@ public:
 class StateMachineCrash : public StateMachineTerminal {
 	StateMachineCrash() : StateMachineTerminal(VexRip(), StateMachineState::Crash) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
-	bool canCrash() const { return true; }
 public:
 	static StateMachineCrash *get() {
 		if (!_this) _this = new StateMachineCrash();
@@ -434,7 +435,6 @@ public:
 class StateMachineNoCrash : public StateMachineTerminal {
 	StateMachineNoCrash() : StateMachineTerminal(VexRip(), StateMachineState::NoCrash) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
-	bool canCrash() const { return false; }
 public:
 	static StateMachineNoCrash *get() {
 		if (!_this) _this = new StateMachineNoCrash();
@@ -444,7 +444,6 @@ public:
 };
 
 class StateMachineSideEffecting : public StateMachineState {
-	bool _canCrash(std::set<const StateMachineState *> &memo) const { return target->canCrash(memo); }
 public:
 	StateMachineState *target;
 	StateMachineSideEffect *sideEffect;
@@ -482,9 +481,6 @@ public:
 };
 
 class StateMachineBifurcate : public StateMachineState {
-	bool _canCrash(std::set<const StateMachineState *> &memo) const {
-		return trueTarget->canCrash(memo) || falseTarget->canCrash(memo);
-	}
 public:
 	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
@@ -533,10 +529,54 @@ public:
 	StateMachineSideEffect *getSideEffect() { return NULL; }
 };
 
+/* A special state which arbitrarily picks one of N possible successor
+   states.  Used to model things like loop unrolling, where we use an
+   ND choice to decide how many iterations we want to take. */
+class StateMachineNdChoice : public StateMachineState {
+public:
+	std::vector<StateMachineState *> successors;
+	StateMachineNdChoice(const VexRip &origin,
+			     const std::vector<StateMachineState *> &content)
+		: StateMachineState(origin, StateMachineState::NdChoice),
+		  successors(content)
+	{}
+	StateMachineNdChoice(const VexRip &origin)
+		: StateMachineState(origin, StateMachineState::NdChoice)
+	{}
+
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
+		fprintf(f, "%s: ND {", origin.name());
+		for (auto it = successors.begin(); it != successors.end(); it++) {
+			if (it != successors.begin())
+				fprintf(f, ", ");
+			fprintf(f, "l%d", labels[*it]);
+		}
+		fprintf(f, "}");
+	}
+
+	void visit(HeapVisitor &hv)
+	{
+		for (auto it = successors.begin(); it != successors.end(); it++)
+			hv(*it);
+	}
+
+	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
+				    std::set<StateMachineState *> &);
+	void targets(std::vector<StateMachineState *> &out) {
+		out.insert(out.end(), successors.begin(), successors.end());
+	}
+	void targets(std::vector<const StateMachineState *> &out) const {
+		out.insert(out.end(), successors.begin(), successors.end());
+	}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
+	{
+	}
+	StateMachineSideEffect *getSideEffect() { return NULL; }	
+};
+
 /* A node in the state machine representing a bit of code which we
    haven't explored yet. */
 class StateMachineStub : public StateMachineTerminal {
-	bool canCrash() const { return false; }
 public:
 	VexRip target;
 

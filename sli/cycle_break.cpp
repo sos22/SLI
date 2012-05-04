@@ -158,6 +158,14 @@ reachabilityMap::breakCycle(void)
 					StateMachineUnreached::get();
 				break;
 			}
+			case StateMachineState::NdChoice: {
+				StateMachineNdChoice *smn = (StateMachineNdChoice *)e;
+				for (auto it = smn->successors.begin();
+				     it != smn->successors.end();
+				     it++)
+					*it = StateMachineUnreached::get();
+				break;
+			}
 			case StateMachineState::Unreached:
 			case StateMachineState::Crash:
 			case StateMachineState::NoCrash:

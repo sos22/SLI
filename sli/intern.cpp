@@ -17,6 +17,7 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
 	std::set<StateMachineSideEffecting *> states_side_effect;
+	std::set<StateMachineNdChoice *> states_ndchoice;
 };
 
 static unsigned
@@ -443,6 +444,23 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		}
 		t.states[start] = start;
 		t.states_stub.insert(sms);
+		return start;
+	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)start;
+		for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++)
+			*it = internStateMachineState(*it, t);
+		for (auto it = t.states_ndchoice.begin();
+		     it != t.states_ndchoice.end();
+		     it++) {
+			StateMachineNdChoice *o = *it;
+			if (smnd->successors == o->successors) {
+				t.states[start] = o;
+				return o;
+			}
+		}
+		t.states[start] = start;
+		t.states_ndchoice.insert(smnd);
 		return start;
 	}
 	}

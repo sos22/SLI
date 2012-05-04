@@ -818,6 +818,19 @@ buildNewStateMachineWithLoadsEliminated(
 			done_something, edgeLabels);
 		return res;
 	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
+		StateMachineNdChoice *res = new StateMachineNdChoice(smnd->origin,
+								     smnd->successors);
+		memo[sm] = res;
+		for (auto it = res->successors.begin();
+		     it != res->successors.end();
+		     it++)
+			*it = buildNewStateMachineWithLoadsEliminated(
+				*it, availMap, memo, opt, alias, oracle,
+				done_something, edgeLabels);
+		return res;
+	}
 	case StateMachineState::Unreached:
 	case StateMachineState::Crash:
 	case StateMachineState::NoCrash:

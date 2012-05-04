@@ -410,7 +410,7 @@ parseStateMachineState(StateMachineState **out,
 	}
 	int target1;
 	StateMachineSideEffect *sme;
-	if (parseThisString("{SIDEEFFECT:", str, &str2) &&
+	if (parseThisString("{:", str, &str2) &&
 	    parseVexRip(&origin, str2, &str2) &&
 	    parseThisChar(':', str2, &str2) &&
 	    parseStateMachineSideEffect(&sme, str2, &str2) &&
@@ -434,6 +434,26 @@ parseStateMachineState(StateMachineState **out,
 						 (StateMachineState *)target2);
 		return true;
 	}
+
+	if (parseVexRip(&origin, str, &str2) &&
+	    parseThisString(": ND {", str2, &str2)) {
+		std::vector<StateMachineState *> successors;
+		while (1) {
+			if (parseThisChar('}', str2, suffix))
+				break;
+			if (successors.size() != 0 && !parseThisString(", ", str2, &str2))
+				return false;
+			if (!parseThisChar('l', str2, &str2))
+				return false;
+			int l;
+			if (!parseDecimalInt(&l, str2, &str2))
+				return false;
+			successors.push_back((StateMachineState *)l);
+		}
+		*out = new StateMachineNdChoice(origin, successors);
+		return true;
+	}
+
 	return false;
 }
 
@@ -495,6 +515,15 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 				smb->falseTarget = labelToState[(int)(unsigned long)smb->falseTarget];
 				if (!smb->trueTarget || !smb->falseTarget)
 					return false;
+				return true;
+			}
+			case StateMachineState::NdChoice: {
+				StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
+				for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++) {
+					*it = labelToState[(int)(unsigned long)*it];
+					if (!*it)
+						return false;
+				}
 				return true;
 			}
 			case StateMachineState::Crash:
@@ -889,3 +918,56 @@ StateMachine::sanityCheck() const
 	     it++)
 		it->first->sanityCheck(&definedAtTopOfState[it->first]);
 }
+
+StateMachineState *
+StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
+			       Oracle *oracle,
+			       bool *done_something,
+			       FreeVariableMap &fvm,
+			       std::set<StateMachineState *> &memo)
+{
+	if (successors.size() == 0) {
+		*done_something = true;
+		return StateMachineUnreached::get();
+	}
+	successors[0] = successors[0]->optimise(opt, oracle, done_something, fvm, memo);
+
+	/* Remove duplicates.  Note that we don't want to sort
+	   successors here, since that would involve a dependency on
+	   pointer ordering, which causes problems for determinacy. */
+	for (auto it1 = successors.begin(); it1 != successors.end(); ) {
+		if ((*it1)->type == StateMachineState::Unreached) {
+			/* Unreached nodes can be safely removed */
+			it1 = successors.erase(it1);
+			*done_something = true;
+			continue;
+		}
+		for (auto it2 = it1 + 1; it2 != successors.end(); ) {
+			if ( *it1 == *it2 ) {
+				*done_something = true;
+				it2 = successors.erase(it2);
+			} else if ( it1 == successors.begin() ) {
+				*it2 = (*it2)->optimise(opt, oracle, done_something, fvm, memo);
+				if ( *it1 == *it2 ) {
+					*done_something = true;
+					it2 = successors.erase(it2);
+				} else {
+					it2++;
+				}
+			} else {
+				it2++;
+			}
+		}
+		it1++;
+	}
+	if (successors.size() == 0) {
+		*done_something = true;
+		return StateMachineUnreached::get();
+	}
+	if (successors.size() == 1) {
+		*done_something = true;
+		return successors[0]->optimise(opt, oracle, done_something, fvm, memo);
+	}
+	return this;
+}
+

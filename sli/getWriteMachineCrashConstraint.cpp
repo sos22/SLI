@@ -191,6 +191,16 @@ stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt)
 			stateCrashConstraint(smb->trueTarget, ctxt));
 		break;
 	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smn = (StateMachineNdChoice *)s;
+		IRExprAssociative *iex = IRExpr_Associative(
+			smn->successors.size(), Iop_Or1);
+		for (unsigned x = 0; x < smn->successors.size(); x++)
+			iex->contents[x] =
+				stateCrashConstraint(smn->successors[x], ctxt);
+		res = iex;
+		break;
+	}
 	}
 	assert(res != NULL);
 	res = simplifyIRExpr(res, ctxt.opt);

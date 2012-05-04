@@ -322,6 +322,26 @@ introduceFreeVariables(StateMachineState *sm,
 			return sm;
 		}
 	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smn = (StateMachineNdChoice *)sm;
+		std::vector<StateMachineState *> successors;
+		successors.resize(smn->successors.size());
+		for (unsigned x = 0; x < smn->successors.size(); x++)
+			successors[x] = introduceFreeVariables(
+				smn->successors[x],
+				root_sm,
+				alias,
+				opt,
+				oracle,
+				&doit,
+				fresh);
+		if (doit) {
+			*done_something = true;
+			return new StateMachineNdChoice(smn->origin, successors);
+		} else {
+			return sm;
+		}
+	}
 	}
 	abort();
 }

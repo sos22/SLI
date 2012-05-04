@@ -745,6 +745,13 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 		else
 			return smb->falseTarget;
 	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
+		if (smnd->successors.size() != 0)
+			return chooser.nd_choice(smnd->successors);
+		/* Fall through to the Unreached case if we have no
+		 * available successors. */
+	}
 	case StateMachineState::Unreached:
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
@@ -908,6 +915,11 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 				machine->currentState = smb->trueTarget;
 			else
 				machine->currentState = smb->falseTarget;
+			break;
+		}
+		case StateMachineState::NdChoice: {
+			StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
+			machine->currentState = chooser.nd_choice(smnd->successors);
 			break;
 		}
 		case StateMachineState::SideEffecting: {
@@ -1094,6 +1106,11 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 				writerState = smb->trueTarget;
 			else
 				writerState = smb->falseTarget;
+			break;
+		}
+		case StateMachineState::NdChoice: {
+			StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
+			writerState = chooser.nd_choice(smnd->successors);
 			break;
 		}
 		case StateMachineState::SideEffecting: {

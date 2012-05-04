@@ -57,6 +57,15 @@ rewriteStateMachine(StateMachineState *sm,
 			memo);
 		return sm;
 	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
+		for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++)
+			*it = rewriteStateMachine(
+				*it,
+				rules,
+				memo);
+		return sm;
+	}
 	}
 	abort();
 }
@@ -161,6 +170,17 @@ statesLocallyBisimilar(StateMachineState *sm1,
 		return edges.count(st_pair_t(smb1->trueTarget, smb2->trueTarget)) &&
 			edges.count(st_pair_t(smb1->falseTarget, smb2->falseTarget)) &&
 			definitelyEqual(smb1->condition, smb2->condition, opt);
+	}
+
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smn1 = (StateMachineNdChoice *)sm1;
+		StateMachineNdChoice *smn2 = (StateMachineNdChoice *)sm2;
+		if (smn1->successors.size() != smn2->successors.size())
+			return false;
+		for (unsigned x = 0; x < smn1->successors.size(); x++)
+			if (!edges.count(st_pair_t(smn1->successors[x], smn2->successors[x])))
+				return false;
+		return true;
 	}
 	}
 	abort();
