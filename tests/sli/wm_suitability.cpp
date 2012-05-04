@@ -17,9 +17,11 @@ main(int argc, char *argv[])
 	VexPtr<StateMachine, &ir_heap> writeMachine(readStateMachine(open(argv[3], O_RDONLY)));
 	VexPtr<IRExpr, &ir_heap> survive(readIRExpr(open(argv[4], O_RDONLY)));
 	
-	IRExpr *assumption = writeMachineSuitabilityConstraint(readMachine, writeMachine, survive, oracle,
-							       AllowableOptimisations::defaultOptimisations,
-							       ALLOW_GC);
+	IRExpr *assumption = writeMachineCrashConstraint(writeMachine,
+							 survive,
+							 IRExpr_Const(IRConst_U1(1)),
+							 IRExpr_Const(IRConst_U1(0)),
+							 AllowableOptimisations::defaultOptimisations);
 	if (!assumption) {
 		printf("<machine unsuitable>\n");
 	} else {
