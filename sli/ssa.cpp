@@ -11,277 +11,6 @@ namespace SSA {
 }
 #endif
 
-static bool
-sideEffectDefinesReg(const StateMachineSideEffect *se, const threadAndRegister &reg,
-		     bool acceptPartialDefinition)
-{
-	bool (*comparator)(const threadAndRegister &a, const threadAndRegister &b);
-	if (acceptPartialDefinition)
-		comparator = threadAndRegister::partialEq;
-	else
-		comparator = threadAndRegister::fullEq;
-	switch (se->type) {
-	case StateMachineSideEffect::Load: {
-		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)se;
-		return comparator(l->target, reg);
-	}
-	case StateMachineSideEffect::Copy: {
-		StateMachineSideEffectCopy *l = (StateMachineSideEffectCopy *)se;
-		return comparator(l->target, reg);
-	}
-	case StateMachineSideEffect::Phi: {
-		StateMachineSideEffectPhi *l = (StateMachineSideEffectPhi *)se;
-		return comparator(l->reg, reg);
-	}
-	case StateMachineSideEffect::AssertFalse:
-	case StateMachineSideEffect::Unreached:
-	case StateMachineSideEffect::Store:
-		return false;
-	}
-	return true;
-}
-
-/* Most machines depend on the initial values of registers i.e. are
-   free in some registers.  That confuses a naive conversion to SSA
-   form, so, for each possible register, we generate a pseudo-Phi node
-   which initialises it from nothing at all, and we pretend that those
-   nodes run before the machine starts.  If at the end we find that
-   we're dependent on one of those nodes then we code that as a
-   dependency on the initial value (i.e. generation -1) */
-class ImportRegTable {
-public:
-	std::set<StateMachineSideEffect *> content;
-	ImportRegTable(StateMachine *inp);
-};
-
-ImportRegTable::ImportRegTable(StateMachine *inp)
-{
-	class _ : public StateMachineTransformer {
-		std::set<threadAndRegister, threadAndRegister::partialCompare> done;
-		std::set<StateMachineSideEffect *> &content;
-		IRExpr *transformIex(IRExprGet *g) {
-			if (!done.count(g->reg)) {
-				std::set<unsigned> gen;
-				content.insert(new StateMachineSideEffectPhi(g->reg.setGen(-1), gen));
-			}
-			return NULL;
-		}
-	public:
-		_(std::set<StateMachineSideEffect *> &_content)
-			: content(_content)
-		{}
-	} doit(content);
-	doit.transform(inp);
-}
-
-/* Possibly reaching map.  This tells us, for each side effect in a
-   state machine, the set of side effects which might conceivably
-   reach it. */
-template <bool acceptPartialDefinition>
-class PossiblyReaching {
-	void updateStateReaching(StateMachineState *state,
-				 std::set<StateMachineState *> &needsUpdate);
-	void buildSideEffectTable(StateMachineState *edge);
-	std::map<StateMachineState *, std::set<StateMachineSideEffect *> > stateTable;
-	std::map<StateMachineSideEffect *, std::set<StateMachineSideEffect *> > effectTable;
-public:
-	std::set<StateMachineSideEffect *> &effectsReachingState(StateMachineState *state) {
-		return stateTable[state];
-	}
-	std::set<StateMachineSideEffect *> &effectsReachingSideEffect(StateMachineSideEffect *effect) {
-		return effectTable[effect];
-	}
-	void findReachingGenerations(StateMachineState *e,
-				     const threadAndRegister &r,
-				     std::set<unsigned> &out);
-	void findReachingGenerations(StateMachineSideEffect *e,
-				     const threadAndRegister &r,
-				     std::set<unsigned> &out);
-	PossiblyReaching(StateMachine *inp, const ImportRegTable &imports);
-};
-
-static void
-enumAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
-{
-	enumStates(sm, &out);
-}
-
-template <bool acceptPartialDefinition>
-PossiblyReaching<acceptPartialDefinition>::PossiblyReaching(StateMachine *inp, const ImportRegTable &r)
-{
-	std::set<StateMachineState *> statesNeedingUpdate;
-	enumAllStates(inp, statesNeedingUpdate);
-
-	/* Initial state's initial reaching set is just the import
-	 * table.  Other states and edges start off with empty
-	 * reaching set. */
-	stateTable[inp->root] = r.content;
-
-	/* Iterate to fixed point. */
-	while (!statesNeedingUpdate.empty()) {
-		if (TIMEOUT)
-			return;
-		while (!statesNeedingUpdate.empty()) {
-			auto it = statesNeedingUpdate.begin();
-			auto s = *it;
-			statesNeedingUpdate.erase(it);
-			updateStateReaching(s, statesNeedingUpdate);
-		}
-	}
-
-	/* Now build the reaching-side-effect table */
-	std::set<StateMachineState *> allStates;
-	enumAllStates(inp, allStates);
-	for (auto it = allStates.begin(); it != allStates.end(); it++)
-		buildSideEffectTable(*it);
-}
-
-static void
-updateReachingSetForSideEffect(StateMachineSideEffect *smse, std::set<StateMachineSideEffect *> *out,
-			       bool acceptPartialDefinition)
-{
-	class _ {
-	public:
-		std::set<StateMachineSideEffect *> *out;
-		bool acceptPartialDefinition;
-		void operator()(threadAndRegister reg) {
-			for (auto it = out->begin(); it != out->end(); ) {
-				StateMachineSideEffect *o = *it;
-				if (sideEffectDefinesReg(o, reg, acceptPartialDefinition))
-					out->erase(it++);
-				else
-					it++;
-			}
-		}
-		_(std::set<StateMachineSideEffect *> *_out,
-		  bool _acceptPartialDefinition)
-			: out(_out), acceptPartialDefinition(_acceptPartialDefinition)
-		{}
-	} defineReg(out, acceptPartialDefinition);
-	switch (smse->type) {
-	case StateMachineSideEffect::Load: {
-		StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)smse;
-		defineReg(smsel->target);
-		out->insert(smse);
-		return;
-	}
-	case StateMachineSideEffect::Copy: {
-		StateMachineSideEffectCopy *smsec = (StateMachineSideEffectCopy *)smse;
-		defineReg(smsec->target);
-		out->insert(smse);
-		return;
-	}
-	case StateMachineSideEffect::Phi: {
-		StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)smse;
-		defineReg(smsep->reg);
-		out->insert(smse);
-		return;
-	}
-	case StateMachineSideEffect::AssertFalse:
-	case StateMachineSideEffect::Unreached:
-	case StateMachineSideEffect::Store:
-		return;
-	}
-	abort();
-}
-
-template <bool acceptPartialDefinition> void
-PossiblyReaching<acceptPartialDefinition>::updateStateReaching(StateMachineState *state, std::set<StateMachineState *> &needsUpdate)
-{
-	std::set<StateMachineSideEffect *> &reachingThisState(effectsReachingState(state));
-	std::set<StateMachineSideEffect *> *reachingEndOfState;
-	std::set<StateMachineSideEffect *> _reachingEndOfState;
-	if (state->type == StateMachineState::SideEffecting) {
-		StateMachineSideEffecting *s = (StateMachineSideEffecting *)state;
-		if (s->sideEffect) {
-			_reachingEndOfState = reachingThisState;
-			updateReachingSetForSideEffect(s->sideEffect, &_reachingEndOfState, acceptPartialDefinition);
-			reachingEndOfState = &_reachingEndOfState;
-		}
-	} else {
-		reachingEndOfState = &reachingThisState;
-	}
-	std::vector<StateMachineState *> targets;
-	state->targets(targets);
-	for (auto it = targets.begin(); it != targets.end(); it++) {
-		std::set<StateMachineSideEffect *> &reachingThisTarget(effectsReachingState(*it));
-		if (expandSet(reachingThisTarget, *reachingEndOfState))
-			needsUpdate.insert(*it);
-	}
-}
-
-static void
-sideEffectSetToGenerationSet(const std::set<StateMachineSideEffect *> &effects,
-			     const threadAndRegister &reg,
-			     std::set<unsigned> &out)
-{
-	struct _ {
-		std::set<unsigned> &out;
-		_(std::set<unsigned> &_out)
-			: out(_out)
-		{}
-		void operator()(unsigned r) {
-			out.insert(r);
-		}
-	} addItem(out);
-	for (auto it = effects.begin(); it != effects.end(); it++) {
-		StateMachineSideEffect *se = *it;
-		switch (se->type) {
-		case StateMachineSideEffect::Load: {
-			StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)se;
-			if (threadAndRegister::partialEq(l->target, reg))
-				addItem(l->target.gen());
-			break;
-		}
-		case StateMachineSideEffect::Copy: {
-			StateMachineSideEffectCopy *l = (StateMachineSideEffectCopy *)se;
-			if (threadAndRegister::partialEq(l->target, reg))
-				addItem(l->target.gen());
-			break;
-		}
-		case StateMachineSideEffect::Phi: {
-			StateMachineSideEffectPhi *l = (StateMachineSideEffectPhi *)se;
-			if (threadAndRegister::partialEq(l->reg, reg))
-				addItem(l->reg.gen());
-			break;
-		}
-		case StateMachineSideEffect::AssertFalse:
-		case StateMachineSideEffect::Unreached:
-		case StateMachineSideEffect::Store:
-			break;
-		}
-	}
-}
-
-template <bool acceptPartialDefinition> void
-PossiblyReaching<acceptPartialDefinition>::findReachingGenerations(StateMachineState *e,
-								   const threadAndRegister &reg,
-								   std::set<unsigned> &out)
-{
-	std::set<StateMachineSideEffect *> &effects(effectsReachingState(e));
-	sideEffectSetToGenerationSet(effects, reg, out);
-}
-
-template <bool acceptPartialDefinition> void
-PossiblyReaching<acceptPartialDefinition>::findReachingGenerations(StateMachineSideEffect *e,
-								   const threadAndRegister &reg,
-								   std::set<unsigned> &out)
-{
-	std::set<StateMachineSideEffect *> &effects(effectsReachingSideEffect(e));
-	sideEffectSetToGenerationSet(effects, reg, out);
-}
-
-template <bool acceptPartialDefinition> void
-PossiblyReaching<acceptPartialDefinition>::buildSideEffectTable(StateMachineState *e)
-{
-	if (e->type != StateMachineState::SideEffecting)
-		return;
-	StateMachineSideEffecting *se = (StateMachineSideEffecting *)e;
-	if (se->sideEffect)
-		expandSet(effectsReachingSideEffect(se->sideEffect),
-			  effectsReachingState(e));
-}
-
 /* Assert that the machine does not currently reference and tAR
    structures with non-zero generation number. */
 static void
@@ -584,6 +313,7 @@ rawDupe(duplication_context &ctxt, const StateMachineSideEffect *smse)
 		do_case(AssertFalse);
 		do_case(Copy);
 		do_case(Phi);
+#undef do_case
 	}
 	abort();
 }
@@ -989,29 +719,40 @@ convertToSSA(StateMachine *inp)
 }
 
 class optimiseSSATransformer : public StateMachineTransformer {
-	PossiblyReaching<false> reaching;
+	ReachingTable reaching;
 
-	StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *phi,
-							  bool *done_something)
+	StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
+						     bool *done_something)
 	{
-		assert(phi->generations.size() != 0);
-		std::set<unsigned> generations;
-		reaching.findReachingGenerations(phi, phi->reg, generations);
-		for (auto it = phi->generations.begin(); it != phi->generations.end(); ) {
-			if (!generations.count(it->first)) {
+		StateMachineSideEffect *se = smse->getSideEffect();
+		if (se && se->type == StateMachineSideEffect::Phi) {
+			StateMachineSideEffectPhi *phi =
+				(StateMachineSideEffectPhi *)smse;
+			const std::set<unsigned> &generations(reaching.getEntryReaching(smse).get(phi->reg));
+			std::vector<std::pair<unsigned, IRExpr *> > newGenerations;
+			newGenerations.reserve(phi->generations.size());
+			for (auto it = phi->generations.begin();
+			     it != phi->generations.end();
+			     it++) {
+				if (generations.count(it->first))
+					newGenerations.push_back(*it);
+			}
+			if (newGenerations.size() < phi->generations.size()) {
 				*done_something = true;
-				it = phi->generations.erase(it);
-			} else {
-				it++;
+				return new StateMachineSideEffecting(
+					smse->origin,
+					new StateMachineSideEffectPhi(
+						phi->reg,
+						newGenerations),
+					smse->target);
 			}
 		}
-		assert(phi->generations.size() != 0);
-		return phi;
+		return smse;
 	}
 	IRExpr *transformIRExpr(IRExpr *e, bool *b) { return NULL; }
 public:
 	optimiseSSATransformer(StateMachine *inp)
-		: reaching(inp, ImportRegTable(inp))
+		: reaching(inp)
 	{}
 };
 
