@@ -331,7 +331,6 @@ public:
 	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 					    std::set<StateMachineState *> &done) = 0;
 	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
-	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
 	bool canCrash(std::set<const StateMachineState *> &memo) const {
 		if (memo.insert(this).second)
 			return _canCrash(memo);
@@ -386,7 +385,6 @@ protected:
 public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
-	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
 	NAMED_CLASS
@@ -402,7 +400,6 @@ public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	void targets(std::vector<StateMachineState *> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
@@ -474,7 +471,6 @@ public:
 
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
 				    std::set<StateMachineState *> &done);
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt);
 	void targets(std::vector<StateMachineState *> &out) { out.push_back(target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
@@ -521,7 +517,6 @@ public:
 	}
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
 				    std::set<StateMachineState *> &);
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt);
 	void targets(std::vector<StateMachineState *> &out) {
 		out.push_back(falseTarget);
 		out.push_back(trueTarget);
@@ -566,7 +561,6 @@ public:
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &hv) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
 	bool definesRegister(threadAndRegister &reg) const {
@@ -614,7 +608,6 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		sanityCheckIRExpr(data, live);
@@ -660,7 +653,6 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
 	}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = target;
 		return true;
@@ -686,7 +678,6 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 	}
@@ -713,7 +704,6 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 		assert(value->type() == Ity_I1);
@@ -776,7 +766,6 @@ public:
 	void visit(HeapVisitor &hv) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		assert(generations.size() != 0);
 	}

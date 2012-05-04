@@ -10,8 +10,6 @@
 
 #include "libvex_parse.h"
 
-static void findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
@@ -123,14 +121,6 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 	return this;
 }
 
-void
-StateMachineBifurcate::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	trueTarget->findUsedRegisters(s, opt);
-	falseTarget->findUsedRegisters(s, opt);
-	::findUsedRegisters(condition, s, opt);
-}
-
 StateMachineSideEffect *
 StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
@@ -155,12 +145,6 @@ StateMachineSideEffectStore::updateLoadedAddresses(std::set<IRExpr *> &l, const 
 			it++;
 	}
 }
-void
-StateMachineSideEffectStore::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	::findUsedRegisters(addr, s, opt);
-	::findUsedRegisters(data, s, opt);
-}
 
 void
 StateMachineSideEffectLoad::constructed()
@@ -181,12 +165,6 @@ StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, Oracle *
 	constructed();
 	return this;
 }
-void
-StateMachineSideEffectLoad::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	s.erase(target);
-	::findUsedRegisters(addr, s, opt);
-}
 
 StateMachineSideEffect *
 StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
@@ -197,12 +175,6 @@ StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, Oracle *
 		return StateMachineSideEffectUnreached::get();
 	}
 	return this;
-}
-void
-StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	s.erase(target);
-	::findUsedRegisters(value, s, opt);
 }
 
 StateMachineSideEffect *
@@ -215,11 +187,6 @@ StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, O
 		return StateMachineSideEffectUnreached::get();
 	}
 	return this;
-}
-void
-StateMachineSideEffectAssertFalse::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	::findUsedRegisters(value, s, opt);
 }
 
 struct availEntry {
@@ -238,23 +205,6 @@ struct availEntry {
 		return false;
 	}
 };
-
-static void
-findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::fullCompare> &out, const AllowableOptimisations &opt)
-{
-	class _ : public IRExprTransformer {
-	public:
-		std::set<threadAndRegister, threadAndRegister::fullCompare> &out;
-		_(std::set<threadAndRegister, threadAndRegister::fullCompare> &_out)
-			: out(_out)
-		{}
-		IRExpr *transformIex(IRExprGet *e) {
-			out.insert(e->reg);
-			return IRExprTransformer::transformIex(e);
-		}
-	} t(out);
-	t.doit(e);
-}
 
 static void
 buildStateLabelTable(const StateMachine *sm,
@@ -873,14 +823,6 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, Oracle *o
 	}
 	target = target->optimise(opt, oracle, done_something, fv, done);
 	return this;
-}
-
-void
-StateMachineSideEffecting::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	target->findUsedRegisters(s, opt);
-	if (sideEffect)
-		sideEffect->findUsedRegisters(s, opt);
 }
 
 template <typename t, typename s> static bool
