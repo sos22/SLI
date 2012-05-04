@@ -10,11 +10,10 @@
 #ifdef NDEBUG
 #define dump_avail_table 0 /* Dump the available expression table
 			    * after we build it */
-#define debug_build_table 0 /* Debug to do with building the table */
 #define debug_substitutions 0 /* Debug to do with actually using the
 				 table. */
 #else
-static int dump_avail_table = 0, debug_build_table = 0, debug_substitutions = 0;
+static int dump_avail_table = 0, debug_substitutions = 0;
 #endif
 
 namespace _availExpressionAnalysis {
@@ -449,7 +448,6 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
 		outputAvail.insertSideEffect(smsec);
-		outputAvail.invalidateRegister(smsec->target, smsec);
 		break;
 	}
 	case StateMachineSideEffect::Load: {
@@ -457,7 +455,6 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		outputAvail.insertSideEffect(smsel);
 		outputAvail.dereference(smsel->addr, opt);
-		outputAvail.invalidateRegister(smsel->target, smsel);
 		break;
 	}
 	case StateMachineSideEffect::AssertFalse: {
@@ -472,11 +469,14 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		StateMachineSideEffectPhi *p =
 			(StateMachineSideEffectPhi *)smse;
 		outputAvail.insertSideEffect(p);
-		outputAvail.invalidateRegister(p->reg, smse);
 		break;
 	}
 		
 	}
+
+	threadAndRegister r(threadAndRegister::invalid());
+	if (smse->definesRegister(r))
+		outputAvail.invalidateRegister(r, smse);
 }
 
 class applyAvailTransformer : public IRExprTransformer {
@@ -533,7 +533,7 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *aliasing,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels
+	std::map<const StateMachineState *, int> &edgeLabels
 	);
 static StateMachineSideEffect *
 buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
@@ -745,45 +745,6 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 	return newEffect;
 }
 
-static StateMachineEdge *
-buildNewStateMachineWithLoadsEliminated(
-	StateMachineEdge *sme,
-	const avail_t &initialAvail,
-	std::map<StateMachineState *, avail_t> &availMap,
-	std::map<StateMachineState *, StateMachineState *> &memo,
-	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration *aliasing,
-	Oracle *oracle,
-	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels
-)
-{
-	if (TIMEOUT)
-		return sme;
-	StateMachineState *target =
-		buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
-							done_something, edgeLabels);
-
-	avail_t currentlyAvailable(initialAvail);
-	currentlyAvailable.calcRegisterMap(opt);
-
-	if (debug_substitutions) {
-		printf("Looking at edge %d\n", edgeLabels[sme]);
-		printf("Available:\n");
-		currentlyAvailable.print(stdout);
-	}
-
-	StateMachineSideEffect *newEffect;
-	newEffect = NULL;
-	if (sme->sideEffect)
-		newEffect = buildNewStateMachineWithLoadsEliminated(sme->sideEffect,
-								    currentlyAvailable,
-								    oracle,
-								    done_something,
-								    aliasing,
-								    opt);
-	return new StateMachineEdge(newEffect, target);
-}
 static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachineState *sm,
@@ -793,7 +754,7 @@ buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels)
+	std::map<const StateMachineState *, int> &edgeLabels)
 {
 	if (sm->isTerminal())
 		return sm;
@@ -813,25 +774,27 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineBifurcate(
 			sm->origin,
 			applyAvailSet(avail, smb->condition, true, &doit, opt),
-			(StateMachineEdge *)NULL, NULL);
+			NULL, NULL);
 		*done_something |= doit;
 		memo[sm] = res;
 		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->trueTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something, edgeLabels);
+			smb->trueTarget,
+			availMap,
+			memo,
+			opt,
+			alias,
+			oracle,
+			done_something,
+			edgeLabels);
 		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->falseTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something, edgeLabels);
-		return res;
-	}
-	case StateMachineState::Proxy: {
-		StateMachineProxy *smp = (StateMachineProxy *)sm;
-		StateMachineProxy *res;
-		res = new StateMachineProxy(sm->origin, (StateMachineEdge *)NULL);
-		memo[sm] = res;
-		res->target = buildNewStateMachineWithLoadsEliminated(
-			smp->target, avail, availMap, memo, opt, alias, oracle,
-			done_something, edgeLabels);
+			smb->falseTarget,
+			availMap,
+			memo,
+			opt,
+			alias,
+			oracle,
+			done_something,
+			edgeLabels);
 		return res;
 	}
 	case StateMachineState::SideEffecting: {
@@ -839,16 +802,19 @@ buildNewStateMachineWithLoadsEliminated(
 		StateMachineSideEffecting *res;
 		StateMachineSideEffect *newEffect;
 		avail.calcRegisterMap(opt);
-		newEffect = buildNewStateMachineWithLoadsEliminated(smp->sideEffect,
-								    avail,
-								    oracle,
-								    done_something,
-								    alias,
-								    opt);
+		if (smp->sideEffect)
+			newEffect = buildNewStateMachineWithLoadsEliminated(smp->sideEffect,
+									    avail,
+									    oracle,
+									    done_something,
+									    alias,
+									    opt);
+		else
+			newEffect = NULL;
 		res = new StateMachineSideEffecting(sm->origin, newEffect, NULL);
 		memo[sm] = res;
 		res->target = buildNewStateMachineWithLoadsEliminated(
-			smp->target, avail, availMap, memo, opt, alias, oracle,
+			smp->target, availMap, memo, opt, alias, oracle,
 			done_something, edgeLabels);
 		return res;
 	}
@@ -869,7 +835,7 @@ buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels)
+	std::map<const StateMachineState *, int> &edgeLabels)
 {
 	std::map<StateMachineState *, StateMachineState *> memo;
 	bool d = false;
@@ -928,8 +894,8 @@ availExpressionAnalysis(StateMachine *sm,
 			Oracle *oracle,
 			bool *done_something)
 {
-	std::map<const StateMachineEdge *, int> edgeLabels;
-	if (dump_avail_table || debug_build_table || debug_substitutions) {
+	std::map<const StateMachineState *, int> edgeLabels;
+	if (dump_avail_table || debug_substitutions) {
 		printf("Avail analysis on state machine:\n");
 		printStateMachine(sm, stdout, edgeLabels);
 	}
@@ -957,120 +923,44 @@ availExpressionAnalysis(StateMachine *sm,
 	 * start of the very first state nothing is available, and
 	 * then use a Tarski iteration to make everything
 	 * consistent. */
-	std::set<StateMachineEdge *> allEdges;
 	std::set<StateMachineState *> allStates;
-	findAllEdges(sm, allEdges);
 	findAllStates(sm, allStates);
 	std::map<StateMachineState *, avail_t> availOnEntry;
-	std::map<StateMachineEdge *, avail_t> availOnExit;
-	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
-	     !TIMEOUT && it != allEdges.end();
-	     it++)
-		availOnExit[*it] = potentiallyAvailable;
-	for (std::set<StateMachineState *>::iterator it = allStates.begin();
+	for (auto it = allStates.begin();
 	     !TIMEOUT && it != allStates.end();
 	     it++)
 		availOnEntry[*it] = potentiallyAvailable;
 	availOnEntry[sm->root].clear();
 
-	if (debug_build_table) {
-		printf("Initial state exit availability map:\n");
-		for (auto it = availOnExit.begin();
-		     it != availOnExit.end();
-		     it++) {
-			printf("Edge %d:\n", edgeLabels[it->first]);
-			it->second.print(stdout);
-		}
-	}
-	std::set<StateMachineState *> statesNeedingRefresh(allStates);
-	std::set<StateMachineEdge *> edgesNeedingRefresh(allEdges);
+	std::queue<StateMachineState *> statesNeedingRefresh;
 
 	/* Tarski iteration.  */
-	statesNeedingRefresh.insert(sm->root);
-	while (1) {
-		if (TIMEOUT)
-			return sm;
+	for (auto it = allStates.begin(); it != allStates.end(); it++)
+		statesNeedingRefresh.push(*it);
+	while (!statesNeedingRefresh.empty() && !TIMEOUT) {
+		StateMachineState *state = statesNeedingRefresh.front();
+		statesNeedingRefresh.pop();
 
-		if (debug_build_table)
-			printf("Start table building pass\n");
-
-		if (statesNeedingRefresh.empty())
-			break;
-
-		/* Now go through and update the avail-on-exit set.
-		   Use a slightly weird-looking iteration over states
-		   instead of over edges because that makes things a
-		   bit easier. */
-		for (std::set<StateMachineState *>::iterator it = statesNeedingRefresh.begin();
-		     it != statesNeedingRefresh.end();
-		     it++) {
-			std::vector<StateMachineEdge *> edges;
-			(*it)->targets(edges);
-			for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
-				StateMachineEdge *edge = *it2;
-				assert(availOnEntry.count(*it));
-				avail_t outputAvail(availOnEntry[*it]);
-
-				if (debug_build_table)
-					printf("Consider edge %d\n", edgeLabels[edge]);
-#warning Why not introduce an assertion on the relevant edge?
-
-				/* Build the output set. */
-				if (edge->sideEffect)
-					updateAvailSetForSideEffect(outputAvail, edge->sideEffect,
-								    opt, alias, oracle);
-				if (availOnExit[edge].merge(outputAvail, opt, is_ssa)) {
-					if (debug_build_table)
-						printf("Made progress; edge %d needs refresh\n",
-						       edgeLabels[edge]);
-					edgesNeedingRefresh.insert(edge);
-				} else if (debug_build_table) {
-					printf("State is unchanged\n");
-				}
-			}
+		avail_t outputAvail(availOnEntry[state]);
+		if ( state->type == StateMachineState::SideEffecting ) {
+			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
+			if (se)
+				updateAvailSetForSideEffect(outputAvail, se, opt,
+							    alias, oracle);
 		}
-		statesNeedingRefresh.clear();
 
-		if (edgesNeedingRefresh.empty())
-			break;
-
-		/* Update the set of things which are available on
-		   entry.  This means walking the set of edges and
-		   looking at the targets.  If there's something which
-		   is available at the start of the target, but not at
-		   the end of this edge, remove it from the target. */
-		for (std::set<StateMachineEdge *>::iterator it = edgesNeedingRefresh.begin();
-		     it != edgesNeedingRefresh.end();
-		     it++) {
-			StateMachineEdge *edge = *it;
-			if (debug_build_table)
-				printf("Refresh edge %d\n",
-				       edgeLabels[*it]);
-			StateMachineState *target = edge->target;
-			avail_t &avail_at_end_of_edge(availOnExit[edge]);
-			avail_t &avail_at_start_of_target(availOnEntry[target]);
-			if (avail_at_start_of_target.merge(avail_at_end_of_edge, opt, is_ssa))
-				statesNeedingRefresh.insert(target);
-		}
-		edgesNeedingRefresh.clear();
-
-		if (debug_build_table) {
-			printf("Availability at end of pass:\n");
-			for (auto it = availOnExit.begin();
-			     it != availOnExit.end();
-			     it++) {
-				printf("Edge %d:\n", edgeLabels[it->first]);
-				it->second.print(stdout);
-				printf("State entry availability:\n");
-				availOnEntry[it->first->target].print(stdout);
-			}
+		std::vector<StateMachineState *> edges;
+		state->targets(edges);
+		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
+			if (availOnEntry[*it2].merge(outputAvail, opt, is_ssa))
+				statesNeedingRefresh.push(*it2);
 		}
 	}
 
 	if (dump_avail_table) {
-		printf("Final (edge exit) availability map:\n");
-		for (auto it = availOnExit.begin();
-		     it != availOnExit.end();
+		printf("Final entry availability map:\n");
+		for (auto it = availOnEntry.begin();
+		     it != availOnEntry.end();
 		     it++) {
 			printf("Edge %d:\n", edgeLabels[it->first]);
 			it->second.print(stdout);

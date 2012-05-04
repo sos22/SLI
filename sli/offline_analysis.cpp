@@ -176,70 +176,10 @@ findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
 	findAllTypedSideEffects(sm, out);
 }
 
-class findAllEdgesVisitor : public StateMachineTransformer {
-	StateMachineEdge *transformOneEdge(StateMachineEdge *x, bool *)
-	{
-		out.insert(x);
-		return NULL;
-	}
-	StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *, bool *)
-	{
-		/* This should never be invoked, because we stop the
-		   traversal in transformOneEdge. */
-		abort();
-	}
-	IRExpr *transformIRExpr(IRExpr *e, bool *)
-	{
-		return e;
-	}
-public:
-	std::set<StateMachineEdge *> &out;
-	findAllEdgesVisitor(std::set<StateMachineEdge *> &o)
-		: out(o)
-	{}
-};
-void
-findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out)
-{
-	findAllEdgesVisitor v(out);
-	v.transform(sm);
-}
-
-class findAllStatesVisitor : public StateMachineTransformer {
-	StateMachineState *transformState(StateMachineState *s, bool *)
-	{
-		out.insert(s);
-		return NULL;
-	}
-	StateMachineEdge *transformOneEdge(StateMachineEdge *e, bool *)
-	{
-		return NULL;
-	}
-	void transformFreeVariables(FreeVariableMap *fvm, bool *done_something)
-	{
-		return;
-	}
-	IRExpr *transformIRExpr(IRExpr *e, bool *)
-	{
-		/* We shouldn't get here: transformOneState() stops it
-		   looking in state conditions, transformOneEdge()
-		   stops it looking in side-effects, and
-		   transformFreeVariables() stops it looking in the
-		   free variable map, and there shouldn't be anywhere
-		   else for free variables to be hiding. */
-		abort();
-	}
-public:
-	std::set<StateMachineState *> &out;
-	findAllStatesVisitor(std::set<StateMachineState *> &o)
-		: out(o)
-	{}
-};
 void
 findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 {
-	findAllStatesVisitor v(out);
-	v.transform(sm);
+	enumStates(sm, &out);
 }
 
 static void
@@ -264,8 +204,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 				IRExpr_Const(
 					IRConst_U64(delta)),
 				NULL));
-	StateMachineEdge *e = new StateMachineEdge(smse, sm->root);
-	sm->root = new StateMachineProxy(sm->origin, e);
+	sm->root = new StateMachineSideEffecting(sm->origin, smse, sm->root);
 }
 
 /* Find all of the states which definitely reach <survive> rather than
@@ -302,22 +241,19 @@ removeSurvivingStates(StateMachine *sm, bool *done_something)
 		}
 	} while (progress);
 
-	StateMachineEdge *noCrashEdge = NULL;
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *s = *it;
 		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s);
 		if (!smb)
 			continue;
-		if (smb->trueTarget->target != StateMachineNoCrash::get() &&
-		    survivingStates.count(smb->trueTarget->target)) {
-			if (!noCrashEdge) noCrashEdge = new StateMachineEdge(StateMachineNoCrash::get());
-			smb->trueTarget = noCrashEdge;
+		if (smb->trueTarget != StateMachineNoCrash::get() &&
+		    survivingStates.count(smb->trueTarget)) {
+			smb->trueTarget = StateMachineNoCrash::get();
 			*done_something = true;
 		}
-		if (smb->falseTarget->target != StateMachineNoCrash::get() &&
-		    survivingStates.count(smb->falseTarget->target)) {
-			if (!noCrashEdge) noCrashEdge = new StateMachineEdge(StateMachineNoCrash::get());
-			smb->falseTarget = noCrashEdge;
+		if (smb->falseTarget != StateMachineNoCrash::get() &&
+		    survivingStates.count(smb->falseTarget)) {
+			smb->falseTarget = StateMachineNoCrash::get();
 			*done_something = true;
 		}
 	}
@@ -354,8 +290,10 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		done_something = false;
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
+		sm->sanityCheck();
 		if (opt.ignoreSideEffects())
 			removeSurvivingStates(sm, &done_something);
+		sm->sanityCheck();
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &done_something);
@@ -364,7 +302,10 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			bool d;
 			do {
 				d = false;
-				sm = deadCodeElimination(sm, &d);
+				sm->sanityCheck();
+				StateMachine *smp = deadCodeElimination(sm, &d);
+				smp->sanityCheck();
+				sm = smp;
 				done_something |= d;
 			} while (d);
 		}
@@ -377,7 +318,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			sm = optimiseFreeVariables(sm, &done_something);
 			sm->assertAcyclic();
 		}
-		sm = optimiseSSA(sm, &done_something);
+		if (is_ssa)
+			sm = optimiseSSA(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
 	} while (done_something);
 	sm->sanityCheck();
@@ -1144,11 +1086,10 @@ CFGtoCrashReason(unsigned tid,
 			return MemoryAccessIdentifier(rip, it->second++);
 		}
 
-		StateMachineEdge *backtrackOneStatement(IRStmt *stmt,
-							const ThreadRip &rip,
-							CFGNode *branchTarget,
-							StateMachineEdge *edge,
-							StateMachineState ***final) {
+		StateMachineState *backtrackOneStatement(IRStmt *stmt,
+							 const ThreadRip &rip,
+							 CFGNode *branchTarget,
+							 StateMachineState *fallThrough) {
 			StateMachineSideEffect *se = NULL;
 			switch (stmt->tag) {
 			case Ist_NoOp:
@@ -1204,19 +1145,19 @@ CFGtoCrashReason(unsigned tid,
 						new StateMachineBifurcate(
 							rip.rip,
 							((IRStmtExit *)stmt)->guard,
-							new StateMachineEdge(NULL),
-							edge);
-					assert(smb->trueTarget);
-					state.addReloc(&smb->trueTarget->target, branchTarget);
-					edge = new StateMachineEdge(smb);
+							NULL,
+							fallThrough);
+					state.addReloc(&smb->trueTarget, branchTarget);
+					return smb;
 				} else {
 					/* We've decided to ignore this branch */
 				}
 				break;
 			}
 			if (se)
-				edge->prependSideEffect(rip.rip, se, final);
-			return edge;
+				return new StateMachineSideEffecting(rip.rip, se, fallThrough);
+			else
+				return fallThrough;
 		}
 
 		StateMachineState *buildStateForCallInstruction(CFGNode *cfg,
@@ -1258,7 +1199,14 @@ CFGtoCrashReason(unsigned tid,
 				r = IRExpr_ClientCallFailed(irsb->next_nonconst);
 			}
 
-			std::vector<StateMachineSideEffect *> sideEffects;
+			StateMachineSideEffecting *lastState =
+				new StateMachineSideEffecting(
+					site.rip,
+					new StateMachineSideEffectCopy(
+						threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
+						r),
+					NULL);
+			StateMachineState *headState = lastState;
 
 			/* Pick up any temporaries calculated during
 			 * the call instruction. */
@@ -1276,12 +1224,15 @@ CFGtoCrashReason(unsigned tid,
 				if (stmt->tag == Ist_Dirty) {
 					IRDirty *details = ((IRStmtDirty *)stmt)->details;
 					if (!strcmp(details->cee->name, "helper_load_64")) {
-						sideEffects.push_back(
-							new StateMachineSideEffectLoad(
-								details->tmp,
-								details->args[0],
-								getAccessIdentifier(site),
-								Ity_I64));
+						headState =
+							new StateMachineSideEffecting(
+								site.rip,
+								new StateMachineSideEffectLoad(
+									details->tmp,
+									details->args[0],
+									getAccessIdentifier(site),
+									Ity_I64),
+								headState);
 					} else {
 						/* Other dirty calls
 						   inside a call
@@ -1294,17 +1245,11 @@ CFGtoCrashReason(unsigned tid,
 				}
 			}
 
-			sideEffects.push_back(
-				new StateMachineSideEffectCopy(
-					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
-					r));
-			StateMachineEdge *edge = new StateMachineEdge(sideEffects, site.rip, NULL);
 			if (cfg->fallThrough)
-				state.addReloc(&edge->target, cfg->fallThrough);
+				state.addReloc(&lastState->target, cfg->fallThrough);
 			else
-				edge->target = escapeState;
-			StateMachineProxy *smp = new StateMachineProxy(site.rip, edge);
-			return smp;
+				lastState->target = escapeState;
+			return headState;
 		}
 	public:
 		bool simple_calls;
@@ -1332,24 +1277,23 @@ CFGtoCrashReason(unsigned tid,
 			     endOfInstr < irsb->stmts_used && irsb->stmts[endOfInstr]->tag != Ist_IMark;
 			     endOfInstr++)
 				;
-			StateMachineEdge *edge;
-			StateMachineState **finalEdge;
+			if (endOfInstr == irsb->stmts_used &&
+			    irsb->jumpkind == Ijk_Call &&
+			    !cfg->branch)
+				return buildStateForCallInstruction(cfg, irsb, rip);
 			CFGNode *relocTo;
+			StateMachineSideEffecting *lastState =
+				new StateMachineSideEffecting(
+					rip.rip,
+					NULL,
+					NULL);
+			StateMachineState *res = lastState;
+			
 			if (endOfInstr == irsb->stmts_used && irsb->jumpkind == Ijk_Call) {
-				/* This is a call node, which requires
-				 * special handling. */
-				if (cfg->branch) {
-					/* We want to inline this
-					 * call, in effect. */
-					edge = new StateMachineEdge(NULL);
-					relocTo = cfg->branch;
-					finalEdge = &edge->target;
-				} else {
-					return buildStateForCallInstruction(cfg, irsb, rip);
-				}
+				/* We want to inline this call, in
+				 * effect. */
+				relocTo = cfg->branch;
 			} else {
-				edge = new StateMachineEdge(NULL);
-				finalEdge = &edge->target;
 				if (!cfg->fallThrough && cfg->branch) {
 					/* We've decided to force this one to take the
 					   branch.  Trim the bit of the instruction
@@ -1368,19 +1312,18 @@ CFGtoCrashReason(unsigned tid,
 			}
 
 			for (int i = endOfInstr - 1; i >= 0; i--) {
-				edge = backtrackOneStatement(irsb->stmts[i],
-							     rip,
-							     cfg->branch,
-							     edge,
-							     &finalEdge);
-				if (!edge)
+				res = backtrackOneStatement(irsb->stmts[i],
+							    rip,
+							    cfg->branch,
+							    res);
+				if (!res)
 					return NULL;
 			}
 			if (relocTo)
-				state.addReloc(finalEdge, relocTo);
+				state.addReloc(&lastState->target, relocTo);
 			else
-				*finalEdge = escapeState;
-			return new StateMachineProxy(rip.rip, edge);
+				lastState->target = escapeState;
+			return res;
 		}
 	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle, accessGenerationNumbers);
 
@@ -1488,14 +1431,14 @@ checkWhetherInstructionCanCrash(const VexRip &rip,
 				FixConsumer &df,
 				GarbageCollectionToken token)
 {
-	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), rip), thr));
+	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), rip), thr));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
 	}
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(rip, new StateMachineProxy(rip, proximal));
+	ii->set(rip, proximal);
 
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, rip);

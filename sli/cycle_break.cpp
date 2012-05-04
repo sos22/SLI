@@ -19,9 +19,9 @@ namespace _cycle_break {
 
 class reachabilityMap {
 public:
-	std::map<StateMachineEdge *,
-		 std::set<StateMachineEdge *> > content;
-	std::vector<StateMachineEdge *> edges;
+	std::map<StateMachineState *,
+		 std::set<StateMachineState *> > content;
+	std::vector<StateMachineState *> edges;
 
 	struct extendPathsRes {
 		bool finished;
@@ -32,18 +32,14 @@ public:
 		extendPathsRes res;
 		res.finished = false;
 		res.haveCycle = false;
-		if (s->root->type != StateMachineState::Proxy)
-			s->root = new StateMachineProxy(s->origin, s->root);
-		std::set<StateMachineEdge *> allEdges;
-		findAllEdges(s, allEdges);
+		std::set<StateMachineState *> allStates;
+		findAllStates(s, allStates);
 		content.clear();
-		for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
-			StateMachineEdge *e = *it;
-			std::set<StateMachineEdge *> &contentE(content[e]);
+		for (auto it = allStates.begin(); it != allStates.end(); it++) {
+			StateMachineState *e = *it;
+			std::set<StateMachineState *> &contentE(content[e]);
 			contentE.clear();
-			StateMachineState *s = e->target;
-			assert(s);
-			s->targets(contentE);
+			e->targets(contentE);
 			if (contentE.count(e))
 				res.haveCycle = true;
 		}
@@ -63,29 +59,26 @@ public:
 void
 reachabilityMap::buildEdgeList(StateMachine *s)
 {
-	std::queue<StateMachineEdge *> q;
+	std::queue<StateMachineState *> q;
 
 	/* This is just @edges as a set rather than a vector, but
 	   that's handy, because we need a fast membership test. */
-	std::set<StateMachineEdge *> visited;
+	std::set<StateMachineState *> visited;
 
 	/* Start clean */
 	edges.clear();
 
-	assert(s->root->type == StateMachineState::Proxy);
-	q.push(((StateMachineProxy *)s->root)->target);
+	q.push(s->root);
 	while (!q.empty()) {
-		StateMachineEdge *e = q.front();
+		StateMachineState *e = q.front();
 		q.pop();
 		if (visited.count(e))
 			continue;
 		visited.insert(e);
 
 		edges.push_back(e);
-		StateMachineState *s = e->target;
-		assert(s);
 
-		s->targets(q);
+		e->targets(q);
 	}
 }
 
@@ -95,21 +88,21 @@ reachabilityMap::extendPaths(void)
 	bool progress;
 	bool haveCycle;
 
-	std::map<StateMachineEdge *, std::set<StateMachineEdge *> > newContent(content);
+	std::map<StateMachineState *, std::set<StateMachineState *> > newContent(content);
 	progress = false;
 	haveCycle = false;
 	for (auto it = newContent.begin(); it != newContent.end(); it++) {
-		StateMachineEdge *e = it->first;
-		std::set<StateMachineEdge *> &reachableByUs(it->second);
+		StateMachineState *e = it->first;
+		std::set<StateMachineState *> &reachableByUs(it->second);
 
 		struct {
 			void operator()(reachabilityMap *_this,
-					std::set<StateMachineEdge *> &reachableByUs,
-					StateMachineEdge *src,
-					StateMachineEdge *dest,
+					std::set<StateMachineState *> &reachableByUs,
+					StateMachineState *src,
+					StateMachineState *dest,
 					bool &haveCycle,
 					bool &progress) {
-				std::set<StateMachineEdge *> &reachableByDest(_this->content[dest]);
+				std::set<StateMachineState *> &reachableByDest(_this->content[dest]);
 				for (auto it2 = reachableByDest.begin();
 				     it2 != reachableByDest.end();
 				     it2++) {
@@ -121,10 +114,8 @@ reachabilityMap::extendPaths(void)
 				}
 			}
 		} doEdge;
-		assert(e->target);
-		StateMachineState *s = e->target;
-		std::vector<StateMachineEdge *> edges;
-		s->targets(edges);
+		std::vector<StateMachineState *> edges;
+		e->targets(edges);
 		for (auto it = edges.begin(); it != edges.end(); it++)
 			doEdge(this, reachableByUs, e, *it, haveCycle,
 			       progress);
@@ -144,7 +135,7 @@ void
 reachabilityMap::breakCycle(void)
 {
 	for (auto it = edges.rbegin(); it != edges.rend(); it++) {
-		StateMachineEdge *e = *it;
+		StateMachineState *e = *it;
 		if (content[e].count(e)) {
 			/* This edge can reach itself, and is
 			   therefore part of a cycle.  Furthermore, we
@@ -154,7 +145,27 @@ reachabilityMap::breakCycle(void)
 			   those furthest from the root considered
 			   first).  It is therefore a good choice for
 			   a cycle breaking edge. */
-			e->target = StateMachineUnreached::get();
+			switch (e->type) {
+			case StateMachineState::Bifurcate: {
+				StateMachineBifurcate *smb = (StateMachineBifurcate *)e;
+				smb->trueTarget =
+					smb->falseTarget =
+					StateMachineUnreached::get();
+				break;
+			}
+			case StateMachineState::SideEffecting: {
+				((StateMachineSideEffecting *)e)->target =
+					StateMachineUnreached::get();
+				break;
+			}
+			case StateMachineState::Unreached:
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
+			case StateMachineState::Stub:
+				/* These can't be part of a cycle, as
+				   they have no outgoing edges. */
+				abort();
+			}
 
 			/* Only want to break one cycle on each
 			   iteration, as otherwise the various maps

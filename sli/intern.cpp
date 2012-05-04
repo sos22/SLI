@@ -8,14 +8,12 @@
 
 struct internStateMachineTable : public internIRExprTable {
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
-	std::map<StateMachineEdge *, StateMachineEdge *> edges;
 	std::map<StateMachineState *, StateMachineState *> states;
 	std::set<StateMachineSideEffectStore *> stores;
 	std::set<StateMachineSideEffectLoad *> loads;
 	std::set<StateMachineSideEffectCopy *> copies;
 	std::set<StateMachineSideEffectPhi *> phis;
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
-	std::set<StateMachineProxy *> states_proxy;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
 	std::set<StateMachineSideEffecting *> states_side_effect;
@@ -383,27 +381,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 
 static StateMachineState *internStateMachineState(StateMachineState *start, internStateMachineTable &t);
 
-static StateMachineEdge *
-internStateMachineEdge(StateMachineEdge *start, internStateMachineTable &t)
-{
-	if (TIMEOUT)
-		return start;
-	if (t.edges.count(start))
-		return t.edges[start];
-	start->target = internStateMachineState(start->target, t);
-	if (start->sideEffect)
-		start->sideEffect = internStateMachineSideEffect(start->sideEffect, t);
-	for (auto it = t.edges.begin(); it != t.edges.end(); it++) {
-		StateMachineEdge *o = it->second;
-		if (o->eq(start)) {
-			t.edges[start] = o;
-			return o;
-		}
-	}
-	t.edges[start] = start;
-	return start;
-}
-
 static StateMachineState *
 internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 {
@@ -416,25 +393,11 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 	case StateMachineState::Unreached:
 		t.states[start] = start;
 		return start;
-	case StateMachineState::Proxy: {
-		StateMachineProxy *smp = (StateMachineProxy *)start;
-		smp->target = internStateMachineEdge(smp->target, t);
-		for (auto it = t.states_proxy.begin();
-		     it != t.states_proxy.end();
-		     it++) {
-			if ((*it)->target == smp->target) {
-				t.states[start] = *it;
-				return *it;
-			}
-		}
-		t.states[start] = start;
-		t.states_proxy.insert(smp);
-		return start;
-	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)start;
-		smse->sideEffect = internStateMachineSideEffect(smse->sideEffect, t);
-		smse->target = internStateMachineEdge(smse->target, t);
+		if (smse->sideEffect)
+			smse->sideEffect = internStateMachineSideEffect(smse->sideEffect, t);
+		smse->target = internStateMachineState(smse->target, t);
 		for (auto it = t.states_side_effect.begin();
 		     it != t.states_side_effect.end();
 		     it++) {
@@ -451,8 +414,8 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
 		smb->condition = internIRExpr(smb->condition, t);
-		smb->trueTarget = internStateMachineEdge(smb->trueTarget, t);
-		smb->falseTarget = internStateMachineEdge(smb->falseTarget, t);
+		smb->trueTarget = internStateMachineState(smb->trueTarget, t);
+		smb->falseTarget = internStateMachineState(smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();
 		     it != t.states_bifurcate.end();
 		     it++) {

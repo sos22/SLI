@@ -694,47 +694,12 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	return true;
 }
 
-static bool
-smallStepEvalStateMachineEdge(StateMachine *thisMachine,
-			      StateMachineEdge *sme,
-			      bool *crashes,
-			      NdChooser &chooser,
-			      Oracle *oracle,
-			      const AllowableOptimisations &opt,
-			      StateMachineEvalContext &ctxt)
-{
-	bool valid = true;
-	if (sme->sideEffect)
-		valid &=
-			evalStateMachineSideEffect(thisMachine,
-						   sme->sideEffect,
-						   chooser,
-						   oracle,
-						   ctxt.state,
-						   ctxt.memLog, ctxt.collectOrderingConstraints,
-						   opt,
-						   &ctxt.pathConstraint,
-						   &ctxt.justPathConstraint);
-	if (!valid ||
-	    (ctxt.pathConstraint->tag == Iex_Const &&
-	     ((IRExprConst *)ctxt.pathConstraint)->con->Ico.U1 == 0)) {
-		/* We've found a contradiction.  That means that the
-		   original program would have crashed, *but* in a way
-		   other than the one which we're investigating.  We
-		   therefore treat that as no-crash and abort the
-		   run. */
-		*crashes = false;
-		return true;
-	}
-	return false;
-}
-
 /* Walk the state machine and figure out whether it's going to crash.
    If we hit something which we can't solve statically or via the
    oracle, ask the chooser which way we should go, and then emit a
    path constraint saying which way we went.  Stubs are assumed to
    never crash. */
-static StateMachineEdge *
+static StateMachineState *
 smallStepEvalStateMachine(StateMachine *rootMachine,
 			  StateMachineState *sm,
 			  bool *crashes,
@@ -756,8 +721,6 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 	case StateMachineState::Stub:
 		*crashes = false;
 		return NULL;
-	case StateMachineState::Proxy:
-		return ((StateMachineProxy *)sm)->target;
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
 		if (!evalStateMachineSideEffect(rootMachine,
@@ -802,24 +765,15 @@ bigStepEvalStateMachine(StateMachine *rootMachine,
 			StateMachineEvalContext &ctxt)
 {
 	while (1) {
-		StateMachineEdge *e = smallStepEvalStateMachine(rootMachine,
-								sm,
-								crashes,
-								chooser,
-								oracle,
-								opt,
-								ctxt);
-		if (!e)
+		sm = smallStepEvalStateMachine(rootMachine,
+					       sm,
+					       crashes,
+					       chooser,
+					       oracle,
+					       opt,
+					       ctxt);
+		if (!sm)
 			return;
-		if (smallStepEvalStateMachineEdge(rootMachine,
-						  e,
-						  crashes,
-						  chooser,
-						  oracle,
-						  opt,
-						  ctxt))
-			return;
-		sm = e->target;
 	}
 }
 
@@ -871,17 +825,15 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 class CrossEvalState {
 public:
 	StateMachine *rootMachine;
-	StateMachineEdge *currentEdge;
+	StateMachineState *currentState;
 	bool finished;
 	bool crashed;
 	threadState state;
-	bool skipThisSideEffect;
-	CrossEvalState(StateMachine *_rootMachine, StateMachineEdge *_e)
+	CrossEvalState(StateMachine *_rootMachine)
 		: rootMachine(_rootMachine),
-		  currentEdge(_e),
+		  currentState(_rootMachine->root),
 		  finished(false),
-		  crashed(false),
-		  skipThisSideEffect(false)
+		  crashed(false)
 	{}
 };
 
@@ -938,32 +890,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					     bool wantLoad)
 {
 	while (!TIMEOUT) {
-		StateMachineSideEffect *se = machine->currentEdge->sideEffect;
-		if (se && !machine->skipThisSideEffect) {
-			bool acceptable = se->type == StateMachineSideEffect::Store;
-			if (wantLoad)
-				acceptable |= se->type == StateMachineSideEffect::Load;
-			if (acceptable) {
-				StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
-				if (smea)
-					acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip.rip));
-			}
-			if (acceptable) {
-				machine->skipThisSideEffect = true;
-				return se;
-			}
-			if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-							collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
-				/* Found a contradiction -> get out */
-				machine->finished = true;
-				return NULL;
-			}
-			history.push_back(se);
-		}
-
-		machine->skipThisSideEffect = false;
-
-		StateMachineState *s = machine->currentEdge->target;
+		StateMachineState *s = machine->currentState;
 		switch (s->type) {
 		case StateMachineState::Unreached:
 			abort();
@@ -975,23 +902,18 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 		case StateMachineState::Stub:
 			machine->finished = true;
 			return NULL;
-		case StateMachineState::Proxy: {
-			StateMachineProxy *smp = (StateMachineProxy *)s;
-			machine->currentEdge = smp->target;
-			break;
-		}
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 			if (expressionIsTrue(smb->condition, chooser, machine->state, opt, &pathConstraint, &justPathConstraint))
-				machine->currentEdge = smb->trueTarget;
+				machine->currentState = smb->trueTarget;
 			else
-				machine->currentEdge = smb->falseTarget;
+				machine->currentState = smb->falseTarget;
 			break;
 		}
 		case StateMachineState::SideEffecting: {
 			StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
-			se = smse->sideEffect;
-			if (se) {
+			if (smse->sideEffect) {
+				StateMachineSideEffect *se = smse->sideEffect;
 				bool acceptable = se->type == StateMachineSideEffect::Store;
 				if (wantLoad)
 					acceptable |= se->type == StateMachineSideEffect::Load;
@@ -1001,7 +923,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 						acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip.rip));
 				}
 				if (acceptable) {
-					machine->currentEdge = smse->target;
+					machine->currentState = smse->target;
 					return se;
 				}
 				if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
@@ -1011,8 +933,8 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					return NULL;
 				}
 				history.push_back(se);
-				machine->currentEdge = smse->target;
 			}
+			machine->currentState = smse->target;
 		}
 		}
 	}
@@ -1089,8 +1011,6 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	probeMachine = optimiseStateMachine(probeMachine, loadMachineOpt, oracle,
 					    true, true, token);
 
-	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine->root));
-	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine->root));
 	while (!*mightCrash || !*mightSurvive) {
 		if (TIMEOUT)
 			return false;
@@ -1099,8 +1019,8 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 		CrossMachineEvalContext ctxt(probeMachineRacingInstructions, storeMachineRacingInstructions);
 		ctxt.pathConstraint = initialStateCondition;
-		CrossEvalState s1(probeMachine, probeEdge);
-		CrossEvalState s2(storeMachine, storeEdge);
+		CrossEvalState s1(probeMachine);
+		CrossEvalState s2(storeMachine);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
 		while (!TIMEOUT && !s1.finished && !s2.finished)
@@ -1136,11 +1056,10 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 struct findRemoteMacroSectionsState {
 	bool skipFirstSideEffect;
-	StateMachineEdge *writerEdge;
+	StateMachineState *writerState;
 	StateMachineEvalContext writerContext;
 	bool finished;
 	bool writer_failed;
-	StateMachineSideEffect *pendingSideEffect;
 
 	StateMachineSideEffectStore *advanceWriteMachine(StateMachine *writeMachine,
 							 NdChooser &chooser,
@@ -1156,36 +1075,8 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 {
 	StateMachineSideEffectStore *smses = NULL;
 
-	if (pendingSideEffect) {
-		if (!evalStateMachineSideEffect(writeMachine, pendingSideEffect, chooser, oracle, writerContext.state,
-						writerContext.memLog,
-						writerContext.collectOrderingConstraints,
-						opt, &writerContext.pathConstraint,
-						&writerContext.justPathConstraint)) {
-			writer_failed = true;
-			return NULL;
-		}
-		if (pendingSideEffect->type == StateMachineSideEffect::Store)
-			smses = (StateMachineSideEffectStore *)pendingSideEffect;
-		pendingSideEffect = NULL;
-	}
 	while (!TIMEOUT && !smses) {
-		StateMachineSideEffect *se = writerEdge->sideEffect;
-		if (se) {
-			if (se->type == StateMachineSideEffect::Store)
-				smses = (StateMachineSideEffectStore *)se;
-			if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
-							writerContext.memLog,
-							writerContext.collectOrderingConstraints, opt,
-							&writerContext.pathConstraint,
-							&writerContext.justPathConstraint)) {
-				/* Found a contradiction -> get out */
-				writer_failed = true;
-				return NULL;
-			}
-		}
-
-		StateMachineState *s = writerEdge->target;
+		StateMachineState *s = writerState;
 		switch (s->type) {
 		case StateMachineState::Unreached:
 			abort();
@@ -1196,26 +1087,19 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 		case StateMachineState::Stub:
 			finished = true;
 			return NULL;
-		case StateMachineState::Proxy: {
-			StateMachineProxy *smp = (StateMachineProxy *)s;
-			writerEdge = smp->target;
-			break;
-		}
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 			if (expressionIsTrue(smb->condition, chooser, writerContext.state, opt,
 					     &writerContext.pathConstraint, &writerContext.justPathConstraint))
-				writerEdge = smb->trueTarget;
+				writerState = smb->trueTarget;
 			else
-				writerEdge = smb->falseTarget;
+				writerState = smb->falseTarget;
 			break;
 		}
 		case StateMachineState::SideEffecting: {
 			StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
-			se = smse->sideEffect;
-			if (smses) {
-				pendingSideEffect = se;
-			} else {
+			StateMachineSideEffect *se = smse->sideEffect;
+			if (se) {
 				if (se->type == StateMachineSideEffect::Store)
 					smses = (StateMachineSideEffectStore *)se;
 				if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
@@ -1228,7 +1112,7 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 					return NULL;
 				}
 			}
-			writerEdge = smse->target;
+			writerState = smse->target;
 		}
 		}
 	}
@@ -1257,7 +1141,6 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 	__set_profiling(findRemoteMacroSections);
 	NdChooser chooser;
 
-	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine->root));
 	do {
 		if (TIMEOUT)
 			return false;
@@ -1268,8 +1151,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 		StateMachineSideEffectStore *sectionStart;
 
 		state.writerContext.pathConstraint = assumption;
-		state.writerEdge = writeStartEdge;
-		state.skipFirstSideEffect = false;
+		state.writerState = writeMachine->root;
 		sectionStart = NULL;
 		state.finished = false;
 		state.writer_failed = false;
@@ -1334,7 +1216,6 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 {
 	__set_profiling(fixSufficient);
 	NdChooser chooser;
-	VexPtr<StateMachineEdge, &ir_heap> writeStartEdge(new StateMachineEdge(writeMachine->root));
 
 	do {
 		if (TIMEOUT)
@@ -1347,7 +1228,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		findRemoteMacroSectionsState state;
 
 		state.writerContext.pathConstraint = assumption;
-		state.writerEdge = writeStartEdge;
+		state.writerState = writeMachine->root;
 		state.skipFirstSideEffect = false;
 		while (!TIMEOUT) {
 			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
@@ -1415,8 +1296,6 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 					   probeMachineRacingInstructions,
 					   storeMachineRacingInstructions);
 
-	VexPtr<StateMachineEdge, &ir_heap> probeEdge(new StateMachineEdge(probeMachine->root));
-	VexPtr<StateMachineEdge, &ir_heap> storeEdge(new StateMachineEdge(storeMachine->root));
 	while (1) {
 		if (TIMEOUT)
 			return;
@@ -1428,8 +1307,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		ctxt.collectOrderingConstraints = true;
 		ctxt.pathConstraint = initialStateCondition;
 		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		CrossEvalState s1(probeMachine, probeEdge);
-		CrossEvalState s2(storeMachine, storeEdge);
+		CrossEvalState s1(probeMachine);
+		CrossEvalState s2(storeMachine);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
 		while (!TIMEOUT && !s1.finished && !s2.finished)

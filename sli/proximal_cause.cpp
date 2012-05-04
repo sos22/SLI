@@ -6,7 +6,7 @@
 
 namespace ProximalCause {
 
-static StateMachineEdge *
+static StateMachineState *
 getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 {
 	IRSB *irsb;
@@ -17,66 +17,58 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 		   problem was an instruction fetch fault, and produce
 		   a proximal cause which says ``we always crash if we
 		   get to this RIP''. */
-		return new StateMachineEdge(StateMachineCrash::get());
+		return StateMachineCrash::get();
 	}
 
 	/* Successfully decoded the block -> build a state machine
 	   which does what we want of it.  This is a lot like a simple
 	   compiler from VEX intercode to our state machine model. */
-	StateMachineEdge *work = new StateMachineEdge(NULL);
-	StateMachineEdge *res = work;
+	StateMachineState *work = StateMachineNoCrash::get();
 
 	class _ {
 	public:
 		const ThreadRip &rip;
-		StateMachineEdge *&work;
+		StateMachineState *&work;
 		void operator()(IRExpr *condition, StateMachineState *target) {
-			StateMachineEdge *newEdge = new StateMachineEdge(NULL);
-			StateMachineBifurcate *smb = new StateMachineBifurcate(
+			work = new StateMachineBifurcate(
 				rip.rip,
 				condition,
-				new StateMachineEdge(target),
-				newEdge);
-			work->target = smb;
-			work = newEdge;			
+				target,
+				work);
 		}
-		_(const ThreadRip &_rip, StateMachineEdge *&_work)
+		_(const ThreadRip &_rip, StateMachineState *&_work)
 			: rip(_rip), work(_work)
 		{}
 	} conditionalBranch(rip, work);
 	struct _2 {
 		const ThreadRip &rip;
-		StateMachineEdge *&work;
+		StateMachineState *&work;
 		void operator()(StateMachineSideEffect *se) {
-			if (!work->sideEffect) {
-				work->sideEffect = se;
-			} else {
-				StateMachineEdge *newEdge =
-					new StateMachineEdge(se, NULL);
-				work->target = new StateMachineProxy(rip.rip, newEdge);
-				work = newEdge;
-			}
+			work = new StateMachineSideEffecting(
+				rip.rip,
+				se,
+				work);
 		}
-		_2(const ThreadRip &_rip, StateMachineEdge *&_work)
+		_2(const ThreadRip &_rip, StateMachineState *&_work)
 			: rip(_rip), work(_work)
 		{}
-	} appendSideEffect(rip, work);
-	for (int idx = 1; /* Skip initial IMark */
-	     idx < irsb->stmts_used;
-	     idx++) {
+	} prependSideEffect(rip, work);
+	int idx;
+	for (idx = 1; idx < irsb->stmts_used && irsb->stmts[idx]->tag != Ist_IMark; idx++)
+		;
+	while (idx >= 0) {
 		IRStmt *stmt = irsb->stmts[idx];
+		idx--;
 		switch (stmt->tag) {
 		case Ist_NoOp:
 			break;
 		case Ist_IMark:
-			/* End of the instruction -> we're done */
-			idx = irsb->stmts_used;
 			break;
 		case Ist_AbiHint:
 			break;
 		case Ist_Put: {
 			IRStmtPut *isp = (IRStmtPut *)stmt;
-			appendSideEffect(
+			prependSideEffect(
 				new StateMachineSideEffectCopy(
 					isp->target,
 					isp->data));
@@ -89,13 +81,13 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			break;
 		case Ist_Store: {
 			IRStmtStore *ist = (IRStmtStore *)stmt;
-			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
-					  StateMachineCrash::get());
-			appendSideEffect(
+			prependSideEffect(
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
 					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation)));
+			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
+					  StateMachineCrash::get());
 			break;
 		}
 		case Ist_CAS: {
@@ -127,31 +119,10 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			   means that we'll sometimes report a crash
 			   which can't happen, but we'll never miss a
 			   crash which can. */
-			conditionalBranch(IRExpr_Unop(Iop_BadPtr, cas->addr),
-					  StateMachineCrash::get());
 			IRTemp t = newIRTemp(irsb->tyenv);
 			threadAndRegister tr = threadAndRegister::temp(rip.thread, t, 0);
 			IRType ty = cas->expdLo->type();
 			IRExpr *t_expr = IRExpr_Get(tr, ty);
-			appendSideEffect(
-				new StateMachineSideEffectLoad(
-					tr,
-					cas->addr,
-					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
-					ty));
-			StateMachineEdge *exitEdge = new StateMachineEdge(
-				new StateMachineSideEffectCopy(
-					cas->oldLo,
-					t_expr),
-				NULL);
-			StateMachineProxy *r = new StateMachineProxy(rip.rip, exitEdge);
-			StateMachineEdge *edgeIfEq = new StateMachineEdge(
-				new StateMachineSideEffectStore(
-					cas->addr,
-					cas->dataLo,
-					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation)),
-				r);
-			StateMachineEdge *edgeIfNEq = new StateMachineEdge(r);
 			IROp op;
 			switch (ty) {
 #define do_size(sz)						\
@@ -166,15 +137,39 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			default:
 				abort();
 			}
-			StateMachineBifurcate *smb = new StateMachineBifurcate(
+			work = new StateMachineSideEffecting(
 				rip.rip,
-				IRExpr_Binop(op,
-					     t_expr,
-					     cas->expdLo),
-				edgeIfEq,
-				edgeIfNEq);
-			work->target = smb;
-			work = exitEdge;
+				new StateMachineSideEffectCopy(
+					cas->oldLo,
+					t_expr),
+				work);
+			work =
+				new StateMachineBifurcate(
+					rip.rip,
+					IRExpr_Unop(Iop_BadPtr, cas->addr),
+					StateMachineCrash::get(),
+					new StateMachineSideEffecting(
+						rip.rip,
+						new StateMachineSideEffectLoad(
+							tr,
+							cas->addr,
+							MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
+							ty),
+						new StateMachineBifurcate(
+							rip.rip,
+							IRExpr_Binop(
+								op,
+								t_expr,
+								cas->expdLo),
+							new StateMachineSideEffecting(
+								rip.rip,
+								new StateMachineSideEffectStore(
+									cas->addr,
+									cas->dataLo,
+									MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation)),
+								work),
+							work)));
+
 			break;
 		}
 		case Ist_Dirty: {
@@ -191,14 +186,14 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 			else
 				abort();
 			assert(ity != Ity_INVALID);
-			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
-					  StateMachineCrash::get());
-			appendSideEffect(
+			prependSideEffect(
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
 					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
 					ity));
+			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
+					  StateMachineCrash::get());
 			break;
 		}
 		case Ist_MBE:
@@ -213,17 +208,13 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 		}
 	}
 
-	/* If we get to the end of the block then we're considered to
-	 * have survived. */
-	work->target = StateMachineNoCrash::get();
-
-	return res;
+	return work;
 }
 
 /* End of namespace */
 }
 
-StateMachineEdge *
+StateMachineState *
 getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 {
 	return ProximalCause::getProximalCause(ms, rip, thr);

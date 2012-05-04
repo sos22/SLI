@@ -151,39 +151,38 @@ protected:
 	virtual StateMachineStub *transformOneState(StateMachineStub *s,
 						    bool *done_something)
 	{ return NULL; }
-	virtual StateMachineProxy *transformOneState(StateMachineProxy *p,
-						     bool *done_something)
-	{
-		return NULL;
-	}
 	virtual StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
 							     bool *done_something)
 	{
 		bool b = false;
-		StateMachineSideEffect *e = transformSideEffect(smse->sideEffect, &b);
-		if (b)
+		StateMachineSideEffect *e =
+			smse->sideEffect ? transformSideEffect(smse->sideEffect, &b) : NULL;
+		if (b) {
+			*done_something = true;
 			return new StateMachineSideEffecting(smse->origin,
 							     e,
 							     NULL);
-		else
+		} else {
 			return NULL;
+		}
 	}
 	virtual StateMachineBifurcate *transformOneState(StateMachineBifurcate *s,
 							 bool *done_something)
 	{
 		bool b = false;
 		IRExpr *c = doit(s->condition, &b);
-		if (b)
+		if (b) {
+			*done_something = true;
 			return new StateMachineBifurcate(s->origin,
 							 c,
-							 (StateMachineEdge *)NULL,
-							 (StateMachineEdge *)NULL);
-		else
+							 NULL,
+							 NULL);
+		} else {
 			return NULL;
+		}
 	}
-	virtual StateMachineEdge *transformOneEdge(StateMachineEdge *, bool *);
-	virtual StateMachineState *transformState(StateMachineState *, bool *);
 public:
+	virtual StateMachineState *transformState(StateMachineState *, bool *);
 	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
 							    bool *);
 	virtual void transformFreeVariables(FreeVariableMap *fvm, bool *done_something = NULL)
@@ -197,7 +196,7 @@ public:
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
-StateMachineEdge *getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr);
+StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
 				   VexPtr<Oracle> &oracle,
@@ -223,7 +222,6 @@ StateMachine *optimiseFreeVariables(StateMachine *sm, bool *done_something);
 
 void breakCycles(StateMachine *);
 
-void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;

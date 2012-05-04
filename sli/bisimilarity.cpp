@@ -12,53 +12,23 @@ namespace _bisimilarity {
 #endif
 
 typedef std::pair<StateMachineState *, StateMachineState *> st_pair_t;
-typedef std::pair<StateMachineEdge *, StateMachineEdge *> st_edge_pair_t;
 
 static StateMachineState *
 rewriteStateMachine(StateMachineState *sm,
 		    std::map<StateMachineState *, StateMachineState *> &rules,
-		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
-		    std::set<StateMachineState *> &memo,
-		    std::set<StateMachineEdge *> &edgeMemo);
-
-static StateMachineEdge *
-rewriteStateMachineEdge(StateMachineEdge *sme,
-			std::map<StateMachineState *, StateMachineState *> &rules,
-			std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
-			std::set<StateMachineState *> &memo,
-			std::set<StateMachineEdge *> &edgeMemo)
-{
-	if (edgeMemo.count(sme))
-		return sme;
-
-	if (edgeRules.count(sme)) {
-		edgeMemo.insert(edgeRules[sme]);
-		return rewriteStateMachineEdge(edgeRules[sme], rules, edgeRules, memo, edgeMemo);
-	}
-	if (TIMEOUT)
-		return sme;
-	edgeMemo.insert(sme);
-	sme->target = rewriteStateMachine(sme->target,
-					  rules,
-					  edgeRules,
-					  memo,
-					  edgeMemo);
-	return sme;
-}
+		    std::set<StateMachineState *> &memo);
 
 static StateMachineState *
 rewriteStateMachine(StateMachineState *sm,
 		    std::map<StateMachineState *, StateMachineState *> &rules,
-		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules,
-		    std::set<StateMachineState *> &memo,
-		    std::set<StateMachineEdge *> &edgeMemo)
+		    std::set<StateMachineState *> &memo)
 {
 	if (memo.count(sm))
 		return sm;
 
 	if (rules.count(sm) && rules[sm] != sm) {
 		memo.insert(rules[sm]);
-		return rewriteStateMachine(rules[sm], rules, edgeRules, memo, edgeMemo);
+		return rewriteStateMachine(rules[sm], rules, memo);
 	}
 	memo.insert(sm);
 	switch (sm->type) {
@@ -69,38 +39,22 @@ rewriteStateMachine(StateMachineState *sm,
 		return sm;
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-		smb->trueTarget = rewriteStateMachineEdge(
+		smb->trueTarget = rewriteStateMachine(
 			smb->trueTarget,
 			rules,
-			edgeRules,
-			memo,
-			edgeMemo);
-		smb->falseTarget = rewriteStateMachineEdge(
+			memo);
+		smb->falseTarget = rewriteStateMachine(
 			smb->falseTarget,
 			rules,
-			edgeRules,
-			memo,
-			edgeMemo);
-		return sm;
-	}
-	case StateMachineState::Proxy: {
-		StateMachineProxy *smp = (StateMachineProxy *)sm;
-		smp->target = rewriteStateMachineEdge(
-			smp->target,
-			rules,
-			edgeRules,
-			memo,
-			edgeMemo);
+			memo);
 		return sm;
 	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
-		smp->target = rewriteStateMachineEdge(
+		smp->target = rewriteStateMachine(
 			smp->target,
 			rules,
-			edgeRules,
-			memo,
-			edgeMemo);
+			memo);
 		return sm;
 	}
 	}
@@ -152,46 +106,27 @@ assert_mapping_acyclic(std::map<t, t> &m)
 }
 
 static StateMachineState *
-rewriteStateMachine(StateMachineState *sm, std::map<StateMachineState *, StateMachineState *> &rules,
-		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules)
+rewriteStateMachine(StateMachineState *sm, std::map<StateMachineState *, StateMachineState *> &rules)
 {
 	/* Cyclies make this work badly. */
 	assert_mapping_acyclic(rules);
-	assert_mapping_acyclic(edgeRules);
 
 	std::set<StateMachineState *> memo;
-	std::set<StateMachineEdge *> edgeMemo;
 
-	return rewriteStateMachine(sm, rules, edgeRules, memo, edgeMemo);
+	return rewriteStateMachine(sm, rules, memo);
 }
 
 static StateMachine *
-rewriteStateMachine(StateMachine *sm, std::map<StateMachineState *, StateMachineState *> &rules,
-		    std::map<StateMachineEdge *, StateMachineEdge *> &edgeRules)
+rewriteStateMachine(StateMachine *sm, std::map<StateMachineState *, StateMachineState *> &rules)
 {
-	sm->root = rewriteStateMachine(sm->root, rules, edgeRules);
+	sm->root = rewriteStateMachine(sm->root, rules);
 	return sm;
-}
-
-static bool
-edgesLocallyBisimilar(StateMachineEdge *sme1,
-		      StateMachineEdge *sme2,
-		      const std::set<st_pair_t> &states,
-		      const AllowableOptimisations &opt)
-{
-	if (!states.count(st_pair_t(sme1->target, sme2->target)))
-		return false;
-	if (!!sme1->sideEffect != !!sme2->sideEffect)
-		return false;
-	if (!sme1->sideEffect)
-		return true;
-	return sideEffectsBisimilar(sme1->sideEffect, sme2->sideEffect, opt);
 }
 
 static bool
 statesLocallyBisimilar(StateMachineState *sm1,
 		       StateMachineState *sm2,
-		       const std::set<st_edge_pair_t> &edges,
+		       const std::set<st_pair_t> &edges,
 		       const AllowableOptimisations &opt)
 {
 	if (sm1 == sm2)
@@ -213,24 +148,18 @@ statesLocallyBisimilar(StateMachineState *sm1,
 		return sms1->target == sms2->target;
 	}
 
-	case StateMachineState::Proxy: {
-		StateMachineProxy *smp1 = (StateMachineProxy *)sm1;
-		StateMachineProxy *smp2 = (StateMachineProxy *)sm2;
-		return edges.count(st_edge_pair_t(smp1->target, smp2->target));
-	}
-
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme1 = (StateMachineSideEffecting *)sm1;
 		StateMachineSideEffecting *sme2 = (StateMachineSideEffecting *)sm2;
-		return edges.count(st_edge_pair_t(sme1->target, sme2->target)) &&
+		return edges.count(st_pair_t(sme1->target, sme2->target)) &&
 			sideEffectsBisimilar(sme1->sideEffect, sme2->sideEffect, opt);
 	}
 
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb1 = (StateMachineBifurcate *)sm1;
 		StateMachineBifurcate *smb2 = (StateMachineBifurcate *)sm2;
-		return edges.count(st_edge_pair_t(smb1->trueTarget, smb2->trueTarget)) &&
-			edges.count(st_edge_pair_t(smb1->falseTarget, smb2->falseTarget)) &&
+		return edges.count(st_pair_t(smb1->trueTarget, smb2->trueTarget)) &&
+			edges.count(st_pair_t(smb1->falseTarget, smb2->falseTarget)) &&
 			definitelyEqual(smb1->condition, smb2->condition, opt);
 	}
 	}
@@ -239,7 +168,6 @@ statesLocallyBisimilar(StateMachineState *sm1,
 
 static void
 buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimilarStates,
-				 std::set<st_edge_pair_t> &bisimilarEdges,
 				 const std::set<StateMachineState *> *allStates,
 				 const AllowableOptimisations &opt)
 {
@@ -256,9 +184,6 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 		findAllStates(sm, _allStates);
 	}
 
-	std::set<StateMachineEdge *> allEdges;
-	findAllEdges(sm, allEdges);	
-
 	/* Initially, everything is bisimilar to everything else. */
 	for (std::set<StateMachineState *>::const_iterator it = allStates->begin();
 	     !TIMEOUT && it != allStates->end();
@@ -267,13 +192,6 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 		     !TIMEOUT && it2 != allStates->end();
 		     it2++)
 			bisimilarStates.insert(st_pair_t(*it, *it2));
-	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
-	     !TIMEOUT && it != allEdges.end();
-	     it++)
-		for (std::set<StateMachineEdge *>::iterator it2 = allEdges.begin();
-		     !TIMEOUT && it2 != allEdges.end();
-		     it2++)
-			bisimilarEdges.insert(st_edge_pair_t(*it, *it2));
 
 	bool progress;
 	do {
@@ -289,20 +207,10 @@ buildStateMachineBisimilarityMap(StateMachine *sm, std::set<st_pair_t> &bisimila
 		for (std::set<st_pair_t>::iterator it = bisimilarStates.begin();
 		     it != bisimilarStates.end();
 			) {
-			if (statesLocallyBisimilar(it->first, it->second, bisimilarEdges, opt)) {
+			if (statesLocallyBisimilar(it->first, it->second, bisimilarStates, opt)) {
 				it++;
 			} else {
 				bisimilarStates.erase(it++);
-				progress = true;
-			}
-		}
-		for (std::set<st_edge_pair_t>::iterator it = bisimilarEdges.begin();
-		     it != bisimilarEdges.end();
-			) {
-			if (edgesLocallyBisimilar(it->first, it->second, bisimilarStates, opt)) {
-				it++;
-			} else {
-				bisimilarEdges.erase(it++);
 				progress = true;
 			}
 		}
@@ -313,12 +221,11 @@ static StateMachine *
 bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 {
 	__set_profiling(bisimilarityReduction);
-	std::set<st_edge_pair_t> bisimilarEdges;
 	std::set<st_pair_t> bisimilarStates;
 	std::set<StateMachineState *> allStates;
 
 	findAllStates(sm, allStates);
-	buildStateMachineBisimilarityMap(sm, bisimilarStates, bisimilarEdges, &allStates, opt);
+	buildStateMachineBisimilarityMap(sm, bisimilarStates, &allStates, opt);
 
 	if (TIMEOUT)
 		return sm;
@@ -362,24 +269,9 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 			canonMap[s2] = s1;
 	}
 
-	/* Do the same thing for edges */
-	std::map<StateMachineEdge *, StateMachineEdge *> canonEdgeMap;
-	for (std::set<st_edge_pair_t>::iterator it = bisimilarEdges.begin();
-	     it != bisimilarEdges.end();
-	     it++) {
-		StateMachineEdge *s1 = it->first;
-		StateMachineEdge *s2 = it->second;
-		while (canonEdgeMap.count(s1))
-			s1 = canonEdgeMap[s1];
-		while (canonEdgeMap.count(s2))
-			s2 = canonEdgeMap[s2];
-		if (s1 != s2)
-			canonEdgeMap[s2] = s1;
-	}
-
 	/* Perform the rewrite.  We do this in-place, because it's not
 	   context-dependent. */
-	return rewriteStateMachine(sm, canonMap, canonEdgeMap);
+	return rewriteStateMachine(sm, canonMap);
 }
 
 /* end of namespace */

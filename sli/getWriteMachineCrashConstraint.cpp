@@ -18,9 +18,8 @@ struct crash_constraint_context {
 	IRExpr *escapeExpression;
 	const AllowableOptimisations &opt;
 	std::map<StateMachineState *, IRExpr *> stateValues;
-	std::map<StateMachineEdge *, IRExpr *> edgeValues;
 
-	std::map<const StateMachineEdge *, int> edgeLabels;
+	std::map<const StateMachineState *, int> edgeLabels;
 
 	IRExpr *escapeConstraint(IRExpr *escape_if, IRExpr *non_escape)
 	{
@@ -159,33 +158,6 @@ sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc, crash_const
 }
 
 static IRExpr *
-edgeCrashConstraint(StateMachineEdge *e, crash_constraint_context &ctxt)
-{
-	auto it = ctxt.edgeValues.find(e);
-	if (it != ctxt.edgeValues.end())
-		return it->second;
-
-	IRExpr *acc = stateCrashConstraint(e->target, ctxt);
-
-	if (e->sideEffect) {
-		StateMachineSideEffect *smse = e->sideEffect;
-		acc = sideEffectCrashConstraint(smse, acc, ctxt);
-		acc = simplifyIRExpr(acc, ctxt.opt);
-	}
-
-	ctxt.edgeValues[e] = acc;
-
-	if (dump_state_constraints) {
-		printf("Computed constraint at top of edge l%d:\n", ctxt.edgeLabels[e]);
-		e->prettyPrint(stdout, ctxt.edgeLabels);
-		printf("Result ");
-		ppIRExpr(acc, stdout);
-		printf("\n");
-	}
-	return acc;
-}
-
-static IRExpr *
 stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt)
 {
 	auto it = ctxt.stateValues.find(s);
@@ -204,23 +176,19 @@ stateCrashConstraint(StateMachineState *s, crash_constraint_context &ctxt)
 	case StateMachineState::Stub:
 		res = ctxt.escapeExpression;
 		break;
-	case StateMachineState::Proxy: {
-		StateMachineProxy *smp = (StateMachineProxy *)s;
-		res = edgeCrashConstraint(smp->target, ctxt);
-		break;
-	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
-		res = edgeCrashConstraint(smse->target, ctxt);
-		res = sideEffectCrashConstraint(smse->sideEffect, res, ctxt);
+		res = stateCrashConstraint(smse->target, ctxt);
+		if (smse->sideEffect)
+			res = sideEffectCrashConstraint(smse->sideEffect, res, ctxt);
 		break;
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 		res = IRExpr_Mux0X(
 			smb->condition,
-			edgeCrashConstraint(smb->falseTarget, ctxt),
-			edgeCrashConstraint(smb->trueTarget, ctxt));
+			stateCrashConstraint(smb->falseTarget, ctxt),
+			stateCrashConstraint(smb->trueTarget, ctxt));
 		break;
 	}
 	}

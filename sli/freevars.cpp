@@ -22,41 +22,27 @@ nrAliasingLoads(StateMachineState *sm,
 		const AllowableOptimisations &opt,
 		int *out,
 		std::set<StateMachineState *> &visited,
-		Oracle *oracle);
-static void
-nrAliasingLoads(StateMachineEdge *sme,
-		StateMachineSideEffectLoad *smsel,
-		const Oracle::RegisterAliasingConfiguration *alias,
-		const AllowableOptimisations &opt,
-		int *out,
-		std::set<StateMachineState *> &visited,
-		Oracle *oracle)
-{
-	if (sme->sideEffect) {
-		StateMachineSideEffectLoad *smsel2 = dynamic_cast<StateMachineSideEffectLoad *>(sme->sideEffect);
-		if (smsel2 &&
-		    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, !opt.freeVariablesNeverAccessStack())) &&
-		    oracle->memoryAccessesMightAlias(opt, smsel, smsel2) &&
-		    definitelyEqual( smsel->addr,
-				     smsel2->addr,
-				     opt))
-			(*out)++;
-	}
-	nrAliasingLoads(sme->target, smsel, alias, opt, out, visited, oracle);
-}
-static void
-nrAliasingLoads(StateMachineState *sm,
-		StateMachineSideEffectLoad *smsel,
-		const Oracle::RegisterAliasingConfiguration *alias,
-		const AllowableOptimisations &opt,
-		int *out,
-		std::set<StateMachineState *> &visited,
 		Oracle *oracle)
 {
 	if (visited.count(sm))
 		return;
 	visited.insert(sm);
-	std::vector<StateMachineEdge *> edges;
+
+	if (sm->type == StateMachineState::SideEffecting) {
+		StateMachineSideEffect *smse =
+			((StateMachineSideEffecting *)sm)->sideEffect;
+		if (smse) {
+			StateMachineSideEffectLoad *smsel2 = dynamic_cast<StateMachineSideEffectLoad *>(smse);
+			if (smsel2 &&
+			    (!alias || alias->ptrsMightAlias(smsel->addr, smsel2->addr, !opt.freeVariablesNeverAccessStack())) &&
+			    oracle->memoryAccessesMightAlias(opt, smsel, smsel2) &&
+			    definitelyEqual( smsel->addr,
+					     smsel2->addr,
+					     opt))
+				(*out)++;
+		}
+	}
+	std::vector<StateMachineState *> edges;
 	sm->targets(edges);
 	for (auto it = edges.begin(); it != edges.end(); it++)
 		nrAliasingLoads(*it,
@@ -81,56 +67,6 @@ nrAliasingLoads(StateMachine *sm,
 }
 
 		   
-static bool definitelyNoSatisfyingStores(StateMachineState *sm,
-					 StateMachineSideEffectLoad *smsel,
-					 const Oracle::RegisterAliasingConfiguration *alias,
-					 const AllowableOptimisations &opt,
-					 bool haveAliasingStore,
-					 Oracle *oracle);
-static bool
-definitelyNoSatisfyingStores(StateMachineEdge *sme,
-			     StateMachineSideEffectLoad *smsel,
-			     const Oracle::RegisterAliasingConfiguration *alias,
-			     const AllowableOptimisations &opt,
-			     bool haveAliasingStore,
-			     Oracle *oracle)
-{
-	if (sme->sideEffect) {
-		StateMachineSideEffect *smse = sme->sideEffect;
-		if (smse == smsel) {
-			if (haveAliasingStore) {
-				return false;
-			} else {
-				/* The load can't appear twice in one
-				   path, and we've not seen a
-				   satisfying store yet, so we're
-				   fine. */
-				return true;
-			}
-		}
-		if (!haveAliasingStore) {
-			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(smse);
-			if (smses &&
-			    (!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, !opt.freeVariablesNeverAccessStack())) &&
-			    oracle->memoryAccessesMightAlias(opt, smsel, smses) &&
-			    !definitelyNotEqual( smsel->addr,
-						 smses->addr,
-						 opt)) {
-				/* This store might alias with the load.  If
-				   we encounter the load after this, then it
-				   might be satisfied. */
-				haveAliasingStore = true;
-			}
-		}
-	}
-	return definitelyNoSatisfyingStores(sme->target,
-					    smsel,
-					    alias,
-					    opt,
-					    haveAliasingStore,
-					    oracle);
-}
 static bool
 definitelyNoSatisfyingStores(StateMachineState *sm,
 			     StateMachineSideEffectLoad *smsel,
@@ -139,7 +75,39 @@ definitelyNoSatisfyingStores(StateMachineState *sm,
 			     bool haveAliasingStore,
 			     Oracle *oracle)
 {
-	std::vector<StateMachineEdge *> edges;
+	if (sm->type == StateMachineState::SideEffecting) {
+		StateMachineSideEffect *smse = ((StateMachineSideEffecting *)sm)->sideEffect;
+		if (smse) {
+			if (smse == smsel) {
+				if (haveAliasingStore) {
+					return false;
+				} else {
+					/* The load can't appear twice in one
+					   path, and we've not seen a
+					   satisfying store yet, so we're
+					   fine. */
+					return true;
+				}
+			}
+			if (!haveAliasingStore) {
+				StateMachineSideEffectStore *smses =
+					dynamic_cast<StateMachineSideEffectStore *>(smse);
+				if (smses &&
+				    (!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, !opt.freeVariablesNeverAccessStack())) &&
+				    oracle->memoryAccessesMightAlias(opt, smsel, smses) &&
+				    !definitelyNotEqual( smsel->addr,
+							 smses->addr,
+							 opt)) {
+					/* This store might alias with
+					   the load.  If we encounter
+					   the load after this, then
+					   it might be satisfied. */
+					haveAliasingStore = true;
+				}
+			}
+		}
+	}
+	std::vector<StateMachineState *> edges;
 	sm->targets(edges);
 	for (auto it = edges.begin(); it != edges.end(); it++)
 		if (!definitelyNoSatisfyingStores(*it,
@@ -243,13 +211,6 @@ introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something)
 	return s.transform(sm, done_something);
 }
 
-static StateMachineState *introduceFreeVariables(StateMachineState *sm,
-						 StateMachine *root_sm,
-						 const Oracle::RegisterAliasingConfiguration *alias,
-						 const AllowableOptimisations &opt,
-						 Oracle *oracle,
-						 bool *done_something,
-						 std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh);
 static bool
 containsNoTemporaries(IRExpr *e)
 {
@@ -294,45 +255,6 @@ introduceFreeVariables(StateMachineSideEffect *smse,
 	return smse;
 }
 
-static StateMachineEdge *
-introduceFreeVariables(StateMachineEdge *sme,
-		       StateMachine *root_sm,
-		       const Oracle::RegisterAliasingConfiguration *alias,
-		       const AllowableOptimisations &opt,
-		       Oracle *oracle,
-		       bool *done_something,
-		       std::vector<std::pair<FreeVariableKey, IRExpr *> > &fresh)
-{
-	std::vector<StateMachineSideEffect *> sideEffects;
-	bool doit = false;
-	/* A load results in a free variable if:
-
-	   a) it's local and,
-	   b) no stores could potentially alias with it, and 
-	   c) no other loads could alias with it, and
-	   d) the loaded address does not contain any temporaries (i.e. the
-	   results of other loads).
-
-	   For (d), free variables and registers are fine, because
-	   they're inherently local. */
-	StateMachineSideEffect *smse = sme->sideEffect;
-	if (smse)
-		smse = introduceFreeVariables(smse,
-					      root_sm,
-					      alias,
-					      opt,
-					      oracle,
-					      &doit,
-					      fresh);
-	StateMachineState *target = introduceFreeVariables(sme->target, root_sm, alias, opt, oracle, &doit, fresh);
-
-	if (doit) {
-		*done_something = true;
-		return new StateMachineEdge(smse, target);
-	} else {
-		return sme;
-	}
-}
 static StateMachineState *
 introduceFreeVariables(StateMachineState *sm,
 		       StateMachine *root_sm,
@@ -349,31 +271,15 @@ introduceFreeVariables(StateMachineState *sm,
 	case StateMachineState::Stub:
 	case StateMachineState::Unreached:
 		return sm;
-	case StateMachineState::Proxy: {
-		StateMachineProxy *smp = (StateMachineProxy *)sm;
-		StateMachineEdge *e = introduceFreeVariables(smp->target,
-							     root_sm,
-							     alias,
-							     opt,
-							     oracle,
-							     &doit,
-							     fresh);
-		if (doit) {
-			*done_something = true;
-			return new StateMachineProxy(smp->origin, e);
-		} else {
-			return sm;
-		}
-	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
-		StateMachineEdge *e = introduceFreeVariables(sme->target,
-							     root_sm,
-							     alias,
-							     opt,
-							     oracle,
-							     &doit,
-							     fresh);
+		StateMachineState *e = introduceFreeVariables(sme->target,
+							      root_sm,
+							      alias,
+							      opt,
+							      oracle,
+							      &doit,
+							      fresh);
 		StateMachineSideEffect *smse = sme->sideEffect;
 		if (smse)
 			smse = introduceFreeVariables(smse,
@@ -392,20 +298,20 @@ introduceFreeVariables(StateMachineState *sm,
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-		StateMachineEdge *t = introduceFreeVariables(smb->trueTarget,
-							     root_sm,
-							     alias,
-							     opt,
-							     oracle,
-							     &doit,
-							     fresh);
-		StateMachineEdge *f = introduceFreeVariables(smb->falseTarget,
-							     root_sm,
-							     alias,
-							     opt,
-							     oracle,
-							     &doit,
-							     fresh);
+		StateMachineState *t = introduceFreeVariables(smb->trueTarget,
+							      root_sm,
+							      alias,
+							      opt,
+							      oracle,
+							      &doit,
+							      fresh);
+		StateMachineState *f = introduceFreeVariables(smb->falseTarget,
+							      root_sm,
+							      alias,
+							      opt,
+							      oracle,
+							      &doit,
+							      fresh);
 		if (doit) {
 			*done_something = true;
 			return new StateMachineBifurcate(smb->origin,

@@ -3,47 +3,55 @@
 #include "state_machine.hpp"
 
 StateMachineSideEffectLoad *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, bool *)
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, bool *c)
 {
 	bool b = false;
 	IRExpr *a = doit(l->addr, &b);
-	if (b)
+	if (b) {
+		*c = true;
 		return new StateMachineSideEffectLoad(l->target, a, l->rip, l->type);
-	else
+	} else {
 		return NULL;
+	}
 }
 
 StateMachineSideEffectStore *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, bool *)
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, bool *c)
 {
 	bool b = false;
 	IRExpr *a = doit(s->addr, &b), *d = doit(s->data, &b);
-	if (b)
+	if (b) {
+		*c = true;
 		return new StateMachineSideEffectStore(a, d, s->rip);
-	else
+	} else {
 		return NULL;
+	}
 }
 
 StateMachineSideEffectAssertFalse *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFalse *a, bool *)
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFalse *a, bool *d)
 {
 	bool b = false;
 	IRExpr *v = doit(a->value, &b);
-	if (b)
+	if (b) {
+		*d = true;
 		return new StateMachineSideEffectAssertFalse(v);
-	else
+	} else {
 		return NULL;
+	}
 }
 
 StateMachineSideEffectCopy *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, bool *)
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, bool *d)
 {
 	bool b = false;
 	IRExpr *v = doit(c->value, &b);
-	if (b)
+	if (b) {
+		*d = true;
 		return new StateMachineSideEffectCopy(c->target, v);
-	else
+	} else {
 		return NULL;
+	}
 }
 
 StateMachineSideEffect *
@@ -66,21 +74,6 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 	abort();
 }
 
-StateMachineEdge *
-StateMachineTransformer::transformOneEdge(StateMachineEdge *edge, bool *done_something)
-{
-	StateMachineSideEffect *trans;
-	if (edge->sideEffect) {
-		trans = transformSideEffect(edge->sideEffect, done_something);
-		if (trans == NULL)
-			trans = edge->sideEffect;
-	} else
-		trans = NULL;
-	if (trans == edge->sideEffect)
-		return NULL;
-	return new StateMachineEdge(trans, NULL);
-}
-
 StateMachineState *
 StateMachineTransformer::transformState(StateMachineState *s, bool *done_something)
 {
@@ -100,14 +93,12 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 	bool _b;
 	if (!done_something) done_something = &_b;
 	std::set<StateMachineState *> allStates;
-	std::set<StateMachineEdge *> allEdges;
-	enumStatesAndEdges(sm, &allStates, &allEdges);
+	enumStates(sm, &allStates);
 
-	/* Step 1: walk over the state machine states and edges, and
-	   figure out which ones need to be changed due to the actual
+	/* Step 1: walk over the state machine states and figure out
+	   which ones need to be changed due to the actual
 	   transformation. */
 	std::map<StateMachineState *, StateMachineState *> stateRewrites; /* From old state to new state */
-	std::map<StateMachineEdge *, StateMachineEdge *> edgeRewrites;
 
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *s = *it;
@@ -115,14 +106,6 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 		if (res != NULL && res != s) {
 			/* This one got rewritten */
 			stateRewrites[s] = res;
-			*done_something = true;
-		}
-	}
-	for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
-		StateMachineEdge *e = *it;
-		StateMachineEdge *res = transformOneEdge(e, done_something);
-		if (res != NULL && res != e) {
-			edgeRewrites[e] = res;
 			*done_something = true;
 		}
 	}
@@ -139,11 +122,11 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			StateMachineState *s = *it;
 			if (stateRewrites.count(s))
 				continue;
-			std::vector<StateMachineEdge *> edges;
+			std::vector<StateMachineState *> edges;
 			s->targets(edges);
 			bool do_rewrite = false;
 			for (auto it = edges.begin(); !do_rewrite && it != edges.end(); it++)
-				if (edgeRewrites.count(*it))
+				if (stateRewrites.count(*it))
 					do_rewrite = true;
 			if (do_rewrite) {
 				/* Need to rewrite this one as well. */
@@ -153,13 +136,6 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 				assert(!StateMachineState::stateTypeIsTerminal(s->type));
 
 				switch (s->type) {
-				case StateMachineState::Proxy: {
-					StateMachineProxy *smp = (StateMachineProxy *)s;
-					stateRewrites[s] =
-						new StateMachineProxy(smp->origin,
-								      (StateMachineEdge *)NULL);
-					break;
-				}
 				case StateMachineState::SideEffecting: {
 					StateMachineSideEffecting *smp = (StateMachineSideEffecting *)s;
 					stateRewrites[s] =
@@ -173,8 +149,8 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 					stateRewrites[s] =
 						new StateMachineBifurcate(smb->origin,
 									  smb->condition,
-									  (StateMachineEdge *)NULL,
-									  (StateMachineEdge *)NULL);
+									  NULL,
+									  NULL);
 					break;
 				}
 				case StateMachineState::Unreached:
@@ -185,45 +161,18 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 				}
 			}
 		}
-		for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
-			StateMachineEdge *e = *it;
-			if (edgeRewrites.count(e))
-				continue;
-			if (stateRewrites.count(e->target)) {
-				progress = true;
-				StateMachineEdge *n = new StateMachineEdge(*e);
-				n->target = NULL;
-				edgeRewrites[e] = n;
-			}
-		}
 	} while (progress);
 
 	/* Step 3: We now know how we're going to be doing the
 	 * rewrites.  Go through and do them. */
-	for (auto it = edgeRewrites.begin(); it != edgeRewrites.end(); it++) {
-		StateMachineEdge *old = it->first;
-		StateMachineEdge *replacement = it->second;
-		StateMachineState *oldTarget;
-
-		if (replacement->target)
-			oldTarget = replacement->target;
-		else
-			oldTarget = old->target;
-
-		auto it2 = stateRewrites.find(oldTarget);
-		if (it2 == stateRewrites.end())
-			replacement->target = oldTarget;
-		else
-			replacement->target = it2->second;
-	}
 	for (auto it = stateRewrites.begin(); it != stateRewrites.end(); it++) {
 		StateMachineState *old = it->first;
 		StateMachineState *replacement = it->second;
 
 		struct {
-			void operator()(StateMachineEdge *&target, StateMachineEdge *o,
-					std::map<StateMachineEdge *, StateMachineEdge *> &edgeRewrites) {
-				StateMachineEdge *oldTarget = target;
+			void operator()(StateMachineState *&target, StateMachineState *o,
+					std::map<StateMachineState *, StateMachineState *> &edgeRewrites) {
+				StateMachineState *oldTarget = target;
 				if (!oldTarget)
 					oldTarget = o;
 				auto it = edgeRewrites.find(oldTarget);
@@ -235,26 +184,19 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 		} doEdge;
 
 		switch (old->type) {
-		case StateMachineState::Proxy: {
-			StateMachineProxy *smp = (StateMachineProxy *)old;
-			assert(replacement->type == StateMachineState::Proxy);
-			StateMachineProxy *repl = (StateMachineProxy *)replacement;
-			doEdge(repl->target, smp->target, edgeRewrites);
-			break;
-		}
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)old;
 			assert(replacement->type == StateMachineState::Bifurcate);
 			StateMachineBifurcate *repl = (StateMachineBifurcate *)replacement;
-			doEdge(repl->trueTarget, smb->trueTarget, edgeRewrites);
-			doEdge(repl->falseTarget, smb->falseTarget, edgeRewrites);
+			doEdge(repl->trueTarget, smb->trueTarget, stateRewrites);
+			doEdge(repl->falseTarget, smb->falseTarget, stateRewrites);
 			break;
 		}
 		case StateMachineState::SideEffecting: {
 			StateMachineSideEffecting *smp = (StateMachineSideEffecting *)old;
 			assert(replacement->type == StateMachineState::SideEffecting);
 			StateMachineSideEffecting *repl = (StateMachineSideEffecting *)replacement;
-			doEdge(repl->target, smp->target, edgeRewrites);
+			doEdge(repl->target, smp->target, stateRewrites);
 			break;
 		}
 		case StateMachineState::Crash:

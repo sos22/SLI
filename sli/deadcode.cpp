@@ -9,6 +9,12 @@ namespace _deadCode {
 }
 #endif
 
+#ifdef NDEBUG
+#define debug_dump_liveness_map 0
+#else
+static int debug_dump_liveness_map = 0;
+#endif
+
 class LivenessEntry : public std::set<threadAndRegister, threadAndRegister::fullCompare> {
 	void killRegister(threadAndRegister r)
 	{
@@ -92,11 +98,99 @@ public:
 		else
 			return true;
 	}
+
+	void print() const {
+		for (auto it = begin(); it != end(); it++) {
+			if (it != begin())
+				printf(", ");
+			printf("%s", it->name());
+		}
+	}
+};
+
+class LivenessMap {
+	/* Map from states to what's live at the *start* of the state */
+	std::map<const StateMachineState *, LivenessEntry> content;
+
+	void updateState(StateMachineState *sm, bool *progress)
+	{
+		LivenessEntry res(liveAtEndOfState(sm));
+		switch (sm->type) {
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
+			if (sme->sideEffect)
+				res.useSideEffect(sme->sideEffect);
+			break;
+		}
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
+			res.useExpression(smb->condition);
+			break;
+		}
+		case StateMachineState::Unreached:
+		case StateMachineState::Stub:
+		case StateMachineState::Crash:
+		case StateMachineState::NoCrash:
+			/* Nothing needed */
+			break;
+		}
+		if (expandSet(content[sm], res))
+			*progress = true;
+	}
+
+public:
+	LivenessMap(StateMachine *sm, std::set<StateMachineState *> &allStates) {
+		bool progress;
+		do {
+			progress = false;
+			for (auto it = allStates.begin();
+			     it != allStates.end();
+			     it++)
+				updateState(*it, &progress);
+		} while (progress && !TIMEOUT);
+	}
+	LivenessEntry liveAtStartOfState(const StateMachineState *sm) const {
+		auto it = content.find(sm);
+		/* The base case for the Tarski iteration is that
+		   nothing is live anywhere. */
+		if (it == content.end())
+			return LivenessEntry();
+		else
+			return it->second;
+	}
+	LivenessEntry liveAtEndOfState(const StateMachineState * sm) const {
+		std::vector<const StateMachineState *> exits;
+		sm->targets(exits);
+		LivenessEntry res;
+		if (exits.size() == 0)
+			return res;
+		res = liveAtStartOfState(exits[0]);
+		for (unsigned x = 1; x < exits.size(); x++)
+			res.merge(liveAtStartOfState(exits[x]));
+		return res;
+	}
+	void print(const std::map<const StateMachineState *, int> &labels) const {
+		printf("At starts of states:\n");
+		for (auto it = content.begin(); it != content.end(); it++) {
+			auto it2 = labels.find(it->first);
+			assert(it2 != labels.end());
+			printf("l%d: ", it2->second);
+			it->second.print();
+			printf("\n");
+		}
+	}
 };
 
 static StateMachine *
 deadCodeElimination(StateMachine *sm, bool *done_something)
 {
+	std::map<const StateMachineState *, int> stateLabels;
+
+	if (debug_dump_liveness_map) {
+		printf("Input to deadCodeElimination:\n");
+		printStateMachine(sm, stdout, stateLabels);
+	}
+
 	std::set<StateMachineState *> allStates;
 	findAllStates(sm, allStates);
 
@@ -108,66 +202,18 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 	     it++)
 		alwaysLive.useExpression(it.value());
 
-	if (TIMEOUT)
-		return sm;
-
-	class LivenessMap : public std::map<StateMachineState *, LivenessEntry> {
-		void buildResForEdge(LivenessEntry &out, StateMachineEdge *edge)
-		{
-			out = (*this)[edge->target];
-			if (edge->sideEffect)
-				out.useSideEffect(edge->sideEffect);
-		}
-
-		void updateState(StateMachineState *sm, bool *progress)
-		{
-			LivenessEntry res;
-			switch (sm->type) {
-			case StateMachineState::Proxy:
-				buildResForEdge(res, ((StateMachineProxy *)sm)->target);
-				break;
-			case StateMachineState::SideEffecting: {
-				StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
-				res.useSideEffect(sme->sideEffect);
-				buildResForEdge(res, sme->target);
-				break;
-			}
-			case StateMachineState::Bifurcate: {
-				StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-				buildResForEdge(res, smb->trueTarget);
-				LivenessEntry res_false;
-				buildResForEdge(res_false, smb->falseTarget);
-				res.merge(res_false);
-				res.useExpression(smb->condition);
-				break;
-			}
-			case StateMachineState::Unreached:
-			case StateMachineState::Stub:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-				/* Nothing needed */
-				break;
-			}
-			LivenessEntry &outputSlot( (*this)[sm] );
-			if (expandSet(outputSlot, res))
-				*progress = true;
-		}
-
-	public:
-		LivenessMap(StateMachine *sm, std::set<StateMachineState *> &allStates) {
-			bool progress;
-			do {
-				progress = false;
-				for (auto it = allStates.begin();
-				     it != allStates.end();
-				     it++)
-					updateState(*it, &progress);
-			} while (progress && !TIMEOUT);
-		}
-	} livenessMap(sm, allStates);
+	LivenessMap livenessMap(sm, allStates);
 
 	if (TIMEOUT)
 		return sm;
+
+	if (TIMEOUT)
+		return sm;
+
+	if (debug_dump_liveness_map) {
+		printf("Liveness map:\n");
+		livenessMap.print(stateLabels);
+	}
 
 	class _ {
 		LivenessMap &livenessMap;
@@ -240,34 +286,18 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				return e;
 			}
 		}
-		void doit(StateMachineEdge *edge, FreeVariableMap &fvm) {
-			LivenessEntry alive = livenessMap[edge->target];
-			if (edge->sideEffect)
-				edge->sideEffect = doit(edge->sideEffect,
-							edge->target->isTerminal(),
-							alive);
-		}
 	public:
 		void operator()(StateMachineState *state) {
 			switch (state->type) {
-			case StateMachineState::Proxy:
-				doit(((StateMachineProxy *)state)->target, fvm);
-				return;
 			case StateMachineState::SideEffecting: {
 				StateMachineSideEffecting *smse = (StateMachineSideEffecting *)state;
 				if (smse->sideEffect)
 					smse->sideEffect = doit(smse->sideEffect,
 								false,
-								livenessMap[smse]);
-				doit(smse->target, fvm);
+								livenessMap.liveAtEndOfState(smse));
 				return;
 			}
-			case StateMachineState::Bifurcate: {
-				StateMachineBifurcate *smb = (StateMachineBifurcate *)state;
-				doit(smb->trueTarget, fvm);
-				doit(smb->falseTarget, fvm);
-				return;
-			}
+			case StateMachineState::Bifurcate:
 			case StateMachineState::Crash:
 			case StateMachineState::NoCrash:
 			case StateMachineState::Stub:
@@ -293,6 +323,10 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		eliminateDeadCode(*it);
 	}
 
+	if (debug_dump_liveness_map) {
+		printf("Final result:\n");
+		printStateMachine(sm, stdout);
+	}
 	return sm;
 }
 
