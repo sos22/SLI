@@ -56,6 +56,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 	int idx;
 	for (idx = 1; idx < irsb->stmts_used && irsb->stmts[idx]->tag != Ist_IMark; idx++)
 		;
+	idx--;
 	while (idx >= 0) {
 		IRStmt *stmt = irsb->stmts[idx];
 		idx--;
