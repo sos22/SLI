@@ -51,13 +51,12 @@ main(int argc, char *argv[])
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 
-	VexPtr<StateMachineEdge, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(CRASHED_THREAD, VexRip::invent_vex_rip(thr->regs.rip())), thr));
+	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(CRASHED_THREAD, VexRip::invent_vex_rip(thr->regs.rip())), thr));
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(VexRip::invent_vex_rip(thr->regs.rip()),
-		new StateMachineProxy(VexRip::invent_vex_rip(thr->regs.rip()), proximal.get()));
+	ii->set(VexRip::invent_vex_rip(thr->regs.rip()), proximal);
 
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions);
