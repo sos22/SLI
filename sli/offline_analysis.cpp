@@ -1199,12 +1199,15 @@ CFGtoCrashReason(unsigned tid,
 				r = IRExpr_ClientCallFailed(irsb->next_nonconst);
 			}
 
+			StateMachineSideEffectCopy *smsec =
+				new StateMachineSideEffectCopy(
+					threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
+					r);
+			IRExpr **realR = &smsec->value;
 			StateMachineSideEffecting *lastState =
 				new StateMachineSideEffecting(
 					site.rip,
-					new StateMachineSideEffectCopy(
-						threadAndRegister::reg(site.thread, OFFSET_amd64_RAX, 0),
-						r),
+					smsec,
 					NULL);
 			StateMachineState *headState = lastState;
 
@@ -1218,8 +1221,10 @@ CFGtoCrashReason(unsigned tid,
 				if (stmt->tag == Ist_Put) {
 					IRStmtPut *p = (IRStmtPut *)stmt;
 					if (p->target.isTemp())
-						r = rewriteTemporary(r, p->target.asTemp(),
-								     p->data);
+						*realR = rewriteTemporary(
+							*realR,
+							p->target.asTemp(),
+							p->data);
 				}
 				if (stmt->tag == Ist_Dirty) {
 					IRDirty *details = ((IRStmtDirty *)stmt)->details;
