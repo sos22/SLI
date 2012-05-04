@@ -11,6 +11,12 @@ namespace SSA {
 }
 #endif
 
+#ifdef NDEBUG
+#define debug_dump_reaching_table 0
+#else
+static int debug_dump_reaching_table = 0;
+#endif
+
 /* Assert that the machine does not currently reference and tAR
    structures with non-zero generation number. */
 static void
@@ -443,6 +449,19 @@ public:
 		assert(it != end());
 		return it->second;
 	}
+	void print(FILE *f) const {
+		for (auto it = begin(); it != end(); it++) {
+			if (it != begin())
+				fprintf(f, "; ");
+			fprintf(f, "%s: (", it->first.name());
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin())
+					fprintf(f, ",");
+				fprintf(f, "%d", *it2);
+			}
+			fprintf(f, ")");
+		}
+	}
 };
 
 bool
@@ -478,18 +497,27 @@ public:
 		return it->second;
 	}
 	ReachingTable(const StateMachine *);
+	void print(FILE *f, std::map<const StateMachineState *, int> &labels) const;
 };
 
 ReachingTable::ReachingTable(const StateMachine *inp)
 {
+	std::queue<const StateMachineState *> toProcess;
+	std::vector<const StateMachineState *> states;
+	enumStates(inp, &states);
+
 	/* Initial value of the root is the import of all of the
 	   registers which might possibly be relevant.  Initial value
 	   of everything else is empty. */
-	content[inp->root] = initialReachingSet(inp);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		if (*it == inp->root)
+			content[*it] = initialReachingSet(inp);
+		else
+			content[*it] = ReachingEntry();
+		toProcess.push(*it);
+	}
 
 	/* Iterate to a fixed point. */
-	std::queue<const StateMachineState *> toProcess;
-	toProcess.push(inp->root);
 	while (!toProcess.empty()) {
 		const StateMachineState *s = toProcess.front();
 		toProcess.pop();
@@ -530,6 +558,16 @@ ReachingTable::getExitReaching(const StateMachineState *s)
 	gens.clear();
 	gens.insert(definedHere.gen());
 	return res;
+}
+
+void
+ReachingTable::print(FILE *f, std::map<const StateMachineState *, int> &labels) const
+{
+	for (auto it = content.begin(); it != content.end(); it++) {
+		fprintf(f, "l%d: ", labels[it->first]);
+		it->second.print(f);
+		fprintf(f, "\n");
+	}
 }
 
 static StateMachine *
@@ -677,6 +715,14 @@ convertToSSA(StateMachine *inp)
 			return NULL;
 
 		ReachingTable reaching(inp);
+		if (debug_dump_reaching_table) {
+			std::map<const StateMachineState *, int> stateLabels;
+			printf("At start of SSA conversion iteration:\n");
+			printStateMachine(inp, stdout);
+			printf("Reaching table:\n");
+			reaching.print(stdout, stateLabels);
+		}
+
 		std::set<StateMachineState *> newPendingStates;
 		inp = resolveDependencies(inp, reaching, newPendingStates);
 		if (newPendingStates.empty()) {
