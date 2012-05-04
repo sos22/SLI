@@ -335,7 +335,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)inp;
 		StateMachineSideEffecting *res = new StateMachineSideEffecting(sme->origin,
-									       rawDupe(ctxt, sme->sideEffect),
+									       sme->sideEffect ? rawDupe(ctxt, sme->sideEffect) : NULL,
 									       NULL);
 		ctxt(&res->target, sme->target, rawDupe);
 		return res;
