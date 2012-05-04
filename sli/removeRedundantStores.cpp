@@ -17,7 +17,8 @@ static bool storeMightBeLoadedAfterState(StateMachineState *sme,
 					 StateMachineSideEffectStore *smses,
 					 const Oracle::RegisterAliasingConfiguration *alias,
 					 bool freeVariablesMightAccessStack,
-					 Oracle *oracle);
+					 Oracle *oracle,
+					 std::set<StateMachineState *> &memo);
 
 static bool
 storeMightBeLoadedByState(StateMachineState *sm,
@@ -51,7 +52,7 @@ storeMightBeLoadedByState(StateMachineState *sm,
 			}
 		}
 	}
-	return storeMightBeLoadedAfterState(sm, opt, smses, alias, freeVariablesMightAccessStack, oracle);
+	return storeMightBeLoadedAfterState(sm, opt, smses, alias, freeVariablesMightAccessStack, oracle, memo);
 }
 
 static bool
