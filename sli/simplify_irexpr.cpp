@@ -2130,12 +2130,18 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				bool to;
 				IRExpr *_to;
 				bool *done_something;
+				IRExpr *rewriteFrom;
+				IRExpr *rewriteTo;
 				IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 					if (physicallyEqual(e, from)) {
 						if (!_to)
 							_to = IRExpr_Const(IRConst_U1(to));
 						*done_something = true;
 						return _to;
+					}
+					if (rewriteFrom && physicallyEqual(e, rewriteFrom)) {
+						*done_something = true;
+						return rewriteTo;
 					}
 					return IRExprTransformer::transformIRExpr(e, done_something);
 				}
@@ -2151,6 +2157,27 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			doit.to = val;
 			doit._to = NULL;
 			doit.done_something = done_something;
+			doit.rewriteFrom = NULL;
+			doit.rewriteTo = NULL;
+			if (val && expr->tag == Iex_Binop) {
+				IRExprBinop *ieb = (IRExprBinop *)expr;
+				if (ieb->op >= Iop_CmpEQ8 &&
+				    ieb->op <= Iop_CmpEQ64) {
+					/* CmpEQ is always sorted so
+					   that the thing on the left
+					   is before the thing on the
+					   right in the expression
+					   sort order.  That tends to
+					   mean that the thing on the
+					   left is simpler than the
+					   thing on the right, so
+					   rewriting from right to
+					   left is generally
+					   worthwhile. */
+					doit.rewriteFrom = ieb->arg2;
+					doit.rewriteTo = ieb->arg1;
+				}
+			}
 			return doit.doit(inp);
 		}
 		IRExpr *transformIex(IRExprMux0X *e) {
