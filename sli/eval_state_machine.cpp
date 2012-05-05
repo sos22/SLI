@@ -796,11 +796,40 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 				       const AllowableOptimisations &opt,
 				       GarbageCollectionToken token)
 {
-	return writeMachineCrashConstraint(sm,
-					   IRExpr_Const(IRConst_U1(1)),
-					   IRExpr_Const(IRConst_U1(0)),
-					   IRExpr_Const(IRConst_U1(1)),
-					   opt);
+	__set_profiling(survivalConstraintIfExecutedAtomically);
+	NdChooser chooser;
+
+	VexPtr<IRExpr, &ir_heap> res(NULL);
+	do {
+		if (TIMEOUT)
+			return NULL;
+
+		LibVEX_maybe_gc(token);
+		StateMachineEvalContext ctxt;
+		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
+		ctxt.pathConstraint->optimisationsApplied = 0xffff;
+		bool crashes;
+		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
+		assert(ctxt.pathConstraint->optimisationsApplied);
+		if (crashes) {
+			IRExpr *component =
+				IRExpr_Unop(
+					Iop_Not1,
+					ctxt.pathConstraint);
+			if (res)
+				res = IRExpr_Binop(
+					Iop_And1,
+					res,
+					component);
+			else
+				res = component;
+			res = simplifyIRExpr(res, opt);
+		}
+	} while (chooser.advance());
+
+	if (!res)
+		res = IRExpr_Const(IRConst_U1(1));
+	return res;
 }
 
 bool
