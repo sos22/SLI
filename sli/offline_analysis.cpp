@@ -765,43 +765,55 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		return NULL;
 	}
 
-	AllowableOptimisations opt =
-		optIn
-		.enableignoreSideEffects()
-		.enablefreeVariablesNeverAccessStack();
-	VexPtr<IRExpr, &ir_heap> survive(
-		survivalConstraintIfExecutedAtomically(probeMachine, oracle, opt, token));
-	if (!survive) {
-		fprintf(_logfile, "\tTimed out computing survival constraint\n");
-		return NULL;
-	}
-	survive = simplifyIRExpr(survive, opt);
+	VexPtr<IRExpr, &ir_heap> survive;
 
-	fprintf(_logfile, "\tComputed survival constraint ");
-	ppIRExpr(survive, _logfile);
-	fprintf(_logfile, "\n");
+	{
+		/* We start by figuring out some properties of the
+		   probe machine when it's run atomically. */
+		AllowableOptimisations opt =
+			optIn
+			.enableignoreSideEffects()
+			.enablefreeVariablesNeverAccessStack()
+			.enableassumeNoInterferingStores()
+			.enableassumeExecutesAtomically();
+		VexPtr<StateMachine, &ir_heap> atomicProbeMachine;
+		atomicProbeMachine = duplicateStateMachine(probeMachine);
+		atomicProbeMachine = optimiseStateMachine(atomicProbeMachine, opt, oracle,
+							  true, true, token);
+		survive = survivalConstraintIfExecutedAtomically(atomicProbeMachine, oracle, opt, token);
+		if (!survive) {
+			fprintf(_logfile, "\tTimed out computing survival constraint\n");
+			return NULL;
+		}
+		survive = simplifyIRExpr(survive, opt);
 
-	/* Quick check that that vaguely worked.  If this reports
-	   mightCrash == true then that probably means that the
-	   theorem prover bits need more work.  If it reports
-	   mightSurvive == false then the program is doomed and it's
-	   not possible to fix it from this point. */
-	bool mightSurvive, mightCrash;
-	if (!evalMachineUnderAssumption(probeMachine, oracle, survive, opt, &mightSurvive, &mightCrash, token)) {
-		fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
-		return NULL;
-	}
-	if (TIMEOUT)
-		return NULL;
-	if (!mightSurvive) {
-		fprintf(_logfile, "\tCan never survive...\n");
-		return NULL;
-	}
-	if (mightCrash) {
-		fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-		printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-		dbg_break("Bad things are happening\n");
-		return NULL;
+		fprintf(_logfile, "\tComputed survival constraint ");
+		ppIRExpr(survive, _logfile);
+		fprintf(_logfile, "\n");
+
+		/* Quick check that that vaguely worked.  If this
+		   reports mightCrash == true then that probably means
+		   that the theorem prover bits need more work.  If it
+		   reports mightSurvive == false then the program is
+		   doomed and it's not possible to fix it from this
+		   point. */
+		bool mightSurvive, mightCrash;
+		if (!evalMachineUnderAssumption(atomicProbeMachine, oracle, survive, opt, &mightSurvive, &mightCrash, token)) {
+			fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
+			return NULL;
+		}
+		if (TIMEOUT)
+			return NULL;
+		if (!mightSurvive) {
+			fprintf(_logfile, "\tCan never survive...\n");
+			return NULL;
+		}
+		if (mightCrash) {
+			fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+			dbg_break("Bad things are happening\n");
+			return NULL;
+		}
 	}
 
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));

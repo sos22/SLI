@@ -11,7 +11,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{StateMachineTransformer,IRExprTransformer,proximal_cause}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{removeRedundantStores,availExpressionAnalysis,deadcode}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{bisimilarity,cycle_break,freevars,nf,typesdb,timers}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,getWriteMachineCrashConstraint}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,getWriteMachineCrashConstraint,dupeStateMachine}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 ifeq (\$(SELECTIVE_PROFILING),y)

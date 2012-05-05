@@ -58,8 +58,9 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
 	                at all, and instead rely on ignoreSideEffects.
 
    nonLocalLoads -- If this is non-NULL then rather than using the
-                    oracle to check whether loads might possibly load,
-                    we just look in here.
+                    oracle to check whether loads might possibly
+                    conflict with stuff outside of the current
+                    machine, we just look in here.
 
    as -- if non-NULL, used to resolve BadPtr expressions with a
          constant address.
@@ -823,6 +824,7 @@ StateMachine *readStateMachine(int fd);
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
 				 const char **suffix);
+StateMachine *duplicateStateMachine(const StateMachine *inp);
 
 template <typename t> t
 pop(std::set<t> &x)
