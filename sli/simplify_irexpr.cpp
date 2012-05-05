@@ -370,7 +370,7 @@ _sortIntegers(t a, t b)
 }
 
 static sort_ordering
-_sortIRConsts(IRConst *a, IRConst *b)
+_sortIRConsts(const IRConst *a, const IRConst *b)
 {
 	if (a->tag < b->tag)
 		return less_than;
@@ -427,7 +427,7 @@ isVariableLike(const IRExpr *a)
    We arrange that equal expressions are always sorted together.
    Returns true if @a should be before @b. */
 static sort_ordering
-_sortIRExprs(IRExpr *_a, IRExpr *_b)
+_sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 {
 	if (_a == _b)
 		return equal_to;
@@ -705,7 +705,7 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 	return e;
 }
 
-template <bool ordering(IRExpr *, IRExpr *)> static void
+template <bool ordering(const IRExpr *, const IRExpr *)> static void
 performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
 {
         /* Linear scan to find the place to insert.  Could use a
@@ -722,7 +722,7 @@ performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
         list[idx] = newItem;
 }
 
-template <bool ordering(IRExpr *, IRExpr *)> static void
+template <bool ordering(const IRExpr *, const IRExpr *)> static void
 _sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 {
         /* All indexes [0, first_unsorted) are definitely already sorted */
@@ -744,26 +744,26 @@ _sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 }
 
 static sort_ordering
-_cnf_disjunction_sort(IRExpr *a1, IRExpr *b1)
+_cnf_disjunction_sort(const IRExpr *a1, const IRExpr *b1)
 {
 	/* The disjunction order is essentially the same as the normal
 	   sortIRExprs order, except that we strip off leading
 	   Iop_Not1 operations, so that A and ~A always sort together,
 	   and then do a little bit extra so that ~A is always after
 	   A. */
-	IRExpr *a = a1;
-	IRExpr *b = b1;
+	const IRExpr *a = a1;
+	const IRExpr *b = b1;
 	bool inv_a = false;
 	bool inv_b = false;
 	while (a->tag == Iex_Unop) {
-		IRExprUnop *ua = (IRExprUnop *)a;
+		const IRExprUnop *ua = (IRExprUnop *)a;
 		if (ua->op != Iop_Not1)
 			break;
 		inv_a = !inv_a;
 		a = ua->arg;
 	}
 	while (b->tag == Iex_Unop) {
-		IRExprUnop *ub = (IRExprUnop *)b;
+		const IRExprUnop *ub = (IRExprUnop *)b;
 		if (ub->op != Iop_Not1)
 			break;
 		inv_b = !inv_b;
@@ -778,7 +778,7 @@ _cnf_disjunction_sort(IRExpr *a1, IRExpr *b1)
 }
 
 static sort_ordering
-_cnf_conjunction_sort(IRExpr *a, IRExpr *b)
+_cnf_conjunction_sort(const IRExpr *a, const IRExpr *b)
 {
 	/* Conjunction ordering treats every argument as an Iop_Or1
 	   disjunction (if it isn't one already, we treat it as a
@@ -798,7 +798,7 @@ _cnf_conjunction_sort(IRExpr *a, IRExpr *b)
 	   relation, the second two as the size relation, and the
 	   final one as the dictionary relation.
 	*/
-	IRExprAssociative *ae, *be;
+	const IRExprAssociative *ae, *be;
 	ae = NULL;
 	be = NULL;
 	if (a->tag == Iex_Associative) {
@@ -926,17 +926,17 @@ _cnf_conjunction_sort(IRExpr *a, IRExpr *b)
 /* These are only non-static because they're used as template
  * arguments; sigh. */
 bool
-sortIRExprs(IRExpr *a, IRExpr *b)
+sortIRExprs(const IRExpr *a, const IRExpr *b)
 {
 	return _sortIRExprs(a, b) == less_than;
 }
 bool
-cnf_disjunction_sort(IRExpr *a, IRExpr *b)
+cnf_disjunction_sort(const IRExpr *a, const IRExpr *b)
 {
 	return _cnf_disjunction_sort(a, b) == less_than;
 }
 bool
-cnf_conjunction_sort(IRExpr *a, IRExpr *b)
+cnf_conjunction_sort(const IRExpr *a, const IRExpr *b)
 {
 	return _cnf_conjunction_sort(a, b) == less_than;
 }
@@ -970,9 +970,9 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
  * only care about the case where @a and @b are CNF disjunctions
  * here. */
 static bool
-isCnfSubset(IRExpr *a, IRExpr *b)
+isCnfSubset(const IRExpr *a, const IRExpr *b)
 {
-	IRExprAssociative *a_disjunct, *b_disjunct;
+	const IRExprAssociative *a_disjunct, *b_disjunct;
 top:
 	a_disjunct = NULL;
 	if (a->tag == Iex_Associative) {
@@ -1057,12 +1057,12 @@ top2:
    and with fairly high probability @iex is a CNF disjunction.
    Optimise under that assumption. */
 static IRExpr *
-optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
+optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 {
 	bool invertAssumption;
 	invertAssumption = false;
 	if (assumption->tag == Iex_Unop) {
-		IRExprUnop *u = (IRExprUnop *)assumption;
+		const IRExprUnop *u = (IRExprUnop *)assumption;
 		if (u->op == Iop_Not1) {
 			assumption = u->arg;
 			invertAssumption = true;
@@ -1074,7 +1074,7 @@ optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
 		return IRExpr_Const(IRConst_U1(invertAssumption ? 0 : 1));
 	}
 	if (iex->tag == Iex_Unop) {
-		IRExprUnop *u = (IRExprUnop *)iex;
+		const IRExprUnop *u = (IRExprUnop *)iex;
 		if (u->op == Iop_Not1 &&
 		    _sortIRExprs(u->arg, assumption) == equal_to) {
 			*done_something = true;
