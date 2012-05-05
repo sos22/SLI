@@ -1204,14 +1204,14 @@ typedef
       Iex_Triop,
       Iex_Binop,
       Iex_Unop,
-      Iex_Load,
       Iex_Const,
       Iex_Mux0X,
       Iex_CCall,
       Iex_Associative, /* n-ary associative operator */
-      Iex_FreeVariable,
       Iex_ClientCall,
       Iex_ClientCallFailed,
+      Iex_FreeVariable,
+      Iex_Load,
       Iex_HappensBefore,
       Iex_Phi,
    }

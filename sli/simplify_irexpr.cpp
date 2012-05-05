@@ -393,15 +393,47 @@ _sortIRConsts(IRConst *a, IRConst *b)
 	abort();
 }
 
-/* Simple sort function: constants go at the front, and then
-   everything goes afterwards.  We arrange that identical expressions
-   are always sorted together.  Returns true if @a should be before
-   @b. */
+static bool
+isEqualityTest(const IRExpr *a)
+{
+	if (a->tag != Iex_Binop)
+		return false;
+	const IRExprBinop *ab = (const IRExprBinop *)a;
+	return (ab->op >= Iop_CmpEQ8 && ab->op <= Iop_CmpEQ64) ||
+		ab->op == Iop_CmpEQ1;
+}
+
+static bool
+isVariableLike(const IRExpr *a)
+{
+	return a->tag == Iex_Get || a->tag == Iex_Load ||
+		a->tag == Iex_ClientCall ||
+		a->tag == Iex_ClientCallFailed ||
+		a->tag == Iex_FreeVariable;
+}
+
+/* Simple sort function.  Ordering looks like this:
+
+   Constants
+   Equality tests
+   Other boolean expressions
+   Variable-like expressions:
+     Registers and temporaries
+     Loads
+     Call expressions
+     Failed call expressions
+   Everything else.
+
+   We arrange that equal expressions are always sorted together.
+   Returns true if @a should be before @b. */
 static sort_ordering
 _sortIRExprs(IRExpr *_a, IRExpr *_b)
 {
 	if (_a == _b)
 		return equal_to;
+
+	sort_ordering s;
+
 	if (_a->tag == Iex_Const && _b->tag == Iex_Const) {
 		IRExprConst *a = (IRExprConst *)_a;
 		IRExprConst *b = (IRExprConst *)_b;
@@ -411,12 +443,36 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 		return less_than;
 	if (_b->tag == Iex_Const)
 		return greater_than;
-	if (_a->tag < _b->tag)
-		return less_than;
-	if (_a->tag > _b->tag)
-		return greater_than;
+	{
+		bool a_is_eq_test = isEqualityTest(_a);
+		bool b_is_eq_test = isEqualityTest(_b);
+		if (a_is_eq_test && !b_is_eq_test)
+			return less_than;
+		if (b_is_eq_test && !a_is_eq_test)
+			return greater_than;
+	}
+	{
+		IRType a_type = _a->type();
+		IRType b_type = _b->type();
+		if (a_type == Ity_I1 && b_type != Ity_I1)
+			return less_than;
+		if (b_type == Ity_I1 && a_type != Ity_I1)
+			return greater_than;
+	}
+	{
+		bool a_is_var_like = isVariableLike(_a);
+		bool b_is_var_like = isVariableLike(_b);
+		if (a_is_var_like && !b_is_var_like)
+			return less_than;
+		if (b_is_var_like && !a_is_var_like)
+			return greater_than;
+	}
 
-	sort_ordering s;
+	/* None of the special rules fired -> use fallback
+	 * ordering. */
+	s = _sortIntegers(_a->tag, _b->tag);
+	if (s != equal_to)
+		return s;
 
 	switch (_a->tag) {
 #define hdr1(t)								\
@@ -462,10 +518,22 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 			return less_than;
 		if (a->op > b->op)
 			return greater_than;
-		if ((s = _sortIRExprs(a->arg1, b->arg1)) != equal_to)
-			return s;
-		else
-			return _sortIRExprs(a->arg2, b->arg2);
+		/* Special case: if we're comparing two equality
+		   tests, and both have a constant on the LHS, sort on
+		   the RHS.  Otherwise, we'd sort on the value of the
+		   constant, which is a bit useless. */
+		if (a->op >= Iop_CmpEQ8 && a->op <= Iop_CmpEQ64 &&
+		    a->arg1->tag == Iex_Const && b->arg1->tag == Iex_Const) {
+			if ((s = _sortIRExprs(a->arg2, b->arg2)) != equal_to)
+				return s;
+			else
+				return _sortIRExprs(a->arg1, b->arg1);
+		} else {
+			if ((s = _sortIRExprs(a->arg1, b->arg1)) != equal_to)
+				return s;
+			else
+				return _sortIRExprs(a->arg2, b->arg2);
+		}
 	hdr(Unop)
 		if (a->op < b->op)
 			return less_than;
@@ -540,7 +608,7 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 		}
 	hdr(ClientCallFailed)
 		return _sortIRExprs(a->target,
-				   b->target);
+				    b->target);
 	hdr(HappensBefore)
 		if ((s = _sortIntegers(a->before, b->before)) != equal_to)
 			return s;
@@ -676,34 +744,36 @@ _sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 }
 
 static sort_ordering
-_cnf_disjunction_sort(IRExpr *a, IRExpr *b)
+_cnf_disjunction_sort(IRExpr *a1, IRExpr *b1)
 {
 	/* The disjunction order is essentially the same as the normal
 	   sortIRExprs order, except that we strip off leading
 	   Iop_Not1 operations, so that A and ~A always sort together,
 	   and then do a little bit extra so that ~A is always after
 	   A. */
+	IRExpr *a = a1;
+	IRExpr *b = b1;
 	bool inv_a = false;
 	bool inv_b = false;
 	while (a->tag == Iex_Unop) {
 		IRExprUnop *ua = (IRExprUnop *)a;
 		if (ua->op != Iop_Not1)
 			break;
-		inv_a = true;
+		inv_a = !inv_a;
 		a = ua->arg;
 	}
 	while (b->tag == Iex_Unop) {
 		IRExprUnop *ub = (IRExprUnop *)b;
 		if (ub->op != Iop_Not1)
 			break;
-		inv_b = true;
+		inv_b = !inv_b;
 		b = ub->arg;
 	}
 	sort_ordering order = _sortIRExprs(a, b);
 	if (order == equal_to) {
 		return _sortIntegers(inv_a, inv_b);
 	} else {
-		return order;
+		return _sortIRExprs(a1, b1);
 	}
 }
 
