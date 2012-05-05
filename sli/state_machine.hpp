@@ -664,19 +664,16 @@ public:
 };
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
-	void constructed();
 public:
 	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(alloc()), type(_type)
 	{
-		constructed();
 	}
 	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(reg), type(_type)
 	{
-		constructed();
 	}
 	threadAndRegister target;
 	IRType type;

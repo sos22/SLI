@@ -146,14 +146,6 @@ StateMachineSideEffectStore::updateLoadedAddresses(std::set<IRExpr *> &l, const 
 	}
 }
 
-void
-StateMachineSideEffectLoad::constructed()
-{
-	if (addr) {
-		bool ign;
-		addr = optimiseIRExprFP(addr, AllowableOptimisations::defaultOptimisations, &ign);
-	}
-}
 StateMachineSideEffect *
 StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
 {
@@ -162,7 +154,6 @@ StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, Oracle *
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
-	constructed();
 	return this;
 }
 
