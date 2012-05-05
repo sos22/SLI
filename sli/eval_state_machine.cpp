@@ -71,7 +71,7 @@ class threadState {
 		assignmentOrder.push_back(reg);
 	}
 
-	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp);
+	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp, const AllowableOptimisations &opt);
 public:
 	IRExpr *register_value(const threadAndRegister &reg,
 			       IRType type) {
@@ -240,7 +240,9 @@ public:
 			abort();
 		}
 	}
-	void set_register(const threadAndRegister &reg, IRExpr *e, IRExpr **assumption) {
+	void set_register(const threadAndRegister &reg, IRExpr *e,
+			  IRExpr **assumption,
+			  const AllowableOptimisations &opt) {
 		register_val &rv(registers[reg]);
 		switch (e->type()) {
 		case Ity_I8:
@@ -266,11 +268,12 @@ public:
 		}
 
 		if (reg.isTemp())
-			*assumption = setTemporary(reg, *assumption);
+			*assumption = setTemporary(reg, *assumption, opt);
 
 		bump_register_in_assignment_order(reg);
 	}
-	void eval_phi(StateMachineSideEffectPhi *phi, IRExpr **assumption) {
+	void eval_phi(StateMachineSideEffectPhi *phi, IRExpr **assumption,
+		      const AllowableOptimisations &opt) {
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
 		     it++) {
@@ -281,7 +284,7 @@ public:
 					if (it2->first == it->gen()) {
 						registers[phi->reg] = registers[*it];
 						if (phi->reg.isTemp())
-							*assumption = setTemporary(phi->reg, *assumption);
+							*assumption = setTemporary(phi->reg, *assumption, opt);
 						bump_register_in_assignment_order(phi->reg);
 						return;
 					}
@@ -309,14 +312,14 @@ public:
 		rv.val32 = NULL;
 		rv.val64 = NULL;
 		if (phi->reg.isTemp())
-			*assumption = setTemporary(phi->reg, *assumption);
+			*assumption = setTemporary(phi->reg, *assumption, opt);
 		bump_register_in_assignment_order(phi->reg);
 	}
 };
 
 /* Rewrite @e now that we know the value of @reg */
 IRExpr *
-threadState::setTemporary(const threadAndRegister &reg, IRExpr *e)
+threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const AllowableOptimisations &opt)
 {
 	struct _ : public IRExprTransformer {
 		const threadAndRegister &reg;
@@ -331,7 +334,7 @@ threadState::setTemporary(const threadAndRegister &reg, IRExpr *e)
 				return IRExprTransformer::transformIex(ieg);
 		}
 	} doit(reg, this);
-	return doit.doit(e);
+	return simplifyIRExpr(doit.doit(e), opt);
 }
 
 typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
@@ -662,7 +665,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 						specialiseIRExpr(addr, state),
 						smsel->rip,
 						smsel->type)));
-		state.set_register(smsel->target, val, assumption);
+		state.set_register(smsel->target, val, assumption, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -671,7 +674,8 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		assert(smsec);
 		state.set_register(smsec->target,
 				   specialiseIRExpr(smsec->value, state),
-				   assumption);
+				   assumption,
+				   opt);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
@@ -687,7 +691,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *smsep =
 			(StateMachineSideEffectPhi *)(smse);
-		state.eval_phi(smsep, assumption);
+		state.eval_phi(smsep, assumption, opt);
 		break;
 	}
 	}
@@ -819,6 +823,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = assumption;
 		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
+		assert(ctxt.pathConstraint->optimisationsApplied != 0);
 		if (crashes)
 			*mightCrash = true;
 		else
