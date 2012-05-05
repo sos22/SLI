@@ -358,7 +358,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 			}
 		} doit;
 
-		if (doit(hdr->nr_loads, smsel_dr, raw_types_database, offset, &sz) ||
+		if (doit(hdr->nr_loads, smsel_dr, raw_types_database, offset, &sz) &&
 		    doit(hdr->nr_stores, smses_dr, raw_types_database, offset, &sz)) {
 			cache.set(smsel, smses, idx, true);
 			return true;
