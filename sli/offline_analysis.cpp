@@ -290,10 +290,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		done_something = false;
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, oracle, &done_something);
-		sm->sanityCheck();
 		if (opt.ignoreSideEffects())
 			removeSurvivingStates(sm, &done_something);
-		sm->sanityCheck();
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &done_something);
@@ -302,10 +300,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			bool d;
 			do {
 				d = false;
-				sm->sanityCheck();
-				StateMachine *smp = deadCodeElimination(sm, &d);
-				smp->sanityCheck();
-				sm = smp;
+				sm = deadCodeElimination(sm, &d);
 				done_something |= d;
 			} while (d);
 		}
@@ -532,14 +527,13 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		 const std::set<DynAnalysisRip> &is,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
+		 const AllowableOptimisations &optIn,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
 	AllowableOptimisations opt =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack()
-		.enableassumeNoInterferingStores()
-		.setAddressSpace(oracle->ms->addressSpace);
+		optIn
+		.enableassumeNoInterferingStores();
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, opt, token));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
@@ -613,15 +607,14 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 		  VexPtr<Oracle> &oracle,
 		  const VexRip &interestingRip,
 		  ThreadId tid,
+		  const AllowableOptimisations &optIn,
 		  GarbageCollectionToken token)
 {
 	__set_profiling(buildProbeMachine);
 
 	AllowableOptimisations opt =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack()
-		.enableignoreSideEffects()
-		.setAddressSpace(oracle->ms->addressSpace);
+		optIn
+		.enableignoreSideEffects();
 
 	VexPtr<StateMachine, &ir_heap> sm(NULL);
 
@@ -709,6 +702,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      VexPtr<CrashSummary, &ir_heap> &summary,
 		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
+		      const AllowableOptimisations &optIn,
 		      GarbageCollectionToken token)
 {
 	assert(potentiallyConflictingStores.size() > 0);
@@ -744,6 +738,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 					      potentiallyConflictingStores,
 					      needRemoteMacroSections,
 					      STORING_THREAD + i,
+					      optIn,
 					      token);
 	}
 
@@ -755,6 +750,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<Oracle> &oracle,
 	      VexPtr<MachineState> &ms,
 	      bool needRemoteMacroSections,
+	      const AllowableOptimisations &optIn,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
@@ -770,8 +766,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	}
 
 	AllowableOptimisations opt =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack()
+		optIn
 		.enableignoreSideEffects()
 		.enablefreeVariablesNeverAccessStack();
 	VexPtr<IRExpr, &ir_heap> survive(
@@ -805,6 +800,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	if (mightCrash) {
 		fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
 		printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
+		dbg_break("Bad things are happening\n");
 		return NULL;
 	}
 
@@ -813,6 +809,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	bool foundRace = probeMachineToSummary(probeMachine, oracle, survive,
 					       summary, needRemoteMacroSections,
 					       potentiallyConflictingStores,
+					       optIn,
 					       token);
 	if (TIMEOUT)
 		return NULL;
@@ -1357,12 +1354,10 @@ CFGtoCrashReason(unsigned tid,
 
 	FreeVariableMap fv;
 	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip, fv, tid));
-	sm->sanityCheck();
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, opt, oracle, false, false, token);
 	if (crashReasons)
 		crashReasons->set(original_rip, sm->root);
-	sm->sanityCheck();
 	return sm;
 }
 
@@ -1448,11 +1443,15 @@ checkWhetherInstructionCanCrash(const VexRip &rip,
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, rip);
 
+	AllowableOptimisations opt =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack()
+		.setAddressSpace(oracle->ms->addressSpace);
 	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, rip, thr->tid, token);
+	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, rip, thr->tid, opt, token);
 	if (probeMachine) {
 		VexPtr<CrashSummary, &ir_heap> summary;
-		summary = diagnoseCrash(probeMachine, oracle, ms, false, token);
+		summary = diagnoseCrash(probeMachine, oracle, ms, false, opt, token);
 		if (summary)
 			df(summary, token);
 	}

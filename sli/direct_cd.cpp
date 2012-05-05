@@ -64,14 +64,19 @@ main(int argc, char *argv[])
 	DumpFix df(oracle);
 	VexPtr<StateMachine, &ir_heap> probeMachine;
 
+	AllowableOptimisations opt =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack()
+		.setAddressSpace(ms->addressSpace);
 	probeMachine = buildProbeMachine(previousInstructions,
 					 ii,
 					 oracle,
 					 VexRip::invent_vex_rip(thr->regs.rip()),
 					 thr->tid,
+					 opt,
 					 ALLOW_GC);
 	VexPtr<CrashSummary, &ir_heap> summary;
-	summary = diagnoseCrash(probeMachine, oracle, ms, true, ALLOW_GC);
+	summary = diagnoseCrash(probeMachine, oracle, ms, true, opt, ALLOW_GC);
 	if (summary)
 		df(summary, ALLOW_GC);
 

@@ -69,11 +69,13 @@ StateMachine *buildProbeMachine(std::vector<VexRip> &previousInstructions,
 				VexPtr<Oracle> &oracle,
 				const VexRip &interestingRip,
 				ThreadId tid,
+				const AllowableOptimisations &opt,
 				GarbageCollectionToken token);
 CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    VexPtr<Oracle> &oracle,
 			    VexPtr<MachineState> &ms,
 			    bool needRemoteMacroSections,
+			    const AllowableOptimisations &opt,
 			    GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,
