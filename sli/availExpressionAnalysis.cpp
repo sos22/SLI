@@ -980,6 +980,9 @@ availExpressionAnalysis(StateMachine *sm,
 		}
 	}
 
+	if (TIMEOUT)
+		return sm;
+
 	/* So after all that we now have a complete map of what's
 	   available where.  Given that, we should be able to
 	   construct a new state machine with redundant loads replaced
