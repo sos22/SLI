@@ -1989,6 +1989,23 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				else
 					return IRExpr_Unop(Iop_Not1, r);
 			}
+			/* Slight generalisation of that:
+			   0:X == 1UtoX(x) -> !x for any type X, and
+			   1:X == 1UtoX(x) -> x */
+			if (l->tag == Iex_Const &&
+			    e->op >= Iop_CmpEQ8 &&
+			    e->op <= Iop_CmpEQ64 &&
+			    r->tag == Iex_Unop &&
+			    ((IRExprUnop *)r)->op >= Iop_1Uto8 &&
+			    ((IRExprUnop *)r)->op <= Iop_1Uto64) {
+				IRExprConst *lc = (IRExprConst *)l;
+				IRExprUnop *ru = (IRExprUnop *)r;
+				*done_something = true;
+				if (lc->con->Ico.U1)
+					return ru->arg;
+				else
+					return IRExpr_Unop(Iop_Not1, ru->arg);
+			}
 
 			/* And another one: -x == c -> x == -c if c is a constant. */
 			if (e->op == Iop_CmpEQ64 &&
