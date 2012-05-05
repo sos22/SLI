@@ -677,7 +677,11 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 	e->sanity_check();
 #endif
 	progress = false;
-	e = optimiseIRExpr(e, opt, &progress);
+	IRExpr *e2;
+	e2 = optimiseIRExpr(e, opt, &progress);
+	if (e2 != e)
+		progress = true;
+	e = e2;
 	if (progress) {
 		*done_something = true;
 		while (progress) {
@@ -688,7 +692,10 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 				return e;
 			}
 			progress = false;
-			e = optimiseIRExpr(e, opt, &progress);
+			e2 = optimiseIRExpr(e, opt, &progress);
+			if (e2 != e)
+				progress = true;
+			e = e2;
 		}
 	}
 	e->optimisationsApplied |= opt.asUnsigned();
