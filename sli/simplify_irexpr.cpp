@@ -2206,7 +2206,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				IRExpr *from;
 				bool to;
 				IRExpr *_to;
-				bool *done_something;
 				IRExpr *rewriteFrom;
 				IRExpr *rewriteTo;
 				IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
@@ -2233,7 +2232,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			doit.from = expr;
 			doit.to = val;
 			doit._to = NULL;
-			doit.done_something = done_something;
 			doit.rewriteFrom = NULL;
 			doit.rewriteTo = NULL;
 			if (val && expr->tag == Iex_Binop) {
@@ -2255,7 +2253,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					doit.rewriteTo = ieb->arg1;
 				}
 			}
-			return doit.doit(inp);
+			return doit.doit(inp, done_something);
 		}
 		IRExpr *transformIex(IRExprMux0X *e) {
 			hdr(Mux0X)
