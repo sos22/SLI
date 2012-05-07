@@ -41,6 +41,7 @@ public:
 };
 
 IRExpr *survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
+					       VexPtr<IRExpr, &ir_heap> &assumption,
 					       VexPtr<Oracle> &oracle,
 					       const AllowableOptimisations &opt,
 					       GarbageCollectionToken token);
@@ -76,5 +77,11 @@ IRExpr *writeMachineCrashConstraint(StateMachine *sm,
 				    IRExpr *crashExpression,
 				    IRExpr *escapeExpression,
 				    const AllowableOptimisations &opt);
+IRExpr *writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
+					  VexPtr<StateMachine, &ir_heap> &readMachine,
+					  VexPtr<Oracle> &oracle,
+					  VexPtr<IRExpr, &ir_heap> &assumption,
+					  const AllowableOptimisations &opt,
+					  GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

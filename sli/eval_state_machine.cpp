@@ -792,6 +792,7 @@ bigStepEvalStateMachine(StateMachine *rootMachine,
    the initial state which will lead to it not crashing. */
 IRExpr *
 survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
+				       VexPtr<IRExpr, &ir_heap> &assumption,
 				       VexPtr<Oracle> &oracle,
 				       const AllowableOptimisations &opt,
 				       GarbageCollectionToken token)
@@ -799,23 +800,24 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	__set_profiling(survivalConstraintIfExecutedAtomically);
 	NdChooser chooser;
 
-	VexPtr<IRExpr, &ir_heap> res(NULL);
+	VexPtr<IRExpr, &ir_heap> res(assumption);
 	do {
 		if (TIMEOUT)
 			return NULL;
 
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
-		ctxt.pathConstraint = IRExpr_Const(IRConst_U1(1));
-		ctxt.pathConstraint->optimisationsApplied = 0xffff;
+		ctxt.pathConstraint =
+			assumption ? assumption.get() : IRExpr_Const(IRConst_U1(1));
+		ctxt.justPathConstraint =
+			assumption ? IRExpr_Const(IRConst_U1(1)) : NULL;
 		bool crashes;
 		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
-		assert(ctxt.pathConstraint->optimisationsApplied);
 		if (crashes) {
 			IRExpr *component =
 				IRExpr_Unop(
 					Iop_Not1,
-					ctxt.pathConstraint);
+					assumption ? ctxt.justPathConstraint : ctxt.pathConstraint);
 			if (res)
 				res = IRExpr_Binop(
 					Iop_And1,
@@ -1410,3 +1412,51 @@ findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 	return res;
 }
 
+/* Transform @machine so that wherever it would previously branch to
+   @from it will now branch to @to.  If @from is a terminal state then
+   this effectively concatenates the two machines together. */
+static StateMachine *
+concatenateStateMachines(StateMachine *machine, StateMachineState *from, StateMachineState *to)
+{
+	std::map<StateMachineState *, StateMachineState *> rewriteRules;
+	rewriteRules[from] = to;
+	StateMachineTransformer::rewriteMachine(machine, rewriteRules);
+	assert(rewriteRules.count(machine->root));
+	return new StateMachine(rewriteRules[machine->root],
+				machine->origin,
+				machine->freeVariables,
+				machine->tid);
+}
+
+IRExpr *
+writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
+				  VexPtr<StateMachine, &ir_heap> &readMachine,
+				  VexPtr<Oracle> &oracle,
+				  VexPtr<IRExpr, &ir_heap> &assumption,
+				  const AllowableOptimisations &opt,
+				  GarbageCollectionToken token)
+{
+	__set_profiling(writeMachineSuitabilityConstraint);
+
+	VexPtr<StateMachine, &ir_heap> combinedMachine;
+
+	combinedMachine = concatenateStateMachines(
+		writeMachine,
+		StateMachineCrash::get(),
+		readMachine->root);
+	combinedMachine = optimiseStateMachine(combinedMachine,
+					       opt
+					          .enableassumeExecutesAtomically()
+					          .enableignoreSideEffects()
+					          .enableassumeNoInterferingStores(),
+					       oracle,
+					       true,
+					       true,
+					       token);
+	return survivalConstraintIfExecutedAtomically(
+		combinedMachine,
+		assumption,
+		oracle,
+		opt,
+		token);
+}

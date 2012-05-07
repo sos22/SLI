@@ -108,34 +108,19 @@ StateMachineTransformer::transformState(StateMachineState *s, bool *done_somethi
 	abort();
 }
 
-StateMachine *
-StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
+void
+StateMachineTransformer::rewriteMachine(StateMachine *sm,
+					std::map<StateMachineState *, StateMachineState *> &stateRewrites)
 {
-	bool _b;
-	if (!done_something) done_something = &_b;
 	std::set<StateMachineState *> allStates;
 	enumStates(sm, &allStates);
 
-	/* Step 1: walk over the state machine states and figure out
-	   which ones need to be changed due to the actual
-	   transformation. */
-	std::map<StateMachineState *, StateMachineState *> stateRewrites; /* From old state to new state */
-
-	for (auto it = allStates.begin(); it != allStates.end(); it++) {
-		StateMachineState *s = *it;
-		StateMachineState *res = transformState(s, done_something);
-		if (res != NULL && res != s) {
-			/* This one got rewritten */
-			stateRewrites[s] = res;
-			*done_something = true;
-		}
-	}
-
-	/* Step 2: If we're rewriting a state, we have to rewrite all
-	   of the edges which target it, and if we're rewriting an
-	   edge then we have to rewrite all of the states which branch
-	   to it.  Take a (kind of) closure of the rewrites obtained
-	   thus far to ensure that we get this right. */
+	/* Step 2 of state machine transformation: If we're rewriting
+	   a state, we have to rewrite all of the edges which target
+	   it, and if we're rewriting an edge then we have to rewrite
+	   all of the states which branch to it.  Take a (kind of)
+	   closure of the rewrites obtained thus far to ensure that we
+	   get this right. */
 	bool progress;
 	do {
 		progress = false;
@@ -244,6 +229,33 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			break;
 		}
 	}
+
+}
+
+StateMachine *
+StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
+{
+	bool _b;
+	if (!done_something) done_something = &_b;
+	std::set<StateMachineState *> allStates;
+	enumStates(sm, &allStates);
+
+	/* Step 1: walk over the state machine states and figure out
+	   which ones need to be changed due to the actual
+	   transformation. */
+	std::map<StateMachineState *, StateMachineState *> stateRewrites; /* From old state to new state */
+
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		StateMachineState *s = *it;
+		StateMachineState *res = transformState(s, done_something);
+		if (res != NULL && res != s) {
+			/* This one got rewritten */
+			stateRewrites[s] = res;
+			*done_something = true;
+		}
+	}
+
+	rewriteMachine(sm, stateRewrites);
 
 	/* The state machine proper has now been fully rewritten.  All
 	   that remains is to transform the free variable map and

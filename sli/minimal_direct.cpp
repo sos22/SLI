@@ -175,7 +175,7 @@ main(int argc, char *argv[])
 	   -- a...b and b...c must, between them, cover precisely the
               same range as a...c i.e. no duplicates or gaps.
 	*/
-	unsigned long start_instr = 353;//total_instructions / 100 * start_percentage;
+	unsigned long start_instr = 2042;//total_instructions / 100 * start_percentage;
 	unsigned long end_instr = end_percentage == 100 ? total_instructions : total_instructions / 100 * end_percentage - 1;
 	unsigned long instructions_to_process = end_instr - start_instr + 1;
 

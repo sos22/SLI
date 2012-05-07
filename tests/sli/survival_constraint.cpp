@@ -15,13 +15,14 @@ main(int argc, char *argv[])
 
 	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(open(argv[1], O_RDONLY)));
 	VexPtr<IRExpr, &ir_heap> survive;
-	
+	VexPtr<IRExpr, &ir_heap> nullExpr(NULL);
+
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableignoreSideEffects();
 
-	survive = survivalConstraintIfExecutedAtomically(sm, oracle, opt, ALLOW_GC);
+	survive = survivalConstraintIfExecutedAtomically(sm, nullExpr, oracle, opt, ALLOW_GC);
 
 	survive = simplifyIRExpr(survive, opt);
 

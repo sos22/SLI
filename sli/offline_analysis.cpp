@@ -383,19 +383,29 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
-	IRExpr *writeMachineConstraint =
+	VexPtr<IRExpr, &ir_heap> writeMachineConstraint(
 		writeMachineCrashConstraint(sm,
 					    IRExpr_Const(IRConst_U1(0)),
 					    assumption,
 					    IRExpr_Const(IRConst_U1(0)),
-					    opt);
+					    opt));
 	if (!writeMachineConstraint) {
+		fprintf(_logfile, "\t\tCannot derive write machine crash constraint\n");
+		return false;
+	}
+
+	assumption = writeMachineSuitabilityConstraint(
+		sm,
+		probeMachine,
+		oracle,
+		assumption,
+		opt,
+		token);
+
+	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return false;
 	}
-	assumption = IRExpr_Binop(Iop_And1, assumption, writeMachineConstraint);
-	writeMachineConstraint = NULL;
-	assumption = simplifyIRExpr(assumption, opt);
 
 	fprintf(_logfile, "\t\tWrite machine suitability constraint: ");
 	ppIRExpr(assumption, _logfile);
@@ -780,7 +790,8 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		atomicProbeMachine = duplicateStateMachine(probeMachine);
 		atomicProbeMachine = optimiseStateMachine(atomicProbeMachine, opt, oracle,
 							  true, true, token);
-		survive = survivalConstraintIfExecutedAtomically(atomicProbeMachine, oracle, opt, token);
+		VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
+		survive = survivalConstraintIfExecutedAtomically(atomicProbeMachine, nullexpr, oracle, opt, token);
 		if (!survive) {
 			fprintf(_logfile, "\tTimed out computing survival constraint\n");
 			return NULL;
