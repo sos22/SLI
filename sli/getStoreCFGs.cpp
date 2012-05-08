@@ -107,14 +107,16 @@ top_exploration_iter:
 				   but at a worse depth.  Fix it
 				   up. */
 				CFGNode *n = it->second.second;
-				if (n->branchRip.isValid())
+				for (auto it2 = n->branches.begin();
+				     it2 != n->branches.end();
+				     it2++)
 					pending.push(std::pair<unsigned, VexRip>(
 							     item.first - 1,
-							     n->branchRip));
-				if (n->fallThroughRip.isValid())
+							     it2->first));
+				if (n->fallThrough.first.isValid())
 					pending.push(std::pair<unsigned, VexRip>(
 							     item.first - 1,
-							     n->fallThroughRip));
+							     n->fallThrough.first));
 				it->second.first = item.first;
 
 				if (item.first == maxPathLength)
@@ -140,28 +142,32 @@ top_exploration_iter:
 		int x;
 		for (x = 1; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 			if (irsb->stmts[x]->tag == Ist_Exit)
-				work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst.rip;
+				work->branches.push_back(
+					CFGNode::successor_t(((IRStmtExit *)irsb->stmts[x])->dst.rip,
+							     NULL));
 		}
 		if (x == irsb->stmts_used) {
 			if (irsb->jumpkind == Ijk_Ret) {
-				work->fallThroughRip = item.second;
-				work->fallThroughRip.rtrn();
+				work->fallThrough.first = item.second;
+				work->fallThrough.first.rtrn();
 			} else if (irsb->next_is_const) {
-				work->fallThroughRip = irsb->next_const.rip;
+				work->fallThrough.first = irsb->next_const.rip;
 			}
 		} else {
 			assert(irsb->stmts[x]->tag == Ist_IMark);
-			work->fallThroughRip = ((IRStmtIMark *)irsb->stmts[x])->addr.rip;
+			work->fallThrough.first = ((IRStmtIMark *)irsb->stmts[x])->addr.rip;
 		}
 		if (item.first != 1) {
-			if (work->fallThroughRip.isValid())
+			if (work->fallThrough.first.isValid())
 				pending.push(std::pair<unsigned, VexRip>(
 						     item.first - 1,
-						     work->fallThroughRip));
-			if (work->branchRip.isValid())
+						     work->fallThrough.first));
+			for (auto it = work->branches.begin();
+			     it != work->branches.end();
+			     it++)
 				pending.push(std::pair<unsigned, VexRip>(
 						     item.first - 1,
-						     work->branchRip));
+						     it->first));
 		}
 
 		doneSoFar[item.second] = std::pair<unsigned, CFGNode *>(item.first, work);
@@ -273,8 +279,9 @@ resolveReferences(std::map<VexRip, CFGNode *> &m)
 	for (auto it = m.begin(); it != m.end(); it++) {
 		CFGNode *n = it->second;
 		assert(n);
-		n->fallThrough = resolveBranch(n->fallThroughRip);
-		n->branch = resolveBranch(n->branchRip);
+		n->fallThrough.second = resolveBranch(n->fallThrough.first);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			it->second = resolveBranch(it->first);
 	}
 }
 
@@ -309,11 +316,15 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			assert(n);
 			if (interesting.count(n))
 				continue;
-			if ( (n->fallThrough && interesting.count(n->fallThrough)) ||
-			     (n->branch && interesting.count(n->branch)) ) {
+			bool isInteresting = false;
+			if ( n->fallThrough.second && interesting.count(n->fallThrough.second) )
+				isInteresting = true;
+			for (auto it = n->branches.begin(); !isInteresting && it != n->branches.end(); it++)
+				if (it->second && interesting.count(it->second))
+					isInteresting = true;
+			if (isInteresting) {
 				interesting.insert(n);
 				progress = true;
-				continue;
 			}
 		}
 	}
@@ -326,10 +337,11 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			m.erase(it++);
 			continue;
 		}
-		if (n->fallThrough && !interesting.count(n->fallThrough))
-			n->fallThrough = NULL;
-		if (n->branch && !interesting.count(n->branch))
-			n->branch = NULL;
+		if (n->fallThrough.second && !interesting.count(n->fallThrough.second))
+			n->fallThrough.second = NULL;
+		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+			if (it2->second && !interesting.count(it2->second))
+				it2->second = NULL;
 		it++;
 	}
 }
@@ -348,10 +360,11 @@ removeReachable(std::set<CFGNode *> &out, const CFGNode *n)
 			/* Already not-present */
 			continue;
 		}
-		if (n->fallThrough)
-			pending.push_back(n->fallThrough);
-		if (n->branch)
-			pending.push_back(n->branch);
+		if (n->fallThrough.second)
+			pending.push_back(n->fallThrough.second);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second)
+				pending.push_back(it->second);
 	}
 }
 
@@ -375,10 +388,11 @@ nrSuccessors(const std::set<CFGNode *> &interesting, const CFGNode *n)
 			continue;
 		if (!successors.insert(n).second)
 			continue;
-		if (n->branch)
-			pending.push(n->branch);
-		if (n->fallThrough)
-			pending.push(n->fallThrough);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second)
+				pending.push(it->second);
+		if (n->fallThrough.second)
+			pending.push(n->fallThrough.second);
 	}
 	return successors.size();
 }
@@ -410,10 +424,11 @@ findRoots(const std::map<VexRip, CFGNode *> &m,
 	     it != currentlyUnrooted.end();
 	     it++) {
 		CFGNode *n = *it;
-		if (n->fallThrough)
-			newRoots.erase(n->fallThrough);
-		if (n->branch)
-			newRoots.erase(n->branch);
+		if (n->fallThrough.second)
+			newRoots.erase(n->fallThrough.second);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second)
+				newRoots.erase(it->second);
 	}
 
 	removeReachable(currentlyUnrooted, newRoots);
@@ -510,8 +525,10 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
 	pending.reserve(roots.size() * 2);
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		CFGNode *n = *it;
-		if (n->fallThrough) pending.push_back(n->fallThrough);
-		if (n->branch) pending.push_back(n->branch);
+		if (n->fallThrough.second) pending.push_back(n->fallThrough.second);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second)
+				pending.push_back(it->second);
 	}
 	while (!pending.empty()) {
 		if (TIMEOUT)
@@ -521,8 +538,10 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
 		assert(n);
 		if (!reachable.insert(n).second)
 			continue;
-		if (n->fallThrough) pending.push_back(n->fallThrough);
-		if (n->branch) pending.push_back(n->branch);
+		if (n->fallThrough.second) pending.push_back(n->fallThrough.second);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second)
+				pending.push_back(it->second);
 	}
 	for (auto it = m.begin(); it != m.end(); ) {
 		if (reachable.count(it->second))
@@ -605,14 +624,15 @@ nodeLabellingMap::nodeLabellingMap(std::set<CFGNode *> &roots, unsigned maxPathL
 			pending.pop();
 			if (n->flavour == CFGNode::true_target_instr)
 				(*this)[n][n] = 0;
-			if (!n->fallThrough && !n->branch)
+			if (!n->fallThrough.second && n->branches.empty())
 				continue;
 			nodeLabelling exitMap((*this)[n]);
 			exitMap.successor(maxPathLength);
-			if (n->fallThrough && (*this)[n->fallThrough].merge(exitMap))
-				pending.push(n->fallThrough);
-			if (n->branch && (*this)[n->branch].merge(exitMap))
-				pending.push(n->branch);			
+			if (n->fallThrough.second && (*this)[n->fallThrough.second].merge(exitMap))
+				pending.push(n->fallThrough.second);
+			for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+				if (it2->second && (*this)[it2->second].merge(exitMap))
+					pending.push(it2->second);			
 		}
 	}
 }
@@ -623,32 +643,34 @@ static bool
 selectEdgeForCycleBreak(CFGNode *root, CFGNode **edge_start, CFGNode **edge_end,
 			std::set<CFGNode *> &clean, std::set<CFGNode *> &path)
 {
-	if (!root->fallThrough && !root->branch)
+	if (!root->fallThrough.second && root->branches.empty())
 		return false;
 	if (clean.count(root))
 		return false;
 	assert(!path.count(root));
 	clean.insert(root);
 	path.insert(root);
-	if (root->fallThrough) {
-		if (path.count(root->fallThrough)) {
+	if (root->fallThrough.second) {
+		if (path.count(root->fallThrough.second)) {
 			*edge_start = root;
-			*edge_end = root->fallThrough;
+			*edge_end = root->fallThrough.second;
 			return true;
 		}
-		if (selectEdgeForCycleBreak(root->fallThrough, edge_start, edge_end, clean,
+		if (selectEdgeForCycleBreak(root->fallThrough.second, edge_start, edge_end, clean,
 					    path))
 			return true;
 	}
-	if (root->branch) {
-		if (path.count(root->branch)) {
-			*edge_start = root;
-			*edge_end = root->branch;
-			return true;
+	for (auto it = root->branches.begin(); it != root->branches.end(); it++) {
+		if (it->second) {
+			if (path.count(it->second)) {
+				*edge_start = root;
+				*edge_end = it->second;
+				return true;
+			}
+			if (selectEdgeForCycleBreak(it->second, edge_start, edge_end, clean,
+						    path))
+				return true;
 		}
-		if (selectEdgeForCycleBreak(root->branch, edge_start, edge_end, clean,
-					    path))
-			return true;
 	}
 	path.erase(root);
 	return false;
@@ -662,41 +684,6 @@ selectEdgeForCycleBreak(CFGNode *root, CFGNode **edge_start, CFGNode **edge_end)
 				     the node we're currently looking
 				     at. */
 	return selectEdgeForCycleBreak(root, edge_start, edge_end, clean, path);
-}
-
-static void
-dump_cfg_for_dot(FILE *f, const CFGNode *root, const nodeLabellingMap &nlm, std::set<const CFGNode *> &done)
-{
-	if (!root)
-		return;
-	if (done.count(root))
-		return;
-	done.insert(root);
-	fprintf(f, "n%p [label=\"%p; ", root, root);
-	auto it = nlm.find(const_cast<CFGNode *>(root));
-	assert(it != nlm.end());
-	const nodeLabelling &label(it->second);
-	for (auto it = label.begin(); it != label.end(); it++)
-		fprintf(f, "%p->%d,", it->first, it->second);
-	fprintf(f, "\"]\n");
-	if (root->branch)
-		fprintf(f, "n%p -> n%p\n", root, root->branch);
-	if (root->fallThrough)
-		fprintf(f, "n%p -> n%p\n", root, root->fallThrough);
-
-	dump_cfg_for_dot(f, root->branch, nlm, done);	
-	dump_cfg_for_dot(f, root->fallThrough, nlm, done);	
-}
-
-static void
-dump_cfg_for_dot(const CFGNode *root, const nodeLabellingMap &nlm)
-{
-	std::set<const CFGNode *> done;
-	FILE *f = fopen("graph.dot", "w");
-	fprintf(f, "digraph {\n");
-	dump_cfg_for_dot(f, root, nlm, done);
-	fprintf(f, "}\n");
-	fclose(f);
 }
 
 /* Take the graph represented by @roots and transform it so that it is
@@ -727,11 +714,19 @@ performUnrollAndCycleBreak(std::set<CFGNode *> &roots, unsigned maxPathLength)
 				new_node = cycle_edge_end->dupe();
 				nlm[new_node] = label;
 			}
-			if (cycle_edge_start->fallThrough == cycle_edge_end) {
-				cycle_edge_start->fallThrough = new_node;
+			if (cycle_edge_start->fallThrough.second == cycle_edge_end) {
+				cycle_edge_start->fallThrough.second = new_node;
 			} else {
-				assert(cycle_edge_start->branch == cycle_edge_end);
-				cycle_edge_start->branch = new_node;
+				bool found_it = false;
+				for (auto it = cycle_edge_start->branches.begin();
+				     !found_it && it != cycle_edge_start->branches.end();
+				     it++) {
+					if (it->second == cycle_edge_end) {
+						it->second = new_node;
+						found_it = true;
+					}
+				}
+				assert(found_it);
 			}
 		}
 	}
@@ -747,10 +742,11 @@ enumerateCFG(CFGNode *start, std::set<CFGNode *> &out)
 		pending.pop_back();
 		if (!out.insert(n).second)
 			continue;
-		if (n->fallThrough)
-			pending.push_back(n->fallThrough);
-		if (n->branch)
-			pending.push_back(n->branch);
+		if (n->fallThrough.second)
+			pending.push_back(n->fallThrough.second);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second)
+				pending.push_back(it->second);
 	}
 }
 
@@ -768,10 +764,15 @@ trimUninterestingCFGNodes(std::set<CFGNode *> &roots)
 			CFGNode *n = *it;
 			if (interesting.count(n))
 				continue;
+			bool isInteresting = false;
 			if ( n->flavour == CFGNode::true_target_instr ||
 			     n->flavour == CFGNode::dupe_target_instr ||
-			     (n->fallThrough && interesting.count(n->fallThrough)) ||
-			     (n->branch && interesting.count(n->branch)) ) {
+			     (n->fallThrough.second && interesting.count(n->fallThrough.second)))
+				isInteresting = true;
+			for (auto it2 = n->branches.begin(); !isInteresting && it2 != n->branches.end(); it2++)
+				if (it2->second && interesting.count(it2->second))
+					isInteresting = true;
+			if (isInteresting) {
 				interesting.insert(n);
 				progress = true;
 			}
@@ -779,10 +780,11 @@ trimUninterestingCFGNodes(std::set<CFGNode *> &roots)
 	}
 	for (auto it = allCFGNodes.begin(); !TIMEOUT && it != allCFGNodes.end(); it++) {
 		CFGNode *n = *it;
-		if (n->fallThrough && !interesting.count(n->fallThrough))
-			n->fallThrough = NULL;
-		if (n->branch && !interesting.count(n->branch))
-			n->branch = NULL;
+		if (n->fallThrough.second && !interesting.count(n->fallThrough.second))
+			n->fallThrough.second = NULL;
+		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+			if (it2->second && !interesting.count(it2->second))
+				it2->second = NULL;
 	}
 }
 

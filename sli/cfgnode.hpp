@@ -5,10 +5,19 @@ class Oracle;
 class CFGNode : public GarbageCollected<CFGNode, &ir_heap>, public PrettyPrintable {
 public:
 	enum flavour_t { true_target_instr, dupe_target_instr, ordinary_instr } flavour;
-	VexRip fallThroughRip;
-	VexRip branchRip;
-	CFGNode *fallThrough;
-	CFGNode *branch;
+	struct successor_t : public std::pair<VexRip, CFGNode *> {
+		void prettyPrint(FILE *f) const {
+			fprintf(f, "%s(%p)", first.name(), second);
+		}
+		successor_t(const VexRip &vr, CFGNode *cfg)
+			: std::pair<VexRip, CFGNode *> (vr, cfg)
+		{}
+		successor_t()
+			: std::pair<VexRip, CFGNode *> ()
+		{}
+	};
+	successor_t fallThrough;
+	std::vector<successor_t> branches;
 
 	VexRip my_rip;
 
@@ -21,24 +30,28 @@ public:
 	CFGNode *dupe() {
 		CFGNode *r = new CFGNode(my_rip,
 					 flavour == true_target_instr ? dupe_target_instr : flavour);
-		r->fallThroughRip = fallThroughRip;
-		r->branchRip = branchRip;
 		r->fallThrough = fallThrough;
-		r->branch = branch;
+		r->branches = branches;
 		return r;
 	}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s: %s(%p), %s(%p)",
-			my_rip.name(),
-			fallThroughRip.name(),
-			fallThrough,
-			branchRip.name(),
-			branch);
+		fprintf(f, "%s: ", my_rip.name());
+		fallThrough.prettyPrint(f);
+		if (branches.size() != 0) {
+			fprintf(f, " {");
+			for (auto it = branches.begin(); it != branches.end(); it++) {
+				if (it != branches.begin())
+					fprintf(f, ", ");
+				it->prettyPrint(f);
+			}
+			fprintf(f, "}");
+		}
 	}
 	void visit(HeapVisitor &hv) {
-		hv(fallThrough);
-		hv(branch);
+		hv(fallThrough.second);
+		for (auto it = branches.begin(); it != branches.end(); it++)
+			hv(it->second);
 	}
 
 	static CFGNode *forRip(Oracle *oracle, const VexRip &vr, flavour_t flavour);

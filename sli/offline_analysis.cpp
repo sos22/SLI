@@ -41,8 +41,9 @@ enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
 	if (rips.count(root->my_rip))
 		return;
 	rips[root->my_rip] = root;
-	enumerateCFG(root->branch, rips);
-	enumerateCFG(root->fallThrough, rips);
+	enumerateCFG(root->fallThrough.second, rips);
+	for (auto it = root->branches.begin(); it != root->branches.end(); it++)
+		enumerateCFG(it->second, rips);
 }
 
 /* Remove all of the nodes which appear to be uninteresting.  A node
@@ -88,10 +89,11 @@ trimCFG(CFGNode *root, const InstructionSet &interestingAddresses)
 	     it++) {
 		CFGNode *n = it->second;
 		assert(n);
-		if (n->branch && uninteresting.count(n->branch->my_rip))
-			n->branch = NULL;
-		if (n->fallThrough && uninteresting.count(n->fallThrough->my_rip))
-			n->fallThrough = NULL;
+		if (n->fallThrough.second && uninteresting.count(n->fallThrough.second->my_rip))
+			n->fallThrough.second = NULL;
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second && uninteresting.count(it->second->my_rip))
+				it->second = NULL;
 	}
 
 	/* All done. */
@@ -121,22 +123,24 @@ breakCycles(CFGNode *cfg, std::map<CFGNode *, unsigned> &numbering,
 	}
 
 	onPath.insert(cfg);
-	if (cfg->branch) {
-		CFGNode **p = lastBackEdge;
-		if (numbering[cfg->branch] < numbering[cfg])
-			p = &cfg->branch;
-		if (cfg->branch == cfg)
-			cfg->branch = NULL;
-		else if (!breakCycles(cfg->branch, numbering, p, onPath, clean))
-			return false;
+	for (auto it = cfg->branches.begin(); it != cfg->branches.end(); it++) {
+		if (it->second) {
+			CFGNode **p = lastBackEdge;
+			if (numbering[it->second] < numbering[cfg])
+				p = &it->second;
+			if (it->second == cfg)
+				it->second = NULL;
+			else if (!breakCycles(it->second, numbering, p, onPath, clean))
+				return false;
+		}
 	}
-	if (cfg->fallThrough) {
+	if (cfg->fallThrough.second) {
 		CFGNode **p = lastBackEdge;
-		if (numbering[cfg->fallThrough] < numbering[cfg])
-			p = &cfg->fallThrough;
-		if (cfg->fallThrough == cfg)
-			cfg->fallThrough = NULL;
-		else if (!breakCycles(cfg->fallThrough, numbering, p, onPath, clean))
+		if (numbering[cfg->fallThrough.second] < numbering[cfg])
+			p = &cfg->fallThrough.second;
+		if (cfg->fallThrough.second == cfg)
+			cfg->fallThrough.second = NULL;
+		else if (!breakCycles(cfg->fallThrough.second, numbering, p, onPath, clean))
 			return false;
 	}
 
@@ -702,7 +706,7 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 static bool
 isSingleNodeCfg(CFGNode *root)
 {
-	return root->fallThrough == NULL && root->branch == NULL;
+	return root->fallThrough.second == NULL && root->branches.empty();
 }
 
 static bool
@@ -879,10 +883,13 @@ printCFG(const CFGNode *cfg, const char *prefix, FILE *f)
 		fprintf(f, "%s%p(%s): ", prefix, cfg, flavour);
 		cfg->prettyPrint(f);
 		fprintf(f, "\n");
-		if (cfg->fallThrough)
-			pending.push_back(cfg->fallThrough);
-		if (cfg->branch)
-			pending.push_back(cfg->branch);
+		if (cfg->fallThrough.second)
+			pending.push_back(cfg->fallThrough.second);
+		for (auto it = cfg->branches.begin();
+		     it != cfg->branches.end();
+		     it++)
+			if (it->second)
+				pending.push_back(it->second);
 		done.insert(cfg);
 	}
 }
@@ -922,12 +929,13 @@ buildCFGForRipSet(AddressSpace *as,
 		int x;
 		for (x = 1; x < irsb->stmts_used; x++) {
 			if (irsb->stmts[x]->tag == Ist_IMark) {
-				work->fallThroughRip = ((IRStmtIMark *)irsb->stmts[x])->addr.rip;
+				work->fallThrough.first = ((IRStmtIMark *)irsb->stmts[x])->addr.rip;
 				break;
 			}
 			if (irsb->stmts[x]->tag == Ist_Exit) {
-				assert(!work->branchRip.isValid());
-				work->branchRip = ((IRStmtExit *)irsb->stmts[x])->dst.rip;
+				work->branches.push_back(
+					CFGNode::successor_t(((IRStmtExit *)irsb->stmts[x])->dst.rip,
+							     NULL));
 			}
 		}
 		if (x == irsb->stmts_used) {
@@ -936,10 +944,11 @@ buildCFGForRipSet(AddressSpace *as,
 				if (irsb->next_is_const) {
 					if (terminalFunctions.count(irsb->next_const.rip)) {
 						/* Inline this function */
-						work->branchRip = irsb->next_const.rip;
+						work->branches.push_back(
+							CFGNode::successor_t(irsb->next_const.rip, NULL));
 					} else if (oracle->functionCanReturn(irsb->next_const.rip)) {
 						/* Treat this function as pure. */
-						work->fallThroughRip = follower;
+						work->fallThrough.first = follower;
 					} else {
 						/* This function can't
 						   return, and wasn't
@@ -953,21 +962,21 @@ buildCFGForRipSet(AddressSpace *as,
 						   empty. */
 					}
 				} else {
-					work->fallThroughRip = follower;
+					work->fallThrough.first = follower;
 				}
 			} else if (irsb->jumpkind == Ijk_Ret) {
-				work->fallThroughRip = work->my_rip;
-				work->fallThroughRip.rtrn();
+				work->fallThrough.first = work->my_rip;
+				work->fallThrough.first.rtrn();
 			} else {
 				/* Don't currently try to trace across indirect branches. */
 				if (irsb->next_is_const)
-					work->fallThroughRip = irsb->next_const.rip;
+					work->fallThrough.first = irsb->next_const.rip;
 			}
 		}
-		if (work->fallThroughRip.isValid())
-			needed.push(std::pair<unsigned, VexRip>(depth - 1, work->fallThroughRip));
-		if (work->branchRip.isValid())
-			needed.push(std::pair<unsigned, VexRip>(depth - 1, work->branchRip));
+		if (work->fallThrough.first.isValid())
+			needed.push(std::pair<unsigned, VexRip>(depth - 1, work->fallThrough.first));
+		for (auto it = work->branches.begin(); it != work->branches.end(); it++)
+			needed.push(std::pair<unsigned, VexRip>(depth - 1, it->first));
 		builtSoFar[rip] = std::pair<CFGNode *, unsigned>(work, depth);
 	}
 
@@ -982,8 +991,9 @@ buildCFGForRipSet(AddressSpace *as,
 			 * the depth limit. */
 			continue;
 		}
-		node->fallThrough = builtSoFar[node->fallThroughRip].first;
-		node->branch = builtSoFar[node->branchRip].first;
+		node->fallThrough.second = builtSoFar[node->fallThrough.first].first;
+		for (auto it = node->branches.begin(); it != node->branches.end(); it++)
+			it->second = builtSoFar[it->first].first;
 	}
 
 	return builtSoFar[start].first;
@@ -1270,8 +1280,8 @@ CFGtoCrashReason(unsigned tid,
 				}
 			}
 
-			if (cfg->fallThrough)
-				state.addReloc(&lastState->target, cfg->fallThrough);
+			if (cfg->fallThrough.second)
+				state.addReloc(&lastState->target, cfg->fallThrough.second);
 			else
 				lastState->target = escapeState;
 			return headState;
@@ -1304,7 +1314,8 @@ CFGtoCrashReason(unsigned tid,
 				;
 			if (endOfInstr == irsb->stmts_used &&
 			    irsb->jumpkind == Ijk_Call &&
-			    !cfg->branch)
+			    (cfg->branches.empty() ||
+			     cfg->branches[0].second == NULL))
 				return buildStateForCallInstruction(cfg, irsb, rip);
 			CFGNode *relocTo;
 			StateMachineSideEffecting *lastState =
@@ -1314,23 +1325,23 @@ CFGtoCrashReason(unsigned tid,
 					NULL);
 			StateMachineState *res = lastState;
 			
+#warning Only considering a single branch here, which isn't always sufficient '
 			if (endOfInstr == irsb->stmts_used && irsb->jumpkind == Ijk_Call) {
 				/* We want to inline this call, in
 				 * effect. */
-				relocTo = cfg->branch;
+				relocTo = cfg->branches[0].second;
 			} else {
-				if (!cfg->fallThrough && cfg->branch) {
+				if (!cfg->fallThrough.second && !cfg->branches.empty() && cfg->branches[0].second) {
 					/* We've decided to force this one to take the
 					   branch.  Trim the bit of the instruction
 					   after the branch. */
-					assert(cfg->branch);
 					endOfInstr--;
 					while (endOfInstr >= 0 && irsb->stmts[endOfInstr]->tag != Ist_Exit)
 						endOfInstr--;
 					assert(endOfInstr > 0);
-					relocTo = cfg->branch;
-				} else if (cfg->fallThrough) {
-					relocTo = cfg->fallThrough;
+					relocTo = cfg->branches[0].second;
+				} else if (cfg->fallThrough.second) {
+					relocTo = cfg->fallThrough.second;
 				} else {
 					relocTo = NULL;
 				}
@@ -1339,7 +1350,7 @@ CFGtoCrashReason(unsigned tid,
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				res = backtrackOneStatement(irsb->stmts[i],
 							    rip,
-							    cfg->branch,
+							    cfg->branches[0].second,
 							    res);
 				if (!res)
 					return NULL;
