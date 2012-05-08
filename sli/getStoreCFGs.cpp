@@ -150,8 +150,33 @@ top_exploration_iter:
 			if (irsb->jumpkind == Ijk_Ret) {
 				work->fallThrough.first = item.second;
 				work->fallThrough.first.rtrn();
+			} else if (irsb->jumpkind == Ijk_Call) {
+				if (irsb->next_is_const) {
+					work->branches.push_back(
+						CFGNode::successor_t(irsb->next_const.rip,
+								     NULL));
+				} else {
+					std::vector<VexRip> b;
+					oracle->getInstrCallees(item.second, b);
+					for (auto it = b.begin(); it != b.end(); it++)
+						work->branches.push_back(
+							CFGNode::successor_t(*it, NULL));
+				}
+				work->fallThrough.first = extract_call_follower(irsb);
 			} else if (irsb->next_is_const) {
 				work->fallThrough.first = irsb->next_const.rip;
+			} else {
+				/* Note that the oracle has a slightly
+				   different idea of fall-throughs to
+				   us: it considers the targets of a
+				   dynamic branch to be fall-through
+				   targets, whereas we consider them
+				   to be branch targets. */
+				std::vector<VexRip> b;
+				oracle->getInstrFallThroughs(item.second, b);
+					for (auto it = b.begin(); it != b.end(); it++)
+						work->branches.push_back(
+							CFGNode::successor_t(*it, NULL));
 			}
 		} else {
 			assert(irsb->stmts[x]->tag == Ist_IMark);

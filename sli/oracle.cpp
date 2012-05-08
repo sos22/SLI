@@ -2754,6 +2754,34 @@ Oracle::liveOnEntryToFunction(const VexRip &rip)
 	return liveOnEntryToFunction(StaticRip(rip));
 }
 
+void
+Oracle::getInstrCallees(const VexRip &vr, std::vector<VexRip> &out)
+{
+	StaticRip sr(vr);
+	std::vector<StaticRip> outSr;
+	Function(sr).getInstructionCallees(sr, outSr, this);
+	VexRip vrEnd = vr + getInstructionSize(ms->addressSpace, sr);
+	for (auto it = outSr.begin(); it != outSr.end(); it++) {
+		VexRip newVr(vrEnd);
+		newVr.call(it->rip);
+		out.push_back(newVr);
+	}
+}
+
+void
+Oracle::getInstrFallThroughs(const VexRip &vr, std::vector<VexRip> &out)
+{
+	StaticRip sr(vr);
+	std::vector<StaticRip> outSr;
+	Function(sr).getInstructionFallThroughs(sr, outSr);
+	VexRip vrEnd = vr + getInstructionSize(ms->addressSpace, sr);
+	for (auto it = outSr.begin(); it != outSr.end(); it++) {
+		VexRip newVr(vrEnd);
+		newVr.call(it->rip);
+		out.push_back(newVr);
+	}
+}
+
 VexRip
 StaticRip::makeVexRip(const VexRip &from)
 {

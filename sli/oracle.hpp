@@ -369,6 +369,9 @@ public:
 	bool getRbpToRspDelta(const VexRip &rip, long *out);
 	LivenessSet liveOnEntryToFunction(const VexRip &rip);
 
+	void getInstrCallees(const VexRip &vr, std::vector<VexRip> &out);
+	void getInstrFallThroughs(const VexRip &vr, std::vector<VexRip> &out);
+
 	~Oracle() { }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)
 		: ms(_ms), crashedThread(_thr)

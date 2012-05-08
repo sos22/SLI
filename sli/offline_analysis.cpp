@@ -1350,7 +1350,7 @@ CFGtoCrashReason(unsigned tid,
 			for (int i = endOfInstr - 1; i >= 0; i--) {
 				res = backtrackOneStatement(irsb->stmts[i],
 							    rip,
-							    cfg->branches[0].second,
+							    cfg->branches.empty() ? NULL : cfg->branches[0].second,
 							    res);
 				if (!res)
 					return NULL;
