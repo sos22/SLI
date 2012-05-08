@@ -168,6 +168,21 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &out)
 	getDominators(crashedThread, ms, out, fheads);
 }
 
+static unsigned
+getInstructionSize(AddressSpace *as, const StaticRip &rip)
+{
+	IRSB *irsb = Oracle::getIRSBForRip(as, rip);
+	if (!irsb)
+		return 0;
+	assert(irsb->stmts[0]->tag == Ist_IMark);
+	return ((IRStmtIMark *)irsb->stmts[0])->len;
+}
+unsigned
+getInstructionSize(AddressSpace *as, const VexRip &rip)
+{
+	return getInstructionSize(as, StaticRip(rip));
+}
+
 bool
 Oracle::functionCanReturn(const VexRip &rip)
 {
@@ -1211,9 +1226,13 @@ database(void)
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE callSuccRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE returnRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
 			  NULL, NULL, NULL);
@@ -1334,9 +1353,12 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads
 		drop_index("branchDest");
 		drop_index("callDest");
 		drop_index("fallThroughDest");
+		drop_index("callSuccDest");
+		drop_index("returnDest");
 		drop_index("branchRip");
 		drop_index("callRip");
 		drop_index("fallThroughRip");
+		drop_index("callSuccRip");
 		drop_index("instructionAttributesFunctionHead");
 		drop_index("instructionAttributesRip");
 
@@ -1377,11 +1399,16 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads
 		create_index("branchDest", "branchRips", "dest");
 		create_index("callDest", "callRips", "dest");
 		create_index("fallThroughDest", "fallThroughRips", "dest");
+		create_index("callSuccDest", "callSuccRips", "dest");
 		create_index("branchRip", "branchRips", "rip");
 		create_index("callRip", "callRips", "rip");
 		create_index("fallThroughRip", "fallThroughRips", "rip");
+		create_index("callSuccRip", "callSuccRips", "rip");
 		create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
 		create_index("instructionAttributesRip", "instructionAttributes", "rip");
+
+		ths->buildReturnAddressTable();
+		create_index("returnDest", "returnRips", "dest");
 	}
 
 	printf("Calculate register liveness...\n");
@@ -1391,6 +1418,65 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads
 	printf("Calculate RBP map...\n");
 	calculateRbpToRspOffsets(ths, token);
 	printf("Done static analysis phase\n");
+}
+
+void
+Oracle::buildReturnAddressTable()
+{
+	static sqlite3_stmt *stmt1, *stmt2, *stmt3;
+	std::vector<StaticRip> returnInstructions;
+	int rc;
+
+	if (!stmt1)
+		stmt1 = prepare_statement("SELECT rip FROM returnRips WHERE dest = 0");
+	extract_oraclerip_column(stmt1, 0, returnInstructions);
+
+	if (!stmt2)
+		stmt2 = prepare_statement("DELETE FROM returnRips");
+	rc = sqlite3_step(stmt2);
+	assert(rc == SQLITE_DONE);
+	sqlite3_reset(stmt2);
+
+	printf("Building return address table\n");
+	if (!stmt3)
+		stmt3 = prepare_statement("INSERT INTO returnRips (rip, dest) VALUES (?, ?)");
+
+	for (auto it = returnInstructions.begin();
+	     it != returnInstructions.end();
+	     it++) {
+		std::set<StaticRip> headsProcessed;
+		std::vector<StaticRip> toProcess;
+		toProcess.push_back(*it);
+		while (!toProcess.empty()) {
+			StaticRip head(functionHeadForInstruction(toProcess.back()));
+			toProcess.pop_back();
+			if (headsProcessed.count(head))
+				continue;
+			headsProcessed.insert(head);
+			std::vector<StaticRip> callers;
+			Function(head).addPredecessorsCall(head, callers);
+			for (auto it2 = callers.begin(); it2 != callers.end(); it2++) {
+				/* *it2 is the address of a call
+				   instruction which we might be
+				   returning from.  The return address
+				   is the end of that call
+				   instruction. */
+				StaticRip returnAddress(
+					it2->rip + getInstructionSize(ms->addressSpace, *it2));
+				bind_oraclerip(stmt3, 1, *it);
+				bind_oraclerip(stmt3, 2, returnAddress);
+				rc = sqlite3_step(stmt3);
+				assert(rc == SQLITE_DONE);
+				sqlite3_reset(stmt3);
+			}
+
+			/* Non-call predecessors of a function head
+			   might be tail calls.  Add them to the queue
+			   so that we process them later. */
+			Function(head).addPredecessorsNonCall(head, toProcess);
+		}
+	}
+	printf("Finished building return address table\n");
 }
 
 Oracle::LivenessSet
@@ -1513,6 +1599,7 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, 
 
 			std::vector<StaticRip> branch;
 			std::vector<StaticRip> fallThrough;
+			std::vector<StaticRip> callSucc;
 			std::vector<StaticRip> callees;
 			for (end_of_instruction = start_of_instruction + 1;
 			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
@@ -1526,7 +1613,7 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, 
 				if (irsb->jumpkind == Ijk_Call) {
 					if (!irsb->next_is_const ||
 					    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
-						fallThrough.push_back(StaticRip(extract_call_follower(irsb)));
+						callSucc.push_back(StaticRip(extract_call_follower(irsb)));
 					if (irsb->next_is_const)
 						callees.push_back(StaticRip(irsb->next_const.rip));
 					else
@@ -1545,6 +1632,7 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, 
 
 			heads.insert(heads.end(), callees.begin(), callees.end());
 			unexplored.insert(unexplored.end(), fallThrough.begin(), fallThrough.end());
+			unexplored.insert(unexplored.end(), callSucc.begin(), callSucc.end());
 			unexplored.insert(unexplored.end(), branch.begin(), branch.end());
 
 			/* This can sometimes contain duplicates if
@@ -1564,7 +1652,9 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, 
 			make_unique(branch);
 
 			explored.insert(r);
-			if (!work.addInstruction(r, callees, fallThrough, branch)) {
+			bool isReturn = end_of_instruction == irsb->stmts_used &&
+				irsb->jumpkind == Ijk_Ret;
+			if (!work.addInstruction(r, isReturn, callees, fallThrough, callSucc, branch)) {
 				/* Already explored this instruction
 				 * as part of some other function.
 				 * Meh. */
@@ -2261,7 +2351,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 }
 
 void
-Oracle::Function::addPredecessorsNonCall(const StaticRip &rip, std::vector<StaticRip> &out)
+Oracle::Function::addPredecessorsDirect(const StaticRip &rip, std::vector<StaticRip> &out)
 {
 	static sqlite3_stmt *stmt1, *stmt2;
 
@@ -2277,11 +2367,22 @@ Oracle::Function::addPredecessorsNonCall(const StaticRip &rip, std::vector<Stati
 }
 
 void
-Oracle::Function::addPredecessors(const StaticRip &rip, std::vector<StaticRip> &out)
+Oracle::Function::addPredecessorsNonCall(const StaticRip &rip, std::vector<StaticRip> &out)
 {
 	static sqlite3_stmt *stmt;
 
-	addPredecessorsNonCall(rip, out);
+	addPredecessorsDirect(rip, out);
+	if (!stmt)
+		stmt = prepare_statement("SELECT rip FROM callSuccRips WHERE dest = ?");
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
+}
+
+void
+Oracle::Function::addPredecessorsCall(const StaticRip &rip, std::vector<StaticRip> &out)
+{
+	static sqlite3_stmt *stmt;
+
 	if (!stmt)
 		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
 	bind_oraclerip(stmt, 1, rip);
@@ -2289,16 +2390,31 @@ Oracle::Function::addPredecessors(const StaticRip &rip, std::vector<StaticRip> &
 }
 
 void
+Oracle::Function::addPredecessorsReturn(const StaticRip &rip, std::vector<StaticRip> &out)
+{
+	static sqlite3_stmt *stmt;
+
+	if (!stmt)
+		stmt = prepare_statement("SELECT rip FROM returnRips WHERE dest = ?");
+	bind_oraclerip(stmt, 1, rip);
+	extract_oraclerip_column(stmt, 0, out);
+}
+
+void
 Oracle::Function::getInstructionFallThroughs(const StaticRip &rip, std::vector<StaticRip> &succ)
 {
-	static sqlite3_stmt *stmt1;
+	static sqlite3_stmt *stmt1, *stmt2;
 
 	if (!stmt1)
 		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
+	if (!stmt2)
+		stmt2 = prepare_statement("SELECT dest FROM callSuccRips WHERE rip = ?");
 	bind_oraclerip(stmt1, 1, rip);
+	bind_oraclerip(stmt2, 1, rip);
 
 	succ.clear();
 	extract_oraclerip_column(stmt1, 0, succ);
+	extract_oraclerip_column(stmt2, 0, succ);
 }
 
 void
@@ -2317,18 +2433,21 @@ Oracle::Function::getInstructionsInFunction(std::vector<StaticRip> &succ) const
 void
 Oracle::Function::getSuccessors(const StaticRip &rip, std::vector<StaticRip> &succ)
 {
-	static sqlite3_stmt *stmt1, *stmt2;
+	static sqlite3_stmt *stmt1, *stmt2, *stmt3;
 
 	if (!stmt1 || !stmt2) {
 		assert(!stmt1 && !stmt2);
 		stmt1 = prepare_statement("SELECT dest FROM fallThroughRips WHERE rip = ?");
-		stmt2 = prepare_statement("SELECT dest FROM branchRips WHERE rip = ?");
+		stmt2 = prepare_statement("SELECT dest FROM callSuccRips WHERE rip = ?");
+		stmt3 = prepare_statement("SELECT dest FROM branchRips WHERE rip = ?");
 	}
 	bind_oraclerip(stmt1, 1, rip);
 	bind_oraclerip(stmt2, 1, rip);
+	bind_oraclerip(stmt3, 1, rip);
 
 	extract_oraclerip_column(stmt1, 0, succ);
 	extract_oraclerip_column(stmt2, 0, succ);
+	extract_oraclerip_column(stmt3, 0, succ);
 }
 
 void
@@ -2354,14 +2473,18 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(const StaticRip &r,
 
 bool
 Oracle::Function::addInstruction(const StaticRip &rip,
+				 bool isReturn,
 				 const std::vector<StaticRip> &callees,
 				 const std::vector<StaticRip> &fallThrough,
+				 const std::vector<StaticRip> &callSucc,
 				 const std::vector<StaticRip> &branch)
 {
 	static sqlite3_stmt *stmt1;
 	static sqlite3_stmt *stmt2;
 	static sqlite3_stmt *stmt3;
 	static sqlite3_stmt *stmt4;
+	static sqlite3_stmt *stmt5;
+	static sqlite3_stmt *stmt6;
 	int rc;
 
 	if (!stmt1)
@@ -2389,6 +2512,19 @@ Oracle::Function::addInstruction(const StaticRip &rip,
 		assert(rc == SQLITE_OK);
 	}
 
+	if (!stmt6)
+		stmt6 = prepare_statement("INSERT INTO callSuccRips (rip, dest) VALUES (?, ?)");
+	for (auto it = callSucc.begin();
+	     it != callSucc.end();
+	     it++) {
+		bind_oraclerip(stmt6, 1, rip);
+		bind_oraclerip(stmt6, 2, *it);
+		rc = sqlite3_step(stmt6);
+		assert(rc == SQLITE_DONE);
+		rc = sqlite3_reset(stmt6);
+		assert(rc == SQLITE_OK);
+	}
+
 	if (!stmt3)
 		stmt3 = prepare_statement("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
 	for (auto it = branch.begin();
@@ -2412,6 +2548,16 @@ Oracle::Function::addInstruction(const StaticRip &rip,
 		rc = sqlite3_step(stmt4);
 		assert(rc == SQLITE_DONE);
 		rc = sqlite3_reset(stmt4);
+		assert(rc == SQLITE_OK);
+	}
+
+	if (isReturn) {
+		if (!stmt5)
+			stmt5 = prepare_statement("INSERT INTO returnRips (rip, dest) VALUES (?, 0)");
+		bind_oraclerip(stmt5, 1, rip);
+		rc = sqlite3_step(stmt5);
+		assert(rc == SQLITE_DONE);
+		rc = sqlite3_reset(stmt5);
 		assert(rc == SQLITE_OK);
 	}
 
@@ -2625,21 +2771,6 @@ Oracle::functionHeadForInstruction(const StaticRip &rip)
 		return StaticRip(0);
 	assert(x.size() == 1);
 	return x[0];
-}
-
-static unsigned
-getInstructionSize(AddressSpace *as, const StaticRip &rip)
-{
-	IRSB *irsb = Oracle::getIRSBForRip(as, rip);
-	if (!irsb)
-		return 0;
-	assert(irsb->stmts[0]->tag == Ist_IMark);
-	return ((IRStmtIMark *)irsb->stmts[0])->len;
-}
-unsigned
-getInstructionSize(AddressSpace *as, const VexRip &rip)
-{
-	return getInstructionSize(as, StaticRip(rip));
 }
 
 /* Find an instruction which is guaranteed to be executed before any
@@ -2907,4 +3038,99 @@ parseThreadVexRip(ThreadVexRip *tr, const char *str, const char **suffix)
 	    !parseVexRip(&tr->rip, str, suffix))
 		return false;
 	return true;
+}
+
+/* Returns true if @vr is believed to be the first instruction in a
+ * function. */
+bool
+Oracle::isFunctionHead(const VexRip &vr)
+{
+	StaticRip sr(vr);
+	static sqlite3_stmt *stmt;
+
+	if (!stmt)
+		stmt = prepare_statement("SELECT COUNT(*) FROM instructionAttributes WHERE functionHead = ?");
+	bind_oraclerip(stmt, 1, sr);
+	std::vector<unsigned long> a;
+	extract_int64_column(stmt, 0, a);
+	assert(a.size() == 1);
+	return a[0];
+}
+
+/* The call stack for @vr is possibly truncated.  Examine our
+   databases and try to figure out what might possibly be supposed to
+   be at the top of it. */
+void
+Oracle::getPossibleStackTruncations(const VexRip &vr,
+				    std::vector<unsigned long> &callers)
+{
+	/* Find the thing on the bottom of the stack, then find which
+	   function it's in, and then find all callers of that
+	   function. */
+	StaticRip baseRip(vr.stack[0]);
+	StaticRip functionHead = functionHeadForInstruction(baseRip);
+	std::vector<StaticRip> predecessors;
+	Function(functionHead).addPredecessorsCall(functionHead, predecessors);
+	/* That tells us the address of the start of the call
+	   instruction, but we really want the end of the
+	   instruction. */
+	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+		callers.push_back(it->rip + getInstructionSize(ms->addressSpace, *it));
+	}
+}
+
+/* Find all of the instructions which might have executed immediately
+ * before @vr. */
+void
+Oracle::findPredecessors(const VexRip &vr, std::vector<VexRip> &out)
+{
+	StaticRip sr(vr);
+	Function f(sr);
+
+	std::vector<StaticRip> nonCall;
+	f.addPredecessorsDirect(sr, nonCall);
+	for (auto it = nonCall.begin(); it != nonCall.end(); it++)
+		out.push_back(it->makeVexRip(vr));
+	std::vector<StaticRip> call;
+	f.addPredecessorsCall(sr, call);
+	if (call.size() != 0) {
+		VexRip parentVr(vr);
+		parentVr.rtrn();
+		for (auto it = call.begin(); it != call.end(); it++)
+			out.push_back(it->makeVexRip(parentVr));
+	}
+	std::vector<StaticRip> rtrn;
+	f.addPredecessorsReturn(sr, rtrn);
+	for (auto it = rtrn.begin(); it != rtrn.end(); it++) {
+		VexRip r(vr);
+		r.call(it->rip);
+		out.push_back(r);
+	}
+
+	if (rtrn.empty() && call.empty() && nonCall.empty()) {
+		std::vector<StaticRip> callSucc;
+		static sqlite3_stmt *stmt;
+		if (!stmt)
+			stmt = prepare_statement("SELECT rip FROM callSuccRips WHERE dest = ?");
+		bind_oraclerip(stmt, 1, sr);
+		extract_oraclerip_column(stmt, 0, callSucc);
+
+		if (!callSucc.empty()) {
+			printf("Warning: ignoring library call at %s\n", sr.name());
+			for (auto it = callSucc.begin(); it != callSucc.end(); it++) {
+				out.push_back(it->makeVexRip(vr));
+			}
+		}
+	}
+}
+
+bool
+Oracle::isPltCall(const VexRip &vr)
+{
+#warning These numbers are correct for mysqld; not for anything else.
+	unsigned long r = vr.unwrap_vexrip();
+	if (r >= 0x5364c0 && r <= 0x537570)
+		return true;
+	else
+		return false;
 }

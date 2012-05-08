@@ -40,9 +40,9 @@ class VexRip : public Named {
 		assert(cursor - buf < (int)stack.size() * 20 + 2);
 		return buf;
 	}
-	std::vector<unsigned long> stack;
 	void changed() { clearName(); }
 public:
+	std::vector<unsigned long> stack;
 	bool fullCompareLt(const VexRip &other) const {
 		for (unsigned idx = 0;
 		     idx < stack.size() && idx < other.stack.size();
@@ -201,6 +201,10 @@ public:
 			if (*it == rip)
 				return true;
 		return false;
+	}
+
+	void prepend(unsigned long what) {
+		stack.insert(stack.begin(), what);
 	}
 
 	bool isPrefix(const VexRip &vr) const {

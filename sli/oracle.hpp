@@ -134,8 +134,10 @@ public:
 		void getInstructionsInFunction(std::vector<StaticRip> &out) const;
 		void updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
 		void updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
+		void addPredecessorsDirect(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsNonCall(const StaticRip &rip, std::vector<StaticRip> &out);
-		void addPredecessors(const StaticRip &rip, std::vector<StaticRip> &out);
+		void addPredecessorsCall(const StaticRip &rip, std::vector<StaticRip> &out);
+		void addPredecessorsReturn(const StaticRip &rip, std::vector<StaticRip> &out);
 		void updateSuccessorInstructionsAliasing(const StaticRip &rip, AddressSpace *as, std::vector<StaticRip> *changed,
 							 bool *done_something, Oracle *oracle);
 		void getInstructionFallThroughs(const StaticRip &rip, std::vector<StaticRip> &out);
@@ -160,8 +162,10 @@ public:
 		void setAliasConfigOnEntryToInstruction(const StaticRip &rip, const RegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
 		bool addInstruction(const StaticRip &rip,
+				    bool isReturn,
 				    const std::vector<StaticRip> &callees,
 				    const std::vector<StaticRip> &fallThrough,
+				    const std::vector<StaticRip> &callSucc,
 				    const std::vector<StaticRip> &branch);
 		void calculateRegisterLiveness(AddressSpace *as, bool *done_something, Oracle *oracle);
 		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
@@ -297,6 +301,7 @@ public:
 private:
 
 	void discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, const callgraph_t &callgraph_table);
+	void buildReturnAddressTable();
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
@@ -371,6 +376,13 @@ public:
 
 	void getInstrCallees(const VexRip &vr, std::vector<VexRip> &out);
 	void getInstrFallThroughs(const VexRip &vr, std::vector<VexRip> &out);
+
+	bool isFunctionHead(const VexRip &vr);
+	void getPossibleStackTruncations(const VexRip &vr,
+					 std::vector<unsigned long> &callers);
+	void findPredecessors(const VexRip &vr, std::vector<VexRip> &out);
+
+	bool isPltCall(const VexRip &vr);
 
 	~Oracle() { }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)

@@ -47,6 +47,7 @@ public:
 			}
 			fprintf(f, "}");
 		}
+		fprintf(f, "\n");
 	}
 	void visit(HeapVisitor &hv) {
 		hv(fallThrough.second);
@@ -62,3 +63,18 @@ public:
 void printCFG(const CFGNode *cfg, const char *prefix, FILE *f);
 void getStoreCFGs(const std::set<DynAnalysisRip> &, Oracle *,
 		  CFGNode ***, int *);
+bool getProbeCFGs(Oracle *oracle, const DynAnalysisRip &vr,
+		  std::set<CFGNode *> &out);
+
+void resolveReferences(std::map<VexRip, CFGNode *> &m);
+void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
+			       const std::set<DynAnalysisRip> &roots);
+void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
+			       const DynAnalysisRip &target);
+void trimUninterestingCFGNodes(std::set<CFGNode *> &roots);
+void findRoots(const std::map<VexRip, CFGNode *> &m,
+	       std::set<CFGNode *> &roots);
+void findRoots(const std::set<CFGNode *> &allNodes,
+	       std::set<CFGNode *> &roots);
+
+void dumpCFGToDot(std::set<CFGNode *> &roots, FILE *f);
