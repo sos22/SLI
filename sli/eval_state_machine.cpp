@@ -854,7 +854,6 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = assumption;
 		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
-		assert(ctxt.pathConstraint->optimisationsApplied != 0);
 		if (crashes)
 			*mightCrash = true;
 		else
