@@ -244,14 +244,18 @@ resolveDependencies(StateMachine *sm,
 		IRExpr *transformIex(IRExprGet *ieg) {
 			assert(currentStateReaching);
 			assert(currentState);
-			const std::set<unsigned> &gen(currentStateReaching->get(ieg->reg));
-			assert(gen.size() != 0);
-			if (gen.size() == 1) {
-				return IRExpr_Get(
-					ieg->reg.setGen(*gen.begin()),
-					ieg->ty);
+			if (ieg->reg.gen() == 0) {
+				const std::set<unsigned> &gen(currentStateReaching->get(ieg->reg));
+				assert(gen.size() != 0);
+				if (gen.size() == 1) {
+					return IRExpr_Get(
+						ieg->reg.setGen(*gen.begin()),
+						ieg->ty);
+				} else {
+					failedStates.insert(currentState);
+					return NULL;
+				}
 			} else {
-				failedStates.insert(currentState);
 				return NULL;
 			}
 		}
@@ -306,6 +310,10 @@ findPredecessor(StateMachine *sm, StateMachineState *s)
 {
 	if (s->type == StateMachineState::SideEffecting)
 		return (StateMachineSideEffecting *)s;
+	/* This algorithm doesn't work for finding the predecessor of
+	 * the root state, so make sure we don't have to. */
+	if (sm->root == s)
+		sm->root = new StateMachineSideEffecting(s->origin, NULL, s);
 	std::set<StateMachineState *> allStates;
 	enumStates(sm, &allStates);
 	StateMachineState *found = NULL;
@@ -328,16 +336,16 @@ findPredecessor(StateMachine *sm, StateMachineState *s)
 insert_new_predecessor:
 	StateMachineSideEffecting *res = new StateMachineSideEffecting(s->origin, NULL, s);
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
-		StateMachineState *s = *it;
-		switch (s->type) {
+		StateMachineState *st = *it;
+		switch (st->type) {
 		case StateMachineState::SideEffecting: {
-			StateMachineSideEffecting *se = (StateMachineSideEffecting *)s;
+			StateMachineSideEffecting *se = (StateMachineSideEffecting *)st;
 			if (se->target == s)
 				se->target = res;
 			break;
 		}
 		case StateMachineState::Bifurcate: {
-			StateMachineBifurcate *se = (StateMachineBifurcate *)s;
+			StateMachineBifurcate *se = (StateMachineBifurcate *)st;
 			if (se->trueTarget == s)
 				se->trueTarget = res;
 			if (se->falseTarget == s)
@@ -345,7 +353,7 @@ insert_new_predecessor:
 			break;
 		}
 		case StateMachineState::NdChoice: {
-			StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
+			StateMachineNdChoice *smnd = (StateMachineNdChoice *)st;
 			for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++) {
 				if (*it == s)
 					*it = res;
@@ -385,7 +393,7 @@ convertToSSA(StateMachine *inp)
 		if (debug_dump_reaching_table) {
 			std::map<const StateMachineState *, int> stateLabels;
 			printf("At start of SSA conversion iteration:\n");
-			printStateMachine(inp, stdout);
+			printStateMachine(inp, stdout, stateLabels);
 			printf("Reaching table:\n");
 			reaching.print(stdout, stateLabels);
 		}
@@ -440,7 +448,7 @@ class optimiseSSATransformer : public StateMachineTransformer {
 		StateMachineSideEffect *se = smse->getSideEffect();
 		if (se && se->type == StateMachineSideEffect::Phi) {
 			StateMachineSideEffectPhi *phi =
-				(StateMachineSideEffectPhi *)smse;
+				(StateMachineSideEffectPhi *)se;
 			const std::set<unsigned> &generations(reaching.getEntryReaching(smse).get(phi->reg));
 			std::vector<std::pair<unsigned, IRExpr *> > newGenerations;
 			newGenerations.reserve(phi->generations.size());
