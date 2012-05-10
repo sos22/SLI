@@ -283,7 +283,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 	   turn means that a single aliasing configuration is valid
 	   for the entire machine. */
 	if (is_ssa && sm->origin.size() == 1) {
-		alias = oracle->getAliasingConfigurationForRip(sm->origin[0].second);
+		alias = oracle->getAliasingConfiguration(sm->origin);
 		aliasp = &alias;
 		sm->assertSSA();
 	} else {

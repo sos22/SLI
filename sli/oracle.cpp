@@ -134,8 +134,8 @@ const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::stackPointer(2);
 const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::nonStackPointer(4);
 const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::anything(7);
 
-Oracle::RegisterAliasingConfiguration Oracle::RegisterAliasingConfiguration::functionEntryConfiguration(5.3f);
-Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
+Oracle::ThreadRegisterAliasingConfiguration Oracle::ThreadRegisterAliasingConfiguration::functionEntryConfiguration(5.3f);
+Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration(float f)
 {
 	/* On function entry, the only pointer to the current stack
 	   frame should be in RSP.  Anythign else indicates that the
@@ -146,8 +146,8 @@ Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float f)
 	v[4] = Oracle::PointerAliasingSet::stackPointer; /* rsp */
 }
 
-Oracle::RegisterAliasingConfiguration Oracle::RegisterAliasingConfiguration::unknown(5.3f, 12);
-Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float, int)
+Oracle::ThreadRegisterAliasingConfiguration Oracle::ThreadRegisterAliasingConfiguration::unknown(5.3f, 12);
+Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration(float, int)
 {
 	stackHasLeaked = true;
 	for (int i = 0; i < NR_REGS; i++)
@@ -155,7 +155,7 @@ Oracle::RegisterAliasingConfiguration::RegisterAliasingConfiguration(float, int)
 }
 
 void
-Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
+Oracle::ThreadRegisterAliasingConfiguration::prettyPrint(FILE *f) const
 {
        for (int i = 0; i < NR_REGS; i++)
                fprintf(f, "\t%8d: %s\n", i, v[i].name());
@@ -839,14 +839,8 @@ irexprAliasingClass(IRExpr *expr,
 			auto it = temps->find(e->reg);
 			assert(it != temps->end());
 			return it->second;
-		} else if (e->reg.asReg() < Oracle::NR_REGS * 8) {
-			if (e->reg.gen() == (unsigned)-1)
-				return config.v[e->reg.asReg() / 8];
-			else
-				return Oracle::PointerAliasingSet::anything;
 		} else {
-			/* Assume that those are the only pointer registers */
-			return Oracle::PointerAliasingSet::notAPointer;
+			return config.lookupRegister(e->reg);
 		}
 	}
 	case Iex_Const:
@@ -1032,13 +1026,13 @@ Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, bool
 		~PointerAliasingSet::notAPointer;
 }
 
-Oracle::RegisterAliasingConfiguration
+Oracle::ThreadRegisterAliasingConfiguration
 Oracle::getAliasingConfigurationForRip(const StaticRip &rip)
 {
 	Function f(rip);
 	return f.aliasConfigOnEntryToInstruction(rip);
 }
-Oracle::RegisterAliasingConfiguration
+Oracle::ThreadRegisterAliasingConfiguration
 Oracle::getAliasingConfigurationForRip(const VexRip &rip)
 {
 	return getAliasingConfigurationForRip(StaticRip(rip));
@@ -1512,7 +1506,7 @@ Oracle::Function::liveOnEntry(const StaticRip &rip, bool isHead)
 	return LivenessSet(r);
 }
 
-Oracle::RegisterAliasingConfiguration
+Oracle::ThreadRegisterAliasingConfiguration
 Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 {
 	static sqlite3_stmt *stmt;
@@ -1527,10 +1521,10 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 	if (rc == SQLITE_DONE) {
 		sqlite3_reset(stmt);
 		*b = false;
-		return RegisterAliasingConfiguration::unknown;
+		return ThreadRegisterAliasingConfiguration::unknown;
 	}
 	int i;
-	RegisterAliasingConfiguration res;
+	ThreadRegisterAliasingConfiguration res;
 	for (i = 0; i < NR_REGS; i++) {
 		unsigned long r;
 		if (sqlite3_column_type(stmt, i) == SQLITE_NULL) {
@@ -1560,14 +1554,14 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 }
 
 bool
-Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, Oracle::RegisterAliasingConfiguration *out)
+Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, Oracle::ThreadRegisterAliasingConfiguration *out)
 {
 	bool res;
 	*out = aliasConfigOnEntryToInstruction(rip, &res);
 	return res;
 }
 
-Oracle::RegisterAliasingConfiguration
+Oracle::ThreadRegisterAliasingConfiguration
 Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip)
 {
 	bool ign;
@@ -1778,17 +1772,17 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 		return;
 
 	bool aValid;
-	RegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip, &aValid));
+	ThreadRegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip, &aValid));
 	if (aValid) {
-		RegisterAliasingConfiguration b(a);
-		b |= RegisterAliasingConfiguration::functionEntryConfiguration;
+		ThreadRegisterAliasingConfiguration b(a);
+		b |= ThreadRegisterAliasingConfiguration::functionEntryConfiguration;
 		if (a != b) {
 			*done_something = true;
 			setAliasConfigOnEntryToInstruction(rip, b);
 		}
 	} else {
 		*done_something = true;
-		setAliasConfigOnEntryToInstruction(rip, RegisterAliasingConfiguration::functionEntryConfiguration);
+		setAliasConfigOnEntryToInstruction(rip, ThreadRegisterAliasingConfiguration::functionEntryConfiguration);
 	}
 
 	std::vector<StaticRip> needsUpdating;
@@ -2181,7 +2175,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      bool *done_something,
 						      Oracle *oracle)
 {
-	RegisterAliasingConfiguration config(aliasConfigOnEntryToInstruction(rip));
+	RegisterAliasingConfiguration config;
+	config.addConfig(STATIC_THREAD, aliasConfigOnEntryToInstruction(rip));
+	ThreadRegisterAliasingConfiguration &tconfig(config.content[0].second);
 	std::map<threadAndRegister, PointerAliasingSet, threadAndRegister::fullCompare> temporaryAliases;
 	IRStmt *st;
 
@@ -2206,14 +2202,11 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		case Ist_Put: {
 			IRStmtPut *p = (IRStmtPut *)st;
 			if (p->target.isReg()) {
-				if (p->target.asReg() < NR_REGS * 8 &&
-				    p->target.asReg() != OFFSET_amd64_RSP) {
-					config.v[p->target.asReg() / 8] =
-						irexprAliasingClass(p->data,
-								    config,
-								    false,
-								    &temporaryAliases);
-				}
+				config.set(p->target,
+					   irexprAliasingClass(p->data,
+							       config,
+							       false,
+							       &temporaryAliases));
 			} else {
 				temporaryAliases.insert(
 					std::pair<threadAndRegister, PointerAliasingSet>(p->target,
@@ -2228,7 +2221,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			/* Assume that PutIs never target the NR_REGS registers */
 			break;
 		case Ist_Store:
-			if (!config.stackHasLeaked) {
+			if (!tconfig.stackHasLeaked) {
 				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      config,
 									      false,
@@ -2238,8 +2231,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 									      false,
 									      &temporaryAliases);
 				if ((addr & PointerAliasingSet::nonStackPointer) &&
-				    (data & PointerAliasingSet::stackPointer))
-					config.stackHasLeaked = true;
+				    (data & PointerAliasingSet::stackPointer)) {
+					/* Bit of a hack: rely on the
+					   fact that we only have one
+					   relevant thread here. */
+					tconfig.stackHasLeaked = true;
+				}
 			}
 			break;
 		case Ist_CAS: {
@@ -2249,8 +2246,8 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 					std::pair<threadAndRegister, PointerAliasingSet>(
 						s->details->oldLo,
 						PointerAliasingSet::anything));
-			} else if (s->details->oldLo.asReg() < NR_REGS * 8) {
-				config.v[s->details->oldLo.asReg() / 8] = PointerAliasingSet::anything;
+			} else {
+				config.set(s->details->oldLo, PointerAliasingSet::anything);
 			}
 			break;
 		}
@@ -2258,7 +2255,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			if (((IRStmtDirty *)st)->details->tmp.isValid()) {
 				PointerAliasingSet res =
 					(strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64") ||
-					 config.stackHasLeaked) ?
+					 tconfig.stackHasLeaked) ?
 					 PointerAliasingSet::anything :
 					PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 				temporaryAliases.insert(
@@ -2271,9 +2268,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			abort();
 		case Ist_Exit: {
 			StaticRip _branchRip(((IRStmtExit *)st)->dst.rip);
-			RegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
-			RegisterAliasingConfiguration newExitConfig(bConfig);
-			newExitConfig |= config;
+			ThreadRegisterAliasingConfiguration bConfig(aliasConfigOnEntryToInstruction(_branchRip));
+			ThreadRegisterAliasingConfiguration newExitConfig(bConfig);
+			newExitConfig |= tconfig;
 			if (newExitConfig != bConfig) {
 #warning This isn't even slightly right in the case where _branchRip hasn't been visited yet.
 				changed->push_back(_branchRip);
@@ -2289,9 +2286,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	std::vector<StaticRip> callees;
 	getInstructionCallees(rip, callees, oracle);
 	if (!callees.empty())
-		config.v[0] = PointerAliasingSet::notAPointer;
+		tconfig.v[0] = PointerAliasingSet::notAPointer;
 	for (auto it = callees.begin();
-	     config.v[0] != PointerAliasingSet::anything && it != callees.end();
+	     tconfig.v[0] != PointerAliasingSet::anything && it != callees.end();
 	     it++) {
 		LivenessSet ls = (Function(*it)).liveOnEntry(*it, true);
 		/* If any of the argument registers contain stack
@@ -2308,13 +2305,13 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				continue;
 			if (!(ls.mask & (1 << i)))
 				continue;
-			if (config.v[i] & PointerAliasingSet::stackPointer)
+			if (tconfig.v[i] & PointerAliasingSet::stackPointer)
 				stackEscapes = true;
 		}
 #undef ARG_REGISTERS
 		if (stackEscapes)
-			config.v[0] = config.v[0] | PointerAliasingSet::stackPointer;
-		config.v[0] = config.v[0] | PointerAliasingSet::nonStackPointer;
+			tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::stackPointer;
+		tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::nonStackPointer;
 #warning What about clearing the state of call-clobbered registers?
 #warning Should allow the stack pointer to taint the return address if the stack has leaked in config!
 #warning Should really say the stack has leaked in config if it escapes here!
@@ -2340,11 +2337,11 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	     it != _fallThroughRips.end();
 	     it++) {
 		bool b;
-		RegisterAliasingConfiguration succ_config =
+		ThreadRegisterAliasingConfiguration succ_config =
 			aliasConfigOnEntryToInstruction(*it, &b);
 		if (b) {
-			RegisterAliasingConfiguration new_config = succ_config;
-			new_config |= config;
+			ThreadRegisterAliasingConfiguration new_config = succ_config;
+			new_config |= tconfig;
 			if (new_config != succ_config) {
 				*done_something = true;
 				changed->push_back(*it);
@@ -2458,7 +2455,7 @@ Oracle::Function::getSuccessors(const StaticRip &rip, std::vector<StaticRip> &su
 
 void
 Oracle::Function::setAliasConfigOnEntryToInstruction(const StaticRip &r,
-						     const RegisterAliasingConfiguration &config)
+						     const ThreadRegisterAliasingConfiguration &config)
 {
 	static sqlite3_stmt *stmt;
 	int i;
@@ -3142,3 +3139,63 @@ Oracle::isPltCall(const VexRip &vr)
 	else
 		return false;
 }
+
+Oracle::PointerAliasingSet
+Oracle::RegisterAliasingConfiguration::lookupRegister(const threadAndRegister &r) const
+{
+	/* This is only safe for SSA-form machines */
+	assert(r.gen() != 0);
+
+	/* Assume that anything which isn't a GPR isn't a pointer.
+	   True for x86. */
+	if (r.asReg() >= Oracle::NR_REGS * 8)
+		return Oracle::PointerAliasingSet::notAPointer;
+	/* Can't say anything about non-default generations. */
+	if (r.gen() != (unsigned)-1)
+		return Oracle::PointerAliasingSet::anything;
+	for (auto it = content.begin(); it != content.end(); it++) {
+		if (it->first == r.tid())
+			return it->second.v[r.asReg() / 8];
+	}
+
+	/* Don't have an aliasing configuration for this thread ->
+	 * pretty bad. */
+	abort();
+}
+
+void
+Oracle::RegisterAliasingConfiguration::set(const threadAndRegister &r, const PointerAliasingSet &v)
+{
+	if (r.asReg() >= NR_REGS * 8)
+		return;
+	/* The class of RSP is always hard-wired to be just a stack
+	 * pointer. */
+	if (r.asReg() == OFFSET_amd64_RSP)
+		return;
+	for (auto it = content.begin(); it != content.end(); it++) {
+		if (it->first == r.tid()) {
+			it->second.v[r.asReg() / 8] = v;
+			return;
+		}
+	}
+	abort();
+}
+
+void
+Oracle::RegisterAliasingConfiguration::addConfig(unsigned tid, const ThreadRegisterAliasingConfiguration &config)
+{
+	for (auto it = content.begin(); it != content.end(); it++)
+		assert(tid != it->first);
+	content.push_back(std::pair<unsigned, ThreadRegisterAliasingConfiguration>(tid, config));
+}
+
+Oracle::RegisterAliasingConfiguration
+Oracle::getAliasingConfiguration(const std::vector<std::pair<unsigned, VexRip> > &origins)
+{
+	RegisterAliasingConfiguration rac;
+	for (auto it = origins.begin(); it != origins.end(); it++)
+		rac.addConfig(it->first,
+			      getAliasingConfigurationForRip(it->second));
+	return rac;
+}
+

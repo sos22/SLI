@@ -121,7 +121,7 @@ public:
 		}
 	};
 
-	class RegisterAliasingConfiguration;
+	class ThreadRegisterAliasingConfiguration;
 
 	class Function : public Named {
 		friend class Oracle;
@@ -156,10 +156,10 @@ public:
 		{}
 
 		LivenessSet liveOnEntry(const StaticRip &, bool);
-		bool aliasConfigOnEntryToInstruction(const StaticRip &rip, RegisterAliasingConfiguration *out);
-		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip);
-		RegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b);
-		void setAliasConfigOnEntryToInstruction(const StaticRip &rip, const RegisterAliasingConfiguration &config);
+		bool aliasConfigOnEntryToInstruction(const StaticRip &rip, ThreadRegisterAliasingConfiguration *out);
+		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip);
+		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b);
+		void setAliasConfigOnEntryToInstruction(const StaticRip &rip, const ThreadRegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
 		bool addInstruction(const StaticRip &rip,
 				    bool isReturn,
@@ -180,7 +180,7 @@ public:
 	   the stack bit set could still point into a *calling*
 	   functions' stack frame, and that wouldn't be a bug. */
 	class PointerAliasingSet : public Named {
-		friend class RegisterAliasingConfiguration;
+		friend class ThreadRegisterAliasingConfiguration;
 		             
 		int v;
 		char *mkName() const {
@@ -231,22 +231,22 @@ public:
 		operator bool() const { return v != 0; }
 		operator unsigned long() const { return v; }
 	};
-	class RegisterAliasingConfiguration {
-		friend RegisterAliasingConfiguration Function::aliasConfigOnEntryToInstruction(const StaticRip &rip,
+	class ThreadRegisterAliasingConfiguration {
+		friend ThreadRegisterAliasingConfiguration Function::aliasConfigOnEntryToInstruction(const StaticRip &rip,
 											       bool *b);
-		RegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
-		RegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
+		ThreadRegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
+		ThreadRegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
 	public:
-		RegisterAliasingConfiguration() : stackHasLeaked(false) {}
+		ThreadRegisterAliasingConfiguration() : stackHasLeaked(false) {}
 		bool stackHasLeaked;
 		PointerAliasingSet v[NR_REGS];
 		
-		void operator|=(const RegisterAliasingConfiguration &src) {
+		void operator|=(const ThreadRegisterAliasingConfiguration &src) {
 			stackHasLeaked |= src.stackHasLeaked;
 			for (int i = 0; i < NR_REGS; i++)
 				v[i] = v[i] | src.v[i];
 		}
-		bool operator != (const RegisterAliasingConfiguration &x) const {
+		bool operator != (const ThreadRegisterAliasingConfiguration &x) const {
 			if (stackHasLeaked != x.stackHasLeaked)
 				return true;
 			for (int i = 0; i < NR_REGS; i++)
@@ -256,10 +256,21 @@ public:
 		}
 		/* This should be const, but C++ can't quite manage the
 		 * initialisation in that case, poor thing. */
-		static RegisterAliasingConfiguration functionEntryConfiguration;
+		static ThreadRegisterAliasingConfiguration functionEntryConfiguration;
 
 		/* Any aliasing pattern possible. */
-		static RegisterAliasingConfiguration unknown;
+		static ThreadRegisterAliasingConfiguration unknown;
+
+		void prettyPrint(FILE *) const;
+	};
+
+	class RegisterAliasingConfiguration {
+	public:
+		std::vector<std::pair<unsigned, ThreadRegisterAliasingConfiguration> > content;
+
+		PointerAliasingSet lookupRegister(const threadAndRegister &r) const;
+		void set(const threadAndRegister &, const PointerAliasingSet &);
+		void addConfig(unsigned tid, const ThreadRegisterAliasingConfiguration &config);
 
 		/* Check whether a and b mght point at the same bit of
 		   memory (i.e. have intersecting pointer aliasing
@@ -272,9 +283,9 @@ public:
 		/* Check whether there's any possibility of @a being a
 		   pointer to a non-stack location. */
 		bool mightPointOutsideStack(IRExpr *a) const;
-
-		void prettyPrint(FILE *) const;
 	};
+
+	RegisterAliasingConfiguration getAliasingConfiguration(const std::vector<std::pair<unsigned, VexRip> > &rips);
 
 	struct callgraph_entry {
 		bool is_call;
@@ -365,12 +376,12 @@ public:
 			    AddressSpace *as,
 			    unsigned minimum_size);
 
-	RegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
+	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
 	LivenessSet liveOnEntryToFunction(const StaticRip &rip);
 
 	bool getRbpToRspDelta(const StaticRip &rip, long *out);
 
-	RegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
+	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
 	bool getRbpToRspDelta(const VexRip &rip, long *out);
 	LivenessSet liveOnEntryToFunction(const VexRip &rip);
 
