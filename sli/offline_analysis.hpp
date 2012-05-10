@@ -182,7 +182,10 @@ protected:
 		}
 	}
 	virtual StateMachineNdChoice *transformOneState(StateMachineNdChoice *s,
-							bool *done_something);
+							bool *done_something)
+	{
+		return NULL;
+	}
 
 public:
 	virtual StateMachineState *transformState(StateMachineState *, bool *);

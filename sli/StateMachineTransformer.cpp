@@ -74,27 +74,6 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 	abort();
 }
 
-StateMachineNdChoice *
-StateMachineTransformer::transformOneState(StateMachineNdChoice *s, bool *done_something)
-{
-	bool b = false;
-	StateMachineState *trans;
-	unsigned firstTransformed;
-	for (firstTransformed = 0;
-	     !b && firstTransformed < s->successors.size();
-	     firstTransformed++) {
-		trans = transformState(s->successors[firstTransformed], &b);
-	}
-	if (!b)
-		return NULL;
-	*done_something = true;
-	std::vector<StateMachineState *> newSucc(s->successors);
-	newSucc[firstTransformed] = trans;
-	for (unsigned x = firstTransformed + 1; x < newSucc.size(); x++)
-		newSucc[x] = transformState(newSucc[x], &b);
-	return new StateMachineNdChoice(s->origin, newSucc);
-}
-
 StateMachineState *
 StateMachineTransformer::transformState(StateMachineState *s, bool *done_something)
 {
