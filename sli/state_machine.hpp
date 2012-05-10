@@ -255,35 +255,32 @@ public:
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
-	StateMachine(StateMachineState *_root, const VexRip &_origin, unsigned _tid)
-		: root(_root), origin(_origin), tid(_tid)
+	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin)
+		: root(_root), origin(_origin)
 	{
 	}
 public:
 	StateMachineState *root;
-	VexRip origin;
+	std::vector<std::pair<unsigned, VexRip> > origin;
 	FreeVariableMap freeVariables;
-	unsigned tid;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, const VexRip &_origin, const FreeVariableMap &fv, unsigned _tid)
-		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
+	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin,
+		     const FreeVariableMap &fv)
+		: root(_root), origin(_origin), freeVariables(fv)
 	{
 	}
-	StateMachine(StateMachine *parent, const VexRip &_origin, StateMachineState *new_root)
-		: root(new_root), origin(_origin), freeVariables(parent->freeVariables),
-		  tid(parent->tid)
+	StateMachine(StateMachine *parent, const std::vector<std::pair<unsigned, VexRip> > &_origin, StateMachineState *new_root)
+		: root(new_root), origin(_origin), freeVariables(parent->freeVariables)
 	{}
 	StateMachine(StateMachine *parent)
-		: root(parent->root), origin(parent->origin), freeVariables(parent->freeVariables),
-		  tid(parent->tid)
+		: root(parent->root), origin(parent->origin), freeVariables(parent->freeVariables)
 	{}
 	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
 		: root(parent->root),
 		  origin(parent->origin),
-		  freeVariables(parent->freeVariables, delta),
-		  tid(parent->tid)
+		  freeVariables(parent->freeVariables, delta)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       Oracle *oracle,

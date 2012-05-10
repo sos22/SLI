@@ -189,26 +189,28 @@ findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 static void
 canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 {
-	long delta;
-
-	if (!oracle->getRbpToRspDelta(sm->origin, &delta)) {
-		/* Can't do anything if we don't know the delta */
-		return;
+	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
+		long delta;
+		if (!oracle->getRbpToRspDelta(it->second, &delta)) {
+			/* Can't do anything if we don't know the
+			 * delta */
+			continue;
+		}
+		/* Got RBP->RSP delta, want RSP->RBP */
+		delta = -delta;
+		StateMachineSideEffect *smse =
+			new StateMachineSideEffectCopy(
+				threadAndRegister::reg(it->first, OFFSET_amd64_RBP, 0),
+				IRExpr_Associative(
+					Iop_Add64,
+					IRExpr_Get(
+						threadAndRegister::reg(it->first, OFFSET_amd64_RSP, 0),
+						Ity_I64),
+					IRExpr_Const(
+						IRConst_U64(delta)),
+					NULL));
+		sm->root = new StateMachineSideEffecting(it->second, smse, sm->root);
 	}
-	/* Got RBP->RSP delta, want RSP->RBP */
-	delta = -delta;
-	StateMachineSideEffect *smse =
-		new StateMachineSideEffectCopy(
-			threadAndRegister::reg(sm->tid, OFFSET_amd64_RBP, 0),
-			IRExpr_Associative(
-				Iop_Add64,
-				IRExpr_Get(
-					threadAndRegister::reg(sm->tid, OFFSET_amd64_RSP, 0),
-					Ity_I64),
-				IRExpr_Const(
-					IRConst_U64(delta)),
-				NULL));
-	sm->root = new StateMachineSideEffecting(sm->origin, smse, sm->root);
 }
 
 /* Find all of the states which definitely reach <survive> rather than
@@ -280,8 +282,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 	   there won't be any writes to gen -1 registers, which in
 	   turn means that a single aliasing configuration is valid
 	   for the entire machine. */
-	if (is_ssa) {
-		alias = oracle->getAliasingConfigurationForRip(sm->origin);
+	if (is_ssa && sm->origin.size() == 1) {
+		alias = oracle->getAliasingConfigurationForRip(sm->origin[0].second);
 		aliasp = &alias;
 		sm->assertSSA();
 	} else {
@@ -464,9 +466,16 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				 GarbageCollectionToken token)
 {
 	__set_profiling(expandStateMachineToFunctionHead);
+
+	/* This only makes sense for single-threaded machines. */
+	assert(sm->origin.size() == 1);
+
+	VexRip origin(sm->origin[0].second);
+	unsigned tid(sm->origin[0].first);
+
 	assert(sm->freeVariables.empty());
 	std::vector<VexRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, sm->origin);
+	oracle->findPreviousInstructions(previousInstructions, origin);
 	if (previousInstructions.size() == 0) {
 		/* Lacking any better ideas... */
 		fprintf(_logfile, "cannot expand store machine...\n");
@@ -475,10 +484,10 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
 
-	ii->set(sm->origin, sm->root);
+	ii->set(origin, sm->root);
 
 	InstructionSet interesting;
-	interesting.rips.insert(sm->origin);
+	interesting.rips.insert(origin);
 
 	std::set<VexRip> terminalFunctions;
 
@@ -499,7 +508,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 
 	{
 		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
-		cr = CFGtoCrashReason(sm->tid,
+		cr = CFGtoCrashReason(tid,
 				      cfg,
 				      ii,
 				      escape,
@@ -1369,7 +1378,9 @@ CFGtoCrashReason(unsigned tid,
 	}
 
 	FreeVariableMap fv;
-	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, original_rip, fv, tid));
+	std::vector<std::pair<unsigned, VexRip> > origin;
+	origin.push_back(std::pair<unsigned, VexRip>(tid, original_rip));
+	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, origin, fv));
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, opt, oracle, false, false, token);
 	if (crashReasons)

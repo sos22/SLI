@@ -258,7 +258,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 	/* Construct new machine */
 	for (auto it = fvDelta.begin(); it != fvDelta.end(); it++)
 		fvm.content->set(it->first, it->second);
-	return new StateMachine(newRoot, sm->origin, fvm, sm->tid);
+	return new StateMachine(newRoot, sm->origin, fvm);
 }
 
 StateMachineSideEffectPhi *

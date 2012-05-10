@@ -251,7 +251,9 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		StateMachineState *root = results[*it];
 		assert(root);
 		FreeVariableMap fvm;
-		StateMachine *sm = new StateMachine(root, root->origin, fvm, tid);
+		std::vector<std::pair<unsigned, VexRip> > origin;
+		origin.push_back(std::pair<unsigned, VexRip>(tid, root->origin));
+		StateMachine *sm = new StateMachine(root, origin, fvm);
 		sm->sanityCheck();
 		out.insert(sm);
 	}

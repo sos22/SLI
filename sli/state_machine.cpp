@@ -224,7 +224,13 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 {
 	std::vector<const StateMachineState *> states;
 
-	fprintf(f, "Machine for %s:%d\n", sm->origin.name(), sm->tid);
+	fprintf(f, "Machine for ");
+	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
+		if (it != sm->origin.begin())
+			fprintf(f, ", ");
+		fprintf(f, "%s:%d", it->second.name(), it->first);
+	}
+	fprintf(f, ":\n");
 	buildStateLabelTable(sm, labels, states);
 	for (auto it = states.begin(); it != states.end(); it++) {
 		fprintf(f, "l%d: ", labels[*it]);
@@ -539,13 +545,21 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 bool
 StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 {
-	VexRip origin;
-	int tid;
-	if (!parseThisString("Machine for ", str, &str) ||
-	    !parseVexRip(&origin, str, &str) ||
-	    !parseThisChar(':', str, &str) ||
-	    !parseDecimalInt(&tid, str, &str) ||
-	    !parseThisChar('\n', str, &str))
+	std::vector<std::pair<unsigned, VexRip> > origin;
+	if (!parseThisString("Machine for ", str, &str))
+		return false;
+	while (1) {
+		if (parseThisChar(':', str, &str))
+			break;
+		std::pair<unsigned, VexRip> e;
+		if (!parseVexRip(&e.second, str, &str) ||
+		    !parseThisChar(':', str, &str) ||
+		    !parseDecimalUInt(&e.first, str, &str))
+			return false;
+		parseThisChar(' ', str, &str);
+		origin.push_back(e);
+	}
+	if (!parseThisChar('\n', str, &str))
 		return false;
 	StateMachineState *root;
 
@@ -556,7 +570,7 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 
 	if (!parseStateMachine(&root, str, &str))
 		return false;
-	*out = new StateMachine(root, origin, tid);
+	*out = new StateMachine(root, origin);
 	if (!(*out)->freeVariables.parse(str, suffix))
 		return false;
 	return true;

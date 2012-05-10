@@ -1412,19 +1412,37 @@ findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 }
 
 /* Transform @machine so that wherever it would previously branch to
-   @from it will now branch to @to.  If @from is a terminal state then
-   this effectively concatenates the two machines together. */
+   @from it will now branch to the root of @to.  If @from is a
+   terminal state then this effectively concatenates the two machines
+   together. */
 static StateMachine *
-concatenateStateMachines(StateMachine *machine, StateMachineState *from, StateMachineState *to)
+concatenateStateMachines(StateMachine *machine, StateMachineState *from, StateMachine *to)
 {
 	std::map<StateMachineState *, StateMachineState *> rewriteRules;
-	rewriteRules[from] = to;
+	rewriteRules[from] = to->root;
 	StateMachineTransformer::rewriteMachine(machine, rewriteRules);
 	assert(rewriteRules.count(machine->root));
+#ifndef NDEBUG
+	std::map<unsigned, VexRip> newOrigin;
+	for (auto it = machine->origin.begin();
+	     it != machine->origin.end();
+	     it++) {
+		assert(!newOrigin.count(it->first));
+		newOrigin.insert(*it);
+	}
+	for (auto it = to->origin.begin();
+	     it != to->origin.end();
+	     it++) {
+		assert(!newOrigin.count(it->first));
+		newOrigin.insert(*it);
+	}
+	std::vector<std::pair<unsigned, VexRip> > neworigin(newOrigin.begin(), newOrigin.end());
+#else
+#error write me
+#endif
 	return new StateMachine(rewriteRules[machine->root],
-				machine->origin,
-				machine->freeVariables,
-				machine->tid);
+				neworigin,
+				machine->freeVariables);
 }
 
 IRExpr *
@@ -1442,7 +1460,7 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 	combinedMachine = concatenateStateMachines(
 		writeMachine,
 		StateMachineCrash::get(),
-		readMachine->root);
+		readMachine);
 	combinedMachine = optimiseStateMachine(combinedMachine,
 					       opt
 					          .enableassumeExecutesAtomically()
