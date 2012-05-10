@@ -330,6 +330,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	if (offsets.size() == 0) {
 		if (!notInTagTable(smsel))
 			return false;
+		if (smsel->rip.rip.thread != smses->rip.rip.thread)
+			return false;
 		if (!definitelyNotEqual(smsel->addr, smses->addr, opt))
                         return true;
 		else
@@ -396,6 +398,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	if (offsets.size() == 0) {
 		if (!notInTagTable(smsel2))
 			return false;
+		if (smsel1->rip.rip.thread != smsel2->rip.rip.thread)
+			return false;
 		if (!definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
 			return true;
 		else
@@ -425,6 +429,8 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	type_index->findOffsets(dr1, offsets);
 	if (offsets.size() == 0) {
 		if (!notInTagTable(smses2))
+			return false;
+		if (smses1->rip.rip.thread != smses2->rip.rip.thread)
 			return false;
 		if (!definitelyNotEqual(smses2->addr, smses1->addr, opt))
 			return true;
