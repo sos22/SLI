@@ -2,6 +2,12 @@
 #include "cfgnode.hpp"
 #include "oracle.hpp"
 
+#ifdef NDEBUG
+#define debug_find_roots
+#else
+static int debug_find_roots = 0;
+#endif
+
 CFGNode *
 CFGNode::forRip(Oracle *oracle, const VexRip &vr, CFGNode::flavour_t flavour)
 {
@@ -278,16 +284,18 @@ findRoots(const std::set<CFGNode *> &allNodes, std::set<CFGNode *> &roots)
 {
 	std::set<CFGNode *> currentlyUnrooted(allNodes);
 
-	printf("findRoots():\n");
-	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
-		printf("\t%p -> ", *it);
-		if ((*it)->fallThrough.second)
-			printf("%p, ", (*it)->fallThrough.second);
-		for (auto it2 = (*it)->branches.begin();
-		     it2 != (*it)->branches.end();
-		     it2++)
-			printf("%p, ", it2->second);
-		printf("\n");
+	if (debug_find_roots) {
+		printf("findRoots():\n");
+		for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+			printf("\t%p -> ", *it);
+			if ((*it)->fallThrough.second)
+				printf("%p, ", (*it)->fallThrough.second);
+			for (auto it2 = (*it)->branches.begin();
+			     it2 != (*it)->branches.end();
+			     it2++)
+				printf("%p, ", it2->second);
+			printf("\n");
+		}
 	}
 
 	/* First rule: if something in @currentlyUnrooted cannot be
@@ -300,21 +308,25 @@ findRoots(const std::set<CFGNode *> &allNodes, std::set<CFGNode *> &roots)
 		CFGNode *n = *it;
 		if (n->fallThrough.second) {
 			newRoots.erase(n->fallThrough.second);
-			printf("%p is not a root because of %p\n", n->fallThrough.second,
-			       n);
+			if (debug_find_roots)
+				printf("%p is not a root because of %p\n", n->fallThrough.second,
+				       n);
 		}
 		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
 			if (it2->second) {
-				printf("%p is not a root because of %p\n",
-				       it2->second, n);
+				if (debug_find_roots)
+					printf("%p is not a root because of %p\n",
+					       it2->second, n);
 				newRoots.erase(it2->second);
 			}
 	}
 
-	printf("Basic root set: ");
-	for (auto it = newRoots.begin(); it != newRoots.end(); it++)
-		printf("%p, ", *it);
-	printf("\n");
+	if (debug_find_roots) {
+		printf("Basic root set: ");
+		for (auto it = newRoots.begin(); it != newRoots.end(); it++)
+			printf("%p, ", *it);
+		printf("\n");
+	}
 
 	removeReachable(currentlyUnrooted, newRoots);
 	roots |= newRoots;
@@ -345,6 +357,9 @@ findRoots(const std::set<CFGNode *> &allNodes, std::set<CFGNode *> &roots)
 			}
 		}
 
+		if (debug_find_roots)
+			printf("Selected cycle-breaking root %p (%d)\n",
+			       best_node, best_nr_succ);
 		assert(best_node != NULL);
 		roots.insert(best_node);
 		removeReachable(currentlyUnrooted, best_node);
@@ -361,7 +376,7 @@ findRoots(const std::map<VexRip, CFGNode *> &m, std::set<CFGNode *> &roots)
 }
 
 void
-dumpCFGToDot(std::set<CFGNode *> &roots, FILE *f)
+dumpCFGToDot(const std::set<CFGNode *> &roots, FILE *f)
 {
 	std::set<CFGNode *> allNodes;
 	for (auto it = roots.begin(); it != roots.end(); it++)
@@ -393,4 +408,23 @@ dumpCFGToDot(std::set<CFGNode *> &roots, FILE *f)
 				fprintf(f, "n%p -> n%p [color=red]\n", n, it->second);
 	}
 	fprintf(f, "}\n");
+}
+
+/* This is mostly intended to be called from the debugger. */
+void
+dumpCFGToDot(const std::set<CFGNode *> &allNodes, const char *fname, bool useTheseRoots)
+{
+	FILE *f = fopen(fname, "w");
+	if (!f) {
+		printf("can't open %s\n", fname);
+		return;
+	}
+	if (useTheseRoots) {
+		dumpCFGToDot(allNodes, f);
+	} else {
+		std::set<CFGNode *> roots;
+		findRoots(allNodes, roots);
+		dumpCFGToDot(roots, f);
+	}
+	fclose(f);
 }

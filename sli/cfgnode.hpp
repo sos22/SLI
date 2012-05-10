@@ -77,4 +77,4 @@ void findRoots(const std::map<VexRip, CFGNode *> &m,
 void findRoots(const std::set<CFGNode *> &allNodes,
 	       std::set<CFGNode *> &roots);
 
-void dumpCFGToDot(std::set<CFGNode *> &roots, FILE *f);
+void dumpCFGToDot(const std::set<CFGNode *> &roots, FILE *f);
