@@ -831,9 +831,10 @@ bool parseStateMachine(StateMachine **out, const char *str, const char **suffix)
 StateMachine *readStateMachine(int fd);
 
 class CFGNode;
-StateMachine *probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
-				 const DynAnalysisRip &proximalRip,
-				 StateMachineState *proximalCause);
+void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
+			const DynAnalysisRip &proximalRip,
+			StateMachineState *proximalCause,
+			std::set<StateMachine *> &out);
 
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,

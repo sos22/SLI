@@ -64,12 +64,14 @@ public:
 };
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
-StateMachine *buildProbeMachine(VexPtr<Oracle> &oracle,
-				const DynAnalysisRip &interestingRip,
-				VexPtr<StateMachineState, &ir_heap> &proximal,
-				ThreadId tid,
-				const AllowableOptimisations &opt,
-				GarbageCollectionToken token);
+bool buildProbeMachine(VexPtr<Oracle> &oracle,
+		       const DynAnalysisRip &interestingRip,
+		       VexPtr<StateMachineState, &ir_heap> &proximal,
+		       ThreadId tid,
+		       const AllowableOptimisations &opt,
+		       StateMachine ***out,
+		       unsigned *nr_out_machines,
+		       GarbageCollectionToken token);
 CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    VexPtr<Oracle> &oracle,
 			    VexPtr<MachineState> &ms,

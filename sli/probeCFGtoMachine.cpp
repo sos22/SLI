@@ -212,10 +212,11 @@ cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
 	return root;
 }
 
-static StateMachine *
+static void
 probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &proximalRip,
-		   StateMachineState *proximal)
+		   StateMachineState *proximal,
+		   std::set<StateMachine *> &out)
 {
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<reloc_t> pendingRelocations;
@@ -246,27 +247,25 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		}
 	}
 
-	std::vector<StateMachineState *> rootStates;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
-		assert(results[*it]);
-		rootStates.push_back(results[*it]);
+		StateMachineState *root = results[*it];
+		assert(root);
+		FreeVariableMap fvm;
+		StateMachine *sm = new StateMachine(root, root->origin, fvm, tid);
+		sm->sanityCheck();
+		out.insert(sm);
 	}
-	StateMachineState *root =
-		new StateMachineNdChoice(VexRip(), rootStates);
-	FreeVariableMap fvm;
-	StateMachine *sm = new StateMachine(root, VexRip(), fvm, tid);
-	sm->sanityCheck();
-	return sm;
 }
 
 /* End of namespace */
 };
 
-StateMachine *
+void
 probeCFGsToMachine(Oracle *oracle, unsigned tid,
 		   std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &targetRip,
-		   StateMachineState *proximal)
+		   StateMachineState *proximal,
+		   std::set<StateMachine *> &out)
 {
-	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal);
+	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal, out);
 }

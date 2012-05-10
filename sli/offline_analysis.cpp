@@ -615,12 +615,14 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 	return true;
 }
 
-StateMachine *
+bool
 buildProbeMachine(VexPtr<Oracle> &oracle,
 		  const DynAnalysisRip &targetRip,
 		  VexPtr<StateMachineState, &ir_heap> &proximal,
 		  ThreadId tid,
 		  const AllowableOptimisations &optIn,
+		  StateMachine ***out,
+		  unsigned *nr_out_machines,
 		  GarbageCollectionToken token)
 {
 	__set_profiling(buildProbeMachine);
@@ -629,40 +631,58 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 		optIn
 		.enableignoreSideEffects();
 
-	VexPtr<StateMachine, &ir_heap> sm;
+	VexPtr<StateMachine *, &ir_heap> sms;
+	unsigned nr_sms;
 	{
 		std::set<CFGNode *> roots;
 		if (!getProbeCFGs(oracle, targetRip, roots)) {
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
 			return NULL;
 		}
-		sm = probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal);
+		std::set<StateMachine *> machines;
+		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal, machines);
+		sms = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, machines.size());
+		nr_sms = 0;
+		for (auto it = machines.begin(); it != machines.end(); it++) {
+			sms[nr_sms] = *it;
+			nr_sms++;
+		}
 	}
 	if (TIMEOUT)
-		return NULL;
+		return false;
 
 	LibVEX_maybe_gc(token);
-	sm->sanityCheck();
 
-	sm = optimiseStateMachine(sm,
-				  opt,
-				  oracle,
-				  true,
-				  false,
-				  token);
+	for (unsigned x = 0; x < nr_sms; x++) {
+		VexPtr<StateMachine, &ir_heap> sm(sms[x]);
+		sm->sanityCheck();
 
-	sm = convertToSSA(sm);
-	if (TIMEOUT)
-		return NULL;
-	sm->sanityCheck();
-	sm = optimiseStateMachine(sm,
-				  opt,
-				  oracle,
-				  true,
-				  true,
-				  token);
+		sm = optimiseStateMachine(sm,
+					  opt,
+					  oracle,
+					  true,
+					  false,
+					  token);
 
-	return sm;
+		sm = convertToSSA(sm);
+		if (TIMEOUT)
+			return false;
+		sm->sanityCheck();
+		sm = optimiseStateMachine(sm,
+					  opt,
+					  oracle,
+					  true,
+					  true,
+					  token);
+
+		sms[x] = sm;
+	}
+
+	*out = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_sms);
+	for (unsigned x = 0; x < nr_sms; x++)
+		(*out)[x] = sms[x];
+	*nr_out_machines = nr_sms;
+	return true;
 }
 
 static bool
@@ -1437,10 +1457,17 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.setAddressSpace(oracle->ms->addressSpace);
-	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, token);
-	if (probeMachine) {
+	VexPtr<StateMachine *, &ir_heap> probeMachines;
+	unsigned nrProbeMachines;
+	{
+		StateMachine **_probeMachines;
+		if (buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, &_probeMachines, &nrProbeMachines, token))
+			return;
+		probeMachines = _probeMachines;
+	}
+	for (unsigned x = 0; x < nrProbeMachines; x++) {
 		VexPtr<CrashSummary, &ir_heap> summary;
+		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
 		summary = diagnoseCrash(probeMachine, oracle, ms, false, opt, token);
 		if (summary)
 			df(summary, token);
