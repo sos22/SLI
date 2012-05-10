@@ -8,8 +8,9 @@ namespace _getProbeCFGs {
 
 #ifdef NDEBUG
 #define debug_exploration 0
+#define debug_trim 0
 #else
-static int debug_exploration = 1;
+static int debug_exploration = 0, debug_trim = 1;
 #endif
 
 static void
@@ -52,25 +53,30 @@ debug_dump(const std::set<t> &what, const char *prefix)
 	}
 }
 
-					
+/* We always backtrack to at least maxPathLength1, and can backtrack
+   up to maxPathLength2 provided that doing so doesn't cross any
+   function heads. */
 static bool
 exploreForStartingRip(Oracle *oracle,
 		      const VexRip &startingVexRip,
 		      std::map<VexRip, CFGNode *> &out,
 		      std::set<VexRip> &newStartingRips,
-		      unsigned maxPathLength)
+		      unsigned maxPathLength1,
+		      unsigned maxPathLength2)
 {
 	std::vector<VexRip> pendingAtCurrentDepth;
 	std::vector<VexRip> neededAtNextDepth;
 	std::map<VexRip, std::set<VexRip> > neededRelocs;
+	unsigned depth;
 
 	if (debug_exploration)
 		printf("Exploring from %s...\n", startingVexRip.name());
 	CFGNode::flavour_t flavour = CFGNode::true_target_instr;
 	pendingAtCurrentDepth.push_back(startingVexRip);
-	while (maxPathLength != 0) {
+	depth = 0;
+	while (depth < maxPathLength2) {
 		if (debug_exploration)
-			printf("\tAt depth %d\n", maxPathLength);
+			printf("\tAt depth %d/(%d,%d)\n", depth, maxPathLength1, maxPathLength2);
 		while (!pendingAtCurrentDepth.empty()) {
 			VexRip vr(pendingAtCurrentDepth.back());
 			pendingAtCurrentDepth.pop_back();
@@ -125,9 +131,9 @@ exploreForStartingRip(Oracle *oracle,
 						       vr.name());
 				}
 			}
-			oracle->findPredecessors(vr, neededAtNextDepth);
+			oracle->findPredecessors(vr, depth < maxPathLength1, neededAtNextDepth);
 		}
-		maxPathLength--;
+		depth++;
 		pendingAtCurrentDepth = neededAtNextDepth;
 		neededAtNextDepth.clear();
 	}
@@ -141,7 +147,7 @@ exploreForStartingRip(Oracle *oracle,
 static void
 initialExploration(Oracle *oracle, const DynAnalysisRip &targetRip,
 		   std::map<VexRip, CFGNode *> &out,
-		   unsigned maxPathLength)
+		   unsigned maxPathLength1, unsigned maxPathLength2)
 {
 	std::set<VexRip> startingRips;
 	startingRips.insert(targetRip.toVexRip());
@@ -155,7 +161,8 @@ initialExploration(Oracle *oracle, const DynAnalysisRip &targetRip,
 		for (auto it = startingRips.begin(); it != startingRips.end(); it++) {
 			if (exploreForStartingRip(oracle, *it, out,
 						  newStartingRips,
-						  maxPathLength)) {
+						  maxPathLength1,
+						  maxPathLength2)) {
 				failed = true;
 			} else {
 				newStartingRips.insert(*it);
@@ -213,9 +220,8 @@ static void
 unrollAndCycleBreak(std::set<CFGNode *> &instrs, int maxPathLength)
 {
 	std::map<CFGNode *, std::set<CFGNode *> > predecessorMap;
-	CFGNode *startNode;
+	std::set<CFGNode *> startNodes;
 
-	startNode = NULL;
 	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		CFGNode *n = *it;
 		if (n->fallThrough.second)
@@ -225,83 +231,211 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs, int maxPathLength)
 		     it++)
 			if (it->second)
 				predecessorMap[it->second].insert(n);
-		if (n->flavour == CFGNode::true_target_instr) {
-			assert(startNode == NULL);
-			startNode = n;
-		}
+		if (n->flavour == CFGNode::true_target_instr)
+			startNodes.insert(n);
 	}
-	assert(startNode);
+	assert(!startNodes.empty());
 
-	while (1) {
-		CFGNode *cycle_edge_start, *cycle_edge_end;
-		int discoveryDepth;
-		if (!selectEdgeForCycleBreak(startNode,
-					     predecessorMap,
-					     &cycle_edge_start,
-					     &cycle_edge_end,
-					     &discoveryDepth)) {
-			/* No cycles left in the graph.  Yay. */
-			break;
-		}
-
-		if (discoveryDepth < maxPathLength) {
-			/* The edge from cycle_edge_start to
-			   cycle_edge_end closes a cycle, and we want
-			   to get rid of that cycle.  We do so by
-			   duplicating cycle_edge_start along with all
-			   of its *incoming* edges, plus the one edge
-			   to cycle_edge_end.  We then remove
-			   cycle_edge_end from the old node's outgoing
-			   list.  The effect is that the old node is
-			   no longer on the cycle.  The new node is
-			   part of a cycle, but it's a cycle further
-			   from the start node, and so if we iterate
-			   long enough the cycle will eventually be
-			   broken by maxPathLength. */
-			CFGNode *new_node;
-			/* Create new node */
-			new_node = new CFGNode(cycle_edge_start->my_rip, CFGNode::ordinary_instr);
-			/* Maintain the edge to cycle_edge_end */
-			new_node->fallThrough.first = cycle_edge_end->my_rip;
-			new_node->fallThrough.second = cycle_edge_end;
-			predecessorMap[cycle_edge_end].insert(new_node);
-
-			/* Clone all the incoming edges */
-			std::set<CFGNode *> &oldNodePredecessors(predecessorMap[cycle_edge_start]);
-			std::set<CFGNode *> &newNodePredecessors(predecessorMap[new_node]);
-			for (auto it = oldNodePredecessors.begin();
-			     it != oldNodePredecessors.end();
-			     it++) {
-				CFGNode *pred = *it;
-				pred->branches.push_back(
-					CFGNode::successor_t(new_node->my_rip, new_node));
-				newNodePredecessors.insert(pred);
+	for (auto it = startNodes.begin(); it != startNodes.end(); it++) {
+		CFGNode *startNode = *it;
+		while (1) {
+			CFGNode *cycle_edge_start, *cycle_edge_end;
+			int discoveryDepth;
+			if (!selectEdgeForCycleBreak(startNode,
+						     predecessorMap,
+						     &cycle_edge_start,
+						     &cycle_edge_end,
+						     &discoveryDepth)) {
+				/* No cycles left in the graph.  Yay. */
+				break;
 			}
 
-			instrs.insert(new_node);
-		}
+			if (discoveryDepth < maxPathLength) {
+				/* The edge from cycle_edge_start to
+				   cycle_edge_end closes a cycle, and
+				   we want to get rid of that cycle.
+				   We do so by duplicating
+				   cycle_edge_start along with all of
+				   its *incoming* edges, plus the one
+				   edge to cycle_edge_end.  We then
+				   remove cycle_edge_end from the old
+				   node's outgoing list.  The effect
+				   is that the old node is no longer
+				   on the cycle.  The new node is part
+				   of a cycle, but it's a cycle
+				   further from the start node, and so
+				   if we iterate long enough the cycle
+				   will eventually be broken by
+				   maxPathLength. */
+				CFGNode *new_node;
+				/* Create new node */
+				new_node = new CFGNode(cycle_edge_start->my_rip, CFGNode::ordinary_instr);
+				/* Maintain the edge to cycle_edge_end */
+				new_node->fallThrough.first = cycle_edge_end->my_rip;
+				new_node->fallThrough.second = cycle_edge_end;
+				predecessorMap[cycle_edge_end].insert(new_node);
 
-		/* Remove the edge we just killed. */
-		if (cycle_edge_start->fallThrough.second == cycle_edge_end) {
-			cycle_edge_start->fallThrough.second = NULL;
-		} else {
-			for (auto it = cycle_edge_start->branches.begin();
-			     it != cycle_edge_start->branches.end();
-			     it++) {
-				if (it->second == cycle_edge_end) {
-					it->second = NULL;
-					break;
+				/* Clone all the incoming edges */
+				std::set<CFGNode *> &oldNodePredecessors(predecessorMap[cycle_edge_start]);
+				std::set<CFGNode *> &newNodePredecessors(predecessorMap[new_node]);
+				for (auto it = oldNodePredecessors.begin();
+				     it != oldNodePredecessors.end();
+				     it++) {
+					CFGNode *pred = *it;
+					pred->branches.push_back(
+						CFGNode::successor_t(new_node->my_rip, new_node));
+					newNodePredecessors.insert(pred);
+				}
+
+				instrs.insert(new_node);
+			}
+
+			/* Remove the edge we just killed. */
+			if (cycle_edge_start->fallThrough.second == cycle_edge_end) {
+				cycle_edge_start->fallThrough.second = NULL;
+			} else {
+				for (auto it = cycle_edge_start->branches.begin();
+				     it != cycle_edge_start->branches.end();
+				     it++) {
+					if (it->second == cycle_edge_end) {
+						it->second = NULL;
+						break;
+					}
 				}
 			}
+			predecessorMap[cycle_edge_end].erase(cycle_edge_start);
 		}
-		predecessorMap[cycle_edge_end].erase(cycle_edge_start);
 	}
 		
 }
-		    
+
+/* Find any nodes in @nodes which:
+
+   a) Aren't reachable from a function head in @nodes, and
+   b) Aren't followed by a true_target_instr within @maxPathLength
+      nodes.
+
+   And then go and remove them.  The idea is that the exploration has
+   gone past @maxPathLength, and we want to keep any nodes past that
+   depth which look like they might make the analysis easier and
+   discard anything which looks like it'll make it more difficult.
+*/
+static void
+trimExcessNodes(Oracle *oracle,
+		std::set<CFGNode *> &nodes,
+		int maxPathLength)
+{
+	/* This is not an efficient algorithm for doing this.
+	   Nevermind; this isn't exactly a hotspot. */
+	std::map<CFGNode *, int> distanceToTargetInstr;
+	for (auto it = nodes.begin(); it != nodes.end(); it++) {
+		CFGNode *n = *it;
+		int v;
+		if (n->flavour == CFGNode::true_target_instr)
+			v = 0;
+		else
+			v = nodes.size();
+		distanceToTargetInstr[n] = v;
+	}
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		for (auto it = nodes.begin(); it != nodes.end(); it++) {
+			CFGNode *n = *it;
+			int distance;
+			distance = distanceToTargetInstr[n];
+			if (n->fallThrough.second &&
+			    distance > distanceToTargetInstr[n->fallThrough.second] + 1)
+				distance = distanceToTargetInstr[n->fallThrough.second] + 1;
+			for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+				if ( it2->second &&
+				     distance > distanceToTargetInstr[it2->second] + 1)
+					distance = distanceToTargetInstr[it2->second] + 1;
+			if (!progress && distanceToTargetInstr[n] != distance)
+				progress = true;
+			distanceToTargetInstr[n] = distance;
+		}
+	}
+
+	std::set<CFGNode *> reachableFromFunctionHead;
+	std::set<CFGNode *> pending;
+	for (auto it = nodes.begin(); it != nodes.end(); it++) {
+		CFGNode *n = *it;
+		if (oracle->isFunctionHead(n->my_rip))
+			pending.insert(n);
+	}
+	while (!pending.empty()) {
+		std::set<CFGNode *> newPending;
+		for (auto it = pending.begin(); it != pending.end(); it++) {
+			CFGNode *n = *it;
+			if (reachableFromFunctionHead.insert(n).second) {
+				if (n->fallThrough.second)
+					newPending.insert(n->fallThrough.second);
+				for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+					if (it2->second)
+						newPending.insert(it2->second);
+			}
+		}
+		pending = newPending;
+	}
+
+	std::set<CFGNode *> nodesToKill;
+	for (auto it = nodes.begin(); it != nodes.end(); it++) {
+		/* We keep the node if either it's reachable from the
+		 * function head or a root... */
+		if (reachableFromFunctionHead.count(*it)) {
+			if (debug_trim) {
+				printf("Preserve due to reachability from head %p ", *it);
+				(*it)->prettyPrint(stdout);
+			}
+			continue;
+		}
+		/* ...or it's within the threshold of a target
+		 * instruction. */
+		auto it2 = distanceToTargetInstr.find(*it);
+		if (it2 != distanceToTargetInstr.end() &&
+		    it2->second < maxPathLength) {
+			if (debug_trim) {
+				printf("Preserve at distance %d(< %d) %p ",
+				       it2->second, maxPathLength, *it);
+				(*it)->prettyPrint(stdout);
+			}
+			continue;
+		}
+		/* Otherwise, we have to kill it. */
+		if (debug_trim) {
+			printf("Kill node %p ", *it);
+			(*it)->prettyPrint(stdout);
+		}
+		nodesToKill.insert(*it);
+	}
+
+	if (nodesToKill.empty())
+		return;
+
+	/* Now go back and remove all the nodes in nodesToKill. */
+	for (auto it = nodes.begin(); it != nodes.end(); ) {
+		CFGNode *n = *it;
+		if (nodesToKill.count(n)) {
+			nodes.erase(it++);
+		} else {
+			if (n->fallThrough.second && nodesToKill.count(n->fallThrough.second))
+				n->fallThrough.second = NULL;
+			for (auto it2 = n->branches.begin();
+			     it2 != n->branches.end();
+			     it2++) {
+				if (it2->second && nodesToKill.count(it2->second))
+					it2->second = NULL;
+			}
+			it++;
+		}
+	}
+}
+
 static bool
 getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
-	    std::set<CFGNode *> &out, unsigned maxPathLength)
+	    std::set<CFGNode *> &out, unsigned maxPathLength1,
+	    unsigned maxPathLength2)
 {
 	/* Step one: build a CFG backwards from @targetInstr until the
 	   shortest path from any root to @vr is at least
@@ -309,7 +443,7 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 	VexRip dominator;
 
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	initialExploration(oracle, targetInstr, ripsToCFGNodes, maxPathLength);
+	initialExploration(oracle, targetInstr, ripsToCFGNodes, maxPathLength1, maxPathLength2);
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
@@ -322,11 +456,20 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 	std::set<CFGNode *> nodes;
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++)
 		nodes.insert(it->second);
-	unrollAndCycleBreak(nodes, maxPathLength);
+	unrollAndCycleBreak(nodes, maxPathLength2);
+
+	if (debug_exploration) {
+		std::set<CFGNode *> initialRoots;
+		findRoots(nodes, initialRoots);
+		printf("Before trimming:\n");
+		debug_dump(initialRoots, "\t");
+	}
+
+	trimExcessNodes(oracle, nodes, maxPathLength1);
 
 	findRoots(nodes, out);
 	if (debug_exploration) {
-		printf("Roots:\n");
+		printf("After trimming:\n");
 		debug_dump(out, "\t");
 	}
 
@@ -339,5 +482,5 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 bool
 getProbeCFGs(Oracle *oracle, const DynAnalysisRip &vr, std::set<CFGNode *> &out)
 {
-	return _getProbeCFGs::getProbeCFG(oracle, vr, out, PROBE_CLUSTER_THRESHOLD);
+	return _getProbeCFGs::getProbeCFG(oracle, vr, out, PROBE_CLUSTER_THRESHOLD1, PROBE_CLUSTER_THRESHOLD2);
 }

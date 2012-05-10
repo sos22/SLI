@@ -3082,7 +3082,7 @@ Oracle::getPossibleStackTruncations(const VexRip &vr,
 /* Find all of the instructions which might have executed immediately
  * before @vr. */
 void
-Oracle::findPredecessors(const VexRip &vr, std::vector<VexRip> &out)
+Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::vector<VexRip> &out)
 {
 	StaticRip sr(vr);
 	Function f(sr);
@@ -3091,13 +3091,15 @@ Oracle::findPredecessors(const VexRip &vr, std::vector<VexRip> &out)
 	f.addPredecessorsDirect(sr, nonCall);
 	for (auto it = nonCall.begin(); it != nonCall.end(); it++)
 		out.push_back(it->makeVexRip(vr));
-	std::vector<StaticRip> call;
-	f.addPredecessorsCall(sr, call);
-	if (call.size() != 0) {
-		VexRip parentVr(vr);
-		parentVr.rtrn();
-		for (auto it = call.begin(); it != call.end(); it++)
-			out.push_back(it->makeVexRip(parentVr));
+	if (includeCallPredecessors) {
+		std::vector<StaticRip> call;
+		f.addPredecessorsCall(sr, call);
+		if (call.size() != 0) {
+			VexRip parentVr(vr);
+			parentVr.rtrn();
+			for (auto it = call.begin(); it != call.end(); it++)
+				out.push_back(it->makeVexRip(parentVr));
+		}
 	}
 	std::vector<StaticRip> rtrn;
 	f.addPredecessorsReturn(sr, rtrn);
@@ -3107,7 +3109,7 @@ Oracle::findPredecessors(const VexRip &vr, std::vector<VexRip> &out)
 		out.push_back(r);
 	}
 
-	if (rtrn.empty() && call.empty() && nonCall.empty()) {
+	if (rtrn.empty() && nonCall.empty()) {
 		std::vector<StaticRip> callSucc;
 		static sqlite3_stmt *stmt;
 		if (!stmt)

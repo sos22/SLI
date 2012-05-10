@@ -64,10 +64,9 @@ public:
 };
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
-StateMachine *buildProbeMachine(std::vector<VexRip> &previousInstructions,
-				VexPtr<InferredInformation, &ir_heap> &ii,
-				VexPtr<Oracle> &oracle,
-				const VexRip &interestingRip,
+StateMachine *buildProbeMachine(VexPtr<Oracle> &oracle,
+				const DynAnalysisRip &interestingRip,
+				VexPtr<StateMachineState, &ir_heap> &proximal,
 				ThreadId tid,
 				const AllowableOptimisations &opt,
 				GarbageCollectionToken token);

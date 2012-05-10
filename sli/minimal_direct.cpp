@@ -79,7 +79,7 @@ public:
 static TimeoutTimer timeoutTimer;
 
 static void
-consider_rip(const VexRip &my_rip,
+consider_rip(const DynAnalysisRip &my_rip,
 	     VexPtr<MachineState> &ms,
 	     VexPtr<Thread> &thr,
 	     VexPtr<Oracle> &oracle,
@@ -152,9 +152,9 @@ main(int argc, char *argv[])
 	end_percentage = 100;
 
 	if (argc == 5) {
-		VexRip vr;
+		DynAnalysisRip vr;
 		const char *succ;
-		if (parseVexRip(&vr, argv[4], &succ)) {
+		if (parseDynAnalysisRip(&vr, argv[4], &succ)) {
 			consider_rip(vr, ms, thr, oracle, df, NULL, ALLOW_GC);
 			df.finish();
 			return 0;
@@ -175,7 +175,7 @@ main(int argc, char *argv[])
 	   -- a...b and b...c must, between them, cover precisely the
               same range as a...c i.e. no duplicates or gaps.
 	*/
-	unsigned long start_instr = 6957;//total_instructions / 100 * start_percentage;
+	unsigned long start_instr = 12410;//total_instructions / 100 * start_percentage;
 	unsigned long end_instr = end_percentage == 100 ? total_instructions : total_instructions / 100 * end_percentage - 1;
 	unsigned long instructions_to_process = end_instr - start_instr + 1;
 
@@ -196,11 +196,10 @@ main(int argc, char *argv[])
 		instrIterator->fetch(&dar);
 		_logfile = fopenf("w", "logs/%ld", cntr + start_instr);
 		if (!_logfile) err(1, "opening logs/%ld", cntr + start_instr);
-		VexRip rip = dar.toVexRip();
-		printf("Considering %s, log logs/%ld\n", rip.name(), cntr + start_instr);
-		fprintf(_logfile, "Log for %s:\n", rip.name());
+		printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
+		fprintf(_logfile, "Log for %s:\n", dar.name());
 		cntr++;
-		consider_rip(rip, ms, thr, oracle, df, timings, ALLOW_GC);
+		consider_rip(dar, ms, thr, oracle, df, timings, ALLOW_GC);
 		fclose(_logfile);
 		_logfile = stdout;
 

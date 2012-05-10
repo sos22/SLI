@@ -380,7 +380,7 @@ public:
 	bool isFunctionHead(const VexRip &vr);
 	void getPossibleStackTruncations(const VexRip &vr,
 					 std::vector<unsigned long> &callers);
-	void findPredecessors(const VexRip &vr, std::vector<VexRip> &out);
+	void findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::vector<VexRip> &out);
 
 	bool isPltCall(const VexRip &vr);
 

@@ -616,10 +616,9 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 }
 
 StateMachine *
-buildProbeMachine(std::vector<VexRip> &previousInstructions,
-		  VexPtr<InferredInformation, &ir_heap> &ii,
-		  VexPtr<Oracle> &oracle,
-		  const VexRip &interestingRip,
+buildProbeMachine(VexPtr<Oracle> &oracle,
+		  const DynAnalysisRip &targetRip,
+		  VexPtr<StateMachineState, &ir_heap> &proximal,
 		  ThreadId tid,
 		  const AllowableOptimisations &optIn,
 		  GarbageCollectionToken token)
@@ -630,75 +629,38 @@ buildProbeMachine(std::vector<VexRip> &previousInstructions,
 		optIn
 		.enableignoreSideEffects();
 
-	VexPtr<StateMachine, &ir_heap> sm(NULL);
-
-	for (auto it = previousInstructions.begin();
-	     !TIMEOUT && it != previousInstructions.end();
-	     it++) {
-		fprintf(_logfile, "Backtrack to %s...\n", it->name());
-		LibVEX_maybe_gc(token);
-
-		std::set<VexRip> terminalFunctions;
-		terminalFunctions.insert(VexRip::invent_vex_rip(0x757bf0));
-		VexPtr<CFGNode, &ir_heap> cfg(
-			buildCFGForRipSet(oracle->ms->addressSpace,
-					  *it,
-					  terminalFunctions,
-					  oracle,
-					  100));
-		InstructionSet interesting;
-		interesting.rips.insert(interestingRip);
-		trimCFG(cfg.get(), interesting);
-
-		VexPtr<StateMachineState, &ir_heap> escape(StateMachineNoCrash::get());
-		VexPtr<StateMachine, &ir_heap> cr(
-			CFGtoCrashReason(tid._tid(), cfg, ii,
-					 escape, opt, false, oracle, token));
-		if (!cr) {
-			fprintf(_logfile, "\tCannot build crash reason from CFG\n");
+	VexPtr<StateMachine, &ir_heap> sm;
+	{
+		std::set<CFGNode *> roots;
+		if (!getProbeCFGs(oracle, targetRip, roots)) {
+			fprintf(_logfile, "Cannot get probe CFGs!\n");
 			return NULL;
 		}
-
-		cr = optimiseStateMachine(cr,
-					  opt,
-					  oracle,
-					  false,
-					  false,
-					  token);
-		breakCycles(cr);
-		if (TIMEOUT)
-			return NULL;
-		cr = optimiseStateMachine(cr,
-					  opt,
-					  oracle,
-					  false,
-					  false,
-					  token);
-
-		if (dynamic_cast<StateMachineNoCrash *>(cr->root)) {
-			/* Once you've reduced the machine to
-			   definitely-doesn't-crash there's not much
-			   point in looking any further, so stop. */
-			fprintf(_logfile, "Machine definitely survives -> stop now\n");
-			return NULL;
-		}
-		sm = cr;
+		sm = probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal);
 	}
 	if (TIMEOUT)
 		return NULL;
 
-	if (sm) {
-		sm = convertToSSA(sm);
-		if (TIMEOUT)
-			return NULL;
-		sm->sanityCheck();
-		sm = optimiseStateMachine(sm,
-					  opt.enablefreeVariablesNeverAccessStack(),
-					  oracle,
-					  true,
-					  true,
-					  token);
-	}
+	LibVEX_maybe_gc(token);
+	sm->sanityCheck();
+
+	sm = optimiseStateMachine(sm,
+				  opt,
+				  oracle,
+				  true,
+				  false,
+				  token);
+
+	sm = convertToSSA(sm);
+	if (TIMEOUT)
+		return NULL;
+	sm->sanityCheck();
+	sm = optimiseStateMachine(sm,
+				  opt,
+				  oracle,
+				  true,
+				  true,
+				  token);
 
 	return sm;
 }
@@ -1458,31 +1420,25 @@ remoteMacroSectionsT::visit(HeapVisitor &hv)
 }
 
 void
-checkWhetherInstructionCanCrash(const VexRip &rip,
+checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				VexPtr<MachineState> &ms,
 				VexPtr<Thread> &thr,
 				VexPtr<Oracle> &oracle,
 				FixConsumer &df,
 				GarbageCollectionToken token)
 {
-	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), rip), thr));
+	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), targetRip.toVexRip()), thr));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
 	}
-
-	VexPtr<InferredInformation, &ir_heap> ii(new InferredInformation());
-	ii->set(rip, proximal);
-
-	std::vector<VexRip> previousInstructions;
-	oracle->findPreviousInstructions(previousInstructions, rip);
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.setAddressSpace(oracle->ms->addressSpace);
 	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(previousInstructions, ii, oracle, rip, thr->tid, opt, token);
+	probeMachine = buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, token);
 	if (probeMachine) {
 		VexPtr<CrashSummary, &ir_heap> summary;
 		summary = diagnoseCrash(probeMachine, oracle, ms, false, opt, token);

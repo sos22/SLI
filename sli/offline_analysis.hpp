@@ -234,7 +234,7 @@ void breakCycles(StateMachine *);
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;
-void checkWhetherInstructionCanCrash(const VexRip &rip,
+void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     VexPtr<MachineState> &ms,
 				     VexPtr<Thread> &thr,
 				     VexPtr<Oracle> &oracle,

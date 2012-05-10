@@ -571,6 +571,10 @@ public:
 	}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
 	{
+		for (auto it = successors.begin(); it != successors.end(); it++) {
+			assert(*it);
+			(*it)->sanityCheck(live);
+		}
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }	
 };
@@ -821,6 +825,11 @@ bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 bool parseStateMachine(StateMachine **out, const char *str, const char **suffix);
 StateMachine *readStateMachine(int fd);
 
+class CFGNode;
+StateMachine *probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
+				 const DynAnalysisRip &proximalRip,
+				 StateMachineState *proximalCause);
+
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
 				 const char **suffix);
@@ -845,6 +854,7 @@ enumStates(StateMachine *sm, std::set<stateType *> *states)
 	toVisit.insert(sm->root);
 	while (!toVisit.empty()) {
 		StateMachineState *s = pop(toVisit);
+		assert(s);
 		if (!visited.insert(s).second)
 			continue;
 		if (states) {
