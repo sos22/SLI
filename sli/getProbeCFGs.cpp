@@ -10,7 +10,7 @@ namespace _getProbeCFGs {
 #define debug_exploration 0
 #define debug_trim 0
 #else
-static int debug_exploration = 0, debug_trim = 1;
+static int debug_exploration = 0, debug_trim = 0;
 #endif
 
 static void
