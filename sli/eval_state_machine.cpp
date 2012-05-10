@@ -1447,7 +1447,8 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 					       opt
 					          .enableassumeExecutesAtomically()
 					          .enableignoreSideEffects()
-					          .enableassumeNoInterferingStores(),
+					          .enableassumeNoInterferingStores()
+					          .enablenoExtend(),
 					       oracle,
 					       true,
 					       true,

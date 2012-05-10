@@ -223,7 +223,7 @@ StateMachine *availExpressionAnalysis(StateMachine *sm,
 				      bool is_ssa,
 				      Oracle *oracle,
 				      bool *done_something);
-StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something);
+StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
 
 StateMachine *introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something);

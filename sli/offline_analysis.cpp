@@ -304,7 +304,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			bool d;
 			do {
 				d = false;
-				sm = deadCodeElimination(sm, &d);
+				sm = deadCodeElimination(sm, &d, opt);
 				done_something |= d;
 			} while (d);
 		}

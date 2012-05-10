@@ -92,11 +92,29 @@ public:
 	}
 
 	bool registerLive(threadAndRegister reg) const { return count(reg); }
-	bool assertionLive(IRExpr *assertion) const {
+	bool assertionLive(IRExpr *assertion, const AllowableOptimisations &opt) const {
 		if (assertion->tag == Iex_Const)
 			return false;
-		else
+
+		if (!opt.noExtend())
 			return true;
+
+		/* If we're in noExtend mode, we only keep an
+		   assertion around if it mentions a register which is
+		   live after it. */
+		struct : public IRExprTransformer {
+			bool res;
+			const LivenessEntry *_this;
+			IRExpr *transformIex(IRExprGet *ieg) {
+				if (_this->registerLive(ieg->reg))
+					res = true;
+				return NULL;
+			}
+		} doit;
+		doit.res = false;
+		doit._this = this;
+		doit.doit(assertion);
+		return doit.res;
 	}
 
 	void print() const {
@@ -183,7 +201,7 @@ public:
 };
 
 static StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something)
+deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt)
 {
 	std::map<const StateMachineState *, int> stateLabels;
 
@@ -221,6 +239,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		LivenessEntry &alwaysLive;
 		bool *done_something;
 		FreeVariableMap &fvm;
+		const AllowableOptimisations &opt;
 
 		StateMachineSideEffect *doit(StateMachineSideEffect *e,
 					     bool targetIsTerminal,
@@ -244,7 +263,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 				StateMachineSideEffectAssertFalse *a =
 					(StateMachineSideEffectAssertFalse *)e;
 				if (targetIsTerminal ||
-				    !alive.assertionLive(a->value))
+				    !alive.assertionLive(a->value, opt))
 					dead = true;
 				break;
 			}
@@ -311,11 +330,13 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		}
 
 		_(LivenessMap &_livenessMap, LivenessEntry &_alwaysLive,
-		  bool *_done_something, FreeVariableMap &_fvm)
+		  bool *_done_something, FreeVariableMap &_fvm,
+		  const AllowableOptimisations &_opt)
 			: livenessMap(_livenessMap), alwaysLive(_alwaysLive),
-			  done_something(_done_something), fvm(_fvm)
+			  done_something(_done_something), fvm(_fvm),
+			  opt(_opt)
 		{}
-	} eliminateDeadCode(livenessMap, alwaysLive, done_something, sm->freeVariables);
+	} eliminateDeadCode(livenessMap, alwaysLive, done_something, sm->freeVariables, opt);
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();
@@ -336,8 +357,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 }
 
 StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something)
+deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt)
 {
-	return _deadCode::deadCodeElimination(sm, done_something);
+	return _deadCode::deadCodeElimination(sm, done_something, opt);
 }
 

@@ -49,6 +49,10 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
  				    generated at function heads, for
  				    instance.
 
+   noExtend -- If true, assume that the machine will never be
+               expanded.  This means that we can discard some
+               assertions which would otherwise be quite useful.
+
    Other fields:
 
    interestingStores -- Bit of a hack: sometimes, only some side
@@ -72,7 +76,8 @@ class AllowableOptimisations {
 	f(assumeExecutesAtomically, bool)				\
 	f(ignoreSideEffects, bool)					\
 	f(assumeNoInterferingStores, bool)				\
-	f(freeVariablesNeverAccessStack,bool)
+	f(freeVariablesNeverAccessStack,bool)				\
+	f(noExtend,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\
