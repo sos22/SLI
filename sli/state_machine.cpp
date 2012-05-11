@@ -10,6 +10,12 @@
 
 #include "libvex_parse.h"
 
+#ifndef NDEBUG
+#define debug_state_machine_sanity_checks 0
+#else
+static int debug_state_machine_sanity_checks = 0;
+#endif
+
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
@@ -877,6 +883,11 @@ intersectSets(std::set<t, s> &out, const std::set<t, s> &inp)
 void
 StateMachine::sanityCheck() const
 {
+	/* These are expensive enough that we don't want them on
+	   unconditionally even in !NDEBUG builds. */
+	if (!debug_state_machine_sanity_checks)
+		return;
+
 	std::map<const StateMachineState *, std::set<threadAndRegister, threadAndRegister::fullCompare> > definedAtTopOfState;
 	std::set<threadAndRegister, threadAndRegister::fullCompare> allDefinedRegisters;
 	std::set<const StateMachineState *> allStates;
