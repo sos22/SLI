@@ -153,9 +153,6 @@ cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
 			std::vector<CFGNode *> targets;
 			getTargets(target, stmt->dst.rip, targets);
 			StateMachineBifurcate *smb;
-			printf("Exit with guard %p\n\t", stmt->guard);
-			ppIRExpr(stmt->guard, stdout);
-			printf("\n");
 			smb = new StateMachineBifurcate(
 				target->my_rip,
 				stmt->guard,
