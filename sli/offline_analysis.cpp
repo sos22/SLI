@@ -636,6 +636,8 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 {
 	__set_profiling(buildProbeMachine);
 
+	*nr_out_machines = 0;
+
 	AllowableOptimisations opt =
 		optIn
 		.enableignoreSideEffects();
@@ -646,7 +648,7 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 		std::set<CFGNode *> roots;
 		if (!getProbeCFGs(oracle, targetRip, roots)) {
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
-			return NULL;
+			return false;
 		}
 		std::set<StateMachine *> machines;
 		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal, machines);
@@ -1473,7 +1475,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	unsigned nrProbeMachines;
 	{
 		StateMachine **_probeMachines;
-		if (buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, &_probeMachines, &nrProbeMachines, token))
+		if (!buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, &_probeMachines, &nrProbeMachines, token))
 			return;
 		probeMachines = _probeMachines;
 	}
