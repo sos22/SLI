@@ -909,4 +909,18 @@ enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
 	}
 }
 
+template <typename seType> void
+enumSideEffects(StateMachine *sm, std::set<seType *> &out)
+{
+	std::set<StateMachineSideEffecting *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		if ( !(*it)->sideEffect )
+			continue;
+		seType *se = dynamic_cast<seType *>( (*it)->sideEffect );
+		if (se)
+			out.insert(se);
+	}
+}
+
 #endif /* !STATEMACHINE_HPP__ */

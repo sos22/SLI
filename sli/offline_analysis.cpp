@@ -360,6 +360,61 @@ CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode, &ir_heap
 	return CFGtoCrashReason(tid, cfg, dummy, escape, opt, true, oracle, token);
 }
 
+/* If there's precisely one interesting store in the store machine and
+ * one interesting load in the probe machine then the whole thing
+ * becomes very easy. */
+static bool
+singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachine,
+			    const AllowableOptimisations &opt, Oracle *oracle)
+{
+	std::set<StateMachineSideEffectStore *> storeMachineStores;
+	std::set<StateMachineSideEffectLoad *> probeMachineLoads;
+	enumSideEffects(storeMachine, storeMachineStores);
+	enumSideEffects(probeMachine, probeMachineLoads);
+
+	StateMachineSideEffectStore *racingStore = NULL;
+	StateMachineSideEffectLoad *racingLoad = NULL;
+	for (auto it = storeMachineStores.begin(); it != storeMachineStores.end(); it++) {
+		StateMachineSideEffectStore *store = *it;
+		bool races = false;
+		for (auto it2 = probeMachineLoads.begin();
+		     !races && it2 != probeMachineLoads.end();
+		     it2++) {
+			StateMachineSideEffectLoad *load = *it2;
+			if (oracle->memoryAccessesMightAlias(opt, load, store)) {
+				if (racingLoad) {
+					/* Multiple racing loads */
+					return false;
+				}
+				racingLoad = load;
+				races = true;
+			}
+		}
+		if (races) {
+			if (racingStore) {
+				/* We have multiple racing stores */
+				return false;
+			}
+			racingStore = store;
+		}
+	}
+
+	/* There must be *some* races in here, or else machine
+	   construction must have gone wrong. */
+	assert(racingStore != NULL);
+	assert(racingLoad != NULL);
+
+	for (auto it = probeMachineLoads.begin(); it != probeMachineLoads.end(); it++) {
+		StateMachineSideEffectLoad *load = *it;
+		if (racingLoad == load)
+			continue;
+		if (oracle->memoryAccessesMightAlias(opt, load, racingStore))
+			return false;
+	}
+
+	return true;
+}
+
 static bool
 determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> &probeMachine,
@@ -388,6 +443,15 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
+
+	/* Special case: if the only possible interaction between the
+	   probe machine and the store machine is a single load in the
+	   probe machine and a single store in the store machine then
+	   we don't need to do anything. */
+	if (singleLoadVersusSingleStore(storeMachine, probeMachine, opt, oracle)) {
+		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
+		return false;
+	}
 
 	VexPtr<IRExpr, &ir_heap> writeMachineConstraint(
 		writeMachineCrashConstraint(sm,
