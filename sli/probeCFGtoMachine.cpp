@@ -1,3 +1,4 @@
+/* This file is somewhat misnamed, because it also handles store CFGs. */
 #include "sli.h"
 #include "state_machine.hpp"
 #include "cfgnode.hpp"
@@ -19,10 +20,14 @@ ndChoiceState(StateMachineState **slot,
 	      const VexRip &vr,
 	      std::vector<reloc_t> &pendingRelocs,
 	      std::vector<CFGNode *> &targets,
+	      bool storeLike,
 	      std::set<CFGNode *> *usedExits)
 {
 	if (targets.empty()) {
-		*slot = StateMachineNoCrash::get();
+		if (storeLike)
+			*slot = StateMachineCrash::get();
+		else
+			*slot = StateMachineNoCrash::get();
 	} else if (targets.size() == 1) {
 		if (usedExits)
 			usedExits->insert(targets[0]);
@@ -55,6 +60,7 @@ getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 
 static StateMachineState *
 cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
+	       bool storeLike,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	ThreadRip tr(tid, target->my_rip);
@@ -159,7 +165,7 @@ cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
 				NULL,
 				NULL);
 			ndChoiceState(&smb->trueTarget, target->my_rip,
-				      pendingRelocs, targets, &usedExits);
+				      pendingRelocs, targets, storeLike, &usedExits);
 			*cursor = smb;
 			cursor = &smb->falseTarget;
 			break;
@@ -204,8 +210,45 @@ cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
 		IRStmtIMark *mark = (IRStmtIMark *)irsb->stmts[i];
 		getTargets(target, mark->addr.rip, targets);
 	}
-	ndChoiceState(cursor, target->my_rip, pendingRelocs, targets, NULL);
+	ndChoiceState(cursor, target->my_rip, pendingRelocs, targets, storeLike, NULL);
 
+	return root;
+}
+
+struct cfg_translator {
+	virtual StateMachineState *operator()(CFGNode *src,
+					      Oracle *oracle,
+					      unsigned tid,
+					      std::vector<reloc_t> &pendingRelocations) = 0;
+};
+
+static StateMachineState *
+performTranslation(std::map<CFGNode *, StateMachineState *> &results,
+		   CFGNode *rootCfg,
+		   Oracle *oracle,
+		   unsigned tid,
+		   cfg_translator &node_translator)
+{
+	std::vector<reloc_t> pendingRelocations;
+	StateMachineState *root = NULL;
+	pendingRelocations.push_back(
+		reloc_t(&root, rootCfg));
+	while (!pendingRelocations.empty()) {
+		reloc_t r(pendingRelocations.back());
+		pendingRelocations.pop_back();
+		assert(r.target);
+		assert(r.ptr);
+		assert(!*r.ptr);
+		std::pair<CFGNode *, StateMachineState *> thingToInsert(r.target, (StateMachineState *)NULL);
+		auto slot_and_inserted = results.insert(thingToInsert);
+		auto slot = slot_and_inserted.first;
+		auto inserted = slot_and_inserted.second;
+		if (!inserted)
+			assert(slot->second);
+		else 
+			slot->second = node_translator(r.target, oracle, tid, pendingRelocations);
+		*r.ptr = slot->second;
+	}
 	return root;
 }
 
@@ -215,34 +258,28 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		   StateMachineState *proximal,
 		   std::set<StateMachine *> &out)
 {
-	std::map<CFGNode *, StateMachineState *> results;
-	std::vector<reloc_t> pendingRelocations;
-
-	for (auto it = roots.begin(); it != roots.end(); it++) {
-		StateMachineState *root = NULL;
-		pendingRelocations.push_back(
-			reloc_t(&root, *it));
-		while (!pendingRelocations.empty()) {
-			reloc_t r(pendingRelocations.back());
-			pendingRelocations.pop_back();
-			assert(r.target);
-			assert(r.ptr);
-			assert(!*r.ptr);
-			std::pair<CFGNode *, StateMachineState *> thingToInsert(r.target, (StateMachineState *)NULL);
-			auto slot_and_inserted = results.insert(thingToInsert);
-			auto slot = slot_and_inserted.first;
-			auto inserted = slot_and_inserted.second;
-			if (!inserted) {
-				assert(slot->second);
-			} else if (DynAnalysisRip(r.target->my_rip) == proximalRip) {
-				slot->second = proximal;
+	struct _ : public cfg_translator {
+		const DynAnalysisRip &proximalRip;
+		StateMachineState *proximal;
+		StateMachineState *operator()(CFGNode *e,
+					      Oracle *oracle,
+					      unsigned tid,
+					      std::vector<reloc_t> &pendingRelocations) {
+			if (DynAnalysisRip(e->my_rip) == proximalRip) {
+				return proximal;
 			} else {
-				StateMachineState *newS = cfgNodeToState(oracle, tid, r.target, pendingRelocations);
-				slot->second = newS;
+				return cfgNodeToState(oracle, tid, e, false, pendingRelocations);
 			}
-			*r.ptr = slot->second;
 		}
-	}
+		_(const DynAnalysisRip &_proximalRip,
+		  StateMachineState *_proximal)
+			: proximalRip(_proximalRip), proximal(_proximal)
+		{}
+	} doOne(proximalRip, proximal);
+
+	std::map<CFGNode *, StateMachineState *> results;
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		performTranslation(results, *it, oracle, tid, doOne);
 
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		StateMachineState *root = results[*it];
@@ -256,6 +293,27 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 	}
 }
 
+static StateMachine *
+storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root)
+{
+	struct _ : public cfg_translator {
+		StateMachineState *operator()(CFGNode *e,
+					      Oracle *oracle,
+					      unsigned tid,
+					      std::vector<reloc_t> &pendingRelocations)
+		{
+			return cfgNodeToState(oracle, tid, e, true, pendingRelocations);
+		}
+	} doOne;
+	std::map<CFGNode *, StateMachineState *> results;
+	std::vector<std::pair<unsigned, VexRip> > origin;
+	origin.push_back(std::pair<unsigned, VexRip>(tid, root->my_rip));
+	FreeVariableMap fvm;
+	return new StateMachine(performTranslation(results, root, oracle, tid, doOne),
+				origin,
+				fvm);
+}
+
 /* End of namespace */
 };
 
@@ -267,4 +325,12 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid,
 		   std::set<StateMachine *> &out)
 {
 	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal, out);
+}
+
+StateMachine *
+storeCFGToMachine(Oracle *oracle,
+		  unsigned tid,
+		  CFGNode *root)
+{
+	return _probeCFGsToMachine::storeCFGsToMachine(oracle, tid, root);
 }

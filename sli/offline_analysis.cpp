@@ -355,9 +355,9 @@ static StateMachine *
 CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode, &ir_heap> &cfg,
 		  AllowableOptimisations &opt, GarbageCollectionToken token)
 {
-	VexPtr<gc_heap_map<VexRip, StateMachineState, &ir_heap>::type, &ir_heap> dummy(NULL);
-	VexPtr<StateMachineState, &ir_heap> escape(StateMachineCrash::get());
-	return CFGtoCrashReason(tid, cfg, dummy, escape, opt, true, oracle, token);
+	StateMachine *sm = storeCFGToMachine(oracle, tid, cfg);
+	canonicaliseRbp(sm, oracle);
+	return sm;
 }
 
 /* If there's precisely one interesting store in the store machine and
@@ -627,8 +627,8 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
 	}
-
 	opt = opt.setinterestingStores(&is);
+	sm = optimiseStateMachine(sm, opt, oracle, false, false, token);
 
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
 	if (!sm_ssa)

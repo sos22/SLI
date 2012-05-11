@@ -841,6 +841,9 @@ void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots
 			const DynAnalysisRip &proximalRip,
 			StateMachineState *proximalCause,
 			std::set<StateMachine *> &out);
+StateMachine *storeCFGToMachine(Oracle *oracle,
+				unsigned tid,
+				CFGNode *root);
 
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
