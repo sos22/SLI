@@ -666,6 +666,7 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 		VexPtr<StateMachine, &ir_heap> sm(sms[x]);
 		sm->sanityCheck();
 
+		canonicaliseRbp(sm, oracle);
 		sm = optimiseStateMachine(sm,
 					  opt,
 					  oracle,
