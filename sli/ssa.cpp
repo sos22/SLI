@@ -259,11 +259,11 @@ ReachingTable::print(FILE *f, std::map<const StateMachineState *, int> &labels) 
 static StateMachine *
 resolveDependencies(StateMachine *sm,
 		    ReachingTable &reachingTable,
-		    std::set<StateMachineState *> &failedStates)
+		    StateMachineState **needsPhi)
 {
 	struct _ : public StateMachineTransformer {
 		const ReachingTable &reachingTable;
-		std::set<StateMachineState *> &failedStates;
+		StateMachineState **needsPhi;
 
 		const ReachingEntry *currentStateReaching;
 		StateMachineState *currentState;
@@ -279,7 +279,7 @@ resolveDependencies(StateMachine *sm,
 						ieg->reg.setGen(*gen.begin()),
 						ieg->ty);
 				} else {
-					failedStates.insert(currentState);
+					*needsPhi = currentState;
 					return NULL;
 				}
 			} else {
@@ -302,14 +302,13 @@ resolveDependencies(StateMachine *sm,
 			currentStateReaching = NULL;
 			return res;
 		}
-		_(ReachingTable &_reachingTable,
-		  std::set<StateMachineState *> &_failedStates)
+		_(ReachingTable &_reachingTable, StateMachineState **_needsPhi)
 			: reachingTable(_reachingTable),
-			  failedStates(_failedStates),
-			  currentStateReaching(NULL),
+			  needsPhi(_needsPhi),
+			  currentStateReaching(NULL),			  
 			  currentState(NULL)
 		{}
-	} doit(reachingTable, failedStates);
+	} doit(reachingTable, needsPhi);
 	return doit.transform(sm);
 }
 
@@ -409,9 +408,6 @@ convertToSSA(StateMachine *inp)
 	std::map<threadAndRegister, unsigned, threadAndRegister::partialCompare> lastGeneration;
 	inp = assignLabelsToDefinitions(inp, lastGeneration);
 
-	std::set<StateMachineState *> pendingStates;
-	enumStates(inp, &pendingStates);
-
 	while (1) {
 		if (TIMEOUT)
 			return NULL;
@@ -425,9 +421,9 @@ convertToSSA(StateMachine *inp)
 			reaching.print(stdout, stateLabels);
 		}
 
-		std::set<StateMachineState *> newPendingStates;
-		inp = resolveDependencies(inp, reaching, newPendingStates);
-		if (newPendingStates.empty()) {
+		StateMachineState *needsPhi = NULL;
+		inp = resolveDependencies(inp, reaching, &needsPhi);
+		if (!needsPhi) {
 			/* We're done */
 			break;
 		}
@@ -437,27 +433,18 @@ convertToSSA(StateMachine *inp)
 		   we invalidate the reaching map.  We simplify
 		   further by just only resolving one state each
 		   time around. */
-		StateMachineState *s;
-		{
-			auto it = newPendingStates.begin();
-			s = *it;
-			it++;
-			pendingStates.clear();
-			pendingStates.insert(it, newPendingStates.end());
-		}
-
 		std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
 		StateMachineSideEffecting *insertAt;
 
-		findUnresolvedReferences(s, needed);
-		insertAt = findPredecessor(inp, s);
+		findUnresolvedReferences(needsPhi, needed);
+		insertAt = findPredecessor(inp, needsPhi);
 		for (auto it = needed.begin();
 		     it != needed.end();
 		     it++)
 			insertAt->prependSideEffect(
 					new StateMachineSideEffectPhi(
 						it->setGen(++lastGeneration[*it]),
-						reaching.getEntryReaching(s).get(*it)));
+						reaching.getEntryReaching(needsPhi).get(*it)));
 	}
 
 	inp->assertSSA();
