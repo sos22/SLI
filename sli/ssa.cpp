@@ -13,8 +13,10 @@ namespace SSA {
 
 #ifdef NDEBUG
 #define debug_dump_reaching_table 0
+#define debug_optimise_ssa 0
 #else
 static int debug_dump_reaching_table = 0;
+static int debug_optimise_ssa = 0;
 #endif
 
 /* Assert that the machine does not currently reference and tAR
@@ -441,6 +443,7 @@ convertToSSA(StateMachine *inp)
 
 class optimiseSSATransformer : public StateMachineTransformer {
 	ReachingTable reaching;
+	std::map<const StateMachineState *, int> stateLabels;
 
 	StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
 						     bool *done_something)
@@ -449,7 +452,14 @@ class optimiseSSATransformer : public StateMachineTransformer {
 		if (se && se->type == StateMachineSideEffect::Phi) {
 			StateMachineSideEffectPhi *phi =
 				(StateMachineSideEffectPhi *)se;
-			const std::set<unsigned> &generations(reaching.getEntryReaching(smse).get(phi->reg));
+			const ReachingEntry &reachingEntry(reaching.getEntryReaching(smse));
+			if (debug_optimise_ssa) {
+				printf("optimiseSSA consider state l%d, reaching entry ",
+				       stateLabels[smse]);
+				reachingEntry.print(stdout);
+				printf(" (target reg %s)\n", phi->reg.name());
+			}
+			const std::set<unsigned> &generations(reachingEntry.get(phi->reg));
 			std::vector<std::pair<unsigned, IRExpr *> > newGenerations;
 			newGenerations.reserve(phi->generations.size());
 			for (auto it = phi->generations.begin();
@@ -460,6 +470,7 @@ class optimiseSSATransformer : public StateMachineTransformer {
 			}
 			if (newGenerations.size() < phi->generations.size()) {
 				*done_something = true;
+				assert(newGenerations.size() != 0);
 				return new StateMachineSideEffecting(
 					smse->origin,
 					new StateMachineSideEffectPhi(
@@ -474,7 +485,14 @@ class optimiseSSATransformer : public StateMachineTransformer {
 public:
 	optimiseSSATransformer(StateMachine *inp)
 		: reaching(inp)
-	{}
+	{
+		if (debug_optimise_ssa && !TIMEOUT) {
+			printf("Input to optimiseSSA:\n");
+			printStateMachine(inp, stdout, stateLabels);
+			printf("Reaching table:\n");
+			reaching.print(stdout, stateLabels);
+		}
+	}
 };
 
 /* Other optimisations can sometimes lead to the set of assignments
@@ -487,7 +505,12 @@ optimiseSSA(StateMachine *inp, bool *done_something)
 	optimiseSSATransformer t(inp);
 	if (TIMEOUT)
 		return inp;
-	return t.transform(inp, done_something);
+	StateMachine *res = t.transform(inp, done_something);
+	if (debug_optimise_ssa) {
+		printf("optimiseSSA result:\n");
+		printStateMachine(res, stdout);
+	}
+	return res;
 }
 
 /* End of namespace SSA */
