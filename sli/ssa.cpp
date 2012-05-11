@@ -363,35 +363,11 @@ insert_new_predecessor:
 	StateMachineSideEffecting *res = new StateMachineSideEffecting(s->origin, NULL, s);
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *st = *it;
-		switch (st->type) {
-		case StateMachineState::SideEffecting: {
-			StateMachineSideEffecting *se = (StateMachineSideEffecting *)st;
-			if (se->target == s)
-				se->target = res;
-			break;
-		}
-		case StateMachineState::Bifurcate: {
-			StateMachineBifurcate *se = (StateMachineBifurcate *)st;
-			if (se->trueTarget == s)
-				se->trueTarget = res;
-			if (se->falseTarget == s)
-				se->falseTarget = res;
-			break;
-		}
-		case StateMachineState::NdChoice: {
-			StateMachineNdChoice *smnd = (StateMachineNdChoice *)st;
-			for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++) {
-				if (*it == s)
-					*it = res;
-			}
-			break;
-		}
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
-		case StateMachineState::Stub:
-			break;
-		}
+		std::vector<StateMachineState **> targets;
+		st->targets(targets);
+		for (auto it = targets.begin(); it != targets.end(); it++)
+			if (**it == s)
+				**it = res;
 	}
 
 	return res;

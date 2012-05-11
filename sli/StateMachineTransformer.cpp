@@ -126,7 +126,7 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 					stateRewrites[s] =
 						new StateMachineSideEffecting(smp->origin,
 									      smp->sideEffect,
-									      NULL);
+									      smp->target);
 					break;
 				}
 				case StateMachineState::Bifurcate: {
@@ -134,14 +134,14 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 					stateRewrites[s] =
 						new StateMachineBifurcate(smb->origin,
 									  smb->condition,
-									  NULL,
-									  NULL);
+									  smb->trueTarget,
+									  smb->falseTarget);
 					break;
 				}
 				case StateMachineState::NdChoice: {
 					StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
 					stateRewrites[s] =
-						new StateMachineNdChoice(smnd->origin);
+						new StateMachineNdChoice(smnd->origin, smnd->successors);
 					break;
 				}
 
@@ -158,55 +158,24 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 	/* Step 3: We now know how we're going to be doing the
 	 * rewrites.  Go through and do them. */
 	for (auto it = stateRewrites.begin(); it != stateRewrites.end(); it++) {
-		const StateMachineState *old = it->first;
 		StateMachineState *replacement = it->second;
 
 		struct {
 			void operator()(StateMachineState *&target, const StateMachineState *o,
 					std::map<const StateMachineState *, StateMachineState *> &edgeRewrites) {
-				const StateMachineState *oldTarget = target;
-				if (!oldTarget)
-					oldTarget = o;
-				auto it = edgeRewrites.find(oldTarget);
+				assert(o);
+				auto it = edgeRewrites.find(o);
 				if (it == edgeRewrites.end())
-					target = const_cast<StateMachineState *>(oldTarget);
+					target = const_cast<StateMachineState *>(o);
 				else
 					target = it->second;
 			};
 		} doEdge;
 
-		switch (old->type) {
-		case StateMachineState::Bifurcate: {
-			StateMachineBifurcate *smb = (StateMachineBifurcate *)old;
-			assert(replacement->type == StateMachineState::Bifurcate);
-			StateMachineBifurcate *repl = (StateMachineBifurcate *)replacement;
-			doEdge(repl->trueTarget, smb->trueTarget, stateRewrites);
-			doEdge(repl->falseTarget, smb->falseTarget, stateRewrites);
-			break;
-		}
-		case StateMachineState::SideEffecting: {
-			StateMachineSideEffecting *smp = (StateMachineSideEffecting *)old;
-			assert(replacement->type == StateMachineState::SideEffecting);
-			StateMachineSideEffecting *repl = (StateMachineSideEffecting *)replacement;
-			doEdge(repl->target, smp->target, stateRewrites);
-			break;
-		}
-		case StateMachineState::NdChoice: {
-			StateMachineNdChoice *smnd = (StateMachineNdChoice *)old;
-			assert(replacement->type == StateMachineState::NdChoice);
-			StateMachineNdChoice *repl = (StateMachineNdChoice *)replacement;
-			repl->successors.resize(smnd->successors.size());
-			for (unsigned x = 0; x < smnd->successors.size(); x++)
-				doEdge(repl->successors[x], smnd->successors[x], stateRewrites);
-			break;
-		}
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
-		case StateMachineState::Stub:
-		case StateMachineState::Unreached:
-			/* These have no outgoing edges, so need no rewriting. */
-			break;
-		}
+		std::vector<StateMachineState **> newTargets;
+		replacement->targets(newTargets);
+		for (unsigned x = 0; x < newTargets.size(); x++)
+			doEdge(*newTargets[x], *newTargets[x], stateRewrites);
 	}
 
 }

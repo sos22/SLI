@@ -31,43 +31,11 @@ rewriteStateMachine(StateMachineState *sm,
 		return rewriteStateMachine(rules[sm], rules, memo);
 	}
 	memo.insert(sm);
-	switch (sm->type) {
-	case StateMachineState::Crash:
-	case StateMachineState::NoCrash:
-	case StateMachineState::Stub:
-	case StateMachineState::Unreached:
-		return sm;
-	case StateMachineState::Bifurcate: {
-		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-		smb->trueTarget = rewriteStateMachine(
-			smb->trueTarget,
-			rules,
-			memo);
-		smb->falseTarget = rewriteStateMachine(
-			smb->falseTarget,
-			rules,
-			memo);
-		return sm;
-	}
-	case StateMachineState::SideEffecting: {
-		StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
-		smp->target = rewriteStateMachine(
-			smp->target,
-			rules,
-			memo);
-		return sm;
-	}
-	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
-		for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++)
-			*it = rewriteStateMachine(
-				*it,
-				rules,
-				memo);
-		return sm;
-	}
-	}
-	abort();
+	std::vector<StateMachineState **> targets;
+	sm->targets(targets);
+	for (auto it = targets.begin(); it != targets.end(); it++)
+		**it = rewriteStateMachine(**it, rules, memo);
+	return sm;
 }
 
 template <typename t> void
@@ -144,11 +112,22 @@ statesLocallyBisimilar(StateMachineState *sm1,
 	if (sm1->type != sm2->type)
 		return false;
 
+	std::vector<StateMachineState *> smTarg1;
+	std::vector<StateMachineState *> smTarg2;
+	sm1->targets(smTarg1);
+	sm2->targets(smTarg2);
+	if (smTarg1.size() != smTarg2.size())
+		return false;
+	for (unsigned x = 0; x < smTarg1.size(); x++) {
+		if (!edges.count(st_pair_t(smTarg1[x], smTarg2[x])))
+			return false;
+	}
 	switch (sm1->type) {
 		/* These have no data, so if they're the same type it's fine */
 	case StateMachineState::Unreached:
 	case StateMachineState::Crash:
 	case StateMachineState::NoCrash:
+	case StateMachineState::NdChoice:
 		return true;
 
 	case StateMachineState::Stub: {
@@ -160,27 +139,13 @@ statesLocallyBisimilar(StateMachineState *sm1,
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme1 = (StateMachineSideEffecting *)sm1;
 		StateMachineSideEffecting *sme2 = (StateMachineSideEffecting *)sm2;
-		return edges.count(st_pair_t(sme1->target, sme2->target)) &&
-			sideEffectsBisimilar(sme1->sideEffect, sme2->sideEffect, opt);
+		return sideEffectsBisimilar(sme1->sideEffect, sme2->sideEffect, opt);
 	}
 
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb1 = (StateMachineBifurcate *)sm1;
 		StateMachineBifurcate *smb2 = (StateMachineBifurcate *)sm2;
-		return edges.count(st_pair_t(smb1->trueTarget, smb2->trueTarget)) &&
-			edges.count(st_pair_t(smb1->falseTarget, smb2->falseTarget)) &&
-			definitelyEqual(smb1->condition, smb2->condition, opt);
-	}
-
-	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smn1 = (StateMachineNdChoice *)sm1;
-		StateMachineNdChoice *smn2 = (StateMachineNdChoice *)sm2;
-		if (smn1->successors.size() != smn2->successors.size())
-			return false;
-		for (unsigned x = 0; x < smn1->successors.size(); x++)
-			if (!edges.count(st_pair_t(smn1->successors[x], smn2->successors[x])))
-				return false;
-		return true;
+		return definitelyEqual(smb1->condition, smb2->condition, opt);
 	}
 	}
 	abort();

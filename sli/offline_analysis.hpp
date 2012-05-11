@@ -161,7 +161,7 @@ protected:
 			*done_something = true;
 			return new StateMachineSideEffecting(smse->origin,
 							     e,
-							     NULL);
+							     smse->target);
 		} else {
 			return NULL;
 		}
@@ -175,8 +175,8 @@ protected:
 			*done_something = true;
 			return new StateMachineBifurcate(s->origin,
 							 c,
-							 NULL,
-							 NULL);
+							 s->trueTarget,
+							 s->falseTarget);
 		} else {
 			return NULL;
 		}

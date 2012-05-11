@@ -504,38 +504,14 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 			: labelToState(_labelToState)
 		{}
 		bool operator()(StateMachineState *s) {
-			switch (s->type) {
-			case StateMachineState::SideEffecting: {
-				StateMachineSideEffecting *sme = (StateMachineSideEffecting *)s;
-				sme->target = labelToState[(int)(unsigned long)sme->target];
-				if (!sme->target)
+			std::vector<StateMachineState **> targets;
+			s->targets(targets);
+			for (auto it = targets.begin(); it != targets.end(); it++) {
+				**it = labelToState[(int)(unsigned long)*it];
+				if (!**it)
 					return false;
-				return true;
 			}
-			case StateMachineState::Bifurcate: {
-				StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-				smb->trueTarget = labelToState[(int)(unsigned long)smb->trueTarget];
-				smb->falseTarget = labelToState[(int)(unsigned long)smb->falseTarget];
-				if (!smb->trueTarget || !smb->falseTarget)
-					return false;
-				return true;
-			}
-			case StateMachineState::NdChoice: {
-				StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
-				for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++) {
-					*it = labelToState[(int)(unsigned long)*it];
-					if (!*it)
-						return false;
-				}
-				return true;
-			}
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-			case StateMachineState::Stub:
-			case StateMachineState::Unreached:
-				return true;
-			}
-			abort();
+			return true;
 		}
 	} doOneState(labelToState);
 	if (!doOneState(root))

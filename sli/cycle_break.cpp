@@ -145,35 +145,11 @@ reachabilityMap::breakCycle(void)
 			   those furthest from the root considered
 			   first).  It is therefore a good choice for
 			   a cycle breaking edge. */
-			switch (e->type) {
-			case StateMachineState::Bifurcate: {
-				StateMachineBifurcate *smb = (StateMachineBifurcate *)e;
-				smb->trueTarget =
-					smb->falseTarget =
-					StateMachineUnreached::get();
-				break;
-			}
-			case StateMachineState::SideEffecting: {
-				((StateMachineSideEffecting *)e)->target =
-					StateMachineUnreached::get();
-				break;
-			}
-			case StateMachineState::NdChoice: {
-				StateMachineNdChoice *smn = (StateMachineNdChoice *)e;
-				for (auto it = smn->successors.begin();
-				     it != smn->successors.end();
-				     it++)
-					*it = StateMachineUnreached::get();
-				break;
-			}
-			case StateMachineState::Unreached:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-			case StateMachineState::Stub:
-				/* These can't be part of a cycle, as
-				   they have no outgoing edges. */
-				abort();
-			}
+			std::vector<StateMachineState **> targets;
+			e->targets(targets);
+			assert(!targets.empty());
+			for (auto it = targets.begin(); it != targets.end(); it++)
+				**it = StateMachineUnreached::get();
 
 			/* Only want to break one cycle on each
 			   iteration, as otherwise the various maps

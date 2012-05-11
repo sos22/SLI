@@ -765,41 +765,19 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 	avail_t avail(availMap[sm]);
 
+	StateMachineState *res;
 	switch (sm->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-		StateMachineBifurcate *res;
-		bool doit = false;
 		avail.calcRegisterMap(opt);
 		res = new StateMachineBifurcate(
 			sm->origin,
-			applyAvailSet(avail, smb->condition, true, &doit, opt),
-			NULL, NULL);
-		*done_something |= doit;
-		memo[sm] = res;
-		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->trueTarget,
-			availMap,
-			memo,
-			opt,
-			alias,
-			oracle,
-			done_something,
-			edgeLabels);
-		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->falseTarget,
-			availMap,
-			memo,
-			opt,
-			alias,
-			oracle,
-			done_something,
-			edgeLabels);
-		return res;
+			applyAvailSet(avail, smb->condition, true, done_something, opt),
+			smb->trueTarget, smb->falseTarget);
+		break;
 	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
-		StateMachineSideEffecting *res;
 		StateMachineSideEffect *newEffect;
 		avail.calcRegisterMap(opt);
 		if (smp->sideEffect)
@@ -811,25 +789,14 @@ buildNewStateMachineWithLoadsEliminated(
 									    opt);
 		else
 			newEffect = NULL;
-		res = new StateMachineSideEffecting(sm->origin, newEffect, NULL);
-		memo[sm] = res;
-		res->target = buildNewStateMachineWithLoadsEliminated(
-			smp->target, availMap, memo, opt, alias, oracle,
-			done_something, edgeLabels);
-		return res;
+		res = new StateMachineSideEffecting(sm->origin, newEffect, smp->target);
+		break;
 	}
 	case StateMachineState::NdChoice: {
 		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
-		StateMachineNdChoice *res = new StateMachineNdChoice(smnd->origin,
-								     smnd->successors);
-		memo[sm] = res;
-		for (auto it = res->successors.begin();
-		     it != res->successors.end();
-		     it++)
-			*it = buildNewStateMachineWithLoadsEliminated(
-				*it, availMap, memo, opt, alias, oracle,
-				done_something, edgeLabels);
-		return res;
+		res = new StateMachineNdChoice(smnd->origin,
+					       smnd->successors);
+		break;
 	}
 	case StateMachineState::Unreached:
 	case StateMachineState::Crash:
@@ -837,7 +804,16 @@ buildNewStateMachineWithLoadsEliminated(
 	case StateMachineState::Stub:
 		abort();
 	}
-	abort();
+
+	memo[sm] = res;
+	std::vector<StateMachineState **> targets;
+	res->targets(targets);
+	for (auto it = targets.begin(); it != targets.end(); it++) {
+		**it = buildNewStateMachineWithLoadsEliminated(
+			**it, availMap, memo, opt, alias, oracle,
+			done_something, edgeLabels);
+	}
+	return res;
 }
 
 static StateMachine *

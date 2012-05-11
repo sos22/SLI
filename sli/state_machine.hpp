@@ -345,8 +345,15 @@ public:
 				return true;
 		return false;
 	}
-	virtual void targets(std::vector<StateMachineState *> &) = 0;
+	virtual void targets(std::vector<StateMachineState **> &) = 0;
 	virtual void targets(std::vector<const StateMachineState *> &) const = 0;
+	void targets(std::vector<StateMachineState *> &out) {
+		std::vector<StateMachineState **> r;
+		targets(r);
+		out.reserve(r.size());
+		for (auto it = r.begin(); it != r.end(); it++)
+			out.push_back(**it);
+	}
 	void targets(std::set<StateMachineState *> &out) {
 		std::vector<StateMachineState *> r;
 		targets(r);
@@ -406,7 +413,7 @@ public:
 	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
 				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
-	void targets(std::vector<StateMachineState *> &) { }
+	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
@@ -473,7 +480,7 @@ public:
 
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
 				    std::set<StateMachineState *> &done);
-	void targets(std::vector<StateMachineState *> &out) { out.push_back(target); }
+	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
@@ -516,9 +523,9 @@ public:
 	}
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
 				    std::set<StateMachineState *> &);
-	void targets(std::vector<StateMachineState *> &out) {
-		out.push_back(falseTarget);
-		out.push_back(trueTarget);
+	void targets(std::vector<StateMachineState **> &out) {
+		out.push_back(&falseTarget);
+		out.push_back(&trueTarget);
 	}
 	void targets(std::vector<const StateMachineState *> &out) const {
 		out.push_back(falseTarget);
@@ -565,8 +572,10 @@ public:
 
 	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
 				    std::set<StateMachineState *> &);
-	void targets(std::vector<StateMachineState *> &out) {
-		out.insert(out.end(), successors.begin(), successors.end());
+	void targets(std::vector<StateMachineState **> &out) {
+		out.reserve(out.size() + successors.size());
+		for (auto it = successors.begin(); it != successors.end(); it++)
+			out.push_back(&*it);
 	}
 	void targets(std::vector<const StateMachineState *> &out) const {
 		out.insert(out.end(), successors.begin(), successors.end());
