@@ -431,7 +431,8 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
-	sm = optimiseStateMachine(storeMachine, opt, oracle, noExtendContext, true, token);
+	sm = duplicateStateMachine(storeMachine);
+	sm = optimiseStateMachine(sm, opt, oracle, noExtendContext, true, token);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we

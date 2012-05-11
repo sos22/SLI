@@ -1055,6 +1055,7 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 					   storeMachineRacingInstructions);
 
 	AllowableOptimisations loadMachineOpt = opt.setnonLocalLoads(&probeMachineRacingInstructions);
+	probeMachine = duplicateStateMachine(probeMachine);
 	probeMachine = optimiseStateMachine(probeMachine, loadMachineOpt, oracle,
 					    true, true, token);
 
@@ -1412,14 +1413,24 @@ findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 }
 
 /* Transform @machine so that wherever it would previously branch to
-   @from it will now branch to the root of @to.  If @from is a
-   terminal state then this effectively concatenates the two machines
-   together. */
+   StateMachineCrash it will now branch to the root of @to.  If @from
+   is a store state then this effectively concatenates the two
+   machines together.  We duplicate both machines in the process. */
 static StateMachine *
-concatenateStateMachines(StateMachine *machine, StateMachineState *from, StateMachine *to)
+concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
 {
 	std::map<const StateMachineState *, StateMachineState *> rewriteRules;
-	rewriteRules[from] = to->root;
+
+	to = duplicateStateMachine(to);
+
+	/* This is moderately tricky: setting rules for all of the
+	   terminal states, even no-op rules, forces rewriteMachine()
+	   to duplicate every state, because it duplicates any state
+	   which can ultimately reach a state which it has a rule for. */
+	rewriteRules[StateMachineCrash::get()] = to->root;
+	rewriteRules[StateMachineNoCrash::get()] = StateMachineNoCrash::get();
+	rewriteRules[StateMachineUnreached::get()] = StateMachineUnreached::get();
+
 	StateMachineTransformer::rewriteMachine(machine, rewriteRules);
 	assert(rewriteRules.count(machine->root));
 #ifndef NDEBUG
@@ -1459,7 +1470,6 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 	combinedMachine = concatenateStateMachines(
 		writeMachine,
-		StateMachineCrash::get(),
 		readMachine);
 	combinedMachine = optimiseStateMachine(combinedMachine,
 					       opt
