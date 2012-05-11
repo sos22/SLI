@@ -149,6 +149,29 @@ ReachingEntry::merge(const ReachingEntry &other)
 
 class ReachingTable {
 	std::map<const StateMachineState *, ReachingEntry> content;
+
+	/* If we're building a reaching table as part of converting a
+	   machine to SSA form, the reaching set is the set of
+	   registers for foo is the set of things which foo:0 might
+	   resolve to.  Otherwise, it's the set of generations which
+	   might be selected by a Phi expression.  The two types of
+	   table are generated in almost exactly the same way, except
+	   that the former considers any assignment to register foo to
+	   kill every other generation of foo in the current reaching
+	   set, and the other one doesn't.
+
+	   In other words, the former mode effectively moves the
+	   generation number in an assignment from the target register
+	   to the assignment itself, erases all of the generation
+	   numbers, and computes which assignments might reach each
+	   node.  The latter mode which assignments might reach a
+	   given node without erasing the labels.
+
+	   Set buildReachingForSSAErasure to true to select the first
+	   mode, or false to select the second one.
+	*/
+	bool buildReachingForSSAErasure;
+
 	ReachingEntry initialReachingSet(const StateMachine *);
 	ReachingEntry getExitReaching(const StateMachineState *);
 public:
@@ -157,11 +180,12 @@ public:
 		assert(it != content.end());
 		return it->second;
 	}
-	ReachingTable(const StateMachine *);
+	ReachingTable(const StateMachine *, bool considerErasure);
 	void print(FILE *f, std::map<const StateMachineState *, int> &labels) const;
 };
 
-ReachingTable::ReachingTable(const StateMachine *inp)
+ReachingTable::ReachingTable(const StateMachine *inp, bool considerErasure)
+	: buildReachingForSSAErasure(considerErasure)
 {
 	std::queue<const StateMachineState *> toProcess;
 	std::vector<const StateMachineState *> states;
@@ -216,7 +240,8 @@ ReachingTable::getExitReaching(const StateMachineState *s)
 		return content[s];
 	ReachingEntry res(content[s]);
 	std::set<unsigned> &gens(res[definedHere]);
-	gens.clear();
+	if (buildReachingForSSAErasure)
+		gens.clear();
 	gens.insert(definedHere.gen());
 	return res;
 }
@@ -391,7 +416,7 @@ convertToSSA(StateMachine *inp)
 		if (TIMEOUT)
 			return NULL;
 
-		ReachingTable reaching(inp);
+		ReachingTable reaching(inp, true);
 		if (debug_dump_reaching_table) {
 			std::map<const StateMachineState *, int> stateLabels;
 			printf("At start of SSA conversion iteration:\n");
@@ -484,7 +509,7 @@ class optimiseSSATransformer : public StateMachineTransformer {
 	IRExpr *transformIRExpr(IRExpr *e, bool *b) { return NULL; }
 public:
 	optimiseSSATransformer(StateMachine *inp)
-		: reaching(inp)
+		: reaching(inp, false)
 	{
 		if (debug_optimise_ssa && !TIMEOUT) {
 			printf("Input to optimiseSSA:\n");
