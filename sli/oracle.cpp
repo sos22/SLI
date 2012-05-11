@@ -362,6 +362,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 					unsigned long offset,
 					unsigned long *sz)
 			{
+				bool res = false;
 				for (int x = 0; x < nr_items; x++) {
 					DynAnalysisRip buf;
 					bool is_private;
@@ -369,9 +370,9 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 					TypesDb::parse_vexrip_canon(&buf, mapping, offset + *sz, &is_private, &s);
 					*sz += s;
 					if (buf == desiredRip)
-						return true;
+						res = true;
 				}
-				return false;
+				return res;
 			}
 		} doit;
 
