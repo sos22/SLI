@@ -88,10 +88,10 @@ StateMachineTransformer::transformState(StateMachineState *s, bool *done_somethi
 }
 
 void
-StateMachineTransformer::rewriteMachine(StateMachine *sm,
-					std::map<StateMachineState *, StateMachineState *> &stateRewrites)
+StateMachineTransformer::rewriteMachine(const StateMachine *sm,
+					std::map<const StateMachineState *, StateMachineState *> &stateRewrites)
 {
-	std::set<StateMachineState *> allStates;
+	std::set<const StateMachineState *> allStates;
 	enumStates(sm, &allStates);
 
 	/* Step 2 of state machine transformation: If we're rewriting
@@ -104,10 +104,10 @@ StateMachineTransformer::rewriteMachine(StateMachine *sm,
 	do {
 		progress = false;
 		for (auto it = allStates.begin(); it != allStates.end(); it++) {
-			StateMachineState *s = *it;
+			const StateMachineState *s = *it;
 			if (stateRewrites.count(s))
 				continue;
-			std::vector<StateMachineState *> edges;
+			std::vector<const StateMachineState *> edges;
 			s->targets(edges);
 			bool do_rewrite = false;
 			for (auto it = edges.begin(); !do_rewrite && it != edges.end(); it++)
@@ -158,18 +158,18 @@ StateMachineTransformer::rewriteMachine(StateMachine *sm,
 	/* Step 3: We now know how we're going to be doing the
 	 * rewrites.  Go through and do them. */
 	for (auto it = stateRewrites.begin(); it != stateRewrites.end(); it++) {
-		StateMachineState *old = it->first;
+		const StateMachineState *old = it->first;
 		StateMachineState *replacement = it->second;
 
 		struct {
-			void operator()(StateMachineState *&target, StateMachineState *o,
-					std::map<StateMachineState *, StateMachineState *> &edgeRewrites) {
-				StateMachineState *oldTarget = target;
+			void operator()(StateMachineState *&target, const StateMachineState *o,
+					std::map<const StateMachineState *, StateMachineState *> &edgeRewrites) {
+				const StateMachineState *oldTarget = target;
 				if (!oldTarget)
 					oldTarget = o;
 				auto it = edgeRewrites.find(oldTarget);
 				if (it == edgeRewrites.end())
-					target = oldTarget;
+					target = const_cast<StateMachineState *>(oldTarget);
 				else
 					target = it->second;
 			};
@@ -222,7 +222,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 	/* Step 1: walk over the state machine states and figure out
 	   which ones need to be changed due to the actual
 	   transformation. */
-	std::map<StateMachineState *, StateMachineState *> stateRewrites; /* From old state to new state */
+	std::map<const StateMachineState *, StateMachineState *> stateRewrites; /* From old state to new state */
 
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *s = *it;

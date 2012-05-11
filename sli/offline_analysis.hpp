@@ -197,8 +197,8 @@ public:
 		if (!done_something) done_something = &b;
 		fvm->applyTransformation(*this, done_something);
 	}
-	static void rewriteMachine(StateMachine *sm,
-				   std::map<StateMachineState *, StateMachineState *> &rewriteRules);
+	static void rewriteMachine(const StateMachine *sm,
+				   std::map<const StateMachineState *, StateMachineState *> &rewriteRules);
 
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
 };

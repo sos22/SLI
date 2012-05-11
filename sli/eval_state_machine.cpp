@@ -1418,7 +1418,7 @@ findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 static StateMachine *
 concatenateStateMachines(StateMachine *machine, StateMachineState *from, StateMachine *to)
 {
-	std::map<StateMachineState *, StateMachineState *> rewriteRules;
+	std::map<const StateMachineState *, StateMachineState *> rewriteRules;
 	rewriteRules[from] = to->root;
 	StateMachineTransformer::rewriteMachine(machine, rewriteRules);
 	assert(rewriteRules.count(machine->root));
