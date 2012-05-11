@@ -362,7 +362,8 @@ public:
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
-	void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
+        bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store);
+        void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
 	void findRacingRips(StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
 	bool functionCanReturn(const VexRip &rip);
 

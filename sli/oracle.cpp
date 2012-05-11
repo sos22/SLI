@@ -386,6 +386,85 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 	return false;
 }
 
+static void
+intersect_sorted_vectors(std::vector<unsigned long> &out, const std::vector<unsigned long> &a,
+			 const std::vector<unsigned long> &b)
+{
+	out.clear();
+	out.reserve(std::min(a.size(), b.size()));
+
+	auto it1 = a.begin();
+	auto it2 = b.begin();
+
+	while (1) {
+		if (it1 == a.end() || it2 == b.end())
+			break;
+		unsigned long A = *it1;
+		unsigned long B = *it2;
+		if (A == B) {
+			out.push_back(A);
+			it1++;
+			it2++;
+		} else if (A < B) {
+			it1++;
+		} else {
+			it2++;
+		}
+	}
+}
+
+bool
+Oracle::memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store)
+{
+	__set_profiling(might_alias_cross_thread);
+	std::vector<unsigned long> offsets_store;
+	DynAnalysisRip smses_dr(store);
+	type_index->findOffsets(smses_dr, offsets_store);
+	if (offsets_store.size() == 0)
+		return false;
+	DynAnalysisRip smsel_dr(load);
+	std::vector<unsigned long> offsets_load;
+	type_index->findOffsets(smsel_dr, offsets_load);
+	if (offsets_load.size() == 0)
+		return false;
+	std::sort(offsets_store.begin(), offsets_store.end());
+	std::sort(offsets_load.begin(), offsets_load.end());
+	std::vector<unsigned long> combinedOffsets;
+	intersect_sorted_vectors(combinedOffsets, offsets_store, offsets_load);
+
+	for (auto it = combinedOffsets.begin(); it != combinedOffsets.end(); it++) {
+		unsigned long offset = *it;
+		const struct tag_hdr *hdr = raw_types_database.get<tag_hdr>(offset);
+		assert(hdr);
+		unsigned long sz = sizeof(*hdr);
+		struct {
+			bool operator()(int nr_items,
+					const DynAnalysisRip &desiredRip,
+					const Mapping &mapping,
+					unsigned long offset,
+					unsigned long *sz)
+			{
+				bool res = false;
+				for (int x = 0; x < nr_items; x++) {
+					DynAnalysisRip buf;
+					bool is_private;
+					unsigned long s;
+					TypesDb::parse_vexrip_canon(&buf, mapping, offset + *sz, &is_private, &s);
+					*sz += s;
+					if (buf == desiredRip)
+						res = true;
+				}
+				return res;
+			}
+		} doit;
+
+		if (doit(hdr->nr_loads, smsel_dr, raw_types_database, offset, &sz) &&
+		    doit(hdr->nr_stores, smses_dr, raw_types_database, offset, &sz))
+			return true;
+	}
+	return false;
+}
+
 bool
 Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 				 StateMachineSideEffectLoad *smsel1,

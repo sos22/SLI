@@ -768,6 +768,26 @@ isSingleNodeCfg(CFGNode *root)
 }
 
 static bool
+machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, Oracle *oracle)
+{
+	std::set<StateMachineSideEffectLoad *> loads;
+	enumSideEffects(sm, loads);
+	bool got_one = false;
+	for (auto it = loads.begin(); it != loads.end(); it++) {
+		StateMachineSideEffectLoad *load = *it;
+		if (oracle->memoryAccessesMightAliasCrossThread(load->rip.rip.rip, vr)) {
+			if (got_one)
+				return false;
+			got_one = true;
+		}
+	}
+	/* If there are no racing loads at all then something has gone
+	   wrong building the machines. */
+	assert(got_one);
+	return true;
+}
+
+static bool
 probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      VexPtr<Oracle> &oracle,
 		      VexPtr<IRExpr, &ir_heap> &survive,
@@ -795,9 +815,15 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	bool foundRace;
 	foundRace = false;
 	for (int i = 0; i < nrStoreCfgs; i++) {
-		if (roughLoadCount == StateMachineState::singleLoad &&
-		    isSingleNodeCfg(storeCFGs[i])) {
+		bool singleNodeCfg = isSingleNodeCfg(storeCFGs[i]);
+		if (roughLoadCount == StateMachineState::singleLoad && singleNodeCfg) {
 			fprintf(_logfile, "Single store versus single load -> no race possible\n");
+			continue;
+		}
+
+		if (singleNodeCfg &&
+		    machineHasOneRacingLoad(probeMachine, storeCFGs[i]->my_rip, oracle)) {
+			fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
 			continue;
 		}
 
