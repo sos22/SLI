@@ -791,10 +791,10 @@ bigStepEvalStateMachine(StateMachine *rootMachine,
 }
 
 struct EvalPathConsumer {
-	virtual void crash(IRExpr *assumption, IRExpr *accAssumption) = 0;
-	virtual void survive(IRExpr *assumption, IRExpr *accAssumption) = 0;
-	virtual void escape(IRExpr *assumption, IRExpr *accAssumption) = 0;
-	virtual void badMachine() {
+	virtual bool crash(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
+	virtual bool survive(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
+	virtual bool escape(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
+	virtual bool badMachine() __attribute__((warn_unused_result)) {
 		abort();
 	}
 	bool collectOrderingConstraints;
@@ -847,10 +847,10 @@ class EvalContext {
 	{}
 public:
 	VexPtr<StateMachineState, &ir_heap> currentState;
-	void advance(Oracle *oracle, const AllowableOptimisations &opt,
+	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
-		     EvalPathConsumer &consumer);
+		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
 	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions)
 		: assumption(initialAssumption),
 		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
@@ -960,7 +960,7 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderi
    time.  That'd work, but it'd mean duplicating those pointers in
    every item in the pending state queue, which would make that queue
    much bigger, which'd be kind of annoying. */
-void
+bool
 EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
@@ -968,24 +968,20 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 {
 	switch (currentState->type) {
 	case StateMachineState::Crash:
-		consumer.crash(assumption, accumulatedAssumption);
-		break;
+		return consumer.crash(assumption, accumulatedAssumption);
 	case StateMachineState::NoCrash:
-		consumer.survive(assumption, accumulatedAssumption);
-		break;
+		return consumer.survive(assumption, accumulatedAssumption);
 	case StateMachineState::Stub:
-		consumer.escape(assumption, accumulatedAssumption);
-		break;
+		return consumer.escape(assumption, accumulatedAssumption);
 	case StateMachineState::Unreached:
-		consumer.badMachine();
-		break;
+		return consumer.badMachine();
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState.get();
 		currentState = sme->target;
 		if (sme->sideEffect)
 			evalSideEffect(sm, oracle, consumer.collectOrderingConstraints,
 				       pendingStates, sme->sideEffect, opt);
-		break;
+		return true;
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState.get();
@@ -1014,12 +1010,12 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 							smb->condition));
 			break;
 		}
-		break;
+		return true;
 	}
 	case StateMachineState::NdChoice: {
 		StateMachineNdChoice *smnd = (StateMachineNdChoice *)currentState.get();
 		if (smnd->successors.size() == 0) {
-			consumer.badMachine();
+			return consumer.badMachine();
 		} else {
 			pendingStates.reserve(pendingStates.size() + smnd->successors.size() - 1);
 			for (auto it = smnd->successors.begin();
@@ -1027,12 +1023,13 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 			     it++)
 				pendingStates.push_back(EvalContext(*this, *it));
 		}
-		return;
+		return true;
 	}
 	}
+	abort();
 }
 
-static void
+static bool
 enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
 	      VexPtr<IRExpr, &ir_heap> &assumption,
 	      VexPtr<Oracle> &oracle,
@@ -1045,12 +1042,17 @@ enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
 	pendingStates.push_back(EvalContext(sm, assumption, consumer.needsAccAssumptions));
 
 	while (!pendingStates.empty()) {
+		if (TIMEOUT)
+			return true;
+
 		LibVEX_maybe_gc(token);
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		ctxt.advance(oracle, opt, pendingStates, sm, consumer);
+		if (!ctxt.advance(oracle, opt, pendingStates, sm, consumer))
+			return false;
 	}
+	return true;
 }
 
 /* Assume that @sm executes atomically.  Figure out a constraint on
@@ -1068,7 +1070,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 		VexPtr<IRExpr, &ir_heap> res;
 		VexPtr<IRExpr, &ir_heap> &assumption;
 		const AllowableOptimisations &opt;
-		void crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			IRExpr *component =
 				IRExpr_Unop(
 					Iop_Not1,
@@ -1081,9 +1083,10 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 			else
 				res = component;
 			res = simplifyIRExpr(res, opt);
+			return true;
 		}
-		void survive(IRExpr *, IRExpr *) {}
-		void escape(IRExpr *, IRExpr *) {}
+		bool survive(IRExpr *, IRExpr *) { return true; }
+		bool escape(IRExpr *, IRExpr *) { return true; }
 		_(VexPtr<IRExpr, &ir_heap> &_assumption,
 		  const AllowableOptimisations &_opt)
 			: res(NULL), assumption(_assumption), opt(_opt)
@@ -1111,26 +1114,34 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 			   GarbageCollectionToken token)
 {
 	__set_profiling(evalMachineUnderAssumption);
-	NdChooser chooser;
-	bool crashes;
 
-	*mightSurvive = false;
-	*mightCrash = false;
-	while (!*mightCrash || !*mightSurvive) {
-		if (TIMEOUT)
-			return false;
-		LibVEX_maybe_gc(token);
-		StateMachineEvalContext ctxt;
-		ctxt.pathConstraint = assumption;
-		ctxt.currentState = sm->root;
-		bigStepEvalStateMachine(sm, &crashes, chooser, oracle, opt, ctxt);
-		if (crashes)
+	struct : public EvalPathConsumer {
+		bool *mightSurvive, *mightCrash;
+
+		bool crash(IRExpr *, IRExpr *) {
 			*mightCrash = true;
-		else
+			if (*mightSurvive)
+				return false;
+			return true;
+		}
+		bool survive(IRExpr *, IRExpr *) {
 			*mightSurvive = true;
-		if (!chooser.advance())
-			break;
-	}
+			if (*mightCrash)
+				return false;
+			return true;
+		}
+		bool escape(IRExpr *, IRExpr *) {
+			return survive(NULL, NULL);
+		}
+	} consumer;
+	consumer.mightSurvive = mightSurvive;
+	consumer.mightCrash = mightCrash;
+
+	enumEvalPaths(sm, assumption, oracle, opt, consumer, token);
+
+	if (TIMEOUT)
+		return false;
+
 	return true;
 }
 
