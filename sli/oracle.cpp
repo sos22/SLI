@@ -3180,8 +3180,14 @@ Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::ve
 		if (call.size() != 0) {
 			VexRip parentVr(vr);
 			parentVr.rtrn();
-			for (auto it = call.begin(); it != call.end(); it++)
-				out.push_back(it->makeVexRip(parentVr));
+			for (auto it = call.begin(); it != call.end(); it++) {
+				unsigned long expectedReturn =
+					it->rip + getInstructionSize(
+						ms->addressSpace,
+						*it);
+				if (expectedReturn == parentVr.unwrap_vexrip())
+					out.push_back(it->makeVexRip(parentVr));
+			}
 		}
 	}
 	std::vector<StaticRip> rtrn;
