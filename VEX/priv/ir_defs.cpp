@@ -1705,6 +1705,8 @@ IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
    return e;
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
+   assert(arg1);
+   assert(arg2);
    if (operationAssociates(op))
      return IRExpr_Associative(op, arg1, arg2, NULL);
 
