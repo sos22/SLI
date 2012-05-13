@@ -347,6 +347,8 @@ public:
 	memLogT memLog;
 	threadState state;
 	bool collectOrderingConstraints;
+	StateMachineState *currentState;
+
 	/* justPathConstraint contains all of the assumptions we've
 	   made using the ND chooser.  pathConstraint is that plus the
 	   initial assumption. */
@@ -768,7 +770,6 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 
 static void
 bigStepEvalStateMachine(StateMachine *rootMachine,
-			StateMachineState *sm,
 			bool *crashes,
 			NdChooser &chooser,
 			Oracle *oracle,
@@ -776,14 +777,15 @@ bigStepEvalStateMachine(StateMachine *rootMachine,
 			StateMachineEvalContext &ctxt)
 {
 	while (1) {
-		sm = smallStepEvalStateMachine(rootMachine,
-					       sm,
-					       crashes,
-					       chooser,
-					       oracle,
-					       opt,
-					       ctxt);
-		if (!sm)
+		ctxt.currentState =
+			smallStepEvalStateMachine(rootMachine,
+						  ctxt.currentState,
+						  crashes,
+						  chooser,
+						  oracle,
+						  opt,
+						  ctxt);
+		if (!ctxt.currentState)
 			return;
 	}
 }
@@ -811,8 +813,9 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 			assumption ? assumption.get() : IRExpr_Const(IRConst_U1(1));
 		ctxt.justPathConstraint =
 			assumption ? IRExpr_Const(IRConst_U1(1)) : NULL;
+		ctxt.currentState = sm->root;
 		bool crashes;
-		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
+		bigStepEvalStateMachine(sm, &crashes, chooser, oracle, opt, ctxt);
 		if (crashes) {
 			IRExpr *component =
 				IRExpr_Unop(
@@ -853,7 +856,8 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 		LibVEX_maybe_gc(token);
 		StateMachineEvalContext ctxt;
 		ctxt.pathConstraint = assumption;
-		bigStepEvalStateMachine(sm, sm->root, &crashes, chooser, oracle, opt, ctxt);
+		ctxt.currentState = sm->root;
+		bigStepEvalStateMachine(sm, &crashes, chooser, oracle, opt, ctxt);
 		if (crashes)
 			*mightCrash = true;
 		else
@@ -1221,8 +1225,9 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   the stores list every time around the
 			   loop. */
 			StateMachineEvalContext readEvalCtxt = state.writerContext;
+			readEvalCtxt.currentState = readMachine->root;
 			bool crashes;
-			bigStepEvalStateMachine(readMachine, readMachine->root, &crashes, chooser,
+			bigStepEvalStateMachine(readMachine, &crashes, chooser,
 						oracle, opt, readEvalCtxt);
 			if (crashes) {
 				if (!sectionStart) {
@@ -1311,8 +1316,9 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			   in a critical section, so we should now try
 			   running the reader atomically.  */
 			StateMachineEvalContext readEvalCtxt = state.writerContext;
+			readEvalCtxt.currentState = probeMachine->root;
 			bool crashes;
-			bigStepEvalStateMachine(probeMachine, probeMachine->root, &crashes, chooser, oracle, opt, readEvalCtxt);
+			bigStepEvalStateMachine(probeMachine, &crashes, chooser, oracle, opt, readEvalCtxt);
 			if (crashes) {
 				fprintf(_logfile, "Fix is insufficient, witness: ");
 				ppIRExpr(readEvalCtxt.pathConstraint, _logfile);
